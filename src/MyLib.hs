@@ -80,19 +80,17 @@ mainWith settings gui' = do
     )
     (\e gui -> pure $ gui)
     (\t gui -> pure $ gui)
-  where
-  go = render
 
 guiToIO :: Member (Embed IO) r => Sem (GUI ': r) a -> Sem r a
 guiToIO = interpret \case
-  Button p x y -> embed @IO (pure False)
+  Button {} -> embed @IO (pure False)
 
 render :: Sem (GUI : r) b -> Sem r [Picture]
 render = fmap fst . runWriter . runGUIPure
 
-runGUIPure :: forall r m a. Sem (GUI ': r) a -> Sem (Writer [Picture] ': r) a
+runGUIPure :: forall r a. Sem (GUI ': r) a -> Sem (Writer [Picture] ': r) a
 runGUIPure sem = reinterpret go sem
   where
   go :: GUI (Sem rInitial) x -> Sem (Writer [Picture] : r) x
   go = \case
-    (Button p x y) -> tell (rectangleSolid x y : p) *> pure False
+    Button p x y -> tell (rectangleSolid x y : p) *> pure False
