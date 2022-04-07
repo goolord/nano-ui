@@ -96,7 +96,6 @@ guiIO = interpret $ \case
   Button {} -> embed @IO (pure False)
   PictureI {} -> embed @IO (pure ())
 
-
 render :: Member (Embed IO) r => Sem (GUI : r) b -> Sem r [Picture]
 render = fmap fst . runWriter . runGUI
 

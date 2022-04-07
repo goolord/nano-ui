@@ -9,6 +9,7 @@ import Graphics.Text.TrueType (FontStyle(FontStyle), FontDescriptor (FontDescrip
 import Polysemy.State
 import qualified Graphics.Text.TrueType as TT
 import Data.IORef
+import Control.Monad (when)
 
 firaCode = FontDescriptor "Open Sans" (FontStyle False False)
 text = renderFont firaCode (TT.PointSize 16)
@@ -17,9 +18,8 @@ main :: IO ()
 main = defaultMain $ do
   didSaveText <- text "Save"
   didSave <- button (color white didSaveText) 75.0 30.0
-  if didSave
-    then liftIO $ putStrLn "you saved!"
-    else pure ()
+  when didSave $ liftIO $ putStrLn "you saved!"
+
   mousePosRef <- cursorPos <$> get
   mousePos <- liftIO $ readIORef mousePosRef
   pictureI . color white . translate (-100.0) (-100.0) =<< text (show mousePos)
