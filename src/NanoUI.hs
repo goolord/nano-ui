@@ -12,7 +12,7 @@
 {-# LANGUAGE TypeApplications  #-}
 {-# LANGUAGE TypeOperators #-}
 
-module MyLib where
+module NanoUI where
 import Graphics.Gloss
 import Graphics.Gloss.Interface.IO.Game (playIO, Event (..))
 import Polysemy

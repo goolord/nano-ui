@@ -2,7 +2,7 @@
 
 module Main where
 
-import MyLib
+import NanoUI
 import Graphics.Gloss
 import Control.Monad.IO.Class
 import Graphics.Text.TrueType (FontStyle(FontStyle), FontDescriptor (FontDescriptor))

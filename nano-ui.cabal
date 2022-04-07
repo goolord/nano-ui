@@ -1,46 +1,46 @@
-cabal-version:      2.4
-name:               nano-ui
-version:            0.1.0.0
+cabal-version: 2.4
+name: nano-ui
+version: 0.1.0.0
 synopsis:
-
--- A longer description of the package.
 -- description:
 homepage:
-
--- A URL where users can report bugs.
 -- bug-reports:
-license:            MIT
-license-file:       LICENSE
-author:             Zachary Churchill
-maintainer:         zacharyachurchill@gmail.com
-
--- A copyright notice.
+license: MIT
+license-file: LICENSE
+author: Zachary Churchill
+maintainer: zacharyachurchill@gmail.com
 -- copyright:
-category:           Graphics
+category: Graphics
 extra-source-files: CHANGELOG.md
 
 library
-    exposed-modules:  MyLib
-
-    -- Modules included in this library but not exported.
-    -- other-modules:
-
-    -- LANGUAGE extensions used by modules in this package.
-    -- other-extensions:
-    build-depends:    base >=4.14, gloss, reactive-banana, polysemy, FontyFruity, vector
-    hs-source-dirs:   src
-    default-language: Haskell2010
-    ghc-options: -Wall
+  exposed-modules:
+      NanoUI
+  build-depends:
+      base >=4.14
+    , gloss
+    , reactive-banana
+    , polysemy
+    , FontyFruity
+    , vector
+  hs-source-dirs: src
+  default-language: Haskell2010
+  ghc-options: -Wall
 
 executable example-text-editor
-    build-depends:    base >=4.14, gloss, nano-ui, FontyFruity
-    hs-source-dirs:   examples
-    main-is:          text-editor.hs
+  build-depends:
+      base >=4.14
+    , gloss
+    , nano-ui
+    , FontyFruity
+  hs-source-dirs: examples
+  main-is: text-editor.hs
 
 test-suite nano-ui-test
-    default-language: Haskell2010
-    type:             exitcode-stdio-1.0
-    hs-source-dirs:   tests
-    main-is:          MyLibTest.hs
-    build-depends:    base ^>=4.14.3.0
-    ghc-options: -Wall
+  default-language: Haskell2010
+  type: exitcode-stdio-1.0
+  hs-source-dirs: tests
+  main-is: NanoUITest.hs
+  build-depends:
+    base
+  ghc-options: -Wall
