@@ -22,20 +22,23 @@ import qualified Graphics.Text.TrueType as TT
 import Polysemy.State
 import Control.Monad.IO.Class (MonadIO(liftIO))
 import Data.Bifunctor
+import Data.IORef
+import Data.Functor (($>))
 
 data AppState = AppState
   { fontCache :: TT.FontCache
+  , cursorPos :: IORef Point
   }
-  deriving (Show)
 
 type GUIM = Sem '[GUI, State AppState, Embed IO]
 
 data GUI m a where
-  Button :: [Picture] -> Float -> Float -> GUI m Bool
+  Button :: Picture -> Float -> Float -> GUI m Bool
+  PictureI :: Picture -> GUI m ()
 
 makeSem ''GUI
 
-data Settings = Settings 
+data Settings = Settings
   { tickRate :: Int
   , bgColor :: Color
   , mainWindow :: Display
@@ -52,7 +55,7 @@ defaultMain :: Sem '[GUI, State AppState, Embed IO] () -> IO ()
 defaultMain = mainWith defaultSettings
 
 newState :: IO AppState
-newState = AppState <$> TT.buildCache
+newState = AppState <$> TT.buildCache <*> newIORef (0, 0)
 
 renderFont :: TT.FontDescriptor -> TT.PointSize -> String -> GUIM Picture
 renderFont fontd pt str = do 
@@ -79,27 +82,32 @@ mainWith settings gui' = do
       gui2 <- runM $ evalState state $ render gui
       pure $ Pictures gui2
     )
-    (\e gui -> case e of 
-      EventMotion _coords -> pure gui
+    (\e gui -> case e of
       EventResize _dims -> pure gui
+      EventMotion p -> do
+        writeIORef (cursorPos state) p
+        pure gui
       EventKey _key _keyState _mods _coords -> pure gui
     )
     (\_t gui -> pure $ gui)
 
 guiIO :: Member (Embed IO) r => Sem (GUI ': r) a -> Sem r a
-guiIO = interpret \case
+guiIO = interpret $ \case
   Button {} -> embed @IO (pure False)
+  PictureI {} -> embed @IO (pure ())
 
-render :: Sem (GUI : r) b -> Sem r [Picture]
-render = fmap fst . runWriter . runGUIPure
 
-runGUIPure :: forall r a. Sem (GUI ': r) a -> Sem (Writer [Picture] ': r) a
-runGUIPure sem = reinterpret go sem
+render :: Member (Embed IO) r => Sem (GUI : r) b -> Sem r [Picture]
+render = fmap fst . runWriter . runGUI
+
+runGUI :: forall r a. Member (Embed IO) r => Sem (GUI ': r) a -> Sem (Writer [Picture] ': r) a
+runGUI sem = reinterpret go sem
   where
   go :: GUI (Sem rInitial) x -> Sem (Writer [Picture] : r) x
   go = \case
     Button p x y -> do
       tell [ rectangleSolid x y
-           , translate (negate $ x / 2) (negate $ y / 2) (Pictures p)
+           , translate (negate $ x / 2) (negate $ y / 2) p
            ]
       pure False
+    PictureI p -> tell [p] $> ()
