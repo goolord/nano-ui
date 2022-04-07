@@ -1,31 +1,32 @@
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE StandaloneDeriving #-}
-{-# LANGUAGE DeriveFunctor #-}
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TemplateHaskell, LambdaCase, BlockArguments, GADTs, TypeApplications , FlexibleContexts, TypeOperators, DataKinds, PolyKinds, ScopedTypeVariables #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeApplications  #-}
+{-# LANGUAGE TypeOperators #-}
 
 module MyLib where
 import Graphics.Gloss
-import Graphics.Gloss.Interface.IO.Game (playIO)
+import Graphics.Gloss.Interface.IO.Game (playIO, Event (..))
 import Polysemy
-import Polysemy.Input
-import Polysemy.Output
 import Polysemy.Writer
-import Polysemy.Embed (runEmbedded)
-import Data.Vector (Vector)
-import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as VU
 import qualified Graphics.Text.TrueType as TT
 import Polysemy.State
 import Control.Monad.IO.Class (MonadIO(liftIO))
+import Data.Bifunctor
 
 data AppState = AppState
   { fontCache :: TT.FontCache
   }
+  deriving (Show)
 
 type GUIM = Sem '[GUI, State AppState, Embed IO]
 
@@ -43,7 +44,7 @@ data Settings = Settings
 defaultSettings :: Settings
 defaultSettings = Settings
   { tickRate = 60
-  , bgColor = makeColorI 0xff 0xff 0xff 0xff
+  , bgColor = makeColorI 0x28 0x28 0x28 0xff
   , mainWindow = InWindow "Wave" (800, 600) (100, 100)
   }
 
@@ -58,9 +59,9 @@ renderFont fontd pt str = do
   state <- get
   case TT.findFontInCache (fontCache state) fontd of
     Nothing -> error $ unwords ["font", show fontd, "missing"]
-    Just fp -> do 
+    Just fp -> do
       f <- either (error . show) id <$> (liftIO $ TT.loadFontFile fp)
-      pure $ foldMap (line . VU.toList) $ mconcat $ TT.getStringCurveAtPoint
+      pure $ foldMap (line . fmap (second negate) . VU.toList) $ mconcat $ TT.getStringCurveAtPoint
         96 -- DPI
         (0.0, 0.0)
         [(f,pt,str)]
@@ -78,11 +79,15 @@ mainWith settings gui' = do
       gui2 <- runM $ evalState state $ render gui
       pure $ Pictures gui2
     )
-    (\e gui -> pure $ gui)
-    (\t gui -> pure $ gui)
+    (\e gui -> case e of 
+      EventMotion _coords -> pure gui
+      EventResize _dims -> pure gui
+      EventKey _key _keyState _mods _coords -> pure gui
+    )
+    (\_t gui -> pure $ gui)
 
-guiToIO :: Member (Embed IO) r => Sem (GUI ': r) a -> Sem r a
-guiToIO = interpret \case
+guiIO :: Member (Embed IO) r => Sem (GUI ': r) a -> Sem r a
+guiIO = interpret \case
   Button {} -> embed @IO (pure False)
 
 render :: Sem (GUI : r) b -> Sem r [Picture]
@@ -93,4 +98,8 @@ runGUIPure sem = reinterpret go sem
   where
   go :: GUI (Sem rInitial) x -> Sem (Writer [Picture] : r) x
   go = \case
-    Button p x y -> tell (rectangleSolid x y : p) *> pure False
+    Button p x y -> do
+      tell [ rectangleSolid x y
+           , translate (negate $ x / 2) (negate $ y / 2) (Pictures p)
+           ]
+      pure False
