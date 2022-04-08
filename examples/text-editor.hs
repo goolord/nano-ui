@@ -6,7 +6,7 @@ import NanoUI
 import Graphics.Gloss hiding (text)
 import Control.Monad.IO.Class
 import Graphics.Text.TrueType (FontStyle(FontStyle), FontDescriptor (FontDescriptor))
-import Polysemy.State
+import Control.Monad.Freer.State
 import qualified Graphics.Text.TrueType as TT
 import Data.IORef
 import Control.Monad (when)

@@ -20,7 +20,7 @@ library
       base >=4.14
     , gloss >= 1.12.0.0 && < 2.0.0.0
     , reactive-banana
-    , polysemy
+    , freer-simple
     , FontyFruity
     , vector
     , containers
@@ -35,7 +35,7 @@ executable example-text-editor
     , gloss
     , nano-ui
     , FontyFruity
-    , polysemy
+    , freer-simple
   hs-source-dirs: examples
   main-is: text-editor.hs
 

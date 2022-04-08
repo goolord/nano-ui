@@ -20,9 +20,10 @@ import Data.DList
 import Data.IORef
 import Graphics.Gloss
 import Graphics.Gloss.Interface.IO.Game (playIO, Event (..))
-import Polysemy
-import Polysemy.State
-import Polysemy.Writer
+import Control.Monad.Freer hiding (translate)
+import Control.Monad.Freer.TH
+import Control.Monad.Freer.State
+import Control.Monad.Freer.Writer
 import qualified Data.DList as DList
 import qualified Data.Vector.Unboxed as VU
 import qualified Graphics.Text.TrueType as TT
@@ -32,13 +33,13 @@ data AppState = AppState
   , cursorPos :: !(IORef Point)
   }
 
-type GUIM = Sem '[GUI, State AppState, Embed IO]
+type GUIM = Eff [GUI, State AppState, IO]
 
-data GUI m a where
-  Button :: Picture -> Float -> Float -> GUI m Bool
-  PictureI :: Picture -> GUI m ()
+data GUI a where
+  Button :: Picture -> Float -> Float -> GUI Bool
+  PictureI :: Picture -> GUI ()
 
-makeSem ''GUI
+makeEffect ''GUI
 
 data Settings = Settings
   { tickRate :: !Int
@@ -53,7 +54,7 @@ defaultSettings = Settings
   , mainWindow = InWindow "Wave" (800, 600) (100, 100)
   }
 
-defaultMain :: Sem '[GUI, State AppState, Embed IO] () -> IO ()
+defaultMain :: Eff '[GUI, State AppState, IO] () -> IO ()
 defaultMain = mainWith defaultSettings
 
 newState :: IO AppState
@@ -94,18 +95,18 @@ mainWith settings gui' = do
     )
     (\_t gui -> pure $ gui)
 
-guiIO :: Member (Embed IO) r => Sem (GUI ': r) a -> Sem r a
-guiIO = interpret $ \case
-  Button {} -> embed @IO (pure False)
-  PictureI {} -> embed @IO (pure ())
+guiIO :: (LastMember IO r, Member IO r) => Eff (GUI ': r) a -> Eff r a
+guiIO = interpretM @GUI @IO $ \case
+  Button {} -> pure False
+  PictureI {} -> pure ()
 
-render :: Member (Embed IO) r => Sem (GUI : r) b -> Sem r [Picture]
-render = fmap (DList.toList . fst) . runWriter . runGUI
+render :: Member IO r => Eff (GUI : r) b -> Eff r [Picture]
+render = fmap (DList.toList . snd) . runWriter . runGUI
 
-runGUI :: forall r a. Member (Embed IO) r => Sem (GUI ': r) a -> Sem (Writer (DList Picture) ': r) a
-runGUI sem = evalState 0.0 $ reinterpret2 go sem
+runGUI :: forall r a. Member IO r => Eff (GUI ': r) a -> Eff (Writer (DList Picture) ': r) a
+runGUI sem = evalState (0.0 :: Float) $ reinterpret2 go sem
   where
-  go :: GUI (Sem rInitial) x -> Sem (State Float : Writer (DList Picture) : r) x
+  go :: GUI x -> Eff (State Float : Writer (DList Picture) : r) x
   go = \case
     Button p x y -> do
       height <- get
