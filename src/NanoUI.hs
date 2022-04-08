@@ -12,6 +12,8 @@
 {-# LANGUAGE TypeApplications  #-}
 {-# LANGUAGE TypeOperators #-}
 
+{-# OPTIONS_GHC -fno-warn-orphans #-}
+
 module NanoUI where
 
 import Control.Monad.IO.Class (MonadIO(liftIO))
@@ -24,12 +26,17 @@ import Control.Monad.Freer hiding (translate)
 import Control.Monad.Freer.TH
 import Control.Monad.Freer.State
 import Control.Monad.Freer.Writer
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
 import qualified Data.DList as DList
 import qualified Data.Vector.Unboxed as VU
 import qualified Graphics.Text.TrueType as TT
 
+deriving instance (Ord TT.PointSize)
+
 data AppState = AppState
-  { fontCache :: !TT.FontCache
+  { fontCache :: TT.FontCache
+  , loadedFontCache :: !(IORef (Map (TT.FontDescriptor, TT.PointSize) TT.Font))
   , cursorPos :: !(IORef Point)
   }
 
@@ -58,20 +65,26 @@ defaultMain :: Eff '[GUI, State AppState, IO] () -> IO ()
 defaultMain = mainWith defaultSettings
 
 newState :: IO AppState
-newState = AppState <$> TT.buildCache <*> newIORef (0, 0)
+newState = AppState <$> TT.buildCache <*> newIORef mempty <*> newIORef (0, 0)
 
 renderFont :: TT.FontDescriptor -> TT.PointSize -> String -> GUIM Picture
-renderFont fontd pt str = do 
+renderFont fontd pt str = do
   state <- get
-  case TT.findFontInCache (fontCache state) fontd of
-    Nothing -> error $ unwords ["font", show fontd, "missing"]
-    Just fp -> do
-      f <- either (error . show) id <$> (liftIO $ TT.loadFontFile fp)
-      -- todo: interpret as Polygon instead of Line
-      pure $ foldMap (line . fmap (second negate) . VU.toList) $ mconcat $ TT.getStringCurveAtPoint
-        96 -- DPI
-        (0.0, 0.0)
-        [(f,pt,str)]
+  loaded <- liftIO $ readIORef $ loadedFontCache state
+  f <- case Map.lookup (fontd, pt) loaded of
+    Nothing -> do
+      case TT.findFontInCache (fontCache state) fontd of
+        Nothing -> error $ unwords ["font", show fontd, "missing"]
+        Just fp -> do
+          f <- either (error . show) id <$> (liftIO $ TT.loadFontFile fp)
+          liftIO $ modifyIORef' (loadedFontCache state) (Map.insert (fontd, pt) f)
+          pure f
+    Just f -> pure f
+  -- todo: interpret as Polygon instead of Line
+  pure $ foldMap (line . fmap (second negate) . VU.toList) $ mconcat $ TT.getStringCurveAtPoint
+    96 -- DPI
+    (0.0, 0.0)
+    [(f,pt,str)]
 
 mainWith :: Settings -> GUIM () -> IO ()
 mainWith settings gui' = do
