@@ -37,10 +37,8 @@ import qualified Graphics.Text.TrueType as TT
 
 deriving instance Generic TT.FontDescriptor
 deriving instance Generic TT.FontStyle
-deriving instance Generic TT.PointSize
 instance Hashable TT.FontDescriptor
 instance Hashable TT.FontStyle
-instance Hashable TT.PointSize
 
 data GUI a where
   Button :: Picture -> Float -> Float -> GUI Bool
@@ -50,7 +48,7 @@ makeEffect ''GUI
 
 data AppState = AppState
   { fontCache :: TT.FontCache
-  , loadedFontCache :: !(IORef (HashMap (TT.FontDescriptor, TT.PointSize) TT.Font))
+  , loadedFontCache :: !(IORef (HashMap TT.FontDescriptor TT.Font))
   , cursorPos :: !(IORef Point)
   }
 
@@ -79,14 +77,14 @@ renderFont :: TT.FontDescriptor -> TT.PointSize -> String -> GUIM Picture
 renderFont fontd pt str = do
   state <- get
   loaded <- liftIO $ readIORef $ loadedFontCache state
-  f <- case HM.lookup (fontd, pt) loaded of
+  f <- case HM.lookup fontd loaded of
     Just f -> pure f
     Nothing -> do
       case TT.findFontInCache (fontCache state) fontd of
         Nothing -> error $ unwords ["font", show fontd, "missing"]
         Just fp -> do
           f <- either (error . show) id <$> (liftIO $ TT.loadFontFile fp)
-          liftIO $ modifyIORef' (loadedFontCache state) (HM.insert (fontd, pt) f)
+          liftIO $ modifyIORef' (loadedFontCache state) (HM.insert fontd f)
           pure f
   -- todo: interpret as Polygon instead of Line
   pure $ foldMap (line . fmap (second negate) . VU.toList) $ mconcat $ TT.getStringCurveAtPoint
