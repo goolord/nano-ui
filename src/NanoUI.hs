@@ -11,42 +11,48 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeApplications  #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE DeriveGeneric #-}
 
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 module NanoUI where
 
+import Control.Monad.Freer hiding (translate)
+import Control.Monad.Freer.State
+import Control.Monad.Freer.TH
+import Control.Monad.Freer.Writer
 import Control.Monad.IO.Class (MonadIO(liftIO))
 import Data.Bifunctor
 import Data.DList
+import Data.HashMap.Strict (HashMap)
+import Data.Hashable (Hashable)
 import Data.IORef
+import GHC.Generics (Generic)
 import Graphics.Gloss
 import Graphics.Gloss.Interface.IO.Game (playIO, Event (..))
-import Control.Monad.Freer hiding (translate)
-import Control.Monad.Freer.TH
-import Control.Monad.Freer.State
-import Control.Monad.Freer.Writer
-import Data.Map.Strict (Map)
-import qualified Data.Map.Strict as Map
 import qualified Data.DList as DList
+import qualified Data.HashMap.Strict as HM
 import qualified Data.Vector.Unboxed as VU
 import qualified Graphics.Text.TrueType as TT
 
-deriving instance (Ord TT.PointSize)
-
-data AppState = AppState
-  { fontCache :: TT.FontCache
-  , loadedFontCache :: !(IORef (Map (TT.FontDescriptor, TT.PointSize) TT.Font))
-  , cursorPos :: !(IORef Point)
-  }
-
-type GUIM = Eff [GUI, State AppState, IO]
+deriving instance Generic TT.FontDescriptor
+deriving instance Generic TT.FontStyle
+deriving instance Generic TT.PointSize
+instance Hashable TT.FontDescriptor
+instance Hashable TT.FontStyle
+instance Hashable TT.PointSize
 
 data GUI a where
   Button :: Picture -> Float -> Float -> GUI Bool
   PictureI :: Picture -> GUI ()
 
 makeEffect ''GUI
+
+data AppState = AppState
+  { fontCache :: TT.FontCache
+  , loadedFontCache :: !(IORef (HashMap (TT.FontDescriptor, TT.PointSize) TT.Font))
+  , cursorPos :: !(IORef Point)
+  }
 
 data Settings = Settings
   { tickRate :: !Int
@@ -61,7 +67,9 @@ defaultSettings = Settings
   , mainWindow = InWindow "Wave" (800, 600) (100, 100)
   }
 
-defaultMain :: Eff '[GUI, State AppState, IO] () -> IO ()
+type GUIM = Eff [GUI, State AppState, IO]
+
+defaultMain :: GUIM () -> IO ()
 defaultMain = mainWith defaultSettings
 
 newState :: IO AppState
@@ -71,15 +79,15 @@ renderFont :: TT.FontDescriptor -> TT.PointSize -> String -> GUIM Picture
 renderFont fontd pt str = do
   state <- get
   loaded <- liftIO $ readIORef $ loadedFontCache state
-  f <- case Map.lookup (fontd, pt) loaded of
+  f <- case HM.lookup (fontd, pt) loaded of
+    Just f -> pure f
     Nothing -> do
       case TT.findFontInCache (fontCache state) fontd of
         Nothing -> error $ unwords ["font", show fontd, "missing"]
         Just fp -> do
           f <- either (error . show) id <$> (liftIO $ TT.loadFontFile fp)
-          liftIO $ modifyIORef' (loadedFontCache state) (Map.insert (fontd, pt) f)
+          liftIO $ modifyIORef' (loadedFontCache state) (HM.insert (fontd, pt) f)
           pure f
-    Just f -> pure f
   -- todo: interpret as Polygon instead of Line
   pure $ foldMap (line . fmap (second negate) . VU.toList) $ mconcat $ TT.getStringCurveAtPoint
     96 -- DPI
