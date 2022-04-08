@@ -22,4 +22,4 @@ main = defaultMain $ do
 
   mousePosRef <- cursorPos <$> get
   mousePos <- liftIO $ readIORef mousePosRef
-  pictureI . color white . translate (-100.0) (-100.0) =<< text (show mousePos)
+  pictureI . color white =<< text (show mousePos)

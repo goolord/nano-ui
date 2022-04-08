@@ -5,3 +5,8 @@ source-repository-package
   type: git
   location: https://github.com/Twinside/FontyFruity
   tag: 776c0fc35266e455795faa5827ef7c2e270ae2c5
+
+source-repository-package
+  type: git
+  location: https://github.com/haskell-opengl/OpenGL
+  tag: f7af8fe04b0f19c260a85c9ebcad612737cd7c8c

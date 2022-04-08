@@ -13,21 +13,23 @@
 {-# LANGUAGE TypeOperators #-}
 
 module NanoUI where
+
+import Control.Monad.IO.Class (MonadIO(liftIO))
+import Data.Bifunctor
+import Data.DList
+import Data.IORef
 import Graphics.Gloss
 import Graphics.Gloss.Interface.IO.Game (playIO, Event (..))
 import Polysemy
+import Polysemy.State
 import Polysemy.Writer
+import qualified Data.DList as DList
 import qualified Data.Vector.Unboxed as VU
 import qualified Graphics.Text.TrueType as TT
-import Polysemy.State
-import Control.Monad.IO.Class (MonadIO(liftIO))
-import Data.Bifunctor
-import Data.IORef
-import Data.Functor (($>))
 
 data AppState = AppState
-  { fontCache :: TT.FontCache
-  , cursorPos :: IORef Point
+  { fontCache :: !TT.FontCache
+  , cursorPos :: !(IORef Point)
   }
 
 type GUIM = Sem '[GUI, State AppState, Embed IO]
@@ -39,9 +41,9 @@ data GUI m a where
 makeSem ''GUI
 
 data Settings = Settings
-  { tickRate :: Int
-  , bgColor :: Color
-  , mainWindow :: Display
+  { tickRate :: !Int
+  , bgColor :: !Color
+  , mainWindow :: !Display
   }
 
 defaultSettings :: Settings
@@ -64,6 +66,7 @@ renderFont fontd pt str = do
     Nothing -> error $ unwords ["font", show fontd, "missing"]
     Just fp -> do
       f <- either (error . show) id <$> (liftIO $ TT.loadFontFile fp)
+      -- todo: interpret as Polygon instead of Line
       pure $ foldMap (line . fmap (second negate) . VU.toList) $ mconcat $ TT.getStringCurveAtPoint
         96 -- DPI
         (0.0, 0.0)
@@ -97,16 +100,23 @@ guiIO = interpret $ \case
   PictureI {} -> embed @IO (pure ())
 
 render :: Member (Embed IO) r => Sem (GUI : r) b -> Sem r [Picture]
-render = fmap fst . runWriter . runGUI
+render = fmap (DList.toList . fst) . runWriter . runGUI
 
-runGUI :: forall r a. Member (Embed IO) r => Sem (GUI ': r) a -> Sem (Writer [Picture] ': r) a
-runGUI sem = reinterpret go sem
+runGUI :: forall r a. Member (Embed IO) r => Sem (GUI ': r) a -> Sem (Writer (DList Picture) ': r) a
+runGUI sem = evalState 0.0 $ reinterpret2 go sem
   where
-  go :: GUI (Sem rInitial) x -> Sem (Writer [Picture] : r) x
+  go :: GUI (Sem rInitial) x -> Sem (State Float : Writer (DList Picture) : r) x
   go = \case
     Button p x y -> do
-      tell [ rectangleSolid x y
-           , translate (negate $ x / 2) (negate $ y / 2) p
-           ]
+      height <- get
+      tell $ DList.fromList 
+        [ translate 0.0 height $ rectangleSolid x y
+        , translate 0.0 height $ translate (negate $ x / 2) (negate $ y / 2) p
+        ]
+      modify (\height' -> height' - y)
       pure False
-    PictureI p -> tell [p] $> ()
+    PictureI p -> do
+      height <- get
+      tell (DList.singleton $ translate 0.0 height p)
+      -- modify (\height' -> height' - y)
+      pure ()

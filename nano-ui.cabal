@@ -18,12 +18,13 @@ library
       NanoUI
   build-depends:
       base >=4.14
-    , gloss
+    , gloss >= 1.12.0.0 && < 2.0.0.0
     , reactive-banana
     , polysemy
     , FontyFruity
     , vector
     , containers
+    , dlist
   hs-source-dirs: src
   default-language: Haskell2010
   ghc-options: -Wall
