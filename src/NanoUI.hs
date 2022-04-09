@@ -1,15 +1,11 @@
-{-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE PolyKinds #-}
-{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE TypeApplications  #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE DeriveGeneric #-}
 
@@ -47,6 +43,8 @@ data GUI a where
   Rows :: GUI a -> GUI a
 
 makeEffect ''GUI
+
+data ElState = Active | Hot | Inactive
 
 data AppState = AppState
   { fontCache :: TT.FontCache
@@ -137,7 +135,7 @@ mainWith settings gui' = do
       pure ()
     )
 
-guiIO :: forall r a. (LastMember IO r, Member IO r) => Eff (GUI ': r) a -> Eff r a
+guiIO :: forall r a. (LastMember IO r, Member IO r) => Eff (GUI : r) a -> Eff r a
 guiIO = interpretM @GUI @IO go
   where
   go :: forall x. GUI x -> IO x
@@ -150,7 +148,7 @@ guiIO = interpretM @GUI @IO go
 render :: Member IO r => Eff (GUI : r) b -> Eff r [Picture]
 render = fmap (DList.toList . snd) . runWriter . runGUI
 
-runGUI :: forall r a. Member IO r => Eff (GUI ': r) a -> Eff (Writer (DList Picture) ': r) a
+runGUI :: forall r a. Member IO r => Eff (GUI : r) a -> Eff (Writer (DList Picture) : r) a
 runGUI sem = evalState (0.0, 0.0) $ reinterpret2 withRows sem
   where
   withColumns g = do
