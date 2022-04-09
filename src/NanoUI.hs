@@ -28,6 +28,7 @@ import Data.HashMap.Strict (HashMap)
 import Data.Hashable (Hashable)
 import Data.IORef
 import GHC.Generics (Generic)
+import Data.Traversable (for)
 import Graphics.Gloss
 import Graphics.Gloss.Interface.IO.Game (playIO, Event (..))
 import qualified Data.DList as DList
@@ -43,6 +44,7 @@ instance Hashable TT.FontStyle
 data GUI a where
   Button :: Picture -> Float -> Float -> GUI Bool
   PictureI :: Picture -> GUI ()
+  Columns :: [GUI a] -> GUI [a]
 
 makeEffect ''GUI
 
@@ -114,29 +116,40 @@ mainWith settings gui' = do
     )
     (\_t gui -> pure $ gui)
 
-guiIO :: (LastMember IO r, Member IO r) => Eff (GUI ': r) a -> Eff r a
-guiIO = interpretM @GUI @IO $ \case
-  Button {} -> pure False
-  PictureI {} -> pure ()
+guiIO :: forall r a. (LastMember IO r, Member IO r) => Eff (GUI ': r) a -> Eff r a
+guiIO = interpretM @GUI @IO go
+  where
+  go :: forall x. GUI x -> IO x
+  go = \case
+    Button {} -> pure False
+    PictureI {} -> pure ()
+    Columns ps -> traverse go ps
 
 render :: Member IO r => Eff (GUI : r) b -> Eff r [Picture]
 render = fmap (DList.toList . snd) . runWriter . runGUI
 
 runGUI :: forall r a. Member IO r => Eff (GUI ': r) a -> Eff (Writer (DList Picture) ': r) a
-runGUI sem = evalState (0.0 :: Float) $ reinterpret2 go sem
+runGUI sem = evalState (0.0, 0.0) $ reinterpret2 go sem
   where
-  go :: GUI x -> Eff (State Float : Writer (DList Picture) : r) x
+  go :: GUI x -> Eff (State (Float, Float) : Writer (DList Picture) : r) x
   go = \case
     Button p x y -> do
-      height <- get
-      tell $ DList.fromList 
-        [ translate 0.0 height $ rectangleSolid x y
-        , translate 0.0 height $ translate (negate $ x / 2) (negate $ y / 2) p
+      (xoffset, yoffset) <- get
+      tell $ DList.fromList
+        [ translate xoffset yoffset $ rectangleSolid x y
+        , translate xoffset yoffset $ translate (negate $ x / 2) (negate $ y / 2) p
         ]
-      modify (\height' -> height' - y)
+      modify (\(xo, yoffset') -> (xo :: Float, yoffset' - y))
       pure False
     PictureI p -> do
-      height <- get
-      tell (DList.singleton $ translate 0.0 height p)
-      -- modify (\height' -> height' - y)
+      (xoffset, yoffset) <- get
+      tell (DList.singleton $ translate xoffset yoffset p)
+      -- modify (\yoffset' -> yoffset' - y)
       pure ()
+    Columns ps -> for ps $ \p -> do
+      (_xo1 :: Float, yo1 :: Float) <- get
+      res <- go p
+      (xo2 :: Float, _yo2 :: Float) <- get
+      -- bounding <- getBoundingBox
+      put (xo2, yo1)
+      pure res
