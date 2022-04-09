@@ -29,7 +29,7 @@ import Data.Hashable (Hashable)
 import Data.IORef
 import GHC.Generics (Generic)
 import Graphics.Gloss
-import Graphics.Gloss.Interface.IO.Game (playIO, Event (..))
+import Graphics.Gloss.Interface.IO.Interact (interactIO, Event (..))
 import qualified Data.DList as DList
 import qualified Data.HashMap.Strict as HM
 import qualified Data.Vector.Unboxed as VU
@@ -94,27 +94,48 @@ renderFont fontd pt str = do
     (0.0, 0.0)
     [(f,pt,str)]
 
+data World = World
+  { worldGui :: GUIM ()
+  , pictureCache :: IORef (Maybe Picture)
+  }
+
+nocache :: World -> IO ()
+nocache w = do 
+  writeIORef (pictureCache w) Nothing
+
 mainWith :: Settings -> GUIM () -> IO ()
 mainWith settings gui' = do
   state <- newState
-  let
-  playIO
+  let render' = runM . evalState state . render
+  initGui <- render' gui'
+  initPcache <- newIORef (Just $ Pictures initGui)
+  interactIO
     (mainWindow settings)
     (bgColor settings)
-    (tickRate settings)
-    gui'
-    (\gui -> do
-      gui2 <- runM $ evalState state $ render gui
-      pure $ Pictures gui2
+    (World
+      { worldGui = gui'
+      , pictureCache = initPcache
+      }
     )
-    (\e gui -> case e of
-      EventResize _dims -> pure gui
+    (\world -> do
+      pcache <- readIORef (pictureCache world)
+      case pcache of
+        Just g -> pure g
+        Nothing -> Pictures <$> render' (worldGui world)
+    )
+    (\e world -> case e of
+      EventResize _dims -> pure world
       EventMotion p -> do
         writeIORef (cursorPos state) p
-        pure gui
-      EventKey _key _keyState _mods _coords -> pure gui
+        nocache world -- move to the controller handler
+        pure world
+      EventKey _key _keyState _mods _coords -> pure world
     )
-    (\_t gui -> pure $ gui)
+    (\controller -> do
+      -- update every n seconds
+      -- nocache world
+      pure ()
+    )
 
 guiIO :: forall r a. (LastMember IO r, Member IO r) => Eff (GUI ': r) a -> Eff r a
 guiIO = interpretM @GUI @IO go
