@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE FlexibleInstances #-}
 
 module Main where
 
@@ -10,14 +11,18 @@ import Control.Monad.Freer.State
 import qualified Graphics.Text.TrueType as TT
 import Data.IORef
 import Control.Monad (when)
+import Data.String (IsString(..))
 
+firaCode :: FontDescriptor
 firaCode = FontDescriptor "Open Sans" (FontStyle False False)
+
+text :: String -> GUIM Picture
 text = renderFont firaCode (TT.PointSize 16)
 
 main :: IO ()
 main = defaultMain $ do
   didSaveText <- text "Save"
-  didSave <- button (color white didSaveText) 75.0 30.0
+  didSave <- button (PictureI $ color white didSaveText) 75.0 30.0
   when didSave $ liftIO $ putStrLn "you saved!"
 
   mousePosRef <- cursorPos <$> get

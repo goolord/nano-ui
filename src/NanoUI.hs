@@ -41,7 +41,7 @@ instance Hashable TT.FontDescriptor
 instance Hashable TT.FontStyle
 
 data GUI a where
-  Button :: Picture -> Float -> Float -> GUI Bool
+  Button :: GUI () -> Float -> Float -> GUI Bool
   PictureI :: Picture -> GUI ()
   Columns :: GUI a -> GUI a
   Rows :: GUI a -> GUI a
@@ -148,11 +148,12 @@ runGUI sem = evalState (0.0, 0.0) $ reinterpret2 withRows sem
     pure res
   go :: forall x r'. GUI x -> Eff (State (Float, Float) : Writer (DList Picture) : r') x
   go = \case
-    Button p x y -> do
+    Button gp x y -> do
       (xo, yo) <- get
+      (_, p) <- runWriter $ evalState (0.0, 0.0) $ go gp
       tell $ DList.fromList
         [ translate xo yo $ rectangleSolid x y
-        , translate xo yo $ translate (negate $ x / 2) (negate $ y / 2) p
+        , translate xo yo $ translate (negate $ x / 2) (negate $ y / 2) $ Pictures $ DList.toList p
         ]
       modify (\(xo', yo') -> (xo' + (x / 2) :: Float, yo' - y))
       pure False
