@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -fno-warn-orphans #-}
+
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
@@ -8,13 +10,13 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE DeriveGeneric #-}
-
-{-# OPTIONS_GHC -fno-warn-orphans #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module NanoUI where
 
 import Control.Monad.Freer hiding (translate)
 import Control.Monad.Freer.State
+import Control.Monad.Freer.Reader
 import Control.Monad.Freer.TH
 import Control.Monad.Freer.Writer
 import Control.Monad.IO.Class (MonadIO(liftIO))
@@ -30,6 +32,8 @@ import qualified Data.DList as DList
 import qualified Data.HashMap.Strict as HM
 import qualified Data.Vector.Unboxed as VU
 import qualified Graphics.Text.TrueType as TT
+import qualified Data.IntMap as IntMap
+import Data.IntMap (IntMap)
 
 deriving instance Generic TT.FontDescriptor
 deriving instance Generic TT.FontStyle
@@ -46,10 +50,16 @@ makeEffect ''GUI
 
 data ElState = Active | Hot | Inactive
 
+data BBox = BBox
+  { bboxBR :: !Point
+  , bboxTL :: !Point
+  }
+
 data AppState = AppState
-  { fontCache :: TT.FontCache
+  { fontCache :: !TT.FontCache
   , loadedFontCache :: !(IORef (HashMap TT.FontDescriptor TT.Font))
   , cursorPos :: !(IORef Point)
+  , boundingBoxes :: !(IORef (IntMap BBox))
   }
 
 data Settings = Settings
@@ -65,17 +75,22 @@ defaultSettings = Settings
   , mainWindow = InWindow "Wave" (800, 600) (100, 100)
   }
 
-type GUIM = Eff [GUI, State AppState, IO]
+type GUIM = Eff [GUI, Reader AppState, IO]
 
 defaultMain :: GUIM () -> IO ()
 defaultMain = mainWith defaultSettings
 
 newState :: IO AppState
-newState = AppState <$> TT.buildCache <*> newIORef mempty <*> newIORef (0, 0)
+newState = do
+  fontCache       <- TT.buildCache 
+  loadedFontCache <- newIORef HM.empty
+  cursorPos       <- newIORef (0, 0)
+  boundingBoxes   <- newIORef IntMap.empty
+  pure AppState {..}
 
 renderFont :: TT.FontDescriptor -> TT.PointSize -> String -> GUIM Picture
 renderFont fontd pt str = do
-  state <- get
+  state <- ask
   loaded <- liftIO $ readIORef $ loadedFontCache state
   f <- case HM.lookup fontd loaded of
     Just f -> pure f
@@ -104,7 +119,7 @@ clearCache w = do
 mainWith :: Settings -> GUIM () -> IO ()
 mainWith settings gui' = do
   state <- newState
-  let render' = runM . evalState state . render
+  let render' = runM . runReader state . render
   initGui <- render' gui'
   initPcache <- newIORef $ Just $ Pictures initGui
   interactIO
@@ -134,7 +149,7 @@ mainWith settings gui' = do
       pure ()
     )
 
-guiIO :: forall r a. (LastMember IO r, Member IO r) => Eff (GUI : r) a -> Eff r a
+guiIO :: forall r a. (LastMember IO r) => Eff (GUI : r) a -> Eff r a
 guiIO = interpretM @GUI @IO go
   where
   go :: forall x. GUI x -> IO x
@@ -154,15 +169,17 @@ runGUI sem = evalState (0.0, 0.0) $ reinterpret2 withRows sem
     (_xo1 :: Float, yo1 :: Float) <- get
     res <- go g
     (xo2 :: Float, _yo2 :: Float) <- get
-    -- bounding <- getBoundingBox
-    put (xo2, yo1)
+    -- bounding <- askBoundingBox
+    put (xo2, yo1) -- each gui element only increments its x offset,
+                   -- meaning all children of 'g' ask layed out left to right
     pure res
   withRows g = do
     (xo1 :: Float, _yo1 :: Float) <- get
     res <- go g
     (_xo2 :: Float, yo2 :: Float) <- get
-    -- bounding <- getBoundingBox
-    put (xo1, yo2)
+    -- bounding <- askBoundingBox
+    put (xo1, yo2) -- each gui element only increments its y offset
+                   -- meaning all children of 'g' ask layed out top to bottom
     pure res
   go :: forall x r'. GUI x -> Eff (State (Float, Float) : Writer (DList Picture) : r') x
   go = \case

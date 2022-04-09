@@ -7,7 +7,7 @@ import NanoUI
 import Graphics.Gloss hiding (text)
 import Control.Monad.IO.Class
 import Graphics.Text.TrueType (FontStyle(FontStyle), FontDescriptor (FontDescriptor))
-import Control.Monad.Freer.State
+import Control.Monad.Freer.Reader
 import qualified Graphics.Text.TrueType as TT
 import Data.IORef
 import Control.Monad (when)
@@ -24,6 +24,6 @@ main = defaultMain $ do
   didSave <- button (PictureI $ color white didSaveText) 75.0 30.0
   when didSave $ liftIO $ putStrLn "you saved!"
 
-  mousePosRef <- cursorPos <$> get
+  mousePosRef <- cursorPos <$> ask
   mousePos <- liftIO $ readIORef mousePosRef
   pictureI . color white =<< text (show mousePos)
