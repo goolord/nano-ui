@@ -40,6 +40,7 @@ executable example-text-editor
     , freer-simple
   hs-source-dirs: examples
   main-is: text-editor.hs
+  ghc-options: -Wall
 
 test-suite nano-ui-test
   default-language: Haskell2010

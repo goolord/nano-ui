@@ -97,8 +97,8 @@ data World = World
   , pictureCache :: IORef (Maybe Picture)
   }
 
-nocache :: World -> IO ()
-nocache w = do 
+clearCache :: World -> IO ()
+clearCache w = do
   writeIORef (pictureCache w) Nothing
 
 mainWith :: Settings -> GUIM () -> IO ()
@@ -106,15 +106,14 @@ mainWith settings gui' = do
   state <- newState
   let render' = runM . evalState state . render
   initGui <- render' gui'
-  initPcache <- newIORef (Just $ Pictures initGui)
+  initPcache <- newIORef $ Just $ Pictures initGui
   interactIO
     (mainWindow settings)
     (bgColor settings)
-    (World
+    World
       { worldGui = gui'
       , pictureCache = initPcache
       }
-    )
     (\world -> do
       pcache <- readIORef (pictureCache world)
       case pcache of
@@ -125,13 +124,13 @@ mainWith settings gui' = do
       EventResize _dims -> pure world
       EventMotion p -> do
         writeIORef (cursorPos state) p
-        nocache world -- move to the controller handler
+        clearCache world -- move to the controller handler
         pure world
       EventKey _key _keyState _mods _coords -> pure world
     )
     (\controller -> do
       -- update every n seconds
-      -- nocache world
+      -- clearCache world
       pure ()
     )
 

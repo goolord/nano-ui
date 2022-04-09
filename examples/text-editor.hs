@@ -11,7 +11,6 @@ import Control.Monad.Freer.State
 import qualified Graphics.Text.TrueType as TT
 import Data.IORef
 import Control.Monad (when)
-import Data.String (IsString(..))
 
 firaCode :: FontDescriptor
 firaCode = FontDescriptor "Open Sans" (FontStyle False False)
