@@ -21,7 +21,7 @@ text = renderFont firaCode (TT.PointSize 16)
 main :: IO ()
 main = defaultMain $ do
   didSaveText <- text "Save"
-  didSave <- button (PictureI $ color white didSaveText) 75.0 30.0
+  didSave <- button 1 (PictureI $ color white didSaveText) 75.0 30.0
   when didSave $ liftIO $ putStrLn "you saved!"
 
   mousePosRef <- cursorPos <$> ask

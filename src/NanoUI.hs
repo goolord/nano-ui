@@ -34,6 +34,8 @@ import qualified Data.Vector.Unboxed as VU
 import qualified Graphics.Text.TrueType as TT
 import qualified Data.IntMap as IntMap
 import Data.IntMap (IntMap)
+import Graphics.Gloss.Data.Point (pointInBox)
+import Data.Bool (bool)
 
 deriving instance Generic TT.FontDescriptor
 deriving instance Generic TT.FontStyle
@@ -41,7 +43,7 @@ instance Hashable TT.FontDescriptor
 instance Hashable TT.FontStyle
 
 data GUI a where
-  Button :: GUI () -> Float -> Float -> GUI Bool
+  Button :: Int -> GUI () -> Float -> Float -> GUI Bool
   PictureI :: Picture -> GUI ()
   Columns :: GUI a -> GUI a
   Rows :: GUI a -> GUI a
@@ -159,12 +161,16 @@ guiIO = interpretM @GUI @IO go
     Columns g -> go g
     Rows g -> go g
 
-render :: Member IO r => Eff (GUI : r) b -> Eff r [Picture]
-render = fmap (DList.toList . snd) . runWriter . runGUI
+render :: (LastMember IO r, Member (Reader AppState) r) => Eff (GUI : r) b -> Eff r [Picture]
+render gui = do
+  appState <- ask
+  fmap (DList.toList . snd) $ runWriter $ runGUI appState gui
 
-runGUI :: forall r a. Member IO r => Eff (GUI : r) a -> Eff (Writer (DList Picture) : r) a
-runGUI sem = evalState (0.0, 0.0) $ reinterpret2 withRows sem
+runGUI :: forall r a. LastMember IO r => AppState -> Eff (GUI : r) a -> Eff (Writer (DList Picture) : r) a
+runGUI appState sem = do
+  evalState (0.0, 0.0) $ reinterpret2 withRows sem
   where
+  withColumns :: forall x r'. LastMember IO r' => GUI x -> Eff (State (Float, Float) : Writer (DList Picture) : r') x
   withColumns g = do
     (_xo1 :: Float, yo1 :: Float) <- get
     res <- go g
@@ -173,6 +179,7 @@ runGUI sem = evalState (0.0, 0.0) $ reinterpret2 withRows sem
     put (xo2, yo1) -- each gui element only increments its x offset,
                    -- meaning all children of 'g' ask layed out left to right
     pure res
+  withRows :: forall x r'. LastMember IO r' => GUI x -> Eff (State (Float, Float) : Writer (DList Picture) : r') x
   withRows g = do
     (xo1 :: Float, _yo1 :: Float) <- get
     res <- go g
@@ -181,13 +188,25 @@ runGUI sem = evalState (0.0, 0.0) $ reinterpret2 withRows sem
     put (xo1, yo2) -- each gui element only increments its y offset
                    -- meaning all children of 'g' ask layed out top to bottom
     pure res
-  go :: forall x r'. GUI x -> Eff (State (Float, Float) : Writer (DList Picture) : r') x
+  go :: forall x r'. LastMember IO r' => GUI x -> Eff (State (Float, Float) : Writer (DList Picture) : r') x
   go = \case
-    Button gp x y -> do
+    Button id' gp x y -> do
       (xo, yo) <- get
+
+      bboxes <- liftIO $ readIORef $ boundingBoxes appState
+      cursorPos' <- liftIO $ readIORef $ cursorPos appState
+      isHovering <- liftIO $ case IntMap.lookup id' bboxes of
+        Just (BBox br tl) -> pure $ pointInBox cursorPos' br tl
+        Nothing -> do
+          let br = (xo + x / 2, yo - y / 2)
+              tl = (xo - x / 2, yo + y / 2)
+          let bbox = BBox br tl
+          writeIORef (boundingBoxes appState) $ IntMap.insert id' bbox bboxes
+          pure $ pointInBox cursorPos' br tl
+
       (_, p) <- runWriter $ evalState (0.0, 0.0) $ go gp
       tell $ DList.fromList
-        [ translate xo yo $ rectangleSolid x y
+        [ bool id (color red) isHovering $ translate xo yo $ rectangleSolid x y
         , translate xo yo $ translate (negate $ x / 2) (negate $ y / 2) $ Pictures $ DList.toList p
         ]
       modify (\(xo', yo') -> (xo' + (x / 2) :: Float, yo' - y))
