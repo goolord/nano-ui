@@ -27,15 +27,15 @@ import Data.Hashable (Hashable)
 import Data.IORef
 import GHC.Generics (Generic)
 import Graphics.Gloss
-import Graphics.Gloss.Interface.IO.Interact (interactIO, Event (..))
+import Graphics.Gloss.Interface.IO.Interact (interactIO, Event (..), Key (..), MouseButton (..), KeyState (..))
 import qualified Data.DList as DList
 import qualified Data.HashMap.Strict as HM
 import qualified Data.Vector.Unboxed as VU
 import qualified Graphics.Text.TrueType as TT
-import qualified Data.IntMap as IntMap
-import Data.IntMap (IntMap)
 import Graphics.Gloss.Data.Point (pointInBox)
-import Data.Bool (bool)
+import Data.Maybe (mapMaybe)
+import qualified Data.List.NonEmpty as NonEmpty
+import Data.Semigroup (Semigroup(sconcat))
 
 deriving instance Generic TT.FontDescriptor
 deriving instance Generic TT.FontStyle
@@ -43,7 +43,7 @@ instance Hashable TT.FontDescriptor
 instance Hashable TT.FontStyle
 
 data GUI a where
-  Button :: Int -> GUI () -> Float -> Float -> GUI Bool
+  Button :: GUI () -> Float -> Float -> GUI Bool
   PictureI :: Picture -> GUI ()
   Columns :: GUI a -> GUI a
   Rows :: GUI a -> GUI a
@@ -57,11 +57,19 @@ data BBox = BBox
   , bboxTL :: !Point
   }
 
+instance Semigroup BBox where
+  (BBox brL tlL) <> (BBox brR tlR) = BBox (ptBR brL brR) (ptTL tlL tlR)
+
+ptBR :: (Ord a, Ord b) => (a, b) -> (a, b) -> (a, b)
+ptBR (x1,y1) (x2,y2) = (max x1 x2, min y1 y2)
+
+ptTL :: (Ord a, Ord b) => (a, b) -> (a, b) -> (a, b)
+ptTL (x1,y1) (x2,y2) = (min x1 x2, max y1 y2)
+
 data AppState = AppState
   { fontCache :: !TT.FontCache
   , loadedFontCache :: !(IORef (HashMap TT.FontDescriptor TT.Font))
-  , cursorPos :: !(IORef Point)
-  , boundingBoxes :: !(IORef (IntMap BBox))
+  , mouse :: !(IORef Mouse)
   }
 
 data Settings = Settings
@@ -86,8 +94,7 @@ newState :: IO AppState
 newState = do
   fontCache       <- TT.buildCache 
   loadedFontCache <- newIORef HM.empty
-  cursorPos       <- newIORef (0, 0)
-  boundingBoxes   <- newIORef IntMap.empty
+  mouse           <- newIORef (Hovering (0, 0))
   pure AppState {..}
 
 renderFont :: TT.FontDescriptor -> TT.PointSize -> String -> GUIM Picture
@@ -118,6 +125,25 @@ clearCache :: World -> IO ()
 clearCache w = do
   writeIORef (pictureCache w) Nothing
 
+data Mouse = Hovering Point | MB Point MouseButton KeyState
+  deriving Show
+
+mouseInteractionButton :: Mouse -> BBox -> Picture -> Picture
+mouseInteractionButton (Hovering p) BBox {..} = case pointInBox p bboxBR bboxTL of
+  True -> color red
+  False -> id
+mouseInteractionButton (MB p mb ks) BBox {..} = case pointInBox p bboxBR bboxTL of
+  True -> case mb of
+    LeftButton -> case ks of
+      Down -> color green
+      Up -> color white
+    _ -> id
+  False -> id
+
+didPress :: Mouse -> BBox -> Bool
+didPress (MB p LeftButton Up) BBox {..} = pointInBox p bboxBR bboxTL
+didPress _ _ = False
+
 mainWith :: Settings -> GUIM () -> IO ()
 mainWith settings gui' = do
   state <- newState
@@ -140,7 +166,11 @@ mainWith settings gui' = do
     (\e world -> case e of
       EventResize _dims -> pure world
       EventMotion p -> do
-        writeIORef (cursorPos state) p
+        writeIORef (mouse state) (Hovering p)
+        clearCache world -- move to the controller handler
+        pure world
+      EventKey (MouseButton mb) keyState _mods p -> do
+        writeIORef (mouse state) (MB p mb keyState)
         clearCache world -- move to the controller handler
         pure world
       EventKey _key _keyState _mods _coords -> pure world
@@ -166,6 +196,21 @@ render gui = do
   appState <- ask
   fmap (DList.toList . snd) $ runWriter $ runGUI appState gui
 
+pictureBBox :: Picture -> Maybe BBox
+pictureBBox = \case
+  Line p -> pathBBox p
+  Polygon p -> pathBBox p
+  Pictures ps -> fmap sconcat $ NonEmpty.nonEmpty $ mapMaybe pictureBBox ps
+  _ -> Nothing
+  where
+  pathBBox :: Path -> Maybe BBox
+  pathBBox [] = Nothing
+  pathBBox [_] = Nothing
+  pathBBox xs = Just $ BBox
+    { bboxBR = (maximum $ fmap fst xs, minimum $ fmap snd xs)
+    , bboxTL = (minimum $ fmap fst xs, maximum $ fmap snd xs)
+    }
+
 runGUI :: forall r a. LastMember IO r => AppState -> Eff (GUI : r) a -> Eff (Writer (DList Picture) : r) a
 runGUI appState sem = do
   evalState (0.0, 0.0) $ reinterpret2 withRows sem
@@ -190,31 +235,28 @@ runGUI appState sem = do
     pure res
   go :: forall x r'. LastMember IO r' => GUI x -> Eff (State (Float, Float) : Writer (DList Picture) : r') x
   go = \case
-    Button id' gp x y -> do
+    Button gp x y -> do
       (xo, yo) <- get
-
-      bboxes <- liftIO $ readIORef $ boundingBoxes appState
-      cursorPos' <- liftIO $ readIORef $ cursorPos appState
-      isHovering <- liftIO $ case IntMap.lookup id' bboxes of
-        Just (BBox br tl) -> pure $ pointInBox cursorPos' br tl
-        Nothing -> do
-          let br = (xo + x / 2, yo - y / 2)
-              tl = (xo - x / 2, yo + y / 2)
-          let bbox = BBox br tl
-          writeIORef (boundingBoxes appState) $ IntMap.insert id' bbox bboxes
-          pure $ pointInBox cursorPos' br tl
-
+      -- bboxes <- liftIO $ readIORef $ boundingBoxes appState
+      let br = (xo + x / 2, yo - y / 2)
+          tl = (xo - x / 2, yo + y / 2)
+      let bbox = BBox br tl
+      mouse' <- liftIO $ readIORef $ mouse appState
       (_, p) <- runWriter $ evalState (0.0, 0.0) $ go gp
       tell $ DList.fromList
-        [ bool id (color red) isHovering $ translate xo yo $ rectangleSolid x y
+        [ mouseInteractionButton mouse' bbox $ translate xo yo $ rectangleSolid x y
         , translate xo yo $ translate (negate $ x / 2) (negate $ y / 2) $ Pictures $ DList.toList p
         ]
       modify (\(xo', yo') -> (xo' + (x / 2) :: Float, yo' - y))
-      pure False
+      pure $ didPress mouse' bbox
     PictureI p -> do
       (xo, yo) <- get
       tell (DList.singleton $ translate xo yo p)
-      -- modify (\yo' -> yo' - y)
+      case pictureBBox p of
+        Nothing -> pure ()
+        Just (BBox (_, bottom) _) ->
+          modify (\(xo', yo') -> (xo' :: Float, yo' - bottom))
+      modify (\(xo', yo') -> (xo' :: Float, yo' - 20.0 :: Float))
       pure ()
     Columns g -> withColumns g
     Rows g -> withRows g

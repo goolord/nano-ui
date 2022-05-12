@@ -19,11 +19,22 @@ text :: String -> GUIM Picture
 text = renderFont firaCode (TT.PointSize 16)
 
 main :: IO ()
-main = defaultMain $ do
-  didSaveText <- text "Save"
-  didSave <- button 1 (PictureI $ color white didSaveText) 75.0 30.0
-  when didSave $ liftIO $ putStrLn "you saved!"
+main = do
+  msgs <- newIORef []
 
-  mousePosRef <- cursorPos <$> ask
-  mousePos <- liftIO $ readIORef mousePosRef
-  pictureI . color white =<< text (show mousePos)
+  defaultMain $ do
+  
+    didSaveText <- text "Save"
+    didSave <- button (PictureI $ color white didSaveText) 75.0 30.0
+
+    when didSave $ liftIO (modifyIORef' msgs ("YOU MUST DIE!!!!" :))
+
+    pics <- do
+      msgs' <- liftIO (readIORef msgs)
+      pics <- mapM text msgs'
+      pure $ fmap (color white) pics
+    mapM_ pictureI pics
+
+    mousePosRef <- mouse <$> ask
+    mousePos <- liftIO $ readIORef mousePosRef
+    pictureI . color white =<< text (show mousePos)
