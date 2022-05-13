@@ -159,9 +159,14 @@ mainWith settings gui' = do
       }
     (\world -> do
       pcache <- readIORef (pictureCache world)
-      case pcache of
+      mouse' <- liftIO $ readIORef $ mouse state
+      x <- case pcache of
         Just g -> pure g
         Nothing -> Pictures <$> render' (worldGui world)
+      case mouse' of
+        MB p LeftButton Up -> writeIORef (mouse state) (Hovering p) -- we have to manually reset this since we're effectively doing (Event MousePos -> Dynamic MousePos) by storing the mousepos in an IORef. this seems kinda hacky
+        _ -> pure ()
+      pure x
     )
     (\e world -> case e of
       EventResize _dims -> pure world
