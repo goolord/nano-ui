@@ -44,6 +44,7 @@ instance Hashable TT.FontStyle
 
 data GUI a where
   Button :: GUI () -> Float -> Float -> GUI Bool
+  Padding :: Float -> Float -> GUI ()
   PictureI :: Picture -> GUI ()
   Columns :: GUI a -> GUI a
   Rows :: GUI a -> GUI a
@@ -195,6 +196,7 @@ guiIO = interpretM @GUI @IO go
     PictureI {} -> pure ()
     Columns g -> go g
     Rows g -> go g
+    Padding {} -> pure ()
 
 render :: (LastMember IO r, Member (Reader AppState) r) => Eff (GUI : r) b -> Eff r [Picture]
 render gui = do
@@ -203,6 +205,7 @@ render gui = do
 
 pictureBBox :: Picture -> Maybe BBox
 pictureBBox = \case
+  Color _ p -> pictureBBox p
   Line p -> pathBBox p
   Polygon p -> pathBBox p
   Pictures ps -> fmap sconcat $ NonEmpty.nonEmpty $ mapMaybe pictureBBox ps
@@ -243,14 +246,15 @@ runGUI appState sem = do
     Button gp x y -> do
       (xo, yo) <- get
       -- bboxes <- liftIO $ readIORef $ boundingBoxes appState
-      let br = (xo + x / 2, yo - y / 2)
-          tl = (xo - x / 2, yo + y / 2)
+      let
+        br = (xo + x, yo - y / 2)
+        tl = (xo - x, yo + y / 2)
       let bbox = BBox br tl
       mouse' <- liftIO $ readIORef $ mouse appState
       (_, p) <- runWriter $ evalState (0.0, 0.0) $ go gp
       tell $ DList.fromList
-        [ mouseInteractionButton mouse' bbox $ translate xo yo $ rectangleSolid x y
-        , translate xo yo $ translate (negate $ x / 2) (negate $ y / 2) $ Pictures $ DList.toList p
+        [ mouseInteractionButton mouse' bbox $ translate (xo + (x / 2)) yo $ rectangleSolid x y
+        , translate xo yo $ translate 0 (negate $ (y / 2) / 2) $ Pictures $ DList.toList p
         ]
       modify (\(xo', yo') -> (xo' + (x / 2) :: Float, yo' - y))
       pure $ didPress mouse' bbox
@@ -258,10 +262,11 @@ runGUI appState sem = do
       (xo, yo) <- get
       tell (DList.singleton $ translate xo yo p)
       case pictureBBox p of
-        Nothing -> pure ()
-        Just (BBox (_, bottom) _) ->
-          modify (\(xo', yo') -> (xo' :: Float, yo' - bottom))
-      modify (\(xo', yo') -> (xo' :: Float, yo' - 20.0 :: Float))
+        Nothing -> error (show p)
+        Just (BBox (_, _) (_, top)) ->
+          modify (\(xo', yo') -> (xo' :: Float, yo' - top))
       pure ()
+    Padding x y -> do
+      modify (\(xo', yo') -> (xo' + x, yo' - y))
     Columns g -> withColumns g
     Rows g -> withRows g
