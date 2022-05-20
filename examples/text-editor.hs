@@ -13,20 +13,18 @@ import Data.IORef
 import Control.Monad (when)
 import Data.Foldable (for_)
 
-firaCode :: FontDescriptor
-firaCode = FontDescriptor "Open Sans" (FontStyle False False)
-
-text :: String -> GUIM Picture
-text s = do
-  renderFont firaCode (TT.PointSize 16) s
-
 main :: IO ()
 main = do
   msgs <- newIORef []
 
   defaultMain $ do
+
+    text "File name:"
+    fileName <- input 0 "File name" ""
+    text fileName
+    padding 0.0 10.0
   
-    didSaveText <- text "Save"
+    didSaveText <- textP "Save"
     didSave <- button (PictureI $ color white didSaveText) 75.0 30.0
     padding 0.0 10.0
 
@@ -34,11 +32,11 @@ main = do
 
     mousePosRef <- mouse <$> ask
     mousePos <- liftIO $ readIORef mousePosRef
-    pictureI . color white =<< text (show mousePos)
+    text (show mousePos)
 
     pics <- do
       msgs' <- liftIO (readIORef msgs)
-      pics <- mapM text msgs'
+      pics <- mapM textP msgs'
       pure $ fmap (color white) pics
 
     for_ pics $ \pic -> do

@@ -11,8 +11,15 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE OverloadedStrings #-}
 
-module NanoUI where
+module NanoUI
+  ( module NanoUI
+  , module NanoUI.Types
+  )
+  where
+
+import NanoUI.Types
 
 import Control.Monad.Freer hiding (translate)
 import Control.Monad.Freer.State
@@ -26,7 +33,7 @@ import Data.HashMap.Strict (HashMap)
 import Data.Hashable (Hashable)
 import Data.IORef
 import GHC.Generics (Generic)
-import Graphics.Gloss
+import Graphics.Gloss hiding (text)
 import Graphics.Gloss.Interface.IO.Interact (interactIO, Event (..), Key (..), MouseButton (..), KeyState (..))
 import qualified Data.DList as DList
 import qualified Data.HashMap.Strict as HM
@@ -36,57 +43,30 @@ import Graphics.Gloss.Data.Point (pointInBox)
 import Data.Maybe (mapMaybe)
 import qualified Data.List.NonEmpty as NonEmpty
 import Data.Semigroup (Semigroup(sconcat))
+import qualified Data.IntMap.Strict as IntMap
+import Data.IntMap (IntMap)
+import Control.Monad (when)
+import Data.Foldable (for_)
 
 deriving instance Generic TT.FontDescriptor
 deriving instance Generic TT.FontStyle
 instance Hashable TT.FontDescriptor
 instance Hashable TT.FontStyle
 
-data GUI a where
-  Button :: GUI () -> Float -> Float -> GUI Bool
-  Padding :: Float -> Float -> GUI ()
-  PictureI :: Picture -> GUI ()
-  Columns :: GUI a -> GUI a
-  Rows :: GUI a -> GUI a
+openSans :: TT.FontDescriptor
+openSans = TT.FontDescriptor "Open Sans" (TT.FontStyle False False)
 
-makeEffect ''GUI
+textP :: (Member (Reader AppState) r, LastMember IO r) => String -> Eff r Picture
+textP s = do
+  renderFont openSans (TT.PointSize 16) s
 
-data ElState = Active | Hot | Inactive
+text :: (Member (Reader AppState) r, LastMember IO r, Member GUI r) => String -> Eff r ()
+text s = do
+  p <- renderFont openSans (TT.PointSize 16) s
+  send $ PictureI $ decorateText p
 
-data BBox = BBox
-  { bboxBR :: !Point
-  , bboxTL :: !Point
-  }
-
-instance Semigroup BBox where
-  (BBox brL tlL) <> (BBox brR tlR) = BBox (ptBR brL brR) (ptTL tlL tlR)
-
-ptBR :: (Ord a, Ord b) => (a, b) -> (a, b) -> (a, b)
-ptBR (x1,y1) (x2,y2) = (max x1 x2, min y1 y2)
-
-ptTL :: (Ord a, Ord b) => (a, b) -> (a, b) -> (a, b)
-ptTL (x1,y1) (x2,y2) = (min x1 x2, max y1 y2)
-
-data AppState = AppState
-  { fontCache :: !TT.FontCache
-  , loadedFontCache :: !(IORef (HashMap TT.FontDescriptor TT.Font))
-  , mouse :: !(IORef Mouse)
-  }
-
-data Settings = Settings
-  { tickRate :: !Int
-  , bgColor :: !Color
-  , mainWindow :: !Display
-  }
-
-defaultSettings :: Settings
-defaultSettings = Settings
-  { tickRate = 60
-  , bgColor = makeColorI 0x28 0x28 0x28 0xff
-  , mainWindow = InWindow "Wave" (800, 600) (100, 100)
-  }
-
-type GUIM = Eff [GUI, Reader AppState, IO]
+decorateText :: Picture -> Picture
+decorateText = color white
 
 defaultMain :: GUIM () -> IO ()
 defaultMain = mainWith defaultSettings
@@ -96,9 +76,10 @@ newState = do
   fontCache       <- TT.buildCache 
   loadedFontCache <- newIORef HM.empty
   mouse           <- newIORef (Hovering (0, 0))
+  inputState      <- newIORef IntMap.empty
   pure AppState {..}
 
-renderFont :: TT.FontDescriptor -> TT.PointSize -> String -> GUIM Picture
+renderFont :: (Member (Reader AppState) r, LastMember IO r) => TT.FontDescriptor -> TT.PointSize -> String -> Eff r Picture
 renderFont fontd pt str = do
   state <- ask
   loaded <- liftIO $ readIORef $ loadedFontCache state
@@ -117,17 +98,9 @@ renderFont fontd pt str = do
     (0.0, 0.0)
     [(f,pt,str)]
 
-data World = World
-  { worldGui :: GUIM ()
-  , pictureCache :: IORef (Maybe Picture)
-  }
-
 clearCache :: World -> IO ()
 clearCache w = do
   writeIORef (pictureCache w) Nothing
-
-data Mouse = Hovering Point | MB Point MouseButton KeyState
-  deriving Show
 
 mouseInteractionButton :: Mouse -> BBox -> Picture -> Picture
 mouseInteractionButton (Hovering p) BBox {..} = case pointInBox p bboxBR bboxTL of
@@ -144,6 +117,13 @@ mouseInteractionButton (MB p mb ks) BBox {..} = case pointInBox p bboxBR bboxTL 
 didPress :: Mouse -> BBox -> Bool
 didPress (MB p LeftButton Up) BBox {..} = pointInBox p bboxBR bboxTL
 didPress _ _ = False
+
+defaultSettings :: Settings
+defaultSettings = Settings
+  { tickRate = 60
+  , bgColor = makeColorI 0x28 0x28 0x28 0xff
+  , mainWindow = InWindow "Wave" (800, 600) (100, 100)
+  }
 
 mainWith :: Settings -> GUIM () -> IO ()
 mainWith settings gui' = do
@@ -177,6 +157,15 @@ mainWith settings gui' = do
         pure world
       EventKey (MouseButton mb) keyState _mods p -> do
         writeIORef (mouse state) (MB p mb keyState)
+        case keyState of
+          Up -> modifyIORef' (inputState state) (fmap disableInput)
+          _ -> pure ()
+        clearCache world -- move to the controller handler
+        pure world
+      EventKey (Char c) Down _mods _coords -> do
+        inputMap <- readIORef (inputState state)
+        for_ (IntMap.filter inputIsActive inputMap) $ \(InputState strRef _) -> do
+          modifyIORef' strRef (<> [c])
         clearCache world -- move to the controller handler
         pure world
       EventKey _key _keyState _mods _coords -> pure world
@@ -187,6 +176,14 @@ mainWith settings gui' = do
       pure ()
     )
 
+disableInput :: InputState -> InputState
+disableInput (InputState strRef _) = InputState strRef InputInactive
+
+inputIsActive :: InputState -> Bool
+inputIsActive (InputState _ InputActive) = True
+inputIsActive _ = False
+
+{-
 guiIO :: forall r a. (LastMember IO r) => Eff (GUI : r) a -> Eff r a
 guiIO = interpretM @GUI @IO go
   where
@@ -197,6 +194,8 @@ guiIO = interpretM @GUI @IO go
     Columns g -> go g
     Rows g -> go g
     Padding {} -> pure ()
+    Input {} -> pure ""
+-}
 
 render :: (LastMember IO r, Member (Reader AppState) r) => Eff (GUI : r) b -> Eff r [Picture]
 render gui = do
@@ -262,11 +261,39 @@ runGUI appState sem = do
       (xo, yo) <- get
       tell (DList.singleton $ translate xo yo p)
       case pictureBBox p of
-        Nothing -> error (show p)
+        Nothing -> pure () -- error (show p)
         Just (BBox (_, _) (_, top)) ->
           modify (\(xo', yo') -> (xo' :: Float, yo' - top))
       pure ()
     Padding x y -> do
       modify (\(xo', yo') -> (xo' + x, yo' - y))
+    Input ident _placeholder initialValue -> do
+      (xo, yo) <- get
+      inputMap <- liftIO $ readIORef (inputState appState)
+      InputState strRef ia <- case IntMap.lookup ident inputMap of
+        Nothing -> liftIO $ do
+          strRef <- newIORef initialValue
+          let is = InputState strRef InputInactive
+          modifyIORef' (inputState appState) (IntMap.insert ident is)
+          pure is
+        Just strRef -> pure strRef
+      str <- liftIO $ readIORef strRef
+      mouse' <- liftIO $ readIORef $ mouse appState
+      strPic <- runReader appState $ textP str
+      let x = 100.0
+          y = 30.0
+      let
+        br = (xo + x, yo - y / 2)
+        tl = (xo - x, yo + y / 2)
+      let bbox = BBox br tl
+      tell $ DList.fromList
+        [ translate (xo + (x / 2)) yo $ color white $ rectangleSolid x y
+        , translate xo yo $ translate 0 (negate $ (y / 2) / 2) $ color black strPic
+        -- , translate xo yo $ translate 0 (negate $ (y / 2) / 2) $ Pictures $ DList.toList [blank]
+        ]
+      modify (\(xo', yo') -> (xo' + (x / 2) :: Float, yo' - y))
+      when (didPress mouse' bbox) $ do
+        liftIO $ modifyIORef' (inputState appState) (IntMap.insert ident (InputState strRef InputActive))
+      pure str
     Columns g -> withColumns g
     Rows g -> withRows g
