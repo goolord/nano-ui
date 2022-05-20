@@ -24,7 +24,6 @@ import Graphics.Gloss hiding (text)
 import Graphics.Gloss.Interface.IO.Interact (MouseButton (..), KeyState (..))
 import qualified Graphics.Text.TrueType as TT
 import Data.IntMap (IntMap)
-import Graphics.Gloss.Interface.IO.Interact (Event (..))
 
 data GUI a where
   Button ::
@@ -57,6 +56,9 @@ data BBox = BBox
 instance Semigroup BBox where
   (BBox brL tlL) <> (BBox brR tlR) = BBox (ptBR brL brR) (ptTL tlL tlR)
 
+instance Monoid BBox where
+  mempty = BBox (0.0, 0.0) (0.0, 0.0)
+
 ptBR :: (Ord a, Ord b) => (a, b) -> (a, b) -> (a, b)
 ptBR (x1,y1) (x2,y2) = (max x1 x2, min y1 y2)
 
@@ -73,7 +75,7 @@ data AppState = AppState
 data InputState = InputState (IORef String) InputActive
 
 data InputActive
-  = InputActive InputCursor
+  = InputActive (IORef InputCursor)
   | InputInactive
 
 type InputCursor = Int

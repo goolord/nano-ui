@@ -24,12 +24,10 @@ import NanoUI.Types
 import Control.Monad.Freer hiding (translate)
 import Control.Monad.Freer.State
 import Control.Monad.Freer.Reader
-import Control.Monad.Freer.TH
 import Control.Monad.Freer.Writer
 import Control.Monad.IO.Class (MonadIO(liftIO))
 import Data.Bifunctor
 import Data.DList
-import Data.HashMap.Strict (HashMap)
 import Data.Hashable (Hashable)
 import Data.IORef
 import GHC.Generics (Generic)
@@ -40,11 +38,10 @@ import qualified Data.HashMap.Strict as HM
 import qualified Data.Vector.Unboxed as VU
 import qualified Graphics.Text.TrueType as TT
 import Graphics.Gloss.Data.Point (pointInBox)
-import Data.Maybe (mapMaybe)
+import Data.Maybe (mapMaybe, fromMaybe)
 import qualified Data.List.NonEmpty as NonEmpty
 import Data.Semigroup (Semigroup(sconcat))
 import qualified Data.IntMap.Strict as IntMap
-import Data.IntMap (IntMap)
 import Control.Monad (when)
 import Data.Foldable (for_)
 import Data.List (dropWhileEnd)
@@ -131,10 +128,15 @@ mainWith :: Settings -> GUIM () -> IO ()
 mainWith settings gui' = do
   state <- newState
   let render' = runM . runReader state . render
-  let inputEv world f = do
+  let inputEv :: World -> (String -> String) -> IO World
+      inputEv world f = do
         inputMap <- readIORef (inputState state)
-        for_ (IntMap.filter inputIsActive inputMap) $ \(InputState strRef _) -> do
-          modifyIORef' strRef f
+        for_ (IntMap.filter inputIsActive inputMap) $ \(InputState strRef (InputActive ixRef)) -> do
+          initString <- readIORef strRef
+          let newString = f initString
+              diff = length newString - length initString
+          writeIORef strRef newString
+          modifyIORef' ixRef (+ diff)
         -- print c
         clearCache world -- move to the controller handler
         pure world
@@ -296,6 +298,12 @@ runGUI appState sem = do
       str <- liftIO $ readIORef strRef
       mouse' <- liftIO $ readIORef $ mouse appState
       strPic <- runReader appState $ textP str
+      BBox (cursorOffset, _) _ <- case ia of
+        InputActive ixRef -> do
+          ix <- liftIO $ readIORef ixRef
+          pic <- runReader appState $ textP $ take ix str
+          pure $ fromMaybe mempty (pictureBBox pic)
+        InputInactive -> pure mempty
       let x = 100.0
           y = 30.0
       let
@@ -305,12 +313,13 @@ runGUI appState sem = do
       tell $ DList.fromList
         [ translate (xo + (x / 2)) yo $ color white $ rectangleSolid x y
         , translate xo yo $ translate 0 (negate $ (y / 2) / 2) $ color black strPic
-        , translate (xo + 4.0) yo $ color black $ rectangleSolid 2.0 (y - 8.0)
+        , translate (xo + 4.0 + cursorOffset) yo $ color black $ rectangleSolid 2.0 (y - 8.0)
         ]
       modify (\(xo', yo') -> (xo' + (x / 2) :: Float, yo' - y))
       when (didPress mouse' bbox) $ do
         let pressedIx = 0
-        liftIO $ modifyIORef' (inputState appState) (IntMap.insert ident (InputState strRef (InputActive pressedIx)))
+        ixRef <- liftIO $ newIORef pressedIx
+        liftIO $ modifyIORef' (inputState appState) (IntMap.insert ident (InputState strRef (InputActive ixRef)))
       pure str
     Columns g -> withColumns g
     Rows g -> withRows g
