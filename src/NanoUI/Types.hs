@@ -72,7 +72,11 @@ data AppState = AppState
 
 data InputState = InputState (IORef String) InputActive
 
-data InputActive = InputActive | InputInactive
+data InputActive
+  = InputActive InputCursor
+  | InputInactive
+
+type InputCursor = Int
 
 data Settings = Settings
   { tickRate :: !Int

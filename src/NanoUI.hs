@@ -34,7 +34,7 @@ import Data.Hashable (Hashable)
 import Data.IORef
 import GHC.Generics (Generic)
 import Graphics.Gloss hiding (text)
-import Graphics.Gloss.Interface.IO.Interact (interactIO, Event (..), Key (..), MouseButton (..), KeyState (..), SpecialKey (..))
+import Graphics.Gloss.Interface.IO.Interact (interactIO, Event (..), Key (..), MouseButton (..), KeyState (..), SpecialKey (..), Modifiers (..))
 import qualified Data.DList as DList
 import qualified Data.HashMap.Strict as HM
 import qualified Data.Vector.Unboxed as VU
@@ -47,6 +47,8 @@ import qualified Data.IntMap.Strict as IntMap
 import Data.IntMap (IntMap)
 import Control.Monad (when)
 import Data.Foldable (for_)
+import Data.List (dropWhileEnd)
+import Data.Char (isAlphaNum, isSpace)
 
 deriving instance Generic TT.FontDescriptor
 deriving instance Generic TT.FontStyle
@@ -169,8 +171,10 @@ mainWith settings gui' = do
           _ -> pure ()
         clearCache world -- move to the controller handler
         pure world
-      EventKey (Char '\b') Down _mods _coords ->
-        inputEv world safeInit
+      EventKey (Char '\b') Down mods _coords ->
+        case ctrl mods of
+          Down -> inputEv world (dropWhileEnd isAlphaNum . dropWhileEnd isSpace)
+          Up -> inputEv world safeInit
       EventKey (Char c) Down _mods _coords -> do
         inputEv world (<> [c])
         -- print c
@@ -192,7 +196,7 @@ disableInput :: InputState -> InputState
 disableInput (InputState strRef _) = InputState strRef InputInactive
 
 inputIsActive :: InputState -> Bool
-inputIsActive (InputState _ InputActive) = True
+inputIsActive (InputState _ InputActive{}) = True
 inputIsActive _ = False
 
 {-
@@ -301,11 +305,12 @@ runGUI appState sem = do
       tell $ DList.fromList
         [ translate (xo + (x / 2)) yo $ color white $ rectangleSolid x y
         , translate xo yo $ translate 0 (negate $ (y / 2) / 2) $ color black strPic
-        -- , translate xo yo $ translate 0 (negate $ (y / 2) / 2) $ Pictures $ DList.toList [blank]
+        , translate (xo + 4.0) yo $ color black $ rectangleSolid 2.0 (y - 8.0)
         ]
       modify (\(xo', yo') -> (xo' + (x / 2) :: Float, yo' - y))
       when (didPress mouse' bbox) $ do
-        liftIO $ modifyIORef' (inputState appState) (IntMap.insert ident (InputState strRef InputActive))
+        let pressedIx = 0
+        liftIO $ modifyIORef' (inputState appState) (IntMap.insert ident (InputState strRef (InputActive pressedIx)))
       pure str
     Columns g -> withColumns g
     Rows g -> withRows g
