@@ -34,7 +34,7 @@ import Data.Hashable (Hashable)
 import Data.IORef
 import GHC.Generics (Generic)
 import Graphics.Gloss hiding (text)
-import Graphics.Gloss.Interface.IO.Interact (interactIO, Event (..), Key (..), MouseButton (..), KeyState (..))
+import Graphics.Gloss.Interface.IO.Interact (interactIO, Event (..), Key (..), MouseButton (..), KeyState (..), SpecialKey (..))
 import qualified Data.DList as DList
 import qualified Data.HashMap.Strict as HM
 import qualified Data.Vector.Unboxed as VU
@@ -129,6 +129,13 @@ mainWith :: Settings -> GUIM () -> IO ()
 mainWith settings gui' = do
   state <- newState
   let render' = runM . runReader state . render
+  let inputEv world f = do
+        inputMap <- readIORef (inputState state)
+        for_ (IntMap.filter inputIsActive inputMap) $ \(InputState strRef _) -> do
+          modifyIORef' strRef f
+        -- print c
+        clearCache world -- move to the controller handler
+        pure world
   initGui <- render' gui'
   initPcache <- newIORef $ Just $ Pictures initGui
   interactIO
@@ -162,12 +169,13 @@ mainWith settings gui' = do
           _ -> pure ()
         clearCache world -- move to the controller handler
         pure world
+      EventKey (Char '\b') Down _mods _coords ->
+        inputEv world safeInit
       EventKey (Char c) Down _mods _coords -> do
-        inputMap <- readIORef (inputState state)
-        for_ (IntMap.filter inputIsActive inputMap) $ \(InputState strRef _) -> do
-          modifyIORef' strRef (<> [c])
-        clearCache world -- move to the controller handler
-        pure world
+        inputEv world (<> [c])
+        -- print c
+      EventKey (SpecialKey KeySpace) Down _mods _coords ->
+        inputEv world (<> " ")
       EventKey _key _keyState _mods _coords -> pure world
     )
     (\controller -> do
@@ -175,6 +183,10 @@ mainWith settings gui' = do
       -- clearCache world
       pure ()
     )
+
+safeInit :: [a] -> [a]
+safeInit [] = []
+safeInit l = init l
 
 disableInput :: InputState -> InputState
 disableInput (InputState strRef _) = InputState strRef InputInactive
