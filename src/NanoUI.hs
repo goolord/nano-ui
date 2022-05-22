@@ -32,7 +32,7 @@ import Data.Hashable (Hashable)
 import Data.IORef
 import GHC.Generics (Generic)
 import Graphics.Gloss hiding (text)
-import Graphics.Gloss.Interface.IO.Interact (interactIO, Event (..), Key (..), MouseButton (..), KeyState (..), SpecialKey (..), Modifiers (..))
+import Graphics.Gloss.Interface.IO.Interact (interactIO, Event (..), Key (..), MouseButton (..), KeyState (..), SpecialKey (..), Modifiers (..), Controller (..))
 import qualified Data.DList as DList
 import qualified Data.HashMap.Strict as HM
 import qualified Data.Vector.Unboxed as VU
@@ -45,7 +45,8 @@ import qualified Data.IntMap.Strict as IntMap
 import Control.Monad (when)
 import Data.Foldable (for_)
 import Data.List (dropWhileEnd)
-import Data.Char (isAlphaNum, isSpace)
+import Data.Char (isAlphaNum, isSpace, isPunctuation)
+import Graphics.Gloss.Interface.Environment (getScreenSize)
 
 deriving instance Generic TT.FontDescriptor
 deriving instance Generic TT.FontStyle
@@ -70,12 +71,15 @@ decorateText = color white
 defaultMain :: GUIM () -> IO ()
 defaultMain = mainWith defaultSettings
 
-newState :: IO AppState
-newState = do
+newState :: Settings -> IO AppState
+newState Settings {..} = do
   fontCache       <- TT.buildCache 
   loadedFontCache <- newIORef HM.empty
   mouse           <- newIORef (Hovering (0, 0))
   inputState      <- newIORef IntMap.empty
+  windowSize      <- newIORef =<< case mainWindow of
+    InWindow _ sz _ -> pure sz
+    FullScreen -> getScreenSize
   pure AppState {..}
 
 renderFont :: (Member (Reader AppState) r, LastMember IO r) => TT.FontDescriptor -> TT.PointSize -> String -> Eff r Picture
@@ -126,7 +130,7 @@ defaultSettings = Settings
 
 mainWith :: Settings -> GUIM () -> IO ()
 mainWith settings gui' = do
-  state <- newState
+  state <- newState settings
   let render' = runM . runReader state . render
   let inputEv :: World -> (String -> String) -> IO World
       inputEv world f = do
@@ -161,7 +165,9 @@ mainWith settings gui' = do
       pure x
     )
     (\e world -> case e of
-      EventResize _dims -> pure world
+      EventResize dims -> do
+        writeIORef (windowSize state) dims
+        pure world
       EventMotion p -> do
         writeIORef (mouse state) (Hovering p)
         clearCache world -- move to the controller handler
@@ -175,7 +181,7 @@ mainWith settings gui' = do
         pure world
       EventKey (Char '\b') Down mods _coords ->
         case ctrl mods of
-          Down -> inputEv world (dropWhileEnd isAlphaNum . dropWhileEnd isSpace)
+          Down -> inputEv world (dropWhileEnd (\x -> isAlphaNum x || isPunctuation x) . dropWhileEnd isSpace)
           Up -> inputEv world safeInit
       EventKey (Char c) Down _mods _coords -> do
         inputEv world (<> [c])
@@ -184,9 +190,17 @@ mainWith settings gui' = do
         inputEv world (<> " ")
       EventKey _key _keyState _mods _coords -> pure world
     )
-    (\controller -> do
+    (\(Controller _redraw _modifyViewPort) -> do
       -- update every n seconds
       -- clearCache world
+      -- modifyViewPort $ \vp -> do
+      --   (x, y) <- readIORef (windowSize state)
+      --   pure vp {
+      --     viewPortTranslate =
+      --       ( fromIntegral $ negate $ x `div` 2
+      --       , fromIntegral          $ y `div` 2
+      --       )
+      --   }
       pure ()
     )
 
@@ -238,7 +252,10 @@ pictureBBox = \case
 
 runGUI :: forall r a. LastMember IO r => AppState -> Eff (GUI : r) a -> Eff (Writer (DList Picture) : r) a
 runGUI appState sem = do
-  evalState (0.0, 0.0) $ reinterpret2 withRows sem
+  (wX, wY) <- send $ readIORef $ windowSize appState
+  let left = (fromIntegral $ negate $ wX `div` 2) + 5.0
+      top  = (fromIntegral          $ wY `div` 2) - 22.0
+  evalState (left, top) $ reinterpret2 withRows sem
   where
   withColumns :: forall x r'. LastMember IO r' => GUI x -> Eff (State (Float, Float) : Writer (DList Picture) : r') x
   withColumns g = do

@@ -70,6 +70,7 @@ data AppState = AppState
   , loadedFontCache :: !(IORef (HashMap TT.FontDescriptor TT.Font))
   , inputState :: !(IORef (IntMap InputState))
   , mouse :: !(IORef Mouse)
+  , windowSize :: !(IORef (Int, Int))
   }
 
 data InputState = InputState (IORef String) InputActive
