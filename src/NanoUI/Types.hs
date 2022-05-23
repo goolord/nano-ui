@@ -85,9 +85,15 @@ data Settings = Settings
   { tickRate :: !Int
   , bgColor :: !Color
   , mainWindow :: !Display
+  , stylesheet :: !Stylesheet
   }
 
-type GUIM = Eff [GUI, Reader AppState, IO]
+type GUIM = Eff [GUI, Reader AppState, Reader Settings, IO]
+
+data Stylesheet = Stylesheet
+  { xPad :: !Float
+  , yPad :: !Float
+  }
 
 data Mouse = Hovering Point | MB Point MouseButton KeyState
   deriving Show

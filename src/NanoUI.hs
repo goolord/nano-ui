@@ -126,12 +126,19 @@ defaultSettings = Settings
   { tickRate = 60
   , bgColor = makeColorI 0x28 0x28 0x28 0xff
   , mainWindow = InWindow "Wave" (800, 600) (100, 100)
+  , stylesheet = defaultStylesheet
+  }
+
+defaultStylesheet :: Stylesheet
+defaultStylesheet = Stylesheet 
+  { xPad = 5.0
+  , yPad = 15.0
   }
 
 mainWith :: Settings -> GUIM () -> IO ()
 mainWith settings gui' = do
   state <- newState settings
-  let render' = runM . runReader state . render
+  let render' = runM . runReader settings . runReader state . render
   let inputEv :: World -> (String -> String) -> IO World
       inputEv world f = do
         inputMap <- readIORef (inputState state)
@@ -229,10 +236,11 @@ guiIO = interpretM @GUI @IO go
     Input {} -> pure ""
 -}
 
-render :: (LastMember IO r, Member (Reader AppState) r) => Eff (GUI : r) b -> Eff r [Picture]
+render :: (LastMember IO r, Member (Reader AppState) r, Member (Reader Settings) r) => Eff (GUI : r) b -> Eff r [Picture]
 render gui = do
   appState <- ask
-  fmap (DList.toList . snd) $ runWriter $ runGUI appState gui
+  settings <- ask
+  fmap (DList.toList . snd) $ runWriter $ runGUI settings appState gui
 
 pictureBBox :: Picture -> Maybe BBox
 pictureBBox = \case
@@ -250,8 +258,8 @@ pictureBBox = \case
     , bboxTL = (minimum $ fmap fst xs, maximum $ fmap snd xs)
     }
 
-runGUI :: forall r a. LastMember IO r => AppState -> Eff (GUI : r) a -> Eff (Writer (DList Picture) : r) a
-runGUI appState sem = do
+runGUI :: forall r a. LastMember IO r => Settings -> AppState -> Eff (GUI : r) a -> Eff (Writer (DList Picture) : r) a
+runGUI settings appState sem = do
   (wX, wY) <- send $ readIORef $ windowSize appState
   let left = (fromIntegral $ negate $ wX `div` 2) + 5.0
       top  = (fromIntegral          $ wY `div` 2) - 22.0
@@ -265,6 +273,7 @@ runGUI appState sem = do
     -- bounding <- askBoundingBox
     put (xo2, yo1) -- each gui element only increments its x offset,
                    -- meaning all children of 'g' ask layed out left to right
+    _ <- go $ Padding (xPad $ stylesheet settings) 0.0
     pure res
   withRows :: forall x r'. LastMember IO r' => GUI x -> Eff (State (Float, Float) : Writer (DList Picture) : r') x
   withRows g = do
@@ -274,6 +283,7 @@ runGUI appState sem = do
     -- bounding <- askBoundingBox
     put (xo1, yo2) -- each gui element only increments its y offset
                    -- meaning all children of 'g' ask layed out top to bottom
+    _ <- go $ Padding 0.0 (yPad $ stylesheet settings)
     pure res
   go :: forall x r'. LastMember IO r' => GUI x -> Eff (State (Float, Float) : Writer (DList Picture) : r') x
   go = \case
