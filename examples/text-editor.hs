@@ -24,7 +24,7 @@ main = do
     didSaveText <- textP "Save"
     didSave <- button (PictureI $ color white didSaveText) 75.0 30.0
 
-    when didSave $ liftIO (modifyIORef' msgs ("YOU MUST DIE!!!!" :))
+    when didSave $ liftIO (modifyIORef' msgs (fileName :))
 
     mousePosRef <- mouse <$> ask
     mousePos <- liftIO $ readIORef mousePosRef

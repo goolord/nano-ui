@@ -337,10 +337,13 @@ runGUI settings appState sem = do
         br = (xo + x, yo - y / 2)
         tl = (xo - x, yo + y / 2)
       let bbox = BBox br tl
+      let cursor = case ia of
+            InputInactive -> blank
+            _ -> translate (xo + 4.0 + cursorOffset) yo $ color black $ rectangleSolid 2.0 (y - 8.0)
       tell $ DList.fromList
         [ translate (xo + (x / 2)) yo $ color white $ rectangleSolid x y
         , translate xo yo $ translate 0 (negate $ (y / 2) / 2) $ color black strPic
-        , translate (xo + 4.0 + cursorOffset) yo $ color black $ rectangleSolid 2.0 (y - 8.0)
+        , cursor
         ]
       modify (\(xo', yo') -> (xo' + (x / 2) :: Float, yo' - y))
       when (didPress mouse' bbox) $ do
