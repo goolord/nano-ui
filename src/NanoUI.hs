@@ -38,7 +38,7 @@ import qualified Data.HashMap.Strict as HM
 import qualified Data.Vector.Unboxed as VU
 import qualified Graphics.Text.TrueType as TT
 import Graphics.Gloss.Data.Point (pointInBox)
-import Data.Maybe (mapMaybe, fromMaybe)
+import Data.Maybe (mapMaybe)
 import qualified Data.List.NonEmpty as NonEmpty
 import Data.Semigroup (Semigroup(sconcat))
 import qualified Data.IntMap.Strict as IntMap
@@ -53,6 +53,9 @@ deriving instance Generic TT.FontStyle
 instance Hashable TT.FontDescriptor
 instance Hashable TT.FontStyle
 
+dpi :: TT.Dpi
+dpi = 96
+
 openSans :: TT.FontDescriptor
 openSans = TT.FontDescriptor "Open Sans" (TT.FontStyle False False)
 
@@ -65,6 +68,13 @@ text s = do
   p <- renderFont openSans (TT.PointSize 16) s
   send $ PictureI $ decorateText p
 
+textBBox :: (Member (Reader AppState) r, LastMember IO r) => String -> Eff r BBox
+textBBox s = do
+  f <- lookupOrInsertFont openSans
+  let bb = TT.stringBoundingBox f dpi (TT.PointSize 16) s
+  let baseline = TT._baselineHeight bb
+  pure $ BBox (TT._xMax bb + baseline, TT._yMax bb + baseline) (TT._xMin bb + baseline, TT._yMax bb + baseline)
+
 decorateText :: Picture -> Picture
 decorateText = color white
 
@@ -73,7 +83,7 @@ defaultMain = mainWith defaultSettings
 
 newState :: Settings -> IO AppState
 newState Settings {..} = do
-  fontCache       <- TT.buildCache 
+  fontCache       <- TT.buildCache
   loadedFontCache <- newIORef HM.empty
   mouse           <- newIORef (Hovering (0, 0))
   inputState      <- newIORef IntMap.empty
@@ -82,11 +92,11 @@ newState Settings {..} = do
     FullScreen -> getScreenSize
   pure AppState {..}
 
-renderFont :: (Member (Reader AppState) r, LastMember IO r) => TT.FontDescriptor -> TT.PointSize -> String -> Eff r Picture
-renderFont fontd pt str = do
+lookupOrInsertFont :: (MonadIO m, LastMember m effs, Member (Reader AppState) effs) => TT.FontDescriptor -> Eff effs TT.Font
+lookupOrInsertFont fontd = do
   state <- ask
   loaded <- liftIO $ readIORef $ loadedFontCache state
-  f <- case HM.lookup fontd loaded of
+  case HM.lookup fontd loaded of
     Just f -> pure f
     Nothing -> do
       case TT.findFontInCache (fontCache state) fontd of
@@ -95,9 +105,13 @@ renderFont fontd pt str = do
           f <- either (error . show) id <$> (liftIO $ TT.loadFontFile fp)
           liftIO $ modifyIORef' (loadedFontCache state) (HM.insert fontd f)
           pure f
+
+renderFont :: (Member (Reader AppState) r, LastMember IO r) => TT.FontDescriptor -> TT.PointSize -> String -> Eff r Picture
+renderFont fontd pt str = do
+  f <- lookupOrInsertFont fontd
   -- todo: interpret as Polygon instead of Line
   pure $ foldMap (line . fmap (second negate) . VU.toList) $ mconcat $ TT.getStringCurveAtPoint
-    96 -- DPI
+    dpi
     (0.0, 0.0)
     [(f,pt,str)]
 
@@ -139,7 +153,7 @@ mainWith :: Settings -> GUIM () -> IO ()
 mainWith settings gui' = do
   state <- newState settings
   let render' = runM . runReader settings . runReader state . render
-  let inputEv :: World -> (String -> String) -> IO World
+  let inputEv :: World -> (String -> String) -> IO World -- move this to a state handler or maybe the drawing stage
       inputEv world f = do
         inputMap <- readIORef (inputState state)
         for_ (IntMap.filter inputIsActive inputMap) $ \(InputState strRef (InputActive ixRef)) -> do
@@ -325,28 +339,32 @@ runGUI settings appState sem = do
       str <- liftIO $ readIORef strRef
       mouse' <- liftIO $ readIORef $ mouse appState
       strPic <- runReader appState $ textP str
-      BBox (cursorOffset, _) _ <- case ia of
-        InputActive ixRef -> do
-          ix <- liftIO $ readIORef ixRef
-          pic <- runReader appState $ textP $ take ix str
-          pure $ fromMaybe mempty (pictureBBox pic)
-        InputInactive -> pure mempty
       let x = 100.0
           y = 30.0
       let
         br = (xo + x, yo - y / 2)
         tl = (xo - x, yo + y / 2)
       let bbox = BBox br tl
+      let pressed = didPress mouse' bbox
+      BBox (cursorOffset, _) _ <- case ia of -- cursorOffset doesn't account for spaces in the bbox. do that!
+        InputActive ixRef -> do
+          ix <- liftIO $ readIORef ixRef
+          runReader appState $ textBBox $ take ix str
+        InputInactive ->
+          if pressed
+          then pure mempty -- calculate which glyph was pressed and change the ixRef to that
+          else pure $ BBox (3.0, 0.0) (0.0, 0.0)
+      send $ print cursorOffset
       let cursor = case ia of
             InputInactive -> blank
-            _ -> translate (xo + 4.0 + cursorOffset) yo $ color black $ rectangleSolid 2.0 (y - 8.0)
+            _ -> translate (xo + 1.0 + cursorOffset) yo $ color black $ rectangleSolid 2.0 (y - 8.0)
       tell $ DList.fromList
         [ translate (xo + (x / 2)) yo $ color white $ rectangleSolid x y
         , translate xo yo $ translate 0 (negate $ (y / 2) / 2) $ color black strPic
         , cursor
         ]
       modify (\(xo', yo') -> (xo' + (x / 2) :: Float, yo' - y))
-      when (didPress mouse' bbox) $ do
+      when pressed $ do
         let pressedIx = 0
         ixRef <- liftIO $ newIORef pressedIx
         liftIO $ modifyIORef' (inputState appState) (IntMap.insert ident (InputState strRef (InputActive ixRef)))
