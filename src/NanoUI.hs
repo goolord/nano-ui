@@ -207,9 +207,18 @@ mainWith settings gui' = do
         case ctrl mods of
           Down -> inputEv world (dropWhileEnd (\x -> isAlphaNum x || isPunctuation x) . dropWhileEnd isSpace)
           Up -> inputEv world safeInit
+      -- EventKey (Char '\b') Down mods _coords ->
       EventKey (Char c) Down _mods _coords -> do
         inputEv world (<> [c])
         -- print c
+      EventKey (SpecialKey KeyLeft) Down _mods _coords -> do
+        is <- readIORef $ inputState state
+        mapM_ (overIndex (\x -> x-1)) is
+        pure world
+      EventKey (SpecialKey KeyRight) Down _mods _coords -> do
+        is <- readIORef $ inputState state
+        mapM_ (overIndex (+1)) is
+        pure world
       EventKey (SpecialKey KeySpace) Down _mods _coords ->
         inputEv world (<> " ")
       EventKey _key _keyState _mods _coords -> pure world
@@ -227,6 +236,10 @@ mainWith settings gui' = do
       --   }
       pure ()
     )
+
+overIndex :: (Int -> Int) -> InputState -> IO ()
+overIndex f (InputState _ (InputActive ixRef)) = modifyIORef' ixRef f
+overIndex _ _ = pure ()
 
 safeInit :: [a] -> [a]
 safeInit [] = []
