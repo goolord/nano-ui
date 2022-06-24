@@ -98,6 +98,10 @@ data Stylesheet = Stylesheet
 data Mouse = Hovering Point | MB Point MouseButton KeyState
   deriving Show
 
+mousePos :: Mouse -> Point
+mousePos (Hovering p) = p
+mousePos (MB p _ _) = p
+
 data World = World
   { worldGui :: GUIM ()
   , pictureCache :: IORef (Maybe Picture)

@@ -42,11 +42,11 @@ import Data.Maybe (mapMaybe)
 import qualified Data.List.NonEmpty as NonEmpty
 import Data.Semigroup (Semigroup(sconcat))
 import qualified Data.IntMap.Strict as IntMap
-import Control.Monad (when)
-import Data.Foldable (for_)
+import Data.Foldable (for_, minimumBy)
 import Data.List (dropWhileEnd)
 import Data.Char (isAlphaNum, isSpace, isPunctuation)
 import Graphics.Gloss.Interface.Environment (getScreenSize)
+import Data.Ord (comparing)
 
 deriving instance Generic TT.FontDescriptor
 deriving instance Generic TT.FontStyle
@@ -92,7 +92,7 @@ newState Settings {..} = do
     FullScreen -> getScreenSize
   pure AppState {..}
 
-lookupOrInsertFont :: (MonadIO m, LastMember m effs, Member (Reader AppState) effs) => TT.FontDescriptor -> Eff effs TT.Font
+lookupOrInsertFont :: (LastMember IO effs, Member (Reader AppState) effs) => TT.FontDescriptor -> Eff effs TT.Font
 lookupOrInsertFont fontd = do
   state <- ask
   loaded <- liftIO $ readIORef $ loadedFontCache state
@@ -158,7 +158,10 @@ mainWith settings gui' = do
         inputMap <- readIORef (inputState state)
         for_ (IntMap.filter inputIsActive inputMap) $ \(InputState strRef (InputActive ixRef)) -> do
           initString <- readIORef strRef
-          let newString = f initString
+          ix <- readIORef ixRef
+          let (strL, strR) = splitAt ix initString
+          let newStringL = f strL
+              newString = newStringL <> strR
               diff = length newString - length initString
           writeIORef strRef newString
           modifyIORef' ixRef (+ diff)
@@ -346,15 +349,25 @@ runGUI settings appState sem = do
         tl = (xo - x, yo + y / 2)
       let bbox = BBox br tl
       let pressed = didPress mouse' bbox
-      BBox (cursorOffset, _) _ <- case ia of -- cursorOffset doesn't account for spaces in the bbox. do that!
-        InputActive ixRef -> do
-          ix <- liftIO $ readIORef ixRef
-          runReader appState $ textBBox $ take ix str
-        InputInactive ->
-          if pressed
-          then pure mempty -- calculate which glyph was pressed and change the ixRef to that
-          else pure $ BBox (3.0, 0.0) (0.0, 0.0)
-      send $ print cursorOffset
+      BBox (cursorOffset, _) _ <-
+        if pressed
+        then do
+          let p = mousePos mouse'
+          -- unhardcode this somehow
+          f <- runReader appState $ lookupOrInsertFont openSans
+          let pt = TT.PointSize 16
+          let pts = TT.getStringCurveAtPoint dpi (0.0, 0.0) [(f,pt,str)]
+          let (bb, pressedIx) = closestX (fst p - xo) pts
+          send $ print pressedIx
+          ixRef <- liftIO $ newIORef pressedIx
+          liftIO $ modifyIORef' (inputState appState) (IntMap.insert ident (InputState strRef (InputActive ixRef)))
+          pure bb
+        else case ia of -- cursorOffset doesn't account for spaces in the bbox. do that!
+          InputActive ixRef -> do
+            ix <- liftIO $ readIORef ixRef
+            runReader appState $ textBBox $ take ix str
+          InputInactive ->
+            pure $ BBox (3.0, 0.0) (0.0, 0.0)
       let cursor = case ia of
             InputInactive -> blank
             _ -> translate (xo + 1.0 + cursorOffset) yo $ color black $ rectangleSolid 2.0 (y - 8.0)
@@ -364,10 +377,24 @@ runGUI settings appState sem = do
         , cursor
         ]
       modify (\(xo', yo') -> (xo' + (x / 2) :: Float, yo' - y))
-      when pressed $ do
-        let pressedIx = 0
-        ixRef <- liftIO $ newIORef pressedIx
-        liftIO $ modifyIORef' (inputState appState) (IntMap.insert ident (InputState strRef (InputActive ixRef)))
       pure str
     Columns g -> withColumns g
     Rows g -> withRows g
+
+closestX :: Float -> [[VU.Vector (Float, Float)]] -> (BBox, Int)
+closestX _ [] = (mempty, 0)
+closestX x chars =
+  let xs = zip (fmap bboxChar chars) [1..]
+  in minimumBy (comparing ((\x2 -> x2 - x) . fst . bboxTL . fst)) xs
+  where
+  bboxChar :: [VU.Vector (Float, Float)] -> BBox
+  bboxChar xs =
+    let allPts = mconcat xs in
+    if VU.null allPts
+    then mempty
+    else 
+      BBox
+        ((VU.maximum $ VU.map fst allPts), (VU.minimum $ VU.map snd allPts))
+        ((VU.minimum $ VU.map fst allPts), (VU.maximum $ VU.map snd allPts))
+
+
