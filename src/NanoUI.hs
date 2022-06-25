@@ -248,7 +248,10 @@ mainWith settings gui' = do
     )
 
 overIndex :: (Int -> Int) -> InputState -> IO ()
-overIndex f (InputState _ (InputActive ixRef)) = modifyIORef' ixRef f
+overIndex f (InputState strRef (InputActive ixRef)) = do 
+  str <- readIORef strRef
+  ix <- readIORef ixRef
+  writeIORef ixRef $ max 0 $ min (length str) (f ix)
 overIndex _ _ = pure ()
 
 safeInit :: [a] -> [a]
