@@ -199,7 +199,7 @@ mainWith settings gui' = do
       EventKey (MouseButton mb) keyState _mods p -> do
         writeIORef (mouse state) (MB p mb keyState)
         case keyState of
-          Up -> modifyIORef' (inputState state) (fmap disableInput)
+          Down -> modifyIORef' (inputState state) (fmap disableInput)
           _ -> pure ()
         clearCache world -- move to the controller handler
         pure world
@@ -211,14 +211,24 @@ mainWith settings gui' = do
       EventKey (Char c) Down _mods _coords -> do
         inputEv world (<> [c])
         -- print c
-      EventKey (SpecialKey KeyLeft) Down _mods _coords -> do
+      EventKey (SpecialKey KeyLeft) Down mods _coords -> do
         is <- readIORef $ inputState state
-        mapM_ (overIndex (\x -> x-1)) is
-        pure world
-      EventKey (SpecialKey KeyRight) Down _mods _coords -> do
+        case ctrl mods of
+          Up -> do
+            mapM_ (overIndex (\x -> x-1)) is
+            pure world
+          Down -> do -- move by words
+            mapM_ (overIndex (\x -> x-1)) is
+            pure world
+      EventKey (SpecialKey KeyRight) Down mods _coords -> do
         is <- readIORef $ inputState state
-        mapM_ (overIndex (+1)) is
-        pure world
+        case ctrl mods of
+          Up -> do
+            mapM_ (overIndex (\x -> x+1)) is
+            pure world
+          Down -> do -- move by words
+            mapM_ (overIndex (\x -> x+1)) is
+            pure world
       EventKey (SpecialKey KeySpace) Down _mods _coords ->
         inputEv world (<> " ")
       EventKey _key _keyState _mods _coords -> pure world
@@ -371,7 +381,6 @@ runGUI settings appState sem = do
           let pt = TT.PointSize 16
           let pts = TT.getStringCurveAtPoint dpi (0.0, 0.0) [(f,pt,str)]
           let (bb, pressedIx) = closestX (fst p - xo) pts
-          send $ print pressedIx
           ixRef <- liftIO $ newIORef pressedIx
           liftIO $ modifyIORef' (inputState appState) (IntMap.insert ident (InputState strRef (InputActive ixRef)))
           pure bb
@@ -397,17 +406,17 @@ runGUI settings appState sem = do
 closestX :: Float -> [[VU.Vector (Float, Float)]] -> (BBox, Int)
 closestX _ [] = (mempty, 0)
 closestX x chars =
-  let xs = zip (fmap bboxChar chars) [1..]
-  in minimumBy (comparing ((\x2 -> x2 - x) . fst . bboxTL . fst)) xs
+  let xs = zip (fmap bboxChar chars) [0..]
+  in minimumBy (comparing ((\x2 -> abs $ x2 - x) . fst . bboxTL . fst)) xs
   where
   bboxChar :: [VU.Vector (Float, Float)] -> BBox
   bboxChar xs =
     let allPts = mconcat xs in
     if VU.null allPts
     then mempty
-    else 
+    else
       BBox
-        ((VU.maximum $ VU.map fst allPts), (VU.minimum $ VU.map snd allPts))
-        ((VU.minimum $ VU.map fst allPts), (VU.maximum $ VU.map snd allPts))
-
+        { bboxBR = ((VU.maximum $ VU.map fst allPts), negate (VU.minimum $ VU.map snd allPts))
+        , bboxTL = ((VU.minimum $ VU.map fst allPts), negate (VU.maximum $ VU.map snd allPts))
+        }
 
