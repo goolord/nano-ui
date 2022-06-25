@@ -375,7 +375,7 @@ runGUI settings appState sem = do
       BBox (cursorOffset, _) _ <-
         if pressed
         then do
-          let p = mousePos mouse'
+          let p = mousePosPt mouse'
           -- unhardcode this somehow
           f <- runReader appState $ lookupOrInsertFont openSans
           let pt = TT.PointSize 16
