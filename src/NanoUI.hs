@@ -27,7 +27,7 @@ import Control.Monad.Freer.Reader
 import Control.Monad.Freer.Writer
 import Control.Monad.IO.Class (MonadIO(liftIO))
 import Data.Bifunctor
-import Data.DList
+import Data.DList (DList)
 import Data.Hashable (Hashable)
 import Data.IORef
 import GHC.Generics (Generic)
@@ -53,12 +53,18 @@ deriving instance Generic TT.FontStyle
 instance Hashable TT.FontDescriptor
 instance Hashable TT.FontStyle
 
+---------------------------------------------------------------------
+-- constants
+---------------------------------------------------------------------
 dpi :: TT.Dpi
 dpi = 96
 
 openSans :: TT.FontDescriptor
 openSans = TT.FontDescriptor "Open Sans" (TT.FontStyle False False)
 
+---------------------------------------------------------------------
+-- widgets
+---------------------------------------------------------------------
 textP :: (Member (Reader AppState) r, LastMember IO r) => String -> Eff r Picture
 textP s = do
   renderFont openSans (TT.PointSize 16) s
@@ -216,6 +222,10 @@ overIndex _ _ = pure ()
 safeInit :: [a] -> [a]
 safeInit [] = []
 safeInit l = init l
+
+safeTail :: [a] -> [a]
+safeTail [] = []
+safeTail l = tail l
 
 disableInput :: InputState -> InputState
 disableInput (InputState strRef _) = InputState strRef InputInactive
@@ -382,16 +392,18 @@ closestX x chars =
         , bboxTL = ((VU.minimum $ VU.map fst allPts), negate (VU.maximum $ VU.map snd allPts))
         }
 
-
 inputEvents :: Event -> World -> AppState -> IO World
 inputEvents e world state = case e of
   EventKey (Char '\b') Down mods _coords ->
     case ctrl mods of
-      Down -> inputEv (dropWhileEnd (\x -> isAlphaNum x || isPunctuation x) . dropWhileEnd isSpace)
-      Up -> inputEv safeInit
-  -- EventKey (Char '\b') Down mods _coords ->
+      Down -> inputEv (dropWhileEnd (\x -> isAlphaNum x || isPunctuation x) . dropWhileEnd isSpace) id
+      Up -> inputEv safeInit id
+  EventKey (SpecialKey KeyDelete) Down mods _coords ->
+    case ctrl mods of
+      Down -> inputEv id (dropWhile (\x -> isAlphaNum x || isPunctuation x) . dropWhile isSpace)
+      Up -> inputEv id safeTail
   EventKey (Char c) Down _mods _coords -> do
-    inputEv (<> [c])
+    inputEv (<> [c]) id
     -- print c
   EventKey (SpecialKey KeyLeft) Down mods _coords -> do
     is <- readIORef $ inputState state
@@ -420,21 +432,23 @@ inputEvents e world state = case e of
     mapM_ (overIndex (\str _ -> length str)) is
     pure world
   EventKey (SpecialKey KeySpace) Down _mods _coords ->
-    inputEv (<> " ")
+    inputEv (<> " ") id
   _ -> pure world
   where
-  inputEv :: (String -> String) -> IO World -- move this to a state handler or maybe the drawing stage
-  inputEv f = do
+  inputEv :: (String -> String) -> (String -> String) -> IO World -- move this to a state handler or maybe the drawing stage
+  inputEv fL fR = do
     inputMap <- readIORef (inputState state)
     for_ (IntMap.filter inputIsActive inputMap) $ \(InputState strRef (InputActive ixRef)) -> do
       initString <- readIORef strRef
       ix <- readIORef ixRef
       let (strL, strR) = splitAt ix initString
-      let newStringL = f strL
-          newString = newStringL <> strR
-          diff = length newString - length initString
+          newStringL = fL strL
+          newStringR = fR strR
+          diffL = length newStringL - length strL
+          newString = newStringL <> newStringR
       writeIORef strRef newString
-      modifyIORef' ixRef (+ diff)
+      modifyIORef' ixRef (+ diffL)
     -- print c
     clearCache world -- move to the controller handler
     pure world
+
