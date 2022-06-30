@@ -144,7 +144,7 @@ defaultSettings = Settings
   }
 
 defaultStylesheet :: Stylesheet
-defaultStylesheet = Stylesheet 
+defaultStylesheet = Stylesheet
   { xPad = 5.0
   , yPad = 15.0
   }
@@ -153,21 +153,6 @@ mainWith :: Settings -> GUIM () -> IO ()
 mainWith settings gui' = do
   state <- newState settings
   let render' = runM . runReader settings . runReader state . render
-  let inputEv :: World -> (String -> String) -> IO World -- move this to a state handler or maybe the drawing stage
-      inputEv world f = do
-        inputMap <- readIORef (inputState state)
-        for_ (IntMap.filter inputIsActive inputMap) $ \(InputState strRef (InputActive ixRef)) -> do
-          initString <- readIORef strRef
-          ix <- readIORef ixRef
-          let (strL, strR) = splitAt ix initString
-          let newStringL = f strL
-              newString = newStringL <> strR
-              diff = length newString - length initString
-          writeIORef strRef newString
-          modifyIORef' ixRef (+ diff)
-        -- print c
-        clearCache world -- move to the controller handler
-        pure world
   initGui <- render' gui'
   initPcache <- newIORef $ Just $ Pictures initGui
   interactIO
@@ -188,50 +173,24 @@ mainWith settings gui' = do
         _ -> pure ()
       pure x
     )
-    (\e world -> case e of
-      EventResize dims -> do
-        writeIORef (windowSize state) dims
-        pure world
-      EventMotion p -> do
-        writeIORef (mouse state) (Hovering p)
-        clearCache world -- move to the controller handler
-        pure world
-      EventKey (MouseButton mb) keyState _mods p -> do
-        writeIORef (mouse state) (MB p mb keyState)
-        case keyState of
-          Down -> modifyIORef' (inputState state) (fmap disableInput)
-          _ -> pure ()
-        clearCache world -- move to the controller handler
-        pure world
-      EventKey (Char '\b') Down mods _coords ->
-        case ctrl mods of
-          Down -> inputEv world (dropWhileEnd (\x -> isAlphaNum x || isPunctuation x) . dropWhileEnd isSpace)
-          Up -> inputEv world safeInit
-      -- EventKey (Char '\b') Down mods _coords ->
-      EventKey (Char c) Down _mods _coords -> do
-        inputEv world (<> [c])
-        -- print c
-      EventKey (SpecialKey KeyLeft) Down mods _coords -> do
-        is <- readIORef $ inputState state
-        case ctrl mods of
-          Up -> do
-            mapM_ (overIndex (\x -> x-1)) is
-            pure world
-          Down -> do -- move by words
-            mapM_ (overIndex (\x -> x-1)) is
-            pure world
-      EventKey (SpecialKey KeyRight) Down mods _coords -> do
-        is <- readIORef $ inputState state
-        case ctrl mods of
-          Up -> do
-            mapM_ (overIndex (\x -> x+1)) is
-            pure world
-          Down -> do -- move by words
-            mapM_ (overIndex (\x -> x+1)) is
-            pure world
-      EventKey (SpecialKey KeySpace) Down _mods _coords ->
-        inputEv world (<> " ")
-      EventKey _key _keyState _mods _coords -> pure world
+    (\e world -> do
+      world2 <- inputEvents e world state
+      case e of
+        EventResize dims -> do
+          writeIORef (windowSize state) dims
+          pure world2
+        EventMotion p -> do
+          writeIORef (mouse state) (Hovering p)
+          clearCache world2 -- move to the controller handler
+          pure world2
+        EventKey (MouseButton mb) keyState _mods p -> do
+          writeIORef (mouse state) (MB p mb keyState)
+          case keyState of
+            Down -> modifyIORef' (inputState state) (fmap disableInput)
+            _ -> pure ()
+          clearCache world2 -- move to the controller handler
+          pure world2
+        _ -> pure world2
     )
     (\(Controller _redraw _modifyViewPort) -> do
       -- update every n seconds
@@ -247,11 +206,11 @@ mainWith settings gui' = do
       pure ()
     )
 
-overIndex :: (Int -> Int) -> InputState -> IO ()
-overIndex f (InputState strRef (InputActive ixRef)) = do 
+overIndex :: (String -> Int -> Int) -> InputState -> IO ()
+overIndex f (InputState strRef (InputActive ixRef)) = do
   str <- readIORef strRef
   ix <- readIORef ixRef
-  writeIORef ixRef $ max 0 $ min (length str) (f ix)
+  writeIORef ixRef $ max 0 $ min (length str) (f str ix)
 overIndex _ _ = pure ()
 
 safeInit :: [a] -> [a]
@@ -423,3 +382,59 @@ closestX x chars =
         , bboxTL = ((VU.minimum $ VU.map fst allPts), negate (VU.maximum $ VU.map snd allPts))
         }
 
+
+inputEvents :: Event -> World -> AppState -> IO World
+inputEvents e world state = case e of
+  EventKey (Char '\b') Down mods _coords ->
+    case ctrl mods of
+      Down -> inputEv (dropWhileEnd (\x -> isAlphaNum x || isPunctuation x) . dropWhileEnd isSpace)
+      Up -> inputEv safeInit
+  -- EventKey (Char '\b') Down mods _coords ->
+  EventKey (Char c) Down _mods _coords -> do
+    inputEv (<> [c])
+    -- print c
+  EventKey (SpecialKey KeyLeft) Down mods _coords -> do
+    is <- readIORef $ inputState state
+    case ctrl mods of
+      Up -> do
+        mapM_ (overIndex (\_ x -> x-1)) is
+        pure world
+      Down -> do -- TODO: move by words
+        mapM_ (overIndex (\_ x -> x-1)) is
+        pure world
+  EventKey (SpecialKey KeyRight) Down mods _coords -> do
+    is <- readIORef $ inputState state
+    case ctrl mods of
+      Up -> do
+        mapM_ (overIndex (\_ x -> x+1)) is
+        pure world
+      Down -> do -- TODO: move by words
+        mapM_ (overIndex (\_ x -> x+1)) is
+        pure world
+  EventKey (SpecialKey KeyHome) Down _mods _coords -> do
+    is <- readIORef $ inputState state
+    mapM_ (overIndex (\_ _ -> 0)) is
+    pure world
+  EventKey (SpecialKey KeyEnd) Down _mods _coords -> do
+    is <- readIORef $ inputState state
+    mapM_ (overIndex (\str _ -> length str)) is
+    pure world
+  EventKey (SpecialKey KeySpace) Down _mods _coords ->
+    inputEv (<> " ")
+  _ -> pure world
+  where
+  inputEv :: (String -> String) -> IO World -- move this to a state handler or maybe the drawing stage
+  inputEv f = do
+    inputMap <- readIORef (inputState state)
+    for_ (IntMap.filter inputIsActive inputMap) $ \(InputState strRef (InputActive ixRef)) -> do
+      initString <- readIORef strRef
+      ix <- readIORef ixRef
+      let (strL, strR) = splitAt ix initString
+      let newStringL = f strL
+          newString = newStringL <> strR
+          diff = length newString - length initString
+      writeIORef strRef newString
+      modifyIORef' ixRef (+ diff)
+    -- print c
+    clearCache world -- move to the controller handler
+    pure world
