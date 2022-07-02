@@ -16,73 +16,33 @@
 module NanoUI
   ( module NanoUI
   , module NanoUI.Types
+  , module NanoUI.Widgets
   )
   where
 
 import NanoUI.Types
+import NanoUI.Widgets
 
 import Control.Monad.Freer hiding (translate)
 import Control.Monad.Freer.State
 import Control.Monad.Freer.Reader
 import Control.Monad.Freer.Writer
 import Control.Monad.IO.Class (MonadIO(liftIO))
-import Data.Bifunctor
 import Data.DList (DList)
-import Data.Hashable (Hashable)
 import Data.IORef
-import GHC.Generics (Generic)
 import Graphics.Gloss hiding (text)
-import Graphics.Gloss.Interface.IO.Interact (interactIO, Event (..), Key (..), MouseButton (..), KeyState (..), SpecialKey (..), Modifiers (..), Controller (..))
+import Graphics.Gloss.Interface.IO.Interact (interactIO, Event (..), Key (..), MouseButton (..), KeyState (..), Controller (..))
 import qualified Data.DList as DList
 import qualified Data.HashMap.Strict as HM
 import qualified Data.Vector.Unboxed as VU
 import qualified Graphics.Text.TrueType as TT
-import Graphics.Gloss.Data.Point (pointInBox)
 import Data.Maybe (mapMaybe)
 import qualified Data.List.NonEmpty as NonEmpty
 import Data.Semigroup (Semigroup(sconcat))
 import qualified Data.IntMap.Strict as IntMap
-import Data.Foldable (for_, minimumBy)
-import Data.List (dropWhileEnd)
-import Data.Char (isAlphaNum, isSpace, isPunctuation)
+import Data.Foldable (minimumBy)
 import Graphics.Gloss.Interface.Environment (getScreenSize)
 import Data.Ord (comparing)
-
-deriving instance Generic TT.FontDescriptor
-deriving instance Generic TT.FontStyle
-instance Hashable TT.FontDescriptor
-instance Hashable TT.FontStyle
-
----------------------------------------------------------------------
--- constants
----------------------------------------------------------------------
-dpi :: TT.Dpi
-dpi = 96
-
-openSans :: TT.FontDescriptor
-openSans = TT.FontDescriptor "Open Sans" (TT.FontStyle False False)
-
----------------------------------------------------------------------
--- widgets
----------------------------------------------------------------------
-textP :: (Member (Reader AppState) r, LastMember IO r) => String -> Eff r Picture
-textP s = do
-  renderFont openSans (TT.PointSize 16) s
-
-text :: (Member (Reader AppState) r, LastMember IO r, Member GUI r) => String -> Eff r ()
-text s = do
-  p <- renderFont openSans (TT.PointSize 16) s
-  send $ PictureI $ decorateText p
-
-textBBox :: (Member (Reader AppState) r, LastMember IO r) => String -> Eff r BBox
-textBBox s = do
-  f <- lookupOrInsertFont openSans
-  let bb = TT.stringBoundingBox f dpi (TT.PointSize 16) s
-  let baseline = TT._baselineHeight bb
-  pure $ BBox (TT._xMax bb + baseline, TT._yMax bb + baseline) (TT._xMin bb + baseline, TT._yMax bb + baseline)
-
-decorateText :: Picture -> Picture
-decorateText = color white
 
 defaultMain :: GUIM () -> IO ()
 defaultMain = mainWith defaultSettings
@@ -97,49 +57,6 @@ newState Settings {..} = do
     InWindow _ sz _ -> pure sz
     FullScreen -> getScreenSize
   pure AppState {..}
-
-lookupOrInsertFont :: (LastMember IO effs, Member (Reader AppState) effs) => TT.FontDescriptor -> Eff effs TT.Font
-lookupOrInsertFont fontd = do
-  state <- ask
-  loaded <- liftIO $ readIORef $ loadedFontCache state
-  case HM.lookup fontd loaded of
-    Just f -> pure f
-    Nothing -> do
-      case TT.findFontInCache (fontCache state) fontd of
-        Nothing -> error $ unwords ["font", show fontd, "missing"]
-        Just fp -> do
-          f <- either (error . show) id <$> (liftIO $ TT.loadFontFile fp)
-          liftIO $ modifyIORef' (loadedFontCache state) (HM.insert fontd f)
-          pure f
-
-renderFont :: (Member (Reader AppState) r, LastMember IO r) => TT.FontDescriptor -> TT.PointSize -> String -> Eff r Picture
-renderFont fontd pt str = do
-  f <- lookupOrInsertFont fontd
-  -- todo: interpret as Polygon instead of Line
-  pure $ foldMap (line . fmap (second negate) . VU.toList) $ mconcat $ TT.getStringCurveAtPoint
-    dpi
-    (0.0, 0.0)
-    [(f,pt,str)]
-
-clearCache :: World -> IO ()
-clearCache w = do
-  writeIORef (pictureCache w) Nothing
-
-mouseInteractionButton :: Mouse -> BBox -> Picture -> Picture
-mouseInteractionButton (Hovering p) BBox {..} = case pointInBox p bboxBR bboxTL of
-  True -> color red
-  False -> id
-mouseInteractionButton (MB p mb ks) BBox {..} = case pointInBox p bboxBR bboxTL of
-  True -> case mb of
-    LeftButton -> case ks of
-      Down -> color green
-      Up -> color white
-    _ -> id
-  False -> id
-
-didPress :: Mouse -> BBox -> Bool
-didPress (MB p LeftButton Up) BBox {..} = pointInBox p bboxBR bboxTL
-didPress _ _ = False
 
 defaultSettings :: Settings
 defaultSettings = Settings
@@ -211,28 +128,6 @@ mainWith settings gui' = do
       --   }
       pure ()
     )
-
-overIndex :: (String -> Int -> Int) -> InputState -> IO ()
-overIndex f (InputState strRef (InputActive ixRef)) = do
-  str <- readIORef strRef
-  ix <- readIORef ixRef
-  writeIORef ixRef $ max 0 $ min (length str) (f str ix)
-overIndex _ _ = pure ()
-
-safeInit :: [a] -> [a]
-safeInit [] = []
-safeInit l = init l
-
-safeTail :: [a] -> [a]
-safeTail [] = []
-safeTail l = tail l
-
-disableInput :: InputState -> InputState
-disableInput (InputState strRef _) = InputState strRef InputInactive
-
-inputIsActive :: InputState -> Bool
-inputIsActive (InputState _ InputActive{}) = True
-inputIsActive _ = False
 
 {-
 guiIO :: forall r a. (LastMember IO r) => Eff (GUI : r) a -> Eff r a
@@ -391,64 +286,4 @@ closestX x chars =
         { bboxBR = ((VU.maximum $ VU.map fst allPts), negate (VU.minimum $ VU.map snd allPts))
         , bboxTL = ((VU.minimum $ VU.map fst allPts), negate (VU.maximum $ VU.map snd allPts))
         }
-
-inputEvents :: Event -> World -> AppState -> IO World
-inputEvents e world state = case e of
-  EventKey (Char '\b') Down mods _coords ->
-    case ctrl mods of
-      Down -> inputEv (dropWhileEnd (\x -> isAlphaNum x || isPunctuation x) . dropWhileEnd isSpace) id
-      Up -> inputEv safeInit id
-  EventKey (SpecialKey KeyDelete) Down mods _coords ->
-    case ctrl mods of
-      Down -> inputEv id (dropWhile (\x -> isAlphaNum x || isPunctuation x) . dropWhile isSpace)
-      Up -> inputEv id safeTail
-  EventKey (Char c) Down _mods _coords -> do
-    inputEv (<> [c]) id
-    -- print c
-  EventKey (SpecialKey KeyLeft) Down mods _coords -> do
-    is <- readIORef $ inputState state
-    case ctrl mods of
-      Up -> do
-        mapM_ (overIndex (\_ x -> x-1)) is
-        pure world
-      Down -> do -- TODO: move by words
-        mapM_ (overIndex (\_ x -> x-1)) is
-        pure world
-  EventKey (SpecialKey KeyRight) Down mods _coords -> do
-    is <- readIORef $ inputState state
-    case ctrl mods of
-      Up -> do
-        mapM_ (overIndex (\_ x -> x+1)) is
-        pure world
-      Down -> do -- TODO: move by words
-        mapM_ (overIndex (\_ x -> x+1)) is
-        pure world
-  EventKey (SpecialKey KeyHome) Down _mods _coords -> do
-    is <- readIORef $ inputState state
-    mapM_ (overIndex (\_ _ -> 0)) is
-    pure world
-  EventKey (SpecialKey KeyEnd) Down _mods _coords -> do
-    is <- readIORef $ inputState state
-    mapM_ (overIndex (\str _ -> length str)) is
-    pure world
-  EventKey (SpecialKey KeySpace) Down _mods _coords ->
-    inputEv (<> " ") id
-  _ -> pure world
-  where
-  inputEv :: (String -> String) -> (String -> String) -> IO World -- move this to a state handler or maybe the drawing stage
-  inputEv fL fR = do
-    inputMap <- readIORef (inputState state)
-    for_ (IntMap.filter inputIsActive inputMap) $ \(InputState strRef (InputActive ixRef)) -> do
-      initString <- readIORef strRef
-      ix <- readIORef ixRef
-      let (strL, strR) = splitAt ix initString
-          newStringL = fL strL
-          newStringR = fR strR
-          diffL = length newStringL - length strL
-          newString = newStringL <> newStringR
-      writeIORef strRef newString
-      modifyIORef' ixRef (+ diffL)
-    -- print c
-    clearCache world -- move to the controller handler
-    pure world
 

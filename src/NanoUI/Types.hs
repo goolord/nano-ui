@@ -106,3 +106,8 @@ data World = World
   { worldGui :: GUIM ()
   , pictureCache :: IORef (Maybe Picture)
   }
+
+clearCache :: World -> IO ()
+clearCache w = do
+  writeIORef (pictureCache w) Nothing
+
