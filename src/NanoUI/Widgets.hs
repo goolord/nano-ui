@@ -108,15 +108,21 @@ mouseInteractionButton (MB p mb ks) BBox {..} = case pointInBox p bboxBR bboxTL 
     _ -> id
   False -> id
 
+dropWordL :: [Char] -> [Char]
+dropWordL = dropWhileEnd (\x -> isAlphaNum x || isPunctuation x) . dropWhileEnd isSpace
+
+dropWordR :: [Char] -> [Char]
+dropWordR = dropWhile (\x -> isAlphaNum x || isPunctuation x) . dropWhile isSpace
+
 inputEvents :: Event -> World -> AppState -> IO World
 inputEvents e world state = case e of
   EventKey (Char '\b') Down mods _coords ->
     case ctrl mods of
-      Down -> inputEv (dropWhileEnd (\x -> isAlphaNum x || isPunctuation x) . dropWhileEnd isSpace) id
+      Down -> inputEv dropWordL id
       Up -> inputEv safeInit id
   EventKey (SpecialKey KeyDelete) Down mods _coords ->
     case ctrl mods of
-      Down -> inputEv id (dropWhile (\x -> isAlphaNum x || isPunctuation x) . dropWhile isSpace)
+      Down -> inputEv id dropWordR
       Up -> inputEv id safeTail
   EventKey (Char c) Down _mods _coords -> do
     inputEv (<> [c]) id
@@ -128,7 +134,11 @@ inputEvents e world state = case e of
         mapM_ (overIndex (\_ x -> x-1)) is
         pure world
       Down -> do -- TODO: move by words
-        mapM_ (overIndex (\_ x -> x-1)) is
+        mapM_ (overIndex (\str ix ->
+            let (strL, _) = splitAt ix str
+                newStr = dropWordL strL
+            in ix-(length strL - length newStr)
+          )) is
         pure world
   EventKey (SpecialKey KeyRight) Down mods _coords -> do
     is <- readIORef $ inputState state
@@ -137,7 +147,11 @@ inputEvents e world state = case e of
         mapM_ (overIndex (\_ x -> x+1)) is
         pure world
       Down -> do -- TODO: move by words
-        mapM_ (overIndex (\_ x -> x+1)) is
+        mapM_ (overIndex (\str ix ->
+            let (_, strR) = splitAt ix str
+                newStr = dropWordR strR
+            in ix+(length strR - length newStr)
+          )) is
         pure world
   EventKey (SpecialKey KeyHome) Down _mods _coords -> do
     is <- readIORef $ inputState state
