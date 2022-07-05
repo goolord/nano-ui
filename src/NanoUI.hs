@@ -24,25 +24,25 @@ import NanoUI.Types
 import NanoUI.Widgets
 
 import Control.Monad.Freer hiding (translate)
-import Control.Monad.Freer.State
 import Control.Monad.Freer.Reader
+import Control.Monad.Freer.State
 import Control.Monad.Freer.Writer
 import Control.Monad.IO.Class (MonadIO(liftIO))
 import Data.DList (DList)
+import Data.Foldable (minimumBy)
 import Data.IORef
+import Data.Maybe (mapMaybe)
+import Data.Ord (comparing)
+import Data.Semigroup (Semigroup(sconcat))
 import Graphics.Gloss hiding (text)
+import Graphics.Gloss.Interface.Environment (getScreenSize)
 import Graphics.Gloss.Interface.IO.Interact (interactIO, Event (..), Key (..), MouseButton (..), KeyState (..), Controller (..))
 import qualified Data.DList as DList
 import qualified Data.HashMap.Strict as HM
+import qualified Data.IntMap.Strict as IntMap
+import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Vector.Unboxed as VU
 import qualified Graphics.Text.TrueType as TT
-import Data.Maybe (mapMaybe)
-import qualified Data.List.NonEmpty as NonEmpty
-import Data.Semigroup (Semigroup(sconcat))
-import qualified Data.IntMap.Strict as IntMap
-import Data.Foldable (minimumBy)
-import Graphics.Gloss.Interface.Environment (getScreenSize)
-import Data.Ord (comparing)
 
 defaultMain :: GUIM () -> IO ()
 defaultMain = mainWith defaultSettings
@@ -223,56 +223,61 @@ runGUI settings appState sem = do
       (xo, yo) <- get
       inputMap <- liftIO $ readIORef (inputState appState)
       InputState strRef ia <- case IntMap.lookup ident inputMap of
-        Nothing -> liftIO $ do
-          strRef <- newIORef initialValue
-          let is = InputState strRef InputInactive
-          modifyIORef' (inputState appState) (IntMap.insert ident is)
-          pure is
+        Nothing -> do
+          liftIO $ do
+            strRef <- newIORef initialValue
+            let is = InputState strRef InputInactive
+            modifyIORef' (inputState appState) (IntMap.insert ident is)
+            pure is
         Just strRef -> pure strRef
       str <- liftIO $ readIORef strRef
       mouse' <- liftIO $ readIORef $ mouse appState
       strPic <- runReader appState $ textP str
-      let x = 100.0
+      let x = 200.0
           y = 30.0
       let
         br = (xo + x, yo - y / 2)
         tl = (xo - x, yo + y / 2)
       let bbox = BBox br tl
       let pressed = didPress mouse' bbox
+      -- unhardcode this somehow
+      f <- runReader appState $ lookupOrInsertFont openSans
+      let pt = TT.PointSize 16
       BBox (cursorOffset, _) _ <-
         if pressed
         then do
           let p = mousePosPt mouse'
-          -- unhardcode this somehow
-          f <- runReader appState $ lookupOrInsertFont openSans
-          let pt = TT.PointSize 16
           let pts = TT.getStringCurveAtPoint dpi (0.0, 0.0) [(f,pt,str)]
-          let (bb, pressedIx) = closestX (fst p - xo) pts
+          let (bb, pressedIx) = closestCharX (fst p - xo) pts
           ixRef <- liftIO $ newIORef pressedIx
           liftIO $ modifyIORef' (inputState appState) (IntMap.insert ident (InputState strRef (InputActive ixRef)))
           pure bb
-        else case ia of -- cursorOffset doesn't account for spaces in the bbox. do that!
+        else case ia of
           InputActive ixRef -> do
             ix <- liftIO $ readIORef ixRef
             runReader appState $ textBBox $ take ix str
           InputInactive ->
             pure $ BBox (3.0, 0.0) (0.0, 0.0)
+      let tlText =
+            if cursorOffset > x
+            then translate (negate $ cursorOffset - x) 0.0
+            else id
       let cursor = case ia of
             InputInactive -> blank
             _ -> translate (xo + 1.0 + cursorOffset) yo $ color black $ rectangleSolid 2.0 (y - 8.0)
       tell $ DList.fromList
         [ translate (xo + (x / 2)) yo $ color white $ rectangleSolid x y
-        , translate xo yo $ translate 0 (negate $ (y / 2) / 2) $ color black strPic
-        , cursor
+        , translate xo yo $ translate 0 (negate $ (y / 2) / 2) $ tlText $ color black strPic
+        , tlText cursor
         ]
       modify (\(xo', yo') -> (xo' + (x / 2) :: Float, yo' - y))
       pure str
     Columns g -> withColumns g
     Rows g -> withRows g
 
-closestX :: Float -> [[VU.Vector (Float, Float)]] -> (BBox, Int)
-closestX _ [] = (mempty, 0)
-closestX x chars =
+closestCharX :: Float -> [[VU.Vector (Float, Float)]] -> (BBox, Int)
+closestCharX _ [] = (mempty, 0)
+closestCharX x chars =
   let xs = zip (fmap bboxChar chars) [0..]
   in minimumBy (comparing ((\x2 -> abs $ x2 - x) . fst . bboxTL . fst)) xs
   where
