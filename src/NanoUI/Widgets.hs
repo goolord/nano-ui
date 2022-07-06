@@ -134,6 +134,9 @@ renderFont fontd pt texture str = do
   --
   -- and the right is cut off
   --
+  -- it's also shaking around when i type so something is not getting done properly
+  -- maybe something to do with the translate calculation `~`
+  --
   -- the font might be rendering bigger than
   -- using the old method + line
   f <- lookupOrInsertFont fontd
@@ -143,7 +146,9 @@ renderFont fontd pt texture str = do
   let bs = encodeBitmap $ renderDrawing (floor w) (floor h) (PixelRGBA8 255 0 0 0) $
         traverse_ orderToDrawing $ textToDrawOrders dpi texture (V2 0.0 (maxY bb)) [TextRange f pt str Nothing]
   let bmp = either (error . show) id $ parseBMP bs
-  pure $ translate ((w / 2) - minX bb) ((h / 2) + minY bb) $ bitmapOfBMP bmp
+  pure $
+    color red (line [bboxBR bb, bboxTL bb])
+    <> (translate ((w / 2) - minX bb) ((h / 2) + minY bb) $ bitmapOfBMP bmp)
 
 mouseInteractionButton :: Mouse -> BBox -> Picture -> Picture
 mouseInteractionButton (Hovering p) BBox {..} = case pointInBox p bboxBR bboxTL of
