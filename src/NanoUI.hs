@@ -42,6 +42,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.List.NonEmpty as NonEmpty
 import qualified Graphics.Text.TrueType as TT
 import Control.Monad (unless)
+import System.Clipboard
 
 {-
 todo: 

@@ -42,6 +42,8 @@ import Graphics.Rasterific.Texture (uniformTexture)
 import Codec.Picture (PixelRGBA8(..), encodeBitmap)
 import Codec.BMP (parseBMP)
 import Graphics.Rasterific.Immediate (textToDrawOrders, orderToDrawing)
+import System.Clipboard
+import Data.Maybe (fromMaybe)
 
 deriving instance Generic TT.FontDescriptor
 deriving instance Generic TT.FontStyle
@@ -167,6 +169,9 @@ inputEvents e world state = case e of
     case ctrl mods of
       Down -> inputEv id dropWordR
       Up -> inputEv id safeTail
+  EventKey (Char '\SYN') Down (Modifiers {ctrl=Down}) _coords -> do
+    mcb <- getClipboardString
+    inputEv (<> fromMaybe mempty mcb) id
   EventKey (Char c) Down _mods _coords -> do
     inputEv (<> [c]) id
     -- print c
