@@ -135,11 +135,10 @@ renderFont fontd pt texture str = do
   let bb = ttBoundingBox $ TT.stringBoundingBox f dpi pt str
       w = (maxX bb - minX bb)
       h = (maxY bb - minY bb)
-  let bs = encodeBitmap $ renderDrawing (ceiling w) (ceiling h) (PixelRGBA8 255 0 0 0) $
+  let bs = encodeBitmap $ renderDrawing (floor w) (floor h) (PixelRGBA8 255 0 0 0) $
         traverse_ orderToDrawing $ textToDrawOrders dpi texture (V2 0.0 (maxY bb)) [TextRange f pt str Nothing]
-
   let bmp = either (error . show) id $ parseBMP bs
-  pure $ translate (w / 2) ((h / 2) + minY bb) $ bitmapOfBMP bmp
+  pure $ translate ((w / 2) - minX bb) ((h / 2) + minY bb) $ bitmapOfBMP bmp
 
 mouseInteractionButton :: Mouse -> BBox -> Picture -> Picture
 mouseInteractionButton (Hovering p) BBox {..} = case pointInBox p bboxBR bboxTL of

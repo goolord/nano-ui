@@ -265,7 +265,7 @@ runGUI settings appState sem = do
           -- recBitmapSection
           -- rectangle = Rectangle
           --   { rectPos = (0, 0)
-          --   , rectSize = (ceiling x, ceiling y)
+          --   , rectSize = (floor x, floor y)
           --   }
       tell $ DList.fromList
         [ translate (xo + (x / 2)) yo $ color white $ rectangleSolid x y
