@@ -177,7 +177,7 @@ inputEvents e world state = case e of
   inputEv :: (String -> String) -> (String -> String) -> IO World -- move this to a state handler or maybe the drawing stage
   inputEv fL fR = do
     inputMap <- readIORef (inputState state)
-    for_ (IntMap.filter inputIsActive inputMap) $ \(InputState strRef (InputActive ixRef)) -> do
+    for_ (IntMap.filter inputIsActive inputMap) $ \(InputState strRef ixRef InputActive) -> do
       initString <- readIORef strRef
       ix <- readIORef ixRef
       let (strL, strR) = splitAt ix initString
@@ -192,17 +192,17 @@ inputEvents e world state = case e of
     pure world
 
 overIndex :: (String -> Int -> Int) -> InputState -> IO ()
-overIndex f (InputState strRef (InputActive ixRef)) = do
+overIndex f (InputState strRef ixRef InputActive) = do
   str <- readIORef strRef
   ix <- readIORef ixRef
   writeIORef ixRef $ max 0 $ min (length str) (f str ix)
 overIndex _ _ = pure ()
 
 disableInput :: InputState -> InputState
-disableInput (InputState strRef _) = InputState strRef InputInactive
+disableInput (InputState strRef ixRef _) = InputState strRef ixRef InputInactive
 
 inputIsActive :: InputState -> Bool
-inputIsActive (InputState _ InputActive{}) = True
+inputIsActive (InputState _ _ InputActive{}) = True
 inputIsActive _ = False
 
 didPress :: Mouse -> BBox -> Bool

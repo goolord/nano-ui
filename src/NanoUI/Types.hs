@@ -73,10 +73,10 @@ data AppState = AppState
   , windowSize :: !(IORef (Int, Int))
   }
 
-data InputState = InputState (IORef String) InputActive
+data InputState = InputState (IORef String) (IORef InputCursor) InputActive
 
 data InputActive
-  = InputActive (IORef InputCursor)
+  = InputActive
   | InputInactive
 
 type InputCursor = Int

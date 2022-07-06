@@ -29,10 +29,8 @@ import Control.Monad.Freer.State
 import Control.Monad.Freer.Writer
 import Control.Monad.IO.Class (MonadIO(liftIO))
 import Data.DList (DList)
-import Data.Foldable (minimumBy)
 import Data.IORef
 import Data.Maybe (mapMaybe)
-import Data.Ord (comparing)
 import Data.Semigroup (Semigroup(sconcat))
 import Graphics.Gloss hiding (text)
 import Graphics.Gloss.Interface.Environment (getScreenSize)
@@ -41,7 +39,6 @@ import qualified Data.DList as DList
 import qualified Data.HashMap.Strict as HM
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.List.NonEmpty as NonEmpty
-import qualified Data.Vector.Unboxed as VU
 import qualified Graphics.Text.TrueType as TT
 import Control.Monad (unless)
 
@@ -220,11 +217,12 @@ runGUI settings appState sem = do
     Input ident _placeholder initialValue -> do
       (xo, yo) <- get
       inputMap <- liftIO $ readIORef (inputState appState)
-      InputState strRef ia <- case IntMap.lookup ident inputMap of
+      InputState strRef ixRef ia <- case IntMap.lookup ident inputMap of
         Nothing -> do
           liftIO $ do
             strRef <- newIORef initialValue
-            let is = InputState strRef InputInactive
+            ixRef <- newIORef 0
+            let is = InputState strRef ixRef InputInactive
             modifyIORef' (inputState appState) (IntMap.insert ident is)
             pure is
         Just strRef -> pure strRef
@@ -245,26 +243,22 @@ runGUI settings appState sem = do
       -- unhardcode this somehow
       f <- runReader appState $ lookupOrInsertFont openSans
       let pt = TT.PointSize 16
+      let notPressed = do
+            ix <- liftIO $ readIORef ixRef
+            runReader appState $ textBBox $ take ix str
       BBox (cursorOffset, _) _ <-
         if pressed
         then do
           let p = mousePosPt mouse'
-          -- TODO: account for the cursor offset v- here
-          -- this is a pain in the ass because right now
-          -- it seems like MouseDown makes the input inactive
-          -- which means there's no way to recover the `InputActive` not pressed branch
-          -- as it stands. there's a lot of ways to fix this but maybe
-          -- this way of wrapping the text sucks to begin with
-          let (bb, pressedIx) = closestChar (fst p - xo, snd p - yo) f dpi pt str
-          ixRef <- liftIO $ newIORef pressedIx
-          liftIO $ modifyIORef' (inputState appState) (IntMap.insert ident (InputState strRef (InputActive ixRef)))
+          BBox (co, _) _ <- notPressed
+          let prevTl = if co > x
+                then (co - x)
+                else 0.0
+          let (bb, pressedIx) = closestChar (prevTl + fst p - xo, snd p - yo) f dpi pt str
+          ixRef' <- liftIO $ newIORef pressedIx
+          liftIO $ modifyIORef' (inputState appState) (IntMap.insert ident (InputState strRef ixRef' InputActive))
           pure bb
-        else case ia of
-          InputActive ixRef -> do
-            ix <- liftIO $ readIORef ixRef
-            runReader appState $ textBBox $ take ix str
-          InputInactive ->
-            pure $ BBox (3.0, 0.0) (0.0, 0.0)
+        else notPressed
       let tlText =
             if cursorOffset > x
             then translate (negate $ cursorOffset - x) 0.0
