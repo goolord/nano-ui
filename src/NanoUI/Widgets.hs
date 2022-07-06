@@ -12,6 +12,8 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 
 module NanoUI.Widgets where
 
@@ -35,10 +37,9 @@ import Data.Foldable (for_, traverse_)
 import Data.List (dropWhileEnd, minimumBy, inits)
 import Data.Char (isAlphaNum, isSpace, isPunctuation)
 import Data.Ord (comparing)
-import Graphics.Rasterific (printTextAt, withTexture, V2 (..), renderDrawing, TextRange (..), getPointSize, Texture)
+import Graphics.Rasterific (V2 (..), renderDrawing, TextRange (..), Texture)
 import Graphics.Rasterific.Texture (uniformTexture)
 import Codec.Picture (PixelRGBA8(..), encodeBitmap)
-import qualified Data.ByteString.Lazy.Char8 as BSL
 import Codec.BMP (parseBMP)
 import Graphics.Rasterific.Immediate (textToDrawOrders, orderToDrawing)
 
@@ -60,14 +61,39 @@ openSans = TT.FontDescriptor "Open Sans" (TT.FontStyle False False)
 ---------------------------------------------------------------------
 -- Widgets & helper functions
 ---------------------------------------------------------------------
-textP :: (Member (Reader AppState) r, LastMember IO r) => String -> Eff r Picture
-textP s = do
-  renderFont openSans (TT.PointSize 16) (uniformTexture $ PixelRGBA8 0 0 0 255) s
+
+data TextConfig = TextConfig
+  { font :: TT.FontDescriptor
+  , texture :: Texture PixelRGBA8
+  , ptsz :: TT.PointSize
+  }
+
+defaultTextConfig :: TextConfig
+defaultTextConfig = TextConfig
+  { font = openSans
+  , texture = whiteTexture
+  , ptsz = TT.PointSize 16
+  }
+
+whiteTexture :: Texture PixelRGBA8
+whiteTexture = (uniformTexture $ PixelRGBA8 255 255 255 255)
+
+blackTexture :: Texture PixelRGBA8
+blackTexture = (uniformTexture $ PixelRGBA8 0 0 0 255)
 
 text :: (Member (Reader AppState) r, LastMember IO r, Member GUI r) => String -> Eff r ()
-text s = do
-  p <- renderFont openSans (TT.PointSize 16) (uniformTexture $ PixelRGBA8 0 0 0 255) s
-  send $ PictureI $ decorateText p
+text = text' defaultTextConfig
+
+textP :: (Member (Reader AppState) r, LastMember IO r) => String -> Eff r Picture
+textP = textP' defaultTextConfig
+
+textP' :: (Member (Reader AppState) r, LastMember IO r) => TextConfig -> String -> Eff r Picture
+textP' (TextConfig{..}) s = do
+  renderFont font ptsz texture s
+
+text' :: (Member (Reader AppState) r, LastMember IO r, Member GUI r) => TextConfig -> String -> Eff r ()
+text' tc s = do
+  textP' tc s >>= send . PictureI
 
 textBBox :: (Member (Reader AppState) r, LastMember IO r) => String -> Eff r BBox
 textBBox s = do
@@ -83,9 +109,6 @@ closestChar :: Point -> TT.Font -> TT.Dpi -> TT.PointSize -> String -> (BBox, In
 closestChar (x, y) font dpi' size str =
   let bboxes = fmap (TT.stringBoundingBox font dpi' size) $ inits str
   in first ttBoundingBox $ minimumBy (comparing (\(bb, _) -> abs $ TT._xMax bb - x)) $ zip bboxes [0..]
-
-decorateText :: Picture -> Picture
-decorateText = color white
 
 lookupOrInsertFont :: (LastMember IO effs, Member (Reader AppState) effs) => TT.FontDescriptor -> Eff effs TT.Font
 lookupOrInsertFont fontd = do

@@ -12,6 +12,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE NamedFieldPuns #-}
 
 module NanoUI
   ( module NanoUI
@@ -44,11 +45,8 @@ import Control.Monad (unless)
 
 {-
 todo: 
-- render font as a bitmap
-  so we can do proper font rendering
-  and also cull the text you shouldn't see in the inputs
-
-- factor out the global font size constants
+- cull the text you shouldn't see in the inputs
+- factor out the global font size/dpi etc constants
 -}
 
 defaultMain :: GUIM () -> IO ()
@@ -225,7 +223,7 @@ runGUI settings appState sem = do
         Just strRef -> pure strRef
       str <- liftIO $ readIORef strRef
       mouse' <- liftIO $ readIORef $ mouse appState
-      strPic <- runReader appState $ textP str
+      strPic <- runReader appState $ textP' (defaultTextConfig { texture = blackTexture }) str
       let x = 200.0
           y = 30.0
       let
@@ -263,9 +261,14 @@ runGUI settings appState sem = do
       let cursor = case ia of
             InputInactive -> blank
             _ -> translate (xo + 1.0 + cursorOffset) yo $ color black $ rectangleSolid 2.0 (y - 8.0)
+          -- recBitmapSection
+          -- rectangle = Rectangle
+          --   { rectPos = (0, 0)
+          --   , rectSize = (ceiling x, ceiling y)
+          --   }
       tell $ DList.fromList
         [ translate (xo + (x / 2)) yo $ color white $ rectangleSolid x y
-        , translate xo yo $ translate 0 (negate $ (y / 2) / 2) $ tlText $ color black strPic
+        , translate xo yo $ translate 0 (negate $ y / 4) $ tlText $ strPic
         , tlText cursor
         ]
       modify (\(xo', yo') -> (xo' + (x / 2) :: Float, yo' - y))
@@ -273,3 +276,13 @@ runGUI settings appState sem = do
     Columns g -> withColumns g
     Rows g -> withRows g
 
+
+recBitmapSection :: Rectangle -> Picture -> Picture
+recBitmapSection r p' = case p' of
+  Bitmap bmd -> bitmapSection r bmd
+  Color c p -> Color c (recBitmapSection r p)
+  Translate x y p -> Translate x y (recBitmapSection r p)
+  Rotate f p -> Rotate f (recBitmapSection r p)
+  Scale x y p -> Scale x y (recBitmapSection r p)
+  Pictures ps -> Pictures (fmap (recBitmapSection r) ps)
+  x -> x
