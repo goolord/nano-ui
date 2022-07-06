@@ -42,6 +42,15 @@ import qualified Data.List.NonEmpty as NonEmpty
 import qualified Graphics.Text.TrueType as TT
 import Control.Monad (unless)
 
+{-
+todo: 
+- render font as a bitmap
+  so we can do proper font rendering
+  and also cull the text you shouldn't see in the inputs
+
+- factor out the global font size constants
+-}
+
 defaultMain :: GUIM () -> IO ()
 defaultMain = mainWith defaultSettings
 
@@ -68,6 +77,8 @@ defaultStylesheet :: Stylesheet
 defaultStylesheet = Stylesheet
   { xPad = 5.0
   , yPad = 15.0
+  , font = TT.FontDescriptor "Open Sans" (TT.FontStyle False False)
+  , fontPt = TT.PointSize 16
   }
 
 mainWith :: Settings -> GUIM () -> IO ()
@@ -123,20 +134,6 @@ mainWith settings gui' = do
       --   }
       pure ()
     )
-
-{-
-guiIO :: forall r a. (LastMember IO r) => Eff (GUI : r) a -> Eff r a
-guiIO = interpretM @GUI @IO go
-  where
-  go :: forall x. GUI x -> IO x
-  go = \case
-    Button {} -> pure False
-    PictureI {} -> pure ()
-    Columns g -> go g
-    Rows g -> go g
-    Padding {} -> pure ()
-    Input {} -> pure ""
--}
 
 render :: (LastMember IO r, Member (Reader AppState) r, Member (Reader Settings) r) => Eff (GUI : r) b -> Eff r [Picture]
 render gui = do

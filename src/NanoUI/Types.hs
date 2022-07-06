@@ -53,6 +53,18 @@ data BBox = BBox
   , bboxTL :: !Point
   }
 
+maxX :: BBox -> Float
+maxX = fst . bboxBR
+
+minX :: BBox -> Float
+minX = fst . bboxTL
+
+maxY :: BBox -> Float
+maxY = snd . bboxTL
+
+minY :: BBox -> Float
+minY = snd . bboxBR
+
 instance Semigroup BBox where
   (BBox brL tlL) <> (BBox brR tlR) = BBox (ptBR brL brR) (ptTL tlL tlR)
 
@@ -93,6 +105,8 @@ type GUIM = Eff [GUI, Reader AppState, Reader Settings, IO]
 data Stylesheet = Stylesheet
   { xPad :: !Float
   , yPad :: !Float
+  , font :: TT.FontDescriptor
+  , fontPt :: TT.PointSize
   }
 
 data Mouse = Hovering Point | MB Point MouseButton KeyState

@@ -25,11 +25,15 @@ library
     , reactive-banana
     , freer-simple
     , FontyFruity
+    , JuicyPixels
+    , Rasterific
     , vector
     , containers
     , dlist
     , unordered-containers
     , hashable
+    , bytestring
+    , bmp
   hs-source-dirs: src
   default-language: Haskell2010
   ghc-options: -Wall

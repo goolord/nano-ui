@@ -28,14 +28,19 @@ import GHC.Generics (Generic)
 import Graphics.Gloss hiding (text)
 import Graphics.Gloss.Interface.IO.Interact (Event (..), Key (..), MouseButton (..), KeyState (..), SpecialKey (..), Modifiers (..))
 import qualified Data.HashMap.Strict as HM
-import qualified Data.Vector.Unboxed as VU
 import qualified Graphics.Text.TrueType as TT
 import Graphics.Gloss.Data.Point (pointInBox)
 import qualified Data.IntMap.Strict as IntMap
-import Data.Foldable (for_)
+import Data.Foldable (for_, traverse_)
 import Data.List (dropWhileEnd, minimumBy, inits)
 import Data.Char (isAlphaNum, isSpace, isPunctuation)
 import Data.Ord (comparing)
+import Graphics.Rasterific (printTextAt, withTexture, V2 (..), renderDrawing, TextRange (..), getPointSize, Texture)
+import Graphics.Rasterific.Texture (uniformTexture)
+import Codec.Picture (PixelRGBA8(..), encodeBitmap)
+import qualified Data.ByteString.Lazy.Char8 as BSL
+import Codec.BMP (parseBMP)
+import Graphics.Rasterific.Immediate (textToDrawOrders, orderToDrawing)
 
 deriving instance Generic TT.FontDescriptor
 deriving instance Generic TT.FontStyle
@@ -57,11 +62,11 @@ openSans = TT.FontDescriptor "Open Sans" (TT.FontStyle False False)
 ---------------------------------------------------------------------
 textP :: (Member (Reader AppState) r, LastMember IO r) => String -> Eff r Picture
 textP s = do
-  renderFont openSans (TT.PointSize 16) s
+  renderFont openSans (TT.PointSize 16) (uniformTexture $ PixelRGBA8 0 0 0 255) s
 
 text :: (Member (Reader AppState) r, LastMember IO r, Member GUI r) => String -> Eff r ()
 text s = do
-  p <- renderFont openSans (TT.PointSize 16) s
+  p <- renderFont openSans (TT.PointSize 16) (uniformTexture $ PixelRGBA8 0 0 0 255) s
   send $ PictureI $ decorateText p
 
 textBBox :: (Member (Reader AppState) r, LastMember IO r) => String -> Eff r BBox
@@ -72,7 +77,7 @@ textBBox s = do
 ttBoundingBox :: TT.BoundingBox -> BBox
 ttBoundingBox bb =
   let baseline = TT._baselineHeight bb
-  in BBox (TT._xMax bb + baseline, TT._yMax bb + baseline) (TT._xMin bb + baseline, TT._yMax bb + baseline)
+  in BBox (TT._xMax bb + baseline, TT._yMin bb + baseline) (TT._xMin bb + baseline, TT._yMax bb + baseline)
 
 closestChar :: Point -> TT.Font -> TT.Dpi -> TT.PointSize -> String -> (BBox, Int)
 closestChar (x, y) font dpi' size str =
@@ -96,14 +101,20 @@ lookupOrInsertFont fontd = do
           liftIO $ modifyIORef' (loadedFontCache state) (HM.insert fontd f)
           pure f
 
-renderFont :: (Member (Reader AppState) r, LastMember IO r) => TT.FontDescriptor -> TT.PointSize -> String -> Eff r Picture
-renderFont fontd pt str = do
+renderFont :: (Member (Reader AppState) r, LastMember IO r) => TT.FontDescriptor -> TT.PointSize -> (Texture PixelRGBA8) -> String -> Eff r Picture
+renderFont fontd pt texture str = do
+  -- let ptF = getPointSize pt
+  -- TODO: how tf do i properly calculate the size of this texture
+  -- and place it so that new characters don't move it around
   f <- lookupOrInsertFont fontd
-  -- todo: interpret as Polygon instead of Line
-  pure $ foldMap (line . fmap (second negate) . VU.toList) $ mconcat $ TT.getStringCurveAtPoint
-    dpi
-    (0.0, 0.0)
-    [(f,pt,str)]
+  let bb = ttBoundingBox $ TT.stringBoundingBox f dpi pt str
+      w = (maxX bb - minX bb)
+      h = (maxY bb - minY bb)
+  let bs = encodeBitmap $ renderDrawing (ceiling w) (ceiling h) (PixelRGBA8 0 0 0 0) $
+        traverse_ orderToDrawing $ textToDrawOrders dpi texture (V2 0.0 (maxY bb)) [TextRange f pt str Nothing]
+
+  let bmp = either (error . show) id $ parseBMP bs
+  pure $ translate (maxX bb / 2) (maxY bb / 2) $ bitmapOfBMP bmp
 
 mouseInteractionButton :: Mouse -> BBox -> Picture -> Picture
 mouseInteractionButton (Hovering p) BBox {..} = case pointInBox p bboxBR bboxTL of
