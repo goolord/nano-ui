@@ -129,8 +129,13 @@ lookupOrInsertFont fontd = do
 renderFont :: (Member (Reader AppState) r, LastMember IO r) => TT.FontDescriptor -> TT.PointSize -> (Texture PixelRGBA8) -> String -> Eff r Picture
 renderFont fontd pt texture str = do
   -- let ptF = getPointSize pt
-  -- TODO: how tf do i properly calculate the size of this texture
-  -- and place it so that new characters don't move it around
+  -- TODO: TODO: fsr the bottom of the text is cutoff until something like
+  -- 'q' is present in the string
+  --
+  -- and the right is cut off
+  --
+  -- the font might be rendering bigger than
+  -- using the old method + line
   f <- lookupOrInsertFont fontd
   let bb = ttBoundingBox $ TT.stringBoundingBox f dpi pt str
       w = (maxX bb - minX bb)
