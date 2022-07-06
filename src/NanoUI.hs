@@ -247,8 +247,7 @@ runGUI settings appState sem = do
         if pressed
         then do
           let p = mousePosPt mouse'
-          let pts = TT.getStringCurveAtPoint dpi (0.0, 0.0) [(f,pt,str)]
-          let (bb, pressedIx) = closestCharX (fst p - xo) pts
+          let (bb, pressedIx) = closestChar (fst p - xo, snd p - yo) f dpi pt str
           ixRef <- liftIO $ newIORef pressedIx
           liftIO $ modifyIORef' (inputState appState) (IntMap.insert ident (InputState strRef (InputActive ixRef)))
           pure bb
@@ -274,21 +273,4 @@ runGUI settings appState sem = do
       pure str
     Columns g -> withColumns g
     Rows g -> withRows g
-
-closestCharX :: Float -> [[VU.Vector (Float, Float)]] -> (BBox, Int)
-closestCharX _ [] = (mempty, 0)
-closestCharX x chars =
-  let xs = zip (fmap bboxChar chars) [0..]
-  in minimumBy (comparing ((\x2 -> abs $ x2 - x) . fst . bboxTL . fst)) xs
-  where
-  bboxChar :: [VU.Vector (Float, Float)] -> BBox
-  bboxChar xs =
-    let allPts = mconcat xs in
-    if VU.null allPts
-    then mempty
-    else
-      BBox
-        { bboxBR = ((VU.maximum $ VU.map fst allPts), negate (VU.minimum $ VU.map snd allPts))
-        , bboxTL = ((VU.minimum $ VU.map fst allPts), negate (VU.maximum $ VU.map snd allPts))
-        }
 
