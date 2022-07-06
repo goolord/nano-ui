@@ -257,7 +257,7 @@ runGUI settings appState sem = do
         else notPressed
       let tlText =
             if cursorOffset > x
-            then translate (negate $ cursorOffset - x) 0.0
+            then translate (-4.0 + ((negate $ cursorOffset - x))) 0.0
             else id
       let cursor = case ia of
             InputInactive -> blank
