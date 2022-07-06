@@ -105,7 +105,7 @@ textBBox s = do
 ttBoundingBox :: TT.BoundingBox -> BBox
 ttBoundingBox bb =
   let baseline = TT._baselineHeight bb
-  in BBox (TT._xMax bb + baseline, TT._yMin bb + baseline) (TT._xMin bb + baseline, TT._yMax bb + baseline)
+  in BBox (TT._xMax bb, TT._yMin bb + baseline) (TT._xMin bb, TT._yMax bb + baseline)
 
 closestChar :: Point -> TT.Font -> TT.Dpi -> TT.PointSize -> String -> (BBox, Int)
 closestChar (x, y) font dpi' size str =
