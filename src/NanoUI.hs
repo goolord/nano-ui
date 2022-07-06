@@ -247,6 +247,12 @@ runGUI settings appState sem = do
         if pressed
         then do
           let p = mousePosPt mouse'
+          -- TODO: account for the cursor offset v- here
+          -- this is a pain in the ass because right now
+          -- it seems like MouseDown makes the input inactive
+          -- which means there's no way to recover the `InputActive` not pressed branch
+          -- as it stands. there's a lot of ways to fix this but maybe
+          -- this way of wrapping the text sucks to begin with
           let (bb, pressedIx) = closestChar (fst p - xo, snd p - yo) f dpi pt str
           ixRef <- liftIO $ newIORef pressedIx
           liftIO $ modifyIORef' (inputState appState) (IntMap.insert ident (InputState strRef (InputActive ixRef)))
