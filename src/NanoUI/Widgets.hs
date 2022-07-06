@@ -206,6 +206,6 @@ inputIsActive (InputState _ InputActive{}) = True
 inputIsActive _ = False
 
 didPress :: Mouse -> BBox -> Bool
-didPress (MB p LeftButton Up) BBox {..} = pointInBox p bboxBR bboxTL
+didPress (MB p LeftButton Down) BBox {..} = pointInBox p bboxBR bboxTL
 didPress _ _ = False
 

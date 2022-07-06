@@ -43,6 +43,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Vector.Unboxed as VU
 import qualified Graphics.Text.TrueType as TT
+import Control.Monad (unless)
 
 defaultMain :: GUIM () -> IO ()
 defaultMain = mainWith defaultSettings
@@ -108,9 +109,6 @@ mainWith settings gui' = do
           pure world2
         EventKey (MouseButton mb) keyState _mods p -> do
           writeIORef (mouse state) (MB p mb keyState)
-          case keyState of
-            Down -> modifyIORef' (inputState state) (fmap disableInput)
-            _ -> pure ()
           clearCache world2 -- move to the controller handler
           pure world2
         _ -> pure world2
@@ -240,6 +238,10 @@ runGUI settings appState sem = do
         tl = (xo - x, yo + y / 2)
       let bbox = BBox br tl
       let pressed = didPress mouse' bbox
+      case mouse' of
+        MB _ LeftButton Down -> do
+          send $ unless pressed $ modifyIORef' (inputState appState) (IntMap.adjust disableInput ident)
+        _ -> pure ()
       -- unhardcode this somehow
       f <- runReader appState $ lookupOrInsertFont openSans
       let pt = TT.PointSize 16
