@@ -80,6 +80,7 @@ blackTexture = (uniformTexture $ PixelRGBA8 0 0 0 255)
 text :: (Member (Reader AppState) r, LastMember IO r, Member GUI r) => String -> Eff r ()
 text = text' defaultTextConfig
 
+-- TODO: consider banning
 textP :: (Member (Reader AppState) r, LastMember IO r) => String -> Eff r Picture
 textP = textP' defaultTextConfig
 
@@ -145,14 +146,13 @@ renderFont fontd pt texture str = do
   let aaBuffer = 3
   let bb = ttBoundingBox $ TT.stringBoundingBox f dpi pt str
       w = (aaBuffer + maxX bb - minX bb)
-      h = (aaBuffer + maxY bb - minY bb)
-  let bs = encodeBitmap $ renderDrawing (floor w) (ceiling h) (PixelRGBA8 255 0 0 0) $
-        traverse_ orderToDrawing $ textToDrawOrders dpi texture (V2 0.0 (maxY bb)) [TextRange f pt str Nothing]
+      h = TT.pointInPixelAtDpi pt dpi
+  let bs = encodeBitmap $ renderDrawing (floor w) (ceiling h * 2) (PixelRGBA8 255 0 0 0) $
+        traverse_ orderToDrawing $ textToDrawOrders dpi texture (V2 0.0 h) [TextRange f pt str Nothing]
   let bmp = either (error . show) id $ parseBMP bs
   pure $ translate
     ((w / 2) - minX bb + 2)
-    ((h / 2) + minY bb - aaBuffer) $
-      bitmapOfBMP bmp
+    0 $ bitmapOfBMP bmp
 
 mouseInteractionButton :: Mouse -> BBox -> Picture -> Picture
 mouseInteractionButton (Hovering p) BBox {..} = case pointInBox p bboxBR bboxTL of

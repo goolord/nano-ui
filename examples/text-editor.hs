@@ -30,10 +30,5 @@ main = do
     mousePos <- liftIO $ readIORef mousePosRef
     text (show mousePos)
 
-    pics <- do
-      msgs' <- liftIO (readIORef msgs)
-      pics <- mapM textP msgs'
-      pure $ fmap (color white) pics
+    mapM_ text =<< liftIO (readIORef msgs)
 
-    for_ pics $ \pic -> do
-      pictureI pic

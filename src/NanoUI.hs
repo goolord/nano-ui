@@ -276,9 +276,10 @@ runGUI settings appState sem = do
     Text' (TextConfig {..}) s -> do
       (xo, yo) <- get
       strPic <- runReader appState $ renderFont font ptsz texture s
-      BBox (right, _) (_, top) <- runReader appState $ textBBox s
+      let top = TT.pointInPixelAtDpi ptsz dpi
+      BBox (right, _) (_, _) <- runReader appState $ textBBox s
       tell $ DList.singleton $
-        translate xo yo $ strPic
+        translate 0 (negate $ top/4) $ translate xo yo $ strPic
       modify (\(xo', yo') -> (xo' + right, yo' - top))
       pure ()
     Columns g -> withColumns g
