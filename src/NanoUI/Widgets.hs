@@ -135,19 +135,12 @@ lookupOrInsertFont fontd = do
 
 renderFont :: (Member (Reader AppState) r, LastMember IO r) => TT.FontDescriptor -> TT.PointSize -> (Texture PixelRGBA8) -> String -> Eff r Picture
 renderFont fontd pt texture str = do
-  -- let ptF = getPointSize pt
-  -- the text is shaking around when i type so something is not getting done properly
-  -- maybe something to do with the width/height and translate calculations
-  -- using floats and floating point weirdness
-  --
-  -- i think that antialiasing is making the font slightly bigger than the
-  -- stringBoundingBox calculation
   f <- lookupOrInsertFont fontd
   let aaBuffer = 3
   let bb = ttBoundingBox $ TT.stringBoundingBox f dpi pt str
       w = (aaBuffer + maxX bb - minX bb)
       h = TT.pointInPixelAtDpi pt dpi
-  let bs = encodeBitmap $ renderDrawing (floor w) (ceiling h * 2) (PixelRGBA8 255 0 0 0) $
+  let bs = encodeBitmap $ renderDrawing (round w) (round h * 2) (PixelRGBA8 255 0 0 0) $
         traverse_ orderToDrawing $ textToDrawOrders dpi texture (V2 0.0 h) [TextRange f pt str Nothing]
   let bmp = either (error . show) id $ parseBMP bs
   pure $ translate
