@@ -102,10 +102,13 @@ ttBoundingBox bb =
   let baseline = TT._baselineHeight bb
   in BBox (TT._xMax bb, TT._yMin bb + baseline) (TT._xMin bb, TT._yMax bb + baseline)
 
+-- todo: do we even care about y in `closestChar`?
+-- text with newlines might have to be split up in such a way
+-- that the y comparison here is unecessary
 closestChar :: Point -> TT.Font -> TT.Dpi -> TT.PointSize -> String -> (BBox, Int)
 closestChar (x, y) font dpi' size str =
   let bboxes = fmap (TT.stringBoundingBox font dpi' size) $ inits str
-  in first ttBoundingBox $ minimumBy (comparing (\(bb, _) -> abs $ TT._xMax bb - x)) $ zip bboxes [0..]
+  in first ttBoundingBox $ minimumBy (comparing (\(bb, _) -> (abs $ TT._xMax bb - x, abs $ TT._yMax bb - y))) $ zip bboxes [0..]
 
 -- data BBox = BBox
 --   { bboxBR :: !Point
