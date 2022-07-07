@@ -64,12 +64,6 @@ openSans = TT.FontDescriptor "Open Sans" (TT.FontStyle False False)
 -- Widgets & helper functions
 ---------------------------------------------------------------------
 
-data TextConfig = TextConfig
-  { font :: TT.FontDescriptor
-  , texture :: Texture PixelRGBA8
-  , ptsz :: TT.PointSize
-  }
-
 defaultTextConfig :: TextConfig
 defaultTextConfig = TextConfig
   { font = openSans
@@ -93,9 +87,9 @@ textP' :: (Member (Reader AppState) r, LastMember IO r) => TextConfig -> String 
 textP' (TextConfig{..}) s = do
   renderFont font ptsz texture s
 
-text' :: (Member (Reader AppState) r, LastMember IO r, Member GUI r) => TextConfig -> String -> Eff r ()
-text' tc s = do
-  textP' tc s >>= send . PictureI
+-- text' :: (Member (Reader AppState) r, LastMember IO r, Member GUI r) => TextConfig -> String -> Eff r ()
+-- text' tc s = do
+--   textP' tc s >>= send . PictureI
 
 textBBox :: (Member (Reader AppState) r, LastMember IO r) => String -> Eff r BBox
 textBBox s = do
@@ -111,6 +105,18 @@ closestChar :: Point -> TT.Font -> TT.Dpi -> TT.PointSize -> String -> (BBox, In
 closestChar (x, y) font dpi' size str =
   let bboxes = fmap (TT.stringBoundingBox font dpi' size) $ inits str
   in first ttBoundingBox $ minimumBy (comparing (\(bb, _) -> abs $ TT._xMax bb - x)) $ zip bboxes [0..]
+
+-- data BBox = BBox
+--   { bboxBR :: !Point
+--   , bboxTL :: !Point
+--   }
+
+drawBBox :: BBox -> Picture
+drawBBox bb = color red $ line
+  [ (minX bb, minY bb), bboxBR bb
+  , (maxX bb, maxY bb), bboxTL bb
+  , (minX bb, minY bb)
+  ]
 
 lookupOrInsertFont :: (LastMember IO effs, Member (Reader AppState) effs) => TT.FontDescriptor -> Eff effs TT.Font
 lookupOrInsertFont fontd = do
@@ -129,26 +135,24 @@ lookupOrInsertFont fontd = do
 renderFont :: (Member (Reader AppState) r, LastMember IO r) => TT.FontDescriptor -> TT.PointSize -> (Texture PixelRGBA8) -> String -> Eff r Picture
 renderFont fontd pt texture str = do
   -- let ptF = getPointSize pt
-  -- TODO: TODO: fsr the bottom of the text is cutoff until something like
-  -- 'q' is present in the string
+  -- the text is shaking around when i type so something is not getting done properly
+  -- maybe something to do with the width/height and translate calculations
+  -- using floats and floating point weirdness
   --
-  -- and the right is cut off
-  --
-  -- it's also shaking around when i type so something is not getting done properly
-  -- maybe something to do with the translate calculation `~`
-  --
-  -- the font might be rendering bigger than
-  -- using the old method + line
+  -- i think that antialiasing is making the font slightly bigger than the
+  -- stringBoundingBox calculation
   f <- lookupOrInsertFont fontd
+  let aaBuffer = 3
   let bb = ttBoundingBox $ TT.stringBoundingBox f dpi pt str
-      w = (maxX bb - minX bb)
-      h = (maxY bb - minY bb)
-  let bs = encodeBitmap $ renderDrawing (floor w) (floor h) (PixelRGBA8 255 0 0 0) $
+      w = (aaBuffer + maxX bb - minX bb)
+      h = (aaBuffer + maxY bb - minY bb)
+  let bs = encodeBitmap $ renderDrawing (floor w) (ceiling h) (PixelRGBA8 255 0 0 0) $
         traverse_ orderToDrawing $ textToDrawOrders dpi texture (V2 0.0 (maxY bb)) [TextRange f pt str Nothing]
   let bmp = either (error . show) id $ parseBMP bs
-  pure $
-    color red (line [bboxBR bb, bboxTL bb])
-    <> (translate ((w / 2) - minX bb) ((h / 2) + minY bb) $ bitmapOfBMP bmp)
+  pure $ translate
+    ((w / 2) - minX bb + 2)
+    ((h / 2) + minY bb - aaBuffer) $
+      bitmapOfBMP bmp
 
 mouseInteractionButton :: Mouse -> BBox -> Picture -> Picture
 mouseInteractionButton (Hovering p) BBox {..} = case pointInBox p bboxBR bboxTL of

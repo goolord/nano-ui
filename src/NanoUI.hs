@@ -42,7 +42,6 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.List.NonEmpty as NonEmpty
 import qualified Graphics.Text.TrueType as TT
 import Control.Monad (unless)
-import System.Clipboard
 
 {-
 todo: 
@@ -274,9 +273,16 @@ runGUI settings appState sem = do
         ]
       modify (\(xo', yo') -> (xo' + (x / 2) :: Float, yo' - y))
       pure str
+    Text' (TextConfig {..}) s -> do
+      (xo, yo) <- get
+      strPic <- runReader appState $ renderFont font ptsz texture s
+      BBox (right, _) (_, top) <- runReader appState $ textBBox s
+      tell $ DList.singleton $
+        translate xo yo $ strPic
+      modify (\(xo', yo') -> (xo' + right, yo' - top))
+      pure ()
     Columns g -> withColumns g
     Rows g -> withRows g
-
 
 recBitmapSection :: Rectangle -> Picture -> Picture
 recBitmapSection r p' = case p' of

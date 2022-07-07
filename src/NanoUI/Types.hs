@@ -26,6 +26,15 @@ import Graphics.Gloss hiding (text)
 import Graphics.Gloss.Interface.IO.Interact (MouseButton (..), KeyState (..))
 import qualified Graphics.Text.TrueType as TT
 import Data.IntMap (IntMap)
+import Graphics.Rasterific (Texture)
+import Codec.Picture (PixelRGBA8)
+
+
+data TextConfig = TextConfig
+  { font :: TT.FontDescriptor
+  , texture :: Texture PixelRGBA8
+  , ptsz :: TT.PointSize
+  }
 
 data GUI a where
   Button ::
@@ -43,6 +52,7 @@ data GUI a where
     -> String -- initial value
     -> GUI String -- current user input
   PictureI :: Picture -> GUI ()
+  Text' :: TextConfig -> String -> GUI ()
   Columns :: GUI a -> GUI a
   Rows :: GUI a -> GUI a
 
