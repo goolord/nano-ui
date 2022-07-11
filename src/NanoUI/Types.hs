@@ -117,8 +117,8 @@ type GUIM = Eff [GUI, Reader AppState, Reader Settings, IO]
 data Stylesheet = Stylesheet
   { xPad :: !Float
   , yPad :: !Float
-  , font :: TT.FontDescriptor
-  , fontPt :: TT.PointSize
+  , dpi :: !TT.Dpi
+  , textConfig :: !TextConfig
   }
 
 data Mouse = Hovering Point | MB Point MouseButton KeyState

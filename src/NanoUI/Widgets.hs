@@ -54,9 +54,6 @@ instance Hashable TT.FontStyle
 -- constants
 ---------------------------------------------------------------------
 
-dpi :: TT.Dpi
-dpi = 96
-
 openSans :: TT.FontDescriptor
 openSans = TT.FontDescriptor "Open Sans" (TT.FontStyle False False)
 
@@ -81,10 +78,10 @@ text :: (Member (Reader AppState) r, LastMember IO r, Member GUI r) => String ->
 text = text' defaultTextConfig
 
 -- TODO: consider banning
-textP :: (Member (Reader AppState) r, LastMember IO r) => String -> Eff r Picture
+textP :: (Member (Reader AppState) r, Member (Reader Settings) r, LastMember IO r) => String -> Eff r Picture
 textP = textP' defaultTextConfig
 
-textP' :: (Member (Reader AppState) r, LastMember IO r) => TextConfig -> String -> Eff r Picture
+textP' :: (Member (Reader AppState) r, Member (Reader Settings) r, LastMember IO r) => TextConfig -> String -> Eff r Picture
 textP' (TextConfig{..}) s = do
   renderFont font ptsz texture s
 
@@ -92,10 +89,11 @@ textP' (TextConfig{..}) s = do
 -- text' tc s = do
 --   textP' tc s >>= send . PictureI
 
-textBBox :: (Member (Reader AppState) r, LastMember IO r) => String -> Eff r BBox
-textBBox s = do
-  f <- lookupOrInsertFont openSans
-  pure $ ttBoundingBox $ TT.stringBoundingBox f dpi (TT.PointSize 16) s
+textBBox :: (Member (Reader AppState) r, LastMember IO r, Member (Reader Settings) r) => TextConfig -> String -> Eff r BBox
+textBBox TextConfig{..} s = do
+  settings <- ask
+  f <- lookupOrInsertFont font
+  pure $ ttBoundingBox $ TT.stringBoundingBox f (dpi $ stylesheet settings) ptsz s
 
 ttBoundingBox :: TT.BoundingBox -> BBox
 ttBoundingBox bb =
@@ -136,8 +134,9 @@ lookupOrInsertFont fontd = do
           liftIO $ modifyIORef' (loadedFontCache state) (HM.insert fontd f)
           pure f
 
-renderFont :: (Member (Reader AppState) r, LastMember IO r) => TT.FontDescriptor -> TT.PointSize -> (Texture PixelRGBA8) -> String -> Eff r Picture
+renderFont :: (Member (Reader AppState) r, LastMember IO r, Member (Reader Settings) r) => TT.FontDescriptor -> TT.PointSize -> (Texture PixelRGBA8) -> String -> Eff r Picture
 renderFont fontd pt texture str = do
+  Stylesheet{..} <- stylesheet <$> ask
   f <- lookupOrInsertFont fontd
   let aaBuffer = 3
   let bb = ttBoundingBox $ TT.stringBoundingBox f dpi pt str

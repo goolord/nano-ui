@@ -46,7 +46,6 @@ import Control.Monad (unless)
 {-
 todo: 
 - cull the text you shouldn't see in the inputs
-- factor out the global font size/dpi etc constants
 -}
 
 defaultMain :: GUIM () -> IO ()
@@ -75,8 +74,8 @@ defaultStylesheet :: Stylesheet
 defaultStylesheet = Stylesheet
   { xPad = 5.0
   , yPad = 15.0
-  , font = TT.FontDescriptor "Open Sans" (TT.FontStyle False False)
-  , fontPt = TT.PointSize 16
+  , dpi = 96
+  , textConfig = defaultTextConfig
   }
 
 mainWith :: Settings -> GUIM () -> IO ()
@@ -223,7 +222,7 @@ runGUI settings appState sem = do
         Just strRef -> pure strRef
       str <- liftIO $ readIORef strRef
       mouse' <- liftIO $ readIORef $ mouse appState
-      strPic <- runReader appState $ textP' (defaultTextConfig { texture = blackTexture }) str
+      strPic <- runReader appState $ runReader settings $ textP' ((textConfig $ stylesheet settings) { texture = blackTexture }) str
       let x = 200.0
           y = 30.0
       let
@@ -237,10 +236,10 @@ runGUI settings appState sem = do
         _ -> pure ()
       -- unhardcode this somehow
       f <- runReader appState $ lookupOrInsertFont openSans
-      let pt = TT.PointSize 16
+      let Stylesheet{..} = stylesheet settings
       let notPressed = do
             ix <- liftIO $ readIORef ixRef
-            runReader appState $ textBBox $ take ix str
+            runReader appState $ runReader settings $ textBBox textConfig $ take ix str
       BBox (cursorOffset, _) _ <-
         if pressed
         then do
@@ -249,7 +248,7 @@ runGUI settings appState sem = do
           let prevTl = if co > x
                 then (co - x)
                 else 0.0
-          let (bb, pressedIx) = closestChar (prevTl + fst p - xo, snd p - yo) f dpi pt str
+          let (bb, pressedIx) = closestChar (prevTl + fst p - xo, snd p - yo) f dpi (ptsz textConfig) str
           ixRef' <- liftIO $ newIORef pressedIx
           liftIO $ modifyIORef' (inputState appState) (IntMap.insert ident (InputState strRef ixRef' InputActive))
           pure bb
@@ -275,9 +274,9 @@ runGUI settings appState sem = do
       pure str
     Text' (TextConfig {..}) s -> do
       (xo, yo) <- get
-      strPic <- runReader appState $ renderFont font ptsz texture s
-      let top = TT.pointInPixelAtDpi ptsz dpi
-      BBox (right, _) (_, _) <- runReader appState $ textBBox s
+      strPic <- runReader appState $ runReader settings $ renderFont font ptsz texture s
+      let top = TT.pointInPixelAtDpi ptsz (dpi $ stylesheet settings)
+      BBox (right, _) (_, _) <- runReader appState $ runReader settings $ textBBox (textConfig $ stylesheet settings) s
       tell $ DList.singleton $
         translate 0 (negate $ top/4) $ translate xo yo $ strPic
       modify (\(xo', yo') -> (xo' + right, yo' - top))
