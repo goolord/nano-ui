@@ -29,7 +29,6 @@ import Data.IntMap (IntMap)
 import Graphics.Rasterific (Texture)
 import Codec.Picture (PixelRGBA8)
 
-
 data TextConfig = TextConfig
   { font :: TT.FontDescriptor
   , texture :: Texture PixelRGBA8
@@ -136,4 +135,3 @@ data World = World
 clearCache :: World -> IO ()
 clearCache w = do
   writeIORef (pictureCache w) Nothing
-

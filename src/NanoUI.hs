@@ -28,7 +28,6 @@ import Control.Monad.Freer hiding (translate)
 import Control.Monad.Freer.Reader
 import Control.Monad.Freer.State
 import Control.Monad.Freer.Writer
-import Control.Monad.IO.Class (MonadIO(liftIO))
 import Data.DList (DList)
 import Data.IORef
 import Data.Maybe (mapMaybe)
@@ -93,7 +92,7 @@ mainWith settings gui' = do
       }
     (\world -> do
       pcache <- readIORef (pictureCache world)
-      mouse' <- liftIO $ readIORef $ mouse state
+      mouse' <- readIORef $ mouse state
       x <- case pcache of
         Just g -> pure g
         Nothing -> Pictures <$> render' (worldGui world)
@@ -132,7 +131,7 @@ mainWith settings gui' = do
       pure ()
     )
 
-render :: (LastMember IO r, Member (Reader AppState) r, Member (Reader Settings) r) => Eff (GUI : r) b -> Eff r [Picture]
+render :: (Member IO r, Member (Reader AppState) r, Member (Reader Settings) r) => Eff (GUI : r) b -> Eff r [Picture]
 render gui = do
   appState <- ask
   settings <- ask
@@ -154,14 +153,14 @@ pictureBBox = \case
     , bboxTL = (minimum $ fmap fst xs, maximum $ fmap snd xs)
     }
 
-runGUI :: forall r a. LastMember IO r => Settings -> AppState -> Eff (GUI : r) a -> Eff (Writer (DList Picture) : r) a
+runGUI :: forall r a. Member IO r => Settings -> AppState -> Eff (GUI : r) a -> Eff (Writer (DList Picture) : r) a
 runGUI settings appState sem = do
   (wX, wY) <- send $ readIORef $ windowSize appState
   let left = (fromIntegral $ negate $ wX `div` 2) + 5.0
       top  = (fromIntegral          $ wY `div` 2) - 22.0
   evalState (left, top) $ reinterpret2 withRows sem
   where
-  withColumns :: forall x r'. LastMember IO r' => GUI x -> Eff (State (Float, Float) : Writer (DList Picture) : r') x
+  withColumns :: forall x r'. Member IO r' => GUI x -> Eff (State (Float, Float) : Writer (DList Picture) : r') x
   withColumns g = do
     (_xo1 :: Float, yo1 :: Float) <- get
     res <- go g
@@ -171,7 +170,7 @@ runGUI settings appState sem = do
                    -- meaning all children of 'g' ask layed out left to right
     _ <- go $ Padding (xPad $ stylesheet settings) 0.0
     pure res
-  withRows :: forall x r'. LastMember IO r' => GUI x -> Eff (State (Float, Float) : Writer (DList Picture) : r') x
+  withRows :: forall x r'. Member IO r' => GUI x -> Eff (State (Float, Float) : Writer (DList Picture) : r') x
   withRows g = do
     (xo1 :: Float, _yo1 :: Float) <- get
     res <- go g
@@ -181,16 +180,16 @@ runGUI settings appState sem = do
                    -- meaning all children of 'g' ask layed out top to bottom
     _ <- go $ Padding 0.0 (yPad $ stylesheet settings)
     pure res
-  go :: forall x r'. LastMember IO r' => GUI x -> Eff (State (Float, Float) : Writer (DList Picture) : r') x
+  go :: forall x r'. Member IO r' => GUI x -> Eff (State (Float, Float) : Writer (DList Picture) : r') x
   go = \case
     Button gp x y -> do
       (xo, yo) <- get
-      -- bboxes <- liftIO $ readIORef $ boundingBoxes appState
+      -- bboxes <- send $ readIORef $ boundingBoxes appState
       let
         br = (xo + x, yo - y / 2)
         tl = (xo - x, yo + y / 2)
       let bbox = BBox br tl
-      mouse' <- liftIO $ readIORef $ mouse appState
+      mouse' <- send $ readIORef $ mouse appState
       (_, p) <- runWriter $ evalState (0.0, 0.0) $ go gp
       tell $ DList.fromList
         [ mouseInteractionButton mouse' bbox $ translate (xo + (x / 2)) yo $ rectangleSolid x y
@@ -210,18 +209,18 @@ runGUI settings appState sem = do
       modify (\(xo', yo') -> (xo' + x, yo' - y))
     Input ident _placeholder initialValue -> do
       (xo, yo) <- get
-      inputMap <- liftIO $ readIORef (inputState appState)
+      inputMap <- send $ readIORef (inputState appState)
       InputState strRef ixRef ia <- case IntMap.lookup ident inputMap of
         Nothing -> do
-          liftIO $ do
+          send $ do
             strRef <- newIORef initialValue
             ixRef <- newIORef 0
             let is = InputState strRef ixRef InputInactive
             modifyIORef' (inputState appState) (IntMap.insert ident is)
             pure is
         Just strRef -> pure strRef
-      str <- liftIO $ readIORef strRef
-      mouse' <- liftIO $ readIORef $ mouse appState
+      str <- send $ readIORef strRef
+      mouse' <- send $ readIORef $ mouse appState
       strPic <- runReader appState $ runReader settings $ textP' ((textConfig $ stylesheet settings) { texture = blackTexture }) str
       let x = 200.0
           y = 30.0
@@ -238,7 +237,7 @@ runGUI settings appState sem = do
       f <- runReader appState $ lookupOrInsertFont openSans
       let Stylesheet{..} = stylesheet settings
       let notPressed = do
-            ix <- liftIO $ readIORef ixRef
+            ix <- send $ readIORef ixRef
             runReader appState $ runReader settings $ textBBox textConfig $ take ix str
       BBox (cursorOffset, _) _ <-
         if pressed
@@ -249,8 +248,8 @@ runGUI settings appState sem = do
                 then (co - x)
                 else 0.0
           let (bb, pressedIx) = closestChar (prevTl + fst p - xo, snd p - yo) f dpi (ptsz textConfig) str
-          ixRef' <- liftIO $ newIORef pressedIx
-          liftIO $ modifyIORef' (inputState appState) (IntMap.insert ident (InputState strRef ixRef' InputActive))
+          ixRef' <- send $ newIORef pressedIx
+          send $ modifyIORef' (inputState appState) (IntMap.insert ident (InputState strRef ixRef' InputActive))
           pure bb
         else notPressed
       let tlText =

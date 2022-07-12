@@ -22,7 +22,6 @@ import NanoUI.Internal
 
 import Control.Monad.Freer hiding (translate)
 import Control.Monad.Freer.Reader
-import Control.Monad.IO.Class (MonadIO(liftIO))
 import Data.Bifunctor
 import Data.Hashable (Hashable)
 import Data.IORef
@@ -74,22 +73,22 @@ whiteTexture = (uniformTexture $ PixelRGBA8 255 255 255 255)
 blackTexture :: Texture PixelRGBA8
 blackTexture = (uniformTexture $ PixelRGBA8 0 0 0 255)
 
-text :: (Member (Reader AppState) r, LastMember IO r, Member GUI r) => String -> Eff r ()
+text :: (Member (Reader AppState) r, Member IO r, Member GUI r) => String -> Eff r ()
 text = text' defaultTextConfig
 
 -- TODO: consider banning
-textP :: (Member (Reader AppState) r, Member (Reader Settings) r, LastMember IO r) => String -> Eff r Picture
+textP :: (Member (Reader AppState) r, Member (Reader Settings) r, Member IO r) => String -> Eff r Picture
 textP = textP' defaultTextConfig
 
-textP' :: (Member (Reader AppState) r, Member (Reader Settings) r, LastMember IO r) => TextConfig -> String -> Eff r Picture
+textP' :: (Member (Reader AppState) r, Member (Reader Settings) r, Member IO r) => TextConfig -> String -> Eff r Picture
 textP' (TextConfig{..}) s = do
   renderFont font ptsz texture s
 
--- text' :: (Member (Reader AppState) r, LastMember IO r, Member GUI r) => TextConfig -> String -> Eff r ()
+-- text' :: (Member (Reader AppState) r, Member IO r, Member GUI r) => TextConfig -> String -> Eff r ()
 -- text' tc s = do
 --   textP' tc s >>= send . PictureI
 
-textBBox :: (Member (Reader AppState) r, LastMember IO r, Member (Reader Settings) r) => TextConfig -> String -> Eff r BBox
+textBBox :: (Member (Reader AppState) r, Member IO r, Member (Reader Settings) r) => TextConfig -> String -> Eff r BBox
 textBBox TextConfig{..} s = do
   settings <- ask
   f <- lookupOrInsertFont font
@@ -120,21 +119,21 @@ drawBBox bb = color red $ line
   , (minX bb, minY bb)
   ]
 
-lookupOrInsertFont :: (LastMember IO effs, Member (Reader AppState) effs) => TT.FontDescriptor -> Eff effs TT.Font
+lookupOrInsertFont :: (Member IO effs, Member (Reader AppState) effs) => TT.FontDescriptor -> Eff effs TT.Font
 lookupOrInsertFont fontd = do
   state <- ask
-  loaded <- liftIO $ readIORef $ loadedFontCache state
+  loaded <- send $ readIORef $ loadedFontCache state
   case HM.lookup fontd loaded of
     Just f -> pure f
     Nothing -> do
       case TT.findFontInCache (fontCache state) fontd of
         Nothing -> error $ unwords ["font", show fontd, "missing"]
         Just fp -> do
-          f <- either (error . show) id <$> (liftIO $ TT.loadFontFile fp)
-          liftIO $ modifyIORef' (loadedFontCache state) (HM.insert fontd f)
+          f <- either (error . show) id <$> (send $ TT.loadFontFile fp)
+          send $ modifyIORef' (loadedFontCache state) (HM.insert fontd f)
           pure f
 
-renderFont :: (Member (Reader AppState) r, LastMember IO r, Member (Reader Settings) r) => TT.FontDescriptor -> TT.PointSize -> (Texture PixelRGBA8) -> String -> Eff r Picture
+renderFont :: (Member (Reader AppState) r, Member IO r, Member (Reader Settings) r) => TT.FontDescriptor -> TT.PointSize -> (Texture PixelRGBA8) -> String -> Eff r Picture
 renderFont fontd pt texture str = do
   Stylesheet{..} <- stylesheet <$> ask
   f <- lookupOrInsertFont fontd
