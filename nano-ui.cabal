@@ -33,6 +33,7 @@ library
     , unordered-containers
     , hashable
     , bytestring
+    , text
     , bmp
     , Clipboard
   hs-source-dirs: src

@@ -1,18 +1,19 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE NamedFieldPuns #-}
 
 module NanoUI
   ( module NanoUI
@@ -52,7 +53,11 @@ defaultMain = mainWith defaultSettings
 
 newState :: Settings -> IO AppState
 newState Settings {..} = do
+#ifdef darwin_HOST_OS
+  let fontCache   = TT.emptyFontCache -- too many file descriptors otherwise??
+#else
   fontCache       <- TT.buildCache
+#endif
   loadedFontCache <- newIORef HM.empty
   mouse           <- newIORef (Hovering (0, 0))
   inputState      <- newIORef IntMap.empty

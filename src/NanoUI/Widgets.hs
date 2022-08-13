@@ -29,6 +29,7 @@ import Data.IORef
 import GHC.Generics (Generic)
 import Graphics.Gloss hiding (text)
 import Graphics.Gloss.Interface.IO.Interact (Event (..), Key (..), MouseButton (..), KeyState (..), SpecialKey (..), Modifiers (..))
+import qualified Data.Text as T
 import qualified Data.HashMap.Strict as HM
 import qualified Graphics.Text.TrueType as TT
 import Graphics.Gloss.Data.Point (pointInBox)
@@ -133,12 +134,16 @@ lookupOrInsertFont fontd = do
   case HM.lookup fontd loaded of
     Just f -> pure f
     Nothing -> do
-      case TT.findFontInCache (fontCache state) fontd of
-        Nothing -> error $ unwords ["font", show fontd, "missing"]
-        Just fp -> do
-          f <- either (error . show) id <$> (send $ TT.loadFontFile fp)
-          send $ modifyIORef' (loadedFontCache state) (HM.insert fontd f)
-          pure f
+      fp <- case TT.findFontInCache (fontCache state) fontd of
+        Nothing -> do
+          mfp <- send $ TT.findFontOfFamily (T.unpack $ TT._descriptorFamilyName fontd) (TT._descriptorStyle fontd)
+          case mfp of
+            Nothing -> error $ unwords ["font", show fontd, "missing"]
+            Just fp -> pure fp
+        Just fp -> pure fp
+      f <- either (error . show) id <$> (send $ TT.loadFontFile fp)
+      send $ modifyIORef' (loadedFontCache state) (HM.insert fontd f)
+      pure f
 
 renderFont :: (Member (Reader AppState) r, Member IO r, Member (Reader Settings) r) => TT.FontDescriptor -> TT.PointSize -> (Texture PixelRGBA8) -> String -> Eff r Picture
 renderFont fontd pt texture str = do
