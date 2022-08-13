@@ -14,6 +14,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE CPP #-}
 
 module NanoUI.Widgets where
 
@@ -41,8 +42,9 @@ import Graphics.Rasterific.Texture (uniformTexture)
 import Codec.Picture (PixelRGBA8(..), encodeBitmap)
 import Codec.BMP (parseBMP)
 import Graphics.Rasterific.Immediate (textToDrawOrders, orderToDrawing)
-import System.Clipboard
+-- import System.Clipboard
 import Data.Maybe (fromMaybe)
+import System.Clipboard (getClipboardString)
 
 deriving instance Generic TT.FontDescriptor
 deriving instance Generic TT.FontStyle
@@ -53,8 +55,13 @@ instance Hashable TT.FontStyle
 -- constants
 ---------------------------------------------------------------------
 
-openSans :: TT.FontDescriptor
-openSans = TT.FontDescriptor "Open Sans" (TT.FontStyle False False)
+defaultFont :: TT.FontDescriptor
+defaultFont =
+#ifdef darwin_HOST_OS
+  TT.FontDescriptor "Helvetica" (TT.FontStyle False False)
+#else
+  TT.FontDescriptor "Open Sans" (TT.FontStyle False False)
+#endif
 
 ---------------------------------------------------------------------
 -- Widgets & helper functions
@@ -62,7 +69,7 @@ openSans = TT.FontDescriptor "Open Sans" (TT.FontStyle False False)
 
 defaultTextConfig :: TextConfig
 defaultTextConfig = TextConfig
-  { font = openSans
+  { font = defaultFont
   , texture = whiteTexture
   , ptsz = TT.PointSize 16
   }
@@ -254,4 +261,3 @@ inputIsActive _ = False
 didPress :: Mouse -> BBox -> Bool
 didPress (MB p LeftButton Down) BBox {..} = pointInBox p bboxBR bboxTL
 didPress _ _ = False
-

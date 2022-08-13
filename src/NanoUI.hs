@@ -234,7 +234,7 @@ runGUI settings appState sem = do
           send $ unless pressed $ modifyIORef' (inputState appState) (IntMap.adjust disableInput ident)
         _ -> pure ()
       -- unhardcode this somehow
-      f <- runReader appState $ lookupOrInsertFont openSans
+      f <- runReader appState $ lookupOrInsertFont defaultFont
       let Stylesheet{..} = stylesheet settings
       let notPressed = do
             ix <- send $ readIORef ixRef
