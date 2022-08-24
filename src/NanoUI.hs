@@ -53,11 +53,7 @@ defaultMain = mainWith defaultSettings
 
 newState :: Settings -> IO AppState
 newState Settings {..} = do
-#ifdef darwin_HOST_OS
-  let fontCache   = TT.emptyFontCache -- too many file descriptors otherwise??
-#else
   fontCache       <- TT.buildCache
-#endif
   loadedFontCache <- newIORef HM.empty
   mouse           <- newIORef (Hovering (0, 0))
   inputState      <- newIORef IntMap.empty

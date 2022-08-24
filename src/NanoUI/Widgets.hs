@@ -59,7 +59,7 @@ instance Hashable TT.FontStyle
 defaultFont :: TT.FontDescriptor
 defaultFont =
 #ifdef darwin_HOST_OS
-  TT.FontDescriptor "Helvetica" (TT.FontStyle False False)
+  TT.FontDescriptor "Arial" (TT.FontStyle False False)
 #else
   TT.FontDescriptor "Open Sans" (TT.FontStyle False False)
 #endif
