@@ -4,7 +4,7 @@ packages:
 source-repository-package
   type: git
   location: https://github.com/goolord/FontyFruity
-  tag: b830c334a93660e2395dd3968fafc5f5dd728fe9
+  tag: 20c0523af1964a63b5fef5913179418670210415
 
 source-repository-package
   type: git
