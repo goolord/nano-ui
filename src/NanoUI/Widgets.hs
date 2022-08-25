@@ -178,8 +178,22 @@ dropWordL = dropWhileEnd (\x -> isAlphaNum x || isPunctuation x) . dropWhileEnd 
 dropWordR :: [Char] -> [Char]
 dropWordR = dropWhile (\x -> isAlphaNum x || isPunctuation x) . dropWhile isSpace
 
+normalizeEvent :: Event -> Event
+#ifdef darwin_HOST_OS
+normalizeEvent = \case
+  EventKey key keyState mods coords -> EventKey (normalizeKey key) keyState (normalizeMods mods) coords
+  x -> x
+  where
+  normalizeKey = \case
+    SpecialKey KeyDelete -> Char '\b'
+    x -> x
+  normalizeMods mods = mods
+#else
+normalizeEvent = id
+#endif
+
 inputEvents :: Event -> World -> AppState -> IO World
-inputEvents e world state = case e of
+inputEvents e world state = case normalizeEvent e of
   EventKey (Char '\b') Down mods _coords ->
     case ctrl mods of
       Down -> inputEv dropWordL id
