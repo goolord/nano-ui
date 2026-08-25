@@ -3,7 +3,7 @@ module Main (main) where
 import Control.Monad (replicateM, when)
 import Data.ByteString.Builder (toLazyByteString)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import Data.List (isInfixOf)
+import Data.List (isInfixOf, nub)
 import NanoUI
 import NanoUI.Term.Ansi (frameBytes)
 import NanoUI.Term.Cells (cellRows, narrowChar, rasterize)
@@ -33,6 +33,8 @@ main = do
   run "overlay" runOverlayTest
   run "interaction" runInteractionTest
   run "hover" runHoverTest
+  run "button-hover-anim" runButtonHoverAnimTest
+  run "button-press-release-hover" runButtonPressReleaseHoverTest
   run "text-input-focus" runTextInputFocusTest
   run "idle" runIdleTest
   run "animation-idle" runAnimationIdleTest
@@ -45,6 +47,10 @@ main = do
   run "tab-focus" runTabFocusTest
   run "select-initial" runSelectTest
   run "select-dropdown" runSelectDropdownTest
+  run "select-dropdown-hover" runSelectDropdownHoverTest
+  run "text-wrap" runTextWrapTest
+  run "flex-wrap" runFlexWrapTest
+  run "flex-shrink" runFlexShrinkTest
 
   n <- readIORef failed
   if n == 0
@@ -209,6 +215,54 @@ runHoverTest ctx failed = do
   _ <- runFrame ctx inp1 ui
   hot <- getHotId ctx
   when (hashWidgetId hot == 0) $ bump failed
+
+-- Hover animation must advance frame-to-frame without restarting at zero.
+runButtonHoverAnimTest :: Context -> IORef Int -> IO ()
+runButtonHoverAnimTest ctx failed = do
+  let inp0 =
+        emptyInput
+          { inputWindowSize = Size 200 100
+          , inputDeltaTime = 0.016
+          }
+      ui = column defaultLayout (button "Hover")
+  _ <- runFrame ctx inp0 ui
+  let inp1 = inp0 {inputMousePos = V2 10 10}
+  vals <- replicateM 5 $ do
+    _ <- runFrame ctx inp1 ui
+    hot <- getHotId ctx
+    getAnimationValue ctx hot
+  let decreases =
+        case vals of
+          [] -> False
+          _ -> any (uncurry (\a b -> b + 0.001 < a)) (zip vals (drop 1 vals))
+  when decreases $ bump failed
+  when (last vals < 0.4) $ bump failed
+
+-- Release over a button while still hovered should land at full hover, not flash base.
+runButtonPressReleaseHoverTest :: Context -> IORef Int -> IO ()
+runButtonPressReleaseHoverTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 200 100, inputDeltaTime = 0.016}
+      ui = column defaultLayout (button "Hover")
+  _ <- runFrame ctx inp0 ui
+  let click = V2 10 10
+      inpPress =
+        inp0
+          { inputMousePos = click
+          , inputMouseDown = True
+          , inputMousePressed = True
+          }
+  _ <- runFrame ctx inpPress ui
+  let inpRelease =
+        inpPress
+          { inputMouseDown = False
+          , inputMousePressed = False
+          , inputMouseReleased = True
+          }
+  _ <- runFrame ctx inpRelease ui
+  hot <- getHotId ctx
+  val <- getAnimationValue ctx hot
+  when (hashWidgetId hot == 0) $ bump failed
+  when (val < 0.99) $ bump failed
 
 -- Text input focus is finalized against solved rects on first press.
 runTextInputFocusTest :: Context -> IORef Int -> IO ()
@@ -446,3 +500,103 @@ runSelectDropdownTest ctx failed = do
   let hasLow = any (\(_, txt, _, _, _) -> "Low" `T.isInfixOf` txt) overlays
       hasHigh = any (\(_, txt, _, _, _) -> "High" `T.isInfixOf` txt) overlays
   when (not (hasLow && hasHigh)) $ bump failed
+
+runSelectDropdownHoverTest :: Context -> IORef Int -> IO ()
+runSelectDropdownHoverTest _ failed = do
+  ctx <- newTerminalContext
+  let layout = defaultLayout {layoutPadding = Padding 0 0 0 0, layoutGap = 0}
+      inp0 = emptyInput {inputWindowSize = Size 40 6}
+      ui = column layout (select "Quality" ["Low", "High"] 0)
+  _ <- runFrame ctx inp0 ui
+  let click =
+        inp0
+          { inputMousePos = V2 1 0.5
+          , inputMouseDown = True
+          , inputMousePressed = True
+          , inputMouseReleased = False
+          }
+  _ <- runFrame ctx click ui
+  let open =
+        click
+          { inputMouseDown = False
+          , inputMousePressed = False
+          , inputMouseReleased = True
+          }
+  _ <- runFrame ctx open ui
+  overlaysOpen <- collectOverlayTextSpans ctx open
+  let highYs = [rectY r | (r, txt, _, _, _) <- overlaysOpen, "High" `T.isInfixOf` txt]
+  case highYs of
+    (highY : _) -> do
+      let hoverHigh = open {inputMousePos = V2 1 (highY + 0.5)}
+      _ <- runFrame ctx hoverHigh ui
+      overlaysHigh <- collectOverlayTextSpans ctx hoverHigh
+      let bgFor needle spans = [bg | (_, txt, _, bg, _) <- spans, needle `T.isInfixOf` txt]
+      case (bgFor "Low" overlaysHigh, bgFor "High" overlaysHigh) of
+        ([lowBg], [highBg]) -> when (lowBg == highBg) $ bump failed
+        _ -> bump failed
+      let lowYs = [rectY r | (r, txt, _, _, _) <- overlaysOpen, "Low" `T.isInfixOf` txt]
+      case (lowYs, bgFor "High" overlaysHigh) of
+        ((lowY : _), [highHoverBg]) -> do
+          let hoverLow = open {inputMousePos = V2 1 (lowY + 0.5)}
+          _ <- runFrame ctx hoverLow ui
+          overlaysLow <- collectOverlayTextSpans ctx hoverLow
+          case bgFor "Low" overlaysLow of
+            [lowHoverBg]
+              | lowHoverBg == highHoverBg -> pure ()
+              | otherwise -> bump failed
+            _ -> bump failed
+        _ -> bump failed
+    _ -> bump failed
+
+runTextWrapTest :: Context -> IORef Int -> IO ()
+runTextWrapTest _ failed = do
+  ctx <- newTerminalContext
+  let inp = emptyInput {inputWindowSize = Size 40 10}
+      long = T.replicate 24 (T.pack "x")
+      ui = labelEx (defaultLayout {layoutMaxW = 8}) long
+  _ <- runFrame ctx inp ui
+  spans <- collectTextSpans ctx
+  when (length spans < 3) $ bump failed
+
+runFlexWrapTest :: Context -> IORef Int -> IO ()
+runFlexWrapTest _ failed = do
+  ctx <- newTerminalContext
+  let inp = emptyInput {inputWindowSize = Size 30 10}
+      ui =
+        row
+          (defaultLayout {layoutWrap = True, layoutWidth = Fixed 10, layoutGap = 0})
+          ( do
+              _ <- label "AA"
+              _ <- label "BB"
+              _ <- label "CC"
+              _ <- label "DD"
+              pure ()
+          )
+  _ <- runFrame ctx inp ui
+  spans <- collectTextSpans ctx
+  let ys = nub (map (\(Rect _ y _ _, _, _, _, _) -> (round y :: Int)) spans)
+  when (length ys < 2) $ bump failed
+
+runFlexShrinkTest :: Context -> IORef Int -> IO ()
+runFlexShrinkTest _ failed = do
+  ctx <- newTerminalContext
+  let inp = emptyInput {inputWindowSize = Size 20 10}
+      ui =
+        row
+          ( defaultLayout
+              { layoutWidth = Fixed 5
+              , layoutGap = 0
+              , layoutPadding = Padding 0 0 0 0
+              }
+          )
+          ( do
+              _ <- labelEx (defaultLayout {layoutWidth = Shrink 1}) "AA"
+              _ <- labelEx (defaultLayout {layoutWidth = Shrink 1}) "BB"
+              _ <- labelEx (defaultLayout {layoutWidth = Shrink 1}) "CC"
+              pure ()
+          )
+  _ <- runFrame ctx inp ui
+  spans <- collectTextSpans ctx
+  when (length spans /= 3) $ bump failed
+  let lastX = maximum (map (\(Rect x _ _ _, _, _, _, _) -> x) spans)
+  when (lastX > 3.5) $ bump failed

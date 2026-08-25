@@ -20,6 +20,7 @@ data Sizing
   = Fixed Float
   | Fit
   | Grow Float
+  | Shrink Float
   | Percent Float
   deriving (Eq, Show)
 
@@ -46,6 +47,7 @@ data Layout = Layout
   , layoutHeight :: Sizing
   , layoutPadding :: Padding
   , layoutGap :: Float
+  , layoutWrap :: Bool
   , layoutAlignX :: AlignX
   , layoutAlignY :: AlignY
   , layoutMinW :: Float
@@ -63,6 +65,7 @@ defaultLayout =
     , layoutHeight = Fit
     , layoutPadding = Padding 4 4 4 4
     , layoutGap = 4
+    , layoutWrap = False
     , layoutAlignX = AlignStart
     , layoutAlignY = AlignTop
     , layoutMinW = 0
