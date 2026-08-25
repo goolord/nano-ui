@@ -43,6 +43,7 @@ main = do
   run "slider-store" runSliderTest
   run "scroll-wheel" runScrollTest
   run "tab-focus" runTabFocusTest
+  run "select-initial" runSelectTest
 
   n <- readIORef failed
   if n == 0
@@ -407,3 +408,13 @@ runTabFocusTest ctx failed = do
   _ <- runFrame ctx (inp0 {inputKeys = [KeyTab]}) ui
   focus2 <- getFocusId ctx
   when (focus1 == WidgetId 0 || focus2 == WidgetId 0 || focus1 == focus2) $ bump failed
+
+runSelectTest :: Context -> IORef Int -> IO ()
+runSelectTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 320 80}
+      ui = column defaultLayout (select "Quality" ["Low", "Medium", "High"] 1)
+  _ <- runFrame ctx inp0 ui
+  spans <- collectTextSpans ctx
+  let hasMedium =
+        any (\(_, txt, _, _, _) -> "Quality: Medium" `T.isInfixOf` txt) spans
+  when (not hasMedium) $ bump failed

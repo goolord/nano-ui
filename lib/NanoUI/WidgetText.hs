@@ -12,6 +12,7 @@ module NanoUI.WidgetText
   , selectLabelText
   , selectDisplayText
   , selectChevronReserve
+  , selectChevronCenterX
   ) where
 
 import Data.Text (Text)
@@ -88,3 +89,6 @@ selectDisplayText lbl opt = lbl <> ": " <> opt
 -- Space reserved on the right of a select for the chevron.
 selectChevronReserve :: Float
 selectChevronReserve = 16
+
+selectChevronCenterX :: Float -> Float -> Float
+selectChevronCenterX x w = x + w - selectChevronReserve / 2

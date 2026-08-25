@@ -52,9 +52,9 @@ import NanoUI.Context
   , intKey
   , isDisabled
   , registerFocusable
+  , pushTooltip
   , setStore
   )
-import NanoUI.Draw (beginLayer, Layer (..), pushRect, pushText)
 import NanoUI.Id (WidgetId (..))
 import NanoUI.Input (Input (..), Key (..))
 import NanoUI.Layout.Arena
@@ -72,10 +72,7 @@ import NanoUI.Style
   , Layout (..)
   , Padding (..)
   , Sizing (..)
-  , Style (..)
-  , Theme (..)
   , defaultLayout
-  , themePanel
   )
 import NanoUI.Types (Rect (..), V2 (..), rectContains)
 
@@ -343,6 +340,9 @@ select lbl options initial = do
   let current = IM.findWithDefault initial key (storeSelect store0)
       clamped = max 0 (min (length opts - 1) current)
       nodeText = selectPackOptions lbl opts
+  when (not (IM.member key (storeSelect store0))) $
+    liftIO $
+      setStore ctx (store0 {storeSelect = IM.insert key clamped (storeSelect store0)})
   resp <- addWidget wid NodeSelect nodeText 0 defaultLayout
   open <- liftIO $ do
     st <- getStore ctx
@@ -350,7 +350,12 @@ select lbl options initial = do
   when (respClicked resp) $
     liftIO $ do
       st <- getStore ctx
-      setStore ctx (st {storeSelectOpen = IM.insert key (not open) (storeSelectOpen st)})
+      setStore
+        ctx
+        ( if open
+            then st {storeSelectOpen = IM.insert key False (storeSelectOpen st)}
+            else st {storeSelectOpen = IM.singleton key True}
+        )
   store1 <- liftIO (getStore ctx)
   let finalIdx = IM.findWithDefault clamped key (storeSelect store1)
   pure (resp {respChanged = finalIdx /= initial}, finalIdx)
@@ -361,12 +366,8 @@ tooltip tipTxt resp = do
   when (respHovered resp) $ do
     ctx <- askContext
     liftIO $ do
-      let (Rect rx ry rw _) = respRect resp
-      beginLayer (ctxDrawArena ctx) LayerOverlay
-      let fm = ctxFontMetrics ctx
-          style = themePanel (ctxTheme ctx)
-      pushRect (ctxDrawArena ctx) (Rect (rx + rw + 4) ry 100 20) (styleBg style)
-      pushText (ctxDrawArena ctx) fm (rx + rw + 8) (ry + 4) tipTxt (styleFg style)
+      let (Rect rx ry rw rh) = respRect resp
+      pushTooltip ctx (Rect (rx + rw + 4) ry 100 (max rh 20)) tipTxt
   pure resp
 
 sliderBarCells :: Int

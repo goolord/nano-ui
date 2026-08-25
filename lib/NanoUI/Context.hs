@@ -32,6 +32,10 @@ module NanoUI.Context
   , setScrollOffset
   , getAnimationValue
   , lerpColor
+  , clearTooltips
+  , pushTooltip
+  , readTooltips
+  , PendingTooltip (..)
   ) where
 
 import Data.Bits (shiftR, shiftL, (.&.), (.|.))
@@ -83,6 +87,12 @@ emptyWidgetStore =
     , storeDisabled = IM.empty
     }
 
+data PendingTooltip = PendingTooltip
+  { pendingTooltipRect :: Rect
+  , pendingTooltipText :: Text
+  }
+  deriving (Eq, Show)
+
 data Context = Context
   { ctxNodeArena :: NodeArena
   , ctxDrawArena :: DrawArena
@@ -102,8 +112,8 @@ data Context = Context
   , ctxContainerStack :: IORef [Int]
   , ctxMessages :: IORef [FrameMsg]
   , ctxFocusables :: IORef [WidgetId]
-  , ctxPrevHot :: IORef WidgetId
   , ctxScrollDrag :: IORef (Maybe (WidgetId, Float))
+  , ctxTooltips :: IORef [PendingTooltip]
   }
 
 {-# INLINE newContext #-}
@@ -123,8 +133,8 @@ newContext = do
   ctxContainerStack <- newIORef []
   ctxMessages <- newIORef []
   ctxFocusables <- newIORef []
-  ctxPrevHot <- newIORef (WidgetId 0)
   ctxScrollDrag <- newIORef Nothing
+  ctxTooltips <- newIORef []
   let fm0 = monospaceMetrics 12
   pure
     Context
@@ -146,8 +156,8 @@ newContext = do
       , ctxContainerStack
       , ctxMessages
       , ctxFocusables
-      , ctxPrevHot
       , ctxScrollDrag
+      , ctxTooltips
       }
 
 {-# INLINE withFontMetrics #-}
@@ -323,3 +333,16 @@ lerpColor (Color a) (Color b) t =
 
 modifyIORefList :: IORef [a] -> ([a] -> [a]) -> IO ()
 modifyIORefList ref f = readIORef ref >>= writeIORef ref . f
+
+{-# INLINE clearTooltips #-}
+clearTooltips :: Context -> IO ()
+clearTooltips ctx = writeIORef (ctxTooltips ctx) []
+
+{-# INLINE pushTooltip #-}
+pushTooltip :: Context -> Rect -> Text -> IO ()
+pushTooltip ctx rect txt =
+  modifyIORefList (ctxTooltips ctx) (PendingTooltip rect txt :)
+
+{-# INLINE readTooltips #-}
+readTooltips :: Context -> IO [PendingTooltip]
+readTooltips ctx = readIORef (ctxTooltips ctx)
