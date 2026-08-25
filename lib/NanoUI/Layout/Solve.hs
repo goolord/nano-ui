@@ -6,7 +6,15 @@ import Control.Monad (forM, forM_)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
-import NanoUI.Font (FontMetrics (..), checkboxLeading, fmLineHeight, widgetPadding)
+import NanoUI.Font
+  ( FontMetrics (..)
+  , checkboxLeading
+  , fmLineHeight
+  , isTerminalFont
+  , measureTextWrapped
+  , measureTextWrappedIO
+  , widgetPadding
+  )
 import NanoUI.Layout.Arena
   ( DirTag (..)
   , NodeArena
@@ -27,6 +35,7 @@ import NanoUI.Layout.Arena
   , getRect
   , getText
   , getWidthSizing
+  , getWrap
   , setRect
   , getNodeValue
   , setNodeValue
@@ -67,7 +76,14 @@ measureTextNode :: NodeArena -> FontMetrics -> (Text -> IO (Float, Float)) -> No
 measureTextNode na fm measure idx = do
   txt <- getText na idx
   (minW, minH, maxW, maxH) <- getMinMax na idx
-  (tw, th) <- measure txt
+  (tw, th) <-
+    if maxW < 1e8
+      then do
+        let wrapW = max 0 maxW
+        if isTerminalFont fm
+          then pure (measureTextWrapped fm txt wrapW)
+          else measureTextWrappedIO (\t -> fmap fst (measure t)) fm txt wrapW
+      else measure txt
   setRect na idx 0 0 (clamp tw minW maxW) (clamp (max (fmLineHeight fm) th) minH maxH)
 
 measureSpacer :: NodeArena -> NodeIdx -> IO ()
@@ -134,11 +150,27 @@ measureContainer na idx = do
   pad <- getPadding na idx
   gap <- getGap na idx
   dir <- getDirection na idx
+  wrap <- getWrap na idx
   (minW, minH, maxW, maxH) <- getMinMax na idx
+  (wTag, wVal) <- getWidthSizing na idx
+  (hTag, hVal) <- getHeightSizing na idx
   childDims <- collectChildDims na idx
-  let (contentW, contentH) = foldChildren dir gap childDims
-      w = clamp (contentW + padL pad + padR pad) minW maxW
-      h = clamp (contentH + padT pad + padB pad) minH maxH
+  let innerMaxW =
+        case wTag of
+          SizingFixed -> max 0 (wVal - padL pad - padR pad)
+          _ -> max 0 (maxW - padL pad - padR pad)
+      (contentW, contentH) =
+        if wrap && dir == DirRow && innerMaxW > 0
+          then foldWrappedRow childDims innerMaxW gap
+          else foldChildren dir gap childDims
+      w =
+        case wTag of
+          SizingFixed -> clamp wVal minW maxW
+          _ -> clamp (contentW + padL pad + padR pad) minW maxW
+      h =
+        case hTag of
+          SizingFixed -> clamp hVal minH maxH
+          _ -> clamp (contentH + padT pad + padB pad) minH maxH
   setRect na idx 0 0 w h
 
 measureScrollContainer :: NodeArena -> NodeIdx -> IO ()
@@ -192,6 +224,62 @@ foldChildren DirColumn gap dims =
       totalH = sum hs + gap * fromIntegral (max 0 (length hs - 1))
    in (maxW, totalH)
 
+foldWrappedRow :: [(Float, Float)] -> Float -> Float -> (Float, Float)
+foldWrappedRow dims avail gap =
+  let rows = packDimLines dims avail gap
+      heights = map lineDimCross rows
+      widths = map (lineDimMain gap) rows
+   in ( if null widths then 0 else maximum widths
+      , if null heights then 0 else sum heights + gap * fromIntegral (max 0 (length heights - 1))
+      )
+
+packDimLines :: [(Float, Float)] -> Float -> Float -> [[(Float, Float)]]
+packDimLines dims avail gap = reverse (go 0 [] 0 [])
+  where
+    n = length dims
+    go i curLine curW acc
+      | i >= n = finalize curLine acc
+      | otherwise =
+          let item = dims !! i
+              (w, _) = item
+              need = if null curLine then w else w + gap
+           in if null curLine || curW + need <= avail + 0.001
+                then go (i + 1) (item : curLine) (curW + need) acc
+                -- Oversized children get a row alone; parent may clip or scroll.
+                else go i [] 0 (curLine : acc)
+    finalize [] acc = acc
+    finalize cur acc = cur : acc
+
+lineDimMain :: Float -> [(Float, Float)] -> Float
+lineDimMain gap line =
+  let ws = map fst line
+   in sum ws + gap * fromIntegral (max 0 (length ws - 1))
+
+lineDimCross :: [(Float, Float)] -> Float
+lineDimCross line =
+  if null line then 0 else maximum (map snd line)
+
+packRowLines :: [(NodeIdx, Float, Float)] -> Float -> Float -> [[(NodeIdx, Float, Float)]]
+packRowLines dims avail gap = reverse (go 0 [] 0 [])
+  where
+    n = length dims
+    go i curLine curW acc
+      | i >= n = finalize curLine acc
+      | otherwise =
+          let item = dims !! i
+              (w, _) = (snd3 item, thd3 item)
+              need = if null curLine then w else w + gap
+           in if null curLine || curW + need <= avail + 0.001
+                then go (i + 1) (item : curLine) (curW + need) acc
+                -- Oversized children get a row alone; parent may clip or scroll.
+                else go i [] 0 (curLine : acc)
+    finalize [] acc = acc
+    finalize cur acc = cur : acc
+
+lineCrossSize :: [(NodeIdx, Float, Float)] -> Float
+lineCrossSize line =
+  if null line then 0 else maximum (map thd3 line)
+
 positionNode :: NodeArena -> NodeIdx -> Float -> Float -> Float -> Float -> IO ()
 positionNode na idx x y availW availH = do
   (minW, minH, maxW, maxH) <- getMinMax na idx
@@ -224,19 +312,23 @@ positionScrollChildren na idx dir gap pad px py pw ph = do
 
 resolveSize :: SizingTag -> Float -> Float -> Float -> Float -> Float -> Float
 resolveSize SizingFixed v _ _ _ _ = v
-resolveSize SizingFit _ intrinsic _ minS maxS = clamp intrinsic minS maxS
+resolveSize SizingFit _ intrinsic avail minS maxS = clamp (min intrinsic avail) minS maxS
+resolveSize SizingShrink _ intrinsic avail minS maxS = clamp (min intrinsic avail) minS maxS
 resolveSize SizingGrow _ _ avail _ maxS = min avail maxS
 resolveSize SizingPercent p _ avail _ maxS = min (avail * p / 100) maxS
 
 positionChildren :: NodeArena -> NodeIdx -> DirTag -> Float -> Padding -> Float -> Float -> Float -> Float -> IO ()
 positionChildren na idx dir gap pad px py pw ph = do
+  wrap <- getWrap na idx
   let cx = px + padL pad
       cy = py + padT pad
       cw = pw - padL pad - padR pad
       ch = ph - padT pad - padB pad
   children <- collectChildren na idx
   case dir of
-    DirRow -> positionRow na children gap cx cy cw ch
+    DirRow
+      | wrap -> positionRowWrap na children gap cx cy cw ch
+      | otherwise -> positionRow na children gap cx cy cw ch
     DirColumn -> positionColumn na children gap cx cy cw ch
 
 -- Children are linked newest-first, so prepending while walking restores
@@ -255,62 +347,130 @@ collectChildren na idx = do
 
 positionRow :: NodeArena -> [NodeIdx] -> Float -> Float -> Float -> Float -> Float -> IO ()
 positionRow na children gap cx cy cw ch = do
-  childInfos <- forM children $ \ci -> do
-    (_, _, w, h) <- getRect na ci
-    pure (ci, w, h)
-  let totalIntrinsic = sum (map snd3 childInfos) + gap * fromIntegral (max 0 (length childInfos - 1))
-      slack = cw - totalIntrinsic
-  growTotal <- sumGrow na children
+  childInfos <- loadChildInfos na children
+  sizes <- distributeMainAxis na childInfos cw gap True
   ox <- newIORef cx
-  forM_ childInfos $ \(ci, iw, ih) -> do
+  forM_ (zip childInfos sizes) $ \((ci, _, _), (fw, _)) -> do
+    (_, _, _, ih) <- getRect na ci
     curX <- readIORef ox
-    growW <-
-      if growTotal > 0
-        then do
-          gf <- getGrowFactor na ci
-          pure (slack * gf / growTotal)
-        else pure 0
-    let fw = iw + growW
     ay <- getAlignY na ci
     let fy = alignY ay cy ch ih
     positionNode na ci curX fy fw ch
     writeIORef ox (curX + fw + gap)
 
+positionRowWrap :: NodeArena -> [NodeIdx] -> Float -> Float -> Float -> Float -> Float -> IO ()
+positionRowWrap na children gap cx cy cw _ch = do
+  childInfos <- loadChildInfos na children
+  let lineGroups = packRowLines childInfos cw gap
+  go cy lineGroups
+  where
+    go _ [] = pure ()
+    go oy (rowItems : rest) = do
+      let rowH = lineCrossSize rowItems
+      sizes <- distributeMainAxis na rowItems cw gap True
+      ox <- newIORef cx
+      forM_ (zip rowItems sizes) $ \((ci, _, _), (fw, _)) -> do
+        (_, _, _, ih) <- getRect na ci
+        curX <- readIORef ox
+        ay <- getAlignY na ci
+        let fy = alignY ay oy rowH ih
+        positionNode na ci curX fy fw rowH
+        writeIORef ox (curX + fw + gap)
+      go (oy + rowH + gap) rest
+
 positionColumn :: NodeArena -> [NodeIdx] -> Float -> Float -> Float -> Float -> Float -> IO ()
 positionColumn na children gap cx cy cw ch = do
-  childInfos <- forM children $ \ci -> do
-    (_, _, w, h) <- getRect na ci
-    pure (ci, w, h)
-  let totalIntrinsic = sum (map thd3 childInfos) + gap * fromIntegral (max 0 (length childInfos - 1))
-      slack = ch - totalIntrinsic
-  growTotal <- sumGrow na children
+  childInfos <- loadChildInfos na children
+  sizes <- distributeMainAxis na childInfos ch gap False
   oy <- newIORef cy
-  forM_ childInfos $ \(ci, iw, ih) -> do
+  forM_ (zip childInfos sizes) $ \((ci, _, _), (_, fh)) -> do
+    (_, _, iw, _) <- getRect na ci
     curY <- readIORef oy
-    growH <-
-      if growTotal > 0
-        then do
-          gf <- getGrowFactor na ci
-          pure (slack * gf / growTotal)
-        else pure 0
-    let fh = ih + growH
     ax <- getAlignX na ci
     let fx = alignX ax cx cw iw
     positionNode na ci fx curY cw fh
     writeIORef oy (curY + fh + gap)
 
-sumGrow :: NodeArena -> [NodeIdx] -> IO Float
-sumGrow na children = do
-  factors <- forM children (getGrowFactor na)
-  pure (sum factors)
+loadChildInfos :: NodeArena -> [NodeIdx] -> IO [(NodeIdx, Float, Float)]
+loadChildInfos na children =
+  forM children $ \ci -> do
+    (_, _, w, h) <- getRect na ci
+    pure (ci, w, h)
 
-getGrowFactor :: NodeArena -> NodeIdx -> IO Float
-getGrowFactor na idx = do
+-- Distribute grow/shrink slack on the container main axis (row = width).
+distributeMainAxis ::
+  NodeArena ->
+  [(NodeIdx, Float, Float)] ->
+  Float ->
+  Float ->
+  Bool ->
+  IO [(Float, Float)]
+distributeMainAxis na childInfos avail gap horizontal = do
+  let n = length childInfos
+      totalIntrinsic =
+        sum (map mainSize childInfos) + gap * fromIntegral (max 0 n - 1)
+      slack = avail - totalIntrinsic
+  if slack > 0.001
+    then growSizes childInfos slack
+    else
+      if slack < -0.001
+        then shrinkSizes childInfos (negate slack)
+        else pure (map (\(_, w, h) -> (w, h)) childInfos)
+  where
+    mainSize (_, w, h) = if horizontal then w else h
+
+    growSizes infos slack =
+      do
+        growTotal <- sumFactors na infos horizontal getGrowFactor
+        if growTotal <= 0
+          then pure (map (\(_, w, h) -> (w, h)) infos)
+          else
+            forM infos $ \(ci, iw, ih) -> do
+              gf <- getGrowFactor na ci horizontal
+              let extra = slack * gf / growTotal
+              pure (if horizontal then (iw + extra, ih) else (iw, ih + extra))
+
+    shrinkSizes infos overflow =
+      do
+        shrinkTotal <- sumFactors na infos horizontal getShrinkFactor
+        if shrinkTotal <= 0
+          then pure (map (\(_, w, h) -> (w, h)) infos)
+          else
+            forM infos $ \(ci, iw, ih) -> do
+              (minW, minH, _, _) <- getMinMax na ci
+              sf <- getShrinkFactor na ci horizontal
+              let main = if horizontal then iw else ih
+                  minMain = if horizontal then minW else minH
+                  delta = overflow * sf / shrinkTotal
+                  shrunk = max minMain (main - delta)
+              pure (if horizontal then (shrunk, ih) else (iw, shrunk))
+
+sumFactors ::
+  NodeArena ->
+  [(NodeIdx, Float, Float)] ->
+  Bool ->
+  (NodeArena -> NodeIdx -> Bool -> IO Float) ->
+  IO Float
+sumFactors na childInfos horizontal k = do
+  fs <- forM childInfos $ \(ci, _, _) -> k na ci horizontal
+  pure (sum fs)
+
+getGrowFactor :: NodeArena -> NodeIdx -> Bool -> IO Float
+getGrowFactor na idx horizontal = do
   (wTag, wVal) <- getWidthSizing na idx
   (hTag, hVal) <- getHeightSizing na idx
-  case (wTag, hTag) of
-    (SizingGrow, _) -> pure wVal
-    (_, SizingGrow) -> pure hVal
+  case if horizontal then (wTag, wVal) else (hTag, hVal) of
+    (SizingGrow, g) -> pure g
+    _ -> pure 0
+
+getShrinkFactor :: NodeArena -> NodeIdx -> Bool -> IO Float
+getShrinkFactor na idx horizontal = do
+  (wTag, wVal) <- getWidthSizing na idx
+  (hTag, hVal) <- getHeightSizing na idx
+  let (tag, val) = if horizontal then (wTag, wVal) else (hTag, hVal)
+  case tag of
+    SizingShrink -> pure val
+    SizingFit -> pure 1
     _ -> pure 0
 
 alignX :: AlignX -> Float -> Float -> Float -> Float

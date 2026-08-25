@@ -16,6 +16,7 @@ module NanoUI.Context
   , getFocusId
   , anyAnimating
   , startAnimation
+  , setAnimationValue
   , tickAnimations
   , getPrevRect
   , setPrevRect
@@ -97,6 +98,7 @@ data Context = Context
   { ctxNodeArena :: NodeArena
   , ctxDrawArena :: DrawArena
   , ctxHotId :: IORef WidgetId
+  , ctxLastHotId :: IORef WidgetId
   , ctxActiveId :: IORef WidgetId
   , ctxFocusId :: IORef WidgetId
   , ctxPrevRects :: IORef (IntMap Rect)
@@ -122,6 +124,7 @@ newContext = do
   nodeArena <- newNodeArena
   drawArena <- newDrawArena
   ctxHotId <- newIORef (WidgetId 0)
+  ctxLastHotId <- newIORef (WidgetId 0)
   ctxActiveId <- newIORef (WidgetId 0)
   ctxFocusId <- newIORef (WidgetId 0)
   ctxPrevRects <- newIORef IM.empty
@@ -141,6 +144,7 @@ newContext = do
       { ctxNodeArena = nodeArena
       , ctxDrawArena = drawArena
       , ctxHotId
+      , ctxLastHotId
       , ctxActiveId
       , ctxFocusId
       , ctxPrevRects
@@ -217,8 +221,21 @@ startAnimation :: Context -> WidgetId -> Float -> Float -> Float -> IO ()
 startAnimation ctx wid start end dur = do
   let key = intKey wid
   anims <- readIORef (ctxAnimations ctx)
-  writeIORef (ctxAnimations ctx) (IM.insert key (Animation start end dur 0) anims)
+  let elapsed =
+        case IM.lookup key anims of
+          Just a | animStart a == start && animEnd a == end -> animElapsed a
+          _ -> 0
+  writeIORef (ctxAnimations ctx) (IM.insert key (Animation start end dur elapsed) anims)
   writeIORef (ctxAnyAnimating ctx) True
+
+{-# INLINE setAnimationValue #-}
+setAnimationValue :: Context -> WidgetId -> Float -> IO ()
+setAnimationValue ctx wid val = do
+  let key = intKey wid
+      v = max 0 (min 1 val)
+  anims <- readIORef (ctxAnimations ctx)
+  writeIORef (ctxAnimations ctx) (IM.insert key (Animation v v 0 0) anims)
+  writeIORef (ctxAnyAnimating ctx) False
 
 {-# INLINE tickAnimations #-}
 tickAnimations :: Context -> Float -> IO ()
@@ -228,7 +245,10 @@ tickAnimations ctx dt = do
     then writeIORef (ctxAnyAnimating ctx) False
     else do
       let updated = IM.map (\a -> a {animElapsed = animElapsed a + dt}) anims
-          finished = IM.filter (\a -> animElapsed a >= animDuration a) updated
+          finished =
+            IM.filter
+              (\a -> animStart a /= animEnd a && animElapsed a >= animDuration a)
+              updated
           remaining = IM.difference updated finished
       writeIORef (ctxAnimations ctx) remaining
       writeIORef (ctxAnyAnimating ctx) (not (IM.null remaining))

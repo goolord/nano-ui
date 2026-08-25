@@ -41,6 +41,7 @@ module NanoUI
   , row
   , column
   , label
+  , labelEx
   , button
   , checkbox
   , slider
@@ -71,6 +72,8 @@ module NanoUI
   , getFocusId
   , getScrollOffset
   , startAnimation
+  , setAnimationValue
+  , getAnimationValue
   , anyAnimating
   , FrameMsg (..)
   , -- Draw
@@ -91,7 +94,7 @@ module NanoUI
   , renderASCIIFromRects
   ) where
 
-import NanoUI.Context (Context (..), FrameMsg (..), anyAnimating, ctxTheme, getFocusId, getHotId, getScrollOffset, isDirty, markDirty, newContext, newSdlContext, newTerminalContext, startAnimation, withExternalText, withFontMetrics, withMeasureText)
+import NanoUI.Context (Context (..), FrameMsg (..), anyAnimating, ctxTheme, getAnimationValue, getFocusId, getHotId, getScrollOffset, isDirty, markDirty, newContext, newSdlContext, newTerminalContext, setAnimationValue, startAnimation, withExternalText, withFontMetrics, withMeasureText)
 import NanoUI.Draw (DrawCmd (..), DrawData (..), Layer (..), indexSize, vertexSize)
 import NanoUI.Font (FontMetrics (..), isTerminalFont, labelContentInset, monospaceMetrics, widgetContentInset, widgetPadding)
 import NanoUI.Frame (collectOverlayTextSpans, collectTextSpans, needsRedraw, runFrame)
@@ -126,6 +129,7 @@ import NanoUI.Widgets
   , checkbox
   , column
   , label
+  , labelEx
   , panel
   , row
   , separator

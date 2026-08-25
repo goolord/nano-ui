@@ -21,12 +21,14 @@ import NanoUI.Context
   , getStore
   , intKey
   , isDirty
+  , isDisabled
   , markDirty
   , pushMessage
   , setScrollOffset
   , setStore
   , setPrevRect
   , startAnimation
+  , setAnimationValue
   , tickAnimations
   , getAnimationValue
   , lerpColor
@@ -54,7 +56,10 @@ import NanoUI.Font
   , fmLineHeight
   , isTerminalFont
   , labelContentInset
+  , lineWidth
   , widgetContentInset
+  , wrapTextLines
+  , wrapTextLinesIO
   )
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), Key (..), Modifiers (..), inputChanged)
@@ -65,6 +70,7 @@ import NanoUI.Layout.Arena
   , arenaCount
   , getDirection
   , getFirstChild
+  , getMinMax
   , getNextSibling
   , getNodeType
   , getNodeValue
@@ -108,7 +114,6 @@ runFrame ctx inp ui = do
   writeIORef (ctxHotId ctx) (WidgetId 0)
   clearTooltips ctx
   result <- unUI ui ctx inp
-  writeIORef (ctxHotId ctx) (WidgetId 0)
   -- Terminal sliders embed the bar in node text; sync before measure so width is correct.
   syncWidgetLabels ctx
   let Size w h = inputWindowSize inp
@@ -116,6 +121,7 @@ runFrame ctx inp ui = do
   updateScrollWheel ctx inp
   updateScrollDrag ctx inp
   applyScrollOffsets ctx
+  finalizePointerPress ctx inp
   finalizePointerRelease ctx inp
   finalizeTextInputFocus ctx inp
   finalizeTabFocus ctx inp
@@ -229,8 +235,37 @@ collectNodeTextSpans ctx idx = do
         else do
           let style = themePanel theme
               (ix, iy) = labelContentInset fm
-          (tw, th) <- ctxMeasureText ctx txt
-          pure [(Rect (x + ix) (y + iy) tw th, txt, styleFg style, styleBg style)]
+              fg = styleFg style
+              bg = styleBg style
+          (_, _, maxW, _) <- getMinMax (ctxNodeArena ctx) idx
+          let innerW = max 0 (w - ix)
+              wrapW = if maxW < 1e8 then min maxW innerW else innerW
+          if maxW < 1e8
+            then do
+              let lineH = fmLineHeight fm
+              textLines <-
+                if isTerminalFont fm
+                  then pure (wrapTextLines fm txt wrapW)
+                  else wrapTextLinesIO (\t -> fmap fst (ctxMeasureText ctx t)) fm txt wrapW
+              lineWs <-
+                if isTerminalFont fm
+                  then pure (map (lineWidth fm) textLines)
+                  else mapM (fmap fst . ctxMeasureText ctx) textLines
+              pure
+                [ ( Rect
+                      (x + ix)
+                      (y + iy + fromIntegral i * lineH)
+                      (min lw innerW)
+                      lineH
+                  , line
+                  , fg
+                  , bg
+                  )
+                | (i, line, lw) <- zip3 [(0 :: Int) ..] textLines lineWs
+                ]
+            else do
+              (tw, th) <- ctxMeasureText ctx txt
+              pure [(Rect (x + ix) (y + iy) (min tw innerW) th, txt, fg, bg)]
     else
       if isWidgetNode nt
         then widgetTextSpans ctx nt idx x y w h
@@ -419,11 +454,10 @@ widgetVisualStyle ctx nt idx = do
   pure base {styleBg = bg}
 
 hoverBackground :: Style -> Float -> Bool -> Color
-hoverBackground base animT isHot
+hoverBackground base val isHot
   | styleBg base == styleHoverBg base = styleBg base
-  | isHot && animT <= 0 = styleHoverBg base
-  | animT > 0 = lerpColor (styleBg base) (styleHoverBg base) animT
-  | otherwise = styleBg base
+  | isHot = lerpColor (styleBg base) (styleHoverBg base) (if val > 0 then val else 1)
+  | otherwise = lerpColor (styleBg base) (styleHoverBg base) val
 
 lowerShapes :: Context -> IO ()
 lowerShapes ctx = do
@@ -785,25 +819,65 @@ unlessHit b act = when (not b) act
 -- Hit-test widgets with solved layout rects so hover paint matches draw positions.
 refreshHover :: Context -> Input -> IO ()
 refreshHover ctx inp = do
-  prevHot <- readIORef (ctxHotId ctx)
+  prevHot <- readIORef (ctxLastHotId ctx)
   writeIORef (ctxHotId ctx) (WidgetId 0)
   count <- arenaCount (ctxNodeArena ctx)
   let mouse = inputMousePos inp
-  forM_ [0 .. count - 1] $ \idx -> do
-    nt <- getNodeType (ctxNodeArena ctx) idx
-    when (isWidgetNode nt) $ do
-      wid <- getWidgetId (ctxNodeArena ctx) idx
-      (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-      let rect = Rect x y w h
-      when (w > 0 && h > 0 && rectContains rect mouse) $
-        writeIORef (ctxHotId ctx) wid
+      go idx = do
+        nt <- getNodeType (ctxNodeArena ctx) idx
+        when (isWidgetNode nt) $ do
+          wid <- getWidgetId (ctxNodeArena ctx) idx
+          (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+          let rect = Rect x y w h
+          when (w > 0 && h > 0 && rectContains rect mouse) $
+            writeIORef (ctxHotId ctx) wid
+        when (idx > 0) $ go (idx - 1)
+  when (count > 0) $ go (count - 1)
   newHot <- readIORef (ctxHotId ctx)
+  writeIORef (ctxLastHotId ctx) newHot
   let terminal = isTerminalFont (ctxFontMetrics ctx)
   when (prevHot /= newHot) $ do
     markDirty ctx
     unless terminal $ do
       when (hashWidgetId prevHot /= 0) $ startAnimation ctx prevHot 1 0 0.12
       when (hashWidgetId newHot /= 0) $ startAnimation ctx newHot 0 1 0.12
+
+finalizePointerPress :: Context -> Input -> IO ()
+finalizePointerPress ctx inp =
+  when (inputMousePressed inp) $ do
+    let mouse = inputMousePos inp
+    count <- arenaCount (ctxNodeArena ctx)
+    mWid <- findTopWidgetUnderMouse ctx count mouse isInteractiveNode
+    case mWid of
+      Nothing -> pure ()
+      Just wid -> do
+        disabled <- isDisabled ctx wid
+        unless disabled $ writeIORef (ctxActiveId ctx) wid
+
+findTopWidgetUnderMouse ::
+  Context -> Int -> V2 -> (NodeType -> Bool) -> IO (Maybe WidgetId)
+findTopWidgetUnderMouse ctx count mouse wanted = go (count - 1)
+  where
+    go idx
+      | idx < 0 = pure Nothing
+      | otherwise = do
+          nt <- getNodeType (ctxNodeArena ctx) idx
+          if not (wanted nt)
+            then go (idx - 1)
+            else do
+              wid <- getWidgetId (ctxNodeArena ctx) idx
+              (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+              let rect = Rect x y w h
+              if w > 0 && h > 0 && rectContains rect mouse
+                then pure (Just wid)
+                else go (idx - 1)
+
+isInteractiveNode :: NodeType -> Bool
+isInteractiveNode nt =
+  nt == NodeButton
+    || nt == NodeCheckbox
+    || nt == NodeSlider
+    || nt == NodeSelect
 
 -- Clicks are finalized against solved layout rects; widgets only track press state.
 finalizePointerRelease :: Context -> Input -> IO ()
@@ -815,6 +889,10 @@ finalizePointerRelease ctx inp =
       when (hashWidgetId active /= 0) $ do
         let mouse = inputMousePos inp
         count <- arenaCount (ctxNodeArena ctx)
+        releasedOver <-
+          if count <= 0
+            then pure False
+            else checkReleasedOver ctx count active mouse
         forM_ [0 .. count - 1] $ \idx -> do
           wid <- getWidgetId (ctxNodeArena ctx) idx
           when (wid == active) $ do
@@ -838,7 +916,24 @@ finalizePointerRelease ctx inp =
                   txt <- getText (ctxNodeArena ctx) idx
                   pushMessage ctx (FrameMsg ("checkbox:" <> T.unpack (checkboxLabelText txt)))
                 _ -> pure ()
-      writeIORef (ctxActiveId ctx) (WidgetId 0)
+        writeIORef (ctxActiveId ctx) (WidgetId 0)
+        when releasedOver $
+          unless (isTerminalFont (ctxFontMetrics ctx)) $
+            setAnimationValue ctx active 1
+
+checkReleasedOver :: Context -> Int -> WidgetId -> V2 -> IO Bool
+checkReleasedOver ctx count active mouse = go 0
+  where
+    go idx
+      | idx >= count = pure False
+      | otherwise = do
+          wid <- getWidgetId (ctxNodeArena ctx) idx
+          if wid /= active
+            then go (idx + 1)
+            else do
+              (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+              let rect = Rect x y w h
+              pure (w > 0 && h > 0 && rectContains rect mouse)
 
 -- Focus text inputs using solved layout rects so the caret appears on first press.
 finalizeTextInputFocus :: Context -> Input -> IO ()
@@ -955,13 +1050,13 @@ selectDropGap :: FontMetrics -> Float
 selectDropGap fm = if isTerminalFont fm then 0 else 2
 
 selectDropBg :: Style -> Color
-selectDropBg st = lerpColor (styleBg st) (colorRGBA 255 255 255 255) 0.1
+selectDropBg st = styleBg st
 
 selectDropActiveBg :: Style -> Color
-selectDropActiveBg st = lerpColor (styleActiveBg st) (colorRGBA 255 255 255 255) 0.14
+selectDropActiveBg st = styleActiveBg st
 
 selectDropHoverBg :: Style -> Color
-selectDropHoverBg st = lerpColor (styleHoverBg st) (colorRGBA 255 255 255 255) 0.08
+selectDropHoverBg st = styleHoverBg st
 
 selectDropRect :: FontMetrics -> Float -> Float -> Float -> Float -> Int -> Rect
 selectDropRect fm x y w h nOpts =
@@ -1007,11 +1102,11 @@ terminalSelectDropdownSpans rx ry wi opts picked hoverIdx fg dropBg dropActiveBg
   let innerW = max 0 (wi - 1)
       itemRow opt = T.singleton ' ' <> padDropText innerW opt
       rowBg i =
-        if i == picked
-          then dropActiveBg
+        if Just i == hoverIdx
+          then dropHoverBg
           else
-            if Just i == hoverIdx
-              then dropHoverBg
+            if i == picked
+              then dropActiveBg
               else dropBg
    in [ terminalDropRow rx (ry + i) wi rowText fg (rowBg i) clip
       | (i, opt) <- zip [0 ..] opts
@@ -1302,11 +1397,11 @@ drawSelectOverlays ctx inp = do
                             itemRect = Rect (rectX dropRect) iy (rectW dropRect) itemH
                             hovered = rectContains itemRect mouse
                             bg =
-                              if i == picked
-                                then styleActiveBg itemStyle
+                              if hovered
+                                then styleHoverBg itemStyle
                                 else
-                                  if hovered
-                                    then styleHoverBg itemStyle
+                                  if i == picked
+                                    then styleActiveBg itemStyle
                                     else styleBg itemStyle
                         fillStyledRect da False (itemStyle {styleBg = bg}) itemRect
                       go (idx + 1)
@@ -1356,18 +1451,16 @@ collectSelectDropdownSpans ctx inp = do
                           )
                       else do
                         let (ix, iy) = widgetContentInset fm
+                            dropBg = styleBg itemStyle
                         itemSpans <-
                           forM (zip ([0 ..] :: [Int]) opts) $ \(i, opt) ->
                             if T.null opt
                               then pure []
                               else do
                                 (tw, th) <- ctxMeasureText ctx opt
-                                let ty = selectDropItemY dropRect itemH i + iy
-                                    bg =
-                                      if i == picked
-                                        then styleActiveBg itemStyle
-                                        else styleBg itemStyle
-                                pure [(Rect (x + ix) ty tw th, opt, fg, bg, dropRect)]
+                                let itemY = selectDropItemY dropRect itemH i
+                                    ty = itemY + iy
+                                pure [(Rect (x + ix) ty tw th, opt, fg, dropBg, dropRect)]
                         rest <- go (idx + 1)
                         pure (concat itemSpans ++ rest)
   go 0

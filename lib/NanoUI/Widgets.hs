@@ -4,6 +4,7 @@ module NanoUI.Widgets
   , row
   , column
   , label
+  , labelEx
   , button
   , checkbox
   , slider
@@ -126,6 +127,7 @@ container layout child = UI $ \ctx inp -> do
       0
       (layoutAlignX layout)
       (layoutAlignY layout)
+      (layoutWrap layout)
   writeIORef (ctxContainerStack ctx) (idx : stack)
   r <- unUI child ctx inp
   writeIORef (ctxContainerStack ctx) stack
@@ -133,9 +135,13 @@ container layout child = UI $ \ctx inp -> do
 
 {-# INLINE label #-}
 label :: HasCallStack => Text -> UI Response
-label txt = do
+label = labelEx defaultLayout
+
+{-# INLINE labelEx #-}
+labelEx :: HasCallStack => Layout -> Text -> UI Response
+labelEx layout txt = do
   wid <- currentId
-  addWidget wid NodeText txt 0 defaultLayout
+  addWidget wid NodeText txt 0 layout
 
 {-# INLINE button #-}
 button :: HasCallStack => Text -> UI Response
@@ -266,6 +272,7 @@ separator = do
         0
         AlignStart
         AlignTop
+        False
     setWidgetId (ctxNodeArena ctx) idx wid
     resolveInteraction ctx inp wid
 
@@ -295,6 +302,7 @@ spacer w h = do
         0
         AlignStart
         AlignTop
+        False
     setWidgetId (ctxNodeArena ctx) idx wid
     resolveInteraction ctx inp wid
 
@@ -323,6 +331,7 @@ scrollArea layout child = do
           0
           (layoutAlignX layout)
           (layoutAlignY layout)
+          (layoutWrap layout)
       setWidgetId (ctxNodeArena ctx) idx wid
       writeIORef (ctxContainerStack ctx) (idx : stack)
       childR <- unUI child ctx inp
@@ -423,6 +432,7 @@ addWidgetResp wid nt txt value layout mResp = do
         0
         (layoutAlignX layout)
         (layoutAlignY layout)
+        (layoutWrap layout)
     setNodeText (ctxNodeArena ctx) idx txt
     setNodeValue (ctxNodeArena ctx) idx value
     setWidgetId (ctxNodeArena ctx) idx wid
@@ -456,8 +466,6 @@ resolveInteraction ctx inp wid = do
       active <- readIORef (ctxActiveId ctx)
       let activating = inputMousePressed inp && hovered
           isActive = active == wid || activating
-      when hovered $ writeIORef (ctxHotId ctx) wid
-      when activating $ writeIORef (ctxActiveId ctx) wid
       let pressed = inputMouseDown inp && (hovered || active == wid)
           clicked = inputMouseReleased inp && isActive
       pure

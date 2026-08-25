@@ -33,6 +33,20 @@ main = do
             }
           ( column compact $ do
               _ <- label "nano-ui terminal"
+              _ <-
+                labelEx
+                  (compact {layoutMaxW = 28})
+                  "This label wraps inside a max width so long lines break cleanly."
+              _ <-
+                row
+                  (compact {layoutWrap = True, layoutWidth = Fixed 24})
+                  ( do
+                      _ <- label "[wrap]"
+                      _ <- label "alpha"
+                      _ <- label "beta"
+                      _ <- label "gamma"
+                      pure ()
+                  )
               _ <- label ""
               ok <- button "OK"
               when (respClicked ok) $ do
