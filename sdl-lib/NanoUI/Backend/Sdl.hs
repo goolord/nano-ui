@@ -18,11 +18,13 @@ import NanoUI
   , collectOverlayTextSpans
   , ctxTheme
   , emptyInput
+  , inputMousePos
   , isDirty
   , needsRedraw
   , runFrame
   , themeWindow
   )
+import NanoUI.Sdl.Cursor (syncPointerCursor)
 import NanoUI.Sdl.Event (SdlEvent (..))
 import NanoUI.Sdl.Font (renderTextSpans)
 import NanoUI.Sdl.Input
@@ -109,13 +111,27 @@ loop ctx ui env prev pendingRedraw wasAnimating shouldQuit inp queued lastT = do
           dirtyNow <- isDirty ctx'
           anim <- anyAnimating ctx'
           let forceFinal = wasAnim && not anim
+              mouseMoved = inputMousePos prevInp /= inputMousePos inpSynced
+              shouldDraw =
+                need
+                  || anim
+                  || forceFinal
+                  || pendingDirty
+                  || dirtyNow
+                  || not (null group)
+              cursorOnly = mouseMoved && not shouldDraw
           writeIORef wasAnimating anim
-          if need || anim || forceFinal || pendingDirty || dirtyNow || not (null group)
+          if shouldDraw
             then do
               (_, synced) <- draw ctx' ui env inpSynced
               writeIORef pendingRedraw False
               writeIORef prev synced
               loop ctx' ui env prev pendingRedraw wasAnimating shouldQuit synced rest now
+            else if cursorOnly
+              then do
+                synced <- syncCursorFrame ctx' ui env inpSynced
+                writeIORef prev synced
+                loop ctx' ui env prev pendingRedraw wasAnimating shouldQuit synced rest now
             else
               if null rest
                 then loop ctx' ui env prev pendingRedraw wasAnimating shouldQuit inpSynced [] now
@@ -125,6 +141,7 @@ draw :: Context -> UI () -> SdlEnv -> Input -> IO (Bool, Input)
 draw ctx ui env inp = do
   scale <- readIORef (sdlScaleRef env)
   (_, _, drawData, dirtyAfterUi) <- runFrame ctx inp ui
+  syncPointerCursor (sdlCursors env) ctx inp
   baseSpans <- collectTextSpans ctx
   overlaySpans <- collectOverlayTextSpans ctx inp
   font <- readIORef (sdlFontRef env)
@@ -135,3 +152,9 @@ draw ctx ui env inp = do
   renderTextSpans (sdlRenderer env) scale font (sdlTextCache env) overlaySpans
   void $ renderPresentSafe (sdlRenderer env)
   pure (dirtyAfterUi, inp)
+
+syncCursorFrame :: Context -> UI () -> SdlEnv -> Input -> IO Input
+syncCursorFrame ctx ui env inp = do
+  _ <- runFrame ctx inp ui
+  syncPointerCursor (sdlCursors env) ctx inp
+  pure inp

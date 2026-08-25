@@ -23,6 +23,7 @@ import NanoUI.Sdl.Display
   , setRenderScale
   , windowToLogicalCoords
   )
+import NanoUI.Sdl.Cursor (SdlCursors (..), destroyCursors, initCursors)
 import NanoUI.Sdl.Font
   ( SdlFont
   , TextCache
@@ -56,6 +57,7 @@ data SdlEnv = SdlEnv
   , sdlScaleRef :: IORef Float
   , sdlFontRef :: IORef SdlFont
   , sdlTextCache :: TextCache
+  , sdlCursors :: SdlCursors
   }
 
 defaultWindowSize :: Size
@@ -128,6 +130,7 @@ withSdl ctx title (Size w h) act =
                 scaleRef <- newIORef scale
                 fontRef <- newIORef font
                 cache <- newTextCache
+                cursors <- initCursors
                 unlessM (setRenderScale ren defaultUiScale) $
                   fail "SDL_SetRenderScale failed"
                 _ <- startTextInputSafe win
@@ -139,8 +142,10 @@ withSdl ctx title (Size w h) act =
                     , sdlScaleRef = scaleRef
                     , sdlFontRef = fontRef
                     , sdlTextCache = cache
+                    , sdlCursors = cursors
                     }
         teardown env = do
+          destroyCursors (sdlCursors env)
           destroyTextCache (sdlTextCache env)
           font <- readIORef (sdlFontRef env)
           closeFont font

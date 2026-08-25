@@ -17,10 +17,17 @@ main :: IO ()
 main = do
   failed <- newIORef 0
   ctx <- newContext
+  sdlCtx <- newSdlContext
 
   let run name test = do
         before <- readIORef failed
         test ctx failed
+        after <- readIORef failed
+        when (after > before) $ putStrLn ("FAIL: " ++ name)
+
+  let runSdl name test = do
+        before <- readIORef failed
+        test sdlCtx failed
         after <- readIORef failed
         when (after > before) $ putStrLn ("FAIL: " ++ name)
 
@@ -33,6 +40,14 @@ main = do
   run "overlay" runOverlayTest
   run "interaction" runInteractionTest
   run "hover" runHoverTest
+  run "pointer-cursor" runPointerCursorTest
+  run "pointer-cursor-checkbox" runPointerCursorCheckboxTest
+  run "text-input-cursor" runTextInputCursorTest
+  run "select-dropdown-cursor" runSelectDropdownCursorTest
+  run "slider-cursor" runSliderCursorTest
+  run "scroll-thumb-cursor" runScrollThumbCursorTest
+  runSdl "text-input-span" runTextInputSpanTest
+  runSdl "text-input-focus-sdl" runTextInputFocusSdlTest
   run "button-hover-anim" runButtonHoverAnimTest
   run "button-press-release-hover" runButtonPressReleaseHoverTest
   run "text-input-focus" runTextInputFocusTest
@@ -48,6 +63,7 @@ main = do
   run "select-initial" runSelectTest
   run "select-dropdown" runSelectDropdownTest
   run "select-dropdown-hover" runSelectDropdownHoverTest
+  run "select-pick-low" runSelectPickLowTest
   run "text-wrap" runTextWrapTest
   run "flex-wrap" runFlexWrapTest
   run "flex-shrink" runFlexShrinkTest
@@ -61,6 +77,16 @@ main = do
 
 bump :: IORef Int -> IO ()
 bump r = modifyIORef r (+ 1)
+
+findGrabHover :: Context -> UI a -> Input -> Float -> [Float] -> IO (Maybe Input)
+findGrabHover ctx ui inp0 thumbX = go
+  where
+    go [] = pure Nothing
+    go (y : ys) = do
+      let hover = inp0 {inputMousePos = V2 thumbX y}
+      _ <- runFrame ctx hover ui
+      kind <- uiCursorKind ctx hover
+      if kind == UiCursorGrab then pure (Just hover) else go ys
 
 modifyIORef :: IORef Int -> (Int -> Int) -> IO ()
 modifyIORef r f = readIORef r >>= writeIORef r . f
@@ -215,6 +241,234 @@ runHoverTest ctx failed = do
   _ <- runFrame ctx inp1 ui
   hot <- getHotId ctx
   when (hashWidgetId hot == 0) $ bump failed
+
+runPointerCursorTest :: Context -> IORef Int -> IO ()
+runPointerCursorTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 200 100}
+      ui = column defaultLayout (button "Click")
+  _ <- runFrame ctx inp0 ui
+  let inp1 = inp0 {inputMousePos = V2 10 10}
+  _ <- runFrame ctx inp1 ui
+  want <- pointerCursorWanted ctx inp1
+  when (not want) $ bump failed
+  let inp2 = inp0 {inputMousePos = V2 (-1) (-1)}
+  _ <- runFrame ctx inp2 ui
+  want2 <- pointerCursorWanted ctx inp2
+  when want2 $ bump failed
+
+runPointerCursorCheckboxTest :: Context -> IORef Int -> IO ()
+runPointerCursorCheckboxTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 200 100}
+      ui = column defaultLayout (checkbox "Feature" False)
+  _ <- runFrame ctx inp0 ui
+  ((resp, _), _, _, _) <- runFrame ctx inp0 ui
+  let Rect rx ry rw rh = respRect resp
+      hover = inp0 {inputMousePos = V2 (rx + rw / 2) (ry + rh / 2)}
+  _ <- runFrame ctx hover ui
+  want <- pointerCursorWanted ctx hover
+  when (not want) $ bump failed
+  let click =
+        hover
+          { inputMouseDown = True
+          , inputMousePressed = True
+          , inputMouseReleased = False
+          }
+  _ <- runFrame ctx click ui
+  wantClick <- pointerCursorWanted ctx click
+  when (not wantClick) $ bump failed
+
+runTextInputCursorTest :: Context -> IORef Int -> IO ()
+runTextInputCursorTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 320 120}
+      ui = column defaultLayout (textInput "Name" "")
+  _ <- runFrame ctx inp0 ui
+  _ <- runFrame ctx inp0 ui
+  spans <- collectTextSpans ctx
+  let labelPos =
+        [ (rectX r + rectW r / 2, rectY r + 0.5)
+        | (r, txt, _, _, _) <- spans
+        , txt == "Name"
+        ]
+      fieldPos =
+        [ (rectX r + rectW r / 2, rectY r + 0.5)
+        | (r, txt, _, _, _) <- spans
+        , "Enter" `T.isInfixOf` txt
+        ]
+  case (labelPos, fieldPos) of
+    ([(lx, ly)], [(fx, fy)]) -> do
+      let labelHover = inp0 {inputMousePos = V2 lx ly}
+      _ <- runFrame ctx labelHover ui
+      labelKind <- uiCursorKind ctx labelHover
+      when (labelKind /= UiCursorDefault) $ bump failed
+      let fieldHover = inp0 {inputMousePos = V2 fx fy}
+      _ <- runFrame ctx fieldHover ui
+      fieldKind <- uiCursorKind ctx fieldHover
+      when (fieldKind /= UiCursorText) $ bump failed
+      let click =
+            fieldHover
+              { inputMouseDown = True
+              , inputMousePressed = True
+              , inputMouseReleased = False
+              }
+      _ <- runFrame ctx click ui
+      clickKind <- uiCursorKind ctx click
+      when (clickKind /= UiCursorText) $ bump failed
+    _ -> bump failed
+
+runSelectDropdownCursorTest :: Context -> IORef Int -> IO ()
+runSelectDropdownCursorTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 320 200}
+      ui = column defaultLayout (select "Quality" ["Low", "High"] 0)
+  _ <- runFrame ctx inp0 ui
+  ((resp, _), _, _, _) <- runFrame ctx inp0 ui
+  let Rect sx sy sw sh = respRect resp
+      btn = V2 (sx + sw / 2) (sy + sh / 2)
+      openPress =
+        inp0
+          { inputMousePos = btn
+          , inputMouseDown = True
+          , inputMousePressed = True
+          , inputMouseReleased = False
+          }
+  _ <- runFrame ctx openPress ui
+  let openRelease =
+        openPress
+          { inputMousePressed = False
+          , inputMouseDown = False
+          , inputMouseReleased = True
+          }
+  _ <- runFrame ctx openRelease ui
+  overlaysOpen <- collectOverlayTextSpans ctx openRelease
+  let lowYs = [rectY r | (r, txt, _, _, _) <- overlaysOpen, "Low" `T.isInfixOf` txt]
+  case lowYs of
+    (lowY : _) -> do
+      let hover =
+            inp0
+              { inputMousePos = V2 (sx + sw / 2) (lowY + 0.5)
+              , inputMouseReleased = False
+              , inputMousePressed = False
+              , inputMouseDown = False
+              }
+      _ <- runFrame ctx hover ui
+      kind <- uiCursorKind ctx hover
+      when (kind /= UiCursorPointer) $ bump failed
+      let press =
+            hover
+              { inputMouseDown = True
+              , inputMousePressed = True
+              }
+      _ <- runFrame ctx press ui
+      pressKind <- uiCursorKind ctx press
+      when (pressKind /= UiCursorPointer) $ bump failed
+    _ -> bump failed
+
+runSliderCursorTest :: Context -> IORef Int -> IO ()
+runSliderCursorTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 300 80}
+      ui = column defaultLayout (slider (defaultLayout {layoutWidth = Grow 1}) "Volume" 0 100 50)
+  _ <- runFrame ctx inp0 ui
+  ((resp, _), _, _, _) <- runFrame ctx inp0 ui
+  let Rect rx ry rw rh = respRect resp
+      trackRect = sliderTrackRect rx ry rw rh
+      track = V2 (rx + rw / 2) (rectY trackRect + rectH trackRect / 2)
+      labelPos = V2 (rx + 4) (ry + 4)
+  let hoverTrack = inp0 {inputMousePos = track}
+  _ <- runFrame ctx hoverTrack ui
+  hoverKind <- uiCursorKind ctx hoverTrack
+  when (hoverKind /= UiCursorGrab) $ bump failed
+  let pressTrack =
+        hoverTrack
+          { inputMouseDown = True
+          , inputMousePressed = True
+          }
+  _ <- runFrame ctx pressTrack ui
+  grabbing <- cursorKindIs ctx pressTrack UiCursorGrabbing
+  when (not grabbing) $ bump failed
+  let dragOff =
+        pressTrack
+          { inputMousePos = labelPos
+          }
+  _ <- runFrame ctx dragOff ui
+  grabbingOff <- cursorKindIs ctx dragOff UiCursorGrabbing
+  when (not grabbingOff) $ bump failed
+  let hoverLabel = inp0 {inputMousePos = labelPos}
+  _ <- runFrame ctx hoverLabel ui
+  labelKind <- uiCursorKind ctx hoverLabel
+  when (labelKind /= UiCursorDefault) $ bump failed
+
+runScrollThumbCursorTest :: Context -> IORef Int -> IO ()
+runScrollThumbCursorTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 200 120}
+      ui =
+        scrollArea
+          (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 80})
+          ( column defaultLayout $ do
+              _ <- replicateM 8 (label "scroll line")
+              pure ()
+          )
+  _ <- runFrame ctx inp0 ui
+  ((sid, ()), _, _, _) <- runFrame ctx inp0 ui
+  mrect <- getPrevRect ctx sid
+  case mrect of
+    Nothing -> bump failed
+    Just (Rect rx ry rw rh) -> do
+      let barW = 8
+          barMargin = 3
+          thumbX = rx + rw - barW - barMargin + barW / 2
+          tryYs = [ry + rh * n / 8 | n <- [1 .. 7]]
+      mHover <- findGrabHover ctx ui inp0 thumbX tryYs
+      case mHover of
+        Nothing -> bump failed
+        Just hover -> do
+          kind <- uiCursorKind ctx hover
+          when (kind /= UiCursorGrab) $ bump failed
+          let press =
+                hover
+                  { inputMouseDown = True
+                  , inputMousePressed = True
+                  }
+          _ <- runFrame ctx press ui
+          grabbing <- cursorKindIs ctx press UiCursorGrabbing
+          when (not grabbing) $ bump failed
+
+runTextInputSpanTest :: Context -> IORef Int -> IO ()
+runTextInputSpanTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 320 120}
+      ui = column defaultLayout (textInput "Name" "hello")
+  _ <- runFrame ctx inp0 ui
+  spans <- collectTextSpans ctx
+  let hasHello = any (\(_, txt, _, _, _) -> "hello" `T.isInfixOf` txt) spans
+  when (not hasHello) $ bump failed
+
+runTextInputFocusSdlTest :: Context -> IORef Int -> IO ()
+runTextInputFocusSdlTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 320 120}
+      ui = column defaultLayout (textInput "Name" "")
+  _ <- runFrame ctx inp0 ui
+  ((resp, _), _, _, _) <- runFrame ctx inp0 ui
+  spans <- collectTextSpans ctx
+  let fieldPos =
+        [ (rectX r + rectW r / 2, rectY r + 0.5)
+        | (r, txt, _, _, _) <- spans
+        , "Enter" `T.isInfixOf` txt
+        ]
+  case fieldPos of
+    [(fx, fy)] -> do
+      let click = V2 fx fy
+          inp1 =
+            inp0
+              { inputMousePos = click
+              , inputMouseDown = True
+              , inputMousePressed = True
+              , inputMouseReleased = False
+              }
+      _ <- runFrame ctx inp1 ui
+      focus <- getFocusId ctx
+      when (focus /= respId resp) $ bump failed
+      spans' <- collectTextSpans ctx
+      let hasLabel = any (\(_, txt, _, _, _) -> txt == "Name") spans'
+      when (not hasLabel) $ bump failed
+    _ -> bump failed
 
 -- Hover animation must advance frame-to-frame without restarting at zero.
 runButtonHoverAnimTest :: Context -> IORef Int -> IO ()
@@ -414,8 +668,9 @@ runSliderTest ctx failed = do
       ui = column defaultLayout (slider (defaultLayout {layoutWidth = Grow 1}) "Vol" 0 100 10)
   _ <- runFrame ctx inp0 ui
   ((resp, _), _, _, _) <- runFrame ctx inp0 ui
-  let Rect rx ry rw _ = respRect resp
-      drag = V2 (rx + rw * 0.75) (ry + 1)
+  let Rect rx ry rw rh = respRect resp
+      trackRect = sliderTrackRect rx ry rw rh
+      drag = V2 (rx + rw * 0.75) (rectY trackRect + rectH trackRect / 2)
   let inpDrag =
         inp0
           { inputMousePos = drag
@@ -523,11 +778,17 @@ runSelectDropdownHoverTest _ failed = do
           , inputMouseReleased = True
           }
   _ <- runFrame ctx open ui
-  overlaysOpen <- collectOverlayTextSpans ctx open
+  let hoverBase =
+        open
+          { inputMouseReleased = False
+          , inputMousePressed = False
+          , inputMouseDown = False
+          }
+  overlaysOpen <- collectOverlayTextSpans ctx hoverBase
   let highYs = [rectY r | (r, txt, _, _, _) <- overlaysOpen, "High" `T.isInfixOf` txt]
   case highYs of
     (highY : _) -> do
-      let hoverHigh = open {inputMousePos = V2 1 (highY + 0.5)}
+      let hoverHigh = hoverBase {inputMousePos = V2 1 (highY + 0.5)}
       _ <- runFrame ctx hoverHigh ui
       overlaysHigh <- collectOverlayTextSpans ctx hoverHigh
       let bgFor needle spans = [bg | (_, txt, _, bg, _) <- spans, needle `T.isInfixOf` txt]
@@ -537,7 +798,7 @@ runSelectDropdownHoverTest _ failed = do
       let lowYs = [rectY r | (r, txt, _, _, _) <- overlaysOpen, "Low" `T.isInfixOf` txt]
       case (lowYs, bgFor "High" overlaysHigh) of
         ((lowY : _), [highHoverBg]) -> do
-          let hoverLow = open {inputMousePos = V2 1 (lowY + 0.5)}
+          let hoverLow = hoverBase {inputMousePos = V2 1 (lowY + 0.5)}
           _ <- runFrame ctx hoverLow ui
           overlaysLow <- collectOverlayTextSpans ctx hoverLow
           case bgFor "Low" overlaysLow of
@@ -546,6 +807,57 @@ runSelectDropdownHoverTest _ failed = do
               | otherwise -> bump failed
             _ -> bump failed
         _ -> bump failed
+    _ -> bump failed
+
+runSelectPickLowTest :: Context -> IORef Int -> IO ()
+runSelectPickLowTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 320 200}
+      ui = select "Quality" ["Low", "Medium", "High"] 1
+  _ <- runFrame ctx inp0 ui
+  ((resp, idx0), _, _, _) <- runFrame ctx inp0 ui
+  when (idx0 /= 1) $ bump failed
+  let Rect sx sy sw sh = respRect resp
+      btn = V2 (sx + sw / 2) (sy + sh / 2)
+      openPress =
+        inp0
+          { inputMousePos = btn
+          , inputMouseDown = True
+          , inputMousePressed = True
+          , inputMouseReleased = False
+          }
+  _ <- runFrame ctx openPress ui
+  let openRelease =
+        openPress
+          { inputMousePressed = False
+          , inputMouseDown = False
+          , inputMouseReleased = True
+          }
+  _ <- runFrame ctx openRelease ui
+  overlaysOpen <- collectOverlayTextSpans ctx openRelease
+  let lowYs = [rectY r | (r, txt, _, _, _) <- overlaysOpen, "Low" `T.isInfixOf` txt]
+  case lowYs of
+    (lowY : _) -> do
+      let pickPos = V2 (sx + sw / 2) (lowY + 0.5)
+          pickPress =
+            inp0
+              { inputMousePos = pickPos
+              , inputMouseDown = True
+              , inputMousePressed = True
+              , inputMouseReleased = False
+              }
+      _ <- runFrame ctx pickPress ui
+      let pickRelease =
+            pickPress
+              { inputMousePressed = False
+              , inputMouseDown = False
+              , inputMouseReleased = True
+              }
+      ((_, idx1), _, _, _) <- runFrame ctx pickRelease ui
+      when (idx1 /= 0) $ bump failed
+      spans <- collectTextSpans ctx
+      let hasLow =
+            any (\(_, txt, _, _, _) -> "Quality: Low" `T.isInfixOf` txt) spans
+      when (not hasLow) $ bump failed
     _ -> bump failed
 
 runTextWrapTest :: Context -> IORef Int -> IO ()

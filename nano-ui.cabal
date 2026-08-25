@@ -152,6 +152,7 @@ library nano-ui-sdl
         NanoUI.Backend.Sdl
         NanoUI.Sdl.Event
     other-modules:
+        NanoUI.Sdl.Cursor
         NanoUI.Sdl.Display
         NanoUI.Sdl.Font
         NanoUI.Sdl.Input

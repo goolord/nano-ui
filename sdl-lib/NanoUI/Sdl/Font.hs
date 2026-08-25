@@ -19,6 +19,7 @@ import Control.Monad (forM_, void, when)
 import Data.Bits (shiftR, (.&.))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Text (Text)
+import qualified Data.Text as T
 import Data.Word (Word32, Word8)
 import Foreign.C.String (CString, withCString)
 import Foreign.C.Types (CFloat (..), CSize (..))
@@ -141,6 +142,8 @@ renderTextSpans ren scale font cache spans = do
   clearLogicalClipRect ren
 
 drawSpan :: Ptr SDL_Renderer -> Float -> SdlFont -> TextCache -> Text -> Color -> Float -> Float -> IO ()
+drawSpan _ _ _ _ txt _ _ _
+  | T.null txt = pure ()
 drawSpan ren scale font cache txt col x y =
   withUtf8 txt $ \cstr len -> do
     let keyCol = colorWord col

@@ -10,6 +10,8 @@ module NanoUI.Types
   , rectContains
   , rectUnion
   , rectIntersect
+  , rectOverlapArea
+  , sliderTrackRect
   , v2Add
   , v2Sub
   ) where
@@ -81,6 +83,18 @@ rectIntersect (Rect x1 y1 w1 h1) (Rect x2 y2 w2 h2) =
       w = xEnd - x
       h = yEnd - y
    in if w > 0 && h > 0 then Just (Rect x y w h) else Nothing
+
+{-# INLINE rectOverlapArea #-}
+rectOverlapArea :: Rect -> Rect -> Float
+rectOverlapArea a b =
+  maybe 0 (\r -> rectW r * rectH r) (rectIntersect a b)
+
+{-# INLINE sliderTrackRect #-}
+sliderTrackRect :: Float -> Float -> Float -> Float -> Rect
+sliderTrackRect x y w h =
+  let trackH = max 4 (h * 0.18)
+      trackY = y + h - trackH - 2
+   in Rect x trackY w trackH
 
 {-# INLINE v2Add #-}
 v2Add :: V2 -> V2 -> V2
