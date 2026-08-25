@@ -52,10 +52,13 @@ module NanoUI
   , collectTextSpans
   , -- Context
     Context
+  , ctxTheme
+  , ctxFontMetrics
   , newContext
   , withFontMetrics
   , newTerminalContext
   , markDirty
+  , isDirty
   , getHotId
   , startAnimation
   , anyAnimating
@@ -78,7 +81,7 @@ module NanoUI
   , renderASCIIFromRects
   ) where
 
-import NanoUI.Context (Context (..), FrameMsg (..), anyAnimating, getHotId, markDirty, newContext, newTerminalContext, startAnimation, withFontMetrics)
+import NanoUI.Context (Context (..), FrameMsg (..), anyAnimating, ctxTheme, getHotId, isDirty, markDirty, newContext, newTerminalContext, startAnimation, withFontMetrics)
 import NanoUI.Draw (DrawCmd (..), DrawData (..), Layer (..), indexSize, vertexSize)
 import NanoUI.Font (FontMetrics (..), isTerminalFont, labelContentInset, monospaceMetrics, widgetContentInset, widgetPadding)
 import NanoUI.Frame (collectTextSpans, needsRedraw, runFrame)

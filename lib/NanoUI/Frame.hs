@@ -73,12 +73,12 @@ runFrame ctx inp ui = do
   finalizeTextInputFocus ctx inp
   syncWidgetLabels ctx
   refreshHover ctx inp
+  tickAnimations ctx (inputDeltaTime inp)
   beginLayer (ctxDrawArena ctx) LayerBackground
   lowerShapes ctx
   drawData <- finishDraw (ctxDrawArena ctx)
   updatePrevRects ctx
   msgs <- drainMessages ctx
-  tickAnimations ctx (inputDeltaTime inp)
   dirtyAfterUi <- isDirty ctx
   writeIORef (ctxDirty ctx) False
   pure (result, msgs, drawData, dirtyAfterUi)

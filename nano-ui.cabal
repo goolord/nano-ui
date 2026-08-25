@@ -14,6 +14,11 @@ extra-doc-files:
     CHANGELOG.md
     README.md
 
+flag sdl
+    description: Build the SDL3 window backend (requires SDL3 dev libraries and pkg-config)
+    manual: True
+    default: False
+
 common extensions
     default-language: GHC2021
     default-extensions:
@@ -140,6 +145,45 @@ executable nano-ui-tui
         text ^>=2.1
     hs-source-dirs:   examples
     default-language: GHC2024
+
+library nano-ui-sdl
+    import:           extensions
+    import:           ghc-options
+    import:           warnings
+    exposed-modules:
+        NanoUI.Backend.Sdl
+        NanoUI.Sdl.Event
+    other-modules:
+        NanoUI.Sdl.Input
+        NanoUI.Sdl.Render
+        NanoUI.Sdl.Text
+        NanoUI.Sdl.Window
+    build-depends:
+        base ^>=4.22.0.0,
+        nano-ui,
+        record-hasfield ^>=1.0,
+        sdl3-bindgen-sys ^>=0.0.0.2,
+        text ^>=2.1
+    hs-source-dirs:   sdl-lib
+    default-language: GHC2024
+    if !flag(sdl)
+        buildable: False
+
+executable nano-ui-sdl-demo
+    import:           extensions
+    import:           ghc-options
+    import:           rts-options
+    import:           warnings
+    main-is:          SdlDemo.hs
+    build-depends:
+        base ^>=4.22.0.0,
+        nano-ui,
+        nano-ui:nano-ui-sdl,
+        text ^>=2.1
+    hs-source-dirs:   examples
+    default-language: GHC2024
+    if !flag(sdl)
+        buildable: False
 
 test-suite nano-ui-test
     import:           extensions

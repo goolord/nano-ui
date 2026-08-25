@@ -10,7 +10,7 @@ module NanoUI.Font
   , isTerminalFont
   ) where
 
-import Data.Char (isPrint)
+
 import Data.Text (Text)
 import qualified Data.Text as T
 
@@ -40,22 +40,7 @@ monospaceMetrics cell =
     { fmLineHeight = cell
     , fmAscent = cell * 0.8
     , fmAdvance = \_ -> cell
-    , fmGlyph =
-        \c ->
-          if isPrint c
-            then
-              Just
-                GlyphQuad
-                  { gqX = 0
-                  , gqY = 0
-                  , gqW = cell
-                  , gqH = cell
-                  , gqU0 = 0
-                  , gqV0 = 0
-                  , gqU1 = 1
-                  , gqV1 = 1
-                  }
-            else Nothing
+    , fmGlyph = \_ -> Nothing
     }
 
 -- Cell-grid metrics get whole-cell insets; fractional padding would place rows

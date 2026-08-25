@@ -4,11 +4,11 @@ Purely functional immediate-mode GUI core for Haskell. Backend-agnostic: emits b
 
 ## Features
 
-- **SrcLoc IDs** — `HasCallStack` hashing for stable widget identity without manual ID stacks
-- **Two-pass flex layout** — measure/position over struct-of-arrays node arena
-- **Zero-allocation draw path** — pinned `ForeignPtr` vertex/index arenas reused each frame
-- **Damage tracking** — `needsRedraw` gates on input change, `markDirty`, or active animation
-- **Headless verification** — ASCII renderer + golden-style tests, no window/GL dependency
+- **SrcLoc IDs**: `HasCallStack` hashing for stable widget identity without manual ID stacks
+- **Two-pass flex layout**: measure/position over struct-of-arrays node arena
+- **Zero-allocation draw path**: pinned `ForeignPtr` vertex/index arenas reused each frame
+- **Damage tracking**: `needsRedraw` gates on input change, `markDirty`, or active animation
+- **Headless verification**: ASCII renderer + golden-style tests, no window/GL dependency
 
 ## Build
 
@@ -16,6 +16,18 @@ Purely functional immediate-mode GUI core for Haskell. Backend-agnostic: emits b
 cabal build
 cabal test
 cabal run nano-ui-demo
+```
+
+## Nix
+
+Linux and macOS only (Nix does not replace the Windows MSYS2/Zig workflow).
+
+```bash
+nix develop          # GHC 9.14, cabal, HLS, SDL3, pkg-config; sdl flag on
+nix build            # build all wired packages
+nix run .#nano-ui-sdl-demo
+nix run .#nano-ui-tui
+nix flake check      # run the test suite
 ```
 
 ## Quickstart
@@ -57,13 +69,39 @@ Uses `nano-ui-term` (`runTermApp`, `newTerminalContext`) with 1-cell font metric
 The backend talks to the platform console directly instead of using vty, because
 vty cannot report pointer motion: it rejects the any-motion mouse report and
 discards the rest of the pending input when it does, which loses hover and any
-click that arrives in the same read. Only GHC boot libraries are needed — `Win32`
+click that arrives in the same read. Only GHC boot libraries are needed: `Win32`
 on Windows, `unix` elsewhere.
 
 Windows reads native console records, so hover works even on terminals that do
 not implement DECSET 1003. POSIX puts the terminal in raw mode and decodes SGR
 mouse reports from the byte stream. Frames are diffed cell by cell, so a pointer
 movement only rewrites what changed.
+
+### SDL3 backend
+
+Requires SDL3 development libraries and `pkg-config`. On Windows, MSYS2 UCRT64
+(`pacman -S mingw-w64-ucrt-x86_64-sdl3 mingw-w64-ucrt-x86_64-pkg-config`) is the usual path.
+
+```bash
+cabal build -fsdl
+cabal run -fsdl nano-ui-sdl-demo
+```
+
+Uses `nano-ui-sdl` (`runSdlApp`, `newContext`) with the default pixel font metrics.
+The backend renders pinned `DrawData` quads through SDL3's 2D renderer, sorts
+draw commands by layer (background → content → overlay), and skips `runFrame`
+when idle (250ms wake checks `markDirty` / animation state).
+
+Build with Zig as the C compiler (MSYS2 UCRT64 for SDL3 + pkg-config):
+
+```powershell
+$env:PKG_CONFIG_PATH = "C:\msys64\ucrt64\lib\pkgconfig"
+$env:PATH = "C:\msys64\ucrt64\bin;$env:PATH"
+$env:CC = "zig cc -target x86_64-windows-gnu"
+$env:CXX = "zig c++ -target x86_64-windows-gnu"
+cabal build -fsdl
+cabal run -fsdl nano-ui-sdl-demo
+```
 
 ## Architecture
 
