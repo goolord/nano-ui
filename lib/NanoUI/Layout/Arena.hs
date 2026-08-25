@@ -1,6 +1,7 @@
 module NanoUI.Layout.Arena
   ( NodeIdx
   , NodeType (..)
+  , isWidgetNode
   , SizingTag (..)
   , DirTag (..)
   , NodeArena (..)
@@ -30,6 +31,8 @@ module NanoUI.Layout.Arena
   , setWidgetId
   , getStyleIdx
   , setStyleIdx
+  , getNodeValue
+  , setNodeValue
   ) where
 
 import Control.Monad (forM_)
@@ -51,7 +54,21 @@ data NodeType
   | NodeSpacer
   | NodeSeparator
   | NodeWidget
+  | NodeButton
+  | NodeCheckbox
+  | NodeSlider
+  | NodeTextInput
   deriving (Eq, Show, Enum, Bounded)
+
+isWidgetNode :: NodeType -> Bool
+isWidgetNode nt =
+  case nt of
+    NodeWidget -> True
+    NodeButton -> True
+    NodeCheckbox -> True
+    NodeSlider -> True
+    NodeTextInput -> True
+    _ -> False
 
 data SizingTag
   = SizingFixed
@@ -93,6 +110,7 @@ data NodeArena = NodeArena
   , naW :: IORef (MutablePrimArray RealWorld Float)
   , naH :: IORef (MutablePrimArray RealWorld Float)
   , naWidgetId :: IORef (MutablePrimArray RealWorld Word64)
+  , naValue :: IORef (MutablePrimArray RealWorld Float)
   , naStyleIdx :: IORef (MutablePrimArray RealWorld Int)
   , naTextStore :: IORef (MutableArray RealWorld Text)
   , naTextIdx :: IORef (MutablePrimArray RealWorld Int)
@@ -134,6 +152,7 @@ newNodeArena = do
   naW <- newIORef =<< newPrimArray cap
   naH <- newIORef =<< newPrimArray cap
   naWidgetId <- newIORef =<< newPrimArray cap
+  naValue <- newIORef =<< newPrimArray cap
   naStyleIdx <- newIORef =<< newPrimArray cap
   naTextStore <- newIORef =<< newArray cap T.empty
   naTextIdx <- newIORef =<< newPrimArray cap
@@ -168,6 +187,7 @@ newNodeArena = do
       , naW
       , naH
       , naWidgetId
+      , naValue
       , naStyleIdx
       , naTextStore
       , naTextIdx
@@ -241,6 +261,7 @@ ensureCapacity na needed = do
         growFloat (naW na) cap newCap 0
         growFloat (naH na) cap newCap 0
         growWord64 (naWidgetId na) cap newCap 0
+        growFloat (naValue na) cap newCap 0
         growInt (naStyleIdx na) cap newCap 0
         growInt (naTextIdx na) cap newCap (-1)
         growTextStore (naTextStore na) cap newCap
@@ -367,6 +388,7 @@ addNode na nt parent dir wSiz hSiz pad gap minW minH maxW maxH grow ax ay = do
   writeFloat (naW na) idx 0
   writeFloat (naH na) idx 0
   writeWord64 (naWidgetId na) idx 0
+  writeFloat (naValue na) idx 0
   writeInt (naStyleIdx na) idx 0
   writeInt (naTextIdx na) idx (-1)
   writeInt (naFirstChild na) idx (-1)
@@ -391,36 +413,45 @@ setNodeText na idx txt = do
   writeInt (naTextIdx na) idx idx
 
 {-# INLINE getParent #-}
+getParent :: NodeArena -> NodeIdx -> IO Int
 getParent na idx = readInt (naParent na) idx
 
 {-# INLINE getFirstChild #-}
+getFirstChild :: NodeArena -> NodeIdx -> IO Int
 getFirstChild na idx = readInt (naFirstChild na) idx
 
 {-# INLINE getNextSibling #-}
+getNextSibling :: NodeArena -> NodeIdx -> IO Int
 getNextSibling na idx = readInt (naNextSibling na) idx
 
 {-# INLINE getChildCount #-}
+getChildCount :: NodeArena -> NodeIdx -> IO Int
 getChildCount na idx = readInt (naChildCount na) idx
 
 {-# INLINE getNodeType #-}
+getNodeType :: NodeArena -> NodeIdx -> IO NodeType
 getNodeType na idx = readWord8 (naNodeType na) idx >>= pure . toEnum . fromIntegral
 
 {-# INLINE getDirection #-}
+getDirection :: NodeArena -> NodeIdx -> IO DirTag
 getDirection na idx = readWord8 (naDirection na) idx >>= pure . toEnum . fromIntegral
 
 {-# INLINE getWidthSizing #-}
+getWidthSizing :: NodeArena -> NodeIdx -> IO (SizingTag, Float)
 getWidthSizing na idx = do
   tag <- readWord8 (naWidthSizing na) idx
   val <- readFloat (naWidthValue na) idx
   pure (toEnum (fromIntegral tag), val)
 
 {-# INLINE getHeightSizing #-}
+getHeightSizing :: NodeArena -> NodeIdx -> IO (SizingTag, Float)
 getHeightSizing na idx = do
   tag <- readWord8 (naHeightSizing na) idx
   val <- readFloat (naHeightValue na) idx
   pure (toEnum (fromIntegral tag), val)
 
 {-# INLINE getPadding #-}
+getPadding :: NodeArena -> NodeIdx -> IO Padding
 getPadding na idx = do
   l <- readFloat (naPadL na) idx
   r <- readFloat (naPadR na) idx
@@ -429,9 +460,11 @@ getPadding na idx = do
   pure (Padding l r t b)
 
 {-# INLINE getGap #-}
+getGap :: NodeArena -> NodeIdx -> IO Float
 getGap na idx = readFloat (naGap na) idx
 
 {-# INLINE getMinMax #-}
+getMinMax :: NodeArena -> NodeIdx -> IO (Float, Float, Float, Float)
 getMinMax na idx = do
   minW <- readFloat (naMinW na) idx
   minH <- readFloat (naMinH na) idx
@@ -440,9 +473,11 @@ getMinMax na idx = do
   pure (minW, minH, maxW, maxH)
 
 {-# INLINE getGrow #-}
+getGrow :: NodeArena -> NodeIdx -> IO Float
 getGrow na idx = readFloat (naGrow na) idx
 
 {-# INLINE getAlignX #-}
+getAlignX :: NodeArena -> NodeIdx -> IO AlignX
 getAlignX na idx = do
   w <- readWord8 (naAlignX na) idx
   pure $
@@ -453,6 +488,7 @@ getAlignX na idx = do
       _ -> AlignStart
 
 {-# INLINE getAlignY #-}
+getAlignY :: NodeArena -> NodeIdx -> IO AlignY
 getAlignY na idx = do
   w <- readWord8 (naAlignY na) idx
   pure $
@@ -463,6 +499,7 @@ getAlignY na idx = do
       _ -> AlignTop
 
 {-# INLINE getRect #-}
+getRect :: NodeArena -> NodeIdx -> IO (Float, Float, Float, Float)
 getRect na idx = do
   x <- readFloat (naX na) idx
   y <- readFloat (naY na) idx
@@ -471,6 +508,7 @@ getRect na idx = do
   pure (x, y, w, h)
 
 {-# INLINE setRect #-}
+setRect :: NodeArena -> NodeIdx -> Float -> Float -> Float -> Float -> IO ()
 setRect na idx x y w h = do
   writeFloat (naX na) idx x
   writeFloat (naY na) idx y
@@ -478,6 +516,7 @@ setRect na idx x y w h = do
   writeFloat (naH na) idx h
 
 {-# INLINE getText #-}
+getText :: NodeArena -> NodeIdx -> IO Text
 getText na idx = do
   ti <- readInt (naTextIdx na) idx
   if ti < 0
@@ -485,13 +524,25 @@ getText na idx = do
     else readIORef (naTextStore na) >>= \arr -> readArray arr ti
 
 {-# INLINE getWidgetId #-}
+getWidgetId :: NodeArena -> NodeIdx -> IO WidgetId
 getWidgetId na idx = readWord64 (naWidgetId na) idx >>= pure . WidgetId
 
 {-# INLINE setWidgetId #-}
+setWidgetId :: NodeArena -> NodeIdx -> WidgetId -> IO ()
 setWidgetId na idx wid = writeWord64 (naWidgetId na) idx (hashWidgetId wid)
 
+{-# INLINE getNodeValue #-}
+getNodeValue :: NodeArena -> NodeIdx -> IO Float
+getNodeValue na idx = readFloat (naValue na) idx
+
+{-# INLINE setNodeValue #-}
+setNodeValue :: NodeArena -> NodeIdx -> Float -> IO ()
+setNodeValue na idx v = writeFloat (naValue na) idx v
+
 {-# INLINE getStyleIdx #-}
+getStyleIdx :: NodeArena -> NodeIdx -> IO Int
 getStyleIdx na idx = readInt (naStyleIdx na) idx
 
 {-# INLINE setStyleIdx #-}
+setStyleIdx :: NodeArena -> NodeIdx -> Int -> IO ()
 setStyleIdx na idx si = writeInt (naStyleIdx na) idx si

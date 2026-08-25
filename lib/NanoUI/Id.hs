@@ -2,13 +2,15 @@ module NanoUI.Id
   ( WidgetId (..)
   , widgetId
   , hashWidgetId
+  , hashSrcLoc
+  , fnv1a
   , mixId
   ) where
 
 import Data.Bits (xor)
 import Data.Hashable (Hashable, hash)
 import Data.Word (Word64)
-import GHC.Stack (CallStack, HasCallStack, SrcLoc (..), callStack, getCallStack)
+import GHC.Stack (HasCallStack, SrcLoc (..), callStack, getCallStack)
 
 newtype WidgetId = WidgetId Word64
   deriving (Eq, Ord, Show)

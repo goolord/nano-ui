@@ -3,10 +3,9 @@ module NanoUI.Layout.Solve
   ) where
 
 import Control.Monad (forM, forM_)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import Data.Text (Text)
+import Data.IORef (newIORef, readIORef, writeIORef)
 import qualified Data.Text as T
-import NanoUI.Font (FontMetrics (..), measureText)
+import NanoUI.Font (FontMetrics (..), measureText, widgetPadding)
 import NanoUI.Layout.Arena
   ( DirTag (..)
   , NodeArena
@@ -16,7 +15,6 @@ import NanoUI.Layout.Arena
   , arenaCount
   , getAlignX
   , getAlignY
-  , getChildCount
   , getDirection
   , getFirstChild
   , getGap
@@ -50,15 +48,15 @@ measureNode na fm idx = do
     NodeText -> measureTextNode na fm idx
     NodeSpacer -> measureSpacer na idx
     NodeSeparator -> measureSeparator na idx
-    NodeWidget -> measureWidget na fm idx
     NodeContainer -> measureContainer na fm idx
+    _ -> measureWidget na fm idx
 
 measureTextNode :: NodeArena -> FontMetrics -> NodeIdx -> IO ()
 measureTextNode na fm idx = do
   txt <- getText na idx
   (minW, minH, maxW, maxH) <- getMinMax na idx
   let (tw, th) = measureText fm txt
-  setRect na idx 0 0 (clamp tw minW maxW) (clamp th minH maxH)
+  setRect na idx 0 0 (clamp tw minW maxW) (clamp (max (fmLineHeight fm) th) minH maxH)
 
 measureSpacer :: NodeArena -> NodeIdx -> IO ()
 measureSpacer na idx = do
@@ -83,10 +81,11 @@ measureWidget na fm idx = do
       then pure (40, fmLineHeight fm)
       else pure (measureText fm txt)
   (minW, minH, maxW, maxH) <- getMinMax na idx
-  setRect na idx 0 0 (clamp tw minW maxW) (clamp th minH maxH)
+  let (padX, padY) = widgetPadding fm
+  setRect na idx 0 0 (clamp (tw + padX) minW maxW) (clamp (th + padY) minH maxH)
 
 measureContainer :: NodeArena -> FontMetrics -> NodeIdx -> IO ()
-measureContainer na fm idx = do
+measureContainer na _ idx = do
   pad <- getPadding na idx
   gap <- getGap na idx
   dir <- getDirection na idx
@@ -144,9 +143,9 @@ positionNode na idx x y availW availH = do
 
 resolveSize :: SizingTag -> Float -> Float -> Float -> Float -> Float -> Float
 resolveSize SizingFixed v _ _ _ _ = v
-resolveSize SizingFit intrinsic _ minS maxS _ = clamp intrinsic minS maxS
-resolveSize SizingGrow _ intrinsic avail _ maxS = min avail maxS
-resolveSize SizingPercent p avail _ _ maxS = min (avail * p / 100) maxS
+resolveSize SizingFit _ intrinsic _ minS maxS = clamp intrinsic minS maxS
+resolveSize SizingGrow _ _ avail _ maxS = min avail maxS
+resolveSize SizingPercent p _ avail _ maxS = min (avail * p / 100) maxS
 
 positionChildren :: NodeArena -> NodeIdx -> DirTag -> Float -> Padding -> Float -> Float -> Float -> Float -> IO ()
 positionChildren na idx dir gap pad px py pw ph = do
@@ -159,6 +158,8 @@ positionChildren na idx dir gap pad px py pw ph = do
     DirRow -> positionRow na children gap cx cy cw ch
     DirColumn -> positionColumn na children gap cx cy cw ch
 
+-- Children are linked newest-first, so prepending while walking restores
+-- declaration order.
 collectChildren :: NodeArena -> NodeIdx -> IO [NodeIdx]
 collectChildren na idx = do
   fc <- getFirstChild na idx
@@ -166,7 +167,7 @@ collectChildren na idx = do
   where
     go ci acc =
       if ci < 0
-        then pure (reverse acc)
+        then pure acc
         else do
           ns <- getNextSibling na ci
           go ns (ci : acc)

@@ -38,9 +38,24 @@ common rts-options
 common test-rts-options
     ghc-options: -rtsopts -threaded "-with-rtsopts=-A8m -H64m"
 
+common warnings
+  ghc-options:
+    -Wall
+    -Wextra
+    -Werror
+    -Wcompat
+    -Widentities
+    -Wincomplete-record-updates
+    -Wincomplete-uni-patterns
+    -Wmissing-export-lists
+    -Wmissing-home-modules
+    -Wpartial-fields
+    -Wredundant-constraints
+
 library
     import:           extensions
     import:           ghc-options
+    import:           warnings
     exposed-modules:
         NanoUI
     other-modules:
@@ -70,6 +85,7 @@ executable nano-ui-demo
     import:           extensions
     import:           ghc-options
     import:           rts-options
+    import:           warnings
     main-is:          Demo.hs
     build-depends:
         base ^>=4.22.0.0,
@@ -77,14 +93,66 @@ executable nano-ui-demo
     hs-source-dirs:   examples
     default-language: GHC2024
 
+-- Terminal backend. Talks to the platform console APIs directly rather than
+-- going through vty, which cannot report pointer motion (hover) and drops
+-- buffered input when it meets a sequence it does not recognise. Only GHC boot
+-- libraries are needed: Win32 on Windows, unix elsewhere.
+library nano-ui-term
+    import:           extensions
+    import:           ghc-options
+    import:           warnings
+    exposed-modules:
+        NanoUI.Backend.Term
+        NanoUI.Term.Ansi
+        NanoUI.Term.Cells
+        NanoUI.Term.Event
+        NanoUI.Term.Vt
+    other-modules:
+        NanoUI.Term.Driver
+        NanoUI.Term.Driver.Types
+    build-depends:
+        base ^>=4.22.0.0,
+        bytestring,
+        nano-ui,
+        primitive ^>=0.9,
+        text ^>=2.1
+    if os(windows)
+        build-depends: Win32 >=2.14
+        other-modules: NanoUI.Term.Driver.Windows
+    else
+        build-depends: unix >=2.8
+        other-modules:
+            NanoUI.Term.Driver.Posix
+            NanoUI.Term.Driver.WinSize
+    hs-source-dirs:   term-lib
+    default-language: GHC2024
+
+executable nano-ui-tui
+    import:           extensions
+    import:           ghc-options
+    import:           rts-options
+    import:           warnings
+    main-is:          Tui.hs
+    build-depends:
+        base ^>=4.22.0.0,
+        nano-ui,
+        nano-ui:nano-ui-term,
+        text ^>=2.1
+    hs-source-dirs:   examples
+    default-language: GHC2024
+
 test-suite nano-ui-test
     import:           extensions
     import:           ghc-options
     import:           test-rts-options
+    import:           warnings
     type:             exitcode-stdio-1.0
     main-is:          Main.hs
     build-depends:
         base ^>=4.22.0.0,
-        nano-ui
+        bytestring,
+        nano-ui,
+        nano-ui:nano-ui-term,
+        text ^>=2.1
     hs-source-dirs:   test
     default-language: GHC2024

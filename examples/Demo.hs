@@ -1,4 +1,4 @@
-module Main where
+module Main (main) where
 
 import NanoUI
 
@@ -12,15 +12,15 @@ main = do
           , inputMousePressed = True
           , inputMouseDown = True
           }
-  (_, msgs, drawData) <-
+  (_, msgs, drawData, _) <-
     runFrame
       ctx
       inp
       ( column
           (defaultLayout {layoutWidth = Grow 1, layoutHeight = Grow 1})
           ( do
-              button "OK"
-              button "Cancel"
+              _ <- button "OK"
+              _ <- button "Cancel"
               label "nano-ui demo"
           )
       )

@@ -10,6 +10,7 @@ module NanoUI.Style
   , defaultStyle
   , Theme (..)
   , defaultTheme
+  , terminalTheme
   ) where
 
 import NanoUI.Types (Color, colorRGBA)
@@ -136,4 +137,41 @@ defaultTheme =
         }
     , themeSeparator = colorRGBA 80 80 85 255
     , themeAccent = colorRGBA 100 149 237 255
+    }
+
+terminalTheme :: Theme
+terminalTheme =
+  Theme
+    { themePanel =
+        Style
+          { styleBg = colorRGBA 28 28 32 255
+          , styleFg = colorRGBA 230 230 235 255
+          , styleBorder = colorRGBA 140 145 160 255
+          , styleBorderWidth = 1
+          , styleCornerRadius = 0
+          , styleHoverBg = colorRGBA 38 38 44 255
+          , styleActiveBg = colorRGBA 22 22 26 255
+        }
+    , themeButton =
+        Style
+          { styleBg = colorRGBA 55 60 72 255
+          , styleFg = colorRGBA 240 240 245 255
+          , styleBorder = colorRGBA 160 165 180 255
+          , styleBorderWidth = 1
+          , styleCornerRadius = 0
+          , styleHoverBg = colorRGBA 75 80 95 255
+          , styleActiveBg = colorRGBA 40 45 55 255
+        }
+    , themeInput =
+        Style
+          { styleBg = colorRGBA 18 18 22 255
+          , styleFg = colorRGBA 240 240 245 255
+          , styleBorder = colorRGBA 120 125 140 255
+          , styleBorderWidth = 1
+          , styleCornerRadius = 0
+          , styleHoverBg = colorRGBA 24 24 28 255
+          , styleActiveBg = colorRGBA 14 14 18 255
+        }
+    , themeSeparator = colorRGBA 100 105 120 255
+    , themeAccent = colorRGBA 90 160 255 255
     }

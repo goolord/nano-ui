@@ -8,13 +8,14 @@ module NanoUI.Monad
   , askInput
   ) where
 
+import Control.Monad.IO.Class (MonadIO (..))
 import Data.Bits (xor)
 import Data.Hashable (Hashable, hash)
 import Data.IORef (readIORef, writeIORef)
 import Data.Word (Word64)
-import GHC.Stack (HasCallStack)
+import GHC.Stack (CallStack, HasCallStack, callStack, getCallStack)
 import NanoUI.Context (Context (..), FrameMsg (..), pushMessage)
-import NanoUI.Id (WidgetId (..), hashWidgetId, widgetId)
+import NanoUI.Id (WidgetId (..), fnv1a, hashSrcLoc, hashWidgetId)
 import NanoUI.Input (Input)
 
 newtype UI a = UI {unUI :: Context -> Input -> IO a}
@@ -28,6 +29,9 @@ instance Applicative UI where
 
 instance Monad UI where
   UI m >>= f = UI (\ctx inp -> m ctx inp >>= \a -> unUI (f a) ctx inp)
+
+instance MonadIO UI where
+  liftIO act = UI (\_ _ -> act)
 
 {-# INLINE runUI #-}
 runUI :: Context -> Input -> UI a -> IO a
@@ -46,12 +50,21 @@ withKey k (UI m) = UI (\ctx inp -> do
   writeIORef (ctxIdSalt ctx) old
   pure r)
 
+-- The whole stack is hashed, not just its head: the head always points at this
+-- module, so distinct user call sites are only distinguishable by outer frames.
 {-# INLINE currentId #-}
 currentId :: HasCallStack => UI WidgetId
 currentId = UI (\ctx _ -> do
   salt <- readIORef (ctxIdSalt ctx)
-  let base = hashWidgetId widgetId
+  let base = hashCallStack callStack
   pure (WidgetId (base `mix64` salt)))
+
+hashCallStack :: CallStack -> Word64
+hashCallStack cs =
+  foldl
+    (\acc (fn, loc) -> acc `mix64` fnv1a fn `mix64` hashWidgetId (hashSrcLoc loc))
+    14695981039346656037
+    (getCallStack cs)
 
 {-# INLINE askContext #-}
 askContext :: UI Context

@@ -44,7 +44,26 @@ For interactive 60fps apps, use the non-moving GC and latency-tuned flags:
 +RTS -N --nonmoving-gc -qb0
 ```
 
-The demo and test suite set these via cabal `-with-rtsopts`.
+The demo and TUI set these via cabal `-with-rtsopts`.
+
+### Terminal backend
+
+```bash
+cabal run nano-ui-tui
+```
+
+Uses `nano-ui-term` (`runTermApp`, `newTerminalContext`) with 1-cell font metrics.
+
+The backend talks to the platform console directly instead of using vty, because
+vty cannot report pointer motion: it rejects the any-motion mouse report and
+discards the rest of the pending input when it does, which loses hover and any
+click that arrives in the same read. Only GHC boot libraries are needed — `Win32`
+on Windows, `unix` elsewhere.
+
+Windows reads native console records, so hover works even on terminals that do
+not implement DECSET 1003. POSIX puts the terminal in raw mode and decodes SGR
+mouse reports from the byte stream. Frames are diffed cell by cell, so a pointer
+movement only rewrites what changed.
 
 ## Architecture
 
@@ -65,6 +84,10 @@ UI monad → node arena → layout solver → shape lowering → DrawData
 | `NanoUI.Draw` | Pinned vertex arena, draw command batching |
 | `NanoUI.Layout.Solve` | Two-pass flexbox constraint solver |
 | `NanoUI.Render.ASCII` | Headless ASCII rasterizer |
+| `NanoUI.Backend.Term` | `runTermApp`, terminal event loop |
+| `NanoUI.Term.Cells` | Draw commands and spans to a terminal cell grid |
+| `NanoUI.Term.Ansi` | Cell grid to ANSI bytes, diffed against the last frame |
+| `NanoUI.Term.Vt` | Incremental VT input decoder, including mouse motion |
 
 ## License
 

@@ -4,6 +4,10 @@ module NanoUI.Font
   , monospaceMetrics
   , measureText
   , measureTextWrapped
+  , labelContentInset
+  , widgetContentInset
+  , widgetPadding
+  , isTerminalFont
   ) where
 
 import Data.Char (isPrint)
@@ -53,6 +57,30 @@ monospaceMetrics cell =
                   }
             else Nothing
     }
+
+-- Cell-grid metrics get whole-cell insets; fractional padding would place rows
+-- on half cells, which a terminal cannot represent.
+{-# INLINE labelContentInset #-}
+labelContentInset :: FontMetrics -> (Float, Float)
+labelContentInset fm
+  | isTerminalFont fm = (0, 0)
+  | otherwise = (0.5 * fmAdvance fm ' ', 0.25 * fmLineHeight fm)
+
+{-# INLINE widgetContentInset #-}
+widgetContentInset :: FontMetrics -> (Float, Float)
+widgetContentInset fm
+  | isTerminalFont fm = (fmAdvance fm ' ', 0)
+  | otherwise = (fmAdvance fm ' ', 0.25 * fmLineHeight fm)
+
+{-# INLINE widgetPadding #-}
+widgetPadding :: FontMetrics -> (Float, Float)
+widgetPadding fm =
+  let (cx, cy) = widgetContentInset fm
+   in (2 * cx, 2 * cy)
+
+{-# INLINE isTerminalFont #-}
+isTerminalFont :: FontMetrics -> Bool
+isTerminalFont fm = fmLineHeight fm == 1 && fmAdvance fm ' ' == 1
 
 measureText :: FontMetrics -> Text -> (Float, Float)
 measureText fm txt =
