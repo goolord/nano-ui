@@ -4,8 +4,12 @@ module NanoUI.Context
   , Animation (..)
   , WidgetStore (..)
   , newContext
+  , withFontMetrics
+  , withTheme
+  , newTerminalContext
   , markDirty
   , isDirty
+  , getHotId
   , anyAnimating
   , startAnimation
   , tickAnimations
@@ -18,7 +22,6 @@ module NanoUI.Context
   , drainMessages
   ) where
 
-import Data.Bits (xor)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict (IntMap)
 import Data.Word (Word64)
@@ -27,7 +30,7 @@ import NanoUI.Draw (DrawArena, newDrawArena)
 import NanoUI.Font (FontMetrics, monospaceMetrics)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Layout.Arena (NodeArena, newNodeArena)
-import NanoUI.Style (Theme, defaultTheme)
+import NanoUI.Style (Theme, defaultTheme, terminalTheme)
 import NanoUI.Types (Rect (..))
 
 data FrameMsg where
@@ -111,6 +114,20 @@ newContext = do
       , ctxMessages
       }
 
+{-# INLINE withFontMetrics #-}
+withFontMetrics :: Context -> FontMetrics -> Context
+withFontMetrics ctx fm = ctx {ctxFontMetrics = fm}
+
+{-# INLINE withTheme #-}
+withTheme :: Context -> Theme -> Context
+withTheme ctx theme = ctx {ctxTheme = theme}
+
+{-# INLINE newTerminalContext #-}
+newTerminalContext :: IO Context
+newTerminalContext = do
+  ctx <- newContext
+  pure (withTheme (withFontMetrics ctx (monospaceMetrics 1)) terminalTheme)
+
 {-# INLINE markDirty #-}
 markDirty :: Context -> IO ()
 markDirty ctx = writeIORef (ctxDirty ctx) True
@@ -118,6 +135,10 @@ markDirty ctx = writeIORef (ctxDirty ctx) True
 {-# INLINE isDirty #-}
 isDirty :: Context -> IO Bool
 isDirty ctx = readIORef (ctxDirty ctx)
+
+{-# INLINE getHotId #-}
+getHotId :: Context -> IO WidgetId
+getHotId ctx = readIORef (ctxHotId ctx)
 
 {-# INLINE anyAnimating #-}
 anyAnimating :: Context -> IO Bool
@@ -166,7 +187,9 @@ getStore ctx = readIORef (ctxStore ctx)
 
 {-# INLINE setStore #-}
 setStore :: Context -> WidgetStore -> IO ()
-setStore ctx store = writeIORef (ctxStore ctx) store
+setStore ctx store = do
+  writeIORef (ctxStore ctx) store
+  markDirty ctx
 
 {-# INLINE pushMessage #-}
 pushMessage :: Context -> FrameMsg -> IO ()
@@ -180,7 +203,3 @@ drainMessages ctx = do
   msgs <- readIORef (ctxMessages ctx)
   writeIORef (ctxMessages ctx) []
   pure (reverse msgs)
-
-{-# INLINE mix64 #-}
-mix64 :: Word64 -> Word64 -> Word64
-mix64 h k = (h `xor` k) * 1099511628211

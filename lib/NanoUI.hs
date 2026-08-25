@@ -5,6 +5,7 @@ module NanoUI
   , Size (..)
   , Color (..)
   , colorRGBA
+  , colorToWord32
   , -- Input
     Input (..)
   , Key (..)
@@ -22,6 +23,7 @@ module NanoUI
   , Style (..)
   , Theme (..)
   , defaultTheme
+  , terminalTheme
   , -- ID
     WidgetId (..)
   , widgetId
@@ -47,28 +49,39 @@ module NanoUI
   , -- Frame
     runFrame
   , needsRedraw
+  , collectTextSpans
   , -- Context
     Context
   , newContext
+  , withFontMetrics
+  , newTerminalContext
   , markDirty
+  , getHotId
   , startAnimation
+  , anyAnimating
   , FrameMsg (..)
   , -- Draw
     DrawData (..)
   , DrawCmd (..)
   , Layer (..)
+  , vertexSize
+  , indexSize
   , -- Font
     FontMetrics (..)
   , monospaceMetrics
+  , labelContentInset
+  , widgetContentInset
+  , widgetPadding
+  , isTerminalFont
   , -- ASCII
     renderASCII
   , renderASCIIFromRects
   ) where
 
-import NanoUI.Context (Context (..), FrameMsg (..), markDirty, newContext, startAnimation)
-import NanoUI.Draw (DrawCmd (..), DrawData (..), Layer (..))
-import NanoUI.Font (FontMetrics (..), monospaceMetrics)
-import NanoUI.Frame (needsRedraw, runFrame)
+import NanoUI.Context (Context (..), FrameMsg (..), anyAnimating, getHotId, markDirty, newContext, newTerminalContext, startAnimation, withFontMetrics)
+import NanoUI.Draw (DrawCmd (..), DrawData (..), Layer (..), indexSize, vertexSize)
+import NanoUI.Font (FontMetrics (..), isTerminalFont, labelContentInset, monospaceMetrics, widgetContentInset, widgetPadding)
+import NanoUI.Frame (collectTextSpans, needsRedraw, runFrame)
 import NanoUI.Id (WidgetId (..), hashWidgetId, widgetId)
 import NanoUI.Input
   ( Input (..)
@@ -90,8 +103,9 @@ import NanoUI.Style
   , Theme (..)
   , defaultLayout
   , defaultTheme
+  , terminalTheme
   )
-import NanoUI.Types (Color (..), Rect (..), Size (..), V2 (..), colorRGBA)
+import NanoUI.Types (Color (..), Rect (..), Size (..), V2 (..), colorRGBA, colorToWord32)
 import NanoUI.Widgets
   ( Response (..)
   , button

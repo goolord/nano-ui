@@ -11,9 +11,12 @@ module NanoUI.Widgets
   , separator
   , spacer
   , tooltip
+  , sliderText
+  , textInputText
   ) where
 
 import Control.Monad (when)
+import Control.Monad.IO.Class (liftIO)
 import Data.IORef (readIORef, writeIORef)
 import Data.Text (Text)
 import qualified Data.IntMap.Strict as IM
@@ -34,6 +37,7 @@ import NanoUI.Layout.Arena
   ( NodeType (..)
   , addNode
   , setNodeText
+  , setNodeValue
   , setWidgetId
   )
 import NanoUI.Monad (UI (..), askContext, askInput, currentId, emit)
@@ -47,11 +51,14 @@ import NanoUI.Style
   , Style (..)
   , Theme (..)
   , defaultLayout
-  , themeButton
-  , themeInput
   , themePanel
   )
 import NanoUI.Types (Rect (..), V2 (..), rectContains)
+
+parentIdx :: [Int] -> Int
+parentIdx = \case
+  [] -> -1
+  (p : _) -> p
 
 data Response = Response
   { respId :: WidgetId
@@ -64,21 +71,21 @@ data Response = Response
   deriving (Eq, Show)
 
 {-# INLINE panel #-}
-panel :: HasCallStack => Layout -> UI a -> UI a
+panel :: Layout -> UI a -> UI a
 panel = container
 
 {-# INLINE row #-}
-row :: HasCallStack => Layout -> UI a -> UI a
+row :: Layout -> UI a -> UI a
 row layout child = container (layout {layoutDirection = Row}) child
 
 {-# INLINE column #-}
-column :: HasCallStack => Layout -> UI a -> UI a
+column :: Layout -> UI a -> UI a
 column layout child = container (layout {layoutDirection = Column}) child
 
-container :: HasCallStack => Layout -> UI a -> UI a
+container :: Layout -> UI a -> UI a
 container layout child = UI $ \ctx inp -> do
   stack <- readIORef (ctxContainerStack ctx)
-  let parent = if null stack then -1 else head stack
+  let parent = parentIdx stack
   idx <-
     addNode
       (ctxNodeArena ctx)
@@ -103,12 +110,15 @@ container layout child = UI $ \ctx inp -> do
 
 {-# INLINE label #-}
 label :: HasCallStack => Text -> UI Response
-label txt = addWidget NodeText txt defaultLayout themePanel
+label txt = do
+  wid <- currentId
+  addWidget wid NodeText txt 0 defaultLayout
 
 {-# INLINE button #-}
 button :: HasCallStack => Text -> UI Response
 button txt = do
-  resp <- addWidget NodeWidget txt defaultLayout themeButton
+  wid <- currentId
+  resp <- addWidget wid NodeButton ("[ " <> txt <> " ]") 0 defaultLayout
   when (respClicked resp) $ emit ("button:" <> T.unpack txt)
   pure resp
 
@@ -120,12 +130,10 @@ checkbox txt initial = do
   store <- liftIO (getStore ctx)
   let key = intKey wid
       current = IM.findWithDefault initial key (storeCheckbox store)
-  resp <- addWidget NodeWidget txt defaultLayout themeButton
-  let newVal = if respClicked resp then not current else current
-  when (respClicked resp) $ do
-    liftIO $ setStore ctx (store {storeCheckbox = IM.insert key newVal (storeCheckbox store)})
-    emit ("checkbox:" <> T.unpack txt)
-  pure (resp, newVal)
+      mark = if current then "[x] " else "[ ] "
+  resp <- addWidgetResp wid NodeCheckbox (mark <> txt) (if current then 1 else 0) defaultLayout Nothing
+  let display = if respClicked resp then not current else current
+  pure (resp, display)
 
 {-# INLINE slider #-}
 slider :: HasCallStack => Text -> Float -> Float -> Float -> UI (Response, Float)
@@ -136,7 +144,8 @@ slider lbl minV maxV initial = do
   store <- liftIO (getStore ctx)
   let key = intKey wid
       current = IM.findWithDefault initial key (storeSlider store)
-  resp <- addWidget NodeWidget lbl defaultLayout themeInput
+      frac = if maxV > minV then (current - minV) / (maxV - minV) else 0
+  resp <- addWidget wid NodeSlider (sliderText lbl frac current) frac defaultLayout
   active <- liftIO (readIORef (ctxActiveId ctx))
   let isActive = active == wid
       hovered = respHovered resp
@@ -144,14 +153,14 @@ slider lbl minV maxV initial = do
   val <-
     liftIO $ do
       mrect <- getPrevRect ctx wid
-      let frac =
+      let dragFrac =
             case mrect of
-              Nothing -> 0
+              Nothing -> frac
               Just (Rect x _ w _) ->
                 let px = v2X (inputMousePos inp)
                     f = (px - x) / max w 1
                  in max 0 (min 1 f)
-          computed = minV + frac * (maxV - minV)
+          computed = minV + dragFrac * (maxV - minV)
       if pressed then pure computed else pure current
   when (pressed && hovered && not isActive) $
     liftIO $ writeIORef (ctxActiveId ctx) wid
@@ -172,10 +181,8 @@ textInput lbl initial = do
   let key = intKey wid
       current = IM.findWithDefault initial key (storeText store)
       cursor = IM.findWithDefault (length current) key (storeCursor store)
-  resp <- addWidget NodeWidget lbl defaultLayout themeInput
   focus <- liftIO (readIORef (ctxFocusId ctx))
   let isFocus = focus == wid
-  when (respClicked resp) $ liftIO $ writeIORef (ctxFocusId ctx) wid
   (newText, newCursor) <-
     if isFocus
       then liftIO (processTextInput inp current cursor)
@@ -189,6 +196,8 @@ textInput lbl initial = do
             , storeCursor = IM.insert key newCursor (storeCursor store)
             }
         )
+  resp <-
+    addWidget wid NodeTextInput (textInputText lbl newText newCursor isFocus) 0 defaultLayout
   pure (resp {respChanged = newText /= current}, newText)
 
 {-# INLINE separator #-}
@@ -199,7 +208,7 @@ separator = do
   inp <- askInput
   liftIO $ do
     stack <- readIORef (ctxContainerStack ctx)
-    let parent = if null stack then -1 else head stack
+    let parent = parentIdx stack
     idx <-
       addNode
         (ctxNodeArena ctx)
@@ -228,7 +237,7 @@ spacer w h = do
   inp <- askInput
   liftIO $ do
     stack <- readIORef (ctxContainerStack ctx)
-    let parent = if null stack then -1 else head stack
+    let parent = parentIdx stack
     idx <-
       addNode
         (ctxNodeArena ctx)
@@ -250,12 +259,12 @@ spacer w h = do
     resolveInteraction ctx inp wid
 
 {-# INLINE tooltip #-}
-tooltip :: HasCallStack => Text -> Response -> UI Response
+tooltip :: Text -> Response -> UI Response
 tooltip tipTxt resp = do
   when (respHovered resp) $ do
     ctx <- askContext
     liftIO $ do
-      let (Rect rx ry rw rh) = respRect resp
+      let (Rect rx ry rw _) = respRect resp
       beginLayer (ctxDrawArena ctx) LayerOverlay
       let fm = ctxFontMetrics ctx
           style = themePanel (ctxTheme ctx)
@@ -263,20 +272,49 @@ tooltip tipTxt resp = do
       pushText (ctxDrawArena ctx) fm (rx + rw + 8) (ry + 4) tipTxt (styleFg style)
   pure resp
 
+sliderBarCells :: Int
+sliderBarCells = 12
+
+sliderText :: Text -> Float -> Float -> Text
+sliderText lbl frac value =
+  let filled = max 0 (min sliderBarCells (round (frac * fromIntegral sliderBarCells)))
+      bar = T.replicate filled "\x2588" <> T.replicate (sliderBarCells - filled) "\x2591"
+   in lbl <> " [" <> bar <> "] " <> T.pack (show (round value :: Int))
+
+textInputText :: Text -> String -> Int -> Bool -> Text
+textInputText lbl value cursor focused =
+  let body = T.pack value
+      shown =
+        if focused
+          then
+            let c = max 0 (min (T.length body) cursor)
+             in T.take c body <> "\x2502" <> T.drop c body
+          else body
+   in lbl <> ": " <> shown
+
 addWidget ::
-  HasCallStack =>
+  WidgetId ->
   NodeType ->
   Text ->
+  Float ->
   Layout ->
-  (Theme -> Style) ->
   UI Response
-addWidget nt txt layout styleFn = do
-  wid <- currentId
+addWidget wid nt txt value layout = addWidgetResp wid nt txt value layout Nothing
+
+addWidgetResp ::
+  WidgetId ->
+  NodeType ->
+  Text ->
+  Float ->
+  Layout ->
+  Maybe Response ->
+  UI Response
+addWidgetResp wid nt txt value layout mResp = do
   ctx <- askContext
   inp <- askInput
   liftIO $ do
     stack <- readIORef (ctxContainerStack ctx)
-    let parent = if null stack then -1 else head stack
+    let parent = parentIdx stack
     idx <-
       addNode
         (ctxNodeArena ctx)
@@ -295,23 +333,27 @@ addWidget nt txt layout styleFn = do
         (layoutAlignX layout)
         (layoutAlignY layout)
     setNodeText (ctxNodeArena ctx) idx txt
+    setNodeValue (ctxNodeArena ctx) idx value
     setWidgetId (ctxNodeArena ctx) idx wid
-    resolveInteraction ctx inp wid
+    case mResp of
+      Just resp -> pure resp
+      Nothing -> resolveInteraction ctx inp wid
 
 resolveInteraction :: Context -> Input -> WidgetId -> IO Response
 resolveInteraction ctx inp wid = do
   mrect <- getPrevRect ctx wid
   let rect = maybe (Rect 0 0 0 0) id mrect
       mouse = inputMousePos inp
-      hovered = rectContains rect mouse
+      hovered =
+        case rect of
+          Rect _ _ rw rh -> rw > 0 && rh > 0 && rectContains rect mouse
   active <- readIORef (ctxActiveId ctx)
-  let isActive = active == wid
+  let activating = inputMousePressed inp && hovered
+      isActive = active == wid || activating
   when hovered $ writeIORef (ctxHotId ctx) wid
-  when (inputMousePressed inp && hovered) $
-    writeIORef (ctxActiveId ctx) wid
-  let pressed = inputMouseDown inp && (hovered || isActive)
+  when activating $ writeIORef (ctxActiveId ctx) wid
+  let pressed = inputMouseDown inp && (hovered || active == wid)
       clicked = inputMouseReleased inp && isActive
-  when clicked $ writeIORef (ctxActiveId ctx) (WidgetId 0)
   pure
     Response
       { respId = wid
@@ -345,6 +387,3 @@ applyKey (t, c) key =
     KeyHome -> (t, 0)
     KeyEnd -> (t, length t)
     _ -> (t, c)
-
-liftIO :: IO a -> UI a
-liftIO act = UI (\_ _ -> act)
