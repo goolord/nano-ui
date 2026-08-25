@@ -9,7 +9,9 @@ data SdlEvent
   | EvKey Key Modifiers
   | EvText String Modifiers
   | EvMouseMotion V2 Modifiers
-  | EvMousePress V2 Modifiers
+  | EvMousePress V2 Modifiers Int
   | EvMouseRelease V2 Modifiers
+  | EvMouseRightPress V2 Modifiers
+  | EvMouseRightRelease V2 Modifiers
   | EvScroll V2
   deriving (Eq, Show)

@@ -13,7 +13,7 @@ module NanoUI.Backend.Term
 
 import Control.Exception (finally)
 import Control.Monad (when)
-import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import GHC.Clock (getMonotonicTime)
 import NanoUI
   ( Context
@@ -28,6 +28,7 @@ import NanoUI
   , emptyInput
   , needsRedraw
   , runFrame
+  , textInputEditActive
   )
 import NanoUI.Term.Cells (Cells, cellsSize, rasterizeLayered)
 import NanoUI.Term.Event (MouseAction (..), TermEvent (..))
@@ -114,12 +115,13 @@ termMainLoop ctx shouldQuit ui onEnter onLeave getSize readEvents present =
                    { inputWindowSize = Size (fromIntegral w0) (fromIntegral h0)
                    }
            prevInp <- newIORef inp0
+           clickRef <- newIORef (0, V2 (-999) (-999), 0)
            draw prev prevInp inp0
-           loop prev prevInp inp0 [] now
+           loop prev prevInp clickRef inp0 [] now
          )
     `finally` onLeave
   where
-    loop prev prevInp inp queued lastT = do
+    loop prev prevInp clickRef inp queued lastT = do
       pending <-
         if null queued
           then do
@@ -127,21 +129,24 @@ termMainLoop ctx shouldQuit ui onEnter onLeave getSize readEvents present =
             readEvents (if animating then animateTimeout else idleTimeout)
           else pure []
       let (group, rest) = splitFrame (queued ++ pending)
-      if any isHardQuit group
+      editActive <- textInputEditActive ctx
+      if any isHardQuit group && not editActive
         then pure ()
         else do
           now <- getMonotonicTime
-          let inp' =
+          let inpRaw =
                 foldl'
                   applyEvent
                   (clearEphemeral inp {inputDeltaTime = realToFrac (now - lastT)})
                   group
-          if shouldQuit inp' || isHardQuitInput inp'
+          inp' <- stampClicks clickRef inpRaw
+          editActive' <- textInputEditActive ctx
+          if shouldQuit inp' || (isHardQuitInput inp' && not editActive')
             then pure ()
             else do
               draw prev prevInp inp'
               writeIORef prevInp inp'
-              loop prev prevInp inp' rest now
+              loop prev prevInp clickRef inp' rest now
 
     draw prevCells prevInpRef inp = do
       prevI <- readIORef prevInpRef
@@ -187,8 +192,25 @@ clearEphemeral inp =
     , inputChars = []
     , inputMousePressed = False
     , inputMouseReleased = False
+    , inputMouseRightPressed = False
+    , inputMouseRightReleased = False
+    , inputMouseClicks = 1
     , inputScroll = V2 0 0
     }
+
+stampClicks :: IORef (Double, V2, Int) -> Input -> IO Input
+stampClicks ref inp
+  | not (inputMousePressed inp) = pure inp
+  | otherwise = do
+      now <- getMonotonicTime
+      (t, pos, n) <- readIORef ref
+      let V2 x y = inputMousePos inp
+          V2 px py = pos
+          close = abs (x - px) <= 1.5 && abs (y - py) <= 1.5
+          quick = now - t <= 0.4
+          n' = if close && quick then min 3 (n + 1) else 1
+      writeIORef ref (now, inputMousePos inp, n')
+      pure (inp {inputMouseClicks = n'})
 
 applyEvent :: Input -> TermEvent -> Input
 applyEvent inp ev =
