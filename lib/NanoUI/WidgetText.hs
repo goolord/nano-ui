@@ -7,6 +7,12 @@ module NanoUI.WidgetText
   , sliderParseRange
   , checkboxLabelText
   , textInputDisplayText
+  , selectPackOptions
+  , selectParseOptions
+  , selectLabelText
+  , selectDisplayText
+  , selectChevronReserve
+  , selectChevronCenterX
   ) where
 
 import Data.Text (Text)
@@ -63,3 +69,26 @@ checkboxLabelText txt =
 textInputDisplayText :: Text -> String -> Bool -> Text
 textInputDisplayText lbl value _focused =
   lbl <> ": " <> T.pack value
+
+selectPackOptions :: Text -> [Text] -> Text
+selectPackOptions lbl opts =
+  T.intercalate sliderRangeSep (lbl : opts)
+
+selectParseOptions :: Text -> (Text, [Text])
+selectParseOptions txt =
+  case T.splitOn sliderRangeSep txt of
+    [] -> ("", [])
+    (lbl : rest) -> (lbl, rest)
+
+selectLabelText :: Text -> Text
+selectLabelText txt = fst (selectParseOptions txt)
+
+selectDisplayText :: Text -> Text -> Text
+selectDisplayText lbl opt = lbl <> ": " <> opt
+
+-- Space reserved on the right of a select for the chevron.
+selectChevronReserve :: Float
+selectChevronReserve = 16
+
+selectChevronCenterX :: Float -> Float -> Float
+selectChevronCenterX x w = x + w - selectChevronReserve / 2

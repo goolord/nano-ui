@@ -1,14 +1,14 @@
 module NanoUI.Sdl.Display
   ( defaultUiScale
   , defaultFontSize
+  , initSdlHints
   , queryWindowDisplayScale
   , queryWindowLogicalSize
   , queryMouseWindowPos
   , setRenderScale
-  , windowToRenderCoords
+  , windowToLogicalCoords
   ) where
 
-import Control.Monad (unless)
 import Foreign.C.Types (CFloat (..))
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr)
@@ -22,6 +22,9 @@ defaultUiScale = 1
 
 defaultFontSize :: Float
 defaultFontSize = 16
+
+initSdlHints :: IO ()
+initSdlHints = sdlInitHintsC
 
 queryWindowDisplayScale :: Ptr SDL_Window -> IO Float
 queryWindowDisplayScale win = do
@@ -52,27 +55,17 @@ queryMouseWindowPos =
           pure (Just (V2 (realToFrac x) (realToFrac y)))
         else pure Nothing
 
+-- Renderer stays at 1:1 pixels; layout uses logical coordinates.
 setRenderScale :: Ptr SDL_Renderer -> Float -> IO Bool
 setRenderScale ren scale = setRenderScaleC ren (realToFrac scale)
 
-windowToRenderCoords :: Ptr SDL_Renderer -> V2 -> IO V2
-windowToRenderCoords ren (V2 wx wy) =
-  alloca $ \xp ->
-    alloca $ \yp -> do
-      ok <- renderCoordsFromWindowC ren (realToFrac wx) (realToFrac wy) xp yp
-      unless ok $ fail "SDL_RenderCoordinatesFromWindow failed"
-      rx <- peek xp
-      ry <- peek yp
-      pure (V2 (realToFrac rx) (realToFrac ry))
+windowToLogicalCoords :: Float -> V2 -> V2
+windowToLogicalCoords scale (V2 wx wy) =
+  let s = if scale > 0 then scale else defaultUiScale
+   in V2 (wx / s) (wy / s)
 
-foreign import ccall safe "nano_ui_render_coords_from_window"
-  renderCoordsFromWindowC ::
-    Ptr SDL_Renderer ->
-    CFloat ->
-    CFloat ->
-    Ptr CFloat ->
-    Ptr CFloat ->
-    IO Bool
+foreign import ccall safe "nano_ui_sdl_init_hints"
+  sdlInitHintsC :: IO ()
 
 foreign import ccall safe "nano_ui_window_display_scale"
   windowDisplayScaleC :: Ptr SDL_Window -> IO CFloat

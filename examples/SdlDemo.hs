@@ -61,7 +61,16 @@ main = do
                         emit ("button:Cancel" :: String)
                       pure ()
                   (_, checked) <- checkbox "Feature" False
+                  (_, _) <-
+                    scrollArea
+                      (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 80})
+                      ( column defaultLayout $ do
+                          _ <- label "Scrollable list"
+                          mapM_ (\i -> label (T.pack ("Item " <> show (i :: Int)))) [1 .. 12]
+                          pure ()
+                      )
                   (_, vol) <- slider (defaultLayout {layoutWidth = Grow 1}) "Volume" 0 100 50
+                  (_, quality) <- select "Quality" ["Low", "Medium", "High"] 1
                   (_, name) <- textInput "Name" ""
                   click <- liftIO $ readIORef lastClick
                   _ <- separator
@@ -72,6 +81,8 @@ main = do
                               <> show checked
                               <> "  vol="
                               <> show (round vol :: Int)
+                              <> "  quality="
+                              <> show quality
                               <> "  name="
                               <> name
                               <> "  click="

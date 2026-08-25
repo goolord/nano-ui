@@ -93,8 +93,8 @@ cabal run -fsdl nano-ui-sdl-demo
 ```
 
 Uses `nano-ui-sdl` (`runSdlApp`, `newSdlContext`) with SDL_ttf text rendering.
-Window DPI is read via `SDL_GetWindowDisplayScale`; only the renderer scale
-tracks display DPI so layout stays in logical coordinates at the base font size.
+Window DPI is read via `SDL_GetWindowDisplayScale`; fonts and geometry rasterize
+at native pixel density while layout stays in logical coordinates.
 The backend renders pinned `DrawData` quads through SDL3's 2D renderer, sorts
 draw commands by layer (background → content → overlay), and skips `runFrame`
 when idle (250ms wake checks `markDirty` / animation state).

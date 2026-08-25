@@ -44,6 +44,7 @@ main = do
                 emit ("button:Cancel" :: String)
               (_, checked) <- checkbox "Feature" False
               (_, vol) <- slider defaultLayout "Volume" 0 100 50
+              (_, quality) <- select "Quality" ["Low", "High"] 0
               (_, name) <- textInput "Name" ""
               click <- liftIO $ readIORef lastClick
               _ <- label ""
@@ -54,6 +55,8 @@ main = do
                           <> show checked
                           <> "  vol="
                           <> show (round vol :: Int)
+                          <> "  quality="
+                          <> show quality
                           <> "  name="
                           <> name
                           <> "  click="

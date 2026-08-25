@@ -19,7 +19,7 @@ fillSolidRect ren r g b a x y w h =
   when (w > 0 && h > 0) $ do
     void $ setRenderDrawColorSafe ren r g b a
     allocaRect $ \rect -> do
-      poke rect (SDL_FRect {x = cf (snap x), y = cf (snap y), w = cf (snap w), h = cf (snap h)})
+      poke rect (SDL_FRect {x = cf x, y = cf y, w = cf w, h = cf h})
       void $ renderFillRectSafe ren (PtrConst.unsafeFromPtr rect)
 
 fillRoundedRect :: Ptr SDL_Renderer -> Word8 -> Word8 -> Word8 -> Word8 -> Float -> Float -> Float -> Float -> Float -> IO ()
@@ -32,14 +32,11 @@ fillRoundedRect ren r g b a x y w h radius =
         g
         b
         a
-        (cf (snap x))
-        (cf (snap y))
-        (cf (snap w))
-        (cf (snap h))
+        (cf x)
+        (cf y)
+        (cf w)
+        (cf h)
         (cf (max 0 radius))
-
-snap :: Float -> Float
-snap x = fromIntegral (round x :: Int)
 
 foreign import ccall safe "nano_ui_fill_rounded_rect"
   fillRoundedRectC ::

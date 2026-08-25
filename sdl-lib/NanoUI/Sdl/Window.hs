@@ -12,15 +12,16 @@ import Foreign.C.String (withCString)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (peek)
-import NanoUI (Context, Input (..), Size (..), markDirty, withExternalText)
+import NanoUI (Context, Input (..), Size (..), markDirty)
 import NanoUI.Sdl.Display
   ( defaultFontSize
   , defaultUiScale
+  , initSdlHints
   , queryMouseWindowPos
   , queryWindowDisplayScale
   , queryWindowLogicalSize
   , setRenderScale
-  , windowToRenderCoords
+  , windowToLogicalCoords
   )
 import NanoUI.Sdl.Font
   ( SdlFont
@@ -31,7 +32,7 @@ import NanoUI.Sdl.Font
   , newTextCache
   , openFont
   , withTtf
-  , withTtfMeasure
+  , withTtfMeasureScaled
   )
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
@@ -60,37 +61,43 @@ data SdlEnv = SdlEnv
 defaultWindowSize :: Size
 defaultWindowSize = Size 960 640
 
--- Layout stays in logical coordinates; SDL render scale maps to pixels. Font stays
--- at the base point size so text is not double-scaled with the renderer.
+-- Layout in logical coordinates; draw/text rasterize at native pixel density.
 syncDisplay :: Context -> SdlEnv -> Input -> IO (Context, Input)
 syncDisplay ctx env inp = do
   scale <- queryWindowDisplayScale (sdlWindow env)
-  ok <- setRenderScale (sdlRenderer env) scale
-  unless ok $ fail "SDL_SetRenderScale failed"
+  unlessM (setRenderScale (sdlRenderer env) defaultUiScale) $
+    fail "SDL_SetRenderScale failed"
   oldScale <- readIORef (sdlScaleRef env)
   when (abs (scale - oldScale) > scaleEpsilon) $ do
     writeIORef (sdlScaleRef env) scale
+    oldFont <- readIORef (sdlFontRef env)
+    closeFont oldFont
+    newFont <- openFont (sdlFontPath env) (defaultFontSize * scale)
+    writeIORef (sdlFontRef env) newFont
+    destroyTextCache (sdlTextCache env)
     markDirty ctx
   queried <- queryWindowLogicalSize (sdlWindow env) scale
   let winSize =
         case queried of
           Size 0 0 -> inputWindowSize inp
           s -> s
-  inpSized <- syncInput env inp {inputWindowSize = winSize}
-  pure (ctx, inpSized)
+  inpSized <- syncInput env scale inp {inputWindowSize = winSize}
+  font <- readIORef (sdlFontRef env)
+  let ctx' = withTtfMeasureScaled ctx font scale
+  pure (ctx', inpSized)
 
-syncInput :: SdlEnv -> Input -> IO Input
-syncInput env inp = do
-  windowPos <-
-    queryMouseWindowPos >>= \case
-      Just pos -> pure pos
-      Nothing -> pure (inputMousePos inp)
-  pos <- windowToRenderCoords (sdlRenderer env) windowPos
-  pure inp {inputMousePos = pos}
+syncInput :: SdlEnv -> Float -> Input -> IO Input
+syncInput _env scale inp = do
+  mPos <- queryMouseWindowPos
+  pure $
+    case mPos of
+      Just windowPos -> inp {inputMousePos = windowToLogicalCoords scale windowPos}
+      Nothing -> inp
 
 withSdl :: Context -> String -> Size -> (Context -> SdlEnv -> IO a) -> IO a
 withSdl ctx title (Size w h) act =
   withTtf $ do
+    initSdlHints
     fontPath <-
       findFontPath >>= \case
         Nothing ->
@@ -117,11 +124,11 @@ withSdl ctx title (Size w h) act =
                 win <- peek winPtr
                 ren <- peek renPtr
                 scale <- queryWindowDisplayScale win
-                font <- openFont fontPath defaultFontSize
+                font <- openFont fontPath (defaultFontSize * scale)
                 scaleRef <- newIORef scale
                 fontRef <- newIORef font
                 cache <- newTextCache
-                unlessM (setRenderScale ren scale) $
+                unlessM (setRenderScale ren defaultUiScale) $
                   fail "SDL_SetRenderScale failed"
                 _ <- startTextInputSafe win
                 pure
@@ -143,8 +150,9 @@ withSdl ctx title (Size w h) act =
           destroyWindowSafe (sdlWindow env)
           quitSafe
     bracket startup teardown $ \env -> do
+      scale <- readIORef (sdlScaleRef env)
       font <- readIORef (sdlFontRef env)
-      let ctx' = withExternalText (withTtfMeasure ctx font) True
+      let ctx' = withTtfMeasureScaled ctx font scale
       act ctx' env
 
 unlessM :: IO Bool -> IO () -> IO ()

@@ -6,6 +6,7 @@ module NanoUI
   , Color (..)
   , colorRGBA
   , colorToWord32
+  , rectContains
   , -- Input
     Input (..)
   , Key (..)
@@ -47,10 +48,13 @@ module NanoUI
   , separator
   , spacer
   , tooltip
+  , scrollArea
+  , select
   , -- Frame
     runFrame
   , needsRedraw
   , collectTextSpans
+  , collectOverlayTextSpans
   , -- Context
     Context
   , ctxTheme
@@ -64,6 +68,8 @@ module NanoUI
   , markDirty
   , isDirty
   , getHotId
+  , getFocusId
+  , getScrollOffset
   , startAnimation
   , anyAnimating
   , FrameMsg (..)
@@ -85,10 +91,10 @@ module NanoUI
   , renderASCIIFromRects
   ) where
 
-import NanoUI.Context (Context (..), FrameMsg (..), anyAnimating, ctxTheme, getHotId, isDirty, markDirty, newContext, newSdlContext, newTerminalContext, startAnimation, withExternalText, withFontMetrics, withMeasureText)
+import NanoUI.Context (Context (..), FrameMsg (..), anyAnimating, ctxTheme, getFocusId, getHotId, getScrollOffset, isDirty, markDirty, newContext, newSdlContext, newTerminalContext, startAnimation, withExternalText, withFontMetrics, withMeasureText)
 import NanoUI.Draw (DrawCmd (..), DrawData (..), Layer (..), indexSize, vertexSize)
 import NanoUI.Font (FontMetrics (..), isTerminalFont, labelContentInset, monospaceMetrics, widgetContentInset, widgetPadding)
-import NanoUI.Frame (collectTextSpans, needsRedraw, runFrame)
+import NanoUI.Frame (collectOverlayTextSpans, collectTextSpans, needsRedraw, runFrame)
 import NanoUI.Id (WidgetId (..), hashWidgetId, widgetId)
 import NanoUI.Input
   ( Input (..)
@@ -113,7 +119,7 @@ import NanoUI.Style
   , terminalTheme
   , sdlTheme
   )
-import NanoUI.Types (Color (..), Rect (..), Size (..), V2 (..), colorRGBA, colorToWord32)
+import NanoUI.Types (Color (..), Rect (..), Size (..), V2 (..), colorRGBA, colorToWord32, rectContains)
 import NanoUI.Widgets
   ( Response (..)
   , button
@@ -127,4 +133,6 @@ import NanoUI.Widgets
   , spacer
   , textInput
   , tooltip
+  , scrollArea
+  , select
   )
