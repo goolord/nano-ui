@@ -1,10 +1,11 @@
--- | Terminal backend built directly on the platform console APIs.
+{-# LANGUAGE CPP #-}
+
+-- | Terminal backend: notcurses on POSIX, native Win32 console on Windows.
 --
--- Replaces the vty backend. vty cannot report pointer motion: its SGR parser
--- rejects the any-motion button code, and its input loop discards the whole
--- pending buffer on a rejected sequence, which also swallowed clicks that
--- arrived in the same read. Owning the input path makes hover a normal event
--- and keeps clicks intact.
+-- notcurses probes the terminal during init (OSC palette, DA queries). On
+-- Windows those sequences are often echoed as literal text rather than
+-- handled — see notcurses #2914. The Win32 driver avoids that by talking
+-- to the console API directly.
 module NanoUI.Backend.Term
   ( runTermApp
   , runTermAppWithQuit
@@ -12,7 +13,6 @@ module NanoUI.Backend.Term
 
 import Control.Exception (finally)
 import Control.Monad (when)
-import Data.ByteString.Builder (string7)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import GHC.Clock (getMonotonicTime)
 import NanoUI
@@ -29,53 +29,102 @@ import NanoUI
   , needsRedraw
   , runFrame
   )
-import NanoUI.Term.Ansi (frameBytes, setup, teardown)
-import NanoUI.Term.Cells (cellsSize, rasterizeLayered)
-import NanoUI.Term.Driver (Driver (..), withDriver)
+import NanoUI.Term.Cells (Cells, cellsSize, rasterizeLayered)
 import NanoUI.Term.Event (MouseAction (..), TermEvent (..))
 
--- | Poll interval while animations are running, in milliseconds.
+#if defined(mingw32_HOST_OS)
+import Data.ByteString.Builder (string7)
+import NanoUI.Term.Ansi (frameBytes, setup, teardown)
+import NanoUI.Term.Driver (Driver (..), withDriver)
+#else
+import NanoUI.Term.Notcurses (ncBlitCells, ncRead, ncSize, withNotcurses)
+#endif
+
 animateTimeout :: Int
 animateTimeout = 16
 
--- | Idle wait. Long enough to cost nothing, short enough that a missed wakeup
--- is not noticeable.
 idleTimeout :: Int
 idleTimeout = 250
 
 runTermApp :: Context -> UI () -> IO ()
 runTermApp ctx ui = runTermAppWithQuit ctx (const False) ui
 
+#if defined(mingw32_HOST_OS)
+
 runTermAppWithQuit :: Context -> (Input -> Bool) -> UI () -> IO ()
 runTermAppWithQuit ctx shouldQuit ui =
-  withDriver $ \drv -> do
-    (w0, h0) <- drvSize drv
-    drvWrite drv setup
-    drvFlush drv
-    prev <- newIORef Nothing
-    now <- getMonotonicTime
-    let inp0 =
-          emptyInput
-            { inputWindowSize = Size (fromIntegral w0) (fromIntegral h0)
-            }
-    prevInp <- newIORef inp0
-    -- Paint before waiting on input, so startup is not a blank screen for as
-    -- long as the idle timeout.
-    ( do
-        draw drv prev prevInp inp0
-        loop drv prev prevInp inp0 [] now
+  withDriver $ \drv ->
+    termMainLoop
+      ctx
+      shouldQuit
+      ui
+      ( do
+          drvWrite drv setup
+          drvFlush drv
+          drvRefreshViewport drv
       )
-      `finally` ( do
-                    drvWrite drv teardown
-                    drvFlush drv
-                )
+      ( do
+          drvWrite drv teardown
+          drvFlush drv
+      )
+      (drvSize drv)
+      (drvRead drv)
+      ( \before cur -> do
+          when (fmap cellsSize before /= Just (cellsSize cur)) $
+            drvWrite drv (string7 "\ESC[2J")
+          drvWrite drv (frameBytes before cur)
+          drvFlush drv
+      )
+
+#else
+
+runTermAppWithQuit :: Context -> (Input -> Bool) -> UI () -> IO ()
+runTermAppWithQuit ctx shouldQuit ui =
+  withNotcurses $ \nc ->
+    termMainLoop
+      ctx
+      shouldQuit
+      ui
+      (pure ())
+      (pure ())
+      (ncSize nc)
+      (ncRead nc)
+      (ncBlitCells nc)
+
+#endif
+
+termMainLoop ::
+  Context ->
+  (Input -> Bool) ->
+  UI () ->
+  IO () ->
+  IO () ->
+  IO (Int, Int) ->
+  (Int -> IO [TermEvent]) ->
+  (Maybe Cells -> Cells -> IO ()) ->
+  IO ()
+termMainLoop ctx shouldQuit ui onEnter onLeave getSize readEvents present =
+  onEnter
+    >> ( do
+           (w0, h0) <- getSize
+           prev <- newIORef Nothing
+           now <- getMonotonicTime
+           let inp0 =
+                 emptyInput
+                   { inputWindowSize = Size (fromIntegral w0) (fromIntegral h0)
+                   }
+           prevInp <- newIORef inp0
+           draw prev prevInp inp0
+           loop prev prevInp inp0 [] now
+         )
+    `finally` onLeave
   where
-    loop drv prev prevInp inp queued lastT = do
+    loop prev prevInp inp queued lastT = do
       pending <-
         if null queued
           then do
             animating <- anyAnimating ctx
-            drvRead drv (if animating then animateTimeout else idleTimeout)
+            readEvents (if animating then animateTimeout else idleTimeout)
           else pure []
       let (group, rest) = splitFrame (queued ++ pending)
       if any isHardQuit group
@@ -90,30 +139,24 @@ runTermAppWithQuit ctx shouldQuit ui =
           if shouldQuit inp' || isHardQuitInput inp'
             then pure ()
             else do
-              draw drv prev prevInp inp'
+              draw prev prevInp inp'
               writeIORef prevInp inp'
-              loop drv prev prevInp inp' rest now
+              loop prev prevInp inp' rest now
 
-    draw drv prevCells prevInpRef inp = do
+    draw prevCells prevInpRef inp = do
       prevI <- readIORef prevInpRef
       need <- needsRedraw ctx prevI inp
       (_, _, drawData, _) <- runFrame ctx inp ui
       when need $ do
         baseSpans <- collectTextSpans ctx
-        overlaySpans <- collectOverlayTextSpans ctx
+        overlaySpans <- collectOverlayTextSpans ctx inp
         let Size w h = inputWindowSize inp
         cells <- rasterizeLayered (round w) (round h) drawData baseSpans overlaySpans
         before <- readIORef prevCells
         when (before /= Just cells) $ do
-          when (fmap cellsSize before /= Just (cellsSize cells)) $
-            drvWrite drv (string7 "\ESC[2J")
-          drvWrite drv (frameBytes before cells)
-          drvFlush drv
+          present before cells
           writeIORef prevCells (Just cells)
 
--- | Mouse button transitions have to be visible to exactly one frame, so a
--- batch is cut after the first one. Without this a fast click whose press and
--- release land in the same read would never register.
 splitFrame :: [TermEvent] -> ([TermEvent], [TermEvent])
 splitFrame events =
   case break isButtonEdge events of
@@ -127,9 +170,6 @@ isButtonEdge ev =
     EvMouse (MouseRelease _) _ _ _ -> True
     _ -> False
 
--- Signal generation is disabled in raw mode, so Ctrl-C is handled here.
--- POSIX reports the control byte as the letter it was typed with; the
--- Windows console reports the control character itself.
 isHardQuit :: TermEvent -> Bool
 isHardQuit ev =
   case ev of
@@ -159,7 +199,7 @@ applyEvent inp ev =
     EvMouse action col row mods ->
       let positioned =
             inp
-              { inputMousePos = V2 (fromIntegral col) (fromIntegral row)
+              { inputMousePos = V2 (fromIntegral col + 0.5) (fromIntegral row + 0.5)
               , inputModifiers = mods
               }
        in case action of
@@ -169,5 +209,7 @@ applyEvent inp ev =
               positioned {inputMouseDown = False, inputMouseReleased = True}
             MouseDrag _ -> positioned {inputMouseDown = True}
             MouseMove -> positioned
-            MouseScrollUp -> positioned {inputScroll = V2 0 1}
-            MouseScrollDown -> positioned {inputScroll = V2 0 (-1)}
+            MouseScrollUp -> positioned {inputScroll = V2 0 (-1)}
+            MouseScrollDown -> positioned {inputScroll = V2 0 1}
+            MouseScrollLeft -> positioned {inputScroll = V2 (-1) 0}
+            MouseScrollRight -> positioned {inputScroll = V2 1 0}

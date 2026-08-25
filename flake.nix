@@ -47,6 +47,7 @@
               extraPackages = _hpkgs: with pkgs; [
                 SDL3
                 SDL3_ttf
+                notcurses # provides notcurses-core.pc for cabal pkg-config
               ];
             };
           };

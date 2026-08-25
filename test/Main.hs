@@ -44,6 +44,7 @@ main = do
   run "scroll-wheel" runScrollTest
   run "tab-focus" runTabFocusTest
   run "select-initial" runSelectTest
+  run "select-dropdown" runSelectDropdownTest
 
   n <- readIORef failed
   if n == 0
@@ -418,3 +419,30 @@ runSelectTest ctx failed = do
   let hasMedium =
         any (\(_, txt, _, _, _) -> "Quality: Medium" `T.isInfixOf` txt) spans
   when (not hasMedium) $ bump failed
+
+-- Open select dropdown and check overlay rows render option text.
+runSelectDropdownTest :: Context -> IORef Int -> IO ()
+runSelectDropdownTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 320 80}
+      ui = column defaultLayout (select "Quality" ["Low", "High"] 0)
+  _ <- runFrame ctx inp0 ui
+  let click = V2 10 10
+      inpPress =
+        inp0
+          { inputMousePos = click
+          , inputMouseDown = True
+          , inputMousePressed = True
+          , inputMouseReleased = False
+          }
+  _ <- runFrame ctx inpPress ui
+  let inpRelease =
+        inpPress
+          { inputMousePressed = False
+          , inputMouseDown = False
+          , inputMouseReleased = True
+          }
+  _ <- runFrame ctx inpRelease ui
+  overlays <- collectOverlayTextSpans ctx inpRelease
+  let hasLow = any (\(_, txt, _, _, _) -> "Low" `T.isInfixOf` txt) overlays
+      hasHigh = any (\(_, txt, _, _, _) -> "High" `T.isInfixOf` txt) overlays
+  when (not (hasLow && hasHigh)) $ bump failed

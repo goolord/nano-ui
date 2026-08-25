@@ -43,9 +43,25 @@ main = do
                 liftIO $ writeIORef lastClick "Cancel"
                 emit ("button:Cancel" :: String)
               (_, checked) <- checkbox "Feature" False
-              (_, vol) <- slider defaultLayout "Volume" 0 100 50
+              (_, vol) <- slider (defaultLayout {layoutWidth = Grow 1}) "Volume" 0 100 50
               (_, quality) <- select "Quality" ["Low", "High"] 0
               (_, name) <- textInput "Name" ""
+              (_, _) <-
+                scrollArea
+                  ( compact
+                      { layoutWidth = Grow 1
+                      , layoutHeight = Fixed 4
+                      }
+                  )
+                  ( column compact $ do
+                      _ <- label "Scroll line 1"
+                      _ <- label "Scroll line 2"
+                      _ <- label "Scroll line 3"
+                      _ <- label "Scroll line 4"
+                      _ <- label "Scroll line 5"
+                      _ <- label "Scroll line 6"
+                      pure ()
+                  )
               click <- liftIO $ readIORef lastClick
               _ <- label ""
               _ <-

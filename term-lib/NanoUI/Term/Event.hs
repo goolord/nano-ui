@@ -1,6 +1,6 @@
--- | Terminal events, as produced by every platform driver. The Windows driver
--- builds these from console input records; POSIX builds them by decoding VT
--- byte sequences. Both funnel into the same 'NanoUI.Input.Input' folding.
+-- | Terminal events shared by all backends. Win32 builds these from console
+-- input records; notcurses maps them from @ncinput@; 'NanoUI.Term.Vt' decodes
+-- them from VT byte streams for tests.
 module NanoUI.Term.Event
   ( MouseBtn (..)
   , MouseAction (..)
@@ -22,6 +22,8 @@ data MouseAction
     MouseDrag MouseBtn
   | MouseScrollUp
   | MouseScrollDown
+  | MouseScrollLeft
+  | MouseScrollRight
   deriving (Eq, Show)
 
 data TermEvent

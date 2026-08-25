@@ -99,10 +99,7 @@ executable nano-ui-demo
     hs-source-dirs:   examples
     default-language: GHC2024
 
--- Terminal backend. Talks to the platform console APIs directly rather than
--- going through vty, which cannot report pointer motion (hover) and drops
--- buffered input when it meets a sequence it does not recognise. Only GHC boot
--- libraries are needed: Win32 on Windows, unix elsewhere.
+-- Terminal backend: notcurses-core on POSIX, native Win32 console on Windows.
 library nano-ui-term
     import:           extensions
     import:           ghc-options
@@ -113,25 +110,25 @@ library nano-ui-term
         NanoUI.Term.Cells
         NanoUI.Term.Event
         NanoUI.Term.Vt
-    other-modules:
-        NanoUI.Term.Driver
-        NanoUI.Term.Driver.Types
     build-depends:
         base ^>=4.22.0.0,
         bytestring,
         nano-ui,
         primitive ^>=0.9,
         text ^>=2.1
-    if os(windows)
-        build-depends: Win32 >=2.14
-        other-modules: NanoUI.Term.Driver.Windows
-    else
-        build-depends: unix >=2.8
-        other-modules:
-            NanoUI.Term.Driver.Posix
-            NanoUI.Term.Driver.WinSize
     hs-source-dirs:   term-lib
     default-language: GHC2024
+    if os(windows)
+        build-depends: Win32 >=2.14
+        other-modules:
+            NanoUI.Term.Driver
+            NanoUI.Term.Driver.Types
+            NanoUI.Term.Driver.Windows
+    else
+        c-sources:        term-lib/cbits/nano_ui_notcurses.c
+        include-dirs:     term-lib/cbits
+        pkgconfig-depends: notcurses-core >= 3.0
+        other-modules: NanoUI.Term.Notcurses
 
 executable nano-ui-tui
     import:           extensions

@@ -73,8 +73,7 @@ withDriver act =
       setConsoleOutputCP 65001
       hSetBinaryMode stdout True
       hSetBuffering stdout (BlockBuffering Nothing)
-      origin0 <- windowOrigin hOut
-      st <- newIORef WinState {wsButtons = 0, wsSurrogate = Nothing, wsOrigin = origin0}
+      st <- newIORef WinState {wsButtons = 0, wsSurrogate = Nothing, wsOrigin = (0, 0)}
       let enter = do
             -- Deliberately omits ENABLE_QUICK_EDIT_MODE: with quick edit on,
             -- the console consumes drags for text selection instead of
@@ -85,13 +84,15 @@ withDriver act =
           leave = do
             setConsoleMode hIn inMode0
             setConsoleMode hOut outMode0
-      bracket_ enter leave $
+      bracket_ enter leave $ do
+        refreshViewport st
         act
           Driver
             { drvSize = consoleSize
             , drvRead = readEvents hIn st
             , drvWrite = hPutBuilder stdout
             , drvFlush = hFlush stdout
+            , drvRefreshViewport = refreshViewport st
             }
 
 -- | Always talk to the console itself rather than the process's standard
@@ -125,6 +126,12 @@ windowOrigin h = do
   info <- getConsoleScreenBufferInfo h
   let win = srWindow info
   pure (fromIntegral (leftPos win), fromIntegral (topPos win))
+
+refreshViewport :: IORef WinState -> IO ()
+refreshViewport st = do
+  (ox, oy) <- bracket (openConsole "CONOUT$") closeHandle windowOrigin
+  s <- readIORef st
+  writeIORef st s {wsOrigin = (ox, oy)}
 
 recordBatch :: Int
 recordBatch = 64
@@ -166,9 +173,9 @@ resizeEvents st =
   bracket (openConsole "CONOUT$") closeHandle $ \h -> do
     info <- getConsoleScreenBufferInfo h
     let win = srWindow info
+        origin = (fromIntegral (leftPos win), fromIntegral (topPos win))
         w = fromIntegral (rightPos win) - fromIntegral (leftPos win) + 1
         h' = fromIntegral (bottomPos win) - fromIntegral (topPos win) + 1
-        origin = (fromIntegral (leftPos win), fromIntegral (topPos win))
     s <- readIORef st
     writeIORef st s {wsOrigin = origin}
     pure [EvResize (max 1 w) (max 1 h')]
