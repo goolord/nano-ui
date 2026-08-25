@@ -17,4 +17,6 @@ data Driver = Driver
     drvWrite :: Builder -> IO ()
   , -- | Push queued output to the terminal.
     drvFlush :: IO ()
+  , -- | Refresh cached viewport origin after alternate-screen setup or resize.
+    drvRefreshViewport :: IO ()
   }

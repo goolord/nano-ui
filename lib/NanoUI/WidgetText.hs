@@ -4,7 +4,9 @@ module NanoUI.WidgetText
   , sliderLabelText
   , sliderValueText
   , sliderPackRange
+  , sliderPackTerminal
   , sliderParseRange
+  , sliderText
   , checkboxLabelText
   , textInputDisplayText
   , selectPackOptions
@@ -33,9 +35,27 @@ sliderLabelText txt =
 sliderValueText :: Float -> Text
 sliderValueText = T.pack . show . (round :: Float -> Int)
 
+sliderBarCells :: Int
+sliderBarCells = 12
+
+sliderText :: Text -> Float -> Float -> Text
+sliderText lbl frac value =
+  let filled = max 0 (min sliderBarCells (round (frac * fromIntegral sliderBarCells)))
+      bar = T.replicate filled "\x2588" <> T.replicate (sliderBarCells - filled) "\x2591"
+   in lbl <> " [" <> bar <> "] " <> T.pack (show (round value :: Int))
+
 sliderPackRange :: Text -> Float -> Float -> Text
 sliderPackRange lbl minV maxV =
   lbl <> sliderRangeSep <> sliderValueText minV <> "," <> sliderValueText maxV
+
+-- | Terminal slider node text: visible bar plus hidden min/max suffix after US.
+sliderPackTerminal :: Text -> Float -> Float -> Float -> Float -> Text
+sliderPackTerminal lbl frac val minV maxV =
+  sliderText lbl frac val
+    <> sliderRangeSep
+    <> sliderValueText minV
+    <> ","
+    <> sliderValueText maxV
 
 sliderParseRange :: Text -> (Text, Float, Float)
 sliderParseRange txt =

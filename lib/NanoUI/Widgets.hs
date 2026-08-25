@@ -38,6 +38,8 @@ import NanoUI.WidgetText
   , sliderDisplayText
   , sliderLabelText
   , sliderPackRange
+  , sliderPackTerminal
+  , sliderText
   , sliderValueText
   , textInputDisplayText
   , selectPackOptions
@@ -180,7 +182,7 @@ slider layout lbl minV maxV initial = do
       fm = ctxFontMetrics ctx
       nodeText =
         if isTerminalFont fm
-          then sliderText lbl frac current
+          then sliderPackTerminal lbl frac current minV maxV
           else sliderPackRange lbl minV maxV
   resp <- addWidget wid NodeSlider nodeText frac layout
   active <- liftIO (readIORef (ctxActiveId ctx))
@@ -369,15 +371,6 @@ tooltip tipTxt resp = do
       let (Rect rx ry rw rh) = respRect resp
       pushTooltip ctx (Rect (rx + rw + 4) ry 100 (max rh 20)) tipTxt
   pure resp
-
-sliderBarCells :: Int
-sliderBarCells = 12
-
-sliderText :: Text -> Float -> Float -> Text
-sliderText lbl frac value =
-  let filled = max 0 (min sliderBarCells (round (frac * fromIntegral sliderBarCells)))
-      bar = T.replicate filled "\x2588" <> T.replicate (sliderBarCells - filled) "\x2591"
-   in lbl <> " [" <> bar <> "] " <> T.pack (show (round value :: Int))
 
 textInputText :: Text -> String -> Int -> Bool -> Text
 textInputText lbl value cursor focused =

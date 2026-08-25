@@ -126,7 +126,7 @@ draw ctx ui env inp = do
   scale <- readIORef (sdlScaleRef env)
   (_, _, drawData, dirtyAfterUi) <- runFrame ctx inp ui
   baseSpans <- collectTextSpans ctx
-  overlaySpans <- collectOverlayTextSpans ctx
+  overlaySpans <- collectOverlayTextSpans ctx inp
   font <- readIORef (sdlFontRef env)
   let clear = themeWindow (ctxTheme ctx)
   renderDrawDataPass (sdlRenderer env) scale (Just clear) drawData False

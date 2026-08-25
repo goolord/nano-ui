@@ -66,17 +66,19 @@ cabal run nano-ui-tui
 
 Uses `nano-ui-term` (`runTermApp`, `newTerminalContext`) with 1-cell font metrics.
 
-The backend talks to the platform console directly instead of using vty, because
-vty cannot report pointer motion: it rejects the any-motion mouse report and
-discards the rest of the pending input when it does, which loses hover and any
-click that arrives in the same read. Only GHC boot libraries are needed: `Win32`
-on Windows, `unix` elsewhere.
+**Windows** — native Win32 console API (no notcurses). Frames are cell-rasterised
+and diffed to ANSI; mouse hover uses console input records. Only `Win32` is
+required; MSYS2 UCRT64 is the usual build path:
 
-Windows reads native console records, so hover works even on terminals that do
-not implement DECSET 1003. POSIX puts the terminal in raw mode and decodes SGR
-mouse reports from the byte stream. Frames are diffed cell by cell, so a pointer
-movement only rewrites what changed.
+```bash
+cabal run nano-ui-tui
+```
 
+**Linux / macOS / Nix** — [notcurses](https://github.com/dankamongmen/notcurses)
+handles rendering and input. **Requires `notcurses-core`** (pkg-config); there is
+no VT-only fallback on POSIX. Use `nix develop` or install the library before
+building. Changed cells are patched each frame; a full plane erase also runs on
+resize, dimension mismatch, or when a cell update fails mid-blit.
 ### SDL3 backend
 
 Requires SDL3, SDL3_ttf, and `pkg-config`. On Windows, MSYS2 UCRT64 is the usual path:
