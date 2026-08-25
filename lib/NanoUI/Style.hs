@@ -133,14 +133,14 @@ defaultTheme =
         }
     , themeInput =
         Style
-          { styleBg = colorRGBA 30 30 32 255
+          { styleBg = colorRGBA 22 22 26 255
           , styleFg = colorRGBA 240 240 240 255
-          , styleBorder = colorRGBA 80 80 85 255
+          , styleBorder = colorRGBA 100 105 115 255
           , styleBorderWidth = 1
-          , styleCornerRadius = 3
-          , styleHoverBg = colorRGBA 35 35 38 255
-          , styleActiveBg = colorRGBA 25 25 28 255
-        }
+          , styleCornerRadius = 4
+          , styleHoverBg = colorRGBA 28 28 32 255
+          , styleActiveBg = colorRGBA 18 18 22 255
+          }
     , themeSeparator = colorRGBA 80 80 85 255
     , themeAccent = colorRGBA 100 149 237 255
     }
@@ -172,13 +172,13 @@ sdlTheme =
           }
     , themeInput =
         Style
-          { styleBg = colorRGBA 33 34 44 255
+          { styleBg = colorRGBA 25 26 36 255
           , styleFg = colorRGBA 248 248 242 255
           , styleBorder = colorRGBA 98 114 164 255
           , styleBorderWidth = 1
-          , styleCornerRadius = 6
-          , styleHoverBg = colorRGBA 40 42 54 255
-          , styleActiveBg = colorRGBA 33 34 44 255
+          , styleCornerRadius = 4
+          , styleHoverBg = colorRGBA 32 34 46 255
+          , styleActiveBg = colorRGBA 20 21 30 255
           }
     , themeSeparator = colorRGBA 98 114 164 96
     , themeAccent = colorRGBA 255 121 198 255
@@ -210,14 +210,14 @@ terminalTheme =
         }
     , themeInput =
         Style
-          { styleBg = colorRGBA 18 18 22 255
+          { styleBg = colorRGBA 14 14 18 255
           , styleFg = colorRGBA 240 240 245 255
           , styleBorder = colorRGBA 120 125 140 255
           , styleBorderWidth = 1
           , styleCornerRadius = 0
-          , styleHoverBg = colorRGBA 24 24 28 255
-          , styleActiveBg = colorRGBA 14 14 18 255
-        }
+          , styleHoverBg = colorRGBA 20 20 24 255
+          , styleActiveBg = colorRGBA 10 10 14 255
+          }
     , themeSeparator = colorRGBA 100 105 120 255
     , themeAccent = colorRGBA 90 160 255 255
     }

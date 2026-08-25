@@ -48,6 +48,10 @@ import NanoUI.WidgetText
   , selectParseOptions
   , sliderLabelText
   , sliderParseRange
+  , textInputFieldHeight
+  , textInputLabelGap
+  , textInputMinWidth
+  , textInputPlaceholder
   , sliderValueText
   )
 solveLayout :: NodeArena -> FontMetrics -> (Text -> IO (Float, Float)) -> Float -> Float -> IO ()
@@ -136,6 +140,19 @@ measureWidget na fm measure idx = do
                 [] -> (0, 0)
                 ds -> (maximum (map fst ds), maximum (map snd ds))
         pure (mw, mh, selectChevronReserve, 0)
+      NodeTextInput -> do
+        let lbl = if T.null txt then " " else txt
+        (lw, lh) <- measure lbl
+        if isTerminalFont fm
+          then do
+            (vw, vh) <- measure (textInputPlaceholder lbl)
+            pure (max lw vw, max lh vh, 0, 0)
+          else do
+            (pw, _) <- measure (textInputPlaceholder lbl)
+            let fieldH = textInputFieldHeight fm
+                gap = textInputLabelGap fm
+                contentW = max textInputMinWidth (max lw pw)
+            pure (contentW, lh + gap + fieldH, 0, lh + gap)
       _ -> do
         let body =
               if T.null txt
