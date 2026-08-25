@@ -11,6 +11,8 @@ module NanoUI.Widgets
   , separator
   , spacer
   , tooltip
+  , scrollArea
+  , select
   , sliderText
   , sliderDisplayText
   , sliderLabelText
@@ -18,6 +20,9 @@ module NanoUI.Widgets
   , checkboxLabelText
   , textInputText
   , textInputDisplayText
+  , selectPackOptions
+  , selectLabelText
+  , selectParseOptions
   ) where
 
 import Control.Monad (when)
@@ -35,6 +40,9 @@ import NanoUI.WidgetText
   , sliderPackRange
   , sliderValueText
   , textInputDisplayText
+  , selectPackOptions
+  , selectParseOptions
+  , selectLabelText
   )
 import NanoUI.Context
   ( Context (..)
@@ -42,6 +50,8 @@ import NanoUI.Context
   , getPrevRect
   , getStore
   , intKey
+  , isDisabled
+  , registerFocusable
   , setStore
   )
 import NanoUI.Draw (beginLayer, Layer (..), pushRect, pushText)
@@ -130,11 +140,18 @@ label txt = do
 
 {-# INLINE button #-}
 button :: HasCallStack => Text -> UI Response
-button txt = do
+button txt = buttonEx True txt
+
+buttonEx :: HasCallStack => Bool -> Text -> UI Response
+buttonEx enabled txt = do
   wid <- currentId
+  ctx <- askContext
+  liftIO $ registerFocusable ctx wid
   resp <- addWidget wid NodeButton ("[ " <> txt <> " ]") 0 defaultLayout
-  when (respClicked resp) $ emit ("button:" <> T.unpack txt)
-  pure resp
+  disabled <- liftIO (isDisabled ctx wid)
+  let active = enabled && not disabled
+  when (active && respClicked resp) $ emit ("button:" <> T.unpack txt)
+  pure resp {respClicked = active && respClicked resp, respHovered = active && respHovered resp}
 
 {-# INLINE checkbox #-}
 checkbox :: HasCallStack => Text -> Bool -> UI (Response, Bool)
@@ -199,6 +216,7 @@ textInput :: HasCallStack => Text -> String -> UI (Response, String)
 textInput lbl initial = do
   wid <- currentId
   ctx <- askContext
+  liftIO $ registerFocusable ctx wid
   inp <- askInput
   store <- liftIO (getStore ctx)
   let key = intKey wid
@@ -280,6 +298,62 @@ spacer w h = do
         AlignTop
     setWidgetId (ctxNodeArena ctx) idx wid
     resolveInteraction ctx inp wid
+
+{-# INLINE scrollArea #-}
+scrollArea :: HasCallStack => Layout -> UI a -> UI (WidgetId, a)
+scrollArea layout child = do
+  wid <- currentId
+  r <-
+    UI $ \ctx inp -> do
+      stack <- readIORef (ctxContainerStack ctx)
+      let parent = parentIdx stack
+      idx <-
+        addNode
+          (ctxNodeArena ctx)
+          NodeScrollContainer
+          parent
+          (layoutDirection layout)
+          (layoutWidth layout)
+          (layoutHeight layout)
+          (layoutPadding layout)
+          (layoutGap layout)
+          (layoutMinW layout)
+          (layoutMinH layout)
+          (layoutMaxW layout)
+          (layoutMaxH layout)
+          0
+          (layoutAlignX layout)
+          (layoutAlignY layout)
+      setWidgetId (ctxNodeArena ctx) idx wid
+      writeIORef (ctxContainerStack ctx) (idx : stack)
+      childR <- unUI child ctx inp
+      writeIORef (ctxContainerStack ctx) stack
+      pure childR
+  pure (wid, r)
+
+{-# INLINE select #-}
+select :: HasCallStack => Text -> [Text] -> Int -> UI (Response, Int)
+select lbl options initial = do
+  wid <- currentId
+  ctx <- askContext
+  liftIO $ registerFocusable ctx wid
+  let opts = if null options then [""] else options
+      key = intKey wid
+  store0 <- liftIO (getStore ctx)
+  let current = IM.findWithDefault initial key (storeSelect store0)
+      clamped = max 0 (min (length opts - 1) current)
+      nodeText = selectPackOptions lbl opts
+  resp <- addWidget wid NodeSelect nodeText 0 defaultLayout
+  open <- liftIO $ do
+    st <- getStore ctx
+    pure (IM.findWithDefault False key (storeSelectOpen st))
+  when (respClicked resp) $
+    liftIO $ do
+      st <- getStore ctx
+      setStore ctx (st {storeSelectOpen = IM.insert key (not open) (storeSelectOpen st)})
+  store1 <- liftIO (getStore ctx)
+  let finalIdx = IM.findWithDefault clamped key (storeSelect store1)
+  pure (resp {respChanged = finalIdx /= initial}, finalIdx)
 
 {-# INLINE tooltip #-}
 tooltip :: Text -> Response -> UI Response
@@ -364,28 +438,43 @@ addWidgetResp wid nt txt value layout mResp = do
 
 resolveInteraction :: Context -> Input -> WidgetId -> IO Response
 resolveInteraction ctx inp wid = do
-  mrect <- getPrevRect ctx wid
-  let rect = maybe (Rect 0 0 0 0) id mrect
-      mouse = inputMousePos inp
-      hovered =
-        case rect of
-          Rect _ _ rw rh -> rw > 0 && rh > 0 && rectContains rect mouse
-  active <- readIORef (ctxActiveId ctx)
-  let activating = inputMousePressed inp && hovered
-      isActive = active == wid || activating
-  when hovered $ writeIORef (ctxHotId ctx) wid
-  when activating $ writeIORef (ctxActiveId ctx) wid
-  let pressed = inputMouseDown inp && (hovered || active == wid)
-      clicked = inputMouseReleased inp && isActive
-  pure
-    Response
-      { respId = wid
-      , respRect = rect
-      , respHovered = hovered
-      , respPressed = pressed
-      , respClicked = clicked
-      , respChanged = False
-      }
+  disabled <- isDisabled ctx wid
+  if disabled
+    then do
+      mrect <- getPrevRect ctx wid
+      let rect = maybe (Rect 0 0 0 0) id mrect
+      pure
+        Response
+          { respId = wid
+          , respRect = rect
+          , respHovered = False
+          , respPressed = False
+          , respClicked = False
+          , respChanged = False
+          }
+    else do
+      mrect <- getPrevRect ctx wid
+      let rect = maybe (Rect 0 0 0 0) id mrect
+          mouse = inputMousePos inp
+          hovered =
+            case rect of
+              Rect _ _ rw rh -> rw > 0 && rh > 0 && rectContains rect mouse
+      active <- readIORef (ctxActiveId ctx)
+      let activating = inputMousePressed inp && hovered
+          isActive = active == wid || activating
+      when hovered $ writeIORef (ctxHotId ctx) wid
+      when activating $ writeIORef (ctxActiveId ctx) wid
+      let pressed = inputMouseDown inp && (hovered || active == wid)
+          clicked = inputMouseReleased inp && isActive
+      pure
+        Response
+          { respId = wid
+          , respRect = rect
+          , respHovered = hovered
+          , respPressed = pressed
+          , respClicked = clicked
+          , respChanged = False
+          }
 
 processTextInput :: Input -> String -> Int -> IO (String, Int)
 processTextInput inp txt cur =

@@ -39,6 +39,10 @@ main = do
   run "ascii" runAsciiTest
   run "vt-decode" runVtTest
   run "cells-and-diff" runCellsTest
+  run "checkbox-toggle" runCheckboxTest
+  run "slider-store" runSliderTest
+  run "scroll-wheel" runScrollTest
+  run "tab-focus" runTabFocusTest
 
   n <- readIORef failed
   if n == 0
@@ -223,12 +227,17 @@ runTextInputFocusTest _ failed = do
           }
   (_, _, _, _) <- runFrame ctx inp1 ui
   spans <- collectTextSpans ctx
-  let hasCursor = any (\(_, txt, _, _) -> T.isInfixOf "\x2502" txt) spans
+  let hasCursor = any (\(_, txt, _, _, _) -> T.isInfixOf "\x2502" txt) spans
   when (not hasCursor) $ bump failed
 
 runIdleTest :: Context -> IORef Int -> IO ()
-runIdleTest ctx failed = do
-  let inp = emptyInput {inputWindowSize = Size 100 100}
+runIdleTest _ failed = do
+  ctx <- newContext
+  let inp =
+        emptyInput
+          { inputWindowSize = Size 100 100
+          , inputMousePos = V2 (-1) (-1)
+          }
   _ <- runFrame ctx inp (label "idle")
   need <- needsRedraw ctx inp inp
   when need $ bump failed
@@ -323,3 +332,78 @@ runCellsTest ctx failed = do
   ck (narrowChar '\x2588')
   ck (narrowChar '\x2591')
   ck (not (narrowChar '\x4E00'))
+
+runCheckboxTest :: Context -> IORef Int -> IO ()
+runCheckboxTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 200 100}
+      ui = column defaultLayout (checkbox "Opt" False)
+  _ <- runFrame ctx inp0 ui
+  ((resp, _), _, _, _) <- runFrame ctx inp0 ui
+  let Rect rx ry _ _ = respRect resp
+      click = V2 (rx + 1) (ry + 0.5)
+  let inpPress =
+        inp0
+          { inputMousePos = click
+          , inputMouseDown = True
+          , inputMousePressed = True
+          }
+  _ <- runFrame ctx inpPress ui
+  let inpRelease = inpPress {inputMouseDown = False, inputMousePressed = False, inputMouseReleased = True}
+  ((_, checked), _, _, _) <- runFrame ctx inpRelease ui
+  when (not checked) $ bump failed
+
+runSliderTest :: Context -> IORef Int -> IO ()
+runSliderTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 300 80}
+      ui = column defaultLayout (slider (defaultLayout {layoutWidth = Grow 1}) "Vol" 0 100 10)
+  _ <- runFrame ctx inp0 ui
+  ((resp, _), _, _, _) <- runFrame ctx inp0 ui
+  let Rect rx ry rw _ = respRect resp
+      drag = V2 (rx + rw * 0.75) (ry + 1)
+  let inpDrag =
+        inp0
+          { inputMousePos = drag
+          , inputMouseDown = True
+          , inputMousePressed = True
+          }
+  ((_, val), _, _, _) <- runFrame ctx inpDrag ui
+  when (val <= 10) $ bump failed
+
+runScrollTest :: Context -> IORef Int -> IO ()
+runScrollTest ctx failed = do
+  let inp0 =
+        emptyInput
+          { inputWindowSize = Size 200 120
+          , inputMousePos = V2 20 20
+          }
+      ui = do
+        (sid, _) <-
+          scrollArea
+            (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 60})
+            ( column defaultLayout $ do
+                _ <- replicateM 8 (label "scroll line")
+                pure ()
+            )
+        pure sid
+  _ <- runFrame ctx inp0 ui
+  (sid, _, _, _) <- runFrame ctx inp0 ui
+  off0 <- getScrollOffset ctx sid
+  let inpScroll = inp0 {inputScroll = V2 0 1}
+  (_, _, _, _) <- runFrame ctx inpScroll ui
+  off1 <- getScrollOffset ctx sid
+  when (off1 <= off0) $ bump failed
+
+runTabFocusTest :: Context -> IORef Int -> IO ()
+runTabFocusTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 200 120}
+      ui =
+        column defaultLayout $ do
+          _ <- button "One"
+          _ <- button "Two"
+          pure ()
+  _ <- runFrame ctx inp0 ui
+  _ <- runFrame ctx (inp0 {inputKeys = [KeyTab]}) ui
+  focus1 <- getFocusId ctx
+  _ <- runFrame ctx (inp0 {inputKeys = [KeyTab]}) ui
+  focus2 <- getFocusId ctx
+  when (focus1 == WidgetId 0 || focus2 == WidgetId 0 || focus1 == focus2) $ bump failed

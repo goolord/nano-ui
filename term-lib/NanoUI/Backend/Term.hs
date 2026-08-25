@@ -24,11 +24,13 @@ import NanoUI
   , V2 (..)
   , anyAnimating
   , collectTextSpans
+  , collectOverlayTextSpans
   , emptyInput
+  , needsRedraw
   , runFrame
   )
 import NanoUI.Term.Ansi (frameBytes, setup, teardown)
-import NanoUI.Term.Cells (cellsSize, rasterize)
+import NanoUI.Term.Cells (cellsSize, rasterizeLayered)
 import NanoUI.Term.Driver (Driver (..), withDriver)
 import NanoUI.Term.Event (MouseAction (..), TermEvent (..))
 
@@ -56,18 +58,19 @@ runTermAppWithQuit ctx shouldQuit ui =
           emptyInput
             { inputWindowSize = Size (fromIntegral w0) (fromIntegral h0)
             }
+    prevInp <- newIORef inp0
     -- Paint before waiting on input, so startup is not a blank screen for as
     -- long as the idle timeout.
     ( do
-        draw drv prev inp0
-        loop drv prev inp0 [] now
+        draw drv prev prevInp inp0
+        loop drv prev prevInp inp0 [] now
       )
       `finally` ( do
                     drvWrite drv teardown
                     drvFlush drv
                 )
   where
-    loop drv prev inp queued lastT = do
+    loop drv prev prevInp inp queued lastT = do
       pending <-
         if null queued
           then do
@@ -87,22 +90,26 @@ runTermAppWithQuit ctx shouldQuit ui =
           if shouldQuit inp' || isHardQuitInput inp'
             then pure ()
             else do
-              draw drv prev inp'
-              loop drv prev inp' rest now
+              draw drv prev prevInp inp'
+              writeIORef prevInp inp'
+              loop drv prev prevInp inp' rest now
 
-    draw drv prev inp = do
+    draw drv prevCells prevInpRef inp = do
+      prevI <- readIORef prevInpRef
+      need <- needsRedraw ctx prevI inp
       (_, _, drawData, _) <- runFrame ctx inp ui
-      spans <- collectTextSpans ctx
-      let Size w h = inputWindowSize inp
-      cells <- rasterize (round w) (round h) drawData spans
-      before <- readIORef prev
-      when (before /= Just cells) $ do
-        -- A size change leaves stale cells outside the new grid.
-        when (fmap cellsSize before /= Just (cellsSize cells)) $
-          drvWrite drv (string7 "\ESC[2J")
-        drvWrite drv (frameBytes before cells)
-        drvFlush drv
-        writeIORef prev (Just cells)
+      when need $ do
+        baseSpans <- collectTextSpans ctx
+        overlaySpans <- collectOverlayTextSpans ctx
+        let Size w h = inputWindowSize inp
+        cells <- rasterizeLayered (round w) (round h) drawData baseSpans overlaySpans
+        before <- readIORef prevCells
+        when (before /= Just cells) $ do
+          when (fmap cellsSize before /= Just (cellsSize cells)) $
+            drvWrite drv (string7 "\ESC[2J")
+          drvWrite drv (frameBytes before cells)
+          drvFlush drv
+          writeIORef prevCells (Just cells)
 
 -- | Mouse button transitions have to be visible to exactly one frame, so a
 -- batch is cut after the first one. Without this a fast click whose press and

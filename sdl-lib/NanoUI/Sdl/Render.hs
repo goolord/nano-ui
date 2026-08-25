@@ -1,10 +1,13 @@
 module NanoUI.Sdl.Render
   ( renderDrawData
+  , renderDrawDataPass
+  , setLogicalClipRect
+  , clearLogicalClipRect
   ) where
 
 import Control.Monad (void, when)
 import Data.Bits (shiftR, (.&.))
-import Data.List (sortBy)
+import Data.List (partition, sortBy)
 import Data.Ord (comparing)
 import Data.Word (Word32, Word8)
 import Foreign.C.Types (CInt)
@@ -12,7 +15,7 @@ import Foreign.ForeignPtr (ForeignPtr, withForeignPtr)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (Storable (..), peekByteOff, poke)
-import NanoUI (Color (..), DrawCmd (..), DrawData (..), Layer (..), indexSize, vertexSize)
+import NanoUI (Color (..), DrawCmd (..), DrawData (..), Layer (..), Rect (..), indexSize, vertexSize)
 import NanoUI.Sdl.Shape (fillRoundedRect, fillSolidRect)
 import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
@@ -26,14 +29,47 @@ import SDL3.Sys.Render
 nullClip :: PtrConst.PtrConst SDL_Rect
 nullClip = PtrConst.unsafeFromPtr (nullPtr :: Ptr SDL_Rect)
 
-renderDrawData :: Ptr SDL_Renderer -> Color -> DrawData -> IO ()
-renderDrawData ren clearColor drawData = do
-  void $ setRenderClipRectSafe ren nullClip
-  let (cr, cg, cb, ca) = unpackColor clearColor
-  void $ setRenderDrawColorSafe ren cr cg cb ca
-  void $ renderClearSafe ren
-  mapM_ (drawCmd ren drawData) (sortBy (comparing layerOrder) (drawCommands drawData))
-  void $ setRenderClipRectSafe ren nullClip
+setLogicalClipRect :: Ptr SDL_Renderer -> Float -> Rect -> IO ()
+setLogicalClipRect ren uiScale (Rect x y w h) =
+  alloca $ \(r :: Ptr SDL_Rect) -> do
+    let lx = x * uiScale
+        ly = y * uiScale
+        rx = (x + w) * uiScale
+        by = (y + h) * uiScale
+        x0 = floor lx
+        y0 = floor ly
+        x1 = ceiling rx
+        y1 = ceiling by
+    poke
+      r
+      SDL_Rect
+        { x = ci x0
+        , y = ci y0
+        , w = ci (max (0 :: Int) (x1 - x0))
+        , h = ci (max (0 :: Int) (y1 - y0))
+        }
+    void $ setRenderClipRectSafe ren (PtrConst.unsafeFromPtr r)
+
+clearLogicalClipRect :: Ptr SDL_Renderer -> IO ()
+clearLogicalClipRect ren = void $ setRenderClipRectSafe ren nullClip
+
+renderDrawData :: Ptr SDL_Renderer -> Float -> Color -> DrawData -> IO ()
+renderDrawData ren uiScale clearColor drawData =
+  renderDrawDataPass ren uiScale (Just clearColor) drawData False
+
+renderDrawDataPass :: Ptr SDL_Renderer -> Float -> Maybe Color -> DrawData -> Bool -> IO ()
+renderDrawDataPass ren uiScale mClear drawData overlayPass = do
+  clearLogicalClipRect ren
+  case mClear of
+    Just clearColor -> do
+      let (cr, cg, cb, ca) = unpackColor clearColor
+      void $ setRenderDrawColorSafe ren cr cg cb ca
+      void $ renderClearSafe ren
+    Nothing -> pure ()
+  let (overlay, base) = partition ((== LayerOverlay) . cmdLayer) (drawCommands drawData)
+      cmds = if overlayPass then overlay else base
+  mapM_ (drawCmd ren uiScale drawData) (sortBy (comparing layerOrder) cmds)
+  clearLogicalClipRect ren
 
 layerOrder :: DrawCmd -> Int
 layerOrder cmd =
@@ -42,51 +78,38 @@ layerOrder cmd =
     LayerContent -> 1
     LayerOverlay -> 2
 
-drawCmd :: Ptr SDL_Renderer -> DrawData -> DrawCmd -> IO ()
-drawCmd ren dd cmd = do
+drawCmd :: Ptr SDL_Renderer -> Float -> DrawData -> DrawCmd -> IO ()
+drawCmd ren uiScale dd cmd = do
   let count = fromIntegral (cmdIndexCount cmd)
   when (count > 0 && count `mod` 6 == 0) $ do
-    setCmdClip ren cmd
+    setCmdClip ren uiScale cmd
     let start = fromIntegral (cmdIndexOffset cmd)
-    mapM_ (fillQuad ren dd) [start, start + 6 .. start + count - 1]
+    mapM_ (fillQuad ren uiScale dd) [start, start + 6 .. start + count - 1]
 
-setCmdClip :: Ptr SDL_Renderer -> DrawCmd -> IO ()
-setCmdClip ren cmd
+setCmdClip :: Ptr SDL_Renderer -> Float -> DrawCmd -> IO ()
+setCmdClip ren uiScale cmd
   | cmdClipW cmd >= 1e8 || cmdClipH cmd >= 1e8 =
-      void $ setRenderClipRectSafe ren nullClip
+      clearLogicalClipRect ren
   | otherwise =
-      alloca $ \(r :: Ptr SDL_Rect) -> do
-        poke
-          r
-          SDL_Rect
-            { x = ci (round (cmdClipX cmd))
-            , y = ci (round (cmdClipY cmd))
-            , w = ci (max (0 :: Int) (round (cmdClipW cmd)))
-            , h = ci (max (0 :: Int) (round (cmdClipH cmd)))
-            }
-        void $ setRenderClipRectSafe ren (PtrConst.unsafeFromPtr r)
+      setLogicalClipRect ren uiScale (Rect (cmdClipX cmd) (cmdClipY cmd) (cmdClipW cmd) (cmdClipH cmd))
 
-fillQuad :: Ptr SDL_Renderer -> DrawData -> Int -> IO ()
-fillQuad ren dd i = do
+fillQuad :: Ptr SDL_Renderer -> Float -> DrawData -> Int -> IO ()
+fillQuad ren uiScale dd i = do
   v0 <- vertexAt dd i
-  v1 <- vertexAt dd (i + 1)
   v2 <- vertexAt dd (i + 2)
-  v3 <- vertexAt dd (i + 5)
-  case (v0, v1, v2, v3) of
-    (Just (x0, y0, u0, v0c, rgba), Just (x1, y1, _, _, _), Just (x2, y2, _, _, _), Just (x3, y3, _, _, _)) -> do
-      let xs = [x0, x1, x2, x3]
-          ys = [y0, y1, y2, y3]
-          xmin = minimum xs
-          xmax = maximum xs
-          ymin = minimum ys
-          ymax = maximum ys
-          w = xmax - xmin
-          h = ymax - ymin
-      when (w > 0 && h > 0) $ do
-        let (r, g, b, a) = unpackColor (Color rgba)
-        if v0c < 0
-          then fillRoundedRect ren r g b a xmin ymin w h u0
-          else fillSolidRect ren r g b a xmin ymin w h
+  case (v0, v2) of
+    (Just (x0, y0, u0, v0c, rgba), Just (x2, y2, _, _, _)) ->
+      let w = x2 - x0
+          h = y2 - y0
+       in when (w > 0 && h > 0) $ do
+            let (r, g, b, a) = unpackColor (Color rgba)
+                px = x0 * uiScale
+                py = y0 * uiScale
+                pw = w * uiScale
+                ph = h * uiScale
+            if v0c < 0
+              then fillRoundedRect ren r g b a px py pw ph (u0 * uiScale)
+              else fillSolidRect ren r g b a px py pw ph
     _ -> pure ()
 
 ci :: Int -> CInt

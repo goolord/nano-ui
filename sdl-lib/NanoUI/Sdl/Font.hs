@@ -8,7 +8,8 @@ module NanoUI.Sdl.Font
   , newTextCache
   , destroyTextCache
   , withTtfMeasure
-  , ttfFontMetrics
+  , withTtfMeasureScaled
+  , ttfFontMetricsScaled
   , measureTtfText
   , renderTextSpans
   ) where
@@ -25,6 +26,7 @@ import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (peek)
 import NanoUI (Color (..), Context, FontMetrics (..), Rect (..), monospaceMetrics, withExternalText, withFontMetrics, withMeasureText)
+import NanoUI.Sdl.Render (clearLogicalClipRect, setLogicalClipRect)
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
 import System.Directory (doesFileExist)
 import System.Environment (lookupEnv)
@@ -93,19 +95,30 @@ closeFont :: SdlFont -> IO ()
 closeFont = ttfCloseFont . sfFont
 
 withTtfMeasure :: Context -> SdlFont -> Context
-withTtfMeasure ctx sf =
+withTtfMeasure ctx sf = withTtfMeasureScaled ctx sf 1
+
+withTtfMeasureScaled :: Context -> SdlFont -> Float -> Context
+withTtfMeasureScaled ctx sf scale =
   withExternalText
-    (withMeasureText (withFontMetrics ctx (ttfFontMetrics sf)) (measureTtfText sf))
+    ( withMeasureText
+        (withFontMetrics ctx (ttfFontMetricsScaled sf scale))
+        (measureTtfTextScaled sf scale)
+    )
     True
 
-ttfFontMetrics :: SdlFont -> FontMetrics
-ttfFontMetrics sf =
-  -- Proportional glyphs render via SDL_ttf textures; fmAdvance is only used by
-  -- terminal-style pushText, which is a no-op when fmGlyph is Nothing.
-  (monospaceMetrics (sfLineSkip sf))
-    { fmAscent = sfAscent sf
-    , fmAdvance = const (sfSpaceAdvance sf)
-    }
+ttfFontMetricsScaled :: SdlFont -> Float -> FontMetrics
+ttfFontMetricsScaled sf scale =
+  let inv = if scale > 0 then scale else 1
+   in (monospaceMetrics (sfLineSkip sf / inv))
+        { fmAscent = sfAscent sf / inv
+        , fmAdvance = const (sfSpaceAdvance sf / inv)
+        }
+
+measureTtfTextScaled :: SdlFont -> Float -> Text -> IO (Float, Float)
+measureTtfTextScaled sf scale txt = do
+  (w, h) <- measureTtfText sf txt
+  let inv = if scale > 0 then scale else 1
+  pure (w / inv, h / inv)
 
 measureTtfText :: SdlFont -> Text -> IO (Float, Float)
 measureTtfText sf txt =
@@ -120,22 +133,25 @@ measureTtfText sf txt =
             pure (realToFrac w, realToFrac h)
           else pure (0, sfLineSkip sf)
 
-renderTextSpans :: Ptr SDL_Renderer -> SdlFont -> TextCache -> [(Rect, Text, Color, Color)] -> IO ()
-renderTextSpans ren font cache spans =
-  forM_ spans $ \(Rect x y _ _, txt, fg, _bg) ->
-    drawSpan ren font cache txt fg x y
+renderTextSpans :: Ptr SDL_Renderer -> Float -> SdlFont -> TextCache -> [(Rect, Text, Color, Color, Rect)] -> IO ()
+renderTextSpans ren scale font cache spans = do
+  forM_ spans $ \(Rect x y _ _, txt, fg, _bg, clip) -> do
+    setLogicalClipRect ren scale clip
+    drawSpan ren scale font cache txt fg x y
+  clearLogicalClipRect ren
 
-drawSpan :: Ptr SDL_Renderer -> SdlFont -> TextCache -> Text -> Color -> Float -> Float -> IO ()
-drawSpan ren font cache txt col x y =
+drawSpan :: Ptr SDL_Renderer -> Float -> SdlFont -> TextCache -> Text -> Color -> Float -> Float -> IO ()
+drawSpan ren scale font cache txt col x y =
   withUtf8 txt $ \cstr len -> do
     let keyCol = colorWord col
         cacheKey = (txt, keyCol)
-    (tex, tw, th) <-
+    (tex, _tw, _th) <-
       lookupCache cache cacheKey >>= \case
         Just hit -> pure hit
         Nothing -> createCached ren font cache cacheKey cstr len col
-    let drawY = y
-    drawTexture ren tex x drawY tw th
+    let px = x * scale
+        py = y * scale
+    drawTexture ren tex px py
 
 createCached ::
   Ptr SDL_Renderer ->
@@ -204,8 +220,8 @@ evictOldest cache = do
           writeIORef (tcEntries cache) (Map.delete oldest entries)
           writeIORef (tcOrder cache) (filter (/= oldest) ord)
 
-drawTexture :: Ptr SDL_Renderer -> Ptr () -> Float -> Float -> Float -> Float -> IO ()
-drawTexture ren tex x y _w _h =
+drawTexture :: Ptr SDL_Renderer -> Ptr () -> Float -> Float -> IO ()
+drawTexture ren tex x y =
   void $ renderTextureAt ren tex (cf x) (cf y)
 
 lookupCache :: TextCache -> (Text, Word32) -> IO (Maybe (Ptr (), Float, Float))
@@ -231,6 +247,7 @@ fontCandidates :: [FilePath]
 fontCandidates =
   [ "C:\\Windows\\Fonts\\segoeui.ttf"
   , "C:\\Windows\\Fonts\\SegoeUI.ttf"
+  , "C:\\Windows\\Fonts\\segoeuib.ttf"
   , "C:\\Windows\\Fonts\\arial.ttf"
   , "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
   , "/usr/share/fonts/TTF/DejaVuSans.ttf"

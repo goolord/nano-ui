@@ -2,6 +2,11 @@
 #include <stddef.h>
 #include <stdbool.h>
 
+void nano_ui_sdl_init_hints(void)
+{
+    SDL_SetHint(SDL_HINT_RENDER_VSYNC, "1");
+}
+
 float nano_ui_window_display_scale(SDL_Window *window)
 {
     if (!window) {

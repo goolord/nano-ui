@@ -2,6 +2,7 @@ module NanoUI.Layout.Arena
   ( NodeIdx
   , NodeType (..)
   , isWidgetNode
+  , isContainerNode
   , SizingTag (..)
   , DirTag (..)
   , NodeArena (..)
@@ -58,6 +59,8 @@ data NodeType
   | NodeCheckbox
   | NodeSlider
   | NodeTextInput
+  | NodeScrollContainer
+  | NodeSelect
   deriving (Eq, Show, Enum, Bounded)
 
 isWidgetNode :: NodeType -> Bool
@@ -68,6 +71,14 @@ isWidgetNode nt =
     NodeCheckbox -> True
     NodeSlider -> True
     NodeTextInput -> True
+    NodeSelect -> True
+    _ -> False
+
+isContainerNode :: NodeType -> Bool
+isContainerNode nt =
+  case nt of
+    NodeContainer -> True
+    NodeScrollContainer -> True
     _ -> False
 
 data SizingTag

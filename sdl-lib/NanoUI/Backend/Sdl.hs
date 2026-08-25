@@ -15,6 +15,7 @@ import NanoUI
   , UI
   , anyAnimating
   , collectTextSpans
+  , collectOverlayTextSpans
   , ctxTheme
   , emptyInput
   , isDirty
@@ -33,7 +34,7 @@ import NanoUI.Sdl.Input
   , splitFrame
   , waitEventTimeout
   )
-import NanoUI.Sdl.Render (renderDrawData)
+import NanoUI.Sdl.Render (renderDrawDataPass)
 import NanoUI.Sdl.Window (SdlEnv (..), defaultWindowSize, syncDisplay, withSdl)
 import SDL3.Sys.Bindgen.Blendmode (sDL_BLENDMODE_BLEND)
 import SDL3.Sys.Render (renderPresentSafe, setRenderDrawBlendModeSafe)
@@ -49,17 +50,17 @@ runSdlApp ctx ui = runSdlAppWithQuit ctx (const False) ui
 
 runSdlAppWithQuit :: Context -> (Input -> Bool) -> UI () -> IO ()
 runSdlAppWithQuit ctx shouldQuit ui =
-  withSdl ctx "nano-ui" defaultWindowSize $ \ctx' env -> do
+  withSdl ctx "nano-ui" defaultWindowSize $ \ctx0 env -> do
     void $ setRenderDrawBlendModeSafe (sdlRenderer env) (fromIntegral sDL_BLENDMODE_BLEND)
     now <- getMonotonicTime
-    (_, inp0) <- syncDisplay ctx' env emptyInput
+    (ctx1, inp0) <- syncDisplay ctx0 env emptyInput
     prev <- newIORef inp0
     pendingRedraw <- newIORef False
     wasAnimating <- newIORef False
-    (_, synced0) <- draw ctx' ui env inp0
+    (_, synced0) <- draw ctx1 ui env inp0
     writeIORef pendingRedraw False
     writeIORef prev synced0
-    loop ctx' ui env prev pendingRedraw wasAnimating shouldQuit synced0 [] now
+    loop ctx1 ui env prev pendingRedraw wasAnimating shouldQuit synced0 [] now
 
 loop ::
   Context ->
@@ -97,36 +98,40 @@ loop ctx ui env prev pendingRedraw wasAnimating shouldQuit inp queued lastT = do
               applyEvent
               (clearEphemeral inp {inputDeltaTime = dt})
               group
-      (_, inpSynced) <- syncDisplay ctx env inp'
+      (ctx', inpSynced) <- syncDisplay ctx env inp'
       if shouldQuit inpSynced || isHardQuitInput inpSynced
         then pure ()
         else do
           prevInp <- readIORef prev
           pendingDirty <- readIORef pendingRedraw
           wasAnim <- readIORef wasAnimating
-          need <- needsRedraw ctx prevInp inpSynced
-          dirtyNow <- isDirty ctx
-          anim <- anyAnimating ctx
+          need <- needsRedraw ctx' prevInp inpSynced
+          dirtyNow <- isDirty ctx'
+          anim <- anyAnimating ctx'
           let forceFinal = wasAnim && not anim
           writeIORef wasAnimating anim
           if need || anim || forceFinal || pendingDirty || dirtyNow || not (null group)
             then do
-              (_, synced) <- draw ctx ui env inpSynced
+              (_, synced) <- draw ctx' ui env inpSynced
               writeIORef pendingRedraw False
               writeIORef prev synced
-              loop ctx ui env prev pendingRedraw wasAnimating shouldQuit synced rest now
+              loop ctx' ui env prev pendingRedraw wasAnimating shouldQuit synced rest now
             else
               if null rest
-                then loop ctx ui env prev pendingRedraw wasAnimating shouldQuit inpSynced [] now
-                else loop ctx ui env prev pendingRedraw wasAnimating shouldQuit inpSynced rest now
+                then loop ctx' ui env prev pendingRedraw wasAnimating shouldQuit inpSynced [] now
+                else loop ctx' ui env prev pendingRedraw wasAnimating shouldQuit inpSynced rest now
 
 draw :: Context -> UI () -> SdlEnv -> Input -> IO (Bool, Input)
 draw ctx ui env inp = do
+  scale <- readIORef (sdlScaleRef env)
   (_, _, drawData, dirtyAfterUi) <- runFrame ctx inp ui
-  spans <- collectTextSpans ctx
+  baseSpans <- collectTextSpans ctx
+  overlaySpans <- collectOverlayTextSpans ctx
   font <- readIORef (sdlFontRef env)
   let clear = themeWindow (ctxTheme ctx)
-  renderDrawData (sdlRenderer env) clear drawData
-  renderTextSpans (sdlRenderer env) font (sdlTextCache env) spans
+  renderDrawDataPass (sdlRenderer env) scale (Just clear) drawData False
+  renderTextSpans (sdlRenderer env) scale font (sdlTextCache env) baseSpans
+  renderDrawDataPass (sdlRenderer env) scale Nothing drawData True
+  renderTextSpans (sdlRenderer env) scale font (sdlTextCache env) overlaySpans
   void $ renderPresentSafe (sdlRenderer env)
   pure (dirtyAfterUi, inp)

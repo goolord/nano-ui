@@ -9,6 +9,7 @@ module NanoUI.Term.Cells
   , cellFg
   , cellBg
   , rasterize
+  , rasterizeLayered
   , cellRows
   , narrowChar
   ) where
@@ -16,6 +17,7 @@ module NanoUI.Term.Cells
 import Control.Monad (when)
 import Control.Monad.Primitive (PrimState)
 import Data.Char (chr, ord)
+import Data.List (partition)
 import Data.Primitive.PrimArray
   ( MutablePrimArray
   , PrimArray
@@ -33,11 +35,14 @@ import NanoUI
   ( Color
   , DrawCmd (..)
   , DrawData (..)
+  , Layer (..)
   , Rect (..)
+  , V2 (..)
   , colorToWord32
   , indexSize
   , vertexSize
   )
+import NanoUI (rectContains)
 import qualified Data.Text as T
 
 -- | Row-major grid, three 'Word32' per cell: codepoint, foreground RGBA,
@@ -75,16 +80,29 @@ cellRows cs =
   | y <- [0 .. cellsH cs - 1]
   ]
 
-rasterize :: Int -> Int -> DrawData -> [(Rect, Text, Color, Color)] -> IO Cells
-rasterize width height drawData spans = do
+rasterize :: Int -> Int -> DrawData -> [(Rect, Text, Color, Color, Rect)] -> IO Cells
+rasterize width height drawData spans = rasterizeLayered width height drawData spans []
+
+rasterizeLayered ::
+  Int ->
+  Int ->
+  DrawData ->
+  [(Rect, Text, Color, Color, Rect)] ->
+  [(Rect, Text, Color, Color, Rect)] ->
+  IO Cells
+rasterizeLayered width height drawData baseSpans overlaySpans = do
   let w = max 1 width
       h = max 1 height
       len = w * h * 3
   arr <- newPrimArray len
   setPrimArray arr 0 len 0
   fillBlanks arr len
-  mapM_ (applyCmd arr w h drawData) (drawCommands drawData)
-  mapM_ (stampSpan arr w h) spans
+  let (overlayCmds, baseCmds) =
+        partition ((== LayerOverlay) . cmdLayer) (drawCommands drawData)
+  mapM_ (applyCmd arr w h drawData) baseCmds
+  mapM_ (stampSpan arr w h) baseSpans
+  mapM_ (applyCmd arr w h drawData) overlayCmds
+  mapM_ (stampSpan arr w h) overlaySpans
   frozen <- unsafeFreezePrimArray arr
   pure Cells {cellsW = w, cellsH = h, cellsData = frozen}
   where
@@ -148,11 +166,15 @@ stampSpan ::
   MutablePrimArray (PrimState IO) Word32 ->
   Int ->
   Int ->
-  (Rect, Text, Color, Color) ->
+  (Rect, Text, Color, Color, Rect) ->
   IO ()
-stampSpan arr w h (Rect rx ry rw _rh, txt, fg, bg) =
+stampSpan arr w h (Rect rx ry rw _rh, txt, fg, bg, clip) =
   mapM_
-    (\(dx, c) -> writeCell arr w h (x0 + dx) y0 (fromIntegral (ord c)) fgW bgW)
+    (\(dx, c) -> do
+      let cx = x0 + dx
+      when (rectContains clip (V2 (fromIntegral cx + 0.5) (fromIntegral y0 + 0.5))) $
+        writeCell arr w h cx y0 (fromIntegral (ord c)) fgW bgW
+    )
     (zip [0 ..] chars)
   where
     fgW = colorToWord32 fg

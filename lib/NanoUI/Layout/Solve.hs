@@ -28,10 +28,15 @@ import NanoUI.Layout.Arena
   , getText
   , getWidthSizing
   , setRect
+  , getNodeValue
+  , setNodeValue
   )
 import NanoUI.Style (AlignX (..), AlignY (..), Padding (..))
 import NanoUI.WidgetText
   ( checkboxLabelText
+  , selectDisplayText
+  , selectChevronReserve
+  , selectParseOptions
   , sliderLabelText
   , sliderParseRange
   , sliderValueText
@@ -55,6 +60,7 @@ measureNode na fm measure idx = do
     NodeSpacer -> measureSpacer na idx
     NodeSeparator -> measureSeparator na idx
     NodeContainer -> measureContainer na idx
+    NodeScrollContainer -> measureScrollContainer na idx
     _ -> measureWidget na fm measure idx
 
 measureTextNode :: NodeArena -> FontMetrics -> (Text -> IO (Float, Float)) -> NodeIdx -> IO ()
@@ -105,6 +111,15 @@ measureWidget na fm measure idx = do
                 else checkboxLabelText txt
         (mw, mh) <- measure body
         pure (mw, mh, checkboxLeading fm, 0)
+      NodeSelect -> do
+        let (lbl, opts) = selectParseOptions txt
+            choices = if null opts then [""] else opts
+        dims <- mapM (measure . selectDisplayText lbl) choices
+        let (mw, mh) =
+              case dims of
+                [] -> (0, 0)
+                ds -> (maximum (map fst ds), maximum (map snd ds))
+        pure (mw, mh, selectChevronReserve, 0)
       _ -> do
         let body =
               if T.null txt
@@ -125,6 +140,29 @@ measureContainer na idx = do
       w = clamp (contentW + padL pad + padR pad) minW maxW
       h = clamp (contentH + padT pad + padB pad) minH maxH
   setRect na idx 0 0 w h
+
+measureScrollContainer :: NodeArena -> NodeIdx -> IO ()
+measureScrollContainer na idx = do
+  pad <- getPadding na idx
+  gap <- getGap na idx
+  dir <- getDirection na idx
+  (minW, minH, maxW, maxH) <- getMinMax na idx
+  (wTag, wVal) <- getWidthSizing na idx
+  (hTag, hVal) <- getHeightSizing na idx
+  childDims <- collectChildDims na idx
+  let (contentW, contentH) = foldChildren dir gap childDims
+      fullW = contentW + padL pad + padR pad
+      fullH = contentH + padT pad + padB pad
+  setNodeValue na idx (case dir of DirColumn -> fullH; DirRow -> fullW)
+  let viewportW =
+        case wTag of
+          SizingFixed -> wVal
+          _ -> fullW
+      viewportH =
+        case hTag of
+          SizingFixed -> hVal
+          _ -> fullH
+  setRect na idx 0 0 (clamp viewportW minW maxW) (clamp viewportH minH maxH)
 
 collectChildDims :: NodeArena -> NodeIdx -> IO [(Float, Float)]
 collectChildDims na idx = do
@@ -167,9 +205,22 @@ positionNode na idx x y availW availH = do
   gap <- getGap na idx
   dir <- getDirection na idx
   nt <- getNodeType na idx
-  if nt == NodeContainer
-    then positionChildren na idx dir gap pad x y w h
-    else pure ()
+  case nt of
+    NodeContainer -> positionChildren na idx dir gap pad x y w h
+    NodeScrollContainer -> positionScrollChildren na idx dir gap pad x y w h
+    _ -> pure ()
+
+positionScrollChildren :: NodeArena -> NodeIdx -> DirTag -> Float -> Padding -> Float -> Float -> Float -> Float -> IO ()
+positionScrollChildren na idx dir gap pad px py pw ph = do
+  contentSize <- getNodeValue na idx
+  let cx = px + padL pad
+      cy = py + padT pad
+      cw = pw - padL pad - padR pad
+      innerH = ph - padT pad - padB pad
+  children <- collectChildren na idx
+  case dir of
+    DirRow -> positionRow na children gap cx cy contentSize innerH
+    DirColumn -> positionColumn na children gap cx cy cw contentSize
 
 resolveSize :: SizingTag -> Float -> Float -> Float -> Float -> Float -> Float
 resolveSize SizingFixed v _ _ _ _ = v

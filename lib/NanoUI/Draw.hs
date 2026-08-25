@@ -9,6 +9,7 @@ module NanoUI.Draw
   , newDrawArena
   , resetDrawArena
   , beginLayer
+  , setClip
   , pushRect
   , pushRoundedRect
   , pushText
@@ -16,6 +17,7 @@ module NanoUI.Draw
   , finishDraw
   , vertexSize
   , indexSize
+  , withClip
   ) where
 
 import Control.Monad (forM_)
@@ -158,6 +160,22 @@ flushCmd da = do
       writeIORef (daCommands da) (cmd : cmds)
       writeIORef (daCmdStartIndex da) curIdx
     else pure ()
+
+{-# INLINE setClip #-}
+setClip :: DrawArena -> Rect -> IO ()
+setClip da (Rect x y w h) = do
+  flushCmd da
+  writeIORef (daCurrentClip da) (x, y, w, h)
+
+{-# INLINE withClip #-}
+withClip :: DrawArena -> Rect -> IO a -> IO a
+withClip da rect act = do
+  old <- readIORef (daCurrentClip da)
+  setClip da rect
+  r <- act
+  let (cx, cy, cw, ch) = old
+  setClip da (Rect cx cy cw ch)
+  pure r
 
 {-# INLINE pushRect #-}
 pushRect :: DrawArena -> Rect -> Color -> IO ()

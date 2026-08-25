@@ -13,6 +13,7 @@ module NanoUI.Context
   , markDirty
   , isDirty
   , getHotId
+  , getFocusId
   , anyAnimating
   , startAnimation
   , tickAnimations
@@ -23,8 +24,17 @@ module NanoUI.Context
   , intKey
   , pushMessage
   , drainMessages
+  , registerFocusable
+  , getFocusables
+  , isDisabled
+  , setDisabled
+  , getScrollOffset
+  , setScrollOffset
+  , getAnimationValue
+  , lerpColor
   ) where
 
+import Data.Bits (shiftR, shiftL, (.&.), (.|.))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict (IntMap)
 import Data.Text (Text)
@@ -35,7 +45,7 @@ import NanoUI.Font (FontMetrics, measureText, monospaceMetrics)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Layout.Arena (NodeArena, newNodeArena)
 import NanoUI.Style (Theme, defaultTheme, sdlTheme, terminalTheme)
-import NanoUI.Types (Rect (..))
+import NanoUI.Types (Rect (..), Color (..))
 
 data FrameMsg where
   FrameMsg :: a -> FrameMsg
@@ -53,6 +63,10 @@ data WidgetStore = WidgetStore
   , storeSlider :: IntMap Float
   , storeText :: IntMap String
   , storeCursor :: IntMap Int
+  , storeScroll :: IntMap Float
+  , storeSelect :: IntMap Int
+  , storeSelectOpen :: IntMap Bool
+  , storeDisabled :: IntMap Bool
   }
   deriving (Eq, Show)
 
@@ -63,6 +77,10 @@ emptyWidgetStore =
     , storeSlider = IM.empty
     , storeText = IM.empty
     , storeCursor = IM.empty
+    , storeScroll = IM.empty
+    , storeSelect = IM.empty
+    , storeSelectOpen = IM.empty
+    , storeDisabled = IM.empty
     }
 
 data Context = Context
@@ -83,6 +101,9 @@ data Context = Context
   , ctxTheme :: Theme
   , ctxContainerStack :: IORef [Int]
   , ctxMessages :: IORef [FrameMsg]
+  , ctxFocusables :: IORef [WidgetId]
+  , ctxPrevHot :: IORef WidgetId
+  , ctxScrollDrag :: IORef (Maybe (WidgetId, Float))
   }
 
 {-# INLINE newContext #-}
@@ -101,6 +122,9 @@ newContext = do
   ctxIdSalt <- newIORef 0
   ctxContainerStack <- newIORef []
   ctxMessages <- newIORef []
+  ctxFocusables <- newIORef []
+  ctxPrevHot <- newIORef (WidgetId 0)
+  ctxScrollDrag <- newIORef Nothing
   let fm0 = monospaceMetrics 12
   pure
     Context
@@ -121,6 +145,9 @@ newContext = do
       , ctxTheme = defaultTheme
       , ctxContainerStack
       , ctxMessages
+      , ctxFocusables
+      , ctxPrevHot
+      , ctxScrollDrag
       }
 
 {-# INLINE withFontMetrics #-}
@@ -153,7 +180,7 @@ newTerminalContext = do
 newSdlContext :: IO Context
 newSdlContext = do
   ctx <- newContext
-  pure (withTheme (withFontMetrics ctx (monospaceMetrics 16)) sdlTheme)
+  pure (withExternalText (withTheme (withFontMetrics ctx (monospaceMetrics 16)) sdlTheme) True)
 
 {-# INLINE markDirty #-}
 markDirty :: Context -> IO ()
@@ -162,6 +189,10 @@ markDirty ctx = writeIORef (ctxDirty ctx) True
 {-# INLINE isDirty #-}
 isDirty :: Context -> IO Bool
 isDirty ctx = readIORef (ctxDirty ctx)
+
+{-# INLINE getFocusId #-}
+getFocusId :: Context -> IO WidgetId
+getFocusId ctx = readIORef (ctxFocusId ctx)
 
 {-# INLINE getHotId #-}
 getHotId :: Context -> IO WidgetId
@@ -230,3 +261,65 @@ drainMessages ctx = do
   msgs <- readIORef (ctxMessages ctx)
   writeIORef (ctxMessages ctx) []
   pure (reverse msgs)
+
+{-# INLINE registerFocusable #-}
+registerFocusable :: Context -> WidgetId -> IO ()
+registerFocusable ctx wid =
+  modifyIORefList (ctxFocusables ctx) (wid :)
+
+{-# INLINE getFocusables #-}
+getFocusables :: Context -> IO [WidgetId]
+getFocusables ctx = reverse <$> readIORef (ctxFocusables ctx)
+
+{-# INLINE isDisabled #-}
+isDisabled :: Context -> WidgetId -> IO Bool
+isDisabled ctx wid = do
+  store <- getStore ctx
+  pure (IM.findWithDefault False (intKey wid) (storeDisabled store))
+
+{-# INLINE setDisabled #-}
+setDisabled :: Context -> WidgetId -> Bool -> IO ()
+setDisabled ctx wid on = do
+  store <- getStore ctx
+  setStore ctx (store {storeDisabled = IM.insert (intKey wid) on (storeDisabled store)})
+
+{-# INLINE getScrollOffset #-}
+getScrollOffset :: Context -> WidgetId -> IO Float
+getScrollOffset ctx wid = do
+  store <- getStore ctx
+  pure (IM.findWithDefault 0 (intKey wid) (storeScroll store))
+
+{-# INLINE setScrollOffset #-}
+setScrollOffset :: Context -> WidgetId -> Float -> IO ()
+setScrollOffset ctx wid off = do
+  store <- getStore ctx
+  setStore ctx (store {storeScroll = IM.insert (intKey wid) off (storeScroll store)})
+
+{-# INLINE getAnimationValue #-}
+getAnimationValue :: Context -> WidgetId -> IO Float
+getAnimationValue ctx wid = do
+  anims <- readIORef (ctxAnimations ctx)
+  case IM.lookup (intKey wid) anims of
+    Nothing -> pure 0
+    Just a ->
+      let dur = max 0.001 (animDuration a)
+          t = min 1 (animElapsed a / dur)
+       in pure (animStart a + (animEnd a - animStart a) * t)
+
+{-# INLINE lerpColor #-}
+lerpColor :: Color -> Color -> Float -> Color
+lerpColor (Color a) (Color b) t =
+  let u = max 0 (min 1 t)
+      ch i =
+        round $
+          fromIntegral ((a `shiftR` i) .&. 0xFF) * (1 - u)
+            + fromIntegral ((b `shiftR` i) .&. 0xFF) * u
+   in Color
+        ( (ch 24 `shiftL` 24)
+            .|. (ch 16 `shiftL` 16)
+            .|. (ch 8 `shiftL` 8)
+            .|. ch 0
+        )
+
+modifyIORefList :: IORef [a] -> ([a] -> [a]) -> IO ()
+modifyIORefList ref f = readIORef ref >>= writeIORef ref . f

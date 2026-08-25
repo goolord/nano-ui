@@ -75,6 +75,115 @@ static float corner_inset(float rad, float dist)
     return rad - sqrtf(rad * rad - dist * dist);
 }
 
+static float rounded_rect_sdf(
+    float px,
+    float py,
+    float x,
+    float y,
+    float w,
+    float h,
+    float rad)
+{
+    float cx = x + w * 0.5f;
+    float cy = y + h * 0.5f;
+    float hx = w * 0.5f - rad;
+    float hy = h * 0.5f - rad;
+    float dx = fabsf(px - cx) - hx;
+    float dy = fabsf(py - cy) - hy;
+    float ax = fmaxf(dx, 0.f);
+    float ay = fmaxf(dy, 0.f);
+    return sqrtf(ax * ax + ay * ay) + fminf(fmaxf(dx, dy), 0.f) - rad;
+}
+
+static bool fill_scanline_interior(
+    SDL_Renderer *renderer,
+    Uint8 r,
+    Uint8 g,
+    Uint8 b,
+    Uint8 a,
+    float x,
+    float y,
+    float w,
+    float h,
+    float rad)
+{
+    SDL_SetRenderDrawColor(renderer, r, g, b, a);
+
+    int y0 = (int)floorf(y + 0.5f);
+    int y1 = (int)floorf(y + h - 0.5f);
+    float corner_top = y + rad;
+    float corner_bot = y + h - rad;
+
+    for (int py = y0; py <= y1; py++) {
+        float cy = (float)py + 0.5f;
+        float left = x;
+        float right = x + w;
+
+        if (cy < corner_top) {
+            float dy = corner_top - cy;
+            float inset = corner_inset(rad, dy);
+            left = x + inset;
+            right = x + w - inset;
+        } else if (cy >= corner_bot) {
+            float dy = cy - corner_bot;
+            float inset = corner_inset(rad, dy);
+            left = x + inset;
+            right = x + w - inset;
+        }
+
+        if (right > left) {
+            SDL_FRect row = {left, (float)py, right - left, 1.f};
+            if (!SDL_RenderFillRect(renderer, &row)) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+static bool fill_edge_aa(
+    SDL_Renderer *renderer,
+    Uint8 r,
+    Uint8 g,
+    Uint8 b,
+    Uint8 a,
+    float x,
+    float y,
+    float w,
+    float h,
+    float rad)
+{
+    int x0 = (int)floorf(x - 1.f);
+    int x1 = (int)ceilf(x + w + 1.f);
+    int y0 = (int)floorf(y - 1.f);
+    int y1 = (int)ceilf(y + h + 1.f);
+
+    for (int py = y0; py < y1; py++) {
+        for (int px = x0; px < x1; px++) {
+            float sx = (float)px + 0.5f;
+            float sy = (float)py + 0.5f;
+            float dist = rounded_rect_sdf(sx, sy, x, y, w, h, rad);
+            if (dist <= 0.f) {
+                continue;
+            }
+            if (dist >= 0.5f) {
+                continue;
+            }
+            float coverage = 0.5f - dist;
+            if (coverage <= 0.f) {
+                continue;
+            }
+            Uint8 aa = (Uint8)fminf(255.f, (float)a * coverage + 0.5f);
+            SDL_SetRenderDrawColor(renderer, r, g, b, aa);
+            SDL_FRect pixel = {(float)px, (float)py, 1.f, 1.f};
+            if (!SDL_RenderFillRect(renderer, &pixel)) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
 bool nano_ui_fill_rounded_rect(
     SDL_Renderer *renderer,
     Uint8 r,
@@ -106,33 +215,10 @@ bool nano_ui_fill_rounded_rect(
         rad = h / 2.f;
     }
 
-    int y0 = (int)floorf(y);
-    int y1 = (int)ceilf(y + h);
-    for (int py = y0; py < y1; py++) {
-        float cy = (float)py + 0.5f;
-        float left = x;
-        float right = x + w;
-
-        if (cy < y + rad) {
-            float dy = (y + rad) - cy;
-            float inset = corner_inset(rad, dy);
-            left = x + inset;
-            right = x + w - inset;
-        } else if (cy >= y + h - rad) {
-            float dy = cy - (y + h - rad);
-            float inset = corner_inset(rad, dy);
-            left = x + inset;
-            right = x + w - inset;
-        }
-
-        if (right > left) {
-            SDL_FRect row = {left, (float)py, right - left, 1.f};
-            if (!SDL_RenderFillRect(renderer, &row)) {
-                return false;
-            }
-        }
+    if (!fill_scanline_interior(renderer, r, g, b, a, x, y, w, h, rad)) {
+        return false;
     }
-    return true;
+    return fill_edge_aa(renderer, r, g, b, a, x, y, w, h, rad);
 }
 
 bool nano_ui_ttf_create_texture(
@@ -159,6 +245,7 @@ bool nano_ui_ttf_create_texture(
     if (!texture) {
         return false;
     }
+    SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_LINEAR);
 
     float tw = 0.f;
     float th = 0.f;

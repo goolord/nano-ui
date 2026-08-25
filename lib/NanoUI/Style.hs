@@ -171,7 +171,7 @@ sdlTheme =
         Style
           { styleBg = colorRGBA 33 34 44 255
           , styleFg = colorRGBA 248 248 242 255
-          , styleBorder = colorRGBA 98 114 164 200
+          , styleBorder = colorRGBA 98 114 164 255
           , styleBorderWidth = 1
           , styleCornerRadius = 6
           , styleHoverBg = colorRGBA 40 42 54 255
