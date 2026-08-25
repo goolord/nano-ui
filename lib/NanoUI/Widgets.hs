@@ -21,6 +21,7 @@ module NanoUI.Widgets
   , checkboxLabelText
   , textInputText
   , textInputDisplayText
+  , textInputTerminalText
   , selectPackOptions
   , selectLabelText
   , selectParseOptions
@@ -43,6 +44,7 @@ import NanoUI.WidgetText
   , sliderText
   , sliderValueText
   , textInputDisplayText
+  , textInputTerminalText
   , selectPackOptions
   , selectParseOptions
   , selectLabelText
@@ -243,8 +245,15 @@ textInput lbl initial = do
             }
         )
   resp <-
-    addWidget wid NodeTextInput (textInputText lbl newText newCursor isFocus) 0 defaultLayout
+    addWidget wid NodeTextInput lbl 0 textInputLayout
   pure (resp {respChanged = newText /= current}, newText)
+
+textInputLayout :: Layout
+textInputLayout =
+  defaultLayout
+    { layoutWidth = Grow 1
+    , layoutMinW = 160
+    }
 
 {-# INLINE separator #-}
 separator :: HasCallStack => UI Response
@@ -382,15 +391,7 @@ tooltip tipTxt resp = do
   pure resp
 
 textInputText :: Text -> String -> Int -> Bool -> Text
-textInputText lbl value cursor focused =
-  let body = T.pack value
-      shown =
-        if focused
-          then
-            let c = max 0 (min (T.length body) cursor)
-             in T.take c body <> "\x2502" <> T.drop c body
-          else body
-   in lbl <> ": " <> shown
+textInputText = textInputTerminalText
 
 addWidget ::
   WidgetId ->

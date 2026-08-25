@@ -95,14 +95,17 @@ import NanoUI.WidgetText
   , sliderParseRange
   , sliderPackTerminal
   , sliderValueText
-  , textInputDisplayText
+  , textInputFieldHeight
+  , textInputFieldPadY
+  , textInputFieldText
+  , textInputLabelGap
+  , textInputTerminalText
   , selectParseOptions
   , selectDisplayText
   , selectChevronReserve
   , selectChevronCenterX
   )
-import NanoUI.Widgets (textInputText)
-import NanoUI.Style (Padding (..), Style (..), Theme (..), themeAccent, themeButton, themeInput, themePanel, themeSeparator)
+import NanoUI.Style (Padding (..), Style (..), Theme (..), themeAccent, themeButton, themeInput, themePanel, themeSeparator, themeWindow)
 import NanoUI.Types (Color (..), Rect (..), Size (..), V2 (..), colorRGBA, rectContains, rectIntersect)
 
 runFrame :: Context -> Input -> UI a -> IO (a, [FrameMsg], DrawData, Bool)
@@ -179,6 +182,10 @@ collectClippedSpans ctx idx clip = do
           NodeSelect -> do
             spans <- collectNodeTextSpans ctx idx
             pure (tagSelectClippedSpans clipHere x y w h fm spans)
+          NodeTextInput
+            | not (isTerminalFont fm) -> do
+                spans <- collectNodeTextSpans ctx idx
+                pure (tagTextInputClippedSpans clipHere x y w h fm spans)
           _ -> tagClippedSpans clipHere <$> collectNodeTextSpans ctx idx
       childSpans <- walkChildSpans ctx idx clipHere
       pure (here ++ childSpans)
@@ -200,10 +207,17 @@ tagClippedSpans :: Rect -> [(Rect, T.Text, Color, Color)] -> [(Rect, T.Text, Col
 tagClippedSpans clip =
   concatMap
     ( \(rect, txt, fg, bg) ->
-        case rectIntersect clip rect of
+        case rectIntersect clip (padTextClipRect rect) of
           Nothing -> []
           Just clipHere -> [(rect, txt, fg, bg, clipHere)]
     )
+
+-- TTF measure is often a fraction narrower than the rendered texture.
+textClipSlop :: Float
+textClipSlop = 4
+
+padTextClipRect :: Rect -> Rect
+padTextClipRect (Rect x y w h) = Rect x y (w + textClipSlop) h
 
 selectTextClip :: Float -> Float -> Float -> Float -> FontMetrics -> Rect
 selectTextClip x y w h fm =
@@ -213,12 +227,41 @@ selectTextClip x y w h fm =
 tagSelectClippedSpans ::
   Rect -> Float -> Float -> Float -> Float -> FontMetrics -> [(Rect, T.Text, Color, Color)] -> [(Rect, T.Text, Color, Color, Rect)]
 tagSelectClippedSpans parentClip x y w h fm =
-  let textClip = selectTextClip x y w h fm
+  let textClip = padTextClipRect (selectTextClip x y w h fm)
    in concatMap
         ( \(rect, txt, fg, bg) ->
             case rectIntersect parentClip textClip of
               Nothing -> []
               Just clip -> [(rect, txt, fg, bg, clip)]
+        )
+
+textInputFieldTextClip :: Float -> Float -> Float -> Float -> FontMetrics -> Rect
+textInputFieldTextClip x y w h fm =
+  let geom = textInputGeom fm x y w h
+      field = tigFieldRect geom
+      (ix, iy) = widgetContentInset fm
+   in Rect
+        (rectX field + ix)
+        (rectY field + iy)
+        (max 0 (rectW field - 2 * ix))
+        (max 0 (rectH field - 2 * iy))
+
+tagTextInputClippedSpans ::
+  Rect -> Float -> Float -> Float -> Float -> FontMetrics -> [(Rect, T.Text, Color, Color)] -> [(Rect, T.Text, Color, Color, Rect)]
+tagTextInputClippedSpans parentClip x y w h fm =
+  let fieldClip = textInputFieldTextClip x y w h fm
+      labelClip = Rect x y w (fmLineHeight fm)
+      fieldTop = rectY fieldClip
+   in concatMap
+        ( \(rect, txt, fg, bg) ->
+            let area =
+                  if rectY rect >= fieldTop - 0.5 then fieldClip else labelClip
+             in case rectIntersect area (padTextClipRect rect) of
+                  Nothing -> []
+                  Just local ->
+                    case rectIntersect parentClip local of
+                      Nothing -> []
+                      Just clip -> [(rect, txt, fg, bg, clip)]
         )
 
 collectNodeTextSpans :: Context -> NodeIdx -> IO [(Rect, T.Text, Color, Color)]
@@ -298,7 +341,7 @@ displayText ctx nt idx = do
         NodeTextInput -> do
           value <- textInputValue ctx idx
           focused <- textInputFocused ctx idx
-          pure (textInputDisplayText (textInputLabel txt) value focused)
+          pure (textInputFieldText txt value focused)
         NodeSlider -> pure (sliderLabelText txt)
         NodeSelect -> do
           store <- getStore ctx
@@ -324,6 +367,23 @@ textInputFocused ctx idx = do
   wid <- getWidgetId (ctxNodeArena ctx) idx
   focus <- readIORef (ctxFocusId ctx)
   pure (focus == wid)
+
+data TextInputGeom = TextInputGeom
+  { tigFieldRect :: Rect
+  , tigFieldTextY :: Float
+  }
+
+textInputGeom :: FontMetrics -> Float -> Float -> Float -> Float -> TextInputGeom
+textInputGeom fm x y w _h =
+  let labelH = fmLineHeight fm
+      gap = textInputLabelGap fm
+      fieldH = textInputFieldHeight fm
+      fieldY = y + labelH + gap
+      fieldPadY = textInputFieldPadY fm
+   in TextInputGeom
+        { tigFieldRect = Rect x fieldY w fieldH
+        , tigFieldTextY = fieldY + fieldPadY
+        }
 
 stripButtonBrackets :: T.Text -> T.Text
 stripButtonBrackets txt =
@@ -354,12 +414,37 @@ widgetTextSpans ctx nt idx x y w h = do
               textSpan = [(Rect (x + ix) (y + iy) tw th, txt, fg, bg)]
           pure (fullBg ++ textSpan)
     else do
-      placements <- widgetTextPlacements ctx nt idx x y w h
-      pure
-        [ (Rect px py tw th, txt, fg, bg)
-        | (txt, px, py, tw, th) <- placements
-        , not (T.null txt)
-        ]
+      case nt of
+        NodeTextInput -> do
+          placements <- widgetTextPlacements ctx nt idx x y w h
+          value <- textInputValue ctx idx
+          focus <- textInputFocused ctx idx
+          let theme = ctxTheme ctx
+              windowBg = themeWindow theme
+              labelFg = lerpColor fg windowBg 0.45
+              placeholder = T.null (T.pack value) && not focus
+              fieldFg
+                | placeholder = lerpColor fg bg 0.55
+                | otherwise = fg
+          case placements of
+            (lblPl : fieldPl : _) -> do
+              let (lbl, lx, ly, lw, lh) = lblPl
+                  (field, fx, fy, fw, fh) = fieldPl
+              pure
+                [ (Rect lx ly lw lh, lbl, labelFg, windowBg)
+                , (Rect fx fy fw fh, field, fieldFg, bg)
+                ]
+            [lblPl] -> do
+              let (lbl, lx, ly, lw, lh) = lblPl
+              pure [(Rect lx ly lw lh, lbl, labelFg, windowBg)]
+            _ -> pure []
+        _ -> do
+          placements <- widgetTextPlacements ctx nt idx x y w h
+          pure
+            [ (Rect px py tw th, txt, fg, bg)
+            | (txt, px, py, tw, th) <- placements
+            , not (T.null txt)
+            ]
 
 widgetTextPlacements ::
   Context -> NodeType -> NodeIdx -> Float -> Float -> Float -> Float -> IO [(T.Text, Float, Float, Float, Float)]
@@ -398,6 +483,27 @@ widgetTextPlacements ctx nt idx x y w h = do
             [ (lbl, x + ix, ty, lw, lh)
             , (valTxt, x + w - ix - vw, ty, vw, vh)
             ]
+    NodeTextInput -> do
+      lbl <- getText (ctxNodeArena ctx) idx
+      value <- textInputValue ctx idx
+      focus <- textInputFocused ctx idx
+      if terminal
+        then do
+          wid <- getWidgetId (ctxNodeArena ctx) idx
+          store <- getStore ctx
+          let cursor = IM.findWithDefault (length value) (intKey wid) (storeCursor store)
+              shown = textInputTerminalText lbl value cursor focus
+          (tw, th) <- ctxMeasureText ctx shown
+          pure [(shown, x + ix, y + iy, tw, th)]
+        else do
+          let geom = textInputGeom fm x y w h
+              fieldTxt = textInputFieldText lbl value focus
+          (lw, lh) <- ctxMeasureText ctx lbl
+          (fw, fh) <- ctxMeasureText ctx fieldTxt
+          pure
+            [ (lbl, x, y, lw, lh)
+            , (fieldTxt, x + ix, tigFieldTextY geom, fw, fh)
+            ]
     _ -> do
       txt <- displayText ctx nt idx
       (tw, th) <- ctxMeasureText ctx txt
@@ -416,10 +522,12 @@ widgetVisualStyle ctx nt idx = do
   wid <- getWidgetId (ctxNodeArena ctx) idx
   hot <- readIORef (ctxHotId ctx)
   active <- readIORef (ctxActiveId ctx)
+  focus <- readIORef (ctxFocusId ctx)
   animT <- getAnimationValue ctx wid
   let theme = ctxTheme ctx
       fm = ctxFontMetrics ctx
       terminal = isTerminalFont fm
+      isFocus = focus == wid
       base =
         case nt of
           NodeTextInput -> themeInput theme
@@ -448,6 +556,7 @@ widgetVisualStyle ctx nt idx = do
         | terminal, widKey == hashWidgetId active = styleActiveBg base
         | terminal, isHot = styleHoverBg base
         | terminal = styleBg base
+        | nt == NodeTextInput, isFocus = styleActiveBg base
         | widKey == hashWidgetId active = styleActiveBg base
         | nt == NodeCheckbox || nt == NodeSlider = styleBg base
         | otherwise = hoverBackground base animT isHot
@@ -508,13 +617,35 @@ lowerNode ctx idx = do
     NodeSeparator -> do
       let sepH = max 1 h
       pushRect da (Rect x (y + (h - sepH) / 2) w sepH) (themeSeparator theme)
+    NodeTextInput
+      | not terminal -> do
+          style <- widgetVisualStyle ctx nt idx
+          focus <- textInputFocused ctx idx
+          let geom = textInputGeom fm x y w h
+              fieldRect = tigFieldRect geom
+              borderCol =
+                if focus
+                  then themeAccent theme
+                  else styleBorder style
+              fieldStyle = style {styleBorder = borderCol}
+          fillStyledRect da False style fieldRect
+          strokeStyledRect
+            da
+            False
+            fieldStyle
+            (styleBg style)
+            (rectX fieldRect)
+            (rectY fieldRect)
+            (rectW fieldRect)
+            (rectH fieldRect)
+          drawTextInputCaret da ctx idx x y w h style
     NodeSpacer -> pure ()
     _ -> do
       style <- widgetVisualStyle ctx nt idx
       value <- getNodeValue (ctxNodeArena ctx) idx
       let opaqueBg =
             isTerminalFont fm
-              || (nt /= NodeCheckbox && nt /= NodeSlider)
+              || (nt /= NodeCheckbox && nt /= NodeSlider && nt /= NodeTextInput)
       when opaqueBg $ fillStyledRect da terminal style rect
       when (not terminal) $ do
         when opaqueBg $ strokeStyledRect da terminal style (styleBg style) x y w h
@@ -538,7 +669,7 @@ lowerNode ctx idx = do
               handleCx = x + max (handleD / 2) (min (w - handleD / 2) fillW)
               handleHy = trackY + (trackH - handleD) / 2
           pushRoundedRect da (Rect (handleCx - handleD / 2) handleHy handleD handleD) (handleD / 2) (styleFg style)
-        when (nt == NodeTextInput) $
+        when (nt == NodeTextInput && terminal) $
           drawTextInputCaret da ctx idx x y w h style
         when (nt == NodeSelect) $
           drawSelectChevron da x y w h (styleFg style)
@@ -562,7 +693,7 @@ drawCheckbox da fm style x y h value accent = do
     pushRoundedRect da (Rect (bx + inset) (by + inset) (box - 2 * inset) (box - 2 * inset)) (max 1 (r - 1)) accent
 
 drawTextInputCaret :: DrawArena -> Context -> NodeIdx -> Float -> Float -> Float -> Float -> Style -> IO ()
-drawTextInputCaret da ctx idx x y _w _h style = do
+drawTextInputCaret da ctx idx x y w h style = do
   let terminal = isTerminalFont (ctxFontMetrics ctx)
   if terminal
     then pure ()
@@ -574,15 +705,14 @@ drawTextInputCaret da ctx idx x y _w _h style = do
           wid <- getWidgetId (ctxNodeArena ctx) idx
           store <- getStore ctx
           pure (IM.findWithDefault (length value) (intKey wid) (storeCursor store))
-        txt <- getText (ctxNodeArena ctx) idx
-        let lbl = textInputLabel txt
-            shown = T.pack value
-            prefix = lbl <> ": " <> T.take (max 0 (min (T.length shown) cursor)) shown
-        (pw, _) <- ctxMeasureText ctx prefix
         let fm = ctxFontMetrics ctx
-            (ix, iy) = widgetContentInset fm
-            caretX = x + ix + pw
-            caretY = y + iy + 1
+            geom = textInputGeom fm x y w h
+            fieldRect = tigFieldRect geom
+            (ix, _) = widgetContentInset fm
+            prefix = T.take (max 0 (min (T.length (T.pack value)) cursor)) (T.pack value)
+        (pw, _) <- ctxMeasureText ctx prefix
+        let caretX = rectX fieldRect + ix + pw
+            caretY = tigFieldTextY geom + 1
             caretH = max 4 (fmLineHeight fm - 2)
         pushRect da (Rect caretX caretY 1 caretH) (styleFg style)
 
@@ -1002,24 +1132,15 @@ syncWidgetLabels ctx = do
         when (not (isTerminalFont (ctxFontMetrics ctx))) $
           setNodeText (ctxNodeArena ctx) idx (stripButtonBrackets txt)
       NodeTextInput -> do
-        let value = IM.findWithDefault "" key (storeText store)
-            cursor = IM.findWithDefault (length value) key (storeCursor store)
-        focus <- readIORef (ctxFocusId ctx)
-        txt <- getText (ctxNodeArena ctx) idx
-        let lbl = textInputLabel txt
-            terminal = isTerminalFont (ctxFontMetrics ctx)
-            focused = focus == wid
-            shown =
-              if terminal
-                then textInputText lbl value cursor focused
-                else textInputDisplayText lbl value focused
-        setNodeText (ctxNodeArena ctx) idx shown
+        when (isTerminalFont (ctxFontMetrics ctx)) $ do
+          focus <- readIORef (ctxFocusId ctx)
+          txt <- getText (ctxNodeArena ctx) idx
+          let value = IM.findWithDefault "" key (storeText store)
+              cursor = IM.findWithDefault (length value) key (storeCursor store)
+              lbl = txt
+              focused = focus == wid
+          setNodeText (ctxNodeArena ctx) idx (textInputTerminalText lbl value cursor focused)
       _ -> pure ()
-
-textInputLabel :: T.Text -> T.Text
-textInputLabel txt =
-  let (lbl, _) = T.breakOn ": " txt
-   in if T.null lbl then txt else lbl
 
 walkChildren :: Context -> NodeIdx -> IO ()
 walkChildren ctx idx = do

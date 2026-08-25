@@ -9,6 +9,13 @@ module NanoUI.WidgetText
   , sliderText
   , checkboxLabelText
   , textInputDisplayText
+  , textInputTerminalText
+  , textInputFieldText
+  , textInputPlaceholder
+  , textInputMinWidth
+  , textInputLabelGap
+  , textInputFieldPadY
+  , textInputFieldHeight
   , selectPackOptions
   , selectParseOptions
   , selectLabelText
@@ -18,6 +25,7 @@ module NanoUI.WidgetText
   ) where
 
 import Data.Text (Text)
+import NanoUI.Font (FontMetrics (..), fmLineHeight)
 import qualified Data.Text as T
 
 sliderRangeSep :: Text
@@ -86,9 +94,46 @@ checkboxLabelText txt =
         then T.drop 4 txt
         else txt
 
+textInputMinWidth :: Float
+textInputMinWidth = 160
+
+textInputLabelGap :: FontMetrics -> Float
+textInputLabelGap fm =
+  if fmLineHeight fm <= 14 then 3 else 4
+
+textInputFieldPadY :: FontMetrics -> Float
+textInputFieldPadY fm = max 3 (fmLineHeight fm * 0.22)
+
+textInputFieldHeight :: FontMetrics -> Float
+textInputFieldHeight fm = fmLineHeight fm + 2 * textInputFieldPadY fm
+
+textInputPlaceholder :: Text -> Text
+textInputPlaceholder lbl =
+  if T.null lbl
+    then "Enter text"
+    else "Enter " <> T.toLower lbl
+
+textInputFieldText :: Text -> String -> Bool -> Text
+textInputFieldText lbl value focused =
+  let body = T.pack value
+   in if T.null body && not focused
+        then textInputPlaceholder lbl
+        else body
+
+textInputTerminalText :: Text -> String -> Int -> Bool -> Text
+textInputTerminalText lbl value cursor focused =
+  let body = T.pack value
+      shown =
+        if focused
+          then
+            let c = max 0 (min (T.length body) cursor)
+             in T.take c body <> "\x2502" <> T.drop c body
+          else body
+   in lbl <> ": " <> shown
+
 textInputDisplayText :: Text -> String -> Bool -> Text
-textInputDisplayText lbl value _focused =
-  lbl <> ": " <> T.pack value
+textInputDisplayText lbl value focused =
+  textInputFieldText lbl value focused
 
 selectPackOptions :: Text -> [Text] -> Text
 selectPackOptions lbl opts =
