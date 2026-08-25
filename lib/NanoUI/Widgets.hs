@@ -79,7 +79,7 @@ import NanoUI.Style
   , Sizing (..)
   , defaultLayout
   )
-import NanoUI.Types (Rect (..), V2 (..), rectContains)
+import NanoUI.Types (Rect (..), V2 (..), rectContains, sliderTrackRect)
 
 parentIdx :: [Int] -> Int
 parentIdx = \case
@@ -194,9 +194,14 @@ slider layout lbl minV maxV initial = do
           else sliderPackRange lbl minV maxV
   resp <- addWidget wid NodeSlider nodeText frac layout
   active <- liftIO (readIORef (ctxActiveId ctx))
+  trackHover <- liftIO $ do
+    mrect <- getPrevRect ctx wid
+    pure $
+      case mrect of
+        Nothing -> False
+        Just (Rect x y w h) -> rectContains (sliderTrackRect x y w h) (inputMousePos inp)
   let isActive = active == wid
-      hovered = respHovered resp
-      pressed = inputMouseDown inp && (hovered || isActive)
+      pressed = inputMouseDown inp && (trackHover || isActive)
   val <-
     liftIO $ do
       mrect <- getPrevRect ctx wid
@@ -209,7 +214,7 @@ slider layout lbl minV maxV initial = do
                  in max 0 (min 1 f)
           computed = minV + dragFrac * (maxV - minV)
       if pressed then pure computed else pure current
-  when (pressed && hovered && not isActive) $
+  when (pressed && trackHover && not isActive) $
     liftIO $ writeIORef (ctxActiveId ctx) wid
   when (not (inputMouseDown inp) && isActive) $
     liftIO $ writeIORef (ctxActiveId ctx) (WidgetId 0)
@@ -227,7 +232,9 @@ textInput lbl initial = do
   inp <- askInput
   store <- liftIO (getStore ctx)
   let key = intKey wid
-      current = IM.findWithDefault initial key (storeText store)
+  when (not (IM.member key (storeText store))) $
+    liftIO $ setStore ctx (store {storeText = IM.insert key initial (storeText store)})
+  let current = IM.findWithDefault initial key (storeText store)
       cursor = IM.findWithDefault (length current) key (storeCursor store)
   focus <- liftIO (readIORef (ctxFocusId ctx))
   let isFocus = focus == wid
@@ -364,16 +371,22 @@ select lbl options initial = do
     liftIO $
       setStore ctx (store0 {storeSelect = IM.insert key clamped (storeSelect store0)})
   resp <- addWidget wid NodeSelect nodeText 0 defaultLayout
+  inp <- askInput
   open <- liftIO $ do
     st <- getStore ctx
     pure (IM.findWithDefault False key (storeSelectOpen st))
   when (respClicked resp) $
     liftIO $ do
       st <- getStore ctx
+      let Rect rx ry rw rh = respRect resp
+          onButton = rw > 0 && rh > 0 && rectContains (Rect rx ry rw rh) (inputMousePos inp)
       setStore
         ctx
         ( if open
-            then st {storeSelectOpen = IM.insert key False (storeSelectOpen st)}
+            then
+              if onButton
+                then st {storeSelectOpen = IM.insert key False (storeSelectOpen st)}
+                else st
             else st {storeSelectOpen = IM.singleton key True}
         )
   store1 <- liftIO (getStore ctx)

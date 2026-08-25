@@ -3,11 +3,17 @@ module NanoUI.Frame
   , needsRedraw
   , collectTextSpans
   , collectOverlayTextSpans
+  , pointerCursorWanted
+  , cursorKindIs
+  , uiCursorKind
+  , UiCursorKind (..)
+  , sliderTrackRect
   ) where
 
 import Control.Monad (forM, forM_, unless, when)
 import Data.IORef (readIORef, writeIORef)
 import Data.List (findIndex)
+import Data.Maybe (isJust)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Text as T
 import NanoUI.Context
@@ -23,6 +29,8 @@ import NanoUI.Context
   , isDirty
   , isDisabled
   , markDirty
+  , getHotId
+  , getPrevRect
   , pushMessage
   , setScrollOffset
   , setStore
@@ -96,7 +104,6 @@ import NanoUI.WidgetText
   , sliderPackTerminal
   , sliderValueText
   , textInputFieldHeight
-  , textInputFieldPadY
   , textInputFieldText
   , textInputLabelGap
   , textInputTerminalText
@@ -106,7 +113,7 @@ import NanoUI.WidgetText
   , selectChevronCenterX
   )
 import NanoUI.Style (Padding (..), Style (..), Theme (..), themeAccent, themeButton, themeInput, themePanel, themeSeparator, themeWindow)
-import NanoUI.Types (Color (..), Rect (..), Size (..), V2 (..), colorRGBA, rectContains, rectIntersect)
+import NanoUI.Types (Color (..), Rect (..), Size (..), V2 (..), colorRGBA, rectContains, rectH, rectIntersect, rectOverlapArea, rectW, sliderTrackRect)
 
 runFrame :: Context -> Input -> UI a -> IO (a, [FrameMsg], DrawData, Bool)
 runFrame ctx inp ui = do
@@ -115,6 +122,9 @@ runFrame ctx inp ui = do
   writeIORef (ctxContainerStack ctx) []
   writeIORef (ctxFocusables ctx) []
   writeIORef (ctxHotId ctx) (WidgetId 0)
+  writeIORef (ctxWidgetNodeTypes ctx) Nothing
+  unless (inputMouseDown inp) $
+    writeIORef (ctxSelectDropPress ctx) False
   clearTooltips ctx
   result <- unUI ui ctx inp
   -- Terminal sliders embed the bar in node text; sync before measure so width is correct.
@@ -128,6 +138,7 @@ runFrame ctx inp ui = do
   finalizePointerRelease ctx inp
   finalizeTextInputFocus ctx inp
   finalizeTabFocus ctx inp
+  markSelectDropPress ctx inp
   finalizeSelectPick ctx inp
   closeSelectOnOutsideClick ctx inp
   syncWidgetLabels ctx
@@ -235,10 +246,9 @@ tagSelectClippedSpans parentClip x y w h fm =
               Just clip -> [(rect, txt, fg, bg, clip)]
         )
 
-textInputFieldTextClip :: Float -> Float -> Float -> Float -> FontMetrics -> Rect
-textInputFieldTextClip x y w h fm =
-  let geom = textInputGeom fm x y w h
-      field = tigFieldRect geom
+textInputFieldTextClip :: TextInputGeom -> FontMetrics -> Rect
+textInputFieldTextClip geom fm =
+  let field = tigFieldRect geom
       (ix, iy) = widgetContentInset fm
    in Rect
         (rectX field + ix)
@@ -248,21 +258,21 @@ textInputFieldTextClip x y w h fm =
 
 tagTextInputClippedSpans ::
   Rect -> Float -> Float -> Float -> Float -> FontMetrics -> [(Rect, T.Text, Color, Color)] -> [(Rect, T.Text, Color, Color, Rect)]
-tagTextInputClippedSpans parentClip x y w h fm =
-  let fieldClip = textInputFieldTextClip x y w h fm
+tagTextInputClippedSpans parentClip x y w h fm spans =
+  let geom = textInputGeom fm x y w h
+      fieldClip = textInputFieldTextClip geom fm
       labelClip = Rect x y w (fmLineHeight fm)
-      fieldTop = rectY fieldClip
-   in concatMap
-        ( \(rect, txt, fg, bg) ->
-            let area =
-                  if rectY rect >= fieldTop - 0.5 then fieldClip else labelClip
-             in case rectIntersect area (padTextClipRect rect) of
+      tagOne (rect, txt, fg, bg) =
+        let clipRect = padTextClipRect rect
+            isField = rectOverlapArea fieldClip clipRect > rectOverlapArea labelClip clipRect
+            area = if isField then fieldClip else labelClip
+         in case rectIntersect area clipRect of
+              Nothing -> []
+              Just local ->
+                case rectIntersect parentClip local of
                   Nothing -> []
-                  Just local ->
-                    case rectIntersect parentClip local of
-                      Nothing -> []
-                      Just clip -> [(rect, txt, fg, bg, clip)]
-        )
+                  Just clip -> [(rect, txt, fg, bg, clip)]
+   in concatMap tagOne spans
 
 collectNodeTextSpans :: Context -> NodeIdx -> IO [(Rect, T.Text, Color, Color)]
 collectNodeTextSpans ctx idx = do
@@ -328,9 +338,9 @@ displayText ctx nt idx = do
           let picked = IM.findWithDefault 0 (intKey wid) (storeSelect store)
               open = IM.findWithDefault False (intKey wid) (storeSelectOpen store)
               opt =
-                if picked >= 0 && picked < length opts
-                  then opts !! picked
-                  else ""
+                case drop picked opts of
+                  (o : _) -> o
+                  _ -> ""
               caret = if open then " v" else " >"
           pure (selectDisplayText lbl opt <> caret)
         NodeSlider -> pure (T.takeWhile (/= '\US') txt)
@@ -349,9 +359,9 @@ displayText ctx nt idx = do
           wid <- getWidgetId (ctxNodeArena ctx) idx
           let picked = IM.findWithDefault 0 (intKey wid) (storeSelect store)
               opt =
-                if picked >= 0 && picked < length opts
-                  then opts !! picked
-                  else ""
+                case drop picked opts of
+                  (o : _) -> o
+                  _ -> ""
           pure (selectDisplayText lbl opt)
         _ -> pure (stripButtonBrackets txt)
 
@@ -370,7 +380,6 @@ textInputFocused ctx idx = do
 
 data TextInputGeom = TextInputGeom
   { tigFieldRect :: Rect
-  , tigFieldTextY :: Float
   }
 
 textInputGeom :: FontMetrics -> Float -> Float -> Float -> Float -> TextInputGeom
@@ -379,11 +388,211 @@ textInputGeom fm x y w _h =
       gap = textInputLabelGap fm
       fieldH = textInputFieldHeight fm
       fieldY = y + labelH + gap
-      fieldPadY = textInputFieldPadY fm
-   in TextInputGeom
-        { tigFieldRect = Rect x fieldY w fieldH
-        , tigFieldTextY = fieldY + fieldPadY
-        }
+   in TextInputGeom {tigFieldRect = Rect x fieldY w fieldH}
+
+widgetHitRect :: Context -> NodeType -> Float -> Float -> Float -> Float -> Rect
+widgetHitRect ctx nt x y w h =
+  case nt of
+    NodeTextInput
+      | not (isTerminalFont (ctxFontMetrics ctx)) ->
+          tigFieldRect (textInputGeom (ctxFontMetrics ctx) x y w h)
+    _ -> Rect x y w h
+
+data UiCursorKind
+  = UiCursorDefault
+  | UiCursorPointer
+  | UiCursorText
+  | UiCursorGrab
+  | UiCursorGrabbing
+  deriving (Eq, Show)
+
+grabHoverKind :: Bool -> Input -> UiCursorKind
+grabHoverKind onTarget inp = grabDragKind onTarget False inp
+
+grabDragKind :: Bool -> Bool -> Input -> UiCursorKind
+grabDragKind onTarget dragging inp
+  | dragging = UiCursorGrabbing
+  | onTarget, inputMouseDown inp = UiCursorGrabbing
+  | onTarget = UiCursorGrab
+  | otherwise = UiCursorDefault
+
+uiCursorKind :: Context -> Input -> IO UiCursorKind
+uiCursorKind ctx inp = do
+  let mouse = inputMousePos inp
+  table <- widgetNodeTypeTable ctx
+  mDrop <- selectDropdownCursorKind ctx inp
+  case mDrop of
+    Just k -> pure k
+    Nothing -> do
+      mScroll <- scrollThumbCursorKind ctx inp
+      case mScroll of
+        Just k -> pure k
+        Nothing -> do
+          active <- readIORef (ctxActiveId ctx)
+          activeKind <- cursorKindAt table ctx active mouse inp
+          if activeKind /= UiCursorDefault
+            then pure activeKind
+            else do
+              hot <- getHotId ctx
+              cursorKindAt table ctx hot mouse inp
+
+selectDropdownCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
+selectDropdownCursorKind ctx inp = do
+  let mouse = inputMousePos inp
+  dropPress <- readIORef (ctxSelectDropPress ctx)
+  store <- getStore ctx
+  count <- arenaCount (ctxNodeArena ctx)
+  let go idx
+        | idx >= count = pure Nothing
+        | otherwise = do
+            nt <- getNodeType (ctxNodeArena ctx) idx
+            if nt /= NodeSelect
+              then go (idx + 1)
+              else do
+                wid <- getWidgetId (ctxNodeArena ctx) idx
+                let key = intKey wid
+                    open = IM.findWithDefault False key (storeSelectOpen store)
+                txt <- getText (ctxNodeArena ctx) idx
+                let (_, opts) = selectParseOptions txt
+                (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+                let fm = ctxFontMetrics ctx
+                    dropRect = selectDropRect fm x y w h (length opts)
+                    inDrop = rectContains dropRect mouse
+                if inDrop && (open || dropPress)
+                  then pure (Just UiCursorPointer)
+                  else go (idx + 1)
+  go 0
+
+scrollThumbCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
+scrollThumbCursorKind ctx inp = do
+  mDrag <- readIORef (ctxScrollDrag ctx)
+  let clicking = inputMouseDown inp
+  if clicking && isJust mDrag
+    then pure (Just UiCursorGrabbing)
+    else do
+      onThumb <- scrollThumbHit ctx (inputMousePos inp)
+      if onThumb
+        then pure (Just (grabHoverKind True inp))
+        else pure Nothing
+
+scrollThumbHit :: Context -> V2 -> IO Bool
+scrollThumbHit ctx mouse = do
+  count <- arenaCount (ctxNodeArena ctx)
+  go 0 count
+  where
+    go idx count
+      | idx >= count = pure False
+      | otherwise = do
+          nt <- getNodeType (ctxNodeArena ctx) idx
+          if nt /= NodeScrollContainer
+            then go (idx + 1) count
+            else do
+              wid <- getWidgetId (ctxNodeArena ctx) idx
+              pad <- getPadding (ctxNodeArena ctx) idx
+              contentSize <- getNodeValue (ctxNodeArena ctx) idx
+              (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+              dir <- getDirection (ctxNodeArena ctx) idx
+              off <- getScrollOffset ctx wid
+              let fm = ctxFontMetrics ctx
+              case scrollBarLayout fm dir x y w h pad contentSize off of
+                Nothing -> go (idx + 1) count
+                Just layout ->
+                  if rectContains (sbThumb layout) mouse
+                    then pure True
+                    else go (idx + 1) count
+
+markSelectDropPress :: Context -> Input -> IO ()
+markSelectDropPress ctx inp =
+  when (inputMouseDown inp) $ do
+    store <- getStore ctx
+    when (any id (IM.elems (storeSelectOpen store))) $ do
+      let mouse = inputMousePos inp
+      count <- arenaCount (ctxNodeArena ctx)
+      hit <- openSelectHit ctx count mouse (storeSelectOpen store)
+      when hit $ writeIORef (ctxSelectDropPress ctx) True
+
+cursorKindAt :: IM.IntMap NodeType -> Context -> WidgetId -> V2 -> Input -> IO UiCursorKind
+cursorKindAt table ctx wid mouse inp
+  | hashWidgetId wid == 0 = pure UiCursorDefault
+  | otherwise = do
+      disabled <- isDisabled ctx wid
+      if disabled
+        then pure UiCursorDefault
+        else
+          case IM.lookup (intKey wid) table of
+            Just NodeButton -> pure UiCursorPointer
+            Just NodeCheckbox -> pure UiCursorPointer
+            Just NodeSelect -> selectCursorKind ctx wid mouse
+            Just NodeTextInput -> textInputCursorKind ctx wid mouse
+            Just NodeSlider -> sliderCursorKind ctx wid mouse inp
+            _ -> pure UiCursorDefault
+
+selectCursorKind :: Context -> WidgetId -> V2 -> IO UiCursorKind
+selectCursorKind ctx wid mouse = do
+  mrect <- getPrevRect ctx wid
+  pure $
+    case mrect of
+      Nothing -> UiCursorDefault
+      Just rect ->
+        if rectContains rect mouse
+          then UiCursorPointer
+          else UiCursorDefault
+
+sliderCursorKind :: Context -> WidgetId -> V2 -> Input -> IO UiCursorKind
+sliderCursorKind ctx wid mouse inp = do
+  mrect <- getPrevRect ctx wid
+  active <- readIORef (ctxActiveId ctx)
+  let dragging = active == wid && inputMouseDown inp
+  pure $
+    case mrect of
+      Nothing -> UiCursorDefault
+      Just (Rect x y w h) ->
+        grabDragKind (rectContains (sliderTrackRect x y w h) mouse) dragging inp
+
+textInputCursorKind :: Context -> WidgetId -> V2 -> IO UiCursorKind
+textInputCursorKind ctx wid mouse = do
+  mrect <- getPrevRect ctx wid
+  case mrect of
+    Nothing -> pure UiCursorDefault
+    Just (Rect x y w h) -> do
+      let fm = ctxFontMetrics ctx
+          field = tigFieldRect (textInputGeom fm x y w h)
+      pure $
+        if rectContains field mouse
+          then UiCursorText
+          else UiCursorDefault
+
+pointerCursorWanted :: Context -> Input -> IO Bool
+pointerCursorWanted ctx inp = cursorKindIs ctx inp UiCursorPointer
+
+cursorKindIs :: Context -> Input -> UiCursorKind -> IO Bool
+cursorKindIs ctx inp want = (== want) <$> uiCursorKind ctx inp
+
+widgetNodeTypeTable :: Context -> IO (IM.IntMap NodeType)
+widgetNodeTypeTable ctx = do
+  cached <- readIORef (ctxWidgetNodeTypes ctx)
+  case cached of
+    Just table -> pure table
+    Nothing -> do
+      count <- arenaCount (ctxNodeArena ctx)
+      table <-
+        if count <= 0
+          then pure IM.empty
+          else do
+            let go idx acc
+                  | idx >= count = pure acc
+                  | otherwise = do
+                      nt <- getNodeType (ctxNodeArena ctx) idx
+                      acc' <-
+                        if isWidgetNode nt
+                          then do
+                            wid <- getWidgetId (ctxNodeArena ctx) idx
+                            pure (IM.insert (intKey wid) nt acc)
+                          else pure acc
+                      go (idx + 1) acc'
+            go 0 IM.empty
+      writeIORef (ctxWidgetNodeTypes ctx) (Just table)
+      pure table
 
 stripButtonBrackets :: T.Text -> T.Text
 stripButtonBrackets txt =
@@ -497,12 +706,14 @@ widgetTextPlacements ctx nt idx x y w h = do
           pure [(shown, x + ix, y + iy, tw, th)]
         else do
           let geom = textInputGeom fm x y w h
+              field = tigFieldRect geom
               fieldTxt = textInputFieldText lbl value focus
           (lw, lh) <- ctxMeasureText ctx lbl
           (fw, fh) <- ctxMeasureText ctx fieldTxt
+          let ty = rectY field + (rectH field - fh) / 2
           pure
             [ (lbl, x, y, lw, lh)
-            , (fieldTxt, x + ix, tigFieldTextY geom, fw, fh)
+            , (fieldTxt, x + ix, ty, fw, fh)
             ]
     _ -> do
       txt <- displayText ctx nt idx
@@ -652,10 +863,10 @@ lowerNode ctx idx = do
         when (nt == NodeCheckbox) $
           drawCheckbox da fm style x y h value (themeAccent theme)
         when (nt == NodeSlider) $ do
-          let trackH = max 4 (h * 0.18)
-              trackY = y + h - trackH - 2
+          let trackRect = sliderTrackRect x y w h
+              trackH = rectH trackRect
+              trackY = rectY trackRect
               trackR = trackH / 2
-              trackRect = Rect x trackY w trackH
               fillW = max 0 (w * clamp01 value)
               inputBg = styleBg (themeInput theme)
           pushRoundedRect da trackRect trackR inputBg
@@ -705,15 +916,19 @@ drawTextInputCaret da ctx idx x y w h style = do
           wid <- getWidgetId (ctxNodeArena ctx) idx
           store <- getStore ctx
           pure (IM.findWithDefault (length value) (intKey wid) (storeCursor store))
+        lbl <- getText (ctxNodeArena ctx) idx
         let fm = ctxFontMetrics ctx
             geom = textInputGeom fm x y w h
             fieldRect = tigFieldRect geom
             (ix, _) = widgetContentInset fm
-            prefix = T.take (max 0 (min (T.length (T.pack value)) cursor)) (T.pack value)
+            fieldTxt = textInputFieldText lbl value focus
+            prefix = T.take (max 0 (min (T.length fieldTxt) cursor)) fieldTxt
         (pw, _) <- ctxMeasureText ctx prefix
-        let caretX = rectX fieldRect + ix + pw
-            caretY = tigFieldTextY geom + 1
-            caretH = max 4 (fmLineHeight fm - 2)
+        (_, ph) <- ctxMeasureText ctx fieldTxt
+        let ty = rectY fieldRect + (rectH fieldRect - ph) / 2
+            caretX = rectX fieldRect + ix + pw
+            caretY = ty + 1
+            caretH = max 4 (ph - 2)
         pushRect da (Rect caretX caretY 1 caretH) (styleFg style)
 
 fillStyledRect :: DrawArena -> Bool -> Style -> Rect -> IO ()
@@ -997,8 +1212,8 @@ findTopWidgetUnderMouse ctx count mouse wanted = go (count - 1)
             else do
               wid <- getWidgetId (ctxNodeArena ctx) idx
               (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-              let rect = Rect x y w h
-              if w > 0 && h > 0 && rectContains rect mouse
+              let rect = widgetHitRect ctx nt x y w h
+              if rectW rect > 0 && rectH rect > 0 && rectContains rect mouse
                 then pure (Just wid)
                 else go (idx - 1)
 
@@ -1008,6 +1223,7 @@ isInteractiveNode nt =
     || nt == NodeCheckbox
     || nt == NodeSlider
     || nt == NodeSelect
+    || nt == NodeTextInput
 
 -- Clicks are finalized against solved layout rects; widgets only track press state.
 finalizePointerRelease :: Context -> Input -> IO ()
@@ -1092,8 +1308,8 @@ findTextInputUnderMouse ctx count mouse = go 0
             then do
               wid <- getWidgetId (ctxNodeArena ctx) idx
               (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-              let rect = Rect x y w h
-              if w > 0 && h > 0 && rectContains rect mouse
+              let rect = widgetHitRect ctx nt x y w h
+              if rectW rect > 0 && rectH rect > 0 && rectContains rect mouse
                 then pure (Just wid)
                 else go (idx + 1)
             else go (idx + 1)

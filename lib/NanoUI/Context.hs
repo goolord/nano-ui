@@ -48,7 +48,7 @@ import qualified Data.IntMap.Strict as IM
 import NanoUI.Draw (DrawArena, newDrawArena)
 import NanoUI.Font (FontMetrics, measureText, monospaceMetrics)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
-import NanoUI.Layout.Arena (NodeArena, newNodeArena)
+import NanoUI.Layout.Arena (NodeArena, NodeType, newNodeArena)
 import NanoUI.Style (Theme, defaultTheme, sdlTheme, terminalTheme)
 import NanoUI.Types (Rect (..), Color (..))
 
@@ -116,6 +116,8 @@ data Context = Context
   , ctxFocusables :: IORef [WidgetId]
   , ctxScrollDrag :: IORef (Maybe (WidgetId, Float))
   , ctxTooltips :: IORef [PendingTooltip]
+  , ctxWidgetNodeTypes :: IORef (Maybe (IntMap NodeType))
+  , ctxSelectDropPress :: IORef Bool
   }
 
 {-# INLINE newContext #-}
@@ -138,6 +140,8 @@ newContext = do
   ctxFocusables <- newIORef []
   ctxScrollDrag <- newIORef Nothing
   ctxTooltips <- newIORef []
+  ctxWidgetNodeTypes <- newIORef Nothing
+  ctxSelectDropPress <- newIORef False
   let fm0 = monospaceMetrics 12
   pure
     Context
@@ -162,6 +166,8 @@ newContext = do
       , ctxFocusables
       , ctxScrollDrag
       , ctxTooltips
+      , ctxWidgetNodeTypes
+      , ctxSelectDropPress
       }
 
 {-# INLINE withFontMetrics #-}
