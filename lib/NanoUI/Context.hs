@@ -5,8 +5,11 @@ module NanoUI.Context
   , WidgetStore (..)
   , newContext
   , withFontMetrics
+  , withMeasureText
+  , withExternalText
   , withTheme
   , newTerminalContext
+  , newSdlContext
   , markDirty
   , isDirty
   , getHotId
@@ -24,13 +27,14 @@ module NanoUI.Context
 
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict (IntMap)
+import Data.Text (Text)
 import Data.Word (Word64)
 import qualified Data.IntMap.Strict as IM
 import NanoUI.Draw (DrawArena, newDrawArena)
-import NanoUI.Font (FontMetrics, monospaceMetrics)
+import NanoUI.Font (FontMetrics, measureText, monospaceMetrics)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Layout.Arena (NodeArena, newNodeArena)
-import NanoUI.Style (Theme, defaultTheme, terminalTheme)
+import NanoUI.Style (Theme, defaultTheme, sdlTheme, terminalTheme)
 import NanoUI.Types (Rect (..))
 
 data FrameMsg where
@@ -74,6 +78,8 @@ data Context = Context
   , ctxDirty :: IORef Bool
   , ctxIdSalt :: IORef Word64
   , ctxFontMetrics :: FontMetrics
+  , ctxMeasureText :: Text -> IO (Float, Float)
+  , ctxExternalText :: Bool
   , ctxTheme :: Theme
   , ctxContainerStack :: IORef [Int]
   , ctxMessages :: IORef [FrameMsg]
@@ -95,6 +101,7 @@ newContext = do
   ctxIdSalt <- newIORef 0
   ctxContainerStack <- newIORef []
   ctxMessages <- newIORef []
+  let fm0 = monospaceMetrics 12
   pure
     Context
       { ctxNodeArena = nodeArena
@@ -108,7 +115,9 @@ newContext = do
       , ctxAnyAnimating
       , ctxDirty
       , ctxIdSalt
-      , ctxFontMetrics = monospaceMetrics 12
+      , ctxFontMetrics = fm0
+      , ctxMeasureText = \txt -> pure (measureText fm0 txt)
+      , ctxExternalText = False
       , ctxTheme = defaultTheme
       , ctxContainerStack
       , ctxMessages
@@ -116,7 +125,19 @@ newContext = do
 
 {-# INLINE withFontMetrics #-}
 withFontMetrics :: Context -> FontMetrics -> Context
-withFontMetrics ctx fm = ctx {ctxFontMetrics = fm}
+withFontMetrics ctx fm =
+  ctx
+    { ctxFontMetrics = fm
+    , ctxMeasureText = \txt -> pure (measureText fm txt)
+    }
+
+{-# INLINE withMeasureText #-}
+withMeasureText :: Context -> (Text -> IO (Float, Float)) -> Context
+withMeasureText ctx measure = ctx {ctxMeasureText = measure}
+
+{-# INLINE withExternalText #-}
+withExternalText :: Context -> Bool -> Context
+withExternalText ctx on = ctx {ctxExternalText = on}
 
 {-# INLINE withTheme #-}
 withTheme :: Context -> Theme -> Context
@@ -126,7 +147,13 @@ withTheme ctx theme = ctx {ctxTheme = theme}
 newTerminalContext :: IO Context
 newTerminalContext = do
   ctx <- newContext
-  pure (withTheme (withFontMetrics ctx (monospaceMetrics 1)) terminalTheme)
+  pure (withExternalText (withTheme (withFontMetrics ctx (monospaceMetrics 1)) terminalTheme) True)
+
+{-# INLINE newSdlContext #-}
+newSdlContext :: IO Context
+newSdlContext = do
+  ctx <- newContext
+  pure (withTheme (withFontMetrics ctx (monospaceMetrics 16)) sdlTheme)
 
 {-# INLINE markDirty #-}
 markDirty :: Context -> IO ()

@@ -43,7 +43,7 @@ main = do
                 liftIO $ writeIORef lastClick "Cancel"
                 emit ("button:Cancel" :: String)
               (_, checked) <- checkbox "Feature" False
-              (_, vol) <- slider "Volume" 0 100 50
+              (_, vol) <- slider defaultLayout "Volume" 0 100 50
               (_, name) <- textInput "Name" ""
               click <- liftIO $ readIORef lastClick
               _ <- label ""

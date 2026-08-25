@@ -206,13 +206,17 @@ runHoverTest ctx failed = do
 
 -- Text input focus is finalized against solved rects on first press.
 runTextInputFocusTest :: Context -> IORef Int -> IO ()
-runTextInputFocusTest ctx failed = do
+runTextInputFocusTest _ failed = do
+  ctx <- newTerminalContext
   let inp0 = emptyInput {inputWindowSize = Size 200 100}
       ui = column defaultLayout (textInput "Name" "")
   _ <- runFrame ctx inp0 ui
+  ((resp, _), _, _, _) <- runFrame ctx inp0 ui
+  let Rect rx ry _ _ = respRect resp
+      click = V2 (rx + 1) (ry + 0.5)
   let inp1 =
         inp0
-          { inputMousePos = V2 10 10
+          { inputMousePos = click
           , inputMouseDown = True
           , inputMousePressed = True
           , inputMouseReleased = False

@@ -7,10 +7,12 @@ module NanoUI.Font
   , labelContentInset
   , widgetContentInset
   , widgetPadding
+  , checkboxBoxSize
+  , checkboxLeading
   , isTerminalFont
   ) where
 
-import Data.Char (isPrint)
+
 import Data.Text (Text)
 import qualified Data.Text as T
 
@@ -40,22 +42,7 @@ monospaceMetrics cell =
     { fmLineHeight = cell
     , fmAscent = cell * 0.8
     , fmAdvance = \_ -> cell
-    , fmGlyph =
-        \c ->
-          if isPrint c
-            then
-              Just
-                GlyphQuad
-                  { gqX = 0
-                  , gqY = 0
-                  , gqW = cell
-                  , gqH = cell
-                  , gqU0 = 0
-                  , gqV0 = 0
-                  , gqU1 = 1
-                  , gqV1 = 1
-                  }
-            else Nothing
+    , fmGlyph = \_ -> Nothing
     }
 
 -- Cell-grid metrics get whole-cell insets; fractional padding would place rows
@@ -77,6 +64,17 @@ widgetPadding :: FontMetrics -> (Float, Float)
 widgetPadding fm =
   let (cx, cy) = widgetContentInset fm
    in (2 * cx, 2 * cy)
+
+{-# INLINE checkboxBoxSize #-}
+checkboxBoxSize :: FontMetrics -> Float
+checkboxBoxSize fm =
+  min 16 (max 12 (fmLineHeight fm * 0.85))
+
+{-# INLINE checkboxLeading #-}
+checkboxLeading :: FontMetrics -> Float
+checkboxLeading fm
+  | isTerminalFont fm = 0
+  | otherwise = checkboxBoxSize fm + 4
 
 {-# INLINE isTerminalFont #-}
 isTerminalFont :: FontMetrics -> Bool

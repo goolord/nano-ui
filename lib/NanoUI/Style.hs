@@ -11,6 +11,7 @@ module NanoUI.Style
   , Theme (..)
   , defaultTheme
   , terminalTheme
+  , sdlTheme
   ) where
 
 import NanoUI.Types (Color, colorRGBA)
@@ -94,7 +95,8 @@ defaultStyle =
     }
 
 data Theme = Theme
-  { themePanel :: Style
+  { themeWindow :: Color
+  , themePanel :: Style
   , themeButton :: Style
   , themeInput :: Style
   , themeSeparator :: Color
@@ -105,7 +107,8 @@ data Theme = Theme
 defaultTheme :: Theme
 defaultTheme =
   Theme
-    { themePanel =
+    { themeWindow = colorRGBA 33 33 36 255
+    , themePanel =
         Style
           { styleBg = colorRGBA 45 45 48 255
           , styleFg = colorRGBA 240 240 240 255
@@ -139,10 +142,50 @@ defaultTheme =
     , themeAccent = colorRGBA 100 149 237 255
     }
 
+-- Dracula-inspired palette similar to dvui's default dark themes.
+sdlTheme :: Theme
+sdlTheme =
+  Theme
+    { themeWindow = colorRGBA 33 34 44 255
+    , themePanel =
+        Style
+          { styleBg = colorRGBA 40 42 54 255
+          , styleFg = colorRGBA 248 248 242 255
+          , styleBorder = colorRGBA 98 114 164 255
+          , styleBorderWidth = 0
+          , styleCornerRadius = 8
+          , styleHoverBg = colorRGBA 40 42 54 255
+          , styleActiveBg = colorRGBA 40 42 54 255
+          }
+    , themeButton =
+        Style
+          { styleBg = colorRGBA 68 71 90 255
+          , styleFg = colorRGBA 248 248 242 255
+          , styleBorder = colorRGBA 98 114 164 255
+          , styleBorderWidth = 0
+          , styleCornerRadius = 6
+          , styleHoverBg = colorRGBA 98 114 164 255
+          , styleActiveBg = colorRGBA 255 121 198 255
+          }
+    , themeInput =
+        Style
+          { styleBg = colorRGBA 33 34 44 255
+          , styleFg = colorRGBA 248 248 242 255
+          , styleBorder = colorRGBA 98 114 164 200
+          , styleBorderWidth = 1
+          , styleCornerRadius = 6
+          , styleHoverBg = colorRGBA 40 42 54 255
+          , styleActiveBg = colorRGBA 33 34 44 255
+          }
+    , themeSeparator = colorRGBA 98 114 164 96
+    , themeAccent = colorRGBA 255 121 198 255
+    }
+
 terminalTheme :: Theme
 terminalTheme =
   Theme
-    { themePanel =
+    { themeWindow = colorRGBA 18 18 22 255
+    , themePanel =
         Style
           { styleBg = colorRGBA 28 28 32 255
           , styleFg = colorRGBA 230 230 235 255

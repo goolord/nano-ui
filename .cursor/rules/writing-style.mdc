@@ -1,0 +1,46 @@
+---
+description: Prose and documentation style for nano-ui (no em dashes; keep docs simple)
+alwaysApply: true
+---
+
+# Writing style
+
+## No em dashes or en dashes
+
+Do not use em dashes (`—`) or en dashes (`–`) anywhere in this repo: README, comments, commit messages, module docs, or chat summaries about this project.
+
+Use plain ASCII instead:
+
+- **Colon** for a label or explanation: `SrcLoc IDs: HasCallStack hashing...`
+- **Period** for a new sentence.
+- **Comma** or **parentheses** for a short aside.
+- **Hyphen** (`-`) only for compound words and ranges (`zero-allocation`, `background-content-overlay`).
+
+```markdown
+<!-- BAD -->
+- **Damage tracking** — `needsRedraw` gates on input change
+
+<!-- GOOD -->
+- **Damage tracking**: `needsRedraw` gates on input change
+```
+
+```haskell
+-- BAD
+-- skips runFrame when idle (design doc — damage tracking)
+
+-- GOOD
+-- skips runFrame when idle (see damage tracking in the design doc)
+```
+
+## Documentation tone
+
+Keep documentation **clear, concise, and relatively simple**:
+
+- Prefer short sentences and plain words over dense jargon.
+- One idea per sentence or bullet when possible.
+- Show a minimal example before explaining edge cases.
+- Module comments and README sections should help a new contributor act quickly, not read like an essay.
+- Avoid rhetorical filler ("simply", "just", "it's worth noting that").
+- Use ASCII arrows (`->`) or words (`to`) in diagrams unless a Unicode arrow is already established in the file.
+
+When editing docs, tighten rather than expand unless the user asked for more detail.

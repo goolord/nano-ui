@@ -10,6 +10,7 @@ module NanoUI.Draw
   , resetDrawArena
   , beginLayer
   , pushRect
+  , pushRoundedRect
   , pushText
   , pushLine
   , finishDraw
@@ -167,6 +168,25 @@ pushRect da (Rect x y w h) col = do
         , Vertex (x + w) y 1 0 rgba
         , Vertex (x + w) (y + h) 1 1 rgba
         , Vertex x (y + h) 0 1 rgba
+        ]
+  base <- readIORef (daVertexCount da)
+  writeVerts da base verts
+  writeIORef (daVertexCount da) (base + 4)
+  baseIdx <- readIORef (daIndexCount da)
+  writeIndices da baseIdx [base, base + 1, base + 2, base, base + 2, base + 3]
+  writeIORef (daIndexCount da) (baseIdx + 6)
+
+-- Rounded fills encode radius in vtxU and use vtxV = -1 (plain rects use v in [0, 1]).
+{-# INLINE pushRoundedRect #-}
+pushRoundedRect :: DrawArena -> Rect -> Float -> Color -> IO ()
+pushRoundedRect da (Rect x y w h) radius col = do
+  let rgba = colorToWord32 col
+      r = max 0 radius
+      verts =
+        [ Vertex x y r (-1) rgba
+        , Vertex (x + w) y r (-1) rgba
+        , Vertex (x + w) (y + h) r (-1) rgba
+        , Vertex x (y + h) r (-1) rgba
         ]
   base <- readIORef (daVertexCount da)
   writeVerts da base verts
