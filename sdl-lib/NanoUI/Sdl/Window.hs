@@ -23,6 +23,7 @@ import NanoUI.Sdl.Display
   , setRenderScale
   , windowToLogicalCoords
   )
+import NanoUI.Sdl.Clipboard (withSdlClipboard)
 import NanoUI.Sdl.Cursor (SdlCursors (..), destroyCursors, initCursors)
 import NanoUI.Sdl.Font
   ( SdlFont
@@ -157,7 +158,7 @@ withSdl ctx title (Size w h) act =
     bracket startup teardown $ \env -> do
       scale <- readIORef (sdlScaleRef env)
       font <- readIORef (sdlFontRef env)
-      let ctx' = withTtfMeasureScaled ctx font scale
+      let ctx' = withSdlClipboard (withTtfMeasureScaled ctx font scale)
       act ctx' env
 
 unlessM :: IO Bool -> IO () -> IO ()

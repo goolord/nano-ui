@@ -34,6 +34,10 @@ data Input = Input
   , inputMouseDown :: Bool
   , inputMousePressed :: Bool
   , inputMouseReleased :: Bool
+  , inputMouseRightDown :: Bool
+  , inputMouseRightPressed :: Bool
+  , inputMouseRightReleased :: Bool
+  , inputMouseClicks :: Int
   , inputScroll :: V2
   , inputKeys :: [Key]
   , inputChars :: [Char]
@@ -50,6 +54,10 @@ emptyInput =
     , inputMouseDown = False
     , inputMousePressed = False
     , inputMouseReleased = False
+    , inputMouseRightDown = False
+    , inputMouseRightPressed = False
+    , inputMouseRightReleased = False
+    , inputMouseClicks = 1
     , inputScroll = V2 0 0
     , inputKeys = []
     , inputChars = []
@@ -64,6 +72,10 @@ inputChanged a b =
     || inputMouseDown a /= inputMouseDown b
     || inputMousePressed a /= inputMousePressed b
     || inputMouseReleased a /= inputMouseReleased b
+    || inputMouseRightDown a /= inputMouseRightDown b
+    || inputMouseRightPressed a /= inputMouseRightPressed b
+    || inputMouseRightReleased a /= inputMouseRightReleased b
+    || inputMouseClicks a /= inputMouseClicks b
     || inputScroll a /= inputScroll b
     || inputKeys a /= inputKeys b
     || inputChars a /= inputChars b

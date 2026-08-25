@@ -52,7 +52,7 @@ import SDL3.Sys.Bindgen.Keycode
   , sDL_KMOD_CTRL
   , sDL_KMOD_SHIFT
   )
-import SDL3.Sys.Bindgen.Mouse (sDL_BUTTON_LEFT)
+import SDL3.Sys.Bindgen.Mouse (sDL_BUTTON_LEFT, sDL_BUTTON_RIGHT)
 import SDL3.Sys.Bindgen.Stdinc (Sint32 (..), Uint32 (..))
 import SDL3.Sys.Keyboard (getModStateSafe)
 
@@ -114,7 +114,10 @@ keyDown p = do
           then [EvKey k mods]
           else []
       Nothing
-        | modCtrl mods && code == sdlCtrlCKeycode -> [EvText "\ETX" mods]
+        | modCtrl mods && code == sdlCtrlAKeycode -> [EvText "a" mods]
+        | modCtrl mods && code == sdlCtrlCKeycode -> [EvText "c" mods]
+        | modCtrl mods && code == sdlCtrlVKeycode -> [EvText "v" mods]
+        | modCtrl mods && code == sdlCtrlXKeycode -> [EvText "x" mods]
         | otherwise -> []
 
 textInput :: Ptr SDL_Event -> IO [SdlEvent]
@@ -139,14 +142,18 @@ mouseMotion p = do
 mouseButton :: Ptr SDL_Event -> Bool -> IO [SdlEvent]
 mouseButton p down = do
   be <- peek p.button
-  if getField @"button" be /= fromIntegral sDL_BUTTON_LEFT
-    then pure []
-    else do
-      mods <- peekModifiers
-      let x = getField @"x" be :: CFloat
-          y = getField @"y" be :: CFloat
-          pos = mousePos (realToFrac x) (realToFrac y)
-      pure [if down then EvMousePress pos mods else EvMouseRelease pos mods]
+  mods <- peekModifiers
+  let x = getField @"x" be :: CFloat
+      y = getField @"y" be :: CFloat
+      pos = mousePos (realToFrac x) (realToFrac y)
+      btn = getField @"button" be
+      clicks = fromIntegral (getField @"clicks" be) :: Int
+  if btn == fromIntegral sDL_BUTTON_LEFT
+    then pure [if down then EvMousePress pos mods (max 1 clicks) else EvMouseRelease pos mods]
+    else
+      if btn == fromIntegral sDL_BUTTON_RIGHT
+        then pure [if down then EvMouseRightPress pos mods else EvMouseRightRelease pos mods]
+        else pure []
 
 mouseWheel :: Ptr SDL_Event -> IO [SdlEvent]
 mouseWheel p = do
@@ -180,8 +187,11 @@ keyModifiers ke = modFromKeymod (getField @"mod" ke)
 word32 :: Integral a => a -> Word32
 word32 = fromIntegral
 
-sdlCtrlCKeycode :: Word32
+sdlCtrlAKeycode, sdlCtrlCKeycode, sdlCtrlVKeycode, sdlCtrlXKeycode :: Word32
+sdlCtrlAKeycode = 97
 sdlCtrlCKeycode = 99
+sdlCtrlVKeycode = 118
+sdlCtrlXKeycode = 120
 
 mapSpecialKey :: Word32 -> Maybe Key
 mapSpecialKey k
@@ -212,6 +222,9 @@ clearEphemeral inp =
     , inputChars = []
     , inputMousePressed = False
     , inputMouseReleased = False
+    , inputMouseRightPressed = False
+    , inputMouseRightReleased = False
+    , inputMouseClicks = 1
     , inputScroll = V2 0 0
     }
 
@@ -226,12 +239,13 @@ applyEvent inp ev =
       inp {inputChars = inputChars inp ++ str, inputModifiers = mods}
     EvMouseMotion pos mods ->
       inp {inputMousePos = pos, inputModifiers = mods}
-    EvMousePress pos mods ->
+    EvMousePress pos mods clicks ->
       inp
         { inputMousePos = pos
         , inputModifiers = mods
         , inputMouseDown = True
         , inputMousePressed = True
+        , inputMouseClicks = max 1 clicks
         }
     EvMouseRelease pos mods ->
       inp
@@ -239,6 +253,20 @@ applyEvent inp ev =
         , inputModifiers = mods
         , inputMouseDown = False
         , inputMouseReleased = True
+        }
+    EvMouseRightPress pos mods ->
+      inp
+        { inputMousePos = pos
+        , inputModifiers = mods
+        , inputMouseRightDown = True
+        , inputMouseRightPressed = True
+        }
+    EvMouseRightRelease pos mods ->
+      inp
+        { inputMousePos = pos
+        , inputModifiers = mods
+        , inputMouseRightDown = False
+        , inputMouseRightReleased = True
         }
     EvScroll delta -> inp {inputScroll = delta}
 
@@ -255,12 +283,14 @@ splitFrame events =
 isButtonEdge :: SdlEvent -> Bool
 isButtonEdge ev =
   case ev of
-    EvMousePress _ _ -> True
+    EvMousePress {} -> True
     EvMouseRelease _ _ -> True
+    EvMouseRightPress _ _ -> True
+    EvMouseRightRelease _ _ -> True
     _ -> False
 
 isHardQuit :: SdlEvent -> Bool
 isHardQuit ev =
   case ev of
-    EvText str mods -> modCtrl mods && ('\ETX' `elem` str || 'c' `elem` str)
+    EvText str mods -> modCtrl mods && ('c' `elem` str || '\ETX' `elem` str)
     _ -> False

@@ -1,6 +1,6 @@
 module Main (main) where
 
-import Control.Monad (replicateM, when)
+import Control.Monad (forM_, replicateM, when)
 import Data.ByteString.Builder (toLazyByteString)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (isInfixOf, nub)
@@ -43,6 +43,12 @@ main = do
   run "pointer-cursor" runPointerCursorTest
   run "pointer-cursor-checkbox" runPointerCursorCheckboxTest
   run "text-input-cursor" runTextInputCursorTest
+  run "text-input-selection" runTextInputSelectionTest
+  run "text-input-ctrl-a" runTextInputCtrlATest
+  run "text-input-mouse-selection" runTextInputMouseSelectionTest
+  run "text-input-click-select" runTextInputClickSelectTest
+  run "text-input-clipboard" runTextInputClipboardTest
+  run "text-input-menu" runTextInputMenuTest
   run "select-dropdown-cursor" runSelectDropdownCursorTest
   run "slider-cursor" runSliderCursorTest
   run "scroll-thumb-cursor" runScrollThumbCursorTest
@@ -313,6 +319,221 @@ runTextInputCursorTest ctx failed = do
       _ <- runFrame ctx click ui
       clickKind <- uiCursorKind ctx click
       when (clickKind /= UiCursorText) $ bump failed
+    _ -> bump failed
+
+runTextInputSelectionTest :: Context -> IORef Int -> IO ()
+runTextInputSelectionTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 320 120}
+      ui =
+        column defaultLayout $ do
+          _ <- button "Other"
+          textInput "Name" "hello"
+  _ <- runFrame ctx inp0 ui
+  _ <- runFrame ctx inp0 ui
+  let tab1 = inp0 {inputKeys = [KeyTab]}
+  _ <- runFrame ctx tab1 ui
+  let tab2 = inp0 {inputKeys = [KeyTab]}
+  _ <- runFrame ctx tab2 ui
+  let shiftLeft1 =
+        inp0
+          { inputKeys = [KeyLeft]
+          , inputModifiers = Modifiers True False False
+          }
+  _ <- runFrame ctx shiftLeft1 ui
+  let shiftLeft2 = shiftLeft1 {inputKeys = [KeyLeft]}
+  _ <- runFrame ctx shiftLeft2 ui
+  let typed =
+        inp0
+          { inputChars = ['X']
+          , inputModifiers = Modifiers False False False
+          }
+  ((_, valReplace), _, _, _) <- runFrame ctx typed ui
+  when (valReplace /= "helX") $ bump failed
+  let selectAll =
+        inp0
+          { inputChars = ['a']
+          , inputModifiers = Modifiers False True False
+          }
+  _ <- runFrame ctx selectAll ui
+  let deleteSel = inp0 {inputKeys = [KeyBackspace]}
+  ((_, valClear), _, _, _) <- runFrame ctx deleteSel ui
+  when (valClear /= "") $ bump failed
+
+runTextInputCtrlATest :: Context -> IORef Int -> IO ()
+runTextInputCtrlATest ctx failed = do
+  term <- newTerminalContext
+  let inp0 = emptyInput {inputWindowSize = Size 320 120}
+      ui = column defaultLayout (textInput "Name" "hello")
+  forM_ [ctx, term] $ \c -> do
+    _ <- runFrame c inp0 ui
+    let tab = inp0 {inputKeys = [KeyTab]}
+    _ <- runFrame c tab ui
+    let selectAll =
+          inp0
+            { inputChars = ['\x01']
+            , inputModifiers = Modifiers False True False
+            }
+    _ <- runFrame c selectAll ui
+    let deleteSel = inp0 {inputKeys = [KeyBackspace]}
+    ((_, valClear), _, _, _) <- runFrame c deleteSel ui
+    when (valClear /= "") $ bump failed
+
+runTextInputMouseSelectionTest :: Context -> IORef Int -> IO ()
+runTextInputMouseSelectionTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 320 120}
+      ui = column defaultLayout (textInput "Name" "hello")
+  _ <- runFrame ctx inp0 ui
+  _ <- runFrame ctx inp0 ui
+  spans <- collectTextSpans ctx
+  case [r | (r, txt, _, _, _) <- spans, txt == "hello"] of
+    (Rect fx fy fw fh : _) -> do
+      let fieldY = fy + fh / 2
+          leftX = fx + 1
+          rightX = fx + fw - 1
+          focusPress =
+            inp0
+              { inputMousePos = V2 leftX fieldY
+              , inputMouseDown = True
+              , inputMousePressed = True
+              }
+      _ <- runFrame ctx focusPress ui
+      let dragMove =
+            inp0
+              { inputMousePos = V2 rightX fieldY
+              , inputMouseDown = True
+              }
+      _ <- runFrame ctx dragMove ui
+      let dragRelease =
+            dragMove
+              { inputMouseDown = False
+              , inputMouseReleased = True
+              }
+      _ <- runFrame ctx dragRelease ui
+      let typed = inp0 {inputChars = ['z']}
+      ((_, val), _, _, _) <- runFrame ctx typed ui
+      when (val /= "z") $ bump failed
+    _ -> bump failed
+
+runTextInputClickSelectTest :: Context -> IORef Int -> IO ()
+runTextInputClickSelectTest _ failed = do
+  wordCtx <- newContext
+  allCtx <- newContext
+  let inp0 = emptyInput {inputWindowSize = Size 320 120}
+      wordUi = column defaultLayout (textInput "Name" "hello world")
+      allUi = column defaultLayout (textInput "Name" "hello")
+  _ <- runFrame wordCtx inp0 wordUi
+  _ <- runFrame wordCtx inp0 wordUi
+  spans <- collectTextSpans wordCtx
+  case [r | (r, txt, _, _, _) <- spans, txt == "hello world"] of
+    (Rect fx fy _ fh : _) -> do
+      let click =
+            inp0
+              { inputMousePos = V2 (fx + 1) (fy + fh / 2)
+              , inputMouseDown = True
+              , inputMousePressed = True
+              , inputMouseClicks = 2
+              }
+      _ <- runFrame wordCtx click wordUi
+      let del = inp0 {inputKeys = [KeyBackspace]}
+      ((_, val), _, _, _) <- runFrame wordCtx del wordUi
+      when (val /= " world") $ bump failed
+    _ -> bump failed
+  _ <- runFrame allCtx inp0 allUi
+  _ <- runFrame allCtx inp0 allUi
+  spansAll <- collectTextSpans allCtx
+  case [r | (r, txt, _, _, _) <- spansAll, txt == "hello"] of
+    (Rect fx fy _ fh : _) -> do
+      let click =
+            inp0
+              { inputMousePos = V2 (fx + 1) (fy + fh / 2)
+              , inputMouseDown = True
+              , inputMousePressed = True
+              , inputMouseClicks = 3
+              }
+      _ <- runFrame allCtx click allUi
+      let del = inp0 {inputKeys = [KeyBackspace]}
+      ((_, val), _, _, _) <- runFrame allCtx del allUi
+      when (val /= "") $ bump failed
+    _ -> bump failed
+
+runTextInputClipboardTest :: Context -> IORef Int -> IO ()
+runTextInputClipboardTest ctx failed = do
+  clipRef <- newIORef (Nothing :: Maybe String)
+  let ctx' =
+        withClipboard
+          ctx
+          (readIORef clipRef)
+          (\s -> writeIORef clipRef (Just s) >> pure True)
+  let inp0 = emptyInput {inputWindowSize = Size 320 120}
+      ui = column defaultLayout (textInput "Name" "hello")
+  _ <- runFrame ctx' inp0 ui
+  _ <- runFrame ctx' inp0 ui
+  let tab = inp0 {inputKeys = [KeyTab]}
+  _ <- runFrame ctx' tab ui
+  let selectAll =
+        inp0
+          { inputChars = ['a']
+          , inputModifiers = Modifiers False True False
+          }
+  _ <- runFrame ctx' selectAll ui
+  let copy =
+        inp0
+          { inputChars = ['c']
+          , inputModifiers = Modifiers False True False
+          }
+  _ <- runFrame ctx' copy ui
+  clip <- readIORef clipRef
+  when (clip /= Just "hello") $ bump failed
+  _ <- runFrame ctx' selectAll ui
+  let clear = inp0 {inputKeys = [KeyBackspace]}
+  _ <- runFrame ctx' clear ui
+  let paste =
+        inp0
+          { inputChars = ['v']
+          , inputModifiers = Modifiers False True False
+          }
+  ((_, val), _, _, _) <- runFrame ctx' paste ui
+  when (val /= "hello") $ bump failed
+
+runTextInputMenuTest :: Context -> IORef Int -> IO ()
+runTextInputMenuTest ctx failed = do
+  clipRef <- newIORef (Just "pasted")
+  let ctx' =
+        withClipboard
+          ctx
+          (readIORef clipRef)
+          (\s -> writeIORef clipRef (Just s) >> pure True)
+  let inp0 = emptyInput {inputWindowSize = Size 320 160}
+      ui = column defaultLayout (textInput "Name" "hello")
+  _ <- runFrame ctx' inp0 ui
+  _ <- runFrame ctx' inp0 ui
+  let tab = inp0 {inputKeys = [KeyTab]}
+  _ <- runFrame ctx' tab ui
+  spans <- collectTextSpans ctx'
+  case [r | (r, txt, _, _, _) <- spans, txt == "hello"] of
+    (Rect fx fy _ fh : _) -> do
+      let fieldClick = V2 (fx + 1) (fy + fh / 2)
+          menuOpen =
+            inp0
+              { inputMousePos = fieldClick
+              , inputMouseRightDown = True
+              , inputMouseRightPressed = True
+              }
+      _ <- runFrame ctx' menuOpen ui
+      overlays <- collectOverlayTextSpans ctx' menuOpen
+      let pasteRows = [r | (r, txt, _, _, _) <- overlays, txt == "Paste"]
+      case pasteRows of
+        (Rect px py pw ph : _) -> do
+          let pick =
+                inp0
+                  { inputMousePos = V2 (px + pw / 2) (py + ph / 2)
+                  , inputMouseDown = True
+                  , inputMousePressed = True
+                  }
+          _ <- runFrame ctx' pick ui
+          ((_, val), _, _, _) <- runFrame ctx' inp0 ui
+          when (val /= "hellopasted") $ bump failed
+        _ -> bump failed
     _ -> bump failed
 
 runSelectDropdownCursorTest :: Context -> IORef Int -> IO ()

@@ -22,6 +22,7 @@ import NanoUI
   , isDirty
   , needsRedraw
   , runFrame
+  , textInputEditActive
   , themeWindow
   )
 import NanoUI.Sdl.Cursor (syncPointerCursor)
@@ -90,7 +91,8 @@ loop ctx ui env prev pendingRedraw wasAnimating shouldQuit inp queued lastT = do
               else waitEventTimeout idleTimeout
       else pure queued
   let (group, rest) = splitFrame pending
-  if any isHardQuit group || any (== EvQuit) group
+  editActive <- textInputEditActive ctx
+  if any (== EvQuit) group || (any isHardQuit group && not editActive)
     then pure ()
     else do
       now <- getMonotonicTime
@@ -101,7 +103,8 @@ loop ctx ui env prev pendingRedraw wasAnimating shouldQuit inp queued lastT = do
               (clearEphemeral inp {inputDeltaTime = dt})
               group
       (ctx', inpSynced) <- syncDisplay ctx env inp'
-      if shouldQuit inpSynced || isHardQuitInput inpSynced
+      editActive' <- textInputEditActive ctx'
+      if shouldQuit inpSynced || (isHardQuitInput inpSynced && not editActive')
         then pure ()
         else do
           prevInp <- readIORef prev

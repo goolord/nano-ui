@@ -37,7 +37,11 @@ module NanoUI.Context
   , pushTooltip
   , readTooltips
   , PendingTooltip (..)
-  ) where
+  , TextInputMenu (..)
+  , TextInputDrag (..)
+  , withClipboard
+  , textInputEditActive
+) where
 
 import Data.Bits (shiftR, shiftL, (.&.), (.|.))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
@@ -68,6 +72,7 @@ data WidgetStore = WidgetStore
   , storeSlider :: IntMap Float
   , storeText :: IntMap String
   , storeCursor :: IntMap Int
+  , storeSelAnchor :: IntMap Int
   , storeScroll :: IntMap Float
   , storeSelect :: IntMap Int
   , storeSelectOpen :: IntMap Bool
@@ -82,6 +87,7 @@ emptyWidgetStore =
     , storeSlider = IM.empty
     , storeText = IM.empty
     , storeCursor = IM.empty
+    , storeSelAnchor = IM.empty
     , storeScroll = IM.empty
     , storeSelect = IM.empty
     , storeSelectOpen = IM.empty
@@ -91,6 +97,19 @@ emptyWidgetStore =
 data PendingTooltip = PendingTooltip
   { pendingTooltipRect :: Rect
   , pendingTooltipText :: Text
+  }
+  deriving (Eq, Show)
+
+data TextInputMenu = TextInputMenu
+  { textInputMenuWidget :: WidgetId
+  , textInputMenuRect :: Rect
+  }
+  deriving (Eq, Show)
+
+data TextInputDrag = TextInputDrag
+  { textInputDragWidget :: WidgetId
+  , textInputDragAnchor :: Int
+  , textInputDragClicks :: Int
   }
   deriving (Eq, Show)
 
@@ -115,6 +134,10 @@ data Context = Context
   , ctxMessages :: IORef [FrameMsg]
   , ctxFocusables :: IORef [WidgetId]
   , ctxScrollDrag :: IORef (Maybe (WidgetId, Float))
+  , ctxTextInputDrag :: IORef (Maybe TextInputDrag)
+  , ctxTextInputMenu :: IORef (Maybe TextInputMenu)
+  , ctxClipboardGet :: IO (Maybe String)
+  , ctxClipboardSet :: String -> IO Bool
   , ctxTooltips :: IORef [PendingTooltip]
   , ctxWidgetNodeTypes :: IORef (Maybe (IntMap NodeType))
   , ctxSelectDropPress :: IORef Bool
@@ -139,6 +162,8 @@ newContext = do
   ctxMessages <- newIORef []
   ctxFocusables <- newIORef []
   ctxScrollDrag <- newIORef Nothing
+  ctxTextInputDrag <- newIORef Nothing
+  ctxTextInputMenu <- newIORef Nothing
   ctxTooltips <- newIORef []
   ctxWidgetNodeTypes <- newIORef Nothing
   ctxSelectDropPress <- newIORef False
@@ -165,6 +190,10 @@ newContext = do
       , ctxMessages
       , ctxFocusables
       , ctxScrollDrag
+      , ctxTextInputDrag
+      , ctxTextInputMenu
+      , ctxClipboardGet = pure Nothing
+      , ctxClipboardSet = \_ -> pure False
       , ctxTooltips
       , ctxWidgetNodeTypes
       , ctxSelectDropPress
@@ -213,6 +242,16 @@ isDirty ctx = readIORef (ctxDirty ctx)
 {-# INLINE getFocusId #-}
 getFocusId :: Context -> IO WidgetId
 getFocusId ctx = readIORef (ctxFocusId ctx)
+
+withClipboard :: Context -> IO (Maybe String) -> (String -> IO Bool) -> Context
+withClipboard ctx get set =
+  ctx {ctxClipboardGet = get, ctxClipboardSet = set}
+
+textInputEditActive :: Context -> IO Bool
+textInputEditActive ctx = do
+  focus <- getFocusId ctx
+  menu <- readIORef (ctxTextInputMenu ctx)
+  pure (hashWidgetId focus /= 0 || menu /= Nothing)
 
 {-# INLINE getHotId #-}
 getHotId :: Context -> IO WidgetId
