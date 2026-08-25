@@ -26,7 +26,6 @@ import NanoUI
   ( Input (..)
   , Key (..)
   , Modifiers (..)
-  , Size (..)
   , V2 (..)
   )
 import NanoUI.Sdl.Event (SdlEvent (..))
@@ -90,8 +89,10 @@ decodeEvent p = do
   Uint32 w <- peek p.type'
   case w of
     256 -> pure [EvQuit]
-    518 -> windowResize p
-    519 -> windowResize p
+    518 -> windowResized p
+    -- Pixel size changes are ignored here; syncDisplay re-queries logical size.
+    519 -> pure [EvDisplayScale]
+    532 -> pure [EvDisplayScale]
     768 -> keyDown p
     771 -> textInput p
     1024 -> mouseMotion p
@@ -154,8 +155,8 @@ mouseWheel p = do
       y = getField @"y" we :: CFloat
   pure [EvScroll (V2 (realToFrac x) (negate (realToFrac y)))]
 
-windowResize :: Ptr SDL_Event -> IO [SdlEvent]
-windowResize p = do
+windowResized :: Ptr SDL_Event -> IO [SdlEvent]
+windowResized p = do
   we <- peek p.window
   let Sint32 w = getField @"data1" we
       Sint32 h = getField @"data2" we
@@ -218,7 +219,8 @@ applyEvent :: Input -> SdlEvent -> Input
 applyEvent inp ev =
   case ev of
     EvQuit -> inp
-    EvResize w h -> inp {inputWindowSize = Size (fromIntegral w) (fromIntegral h)}
+    EvDisplayScale -> inp
+    EvResize _ _ -> inp
     EvKey k mods -> inp {inputKeys = inputKeys inp ++ [k], inputModifiers = mods}
     EvText str mods ->
       inp {inputChars = inputChars inp ++ str, inputModifiers = mods}

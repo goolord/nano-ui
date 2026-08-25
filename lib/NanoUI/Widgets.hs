@@ -12,7 +12,12 @@ module NanoUI.Widgets
   , spacer
   , tooltip
   , sliderText
+  , sliderDisplayText
+  , sliderLabelText
+  , sliderValueText
+  , checkboxLabelText
   , textInputText
+  , textInputDisplayText
   ) where
 
 import Control.Monad (when)
@@ -22,6 +27,15 @@ import Data.Text (Text)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Text as T
 import GHC.Stack (HasCallStack)
+import NanoUI.Font (isTerminalFont)
+import NanoUI.WidgetText
+  ( checkboxLabelText
+  , sliderDisplayText
+  , sliderLabelText
+  , sliderPackRange
+  , sliderValueText
+  , textInputDisplayText
+  )
 import NanoUI.Context
   ( Context (..)
   , WidgetStore (..)
@@ -130,14 +144,18 @@ checkbox txt initial = do
   store <- liftIO (getStore ctx)
   let key = intKey wid
       current = IM.findWithDefault initial key (storeCheckbox store)
-      mark = if current then "[x] " else "[ ] "
-  resp <- addWidgetResp wid NodeCheckbox (mark <> txt) (if current then 1 else 0) defaultLayout Nothing
+      fm = ctxFontMetrics ctx
+      nodeText =
+        if isTerminalFont fm
+          then (if current then "[x] " else "[ ] ") <> txt
+          else txt
+  resp <- addWidgetResp wid NodeCheckbox nodeText (if current then 1 else 0) defaultLayout Nothing
   let display = if respClicked resp then not current else current
   pure (resp, display)
 
 {-# INLINE slider #-}
-slider :: HasCallStack => Text -> Float -> Float -> Float -> UI (Response, Float)
-slider lbl minV maxV initial = do
+slider :: HasCallStack => Layout -> Text -> Float -> Float -> Float -> UI (Response, Float)
+slider layout lbl minV maxV initial = do
   wid <- currentId
   ctx <- askContext
   inp <- askInput
@@ -145,7 +163,12 @@ slider lbl minV maxV initial = do
   let key = intKey wid
       current = IM.findWithDefault initial key (storeSlider store)
       frac = if maxV > minV then (current - minV) / (maxV - minV) else 0
-  resp <- addWidget wid NodeSlider (sliderText lbl frac current) frac defaultLayout
+      fm = ctxFontMetrics ctx
+      nodeText =
+        if isTerminalFont fm
+          then sliderText lbl frac current
+          else sliderPackRange lbl minV maxV
+  resp <- addWidget wid NodeSlider nodeText frac layout
   active <- liftIO (readIORef (ctxActiveId ctx))
   let isActive = active == wid
       hovered = respHovered resp

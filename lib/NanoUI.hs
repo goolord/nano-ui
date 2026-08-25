@@ -24,6 +24,7 @@ module NanoUI
   , Theme (..)
   , defaultTheme
   , terminalTheme
+  , sdlTheme
   , -- ID
     WidgetId (..)
   , widgetId
@@ -56,7 +57,10 @@ module NanoUI
   , ctxFontMetrics
   , newContext
   , withFontMetrics
+  , withMeasureText
+  , withExternalText
   , newTerminalContext
+  , newSdlContext
   , markDirty
   , isDirty
   , getHotId
@@ -81,7 +85,7 @@ module NanoUI
   , renderASCIIFromRects
   ) where
 
-import NanoUI.Context (Context (..), FrameMsg (..), anyAnimating, ctxTheme, getHotId, isDirty, markDirty, newContext, newTerminalContext, startAnimation, withFontMetrics)
+import NanoUI.Context (Context (..), FrameMsg (..), anyAnimating, ctxTheme, getHotId, isDirty, markDirty, newContext, newSdlContext, newTerminalContext, startAnimation, withExternalText, withFontMetrics, withMeasureText)
 import NanoUI.Draw (DrawCmd (..), DrawData (..), Layer (..), indexSize, vertexSize)
 import NanoUI.Font (FontMetrics (..), isTerminalFont, labelContentInset, monospaceMetrics, widgetContentInset, widgetPadding)
 import NanoUI.Frame (collectTextSpans, needsRedraw, runFrame)
@@ -107,6 +111,7 @@ import NanoUI.Style
   , defaultLayout
   , defaultTheme
   , terminalTheme
+  , sdlTheme
   )
 import NanoUI.Types (Color (..), Rect (..), Size (..), V2 (..), colorRGBA, colorToWord32)
 import NanoUI.Widgets

@@ -7,6 +7,8 @@ module NanoUI.Font
   , labelContentInset
   , widgetContentInset
   , widgetPadding
+  , checkboxBoxSize
+  , checkboxLeading
   , isTerminalFont
   ) where
 
@@ -62,6 +64,17 @@ widgetPadding :: FontMetrics -> (Float, Float)
 widgetPadding fm =
   let (cx, cy) = widgetContentInset fm
    in (2 * cx, 2 * cy)
+
+{-# INLINE checkboxBoxSize #-}
+checkboxBoxSize :: FontMetrics -> Float
+checkboxBoxSize fm =
+  min 16 (max 12 (fmLineHeight fm * 0.85))
+
+{-# INLINE checkboxLeading #-}
+checkboxLeading :: FontMetrics -> Float
+checkboxLeading fm
+  | isTerminalFont fm = 0
+  | otherwise = checkboxBoxSize fm + 4
 
 {-# INLINE isTerminalFont #-}
 isTerminalFont :: FontMetrics -> Bool

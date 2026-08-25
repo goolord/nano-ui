@@ -46,6 +46,7 @@
             shellFor = {
               extraPackages = _hpkgs: with pkgs; [
                 SDL3
+                SDL3_ttf
               ];
             };
           };

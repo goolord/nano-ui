@@ -4,8 +4,9 @@ module NanoUI.Layout.Solve
 
 import Control.Monad (forM, forM_)
 import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.Text (Text)
 import qualified Data.Text as T
-import NanoUI.Font (FontMetrics (..), measureText, widgetPadding)
+import NanoUI.Font (FontMetrics (..), checkboxLeading, fmLineHeight, widgetPadding)
 import NanoUI.Layout.Arena
   ( DirTag (..)
   , NodeArena
@@ -29,33 +30,38 @@ import NanoUI.Layout.Arena
   , setRect
   )
 import NanoUI.Style (AlignX (..), AlignY (..), Padding (..))
-
-solveLayout :: NodeArena -> FontMetrics -> Float -> Float -> IO ()
-solveLayout na fm rootW rootH = do
+import NanoUI.WidgetText
+  ( checkboxLabelText
+  , sliderLabelText
+  , sliderParseRange
+  , sliderValueText
+  )
+solveLayout :: NodeArena -> FontMetrics -> (Text -> IO (Float, Float)) -> Float -> Float -> IO ()
+solveLayout na fm measure rootW rootH = do
   count <- arenaCount na
   whenPositive count $ do
     forM_ (reverse [0 .. count - 1]) $ \idx ->
-      measureNode na fm idx
+      measureNode na fm measure idx
     positionNode na 0 0 0 rootW rootH
 
 whenPositive :: Int -> IO () -> IO ()
 whenPositive n act = if n > 0 then act else pure ()
 
-measureNode :: NodeArena -> FontMetrics -> NodeIdx -> IO ()
-measureNode na fm idx = do
+measureNode :: NodeArena -> FontMetrics -> (Text -> IO (Float, Float)) -> NodeIdx -> IO ()
+measureNode na fm measure idx = do
   nt <- getNodeType na idx
   case nt of
-    NodeText -> measureTextNode na fm idx
+    NodeText -> measureTextNode na fm measure idx
     NodeSpacer -> measureSpacer na idx
     NodeSeparator -> measureSeparator na idx
-    NodeContainer -> measureContainer na fm idx
-    _ -> measureWidget na fm idx
+    NodeContainer -> measureContainer na idx
+    _ -> measureWidget na fm measure idx
 
-measureTextNode :: NodeArena -> FontMetrics -> NodeIdx -> IO ()
-measureTextNode na fm idx = do
+measureTextNode :: NodeArena -> FontMetrics -> (Text -> IO (Float, Float)) -> NodeIdx -> IO ()
+measureTextNode na fm measure idx = do
   txt <- getText na idx
   (minW, minH, maxW, maxH) <- getMinMax na idx
-  let (tw, th) = measureText fm txt
+  (tw, th) <- measure txt
   setRect na idx 0 0 (clamp tw minW maxW) (clamp (max (fmLineHeight fm) th) minH maxH)
 
 measureSpacer :: NodeArena -> NodeIdx -> IO ()
@@ -73,19 +79,43 @@ measureSeparator na idx = do
     DirRow -> setRect na idx 0 0 1 20
     DirColumn -> setRect na idx 0 0 20 1
 
-measureWidget :: NodeArena -> FontMetrics -> NodeIdx -> IO ()
-measureWidget na fm idx = do
+measureWidget :: NodeArena -> FontMetrics -> (Text -> IO (Float, Float)) -> NodeIdx -> IO ()
+measureWidget na fm measure idx = do
+  nt <- getNodeType na idx
   txt <- getText na idx
-  (tw, th) <-
-    if T.null txt
-      then pure (40, fmLineHeight fm)
-      else pure (measureText fm txt)
   (minW, minH, maxW, maxH) <- getMinMax na idx
   let (padX, padY) = widgetPadding fm
-  setRect na idx 0 0 (clamp (tw + padX) minW maxW) (clamp (th + padY) minH maxH)
+  (tw, th, extraW, extraH) <-
+    case nt of
+      NodeSlider -> do
+        let lbl =
+              if T.null txt
+                then " "
+                else sliderLabelText txt
+            (_, minV, maxV) = sliderParseRange txt
+        (lw, lh) <- measure lbl
+        (vwMin, _) <- measure (sliderValueText minV)
+        (vwMax, _) <- measure (sliderValueText maxV)
+        let vw = max vwMin vwMax
+        pure (max lw vw, lh, 0, fmLineHeight fm * 0.35)
+      NodeCheckbox -> do
+        let body =
+              if T.null txt
+                then " "
+                else checkboxLabelText txt
+        (mw, mh) <- measure body
+        pure (mw, mh, checkboxLeading fm, 0)
+      _ -> do
+        let body =
+              if T.null txt
+                then " "
+                else txt
+        (mw, mh) <- measure body
+        pure (mw, mh, 0, 0)
+  setRect na idx 0 0 (clamp (tw + padX + extraW) minW maxW) (clamp (th + padY + extraH) minH maxH)
 
-measureContainer :: NodeArena -> FontMetrics -> NodeIdx -> IO ()
-measureContainer na _ idx = do
+measureContainer :: NodeArena -> NodeIdx -> IO ()
+measureContainer na idx = do
   pad <- getPadding na idx
   gap <- getGap na idx
   dir <- getDirection na idx

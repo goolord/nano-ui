@@ -5,6 +5,7 @@ import NanoUI (Key, Modifiers, V2 (..))
 data SdlEvent
   = EvQuit
   | EvResize Int Int
+  | EvDisplayScale
   | EvKey Key Modifiers
   | EvText String Modifiers
   | EvMouseMotion V2 Modifiers

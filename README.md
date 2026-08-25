@@ -23,7 +23,7 @@ cabal run nano-ui-demo
 Linux and macOS only (Nix does not replace the Windows MSYS2/Zig workflow).
 
 ```bash
-nix develop          # GHC 9.14, cabal, HLS, SDL3, pkg-config; sdl flag on
+nix develop          # GHC 9.14, cabal, HLS, SDL3, SDL3_ttf, pkg-config; sdl flag on
 nix build            # build all wired packages
 nix run .#nano-ui-sdl-demo
 nix run .#nano-ui-tui
@@ -79,15 +79,22 @@ movement only rewrites what changed.
 
 ### SDL3 backend
 
-Requires SDL3 development libraries and `pkg-config`. On Windows, MSYS2 UCRT64
-(`pacman -S mingw-w64-ucrt-x86_64-sdl3 mingw-w64-ucrt-x86_64-pkg-config`) is the usual path.
+Requires SDL3, SDL3_ttf, and `pkg-config`. On Windows, MSYS2 UCRT64 is the usual path:
+
+```bash
+pacman -S mingw-w64-ucrt-x86_64-sdl3 mingw-w64-ucrt-x86_64-sdl3-ttf mingw-w64-ucrt-x86_64-pkg-config
+```
+
+Text uses a system TrueType font (Segoe UI on Windows). Override with `NANO_UI_FONT=/path/to/font.ttf`.
 
 ```bash
 cabal build -fsdl
 cabal run -fsdl nano-ui-sdl-demo
 ```
 
-Uses `nano-ui-sdl` (`runSdlApp`, `newContext`) with the default pixel font metrics.
+Uses `nano-ui-sdl` (`runSdlApp`, `newSdlContext`) with SDL_ttf text rendering.
+Window DPI is read via `SDL_GetWindowDisplayScale`; only the renderer scale
+tracks display DPI so layout stays in logical coordinates at the base font size.
 The backend renders pinned `DrawData` quads through SDL3's 2D renderer, sorts
 draw commands by layer (background → content → overlay), and skips `runFrame`
 when idle (250ms wake checks `markDirty` / animation state).
@@ -117,7 +124,7 @@ UI monad → node arena → layout solver → shape lowering → DrawData
 |--------|------|
 | `NanoUI` | Public API re-export |
 | `NanoUI.Monad` | `UI` monad, `emit`, `withKey`, `currentId` |
-| `NanoUI.Widgets` | `button`, `checkbox`, `slider`, `textInput`, containers |
+| `NanoUI.Widgets` | `button`, `checkbox`, `slider layout lbl min max initial`, `textInput`, containers |
 | `NanoUI.Frame` | `runFrame`, `needsRedraw` |
 | `NanoUI.Draw` | Pinned vertex arena, draw command batching |
 | `NanoUI.Layout.Solve` | Two-pass flexbox constraint solver |

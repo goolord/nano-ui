@@ -25,3 +25,6 @@ scratch/
 result
 result-*
 .direnv
+SDL3.dll
+SDL3_ttf.dll
+libiconv-2.dll

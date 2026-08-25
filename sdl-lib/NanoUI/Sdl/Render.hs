@@ -7,25 +7,18 @@ import Data.Bits (shiftR, (.&.))
 import Data.List (sortBy)
 import Data.Ord (comparing)
 import Data.Word (Word32, Word8)
-import Foreign.C.Types (CFloat, CInt)
+import Foreign.C.Types (CInt)
 import Foreign.ForeignPtr (ForeignPtr, withForeignPtr)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (Storable (..), peekByteOff, poke)
-import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
-import NanoUI
-  ( Color (..)
-  , DrawCmd (..)
-  , DrawData (..)
-  , Layer (..)
-  , indexSize
-  , vertexSize
-  )
-import SDL3.Sys.Bindgen.Rect (SDL_FRect (..), SDL_Rect (..))
+import NanoUI (Color (..), DrawCmd (..), DrawData (..), Layer (..), indexSize, vertexSize)
+import NanoUI.Sdl.Shape (fillRoundedRect, fillSolidRect)
+import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
+import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Render
   ( renderClearSafe
-  , renderFillRectSafe
   , setRenderClipRectSafe
   , setRenderDrawColorSafe
   )
@@ -80,7 +73,7 @@ fillQuad ren dd i = do
   v2 <- vertexAt dd (i + 2)
   v3 <- vertexAt dd (i + 5)
   case (v0, v1, v2, v3) of
-    (Just (x0, y0, rgba), Just (x1, y1, _), Just (x2, y2, _), Just (x3, y3, _)) -> do
+    (Just (x0, y0, u0, v0c, rgba), Just (x1, y1, _, _, _), Just (x2, y2, _, _, _), Just (x3, y3, _, _, _)) -> do
       let xs = [x0, x1, x2, x3]
           ys = [y0, y1, y2, y3]
           xmin = minimum xs
@@ -91,26 +84,15 @@ fillQuad ren dd i = do
           h = ymax - ymin
       when (w > 0 && h > 0) $ do
         let (r, g, b, a) = unpackColor (Color rgba)
-        void $ setRenderDrawColorSafe ren r g b a
-        alloca $ \(rect :: Ptr SDL_FRect) -> do
-          poke
-            rect
-            SDL_FRect
-              { x = cf xmin
-              , y = cf ymin
-              , w = cf w
-              , h = cf h
-              }
-          void $ renderFillRectSafe ren (PtrConst.unsafeFromPtr rect)
+        if v0c < 0
+          then fillRoundedRect ren r g b a xmin ymin w h u0
+          else fillSolidRect ren r g b a xmin ymin w h
     _ -> pure ()
-
-cf :: Float -> CFloat
-cf = realToFrac
 
 ci :: Int -> CInt
 ci = fromIntegral
 
-vertexAt :: DrawData -> Int -> IO (Maybe (Float, Float, Word32))
+vertexAt :: DrawData -> Int -> IO (Maybe (Float, Float, Float, Float, Word32))
 vertexAt dd slot = do
   mVi <- readIndexAt dd slot
   case mVi of
@@ -120,8 +102,10 @@ vertexAt dd slot = do
       | otherwise -> do
           x <- peekFloatAt (drawVertices dd) (vi * vertexSize)
           y <- peekFloatAt (drawVertices dd) (vi * vertexSize + 4)
+          u <- peekFloatAt (drawVertices dd) (vi * vertexSize + 8)
+          v <- peekFloatAt (drawVertices dd) (vi * vertexSize + 12)
           rgba <- peekWord32At (drawVertices dd) (vi * vertexSize + 16)
-          pure (Just (x, y, rgba))
+          pure (Just (x, y, u, v, rgba))
 
 readIndexAt :: DrawData -> Int -> IO (Maybe Int)
 readIndexAt dd i

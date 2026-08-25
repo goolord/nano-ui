@@ -12,21 +12,18 @@ import GHC.Clock (getMonotonicTime)
 import NanoUI
   ( Context (..)
   , Input (..)
-  , Style (..)
-  , Theme (..)
   , UI
-  , FontMetrics (..)
   , anyAnimating
   , collectTextSpans
-  , ctxFontMetrics
   , ctxTheme
   , emptyInput
   , isDirty
   , needsRedraw
   , runFrame
+  , themeWindow
   )
-import NanoUI.Sdl.Text (renderTextSpans)
 import NanoUI.Sdl.Event (SdlEvent (..))
+import NanoUI.Sdl.Font (renderTextSpans)
 import NanoUI.Sdl.Input
   ( applyEvent
   , clearEphemeral
@@ -37,15 +34,13 @@ import NanoUI.Sdl.Input
   , waitEventTimeout
   )
 import NanoUI.Sdl.Render (renderDrawData)
-import NanoUI.Sdl.Window (SdlEnv (..), defaultWindowSize, withSdl)
+import NanoUI.Sdl.Window (SdlEnv (..), defaultWindowSize, syncDisplay, withSdl)
 import SDL3.Sys.Bindgen.Blendmode (sDL_BLENDMODE_BLEND)
 import SDL3.Sys.Render (renderPresentSafe, setRenderDrawBlendModeSafe)
 
 animateTimeout :: Int
 animateTimeout = 16
 
--- | Periodic wake while idle so external 'markDirty' is not stuck behind an
--- indefinite 'waitEvent'.
 idleTimeout :: Int
 idleTimeout = 250
 
@@ -54,16 +49,17 @@ runSdlApp ctx ui = runSdlAppWithQuit ctx (const False) ui
 
 runSdlAppWithQuit :: Context -> (Input -> Bool) -> UI () -> IO ()
 runSdlAppWithQuit ctx shouldQuit ui =
-  withSdl "nano-ui" defaultWindowSize $ \env -> do
+  withSdl ctx "nano-ui" defaultWindowSize $ \ctx' env -> do
     void $ setRenderDrawBlendModeSafe (sdlRenderer env) (fromIntegral sDL_BLENDMODE_BLEND)
     now <- getMonotonicTime
-    let inp0 = emptyInput {inputWindowSize = sdlSize env}
-    prev <- newIORef emptyInput
+    (_, inp0) <- syncDisplay ctx' env emptyInput
+    prev <- newIORef inp0
     pendingRedraw <- newIORef False
     wasAnimating <- newIORef False
-    draw ctx ui env inp0 >>= writeIORef pendingRedraw
-    writeIORef prev inp0
-    loop ctx ui env prev pendingRedraw wasAnimating shouldQuit inp0 [] now
+    (_, synced0) <- draw ctx' ui env inp0
+    writeIORef pendingRedraw False
+    writeIORef prev synced0
+    loop ctx' ui env prev pendingRedraw wasAnimating shouldQuit synced0 [] now
 
 loop ::
   Context ->
@@ -101,35 +97,36 @@ loop ctx ui env prev pendingRedraw wasAnimating shouldQuit inp queued lastT = do
               applyEvent
               (clearEphemeral inp {inputDeltaTime = dt})
               group
-      if shouldQuit inp' || isHardQuitInput inp'
+      (_, inpSynced) <- syncDisplay ctx env inp'
+      if shouldQuit inpSynced || isHardQuitInput inpSynced
         then pure ()
         else do
           prevInp <- readIORef prev
           pendingDirty <- readIORef pendingRedraw
           wasAnim <- readIORef wasAnimating
-          need <- needsRedraw ctx prevInp inp'
+          need <- needsRedraw ctx prevInp inpSynced
           dirtyNow <- isDirty ctx
           anim <- anyAnimating ctx
           let forceFinal = wasAnim && not anim
           writeIORef wasAnimating anim
           if need || anim || forceFinal || pendingDirty || dirtyNow || not (null group)
             then do
-              moreDirty <- draw ctx ui env inp'
-              writeIORef pendingRedraw moreDirty
-              writeIORef prev inp'
-              loop ctx ui env prev pendingRedraw wasAnimating shouldQuit inp' rest now
+              (_, synced) <- draw ctx ui env inpSynced
+              writeIORef pendingRedraw False
+              writeIORef prev synced
+              loop ctx ui env prev pendingRedraw wasAnimating shouldQuit synced rest now
             else
               if null rest
-                then loop ctx ui env prev pendingRedraw wasAnimating shouldQuit inp' [] now
-                else loop ctx ui env prev pendingRedraw wasAnimating shouldQuit inp' rest now
+                then loop ctx ui env prev pendingRedraw wasAnimating shouldQuit inpSynced [] now
+                else loop ctx ui env prev pendingRedraw wasAnimating shouldQuit inpSynced rest now
 
-draw :: Context -> UI () -> SdlEnv -> Input -> IO Bool
+draw :: Context -> UI () -> SdlEnv -> Input -> IO (Bool, Input)
 draw ctx ui env inp = do
   (_, _, drawData, dirtyAfterUi) <- runFrame ctx inp ui
   spans <- collectTextSpans ctx
-  let clear = styleBg (themePanel (ctxTheme ctx))
-      lineHeight = fmLineHeight (ctxFontMetrics ctx)
+  font <- readIORef (sdlFontRef env)
+  let clear = themeWindow (ctxTheme ctx)
   renderDrawData (sdlRenderer env) clear drawData
-  renderTextSpans (sdlRenderer env) lineHeight spans
+  renderTextSpans (sdlRenderer env) font (sdlTextCache env) spans
   void $ renderPresentSafe (sdlRenderer env)
-  pure dirtyAfterUi
+  pure (dirtyAfterUi, inp)
