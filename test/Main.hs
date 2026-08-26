@@ -48,6 +48,7 @@ main = do
   run "text-input-mouse-selection" runTextInputMouseSelectionTest
   run "text-input-click-select" runTextInputClickSelectTest
   run "modal-overlay" runModalOverlayTest
+  run "image" runImageTest
   run "text-input-clipboard" runTextInputClipboardTest
   run "text-input-menu" runTextInputMenuTest
   run "select-dropdown-cursor" runSelectDropdownCursorTest
@@ -543,6 +544,34 @@ runModalOverlayTest ctx failed = do
   ((dlgTall, _), _, _, _) <- runFrame ctx inp0 tallUi
   let Rect _ _ _ mh = respRect dlgTall
   when (mh > 200) $ bump failed
+
+runImageTest :: Context -> IORef Int -> IO ()
+runImageTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 320 200}
+      ui =
+        image
+          ( defaultLayout
+              { layoutWidth = Fixed 40
+              , layoutHeight = Fixed 24
+              }
+          )
+          (ImageId 7)
+  _ <- runFrame ctx inp0 ui
+  (resp, _, drawData, _) <- runFrame ctx inp0 ui
+  let Rect _ _ w h = respRect resp
+  when (abs (w - 40) > 0.5 || abs (h - 24) > 0.5) $ bump failed
+  when (not (any (\c -> cmdTextureId c == 7) (drawCommands drawData))) $ bump failed
+  let missing =
+        image
+          ( defaultLayout
+              { layoutWidth = Fixed 40
+              , layoutHeight = Fixed 24
+              }
+          )
+          (ImageId 0)
+  _ <- runFrame ctx inp0 missing
+  (_, _, missingData, _) <- runFrame ctx inp0 missing
+  when (any (\c -> cmdTextureId c > 0) (drawCommands missingData)) $ bump failed
 
 runTextInputClipboardTest :: Context -> IORef Int -> IO ()
 runTextInputClipboardTest ctx failed = do

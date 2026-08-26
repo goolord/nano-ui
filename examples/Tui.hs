@@ -93,6 +93,10 @@ main = do
                           <> click
                       )
                   )
+              _ <-
+                image
+                  (compact {layoutWidth = Fixed 8, layoutHeight = Fixed 2})
+                  (ImageId 1)
               _ <- label "click widgets, type in Name, Esc quits"
               pure ()
           )

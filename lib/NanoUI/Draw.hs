@@ -11,6 +11,7 @@ module NanoUI.Draw
   , beginLayer
   , setClip
   , pushRect
+  , pushImage
   , pushRoundedRect
   , pushText
   , pushLine
@@ -20,7 +21,7 @@ module NanoUI.Draw
   , withClip
   ) where
 
-import Control.Monad (forM_)
+import Control.Monad (forM_, when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Word (Word8, Word32)
 import Foreign.ForeignPtr (ForeignPtr, mallocForeignPtrBytes, withForeignPtr)
@@ -233,15 +234,23 @@ withClip da rect act = do
   setClip da (Rect cx cy cw ch)
   pure r
 
-{-# INLINE pushRect #-}
-pushRect :: DrawArena -> Rect -> Color -> IO ()
-pushRect da (Rect x y w h) col = do
+{-# INLINE setTexture #-}
+setTexture :: DrawArena -> Int -> IO ()
+setTexture da tex = do
+  cur <- readIORef (daCurrentTexture da)
+  when (cur /= tex) $ do
+    flushCmd da
+    writeIORef (daCurrentTexture da) tex
+
+{-# INLINE pushQuad #-}
+pushQuad :: DrawArena -> Rect -> Float -> Float -> Float -> Float -> Color -> IO ()
+pushQuad da (Rect x y w h) u0 v0 u1 v1 col = do
   let rgba = colorToWord32 col
       verts =
-        [ Vertex x y 0 0 rgba
-        , Vertex (x + w) y 1 0 rgba
-        , Vertex (x + w) (y + h) 1 1 rgba
-        , Vertex x (y + h) 0 1 rgba
+        [ Vertex x y u0 v0 rgba
+        , Vertex (x + w) y u1 v0 rgba
+        , Vertex (x + w) (y + h) u1 v1 rgba
+        , Vertex x (y + h) u0 v1 rgba
         ]
   ensureVerts da 4
   ensureIndices da 6
@@ -252,10 +261,25 @@ pushRect da (Rect x y w h) col = do
   writeIndices da baseIdx [base, base + 1, base + 2, base, base + 2, base + 3]
   writeIORef (daIndexCount da) (baseIdx + 6)
 
+{-# INLINE pushRect #-}
+pushRect :: DrawArena -> Rect -> Color -> IO ()
+pushRect da rect col = do
+  setTexture da 0
+  pushQuad da rect 0 0 1 1 col
+
+{-# INLINE pushImage #-}
+pushImage :: DrawArena -> Rect -> Int -> Color -> IO ()
+pushImage da rect tex col
+  | tex <= 0 = pushRect da rect col
+  | otherwise = do
+      setTexture da tex
+      pushQuad da rect 0 0 1 1 col
+
 -- Rounded fills encode radius in vtxU and use vtxV = -1 (plain rects use v in [0, 1]).
 {-# INLINE pushRoundedRect #-}
 pushRoundedRect :: DrawArena -> Rect -> Float -> Color -> IO ()
 pushRoundedRect da (Rect x y w h) radius col = do
+  setTexture da 0
   let rgba = colorToWord32 col
       r = max 0 radius
       verts =
@@ -281,7 +305,8 @@ pushLine da x1 y1 x2 y2 thickness col = do
       len = sqrt (dx * dx + dy * dy)
   if len < 0.001
     then pure ()
-    else
+    else do
+      setTexture da 0
       let nx = -dy / len * thickness / 2
           ny = dx / len * thickness / 2
           rgba = colorToWord32 col
@@ -291,15 +316,14 @@ pushLine da x1 y1 x2 y2 thickness col = do
             , Vertex (x2 - nx) (y2 - ny) 1 1 rgba
             , Vertex (x1 - nx) (y1 - ny) 0 1 rgba
             ]
-       in do
-        ensureVerts da 4
-        ensureIndices da 6
-        base <- readIORef (daVertexCount da)
-        writeVerts da base verts
-        writeIORef (daVertexCount da) (base + 4)
-        baseIdx <- readIORef (daIndexCount da)
-        writeIndices da baseIdx [base, base + 1, base + 2, base, base + 2, base + 3]
-        writeIORef (daIndexCount da) (baseIdx + 6)
+      ensureVerts da 4
+      ensureIndices da 6
+      base <- readIORef (daVertexCount da)
+      writeVerts da base verts
+      writeIORef (daVertexCount da) (base + 4)
+      baseIdx <- readIORef (daIndexCount da)
+      writeIndices da baseIdx [base, base + 1, base + 2, base, base + 2, base + 3]
+      writeIORef (daIndexCount da) (baseIdx + 6)
 
 {-# INLINE pushText #-}
 pushText :: DrawArena -> FontMetrics -> Float -> Float -> T.Text -> Color -> IO ()

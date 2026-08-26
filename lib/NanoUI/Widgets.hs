@@ -16,6 +16,7 @@ module NanoUI.Widgets
   , scrollArea
   , select
   , modal
+  , image
   , sliderText
   , sliderDisplayText
   , sliderLabelText
@@ -86,7 +87,7 @@ import NanoUI.Style
   , Sizing (..)
   , defaultLayout
   )
-import NanoUI.Types (Rect (..), Size (..), V2 (..), rectContains, rectH, rectW, sliderTrackRect)
+import NanoUI.Types (ImageId (..), Rect (..), Size (..), V2 (..), rectContains, rectH, rectW, sliderTrackRect)
 
 parentIdx :: [Int] -> Int
 parentIdx = \case
@@ -188,6 +189,12 @@ modal open title child
             }
         , Just body
         )
+
+image :: HasCallStack => Layout -> ImageId -> UI Response
+image layout (ImageId tid) = do
+  wid <- currentId
+  let stored = if tid <= 0 then T.empty else T.pack (show tid)
+  addWidget wid NodeImage stored 0 layout
 
 emptyModalResp :: WidgetId -> Response
 emptyModalResp wid =

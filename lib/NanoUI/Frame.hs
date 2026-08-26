@@ -57,6 +57,7 @@ import NanoUI.Draw
   , finishDraw
   , pushLine
   , pushRect
+  , pushImage
   , pushRoundedRect
   , pushText
   , resetDrawArena
@@ -95,7 +96,7 @@ import NanoUI.Layout.Arena
   , isWidgetNode
   , isContainerNode
   , isScrollNode
-  , NodeType (NodeButton, NodeCheckbox, NodeSelect, NodeSlider, NodeTextInput, NodeModal)
+  , NodeType (NodeButton, NodeCheckbox, NodeSelect, NodeSlider, NodeTextInput, NodeModal, NodeImage)
   , resetNodeArena
   , setNodeText
   , setNodeValue
@@ -886,6 +887,11 @@ lowerNode ctx idx = do
           drawTextInputCaret da ctx idx x y w h style
     NodeSpacer -> pure ()
     NodeModal -> pure ()
+    NodeImage -> do
+      tex <- imageIdFromText <$> getText (ctxNodeArena ctx) idx
+      if terminal || tex <= 0
+        then pushRect da rect (themeAccent theme)
+        else pushImage da rect tex (colorRGBA 255 255 255 255)
     _ -> do
       style <- widgetVisualStyle ctx nt idx
       value <- getNodeValue (ctxNodeArena ctx) idx
@@ -2535,6 +2541,12 @@ collectTooltipSpans ctx = do
             ty = rectY rect + iy
             textRect = Rect tx ty tw th
         pure (textRect, txt, fg, bg, rect)
+
+imageIdFromText :: T.Text -> Int
+imageIdFromText txt =
+  case reads (T.unpack txt) of
+    [(n, "")] | n > 0 -> n
+    _ -> 0
 
 updatePrevRects :: Context -> IO ()
 updatePrevRects ctx = do

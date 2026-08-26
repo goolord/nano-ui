@@ -6,6 +6,7 @@ module NanoUI
   , Color (..)
   , colorRGBA
   , colorToWord32
+  , ImageId (..)
   , rectContains
   , -- Input
     Input (..)
@@ -52,6 +53,7 @@ module NanoUI
   , scrollArea
   , select
   , modal
+  , image
   , -- Frame
     runFrame
   , needsRedraw
@@ -133,7 +135,7 @@ import NanoUI.Style
   , terminalTheme
   , sdlTheme
   )
-import NanoUI.Types (Color (..), Rect (..), Size (..), V2 (..), colorRGBA, colorToWord32, rectContains)
+import NanoUI.Types (Color (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, colorToWord32, rectContains)
 import NanoUI.Widgets
   ( Response (..)
   , button
@@ -151,4 +153,5 @@ import NanoUI.Widgets
   , scrollArea
   , select
   , modal
+  , image
   )

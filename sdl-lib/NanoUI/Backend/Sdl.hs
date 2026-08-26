@@ -2,8 +2,11 @@
 -- maps SDL events into 'Input'. Idle frames skip 'runFrame' until input,
 -- 'markDirty', or an active animation demands a redraw (damage tracking; see design doc).
 module NanoUI.Backend.Sdl
-  ( runSdlApp
+  ( SdlEnv (..)
+  , runSdlApp
   , runSdlAppWithQuit
+  , runSdlAppWith
+  , registerRgbaImage
   ) where
 
 import Control.Monad (unless, void)
@@ -11,6 +14,7 @@ import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import GHC.Clock (getMonotonicTime)
 import NanoUI
   ( Context
+  , ImageId
   , Input (..)
   , UI
   , anyAnimating
@@ -38,6 +42,8 @@ import NanoUI.Sdl.Input
   , splitFrame
   , waitEventTimeout
   )
+import Data.ByteString (ByteString)
+import qualified NanoUI.Sdl.Image as SdlImage
 import NanoUI.Sdl.Render (renderDrawDataPass)
 import NanoUI.Sdl.Window (SdlEnv (..), defaultWindowSize, syncDisplay, withSdl)
 import SDL3.Sys.Bindgen.Blendmode (sDL_BLENDMODE_BLEND)
@@ -53,8 +59,16 @@ runSdlApp :: Context -> UI () -> IO ()
 runSdlApp ctx ui = runSdlAppWithQuit ctx (const False) ui
 
 runSdlAppWithQuit :: Context -> (Input -> Bool) -> UI () -> IO ()
-runSdlAppWithQuit ctx shouldQuit ui =
+runSdlAppWithQuit ctx shouldQuit ui = runSdlAppWith ctx (const (pure ())) shouldQuit ui
+
+registerRgbaImage :: SdlEnv -> ImageId -> Int -> Int -> ByteString -> IO Bool
+registerRgbaImage env =
+  SdlImage.registerRgbaImage (sdlRenderer env) (sdlImages env)
+
+runSdlAppWith :: Context -> (SdlEnv -> IO ()) -> (Input -> Bool) -> UI () -> IO ()
+runSdlAppWith ctx setup shouldQuit ui =
   withSdl ctx "nano-ui" defaultWindowSize $ \ctx0 env -> do
+    setup env
     void $ setRenderDrawBlendModeSafe (sdlRenderer env) (fromIntegral sDL_BLENDMODE_BLEND)
     now <- getMonotonicTime
     (ctx1, inp0) <- syncDisplay ctx0 env emptyInput
@@ -153,9 +167,9 @@ draw ctx ui env inp = do
   overlaySpans <- collectOverlayTextSpans ctx inp
   font <- readIORef (sdlFontRef env)
   let clear = themeWindow (ctxTheme ctx)
-  renderDrawDataPass (sdlRenderer env) scale (Just clear) drawData False
+  renderDrawDataPass (sdlRenderer env) scale (Just clear) drawData False (sdlImages env)
   renderTextSpans (sdlRenderer env) scale font (sdlTextCache env) baseSpans
-  renderDrawDataPass (sdlRenderer env) scale Nothing drawData True
+  renderDrawDataPass (sdlRenderer env) scale Nothing drawData True (sdlImages env)
   renderTextSpans (sdlRenderer env) scale font (sdlTextCache env) overlaySpans
   void $ renderPresentSafe (sdlRenderer env)
   pure (dirtyAfterUi, inp)

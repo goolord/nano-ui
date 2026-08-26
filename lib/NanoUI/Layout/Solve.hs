@@ -76,6 +76,7 @@ measureNode na fm measure idx = do
     NodeContainer -> measureContainer na idx
     NodeScrollContainer -> measureScrollContainer na idx
     NodeModal -> measureScrollContainer na idx
+    NodeImage -> measureImage na idx
     _ -> measureWidget na fm measure idx
 
 measureTextNode :: NodeArena -> FontMetrics -> (Text -> IO (Float, Float)) -> NodeIdx -> IO ()
@@ -91,6 +92,21 @@ measureTextNode na fm measure idx = do
           else measureTextWrappedIO (\t -> fmap fst (measure t)) fm txt wrapW
       else measure txt
   setRect na idx 0 0 (clamp tw minW maxW) (clamp (max (fmLineHeight fm) th) minH maxH)
+
+measureImage :: NodeArena -> NodeIdx -> IO ()
+measureImage na idx = do
+  (minW, minH, maxW, maxH) <- getMinMax na idx
+  (wTag, wVal) <- getWidthSizing na idx
+  (hTag, hVal) <- getHeightSizing na idx
+  let w =
+        case wTag of
+          SizingFixed -> wVal
+          _ -> if minW > 0 then minW else 32
+      h =
+        case hTag of
+          SizingFixed -> hVal
+          _ -> if minH > 0 then minH else 32
+  setRect na idx 0 0 (clamp w minW maxW) (clamp h minH maxH)
 
 measureSpacer :: NodeArena -> NodeIdx -> IO ()
 measureSpacer na idx = do
