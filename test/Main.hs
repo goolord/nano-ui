@@ -1449,6 +1449,8 @@ runSelectPickLowTest ctx failed = do
               , inputMouseReleased = False
               }
       _ <- runFrame ctx pickPress ui
+      focusAfterPick <- getFocusId ctx
+      when (hashWidgetId focusAfterPick == 0) $ bump failed
       let pickRelease =
             pickPress
               { inputMousePressed = False

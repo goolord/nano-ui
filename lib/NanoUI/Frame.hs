@@ -163,6 +163,7 @@ runFrame ctx inp ui = do
   finalizePointerPress ctx inp
   finalizePointerRelease ctx inp
   finalizeTextInputFocus ctx inp
+  finalizeSelectFocus ctx inp
   finalizeTextInputMouse ctx inp
   closeTextInputMenuOnOutsideClick ctx inp
   openTextInputMenu ctx inp
@@ -1513,6 +1514,8 @@ finalizeSelectPick ctx inp =
                                       , storeSelectOpen = IM.insert key False (storeSelectOpen st)
                                       }
                                   )
+                                writeIORef (ctxFocusId ctx) wid
+                                markDirty ctx
                           go (idx + 1)
     go 0
 
@@ -1696,6 +1699,48 @@ collapseTextInputSelection ctx wid =
     let key = intKey wid
         cur = IM.findWithDefault 0 key (storeCursor store)
     setStore ctx (store {storeSelAnchor = IM.insert key cur (storeSelAnchor store)})
+
+finalizeSelectFocus :: Context -> Input -> IO ()
+finalizeSelectFocus ctx inp =
+  when (inputMousePressed inp) $ do
+    count <- arenaCount (ctxNodeArena ctx)
+    mWid <- findSelectUnderMouse ctx count (inputMousePos inp)
+    case mWid of
+      Nothing -> pure ()
+      Just wid -> do
+        disabled <- isDisabled ctx wid
+        unless disabled $ do
+          prev <- readIORef (ctxFocusId ctx)
+          writeIORef (ctxFocusId ctx) wid
+          when (prev /= wid) $ markDirty ctx
+
+findSelectUnderMouse :: Context -> Int -> V2 -> IO (Maybe WidgetId)
+findSelectUnderMouse ctx count mouse = go (count - 1)
+  where
+    go idx
+      | idx < 0 = pure Nothing
+      | otherwise = do
+          nt <- getNodeType (ctxNodeArena ctx) idx
+          if nt /= NodeSelect
+            then go (idx - 1)
+            else do
+              wid <- getWidgetId (ctxNodeArena ctx) idx
+              allow <- widgetOverlayAllowed ctx wid
+              if not allow
+                then go (idx - 1)
+                else do
+                  (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+                  txt <- getText (ctxNodeArena ctx) idx
+                  store <- getStore ctx
+                  let key = intKey wid
+                      open = IM.findWithDefault False key (storeSelectOpen store)
+                      fm = ctxFontMetrics ctx
+                      (_, opts) = selectParseOptions txt
+                      btnRect = Rect x y w h
+                      dropRect = selectDropRect fm x y w h (length opts)
+                  if rectContains btnRect mouse || (open && rectContains dropRect mouse)
+                    then pure (Just wid)
+                    else go (idx - 1)
 
 finalizeTextInputMouse :: Context -> Input -> IO ()
 finalizeTextInputMouse ctx inp = do
