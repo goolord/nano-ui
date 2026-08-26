@@ -113,84 +113,48 @@ data Theme = Theme
   }
   deriving (Eq, Show)
 
-defaultTheme :: Theme
-defaultTheme =
-  Theme
-    { themeWindow = colorRGBA 33 33 36 255
-    , themePanel =
-        Style
-          { styleBg = colorRGBA 45 45 48 255
-          , styleFg = colorRGBA 240 240 240 255
-          , styleBorder = colorRGBA 70 70 70 255
-          , styleBorderWidth = 1
-          , styleCornerRadius = 6
-          , styleHoverBg = colorRGBA 55 55 58 255
-          , styleActiveBg = colorRGBA 35 35 38 255
-        }
-    , themeButton =
-        Style
-          { styleBg = colorRGBA 70 70 75 255
-          , styleFg = colorRGBA 240 240 240 255
-          , styleBorder = colorRGBA 90 90 95 255
-          , styleBorderWidth = 1
-          , styleCornerRadius = 4
-          , styleHoverBg = colorRGBA 90 90 95 255
-          , styleActiveBg = colorRGBA 50 50 55 255
-        }
-    , themeInput =
-        Style
-          { styleBg = colorRGBA 22 22 26 255
-          , styleFg = colorRGBA 240 240 240 255
-          , styleBorder = colorRGBA 100 105 115 255
-          , styleBorderWidth = 1
-          , styleCornerRadius = 4
-          , styleHoverBg = colorRGBA 28 28 32 255
-          , styleActiveBg = colorRGBA 18 18 22 255
-          }
-    , themeSeparator = colorRGBA 80 80 85 255
-    , themeAccent = colorRGBA 100 149 237 255
-    , themeOverlayDim = colorRGBA 0 0 0 120
-    }
-
--- Dracula-inspired palette similar to dvui's default dark themes.
+-- Charcoal tiling surfaces (Untitled.png) with Adwaita-dark widget chrome.
 sdlTheme :: Theme
 sdlTheme =
   Theme
-    { themeWindow = colorRGBA 24 25 34 255
+    { themeWindow = colorRGBA 29 29 29 255
     , themePanel =
         Style
-          { styleBg = colorRGBA 48 50 64 255
-          , styleFg = colorRGBA 248 248 242 255
-          , styleBorder = colorRGBA 72 76 102 255
+          { styleBg = colorRGBA 37 37 38 255
+          , styleFg = colorRGBA 232 230 227 255
+          , styleBorder = colorRGBA 68 70 78 255
           , styleBorderWidth = 1
-          , styleCornerRadius = 8
-          , styleHoverBg = colorRGBA 48 50 64 255
-          , styleActiveBg = colorRGBA 48 50 64 255
+          , styleCornerRadius = 10
+          , styleHoverBg = colorRGBA 37 37 38 255
+          , styleActiveBg = colorRGBA 32 32 33 255
           }
     , themeButton =
         Style
-          { styleBg = colorRGBA 68 71 90 255
-          , styleFg = colorRGBA 248 248 242 255
-          , styleBorder = colorRGBA 98 114 164 255
-          , styleBorderWidth = 0
-          , styleCornerRadius = 6
-          , styleHoverBg = colorRGBA 88 94 128 255
-          , styleActiveBg = colorRGBA 90 48 78 255
+          { styleBg = colorRGBA 58 58 61 255
+          , styleFg = colorRGBA 246 245 244 255
+          , styleBorder = colorRGBA 78 78 82 255
+          , styleBorderWidth = 1
+          , styleCornerRadius = 9
+          , styleHoverBg = colorRGBA 74 74 78 255
+          , styleActiveBg = colorRGBA 46 46 49 255
           }
     , themeInput =
         Style
-          { styleBg = colorRGBA 20 21 30 255
-          , styleFg = colorRGBA 248 248 242 255
-          , styleBorder = colorRGBA 98 114 164 255
+          { styleBg = colorRGBA 20 20 21 255
+          , styleFg = colorRGBA 232 230 227 255
+          , styleBorder = colorRGBA 74 74 78 255
           , styleBorderWidth = 1
-          , styleCornerRadius = 4
-          , styleHoverBg = colorRGBA 28 30 42 255
-          , styleActiveBg = colorRGBA 16 17 24 255
+          , styleCornerRadius = 9
+          , styleHoverBg = colorRGBA 26 26 27 255
+          , styleActiveBg = colorRGBA 16 16 17 255
           }
-    , themeSeparator = colorRGBA 98 114 164 160
-    , themeAccent = colorRGBA 255 121 198 255
+    , themeSeparator = colorRGBA 58 58 61 255
+    , themeAccent = colorRGBA 53 132 228 255
     , themeOverlayDim = colorRGBA 0 0 0 168
     }
+
+defaultTheme :: Theme
+defaultTheme = sdlTheme
 
 terminalTheme :: Theme
 terminalTheme =

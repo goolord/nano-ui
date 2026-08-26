@@ -11,6 +11,9 @@ module NanoUI.Font
   , labelContentInset
   , widgetContentInset
   , widgetPadding
+  , buttonPadding
+  , centeredTextY
+  , layoutLineHeight
   , checkboxBoxSize
   , checkboxLeading
   , isTerminalFont
@@ -58,13 +61,36 @@ monospaceMetrics cell =
 labelContentInset :: FontMetrics -> (Float, Float)
 labelContentInset fm
   | isTerminalFont fm = (0, 0)
-  | otherwise = (0.5 * fmAdvance fm ' ', 0.25 * fmLineHeight fm)
+  | otherwise = (0.5 * fmAdvance fm ' ', 0.12 * layoutLineHeight fm)
 
 {-# INLINE widgetContentInset #-}
 widgetContentInset :: FontMetrics -> (Float, Float)
 widgetContentInset fm
   | isTerminalFont fm = (fmAdvance fm ' ', 0)
-  | otherwise = (fmAdvance fm ' ', 0.25 * fmLineHeight fm)
+  | otherwise = (fmAdvance fm ' ' * 1.15, 0.22 * layoutLineHeight fm)
+
+{-# INLINE buttonPadding #-}
+buttonPadding :: FontMetrics -> (Float, Float)
+buttonPadding fm
+  | isTerminalFont fm = widgetPadding fm
+  | otherwise =
+      let adv = fmAdvance fm ' '
+          lh = layoutLineHeight fm
+       in (adv * 2.6, lh * 0.42)
+
+{-# INLINE layoutLineHeight #-}
+layoutLineHeight :: FontMetrics -> Float
+layoutLineHeight fm
+  | isTerminalFont fm = fmLineHeight fm
+  | otherwise = fmLineHeight fm * 0.82
+
+{-# INLINE centeredTextY #-}
+centeredTextY :: FontMetrics -> Float -> Float -> Float -> Float
+centeredTextY fm y h th
+  | isTerminalFont fm = y + (h - th) / 2
+  | otherwise =
+      let slack = max 0 (th - fmAscent fm)
+       in y + (h - th) / 2 - slack * 0.45
 
 {-# INLINE widgetPadding #-}
 widgetPadding :: FontMetrics -> (Float, Float)
@@ -74,14 +100,15 @@ widgetPadding fm =
 
 {-# INLINE checkboxBoxSize #-}
 checkboxBoxSize :: FontMetrics -> Float
-checkboxBoxSize fm =
-  min 18 (max 14 (fmLineHeight fm * 0.9))
+checkboxBoxSize fm
+  | isTerminalFont fm = min 18 (max 14 (fmLineHeight fm * 0.9))
+  | otherwise = min 22 (max 18 (fmLineHeight fm * 1.15))
 
 {-# INLINE checkboxLeading #-}
 checkboxLeading :: FontMetrics -> Float
 checkboxLeading fm
   | isTerminalFont fm = 0
-  | otherwise = checkboxBoxSize fm + 4
+  | otherwise = checkboxBoxSize fm + 8
 
 {-# INLINE isTerminalFont #-}
 isTerminalFont :: FontMetrics -> Bool

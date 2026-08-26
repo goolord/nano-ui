@@ -494,7 +494,10 @@ select lbl options initial = do
               if onButton
                 then st {storeSelectOpen = IM.insert key False (storeSelectOpen st)}
                 else st
-            else st {storeSelectOpen = IM.singleton key True}
+            else
+              if onButton
+                then st {storeSelectOpen = IM.singleton key True}
+                else st
         )
   store1 <- liftIO (getStore ctx)
   let finalIdx = IM.findWithDefault clamped key (storeSelect store1)
