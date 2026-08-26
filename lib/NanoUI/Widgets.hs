@@ -15,6 +15,7 @@ module NanoUI.Widgets
   , tooltip
   , scrollArea
   , select
+  , modal
   , sliderText
   , sliderDisplayText
   , sliderLabelText
@@ -61,6 +62,10 @@ import NanoUI.Context
   , pushTooltip
   , setStore
   , markDirty
+  , beginModal
+  , endModal
+  , markEscapeConsumed
+  , pointerBlockedByModal
   )
 import NanoUI.Id (WidgetId (..))
 import NanoUI.Input (Input (..), Key (..), Modifiers (..), inputChars, inputKeys, inputModifiers)
@@ -71,7 +76,7 @@ import NanoUI.Layout.Arena
   , setNodeValue
   , setWidgetId
   )
-import NanoUI.Monad (UI (..), askContext, askInput, currentId, emit)
+import NanoUI.Monad (UI (..), askContext, askInput, currentId, emit, withKey)
 import NanoUI.Style
   ( AlignX (..)
   , AlignY (..)
@@ -81,7 +86,7 @@ import NanoUI.Style
   , Sizing (..)
   , defaultLayout
   )
-import NanoUI.Types (Rect (..), V2 (..), rectContains, sliderTrackRect)
+import NanoUI.Types (Rect (..), Size (..), V2 (..), rectContains, rectH, rectW, sliderTrackRect)
 
 parentIdx :: [Int] -> Int
 parentIdx = \case
@@ -109,6 +114,91 @@ row layout child = container (layout {layoutDirection = Row}) child
 {-# INLINE column #-}
 column :: Layout -> UI a -> UI a
 column layout child = container (layout {layoutDirection = Column}) child
+
+modal :: HasCallStack => Bool -> Text -> UI a -> UI (Response, Maybe a)
+modal open title child
+  | not open = do
+      wid <- currentId
+      pure (emptyModalResp wid, Nothing)
+  | otherwise = do
+      wid <- currentId
+      ctx <- askContext
+      inp <- askInput
+      body <-
+        UI $ \c i -> do
+          stack <- readIORef (ctxContainerStack c)
+          let parent = parentIdx stack
+              Size winW winH = inputWindowSize i
+              margin = 16
+              maxW = max 220 (winW - 2 * margin)
+              maxH = max 40 (winH - 2 * margin)
+          idx <-
+            addNode
+              (ctxNodeArena c)
+              NodeModal
+              parent
+              Column
+              Fit
+              Fit
+              (Padding 16 16 16 16)
+              8
+              220
+              0
+              maxW
+              maxH
+              0
+              AlignStart
+              AlignTop
+              False
+          setWidgetId (ctxNodeArena c) idx wid
+          writeIORef (ctxContainerStack c) (idx : stack)
+          beginModal c
+          r <-
+            unUI
+              ( do
+                  when (not (T.null title)) $ do
+                    _ <- withKey title (label title)
+                    pure ()
+                  child
+              )
+              c
+              i
+          endModal c
+          writeIORef (ctxContainerStack c) stack
+          pure r
+      mrect <- liftIO (getPrevRect ctx wid)
+      let mouse = inputMousePos inp
+          inPanel = maybe False (\r -> rectW r > 0 && rectH r > 0 && rectContains r mouse) mrect
+          backdrop =
+            case mrect of
+              Just r | rectW r > 0 && rectH r > 0 ->
+                inputMousePressed inp && not (rectContains r mouse)
+              _ -> False
+          esc = KeyEscape `elem` inputKeys inp
+          dismiss = backdrop || esc
+      when esc $ liftIO (markEscapeConsumed ctx)
+      pure
+        ( Response
+            { respId = wid
+            , respRect = maybe (Rect 0 0 0 0) id mrect
+            , respHovered = inPanel
+            , respPressed = False
+            , respClicked = dismiss
+            , respChanged = dismiss
+            }
+        , Just body
+        )
+
+emptyModalResp :: WidgetId -> Response
+emptyModalResp wid =
+  Response
+    { respId = wid
+    , respRect = Rect 0 0 0 0
+    , respHovered = False
+    , respPressed = False
+    , respClicked = False
+    , respChanged = False
+    }
 
 container :: Layout -> UI a -> UI a
 container layout child = UI $ \ctx inp -> do
@@ -240,7 +330,8 @@ textInput lbl initial = do
       cursor = IM.findWithDefault (length current) key (storeCursor store)
       anchor = IM.findWithDefault cursor key (storeSelAnchor store)
   focus <- liftIO (readIORef (ctxFocusId ctx))
-  let isFocus = focus == wid
+  blocked <- liftIO (pointerBlockedByModal ctx)
+  let isFocus = focus == wid && not blocked
   newState <-
     if isFocus
       then liftIO (processTextInput ctx inp (TextInputState current cursor anchor))
@@ -407,7 +498,7 @@ tooltip tipTxt resp = do
     ctx <- askContext
     liftIO $ do
       let (Rect rx ry rw rh) = respRect resp
-      pushTooltip ctx (Rect (rx + rw + 4) ry 100 (max rh 20)) tipTxt
+      pushTooltip ctx (respId resp) (Rect (rx + rw + 4) ry 100 (max rh 20)) tipTxt
   pure resp
 
 textInputText :: Text -> String -> Int -> Bool -> Text
@@ -479,11 +570,13 @@ resolveInteraction ctx inp wid = do
           }
     else do
       mrect <- getPrevRect ctx wid
+      blocked <- pointerBlockedByModal ctx
       let rect = maybe (Rect 0 0 0 0) id mrect
           mouse = inputMousePos inp
           hovered =
             case rect of
-              Rect _ _ rw rh -> rw > 0 && rh > 0 && rectContains rect mouse
+              Rect _ _ rw rh ->
+                not blocked && rw > 0 && rh > 0 && rectContains rect mouse
       active <- readIORef (ctxActiveId ctx)
       let activating = inputMousePressed inp && hovered
           isActive = active == wid || activating

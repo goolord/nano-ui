@@ -6,11 +6,11 @@ module NanoUI.Backend.Sdl
   , runSdlAppWithQuit
   ) where
 
-import Control.Monad (void)
+import Control.Monad (unless, void)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import GHC.Clock (getMonotonicTime)
 import NanoUI
-  ( Context (..)
+  ( Context
   , Input (..)
   , UI
   , anyAnimating
@@ -21,6 +21,7 @@ import NanoUI
   , inputMousePos
   , isDirty
   , needsRedraw
+  , overlayConsumesQuit
   , runFrame
   , textInputEditActive
   , themeWindow
@@ -104,7 +105,7 @@ loop ctx ui env prev pendingRedraw wasAnimating shouldQuit inp queued lastT = do
               group
       (ctx', inpSynced) <- syncDisplay ctx env inp'
       editActive' <- textInputEditActive ctx'
-      if shouldQuit inpSynced || (isHardQuitInput inpSynced && not editActive')
+      if isHardQuitInput inpSynced && not editActive'
         then pure ()
         else do
           prevInp <- readIORef prev
@@ -124,21 +125,24 @@ loop ctx ui env prev pendingRedraw wasAnimating shouldQuit inp queued lastT = do
                   || not (null group)
               cursorOnly = mouseMoved && not shouldDraw
           writeIORef wasAnimating anim
-          if shouldDraw
-            then do
-              (_, synced) <- draw ctx' ui env inpSynced
-              writeIORef pendingRedraw False
-              writeIORef prev synced
-              loop ctx' ui env prev pendingRedraw wasAnimating shouldQuit synced rest now
-            else if cursorOnly
+          synced <-
+            if shouldDraw
               then do
-                synced <- syncCursorFrame ctx' ui env inpSynced
-                writeIORef prev synced
-                loop ctx' ui env prev pendingRedraw wasAnimating shouldQuit synced rest now
-            else
-              if null rest
-                then loop ctx' ui env prev pendingRedraw wasAnimating shouldQuit inpSynced [] now
-                else loop ctx' ui env prev pendingRedraw wasAnimating shouldQuit inpSynced rest now
+                (_, s) <- draw ctx' ui env inpSynced
+                writeIORef pendingRedraw False
+                writeIORef prev s
+                pure s
+              else if cursorOnly
+                then do
+                  s <- syncCursorFrame ctx' ui env inpSynced
+                  writeIORef prev s
+                  pure s
+                else pure inpSynced
+          overlayQuit <- overlayConsumesQuit ctx' inpSynced
+          unless (shouldQuit inpSynced && not overlayQuit) $
+            if null rest
+              then loop ctx' ui env prev pendingRedraw wasAnimating shouldQuit synced [] now
+              else loop ctx' ui env prev pendingRedraw wasAnimating shouldQuit synced rest now
 
 draw :: Context -> UI () -> SdlEnv -> Input -> IO (Bool, Input)
 draw ctx ui env inp = do

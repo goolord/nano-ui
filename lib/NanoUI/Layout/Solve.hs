@@ -1,8 +1,9 @@
 module NanoUI.Layout.Solve
   ( solveLayout
+  , placeModals
   ) where
 
-import Control.Monad (forM, forM_)
+import Control.Monad (forM, forM_, when)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -74,6 +75,7 @@ measureNode na fm measure idx = do
     NodeSeparator -> measureSeparator na idx
     NodeContainer -> measureContainer na idx
     NodeScrollContainer -> measureScrollContainer na idx
+    NodeModal -> measureScrollContainer na idx
     _ -> measureWidget na fm measure idx
 
 measureTextNode :: NodeArena -> FontMetrics -> (Text -> IO (Float, Float)) -> NodeIdx -> IO ()
@@ -222,9 +224,13 @@ collectChildDims na idx = do
       if ci < 0
         then pure acc
         else do
-          (_, _, w, h) <- getRect na ci
+          nt <- getNodeType na ci
           ns <- getNextSibling na ci
-          go ns ((w, h) : acc)
+          if nt == NodeModal
+            then go ns acc
+            else do
+              (_, _, w, h) <- getRect na ci
+              go ns ((w, h) : acc)
 
 foldChildren :: DirTag -> Float -> [(Float, Float)] -> (Float, Float)
 foldChildren _ _ [] = (0, 0)
@@ -313,6 +319,7 @@ positionNode na idx x y availW availH = do
   case nt of
     NodeContainer -> positionChildren na idx dir gap pad x y w h
     NodeScrollContainer -> positionScrollChildren na idx dir gap pad x y w h
+    NodeModal -> positionScrollChildren na idx dir gap pad x y w h
     _ -> pure ()
 
 positionScrollChildren :: NodeArena -> NodeIdx -> DirTag -> Float -> Padding -> Float -> Float -> Float -> Float -> IO ()
@@ -359,8 +366,11 @@ collectChildren na idx = do
       if ci < 0
         then pure acc
         else do
+          nt <- getNodeType na ci
           ns <- getNextSibling na ci
-          go ns (ci : acc)
+          if nt == NodeModal
+            then go ns acc
+            else go ns (ci : acc)
 
 positionRow :: NodeArena -> [NodeIdx] -> Float -> Float -> Float -> Float -> Float -> IO ()
 positionRow na children gap cx cy cw ch = do
@@ -502,6 +512,19 @@ alignY AlignBottom cy ch ih = cy + ch - ih
 
 clamp :: Float -> Float -> Float -> Float
 clamp v lo hi = max lo (min hi v)
+
+placeModals :: NodeArena -> Float -> Float -> IO ()
+placeModals na winW winH = do
+  count <- arenaCount na
+  forM_ [0 .. count - 1] $ \idx -> do
+    nt <- getNodeType na idx
+    when (nt == NodeModal) $ do
+      (_, _, iw, ih) <- getRect na idx
+      let w = min iw winW
+          h = min ih winH
+          x = max 0 ((winW - w) / 2)
+          y = max 0 ((winH - h) / 2)
+      positionNode na idx x y w h
 
 snd3 :: (a, b, c) -> b
 snd3 (_, b, _) = b

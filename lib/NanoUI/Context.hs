@@ -41,6 +41,12 @@ module NanoUI.Context
   , TextInputDrag (..)
   , withClipboard
   , textInputEditActive
+  , modalActive
+  , overlayConsumesQuit
+  , markEscapeConsumed
+  , pointerBlockedByModal
+  , beginModal
+  , endModal
 ) where
 
 import Data.Bits (shiftR, shiftL, (.&.), (.|.))
@@ -52,6 +58,7 @@ import qualified Data.IntMap.Strict as IM
 import NanoUI.Draw (DrawArena, newDrawArena)
 import NanoUI.Font (FontMetrics, measureText, monospaceMetrics)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
+import NanoUI.Input (Input (..), Key (KeyEscape))
 import NanoUI.Layout.Arena (NodeArena, NodeType, newNodeArena)
 import NanoUI.Style (Theme, defaultTheme, sdlTheme, terminalTheme)
 import NanoUI.Types (Rect (..), Color (..))
@@ -95,7 +102,8 @@ emptyWidgetStore =
     }
 
 data PendingTooltip = PendingTooltip
-  { pendingTooltipRect :: Rect
+  { pendingTooltipWidget :: WidgetId
+  , pendingTooltipRect :: Rect
   , pendingTooltipText :: Text
   }
   deriving (Eq, Show)
@@ -141,6 +149,10 @@ data Context = Context
   , ctxTooltips :: IORef [PendingTooltip]
   , ctxWidgetNodeTypes :: IORef (Maybe (IntMap NodeType))
   , ctxSelectDropPress :: IORef Bool
+  , ctxModalWasActive :: IORef Bool
+  , ctxModalActive :: IORef Bool
+  , ctxModalDepth :: IORef Int
+  , ctxEscapeConsumed :: IORef Bool
   }
 
 {-# INLINE newContext #-}
@@ -167,6 +179,10 @@ newContext = do
   ctxTooltips <- newIORef []
   ctxWidgetNodeTypes <- newIORef Nothing
   ctxSelectDropPress <- newIORef False
+  ctxModalWasActive <- newIORef False
+  ctxModalActive <- newIORef False
+  ctxModalDepth <- newIORef 0
+  ctxEscapeConsumed <- newIORef False
   let fm0 = monospaceMetrics 12
   pure
     Context
@@ -197,6 +213,10 @@ newContext = do
       , ctxTooltips
       , ctxWidgetNodeTypes
       , ctxSelectDropPress
+      , ctxModalWasActive
+      , ctxModalActive
+      , ctxModalDepth
+      , ctxEscapeConsumed
       }
 
 {-# INLINE withFontMetrics #-}
@@ -252,6 +272,41 @@ textInputEditActive ctx = do
   focus <- getFocusId ctx
   menu <- readIORef (ctxTextInputMenu ctx)
   pure (hashWidgetId focus /= 0 || menu /= Nothing)
+
+modalActive :: Context -> IO Bool
+modalActive ctx = do
+  was <- readIORef (ctxModalWasActive ctx)
+  now <- readIORef (ctxModalActive ctx)
+  pure (was || now)
+
+-- | True after this frame's UI consumed Escape (modal dismiss or text menu).
+-- Call after 'runFrame'.
+overlayConsumesQuit :: Context -> Input -> IO Bool
+overlayConsumesQuit ctx inp = do
+  consumed <- readIORef (ctxEscapeConsumed ctx)
+  let esc = KeyEscape `elem` inputKeys inp
+  pure (esc && consumed)
+
+markEscapeConsumed :: Context -> IO ()
+markEscapeConsumed ctx = writeIORef (ctxEscapeConsumed ctx) True
+
+pointerBlockedByModal :: Context -> IO Bool
+pointerBlockedByModal ctx = do
+  depth <- readIORef (ctxModalDepth ctx)
+  if depth > 0
+    then pure False
+    else modalActive ctx
+
+beginModal :: Context -> IO ()
+beginModal ctx = do
+  writeIORef (ctxModalActive ctx) True
+  depth <- readIORef (ctxModalDepth ctx)
+  writeIORef (ctxModalDepth ctx) (depth + 1)
+
+endModal :: Context -> IO ()
+endModal ctx = do
+  depth <- readIORef (ctxModalDepth ctx)
+  writeIORef (ctxModalDepth ctx) (max 0 (depth - 1))
 
 {-# INLINE getHotId #-}
 getHotId :: Context -> IO WidgetId
@@ -404,9 +459,9 @@ clearTooltips :: Context -> IO ()
 clearTooltips ctx = writeIORef (ctxTooltips ctx) []
 
 {-# INLINE pushTooltip #-}
-pushTooltip :: Context -> Rect -> Text -> IO ()
-pushTooltip ctx rect txt =
-  modifyIORefList (ctxTooltips ctx) (PendingTooltip rect txt :)
+pushTooltip :: Context -> WidgetId -> Rect -> Text -> IO ()
+pushTooltip ctx wid rect txt =
+  modifyIORefList (ctxTooltips ctx) (PendingTooltip wid rect txt :)
 
 {-# INLINE readTooltips #-}
 readTooltips :: Context -> IO [PendingTooltip]
