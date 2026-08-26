@@ -15,6 +15,7 @@ module NanoUI.Draw
   , pushRoundedRect
   , pushText
   , pushLine
+  , pushFilledTriangle
   , finishDraw
   , vertexSize
   , indexSize
@@ -309,23 +310,33 @@ pushLine da x1 y1 x2 y2 thickness col = do
     then pure ()
     else do
       setTexture da 0
-      let nx = -dy / len * thickness / 2
-          ny = dx / len * thickness / 2
-          rgba = colorToWord32 col
-          verts =
-            [ Vertex (x1 + nx) (y1 + ny) (-2) 0 rgba
-            , Vertex (x2 + nx) (y2 + ny) (-2) 0 rgba
-            , Vertex (x2 - nx) (y2 - ny) (-2) 0 rgba
-            , Vertex (x1 - nx) (y1 - ny) (-2) 0 rgba
-            ]
-      ensureVerts da 4
-      ensureIndices da 6
-      base <- readIORef (daVertexCount da)
-      writeVerts da base verts
-      writeIORef (daVertexCount da) (base + 4)
-      baseIdx <- readIORef (daIndexCount da)
-      writeIndices da baseIdx [base, base + 1, base + 2, base, base + 2, base + 3]
-      writeIORef (daIndexCount da) (baseIdx + 6)
+      let r = thickness / 2
+          step = max 0.5 (r * 0.65)
+          n = max (1 :: Int) (ceiling (len / step))
+      forM_ [0 .. n] $ \i -> do
+        let u = fromIntegral i / fromIntegral n
+            cx = x1 + dx * u
+            cy = y1 + dy * u
+        pushRoundedRect da (Rect (cx - r) (cy - r) thickness thickness) r col
+
+{-# INLINE pushFilledTriangle #-}
+pushFilledTriangle :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
+pushFilledTriangle da x0 y0 x1 y1 x2 y2 col = do
+  setTexture da 0
+  let rgba = colorToWord32 col
+      verts =
+        [ Vertex x0 y0 (-3) 0 rgba
+        , Vertex x1 y1 (-3) 0 rgba
+        , Vertex x2 y2 (-3) 0 rgba
+        ]
+  ensureVerts da 3
+  ensureIndices da 3
+  base <- readIORef (daVertexCount da)
+  writeVerts da base verts
+  writeIORef (daVertexCount da) (base + 3)
+  baseIdx <- readIORef (daIndexCount da)
+  writeIndices da baseIdx [base, base + 1, base + 2]
+  writeIORef (daIndexCount da) (baseIdx + 3)
 
 {-# INLINE pushText #-}
 pushText :: DrawArena -> FontMetrics -> Float -> Float -> T.Text -> Color -> IO ()

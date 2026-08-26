@@ -58,6 +58,7 @@ import NanoUI.Draw
   , beginLayer
   , finishDraw
   , pushLine
+  , pushFilledTriangle
   , pushRect
   , pushImage
   , pushRoundedRect
@@ -1103,17 +1104,19 @@ scrollLine = 20
 
 applyScrollOffsets :: Context -> IO ()
 applyScrollOffsets ctx = do
-  count <- arenaCount (ctxNodeArena ctx)
-  forM_ [0 .. count - 1] $ \idx -> do
-    nt <- getNodeType (ctxNodeArena ctx) idx
-    when (isScrollNode nt) $ do
-      wid <- getWidgetId (ctxNodeArena ctx) idx
-      off <- getScrollOffset ctx wid
-      when (off > 0) $ do
-        dir <- getDirection (ctxNodeArena ctx) idx
-        case dir of
-          DirColumn -> shiftDescendants ctx idx 0 (-off)
-          DirRow -> shiftDescendants ctx idx (-off) 0
+  store <- getStore ctx
+  when (any (> 0) (IM.elems (storeScroll store))) $ do
+    count <- arenaCount (ctxNodeArena ctx)
+    forM_ [0 .. count - 1] $ \idx -> do
+      nt <- getNodeType (ctxNodeArena ctx) idx
+      when (isScrollNode nt) $ do
+        wid <- getWidgetId (ctxNodeArena ctx) idx
+        off <- getScrollOffset ctx wid
+        when (off > 0) $ do
+          dir <- getDirection (ctxNodeArena ctx) idx
+          case dir of
+            DirColumn -> shiftDescendants ctx idx 0 (-off)
+            DirRow -> shiftDescendants ctx idx (-off) 0
 
 shiftDescendants :: Context -> NodeIdx -> Float -> Float -> IO ()
 shiftDescendants ctx idx dx dy = do
@@ -1200,6 +1203,7 @@ tryApplyScrollWheelDelta ctx wid scroll = do
         then pure False
         else do
           setScrollOffset ctx wid newOff
+          markDirty ctx
           pure True
 
 findScrollTargetUnderMouse :: Context -> V2 -> IO (Maybe WidgetId)
@@ -1247,19 +1251,55 @@ scrollHitSelf ctx idx mouse clip = do
 -- Same clip stack as collectClippedSpans': scroll viewport, then panel bounds.
 scrollHitClip :: Context -> NodeIdx -> NodeType -> Rect -> IO (Maybe Rect)
 scrollHitClip ctx idx nt parentClip = do
-  (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
   pad <- getPadding (ctxNodeArena ctx) idx
   let fm = ctxFontMetrics ctx
   if isScrollNode nt
     then do
+      (x, y, w, h) <- getScrollVisualRect ctx idx
       dir <- getDirection (ctxNodeArena ctx) idx
       contentSize <- getNodeValue (ctxNodeArena ctx) idx
       let local = scrollContentClip fm dir x y w h pad contentSize
       pure (rectIntersect parentClip local)
     else
       if nt == NodeContainer && isPanelLike pad
-        then pure (rectIntersect parentClip (Rect x y w h))
+        then do
+          (x, y, w, h) <- getScrollVisualRect ctx idx
+          pure (rectIntersect parentClip (Rect x y w h))
         else pure (Just parentClip)
+
+-- Layout position plus ancestor scroll shifts (before applyScrollOffsets runs).
+getScrollVisualRect :: Context -> NodeIdx -> IO (Float, Float, Float, Float)
+getScrollVisualRect ctx idx = do
+  (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+  (dx, dy) <- ancestorScrollShift ctx idx
+  pure (x + dx, y + dy, w, h)
+
+ancestorScrollShift :: Context -> NodeIdx -> IO (Float, Float)
+ancestorScrollShift ctx idx = go idx (0, 0)
+  where
+    go i (sx, sy)
+      | i <= 0 = pure (sx, sy)
+      | otherwise = do
+          p <- getParent (ctxNodeArena ctx) i
+          if p < 0
+            then pure (sx, sy)
+            else do
+              (sx', sy') <- parentScrollShift ctx p (sx, sy)
+              go p (sx', sy')
+
+parentScrollShift :: Context -> NodeIdx -> (Float, Float) -> IO (Float, Float)
+parentScrollShift ctx p (sx, sy) = do
+  nt <- getNodeType (ctxNodeArena ctx) p
+  if isScrollNode nt
+    then do
+      wid <- getWidgetId (ctxNodeArena ctx) p
+      off <- getScrollOffset ctx wid
+      dir <- getDirection (ctxNodeArena ctx) p
+      pure $
+        case dir of
+          DirColumn -> (sx, sy - off)
+          DirRow -> (sx - off, sy)
+    else pure (sx, sy)
 
 finalizeTabFocus :: Context -> Input -> IO ()
 finalizeTabFocus ctx inp =
@@ -2312,10 +2352,10 @@ strokeRect :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color ->
 strokeRect da x y w h bw col =
   let t = max 1 bw
    in do
-    pushLine da x y (x + w) y t col
-    pushLine da x (y + h - t) (x + w) (y + h) t col
-    pushLine da x y x (y + h) t col
-    pushLine da (x + w - t) y (x + w) (y + h) t col
+    pushRect da (Rect x y w t) col
+    pushRect da (Rect x (y + h - t) w t) col
+    pushRect da (Rect x y t h) col
+    pushRect da (Rect (x + w - t) y t h) col
 
 selectItemH :: FontMetrics -> Float -> Float
 selectItemH fm rh = if isTerminalFont fm then max 1 rh else 28
@@ -2396,9 +2436,9 @@ drawSelectChevron :: DrawArena -> Float -> Float -> Float -> Float -> Color -> I
 drawSelectChevron da x y w h col = do
   let cx = selectChevronCenterX x w
       cy = y + h / 2
-      sz = 3.5
-  pushLine da (cx - sz) (cy - sz * 0.55) cx (cy + sz * 0.55) 1.5 col
-  pushLine da cx (cy + sz * 0.55) (cx + sz) (cy - sz * 0.55) 1.5 col
+      hw = 3.5
+      hh = 2.2
+  pushFilledTriangle da (cx - hw) (cy - hh * 0.45) (cx + hw) (cy - hh * 0.45) cx (cy + hh) col
 
 scrollContentClip ::
   FontMetrics ->
@@ -2544,7 +2584,7 @@ scrollContainerGeom ctx wid = do
                     dir <- getDirection (ctxNodeArena ctx) idx
                     pad <- getPadding (ctxNodeArena ctx) idx
                     contentSize <- getNodeValue (ctxNodeArena ctx) idx
-                    (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+                    (x, y, w, h) <- getScrollVisualRect ctx idx
                     pure (Just (idx, dir, x, y, w, h, pad, contentSize))
   go 0
 

@@ -1,6 +1,6 @@
 module Main (main) where
 
-import Control.Monad (forM_, replicateM, when)
+import Control.Monad (forM_, replicateM, void, when)
 import Data.ByteString.Builder (toLazyByteString)
 import qualified Data.ByteString as BS
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
@@ -74,6 +74,7 @@ main = do
   run "nested-scroll" runNestedScrollTest
   run "nested-scroll-focus" runNestedScrollFocusTest
   run "scroll-hover-clip" runScrollHoverClipTest
+  run "scroll-hit-offset" runScrollHitOffsetTest
   run "tab-focus" runTabFocusTest
   run "select-initial" runSelectTest
   run "select-dropdown" runSelectDropdownTest
@@ -1220,6 +1221,53 @@ runScrollHoverClipTest ctx failed = do
           _ <- runFrame ctx hoverHidden ui
           offI1 <- getScrollOffset ctx inner
           when (offI1 > offI0) $ bump failed
+    _ -> bump failed
+
+-- Wheel hit-test must use post-scroll rects. Above the shifted viewport is not a hit.
+runScrollHitOffsetTest :: Context -> IORef Int -> IO ()
+runScrollHitOffsetTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 200 200}
+      ui = do
+        (outer, inner) <-
+          scrollArea
+            (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 90})
+            ( column defaultLayout $ do
+                (inner, ()) <-
+                  scrollArea
+                    (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 40})
+                    ( column defaultLayout $ do
+                        mapM_ (\i -> label (T.pack ("in " <> show (i :: Int)))) [1 .. 12]
+                    )
+                mapM_ (\i -> label (T.pack ("out " <> show (i :: Int)))) [1 .. 12]
+                pure inner
+            )
+        pure (outer, inner)
+  _ <- runFrame ctx inp0 ui
+  ((_, inner), _, _, _) <- runFrame ctx inp0 ui
+  mInner0 <- getPrevRect ctx inner
+  case mInner0 of
+    Just (Rect ix iy iw ih)
+      | iw > 0 && ih > 0 -> do
+          let wheelInner =
+                inp0
+                  { inputMousePos = V2 (ix + iw / 2) (iy + ih / 2)
+                  , inputScroll = V2 0 1
+                  }
+          forM_ [(1 :: Int) .. 6] $ \_ -> void (runFrame ctx wheelInner ui)
+          mInner1 <- getPrevRect ctx inner
+          case mInner1 of
+            Just (Rect ix1 iy1 iw1 _) -> do
+              off0 <- getScrollOffset ctx inner
+              when (off0 <= 0) $ bump failed
+              let hoverAbove =
+                    inp0
+                      { inputMousePos = V2 (ix1 + iw1 / 2) (iy1 - 6)
+                      , inputScroll = V2 0 1
+                      }
+              _ <- runFrame ctx hoverAbove ui
+              off1 <- getScrollOffset ctx inner
+              when (off1 > off0) $ bump failed
+            _ -> bump failed
     _ -> bump failed
 
 -- Wheel with the pointer outside every scroller still moves the nested list

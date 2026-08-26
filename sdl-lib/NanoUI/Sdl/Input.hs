@@ -27,6 +27,7 @@ import NanoUI
   , Key (..)
   , Modifiers (..)
   , V2 (..)
+  , v2Add
   )
 import NanoUI.Sdl.Event (SdlEvent (..))
 import SDL3.Sys.Bindgen.Events
@@ -268,7 +269,7 @@ applyEvent inp ev =
         , inputMouseRightDown = False
         , inputMouseRightReleased = True
         }
-    EvScroll delta -> inp {inputScroll = delta}
+    EvScroll delta -> inp {inputScroll = v2Add (inputScroll inp) delta}
 
 isHardQuitInput :: Input -> Bool
 isHardQuitInput inp =

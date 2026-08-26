@@ -11,6 +11,7 @@ module NanoUI
   , atlasTextureId
   , atlasSnapshot
   , rectContains
+  , v2Add
   , -- Input
     Input (..)
   , Key (..)
@@ -140,7 +141,7 @@ import NanoUI.Style
   , sdlTheme
   , panelPaintPad
   )
-import NanoUI.Types (Color (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, colorToWord32, rectContains)
+import NanoUI.Types (Color (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, colorToWord32, rectContains, v2Add)
 import NanoUI.Widgets
   ( Response (..)
   , button

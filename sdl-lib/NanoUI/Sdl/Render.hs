@@ -83,11 +83,11 @@ layerOrder cmd =
 drawCmd :: Ptr SDL_Renderer -> Float -> DrawData -> ImageAtlas -> DrawCmd -> IO ()
 drawCmd ren uiScale dd images cmd = do
   let count = fromIntegral (cmdIndexCount cmd)
-  when (count > 0 && count `mod` 6 == 0) $ do
+  when (count > 0 && count `mod` 3 == 0) $ do
     setCmdClip ren uiScale cmd
     let start = fromIntegral (cmdIndexOffset cmd)
         texId = cmdTextureId cmd
-    mapM_ (fillQuad ren uiScale dd images texId) [start, start + 6 .. start + count - 1]
+    mapM_ (fillQuad ren uiScale dd images texId) [start, start + 3 .. start + count - 1]
 
 setCmdClip :: Ptr SDL_Renderer -> Float -> DrawCmd -> IO ()
 setCmdClip ren uiScale cmd
