@@ -6,13 +6,15 @@ module NanoUI.Sdl.Display
   , queryWindowLogicalSize
   , queryMouseWindowPos
   , setRenderScale
+  , queryRendererName
   , windowToLogicalCoords
   , installResizeWatch
-  ) where
+) where
 
 import Control.Monad (unless)
-import Foreign.C.Types (CFloat (..))
-import Foreign.Marshal.Alloc (alloca)
+import Foreign.C.String (peekCString)
+import Foreign.C.Types (CChar, CFloat (..), CSize (..))
+import Foreign.Marshal.Alloc (alloca, allocaBytes)
 import Foreign.Ptr (FunPtr, Ptr, freeHaskellFunPtr)
 import Foreign.Storable (peek)
 import NanoUI (Size (..), V2 (..))
@@ -61,6 +63,12 @@ queryMouseWindowPos =
 setRenderScale :: Ptr SDL_Renderer -> Float -> IO Bool
 setRenderScale ren scale = setRenderScaleC ren (realToFrac scale)
 
+queryRendererName :: Ptr SDL_Renderer -> IO String
+queryRendererName ren =
+  allocaBytes 64 $ \buf -> do
+    ok <- rendererNameC ren buf 64
+    if ok then peekCString buf else pure "unknown"
+
 windowToLogicalCoords :: Float -> V2 -> V2
 windowToLogicalCoords scale (V2 wx wy) =
   let s = if scale > 0 then scale else defaultUiScale
@@ -96,6 +104,9 @@ foreign import ccall safe "nano_ui_mouse_window_pos"
 
 foreign import ccall safe "nano_ui_set_render_scale"
   setRenderScaleC :: Ptr SDL_Renderer -> CFloat -> IO Bool
+
+foreign import ccall safe "nano_ui_renderer_name"
+  rendererNameC :: Ptr SDL_Renderer -> Ptr CChar -> CSize -> IO Bool
 
 foreign import ccall "wrapper"
   mkResizeCb :: IO () -> IO (FunPtr (IO ()))

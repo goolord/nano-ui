@@ -48,6 +48,7 @@ module NanoUI.Context
   , beginModal
   , endModal
   , registerImage
+  , registerImages
   , lookupImageUv
   , atlasSnapshot
   , atlasTextureId
@@ -92,6 +93,9 @@ data WidgetStore = WidgetStore
   , storeSelect :: IntMap Int
   , storeSelectOpen :: IntMap Bool
   , storeDisabled :: IntMap Bool
+  , storeFlag :: IntMap Bool
+  , storeNote :: IntMap String
+  , storeWindow :: IntMap (Float, Float)
   }
   deriving (Eq, Show)
 
@@ -107,6 +111,9 @@ emptyWidgetStore =
     , storeSelect = IM.empty
     , storeSelectOpen = IM.empty
     , storeDisabled = IM.empty
+    , storeFlag = IM.empty
+    , storeNote = IM.empty
+    , storeWindow = IM.empty
     }
 
 data PendingTooltip = PendingTooltip
@@ -161,6 +168,7 @@ data Context = Context
   , ctxModalActive :: IORef Bool
   , ctxModalDepth :: IORef Int
   , ctxEscapeConsumed :: IORef Bool
+  , ctxWindowDrag :: IORef (Maybe (WidgetId, Float, Float))
   , ctxImageAtlas :: ImageAtlas
   }
 
@@ -192,6 +200,7 @@ newContext = do
   ctxModalActive <- newIORef False
   ctxModalDepth <- newIORef 0
   ctxEscapeConsumed <- newIORef False
+  ctxWindowDrag <- newIORef Nothing
   ctxImageAtlas <- Atlas.newImageAtlas
   let fm0 = monospaceMetrics 12
   pure
@@ -226,8 +235,9 @@ newContext = do
       , ctxModalWasActive
       , ctxModalActive
       , ctxModalDepth
-      , ctxEscapeConsumed
-      , ctxImageAtlas
+  , ctxEscapeConsumed
+  , ctxWindowDrag
+  , ctxImageAtlas
       }
 
 {-# INLINE withFontMetrics #-}
@@ -483,6 +493,9 @@ registerImage ctx iid w h pixels = do
   ok <- Atlas.registerImage (ctxImageAtlas ctx) iid w h pixels
   when ok (markDirty ctx)
   pure ok
+
+registerImages :: Context -> [(ImageId, Int, Int, ByteString)] -> IO Bool
+registerImages ctx = fmap and . mapM (\(iid, w, h, px) -> registerImage ctx iid w h px)
 
 lookupImageUv :: Context -> ImageId -> IO (Maybe (Float, Float, Float, Float))
 lookupImageUv ctx = Atlas.lookupImageUv (ctxImageAtlas ctx)

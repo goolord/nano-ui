@@ -100,6 +100,24 @@ bool nano_ui_set_render_scale(SDL_Renderer *renderer, float scale)
     return SDL_SetRenderScale(renderer, scale, scale);
 }
 
+bool nano_ui_renderer_name(SDL_Renderer *renderer, char *buf, size_t cap)
+{
+    if (!renderer || !buf || cap == 0) {
+        return false;
+    }
+    const char *name = SDL_GetRendererName(renderer);
+    if (!name) {
+        buf[0] = '\0';
+        return false;
+    }
+    size_t i = 0;
+    for (; i + 1 < cap && name[i]; i++) {
+        buf[i] = name[i];
+    }
+    buf[i] = '\0';
+    return true;
+}
+
 bool nano_ui_render_coords_from_window(
     SDL_Renderer *renderer,
     float window_x,

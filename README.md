@@ -41,7 +41,7 @@ main = do
   let inp = emptyInput { inputWindowSize = Size 800 600 }
   (_, msgs, drawData) <-
     runFrame ctx inp $
-      column (defaultLayout { layoutWidth = Grow 1, layoutHeight = Grow 1 }) $
+      column (grow defaultLayout) $
         do
           button "OK"
           label "Hello"
@@ -126,7 +126,7 @@ UI monad → node arena → layout solver → shape lowering → DrawData
 |--------|------|
 | `NanoUI` | Public API re-export |
 | `NanoUI.Monad` | `UI` monad, `emit`, `withKey`, `currentId` |
-| `NanoUI.Widgets` | `button`, `checkbox`, `slider layout lbl min max initial`, `textInput`, containers |
+| `NanoUI.Widgets` | `button`, `checkbox`, `slider lbl min max initial`, `textInput`, `panel` / `row` / `column`, `useFlag` / `useText` |
 | `NanoUI.Frame` | `runFrame`, `needsRedraw` |
 | `NanoUI.Draw` | Pinned vertex arena, draw command batching |
 | `NanoUI.Layout.Solve` | Two-pass flexbox constraint solver |

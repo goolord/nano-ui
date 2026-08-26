@@ -13,6 +13,18 @@ module NanoUI.Style
   , terminalTheme
   , sdlTheme
   , panelPaintPad
+  , padAll
+  , padXY
+  , gap
+  , fillW
+  , fillH
+  , grow
+  , minW
+  , fixedH
+  , fixedWH
+  , alignMid
+  , wrap
+  , tight
 ) where
 
 import NanoUI.Types (Color, colorRGBA)
@@ -78,6 +90,54 @@ defaultLayout =
     , layoutMaxW = 1e9
     , layoutMaxH = 1e9
     }
+
+{-# INLINE padAll #-}
+padAll :: Float -> Layout -> Layout
+padAll n l = l {layoutPadding = Padding n n n n}
+
+{-# INLINE padXY #-}
+padXY :: Float -> Float -> Layout -> Layout
+padXY x y l = l {layoutPadding = Padding x x y y}
+
+{-# INLINE gap #-}
+gap :: Float -> Layout -> Layout
+gap n l = l {layoutGap = n}
+
+{-# INLINE fillW #-}
+fillW :: Layout -> Layout
+fillW l = l {layoutWidth = Grow 1}
+
+{-# INLINE fillH #-}
+fillH :: Layout -> Layout
+fillH l = l {layoutHeight = Grow 1}
+
+{-# INLINE grow #-}
+grow :: Layout -> Layout
+grow = fillW . fillH
+
+{-# INLINE minW #-}
+minW :: Float -> Layout -> Layout
+minW n l = l {layoutMinW = n}
+
+{-# INLINE fixedH #-}
+fixedH :: Float -> Layout -> Layout
+fixedH n l = l {layoutHeight = Fixed n}
+
+{-# INLINE fixedWH #-}
+fixedWH :: Float -> Float -> Layout -> Layout
+fixedWH w h l = l {layoutWidth = Fixed w, layoutHeight = Fixed h}
+
+{-# INLINE alignMid #-}
+alignMid :: Layout -> Layout
+alignMid l = l {layoutAlignY = AlignMiddle}
+
+{-# INLINE wrap #-}
+wrap :: Layout -> Layout
+wrap l = l {layoutWrap = True}
+
+{-# INLINE tight #-}
+tight :: Layout -> Layout
+tight l = l {layoutPadding = Padding 0 0 0 0}
 
 data Style = Style
   { styleBg :: Color
@@ -148,7 +208,7 @@ sdlTheme =
           , styleHoverBg = colorRGBA 26 26 27 255
           , styleActiveBg = colorRGBA 16 16 17 255
           }
-    , themeSeparator = colorRGBA 58 58 61 255
+    , themeSeparator = colorRGBA 88 90 96 255
     , themeAccent = colorRGBA 53 132 228 255
     , themeOverlayDim = colorRGBA 0 0 0 168
     }

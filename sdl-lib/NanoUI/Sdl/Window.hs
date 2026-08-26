@@ -36,6 +36,7 @@ import NanoUI.Sdl.Font
   , withTtf
   , withTtfMeasureScaled
   )
+import NanoUI.Sdl.Debug (SdlDebugSampler, newSdlDebugSampler)
 import NanoUI.Sdl.Image (ImageAtlas, destroyImageAtlas, newImageAtlas)
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
@@ -61,6 +62,7 @@ data SdlEnv = SdlEnv
   , sdlTextCache :: TextCache
   , sdlImages :: ImageAtlas
   , sdlCursors :: SdlCursors
+  , sdlDebug :: IORef SdlDebugSampler
   }
 
 defaultWindowSize :: Size
@@ -135,6 +137,7 @@ withSdl ctx title (Size w h) act =
                 cache <- newTextCache
                 images <- newImageAtlas
                 cursors <- initCursors
+                debug <- newSdlDebugSampler
                 unlessM (setRenderScale ren defaultUiScale) $
                   fail "SDL_SetRenderScale failed"
                 _ <- startTextInputSafe win
@@ -148,6 +151,7 @@ withSdl ctx title (Size w h) act =
                     , sdlTextCache = cache
                     , sdlImages = images
                     , sdlCursors = cursors
+                    , sdlDebug = debug
                     }
         teardown env = do
           destroyCursors (sdlCursors env)

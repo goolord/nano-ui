@@ -64,7 +64,7 @@ main = do
                 liftIO $ writeIORef lastClick "Cancel"
                 emit ("button:Cancel" :: String)
               (_, checked) <- checkbox "Feature" False
-              (_, vol) <- slider (defaultLayout {layoutWidth = Grow 1}) "Volume" 0 100 50
+              (_, vol) <- slider "Volume" 0 100 50
               (_, quality) <- select "Quality" ["Low", "High"] 0
               (_, name) <- textInput "Name" ""
               (_, _) <-

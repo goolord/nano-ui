@@ -7,6 +7,9 @@ module NanoUI.Backend.Sdl
   , runSdlAppWithQuit
   , runSdlAppWith
   , registerRgbaImage
+  , SdlDebugSnapshot (..)
+  , emptySdlDebug
+  , readSdlDebugEnv
   ) where
 
 import Control.Exception (bracket, finally)
@@ -31,8 +34,25 @@ import NanoUI
   , runFrame
   , textInputEditActive
   , themeWindow
+  , V2 (..)
+  )
+import NanoUI.Sdl.Debug
+  ( SdlDebugSnapshot (..)
+  , emptySdlDebug
+  , noteLoop
+  , notePresent
+  , noteSkip
+  , readSdlDebug
+  , takeDebugLive
   )
 import NanoUI.Sdl.Cursor (syncPointerCursor)
+import NanoUI.Sdl.Display
+  ( installResizeWatch
+  , queryMouseWindowPos
+  , queryRendererName
+  , queryWindowLogicalSize
+  , windowToLogicalCoords
+  )
 import NanoUI.Sdl.Event (SdlEvent (..))
 import NanoUI.Sdl.Font (renderTextSpans)
 import NanoUI.Sdl.Input
@@ -47,7 +67,6 @@ import NanoUI.Sdl.Input
 import Data.ByteString (ByteString)
 import qualified NanoUI.Sdl.Image as SdlImage
 import NanoUI.Sdl.Render (renderDrawDataPass)
-import NanoUI.Sdl.Display (installResizeWatch)
 import NanoUI.Sdl.Window (SdlEnv (..), defaultWindowSize, syncDisplay, withSdl)
 import SDL3.Sys.Bindgen.Blendmode (sDL_BLENDMODE_BLEND)
 import SDL3.Sys.Render (renderPresentSafe, setRenderDrawBlendModeSafe)
@@ -109,6 +128,7 @@ loop ::
   IO ()
 loop ctxRef ui env prev pendingRedraw wasAnimating drawing shouldQuit inp queued lastT = do
   ctx <- readIORef ctxRef
+  wantDebug <- takeDebugLive (sdlDebug env)
   pending <-
     if null queued
       then do
@@ -117,7 +137,7 @@ loop ctxRef ui env prev pendingRedraw wasAnimating drawing shouldQuit inp queued
           then pure polled
           else do
             animating <- anyAnimating ctx
-            if animating
+            if animating || wantDebug
               then waitEventTimeout animateTimeout
               else waitEventTimeout idleTimeout
       else pure queued
@@ -128,7 +148,8 @@ loop ctxRef ui env prev pendingRedraw wasAnimating drawing shouldQuit inp queued
     else do
       now <- getMonotonicTime
       let dt = realToFrac (now - lastT)
-          inp' =
+      noteLoop (sdlDebug env) dt
+      let inp' =
             foldl'
               applyEvent
               (clearEphemeral inp {inputDeltaTime = dt})
@@ -153,6 +174,7 @@ loop ctxRef ui env prev pendingRedraw wasAnimating drawing shouldQuit inp queued
                   || forceFinal
                   || pendingDirty
                   || dirtyNow
+                  || wantDebug
                   || not (null group)
               cursorOnly = mouseMoved && not shouldDraw
           writeIORef wasAnimating anim
@@ -168,10 +190,13 @@ loop ctxRef ui env prev pendingRedraw wasAnimating drawing shouldQuit inp queued
                 maybe (pure inpSynced) pure ms
               else if cursorOnly
                 then do
+                  noteSkip (sdlDebug env)
                   s <- syncCursorFrame ctx' ui env inpSynced
                   writeIORef prev s
                   pure s
-                else pure inpSynced
+                else do
+                  noteSkip (sdlDebug env)
+                  pure inpSynced
           overlayQuit <- overlayConsumesQuit ctx' inpSynced
           unless (shouldQuit inpSynced && not overlayQuit) $
             if null rest
@@ -189,7 +214,9 @@ draw :: Context -> UI () -> SdlEnv -> Input -> IO (Bool, Input)
 draw ctx ui env inp = do
   scale <- readIORef (sdlScaleRef env)
   SdlImage.syncImageAtlas (sdlRenderer env) (sdlImages env) ctx
+  t0 <- getMonotonicTime
   (_, _, drawData, dirtyAfterUi) <- runFrame ctx inp ui
+  t1 <- getMonotonicTime
   syncPointerCursor (sdlCursors env) ctx inp
   baseSpans <- collectTextSpans ctx
   overlaySpans <- collectOverlayTextSpans ctx inp
@@ -200,7 +227,17 @@ draw ctx ui env inp = do
   renderDrawDataPass (sdlRenderer env) scale Nothing drawData True (sdlImages env)
   renderTextSpans (sdlRenderer env) scale font (sdlTextCache env) overlaySpans
   void $ renderPresentSafe (sdlRenderer env)
+  notePresent (sdlDebug env) ((t1 - t0) * 1000) drawData
   pure (dirtyAfterUi, inp)
+
+readSdlDebugEnv :: SdlEnv -> IO SdlDebugSnapshot
+readSdlDebugEnv env = do
+  scale <- readIORef (sdlScaleRef env)
+  name <- queryRendererName (sdlRenderer env)
+  size <- queryWindowLogicalSize (sdlWindow env) scale
+  mouse <- queryMouseWindowPos
+  let pos = maybe (V2 0 0) (windowToLogicalCoords scale) mouse
+  readSdlDebug (sdlDebug env) size pos (sdlFontPath env) scale name
 
 syncCursorFrame :: Context -> UI () -> SdlEnv -> Input -> IO Input
 syncCursorFrame ctx ui env inp = do

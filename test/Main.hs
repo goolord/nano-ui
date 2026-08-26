@@ -88,6 +88,13 @@ main = do
   run "grow-fits-window" runGrowFitsWindowTest
   run "grow-wrap-sibling" runGrowWrapPushesSiblingTest
   run "scroll-bar-gutter" runScrollBarGutterTest
+  run "use-flag-click" runUseFlagClickTest
+  run "panel-paints" runPanelPaintsTest
+  run "separator-span" runSeparatorSpanTest
+  run "header-top-pad" runHeaderTopPadTest
+  run "fit-header-no-shrink" runFitHeaderNoShrinkTest
+  run "window-overlay" runWindowOverlayTest
+  run "window-drag" runWindowDragTest
 
   n <- readIORef failed
   if n == 0
@@ -769,7 +776,7 @@ runSelectDropdownCursorTest ctx failed = do
 runSliderCursorTest :: Context -> IORef Int -> IO ()
 runSliderCursorTest ctx failed = do
   let inp0 = emptyInput {inputWindowSize = Size 300 80}
-      ui = column defaultLayout (slider (defaultLayout {layoutWidth = Grow 1}) "Volume" 0 100 50)
+      ui = column defaultLayout (slider "Volume" 0 100 50)
   _ <- runFrame ctx inp0 ui
   ((resp, _), _, _, _) <- runFrame ctx inp0 ui
   let Rect rx ry rw rh = respRect resp
@@ -1093,7 +1100,7 @@ runCheckboxTest ctx failed = do
 runSliderTest :: Context -> IORef Int -> IO ()
 runSliderTest ctx failed = do
   let inp0 = emptyInput {inputWindowSize = Size 300 80}
-      ui = column defaultLayout (slider (defaultLayout {layoutWidth = Grow 1}) "Vol" 0 100 10)
+      ui = column defaultLayout (slider "Vol" 0 100 10)
   _ <- runFrame ctx inp0 ui
   ((resp, _), _, _, _) <- runFrame ctx inp0 ui
   let Rect rx ry rw rh = respRect resp
@@ -1651,3 +1658,189 @@ runGrowWrapPushesSiblingTest _ failed = do
   case (ysFor "BBBB", ysFor "BELOW") of
     ([by], [sy]) -> when (sy < by + 0.5) $ bump failed
     _ -> bump failed
+
+-- App state lives in the widget store, so clicks persist without IORefs.
+runUseFlagClickTest :: Context -> IORef Int -> IO ()
+runUseFlagClickTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 240 120}
+      ui = do
+        (open, setOpen) <- useFlag False
+        (note, setNote) <- useText ""
+        resp <- button "Go"
+        onClick resp $ do
+          setOpen True
+          setNote "hi"
+        pure (open, note, resp)
+  _ <- runFrame ctx inp0 ui
+  ((open0, note0, resp), _, _, _) <- runFrame ctx inp0 ui
+  when (open0 || note0 /= "") $ bump failed
+  let Rect x y w h = respRect resp
+      pos = V2 (x + w / 2) (y + h / 2)
+      press =
+        inp0
+          { inputMousePos = pos
+          , inputMouseDown = True
+          , inputMousePressed = True
+          , inputMouseReleased = False
+          }
+      release =
+        press
+          { inputMousePressed = False
+          , inputMouseDown = False
+          , inputMouseReleased = True
+          }
+  _ <- runFrame ctx press ui
+  _ <- runFrame ctx release ui
+  ((open1, note1, _), _, _, _) <- runFrame ctx inp0 ui
+  when (not open1 || note1 /= "hi") $ bump failed
+
+-- panel paints chrome; a fat-padded column does not.
+runPanelPaintsTest :: Context -> IORef Int -> IO ()
+runPanelPaintsTest ctx failed = do
+  let inp = emptyInput {inputWindowSize = Size 200 200}
+      fat = padAll 16 (fillW defaultLayout)
+  (_, _, colDraw, _) <- runFrame ctx inp (column fat (label "x"))
+  (_, _, panDraw, _) <- runFrame ctx inp (panel fat (label "x"))
+  when (drawVertexCount panDraw <= drawVertexCount colDraw) $ bump failed
+
+-- Page chrome sits below window padding so the header outline is not on y=0.
+runHeaderTopPadTest :: Context -> IORef Int -> IO ()
+runHeaderTopPadTest ctx failed = do
+  let inp = emptyInput {inputWindowSize = Size 800 600}
+      ui =
+        column (padAll 12 . gap 8 . grow $ defaultLayout) $
+          panel (padXY 16 12 . fillW $ defaultLayout) $
+            label "nano-ui SDL3 demo"
+  _ <- runFrame ctx inp ui
+  (resp, _, _, _) <- runFrame ctx inp ui
+  let Rect _ y _ _ = respRect resp
+  when (y < 24) $ bump failed
+
+-- A Fit header beside a Grow scroll keeps its content height when the
+-- window is shorter than the scroll content.
+runFitHeaderNoShrinkTest :: Context -> IORef Int -> IO ()
+runFitHeaderNoShrinkTest ctx failed = do
+  let header = panel (padXY 16 12 . fillW $ defaultLayout) (label "nano-ui SDL3 demo")
+      only =
+        column (padAll 12 . grow $ defaultLayout) header
+      withBody = do
+        r <-
+          column (padAll 12 . gap 8 . grow $ defaultLayout) $ do
+            h <- header
+            scroll (tight (grow defaultLayout)) $
+              column (fillW defaultLayout) $
+                mapM_ (label_ . T.pack . show) [1 .. 40 :: Int]
+            pure h
+        pure r
+      tall = emptyInput {inputWindowSize = Size 400 800}
+      short = emptyInput {inputWindowSize = Size 400 200}
+  _ <- runFrame ctx tall only
+  (r0, _, _, _) <- runFrame ctx tall only
+  _ <- runFrame ctx short withBody
+  (r1, _, _, _) <- runFrame ctx short withBody
+  when (rectH (respRect r1) + 0.5 < rectH (respRect r0)) $ bump failed
+
+-- Floating windows draw on the overlay, ignore backdrop clicks, and close on X.
+runWindowOverlayTest :: Context -> IORef Int -> IO ()
+runWindowOverlayTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 640 400}
+      ui = do
+        outside <- button "Outside"
+        (win, mBody) <-
+          window True "Debug" $ do
+            label "Body"
+        pure (outside, win, mBody)
+      closedUi = do
+        _ <- button "Outside"
+        (win, mBody) <- window False "Debug" (label "Body")
+        pure (win, mBody)
+  do
+    ((win, mBody), _, _, _) <- runFrame ctx inp0 closedUi
+    when (respClicked win) $ bump failed
+    case mBody of
+      Nothing -> pure ()
+      Just _ -> bump failed
+    closedSpans <- collectOverlayTextSpans ctx inp0
+    when (any (\(_, txt, _, _, _) -> "Debug" `T.isInfixOf` txt) closedSpans) $ bump failed
+  _ <- runFrame ctx inp0 ui
+  ((outside0, win0, mBody0), _, _, _) <- runFrame ctx inp0 ui
+  overlays <- collectOverlayTextSpans ctx inp0
+  let hasTitle = any (\(_, txt, _, _, _) -> "Debug" `T.isInfixOf` txt) overlays
+      hasBody = any (\(_, txt, _, _, _) -> "Body" `T.isInfixOf` txt) overlays
+  when (not (hasTitle && hasBody)) $ bump failed
+  let Rect wx wy ww wh = respRect win0
+  when (ww < 100 || wh < 20) $ bump failed
+  case mBody0 of
+    Nothing -> bump failed
+    Just _ -> pure ()
+  let clickOut =
+        inp0
+          { inputMousePos = V2 (rectX (respRect outside0) + 8) (rectY (respRect outside0) + 8)
+          , inputMouseDown = True
+          , inputMousePressed = True
+          }
+  _ <- runFrame ctx clickOut ui
+  let releaseOut =
+        clickOut
+          { inputMouseDown = False
+          , inputMousePressed = False
+          , inputMouseReleased = True
+          }
+  ((outsideHit, _, _), _, _, _) <- runFrame ctx releaseOut ui
+  when (not (respClicked outsideHit)) $ bump failed
+  let mid = V2 (wx + ww / 2) (wy + wh * 0.7)
+      clickWin =
+        inp0
+          { inputMousePos = mid
+          , inputMouseDown = True
+          , inputMousePressed = True
+          }
+  ((outsideMid, _, _), _, _, _) <- runFrame ctx clickWin ui
+  when (respClicked outsideMid) $ bump failed
+  let esc = inp0 {inputKeys = [KeyEscape]}
+  ((_, winEsc, _), _, _, _) <- runFrame ctx esc ui
+  when (respClicked winEsc) $ bump failed
+
+runWindowDragTest :: Context -> IORef Int -> IO ()
+runWindowDragTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 640 400}
+      ui = do
+        (win, _) <- window True "Debug" (label "Body")
+        pure win
+  _ <- runFrame ctx inp0 ui
+  (win0, _, _, _) <- runFrame ctx inp0 ui
+  let Rect x0 y0 _ _ = respRect win0
+      grab = V2 (x0 + 24) (y0 + 10)
+      press =
+        inp0
+          { inputMousePos = grab
+          , inputMouseDown = True
+          , inputMousePressed = True
+          }
+  _ <- runFrame ctx press ui
+  let moved =
+        press
+          { inputMousePos = V2 (x0 + 24 - 50) (y0 + 10 + 30)
+          , inputMousePressed = False
+          }
+  _ <- runFrame ctx moved ui
+  (win1, _, _, _) <- runFrame ctx moved ui
+  let Rect x1 y1 _ _ = respRect win1
+  when (x1 >= x0 - 10) $ bump failed
+  when (y1 <= y0 + 10) $ bump failed
+
+-- A column separator spans the parent width and stays a 1px hairline.
+runSeparatorSpanTest :: Context -> IORef Int -> IO ()
+runSeparatorSpanTest ctx failed = do
+  let inp = emptyInput {inputWindowSize = Size 200 120}
+      ui =
+        column (fillW defaultLayout) $ do
+          label_ "A"
+          resp <- separator
+          label_ "B"
+          pure resp
+  _ <- runFrame ctx inp ui
+  (resp, _, _, _) <- runFrame ctx inp ui
+  let Rect _ _ w h = respRect resp
+  when (w < 100) $ bump failed
+  when (h > 2) $ bump failed

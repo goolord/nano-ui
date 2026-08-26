@@ -8,6 +8,7 @@ module NanoUI
   , colorToWord32
   , ImageId (..)
   , registerImage
+  , registerImages
   , atlasTextureId
   , atlasSnapshot
   , rectContains
@@ -32,6 +33,18 @@ module NanoUI
   , terminalTheme
   , sdlTheme
   , panelPaintPad
+  , padAll
+  , padXY
+  , gap
+  , fillW
+  , fillH
+  , grow
+  , minW
+  , fixedH
+  , fixedWH
+  , alignMid
+  , wrap
+  , tight
   , -- ID
     WidgetId (..)
   , widgetId
@@ -48,17 +61,28 @@ module NanoUI
   , column
   , label
   , labelEx
+  , label_
   , button
   , checkbox
   , slider
+  , sliderEx
   , textInput
   , separator
   , spacer
   , tooltip
+  , scroll
   , scrollArea
   , select
   , modal
+  , window
   , image
+  , onClick
+  , clickButton
+  , useFlag
+  , useText
+  , sep
+  , flex
+  , image_
   , -- Frame
     runFrame
   , needsRedraw
@@ -112,7 +136,7 @@ module NanoUI
   , renderASCIIFromRects
   ) where
 
-import NanoUI.Context (Context (..), FrameMsg (..), anyAnimating, atlasSnapshot, atlasTextureId, ctxTheme, getAnimationValue, getFocusId, getHotId, getPrevRect, getScrollOffset, isDirty, markDirty, modalActive, newContext, newSdlContext, newTerminalContext, overlayConsumesQuit, registerImage, setAnimationValue, startAnimation, textInputEditActive, withClipboard, withExternalText, withFontMetrics, withMeasureText)
+import NanoUI.Context (Context (..), FrameMsg (..), anyAnimating, atlasSnapshot, atlasTextureId, ctxTheme, getAnimationValue, getFocusId, getHotId, getPrevRect, getScrollOffset, isDirty, markDirty, modalActive, newContext, newSdlContext, newTerminalContext, overlayConsumesQuit, registerImage, registerImages, setAnimationValue, startAnimation, textInputEditActive, withClipboard, withExternalText, withFontMetrics, withMeasureText)
 import NanoUI.Draw (DrawCmd (..), DrawData (..), Layer (..), indexSize, vertexSize)
 import NanoUI.Font (FontMetrics (..), isTerminalFont, labelContentInset, monospaceMetrics, widgetContentInset, widgetPadding)
 import NanoUI.Frame (collectOverlayTextSpans, collectTextSpans, cursorKindIs, needsRedraw, pointerCursorWanted, runFrame, sliderTrackRect, uiCursorKind, UiCursorKind (..))
@@ -140,24 +164,47 @@ import NanoUI.Style
   , terminalTheme
   , sdlTheme
   , panelPaintPad
+  , padAll
+  , padXY
+  , gap
+  , fillW
+  , fillH
+  , grow
+  , minW
+  , fixedH
+  , fixedWH
+  , alignMid
+  , wrap
+  , tight
   )
 import NanoUI.Types (Color (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, colorToWord32, rectContains, v2Add)
 import NanoUI.Widgets
   ( Response (..)
   , button
   , checkbox
+  , clickButton
   , column
   , label
   , labelEx
+  , label_
+  , onClick
   , panel
   , row
   , separator
   , slider
+  , sliderEx
   , spacer
   , textInput
   , tooltip
+  , scroll
   , scrollArea
   , select
   , modal
+  , window
   , image
+  , useFlag
+  , useText
+  , sep
+  , flex
+  , image_
   )
