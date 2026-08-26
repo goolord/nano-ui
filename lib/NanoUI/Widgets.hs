@@ -131,7 +131,8 @@ modal open title child
           let parent = parentIdx stack
               Size winW winH = inputWindowSize i
               margin = 16
-              maxW = max 220 (winW - 2 * margin)
+              minW = 260
+              maxW = max minW (winW - 2 * margin)
               maxH = max 40 (winH - 2 * margin)
           idx <-
             addNode
@@ -141,9 +142,9 @@ modal open title child
               Column
               Fit
               Fit
-              (Padding 16 16 16 16)
-              8
-              220
+              (Padding 20 20 18 18)
+              12
+              minW
               0
               maxW
               maxH
@@ -159,6 +160,7 @@ modal open title child
               ( do
                   when (not (T.null title)) $ do
                     _ <- withKey title (label title)
+                    _ <- separator
                     pure ()
                   child
               )

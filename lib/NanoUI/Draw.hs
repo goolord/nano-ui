@@ -28,7 +28,7 @@ import Foreign.ForeignPtr (ForeignPtr, mallocForeignPtrBytes, withForeignPtr)
 import Foreign.Marshal.Array (copyArray)
 import Foreign.Storable (pokeByteOff)
 import NanoUI.Font (FontMetrics (..), GlyphQuad (..))
-import NanoUI.Types (Color, Rect (..), colorToWord32)
+import NanoUI.Types (Color, Rect (..), colorToWord32, rectIntersect)
 import qualified Data.Text as T
 
 data Layer = LayerBackground | LayerContent | LayerOverlay
@@ -228,10 +228,12 @@ setClip da (Rect x y w h) = do
 withClip :: DrawArena -> Rect -> IO a -> IO a
 withClip da rect act = do
   old <- readIORef (daCurrentClip da)
-  setClip da rect
+  let (ox, oy, ow, oh) = old
+      prev = Rect ox oy ow oh
+      clip = maybe (Rect 0 0 0 0) id (rectIntersect prev rect)
+  setClip da clip
   r <- act
-  let (cx, cy, cw, ch) = old
-  setClip da (Rect cx cy cw ch)
+  setClip da prev
   pure r
 
 {-# INLINE setTexture #-}
@@ -268,12 +270,12 @@ pushRect da rect col = do
   pushQuad da rect 0 0 1 1 col
 
 {-# INLINE pushImage #-}
-pushImage :: DrawArena -> Rect -> Int -> Color -> IO ()
-pushImage da rect tex col
+pushImage :: DrawArena -> Rect -> Int -> Float -> Float -> Float -> Float -> Color -> IO ()
+pushImage da rect tex u0 v0 u1 v1 col
   | tex <= 0 = pushRect da rect col
   | otherwise = do
       setTexture da tex
-      pushQuad da rect 0 0 1 1 col
+      pushQuad da rect u0 v0 u1 v1 col
 
 -- Rounded fills encode radius in vtxU and use vtxV = -1 (plain rects use v in [0, 1]).
 {-# INLINE pushRoundedRect #-}
@@ -311,10 +313,10 @@ pushLine da x1 y1 x2 y2 thickness col = do
           ny = dx / len * thickness / 2
           rgba = colorToWord32 col
           verts =
-            [ Vertex (x1 + nx) (y1 + ny) 0 0 rgba
-            , Vertex (x2 + nx) (y2 + ny) 1 0 rgba
-            , Vertex (x2 - nx) (y2 - ny) 1 1 rgba
-            , Vertex (x1 - nx) (y1 - ny) 0 1 rgba
+            [ Vertex (x1 + nx) (y1 + ny) (-2) 0 rgba
+            , Vertex (x2 + nx) (y2 + ny) (-2) 0 rgba
+            , Vertex (x2 - nx) (y2 - ny) (-2) 0 rgba
+            , Vertex (x1 - nx) (y1 - ny) (-2) 0 rgba
             ]
       ensureVerts da 4
       ensureIndices da 6

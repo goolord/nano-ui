@@ -47,21 +47,29 @@ module NanoUI.Context
   , pointerBlockedByModal
   , beginModal
   , endModal
+  , registerImage
+  , lookupImageUv
+  , atlasSnapshot
+  , atlasTextureId
 ) where
 
+import Control.Monad (when)
 import Data.Bits (shiftR, shiftL, (.&.), (.|.))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict (IntMap)
 import Data.Text (Text)
 import Data.Word (Word64)
 import qualified Data.IntMap.Strict as IM
+import Data.ByteString (ByteString)
+import qualified NanoUI.Atlas as Atlas
+import NanoUI.Atlas (ImageAtlas, atlasTextureId)
 import NanoUI.Draw (DrawArena, newDrawArena)
+import NanoUI.Types (Color (..), ImageId (..), Rect (..))
 import NanoUI.Font (FontMetrics, measureText, monospaceMetrics)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), Key (KeyEscape))
 import NanoUI.Layout.Arena (NodeArena, NodeType, newNodeArena)
 import NanoUI.Style (Theme, defaultTheme, sdlTheme, terminalTheme)
-import NanoUI.Types (Rect (..), Color (..))
 
 data FrameMsg where
   FrameMsg :: a -> FrameMsg
@@ -153,6 +161,7 @@ data Context = Context
   , ctxModalActive :: IORef Bool
   , ctxModalDepth :: IORef Int
   , ctxEscapeConsumed :: IORef Bool
+  , ctxImageAtlas :: ImageAtlas
   }
 
 {-# INLINE newContext #-}
@@ -183,6 +192,7 @@ newContext = do
   ctxModalActive <- newIORef False
   ctxModalDepth <- newIORef 0
   ctxEscapeConsumed <- newIORef False
+  ctxImageAtlas <- Atlas.newImageAtlas
   let fm0 = monospaceMetrics 12
   pure
     Context
@@ -217,6 +227,7 @@ newContext = do
       , ctxModalActive
       , ctxModalDepth
       , ctxEscapeConsumed
+      , ctxImageAtlas
       }
 
 {-# INLINE withFontMetrics #-}
@@ -466,3 +477,15 @@ pushTooltip ctx wid rect txt =
 {-# INLINE readTooltips #-}
 readTooltips :: Context -> IO [PendingTooltip]
 readTooltips ctx = readIORef (ctxTooltips ctx)
+
+registerImage :: Context -> ImageId -> Int -> Int -> ByteString -> IO Bool
+registerImage ctx iid w h pixels = do
+  ok <- Atlas.registerImage (ctxImageAtlas ctx) iid w h pixels
+  when ok (markDirty ctx)
+  pure ok
+
+lookupImageUv :: Context -> ImageId -> IO (Maybe (Float, Float, Float, Float))
+lookupImageUv ctx = Atlas.lookupImageUv (ctxImageAtlas ctx)
+
+atlasSnapshot :: Context -> IO (Maybe (Int, Int, ByteString, Int))
+atlasSnapshot ctx = Atlas.atlasSnapshot (ctxImageAtlas ctx)

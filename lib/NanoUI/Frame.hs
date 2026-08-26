@@ -10,7 +10,7 @@ module NanoUI.Frame
   , sliderTrackRect
   ) where
 
-import Control.Monad (filterM, forM, forM_, unless, when)
+import Control.Monad (filterM, forM, forM_, unless, void, when)
 import Data.Char (isAlphaNum, isSpace)
 import Data.IORef (readIORef, writeIORef)
 import Data.List (findIndex)
@@ -48,6 +48,8 @@ import NanoUI.Context
   , PendingTooltip (..)
   , ctxClipboardGet
   , markEscapeConsumed
+  , lookupImageUv
+  , atlasTextureId
   )
 import NanoUI.Draw
   ( DrawArena
@@ -71,6 +73,9 @@ import NanoUI.Font
   , isTerminalFont
   , labelContentInset
   , lineWidth
+  , scrollBarGeom
+  , scrollBarWidth
+  , scrollOverflowGutter
   , widgetContentInset
   , wrapTextLines
   , wrapTextLinesIO
@@ -81,9 +86,11 @@ import NanoUI.Layout.Arena
   ( DirTag (..)
   , NodeIdx
   , NodeType (..)
+  , SizingTag (..)
   , arenaCount
   , getDirection
   , getFirstChild
+  , getHeightSizing
   , getMinMax
   , getNextSibling
   , getParent
@@ -92,6 +99,7 @@ import NanoUI.Layout.Arena
   , getPadding
   , getRect
   , getText
+  , getWidthSizing
   , getWidgetId
   , isWidgetNode
   , isContainerNode
@@ -121,8 +129,8 @@ import NanoUI.WidgetText
   , selectChevronReserve
   , selectChevronCenterX
   )
-import NanoUI.Style (Padding (..), Style (..), Theme (..), themeAccent, themeButton, themeInput, themeOverlayDim, themePanel, themeSeparator, themeWindow)
-import NanoUI.Types (Color (..), Rect (..), Size (..), V2 (..), colorRGBA, rectContains, rectH, rectIntersect, rectOverlapArea, rectW, rectX, rectY, sliderTrackRect, v2X, v2Y)
+import NanoUI.Style (Padding (..), Style (..), Theme (..), panelPaintPad, themeAccent, themeButton, themeInput, themeOverlayDim, themePanel, themeSeparator, themeWindow)
+import NanoUI.Types (Color (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, rectContains, rectH, rectIntersect, rectOverlapArea, rectW, rectX, rectY, sliderTrackRect, v2X, v2Y)
 
 runFrame :: Context -> Input -> UI a -> IO (a, [FrameMsg], DrawData, Bool)
 runFrame ctx inp ui = do
@@ -145,7 +153,7 @@ runFrame ctx inp ui = do
   syncWidgetLabels ctx
   let Size w h = inputWindowSize inp
   solveLayout (ctxNodeArena ctx) (ctxFontMetrics ctx) (ctxMeasureText ctx) w h
-  placeModals (ctxNodeArena ctx) w h
+  placeModals (ctxNodeArena ctx) (ctxFontMetrics ctx) w h
   updateScrollWheel ctx inp
   updateScrollDrag ctx inp
   applyScrollOffsets ctx
@@ -159,6 +167,7 @@ runFrame ctx inp ui = do
   closeTextInputMenuOnEscape ctx inp
   constrainFocusToModal ctx
   finalizeTabFocus ctx inp
+  finalizeSelectKeyboard ctx inp
   markSelectDropPress ctx inp
   finalizeSelectPick ctx inp
   closeSelectOnOutsideClick ctx inp
@@ -210,15 +219,23 @@ collectClippedSpans ctx idx clip = do
 collectClippedSpans' :: Context -> NodeIdx -> NodeType -> Rect -> IO [(Rect, T.Text, Color, Color, Rect)]
 collectClippedSpans' ctx idx nt clip = do
   (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+  pad <- getPadding (ctxNodeArena ctx) idx
   let nodeRect = Rect x y w h
-      mClipChildren =
-        case nt of
-          _ | isScrollNode nt -> rectIntersect clip nodeRect
-          _ -> Just clip
+      fm = ctxFontMetrics ctx
+  mClipChildren <-
+    if isScrollNode nt
+      then do
+        dir <- getDirection (ctxNodeArena ctx) idx
+        contentSize <- getNodeValue (ctxNodeArena ctx) idx
+        let content = scrollContentClip fm dir x y w h pad contentSize
+        pure (rectIntersect clip content)
+      else
+        if nt == NodeContainer && isPanelLike pad
+          then pure (rectIntersect clip nodeRect)
+          else pure (Just clip)
   case mClipChildren of
     Nothing -> pure []
     Just clipHere -> do
-      fm <- pure (ctxFontMetrics ctx)
       here <-
         case nt of
           NodeSelect -> do
@@ -322,11 +339,17 @@ collectNodeTextSpans ctx idx = do
               fg = styleFg style
               bg = styleBg style
           (_, _, maxW, _) <- getMinMax (ctxNodeArena ctx) idx
-          let innerW = max 0 (w - ix)
-              wrapW = if maxW < 1e8 then min maxW innerW else innerW
-          if maxW < 1e8
+          (wTag, _) <- getWidthSizing (ctxNodeArena ctx) idx
+          (tw0, th0) <- ctxMeasureText ctx txt
+          let wrapCap
+                | maxW < 1e8 = max 0 maxW
+                | wTag == SizingGrow && w > 0 = w
+                | otherwise = maxW
+              canWrap = wrapCap < 1e8
+              wrapW = max 0 (wrapCap - ix)
+              lineH = fmLineHeight fm
+          if canWrap && wrapCap + 0.5 < tw0
             then do
-              let lineH = fmLineHeight fm
               textLines <-
                 if isTerminalFont fm
                   then pure (wrapTextLines fm txt wrapW)
@@ -339,7 +362,7 @@ collectNodeTextSpans ctx idx = do
                 [ ( Rect
                       (x + ix)
                       (y + iy + fromIntegral i * lineH)
-                      (min lw innerW)
+                      (min lw (max 0 (w - ix)))
                       lineH
                   , line
                   , fg
@@ -347,9 +370,8 @@ collectNodeTextSpans ctx idx = do
                   )
                 | (i, line, lw) <- zip3 [(0 :: Int) ..] textLines lineWs
                 ]
-            else do
-              (tw, th) <- ctxMeasureText ctx txt
-              pure [(Rect (x + ix) (y + iy) (min tw innerW) th, txt, fg, bg)]
+            else
+              pure [(Rect (x + ix) (y + iy) (min tw0 (max 0 (w - ix))) th0, txt, fg, bg)]
     else
       if isWidgetNode nt
         then widgetTextSpans ctx nt idx x y w h
@@ -665,10 +687,10 @@ widgetTextSpans ctx nt idx x y w h = do
           focus <- textInputFocused ctx idx
           let theme = ctxTheme ctx
               windowBg = themeWindow theme
-              labelFg = lerpColor fg windowBg 0.45
+              labelFg = lerpColor fg windowBg 0.32
               placeholder = T.null (T.pack value) && not focus
               fieldFg
-                | placeholder = lerpColor fg bg 0.55
+                | placeholder = lerpColor fg bg 0.40
                 | otherwise = fg
           case placements of
             (lblPl : fieldPl : _) -> do
@@ -831,25 +853,29 @@ lowerNode ctx idx = do
   case nt of
     NodeContainer -> do
       pad <- getPadding (ctxNodeArena ctx) idx
-      let panelLike =
-            padL pad >= 12 || padR pad >= 12 || padT pad >= 12 || padB pad >= 12
-          paintBg = panelLike
+      let paintBg = isPanelLike pad
       when paintBg $ do
         let style = themePanel theme
         fillStyledRect da terminal style rect
         strokeStyledRect da terminal style (styleBg style) x y w h
-      walkChildren ctx idx
+      if paintBg
+        then withClip da rect $ walkChildren ctx idx
+        else walkChildren ctx idx
     NodeScrollContainer -> do
       let style = themeInput theme
       pad <- getPadding (ctxNodeArena ctx) idx
-      fillStyledRect da terminal style rect
-      strokeStyledRect da terminal style (styleBg style) x y w h
-      let inner =
-            Rect
-              (x + padL pad)
-              (y + padT pad)
-              (w - padL pad - padR pad)
-              (h - padT pad - padB pad)
+      (wTag, _) <- getWidthSizing (ctxNodeArena ctx) idx
+      (hTag, _) <- getHeightSizing (ctxNodeArena ctx) idx
+      -- Paint bounded wells; full-page Grow/Grow viewports stay on the window fill.
+      -- Square corners so axis-aligned clip does not leave rounded leftover pixels.
+      let paintWell = not (wTag == SizingGrow && hTag == SizingGrow)
+          wellStyle = style {styleCornerRadius = 0}
+      when paintWell $ do
+        fillStyledRect da terminal wellStyle rect
+        strokeStyledRect da terminal wellStyle (styleBg wellStyle) x y w h
+      dir <- getDirection (ctxNodeArena ctx) idx
+      contentSize <- getNodeValue (ctxNodeArena ctx) idx
+      let inner = scrollContentClip fm dir x y w h pad contentSize
       withClip da inner $ walkChildren ctx idx
       wid <- getWidgetId (ctxNodeArena ctx) idx
       drawScrollBar ctx da idx wid x y w h pad theme terminal
@@ -889,9 +915,12 @@ lowerNode ctx idx = do
     NodeModal -> pure ()
     NodeImage -> do
       tex <- imageIdFromText <$> getText (ctxNodeArena ctx) idx
-      if terminal || tex <= 0
-        then pushRect da rect (themeAccent theme)
-        else pushImage da rect tex (colorRGBA 255 255 255 255)
+      mUv <- lookupImageUv ctx (ImageId tex)
+      case mUv of
+        Just (u0, v0, u1, v1)
+          | not terminal ->
+              pushImage da rect atlasTextureId u0 v0 u1 v1 (colorRGBA 255 255 255 255)
+        _ -> pushRect da rect (themeAccent theme)
     _ -> do
       style <- widgetVisualStyle ctx nt idx
       value <- getNodeValue (ctxNodeArena ctx) idx
@@ -902,7 +931,17 @@ lowerNode ctx idx = do
       when (not terminal) $ do
         when opaqueBg $ strokeStyledRect da terminal style (styleBg style) x y w h
         when (nt == NodeCheckbox) $
-          drawCheckbox da fm style x y h value (themeAccent theme)
+          drawCheckbox
+            da
+            fm
+            style
+            x
+            y
+            h
+            value
+            (themeAccent theme)
+            (styleBg (themeInput theme))
+            (styleFg style)
         when (nt == NodeSlider) $ do
           let trackRect = sliderTrackRect x y w h
               trackH = rectH trackRect
@@ -920,7 +959,18 @@ lowerNode ctx idx = do
           let handleD = max 10 (trackH * 1.5)
               handleCx = x + max (handleD / 2) (min (w - handleD / 2) fillW)
               handleHy = trackY + (trackH - handleD) / 2
-          pushRoundedRect da (Rect (handleCx - handleD / 2) handleHy handleD handleD) (handleD / 2) (styleFg style)
+              handle = Rect (handleCx - handleD / 2) handleHy handleD handleD
+              innerD = max 4 (handleD - 3)
+              handleInner =
+                Rect
+                  (handleCx - innerD / 2)
+                  (handleHy + (handleD - innerD) / 2)
+                  innerD
+                  innerD
+              ringCol = themeWindow theme
+          -- Dark ring keeps the knob readable on both the well and the accent fill.
+          pushRoundedRect da handle (handleD / 2) ringCol
+          pushRoundedRect da handleInner (innerD / 2) (styleFg style)
         when (nt == NodeTextInput && terminal) $
           drawTextInputCaret da ctx idx x y w h style
         when (nt == NodeSelect) $
@@ -931,18 +981,47 @@ lowerNode ctx idx = do
           when (not (T.null txt)) $
             pushText da fm px py txt (styleFg style)
 
-drawCheckbox :: DrawArena -> FontMetrics -> Style -> Float -> Float -> Float -> Float -> Color -> IO ()
-drawCheckbox da fm style x y h value accent = do
+drawCheckbox ::
+  DrawArena ->
+  FontMetrics ->
+  Style ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Color ->
+  Color ->
+  Color ->
+  IO ()
+drawCheckbox da fm style x y h value accent well markCol = do
   let (ix, _) = widgetContentInset fm
       box = checkboxBoxSize fm
       bx = x + ix
       by = y + (h - box) / 2
-      r = min 4 (box / 4)
-      inset = max 2 (box * 0.2)
-  pushRoundedRect da (Rect bx by box box) r (styleBorder style)
-  pushRoundedRect da (Rect (bx + 1) (by + 1) (box - 2) (box - 2)) (max 0 (r - 1)) (styleBg style)
-  when (value >= 0.5) $
-    pushRoundedRect da (Rect (bx + inset) (by + inset) (box - 2 * inset) (box - 2 * inset)) (max 1 (r - 1)) accent
+      r = min 3 (box / 6)
+      bw = 1.5
+      outer = Rect bx by box box
+      inner = Rect (bx + bw) (by + bw) (box - 2 * bw) (box - 2 * bw)
+      innerR = max 0 (r - bw)
+  if value >= 0.5
+    then do
+      pushRoundedRect da outer r accent
+      drawCheckboxMark da bx by box markCol
+    else do
+      pushRoundedRect da outer r (styleBorder style)
+      pushRoundedRect da inner innerR well
+
+drawCheckboxMark :: DrawArena -> Float -> Float -> Float -> Color -> IO ()
+drawCheckboxMark da bx by box markCol = do
+  let t = max 1.6 (box * 0.11)
+      x0 = bx + box * 0.22
+      y0 = by + box * 0.52
+      x1 = bx + box * 0.42
+      y1 = by + box * 0.72
+      x2 = bx + box * 0.78
+      y2 = by + box * 0.28
+  pushLine da x0 y0 x1 y1 t markCol
+  pushLine da x1 y1 x2 y2 t markCol
 
 drawTextInputCaret :: DrawArena -> Context -> NodeIdx -> Float -> Float -> Float -> Float -> Style -> IO ()
 drawTextInputCaret da ctx idx x y w h style = do
@@ -1009,6 +1088,13 @@ strokeStyledRect da terminal style fillBg x y w h =
 clamp01 :: Float -> Float
 clamp01 v = max 0 (min 1 v)
 
+isPanelLike :: Padding -> Bool
+isPanelLike pad =
+  padL pad >= panelPaintPad
+    || padR pad >= panelPaintPad
+    || padT pad >= panelPaintPad
+    || padB pad >= panelPaintPad
+
 scrollLineFor :: FontMetrics -> Float
 scrollLineFor fm = if isTerminalFont fm then 1 else scrollLine
 
@@ -1048,70 +1134,132 @@ updateScrollWheel :: Context -> Input -> IO ()
 updateScrollWheel ctx inp = do
   let scroll = inputScroll inp
   when (v2Y scroll /= 0 || v2X scroll /= 0) $ do
-    let mouse = inputMousePos inp
-    mTarget <- findScrollTargetUnderMouse ctx mouse
+    mTarget <- pickScrollWheelTarget ctx (inputMousePos inp)
     case mTarget of
       Nothing -> pure ()
-      Just wid -> applyScrollWheelDelta ctx wid scroll
+      Just wid -> void (tryApplyScrollWheelDelta ctx wid scroll)
 
-applyScrollWheelDelta :: Context -> WidgetId -> V2 -> IO ()
-applyScrollWheelDelta ctx wid scroll = do
+-- Nested scrollers take the wheel only while hovered or while they own focus.
+-- No leftover chain to the parent at a limit.
+pickScrollWheelTarget :: Context -> V2 -> IO (Maybe WidgetId)
+pickScrollWheelTarget ctx mouse = do
+  hovered <- findScrollTargetUnderMouse ctx mouse
+  case hovered of
+    Just wid -> pure (Just wid)
+    Nothing -> do
+      focus <- readIORef (ctxFocusId ctx)
+      if hashWidgetId focus == 0
+        then pure Nothing
+        else findScrollOwningWidget ctx focus
+
+findScrollOwningWidget :: Context -> WidgetId -> IO (Maybe WidgetId)
+findScrollOwningWidget ctx wid = do
+  mIdx <- findNodeByWidgetId ctx wid
+  case mIdx of
+    Nothing -> pure Nothing
+    Just idx -> walkUp idx
+  where
+    walkUp i
+      | i < 0 = pure Nothing
+      | otherwise = do
+          nt <- getNodeType (ctxNodeArena ctx) i
+          if isScrollNode nt
+            then Just <$> getWidgetId (ctxNodeArena ctx) i
+            else do
+              p <- getParent (ctxNodeArena ctx) i
+              walkUp p
+
+findNodeByWidgetId :: Context -> WidgetId -> IO (Maybe NodeIdx)
+findNodeByWidgetId ctx wid = do
+  count <- arenaCount (ctxNodeArena ctx)
+  let go idx
+        | idx >= count = pure Nothing
+        | otherwise = do
+            w' <- getWidgetId (ctxNodeArena ctx) idx
+            if w' == wid
+              then pure (Just idx)
+              else go (idx + 1)
+  go 0
+
+tryApplyScrollWheelDelta :: Context -> WidgetId -> V2 -> IO Bool
+tryApplyScrollWheelDelta ctx wid scroll = do
   mGeom <- scrollContainerGeom ctx wid
   case mGeom of
-    Nothing -> pure ()
+    Nothing -> pure False
     Just (_idx, dir, _x, _y, w, h, pad, contentSize) -> do
       cur <- getScrollOffset ctx wid
       let step = scrollLineFor (ctxFontMetrics ctx)
       case dir of
-        DirColumn -> do
-          let inner = h - padT pad - padB pad
-              maxOff = max 0 (contentSize - inner)
-              delta = v2Y scroll * step
-              newOff = max 0 (min maxOff (cur + delta))
-          when (newOff /= cur) $ setScrollOffset ctx wid newOff
-        DirRow -> do
-          let inner = w - padL pad - padR pad
-              maxOff = max 0 (contentSize - inner)
-              delta = v2X scroll * step
-              newOff = max 0 (min maxOff (cur + delta))
-          when (newOff /= cur) $ setScrollOffset ctx wid newOff
+        DirColumn -> applyAxis cur (h - padT pad - padB pad) contentSize (v2Y scroll * step)
+        DirRow -> applyAxis cur (w - padL pad - padR pad) contentSize (v2X scroll * step)
+  where
+    applyAxis cur inner contentSize delta = do
+      let maxOff = max 0 (contentSize - inner)
+          newOff = max 0 (min maxOff (cur + delta))
+      if newOff == cur
+        then pure False
+        else do
+          setScrollOffset ctx wid newOff
+          pure True
 
 findScrollTargetUnderMouse :: Context -> V2 -> IO (Maybe WidgetId)
-findScrollTargetUnderMouse ctx mouse = queryScrollTarget ctx 0 mouse
+findScrollTargetUnderMouse ctx mouse = do
+  (x, y, w, h) <- getRect (ctxNodeArena ctx) 0
+  queryScrollTarget ctx 0 mouse (Rect x y w h)
 
-queryScrollTarget :: Context -> NodeIdx -> V2 -> IO (Maybe WidgetId)
-queryScrollTarget ctx idx mouse = do
-  childHit <- walkScrollSiblings ctx idx mouse
-  case childHit of
-    Just wid -> pure (Just wid)
-    Nothing -> scrollHitSelf ctx idx mouse
+queryScrollTarget :: Context -> NodeIdx -> V2 -> Rect -> IO (Maybe WidgetId)
+queryScrollTarget ctx idx mouse parentClip = do
+  nt <- getNodeType (ctxNodeArena ctx) idx
+  mClipHere <- scrollHitClip ctx idx nt parentClip
+  case mClipHere of
+    Nothing -> pure Nothing
+    Just clip -> do
+      childHit <- walkScrollSiblings ctx idx mouse clip
+      case childHit of
+        Just wid -> pure (Just wid)
+        Nothing -> scrollHitSelf ctx idx mouse clip
 
-walkScrollSiblings :: Context -> NodeIdx -> V2 -> IO (Maybe WidgetId)
-walkScrollSiblings ctx parent mouse = do
+walkScrollSiblings :: Context -> NodeIdx -> V2 -> Rect -> IO (Maybe WidgetId)
+walkScrollSiblings ctx parent mouse clip = do
   fc <- getFirstChild (ctxNodeArena ctx) parent
   go fc
   where
     go ci
       | ci < 0 = pure Nothing
       | otherwise = do
-          hit <- queryScrollTarget ctx ci mouse
+          hit <- queryScrollTarget ctx ci mouse clip
           case hit of
             Just wid -> pure (Just wid)
             Nothing -> do
               ns <- getNextSibling (ctxNodeArena ctx) ci
               go ns
 
-scrollHitSelf :: Context -> NodeIdx -> V2 -> IO (Maybe WidgetId)
-scrollHitSelf ctx idx mouse = do
+scrollHitSelf :: Context -> NodeIdx -> V2 -> Rect -> IO (Maybe WidgetId)
+scrollHitSelf ctx idx mouse clip = do
   nt <- getNodeType (ctxNodeArena ctx) idx
   if not (isScrollNode nt)
     then pure Nothing
-    else do
-      (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-      let viewport = Rect x y w h
-      if w > 0 && h > 0 && rectContains viewport mouse
+    else
+      if rectW clip > 0 && rectH clip > 0 && rectContains clip mouse
         then Just <$> getWidgetId (ctxNodeArena ctx) idx
         else pure Nothing
+
+-- Same clip stack as collectClippedSpans': scroll viewport, then panel bounds.
+scrollHitClip :: Context -> NodeIdx -> NodeType -> Rect -> IO (Maybe Rect)
+scrollHitClip ctx idx nt parentClip = do
+  (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+  pad <- getPadding (ctxNodeArena ctx) idx
+  let fm = ctxFontMetrics ctx
+  if isScrollNode nt
+    then do
+      dir <- getDirection (ctxNodeArena ctx) idx
+      contentSize <- getNodeValue (ctxNodeArena ctx) idx
+      let local = scrollContentClip fm dir x y w h pad contentSize
+      pure (rectIntersect parentClip local)
+    else
+      if nt == NodeContainer && isPanelLike pad
+        then pure (rectIntersect parentClip (Rect x y w h))
+        else pure (Just parentClip)
 
 finalizeTabFocus :: Context -> Input -> IO ()
 finalizeTabFocus ctx inp =
@@ -1152,6 +1300,103 @@ closeSelectOnOutsideClick ctx inp =
       hit <- openSelectHit ctx count mouse (storeSelectOpen store)
       unlessHit hit $
         setStore ctx (store {storeSelectOpen = IM.map (const False) (storeSelectOpen store)})
+
+finalizeSelectKeyboard :: Context -> Input -> IO ()
+finalizeSelectKeyboard ctx inp = do
+  let keys = inputKeys inp
+      wantDown = KeyDown `elem` keys
+      wantUp = KeyUp `elem` keys
+      wantEsc = KeyEscape `elem` keys
+      wantEnter = KeyEnter `elem` keys
+      wantStep = wantDown || wantUp
+  when (wantStep || wantEsc || wantEnter) $ do
+    focus <- readIORef (ctxFocusId ctx)
+    store <- getStore ctx
+    mTarget <- pickSelectKeyboardTarget ctx focus store wantStep
+    case mTarget of
+      Nothing -> pure ()
+      Just (wid, open) -> do
+        allow <- widgetOverlayAllowed ctx wid
+        when allow $
+          case () of
+            _ | wantEsc || wantEnter ->
+                when open $ do
+                  setStore ctx (store {storeSelectOpen = IM.insert (intKey wid) False (storeSelectOpen store)})
+                  when wantEsc $ markEscapeConsumed ctx
+                  markDirty ctx
+            _ | wantStep -> do
+                mIdx <- findNodeByWidgetId ctx wid
+                case mIdx of
+                  Nothing -> pure ()
+                  Just idx -> do
+                    txt <- getText (ctxNodeArena ctx) idx
+                    let (_, opts) = selectParseOptions txt
+                        n = length opts
+                    if n <= 0
+                      then pure ()
+                      else do
+                        let key = intKey wid
+                            cur = IM.findWithDefault 0 key (storeSelect store)
+                            delta = if wantDown then 1 else -1
+                            next = max 0 (min (n - 1) (cur + delta))
+                            st1 = store {storeSelect = IM.insert key next (storeSelect store)}
+                            st2 =
+                              if open
+                                then st1
+                                else st1 {storeSelectOpen = IM.singleton key True}
+                        when (next /= cur || not open) $ do
+                          setStore ctx st2
+                          markDirty ctx
+            _ -> pure ()
+
+pickSelectKeyboardTarget ::
+  Context -> WidgetId -> WidgetStore -> Bool -> IO (Maybe (WidgetId, Bool))
+pickSelectKeyboardTarget ctx focus store wantStep = do
+  if wantStep
+    then do
+      mFocus <- selectWidgetIfAny ctx focus
+      case mFocus of
+        Just wid -> do
+          let open = IM.findWithDefault False (intKey wid) (storeSelectOpen store)
+          pure (Just (wid, open))
+        Nothing -> do
+          mOpen <- findOpenSelectWidget ctx
+          case mOpen of
+            Nothing -> pure Nothing
+            Just w -> pure (Just (w, True))
+    else do
+      mOpen <- findOpenSelectWidget ctx
+      case mOpen of
+        Nothing -> pure Nothing
+        Just w -> pure (Just (w, True))
+
+selectWidgetIfAny :: Context -> WidgetId -> IO (Maybe WidgetId)
+selectWidgetIfAny ctx wid
+  | hashWidgetId wid == 0 = pure Nothing
+  | otherwise = do
+      mIdx <- findNodeByWidgetId ctx wid
+      case mIdx of
+        Nothing -> pure Nothing
+        Just idx -> do
+          nt <- getNodeType (ctxNodeArena ctx) idx
+          if nt == NodeSelect then pure (Just wid) else pure Nothing
+
+findOpenSelectWidget :: Context -> IO (Maybe WidgetId)
+findOpenSelectWidget ctx = do
+  store <- getStore ctx
+  count <- arenaCount (ctxNodeArena ctx)
+  let go idx
+        | idx >= count = pure Nothing
+        | otherwise = do
+            nt <- getNodeType (ctxNodeArena ctx) idx
+            if nt /= NodeSelect
+              then go (idx + 1)
+              else do
+                wid <- getWidgetId (ctxNodeArena ctx) idx
+                if IM.findWithDefault False (intKey wid) (storeSelectOpen store)
+                  then pure (Just wid)
+                  else go (idx + 1)
+  go 0
 
 finalizeSelectPick :: Context -> Input -> IO ()
 finalizeSelectPick ctx inp =
@@ -1508,6 +1753,11 @@ overlayMenuStyle theme =
         , styleHoverBg = hover
         , styleActiveBg = selected
         }
+
+overlayModalStyle :: Theme -> Style
+overlayModalStyle theme =
+  let base = overlayMenuStyle theme
+   in base {styleCornerRadius = 12, styleBorderWidth = 1}
 
 textInputMenuStyle :: Theme -> Style
 textInputMenuStyle = overlayMenuStyle
@@ -2027,17 +2277,14 @@ drawModalOverlays ctx (Size ww wh) = do
         pad <- getPadding (ctxNodeArena ctx) idx
         wid <- getWidgetId (ctxNodeArena ctx) idx
         let rect = Rect x y w h
-            style = overlayMenuStyle theme
-            inner =
-              Rect
-                (x + padL pad)
-                (y + padT pad)
-                (w - padL pad - padR pad)
-                (h - padT pad - padB pad)
+            style = overlayModalStyle theme
         when (not terminal) $ pushMenuShadow da rect (styleCornerRadius style)
         fillStyledRect da terminal style rect
         strokeStyledRect da terminal style (styleBg style) x y w h
-        withClip da inner $ walkChildren ctx idx
+        dir <- getDirection (ctxNodeArena ctx) idx
+        contentSize <- getNodeValue (ctxNodeArena ctx) idx
+        let clip = scrollContentClip fm dir x y w h pad contentSize
+        withClip da clip $ walkChildren ctx idx
         drawScrollBar ctx da idx wid x y w h pad theme terminal
 
 collectModalSpans :: Context -> IO [(Rect, T.Text, Color, Color, Rect)]
@@ -2051,7 +2298,11 @@ collectModalSpans ctx = do
               then go (idx + 1)
               else do
                 (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-                let clip = Rect x y w h
+                pad <- getPadding (ctxNodeArena ctx) idx
+                dir <- getDirection (ctxNodeArena ctx) idx
+                contentSize <- getNodeValue (ctxNodeArena ctx) idx
+                let fm = ctxFontMetrics ctx
+                    clip = scrollContentClip fm dir x y w h pad contentSize
                 here <- walkChildSpans ctx idx clip
                 rest <- go (idx + 1)
                 pure (here ++ rest)
@@ -2149,17 +2400,26 @@ drawSelectChevron da x y w h col = do
   pushLine da (cx - sz) (cy - sz * 0.55) cx (cy + sz * 0.55) 1.5 col
   pushLine da cx (cy + sz * 0.55) (cx + sz) (cy - sz * 0.55) 1.5 col
 
-scrollBarWidth :: Float
-scrollBarWidth = 8
-
-scrollBarMargin :: Float
-scrollBarMargin = 3
-
-scrollBarGeom :: FontMetrics -> (Float, Float)
-scrollBarGeom fm =
-  if isTerminalFont fm
-    then (1, 0)
-    else (scrollBarWidth, scrollBarMargin)
+scrollContentClip ::
+  FontMetrics ->
+  DirTag ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Padding ->
+  Float ->
+  Rect
+scrollContentClip fm dir x y w h pad contentSize =
+  let innerW = w - padL pad - padR pad
+      innerH = h - padT pad - padB pad
+      cx = x + padL pad
+      cy = y + padT pad
+   in case dir of
+        DirColumn ->
+          Rect cx cy (innerW - scrollOverflowGutter fm contentSize innerH) innerH
+        DirRow ->
+          Rect cx cy innerW (innerH - scrollOverflowGutter fm contentSize innerW)
 
 data ScrollBarLayout = ScrollBarLayout
   { sbTrack :: Rect

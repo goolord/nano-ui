@@ -12,7 +12,8 @@ module NanoUI.Style
   , defaultTheme
   , terminalTheme
   , sdlTheme
-  ) where
+  , panelPaintPad
+) where
 
 import NanoUI.Types (Color, colorRGBA)
 
@@ -40,6 +41,10 @@ data Padding = Padding
   , padB :: Float
   }
   deriving (Eq, Show)
+
+-- Containers fill with themePanel when any pad side is at least this.
+panelPaintPad :: Float
+panelPaintPad = 12
 
 data Layout = Layout
   { layoutDirection :: Direction
@@ -151,16 +156,16 @@ defaultTheme =
 sdlTheme :: Theme
 sdlTheme =
   Theme
-    { themeWindow = colorRGBA 33 34 44 255
+    { themeWindow = colorRGBA 24 25 34 255
     , themePanel =
         Style
-          { styleBg = colorRGBA 40 42 54 255
+          { styleBg = colorRGBA 48 50 64 255
           , styleFg = colorRGBA 248 248 242 255
-          , styleBorder = colorRGBA 98 114 164 255
-          , styleBorderWidth = 0
+          , styleBorder = colorRGBA 72 76 102 255
+          , styleBorderWidth = 1
           , styleCornerRadius = 8
-          , styleHoverBg = colorRGBA 40 42 54 255
-          , styleActiveBg = colorRGBA 40 42 54 255
+          , styleHoverBg = colorRGBA 48 50 64 255
+          , styleActiveBg = colorRGBA 48 50 64 255
           }
     , themeButton =
         Style
@@ -169,22 +174,22 @@ sdlTheme =
           , styleBorder = colorRGBA 98 114 164 255
           , styleBorderWidth = 0
           , styleCornerRadius = 6
-          , styleHoverBg = colorRGBA 98 114 164 255
-          , styleActiveBg = colorRGBA 255 121 198 255
+          , styleHoverBg = colorRGBA 88 94 128 255
+          , styleActiveBg = colorRGBA 90 48 78 255
           }
     , themeInput =
         Style
-          { styleBg = colorRGBA 25 26 36 255
+          { styleBg = colorRGBA 20 21 30 255
           , styleFg = colorRGBA 248 248 242 255
           , styleBorder = colorRGBA 98 114 164 255
           , styleBorderWidth = 1
           , styleCornerRadius = 4
-          , styleHoverBg = colorRGBA 32 34 46 255
-          , styleActiveBg = colorRGBA 20 21 30 255
+          , styleHoverBg = colorRGBA 28 30 42 255
+          , styleActiveBg = colorRGBA 16 17 24 255
           }
-    , themeSeparator = colorRGBA 98 114 164 96
+    , themeSeparator = colorRGBA 98 114 164 160
     , themeAccent = colorRGBA 255 121 198 255
-    , themeOverlayDim = colorRGBA 0 0 0 120
+    , themeOverlayDim = colorRGBA 0 0 0 168
     }
 
 terminalTheme :: Theme

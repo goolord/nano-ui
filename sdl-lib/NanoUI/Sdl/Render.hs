@@ -18,7 +18,7 @@ import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (Storable (..), peekByteOff, poke)
 import NanoUI (Color (..), DrawCmd (..), DrawData (..), Layer (..), Rect (..), indexSize, vertexSize)
-import NanoUI.Sdl.Shape (fillRoundedRect, fillSolidRect)
+import NanoUI.Sdl.Shape (fillRoundedRect, fillSolidRect, fillTriangle)
 import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
@@ -98,44 +98,66 @@ setCmdClip ren uiScale cmd
 
 fillQuad :: Ptr SDL_Renderer -> Float -> DrawData -> ImageAtlas -> Int -> Int -> IO ()
 fillQuad ren uiScale dd images texId i = do
-  v0 <- vertexAt dd i
-  v2 <- vertexAt dd (i + 2)
-  case (v0, v2) of
-    (Just (x0, y0, u0, v0c, rgba), Just (x2, y2, u1, v1, _)) ->
-      let w = x2 - x0
-          h = y2 - y0
-       in when (w > 0 && h > 0) $ do
-            let (r, g, b, a) = unpackColor (Color rgba)
-                px = x0 * uiScale
-                py = y0 * uiScale
-                pw = w * uiScale
-                ph = h * uiScale
-            if texId > 0
-              then do
-                mTex <- lookupImage images texId
-                case mTex of
-                  Just tex ->
-                    void $
-                      renderTextureDst
-                        ren
-                        tex
-                        (cf px)
-                        (cf py)
-                        (cf pw)
-                        (cf ph)
-                        (cf u0)
-                        (cf v0c)
-                        (cf u1)
-                        (cf v1)
-                        r
-                        g
-                        b
-                        a
-                  Nothing -> fillSolidRect ren r g b a px py pw ph
+  vert0 <- vertexAt dd i
+  vert1 <- vertexAt dd (i + 1)
+  vert2 <- vertexAt dd (i + 2)
+  case (vert0, vert1, vert2) of
+    (Just (x0, y0, u0, v0c, rgba), Just (x1, y1, _, _, _), Just (x2, y2, u1, v1c, _)) ->
+      let (r, g, b, a) = unpackColor (Color rgba)
+       in if texId > 0
+            then
+              let w = x2 - x0
+                  h = y2 - y0
+               in when (w > 0 && h > 0) $ do
+                    let px = x0 * uiScale
+                        py = y0 * uiScale
+                        pw = w * uiScale
+                        ph = h * uiScale
+                    mTex <- lookupImage images texId
+                    case mTex of
+                      Just tex ->
+                        void $
+                          renderTextureDst
+                            ren
+                            tex
+                            (cf px)
+                            (cf py)
+                            (cf pw)
+                            (cf ph)
+                            (cf u0)
+                            (cf v0c)
+                            (cf u1)
+                            (cf v1c)
+                            r
+                            g
+                            b
+                            a
+                      Nothing -> fillSolidRect ren r g b a px py pw ph
+            else if u0 <= -1.5
+              then
+                fillTriangle
+                  ren
+                  r
+                  g
+                  b
+                  a
+                  (x0 * uiScale)
+                  (y0 * uiScale)
+                  (x1 * uiScale)
+                  (y1 * uiScale)
+                  (x2 * uiScale)
+                  (y2 * uiScale)
               else
-                if v0c < 0
-                  then fillRoundedRect ren r g b a px py pw ph (u0 * uiScale)
-                  else fillSolidRect ren r g b a px py pw ph
+                let w = x2 - x0
+                    h = y2 - y0
+                 in when (w > 0 && h > 0) $ do
+                      let px = x0 * uiScale
+                          py = y0 * uiScale
+                          pw = w * uiScale
+                          ph = h * uiScale
+                      if v0c < 0
+                        then fillRoundedRect ren r g b a px py pw ph (u0 * uiScale)
+                        else fillSolidRect ren r g b a px py pw ph
     _ -> pure ()
 
 cf :: Float -> CFloat

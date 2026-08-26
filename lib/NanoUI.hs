@@ -7,6 +7,9 @@ module NanoUI
   , colorRGBA
   , colorToWord32
   , ImageId (..)
+  , registerImage
+  , atlasTextureId
+  , atlasSnapshot
   , rectContains
   , -- Input
     Input (..)
@@ -27,6 +30,7 @@ module NanoUI
   , defaultTheme
   , terminalTheme
   , sdlTheme
+  , panelPaintPad
   , -- ID
     WidgetId (..)
   , widgetId
@@ -107,7 +111,7 @@ module NanoUI
   , renderASCIIFromRects
   ) where
 
-import NanoUI.Context (Context (..), FrameMsg (..), anyAnimating, ctxTheme, getAnimationValue, getFocusId, getHotId, getPrevRect, getScrollOffset, isDirty, markDirty, modalActive, newContext, newSdlContext, newTerminalContext, overlayConsumesQuit, setAnimationValue, startAnimation, textInputEditActive, withClipboard, withExternalText, withFontMetrics, withMeasureText)
+import NanoUI.Context (Context (..), FrameMsg (..), anyAnimating, atlasSnapshot, atlasTextureId, ctxTheme, getAnimationValue, getFocusId, getHotId, getPrevRect, getScrollOffset, isDirty, markDirty, modalActive, newContext, newSdlContext, newTerminalContext, overlayConsumesQuit, registerImage, setAnimationValue, startAnimation, textInputEditActive, withClipboard, withExternalText, withFontMetrics, withMeasureText)
 import NanoUI.Draw (DrawCmd (..), DrawData (..), Layer (..), indexSize, vertexSize)
 import NanoUI.Font (FontMetrics (..), isTerminalFont, labelContentInset, monospaceMetrics, widgetContentInset, widgetPadding)
 import NanoUI.Frame (collectOverlayTextSpans, collectTextSpans, cursorKindIs, needsRedraw, pointerCursorWanted, runFrame, sliderTrackRect, uiCursorKind, UiCursorKind (..))
@@ -134,6 +138,7 @@ import NanoUI.Style
   , defaultTheme
   , terminalTheme
   , sdlTheme
+  , panelPaintPad
   )
 import NanoUI.Types (Color (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, colorToWord32, rectContains)
 import NanoUI.Widgets

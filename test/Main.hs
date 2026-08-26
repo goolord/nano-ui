@@ -2,7 +2,10 @@ module Main (main) where
 
 import Control.Monad (forM_, replicateM, when)
 import Data.ByteString.Builder (toLazyByteString)
+import qualified Data.ByteString as BS
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Foreign.ForeignPtr (withForeignPtr)
+import Foreign.Storable (peekByteOff)
 import Data.List (isInfixOf, nub)
 import NanoUI
 import NanoUI.Term.Ansi (frameBytes)
@@ -48,6 +51,7 @@ main = do
   run "text-input-mouse-selection" runTextInputMouseSelectionTest
   run "text-input-click-select" runTextInputClickSelectTest
   run "modal-overlay" runModalOverlayTest
+  run "modal-no-phantom-scroll" runModalNoPhantomScrollTest
   run "image" runImageTest
   run "text-input-clipboard" runTextInputClipboardTest
   run "text-input-menu" runTextInputMenuTest
@@ -67,14 +71,22 @@ main = do
   run "checkbox-toggle" runCheckboxTest
   run "slider-store" runSliderTest
   run "scroll-wheel" runScrollTest
+  run "nested-scroll" runNestedScrollTest
+  run "nested-scroll-focus" runNestedScrollFocusTest
+  run "scroll-hover-clip" runScrollHoverClipTest
   run "tab-focus" runTabFocusTest
   run "select-initial" runSelectTest
   run "select-dropdown" runSelectDropdownTest
   run "select-dropdown-hover" runSelectDropdownHoverTest
   run "select-pick-low" runSelectPickLowTest
+  run "select-keyboard" runSelectKeyboardTest
   run "text-wrap" runTextWrapTest
+  run "text-wrap-width" runTextWrapAssignedTest
   run "flex-wrap" runFlexWrapTest
   run "flex-shrink" runFlexShrinkTest
+  run "grow-fits-window" runGrowFitsWindowTest
+  run "grow-wrap-sibling" runGrowWrapPushesSiblingTest
+  run "scroll-bar-gutter" runScrollBarGutterTest
 
   n <- readIORef failed
   if n == 0
@@ -545,22 +557,67 @@ runModalOverlayTest ctx failed = do
   let Rect _ _ _ mh = respRect dlgTall
   when (mh > 200) $ bump failed
 
+-- A short padded modal must not treat its own padding as overflow.
+runModalNoPhantomScrollTest :: Context -> IORef Int -> IO ()
+runModalNoPhantomScrollTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 400 300}
+      ui =
+        modal True "About" $ do
+          _ <- label "Immediate-mode GUI for Haskell."
+          row
+            (defaultLayout {layoutWidth = Grow 1})
+            $ do
+              _ <- spacer (Grow 1) Fit
+              _ <- button "Close"
+              pure ()
+  _ <- runFrame ctx inp0 ui
+  ((dlg, _), _, _, _) <- runFrame ctx inp0 ui
+  let Rect mx my mw mh = respRect dlg
+  when (mw <= 0 || mh <= 0) $ bump failed
+  off0 <- getScrollOffset ctx (respId dlg)
+  let wheel =
+        inp0
+          { inputMousePos = V2 (mx + mw / 2) (my + mh / 2)
+          , inputScroll = V2 0 1
+          }
+  _ <- runFrame ctx wheel ui
+  off1 <- getScrollOffset ctx (respId dlg)
+  when (off0 /= 0 || off1 /= 0) $ bump failed
+
 runImageTest :: Context -> IORef Int -> IO ()
 runImageTest ctx failed = do
+  let px a b c = BS.pack (concat (replicate 16 [a, b, c, 255]))
+  ok1 <- registerImage ctx (ImageId 1) 4 4 (px 255 0 0)
+  ok7 <- registerImage ctx (ImageId 7) 4 4 (px 0 0 255)
+  when (not (ok1 && ok7)) $ bump failed
   let inp0 = emptyInput {inputWindowSize = Size 320 200}
       ui =
-        image
-          ( defaultLayout
-              { layoutWidth = Fixed 40
-              , layoutHeight = Fixed 24
-              }
-          )
-          (ImageId 7)
+        row defaultLayout $ do
+          _ <-
+            image
+              ( defaultLayout
+                  { layoutWidth = Fixed 40
+                  , layoutHeight = Fixed 24
+                  }
+              )
+              (ImageId 1)
+          image
+            ( defaultLayout
+                { layoutWidth = Fixed 40
+                , layoutHeight = Fixed 24
+                }
+            )
+            (ImageId 7)
   _ <- runFrame ctx inp0 ui
   (resp, _, drawData, _) <- runFrame ctx inp0 ui
   let Rect _ _ w h = respRect resp
   when (abs (w - 40) > 0.5 || abs (h - 24) > 0.5) $ bump failed
-  when (not (any (\c -> cmdTextureId c == 7) (drawCommands drawData))) $ bump failed
+  let texCmds = filter (\c -> cmdTextureId c == atlasTextureId) (drawCommands drawData)
+  when (length texCmds /= 1) $ bump failed
+  when (not (any (\c -> cmdIndexCount c == 12) texCmds)) $ bump failed
+  (u0, _) <- vertUv drawData 0
+  (u4, _) <- vertUv drawData 4
+  when (abs (u0 - u4) < 1e-6) $ bump failed
   let missing =
         image
           ( defaultLayout
@@ -572,6 +629,14 @@ runImageTest ctx failed = do
   _ <- runFrame ctx inp0 missing
   (_, _, missingData, _) <- runFrame ctx inp0 missing
   when (any (\c -> cmdTextureId c > 0) (drawCommands missingData)) $ bump failed
+
+vertUv :: DrawData -> Int -> IO (Float, Float)
+vertUv dd i =
+  withForeignPtr (drawVertices dd) $ \p -> do
+    let off = i * vertexSize
+    u <- peekByteOff p (off + 8)
+    v <- peekByteOff p (off + 12)
+    pure (u, v)
 
 runTextInputClipboardTest :: Context -> IORef Int -> IO ()
 runTextInputClipboardTest ctx failed = do
@@ -769,6 +834,30 @@ runScrollThumbCursorTest ctx failed = do
           grabbing <- cursorKindIs ctx press UiCursorGrabbing
           when (not grabbing) $ bump failed
 
+-- Overflowing vertical scroll reserves a right gutter so children do not sit under the bar.
+runScrollBarGutterTest :: Context -> IORef Int -> IO ()
+runScrollBarGutterTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 200 120}
+      ui = do
+        (sid, child) <-
+          scrollArea
+            (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 60})
+            ( column (defaultLayout {layoutWidth = Grow 1}) $ do
+                r <- button "Wide"
+                _ <- replicateM 8 (label "scroll line")
+                pure r
+            )
+        pure (sid, child)
+  _ <- runFrame ctx inp0 ui
+  ((sid, child), _, _, _) <- runFrame ctx inp0 ui
+  mrect <- getPrevRect ctx sid
+  case mrect of
+    Nothing -> bump failed
+    Just (Rect sx _ sw _) -> do
+      let Rect cx _ cw _ = respRect child
+          gutter = 8 + 3
+      when (cx + cw > sx + sw - gutter + 0.01) $ bump failed
+
 runTextInputSpanTest :: Context -> IORef Int -> IO ()
 runTextInputSpanTest ctx failed = do
   let inp0 = emptyInput {inputWindowSize = Size 320 120}
@@ -962,7 +1051,7 @@ runVtTest _ failed = do
 runCellsTest :: Context -> IORef Int -> IO ()
 runCellsTest ctx failed = do
   let ck cond = when (not cond) (bump failed)
-      inp = emptyInput {inputWindowSize = Size 40 10}
+      inp = emptyInput {inputWindowSize = Size 200 80}
       ui = column (defaultLayout {layoutWidth = Grow 1, layoutHeight = Grow 1}) (label "hello")
   (_, _, draw, _) <- runFrame ctx inp ui
   spans <- collectTextSpans ctx
@@ -1041,6 +1130,134 @@ runScrollTest ctx failed = do
   (_, _, _, _) <- runFrame ctx inpScroll ui
   off1 <- getScrollOffset ctx sid
   when (off1 <= off0) $ bump failed
+
+-- Inner list takes the wheel only while hovered. At its limit the page stays put.
+runNestedScrollTest :: Context -> IORef Int -> IO ()
+runNestedScrollTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 200 200}
+      ui = do
+        (outer, inner) <-
+          scrollArea
+            (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 90})
+            ( column defaultLayout $ do
+                (inner, ()) <-
+                  scrollArea
+                    (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 40})
+                    ( column defaultLayout $ do
+                        mapM_ (\i -> label (T.pack ("in " <> show (i :: Int)))) [1 .. 12]
+                    )
+                mapM_ (\i -> label (T.pack ("out " <> show (i :: Int)))) [1 .. 12]
+                pure inner
+            )
+        pure (outer, inner)
+  _ <- runFrame ctx inp0 ui
+  ((outer, inner), _, _, _) <- runFrame ctx inp0 ui
+  mInner <- getPrevRect ctx inner
+  mOuter <- getPrevRect ctx outer
+  case (mInner, mOuter) of
+    (Just (Rect ix iy iw ih), Just (Rect _ oy _ oh))
+      | iw > 0 && ih > 0 -> do
+          let hoverInner = inp0 {inputMousePos = V2 (ix + iw / 2) (iy + ih / 2)}
+              wheelInner = hoverInner {inputScroll = V2 0 1}
+          offI0 <- getScrollOffset ctx inner
+          offO0 <- getScrollOffset ctx outer
+          _ <- runFrame ctx wheelInner ui
+          offI1 <- getScrollOffset ctx inner
+          offO1 <- getScrollOffset ctx outer
+          when (offI1 <= offI0) $ bump failed
+          when (offO1 /= offO0) $ bump failed
+          let pumpInner = do
+                before <- getScrollOffset ctx inner
+                _ <- runFrame ctx wheelInner ui
+                after <- getScrollOffset ctx inner
+                when (after > before) pumpInner
+          pumpInner
+          offO2 <- getScrollOffset ctx outer
+          when (offO2 /= offO1) $ bump failed
+          let hoverOuterY = min (oy + oh - 4) (iy + ih + 8)
+              wheelOuter =
+                inp0
+                  { inputMousePos = V2 (ix + iw / 2) hoverOuterY
+                  , inputScroll = V2 0 1
+                  }
+          offO3 <- getScrollOffset ctx outer
+          _ <- runFrame ctx wheelOuter ui
+          offO4 <- getScrollOffset ctx outer
+          when (offO4 <= offO3) $ bump failed
+    _ -> bump failed
+
+-- A nested scroller below the parent viewport must not take wheel hover.
+runScrollHoverClipTest :: Context -> IORef Int -> IO ()
+runScrollHoverClipTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 200 200}
+      ui = do
+        (outer, inner) <-
+          scrollArea
+            (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 80})
+            ( column defaultLayout $ do
+                mapM_ (\i -> label (T.pack ("out " <> show (i :: Int)))) [1 .. 10]
+                (inner, ()) <-
+                  scrollArea
+                    (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 36})
+                    ( column defaultLayout $ do
+                        mapM_ (\i -> label (T.pack ("in " <> show (i :: Int)))) [1 .. 8]
+                    )
+                pure inner
+            )
+        pure (outer, inner)
+  _ <- runFrame ctx inp0 ui
+  ((_, inner), _, _, _) <- runFrame ctx inp0 ui
+  mInner <- getPrevRect ctx inner
+  case mInner of
+    Just (Rect ix iy iw ih)
+      | iw > 0 && ih > 0 -> do
+          let hoverHidden =
+                inp0
+                  { inputMousePos = V2 (ix + iw / 2) (iy + ih / 2)
+                  , inputScroll = V2 0 1
+                  }
+          offI0 <- getScrollOffset ctx inner
+          _ <- runFrame ctx hoverHidden ui
+          offI1 <- getScrollOffset ctx inner
+          when (offI1 > offI0) $ bump failed
+    _ -> bump failed
+
+-- Wheel with the pointer outside every scroller still moves the nested list
+-- when a widget inside it is focused.
+runNestedScrollFocusTest :: Context -> IORef Int -> IO ()
+runNestedScrollFocusTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 240 220}
+      ui = do
+        (outer, (inner, btn)) <-
+          scrollArea
+            (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 90})
+            ( column defaultLayout $ do
+                pair <-
+                  scrollArea
+                    (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 50})
+                    ( column defaultLayout $ do
+                        b <- button "In"
+                        mapM_ (\i -> label (T.pack ("in " <> show (i :: Int)))) [1 .. 10]
+                        pure b
+                    )
+                mapM_ (\i -> label (T.pack ("out " <> show (i :: Int)))) [1 .. 10]
+                pure pair
+            )
+        pure (outer, inner, btn)
+  _ <- runFrame ctx inp0 ui
+  ((_, inner, _), _, _, _) <- runFrame ctx inp0 ui
+  _ <- runFrame ctx (inp0 {inputKeys = [KeyTab]}) ui
+  focus <- getFocusId ctx
+  when (focus == WidgetId 0) $ bump failed
+  offI0 <- getScrollOffset ctx inner
+  let away =
+        inp0
+          { inputMousePos = V2 230 210
+          , inputScroll = V2 0 1
+          }
+  _ <- runFrame ctx away ui
+  offI1 <- getScrollOffset ctx inner
+  when (offI1 <= offI0) $ bump failed
 
 runTabFocusTest :: Context -> IORef Int -> IO ()
 runTabFocusTest ctx failed = do
@@ -1198,12 +1415,70 @@ runSelectPickLowTest ctx failed = do
       when (not hasLow) $ bump failed
     _ -> bump failed
 
+runSelectKeyboardTest :: Context -> IORef Int -> IO ()
+runSelectKeyboardTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 320 200}
+      ui = select "Quality" ["Low", "Medium", "High"] 1
+  _ <- runFrame ctx inp0 ui
+  ((resp, idx0), _, _, _) <- runFrame ctx inp0 ui
+  when (idx0 /= 1) $ bump failed
+  let Rect sx sy sw sh = respRect resp
+      btn = V2 (sx + sw / 2) (sy + sh / 2)
+      openPress =
+        inp0
+          { inputMousePos = btn
+          , inputMouseDown = True
+          , inputMousePressed = True
+          , inputMouseReleased = False
+          }
+  _ <- runFrame ctx openPress ui
+  let openRelease =
+        openPress
+          { inputMousePressed = False
+          , inputMouseDown = False
+          , inputMouseReleased = True
+          }
+  _ <- runFrame ctx openRelease ui
+  _ <- runFrame ctx (openRelease {inputKeys = [KeyDown]}) ui
+  ((_, idx1), _, _, _) <- runFrame ctx openRelease ui
+  when (idx1 /= 2) $ bump failed
+  _ <- runFrame ctx (openRelease {inputKeys = [KeyUp]}) ui
+  ((_, idx2), _, _, _) <- runFrame ctx openRelease ui
+  when (idx2 /= 1) $ bump failed
+  _ <- runFrame ctx (openRelease {inputKeys = [KeyEscape]}) ui
+  _ <- runFrame ctx openRelease ui
+  overlays <- collectOverlayTextSpans ctx openRelease
+  let dropdownOpen =
+        any
+          (\(_, txt, _, _, _) -> txt `elem` ["Low", "Medium", "High"])
+          overlays
+  when dropdownOpen $ bump failed
+
 runTextWrapTest :: Context -> IORef Int -> IO ()
 runTextWrapTest _ failed = do
   ctx <- newTerminalContext
   let inp = emptyInput {inputWindowSize = Size 40 10}
       long = T.replicate 24 (T.pack "x")
       ui = labelEx (defaultLayout {layoutMaxW = 8}) long
+  _ <- runFrame ctx inp ui
+  spans <- collectTextSpans ctx
+  when (length spans < 3) $ bump failed
+
+-- Grow labels wrap to the assigned column width without an explicit maxW.
+runTextWrapAssignedTest :: Context -> IORef Int -> IO ()
+runTextWrapAssignedTest _ failed = do
+  ctx <- newTerminalContext
+  let inp = emptyInput {inputWindowSize = Size 20 12}
+      long = T.replicate 24 (T.pack "x")
+      ui =
+        column
+          ( defaultLayout
+              { layoutWidth = Fixed 8
+              , layoutPadding = Padding 0 0 0 0
+              , layoutGap = 0
+              }
+          )
+          $ labelEx (defaultLayout {layoutWidth = Grow 1}) long
   _ <- runFrame ctx inp ui
   spans <- collectTextSpans ctx
   when (length spans < 3) $ bump failed
@@ -1250,3 +1525,63 @@ runFlexShrinkTest _ failed = do
   when (length spans /= 3) $ bump failed
   let lastX = maximum (map (\(Rect x _ _ _, _, _, _, _) -> x) spans)
   when (lastX > 3.5) $ bump failed
+
+-- Grow children must shrink when the window is narrower than content.
+runGrowFitsWindowTest :: Context -> IORef Int -> IO ()
+runGrowFitsWindowTest ctx failed = do
+  let inp = emptyInput {inputWindowSize = Size 10 10}
+      ui =
+        row
+          ( defaultLayout
+              { layoutWidth = Grow 1
+              , layoutHeight = Grow 1
+              , layoutPadding = Padding 0 0 0 0
+              , layoutGap = 0
+              }
+          )
+          $ do
+            a <- spacer (Grow 1) (Fixed 8)
+            b <- spacer (Grow 1) (Fixed 8)
+            pure (a, b)
+  _ <- runFrame ctx inp ui
+  ((ra, rb), _, _, _) <- runFrame ctx inp ui
+  let Rect x1 _ w1 _ = respRect ra
+      Rect x2 _ w2 _ = respRect rb
+  when (w1 <= 0 || w2 <= 0) $ bump failed
+  when (x1 < -0.01 || x2 + w2 > 10.01) $ bump failed
+  when (abs (w1 - w2) > 0.5) $ bump failed
+
+-- Grow wrap must remasure height so the next sibling sits below wrapped lines.
+runGrowWrapPushesSiblingTest :: Context -> IORef Int -> IO ()
+runGrowWrapPushesSiblingTest _ failed = do
+  ctx <- newTerminalContext
+  let inp = emptyInput {inputWindowSize = Size 6 20}
+      ui =
+        column
+          ( defaultLayout
+              { layoutWidth = Grow 1
+              , layoutHeight = Grow 1
+              , layoutPadding = Padding 0 0 0 0
+              , layoutGap = 0
+              }
+          )
+          $ do
+            row
+              ( defaultLayout
+                  { layoutWidth = Grow 1
+                  , layoutWrap = True
+                  , layoutPadding = Padding 0 0 0 0
+                  , layoutGap = 0
+                  }
+              )
+              $ do
+                _ <- label "AAAA"
+                _ <- label "BBBB"
+                pure ()
+            label "BELOW"
+  _ <- runFrame ctx inp ui
+  spans <- collectTextSpans ctx
+  let ysFor t = [y | (Rect _ y _ _, txt, _, _, _) <- spans, txt == t]
+  case (ysFor "BBBB", ysFor "BELOW") of
+    ([by], [sy]) -> when (sy < by + 0.5) $ bump failed
+    _ -> bump failed

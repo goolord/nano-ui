@@ -313,3 +313,87 @@ void nano_ui_destroy_texture(SDL_Texture *texture)
         SDL_DestroyTexture(texture);
     }
 }
+
+static float edge_x_at_y(float y, float x0, float y0, float x1, float y1)
+{
+    if (fabsf(y1 - y0) < 1e-6f) {
+        return x0;
+    }
+    return x0 + (y - y0) * (x1 - x0) / (y1 - y0);
+}
+
+static void add_edge_hits(
+    float y,
+    float x0,
+    float y0,
+    float x1,
+    float y1,
+    float *xs,
+    int *count)
+{
+    float lo = fminf(y0, y1);
+    float hi = fmaxf(y0, y1);
+    if (y < lo - 0.5f || y > hi + 0.5f) {
+        return;
+    }
+    if (fabsf(y1 - y0) < 1e-6f) {
+        xs[(*count)++] = fminf(x0, x1);
+        xs[(*count)++] = fmaxf(x0, x1);
+        return;
+    }
+    xs[(*count)++] = edge_x_at_y(y, x0, y0, x1, y1);
+}
+
+bool nano_ui_fill_triangle(
+    SDL_Renderer *renderer,
+    Uint8 r,
+    Uint8 g,
+    Uint8 b,
+    Uint8 a,
+    float x0,
+    float y0,
+    float x1,
+    float y1,
+    float x2,
+    float y2)
+{
+    if (!renderer) {
+        return false;
+    }
+
+    SDL_SetRenderDrawColor(renderer, r, g, b, a);
+
+    float min_y = fminf(y0, fminf(y1, y2));
+    float max_y = fmaxf(y0, fmaxf(y1, y2));
+    int y_start = (int)floorf(min_y);
+    int y_end = (int)ceilf(max_y);
+
+    for (int py = y_start; py <= y_end; py++) {
+        float y = (float)py + 0.5f;
+        float xs[6];
+        int count = 0;
+        add_edge_hits(y, x0, y0, x1, y1, xs, &count);
+        add_edge_hits(y, x1, y1, x2, y2, xs, &count);
+        add_edge_hits(y, x2, y2, x0, y0, xs, &count);
+        if (count < 2) {
+            continue;
+        }
+        float left = xs[0];
+        float right = xs[0];
+        for (int i = 1; i < count; i++) {
+            if (xs[i] < left) {
+                left = xs[i];
+            }
+            if (xs[i] > right) {
+                right = xs[i];
+            }
+        }
+        if (right > left) {
+            SDL_FRect row = {left, (float)py, right - left, 1.f};
+            if (!SDL_RenderFillRect(renderer, &row)) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
