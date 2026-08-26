@@ -92,6 +92,33 @@ void nano_ui_remove_resize_watch(void)
     g_resize_cb = NULL;
 }
 
+static Uint32 g_refresh_event_type = 0;
+
+bool nano_ui_register_refresh_event(void)
+{
+    if (g_refresh_event_type != 0) {
+        return true;
+    }
+    g_refresh_event_type = SDL_RegisterEvents(1);
+    return g_refresh_event_type != 0;
+}
+
+Uint32 nano_ui_refresh_event_type(void)
+{
+    return g_refresh_event_type;
+}
+
+bool nano_ui_push_refresh_event(void)
+{
+    if (g_refresh_event_type == 0) {
+        return false;
+    }
+    SDL_Event ev;
+    SDL_zero(ev);
+    ev.type = g_refresh_event_type;
+    return SDL_PushEvent(&ev);
+}
+
 bool nano_ui_set_render_scale(SDL_Renderer *renderer, float scale)
 {
     if (!renderer || scale <= 0.f) {

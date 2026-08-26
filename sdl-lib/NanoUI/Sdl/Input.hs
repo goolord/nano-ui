@@ -29,6 +29,7 @@ import NanoUI
   , V2 (..)
   , v2Add
   )
+import NanoUI.Sdl.Display (readRefreshEventType)
 import NanoUI.Sdl.Event (SdlEvent (..))
 import SDL3.Sys.Bindgen.Events
   ( SDL_Event (..)
@@ -88,19 +89,25 @@ waitEventTimeout ms =
 decodeEvent :: Ptr SDL_Event -> IO [SdlEvent]
 decodeEvent p = do
   Uint32 w <- peek p.type'
-  case w of
-    256 -> pure [EvQuit]
-    518 -> windowResized p
-    -- Pixel size changes are ignored here; syncDisplay re-queries logical size.
-    519 -> pure [EvDisplayScale]
-    532 -> pure [EvDisplayScale]
-    768 -> keyDown p
-    771 -> textInput p
-    1024 -> mouseMotion p
-    1025 -> mouseButton p True
-    1026 -> mouseButton p False
-    1027 -> mouseWheel p
-    _ -> pure []
+  refreshTy <- readRefreshEventType
+  if refreshTy /= 0 && w == refreshTy
+    then pure [EvRefresh]
+    else decodeEventType p w
+  where
+    decodeEventType p' w' =
+      case w' of
+        256 -> pure [EvQuit]
+        518 -> windowResized p'
+        -- Pixel size changes are ignored here; syncDisplay re-queries logical size.
+        519 -> pure [EvDisplayScale]
+        532 -> pure [EvDisplayScale]
+        768 -> keyDown p'
+        771 -> textInput p'
+        1024 -> mouseMotion p'
+        1025 -> mouseButton p' True
+        1026 -> mouseButton p' False
+        1027 -> mouseWheel p'
+        _ -> pure []
 
 keyDown :: Ptr SDL_Event -> IO [SdlEvent]
 keyDown p = do
@@ -270,6 +277,7 @@ applyEvent inp ev =
         , inputMouseRightReleased = True
         }
     EvScroll delta -> inp {inputScroll = v2Add (inputScroll inp) delta}
+    EvRefresh -> inp
 
 isHardQuitInput :: Input -> Bool
 isHardQuitInput inp =

@@ -7,7 +7,7 @@ Purely functional immediate-mode GUI core for Haskell. Backend-agnostic: emits b
 - **SrcLoc IDs**: `HasCallStack` hashing for stable widget identity without manual ID stacks
 - **Two-pass flex layout**: measure/position over struct-of-arrays node arena
 - **Zero-allocation draw path**: pinned `ForeignPtr` vertex/index arenas reused each frame
-- **Damage tracking**: `needsRedraw` gates on commands, hover target change, `markDirty`, or active animation. Mouse motion on the same widget is skipped. SDL presents only the dirty rect for hover and animation frames.
+- **Damage tracking**: `needsRedraw` gates on commands, hover target change, scroll drag, focused text field, `markDirty`, or active animation. Mouse motion on the same widget is skipped. Scroll or widget-store text changes force a full redraw. SDL scissors hover and animation into the retain texture; the window always gets a full retain copy.
 - **Headless verification**: ASCII renderer + golden-style tests, no window/GL dependency
 
 ## Build
@@ -100,7 +100,8 @@ at native pixel density while layout stays in logical coordinates.
 The backend renders pinned `DrawData` quads through SDL3's 2D renderer, sorts
 draw commands by layer (background → content → overlay), and skips `runFrame`
 when idle (`SDL_WaitEvent` until a command, hover change, `markDirty`, or animation).
-Hover and animation frames scissor to the dirty rect and blit only that box from the retain buffer.
+Cross-thread `markDirty` wakes the loop via a registered SDL user event (`runSdlApp` wires this automatically).
+Hover and animation frames scissor into the retain texture. The window always gets a full retain copy.
 Debug HUD refreshes at 4 Hz instead of every frame.
 
 Build with Zig as the C compiler (MSYS2 UCRT64 for SDL3 + pkg-config):

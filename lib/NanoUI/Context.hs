@@ -12,6 +12,7 @@ module NanoUI.Context
   , newSdlContext
   , markDirty
   , isDirty
+  , setWakeLoop
   , takeDamage
   , getHotId
   , getFocusId
@@ -173,6 +174,7 @@ data Context = Context
   , ctxEscapeConsumed :: IORef Bool
   , ctxWindowDrag :: IORef (Maybe (WidgetId, Float, Float))
   , ctxImageAtlas :: ImageAtlas
+  , ctxWakeLoop :: IORef (Maybe (IO ()))
   }
 
 {-# INLINE newContext #-}
@@ -207,6 +209,7 @@ newContext = do
   ctxEscapeConsumed <- newIORef False
   ctxWindowDrag <- newIORef Nothing
   ctxImageAtlas <- Atlas.newImageAtlas
+  ctxWakeLoop <- newIORef Nothing
   let fm0 = monospaceMetrics 12
   pure
     Context
@@ -245,6 +248,7 @@ newContext = do
   , ctxEscapeConsumed
   , ctxWindowDrag
   , ctxImageAtlas
+  , ctxWakeLoop
       }
 
 {-# INLINE withFontMetrics #-}
@@ -281,7 +285,16 @@ newSdlContext = do
 
 {-# INLINE markDirty #-}
 markDirty :: Context -> IO ()
-markDirty ctx = writeIORef (ctxDirty ctx) True
+markDirty ctx = do
+  writeIORef (ctxDirty ctx) True
+  mWake <- readIORef (ctxWakeLoop ctx)
+  case mWake of
+    Just wake -> wake
+    Nothing -> pure ()
+
+{-# INLINE setWakeLoop #-}
+setWakeLoop :: Context -> IO () -> IO ()
+setWakeLoop ctx wake = writeIORef (ctxWakeLoop ctx) (Just wake)
 
 {-# INLINE isDirty #-}
 isDirty :: Context -> IO Bool
@@ -384,7 +397,6 @@ tickAnimations ctx dt = do
           remaining = IM.difference updated finished
       writeIORef (ctxAnimations ctx) remaining
       writeIORef (ctxAnyAnimating ctx) (not (IM.null remaining))
-      if not (IM.null finished) then markDirty ctx else pure ()
 
 {-# INLINE intKey #-}
 intKey :: WidgetId -> Int
@@ -408,8 +420,9 @@ getStore ctx = readIORef (ctxStore ctx)
 {-# INLINE setStore #-}
 setStore :: Context -> WidgetStore -> IO ()
 setStore ctx store = do
+  prev <- readIORef (ctxStore ctx)
   writeIORef (ctxStore ctx) store
-  markDirty ctx
+  when (prev /= store) (markDirty ctx)
 
 {-# INLINE pushMessage #-}
 pushMessage :: Context -> FrameMsg -> IO ()
@@ -455,7 +468,11 @@ getScrollOffset ctx wid = do
 setScrollOffset :: Context -> WidgetId -> Float -> IO ()
 setScrollOffset ctx wid off = do
   store <- getStore ctx
-  setStore ctx (store {storeScroll = IM.insert (intKey wid) off (storeScroll store)})
+  let key = intKey wid
+      prev = IM.findWithDefault 0 key (storeScroll store)
+  when (prev /= off) $ do
+    setStore ctx (store {storeScroll = IM.insert key off (storeScroll store)})
+    markDirty ctx
 
 {-# INLINE getAnimationValue #-}
 getAnimationValue :: Context -> WidgetId -> IO Float

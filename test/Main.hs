@@ -66,6 +66,12 @@ main = do
   run "idle" runIdleTest
   run "hover-skip" runHoverSkipTest
   run "hover-damage" runHoverDamageTest
+  run "scroll-damage" runScrollDamageTest
+  run "select-overlay-damage" runSelectOverlayDamageTest
+  run "text-input-dirty" runTextInputDirtyTest
+  run "modal-close-damage" runModalCloseDamageTest
+  run "modal-open-damage" runModalOpenDamageTest
+  run "overlay-panel-live" runOverlayPanelLiveTest
   run "animation-idle" runAnimationIdleTest
   run "ascii" runAsciiTest
   run "vt-decode" runVtTest
@@ -1042,6 +1048,177 @@ runHoverDamageTest _ failed = do
   _ <- runFrame ctx inpClick ui
   d2 <- takeDamage ctx
   when (d2 /= DamageFull) $ bump failed
+
+runScrollDamageTest :: Context -> IORef Int -> IO ()
+runScrollDamageTest _ failed = do
+  ctx <- newContext
+  let ui = do
+        (sid, _) <-
+          scrollArea
+            (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 60})
+            ( column defaultLayout $ do
+                _ <- replicateM 8 (label "scroll line")
+                pure ()
+            )
+        pure sid
+      inp0 =
+        emptyInput
+          { inputWindowSize = Size 200 120
+          , inputMousePos = V2 (-10) (-10)
+          }
+  (_, _, _, _) <- runFrame ctx inp0 ui
+  let inpHover = inp0 {inputMousePos = V2 20 20}
+  _ <- runFrame ctx inpHover ui
+  dHover <- takeDamage ctx
+  case dHover of
+    DamageFull -> bump failed
+    DamageClip {} -> pure ()
+  let inpScroll = inpHover {inputScroll = V2 0 1}
+  _ <- runFrame ctx inpScroll ui
+  dScroll <- takeDamage ctx
+  when (dScroll /= DamageFull) $ bump failed
+
+-- Open dropdown: motion over the menu must redraw, and damage must be full.
+runSelectOverlayDamageTest :: Context -> IORef Int -> IO ()
+runSelectOverlayDamageTest _ failed = do
+  ctx <- newContext
+  let ui = column defaultLayout (select "Quality" ["Low", "Medium", "High"] 0)
+      inp0 = emptyInput {inputWindowSize = Size 320 160, inputMousePos = V2 20 20}
+  _ <- runFrame ctx inp0 ui
+  let press =
+        inp0
+          { inputMouseDown = True
+          , inputMousePressed = True
+          }
+  _ <- runFrame ctx press ui
+  let open =
+        press
+          { inputMouseDown = False
+          , inputMousePressed = False
+          , inputMouseReleased = True
+          }
+  _ <- runFrame ctx open ui
+  let idle = open {inputMouseReleased = False, inputDeltaTime = 1}
+  _ <- runFrame ctx idle ui
+  overlays <- collectOverlayTextSpans ctx idle
+  let highYs = [rectY r | (r, txt, _, _, _) <- overlays, "High" `T.isInfixOf` txt]
+  case highYs of
+    [] -> bump failed
+    (highY : _) -> do
+      let overMenu = idle {inputMousePos = V2 20 (highY + 0.5)}
+      need <- needsRedraw ctx idle overMenu
+      when (not need) $ bump failed
+      _ <- runFrame ctx overMenu ui
+      dmg <- takeDamage ctx
+      when (dmg /= DamageFull) $ bump failed
+
+-- Focused text field must stay live so typed bytes are not delayed until
+-- the next unrelated wake, and store text changes force a full redraw.
+runTextInputDirtyTest :: Context -> IORef Int -> IO ()
+runTextInputDirtyTest _ failed = do
+  ctx <- newTerminalContext
+  let ui = column defaultLayout (textInput "Name" "")
+      inp0 = emptyInput {inputWindowSize = Size 200 100, inputMousePos = V2 20 20}
+  _ <- runFrame ctx inp0 ui
+  ((resp, _), _, _, _) <- runFrame ctx inp0 ui
+  let Rect rx ry _ _ = respRect resp
+      click = V2 (rx + 1) (ry + 0.5)
+      press =
+        inp0
+          { inputMousePos = click
+          , inputMouseDown = True
+          , inputMousePressed = True
+          }
+  _ <- runFrame ctx press ui
+  let release =
+        press
+          { inputMouseDown = False
+          , inputMousePressed = False
+          , inputMouseReleased = True
+          }
+  _ <- runFrame ctx release ui
+  let idle = release {inputMouseReleased = False, inputDeltaTime = 1}
+  _ <- runFrame ctx idle ui
+  needFocus <- needsRedraw ctx idle idle
+  when (not needFocus) $ bump failed
+  let typed = idle {inputChars = "ab"}
+  _ <- runFrame ctx typed ui
+  dmg <- takeDamage ctx
+  when (dmg /= DamageFull) $ bump failed
+
+-- Esc dismisses the modal this frame; the next idle frame must still redraw
+-- the dim and panel away (full damage).
+runModalCloseDamageTest :: Context -> IORef Int -> IO ()
+runModalCloseDamageTest _ failed = do
+  ctx <- newContext
+  let ui = do
+        (open, setOpen) <- useFlag True
+        (resp, _) <- modal open "Title" (label "body")
+        onClick resp (setOpen False)
+      inp0 = emptyInput {inputWindowSize = Size 320 240, inputMousePos = V2 1 1}
+  _ <- runFrame ctx inp0 ui
+  _ <- runFrame ctx inp0 ui
+  let esc = inp0 {inputKeys = [KeyEscape]}
+  _ <- runFrame ctx esc ui
+  let idle = inp0 {inputDeltaTime = 1}
+  need <- needsRedraw ctx idle idle
+  when (not need) $ bump failed
+  _ <- runFrame ctx idle ui
+  dmg <- takeDamage ctx
+  when (dmg /= DamageFull) $ bump failed
+
+-- Click opens the modal next frame. That idle frame must still redraw the dim.
+runModalOpenDamageTest :: Context -> IORef Int -> IO ()
+runModalOpenDamageTest _ failed = do
+  ctx <- newContext
+  let ui = do
+        (open, setOpen) <- useFlag False
+        resp <- button "Open"
+        onClick resp (setOpen True)
+        _ <- modal open "Title" (label "body")
+        pure resp
+      inp0 = emptyInput {inputWindowSize = Size 320 240, inputMousePos = V2 (-10) (-10)}
+  _ <- runFrame ctx inp0 ui
+  (resp, _, _, _) <- runFrame ctx inp0 ui
+  let Rect rx ry rw rh = respRect resp
+      click = V2 (rx + rw / 2) (ry + rh / 2)
+      press =
+        inp0
+          { inputMousePos = click
+          , inputMouseDown = True
+          , inputMousePressed = True
+          }
+  _ <- runFrame ctx press ui
+  let release =
+        press
+          { inputMouseDown = False
+          , inputMousePressed = False
+          , inputMouseReleased = True
+          }
+  _ <- runFrame ctx release ui
+  let idle = inp0 {inputDeltaTime = 1}
+  need <- needsRedraw ctx idle idle
+  when (not need) $ bump failed
+  _ <- runFrame ctx idle ui
+  dmg <- takeDamage ctx
+  when (dmg /= DamageFull) $ bump failed
+
+-- Floating window and modal text must keep redrawing. Idle skip would freeze
+-- overlay labels until a click or window drag.
+runOverlayPanelLiveTest :: Context -> IORef Int -> IO ()
+runOverlayPanelLiveTest _ failed = do
+  let inp = emptyInput {inputWindowSize = Size 320 240, inputMousePos = V2 (-10) (-10)}
+      check ui = do
+        ctx <- newContext
+        _ <- runFrame ctx inp ui
+        _ <- runFrame ctx inp ui
+        need <- needsRedraw ctx inp inp
+        when (not need) $ bump failed
+        _ <- runFrame ctx inp ui
+        dmg <- takeDamage ctx
+        when (dmg /= DamageFull) $ bump failed
+  check (void (window True "Debug" (label "fps 0")))
+  check (void (modal True "About" (label "body")))
 
 runAnimationIdleTest :: Context -> IORef Int -> IO ()
 runAnimationIdleTest ctx failed = do

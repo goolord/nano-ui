@@ -1,8 +1,8 @@
 -- | SDL3 backend: consumes geometry ('DrawData') from the core frame loop and
 -- maps SDL events into 'Input'. Idle frames skip 'runFrame' until a command,
--- hover target change, 'markDirty', or an active animation demands a redraw.
--- Mouse motion on the same widget is ignored. Presents clip to a dirty rect
--- when only hover or animation changed (see design doc damage tracking).
+-- hover target change, scroll drag, focused text field, 'markDirty', or an active animation demands a redraw.
+-- Cross-thread 'markDirty' pushes a registered SDL user event to wake 'SDL_WaitEvent'.
+-- Hover and animation frames scissor into the retain texture; the window always gets a full retain copy.
 module NanoUI.Backend.Sdl
   ( SdlEnv (..)
   , runSdlApp
@@ -32,6 +32,8 @@ import NanoUI
   , emptyInput
   , isDirty
   , needsRedraw
+  , textFieldActive
+  , floatingPanelActive
   , overlayConsumesQuit
   , registerImage
   , Rect (..)
@@ -60,7 +62,6 @@ import NanoUI.Sdl.Display
   , queryWindowLogicalSize
   , retainBegin
   , retainBlit
-  , retainBlitRect
   , retainCreate
   , retainDestroy
   , windowToLogicalCoords
@@ -81,10 +82,9 @@ import Data.ByteString (ByteString)
 import Data.Maybe (isJust)
 import Foreign.Ptr (Ptr, nullPtr)
 import qualified NanoUI.Sdl.Image as SdlImage
-import NanoUI.Sdl.Render (renderDrawDataPass)
+import NanoUI.Sdl.Render (renderDrawDataPass, snapDamage)
 import NanoUI.Sdl.Window (SdlEnv (..), defaultWindowSize, syncDisplay, withSdl)
 import SDL3.Sys.Bindgen.Blendmode (sDL_BLENDMODE_BLEND)
-import SDL3.Sys.Bindgen.Render (SDL_Renderer)
 import SDL3.Sys.Render (renderPresentSafe, setRenderDrawBlendModeSafe)
 
 animateTimeout :: Int
@@ -150,7 +150,9 @@ loop ctxRef ui env prev pendingRedraw wasAnimating drawing shouldQuit inp queued
           then pure polled
           else do
             animating <- anyAnimating ctx
-            if animating || wantDebug
+            editing <- textFieldActive ctx
+            floating <- floatingPanelActive ctx
+            if animating || wantDebug || editing || floating
               then waitEventTimeout animateTimeout
               else waitEvent
       else pure queued
@@ -179,6 +181,7 @@ loop ctxRef ui env prev pendingRedraw wasAnimating drawing shouldQuit inp queued
           need <- needsRedraw ctx' prevInp inpSynced
           dirtyNow <- isDirty ctx'
           anim <- anyAnimating ctx'
+          editing <- textFieldActive ctx'
           let forceFinal = wasAnim && not anim
               shouldDraw =
                 need
@@ -187,6 +190,7 @@ loop ctxRef ui env prev pendingRedraw wasAnimating drawing shouldQuit inp queued
                   || pendingDirty
                   || dirtyNow
                   || wantDebug
+                  || editing
           writeIORef wasAnimating anim
           synced <-
             if shouldDraw
@@ -224,7 +228,7 @@ draw ctx ui env inp forceFull = do
   t1 <- getMonotonicTime
   syncPointerCursor (sdlCursors env) ctx inp
   dmg0 <- takeDamage ctx
-  let damage = if forceFull then DamageFull else dmg0
+  let damage = if forceFull then DamageFull else snapDamage scale dmg0
   if damageIsEmpty damage
     then do
       notePresent (sdlDebug env) ((t1 - t0) * 1000) drawData
@@ -245,7 +249,7 @@ draw ctx ui env inp forceFull = do
       renderTextSpans (sdlRenderer env) scale font (sdlTextCache env) (spansIn baseSpans)
       renderDrawDataPass (sdlRenderer env) scale Nothing drawData True (sdlImages env) damage
       renderTextSpans (sdlRenderer env) scale font (sdlTextCache env) (spansIn overlaySpans)
-      okBlit <- presentRetain (sdlRenderer env) tex scale damage
+      okBlit <- retainBlit (sdlRenderer env) tex
       unless okBlit $ fail "SDL_RenderTexture(retain) failed"
       void $ renderPresentSafe (sdlRenderer env)
       notePresent (sdlDebug env) ((t1 - t0) * 1000) drawData
@@ -267,17 +271,6 @@ filterSpans :: Damage -> [(Rect, a, b, c, Rect)] -> [(Rect, a, b, c, Rect)]
 filterSpans DamageFull spans = spans
 filterSpans (DamageClip clip) spans =
   filter (\(box, _, _, _, _) -> isJust (rectIntersect clip box)) spans
-
-presentRetain :: Ptr SDL_Renderer -> Ptr () -> Float -> Damage -> IO Bool
-presentRetain ren tex scale damage =
-  case damage of
-    DamageFull -> retainBlit ren tex
-    DamageClip (Rect x y w h) -> do
-      let px = x * scale
-          py = y * scale
-          pw = w * scale
-          ph = h * scale
-      retainBlitRect ren tex px py pw ph px py
 
 readSdlDebugEnv :: SdlEnv -> IO SdlDebugSnapshot
 readSdlDebugEnv env = do

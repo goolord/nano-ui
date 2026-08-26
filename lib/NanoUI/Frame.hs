@@ -1,6 +1,8 @@
 module NanoUI.Frame
   ( runFrame
   , needsRedraw
+  , textFieldActive
+  , floatingPanelActive
   , collectTextSpans
   , collectOverlayTextSpans
   , pointerCursorWanted
@@ -145,7 +147,9 @@ runFrame ctx inp ui = do
   oldActiveRect <- getPrevRect ctx oldActive
   oldFocusRect <- getPrevRect ctx oldFocus
   oldSize <- readIORef (ctxLastWindowSize ctx)
+  oldStore <- getStore ctx
   wasDirty <- isDirty ctx
+  writeIORef (ctxDirty ctx) False
   animKeys <- IM.keys <$> readIORef (ctxAnimations ctx)
   resetNodeArena (ctxNodeArena ctx)
   resetDrawArena (ctxDrawArena ctx)
@@ -208,6 +212,7 @@ runFrame ctx inp ui = do
     inp
     wasDirty
     oldSize
+    oldStore
     oldHot
     oldActive
     oldFocus
@@ -217,7 +222,9 @@ runFrame ctx inp ui = do
     animKeys
   msgs <- drainMessages ctx
   dirtyAfterUi <- isDirty ctx
-  writeIORef (ctxDirty ctx) False
+  -- Keep mid-frame markDirty for the next loop. Open and close both flip
+  -- the modal flag one frame after the click, so that follow-up must run.
+  writeIORef (ctxDirty ctx) dirtyAfterUi
   pure (result, msgs, drawData, dirtyAfterUi)
 
 needsRedraw :: Context -> Input -> Input -> IO Bool
@@ -225,7 +232,99 @@ needsRedraw ctx prev inp = do
   dirty <- isDirty ctx
   anim <- anyAnimating ctx
   hover <- hoverWouldChange ctx inp
-  pure (dirty || anim || inputInteracted prev inp || inputPointerHeld inp || hover)
+  mDrag <- readIORef (ctxScrollDrag ctx)
+  overlay <- overlayMenuOpen ctx
+  edit <- textFieldActive ctx
+  floating <- floatingPanelActive ctx
+  let overlayMove = overlay && inputMousePos prev /= inputMousePos inp
+  pure
+    ( dirty
+        || anim
+        || inputInteracted prev inp
+        || inputPointerHeld inp
+        || hover
+        || isJust mDrag
+        || overlayMove
+        || edit
+        || floating
+    )
+
+-- Select dropdown or text-input menu is open. Overlay hover is not a widget id.
+overlayMenuOpen :: Context -> IO Bool
+overlayMenuOpen ctx = do
+  store <- getStore ctx
+  menu <- readIORef (ctxTextInputMenu ctx)
+  pure (any id (IM.elems (storeSelectOpen store)) || isJust menu)
+
+overlayMenuOwnerAt :: Context -> V2 -> IO (Maybe WidgetId)
+overlayMenuOwnerAt ctx mouse = do
+  menu <- readIORef (ctxTextInputMenu ctx)
+  case menu of
+    Just m | rectContains (textInputMenuRect m) mouse ->
+      pure (Just (textInputMenuWidget m))
+    _ -> openSelectOwnerAt ctx mouse
+
+openSelectOwnerAt :: Context -> V2 -> IO (Maybe WidgetId)
+openSelectOwnerAt ctx mouse = do
+  store <- getStore ctx
+  count <- arenaCount (ctxNodeArena ctx)
+  let go idx
+        | idx >= count = pure Nothing
+        | otherwise = do
+            nt <- getNodeType (ctxNodeArena ctx) idx
+            if nt /= NodeSelect
+              then go (idx + 1)
+              else do
+                wid <- getWidgetId (ctxNodeArena ctx) idx
+                let key = intKey wid
+                if not (IM.findWithDefault False key (storeSelectOpen store))
+                  then go (idx + 1)
+                  else do
+                    txt <- getText (ctxNodeArena ctx) idx
+                    (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+                    let (_, opts) = selectParseOptions txt
+                        dropRect = selectDropRect (ctxFontMetrics ctx) x y w h (length opts)
+                    if rectContains dropRect mouse
+                      then pure (Just wid)
+                      else go (idx + 1)
+  go 0
+
+-- Focused text field or its context menu. Keep the loop live so typed bytes
+-- are not stuck behind SDL_WaitEvent.
+textFieldActive :: Context -> IO Bool
+textFieldActive ctx = do
+  menu <- readIORef (ctxTextInputMenu ctx)
+  if isJust menu
+    then pure True
+    else do
+      focus <- readIORef (ctxFocusId ctx)
+      if hashWidgetId focus == 0
+        then pure False
+        else do
+          mIdx <- findNodeByWidgetId ctx focus
+          case mIdx of
+            Nothing -> pure False
+            Just idx -> do
+              nt <- getNodeType (ctxNodeArena ctx) idx
+              pure (nt == NodeTextInput)
+
+-- Last frame still has the floating node. Keep the loop live so overlay
+-- labels (debug window, modal body) are not stuck until a click or drag.
+floatingPanelActive :: Context -> IO Bool
+floatingPanelActive ctx = do
+  modal <- readIORef (ctxModalActive ctx)
+  if modal
+    then pure True
+    else do
+      count <- arenaCount (ctxNodeArena ctx)
+      let go idx
+            | idx >= count = pure False
+            | otherwise = do
+                nt <- getNodeType (ctxNodeArena ctx) idx
+                if isFloatingNode nt
+                  then pure True
+                  else go (idx + 1)
+      go 0
 
 hoverWouldChange :: Context -> Input -> IO Bool
 hoverWouldChange ctx inp = do
@@ -1279,7 +1378,6 @@ tryApplyScrollWheelDelta ctx wid scroll = do
         then pure False
         else do
           setScrollOffset ctx wid newOff
-          markDirty ctx
           pure True
 
 findScrollTargetUnderMouse :: Context -> V2 -> IO (Maybe WidgetId)
@@ -1596,7 +1694,6 @@ refreshHover ctx inp = do
   writeIORef (ctxLastHotId ctx) newHot
   let terminal = isTerminalFont (ctxFontMetrics ctx)
   when (prevHot /= newHot) $ do
-    markDirty ctx
     unless terminal $ do
       when (hashWidgetId prevHot /= 0) $ startAnimation ctx prevHot 1 0 0.12
       when (hashWidgetId newHot /= 0) $ startAnimation ctx newHot 0 1 0.12
@@ -1604,10 +1701,14 @@ refreshHover ctx inp = do
 -- Same walk as refreshHover: later nodes paint first, earlier widget hits win.
 probeHotId :: Context -> V2 -> IO WidgetId
 probeHotId ctx mouse = do
-  count <- arenaCount (ctxNodeArena ctx)
-  if count <= 0
-    then pure (WidgetId 0)
-    else go (WidgetId 0) (count - 1)
+  mOverlay <- overlayMenuOwnerAt ctx mouse
+  case mOverlay of
+    Just wid -> pure wid
+    Nothing -> do
+      count <- arenaCount (ctxNodeArena ctx)
+      if count <= 0
+        then pure (WidgetId 0)
+        else go (WidgetId 0) (count - 1)
   where
     go acc idx
       | idx < 0 = pure acc
@@ -2437,7 +2538,8 @@ persistWindowPositions ctx = do
   count <- arenaCount (ctxNodeArena ctx)
   store0 <- getStore ctx
   store1 <- foldlPersist 0 count (storeWindow store0)
-  setStore ctx (store0 {storeWindow = store1})
+  when (store1 /= storeWindow store0) $
+    setStore ctx (store0 {storeWindow = store1})
   where
     foldlPersist idx count acc
       | idx >= count = pure acc
@@ -3155,6 +3257,7 @@ writeDamage ::
   Input ->
   Bool ->
   Size ->
+  WidgetStore ->
   WidgetId ->
   WidgetId ->
   WidgetId ->
@@ -3163,7 +3266,7 @@ writeDamage ::
   Maybe Rect ->
   [Int] ->
   IO ()
-writeDamage ctx inp wasDirty oldSize oldHot oldActive oldFocus oldHotR oldActiveR oldFocusR animKeys = do
+writeDamage ctx inp wasDirty oldSize oldStore oldHot oldActive oldFocus oldHotR oldActiveR oldFocusR animKeys = do
   let Size winW winH = inputWindowSize inp
       sizeChanged = oldSize /= Size winW winH
       commanded =
@@ -3175,7 +3278,21 @@ writeDamage ctx inp wasDirty oldSize oldHot oldActive oldFocus oldHotR oldActive
           || inputScroll inp /= V2 0 0
           || not (null (inputKeys inp))
           || not (null (inputChars inp))
-      full = wasDirty || sizeChanged || commanded
+  newStore <- getStore ctx
+  overlay <- overlayMenuOpen ctx
+  wasModal <- readIORef (ctxModalWasActive ctx)
+  nowModal <- readIORef (ctxModalActive ctx)
+  floating <- floatingPanelActive ctx
+  let storePaintChanged = paintStore oldStore /= paintStore newStore
+      modalFlip = wasModal /= nowModal
+      full =
+        wasDirty
+          || sizeChanged
+          || commanded
+          || storePaintChanged
+          || overlay
+          || modalFlip
+          || floating
   dmg <-
     if full
       then pure DamageFull
@@ -3204,13 +3321,17 @@ writeDamage ctx inp wasDirty oldSize oldHot oldActive oldFocus oldHotR oldActive
                 else do
                   newR <- getPrevRect ctx wid
                   pure (catMaybes [oldOf wid, newR])
-        let clip = rectInflate 2 (unionRects rs)
+        let clip = rectInflate textClipSlop (unionRects rs)
             winArea = winW * winH
         if winArea > 0 && rectArea clip > winArea * 0.5
           then pure DamageFull
           else pure (DamageClip clip)
   writeIORef (ctxDamage ctx) dmg
   writeIORef (ctxLastWindowSize ctx) (Size winW winH)
+
+-- Window drag writes store every frame. Ignore it for damage.
+paintStore :: WidgetStore -> WidgetStore
+paintStore s = s {storeWindow = IM.empty}
 
 unionRects :: [Rect] -> Rect
 unionRects [] = Rect 0 0 0 0

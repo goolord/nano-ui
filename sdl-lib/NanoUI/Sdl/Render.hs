@@ -3,6 +3,7 @@ module NanoUI.Sdl.Render
   , renderDrawDataPass
   , setLogicalClipRect
   , clearLogicalClipRect
+  , snapDamage
   ) where
 
 import NanoUI.Sdl.Image (ImageAtlas, lookupImage)
@@ -30,6 +31,20 @@ import SDL3.Sys.Render
 
 nullClip :: PtrConst.PtrConst SDL_Rect
 nullClip = PtrConst.unsafeFromPtr (nullPtr :: Ptr SDL_Rect)
+
+-- Align a logical clip to the same integer pixels as setLogicalClipRect.
+snapDamage :: Float -> Damage -> Damage
+snapDamage _ DamageFull = DamageFull
+snapDamage uiScale (DamageClip r) = DamageClip (snapClipRect uiScale r)
+
+snapClipRect :: Float -> Rect -> Rect
+snapClipRect uiScale (Rect x y w h) =
+  let s = if uiScale > 0 then uiScale else 1
+      x0 = fromIntegral (floor (x * s) :: Int)
+      y0 = fromIntegral (floor (y * s) :: Int)
+      x1 = fromIntegral (ceiling ((x + w) * s) :: Int)
+      y1 = fromIntegral (ceiling ((y + h) * s) :: Int)
+   in Rect (x0 / s) (y0 / s) ((x1 - x0) / s) ((y1 - y0) / s)
 
 setLogicalClipRect :: Ptr SDL_Renderer -> Float -> Rect -> IO ()
 setLogicalClipRect ren uiScale (Rect x y w h) =

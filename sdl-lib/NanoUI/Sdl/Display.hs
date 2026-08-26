@@ -9,6 +9,9 @@ module NanoUI.Sdl.Display
   , queryRendererName
   , windowToLogicalCoords
   , installResizeWatch
+  , initRefreshEvent
+  , pushRefreshEvent
+  , readRefreshEventType
   , retainCreate
   , retainBegin
   , retainBlit
@@ -16,12 +19,13 @@ module NanoUI.Sdl.Display
   , retainDestroy
 ) where
 
-import Control.Monad (unless)
+import Control.Monad (unless, void)
 import Foreign.C.String (peekCString)
 import Foreign.C.Types (CChar, CFloat (..), CInt (..), CSize (..))
 import Foreign.Marshal.Alloc (alloca, allocaBytes)
 import Foreign.Ptr (FunPtr, Ptr, freeHaskellFunPtr, nullPtr)
 import Foreign.Storable (peek)
+import Data.Word (Word32)
 import NanoUI (Size (..), V2 (..))
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
 import SDL3.Sys.Bindgen.Video (SDL_Window)
@@ -121,6 +125,24 @@ foreign import ccall safe "nano_ui_install_resize_watch"
 
 foreign import ccall safe "nano_ui_remove_resize_watch"
   removeResizeWatchC :: IO ()
+
+foreign import ccall safe "nano_ui_register_refresh_event"
+  registerRefreshEventC :: IO Bool
+
+foreign import ccall safe "nano_ui_refresh_event_type"
+  refreshEventTypeC :: IO Word32
+
+foreign import ccall safe "nano_ui_push_refresh_event"
+  pushRefreshEventC :: IO Bool
+
+initRefreshEvent :: IO Bool
+initRefreshEvent = registerRefreshEventC
+
+readRefreshEventType :: IO Word32
+readRefreshEventType = refreshEventTypeC
+
+pushRefreshEvent :: IO ()
+pushRefreshEvent = void pushRefreshEventC
 
 foreign import ccall safe "nano_ui_retain_create"
   retainCreateC :: Ptr SDL_Renderer -> CInt -> CInt -> IO (Ptr ())

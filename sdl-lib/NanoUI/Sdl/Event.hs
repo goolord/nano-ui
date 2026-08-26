@@ -14,4 +14,5 @@ data SdlEvent
   | EvMouseRightPress V2 Modifiers
   | EvMouseRightRelease V2 Modifiers
   | EvScroll V2
+  | EvRefresh
   deriving (Eq, Show)

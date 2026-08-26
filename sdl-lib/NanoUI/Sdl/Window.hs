@@ -12,11 +12,13 @@ import Foreign.C.String (withCString)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (peek)
-import NanoUI (Context, Input (..), Size (..), markDirty)
+import NanoUI (Context, Input (..), Size (..), markDirty, setWakeLoop)
 import NanoUI.Sdl.Display
   ( defaultFontSize
   , defaultUiScale
+  , initRefreshEvent
   , initSdlHints
+  , pushRefreshEvent
   , queryMouseWindowPos
   , queryWindowDisplayScale
   , queryWindowLogicalSize
@@ -118,6 +120,8 @@ withSdl ctx title (Size w h) act =
     let startup = do
           unlessM (initSafe (SDL_InitFlags 32)) $
             fail "SDL_Init(SDL_INIT_VIDEO) failed"
+          unlessM initRefreshEvent $
+            fail "SDL_RegisterEvents failed for refresh wake"
           withCString title $ \titlePtr ->
             alloca $ \winPtr ->
               alloca $ \renPtr -> do
@@ -174,6 +178,7 @@ withSdl ctx title (Size w h) act =
       scale <- readIORef (sdlScaleRef env)
       font <- readIORef (sdlFontRef env)
       let ctx' = withSdlClipboard (withTtfMeasureScaled ctx font scale)
+      setWakeLoop ctx' pushRefreshEvent
       act ctx' env
 
 unlessM :: IO Bool -> IO () -> IO ()
