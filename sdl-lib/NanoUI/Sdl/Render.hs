@@ -5,12 +5,14 @@ module NanoUI.Sdl.Render
   , clearLogicalClipRect
   ) where
 
+import NanoUI.Sdl.Image (ImageAtlas, lookupImage)
+
 import Control.Monad (void, when)
 import Data.Bits (shiftR, (.&.))
 import Data.List (partition, sortBy)
 import Data.Ord (comparing)
 import Data.Word (Word32, Word8)
-import Foreign.C.Types (CInt)
+import Foreign.C.Types (CFloat (..), CInt)
 import Foreign.ForeignPtr (ForeignPtr, withForeignPtr)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr, nullPtr)
@@ -53,12 +55,12 @@ setLogicalClipRect ren uiScale (Rect x y w h) =
 clearLogicalClipRect :: Ptr SDL_Renderer -> IO ()
 clearLogicalClipRect ren = void $ setRenderClipRectSafe ren nullClip
 
-renderDrawData :: Ptr SDL_Renderer -> Float -> Color -> DrawData -> IO ()
-renderDrawData ren uiScale clearColor drawData =
-  renderDrawDataPass ren uiScale (Just clearColor) drawData False
+renderDrawData :: Ptr SDL_Renderer -> Float -> Color -> DrawData -> ImageAtlas -> IO ()
+renderDrawData ren uiScale clearColor drawData images =
+  renderDrawDataPass ren uiScale (Just clearColor) drawData False images
 
-renderDrawDataPass :: Ptr SDL_Renderer -> Float -> Maybe Color -> DrawData -> Bool -> IO ()
-renderDrawDataPass ren uiScale mClear drawData overlayPass = do
+renderDrawDataPass :: Ptr SDL_Renderer -> Float -> Maybe Color -> DrawData -> Bool -> ImageAtlas -> IO ()
+renderDrawDataPass ren uiScale mClear drawData overlayPass images = do
   clearLogicalClipRect ren
   case mClear of
     Just clearColor -> do
@@ -68,7 +70,7 @@ renderDrawDataPass ren uiScale mClear drawData overlayPass = do
     Nothing -> pure ()
   let (overlay, base) = partition ((== LayerOverlay) . cmdLayer) (drawCommands drawData)
       cmds = if overlayPass then overlay else base
-  mapM_ (drawCmd ren uiScale drawData) (sortBy (comparing layerOrder) cmds)
+  mapM_ (drawCmd ren uiScale drawData images) (sortBy (comparing layerOrder) cmds)
   clearLogicalClipRect ren
 
 layerOrder :: DrawCmd -> Int
@@ -78,13 +80,14 @@ layerOrder cmd =
     LayerContent -> 1
     LayerOverlay -> 2
 
-drawCmd :: Ptr SDL_Renderer -> Float -> DrawData -> DrawCmd -> IO ()
-drawCmd ren uiScale dd cmd = do
+drawCmd :: Ptr SDL_Renderer -> Float -> DrawData -> ImageAtlas -> DrawCmd -> IO ()
+drawCmd ren uiScale dd images cmd = do
   let count = fromIntegral (cmdIndexCount cmd)
   when (count > 0 && count `mod` 6 == 0) $ do
     setCmdClip ren uiScale cmd
     let start = fromIntegral (cmdIndexOffset cmd)
-    mapM_ (fillQuad ren uiScale dd) [start, start + 6 .. start + count - 1]
+        texId = cmdTextureId cmd
+    mapM_ (fillQuad ren uiScale dd images texId) [start, start + 6 .. start + count - 1]
 
 setCmdClip :: Ptr SDL_Renderer -> Float -> DrawCmd -> IO ()
 setCmdClip ren uiScale cmd
@@ -93,12 +96,12 @@ setCmdClip ren uiScale cmd
   | otherwise =
       setLogicalClipRect ren uiScale (Rect (cmdClipX cmd) (cmdClipY cmd) (cmdClipW cmd) (cmdClipH cmd))
 
-fillQuad :: Ptr SDL_Renderer -> Float -> DrawData -> Int -> IO ()
-fillQuad ren uiScale dd i = do
+fillQuad :: Ptr SDL_Renderer -> Float -> DrawData -> ImageAtlas -> Int -> Int -> IO ()
+fillQuad ren uiScale dd images texId i = do
   v0 <- vertexAt dd i
   v2 <- vertexAt dd (i + 2)
   case (v0, v2) of
-    (Just (x0, y0, u0, v0c, rgba), Just (x2, y2, _, _, _)) ->
+    (Just (x0, y0, u0, v0c, rgba), Just (x2, y2, u1, v1, _)) ->
       let w = x2 - x0
           h = y2 - y0
        in when (w > 0 && h > 0) $ do
@@ -107,10 +110,54 @@ fillQuad ren uiScale dd i = do
                 py = y0 * uiScale
                 pw = w * uiScale
                 ph = h * uiScale
-            if v0c < 0
-              then fillRoundedRect ren r g b a px py pw ph (u0 * uiScale)
-              else fillSolidRect ren r g b a px py pw ph
+            if texId > 0
+              then do
+                mTex <- lookupImage images texId
+                case mTex of
+                  Just tex ->
+                    void $
+                      renderTextureDst
+                        ren
+                        tex
+                        (cf px)
+                        (cf py)
+                        (cf pw)
+                        (cf ph)
+                        (cf u0)
+                        (cf v0c)
+                        (cf u1)
+                        (cf v1)
+                        r
+                        g
+                        b
+                        a
+                  Nothing -> fillSolidRect ren r g b a px py pw ph
+              else
+                if v0c < 0
+                  then fillRoundedRect ren r g b a px py pw ph (u0 * uiScale)
+                  else fillSolidRect ren r g b a px py pw ph
     _ -> pure ()
+
+cf :: Float -> CFloat
+cf = realToFrac
+
+foreign import ccall safe "nano_ui_render_texture_dst"
+  renderTextureDst ::
+    Ptr SDL_Renderer ->
+    Ptr () ->
+    CFloat ->
+    CFloat ->
+    CFloat ->
+    CFloat ->
+    CFloat ->
+    CFloat ->
+    CFloat ->
+    CFloat ->
+    Word8 ->
+    Word8 ->
+    Word8 ->
+    Word8 ->
+    IO Bool
 
 ci :: Int -> CInt
 ci = fromIntegral

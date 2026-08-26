@@ -7,6 +7,7 @@ module NanoUI.Types
   , Color (..)
   , colorRGBA
   , colorToWord32
+  , ImageId (..)
   , rectContains
   , rectUnion
   , rectIntersect
@@ -38,6 +39,11 @@ data Rect = Rect
   , rectH :: {-# UNPACK #-} !Float
   }
   deriving (Eq, Show)
+
+newtype ImageId = ImageId
+  { unImageId :: Int
+  }
+  deriving (Eq, Ord, Show)
 
 newtype Color = Color Word32
   deriving (Eq, Show)

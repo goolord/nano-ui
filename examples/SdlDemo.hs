@@ -2,11 +2,12 @@
 
 module Main (main) where
 
-import Control.Monad (when)
+import Control.Monad (unless, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import NanoUI
-import NanoUI.Backend.Sdl (runSdlAppWithQuit)
+import qualified Data.ByteString as BS
+import NanoUI.Backend.Sdl (registerRgbaImage, runSdlAppWith)
 import qualified Data.Text as T
 
 outerPad :: Padding
@@ -23,7 +24,14 @@ main = do
   ctx <- newSdlContext
   lastClick <- newIORef ("" :: String)
   aboutOpen <- newIORef False
-  runSdlAppWithQuit ctx (\inp -> KeyEscape `elem` inputKeys inp) $
+  runSdlAppWith
+    ctx
+    ( \env -> do
+        ok <- registerRgbaImage env (ImageId 1) 32 32 swatchPixels
+        unless ok $ fail "registerRgbaImage failed"
+    )
+    (\inp -> KeyEscape `elem` inputKeys inp)
+    $
     column
       defaultLayout
         { layoutWidth = Grow 1
@@ -92,6 +100,14 @@ main = do
                               <> click
                           )
                       )
+                  _ <-
+                    image
+                      ( defaultLayout
+                          { layoutWidth = Fixed 48
+                          , layoutHeight = Fixed 48
+                          }
+                      )
+                      (ImageId 1)
                   _ <- label "Click widgets, type in Name. Esc closes About, then quits"
                   showAbout <- liftIO (readIORef aboutOpen)
                   (aboutResp, _) <-
@@ -104,3 +120,17 @@ main = do
                   pure ()
           )
       )
+
+swatchPixels :: BS.ByteString
+swatchPixels =
+  BS.pack
+    [ chan
+    | y <- [0 .. 31] :: [Int]
+    , x <- [0 .. 31] :: [Int]
+    , chan <-
+        [ fromIntegral (x * 255 `div` 31)
+        , fromIntegral (y * 255 `div` 31)
+        , 180
+        , 255
+        ]
+    ]

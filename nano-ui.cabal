@@ -156,12 +156,14 @@ library nano-ui-sdl
         NanoUI.Sdl.Cursor
         NanoUI.Sdl.Display
         NanoUI.Sdl.Font
+        NanoUI.Sdl.Image
         NanoUI.Sdl.Input
         NanoUI.Sdl.Render
         NanoUI.Sdl.Shape
         NanoUI.Sdl.Window
     c-sources:        sdl-lib/cbits/nano_ui_ttf.c
                       sdl-lib/cbits/nano_ui_display.c
+                      sdl-lib/cbits/nano_ui_image.c
     include-dirs:     sdl-lib/cbits
     pkgconfig-depends: sdl3 >= 3.2, sdl3-ttf >= 3.2
     build-depends:
@@ -186,6 +188,7 @@ executable nano-ui-sdl-demo
     main-is:          SdlDemo.hs
     build-depends:
         base ^>=4.22.0.0,
+        bytestring ^>=0.12,
         nano-ui,
         nano-ui:nano-ui-sdl,
         text ^>=2.1

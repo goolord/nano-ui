@@ -64,6 +64,7 @@ data NodeType
   | NodeScrollContainer
   | NodeSelect
   | NodeModal
+  | NodeImage
   deriving (Eq, Show, Enum, Bounded)
 
 isWidgetNode :: NodeType -> Bool
@@ -75,6 +76,7 @@ isWidgetNode nt =
     NodeSlider -> True
     NodeTextInput -> True
     NodeSelect -> True
+    NodeImage -> True
     _ -> False
 
 isContainerNode :: NodeType -> Bool

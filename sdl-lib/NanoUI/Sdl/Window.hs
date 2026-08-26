@@ -36,6 +36,7 @@ import NanoUI.Sdl.Font
   , withTtf
   , withTtfMeasureScaled
   )
+import NanoUI.Sdl.Image (ImageAtlas, destroyImageAtlas, newImageAtlas)
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Bindgen.Video (SDL_Window, SDL_WindowFlags (..))
@@ -58,6 +59,7 @@ data SdlEnv = SdlEnv
   , sdlScaleRef :: IORef Float
   , sdlFontRef :: IORef SdlFont
   , sdlTextCache :: TextCache
+  , sdlImages :: ImageAtlas
   , sdlCursors :: SdlCursors
   }
 
@@ -131,6 +133,7 @@ withSdl ctx title (Size w h) act =
                 scaleRef <- newIORef scale
                 fontRef <- newIORef font
                 cache <- newTextCache
+                images <- newImageAtlas
                 cursors <- initCursors
                 unlessM (setRenderScale ren defaultUiScale) $
                   fail "SDL_SetRenderScale failed"
@@ -143,10 +146,12 @@ withSdl ctx title (Size w h) act =
                     , sdlScaleRef = scaleRef
                     , sdlFontRef = fontRef
                     , sdlTextCache = cache
+                    , sdlImages = images
                     , sdlCursors = cursors
                     }
         teardown env = do
           destroyCursors (sdlCursors env)
+          destroyImageAtlas (sdlImages env)
           destroyTextCache (sdlTextCache env)
           font <- readIORef (sdlFontRef env)
           closeFont font
