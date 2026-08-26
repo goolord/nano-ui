@@ -27,6 +27,7 @@ import NanoUI
   , collectOverlayTextSpans
   , emptyInput
   , needsRedraw
+  , overlayConsumesQuit
   , runFrame
   , textInputEditActive
   )
@@ -141,12 +142,15 @@ termMainLoop ctx shouldQuit ui onEnter onLeave getSize readEvents present =
                   group
           inp' <- stampClicks clickRef inpRaw
           editActive' <- textInputEditActive ctx
-          if shouldQuit inp' || (isHardQuitInput inp' && not editActive')
+          if isHardQuitInput inp' && not editActive'
             then pure ()
             else do
               draw prev prevInp inp'
               writeIORef prevInp inp'
-              loop prev prevInp clickRef inp' rest now
+              overlayQuit <- overlayConsumesQuit ctx inp'
+              if shouldQuit inp' && not overlayQuit
+                then pure ()
+                else loop prev prevInp clickRef inp' rest now
 
     draw prevCells prevInpRef inp = do
       prevI <- readIORef prevInpRef

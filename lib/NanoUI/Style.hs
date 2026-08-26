@@ -104,6 +104,7 @@ data Theme = Theme
   , themeInput :: Style
   , themeSeparator :: Color
   , themeAccent :: Color
+  , themeOverlayDim :: Color
   }
   deriving (Eq, Show)
 
@@ -143,6 +144,7 @@ defaultTheme =
           }
     , themeSeparator = colorRGBA 80 80 85 255
     , themeAccent = colorRGBA 100 149 237 255
+    , themeOverlayDim = colorRGBA 0 0 0 120
     }
 
 -- Dracula-inspired palette similar to dvui's default dark themes.
@@ -182,6 +184,7 @@ sdlTheme =
           }
     , themeSeparator = colorRGBA 98 114 164 96
     , themeAccent = colorRGBA 255 121 198 255
+    , themeOverlayDim = colorRGBA 0 0 0 120
     }
 
 terminalTheme :: Theme
@@ -220,4 +223,5 @@ terminalTheme =
           }
     , themeSeparator = colorRGBA 100 105 120 255
     , themeAccent = colorRGBA 90 160 255 255
+    , themeOverlayDim = colorRGBA 0 0 0 80
     }

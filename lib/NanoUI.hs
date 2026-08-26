@@ -51,6 +51,7 @@ module NanoUI
   , tooltip
   , scrollArea
   , select
+  , modal
   , -- Frame
     runFrame
   , needsRedraw
@@ -77,6 +78,8 @@ module NanoUI
   , getFocusId
   , withClipboard
   , textInputEditActive
+  , modalActive
+  , overlayConsumesQuit
   , getPrevRect
   , getScrollOffset
   , startAnimation
@@ -102,7 +105,7 @@ module NanoUI
   , renderASCIIFromRects
   ) where
 
-import NanoUI.Context (Context (..), FrameMsg (..), anyAnimating, ctxTheme, getAnimationValue, getFocusId, getHotId, getPrevRect, getScrollOffset, isDirty, markDirty, newContext, newSdlContext, newTerminalContext, setAnimationValue, startAnimation, textInputEditActive, withClipboard, withExternalText, withFontMetrics, withMeasureText)
+import NanoUI.Context (Context (..), FrameMsg (..), anyAnimating, ctxTheme, getAnimationValue, getFocusId, getHotId, getPrevRect, getScrollOffset, isDirty, markDirty, modalActive, newContext, newSdlContext, newTerminalContext, overlayConsumesQuit, setAnimationValue, startAnimation, textInputEditActive, withClipboard, withExternalText, withFontMetrics, withMeasureText)
 import NanoUI.Draw (DrawCmd (..), DrawData (..), Layer (..), indexSize, vertexSize)
 import NanoUI.Font (FontMetrics (..), isTerminalFont, labelContentInset, monospaceMetrics, widgetContentInset, widgetPadding)
 import NanoUI.Frame (collectOverlayTextSpans, collectTextSpans, cursorKindIs, needsRedraw, pointerCursorWanted, runFrame, sliderTrackRect, uiCursorKind, UiCursorKind (..))
@@ -147,4 +150,5 @@ import NanoUI.Widgets
   , tooltip
   , scrollArea
   , select
+  , modal
   )

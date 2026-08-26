@@ -47,6 +47,7 @@ main = do
   run "text-input-ctrl-a" runTextInputCtrlATest
   run "text-input-mouse-selection" runTextInputMouseSelectionTest
   run "text-input-click-select" runTextInputClickSelectTest
+  run "modal-overlay" runModalOverlayTest
   run "text-input-clipboard" runTextInputClipboardTest
   run "text-input-menu" runTextInputMenuTest
   run "select-dropdown-cursor" runSelectDropdownCursorTest
@@ -455,6 +456,93 @@ runTextInputClickSelectTest _ failed = do
       ((_, val), _, _, _) <- runFrame allCtx del allUi
       when (val /= "") $ bump failed
     _ -> bump failed
+
+runModalOverlayTest :: Context -> IORef Int -> IO ()
+runModalOverlayTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 320 200}
+      ui =
+        column defaultLayout $ do
+          outside <- button "Outside"
+          (dlg, mInside) <-
+            modal True "Title" $ do
+              button "Inside"
+          pure (outside, dlg, mInside)
+      closedUi =
+        column defaultLayout $ do
+          _ <- button "Outside"
+          (dlg, mInside) <-
+            modal False "Title" $ do
+              button "Inside"
+          pure (dlg, mInside)
+  do
+    ((dlg, mInside), _, _, _) <- runFrame ctx inp0 closedUi
+    when (respClicked dlg) $ bump failed
+    case mInside of
+      Nothing -> pure ()
+      Just _ -> bump failed
+    closedSpans <- collectOverlayTextSpans ctx inp0
+    let closedTitle = any (\(_, txt, _, _, _) -> "Title" `T.isInfixOf` txt) closedSpans
+    when closedTitle $ bump failed
+  _ <- runFrame ctx inp0 ui
+  ((outside0, _, mInside0), _, _, _) <- runFrame ctx inp0 ui
+  overlays <- collectOverlayTextSpans ctx inp0
+  let hasTitle = any (\(_, txt, _, _, _) -> "Title" `T.isInfixOf` txt) overlays
+      hasInside = any (\(_, txt, _, _, _) -> "Inside" `T.isInfixOf` txt) overlays
+  when (not (hasTitle && hasInside)) $ bump failed
+  case mInside0 of
+    Just inside -> do
+      let Rect ix iy iw ih = respRect inside
+          clickIn =
+            inp0
+              { inputMousePos = V2 (ix + iw / 2) (iy + ih / 2)
+              , inputMouseDown = True
+              , inputMousePressed = True
+              }
+      _ <- runFrame ctx clickIn ui
+      let releaseIn =
+            clickIn
+              { inputMouseDown = False
+              , inputMousePressed = False
+              , inputMouseReleased = True
+              }
+      ((_, _, mClicked), _, _, _) <- runFrame ctx releaseIn ui
+      case mClicked of
+        Just r -> when (not (respClicked r)) $ bump failed
+        Nothing -> bump failed
+      let Rect ox oy ow oh = respRect outside0
+          clickOut =
+            inp0
+              { inputMousePos = V2 (ox + ow / 2) (oy + oh / 2)
+              , inputMouseDown = True
+              , inputMousePressed = True
+              }
+      ((outsideHit, _, _), _, _, _) <- runFrame ctx clickOut ui
+      when (respClicked outsideHit) $ bump failed
+      let backdrop =
+            inp0
+              { inputMousePos = V2 4 4
+              , inputMouseDown = True
+              , inputMousePressed = True
+              }
+      ((_, dlg, _), _, _, _) <- runFrame ctx backdrop ui
+      when (not (respClicked dlg)) $ bump failed
+      let esc = inp0 {inputKeys = [KeyEscape]}
+      ((_, dlgEsc, _), _, _, _) <- runFrame ctx esc ui
+      when (not (respClicked dlgEsc)) $ bump failed
+      consumed <- overlayConsumesQuit ctx esc
+      when (not consumed) $ bump failed
+      _ <- runFrame ctx esc closedUi
+      leftover <- overlayConsumesQuit ctx esc
+      when leftover $ bump failed
+    Nothing -> bump failed
+  let tallUi =
+        modal True "Tall" $ do
+          mapM_ (\i -> label (T.pack ("Row " <> show (i :: Int)))) [1 .. 40]
+          button "Close"
+  _ <- runFrame ctx inp0 tallUi
+  ((dlgTall, _), _, _, _) <- runFrame ctx inp0 tallUi
+  let Rect _ _ _ mh = respRect dlgTall
+  when (mh > 200) $ bump failed
 
 runTextInputClipboardTest :: Context -> IORef Int -> IO ()
 runTextInputClipboardTest ctx failed = do

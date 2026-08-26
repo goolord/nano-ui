@@ -10,7 +10,7 @@ module NanoUI.Frame
   , sliderTrackRect
   ) where
 
-import Control.Monad (forM, forM_, unless, when)
+import Control.Monad (filterM, forM, forM_, unless, when)
 import Data.Char (isAlphaNum, isSpace)
 import Data.IORef (readIORef, writeIORef)
 import Data.List (findIndex)
@@ -47,6 +47,7 @@ import NanoUI.Context
   , readTooltips
   , PendingTooltip (..)
   , ctxClipboardGet
+  , markEscapeConsumed
   )
 import NanoUI.Draw
   ( DrawArena
@@ -84,6 +85,7 @@ import NanoUI.Layout.Arena
   , getFirstChild
   , getMinMax
   , getNextSibling
+  , getParent
   , getNodeType
   , getNodeValue
   , getPadding
@@ -92,13 +94,14 @@ import NanoUI.Layout.Arena
   , getWidgetId
   , isWidgetNode
   , isContainerNode
-  , NodeType (NodeButton, NodeCheckbox, NodeSelect, NodeSlider, NodeTextInput)
+  , isScrollNode
+  , NodeType (NodeButton, NodeCheckbox, NodeSelect, NodeSlider, NodeTextInput, NodeModal)
   , resetNodeArena
   , setNodeText
   , setNodeValue
   , setRect
   )
-import NanoUI.Layout.Solve (solveLayout)
+import NanoUI.Layout.Solve (placeModals, solveLayout)
 import NanoUI.Monad (UI (..))
 import NanoUI.Widgets (applyTextInputMenuAction)
 import NanoUI.WidgetText
@@ -117,7 +120,7 @@ import NanoUI.WidgetText
   , selectChevronReserve
   , selectChevronCenterX
   )
-import NanoUI.Style (Padding (..), Style (..), Theme (..), themeAccent, themeButton, themeInput, themePanel, themeSeparator, themeWindow)
+import NanoUI.Style (Padding (..), Style (..), Theme (..), themeAccent, themeButton, themeInput, themeOverlayDim, themePanel, themeSeparator, themeWindow)
 import NanoUI.Types (Color (..), Rect (..), Size (..), V2 (..), colorRGBA, rectContains, rectH, rectIntersect, rectOverlapArea, rectW, rectX, rectY, sliderTrackRect, v2X, v2Y)
 
 runFrame :: Context -> Input -> UI a -> IO (a, [FrameMsg], DrawData, Bool)
@@ -130,12 +133,18 @@ runFrame ctx inp ui = do
   writeIORef (ctxWidgetNodeTypes ctx) Nothing
   unless (inputMouseDown inp) $
     writeIORef (ctxSelectDropPress ctx) False
+  modalNow <- readIORef (ctxModalActive ctx)
+  writeIORef (ctxModalWasActive ctx) modalNow
+  writeIORef (ctxModalActive ctx) False
+  writeIORef (ctxModalDepth ctx) 0
+  writeIORef (ctxEscapeConsumed ctx) False
   clearTooltips ctx
   result <- unUI ui ctx inp
   -- Terminal sliders embed the bar in node text; sync before measure so width is correct.
   syncWidgetLabels ctx
   let Size w h = inputWindowSize inp
   solveLayout (ctxNodeArena ctx) (ctxFontMetrics ctx) (ctxMeasureText ctx) w h
+  placeModals (ctxNodeArena ctx) w h
   updateScrollWheel ctx inp
   updateScrollDrag ctx inp
   applyScrollOffsets ctx
@@ -147,6 +156,7 @@ runFrame ctx inp ui = do
   openTextInputMenu ctx inp
   finalizeTextInputMenuPick ctx inp
   closeTextInputMenuOnEscape ctx inp
+  constrainFocusToModal ctx
   finalizeTabFocus ctx inp
   markSelectDropPress ctx inp
   finalizeSelectPick ctx inp
@@ -157,6 +167,7 @@ runFrame ctx inp ui = do
   beginLayer (ctxDrawArena ctx) LayerBackground
   lowerShapes ctx
   beginLayer (ctxDrawArena ctx) LayerOverlay
+  drawModalOverlays ctx (inputWindowSize inp)
   drawSelectOverlays ctx inp
   drawTextInputMenuOverlays ctx inp
   drawTooltipOverlays ctx
@@ -185,16 +196,23 @@ collectOverlayTextSpans ctx inp = do
   drops <- collectSelectDropdownSpans ctx inp
   menu <- collectTextInputMenuSpans ctx inp
   tips <- collectTooltipSpans ctx
-  pure (drops ++ menu ++ tips)
+  modals <- collectModalSpans ctx
+  pure (modals ++ drops ++ menu ++ tips)
 
 collectClippedSpans :: Context -> NodeIdx -> Rect -> IO [(Rect, T.Text, Color, Color, Rect)]
 collectClippedSpans ctx idx clip = do
   nt <- getNodeType (ctxNodeArena ctx) idx
+  if nt == NodeModal
+    then pure []
+    else collectClippedSpans' ctx idx nt clip
+
+collectClippedSpans' :: Context -> NodeIdx -> NodeType -> Rect -> IO [(Rect, T.Text, Color, Color, Rect)]
+collectClippedSpans' ctx idx nt clip = do
   (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
   let nodeRect = Rect x y w h
       mClipChildren =
         case nt of
-          NodeScrollContainer -> rectIntersect clip nodeRect
+          _ | isScrollNode nt -> rectIntersect clip nodeRect
           _ -> Just clip
   case mClipChildren of
     Nothing -> pure []
@@ -500,7 +518,7 @@ scrollThumbHit ctx mouse = do
       | idx >= count = pure False
       | otherwise = do
           nt <- getNodeType (ctxNodeArena ctx) idx
-          if nt /= NodeScrollContainer
+          if not (isScrollNode nt)
             then go (idx + 1) count
             else do
               wid <- getWidgetId (ctxNodeArena ctx) idx
@@ -867,6 +885,7 @@ lowerNode ctx idx = do
             (rectH fieldRect)
           drawTextInputCaret da ctx idx x y w h style
     NodeSpacer -> pure ()
+    NodeModal -> pure ()
     _ -> do
       style <- widgetVisualStyle ctx nt idx
       value <- getNodeValue (ctxNodeArena ctx) idx
@@ -995,7 +1014,7 @@ applyScrollOffsets ctx = do
   count <- arenaCount (ctxNodeArena ctx)
   forM_ [0 .. count - 1] $ \idx -> do
     nt <- getNodeType (ctxNodeArena ctx) idx
-    when (nt == NodeScrollContainer) $ do
+    when (isScrollNode nt) $ do
       wid <- getWidgetId (ctxNodeArena ctx) idx
       off <- getScrollOffset ctx wid
       when (off > 0) $ do
@@ -1079,7 +1098,7 @@ walkScrollSiblings ctx parent mouse = do
 scrollHitSelf :: Context -> NodeIdx -> V2 -> IO (Maybe WidgetId)
 scrollHitSelf ctx idx mouse = do
   nt <- getNodeType (ctxNodeArena ctx) idx
-  if nt /= NodeScrollContainer
+  if not (isScrollNode nt)
     then pure Nothing
     else do
       (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
@@ -1092,7 +1111,8 @@ finalizeTabFocus :: Context -> Input -> IO ()
 finalizeTabFocus ctx inp =
   when (KeyTab `elem` inputKeys inp) $ do
     focusables <- getFocusables ctx
-    let ids = filter (/= WidgetId 0) focusables
+    let raw = filter (/= WidgetId 0) focusables
+    ids <- filterModalFocusables ctx raw
     if null ids
       then pure ()
       else do
@@ -1145,24 +1165,28 @@ finalizeSelectPick ctx inp =
                   if not (IM.findWithDefault False key (storeSelectOpen store))
                     then go (idx + 1)
                     else do
-                      txt <- getText (ctxNodeArena ctx) idx
-                      let (_, opts) = selectParseOptions txt
-                      (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-                      let fm = ctxFontMetrics ctx
-                          dropRect = selectDropRect fm x y w h (length opts)
-                      when (rectContains dropRect mouse) $
-                        case selectDropPickIndex dropRect (selectItemH fm h) (length opts) (v2Y mouse) of
-                          Nothing -> pure ()
-                          Just picked -> do
-                            st <- getStore ctx
-                            setStore
-                              ctx
-                              ( st
-                                  { storeSelect = IM.insert key picked (storeSelect st)
-                                  , storeSelectOpen = IM.insert key False (storeSelectOpen st)
-                                  }
-                              )
-                      go (idx + 1)
+                      allow <- widgetOverlayAllowed ctx wid
+                      if not allow
+                        then go (idx + 1)
+                        else do
+                          txt <- getText (ctxNodeArena ctx) idx
+                          let (_, opts) = selectParseOptions txt
+                          (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+                          let fm = ctxFontMetrics ctx
+                              dropRect = selectDropRect fm x y w h (length opts)
+                          when (rectContains dropRect mouse) $
+                            case selectDropPickIndex dropRect (selectItemH fm h) (length opts) (v2Y mouse) of
+                              Nothing -> pure ()
+                              Just picked -> do
+                                st <- getStore ctx
+                                setStore
+                                  ctx
+                                  ( st
+                                      { storeSelect = IM.insert key picked (storeSelect st)
+                                      , storeSelectOpen = IM.insert key False (storeSelectOpen st)
+                                      }
+                                  )
+                          go (idx + 1)
     go 0
 
 openSelectHit :: Context -> Int -> V2 -> IM.IntMap Bool -> IO Bool
@@ -1206,8 +1230,9 @@ refreshHover ctx inp = do
           wid <- getWidgetId (ctxNodeArena ctx) idx
           (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
           let rect = Rect x y w h
-          when (w > 0 && h > 0 && rectContains rect mouse) $
-            writeIORef (ctxHotId ctx) wid
+          when (w > 0 && h > 0 && rectContains rect mouse) $ do
+            allow <- modalHitAllowed ctx idx
+            when allow $ writeIORef (ctxHotId ctx) wid
         when (idx > 0) $ go (idx - 1)
   when (count > 0) $ go (count - 1)
   newHot <- readIORef (ctxHotId ctx)
@@ -1246,7 +1271,9 @@ findTopWidgetUnderMouse ctx count mouse wanted = go (count - 1)
               (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
               let rect = widgetHitRect ctx nt x y w h
               if rectW rect > 0 && rectH rect > 0 && rectContains rect mouse
-                then pure (Just wid)
+                then do
+                  allow <- modalHitAllowed ctx idx
+                  if allow then pure (Just wid) else go (idx - 1)
                 else go (idx - 1)
 
 isInteractiveNode :: NodeType -> Bool
@@ -1616,6 +1643,7 @@ closeTextInputMenuOnEscape ctx inp =
       Nothing -> pure ()
       Just _ -> do
         writeIORef (ctxTextInputMenu ctx) Nothing
+        markEscapeConsumed ctx
         markDirty ctx
 
 textInputMenuCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
@@ -1642,46 +1670,48 @@ drawTextInputMenuOverlays ctx inp = do
   case mMenu of
     Nothing -> pure ()
     Just menu -> do
-      let fm = ctxFontMetrics ctx
-      when (not (isTerminalFont fm)) $ do
-        let da = ctxDrawArena ctx
-            theme = ctxTheme ctx
-            mouse = inputMousePos inp
-            menuRect = textInputMenuRect menu
-            menuStyle = textInputMenuStyle theme
-            content = textInputMenuContentRect menuRect fm
-            r = styleCornerRadius menuStyle
-            wid = textInputMenuWidget menu
-        pushMenuShadow da menuRect r
-        fillStyledRect da False menuStyle menuRect
-        strokeStyledRect
-          da
-          False
-          menuStyle
-          (styleBg menuStyle)
-          (rectX menuRect)
-          (rectY menuRect)
-          (rectW menuRect)
-          (rectH menuRect)
-        forM_ (textInputMenuLayout fm) $ \(entry, relY, h) -> do
-          let rowRect = Rect (rectX menuRect) (rectY content + relY) (rectW menuRect) h
-          case entry of
-            TextInputMenuSep -> do
-              let sepCol = themeSeparator theme
-                  margin = textInputMenuItemPadX
-                  lineY = rectY rowRect + h / 2
-              pushRect
-                da
-                (Rect (rectX rowRect + margin) lineY (rectW rowRect - 2 * margin) 1)
-                sepCol
-            TextInputMenuItem action _ -> do
-              enabled <- textInputMenuActionEnabled ctx wid action
-              let hovered = enabled && rectContains rowRect mouse
-              when hovered $ do
-                pushRect da rowRect (styleHoverBg menuStyle)
-                let accent = themeAccent theme
-                    barRect = Rect (rectX rowRect) (rectY rowRect + 3) 2 (rectH rowRect - 6)
-                pushRoundedRect da barRect 1 accent
+      allow <- widgetOverlayAllowed ctx (textInputMenuWidget menu)
+      when allow $ do
+        let fm = ctxFontMetrics ctx
+        when (not (isTerminalFont fm)) $ do
+          let da = ctxDrawArena ctx
+              theme = ctxTheme ctx
+              mouse = inputMousePos inp
+              menuRect = textInputMenuRect menu
+              menuStyle = textInputMenuStyle theme
+              content = textInputMenuContentRect menuRect fm
+              r = styleCornerRadius menuStyle
+              wid = textInputMenuWidget menu
+          pushMenuShadow da menuRect r
+          fillStyledRect da False menuStyle menuRect
+          strokeStyledRect
+            da
+            False
+            menuStyle
+            (styleBg menuStyle)
+            (rectX menuRect)
+            (rectY menuRect)
+            (rectW menuRect)
+            (rectH menuRect)
+          forM_ (textInputMenuLayout fm) $ \(entry, relY, h) -> do
+            let rowRect = Rect (rectX menuRect) (rectY content + relY) (rectW menuRect) h
+            case entry of
+              TextInputMenuSep -> do
+                let sepCol = themeSeparator theme
+                    margin = textInputMenuItemPadX
+                    lineY = rectY rowRect + h / 2
+                pushRect
+                  da
+                  (Rect (rectX rowRect + margin) lineY (rectW rowRect - 2 * margin) 1)
+                  sepCol
+              TextInputMenuItem action _ -> do
+                enabled <- textInputMenuActionEnabled ctx wid action
+                let hovered = enabled && rectContains rowRect mouse
+                when hovered $ do
+                  pushRect da rowRect (styleHoverBg menuStyle)
+                  let accent = themeAccent theme
+                      barRect = Rect (rectX rowRect) (rectY rowRect + 3) 2 (rectH rowRect - 6)
+                  pushRoundedRect da barRect 1 accent
 
 collectTextInputMenuSpans :: Context -> Input -> IO [(Rect, T.Text, Color, Color, Rect)]
 collectTextInputMenuSpans ctx inp = do
@@ -1696,7 +1726,10 @@ collectTextInputMenuSpans ctx inp = do
           menuStyle = textInputMenuStyle theme
           content = textInputMenuContentRect menuRect fm
           wid = textInputMenuWidget menu
-      if isTerminalFont fm
+      allow <- widgetOverlayAllowed ctx wid
+      if not allow
+        then pure []
+        else if isTerminalFont fm
         then terminalTextInputMenuSpans ctx menuRect content fm menuStyle mouse wid
         else do
           let (ix, _) = widgetContentInset fm
@@ -1834,7 +1867,9 @@ findTextInputUnderMouse ctx count mouse = go 0
               (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
               let rect = widgetHitRect ctx nt x y w h
               if rectW rect > 0 && rectH rect > 0 && rectContains rect mouse
-                then pure (Just wid)
+                then do
+                  allow <- modalHitAllowed ctx idx
+                  if allow then pure (Just wid) else go (idx + 1)
                 else go (idx + 1)
             else go (idx + 1)
 
@@ -1894,6 +1929,127 @@ walkChildren ctx idx = do
           lowerNode ctx ci
           ns <- getNextSibling (ctxNodeArena ctx) ci
           go ns
+
+modalTreeOpen :: Context -> IO Bool
+modalTreeOpen ctx = do
+  top <- topmostModalIdx ctx
+  pure (isJust top)
+
+topmostModalIdx :: Context -> IO (Maybe NodeIdx)
+topmostModalIdx ctx = do
+  count <- arenaCount (ctxNodeArena ctx)
+  go (count - 1)
+  where
+    go idx
+      | idx < 0 = pure Nothing
+      | otherwise = do
+          nt <- getNodeType (ctxNodeArena ctx) idx
+          if nt == NodeModal then pure (Just idx) else go (idx - 1)
+
+nodeInTopmostModal :: Context -> NodeIdx -> IO Bool
+nodeInTopmostModal ctx idx = do
+  mTop <- topmostModalIdx ctx
+  case mTop of
+    Nothing -> pure False
+    Just top -> nodeInSubtree ctx idx top
+
+nodeInSubtree :: Context -> NodeIdx -> NodeIdx -> IO Bool
+nodeInSubtree ctx idx top = go idx
+  where
+    go i
+      | i < 0 = pure False
+      | i == top = pure True
+      | otherwise = do
+          parent <- getParent (ctxNodeArena ctx) i
+          go parent
+
+modalHitAllowed :: Context -> NodeIdx -> IO Bool
+modalHitAllowed ctx idx = do
+  mTop <- topmostModalIdx ctx
+  case mTop of
+    Nothing -> pure True
+    Just top -> nodeInSubtree ctx idx top
+
+filterModalFocusables :: Context -> [WidgetId] -> IO [WidgetId]
+filterModalFocusables ctx ids = do
+  open <- modalTreeOpen ctx
+  if not open
+    then pure ids
+    else filterM (widgetIdInModal ctx) ids
+
+widgetIdInModal :: Context -> WidgetId -> IO Bool
+widgetIdInModal ctx wid = do
+  count <- arenaCount (ctxNodeArena ctx)
+  go 0 count
+  where
+    go idx count
+      | idx >= count = pure False
+      | otherwise = do
+          w' <- getWidgetId (ctxNodeArena ctx) idx
+          if w' == wid
+            then nodeInTopmostModal ctx idx
+            else go (idx + 1) count
+
+widgetOverlayAllowed :: Context -> WidgetId -> IO Bool
+widgetOverlayAllowed ctx wid = do
+  open <- modalTreeOpen ctx
+  if not open then pure True else widgetIdInModal ctx wid
+
+constrainFocusToModal :: Context -> IO ()
+constrainFocusToModal ctx = do
+  open <- modalTreeOpen ctx
+  when open $ do
+    focus <- readIORef (ctxFocusId ctx)
+    when (hashWidgetId focus /= 0) $ do
+      ok <- widgetIdInModal ctx focus
+      unless ok $ writeIORef (ctxFocusId ctx) (WidgetId 0)
+
+drawModalOverlays :: Context -> Size -> IO ()
+drawModalOverlays ctx (Size ww wh) = do
+  count <- arenaCount (ctxNodeArena ctx)
+  let da = ctxDrawArena ctx
+      theme = ctxTheme ctx
+      fm = ctxFontMetrics ctx
+      terminal = isTerminalFont fm
+  found <- modalTreeOpen ctx
+  when found $ do
+    pushRect da (Rect 0 0 ww wh) (themeOverlayDim theme)
+    forM_ [0 .. count - 1] $ \idx -> do
+      nt <- getNodeType (ctxNodeArena ctx) idx
+      when (nt == NodeModal) $ do
+        (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+        pad <- getPadding (ctxNodeArena ctx) idx
+        wid <- getWidgetId (ctxNodeArena ctx) idx
+        let rect = Rect x y w h
+            style = overlayMenuStyle theme
+            inner =
+              Rect
+                (x + padL pad)
+                (y + padT pad)
+                (w - padL pad - padR pad)
+                (h - padT pad - padB pad)
+        when (not terminal) $ pushMenuShadow da rect (styleCornerRadius style)
+        fillStyledRect da terminal style rect
+        strokeStyledRect da terminal style (styleBg style) x y w h
+        withClip da inner $ walkChildren ctx idx
+        drawScrollBar ctx da idx wid x y w h pad theme terminal
+
+collectModalSpans :: Context -> IO [(Rect, T.Text, Color, Color, Rect)]
+collectModalSpans ctx = do
+  count <- arenaCount (ctxNodeArena ctx)
+  let go idx
+        | idx >= count = pure []
+        | otherwise = do
+            nt <- getNodeType (ctxNodeArena ctx) idx
+            if nt /= NodeModal
+              then go (idx + 1)
+              else do
+                (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+                let clip = Rect x y w h
+                here <- walkChildSpans ctx idx clip
+                rest <- go (idx + 1)
+                pure (here ++ rest)
+  go 0
 
 strokeRect :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
 strokeRect da x y w h bw col =
@@ -2112,7 +2268,7 @@ scrollContainerGeom ctx wid = do
         | idx >= count = pure Nothing
         | otherwise = do
             nt <- getNodeType (ctxNodeArena ctx) idx
-            if nt /= NodeScrollContainer
+            if not (isScrollNode nt)
               then go (idx + 1)
               else do
                 w' <- getWidgetId (ctxNodeArena ctx) idx
@@ -2240,40 +2396,44 @@ drawSelectOverlays ctx inp = do
                   if not (IM.findWithDefault False key (storeSelectOpen store))
                     then go (idx + 1)
                     else do
-                      txt <- getText (ctxNodeArena ctx) idx
-                      let (_, opts) = selectParseOptions txt
-                      (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-                      let picked = IM.findWithDefault 0 key (storeSelect store)
-                          itemH = selectItemH fm h
-                          dropRect = selectDropRect fm x y w h (length opts)
-                          dropStyle = overlayMenuStyle theme
-                          r = styleCornerRadius dropStyle
-                      pushMenuShadow da dropRect r
-                      fillStyledRect da False dropStyle dropRect
-                      strokeStyledRect
-                        da
-                        False
-                        dropStyle
-                        (styleBg dropStyle)
-                        (rectX dropRect)
-                        (rectY dropRect)
-                        (rectW dropRect)
-                        (rectH dropRect)
-                      forM_ (zip ([0 ..] :: [Int]) opts) $ \(i, _opt) -> do
-                        let iy = selectDropItemY fm dropRect itemH i
-                            itemRect = Rect (rectX dropRect) iy (rectW dropRect) itemH
-                            hovered = rectContains itemRect mouse
-                        when (hovered || i == picked) $ do
-                          let bg =
-                                if hovered
-                                  then styleHoverBg dropStyle
-                                  else styleActiveBg dropStyle
-                          pushRect da itemRect bg
-                          when hovered $ do
-                            let accent = themeAccent theme
-                                barRect = Rect (rectX itemRect) (rectY itemRect + 3) 2 (rectH itemRect - 6)
-                            pushRoundedRect da barRect 1 accent
-                      go (idx + 1)
+                      allow <- widgetOverlayAllowed ctx wid
+                      if not allow
+                        then go (idx + 1)
+                        else do
+                          txt <- getText (ctxNodeArena ctx) idx
+                          let (_, opts) = selectParseOptions txt
+                          (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+                          let picked = IM.findWithDefault 0 key (storeSelect store)
+                              itemH = selectItemH fm h
+                              dropRect = selectDropRect fm x y w h (length opts)
+                              dropStyle = overlayMenuStyle theme
+                              r = styleCornerRadius dropStyle
+                          pushMenuShadow da dropRect r
+                          fillStyledRect da False dropStyle dropRect
+                          strokeStyledRect
+                            da
+                            False
+                            dropStyle
+                            (styleBg dropStyle)
+                            (rectX dropRect)
+                            (rectY dropRect)
+                            (rectW dropRect)
+                            (rectH dropRect)
+                          forM_ (zip ([0 ..] :: [Int]) opts) $ \(i, _opt) -> do
+                            let iy = selectDropItemY fm dropRect itemH i
+                                itemRect = Rect (rectX dropRect) iy (rectW dropRect) itemH
+                                hovered = rectContains itemRect mouse
+                            when (hovered || i == picked) $ do
+                              let bg =
+                                    if hovered
+                                      then styleHoverBg dropStyle
+                                      else styleActiveBg dropStyle
+                              pushRect da itemRect bg
+                              when hovered $ do
+                                let accent = themeAccent theme
+                                    barRect = Rect (rectX itemRect) (rectY itemRect + 3) 2 (rectH itemRect - 6)
+                                pushRoundedRect da barRect 1 accent
+                          go (idx + 1)
     go 0
 
 collectSelectDropdownSpans :: Context -> Input -> IO [(Rect, T.Text, Color, Color, Rect)]
@@ -2295,50 +2455,54 @@ collectSelectDropdownSpans ctx inp = do
                 if not (IM.findWithDefault False key (storeSelectOpen store))
                   then go (idx + 1)
                   else do
-                    txt <- getText (ctxNodeArena ctx) idx
-                    let (_, opts) = selectParseOptions txt
-                    (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-                    let itemH = selectItemH fm h
-                        dropRect = selectDropRect fm x y w h (length opts)
-                        picked = IM.findWithDefault 0 key (storeSelect store)
-                        dropStyle = overlayMenuStyle theme
-                        fg = styleFg dropStyle
-                    if isTerminalFont fm
-                      then do
-                        let wi = max 1 (round w)
-                            rx = round (rectX dropRect)
-                            ry = round (rectY dropRect)
-                            dropBg = selectDropBg dropStyle
-                            dropActiveBg = selectDropActiveBg dropStyle
-                            dropHoverBg = selectDropHoverBg dropStyle
-                            hoverIdx =
-                              selectDropPickIndex dropRect itemH (length opts) (v2Y mouse)
-                        rest <- go (idx + 1)
-                        pure
-                          ( terminalSelectDropdownSpans rx ry wi opts picked hoverIdx fg dropBg dropActiveBg dropHoverBg dropRect
-                              ++ rest
-                          )
+                    allow <- widgetOverlayAllowed ctx wid
+                    if not allow
+                      then go (idx + 1)
                       else do
-                        let (ix, _) = widgetContentInset fm
-                            dropBg = styleBg dropStyle
-                        itemSpans <-
-                          forM (zip ([0 ..] :: [Int]) opts) $ \(i, opt) ->
-                            if T.null opt
-                              then pure []
-                              else do
-                                (tw, th) <- ctxMeasureText ctx opt
-                                let itemY = selectDropItemY fm dropRect itemH i
-                                    itemRect = Rect (rectX dropRect) itemY (rectW dropRect) itemH
-                                    hovered = rectContains itemRect mouse
-                                    rowBg
-                                      | hovered = styleHoverBg dropStyle
-                                      | i == picked = styleActiveBg dropStyle
-                                      | otherwise = dropBg
-                                    ty = itemY + (itemH - th) / 2
-                                    tx = rectX dropRect + textInputMenuItemPadX + ix
-                                pure [(Rect tx ty tw th, opt, fg, rowBg, dropRect)]
-                        rest <- go (idx + 1)
-                        pure (concat itemSpans ++ rest)
+                        txt <- getText (ctxNodeArena ctx) idx
+                        let (_, opts) = selectParseOptions txt
+                        (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+                        let itemH = selectItemH fm h
+                            dropRect = selectDropRect fm x y w h (length opts)
+                            picked = IM.findWithDefault 0 key (storeSelect store)
+                            dropStyle = overlayMenuStyle theme
+                            fg = styleFg dropStyle
+                        if isTerminalFont fm
+                          then do
+                            let wi = max 1 (round w)
+                                rx = round (rectX dropRect)
+                                ry = round (rectY dropRect)
+                                dropBg = selectDropBg dropStyle
+                                dropActiveBg = selectDropActiveBg dropStyle
+                                dropHoverBg = selectDropHoverBg dropStyle
+                                hoverIdx =
+                                  selectDropPickIndex dropRect itemH (length opts) (v2Y mouse)
+                            rest <- go (idx + 1)
+                            pure
+                              ( terminalSelectDropdownSpans rx ry wi opts picked hoverIdx fg dropBg dropActiveBg dropHoverBg dropRect
+                                  ++ rest
+                              )
+                          else do
+                            let (ix, _) = widgetContentInset fm
+                                dropBg = styleBg dropStyle
+                            itemSpans <-
+                              forM (zip ([0 ..] :: [Int]) opts) $ \(i, opt) ->
+                                if T.null opt
+                                  then pure []
+                                  else do
+                                    (tw, th) <- ctxMeasureText ctx opt
+                                    let itemY = selectDropItemY fm dropRect itemH i
+                                        itemRect = Rect (rectX dropRect) itemY (rectW dropRect) itemH
+                                        hovered = rectContains itemRect mouse
+                                        rowBg
+                                          | hovered = styleHoverBg dropStyle
+                                          | i == picked = styleActiveBg dropStyle
+                                          | otherwise = dropBg
+                                        ty = itemY + (itemH - th) / 2
+                                        tx = rectX dropRect + textInputMenuItemPadX + ix
+                                    pure [(Rect tx ty tw th, opt, fg, rowBg, dropRect)]
+                            rest <- go (idx + 1)
+                            pure (concat itemSpans ++ rest)
   go 0
 
 drawTooltipOverlays :: Context -> IO ()
@@ -2349,8 +2513,9 @@ drawTooltipOverlays ctx = do
   when (not terminal) $ do
     tips <- readTooltips ctx
     let panelStyle = themePanel theme
-    forM_ tips $ \(PendingTooltip rect _) ->
-      fillStyledRect da False panelStyle rect
+    forM_ tips $ \(PendingTooltip wid rect _) -> do
+      allow <- widgetOverlayAllowed ctx wid
+      when allow $ fillStyledRect da False panelStyle rect
 
 collectTooltipSpans :: Context -> IO [(Rect, T.Text, Color, Color, Rect)]
 collectTooltipSpans ctx = do
@@ -2360,7 +2525,8 @@ collectTooltipSpans ctx = do
     then pure []
     else do
       tips <- readTooltips ctx
-      forM tips $ \(PendingTooltip rect txt) -> do
+      filtered <- filterM (\(PendingTooltip wid _ _) -> widgetOverlayAllowed ctx wid) tips
+      forM filtered $ \(PendingTooltip _ rect txt) -> do
         let (ix, iy) = widgetContentInset fm
             fg = styleFg (themePanel theme)
             bg = styleBg (themePanel theme)

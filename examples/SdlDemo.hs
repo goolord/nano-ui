@@ -22,6 +22,7 @@ main :: IO ()
 main = do
   ctx <- newSdlContext
   lastClick <- newIORef ("" :: String)
+  aboutOpen <- newIORef False
   runSdlAppWithQuit ctx (\inp -> KeyEscape `elem` inputKeys inp) $
     column
       defaultLayout
@@ -59,6 +60,8 @@ main = do
                       when (respClicked cancel) $ do
                         liftIO $ writeIORef lastClick "Cancel"
                         emit ("button:Cancel" :: String)
+                      about <- button "About"
+                      when (respClicked about) $ liftIO $ writeIORef aboutOpen True
                       pure ()
                   (_, checked) <- checkbox "Feature" False
                   (_, _) <-
@@ -89,7 +92,15 @@ main = do
                               <> click
                           )
                       )
-                  _ <- label "Click widgets, type in Name, Esc quits"
+                  _ <- label "Click widgets, type in Name. Esc closes About, then quits"
+                  showAbout <- liftIO (readIORef aboutOpen)
+                  (aboutResp, _) <-
+                    modal showAbout "About" $ do
+                      _ <- label "nano-ui SDL demo"
+                      close <- button "Close"
+                      when (respClicked close) $ liftIO $ writeIORef aboutOpen False
+                      pure ()
+                  when (respClicked aboutResp) $ liftIO $ writeIORef aboutOpen False
                   pure ()
           )
       )
