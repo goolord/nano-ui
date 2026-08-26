@@ -59,6 +59,39 @@ bool nano_ui_mouse_window_pos(float *out_x, float *out_y)
     return true;
 }
 
+typedef void (*nano_ui_resize_cb)(void);
+
+static nano_ui_resize_cb g_resize_cb = NULL;
+
+static bool nano_ui_resize_watch(void *userdata, SDL_Event *event)
+{
+    (void)userdata;
+    if (!g_resize_cb || !event) {
+        return true;
+    }
+    if (event->type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED
+        || event->type == SDL_EVENT_WINDOW_RESIZED) {
+        g_resize_cb();
+    }
+    return true;
+}
+
+bool nano_ui_install_resize_watch(nano_ui_resize_cb cb)
+{
+    if (!SDL_AddEventWatch(nano_ui_resize_watch, NULL)) {
+        g_resize_cb = NULL;
+        return false;
+    }
+    g_resize_cb = cb;
+    return true;
+}
+
+void nano_ui_remove_resize_watch(void)
+{
+    SDL_RemoveEventWatch(nano_ui_resize_watch, NULL);
+    g_resize_cb = NULL;
+}
+
 bool nano_ui_set_render_scale(SDL_Renderer *renderer, float scale)
 {
     if (!renderer || scale <= 0.f) {

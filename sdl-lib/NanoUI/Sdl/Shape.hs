@@ -1,6 +1,7 @@
 module NanoUI.Sdl.Shape
   ( fillSolidRect
   , fillRoundedRect
+  , fillTriangle
   ) where
 
 import Control.Monad (void, when)
@@ -57,3 +58,35 @@ allocaRect = alloca
 
 cf :: Float -> CFloat
 cf = realToFrac
+
+fillTriangle ::
+  Ptr SDL_Renderer ->
+  Word8 ->
+  Word8 ->
+  Word8 ->
+  Word8 ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  IO ()
+fillTriangle ren r g b a x0 y0 x1 y1 x2 y2 =
+  void $
+    fillTriangleC ren r g b a (cf x0) (cf y0) (cf x1) (cf y1) (cf x2) (cf y2)
+
+foreign import ccall safe "nano_ui_fill_triangle"
+  fillTriangleC ::
+    Ptr SDL_Renderer ->
+    Word8 ->
+    Word8 ->
+    Word8 ->
+    Word8 ->
+    CFloat ->
+    CFloat ->
+    CFloat ->
+    CFloat ->
+    CFloat ->
+    CFloat ->
+    IO Bool

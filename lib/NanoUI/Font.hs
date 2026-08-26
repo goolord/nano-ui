@@ -14,6 +14,11 @@ module NanoUI.Font
   , checkboxBoxSize
   , checkboxLeading
   , isTerminalFont
+  , scrollBarWidth
+  , scrollBarMargin
+  , scrollBarGeom
+  , scrollBarGutter
+  , scrollOverflowGutter
   ) where
 
 
@@ -70,7 +75,7 @@ widgetPadding fm =
 {-# INLINE checkboxBoxSize #-}
 checkboxBoxSize :: FontMetrics -> Float
 checkboxBoxSize fm =
-  min 16 (max 12 (fmLineHeight fm * 0.85))
+  min 18 (max 14 (fmLineHeight fm * 0.9))
 
 {-# INLINE checkboxLeading #-}
 checkboxLeading :: FontMetrics -> Float
@@ -81,6 +86,29 @@ checkboxLeading fm
 {-# INLINE isTerminalFont #-}
 isTerminalFont :: FontMetrics -> Bool
 isTerminalFont fm = fmLineHeight fm == 1 && fmAdvance fm ' ' == 1
+
+scrollBarWidth :: Float
+scrollBarWidth = 8
+
+scrollBarMargin :: Float
+scrollBarMargin = 3
+
+scrollBarGeom :: FontMetrics -> (Float, Float)
+scrollBarGeom fm =
+  if isTerminalFont fm
+    then (1, 0)
+    else (scrollBarWidth, scrollBarMargin)
+
+-- Cross-end space reserved so the bar sits beside children, not over them.
+scrollBarGutter :: FontMetrics -> Float
+scrollBarGutter fm =
+  let (barW, barMargin) = scrollBarGeom fm
+   in barW + barMargin
+
+scrollOverflowGutter :: FontMetrics -> Float -> Float -> Float
+scrollOverflowGutter fm contentSize innerMain
+  | contentSize > innerMain = scrollBarGutter fm
+  | otherwise = 0
 
 measureText :: FontMetrics -> Text -> (Float, Float)
 measureText fm txt =
@@ -146,12 +174,15 @@ wrapWordsWith lineW (w : ws) maxW acc =
     [] ->
       if lineW w <= maxW
         then wrapWordsWith lineW ws maxW [w]
-        else wrapWordsWith lineW ws maxW (reverse (charLinesWith lineW maxW w []))
+        else wrapWordsWith lineW ws maxW (charLinesWith lineW maxW w [])
     (line : rest) ->
       let candidate = line <> " " <> w
        in if lineW candidate <= maxW
             then wrapWordsWith lineW ws maxW (candidate : rest)
-            else wrapWordsWith lineW (w : ws) maxW acc
+            else
+              if lineW w <= maxW
+                then wrapWordsWith lineW ws maxW (w : line : rest)
+                else wrapWordsWith lineW ws maxW (charLinesWith lineW maxW w [] ++ (line : rest))
 
 wrapWordsIO :: (Text -> IO Float) -> [Text] -> Float -> [Text] -> IO [Text]
 wrapWordsIO _ [] _ acc = pure (reverse acc)
@@ -163,13 +194,19 @@ wrapWordsIO lineW (w : ws) maxW acc =
         then wrapWordsIO lineW ws maxW [w]
         else do
           broken <- charLinesIO lineW maxW w []
-          wrapWordsIO lineW ws maxW (reverse broken)
+          wrapWordsIO lineW ws maxW broken
     (line : rest) -> do
       let candidate = line <> " " <> w
       cW <- lineW candidate
       if cW <= maxW
         then wrapWordsIO lineW ws maxW (candidate : rest)
-        else wrapWordsIO lineW (w : ws) maxW acc
+        else do
+          wW <- lineW w
+          if wW <= maxW
+            then wrapWordsIO lineW ws maxW (w : line : rest)
+            else do
+              broken <- charLinesIO lineW maxW w []
+              wrapWordsIO lineW ws maxW (broken ++ (line : rest))
 
 charLinesWith :: (Text -> Float) -> Float -> Text -> [Text] -> [Text]
 charLinesWith lineW maxW txt acc =

@@ -64,6 +64,7 @@ library
     exposed-modules:
         NanoUI
     other-modules:
+        NanoUI.Atlas
         NanoUI.Context
         NanoUI.Draw
         NanoUI.Font
@@ -80,6 +81,7 @@ library
         NanoUI.Widgets
     build-depends:
         base ^>=4.22.0.0,
+        bytestring ^>=0.12,
         containers ^>=0.8,
         hashable ^>=1.5,
         primitive ^>=0.9,

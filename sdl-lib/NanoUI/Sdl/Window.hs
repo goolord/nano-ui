@@ -64,7 +64,7 @@ data SdlEnv = SdlEnv
   }
 
 defaultWindowSize :: Size
-defaultWindowSize = Size 960 640
+defaultWindowSize = Size 1280 800
 
 -- Layout in logical coordinates; draw/text rasterize at native pixel density.
 syncDisplay :: Context -> SdlEnv -> Input -> IO (Context, Input)

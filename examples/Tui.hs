@@ -31,7 +31,14 @@ main = do
             , layoutHeight = Grow 1
             , layoutPadding = Padding 2 2 1 1
             }
-          ( column compact $ do
+          $ do
+            (_, _) <-
+              scrollArea
+                compact
+                  { layoutWidth = Grow 1
+                  , layoutHeight = Grow 1
+                  }
+                $ column compact $ do
               _ <- label "nano-ui terminal"
               _ <-
                 labelEx
@@ -39,7 +46,7 @@ main = do
                   "This label wraps inside a max width so long lines break cleanly."
               _ <-
                 row
-                  (compact {layoutWrap = True, layoutWidth = Fixed 24})
+                  (compact {layoutWrap = True, layoutWidth = Grow 1, layoutMaxW = 24})
                   ( do
                       _ <- label "[wrap]"
                       _ <- label "alpha"
@@ -79,7 +86,8 @@ main = do
               click <- liftIO $ readIORef lastClick
               _ <- label ""
               _ <-
-                label
+                labelEx
+                  (compact {layoutWidth = Grow 1})
                   ( T.pack
                       ( "checked="
                           <> show checked
@@ -93,11 +101,17 @@ main = do
                           <> click
                       )
                   )
-              _ <-
-                image
-                  (compact {layoutWidth = Fixed 8, layoutHeight = Fixed 2})
-                  (ImageId 1)
+              row
+                compact
+                  { layoutWrap = True
+                  , layoutWidth = Grow 1
+                  }
+                $ do
+                  _ <- image (compact {layoutWidth = Fixed 8, layoutHeight = Fixed 2}) (ImageId 1)
+                  _ <- image (compact {layoutWidth = Fixed 8, layoutHeight = Fixed 2}) (ImageId 2)
+                  _ <- image (compact {layoutWidth = Fixed 8, layoutHeight = Fixed 2}) (ImageId 3)
+                  pure ()
               _ <- label "click widgets, type in Name, Esc quits"
               pure ()
-          )
+            pure ()
       )

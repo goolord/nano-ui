@@ -9,8 +9,9 @@ module NanoUI.Backend.Sdl
   , registerRgbaImage
   ) where
 
+import Control.Exception (bracket, finally)
 import Control.Monad (unless, void)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
 import GHC.Clock (getMonotonicTime)
 import NanoUI
   ( Context
@@ -26,6 +27,7 @@ import NanoUI
   , isDirty
   , needsRedraw
   , overlayConsumesQuit
+  , registerImage
   , runFrame
   , textInputEditActive
   , themeWindow
@@ -45,6 +47,7 @@ import NanoUI.Sdl.Input
 import Data.ByteString (ByteString)
 import qualified NanoUI.Sdl.Image as SdlImage
 import NanoUI.Sdl.Render (renderDrawDataPass)
+import NanoUI.Sdl.Display (installResizeWatch)
 import NanoUI.Sdl.Window (SdlEnv (..), defaultWindowSize, syncDisplay, withSdl)
 import SDL3.Sys.Bindgen.Blendmode (sDL_BLENDMODE_BLEND)
 import SDL3.Sys.Render (renderPresentSafe, setRenderDrawBlendModeSafe)
@@ -61,9 +64,8 @@ runSdlApp ctx ui = runSdlAppWithQuit ctx (const False) ui
 runSdlAppWithQuit :: Context -> (Input -> Bool) -> UI () -> IO ()
 runSdlAppWithQuit ctx shouldQuit ui = runSdlAppWith ctx (const (pure ())) shouldQuit ui
 
-registerRgbaImage :: SdlEnv -> ImageId -> Int -> Int -> ByteString -> IO Bool
-registerRgbaImage env =
-  SdlImage.registerRgbaImage (sdlRenderer env) (sdlImages env)
+registerRgbaImage :: Context -> ImageId -> Int -> Int -> ByteString -> IO Bool
+registerRgbaImage = registerImage
 
 runSdlAppWith :: Context -> (SdlEnv -> IO ()) -> (Input -> Bool) -> UI () -> IO ()
 runSdlAppWith ctx setup shouldQuit ui =
@@ -78,13 +80,26 @@ runSdlAppWith ctx setup shouldQuit ui =
     (_, synced0) <- draw ctx1 ui env inp0
     writeIORef pendingRedraw False
     writeIORef prev synced0
-    loop ctx1 ui env prev pendingRedraw wasAnimating shouldQuit synced0 [] now
+    ctxRef <- newIORef ctx1
+    drawing <- newIORef False
+    let onResize = do
+          void $
+            tryWithDrawingLock drawing $ do
+              liveCtx <- readIORef ctxRef
+              inp <- readIORef prev
+              (ctx', inpSynced) <- syncDisplay liveCtx env (clearEphemeral inp)
+              (_, s) <- draw ctx' ui env inpSynced
+              writeIORef ctxRef ctx'
+              writeIORef prev s
+    bracket (installResizeWatch onResize) id $ \_ ->
+      loop ctxRef ui env prev pendingRedraw wasAnimating drawing shouldQuit synced0 [] now
 
 loop ::
-  Context ->
+  IORef Context ->
   UI () ->
   SdlEnv ->
   IORef Input ->
+  IORef Bool ->
   IORef Bool ->
   IORef Bool ->
   (Input -> Bool) ->
@@ -92,7 +107,8 @@ loop ::
   [SdlEvent] ->
   Double ->
   IO ()
-loop ctx ui env prev pendingRedraw wasAnimating shouldQuit inp queued lastT = do
+loop ctxRef ui env prev pendingRedraw wasAnimating drawing shouldQuit inp queued lastT = do
+  ctx <- readIORef ctxRef
   pending <-
     if null queued
       then do
@@ -118,6 +134,7 @@ loop ctx ui env prev pendingRedraw wasAnimating shouldQuit inp queued lastT = do
               (clearEphemeral inp {inputDeltaTime = dt})
               group
       (ctx', inpSynced) <- syncDisplay ctx env inp'
+      writeIORef ctxRef ctx'
       editActive' <- textInputEditActive ctx'
       if isHardQuitInput inpSynced && not editActive'
         then pure ()
@@ -142,10 +159,13 @@ loop ctx ui env prev pendingRedraw wasAnimating shouldQuit inp queued lastT = do
           synced <-
             if shouldDraw
               then do
-                (_, s) <- draw ctx' ui env inpSynced
-                writeIORef pendingRedraw False
-                writeIORef prev s
-                pure s
+                ms <-
+                  tryWithDrawingLock drawing $ do
+                    (_, s) <- draw ctx' ui env inpSynced
+                    writeIORef pendingRedraw False
+                    writeIORef prev s
+                    pure s
+                maybe (pure inpSynced) pure ms
               else if cursorOnly
                 then do
                   s <- syncCursorFrame ctx' ui env inpSynced
@@ -155,12 +175,20 @@ loop ctx ui env prev pendingRedraw wasAnimating shouldQuit inp queued lastT = do
           overlayQuit <- overlayConsumesQuit ctx' inpSynced
           unless (shouldQuit inpSynced && not overlayQuit) $
             if null rest
-              then loop ctx' ui env prev pendingRedraw wasAnimating shouldQuit synced [] now
-              else loop ctx' ui env prev pendingRedraw wasAnimating shouldQuit synced rest now
+              then loop ctxRef ui env prev pendingRedraw wasAnimating drawing shouldQuit synced [] now
+              else loop ctxRef ui env prev pendingRedraw wasAnimating drawing shouldQuit synced rest now
+
+tryWithDrawingLock :: IORef Bool -> IO a -> IO (Maybe a)
+tryWithDrawingLock ref act = do
+  ok <- atomicModifyIORef' ref $ \busy -> if busy then (True, False) else (True, True)
+  if ok
+    then Just <$> (act `finally` writeIORef ref False)
+    else pure Nothing
 
 draw :: Context -> UI () -> SdlEnv -> Input -> IO (Bool, Input)
 draw ctx ui env inp = do
   scale <- readIORef (sdlScaleRef env)
+  SdlImage.syncImageAtlas (sdlRenderer env) (sdlImages env) ctx
   (_, _, drawData, dirtyAfterUi) <- runFrame ctx inp ui
   syncPointerCursor (sdlCursors env) ctx inp
   baseSpans <- collectTextSpans ctx

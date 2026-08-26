@@ -7,11 +7,13 @@ module NanoUI.Sdl.Display
   , queryMouseWindowPos
   , setRenderScale
   , windowToLogicalCoords
+  , installResizeWatch
   ) where
 
+import Control.Monad (unless)
 import Foreign.C.Types (CFloat (..))
 import Foreign.Marshal.Alloc (alloca)
-import Foreign.Ptr (Ptr)
+import Foreign.Ptr (FunPtr, Ptr, freeHaskellFunPtr)
 import Foreign.Storable (peek)
 import NanoUI (Size (..), V2 (..))
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
@@ -64,6 +66,17 @@ windowToLogicalCoords scale (V2 wx wy) =
   let s = if scale > 0 then scale else defaultUiScale
    in V2 (wx / s) (wy / s)
 
+-- Windows runs a modal loop while the user drags the border, so the app
+-- event wait does not run. SDL still delivers resize events to this watch.
+installResizeWatch :: IO () -> IO (IO ())
+installResizeWatch act = do
+  fp <- mkResizeCb act
+  ok <- installResizeWatchC fp
+  unless ok $ fail "SDL_AddEventWatch failed"
+  pure $ do
+    removeResizeWatchC
+    freeHaskellFunPtr fp
+
 foreign import ccall safe "nano_ui_sdl_init_hints"
   sdlInitHintsC :: IO ()
 
@@ -83,3 +96,12 @@ foreign import ccall safe "nano_ui_mouse_window_pos"
 
 foreign import ccall safe "nano_ui_set_render_scale"
   setRenderScaleC :: Ptr SDL_Renderer -> CFloat -> IO Bool
+
+foreign import ccall "wrapper"
+  mkResizeCb :: IO () -> IO (FunPtr (IO ()))
+
+foreign import ccall safe "nano_ui_install_resize_watch"
+  installResizeWatchC :: FunPtr (IO ()) -> IO Bool
+
+foreign import ccall safe "nano_ui_remove_resize_watch"
+  removeResizeWatchC :: IO ()

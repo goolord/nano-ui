@@ -313,3 +313,196 @@ void nano_ui_destroy_texture(SDL_Texture *texture)
         SDL_DestroyTexture(texture);
     }
 }
+
+static float edge_x_at_y(float y, float x0, float y0, float x1, float y1)
+{
+    if (fabsf(y1 - y0) < 1e-6f) {
+        return x0;
+    }
+    return x0 + (y - y0) * (x1 - x0) / (y1 - y0);
+}
+
+static void add_edge_hits(
+    float y,
+    float x0,
+    float y0,
+    float x1,
+    float y1,
+    float *xs,
+    int *count)
+{
+    float lo = fminf(y0, y1);
+    float hi = fmaxf(y0, y1);
+    if (y < lo - 0.5f || y > hi + 0.5f) {
+        return;
+    }
+    if (fabsf(y1 - y0) < 1e-6f) {
+        xs[(*count)++] = fminf(x0, x1);
+        xs[(*count)++] = fmaxf(x0, x1);
+        return;
+    }
+    xs[(*count)++] = edge_x_at_y(y, x0, y0, x1, y1);
+}
+
+static float dist_to_segment(
+    float px,
+    float py,
+    float x0,
+    float y0,
+    float x1,
+    float y1)
+{
+    float dx = x1 - x0;
+    float dy = y1 - y0;
+    float len2 = dx * dx + dy * dy;
+    if (len2 < 1e-6f) {
+        float qx = px - x0;
+        float qy = py - y0;
+        return sqrtf(qx * qx + qy * qy);
+    }
+    float t = fmaxf(0.f, fminf(1.f, ((px - x0) * dx + (py - y0) * dy) / len2));
+    float qx = x0 + t * dx - px;
+    float qy = y0 + t * dy - py;
+    return sqrtf(qx * qx + qy * qy);
+}
+
+static bool point_in_triangle(
+    float px,
+    float py,
+    float x0,
+    float y0,
+    float x1,
+    float y1,
+    float x2,
+    float y2)
+{
+    float d0 = (x1 - x0) * (py - y0) - (y1 - y0) * (px - x0);
+    float d1 = (x2 - x1) * (py - y1) - (y2 - y1) * (px - x1);
+    float d2 = (x0 - x2) * (py - y2) - (y0 - y2) * (px - x2);
+    bool has_neg = (d0 < 0.f) || (d1 < 0.f) || (d2 < 0.f);
+    bool has_pos = (d0 > 0.f) || (d1 > 0.f) || (d2 > 0.f);
+    return !(has_neg && has_pos);
+}
+
+static float triangle_edge_dist(
+    float px,
+    float py,
+    float x0,
+    float y0,
+    float x1,
+    float y1,
+    float x2,
+    float y2)
+{
+    float d0 = dist_to_segment(px, py, x0, y0, x1, y1);
+    float d1 = dist_to_segment(px, py, x1, y1, x2, y2);
+    float d2 = dist_to_segment(px, py, x2, y2, x0, y0);
+    float d = fminf(d0, fminf(d1, d2));
+    if (point_in_triangle(px, py, x0, y0, x1, y1, x2, y2)) {
+        return -d;
+    }
+    return d;
+}
+
+static bool fill_triangle_edge_aa(
+    SDL_Renderer *renderer,
+    Uint8 r,
+    Uint8 g,
+    Uint8 b,
+    Uint8 a,
+    float x0,
+    float y0,
+    float x1,
+    float y1,
+    float x2,
+    float y2)
+{
+    float min_x = fminf(x0, fminf(x1, x2));
+    float max_x = fmaxf(x0, fmaxf(x1, x2));
+    float min_y = fminf(y0, fminf(y1, y2));
+    float max_y = fmaxf(y0, fmaxf(y1, y2));
+
+    int x_start = (int)floorf(min_x - 1.f);
+    int x_end = (int)ceilf(max_x + 1.f);
+    int y_start = (int)floorf(min_y - 1.f);
+    int y_end = (int)ceilf(max_y + 1.f);
+
+    for (int py = y_start; py < y_end; py++) {
+        for (int px = x_start; px < x_end; px++) {
+            float sx = (float)px + 0.5f;
+            float sy = (float)py + 0.5f;
+            float dist = triangle_edge_dist(sx, sy, x0, y0, x1, y1, x2, y2);
+            if (dist <= 0.f) {
+                continue;
+            }
+            if (dist >= 0.5f) {
+                continue;
+            }
+            float coverage = 0.5f - dist;
+            if (coverage <= 0.f) {
+                continue;
+            }
+            Uint8 aa = (Uint8)fminf(255.f, (float)a * coverage + 0.5f);
+            SDL_SetRenderDrawColor(renderer, r, g, b, aa);
+            SDL_FRect pixel = {(float)px, (float)py, 1.f, 1.f};
+            if (!SDL_RenderFillRect(renderer, &pixel)) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool nano_ui_fill_triangle(
+    SDL_Renderer *renderer,
+    Uint8 r,
+    Uint8 g,
+    Uint8 b,
+    Uint8 a,
+    float x0,
+    float y0,
+    float x1,
+    float y1,
+    float x2,
+    float y2)
+{
+    if (!renderer) {
+        return false;
+    }
+
+    SDL_SetRenderDrawColor(renderer, r, g, b, a);
+
+    float min_y = fminf(y0, fminf(y1, y2));
+    float max_y = fmaxf(y0, fmaxf(y1, y2));
+    int y_start = (int)floorf(min_y);
+    int y_end = (int)ceilf(max_y);
+
+    for (int py = y_start; py <= y_end; py++) {
+        float y = (float)py + 0.5f;
+        float xs[6];
+        int count = 0;
+        add_edge_hits(y, x0, y0, x1, y1, xs, &count);
+        add_edge_hits(y, x1, y1, x2, y2, xs, &count);
+        add_edge_hits(y, x2, y2, x0, y0, xs, &count);
+        if (count < 2) {
+            continue;
+        }
+        float left = xs[0];
+        float right = xs[0];
+        for (int i = 1; i < count; i++) {
+            if (xs[i] < left) {
+                left = xs[i];
+            }
+            if (xs[i] > right) {
+                right = xs[i];
+            }
+        }
+        if (right > left) {
+            SDL_FRect row = {left, (float)py, right - left, 1.f};
+            if (!SDL_RenderFillRect(renderer, &row)) {
+                return false;
+            }
+        }
+    }
+    return fill_triangle_edge_aa(renderer, r, g, b, a, x0, y0, x1, y1, x2, y2);
+}
