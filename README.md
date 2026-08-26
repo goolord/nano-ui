@@ -100,7 +100,8 @@ at native pixel density while layout stays in logical coordinates.
 The backend renders pinned `DrawData` quads through SDL3's 2D renderer, sorts
 draw commands by layer (background → content → overlay), and skips `runFrame`
 when idle (`SDL_WaitEvent` until a command, hover change, `markDirty`, or animation).
-Hover and animation frames scissor to the dirty rect instead of clearing the window.
+Hover and animation frames scissor to the dirty rect and blit only that box from the retain buffer.
+Debug HUD refreshes at 4 Hz instead of every frame.
 
 Build with Zig as the C compiler (MSYS2 UCRT64 for SDL3 + pkg-config):
 

@@ -154,6 +154,30 @@ bool nano_ui_retain_blit(SDL_Renderer *renderer, SDL_Texture *tex)
     return SDL_RenderTexture(renderer, tex, NULL, NULL);
 }
 
+bool nano_ui_retain_blit_rect(
+    SDL_Renderer *renderer,
+    SDL_Texture *tex,
+    float src_x,
+    float src_y,
+    float src_w,
+    float src_h,
+    float dst_x,
+    float dst_y)
+{
+    if (!renderer || !tex || src_w <= 0.f || src_h <= 0.f) {
+        return false;
+    }
+    if (!SDL_SetRenderTarget(renderer, NULL)) {
+        return false;
+    }
+    if (!SDL_SetRenderClipRect(renderer, NULL)) {
+        return false;
+    }
+    SDL_FRect src = {src_x, src_y, src_w, src_h};
+    SDL_FRect dst = {dst_x, dst_y, src_w, src_h};
+    return SDL_RenderTexture(renderer, tex, &src, &dst);
+}
+
 bool nano_ui_render_coords_from_window(
     SDL_Renderer *renderer,
     float window_x,

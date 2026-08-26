@@ -45,8 +45,9 @@ import NanoUI.Term.Notcurses (ncBlitCells, ncRead, ncSize, withNotcurses)
 animateTimeout :: Int
 animateTimeout = 16
 
-idleTimeout :: Int
-idleTimeout = 250
+-- Block until input when idle (Win32 INFINITE; notcurses treats negative as wait).
+idleBlock :: Int
+idleBlock = -1
 
 runTermApp :: Context -> UI () -> IO ()
 runTermApp ctx ui = runTermAppWithQuit ctx (const False) ui
@@ -127,7 +128,7 @@ termMainLoop ctx shouldQuit ui onEnter onLeave getSize readEvents present =
         if null queued
           then do
             animating <- anyAnimating ctx
-            readEvents (if animating then animateTimeout else idleTimeout)
+            readEvents (if animating then animateTimeout else idleBlock)
           else pure []
       let (group, rest) = splitFrame (queued ++ pending)
       editActive <- textInputEditActive ctx

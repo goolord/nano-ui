@@ -12,6 +12,7 @@ module NanoUI.Sdl.Display
   , retainCreate
   , retainBegin
   , retainBlit
+  , retainBlitRect
   , retainDestroy
 ) where
 
@@ -130,6 +131,18 @@ foreign import ccall safe "nano_ui_retain_begin"
 foreign import ccall safe "nano_ui_retain_blit"
   retainBlitC :: Ptr SDL_Renderer -> Ptr () -> IO Bool
 
+foreign import ccall safe "nano_ui_retain_blit_rect"
+  retainBlitRectC ::
+    Ptr SDL_Renderer ->
+    Ptr () ->
+    CFloat ->
+    CFloat ->
+    CFloat ->
+    CFloat ->
+    CFloat ->
+    CFloat ->
+    IO Bool
+
 foreign import ccall safe "nano_ui_destroy_texture"
   retainDestroyC :: Ptr () -> IO ()
 
@@ -141,6 +154,12 @@ retainBegin = retainBeginC
 
 retainBlit :: Ptr SDL_Renderer -> Ptr () -> IO Bool
 retainBlit = retainBlitC
+
+retainBlitRect :: Ptr SDL_Renderer -> Ptr () -> Float -> Float -> Float -> Float -> Float -> Float -> IO Bool
+retainBlitRect ren tex sx sy sw sh dx dy =
+  retainBlitRectC ren tex (cf sx) (cf sy) (cf sw) (cf sh) (cf dx) (cf dy)
+  where
+    cf = realToFrac :: Float -> CFloat
 
 retainDestroy :: Ptr () -> IO ()
 retainDestroy tex =

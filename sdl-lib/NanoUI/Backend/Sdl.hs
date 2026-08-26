@@ -60,6 +60,7 @@ import NanoUI.Sdl.Display
   , queryWindowLogicalSize
   , retainBegin
   , retainBlit
+  , retainBlitRect
   , retainCreate
   , retainDestroy
   , windowToLogicalCoords
@@ -83,6 +84,7 @@ import qualified NanoUI.Sdl.Image as SdlImage
 import NanoUI.Sdl.Render (renderDrawDataPass)
 import NanoUI.Sdl.Window (SdlEnv (..), defaultWindowSize, syncDisplay, withSdl)
 import SDL3.Sys.Bindgen.Blendmode (sDL_BLENDMODE_BLEND)
+import SDL3.Sys.Bindgen.Render (SDL_Renderer)
 import SDL3.Sys.Render (renderPresentSafe, setRenderDrawBlendModeSafe)
 
 animateTimeout :: Int
@@ -243,7 +245,7 @@ draw ctx ui env inp forceFull = do
       renderTextSpans (sdlRenderer env) scale font (sdlTextCache env) (spansIn baseSpans)
       renderDrawDataPass (sdlRenderer env) scale Nothing drawData True (sdlImages env) damage
       renderTextSpans (sdlRenderer env) scale font (sdlTextCache env) (spansIn overlaySpans)
-      okBlit <- retainBlit (sdlRenderer env) tex
+      okBlit <- presentRetain (sdlRenderer env) tex scale damage
       unless okBlit $ fail "SDL_RenderTexture(retain) failed"
       void $ renderPresentSafe (sdlRenderer env)
       notePresent (sdlDebug env) ((t1 - t0) * 1000) drawData
@@ -265,6 +267,17 @@ filterSpans :: Damage -> [(Rect, a, b, c, Rect)] -> [(Rect, a, b, c, Rect)]
 filterSpans DamageFull spans = spans
 filterSpans (DamageClip clip) spans =
   filter (\(box, _, _, _, _) -> isJust (rectIntersect clip box)) spans
+
+presentRetain :: Ptr SDL_Renderer -> Ptr () -> Float -> Damage -> IO Bool
+presentRetain ren tex scale damage =
+  case damage of
+    DamageFull -> retainBlit ren tex
+    DamageClip (Rect x y w h) -> do
+      let px = x * scale
+          py = y * scale
+          pw = w * scale
+          ph = h * scale
+      retainBlitRect ren tex px py pw ph px py
 
 readSdlDebugEnv :: SdlEnv -> IO SdlDebugSnapshot
 readSdlDebugEnv env = do

@@ -53,6 +53,7 @@ data SdlDebugSampler = SdlDebugSampler
   { smPresentEma :: Double
   , smLoopEma :: Double
   , smLastPresentT :: Double
+  , smLastDebugT :: Double
   , smPresents :: Word64
   , smSkips :: Word64
   , smUiMs :: Double
@@ -62,6 +63,9 @@ data SdlDebugSampler = SdlDebugSampler
   , smCmds :: Int
   , smWantFrame :: Bool
   }
+
+debugRefreshSec :: Double
+debugRefreshSec = 0.25
 
 type SamplerRef = IORef SdlDebugSampler
 
@@ -73,6 +77,7 @@ newSdlDebugSampler = do
       { smPresentEma = 0
       , smLoopEma = 0
       , smLastPresentT = now
+      , smLastDebugT = 0
       , smPresents = 0
       , smSkips = 0
       , smUiMs = 0
@@ -153,7 +158,18 @@ notePresent ref uiMs dd = do
 
 readSdlDebug :: SamplerRef -> Size -> V2 -> FilePath -> Float -> String -> IO SdlDebugSnapshot
 readSdlDebug ref (Size ww wh) (V2 mx my) fontPath scale renderer = do
-  s <- atomicModifyIORef' ref $ \cur -> (cur {smWantFrame = True}, cur)
+  now <- getMonotonicTime
+  s <-
+    atomicModifyIORef' ref $ \cur ->
+      let elapsed = now - smLastDebugT cur
+          refresh = smLastDebugT cur <= 0 || elapsed >= debugRefreshSec
+       in
+        ( cur
+            { smWantFrame = refresh
+            , smLastDebugT = if refresh then now else smLastDebugT cur
+            }
+        , cur
+        )
   caps <- getNumCapabilities
   cpus <- getNumProcessors
   rtsOn <- getRTSStatsEnabled
