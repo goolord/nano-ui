@@ -1501,6 +1501,22 @@ runSelectKeyboardTest ctx failed = do
           (\(_, txt, _, _, _) -> txt `elem` ["Low", "Medium", "High"])
           overlays
   when dropdownOpen $ bump failed
+  -- Focused with menu closed: arrows change value without opening the list.
+  _ <- runFrame ctx (inp0 {inputKeys = [KeyTab]}) ui
+  focus <- getFocusId ctx
+  when (focus == WidgetId 0) $ bump failed
+  _ <- runFrame ctx (inp0 {inputKeys = [KeyRight]}) ui
+  ((_, idx3), _, _, _) <- runFrame ctx inp0 ui
+  when (idx3 /= 2) $ bump failed
+  closedOverlays <- collectOverlayTextSpans ctx inp0
+  let closedMenuOpen =
+        any
+          (\(_, txt, _, _, _) -> txt `elem` ["Low", "Medium", "High"])
+          closedOverlays
+  when closedMenuOpen $ bump failed
+  _ <- runFrame ctx (inp0 {inputKeys = [KeyLeft]}) ui
+  ((_, idx4), _, _, _) <- runFrame ctx inp0 ui
+  when (idx4 /= 1) $ bump failed
 
 runTextWrapTest :: Context -> IORef Int -> IO ()
 runTextWrapTest _ failed = do

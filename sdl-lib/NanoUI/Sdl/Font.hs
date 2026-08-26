@@ -248,7 +248,14 @@ findFontPath = do
 
 fontCandidates :: [FilePath]
 fontCandidates =
-  [ "C:\\Windows\\Fonts\\segoeui.ttf"
+  [ "/usr/share/fonts/adwaita-sans/AdwaitaSans-Regular.ttf"
+  , "/usr/share/fonts/truetype/adwaita/AdwaitaSans-Regular.ttf"
+  , "/usr/share/fonts/cantarell/Cantarell-Regular.otf"
+  , "/usr/share/fonts/truetype/cantarell/Cantarell-Regular.otf"
+  , "/usr/share/fonts/truetype/cantarell/Cantarell-Regular.ttf"
+  , "/usr/share/fonts/inter/Inter-Regular.ttf"
+  , "/usr/share/fonts/truetype/inter/Inter-Regular.ttf"
+  , "C:\\Windows\\Fonts\\segoeui.ttf"
   , "C:\\Windows\\Fonts\\SegoeUI.ttf"
   , "C:\\Windows\\Fonts\\segoeuib.ttf"
   , "C:\\Windows\\Fonts\\arial.ttf"

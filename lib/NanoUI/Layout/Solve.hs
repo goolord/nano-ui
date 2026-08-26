@@ -18,6 +18,8 @@ import NanoUI.Font
   , labelContentInset
   , scrollOverflowGutter
   , widgetPadding
+  , buttonPadding
+  , layoutLineHeight
   )
 import NanoUI.Layout.Arena
   ( DirTag (..)
@@ -148,7 +150,7 @@ measureTextNode na fm measure useAssignedWidth idx = do
               then pure (measureTextWrapped fm txt wrapW)
               else measureTextWrappedIO (\t -> fmap fst (measure t)) fm txt wrapW
           else pure (tw0, th0)
-      setRect na idx 0 0 (clamp tw minW maxW) (clamp (max (fmLineHeight fm) th) minH maxH)
+      setRect na idx 0 0 (clamp tw minW maxW) (clamp (max (layoutLineHeight fm) th) minH maxH)
 
 measureImage :: NodeArena -> NodeIdx -> IO ()
 measureImage na idx = do
@@ -185,7 +187,11 @@ measureWidget na fm measure idx = do
   nt <- getNodeType na idx
   txt <- getText na idx
   (minW, minH, maxW, maxH) <- getMinMax na idx
-  let (padX, padY) = widgetPadding fm
+  let (padX, padY) =
+        case nt of
+          NodeButton -> buttonPadding fm
+          NodeSelect -> buttonPadding fm
+          _ -> widgetPadding fm
   (tw, th, extraW, extraH) <-
     case nt of
       NodeSlider -> do
@@ -198,7 +204,11 @@ measureWidget na fm measure idx = do
         (vwMin, _) <- measure (sliderValueText minV)
         (vwMax, _) <- measure (sliderValueText maxV)
         let vw = max vwMin vwMax
-        pure (max lw vw, lh, 0, fmLineHeight fm * 0.35)
+        let trackExtra =
+              if isTerminalFont fm
+                then fmLineHeight fm * 0.35
+                else 22
+        pure (max lw vw, lh, 0, trackExtra)
       NodeCheckbox -> do
         let body =
               if T.null txt

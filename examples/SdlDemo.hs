@@ -17,13 +17,16 @@ pagePad =
    in Padding p p p p
 
 cardPad :: Padding
-cardPad = Padding 16 16 16 16
+cardPad = Padding 16 16 14 14
+
+headerPad :: Padding
+headerPad = Padding 16 16 12 12
 
 pageGap :: Float
-pageGap = 16
+pageGap = 8
 
 sectionGap :: Float
-sectionGap = 10
+sectionGap = 8
 
 pageLayout :: Layout
 pageLayout =
@@ -38,8 +41,8 @@ headerCard :: Layout
 headerCard =
   defaultLayout
     { layoutWidth = Grow 1
-    , layoutPadding = cardPad
-    , layoutGap = 10
+    , layoutPadding = headerPad
+    , layoutGap = 8
     }
 
 cardLayout :: Layout
@@ -89,7 +92,7 @@ listScroll =
   defaultLayout
     { layoutWidth = Grow 1
     , layoutHeight = Fixed 136
-    , layoutPadding = Padding 6 6 6 6
+    , layoutPadding = Padding 8 8 8 8
     }
 
 stackCol :: Layout
@@ -168,7 +171,7 @@ main = do
                           ( defaultLayout
                               { layoutWidth = Grow 1
                               , layoutPadding = Padding 0 0 0 0
-                              , layoutGap = 2
+                              , layoutGap = 0
                               }
                           )
                           $ mapM_ (\i -> label (T.pack ("Item " <> show (i :: Int)))) [1 .. 12]
