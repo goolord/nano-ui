@@ -4,6 +4,7 @@ module NanoUI.Layout.Arena
   , isWidgetNode
   , isContainerNode
   , isScrollNode
+  , isFloatingNode
   , SizingTag (..)
   , DirTag (..)
   , NodeArena (..)
@@ -65,6 +66,8 @@ data NodeType
   | NodeSelect
   | NodeModal
   | NodeImage
+  | NodePanel
+  | NodeWindow
   deriving (Eq, Show, Enum, Bounded)
 
 isWidgetNode :: NodeType -> Bool
@@ -85,6 +88,8 @@ isContainerNode nt =
     NodeContainer -> True
     NodeScrollContainer -> True
     NodeModal -> True
+    NodePanel -> True
+    NodeWindow -> True
     _ -> False
 
 isScrollNode :: NodeType -> Bool
@@ -92,7 +97,11 @@ isScrollNode nt =
   case nt of
     NodeScrollContainer -> True
     NodeModal -> True
+    NodeWindow -> True
     _ -> False
+
+isFloatingNode :: NodeType -> Bool
+isFloatingNode nt = nt == NodeModal || nt == NodeWindow
 
 data SizingTag
   = SizingFixed

@@ -64,6 +64,14 @@ main = do
   run "button-press-release-hover" runButtonPressReleaseHoverTest
   run "text-input-focus" runTextInputFocusTest
   run "idle" runIdleTest
+  run "hover-skip" runHoverSkipTest
+  run "hover-damage" runHoverDamageTest
+  run "scroll-damage" runScrollDamageTest
+  run "select-overlay-damage" runSelectOverlayDamageTest
+  run "text-input-dirty" runTextInputDirtyTest
+  run "modal-close-damage" runModalCloseDamageTest
+  run "modal-open-damage" runModalOpenDamageTest
+  run "overlay-panel-live" runOverlayPanelLiveTest
   run "animation-idle" runAnimationIdleTest
   run "ascii" runAsciiTest
   run "vt-decode" runVtTest
@@ -88,6 +96,13 @@ main = do
   run "grow-fits-window" runGrowFitsWindowTest
   run "grow-wrap-sibling" runGrowWrapPushesSiblingTest
   run "scroll-bar-gutter" runScrollBarGutterTest
+  run "use-flag-click" runUseFlagClickTest
+  run "panel-paints" runPanelPaintsTest
+  run "separator-span" runSeparatorSpanTest
+  run "header-top-pad" runHeaderTopPadTest
+  run "fit-header-no-shrink" runFitHeaderNoShrinkTest
+  run "window-overlay" runWindowOverlayTest
+  run "window-drag" runWindowDragTest
 
   n <- readIORef failed
   if n == 0
@@ -769,7 +784,7 @@ runSelectDropdownCursorTest ctx failed = do
 runSliderCursorTest :: Context -> IORef Int -> IO ()
 runSliderCursorTest ctx failed = do
   let inp0 = emptyInput {inputWindowSize = Size 300 80}
-      ui = column defaultLayout (slider (defaultLayout {layoutWidth = Grow 1}) "Volume" 0 100 50)
+      ui = column defaultLayout (slider "Volume" 0 100 50)
   _ <- runFrame ctx inp0 ui
   ((resp, _), _, _, _) <- runFrame ctx inp0 ui
   let Rect rx ry rw rh = respRect resp
@@ -980,6 +995,231 @@ runIdleTest _ failed = do
   need <- needsRedraw ctx inp inp
   when need $ bump failed
 
+runHoverSkipTest :: Context -> IORef Int -> IO ()
+runHoverSkipTest _ failed = do
+  ctx <- newContext
+  let ui = column defaultLayout (button "OK")
+      inp0 =
+        emptyInput
+          { inputWindowSize = Size 240 80
+          , inputMousePos = V2 (-10) (-10)
+          }
+  _ <- runFrame ctx inp0 ui
+  (resp, _, _, _) <- runFrame ctx inp0 ui
+  let Rect rx ry rw rh = respRect resp
+      inside = V2 (rx + rw / 2) (ry + rh / 2)
+      inside2 = V2 (rx + rw / 2 + 1) (ry + rh / 2)
+      inp1 = inp0 {inputMousePos = inside}
+      inp2 = inp0 {inputMousePos = inside2}
+  needEnter <- needsRedraw ctx inp0 inp1
+  when (not needEnter) $ bump failed
+  _ <- runFrame ctx inp1 ui
+  let drain = inp1 {inputDeltaTime = 1}
+  _ <- runFrame ctx drain ui
+  needStay <- needsRedraw ctx drain inp2
+  when needStay $ bump failed
+  let inpClick = inp1 {inputMouseDown = True, inputMousePressed = True}
+  needClick <- needsRedraw ctx drain inpClick
+  when (not needClick) $ bump failed
+
+runHoverDamageTest :: Context -> IORef Int -> IO ()
+runHoverDamageTest _ failed = do
+  ctx <- newContext
+  let ui = column defaultLayout (button "OK")
+      inp0 =
+        emptyInput
+          { inputWindowSize = Size 240 80
+          , inputMousePos = V2 (-10) (-10)
+          }
+  _ <- runFrame ctx inp0 ui
+  d0 <- takeDamage ctx
+  when (d0 /= DamageFull) $ bump failed
+  (resp, _, _, _) <- runFrame ctx inp0 ui
+  let Rect rx ry rw rh = respRect resp
+      inside = V2 (rx + rw / 2) (ry + rh / 2)
+      inp1 = inp0 {inputMousePos = inside}
+  _ <- runFrame ctx inp1 ui
+  d1 <- takeDamage ctx
+  case d1 of
+    DamageFull -> bump failed
+    DamageClip (Rect _ _ w h) ->
+      when (w * h >= 240 * 80 * 0.5) $ bump failed
+  let inpClick = inp1 {inputMouseDown = True, inputMousePressed = True}
+  _ <- runFrame ctx inpClick ui
+  d2 <- takeDamage ctx
+  when (d2 /= DamageFull) $ bump failed
+
+runScrollDamageTest :: Context -> IORef Int -> IO ()
+runScrollDamageTest _ failed = do
+  ctx <- newContext
+  let ui = do
+        (sid, _) <-
+          scrollArea
+            (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 60})
+            ( column defaultLayout $ do
+                _ <- replicateM 8 (label "scroll line")
+                pure ()
+            )
+        pure sid
+      inp0 =
+        emptyInput
+          { inputWindowSize = Size 200 120
+          , inputMousePos = V2 (-10) (-10)
+          }
+  (_, _, _, _) <- runFrame ctx inp0 ui
+  let inpHover = inp0 {inputMousePos = V2 20 20}
+  _ <- runFrame ctx inpHover ui
+  dHover <- takeDamage ctx
+  case dHover of
+    DamageFull -> bump failed
+    DamageClip {} -> pure ()
+  let inpScroll = inpHover {inputScroll = V2 0 1}
+  _ <- runFrame ctx inpScroll ui
+  dScroll <- takeDamage ctx
+  when (dScroll /= DamageFull) $ bump failed
+
+-- Open dropdown: motion over the menu must redraw, and damage must be full.
+runSelectOverlayDamageTest :: Context -> IORef Int -> IO ()
+runSelectOverlayDamageTest _ failed = do
+  ctx <- newContext
+  let ui = column defaultLayout (select "Quality" ["Low", "Medium", "High"] 0)
+      inp0 = emptyInput {inputWindowSize = Size 320 160, inputMousePos = V2 20 20}
+  _ <- runFrame ctx inp0 ui
+  let press =
+        inp0
+          { inputMouseDown = True
+          , inputMousePressed = True
+          }
+  _ <- runFrame ctx press ui
+  let open =
+        press
+          { inputMouseDown = False
+          , inputMousePressed = False
+          , inputMouseReleased = True
+          }
+  _ <- runFrame ctx open ui
+  let idle = open {inputMouseReleased = False, inputDeltaTime = 1}
+  _ <- runFrame ctx idle ui
+  overlays <- collectOverlayTextSpans ctx idle
+  let highYs = [rectY r | (r, txt, _, _, _) <- overlays, "High" `T.isInfixOf` txt]
+  case highYs of
+    [] -> bump failed
+    (highY : _) -> do
+      let overMenu = idle {inputMousePos = V2 20 (highY + 0.5)}
+      need <- needsRedraw ctx idle overMenu
+      when (not need) $ bump failed
+      _ <- runFrame ctx overMenu ui
+      dmg <- takeDamage ctx
+      when (dmg /= DamageFull) $ bump failed
+
+-- Focused text field must stay live so typed bytes are not delayed until
+-- the next unrelated wake, and store text changes force a full redraw.
+runTextInputDirtyTest :: Context -> IORef Int -> IO ()
+runTextInputDirtyTest _ failed = do
+  ctx <- newTerminalContext
+  let ui = column defaultLayout (textInput "Name" "")
+      inp0 = emptyInput {inputWindowSize = Size 200 100, inputMousePos = V2 20 20}
+  _ <- runFrame ctx inp0 ui
+  ((resp, _), _, _, _) <- runFrame ctx inp0 ui
+  let Rect rx ry _ _ = respRect resp
+      click = V2 (rx + 1) (ry + 0.5)
+      press =
+        inp0
+          { inputMousePos = click
+          , inputMouseDown = True
+          , inputMousePressed = True
+          }
+  _ <- runFrame ctx press ui
+  let release =
+        press
+          { inputMouseDown = False
+          , inputMousePressed = False
+          , inputMouseReleased = True
+          }
+  _ <- runFrame ctx release ui
+  let idle = release {inputMouseReleased = False, inputDeltaTime = 1}
+  _ <- runFrame ctx idle ui
+  needFocus <- needsRedraw ctx idle idle
+  when (not needFocus) $ bump failed
+  let typed = idle {inputChars = "ab"}
+  _ <- runFrame ctx typed ui
+  dmg <- takeDamage ctx
+  when (dmg /= DamageFull) $ bump failed
+
+-- Esc dismisses the modal this frame; the next idle frame must still redraw
+-- the dim and panel away (full damage).
+runModalCloseDamageTest :: Context -> IORef Int -> IO ()
+runModalCloseDamageTest _ failed = do
+  ctx <- newContext
+  let ui = do
+        (open, setOpen) <- useFlag True
+        (resp, _) <- modal open "Title" (label "body")
+        onClick resp (setOpen False)
+      inp0 = emptyInput {inputWindowSize = Size 320 240, inputMousePos = V2 1 1}
+  _ <- runFrame ctx inp0 ui
+  _ <- runFrame ctx inp0 ui
+  let esc = inp0 {inputKeys = [KeyEscape]}
+  _ <- runFrame ctx esc ui
+  let idle = inp0 {inputDeltaTime = 1}
+  need <- needsRedraw ctx idle idle
+  when (not need) $ bump failed
+  _ <- runFrame ctx idle ui
+  dmg <- takeDamage ctx
+  when (dmg /= DamageFull) $ bump failed
+
+-- Click opens the modal next frame. That idle frame must still redraw the dim.
+runModalOpenDamageTest :: Context -> IORef Int -> IO ()
+runModalOpenDamageTest _ failed = do
+  ctx <- newContext
+  let ui = do
+        (open, setOpen) <- useFlag False
+        resp <- button "Open"
+        onClick resp (setOpen True)
+        _ <- modal open "Title" (label "body")
+        pure resp
+      inp0 = emptyInput {inputWindowSize = Size 320 240, inputMousePos = V2 (-10) (-10)}
+  _ <- runFrame ctx inp0 ui
+  (resp, _, _, _) <- runFrame ctx inp0 ui
+  let Rect rx ry rw rh = respRect resp
+      click = V2 (rx + rw / 2) (ry + rh / 2)
+      press =
+        inp0
+          { inputMousePos = click
+          , inputMouseDown = True
+          , inputMousePressed = True
+          }
+  _ <- runFrame ctx press ui
+  let release =
+        press
+          { inputMouseDown = False
+          , inputMousePressed = False
+          , inputMouseReleased = True
+          }
+  _ <- runFrame ctx release ui
+  let idle = inp0 {inputDeltaTime = 1}
+  need <- needsRedraw ctx idle idle
+  when (not need) $ bump failed
+  _ <- runFrame ctx idle ui
+  dmg <- takeDamage ctx
+  when (dmg /= DamageFull) $ bump failed
+
+-- Floating window and modal text must keep redrawing. Idle skip would freeze
+-- overlay labels until a click or window drag.
+runOverlayPanelLiveTest :: Context -> IORef Int -> IO ()
+runOverlayPanelLiveTest _ failed = do
+  let inp = emptyInput {inputWindowSize = Size 320 240, inputMousePos = V2 (-10) (-10)}
+      check ui = do
+        ctx <- newContext
+        _ <- runFrame ctx inp ui
+        _ <- runFrame ctx inp ui
+        need <- needsRedraw ctx inp inp
+        when (not need) $ bump failed
+        _ <- runFrame ctx inp ui
+        dmg <- takeDamage ctx
+        when (dmg /= DamageFull) $ bump failed
+  check (void (window True "Debug" (label "fps 0")))
+  check (void (modal True "About" (label "body")))
+
 runAnimationIdleTest :: Context -> IORef Int -> IO ()
 runAnimationIdleTest ctx failed = do
   let inp = emptyInput {inputWindowSize = Size 100 100, inputDeltaTime = 0.05}
@@ -1093,7 +1333,7 @@ runCheckboxTest ctx failed = do
 runSliderTest :: Context -> IORef Int -> IO ()
 runSliderTest ctx failed = do
   let inp0 = emptyInput {inputWindowSize = Size 300 80}
-      ui = column defaultLayout (slider (defaultLayout {layoutWidth = Grow 1}) "Vol" 0 100 10)
+      ui = column defaultLayout (slider "Vol" 0 100 10)
   _ <- runFrame ctx inp0 ui
   ((resp, _), _, _, _) <- runFrame ctx inp0 ui
   let Rect rx ry rw rh = respRect resp
@@ -1651,3 +1891,189 @@ runGrowWrapPushesSiblingTest _ failed = do
   case (ysFor "BBBB", ysFor "BELOW") of
     ([by], [sy]) -> when (sy < by + 0.5) $ bump failed
     _ -> bump failed
+
+-- App state lives in the widget store, so clicks persist without IORefs.
+runUseFlagClickTest :: Context -> IORef Int -> IO ()
+runUseFlagClickTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 240 120}
+      ui = do
+        (open, setOpen) <- useFlag False
+        (note, setNote) <- useText ""
+        resp <- button "Go"
+        onClick resp $ do
+          setOpen True
+          setNote "hi"
+        pure (open, note, resp)
+  _ <- runFrame ctx inp0 ui
+  ((open0, note0, resp), _, _, _) <- runFrame ctx inp0 ui
+  when (open0 || note0 /= "") $ bump failed
+  let Rect x y w h = respRect resp
+      pos = V2 (x + w / 2) (y + h / 2)
+      press =
+        inp0
+          { inputMousePos = pos
+          , inputMouseDown = True
+          , inputMousePressed = True
+          , inputMouseReleased = False
+          }
+      release =
+        press
+          { inputMousePressed = False
+          , inputMouseDown = False
+          , inputMouseReleased = True
+          }
+  _ <- runFrame ctx press ui
+  _ <- runFrame ctx release ui
+  ((open1, note1, _), _, _, _) <- runFrame ctx inp0 ui
+  when (not open1 || note1 /= "hi") $ bump failed
+
+-- panel paints chrome; a fat-padded column does not.
+runPanelPaintsTest :: Context -> IORef Int -> IO ()
+runPanelPaintsTest ctx failed = do
+  let inp = emptyInput {inputWindowSize = Size 200 200}
+      fat = padAll 16 (fillW defaultLayout)
+  (_, _, colDraw, _) <- runFrame ctx inp (column fat (label "x"))
+  (_, _, panDraw, _) <- runFrame ctx inp (panel fat (label "x"))
+  when (drawVertexCount panDraw <= drawVertexCount colDraw) $ bump failed
+
+-- Page chrome sits below window padding so the header outline is not on y=0.
+runHeaderTopPadTest :: Context -> IORef Int -> IO ()
+runHeaderTopPadTest ctx failed = do
+  let inp = emptyInput {inputWindowSize = Size 800 600}
+      ui =
+        column (padAll 12 . gap 8 . grow $ defaultLayout) $
+          panel (padXY 16 12 . fillW $ defaultLayout) $
+            label "nano-ui SDL3 demo"
+  _ <- runFrame ctx inp ui
+  (resp, _, _, _) <- runFrame ctx inp ui
+  let Rect _ y _ _ = respRect resp
+  when (y < 24) $ bump failed
+
+-- A Fit header beside a Grow scroll keeps its content height when the
+-- window is shorter than the scroll content.
+runFitHeaderNoShrinkTest :: Context -> IORef Int -> IO ()
+runFitHeaderNoShrinkTest ctx failed = do
+  let header = panel (padXY 16 12 . fillW $ defaultLayout) (label "nano-ui SDL3 demo")
+      only =
+        column (padAll 12 . grow $ defaultLayout) header
+      withBody = do
+        r <-
+          column (padAll 12 . gap 8 . grow $ defaultLayout) $ do
+            h <- header
+            scroll (tight (grow defaultLayout)) $
+              column (fillW defaultLayout) $
+                mapM_ (label_ . T.pack . show) [1 .. 40 :: Int]
+            pure h
+        pure r
+      tall = emptyInput {inputWindowSize = Size 400 800}
+      short = emptyInput {inputWindowSize = Size 400 200}
+  _ <- runFrame ctx tall only
+  (r0, _, _, _) <- runFrame ctx tall only
+  _ <- runFrame ctx short withBody
+  (r1, _, _, _) <- runFrame ctx short withBody
+  when (rectH (respRect r1) + 0.5 < rectH (respRect r0)) $ bump failed
+
+-- Floating windows draw on the overlay, ignore backdrop clicks, and close on X.
+runWindowOverlayTest :: Context -> IORef Int -> IO ()
+runWindowOverlayTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 640 400}
+      ui = do
+        outside <- button "Outside"
+        (win, mBody) <-
+          window True "Debug" $ do
+            label "Body"
+        pure (outside, win, mBody)
+      closedUi = do
+        _ <- button "Outside"
+        (win, mBody) <- window False "Debug" (label "Body")
+        pure (win, mBody)
+  do
+    ((win, mBody), _, _, _) <- runFrame ctx inp0 closedUi
+    when (respClicked win) $ bump failed
+    case mBody of
+      Nothing -> pure ()
+      Just _ -> bump failed
+    closedSpans <- collectOverlayTextSpans ctx inp0
+    when (any (\(_, txt, _, _, _) -> "Debug" `T.isInfixOf` txt) closedSpans) $ bump failed
+  _ <- runFrame ctx inp0 ui
+  ((outside0, win0, mBody0), _, _, _) <- runFrame ctx inp0 ui
+  overlays <- collectOverlayTextSpans ctx inp0
+  let hasTitle = any (\(_, txt, _, _, _) -> "Debug" `T.isInfixOf` txt) overlays
+      hasBody = any (\(_, txt, _, _, _) -> "Body" `T.isInfixOf` txt) overlays
+  when (not (hasTitle && hasBody)) $ bump failed
+  let Rect wx wy ww wh = respRect win0
+  when (ww < 100 || wh < 20) $ bump failed
+  case mBody0 of
+    Nothing -> bump failed
+    Just _ -> pure ()
+  let clickOut =
+        inp0
+          { inputMousePos = V2 (rectX (respRect outside0) + 8) (rectY (respRect outside0) + 8)
+          , inputMouseDown = True
+          , inputMousePressed = True
+          }
+  _ <- runFrame ctx clickOut ui
+  let releaseOut =
+        clickOut
+          { inputMouseDown = False
+          , inputMousePressed = False
+          , inputMouseReleased = True
+          }
+  ((outsideHit, _, _), _, _, _) <- runFrame ctx releaseOut ui
+  when (not (respClicked outsideHit)) $ bump failed
+  let mid = V2 (wx + ww / 2) (wy + wh * 0.7)
+      clickWin =
+        inp0
+          { inputMousePos = mid
+          , inputMouseDown = True
+          , inputMousePressed = True
+          }
+  ((outsideMid, _, _), _, _, _) <- runFrame ctx clickWin ui
+  when (respClicked outsideMid) $ bump failed
+  let esc = inp0 {inputKeys = [KeyEscape]}
+  ((_, winEsc, _), _, _, _) <- runFrame ctx esc ui
+  when (respClicked winEsc) $ bump failed
+
+runWindowDragTest :: Context -> IORef Int -> IO ()
+runWindowDragTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 640 400}
+      ui = do
+        (win, _) <- window True "Debug" (label "Body")
+        pure win
+  _ <- runFrame ctx inp0 ui
+  (win0, _, _, _) <- runFrame ctx inp0 ui
+  let Rect x0 y0 _ _ = respRect win0
+      grab = V2 (x0 + 24) (y0 + 10)
+      press =
+        inp0
+          { inputMousePos = grab
+          , inputMouseDown = True
+          , inputMousePressed = True
+          }
+  _ <- runFrame ctx press ui
+  let moved =
+        press
+          { inputMousePos = V2 (x0 + 24 - 50) (y0 + 10 + 30)
+          , inputMousePressed = False
+          }
+  _ <- runFrame ctx moved ui
+  (win1, _, _, _) <- runFrame ctx moved ui
+  let Rect x1 y1 _ _ = respRect win1
+  when (x1 >= x0 - 10) $ bump failed
+  when (y1 <= y0 + 10) $ bump failed
+
+-- A column separator spans the parent width and stays a 1px hairline.
+runSeparatorSpanTest :: Context -> IORef Int -> IO ()
+runSeparatorSpanTest ctx failed = do
+  let inp = emptyInput {inputWindowSize = Size 200 120}
+      ui =
+        column (fillW defaultLayout) $ do
+          label_ "A"
+          resp <- separator
+          label_ "B"
+          pure resp
+  _ <- runFrame ctx inp ui
+  (resp, _, _, _) <- runFrame ctx inp ui
+  let Rect _ _ w h = respRect resp
+  when (w < 100) $ bump failed
+  when (h > 2) $ bump failed

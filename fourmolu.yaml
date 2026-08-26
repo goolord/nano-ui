@@ -1,0 +1,30 @@
+# Matches atrophy / checked-exceptions / ditto style
+
+# Indentation & lists
+indentation: 2
+comma-style: leading
+import-export-style: leading
+
+# Type signatures & constraints
+function-arrows: leading-args
+single-constraint-parens: never
+single-deriving-parens: never
+indent-wheres: false
+
+# let/in blocks
+let-style: newline
+in-style: right-align
+
+# Records
+record-style: aligned
+record-brace-space: true
+
+# Line length & declarations
+column-limit: 80
+newlines-between-decls: 1
+trailing-section-operators: true
+
+# Docs & syntax
+haddock-style: single-line
+unicode: never
+respectful: false

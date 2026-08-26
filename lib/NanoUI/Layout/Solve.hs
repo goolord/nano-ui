@@ -1,6 +1,7 @@
 module NanoUI.Layout.Solve
-  ( solveLayout
+  (   solveLayout
   , placeModals
+  , placeWindows
   ) where
 
 import Control.Monad (forM, forM_, when)
@@ -36,16 +37,19 @@ import NanoUI.Layout.Arena
   , getHeightSizing
   , getMinMax
   , getNextSibling
-  , getNodeType
+  ,   getNodeType
   , getPadding
   , getRect
   , getText
+  , getWidgetId
   , getWidthSizing
   , getWrap
+  , isFloatingNode
   , setRect
   , getNodeValue
   , setNodeValue
   )
+import NanoUI.Id (WidgetId)
 import NanoUI.Style (AlignX (..), AlignY (..), Padding (..))
 import NanoUI.WidgetText
   ( checkboxLabelText
@@ -115,8 +119,10 @@ measureNode na fm measure useAssignedWidth idx = do
     NodeSpacer -> measureSpacer na idx
     NodeSeparator -> measureSeparator na idx
     NodeContainer -> measureContainer na useAssignedWidth idx
+    NodePanel -> measureContainer na useAssignedWidth idx
     NodeScrollContainer -> measureScrollContainer na idx
     NodeModal -> measureScrollContainer na idx
+    NodeWindow -> measureScrollContainer na idx
     NodeImage -> measureImage na idx
     _ -> measureWidget na fm measure idx
 
@@ -317,7 +323,7 @@ collectChildDims na idx = do
         else do
           nt <- getNodeType na ci
           ns <- getNextSibling na ci
-          if nt == NodeModal
+          if isFloatingNode nt
             then go ns acc
             else do
               (_, _, w, h) <- getRect na ci
@@ -409,8 +415,10 @@ positionNode na fm idx x y availW availH = do
   nt <- getNodeType na idx
   case nt of
     NodeContainer -> positionChildren na fm idx dir gap pad x y w h
+    NodePanel -> positionChildren na fm idx dir gap pad x y w h
     NodeScrollContainer -> positionScrollChildren na fm idx dir gap pad x y w h
     NodeModal -> positionScrollChildren na fm idx dir gap pad x y w h
+    NodeWindow -> positionScrollChildren na fm idx dir gap pad x y w h
     _ -> pure ()
 
 positionScrollChildren ::
@@ -483,7 +491,7 @@ collectChildren na idx = do
         else do
           nt <- getNodeType na ci
           ns <- getNextSibling na ci
-          if nt == NodeModal
+          if isFloatingNode nt
             then go ns acc
             else go ns (ci : acc)
 
@@ -614,7 +622,9 @@ getShrinkFactor na idx horizontal = do
     SizingShrink -> pure val
     -- Grow also gives space back when the window is smaller than content.
     SizingGrow -> pure (if val > 0 then val else 1)
-    SizingFit -> pure 1
+    -- Fit stays content-sized. A pinned header must not squash when a Grow
+    -- sibling (page scroll) is taller than the window.
+    SizingFit -> pure 0
     _ -> pure 0
 
 alignX :: AlignX -> Float -> Float -> Float -> Float
@@ -641,6 +651,31 @@ placeModals na fm winW winH = do
           h = min ih winH
           x = max 0 ((winW - w) / 2)
           y = max 0 ((winH - h) / 2)
+      positionNode na fm idx x y w h
+
+windowMargin :: Float
+windowMargin = 24
+
+placeWindows ::
+  NodeArena ->
+  FontMetrics ->
+  Float ->
+  Float ->
+  (WidgetId -> IO (Maybe (Float, Float))) ->
+  IO ()
+placeWindows na fm winW winH lookupPos = do
+  count <- arenaCount na
+  forM_ [0 .. count - 1] $ \idx -> do
+    nt <- getNodeType na idx
+    when (nt == NodeWindow) $ do
+      wid <- getWidgetId na idx
+      (_, _, iw, ih) <- getRect na idx
+      let w = min iw winW
+          h = min ih winH
+      mpos <- lookupPos wid
+      let (x0, y0) = maybe (max 0 (winW - w - windowMargin), windowMargin) id mpos
+          x = clamp x0 0 (max 0 (winW - w))
+          y = clamp y0 0 (max 0 (winH - h))
       positionNode na fm idx x y w h
 
 snd3 :: (a, b, c) -> b

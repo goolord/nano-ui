@@ -2,230 +2,143 @@
 
 module Main (main) where
 
-import Control.Monad (unless, when)
+import Control.Monad (unless, void, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import NanoUI
 import qualified Data.ByteString as BS
-import NanoUI.Backend.Sdl (runSdlAppWith)
+import NanoUI.Backend.Sdl
+  ( SdlDebugSnapshot (..)
+  , SdlEnv
+  , emptySdlDebug
+  , readSdlDebugEnv
+  , runSdlAppWith
+  )
 import qualified Data.Text as T
+import Text.Printf (printf)
 
--- Stay below panelPaintPad so the page column does not fill.
-pagePad :: Padding
-pagePad =
-  let p = panelPaintPad - 2
-   in Padding p p p p
-
-cardPad :: Padding
-cardPad = Padding 16 16 14 14
-
-headerPad :: Padding
-headerPad = Padding 16 16 12 12
-
-pageGap :: Float
-pageGap = 8
-
-sectionGap :: Float
-sectionGap = 8
-
-pageLayout :: Layout
-pageLayout =
-  defaultLayout
-    { layoutWidth = Grow 1
-    , layoutHeight = Grow 1
-    , layoutPadding = pagePad
-    , layoutGap = pageGap
-    }
-
-headerCard :: Layout
-headerCard =
-  defaultLayout
-    { layoutWidth = Grow 1
-    , layoutPadding = headerPad
-    , layoutGap = 8
-    }
-
-cardLayout :: Layout
-cardLayout =
-  defaultLayout
-    { layoutWidth = Grow 1
-    , layoutPadding = cardPad
-    , layoutGap = sectionGap
-    , layoutMinW = 280
-    }
-
-headerRow :: Layout
-headerRow =
-  defaultLayout
-    { layoutWidth = Grow 1
-    , layoutAlignY = AlignMiddle
-    , layoutGap = 16
-    }
-
-scrollFill :: Layout
-scrollFill =
-  defaultLayout
-    { layoutWidth = Grow 1
-    , layoutHeight = Grow 1
-    , layoutPadding = Padding 0 0 0 0
-    , layoutGap = 0
-    }
-
-bodyRow :: Layout
-bodyRow =
-  defaultLayout
-    { layoutWidth = Grow 1
-    , layoutGap = pageGap
-    , layoutWrap = True
-    }
-
-pageInner :: Layout
-pageInner =
-  defaultLayout
-    { layoutWidth = Grow 1
-    , layoutPadding = Padding 0 0 0 0
-    , layoutGap = pageGap
-    }
-
-listScroll :: Layout
-listScroll =
-  defaultLayout
-    { layoutWidth = Grow 1
-    , layoutHeight = Fixed 136
-    , layoutPadding = Padding 8 8 8 8
-    }
-
-stackCol :: Layout
-stackCol =
-  defaultLayout
-    { layoutWidth = Grow 1
-    , layoutPadding = Padding 0 0 0 0
-    , layoutGap = sectionGap
-    }
-
-thumbLayout :: Layout
-thumbLayout =
-  defaultLayout
-    { layoutWidth = Fixed 80
-    , layoutHeight = Fixed 80
-    }
-
--- Grow so assigned width remasures and wraps inside the card.
-wrapCopy :: Layout
-wrapCopy =
-  defaultLayout
-    { layoutWidth = Grow 1
-    }
+card :: Layout
+card = minW 280 . padXY 16 14 . gap 8 . fillW $ defaultLayout
 
 main :: IO ()
 main = do
   ctx <- newSdlContext
-  lastClick <- newIORef ("" :: String)
-  aboutOpen <- newIORef False
-  ok1 <- registerImage ctx (ImageId 1) 32 32 swatchPixels
-  ok2 <- registerImage ctx (ImageId 2) 32 32 checkerPixels
-  ok3 <- registerImage ctx (ImageId 3) 32 32 stripePixels
-  unless (ok1 && ok2 && ok3) $ fail "registerImage failed"
+  ok <-
+    registerImages
+      ctx
+      [ (ImageId 1, 32, 32, swatchPixels)
+      , (ImageId 2, 32, 32, checkerPixels)
+      , (ImageId 3, 32, 32, stripePixels)
+      ]
+  unless ok $ fail "registerImage failed"
+  envRef <- newIORef (Nothing :: Maybe SdlEnv)
   runSdlAppWith
     ctx
-    (\_ -> pure ())
+    (\env -> writeIORef envRef (Just env))
     (\inp -> KeyEscape `elem` inputKeys inp)
-    $
-    column pageLayout $ do
-      (_, _) <-
-        scrollArea scrollFill $
-          column pageInner $ do
-            panel headerCard $
-              row headerRow $ do
-                _ <- label "nano-ui SDL3 demo"
-                _ <- spacer (Grow 1) Fit
-                row
-                  defaultLayout
-                    { layoutPadding = Padding 0 0 0 0
-                    , layoutAlignY = AlignMiddle
-                    , layoutGap = 8
-                    }
-                  $ do
-                    ok <- button "OK"
-                    when (respClicked ok) $
-                      liftIO $ writeIORef lastClick "OK"
-                    cancel <- button "Cancel"
-                    when (respClicked cancel) $
-                      liftIO $ writeIORef lastClick "Cancel"
-                    about <- button "About"
-                    when (respClicked about) $ liftIO $ writeIORef aboutOpen True
-                    pure ()
-            row bodyRow $ do
-              panel cardLayout $
-                column stackCol $ do
-                    _ <- label "Controls"
-                    (_, checked) <- checkbox "Feature" False
-                    (_, vol) <- slider (defaultLayout {layoutWidth = Grow 1}) "Volume" 0 100 50
-                    (_, quality) <- select "Quality" ["Low", "Medium", "High"] 1
-                    (_, name) <- textInput "Name" ""
-                    _ <- separator
-                    _ <- label "List"
-                    (_, _) <-
-                      scrollArea listScroll $
-                        column
-                          ( defaultLayout
-                              { layoutWidth = Grow 1
-                              , layoutPadding = Padding 0 0 0 0
-                              , layoutGap = 0
-                              }
-                          )
-                          $ mapM_ (\i -> label (T.pack ("Item " <> show (i :: Int)))) [1 .. 12]
-                    click <- liftIO $ readIORef lastClick
-                    _ <- separator
-                    _ <- label (T.pack ("Feature  " <> if checked then "on" else "off"))
-                    _ <- label (T.pack ("Volume   " <> show (round vol :: Int)))
-                    _ <- label (T.pack ("Quality  " <> show quality))
-                    _ <- label (T.pack ("Name     " <> if null name then "-" else name))
-                    _ <- label (T.pack ("Clicked  " <> if null click then "-" else click))
-                    pure ()
-              panel cardLayout $
-                column stackCol $ do
-                    _ <- label "Gallery"
-                    row
-                      defaultLayout
-                        { layoutPadding = Padding 0 0 0 0
-                        , layoutGap = 12
-                        , layoutWrap = True
-                        }
-                      $ do
-                        column (defaultLayout {layoutPadding = Padding 0 0 0 0, layoutGap = 6}) $ do
-                          _ <- image thumbLayout (ImageId 1)
-                          _ <- label "Swatch"
-                          pure ()
-                        column (defaultLayout {layoutPadding = Padding 0 0 0 0, layoutGap = 6}) $ do
-                          _ <- image thumbLayout (ImageId 2)
-                          _ <- label "Checker"
-                          pure ()
-                        column (defaultLayout {layoutPadding = Padding 0 0 0 0, layoutGap = 6}) $ do
-                          _ <- image thumbLayout (ImageId 3)
-                          _ <- label "Stripe"
-                          pure ()
-                    _ <- separator
-                    _ <- labelEx wrapCopy "Click widgets or type in Name."
-                    _ <- labelEx wrapCopy "Esc closes About, then quits."
-                    pure ()
-      showAbout <- liftIO (readIORef aboutOpen)
+    $ do
+      (click, setClick) <- useText ""
+      (aboutOpen, setAbout) <- useFlag False
+      (debugOpen, setDebug) <- useFlag False
+      column (padAll 12 . gap 8 . grow $ defaultLayout) $ do
+        panel (padXY 16 12 . gap 8 . fillW $ defaultLayout) $
+          row (tight . gap 16 . alignMid . fillW $ defaultLayout) $ do
+            label_ "nano-ui SDL3 demo"
+            flex
+            row (tight . gap 8 . alignMid $ defaultLayout) $ do
+              clickButton "OK" (setClick "OK")
+              clickButton "Cancel" (setClick "Cancel")
+              clickButton "About" (setAbout True)
+              clickButton "Debug" (setDebug (not debugOpen))
+        scroll (tight (grow defaultLayout)) $
+          row (tight . gap 8 . wrap . fillW $ defaultLayout) $ do
+            panel card $ do
+              label_ "Controls"
+              (_, checked) <- checkbox "Feature" False
+              (_, vol) <- slider "Volume" 0 100 50
+              (_, quality) <- select "Quality" ["Low", "Medium", "High"] 1
+              (_, name) <- textInput "Name" ""
+              sep
+              label_ "List"
+              scroll (padAll 8 . fixedH 136 . fillW $ defaultLayout) $
+                column (tight . gap 0 . fillW $ defaultLayout) $
+                  mapM_ (label_ . T.pack . ("Item " <>) . show) [1 .. 12 :: Int]
+              sep
+              label_ (T.pack ("Feature  " <> if checked then "on" else "off"))
+              label_ (T.pack ("Volume   " <> show (round vol :: Int)))
+              label_ (T.pack ("Quality  " <> show quality))
+              label_ (T.pack ("Name     " <> if null name then "-" else name))
+              label_ (T.pack ("Clicked  " <> if null click then "-" else click))
+            panel card $ do
+              label_ "Gallery"
+              row (tight . gap 12 . wrap $ defaultLayout) $ do
+                thumb (ImageId 1) "Swatch"
+                thumb (ImageId 2) "Checker"
+                thumb (ImageId 3) "Stripe"
+              sep
+              copy "Click widgets or type in Name."
+              copy "Esc closes About, then quits."
+      when debugOpen $ do
+        snap <-
+          liftIO $
+            readIORef envRef >>= \m ->
+              case m of
+                Nothing -> pure emptySdlDebug
+                Just env -> readSdlDebugEnv env
+        (win, _) <- window True "Debug" (debugBody snap)
+        onClick win (setDebug False)
       (aboutResp, _) <-
-        modal showAbout "About" $ do
-          _ <- labelEx wrapCopy "Immediate-mode GUI for Haskell."
-          _ <- labelEx wrapCopy "Esc closes this dialog, then the app."
-          row
-            defaultLayout
-              { layoutWidth = Grow 1
-              , layoutGap = 8
-              }
-            $ do
-              _ <- spacer (Grow 1) Fit
-              close <- button "Close"
-              when (respClicked close) $ liftIO $ writeIORef aboutOpen False
-              pure ()
-      when (respClicked aboutResp) $ liftIO $ writeIORef aboutOpen False
-      pure ()
+        modal aboutOpen "About" $ do
+          copy "Immediate-mode GUI for Haskell."
+          copy "Esc closes this dialog, then the app."
+          row (gap 8 (fillW defaultLayout)) $ do
+            flex
+            clickButton "Close" (setAbout False)
+      onClick aboutResp (setAbout False)
+
+debugBody :: SdlDebugSnapshot -> UI ()
+debugBody s =
+  mapM_ (\(i, line) -> withKey i (label_ (T.pack line))) (zip [0 :: Int ..] (debugLines s))
+
+debugLines :: SdlDebugSnapshot -> [String]
+debugLines s =
+  [ printf "present  %.1f fps   loop %.1f fps" (dbgPresentFps s) (dbgLoopFps s)
+  , printf "frame    %.2f ms    ui %.2f ms" (dbgFrameMs s) (dbgUiMs s)
+  , printf "draws    %d   skips %d" (dbgPresents s) (dbgSkips s)
+  , printf "mesh     %d verts  %d idx  %d cmds" (dbgVerts s) (dbgIndices s) (dbgCmds s)
+  , printf
+      "window   %.0fx%.0f  scale %.2f"
+      (dbgWinW s)
+      (dbgWinH s)
+      (dbgScale s)
+  , printf "mouse    %.0f, %.0f" (dbgMouseX s) (dbgMouseY s)
+  , "renderer " <> dbgRenderer s <> "  vsync on"
+  , "font     " <> dbgFontPath s
+  , printf "haskell  %d cap / %d cpu" (dbgCaps s) (dbgCpus s)
+  ]
+    ++ rtsLines s
+
+rtsLines :: SdlDebugSnapshot -> [String]
+rtsLines s
+  | not (dbgRtsOn s) = ["rts      stats off (need +RTS -T)"]
+  | otherwise =
+      [ printf "gc       %d total  %d major  last gen %d (%.2f ms)" (dbgGcs s) (dbgMajorGcs s) (dbgLastGcGen s) (dbgLastGcMs s)
+      , printf
+          "heap     live %.1f MiB  alloc %.1f MiB  copied %.1f MiB"
+          (dbgLiveMb s)
+          (dbgAllocMb s)
+          (dbgCopiedMb s)
+      , printf "rss max  %.1f MiB   gc time %.1f%%" (dbgMaxMemMb s) (dbgGcPct s)
+      ]
+
+copy :: T.Text -> UI ()
+copy txt = void (labelEx (fillW defaultLayout) txt)
+
+thumb :: ImageId -> T.Text -> UI ()
+thumb iid caption =
+  column (tight . gap 6 $ defaultLayout) $ do
+    image_ (fixedWH 80 80 defaultLayout) iid
+    label_ caption
 
 swatchPixels :: BS.ByteString
 swatchPixels =

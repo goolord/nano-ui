@@ -8,15 +8,26 @@ module NanoUI.Widgets
   , button
   , checkbox
   , slider
+  , sliderEx
   , textInput
   , applyTextInputMenuAction
   , separator
   , spacer
   , tooltip
+  , scroll
   , scrollArea
   , select
   , modal
+  , window
   , image
+  , label_
+  , onClick
+  , clickButton
+  , useFlag
+  , useText
+  , sep
+  , flex
+  , image_
   , sliderText
   , sliderDisplayText
   , sliderLabelText
@@ -71,8 +82,10 @@ import NanoUI.Context
 import NanoUI.Id (WidgetId (..))
 import NanoUI.Input (Input (..), Key (..), Modifiers (..), inputChars, inputKeys, inputModifiers)
 import NanoUI.Layout.Arena
-  ( NodeType (..)
+  ( DirTag (..)
+  , NodeType (..)
   , addNode
+  , getDirection
   , setNodeText
   , setNodeValue
   , setWidgetId
@@ -85,7 +98,11 @@ import NanoUI.Style
   , Layout (..)
   , Padding (..)
   , Sizing (..)
+  , alignMid
   , defaultLayout
+  , fillW
+  , gap
+  , tight
   )
 import NanoUI.Types (ImageId (..), Rect (..), Size (..), V2 (..), rectContains, rectH, rectW, sliderTrackRect)
 
@@ -106,15 +123,69 @@ data Response = Response
 
 {-# INLINE panel #-}
 panel :: Layout -> UI a -> UI a
-panel = container
+panel = container NodePanel
 
 {-# INLINE row #-}
 row :: Layout -> UI a -> UI a
-row layout child = container (layout {layoutDirection = Row}) child
+row layout child = container NodeContainer (layout {layoutDirection = Row}) child
 
 {-# INLINE column #-}
 column :: Layout -> UI a -> UI a
-column layout child = container (layout {layoutDirection = Column}) child
+column layout child = container NodeContainer (layout {layoutDirection = Column}) child
+
+{-# INLINE onClick #-}
+onClick :: Response -> UI () -> UI ()
+onClick resp act = when (respClicked resp) act
+
+{-# INLINE clickButton #-}
+clickButton :: HasCallStack => Text -> UI () -> UI ()
+clickButton txt act = button txt >>= \resp -> onClick resp act
+
+{-# INLINE label_ #-}
+label_ :: HasCallStack => Text -> UI ()
+label_ txt = void (label txt)
+
+{-# INLINE sep #-}
+sep :: HasCallStack => UI ()
+sep = void separator
+
+{-# INLINE flex #-}
+flex :: HasCallStack => UI ()
+flex = void (spacer (Grow 1) Fit)
+
+{-# INLINE image_ #-}
+image_ :: HasCallStack => Layout -> ImageId -> UI ()
+image_ layout iid = void (image layout iid)
+
+useFlag :: HasCallStack => Bool -> UI (Bool, Bool -> UI ())
+useFlag initial = do
+  wid <- currentId
+  ctx <- askContext
+  store <- liftIO (getStore ctx)
+  let key = intKey wid
+      cur = IM.findWithDefault initial key (storeFlag store)
+      set v = liftIO $ do
+        st <- getStore ctx
+        let prev = IM.findWithDefault initial key (storeFlag st)
+        when (prev /= v) $ do
+          setStore ctx (st {storeFlag = IM.insert key v (storeFlag st)})
+          markDirty ctx
+  pure (cur, set)
+
+useText :: HasCallStack => String -> UI (String, String -> UI ())
+useText initial = do
+  wid <- currentId
+  ctx <- askContext
+  store <- liftIO (getStore ctx)
+  let key = intKey wid
+      cur = IM.findWithDefault initial key (storeNote store)
+      set v = liftIO $ do
+        st <- getStore ctx
+        let prev = IM.findWithDefault initial key (storeNote st)
+        when (prev /= v) $ do
+          setStore ctx (st {storeNote = IM.insert key v (storeNote st)})
+          markDirty ctx
+  pure (cur, set)
 
 modal :: HasCallStack => Bool -> Text -> UI a -> UI (Response, Maybe a)
 modal open title child
@@ -198,6 +269,76 @@ image layout (ImageId tid) = do
   let stored = if tid <= 0 then T.empty else T.pack (show tid)
   addWidget wid NodeImage stored 0 layout
 
+window :: HasCallStack => Bool -> Text -> UI a -> UI (Response, Maybe a)
+window open title child
+  | not open = do
+      wid <- currentId
+      pure (emptyModalResp wid, Nothing)
+  | otherwise = do
+      wid <- currentId
+      ctx <- askContext
+      inp <- askInput
+      (closeResp, body) <-
+        UI $ \c i -> do
+          stack <- readIORef (ctxContainerStack c)
+          let parent = parentIdx stack
+              Size winW winH = inputWindowSize i
+              margin = 16
+              minW = 280
+              maxW = max minW (winW - 2 * margin)
+              maxH = max 40 (winH - 2 * margin)
+          idx <-
+            addNode
+              (ctxNodeArena c)
+              NodeWindow
+              parent
+              Column
+              Fit
+              Fit
+              (Padding 14 14 10 14)
+              8
+              minW
+              0
+              maxW
+              maxH
+              0
+              AlignStart
+              AlignTop
+              False
+          setWidgetId (ctxNodeArena c) idx wid
+          writeIORef (ctxContainerStack c) (idx : stack)
+          closeResp <-
+            unUI
+              ( do
+                  close <-
+                    row (tight . gap 8 . alignMid . fillW $ defaultLayout) $ do
+                      when (not (T.null title)) $
+                        label_ title
+                      flex
+                      withKey ("close" :: Text) (button "X")
+                  sep
+                  body <- child
+                  pure (close, body)
+              )
+              c
+              i
+          writeIORef (ctxContainerStack c) stack
+          pure closeResp
+      mrect <- liftIO (getPrevRect ctx wid)
+      let mouse = inputMousePos inp
+          inPanel = maybe False (\r -> rectW r > 0 && rectH r > 0 && rectContains r mouse) mrect
+      pure
+        ( Response
+            { respId = wid
+            , respRect = maybe (Rect 0 0 0 0) id mrect
+            , respHovered = inPanel
+            , respPressed = False
+            , respClicked = respClicked closeResp
+            , respChanged = respClicked closeResp
+            }
+        , Just body
+        )
+
 emptyModalResp :: WidgetId -> Response
 emptyModalResp wid =
   Response
@@ -209,14 +350,14 @@ emptyModalResp wid =
     , respChanged = False
     }
 
-container :: Layout -> UI a -> UI a
-container layout child = UI $ \ctx inp -> do
+container :: NodeType -> Layout -> UI a -> UI a
+container nt layout child = UI $ \ctx inp -> do
   stack <- readIORef (ctxContainerStack ctx)
   let parent = parentIdx stack
   idx <-
     addNode
       (ctxNodeArena ctx)
-      NodeContainer
+      nt
       parent
       (layoutDirection layout)
       (layoutWidth layout)
@@ -279,8 +420,12 @@ checkbox txt initial = do
   pure (resp, display)
 
 {-# INLINE slider #-}
-slider :: HasCallStack => Layout -> Text -> Float -> Float -> Float -> UI (Response, Float)
-slider layout lbl minV maxV initial = do
+slider :: HasCallStack => Text -> Float -> Float -> Float -> UI (Response, Float)
+slider = sliderEx (fillW defaultLayout)
+
+{-# INLINE sliderEx #-}
+sliderEx :: HasCallStack => Layout -> Text -> Float -> Float -> Float -> UI (Response, Float)
+sliderEx layout lbl minV maxV initial = do
   wid <- currentId
   ctx <- askContext
   inp <- askInput
@@ -378,14 +523,22 @@ separator = do
   liftIO $ do
     stack <- readIORef (ctxContainerStack ctx)
     let parent = parentIdx stack
+    parentDir <-
+      if parent < 0
+        then pure DirColumn
+        else getDirection (ctxNodeArena ctx) parent
+    let (dir, wSiz, hSiz) =
+          case parentDir of
+            DirColumn -> (Column, Grow 1, Fixed 1)
+            DirRow -> (Row, Fixed 1, Grow 1)
     idx <-
       addNode
         (ctxNodeArena ctx)
         NodeSeparator
         parent
-        Row
-        (Fixed 1)
-        Fit
+        dir
+        wSiz
+        hSiz
         (Padding 0 0 0 0)
         0
         0
@@ -428,6 +581,12 @@ spacer w h = do
         False
     setWidgetId (ctxNodeArena ctx) idx wid
     resolveInteraction ctx inp wid
+
+{-# INLINE scroll #-}
+scroll :: HasCallStack => Layout -> UI a -> UI a
+scroll layout child = do
+  (_, r) <- scrollArea layout child
+  pure r
 
 {-# INLINE scrollArea #-}
 scrollArea :: HasCallStack => Layout -> UI a -> UI (WidgetId, a)

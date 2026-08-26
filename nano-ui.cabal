@@ -38,7 +38,7 @@ common rts-options
     ghc-options:
         -rtsopts
         -threaded
-        "-with-rtsopts=-N --nonmoving-gc -qb0"
+        "-with-rtsopts=-N --nonmoving-gc -qb0 -T"
 
 common test-rts-options
     ghc-options: -rtsopts -threaded "-with-rtsopts=-A8m -H64m"
@@ -156,6 +156,7 @@ library nano-ui-sdl
     other-modules:
         NanoUI.Sdl.Clipboard
         NanoUI.Sdl.Cursor
+        NanoUI.Sdl.Debug
         NanoUI.Sdl.Display
         NanoUI.Sdl.Font
         NanoUI.Sdl.Image

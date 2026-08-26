@@ -92,12 +92,117 @@ void nano_ui_remove_resize_watch(void)
     g_resize_cb = NULL;
 }
 
+static Uint32 g_refresh_event_type = 0;
+
+bool nano_ui_register_refresh_event(void)
+{
+    if (g_refresh_event_type != 0) {
+        return true;
+    }
+    g_refresh_event_type = SDL_RegisterEvents(1);
+    return g_refresh_event_type != 0;
+}
+
+Uint32 nano_ui_refresh_event_type(void)
+{
+    return g_refresh_event_type;
+}
+
+bool nano_ui_push_refresh_event(void)
+{
+    if (g_refresh_event_type == 0) {
+        return false;
+    }
+    SDL_Event ev;
+    SDL_zero(ev);
+    ev.type = g_refresh_event_type;
+    return SDL_PushEvent(&ev);
+}
+
 bool nano_ui_set_render_scale(SDL_Renderer *renderer, float scale)
 {
     if (!renderer || scale <= 0.f) {
         return false;
     }
     return SDL_SetRenderScale(renderer, scale, scale);
+}
+
+bool nano_ui_renderer_name(SDL_Renderer *renderer, char *buf, size_t cap)
+{
+    if (!renderer || !buf || cap == 0) {
+        return false;
+    }
+    const char *name = SDL_GetRendererName(renderer);
+    if (!name) {
+        buf[0] = '\0';
+        return false;
+    }
+    size_t i = 0;
+    for (; i + 1 < cap && name[i]; i++) {
+        buf[i] = name[i];
+    }
+    buf[i] = '\0';
+    return true;
+}
+
+SDL_Texture *nano_ui_retain_create(SDL_Renderer *renderer, int w, int h)
+{
+    if (!renderer || w <= 0 || h <= 0) {
+        return NULL;
+    }
+    SDL_Texture *tex =
+        SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_TARGET, w, h);
+    if (!tex) {
+        return NULL;
+    }
+    SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_NONE);
+    return tex;
+}
+
+bool nano_ui_retain_begin(SDL_Renderer *renderer, SDL_Texture *tex)
+{
+    if (!renderer || !tex) {
+        return false;
+    }
+    return SDL_SetRenderTarget(renderer, tex);
+}
+
+bool nano_ui_retain_blit(SDL_Renderer *renderer, SDL_Texture *tex)
+{
+    if (!renderer || !tex) {
+        return false;
+    }
+    if (!SDL_SetRenderTarget(renderer, NULL)) {
+        return false;
+    }
+    if (!SDL_SetRenderClipRect(renderer, NULL)) {
+        return false;
+    }
+    return SDL_RenderTexture(renderer, tex, NULL, NULL);
+}
+
+bool nano_ui_retain_blit_rect(
+    SDL_Renderer *renderer,
+    SDL_Texture *tex,
+    float src_x,
+    float src_y,
+    float src_w,
+    float src_h,
+    float dst_x,
+    float dst_y)
+{
+    if (!renderer || !tex || src_w <= 0.f || src_h <= 0.f) {
+        return false;
+    }
+    if (!SDL_SetRenderTarget(renderer, NULL)) {
+        return false;
+    }
+    if (!SDL_SetRenderClipRect(renderer, NULL)) {
+        return false;
+    }
+    SDL_FRect src = {src_x, src_y, src_w, src_h};
+    SDL_FRect dst = {dst_x, dst_y, src_w, src_h};
+    return SDL_RenderTexture(renderer, tex, &src, &dst);
 }
 
 bool nano_ui_render_coords_from_window(

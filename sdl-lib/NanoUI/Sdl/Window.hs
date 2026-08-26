@@ -10,16 +10,19 @@ import Control.Monad (unless, void, when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Foreign.C.String (withCString)
 import Foreign.Marshal.Alloc (alloca)
-import Foreign.Ptr (Ptr)
+import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (peek)
-import NanoUI (Context, Input (..), Size (..), markDirty)
+import NanoUI (Context, Input (..), Size (..), markDirty, setWakeLoop)
 import NanoUI.Sdl.Display
   ( defaultFontSize
   , defaultUiScale
+  , initRefreshEvent
   , initSdlHints
+  , pushRefreshEvent
   , queryMouseWindowPos
   , queryWindowDisplayScale
   , queryWindowLogicalSize
+  , retainDestroy
   , setRenderScale
   , windowToLogicalCoords
   )
@@ -36,6 +39,7 @@ import NanoUI.Sdl.Font
   , withTtf
   , withTtfMeasureScaled
   )
+import NanoUI.Sdl.Debug (SdlDebugSampler, newSdlDebugSampler)
 import NanoUI.Sdl.Image (ImageAtlas, destroyImageAtlas, newImageAtlas)
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
@@ -61,6 +65,8 @@ data SdlEnv = SdlEnv
   , sdlTextCache :: TextCache
   , sdlImages :: ImageAtlas
   , sdlCursors :: SdlCursors
+  , sdlDebug :: IORef SdlDebugSampler
+  , sdlRetain :: IORef (Ptr (), Int, Int)
   }
 
 defaultWindowSize :: Size
@@ -114,6 +120,8 @@ withSdl ctx title (Size w h) act =
     let startup = do
           unlessM (initSafe (SDL_InitFlags 32)) $
             fail "SDL_Init(SDL_INIT_VIDEO) failed"
+          unlessM initRefreshEvent $
+            fail "SDL_RegisterEvents failed for refresh wake"
           withCString title $ \titlePtr ->
             alloca $ \winPtr ->
               alloca $ \renPtr -> do
@@ -135,6 +143,8 @@ withSdl ctx title (Size w h) act =
                 cache <- newTextCache
                 images <- newImageAtlas
                 cursors <- initCursors
+                debug <- newSdlDebugSampler
+                retain <- newIORef (nullPtr, 0, 0)
                 unlessM (setRenderScale ren defaultUiScale) $
                   fail "SDL_SetRenderScale failed"
                 _ <- startTextInputSafe win
@@ -148,8 +158,12 @@ withSdl ctx title (Size w h) act =
                     , sdlTextCache = cache
                     , sdlImages = images
                     , sdlCursors = cursors
+                    , sdlDebug = debug
+                    , sdlRetain = retain
                     }
         teardown env = do
+          (tex, _, _) <- readIORef (sdlRetain env)
+          retainDestroy tex
           destroyCursors (sdlCursors env)
           destroyImageAtlas (sdlImages env)
           destroyTextCache (sdlTextCache env)
@@ -164,6 +178,7 @@ withSdl ctx title (Size w h) act =
       scale <- readIORef (sdlScaleRef env)
       font <- readIORef (sdlFontRef env)
       let ctx' = withSdlClipboard (withTtfMeasureScaled ctx font scale)
+      setWakeLoop ctx' pushRefreshEvent
       act ctx' env
 
 unlessM :: IO Bool -> IO () -> IO ()

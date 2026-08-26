@@ -12,6 +12,8 @@ module NanoUI.Context
   , newSdlContext
   , markDirty
   , isDirty
+  , setWakeLoop
+  , takeDamage
   , getHotId
   , getFocusId
   , anyAnimating
@@ -48,6 +50,7 @@ module NanoUI.Context
   , beginModal
   , endModal
   , registerImage
+  , registerImages
   , lookupImageUv
   , atlasSnapshot
   , atlasTextureId
@@ -64,7 +67,7 @@ import Data.ByteString (ByteString)
 import qualified NanoUI.Atlas as Atlas
 import NanoUI.Atlas (ImageAtlas, atlasTextureId)
 import NanoUI.Draw (DrawArena, newDrawArena)
-import NanoUI.Types (Color (..), ImageId (..), Rect (..))
+import NanoUI.Types (Color (..), Damage (..), ImageId (..), Rect (..), Size (..))
 import NanoUI.Font (FontMetrics, measureText, monospaceMetrics)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), Key (KeyEscape))
@@ -92,6 +95,9 @@ data WidgetStore = WidgetStore
   , storeSelect :: IntMap Int
   , storeSelectOpen :: IntMap Bool
   , storeDisabled :: IntMap Bool
+  , storeFlag :: IntMap Bool
+  , storeNote :: IntMap String
+  , storeWindow :: IntMap (Float, Float)
   }
   deriving (Eq, Show)
 
@@ -107,6 +113,9 @@ emptyWidgetStore =
     , storeSelect = IM.empty
     , storeSelectOpen = IM.empty
     , storeDisabled = IM.empty
+    , storeFlag = IM.empty
+    , storeNote = IM.empty
+    , storeWindow = IM.empty
     }
 
 data PendingTooltip = PendingTooltip
@@ -141,6 +150,8 @@ data Context = Context
   , ctxAnimations :: IORef (IntMap Animation)
   , ctxAnyAnimating :: IORef Bool
   , ctxDirty :: IORef Bool
+  , ctxDamage :: IORef Damage
+  , ctxLastWindowSize :: IORef Size
   , ctxIdSalt :: IORef Word64
   , ctxFontMetrics :: FontMetrics
   , ctxMeasureText :: Text -> IO (Float, Float)
@@ -161,7 +172,9 @@ data Context = Context
   , ctxModalActive :: IORef Bool
   , ctxModalDepth :: IORef Int
   , ctxEscapeConsumed :: IORef Bool
+  , ctxWindowDrag :: IORef (Maybe (WidgetId, Float, Float))
   , ctxImageAtlas :: ImageAtlas
+  , ctxWakeLoop :: IORef (Maybe (IO ()))
   }
 
 {-# INLINE newContext #-}
@@ -178,6 +191,8 @@ newContext = do
   ctxAnimations <- newIORef IM.empty
   ctxAnyAnimating <- newIORef False
   ctxDirty <- newIORef True
+  ctxDamage <- newIORef DamageFull
+  ctxLastWindowSize <- newIORef (Size 0 0)
   ctxIdSalt <- newIORef 0
   ctxContainerStack <- newIORef []
   ctxMessages <- newIORef []
@@ -192,7 +207,9 @@ newContext = do
   ctxModalActive <- newIORef False
   ctxModalDepth <- newIORef 0
   ctxEscapeConsumed <- newIORef False
+  ctxWindowDrag <- newIORef Nothing
   ctxImageAtlas <- Atlas.newImageAtlas
+  ctxWakeLoop <- newIORef Nothing
   let fm0 = monospaceMetrics 12
   pure
     Context
@@ -207,6 +224,8 @@ newContext = do
       , ctxAnimations
       , ctxAnyAnimating
       , ctxDirty
+      , ctxDamage
+      , ctxLastWindowSize
       , ctxIdSalt
       , ctxFontMetrics = fm0
       , ctxMeasureText = \txt -> pure (measureText fm0 txt)
@@ -226,8 +245,10 @@ newContext = do
       , ctxModalWasActive
       , ctxModalActive
       , ctxModalDepth
-      , ctxEscapeConsumed
-      , ctxImageAtlas
+  , ctxEscapeConsumed
+  , ctxWindowDrag
+  , ctxImageAtlas
+  , ctxWakeLoop
       }
 
 {-# INLINE withFontMetrics #-}
@@ -264,11 +285,24 @@ newSdlContext = do
 
 {-# INLINE markDirty #-}
 markDirty :: Context -> IO ()
-markDirty ctx = writeIORef (ctxDirty ctx) True
+markDirty ctx = do
+  writeIORef (ctxDirty ctx) True
+  mWake <- readIORef (ctxWakeLoop ctx)
+  case mWake of
+    Just wake -> wake
+    Nothing -> pure ()
+
+{-# INLINE setWakeLoop #-}
+setWakeLoop :: Context -> IO () -> IO ()
+setWakeLoop ctx wake = writeIORef (ctxWakeLoop ctx) (Just wake)
 
 {-# INLINE isDirty #-}
 isDirty :: Context -> IO Bool
 isDirty ctx = readIORef (ctxDirty ctx)
+
+{-# INLINE takeDamage #-}
+takeDamage :: Context -> IO Damage
+takeDamage ctx = readIORef (ctxDamage ctx)
 
 {-# INLINE getFocusId #-}
 getFocusId :: Context -> IO WidgetId
@@ -363,7 +397,6 @@ tickAnimations ctx dt = do
           remaining = IM.difference updated finished
       writeIORef (ctxAnimations ctx) remaining
       writeIORef (ctxAnyAnimating ctx) (not (IM.null remaining))
-      if not (IM.null finished) then markDirty ctx else pure ()
 
 {-# INLINE intKey #-}
 intKey :: WidgetId -> Int
@@ -387,8 +420,9 @@ getStore ctx = readIORef (ctxStore ctx)
 {-# INLINE setStore #-}
 setStore :: Context -> WidgetStore -> IO ()
 setStore ctx store = do
+  prev <- readIORef (ctxStore ctx)
   writeIORef (ctxStore ctx) store
-  markDirty ctx
+  when (prev /= store) (markDirty ctx)
 
 {-# INLINE pushMessage #-}
 pushMessage :: Context -> FrameMsg -> IO ()
@@ -434,7 +468,11 @@ getScrollOffset ctx wid = do
 setScrollOffset :: Context -> WidgetId -> Float -> IO ()
 setScrollOffset ctx wid off = do
   store <- getStore ctx
-  setStore ctx (store {storeScroll = IM.insert (intKey wid) off (storeScroll store)})
+  let key = intKey wid
+      prev = IM.findWithDefault 0 key (storeScroll store)
+  when (prev /= off) $ do
+    setStore ctx (store {storeScroll = IM.insert key off (storeScroll store)})
+    markDirty ctx
 
 {-# INLINE getAnimationValue #-}
 getAnimationValue :: Context -> WidgetId -> IO Float
@@ -483,6 +521,9 @@ registerImage ctx iid w h pixels = do
   ok <- Atlas.registerImage (ctxImageAtlas ctx) iid w h pixels
   when ok (markDirty ctx)
   pure ok
+
+registerImages :: Context -> [(ImageId, Int, Int, ByteString)] -> IO Bool
+registerImages ctx = fmap and . mapM (\(iid, w, h, px) -> registerImage ctx iid w h px)
 
 lookupImageUv :: Context -> ImageId -> IO (Maybe (Float, Float, Float, Float))
 lookupImageUv ctx = Atlas.lookupImageUv (ctxImageAtlas ctx)

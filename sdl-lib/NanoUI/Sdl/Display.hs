@@ -6,15 +6,26 @@ module NanoUI.Sdl.Display
   , queryWindowLogicalSize
   , queryMouseWindowPos
   , setRenderScale
+  , queryRendererName
   , windowToLogicalCoords
   , installResizeWatch
-  ) where
+  , initRefreshEvent
+  , pushRefreshEvent
+  , readRefreshEventType
+  , retainCreate
+  , retainBegin
+  , retainBlit
+  , retainBlitRect
+  , retainDestroy
+) where
 
-import Control.Monad (unless)
-import Foreign.C.Types (CFloat (..))
-import Foreign.Marshal.Alloc (alloca)
-import Foreign.Ptr (FunPtr, Ptr, freeHaskellFunPtr)
+import Control.Monad (unless, void)
+import Foreign.C.String (peekCString)
+import Foreign.C.Types (CChar, CFloat (..), CInt (..), CSize (..))
+import Foreign.Marshal.Alloc (alloca, allocaBytes)
+import Foreign.Ptr (FunPtr, Ptr, freeHaskellFunPtr, nullPtr)
 import Foreign.Storable (peek)
+import Data.Word (Word32)
 import NanoUI (Size (..), V2 (..))
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
 import SDL3.Sys.Bindgen.Video (SDL_Window)
@@ -61,6 +72,12 @@ queryMouseWindowPos =
 setRenderScale :: Ptr SDL_Renderer -> Float -> IO Bool
 setRenderScale ren scale = setRenderScaleC ren (realToFrac scale)
 
+queryRendererName :: Ptr SDL_Renderer -> IO String
+queryRendererName ren =
+  allocaBytes 64 $ \buf -> do
+    ok <- rendererNameC ren buf 64
+    if ok then peekCString buf else pure "unknown"
+
 windowToLogicalCoords :: Float -> V2 -> V2
 windowToLogicalCoords scale (V2 wx wy) =
   let s = if scale > 0 then scale else defaultUiScale
@@ -97,6 +114,9 @@ foreign import ccall safe "nano_ui_mouse_window_pos"
 foreign import ccall safe "nano_ui_set_render_scale"
   setRenderScaleC :: Ptr SDL_Renderer -> CFloat -> IO Bool
 
+foreign import ccall safe "nano_ui_renderer_name"
+  rendererNameC :: Ptr SDL_Renderer -> Ptr CChar -> CSize -> IO Bool
+
 foreign import ccall "wrapper"
   mkResizeCb :: IO () -> IO (FunPtr (IO ()))
 
@@ -105,3 +125,66 @@ foreign import ccall safe "nano_ui_install_resize_watch"
 
 foreign import ccall safe "nano_ui_remove_resize_watch"
   removeResizeWatchC :: IO ()
+
+foreign import ccall safe "nano_ui_register_refresh_event"
+  registerRefreshEventC :: IO Bool
+
+foreign import ccall safe "nano_ui_refresh_event_type"
+  refreshEventTypeC :: IO Word32
+
+foreign import ccall safe "nano_ui_push_refresh_event"
+  pushRefreshEventC :: IO Bool
+
+initRefreshEvent :: IO Bool
+initRefreshEvent = registerRefreshEventC
+
+readRefreshEventType :: IO Word32
+readRefreshEventType = refreshEventTypeC
+
+pushRefreshEvent :: IO ()
+pushRefreshEvent = void pushRefreshEventC
+
+foreign import ccall safe "nano_ui_retain_create"
+  retainCreateC :: Ptr SDL_Renderer -> CInt -> CInt -> IO (Ptr ())
+
+foreign import ccall safe "nano_ui_retain_begin"
+  retainBeginC :: Ptr SDL_Renderer -> Ptr () -> IO Bool
+
+foreign import ccall safe "nano_ui_retain_blit"
+  retainBlitC :: Ptr SDL_Renderer -> Ptr () -> IO Bool
+
+foreign import ccall safe "nano_ui_retain_blit_rect"
+  retainBlitRectC ::
+    Ptr SDL_Renderer ->
+    Ptr () ->
+    CFloat ->
+    CFloat ->
+    CFloat ->
+    CFloat ->
+    CFloat ->
+    CFloat ->
+    IO Bool
+
+foreign import ccall safe "nano_ui_destroy_texture"
+  retainDestroyC :: Ptr () -> IO ()
+
+retainCreate :: Ptr SDL_Renderer -> Int -> Int -> IO (Ptr ())
+retainCreate ren w h = retainCreateC ren (fromIntegral w) (fromIntegral h)
+
+retainBegin :: Ptr SDL_Renderer -> Ptr () -> IO Bool
+retainBegin = retainBeginC
+
+retainBlit :: Ptr SDL_Renderer -> Ptr () -> IO Bool
+retainBlit = retainBlitC
+
+retainBlitRect :: Ptr SDL_Renderer -> Ptr () -> Float -> Float -> Float -> Float -> Float -> Float -> IO Bool
+retainBlitRect ren tex sx sy sw sh dx dy =
+  retainBlitRectC ren tex (cf sx) (cf sy) (cf sw) (cf sh) (cf dx) (cf dy)
+  where
+    cf = realToFrac :: Float -> CFloat
+
+retainDestroy :: Ptr () -> IO ()
+retainDestroy tex =
+  if tex == nullPtr
+    then pure ()
+    else retainDestroyC tex
