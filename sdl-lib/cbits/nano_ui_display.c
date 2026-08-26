@@ -118,6 +118,42 @@ bool nano_ui_renderer_name(SDL_Renderer *renderer, char *buf, size_t cap)
     return true;
 }
 
+SDL_Texture *nano_ui_retain_create(SDL_Renderer *renderer, int w, int h)
+{
+    if (!renderer || w <= 0 || h <= 0) {
+        return NULL;
+    }
+    SDL_Texture *tex =
+        SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_TARGET, w, h);
+    if (!tex) {
+        return NULL;
+    }
+    SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_NONE);
+    return tex;
+}
+
+bool nano_ui_retain_begin(SDL_Renderer *renderer, SDL_Texture *tex)
+{
+    if (!renderer || !tex) {
+        return false;
+    }
+    return SDL_SetRenderTarget(renderer, tex);
+}
+
+bool nano_ui_retain_blit(SDL_Renderer *renderer, SDL_Texture *tex)
+{
+    if (!renderer || !tex) {
+        return false;
+    }
+    if (!SDL_SetRenderTarget(renderer, NULL)) {
+        return false;
+    }
+    if (!SDL_SetRenderClipRect(renderer, NULL)) {
+        return false;
+    }
+    return SDL_RenderTexture(renderer, tex, NULL, NULL);
+}
+
 bool nano_ui_render_coords_from_window(
     SDL_Renderer *renderer,
     float window_x,

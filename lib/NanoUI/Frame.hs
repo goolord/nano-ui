@@ -14,7 +14,7 @@ import Control.Monad (filterM, forM, forM_, unless, void, when)
 import Data.Char (isAlphaNum, isSpace)
 import Data.IORef (readIORef, writeIORef)
 import Data.List (findIndex)
-import Data.Maybe (isJust)
+import Data.Maybe (catMaybes, isJust)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Text as T
 import NanoUI.Context
@@ -84,7 +84,7 @@ import NanoUI.Font
   , wrapTextLinesIO
   )
 import NanoUI.Id (WidgetId (..), hashWidgetId)
-import NanoUI.Input (Input (..), Key (..), Modifiers (..), inputChanged, inputKeys)
+import NanoUI.Input (Input (..), Key (..), Modifiers (..), inputInteracted, inputKeys, inputPointerHeld)
 import NanoUI.Layout.Arena
   ( DirTag (..)
   , NodeIdx
@@ -134,10 +134,19 @@ import NanoUI.WidgetText
   , selectChevronCenterX
   )
 import NanoUI.Style (Padding (..), Style (..), Theme (..), themeAccent, themeButton, themeInput, themeOverlayDim, themePanel, themeSeparator, themeWindow)
-import NanoUI.Types (Color (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, rectContains, rectH, rectIntersect, rectOverlapArea, rectW, rectX, rectY, sliderTrackRect, v2X, v2Y)
+import NanoUI.Types (Color (..), Damage (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, rectArea, rectContains, rectH, rectInflate, rectIntersect, rectOverlapArea, rectUnion, rectW, rectX, rectY, sliderTrackRect, v2X, v2Y)
 
 runFrame :: Context -> Input -> UI a -> IO (a, [FrameMsg], DrawData, Bool)
 runFrame ctx inp ui = do
+  oldHot <- readIORef (ctxLastHotId ctx)
+  oldActive <- readIORef (ctxActiveId ctx)
+  oldFocus <- readIORef (ctxFocusId ctx)
+  oldHotRect <- getPrevRect ctx oldHot
+  oldActiveRect <- getPrevRect ctx oldActive
+  oldFocusRect <- getPrevRect ctx oldFocus
+  oldSize <- readIORef (ctxLastWindowSize ctx)
+  wasDirty <- isDirty ctx
+  animKeys <- IM.keys <$> readIORef (ctxAnimations ctx)
   resetNodeArena (ctxNodeArena ctx)
   resetDrawArena (ctxDrawArena ctx)
   writeIORef (ctxContainerStack ctx) []
@@ -194,6 +203,18 @@ runFrame ctx inp ui = do
   drawTooltipOverlays ctx
   drawData <- finishDraw (ctxDrawArena ctx)
   updatePrevRects ctx
+  writeDamage
+    ctx
+    inp
+    wasDirty
+    oldSize
+    oldHot
+    oldActive
+    oldFocus
+    oldHotRect
+    oldActiveRect
+    oldFocusRect
+    animKeys
   msgs <- drainMessages ctx
   dirtyAfterUi <- isDirty ctx
   writeIORef (ctxDirty ctx) False
@@ -203,7 +224,14 @@ needsRedraw :: Context -> Input -> Input -> IO Bool
 needsRedraw ctx prev inp = do
   dirty <- isDirty ctx
   anim <- anyAnimating ctx
-  pure (dirty || anim || inputChanged prev inp)
+  hover <- hoverWouldChange ctx inp
+  pure (dirty || anim || inputInteracted prev inp || inputPointerHeld inp || hover)
+
+hoverWouldChange :: Context -> Input -> IO Bool
+hoverWouldChange ctx inp = do
+  lastHot <- readIORef (ctxLastHotId ctx)
+  nextHot <- probeHotId ctx (inputMousePos inp)
+  pure (nextHot /= lastHot)
 
 collectTextSpans :: Context -> IO [(Rect, T.Text, Color, Color, Rect)]
 collectTextSpans ctx = do
@@ -1563,21 +1591,8 @@ unlessHit b act = when (not b) act
 refreshHover :: Context -> Input -> IO ()
 refreshHover ctx inp = do
   prevHot <- readIORef (ctxLastHotId ctx)
-  writeIORef (ctxHotId ctx) (WidgetId 0)
-  count <- arenaCount (ctxNodeArena ctx)
-  let mouse = inputMousePos inp
-      go idx = do
-        nt <- getNodeType (ctxNodeArena ctx) idx
-        when (isWidgetNode nt) $ do
-          wid <- getWidgetId (ctxNodeArena ctx) idx
-          (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-          let rect = Rect x y w h
-          when (w > 0 && h > 0 && rectContains rect mouse) $ do
-            allow <- overlayHitAllowed ctx idx mouse
-            when allow $ writeIORef (ctxHotId ctx) wid
-        when (idx > 0) $ go (idx - 1)
-  when (count > 0) $ go (count - 1)
-  newHot <- readIORef (ctxHotId ctx)
+  newHot <- probeHotId ctx (inputMousePos inp)
+  writeIORef (ctxHotId ctx) newHot
   writeIORef (ctxLastHotId ctx) newHot
   let terminal = isTerminalFont (ctxFontMetrics ctx)
   when (prevHot /= newHot) $ do
@@ -1585,6 +1600,31 @@ refreshHover ctx inp = do
     unless terminal $ do
       when (hashWidgetId prevHot /= 0) $ startAnimation ctx prevHot 1 0 0.12
       when (hashWidgetId newHot /= 0) $ startAnimation ctx newHot 0 1 0.12
+
+-- Same walk as refreshHover: later nodes paint first, earlier widget hits win.
+probeHotId :: Context -> V2 -> IO WidgetId
+probeHotId ctx mouse = do
+  count <- arenaCount (ctxNodeArena ctx)
+  if count <= 0
+    then pure (WidgetId 0)
+    else go (WidgetId 0) (count - 1)
+  where
+    go acc idx
+      | idx < 0 = pure acc
+      | otherwise = do
+          nt <- getNodeType (ctxNodeArena ctx) idx
+          acc' <-
+            if not (isWidgetNode nt)
+              then pure acc
+              else do
+                wid <- getWidgetId (ctxNodeArena ctx) idx
+                (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+                if w > 0 && h > 0 && rectContains (Rect x y w h) mouse
+                  then do
+                    allow <- overlayHitAllowed ctx idx mouse
+                    pure (if allow then wid else acc)
+                  else pure acc
+          go acc' (idx - 1)
 
 finalizePointerPress :: Context -> Input -> IO ()
 finalizePointerPress ctx inp =
@@ -3109,3 +3149,69 @@ updatePrevRects ctx = do
     (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
     when (hashWidgetId wid /= 0) $
       setPrevRect ctx wid (Rect x y w h)
+
+writeDamage ::
+  Context ->
+  Input ->
+  Bool ->
+  Size ->
+  WidgetId ->
+  WidgetId ->
+  WidgetId ->
+  Maybe Rect ->
+  Maybe Rect ->
+  Maybe Rect ->
+  [Int] ->
+  IO ()
+writeDamage ctx inp wasDirty oldSize oldHot oldActive oldFocus oldHotR oldActiveR oldFocusR animKeys = do
+  let Size winW winH = inputWindowSize inp
+      sizeChanged = oldSize /= Size winW winH
+      commanded =
+        inputPointerHeld inp
+          || inputMousePressed inp
+          || inputMouseReleased inp
+          || inputMouseRightPressed inp
+          || inputMouseRightReleased inp
+          || inputScroll inp /= V2 0 0
+          || not (null (inputKeys inp))
+          || not (null (inputChars inp))
+      full = wasDirty || sizeChanged || commanded
+  dmg <-
+    if full
+      then pure DamageFull
+      else do
+        newHot <- readIORef (ctxHotId ctx)
+        newActive <- readIORef (ctxActiveId ctx)
+        newFocus <- readIORef (ctxFocusId ctx)
+        let ids =
+              oldHot
+                : oldActive
+                : oldFocus
+                : newHot
+                : newActive
+                : newFocus
+                : fmap (WidgetId . fromIntegral) animKeys
+            oldOf wid
+              | wid == oldHot = oldHotR
+              | wid == oldActive = oldActiveR
+              | wid == oldFocus = oldFocusR
+              | otherwise = Nothing
+        rs <-
+          fmap concat $
+            forM ids $ \wid ->
+              if hashWidgetId wid == 0
+                then pure []
+                else do
+                  newR <- getPrevRect ctx wid
+                  pure (catMaybes [oldOf wid, newR])
+        let clip = rectInflate 2 (unionRects rs)
+            winArea = winW * winH
+        if winArea > 0 && rectArea clip > winArea * 0.5
+          then pure DamageFull
+          else pure (DamageClip clip)
+  writeIORef (ctxDamage ctx) dmg
+  writeIORef (ctxLastWindowSize ctx) (Size winW winH)
+
+unionRects :: [Rect] -> Rect
+unionRects [] = Rect 0 0 0 0
+unionRects (r : rs) = foldl' rectUnion r rs

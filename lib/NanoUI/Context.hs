@@ -12,6 +12,7 @@ module NanoUI.Context
   , newSdlContext
   , markDirty
   , isDirty
+  , takeDamage
   , getHotId
   , getFocusId
   , anyAnimating
@@ -65,7 +66,7 @@ import Data.ByteString (ByteString)
 import qualified NanoUI.Atlas as Atlas
 import NanoUI.Atlas (ImageAtlas, atlasTextureId)
 import NanoUI.Draw (DrawArena, newDrawArena)
-import NanoUI.Types (Color (..), ImageId (..), Rect (..))
+import NanoUI.Types (Color (..), Damage (..), ImageId (..), Rect (..), Size (..))
 import NanoUI.Font (FontMetrics, measureText, monospaceMetrics)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), Key (KeyEscape))
@@ -148,6 +149,8 @@ data Context = Context
   , ctxAnimations :: IORef (IntMap Animation)
   , ctxAnyAnimating :: IORef Bool
   , ctxDirty :: IORef Bool
+  , ctxDamage :: IORef Damage
+  , ctxLastWindowSize :: IORef Size
   , ctxIdSalt :: IORef Word64
   , ctxFontMetrics :: FontMetrics
   , ctxMeasureText :: Text -> IO (Float, Float)
@@ -186,6 +189,8 @@ newContext = do
   ctxAnimations <- newIORef IM.empty
   ctxAnyAnimating <- newIORef False
   ctxDirty <- newIORef True
+  ctxDamage <- newIORef DamageFull
+  ctxLastWindowSize <- newIORef (Size 0 0)
   ctxIdSalt <- newIORef 0
   ctxContainerStack <- newIORef []
   ctxMessages <- newIORef []
@@ -216,6 +221,8 @@ newContext = do
       , ctxAnimations
       , ctxAnyAnimating
       , ctxDirty
+      , ctxDamage
+      , ctxLastWindowSize
       , ctxIdSalt
       , ctxFontMetrics = fm0
       , ctxMeasureText = \txt -> pure (measureText fm0 txt)
@@ -279,6 +286,10 @@ markDirty ctx = writeIORef (ctxDirty ctx) True
 {-# INLINE isDirty #-}
 isDirty :: Context -> IO Bool
 isDirty ctx = readIORef (ctxDirty ctx)
+
+{-# INLINE takeDamage #-}
+takeDamage :: Context -> IO Damage
+takeDamage ctx = readIORef (ctxDamage ctx)
 
 {-# INLINE getFocusId #-}
 getFocusId :: Context -> IO WidgetId

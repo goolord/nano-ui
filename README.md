@@ -7,7 +7,7 @@ Purely functional immediate-mode GUI core for Haskell. Backend-agnostic: emits b
 - **SrcLoc IDs**: `HasCallStack` hashing for stable widget identity without manual ID stacks
 - **Two-pass flex layout**: measure/position over struct-of-arrays node arena
 - **Zero-allocation draw path**: pinned `ForeignPtr` vertex/index arenas reused each frame
-- **Damage tracking**: `needsRedraw` gates on input change, `markDirty`, or active animation
+- **Damage tracking**: `needsRedraw` gates on commands, hover target change, `markDirty`, or active animation. Mouse motion on the same widget is skipped. SDL presents only the dirty rect for hover and animation frames.
 - **Headless verification**: ASCII renderer + golden-style tests, no window/GL dependency
 
 ## Build
@@ -99,7 +99,8 @@ Window DPI is read via `SDL_GetWindowDisplayScale`; fonts and geometry rasterize
 at native pixel density while layout stays in logical coordinates.
 The backend renders pinned `DrawData` quads through SDL3's 2D renderer, sorts
 draw commands by layer (background → content → overlay), and skips `runFrame`
-when idle (250ms wake checks `markDirty` / animation state).
+when idle (`SDL_WaitEvent` until a command, hover change, `markDirty`, or animation).
+Hover and animation frames scissor to the dirty rect instead of clearing the window.
 
 Build with Zig as the C compiler (MSYS2 UCRT64 for SDL3 + pkg-config):
 

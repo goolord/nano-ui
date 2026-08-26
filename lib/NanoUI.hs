@@ -12,13 +12,19 @@ module NanoUI
   , atlasTextureId
   , atlasSnapshot
   , rectContains
+  , rectIntersect
   , v2Add
+  , Damage (..)
+  , damageIsEmpty
+  , takeDamage
   , -- Input
     Input (..)
   , Key (..)
   , Modifiers (..)
   , emptyInput
   , inputChanged
+  , inputInteracted
+  , inputPointerHeld
   , -- Style
     Sizing (..)
   , Direction (..)
@@ -136,7 +142,7 @@ module NanoUI
   , renderASCIIFromRects
   ) where
 
-import NanoUI.Context (Context (..), FrameMsg (..), anyAnimating, atlasSnapshot, atlasTextureId, ctxTheme, getAnimationValue, getFocusId, getHotId, getPrevRect, getScrollOffset, isDirty, markDirty, modalActive, newContext, newSdlContext, newTerminalContext, overlayConsumesQuit, registerImage, registerImages, setAnimationValue, startAnimation, textInputEditActive, withClipboard, withExternalText, withFontMetrics, withMeasureText)
+import NanoUI.Context (Context (..), FrameMsg (..), anyAnimating, atlasSnapshot, atlasTextureId, ctxTheme, getAnimationValue, getFocusId, getHotId, getPrevRect, getScrollOffset, isDirty, markDirty, modalActive, newContext, newSdlContext, newTerminalContext, overlayConsumesQuit, registerImage, registerImages, setAnimationValue, startAnimation, takeDamage, textInputEditActive, withClipboard, withExternalText, withFontMetrics, withMeasureText)
 import NanoUI.Draw (DrawCmd (..), DrawData (..), Layer (..), indexSize, vertexSize)
 import NanoUI.Font (FontMetrics (..), isTerminalFont, labelContentInset, monospaceMetrics, widgetContentInset, widgetPadding)
 import NanoUI.Frame (collectOverlayTextSpans, collectTextSpans, cursorKindIs, needsRedraw, pointerCursorWanted, runFrame, sliderTrackRect, uiCursorKind, UiCursorKind (..))
@@ -147,6 +153,8 @@ import NanoUI.Input
   , Modifiers (..)
   , emptyInput
   , inputChanged
+  , inputInteracted
+  , inputPointerHeld
   )
 import NanoUI.Monad (UI, currentId, emit, withKey)
 import NanoUI.Render.ASCII (renderASCII, renderASCIIFromRects)
@@ -177,7 +185,7 @@ import NanoUI.Style
   , wrap
   , tight
   )
-import NanoUI.Types (Color (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, colorToWord32, rectContains, v2Add)
+import NanoUI.Types (Color (..), Damage (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, colorToWord32, damageIsEmpty, rectContains, rectIntersect, v2Add)
 import NanoUI.Widgets
   ( Response (..)
   , button

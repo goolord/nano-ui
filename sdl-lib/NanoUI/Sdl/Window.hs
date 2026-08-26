@@ -10,7 +10,7 @@ import Control.Monad (unless, void, when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Foreign.C.String (withCString)
 import Foreign.Marshal.Alloc (alloca)
-import Foreign.Ptr (Ptr)
+import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (peek)
 import NanoUI (Context, Input (..), Size (..), markDirty)
 import NanoUI.Sdl.Display
@@ -20,6 +20,7 @@ import NanoUI.Sdl.Display
   , queryMouseWindowPos
   , queryWindowDisplayScale
   , queryWindowLogicalSize
+  , retainDestroy
   , setRenderScale
   , windowToLogicalCoords
   )
@@ -63,6 +64,7 @@ data SdlEnv = SdlEnv
   , sdlImages :: ImageAtlas
   , sdlCursors :: SdlCursors
   , sdlDebug :: IORef SdlDebugSampler
+  , sdlRetain :: IORef (Ptr (), Int, Int)
   }
 
 defaultWindowSize :: Size
@@ -138,6 +140,7 @@ withSdl ctx title (Size w h) act =
                 images <- newImageAtlas
                 cursors <- initCursors
                 debug <- newSdlDebugSampler
+                retain <- newIORef (nullPtr, 0, 0)
                 unlessM (setRenderScale ren defaultUiScale) $
                   fail "SDL_SetRenderScale failed"
                 _ <- startTextInputSafe win
@@ -152,8 +155,11 @@ withSdl ctx title (Size w h) act =
                     , sdlImages = images
                     , sdlCursors = cursors
                     , sdlDebug = debug
+                    , sdlRetain = retain
                     }
         teardown env = do
+          (tex, _, _) <- readIORef (sdlRetain env)
+          retainDestroy tex
           destroyCursors (sdlCursors env)
           destroyImageAtlas (sdlImages env)
           destroyTextCache (sdlTextCache env)

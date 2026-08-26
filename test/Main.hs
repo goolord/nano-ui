@@ -64,6 +64,8 @@ main = do
   run "button-press-release-hover" runButtonPressReleaseHoverTest
   run "text-input-focus" runTextInputFocusTest
   run "idle" runIdleTest
+  run "hover-skip" runHoverSkipTest
+  run "hover-damage" runHoverDamageTest
   run "animation-idle" runAnimationIdleTest
   run "ascii" runAsciiTest
   run "vt-decode" runVtTest
@@ -986,6 +988,60 @@ runIdleTest _ failed = do
   _ <- runFrame ctx inp (label "idle")
   need <- needsRedraw ctx inp inp
   when need $ bump failed
+
+runHoverSkipTest :: Context -> IORef Int -> IO ()
+runHoverSkipTest _ failed = do
+  ctx <- newContext
+  let ui = column defaultLayout (button "OK")
+      inp0 =
+        emptyInput
+          { inputWindowSize = Size 240 80
+          , inputMousePos = V2 (-10) (-10)
+          }
+  _ <- runFrame ctx inp0 ui
+  (resp, _, _, _) <- runFrame ctx inp0 ui
+  let Rect rx ry rw rh = respRect resp
+      inside = V2 (rx + rw / 2) (ry + rh / 2)
+      inside2 = V2 (rx + rw / 2 + 1) (ry + rh / 2)
+      inp1 = inp0 {inputMousePos = inside}
+      inp2 = inp0 {inputMousePos = inside2}
+  needEnter <- needsRedraw ctx inp0 inp1
+  when (not needEnter) $ bump failed
+  _ <- runFrame ctx inp1 ui
+  let drain = inp1 {inputDeltaTime = 1}
+  _ <- runFrame ctx drain ui
+  needStay <- needsRedraw ctx drain inp2
+  when needStay $ bump failed
+  let inpClick = inp1 {inputMouseDown = True, inputMousePressed = True}
+  needClick <- needsRedraw ctx drain inpClick
+  when (not needClick) $ bump failed
+
+runHoverDamageTest :: Context -> IORef Int -> IO ()
+runHoverDamageTest _ failed = do
+  ctx <- newContext
+  let ui = column defaultLayout (button "OK")
+      inp0 =
+        emptyInput
+          { inputWindowSize = Size 240 80
+          , inputMousePos = V2 (-10) (-10)
+          }
+  _ <- runFrame ctx inp0 ui
+  d0 <- takeDamage ctx
+  when (d0 /= DamageFull) $ bump failed
+  (resp, _, _, _) <- runFrame ctx inp0 ui
+  let Rect rx ry rw rh = respRect resp
+      inside = V2 (rx + rw / 2) (ry + rh / 2)
+      inp1 = inp0 {inputMousePos = inside}
+  _ <- runFrame ctx inp1 ui
+  d1 <- takeDamage ctx
+  case d1 of
+    DamageFull -> bump failed
+    DamageClip (Rect _ _ w h) ->
+      when (w * h >= 240 * 80 * 0.5) $ bump failed
+  let inpClick = inp1 {inputMouseDown = True, inputMousePressed = True}
+  _ <- runFrame ctx inpClick ui
+  d2 <- takeDamage ctx
+  when (d2 /= DamageFull) $ bump failed
 
 runAnimationIdleTest :: Context -> IORef Int -> IO ()
 runAnimationIdleTest ctx failed = do

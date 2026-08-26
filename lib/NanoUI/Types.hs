@@ -12,6 +12,10 @@ module NanoUI.Types
   , rectUnion
   , rectIntersect
   , rectOverlapArea
+  , rectInflate
+  , rectArea
+  , Damage (..)
+  , damageIsEmpty
   , sliderTrackRect
   , v2Add
   , v2Sub
@@ -94,6 +98,28 @@ rectIntersect (Rect x1 y1 w1 h1) (Rect x2 y2 w2 h2) =
 rectOverlapArea :: Rect -> Rect -> Float
 rectOverlapArea a b =
   maybe 0 (\r -> rectW r * rectH r) (rectIntersect a b)
+
+{-# INLINE rectInflate #-}
+rectInflate :: Float -> Rect -> Rect
+rectInflate pad (Rect x y w h) =
+  Rect (x - pad) (y - pad) (w + pad * 2) (h + pad * 2)
+
+{-# INLINE rectArea #-}
+rectArea :: Rect -> Float
+rectArea (Rect _ _ w h) = w * h
+
+-- Full window vs a scissor box around widgets that actually changed (hover, anim).
+data Damage
+  = DamageFull
+  | DamageClip Rect
+  deriving (Eq, Show)
+
+{-# INLINE damageIsEmpty #-}
+damageIsEmpty :: Damage -> Bool
+damageIsEmpty dmg =
+  case dmg of
+    DamageFull -> False
+    DamageClip r -> rectW r <= 0 || rectH r <= 0
 
 {-# INLINE sliderTrackRect #-}
 sliderTrackRect :: Float -> Float -> Float -> Float -> Rect

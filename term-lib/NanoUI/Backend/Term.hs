@@ -155,8 +155,8 @@ termMainLoop ctx shouldQuit ui onEnter onLeave getSize readEvents present =
     draw prevCells prevInpRef inp = do
       prevI <- readIORef prevInpRef
       need <- needsRedraw ctx prevI inp
-      (_, _, drawData, _) <- runFrame ctx inp ui
       when need $ do
+        (_, _, drawData, _) <- runFrame ctx inp ui
         baseSpans <- collectTextSpans ctx
         overlaySpans <- collectOverlayTextSpans ctx inp
         let Size w h = inputWindowSize inp

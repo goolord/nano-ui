@@ -9,13 +9,17 @@ module NanoUI.Sdl.Display
   , queryRendererName
   , windowToLogicalCoords
   , installResizeWatch
+  , retainCreate
+  , retainBegin
+  , retainBlit
+  , retainDestroy
 ) where
 
 import Control.Monad (unless)
 import Foreign.C.String (peekCString)
-import Foreign.C.Types (CChar, CFloat (..), CSize (..))
+import Foreign.C.Types (CChar, CFloat (..), CInt (..), CSize (..))
 import Foreign.Marshal.Alloc (alloca, allocaBytes)
-import Foreign.Ptr (FunPtr, Ptr, freeHaskellFunPtr)
+import Foreign.Ptr (FunPtr, Ptr, freeHaskellFunPtr, nullPtr)
 import Foreign.Storable (peek)
 import NanoUI (Size (..), V2 (..))
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
@@ -116,3 +120,30 @@ foreign import ccall safe "nano_ui_install_resize_watch"
 
 foreign import ccall safe "nano_ui_remove_resize_watch"
   removeResizeWatchC :: IO ()
+
+foreign import ccall safe "nano_ui_retain_create"
+  retainCreateC :: Ptr SDL_Renderer -> CInt -> CInt -> IO (Ptr ())
+
+foreign import ccall safe "nano_ui_retain_begin"
+  retainBeginC :: Ptr SDL_Renderer -> Ptr () -> IO Bool
+
+foreign import ccall safe "nano_ui_retain_blit"
+  retainBlitC :: Ptr SDL_Renderer -> Ptr () -> IO Bool
+
+foreign import ccall safe "nano_ui_destroy_texture"
+  retainDestroyC :: Ptr () -> IO ()
+
+retainCreate :: Ptr SDL_Renderer -> Int -> Int -> IO (Ptr ())
+retainCreate ren w h = retainCreateC ren (fromIntegral w) (fromIntegral h)
+
+retainBegin :: Ptr SDL_Renderer -> Ptr () -> IO Bool
+retainBegin = retainBeginC
+
+retainBlit :: Ptr SDL_Renderer -> Ptr () -> IO Bool
+retainBlit = retainBlitC
+
+retainDestroy :: Ptr () -> IO ()
+retainDestroy tex =
+  if tex == nullPtr
+    then pure ()
+    else retainDestroyC tex
