@@ -4,6 +4,7 @@ module NanoUI.Layout.Solve
   , placeWindows
   , positionNode
   , positionWindowNode
+  , scrollBarSlotOf
   ) where
 
 import Control.Monad (forM, forM_, when)
@@ -14,12 +15,14 @@ import NanoUI.Font
   ( FontMetrics (..)
   , checkboxBoxSize
   , checkboxLeading
+  , classifyScrollBar
   , fmLineHeight
   , isTerminalFont
   , measureTextWrapped
   , measureTextWrappedIO
   , labelContentInset
-  , scrollOverflowGutter
+  , ScrollBarSlot
+  , scrollLayoutGutter
   , widgetPadding
   , buttonPadding
   , layoutLineHeight
@@ -39,7 +42,8 @@ import NanoUI.Layout.Arena
   , getHeightSizing
   , getMinMax
   , getNextSibling
-  ,   getNodeType
+  , getNodeType
+  , getParent
   , getPadding
   , getRect
   , getText
@@ -125,7 +129,7 @@ measureNode na fm measure useAssignedWidth idx = do
     NodePanel -> measureContainer na useAssignedWidth idx
     NodeScrollContainer -> measureScrollContainer na idx
     NodeModal -> measureScrollContainer na idx
-    NodeWindow -> measureScrollContainer na idx
+    NodeWindow -> measureContainer na useAssignedWidth idx
     NodeImage -> measureImage na idx
     _ -> measureWidget na fm measure idx
 
@@ -427,7 +431,7 @@ positionNode na fm idx x y availW availH = do
     NodePanel -> positionChildren na fm idx dir gap pad x y w h
     NodeScrollContainer -> positionScrollChildren na fm idx dir gap pad x y w h
     NodeModal -> positionScrollChildren na fm idx dir gap pad x y w h
-    NodeWindow -> positionScrollChildren na fm idx dir gap pad x y w h
+    NodeWindow -> positionChildren na fm idx dir gap pad x y w h
     _ -> pure ()
 
 positionScrollChildren ::
@@ -444,16 +448,45 @@ positionScrollChildren ::
   IO ()
 positionScrollChildren na fm idx dir gap pad px py pw ph = do
   contentSize <- getNodeValue na idx
+  slot <- scrollBarSlotOf na idx
   let cx = px + padL pad
       cy = py + padT pad
       innerW = pw - padL pad - padR pad
       innerH = ph - padT pad - padB pad
-      gutterCol = scrollOverflowGutter fm contentSize innerH
-      gutterRow = scrollOverflowGutter fm contentSize innerW
+      gutterCol = scrollLayoutGutter fm slot contentSize innerH
+      gutterRow = scrollLayoutGutter fm slot contentSize innerW
   children <- collectChildren na idx
   case dir of
     DirRow -> positionRow na fm children gap cx cy contentSize (innerH - gutterRow)
-    DirColumn -> positionColumnScroll na fm children gap cx cy innerW innerH gutterCol contentSize
+    DirColumn -> positionColumnScroll na fm children gap cx cy (innerW - gutterCol) innerH contentSize
+
+scrollBarSlotOf :: NodeArena -> NodeIdx -> IO ScrollBarSlot
+scrollBarSlotOf na idx = do
+  parent <- getParent na idx
+  isWin <-
+    if parent < 0
+      then pure False
+      else do
+        pnt <- getNodeType na parent
+        pure (pnt == NodeWindow)
+  (wTag, _) <- getWidthSizing na idx
+  (hTag, _) <- getHeightSizing na idx
+  inPanel <- hasPanelAncestor na parent
+  let isPage = wTag == SizingGrow && hTag == SizingGrow && not inPanel
+  pure (classifyScrollBar isWin isPage)
+
+hasPanelAncestor :: NodeArena -> NodeIdx -> IO Bool
+hasPanelAncestor na = go
+  where
+    go p
+      | p < 0 = pure False
+      | otherwise = do
+          nt <- getNodeType na p
+          case nt of
+            NodePanel -> pure True
+            NodeWindow -> pure False
+            NodeModal -> pure False
+            _ -> getParent na p >>= go
 
 positionColumnScroll ::
   NodeArena ->
@@ -465,9 +498,8 @@ positionColumnScroll ::
   Float ->
   Float ->
   Float ->
-  Float ->
   IO ()
-positionColumnScroll na fm children gap cx cy innerW innerH gutterCol contentSize = do
+positionColumnScroll na fm children gap cx cy innerW innerH contentSize = do
   childInfos <- loadChildInfos na children
   sizes <- distributeMainAxis na childInfos contentSize gap False
   oy <- newIORef cy
@@ -476,10 +508,7 @@ positionColumnScroll na fm children gap cx cy innerW innerH gutterCol contentSiz
     (_, _, iw, _) <- getRect na ci
     curY <- readIORef oy
     ax <- getAlignX na ci
-    let cw =
-          if gutterCol > 0
-            then max 0 (innerW - gutterCol)
-            else innerW
+    let cw = innerW
         fx = alignX ax cx cw iw
         visibleSlice = max 0 (innerH - (curY - cy))
         nodeH =
@@ -746,7 +775,7 @@ positionWindowNode na fm idx x y w h = do
   pad <- getPadding na idx
   gap <- getGap na idx
   dir <- getDirection na idx
-  positionScrollChildren na fm idx dir gap pad x y w h
+  positionChildren na fm idx dir gap pad x y w h
 
 snd3 :: (a, b, c) -> b
 snd3 (_, b, _) = b

@@ -21,6 +21,7 @@ module NanoUI.Draw
   , vertexSize
   , indexSize
   , withClip
+  , currentLayer
   ) where
 
 import Control.Monad (forM_, unless, when)
@@ -36,7 +37,7 @@ import NanoUI.Font (FontMetrics (..), GlyphQuad (..))
 import NanoUI.Types (Color, Rect (..), colorToWord32, rectIntersect)
 import qualified Data.Text as T
 
-data Layer = LayerBackground | LayerContent | LayerOverlay
+data Layer = LayerBackground | LayerContent | LayerOverlay | LayerChrome
   deriving (Eq, Show, Enum, Bounded)
 
 data Vertex = Vertex
@@ -246,6 +247,10 @@ appendCmd da cmd = do
   arr <- readIORef (daCmdStore da)
   writeArray arr count cmd
   writeIORef (daCmdCount da) (count + 1)
+
+{-# INLINE currentLayer #-}
+currentLayer :: DrawArena -> IO Layer
+currentLayer = readIORef . daCurrentLayer
 
 {-# INLINE beginLayer #-}
 beginLayer :: DrawArena -> Layer -> IO ()

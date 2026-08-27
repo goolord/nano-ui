@@ -1,63 +1,92 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE TypeFamilies #-}
+
 module NanoUI.Monad
-  ( UI (..)
-  , runUI
+  ( NanoUI
+  , Ui
+  , runNanoUI
+  , runUi
+  , uiIO
+  , uiFinally
   , emit
   , withKey
   , currentId
   , askContext
   , askInput
+  , askHost
   ) where
 
-import Control.Monad.IO.Class (MonadIO (..))
+import Control.Exception (finally)
 import Data.Bits (xor)
 import Data.Hashable (Hashable, hash)
 import Data.IORef (readIORef, writeIORef)
+import Data.Typeable (Typeable)
 import Data.Word (Word64)
+import Effectful (Dispatch (Static), DispatchOf, Eff, Effect, IOE, runEff, type (:>))
+import Effectful.Dispatch.Static
+  ( SideEffects (WithSideEffects)
+  , StaticRep
+  , evalStaticRep
+  , getStaticRep
+  , unsafeEff_
+  )
+import Effectful.Dispatch.Static.Unsafe (reallyUnsafeLiftMapIO)
 import GHC.Stack (CallStack, HasCallStack, callStack, getCallStack)
-import NanoUI.Context (Context (..), FrameMsg (..), pushMessage)
+import NanoUI.Context (Context (..), FrameMsg (..), askHostIO, pushMessage)
 import NanoUI.Id (WidgetId (..), fnv1a, hashSrcLoc, hashWidgetId)
 import NanoUI.Input (Input)
 
-newtype UI a = UI {unUI :: Context -> Input -> IO a}
+-- Concrete app stack: Ui plus IO. Widgets stay polymorphic so other
+-- effects (State, Error, extra IO) can sit under Ui.
+type NanoUI = Eff '[Ui, IOE]
 
-instance Functor UI where
-  fmap f (UI g) = UI (\ctx inp -> f <$> g ctx inp)
+data Ui :: Effect
 
-instance Applicative UI where
-  pure a = UI (\_ _ -> pure a)
-  UI fg <*> UI fa = UI (\ctx inp -> fg ctx inp >>= \g -> fa ctx inp >>= \a -> pure (g a))
+type instance DispatchOf Ui = Static WithSideEffects
 
-instance Monad UI where
-  UI m >>= f = UI (\ctx inp -> m ctx inp >>= \a -> unUI (f a) ctx inp)
+data instance StaticRep Ui = UiRep !Context !Input
 
-instance MonadIO UI where
-  liftIO act = UI (\_ _ -> act)
+{-# INLINE runUi #-}
+runUi :: IOE :> es => Context -> Input -> Eff (Ui : es) a -> Eff es a
+runUi ctx inp = evalStaticRep (UiRep ctx inp)
 
-{-# INLINE runUI #-}
-runUI :: Context -> Input -> UI a -> IO a
-runUI ctx inp (UI m) = m ctx inp
+{-# INLINE runNanoUI #-}
+runNanoUI :: Context -> Input -> NanoUI a -> IO a
+runNanoUI ctx inp = runEff . runUi ctx inp
+
+{-# INLINE uiIO #-}
+uiIO :: Ui :> es => IO a -> Eff es a
+uiIO m = do
+  UiRep {} <- getStaticRep
+  unsafeEff_ m
+
+{-# INLINE uiFinally #-}
+uiFinally :: Eff es a -> IO b -> Eff es a
+uiFinally m cleanup = reallyUnsafeLiftMapIO (`finally` cleanup) m
 
 {-# INLINE emit #-}
-emit :: msg -> UI ()
-emit msg = UI (\ctx _ -> pushMessage ctx (FrameMsg msg) >> pure ())
+emit :: Ui :> es => msg -> Eff es ()
+emit msg = do
+  ctx <- askContext
+  uiIO (pushMessage ctx (FrameMsg msg))
 
 {-# INLINE withKey #-}
-withKey :: Hashable k => k -> UI a -> UI a
-withKey k (UI m) = UI (\ctx inp -> do
-  old <- readIORef (ctxIdSalt ctx)
-  writeIORef (ctxIdSalt ctx) (old `mix64` fromIntegral (hash k))
-  r <- m ctx inp
-  writeIORef (ctxIdSalt ctx) old
-  pure r)
+withKey :: (Hashable k, Ui :> es) => k -> Eff es a -> Eff es a
+withKey k m = do
+  ctx <- askContext
+  old <- uiIO (readIORef (ctxIdSalt ctx))
+  uiIO (writeIORef (ctxIdSalt ctx) (old `mix64` fromIntegral (hash k)))
+  uiFinally m (writeIORef (ctxIdSalt ctx) old)
 
 -- The whole stack is hashed, not just its head: the head always points at this
 -- module, so distinct user call sites are only distinguishable by outer frames.
 {-# INLINE currentId #-}
-currentId :: HasCallStack => UI WidgetId
-currentId = UI (\ctx _ -> do
-  salt <- readIORef (ctxIdSalt ctx)
+currentId :: (HasCallStack, Ui :> es) => Eff es WidgetId
+currentId = do
+  ctx <- askContext
+  salt <- uiIO (readIORef (ctxIdSalt ctx))
   let base = hashCallStack callStack
-  pure (WidgetId (base `mix64` salt)))
+  pure (WidgetId (base `mix64` salt))
 
 hashCallStack :: CallStack -> Word64
 hashCallStack cs =
@@ -67,12 +96,22 @@ hashCallStack cs =
     (getCallStack cs)
 
 {-# INLINE askContext #-}
-askContext :: UI Context
-askContext = UI (\ctx _ -> pure ctx)
+askContext :: Ui :> es => Eff es Context
+askContext = do
+  UiRep ctx _ <- getStaticRep
+  pure ctx
 
 {-# INLINE askInput #-}
-askInput :: UI Input
-askInput = UI (\_ inp -> pure inp)
+askInput :: Ui :> es => Eff es Input
+askInput = do
+  UiRep _ inp <- getStaticRep
+  pure inp
+
+{-# INLINE askHost #-}
+askHost :: (Typeable a, Ui :> es) => Eff es (Maybe a)
+askHost = do
+  ctx <- askContext
+  uiIO (askHostIO ctx)
 
 {-# INLINE mix64 #-}
 mix64 :: Word64 -> Word64 -> Word64

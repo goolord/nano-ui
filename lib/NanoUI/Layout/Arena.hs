@@ -97,7 +97,6 @@ isScrollNode nt =
   case nt of
     NodeScrollContainer -> True
     NodeModal -> True
-    NodeWindow -> True
     _ -> False
 
 isFloatingNode :: NodeType -> Bool

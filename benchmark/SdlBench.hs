@@ -23,7 +23,7 @@ benchInput =
     , inputMouseDown = True
     }
 
-smallUi, mediumUi, largeUi :: UI ()
+smallUi, mediumUi, largeUi :: NanoUI ()
 smallUi =
   column (defaultLayout {layoutGap = 8}) $ do
     void (button "OK")
@@ -89,10 +89,10 @@ warmup ctx sdlEnv inp = do
   void (runFrame ctx inp mediumUi)
   void (sdlDrawFrame ctx mediumUi sdlEnv inp False)
 
-benchRunFrame :: Context -> Input -> UI () -> String -> Benchmark
+benchRunFrame :: Context -> Input -> NanoUI () -> String -> Benchmark
 benchRunFrame ctx inp ui name =
   bench name $ whnfIO (void . runFrame ctx inp $ ui)
 
-benchDraw :: Context -> SdlEnv -> Input -> UI () -> String -> Benchmark
+benchDraw :: Context -> SdlEnv -> Input -> NanoUI () -> String -> Benchmark
 benchDraw ctx sdlEnv inp ui name =
   bench name $ whnfIO (void . sdlDrawFrame ctx ui sdlEnv inp $ False)

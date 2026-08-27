@@ -15,7 +15,7 @@ import Foreign.C.String (withCString)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (peek)
-import NanoUI (Context, Input (..), Size (..), markDirty, setWakeLoop)
+import NanoUI (Context, Input (..), Size (..), markDirty, setHost, setWakeLoop)
 import NanoUI.Sdl.Display
   ( defaultFontSize
   , defaultUiScale
@@ -228,6 +228,7 @@ startSdlWindow ctx title w h flags bench fontPath monoPath = do
   font <- readIORef (sdlFontRef env)
   monoFont <- readIORef (sdlMonoFontRef env)
   let ctx' = withSdlClipboard (withTtfMeasureScaled ctx font monoFont scale)
+  setHost ctx' env
   setWakeLoop ctx' pushRefreshEvent
   pure (ctx', env)
 

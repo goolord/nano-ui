@@ -39,6 +39,7 @@ module NanoUI
   , terminalTheme
   , sdlTheme
   , panelPaintPad
+  , windowPad
   , padAll
   , padXY
   , gap
@@ -46,6 +47,7 @@ module NanoUI
   , fillH
   , grow
   , minW
+  , fixedW
   , fixedH
   , fixedWH
   , alignMid
@@ -56,7 +58,15 @@ module NanoUI
   , widgetId
   , hashWidgetId
   , -- Monad
-    UI
+    NanoUI
+  , Ui
+  , Eff
+  , type (:>)
+  , IOE
+  , runEff
+  , runUi
+  , runNanoUI
+  , uiIO
   , emit
   , withKey
   , currentId
@@ -86,11 +96,18 @@ module NanoUI
   , clickButton
   , useFlag
   , useText
+  , useToggle
+  , heading
+  , muted
+  , kv
+  , card
+  , toolbar
   , sep
   , flex
   , image_
   , -- Frame
     runFrame
+  , runFrameEff
   , needsRedraw
   , textFieldActive
   , floatingPanelActive
@@ -106,6 +123,8 @@ module NanoUI
     Context
   , ctxTheme
   , ctxFontMetrics
+  , setHost
+  , askHost
   , newContext
   , withFontMetrics
   , withMonoFontMetrics
@@ -147,15 +166,23 @@ module NanoUI
   , monoFontMarker
   , hasMonoFontMarker
   , stripMonoFontMarker
+  , headingFontMarker
+  , mutedFontMarker
+  , stripWidgetMarkers
+  , scrollBarGutter
+  , scrollBarPageExtra
+  , scrollBarListExtra
+  , scrollBarWidth
   , -- ASCII
     renderASCII
   , renderASCIIFromRects
   ) where
 
-import NanoUI.Context (Context (..), FrameMsg (..), anyAnimating, atlasSnapshot, atlasTextureId, ctxTheme, getAnimationValue, getFocusId, getHotId, getPrevRect, getScrollOffset, getStore, isDirty, markDirty, modalActive, newContext, newSdlContext, newTerminalContext, overlayConsumesQuit, registerImage, registerImages, setAnimationValue, setWakeLoop, startAnimation, takeDamage, textInputEditActive, withClipboard, withExternalText, withFontMetrics, withMeasureText, withMonoFontMetrics, wrapMeasureCache)
+import NanoUI.Context (Context (..), FrameMsg (..), anyAnimating, atlasSnapshot, atlasTextureId, ctxTheme, getAnimationValue, getFocusId, getHotId, getPrevRect, getScrollOffset, getStore, isDirty, markDirty, modalActive, newContext, newSdlContext, newTerminalContext, overlayConsumesQuit, registerImage, registerImages, setAnimationValue, setHost, setWakeLoop, startAnimation, takeDamage, textInputEditActive, withClipboard, withExternalText, withFontMetrics, withMeasureText, withMonoFontMetrics, wrapMeasureCache)
 import NanoUI.Draw (DrawCmd (..), DrawData (..), Layer (..), indexSize, vertexSize)
-import NanoUI.Font (FontMetrics (..), hasMonoFontMarker, isTerminalFont, labelContentInset, monoFontMarker, monospaceMetrics, stripMonoFontMarker, widgetContentInset, widgetPadding)
-import NanoUI.Frame (collectOverlayTextSpans, collectTextSpans, cursorKindIs, debugPanelOpen, floatingPanelActive, needsRedraw, pointerCursorWanted, runFrame, sliderTrackRect, textFieldActive, uiCursorKind, UiCursorKind (..))
+import NanoUI.Font (FontMetrics (..), hasMonoFontMarker, headingFontMarker, isTerminalFont, labelContentInset, monoFontMarker, monospaceMetrics, mutedFontMarker, scrollBarGutter, scrollBarListExtra, scrollBarPageExtra, scrollBarWidth, stripMonoFontMarker, stripWidgetMarkers, widgetContentInset, widgetPadding)
+import Effectful (Eff, IOE, runEff, type (:>))
+import NanoUI.Frame (collectOverlayTextSpans, collectTextSpans, cursorKindIs, debugPanelOpen, floatingPanelActive, needsRedraw, pointerCursorWanted, runFrame, runFrameEff, sliderTrackRect, textFieldActive, uiCursorKind, UiCursorKind (..))
 import NanoUI.Id (WidgetId (..), hashWidgetId, widgetId)
 import NanoUI.Input
   ( Input (..)
@@ -166,7 +193,7 @@ import NanoUI.Input
   , inputInteracted
   , inputPointerHeld
   )
-import NanoUI.Monad (UI, currentId, emit, withKey)
+import NanoUI.Monad (NanoUI, Ui, askHost, currentId, emit, runNanoUI, runUi, uiIO, withKey)
 import NanoUI.Render.ASCII (renderASCII, renderASCIIFromRects)
 import NanoUI.Style
   ( AlignX (..)
@@ -182,6 +209,7 @@ import NanoUI.Style
   , terminalTheme
   , sdlTheme
   , panelPaintPad
+  , windowPad
   , padAll
   , padXY
   , gap
@@ -189,6 +217,7 @@ import NanoUI.Style
   , fillH
   , grow
   , minW
+  , fixedW
   , fixedH
   , fixedWH
   , alignMid
@@ -222,6 +251,12 @@ import NanoUI.Widgets
   , image
   , useFlag
   , useText
+  , useToggle
+  , heading
+  , muted
+  , kv
+  , card
+  , toolbar
   , sep
   , flex
   , image_
