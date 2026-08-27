@@ -120,13 +120,13 @@ stripWidgetMarkers txt =
 labelContentInset :: FontMetrics -> (Float, Float)
 labelContentInset fm
   | isTerminalFont fm = (0, 0)
-  | otherwise = (0.5 * fmAdvance fm ' ', 0.12 * layoutLineHeight fm)
+  | otherwise = (0.55 * fmAdvance fm ' ', 0.16 * layoutLineHeight fm)
 
 {-# INLINE widgetContentInset #-}
 widgetContentInset :: FontMetrics -> (Float, Float)
 widgetContentInset fm
   | isTerminalFont fm = (fmAdvance fm ' ', 0)
-  | otherwise = (fmAdvance fm ' ' * 1.15, 0.22 * layoutLineHeight fm)
+  | otherwise = (fmAdvance fm ' ' * 1.25, 0.28 * layoutLineHeight fm)
 
 {-# INLINE buttonPadding #-}
 buttonPadding :: FontMetrics -> (Float, Float)
@@ -138,7 +138,7 @@ buttonPadding fm
   | otherwise =
       let adv = fmAdvance fm ' '
           lh = layoutLineHeight fm
-       in (adv * 1.5, lh * 0.21)
+       in (adv * 2.0, lh * 0.30)
 
 {-# INLINE layoutLineHeight #-}
 layoutLineHeight :: FontMetrics -> Float
@@ -243,7 +243,8 @@ scrollLayoutGutter fm slot contentSize innerMain
   | contentSize <= innerMain = 0
   | otherwise =
       case slot of
-        ScrollBarWindow -> scrollBarWindowGutter fm
+        -- Window bar hangs into the parent pad. Content keeps the full inner width.
+        ScrollBarWindow -> 0
         ScrollBarList -> scrollBarGutter fm + scrollBarListExtra
         ScrollBarPage -> scrollBarGutter fm + scrollBarPageExtra
 
@@ -257,7 +258,7 @@ scrollBarOuterGap fm slot =
         ScrollBarPage -> scrollBarPageExtra
         ScrollBarWindow -> scrollBarWindowSide
 
--- Reserved from window body width: side + bar + side.
+-- Width the window bar occupies in the parent pad (not taken from content).
 scrollBarWindowGutter :: FontMetrics -> Float
 scrollBarWindowGutter fm =
   let (barW, _) = scrollBarGeomFor fm ScrollBarWindow

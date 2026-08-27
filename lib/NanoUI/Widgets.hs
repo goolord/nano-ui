@@ -117,6 +117,7 @@ import NanoUI.Style
   , fixedWH
   , grow
   , windowPad
+  , windowMargin
   )
 import NanoUI.Types (ImageId (..), Rect (..), Size (..), V2 (..), rectContains, rectH, rectW, sliderTrackRect)
 
@@ -129,7 +130,7 @@ titleBarH :: Float
 titleBarH = 28
 
 titleBarLayout :: Layout -> Layout
-titleBarLayout = tight . gap 4 . alignMid . fixedH titleBarH . fillW
+titleBarLayout = tight . gap 6 . alignMid . fixedH titleBarH . fillW
 
 titleLabelLayout :: Layout
 titleLabelLayout = tight . alignMid . fixedH titleBarH $ defaultLayout
@@ -216,7 +217,7 @@ useToggle initial = do
   pure (cur, set (not cur))
 
 heading :: (HasCallStack, Ui :> es) => Text -> Eff es ()
-heading txt = void (labelEx (tight . padXY 0 2 $ defaultLayout) (headingFontMarker <> txt))
+heading txt = void (labelEx (tight . padXY 0 3 $ defaultLayout) (headingFontMarker <> txt))
 
 muted :: (HasCallStack, Ui :> es) => Text -> Eff es ()
 muted txt = void (labelEx (fillW defaultLayout) (mutedFontMarker <> txt))
@@ -229,10 +230,10 @@ kv k v =
       void (labelEx (tight . fillW . alignEnd $ defaultLayout) (T.stripEnd v))
 
 card :: Ui :> es => Eff es a -> Eff es a
-card = panel (minW 300 . padXY 9 8 . gap 5 . fillW $ defaultLayout)
+card = panel (minW 300 . padXY 12 10 . gap 8 . fillW $ defaultLayout)
 
 toolbar :: Ui :> es => Eff es a -> Eff es a
-toolbar = row (tight . gap 5 . alignMid . fillW $ defaultLayout)
+toolbar = row (tight . gap 8 . alignMid . fillW $ defaultLayout)
 
 modal :: (HasCallStack, Ui :> es) => Bool -> Text -> Eff es a -> Eff es (Response, Maybe a)
 modal open title child
@@ -247,10 +248,9 @@ modal open title child
           stack <- uiIO (readIORef (ctxContainerStack ctx))
           let parent = parentIdx stack
               Size winW winH = inputWindowSize inp
-              margin = 8
               minWidth = 260
-              maxW = max minWidth (winW - 2 * margin)
-              maxH = max 40 (winH - 2 * margin)
+              maxW = max minWidth (winW - 2 * windowMargin)
+              maxH = max 40 (winH - 2 * windowMargin)
           uiIO $ do
             idx <-
               addNode
@@ -260,8 +260,8 @@ modal open title child
                 Column
                 Fit
                 Fit
-                (Padding 10 10 9 9)
-                6
+                (Padding 14 14 12 12)
+                8
                 minWidth
                 0
                 maxW
@@ -331,11 +331,10 @@ window open title child
           stack <- uiIO (readIORef (ctxContainerStack ctx))
           let parent = parentIdx stack
               Size winW winH = inputWindowSize inp
-              margin = 8
               minWidth = 280
               minHeight = padT windowPad + titleBarH + padB windowPad
-              maxW = max minWidth (winW - 2 * margin)
-              maxH = max minHeight (winH - 2 * margin)
+              maxW = max minWidth (winW - 2 * windowMargin)
+              maxH = max minHeight (winH - 2 * windowMargin)
           uiIO $ do
             idx <-
               addNode
@@ -346,7 +345,7 @@ window open title child
                 Fit
                 Fit
                 windowPad
-                8
+                10
                 minWidth
                 minHeight
                 maxW

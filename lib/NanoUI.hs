@@ -40,6 +40,7 @@ module NanoUI
   , sdlTheme
   , panelPaintPad
   , windowPad
+  , windowMargin
   , padAll
   , padXY
   , gap
@@ -219,6 +220,7 @@ import NanoUI.Style
   , sdlTheme
   , panelPaintPad
   , windowPad
+  , windowMargin
   , padAll
   , padXY
   , gap

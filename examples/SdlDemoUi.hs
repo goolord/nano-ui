@@ -25,10 +25,10 @@ demoUi = do
   (aboutOpen, setAbout) <- useFlag False
   (debugOpen, setDebug) <- useFlag False
   scroll (tight (grow defaultLayout)) $
-    column (padAll 5 . gap 8 . fillW $ defaultLayout) $ do
-      panel (padXY 9 7 . gap 5 . fillW $ defaultLayout) $
+    column (padAll 8 . gap 8 . fillW $ defaultLayout) $ do
+      panel (padXY 14 10 . gap 8 . fillW $ defaultLayout) $
         toolbar $ do
-          column (tight . gap 2 $ defaultLayout) $ do
+          column (tight . gap 4 $ defaultLayout) $ do
             heading "nano-ui"
             muted "SDL3 demo"
           flex
@@ -45,7 +45,7 @@ demoUi = do
           (_, name) <- textInput "Name" ""
           sep
           heading "List"
-          scroll (padAll 4 . fixedH 136 . fillW $ defaultLayout) $
+          scroll (padAll 6 . fixedH 136 . fillW $ defaultLayout) $
             column (tight . gap 0 . fillW $ defaultLayout) $
               mapM_ (label_ . T.pack . ("Item " <>) . show) [1 .. 12 :: Int]
           sep
@@ -57,7 +57,7 @@ demoUi = do
           kv "Clicked" (orDash click)
         card $ do
           heading "Gallery"
-          row (tight . gap 7 . wrap $ defaultLayout) $ do
+          row (tight . gap 10 . wrap $ defaultLayout) $ do
             thumb (ImageId 1) "Swatch"
             thumb (ImageId 2) "Checker"
             thumb (ImageId 3) "Stripe"
@@ -73,7 +73,7 @@ demoUi = do
       heading "nano-ui"
       muted "Immediate-mode GUI for Haskell."
       muted "Esc closes this dialog, then the app."
-      row (gap 4 (fillW defaultLayout)) $ do
+      row (gap 6 (fillW defaultLayout)) $ do
         flex
         clickButton "Close" (setAbout False)
   onClick aboutResp (setAbout False)
