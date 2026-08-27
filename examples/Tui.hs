@@ -1,14 +1,11 @@
 module Main (main) where
 
-import Control.Monad (unless, void, when)
+import Control.Monad (void, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import NanoUI
 import NanoUI.Backend.Term (runTermAppWithQuit)
 import qualified Data.Text as T
-import System.Environment (getArgs, getExecutablePath, lookupEnv)
-import System.Info (os)
-import System.Process (callProcess)
 
 -- Terminal cells are the layout unit. defaultLayout gap/pad are scaled down
 -- in solve (see resolveLayoutGap). compact still avoids extra row spacing.
@@ -19,35 +16,12 @@ compact =
     , layoutGap = 0
     }
 
--- From PowerShell/CMD, re-enter via MSYS2 so the TUI sees a POSIX tty.
--- Skip when MSYSTEM is already set (already inside msys2_shell.cmd).
-relaunchViaMsys2 :: IO Bool
-relaunchViaMsys2
-  | os /= "mingw32" = pure False
-  | otherwise = do
-      msystem <- lookupEnv "MSYSTEM"
-      case msystem of
-        Just _ -> pure False
-        Nothing -> do
-          exe <- getExecutablePath
-          args <- getArgs
-          let exeFwd = map (\c -> if c == '\\' then '/' else c) exe
-              cmd = unwords (map quote (exeFwd : args))
-          callProcess
-            "C:\\msys64\\msys2_shell.cmd"
-            ["-defterm", "-no-start", "-here", "-c", cmd]
-          pure True
-  where
-    quote s = '"' : s ++ "\""
-
 main :: IO ()
 main = do
-  wrapped <- relaunchViaMsys2
-  unless wrapped $ do
-    ctx <- newTerminalContext
-    lastClick <- newIORef ("" :: String)
-    runTermAppWithQuit ctx (\inp -> KeyEscape `elem` inputKeys inp) $
-      tuiApp lastClick
+  ctx <- newTerminalContext
+  lastClick <- newIORef ("" :: String)
+  runTermAppWithQuit ctx (\inp -> KeyEscape `elem` inputKeys inp) $
+    tuiApp lastClick
 
 tuiApp :: IORef String -> NanoUI ()
 tuiApp lastClick = do

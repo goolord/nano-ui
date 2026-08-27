@@ -88,6 +88,7 @@ import NanoUI.Font
   , hasMutedMarker
   , isTerminalFont
   , labelContentInset
+  , resolveLayoutPadding
   , stripWidgetMarkers
   , lineWidth
   , ScrollBarSlot (..)
@@ -3276,7 +3277,7 @@ collectFloatingSpans ctx wanted = do
                 let clip =
                       if isScrollNode nt
                         then scrollContentClip fm slot dir x y w h pad contentSize
-                        else padContentClip x y w h pad
+                        else padContentClip fm x y w h pad
                 here <- walkChildSpans ctx idx clip
                 rest <- go (idx + 1)
                 pure (here ++ rest)
@@ -3389,13 +3390,14 @@ drawSelectChevron da x y w h col = do
       hh = 2.6
   pushFilledTriangle da (cx - hw) (cy - hh * 0.35) (cx + hw) (cy - hh * 0.35) cx (cy + hh) col
 
-padContentClip :: Float -> Float -> Float -> Float -> Padding -> Rect
-padContentClip x y w h pad =
-  Rect
-    (x + padL pad)
-    (y + padT pad)
-    (max 0 (w - padL pad - padR pad))
-    (max 0 (h - padT pad - padB pad))
+padContentClip :: FontMetrics -> Float -> Float -> Float -> Float -> Padding -> Rect
+padContentClip fm x y w h pad0 =
+  let pad = resolveLayoutPadding fm pad0
+   in Rect
+        (x + padL pad)
+        (y + padT pad)
+        (max 0 (w - padL pad - padR pad))
+        (max 0 (h - padT pad - padB pad))
 
 scrollContentClip ::
   FontMetrics ->
@@ -3409,7 +3411,7 @@ scrollContentClip ::
   Float ->
   Rect
 scrollContentClip fm slot dir x y w h pad contentSize =
-  let base = padContentClip x y w h pad
+  let base = padContentClip fm x y w h pad
       innerMain =
         case dir of
           DirColumn -> rectH base

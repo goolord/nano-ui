@@ -10,7 +10,7 @@ import Data.List (isInfixOf, nub, sort)
 import Effectful.State.Static.Local (State, evalState, get, modify)
 import NanoUI
 import NanoUI.Term.Ansi (frameBytes)
-import NanoUI.Term.Cells (cellRows, narrowChar, rasterize)
+import NanoUI.Term.Cells (cellRows, narrowChar, rasterize, rasterizeLayered)
 import NanoUI.Term.Event (MouseAction (..), MouseBtn (..), TermEvent (..), noMods)
 import NanoUI.Term.Vt (decode, flushPending)
 import qualified Data.ByteString.Char8 as BS8
@@ -106,6 +106,8 @@ main = do
   run "terminal-default-gap" runTerminalDefaultGapTest
   run "terminal-slider-track" runTerminalSliderTrackTest
   run "terminal-text-input" runTerminalTextInputDisplayTest
+  run "terminal-modal-overlay" runTerminalModalOverlayTest
+  run "terminal-window-overlay" runTerminalWindowOverlayTest
   run "scroll-bar-gutter" runScrollBarGutterTest
   runSdl "scroll-bar-gutter-grow" runGrowScrollGutterTest
   runSdl "scroll-bar-gutter-panel" runPanelGrowScrollGutterTest
@@ -2176,6 +2178,58 @@ runTerminalSliderTrackTest _ failed = do
           }
   ((_, val), _, _, _) <- runFrame ctx endDrag ui
   when (val < 90) $ bump failed
+
+-- Modal/window chrome is pixel-authored. Terminal must scale it to cells
+-- so title and body stay on the 80x24 grid instead of clipping away.
+runTerminalModalOverlayTest :: Context -> IORef Int -> IO ()
+runTerminalModalOverlayTest _ failed = do
+  ctx <- newTerminalContext
+  let inp0 = emptyInput {inputWindowSize = Size 80 24}
+      ui =
+        modal True "About" $ do
+          _ <- label "Immediate-mode GUI for Haskell."
+          pure ()
+  _ <- runFrame ctx inp0 ui
+  ((dlg, _), _, drawData, _) <- runFrame ctx inp0 ui
+  overlays <- collectOverlayTextSpans ctx inp0
+  base <- collectTextSpans ctx
+  let hasTitle = any (\(_, txt, _, _, _) -> "About" `T.isInfixOf` txt) overlays
+      hasBody = any (\(_, txt, _, _, _) -> "Immediate-mode" `T.isInfixOf` txt) overlays
+      inGrid (Rect x y w h, _, _, _, _) =
+        x >= -0.5 && y >= -0.5 && x + w <= 80.5 && y + h <= 24.5
+  when (not (hasTitle && hasBody)) $ bump failed
+  when (any (not . inGrid) overlays) $ bump failed
+  let Rect _ _ mw mh = respRect dlg
+  when (mw > 80 || mh > 24 || mw < 8 || mh < 2) $ bump failed
+  cells <- rasterizeLayered 80 24 drawData base overlays
+  let blob = concat (cellRows cells)
+  when (not ("About" `isInfixOf` blob)) $ bump failed
+  when (not ("Immediate-mode" `isInfixOf` blob)) $ bump failed
+
+runTerminalWindowOverlayTest :: Context -> IORef Int -> IO ()
+runTerminalWindowOverlayTest _ failed = do
+  ctx <- newTerminalContext
+  let inp0 = emptyInput {inputWindowSize = Size 80 24}
+      ui =
+        window True "Debug" $ do
+          _ <- label "Floating window overlay."
+          pure ()
+  _ <- runFrame ctx inp0 ui
+  ((win, _), _, drawData, _) <- runFrame ctx inp0 ui
+  overlays <- collectOverlayTextSpans ctx inp0
+  base <- collectTextSpans ctx
+  let hasTitle = any (\(_, txt, _, _, _) -> "Debug" `T.isInfixOf` txt) overlays
+      hasBody = any (\(_, txt, _, _, _) -> "Floating window" `T.isInfixOf` txt) overlays
+      inGrid (Rect x y w h, _, _, _, _) =
+        x >= -0.5 && y >= -0.5 && x + w <= 80.5 && y + h <= 24.5
+  when (not (hasTitle && hasBody)) $ bump failed
+  when (any (not . inGrid) overlays) $ bump failed
+  let Rect _ _ ww wh = respRect win
+  when (ww > 80 || wh > 24 || ww < 8 || wh < 2) $ bump failed
+  cells <- rasterizeLayered 80 24 drawData base overlays
+  let blob = concat (cellRows cells)
+  when (not ("Debug" `isInfixOf` blob)) $ bump failed
+  when (not ("Floating window" `isInfixOf` blob)) $ bump failed
 
 -- Label stays in node text; display must not accumulate "Name: ...: ...".
 runTerminalTextInputDisplayTest :: Context -> IORef Int -> IO ()

@@ -1,6 +1,10 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DataKinds #-}
 
--- | Terminal backend (notcurses).
+-- | Terminal backend: Win32 console on Windows, notcurses elsewhere.
+--
+-- notcurses OSC/DA probes echo as garbage in conhost/PowerShell
+-- (notcurses #2914). The Win32 driver writes ANSI through the console API.
 module NanoUI.Backend.Term
   ( runTermApp
   , runTermAppEff
@@ -8,6 +12,9 @@ module NanoUI.Backend.Term
   , runTermAppWithQuitEff
   ) where
 
+#if defined(mingw32_HOST_OS)
+import Control.Exception (finally)
+#endif
 import Control.Monad (when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import GHC.Clock (getMonotonicTime)
@@ -32,14 +39,27 @@ import NanoUI
   , textInputEditActive
   , type (:>)
   )
-import NanoUI.Term.Cells (Cells, rasterizeLayered)
+import NanoUI.Term.Cells
+  ( Cells
+  , rasterizeLayered
+#if defined(mingw32_HOST_OS)
+  , cellsSize
+#endif
+  )
 import NanoUI.Term.Event (MouseAction (..), TermEvent (..))
+
+#if defined(mingw32_HOST_OS)
+import Data.ByteString.Builder (string7)
+import NanoUI.Term.Ansi (frameBytes, setup, teardown)
+import NanoUI.Term.Driver (Driver (..), withDriver)
+#else
 import NanoUI.Term.Notcurses (ncBlitCells, ncRead, ncSize, withNotcurses)
+#endif
 
 animateTimeout :: Int
 animateTimeout = 16
 
--- notcurses: negative timeout blocks until input.
+-- Win32 INFINITE / notcurses: negative timeout blocks until input.
 idleBlock :: Int
 idleBlock = -1
 
@@ -56,6 +76,42 @@ runTermAppEff unlift ctx ui = runTermAppWithQuitEff unlift ctx (const False) ui
 
 runTermAppWithQuit :: Context -> (Input -> Bool) -> NanoUI () -> IO ()
 runTermAppWithQuit = runTermAppWithQuitEff runEff
+
+#if defined(mingw32_HOST_OS)
+
+runTermAppWithQuitEff ::
+  IOE :> es =>
+  (forall x. Eff es x -> IO x) ->
+  Context ->
+  (Input -> Bool) ->
+  Eff (Ui : es) () ->
+  IO ()
+runTermAppWithQuitEff unlift ctx shouldQuit ui =
+  withDriver $ \drv ->
+    ( do
+        drvWrite drv setup
+        drvFlush drv
+        drvRefreshViewport drv
+        termMainLoop
+          unlift
+          ctx
+          shouldQuit
+          ui
+          (drvSize drv)
+          (drvRead drv)
+          ( \before cur -> do
+              when (fmap cellsSize before /= Just (cellsSize cur)) $
+                drvWrite drv (string7 "\ESC[2J")
+              drvWrite drv (frameBytes before cur)
+              drvFlush drv
+          )
+    )
+      `finally` ( do
+                    drvWrite drv teardown
+                    drvFlush drv
+                )
+
+#else
 
 runTermAppWithQuitEff ::
   IOE :> es =>
@@ -74,6 +130,8 @@ runTermAppWithQuitEff unlift ctx shouldQuit ui =
       (ncSize nc)
       (ncRead nc)
       (ncBlitCells nc)
+
+#endif
 
 termMainLoop ::
   IOE :> es =>
