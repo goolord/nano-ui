@@ -6,6 +6,16 @@
 #include <string.h>
 
 enum { NANO_UI_VTX_STRIDE = 20 };
+enum { NANO_UI_CORNER_SEGS = 8 };
+enum {
+    NANO_UI_SOLID_BATCH = 512,
+    NANO_UI_GEOM_VERTS = 2048,
+    NANO_UI_GEOM_IDX = 3072
+};
+
+#ifndef NANO_UI_PI
+#define NANO_UI_PI 3.14159265358979323846f
+#endif
 
 bool nano_ui_fill_rounded_rect(
     SDL_Renderer *renderer,
@@ -31,11 +41,6 @@ bool nano_ui_fill_triangle(
     float x2,
     float y2);
 
-enum {
-    NANO_UI_SOLID_BATCH = 512,
-    NANO_UI_TEX_BATCH = 512
-};
-
 struct NanoUiBatch {
     SDL_Renderer *renderer;
     SDL_FRect *solid_rects;
@@ -48,11 +53,19 @@ struct NanoUiBatch {
     bool solid_active;
 
     SDL_Texture *tex;
+    bool tex_set;
     SDL_Vertex *verts;
     int *indices;
-    int tex_count;
-    int tex_cap;
+    int vert_count;
+    int index_count;
+    int vert_cap;
+    int index_cap;
 };
+
+static SDL_FColor color_f(uint8_t r, uint8_t g, uint8_t b, uint8_t a)
+{
+    return (SDL_FColor){(float)r / 255.f, (float)g / 255.f, (float)b / 255.f, (float)a / 255.f};
+}
 
 static bool grow_solid(NanoUiBatch *batch)
 {
@@ -66,27 +79,39 @@ static bool grow_solid(NanoUiBatch *batch)
     return true;
 }
 
-static bool grow_tex(NanoUiBatch *batch)
+static bool grow_geom(NanoUiBatch *batch)
 {
-    int cap = batch->tex_cap ? batch->tex_cap * 2 : NANO_UI_TEX_BATCH;
-    size_t vbytes = (size_t)cap * 4 * sizeof(SDL_Vertex);
-    size_t ibytes = (size_t)cap * 6 * sizeof(int);
-    SDL_Vertex *verts = (SDL_Vertex *)malloc(vbytes);
-    int *idx = (int *)malloc(ibytes);
+    int vcap = batch->vert_cap ? batch->vert_cap * 2 : NANO_UI_GEOM_VERTS;
+    int icap = batch->index_cap ? batch->index_cap * 2 : NANO_UI_GEOM_IDX;
+    SDL_Vertex *verts = (SDL_Vertex *)malloc((size_t)vcap * sizeof(SDL_Vertex));
+    int *idx = (int *)malloc((size_t)icap * sizeof(int));
     if (!verts || !idx) {
         free(verts);
         free(idx);
         return false;
     }
-    if (batch->tex_count > 0) {
-        memcpy(verts, batch->verts, (size_t)batch->tex_count * 4 * sizeof(SDL_Vertex));
-        memcpy(idx, batch->indices, (size_t)batch->tex_count * 6 * sizeof(int));
+    if (batch->vert_count > 0) {
+        memcpy(verts, batch->verts, (size_t)batch->vert_count * sizeof(SDL_Vertex));
+    }
+    if (batch->index_count > 0) {
+        memcpy(idx, batch->indices, (size_t)batch->index_count * sizeof(int));
     }
     free(batch->verts);
     free(batch->indices);
     batch->verts = verts;
     batch->indices = idx;
-    batch->tex_cap = cap;
+    batch->vert_cap = vcap;
+    batch->index_cap = icap;
+    return true;
+}
+
+static bool ensure_geom(NanoUiBatch *batch, int need_v, int need_i)
+{
+    while (batch->vert_count + need_v > batch->vert_cap || batch->index_count + need_i > batch->index_cap) {
+        if (!grow_geom(batch)) {
+            return false;
+        }
+    }
     return true;
 }
 
@@ -110,12 +135,8 @@ static void write_quad(
     float v0,
     float u1,
     float v1,
-    uint8_t r,
-    uint8_t g,
-    uint8_t b,
-    uint8_t a)
+    SDL_FColor col)
 {
-    SDL_FColor col = {(float)r / 255.f, (float)g / 255.f, (float)b / 255.f, (float)a / 255.f};
     verts[0] = (SDL_Vertex){{dst.x, dst.y}, col, {u0, v0}};
     verts[1] = (SDL_Vertex){{dst.x + dst.w, dst.y}, col, {u1, v0}};
     verts[2] = (SDL_Vertex){{dst.x + dst.w, dst.y + dst.h}, col, {u1, v1}};
@@ -143,31 +164,126 @@ static bool draw_one_quad(
 {
     SDL_Vertex verts[4];
     int indices[6];
-    write_quad(verts, indices, 0, dst, u0, v0, u1, v1, r, g, b, a);
+    write_quad(verts, indices, 0, dst, u0, v0, u1, v1, color_f(r, g, b, a));
     return SDL_RenderGeometry(ren, texture, verts, 4, indices, 6);
 }
 
-static void flush_tex(NanoUiBatch *batch)
+static void flush_geom(NanoUiBatch *batch)
 {
-    if (!batch || batch->tex_count <= 0 || !batch->tex) {
+    if (!batch || batch->vert_count <= 0 || batch->index_count <= 0) {
+        batch->vert_count = 0;
+        batch->index_count = 0;
+        batch->tex = NULL;
+        batch->tex_set = false;
         return;
     }
-    int n = batch->tex_count;
     bool ok = SDL_RenderGeometry(
         batch->renderer,
         batch->tex,
         batch->verts,
-        n * 4,
+        batch->vert_count,
         batch->indices,
-        n * 6);
+        batch->index_count);
     if (!ok) {
-        int one[6] = {0, 1, 2, 0, 2, 3};
-        for (int i = 0; i < n; i++) {
-            SDL_RenderGeometry(batch->renderer, batch->tex, &batch->verts[i * 4], 4, one, 6);
+        int one[3] = {0, 1, 2};
+        for (int i = 0; i + 2 < batch->index_count; i += 3) {
+            SDL_Vertex tri[3] = {
+                batch->verts[batch->indices[i]],
+                batch->verts[batch->indices[i + 1]],
+                batch->verts[batch->indices[i + 2]]
+            };
+            SDL_RenderGeometry(batch->renderer, batch->tex, tri, 3, one, 3);
         }
     }
-    batch->tex_count = 0;
+    batch->vert_count = 0;
+    batch->index_count = 0;
     batch->tex = NULL;
+    batch->tex_set = false;
+}
+
+static void begin_geom(NanoUiBatch *batch, SDL_Texture *texture)
+{
+    flush_solid(batch);
+    if (batch->tex_set && batch->tex != texture) {
+        flush_geom(batch);
+    }
+    batch->tex = texture;
+    batch->tex_set = true;
+}
+
+static bool push_quad(NanoUiBatch *batch, SDL_FRect dst, float u0, float v0, float u1, float v1, SDL_FColor col)
+{
+    if (dst.w <= 0.f || dst.h <= 0.f) {
+        return true;
+    }
+    if (!ensure_geom(batch, 4, 6)) {
+        return false;
+    }
+    int base = batch->vert_count;
+    write_quad(&batch->verts[base], &batch->indices[batch->index_count], base, dst, u0, v0, u1, v1, col);
+    batch->vert_count += 4;
+    batch->index_count += 6;
+    return true;
+}
+
+static bool push_tri(
+    NanoUiBatch *batch,
+    float x0,
+    float y0,
+    float x1,
+    float y1,
+    float x2,
+    float y2,
+    SDL_FColor col)
+{
+    if (!ensure_geom(batch, 3, 3)) {
+        return false;
+    }
+    int base = batch->vert_count;
+    batch->verts[base] = (SDL_Vertex){{x0, y0}, col, {0.f, 0.f}};
+    batch->verts[base + 1] = (SDL_Vertex){{x1, y1}, col, {0.f, 0.f}};
+    batch->verts[base + 2] = (SDL_Vertex){{x2, y2}, col, {0.f, 0.f}};
+    batch->indices[batch->index_count] = base;
+    batch->indices[batch->index_count + 1] = base + 1;
+    batch->indices[batch->index_count + 2] = base + 2;
+    batch->vert_count += 3;
+    batch->index_count += 3;
+    return true;
+}
+
+static bool push_corner(
+    NanoUiBatch *batch,
+    float cx,
+    float cy,
+    float rad,
+    float a0,
+    float a1,
+    SDL_FColor col)
+{
+    int segs = NANO_UI_CORNER_SEGS;
+    if (!ensure_geom(batch, segs + 2, segs * 3)) {
+        return false;
+    }
+    int center = batch->vert_count;
+    batch->verts[center] = (SDL_Vertex){{cx, cy}, col, {0.f, 0.f}};
+    batch->vert_count++;
+    for (int i = 0; i <= segs; i++) {
+        float t = (float)i / (float)segs;
+        float a = a0 + (a1 - a0) * t;
+        float x = cx + cosf(a) * rad;
+        float y = cy + sinf(a) * rad;
+        batch->verts[batch->vert_count] = (SDL_Vertex){{x, y}, col, {0.f, 0.f}};
+        if (i > 0) {
+            int rim1 = batch->vert_count - 1;
+            int rim0 = batch->vert_count;
+            batch->indices[batch->index_count] = center;
+            batch->indices[batch->index_count + 1] = rim1;
+            batch->indices[batch->index_count + 2] = rim0;
+            batch->index_count += 3;
+        }
+        batch->vert_count++;
+    }
+    return true;
 }
 
 NanoUiBatch *nano_ui_batch_create(SDL_Renderer *renderer)
@@ -200,7 +316,7 @@ void nano_ui_batch_flush(NanoUiBatch *batch)
     if (!batch) {
         return;
     }
-    flush_tex(batch);
+    flush_geom(batch);
     flush_solid(batch);
 }
 
@@ -222,7 +338,7 @@ void nano_ui_batch_fill_solid(
         && (batch->solid_r != r || batch->solid_g != g || batch->solid_b != b || batch->solid_a != a)) {
         flush_solid(batch);
     }
-    flush_tex(batch);
+    flush_geom(batch);
     if (batch->solid_count >= batch->solid_cap && !grow_solid(batch)) {
         flush_solid(batch);
         SDL_SetRenderDrawColor(batch->renderer, r, g, b, a);
@@ -262,20 +378,13 @@ bool nano_ui_batch_texture_dst(
     (void)tex_w;
     (void)tex_h;
     SDL_FRect dst = {dst_x, dst_y, dst_w, dst_h};
-    if (batch->tex_count > 0 && batch->tex != texture) {
-        flush_tex(batch);
-    }
-    flush_solid(batch);
-    if (batch->tex_count >= batch->tex_cap && !grow_tex(batch)) {
-        flush_tex(batch);
-        if (batch->tex_count >= batch->tex_cap && !grow_tex(batch)) {
+    begin_geom(batch, texture);
+    if (!push_quad(batch, dst, u0, v0, u1, v1, color_f(r, g, b, a))) {
+        flush_geom(batch);
+        if (!push_quad(batch, dst, u0, v0, u1, v1, color_f(r, g, b, a))) {
             return draw_one_quad(batch->renderer, texture, dst, u0, v0, u1, v1, r, g, b, a);
         }
     }
-    int i = batch->tex_count;
-    write_quad(&batch->verts[i * 4], &batch->indices[i * 6], i * 4, dst, u0, v0, u1, v1, r, g, b, a);
-    batch->tex = texture;
-    batch->tex_count++;
     return true;
 }
 
@@ -288,6 +397,84 @@ bool nano_ui_batch_texture_sized(
     float h)
 {
     return nano_ui_batch_texture_dst(batch, texture, w, h, x, y, w, h, 0.f, 0.f, 1.f, 1.f, 255, 255, 255, 255);
+}
+
+void nano_ui_batch_triangle(
+    NanoUiBatch *batch,
+    uint8_t r,
+    uint8_t g,
+    uint8_t b,
+    uint8_t a,
+    float x0,
+    float y0,
+    float x1,
+    float y1,
+    float x2,
+    float y2)
+{
+    if (!batch) {
+        return;
+    }
+    begin_geom(batch, NULL);
+    if (!push_tri(batch, x0, y0, x1, y1, x2, y2, color_f(r, g, b, a))) {
+        flush_geom(batch);
+        if (!push_tri(batch, x0, y0, x1, y1, x2, y2, color_f(r, g, b, a))) {
+            nano_ui_fill_triangle(batch->renderer, r, g, b, a, x0, y0, x1, y1, x2, y2);
+        }
+    }
+}
+
+void nano_ui_batch_rounded_rect(
+    NanoUiBatch *batch,
+    uint8_t r,
+    uint8_t g,
+    uint8_t b,
+    uint8_t a,
+    float x,
+    float y,
+    float w,
+    float h,
+    float radius)
+{
+    if (!batch || w <= 0.f || h <= 0.f) {
+        return;
+    }
+    float rad = radius;
+    if (rad > w / 2.f) {
+        rad = w / 2.f;
+    }
+    if (rad > h / 2.f) {
+        rad = h / 2.f;
+    }
+    if (rad <= 0.5f) {
+        nano_ui_batch_fill_solid(batch, r, g, b, a, x, y, w, h);
+        return;
+    }
+    SDL_FColor col = color_f(r, g, b, a);
+    int segs = NANO_UI_CORNER_SEGS;
+    int need_v = 20 + 4 * (segs + 2);
+    int need_i = 30 + 4 * segs * 3;
+    begin_geom(batch, NULL);
+    if (!ensure_geom(batch, need_v, need_i)) {
+        flush_geom(batch);
+        if (!ensure_geom(batch, need_v, need_i)) {
+            nano_ui_fill_rounded_rect(batch->renderer, r, g, b, a, x, y, w, h, rad);
+            return;
+        }
+    }
+    float mid_w = w - 2.f * rad;
+    float mid_h = h - 2.f * rad;
+    if (!push_quad(batch, (SDL_FRect){x + rad, y + rad, mid_w, mid_h}, 0.f, 0.f, 1.f, 1.f, col)
+        || !push_quad(batch, (SDL_FRect){x + rad, y, mid_w, rad}, 0.f, 0.f, 1.f, 1.f, col)
+        || !push_quad(batch, (SDL_FRect){x + rad, y + h - rad, mid_w, rad}, 0.f, 0.f, 1.f, 1.f, col)
+        || !push_quad(batch, (SDL_FRect){x, y + rad, rad, mid_h}, 0.f, 0.f, 1.f, 1.f, col)
+        || !push_quad(batch, (SDL_FRect){x + w - rad, y + rad, rad, mid_h}, 0.f, 0.f, 1.f, 1.f, col)
+        || !push_corner(batch, x + rad, y + rad, rad, NANO_UI_PI, NANO_UI_PI * 1.5f, col)
+        || !push_corner(batch, x + w - rad, y + rad, rad, NANO_UI_PI * 1.5f, NANO_UI_PI * 2.f, col)
+        || !push_corner(batch, x + w - rad, y + h - rad, rad, 0.f, NANO_UI_PI * 0.5f, col)
+        || !push_corner(batch, x + rad, y + h - rad, rad, NANO_UI_PI * 0.5f, NANO_UI_PI, col)) {
+        nano_ui_fill_rounded_rect(batch->renderer, r, g, b, a, x, y, w, h, rad);
+    }
 }
 
 static bool load_vtx(const uint8_t *verts, int vert_count, uint32_t idx, float *x, float *y, float *u, float *v, uint32_t *rgba)
@@ -361,7 +548,6 @@ void nano_ui_batch_draw_range(
         end = index_count;
     }
     const uint32_t *idx = (const uint32_t *)indices;
-    SDL_Renderer *ren = batch->renderer;
     for (int i = index_start; i + 2 < end; i += 3) {
         float x0, y0, u0, v0, x1, y1, u1, v1, x2, y2, u2, v2;
         uint32_t rgba0, rgba1, rgba2;
@@ -399,9 +585,8 @@ void nano_ui_batch_draw_range(
                 nano_ui_batch_fill_solid(batch, r, g, b, a, px, py, pw, ph);
             }
         } else if (u0 <= -1.5f) {
-            nano_ui_batch_flush(batch);
-            nano_ui_fill_triangle(
-                ren,
+            nano_ui_batch_triangle(
+                batch,
                 r,
                 g,
                 b,
@@ -423,8 +608,7 @@ void nano_ui_batch_draw_range(
             float pw = w * scale;
             float ph = h * scale;
             if (v0 < 0.f) {
-                nano_ui_batch_flush(batch);
-                nano_ui_fill_rounded_rect(ren, r, g, b, a, px, py, pw, ph, u0 * scale);
+                nano_ui_batch_rounded_rect(batch, r, g, b, a, px, py, pw, ph, u0 * scale);
             } else {
                 nano_ui_batch_fill_solid(batch, r, g, b, a, px, py, pw, ph);
             }

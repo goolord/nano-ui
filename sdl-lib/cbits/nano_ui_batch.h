@@ -48,6 +48,31 @@ bool nano_ui_batch_texture_sized(
     float w,
     float h);
 
+void nano_ui_batch_triangle(
+    NanoUiBatch *batch,
+    uint8_t r,
+    uint8_t g,
+    uint8_t b,
+    uint8_t a,
+    float x0,
+    float y0,
+    float x1,
+    float y1,
+    float x2,
+    float y2);
+
+void nano_ui_batch_rounded_rect(
+    NanoUiBatch *batch,
+    uint8_t r,
+    uint8_t g,
+    uint8_t b,
+    uint8_t a,
+    float x,
+    float y,
+    float w,
+    float h,
+    float radius);
+
 void nano_ui_batch_draw_range(
     NanoUiBatch *batch,
     const uint8_t *verts,
