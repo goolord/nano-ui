@@ -2,6 +2,7 @@ module NanoUI.Sdl.Display
   ( defaultUiScale
   , defaultFontSize
   , initSdlHints
+  , initBenchHints
   , queryWindowDisplayScale
   , queryWindowLogicalSize
   , queryMouseWindowPos
@@ -38,6 +39,9 @@ defaultFontSize = 16
 
 initSdlHints :: IO ()
 initSdlHints = sdlInitHintsC
+
+initBenchHints :: IO ()
+initBenchHints = sdlInitBenchHintsC
 
 queryWindowDisplayScale :: Ptr SDL_Window -> IO Float
 queryWindowDisplayScale win = do
@@ -96,6 +100,9 @@ installResizeWatch act = do
 
 foreign import ccall safe "nano_ui_sdl_init_hints"
   sdlInitHintsC :: IO ()
+
+foreign import ccall safe "nano_ui_sdl_init_bench_hints"
+  sdlInitBenchHintsC :: IO ()
 
 foreign import ccall safe "nano_ui_window_display_scale"
   windowDisplayScaleC :: Ptr SDL_Window -> IO CFloat

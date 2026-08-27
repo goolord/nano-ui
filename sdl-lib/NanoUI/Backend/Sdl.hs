@@ -9,6 +9,11 @@ module NanoUI.Backend.Sdl
   , runSdlAppWithQuit
   , runSdlAppWith
   , registerRgbaImage
+  , sdlDrawFrame
+  , withSdlBench
+  , acquireSdlBench
+  , releaseSdlBench
+  , syncDisplay
   , SdlDebugSnapshot (..)
   , emptySdlDebug
   , readSdlDebugEnv
@@ -83,7 +88,7 @@ import Data.Maybe (isJust)
 import Foreign.Ptr (Ptr, nullPtr)
 import qualified NanoUI.Sdl.Image as SdlImage
 import NanoUI.Sdl.Render (renderDrawDataPass, snapDamage)
-import NanoUI.Sdl.Window (SdlEnv (..), defaultWindowSize, syncDisplay, withSdl)
+import NanoUI.Sdl.Window (SdlEnv (..), acquireSdlBench, defaultWindowSize, releaseSdlBench, syncDisplay, withSdl, withSdlBench)
 import SDL3.Sys.Bindgen.Blendmode (sDL_BLENDMODE_BLEND)
 import SDL3.Sys.Render (renderPresentSafe, setRenderDrawBlendModeSafe)
 
@@ -283,3 +288,5 @@ readSdlDebugEnv env = do
   let pos = maybe (V2 0 0) (windowToLogicalCoords scale) mouse
   readSdlDebug (sdlDebug env) size pos (sdlFontPath env) scale name
 
+sdlDrawFrame :: Context -> UI () -> SdlEnv -> Input -> Bool -> IO (Bool, Input)
+sdlDrawFrame = draw

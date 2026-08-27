@@ -87,6 +87,8 @@ Requires SDL3, SDL3_ttf, and `pkg-config`. On Windows, MSYS2 UCRT64 is the usual
 pacman -S mingw-w64-ucrt-x86_64-sdl3 mingw-w64-ucrt-x86_64-sdl3-ttf mingw-w64-ucrt-x86_64-pkg-config
 ```
 
+SDL benchmarks statically link SDL3 (`executable-static` in `cabal.project`). The demo and library use dynamic SDL DLLs.
+
 Text uses a system TrueType font (Segoe UI on Windows). Override with `NANO_UI_FONT=/path/to/font.ttf`.
 
 ```bash
