@@ -157,10 +157,10 @@ foreign import ccall safe "nano_ui_retain_create"
 foreign import ccall safe "nano_ui_retain_begin"
   retainBeginC :: Ptr SDL_Renderer -> Ptr () -> IO Bool
 
-foreign import ccall safe "nano_ui_retain_blit"
+foreign import ccall unsafe "nano_ui_retain_blit"
   retainBlitC :: Ptr SDL_Renderer -> Ptr () -> IO Bool
 
-foreign import ccall safe "nano_ui_retain_blit_rect"
+foreign import ccall unsafe "nano_ui_retain_blit_rect"
   retainBlitRectC ::
     Ptr SDL_Renderer ->
     Ptr () ->

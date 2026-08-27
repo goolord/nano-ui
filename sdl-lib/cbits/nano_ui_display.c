@@ -151,6 +151,27 @@ bool nano_ui_renderer_name(SDL_Renderer *renderer, char *buf, size_t cap)
     return true;
 }
 
+bool nano_ui_fill_solid_rect(
+    SDL_Renderer *renderer,
+    Uint8 r,
+    Uint8 g,
+    Uint8 b,
+    Uint8 a,
+    float x,
+    float y,
+    float w,
+    float h)
+{
+    if (!renderer || w <= 0.f || h <= 0.f) {
+        return true;
+    }
+    if (!SDL_SetRenderDrawColor(renderer, r, g, b, a)) {
+        return false;
+    }
+    SDL_FRect rect = {x, y, w, h};
+    return SDL_RenderFillRect(renderer, &rect);
+}
+
 SDL_Texture *nano_ui_retain_create(SDL_Renderer *renderer, int w, int h)
 {
     if (!renderer || w <= 0 || h <= 0) {

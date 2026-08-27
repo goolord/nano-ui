@@ -245,7 +245,8 @@ bool nano_ui_ttf_create_texture(
     if (!texture) {
         return false;
     }
-    SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_LINEAR);
+    SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+    SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
 
     float tw = 0.f;
     float th = 0.f;
@@ -268,6 +269,21 @@ bool nano_ui_ttf_create_texture(
     return true;
 }
 
+bool nano_ui_render_texture_sized(
+    SDL_Renderer *renderer,
+    SDL_Texture *texture,
+    float x,
+    float y,
+    float w,
+    float h)
+{
+    if (!renderer || !texture || w <= 0.f || h <= 0.f) {
+        return false;
+    }
+    SDL_FRect dst = {x, y, w, h};
+    return SDL_RenderTexture(renderer, texture, NULL, &dst);
+}
+
 bool nano_ui_render_texture(
     SDL_Renderer *renderer,
     SDL_Texture *texture,
@@ -279,8 +295,7 @@ bool nano_ui_render_texture(
     if (!SDL_GetTextureSize(texture, &tw, &th)) {
         return false;
     }
-    SDL_FRect dst = {x, y, tw, th};
-    return SDL_RenderTexture(renderer, texture, NULL, &dst);
+    return nano_ui_render_texture_sized(renderer, texture, x, y, tw, th);
 }
 
 bool nano_ui_ttf_render_blended(

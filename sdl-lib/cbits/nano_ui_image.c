@@ -30,6 +30,8 @@ bool nano_ui_create_rgba_texture(
 bool nano_ui_render_texture_dst(
     SDL_Renderer *renderer,
     SDL_Texture *texture,
+    float tex_w,
+    float tex_h,
     float x,
     float y,
     float w,
@@ -46,20 +48,27 @@ bool nano_ui_render_texture_dst(
     if (!renderer || !texture) {
         return false;
     }
-    float tw = 0.f;
-    float th = 0.f;
-    if (!SDL_GetTextureSize(texture, &tw, &th)) {
-        return false;
+    float tw = tex_w;
+    float th = tex_h;
+    if (tw <= 0.f || th <= 0.f) {
+        if (!SDL_GetTextureSize(texture, &tw, &th)) {
+            return false;
+        }
     }
     SDL_FRect src = {u0 * tw, v0 * th, (u1 - u0) * tw, (v1 - v0) * th};
     SDL_FRect dst = {x, y, w, h};
     if (src.w <= 0.f || src.h <= 0.f) {
         return false;
     }
-    SDL_SetTextureColorMod(texture, r, g, b);
-    SDL_SetTextureAlphaMod(texture, a);
+    bool tinted = (r != 255) || (g != 255) || (b != 255) || (a != 255);
+    if (tinted) {
+        SDL_SetTextureColorMod(texture, r, g, b);
+        SDL_SetTextureAlphaMod(texture, a);
+    }
     bool ok = SDL_RenderTexture(renderer, texture, &src, &dst);
-    SDL_SetTextureColorMod(texture, 255, 255, 255);
-    SDL_SetTextureAlphaMod(texture, 255);
+    if (tinted) {
+        SDL_SetTextureColorMod(texture, 255, 255, 255);
+        SDL_SetTextureAlphaMod(texture, 255);
+    }
     return ok;
 }

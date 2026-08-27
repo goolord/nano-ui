@@ -45,9 +45,11 @@ data SdlFont = SdlFont
   }
 
 data TextCache = TextCache
-  { tcEntries :: IORef (Map.Map (Text, Word32) (Ptr (), Float, Float))
-  , tcOrder :: IORef [(Text, Word32)]
+  { tcEntries :: IORef (Map.Map CacheKey (Ptr (), Float, Float))
+  , tcOrder :: IORef [CacheKey]
   }
+
+type CacheKey = (Ptr (), Text, Word32)
 
 textCacheLimit :: Int
 textCacheLimit = 256
@@ -172,20 +174,20 @@ drawSpanFont _ _ _ _ txt _ _ _
 drawSpanFont ren scale font cache txt col x y =
   withUtf8 txt $ \cstr len -> do
     let keyCol = colorWord col
-        cacheKey = (txt, keyCol)
-    (tex, _tw, _th) <-
+        cacheKey = (sfFont font, txt, keyCol)
+    (tex, tw, th) <-
       lookupCache cache cacheKey >>= \case
         Just hit -> pure hit
         Nothing -> createCached ren font cache cacheKey cstr len col
     let px = x * scale
         py = y * scale
-    drawTexture ren tex px py
+    drawTexture ren tex tw th px py
 
 createCached ::
   Ptr SDL_Renderer ->
   SdlFont ->
   TextCache ->
-  (Text, Word32) ->
+  CacheKey ->
   CString ->
   CSize ->
   Color ->
@@ -216,7 +218,7 @@ createCached ren font cache cacheKey cstr len col =
   where
     (r, g, b, a) = unpackColor col
 
-insertCache :: TextCache -> (Text, Word32) -> (Ptr (), Float, Float) -> IO ()
+insertCache :: TextCache -> CacheKey -> (Ptr (), Float, Float) -> IO ()
 insertCache cache key val = do
   let entriesRef = tcEntries cache
       orderRef = tcOrder cache
@@ -248,13 +250,18 @@ evictOldest cache = do
           writeIORef (tcEntries cache) (Map.delete oldest entries)
           writeIORef (tcOrder cache) (filter (/= oldest) ord)
 
-drawTexture :: Ptr SDL_Renderer -> Ptr () -> Float -> Float -> IO ()
-drawTexture ren tex x y =
-  void $ renderTextureAt ren tex (cf x) (cf y)
+drawTexture :: Ptr SDL_Renderer -> Ptr () -> Float -> Float -> Float -> Float -> IO ()
+drawTexture ren tex tw th x y =
+  void $ renderTextureSized ren tex (cf x) (cf y) (cf tw) (cf th)
 
-lookupCache :: TextCache -> (Text, Word32) -> IO (Maybe (Ptr (), Float, Float))
-lookupCache cache key =
-  Map.lookup key <$> readIORef (tcEntries cache)
+lookupCache :: TextCache -> CacheKey -> IO (Maybe (Ptr (), Float, Float))
+lookupCache cache key = do
+  entries <- readIORef (tcEntries cache)
+  case Map.lookup key entries of
+    Nothing -> pure Nothing
+    Just hit -> do
+      modifyIORef (tcOrder cache) (\ord -> key : filter (/= key) ord)
+      pure (Just hit)
 
 findMonoFontPath :: IO (Maybe FilePath)
 findMonoFontPath = do
@@ -376,15 +383,17 @@ foreign import ccall safe "nano_ui_ttf_create_texture"
     Ptr CFloat ->
     IO Bool
 
-foreign import ccall safe "nano_ui_render_texture"
-  renderTextureAt ::
+foreign import ccall unsafe "nano_ui_render_texture_sized"
+  renderTextureSized ::
     Ptr SDL_Renderer ->
     Ptr () ->
     CFloat ->
     CFloat ->
+    CFloat ->
+    CFloat ->
     IO Bool
 
-foreign import ccall safe "nano_ui_destroy_texture"
+foreign import ccall unsafe "nano_ui_destroy_texture"
   destroyTexture :: Ptr () -> IO ()
 
 unpackColor :: Color -> (Word8, Word8, Word8, Word8)

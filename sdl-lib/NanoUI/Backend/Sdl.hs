@@ -2,7 +2,7 @@
 -- maps SDL events into 'Input'. Idle frames skip 'runFrame' until a command,
 -- hover target change, scroll drag, focused text field, 'markDirty', or an active animation demands a redraw.
 -- Cross-thread 'markDirty' pushes a registered SDL user event to wake 'SDL_WaitEvent'.
--- Hover and animation frames scissor into the retain texture; the window always gets a full retain copy.
+-- Hover and animation frames scissor into the retain texture; partial damage blits only the dirty rect to the window.
 module NanoUI.Backend.Sdl
   ( SdlEnv (..)
   , runSdlApp
@@ -67,6 +67,7 @@ import NanoUI.Sdl.Display
   , queryWindowLogicalSize
   , retainBegin
   , retainBlit
+  , retainBlitRect
   , retainCreate
   , retainDestroy
   , windowToLogicalCoords
@@ -86,8 +87,9 @@ import NanoUI.Sdl.Input
 import Data.ByteString (ByteString)
 import Data.Maybe (isJust)
 import Foreign.Ptr (Ptr, nullPtr)
+import SDL3.Sys.Bindgen.Render (SDL_Renderer)
 import qualified NanoUI.Sdl.Image as SdlImage
-import NanoUI.Sdl.Render (renderDrawDataPass, snapDamage)
+import NanoUI.Sdl.Render (renderDrawDataPass, snapDamage, clipPixelRect)
 import NanoUI.Sdl.Window (SdlEnv (..), acquireSdlBench, defaultWindowSize, releaseSdlBench, syncDisplay, withSdl, withSdlBench)
 import SDL3.Sys.Bindgen.Blendmode (sDL_BLENDMODE_BLEND)
 import SDL3.Sys.Render (renderPresentSafe, setRenderDrawBlendModeSafe)
@@ -256,7 +258,7 @@ draw ctx ui env inp forceFull = do
       renderTextSpans (sdlRenderer env) scale font monoFont (sdlTextCache env) (spansIn baseSpans)
       renderDrawDataPass (sdlRenderer env) scale Nothing drawData True (sdlImages env) damage
       renderTextSpans (sdlRenderer env) scale font monoFont (sdlTextCache env) (spansIn overlaySpans)
-      okBlit <- retainBlit (sdlRenderer env) tex
+      okBlit <- blitRetain (sdlRenderer env) scale tex damage
       unless okBlit $ fail "SDL_RenderTexture(retain) failed"
       void $ renderPresentSafe (sdlRenderer env)
       notePresent (sdlDebug env) ((t1 - t0) * 1000) drawData
@@ -278,6 +280,14 @@ filterSpans :: Damage -> [(Rect, a, b, c, Rect)] -> [(Rect, a, b, c, Rect)]
 filterSpans DamageFull spans = spans
 filterSpans (DamageClip clip) spans =
   filter (\(box, _, _, _, _) -> isJust (rectIntersect clip box)) spans
+
+blitRetain :: Ptr SDL_Renderer -> Float -> Ptr () -> Damage -> IO Bool
+blitRetain ren scale tex damage =
+  case damage of
+    DamageFull -> retainBlit ren tex
+    DamageClip r ->
+      let (px, py, pw, ph) = clipPixelRect scale r
+       in retainBlitRect ren tex px py pw ph px py
 
 readSdlDebugEnv :: SdlEnv -> IO SdlDebugSnapshot
 readSdlDebugEnv env = do

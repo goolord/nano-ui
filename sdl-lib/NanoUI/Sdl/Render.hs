@@ -4,10 +4,11 @@ module NanoUI.Sdl.Render
   , setLogicalClipRect
   , clearLogicalClipRect
   , logicalClipKey
+  , clipPixelRect
   , snapDamage
   ) where
 
-import NanoUI.Sdl.Image (ImageAtlas, lookupImage)
+import NanoUI.Sdl.Image (ImageAtlas, lookupAtlasTex)
 
 import Control.Monad (void, when)
 import Data.Bits (shiftR, (.&.))
@@ -187,13 +188,15 @@ fillQuad ren uiScale vp ip dd images texId mDamage i = do
                                 py = y0 * uiScale
                                 pw = w * uiScale
                                 ph = h * uiScale
-                            mTex <- lookupImage images texId
-                            case mTex of
-                              Just tex ->
+                            mDraw <- lookupAtlasTex images texId
+                            case mDraw of
+                              Just (tex, atW, atH) ->
                                 void $
                                   renderTextureDst
                                     ren
                                     tex
+                                    (cf atW)
+                                    (cf atH)
                                     (cf px)
                                     (cf py)
                                     (cf pw)
@@ -286,10 +289,12 @@ quadHitsDamage (Just clip) x0 y0 x1 y1 x2 y2 =
 cf :: Float -> CFloat
 cf = realToFrac
 
-foreign import ccall safe "nano_ui_render_texture_dst"
+foreign import ccall unsafe "nano_ui_render_texture_dst"
   renderTextureDst ::
     Ptr SDL_Renderer ->
     Ptr () ->
+    CFloat ->
+    CFloat ->
     CFloat ->
     CFloat ->
     CFloat ->
@@ -323,4 +328,14 @@ logicalClipKey uiScale (Rect x y w h) =
       y0 = floor (y * s) :: Int
       x1 = ceiling ((x + w) * s) :: Int
       y1 = ceiling ((y + h) * s) :: Int
+   in (x0, y0, max 0 (x1 - x0), max 0 (y1 - y0))
+
+{-# INLINE clipPixelRect #-}
+clipPixelRect :: Float -> Rect -> (Float, Float, Float, Float)
+clipPixelRect uiScale (Rect x y w h) =
+  let s = if uiScale > 0 then uiScale else 1
+      x0 = fromIntegral (floor (x * s) :: Int) :: Float
+      y0 = fromIntegral (floor (y * s) :: Int) :: Float
+      x1 = fromIntegral (ceiling ((x + w) * s) :: Int) :: Float
+      y1 = fromIntegral (ceiling ((y + h) * s) :: Int) :: Float
    in (x0, y0, max 0 (x1 - x0), max 0 (y1 - y0))
