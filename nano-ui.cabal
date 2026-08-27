@@ -206,6 +206,7 @@ executable nano-ui-sdl-demo
     import:           rts-options
     import:           warnings
     main-is:          SdlDemo.hs
+    other-modules:    SdlDemoUi
     build-depends:
         base ^>=4.22.0.0,
         bytestring ^>=0.12,
@@ -214,6 +215,26 @@ executable nano-ui-sdl-demo
         text ^>=2.1
     hs-source-dirs:   examples
     default-language: GHC2024
+    if !flag(sdl)
+        buildable: False
+
+executable nano-ui-sdl-profile
+    import:           extensions
+    import:           ghc-options
+    import:           bench-rts-options
+    import:           warnings
+    main-is:          SdlProfile.hs
+    other-modules:    SdlDemoUi
+    build-depends:
+        base ^>=4.22.0.0,
+        bytestring ^>=0.12,
+        nano-ui,
+        nano-ui:nano-ui-sdl,
+        text ^>=2.1
+    hs-source-dirs:   examples
+    default-language: GHC2024
+    if os(windows)
+        ghc-options: -optl-mconsole
     if !flag(sdl)
         buildable: False
 

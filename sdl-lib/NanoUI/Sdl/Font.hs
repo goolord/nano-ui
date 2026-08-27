@@ -27,8 +27,8 @@ import Foreign.C.Types (CFloat (..), CSize (..))
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (peek)
-import NanoUI (Color (..), Context, FontMetrics (..), Rect (..), hasMonoFontMarker, monospaceMetrics, stripMonoFontMarker, withExternalText, withFontMetrics, withMeasureText, withMonoFontMetrics)
-import NanoUI.Sdl.Render (clearLogicalClipRect, setLogicalClipRect)
+import NanoUI (Color (..), Context, FontMetrics (..), Rect (..), hasMonoFontMarker, monospaceMetrics, stripMonoFontMarker, withExternalText, withFontMetrics, withMeasureText, withMonoFontMetrics, wrapMeasureCache)
+import NanoUI.Sdl.Render (clearLogicalClipRect, logicalClipKey, setLogicalClipRect)
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
 import System.Directory (doesFileExist)
 import System.Environment (lookupEnv)
@@ -107,12 +107,15 @@ withTtfMeasureScaled ctx sf monoSf scale =
         if hasMonoFontMarker txt
           then measureTtfTextScaled monoSf scale (stripMonoFontMarker txt)
           else measureTtfTextScaled sf scale txt
-   in withExternalText
-        ( withMeasureText
-            (withMonoFontMetrics (withFontMetrics ctx fm) monoFm)
-            measure
-        )
-        True
+      ctx1 =
+        withExternalText
+          ( withMeasureText
+              (withMonoFontMetrics (withFontMetrics ctx fm) monoFm)
+              measure
+          )
+          True
+   in -- Per-frame measure cache; SDL contexts only (see newSdlContext).
+      wrapMeasureCache scale ctx1 measure
 
 ttfFontMetricsScaled :: SdlFont -> Float -> FontMetrics
 ttfFontMetricsScaled sf scale =
@@ -143,8 +146,13 @@ measureTtfText sf txt =
 
 renderTextSpans :: Ptr SDL_Renderer -> Float -> SdlFont -> SdlFont -> TextCache -> [(Rect, Text, Color, Color, Rect)] -> IO ()
 renderTextSpans ren scale font monoFont cache spans = do
+  lastClip <- newIORef (Nothing :: Maybe (Int, Int, Int, Int))
   forM_ spans $ \(Rect x y _ _, txt, fg, _bg, clip) -> do
-    setLogicalClipRect ren scale clip
+    let clipKey = logicalClipKey scale clip
+    prev <- readIORef lastClip
+    when (prev /= Just clipKey) $ do
+      writeIORef lastClip (Just clipKey)
+      setLogicalClipRect ren scale clip
     drawSpan ren scale font monoFont cache txt fg x y
   clearLogicalClipRect ren
 

@@ -110,6 +110,7 @@ module NanoUI
   , withFontMetrics
   , withMonoFontMetrics
   , withMeasureText
+  , wrapMeasureCache
   , withExternalText
   , newTerminalContext
   , newSdlContext
@@ -151,7 +152,7 @@ module NanoUI
   , renderASCIIFromRects
   ) where
 
-import NanoUI.Context (Context (..), FrameMsg (..), anyAnimating, atlasSnapshot, atlasTextureId, ctxTheme, getAnimationValue, getFocusId, getHotId, getPrevRect, getScrollOffset, getStore, isDirty, markDirty, modalActive, newContext, newSdlContext, newTerminalContext, overlayConsumesQuit, registerImage, registerImages, setAnimationValue, setWakeLoop, startAnimation, takeDamage, textInputEditActive, withClipboard, withExternalText, withFontMetrics, withMeasureText, withMonoFontMetrics)
+import NanoUI.Context (Context (..), FrameMsg (..), anyAnimating, atlasSnapshot, atlasTextureId, ctxTheme, getAnimationValue, getFocusId, getHotId, getPrevRect, getScrollOffset, getStore, isDirty, markDirty, modalActive, newContext, newSdlContext, newTerminalContext, overlayConsumesQuit, registerImage, registerImages, setAnimationValue, setWakeLoop, startAnimation, takeDamage, textInputEditActive, withClipboard, withExternalText, withFontMetrics, withMeasureText, withMonoFontMetrics, wrapMeasureCache)
 import NanoUI.Draw (DrawCmd (..), DrawData (..), Layer (..), indexSize, vertexSize)
 import NanoUI.Font (FontMetrics (..), hasMonoFontMarker, isTerminalFont, labelContentInset, monoFontMarker, monospaceMetrics, stripMonoFontMarker, widgetContentInset, widgetPadding)
 import NanoUI.Frame (collectOverlayTextSpans, collectTextSpans, cursorKindIs, debugPanelOpen, floatingPanelActive, needsRedraw, pointerCursorWanted, runFrame, sliderTrackRect, textFieldActive, uiCursorKind, UiCursorKind (..))

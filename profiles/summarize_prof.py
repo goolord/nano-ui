@@ -1,8 +1,12 @@
 import json
+import sys
 from collections import defaultdict
 from pathlib import Path
 
-prof = Path(__file__).with_name("nano-ui-profile.prof")
+name = sys.argv[1] if len(sys.argv) > 1 else "nano-ui-profile.prof"
+prof = Path(__file__).with_name(name)
+if not prof.is_file():
+    sys.exit(f"missing profile file: {prof}")
 with prof.open() as f:
     d = json.load(f)
 
@@ -30,9 +34,10 @@ for root in roots:
     walk(root)
 
 total_ticks = d["total_ticks"]
+print(f"profile: {prof.name}")
 print(f"total_time: {d['total_time']}s  total_ticks: {total_ticks}")
 print(f"{'ticks':>8} {'%':>6}  {'alloc MB':>10}  cost centre")
-for key, v in sorted(by_label.items(), key=lambda kv: kv[1]["ticks"], reverse=True)[:30]:
+for key, v in sorted(by_label.items(), key=lambda kv: kv[1]["ticks"], reverse=True)[:40]:
     pct = 100.0 * v["ticks"] / total_ticks if total_ticks else 0.0
     mb = v["alloc"] / 1e6
     print(f"{int(v['ticks']):>8} {pct:>5.1f}%  {mb:>10.1f}  {key}")

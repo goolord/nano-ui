@@ -96,6 +96,15 @@ cabal build -fsdl
 cabal run -fsdl nano-ui-sdl-demo
 ```
 
+Profile the SDL demo draw path (hidden window, 400 timed frames):
+
+```powershell
+cd profiles
+.\run-sdl-profile.ps1
+```
+
+Uses `nano-ui-sdl-profile` with RTS `-pj` / `-P`. Open `profile-sdl-json.prof` in [speedscope](https://www.speedscope.app/).
+
 Uses `nano-ui-sdl` (`runSdlApp`, `newSdlContext`) with SDL_ttf text rendering.
 Window DPI is read via `SDL_GetWindowDisplayScale`; fonts and geometry rasterize
 at native pixel density while layout stays in logical coordinates.

@@ -51,6 +51,7 @@ import NanoUI.Context
   , readTooltips
   , PendingTooltip (..)
   , ctxClipboardGet
+  , clearMeasureCache
   , markEscapeConsumed
   , lookupImageUv
   , atlasTextureId
@@ -157,6 +158,7 @@ runFrame ctx inp ui = do
   animKeys <- IM.keys <$> readIORef (ctxAnimations ctx)
   resetNodeArena (ctxNodeArena ctx)
   resetDrawArena (ctxDrawArena ctx)
+  clearMeasureCache ctx
   writeIORef (ctxContainerStack ctx) []
   writeIORef (ctxFocusables ctx) []
   writeIORef (ctxHotId ctx) (WidgetId 0)
