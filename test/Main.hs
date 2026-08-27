@@ -99,6 +99,7 @@ main = do
   run "grow-fits-window" runGrowFitsWindowTest
   run "percent-layout" runPercentLayoutTest
   run "aspect-layout" runAspectLayoutTest
+  run "label-align-end" runLabelAlignEndTest
   run "grow-wrap-sibling" runGrowWrapPushesSiblingTest
   run "scroll-bar-gutter" runScrollBarGutterTest
   runSdl "scroll-bar-gutter-grow" runGrowScrollGutterTest
@@ -943,7 +944,7 @@ runPanelGrowScrollGutterTest ctx failed = do
       when (cx + cw < contentRight - 0.5) $ bump failed
       when (cx + cw > contentRight + 0.01) $ bump failed
 
--- Window body keeps full inner width. Bar hangs in the window pad.
+-- Window body reserves a gutter. Bar sits inside the scroll rect.
 runWindowScrollGutterTest :: Context -> IORef Int -> IO ()
 runWindowScrollGutterTest ctx failed = do
   let inp0 = emptyInput {inputWindowSize = Size 640 360}
@@ -959,7 +960,8 @@ runWindowScrollGutterTest ctx failed = do
   _ <- runFrame ctx inp0 ui
   ((win, mwide), _, _, _) <- runFrame ctx inp0 ui
   let Rect wx _ ww _ = respRect win
-      innerRight = wx + ww - padR windowPad
+      gutter = scrollBarWindowGutter (ctxFontMetrics ctx)
+      contentRight = wx + ww - padR windowPad - gutter
   spans <- collectOverlayTextSpans ctx inp0
   let titleYs = [rectY r | (r, txt, _, _, _) <- spans, "GutterWin" `T.isInfixOf` txt]
   when (null titleYs) $ bump failed
@@ -967,8 +969,8 @@ runWindowScrollGutterTest ctx failed = do
     Nothing -> bump failed
     Just wide -> do
       let Rect cx _ cw _ = respRect wide
-      when (cx + cw < innerRight - 0.5) $ bump failed
-      when (cx + cw > innerRight + 0.01) $ bump failed
+      when (cx + cw < contentRight - 0.5) $ bump failed
+      when (cx + cw > contentRight + 0.01) $ bump failed
 
 runTextInputSpanTest :: Context -> IORef Int -> IO ()
 runTextInputSpanTest ctx failed = do
@@ -1181,9 +1183,13 @@ runSelectOverlayDamageTest _ failed = do
   let ui = column defaultLayout (select "Quality" ["Low", "Medium", "High"] 0)
       inp0 = emptyInput {inputWindowSize = Size 320 160, inputMousePos = V2 20 20}
   _ <- runFrame ctx inp0 ui
-  let press =
+  ((resp, _), _, _, _) <- runFrame ctx inp0 ui
+  let Rect sx sy sw sh = respRect resp
+      click = V2 (sx + sw / 2) (sy + sh / 2)
+      press =
         inp0
-          { inputMouseDown = True
+          { inputMousePos = click
+          , inputMouseDown = True
           , inputMousePressed = True
           }
   _ <- runFrame ctx press ui
@@ -1201,7 +1207,7 @@ runSelectOverlayDamageTest _ failed = do
   case highYs of
     [] -> bump failed
     (highY : _) -> do
-      let overMenu = idle {inputMousePos = V2 20 (highY + 0.5)}
+      let overMenu = idle {inputMousePos = V2 (sx + sw / 2) (highY + 0.5)}
       need <- needsRedraw ctx idle overMenu
       when (not need) $ bump failed
       _ <- runFrame ctx overMenu ui
@@ -2030,6 +2036,33 @@ runPercentLayoutTest ctx failed = do
   when (abs (wa - 50) > 1) $ bump failed
   when (abs (wb - 150) > 1) $ bump failed
 
+-- Right-aligned label glyphs sit on the content-box right edge.
+runLabelAlignEndTest :: Context -> IORef Int -> IO ()
+runLabelAlignEndTest _ failed = do
+  checkLabelAlignEnd failed =<< newTerminalContext
+  checkLabelAlignEnd failed =<< newSdlContext
+
+checkLabelAlignEnd :: IORef Int -> Context -> IO ()
+checkLabelAlignEnd failed ctx = do
+  let fm = ctxFontMetrics ctx
+      (ix, _) = labelContentInset fm
+      tw = fmAdvance fm ' ' * 2
+      boxW = tw + 2 * ix + 4
+      inp = emptyInput {inputWindowSize = Size (boxW + 8) 8}
+      ui =
+        row (fixedW boxW . tight . gap 0 $ defaultLayout) $
+          labelEx (fillW . alignEnd . tight $ defaultLayout) "ab"
+  _ <- runFrame ctx inp ui
+  (lab, _, _, _) <- runFrame ctx inp ui
+  spans <- collectTextSpans ctx
+  let Rect bx _ bw _ = respRect lab
+      hits = [r | (r, txt, _, _, _) <- spans, T.isInfixOf (T.pack "ab") txt]
+  case hits of
+    [] -> bump failed
+    Rect x _ w _ : _ -> do
+      when (abs ((x + w) - (bx + bw - ix)) > 0.6) $ bump failed
+      when (abs (w - tw) > 0.6) $ bump failed
+
 -- Aspect locks height to width / ratio after width is known.
 runAspectLayoutTest :: Context -> IORef Int -> IO ()
 runAspectLayoutTest ctx failed = do
@@ -2437,8 +2470,8 @@ runWindowResizeTest ctx failed = do
                 Just (Rect xn yn wn hn) -> do
                   when (hn <= hw + 8) $ bump failed
                   when (yn >= yw - 5) $ bump failed
-                  -- padT 10 + titleBarH 28 + padB 14
-                  let minTitleH = 52
+                  -- padT 5 + titleBarH 28 + padB 7
+                  let minTitleH = 40
                   mShort <-
                     dragWindowEdge
                       ctx

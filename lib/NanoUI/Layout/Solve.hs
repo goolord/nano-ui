@@ -763,7 +763,7 @@ placeModals na fm winW winH = do
       positionNode na fm idx x y w h
 
 windowMargin :: Float
-windowMargin = 24
+windowMargin = 12
 
 placeWindows ::
   NodeArena ->

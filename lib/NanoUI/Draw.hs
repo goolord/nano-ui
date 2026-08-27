@@ -14,6 +14,7 @@ module NanoUI.Draw
   , pushRect
   , pushImage
   , pushRoundedRect
+  , pushRoundedStroke
   , pushText
   , pushLine
   , pushFilledTriangle
@@ -372,10 +373,19 @@ pushImage da rect tex u0 v0 u1 v1 col
       setTexture da tex
       pushQuad da rect u0 v0 u1 v1 col
 
--- Rounded fills encode radius in vtxU and use vtxV = -1 (plain rects use v in [0, 1]).
+-- Rounded fills: vtxU = radius, vtxV = -1. Strokes: vtxV = -(1 + borderWidth).
 {-# INLINE pushRoundedRect #-}
 pushRoundedRect :: DrawArena -> Rect -> Float -> Color -> IO ()
-pushRoundedRect da (Rect x y w h) radius col = do
+pushRoundedRect da rect radius col = pushRoundedCoded da rect radius (-1) col
+
+{-# INLINE pushRoundedStroke #-}
+pushRoundedStroke :: DrawArena -> Rect -> Float -> Float -> Color -> IO ()
+pushRoundedStroke da rect radius bw col =
+  pushRoundedCoded da rect radius (-(1 + max 1 bw)) col
+
+{-# INLINE pushRoundedCoded #-}
+pushRoundedCoded :: DrawArena -> Rect -> Float -> Float -> Color -> IO ()
+pushRoundedCoded da (Rect x y w h) radius v col = do
   setTexture da 0
   ensureVerts da 4
   ensureIndices da 6
@@ -386,10 +396,10 @@ pushRoundedRect da (Rect x y w h) radius col = do
   let rgba = colorToWord32 col
       r = max 0 radius
   withForeignPtr vPtr $ \vp -> do
-    pokeVertex vp base x y r (-1) rgba
-    pokeVertex vp (base + 1) (x + w) y r (-1) rgba
-    pokeVertex vp (base + 2) (x + w) (y + h) r (-1) rgba
-    pokeVertex vp (base + 3) x (y + h) r (-1) rgba
+    pokeVertex vp base x y r v rgba
+    pokeVertex vp (base + 1) (x + w) y r v rgba
+    pokeVertex vp (base + 2) (x + w) (y + h) r v rgba
+    pokeVertex vp (base + 3) x (y + h) r v rgba
   withForeignPtr iPtr $ \ip ->
     pokeQuadIndices ip baseIdx base
   writeIORef (daVertexCount da) (base + 4)

@@ -73,6 +73,19 @@ void nano_ui_batch_rounded_rect(
     float h,
     float radius);
 
+void nano_ui_batch_stroke_rounded_rect(
+    NanoUiBatch *batch,
+    uint8_t r,
+    uint8_t g,
+    uint8_t b,
+    uint8_t a,
+    float x,
+    float y,
+    float w,
+    float h,
+    float radius,
+    float bw);
+
 void nano_ui_batch_draw_range(
     NanoUiBatch *batch,
     const uint8_t *verts,

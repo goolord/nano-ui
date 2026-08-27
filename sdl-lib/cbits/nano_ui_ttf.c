@@ -167,10 +167,10 @@ static bool fill_edge_aa(
             if (dist <= 0.f) {
                 continue;
             }
-            if (dist >= 0.5f) {
+            if (dist >= 1.f) {
                 continue;
             }
-            float coverage = 0.5f - dist;
+            float coverage = 1.f - dist;
             if (coverage <= 0.f) {
                 continue;
             }
@@ -220,6 +220,84 @@ bool nano_ui_fill_rounded_rect(
         return false;
     }
     return fill_edge_aa(renderer, r, g, b, a, x, y, w, h, rad);
+}
+
+static float clampf01(float v)
+{
+    if (v < 0.f) {
+        return 0.f;
+    }
+    if (v > 1.f) {
+        return 1.f;
+    }
+    return v;
+}
+
+bool nano_ui_stroke_rounded_rect(
+    SDL_Renderer *renderer,
+    Uint8 r,
+    Uint8 g,
+    Uint8 b,
+    Uint8 a,
+    float x,
+    float y,
+    float w,
+    float h,
+    float radius,
+    float bw)
+{
+    if (w <= 0.f || h <= 0.f || bw <= 0.f) {
+        return true;
+    }
+
+    float rad = radius;
+    if (rad > w / 2.f) {
+        rad = w / 2.f;
+    }
+    if (rad > h / 2.f) {
+        rad = h / 2.f;
+    }
+
+    float ibw = fminf(bw, fminf(w, h) * 0.5f);
+    float ix = x + ibw;
+    float iy = y + ibw;
+    float iw = w - 2.f * ibw;
+    float ih = h - 2.f * ibw;
+    float ir = fmaxf(0.f, rad - ibw);
+    bool has_inner = iw > 0.f && ih > 0.f;
+
+    int x0 = (int)floorf(x - 1.f);
+    int x1 = (int)ceilf(x + w + 1.f);
+    int y0 = (int)floorf(y - 1.f);
+    int y1 = (int)ceilf(y + h + 1.f);
+    float skip_l = ix + 1.f;
+    float skip_r = ix + iw - 1.f;
+    float skip_t = iy + 1.f;
+    float skip_b = iy + ih - 1.f;
+    bool skip_ok = has_inner && iw > 2.f && ih > 2.f;
+
+    for (int py = y0; py < y1; py++) {
+        for (int px = x0; px < x1; px++) {
+            float sx = (float)px + 0.5f;
+            float sy = (float)py + 0.5f;
+            if (skip_ok && sx > skip_l && sx < skip_r && sy > skip_t && sy < skip_b) {
+                continue;
+            }
+            float d_out = rounded_rect_sdf(sx, sy, x, y, w, h, rad);
+            float d_in = has_inner ? rounded_rect_sdf(sx, sy, ix, iy, iw, ih, ir) : 1.f;
+            float coverage = (1.f - clampf01(d_out)) - (1.f - clampf01(d_in));
+            if (coverage <= 0.f) {
+                continue;
+            }
+            Uint8 aa = (Uint8)fminf(255.f, (float)a * coverage + 0.5f);
+            SDL_SetRenderDrawColor(renderer, r, g, b, aa);
+            SDL_FRect pixel = {(float)px, (float)py, 1.f, 1.f};
+            if (!SDL_RenderFillRect(renderer, &pixel)) {
+                return false;
+            }
+        }
+    }
+    return true;
 }
 
 bool nano_ui_ttf_create_texture(
