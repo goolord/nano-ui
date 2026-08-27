@@ -34,6 +34,7 @@ import NanoUI.Sdl.Font
   , closeFont
   , destroyTextCache
   , findFontPath
+  , findMonoFontPath
   , newTextCache
   , openFont
   , withTtf
@@ -60,8 +61,10 @@ data SdlEnv = SdlEnv
   { sdlWindow :: Ptr SDL_Window
   , sdlRenderer :: Ptr SDL_Renderer
   , sdlFontPath :: FilePath
+  , sdlMonoFontPath :: FilePath
   , sdlScaleRef :: IORef Float
   , sdlFontRef :: IORef SdlFont
+  , sdlMonoFontRef :: IORef SdlFont
   , sdlTextCache :: TextCache
   , sdlImages :: ImageAtlas
   , sdlCursors :: SdlCursors
@@ -85,6 +88,10 @@ syncDisplay ctx env inp = do
     closeFont oldFont
     newFont <- openFont (sdlFontPath env) (defaultFontSize * scale)
     writeIORef (sdlFontRef env) newFont
+    oldMono <- readIORef (sdlMonoFontRef env)
+    closeFont oldMono
+    newMono <- openFont (sdlMonoFontPath env) (defaultFontSize * scale)
+    writeIORef (sdlMonoFontRef env) newMono
     destroyTextCache (sdlTextCache env)
     markDirty ctx
   queried <- queryWindowLogicalSize (sdlWindow env) scale
@@ -94,7 +101,8 @@ syncDisplay ctx env inp = do
           s -> s
   inpSized <- syncInput env scale inp {inputWindowSize = winSize}
   font <- readIORef (sdlFontRef env)
-  let ctx' = withTtfMeasureScaled ctx font scale
+  monoFont <- readIORef (sdlMonoFontRef env)
+  let ctx' = withTtfMeasureScaled ctx font monoFont scale
   pure (ctx', inpSized)
 
 syncInput :: SdlEnv -> Float -> Input -> IO Input
@@ -117,6 +125,10 @@ withSdl ctx title (Size w h) act =
                 <> "to a .ttf path."
             )
         Just p -> pure p
+    monoPath <-
+      findMonoFontPath >>= \case
+        Nothing -> pure fontPath
+        Just p -> pure p
     let startup = do
           unlessM (initSafe (SDL_InitFlags 32)) $
             fail "SDL_Init(SDL_INIT_VIDEO) failed"
@@ -138,8 +150,10 @@ withSdl ctx title (Size w h) act =
                 ren <- peek renPtr
                 scale <- queryWindowDisplayScale win
                 font <- openFont fontPath (defaultFontSize * scale)
+                monoFont <- openFont monoPath (defaultFontSize * scale)
                 scaleRef <- newIORef scale
                 fontRef <- newIORef font
+                monoFontRef <- newIORef monoFont
                 cache <- newTextCache
                 images <- newImageAtlas
                 cursors <- initCursors
@@ -153,8 +167,10 @@ withSdl ctx title (Size w h) act =
                     { sdlWindow = win
                     , sdlRenderer = ren
                     , sdlFontPath = fontPath
+                    , sdlMonoFontPath = monoPath
                     , sdlScaleRef = scaleRef
                     , sdlFontRef = fontRef
+                    , sdlMonoFontRef = monoFontRef
                     , sdlTextCache = cache
                     , sdlImages = images
                     , sdlCursors = cursors
@@ -169,6 +185,8 @@ withSdl ctx title (Size w h) act =
           destroyTextCache (sdlTextCache env)
           font <- readIORef (sdlFontRef env)
           closeFont font
+          monoFont <- readIORef (sdlMonoFontRef env)
+          closeFont monoFont
           void $ stopTextInputSafe (sdlWindow env)
           void $ setRenderScale (sdlRenderer env) defaultUiScale
           destroyRendererSafe (sdlRenderer env)
@@ -177,7 +195,8 @@ withSdl ctx title (Size w h) act =
     bracket startup teardown $ \env -> do
       scale <- readIORef (sdlScaleRef env)
       font <- readIORef (sdlFontRef env)
-      let ctx' = withSdlClipboard (withTtfMeasureScaled ctx font scale)
+      monoFont <- readIORef (sdlMonoFontRef env)
+      let ctx' = withSdlClipboard (withTtfMeasureScaled ctx font monoFont scale)
       setWakeLoop ctx' pushRefreshEvent
       act ctx' env
 

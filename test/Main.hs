@@ -71,6 +71,8 @@ main = do
   run "text-input-dirty" runTextInputDirtyTest
   run "modal-close-damage" runModalCloseDamageTest
   run "modal-open-damage" runModalOpenDamageTest
+  run "window-close-damage" runWindowCloseDamageTest
+  run "window-drag-damage" runWindowDragDamageTest
   run "overlay-panel-live" runOverlayPanelLiveTest
   run "animation-idle" runAnimationIdleTest
   run "ascii" runAsciiTest
@@ -103,6 +105,8 @@ main = do
   run "fit-header-no-shrink" runFitHeaderNoShrinkTest
   run "window-overlay" runWindowOverlayTest
   run "window-drag" runWindowDragTest
+  run "window-scroll-wheel" runWindowScrollWheelTest
+  run "window-resize" runWindowResizeTest
 
   n <- readIORef failed
   if n == 0
@@ -1203,12 +1207,63 @@ runModalOpenDamageTest _ failed = do
   dmg <- takeDamage ctx
   when (dmg /= DamageFull) $ bump failed
 
--- Floating window and modal text must keep redrawing. Idle skip would freeze
--- overlay labels until a click or window drag.
+-- Closing a floating window must redraw the content it covered.
+runWindowCloseDamageTest :: Context -> IORef Int -> IO ()
+runWindowCloseDamageTest _ failed = do
+  ctx <- newContext
+  let ui open = void (window open "Debug" (label "Body"))
+      inp0 = emptyInput {inputWindowSize = Size 640 400}
+  _ <- runFrame ctx inp0 (ui True)
+  _ <- runFrame ctx inp0 (ui True)
+  _ <- runFrame ctx inp0 (ui False)
+  dmg <- takeDamage ctx
+  when (dmg /= DamageFull) $ bump failed
+  let idle = inp0 {inputDeltaTime = 1}
+  need <- needsRedraw ctx inp0 idle
+  when (not need) $ bump failed
+
+-- Dragging a window must not leave partial clips that skip the old footprint.
+runWindowDragDamageTest :: Context -> IORef Int -> IO ()
+runWindowDragDamageTest _ failed = do
+  ctx <- newContext
+  let inp0 = emptyInput {inputWindowSize = Size 640 400}
+      ui = do
+        (win, _) <- window True "Debug" (label "Body")
+        pure win
+  _ <- runFrame ctx inp0 ui
+  (win0, _, _, _) <- runFrame ctx inp0 ui
+  let Rect x0 y0 _ _ = respRect win0
+      grab = V2 (x0 + 24) (y0 + 10)
+      press =
+        inp0
+          { inputMousePos = grab
+          , inputMouseDown = True
+          , inputMousePressed = True
+          }
+  _ <- runFrame ctx press ui
+  let moved =
+        press
+          { inputMousePos = V2 (x0 + 24 - 50) (y0 + 10 + 30)
+          , inputMousePressed = False
+          }
+  _ <- runFrame ctx moved ui
+  dmg <- takeDamage ctx
+  when (dmg /= DamageFull) $ bump failed
+
+-- Modals with static content idle without redraw. Floating windows tick live.
 runOverlayPanelLiveTest :: Context -> IORef Int -> IO ()
 runOverlayPanelLiveTest _ failed = do
   let inp = emptyInput {inputWindowSize = Size 320 240, inputMousePos = V2 (-10) (-10)}
-      check ui = do
+      checkStatic ui = do
+        ctx <- newContext
+        _ <- runFrame ctx inp ui
+        _ <- runFrame ctx inp ui
+        need <- needsRedraw ctx inp inp
+        when need $ bump failed
+        _ <- runFrame ctx inp ui
+        dmg <- takeDamage ctx
+        when (not (damageIsEmpty dmg)) $ bump failed
+      checkWindowLive ui = do
         ctx <- newContext
         _ <- runFrame ctx inp ui
         _ <- runFrame ctx inp ui
@@ -1217,8 +1272,18 @@ runOverlayPanelLiveTest _ failed = do
         _ <- runFrame ctx inp ui
         dmg <- takeDamage ctx
         when (dmg /= DamageFull) $ bump failed
-  check (void (window True "Debug" (label "fps 0")))
-  check (void (modal True "About" (label "body")))
+      checkDirtyWake ui = do
+        ctx <- newContext
+        _ <- runFrame ctx inp ui
+        markDirty ctx
+        need <- needsRedraw ctx inp inp
+        when (not need) $ bump failed
+        _ <- runFrame ctx inp ui
+        dmg <- takeDamage ctx
+        when (dmg /= DamageFull) $ bump failed
+  checkWindowLive (void (window True "Debug" (label "fps 0")))
+  checkStatic (void (modal True "About" (label "body")))
+  checkDirtyWake (void (modal True "About" (label "body")))
 
 runAnimationIdleTest :: Context -> IORef Int -> IO ()
 runAnimationIdleTest ctx failed = do
@@ -2061,6 +2126,74 @@ runWindowDragTest ctx failed = do
   let Rect x1 y1 _ _ = respRect win1
   when (x1 >= x0 - 10) $ bump failed
   when (y1 <= y0 + 10) $ bump failed
+
+-- Wheel over an open floating window must scroll overflowing body content.
+runWindowScrollWheelTest :: Context -> IORef Int -> IO ()
+runWindowScrollWheelTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 320 220}
+      ui = do
+        (win, mSid) <-
+          window True "Scroll" $ do
+            (sid, _) <-
+              scrollArea
+                (tight . grow $ defaultLayout)
+                ( column defaultLayout $
+                    mapM_ (\i -> label (T.pack ("line " <> show (i :: Int)))) [1 .. 24]
+                )
+            pure sid
+        pure (win, mSid)
+  _ <- runFrame ctx inp0 ui
+  ((win, mSid), _, _, _) <- runFrame ctx inp0 ui
+  let Rect wx wy ww wh = respRect win
+  when (ww <= 0 || wh <= 0) $ bump failed
+  case mSid of
+    Nothing -> bump failed
+    Just sid -> do
+      off0 <- getScrollOffset ctx sid
+      let wheel =
+            inp0
+              { inputMousePos = V2 (wx + ww / 2) (wy + wh - 16)
+              , inputScroll = V2 0 1
+              }
+      _ <- runFrame ctx wheel ui
+      off1 <- getScrollOffset ctx sid
+      when (off1 <= off0) $ bump failed
+
+-- Dragging the bottom-right resize handle changes window size.
+runWindowResizeTest :: Context -> IORef Int -> IO ()
+runWindowResizeTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 640 400}
+      ui = do
+        (win, _) <- window True "Resize" (label "Body")
+        pure win
+  _ <- runFrame ctx inp0 ui
+  (win0, _, _, _) <- runFrame ctx inp0 ui
+  mrect0 <- getPrevRect ctx (respId win0)
+  case mrect0 of
+    Nothing -> bump failed
+    Just (Rect x0 y0 w0 h0) -> do
+      when (w0 <= 0 || h0 <= 0) $ bump failed
+      let grab = V2 (x0 + w0 - 4) (y0 + h0 - 4)
+          press =
+            inp0
+              { inputMousePos = grab
+              , inputMouseDown = True
+              , inputMousePressed = True
+              }
+      _ <- runFrame ctx press ui
+      let resized =
+            press
+              { inputMousePos = V2 (x0 + w0 + 40) (y0 + h0 + 30)
+              , inputMousePressed = False
+              }
+      _ <- runFrame ctx resized ui
+      (win1, _, _, _) <- runFrame ctx resized ui
+      mrect1 <- getPrevRect ctx (respId win1)
+      case mrect1 of
+        Nothing -> bump failed
+        Just (Rect _ _ w1 h1) -> do
+          when (w1 <= w0 + 20) $ bump failed
+          when (h1 <= h0 + 15) $ bump failed
 
 -- A column separator spans the parent width and stays a 1px hairline.
 runSeparatorSpanTest :: Context -> IORef Int -> IO ()

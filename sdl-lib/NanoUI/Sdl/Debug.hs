@@ -131,9 +131,15 @@ noteSkip :: SamplerRef -> IO ()
 noteSkip ref =
   atomicModifyIORef' ref $ \s -> (s {smSkips = smSkips s + 1}, ())
 
-takeDebugLive :: SamplerRef -> IO Bool
-takeDebugLive ref =
-  atomicModifyIORef' ref $ \s -> (s {smWantFrame = False}, smWantFrame s)
+takeDebugLive :: SamplerRef -> Bool -> IO Bool
+takeDebugLive _ False = pure False
+takeDebugLive ref True = do
+  now <- getMonotonicTime
+  atomicModifyIORef' ref $ \s ->
+    let elapsed = now - smLastDebugT s
+        due = smLastDebugT s <= 0 || elapsed >= debugRefreshSec
+        want = smWantFrame s || due
+     in (s {smWantFrame = False}, want)
 
 notePresent :: SamplerRef -> Double -> DrawData -> IO ()
 notePresent ref uiMs dd = do

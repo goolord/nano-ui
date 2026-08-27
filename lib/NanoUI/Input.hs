@@ -1,3 +1,5 @@
+{-# LANGUAGE StrictData #-}
+
 module NanoUI.Input
   ( Key (..)
   , Modifiers (..)
@@ -25,27 +27,27 @@ data Key
   deriving (Eq, Show, Enum, Bounded)
 
 data Modifiers = Modifiers
-  { modShift :: Bool
-  , modCtrl :: Bool
-  , modAlt :: Bool
+  { modShift :: !Bool
+  , modCtrl :: !Bool
+  , modAlt :: !Bool
   }
   deriving (Eq, Show)
 
 data Input = Input
-  { inputMousePos :: V2
-  , inputMouseDown :: Bool
-  , inputMousePressed :: Bool
-  , inputMouseReleased :: Bool
-  , inputMouseRightDown :: Bool
-  , inputMouseRightPressed :: Bool
-  , inputMouseRightReleased :: Bool
-  , inputMouseClicks :: Int
-  , inputScroll :: V2
+  { inputMousePos :: !V2
+  , inputMouseDown :: !Bool
+  , inputMousePressed :: !Bool
+  , inputMouseReleased :: !Bool
+  , inputMouseRightDown :: !Bool
+  , inputMouseRightPressed :: !Bool
+  , inputMouseRightReleased :: !Bool
+  , inputMouseClicks :: !Int
+  , inputScroll :: !V2
   , inputKeys :: [Key]
   , inputChars :: [Char]
-  , inputModifiers :: Modifiers
-  , inputWindowSize :: Size
-  , inputDeltaTime :: Float
+  , inputModifiers :: !Modifiers
+  , inputWindowSize :: !Size
+  , inputDeltaTime :: {-# UNPACK #-} !Float
   }
   deriving (Eq, Show)
 
@@ -68,12 +70,14 @@ emptyInput =
     , inputDeltaTime = 0
     }
 
+{-# INLINE inputChanged #-}
 inputChanged :: Input -> Input -> Bool
 inputChanged a b =
   inputMousePos a /= inputMousePos b
     || inputInteracted a b
 
 -- Buttons, keys, scroll, resize. Mouse motion alone does not count.
+{-# INLINE inputInteracted #-}
 inputInteracted :: Input -> Input -> Bool
 inputInteracted a b =
   inputMouseDown a /= inputMouseDown b

@@ -3,6 +3,7 @@ module NanoUI.Frame
   , needsRedraw
   , textFieldActive
   , floatingPanelActive
+  , debugPanelOpen
   , collectTextSpans
   , collectOverlayTextSpans
   , pointerCursorWanted
@@ -25,6 +26,7 @@ import NanoUI.Context
   , WidgetStore (..)
   , TextInputMenu (..)
   , TextInputDrag (..)
+  , WindowResizeDrag (..)
   , anyAnimating
   , drainMessages
   , getFocusables
@@ -74,6 +76,7 @@ import NanoUI.Font
   , checkboxLeading
   , fmLineHeight
   , layoutLineHeight
+  , hasMonoFontMarker
   , isTerminalFont
   , labelContentInset
   , lineWidth
@@ -116,7 +119,7 @@ import NanoUI.Layout.Arena
   , setNodeValue
   , setRect
   )
-import NanoUI.Layout.Solve (placeModals, placeWindows, solveLayout)
+import NanoUI.Layout.Solve (placeModals, placeWindows, positionWindowNode, solveLayout)
 import NanoUI.Monad (UI (..))
 import NanoUI.Widgets (applyTextInputMenuAction)
 import NanoUI.WidgetText
@@ -146,6 +149,7 @@ runFrame ctx inp ui = do
   oldHotRect <- getPrevRect ctx oldHot
   oldActiveRect <- getPrevRect ctx oldActive
   oldFocusRect <- getPrevRect ctx oldFocus
+  oldFloatingRects <- readIORef (ctxPrevFloatingRects ctx)
   oldSize <- readIORef (ctxLastWindowSize ctx)
   oldStore <- getStore ctx
   wasDirty <- isDirty ctx
@@ -171,10 +175,11 @@ runFrame ctx inp ui = do
   let Size w h = inputWindowSize inp
   solveLayout (ctxNodeArena ctx) (ctxFontMetrics ctx) (ctxMeasureText ctx) w h
   placeModals (ctxNodeArena ctx) (ctxFontMetrics ctx) w h
-  placeWindows (ctxNodeArena ctx) (ctxFontMetrics ctx) w h (lookupWindowPos ctx)
+  placeWindows (ctxNodeArena ctx) (ctxFontMetrics ctx) w h (lookupWindowPos ctx) (lookupWindowSize ctx)
+  movedResize <- updateWindowResize ctx inp w h
   movedWindow <- updateWindowDrag ctx inp
-  when movedWindow $
-    placeWindows (ctxNodeArena ctx) (ctxFontMetrics ctx) w h (lookupWindowPos ctx)
+  when (movedResize || movedWindow) $
+    placeWindows (ctxNodeArena ctx) (ctxFontMetrics ctx) w h (lookupWindowPos ctx) (lookupWindowSize ctx)
   persistWindowPositions ctx
   updateScrollWheel ctx inp
   updateScrollDrag ctx inp
@@ -219,6 +224,7 @@ runFrame ctx inp ui = do
     oldHotRect
     oldActiveRect
     oldFocusRect
+    oldFloatingRects
     animKeys
   msgs <- drainMessages ctx
   dirtyAfterUi <- isDirty ctx
@@ -233,9 +239,10 @@ needsRedraw ctx prev inp = do
   anim <- anyAnimating ctx
   hover <- hoverWouldChange ctx inp
   mDrag <- readIORef (ctxScrollDrag ctx)
+  mWinDrag <- readIORef (ctxWindowDrag ctx)
   overlay <- overlayMenuOpen ctx
   edit <- textFieldActive ctx
-  floating <- floatingPanelActive ctx
+  winLive <- debugPanelOpen ctx
   let overlayMove = overlay && inputMousePos prev /= inputMousePos inp
   pure
     ( dirty
@@ -244,9 +251,10 @@ needsRedraw ctx prev inp = do
         || inputPointerHeld inp
         || hover
         || isJust mDrag
+        || isJust mWinDrag
         || overlayMove
         || edit
-        || floating
+        || winLive
     )
 
 -- Select dropdown or text-input menu is open. Overlay hover is not a widget id.
@@ -308,8 +316,8 @@ textFieldActive ctx = do
               nt <- getNodeType (ctxNodeArena ctx) idx
               pure (nt == NodeTextInput)
 
--- Last frame still has the floating node. Keep the loop live so overlay
--- labels (debug window, modal body) are not stuck until a click or drag.
+-- Last frame still has a floating node (modal or window). Used by backends to
+-- decide whether overlay content might need periodic refresh (debug HUD).
 floatingPanelActive :: Context -> IO Bool
 floatingPanelActive ctx = do
   modal <- readIORef (ctxModalActive ctx)
@@ -326,6 +334,24 @@ floatingPanelActive ctx = do
                   else go (idx + 1)
       go 0
 
+-- Floating window overlay (debug HUD). Uses persisted window store because
+-- the node arena is empty between skipped idle frames.
+debugPanelOpen :: Context -> IO Bool
+debugPanelOpen ctx = do
+  store <- getStore ctx
+  if not (IM.null (storeWindow store))
+    then pure True
+    else do
+      count <- arenaCount (ctxNodeArena ctx)
+      let go idx
+            | idx >= count = pure False
+            | otherwise = do
+                nt <- getNodeType (ctxNodeArena ctx) idx
+                if nt == NodeWindow
+                  then pure True
+                  else go (idx + 1)
+      go 0
+
 hoverWouldChange :: Context -> Input -> IO Bool
 hoverWouldChange ctx inp = do
   lastHot <- readIORef (ctxLastHotId ctx)
@@ -335,9 +361,12 @@ hoverWouldChange ctx inp = do
 collectTextSpans :: Context -> IO [(Rect, T.Text, Color, Color, Rect)]
 collectTextSpans ctx = do
   count <- arenaCount (ctxNodeArena ctx)
-  if count > 0
-    then collectClippedSpans ctx 0 (Rect 0 0 1e9 1e9)
-    else pure []
+  spans <-
+    if count > 0
+      then collectClippedSpans ctx 0 (Rect 0 0 1e9 1e9)
+      else pure []
+  panels <- floatingPanelRects ctx
+  pure (filterOccludedBaseSpans panels spans)
 
 collectOverlayTextSpans :: Context -> Input -> IO [(Rect, T.Text, Color, Color, Rect)]
 collectOverlayTextSpans ctx inp = do
@@ -409,6 +438,18 @@ tagClippedSpans clip =
           Nothing -> []
           Just clipHere -> [(rect, txt, fg, bg, clipHere)]
     )
+
+filterOccludedBaseSpans :: IM.IntMap Rect -> [(Rect, T.Text, Color, Color, Rect)] -> [(Rect, T.Text, Color, Color, Rect)]
+filterOccludedBaseSpans panels spans
+  | IM.null panels = spans
+  | otherwise = filter (not . occluded) spans
+  where
+    panelRects = IM.elems panels
+    occluded (rect, _, _, _, _) =
+      let cx = rectX rect + rectW rect / 2
+          cy = rectY rect + rectH rect / 2
+          pt = V2 cx cy
+       in any (\panel -> rectContains panel pt) panelRects
 
 -- TTF measure is often a fraction narrower than the rendered texture.
 textClipSlop :: Float
@@ -536,6 +577,7 @@ displayText ctx nt idx = do
               caret = if open then " v" else " >"
           pure (selectDisplayText lbl opt <> caret)
         NodeSlider -> pure (T.takeWhile (/= '\US') txt)
+        NodeButton -> pure (buttonDisplayText txt)
         _ -> pure txt
     else
       case nt of
@@ -555,6 +597,7 @@ displayText ctx nt idx = do
                   (o : _) -> o
                   _ -> ""
           pure (selectDisplayText lbl opt)
+        NodeButton -> pure (buttonDisplayText txt)
         _ -> pure (stripButtonBrackets txt)
 
 textInputValue :: Context -> NodeIdx -> IO String
@@ -620,17 +663,21 @@ uiCursorKind ctx inp = do
       case mDrop of
         Just k -> pure k
         Nothing -> do
-          mScroll <- scrollThumbCursorKind ctx inp
-          case mScroll of
+          mResize <- windowResizeCursorKind ctx inp
+          case mResize of
             Just k -> pure k
             Nothing -> do
-              active <- readIORef (ctxActiveId ctx)
-              activeKind <- cursorKindAt table ctx active mouse inp
-              if activeKind /= UiCursorDefault
-                then pure activeKind
-                else do
-                  hot <- getHotId ctx
-                  cursorKindAt table ctx hot mouse inp
+              mScroll <- scrollThumbCursorKind ctx inp
+              case mScroll of
+                Just k -> pure k
+                Nothing -> do
+                  active <- readIORef (ctxActiveId ctx)
+                  activeKind <- cursorKindAt table ctx active mouse inp
+                  if activeKind /= UiCursorDefault
+                    then pure activeKind
+                    else do
+                      hot <- getHotId ctx
+                      cursorKindAt table ctx hot mouse inp
 
 selectDropdownCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
 selectDropdownCursorKind ctx inp = do
@@ -797,6 +844,38 @@ stripButtonBrackets txt =
         then T.strip $ T.dropEnd 2 $ T.drop 2 t
         else txt
 
+closeButtonMarker :: T.Text
+closeButtonMarker = T.singleton '\x01'
+
+isCloseButtonText :: T.Text -> Bool
+isCloseButtonText txt =
+  closeButtonMarker `T.isPrefixOf` stripButtonBrackets txt
+
+closeButtonDisplayText :: T.Text -> T.Text
+closeButtonDisplayText txt = T.drop 1 (stripButtonBrackets txt)
+
+buttonDisplayText :: T.Text -> T.Text
+buttonDisplayText txt =
+  let lbl = stripButtonBrackets txt
+   in if isCloseButtonText txt then closeButtonDisplayText txt else lbl
+
+closeButtonStyle :: Theme -> Bool -> Float -> Style
+closeButtonStyle theme isHot animT =
+  let btn = themeButton theme
+      panel = themePanel theme
+      muted = lerpColor (styleFg btn) (styleBg panel) 0.42
+      hot = styleFg btn
+      fg
+        | isHot = lerpColor muted hot (if animT > 0 then animT else 1)
+        | otherwise = lerpColor muted hot animT
+   in btn
+        { styleBg = colorRGBA 0 0 0 0
+        , styleHoverBg = colorRGBA 0 0 0 0
+        , styleActiveBg = colorRGBA 0 0 0 0
+        , styleBorderWidth = 0
+        , styleFg = fg
+        }
+
 widgetTextSpans ::
   Context -> NodeType -> NodeIdx -> Float -> Float -> Float -> Float -> IO [(Rect, T.Text, Color, Color)]
 widgetTextSpans ctx nt idx x y w h = do
@@ -813,11 +892,25 @@ widgetTextSpans ctx nt idx x y w h = do
         else do
           let (ix, _) = widgetContentInset fm
           (tw, th) <- ctxMeasureText ctx txt
-          let fill =
-                T.replicate (max 1 (round w)) (T.singleton ' ')
-              fullBg = [(Rect x y w h, fill, fg, bg)]
-              textSpan = [(Rect (x + ix) (centeredTextY fm y h th) tw th, txt, fg, bg)]
-          pure (fullBg ++ textSpan)
+          isClose <-
+            if nt == NodeButton
+              then isCloseButtonText <$> getText (ctxNodeArena ctx) idx
+              else pure False
+          if isClose
+            then
+              pure
+                [ ( Rect (x + (w - tw) / 2) (centeredTextY fm y h th) tw th
+                  , txt
+                  , fg
+                  , bg
+                  )
+                ]
+            else do
+              let fill =
+                    T.replicate (max 1 (round w)) (T.singleton ' ')
+                  fullBg = [(Rect x y w h, fill, fg, bg)]
+                  textSpan = [(Rect (x + ix) (centeredTextY fm y h th) tw th, txt, fg, bg)]
+              pure (fullBg ++ textSpan)
     else do
       case nt of
         NodeTextInput -> do
@@ -914,8 +1007,12 @@ widgetTextPlacements ctx nt idx x y w h = do
             ]
     _ -> do
       txt <- displayText ctx nt idx
+      let fm' =
+            if hasMonoFontMarker txt
+              then ctxMonoFontMetrics ctx
+              else fm
       (tw, th) <- ctxMeasureText ctx txt
-      pure [(txt, x + ix, centeredTextY fm y h th, tw, th)]
+      pure [(txt, x + ix, centeredTextY fm' y h th, tw, th)]
 
 sliderValue :: Context -> NodeIdx -> IO Float
 sliderValue ctx idx = do
@@ -932,10 +1029,17 @@ widgetVisualStyle ctx nt idx = do
   active <- readIORef (ctxActiveId ctx)
   focus <- readIORef (ctxFocusId ctx)
   animT <- getAnimationValue ctx wid
+  storedText <-
+    if nt == NodeButton
+      then getText (ctxNodeArena ctx) idx
+      else pure T.empty
+  let isClose = nt == NodeButton && isCloseButtonText storedText
   let theme = ctxTheme ctx
       fm = ctxFontMetrics ctx
       terminal = isTerminalFont fm
       isFocus = focus == wid
+      widKey = hashWidgetId wid
+      isHot = wid == hot
       base =
         case nt of
           NodeTextInput -> themeInput theme
@@ -961,16 +1065,16 @@ widgetVisualStyle ctx nt idx = do
               , styleActiveBg = colorRGBA 0 0 0 0
               , styleBorderWidth = 0
               }
+          NodeButton
+            | isClose -> closeButtonStyle theme isHot animT
           _ -> themeButton theme
-      widKey = hashWidgetId wid
-      isHot = wid == hot
       bg
         | terminal, widKey == hashWidgetId active = styleActiveBg base
         | terminal, isHot = styleHoverBg base
         | terminal = styleBg base
         | nt == NodeTextInput, isFocus = styleActiveBg base
         | widKey == hashWidgetId active = styleActiveBg base
-        | nt == NodeCheckbox || nt == NodeSlider = styleBg base
+        | nt == NodeCheckbox || nt == NodeSlider || isClose = styleBg base
         | otherwise = hoverBackground base animT isHot
   pure base {styleBg = bg}
 
@@ -1067,9 +1171,16 @@ lowerNode ctx idx = do
     _ -> do
       style <- widgetVisualStyle ctx nt idx
       value <- getNodeValue (ctxNodeArena ctx) idx
-      let opaqueBg =
-            isTerminalFont fm
-              || (nt /= NodeCheckbox && nt /= NodeSlider && nt /= NodeTextInput)
+      storedText <-
+        if nt == NodeButton
+          then getText (ctxNodeArena ctx) idx
+          else pure T.empty
+      let isClose = nt == NodeButton && isCloseButtonText storedText
+      let opaqueBg
+            | isClose = False
+            | terminal = True
+            | otherwise =
+                nt /= NodeCheckbox && nt /= NodeSlider && nt /= NodeTextInput
       when opaqueBg $ fillStyledRect da terminal style rect
       when (not terminal) $ do
         when opaqueBg $ strokeStyledRect da terminal style (styleBg style) x y w h
@@ -2533,15 +2644,21 @@ lookupWindowPos ctx wid = do
   store <- getStore ctx
   pure (IM.lookup (intKey wid) (storeWindow store))
 
+lookupWindowSize :: Context -> WidgetId -> IO (Maybe (Float, Float))
+lookupWindowSize ctx wid = do
+  store <- getStore ctx
+  pure (IM.lookup (intKey wid) (storeWindowSize store))
+
 persistWindowPositions :: Context -> IO ()
 persistWindowPositions ctx = do
   count <- arenaCount (ctxNodeArena ctx)
   store0 <- getStore ctx
-  store1 <- foldlPersist 0 count (storeWindow store0)
-  when (store1 /= storeWindow store0) $
-    setStore ctx (store0 {storeWindow = store1})
+  pos1 <- foldlPos 0 count (storeWindow store0)
+  size1 <- foldlSize 0 count (storeWindowSize store0)
+  let store1 = store0 {storeWindow = pos1, storeWindowSize = size1}
+  when (store1 /= store0) $ setStore ctx store1
   where
-    foldlPersist idx count acc
+    foldlPos idx count acc
       | idx >= count = pure acc
       | otherwise = do
           nt <- getNodeType (ctxNodeArena ctx) idx
@@ -2552,28 +2669,135 @@ persistWindowPositions ctx = do
                 wid <- getWidgetId (ctxNodeArena ctx) idx
                 (x, y, _, _) <- getRect (ctxNodeArena ctx) idx
                 pure (IM.insert (intKey wid) (x, y) acc)
-          foldlPersist (idx + 1) count acc'
+          foldlPos (idx + 1) count acc'
+    foldlSize idx count acc
+      | idx >= count = pure acc
+      | otherwise = do
+          nt <- getNodeType (ctxNodeArena ctx) idx
+          acc' <-
+            if nt /= NodeWindow
+              then pure acc
+              else do
+                wid <- getWidgetId (ctxNodeArena ctx) idx
+                (_, _, w, h) <- getRect (ctxNodeArena ctx) idx
+                pure (IM.insert (intKey wid) (w, h) acc)
+          foldlSize (idx + 1) count acc'
 
 updateWindowDrag :: Context -> Input -> IO Bool
 updateWindowDrag ctx inp = do
-  drag <- readIORef (ctxWindowDrag ctx)
+  resizing <- isJust <$> readIORef (ctxWindowResize ctx)
+  if resizing
+    then pure False
+    else do
+      drag <- readIORef (ctxWindowDrag ctx)
+      case drag of
+        Just (wid, gx, gy)
+          | inputMouseDown inp -> do
+              let V2 mx my = inputMousePos inp
+                  pos = (mx - gx, my - gy)
+              store <- getStore ctx
+              setStore ctx (store {storeWindow = IM.insert (intKey wid) pos (storeWindow store)})
+              markDirty ctx
+              pure True
+          | otherwise -> do
+              writeIORef (ctxWindowDrag ctx) Nothing
+              pure False
+        Nothing
+          | inputMousePressed inp -> do
+              started <- tryStartWindowDrag ctx (inputMousePos inp)
+              pure started
+          | otherwise -> pure False
+
+windowResizeHandle :: Float
+windowResizeHandle = 12
+
+windowResizeHitRect :: Rect -> Rect
+windowResizeHitRect (Rect x y w h) =
+  let s = windowResizeHandle
+   in Rect (x + w - s) (y + h - s) s s
+
+updateWindowResize :: Context -> Input -> Float -> Float -> IO Bool
+updateWindowResize ctx inp winW winH = do
+  drag <- readIORef (ctxWindowResize ctx)
   case drag of
-    Just (wid, gx, gy)
+    Just wrd
       | inputMouseDown inp -> do
           let V2 mx my = inputMousePos inp
-              pos = (mx - gx, my - gy)
+              nw = max (wrdMinW wrd) (min (wrdMaxW wrd) (wrdStartW wrd + mx - wrdGrabX wrd))
+              nh = max (wrdMinH wrd) (min (wrdMaxH wrd) (wrdStartH wrd + my - wrdGrabY wrd))
           store <- getStore ctx
-          setStore ctx (store {storeWindow = IM.insert (intKey wid) pos (storeWindow store)})
+          setStore ctx (store {storeWindowSize = IM.insert (intKey (wrdWidget wrd)) (nw, nh) (storeWindowSize store)})
+          relayoutWindow ctx winW winH (wrdWidget wrd) nw nh
           markDirty ctx
           pure True
       | otherwise -> do
-          writeIORef (ctxWindowDrag ctx) Nothing
+          writeIORef (ctxWindowResize ctx) Nothing
           pure False
     Nothing
-      | inputMousePressed inp -> do
-          started <- tryStartWindowDrag ctx (inputMousePos inp)
-          pure started
+      | inputMousePressed inp -> tryStartWindowResize ctx (inputMousePos inp)
       | otherwise -> pure False
+
+relayoutWindow :: Context -> Float -> Float -> WidgetId -> Float -> Float -> IO ()
+relayoutWindow ctx winW winH wid nw nh = do
+  mIdx <- findNodeByWidgetId ctx wid
+  case mIdx of
+    Nothing -> pure ()
+    Just idx -> do
+      (minW, minH, maxW, maxH) <- getMinMax (ctxNodeArena ctx) idx
+      let w = max minW (min (min maxW winW) nw)
+          h = max minH (min (min maxH winH) nh)
+      mpos <- lookupWindowPos ctx wid
+      (x, y, _, _) <- getRect (ctxNodeArena ctx) idx
+      let (x0, y0) = maybe (x, y) id mpos
+          x' = max 0 (min x0 (max 0 (winW - w)))
+          y' = max 0 (min y0 (max 0 (winH - h)))
+      positionWindowNode (ctxNodeArena ctx) (ctxFontMetrics ctx) idx x' y' w h
+
+tryStartWindowResize :: Context -> V2 -> IO Bool
+tryStartWindowResize ctx mouse = do
+  mWin <- topmostWindowAtMouse ctx mouse
+  case mWin of
+    Nothing -> pure False
+    Just idx -> do
+      (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+      let panel = Rect x y w h
+      if not (rectContains (windowResizeHitRect panel) mouse)
+        then pure False
+        else do
+          wid <- getWidgetId (ctxNodeArena ctx) idx
+          (minW, minH, maxW, maxH) <- getMinMax (ctxNodeArena ctx) idx
+          let V2 mx my = mouse
+          writeIORef (ctxWindowResize ctx) $
+            Just
+              WindowResizeDrag
+                { wrdWidget = wid
+                , wrdGrabX = mx
+                , wrdGrabY = my
+                , wrdStartW = w
+                , wrdStartH = h
+                , wrdMinW = minW
+                , wrdMinH = minH
+                , wrdMaxW = maxW
+                , wrdMaxH = maxH
+                }
+          markDirty ctx
+          pure True
+
+windowResizeCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
+windowResizeCursorKind ctx inp = do
+  mDrag <- readIORef (ctxWindowResize ctx)
+  case mDrag of
+    Just _ | inputMouseDown inp -> pure (Just UiCursorGrabbing)
+    Just _ -> pure Nothing
+    Nothing -> do
+      mWin <- topmostWindowAtMouse ctx (inputMousePos inp)
+      case mWin of
+        Nothing -> pure Nothing
+        Just idx -> do
+          (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+          let over =
+                rectContains (windowResizeHitRect (Rect x y w h)) (inputMousePos inp)
+          pure (if over then Just (grabHoverKind True inp) else Nothing)
 
 tryStartWindowDrag :: Context -> V2 -> IO Bool
 tryStartWindowDrag ctx mouse = do
@@ -3252,6 +3476,35 @@ updatePrevRects ctx = do
     when (hashWidgetId wid /= 0) $
       setPrevRect ctx wid (Rect x y w h)
 
+floatingPanelRects :: Context -> IO (IM.IntMap Rect)
+floatingPanelRects ctx = do
+  n <- arenaCount (ctxNodeArena ctx)
+  let go idx acc
+        | idx >= n = pure acc
+        | otherwise = do
+            nt <- getNodeType (ctxNodeArena ctx) idx
+            if nt == NodeWindow || nt == NodeModal
+              then do
+                wid <- getWidgetId (ctxNodeArena ctx) idx
+                (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+                if hashWidgetId wid == 0
+                  then go (idx + 1) acc
+                  else go (idx + 1) (IM.insert (intKey wid) (Rect x y w h) acc)
+              else go (idx + 1) acc
+  go 0 IM.empty
+
+floatingRectDamage :: IM.IntMap Rect -> IM.IntMap Rect -> [Rect]
+floatingRectDamage old new =
+  concat
+    [ case (IM.lookup k old, IM.lookup k new) of
+        (Nothing, Just r) -> [r]
+        (Just r, Nothing) -> [r]
+        (Just r1, Just r2)
+          | r1 /= r2 -> [r1, r2]
+        _ -> []
+    | k <- IM.keys (IM.union old new)
+    ]
+
 writeDamage ::
   Context ->
   Input ->
@@ -3264,9 +3517,10 @@ writeDamage ::
   Maybe Rect ->
   Maybe Rect ->
   Maybe Rect ->
+  IM.IntMap Rect ->
   [Int] ->
   IO ()
-writeDamage ctx inp wasDirty oldSize oldStore oldHot oldActive oldFocus oldHotR oldActiveR oldFocusR animKeys = do
+writeDamage ctx inp wasDirty oldSize oldStore oldHot oldActive oldFocus oldHotR oldActiveR oldFocusR oldFloatingRects animKeys = do
   let Size winW winH = inputWindowSize inp
       sizeChanged = oldSize /= Size winW winH
       commanded =
@@ -3279,12 +3533,16 @@ writeDamage ctx inp wasDirty oldSize oldStore oldHot oldActive oldFocus oldHotR 
           || not (null (inputKeys inp))
           || not (null (inputChars inp))
   newStore <- getStore ctx
+  newFloatingRects <- floatingPanelRects ctx
   overlay <- overlayMenuOpen ctx
   wasModal <- readIORef (ctxModalWasActive ctx)
   nowModal <- readIORef (ctxModalActive ctx)
-  floating <- floatingPanelActive ctx
   let storePaintChanged = paintStore oldStore /= paintStore newStore
       modalFlip = wasModal /= nowModal
+      floatingChanged = oldFloatingRects /= newFloatingRects
+      windowLive =
+        not (IM.null (storeWindow newStore))
+          || not (IM.null (storeWindowSize newStore))
       full =
         wasDirty
           || sizeChanged
@@ -3292,7 +3550,8 @@ writeDamage ctx inp wasDirty oldSize oldStore oldHot oldActive oldFocus oldHotR 
           || storePaintChanged
           || overlay
           || modalFlip
-          || floating
+          || floatingChanged
+          || windowLive
   dmg <-
     if full
       then pure DamageFull
@@ -3321,17 +3580,23 @@ writeDamage ctx inp wasDirty oldSize oldStore oldHot oldActive oldFocus oldHotR 
                 else do
                   newR <- getPrevRect ctx wid
                   pure (catMaybes [oldOf wid, newR])
-        let clip = rectInflate textClipSlop (unionRects rs)
+        let base = unionRects (rs ++ floatingRectDamage oldFloatingRects newFloatingRects)
+            clip =
+              if rectW base <= 0 || rectH base <= 0
+                then Rect 0 0 0 0
+                else rectInflate textClipSlop base
             winArea = winW * winH
         if winArea > 0 && rectArea clip > winArea * 0.5
           then pure DamageFull
           else pure (DamageClip clip)
   writeIORef (ctxDamage ctx) dmg
   writeIORef (ctxLastWindowSize ctx) (Size winW winH)
+  writeIORef (ctxPrevFloatingRects ctx) newFloatingRects
+  when floatingChanged $ markDirty ctx
 
 -- Window drag writes store every frame. Ignore it for damage.
 paintStore :: WidgetStore -> WidgetStore
-paintStore s = s {storeWindow = IM.empty}
+paintStore s = s {storeWindow = IM.empty, storeWindowSize = IM.empty}
 
 unionRects :: [Rect] -> Rect
 unionRects [] = Rect 0 0 0 0

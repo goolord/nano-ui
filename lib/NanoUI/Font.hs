@@ -1,3 +1,5 @@
+{-# LANGUAGE StrictData #-}
+
 module NanoUI.Font
   ( GlyphQuad (..)
   , FontMetrics (..)
@@ -17,6 +19,9 @@ module NanoUI.Font
   , checkboxBoxSize
   , checkboxLeading
   , isTerminalFont
+  , monoFontMarker
+  , hasMonoFontMarker
+  , stripMonoFontMarker
   , scrollBarWidth
   , scrollBarMargin
   , scrollBarGeom
@@ -29,20 +34,20 @@ import Data.Text (Text)
 import qualified Data.Text as T
 
 data GlyphQuad = GlyphQuad
-  { gqX :: Float
-  , gqY :: Float
-  , gqW :: Float
-  , gqH :: Float
-  , gqU0 :: Float
-  , gqV0 :: Float
-  , gqU1 :: Float
-  , gqV1 :: Float
+  { gqX :: {-# UNPACK #-} !Float
+  , gqY :: {-# UNPACK #-} !Float
+  , gqW :: {-# UNPACK #-} !Float
+  , gqH :: {-# UNPACK #-} !Float
+  , gqU0 :: {-# UNPACK #-} !Float
+  , gqV0 :: {-# UNPACK #-} !Float
+  , gqU1 :: {-# UNPACK #-} !Float
+  , gqV1 :: {-# UNPACK #-} !Float
   }
   deriving (Eq, Show)
 
 data FontMetrics = FontMetrics
-  { fmLineHeight :: Float
-  , fmAscent :: Float
+  { fmLineHeight :: {-# UNPACK #-} !Float
+  , fmAscent :: {-# UNPACK #-} !Float
   , fmAdvance :: Char -> Float
   , fmGlyph :: Char -> Maybe GlyphQuad
   }
@@ -56,6 +61,24 @@ monospaceMetrics cell =
     , fmAdvance = \_ -> cell
     , fmGlyph = \_ -> Nothing
     }
+
+{-# INLINE isTerminalFont #-}
+isTerminalFont :: FontMetrics -> Bool
+isTerminalFont fm = fmLineHeight fm == 1 && fmAdvance fm ' ' == 1
+
+monoFontMarker :: Text
+monoFontMarker = T.singleton '\x02'
+
+{-# INLINE hasMonoFontMarker #-}
+hasMonoFontMarker :: Text -> Bool
+hasMonoFontMarker txt = T.take 1 txt == monoFontMarker
+
+{-# INLINE stripMonoFontMarker #-}
+stripMonoFontMarker :: Text -> Text
+stripMonoFontMarker txt =
+  if hasMonoFontMarker txt
+    then T.drop 1 txt
+    else txt
 
 {-# INLINE labelContentInset #-}
 labelContentInset :: FontMetrics -> (Float, Float)
@@ -109,10 +132,6 @@ checkboxLeading :: FontMetrics -> Float
 checkboxLeading fm
   | isTerminalFont fm = 0
   | otherwise = checkboxBoxSize fm + 8
-
-{-# INLINE isTerminalFont #-}
-isTerminalFont :: FontMetrics -> Bool
-isTerminalFont fm = fmLineHeight fm == 1 && fmAdvance fm ' ' == 1
 
 scrollBarWidth :: Float
 scrollBarWidth = 8

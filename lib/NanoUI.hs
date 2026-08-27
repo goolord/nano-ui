@@ -94,6 +94,7 @@ module NanoUI
   , needsRedraw
   , textFieldActive
   , floatingPanelActive
+  , debugPanelOpen
   , collectTextSpans
   , collectOverlayTextSpans
   , pointerCursorWanted
@@ -107,6 +108,7 @@ module NanoUI
   , ctxFontMetrics
   , newContext
   , withFontMetrics
+  , withMonoFontMetrics
   , withMeasureText
   , withExternalText
   , newTerminalContext
@@ -121,6 +123,7 @@ module NanoUI
   , modalActive
   , overlayConsumesQuit
   , getPrevRect
+  , getStore
   , getScrollOffset
   , startAnimation
   , setAnimationValue
@@ -140,15 +143,18 @@ module NanoUI
   , widgetContentInset
   , widgetPadding
   , isTerminalFont
+  , monoFontMarker
+  , hasMonoFontMarker
+  , stripMonoFontMarker
   , -- ASCII
     renderASCII
   , renderASCIIFromRects
   ) where
 
-import NanoUI.Context (Context (..), FrameMsg (..), anyAnimating, atlasSnapshot, atlasTextureId, ctxTheme, getAnimationValue, getFocusId, getHotId, getPrevRect, getScrollOffset, isDirty, markDirty, modalActive, newContext, newSdlContext, newTerminalContext, overlayConsumesQuit, registerImage, registerImages, setAnimationValue, setWakeLoop, startAnimation, takeDamage, textInputEditActive, withClipboard, withExternalText, withFontMetrics, withMeasureText)
+import NanoUI.Context (Context (..), FrameMsg (..), anyAnimating, atlasSnapshot, atlasTextureId, ctxTheme, getAnimationValue, getFocusId, getHotId, getPrevRect, getScrollOffset, getStore, isDirty, markDirty, modalActive, newContext, newSdlContext, newTerminalContext, overlayConsumesQuit, registerImage, registerImages, setAnimationValue, setWakeLoop, startAnimation, takeDamage, textInputEditActive, withClipboard, withExternalText, withFontMetrics, withMeasureText, withMonoFontMetrics)
 import NanoUI.Draw (DrawCmd (..), DrawData (..), Layer (..), indexSize, vertexSize)
-import NanoUI.Font (FontMetrics (..), isTerminalFont, labelContentInset, monospaceMetrics, widgetContentInset, widgetPadding)
-import NanoUI.Frame (collectOverlayTextSpans, collectTextSpans, cursorKindIs, floatingPanelActive, needsRedraw, pointerCursorWanted, runFrame, sliderTrackRect, textFieldActive, uiCursorKind, UiCursorKind (..))
+import NanoUI.Font (FontMetrics (..), hasMonoFontMarker, isTerminalFont, labelContentInset, monoFontMarker, monospaceMetrics, stripMonoFontMarker, widgetContentInset, widgetPadding)
+import NanoUI.Frame (collectOverlayTextSpans, collectTextSpans, cursorKindIs, debugPanelOpen, floatingPanelActive, needsRedraw, pointerCursorWanted, runFrame, sliderTrackRect, textFieldActive, uiCursorKind, UiCursorKind (..))
 import NanoUI.Id (WidgetId (..), hashWidgetId, widgetId)
 import NanoUI.Input
   ( Input (..)

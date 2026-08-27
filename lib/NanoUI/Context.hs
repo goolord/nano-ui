@@ -1,3 +1,5 @@
+{-# LANGUAGE StrictData #-}
+
 module NanoUI.Context
   ( Context (..)
   , FrameMsg (..)
@@ -5,6 +7,7 @@ module NanoUI.Context
   , WidgetStore (..)
   , newContext
   , withFontMetrics
+  , withMonoFontMetrics
   , withMeasureText
   , withExternalText
   , withTheme
@@ -41,6 +44,7 @@ module NanoUI.Context
   , PendingTooltip (..)
   , TextInputMenu (..)
   , TextInputDrag (..)
+  , WindowResizeDrag (..)
   , withClipboard
   , textInputEditActive
   , modalActive
@@ -68,7 +72,7 @@ import qualified NanoUI.Atlas as Atlas
 import NanoUI.Atlas (ImageAtlas, atlasTextureId)
 import NanoUI.Draw (DrawArena, newDrawArena)
 import NanoUI.Types (Color (..), Damage (..), ImageId (..), Rect (..), Size (..))
-import NanoUI.Font (FontMetrics, measureText, monospaceMetrics)
+import NanoUI.Font (FontMetrics, hasMonoFontMarker, measureText, monospaceMetrics, stripMonoFontMarker)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), Key (KeyEscape))
 import NanoUI.Layout.Arena (NodeArena, NodeType, newNodeArena)
@@ -78,10 +82,10 @@ data FrameMsg where
   FrameMsg :: a -> FrameMsg
 
 data Animation = Animation
-  { animStart :: Float
-  , animEnd :: Float
-  , animDuration :: Float
-  , animElapsed :: Float
+  { animStart :: {-# UNPACK #-} !Float
+  , animEnd :: {-# UNPACK #-} !Float
+  , animDuration :: {-# UNPACK #-} !Float
+  , animElapsed :: {-# UNPACK #-} !Float
   }
   deriving (Eq, Show)
 
@@ -98,6 +102,7 @@ data WidgetStore = WidgetStore
   , storeFlag :: IntMap Bool
   , storeNote :: IntMap String
   , storeWindow :: IntMap (Float, Float)
+  , storeWindowSize :: IntMap (Float, Float)
   }
   deriving (Eq, Show)
 
@@ -116,6 +121,7 @@ emptyWidgetStore =
     , storeFlag = IM.empty
     , storeNote = IM.empty
     , storeWindow = IM.empty
+    , storeWindowSize = IM.empty
     }
 
 data PendingTooltip = PendingTooltip
@@ -138,6 +144,19 @@ data TextInputDrag = TextInputDrag
   }
   deriving (Eq, Show)
 
+data WindowResizeDrag = WindowResizeDrag
+  { wrdWidget :: WidgetId
+  , wrdGrabX :: Float
+  , wrdGrabY :: Float
+  , wrdStartW :: Float
+  , wrdStartH :: Float
+  , wrdMinW :: Float
+  , wrdMinH :: Float
+  , wrdMaxW :: Float
+  , wrdMaxH :: Float
+  }
+  deriving (Eq, Show)
+
 data Context = Context
   { ctxNodeArena :: NodeArena
   , ctxDrawArena :: DrawArena
@@ -154,6 +173,7 @@ data Context = Context
   , ctxLastWindowSize :: IORef Size
   , ctxIdSalt :: IORef Word64
   , ctxFontMetrics :: FontMetrics
+  , ctxMonoFontMetrics :: FontMetrics
   , ctxMeasureText :: Text -> IO (Float, Float)
   , ctxExternalText :: Bool
   , ctxTheme :: Theme
@@ -173,6 +193,8 @@ data Context = Context
   , ctxModalDepth :: IORef Int
   , ctxEscapeConsumed :: IORef Bool
   , ctxWindowDrag :: IORef (Maybe (WidgetId, Float, Float))
+  , ctxWindowResize :: IORef (Maybe WindowResizeDrag)
+  , ctxPrevFloatingRects :: IORef (IntMap Rect)
   , ctxImageAtlas :: ImageAtlas
   , ctxWakeLoop :: IORef (Maybe (IO ()))
   }
@@ -208,6 +230,8 @@ newContext = do
   ctxModalDepth <- newIORef 0
   ctxEscapeConsumed <- newIORef False
   ctxWindowDrag <- newIORef Nothing
+  ctxWindowResize <- newIORef Nothing
+  ctxPrevFloatingRects <- newIORef IM.empty
   ctxImageAtlas <- Atlas.newImageAtlas
   ctxWakeLoop <- newIORef Nothing
   let fm0 = monospaceMetrics 12
@@ -228,7 +252,8 @@ newContext = do
       , ctxLastWindowSize
       , ctxIdSalt
       , ctxFontMetrics = fm0
-      , ctxMeasureText = \txt -> pure (measureText fm0 txt)
+      , ctxMonoFontMetrics = fm0
+      , ctxMeasureText = \txt -> pure (measureText fm0 (stripMonoFontMarker txt))
       , ctxExternalText = False
       , ctxTheme = defaultTheme
       , ctxContainerStack
@@ -247,17 +272,31 @@ newContext = do
       , ctxModalDepth
   , ctxEscapeConsumed
   , ctxWindowDrag
+  , ctxWindowResize
+  , ctxPrevFloatingRects
   , ctxImageAtlas
   , ctxWakeLoop
       }
+
+fontMetricsForText :: Context -> Text -> FontMetrics
+fontMetricsForText ctx txt =
+  if hasMonoFontMarker txt
+    then ctxMonoFontMetrics ctx
+    else ctxFontMetrics ctx
 
 {-# INLINE withFontMetrics #-}
 withFontMetrics :: Context -> FontMetrics -> Context
 withFontMetrics ctx fm =
   ctx
     { ctxFontMetrics = fm
-    , ctxMeasureText = \txt -> pure (measureText fm txt)
+    , ctxMeasureText =
+        \txt ->
+          pure (measureText (fontMetricsForText ctx {ctxFontMetrics = fm} txt) (stripMonoFontMarker txt))
     }
+
+{-# INLINE withMonoFontMetrics #-}
+withMonoFontMetrics :: Context -> FontMetrics -> Context
+withMonoFontMetrics ctx monoFm = ctx {ctxMonoFontMetrics = monoFm}
 
 {-# INLINE withMeasureText #-}
 withMeasureText :: Context -> (Text -> IO (Float, Float)) -> Context

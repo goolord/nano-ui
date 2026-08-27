@@ -238,31 +238,39 @@ resetNodeArena na = writeIORef (naCount na) 0
 arenaCount :: NodeArena -> IO Int
 arenaCount na = readIORef (naCount na)
 
+{-# INLINE writeInt #-}
 writeInt :: IORef (MutablePrimArray RealWorld Int) -> Int -> Int -> IO ()
 writeInt mv i v = readIORef mv >>= \arr -> writePrimArray arr i v
 
+{-# INLINE readInt #-}
 readInt :: IORef (MutablePrimArray RealWorld Int) -> Int -> IO Int
 readInt mv i = readIORef mv >>= \arr -> readPrimArray arr i
 
+{-# INLINE writeWord8 #-}
 writeWord8 :: IORef (MutablePrimArray RealWorld Word8) -> Int -> Word8 -> IO ()
 writeWord8 mv i v = readIORef mv >>= \arr -> writePrimArray arr i v
 
+{-# INLINE readWord8 #-}
 readWord8 :: IORef (MutablePrimArray RealWorld Word8) -> Int -> IO Word8
 readWord8 mv i = readIORef mv >>= \arr -> readPrimArray arr i
 
+{-# INLINE writeFloat #-}
 writeFloat :: IORef (MutablePrimArray RealWorld Float) -> Int -> Float -> IO ()
 writeFloat mv i v = readIORef mv >>= \arr -> writePrimArray arr i v
 
+{-# INLINE readFloat #-}
 readFloat :: IORef (MutablePrimArray RealWorld Float) -> Int -> IO Float
 readFloat mv i = readIORef mv >>= \arr -> readPrimArray arr i
 
+{-# INLINE writeWord64 #-}
 writeWord64 :: IORef (MutablePrimArray RealWorld Word64) -> Int -> Word64 -> IO ()
 writeWord64 mv i v = readIORef mv >>= \arr -> writePrimArray arr i v
 
+{-# INLINE readWord64 #-}
 readWord64 :: IORef (MutablePrimArray RealWorld Word64) -> Int -> IO Word64
 readWord64 mv i = readIORef mv >>= \arr -> readPrimArray arr i
 
-{-# INLINE ensureCapacity #-}
+{-# NOINLINE ensureCapacity #-}
 ensureCapacity :: NodeArena -> Int -> IO ()
 ensureCapacity na needed = do
   cap <- readIORef (naCapacity na)
@@ -305,6 +313,7 @@ ensureCapacity na needed = do
         growTextStore (naTextStore na) cap newCap
         writeIORef (naCapacity na) newCap
 
+{-# NOINLINE growInt #-}
 growInt :: IORef (MutablePrimArray RealWorld Int) -> Int -> Int -> Int -> IO ()
 growInt mv oldCap newCap fill = do
   arr <- readIORef mv
@@ -315,6 +324,7 @@ growInt mv oldCap newCap fill = do
     writePrimArray newArr i fill
   writeIORef mv newArr
 
+{-# NOINLINE growWord8 #-}
 growWord8 :: IORef (MutablePrimArray RealWorld Word8) -> Int -> Int -> Word8 -> IO ()
 growWord8 mv oldCap newCap fill = do
   arr <- readIORef mv
@@ -325,6 +335,7 @@ growWord8 mv oldCap newCap fill = do
     writePrimArray newArr i fill
   writeIORef mv newArr
 
+{-# NOINLINE growFloat #-}
 growFloat :: IORef (MutablePrimArray RealWorld Float) -> Int -> Int -> Float -> IO ()
 growFloat mv oldCap newCap fill = do
   arr <- readIORef mv
@@ -335,6 +346,7 @@ growFloat mv oldCap newCap fill = do
     writePrimArray newArr i fill
   writeIORef mv newArr
 
+{-# NOINLINE growWord64 #-}
 growWord64 :: IORef (MutablePrimArray RealWorld Word64) -> Int -> Int -> Word64 -> IO ()
 growWord64 mv oldCap newCap fill = do
   arr <- readIORef mv
@@ -345,6 +357,7 @@ growWord64 mv oldCap newCap fill = do
     writePrimArray newArr i fill
   writeIORef mv newArr
 
+{-# NOINLINE growTextStore #-}
 growTextStore :: IORef (MutableArray RealWorld Text) -> Int -> Int -> IO ()
 growTextStore mv oldCap newCap = do
   arr <- readIORef mv
@@ -546,10 +559,14 @@ getAlignY na idx = do
 {-# INLINE getRect #-}
 getRect :: NodeArena -> NodeIdx -> IO (Float, Float, Float, Float)
 getRect na idx = do
-  x <- readFloat (naX na) idx
-  y <- readFloat (naY na) idx
-  w <- readFloat (naW na) idx
-  h <- readFloat (naH na) idx
+  xArr <- readIORef (naX na)
+  yArr <- readIORef (naY na)
+  wArr <- readIORef (naW na)
+  hArr <- readIORef (naH na)
+  x <- readPrimArray xArr idx
+  y <- readPrimArray yArr idx
+  w <- readPrimArray wArr idx
+  h <- readPrimArray hArr idx
   pure (x, y, w, h)
 
 {-# INLINE setRect #-}

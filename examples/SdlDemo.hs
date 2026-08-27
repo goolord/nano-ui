@@ -96,39 +96,71 @@ main = do
             clickButton "Close" (setAbout False)
       onClick aboutResp (setAbout False)
 
+debugLabelW, debugValueW, debugPanelW :: Float
+debugLabelW = 92
+debugValueW = 260
+debugPanelW = debugLabelW + 12 + debugValueW
+
+fixedW :: Float -> Layout -> Layout
+fixedW w l = l {layoutWidth = Fixed w, layoutMinW = w, layoutMaxW = w}
+
+debugPanelLayout, debugRowLayout, debugLabelLayout, debugValueLayout :: Layout
+debugPanelLayout = tight . fixedW debugPanelW . gap 2 $ defaultLayout
+debugRowLayout = tight . gap 12 . alignMid . fillW $ defaultLayout
+debugLabelLayout = tight . fixedW debugLabelW $ defaultLayout
+debugValueLayout = tight . fixedW debugValueW $ defaultLayout
+
 debugBody :: SdlDebugSnapshot -> UI ()
 debugBody s =
-  mapM_ (\(i, line) -> withKey i (label_ (T.pack line))) (zip [0 :: Int ..] (debugLines s))
+  column debugPanelLayout $
+    mapM_ (\(i, entry) -> withKey i (debugRow entry)) (zip [0 :: Int ..] (debugRows s))
 
-debugLines :: SdlDebugSnapshot -> [String]
-debugLines s =
-  [ printf "present  %.1f fps   loop %.1f fps" (dbgPresentFps s) (dbgLoopFps s)
-  , printf "frame    %.2f ms    ui %.2f ms" (dbgFrameMs s) (dbgUiMs s)
-  , printf "draws    %d   skips %d" (dbgPresents s) (dbgSkips s)
-  , printf "mesh     %d verts  %d idx  %d cmds" (dbgVerts s) (dbgIndices s) (dbgCmds s)
-  , printf
-      "window   %.0fx%.0f  scale %.2f"
-      (dbgWinW s)
-      (dbgWinH s)
-      (dbgScale s)
-  , printf "mouse    %.0f, %.0f" (dbgMouseX s) (dbgMouseY s)
-  , "renderer " <> dbgRenderer s <> "  vsync on"
-  , "font     " <> dbgFontPath s
-  , printf "haskell  %d cap / %d cpu" (dbgCaps s) (dbgCpus s)
+debugRow :: (String, String) -> UI ()
+debugRow (lbl, val) =
+  void $
+    row debugRowLayout $ do
+      void (labelEx debugLabelLayout (monoFontMarker <> T.pack lbl))
+      void (labelEx debugValueLayout (monoFontMarker <> T.pack val))
+
+clipField :: Int -> String -> String
+clipField n s =
+  if length s > n
+    then take (max 0 (n - 3)) s ++ "..."
+    else s
+
+debugRows :: SdlDebugSnapshot -> [(String, String)]
+debugRows s =
+  [ ("present", printf "%7.1f fps" (dbgPresentFps s))
+  , ("loop", printf "%7.1f fps" (dbgLoopFps s))
+  , ("frame", printf "%8.2f ms" (dbgFrameMs s))
+  , ("ui", printf "%8.2f ms" (dbgUiMs s))
+  , ("draws", printf "%8d" (dbgPresents s))
+  , ("skips", printf "%8d" (dbgSkips s))
+  , ("verts", printf "%8d" (dbgVerts s))
+  , ("indices", printf "%8d" (dbgIndices s))
+  , ("cmds", printf "%8d" (dbgCmds s))
+  , ("window", printf "%4.0fx%-4.0f" (dbgWinW s) (dbgWinH s))
+  , ("scale", printf "%6.2f" (dbgScale s))
+  , ("mouse", printf "%7.0f, %-7.0f" (dbgMouseX s) (dbgMouseY s))
+  , ("renderer", clipField 36 (dbgRenderer s <> "  vsync on"))
+  , ("font", clipField 36 (dbgFontPath s))
+  , ("haskell", printf "%2d cap / %2d cpu" (dbgCaps s) (dbgCpus s))
   ]
-    ++ rtsLines s
+    ++ rtsRows s
 
-rtsLines :: SdlDebugSnapshot -> [String]
-rtsLines s
-  | not (dbgRtsOn s) = ["rts      stats off (need +RTS -T)"]
+rtsRows :: SdlDebugSnapshot -> [(String, String)]
+rtsRows s
+  | not (dbgRtsOn s) = [("rts", "stats off (need +RTS -T)")]
   | otherwise =
-      [ printf "gc       %d total  %d major  last gen %d (%.2f ms)" (dbgGcs s) (dbgMajorGcs s) (dbgLastGcGen s) (dbgLastGcMs s)
-      , printf
-          "heap     live %.1f MiB  alloc %.1f MiB  copied %.1f MiB"
-          (dbgLiveMb s)
-          (dbgAllocMb s)
-          (dbgCopiedMb s)
-      , printf "rss max  %.1f MiB   gc time %.1f%%" (dbgMaxMemMb s) (dbgGcPct s)
+      [ ("gc total", printf "%8d" (dbgGcs s))
+      , ("gc major", printf "%8d" (dbgMajorGcs s))
+      , ("last gen", printf "%8d" (dbgLastGcGen s))
+      , ("last gc", printf "%8.2f ms" (dbgLastGcMs s))
+      , ("heap live", printf "%8.1f MiB" (dbgLiveMb s))
+      , ("heap alloc", printf "%8.1f MiB" (dbgAllocMb s))
+      , ("copied", printf "%8.1f MiB" (dbgCopiedMb s))
+      , ("rss max", printf "%8.1f MiB" (dbgMaxMemMb s))
+      , ("gc time", printf "%7.1f%%" (dbgGcPct s))
       ]
 
 copy :: T.Text -> UI ()
