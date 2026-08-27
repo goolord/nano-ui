@@ -88,6 +88,8 @@ library
         base ^>=4.22.0.0,
         bytestring ^>=0.12,
         containers ^>=0.8,
+        effectful ^>=2.6,
+        effectful-core ^>=2.6,
         hashable ^>=1.5,
         primitive ^>=0.9,
         text ^>=2.1
@@ -251,6 +253,7 @@ test-suite nano-ui-test
     build-depends:
         base ^>=4.22.0.0,
         bytestring,
+        effectful ^>=2.6,
         nano-ui,
         nano-ui:nano-ui-term,
         text ^>=2.1

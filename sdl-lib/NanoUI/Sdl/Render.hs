@@ -92,9 +92,9 @@ renderDrawData :: Ptr SDL_Renderer -> Float -> Color -> DrawData -> ImageAtlas -
 renderDrawData _ _ _ _ _ =
   error "renderDrawData requires an active RenderBatch; use renderDrawDataPass"
 
-renderDrawDataPass :: RenderBatch -> Ptr SDL_Renderer -> Float -> Maybe Color -> DrawData -> Bool -> ImageAtlas -> Damage -> IO ()
-renderDrawDataPass batch ren uiScale mClear drawData overlayPass images damage = do
-  when (not (damageIsEmpty damage)) $ do
+renderDrawDataPass :: RenderBatch -> Ptr SDL_Renderer -> Float -> Maybe Color -> DrawData -> [Layer] -> ImageAtlas -> Damage -> IO ()
+renderDrawDataPass batch ren uiScale mClear drawData layers images damage = do
+  when (not (damageIsEmpty damage) && not (null layers)) $ do
     clipRef <- newIORef ClipNone
     clearLogicalClipRect ren
     case (mClear, damage) of
@@ -112,8 +112,8 @@ renderDrawDataPass batch ren uiScale mClear drawData overlayPass images damage =
         applyClipState batch clipRef ren uiScale (ClipRect r)
       (Nothing, DamageClip r) -> applyClipState batch clipRef ren uiScale (ClipRect r)
       (Nothing, DamageFull) -> pure ()
-    let selected = [c | c <- drawCommands drawData, (cmdLayer c == LayerOverlay) == overlayPass]
-        cmds = if overlayPass then selected else sortBy (comparing layerOrder) selected
+    let selected = [c | c <- drawCommands drawData, cmdLayer c `elem` layers]
+        cmds = sortBy (comparing layerOrder) selected
         clip = case damage of
           DamageFull -> Nothing
           DamageClip r -> Just r
@@ -130,6 +130,7 @@ layerOrder cmd =
     LayerBackground -> 0
     LayerContent -> 1
     LayerOverlay -> 2
+    LayerChrome -> 3
 
 drawCmds ::
   RenderBatch ->

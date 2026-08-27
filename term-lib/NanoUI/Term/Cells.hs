@@ -17,7 +17,6 @@ module NanoUI.Term.Cells
 import Control.Monad (when)
 import Control.Monad.Primitive (PrimState)
 import Data.Char (chr, ord)
-import Data.List (partition)
 import Data.Primitive.PrimArray
   ( MutablePrimArray
   , PrimArray
@@ -97,12 +96,14 @@ rasterizeLayered width height drawData baseSpans overlaySpans = do
   arr <- newPrimArray len
   setPrimArray arr 0 len 0
   fillBlanks arr len
-  let (overlayCmds, baseCmds) =
-        partition ((== LayerOverlay) . cmdLayer) (drawCommands drawData)
-  mapM_ (applyCmd arr w h drawData) baseCmds
+  let cmds = drawCommands drawData
+      ofLayer ly = filter ((== ly) . cmdLayer) cmds
+  mapM_ (applyCmd arr w h drawData) (ofLayer LayerBackground)
   mapM_ (stampSpan arr w h) baseSpans
-  mapM_ (applyCmd arr w h drawData) overlayCmds
+  mapM_ (applyCmd arr w h drawData) (ofLayer LayerContent)
+  mapM_ (applyCmd arr w h drawData) (ofLayer LayerOverlay)
   mapM_ (stampSpan arr w h) overlaySpans
+  mapM_ (applyCmd arr w h drawData) (ofLayer LayerChrome)
   frozen <- unsafeFreezePrimArray arr
   pure Cells {cellsW = w, cellsH = h, cellsData = frozen}
   where

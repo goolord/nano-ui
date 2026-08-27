@@ -22,16 +22,28 @@ module NanoUI.Font
   , monoFontMarker
   , hasMonoFontMarker
   , stripMonoFontMarker
+  , headingFontMarker
+  , hasHeadingMarker
+  , mutedFontMarker
+  , hasMutedMarker
+  , stripWidgetMarkers
   , scrollBarWidth
   , scrollBarMargin
   , scrollBarGeom
   , scrollBarGutter
-  , scrollOverflowGutter
+  , ScrollBarSlot (..)
+  , classifyScrollBar
+  , scrollLayoutGutter
+  , scrollBarOuterGap
+  , scrollBarPageExtra
+  , scrollBarListExtra
+  , scrollBarWindowHang
   ) where
 
 
 import Data.Text (Text)
 import qualified Data.Text as T
+import NanoUI.Style (padR, windowPad)
 
 data GlyphQuad = GlyphQuad
   { gqX :: {-# UNPACK #-} !Float
@@ -77,6 +89,27 @@ hasMonoFontMarker txt = T.take 1 txt == monoFontMarker
 stripMonoFontMarker :: Text -> Text
 stripMonoFontMarker txt =
   if hasMonoFontMarker txt
+    then T.drop 1 txt
+    else txt
+
+headingFontMarker :: Text
+headingFontMarker = T.singleton '\x03'
+
+{-# INLINE hasHeadingMarker #-}
+hasHeadingMarker :: Text -> Bool
+hasHeadingMarker txt = T.take 1 txt == headingFontMarker
+
+mutedFontMarker :: Text
+mutedFontMarker = T.singleton '\x04'
+
+{-# INLINE hasMutedMarker #-}
+hasMutedMarker :: Text -> Bool
+hasMutedMarker txt = T.take 1 txt == mutedFontMarker
+
+{-# INLINE stripWidgetMarkers #-}
+stripWidgetMarkers :: Text -> Text
+stripWidgetMarkers txt =
+  if hasMonoFontMarker txt || hasHeadingMarker txt || hasMutedMarker txt
     then T.drop 1 txt
     else txt
 
@@ -148,16 +181,61 @@ scrollBarGeom fm =
     then (1, 0)
     else (scrollBarWidth, scrollBarMargin)
 
--- Cross-end space reserved so the bar sits beside children, not over them.
+-- Bar plus end margin. List/page overflow reserves this on the cross axis.
 scrollBarGutter :: FontMetrics -> Float
 scrollBarGutter fm =
   let (barW, barMargin) = scrollBarGeom fm
    in barW + barMargin
 
-scrollOverflowGutter :: FontMetrics -> Float -> Float -> Float
-scrollOverflowGutter fm contentSize innerMain
-  | contentSize > innerMain = scrollBarGutter fm
-  | otherwise = 0
+data ScrollBarSlot = ScrollBarPage | ScrollBarList | ScrollBarWindow
+  deriving (Eq, Show)
+
+classifyScrollBar :: Bool -> Bool -> ScrollBarSlot
+classifyScrollBar isWindowBody isPageGrow
+  | isWindowBody = ScrollBarWindow
+  | isPageGrow = ScrollBarPage
+  | otherwise = ScrollBarList
+
+-- Extra inset from the page scroll's right edge. Reserved in layout.
+scrollBarPageExtra :: Float
+scrollBarPageExtra = 4
+
+-- Extra inset from a list well's right edge. Reserved in layout.
+scrollBarListExtra :: Float
+scrollBarListExtra = 3
+
+-- Tiny gap on both sides of a hanging window bar (content and frame).
+scrollBarWindowSide :: Float
+scrollBarWindowSide = 4
+
+scrollLayoutGutter :: FontMetrics -> ScrollBarSlot -> Float -> Float -> Float
+scrollLayoutGutter fm slot contentSize innerMain
+  | contentSize <= innerMain = 0
+  | otherwise =
+      case slot of
+        ScrollBarWindow -> 0
+        ScrollBarList -> scrollBarGutter fm + scrollBarListExtra
+        ScrollBarPage -> scrollBarGutter fm + scrollBarPageExtra
+
+scrollBarOuterGap :: FontMetrics -> ScrollBarSlot -> Float
+scrollBarOuterGap fm slot =
+  if isTerminalFont fm
+    then 0
+    else
+      case slot of
+        ScrollBarList -> scrollBarListExtra
+        ScrollBarPage -> scrollBarPageExtra
+        ScrollBarWindow -> scrollBarWindowSide
+
+-- How far a window body bar hangs past the content edge (left of the bar).
+scrollBarWindowHang :: FontMetrics -> Float
+scrollBarWindowHang fm =
+  if isTerminalFont fm
+    then 0
+    else
+      let (barW, _) = scrollBarGeom fm
+          side = scrollBarWindowSide
+       in min side (max 0 (padR windowPad - side - barW))
 
 measureText :: FontMetrics -> Text -> (Float, Float)
 measureText fm txt =

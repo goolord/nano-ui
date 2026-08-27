@@ -15,6 +15,7 @@ module NanoUI.Style
   , terminalTheme
   , sdlTheme
   , panelPaintPad
+  , windowPad
   , padAll
   , padXY
   , gap
@@ -22,6 +23,7 @@ module NanoUI.Style
   , fillH
   , grow
   , minW
+  , fixedW
   , fixedH
   , fixedWH
   , alignMid
@@ -59,6 +61,10 @@ data Padding = Padding
 -- Containers fill with themePanel when any pad side is at least this.
 panelPaintPad :: Float
 panelPaintPad = 12
+
+-- Floating window chrome. PadR holds the hanging body scrollbar.
+windowPad :: Padding
+windowPad = Padding 16 16 10 14
 
 data Layout = Layout
   { layoutDirection :: !Direction
@@ -121,6 +127,10 @@ grow = fillW . fillH
 minW :: Float -> Layout -> Layout
 minW n l = l {layoutMinW = n}
 
+{-# INLINE fixedW #-}
+fixedW :: Float -> Layout -> Layout
+fixedW n l = l {layoutWidth = Fixed n, layoutMinW = n, layoutMaxW = n}
+
 {-# INLINE fixedH #-}
 fixedH :: Float -> Layout -> Layout
 fixedH n l = l {layoutHeight = Fixed n}
@@ -179,40 +189,40 @@ data Theme = Theme
 sdlTheme :: Theme
 sdlTheme =
   Theme
-    { themeWindow = colorRGBA 29 29 29 255
+    { themeWindow = colorRGBA 24 24 27 255
     , themePanel =
         Style
-          { styleBg = colorRGBA 37 37 38 255
-          , styleFg = colorRGBA 232 230 227 255
-          , styleBorder = colorRGBA 68 70 78 255
+          { styleBg = colorRGBA 34 34 38 255
+          , styleFg = colorRGBA 236 234 230 255
+          , styleBorder = colorRGBA 62 64 72 255
           , styleBorderWidth = 1
-          , styleCornerRadius = 10
-          , styleHoverBg = colorRGBA 37 37 38 255
-          , styleActiveBg = colorRGBA 32 32 33 255
+          , styleCornerRadius = 12
+          , styleHoverBg = colorRGBA 34 34 38 255
+          , styleActiveBg = colorRGBA 30 30 34 255
           }
     , themeButton =
         Style
-          { styleBg = colorRGBA 58 58 61 255
-          , styleFg = colorRGBA 246 245 244 255
-          , styleBorder = colorRGBA 78 78 82 255
+          { styleBg = colorRGBA 52 52 58 255
+          , styleFg = colorRGBA 248 247 245 255
+          , styleBorder = colorRGBA 74 76 84 255
           , styleBorderWidth = 1
-          , styleCornerRadius = 9
-          , styleHoverBg = colorRGBA 74 74 78 255
-          , styleActiveBg = colorRGBA 46 46 49 255
+          , styleCornerRadius = 10
+          , styleHoverBg = colorRGBA 68 70 78 255
+          , styleActiveBg = colorRGBA 42 42 48 255
           }
     , themeInput =
         Style
-          { styleBg = colorRGBA 20 20 21 255
-          , styleFg = colorRGBA 232 230 227 255
-          , styleBorder = colorRGBA 74 74 78 255
+          { styleBg = colorRGBA 18 18 21 255
+          , styleFg = colorRGBA 236 234 230 255
+          , styleBorder = colorRGBA 70 72 80 255
           , styleBorderWidth = 1
-          , styleCornerRadius = 9
-          , styleHoverBg = colorRGBA 26 26 27 255
-          , styleActiveBg = colorRGBA 16 16 17 255
+          , styleCornerRadius = 10
+          , styleHoverBg = colorRGBA 24 24 28 255
+          , styleActiveBg = colorRGBA 14 14 17 255
           }
-    , themeSeparator = colorRGBA 88 90 96 255
-    , themeAccent = colorRGBA 53 132 228 255
-    , themeOverlayDim = colorRGBA 0 0 0 168
+    , themeSeparator = colorRGBA 78 80 88 255
+    , themeAccent = colorRGBA 88 156 246 255
+    , themeOverlayDim = colorRGBA 8 8 10 176
     }
 
 defaultTheme :: Theme

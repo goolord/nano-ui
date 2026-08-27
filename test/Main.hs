@@ -7,6 +7,7 @@ import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Storable (peekByteOff)
 import Data.List (isInfixOf, nub)
+import Effectful.State.Static.Local (State, evalState, get, modify)
 import NanoUI
 import NanoUI.Term.Ansi (frameBytes)
 import NanoUI.Term.Cells (cellRows, narrowChar, rasterize)
@@ -98,7 +99,12 @@ main = do
   run "grow-fits-window" runGrowFitsWindowTest
   run "grow-wrap-sibling" runGrowWrapPushesSiblingTest
   run "scroll-bar-gutter" runScrollBarGutterTest
+  runSdl "scroll-bar-gutter-grow" runGrowScrollGutterTest
+  runSdl "scroll-bar-gutter-panel" runPanelGrowScrollGutterTest
+  runSdl "window-scroll-gutter" runWindowScrollGutterTest
   run "use-flag-click" runUseFlagClickTest
+  run "host-slot" runHostSlotTest
+  run "embed-state" runEmbedStateTest
   run "panel-paints" runPanelPaintsTest
   run "separator-span" runSeparatorSpanTest
   run "header-top-pad" runHeaderTopPadTest
@@ -107,6 +113,7 @@ main = do
   run "window-drag" runWindowDragTest
   run "window-scroll-wheel" runWindowScrollWheelTest
   run "window-resize" runWindowResizeTest
+  run "window-resize-halo-hit" runWindowResizeHaloHitTest
 
   n <- readIORef failed
   if n == 0
@@ -118,7 +125,7 @@ main = do
 bump :: IORef Int -> IO ()
 bump r = modifyIORef r (+ 1)
 
-findGrabHover :: Context -> UI a -> Input -> Float -> [Float] -> IO (Maybe Input)
+findGrabHover :: Context -> NanoUI a -> Input -> Float -> [Float] -> IO (Maybe Input)
 findGrabHover ctx ui inp0 thumbX = go
   where
     go [] = pure Nothing
@@ -521,7 +528,9 @@ runModalOverlayTest ctx failed = do
   overlays <- collectOverlayTextSpans ctx inp0
   let hasTitle = any (\(_, txt, _, _, _) -> "Title" `T.isInfixOf` txt) overlays
       hasInside = any (\(_, txt, _, _, _) -> "Inside" `T.isInfixOf` txt) overlays
+      hasCloseGlyph = any (\(_, txt, _, _, _) -> T.strip txt == "X") overlays
   when (not (hasTitle && hasInside)) $ bump failed
+  when hasCloseGlyph $ bump failed
   case mInside0 of
     Just inside -> do
       let Rect ix iy iw ih = respRect inside
@@ -835,9 +844,8 @@ runScrollThumbCursorTest ctx failed = do
   case mrect of
     Nothing -> bump failed
     Just (Rect rx ry rw rh) -> do
-      let barW = 8
-          barMargin = 3
-          thumbX = rx + rw - barW - barMargin + barW / 2
+      let barW = scrollBarWidth
+          thumbX = rx + rw - scrollBarListExtra - barW / 2
           tryYs = [ry + rh * n / 8 | n <- [1 .. 7]]
       mHover <- findGrabHover ctx ui inp0 thumbX tryYs
       case mHover of
@@ -854,7 +862,7 @@ runScrollThumbCursorTest ctx failed = do
           grabbing <- cursorKindIs ctx press UiCursorGrabbing
           when (not grabbing) $ bump failed
 
--- Overflowing vertical scroll reserves a right gutter so children do not sit under the bar.
+-- Overflowing list scroll reserves a right gutter. Bar stays inside the well.
 runScrollBarGutterTest :: Context -> IORef Int -> IO ()
 runScrollBarGutterTest ctx failed = do
   let inp0 = emptyInput {inputWindowSize = Size 200 120}
@@ -862,8 +870,8 @@ runScrollBarGutterTest ctx failed = do
         (sid, child) <-
           scrollArea
             (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 60})
-            ( column (defaultLayout {layoutWidth = Grow 1}) $ do
-                r <- button "Wide"
+            ( do
+                r <- labelEx (fillW defaultLayout) "Wide"
                 _ <- replicateM 8 (label "scroll line")
                 pure r
             )
@@ -875,8 +883,89 @@ runScrollBarGutterTest ctx failed = do
     Nothing -> bump failed
     Just (Rect sx _ sw _) -> do
       let Rect cx _ cw _ = respRect child
-          gutter = 8 + 3
-      when (cx + cw > sx + sw - gutter + 0.01) $ bump failed
+          endPad = padR (layoutPadding defaultLayout)
+          gutter = scrollBarGutter (ctxFontMetrics ctx) + scrollBarListExtra
+          contentRight = sx + sw - endPad - gutter
+      when (cx + cw < contentRight - 0.5) $ bump failed
+      when (cx + cw > contentRight + 0.01) $ bump failed
+
+-- Grow/Grow page scroll reserves bar width plus a small right inset.
+runGrowScrollGutterTest :: Context -> IORef Int -> IO ()
+runGrowScrollGutterTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 240 140}
+      ui = do
+        (sid, child) <-
+          scrollArea
+            (tight (grow defaultLayout))
+            ( do
+                r <- labelEx (fillW defaultLayout) "Wide"
+                _ <- replicateM 20 (label "scroll line")
+                pure r
+            )
+        pure (sid, child)
+  _ <- runFrame ctx inp0 ui
+  ((sid, child), _, _, _) <- runFrame ctx inp0 ui
+  mrect <- getPrevRect ctx sid
+  case mrect of
+    Nothing -> bump failed
+    Just (Rect sx _ sw _) -> do
+      let Rect cx _ cw _ = respRect child
+          fm = ctxFontMetrics ctx
+          gutter = scrollBarGutter fm + scrollBarPageExtra
+          contentRight = sx + sw - gutter
+      when (cx + cw < contentRight - 0.5) $ bump failed
+      when (cx + cw > contentRight + 0.01) $ bump failed
+
+-- Grow/Grow inside a panel is a list well, not page chrome.
+runPanelGrowScrollGutterTest :: Context -> IORef Int -> IO ()
+runPanelGrowScrollGutterTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 240 140}
+      ui = do
+        (sid, child) <-
+          panel (grow defaultLayout) $
+            scrollArea (tight (grow defaultLayout)) $ do
+              r <- labelEx (fillW defaultLayout) "Wide"
+              _ <- replicateM 20 (label "scroll line")
+              pure r
+        pure (sid, child)
+  _ <- runFrame ctx inp0 ui
+  ((sid, child), _, _, _) <- runFrame ctx inp0 ui
+  mrect <- getPrevRect ctx sid
+  case mrect of
+    Nothing -> bump failed
+    Just (Rect sx _ sw _) -> do
+      let Rect cx _ cw _ = respRect child
+          gutter = scrollBarGutter (ctxFontMetrics ctx) + scrollBarListExtra
+          contentRight = sx + sw - gutter
+      when (cx + cw < contentRight - 0.5) $ bump failed
+      when (cx + cw > contentRight + 0.01) $ bump failed
+
+-- Window body keeps full inner width. Bar hangs in the window pad.
+runWindowScrollGutterTest :: Context -> IORef Int -> IO ()
+runWindowScrollGutterTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 640 360}
+      long = T.pack (replicate 48 'M')
+      ui = do
+        (win, mwide) <-
+          window True "GutterWin" $ do
+            wide <- labelEx (fillW defaultLayout) "WWWW"
+            kv "Key" long
+            mapM_ (\i -> label (T.pack ("line " <> show (i :: Int)))) [1 .. 24]
+            pure wide
+        pure (win, mwide)
+  _ <- runFrame ctx inp0 ui
+  ((win, mwide), _, _, _) <- runFrame ctx inp0 ui
+  let Rect wx _ ww _ = respRect win
+      innerRight = wx + ww - padR windowPad
+  spans <- collectOverlayTextSpans ctx inp0
+  let titleYs = [rectY r | (r, txt, _, _, _) <- spans, "GutterWin" `T.isInfixOf` txt]
+  when (null titleYs) $ bump failed
+  case mwide of
+    Nothing -> bump failed
+    Just wide -> do
+      let Rect cx _ cw _ = respRect wide
+      when (cx + cw < innerRight - 0.5) $ bump failed
+      when (cx + cw > innerRight + 0.01) $ bump failed
 
 runTextInputSpanTest :: Context -> IORef Int -> IO ()
 runTextInputSpanTest ctx failed = do
@@ -1233,7 +1322,7 @@ runWindowDragDamageTest _ failed = do
   _ <- runFrame ctx inp0 ui
   (win0, _, _, _) <- runFrame ctx inp0 ui
   let Rect x0 y0 _ _ = respRect win0
-      grab = V2 (x0 + 24) (y0 + 10)
+      grab = V2 (x0 + 24) (y0 + 22)
       press =
         inp0
           { inputMousePos = grab
@@ -1243,7 +1332,7 @@ runWindowDragDamageTest _ failed = do
   _ <- runFrame ctx press ui
   let moved =
         press
-          { inputMousePos = V2 (x0 + 24 - 50) (y0 + 10 + 30)
+          { inputMousePos = V2 (x0 + 24 - 50) (y0 + 22 + 30)
           , inputMousePressed = False
           }
   _ <- runFrame ctx moved ui
@@ -1957,6 +2046,27 @@ runGrowWrapPushesSiblingTest _ failed = do
     ([by], [sy]) -> when (sy < by + 0.5) $ bump failed
     _ -> bump failed
 
+runHostSlotTest :: Context -> IORef Int -> IO ()
+runHostSlotTest ctx failed = do
+  let inp = emptyInput {inputWindowSize = Size 80 80}
+  (miss, _, _, _) <- runFrame ctx inp (askHost :: NanoUI (Maybe String))
+  setHost ctx ("ok" :: String)
+  setHost ctx (1 :: Int)
+  (hitS, _, _, _) <- runFrame ctx inp (askHost :: NanoUI (Maybe String))
+  (hitI, _, _, _) <- runFrame ctx inp (askHost :: NanoUI (Maybe Int))
+  when (miss /= Nothing || hitS /= Just "ok" || hitI /= Just 1) $ bump failed
+
+runEmbedStateTest :: Context -> IORef Int -> IO ()
+runEmbedStateTest ctx failed = do
+  let inp = emptyInput {inputWindowSize = Size 80 80}
+      ui :: Eff '[Ui, State Int, IOE] Int
+      ui = do
+        modify (+ (1 :: Int))
+        modify (+ (1 :: Int))
+        get
+  (n, _, _, _) <- runFrameEff (runEff . evalState (0 :: Int)) ctx inp ui
+  when (n /= 2) $ bump failed
+
 -- App state lives in the widget store, so clicks persist without IORefs.
 runUseFlagClickTest :: Context -> IORef Int -> IO ()
 runUseFlagClickTest ctx failed = do
@@ -2038,7 +2148,7 @@ runFitHeaderNoShrinkTest ctx failed = do
   (r1, _, _, _) <- runFrame ctx short withBody
   when (rectH (respRect r1) + 0.5 < rectH (respRect r0)) $ bump failed
 
--- Floating windows draw on the overlay, ignore backdrop clicks, and close on X.
+-- Floating windows draw on the overlay, ignore backdrop clicks, and close on the title icon.
 runWindowOverlayTest :: Context -> IORef Int -> IO ()
 runWindowOverlayTest ctx failed = do
   let inp0 = emptyInput {inputWindowSize = Size 640 400}
@@ -2065,7 +2175,9 @@ runWindowOverlayTest ctx failed = do
   overlays <- collectOverlayTextSpans ctx inp0
   let hasTitle = any (\(_, txt, _, _, _) -> "Debug" `T.isInfixOf` txt) overlays
       hasBody = any (\(_, txt, _, _, _) -> "Body" `T.isInfixOf` txt) overlays
+      hasCloseGlyph = any (\(_, txt, _, _, _) -> T.strip txt == "X") overlays
   when (not (hasTitle && hasBody)) $ bump failed
+  when hasCloseGlyph $ bump failed
   let Rect wx wy ww wh = respRect win0
   when (ww < 100 || wh < 20) $ bump failed
   case mBody0 of
@@ -2098,6 +2210,22 @@ runWindowOverlayTest ctx failed = do
   let esc = inp0 {inputKeys = [KeyEscape]}
   ((_, winEsc, _), _, _, _) <- runFrame ctx esc ui
   when (respClicked winEsc) $ bump failed
+  let closeAt = V2 (wx + ww - padR windowPad - 14) (wy + padT windowPad + 14)
+      clickClose =
+        inp0
+          { inputMousePos = closeAt
+          , inputMouseDown = True
+          , inputMousePressed = True
+          }
+  _ <- runFrame ctx clickClose ui
+  let releaseClose =
+        clickClose
+          { inputMouseDown = False
+          , inputMousePressed = False
+          , inputMouseReleased = True
+          }
+  ((_, winClose, _), _, _, _) <- runFrame ctx releaseClose ui
+  when (not (respClicked winClose)) $ bump failed
 
 runWindowDragTest :: Context -> IORef Int -> IO ()
 runWindowDragTest ctx failed = do
@@ -2108,7 +2236,7 @@ runWindowDragTest ctx failed = do
   _ <- runFrame ctx inp0 ui
   (win0, _, _, _) <- runFrame ctx inp0 ui
   let Rect x0 y0 _ _ = respRect win0
-      grab = V2 (x0 + 24) (y0 + 10)
+      grab = V2 (x0 + 24) (y0 + 22)
       press =
         inp0
           { inputMousePos = grab
@@ -2118,7 +2246,7 @@ runWindowDragTest ctx failed = do
   _ <- runFrame ctx press ui
   let moved =
         press
-          { inputMousePos = V2 (x0 + 24 - 50) (y0 + 10 + 30)
+          { inputMousePos = V2 (x0 + 24 - 50) (y0 + 22 + 30)
           , inputMousePressed = False
           }
   _ <- runFrame ctx moved ui
@@ -2127,7 +2255,11 @@ runWindowDragTest ctx failed = do
   when (x1 >= x0 - 10) $ bump failed
   when (y1 <= y0 + 10) $ bump failed
 
+spanYs :: T.Text -> [(Rect, T.Text, a, b, c)] -> [Float]
+spanYs needle spans = [rectY r | (r, txt, _, _, _) <- spans, needle `T.isInfixOf` txt]
+
 -- Wheel over an open floating window must scroll overflowing body content.
+-- The title bar stays pinned and does not move with the body.
 runWindowScrollWheelTest :: Context -> IORef Int -> IO ()
 runWindowScrollWheelTest ctx failed = do
   let inp0 = emptyInput {inputWindowSize = Size 320 220}
@@ -2146,6 +2278,10 @@ runWindowScrollWheelTest ctx failed = do
   ((win, mSid), _, _, _) <- runFrame ctx inp0 ui
   let Rect wx wy ww wh = respRect win
   when (ww <= 0 || wh <= 0) $ bump failed
+  spans0 <- collectOverlayTextSpans ctx inp0
+  let titleYs0 = spanYs (T.pack "Scroll") spans0
+      line1Ys0 = spanYs (T.pack "line 1") spans0
+  when (null titleYs0) $ bump failed
   case mSid of
     Nothing -> bump failed
     Just sid -> do
@@ -2158,8 +2294,43 @@ runWindowScrollWheelTest ctx failed = do
       _ <- runFrame ctx wheel ui
       off1 <- getScrollOffset ctx sid
       when (off1 <= off0) $ bump failed
+      spans1 <- collectOverlayTextSpans ctx wheel
+      let titleYs1 = spanYs (T.pack "Scroll") spans1
+          line1Ys1 = spanYs (T.pack "line 1") spans1
+      case (titleYs0, titleYs1) of
+        (y0 : _, y1 : _) -> when (y1 /= y0) $ bump failed
+        _ -> bump failed
+      case (line1Ys0, line1Ys1) of
+        (b0 : _, b1 : _) -> when (b1 >= b0) $ bump failed
+        _ -> pure ()
 
--- Dragging the bottom-right resize handle changes window size.
+dragWindowEdge ::
+  Context ->
+  Input ->
+  NanoUI Response ->
+  V2 ->
+  V2 ->
+  IO (Maybe Rect)
+dragWindowEdge ctx inp0 ui grab dest = do
+  let press =
+        inp0
+          { inputMousePos = grab
+          , inputMouseDown = True
+          , inputMousePressed = True
+          }
+  _ <- runFrame ctx press ui
+  let dragged =
+        press
+          { inputMousePos = dest
+          , inputMousePressed = False
+          }
+  _ <- runFrame ctx dragged ui
+  let idle = inp0 {inputMousePos = dest}
+  _ <- runFrame ctx idle ui
+  (win, _, _, _) <- runFrame ctx idle ui
+  getPrevRect ctx (respId win)
+
+-- Resize from every edge and corner; hover uses directional arrows.
 runWindowResizeTest :: Context -> IORef Int -> IO ()
 runWindowResizeTest ctx failed = do
   let inp0 = emptyInput {inputWindowSize = Size 640 400}
@@ -2173,27 +2344,117 @@ runWindowResizeTest ctx failed = do
     Nothing -> bump failed
     Just (Rect x0 y0 w0 h0) -> do
       when (w0 <= 0 || h0 <= 0) $ bump failed
-      let grab = V2 (x0 + w0 - 4) (y0 + h0 - 4)
-          press =
-            inp0
-              { inputMousePos = grab
-              , inputMouseDown = True
-              , inputMousePressed = True
-              }
-      _ <- runFrame ctx press ui
-      let resized =
-            press
-              { inputMousePos = V2 (x0 + w0 + 40) (y0 + h0 + 30)
-              , inputMousePressed = False
-              }
-      _ <- runFrame ctx resized ui
-      (win1, _, _, _) <- runFrame ctx resized ui
-      mrect1 <- getPrevRect ctx (respId win1)
-      case mrect1 of
+      let hoverAt p = inp0 {inputMousePos = p}
+          expectCursor p kind = do
+            k <- uiCursorKind ctx (hoverAt p)
+            when (k /= kind) $ bump failed
+      expectCursor (V2 (x0 + w0 + 4) (y0 + h0 + 4)) UiCursorNwseResize
+      expectCursor (V2 (x0 - 4) (y0 - 4)) UiCursorNwseResize
+      expectCursor (V2 (x0 + w0 + 4) (y0 - 4)) UiCursorNeswResize
+      expectCursor (V2 (x0 - 4) (y0 + h0 + 4)) UiCursorNeswResize
+      expectCursor (V2 (x0 + w0 / 2) (y0 - 4)) UiCursorNsResize
+      expectCursor (V2 (x0 + w0 / 2) (y0 + h0 + 4)) UiCursorNsResize
+      expectCursor (V2 (x0 - 4) (y0 + h0 / 2)) UiCursorEwResize
+      expectCursor (V2 (x0 + w0 + 4) (y0 + h0 / 2)) UiCursorEwResize
+      insideKind <- uiCursorKind ctx (hoverAt (V2 (x0 + w0 - 4) (y0 + h0 / 2)))
+      when (insideKind == UiCursorEwResize) $ bump failed
+      mSe <-
+        dragWindowEdge
+          ctx
+          inp0
+          ui
+          (V2 (x0 + w0 + 4) (y0 + h0 + 4))
+          (V2 (x0 + w0 + 40) (y0 + h0 + 30))
+      case mSe of
         Nothing -> bump failed
-        Just (Rect _ _ w1 h1) -> do
+        Just (Rect x1 y1 w1 h1) -> do
           when (w1 <= w0 + 20) $ bump failed
           when (h1 <= h0 + 15) $ bump failed
+          mW <-
+            dragWindowEdge
+              ctx
+              inp0
+              ui
+              (V2 (x1 - 4) (y1 + h1 / 2))
+              (V2 (x1 - 36) (y1 + h1 / 2))
+          case mW of
+            Nothing -> bump failed
+            Just (Rect xw yw ww hw) -> do
+              when (ww <= w1 + 15) $ bump failed
+              when (xw >= x1 - 10) $ bump failed
+              mN <-
+                dragWindowEdge
+                  ctx
+                  inp0
+                  ui
+                  (V2 (xw + ww / 2) (yw - 4))
+                  (V2 (xw + ww / 2) (yw - 20))
+              case mN of
+                Nothing -> bump failed
+                Just (Rect xn yn wn hn) -> do
+                  when (hn <= hw + 8) $ bump failed
+                  when (yn >= yw - 5) $ bump failed
+                  -- padT 10 + titleBarH 28 + padB 14
+                  let minTitleH = 52
+                  mShort <-
+                    dragWindowEdge
+                      ctx
+                      inp0
+                      ui
+                      (V2 (xn + wn / 2) (yn + hn + 4))
+                      (V2 (xn + wn / 2) (yn + 4))
+                  case mShort of
+                    Nothing -> bump failed
+                    Just (Rect _ _ _ hMin) ->
+                      when (hMin + 0.01 < minTitleH) $ bump failed
+
+-- Page widgets in the outside halo keep their hit. Resize does not steal them.
+runWindowResizeHaloHitTest :: Context -> IORef Int -> IO ()
+runWindowResizeHaloHitTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 640 400}
+      ui = do
+        btn <- button "Hit"
+        (win, _) <- window True "Resize" (label "Body")
+        pure (btn, win)
+  _ <- runFrame ctx inp0 ui
+  ((btn0, win0), _, _, _) <- runFrame ctx inp0 ui
+  let Rect bx by bw bh = respRect btn0
+      Rect x0 y0 _ _ = respRect win0
+      grab = V2 (x0 + 24) (y0 + 22)
+      destX = bx + bw + 4
+      press =
+        inp0
+          { inputMousePos = grab
+          , inputMouseDown = True
+          , inputMousePressed = True
+          }
+  _ <- runFrame ctx press ui
+  let moved =
+        press
+          { inputMousePos = V2 (destX + 24) (y0 + 22)
+          , inputMousePressed = False
+          }
+  _ <- runFrame ctx moved ui
+  ((_, win1), _, _, _) <- runFrame ctx (inp0 {inputMousePos = V2 destX (y0 + 22)}) ui
+  let Rect x1 y1 _ h1 = respRect win1
+      hit = V2 (bx + bw - 2) (by + bh - 2)
+      inHalo =
+        let s = 12
+         in (fst2 hit < x1 && fst2 hit >= x1 - s)
+              && snd2 hit >= y1 - s
+              && snd2 hit <= y1 + h1 + s
+      isResize k =
+        k == UiCursorEwResize
+          || k == UiCursorNsResize
+          || k == UiCursorNwseResize
+          || k == UiCursorNeswResize
+  kind <- uiCursorKind ctx (inp0 {inputMousePos = hit})
+  when (abs (x1 - destX) > 8) $ bump failed
+  when (not inHalo) $ bump failed
+  when (isResize kind) $ bump failed
+  where
+    fst2 (V2 x _) = x
+    snd2 (V2 _ y) = y
 
 -- A column separator spans the parent width and stays a 1px hairline.
 runSeparatorSpanTest :: Context -> IORef Int -> IO ()

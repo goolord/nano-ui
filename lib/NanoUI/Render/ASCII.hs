@@ -45,4 +45,5 @@ applyCmd _ _ grid cmd =
           LayerBackground -> '.'
           LayerContent -> '#'
           LayerOverlay -> '*'
+          LayerChrome -> '|'
    in stamp grid (round (cmdClipX cmd)) (round (cmdClipY cmd)) (max 1 (round (cmdClipW cmd))) (max 1 (round (cmdClipH cmd))) ch

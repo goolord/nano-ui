@@ -5,22 +5,12 @@ module SdlDemoUi
   , demoUi
   ) where
 
-import Control.Monad (void, when)
-import Control.Monad.IO.Class (liftIO)
-import Data.IORef (IORef, readIORef)
+import Control.Monad (when)
 import NanoUI
-import NanoUI.Backend.Sdl
-  ( SdlDebugSnapshot (..)
-  , SdlEnv
-  , emptySdlDebug
-  , readSdlDebugEnv
-  )
+import NanoUI.Backend.Sdl (SdlDebugSnapshot (..), askSdlDebug)
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
 import Text.Printf (printf)
-
-card :: Layout
-card = minW 280 . padXY 16 14 . gap 8 . fillW $ defaultLayout
 
 demoImages :: [(ImageId, Int, Int, BS.ByteString)]
 demoImages =
@@ -29,92 +19,87 @@ demoImages =
   , (ImageId 3, 32, 32, stripePixels)
   ]
 
-demoUi :: IORef (Maybe SdlEnv) -> UI ()
-demoUi envRef = do
+demoUi :: NanoUI ()
+demoUi = do
   (click, setClick) <- useText ""
   (aboutOpen, setAbout) <- useFlag False
   (debugOpen, setDebug) <- useFlag False
-  column (padAll 12 . gap 8 . grow $ defaultLayout) $ do
-    panel (padXY 16 12 . gap 8 . fillW $ defaultLayout) $
-      row (tight . gap 16 . alignMid . fillW $ defaultLayout) $ do
-        label_ "nano-ui SDL3 demo"
-        flex
-        row (tight . gap 8 . alignMid $ defaultLayout) $ do
+  scroll (tight (grow defaultLayout)) $
+    column (padAll 10 . gap 16 . fillW $ defaultLayout) $ do
+      panel (padXY 18 14 . gap 10 . fillW $ defaultLayout) $
+        toolbar $ do
+          column (tight . gap 2 $ defaultLayout) $ do
+            heading "nano-ui"
+            muted "SDL3 demo"
+          flex
           clickButton "OK" (setClick "OK")
           clickButton "Cancel" (setClick "Cancel")
           clickButton "About" (setAbout True)
           clickButton "Debug" (setDebug (not debugOpen))
-    scroll (tight (grow defaultLayout)) $
-      row (tight . gap 8 . wrap . fillW $ defaultLayout) $ do
-        panel card $ do
-          label_ "Controls"
+      row (tight . gap 16 . wrap . fillW $ defaultLayout) $ do
+        card $ do
+          heading "Controls"
           (_, checked) <- checkbox "Feature" False
           (_, vol) <- slider "Volume" 0 100 50
           (_, quality) <- select "Quality" ["Low", "Medium", "High"] 1
           (_, name) <- textInput "Name" ""
           sep
-          label_ "List"
+          heading "List"
           scroll (padAll 8 . fixedH 136 . fillW $ defaultLayout) $
             column (tight . gap 0 . fillW $ defaultLayout) $
               mapM_ (label_ . T.pack . ("Item " <>) . show) [1 .. 12 :: Int]
           sep
-          label_ (T.pack ("Feature  " <> if checked then "on" else "off"))
-          label_ (T.pack ("Volume   " <> show (round vol :: Int)))
-          label_ (T.pack ("Quality  " <> show quality))
-          label_ (T.pack ("Name     " <> if null name then "-" else name))
-          label_ (T.pack ("Clicked  " <> if null click then "-" else click))
-        panel card $ do
-          label_ "Gallery"
-          row (tight . gap 12 . wrap $ defaultLayout) $ do
+          heading "State"
+          kv "Feature" (onOff checked)
+          kv "Volume" (T.pack (show (round vol :: Int)))
+          kv "Quality" (T.pack (show quality))
+          kv "Name" (orDash name)
+          kv "Clicked" (orDash click)
+        card $ do
+          heading "Gallery"
+          row (tight . gap 14 . wrap $ defaultLayout) $ do
             thumb (ImageId 1) "Swatch"
             thumb (ImageId 2) "Checker"
             thumb (ImageId 3) "Stripe"
           sep
-          copy "Click widgets or type in Name."
-          copy "Esc closes About, then quits."
+          muted "Click widgets or type in Name."
+          muted "Esc closes About, then quits."
   when debugOpen $ do
-    snap <-
-      liftIO $
-        readIORef envRef >>= \m ->
-          case m of
-            Nothing -> pure emptySdlDebug
-            Just env -> readSdlDebugEnv env
+    snap <- askSdlDebug
     (win, _) <- window True "Debug" (debugBody snap)
     onClick win (setDebug False)
   (aboutResp, _) <-
     modal aboutOpen "About" $ do
-      copy "Immediate-mode GUI for Haskell."
-      copy "Esc closes this dialog, then the app."
+      heading "nano-ui"
+      muted "Immediate-mode GUI for Haskell."
+      muted "Esc closes this dialog, then the app."
       row (gap 8 (fillW defaultLayout)) $ do
         flex
         clickButton "Close" (setAbout False)
   onClick aboutResp (setAbout False)
 
-debugLabelW, debugValueW, debugPanelW :: Float
-debugLabelW = 92
-debugValueW = 260
-debugPanelW = debugLabelW + 12 + debugValueW
+onOff :: Bool -> T.Text
+onOff True = "on"
+onOff False = "off"
 
-fixedW :: Float -> Layout -> Layout
-fixedW w l = l {layoutWidth = Fixed w, layoutMinW = w, layoutMaxW = w}
+orDash :: String -> T.Text
+orDash "" = "-"
+orDash s = T.pack s
 
-debugPanelLayout, debugRowLayout, debugLabelLayout, debugValueLayout :: Layout
-debugPanelLayout = tight . fixedW debugPanelW . gap 2 $ defaultLayout
-debugRowLayout = tight . gap 12 . alignMid . fillW $ defaultLayout
-debugLabelLayout = tight . fixedW debugLabelW $ defaultLayout
-debugValueLayout = tight . fixedW debugValueW $ defaultLayout
+debugBody :: SdlDebugSnapshot -> NanoUI ()
+debugBody s = do
+  debugSection "Frame" (frameRows s)
+  sep
+  debugSection "Draw" (drawRows s)
+  sep
+  debugSection "Display" (displayRows s)
+  sep
+  debugSection "Runtime" (rtsRows s)
 
-debugBody :: SdlDebugSnapshot -> UI ()
-debugBody s =
-  column debugPanelLayout $
-    mapM_ (\(i, entry) -> withKey i (debugRow entry)) (zip [0 :: Int ..] (debugRows s))
-
-debugRow :: (String, String) -> UI ()
-debugRow (lbl, val) =
-  void $
-    row debugRowLayout $ do
-      void (labelEx debugLabelLayout (monoFontMarker <> T.pack lbl))
-      void (labelEx debugValueLayout (monoFontMarker <> T.pack val))
+debugSection :: T.Text -> [(String, String)] -> NanoUI ()
+debugSection title rows = do
+  heading title
+  mapM_ (\(k, v) -> kv (T.pack k) (monoFontMarker <> T.pack v)) rows
 
 clipField :: Int -> String -> String
 clipField n s =
@@ -122,49 +107,56 @@ clipField n s =
     then take (max 0 (n - 3)) s ++ "..."
     else s
 
-debugRows :: SdlDebugSnapshot -> [(String, String)]
-debugRows s =
-  [ ("present", printf "%7.1f fps" (dbgPresentFps s))
-  , ("loop", printf "%7.1f fps" (dbgLoopFps s))
-  , ("frame", printf "%8.1f ms" (dbgFrameMs s))
-  , ("ui", printf "%8.1f ms" (dbgUiMs s))
-  , ("draws", printf "%8d" (dbgPresents s))
-  , ("skips", printf "%8d" (dbgSkips s))
-  , ("verts", printf "%8d" (dbgVerts s))
-  , ("indices", printf "%8d" (dbgIndices s))
-  , ("cmds", printf "%8d" (dbgCmds s))
-  , ("window", printf "%4.0fx%-4.0f" (dbgWinW s) (dbgWinH s))
-  , ("scale", printf "%6.2f" (dbgScale s))
-  , ("mouse", printf "%7.0f, %-7.0f" (dbgMouseX s) (dbgMouseY s))
+frameRows :: SdlDebugSnapshot -> [(String, String)]
+frameRows s =
+  [ ("present", printf "%.1f fps" (dbgPresentFps s))
+  , ("loop", printf "%.1f fps" (dbgLoopFps s))
+  , ("frame", printf "%.1f ms" (dbgFrameMs s))
+  , ("ui", printf "%.1f ms" (dbgUiMs s))
+  , ("draws", printf "%d" (dbgPresents s))
+  , ("skips", printf "%d" (dbgSkips s))
+  ]
+
+drawRows :: SdlDebugSnapshot -> [(String, String)]
+drawRows s =
+  [ ("verts", printf "%d" (dbgVerts s))
+  , ("indices", printf "%d" (dbgIndices s))
+  , ("cmds", printf "%d" (dbgCmds s))
+  ]
+
+displayRows :: SdlDebugSnapshot -> [(String, String)]
+displayRows s =
+  [ ("window", printf "%.0fx%.0f" (dbgWinW s) (dbgWinH s))
+  , ("scale", printf "%.2f" (dbgScale s))
+  , ("mouse", printf "%.0f, %.0f" (dbgMouseX s) (dbgMouseY s))
   , ("renderer", clipField 36 (dbgRenderer s <> "  vsync on"))
   , ("font", clipField 36 (dbgFontPath s))
-  , ("haskell", printf "%2d cap / %2d cpu" (dbgCaps s) (dbgCpus s))
   ]
-    ++ rtsRows s
 
 rtsRows :: SdlDebugSnapshot -> [(String, String)]
 rtsRows s
-  | not (dbgRtsOn s) = [("rts", "stats off (need +RTS -T)")]
+  | not (dbgRtsOn s) =
+      [ ("rts", "stats off (need +RTS -T)")
+      , ("haskell", printf "%d cap / %d cpu" (dbgCaps s) (dbgCpus s))
+      ]
   | otherwise =
-      [ ("gc total", printf "%8d" (dbgGcs s))
-      , ("gc major", printf "%8d" (dbgMajorGcs s))
-      , ("last gen", printf "%8d" (dbgLastGcGen s))
-      , ("last gc", printf "%8.2f ms" (dbgLastGcMs s))
-      , ("heap live", printf "%8.1f MiB" (dbgLiveMb s))
-      , ("heap alloc", printf "%8.1f MiB" (dbgAllocMb s))
-      , ("copied", printf "%8.1f MiB" (dbgCopiedMb s))
-      , ("rss max", printf "%8.1f MiB" (dbgMaxMemMb s))
-      , ("gc time", printf "%7.1f%%" (dbgGcPct s))
+      [ ("haskell", printf "%d cap / %d cpu" (dbgCaps s) (dbgCpus s))
+      , ("gc total", printf "%d" (dbgGcs s))
+      , ("gc major", printf "%d" (dbgMajorGcs s))
+      , ("last gen", printf "%d" (dbgLastGcGen s))
+      , ("last gc", printf "%.2f ms" (dbgLastGcMs s))
+      , ("heap live", printf "%.1f MiB" (dbgLiveMb s))
+      , ("heap alloc", printf "%.1f MiB" (dbgAllocMb s))
+      , ("copied", printf "%.1f MiB" (dbgCopiedMb s))
+      , ("rss max", printf "%.1f MiB" (dbgMaxMemMb s))
+      , ("gc time", printf "%.1f%%" (dbgGcPct s))
       ]
 
-copy :: T.Text -> UI ()
-copy txt = void (labelEx (fillW defaultLayout) txt)
-
-thumb :: ImageId -> T.Text -> UI ()
+thumb :: ImageId -> T.Text -> NanoUI ()
 thumb iid caption =
   column (tight . gap 6 $ defaultLayout) $ do
-    image_ (fixedWH 80 80 defaultLayout) iid
-    label_ caption
+    image_ (fixedWH 88 88 defaultLayout) iid
+    muted caption
 
 swatchPixels, checkerPixels, stripePixels :: BS.ByteString
 swatchPixels =

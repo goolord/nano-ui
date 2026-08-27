@@ -1,4 +1,5 @@
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE DataKinds #-}
 
 -- | Terminal backend: notcurses on POSIX, native Win32 console on Windows.
 --
@@ -8,7 +9,9 @@
 -- to the console API directly.
 module NanoUI.Backend.Term
   ( runTermApp
+  , runTermAppEff
   , runTermAppWithQuit
+  , runTermAppWithQuitEff
   ) where
 
 import Control.Exception (finally)
@@ -20,7 +23,10 @@ import NanoUI
   , Input (..)
   , Modifiers (..)
   , Size (..)
-  , UI
+  , NanoUI
+  , Ui
+  , Eff
+  , IOE
   , V2 (..)
   , anyAnimating
   , collectTextSpans
@@ -28,8 +34,10 @@ import NanoUI
   , emptyInput
   , needsRedraw
   , overlayConsumesQuit
-  , runFrame
+  , runEff
+  , runFrameEff
   , textInputEditActive
+  , type (:>)
   )
 import NanoUI.Term.Cells (Cells, cellsSize, rasterizeLayered)
 import NanoUI.Term.Event (MouseAction (..), TermEvent (..))
@@ -49,15 +57,33 @@ animateTimeout = 16
 idleBlock :: Int
 idleBlock = -1
 
-runTermApp :: Context -> UI () -> IO ()
-runTermApp ctx ui = runTermAppWithQuit ctx (const False) ui
+runTermApp :: Context -> NanoUI () -> IO ()
+runTermApp = runTermAppEff runEff
+
+runTermAppEff ::
+  IOE :> es =>
+  (forall x. Eff es x -> IO x) ->
+  Context ->
+  Eff (Ui : es) () ->
+  IO ()
+runTermAppEff unlift ctx ui = runTermAppWithQuitEff unlift ctx (const False) ui
 
 #if defined(mingw32_HOST_OS)
 
-runTermAppWithQuit :: Context -> (Input -> Bool) -> UI () -> IO ()
-runTermAppWithQuit ctx shouldQuit ui =
+runTermAppWithQuit :: Context -> (Input -> Bool) -> NanoUI () -> IO ()
+runTermAppWithQuit = runTermAppWithQuitEff runEff
+
+runTermAppWithQuitEff ::
+  IOE :> es =>
+  (forall x. Eff es x -> IO x) ->
+  Context ->
+  (Input -> Bool) ->
+  Eff (Ui : es) () ->
+  IO ()
+runTermAppWithQuitEff unlift ctx shouldQuit ui =
   withDriver $ \drv ->
     termMainLoop
+      unlift
       ctx
       shouldQuit
       ui
@@ -81,10 +107,20 @@ runTermAppWithQuit ctx shouldQuit ui =
 
 #else
 
-runTermAppWithQuit :: Context -> (Input -> Bool) -> UI () -> IO ()
-runTermAppWithQuit ctx shouldQuit ui =
+runTermAppWithQuit :: Context -> (Input -> Bool) -> NanoUI () -> IO ()
+runTermAppWithQuit = runTermAppWithQuitEff runEff
+
+runTermAppWithQuitEff ::
+  IOE :> es =>
+  (forall x. Eff es x -> IO x) ->
+  Context ->
+  (Input -> Bool) ->
+  Eff (Ui : es) () ->
+  IO ()
+runTermAppWithQuitEff unlift ctx shouldQuit ui =
   withNotcurses $ \nc ->
     termMainLoop
+      unlift
       ctx
       shouldQuit
       ui
@@ -97,16 +133,18 @@ runTermAppWithQuit ctx shouldQuit ui =
 #endif
 
 termMainLoop ::
+  IOE :> es =>
+  (forall x. Eff es x -> IO x) ->
   Context ->
   (Input -> Bool) ->
-  UI () ->
+  Eff (Ui : es) () ->
   IO () ->
   IO () ->
   IO (Int, Int) ->
   (Int -> IO [TermEvent]) ->
   (Maybe Cells -> Cells -> IO ()) ->
   IO ()
-termMainLoop ctx shouldQuit ui onEnter onLeave getSize readEvents present =
+termMainLoop unlift ctx shouldQuit ui onEnter onLeave getSize readEvents present =
   onEnter
     >> ( do
            (w0, h0) <- getSize
@@ -157,7 +195,7 @@ termMainLoop ctx shouldQuit ui onEnter onLeave getSize readEvents present =
       prevI <- readIORef prevInpRef
       need <- needsRedraw ctx prevI inp
       when need $ do
-        (_, _, drawData, _) <- runFrame ctx inp ui
+        (_, _, drawData, _) <- runFrameEff unlift ctx inp ui
         baseSpans <- collectTextSpans ctx
         overlaySpans <- collectOverlayTextSpans ctx inp
         let Size w h = inputWindowSize inp

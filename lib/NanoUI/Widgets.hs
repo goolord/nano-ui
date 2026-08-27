@@ -25,6 +25,12 @@ module NanoUI.Widgets
   , clickButton
   , useFlag
   , useText
+  , useToggle
+  , heading
+  , muted
+  , kv
+  , card
+  , toolbar
   , sep
   , flex
   , image_
@@ -42,13 +48,13 @@ module NanoUI.Widgets
   ) where
 
 import Control.Monad (foldM, void, when)
-import Control.Monad.IO.Class (liftIO)
 import Data.IORef (readIORef, writeIORef)
+import Effectful (Eff, type (:>))
 import Data.Text (Text)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Text as T
 import GHC.Stack (HasCallStack)
-import NanoUI.Font (isTerminalFont)
+import NanoUI.Font (headingFontMarker, isTerminalFont, mutedFontMarker)
 import NanoUI.WidgetText
   ( checkboxLabelText
   , sliderDisplayText
@@ -90,7 +96,7 @@ import NanoUI.Layout.Arena
   , setNodeValue
   , setWidgetId
   )
-import NanoUI.Monad (UI (..), askContext, askInput, currentId, emit, withKey)
+import NanoUI.Monad (Ui, askContext, askInput, currentId, emit, uiFinally, uiIO, withKey)
 import NanoUI.Style
   ( AlignX (..)
   , AlignY (..)
@@ -102,10 +108,13 @@ import NanoUI.Style
   , defaultLayout
   , fillW
   , gap
+  , minW
+  , padXY
   , tight
   , fixedH
   , fixedWH
   , grow
+  , windowPad
   )
 import NanoUI.Types (ImageId (..), Rect (..), Size (..), V2 (..), rectContains, rectH, rectW, sliderTrackRect)
 
@@ -134,49 +143,49 @@ data Response = Response
   deriving (Eq, Show)
 
 {-# INLINE panel #-}
-panel :: Layout -> UI a -> UI a
+panel :: Ui :> es => Layout -> Eff es a -> Eff es a
 panel = container NodePanel
 
 {-# INLINE row #-}
-row :: Layout -> UI a -> UI a
+row :: Ui :> es => Layout -> Eff es a -> Eff es a
 row layout child = container NodeContainer (layout {layoutDirection = Row}) child
 
 {-# INLINE column #-}
-column :: Layout -> UI a -> UI a
+column :: Ui :> es => Layout -> Eff es a -> Eff es a
 column layout child = container NodeContainer (layout {layoutDirection = Column}) child
 
 {-# INLINE onClick #-}
-onClick :: Response -> UI () -> UI ()
+onClick :: Response -> Eff es () -> Eff es ()
 onClick resp act = when (respClicked resp) act
 
 {-# INLINE clickButton #-}
-clickButton :: HasCallStack => Text -> UI () -> UI ()
+clickButton :: (HasCallStack, Ui :> es) => Text -> Eff es () -> Eff es ()
 clickButton txt act = button txt >>= \resp -> onClick resp act
 
 {-# INLINE label_ #-}
-label_ :: HasCallStack => Text -> UI ()
+label_ :: (HasCallStack, Ui :> es) => Text -> Eff es ()
 label_ txt = void (label txt)
 
 {-# INLINE sep #-}
-sep :: HasCallStack => UI ()
+sep :: (HasCallStack, Ui :> es) => Eff es ()
 sep = void separator
 
 {-# INLINE flex #-}
-flex :: HasCallStack => UI ()
+flex :: (HasCallStack, Ui :> es) => Eff es ()
 flex = void (spacer (Grow 1) Fit)
 
 {-# INLINE image_ #-}
-image_ :: HasCallStack => Layout -> ImageId -> UI ()
+image_ :: (HasCallStack, Ui :> es) => Layout -> ImageId -> Eff es ()
 image_ layout iid = void (image layout iid)
 
-useFlag :: HasCallStack => Bool -> UI (Bool, Bool -> UI ())
+useFlag :: (HasCallStack, Ui :> es) => Bool -> Eff es (Bool, Bool -> Eff es ())
 useFlag initial = do
   wid <- currentId
   ctx <- askContext
-  store <- liftIO (getStore ctx)
+  store <- uiIO (getStore ctx)
   let key = intKey wid
       cur = IM.findWithDefault initial key (storeFlag store)
-      set v = liftIO $ do
+      set v = uiIO $ do
         st <- getStore ctx
         let prev = IM.findWithDefault initial key (storeFlag st)
         when (prev /= v) $ do
@@ -184,14 +193,14 @@ useFlag initial = do
           markDirty ctx
   pure (cur, set)
 
-useText :: HasCallStack => String -> UI (String, String -> UI ())
+useText :: (HasCallStack, Ui :> es) => String -> Eff es (String, String -> Eff es ())
 useText initial = do
   wid <- currentId
   ctx <- askContext
-  store <- liftIO (getStore ctx)
+  store <- uiIO (getStore ctx)
   let key = intKey wid
       cur = IM.findWithDefault initial key (storeNote store)
-      set v = liftIO $ do
+      set v = uiIO $ do
         st <- getStore ctx
         let prev = IM.findWithDefault initial key (storeNote st)
         when (prev /= v) $ do
@@ -199,7 +208,32 @@ useText initial = do
           markDirty ctx
   pure (cur, set)
 
-modal :: HasCallStack => Bool -> Text -> UI a -> UI (Response, Maybe a)
+useToggle :: (HasCallStack, Ui :> es) => Bool -> Eff es (Bool, Eff es ())
+useToggle initial = do
+  (cur, set) <- useFlag initial
+  pure (cur, set (not cur))
+
+heading :: (HasCallStack, Ui :> es) => Text -> Eff es ()
+heading txt = void (labelEx (tight . padXY 0 4 $ defaultLayout) (headingFontMarker <> txt))
+
+muted :: (HasCallStack, Ui :> es) => Text -> Eff es ()
+muted txt = void (labelEx (fillW defaultLayout) (mutedFontMarker <> txt))
+
+kv :: (HasCallStack, Ui :> es) => Text -> Text -> Eff es ()
+kv k v =
+  void $
+    row (tight . gap 12 . alignMid . fillW $ defaultLayout) $ do
+      void (labelEx (tight . minW 88 $ defaultLayout) k)
+      flex
+      void (labelEx (tight defaultLayout) (T.stripEnd v))
+
+card :: Ui :> es => Eff es a -> Eff es a
+card = panel (minW 300 . padXY 18 16 . gap 10 . fillW $ defaultLayout)
+
+toolbar :: Ui :> es => Eff es a -> Eff es a
+toolbar = row (tight . gap 10 . alignMid . fillW $ defaultLayout)
+
+modal :: (HasCallStack, Ui :> es) => Bool -> Text -> Eff es a -> Eff es (Response, Maybe a)
 modal open title child
   | not open = do
       wid <- currentId
@@ -208,55 +242,53 @@ modal open title child
       wid <- currentId
       ctx <- askContext
       inp <- askInput
-      (closeResp, body) <-
-        UI $ \c i -> do
-          stack <- readIORef (ctxContainerStack c)
+      (closeResp, body) <- do
+          stack <- uiIO (readIORef (ctxContainerStack ctx))
           let parent = parentIdx stack
-              Size winW winH = inputWindowSize i
+              Size winW winH = inputWindowSize inp
               margin = 16
-              minW = 260
-              maxW = max minW (winW - 2 * margin)
+              minWidth = 260
+              maxW = max minWidth (winW - 2 * margin)
               maxH = max 40 (winH - 2 * margin)
-          idx <-
-            addNode
-              (ctxNodeArena c)
-              NodeModal
-              parent
-              Column
-              Fit
-              Fit
-              (Padding 20 20 18 18)
-              12
-              minW
-              0
-              maxW
-              maxH
-              0
-              AlignStart
-              AlignTop
-              False
-          setWidgetId (ctxNodeArena c) idx wid
-          writeIORef (ctxContainerStack c) (idx : stack)
-          beginModal c
+          uiIO $ do
+            idx <-
+              addNode
+                (ctxNodeArena ctx)
+                NodeModal
+                parent
+                Column
+                Fit
+                Fit
+                (Padding 20 20 18 18)
+                12
+                minWidth
+                0
+                maxW
+                maxH
+                0
+                AlignStart
+                AlignTop
+                False
+            setWidgetId (ctxNodeArena ctx) idx wid
+            writeIORef (ctxContainerStack ctx) (idx : stack)
+            beginModal ctx
           (closeResp, r) <-
-            unUI
-              ( do
-                  close <-
-                    row (titleBarLayout defaultLayout) $ do
-                      when (not (T.null title)) $
-                        void (labelEx titleLabelLayout title)
-                      flex
-                      withKey ("close" :: Text) closeButton
-                  when (not (T.null title)) sep
-                  r <- child
-                  pure (close, r)
-              )
-              c
-              i
-          endModal c
-          writeIORef (ctxContainerStack c) stack
+            ( do
+                close <-
+                  row (titleBarLayout defaultLayout) $ do
+                    when (not (T.null title)) $
+                      void (labelEx titleLabelLayout title)
+                    flex
+                    withKey ("close" :: Text) closeButton
+                when (not (T.null title)) sep
+                r <- child
+                pure (close, r)
+            )
+              `uiFinally` do
+                endModal ctx
+                writeIORef (ctxContainerStack ctx) stack
           pure (closeResp, r)
-      mrect <- liftIO (getPrevRect ctx wid)
+      mrect <- uiIO (getPrevRect ctx wid)
       let mouse = inputMousePos inp
           inPanel = maybe False (\r -> rectW r > 0 && rectH r > 0 && rectContains r mouse) mrect
           backdrop =
@@ -266,7 +298,7 @@ modal open title child
               _ -> False
           esc = KeyEscape `elem` inputKeys inp
           dismiss = backdrop || esc || respClicked closeResp
-      when esc $ liftIO (markEscapeConsumed ctx)
+      when esc $ uiIO (markEscapeConsumed ctx)
       pure
         ( Response
             { respId = wid
@@ -279,13 +311,13 @@ modal open title child
         , Just body
         )
 
-image :: HasCallStack => Layout -> ImageId -> UI Response
+image :: (HasCallStack, Ui :> es) => Layout -> ImageId -> Eff es Response
 image layout (ImageId tid) = do
   wid <- currentId
   let stored = if tid <= 0 then T.empty else T.pack (show tid)
   addWidget wid NodeImage stored 0 layout
 
-window :: HasCallStack => Bool -> Text -> UI a -> UI (Response, Maybe a)
+window :: (HasCallStack, Ui :> es) => Bool -> Text -> Eff es a -> Eff es (Response, Maybe a)
 window open title child
   | not open = do
       wid <- currentId
@@ -294,53 +326,51 @@ window open title child
       wid <- currentId
       ctx <- askContext
       inp <- askInput
-      (closeResp, body) <-
-        UI $ \c i -> do
-          stack <- readIORef (ctxContainerStack c)
+      (closeResp, body) <- do
+          stack <- uiIO (readIORef (ctxContainerStack ctx))
           let parent = parentIdx stack
-              Size winW winH = inputWindowSize i
+              Size winW winH = inputWindowSize inp
               margin = 16
-              minW = 280
-              maxW = max minW (winW - 2 * margin)
-              maxH = max 40 (winH - 2 * margin)
-          idx <-
-            addNode
-              (ctxNodeArena c)
-              NodeWindow
-              parent
-              Column
-              Fit
-              Fit
-              (Padding 14 14 10 14)
-              8
-              minW
-              0
-              maxW
-              maxH
-              0
-              AlignStart
-              AlignTop
-              False
-          setWidgetId (ctxNodeArena c) idx wid
-          writeIORef (ctxContainerStack c) (idx : stack)
+              minWidth = 280
+              minHeight = padT windowPad + titleBarH + padB windowPad
+              maxW = max minWidth (winW - 2 * margin)
+              maxH = max minHeight (winH - 2 * margin)
+          uiIO $ do
+            idx <-
+              addNode
+                (ctxNodeArena ctx)
+                NodeWindow
+                parent
+                Column
+                Fit
+                Fit
+                windowPad
+                8
+                minWidth
+                minHeight
+                maxW
+                maxH
+                0
+                AlignStart
+                AlignTop
+                False
+            setWidgetId (ctxNodeArena ctx) idx wid
+            writeIORef (ctxContainerStack ctx) (idx : stack)
           (closeResp, body) <-
-            unUI
-              ( do
-                  close <-
-                    row (titleBarLayout defaultLayout) $ do
-                      when (not (T.null title)) $
-                        withKey title (void (labelEx titleLabelLayout title))
-                      flex
-                      withKey ("close" :: Text) closeButton
-                  sep
-                  body <- scroll (tight . grow $ defaultLayout) child
-                  pure (close, body)
-              )
-              c
-              i
-          writeIORef (ctxContainerStack c) stack
+            ( do
+                close <-
+                  row (titleBarLayout defaultLayout) $ do
+                    when (not (T.null title)) $
+                      withKey title (void (labelEx titleLabelLayout title))
+                    flex
+                    withKey ("close" :: Text) closeButton
+                sep
+                body <- scroll (tight . grow $ defaultLayout) child
+                pure (close, body)
+            )
+              `uiFinally` writeIORef (ctxContainerStack ctx) stack
           pure (closeResp, body)
-      mrect <- liftIO (getPrevRect ctx wid)
+      mrect <- uiIO (getPrevRect ctx wid)
       let mouse = inputMousePos inp
           inPanel = maybe False (\r -> rectW r > 0 && rectH r > 0 && rectContains r mouse) mrect
       pure
@@ -366,39 +396,41 @@ emptyModalResp wid =
     , respChanged = False
     }
 
-container :: NodeType -> Layout -> UI a -> UI a
-container nt layout child = UI $ \ctx inp -> do
-  stack <- readIORef (ctxContainerStack ctx)
-  let parent = parentIdx stack
-  idx <-
-    addNode
-      (ctxNodeArena ctx)
-      nt
-      parent
-      (layoutDirection layout)
-      (layoutWidth layout)
-      (layoutHeight layout)
-      (layoutPadding layout)
-      (layoutGap layout)
-      (layoutMinW layout)
-      (layoutMinH layout)
-      (layoutMaxW layout)
-      (layoutMaxH layout)
-      0
-      (layoutAlignX layout)
-      (layoutAlignY layout)
-      (layoutWrap layout)
-  writeIORef (ctxContainerStack ctx) (idx : stack)
-  r <- unUI child ctx inp
-  writeIORef (ctxContainerStack ctx) stack
+container :: Ui :> es => NodeType -> Layout -> Eff es a -> Eff es a
+container nt layout child = do
+  ctx <- askContext
+  stack <- uiIO $ do
+    stack <- readIORef (ctxContainerStack ctx)
+    let parent = parentIdx stack
+    idx <-
+      addNode
+        (ctxNodeArena ctx)
+        nt
+        parent
+        (layoutDirection layout)
+        (layoutWidth layout)
+        (layoutHeight layout)
+        (layoutPadding layout)
+        (layoutGap layout)
+        (layoutMinW layout)
+        (layoutMinH layout)
+        (layoutMaxW layout)
+        (layoutMaxH layout)
+        0
+        (layoutAlignX layout)
+        (layoutAlignY layout)
+        (layoutWrap layout)
+    writeIORef (ctxContainerStack ctx) (idx : stack)
+    pure stack
+  r <- uiFinally child (writeIORef (ctxContainerStack ctx) stack)
   pure r
 
 {-# INLINE label #-}
-label :: HasCallStack => Text -> UI Response
+label :: (HasCallStack, Ui :> es) => Text -> Eff es Response
 label = labelEx defaultLayout
 
 {-# INLINE labelEx #-}
-labelEx :: HasCallStack => Layout -> Text -> UI Response
+labelEx :: (HasCallStack, Ui :> es) => Layout -> Text -> Eff es Response
 labelEx layout txt = do
   wid <- currentId
   addWidget wid NodeText txt 0 layout
@@ -407,15 +439,15 @@ closeButtonMarker :: Text
 closeButtonMarker = T.singleton '\x01'
 
 {-# INLINE closeButton #-}
-closeButton :: HasCallStack => UI Response
+closeButton :: (HasCallStack, Ui :> es) => Eff es Response
 closeButton = do
   wid <- currentId
   ctx <- askContext
-  liftIO $ registerFocusable ctx wid
+  uiIO $ registerFocusable ctx wid
   let stored = "[ " <> closeButtonMarker <> "X ]"
       layout = tight . fixedWH titleBarH titleBarH . alignMid $ defaultLayout
   resp <- addWidget wid NodeButton stored 0 layout
-  disabled <- liftIO (isDisabled ctx wid)
+  disabled <- uiIO (isDisabled ctx wid)
   pure
     resp
       { respClicked = not disabled && respClicked resp
@@ -423,26 +455,26 @@ closeButton = do
       }
 
 {-# INLINE button #-}
-button :: HasCallStack => Text -> UI Response
+button :: (HasCallStack, Ui :> es) => Text -> Eff es Response
 button txt = buttonEx True txt
 
-buttonEx :: HasCallStack => Bool -> Text -> UI Response
+buttonEx :: (HasCallStack, Ui :> es) => Bool -> Text -> Eff es Response
 buttonEx enabled txt = do
   wid <- currentId
   ctx <- askContext
-  liftIO $ registerFocusable ctx wid
+  uiIO $ registerFocusable ctx wid
   resp <- addWidget wid NodeButton ("[ " <> txt <> " ]") 0 defaultLayout
-  disabled <- liftIO (isDisabled ctx wid)
+  disabled <- uiIO (isDisabled ctx wid)
   let active = enabled && not disabled
   when (active && respClicked resp) $ emit ("button:" <> T.unpack txt)
   pure resp {respClicked = active && respClicked resp, respHovered = active && respHovered resp}
 
 {-# INLINE checkbox #-}
-checkbox :: HasCallStack => Text -> Bool -> UI (Response, Bool)
+checkbox :: (HasCallStack, Ui :> es) => Text -> Bool -> Eff es (Response, Bool)
 checkbox txt initial = do
   wid <- currentId
   ctx <- askContext
-  store <- liftIO (getStore ctx)
+  store <- uiIO (getStore ctx)
   let key = intKey wid
       current = IM.findWithDefault initial key (storeCheckbox store)
       fm = ctxFontMetrics ctx
@@ -455,16 +487,16 @@ checkbox txt initial = do
   pure (resp, display)
 
 {-# INLINE slider #-}
-slider :: HasCallStack => Text -> Float -> Float -> Float -> UI (Response, Float)
+slider :: (HasCallStack, Ui :> es) => Text -> Float -> Float -> Float -> Eff es (Response, Float)
 slider = sliderEx (fillW defaultLayout)
 
 {-# INLINE sliderEx #-}
-sliderEx :: HasCallStack => Layout -> Text -> Float -> Float -> Float -> UI (Response, Float)
+sliderEx :: (HasCallStack, Ui :> es) => Layout -> Text -> Float -> Float -> Float -> Eff es (Response, Float)
 sliderEx layout lbl minV maxV initial = do
   wid <- currentId
   ctx <- askContext
   inp <- askInput
-  store <- liftIO (getStore ctx)
+  store <- uiIO (getStore ctx)
   let key = intKey wid
       current = IM.findWithDefault initial key (storeSlider store)
       frac = if maxV > minV then (current - minV) / (maxV - minV) else 0
@@ -474,8 +506,8 @@ sliderEx layout lbl minV maxV initial = do
           then sliderPackTerminal lbl frac current minV maxV
           else sliderPackRange lbl minV maxV
   resp <- addWidget wid NodeSlider nodeText frac layout
-  active <- liftIO (readIORef (ctxActiveId ctx))
-  trackHover <- liftIO $ do
+  active <- uiIO (readIORef (ctxActiveId ctx))
+  trackHover <- uiIO $ do
     mrect <- getPrevRect ctx wid
     pure $
       case mrect of
@@ -484,7 +516,7 @@ sliderEx layout lbl minV maxV initial = do
   let isActive = active == wid
       pressed = inputMouseDown inp && (trackHover || isActive)
   val <-
-    liftIO $ do
+    uiIO $ do
       mrect <- getPrevRect ctx wid
       let dragFrac =
             case mrect of
@@ -496,40 +528,40 @@ sliderEx layout lbl minV maxV initial = do
           computed = minV + dragFrac * (maxV - minV)
       if pressed then pure computed else pure current
   when (pressed && trackHover && not isActive) $
-    liftIO $ writeIORef (ctxActiveId ctx) wid
+    uiIO $ writeIORef (ctxActiveId ctx) wid
   when (not (inputMouseDown inp) && isActive) $
-    liftIO $ writeIORef (ctxActiveId ctx) (WidgetId 0)
+    uiIO $ writeIORef (ctxActiveId ctx) (WidgetId 0)
   let finalVal = if pressed then val else current
   when (finalVal /= current) $
-    liftIO $ setStore ctx (store {storeSlider = IM.insert key finalVal (storeSlider store)})
+    uiIO $ setStore ctx (store {storeSlider = IM.insert key finalVal (storeSlider store)})
   pure (resp {respChanged = finalVal /= current}, finalVal)
 
 {-# INLINE textInput #-}
-textInput :: HasCallStack => Text -> String -> UI (Response, String)
+textInput :: (HasCallStack, Ui :> es) => Text -> String -> Eff es (Response, String)
 textInput lbl initial = do
   wid <- currentId
   ctx <- askContext
-  liftIO $ registerFocusable ctx wid
+  uiIO $ registerFocusable ctx wid
   inp <- askInput
-  store <- liftIO (getStore ctx)
+  store <- uiIO (getStore ctx)
   let key = intKey wid
   when (not (IM.member key (storeText store))) $
-    liftIO $ setStore ctx (store {storeText = IM.insert key initial (storeText store)})
+    uiIO $ setStore ctx (store {storeText = IM.insert key initial (storeText store)})
   let current = IM.findWithDefault initial key (storeText store)
       cursor = IM.findWithDefault (length current) key (storeCursor store)
       anchor = IM.findWithDefault cursor key (storeSelAnchor store)
-  focus <- liftIO (readIORef (ctxFocusId ctx))
-  blocked <- liftIO (pointerBlockedByModal ctx)
+  focus <- uiIO (readIORef (ctxFocusId ctx))
+  blocked <- uiIO (pointerBlockedByModal ctx)
   let isFocus = focus == wid && not blocked
   newState <-
     if isFocus
-      then liftIO (processTextInput ctx inp (TextInputState current cursor anchor))
+      then uiIO (processTextInput ctx inp (TextInputState current cursor anchor))
       else pure (TextInputState current cursor anchor)
   let newText = tisText newState
       newCursor = tisCursor newState
       newAnchor = tisAnchor newState
   when (newText /= current || newCursor /= cursor || newAnchor /= anchor) $
-    liftIO $
+    uiIO $
       setStore
         ctx
         ( store
@@ -550,12 +582,12 @@ textInputLayout =
     }
 
 {-# INLINE separator #-}
-separator :: HasCallStack => UI Response
+separator :: (HasCallStack, Ui :> es) => Eff es Response
 separator = do
   wid <- currentId
   ctx <- askContext
   inp <- askInput
-  liftIO $ do
+  uiIO $ do
     stack <- readIORef (ctxContainerStack ctx)
     let parent = parentIdx stack
     parentDir <-
@@ -588,12 +620,12 @@ separator = do
     resolveInteraction ctx inp wid
 
 {-# INLINE spacer #-}
-spacer :: HasCallStack => Sizing -> Sizing -> UI Response
+spacer :: (HasCallStack, Ui :> es) => Sizing -> Sizing -> Eff es Response
 spacer w h = do
   wid <- currentId
   ctx <- askContext
   inp <- askInput
-  liftIO $ do
+  uiIO $ do
     stack <- readIORef (ctxContainerStack ctx)
     let parent = parentIdx stack
     idx <-
@@ -618,66 +650,65 @@ spacer w h = do
     resolveInteraction ctx inp wid
 
 {-# INLINE scroll #-}
-scroll :: HasCallStack => Layout -> UI a -> UI a
+scroll :: (HasCallStack, Ui :> es) => Layout -> Eff es a -> Eff es a
 scroll layout child = do
   (_, r) <- scrollArea layout child
   pure r
 
 {-# INLINE scrollArea #-}
-scrollArea :: HasCallStack => Layout -> UI a -> UI (WidgetId, a)
+scrollArea :: (HasCallStack, Ui :> es) => Layout -> Eff es a -> Eff es (WidgetId, a)
 scrollArea layout child = do
   wid <- currentId
-  r <-
-    UI $ \ctx inp -> do
-      stack <- readIORef (ctxContainerStack ctx)
-      let parent = parentIdx stack
-      idx <-
-        addNode
-          (ctxNodeArena ctx)
-          NodeScrollContainer
-          parent
-          (layoutDirection layout)
-          (layoutWidth layout)
-          (layoutHeight layout)
-          (layoutPadding layout)
-          (layoutGap layout)
-          (layoutMinW layout)
-          (layoutMinH layout)
-          (layoutMaxW layout)
-          (layoutMaxH layout)
-          0
-          (layoutAlignX layout)
-          (layoutAlignY layout)
-          (layoutWrap layout)
-      setWidgetId (ctxNodeArena ctx) idx wid
-      writeIORef (ctxContainerStack ctx) (idx : stack)
-      childR <- unUI child ctx inp
-      writeIORef (ctxContainerStack ctx) stack
-      pure childR
-  pure (wid, r)
+  ctx <- askContext
+  stack <- uiIO $ do
+    stack <- readIORef (ctxContainerStack ctx)
+    let parent = parentIdx stack
+    idx <-
+      addNode
+        (ctxNodeArena ctx)
+        NodeScrollContainer
+        parent
+        (layoutDirection layout)
+        (layoutWidth layout)
+        (layoutHeight layout)
+        (layoutPadding layout)
+        (layoutGap layout)
+        (layoutMinW layout)
+        (layoutMinH layout)
+        (layoutMaxW layout)
+        (layoutMaxH layout)
+        0
+        (layoutAlignX layout)
+        (layoutAlignY layout)
+        (layoutWrap layout)
+    setWidgetId (ctxNodeArena ctx) idx wid
+    writeIORef (ctxContainerStack ctx) (idx : stack)
+    pure stack
+  childR <- uiFinally child (writeIORef (ctxContainerStack ctx) stack)
+  pure (wid, childR)
 
 {-# INLINE select #-}
-select :: HasCallStack => Text -> [Text] -> Int -> UI (Response, Int)
+select :: (HasCallStack, Ui :> es) => Text -> [Text] -> Int -> Eff es (Response, Int)
 select lbl options initial = do
   wid <- currentId
   ctx <- askContext
-  liftIO $ registerFocusable ctx wid
+  uiIO $ registerFocusable ctx wid
   let opts = if null options then [""] else options
       key = intKey wid
-  store0 <- liftIO (getStore ctx)
+  store0 <- uiIO (getStore ctx)
   let current = IM.findWithDefault initial key (storeSelect store0)
       clamped = max 0 (min (length opts - 1) current)
       nodeText = selectPackOptions lbl opts
   when (not (IM.member key (storeSelect store0))) $
-    liftIO $
+    uiIO $
       setStore ctx (store0 {storeSelect = IM.insert key clamped (storeSelect store0)})
   resp <- addWidget wid NodeSelect nodeText 0 defaultLayout
   inp <- askInput
-  open <- liftIO $ do
+  open <- uiIO $ do
     st <- getStore ctx
     pure (IM.findWithDefault False key (storeSelectOpen st))
   when (respClicked resp) $
-    liftIO $ do
+    uiIO $ do
       st <- getStore ctx
       let Rect rx ry rw rh = respRect resp
           onButton = rw > 0 && rh > 0 && rectContains (Rect rx ry rw rh) (inputMousePos inp)
@@ -693,16 +724,16 @@ select lbl options initial = do
                 then st {storeSelectOpen = IM.singleton key True}
                 else st
         )
-  store1 <- liftIO (getStore ctx)
+  store1 <- uiIO (getStore ctx)
   let finalIdx = IM.findWithDefault clamped key (storeSelect store1)
   pure (resp {respChanged = finalIdx /= initial}, finalIdx)
 
 {-# INLINE tooltip #-}
-tooltip :: Text -> Response -> UI Response
+tooltip :: Ui :> es => Text -> Response -> Eff es Response
 tooltip tipTxt resp = do
   when (respHovered resp) $ do
     ctx <- askContext
-    liftIO $ do
+    uiIO $ do
       let (Rect rx ry rw rh) = respRect resp
       pushTooltip ctx (respId resp) (Rect (rx + rw + 4) ry 100 (max rh 20)) tipTxt
   pure resp
@@ -711,26 +742,28 @@ textInputText :: Text -> String -> Int -> Bool -> Text
 textInputText = textInputTerminalText
 
 addWidget ::
+  Ui :> es =>
   WidgetId ->
   NodeType ->
   Text ->
   Float ->
   Layout ->
-  UI Response
+  Eff es Response
 addWidget wid nt txt value layout = addWidgetResp wid nt txt value layout Nothing
 
 addWidgetResp ::
+  Ui :> es =>
   WidgetId ->
   NodeType ->
   Text ->
   Float ->
   Layout ->
   Maybe Response ->
-  UI Response
+  Eff es Response
 addWidgetResp wid nt txt value layout mResp = do
   ctx <- askContext
   inp <- askInput
-  liftIO $ do
+  uiIO $ do
     stack <- readIORef (ctxContainerStack ctx)
     let parent = parentIdx stack
     idx <-

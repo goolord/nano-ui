@@ -129,7 +129,7 @@ cabal run -fsdl nano-ui-sdl-demo
 ## Architecture
 
 ```
-UI monad → node arena → layout solver → shape lowering → DrawData
+NanoUI → node arena → layout solver → shape lowering → DrawData
                 ↑                              ↓
          persistent Context (hot/active/focus, prev rects, store)
 ```
@@ -139,7 +139,7 @@ UI monad → node arena → layout solver → shape lowering → DrawData
 | Module | Role |
 |--------|------|
 | `NanoUI` | Public API re-export |
-| `NanoUI.Monad` | `UI` monad, `emit`, `withKey`, `currentId` |
+| `NanoUI.Monad` | `NanoUI` effect stack, `emit`, `withKey`, `currentId` |
 | `NanoUI.Widgets` | `button`, `checkbox`, `slider lbl min max initial`, `textInput`, `panel` / `row` / `column`, `useFlag` / `useText` |
 | `NanoUI.Frame` | `runFrame`, `needsRedraw` |
 | `NanoUI.Draw` | Pinned vertex arena, draw command batching |

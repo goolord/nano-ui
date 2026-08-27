@@ -1,3 +1,5 @@
+{-# LANGUAGE DataKinds #-}
+
 -- | SDL3 backend: consumes geometry ('DrawData') from the core frame loop and
 -- maps SDL events into 'Input'. Idle frames skip 'runFrame' until a command,
 -- hover target change, scroll drag, focused text field, 'markDirty', or an active animation demands a redraw.
@@ -6,10 +8,14 @@
 module NanoUI.Backend.Sdl
   ( SdlEnv (..)
   , runSdlApp
+  , runSdlAppEff
   , runSdlAppWithQuit
+  , runSdlAppWithQuitEff
   , runSdlAppWith
+  , runSdlAppWithEff
   , registerRgbaImage
   , sdlDrawFrame
+  , sdlDrawFrameEff
   , withSdlBench
   , acquireSdlBench
   , releaseSdlBench
@@ -17,6 +23,8 @@ module NanoUI.Backend.Sdl
   , SdlDebugSnapshot (..)
   , emptySdlDebug
   , readSdlDebugEnv
+  , askSdlEnv
+  , askSdlDebug
   ) where
 
 import Control.Exception (bracket, finally)
@@ -27,7 +35,15 @@ import NanoUI
   ( Context
   , ImageId
   , Input (..)
-  , UI
+  , Layer (..)
+  , NanoUI
+  , Ui
+  , Eff
+  , IOE
+  , askHost
+  , runFrameEff
+  , type (:>)
+  , uiIO
   , anyAnimating
   , collectTextSpans
   , collectOverlayTextSpans
@@ -43,7 +59,7 @@ import NanoUI
   , registerImage
   , Rect (..)
   , rectIntersect
-  , runFrame
+  , runEff
   , Size (..)
   , takeDamage
   , textInputEditActive
@@ -98,17 +114,45 @@ import SDL3.Sys.Render (renderPresentSafe, setRenderDrawBlendModeSafe)
 animateTimeout :: Int
 animateTimeout = 16
 
-runSdlApp :: Context -> UI () -> IO ()
-runSdlApp ctx ui = runSdlAppWithQuit ctx (const False) ui
+runSdlApp :: Context -> NanoUI () -> IO ()
+runSdlApp = runSdlAppEff runEff
 
-runSdlAppWithQuit :: Context -> (Input -> Bool) -> UI () -> IO ()
-runSdlAppWithQuit ctx shouldQuit ui = runSdlAppWith ctx (const (pure ())) shouldQuit ui
+runSdlAppEff ::
+  IOE :> es =>
+  (forall x. Eff es x -> IO x) ->
+  Context ->
+  Eff (Ui : es) () ->
+  IO ()
+runSdlAppEff unlift ctx ui = runSdlAppWithQuitEff unlift ctx (const False) ui
+
+runSdlAppWithQuit :: Context -> (Input -> Bool) -> NanoUI () -> IO ()
+runSdlAppWithQuit = runSdlAppWithQuitEff runEff
+
+runSdlAppWithQuitEff ::
+  IOE :> es =>
+  (forall x. Eff es x -> IO x) ->
+  Context ->
+  (Input -> Bool) ->
+  Eff (Ui : es) () ->
+  IO ()
+runSdlAppWithQuitEff unlift ctx shouldQuit ui =
+  runSdlAppWithEff unlift ctx (const (pure ())) shouldQuit ui
 
 registerRgbaImage :: Context -> ImageId -> Int -> Int -> ByteString -> IO Bool
 registerRgbaImage = registerImage
 
-runSdlAppWith :: Context -> (SdlEnv -> IO ()) -> (Input -> Bool) -> UI () -> IO ()
-runSdlAppWith ctx setup shouldQuit ui =
+runSdlAppWith :: Context -> (SdlEnv -> IO ()) -> (Input -> Bool) -> NanoUI () -> IO ()
+runSdlAppWith = runSdlAppWithEff runEff
+
+runSdlAppWithEff ::
+  IOE :> es =>
+  (forall x. Eff es x -> IO x) ->
+  Context ->
+  (SdlEnv -> IO ()) ->
+  (Input -> Bool) ->
+  Eff (Ui : es) () ->
+  IO ()
+runSdlAppWithEff unlift ctx setup shouldQuit ui =
   withSdl ctx "nano-ui" defaultWindowSize $ \ctx0 env -> do
     setup env
     void $ setRenderDrawBlendModeSafe (sdlRenderer env) (fromIntegral sDL_BLENDMODE_BLEND)
@@ -117,7 +161,7 @@ runSdlAppWith ctx setup shouldQuit ui =
     prev <- newIORef inp0
     pendingRedraw <- newIORef False
     wasAnimating <- newIORef False
-    (_, synced0) <- draw ctx1 ui env inp0 True
+    (_, synced0) <- drawEff unlift ctx1 ui env inp0 True
     writeIORef pendingRedraw False
     writeIORef prev synced0
     ctxRef <- newIORef ctx1
@@ -128,15 +172,17 @@ runSdlAppWith ctx setup shouldQuit ui =
               liveCtx <- readIORef ctxRef
               inp <- readIORef prev
               (ctx', inpSynced) <- syncDisplay liveCtx env (clearEphemeral inp)
-              (_, s) <- draw ctx' ui env inpSynced True
+              (_, s) <- drawEff unlift ctx' ui env inpSynced True
               writeIORef ctxRef ctx'
               writeIORef prev s
     bracket (installResizeWatch onResize) id $ \_ ->
-      loop ctxRef ui env prev pendingRedraw wasAnimating drawing shouldQuit synced0 [] now
+      loop unlift ctxRef ui env prev pendingRedraw wasAnimating drawing shouldQuit synced0 [] now
 
 loop ::
+  IOE :> es =>
+  (forall x. Eff es x -> IO x) ->
   IORef Context ->
-  UI () ->
+  Eff (Ui : es) () ->
   SdlEnv ->
   IORef Input ->
   IORef Bool ->
@@ -147,7 +193,7 @@ loop ::
   [SdlEvent] ->
   Double ->
   IO ()
-loop ctxRef ui env prev pendingRedraw wasAnimating drawing shouldQuit inp queued lastT = do
+loop unlift ctxRef ui env prev pendingRedraw wasAnimating drawing shouldQuit inp queued lastT = do
   ctx <- readIORef ctxRef
   debugOpen <- debugPanelOpen ctx
   wantDebug <- takeDebugLive (sdlDebug env) debugOpen
@@ -206,7 +252,7 @@ loop ctxRef ui env prev pendingRedraw wasAnimating drawing shouldQuit inp queued
               then do
                 ms <-
                   tryWithDrawingLock drawing $ do
-                    (_, s) <- draw ctx' ui env inpSynced (debugOpen || wantDebug)
+                    (_, s) <- drawEff unlift ctx' ui env inpSynced (debugOpen || wantDebug)
                     writeIORef pendingRedraw False
                     writeIORef prev s
                     pure s
@@ -220,6 +266,7 @@ loop ctxRef ui env prev pendingRedraw wasAnimating drawing shouldQuit inp queued
             then pure ()
             else
               loop
+                unlift
                 ctxRef
                 ui
                 env
@@ -239,12 +286,34 @@ tryWithDrawingLock ref act = do
     then Just <$> (act `finally` writeIORef ref False)
     else pure Nothing
 
-draw :: Context -> UI () -> SdlEnv -> Input -> Bool -> IO (Bool, Input)
-draw ctx ui env inp forceFull = do
+sdlDrawFrame :: Context -> NanoUI () -> SdlEnv -> Input -> Bool -> IO (Bool, Input)
+sdlDrawFrame = sdlDrawFrameEff runEff
+
+sdlDrawFrameEff ::
+  IOE :> es =>
+  (forall x. Eff es x -> IO x) ->
+  Context ->
+  Eff (Ui : es) () ->
+  SdlEnv ->
+  Input ->
+  Bool ->
+  IO (Bool, Input)
+sdlDrawFrameEff = drawEff
+
+drawEff ::
+  IOE :> es =>
+  (forall x. Eff es x -> IO x) ->
+  Context ->
+  Eff (Ui : es) () ->
+  SdlEnv ->
+  Input ->
+  Bool ->
+  IO (Bool, Input)
+drawEff unlift ctx ui env inp forceFull = do
   scale <- readIORef (sdlScaleRef env)
   SdlImage.syncImageAtlas (sdlRenderer env) (sdlImages env) ctx
   t0 <- getMonotonicTime
-  (_, _, drawData, dirtyAfterUi) <- runFrame ctx inp ui
+  (_, _, drawData, dirtyAfterUi) <- runFrameEff unlift ctx inp ui
   t1 <- getMonotonicTime
   syncPointerCursor (sdlCursors env) ctx inp
   dmg0 <- takeDamage ctx
@@ -267,10 +336,12 @@ draw ctx ui env inp forceFull = do
       let clear = themeWindow (ctxTheme ctx)
           spansIn = filterSpans damage
       withRenderBatch (sdlRenderer env) $ \batch -> do
-        renderDrawDataPass batch (sdlRenderer env) scale (Just clear) drawData False (sdlImages env) damage
+        renderDrawDataPass batch (sdlRenderer env) scale (Just clear) drawData [LayerBackground] (sdlImages env) damage
         renderTextSpans batch (sdlRenderer env) scale font monoFont (sdlTextCache env) (spansIn baseSpans)
-        renderDrawDataPass batch (sdlRenderer env) scale Nothing drawData True (sdlImages env) damage
+        renderDrawDataPass batch (sdlRenderer env) scale Nothing drawData [LayerContent] (sdlImages env) damage
+        renderDrawDataPass batch (sdlRenderer env) scale Nothing drawData [LayerOverlay] (sdlImages env) damage
         renderTextSpans batch (sdlRenderer env) scale font monoFont (sdlTextCache env) (spansIn overlaySpans)
+        renderDrawDataPass batch (sdlRenderer env) scale Nothing drawData [LayerChrome] (sdlImages env) damage
       okBlit <- blitRetain (sdlRenderer env) scale tex damage
       unless okBlit $ fail "SDL_RenderTexture(retain) failed"
       void $ renderPresentSafe (sdlRenderer env)
@@ -302,6 +373,16 @@ blitRetain ren scale tex damage =
       let (px, py, pw, ph) = clipPixelRect scale r
        in retainBlitRect ren tex px py pw ph px py
 
+askSdlEnv :: Ui :> es => Eff es (Maybe SdlEnv)
+askSdlEnv = askHost
+
+askSdlDebug :: Ui :> es => Eff es SdlDebugSnapshot
+askSdlDebug = do
+  menv <- askSdlEnv
+  case menv of
+    Nothing -> pure emptySdlDebug
+    Just env -> uiIO (readSdlDebugEnv env)
+
 readSdlDebugEnv :: SdlEnv -> IO SdlDebugSnapshot
 readSdlDebugEnv env = do
   scale <- readIORef (sdlScaleRef env)
@@ -310,6 +391,3 @@ readSdlDebugEnv env = do
   mouse <- queryMouseWindowPos
   let pos = maybe (V2 0 0) (windowToLogicalCoords scale) mouse
   readSdlDebug (sdlDebug env) size pos (sdlFontPath env) scale name
-
-sdlDrawFrame :: Context -> UI () -> SdlEnv -> Input -> Bool -> IO (Bool, Input)
-sdlDrawFrame = draw

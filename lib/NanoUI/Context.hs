@@ -1,4 +1,6 @@
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StrictData #-}
+{-# LANGUAGE TypeApplications #-}
 
 module NanoUI.Context
   ( Context (..)
@@ -46,6 +48,7 @@ module NanoUI.Context
   , PendingTooltip (..)
   , TextInputMenu (..)
   , TextInputDrag (..)
+  , WindowResizeEdge (..)
   , WindowResizeDrag (..)
   , withClipboard
   , textInputEditActive
@@ -60,11 +63,16 @@ module NanoUI.Context
   , lookupImageUv
   , atlasSnapshot
   , atlasTextureId
+  , setHost
+  , askHostIO
 ) where
 
 import Control.Monad (when)
 import Data.Bits (shiftR, shiftL, (.&.), (.|.))
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.Dynamic (Dynamic, fromDynamic, toDyn)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
+import Data.Proxy (Proxy (..))
+import Data.Typeable (Typeable, TypeRep, typeOf, typeRep)
 import Data.IntMap.Strict (IntMap)
 import Data.Text (Text)
 import Data.Word (Word64)
@@ -75,7 +83,7 @@ import qualified NanoUI.Atlas as Atlas
 import NanoUI.Atlas (ImageAtlas, atlasTextureId)
 import NanoUI.Draw (DrawArena, newDrawArena)
 import NanoUI.Types (Color (..), Damage (..), ImageId (..), Rect (..), Size (..))
-import NanoUI.Font (FontMetrics, hasMonoFontMarker, measureText, monospaceMetrics, stripMonoFontMarker)
+import NanoUI.Font (FontMetrics, hasMonoFontMarker, measureText, monospaceMetrics, stripWidgetMarkers)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), Key (KeyEscape))
 import NanoUI.Layout.Arena (NodeArena, NodeType, newNodeArena)
@@ -147,10 +155,24 @@ data TextInputDrag = TextInputDrag
   }
   deriving (Eq, Show)
 
+data WindowResizeEdge
+  = ResizeN
+  | ResizeS
+  | ResizeE
+  | ResizeW
+  | ResizeNE
+  | ResizeNW
+  | ResizeSE
+  | ResizeSW
+  deriving (Eq, Show)
+
 data WindowResizeDrag = WindowResizeDrag
   { wrdWidget :: WidgetId
+  , wrdEdge :: WindowResizeEdge
   , wrdGrabX :: Float
   , wrdGrabY :: Float
+  , wrdStartX :: Float
+  , wrdStartY :: Float
   , wrdStartW :: Float
   , wrdStartH :: Float
   , wrdMinW :: Float
@@ -203,6 +225,7 @@ data Context = Context
   , ctxPrevFloatingRects :: IORef (IntMap Rect)
   , ctxImageAtlas :: ImageAtlas
   , ctxWakeLoop :: IORef (Maybe (IO ()))
+  , ctxHost :: IORef (Map.Map TypeRep Dynamic)
   }
 
 {-# INLINE newContext #-}
@@ -240,6 +263,7 @@ newContext = do
   ctxPrevFloatingRects <- newIORef IM.empty
   ctxImageAtlas <- Atlas.newImageAtlas
   ctxWakeLoop <- newIORef Nothing
+  ctxHost <- newIORef Map.empty
   let fm0 = monospaceMetrics 12
   pure
     Context
@@ -259,7 +283,7 @@ newContext = do
       , ctxIdSalt
       , ctxFontMetrics = fm0
       , ctxMonoFontMetrics = fm0
-      , ctxMeasureText = \txt -> pure (measureText fm0 (stripMonoFontMarker txt))
+      , ctxMeasureText = \txt -> pure (measureText fm0 (stripWidgetMarkers txt))
       , ctxMeasureCache = Nothing
       , ctxExternalText = False
       , ctxTheme = defaultTheme
@@ -283,6 +307,7 @@ newContext = do
       , ctxPrevFloatingRects
       , ctxImageAtlas
       , ctxWakeLoop
+      , ctxHost
       }
 
 fontMetricsForText :: Context -> Text -> FontMetrics
@@ -298,7 +323,7 @@ withFontMetrics ctx fm =
     { ctxFontMetrics = fm
     , ctxMeasureText =
         \txt ->
-          pure (measureText (fontMetricsForText ctx {ctxFontMetrics = fm} txt) (stripMonoFontMarker txt))
+          pure (measureText (fontMetricsForText ctx {ctxFontMetrics = fm} txt) (stripWidgetMarkers txt))
     }
 
 {-# INLINE withMonoFontMetrics #-}
@@ -318,7 +343,7 @@ wrapMeasureCache scale ctx measure =
       ctx
         { ctxMeasureText = \txt -> do
             let mono = hasMonoFontMarker txt
-                key = (stripMonoFontMarker txt, mono, scale)
+                key = (stripWidgetMarkers txt, mono, scale)
             cache <- readIORef cacheRef
             case Map.lookup key cache of
               Just wh -> pure wh
@@ -342,6 +367,16 @@ withExternalText ctx on = ctx {ctxExternalText = on}
 {-# INLINE withTheme #-}
 withTheme :: Context -> Theme -> Context
 withTheme ctx theme = ctx {ctxTheme = theme}
+
+{-# INLINE setHost #-}
+setHost :: Typeable a => Context -> a -> IO ()
+setHost ctx a = modifyIORef' (ctxHost ctx) (Map.insert (typeOf a) (toDyn a))
+
+{-# INLINE askHostIO #-}
+askHostIO :: forall a. Typeable a => Context -> IO (Maybe a)
+askHostIO ctx = do
+  hosts <- readIORef (ctxHost ctx)
+  pure (Map.lookup (typeRep (Proxy @a)) hosts >>= fromDynamic)
 
 {-# INLINE newTerminalContext #-}
 newTerminalContext :: IO Context

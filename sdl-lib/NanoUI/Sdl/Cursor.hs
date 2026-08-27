@@ -81,6 +81,10 @@ data SdlCursors = SdlCursors
   , scMoveFallback :: Ptr Mouse.SDL_Cursor
   , scGrab :: Ptr Mouse.SDL_Cursor
   , scGrabbing :: Ptr Mouse.SDL_Cursor
+  , scNsResize :: Ptr Mouse.SDL_Cursor
+  , scEwResize :: Ptr Mouse.SDL_Cursor
+  , scNwseResize :: Ptr Mouse.SDL_Cursor
+  , scNeswResize :: Ptr Mouse.SDL_Cursor
   , scCurrent :: IORef UiCursorKind
   }
 
@@ -90,6 +94,10 @@ initCursors = do
   ptr <- createSystemCursorSafe Mouse.SDL_SYSTEM_CURSOR_POINTER
   text <- createSystemCursorSafe Mouse.SDL_SYSTEM_CURSOR_TEXT
   moveFallback <- createSystemCursorSafe Mouse.SDL_SYSTEM_CURSOR_MOVE
+  ns <- createSystemCursorSafe Mouse.SDL_SYSTEM_CURSOR_NS_RESIZE
+  ew <- createSystemCursorSafe Mouse.SDL_SYSTEM_CURSOR_EW_RESIZE
+  nwse <- createSystemCursorSafe Mouse.SDL_SYSTEM_CURSOR_NWSE_RESIZE
+  nesw <- createSystemCursorSafe Mouse.SDL_SYSTEM_CURSOR_NESW_RESIZE
   supported <- extendedGrabCursorsSupported
   grab <- grabCursorOrFallback moveFallback supported
   grabbing <- grabbingCursorOrFallback moveFallback supported
@@ -98,6 +106,10 @@ initCursors = do
   when (ptr == nullPtr) $ fail "SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_POINTER) failed"
   when (text == nullPtr) $ fail "SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_TEXT) failed"
   when (moveFallback == nullPtr) $ fail "SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_MOVE) failed"
+  when (ns == nullPtr) $ fail "SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_NS_RESIZE) failed"
+  when (ew == nullPtr) $ fail "SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_EW_RESIZE) failed"
+  when (nwse == nullPtr) $ fail "SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_NWSE_RESIZE) failed"
+  when (nesw == nullPtr) $ fail "SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_NESW_RESIZE) failed"
   when (grab == nullPtr) $ fail "SDL_CreateSystemCursor(grab) failed"
   when (grabbing == nullPtr) $ fail "SDL_CreateSystemCursor(grabbing) failed"
   pure
@@ -108,6 +120,10 @@ initCursors = do
       , scMoveFallback = moveFallback
       , scGrab = grab
       , scGrabbing = grabbing
+      , scNsResize = ns
+      , scEwResize = ew
+      , scNwseResize = nwse
+      , scNeswResize = nesw
       , scCurrent = current
       }
 
@@ -121,6 +137,10 @@ destroyCursors cursors = do
   let fb = scMoveFallback cursors
   destroyOwnedCursor (scPointer cursors) nullPtr
   destroyOwnedCursor (scText cursors) nullPtr
+  destroyOwnedCursor (scNsResize cursors) nullPtr
+  destroyOwnedCursor (scEwResize cursors) nullPtr
+  destroyOwnedCursor (scNwseResize cursors) nullPtr
+  destroyOwnedCursor (scNeswResize cursors) nullPtr
   destroyOwnedCursor (scGrab cursors) fb
   destroyOwnedCursor (scGrabbing cursors) fb
   destroyCursorSafe fb
@@ -132,6 +152,10 @@ cursorPtr cursors = \case
   UiCursorText -> scText cursors
   UiCursorGrab -> scGrab cursors
   UiCursorGrabbing -> scGrabbing cursors
+  UiCursorNsResize -> scNsResize cursors
+  UiCursorEwResize -> scEwResize cursors
+  UiCursorNwseResize -> scNwseResize cursors
+  UiCursorNeswResize -> scNeswResize cursors
 
 syncPointerCursor :: SdlCursors -> Context -> Input -> IO ()
 syncPointerCursor cursors ctx inp = do
