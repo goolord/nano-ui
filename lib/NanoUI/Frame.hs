@@ -72,6 +72,7 @@ import NanoUI.Draw
   , pushRect
   , pushImage
   , pushRoundedRect
+  , pushRoundedStroke
   , pushText
   , resetDrawArena
   , withClip
@@ -90,13 +91,12 @@ import NanoUI.Font
   , stripWidgetMarkers
   , lineWidth
   , ScrollBarSlot (..)
-  , scrollBarGeom
+  , scrollBarGeomFor
   , scrollBarOuterGap
-  , scrollBarWindowHang
-  , scrollBarWidth
   , scrollLayoutGutter
   , widgetContentInset
   , centeredTextY
+  , alignedTextBox
   , wrapTextLines
   , wrapTextLinesIO
   )
@@ -108,6 +108,7 @@ import NanoUI.Layout.Arena
   , NodeType (..)
   , SizingTag (..)
   , arenaCount
+  , getAlignX
   , getDirection
   , getFirstChild
   , getHeightSizing
@@ -558,6 +559,7 @@ collectNodeTextSpans ctx idx = do
         else do
           let (txt, fg, bg) = nodeLabelPaint theme raw
               (ix, _) = labelContentInset fm
+          ax <- getAlignX (ctxNodeArena ctx) idx
           (_, _, maxW, _) <- getMinMax (ctxNodeArena ctx) idx
           (wTag, _) <- getWidthSizing (ctxNodeArena ctx) idx
           (tw0, th0) <- ctxMeasureText ctx txt
@@ -566,7 +568,7 @@ collectNodeTextSpans ctx idx = do
                 | wTag == SizingGrow && w > 0 = w
                 | otherwise = maxW
               canWrap = wrapCap < 1e8
-              wrapW = max 0 (wrapCap - ix)
+              wrapW = max 0 (wrapCap - 2 * ix)
               lineH = layoutLineHeight fm
           if canWrap && wrapCap + 0.5 < tw0
             then do
@@ -580,18 +582,20 @@ collectNodeTextSpans ctx idx = do
                   else mapM (fmap fst . ctxMeasureText ctx) textLines
               pure
                 [ ( Rect
-                      (x + ix)
+                      tx
                       (centeredTextY fm (y + fromIntegral i * lineH) lineH th0)
-                      (min lw (max 0 (w - ix)))
+                      tw
                       th0
                   , line
                   , fg
                   , bg
                   )
                 | (i, line, lw) <- zip3 [(0 :: Int) ..] textLines lineWs
+                , let (tx, tw) = alignedTextBox ax x w ix lw
                 ]
             else
-              pure [(Rect (x + ix) (centeredTextY fm y h th0) (min tw0 (max 0 (w - ix))) th0, txt, fg, bg)]
+              let (tx, used) = alignedTextBox ax x w ix tw0
+               in pure [(Rect tx (centeredTextY fm y h th0) used th0, txt, fg, bg)]
     else
       if isWidgetNode nt
         then widgetTextSpans ctx nt idx x y w h
@@ -1056,12 +1060,14 @@ widgetTextPlacements ctx nt idx x y w h = do
             ]
     _ -> do
       txt <- displayText ctx nt idx
+      ax <- getAlignX (ctxNodeArena ctx) idx
       let fm' =
             if hasMonoFontMarker txt
               then ctxMonoFontMetrics ctx
               else fm
       (tw, th) <- ctxMeasureText ctx txt
-      pure [(txt, x + ix, centeredTextY fm' y h th, tw, th)]
+      let (tx, used) = alignedTextBox ax x w ix tw
+      pure [(txt, tx, centeredTextY fm' y h th, used, th)]
 
 sliderValue :: Context -> NodeIdx -> IO Float
 sliderValue ctx idx = do
@@ -1152,7 +1158,7 @@ lowerNode ctx idx = do
     NodePanel -> do
       let style = themePanel theme
       fillStyledRect da terminal style rect
-      strokeStyledRect da terminal style (styleBg style) x y w h
+      strokeStyledRect da terminal style x y w h
       withClip da (borderContentClip style rect) $ walkChildren ctx idx
     NodeScrollContainer -> do
       let style = themeInput theme
@@ -1165,7 +1171,7 @@ lowerNode ctx idx = do
           wellStyle = style {styleCornerRadius = 0}
       when paintWell $ do
         fillStyledRect da terminal wellStyle rect
-        strokeStyledRect da terminal wellStyle (styleBg wellStyle) x y w h
+        strokeStyledRect da terminal wellStyle x y w h
       dir <- getDirection (ctxNodeArena ctx) idx
       contentSize <- getNodeValue (ctxNodeArena ctx) idx
       slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
@@ -1177,9 +1183,11 @@ lowerNode ctx idx = do
       raw <- getText (ctxNodeArena ctx) idx
       let (txt, fg, _) = nodeLabelPaint theme raw
           (ix, _) = labelContentInset fm
+      ax <- getAlignX (ctxNodeArena ctx) idx
       when (not (ctxExternalText ctx) && not (T.null txt)) $ do
         (tw, th) <- ctxMeasureText ctx raw
-        pushRect da (Rect (x + ix) (centeredTextY fm y h th) tw th) fg
+        let (tx, used) = alignedTextBox ax x w ix tw
+        pushRect da (Rect tx (centeredTextY fm y h th) used th) fg
     NodeSeparator -> do
       let hair = 1
       if w >= h
@@ -1201,7 +1209,6 @@ lowerNode ctx idx = do
             da
             False
             fieldStyle
-            (styleBg style)
             (rectX fieldRect)
             (rectY fieldRect)
             (rectW fieldRect)
@@ -1233,7 +1240,7 @@ lowerNode ctx idx = do
                 nt /= NodeCheckbox && nt /= NodeSlider && nt /= NodeTextInput
       when opaqueBg $ fillStyledRect da terminal style rect
       when (not terminal) $ do
-        when opaqueBg $ strokeStyledRect da terminal style (styleBg style) x y w h
+        when opaqueBg $ strokeStyledRect da terminal style x y w h
         when (nt == NodeCheckbox) $
           drawCheckbox
             da
@@ -1389,15 +1396,15 @@ fillStyledRect da terminal style rect =
     then pushRect da rect (styleBg style)
     else pushRoundedRect da rect (styleCornerRadius style) (styleBg style)
 
-strokeStyledRect :: DrawArena -> Bool -> Style -> Color -> Float -> Float -> Float -> Float -> IO ()
-strokeStyledRect da terminal style fillBg x y w h =
+strokeStyledRect :: DrawArena -> Bool -> Style -> Float -> Float -> Float -> Float -> IO ()
+strokeStyledRect da terminal style x y w h =
   when (not terminal && styleBorderWidth style > 0) $ do
     let bw = max 1 (styleBorderWidth style)
         col = styleBorder style
         r = styleCornerRadius style
     if r <= 0
       then strokeRect da x y w h bw col
-      else strokeRoundedBorder da x y w h r bw col fillBg
+      else strokeRoundedBorder da x y w h r bw col
 
 strokeRoundedBorder ::
   DrawArena ->
@@ -1408,20 +1415,17 @@ strokeRoundedBorder ::
   Float ->
   Float ->
   Color ->
-  Color ->
   IO ()
-strokeRoundedBorder da x y w h r bw col fillBg = do
-  -- Keep the AA fringe inside the layout box so a parent clip cannot nick the top edge.
-  let inset = 1
+strokeRoundedBorder da x y w h r bw col = do
+  -- Half-pixel inset keeps the 1px AA fringe inside the clip. Do not snap
+  -- the fill in C or this becomes a full layout pixel again.
+  let inset = 0.5
       ox = x + inset
       oy = y + inset
       ow = max 0 (w - 2 * inset)
       oh = max 0 (h - 2 * inset)
       rr = min r (min (ow / 2) (oh / 2))
-      ir = max 0 (rr - bw)
-  pushRoundedRect da (Rect ox oy ow oh) rr col
-  when (ow > 2 * bw && oh > 2 * bw) $
-    pushRoundedRect da (Rect (ox + bw) (oy + bw) (ow - 2 * bw) (oh - 2 * bw)) ir fillBg
+  pushRoundedStroke da (Rect ox oy ow oh) rr bw col
 
 borderContentClip :: Style -> Rect -> Rect
 borderContentClip style (Rect x y w h) =
@@ -2159,7 +2163,7 @@ textInputMenuSepH :: FontMetrics -> Float
 textInputMenuSepH fm = if isTerminalFont fm then 1 else 9
 
 textInputMenuCornerR :: Float
-textInputMenuCornerR = 12
+textInputMenuCornerR = 2
 
 textInputMenuShadowOff :: Float
 textInputMenuShadowOff = 3
@@ -2197,7 +2201,7 @@ overlayMenuStyle theme =
 overlayModalStyle :: Theme -> Style
 overlayModalStyle theme =
   let base = overlayMenuStyle theme
-   in base {styleCornerRadius = 16, styleBorderWidth = 1}
+   in base {styleCornerRadius = 2, styleBorderWidth = 1}
 
 textInputMenuStyle :: Theme -> Style
 textInputMenuStyle = overlayMenuStyle
@@ -2384,7 +2388,6 @@ drawTextInputMenuOverlays ctx inp = do
             da
             False
             menuStyle
-            (styleBg menuStyle)
             (rectX menuRect)
             (rectY menuRect)
             (rectW menuRect)
@@ -3077,7 +3080,7 @@ drawWindowOverlays ctx = do
       let rect = Rect x y w h
       when (not terminal) $ pushMenuShadow da rect (styleCornerRadius style)
       fillStyledRect da terminal style rect
-      strokeStyledRect da terminal style (styleBg style) x y w h
+      strokeStyledRect da terminal style x y w h
       withClip da rect $ walkChildren ctx idx
 
 collectWindowSpans :: Context -> IO [(Rect, T.Text, Color, Color, Rect)]
@@ -3103,7 +3106,7 @@ drawModalOverlays ctx (Size ww wh) = do
             style = overlayModalStyle theme
         when (not terminal) $ pushMenuShadow da rect (styleCornerRadius style)
         fillStyledRect da terminal style rect
-        strokeStyledRect da terminal style (styleBg style) x y w h
+        strokeStyledRect da terminal style x y w h
         dir <- getDirection (ctxNodeArena ctx) idx
         contentSize <- getNodeValue (ctxNodeArena ctx) idx
         slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
@@ -3141,17 +3144,12 @@ collectFloatingSpans ctx wanted = do
 
 strokeRect :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
 strokeRect da x y w h bw col =
-  let t = max 1 bw
-      inset = 1
+  let inset = 0.5
       ox = x + inset
       oy = y + inset
       ow = max 0 (w - 2 * inset)
       oh = max 0 (h - 2 * inset)
-   in do
-    pushRect da (Rect ox oy ow t) col
-    pushRect da (Rect ox (oy + oh - t) ow t) col
-    pushRect da (Rect ox oy t oh) col
-    pushRect da (Rect (ox + ow - t) oy t oh) col
+   in pushRoundedStroke da (Rect ox oy ow oh) 0 (max 1 bw) col
 
 selectItemH :: FontMetrics -> Float -> Float
 selectItemH fm rh = if isTerminalFont fm then max 1 rh else 28
@@ -3278,32 +3276,19 @@ scrollContentClip fm slot dir x y w h pad contentSize =
         DirColumn -> Rect (rectX base) (rectY base) (max 0 (rectW base - gutter)) (rectH base)
         DirRow -> Rect (rectX base) (rectY base) (rectW base) (max 0 (rectH base - gutter))
 
--- List/page bars stay inside the scroll rect. Window body bars hang into padR.
+-- Bars stay inside the scroll rect. Window body reserves a content gutter.
 scrollChromeLane ::
   FontMetrics -> ScrollBarSlot -> DirTag -> Float -> Float -> Float -> Float -> Padding -> Rect
 scrollChromeLane fm slot dir x y w h pad =
-  let (barW, _) = scrollBarGeom fm
+  let (barW, _) = scrollBarGeomFor fm slot
+      outer = scrollBarOuterGap fm slot
    in case dir of
         DirColumn ->
-          let (laneX, laneW) =
-                case slot of
-                  ScrollBarWindow ->
-                    let hang = scrollBarWindowHang fm
-                     in (x + w, barW + hang)
-                  _ ->
-                    let outer = scrollBarOuterGap fm slot
-                     in (max x (x + w - outer - barW), barW)
-           in Rect laneX (y + padT pad) laneW (max 0 (h - padT pad - padB pad))
+          let laneX = max x (x + w - outer - barW)
+           in Rect laneX (y + padT pad) barW (max 0 (h - padT pad - padB pad))
         DirRow ->
-          let (laneY, laneH) =
-                case slot of
-                  ScrollBarWindow ->
-                    let hang = scrollBarWindowHang fm
-                     in (y + h, barW + hang)
-                  _ ->
-                    let outer = scrollBarOuterGap fm slot
-                     in (max y (y + h - outer - barW), barW)
-           in Rect (x + padL pad) laneY (max 0 (w - padL pad - padR pad)) laneH
+          let laneY = max y (y + h - outer - barW)
+           in Rect (x + padL pad) laneY (max 0 (w - padL pad - padR pad)) barW
 
 data ScrollBarLayout = ScrollBarLayout
   { sbTrack :: Rect
@@ -3325,8 +3310,7 @@ scrollBarLayout ::
   Float ->
   Maybe ScrollBarLayout
 scrollBarLayout fm slot dir x y w h pad contentSize off =
-  let (barW, barMargin) = scrollBarGeom fm
-      hang = if slot == ScrollBarWindow then scrollBarWindowHang fm else 0
+  let (barW, barMargin) = scrollBarGeomFor fm slot
       minThumb = if isTerminalFont fm then barW else 16
    in case dir of
     DirColumn ->
@@ -3336,7 +3320,7 @@ scrollBarLayout fm slot dir x y w h pad contentSize off =
             then Nothing
             else
               let lane = scrollChromeLane fm slot DirColumn x y w h pad
-                  trackX = rectX lane + hang
+                  trackX = rectX lane
                   trackY = y + padT pad + barMargin
                   trackH = max 0 (innerH - 2 * barMargin)
                   thumbH = max minThumb (trackH * innerH / contentSize)
@@ -3356,7 +3340,7 @@ scrollBarLayout fm slot dir x y w h pad contentSize off =
             then Nothing
             else
               let lane = scrollChromeLane fm slot DirRow x y w h pad
-                  trackY = rectY lane + hang
+                  trackY = rectY lane
                   trackX = x + padL pad + barMargin
                   trackW = max 0 (innerW - 2 * barMargin)
                   thumbW = max minThumb (trackW * innerW / contentSize)
@@ -3549,7 +3533,7 @@ drawScrollBar ctx da idx wid x y w h pad _theme terminal = do
           pushRect da track trackBg
           pushRect da thumb thumbCol
         else do
-          let trackR = min 4 (scrollBarWidth / 2)
+          let trackR = min 4 (min (rectW track) (rectH track) / 2)
               thumbR = min 4 (min (rectW thumb) (rectH thumb) / 2)
           pushRoundedRect da track trackR trackBg
           pushRoundedRect da thumb thumbR thumbCol
@@ -3594,7 +3578,6 @@ drawSelectOverlays ctx inp = do
                             da
                             False
                             dropStyle
-                            (styleBg dropStyle)
                             (rectX dropRect)
                             (rectY dropRect)
                             (rectW dropRect)

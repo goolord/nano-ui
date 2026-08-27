@@ -15,6 +15,7 @@ module NanoUI.Font
   , widgetPadding
   , buttonPadding
   , centeredTextY
+  , alignedTextBox
   , layoutLineHeight
   , checkboxBoxSize
   , checkboxLeading
@@ -28,8 +29,10 @@ module NanoUI.Font
   , hasMutedMarker
   , stripWidgetMarkers
   , scrollBarWidth
+  , scrollBarWindowWidth
   , scrollBarMargin
   , scrollBarGeom
+  , scrollBarGeomFor
   , scrollBarGutter
   , ScrollBarSlot (..)
   , classifyScrollBar
@@ -37,13 +40,13 @@ module NanoUI.Font
   , scrollBarOuterGap
   , scrollBarPageExtra
   , scrollBarListExtra
-  , scrollBarWindowHang
+  , scrollBarWindowGutter
   ) where
 
 
 import Data.Text (Text)
 import qualified Data.Text as T
-import NanoUI.Style (padR, windowPad)
+import NanoUI.Style (AlignX (..))
 
 data GlyphQuad = GlyphQuad
   { gqX :: {-# UNPACK #-} !Float
@@ -135,7 +138,7 @@ buttonPadding fm
   | otherwise =
       let adv = fmAdvance fm ' '
           lh = layoutLineHeight fm
-       in (adv * 3.0, lh * 0.42)
+       in (adv * 1.5, lh * 0.21)
 
 {-# INLINE layoutLineHeight #-}
 layoutLineHeight :: FontMetrics -> Float
@@ -150,6 +153,18 @@ centeredTextY fm y h th
   | otherwise =
       let slack = max 0 (th - fmAscent fm)
        in y + (h - th) / 2 - slack * 0.45
+
+-- Origin and used width inside the node box, inset on all AlignX sides.
+{-# INLINE alignedTextBox #-}
+alignedTextBox :: AlignX -> Float -> Float -> Float -> Float -> (Float, Float)
+alignedTextBox ax x w ix tw =
+  let contentW = max 0 (w - 2 * ix)
+      used = min tw contentW
+      tx = case ax of
+        AlignEnd -> x + w - ix - used
+        AlignCenter -> x + ix + (contentW - used) / 2
+        AlignStart -> x + ix
+   in (tx, used)
 
 {-# INLINE widgetPadding #-}
 widgetPadding :: FontMetrics -> (Float, Float)
@@ -172,14 +187,29 @@ checkboxLeading fm
 scrollBarWidth :: Float
 scrollBarWidth = 8
 
+-- Thinner than list/page so the body gutter stays small.
+scrollBarWindowWidth :: Float
+scrollBarWindowWidth = 4
+
 scrollBarMargin :: Float
 scrollBarMargin = 3
 
 scrollBarGeom :: FontMetrics -> (Float, Float)
-scrollBarGeom fm =
+scrollBarGeom fm = scrollBarGeomFor fm ScrollBarList
+
+scrollBarGeomFor :: FontMetrics -> ScrollBarSlot -> (Float, Float)
+scrollBarGeomFor fm slot =
   if isTerminalFont fm
     then (1, 0)
-    else (scrollBarWidth, scrollBarMargin)
+    else
+      let barW = case slot of
+            ScrollBarWindow -> scrollBarWindowWidth
+            _ -> scrollBarWidth
+          -- Window bar: side gaps only. No end inset.
+          endM = case slot of
+            ScrollBarWindow -> 0
+            _ -> scrollBarMargin
+       in (barW, endM)
 
 -- Bar plus end margin. List/page overflow reserves this on the cross axis.
 scrollBarGutter :: FontMetrics -> Float
@@ -204,16 +234,16 @@ scrollBarPageExtra = 4
 scrollBarListExtra :: Float
 scrollBarListExtra = 3
 
--- Tiny gap on both sides of a hanging window bar (content and frame).
+-- Gap on both sides of a window body bar.
 scrollBarWindowSide :: Float
-scrollBarWindowSide = 4
+scrollBarWindowSide = 2
 
 scrollLayoutGutter :: FontMetrics -> ScrollBarSlot -> Float -> Float -> Float
 scrollLayoutGutter fm slot contentSize innerMain
   | contentSize <= innerMain = 0
   | otherwise =
       case slot of
-        ScrollBarWindow -> 0
+        ScrollBarWindow -> scrollBarWindowGutter fm
         ScrollBarList -> scrollBarGutter fm + scrollBarListExtra
         ScrollBarPage -> scrollBarGutter fm + scrollBarPageExtra
 
@@ -227,15 +257,12 @@ scrollBarOuterGap fm slot =
         ScrollBarPage -> scrollBarPageExtra
         ScrollBarWindow -> scrollBarWindowSide
 
--- How far a window body bar hangs past the content edge (left of the bar).
-scrollBarWindowHang :: FontMetrics -> Float
-scrollBarWindowHang fm =
-  if isTerminalFont fm
-    then 0
-    else
-      let (barW, _) = scrollBarGeom fm
-          side = scrollBarWindowSide
-       in min side (max 0 (padR windowPad - side - barW))
+-- Reserved from window body width: side + bar + side.
+scrollBarWindowGutter :: FontMetrics -> Float
+scrollBarWindowGutter fm =
+  let (barW, _) = scrollBarGeomFor fm ScrollBarWindow
+      side = scrollBarOuterGap fm ScrollBarWindow
+   in barW + 2 * side
 
 measureText :: FontMetrics -> Text -> (Float, Float)
 measureText fm txt =

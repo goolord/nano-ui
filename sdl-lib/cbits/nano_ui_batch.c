@@ -28,6 +28,18 @@ bool nano_ui_fill_rounded_rect(
     float w,
     float h,
     float radius);
+bool nano_ui_stroke_rounded_rect(
+    SDL_Renderer *renderer,
+    uint8_t r,
+    uint8_t g,
+    uint8_t b,
+    uint8_t a,
+    float x,
+    float y,
+    float w,
+    float h,
+    float radius,
+    float bw);
 bool nano_ui_fill_triangle(
     SDL_Renderer *renderer,
     uint8_t r,
@@ -458,6 +470,7 @@ void nano_ui_batch_rounded_rect(
     if (!ensure_geom(batch, need_v, need_i)) {
         flush_geom(batch);
         if (!ensure_geom(batch, need_v, need_i)) {
+            nano_ui_batch_flush(batch);
             nano_ui_fill_rounded_rect(batch->renderer, r, g, b, a, x, y, w, h, rad);
             return;
         }
@@ -473,8 +486,31 @@ void nano_ui_batch_rounded_rect(
         || !push_corner(batch, x + w - rad, y + rad, rad, NANO_UI_PI * 1.5f, NANO_UI_PI * 2.f, col)
         || !push_corner(batch, x + w - rad, y + h - rad, rad, 0.f, NANO_UI_PI * 0.5f, col)
         || !push_corner(batch, x + rad, y + h - rad, rad, NANO_UI_PI * 0.5f, NANO_UI_PI, col)) {
+        nano_ui_batch_flush(batch);
         nano_ui_fill_rounded_rect(batch->renderer, r, g, b, a, x, y, w, h, rad);
     }
+}
+
+void nano_ui_batch_stroke_rounded_rect(
+    NanoUiBatch *batch,
+    uint8_t r,
+    uint8_t g,
+    uint8_t b,
+    uint8_t a,
+    float x,
+    float y,
+    float w,
+    float h,
+    float radius,
+    float bw)
+{
+    if (!batch || w <= 0.f || h <= 0.f || bw <= 0.f) {
+        return;
+    }
+    if (batch->vert_count > 0 || batch->solid_count > 0) {
+        nano_ui_batch_flush(batch);
+    }
+    nano_ui_stroke_rounded_rect(batch->renderer, r, g, b, a, x, y, w, h, radius, bw);
 }
 
 static bool load_vtx(const uint8_t *verts, int vert_count, uint32_t idx, float *x, float *y, float *u, float *v, uint32_t *rgba)
@@ -608,7 +644,18 @@ void nano_ui_batch_draw_range(
             float pw = w * scale;
             float ph = h * scale;
             if (v0 < 0.f) {
-                nano_ui_batch_rounded_rect(batch, r, g, b, a, px, py, pw, ph, u0 * scale);
+                float rad = u0 * scale;
+                if (v0 <= -2.f) {
+                    float bw = (-v0 - 1.f) * scale;
+                    if (bw < 1.f) {
+                        bw = 1.f;
+                    }
+                    nano_ui_batch_stroke_rounded_rect(batch, r, g, b, a, px, py, pw, ph, rad, bw);
+                } else {
+                    nano_ui_batch_rounded_rect(batch, r, g, b, a, px, py, pw, ph, rad);
+                }
+                /* Quads emit two tris. Skip the paired tri so we stroke once. */
+                i += 3;
             } else {
                 nano_ui_batch_fill_solid(batch, r, g, b, a, px, py, pw, ph);
             }

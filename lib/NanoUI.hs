@@ -51,6 +51,7 @@ module NanoUI
   , fixedH
   , fixedWH
   , alignMid
+  , alignEnd
   , wrap
   , tight
   , percent
@@ -179,6 +180,7 @@ module NanoUI
   , scrollBarPageExtra
   , scrollBarListExtra
   , scrollBarWidth
+  , scrollBarWindowGutter
   , -- ASCII
     renderASCII
   , renderASCIIFromRects
@@ -187,7 +189,7 @@ module NanoUI
 import NanoUI.Compact (Compact, askCompact, compactHost)
 import NanoUI.Context (Context (..), FrameMsg (..), anyAnimating, atlasSnapshot, atlasTextureId, ctxTheme, getAnimationValue, getFocusId, getHotId, getPrevRect, getScrollOffset, getStore, isDirty, markDirty, modalActive, newContext, newSdlContext, newTerminalContext, overlayConsumesQuit, registerImage, registerImages, setAnimationValue, setHost, setWakeLoop, startAnimation, takeDamage, textInputEditActive, withClipboard, withExternalText, withFontMetrics, withMeasureText, withMonoFontMetrics, wrapMeasureCache)
 import NanoUI.Draw (DrawCmd (..), DrawData (..), Layer (..), indexSize, vertexSize)
-import NanoUI.Font (FontMetrics (..), hasMonoFontMarker, headingFontMarker, isTerminalFont, labelContentInset, monoFontMarker, monospaceMetrics, mutedFontMarker, scrollBarGutter, scrollBarListExtra, scrollBarPageExtra, scrollBarWidth, stripMonoFontMarker, stripWidgetMarkers, widgetContentInset, widgetPadding)
+import NanoUI.Font (FontMetrics (..), hasMonoFontMarker, headingFontMarker, isTerminalFont, labelContentInset, monoFontMarker, monospaceMetrics, mutedFontMarker, scrollBarGutter, scrollBarListExtra, scrollBarPageExtra, scrollBarWidth, scrollBarWindowGutter, stripMonoFontMarker, stripWidgetMarkers, widgetContentInset, widgetPadding)
 import Effectful (Eff, IOE, runEff, type (:>))
 import NanoUI.Frame (collectOverlayTextSpans, collectTextSpans, cursorKindIs, debugPanelOpen, floatingPanelActive, needsRedraw, pointerCursorWanted, runFrame, runFrameEff, sliderTrackRect, textFieldActive, uiCursorKind, UiCursorKind (..))
 import NanoUI.Id (WidgetId (..), hashWidgetId, widgetId)
@@ -228,6 +230,7 @@ import NanoUI.Style
   , fixedH
   , fixedWH
   , alignMid
+  , alignEnd
   , wrap
   , tight
   , percent

@@ -27,6 +27,7 @@ module NanoUI.Style
   , fixedH
   , fixedWH
   , alignMid
+  , alignEnd
   , wrap
   , tight
   , percent
@@ -63,11 +64,11 @@ data Padding = Padding
 
 -- Containers fill with themePanel when any pad side is at least this.
 panelPaintPad :: Float
-panelPaintPad = 12
+panelPaintPad = 6
 
--- Floating window chrome. PadR holds the hanging body scrollbar.
+-- Floating window chrome.
 windowPad :: Padding
-windowPad = Padding 16 16 10 14
+windowPad = Padding 8 8 5 7
 
 data Layout = Layout
   { layoutDirection :: !Direction
@@ -92,8 +93,8 @@ defaultLayout =
     { layoutDirection = Column
     , layoutWidth = Fit
     , layoutHeight = Fit
-    , layoutPadding = Padding 4 4 4 4
-    , layoutGap = 4
+    , layoutPadding = Padding 2 2 2 2
+    , layoutGap = 2
     , layoutWrap = False
     , layoutAlignX = AlignStart
     , layoutAlignY = AlignTop
@@ -148,6 +149,10 @@ fixedWH w h l = l {layoutWidth = Fixed w, layoutHeight = Fixed h}
 alignMid :: Layout -> Layout
 alignMid l = l {layoutAlignY = AlignMiddle}
 
+{-# INLINE alignEnd #-}
+alignEnd :: Layout -> Layout
+alignEnd l = l {layoutAlignX = AlignEnd}
+
 {-# INLINE wrap #-}
 wrap :: Layout -> Layout
 wrap l = l {layoutWrap = True}
@@ -187,7 +192,7 @@ defaultStyle =
     , styleFg = colorRGBA 240 240 240 255
     , styleBorder = colorRGBA 100 100 100 255
     , styleBorderWidth = 1
-    , styleCornerRadius = 4
+    , styleCornerRadius = 2
     , styleHoverBg = colorRGBA 80 80 80 255
     , styleActiveBg = colorRGBA 40 40 40 255
     }
@@ -214,7 +219,7 @@ sdlTheme =
           , styleFg = colorRGBA 236 234 230 255
           , styleBorder = colorRGBA 62 64 72 255
           , styleBorderWidth = 1
-          , styleCornerRadius = 12
+          , styleCornerRadius = 2
           , styleHoverBg = colorRGBA 34 34 38 255
           , styleActiveBg = colorRGBA 30 30 34 255
           }
@@ -224,7 +229,7 @@ sdlTheme =
           , styleFg = colorRGBA 248 247 245 255
           , styleBorder = colorRGBA 74 76 84 255
           , styleBorderWidth = 1
-          , styleCornerRadius = 10
+          , styleCornerRadius = 2
           , styleHoverBg = colorRGBA 68 70 78 255
           , styleActiveBg = colorRGBA 42 42 48 255
           }
@@ -234,7 +239,7 @@ sdlTheme =
           , styleFg = colorRGBA 236 234 230 255
           , styleBorder = colorRGBA 70 72 80 255
           , styleBorderWidth = 1
-          , styleCornerRadius = 10
+          , styleCornerRadius = 2
           , styleHoverBg = colorRGBA 24 24 28 255
           , styleActiveBg = colorRGBA 14 14 17 255
           }
