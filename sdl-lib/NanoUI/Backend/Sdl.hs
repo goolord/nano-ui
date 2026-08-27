@@ -216,10 +216,21 @@ loop ctxRef ui env prev pendingRedraw wasAnimating drawing shouldQuit inp queued
                 writeIORef prev inpSynced
                 pure inpSynced
           overlayQuit <- overlayConsumesQuit ctx' inpSynced
-          unless (shouldQuit inpSynced && not overlayQuit) $
-            if null rest
-              then loop ctxRef ui env prev pendingRedraw wasAnimating drawing shouldQuit synced [] now
-              else loop ctxRef ui env prev pendingRedraw wasAnimating drawing shouldQuit synced rest now
+          if shouldQuit inpSynced && not overlayQuit
+            then pure ()
+            else
+              loop
+                ctxRef
+                ui
+                env
+                prev
+                pendingRedraw
+                wasAnimating
+                drawing
+                shouldQuit
+                synced
+                (if null rest then [] else rest)
+                now
 
 tryWithDrawingLock :: IORef Bool -> IO a -> IO (Maybe a)
 tryWithDrawingLock ref act = do

@@ -447,11 +447,20 @@ filterOccludedBaseSpans panels spans
   | otherwise = filter (not . occluded) spans
   where
     panelRects = IM.elems panels
-    occluded (rect, _, _, _, _) =
-      let cx = rectX rect + rectW rect / 2
-          cy = rectY rect + rectH rect / 2
-          pt = V2 cx cy
-       in any (\panel -> rectContains panel pt) panelRects
+    occluded (rect, _, _, _, clip) =
+      case rectIntersect rect clip of
+        Nothing -> True
+        Just visible -> any (rectFullyInside visible) panelRects
+
+-- Visible text is gone only when a floating panel covers every pixel.
+rectFullyInside :: Rect -> Rect -> Bool
+rectFullyInside (Rect ix iy iw ih) (Rect ox oy ow oh) =
+  iw > 0
+    && ih > 0
+    && ix >= ox
+    && iy >= oy
+    && ix + iw <= ox + ow
+    && iy + ih <= oy + oh
 
 -- TTF measure is often a fraction narrower than the rendered texture.
 textClipSlop :: Float

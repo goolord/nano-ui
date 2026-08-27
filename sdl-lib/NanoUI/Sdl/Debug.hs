@@ -62,6 +62,7 @@ data SdlDebugSampler = SdlDebugSampler
   , smIndices :: Int
   , smCmds :: Int
   , smWantFrame :: Bool
+  , smSnapshot :: SdlDebugSnapshot
   }
 
 debugRefreshSec :: Double
@@ -86,6 +87,7 @@ newSdlDebugSampler = do
       , smIndices = 0
       , smCmds = 0
       , smWantFrame = False
+      , smSnapshot = emptySdlDebug
       }
 
 emptySdlDebug :: SdlDebugSnapshot
@@ -165,56 +167,56 @@ notePresent ref uiMs dd = do
 readSdlDebug :: SamplerRef -> Size -> V2 -> FilePath -> Float -> String -> IO SdlDebugSnapshot
 readSdlDebug ref (Size ww wh) (V2 mx my) fontPath scale renderer = do
   now <- getMonotonicTime
-  s <-
-    atomicModifyIORef' ref $ \cur ->
-      let elapsed = now - smLastDebugT cur
-          refresh = smLastDebugT cur <= 0 || elapsed >= debugRefreshSec
-       in
-        ( cur
-            { smWantFrame = refresh
-            , smLastDebugT = if refresh then now else smLastDebugT cur
-            }
-        , cur
-        )
-  caps <- getNumCapabilities
-  cpus <- getNumProcessors
-  rtsOn <- getRTSStatsEnabled
-  rts <-
-    if rtsOn
-      then rtsFields <$> getRTSStats
-      else pure (0, 0, 0, 0, 0, 0, 0, 0, 0)
-  let (gcs, major, alloc, live, maxMem, copied, gcPct, lastGen, lastMs) = rts
-  pure
-    SdlDebugSnapshot
-      { dbgPresentFps = smPresentEma s
-      , dbgLoopFps = smLoopEma s
-      , dbgFrameMs = smFrameMs s
-      , dbgUiMs = smUiMs s
-      , dbgPresents = smPresents s
-      , dbgSkips = smSkips s
-      , dbgVerts = smVerts s
-      , dbgIndices = smIndices s
-      , dbgCmds = smCmds s
-      , dbgWinW = ww
-      , dbgWinH = wh
-      , dbgMouseX = mx
-      , dbgMouseY = my
-      , dbgScale = scale
-      , dbgFontPath = fontPath
-      , dbgRenderer = renderer
-      , dbgRtsOn = rtsOn
-      , dbgGcs = gcs
-      , dbgMajorGcs = major
-      , dbgAllocMb = alloc
-      , dbgLiveMb = live
-      , dbgMaxMemMb = maxMem
-      , dbgCopiedMb = copied
-      , dbgGcPct = gcPct
-      , dbgLastGcGen = lastGen
-      , dbgLastGcMs = lastMs
-      , dbgCaps = caps
-      , dbgCpus = cpus
-      }
+  (refresh, cur) <-
+    atomicModifyIORef' ref $ \s ->
+      let elapsed = now - smLastDebugT s
+          refresh = smLastDebugT s <= 0 || elapsed >= debugRefreshSec
+       in (s {smWantFrame = refresh}, (refresh, s))
+  if not refresh
+    then pure (smSnapshot cur)
+    else do
+      caps <- getNumCapabilities
+      cpus <- getNumProcessors
+      rtsOn <- getRTSStatsEnabled
+      rts <-
+        if rtsOn
+          then rtsFields <$> getRTSStats
+          else pure (0, 0, 0, 0, 0, 0, 0, 0, 0)
+      let (gcs, major, alloc, live, maxMem, copied, gcPct, lastGen, lastMs) = rts
+          snap' =
+            SdlDebugSnapshot
+              { dbgPresentFps = smPresentEma cur
+              , dbgLoopFps = smLoopEma cur
+              , dbgFrameMs = smFrameMs cur
+              , dbgUiMs = smUiMs cur
+              , dbgPresents = smPresents cur
+              , dbgSkips = smSkips cur
+              , dbgVerts = smVerts cur
+              , dbgIndices = smIndices cur
+              , dbgCmds = smCmds cur
+              , dbgWinW = ww
+              , dbgWinH = wh
+              , dbgMouseX = mx
+              , dbgMouseY = my
+              , dbgScale = scale
+              , dbgFontPath = fontPath
+              , dbgRenderer = renderer
+              , dbgRtsOn = rtsOn
+              , dbgGcs = gcs
+              , dbgMajorGcs = major
+              , dbgAllocMb = alloc
+              , dbgLiveMb = live
+              , dbgMaxMemMb = maxMem
+              , dbgCopiedMb = copied
+              , dbgGcPct = gcPct
+              , dbgLastGcGen = lastGen
+              , dbgLastGcMs = lastMs
+              , dbgCaps = caps
+              , dbgCpus = cpus
+              }
+      atomicModifyIORef' ref $ \s ->
+        (s {smLastDebugT = now, smSnapshot = snap', smWantFrame = True}, ())
+      pure snap'
 
 blend :: Double -> Double -> Double
 blend prev sample
