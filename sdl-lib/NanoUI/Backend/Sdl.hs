@@ -11,6 +11,8 @@ module NanoUI.Backend.Sdl
   , registerRgbaImage
   , sdlDrawFrame
   , withSdlBench
+  , acquireSdlBench
+  , releaseSdlBench
   , syncDisplay
   , SdlDebugSnapshot (..)
   , emptySdlDebug
@@ -86,7 +88,7 @@ import Data.Maybe (isJust)
 import Foreign.Ptr (Ptr, nullPtr)
 import qualified NanoUI.Sdl.Image as SdlImage
 import NanoUI.Sdl.Render (renderDrawDataPass, snapDamage)
-import NanoUI.Sdl.Window (SdlEnv (..), defaultWindowSize, syncDisplay, withSdl, withSdlBench)
+import NanoUI.Sdl.Window (SdlEnv (..), acquireSdlBench, defaultWindowSize, releaseSdlBench, syncDisplay, withSdl, withSdlBench)
 import SDL3.Sys.Bindgen.Blendmode (sDL_BLENDMODE_BLEND)
 import SDL3.Sys.Render (renderPresentSafe, setRenderDrawBlendModeSafe)
 

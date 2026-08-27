@@ -2,13 +2,14 @@ module NanoUI.Sdl.Window
   ( SdlEnv (..)
   , withSdl
   , withSdlBench
+  , acquireSdlBench
+  , releaseSdlBench
   , defaultWindowSize
   , syncDisplay
   ) where
 
 import Control.Exception (bracket)
 import Control.Monad (unless, void, when)
-import Data.Bits ((.|.))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Foreign.C.String (withCString)
 import Foreign.Marshal.Alloc (alloca)
@@ -18,6 +19,7 @@ import NanoUI (Context, Input (..), Size (..), markDirty, setWakeLoop)
 import NanoUI.Sdl.Display
   ( defaultFontSize
   , defaultUiScale
+  , initBenchHints
   , initRefreshEvent
   , initSdlHints
   , pushRefreshEvent
@@ -56,12 +58,12 @@ import SDL3.Sys.Video (destroyWindowSafe)
 sdlWindowResizable :: SDL_WindowFlags
 sdlWindowResizable = SDL_WindowFlags 0x0000000000000020
 
-benchWindowFlags :: SDL_WindowFlags
-benchWindowFlags =
-  SDL_WindowFlags
-    ( 0x0000000000000020
-        .|. 0x0000000000000008
-    )
+-- Hidden only. Do not combine with resizable for bench windows on Windows.
+sdlWindowHidden :: SDL_WindowFlags
+sdlWindowHidden = SDL_WindowFlags 0x0000000000000008
+
+benchWindowSize :: Size
+benchWindowSize = Size 800 600
 
 scaleEpsilon :: Float
 scaleEpsilon = 0.001
@@ -123,98 +125,140 @@ syncInput _env scale inp = do
       Nothing -> inp
 
 withSdl :: Context -> String -> Size -> (Context -> SdlEnv -> IO a) -> IO a
-withSdl ctx title size act = withSdlWindow ctx title size sdlWindowResizable act
+withSdl ctx title size act = withSdlWindow ctx title size sdlWindowResizable False act
 
 withSdlBench :: Context -> (Context -> SdlEnv -> IO a) -> IO a
 withSdlBench ctx act =
-  withSdlWindow ctx "nano-ui-bench" defaultWindowSize benchWindowFlags act
+  withSdlWindow ctx "nano-ui-bench" benchWindowSize sdlWindowHidden True act
 
-withSdlWindow :: Context -> String -> Size -> SDL_WindowFlags -> (Context -> SdlEnv -> IO a) -> IO a
-withSdlWindow ctx title (Size w h) flags act =
+withSdlWindow ::
+  Context ->
+  String ->
+  Size ->
+  SDL_WindowFlags ->
+  Bool ->
+  (Context -> SdlEnv -> IO a) ->
+  IO a
+withSdlWindow ctx title (Size w h) flags bench act =
   withTtf $ do
-    initSdlHints
-    fontPath <-
-      findFontPath >>= \case
-        Nothing ->
-          fail
-            ( "No TrueType font found. Install a system font or set NANO_UI_FONT "
-                <> "to a .ttf path."
-            )
-        Just p -> pure p
-    monoPath <-
-      findMonoFontPath >>= \case
-        Nothing -> pure fontPath
-        Just p -> pure p
-    let startup = do
-          unlessM (initSafe (SDL_InitFlags 32)) $
-            fail "SDL_Init(SDL_INIT_VIDEO) failed"
-          unlessM initRefreshEvent $
-            fail "SDL_RegisterEvents failed for refresh wake"
-          withCString title $ \titlePtr ->
-            alloca $ \winPtr ->
-              alloca $ \renPtr -> do
-                ok <-
-                  createWindowAndRendererSafe
-                    (PtrConst.unsafeFromPtr titlePtr)
-                    (round w)
-                    (round h)
-                    flags
-                    winPtr
-                    renPtr
-                unless ok $ fail "SDL_CreateWindowAndRenderer failed"
-                win <- peek winPtr
-                ren <- peek renPtr
-                scale <- queryWindowDisplayScale win
-                font <- openFont fontPath (defaultFontSize * scale)
-                monoFont <- openFont monoPath (defaultFontSize * scale)
-                scaleRef <- newIORef scale
-                fontRef <- newIORef font
-                monoFontRef <- newIORef monoFont
-                cache <- newTextCache
-                images <- newImageAtlas
-                cursors <- initCursors
-                debug <- newSdlDebugSampler
-                retain <- newIORef (nullPtr, 0, 0)
-                unlessM (setRenderScale ren defaultUiScale) $
-                  fail "SDL_SetRenderScale failed"
-                _ <- startTextInputSafe win
-                pure
-                  SdlEnv
-                    { sdlWindow = win
-                    , sdlRenderer = ren
-                    , sdlFontPath = fontPath
-                    , sdlMonoFontPath = monoPath
-                    , sdlScaleRef = scaleRef
-                    , sdlFontRef = fontRef
-                    , sdlMonoFontRef = monoFontRef
-                    , sdlTextCache = cache
-                    , sdlImages = images
-                    , sdlCursors = cursors
-                    , sdlDebug = debug
-                    , sdlRetain = retain
-                    }
-        teardown env = do
-          (tex, _, _) <- readIORef (sdlRetain env)
-          retainDestroy tex
-          destroyCursors (sdlCursors env)
-          destroyImageAtlas (sdlImages env)
-          destroyTextCache (sdlTextCache env)
-          font <- readIORef (sdlFontRef env)
-          closeFont font
-          monoFont <- readIORef (sdlMonoFontRef env)
-          closeFont monoFont
-          void $ stopTextInputSafe (sdlWindow env)
-          void $ setRenderScale (sdlRenderer env) defaultUiScale
-          destroyRendererSafe (sdlRenderer env)
-          destroyWindowSafe (sdlWindow env)
-          quitSafe
-    bracket startup teardown $ \env -> do
-      scale <- readIORef (sdlScaleRef env)
-      font <- readIORef (sdlFontRef env)
-      monoFont <- readIORef (sdlMonoFontRef env)
-      let ctx' = withSdlClipboard (withTtfMeasureScaled ctx font monoFont scale)
-      setWakeLoop ctx' pushRefreshEvent
-      act ctx' env
+    if bench then initBenchHints else initSdlHints
+    fontPath <- resolveFontPath
+    monoPath <- resolveMonoFontPath fontPath
+    bracket
+      (startSdlWindow ctx title w h flags bench fontPath monoPath)
+      (\(_, env) -> stopSdlWindow bench env)
+      $ \(ctx', env) -> act ctx' env
+
+resolveFontPath :: IO FilePath
+resolveFontPath =
+  findFontPath >>= \case
+    Nothing ->
+      fail
+        ( "No TrueType font found. Install a system font or set NANO_UI_FONT "
+            <> "to a .ttf path."
+        )
+    Just p -> pure p
+
+resolveMonoFontPath :: FilePath -> IO FilePath
+resolveMonoFontPath fontPath =
+  findMonoFontPath >>= \case
+    Nothing -> pure fontPath
+    Just p -> pure p
+
+startSdlWindow ::
+  Context ->
+  String ->
+  Float ->
+  Float ->
+  SDL_WindowFlags ->
+  Bool ->
+  FilePath ->
+  FilePath ->
+  IO (Context, SdlEnv)
+startSdlWindow ctx title w h flags bench fontPath monoPath = do
+  unlessM (initSafe (SDL_InitFlags 32)) $
+    fail "SDL_Init(SDL_INIT_VIDEO) failed"
+  unlessM initRefreshEvent $
+    fail "SDL_RegisterEvents failed for refresh wake"
+  env <-
+    withCString title $ \titlePtr ->
+      alloca $ \winPtr ->
+        alloca $ \renPtr -> do
+          ok <-
+            createWindowAndRendererSafe
+              (PtrConst.unsafeFromPtr titlePtr)
+              (round w)
+              (round h)
+              flags
+              winPtr
+              renPtr
+          unless ok $ fail "SDL_CreateWindowAndRenderer failed"
+          win <- peek winPtr
+          ren <- peek renPtr
+          scale <- queryWindowDisplayScale win
+          font <- openFont fontPath (defaultFontSize * scale)
+          monoFont <- openFont monoPath (defaultFontSize * scale)
+          scaleRef <- newIORef scale
+          fontRef <- newIORef font
+          monoFontRef <- newIORef monoFont
+          cache <- newTextCache
+          images <- newImageAtlas
+          cursors <- initCursors
+          debug <- newSdlDebugSampler
+          retain <- newIORef (nullPtr, 0, 0)
+          unlessM (setRenderScale ren defaultUiScale) $
+            fail "SDL_SetRenderScale failed"
+          when (not bench) $ void $ startTextInputSafe win
+          pure
+            SdlEnv
+              { sdlWindow = win
+              , sdlRenderer = ren
+              , sdlFontPath = fontPath
+              , sdlMonoFontPath = monoPath
+              , sdlScaleRef = scaleRef
+              , sdlFontRef = fontRef
+              , sdlMonoFontRef = monoFontRef
+              , sdlTextCache = cache
+              , sdlImages = images
+              , sdlCursors = cursors
+              , sdlDebug = debug
+              , sdlRetain = retain
+              }
+  scale <- readIORef (sdlScaleRef env)
+  font <- readIORef (sdlFontRef env)
+  monoFont <- readIORef (sdlMonoFontRef env)
+  let ctx' = withSdlClipboard (withTtfMeasureScaled ctx font monoFont scale)
+  setWakeLoop ctx' pushRefreshEvent
+  pure (ctx', env)
+
+stopSdlWindow :: Bool -> SdlEnv -> IO ()
+stopSdlWindow bench env = do
+  (tex, _, _) <- readIORef (sdlRetain env)
+  retainDestroy tex
+  destroyCursors (sdlCursors env)
+  destroyImageAtlas (sdlImages env)
+  destroyTextCache (sdlTextCache env)
+  font <- readIORef (sdlFontRef env)
+  closeFont font
+  monoFont <- readIORef (sdlMonoFontRef env)
+  closeFont monoFont
+  when (not bench) $ void $ stopTextInputSafe (sdlWindow env)
+  void $ setRenderScale (sdlRenderer env) defaultUiScale
+  destroyRendererSafe (sdlRenderer env)
+  destroyWindowSafe (sdlWindow env)
+  quitSafe
+
+acquireSdlBench :: Context -> IO (Context, SdlEnv)
+acquireSdlBench ctx =
+  withTtf $ do
+    initBenchHints
+    fontPath <- resolveFontPath
+    monoPath <- resolveMonoFontPath fontPath
+    let Size w h = benchWindowSize
+    startSdlWindow ctx "nano-ui-bench" w h sdlWindowHidden True fontPath monoPath
+
+releaseSdlBench :: SdlEnv -> IO ()
+releaseSdlBench env = withTtf $ stopSdlWindow True env
 
 unlessM :: IO Bool -> IO () -> IO ()
 unlessM p act = do

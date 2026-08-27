@@ -43,6 +43,11 @@ common rts-options
 common test-rts-options
     ghc-options: -rtsopts -threaded "-with-rtsopts=-A8m -H64m"
 
+-- -N1 keeps the threaded runtime on one capability. Do not pass tasty's -j1
+-- via -with-rtsopts; use: cabal bench ... --benchmark-options=-j1
+common bench-rts-options
+    ghc-options: -rtsopts -threaded "-with-rtsopts=-N1 -T"
+
 common warnings
   ghc-options:
     -Wall
@@ -231,17 +236,24 @@ test-suite nano-ui-test
 benchmark nano-ui-sdl-bench
     import:           extensions
     import:           ghc-options
-    import:           rts-options
+    import:           bench-rts-options
     import:           warnings
     type:             exitcode-stdio-1.0
     main-is:          SdlBench.hs
+    pkgconfig-depends: sdl3 >= 3.2, sdl3-ttf >= 3.2
     build-depends:
         base ^>=4.22.0.0,
-        criterion ^>=1.6,
+        tasty-bench ^>=0.5,
         nano-ui,
         nano-ui:nano-ui-sdl,
         text ^>=2.1
     hs-source-dirs:   benchmark
     default-language: GHC2024
+    default-extensions: CPP
+    if os(windows)
+        build-depends: Win32 >=2.14
+        cpp-options: -Dmingw32_HOST_OS
+        -- Static SDL pkg-config adds -mwindows; keep a console for tasty output.
+        ghc-options: -optl-mconsole
     if !flag(sdl)
         buildable: False

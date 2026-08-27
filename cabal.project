@@ -18,3 +18,4 @@ package nano-ui-term
 
 package nano-ui-sdl-bench
   optimization: 2
+  executable-static: True

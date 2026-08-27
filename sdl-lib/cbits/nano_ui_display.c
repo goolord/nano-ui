@@ -7,6 +7,12 @@ void nano_ui_sdl_init_hints(void)
     SDL_SetHint(SDL_HINT_RENDER_VSYNC, "1");
 }
 
+void nano_ui_sdl_init_bench_hints(void)
+{
+    SDL_SetHint(SDL_HINT_ASSERT, "always_ignore");
+    SDL_SetHint(SDL_HINT_RENDER_VSYNC, "0");
+}
+
 float nano_ui_window_display_scale(SDL_Window *window)
 {
     if (!window) {
