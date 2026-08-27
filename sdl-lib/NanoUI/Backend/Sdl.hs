@@ -73,6 +73,7 @@ import NanoUI.Sdl.Display
   , windowToLogicalCoords
   )
 import NanoUI.Sdl.Event (SdlEvent (..))
+import NanoUI.Sdl.Batch (withRenderBatch)
 import NanoUI.Sdl.Font (renderTextSpans)
 import NanoUI.Sdl.Input
   ( applyEvent
@@ -254,10 +255,11 @@ draw ctx ui env inp forceFull = do
       monoFont <- readIORef (sdlMonoFontRef env)
       let clear = themeWindow (ctxTheme ctx)
           spansIn = filterSpans damage
-      renderDrawDataPass (sdlRenderer env) scale (Just clear) drawData False (sdlImages env) damage
-      renderTextSpans (sdlRenderer env) scale font monoFont (sdlTextCache env) (spansIn baseSpans)
-      renderDrawDataPass (sdlRenderer env) scale Nothing drawData True (sdlImages env) damage
-      renderTextSpans (sdlRenderer env) scale font monoFont (sdlTextCache env) (spansIn overlaySpans)
+      withRenderBatch (sdlRenderer env) $ \batch -> do
+        renderDrawDataPass batch (sdlRenderer env) scale (Just clear) drawData False (sdlImages env) damage
+        renderTextSpans batch (sdlRenderer env) scale font monoFont (sdlTextCache env) (spansIn baseSpans)
+        renderDrawDataPass batch (sdlRenderer env) scale Nothing drawData True (sdlImages env) damage
+        renderTextSpans batch (sdlRenderer env) scale font monoFont (sdlTextCache env) (spansIn overlaySpans)
       okBlit <- blitRetain (sdlRenderer env) scale tex damage
       unless okBlit $ fail "SDL_RenderTexture(retain) failed"
       void $ renderPresentSafe (sdlRenderer env)

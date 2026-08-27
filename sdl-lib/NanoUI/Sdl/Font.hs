@@ -16,7 +16,7 @@ module NanoUI.Sdl.Font
   ) where
 
 import Control.Exception (bracket)
-import Control.Monad (forM_, void, when)
+import Control.Monad (forM_, when)
 import Data.Bits (shiftR, (.&.))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Text (Text)
@@ -26,9 +26,10 @@ import Foreign.C.String (CString, withCString)
 import Foreign.C.Types (CFloat (..), CSize (..))
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr, nullPtr)
-import Foreign.Storable (peek)
+import Foreign.Storable (peek, poke)
 import NanoUI (Color (..), Context, FontMetrics (..), Rect (..), hasMonoFontMarker, monospaceMetrics, stripMonoFontMarker, withExternalText, withFontMetrics, withMeasureText, withMonoFontMetrics, wrapMeasureCache)
-import NanoUI.Sdl.Render (clearLogicalClipRect, logicalClipKey, setLogicalClipRect)
+import NanoUI.Sdl.Batch (RenderBatch, batchTextureDst, flushRenderBatch)
+import NanoUI.Sdl.Render (logicalClipKey, setLogicalClipRect)
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
 import System.Directory (doesFileExist)
 import System.Environment (lookupEnv)
@@ -44,8 +45,18 @@ data SdlFont = SdlFont
   , sfPath :: FilePath
   }
 
+data TextSlot = TextSlot
+  { tsU0 :: Float
+  , tsV0 :: Float
+  , tsU1 :: Float
+  , tsV1 :: Float
+  , tsW :: Float
+  , tsH :: Float
+  }
+
 data TextCache = TextCache
-  { tcEntries :: IORef (Map.Map CacheKey (Ptr (), Float, Float))
+  { tcAtlas :: Ptr ()
+  , tcEntries :: IORef (Map.Map CacheKey TextSlot)
   , tcOrder :: IORef [CacheKey]
   }
 
@@ -54,19 +65,16 @@ type CacheKey = (Ptr (), Text, Word32)
 textCacheLimit :: Int
 textCacheLimit = 256
 
-newTextCache :: IO TextCache
-newTextCache = do
+newTextCache :: Ptr SDL_Renderer -> IO TextCache
+newTextCache ren = do
+  atlas <- textAtlasCreate ren
+  when (atlas == nullPtr) $ fail "nano_ui_text_atlas_create failed"
   entries <- newIORef Map.empty
   order <- newIORef []
-  pure TextCache {tcEntries = entries, tcOrder = order}
+  pure TextCache {tcAtlas = atlas, tcEntries = entries, tcOrder = order}
 
 destroyTextCache :: TextCache -> IO ()
-destroyTextCache cache = do
-  entries <- readIORef (tcEntries cache)
-  forM_ (Map.elems entries) $ \(tex, _, _) ->
-    destroyTexture tex
-  writeIORef (tcEntries cache) Map.empty
-  writeIORef (tcOrder cache) []
+destroyTextCache cache = textAtlasDestroy (tcAtlas cache)
 
 withTtf :: IO a -> IO a
 withTtf act =
@@ -116,8 +124,7 @@ withTtfMeasureScaled ctx sf monoSf scale =
               measure
           )
           True
-   in -- Per-frame measure cache; SDL contexts only (see newSdlContext).
-      wrapMeasureCache scale ctx1 measure
+   in wrapMeasureCache scale ctx1 measure
 
 ttfFontMetricsScaled :: SdlFont -> Float -> FontMetrics
 ttfFontMetricsScaled sf scale =
@@ -146,85 +153,133 @@ measureTtfText sf txt =
             pure (realToFrac w, realToFrac h)
           else pure (0, sfLineSkip sf)
 
-renderTextSpans :: Ptr SDL_Renderer -> Float -> SdlFont -> SdlFont -> TextCache -> [(Rect, Text, Color, Color, Rect)] -> IO ()
-renderTextSpans ren scale font monoFont cache spans = do
+renderTextSpans ::
+  RenderBatch ->
+  Ptr SDL_Renderer ->
+  Float ->
+  SdlFont ->
+  SdlFont ->
+  TextCache ->
+  [(Rect, Text, Color, Color, Rect)] ->
+  IO ()
+renderTextSpans batch ren scale font monoFont cache spans = do
   lastClip <- newIORef (Nothing :: Maybe (Int, Int, Int, Int))
   forM_ spans $ \(Rect x y _ _, txt, fg, _bg, clip) -> do
     let clipKey = logicalClipKey scale clip
     prev <- readIORef lastClip
     when (prev /= Just clipKey) $ do
+      flushRenderBatch batch
       writeIORef lastClip (Just clipKey)
       setLogicalClipRect ren scale clip
-    drawSpan ren scale font monoFont cache txt fg x y
-  clearLogicalClipRect ren
+    drawSpan batch scale font monoFont cache txt fg x y
+  flushRenderBatch batch
 
-drawSpan :: Ptr SDL_Renderer -> Float -> SdlFont -> SdlFont -> TextCache -> Text -> Color -> Float -> Float -> IO ()
+drawSpan :: RenderBatch -> Float -> SdlFont -> SdlFont -> TextCache -> Text -> Color -> Float -> Float -> IO ()
 drawSpan _ _ _ _ _ txt _ _ _
   | T.null txt = pure ()
-drawSpan ren scale font monoFont cache txt col x y =
+drawSpan batch scale font monoFont cache txt col x y =
   let (pick, shown) =
         if hasMonoFontMarker txt
           then (monoFont, stripMonoFontMarker txt)
           else (font, txt)
-   in drawSpanFont ren scale pick cache shown col x y
+   in drawSpanFont batch scale pick cache shown col x y
 
-drawSpanFont :: Ptr SDL_Renderer -> Float -> SdlFont -> TextCache -> Text -> Color -> Float -> Float -> IO ()
+drawSpanFont :: RenderBatch -> Float -> SdlFont -> TextCache -> Text -> Color -> Float -> Float -> IO ()
 drawSpanFont _ _ _ _ txt _ _ _
   | T.null txt = pure ()
-drawSpanFont ren scale font cache txt col x y =
+drawSpanFont batch scale font cache txt col x y =
   withUtf8 txt $ \cstr len -> do
     let keyCol = colorWord col
         cacheKey = (sfFont font, txt, keyCol)
-    (tex, tw, th) <-
+    slot <-
       lookupCache cache cacheKey >>= \case
         Just hit -> pure hit
-        Nothing -> createCached ren font cache cacheKey cstr len col
+        Nothing -> createCached font cache cacheKey cstr len col
+    (atW, atH) <- atlasSize (tcAtlas cache)
+    tex <- textAtlasTexture (tcAtlas cache)
     let px = x * scale
         py = y * scale
-    drawTexture ren tex tw th px py
+    batchTextureDst
+      batch
+      tex
+      atW
+      atH
+      px
+      py
+      (tsW slot)
+      (tsH slot)
+      (tsU0 slot)
+      (tsV0 slot)
+      (tsU1 slot)
+      (tsV1 slot)
+      255
+      255
+      255
+      255
 
 createCached ::
-  Ptr SDL_Renderer ->
   SdlFont ->
   TextCache ->
   CacheKey ->
   CString ->
   CSize ->
   Color ->
-  IO (Ptr (), Float, Float)
-createCached ren font cache cacheKey cstr len col =
-  alloca $ \(outTex :: Ptr (Ptr ())) ->
-    alloca $ \outW ->
-      alloca $ \outH -> do
-        ok <-
-          ttfCreateTexture
-            ren
-            (sfFont font)
-            cstr
-            len
-            r
-            g
-            b
-            a
-            outTex
-            outW
-            outH
-        when (not ok) $ fail "TTF render failed"
-        tex <- peek outTex
-        tw <- realToFrac <$> peek outW
-        th <- realToFrac <$> peek outH
-        insertCache cache cacheKey (tex, tw, th)
-        pure (tex, tw, th)
+  IO TextSlot
+createCached font cache cacheKey cstr len col =
+  alloca $ \(surfPtr :: Ptr (Ptr ())) -> do
+    poke surfPtr nullPtr
+    ok <-
+      ttfRenderSurface
+        (sfFont font)
+        cstr
+        len
+        r
+        g
+        b
+        a
+        surfPtr
+        nullPtr
+        nullPtr
+    when (not ok) $ fail "TTF render failed"
+    surf <- peek surfPtr
+    slot <-
+      alloca $ \u0 ->
+        alloca $ \v0 ->
+          alloca $ \u1 ->
+            alloca $ \v1 ->
+              alloca $ \tw ->
+                alloca $ \th -> do
+                  ok2 <-
+                    textAtlasInsertSurface
+                      (tcAtlas cache)
+                      surf
+                      u0
+                      v0
+                      u1
+                      v1
+                      tw
+                      th
+                  when (not ok2) $ fail "text atlas insert failed"
+                  freeSurface surf
+                  TextSlot
+                    <$> (realToFrac <$> peek u0)
+                    <*> (realToFrac <$> peek v0)
+                    <*> (realToFrac <$> peek u1)
+                    <*> (realToFrac <$> peek v1)
+                    <*> (realToFrac <$> peek tw)
+                    <*> (realToFrac <$> peek th)
+    insertCache cache cacheKey slot
+    pure slot
   where
     (r, g, b, a) = unpackColor col
 
-insertCache :: TextCache -> CacheKey -> (Ptr (), Float, Float) -> IO ()
+insertCache :: TextCache -> CacheKey -> TextSlot -> IO ()
 insertCache cache key val = do
   let entriesRef = tcEntries cache
       orderRef = tcOrder cache
   mOld <- Map.lookup key <$> readIORef entriesRef
   case mOld of
-    Just (tex, _, _) -> destroyTexture tex
+    Just _ -> pure ()
     Nothing -> evictUntilRoom cache
   modifyIORef entriesRef (Map.insert key val)
   modifyIORef orderRef (\ord -> key : filter (/= key) ord)
@@ -245,16 +300,11 @@ evictOldest cache = do
       entries <- readIORef (tcEntries cache)
       case Map.lookup oldest entries of
         Nothing -> writeIORef (tcOrder cache) (filter (/= oldest) ord)
-        Just (tex, _, _) -> do
-          destroyTexture tex
+        Just _ -> do
           writeIORef (tcEntries cache) (Map.delete oldest entries)
           writeIORef (tcOrder cache) (filter (/= oldest) ord)
 
-drawTexture :: Ptr SDL_Renderer -> Ptr () -> Float -> Float -> Float -> Float -> IO ()
-drawTexture ren tex tw th x y =
-  void $ renderTextureSized ren tex (cf x) (cf y) (cf tw) (cf th)
-
-lookupCache :: TextCache -> CacheKey -> IO (Maybe (Ptr (), Float, Float))
+lookupCache :: TextCache -> CacheKey -> IO (Maybe TextSlot)
 lookupCache cache key = do
   entries <- readIORef (tcEntries cache)
   case Map.lookup key entries of
@@ -263,20 +313,31 @@ lookupCache cache key = do
       modifyIORef (tcOrder cache) (\ord -> key : filter (/= key) ord)
       pure (Just hit)
 
+atlasSize :: Ptr () -> IO (Float, Float)
+atlasSize atlas =
+  alloca $ \w ->
+    alloca $ \h -> do
+      ok <- textAtlasSize atlas w h
+      when (not ok) $ fail "text atlas size failed"
+      (,) <$> (realToFrac <$> peek w) <*> (realToFrac <$> peek h)
+
+pathExists :: FilePath -> IO (Maybe FilePath)
+pathExists p = do
+  ok <- doesFileExist p
+  pure (if ok then Just p else Nothing)
+
+firstExistingPath :: [FilePath] -> IO (Maybe FilePath)
+firstExistingPath [] = pure Nothing
+firstExistingPath (p : ps) = do
+  ok <- doesFileExist p
+  if ok then pure (Just p) else firstExistingPath ps
+
 findMonoFontPath :: IO (Maybe FilePath)
 findMonoFontPath = do
   envPath <- lookupEnv "NANO_UI_MONO_FONT"
   case envPath of
-    Just p -> exists p
-    Nothing -> firstExisting monoFontCandidates
-  where
-    exists p = do
-      ok <- doesFileExist p
-      pure (if ok then Just p else Nothing)
-    firstExisting [] = pure Nothing
-    firstExisting (p : ps) = do
-      ok <- doesFileExist p
-      if ok then pure (Just p) else firstExisting ps
+    Just p -> pathExists p
+    Nothing -> firstExistingPath monoFontCandidates
 
 monoFontCandidates :: [FilePath]
 monoFontCandidates =
@@ -296,16 +357,8 @@ findFontPath :: IO (Maybe FilePath)
 findFontPath = do
   envPath <- lookupEnv "NANO_UI_FONT"
   case envPath of
-    Just p -> exists p
-    Nothing -> firstExisting fontCandidates
-  where
-    exists p = do
-      ok <- doesFileExist p
-      pure (if ok then Just p else Nothing)
-    firstExisting [] = pure Nothing
-    firstExisting (p : ps) = do
-      ok <- doesFileExist p
-      if ok then pure (Just p) else firstExisting ps
+    Just p -> pathExists p
+    Nothing -> firstExistingPath fontCandidates
 
 fontCandidates :: [FilePath]
 fontCandidates =
@@ -341,9 +394,6 @@ modifyIORef ref f = do
 colorWord :: Color -> Word32
 colorWord (Color w) = w
 
-cf :: Float -> CFloat
-cf = realToFrac
-
 foreign import ccall safe "nano_ui_ttf_init"
   ttfInit :: IO Bool
 
@@ -368,9 +418,8 @@ foreign import ccall safe "nano_ui_ttf_space_advance"
 foreign import ccall safe "nano_ui_ttf_string_size"
   ttfStringSize :: Ptr () -> CString -> CSize -> Ptr CFloat -> Ptr CFloat -> IO Bool
 
-foreign import ccall safe "nano_ui_ttf_create_texture"
-  ttfCreateTexture ::
-    Ptr SDL_Renderer ->
+foreign import ccall unsafe "nano_ui_ttf_render_surface"
+  ttfRenderSurface ::
     Ptr () ->
     CString ->
     CSize ->
@@ -383,18 +432,32 @@ foreign import ccall safe "nano_ui_ttf_create_texture"
     Ptr CFloat ->
     IO Bool
 
-foreign import ccall unsafe "nano_ui_render_texture_sized"
-  renderTextureSized ::
-    Ptr SDL_Renderer ->
+foreign import ccall unsafe "nano_ui_text_atlas_create"
+  textAtlasCreate :: Ptr SDL_Renderer -> IO (Ptr ())
+
+foreign import ccall unsafe "nano_ui_text_atlas_destroy"
+  textAtlasDestroy :: Ptr () -> IO ()
+
+foreign import ccall unsafe "nano_ui_text_atlas_texture"
+  textAtlasTexture :: Ptr () -> IO (Ptr ())
+
+foreign import ccall unsafe "nano_ui_text_atlas_size"
+  textAtlasSize :: Ptr () -> Ptr CFloat -> Ptr CFloat -> IO Bool
+
+foreign import ccall unsafe "nano_ui_text_atlas_insert_surface"
+  textAtlasInsertSurface ::
     Ptr () ->
-    CFloat ->
-    CFloat ->
-    CFloat ->
-    CFloat ->
+    Ptr () ->
+    Ptr CFloat ->
+    Ptr CFloat ->
+    Ptr CFloat ->
+    Ptr CFloat ->
+    Ptr CFloat ->
+    Ptr CFloat ->
     IO Bool
 
-foreign import ccall unsafe "nano_ui_destroy_texture"
-  destroyTexture :: Ptr () -> IO ()
+foreign import ccall unsafe "nano_ui_free_surface"
+  freeSurface :: Ptr () -> IO ()
 
 unpackColor :: Color -> (Word8, Word8, Word8, Word8)
 unpackColor (Color w) =

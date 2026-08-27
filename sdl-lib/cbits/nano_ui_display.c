@@ -1,3 +1,4 @@
+#include "nano_ui_opt.h"
 #include <SDL3/SDL.h>
 #include <stddef.h>
 #include <stdbool.h>
@@ -230,6 +231,11 @@ bool nano_ui_retain_blit_rect(
     SDL_FRect src = {src_x, src_y, src_w, src_h};
     SDL_FRect dst = {dst_x, dst_y, src_w, src_h};
     return SDL_RenderTexture(renderer, tex, &src, &dst);
+}
+
+void nano_ui_free_surface(void *surface)
+{
+    SDL_DestroySurface((SDL_Surface *)surface);
 }
 
 bool nano_ui_render_coords_from_window(

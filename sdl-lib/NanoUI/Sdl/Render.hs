@@ -8,6 +8,7 @@ module NanoUI.Sdl.Render
   , snapDamage
   ) where
 
+import NanoUI.Sdl.Batch (RenderBatch, batchFillSolid, batchTextureDst, flushRenderBatch)
 import NanoUI.Sdl.Image (ImageAtlas, lookupAtlasTex)
 
 import Control.Monad (void, when)
@@ -16,13 +17,13 @@ import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (partition, sortBy)
 import Data.Ord (comparing)
 import Data.Word (Word32, Word8)
-import Foreign.C.Types (CFloat (..), CInt)
+import Foreign.C.Types (CInt)
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (Storable (..), peekByteOff, poke)
 import NanoUI (Color (..), Damage (..), DrawCmd (..), DrawData (..), Layer (..), Rect (..), damageIsEmpty, indexSize, rectIntersect, vertexSize)
-import NanoUI.Sdl.Shape (fillRoundedRect, fillSolidRect, fillTriangle)
+import NanoUI.Sdl.Shape (fillRoundedRect, fillTriangle)
 import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
@@ -80,21 +81,22 @@ setLogicalClipRect ren uiScale (Rect x y w h) =
 clearLogicalClipRect :: Ptr SDL_Renderer -> IO ()
 clearLogicalClipRect ren = void $ setRenderClipRectSafe ren nullClip
 
-applyClipState :: IORef ClipState -> Ptr SDL_Renderer -> Float -> ClipState -> IO ()
-applyClipState ref ren uiScale next = do
+applyClipState :: RenderBatch -> IORef ClipState -> Ptr SDL_Renderer -> Float -> ClipState -> IO ()
+applyClipState batch ref ren uiScale next = do
   prev <- readIORef ref
   when (prev /= next) $ do
+    flushRenderBatch batch
     writeIORef ref next
     case next of
       ClipNone -> clearLogicalClipRect ren
       ClipRect r -> setLogicalClipRect ren uiScale r
 
 renderDrawData :: Ptr SDL_Renderer -> Float -> Color -> DrawData -> ImageAtlas -> IO ()
-renderDrawData ren uiScale clearColor drawData images =
-  renderDrawDataPass ren uiScale (Just clearColor) drawData False images DamageFull
+renderDrawData _ _ _ _ _ =
+  error "renderDrawData requires an active RenderBatch; use renderDrawDataPass"
 
-renderDrawDataPass :: Ptr SDL_Renderer -> Float -> Maybe Color -> DrawData -> Bool -> ImageAtlas -> Damage -> IO ()
-renderDrawDataPass ren uiScale mClear drawData overlayPass images damage = do
+renderDrawDataPass :: RenderBatch -> Ptr SDL_Renderer -> Float -> Maybe Color -> DrawData -> Bool -> ImageAtlas -> Damage -> IO ()
+renderDrawDataPass batch ren uiScale mClear drawData overlayPass images damage = do
   when (not (damageIsEmpty damage)) $ do
     clipRef <- newIORef ClipNone
     clearLogicalClipRect ren
@@ -109,9 +111,9 @@ renderDrawDataPass ren uiScale mClear drawData overlayPass images damage = do
             py = rectY r * uiScale
             pw = rectW r * uiScale
             ph = rectH r * uiScale
-        fillSolidRect ren cr cg cb ca px py pw ph
-        applyClipState clipRef ren uiScale (ClipRect r)
-      (Nothing, DamageClip r) -> applyClipState clipRef ren uiScale (ClipRect r)
+        batchFillSolid batch cr cg cb ca px py pw ph
+        applyClipState batch clipRef ren uiScale (ClipRect r)
+      (Nothing, DamageClip r) -> applyClipState batch clipRef ren uiScale (ClipRect r)
       (Nothing, DamageFull) -> pure ()
     let (overlay, base) = partition ((== LayerOverlay) . cmdLayer) (drawCommands drawData)
         cmds = if overlayPass then overlay else base
@@ -120,8 +122,8 @@ renderDrawDataPass ren uiScale mClear drawData overlayPass images damage = do
           DamageClip r -> Just r
     withForeignPtr (drawVertices drawData) $ \vp ->
       withForeignPtr (drawIndices drawData) $ \ip ->
-        mapM_ (drawCmd ren uiScale vp ip drawData images clip clipRef) (sortBy (comparing layerOrder) cmds)
-    applyClipState clipRef ren uiScale ClipNone
+        mapM_ (drawCmd batch ren uiScale vp ip drawData images clip clipRef) (sortBy (comparing layerOrder) cmds)
+    applyClipState batch clipRef ren uiScale ClipNone
 
 layerOrder :: DrawCmd -> Int
 layerOrder cmd =
@@ -131,6 +133,7 @@ layerOrder cmd =
     LayerOverlay -> 2
 
 drawCmd ::
+  RenderBatch ->
   Ptr SDL_Renderer ->
   Float ->
   Ptr Word8 ->
@@ -141,7 +144,7 @@ drawCmd ::
   IORef ClipState ->
   DrawCmd ->
   IO ()
-drawCmd ren uiScale vp ip dd images mDamage clipRef cmd = do
+drawCmd batch ren uiScale vp ip dd images mDamage clipRef cmd = do
   let count = fromIntegral (cmdIndexCount cmd)
       cmdRect = Rect (cmdClipX cmd) (cmdClipY cmd) (cmdClipW cmd) (cmdClipH cmd)
       cmdOpen = cmdClipW cmd >= 1e8 || cmdClipH cmd >= 1e8
@@ -154,14 +157,15 @@ drawCmd ren uiScale vp ip dd images mDamage clipRef cmd = do
       Nothing -> pure ()
       Just clip -> do
         if cmdOpen && mDamage == Nothing
-          then applyClipState clipRef ren uiScale ClipNone
-          else applyClipState clipRef ren uiScale (ClipRect clip)
+          then applyClipState batch clipRef ren uiScale ClipNone
+          else applyClipState batch clipRef ren uiScale (ClipRect clip)
         let start = fromIntegral (cmdIndexOffset cmd)
             texId = cmdTextureId cmd
-        mapM_ (fillQuad ren uiScale vp ip dd images texId mDamage) [start, start + 3 .. start + count - 1]
+        mapM_ (fillQuad batch ren uiScale vp ip dd images texId mDamage) [start, start + 3 .. start + count - 1]
 
 {-# INLINE fillQuad #-}
 fillQuad ::
+  RenderBatch ->
   Ptr SDL_Renderer ->
   Float ->
   Ptr Word8 ->
@@ -172,7 +176,7 @@ fillQuad ::
   Maybe Rect ->
   Int ->
   IO ()
-fillQuad ren uiScale vp ip dd images texId mDamage i = do
+fillQuad batch ren uiScale vp ip dd images texId mDamage i = do
   readTriangleVerts vp ip dd i >>= \case
     Nothing -> pure ()
     Just ((x0, y0, u0, v0c, rgba), (x1, y1, _, _, _), (x2, y2, u1, v1c, _))
@@ -191,27 +195,27 @@ fillQuad ren uiScale vp ip dd images texId mDamage i = do
                             mDraw <- lookupAtlasTex images texId
                             case mDraw of
                               Just (tex, atW, atH) ->
-                                void $
-                                  renderTextureDst
-                                    ren
-                                    tex
-                                    (cf atW)
-                                    (cf atH)
-                                    (cf px)
-                                    (cf py)
-                                    (cf pw)
-                                    (cf ph)
-                                    (cf u0)
-                                    (cf v0c)
-                                    (cf u1)
-                                    (cf v1c)
-                                    r
-                                    g
-                                    b
-                                    a
-                              Nothing -> fillSolidRect ren r g b a px py pw ph
+                                batchTextureDst
+                                  batch
+                                  tex
+                                  atW
+                                  atH
+                                  px
+                                  py
+                                  pw
+                                  ph
+                                  u0
+                                  v0c
+                                  u1
+                                  v1c
+                                  r
+                                  g
+                                  b
+                                  a
+                              Nothing -> batchFillSolid batch r g b a px py pw ph
                     else if u0 <= -1.5
-                      then
+                      then do
+                        flushRenderBatch batch
                         fillTriangle
                           ren
                           r
@@ -233,8 +237,10 @@ fillQuad ren uiScale vp ip dd images texId mDamage i = do
                                   pw = w * uiScale
                                   ph = h * uiScale
                               if v0c < 0
-                                then fillRoundedRect ren r g b a px py pw ph (u0 * uiScale)
-                                else fillSolidRect ren r g b a px py pw ph
+                                then do
+                                  flushRenderBatch batch
+                                  fillRoundedRect ren r g b a px py pw ph (u0 * uiScale)
+                                else batchFillSolid batch r g b a px py pw ph
 
 readTriangleVerts :: Ptr Word8 -> Ptr Word8 -> DrawData -> Int -> IO (Maybe (Vertex, Vertex, Vertex))
 readTriangleVerts vp ip dd i
@@ -285,29 +291,6 @@ quadHitsDamage (Just clip) x0 y0 x1 y1 x2 y2 =
    in case rectIntersect clip (Rect minx miny (maxx - minx) (maxy - miny)) of
         Nothing -> False
         Just _ -> True
-
-cf :: Float -> CFloat
-cf = realToFrac
-
-foreign import ccall unsafe "nano_ui_render_texture_dst"
-  renderTextureDst ::
-    Ptr SDL_Renderer ->
-    Ptr () ->
-    CFloat ->
-    CFloat ->
-    CFloat ->
-    CFloat ->
-    CFloat ->
-    CFloat ->
-    CFloat ->
-    CFloat ->
-    CFloat ->
-    CFloat ->
-    Word8 ->
-    Word8 ->
-    Word8 ->
-    Word8 ->
-    IO Bool
 
 ci :: Int -> CInt
 ci = fromIntegral

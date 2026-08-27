@@ -171,6 +171,7 @@ library nano-ui-sdl
         NanoUI.Backend.Sdl
         NanoUI.Sdl.Event
     other-modules:
+        NanoUI.Sdl.Batch
         NanoUI.Sdl.Clipboard
         NanoUI.Sdl.Cursor
         NanoUI.Sdl.Debug
@@ -184,6 +185,8 @@ library nano-ui-sdl
     c-sources:        sdl-lib/cbits/nano_ui_ttf.c
                       sdl-lib/cbits/nano_ui_display.c
                       sdl-lib/cbits/nano_ui_image.c
+                      sdl-lib/cbits/nano_ui_batch.c
+                      sdl-lib/cbits/nano_ui_text_atlas.c
     include-dirs:     sdl-lib/cbits
     pkgconfig-depends: sdl3 >= 3.2, sdl3-ttf >= 3.2
     build-depends:

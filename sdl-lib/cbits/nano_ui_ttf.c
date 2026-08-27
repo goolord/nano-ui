@@ -1,3 +1,4 @@
+#include "nano_ui_opt.h"
 #include <SDL3/SDL.h>
 #include <SDL3_ttf/SDL_ttf.h>
 #include <math.h>
@@ -265,6 +266,36 @@ bool nano_ui_ttf_create_texture(
     }
     if (out_h) {
         *out_h = th;
+    }
+    return true;
+}
+
+bool nano_ui_ttf_render_surface(
+    TTF_Font *font,
+    const char *text,
+    size_t len,
+    Uint8 r,
+    Uint8 g,
+    Uint8 b,
+    Uint8 a,
+    SDL_Surface **out_surface,
+    float *out_w,
+    float *out_h)
+{
+    if (!font || !text || !out_surface) {
+        return false;
+    }
+    SDL_Color fg = {r, g, b, a};
+    SDL_Surface *surface = TTF_RenderText_Blended(font, text, len, fg);
+    if (!surface) {
+        return false;
+    }
+    *out_surface = surface;
+    if (out_w) {
+        *out_w = (float)surface->w;
+    }
+    if (out_h) {
+        *out_h = (float)surface->h;
     }
     return true;
 }

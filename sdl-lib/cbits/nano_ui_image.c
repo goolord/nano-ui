@@ -1,3 +1,4 @@
+#include "nano_ui_opt.h"
 #include <SDL3/SDL.h>
 #include <stddef.h>
 #include <stdbool.h>
