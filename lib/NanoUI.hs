@@ -53,6 +53,9 @@ module NanoUI
   , alignMid
   , wrap
   , tight
+  , percent
+  , percentH
+  , aspect
   , -- ID
     WidgetId (..)
   , widgetId
@@ -125,6 +128,9 @@ module NanoUI
   , ctxFontMetrics
   , setHost
   , askHost
+  , Compact
+  , compactHost
+  , askCompact
   , newContext
   , withFontMetrics
   , withMonoFontMetrics
@@ -178,6 +184,7 @@ module NanoUI
   , renderASCIIFromRects
   ) where
 
+import NanoUI.Compact (Compact, askCompact, compactHost)
 import NanoUI.Context (Context (..), FrameMsg (..), anyAnimating, atlasSnapshot, atlasTextureId, ctxTheme, getAnimationValue, getFocusId, getHotId, getPrevRect, getScrollOffset, getStore, isDirty, markDirty, modalActive, newContext, newSdlContext, newTerminalContext, overlayConsumesQuit, registerImage, registerImages, setAnimationValue, setHost, setWakeLoop, startAnimation, takeDamage, textInputEditActive, withClipboard, withExternalText, withFontMetrics, withMeasureText, withMonoFontMetrics, wrapMeasureCache)
 import NanoUI.Draw (DrawCmd (..), DrawData (..), Layer (..), indexSize, vertexSize)
 import NanoUI.Font (FontMetrics (..), hasMonoFontMarker, headingFontMarker, isTerminalFont, labelContentInset, monoFontMarker, monospaceMetrics, mutedFontMarker, scrollBarGutter, scrollBarListExtra, scrollBarPageExtra, scrollBarWidth, stripMonoFontMarker, stripWidgetMarkers, widgetContentInset, widgetPadding)
@@ -223,6 +230,9 @@ import NanoUI.Style
   , alignMid
   , wrap
   , tight
+  , percent
+  , percentH
+  , aspect
   )
 import NanoUI.Types (Color (..), Damage (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, colorToWord32, damageIsEmpty, rectContains, rectIntersect, v2Add)
 import NanoUI.Widgets

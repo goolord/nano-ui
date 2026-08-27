@@ -75,10 +75,11 @@ import Data.Proxy (Proxy (..))
 import Data.Typeable (Typeable, TypeRep, typeOf, typeRep)
 import Data.IntMap.Strict (IntMap)
 import Data.Text (Text)
-import Data.Word (Word64)
+import Data.Word (Word64, Word8)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Map.Strict as Map
 import Data.ByteString (ByteString)
+import Foreign.ForeignPtr (ForeignPtr)
 import qualified NanoUI.Atlas as Atlas
 import NanoUI.Atlas (ImageAtlas, atlasTextureId)
 import NanoUI.Draw (DrawArena, newDrawArena)
@@ -637,5 +638,5 @@ registerImages ctx = fmap and . mapM (\(iid, w, h, px) -> registerImage ctx iid 
 lookupImageUv :: Context -> ImageId -> IO (Maybe (Float, Float, Float, Float))
 lookupImageUv ctx = Atlas.lookupImageUv (ctxImageAtlas ctx)
 
-atlasSnapshot :: Context -> IO (Maybe (Int, Int, ByteString, Int))
+atlasSnapshot :: Context -> IO (Maybe (Int, Int, ForeignPtr Word8, Int))
 atlasSnapshot ctx = Atlas.atlasSnapshot (ctxImageAtlas ctx)

@@ -9,7 +9,6 @@ module NanoUI.Atlas
 
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
-import Data.ByteString.Internal (unsafeCreate)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import qualified Data.IntMap.Strict as IM
 import Data.Word (Word8)
@@ -108,17 +107,13 @@ lookupImageUv (ImageAtlas ref) (ImageId tid) = do
               , fromIntegral (y + h) / fh
               )
 
-atlasSnapshot :: ImageAtlas -> IO (Maybe (Int, Int, ByteString, Int))
+-- Pinned pixel buffer. SDL uploads this pointer; do not copy to ByteString first.
+atlasSnapshot :: ImageAtlas -> IO (Maybe (Int, Int, ForeignPtr Word8, Int))
 atlasSnapshot (ImageAtlas ref) = do
   st <- readIORef ref
   if asGen st == 0
     then pure Nothing
-    else do
-      let n = asW st * asH st * 4
-      bs <-
-        withForeignPtr (asPtr st) $ \p ->
-          pure $ unsafeCreate n $ \out -> copyBytes out p n
-      pure (Just (asW st, asH st, bs, asGen st))
+    else pure (Just (asW st, asH st, asPtr st, asGen st))
 
 fitImage :: AtlasState -> Int -> Int -> Int -> ByteString -> IO (Maybe AtlasState)
 fitImage st0 tid w h pixels = do

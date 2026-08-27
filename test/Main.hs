@@ -97,6 +97,8 @@ main = do
   run "flex-wrap" runFlexWrapTest
   run "flex-shrink" runFlexShrinkTest
   run "grow-fits-window" runGrowFitsWindowTest
+  run "percent-layout" runPercentLayoutTest
+  run "aspect-layout" runAspectLayoutTest
   run "grow-wrap-sibling" runGrowWrapPushesSiblingTest
   run "scroll-bar-gutter" runScrollBarGutterTest
   runSdl "scroll-bar-gutter-grow" runGrowScrollGutterTest
@@ -104,6 +106,7 @@ main = do
   runSdl "window-scroll-gutter" runWindowScrollGutterTest
   run "use-flag-click" runUseFlagClickTest
   run "host-slot" runHostSlotTest
+  run "compact-host" runCompactHostTest
   run "embed-state" runEmbedStateTest
   run "panel-paints" runPanelPaintsTest
   run "separator-span" runSeparatorSpanTest
@@ -2011,6 +2014,35 @@ runGrowFitsWindowTest ctx failed = do
   when (x1 < -0.01 || x2 + w2 > 10.01) $ bump failed
   when (abs (w1 - w2) > 0.5) $ bump failed
 
+-- Percent sizing is a fraction of the parent's inner size.
+runPercentLayoutTest :: Context -> IORef Int -> IO ()
+runPercentLayoutTest ctx failed = do
+  let inp = emptyInput {inputWindowSize = Size 200 80}
+      ui =
+        row (fixedW 200 . tight . gap 0 $ defaultLayout) $ do
+          a <- labelEx (percent 25 . tight $ defaultLayout) "A"
+          b <- labelEx (percent 75 . tight $ defaultLayout) "B"
+          pure (a, b)
+  _ <- runFrame ctx inp ui
+  ((a, b), _, _, _) <- runFrame ctx inp ui
+  let Rect _ _ wa _ = respRect a
+      Rect _ _ wb _ = respRect b
+  when (abs (wa - 50) > 1) $ bump failed
+  when (abs (wb - 150) > 1) $ bump failed
+
+-- Aspect locks height to width / ratio after width is known.
+runAspectLayoutTest :: Context -> IORef Int -> IO ()
+runAspectLayoutTest ctx failed = do
+  let inp = emptyInput {inputWindowSize = Size 320 240}
+      ui =
+        column (fixedW 160 . tight $ defaultLayout) $
+          labelEx (fillW . aspect 2 . tight $ defaultLayout) "X"
+  _ <- runFrame ctx inp ui
+  (resp, _, _, _) <- runFrame ctx inp ui
+  let Rect _ _ w h = respRect resp
+  when (abs (w - 160) > 1) $ bump failed
+  when (abs (h - 80) > 1) $ bump failed
+
 -- Grow wrap must remasure height so the next sibling sits below wrapped lines.
 runGrowWrapPushesSiblingTest :: Context -> IORef Int -> IO ()
 runGrowWrapPushesSiblingTest _ failed = do
@@ -2055,6 +2087,17 @@ runHostSlotTest ctx failed = do
   (hitS, _, _, _) <- runFrame ctx inp (askHost :: NanoUI (Maybe String))
   (hitI, _, _, _) <- runFrame ctx inp (askHost :: NanoUI (Maybe Int))
   when (miss /= Nothing || hitS /= Just "ok" || hitI /= Just 1) $ bump failed
+
+-- Large read-heavy state lives in a compact region. GC sees one block.
+runCompactHostTest :: Context -> IORef Int -> IO ()
+runCompactHostTest ctx failed = do
+  let payload = [0 .. 9999] :: [Int]
+  _ <- compactHost ctx payload
+  let inp = emptyInput {inputWindowSize = Size 80 80}
+  (got, _, _, _) <- runFrame ctx inp (askCompact :: NanoUI (Maybe [Int]))
+  case got of
+    Just xs | length xs == 10000 && last xs == 9999 -> pure ()
+    _ -> bump failed
 
 runEmbedStateTest :: Context -> IORef Int -> IO ()
 runEmbedStateTest ctx failed = do

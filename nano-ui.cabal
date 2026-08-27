@@ -70,6 +70,7 @@ library
         NanoUI
     other-modules:
         NanoUI.Atlas
+        NanoUI.Compact
         NanoUI.Context
         NanoUI.Draw
         NanoUI.Font
@@ -90,6 +91,7 @@ library
         containers ^>=0.8,
         effectful ^>=2.6,
         effectful-core ^>=2.6,
+        ghc-compact ^>=0.1,
         hashable ^>=1.5,
         primitive ^>=0.9,
         text ^>=2.1

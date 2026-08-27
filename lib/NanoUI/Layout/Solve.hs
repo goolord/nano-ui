@@ -36,6 +36,7 @@ import NanoUI.Layout.Arena
   , arenaCount
   , getAlignX
   , getAlignY
+  , getAspect
   , getDirection
   , getFirstChild
   , getGap
@@ -108,7 +109,8 @@ anyNeedsRemeasure na count = go 0
       | otherwise = do
           wrapped <- getWrap na idx
           nt <- getNodeType na idx
-          if wrapped || nt == NodeText
+          ratio <- getAspect na idx
+          if wrapped || nt == NodeText || ratio > 0
             then pure True
             else go (idx + 1)
 
@@ -120,6 +122,7 @@ measureNode ::
   NodeIdx ->
   IO ()
 measureNode na fm measure useAssignedWidth idx = do
+  (_, _, assignedW, _) <- getRect na idx
   nt <- getNodeType na idx
   case nt of
     NodeText -> measureTextNode na fm measure useAssignedWidth idx
@@ -132,6 +135,20 @@ measureNode na fm measure useAssignedWidth idx = do
     NodeWindow -> measureContainer na useAssignedWidth idx
     NodeImage -> measureImage na idx
     _ -> measureWidget na fm measure idx
+  applyAspectAfterMeasure na assignedW useAssignedWidth idx
+
+applyAspectAfterMeasure :: NodeArena -> Float -> Bool -> NodeIdx -> IO ()
+applyAspectAfterMeasure na assignedW useAssignedWidth idx = do
+  ratio <- getAspect na idx
+  when (ratio > 0) $ do
+    (x, y, w, _) <- getRect na idx
+    (_, minH, _, maxH) <- getMinMax na idx
+    (wTag, wVal) <- getWidthSizing na idx
+    let baseW
+          | wTag == SizingFixed = wVal
+          | useAssignedWidth && assignedW > 0 = assignedW
+          | otherwise = w
+    setRect na idx x y w (clamp (baseW / ratio) minH maxH)
 
 measureTextNode ::
   NodeArena ->
@@ -419,8 +436,10 @@ positionNode na fm idx x y availW availH = do
   (wTag, wVal) <- getWidthSizing na idx
   (hTag, hVal) <- getHeightSizing na idx
   (_, _, intrinsicW, intrinsicH) <- getRect na idx
+  ratio <- getAspect na idx
   let w = clamp (resolveSize wTag wVal intrinsicW availW minW maxW) minW maxW
-      h = clamp (resolveSize hTag hVal intrinsicH availH minH maxH) minH maxH
+      h0 = clamp (resolveSize hTag hVal intrinsicH availH minH maxH) minH maxH
+      h = if ratio > 0 then clamp (w / ratio) minH maxH else h0
   setRect na idx x y w h
   pad <- getPadding na idx
   gap <- getGap na idx
@@ -500,7 +519,7 @@ positionColumnScroll ::
   Float ->
   IO ()
 positionColumnScroll na fm children gap cx cy innerW innerH contentSize = do
-  childInfos <- loadChildInfos na children
+  childInfos <- loadChildInfos na children innerW innerH
   sizes <- distributeMainAxis na childInfos contentSize gap False
   oy <- newIORef cy
   forM_ (zip childInfos sizes) $ \((ci, _, _), (_, fh)) -> do
@@ -523,7 +542,7 @@ resolveSize SizingFixed v _ _ _ _ = v
 resolveSize SizingFit _ intrinsic avail minS maxS = clamp (min intrinsic avail) minS maxS
 resolveSize SizingShrink _ intrinsic avail minS maxS = clamp (min intrinsic avail) minS maxS
 resolveSize SizingGrow _ _ avail _ maxS = min avail maxS
-resolveSize SizingPercent p _ avail _ maxS = min (avail * p / 100) maxS
+resolveSize SizingPercent _ _ avail _ maxS = min avail maxS
 
 positionChildren ::
   NodeArena ->
@@ -576,7 +595,7 @@ childRowCrossSize na ci availCross = do
 
 positionRow :: NodeArena -> FontMetrics -> [NodeIdx] -> Float -> Float -> Float -> Float -> Float -> IO ()
 positionRow na fm children gap cx cy cw ch = do
-  childInfos <- loadChildInfos na children
+  childInfos <- loadChildInfos na children cw ch
   sizes <- distributeMainAxis na childInfos cw gap True
   ox <- newIORef cx
   forM_ (zip childInfos sizes) $ \((ci, _, _), (fw, _)) -> do
@@ -588,8 +607,8 @@ positionRow na fm children gap cx cy cw ch = do
     writeIORef ox (curX + fw + gap)
 
 positionRowWrap :: NodeArena -> FontMetrics -> [NodeIdx] -> Float -> Float -> Float -> Float -> Float -> IO ()
-positionRowWrap na fm children gap cx cy cw _ch = do
-  childInfos <- loadChildInfos na children
+positionRowWrap na fm children gap cx cy cw ch = do
+  childInfos <- loadChildInfos na children cw ch
   let lineGroups = packRowLines childInfos cw gap
   go cy lineGroups
   where
@@ -609,7 +628,7 @@ positionRowWrap na fm children gap cx cy cw _ch = do
 
 positionColumn :: NodeArena -> FontMetrics -> [NodeIdx] -> Float -> Float -> Float -> Float -> Float -> IO ()
 positionColumn na fm children gap cx cy cw ch = do
-  childInfos <- loadChildInfos na children
+  childInfos <- loadChildInfos na children cw ch
   sizes <- distributeMainAxis na childInfos ch gap False
   oy <- newIORef cy
   forM_ (zip childInfos sizes) $ \((ci, _, _), (_, fh)) -> do
@@ -620,11 +639,22 @@ positionColumn na fm children gap cx cy cw ch = do
     positionNode na fm ci fx curY cw fh
     writeIORef oy (curY + fh + gap)
 
-loadChildInfos :: NodeArena -> [NodeIdx] -> IO [(NodeIdx, Float, Float)]
-loadChildInfos na children =
+loadChildInfos :: NodeArena -> [NodeIdx] -> Float -> Float -> IO [(NodeIdx, Float, Float)]
+loadChildInfos na children availW availH =
   forM children $ \ci -> do
     (_, _, w, h) <- getRect na ci
-    pure (ci, w, h)
+    (wTag, wVal) <- getWidthSizing na ci
+    (hTag, hVal) <- getHeightSizing na ci
+    (minW, minH, maxW, maxH) <- getMinMax na ci
+    let w' =
+          case wTag of
+            SizingPercent -> clamp (availW * wVal / 100) minW maxW
+            _ -> w
+        h' =
+          case hTag of
+            SizingPercent -> clamp (availH * hVal / 100) minH maxH
+            _ -> h
+    pure (ci, w', h')
 
 -- Distribute grow/shrink slack on the container main axis (row = width).
 distributeMainAxis ::
