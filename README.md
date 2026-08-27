@@ -67,19 +67,16 @@ cabal run nano-ui-tui
 
 Uses `nano-ui-term` (`runTermApp`, `newTerminalContext`) with 1-cell font metrics.
 
-**Windows** — native Win32 console API (no notcurses). Frames are cell-rasterised
-and diffed to ANSI; mouse hover uses console input records. Only `Win32` is
-required; MSYS2 UCRT64 is the usual build path:
+[notcurses](https://github.com/dankamongmen/notcurses) handles rendering and input. **Requires `notcurses-core`** (pkg-config). Use `nix develop` or your distro package. On Windows, install via MSYS2 UCRT64:
 
 ```bash
-cabal run nano-ui-tui
+pacman -S mingw-w64-ucrt-x86_64-notcurses mingw-w64-ucrt-x86_64-pkg-config
 ```
 
-**Linux / macOS / Nix** — [notcurses](https://github.com/dankamongmen/notcurses)
-handles rendering and input. **Requires `notcurses-core`** (pkg-config); there is
-no VT-only fallback on POSIX. Use `nix develop` or install the library before
-building. Changed cells are patched each frame; a full plane erase also runs on
-resize, dimension mismatch, or when a cell update fails mid-blit.
+From PowerShell or CMD, `main` re-enters the same exe through `C:\msys64\msys2_shell.cmd -defterm -no-start -here` so notcurses runs in the current console. If `MSYSTEM` is already set, it runs directly.
+
+Changed cells are patched each frame; a full plane erase also runs on resize, dimension mismatch, or when a cell update fails mid-blit.
+
 ### SDL3 backend
 
 Requires SDL3, SDL3_ttf, and `pkg-config`. On Windows, MSYS2 UCRT64 is the usual path:

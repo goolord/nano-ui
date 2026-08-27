@@ -6,7 +6,7 @@ import qualified Data.ByteString as BS
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Storable (peekByteOff)
-import Data.List (isInfixOf, nub)
+import Data.List (isInfixOf, nub, sort)
 import Effectful.State.Static.Local (State, evalState, get, modify)
 import NanoUI
 import NanoUI.Term.Ansi (frameBytes)
@@ -21,6 +21,7 @@ main :: IO ()
 main = do
   failed <- newIORef 0
   ctx <- newContext
+  -- SDL font metrics only (headless); no SDL3 libs required for these tests.
   sdlCtx <- newSdlContext
 
   let run name test = do
@@ -57,7 +58,7 @@ main = do
   run "text-input-clipboard" runTextInputClipboardTest
   run "text-input-menu" runTextInputMenuTest
   run "select-dropdown-cursor" runSelectDropdownCursorTest
-  run "slider-cursor" runSliderCursorTest
+  runSdl "slider-cursor" runSliderCursorTest
   run "scroll-thumb-cursor" runScrollThumbCursorTest
   runSdl "text-input-span" runTextInputSpanTest
   runSdl "text-input-focus-sdl" runTextInputFocusSdlTest
@@ -80,7 +81,8 @@ main = do
   run "vt-decode" runVtTest
   run "cells-and-diff" runCellsTest
   run "checkbox-toggle" runCheckboxTest
-  run "slider-store" runSliderTest
+  runSdl "slider-store" runSliderTest
+  runSdl "slider-fill-width" runSliderFillWidthTest
   run "scroll-wheel" runScrollTest
   run "nested-scroll" runNestedScrollTest
   run "nested-scroll-focus" runNestedScrollFocusTest
@@ -101,6 +103,9 @@ main = do
   run "aspect-layout" runAspectLayoutTest
   run "label-align-end" runLabelAlignEndTest
   run "grow-wrap-sibling" runGrowWrapPushesSiblingTest
+  run "terminal-default-gap" runTerminalDefaultGapTest
+  run "terminal-slider-track" runTerminalSliderTrackTest
+  run "terminal-text-input" runTerminalTextInputDisplayTest
   run "scroll-bar-gutter" runScrollBarGutterTest
   runSdl "scroll-bar-gutter-grow" runGrowScrollGutterTest
   runSdl "scroll-bar-gutter-panel" runPanelGrowScrollGutterTest
@@ -805,10 +810,10 @@ runSliderCursorTest ctx failed = do
   _ <- runFrame ctx inp0 ui
   ((resp, _), _, _, _) <- runFrame ctx inp0 ui
   let Rect rx ry rw rh = respRect resp
-      trackRect = sliderTrackRect rx ry rw rh
-      track = V2 (rx + rw / 2) (rectY trackRect + rectH trackRect / 2)
+      track = sliderTrackBounds (ctxFontMetrics ctx) "Volume" rx ry rw rh
+      trackMid = V2 (rectX track + rectW track / 2) (rectY track + rectH track / 2)
       labelPos = V2 (rx + 4) (ry + 4)
-  let hoverTrack = inp0 {inputMousePos = track}
+  let hoverTrack = inp0 {inputMousePos = trackMid}
   _ <- runFrame ctx hoverTrack ui
   hoverKind <- uiCursorKind ctx hoverTrack
   when (hoverKind /= UiCursorGrab) $ bump failed
@@ -1499,8 +1504,8 @@ runSliderTest ctx failed = do
   _ <- runFrame ctx inp0 ui
   ((resp, _), _, _, _) <- runFrame ctx inp0 ui
   let Rect rx ry rw rh = respRect resp
-      trackRect = sliderTrackRect rx ry rw rh
-      drag = V2 (rx + rw * 0.75) (rectY trackRect + rectH trackRect / 2)
+      track = sliderTrackBounds (ctxFontMetrics ctx) "Vol" rx ry rw rh
+      drag = V2 (rectX track + rectW track * 0.75) (rectY track + rectH track / 2)
   let inpDrag =
         inp0
           { inputMousePos = drag
@@ -1509,6 +1514,27 @@ runSliderTest ctx failed = do
           }
   ((_, val), _, _, _) <- runFrame ctx inpDrag ui
   when (val <= 10) $ bump failed
+
+-- Grow sliders take the column width; drag maps to the painted track span.
+runSliderFillWidthTest :: Context -> IORef Int -> IO ()
+runSliderFillWidthTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 400 120}
+      ui = column (fillW defaultLayout) (slider "Vol" 0 100 0)
+  _ <- runFrame ctx inp0 ui
+  ((resp, _), _, _, _) <- runFrame ctx inp0 ui
+  let Rect rx ry rw rh = respRect resp
+  when (rw < 300) $ bump failed
+  let track = sliderTrackBounds (ctxFontMetrics ctx) "Vol" rx ry rw rh
+      endDrag =
+        V2 (rectX track + rectW track - 2) (rectY track + rectH track / 2)
+      inpDrag =
+        inp0
+          { inputMousePos = endDrag
+          , inputMouseDown = True
+          , inputMousePressed = True
+          }
+  ((_, val), _, _, _) <- runFrame ctx inpDrag ui
+  when (val < 90) $ bump failed
 
 runScrollTest :: Context -> IORef Int -> IO ()
 runScrollTest ctx failed = do
@@ -1957,7 +1983,7 @@ runFlexWrapTest _ failed = do
   let inp = emptyInput {inputWindowSize = Size 30 10}
       ui =
         row
-          (defaultLayout {layoutWrap = True, layoutWidth = Fixed 10, layoutGap = 0})
+          (defaultLayout {layoutWrap = True, layoutWidth = Fixed 4, layoutGap = 0, layoutPadding = Padding 0 0 0 0})
           ( do
               _ <- label "AA"
               _ <- label "BB"
@@ -2108,6 +2134,63 @@ runGrowWrapPushesSiblingTest _ failed = do
   let ysFor t = [y | (Rect _ y _ _, txt, _, _, _) <- spans, txt == t]
   case (ysFor "BBBB", ysFor "BELOW") of
     ([by], [sy]) -> when (sy < by + 0.5) $ bump failed
+    _ -> bump failed
+
+-- defaultLayout gap/pad are pixel-sized; terminal scales them to cells.
+runTerminalDefaultGapTest :: Context -> IORef Int -> IO ()
+runTerminalDefaultGapTest _ failed = do
+  ctx <- newTerminalContext
+  let fm = ctxFontMetrics ctx
+      expectedStep = fmLineHeight fm + resolveLayoutGap fm (layoutGap defaultLayout)
+      inp = emptyInput {inputWindowSize = Size 20 10}
+      ui =
+        column defaultLayout $ do
+          _ <- label "A"
+          _ <- label "B"
+          pure ()
+  _ <- runFrame ctx inp ui
+  spans <- collectTextSpans ctx
+  let ys = sort [y | (Rect _ y _ _, txt, _, _, _) <- spans, txt == "A" || txt == "B"]
+  case ys of
+    yA : yB : _ -> when (yB - yA > expectedStep + 0.25) $ bump failed
+    _ -> bump failed
+
+-- Terminal slider drag maps to the inline [bar], not the grow node width.
+runTerminalSliderTrackTest :: Context -> IORef Int -> IO ()
+runTerminalSliderTrackTest _ failed = do
+  ctx <- newTerminalContext
+  let inp0 = emptyInput {inputWindowSize = Size 60 10}
+      ui = column (fillW defaultLayout) (slider "Vol" 0 100 0)
+  _ <- runFrame ctx inp0 ui
+  ((resp, _), _, _, _) <- runFrame ctx inp0 ui
+  let Rect rx ry rw rh = respRect resp
+      fm = ctxFontMetrics ctx
+      track = sliderTrackBounds fm "Vol" rx ry rw rh
+  when (rectW track >= rw - 1) $ bump failed
+  when (rectW track < 10) $ bump failed
+  let endDrag =
+        inp0
+          { inputMousePos = V2 (rectX track + rectW track - 0.5) (rectY track + rectH track / 2)
+          , inputMouseDown = True
+          , inputMousePressed = True
+          }
+  ((_, val), _, _, _) <- runFrame ctx endDrag ui
+  when (val < 90) $ bump failed
+
+-- Label stays in node text; display must not accumulate "Name: ...: ...".
+runTerminalTextInputDisplayTest :: Context -> IORef Int -> IO ()
+runTerminalTextInputDisplayTest _ failed = do
+  ctx <- newTerminalContext
+  let inp = emptyInput {inputWindowSize = Size 40 10}
+      ui = column defaultLayout (textInput "Name" "hello")
+  _ <- runFrame ctx inp ui
+  _ <- runFrame ctx inp ui
+  spans <- collectTextSpans ctx
+  let shown = [txt | (_, txt, _, _, _) <- spans, "Name:" `T.isPrefixOf` txt]
+  case shown of
+    [one] -> do
+      when (one /= "Name: hello") $ bump failed
+      when ("Name: hello: hello" `T.isInfixOf` one) $ bump failed
     _ -> bump failed
 
 runHostSlotTest :: Context -> IORef Int -> IO ()

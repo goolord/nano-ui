@@ -124,6 +124,7 @@ module NanoUI
   , uiCursorKind
   , UiCursorKind (..)
   , sliderTrackRect
+  , sliderTrackBounds
   , -- Context
     Context
   , ctxTheme
@@ -171,6 +172,8 @@ module NanoUI
   , widgetContentInset
   , widgetPadding
   , isTerminalFont
+  , resolveLayoutGap
+  , resolveLayoutPadding
   , monoFontMarker
   , hasMonoFontMarker
   , stripMonoFontMarker
@@ -190,7 +193,7 @@ module NanoUI
 import NanoUI.Compact (Compact, askCompact, compactHost)
 import NanoUI.Context (Context (..), FrameMsg (..), anyAnimating, atlasSnapshot, atlasTextureId, ctxTheme, getAnimationValue, getFocusId, getHotId, getPrevRect, getScrollOffset, getStore, isDirty, markDirty, modalActive, newContext, newSdlContext, newTerminalContext, overlayConsumesQuit, registerImage, registerImages, setAnimationValue, setHost, setWakeLoop, startAnimation, takeDamage, textInputEditActive, withClipboard, withExternalText, withFontMetrics, withMeasureText, withMonoFontMetrics, wrapMeasureCache)
 import NanoUI.Draw (DrawCmd (..), DrawData (..), Layer (..), indexSize, vertexSize)
-import NanoUI.Font (FontMetrics (..), hasMonoFontMarker, headingFontMarker, isTerminalFont, labelContentInset, monoFontMarker, monospaceMetrics, mutedFontMarker, scrollBarGutter, scrollBarListExtra, scrollBarPageExtra, scrollBarWidth, scrollBarWindowGutter, stripMonoFontMarker, stripWidgetMarkers, widgetContentInset, widgetPadding)
+import NanoUI.Font (FontMetrics (..), hasMonoFontMarker, headingFontMarker, isTerminalFont, labelContentInset, monoFontMarker, monospaceMetrics, mutedFontMarker, resolveLayoutGap, resolveLayoutPadding, scrollBarGutter, scrollBarListExtra, scrollBarPageExtra, scrollBarWidth, scrollBarWindowGutter, sliderTrackBounds, stripMonoFontMarker, stripWidgetMarkers, widgetContentInset, widgetPadding)
 import Effectful (Eff, IOE, runEff, type (:>))
 import NanoUI.Frame (collectOverlayTextSpans, collectTextSpans, cursorKindIs, debugPanelOpen, floatingPanelActive, needsRedraw, pointerCursorWanted, runFrame, runFrameEff, sliderTrackRect, textFieldActive, uiCursorKind, UiCursorKind (..))
 import NanoUI.Id (WidgetId (..), hashWidgetId, widgetId)

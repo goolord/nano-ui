@@ -54,7 +54,7 @@ import Data.Text (Text)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Text as T
 import GHC.Stack (HasCallStack)
-import NanoUI.Font (headingFontMarker, isTerminalFont, mutedFontMarker)
+import NanoUI.Font (headingFontMarker, isTerminalFont, mutedFontMarker, sliderTrackBounds)
 import NanoUI.WidgetText
   ( checkboxLabelText
   , sliderDisplayText
@@ -119,7 +119,7 @@ import NanoUI.Style
   , windowPad
   , windowMargin
   )
-import NanoUI.Types (ImageId (..), Rect (..), Size (..), V2 (..), rectContains, rectH, rectW, sliderTrackRect)
+import NanoUI.Types (ImageId (..), Rect (..), Size (..), V2 (..), rectContains, rectH, rectW, rectX, v2X)
 
 parentIdx :: [Int] -> Int
 parentIdx = \case
@@ -513,7 +513,8 @@ sliderEx layout lbl minV maxV initial = do
     pure $
       case mrect of
         Nothing -> False
-        Just (Rect x y w h) -> rectContains (sliderTrackRect x y w h) (inputMousePos inp)
+        Just (Rect x y w h) ->
+          rectContains (sliderTrackBounds fm lbl x y w h) (inputMousePos inp)
   let isActive = active == wid
       pressed = inputMouseDown inp && (trackHover || isActive)
   val <-
@@ -522,9 +523,12 @@ sliderEx layout lbl minV maxV initial = do
       let dragFrac =
             case mrect of
               Nothing -> frac
-              Just (Rect x _ w _) ->
-                let px = v2X (inputMousePos inp)
-                    f = (px - x) / max w 1
+              Just (Rect x y w h) ->
+                let track = sliderTrackBounds fm lbl x y w h
+                    tx = rectX track
+                    tw = rectW track
+                    px = v2X (inputMousePos inp)
+                    f = (px - tx) / max tw 1
                  in max 0 (min 1 f)
           computed = minV + dragFrac * (maxV - minV)
       if pressed then pure computed else pure current

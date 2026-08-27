@@ -11,7 +11,7 @@ module NanoUI.Term.Notcurses
 import Control.Exception (bracket)
 import Control.Monad (when)
 import Data.Bits ((.&.))
-import Data.Char (chr, isValidCodePoint)
+import Data.Char (chr)
 import Data.Maybe (maybeToList)
 import Data.Primitive.PrimArray (copyPrimArrayToPtr, sizeofPrimArray)
 import Data.Word (Word32)
@@ -85,7 +85,7 @@ ncBlitCells (NotcursesCtx fp) mPrev cells =
               k prevPtr (fromIntegral (cellsW prev)) (fromIntegral (cellsH prev))
 
 ncRead :: NotcursesCtx -> Int -> IO [TermEvent]
-ncRead ctx timeoutMs = go 0
+ncRead ctx timeoutMs = go (0 :: Int)
   where
     go retries =
       withForeignPtr (ctxPtr ctx) $ \p ->
@@ -127,7 +127,7 @@ resizeEvent p =
       when (r /= 0) $ fail "notcurses dim failed"
       rowCount <- peek rows
       colCount <- peek cols
-      pure [EvResize (fromIntegral colCount, fromIntegral rowCount)]
+      pure [EvResize (fromIntegral colCount) (fromIntegral rowCount)]
 
 mapEvent :: Word32 -> CInt -> CInt -> CUInt -> CInt -> Maybe TermEvent
 mapEvent evId y x mods evtype
@@ -149,7 +149,12 @@ charEvent evId mods
 codePointToChar :: Word32 -> Maybe Char
 codePointToChar w =
   let i = fromIntegral w
-   in if i >= 0 && isValidCodePoint i then Just (chr i) else Nothing
+   in if isValidCodePoint i then Just (chr i) else Nothing
+
+-- Not exported from Data.Char on GHC 9.14 base yet.
+isValidCodePoint :: Int -> Bool
+isValidCodePoint i =
+  i >= 0 && i <= 0x10FFFF && not (i >= 0xD800 && i <= 0xDFFF)
 
 mouseEvent :: Word32 -> Int -> Int -> CUInt -> CInt -> Maybe TermEvent
 mouseEvent evId col row mods evtype =
@@ -329,6 +334,3 @@ foreign import ccall unsafe "nano_ui_ncinput_modifiers"
 
 foreign import ccall unsafe "nano_ui_ncinput_evtype"
   c_input_evtype :: Ptr () -> IO CInt
-
-maybeToList :: Maybe a -> [a]
-maybeToList = maybe [] pure

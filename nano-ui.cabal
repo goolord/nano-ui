@@ -122,7 +122,8 @@ executable nano-ui-profile
     hs-source-dirs:   examples
     default-language: GHC2024
 
--- Terminal backend: notcurses-core on POSIX, native Win32 console on Windows.
+-- Terminal backend: notcurses. On Windows, build from MSYS2 UCRT64
+-- (pkg-config + notcurses). nano-ui-tui re-enters via msys2_shell.cmd.
 library nano-ui-term
     import:           extensions
     import:           ghc-options
@@ -133,6 +134,7 @@ library nano-ui-term
         NanoUI.Term.Cells
         NanoUI.Term.Event
         NanoUI.Term.Vt
+    other-modules:    NanoUI.Term.Notcurses
     build-depends:
         base ^>=4.22.0.0,
         bytestring,
@@ -141,17 +143,9 @@ library nano-ui-term
         text ^>=2.1
     hs-source-dirs:   term-lib
     default-language: GHC2024
-    if os(windows)
-        build-depends: Win32 >=2.14
-        other-modules:
-            NanoUI.Term.Driver
-            NanoUI.Term.Driver.Types
-            NanoUI.Term.Driver.Windows
-    else
-        c-sources:        term-lib/cbits/nano_ui_notcurses.c
-        include-dirs:     term-lib/cbits
-        pkgconfig-depends: notcurses-core >= 3.0
-        other-modules: NanoUI.Term.Notcurses
+    c-sources:        term-lib/cbits/nano_ui_notcurses.c
+    include-dirs:     term-lib/cbits
+    pkgconfig-depends: notcurses-core >= 3.0
 
 executable nano-ui-tui
     import:           extensions
@@ -163,6 +157,7 @@ executable nano-ui-tui
         base ^>=4.22.0.0,
         nano-ui,
         nano-ui:nano-ui-term,
+        process ^>=1.6,
         text ^>=2.1
     hs-source-dirs:   examples
     default-language: GHC2024
@@ -186,13 +181,6 @@ library nano-ui-sdl
         NanoUI.Sdl.Render
         NanoUI.Sdl.Shape
         NanoUI.Sdl.Window
-    c-sources:        sdl-lib/cbits/nano_ui_ttf.c
-                      sdl-lib/cbits/nano_ui_display.c
-                      sdl-lib/cbits/nano_ui_image.c
-                      sdl-lib/cbits/nano_ui_batch.c
-                      sdl-lib/cbits/nano_ui_text_atlas.c
-    include-dirs:     sdl-lib/cbits
-    pkgconfig-depends: sdl3 >= 3.2, sdl3-ttf >= 3.2
     build-depends:
         base ^>=4.22.0.0,
         bytestring ^>=0.12,
@@ -204,7 +192,15 @@ library nano-ui-sdl
         text ^>=2.1
     hs-source-dirs:   sdl-lib
     default-language: GHC2024
-    if !flag(sdl)
+    if flag(sdl)
+        pkgconfig-depends: sdl3 >= 3.2, sdl3-ttf >= 3.2
+        c-sources:        sdl-lib/cbits/nano_ui_ttf.c
+                          sdl-lib/cbits/nano_ui_display.c
+                          sdl-lib/cbits/nano_ui_image.c
+                          sdl-lib/cbits/nano_ui_batch.c
+                          sdl-lib/cbits/nano_ui_text_atlas.c
+        include-dirs:     sdl-lib/cbits
+    else
         buildable: False
 
 executable nano-ui-sdl-demo
@@ -269,7 +265,6 @@ benchmark nano-ui-sdl-bench
     import:           warnings
     type:             exitcode-stdio-1.0
     main-is:          SdlBench.hs
-    pkgconfig-depends: sdl3 >= 3.2, sdl3-ttf >= 3.2
     build-depends:
         base ^>=4.22.0.0,
         tasty-bench ^>=0.5,
@@ -279,6 +274,8 @@ benchmark nano-ui-sdl-bench
     hs-source-dirs:   benchmark
     default-language: GHC2024
     default-extensions: CPP
+    if flag(sdl)
+        pkgconfig-depends: sdl3 >= 3.2, sdl3-ttf >= 3.2
     if os(windows)
         build-depends: Win32 >=2.14
         cpp-options: -Dmingw32_HOST_OS

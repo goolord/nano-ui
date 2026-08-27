@@ -31,10 +31,12 @@ static int
 put_cell(struct ncplane *plane, int y, int x, uint32_t ch, uint32_t fg, uint32_t bg)
 {
   uint64_t channels = channels_from_rgba(fg, bg);
-  nccell c = NCCELL_CHAR_INITIALIZER(' ', 0, channels);
-  if(ch <= 0x7fu){
-    c.gcluster = ch;
-  }else if(nccell_set(&c, (uint32_t)ch)){
+  nccell c = NCCELL_INITIALIZER(' ', 0, channels);
+  if (ch <= 0x7fu) {
+    if (nccell_load_char(plane, &c, (char)ch) < 0) {
+      return -1;
+    }
+  } else if (nccell_load_ucs32(plane, &c, ch) < 0) {
     return -1;
   }
   return ncplane_putc_yx(plane, y, x, &c);

@@ -94,6 +94,7 @@ import NanoUI.Font
   , scrollBarGeomFor
   , scrollBarOuterGap
   , scrollLayoutGutter
+  , sliderTrackBounds
   , widgetContentInset
   , centeredTextY
   , alignedTextBox
@@ -621,7 +622,18 @@ displayText ctx nt idx = do
               caret = if open then " v" else " >"
           pure (selectDisplayText lbl opt <> caret)
         NodeSlider -> pure (T.takeWhile (/= '\US') txt)
-        NodeButton -> pure (buttonDisplayText txt)
+        -- Terminal keeps bracket text for TUI affordance; SDL strips via buttonDisplayText.
+        NodeButton ->
+          if isCloseButtonText txt
+            then pure (closeButtonDisplayText txt)
+            else pure txt
+        NodeTextInput -> do
+          value <- textInputValue ctx idx
+          focused <- textInputFocused ctx idx
+          wid <- getWidgetId (ctxNodeArena ctx) idx
+          store <- getStore ctx
+          let cursor = IM.findWithDefault (length value) (intKey wid) (storeCursor store)
+          pure (textInputTerminalText txt value cursor focused)
         _ -> pure txt
     else
       case nt of
@@ -669,13 +681,43 @@ textInputGeom fm x y w _h =
       fieldY = y + labelH + gap
    in TextInputGeom {tigFieldRect = Rect x fieldY w fieldH}
 
-widgetHitRect :: Context -> NodeType -> Float -> Float -> Float -> Float -> Rect
-widgetHitRect ctx nt x y w h =
-  case nt of
-    NodeTextInput
-      | not (isTerminalFont (ctxFontMetrics ctx)) ->
-          tigFieldRect (textInputGeom (ctxFontMetrics ctx) x y w h)
-    _ -> Rect x y w h
+widgetHitRect :: Context -> NodeType -> NodeIdx -> Float -> Float -> Float -> Float -> IO Rect
+widgetHitRect ctx nt idx x y w h = do
+  let fm = ctxFontMetrics ctx
+  if not (isTerminalFont fm)
+    then
+      pure $
+        case nt of
+          NodeTextInput -> tigFieldRect (textInputGeom fm x y w h)
+          _ -> Rect x y w h
+    else
+      case nt of
+        NodeSlider -> do
+          txt <- getText (ctxNodeArena ctx) idx
+          let lbl = sliderLabelText (T.takeWhile (/= '\US') txt)
+          pure (sliderTrackBounds fm lbl x y w h)
+        NodeButton -> do
+          txt <- displayText ctx nt idx
+          pure (terminalTextHitRect fm x y h txt True)
+        NodeCheckbox -> do
+          txt <- displayText ctx nt idx
+          pure (terminalTextHitRect fm x y h txt True)
+        NodeSelect -> do
+          txt <- displayText ctx nt idx
+          pure (terminalTextHitRect fm x y h txt False)
+        NodeTextInput -> do
+          txt <- displayText ctx nt idx
+          pure (terminalTextHitRect fm x y h txt False)
+        _ -> pure (Rect x y w h)
+
+terminalTextHitRect :: FontMetrics -> Float -> Float -> Float -> T.Text -> Bool -> Rect
+terminalTextHitRect fm x y h txt atOrigin =
+  let (ix, _) = widgetContentInset fm
+      tw = lineWidth fm txt
+      th = layoutLineHeight fm
+      tx = if atOrigin then x else x + ix
+      ty = centeredTextY fm y h th
+   in Rect tx ty tw th
 
 data UiCursorKind
   = UiCursorDefault
@@ -834,12 +876,19 @@ sliderCursorKind :: Context -> WidgetId -> V2 -> Input -> IO UiCursorKind
 sliderCursorKind ctx wid mouse inp = do
   mrect <- getPrevRect ctx wid
   active <- readIORef (ctxActiveId ctx)
-  let dragging = active == wid && inputMouseDown inp
+  let fm = ctxFontMetrics ctx
+      dragging = active == wid && inputMouseDown inp
+  lbl <-
+    findNodeByWidgetId ctx wid >>= \case
+      Nothing -> pure T.empty
+      Just idx -> do
+        txt <- getText (ctxNodeArena ctx) idx
+        pure (sliderLabelText (T.takeWhile (/= '\US') txt))
   pure $
     case mrect of
       Nothing -> UiCursorDefault
       Just (Rect x y w h) ->
-        grabDragKind (rectContains (sliderTrackRect x y w h) mouse) dragging inp
+        grabDragKind (rectContains (sliderTrackBounds fm lbl x y w h) mouse) dragging inp
 
 textInputCursorKind :: Context -> WidgetId -> V2 -> IO UiCursorKind
 textInputCursorKind ctx wid mouse = do
@@ -955,11 +1004,18 @@ widgetTextSpans ctx nt idx x y w h = do
                   )
                 ]
             else do
-              let fill =
-                    T.replicate (max 1 (round w)) (T.singleton ' ')
-                  fullBg = [(Rect x y w h, fill, fg, bg)]
-                  textSpan = [(Rect (x + ix) (centeredTextY fm y h th) tw th, txt, fg, bg)]
-              pure (fullBg ++ textSpan)
+              let tx =
+                    if nt == NodeButton || nt == NodeCheckbox
+                      then x
+                      else x + ix
+                  textSpan =
+                    [ ( Rect tx (centeredTextY fm y h th) tw th
+                      , txt
+                      , fg
+                      , bg
+                      )
+                    ]
+              pure textSpan
     else do
       case nt of
         NodeTextInput -> do
@@ -1240,6 +1296,12 @@ lowerNode ctx idx = do
       let isClose = nt == NodeButton && isCloseButtonText storedText
       let opaqueBg
             | isClose = False
+            | terminal, nt == NodeButton = False
+            | terminal, nt == NodeCheckbox = False
+            | terminal, nt == NodeSlider = False
+            | terminal, nt == NodeSelect = False
+            | terminal, nt == NodeTextInput = False
+            | terminal, nt == NodeText = False
             | terminal = True
             | otherwise =
                 nt /= NodeCheckbox && nt /= NodeSlider && nt /= NodeTextInput
@@ -1259,23 +1321,26 @@ lowerNode ctx idx = do
             (styleBg (themeInput theme))
             (colorRGBA 255 255 255 255)
         when (nt == NodeSlider) $ do
-          let hit = sliderTrackRect x y w h
-              trackH = 10
-              trackY = rectY hit + (rectH hit - trackH) / 2
-              trackRect = Rect x trackY w trackH
+          txt <- getText (ctxNodeArena ctx) idx
+          let lbl = sliderLabelText (T.takeWhile (/= '\US') txt)
+              track = sliderTrackBounds fm lbl x y w h
+              tx = rectX track
+              ty = rectY track
+              tw = rectW track
+              th = rectH track
               trackR = 3
-              fillW = max 0 (w * clamp01 value)
+              fillW = max 0 (tw * clamp01 value)
               outline = styleBorder (themeInput theme)
               well = colorRGBA 72 48 48 255
               fill = colorRGBA 204 102 102 255
               bw = 1
               innerR = max 0 (trackR - bw)
-              innerX = x + bw
-              innerY = trackY + bw
-              innerW = w - 2 * bw
-              innerH = trackH - 2 * bw
+              innerX = tx + bw
+              innerY = ty + bw
+              innerW = tw - 2 * bw
+              innerH = th - 2 * bw
               innerFillW = max 0 (innerW * clamp01 value)
-          pushRoundedRect da trackRect trackR outline
+          pushRoundedRect da track trackR outline
           when (innerW > 0 && innerH > 0) $
             pushRoundedRect da (Rect innerX innerY innerW innerH) innerR well
           when (innerFillW > 0) $ do
@@ -1285,8 +1350,8 @@ lowerNode ctx idx = do
                     else min innerR (innerFillW / 2)
             pushRoundedRect da (Rect innerX innerY innerFillW innerH) fillR fill
           let handleD = 18
-              handleCx = x + max (handleD / 2) (min (w - handleD / 2) fillW)
-              handleHy = trackY + (trackH - handleD) / 2
+              handleCx = tx + max (handleD / 2) (min (tw - handleD / 2) fillW)
+              handleHy = ty + (th - handleD) / 2
               handle = Rect (handleCx - handleD / 2) handleHy handleD handleD
               innerD = handleD - 2
               handleInner =
@@ -1297,8 +1362,6 @@ lowerNode ctx idx = do
                   innerD
           pushRoundedRect da handle (handleD / 2) (styleBorder (themeInput theme))
           pushRoundedRect da handleInner (innerD / 2) (colorRGBA 255 255 255 255)
-        when (nt == NodeTextInput && terminal) $
-          drawTextInputCaret da ctx idx x y w h style
         when isClose $
           drawCloseIcon fm da x y w h (styleFg style)
         when (nt == NodeSelect) $
@@ -1931,7 +1994,7 @@ findTopWidgetUnderMouse ctx count mouse wanted = go (count - 1)
             else do
               wid <- getWidgetId (ctxNodeArena ctx) idx
               (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-              let rect = widgetHitRect ctx nt x y w h
+              rect <- widgetHitRect ctx nt idx x y w h
               if rectW rect > 0 && rectH rect > 0 && rectContains rect mouse
                 then do
                   allow <- overlayHitAllowed ctx idx mouse
@@ -2573,7 +2636,7 @@ findTextInputUnderMouse ctx count mouse = go 0
             then do
               wid <- getWidgetId (ctxNodeArena ctx) idx
               (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-              let rect = widgetHitRect ctx nt x y w h
+              rect <- widgetHitRect ctx nt idx x y w h
               if rectW rect > 0 && rectH rect > 0 && rectContains rect mouse
                 then do
                   allow <- overlayHitAllowed ctx idx mouse
@@ -2614,15 +2677,6 @@ syncWidgetLabels ctx = do
         txt <- getText (ctxNodeArena ctx) idx
         when (not (isTerminalFont (ctxFontMetrics ctx))) $
           setNodeText (ctxNodeArena ctx) idx (stripButtonBrackets txt)
-      NodeTextInput -> do
-        when (isTerminalFont (ctxFontMetrics ctx)) $ do
-          focus <- readIORef (ctxFocusId ctx)
-          txt <- getText (ctxNodeArena ctx) idx
-          let value = IM.findWithDefault "" key (storeText store)
-              cursor = IM.findWithDefault (length value) key (storeCursor store)
-              lbl = txt
-              focused = focus == wid
-          setNodeText (ctxNodeArena ctx) idx (textInputTerminalText lbl value cursor focused)
       _ -> pure ()
 
 walkChildren :: Context -> NodeIdx -> IO ()

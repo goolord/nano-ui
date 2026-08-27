@@ -18,6 +18,8 @@ import NanoUI.Font
   , classifyScrollBar
   , fmLineHeight
   , isTerminalFont
+  , resolveLayoutGap
+  , resolveLayoutPadding
   , measureTextWrapped
   , measureTextWrappedIO
   , labelContentInset
@@ -128,11 +130,11 @@ measureNode na fm measure useAssignedWidth idx = do
     NodeText -> measureTextNode na fm measure useAssignedWidth idx
     NodeSpacer -> measureSpacer na idx
     NodeSeparator -> measureSeparator na idx
-    NodeContainer -> measureContainer na useAssignedWidth idx
-    NodePanel -> measureContainer na useAssignedWidth idx
-    NodeScrollContainer -> measureScrollContainer na idx
-    NodeModal -> measureScrollContainer na idx
-    NodeWindow -> measureContainer na useAssignedWidth idx
+    NodeContainer -> measureContainer na fm useAssignedWidth idx
+    NodePanel -> measureContainer na fm useAssignedWidth idx
+    NodeScrollContainer -> measureScrollContainer na fm idx
+    NodeModal -> measureScrollContainer na fm idx
+    NodeWindow -> measureContainer na fm useAssignedWidth idx
     NodeImage -> measureImage na idx
     _ -> measureWidget na fm measure idx
   applyAspectAfterMeasure na assignedW useAssignedWidth idx
@@ -217,6 +219,8 @@ measureWidget na fm measure idx = do
   nt <- getNodeType na idx
   txt <- getText na idx
   (minW, minH, maxW, maxH) <- getMinMax na idx
+  (wTag, wVal) <- getWidthSizing na idx
+  (hTag, hVal) <- getHeightSizing na idx
   let (padX, padY) =
         case nt of
           NodeButton -> buttonPadding fm
@@ -227,7 +231,7 @@ measureWidget na fm measure idx = do
                 let (cx, cy) = labelContentInset fm
                  in (2 * cx, cy)
           NodeCheckbox
-            | isTerminalFont fm -> widgetPadding fm
+            | isTerminalFont fm -> (0, 0)
             | otherwise ->
                 let (cx, cy) = labelContentInset fm
                  in (2 * cx, cy)
@@ -248,15 +252,20 @@ measureWidget na fm measure idx = do
               if isTerminalFont fm
                 then fmLineHeight fm * 0.35
                 else 18
-        pure (max lw vw, lh, 0, trackExtra)
+            -- Min width for column sizing; Grow still expands in positionNode.
+            contentW = max lw vw
+        pure (contentW, lh, 0, trackExtra)
       NodeCheckbox -> do
         let body =
               if T.null txt
                 then " "
-                else checkboxLabelText txt
+                else if isTerminalFont fm then txt else checkboxLabelText txt
         (mw, mh) <- measure body
-        let box = checkboxBoxSize fm
-        pure (mw, max mh box, checkboxLeading fm, 0)
+        if isTerminalFont fm
+          then pure (mw, mh, 0, 0)
+          else do
+            let box = checkboxBoxSize fm
+            pure (mw, max mh box, checkboxLeading fm, 0)
       NodeSelect -> do
         let (lbl, opts) = selectParseOptions txt
             choices = if null opts then [""] else opts
@@ -286,18 +295,18 @@ measureWidget na fm measure idx = do
                 else txt
         (mw, mh) <- measure body
         pure (mw, mh, 0, 0)
-  (wTag, wVal) <- getWidthSizing na idx
-  (hTag, hVal) <- getHeightSizing na idx
   let rawW = tw + padX + extraW
       rawH = th + padY + extraH
       w = case wTag of SizingFixed -> wVal; _ -> clamp rawW minW maxW
       h = case hTag of SizingFixed -> hVal; _ -> clamp rawH minH maxH
   setRect na idx 0 0 w h
 
-measureContainer :: NodeArena -> Bool -> NodeIdx -> IO ()
-measureContainer na useAssignedWidth idx = do
-  pad <- getPadding na idx
-  gap <- getGap na idx
+measureContainer :: NodeArena -> FontMetrics -> Bool -> NodeIdx -> IO ()
+measureContainer na fm useAssignedWidth idx = do
+  pad0 <- getPadding na idx
+  gap0 <- getGap na idx
+  let pad = resolveLayoutPadding fm pad0
+      gap = resolveLayoutGap fm gap0
   dir <- getDirection na idx
   wrap <- getWrap na idx
   (minW, minH, maxW, maxH) <- getMinMax na idx
@@ -332,10 +341,12 @@ measureContainer na useAssignedWidth idx = do
           _ -> clamp (contentH + padT pad + padB pad) minH maxH
   setRect na idx 0 0 w h
 
-measureScrollContainer :: NodeArena -> NodeIdx -> IO ()
-measureScrollContainer na idx = do
-  pad <- getPadding na idx
-  gap <- getGap na idx
+measureScrollContainer :: NodeArena -> FontMetrics -> NodeIdx -> IO ()
+measureScrollContainer na fm idx = do
+  pad0 <- getPadding na idx
+  gap0 <- getGap na idx
+  let pad = resolveLayoutPadding fm pad0
+      gap = resolveLayoutGap fm gap0
   dir <- getDirection na idx
   (minW, minH, maxW, maxH) <- getMinMax na idx
   (wTag, wVal) <- getWidthSizing na idx
@@ -484,8 +495,10 @@ positionNode na fm idx x y availW availH = do
       h0 = clamp (resolveSize hTag hVal intrinsicH availH minH maxH) minH maxH
       h = if ratio > 0 then clamp (w / ratio) minH maxH else h0
   setRect na idx x y w h
-  pad <- getPadding na idx
-  gap <- getGap na idx
+  pad0 <- getPadding na idx
+  gap0 <- getGap na idx
+  let pad = resolveLayoutPadding fm pad0
+      gap = resolveLayoutGap fm gap0
   dir <- getDirection na idx
   nt <- getNodeType na idx
   case nt of
@@ -829,12 +842,13 @@ clamp v lo hi = max lo (min hi v)
 placeModals :: NodeArena -> FontMetrics -> Float -> Float -> IO ()
 placeModals na fm winW winH = do
   count <- arenaCount na
+  let margin = resolveLayoutGap fm windowMargin
   forM_ [0 .. count - 1] $ \idx -> do
     nt <- getNodeType na idx
     when (nt == NodeModal) $ do
       (_, _, iw, ih) <- getRect na idx
-      let maxW = max 0 (winW - 2 * windowMargin)
-          maxH = max 0 (winH - 2 * windowMargin)
+      let maxW = max 0 (winW - 2 * margin)
+          maxH = max 0 (winH - 2 * margin)
           w = min iw maxW
           h = min ih maxH
           x = max 0 ((winW - w) / 2)
@@ -851,6 +865,7 @@ placeWindows ::
   IO ()
 placeWindows na fm winW winH lookupPos lookupSize = do
   count <- arenaCount na
+  let margin = resolveLayoutGap fm windowMargin
   forM_ [0 .. count - 1] $ \idx -> do
     nt <- getNodeType na idx
     when (nt == NodeWindow) $ do
@@ -869,7 +884,7 @@ placeWindows na fm winW winH lookupPos lookupSize = do
           w = clamp w0 minW (min maxW winW)
           h = clamp h0 minH (min maxH winH)
       mpos <- lookupPos wid
-      let (x0, y0) = maybe (max 0 (winW - w - windowMargin), windowMargin) id mpos
+      let (x0, y0) = maybe (max 0 (winW - w - margin), margin) id mpos
           x = clamp x0 0 (max 0 (winW - w))
           y = clamp y0 0 (max 0 (winH - h))
       positionWindowNode na fm idx x y w h
@@ -878,8 +893,10 @@ placeWindows na fm winW winH lookupPos lookupSize = do
 positionWindowNode :: NodeArena -> FontMetrics -> NodeIdx -> Float -> Float -> Float -> Float -> IO ()
 positionWindowNode na fm idx x y w h = do
   setRect na idx x y w h
-  pad <- getPadding na idx
-  gap <- getGap na idx
+  pad0 <- getPadding na idx
+  gap0 <- getGap na idx
+  let pad = resolveLayoutPadding fm pad0
+      gap = resolveLayoutGap fm gap0
   dir <- getDirection na idx
   positionChildren na fm idx dir gap pad x y w h
 

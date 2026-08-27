@@ -26,6 +26,7 @@ module NanoUI.WidgetText
 
 import Data.Text (Text)
 import NanoUI.Font (FontMetrics (..), fmLineHeight)
+import NanoUI.Types (sliderBarCells)
 import qualified Data.Text as T
 
 sliderRangeSep :: Text
@@ -42,9 +43,6 @@ sliderLabelText txt =
 
 sliderValueText :: Float -> Text
 sliderValueText = T.pack . show . (round :: Float -> Int)
-
-sliderBarCells :: Int
-sliderBarCells = 12
 
 sliderText :: Text -> Float -> Float -> Text
 sliderText lbl frac value =

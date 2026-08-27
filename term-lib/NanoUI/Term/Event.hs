@@ -1,6 +1,5 @@
--- | Terminal events shared by all backends. Win32 builds these from console
--- input records; notcurses maps them from @ncinput@; 'NanoUI.Term.Vt' decodes
--- them from VT byte streams for tests.
+-- | Terminal events. notcurses maps these from @ncinput@;
+-- 'NanoUI.Term.Vt' decodes them from VT byte streams for tests.
 module NanoUI.Term.Event
   ( MouseBtn (..)
   , MouseAction (..)
