@@ -33,7 +33,7 @@ import NanoUI
   , isDirty
   , needsRedraw
   , textFieldActive
-  , floatingPanelActive
+  , debugPanelOpen
   , overlayConsumesQuit
   , registerImage
   , Rect (..)
@@ -141,7 +141,8 @@ loop ::
   IO ()
 loop ctxRef ui env prev pendingRedraw wasAnimating drawing shouldQuit inp queued lastT = do
   ctx <- readIORef ctxRef
-  wantDebug <- takeDebugLive (sdlDebug env)
+  debugOpen <- debugPanelOpen ctx
+  wantDebug <- takeDebugLive (sdlDebug env) debugOpen
   pending <-
     if null queued
       then do
@@ -151,8 +152,7 @@ loop ctxRef ui env prev pendingRedraw wasAnimating drawing shouldQuit inp queued
           else do
             animating <- anyAnimating ctx
             editing <- textFieldActive ctx
-            floating <- floatingPanelActive ctx
-            if animating || wantDebug || editing || floating
+            if animating || wantDebug || editing || debugOpen
               then waitEventTimeout animateTimeout
               else waitEvent
       else pure queued
@@ -189,6 +189,7 @@ loop ctxRef ui env prev pendingRedraw wasAnimating drawing shouldQuit inp queued
                   || forceFinal
                   || pendingDirty
                   || dirtyNow
+                  || debugOpen
                   || wantDebug
                   || editing
           writeIORef wasAnimating anim
@@ -197,7 +198,7 @@ loop ctxRef ui env prev pendingRedraw wasAnimating drawing shouldQuit inp queued
               then do
                 ms <-
                   tryWithDrawingLock drawing $ do
-                    (_, s) <- draw ctx' ui env inpSynced wantDebug
+                    (_, s) <- draw ctx' ui env inpSynced (debugOpen || wantDebug)
                     writeIORef pendingRedraw False
                     writeIORef prev s
                     pure s
@@ -243,12 +244,13 @@ draw ctx ui env inp forceFull = do
       baseSpans <- collectTextSpans ctx
       overlaySpans <- collectOverlayTextSpans ctx inp
       font <- readIORef (sdlFontRef env)
+      monoFont <- readIORef (sdlMonoFontRef env)
       let clear = themeWindow (ctxTheme ctx)
           spansIn = filterSpans damage
       renderDrawDataPass (sdlRenderer env) scale (Just clear) drawData False (sdlImages env) damage
-      renderTextSpans (sdlRenderer env) scale font (sdlTextCache env) (spansIn baseSpans)
+      renderTextSpans (sdlRenderer env) scale font monoFont (sdlTextCache env) (spansIn baseSpans)
       renderDrawDataPass (sdlRenderer env) scale Nothing drawData True (sdlImages env) damage
-      renderTextSpans (sdlRenderer env) scale font (sdlTextCache env) (spansIn overlaySpans)
+      renderTextSpans (sdlRenderer env) scale font monoFont (sdlTextCache env) (spansIn overlaySpans)
       okBlit <- retainBlit (sdlRenderer env) tex
       unless okBlit $ fail "SDL_RenderTexture(retain) failed"
       void $ renderPresentSafe (sdlRenderer env)

@@ -1,3 +1,5 @@
+{-# LANGUAGE StrictData #-}
+
 module NanoUI.Style
   ( Sizing (..)
   , Direction (..)
@@ -47,10 +49,10 @@ data AlignY = AlignTop | AlignMiddle | AlignBottom
   deriving (Eq, Show, Enum, Bounded)
 
 data Padding = Padding
-  { padL :: Float
-  , padR :: Float
-  , padT :: Float
-  , padB :: Float
+  { padL :: {-# UNPACK #-} !Float
+  , padR :: {-# UNPACK #-} !Float
+  , padT :: {-# UNPACK #-} !Float
+  , padB :: {-# UNPACK #-} !Float
   }
   deriving (Eq, Show)
 
@@ -59,18 +61,18 @@ panelPaintPad :: Float
 panelPaintPad = 12
 
 data Layout = Layout
-  { layoutDirection :: Direction
-  , layoutWidth :: Sizing
-  , layoutHeight :: Sizing
-  , layoutPadding :: Padding
-  , layoutGap :: Float
-  , layoutWrap :: Bool
-  , layoutAlignX :: AlignX
-  , layoutAlignY :: AlignY
-  , layoutMinW :: Float
-  , layoutMinH :: Float
-  , layoutMaxW :: Float
-  , layoutMaxH :: Float
+  { layoutDirection :: !Direction
+  , layoutWidth :: !Sizing
+  , layoutHeight :: !Sizing
+  , layoutPadding :: !Padding
+  , layoutGap :: {-# UNPACK #-} !Float
+  , layoutWrap :: !Bool
+  , layoutAlignX :: !AlignX
+  , layoutAlignY :: !AlignY
+  , layoutMinW :: {-# UNPACK #-} !Float
+  , layoutMinH :: {-# UNPACK #-} !Float
+  , layoutMaxW :: {-# UNPACK #-} !Float
+  , layoutMaxH :: {-# UNPACK #-} !Float
   }
   deriving (Eq, Show)
 
@@ -140,13 +142,13 @@ tight :: Layout -> Layout
 tight l = l {layoutPadding = Padding 0 0 0 0}
 
 data Style = Style
-  { styleBg :: Color
-  , styleFg :: Color
-  , styleBorder :: Color
-  , styleBorderWidth :: Float
-  , styleCornerRadius :: Float
-  , styleHoverBg :: Color
-  , styleActiveBg :: Color
+  { styleBg :: !Color
+  , styleFg :: !Color
+  , styleBorder :: !Color
+  , styleBorderWidth :: {-# UNPACK #-} !Float
+  , styleCornerRadius :: {-# UNPACK #-} !Float
+  , styleHoverBg :: !Color
+  , styleActiveBg :: !Color
   }
   deriving (Eq, Show)
 

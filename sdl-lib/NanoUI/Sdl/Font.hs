@@ -5,6 +5,7 @@ module NanoUI.Sdl.Font
   , openFont
   , closeFont
   , findFontPath
+  , findMonoFontPath
   , newTextCache
   , destroyTextCache
   , withTtfMeasure
@@ -26,7 +27,7 @@ import Foreign.C.Types (CFloat (..), CSize (..))
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (peek)
-import NanoUI (Color (..), Context, FontMetrics (..), Rect (..), monospaceMetrics, withExternalText, withFontMetrics, withMeasureText)
+import NanoUI (Color (..), Context, FontMetrics (..), Rect (..), hasMonoFontMarker, monospaceMetrics, stripMonoFontMarker, withExternalText, withFontMetrics, withMeasureText, withMonoFontMetrics)
 import NanoUI.Sdl.Render (clearLogicalClipRect, setLogicalClipRect)
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
 import System.Directory (doesFileExist)
@@ -95,17 +96,23 @@ openFont path ptsize =
 closeFont :: SdlFont -> IO ()
 closeFont = ttfCloseFont . sfFont
 
-withTtfMeasure :: Context -> SdlFont -> Context
-withTtfMeasure ctx sf = withTtfMeasureScaled ctx sf 1
+withTtfMeasure :: Context -> SdlFont -> SdlFont -> Context
+withTtfMeasure ctx sf monoSf = withTtfMeasureScaled ctx sf monoSf 1
 
-withTtfMeasureScaled :: Context -> SdlFont -> Float -> Context
-withTtfMeasureScaled ctx sf scale =
-  withExternalText
-    ( withMeasureText
-        (withFontMetrics ctx (ttfFontMetricsScaled sf scale))
-        (measureTtfTextScaled sf scale)
-    )
-    True
+withTtfMeasureScaled :: Context -> SdlFont -> SdlFont -> Float -> Context
+withTtfMeasureScaled ctx sf monoSf scale =
+  let fm = ttfFontMetricsScaled sf scale
+      monoFm = ttfFontMetricsScaled monoSf scale
+      measure txt =
+        if hasMonoFontMarker txt
+          then measureTtfTextScaled monoSf scale (stripMonoFontMarker txt)
+          else measureTtfTextScaled sf scale txt
+   in withExternalText
+        ( withMeasureText
+            (withMonoFontMetrics (withFontMetrics ctx fm) monoFm)
+            measure
+        )
+        True
 
 ttfFontMetricsScaled :: SdlFont -> Float -> FontMetrics
 ttfFontMetricsScaled sf scale =
@@ -134,17 +141,27 @@ measureTtfText sf txt =
             pure (realToFrac w, realToFrac h)
           else pure (0, sfLineSkip sf)
 
-renderTextSpans :: Ptr SDL_Renderer -> Float -> SdlFont -> TextCache -> [(Rect, Text, Color, Color, Rect)] -> IO ()
-renderTextSpans ren scale font cache spans = do
+renderTextSpans :: Ptr SDL_Renderer -> Float -> SdlFont -> SdlFont -> TextCache -> [(Rect, Text, Color, Color, Rect)] -> IO ()
+renderTextSpans ren scale font monoFont cache spans = do
   forM_ spans $ \(Rect x y _ _, txt, fg, _bg, clip) -> do
     setLogicalClipRect ren scale clip
-    drawSpan ren scale font cache txt fg x y
+    drawSpan ren scale font monoFont cache txt fg x y
   clearLogicalClipRect ren
 
-drawSpan :: Ptr SDL_Renderer -> Float -> SdlFont -> TextCache -> Text -> Color -> Float -> Float -> IO ()
-drawSpan _ _ _ _ txt _ _ _
+drawSpan :: Ptr SDL_Renderer -> Float -> SdlFont -> SdlFont -> TextCache -> Text -> Color -> Float -> Float -> IO ()
+drawSpan _ _ _ _ _ txt _ _ _
   | T.null txt = pure ()
-drawSpan ren scale font cache txt col x y =
+drawSpan ren scale font monoFont cache txt col x y =
+  let (pick, shown) =
+        if hasMonoFontMarker txt
+          then (monoFont, stripMonoFontMarker txt)
+          else (font, txt)
+   in drawSpanFont ren scale pick cache shown col x y
+
+drawSpanFont :: Ptr SDL_Renderer -> Float -> SdlFont -> TextCache -> Text -> Color -> Float -> Float -> IO ()
+drawSpanFont _ _ _ _ txt _ _ _
+  | T.null txt = pure ()
+drawSpanFont ren scale font cache txt col x y =
   withUtf8 txt $ \cstr len -> do
     let keyCol = colorWord col
         cacheKey = (txt, keyCol)
@@ -230,6 +247,35 @@ drawTexture ren tex x y =
 lookupCache :: TextCache -> (Text, Word32) -> IO (Maybe (Ptr (), Float, Float))
 lookupCache cache key =
   Map.lookup key <$> readIORef (tcEntries cache)
+
+findMonoFontPath :: IO (Maybe FilePath)
+findMonoFontPath = do
+  envPath <- lookupEnv "NANO_UI_MONO_FONT"
+  case envPath of
+    Just p -> exists p
+    Nothing -> firstExisting monoFontCandidates
+  where
+    exists p = do
+      ok <- doesFileExist p
+      pure (if ok then Just p else Nothing)
+    firstExisting [] = pure Nothing
+    firstExisting (p : ps) = do
+      ok <- doesFileExist p
+      if ok then pure (Just p) else firstExisting ps
+
+monoFontCandidates :: [FilePath]
+monoFontCandidates =
+  [ "C:\\Windows\\Fonts\\consola.ttf"
+  , "C:\\Windows\\Fonts\\Consolas.ttf"
+  , "C:\\Windows\\Fonts\\CascadiaMono.ttf"
+  , "C:\\Windows\\Fonts\\lucon.ttf"
+  , "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"
+  , "/usr/share/fonts/TTF/DejaVuSansMono.ttf"
+  , "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf"
+  , "/System/Library/Fonts/Menlo.ttc"
+  , "/System/Library/Fonts/Supplemental/Courier New.ttf"
+  , "C:\\msys64\\ucrt64\\share\\fonts\\TTF\\DejaVuSansMono.ttf"
+  ]
 
 findFontPath :: IO (Maybe FilePath)
 findFontPath = do

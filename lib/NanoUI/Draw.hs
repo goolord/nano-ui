@@ -1,3 +1,4 @@
+{-# LANGUAGE StrictData #-}
 {-# LANGUAGE UnliftedFFITypes #-}
 
 module NanoUI.Draw
@@ -24,10 +25,13 @@ module NanoUI.Draw
 
 import Control.Monad (forM_, when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.Primitive.Array (MutableArray, newArray, readArray, writeArray)
 import Data.Word (Word8, Word32)
 import Foreign.ForeignPtr (ForeignPtr, mallocForeignPtrBytes, withForeignPtr)
 import Foreign.Marshal.Array (copyArray)
+import Foreign.Ptr (Ptr)
 import Foreign.Storable (pokeByteOff)
+import GHC.Exts (RealWorld)
 import NanoUI.Font (FontMetrics (..), GlyphQuad (..))
 import NanoUI.Types (Color, Rect (..), colorToWord32, rectIntersect)
 import qualified Data.Text as T
@@ -36,23 +40,23 @@ data Layer = LayerBackground | LayerContent | LayerOverlay
   deriving (Eq, Show, Enum, Bounded)
 
 data Vertex = Vertex
-  { vtxX :: Float
-  , vtxY :: Float
-  , vtxU :: Float
-  , vtxV :: Float
-  , vtxRgba :: Word32
+  { vtxX :: {-# UNPACK #-} !Float
+  , vtxY :: {-# UNPACK #-} !Float
+  , vtxU :: {-# UNPACK #-} !Float
+  , vtxV :: {-# UNPACK #-} !Float
+  , vtxRgba :: {-# UNPACK #-} !Word32
   }
   deriving (Eq, Show)
 
 data DrawCmd = DrawCmd
-  { cmdClipX :: Float
-  , cmdClipY :: Float
-  , cmdClipW :: Float
-  , cmdClipH :: Float
-  , cmdTextureId :: Int
-  , cmdIndexOffset :: Word32
-  , cmdIndexCount :: Word32
-  , cmdLayer :: Layer
+  { cmdClipX :: {-# UNPACK #-} !Float
+  , cmdClipY :: {-# UNPACK #-} !Float
+  , cmdClipW :: {-# UNPACK #-} !Float
+  , cmdClipH :: {-# UNPACK #-} !Float
+  , cmdTextureId :: !Int
+  , cmdIndexOffset :: {-# UNPACK #-} !Word32
+  , cmdIndexCount :: {-# UNPACK #-} !Word32
+  , cmdLayer :: !Layer
   }
   deriving (Eq, Show)
 
@@ -74,7 +78,9 @@ data DrawArena = DrawArena
   , daIndices :: IORef (ForeignPtr Word8, Int)
   , daIndexCount :: IORef Int
   , daIndexPool :: BufferPool
-  , daCommands :: IORef [DrawCmd]
+  , daCmdStore :: IORef (MutableArray RealWorld DrawCmd)
+  , daCmdCount :: IORef Int
+  , daCmdCapacity :: IORef Int
   , daCurrentLayer :: IORef Layer
   , daCurrentClip :: IORef (Float, Float, Float, Float)
   , daCurrentTexture :: IORef Int
@@ -96,6 +102,34 @@ indexSize = 4
 bufferPoolLimit :: Int
 bufferPoolLimit = 4
 
+cmdInitialCapacity :: Int
+cmdInitialCapacity = 64
+
+{-# INLINE pokeVertex #-}
+pokeVertex :: Ptr Word8 -> Int -> Float -> Float -> Float -> Float -> Word32 -> IO ()
+pokeVertex p i x y u v rgba = do
+  let off = i * vertexSize
+  pokeByteOff p off x
+  pokeByteOff p (off + 4) y
+  pokeByteOff p (off + 8) u
+  pokeByteOff p (off + 12) v
+  pokeByteOff p (off + 16) rgba
+
+{-# INLINE pokeIndex #-}
+pokeIndex :: Ptr Word8 -> Int -> Int -> IO ()
+pokeIndex p i idx =
+  pokeByteOff p (i * indexSize) (fromIntegral idx :: Word32)
+
+{-# INLINE pokeQuadIndices #-}
+pokeQuadIndices :: Ptr Word8 -> Int -> Int -> IO ()
+pokeQuadIndices p baseIdx base = do
+  pokeIndex p baseIdx base
+  pokeIndex p (baseIdx + 1) (base + 1)
+  pokeIndex p (baseIdx + 2) (base + 2)
+  pokeIndex p (baseIdx + 3) base
+  pokeIndex p (baseIdx + 4) (base + 2)
+  pokeIndex p (baseIdx + 5) (base + 3)
+
 {-# INLINE newDrawArena #-}
 newDrawArena :: IO DrawArena
 newDrawArena = do
@@ -107,7 +141,10 @@ newDrawArena = do
   daIndices <- newIORef (iPtr, indexCapacity)
   daIndexCount <- newIORef 0
   daIndexPool <- newIORef []
-  daCommands <- newIORef []
+  cmdStore <- newArray cmdInitialCapacity (DrawCmd 0 0 0 0 0 0 0 LayerContent)
+  daCmdStore <- newIORef cmdStore
+  daCmdCount <- newIORef 0
+  daCmdCapacity <- newIORef cmdInitialCapacity
   daCurrentLayer <- newIORef LayerContent
   daCurrentClip <- newIORef (0, 0, 1e9, 1e9)
   daCurrentTexture <- newIORef 0
@@ -120,7 +157,9 @@ newDrawArena = do
       , daIndices
       , daIndexCount
       , daIndexPool
-      , daCommands
+      , daCmdStore
+      , daCmdCount
+      , daCmdCapacity
       , daCurrentLayer
       , daCurrentClip
       , daCurrentTexture
@@ -132,12 +171,13 @@ resetDrawArena :: DrawArena -> IO ()
 resetDrawArena da = do
   writeIORef (daVertexCount da) 0
   writeIORef (daIndexCount da) 0
-  writeIORef (daCommands da) []
+  writeIORef (daCmdCount da) 0
   writeIORef (daCurrentLayer da) LayerContent
   writeIORef (daCurrentClip da) (0, 0, 1e9, 1e9)
   writeIORef (daCurrentTexture da) 0
   writeIORef (daCmdStartIndex da) 0
 
+{-# NOINLINE poolTake #-}
 poolTake :: BufferPool -> Int -> Int -> IO (ForeignPtr Word8)
 poolTake pool bytes minCap = do
   entries <- readIORef pool
@@ -147,11 +187,13 @@ poolTake pool bytes minCap = do
       pure ptr
     _ -> mallocForeignPtrBytes bytes
 
+{-# NOINLINE poolGive #-}
 poolGive :: BufferPool -> ForeignPtr Word8 -> Int -> IO ()
 poolGive pool ptr cap = do
   entries <- readIORef pool
   writeIORef pool (take bufferPoolLimit ((ptr, cap) : entries))
 
+{-# NOINLINE growBufferWithCount #-}
 growBufferWithCount ::
   Int ->
   IORef (ForeignPtr Word8, Int) ->
@@ -184,6 +226,27 @@ ensureIndices da needIndices = do
   count <- readIORef (daIndexCount da)
   growBufferWithCount count (daIndices da) (daIndexPool da) indexSize needIndices
 
+{-# NOINLINE growCmdStore #-}
+growCmdStore :: DrawArena -> Int -> IO ()
+growCmdStore da oldCap = do
+  let newCap = oldCap * 2
+  arr <- readIORef (daCmdStore da)
+  newArr <- newArray newCap (DrawCmd 0 0 0 0 0 0 0 LayerContent)
+  forM_ [0 .. oldCap - 1] $ \i ->
+    readArray arr i >>= writeArray newArr i
+  writeIORef (daCmdStore da) newArr
+  writeIORef (daCmdCapacity da) newCap
+
+{-# INLINE appendCmd #-}
+appendCmd :: DrawArena -> DrawCmd -> IO ()
+appendCmd da cmd = do
+  count <- readIORef (daCmdCount da)
+  cap <- readIORef (daCmdCapacity da)
+  when (count >= cap) $ growCmdStore da cap
+  arr <- readIORef (daCmdStore da)
+  writeArray arr count cmd
+  writeIORef (daCmdCount da) (count + 1)
+
 {-# INLINE beginLayer #-}
 beginLayer :: DrawArena -> Layer -> IO ()
 beginLayer da layer = do
@@ -203,19 +266,18 @@ flushCmd da = do
       (cx, cy, cw, ch) <- readIORef (daCurrentClip da)
       tex <- readIORef (daCurrentTexture da)
       layer <- readIORef (daCurrentLayer da)
-      cmds <- readIORef (daCommands da)
-      let cmd =
-            DrawCmd
-              { cmdClipX = cx
-              , cmdClipY = cy
-              , cmdClipW = cw
-              , cmdClipH = ch
-              , cmdTextureId = tex
-              , cmdIndexOffset = fromIntegral startIdx
-              , cmdIndexCount = fromIntegral count
-              , cmdLayer = layer
-              }
-      writeIORef (daCommands da) (cmd : cmds)
+      appendCmd
+        da
+        DrawCmd
+          { cmdClipX = cx
+          , cmdClipY = cy
+          , cmdClipW = cw
+          , cmdClipH = ch
+          , cmdTextureId = tex
+          , cmdIndexOffset = fromIntegral startIdx
+          , cmdIndexCount = fromIntegral count
+          , cmdLayer = layer
+          }
       writeIORef (daCmdStartIndex da) curIdx
     else pure ()
 
@@ -248,20 +310,21 @@ setTexture da tex = do
 {-# INLINE pushQuad #-}
 pushQuad :: DrawArena -> Rect -> Float -> Float -> Float -> Float -> Color -> IO ()
 pushQuad da (Rect x y w h) u0 v0 u1 v1 col = do
-  let rgba = colorToWord32 col
-      verts =
-        [ Vertex x y u0 v0 rgba
-        , Vertex (x + w) y u1 v0 rgba
-        , Vertex (x + w) (y + h) u1 v1 rgba
-        , Vertex x (y + h) u0 v1 rgba
-        ]
   ensureVerts da 4
   ensureIndices da 6
   base <- readIORef (daVertexCount da)
-  writeVerts da base verts
-  writeIORef (daVertexCount da) (base + 4)
   baseIdx <- readIORef (daIndexCount da)
-  writeIndices da baseIdx [base, base + 1, base + 2, base, base + 2, base + 3]
+  (vPtr, _) <- readIORef (daVertices da)
+  (iPtr, _) <- readIORef (daIndices da)
+  let rgba = colorToWord32 col
+  withForeignPtr vPtr $ \vp -> do
+    pokeVertex vp base x y u0 v0 rgba
+    pokeVertex vp (base + 1) (x + w) y u1 v0 rgba
+    pokeVertex vp (base + 2) (x + w) (y + h) u1 v1 rgba
+    pokeVertex vp (base + 3) x (y + h) u0 v1 rgba
+  withForeignPtr iPtr $ \ip ->
+    pokeQuadIndices ip baseIdx base
+  writeIORef (daVertexCount da) (base + 4)
   writeIORef (daIndexCount da) (baseIdx + 6)
 
 {-# INLINE pushRect #-}
@@ -283,21 +346,22 @@ pushImage da rect tex u0 v0 u1 v1 col
 pushRoundedRect :: DrawArena -> Rect -> Float -> Color -> IO ()
 pushRoundedRect da (Rect x y w h) radius col = do
   setTexture da 0
-  let rgba = colorToWord32 col
-      r = max 0 radius
-      verts =
-        [ Vertex x y r (-1) rgba
-        , Vertex (x + w) y r (-1) rgba
-        , Vertex (x + w) (y + h) r (-1) rgba
-        , Vertex x (y + h) r (-1) rgba
-        ]
   ensureVerts da 4
   ensureIndices da 6
   base <- readIORef (daVertexCount da)
-  writeVerts da base verts
-  writeIORef (daVertexCount da) (base + 4)
   baseIdx <- readIORef (daIndexCount da)
-  writeIndices da baseIdx [base, base + 1, base + 2, base, base + 2, base + 3]
+  (vPtr, _) <- readIORef (daVertices da)
+  (iPtr, _) <- readIORef (daIndices da)
+  let rgba = colorToWord32 col
+      r = max 0 radius
+  withForeignPtr vPtr $ \vp -> do
+    pokeVertex vp base x y r (-1) rgba
+    pokeVertex vp (base + 1) (x + w) y r (-1) rgba
+    pokeVertex vp (base + 2) (x + w) (y + h) r (-1) rgba
+    pokeVertex vp (base + 3) x (y + h) r (-1) rgba
+  withForeignPtr iPtr $ \ip ->
+    pokeQuadIndices ip baseIdx base
+  writeIORef (daVertexCount da) (base + 4)
   writeIORef (daIndexCount da) (baseIdx + 6)
 
 {-# INLINE pushLine #-}
@@ -323,19 +387,22 @@ pushLine da x1 y1 x2 y2 thickness col = do
 pushFilledTriangle :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
 pushFilledTriangle da x0 y0 x1 y1 x2 y2 col = do
   setTexture da 0
-  let rgba = colorToWord32 col
-      verts =
-        [ Vertex x0 y0 (-3) 0 rgba
-        , Vertex x1 y1 (-3) 0 rgba
-        , Vertex x2 y2 (-3) 0 rgba
-        ]
   ensureVerts da 3
   ensureIndices da 3
   base <- readIORef (daVertexCount da)
-  writeVerts da base verts
-  writeIORef (daVertexCount da) (base + 3)
   baseIdx <- readIORef (daIndexCount da)
-  writeIndices da baseIdx [base, base + 1, base + 2]
+  (vPtr, _) <- readIORef (daVertices da)
+  (iPtr, _) <- readIORef (daIndices da)
+  let rgba = colorToWord32 col
+  withForeignPtr vPtr $ \vp -> do
+    pokeVertex vp base x0 y0 (-3) 0 rgba
+    pokeVertex vp (base + 1) x1 y1 (-3) 0 rgba
+    pokeVertex vp (base + 2) x2 y2 (-3) 0 rgba
+  withForeignPtr iPtr $ \ip -> do
+    pokeIndex ip baseIdx base
+    pokeIndex ip (baseIdx + 1) (base + 1)
+    pokeIndex ip (baseIdx + 2) (base + 2)
+  writeIORef (daVertexCount da) (base + 3)
   writeIORef (daIndexCount da) (baseIdx + 3)
 
 {-# INLINE pushText #-}
@@ -355,24 +422,12 @@ pushText da fm x y txt col = go x (T.unpack txt)
           pushRect da (Rect gx gy gw gh) col
           go (ox + adv) rest
 
-writeVerts :: DrawArena -> Int -> [Vertex] -> IO ()
-writeVerts da base verts = do
-  (ptr, _) <- readIORef (daVertices da)
-  withForeignPtr ptr $ \p ->
-    forM_ (zip [base ..] verts) $ \(i, Vertex x y u v rgba) -> do
-      let off = i * vertexSize
-      pokeByteOff p off x
-      pokeByteOff p (off + 4) y
-      pokeByteOff p (off + 8) u
-      pokeByteOff p (off + 12) v
-      pokeByteOff p (off + 16) rgba
-
-writeIndices :: DrawArena -> Int -> [Int] -> IO ()
-writeIndices da baseIdx indices = do
-  (ptr, _) <- readIORef (daIndices da)
-  withForeignPtr ptr $ \p ->
-    forM_ (zip [baseIdx ..] indices) $ \(i, idx) ->
-      pokeByteOff p (i * indexSize) (fromIntegral idx :: Word32)
+readCmdList :: MutableArray RealWorld DrawCmd -> Int -> IO [DrawCmd]
+readCmdList arr count = reverse <$> go 0 []
+  where
+    go i acc
+      | i >= count = pure acc
+      | otherwise = readArray arr i >>= \cmd -> go (i + 1) (cmd : acc)
 
 {-# INLINE finishDraw #-}
 finishDraw :: DrawArena -> IO DrawData
@@ -382,12 +437,14 @@ finishDraw da = do
   (iPtr, _) <- readIORef (daIndices da)
   vCount <- readIORef (daVertexCount da)
   iCount <- readIORef (daIndexCount da)
-  cmds <- readIORef (daCommands da)
+  count <- readIORef (daCmdCount da)
+  arr <- readIORef (daCmdStore da)
+  cmds <- readCmdList arr count
   pure
     DrawData
       { drawVertices = vPtr
       , drawVertexCount = vCount
       , drawIndices = iPtr
       , drawIndexCount = iCount
-      , drawCommands = reverse cmds
+      , drawCommands = cmds
       }

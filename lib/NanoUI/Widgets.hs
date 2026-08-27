@@ -103,6 +103,9 @@ import NanoUI.Style
   , fillW
   , gap
   , tight
+  , fixedH
+  , fixedWH
+  , grow
   )
 import NanoUI.Types (ImageId (..), Rect (..), Size (..), V2 (..), rectContains, rectH, rectW, sliderTrackRect)
 
@@ -110,6 +113,15 @@ parentIdx :: [Int] -> Int
 parentIdx = \case
   [] -> -1
   (p : _) -> p
+
+titleBarH :: Float
+titleBarH = 28
+
+titleBarLayout :: Layout -> Layout
+titleBarLayout = tight . gap 8 . alignMid . fixedH titleBarH . fillW
+
+titleLabelLayout :: Layout
+titleLabelLayout = tight . alignMid . fixedH titleBarH $ defaultLayout
 
 data Response = Response
   { respId :: WidgetId
@@ -196,7 +208,7 @@ modal open title child
       wid <- currentId
       ctx <- askContext
       inp <- askInput
-      body <-
+      (closeResp, body) <-
         UI $ \c i -> do
           stack <- readIORef (ctxContainerStack c)
           let parent = parentIdx stack
@@ -226,20 +238,24 @@ modal open title child
           setWidgetId (ctxNodeArena c) idx wid
           writeIORef (ctxContainerStack c) (idx : stack)
           beginModal c
-          r <-
+          (closeResp, r) <-
             unUI
               ( do
-                  when (not (T.null title)) $ do
-                    _ <- withKey title (label title)
-                    _ <- separator
-                    pure ()
-                  child
+                  close <-
+                    row (titleBarLayout defaultLayout) $ do
+                      when (not (T.null title)) $
+                        void (labelEx titleLabelLayout title)
+                      flex
+                      withKey ("close" :: Text) closeButton
+                  when (not (T.null title)) sep
+                  r <- child
+                  pure (close, r)
               )
               c
               i
           endModal c
           writeIORef (ctxContainerStack c) stack
-          pure r
+          pure (closeResp, r)
       mrect <- liftIO (getPrevRect ctx wid)
       let mouse = inputMousePos inp
           inPanel = maybe False (\r -> rectW r > 0 && rectH r > 0 && rectContains r mouse) mrect
@@ -249,7 +265,7 @@ modal open title child
                 inputMousePressed inp && not (rectContains r mouse)
               _ -> False
           esc = KeyEscape `elem` inputKeys inp
-          dismiss = backdrop || esc
+          dismiss = backdrop || esc || respClicked closeResp
       when esc $ liftIO (markEscapeConsumed ctx)
       pure
         ( Response
@@ -307,23 +323,23 @@ window open title child
               False
           setWidgetId (ctxNodeArena c) idx wid
           writeIORef (ctxContainerStack c) (idx : stack)
-          closeResp <-
+          (closeResp, body) <-
             unUI
               ( do
                   close <-
-                    row (tight . gap 8 . alignMid . fillW $ defaultLayout) $ do
+                    row (titleBarLayout defaultLayout) $ do
                       when (not (T.null title)) $
-                        label_ title
+                        withKey title (void (labelEx titleLabelLayout title))
                       flex
-                      withKey ("close" :: Text) (button "X")
+                      withKey ("close" :: Text) closeButton
                   sep
-                  body <- child
+                  body <- scroll (tight . grow $ defaultLayout) child
                   pure (close, body)
               )
               c
               i
           writeIORef (ctxContainerStack c) stack
-          pure closeResp
+          pure (closeResp, body)
       mrect <- liftIO (getPrevRect ctx wid)
       let mouse = inputMousePos inp
           inPanel = maybe False (\r -> rectW r > 0 && rectH r > 0 && rectContains r mouse) mrect
@@ -386,6 +402,25 @@ labelEx :: HasCallStack => Layout -> Text -> UI Response
 labelEx layout txt = do
   wid <- currentId
   addWidget wid NodeText txt 0 layout
+
+closeButtonMarker :: Text
+closeButtonMarker = T.singleton '\x01'
+
+{-# INLINE closeButton #-}
+closeButton :: HasCallStack => UI Response
+closeButton = do
+  wid <- currentId
+  ctx <- askContext
+  liftIO $ registerFocusable ctx wid
+  let stored = "[ " <> closeButtonMarker <> "X ]"
+      layout = tight . fixedWH titleBarH titleBarH . alignMid $ defaultLayout
+  resp <- addWidget wid NodeButton stored 0 layout
+  disabled <- liftIO (isDisabled ctx wid)
+  pure
+    resp
+      { respClicked = not disabled && respClicked resp
+      , respHovered = not disabled && respHovered resp
+      }
 
 {-# INLINE button #-}
 button :: HasCallStack => Text -> UI Response
