@@ -1,3 +1,4 @@
+#include "nano_ui_opt.h"
 #include <SDL3/SDL.h>
 #include <stddef.h>
 #include <stdbool.h>
@@ -151,6 +152,27 @@ bool nano_ui_renderer_name(SDL_Renderer *renderer, char *buf, size_t cap)
     return true;
 }
 
+bool nano_ui_fill_solid_rect(
+    SDL_Renderer *renderer,
+    Uint8 r,
+    Uint8 g,
+    Uint8 b,
+    Uint8 a,
+    float x,
+    float y,
+    float w,
+    float h)
+{
+    if (!renderer || w <= 0.f || h <= 0.f) {
+        return true;
+    }
+    if (!SDL_SetRenderDrawColor(renderer, r, g, b, a)) {
+        return false;
+    }
+    SDL_FRect rect = {x, y, w, h};
+    return SDL_RenderFillRect(renderer, &rect);
+}
+
 SDL_Texture *nano_ui_retain_create(SDL_Renderer *renderer, int w, int h)
 {
     if (!renderer || w <= 0 || h <= 0) {
@@ -209,6 +231,11 @@ bool nano_ui_retain_blit_rect(
     SDL_FRect src = {src_x, src_y, src_w, src_h};
     SDL_FRect dst = {dst_x, dst_y, src_w, src_h};
     return SDL_RenderTexture(renderer, tex, &src, &dst);
+}
+
+void nano_ui_free_surface(void *surface)
+{
+    SDL_DestroySurface((SDL_Surface *)surface);
 }
 
 bool nano_ui_render_coords_from_window(

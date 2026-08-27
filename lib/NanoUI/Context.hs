@@ -9,6 +9,8 @@ module NanoUI.Context
   , withFontMetrics
   , withMonoFontMetrics
   , withMeasureText
+  , wrapMeasureCache
+  , clearMeasureCache
   , withExternalText
   , withTheme
   , newTerminalContext
@@ -67,6 +69,7 @@ import Data.IntMap.Strict (IntMap)
 import Data.Text (Text)
 import Data.Word (Word64)
 import qualified Data.IntMap.Strict as IM
+import qualified Data.Map.Strict as Map
 import Data.ByteString (ByteString)
 import qualified NanoUI.Atlas as Atlas
 import NanoUI.Atlas (ImageAtlas, atlasTextureId)
@@ -157,6 +160,8 @@ data WindowResizeDrag = WindowResizeDrag
   }
   deriving (Eq, Show)
 
+type MeasureCacheKey = (Text, Bool, Float)
+
 data Context = Context
   { ctxNodeArena :: NodeArena
   , ctxDrawArena :: DrawArena
@@ -175,6 +180,7 @@ data Context = Context
   , ctxFontMetrics :: FontMetrics
   , ctxMonoFontMetrics :: FontMetrics
   , ctxMeasureText :: Text -> IO (Float, Float)
+  , ctxMeasureCache :: Maybe (IORef (Map.Map MeasureCacheKey (Float, Float)))
   , ctxExternalText :: Bool
   , ctxTheme :: Theme
   , ctxContainerStack :: IORef [Int]
@@ -254,6 +260,7 @@ newContext = do
       , ctxFontMetrics = fm0
       , ctxMonoFontMetrics = fm0
       , ctxMeasureText = \txt -> pure (measureText fm0 (stripMonoFontMarker txt))
+      , ctxMeasureCache = Nothing
       , ctxExternalText = False
       , ctxTheme = defaultTheme
       , ctxContainerStack
@@ -270,12 +277,12 @@ newContext = do
       , ctxModalWasActive
       , ctxModalActive
       , ctxModalDepth
-  , ctxEscapeConsumed
-  , ctxWindowDrag
-  , ctxWindowResize
-  , ctxPrevFloatingRects
-  , ctxImageAtlas
-  , ctxWakeLoop
+      , ctxEscapeConsumed
+      , ctxWindowDrag
+      , ctxWindowResize
+      , ctxPrevFloatingRects
+      , ctxImageAtlas
+      , ctxWakeLoop
       }
 
 fontMetricsForText :: Context -> Text -> FontMetrics
@@ -302,6 +309,32 @@ withMonoFontMetrics ctx monoFm = ctx {ctxMonoFontMetrics = monoFm}
 withMeasureText :: Context -> (Text -> IO (Float, Float)) -> Context
 withMeasureText ctx measure = ctx {ctxMeasureText = measure}
 
+{-# INLINE wrapMeasureCache #-}
+wrapMeasureCache :: Float -> Context -> (Text -> IO (Float, Float)) -> Context
+wrapMeasureCache scale ctx measure =
+  case ctxMeasureCache ctx of
+    Nothing -> ctx {ctxMeasureText = measure}
+    Just cacheRef ->
+      ctx
+        { ctxMeasureText = \txt -> do
+            let mono = hasMonoFontMarker txt
+                key = (stripMonoFontMarker txt, mono, scale)
+            cache <- readIORef cacheRef
+            case Map.lookup key cache of
+              Just wh -> pure wh
+              Nothing -> do
+                wh <- measure txt
+                writeIORef cacheRef (Map.insert key wh cache)
+                pure wh
+        }
+
+{-# INLINE clearMeasureCache #-}
+clearMeasureCache :: Context -> IO ()
+clearMeasureCache ctx =
+  case ctxMeasureCache ctx of
+    Nothing -> pure ()
+    Just cacheRef -> writeIORef cacheRef Map.empty
+
 {-# INLINE withExternalText #-}
 withExternalText :: Context -> Bool -> Context
 withExternalText ctx on = ctx {ctxExternalText = on}
@@ -319,7 +352,9 @@ newTerminalContext = do
 {-# INLINE newSdlContext #-}
 newSdlContext :: IO Context
 newSdlContext = do
-  ctx <- newContext
+  ctx0 <- newContext
+  cacheRef <- newIORef Map.empty
+  let ctx = ctx0 {ctxMeasureCache = Just cacheRef}
   pure (withExternalText (withTheme (withFontMetrics ctx (monospaceMetrics 16)) sdlTheme) True)
 
 {-# INLINE markDirty #-}

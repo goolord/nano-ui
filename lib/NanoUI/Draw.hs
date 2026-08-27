@@ -23,7 +23,7 @@ module NanoUI.Draw
   , withClip
   ) where
 
-import Control.Monad (forM_, when)
+import Control.Monad (forM_, unless, when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Primitive.Array (MutableArray, newArray, readArray, writeArray)
 import Data.Word (Word8, Word32)
@@ -266,20 +266,46 @@ flushCmd da = do
       (cx, cy, cw, ch) <- readIORef (daCurrentClip da)
       tex <- readIORef (daCurrentTexture da)
       layer <- readIORef (daCurrentLayer da)
-      appendCmd
-        da
-        DrawCmd
-          { cmdClipX = cx
-          , cmdClipY = cy
-          , cmdClipW = cw
-          , cmdClipH = ch
-          , cmdTextureId = tex
-          , cmdIndexOffset = fromIntegral startIdx
-          , cmdIndexCount = fromIntegral count
-          , cmdLayer = layer
-          }
+      cmdCount <- readIORef (daCmdCount da)
+      let newCmd =
+            DrawCmd
+              { cmdClipX = cx
+              , cmdClipY = cy
+              , cmdClipW = cw
+              , cmdClipH = ch
+              , cmdTextureId = tex
+              , cmdIndexOffset = fromIntegral startIdx
+              , cmdIndexCount = fromIntegral count
+              , cmdLayer = layer
+              }
+      merged <-
+        if cmdCount > 0
+          then do
+            arr <- readIORef (daCmdStore da)
+            prev <- readArray arr (cmdCount - 1)
+            if sameDrawBatch prev newCmd
+              then do
+                writeArray
+                  arr
+                  (cmdCount - 1)
+                  prev {cmdIndexCount = cmdIndexCount prev + cmdIndexCount newCmd}
+                pure True
+              else pure False
+          else pure False
+      unless merged $ appendCmd da newCmd
       writeIORef (daCmdStartIndex da) curIdx
     else pure ()
+
+{-# INLINE sameDrawBatch #-}
+sameDrawBatch :: DrawCmd -> DrawCmd -> Bool
+sameDrawBatch prev next =
+  cmdClipX prev == cmdClipX next
+    && cmdClipY prev == cmdClipY next
+    && cmdClipW prev == cmdClipW next
+    && cmdClipH prev == cmdClipH next
+    && cmdTextureId prev == cmdTextureId next
+    && cmdLayer prev == cmdLayer next
+    && cmdIndexOffset prev + cmdIndexCount prev == cmdIndexOffset next
 
 {-# INLINE setClip #-}
 setClip :: DrawArena -> Rect -> IO ()

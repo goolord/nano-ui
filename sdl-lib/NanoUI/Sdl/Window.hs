@@ -201,7 +201,7 @@ startSdlWindow ctx title w h flags bench fontPath monoPath = do
           scaleRef <- newIORef scale
           fontRef <- newIORef font
           monoFontRef <- newIORef monoFont
-          cache <- newTextCache
+          cache <- newTextCache ren
           images <- newImageAtlas
           cursors <- initCursors
           debug <- newSdlDebugSampler

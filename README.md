@@ -7,7 +7,7 @@ Purely functional immediate-mode GUI core for Haskell. Backend-agnostic: emits b
 - **SrcLoc IDs**: `HasCallStack` hashing for stable widget identity without manual ID stacks
 - **Two-pass flex layout**: measure/position over struct-of-arrays node arena
 - **Zero-allocation draw path**: pinned `ForeignPtr` vertex/index arenas reused each frame
-- **Damage tracking**: `needsRedraw` gates on commands, hover target change, scroll drag, focused text field, `markDirty`, or active animation. Mouse motion on the same widget is skipped. Scroll or widget-store text changes force a full redraw. SDL scissors hover and animation into the retain texture; the window always gets a full retain copy.
+- **Damage tracking**: `needsRedraw` gates on commands, hover target change, scroll drag, focused text field, `markDirty`, or active animation. Mouse motion on the same widget is skipped. Scroll or widget-store text changes force a full redraw. SDL scissors hover and animation into the retain texture; partial damage blits only the dirty rect to the window.
 - **Headless verification**: ASCII renderer + golden-style tests, no window/GL dependency
 
 ## Build
@@ -96,6 +96,15 @@ cabal build -fsdl
 cabal run -fsdl nano-ui-sdl-demo
 ```
 
+Profile the SDL demo draw path (hidden window, 400 timed frames):
+
+```powershell
+cd profiles
+.\run-sdl-profile.ps1
+```
+
+Uses `nano-ui-sdl-profile` with RTS `-pj` / `-P`. Open `profile-sdl-json.prof` in [speedscope](https://www.speedscope.app/).
+
 Uses `nano-ui-sdl` (`runSdlApp`, `newSdlContext`) with SDL_ttf text rendering.
 Window DPI is read via `SDL_GetWindowDisplayScale`; fonts and geometry rasterize
 at native pixel density while layout stays in logical coordinates.
@@ -103,7 +112,7 @@ The backend renders pinned `DrawData` quads through SDL3's 2D renderer, sorts
 draw commands by layer (background → content → overlay), and skips `runFrame`
 when idle (`SDL_WaitEvent` until a command, hover change, `markDirty`, or animation).
 Cross-thread `markDirty` wakes the loop via a registered SDL user event (`runSdlApp` wires this automatically).
-Hover and animation frames scissor into the retain texture. The window always gets a full retain copy.
+Hover and animation frames scissor into the retain texture. Partial damage blits only the dirty rect to the window.
 Debug HUD refreshes at 4 Hz instead of every frame.
 
 Build with Zig as the C compiler (MSYS2 UCRT64 for SDL3 + pkg-config):

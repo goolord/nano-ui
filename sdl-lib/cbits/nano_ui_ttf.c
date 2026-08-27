@@ -1,3 +1,4 @@
+#include "nano_ui_opt.h"
 #include <SDL3/SDL.h>
 #include <SDL3_ttf/SDL_ttf.h>
 #include <math.h>
@@ -245,7 +246,8 @@ bool nano_ui_ttf_create_texture(
     if (!texture) {
         return false;
     }
-    SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_LINEAR);
+    SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+    SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
 
     float tw = 0.f;
     float th = 0.f;
@@ -268,6 +270,51 @@ bool nano_ui_ttf_create_texture(
     return true;
 }
 
+bool nano_ui_ttf_render_surface(
+    TTF_Font *font,
+    const char *text,
+    size_t len,
+    Uint8 r,
+    Uint8 g,
+    Uint8 b,
+    Uint8 a,
+    SDL_Surface **out_surface,
+    float *out_w,
+    float *out_h)
+{
+    if (!font || !text || !out_surface) {
+        return false;
+    }
+    SDL_Color fg = {r, g, b, a};
+    SDL_Surface *surface = TTF_RenderText_Blended(font, text, len, fg);
+    if (!surface) {
+        return false;
+    }
+    *out_surface = surface;
+    if (out_w) {
+        *out_w = (float)surface->w;
+    }
+    if (out_h) {
+        *out_h = (float)surface->h;
+    }
+    return true;
+}
+
+bool nano_ui_render_texture_sized(
+    SDL_Renderer *renderer,
+    SDL_Texture *texture,
+    float x,
+    float y,
+    float w,
+    float h)
+{
+    if (!renderer || !texture || w <= 0.f || h <= 0.f) {
+        return false;
+    }
+    SDL_FRect dst = {x, y, w, h};
+    return SDL_RenderTexture(renderer, texture, NULL, &dst);
+}
+
 bool nano_ui_render_texture(
     SDL_Renderer *renderer,
     SDL_Texture *texture,
@@ -279,8 +326,7 @@ bool nano_ui_render_texture(
     if (!SDL_GetTextureSize(texture, &tw, &th)) {
         return false;
     }
-    SDL_FRect dst = {x, y, tw, th};
-    return SDL_RenderTexture(renderer, texture, NULL, &dst);
+    return nano_ui_render_texture_sized(renderer, texture, x, y, tw, th);
 }
 
 bool nano_ui_ttf_render_blended(
