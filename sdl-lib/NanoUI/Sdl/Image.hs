@@ -8,10 +8,10 @@ module NanoUI.Sdl.Image
   ) where
 
 import Control.Monad (when)
-import Data.ByteString (ByteString)
-import qualified Data.ByteString as BS
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.Word (Word8)
 import Foreign.C.Types (CInt (..))
+import Foreign.ForeignPtr (ForeignPtr, withForeignPtr)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import Foreign.Storable (peek, poke)
@@ -52,9 +52,9 @@ syncImageAtlas ren atlas ctx = do
       when (gen /= oldGen) $
         uploadAtlas ren atlas w h pixels gen
 
-uploadAtlas :: Ptr SDL_Renderer -> ImageAtlas -> Int -> Int -> ByteString -> Int -> IO ()
+uploadAtlas :: Ptr SDL_Renderer -> ImageAtlas -> Int -> Int -> ForeignPtr Word8 -> Int -> IO ()
 uploadAtlas ren atlas w h pixels gen =
-  BS.useAsCStringLen pixels $ \(ptr, _) ->
+  withForeignPtr pixels $ \ptr ->
     alloca $ \out -> do
       poke out nullPtr
       ok <-
