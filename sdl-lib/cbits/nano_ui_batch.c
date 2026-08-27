@@ -1,8 +1,35 @@
 #include "nano_ui_opt.h"
 #include "nano_ui_batch.h"
 
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
+
+enum { NANO_UI_VTX_STRIDE = 20 };
+
+bool nano_ui_fill_rounded_rect(
+    SDL_Renderer *renderer,
+    uint8_t r,
+    uint8_t g,
+    uint8_t b,
+    uint8_t a,
+    float x,
+    float y,
+    float w,
+    float h,
+    float radius);
+bool nano_ui_fill_triangle(
+    SDL_Renderer *renderer,
+    uint8_t r,
+    uint8_t g,
+    uint8_t b,
+    uint8_t a,
+    float x0,
+    float y0,
+    float x1,
+    float y1,
+    float x2,
+    float y2);
 
 enum {
     NANO_UI_SOLID_BATCH = 512,
@@ -261,4 +288,146 @@ bool nano_ui_batch_texture_sized(
     float h)
 {
     return nano_ui_batch_texture_dst(batch, texture, w, h, x, y, w, h, 0.f, 0.f, 1.f, 1.f, 255, 255, 255, 255);
+}
+
+static bool load_vtx(const uint8_t *verts, int vert_count, uint32_t idx, float *x, float *y, float *u, float *v, uint32_t *rgba)
+{
+    if ((int)idx < 0 || (int)idx >= vert_count) {
+        return false;
+    }
+    const uint8_t *p = verts + (size_t)idx * (size_t)NANO_UI_VTX_STRIDE;
+    memcpy(x, p, 4);
+    memcpy(y, p + 4, 4);
+    memcpy(u, p + 8, 4);
+    memcpy(v, p + 12, 4);
+    memcpy(rgba, p + 16, 4);
+    return true;
+}
+
+static bool hits_damage(
+    int has_damage,
+    float dx,
+    float dy,
+    float dw,
+    float dh,
+    float x0,
+    float y0,
+    float x1,
+    float y1,
+    float x2,
+    float y2)
+{
+    if (!has_damage) {
+        return true;
+    }
+    float minx = fminf(x0, fminf(x1, x2));
+    float maxx = fmaxf(x0, fmaxf(x1, x2));
+    float miny = fminf(y0, fminf(y1, y2));
+    float maxy = fmaxf(y0, fmaxf(y1, y2));
+    float ix = fmaxf(minx, dx);
+    float iy = fmaxf(miny, dy);
+    float ix1 = fminf(maxx, dx + dw);
+    float iy1 = fminf(maxy, dy + dh);
+    return ix < ix1 && iy < iy1;
+}
+
+void nano_ui_batch_draw_range(
+    NanoUiBatch *batch,
+    const uint8_t *verts,
+    int vert_count,
+    const uint8_t *indices,
+    int index_count,
+    int index_start,
+    int index_n,
+    int tex_id,
+    SDL_Texture *texture,
+    float tex_w,
+    float tex_h,
+    float scale,
+    int has_damage,
+    float dmg_x,
+    float dmg_y,
+    float dmg_w,
+    float dmg_h)
+{
+    if (!batch || !verts || !indices || vert_count <= 0 || index_n < 3 || scale <= 0.f) {
+        return;
+    }
+    int end = index_start + index_n;
+    if (index_start < 0) {
+        index_start = 0;
+    }
+    if (end > index_count) {
+        end = index_count;
+    }
+    const uint32_t *idx = (const uint32_t *)indices;
+    SDL_Renderer *ren = batch->renderer;
+    for (int i = index_start; i + 2 < end; i += 3) {
+        float x0, y0, u0, v0, x1, y1, u1, v1, x2, y2, u2, v2;
+        uint32_t rgba0, rgba1, rgba2;
+        if (!load_vtx(verts, vert_count, idx[i], &x0, &y0, &u0, &v0, &rgba0)
+            || !load_vtx(verts, vert_count, idx[i + 1], &x1, &y1, &u1, &v1, &rgba1)
+            || !load_vtx(verts, vert_count, idx[i + 2], &x2, &y2, &u2, &v2, &rgba2)) {
+            continue;
+        }
+        (void)u1;
+        (void)v1;
+        (void)u2;
+        (void)v2;
+        (void)rgba1;
+        (void)rgba2;
+        if (!hits_damage(has_damage, dmg_x, dmg_y, dmg_w, dmg_h, x0, y0, x1, y1, x2, y2)) {
+            continue;
+        }
+        uint8_t r = (uint8_t)((rgba0 >> 24) & 0xFFu);
+        uint8_t g = (uint8_t)((rgba0 >> 16) & 0xFFu);
+        uint8_t b = (uint8_t)((rgba0 >> 8) & 0xFFu);
+        uint8_t a = (uint8_t)(rgba0 & 0xFFu);
+        if (tex_id > 0) {
+            float w = x2 - x0;
+            float h = y2 - y0;
+            if (w <= 0.f || h <= 0.f) {
+                continue;
+            }
+            float px = x0 * scale;
+            float py = y0 * scale;
+            float pw = w * scale;
+            float ph = h * scale;
+            if (texture) {
+                nano_ui_batch_texture_dst(batch, texture, tex_w, tex_h, px, py, pw, ph, u0, v0, u2, v2, r, g, b, a);
+            } else {
+                nano_ui_batch_fill_solid(batch, r, g, b, a, px, py, pw, ph);
+            }
+        } else if (u0 <= -1.5f) {
+            nano_ui_batch_flush(batch);
+            nano_ui_fill_triangle(
+                ren,
+                r,
+                g,
+                b,
+                a,
+                x0 * scale,
+                y0 * scale,
+                x1 * scale,
+                y1 * scale,
+                x2 * scale,
+                y2 * scale);
+        } else {
+            float w = x2 - x0;
+            float h = y2 - y0;
+            if (w <= 0.f || h <= 0.f) {
+                continue;
+            }
+            float px = x0 * scale;
+            float py = y0 * scale;
+            float pw = w * scale;
+            float ph = h * scale;
+            if (v0 < 0.f) {
+                nano_ui_batch_flush(batch);
+                nano_ui_fill_rounded_rect(ren, r, g, b, a, px, py, pw, ph, u0 * scale);
+            } else {
+                nano_ui_batch_fill_solid(batch, r, g, b, a, px, py, pw, ph);
+            }
+        }
+    }
 }
