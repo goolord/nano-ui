@@ -21,15 +21,8 @@ struct NanoUiBatch {
     bool solid_active;
 
     SDL_Texture *tex;
-    float tex_w;
-    float tex_h;
-    SDL_FRect *src_rects;
-    SDL_FRect *dst_rects;
-    uint8_t tint_r;
-    uint8_t tint_g;
-    uint8_t tint_b;
-    uint8_t tint_a;
-    bool tint_active;
+    SDL_Vertex *verts;
+    int *indices;
     int tex_count;
     int tex_cap;
 };
@@ -49,14 +42,23 @@ static bool grow_solid(NanoUiBatch *batch)
 static bool grow_tex(NanoUiBatch *batch)
 {
     int cap = batch->tex_cap ? batch->tex_cap * 2 : NANO_UI_TEX_BATCH;
-    SDL_FRect *next_src = (SDL_FRect *)realloc(batch->src_rects, (size_t)cap * sizeof(SDL_FRect));
-    SDL_FRect *next_dst = (SDL_FRect *)realloc(batch->dst_rects, (size_t)cap * sizeof(SDL_FRect));
-    if (!next_src || !next_dst) {
-        free(next_src);
+    size_t vbytes = (size_t)cap * 4 * sizeof(SDL_Vertex);
+    size_t ibytes = (size_t)cap * 6 * sizeof(int);
+    SDL_Vertex *verts = (SDL_Vertex *)malloc(vbytes);
+    int *idx = (int *)malloc(ibytes);
+    if (!verts || !idx) {
+        free(verts);
+        free(idx);
         return false;
     }
-    batch->src_rects = next_src;
-    batch->dst_rects = next_dst;
+    if (batch->tex_count > 0) {
+        memcpy(verts, batch->verts, (size_t)batch->tex_count * 4 * sizeof(SDL_Vertex));
+        memcpy(idx, batch->indices, (size_t)batch->tex_count * 6 * sizeof(int));
+    }
+    free(batch->verts);
+    free(batch->indices);
+    batch->verts = verts;
+    batch->indices = idx;
     batch->tex_cap = cap;
     return true;
 }
@@ -72,25 +74,73 @@ static void flush_solid(NanoUiBatch *batch)
     batch->solid_active = false;
 }
 
+static void write_quad(
+    SDL_Vertex *verts,
+    int *indices,
+    int base,
+    SDL_FRect dst,
+    float u0,
+    float v0,
+    float u1,
+    float v1,
+    uint8_t r,
+    uint8_t g,
+    uint8_t b,
+    uint8_t a)
+{
+    SDL_FColor col = {(float)r / 255.f, (float)g / 255.f, (float)b / 255.f, (float)a / 255.f};
+    verts[0] = (SDL_Vertex){{dst.x, dst.y}, col, {u0, v0}};
+    verts[1] = (SDL_Vertex){{dst.x + dst.w, dst.y}, col, {u1, v0}};
+    verts[2] = (SDL_Vertex){{dst.x + dst.w, dst.y + dst.h}, col, {u1, v1}};
+    verts[3] = (SDL_Vertex){{dst.x, dst.y + dst.h}, col, {u0, v1}};
+    indices[0] = base;
+    indices[1] = base + 1;
+    indices[2] = base + 2;
+    indices[3] = base;
+    indices[4] = base + 2;
+    indices[5] = base + 3;
+}
+
+static bool draw_one_quad(
+    SDL_Renderer *ren,
+    SDL_Texture *texture,
+    SDL_FRect dst,
+    float u0,
+    float v0,
+    float u1,
+    float v1,
+    uint8_t r,
+    uint8_t g,
+    uint8_t b,
+    uint8_t a)
+{
+    SDL_Vertex verts[4];
+    int indices[6];
+    write_quad(verts, indices, 0, dst, u0, v0, u1, v1, r, g, b, a);
+    return SDL_RenderGeometry(ren, texture, verts, 4, indices, 6);
+}
+
 static void flush_tex(NanoUiBatch *batch)
 {
     if (!batch || batch->tex_count <= 0 || !batch->tex) {
         return;
     }
-    if (batch->tint_active) {
-        SDL_SetTextureColorMod(batch->tex, batch->tint_r, batch->tint_g, batch->tint_b);
-        SDL_SetTextureAlphaMod(batch->tex, batch->tint_a);
-    }
-    for (int i = 0; i < batch->tex_count; i++) {
-        SDL_RenderTexture(batch->renderer, batch->tex, &batch->src_rects[i], &batch->dst_rects[i]);
-    }
-    if (batch->tint_active) {
-        SDL_SetTextureColorMod(batch->tex, 255, 255, 255);
-        SDL_SetTextureAlphaMod(batch->tex, 255);
+    int n = batch->tex_count;
+    bool ok = SDL_RenderGeometry(
+        batch->renderer,
+        batch->tex,
+        batch->verts,
+        n * 4,
+        batch->indices,
+        n * 6);
+    if (!ok) {
+        int one[6] = {0, 1, 2, 0, 2, 3};
+        for (int i = 0; i < n; i++) {
+            SDL_RenderGeometry(batch->renderer, batch->tex, &batch->verts[i * 4], 4, one, 6);
+        }
     }
     batch->tex_count = 0;
     batch->tex = NULL;
-    batch->tint_active = false;
 }
 
 NanoUiBatch *nano_ui_batch_create(SDL_Renderer *renderer)
@@ -113,8 +163,8 @@ void nano_ui_batch_destroy(NanoUiBatch *batch)
     }
     nano_ui_batch_flush(batch);
     free(batch->solid_rects);
-    free(batch->src_rects);
-    free(batch->dst_rects);
+    free(batch->verts);
+    free(batch->indices);
     free(batch);
 }
 
@@ -179,50 +229,25 @@ bool nano_ui_batch_texture_dst(
     uint8_t b,
     uint8_t a)
 {
-    if (!batch || !texture || dst_w <= 0.f || dst_h <= 0.f) {
+    if (!batch || !texture || dst_w <= 0.f || dst_h <= 0.f || u1 <= u0 || v1 <= v0) {
         return false;
     }
-    float tw = tex_w;
-    float th = tex_h;
-    if (tw <= 0.f || th <= 0.f) {
-        if (!SDL_GetTextureSize(texture, &tw, &th)) {
-            return false;
-        }
-    }
-    SDL_FRect src = {u0 * tw, v0 * th, (u1 - u0) * tw, (v1 - v0) * th};
+    (void)tex_w;
+    (void)tex_h;
     SDL_FRect dst = {dst_x, dst_y, dst_w, dst_h};
-    if (src.w <= 0.f || src.h <= 0.f) {
-        return false;
-    }
-    bool tinted = (r != 255) || (g != 255) || (b != 255) || (a != 255);
-    if (batch->tex_count > 0
-        && (batch->tex != texture || batch->tint_r != r || batch->tint_g != g || batch->tint_b != b
-            || batch->tint_a != a || batch->tint_active != tinted)) {
+    if (batch->tex_count > 0 && batch->tex != texture) {
         flush_tex(batch);
     }
     flush_solid(batch);
     if (batch->tex_count >= batch->tex_cap && !grow_tex(batch)) {
-        if (tinted) {
-            SDL_SetTextureColorMod(texture, r, g, b);
-            SDL_SetTextureAlphaMod(texture, a);
+        flush_tex(batch);
+        if (batch->tex_count >= batch->tex_cap && !grow_tex(batch)) {
+            return draw_one_quad(batch->renderer, texture, dst, u0, v0, u1, v1, r, g, b, a);
         }
-        bool ok = SDL_RenderTexture(batch->renderer, texture, &src, &dst);
-        if (tinted) {
-            SDL_SetTextureColorMod(texture, 255, 255, 255);
-            SDL_SetTextureAlphaMod(texture, 255);
-        }
-        return ok;
     }
+    int i = batch->tex_count;
+    write_quad(&batch->verts[i * 4], &batch->indices[i * 6], i * 4, dst, u0, v0, u1, v1, r, g, b, a);
     batch->tex = texture;
-    batch->tex_w = tw;
-    batch->tex_h = th;
-    batch->tint_r = r;
-    batch->tint_g = g;
-    batch->tint_b = b;
-    batch->tint_a = a;
-    batch->tint_active = tinted;
-    batch->src_rects[batch->tex_count] = src;
-    batch->dst_rects[batch->tex_count] = dst;
     batch->tex_count++;
     return true;
 }
