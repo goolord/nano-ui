@@ -15,11 +15,11 @@ bool nano_ui_text_atlas_size(NanoUiTextAtlas *atlas, float *out_w, float *out_h)
 bool nano_ui_text_atlas_insert_surface(
     NanoUiTextAtlas *atlas,
     SDL_Surface *surface,
-    float *out_u0,
-    float *out_v0,
-    float *out_u1,
-    float *out_v1,
+    float *out_x,
+    float *out_y,
     float *out_w,
     float *out_h);
+
+void nano_ui_text_atlas_reset(NanoUiTextAtlas *atlas);
 
 #endif

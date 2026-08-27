@@ -126,8 +126,8 @@ debugRows :: SdlDebugSnapshot -> [(String, String)]
 debugRows s =
   [ ("present", printf "%7.1f fps" (dbgPresentFps s))
   , ("loop", printf "%7.1f fps" (dbgLoopFps s))
-  , ("frame", printf "%8.2f ms" (dbgFrameMs s))
-  , ("ui", printf "%8.2f ms" (dbgUiMs s))
+  , ("frame", printf "%8.1f ms" (dbgFrameMs s))
+  , ("ui", printf "%8.1f ms" (dbgUiMs s))
   , ("draws", printf "%8d" (dbgPresents s))
   , ("skips", printf "%8d" (dbgSkips s))
   , ("verts", printf "%8d" (dbgVerts s))

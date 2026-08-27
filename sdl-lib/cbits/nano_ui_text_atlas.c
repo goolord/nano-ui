@@ -6,8 +6,7 @@
 #include <string.h>
 
 enum {
-    NANO_UI_TEXT_ATLAS_START = 512,
-    NANO_UI_TEXT_ATLAS_MAX = 4096,
+    NANO_UI_TEXT_ATLAS_SIZE = 1024,
     NANO_UI_TEXT_ATLAS_PAD = 1
 };
 
@@ -33,7 +32,7 @@ static bool upload_all(NanoUiTextAtlas *atlas)
 static bool create_texture(NanoUiTextAtlas *atlas, int w, int h)
 {
     SDL_Texture *tex =
-        SDL_CreateTexture(atlas->renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, w, h);
+        SDL_CreateTexture(atlas->renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING, w, h);
     if (!tex) {
         return false;
     }
@@ -67,60 +66,35 @@ static bool create_texture(NanoUiTextAtlas *atlas, int w, int h)
     return upload_all(atlas);
 }
 
-static bool grow(NanoUiTextAtlas *atlas, int need_w, int need_h)
-{
-    int new_w = atlas->w ? atlas->w : NANO_UI_TEXT_ATLAS_START;
-    int new_h = atlas->h ? atlas->h : NANO_UI_TEXT_ATLAS_START;
-    while (new_w < need_w || new_h < need_h) {
-        if (new_w < need_w) {
-            new_w = new_w < NANO_UI_TEXT_ATLAS_MAX ? new_w * 2 : NANO_UI_TEXT_ATLAS_MAX;
-        }
-        if (new_h < need_h) {
-            new_h = new_h < NANO_UI_TEXT_ATLAS_MAX ? new_h * 2 : NANO_UI_TEXT_ATLAS_MAX;
-        }
-        if (new_w >= NANO_UI_TEXT_ATLAS_MAX && new_h >= NANO_UI_TEXT_ATLAS_MAX) {
-            break;
-        }
-    }
-    if (new_w > NANO_UI_TEXT_ATLAS_MAX) {
-        new_w = NANO_UI_TEXT_ATLAS_MAX;
-    }
-    if (new_h > NANO_UI_TEXT_ATLAS_MAX) {
-        new_h = NANO_UI_TEXT_ATLAS_MAX;
-    }
-    if (new_w == atlas->w && new_h == atlas->h) {
-        return false;
-    }
-    return create_texture(atlas, new_w, new_h);
-}
-
 static bool slot_for(NanoUiTextAtlas *atlas, int gw, int gh, int *out_x, int *out_y)
 {
     int pad = NANO_UI_TEXT_ATLAS_PAD;
+    if (gw + 2 * pad > NANO_UI_TEXT_ATLAS_SIZE || gh + 2 * pad > NANO_UI_TEXT_ATLAS_SIZE) {
+        return false;
+    }
     if (!atlas->tex) {
-        if (!create_texture(atlas, NANO_UI_TEXT_ATLAS_START, NANO_UI_TEXT_ATLAS_START)) {
+        if (!create_texture(atlas, NANO_UI_TEXT_ATLAS_SIZE, NANO_UI_TEXT_ATLAS_SIZE)) {
             return false;
         }
         atlas->x = pad;
         atlas->y = pad;
         atlas->row_h = 0;
     }
-    for (;;) {
-        if (atlas->x + gw + pad <= atlas->w && atlas->y + gh + pad <= atlas->h) {
-            *out_x = atlas->x;
-            *out_y = atlas->y;
-            return true;
-        }
-        if (atlas->y + atlas->row_h + pad + gh + pad <= atlas->h && gw + 2 * pad <= atlas->w) {
-            atlas->y += atlas->row_h + pad;
-            atlas->x = pad;
-            atlas->row_h = 0;
-            continue;
-        }
-        if (!grow(atlas, atlas->w, atlas->y + atlas->row_h + pad + gh + pad)) {
-            return false;
-        }
+    if (atlas->x + gw + pad <= atlas->w && atlas->y + gh + pad <= atlas->h) {
+        *out_x = atlas->x;
+        *out_y = atlas->y;
+        return true;
     }
+    int next_y = atlas->y + (atlas->row_h > 0 ? atlas->row_h + pad : pad);
+    if (next_y + gh + pad <= atlas->h && gw + 2 * pad <= atlas->w) {
+        atlas->y = next_y;
+        atlas->x = pad;
+        atlas->row_h = 0;
+        *out_x = atlas->x;
+        *out_y = atlas->y;
+        return true;
+    }
+    return false;
 }
 
 static bool blit_surface(NanoUiTextAtlas *atlas, SDL_Surface *surface, int x, int y)
@@ -188,10 +162,8 @@ bool nano_ui_text_atlas_size(NanoUiTextAtlas *atlas, float *out_w, float *out_h)
 bool nano_ui_text_atlas_insert_surface(
     NanoUiTextAtlas *atlas,
     SDL_Surface *surface,
-    float *out_u0,
-    float *out_v0,
-    float *out_u1,
-    float *out_v1,
+    float *out_x,
+    float *out_y,
     float *out_w,
     float *out_h)
 {
@@ -215,19 +187,11 @@ bool nano_ui_text_atlas_insert_surface(
     if (gh > atlas->row_h) {
         atlas->row_h = gh;
     }
-    float fw = (float)atlas->w;
-    float fh = (float)atlas->h;
-    if (out_u0) {
-        *out_u0 = (float)x / fw;
+    if (out_x) {
+        *out_x = (float)x;
     }
-    if (out_v0) {
-        *out_v0 = (float)y / fh;
-    }
-    if (out_u1) {
-        *out_u1 = (float)(x + gw) / fw;
-    }
-    if (out_v1) {
-        *out_v1 = (float)(y + gh) / fh;
+    if (out_y) {
+        *out_y = (float)y;
     }
     if (out_w) {
         *out_w = (float)gw;
@@ -236,4 +200,18 @@ bool nano_ui_text_atlas_insert_surface(
         *out_h = (float)gh;
     }
     return true;
+}
+
+void nano_ui_text_atlas_reset(NanoUiTextAtlas *atlas)
+{
+    if (!atlas) {
+        return;
+    }
+    atlas->x = NANO_UI_TEXT_ATLAS_PAD;
+    atlas->y = NANO_UI_TEXT_ATLAS_PAD;
+    atlas->row_h = 0;
+    if (atlas->pixels && atlas->w > 0 && atlas->h > 0) {
+        memset(atlas->pixels, 0, (size_t)atlas->w * (size_t)atlas->h * 4);
+        upload_all(atlas);
+    }
 }

@@ -46,10 +46,8 @@ data SdlFont = SdlFont
   }
 
 data TextSlot = TextSlot
-  { tsU0 :: Float
-  , tsV0 :: Float
-  , tsU1 :: Float
-  , tsV1 :: Float
+  { tsX :: Float
+  , tsY :: Float
   , tsW :: Float
   , tsH :: Float
   }
@@ -191,31 +189,46 @@ drawSpanFont batch scale font cache txt col x y =
   withUtf8 txt $ \cstr len -> do
     let keyCol = colorWord col
         cacheKey = (sfFont font, txt, keyCol)
-    slot <-
+    mSlot <-
       lookupCache cache cacheKey >>= \case
-        Just hit -> pure hit
-        Nothing -> createCached font cache cacheKey cstr len col
-    (atW, atH) <- atlasSize (tcAtlas cache)
-    tex <- textAtlasTexture (tcAtlas cache)
-    let px = x * scale
-        py = y * scale
-    batchTextureDst
-      batch
-      tex
-      atW
-      atH
-      px
-      py
-      (tsW slot)
-      (tsH slot)
-      (tsU0 slot)
-      (tsV0 slot)
-      (tsU1 slot)
-      (tsV1 slot)
-      255
-      255
-      255
-      255
+        Just hit -> pure (Just hit)
+        Nothing -> do
+          -- Atlas grow replaces the GPU texture; flush first so batch
+          -- never renders through a destroyed SDL_Texture pointer.
+          flushRenderBatch batch
+          createCached font cache cacheKey cstr len col
+    case mSlot of
+      Nothing -> pure ()
+      Just slot -> do
+        (atW, atH) <- atlasSize (tcAtlas cache)
+        tex <- textAtlasTexture (tcAtlas cache)
+        let px = x * scale
+            py = y * scale
+            ax = tsX slot
+            ay = tsY slot
+            aw = tsW slot
+            ah = tsH slot
+            u0 = ax / atW
+            v0 = ay / atH
+            u1 = (ax + aw) / atW
+            v1 = (ay + ah) / atH
+        batchTextureDst
+          batch
+          tex
+          atW
+          atH
+          px
+          py
+          aw
+          ah
+          u0
+          v0
+          u1
+          v1
+          255
+          255
+          255
+          255
 
 createCached ::
   SdlFont ->
@@ -224,7 +237,7 @@ createCached ::
   CString ->
   CSize ->
   Color ->
-  IO TextSlot
+  IO (Maybe TextSlot)
 createCached font cache cacheKey cstr len col =
   alloca $ \(surfPtr :: Ptr (Ptr ())) -> do
     poke surfPtr nullPtr
@@ -241,68 +254,61 @@ createCached font cache cacheKey cstr len col =
         nullPtr
         nullPtr
     when (not ok) $ fail "TTF render failed"
+    sz <- Map.size <$> readIORef (tcEntries cache)
+    when (sz >= textCacheLimit) $ resetTextCache cache
     surf <- peek surfPtr
-    slot <-
-      alloca $ \u0 ->
-        alloca $ \v0 ->
-          alloca $ \u1 ->
-            alloca $ \v1 ->
-              alloca $ \tw ->
-                alloca $ \th -> do
-                  ok2 <-
-                    textAtlasInsertSurface
-                      (tcAtlas cache)
-                      surf
-                      u0
-                      v0
-                      u1
-                      v1
-                      tw
-                      th
-                  when (not ok2) $ fail "text atlas insert failed"
-                  freeSurface surf
-                  TextSlot
-                    <$> (realToFrac <$> peek u0)
-                    <*> (realToFrac <$> peek v0)
-                    <*> (realToFrac <$> peek u1)
-                    <*> (realToFrac <$> peek v1)
-                    <*> (realToFrac <$> peek tw)
-                    <*> (realToFrac <$> peek th)
-    insertCache cache cacheKey slot
-    pure slot
+    mSlot <- insertSurface cache surf
+    freeSurface surf
+    case mSlot of
+      Nothing -> pure Nothing
+      Just slot -> do
+        insertCache cache cacheKey slot
+        pure (Just slot)
   where
     (r, g, b, a) = unpackColor col
 
+insertSurface :: TextCache -> Ptr () -> IO (Maybe TextSlot)
+insertSurface cache surf = do
+  let atlas = tcAtlas cache
+  tryInsert atlas surf >>= \case
+    Just slot -> pure (Just slot)
+    Nothing -> do
+      clearTextCacheEntries cache
+      textAtlasReset atlas
+      tryInsert atlas surf
+
+tryInsert :: Ptr () -> Ptr () -> IO (Maybe TextSlot)
+tryInsert atlas surf =
+  alloca $ \px ->
+    alloca $ \py ->
+      alloca $ \tw ->
+        alloca $ \th -> do
+          ok <- textAtlasInsertSurface atlas surf px py tw th
+          if ok
+            then do
+              slot <-
+                TextSlot
+                  <$> (realToFrac <$> peek px)
+                  <*> (realToFrac <$> peek py)
+                  <*> (realToFrac <$> peek tw)
+                  <*> (realToFrac <$> peek th)
+              pure (Just slot)
+            else pure Nothing
+
+clearTextCacheEntries :: TextCache -> IO ()
+clearTextCacheEntries cache = do
+  writeIORef (tcEntries cache) Map.empty
+  writeIORef (tcOrder cache) []
+
+resetTextCache :: TextCache -> IO ()
+resetTextCache cache = do
+  clearTextCacheEntries cache
+  textAtlasReset (tcAtlas cache)
+
 insertCache :: TextCache -> CacheKey -> TextSlot -> IO ()
 insertCache cache key val = do
-  let entriesRef = tcEntries cache
-      orderRef = tcOrder cache
-  mOld <- Map.lookup key <$> readIORef entriesRef
-  case mOld of
-    Just _ -> pure ()
-    Nothing -> evictUntilRoom cache
-  modifyIORef entriesRef (Map.insert key val)
-  modifyIORef orderRef (\ord -> key : filter (/= key) ord)
-
-evictUntilRoom :: TextCache -> IO ()
-evictUntilRoom cache = do
-  sz <- Map.size <$> readIORef (tcEntries cache)
-  when (sz >= textCacheLimit) $ do
-    evictOldest cache
-    evictUntilRoom cache
-
-evictOldest :: TextCache -> IO ()
-evictOldest cache = do
-  ord <- readIORef (tcOrder cache)
-  case reverse ord of
-    [] -> pure ()
-    (oldest : _) -> do
-      entries <- readIORef (tcEntries cache)
-      case Map.lookup oldest entries of
-        Nothing -> writeIORef (tcOrder cache) (filter (/= oldest) ord)
-        Just _ -> do
-          writeIORef (tcEntries cache) (Map.delete oldest entries)
-          writeIORef (tcOrder cache) (filter (/= oldest) ord)
+  modifyIORef (tcEntries cache) (Map.insert key val)
+  modifyIORef (tcOrder cache) (\ord -> key : filter (/= key) ord)
 
 lookupCache :: TextCache -> CacheKey -> IO (Maybe TextSlot)
 lookupCache cache key = do
@@ -452,9 +458,10 @@ foreign import ccall unsafe "nano_ui_text_atlas_insert_surface"
     Ptr CFloat ->
     Ptr CFloat ->
     Ptr CFloat ->
-    Ptr CFloat ->
-    Ptr CFloat ->
     IO Bool
+
+foreign import ccall unsafe "nano_ui_text_atlas_reset"
+  textAtlasReset :: Ptr () -> IO ()
 
 foreign import ccall unsafe "nano_ui_free_surface"
   freeSurface :: Ptr () -> IO ()
