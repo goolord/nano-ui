@@ -1,12 +1,10 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE DataKinds #-}
 
--- | Terminal backend: notcurses on POSIX, native Win32 console on Windows.
+-- | Terminal backend: Win32 console on Windows, notcurses elsewhere.
 --
--- notcurses probes the terminal during init (OSC palette, DA queries). On
--- Windows those sequences are often echoed as literal text rather than
--- handled — see notcurses #2914. The Win32 driver avoids that by talking
--- to the console API directly.
+-- notcurses OSC/DA probes echo as garbage in conhost/PowerShell
+-- (notcurses #2914). The Win32 driver writes ANSI through the console API.
 module NanoUI.Backend.Term
   ( runTermApp
   , runTermAppEff
@@ -14,7 +12,9 @@ module NanoUI.Backend.Term
   , runTermAppWithQuitEff
   ) where
 
+#if defined(mingw32_HOST_OS)
 import Control.Exception (finally)
+#endif
 import Control.Monad (when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import GHC.Clock (getMonotonicTime)
@@ -39,7 +39,13 @@ import NanoUI
   , textInputEditActive
   , type (:>)
   )
-import NanoUI.Term.Cells (Cells, cellsSize, rasterizeLayered)
+import NanoUI.Term.Cells
+  ( Cells
+  , rasterizeLayered
+#if defined(mingw32_HOST_OS)
+  , cellsSize
+#endif
+  )
 import NanoUI.Term.Event (MouseAction (..), TermEvent (..))
 
 #if defined(mingw32_HOST_OS)
@@ -53,7 +59,7 @@ import NanoUI.Term.Notcurses (ncBlitCells, ncRead, ncSize, withNotcurses)
 animateTimeout :: Int
 animateTimeout = 16
 
--- Block until input when idle (Win32 INFINITE; notcurses treats negative as wait).
+-- Win32 INFINITE / notcurses: negative timeout blocks until input.
 idleBlock :: Int
 idleBlock = -1
 
@@ -68,10 +74,10 @@ runTermAppEff ::
   IO ()
 runTermAppEff unlift ctx ui = runTermAppWithQuitEff unlift ctx (const False) ui
 
-#if defined(mingw32_HOST_OS)
-
 runTermAppWithQuit :: Context -> (Input -> Bool) -> NanoUI () -> IO ()
 runTermAppWithQuit = runTermAppWithQuitEff runEff
+
+#if defined(mingw32_HOST_OS)
 
 runTermAppWithQuitEff ::
   IOE :> es =>
@@ -82,33 +88,30 @@ runTermAppWithQuitEff ::
   IO ()
 runTermAppWithQuitEff unlift ctx shouldQuit ui =
   withDriver $ \drv ->
-    termMainLoop
-      unlift
-      ctx
-      shouldQuit
-      ui
-      ( do
-          drvWrite drv setup
-          drvFlush drv
-          drvRefreshViewport drv
-      )
-      ( do
-          drvWrite drv teardown
-          drvFlush drv
-      )
-      (drvSize drv)
-      (drvRead drv)
-      ( \before cur -> do
-          when (fmap cellsSize before /= Just (cellsSize cur)) $
-            drvWrite drv (string7 "\ESC[2J")
-          drvWrite drv (frameBytes before cur)
-          drvFlush drv
-      )
+    ( do
+        drvWrite drv setup
+        drvFlush drv
+        drvRefreshViewport drv
+        termMainLoop
+          unlift
+          ctx
+          shouldQuit
+          ui
+          (drvSize drv)
+          (drvRead drv)
+          ( \before cur -> do
+              when (fmap cellsSize before /= Just (cellsSize cur)) $
+                drvWrite drv (string7 "\ESC[2J")
+              drvWrite drv (frameBytes before cur)
+              drvFlush drv
+          )
+    )
+      `finally` ( do
+                    drvWrite drv teardown
+                    drvFlush drv
+                )
 
 #else
-
-runTermAppWithQuit :: Context -> (Input -> Bool) -> NanoUI () -> IO ()
-runTermAppWithQuit = runTermAppWithQuitEff runEff
 
 runTermAppWithQuitEff ::
   IOE :> es =>
@@ -124,8 +127,6 @@ runTermAppWithQuitEff unlift ctx shouldQuit ui =
       ctx
       shouldQuit
       ui
-      (pure ())
-      (pure ())
       (ncSize nc)
       (ncRead nc)
       (ncBlitCells nc)
@@ -138,28 +139,22 @@ termMainLoop ::
   Context ->
   (Input -> Bool) ->
   Eff (Ui : es) () ->
-  IO () ->
-  IO () ->
   IO (Int, Int) ->
   (Int -> IO [TermEvent]) ->
   (Maybe Cells -> Cells -> IO ()) ->
   IO ()
-termMainLoop unlift ctx shouldQuit ui onEnter onLeave getSize readEvents present =
-  onEnter
-    >> ( do
-           (w0, h0) <- getSize
-           prev <- newIORef Nothing
-           now <- getMonotonicTime
-           let inp0 =
-                 emptyInput
-                   { inputWindowSize = Size (fromIntegral w0) (fromIntegral h0)
-                   }
-           prevInp <- newIORef inp0
-           clickRef <- newIORef (0, V2 (-999) (-999), 0)
-           draw prev prevInp inp0
-           loop prev prevInp clickRef inp0 [] now
-         )
-    `finally` onLeave
+termMainLoop unlift ctx shouldQuit ui getSize readEvents present = do
+  (w0, h0) <- getSize
+  prev <- newIORef Nothing
+  now <- getMonotonicTime
+  let inp0 =
+        emptyInput
+          { inputWindowSize = Size (fromIntegral w0) (fromIntegral h0)
+          }
+  prevInp <- newIORef inp0
+  clickRef <- newIORef (0, V2 (-999) (-999), 0)
+  draw prev prevInp inp0
+  loop prev prevInp clickRef inp0 [] now
   where
     loop prev prevInp clickRef inp queued lastT = do
       pending <-

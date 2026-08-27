@@ -54,7 +54,16 @@ import Data.Text (Text)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Text as T
 import GHC.Stack (HasCallStack)
-import NanoUI.Font (headingFontMarker, isTerminalFont, mutedFontMarker)
+import NanoUI.Font
+  ( FontMetrics
+  , headingFontMarker
+  , isTerminalFont
+  , layoutUnitScale
+  , mutedFontMarker
+  , resolveLayoutGap
+  , resolveLayoutPadding
+  , sliderTrackBounds
+  )
 import NanoUI.WidgetText
   ( checkboxLabelText
   , sliderDisplayText
@@ -119,7 +128,7 @@ import NanoUI.Style
   , windowPad
   , windowMargin
   )
-import NanoUI.Types (ImageId (..), Rect (..), Size (..), V2 (..), rectContains, rectH, rectW, sliderTrackRect)
+import NanoUI.Types (ImageId (..), Rect (..), Size (..), V2 (..), rectContains, rectH, rectW, rectX, v2X)
 
 parentIdx :: [Int] -> Int
 parentIdx = \case
@@ -129,11 +138,37 @@ parentIdx = \case
 titleBarH :: Float
 titleBarH = 28
 
-titleBarLayout :: Layout -> Layout
-titleBarLayout = tight . gap 6 . alignMid . fixedH titleBarH . fillW
+titleBarHFor :: FontMetrics -> Float
+titleBarHFor fm
+  | isTerminalFont fm = 1
+  | otherwise = titleBarH
 
-titleLabelLayout :: Layout
-titleLabelLayout = tight . alignMid . fixedH titleBarH $ defaultLayout
+titleBarLayoutFor :: FontMetrics -> Layout
+titleBarLayoutFor fm =
+  tight . gap (if isTerminalFont fm then 1 else 6) . alignMid . fixedH (titleBarHFor fm) . fillW $ defaultLayout
+
+titleLabelLayoutFor :: FontMetrics -> Layout
+titleLabelLayoutFor fm =
+  tight . alignMid . fixedH (titleBarHFor fm) $ defaultLayout
+
+-- Pixel-authored chrome. Terminal maps one cell per defaultLayout gap step.
+floatPadFor :: FontMetrics -> Padding -> Padding
+floatPadFor fm pad
+  | isTerminalFont fm = Padding 4 4 4 4
+  | otherwise = pad
+
+floatGapFor :: FontMetrics -> Float -> Float
+floatGapFor fm g
+  | isTerminalFont fm = 4
+  | otherwise = g
+
+floatMinFor :: FontMetrics -> Float -> Float -> Float
+floatMinFor fm authored avail =
+  let raw =
+        if isTerminalFont fm
+          then authored * layoutUnitScale fm
+          else authored
+   in max 1 (min raw avail)
 
 data Response = Response
   { respId :: WidgetId
@@ -246,11 +281,15 @@ modal open title child
       inp <- askInput
       (closeResp, body) <- do
           stack <- uiIO (readIORef (ctxContainerStack ctx))
-          let parent = parentIdx stack
+          let fm = ctxFontMetrics ctx
+              parent = parentIdx stack
               Size winW winH = inputWindowSize inp
-              minWidth = 260
-              maxW = max minWidth (winW - 2 * windowMargin)
-              maxH = max 40 (winH - 2 * windowMargin)
+              margin = resolveLayoutGap fm windowMargin
+              availW = max 1 (winW - 2 * margin)
+              availH = max 1 (winH - 2 * margin)
+              minWidth = floatMinFor fm 260 availW
+              maxW = availW
+              maxH = availH
           uiIO $ do
             idx <-
               addNode
@@ -260,8 +299,8 @@ modal open title child
                 Column
                 Fit
                 Fit
-                (Padding 14 14 12 12)
-                8
+                (floatPadFor fm (Padding 14 14 12 12))
+                (floatGapFor fm 8)
                 minWidth
                 0
                 maxW
@@ -276,9 +315,9 @@ modal open title child
           (closeResp, r) <-
             ( do
                 close <-
-                  row (titleBarLayout defaultLayout) $ do
+                  row (titleBarLayoutFor fm) $ do
                     when (not (T.null title)) $
-                      void (labelEx titleLabelLayout title)
+                      void (labelEx (titleLabelLayoutFor fm) title)
                     flex
                     withKey ("close" :: Text) closeButton
                 when (not (T.null title)) sep
@@ -329,12 +368,18 @@ window open title child
       inp <- askInput
       (closeResp, body) <- do
           stack <- uiIO (readIORef (ctxContainerStack ctx))
-          let parent = parentIdx stack
+          let fm = ctxFontMetrics ctx
+              parent = parentIdx stack
               Size winW winH = inputWindowSize inp
-              minWidth = 280
-              minHeight = padT windowPad + titleBarH + padB windowPad
-              maxW = max minWidth (winW - 2 * windowMargin)
-              maxH = max minHeight (winH - 2 * windowMargin)
+              margin = resolveLayoutGap fm windowMargin
+              availW = max 1 (winW - 2 * margin)
+              availH = max 1 (winH - 2 * margin)
+              pad = resolveLayoutPadding fm (floatPadFor fm windowPad)
+              minWidth = floatMinFor fm 280 availW
+              minHeight =
+                min availH (padT pad + titleBarHFor fm + padB pad)
+              maxW = availW
+              maxH = availH
           uiIO $ do
             idx <-
               addNode
@@ -344,8 +389,8 @@ window open title child
                 Column
                 Fit
                 Fit
-                windowPad
-                10
+                (floatPadFor fm windowPad)
+                (floatGapFor fm 10)
                 minWidth
                 minHeight
                 maxW
@@ -359,9 +404,9 @@ window open title child
           (closeResp, body) <-
             ( do
                 close <-
-                  row (titleBarLayout defaultLayout) $ do
+                  row (titleBarLayoutFor fm) $ do
                     when (not (T.null title)) $
-                      withKey title (void (labelEx titleLabelLayout title))
+                      withKey title (void (labelEx (titleLabelLayoutFor fm) title))
                     flex
                     withKey ("close" :: Text) closeButton
                 sep
@@ -445,8 +490,13 @@ closeButton = do
   wid <- currentId
   ctx <- askContext
   uiIO $ registerFocusable ctx wid
-  let stored = "[ " <> closeButtonMarker <> "X ]"
-      layout = tight . fixedWH titleBarH titleBarH . alignMid $ defaultLayout
+  let fm = ctxFontMetrics ctx
+      stored = "[ " <> closeButtonMarker <> "X ]"
+      h = titleBarHFor fm
+      layout =
+        if isTerminalFont fm
+          then tight . alignMid $ defaultLayout
+          else tight . fixedWH h h . alignMid $ defaultLayout
   resp <- addWidget wid NodeButton stored 0 layout
   disabled <- uiIO (isDisabled ctx wid)
   pure
@@ -513,7 +563,8 @@ sliderEx layout lbl minV maxV initial = do
     pure $
       case mrect of
         Nothing -> False
-        Just (Rect x y w h) -> rectContains (sliderTrackRect x y w h) (inputMousePos inp)
+        Just (Rect x y w h) ->
+          rectContains (sliderTrackBounds fm lbl x y w h) (inputMousePos inp)
   let isActive = active == wid
       pressed = inputMouseDown inp && (trackHover || isActive)
   val <-
@@ -522,9 +573,12 @@ sliderEx layout lbl minV maxV initial = do
       let dragFrac =
             case mrect of
               Nothing -> frac
-              Just (Rect x _ w _) ->
-                let px = v2X (inputMousePos inp)
-                    f = (px - x) / max w 1
+              Just (Rect x y w h) ->
+                let track = sliderTrackBounds fm lbl x y w h
+                    tx = rectX track
+                    tw = rectW track
+                    px = v2X (inputMousePos inp)
+                    f = (px - tx) / max tw 1
                  in max 0 (min 1 f)
           computed = minV + dragFrac * (maxV - minV)
       if pressed then pure computed else pure current

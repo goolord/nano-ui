@@ -20,6 +20,9 @@ module NanoUI.Font
   , checkboxBoxSize
   , checkboxLeading
   , isTerminalFont
+  , layoutUnitScale
+  , resolveLayoutGap
+  , resolveLayoutPadding
   , monoFontMarker
   , hasMonoFontMarker
   , stripMonoFontMarker
@@ -41,12 +44,15 @@ module NanoUI.Font
   , scrollBarPageExtra
   , scrollBarListExtra
   , scrollBarWindowGutter
+  , sliderTrackBounds
+  , sliderTrackHeight
   ) where
 
 
 import Data.Text (Text)
 import qualified Data.Text as T
-import NanoUI.Style (AlignX (..))
+import NanoUI.Style (AlignX (..), Padding (..), defaultLayout, layoutGap)
+import NanoUI.Types (Rect (..), rectH, rectY, sliderBarCells, sliderTrackRect)
 
 data GlyphQuad = GlyphQuad
   { gqX :: {-# UNPACK #-} !Float
@@ -80,6 +86,23 @@ monospaceMetrics cell =
 {-# INLINE isTerminalFont #-}
 isTerminalFont :: FontMetrics -> Bool
 isTerminalFont fm = fmLineHeight fm == 1 && fmAdvance fm ' ' == 1
+
+-- Layout gap/pad are authored in pixel steps (see defaultLayout). Terminal maps one cell per step.
+{-# INLINE layoutUnitScale #-}
+layoutUnitScale :: FontMetrics -> Float
+layoutUnitScale fm
+  | isTerminalFont fm = 1 / layoutGap defaultLayout
+  | otherwise = 1
+
+{-# INLINE resolveLayoutGap #-}
+resolveLayoutGap :: FontMetrics -> Float -> Float
+resolveLayoutGap fm g = g * layoutUnitScale fm
+
+{-# INLINE resolveLayoutPadding #-}
+resolveLayoutPadding :: FontMetrics -> Padding -> Padding
+resolveLayoutPadding fm (Padding l t r b) =
+  let s = layoutUnitScale fm
+   in Padding (l * s) (t * s) (r * s) (b * s)
 
 monoFontMarker :: Text
 monoFontMarker = T.singleton '\x02'
@@ -131,10 +154,7 @@ widgetContentInset fm
 {-# INLINE buttonPadding #-}
 buttonPadding :: FontMetrics -> (Float, Float)
 buttonPadding fm
-  | isTerminalFont fm =
-      let (px, py) = widgetPadding fm
-          adv = fmAdvance fm ' '
-       in (px + adv * 0.4, py)
+  | isTerminalFont fm = (0, 0)
   | otherwise =
       let adv = fmAdvance fm ' '
           lh = layoutLineHeight fm
@@ -175,7 +195,7 @@ widgetPadding fm =
 {-# INLINE checkboxBoxSize #-}
 checkboxBoxSize :: FontMetrics -> Float
 checkboxBoxSize fm
-  | isTerminalFont fm = min 18 (max 14 (fmLineHeight fm * 0.9))
+  | isTerminalFont fm = fmLineHeight fm
   | otherwise = min 22 (max 18 (fmLineHeight fm * 1.15))
 
 {-# INLINE checkboxLeading #-}
@@ -183,6 +203,28 @@ checkboxLeading :: FontMetrics -> Float
 checkboxLeading fm
   | isTerminalFont fm = 0
   | otherwise = checkboxBoxSize fm + 8
+
+sliderTrackHeight :: Float
+sliderTrackHeight = 10
+
+-- SDL track spans the label row insets. Terminal uses the inline [bar] cells.
+{-# INLINE sliderTrackBounds #-}
+sliderTrackBounds :: FontMetrics -> Text -> Float -> Float -> Float -> Float -> Rect
+sliderTrackBounds fm lbl x y w h
+  | isTerminalFont fm =
+      let adv = fmAdvance fm ' '
+          (ix, _) = widgetContentInset fm
+          prefix = lineWidth fm (lbl <> " ")
+          trackW = fromIntegral (sliderBarCells + 2) * adv
+       in Rect (x + ix + prefix) y trackW h
+  | otherwise =
+      let (lx, _) = labelContentInset fm
+          hit = sliderTrackRect x y w h
+          bandH = rectH hit
+          trackY = rectY hit + (bandH - sliderTrackHeight) / 2
+          trackX = x + lx
+          trackW = max 0 (w - 2 * lx)
+       in Rect trackX trackY trackW sliderTrackHeight
 
 scrollBarWidth :: Float
 scrollBarWidth = 8

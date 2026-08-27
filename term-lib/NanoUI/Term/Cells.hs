@@ -36,12 +36,10 @@ import NanoUI
   , DrawData (..)
   , Layer (..)
   , Rect (..)
-  , V2 (..)
   , colorToWord32
   , indexSize
   , vertexSize
   )
-import NanoUI (rectContains)
 import qualified Data.Text as T
 
 -- | Row-major grid, three 'Word32' per cell: codepoint, foreground RGBA,
@@ -173,7 +171,12 @@ stampSpan arr w h (Rect rx ry rw _rh, txt, fg, bg, clip) =
   mapM_
     (\(dx, c) -> do
       let cx = x0 + dx
-      when (rectContains clip (V2 (fromIntegral cx + 0.5) (fromIntegral y0 + 0.5))) $
+          -- Half-open clip rejects cell centers that sit on the max edge.
+          -- Overlay chrome is often centered on *.5, so use inclusive bounds.
+          px = fromIntegral cx + 0.5
+          py = fromIntegral y0 + 0.5
+      when (px >= rectX clip && px <= rectX clip + rectW clip
+              && py >= rectY clip && py <= rectY clip + rectH clip) $
         writeCell arr w h cx y0 (fromIntegral (ord c)) fgW bgW
     )
     (zip [0 ..] chars)
