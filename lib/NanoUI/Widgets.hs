@@ -92,6 +92,7 @@ import NanoUI.Layout.Arena
   , NodeType (..)
   , addNode
   , getDirection
+  , setAspect
   , setNodeText
   , setNodeValue
   , setWidgetId
@@ -420,6 +421,7 @@ container nt layout child = do
         (layoutAlignX layout)
         (layoutAlignY layout)
         (layoutWrap layout)
+    setAspect (ctxNodeArena ctx) idx (layoutAspect layout)
     writeIORef (ctxContainerStack ctx) (idx : stack)
     pure stack
   r <- uiFinally child (writeIORef (ctxContainerStack ctx) stack)
@@ -784,6 +786,7 @@ addWidgetResp wid nt txt value layout mResp = do
         (layoutAlignX layout)
         (layoutAlignY layout)
         (layoutWrap layout)
+    setAspect (ctxNodeArena ctx) idx (layoutAspect layout)
     setNodeText (ctxNodeArena ctx) idx txt
     setNodeValue (ctxNodeArena ctx) idx value
     setWidgetId (ctxNodeArena ctx) idx wid

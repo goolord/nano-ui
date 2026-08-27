@@ -29,6 +29,9 @@ module NanoUI.Style
   , alignMid
   , wrap
   , tight
+  , percent
+  , percentH
+  , aspect
 ) where
 
 import NanoUI.Types (Color, colorRGBA)
@@ -79,6 +82,7 @@ data Layout = Layout
   , layoutMinH :: {-# UNPACK #-} !Float
   , layoutMaxW :: {-# UNPACK #-} !Float
   , layoutMaxH :: {-# UNPACK #-} !Float
+  , layoutAspect :: {-# UNPACK #-} !Float
   }
   deriving (Eq, Show)
 
@@ -97,6 +101,7 @@ defaultLayout =
     , layoutMinH = 0
     , layoutMaxW = 1e9
     , layoutMaxH = 1e9
+    , layoutAspect = 0
     }
 
 {-# INLINE padAll #-}
@@ -150,6 +155,19 @@ wrap l = l {layoutWrap = True}
 {-# INLINE tight #-}
 tight :: Layout -> Layout
 tight l = l {layoutPadding = Padding 0 0 0 0}
+
+{-# INLINE percent #-}
+percent :: Float -> Layout -> Layout
+percent p l = l {layoutWidth = Percent p}
+
+{-# INLINE percentH #-}
+percentH :: Float -> Layout -> Layout
+percentH p l = l {layoutHeight = Percent p}
+
+-- Width over height. After width is known, height becomes width / ratio.
+{-# INLINE aspect #-}
+aspect :: Float -> Layout -> Layout
+aspect r l = l {layoutAspect = r}
 
 data Style = Style
   { styleBg :: !Color

@@ -25,6 +25,8 @@ module NanoUI.Layout.Arena
   , getGap
   , getMinMax
   , getGrow
+  , getAspect
+  , setAspect
   , getWrap
   , getAlignX
   , getAlignY
@@ -136,6 +138,7 @@ data NodeArena = NodeArena
   , naMaxW :: IORef (MutablePrimArray RealWorld Float)
   , naMaxH :: IORef (MutablePrimArray RealWorld Float)
   , naGrow :: IORef (MutablePrimArray RealWorld Float)
+  , naAspect :: IORef (MutablePrimArray RealWorld Float)
   , naWrap :: IORef (MutablePrimArray RealWorld Word8)
   , naAlignX :: IORef (MutablePrimArray RealWorld Word8)
   , naAlignY :: IORef (MutablePrimArray RealWorld Word8)
@@ -179,6 +182,7 @@ newNodeArena = do
   naMaxW <- newIORef =<< newPrimArray cap
   naMaxH <- newIORef =<< newPrimArray cap
   naGrow <- newIORef =<< newPrimArray cap
+  naAspect <- newIORef =<< newPrimArray cap
   naWrap <- newIORef =<< newPrimArray cap
   naAlignX <- newIORef =<< newPrimArray cap
   naAlignY <- newIORef =<< newPrimArray cap
@@ -215,6 +219,7 @@ newNodeArena = do
       , naMaxW
       , naMaxH
       , naGrow
+      , naAspect
       , naWrap
       , naAlignX
       , naAlignY
@@ -298,6 +303,7 @@ ensureCapacity na needed = do
         growFloat (naMaxW na) cap newCap 1e9
         growFloat (naMaxH na) cap newCap 1e9
         growFloat (naGrow na) cap newCap 0
+        growFloat (naAspect na) cap newCap 0
         growWord8 (naWrap na) cap newCap 0
         growWord8 (naAlignX na) cap newCap 0
         growWord8 (naAlignY na) cap newCap 0
@@ -433,6 +439,7 @@ addNode na nt parent dir wSiz hSiz pad gap minW minH maxW maxH grow ax ay wrap =
   writeFloat (naMaxW na) idx maxW
   writeFloat (naMaxH na) idx maxH
   writeFloat (naGrow na) idx grow
+  writeFloat (naAspect na) idx 0
   writeWord8 (naWrap na) idx (if wrap then 1 else 0)
   writeWord8 (naAlignX na) idx (alignXTag ax)
   writeWord8 (naAlignY na) idx (alignYTag ay)
@@ -528,6 +535,14 @@ getMinMax na idx = do
 {-# INLINE getGrow #-}
 getGrow :: NodeArena -> NodeIdx -> IO Float
 getGrow na idx = readFloat (naGrow na) idx
+
+{-# INLINE getAspect #-}
+getAspect :: NodeArena -> NodeIdx -> IO Float
+getAspect na idx = readFloat (naAspect na) idx
+
+{-# INLINE setAspect #-}
+setAspect :: NodeArena -> NodeIdx -> Float -> IO ()
+setAspect na idx v = writeFloat (naAspect na) idx v
 
 {-# INLINE getWrap #-}
 getWrap :: NodeArena -> NodeIdx -> IO Bool
