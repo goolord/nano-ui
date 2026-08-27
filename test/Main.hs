@@ -944,7 +944,7 @@ runPanelGrowScrollGutterTest ctx failed = do
       when (cx + cw < contentRight - 0.5) $ bump failed
       when (cx + cw > contentRight + 0.01) $ bump failed
 
--- Window body reserves a gutter. Bar sits inside the scroll rect.
+-- Window body keeps full inner width. Bar hangs into the window pad.
 runWindowScrollGutterTest :: Context -> IORef Int -> IO ()
 runWindowScrollGutterTest ctx failed = do
   let inp0 = emptyInput {inputWindowSize = Size 640 360}
@@ -960,8 +960,7 @@ runWindowScrollGutterTest ctx failed = do
   _ <- runFrame ctx inp0 ui
   ((win, mwide), _, _, _) <- runFrame ctx inp0 ui
   let Rect wx _ ww _ = respRect win
-      gutter = scrollBarWindowGutter (ctxFontMetrics ctx)
-      contentRight = wx + ww - padR windowPad - gutter
+      contentRight = wx + ww - padR windowPad
   spans <- collectOverlayTextSpans ctx inp0
   let titleYs = [rectY r | (r, txt, _, _, _) <- spans, "GutterWin" `T.isInfixOf` txt]
   when (null titleYs) $ bump failed
@@ -2334,51 +2333,48 @@ runWindowDragTest ctx failed = do
 spanYs :: T.Text -> [(Rect, T.Text, a, b, c)] -> [Float]
 spanYs needle spans = [rectY r | (r, txt, _, _, _) <- spans, needle `T.isInfixOf` txt]
 
+spanLabelYs :: T.Text -> [(Rect, T.Text, a, b, c)] -> [Float]
+spanLabelYs needle spans = [rectY r | (r, txt, _, _, _) <- spans, txt == needle]
+
 -- Wheel over an open floating window must scroll overflowing body content.
 -- The title bar stays pinned and does not move with the body.
 runWindowScrollWheelTest :: Context -> IORef Int -> IO ()
 runWindowScrollWheelTest ctx failed = do
   let inp0 = emptyInput {inputWindowSize = Size 320 220}
+      line1 = T.pack "line 1"
       ui = do
-        (win, mSid) <-
-          window True "Scroll" $ do
-            (sid, _) <-
-              scrollArea
-                (tight . grow $ defaultLayout)
-                ( column defaultLayout $
-                    mapM_ (\i -> label (T.pack ("line " <> show (i :: Int)))) [1 .. 24]
-                )
-            pure sid
-        pure (win, mSid)
+        (win, _) <-
+          window True "Scroll" $
+            column defaultLayout $
+              mapM_ (\i -> label (T.pack ("line " <> show (i :: Int)))) [1 .. 24]
+        pure win
   _ <- runFrame ctx inp0 ui
-  ((win, mSid), _, _, _) <- runFrame ctx inp0 ui
-  let Rect wx wy ww wh = respRect win
+  (win, _, _, _) <- runFrame ctx inp0 ui
+  let Rect wx _ ww wh = respRect win
   when (ww <= 0 || wh <= 0) $ bump failed
   spans0 <- collectOverlayTextSpans ctx inp0
   let titleYs0 = spanYs (T.pack "Scroll") spans0
-      line1Ys0 = spanYs (T.pack "line 1") spans0
+      line1Ys0 = spanLabelYs line1 spans0
   when (null titleYs0) $ bump failed
-  case mSid of
-    Nothing -> bump failed
-    Just sid -> do
-      off0 <- getScrollOffset ctx sid
-      let wheel =
+  case line1Ys0 of
+    [] -> bump failed
+    b0 : _ -> do
+      let wheelAt = V2 (wx + ww / 2) (b0 + 2)
+          wheel =
             inp0
-              { inputMousePos = V2 (wx + ww / 2) (wy + wh - 16)
+              { inputMousePos = wheelAt
               , inputScroll = V2 0 1
               }
       _ <- runFrame ctx wheel ui
-      off1 <- getScrollOffset ctx sid
-      when (off1 <= off0) $ bump failed
       spans1 <- collectOverlayTextSpans ctx wheel
       let titleYs1 = spanYs (T.pack "Scroll") spans1
-          line1Ys1 = spanYs (T.pack "line 1") spans1
+          line1Ys1 = spanLabelYs line1 spans1
       case (titleYs0, titleYs1) of
         (y0 : _, y1 : _) -> when (y1 /= y0) $ bump failed
         _ -> bump failed
-      case (line1Ys0, line1Ys1) of
-        (b0 : _, b1 : _) -> when (b1 >= b0) $ bump failed
-        _ -> pure ()
+      case line1Ys1 of
+        [] -> pure ()
+        b1 : _ -> when (b1 >= b0) $ bump failed
 
 dragWindowEdge ::
   Context ->
@@ -2432,7 +2428,8 @@ runWindowResizeTest ctx failed = do
       expectCursor (V2 (x0 + w0 / 2) (y0 + h0 + 4)) UiCursorNsResize
       expectCursor (V2 (x0 - 4) (y0 + h0 / 2)) UiCursorEwResize
       expectCursor (V2 (x0 + w0 + 4) (y0 + h0 / 2)) UiCursorEwResize
-      insideKind <- uiCursorKind ctx (hoverAt (V2 (x0 + w0 - 4) (y0 + h0 / 2)))
+      expectCursor (V2 (x0 + w0 - 5) (y0 + h0 / 2)) UiCursorEwResize
+      insideKind <- uiCursorKind ctx (hoverAt (V2 (x0 + w0 - padR windowPad - 4) (y0 + h0 / 2)))
       when (insideKind == UiCursorEwResize) $ bump failed
       mSe <-
         dragWindowEdge
@@ -2470,8 +2467,7 @@ runWindowResizeTest ctx failed = do
                 Just (Rect xn yn wn hn) -> do
                   when (hn <= hw + 8) $ bump failed
                   when (yn >= yw - 5) $ bump failed
-                  -- padT 5 + titleBarH 28 + padB 7
-                  let minTitleH = 40
+                  let minTitleH = padT windowPad + 28 + padB windowPad
                   mShort <-
                     dragWindowEdge
                       ctx

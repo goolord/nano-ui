@@ -16,6 +16,7 @@ module NanoUI.Style
   , sdlTheme
   , panelPaintPad
   , windowPad
+  , windowMargin
   , padAll
   , padXY
   , gap
@@ -64,11 +65,15 @@ data Padding = Padding
 
 -- Containers fill with themePanel when any pad side is at least this.
 panelPaintPad :: Float
-panelPaintPad = 6
+panelPaintPad = 8
 
 -- Floating window chrome.
 windowPad :: Padding
-windowPad = Padding 8 8 5 7
+windowPad = Padding 10 10 7 9
+
+-- Screen inset for floating window/modal max size and default placement.
+windowMargin :: Float
+windowMargin = 16
 
 data Layout = Layout
   { layoutDirection :: !Direction
@@ -93,8 +98,8 @@ defaultLayout =
     { layoutDirection = Column
     , layoutWidth = Fit
     , layoutHeight = Fit
-    , layoutPadding = Padding 2 2 2 2
-    , layoutGap = 2
+    , layoutPadding = Padding 3 3 3 3
+    , layoutGap = 4
     , layoutWrap = False
     , layoutAlignX = AlignStart
     , layoutAlignY = AlignTop

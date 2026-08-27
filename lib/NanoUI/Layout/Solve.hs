@@ -58,7 +58,7 @@ import NanoUI.Layout.Arena
   , setNodeValue
   )
 import NanoUI.Id (WidgetId)
-import NanoUI.Style (AlignX (..), AlignY (..), Padding (..))
+import NanoUI.Style (AlignX (..), AlignY (..), Padding (..), windowMargin)
 import NanoUI.WidgetText
   ( checkboxLabelText
   , selectDisplayText
@@ -221,6 +221,16 @@ measureWidget na fm measure idx = do
         case nt of
           NodeButton -> buttonPadding fm
           NodeSelect -> buttonPadding fm
+          NodeSlider
+            | isTerminalFont fm -> widgetPadding fm
+            | otherwise ->
+                let (cx, cy) = labelContentInset fm
+                 in (2 * cx, cy)
+          NodeCheckbox
+            | isTerminalFont fm -> widgetPadding fm
+            | otherwise ->
+                let (cx, cy) = labelContentInset fm
+                 in (2 * cx, cy)
           _ -> widgetPadding fm
   (tw, th, extraW, extraH) <-
     case nt of
@@ -237,7 +247,7 @@ measureWidget na fm measure idx = do
         let trackExtra =
               if isTerminalFont fm
                 then fmLineHeight fm * 0.35
-                else 22
+                else 18
         pure (max lw vw, lh, 0, trackExtra)
       NodeCheckbox -> do
         let body =
@@ -294,8 +304,11 @@ measureContainer na useAssignedWidth idx = do
   (wTag, wVal) <- getWidthSizing na idx
   (hTag, hVal) <- getHeightSizing na idx
   (_, _, assignedW, _) <- getRect na idx
+  nt <- getNodeType na idx
+  children <- collectChildren na idx
   childDims <- collectChildDims na idx
-  let padX = padL pad + padR pad
+  let chrome = isChromeColumn nt dir
+      padX = padL pad + padR pad
       innerMaxW =
         case wTag of
           SizingFixed -> max 0 (wVal - padX)
@@ -303,11 +316,13 @@ measureContainer na useAssignedWidth idx = do
             | useAssignedWidth && assignedW > 0 ->
                 max 0 (assignedW - padX)
             | otherwise -> max 0 (maxW - padX)
-      (contentW, contentH) =
-        if wrap && dir == DirRow && innerMaxW > 0
-          then foldWrappedRow childDims innerMaxW gap
-          else foldChildren dir gap childDims
-      w =
+  (contentW, contentH) <-
+    if wrap && dir == DirRow && innerMaxW > 0
+      then pure (foldWrappedRow childDims innerMaxW gap)
+      else case dir of
+        DirColumn | chrome -> foldChromeColumn na children childDims gap
+        _ -> pure (foldChildren dir gap childDims)
+  let w =
         case wTag of
           SizingFixed -> clamp wVal minW maxW
           _ -> clamp (contentW + padL pad + padR pad) minW maxW
@@ -373,6 +388,34 @@ foldChildren DirColumn gap dims =
       maxW = if null ws then 0 else maximum ws
       totalH = sum hs + gap * fromIntegral (max 0 (length hs - 1))
    in (maxW, totalH)
+
+isChromeColumn :: NodeType -> DirTag -> Bool
+isChromeColumn nt dir =
+  dir == DirColumn && (nt == NodeWindow || nt == NodeModal)
+
+pairColumnGap :: NodeArena -> Bool -> NodeIdx -> NodeIdx -> Float -> IO Float
+pairColumnGap _ False _ _ gap = pure gap
+pairColumnGap na True a b gap = do
+  ntA <- getNodeType na a
+  ntB <- getNodeType na b
+  pure (if ntA == NodeSeparator || ntB == NodeSeparator then 0 else gap)
+
+columnGapSum :: NodeArena -> Bool -> [NodeIdx] -> Float -> IO Float
+columnGapSum _ False _ _ = pure 0
+columnGapSum _ True [] _ = pure 0
+columnGapSum _ True [_] _ = pure 0
+columnGapSum na True (a : b : rest) gap = do
+  g <- pairColumnGap na True a b gap
+  restG <- columnGapSum na True (b : rest) gap
+  pure (g + restG)
+
+foldChromeColumn :: NodeArena -> [NodeIdx] -> [(Float, Float)] -> Float -> IO (Float, Float)
+foldChromeColumn na children dims gap = do
+  let ws = map fst dims
+      hs = map snd dims
+      maxW = if null ws then 0 else maximum ws
+  gapSum <- columnGapSum na True children gap
+  pure (maxW, sum hs + gapSum)
 
 foldWrappedRow :: [(Float, Float)] -> Float -> Float -> (Float, Float)
 foldWrappedRow dims avail gap =
@@ -558,7 +601,9 @@ positionChildren ::
   IO ()
 positionChildren na fm idx dir gap pad px py pw ph = do
   wrap <- getWrap na idx
-  let cx = px + padL pad
+  nt <- getNodeType na idx
+  let chrome = isChromeColumn nt dir
+      cx = px + padL pad
       cy = py + padT pad
       cw = pw - padL pad - padR pad
       ch = ph - padT pad - padB pad
@@ -567,7 +612,7 @@ positionChildren na fm idx dir gap pad px py pw ph = do
     DirRow
       | wrap -> positionRowWrap na fm children gap cx cy cw ch
       | otherwise -> positionRow na fm children gap cx cy cw ch
-    DirColumn -> positionColumn na fm children gap cx cy cw ch
+    DirColumn -> positionColumn na fm children gap chrome px py pw cx cy cw ch
 
 -- Children are linked newest-first, so prepending while walking restores
 -- declaration order.
@@ -603,7 +648,7 @@ positionRow na fm children gap cx cy cw ch = do
     curX <- readIORef ox
     ay <- getAlignY na ci
     let fy = alignY ay cy ch crossH
-    positionNode na fm ci curX fy fw ch
+    positionNode na fm ci curX fy fw crossH
     writeIORef ox (curX + fw + gap)
 
 positionRowWrap :: NodeArena -> FontMetrics -> [NodeIdx] -> Float -> Float -> Float -> Float -> Float -> IO ()
@@ -622,22 +667,46 @@ positionRowWrap na fm children gap cx cy cw ch = do
         curX <- readIORef ox
         ay <- getAlignY na ci
         let fy = alignY ay oy rowH crossH
-        positionNode na fm ci curX fy fw rowH
+        positionNode na fm ci curX fy fw crossH
         writeIORef ox (curX + fw + gap)
       go (oy + rowH + gap) rest
 
-positionColumn :: NodeArena -> FontMetrics -> [NodeIdx] -> Float -> Float -> Float -> Float -> Float -> IO ()
-positionColumn na fm children gap cx cy cw ch = do
+positionColumn ::
+  NodeArena ->
+  FontMetrics ->
+  [NodeIdx] ->
+  Float ->
+  Bool ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  IO ()
+positionColumn na fm children gap chrome px _ pw cx cy cw ch = do
+  gapSum <- columnGapSum na chrome children gap
   childInfos <- loadChildInfos na children cw ch
-  sizes <- distributeMainAxis na childInfos ch gap False
+  sizes <- distributeMainAxisGap na childInfos ch gapSum False
   oy <- newIORef cy
-  forM_ (zip childInfos sizes) $ \((ci, _, _), (_, fh)) -> do
-    (_, _, iw, _) <- getRect na ci
+  let len = length children
+  forM_ (zip3 [0 .. len - 1] childInfos sizes) $ \(i, (ci, _, _), (_, fh)) -> do
+    nt <- getNodeType na ci
     curY <- readIORef oy
-    ax <- getAlignX na ci
-    let fx = alignX ax cx cw iw
-    positionNode na fm ci fx curY cw fh
-    writeIORef oy (curY + fh + gap)
+    (fx, fw) <-
+      if chrome && nt == NodeSeparator
+        then pure (px, pw)
+        else do
+          (_, _, iw, _) <- getRect na ci
+          ax <- getAlignX na ci
+          pure (alignX ax cx cw iw, cw)
+    positionNode na fm ci fx curY fw fh
+    gapAfter <-
+      if i >= len - 1
+        then pure 0
+        else pairColumnGap na chrome (children !! i) (children !! (i + 1)) gap
+    writeIORef oy (curY + fh + gapAfter)
 
 loadChildInfos :: NodeArena -> [NodeIdx] -> Float -> Float -> IO [(NodeIdx, Float, Float)]
 loadChildInfos na children availW availH =
@@ -664,10 +733,18 @@ distributeMainAxis ::
   Float ->
   Bool ->
   IO [(Float, Float)]
-distributeMainAxis na childInfos avail gap horizontal = do
-  let n = length childInfos
-      totalIntrinsic =
-        sum (map mainSize childInfos) + gap * fromIntegral (max 0 n - 1)
+distributeMainAxis na childInfos avail gap horizontal =
+  distributeMainAxisGap na childInfos avail (gap * fromIntegral (max 0 (length childInfos - 1))) horizontal
+
+distributeMainAxisGap ::
+  NodeArena ->
+  [(NodeIdx, Float, Float)] ->
+  Float ->
+  Float ->
+  Bool ->
+  IO [(Float, Float)]
+distributeMainAxisGap na childInfos avail gapSum horizontal = do
+  let totalIntrinsic = sum (map mainSize childInfos) + gapSum
       slack = avail - totalIntrinsic
   if slack > 0.001
     then growSizes childInfos slack
@@ -756,14 +833,13 @@ placeModals na fm winW winH = do
     nt <- getNodeType na idx
     when (nt == NodeModal) $ do
       (_, _, iw, ih) <- getRect na idx
-      let w = min iw winW
-          h = min ih winH
+      let maxW = max 0 (winW - 2 * windowMargin)
+          maxH = max 0 (winH - 2 * windowMargin)
+          w = min iw maxW
+          h = min ih maxH
           x = max 0 ((winW - w) / 2)
           y = max 0 ((winH - h) / 2)
       positionNode na fm idx x y w h
-
-windowMargin :: Float
-windowMargin = 12
 
 placeWindows ::
   NodeArena ->

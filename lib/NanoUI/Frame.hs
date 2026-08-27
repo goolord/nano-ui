@@ -1015,7 +1015,11 @@ widgetTextPlacements ctx nt idx x y w h = do
     NodeCheckbox -> do
       txt <- displayText ctx nt idx
       (tw, th) <- ctxMeasureText ctx txt
-      let tx = x + ix + checkboxLeading fm
+      let (cx, _) =
+            if terminal
+              then widgetContentInset fm
+              else labelContentInset fm
+          tx = x + cx + checkboxLeading fm
           ty = centeredTextY fm y h th
       pure [(txt, tx, ty, tw, th)]
     NodeSlider -> do
@@ -1028,12 +1032,13 @@ widgetTextPlacements ctx nt idx x y w h = do
         else do
           val <- sliderValue ctx idx
           let valTxt = sliderValueText val
+              (lx, _) = labelContentInset fm
           (lw, lh) <- ctxMeasureText ctx lbl
           (vw, vh) <- ctxMeasureText ctx valTxt
           let ty = centeredTextY fm y lh lh
           pure
-            [ (lbl, x + ix, ty, lw, lh)
-            , (valTxt, x + w - ix - vw, centeredTextY fm y vh vh, vw, vh)
+            [ (lbl, x + lx, ty, lw, lh)
+            , (valTxt, x + w - lx - vw, centeredTextY fm y vh vh, vw, vh)
             ]
     NodeTextInput -> do
       lbl <- getText (ctxNodeArena ctx) idx
@@ -1295,7 +1300,7 @@ lowerNode ctx idx = do
         when (nt == NodeTextInput && terminal) $
           drawTextInputCaret da ctx idx x y w h style
         when isClose $
-          drawCloseIcon da x y w h (styleFg style)
+          drawCloseIcon fm da x y w h (styleFg style)
         when (nt == NodeSelect) $
           drawSelectChevron da x y w h (styleFg style)
       placements <- widgetTextPlacements ctx nt idx x y w h
@@ -1317,7 +1322,10 @@ drawCheckbox ::
   Color ->
   IO ()
 drawCheckbox da fm style x y h value accent well markCol = do
-  let (ix, _) = widgetContentInset fm
+  let (ix, _) =
+        if isTerminalFont fm
+          then widgetContentInset fm
+          else labelContentInset fm
       box = checkboxBoxSize fm
       bx = x + ix
       by = y + (h - box) / 2
@@ -1609,6 +1617,7 @@ scrollHitClip ctx idx nt parentClip = do
       let local = scrollContentClip fm slot dir x y w h pad contentSize
           lane = scrollChromeLane fm slot dir x y w h pad
           hit = rectUnion local lane
+      -- Window hang stays hittable: the window clip includes padR.
       pure (rectIntersect parentClip hit)
     else
       if nt == NodePanel
@@ -2154,7 +2163,7 @@ textInputMenuRows =
   ]
 
 textInputMenuOuterPad :: Float
-textInputMenuOuterPad = 4
+textInputMenuOuterPad = 6
 
 textInputMenuItemPadX :: Float
 textInputMenuItemPadX = 10
@@ -2710,9 +2719,28 @@ topmostWindowAtResizeHalo ctx mouse = do
             then go (idx - 1)
             else do
               (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-              if w > 0 && h > 0 && rectContains (windowResizeHalo (Rect x y w h)) mouse
-                then pure (Just idx)
-                else go (idx - 1)
+              if w <= 0 || h <= 0
+                then go (idx - 1)
+                else do
+                  let rect = Rect x y w h
+                  if rectContains (windowResizeHalo rect) mouse
+                    then pure (Just idx)
+                    else do
+                      inInner <- windowInnerEastResizeHit ctx idx rect mouse
+                      if inInner
+                        then pure (Just idx)
+                        else go (idx - 1)
+
+windowInnerEastResizeHit :: Context -> NodeIdx -> Rect -> V2 -> IO Bool
+windowInnerEastResizeHit ctx winIdx winRect mouse@(V2 mx _) = do
+  let Rect x _ w _ = winRect
+  pad <- getPadding (ctxNodeArena ctx) winIdx
+  let pr = padR pad
+  if mx < x + w - pr || mx > x + w
+    then pure False
+    else do
+      mLane <- windowBodyScrollLane ctx winIdx
+      pure (not (maybe False (`rectContains` mouse) mLane))
 
 lookupWindowPos :: Context -> WidgetId -> IO (Maybe (Float, Float))
 lookupWindowPos ctx wid = do
@@ -2790,7 +2818,7 @@ windowResizeHalo :: Rect -> Rect
 windowResizeHalo (Rect x y w h) =
   Rect (x - windowResizeHandle) (y - windowResizeHandle) (w + 2 * windowResizeHandle) (h + 2 * windowResizeHandle)
 
--- Handles sit outside the window so the inner pad (scrollbar) stays scrollable.
+-- Handles sit outside the window. The right pad strip also resizes beside the bar.
 windowResizeEdgeAt :: Rect -> V2 -> Maybe WindowResizeEdge
 windowResizeEdgeAt (Rect x y w h) (V2 mx my) =
   let s = windowResizeHandle
@@ -2811,6 +2839,61 @@ windowResizeEdgeAt (Rect x y w h) (V2 mx my) =
               (_, True, _, _) -> ResizeS
               (_, _, True, _) -> ResizeW
               _ -> ResizeE
+
+innerEastCornerEdge :: Padding -> Rect -> Float -> Maybe WindowResizeEdge
+innerEastCornerEdge pad (Rect _ y _ h) my =
+  let topBand = max 6 (min windowResizeHandle (padT pad))
+      botBand = max 6 (min windowResizeHandle (padB pad))
+   in case (my >= y && my < y + topBand, my > y + h - botBand && my <= y + h) of
+        (True, _) -> Just ResizeNE
+        (_, True) -> Just ResizeSE
+        _ -> Just ResizeE
+
+windowBodyScrollLane :: Context -> NodeIdx -> IO (Maybe Rect)
+windowBodyScrollLane ctx winIdx = do
+  fc <- getFirstChild (ctxNodeArena ctx) winIdx
+  go fc
+  where
+    go ci
+      | ci < 0 = pure Nothing
+      | otherwise = do
+          nt <- getNodeType (ctxNodeArena ctx) ci
+          ns <- getNextSibling (ctxNodeArena ctx) ci
+          case nt of
+            NodeScrollContainer -> do
+              slot <- scrollBarSlotOf (ctxNodeArena ctx) ci
+              if slot /= ScrollBarWindow
+                then go ns
+                else do
+                  (x, y, w, h) <- getRect (ctxNodeArena ctx) ci
+                  pad <- getPadding (ctxNodeArena ctx) ci
+                  dir <- getDirection (ctxNodeArena ctx) ci
+                  contentSize <- getNodeValue (ctxNodeArena ctx) ci
+                  let fm = ctxFontMetrics ctx
+                      innerH = h - padT pad - padB pad
+                  if contentSize <= innerH
+                    then go ns
+                    else
+                      pure
+                        ( Just
+                            (scrollChromeLane fm slot dir x y w h pad)
+                        )
+            _ -> go ns
+
+windowInnerResizeEdgeAt :: Context -> NodeIdx -> Rect -> V2 -> IO (Maybe WindowResizeEdge)
+windowInnerResizeEdgeAt ctx winIdx winRect mouse = do
+  hit <- windowInnerEastResizeHit ctx winIdx winRect mouse
+  if hit
+    then do
+      pad <- getPadding (ctxNodeArena ctx) winIdx
+      pure (innerEastCornerEdge pad winRect (v2Y mouse))
+    else pure Nothing
+
+windowResizeEdgeFor :: Context -> NodeIdx -> Rect -> V2 -> IO (Maybe WindowResizeEdge)
+windowResizeEdgeFor ctx winIdx winRect mouse = do
+  case windowResizeEdgeAt winRect mouse of
+    Just edge -> pure (Just edge)
+    Nothing -> windowInnerResizeEdgeAt ctx winIdx winRect mouse
 
 cursorForResizeEdge :: WindowResizeEdge -> UiCursorKind
 cursorForResizeEdge edge =
@@ -2920,31 +3003,34 @@ tryStartWindowResize ctx mouse = do
       blocked <- resizeHaloBlocked ctx mouse idx
       overClose <- windowTitleHasInteractive ctx idx mouse
       (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-      case (blocked || overClose, windowResizeEdgeAt (Rect x y w h) mouse) of
-        (True, _) -> pure False
-        (_, Nothing) -> pure False
-        (_, Just edge) -> do
-          wid <- getWidgetId (ctxNodeArena ctx) idx
-          (minW, minH, maxW, maxH) <- getMinMax (ctxNodeArena ctx) idx
-          let V2 mx my = mouse
-          writeIORef (ctxWindowResize ctx) $
-            Just
-              WindowResizeDrag
-                { wrdWidget = wid
-                , wrdEdge = edge
-                , wrdGrabX = mx
-                , wrdGrabY = my
-                , wrdStartX = x
-                , wrdStartY = y
-                , wrdStartW = w
-                , wrdStartH = h
-                , wrdMinW = minW
-                , wrdMinH = minH
-                , wrdMaxW = maxW
-                , wrdMaxH = maxH
-                }
-          markDirty ctx
-          pure True
+      if blocked || overClose
+        then pure False
+        else do
+          mEdge <- windowResizeEdgeFor ctx idx (Rect x y w h) mouse
+          case mEdge of
+            Nothing -> pure False
+            Just edge -> do
+              wid <- getWidgetId (ctxNodeArena ctx) idx
+              (minW, minH, maxW, maxH) <- getMinMax (ctxNodeArena ctx) idx
+              let V2 mx my = mouse
+              writeIORef (ctxWindowResize ctx) $
+                Just
+                  WindowResizeDrag
+                    { wrdWidget = wid
+                    , wrdEdge = edge
+                    , wrdGrabX = mx
+                    , wrdGrabY = my
+                    , wrdStartX = x
+                    , wrdStartY = y
+                    , wrdStartW = w
+                    , wrdStartH = h
+                    , wrdMinW = minW
+                    , wrdMinH = minH
+                    , wrdMaxW = maxW
+                    , wrdMaxH = maxH
+                    }
+              markDirty ctx
+              pure True
 
 windowResizeCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
 windowResizeCursorKind ctx inp = do
@@ -2963,7 +3049,7 @@ windowResizeCursorKind ctx inp = do
           (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
           if blocked || overClose
             then pure Nothing
-            else pure (cursorForResizeEdge <$> windowResizeEdgeAt (Rect x y w h) mouse)
+            else fmap cursorForResizeEdge <$> windowResizeEdgeFor ctx idx (Rect x y w h) mouse
 
 -- Halo must not steal hits from page widgets or another window's interior.
 resizeHaloBlocked :: Context -> V2 -> NodeIdx -> IO Bool
@@ -3155,7 +3241,7 @@ selectItemH :: FontMetrics -> Float -> Float
 selectItemH fm rh = if isTerminalFont fm then max 1 rh else 28
 
 selectDropGap :: FontMetrics -> Float
-selectDropGap fm = if isTerminalFont fm then 0 else 4
+selectDropGap fm = if isTerminalFont fm then 0 else 6
 
 selectDropOuterPad :: FontMetrics -> Float
 selectDropOuterPad fm = if isTerminalFont fm then 0 else textInputMenuOuterPad
@@ -3226,15 +3312,18 @@ terminalSelectDropdownSpans rx ry wi opts picked hoverIdx fg dropBg dropActiveBg
       , let rowText = if T.null opt then T.replicate wi (T.singleton ' ') else itemRow opt
       ]
 
-drawCloseIcon :: DrawArena -> Float -> Float -> Float -> Float -> Color -> IO ()
-drawCloseIcon da x y w h col = do
-  let s = min w h
+drawCloseIcon :: FontMetrics -> DrawArena -> Float -> Float -> Float -> Float -> Color -> IO ()
+drawCloseIcon fm da x y w h col = do
+  let s = min w h * 0.72
+      th = s
+      ty = centeredTextY fm y h th
+      tx = x + (w - s) / 2
       inset = s * 0.32
-      t = max 1.6 (s * 0.07)
-      x0 = x + (w - s) / 2 + inset
-      y0 = y + (h - s) / 2 + inset
-      x1 = x + (w + s) / 2 - inset
-      y1 = y + (h + s) / 2 - inset
+      t = max 1.6 (s * 0.10)
+      x0 = tx + inset
+      y0 = ty + inset
+      x1 = tx + s - inset
+      y1 = ty + s - inset
   pushLine da x0 y0 x1 y1 t col
   pushLine da x0 y1 x1 y0 t col
 
@@ -3276,18 +3365,25 @@ scrollContentClip fm slot dir x y w h pad contentSize =
         DirColumn -> Rect (rectX base) (rectY base) (max 0 (rectW base - gutter)) (rectH base)
         DirRow -> Rect (rectX base) (rectY base) (rectW base) (max 0 (rectH base - gutter))
 
--- Bars stay inside the scroll rect. Window body reserves a content gutter.
+-- List/page bars sit in the scroll rect. Window body hangs into the parent pad.
 scrollChromeLane ::
   FontMetrics -> ScrollBarSlot -> DirTag -> Float -> Float -> Float -> Float -> Padding -> Rect
 scrollChromeLane fm slot dir x y w h pad =
   let (barW, _) = scrollBarGeomFor fm slot
       outer = scrollBarOuterGap fm slot
+      hang = slot == ScrollBarWindow
    in case dir of
         DirColumn ->
-          let laneX = max x (x + w - outer - barW)
+          let laneX =
+                if hang
+                  then x + w + outer
+                  else max x (x + w - outer - barW)
            in Rect laneX (y + padT pad) barW (max 0 (h - padT pad - padB pad))
         DirRow ->
-          let laneY = max y (y + h - outer - barW)
+          let laneY =
+                if hang
+                  then y + h + outer
+                  else max y (y + h - outer - barW)
            in Rect (x + padL pad) laneY (max 0 (w - padL pad - padR pad)) barW
 
 data ScrollBarLayout = ScrollBarLayout

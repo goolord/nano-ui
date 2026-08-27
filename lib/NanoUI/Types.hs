@@ -17,6 +17,7 @@ module NanoUI.Types
   , Damage (..)
   , damageIsEmpty
   , sliderTrackRect
+  , sliderTrackMargin
   , v2Add
   , v2Sub
   ) where
@@ -121,11 +122,15 @@ damageIsEmpty dmg =
     DamageFull -> False
     DamageClip r -> rectW r <= 0 || rectH r <= 0
 
+-- End inset above and below the hit band (handle sits in this slack).
+sliderTrackMargin :: Float
+sliderTrackMargin = 3
+
 {-# INLINE sliderTrackRect #-}
 sliderTrackRect :: Float -> Float -> Float -> Float -> Rect
 sliderTrackRect x y w h =
   let trackH = max 4 (h * 0.18)
-      trackY = y + h - trackH - 2
+      trackY = y + h - trackH - sliderTrackMargin
    in Rect x trackY w trackH
 
 {-# INLINE v2Add #-}
