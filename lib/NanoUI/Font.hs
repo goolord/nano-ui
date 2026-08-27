@@ -95,11 +95,14 @@ widgetContentInset fm
 {-# INLINE buttonPadding #-}
 buttonPadding :: FontMetrics -> (Float, Float)
 buttonPadding fm
-  | isTerminalFont fm = widgetPadding fm
+  | isTerminalFont fm =
+      let (px, py) = widgetPadding fm
+          adv = fmAdvance fm ' '
+       in (px + adv * 0.4, py)
   | otherwise =
       let adv = fmAdvance fm ' '
           lh = layoutLineHeight fm
-       in (adv * 2.6, lh * 0.42)
+       in (adv * 3.0, lh * 0.42)
 
 {-# INLINE layoutLineHeight #-}
 layoutLineHeight :: FontMetrics -> Float

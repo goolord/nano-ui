@@ -1,12 +1,14 @@
 module NanoUI.Sdl.Window
   ( SdlEnv (..)
   , withSdl
+  , withSdlBench
   , defaultWindowSize
   , syncDisplay
   ) where
 
 import Control.Exception (bracket)
 import Control.Monad (unless, void, when)
+import Data.Bits ((.|.))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Foreign.C.String (withCString)
 import Foreign.Marshal.Alloc (alloca)
@@ -53,6 +55,13 @@ import SDL3.Sys.Video (destroyWindowSafe)
 
 sdlWindowResizable :: SDL_WindowFlags
 sdlWindowResizable = SDL_WindowFlags 0x0000000000000020
+
+benchWindowFlags :: SDL_WindowFlags
+benchWindowFlags =
+  SDL_WindowFlags
+    ( 0x0000000000000020
+        .|. 0x0000000000000008
+    )
 
 scaleEpsilon :: Float
 scaleEpsilon = 0.001
@@ -114,7 +123,14 @@ syncInput _env scale inp = do
       Nothing -> inp
 
 withSdl :: Context -> String -> Size -> (Context -> SdlEnv -> IO a) -> IO a
-withSdl ctx title (Size w h) act =
+withSdl ctx title size act = withSdlWindow ctx title size sdlWindowResizable act
+
+withSdlBench :: Context -> (Context -> SdlEnv -> IO a) -> IO a
+withSdlBench ctx act =
+  withSdlWindow ctx "nano-ui-bench" defaultWindowSize benchWindowFlags act
+
+withSdlWindow :: Context -> String -> Size -> SDL_WindowFlags -> (Context -> SdlEnv -> IO a) -> IO a
+withSdlWindow ctx title (Size w h) flags act =
   withTtf $ do
     initSdlHints
     fontPath <-
@@ -142,7 +158,7 @@ withSdl ctx title (Size w h) act =
                     (PtrConst.unsafeFromPtr titlePtr)
                     (round w)
                     (round h)
-                    sdlWindowResizable
+                    flags
                     winPtr
                     renPtr
                 unless ok $ fail "SDL_CreateWindowAndRenderer failed"

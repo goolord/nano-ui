@@ -227,3 +227,21 @@ test-suite nano-ui-test
         text ^>=2.1
     hs-source-dirs:   test
     default-language: GHC2024
+
+benchmark nano-ui-sdl-bench
+    import:           extensions
+    import:           ghc-options
+    import:           rts-options
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    main-is:          SdlBench.hs
+    build-depends:
+        base ^>=4.22.0.0,
+        criterion ^>=1.6,
+        nano-ui,
+        nano-ui:nano-ui-sdl,
+        text ^>=2.1
+    hs-source-dirs:   benchmark
+    default-language: GHC2024
+    if !flag(sdl)
+        buildable: False
