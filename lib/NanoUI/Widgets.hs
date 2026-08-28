@@ -29,6 +29,7 @@ module NanoUI.Widgets
   , heading
   , muted
   , kv
+  , kvBlock
   , card
   , toolbar
   , sep
@@ -58,6 +59,7 @@ import NanoUI.Font
   ( FontMetrics
   , headingFontMarker
   , isTerminalFont
+  , monoFontMarker
   , layoutUnitScale
   , mutedFontMarker
   , resolveLayoutGap
@@ -123,6 +125,7 @@ import NanoUI.Style
   , padXY
   , tight
   , fixedH
+  , fixedW
   , fixedWH
   , grow
   , windowPad
@@ -258,11 +261,25 @@ muted :: (HasCallStack, Ui :> es) => Text -> Eff es ()
 muted txt = void (labelEx (fillW defaultLayout) (mutedFontMarker <> txt))
 
 kv :: (HasCallStack, Ui :> es) => Text -> Text -> Eff es ()
-kv k v =
+kv k v = do
+  ctx <- askContext
+  let fm = ctxFontMetrics ctx
+      terminal = isTerminalFont fm
+      rowLayout =
+        tight . gap (if terminal then 1 else 12) . alignMid . fillW $ defaultLayout
+      keyLayout =
+        if terminal then tight else tight . minW 88
   void $
-    row (tight . gap 12 . alignMid . fillW $ defaultLayout) $ do
-      void (labelEx (tight . minW 88 $ defaultLayout) k)
+    row rowLayout $ do
+      void (labelEx (keyLayout defaultLayout) k)
       void (labelEx (tight . fillW . alignEnd $ defaultLayout) (T.stripEnd v))
+
+kvBlock :: (HasCallStack, Ui :> es) => [(String, String)] -> Eff es ()
+kvBlock rows =
+  void $
+    labelEx
+      (tight . gap 0 $ defaultLayout)
+      (monoFontMarker <> T.unlines [T.pack (k <> ": " <> v) | (k, v) <- rows])
 
 card :: Ui :> es => Eff es a -> Eff es a
 card = panel (minW 300 . padXY 12 10 . gap 8 . fillW $ defaultLayout)
@@ -321,7 +338,10 @@ modal open title child
                     flex
                     withKey ("close" :: Text) closeButton
                 when (not (T.null title)) sep
-                r <- child
+                r <-
+                  if isTerminalFont fm
+                    then scroll (tight . grow $ defaultLayout) child
+                    else child
                 pure (close, r)
             )
               `uiFinally` do
@@ -375,7 +395,8 @@ window open title child
               availW = max 1 (winW - 2 * margin)
               availH = max 1 (winH - 2 * margin)
               pad = resolveLayoutPadding fm (floatPadFor fm windowPad)
-              minWidth = floatMinFor fm 280 availW
+              authoredMin = if isTerminalFont fm then 160 else 280
+              minWidth = floatMinFor fm authoredMin availW
               minHeight =
                 min availH (padT pad + titleBarHFor fm + padB pad)
               maxW = availW
@@ -495,7 +516,7 @@ closeButton = do
       h = titleBarHFor fm
       layout =
         if isTerminalFont fm
-          then tight . alignMid $ defaultLayout
+          then tight . fixedW 3 . alignMid $ defaultLayout
           else tight . fixedWH h h . alignMid $ defaultLayout
   resp <- addWidget wid NodeButton stored 0 layout
   disabled <- uiIO (isDisabled ctx wid)

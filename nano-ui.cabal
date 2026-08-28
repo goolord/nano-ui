@@ -141,6 +141,9 @@ library nano-ui-term
         text ^>=2.1
     hs-source-dirs:   term-lib
     default-language: GHC2024
+    other-modules:
+        NanoUI.Term.Debug
+        NanoUI.Term.Palette
     if os(windows)
         build-depends: Win32 >=2.14
         other-modules:

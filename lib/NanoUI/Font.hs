@@ -52,7 +52,7 @@ module NanoUI.Font
 import Data.Text (Text)
 import qualified Data.Text as T
 import NanoUI.Style (AlignX (..), Padding (..), defaultLayout, layoutGap)
-import NanoUI.Types (Rect (..), rectH, rectY, sliderBarCells, sliderTrackRect)
+import NanoUI.Types (Rect (..), sliderBarCells)
 
 data GlyphQuad = GlyphQuad
   { gqX :: {-# UNPACK #-} !Float
@@ -207,6 +207,9 @@ checkboxLeading fm
 sliderTrackHeight :: Float
 sliderTrackHeight = 10
 
+sliderTrackMargin :: Float
+sliderTrackMargin = 3
+
 -- SDL track spans the label row insets. Terminal uses the inline [bar] cells.
 {-# INLINE sliderTrackBounds #-}
 sliderTrackBounds :: FontMetrics -> Text -> Float -> Float -> Float -> Float -> Rect
@@ -219,9 +222,9 @@ sliderTrackBounds fm lbl x y w h
        in Rect (x + ix + prefix) y trackW h
   | otherwise =
       let (lx, _) = labelContentInset fm
-          hit = sliderTrackRect x y w h
-          bandH = rectH hit
-          trackY = rectY hit + (bandH - sliderTrackHeight) / 2
+          bandH = max 4 (h * 0.18)
+          bandY = y + h - bandH - sliderTrackMargin
+          trackY = bandY + (bandH - sliderTrackHeight) / 2
           trackX = x + lx
           trackW = max 0 (w - 2 * lx)
        in Rect trackX trackY trackW sliderTrackHeight

@@ -9,6 +9,7 @@ import Foreign.Storable (peekByteOff)
 import Data.List (isInfixOf, nub, sort)
 import Effectful.State.Static.Local (State, evalState, get, modify)
 import NanoUI
+import NanoUI.Backend.Term (newAdaptiveTerminalContext, queryTerminalColors)
 import NanoUI.Term.Ansi (frameBytes)
 import NanoUI.Term.Cells (cellRows, narrowChar, rasterize, rasterizeLayered)
 import NanoUI.Term.Event (MouseAction (..), MouseBtn (..), TermEvent (..), noMods)
@@ -97,6 +98,7 @@ main = do
   run "select-keyboard" runSelectKeyboardTest
   run "text-wrap" runTextWrapTest
   run "text-wrap-width" runTextWrapAssignedTest
+  run "text-multiline" runTextMultilineTest
   run "flex-wrap" runFlexWrapTest
   run "flex-shrink" runFlexShrinkTest
   run "grow-fits-window" runGrowFitsWindowTest
@@ -108,7 +110,12 @@ main = do
   run "terminal-slider-track" runTerminalSliderTrackTest
   run "terminal-text-input" runTerminalTextInputDisplayTest
   run "terminal-modal-overlay" runTerminalModalOverlayTest
+  run "terminal-modal-scroll" runTerminalModalScrollTest
+  run "terminal-modal-tight" runTerminalModalTightTest
+  run "terminal-modal-open-redraw" runTerminalModalOpenRedrawTest
   run "terminal-window-overlay" runTerminalWindowOverlayTest
+  run "terminal-window-drag" runTerminalWindowDragTest
+  run "terminal-close-button" runTerminalCloseButtonTest
   run "terminal-theme-contrast" runTerminalThemeContrastTest
   run "scroll-bar-gutter" runScrollBarGutterTest
   runSdl "scroll-bar-gutter-grow" runGrowScrollGutterTest
@@ -120,6 +127,7 @@ main = do
   run "embed-state" runEmbedStateTest
   run "panel-paints" runPanelPaintsTest
   run "separator-span" runSeparatorSpanTest
+  run "terminal-separator-span" runTerminalSeparatorSpanTest
   run "header-top-pad" runHeaderTopPadTest
   run "fit-header-no-shrink" runFitHeaderNoShrinkTest
   run "window-overlay" runWindowOverlayTest
@@ -415,7 +423,7 @@ runTextInputSelectionTest ctx failed = do
 
 runTextInputCtrlATest :: Context -> IORef Int -> IO ()
 runTextInputCtrlATest ctx failed = do
-  term <- newTerminalContext
+  term <- newAdaptiveTerminalContext
   let inp0 = emptyInput {inputWindowSize = Size 320 120}
       ui = column defaultLayout (textInput "Name" "hello")
   forM_ [ctx, term] $ \c -> do
@@ -1070,7 +1078,7 @@ runButtonPressReleaseHoverTest ctx failed = do
 -- Text input focus is finalized against solved rects on first press.
 runTextInputFocusTest :: Context -> IORef Int -> IO ()
 runTextInputFocusTest _ failed = do
-  ctx <- newTerminalContext
+  ctx <- newAdaptiveTerminalContext
   let inp0 = emptyInput {inputWindowSize = Size 200 100}
       ui = column defaultLayout (textInput "Name" "")
   _ <- runFrame ctx inp0 ui
@@ -1226,7 +1234,7 @@ runSelectOverlayDamageTest _ failed = do
 -- the next unrelated wake, and store text changes force a full redraw.
 runTextInputDirtyTest :: Context -> IORef Int -> IO ()
 runTextInputDirtyTest _ failed = do
-  ctx <- newTerminalContext
+  ctx <- newAdaptiveTerminalContext
   let ui = column defaultLayout (textInput "Name" "")
       inp0 = emptyInput {inputWindowSize = Size 200 100, inputMousePos = V2 20 20}
   _ <- runFrame ctx inp0 ui
@@ -1793,7 +1801,7 @@ runSelectDropdownTest ctx failed = do
 
 runSelectDropdownHoverTest :: Context -> IORef Int -> IO ()
 runSelectDropdownHoverTest _ failed = do
-  ctx <- newTerminalContext
+  ctx <- newAdaptiveTerminalContext
   let layout = defaultLayout {layoutPadding = Padding 0 0 0 0, layoutGap = 0}
       inp0 = emptyInput {inputWindowSize = Size 40 6}
       ui = column layout (select "Quality" ["Low", "High"] 0)
@@ -1983,7 +1991,7 @@ runSelectKeyboardTest ctx failed = do
 
 runTextWrapTest :: Context -> IORef Int -> IO ()
 runTextWrapTest _ failed = do
-  ctx <- newTerminalContext
+  ctx <- newAdaptiveTerminalContext
   let inp = emptyInput {inputWindowSize = Size 40 10}
       long = T.replicate 24 (T.pack "x")
       ui = labelEx (defaultLayout {layoutMaxW = 8}) long
@@ -1994,7 +2002,7 @@ runTextWrapTest _ failed = do
 -- Grow labels wrap to the assigned column width without an explicit maxW.
 runTextWrapAssignedTest :: Context -> IORef Int -> IO ()
 runTextWrapAssignedTest _ failed = do
-  ctx <- newTerminalContext
+  ctx <- newAdaptiveTerminalContext
   let inp = emptyInput {inputWindowSize = Size 20 12}
       long = T.replicate 24 (T.pack "x")
       ui =
@@ -2010,9 +2018,23 @@ runTextWrapAssignedTest _ failed = do
   spans <- collectTextSpans ctx
   when (length spans < 3) $ bump failed
 
+-- Explicit newlines layout as stacked lines; marker does not add width.
+runTextMultilineTest :: Context -> IORef Int -> IO ()
+runTextMultilineTest _ failed = do
+  ctx <- newAdaptiveTerminalContext
+  let inp = emptyInput {inputWindowSize = Size 40 10}
+      ui = labelEx (tight defaultLayout) (monoFontMarker <> "aa\nbb\ncc")
+  _ <- runFrame ctx inp ui
+  spans <- collectTextSpans ctx
+  let rows = sort (map (\(Rect _ y _ _, txt, _, _, _) -> (round y :: Int, txt)) spans)
+  when (map snd rows /= ["aa", "bb", "cc"]) $ bump failed
+  case map fst rows of
+    [a, b, c] -> when (b /= a + 1 || c /= b + 1) $ bump failed
+    _ -> bump failed
+
 runFlexWrapTest :: Context -> IORef Int -> IO ()
 runFlexWrapTest _ failed = do
-  ctx <- newTerminalContext
+  ctx <- newAdaptiveTerminalContext
   let inp = emptyInput {inputWindowSize = Size 30 10}
       ui =
         row
@@ -2031,7 +2053,7 @@ runFlexWrapTest _ failed = do
 
 runFlexShrinkTest :: Context -> IORef Int -> IO ()
 runFlexShrinkTest _ failed = do
-  ctx <- newTerminalContext
+  ctx <- newAdaptiveTerminalContext
   let inp = emptyInput {inputWindowSize = Size 20 10}
       ui =
         row
@@ -2097,7 +2119,7 @@ runPercentLayoutTest ctx failed = do
 -- Right-aligned label glyphs sit on the content-box right edge.
 runLabelAlignEndTest :: Context -> IORef Int -> IO ()
 runLabelAlignEndTest _ failed = do
-  checkLabelAlignEnd failed =<< newTerminalContext
+  checkLabelAlignEnd failed =<< newAdaptiveTerminalContext
   checkLabelAlignEnd failed =<< newSdlContext
 
 checkLabelAlignEnd :: IORef Int -> Context -> IO ()
@@ -2137,7 +2159,7 @@ runAspectLayoutTest ctx failed = do
 -- Grow wrap must remasure height so the next sibling sits below wrapped lines.
 runGrowWrapPushesSiblingTest :: Context -> IORef Int -> IO ()
 runGrowWrapPushesSiblingTest _ failed = do
-  ctx <- newTerminalContext
+  ctx <- newAdaptiveTerminalContext
   let inp = emptyInput {inputWindowSize = Size 6 20}
       ui =
         column
@@ -2172,7 +2194,7 @@ runGrowWrapPushesSiblingTest _ failed = do
 -- defaultLayout gap/pad are pixel-sized; terminal scales them to cells.
 runTerminalDefaultGapTest :: Context -> IORef Int -> IO ()
 runTerminalDefaultGapTest _ failed = do
-  ctx <- newTerminalContext
+  ctx <- newAdaptiveTerminalContext
   let fm = ctxFontMetrics ctx
       expectedStep = fmLineHeight fm + resolveLayoutGap fm (layoutGap defaultLayout)
       inp = emptyInput {inputWindowSize = Size 20 10}
@@ -2191,7 +2213,7 @@ runTerminalDefaultGapTest _ failed = do
 -- Terminal slider drag maps to the inline [bar], not the grow node width.
 runTerminalSliderTrackTest :: Context -> IORef Int -> IO ()
 runTerminalSliderTrackTest _ failed = do
-  ctx <- newTerminalContext
+  ctx <- newAdaptiveTerminalContext
   let inp0 = emptyInput {inputWindowSize = Size 60 10}
       ui = column (fillW defaultLayout) (slider "Vol" 0 100 0)
   _ <- runFrame ctx inp0 ui
@@ -2214,21 +2236,31 @@ runTerminalSliderTrackTest _ failed = do
 -- so title and body stay on the 80x24 grid instead of clipping away.
 runTerminalModalOverlayTest :: Context -> IORef Int -> IO ()
 runTerminalModalOverlayTest _ failed = do
-  ctx <- newTerminalContext
+  ctx <- newAdaptiveTerminalContext
   let inp0 = emptyInput {inputWindowSize = Size 80 24}
       ui =
-        modal True "About" $ do
-          _ <- label "Immediate-mode GUI for Haskell."
-          pure ()
+        column defaultLayout $ do
+          _ <- label "Behind"
+          (dlg, _) <-
+            modal True "About" $ do
+              heading "nano-ui"
+              muted "Immediate-mode GUI for Haskell."
+              muted "Terminal backend demo."
+              row (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fit}) $ do
+                flex
+                clickButton "Close" (pure ())
+              pure ()
+          pure dlg
   _ <- runFrame ctx inp0 ui
-  ((dlg, _), _, drawData, _) <- runFrame ctx inp0 ui
+  (dlg, _, drawData, _) <- runFrame ctx inp0 ui
   overlays <- collectOverlayTextSpans ctx inp0
   base <- collectTextSpans ctx
   let hasTitle = any (\(_, txt, _, _, _) -> "About" `T.isInfixOf` txt) overlays
       hasBody = any (\(_, txt, _, _, _) -> "Immediate-mode" `T.isInfixOf` txt) overlays
+      hasClose = any (\(_, txt, _, _, _) -> "Close" `T.isInfixOf` txt) overlays
       inGrid (Rect x y w h, _, _, _, _) =
         x >= -0.5 && y >= -0.5 && x + w <= 80.5 && y + h <= 24.5
-  when (not (hasTitle && hasBody)) $ bump failed
+  when (not (hasTitle && hasBody && hasClose)) $ bump failed
   when (any (not . inGrid) overlays) $ bump failed
   let Rect _ _ mw mh = respRect dlg
   when (mw > 80 || mh > 24 || mw < 8 || mh < 2) $ bump failed
@@ -2236,10 +2268,144 @@ runTerminalModalOverlayTest _ failed = do
   let blob = concat (cellRows cells)
   when (not ("About" `isInfixOf` blob)) $ bump failed
   when (not ("Immediate-mode" `isInfixOf` blob)) $ bump failed
+  when (not ("Behind" `isInfixOf` blob)) $ bump failed
+  when (not ('\x2500' `elem` blob)) $ bump failed
+  when (not (any (\c -> cmdTextureId c == backdropDimTextureId) (drawCommands drawData))) $
+    bump failed
+
+-- TUI About modal: title + sep + 4 body lines + float pad/gap (see modal/2).
+terminalAboutModalMaxH :: FontMetrics -> Float
+terminalAboutModalMaxH fm =
+  let pad = resolveLayoutPadding fm (Padding 4 4 4 4)
+      modalGap = resolveLayoutGap fm 8
+      bodyGap = resolveLayoutGap fm (layoutGap defaultLayout)
+      line = fmLineHeight fm
+      titleH = if isTerminalFont fm then 1 else 28
+      sepH = 1
+      bodyRows = (4 :: Int)
+      bodyH =
+        fromIntegral bodyRows * line
+          + bodyGap * fromIntegral (pred bodyRows)
+      chromeH = titleH + sepH + bodyH + modalGap * 2
+   in padT pad + padB pad + chromeH + 0.5
+
+terminalAboutModalMaxFooter :: FontMetrics -> Float
+terminalAboutModalMaxFooter fm =
+  let pad = resolveLayoutPadding fm (Padding 4 4 4 4)
+   in padB pad + fmLineHeight fm
+
+-- Title stays pinned. Body clips and scrolls inside the modal.
+runTerminalModalScrollTest :: Context -> IORef Int -> IO ()
+runTerminalModalScrollTest _ failed = do
+  ctx <- newAdaptiveTerminalContext
+  let inp0 = emptyInput {inputWindowSize = Size 80 16}
+      line1 = T.pack "line 1"
+      ui = do
+        (dlg, _) <-
+          modal True "About" $
+            column defaultLayout $
+              mapM_ (\i -> label (T.pack ("line " <> show (i :: Int)))) [1 .. 24]
+        pure dlg
+  _ <- runFrame ctx inp0 ui
+  (dlg, _, _, _) <- runFrame ctx inp0 ui
+  let Rect mx _ mw mh = respRect dlg
+  when (mw <= 0 || mh <= 0 || mh > 16) $ bump failed
+  spans0 <- collectOverlayTextSpans ctx inp0
+  let titleYs0 = spanYs (T.pack "About") spans0
+      line1Ys0 = spanLabelYs line1 spans0
+  when (null titleYs0) $ bump failed
+  case line1Ys0 of
+    [] -> bump failed
+    b0 : _ -> do
+      let wheelAt = V2 (mx + mw / 2) (b0 + 0.5)
+          wheel =
+            inp0
+              { inputMousePos = wheelAt
+              , inputScroll = V2 0 1
+              }
+      _ <- runFrame ctx wheel ui
+      spans1 <- collectOverlayTextSpans ctx wheel
+      let titleYs1 = spanYs (T.pack "About") spans1
+          line1Ys1 = spanLabelYs line1 spans1
+      case (titleYs0, titleYs1) of
+        (y0 : _, y1 : _) -> when (y1 /= y0) $ bump failed
+        _ -> bump failed
+      case line1Ys1 of
+        [] -> pure ()
+        b1 : _ -> when (b1 >= b0) $ bump failed
+      when (any (\(Rect _ y _ h, _, _, _, _) -> y < 0 || y + h > 16.5) spans1) $
+        bump failed
+
+-- About body should sit on the modal, not a tall empty footer under Close.
+runTerminalModalTightTest :: Context -> IORef Int -> IO ()
+runTerminalModalTightTest _ failed = do
+  ctx <- newAdaptiveTerminalContext
+  let inp0 = emptyInput {inputWindowSize = Size 80 24}
+      ui = do
+        (dlg, _) <-
+          modal True "About" $ do
+            heading "nano-ui"
+            muted "Immediate-mode GUI for Haskell."
+            muted "Terminal backend demo."
+            row (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fit}) $ do
+              flex
+              clickButton "Close" (pure ())
+            pure ()
+        pure dlg
+  _ <- runFrame ctx inp0 ui
+  (dlg, _, _, _) <- runFrame ctx inp0 ui
+  overlays <- collectOverlayTextSpans ctx inp0
+  let fm = ctxFontMetrics ctx
+      Rect _ my _ mh = respRect dlg
+      maxH = terminalAboutModalMaxH fm
+      maxFooter = terminalAboutModalMaxFooter fm
+  case closeSpanBottom overlays of
+    Nothing -> bump failed
+    Just bottom ->
+      let footer = my + mh - bottom
+       in when (mh > maxH || footer > maxFooter) $ bump failed
+
+-- Flag open must redraw on the next idle frame without waiting for input.
+runTerminalModalOpenRedrawTest :: Context -> IORef Int -> IO ()
+runTerminalModalOpenRedrawTest _ failed = do
+  ctx <- newAdaptiveTerminalContext
+  let inp0 = emptyInput {inputWindowSize = Size 80 24, inputMousePos = V2 (-10) (-10)}
+      ui = do
+        (open, setOpen) <- useFlag False
+        resp <- button "Open"
+        onClick resp (setOpen True)
+        _ <- modal open "About" (label "body")
+        pure resp
+  _ <- runFrame ctx inp0 ui
+  (resp, _, _, _) <- runFrame ctx inp0 ui
+  let Rect rx ry rw rh = respRect resp
+      press =
+        inp0
+          { inputMousePos = V2 (rx + rw / 2) (ry + rh / 2)
+          , inputMouseDown = True
+          , inputMousePressed = True
+          }
+  _ <- runFrame ctx press ui
+  let release =
+        press
+          { inputMouseDown = False
+          , inputMousePressed = False
+          , inputMouseReleased = True
+          }
+  _ <- runFrame ctx release ui
+  let idle = inp0 {inputDeltaTime = 0}
+  need <- needsRedrawIdle ctx release idle
+  when (not need) $ bump failed
+  _ <- runFrame ctx idle ui
+  overlays <- collectOverlayTextSpans ctx idle
+  let hasAbout = any (\(_, txt, _, _, _) -> "About" `T.isInfixOf` txt) overlays
+  when (not hasAbout) $ bump failed
+  dmg <- takeDamage ctx
+  when (damageIsEmpty dmg) $ bump failed
 
 runTerminalWindowOverlayTest :: Context -> IORef Int -> IO ()
 runTerminalWindowOverlayTest _ failed = do
-  ctx <- newTerminalContext
+  ctx <- newAdaptiveTerminalContext
   let inp0 = emptyInput {inputWindowSize = Size 80 24}
       ui =
         window True "Debug" $ do
@@ -2261,12 +2427,101 @@ runTerminalWindowOverlayTest _ failed = do
   let blob = concat (cellRows cells)
   when (not ("Debug" `isInfixOf` blob)) $ bump failed
   when (not ("Floating window" `isInfixOf` blob)) $ bump failed
+  when (not ('\x2500' `elem` blob)) $ bump failed
 
--- Body, chrome, accent, and muted text must stay WCAG AA against every fill
--- they can land on, including the hover and active states.
+runTerminalWindowDragTest :: Context -> IORef Int -> IO ()
+runTerminalWindowDragTest _ failed = do
+  ctx <- newAdaptiveTerminalContext
+  let inp0 = emptyInput {inputWindowSize = Size 80 24}
+      ui = do
+        (win, _) <- window True "Debug" (label "Body")
+        pure win
+  _ <- runFrame ctx inp0 ui
+  (win0, _, _, _) <- runFrame ctx inp0 ui
+  let Rect x0 y0 _ _ = respRect win0
+      grab = V2 (x0 + 4) (y0 + 1.5)
+      press =
+        inp0
+          { inputMousePos = grab
+          , inputMouseDown = True
+          , inputMousePressed = True
+          }
+  _ <- runFrame ctx press ui
+  let moved =
+        press
+          { inputMousePos = V2 (x0 + 4 - 8) (y0 + 1.5 + 4)
+          , inputMousePressed = False
+          }
+  _ <- runFrame ctx moved ui
+  (win1, _, _, _) <- runFrame ctx moved ui
+  let Rect x1 y1 _ _ = respRect win1
+  when (x1 >= x0 - 2) $ bump failed
+  when (y1 <= y0 + 1) $ bump failed
+
+runTerminalCloseButtonTest :: Context -> IORef Int -> IO ()
+runTerminalCloseButtonTest _ failed = do
+  ctx <- newAdaptiveTerminalContext
+  let inp0 = emptyInput {inputWindowSize = Size 80 24}
+      modalUi =
+        column defaultLayout $ do
+          (dlg, _) <- modal True "About" (label_ "Body")
+          pure dlg
+      windowUi = do
+        (win, _) <- window True "Debug" (label_ "Body")
+        pure win
+      testClose ui = do
+        _ <- runFrame ctx inp0 ui
+        _ <- runFrame ctx inp0 ui
+        overlays <- collectOverlayTextSpans ctx inp0
+        case closeSpanCenter overlays of
+          Nothing -> bump failed
+          Just (V2 cx cy) -> do
+            -- Left edge of the 3-cell close slot, not the centered glyph.
+            let edge = V2 (cx - 1.0) cy
+                (press, release) = clickAt inp0 edge
+            _ <- runFrame ctx press ui
+            (outer, _, _, _) <- runFrame ctx release ui
+            when (not (respClicked outer)) $ bump failed
+  testClose modalUi
+  testClose windowUi
+
+closeSpanCenter :: [(Rect, T.Text, Color, Color, Rect)] -> Maybe V2
+closeSpanCenter spans =
+  case [Rect x y w h | (Rect x y w h, txt, _, _, _) <- spans, T.strip txt == "X"] of
+    (Rect x y w h : _) -> Just (V2 (x + w / 2) (y + h / 2))
+    [] -> Nothing
+
+clickAt :: Input -> V2 -> (Input, Input)
+clickAt base pos =
+  let press =
+        base
+          { inputMousePos = pos
+          , inputMouseDown = True
+          , inputMousePressed = True
+          }
+      release =
+        press
+          { inputMouseDown = False
+          , inputMousePressed = False
+          , inputMouseReleased = True
+          }
+   in (press, release)
+
 runTerminalThemeContrastTest :: Context -> IORef Int -> IO ()
 runTerminalThemeContrastTest _ failed = do
-  checkThemeContrast "terminalTheme" terminalTheme failed
+  checkThemeContrast
+    "terminalTheme-fallback"
+    (terminalThemeFromColors terminalDefaultFg terminalDefaultBg)
+    failed
+  checkThemeContrast
+    "terminalTheme-light"
+    (terminalThemeFromColors (colorRGBA 0 0 0 255) (colorRGBA 255 255 255 255))
+    failed
+  (fg, bg) <- queryTerminalColors
+  checkThemeContrast
+    "terminalTheme-adaptive"
+    (terminalThemeFromColors fg bg)
+    failed
   checkThemeContrast "sdlTheme" sdlTheme failed
 
 checkThemeContrast :: String -> Theme -> IORef Int -> IO ()
@@ -2293,6 +2548,7 @@ themeContrastPairs :: Theme -> [(String, Color, Color)]
 themeContrastPairs theme =
   concat
     [ styleStates "panel" (themePanel theme)
+    , styleStates "floating-window" (themeFloatingWindow theme)
     , styleStates "button" (themeButton theme)
     , styleStates "input" (themeInput theme)
     , [ ("panel-fg/window", styleFg (themePanel theme), themeWindow theme)
@@ -2300,6 +2556,9 @@ themeContrastPairs theme =
       , ("accent/window", themeAccent theme, themeWindow theme)
       , ("muted/panel", themeMuted theme, styleBg (themePanel theme))
       , ("muted/window", themeMuted theme, themeWindow theme)
+      , ("modal-fg/dim", styleFg (themePanel theme), themeOverlayDim theme)
+      , ("modal-muted/dim", themeMuted theme, themeOverlayDim theme)
+      , ("modal-accent/dim", themeAccent theme, themeOverlayDim theme)
       ]
     ]
   where
@@ -2312,7 +2571,7 @@ themeContrastPairs theme =
 -- Label stays in node text; display must not accumulate "Name: ...: ...".
 runTerminalTextInputDisplayTest :: Context -> IORef Int -> IO ()
 runTerminalTextInputDisplayTest _ failed = do
-  ctx <- newTerminalContext
+  ctx <- newAdaptiveTerminalContext
   let inp = emptyInput {inputWindowSize = Size 40 10}
       ui = column defaultLayout (textInput "Name" "hello")
   _ <- runFrame ctx inp ui
@@ -2551,6 +2810,18 @@ spanYs needle spans = [rectY r | (r, txt, _, _, _) <- spans, needle `T.isInfixOf
 spanLabelYs :: T.Text -> [(Rect, T.Text, a, b, c)] -> [Float]
 spanLabelYs needle spans = [rectY r | (r, txt, _, _, _) <- spans, txt == needle]
 
+closeSpanBottom :: [(Rect, T.Text, a, b, c)] -> Maybe Float
+closeSpanBottom spans =
+  case
+    [ rectY r + rectH r
+    | (r, txt, _, _, _) <- spans
+    , "Close" `T.isInfixOf` txt
+    , T.strip txt /= "X"
+    ]
+  of
+    [] -> Nothing
+    bs -> Just (maximum bs)
+
 -- Wheel over an open floating window must scroll overflowing body content.
 -- The title bar stays pinned and does not move with the body.
 runWindowScrollWheelTest :: Context -> IORef Int -> IO ()
@@ -2758,3 +3029,26 @@ runSeparatorSpanTest ctx failed = do
   let Rect _ _ w h = respRect resp
   when (w < 100) $ bump failed
   when (h > 2) $ bump failed
+
+-- Terminal separators are box-drawing glyphs, not filled hairline quads.
+runTerminalSeparatorSpanTest :: Context -> IORef Int -> IO ()
+runTerminalSeparatorSpanTest _ failed = do
+  ctx <- newAdaptiveTerminalContext
+  let inp = emptyInput {inputWindowSize = Size 40 8}
+      ui =
+        column (fillW defaultLayout) $ do
+          label_ "A"
+          resp <- separator
+          label_ "B"
+          pure resp
+  _ <- runFrame ctx inp ui
+  (resp, _, drawData, _) <- runFrame ctx inp ui
+  spans <- collectTextSpans ctx
+  let Rect _ _ w h = respRect resp
+  when (w < 20) $ bump failed
+  when (h > 2) $ bump failed
+  let Size tw th = inputWindowSize inp
+  cells <- rasterizeLayered (round tw) (round th) drawData spans []
+  let blob = concat (cellRows cells)
+  when (not ('\x2500' `elem` blob)) $ bump failed
+  when (not ("A" `isInfixOf` blob && "B" `isInfixOf` blob)) $ bump failed

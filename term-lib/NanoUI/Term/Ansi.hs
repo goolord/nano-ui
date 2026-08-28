@@ -97,7 +97,8 @@ penUpdate pen fg bg
       case (fgDiff, bgDiff) of
         (True, True) -> colorParams True fg <> string7 ";" <> colorParams False bg
         (True, False) -> colorParams True fg
-        _ -> colorParams False bg
+        (False, True) -> colorParams False bg
+        _ -> mempty
 
 -- | Truecolor SGR parameters. An alpha below 32 means the frame wants the
 -- terminal's own default colour rather than a specific RGB value.

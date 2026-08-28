@@ -12,6 +12,8 @@ module NanoUI.Draw
   , beginLayer
   , setClip
   , pushRect
+  , pushBackdropDim
+  , backdropDimTextureId
   , pushImage
   , pushRoundedRect
   , pushRoundedStroke
@@ -359,10 +361,21 @@ pushQuad da (Rect x y w h) u0 v0 u1 v1 col = do
   writeIORef (daVertexCount da) (base + 4)
   writeIORef (daIndexCount da) (baseIdx + 6)
 
+-- Reserved texture id. Terminal raster treats these quads as backdrop dim,
+-- not a solid fill. Mix comes from the vertex color alpha.
+backdropDimTextureId :: Int
+backdropDimTextureId = 0x7ffffffe
+
 {-# INLINE pushRect #-}
 pushRect :: DrawArena -> Rect -> Color -> IO ()
 pushRect da rect col = do
   setTexture da 0
+  pushQuad da rect 0 0 1 1 col
+
+{-# INLINE pushBackdropDim #-}
+pushBackdropDim :: DrawArena -> Rect -> Color -> IO ()
+pushBackdropDim da rect col = do
+  setTexture da backdropDimTextureId
   pushQuad da rect 0 0 1 1 col
 
 {-# INLINE pushImage #-}

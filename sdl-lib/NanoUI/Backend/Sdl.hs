@@ -45,8 +45,7 @@ import NanoUI
   , type (:>)
   , uiIO
   , anyAnimating
-  , collectTextSpans
-  , collectOverlayTextSpans
+  , collectRasterSpans
   , ctxTheme
   , Damage (..)
   , damageIsEmpty
@@ -329,8 +328,7 @@ drawEff unlift ctx ui env inp forceFull = do
       tex <- ensureRetain env pw ph
       okBegin <- retainBegin (sdlRenderer env) tex
       unless okBegin $ fail "SDL_SetRenderTarget(retain) failed"
-      baseSpans <- collectTextSpans ctx
-      overlaySpans <- collectOverlayTextSpans ctx inp
+      (baseSpans, overlaySpans) <- collectRasterSpans ctx inp
       font <- readIORef (sdlFontRef env)
       monoFont <- readIORef (sdlMonoFontRef env)
       let clear = themeWindow (ctxTheme ctx)

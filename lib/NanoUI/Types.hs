@@ -11,6 +11,8 @@ module NanoUI.Types
   , colorG
   , colorB
   , colorA
+  , lerpColor
+  , colorLuminance
   , contrastRatio
   , ImageId (..)
   , rectContains
@@ -21,8 +23,6 @@ module NanoUI.Types
   , rectArea
   , Damage (..)
   , damageIsEmpty
-  , sliderTrackRect
-  , sliderTrackMargin
   , sliderBarCells
   , v2Add
   , v2Sub
@@ -95,13 +95,31 @@ colorA (Color w) = fromIntegral (w .&. 0xFF)
 -- composite it over its backdrop first.
 contrastRatio :: Color -> Color -> Double
 contrastRatio a b =
-  let hi = max (relLum a) (relLum b)
-      lo = min (relLum a) (relLum b)
+  let hi = max (colorLuminance a) (colorLuminance b)
+      lo = min (colorLuminance a) (colorLuminance b)
    in (hi + 0.05) / (lo + 0.05)
+
+colorLuminance :: Color -> Double
+colorLuminance = relLum
 
 relLum :: Color -> Double
 relLum c =
   0.2126 * srgb (colorR c) + 0.7152 * srgb (colorG c) + 0.0722 * srgb (colorB c)
+
+{-# INLINE lerpColor #-}
+lerpColor :: Color -> Color -> Float -> Color
+lerpColor (Color a) (Color b) t =
+  let u = max 0 (min 1 t)
+      ch shift =
+        round $
+          fromIntegral ((a `shiftR` shift) .&. 0xFF) * (1 - u)
+            + fromIntegral ((b `shiftR` shift) .&. 0xFF) * u
+   in Color
+        ( (ch 24 `shiftL` 24)
+            .|. (ch 16 `shiftL` 16)
+            .|. (ch 8 `shiftL` 8)
+            .|. ch 0
+        )
 
 srgb :: Word8 -> Double
 srgb ch =
@@ -164,20 +182,9 @@ damageIsEmpty dmg =
     DamageFull -> False
     DamageClip r -> rectW r <= 0 || rectH r <= 0
 
--- End inset above and below the hit band (handle sits in this slack).
-sliderTrackMargin :: Float
-sliderTrackMargin = 3
-
 -- Terminal inline slider bar width in cells (matches WidgetText.sliderText).
 sliderBarCells :: Int
 sliderBarCells = 12
-
-{-# INLINE sliderTrackRect #-}
-sliderTrackRect :: Float -> Float -> Float -> Float -> Rect
-sliderTrackRect x y w h =
-  let trackH = max 4 (h * 0.18)
-      trackY = y + h - trackH - sliderTrackMargin
-   in Rect x trackY w trackH
 
 {-# INLINE v2Add #-}
 v2Add :: V2 -> V2 -> V2

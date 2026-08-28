@@ -68,7 +68,6 @@ module NanoUI.Context
 ) where
 
 import Control.Monad (when)
-import Data.Bits (shiftR, shiftL, (.&.), (.|.))
 import Data.Dynamic (Dynamic, fromDynamic, toDyn)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Proxy (Proxy (..))
@@ -83,7 +82,7 @@ import Foreign.ForeignPtr (ForeignPtr)
 import qualified NanoUI.Atlas as Atlas
 import NanoUI.Atlas (ImageAtlas, atlasTextureId)
 import NanoUI.Draw (DrawArena, newDrawArena)
-import NanoUI.Types (Color (..), Damage (..), ImageId (..), Rect (..), Size (..))
+import NanoUI.Types (Damage (..), ImageId (..), Rect (..), Size (..), lerpColor)
 import NanoUI.Font (FontMetrics, hasMonoFontMarker, measureText, monospaceMetrics, stripWidgetMarkers)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), Key (KeyEscape))
@@ -380,6 +379,8 @@ askHostIO ctx = do
   pure (Map.lookup (typeRep (Proxy @a)) hosts >>= fromDynamic)
 
 {-# INLINE newTerminalContext #-}
+-- | Terminal font metrics and fallback dusk theme. Runtime apps should query
+-- the emulator palette via 'NanoUI.Term.Palette.newAdaptiveTerminalContext'.
 newTerminalContext :: IO Context
 newTerminalContext = do
   ctx <- newContext
@@ -594,21 +595,6 @@ getAnimationValue ctx wid = do
       let dur = max 0.001 (animDuration a)
           t = min 1 (animElapsed a / dur)
        in pure (animStart a + (animEnd a - animStart a) * t)
-
-{-# INLINE lerpColor #-}
-lerpColor :: Color -> Color -> Float -> Color
-lerpColor (Color a) (Color b) t =
-  let u = max 0 (min 1 t)
-      ch i =
-        round $
-          fromIntegral ((a `shiftR` i) .&. 0xFF) * (1 - u)
-            + fromIntegral ((b `shiftR` i) .&. 0xFF) * u
-   in Color
-        ( (ch 24 `shiftL` 24)
-            .|. (ch 16 `shiftL` 16)
-            .|. (ch 8 `shiftL` 8)
-            .|. ch 0
-        )
 
 modifyIORefList :: IORef [a] -> ([a] -> [a]) -> IO ()
 modifyIORefList ref f = readIORef ref >>= writeIORef ref . f

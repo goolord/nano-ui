@@ -5,7 +5,7 @@ Purely functional immediate-mode GUI core for Haskell. Backend-agnostic: emits b
 ## Features
 
 - **SrcLoc IDs**: `HasCallStack` hashing for stable widget identity without manual ID stacks
-- **Two-pass flex layout**: measure/position over struct-of-arrays node arena. `percent` / `percentH` and `aspect` (width / height) are first-class constraints
+- **Two-pass flex layout**: measure/position over struct-of-arrays node arena. `percent` and `aspect` (width / height) are first-class constraints
 - **Compact regions**: `compactHost` / `askCompact` keep large read-heavy app state off the GC walk
 - **Zero-allocation draw path**: pinned `ForeignPtr` vertex/index arenas reused each frame
 - **Damage tracking**: `needsRedraw` gates on commands, hover target change, scroll drag, focused text field, `markDirty`, or active animation. Mouse motion on the same widget is skipped. Scroll or widget-store text changes force a full redraw. SDL scissors hover and animation into the retain texture; partial damage blits only the dirty rect to the window.

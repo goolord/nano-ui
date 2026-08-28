@@ -5,7 +5,6 @@ module NanoUI.Input
   , Modifiers (..)
   , Input (..)
   , emptyInput
-  , inputChanged
   , inputInteracted
   , inputPointerHeld
   ) where
@@ -69,12 +68,6 @@ emptyInput =
     , inputWindowSize = Size 800 600
     , inputDeltaTime = 0
     }
-
-{-# INLINE inputChanged #-}
-inputChanged :: Input -> Input -> Bool
-inputChanged a b =
-  inputMousePos a /= inputMousePos b
-    || inputInteracted a b
 
 -- Buttons, keys, scroll, resize. Mouse motion alone does not count.
 {-# INLINE inputInteracted #-}
