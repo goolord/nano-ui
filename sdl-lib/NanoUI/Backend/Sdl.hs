@@ -15,6 +15,10 @@ module NanoUI.Backend.Sdl
   , runSdlAppWithQuitEff
   , runSdlAppWith
   , runSdlAppWithEff
+  , runSdlAppReduce
+  , runSdlAppReduceEff
+  , runSdlAppWithQuitReduce
+  , runSdlAppWithQuitReduceEff
   , registerRgbaImage
   , sdlDrawFrame
   , sdlDrawFrameEff
@@ -32,6 +36,7 @@ module NanoUI.Backend.Sdl
 import Control.Exception (bracket, finally)
 import Control.Monad (unless, void, when)
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
+import Data.Typeable (Typeable)
 import GHC.Clock (getMonotonicTime)
 import NanoUI
   ( Context
@@ -45,12 +50,14 @@ import NanoUI
   , IOE
   , askHost
   , runFrameEff
+  , runFrameReduceEff
   , type (:>)
   , uiIO
   , anyAnimating
   , collectRasterSpans
   , ctxTheme
   , Damage (..)
+  , DrawData
   , damageIsEmpty
   , defaultTheme
   , emptyInput
@@ -160,6 +167,50 @@ runSdlAppWithQuitEff ::
 runSdlAppWithQuitEff unlift ctx shouldQuit ui =
   runSdlAppWithEff unlift ctx (const (pure ())) shouldQuit ui
 
+runSdlAppReduce ::
+  (Typeable msg, Eq model) =>
+  (msg -> model -> model) ->
+  Context ->
+  model ->
+  (model -> NanoUI ()) ->
+  IO ()
+runSdlAppReduce = runSdlAppReduceEff runEff
+
+runSdlAppReduceEff ::
+  (IOE :> es, Typeable msg, Eq model) =>
+  (forall x. Eff es x -> IO x) ->
+  (msg -> model -> model) ->
+  Context ->
+  model ->
+  (model -> Eff (Ui : es) ()) ->
+  IO ()
+runSdlAppReduceEff unlift update ctx model view =
+  runSdlAppWithQuitReduceEff unlift update ctx model (const False) view
+
+runSdlAppWithQuitReduce ::
+  (Typeable msg, Eq model) =>
+  (msg -> model -> model) ->
+  Context ->
+  model ->
+  (Input -> Bool) ->
+  (model -> NanoUI ()) ->
+  IO ()
+runSdlAppWithQuitReduce = runSdlAppWithQuitReduceEff runEff
+
+runSdlAppWithQuitReduceEff ::
+  (IOE :> es, Typeable msg, Eq model) =>
+  (forall x. Eff es x -> IO x) ->
+  (msg -> model -> model) ->
+  Context ->
+  model ->
+  (Input -> Bool) ->
+  (model -> Eff (Ui : es) ()) ->
+  IO ()
+runSdlAppWithQuitReduceEff unlift update ctx model0 shouldQuit view = do
+  modelRef <- newIORef model0
+  runSdlSession ctx (const (pure ())) shouldQuit $ \c env i force ->
+    drawReduceEff unlift update modelRef view c env i force
+
 registerRgbaImage :: Context -> ImageId -> Int -> Int -> ByteString -> IO Bool
 registerRgbaImage = registerImage
 
@@ -175,6 +226,16 @@ runSdlAppWithEff ::
   Eff (Ui : es) () ->
   IO ()
 runSdlAppWithEff unlift ctx setup shouldQuit ui =
+  runSdlSession ctx setup shouldQuit $ \c env i force ->
+    drawEff unlift c ui env i force
+
+runSdlSession ::
+  Context ->
+  (SdlEnv -> IO ()) ->
+  (Input -> Bool) ->
+  (Context -> SdlEnv -> Input -> Bool -> IO (Bool, Input)) ->
+  IO ()
+runSdlSession ctx setup shouldQuit drawFn =
   withSdl ctx "nano-ui" defaultWindowSize $ \ctx0 env -> do
     setup env
     void $ setRenderDrawBlendModeSafe (sdlRenderer env) (fromIntegral sDL_BLENDMODE_BLEND)
@@ -183,7 +244,7 @@ runSdlAppWithEff unlift ctx setup shouldQuit ui =
     prev <- newIORef inp0
     pendingRedraw <- newIORef False
     wasAnimating <- newIORef False
-    (_, synced0) <- drawEff unlift ctx1 ui env inp0 True
+    (_, synced0) <- drawFn ctx1 env inp0 True
     writeIORef pendingRedraw False
     writeIORef prev synced0
     ctxRef <- newIORef ctx1
@@ -194,17 +255,15 @@ runSdlAppWithEff unlift ctx setup shouldQuit ui =
               liveCtx <- readIORef ctxRef
               inp <- readIORef prev
               (ctx', inpSynced) <- syncDisplay liveCtx env (clearEphemeral inp)
-              (_, s) <- drawEff unlift ctx' ui env inpSynced True
+              (_, s) <- drawFn ctx' env inpSynced True
               writeIORef ctxRef ctx'
               writeIORef prev s
     bracket (installResizeWatch onResize) id $ \_ ->
-      loop unlift ctxRef ui env prev pendingRedraw wasAnimating drawing shouldQuit synced0 [] now
+      loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing shouldQuit synced0 [] now
 
 loop ::
-  IOE :> es =>
-  (forall x. Eff es x -> IO x) ->
   IORef Context ->
-  Eff (Ui : es) () ->
+  (Context -> SdlEnv -> Input -> Bool -> IO (Bool, Input)) ->
   SdlEnv ->
   IORef Input ->
   IORef Bool ->
@@ -215,7 +274,7 @@ loop ::
   [SdlEvent] ->
   Double ->
   IO ()
-loop unlift ctxRef ui env prev pendingRedraw wasAnimating drawing shouldQuit inp queued lastT = do
+loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing shouldQuit inp queued lastT = do
   ctx <- readIORef ctxRef
   debugOpen <- debugPanelOpen ctx
   wantDebug <- takeDebugLive (sdlDebug env) debugOpen
@@ -274,7 +333,7 @@ loop unlift ctxRef ui env prev pendingRedraw wasAnimating drawing shouldQuit inp
               then do
                 ms <-
                   tryWithDrawingLock drawing $ do
-                    (_, s) <- drawEff unlift ctx' ui env inpSynced (debugOpen || wantDebug)
+                    (_, s) <- drawFn ctx' env inpSynced (debugOpen || wantDebug)
                     writeIORef pendingRedraw False
                     writeIORef prev s
                     pure s
@@ -288,9 +347,8 @@ loop unlift ctxRef ui env prev pendingRedraw wasAnimating drawing shouldQuit inp
             then pure ()
             else
               loop
-                unlift
                 ctxRef
-                ui
+                drawFn
                 env
                 prev
                 pendingRedraw
@@ -332,10 +390,33 @@ drawEff ::
   Bool ->
   IO (Bool, Input)
 drawEff unlift ctx ui env inp forceFull = do
-  scale <- readIORef (sdlScaleRef env)
   SdlImage.syncImageAtlas (sdlRenderer env) (sdlImages env) ctx
   t0 <- getMonotonicTime
   (_, _, drawData, dirtyAfterUi) <- runFrameEff unlift ctx inp ui
+  finishDraw ctx env inp forceFull t0 drawData dirtyAfterUi
+
+drawReduceEff ::
+  (IOE :> es, Typeable msg, Eq model) =>
+  (forall x. Eff es x -> IO x) ->
+  (msg -> model -> model) ->
+  IORef model ->
+  (model -> Eff (Ui : es) ()) ->
+  Context ->
+  SdlEnv ->
+  Input ->
+  Bool ->
+  IO (Bool, Input)
+drawReduceEff unlift update modelRef view ctx env inp forceFull = do
+  SdlImage.syncImageAtlas (sdlRenderer env) (sdlImages env) ctx
+  t0 <- getMonotonicTime
+  m <- readIORef modelRef
+  (_, m', _, drawData, dirtyAfterUi) <- runFrameReduceEff unlift update ctx inp m view
+  writeIORef modelRef m'
+  finishDraw ctx env inp forceFull t0 drawData dirtyAfterUi
+
+finishDraw :: Context -> SdlEnv -> Input -> Bool -> Double -> DrawData -> Bool -> IO (Bool, Input)
+finishDraw ctx env inp forceFull t0 drawData dirtyAfterUi = do
+  scale <- readIORef (sdlScaleRef env)
   t1 <- getMonotonicTime
   syncPointerCursor (sdlCursors env) ctx inp
   dmg0 <- takeDamage ctx

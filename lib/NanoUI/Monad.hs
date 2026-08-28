@@ -65,7 +65,7 @@ uiFinally :: Eff es a -> IO b -> Eff es a
 uiFinally m cleanup = reallyUnsafeLiftMapIO (`finally` cleanup) m
 
 {-# INLINE emit #-}
-emit :: Ui :> es => msg -> Eff es ()
+emit :: (Typeable msg, Ui :> es) => msg -> Eff es ()
 emit msg = do
   ctx <- askContext
   uiIO (pushMessage ctx (FrameMsg msg))

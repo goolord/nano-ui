@@ -142,6 +142,11 @@ main = do
   run "host-profile-measure" runHostProfileMeasureTest
   run "compact-host" runCompactHostTest
   run "embed-state" runEmbedStateTest
+  run "reduce-messages" runReduceMessagesTest
+  run "reduce-updates" runReduceUpdatesTest
+  run "reduce-click" runReduceClickTest
+  run "reduce-identity" runReduceIdentityTest
+  run "widget-no-string-emit" runWidgetNoStringEmitTest
   run "panel-paints" runPanelPaintsTest
   run "separator-span" runSeparatorSpanTest
   run "terminal-separator-span" runTerminalSeparatorSpanTest
@@ -338,8 +343,8 @@ runInteractionTest ctx failed = do
           , inputMouseDown = False
           , inputMouseReleased = True
           }
-  (_, msgs, _, _) <- runFrame ctx inpRelease ui
-  when (null msgs) $ bump failed
+  (resp, msgs, _, _) <- runFrame ctx inpRelease ui
+  when (not (respClicked resp) || not (null msgs)) $ bump failed
 
 -- Hover uses solved layout rects after the first frame stores prev positions.
 runHoverTest :: Context -> IORef Int -> IO ()
@@ -3090,6 +3095,109 @@ runEmbedStateTest ctx failed = do
         get
   (n, _, _, _) <- runFrameEff (runEff . evalState (0 :: Int)) ctx inp ui
   when (n /= 2) $ bump failed
+
+data CounterMsg = Inc | Dec
+  deriving (Eq, Show)
+
+data Counter = Counter {counterN :: Int}
+  deriving (Eq, Show)
+
+updateCounter :: CounterMsg -> Counter -> Counter
+updateCounter Inc m = m {counterN = counterN m + 1}
+updateCounter Dec m = m {counterN = counterN m - 1}
+
+-- emit collects typed messages; reduceMessages applies them after the view.
+runReduceMessagesTest :: Context -> IORef Int -> IO ()
+runReduceMessagesTest ctx failed = do
+  let inp = emptyInput {inputWindowSize = Size 80 80}
+      model0 = Counter 0
+      view _ = do
+        emit Inc
+        emit Dec
+        emit Inc
+        emit ("noise" :: String)
+  ((), model1, msgs, _, dirty) <- runFrameReduce updateCounter ctx inp model0 view
+  when (msgs /= [Inc, Dec, Inc] || model1 /= Counter 1 || not dirty) $ bump failed
+
+-- Reducer functions themselves are the payload.
+runReduceUpdatesTest :: Context -> IORef Int -> IO ()
+runReduceUpdatesTest ctx failed = do
+  let inp = emptyInput {inputWindowSize = Size 80 80}
+      ui = do
+        emit (updateCounter Inc)
+        emit (updateCounter Dec)
+        emit (updateCounter Inc)
+  (_, msgs, _, _) <- runFrame ctx inp ui
+  let model1 = reduceUpdates (Counter 0) msgs
+  when (model1 /= Counter 1) $ bump failed
+
+-- Click emits Inc; the next view sees the reduced model.
+runReduceClickTest :: Context -> IORef Int -> IO ()
+runReduceClickTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 240 120}
+      view m = do
+        resp <- button "Go"
+        onClick resp (emit Inc)
+        label_ (T.pack (show (counterN m)))
+        pure resp
+  (resp, model0, _, _, _) <- runFrameReduce updateCounter ctx inp0 (Counter 0) view
+  when (model0 /= Counter 0) $ bump failed
+  let Rect x y w h = respRect resp
+      pos = V2 (x + w / 2) (y + h / 2)
+      press =
+        inp0
+          { inputMousePos = pos
+          , inputMouseDown = True
+          , inputMousePressed = True
+          , inputMouseReleased = False
+          }
+      release =
+        press
+          { inputMousePressed = False
+          , inputMouseDown = False
+          , inputMouseReleased = True
+          }
+  (_, modelP, _, _, _) <- runFrameReduce updateCounter ctx press model0 view
+  (_, modelR, msgs, _, dirty) <- runFrameReduce updateCounter ctx release modelP view
+  when (modelP /= Counter 0 || msgs /= [Inc] || modelR /= Counter 1 || not dirty) $
+    bump failed
+  (_, model1, _, _, _) <- runFrameReduce updateCounter ctx inp0 modelR view
+  when (model1 /= Counter 1) $ bump failed
+
+-- Identity update must not mark dirty (no extra idle frame).
+runReduceIdentityTest :: Context -> IORef Int -> IO ()
+runReduceIdentityTest ctx failed = do
+  let inp = emptyInput {inputWindowSize = Size 80 80}
+      view _ = do
+        emit Inc
+        emit Dec
+  ((), model1, msgs, _, dirty) <- runFrameReduce updateCounter ctx inp (Counter 0) view
+  when (msgs /= [Inc, Dec] || model1 /= Counter 0 || dirty) $ bump failed
+
+-- Widgets no longer dump String tags onto the app message queue.
+runWidgetNoStringEmitTest :: Context -> IORef Int -> IO ()
+runWidgetNoStringEmitTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 240 120}
+      ui = button "Go"
+  (resp, _, _, _) <- runFrame ctx inp0 ui
+  let Rect x y w h = respRect resp
+      pos = V2 (x + w / 2) (y + h / 2)
+      press =
+        inp0
+          { inputMousePos = pos
+          , inputMouseDown = True
+          , inputMousePressed = True
+          , inputMouseReleased = False
+          }
+      release =
+        press
+          { inputMousePressed = False
+          , inputMouseDown = False
+          , inputMouseReleased = True
+          }
+  _ <- runFrame ctx press ui
+  (_, msgs, _, _) <- runFrame ctx release ui
+  when (not (null (decodeMessages msgs :: [String]))) $ bump failed
 
 -- App state lives in the widget store, so clicks persist without IORefs.
 runUseFlagClickTest :: Context -> IORef Int -> IO ()

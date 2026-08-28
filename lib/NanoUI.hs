@@ -120,6 +120,8 @@ module NanoUI
   , -- Frame
     runFrame
   , runFrameEff
+  , runFrameReduce
+  , runFrameReduceEff
   , needsRedraw
   , needsRedrawIdle
   , pointerDragActive
@@ -188,6 +190,9 @@ module NanoUI
   , getAnimationValue
   , anyAnimating
   , FrameMsg (..)
+  , decodeMessages
+  , reduceMessages
+  , reduceUpdates
   , -- Draw
     DrawData (..)
   , DrawCmd (..)
@@ -219,13 +224,13 @@ module NanoUI
   ) where
 
 import NanoUI.Compact (Compact, askCompact, compactHost)
-import NanoUI.Context (Context (..), FrameMsg (..), anyAnimating, atlasSnapshot, atlasTextureId, ctxTheme, enableMeasureCache, getAnimationValue, getFocusId, getHotId, getPrevRect, getScrollOffset, getStore, isDirty, markDirty, modalActive, newContext, overlayConsumesQuit, registerImage, registerImages, setAnimationValue, setHost, setWakeLoop, startAnimation, takeDamage, textInputEditActive, withClipboard, withExternalText, withFontMetrics, withHostProfile, withIcons, withMeasureText, withMonoFontMetrics, withTheme, wrapMeasureCache)
+import NanoUI.Context (Context (..), FrameMsg (..), anyAnimating, atlasSnapshot, atlasTextureId, ctxTheme, decodeMessages, enableMeasureCache, getAnimationValue, getFocusId, getHotId, getPrevRect, getScrollOffset, getStore, isDirty, markDirty, modalActive, newContext, overlayConsumesQuit, reduceMessages, reduceUpdates, registerImage, registerImages, setAnimationValue, setHost, setWakeLoop, startAnimation, takeDamage, textInputEditActive, withClipboard, withExternalText, withFontMetrics, withHostProfile, withIcons, withMeasureText, withMonoFontMetrics, withTheme, wrapMeasureCache)
 import NanoUI.Host (HostProfile (..))
 import NanoUI.Icons (IconSet (..), Icons (..), asciiIcons, checkboxMark, fontAwesomeIcon, glyphIcons, iconSetName, iconsFor, parseIconSet, terminalCharColumns, terminalTextColumns, terminalTextPositions, wideTrailChar)
 import NanoUI.Draw (DrawCmd (..), DrawData (..), Layer (..), backdropDimTextureId, indexSize, vertexSize)
 import NanoUI.Font (FontMetrics (..), hasMonoFontMarker, headingFontMarker, labelContentInset, monoFontMarker, monospaceMetrics, mutedFontMarker, resolveLayoutGap, resolveLayoutPadding, scrollBarGutter, scrollBarListExtra, scrollBarPageExtra, scrollBarWidth, scrollBarWindowGutter, sliderTrackBounds, stripMonoFontMarker, stripWidgetMarkers, textDisplayWidth, widgetContentInset, widgetPadding)
 import Effectful (Eff, IOE, runEff, type (:>))
-import NanoUI.Frame (collectOverlayTextSpans, collectRasterSpans, collectTextSpans, cursorKindIs, debugPanelOpen, floatingPanelActive, needsRedraw, needsRedrawIdle, pointerDragActive, pointerCursorWanted, runFrame, runFrameEff, textFieldActive, uiCursorKind, widgetNodeCount, UiCursorKind (..))
+import NanoUI.Frame (collectOverlayTextSpans, collectRasterSpans, collectTextSpans, cursorKindIs, debugPanelOpen, floatingPanelActive, needsRedraw, needsRedrawIdle, pointerDragActive, pointerCursorWanted, runFrame, runFrameEff, runFrameReduce, runFrameReduceEff, textFieldActive, uiCursorKind, widgetNodeCount, UiCursorKind (..))
 import NanoUI.Id (WidgetId (..), hashWidgetId, widgetId)
 import NanoUI.Input
   ( Input (..)

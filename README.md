@@ -5,6 +5,7 @@ Purely functional immediate-mode GUI core for Haskell. Backend-agnostic: emits b
 ## Features
 
 - **SrcLoc IDs**: `HasCallStack` hashing for stable widget identity without manual ID stacks
+- **Typed reducers**: `emit` collects messages; `reduceMessages` / `runFrameReduce` apply them to app state at frame end
 - **Two-pass flex layout**: measure/position over struct-of-arrays node arena. `percent` and `aspect` (width / height) are first-class constraints
 - **Compact regions**: `compactHost` / `askCompact` keep large read-heavy app state off the GC walk
 - **Zero-allocation draw path**: pinned `ForeignPtr` vertex/index arenas reused each frame
@@ -159,7 +160,7 @@ Workspace packages: `nano-ui` (core), `nano-ui-term` (`term-lib`), `nano-ui-sdl`
 | `NanoUI.Host` | `HostProfile` (`PixelHost` / `CellHost`) |
 | `NanoUI.Monad` | `NanoUI` effect stack, `emit`, `withKey`, `currentId` |
 | `NanoUI.Widgets` | `button`, `checkbox`, `slider lbl min max initial`, `textInput`, `panel` / `row` / `column`, `useFlag` / `useText` |
-| `NanoUI.Frame` | `runFrame`, `needsRedraw` |
+| `NanoUI.Frame` | `runFrame`, `runFrameReduce`, `needsRedraw` |
 | `NanoUI.Draw` | Pinned vertex arena, draw command batching |
 | `NanoUI.Layout.Solve` | Two-pass flexbox constraint solver |
 | `NanoUI.Render.ASCII` | Headless ASCII rasterizer |

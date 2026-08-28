@@ -108,7 +108,7 @@ import NanoUI.Layout.Arena
   , setNodeValue
   , setWidgetId
   )
-import NanoUI.Monad (Ui, askContext, askInput, currentId, emit, uiFinally, uiIO, withKey)
+import NanoUI.Monad (Ui, askContext, askInput, currentId, uiFinally, uiIO, withKey)
 import NanoUI.Style
   ( AlignX (..)
   , AlignY (..)
@@ -551,7 +551,6 @@ buttonEx enabled txt = do
   resp <- addWidget wid NodeButton ("[ " <> txt <> " ]") 0 defaultLayout
   disabled <- uiIO (isDisabled ctx wid)
   let active = enabled && not disabled
-  when (active && respClicked resp) $ emit ("button:" <> T.unpack txt)
   pure resp {respClicked = active && respClicked resp, respHovered = active && respHovered resp}
 
 {-# INLINE checkbox #-}
