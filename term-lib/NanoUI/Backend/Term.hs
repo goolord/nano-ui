@@ -10,6 +10,10 @@ module NanoUI.Backend.Term
   , runTermAppEff
   , runTermAppWithQuit
   , runTermAppWithQuitEff
+  , runTermAppReduce
+  , runTermAppReduceEff
+  , runTermAppWithQuitReduce
+  , runTermAppWithQuitReduceEff
   , newAdaptiveTerminalContext
   , newTerminalContext
   , terminalTheme
@@ -27,9 +31,11 @@ import Control.Exception (finally)
 #endif
 import Control.Monad (when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.Typeable (Typeable)
 import GHC.Clock (getMonotonicTime)
 import NanoUI
   ( Context
+  , DrawData
   , asciiIcons
   , ctxIcons
   , ctxTheme
@@ -52,6 +58,7 @@ import NanoUI
   , overlayConsumesQuit
   , runEff
   , runFrameEff
+  , runFrameReduceEff
   , textInputEditActive
   , defaultTheme
   , widgetNodeCount
@@ -142,7 +149,35 @@ runTermAppEff unlift ctx ui = runTermAppWithQuitEff unlift ctx (const False) ui
 runTermAppWithQuit :: Context -> (Input -> Bool) -> NanoUI () -> IO ()
 runTermAppWithQuit = runTermAppWithQuitEff runEff
 
-#if defined(mingw32_HOST_OS)
+runTermAppReduce ::
+  (Typeable msg, Eq model) =>
+  (msg -> model -> model) ->
+  Context ->
+  model ->
+  (model -> NanoUI ()) ->
+  IO ()
+runTermAppReduce = runTermAppReduceEff runEff
+
+runTermAppReduceEff ::
+  (IOE :> es, Typeable msg, Eq model) =>
+  (forall x. Eff es x -> IO x) ->
+  (msg -> model -> model) ->
+  Context ->
+  model ->
+  (model -> Eff (Ui : es) ()) ->
+  IO ()
+runTermAppReduceEff unlift update ctx model view =
+  runTermAppWithQuitReduceEff unlift update ctx model (const False) view
+
+runTermAppWithQuitReduce ::
+  (Typeable msg, Eq model) =>
+  (msg -> model -> model) ->
+  Context ->
+  model ->
+  (Input -> Bool) ->
+  (model -> NanoUI ()) ->
+  IO ()
+runTermAppWithQuitReduce = runTermAppWithQuitReduceEff runEff
 
 runTermAppWithQuitEff ::
   IOE :> es =>
@@ -152,6 +187,35 @@ runTermAppWithQuitEff ::
   Eff (Ui : es) () ->
   IO ()
 runTermAppWithQuitEff unlift ctx shouldQuit ui =
+  withTermSession ctx shouldQuit $ \c i -> do
+    (_, _, d, _) <- runFrameEff unlift c i ui
+    pure d
+
+runTermAppWithQuitReduceEff ::
+  (IOE :> es, Typeable msg, Eq model) =>
+  (forall x. Eff es x -> IO x) ->
+  (msg -> model -> model) ->
+  Context ->
+  model ->
+  (Input -> Bool) ->
+  (model -> Eff (Ui : es) ()) ->
+  IO ()
+runTermAppWithQuitReduceEff unlift update ctx model0 shouldQuit view = do
+  modelRef <- newIORef model0
+  withTermSession ctx shouldQuit $ \c i -> do
+    m <- readIORef modelRef
+    (_, m', _, d, _) <- runFrameReduceEff unlift update c i m view
+    writeIORef modelRef m'
+    pure d
+
+#if defined(mingw32_HOST_OS)
+
+withTermSession ::
+  Context ->
+  (Input -> Bool) ->
+  (Context -> Input -> IO DrawData) ->
+  IO ()
+withTermSession ctx shouldQuit runOnce =
   termContextIO ctx >>= \ctx' ->
   withDriver $ \drv ->
     ( do
@@ -159,10 +223,9 @@ runTermAppWithQuitEff unlift ctx shouldQuit ui =
         drvFlush drv
         drvRefreshViewport drv
         termMainLoop
-          unlift
           ctx'
           shouldQuit
-          ui
+          runOnce
           (drvSize drv)
           (drvRead drv)
           ( \before cur -> do
@@ -179,21 +242,18 @@ runTermAppWithQuitEff unlift ctx shouldQuit ui =
 
 #else
 
-runTermAppWithQuitEff ::
-  IOE :> es =>
-  (forall x. Eff es x -> IO x) ->
+withTermSession ::
   Context ->
   (Input -> Bool) ->
-  Eff (Ui : es) () ->
+  (Context -> Input -> IO DrawData) ->
   IO ()
-runTermAppWithQuitEff unlift ctx shouldQuit ui =
+withTermSession ctx shouldQuit runOnce =
   termContextIO ctx >>= \ctx' ->
   withNotcurses $ \nc ->
     termMainLoop
-      unlift
       ctx'
       shouldQuit
-      ui
+      runOnce
       (ncSize nc)
       (ncRead nc)
       (ncBlitCells nc)
@@ -201,16 +261,14 @@ runTermAppWithQuitEff unlift ctx shouldQuit ui =
 #endif
 
 termMainLoop ::
-  IOE :> es =>
-  (forall x. Eff es x -> IO x) ->
   Context ->
   (Input -> Bool) ->
-  Eff (Ui : es) () ->
+  (Context -> Input -> IO DrawData) ->
   IO (Int, Int) ->
   (Int -> IO [TermEvent]) ->
   (Maybe Cells -> Cells -> IO ()) ->
   IO ()
-termMainLoop unlift ctx shouldQuit ui getSize readEvents present = do
+termMainLoop ctx shouldQuit runOnce getSize readEvents present = do
   debugRef <- newTermDebugSampler
   setHost ctx (TermDebugHost debugRef)
   (w0, h0) <- getSize
@@ -270,7 +328,7 @@ termMainLoop unlift ctx shouldQuit ui getSize readEvents present = do
       if need || wantDebug
         then do
           t0 <- getMonotonicTime
-          (_, _, drawData, _) <- runFrameEff unlift ctx inp ui
+          drawData <- runOnce ctx inp
           (baseSpans, overlaySpans) <- collectRasterSpans ctx inp
           nodes <- widgetNodeCount ctx
           let Size w h = inputWindowSize inp

@@ -3,6 +3,8 @@
 module NanoUI.Frame
   ( runFrame
   , runFrameEff
+  , runFrameReduce
+  , runFrameReduceEff
   , needsRedraw
   , needsRedrawIdle
   , pointerDragActive
@@ -22,6 +24,7 @@ module NanoUI.Frame
 import Control.Monad (filterM, foldM, forM, forM_, unless, void, when)
 import Data.Char (isAlphaNum, isSpace)
 import Data.IORef (readIORef, writeIORef)
+import Data.Typeable (Typeable)
 import Data.List (findIndex)
 import Data.Maybe (catMaybes, isJust)
 import qualified Data.IntMap.Strict as IM
@@ -35,6 +38,7 @@ import NanoUI.Context
   , WindowResizeDrag (..)
   , WindowResizeEdge (..)
   , anyAnimating
+  , decodeMessages
   , drainMessages
   , getFocusables
   , getScrollOffset
@@ -45,7 +49,6 @@ import NanoUI.Context
   , markDirty
   , getHotId
   , getPrevRect
-  , pushMessage
   , setScrollOffset
   , setStore
   , setPrevRect
@@ -107,7 +110,7 @@ import NanoUI.Font
   , wrapTextLinesIO
   )
 import NanoUI.Host (HostProfile, isCellHost)
-import NanoUI.Icons (Icons (..), checkboxMark, terminalTextColumns)
+import NanoUI.Icons (Icons (..), checkboxMark, terminalPaintColumns)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), Key (..), Modifiers (..), inputInteracted, inputKeys, inputPointerHeld)
 import NanoUI.Layout.Arena
@@ -165,6 +168,36 @@ import NanoUI.Types (Color (..), Damage (..), ImageId (..), Rect (..), Size (..)
 
 runFrame :: Context -> Input -> NanoUI a -> IO (a, [FrameMsg], DrawData, Bool)
 runFrame = runFrameEff runEff
+
+-- View this model, then apply decoded messages at frame end.
+-- DrawData is from the pre-reduce model (one-frame lag). The idle
+-- loop redraws when the reduced model differs.
+runFrameReduce ::
+  (Typeable msg, Eq model) =>
+  (msg -> model -> model) ->
+  Context ->
+  Input ->
+  model ->
+  (model -> NanoUI a) ->
+  IO (a, model, [msg], DrawData, Bool)
+runFrameReduce = runFrameReduceEff runEff
+
+runFrameReduceEff ::
+  (IOE :> es, Typeable msg, Eq model) =>
+  (forall x. Eff es x -> IO x) ->
+  (msg -> model -> model) ->
+  Context ->
+  Input ->
+  model ->
+  (model -> Eff (Ui : es) a) ->
+  IO (a, model, [msg], DrawData, Bool)
+runFrameReduceEff unlift update ctx inp model view = do
+  (a, msgs, draw, dirty) <- runFrameEff unlift ctx inp (view model)
+  let typed = decodeMessages msgs
+      model' = foldl' (flip update) model typed
+  when (model' /= model) (markDirty ctx)
+  dirty' <- isDirty ctx
+  pure (a, model', typed, draw, dirty || dirty')
 
 runFrameEff ::
   IOE :> es =>
@@ -835,10 +868,10 @@ terminalTextHitRect host fm x y h txt atOrigin =
       ty = centeredTextY host fm y h th
    in Rect tx ty tw th
 
--- Paint rect: center the X glyph in the close slot.
+-- Paint rect: one cell, centered in the 3-cell slot (Win32 / ASCII "X").
 terminalClosePaintRect :: HostProfile -> FontMetrics -> Float -> Float -> Float -> Float -> T.Text -> Rect
 terminalClosePaintRect host fm x y w h txt =
-  let tw = textDisplayWidth host fm txt
+  let tw = fromIntegral (terminalPaintColumns txt)
       th = layoutLineHeight host fm
       lo = x
       hi = x + w - tw
@@ -2190,8 +2223,6 @@ finalizePointerRelease ctx inp =
                         { storeCheckbox = IM.insert key newVal (storeCheckbox store)
                         }
                     )
-                  txt <- getText (ctxNodeArena ctx) idx
-                  pushMessage ctx (FrameMsg ("checkbox:" <> T.unpack (checkboxLabelText txt)))
                 _ -> pure ()
         writeIORef (ctxActiveId ctx) (WidgetId 0)
         when releasedOver $
@@ -3553,12 +3584,14 @@ terminalScrollCapSpans ctx idx x y w h pad clip
             Just layout
               | rectH (sbTrack layout) >= 3
               , let trackW = rectW (sbTrack layout)
-              , all (\t -> T.null t || fromIntegral (terminalTextColumns t) <= trackW) [up, down] ->
+              , all (\t -> T.null t || fromIntegral (terminalPaintColumns t) <= trackW) [up, down] ->
                   do
               let track = sbTrack layout
                   fg = themeSeparator (ctxTheme ctx)
                   bg = colorRGBA 0 0 0 0
-                  cell ty txt = (Rect (rectX track) ty (rectW track) 1, txt, fg, bg)
+                  cell ty txt =
+                    let pw = fromIntegral (terminalPaintColumns txt)
+                     in (Rect (rectX track) ty pw 1, txt, fg, bg)
               pure $
                 tagClippedSpans
                   clip

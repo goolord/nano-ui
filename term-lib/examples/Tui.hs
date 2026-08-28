@@ -1,10 +1,8 @@
 module Main (main) where
 
 import Control.Monad (void, when)
-import Control.Monad.IO.Class (liftIO)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import NanoUI
-import NanoUI.Backend.Term (TermDebugSnapshot (..), askTermDebug, newTerminalContext, runTermAppWithQuit)
+import NanoUI.Backend.Term (TermDebugSnapshot (..), askTermDebug, newTerminalContext, runTermAppWithQuitReduce)
 import Text.Printf (printf)
 import qualified Data.Text as T
 
@@ -28,15 +26,27 @@ stack =
 inset :: Layout
 inset = stack {layoutPadding = Padding 4 4 4 4, layoutHeight = Grow 1}
 
+data ClickMsg = Clicked String
+  deriving (Eq, Show)
+
+data TuiClick = TuiClick {tuiClick :: String}
+  deriving (Eq, Show)
+
+updateClick :: ClickMsg -> TuiClick -> TuiClick
+updateClick (Clicked s) _ = TuiClick s
+
 main :: IO ()
 main = do
   ctx <- newTerminalContext
-  lastClick <- newIORef ("" :: String)
-  runTermAppWithQuit ctx (\inp -> KeyEscape `elem` inputKeys inp) $
-    tuiApp lastClick
+  runTermAppWithQuitReduce
+    updateClick
+    ctx
+    (TuiClick "")
+    (\inp -> KeyEscape `elem` inputKeys inp)
+    tuiApp
 
-tuiApp :: IORef String -> NanoUI ()
-tuiApp lastClick = do
+tuiApp :: TuiClick -> NanoUI ()
+tuiApp st = do
   (aboutOpen, setAbout) <- useFlag False
   (debugOpen, setDebug) <- useFlag False
   column page $ do
@@ -50,13 +60,9 @@ tuiApp lastClick = do
             checked <-
               row (stack {layoutWrap = True, layoutHeight = Fit}) $ do
                 ok <- button "OK"
-                when (respClicked ok) $ do
-                  liftIO $ writeIORef lastClick "OK"
-                  emit ("button:OK" :: String)
+                when (respClicked ok) $ emit (Clicked "OK")
                 cancel <- button "Cancel"
-                when (respClicked cancel) $ do
-                  liftIO $ writeIORef lastClick "Cancel"
-                  emit ("button:Cancel" :: String)
+                when (respClicked cancel) $ emit (Clicked "Cancel")
                 (_, c) <- checkbox "Feature" False
                 pure c
             row (stack {layoutWrap = True, layoutHeight = Fit}) $ do
@@ -83,7 +89,7 @@ tuiApp lastClick = do
                     _ <- label "Scroll line 6"
                     pure ()
             sep
-            click <- liftIO $ readIORef lastClick
+            let click = tuiClick st
             _ <-
               labelEx (stack {layoutWidth = Grow 1}) $
                 T.pack $

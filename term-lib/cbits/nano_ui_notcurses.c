@@ -27,19 +27,77 @@ channels_from_rgba(uint32_t fg, uint32_t bg)
   return ch;
 }
 
-static int
-put_cell(struct ncplane *plane, int y, int x, uint32_t ch, uint32_t fg, uint32_t bg)
+static uint32_t
+grid_ch(const uint32_t *cells, int w, int x, int y)
 {
-  uint64_t channels = channels_from_rgba(fg, bg);
-  nccell c = NCCELL_INITIALIZER(' ', 0, channels);
-  if (ch <= 0x7fu) {
-    if (nccell_load_char(plane, &c, (char)ch) < 0) {
-      return -1;
-    }
-  } else if (nccell_load_ucs32(plane, &c, ch) < 0) {
-    return -1;
+  return cells[(y * w + x) * 3u];
+}
+
+static int
+font_awesome_p(uint32_t ch)
+{
+  return ch >= 0xF000u && ch <= 0xF2E0u;
+}
+
+static int
+put_cell(
+    struct ncplane *plane,
+    const uint32_t *cells,
+    int w,
+    int y,
+    int x,
+    uint32_t ch,
+    uint32_t fg,
+    uint32_t bg)
+{
+  unsigned rows = 0;
+  unsigned cols = 0;
+  uint64_t channels;
+  nccell c;
+  int wrote;
+
+  ncplane_dim_yx(plane, &rows, &cols);
+  if (y < 0 || x < 0 || (unsigned)y >= rows || (unsigned)x >= cols) {
+    return 0;
   }
-  return ncplane_putc_yx(plane, y, x, &c);
+
+  /* wideTrailChar is NUL. Skip after FA so a width-2 putc is not smashed.
+   * Any other NUL is a ghost: write a space. */
+  if (ch == 0) {
+    if (x > 0 && font_awesome_p(grid_ch(cells, w, x - 1, y))) {
+      return 0;
+    }
+    ch = 32;
+  }
+
+  channels = channels_from_rgba(fg, bg);
+  c = (nccell)NCCELL_INITIALIZER(' ', 0, channels);
+  if (ch > 0x7fu) {
+    if (nccell_load_ucs32(plane, &c, ch) < 0) {
+      return 0;
+    }
+  } else if (nccell_load_char(plane, &c, (char)ch) < 0) {
+    return 0;
+  }
+  /* ncplane_putc_yx returns columns advanced (1 or 2), not 0.
+   * A wide glyph on the last column fails. Retry at width 1. Never abort
+   * the frame: one bad cell used to surface as "notcurses blit failed". */
+  wrote = ncplane_putc_yx(plane, y, x, &c);
+  if (wrote < 0) {
+    c.width = 1;
+    wrote = ncplane_putc_yx(plane, y, x, &c);
+    if (wrote < 0) {
+      return 0;
+    }
+  }
+  return 0;
+}
+
+static int
+blit_cell(struct ncplane *plane, const uint32_t *cells, int w, int x, int y)
+{
+  const uint32_t *cell = cells + (y * w + x) * 3u;
+  return put_cell(plane, cells, w, y, x, cell[0], cell[1], cell[2]);
 }
 
 static int
@@ -47,8 +105,7 @@ blit_all_cells(struct ncplane *plane, int w, int h, const uint32_t *cells)
 {
   for (int y = 0; y < h; ++y) {
     for (int x = 0; x < w; ++x) {
-      const uint32_t *cell = cells + (y * w + x) * 3u;
-      if (put_cell(plane, y, x, cell[0], cell[1], cell[2])) {
+      if (blit_cell(plane, cells, w, x, y) < 0) {
         return -1;
       }
     }
@@ -169,9 +226,9 @@ nano_ui_nc_blit_cells(
         }
       }
 
-      if (put_cell(plane, y, x, ch, fg, bg)) {
+      if (blit_cell(plane, cells, w, x, y) < 0) {
         ncplane_erase(plane);
-        if (blit_all_cells(plane, w, h, cells)) {
+        if (blit_all_cells(plane, w, h, cells) < 0) {
           return -1;
         }
         return notcurses_render(nui->nc);

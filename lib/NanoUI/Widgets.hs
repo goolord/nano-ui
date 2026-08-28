@@ -95,7 +95,7 @@ import NanoUI.Context
   , markEscapeConsumed
   , pointerBlockedByModal
   )
-import NanoUI.Icons (Icons (..), checkboxMark, terminalTextColumns)
+import NanoUI.Icons (Icons (..), checkboxMark)
 import NanoUI.Id (WidgetId (..))
 import NanoUI.Input (Input (..), Key (..), Modifiers (..), inputChars, inputKeys, inputModifiers)
 import NanoUI.Layout.Arena
@@ -108,7 +108,7 @@ import NanoUI.Layout.Arena
   , setNodeValue
   , setWidgetId
   )
-import NanoUI.Monad (Ui, askContext, askInput, currentId, emit, uiFinally, uiIO, withKey)
+import NanoUI.Monad (Ui, askContext, askInput, currentId, uiFinally, uiIO, withKey)
 import NanoUI.Style
   ( AlignX (..)
   , AlignY (..)
@@ -523,12 +523,8 @@ closeButton = do
       layout =
         if isCellHost host
           then
-            let slotW =
-                  max
-                    3
-                    ( fromIntegral (terminalTextColumns (iconClose (ctxIcons ctx)))
-                        + 1
-                    )
+            -- Same 3-cell slot as Win32 / ASCII so the glyph column matches.
+            let slotW = 3
              in tight . fixedW slotW . alignMid $ defaultLayout
           else tight . fixedWH h h . alignMid $ defaultLayout
   resp <- addWidget wid NodeButton stored 0 layout
@@ -551,7 +547,6 @@ buttonEx enabled txt = do
   resp <- addWidget wid NodeButton ("[ " <> txt <> " ]") 0 defaultLayout
   disabled <- uiIO (isDisabled ctx wid)
   let active = enabled && not disabled
-  when (active && respClicked resp) $ emit ("button:" <> T.unpack txt)
   pure resp {respClicked = active && respClicked resp, respHovered = active && respHovered resp}
 
 {-# INLINE checkbox #-}

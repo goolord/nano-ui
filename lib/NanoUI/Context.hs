@@ -35,6 +35,9 @@ module NanoUI.Context
   , intKey
   , pushMessage
   , drainMessages
+  , decodeMessages
+  , reduceMessages
+  , reduceUpdates
   , registerFocusable
   , getFocusables
   , isDisabled
@@ -71,8 +74,9 @@ module NanoUI.Context
 import Control.Monad (when)
 import Data.Dynamic (Dynamic, fromDynamic, toDyn)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
+import Data.Maybe (mapMaybe)
 import Data.Proxy (Proxy (..))
-import Data.Typeable (Typeable, TypeRep, typeOf, typeRep)
+import Data.Typeable (Typeable, TypeRep, cast, typeOf, typeRep)
 import Data.IntMap.Strict (IntMap)
 import Data.Text (Text)
 import Data.Word (Word64, Word8)
@@ -93,7 +97,21 @@ import NanoUI.Layout.Arena (NodeArena, NodeType, newNodeArena)
 import NanoUI.Style (Theme, defaultTheme)
 
 data FrameMsg where
-  FrameMsg :: a -> FrameMsg
+  FrameMsg :: Typeable a => a -> FrameMsg
+
+-- Recover same-type messages. Other payloads (widget String tags, other
+-- app types) are dropped.
+decodeMessages :: Typeable a => [FrameMsg] -> [a]
+decodeMessages = mapMaybe (\(FrameMsg x) -> cast x)
+
+-- Elm-style fold: apply update to each decoded message, in emit order.
+reduceMessages :: Typeable msg => (msg -> model -> model) -> model -> [FrameMsg] -> model
+reduceMessages update model = foldl' (flip update) model . decodeMessages
+
+-- Fold emitted (model -> model) functions. Same frame-end contract as
+-- reduceMessages, without a named Msg type.
+reduceUpdates :: Typeable model => model -> [FrameMsg] -> model
+reduceUpdates = reduceMessages ($)
 
 data Animation = Animation
   { animStart :: {-# UNPACK #-} !Float

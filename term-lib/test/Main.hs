@@ -142,6 +142,11 @@ main = do
   run "host-profile-measure" runHostProfileMeasureTest
   run "compact-host" runCompactHostTest
   run "embed-state" runEmbedStateTest
+  run "reduce-messages" runReduceMessagesTest
+  run "reduce-updates" runReduceUpdatesTest
+  run "reduce-click" runReduceClickTest
+  run "reduce-identity" runReduceIdentityTest
+  run "widget-no-string-emit" runWidgetNoStringEmitTest
   run "panel-paints" runPanelPaintsTest
   run "separator-span" runSeparatorSpanTest
   run "terminal-separator-span" runTerminalSeparatorSpanTest
@@ -179,7 +184,7 @@ runHostProfileMeasureTest _ failed = do
       fmPixel = monospaceMetrics 16
       cellW = textDisplayWidth CellHost fmCell txt
       pixelW = textDisplayWidth PixelHost fmPixel txt
-  when (cellW /= fromIntegral (terminalTextColumns txt)) $ bump failed
+  when (cellW /= fromIntegral (terminalPaintColumns txt)) $ bump failed
   when (pixelW /= fromIntegral (T.length txt) * fmAdvance fmPixel ' ') $ bump failed
 
 -- Pixel host used by former SDL-named checks. Same defaults as newSdlContext
@@ -338,8 +343,8 @@ runInteractionTest ctx failed = do
           , inputMouseDown = False
           , inputMouseReleased = True
           }
-  (_, msgs, _, _) <- runFrame ctx inpRelease ui
-  when (null msgs) $ bump failed
+  (resp, msgs, _, _) <- runFrame ctx inpRelease ui
+  when (not (respClicked resp) || not (null msgs)) $ bump failed
 
 -- Hover uses solved layout rects after the first frame stores prev positions.
 runHoverTest :: Context -> IORef Int -> IO ()
@@ -1541,7 +1546,11 @@ runCellsTest ctx failed = do
   -- the same filter, or the glyph tier would render blanks.
   ck (all narrowChar (concatMap T.unpack (glyphIconTexts glyphIcons)))
   ck (terminalTextColumns "\xf046" == 2)
+  ck (terminalPaintColumns "\xf046" == 1)
+  ck (terminalPaintColumns (iconClose glyphIcons) == 1)
+  ck (terminalTextColumns (iconClose glyphIcons) == 2)
   ck (terminalTextColumns (iconChecked glyphIcons) == 3)
+  ck (terminalPaintColumns (iconChecked glyphIcons) == 3)
   ck (terminalTextColumns (iconUnchecked glyphIcons) == 3)
 
 runCheckboxTest :: Context -> IORef Int -> IO ()
@@ -2571,6 +2580,15 @@ runTerminalWindowDragIconTest _ failed = do
   let bytes = toLazyByteString (frameBytes (Just cells0) cells1)
   when (BL.null bytes) $ bump failed
 
+-- Lone FA paint spans (close, scroll carets) reserve one cell, not a pair.
+oneColFaOrigins :: [(Rect, T.Text, a, b, c)] -> [(Int, Int)]
+oneColFaOrigins spans =
+  [ (round (rectX r), round (rectY r))
+  | (r, txt, _, _, _) <- spans
+  , rectW r < 2
+  , loneFontAwesome (T.strip txt)
+  ]
+
 closeSpanPos :: [(Rect, T.Text, Color, Color, Rect)] -> Maybe (Int, Int)
 closeSpanPos spans =
   case [(round (rectX r), round (rectY r)) | (r, txt, _, _, _) <- spans, T.strip txt == iconClose glyphIcons] of
@@ -2627,7 +2645,7 @@ runTerminalButtonBracketTest _ failed = do
     Just (closeCol, closeY) -> do
       let hover =
             inp0
-              { inputMousePos = V2 (fromIntegral closeCol + 1.5) (fromIntegral closeY + 0.5)
+              { inputMousePos = V2 (fromIntegral closeCol + 0.5) (fromIntegral closeY + 0.5)
               , inputMouseDown = False
               }
       (_, _, draw1, _) <- runFrame ctx hover ui
@@ -2715,19 +2733,21 @@ runTerminalWideTransitionTest _ failed = do
         case cellRows cells of
           (r : _) -> length r
           [] -> 0
-      pairsOk cells =
-        all
-          ( \(x, y) ->
-              let c = cellChar cells x y
-               in not (fontAwesomeIcon c)
-                    || ( x + 1 < gridW cells
-                           && cellChar cells (x + 1) y == wideTrailChar
-                       )
-          )
-          [ (x, y)
-          | y <- [0 .. cellsH cells - 1]
-          , x <- [0 .. gridW cells - 1]
-          ]
+      pairsOk cells spans =
+        let skip = oneColFaOrigins spans
+         in all
+              ( \(x, y) ->
+                  let c = cellChar cells x y
+                   in not (fontAwesomeIcon c)
+                        || (x, y) `elem` skip
+                        || ( x + 1 < gridW cells
+                               && cellChar cells (x + 1) y == wideTrailChar
+                           )
+              )
+              [ (x, y)
+              | y <- [0 .. cellsH cells - 1]
+              , x <- [0 .. gridW cells - 1]
+              ]
       bracketsOk cells spans =
         all
           ( \(Rect x y w h) ->
@@ -2753,7 +2773,7 @@ runTerminalWideTransitionTest _ failed = do
   base0 <- collectTextSpans ctx
   let Size tw th = inputWindowSize inp0
   cells0 <- rasterizeLayered (round tw) (round th) draw0 base0 []
-  when (not (pairsOk cells0)) $ bump failed
+  when (not (pairsOk cells0 base0)) $ bump failed
   when (not (bracketsOk cells0 base0)) $ bump failed
   case [ (round (rectX r), round (rectY r))
        | (r, txt, _, _, _) <- base0
@@ -2768,10 +2788,10 @@ runTerminalWideTransitionTest _ failed = do
       (_, _, drawH, _) <- runFrame ctx hover page
       baseH <- collectTextSpans ctx
       cellsHov <- rasterizeLayered (round tw) (round th) drawH baseH []
-      when (not (pairsOk cellsHov)) $ bump failed
+      when (not (pairsOk cellsHov baseH)) $ bump failed
       when (not (bracketsOk cellsHov baseH)) $ bump failed
       when (cellChar cellsHov bx by /= '[') $ bump failed
-  -- Modal open: close icon must be a pair, page brackets stay clean.
+  -- Modal open: close icon is present, page brackets stay clean.
   _ <- runFrame ctx inp0 (void (modalUi False))
   (_, _, drawC, _) <- runFrame ctx inp0 (void (modalUi False))
   (baseC, overC) <- collectRasterSpans ctx inp0
@@ -2780,7 +2800,7 @@ runTerminalWideTransitionTest _ failed = do
   (_, _, drawM, _) <- runFrame ctx inp0 (void (modalUi True))
   (baseM, overM) <- collectRasterSpans ctx inp0
   cellsM <- rasterizeLayered (round tw) (round th) drawM baseM overM
-  when (not (pairsOk cellsM)) $ bump failed
+  when (not (pairsOk cellsM (baseM ++ overM))) $ bump failed
   when (closeSpanPos overM == Nothing) $ bump failed
   when (not (bracketsOk cellsC baseC)) $ bump failed
   -- Window drag: old close columns must not keep FA/trail.
@@ -2805,7 +2825,7 @@ runTerminalWideTransitionTest _ failed = do
   (_, _, drawW1, _) <- runFrame ctx moved windowUi
   overW1 <- collectOverlayTextSpans ctx moved
   cellsW1 <- rasterizeLayered (round tw) (round th) drawW1 [] overW1
-  when (not (pairsOk cellsW1)) $ bump failed
+  when (not (pairsOk cellsW1 overW1)) $ bump failed
   case closeSpanPos overW0 of
     Nothing -> bump failed
     Just (cx, cy) ->
@@ -2826,7 +2846,8 @@ runTerminalWideTransitionTest _ failed = do
                   [cx, cx + 1]
           when leftover $ bump failed
 
--- Every Font Awesome lead in a live TUI frame must keep its trail cell.
+-- Font Awesome leads that reserve two columns must keep a trail cell.
+-- Lone FA spans paint one cell (rectW < 2) and have no trail.
 runTerminalWidePairTest :: Context -> IORef Int -> IO ()
 runTerminalWidePairTest _ failed = do
   term <- newAdaptiveTerminalContext
@@ -2842,12 +2863,14 @@ runTerminalWidePairTest _ failed = do
   (_, _, draw, _) <- runFrame ctx inp ui
   (base, overlay) <- collectRasterSpans ctx inp
   cells <- rasterizeLayered 80 24 draw base overlay
-  let rows = cellRows cells
+  let skip = oneColFaOrigins (base ++ overlay)
+      rows = cellRows cells
       broken =
         [ (r, c)
         | (r, rowChars) <- zip [0 :: Int ..] rows
         , (c, ch) <- zip [0 ..] rowChars
         , fontAwesomeIcon ch
+        , (c, r) `notElem` skip
         , let nextOk =
                 c + 1 < length rowChars
                   && rowChars !! (c + 1) == wideTrailChar
@@ -2930,7 +2953,7 @@ runTerminalIconChromeTest _ failed = do
       hasGlyph g = any (T.isInfixOf g) texts
   ck (length (filter (== iconUnchecked glyphIcons <> "Feature") texts) == 1)
   ck (hasGlyph (iconSelectClosed glyphIcons))
-  -- Scroll caps need a 1-cell track; FA carets are two columns wide.
+  -- Scroll caps fit a 1-cell track (lone FA paints one column).
   let Size tw th = inputWindowSize inp
   cells <- rasterizeLayered (round tw) (round th) drawData spans []
   let blob = concat (cellRows cells)
@@ -3090,6 +3113,109 @@ runEmbedStateTest ctx failed = do
         get
   (n, _, _, _) <- runFrameEff (runEff . evalState (0 :: Int)) ctx inp ui
   when (n /= 2) $ bump failed
+
+data CounterMsg = Inc | Dec
+  deriving (Eq, Show)
+
+data Counter = Counter {counterN :: Int}
+  deriving (Eq, Show)
+
+updateCounter :: CounterMsg -> Counter -> Counter
+updateCounter Inc m = m {counterN = counterN m + 1}
+updateCounter Dec m = m {counterN = counterN m - 1}
+
+-- emit collects typed messages; reduceMessages applies them after the view.
+runReduceMessagesTest :: Context -> IORef Int -> IO ()
+runReduceMessagesTest ctx failed = do
+  let inp = emptyInput {inputWindowSize = Size 80 80}
+      model0 = Counter 0
+      view _ = do
+        emit Inc
+        emit Dec
+        emit Inc
+        emit ("noise" :: String)
+  ((), model1, msgs, _, dirty) <- runFrameReduce updateCounter ctx inp model0 view
+  when (msgs /= [Inc, Dec, Inc] || model1 /= Counter 1 || not dirty) $ bump failed
+
+-- Reducer functions themselves are the payload.
+runReduceUpdatesTest :: Context -> IORef Int -> IO ()
+runReduceUpdatesTest ctx failed = do
+  let inp = emptyInput {inputWindowSize = Size 80 80}
+      ui = do
+        emit (updateCounter Inc)
+        emit (updateCounter Dec)
+        emit (updateCounter Inc)
+  (_, msgs, _, _) <- runFrame ctx inp ui
+  let model1 = reduceUpdates (Counter 0) msgs
+  when (model1 /= Counter 1) $ bump failed
+
+-- Click emits Inc; the next view sees the reduced model.
+runReduceClickTest :: Context -> IORef Int -> IO ()
+runReduceClickTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 240 120}
+      view m = do
+        resp <- button "Go"
+        onClick resp (emit Inc)
+        label_ (T.pack (show (counterN m)))
+        pure resp
+  (resp, model0, _, _, _) <- runFrameReduce updateCounter ctx inp0 (Counter 0) view
+  when (model0 /= Counter 0) $ bump failed
+  let Rect x y w h = respRect resp
+      pos = V2 (x + w / 2) (y + h / 2)
+      press =
+        inp0
+          { inputMousePos = pos
+          , inputMouseDown = True
+          , inputMousePressed = True
+          , inputMouseReleased = False
+          }
+      release =
+        press
+          { inputMousePressed = False
+          , inputMouseDown = False
+          , inputMouseReleased = True
+          }
+  (_, modelP, _, _, _) <- runFrameReduce updateCounter ctx press model0 view
+  (_, modelR, msgs, _, dirty) <- runFrameReduce updateCounter ctx release modelP view
+  when (modelP /= Counter 0 || msgs /= [Inc] || modelR /= Counter 1 || not dirty) $
+    bump failed
+  (_, model1, _, _, _) <- runFrameReduce updateCounter ctx inp0 modelR view
+  when (model1 /= Counter 1) $ bump failed
+
+-- Identity update must not mark dirty (no extra idle frame).
+runReduceIdentityTest :: Context -> IORef Int -> IO ()
+runReduceIdentityTest ctx failed = do
+  let inp = emptyInput {inputWindowSize = Size 80 80}
+      view _ = do
+        emit Inc
+        emit Dec
+  ((), model1, msgs, _, dirty) <- runFrameReduce updateCounter ctx inp (Counter 0) view
+  when (msgs /= [Inc, Dec] || model1 /= Counter 0 || dirty) $ bump failed
+
+-- Widgets no longer dump String tags onto the app message queue.
+runWidgetNoStringEmitTest :: Context -> IORef Int -> IO ()
+runWidgetNoStringEmitTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 240 120}
+      ui = button "Go"
+  (resp, _, _, _) <- runFrame ctx inp0 ui
+  let Rect x y w h = respRect resp
+      pos = V2 (x + w / 2) (y + h / 2)
+      press =
+        inp0
+          { inputMousePos = pos
+          , inputMouseDown = True
+          , inputMousePressed = True
+          , inputMouseReleased = False
+          }
+      release =
+        press
+          { inputMousePressed = False
+          , inputMouseDown = False
+          , inputMouseReleased = True
+          }
+  _ <- runFrame ctx press ui
+  (_, msgs, _, _) <- runFrame ctx release ui
+  when (not (null (decodeMessages msgs :: [String]))) $ bump failed
 
 -- App state lives in the widget store, so clicks persist without IORefs.
 runUseFlagClickTest :: Context -> IORef Int -> IO ()
