@@ -11,6 +11,7 @@ module NanoUI.Backend.Term
   , runTermAppWithQuit
   , runTermAppWithQuitEff
   , newAdaptiveTerminalContext
+  , detectIconSet
   , queryTerminalColors
   , TermDebugSnapshot (..)
   , askTermDebug
@@ -24,7 +25,10 @@ import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import GHC.Clock (getMonotonicTime)
 import NanoUI
   ( Context
+  , asciiIcons
+  , ctxIcons
   , ctxTheme
+  , withIcons
   , Input (..)
   , Modifiers (..)
   , Size (..)
@@ -68,6 +72,7 @@ import NanoUI.Term.Debug
   , readTermDebug
   , takeDebugLive
   )
+import NanoUI.Term.Icons (detectIconSet)
 import NanoUI.Term.Palette (newAdaptiveTerminalContext, queryTerminalColors)
 import NanoUI.Term.Cells
   ( Cells
@@ -93,12 +98,20 @@ animateTimeout = 16
 idleBlock :: Int
 idleBlock = -1
 
+-- Upgrade the theme and icon tier only while they are still the defaults, so an
+-- app that set either one keeps its choice.
 termContextIO :: Context -> IO Context
-termContextIO ctx =
-  if ctxTheme ctx == defaultTheme || ctxTheme ctx == terminalTheme
+termContextIO ctx0 = do
+  ctx <-
+    if ctxTheme ctx0 == defaultTheme || ctxTheme ctx0 == terminalTheme
+      then do
+        (fg, bg) <- queryTerminalColors
+        pure (withTheme ctx0 (terminalThemeFromColors fg bg))
+      else pure ctx0
+  if ctxIcons ctx == asciiIcons
     then do
-      (fg, bg) <- queryTerminalColors
-      pure (withTheme ctx (terminalThemeFromColors fg bg))
+      icons <- detectIconSet
+      pure (withIcons ctx icons)
     else pure ctx
 
 runTermApp :: Context -> NanoUI () -> IO ()

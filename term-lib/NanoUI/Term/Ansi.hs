@@ -13,7 +13,8 @@ module NanoUI.Term.Ansi
 import Data.Bits (shiftR, (.&.))
 import Data.ByteString.Builder (Builder, charUtf8, intDec, string7)
 import Data.Word (Word32)
-import NanoUI.Term.Cells (Cells, cellBg, cellChar, cellFg, cellsH, cellsSize, cellsW)
+import NanoUI (fontAwesomeIcon)
+import NanoUI.Term.Cells (Cells, cellBg, cellChar, cellFg, cellsH, cellsSize, cellsW, wideTrailChar)
 
 -- | Switch to the alternate screen buffer so the user's scrollback survives,
 -- and hide the cursor since widgets draw their own.
@@ -49,6 +50,17 @@ data Pen = Pen
 gapTolerance :: Int
 gapTolerance = 6
 
+isActiveWideTrail :: Cells -> Int -> Int -> Bool
+isActiveWideTrail cells x y =
+  x > 0 && fontAwesomeIcon (cellChar cells (x - 1) y)
+
+-- Prev partner still holds a real glyph (often '['). Space and trail are not stale.
+staleWidePartner :: Cells -> Int -> Int -> Bool
+staleWidePartner p x y =
+  x + 1 < cellsW p
+    && let q = cellChar p (x + 1) y
+        in q /= wideTrailChar && q /= ' '
+
 emitRow :: Maybe Cells -> Cells -> Int -> Pen -> (Builder, Pen)
 emitRow reference cur y = go 0 mempty
   where
@@ -60,13 +72,36 @@ emitRow reference cur y = go 0 mempty
           cellChar p x y /= cellChar cur x y
             || cellFg p x y /= cellFg cur x y
             || cellBg p x y /= cellBg cur x y
+            || widePartnerNeedsClear p x
+            || wideCoversStale p x
+            || wideOrphanNeedsClear p x
+    widePartnerNeedsClear p x =
+      x + 1 < w
+        && fontAwesomeIcon (cellChar p x y)
+        && not (fontAwesomeIcon (cellChar cur x y))
+        && cellChar p (x + 1) y == wideTrailChar
+    wideCoversStale p x =
+      fontAwesomeIcon (cellChar cur x y) && staleWidePartner p x y
+    wideOrphanNeedsClear _ x =
+      cellChar cur x y == wideTrailChar
+        && not (isActiveWideTrail cur x y)
     go x acc pen
       | x >= w = (acc, pen)
+      | cellChar cur x y == wideTrailChar, isActiveWideTrail cur x y =
+          go (x + 1) acc pen
       | not (changed x) = go (x + 1) acc pen
       | otherwise =
-          let end = spanEnd (x + 1) 0
-              (b, pen') = emitSpan cur y x end pen
+          let end0 = spanEnd (x + 1) 0
+              end = extendWideClear reference end0 x
+              (b, pen') = emitSpan reference cur y x end pen
            in go end (acc <> moveTo x y <> b) pen'
+    extendWideClear ref end x =
+      case ref of
+        Just p
+          | fontAwesomeIcon (cellChar p x y)
+          , not (fontAwesomeIcon (cellChar cur x y)) ->
+              max end (min w (x + 2))
+        _ -> end
     -- Extend the span while cells change, tolerating short unchanged gaps.
     spanEnd x gap
       | x >= w = x - gap
@@ -74,14 +109,55 @@ emitRow reference cur y = go 0 mempty
       | gap >= gapTolerance = x - gap
       | otherwise = spanEnd (x + 1) (gap + 1)
 
-emitSpan :: Cells -> Int -> Int -> Int -> Pen -> (Builder, Pen)
-emitSpan cur y from to pen0 = foldl' cell (mempty, pen0) [from .. to - 1]
+emitSpan :: Maybe Cells -> Cells -> Int -> Int -> Int -> Pen -> (Builder, Pen)
+emitSpan reference cur y from to pen0 = foldl' cell (mempty, pen0) [from .. to - 1]
   where
     cell (acc, pen) x =
+      let ch = cellChar cur x y
+       in if ch == wideTrailChar
+            then
+              if isActiveWideTrail cur x y
+                then (acc, pen)
+                else emitCell acc pen ' ' x
+            else
+              if fontAwesomeIcon ch
+                then emitWide acc pen ch x
+                else emitCell acc pen ch x
+    -- Windows often advances one column for a PUA icon while the font paints
+    -- two. Always CUP to x+2 after the glyph so the next cell cannot overlap.
+    -- Space-space first only when the old partner still holds a real glyph, or
+    -- when a new icon lands on a blank pair (modal open, window move).
+    emitWide acc pen ch x =
+      let nextCol = x + 2
+          finish acc' pen' =
+            if nextCol < cellsW cur
+              then (acc' <> moveTo nextCol y, pen')
+              else (acc', pen')
+          dance =
+            case reference of
+              Just p ->
+                let q =
+                      if x + 1 < cellsW cur
+                        then cellChar p (x + 1) y
+                        else wideTrailChar
+                    leadChanged = cellChar p x y /= ch
+                 in q /= wideTrailChar && (q /= ' ' || leadChanged)
+              Nothing -> False
+       in if dance
+            then
+              let (acc1, pen1) = emitCell acc pen ' ' x
+                  trailX = min (cellsW cur - 1) (x + 1)
+                  (acc2, pen2) = emitCell acc1 pen1 ' ' trailX
+                  (sgr, pen3) = penUpdate pen2 (cellFg cur x y) (cellBg cur x y)
+               in finish (acc2 <> moveTo x y <> sgr <> charUtf8 ch) pen3
+            else
+              let (acc1, pen1) = emitCell acc pen ch x
+               in finish acc1 pen1
+    emitCell acc pen ch x =
       let fg = cellFg cur x y
           bg = cellBg cur x y
           (sgr, pen') = penUpdate pen fg bg
-       in (acc <> sgr <> charUtf8 (cellChar cur x y), pen')
+       in (acc <> sgr <> charUtf8 ch, pen')
 
 penUpdate :: Pen -> Word32 -> Word32 -> (Builder, Pen)
 penUpdate pen fg bg

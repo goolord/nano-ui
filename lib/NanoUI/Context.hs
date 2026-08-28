@@ -15,6 +15,7 @@ module NanoUI.Context
   , clearMeasureCache
   , withExternalText
   , withTheme
+  , withIcons
   , newTerminalContext
   , newSdlContext
   , markDirty
@@ -84,6 +85,7 @@ import NanoUI.Atlas (ImageAtlas, atlasTextureId)
 import NanoUI.Draw (DrawArena, newDrawArena)
 import NanoUI.Types (Damage (..), ImageId (..), Rect (..), Size (..), lerpColor)
 import NanoUI.Font (FontMetrics, hasMonoFontMarker, measureText, monospaceMetrics, stripWidgetMarkers)
+import NanoUI.Icons (IconSet, Icons, asciiIcons, iconsFor)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), Key (KeyEscape))
 import NanoUI.Layout.Arena (NodeArena, NodeType, newNodeArena)
@@ -205,6 +207,7 @@ data Context = Context
   , ctxMeasureCache :: Maybe (IORef (Map.Map MeasureCacheKey (Float, Float)))
   , ctxExternalText :: Bool
   , ctxTheme :: Theme
+  , ctxIcons :: Icons
   , ctxContainerStack :: IORef [Int]
   , ctxMessages :: IORef [FrameMsg]
   , ctxFocusables :: IORef [WidgetId]
@@ -287,6 +290,7 @@ newContext = do
       , ctxMeasureCache = Nothing
       , ctxExternalText = False
       , ctxTheme = defaultTheme
+      , ctxIcons = asciiIcons
       , ctxContainerStack
       , ctxMessages
       , ctxFocusables
@@ -367,6 +371,10 @@ withExternalText ctx on = ctx {ctxExternalText = on}
 {-# INLINE withTheme #-}
 withTheme :: Context -> Theme -> Context
 withTheme ctx theme = ctx {ctxTheme = theme}
+
+{-# INLINE withIcons #-}
+withIcons :: Context -> IconSet -> Context
+withIcons ctx set = ctx {ctxIcons = iconsFor set}
 
 {-# INLINE setHost #-}
 setHost :: Typeable a => Context -> a -> IO ()

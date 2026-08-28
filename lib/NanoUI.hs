@@ -41,6 +41,8 @@ module NanoUI
   , terminalThemeFromColors
   , terminalDefaultFg
   , terminalDefaultBg
+  , scrollBarTrackColor
+  , scrollBarThumbColor
   , sdlTheme
   , panelPaintPad
   , windowPad
@@ -151,6 +153,22 @@ module NanoUI
   , withExternalText
   , newTerminalContext
   , withTheme
+  , withIcons
+  , ctxIcons
+  , IconSet (..)
+  , Icons (..)
+  , asciiIcons
+  , glyphIcons
+  , iconsFor
+  , iconSetName
+  , parseIconSet
+  , checkboxMark
+  , fontAwesomeIcon
+  , terminalCharColumns
+  , terminalTextColumns
+  , terminalTextPositions
+  , wideTrailChar
+  , textDisplayWidth
   , newSdlContext
   , markDirty
   , isDirty
@@ -201,9 +219,10 @@ module NanoUI
   ) where
 
 import NanoUI.Compact (Compact, askCompact, compactHost)
-import NanoUI.Context (Context (..), FrameMsg (..), anyAnimating, atlasSnapshot, atlasTextureId, ctxTheme, getAnimationValue, getFocusId, getHotId, getPrevRect, getScrollOffset, getStore, isDirty, markDirty, modalActive, newContext, newSdlContext, newTerminalContext, overlayConsumesQuit, registerImage, registerImages, setAnimationValue, setHost, setWakeLoop, startAnimation, takeDamage, textInputEditActive, withClipboard, withExternalText, withFontMetrics, withMeasureText, withMonoFontMetrics, withTheme, wrapMeasureCache)
+import NanoUI.Context (Context (..), FrameMsg (..), anyAnimating, atlasSnapshot, atlasTextureId, ctxTheme, getAnimationValue, getFocusId, getHotId, getPrevRect, getScrollOffset, getStore, isDirty, markDirty, modalActive, newContext, newSdlContext, newTerminalContext, overlayConsumesQuit, registerImage, registerImages, setAnimationValue, setHost, setWakeLoop, startAnimation, takeDamage, textInputEditActive, withClipboard, withExternalText, withFontMetrics, withIcons, withMeasureText, withMonoFontMetrics, withTheme, wrapMeasureCache)
+import NanoUI.Icons (IconSet (..), Icons (..), asciiIcons, checkboxMark, fontAwesomeIcon, glyphIcons, iconSetName, iconsFor, parseIconSet, terminalCharColumns, terminalTextColumns, terminalTextPositions, wideTrailChar)
 import NanoUI.Draw (DrawCmd (..), DrawData (..), Layer (..), backdropDimTextureId, indexSize, vertexSize)
-import NanoUI.Font (FontMetrics (..), hasMonoFontMarker, headingFontMarker, isTerminalFont, labelContentInset, monoFontMarker, monospaceMetrics, mutedFontMarker, resolveLayoutGap, resolveLayoutPadding, scrollBarGutter, scrollBarListExtra, scrollBarPageExtra, scrollBarWidth, scrollBarWindowGutter, sliderTrackBounds, stripMonoFontMarker, stripWidgetMarkers, widgetContentInset, widgetPadding)
+import NanoUI.Font (FontMetrics (..), hasMonoFontMarker, headingFontMarker, isTerminalFont, labelContentInset, monoFontMarker, monospaceMetrics, mutedFontMarker, resolveLayoutGap, resolveLayoutPadding, scrollBarGutter, scrollBarListExtra, scrollBarPageExtra, scrollBarWidth, scrollBarWindowGutter, sliderTrackBounds, stripMonoFontMarker, stripWidgetMarkers, textDisplayWidth, widgetContentInset, widgetPadding)
 import Effectful (Eff, IOE, runEff, type (:>))
 import NanoUI.Frame (collectOverlayTextSpans, collectRasterSpans, collectTextSpans, cursorKindIs, debugPanelOpen, floatingPanelActive, needsRedraw, needsRedrawIdle, pointerDragActive, pointerCursorWanted, runFrame, runFrameEff, textFieldActive, uiCursorKind, widgetNodeCount, UiCursorKind (..))
 import NanoUI.Id (WidgetId (..), hashWidgetId, widgetId)
@@ -232,6 +251,8 @@ import NanoUI.Style
   , terminalThemeFromColors
   , terminalDefaultFg
   , terminalDefaultBg
+  , scrollBarTrackColor
+  , scrollBarThumbColor
   , sdlTheme
   , panelPaintPad
   , windowPad

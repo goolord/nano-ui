@@ -75,6 +75,22 @@ cabal run nano-ui-tui
 cabal run nano-ui-tui
 ```
 
+#### Nerd Font and Font Awesome icons
+
+With a Nerd Font (or Font Awesome) the TUI draws its chrome with glyphs instead of brackets: checkbox, close button, select caret, and window/modal title marks. All of them come from the Font Awesome block (U+F000 to U+F2E0), which every Nerd Font ships. In the terminal those icons occupy two cells each; layout and rasterisation use column counts, not `Text` length.
+
+A terminal cannot report which font is loaded, and a missing glyph renders as a same-width box, so there is nothing to probe. The tier is read from the environment and stays ASCII unless something says otherwise:
+
+1. `NANOUI_ICONS=nerd | fontawesome | ascii | auto`
+2. `NERD_FONT` / `NERDFONT` / `NERD_FONTS` set to `1`, `true`, `yes`, or `on`
+3. A terminal that ships a Nerd Font by default (WezTerm, Ghostty)
+
+```bash
+NANOUI_ICONS=nerd cabal run nano-ui-tui
+```
+
+To choose in code instead, `withIcons ctx IconsNerd` before `runTermApp`. An explicit choice is never overwritten by detection.
+
 ### SDL3 backend
 
 Requires SDL3, SDL3_ttf, and `pkg-config`. Unlike the TUI, SDL needs no MSYS2 wrapper: it builds and runs natively.

@@ -26,6 +26,7 @@ module NanoUI.WidgetText
 
 import Data.Text (Text)
 import NanoUI.Font (FontMetrics (..), fmLineHeight)
+import NanoUI.Icons (checkboxPrefixes)
 import NanoUI.Types (sliderBarCells)
 import qualified Data.Text as T
 
@@ -84,13 +85,13 @@ sliderParseRange txt =
         _ -> fallback
 
 checkboxLabelText :: Text -> Text
-checkboxLabelText txt =
-  if T.isPrefixOf "[x] " txt
-    then T.drop 4 txt
-    else
-      if T.isPrefixOf "[ ] " txt
-        then T.drop 4 txt
-        else txt
+checkboxLabelText txt = go checkboxPrefixes
+  where
+    go [] = txt
+    go (p : ps) =
+      if T.isPrefixOf p txt
+        then T.drop (T.length p) txt
+        else go ps
 
 textInputMinWidth :: Float
 textInputMinWidth = 160
