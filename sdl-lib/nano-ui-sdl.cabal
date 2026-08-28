@@ -114,6 +114,22 @@ executable nano-ui-sdl-demo
     if !flag(sdl)
         buildable: False
 
+executable nano-ui-sdl-anim
+    import:           extensions
+    import:           ghc-options
+    import:           rts-options
+    import:           warnings
+    main-is:          SdlAnim.hs
+    build-depends:
+        base ^>=4.22.0.0,
+        nano-ui,
+        nano-ui-sdl,
+        text ^>=2.1
+    hs-source-dirs:   examples
+    default-language: GHC2024
+    if !flag(sdl)
+        buildable: False
+
 executable nano-ui-sdl-profile
     import:           extensions
     import:           ghc-options

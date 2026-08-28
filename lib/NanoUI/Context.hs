@@ -19,6 +19,7 @@ module NanoUI.Context
   , withHostProfile
   , enableMeasureCache
   , markDirty
+  , clearDirty
   , isDirty
   , setWakeLoop
   , takeDamage
@@ -26,9 +27,12 @@ module NanoUI.Context
   , getFocusId
   , anyAnimating
   , startAnimation
+  , startAnimationEase
+  , startAnimationEaseDelay
   , setAnimationValue
   , tickAnimations
   , getPrevRect
+  , getPrevRectByKey
   , setPrevRect
   , getStore
   , setStore
@@ -45,6 +49,10 @@ module NanoUI.Context
   , getScrollOffset
   , setScrollOffset
   , getAnimationValue
+  , applyEase
+  , animInProgress
+  , approxEq
+  , Ease (..)
   , lerpColor
   , clearTooltips
   , pushTooltip
@@ -74,7 +82,7 @@ module NanoUI.Context
 import Control.Monad (when)
 import Data.Dynamic (Dynamic, fromDynamic, toDyn)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
-import Data.Maybe (mapMaybe)
+import Data.Maybe (isNothing, mapMaybe)
 import Data.Proxy (Proxy (..))
 import Data.Typeable (Typeable, TypeRep, cast, typeOf, typeRep)
 import Data.IntMap.Strict (IntMap)
@@ -93,7 +101,7 @@ import NanoUI.Host (HostProfile (..))
 import NanoUI.Icons (IconSet, Icons, asciiIcons, iconsFor)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), Key (KeyEscape))
-import NanoUI.Layout.Arena (NodeArena, NodeType, newNodeArena)
+import NanoUI.Layout.Arena (NodeArena, NodeType, arenaCount, getRect, getWidgetId, newNodeArena)
 import NanoUI.Style (Theme, defaultTheme)
 
 data FrameMsg where
@@ -113,13 +121,72 @@ reduceMessages update model = foldl' (flip update) model . decodeMessages
 reduceUpdates :: Typeable model => model -> [FrameMsg] -> model
 reduceUpdates = reduceMessages ($)
 
+data Ease
+  = EaseLinear
+  | EaseInCubic
+  | EaseOutCubic
+  | EaseInOutCubic
+  | EaseOutBack
+  deriving (Eq, Show)
+
 data Animation = Animation
   { animStart :: {-# UNPACK #-} !Float
   , animEnd :: {-# UNPACK #-} !Float
   , animDuration :: {-# UNPACK #-} !Float
   , animElapsed :: {-# UNPACK #-} !Float
+  , animEase :: !Ease
+  , animDelay :: {-# UNPACK #-} !Float
+  -- Remaining wait. Counts down. Do not compare this to the call-site delay.
+  , animDelayReq :: {-# UNPACK #-} !Float
+  -- Requested delay. Used to decide whether a restart should reset the wait.
   }
   deriving (Eq, Show)
+
+-- Map unit progress through an easing curve. Input is clamped to [0, 1].
+-- EaseOutBack may return a value outside that range (overshoot).
+applyEase :: Ease -> Float -> Float
+applyEase ease t0 =
+  let t = max 0 (min 1 t0)
+   in case ease of
+        EaseLinear -> t
+        EaseInCubic -> t * t * t
+        EaseOutCubic ->
+          let u = 1 - t
+           in 1 - u * u * u
+        EaseInOutCubic
+          | t < 0.5 -> 4 * t * t * t
+          | otherwise ->
+              let u = -2 * t + 2
+               in 1 - (u * u * u) / 2
+        EaseOutBack ->
+          let c1 = 1.70158
+              c3 = c1 + 1
+              u = t - 1
+           in 1 + c3 * u * u * u + c1 * u * u
+
+approxEq :: Float -> Float -> Bool
+approxEq a b = abs (a - b) <= 1e-4
+
+{-# INLINE animInProgress #-}
+animInProgress :: Animation -> Bool
+animInProgress a =
+  not (approxEq (animStart a) (animEnd a))
+    && animDuration a > 0
+    && (animDelay a > 0 || animElapsed a < animDuration a)
+
+{-# INLINE animationValue #-}
+animationValue :: Animation -> Float
+animationValue a
+  | not (animInProgress a) = animEnd a
+  | animDelay a > 0 = animStart a
+  | otherwise =
+      let t = min 1 (animElapsed a / max 0.001 (animDuration a))
+       in animStart a + (animEnd a - animStart a) * applyEase (animEase a) t
+
+refreshAnimating :: Context -> IO ()
+refreshAnimating ctx = do
+  anims <- readIORef (ctxAnimations ctx)
+  writeIORef (ctxAnyAnimating ctx) (any animInProgress anims)
 
 data WidgetStore = WidgetStore
   { storeCheckbox :: IntMap Bool
@@ -215,7 +282,9 @@ data Context = Context
   , ctxPrevRects :: IORef (IntMap Rect)
   , ctxStore :: IORef WidgetStore
   , ctxAnimations :: IORef (IntMap Animation)
+  , ctxAnimRest :: IORef (IntMap Float)
   , ctxAnyAnimating :: IORef Bool
+  , ctxAnimSettled :: IORef Bool
   , ctxDirty :: IORef Bool
   , ctxDamage :: IORef Damage
   , ctxLastWindowSize :: IORef Size
@@ -263,7 +332,9 @@ newContext = do
   ctxPrevRects <- newIORef IM.empty
   ctxStore <- newIORef emptyWidgetStore
   ctxAnimations <- newIORef IM.empty
+  ctxAnimRest <- newIORef IM.empty
   ctxAnyAnimating <- newIORef False
+  ctxAnimSettled <- newIORef False
   ctxDirty <- newIORef True
   ctxDamage <- newIORef DamageFull
   ctxLastWindowSize <- newIORef (Size 0 0)
@@ -299,7 +370,9 @@ newContext = do
       , ctxPrevRects
       , ctxStore
       , ctxAnimations
+      , ctxAnimRest
       , ctxAnyAnimating
+      , ctxAnimSettled
       , ctxDirty
       , ctxDamage
       , ctxLastWindowSize
@@ -432,6 +505,10 @@ markDirty ctx = do
     Just wake -> wake
     Nothing -> pure ()
 
+{-# INLINE clearDirty #-}
+clearDirty :: Context -> IO ()
+clearDirty ctx = writeIORef (ctxDirty ctx) False
+
 {-# INLINE setWakeLoop #-}
 setWakeLoop :: Context -> IO () -> IO ()
 setWakeLoop ctx wake = writeIORef (ctxWakeLoop ctx) (Just wake)
@@ -503,49 +580,148 @@ anyAnimating ctx = readIORef (ctxAnyAnimating ctx)
 
 {-# INLINE startAnimation #-}
 startAnimation :: Context -> WidgetId -> Float -> Float -> Float -> IO ()
-startAnimation ctx wid start end dur = do
+startAnimation ctx wid start end dur = startAnimationEase ctx wid start end dur EaseLinear
+
+{-# INLINE startAnimationEase #-}
+startAnimationEase :: Context -> WidgetId -> Float -> Float -> Float -> Ease -> IO ()
+startAnimationEase ctx wid start end dur ease =
+  startAnimationEaseDelay ctx wid start end dur ease 0
+
+{-# INLINE startAnimationEaseDelay #-}
+startAnimationEaseDelay :: Context -> WidgetId -> Float -> Float -> Float -> Ease -> Float -> IO ()
+startAnimationEaseDelay ctx wid start end dur ease delay = do
   let key = intKey wid
   anims <- readIORef (ctxAnimations ctx)
-  let elapsed =
-        case IM.lookup key anims of
-          Just a | animStart a == start && animEnd a == end -> animElapsed a
-          _ -> 0
-  writeIORef (ctxAnimations ctx) (IM.insert key (Animation start end dur elapsed) anims)
-  writeIORef (ctxAnyAnimating ctx) True
+  if dur <= 0 || approxEq start end
+    then settleKey ctx key end
+    else do
+      let req = max 0 delay
+          (elapsed, delayLeft) =
+            case IM.lookup key anims of
+              Just a
+                | approxEq (animStart a) start
+                    && approxEq (animEnd a) end
+                    && animEase a == ease
+                    && approxEq (animDuration a) dur
+                    && approxEq req (animDelayReq a) ->
+                    (animElapsed a, animDelay a)
+              _ -> (0, req)
+      rest <- readIORef (ctxAnimRest ctx)
+      writeIORef (ctxAnimRest ctx) (IM.delete key rest)
+      writeIORef
+        (ctxAnimations ctx)
+        ( IM.insert
+            key
+            ( Animation
+                { animStart = start
+                , animEnd = end
+                , animDuration = dur
+                , animElapsed = elapsed
+                , animEase = ease
+                , animDelay = delayLeft
+                , animDelayReq = req
+                }
+            )
+            anims
+        )
+      writeIORef (ctxAnyAnimating ctx) True
+      markDirtyIfOrphan ctx key
 
 {-# INLINE setAnimationValue #-}
 setAnimationValue :: Context -> WidgetId -> Float -> IO ()
-setAnimationValue ctx wid val = do
-  let key = intKey wid
-      v = max 0 (min 1 val)
-  anims <- readIORef (ctxAnimations ctx)
-  writeIORef (ctxAnimations ctx) (IM.insert key (Animation v v 0 0) anims)
-  writeIORef (ctxAnyAnimating ctx) False
+setAnimationValue ctx wid val = settleKey ctx (intKey wid) val
 
 {-# INLINE tickAnimations #-}
 tickAnimations :: Context -> Float -> IO ()
 tickAnimations ctx dt = do
   anims <- readIORef (ctxAnimations ctx)
   if IM.null anims
-    then writeIORef (ctxAnyAnimating ctx) False
+    then do
+      writeIORef (ctxAnyAnimating ctx) False
+      writeIORef (ctxAnimSettled ctx) False
     else do
-      let updated = IM.map (\a -> a {animElapsed = animElapsed a + dt}) anims
-          finished =
-            IM.filter
-              (\a -> animStart a /= animEnd a && animElapsed a >= animDuration a)
-              updated
-          remaining = IM.difference updated finished
-      writeIORef (ctxAnimations ctx) remaining
-      writeIORef (ctxAnyAnimating ctx) (not (IM.null remaining))
+      let stepped = IM.map (stepAnim dt) anims
+          (live, done) = IM.partition animInProgress stepped
+      writeIORef (ctxAnimations ctx) live
+      rest <- readIORef (ctxAnimRest ctx)
+      writeIORef (ctxAnimRest ctx) (IM.foldlWithKey' writeRest rest done)
+      writeIORef (ctxAnyAnimating ctx) (not (IM.null live))
+      writeIORef (ctxAnimSettled ctx) (not (IM.null done))
+      mapM_ (markDirtyIfOrphan ctx) (IM.keys live)
+
+writeRest :: IntMap Float -> Int -> Animation -> IntMap Float
+writeRest rest key a
+  | approxEq (animEnd a) 0 = IM.delete key rest
+  | otherwise = IM.insert key (animEnd a) rest
+
+markDirtyIfOrphan :: Context -> Int -> IO ()
+markDirtyIfOrphan ctx key = do
+  mprev <- getPrevRectByKey ctx key
+  hasNow <- nodeHasKey ctx key
+  when (isNothing mprev && not hasNow) (markDirty ctx)
+
+-- Call-site tweens have no node. Hover ids exist in the arena this frame
+-- before prev rects are written; those must not force Full.
+nodeHasKey :: Context -> Int -> IO Bool
+nodeHasKey ctx key = do
+  n <- arenaCount (ctxNodeArena ctx)
+  let go i
+        | i >= n = pure False
+        | otherwise = do
+            wid <- getWidgetId (ctxNodeArena ctx) i
+            if intKey wid == key && hashWidgetId wid /= 0
+              then do
+                (_, _, w, h) <- getRect (ctxNodeArena ctx) i
+                if w > 0 && h > 0 then pure True else go (i + 1)
+              else go (i + 1)
+  go 0
+
+settleKey :: Context -> Int -> Float -> IO ()
+settleKey ctx key val = do
+  anims <- readIORef (ctxAnimations ctx)
+  rest <- readIORef (ctxAnimRest ctx)
+  let prevRest = IM.findWithDefault 0 key rest
+      prevLive = fmap animationValue (IM.lookup key anims)
+      changed =
+        case prevLive of
+          Just v -> not (approxEq v val)
+          Nothing -> not (approxEq prevRest val)
+  writeIORef (ctxAnimations ctx) (IM.delete key anims)
+  writeIORef
+    (ctxAnimRest ctx)
+    ( if approxEq val 0
+        then IM.delete key rest
+        else IM.insert key val rest
+    )
+  when changed (markDirty ctx)
+  refreshAnimating ctx
+
+stepAnim :: Float -> Animation -> Animation
+stepAnim dt a
+  | not (animInProgress a) = a
+  | animDelay a > 0 =
+      let remain = animDelay a - dt
+       in if remain > 0
+            then a {animDelay = remain}
+            else stepAnim (negate remain) (a {animDelay = 0})
+  | otherwise =
+      let elapsed = animElapsed a + dt
+       in if elapsed >= animDuration a
+            then a {animStart = animEnd a, animElapsed = 0, animDuration = 0, animDelay = 0, animDelayReq = 0}
+            else a {animElapsed = elapsed}
 
 {-# INLINE intKey #-}
 intKey :: WidgetId -> Int
 intKey wid = fromIntegral (hashWidgetId wid)
 
+{-# INLINE getPrevRectByKey #-}
+getPrevRectByKey :: Context -> Int -> IO (Maybe Rect)
+getPrevRectByKey ctx key =
+  readIORef (ctxPrevRects ctx) >>= pure . IM.lookup key
+
 {-# INLINE getPrevRect #-}
 getPrevRect :: Context -> WidgetId -> IO (Maybe Rect)
-getPrevRect ctx wid =
-  readIORef (ctxPrevRects ctx) >>= pure . IM.lookup (intKey wid)
+getPrevRect ctx wid = getPrevRectByKey ctx (intKey wid)
 
 {-# INLINE setPrevRect #-}
 setPrevRect :: Context -> WidgetId -> Rect -> IO ()
@@ -617,13 +793,13 @@ setScrollOffset ctx wid off = do
 {-# INLINE getAnimationValue #-}
 getAnimationValue :: Context -> WidgetId -> IO Float
 getAnimationValue ctx wid = do
+  let key = intKey wid
   anims <- readIORef (ctxAnimations ctx)
-  case IM.lookup (intKey wid) anims of
-    Nothing -> pure 0
-    Just a ->
-      let dur = max 0.001 (animDuration a)
-          t = min 1 (animElapsed a / dur)
-       in pure (animStart a + (animEnd a - animStart a) * t)
+  case IM.lookup key anims of
+    Just a -> pure (animationValue a)
+    Nothing -> do
+      rest <- readIORef (ctxAnimRest ctx)
+      pure (IM.findWithDefault 0 key rest)
 
 modifyIORefList :: IORef [a] -> ([a] -> [a]) -> IO ()
 modifyIORefList ref f = readIORef ref >>= writeIORef ref . f

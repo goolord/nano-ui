@@ -10,6 +10,11 @@ maintainer:         zacharyachurchill@gmail.com
 category:           Graphics
 build-type:         Simple
 
+flag notcurses
+    description: POSIX notcurses backend for the TUI. Not required for SDL or Windows.
+    manual: True
+    default: False
+
 common extensions
     default-language: GHC2021
     default-extensions:
@@ -76,11 +81,13 @@ library
             NanoUI.Term.Driver
             NanoUI.Term.Driver.Types
             NanoUI.Term.Driver.Windows
-    else
+    elif flag(notcurses)
         c-sources:        cbits/nano_ui_notcurses.c
         include-dirs:     cbits
         pkgconfig-depends: notcurses-core >= 3.0
         other-modules:    NanoUI.Term.Notcurses
+    else
+        buildable: False
 
 executable nano-ui-tui
     import:           extensions
@@ -95,6 +102,8 @@ executable nano-ui-tui
         text ^>=2.1
     hs-source-dirs:   examples
     default-language: GHC2024
+    if !os(windows) && !flag(notcurses)
+        buildable: False
 
 test-suite nano-ui-test
     import:           extensions
@@ -112,3 +121,5 @@ test-suite nano-ui-test
         text ^>=2.1
     hs-source-dirs:   test
     default-language: GHC2024
+    if !os(windows) && !flag(notcurses)
+        buildable: False
