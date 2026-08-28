@@ -10,6 +10,7 @@ module NanoUI.Font
   , wrapTextLines
   , wrapTextLinesIO
   , lineWidth
+  , textDisplayWidth
   , labelContentInset
   , widgetContentInset
   , widgetPadding
@@ -52,6 +53,7 @@ module NanoUI.Font
 import Data.Text (Text)
 import qualified Data.Text as T
 import NanoUI.Style (AlignX (..), Padding (..), defaultLayout, layoutGap)
+import NanoUI.Icons (terminalTextColumns)
 import NanoUI.Types (Rect (..), sliderBarCells)
 
 data GlyphQuad = GlyphQuad
@@ -312,11 +314,19 @@ scrollBarWindowGutter fm =
 
 measureText :: FontMetrics -> Text -> (Float, Float)
 measureText fm txt =
-  let adv = fmAdvance fm ' '
-      len = fromIntegral (T.length txt)
-      w = len * adv
-      h = fmLineHeight fm
+  let h = fmLineHeight fm
+      w =
+        if isTerminalFont fm
+          then fromIntegral (terminalTextColumns txt)
+          else fromIntegral (T.length txt) * fmAdvance fm ' '
    in (w, h)
+
+-- | Line width for hit testing and centering. Terminal uses column counts.
+textDisplayWidth :: FontMetrics -> Text -> Float
+textDisplayWidth fm txt =
+  if isTerminalFont fm
+    then fromIntegral (terminalTextColumns txt)
+    else lineWidth fm txt
 
 measureTextWrapped :: FontMetrics -> Text -> Float -> (Float, Float)
 measureTextWrapped fm txt maxW =
@@ -324,7 +334,7 @@ measureTextWrapped fm txt maxW =
       textLines = wrapTextLines fm txt maxW
    in wrappedSize lineW lineH maxW textLines
   where
-    lineW = lineWidth fm
+    lineW = textDisplayWidth fm
 
 measureTextWrappedIO :: (Text -> IO Float) -> FontMetrics -> Text -> Float -> IO (Float, Float)
 measureTextWrappedIO lineW fm txt maxW = do
@@ -343,7 +353,7 @@ wrappedSizeFrom lineH maxW textLines ws =
     _ -> (min maxW (maximum ws), lineH * fromIntegral (length textLines))
 
 wrapTextLines :: FontMetrics -> Text -> Float -> [Text]
-wrapTextLines fm txt maxW = wrapTextLinesWith (lineWidth fm) txt maxW
+wrapTextLines fm txt maxW = wrapTextLinesWith (textDisplayWidth fm) txt maxW
 
 wrapTextLinesWith :: (Text -> Float) -> Text -> Float -> [Text]
 wrapTextLinesWith lineW txt maxW =

@@ -95,6 +95,7 @@ import NanoUI.Font
   , resolveLayoutPadding
   , stripWidgetMarkers
   , lineWidth
+  , textDisplayWidth
   , ScrollBarSlot (..)
   , scrollBarGeomFor
   , scrollBarOuterGap
@@ -106,6 +107,7 @@ import NanoUI.Font
   , wrapTextLines
   , wrapTextLinesIO
   )
+import NanoUI.Icons (Icons (..), checkboxMark, terminalTextColumns)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), Key (..), Modifiers (..), inputInteracted, inputKeys, inputPointerHeld)
 import NanoUI.Layout.Arena
@@ -158,7 +160,7 @@ import NanoUI.WidgetText
   , selectChevronReserve
   , selectChevronCenterX
   )
-import NanoUI.Style (Padding (..), Style (..), Theme (..), themeAccent, themeButton, themeFloatingWindow, themeInput, themeMuted, themeOverlayDim, themePanel, themeSeparator, themeWindow)
+import NanoUI.Style (Padding (..), Style (..), Theme (..), scrollBarThumbColor, scrollBarTrackColor, themeAccent, themeButton, themeFloatingWindow, themeInput, themeMuted, themeOverlayDim, themePanel, themeSeparator, themeWindow)
 import NanoUI.Types (Color (..), Damage (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, rectArea, rectContains, rectH, rectInflate, rectIntersect, rectOverlapArea, rectUnion, rectW, rectX, rectY, v2X, v2Y)
 
 runFrame :: Context -> Input -> NanoUI a -> IO (a, [FrameMsg], DrawData, Bool)
@@ -487,8 +489,14 @@ collectClippedSpans' ctx floatCache idx nt clip = do
                       (terminalSeparatorSpans (ctxTheme ctx) x y w h)
                   )
           _ -> tagClippedSpans clipHere <$> collectNodeTextSpans ctx floatCache idx
+      -- TUI modal chrome does not scroll (the inner body scroller does), so it
+      -- has no track to cap.
+      caps <-
+        if isTerminalFont fm && isScrollNode nt && nt /= NodeModal
+          then terminalScrollCapSpans ctx idx x y w h pad clip
+          else pure []
       childSpans <- walkChildSpans ctx floatCache idx clipHere
-      pure (here ++ childSpans)
+      pure (here ++ caps ++ childSpans)
 
 walkChildSpans :: Context -> IM.IntMap (Maybe NodeType) -> NodeIdx -> Rect -> IO [(Rect, T.Text, Color, Color, Rect)]
 walkChildSpans ctx floatCache idx clip = do
@@ -719,7 +727,8 @@ displayText ctx nt idx = do
                 case drop picked opts of
                   (o : _) -> o
                   _ -> ""
-              caret = if open then " v" else " >"
+              icons = ctxIcons ctx
+              caret = if open then iconSelectOpen icons else iconSelectClosed icons
           pure (selectDisplayText lbl opt <> caret)
         NodeSlider -> pure (T.takeWhile (/= '\US') txt)
         -- Terminal keeps bracket text for TUI affordance; SDL strips via buttonDisplayText.
@@ -820,7 +829,7 @@ widgetHitRect ctx nt idx x y w h = do
 terminalTextHitRect :: FontMetrics -> Float -> Float -> Float -> T.Text -> Bool -> Rect
 terminalTextHitRect fm x y h txt atOrigin =
   let (ix, _) = widgetContentInset fm
-      tw = lineWidth fm txt
+      tw = textDisplayWidth fm txt
       th = layoutLineHeight fm
       tx = if atOrigin then x else x + ix
       ty = centeredTextY fm y h th
@@ -829,9 +838,13 @@ terminalTextHitRect fm x y h txt atOrigin =
 -- Paint rect: center the X glyph in the close slot.
 terminalClosePaintRect :: FontMetrics -> Float -> Float -> Float -> Float -> T.Text -> Rect
 terminalClosePaintRect fm x y w h txt =
-  let tw = lineWidth fm txt
+  let tw = textDisplayWidth fm txt
       th = layoutLineHeight fm
-   in Rect (x + (w - tw) / 2) (centeredTextY fm y h th) tw th
+      lo = x
+      hi = x + w - tw
+      raw = x + (w - tw) / 2
+      lead = fromIntegral (round (max lo (min hi raw)) :: Int)
+   in Rect lead (centeredTextY fm y h th) tw th
 
 -- Hit rect: full close slot (terminal) or padded in the title bar (SDL).
 closeButtonHitRect :: FontMetrics -> Float -> Float -> Float -> Float -> Rect
@@ -2796,7 +2809,7 @@ syncWidgetLabels ctx = do
         let body = checkboxLabelText txt
             val = IM.findWithDefault False key (storeCheckbox store)
             terminal = isTerminalFont (ctxFontMetrics ctx)
-            mark = if terminal then (if val then "[x] " else "[ ] ") else ""
+            mark = if terminal then checkboxMark (ctxIcons ctx) val else ""
         setNodeText (ctxNodeArena ctx) idx (mark <> body)
         setNodeValue (ctxNodeArena ctx) idx (if val then 1 else 0)
       NodeSlider -> do
@@ -3513,6 +3526,56 @@ terminalSeparatorSpans theme x y w h =
             | i <- [0 .. hi - 1]
             ]
 
+-- Glyph tiers cap a vertical TUI scrollbar with carets. ASCII draws none, and a
+-- track under three cells has no room for them.
+terminalScrollCapSpans ::
+  Context ->
+  NodeIdx ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Padding ->
+  Rect ->
+  IO [(Rect, T.Text, Color, Color, Rect)]
+terminalScrollCapSpans ctx idx x y w h pad clip
+  | T.null up && T.null down = pure []
+  | otherwise = do
+      dir <- getDirection (ctxNodeArena ctx) idx
+      if dir /= DirColumn
+        then pure []
+        else do
+          wid <- getWidgetId (ctxNodeArena ctx) idx
+          contentSize <- getNodeValue (ctxNodeArena ctx) idx
+          off <- getScrollOffset ctx wid
+          slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
+          case scrollBarLayout fm slot dir x y w h pad contentSize off of
+            Just layout
+              | rectH (sbTrack layout) >= 3
+              , let trackW = rectW (sbTrack layout)
+              , all (\t -> T.null t || fromIntegral (terminalTextColumns t) <= trackW) [up, down] ->
+                  do
+              let track = sbTrack layout
+                  fg = themeSeparator (ctxTheme ctx)
+                  bg = colorRGBA 0 0 0 0
+                  cell ty txt = (Rect (rectX track) ty (rectW track) 1, txt, fg, bg)
+              pure $
+                tagClippedSpans
+                  clip
+                  [ cell ty txt
+                  | (ty, txt) <-
+                      [ (rectY track, up)
+                      , (rectY track + rectH track - 1, down)
+                      ]
+                  , not (T.null txt)
+                  ]
+            _ -> pure []
+  where
+    fm = ctxFontMetrics ctx
+    icons = ctxIcons ctx
+    up = iconScrollUp icons
+    down = iconScrollDown icons
+
 padDropText :: Int -> T.Text -> T.Text
 padDropText n txt =
   let len = T.length txt
@@ -3851,14 +3914,18 @@ drawScrollBar ::
   Theme ->
   Bool ->
   IO ()
-drawScrollBar ctx da idx wid x y w h pad _theme terminal = do
+drawScrollBar ctx da idx wid x y w h pad theme terminal = do
   dir <- getDirection (ctxNodeArena ctx) idx
   contentSize <- getNodeValue (ctxNodeArena ctx) idx
   off <- getScrollOffset ctx wid
   let fm = ctxFontMetrics ctx
-      trackBg = colorRGBA 255 255 255 20
-      thumbCol = colorRGBA 232 230 227 130
   slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
+  let base =
+        case slot of
+          ScrollBarWindow -> themeFloatingWindow theme
+          _ -> themePanel theme
+      trackBg = scrollBarTrackColor base theme terminal
+      thumbCol = scrollBarThumbColor base theme terminal
   case scrollBarLayout fm slot dir x y w h pad contentSize off of
     Nothing -> pure ()
     Just layout -> do

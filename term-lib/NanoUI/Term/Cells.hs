@@ -12,6 +12,7 @@ module NanoUI.Term.Cells
   , rasterizeLayered
   , cellRows
   , narrowChar
+  , wideTrailChar
   ) where
 
 import Control.Monad (when)
@@ -40,11 +41,14 @@ import NanoUI
   , Rect (..)
   , backdropDimTextureId
   , colorToWord32
+  , fontAwesomeIcon
   , indexSize
   , lerpColor
+  , terminalTextColumns
+  , terminalTextPositions
   , vertexSize
+  , wideTrailChar
   )
-import qualified Data.Text as T
 
 -- | Row-major grid, three 'Word32' per cell: codepoint, foreground RGBA,
 -- background RGBA. An RGBA whose alpha is below 32 means "terminal default".
@@ -105,8 +109,10 @@ rasterizeLayered width height drawData baseSpans overlaySpans = do
   -- Text spans after content quads so scroll tracks do not erase box rules.
   mapM_ (stampSpan arr w h) baseSpans
   mapM_ (applyCmd arr w h drawData) (ofLayer LayerOverlay)
-  mapM_ (stampSpan arr w h) overlaySpans
+  -- Chrome (window scrollbars) before overlay text. A 1-cell bar expands to 2
+  -- cells under floor/ceiling, and would wipe a close-icon trail if it ran last.
   mapM_ (applyCmd arr w h drawData) (ofLayer LayerChrome)
+  mapM_ (stampSpan arr w h) overlaySpans
   frozen <- unsafeFreezePrimArray arr
   pure Cells {cellsW = w, cellsH = h, cellsData = frozen}
   where
@@ -155,10 +161,16 @@ stampQuad arr w h drawData isDim i = do
           xmax = maximum xs
           ymin = minimum ys
           ymax = maximum ys
-          ix = clamp 0 (w - 1) (floor xmin)
-          iy = clamp 0 (h - 1) (floor ymin)
-          iw = min (ceiling xmax - ix) (w - ix)
-          ih = min (ceiling ymax - iy) (h - iy)
+          -- Fill a cell only when the quad covers its center. floor/ceiling of a
+          -- 1-cell bar at *.4 expands to two columns and wipes neighbors.
+          firstX = ceiling (xmin - 0.5)
+          lastX = floor (xmax - 0.5)
+          firstY = ceiling (ymin - 0.5)
+          lastY = floor (ymax - 0.5)
+          ix = max 0 firstX
+          iy = max 0 firstY
+          iw = min (lastX - ix + 1) (w - ix)
+          ih = min (lastY - iy + 1) (h - iy)
       when (iw > 0 && ih > 0) $
         if isDim
           then stampBackdropDim arr w h ix iy iw ih rgba
@@ -223,29 +235,77 @@ stampSpan ::
   IO ()
 stampSpan arr w h (Rect rx ry rw _rh, txt, fg, bg, clip) =
   mapM_
-    (\(dx, c) -> do
-      let cx = x0 + dx
-          -- Half-open clip rejects cell centers that sit on the max edge.
-          -- Overlay chrome is often centered on *.5, so use inclusive bounds.
-          px = fromIntegral cx + 0.5
-          py = fromIntegral y0 + 0.5
-      when (px >= rectX clip && px <= rectX clip + rectW clip
-              && py >= rectY clip && py <= rectY clip + rectH clip) $
-        if (bgW .&. 0xff) < 32
+    ( \(cx, c) -> do
+        let px = fromIntegral cx + 0.5
+            py = fromIntegral y0 + 0.5
+            inClip =
+              px >= rectX clip
+                && px <= rectX clip + rectW clip
+                && py >= rectY clip
+                && py <= rectY clip + rectH clip
+        if c == wideTrailChar
           then do
-            let off = (y0 * w + cx) * 3
-            writePrimArray arr off (fromIntegral (ord c))
-            writePrimArray arr (off + 1) fgW
-          else writeCell arr w h cx y0 (fromIntegral (ord c)) fgW bgW
+            -- Keep the partner even when clipW / pixel clip dropped it.
+            let leadCx = cx - 1
+            when (leadCx >= 0 && cx < w && y0 >= 0 && y0 < h) $ do
+              leadCh <- readPrimArray arr ((y0 * w + leadCx) * 3)
+              when (fontAwesomeIcon (chr (fromIntegral leadCh))) $ do
+                existingBg <- readPrimArray arr ((y0 * w + cx) * 3 + 2)
+                writeCell arr w h cx y0 (fromIntegral (ord c)) fgW existingBg
+          else
+            when inClip $ do
+              breakWidePair arr w h cx y0
+              if (bgW .&. 0xff) < 32
+                then do
+                  let off = (y0 * w + cx) * 3
+                  writePrimArray arr off (fromIntegral (ord c))
+                  writePrimArray arr (off + 1) fgW
+                else writeCell arr w h cx y0 (fromIntegral (ord c)) fgW bgW
     )
-    (zip [0 ..] chars)
+    positions
   where
     fgW = colorToWord32 fg
     bgW = colorToWord32 bg
     x0 = clamp 0 (w - 1) (round rx)
     y0 = clamp 0 (h - 1) (round ry)
-    n = min (T.length txt) (min (max 0 (round rw)) (w - x0))
-    chars = filter narrowChar (take n (T.unpack txt))
+    clipW = min (terminalTextColumns txt) (min (max 0 (ceiling rw)) (w - x0))
+    positions = keepWideTrails w
+      [ (x0 + col, c)
+      | (col, c) <- terminalTextPositions txt
+      , col < clipW
+      , narrowChar c || c == wideTrailChar
+      ]
+
+-- If clipW kept a Font Awesome lead, always keep its trail cell on the grid.
+keepWideTrails :: Int -> [(Int, Char)] -> [(Int, Char)]
+keepWideTrails w = go
+  where
+    go [] = []
+    go ((cx, c) : rest)
+      | fontAwesomeIcon c =
+          let rest' = dropWhile (\(x, _) -> x == cx + 1) rest
+           in if cx + 1 < w
+                then (cx, c) : (cx + 1, wideTrailChar) : go rest'
+                else (cx, c) : go rest'
+      | otherwise = (cx, c) : go rest
+
+-- A later span (button '[', title text) must not sit in a wide-glyph trail
+-- cell. That pair would emit as one glyph plus a real character and shift the
+-- rest of the row.
+breakWidePair ::
+  MutablePrimArray (PrimState IO) Word32 ->
+  Int ->
+  Int ->
+  Int ->
+  Int ->
+  IO ()
+breakWidePair arr w h x y
+  | x <= 0 || x >= w || y < 0 || y >= h = pure ()
+  | otherwise = do
+      leadCh <- readPrimArray arr ((y * w + (x - 1)) * 3)
+      when (fontAwesomeIcon (chr (fromIntegral leadCh))) $ do
+        leadBg <- readPrimArray arr ((y * w + (x - 1)) * 3 + 2)
+        writeCell arr w h (x - 1) y 32 leadBg leadBg
 
 {-# INLINE writeCell #-}
 writeCell ::

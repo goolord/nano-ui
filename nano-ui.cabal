@@ -75,6 +75,7 @@ library
         NanoUI.Draw
         NanoUI.Font
         NanoUI.Frame
+        NanoUI.Icons
         NanoUI.Id
         NanoUI.Input
         NanoUI.Layout.Arena
@@ -143,6 +144,7 @@ library nano-ui-term
     default-language: GHC2024
     other-modules:
         NanoUI.Term.Debug
+        NanoUI.Term.Icons
         NanoUI.Term.Palette
     if os(windows)
         build-depends: Win32 >=2.14

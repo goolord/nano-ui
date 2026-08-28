@@ -11,7 +11,7 @@ import Effectful.State.Static.Local (State, evalState, get, modify)
 import NanoUI
 import NanoUI.Backend.Term (newAdaptiveTerminalContext, queryTerminalColors)
 import NanoUI.Term.Ansi (frameBytes)
-import NanoUI.Term.Cells (cellRows, narrowChar, rasterize, rasterizeLayered)
+import NanoUI.Term.Cells (cellChar, cellRows, cellsH, narrowChar, rasterize, rasterizeLayered)
 import NanoUI.Term.Event (MouseAction (..), MouseBtn (..), TermEvent (..), noMods)
 import NanoUI.Term.Vt (decode, flushPending)
 import qualified Data.ByteString.Char8 as BS8
@@ -115,7 +115,16 @@ main = do
   run "terminal-modal-open-redraw" runTerminalModalOpenRedrawTest
   run "terminal-window-overlay" runTerminalWindowOverlayTest
   run "terminal-window-drag" runTerminalWindowDragTest
+  run "terminal-window-drag-icons" runTerminalWindowDragIconTest
   run "terminal-close-button" runTerminalCloseButtonTest
+  run "icon-set" runIconSetTest
+  run "terminal-icon-chrome" runTerminalIconChromeTest
+  run "terminal-icon-close" runTerminalIconCloseTest
+  run "terminal-button-brackets" runTerminalButtonBracketTest
+  run "terminal-wide-clear-bracket" runTerminalWideClearBracketTest
+  run "terminal-wide-cursor-cup" runTerminalWideCursorCupTest
+  run "terminal-wide-transitions" runTerminalWideTransitionTest
+  run "terminal-wide-pairs" runTerminalWidePairTest
   run "terminal-theme-contrast" runTerminalThemeContrastTest
   run "scroll-bar-gutter" runScrollBarGutterTest
   runSdl "scroll-bar-gutter-grow" runGrowScrollGutterTest
@@ -1489,6 +1498,12 @@ runCellsTest ctx failed = do
   ck (narrowChar '\x2588')
   ck (narrowChar '\x2591')
   ck (not (narrowChar '\x4E00'))
+  -- Nerd font / Font Awesome icons live in the private use area and must pass
+  -- the same filter, or the glyph tier would render blanks.
+  ck (all narrowChar (concatMap T.unpack (glyphIconTexts glyphIcons)))
+  ck (terminalTextColumns "\xf046" == 2)
+  ck (terminalTextColumns (iconChecked glyphIcons) == 3)
+  ck (terminalTextColumns (iconUnchecked glyphIcons) == 3)
 
 runCheckboxTest :: Context -> IORef Int -> IO ()
 runCheckboxTest ctx failed = do
@@ -2458,6 +2473,349 @@ runTerminalWindowDragTest _ failed = do
   when (x1 >= x0 - 2) $ bump failed
   when (y1 <= y0 + 1) $ bump failed
 
+-- Dragging with nerd-font close icons must clear both terminal columns the
+-- glyph occupied; otherwise the trail cell leaves a ghost on the screen.
+runTerminalWindowDragIconTest :: Context -> IORef Int -> IO ()
+runTerminalWindowDragIconTest _ failed = do
+  term <- newAdaptiveTerminalContext
+  let ctx = withIcons term IconsNerd
+      inp0 = emptyInput {inputWindowSize = Size 80 24}
+      ui = do
+        (win, _) <- window True "Debug" (label "Body")
+        pure win
+  _ <- runFrame ctx inp0 ui
+  (_, _, draw0, _) <- runFrame ctx inp0 ui
+  overlays0 <- collectOverlayTextSpans ctx inp0
+  (win0, _, _, _) <- runFrame ctx inp0 ui
+  let Rect x0 y0 _ _ = respRect win0
+      grab = V2 (x0 + 4) (y0 + 1.5)
+      press =
+        inp0
+          { inputMousePos = grab
+          , inputMouseDown = True
+          , inputMousePressed = True
+          }
+  _ <- runFrame ctx press ui
+  let moved =
+        press
+          { inputMousePos = V2 (x0 + 4 - 10) (y0 + 1.5 + 4)
+          , inputMousePressed = False
+          }
+  (_, _, draw1, _) <- runFrame ctx moved ui
+  overlays1 <- collectOverlayTextSpans ctx moved
+  let Size tw th = inputWindowSize inp0
+  cells0 <- rasterizeLayered (round tw) (round th) draw0 [] overlays0
+  cells1 <- rasterizeLayered (round tw) (round th) draw1 [] overlays1
+  case closeSpanPos overlays0 of
+    Nothing -> bump failed
+    Just (closeCol, rowY) -> do
+      let maxX =
+            case cellRows cells1 of
+              (r : _) -> length r - 1
+              [] -> -1
+          trailGhost =
+            any
+              ( \x ->
+                  x >= 0
+                    && x <= maxX
+                    && rowY >= 0
+                    && rowY < cellsH cells1
+                    && let c1 = cellChar cells1 x rowY
+                        in fontAwesomeIcon c1 || c1 == wideTrailChar
+              )
+              [closeCol, closeCol + 1]
+      case closeSpanStart overlays1 of
+        Nothing -> bump failed
+        Just x1 -> do
+          when (x1 >= closeCol - 2) $ bump failed
+          when (x1 < closeCol - 2 && trailGhost) $ bump failed
+  let bytes = toLazyByteString (frameBytes (Just cells0) cells1)
+  when (BL.null bytes) $ bump failed
+
+closeSpanPos :: [(Rect, T.Text, Color, Color, Rect)] -> Maybe (Int, Int)
+closeSpanPos spans =
+  case [(round (rectX r), round (rectY r)) | (r, txt, _, _, _) <- spans, T.strip txt == iconClose glyphIcons] of
+    (p : _) -> Just p
+    [] -> Nothing
+
+closeSpanStart :: [(Rect, T.Text, Color, Color, Rect)] -> Maybe Int
+closeSpanStart spans = fmap fst (closeSpanPos spans)
+
+-- Wide icon trail cells must not appear inside button bracket spans, and close
+-- hover must still produce a frame diff.
+runTerminalButtonBracketTest :: Context -> IORef Int -> IO ()
+runTerminalButtonBracketTest _ failed = do
+  term <- newAdaptiveTerminalContext
+  let ctx = withIcons term IconsNerd
+      inp0 = emptyInput {inputWindowSize = Size 50 20}
+      ui = do
+        (dlg, _) <-
+          modal True "Long modal title for clip" $ do
+            row defaultLayout $ do
+              void (button "OK")
+              void (button "Cancel")
+            label_ "Body"
+        pure dlg
+      bracketSpans spans =
+        [ r
+        | (r, txt, _, _, _) <- spans
+        , T.isPrefixOf "[ " txt
+        ]
+      badSpan cells (Rect x y w h) =
+        let x0 = max 0 (round x)
+            y0 = max 0 (round y)
+            x1 = min (gridW cells - 1) (round (x + w - 1))
+            y1 = min (cellsH cells - 1) (round (y + h - 1))
+         in any
+              ( \cy ->
+                  any (\cx -> cellChar cells cx cy == wideTrailChar) [x0 .. x1]
+              )
+              [y0 .. y1]
+      gridW cells =
+        case cellRows cells of
+          (r : _) -> length r
+          [] -> 0
+  _ <- runFrame ctx inp0 ui
+  (_, _, draw0, _) <- runFrame ctx inp0 ui
+  overlays0 <- collectOverlayTextSpans ctx inp0
+  let Size tw th = inputWindowSize inp0
+      spans0 = bracketSpans overlays0
+  when (null spans0) $ bump failed
+  cells0 <- rasterizeLayered (round tw) (round th) draw0 [] overlays0
+  when (any (badSpan cells0) spans0) $ bump failed
+  case closeSpanPos overlays0 of
+    Nothing -> bump failed
+    Just (closeCol, closeY) -> do
+      let hover =
+            inp0
+              { inputMousePos = V2 (fromIntegral closeCol + 1.5) (fromIntegral closeY + 0.5)
+              , inputMouseDown = False
+              }
+      (_, _, draw1, _) <- runFrame ctx hover ui
+      overlays1 <- collectOverlayTextSpans ctx hover
+      cells1 <- rasterizeLayered (round tw) (round th) draw1 [] overlays1
+      when (any (badSpan cells1) (bracketSpans overlays1)) $ bump failed
+  let pageUi =
+        column defaultLayout $
+          row defaultLayout $ do
+            void (button "OK")
+            void (button "Cancel")
+            void (checkbox "Feature" False)
+  _ <- runFrame ctx inp0 pageUi
+  (_, _, drawP, _) <- runFrame ctx inp0 pageUi
+  baseP <- collectTextSpans ctx
+  cellsP <- rasterizeLayered (round tw) (round th) drawP baseP []
+  let pageBrackets = bracketSpans baseP
+  when (null pageBrackets) $ bump failed
+  when (any (badSpan cellsP) pageBrackets) $ bump failed
+
+-- A wide glyph landing on "[OK]" must emit spaces for both columns. Windows
+-- Terminal keeps the old second cell if we only write the lead codepoint.
+runTerminalWideClearBracketTest :: Context -> IORef Int -> IO ()
+runTerminalWideClearBracketTest ctx failed = do
+  let inp = emptyInput {inputWindowSize = Size 2 1}
+      clip = Rect 0 0 2 1
+      fg = colorRGBA 220 220 220 255
+      bg = colorRGBA 20 20 24 255
+  (_, _, draw, _) <- runFrame ctx inp (pure ())
+  cellsA <- rasterize 2 1 draw [(clip, "[O", fg, bg, clip)]
+  cellsB <- rasterize 2 1 draw [(clip, iconClose glyphIcons, fg, bg, clip)]
+  let bytes = toLazyByteString (frameBytes (Just cellsA) cellsB)
+      packed = BL.unpack bytes
+  when (cellChar cellsA 0 0 /= '[') $ bump failed
+  when (cellChar cellsA 1 0 /= 'O') $ bump failed
+  when (not (fontAwesomeIcon (cellChar cellsB 0 0))) $ bump failed
+  when (cellChar cellsB 1 0 /= wideTrailChar) $ bump failed
+  when (BL.null bytes) $ bump failed
+  when (0x20 `notElem` packed) $ bump failed
+  when (not (BS.isInfixOf "\ESC[1;1H" (BL.toStrict bytes))) $ bump failed
+
+-- After a wide glyph the writer must CUP to column x+2 so a following '['
+-- cannot land on the glyph's second cell when the console advanced only one.
+runTerminalWideCursorCupTest :: Context -> IORef Int -> IO ()
+runTerminalWideCursorCupTest ctx failed = do
+  let inp = emptyInput {inputWindowSize = Size 4 1}
+      clip = Rect 0 0 4 1
+      fg = colorRGBA 220 220 220 255
+      bg = colorRGBA 20 20 24 255
+  (_, _, draw, _) <- runFrame ctx inp (pure ())
+  cells <-
+    rasterize
+      4
+      1
+      draw
+      [ (Rect 0 0 2 1, iconClose glyphIcons, fg, bg, clip)
+      , (Rect 2 0 2 1, "[O", fg, bg, clip)
+      ]
+  when (not (fontAwesomeIcon (cellChar cells 0 0))) $ bump failed
+  when (cellChar cells 1 0 /= wideTrailChar) $ bump failed
+  when (cellChar cells 2 0 /= '[') $ bump failed
+  let bytes = BL.toStrict (toLazyByteString (frameBytes Nothing cells))
+  -- 1-based CUP to column 3 (grid x=2), after the 2-col icon.
+  when (not (BS.isInfixOf "\ESC[1;3H" bytes)) $ bump failed
+
+-- Window drag, button hover, and modal open must keep FA+trail pairs and '['.
+runTerminalWideTransitionTest :: Context -> IORef Int -> IO ()
+runTerminalWideTransitionTest _ failed = do
+  term <- newAdaptiveTerminalContext
+  let ctx = withIcons term IconsNerd
+      inp0 = emptyInput {inputWindowSize = Size 80 24}
+      page = do
+        void (button "OK")
+        void (button "Cancel")
+        void (checkbox "Feature" False)
+      windowUi = do
+        page
+        (win, _) <- window True "Debug" (label_ "Body")
+        pure win
+      modalUi open = do
+        page
+        (dlg, _) <- modal open "About" (label_ "Body")
+        pure dlg
+      gridW cells =
+        case cellRows cells of
+          (r : _) -> length r
+          [] -> 0
+      pairsOk cells =
+        all
+          ( \(x, y) ->
+              let c = cellChar cells x y
+               in not (fontAwesomeIcon c)
+                    || ( x + 1 < gridW cells
+                           && cellChar cells (x + 1) y == wideTrailChar
+                       )
+          )
+          [ (x, y)
+          | y <- [0 .. cellsH cells - 1]
+          , x <- [0 .. gridW cells - 1]
+          ]
+      bracketsOk cells spans =
+        all
+          ( \(Rect x y w h) ->
+              let x0 = max 0 (round x)
+                  y0 = max 0 (round y)
+                  x1 = min (gridW cells - 1) (round (x + w - 1))
+                  y1 = min (cellsH cells - 1) (round (y + h - 1))
+               in all
+                    ( \cy ->
+                        all
+                          (\cx -> cellChar cells cx cy /= wideTrailChar)
+                          [x0 .. x1]
+                    )
+                    [y0 .. y1]
+          )
+          [ r
+          | (r, txt, _, _, _) <- spans
+          , T.isPrefixOf "[ " txt
+          ]
+  -- Button hover on the page row (checkbox FA sits on the same wrap row).
+  _ <- runFrame ctx inp0 page
+  (_, _, draw0, _) <- runFrame ctx inp0 page
+  base0 <- collectTextSpans ctx
+  let Size tw th = inputWindowSize inp0
+  cells0 <- rasterizeLayered (round tw) (round th) draw0 base0 []
+  when (not (pairsOk cells0)) $ bump failed
+  when (not (bracketsOk cells0 base0)) $ bump failed
+  case [ (round (rectX r), round (rectY r))
+       | (r, txt, _, _, _) <- base0
+       , T.isPrefixOf "[ " txt
+       ] of
+    [] -> bump failed
+    ((bx, by) : _) -> do
+      let hover =
+            inp0
+              { inputMousePos = V2 (fromIntegral bx + 1.5) (fromIntegral by + 0.5)
+              }
+      (_, _, drawH, _) <- runFrame ctx hover page
+      baseH <- collectTextSpans ctx
+      cellsHov <- rasterizeLayered (round tw) (round th) drawH baseH []
+      when (not (pairsOk cellsHov)) $ bump failed
+      when (not (bracketsOk cellsHov baseH)) $ bump failed
+      when (cellChar cellsHov bx by /= '[') $ bump failed
+  -- Modal open: close icon must be a pair, page brackets stay clean.
+  _ <- runFrame ctx inp0 (void (modalUi False))
+  (_, _, drawC, _) <- runFrame ctx inp0 (void (modalUi False))
+  (baseC, overC) <- collectRasterSpans ctx inp0
+  cellsC <- rasterizeLayered (round tw) (round th) drawC baseC overC
+  _ <- runFrame ctx inp0 (void (modalUi True))
+  (_, _, drawM, _) <- runFrame ctx inp0 (void (modalUi True))
+  (baseM, overM) <- collectRasterSpans ctx inp0
+  cellsM <- rasterizeLayered (round tw) (round th) drawM baseM overM
+  when (not (pairsOk cellsM)) $ bump failed
+  when (closeSpanPos overM == Nothing) $ bump failed
+  when (not (bracketsOk cellsC baseC)) $ bump failed
+  -- Window drag: old close columns must not keep FA/trail.
+  _ <- runFrame ctx inp0 windowUi
+  (_, _, _, _) <- runFrame ctx inp0 windowUi
+  overW0 <- collectOverlayTextSpans ctx inp0
+  (win0, _, _, _) <- runFrame ctx inp0 windowUi
+  let Rect wx wy _ _ = respRect win0
+      grab = V2 (wx + 4) (wy + 1.5)
+      press =
+        inp0
+          { inputMousePos = grab
+          , inputMouseDown = True
+          , inputMousePressed = True
+          }
+  _ <- runFrame ctx press windowUi
+  let moved =
+        press
+          { inputMousePos = V2 (wx + 4 - 10) (wy + 1.5 + 4)
+          , inputMousePressed = False
+          }
+  (_, _, drawW1, _) <- runFrame ctx moved windowUi
+  overW1 <- collectOverlayTextSpans ctx moved
+  cellsW1 <- rasterizeLayered (round tw) (round th) drawW1 [] overW1
+  when (not (pairsOk cellsW1)) $ bump failed
+  case closeSpanPos overW0 of
+    Nothing -> bump failed
+    Just (cx, cy) ->
+      case closeSpanStart overW1 of
+        Nothing -> bump failed
+        Just x1 -> do
+          when (x1 >= cx - 2) $ bump failed
+          let leftover =
+                any
+                  ( \x ->
+                      x >= 0
+                        && x < gridW cellsW1
+                        && cy >= 0
+                        && cy < cellsH cellsW1
+                        && let c1 = cellChar cellsW1 x cy
+                            in fontAwesomeIcon c1 || c1 == wideTrailChar
+                  )
+                  [cx, cx + 1]
+          when leftover $ bump failed
+
+-- Every Font Awesome lead in a live TUI frame must keep its trail cell.
+runTerminalWidePairTest :: Context -> IORef Int -> IO ()
+runTerminalWidePairTest _ failed = do
+  term <- newAdaptiveTerminalContext
+  let ctx = withIcons term IconsNerd
+      inp = emptyInput {inputWindowSize = Size 80 24}
+      ui = do
+        _ <- button "OK"
+        _ <- button "Cancel"
+        _ <- checkbox "Feature" False
+        (win, _) <- window True "Debug" (label_ "Body")
+        pure win
+  _ <- runFrame ctx inp ui
+  (_, _, draw, _) <- runFrame ctx inp ui
+  (base, overlay) <- collectRasterSpans ctx inp
+  cells <- rasterizeLayered 80 24 draw base overlay
+  let rows = cellRows cells
+      broken =
+        [ (r, c)
+        | (r, rowChars) <- zip [0 :: Int ..] rows
+        , (c, ch) <- zip [0 ..] rowChars
+        , fontAwesomeIcon ch
+        , let nextOk =
+                c + 1 < length rowChars
+                  && rowChars !! (c + 1) == wideTrailChar
+        , not nextOk
+        ]
+  when (not (null broken)) $ bump failed
+
 runTerminalCloseButtonTest :: Context -> IORef Int -> IO ()
 runTerminalCloseButtonTest _ failed = do
   ctx <- newAdaptiveTerminalContext
@@ -2484,6 +2842,76 @@ runTerminalCloseButtonTest _ failed = do
             when (not (respClicked outer)) $ bump failed
   testClose modalUi
   testClose windowUi
+
+glyphIconTexts :: Icons -> [T.Text]
+glyphIconTexts icons =
+  [ iconChecked icons
+  , iconUnchecked icons
+  , iconClose icons
+  , iconSelectOpen icons
+  , iconSelectClosed icons
+  , iconScrollUp icons
+  , iconScrollDown icons
+  , iconWindowTitle icons
+  , iconModalTitle icons
+  ]
+
+runIconSetTest :: Context -> IORef Int -> IO ()
+runIconSetTest _ failed = do
+  let ck cond = when (not cond) (bump failed)
+  ck (parseIconSet "nerd" == Just IconsNerd)
+  ck (parseIconSet "FontAwesome" == Just IconsFontAwesome)
+  ck (parseIconSet " ascii " == Just IconsAscii)
+  ck (parseIconSet "auto" == Nothing)
+  ck (iconsFor IconsAscii == asciiIcons)
+  ck (iconsFor IconsNerd == glyphIcons)
+  ck (iconsFor IconsFontAwesome == glyphIcons)
+  ck (checkboxMark glyphIcons True == iconChecked glyphIcons)
+  -- Prefixes must share a cell width, or toggling would reflow the row.
+  ck (terminalTextColumns (iconChecked glyphIcons) == terminalTextColumns (iconUnchecked glyphIcons))
+
+-- Glyph tier: checkbox, select caret and scrollbar caps come from the icon
+-- table, and a re-rendered checkbox keeps exactly one prefix.
+runTerminalIconChromeTest :: Context -> IORef Int -> IO ()
+runTerminalIconChromeTest _ failed = do
+  let ck cond = when (not cond) (bump failed)
+  term <- newAdaptiveTerminalContext
+  let ctx = withIcons term IconsNerd
+      inp = emptyInput {inputWindowSize = Size 40 30}
+      rows = column (fillW defaultLayout) (forM_ [1 .. 40 :: Int] (label_ . T.pack . show))
+      ui = column (fillW defaultLayout) $ do
+        _ <- checkbox "Feature" False
+        _ <- select "Quality" ["Low", "High"] 0
+        _ <- scrollArea ((fillW defaultLayout) {layoutHeight = Fixed 20}) rows
+        pure ()
+  _ <- runFrame ctx inp ui
+  (_, _, drawData, _) <- runFrame ctx inp ui
+  spans <- collectTextSpans ctx
+  let texts = [txt | (_, txt, _, _, _) <- spans]
+      hasGlyph g = any (T.isInfixOf g) texts
+  ck (length (filter (== iconUnchecked glyphIcons <> "Feature") texts) == 1)
+  ck (hasGlyph (iconSelectClosed glyphIcons))
+  -- Scroll caps need a 1-cell track; FA carets are two columns wide.
+  let Size tw th = inputWindowSize inp
+  cells <- rasterizeLayered (round tw) (round th) drawData spans []
+  let blob = concat (cellRows cells)
+  ck (any (`elem` blob) (concatMap T.unpack [iconChecked glyphIcons]))
+
+-- The close glyph follows the tier; the ASCII default stays "X".
+runTerminalIconCloseTest :: Context -> IORef Int -> IO ()
+runTerminalIconCloseTest _ failed = do
+  term <- newAdaptiveTerminalContext
+  let ctx = withIcons term IconsNerd
+      inp = emptyInput {inputWindowSize = Size 60 20}
+      ui = do
+        (win, _) <- window True "Debug" (label_ "Body")
+        pure win
+  _ <- runFrame ctx inp ui
+  _ <- runFrame ctx inp ui
+  overlays <- collectOverlayTextSpans ctx inp
+  let texts = [T.strip txt | (_, txt, _, _, _) <- overlays]
+  when (iconClose glyphIcons `notElem` texts) $ bump failed
+  when (not (any (T.isPrefixOf (iconWindowTitle glyphIcons)) texts)) $ bump failed
 
 closeSpanCenter :: [(Rect, T.Text, Color, Color, Rect)] -> Maybe V2
 closeSpanCenter spans =
@@ -2559,6 +2987,14 @@ themeContrastPairs theme =
       , ("modal-fg/dim", styleFg (themePanel theme), themeOverlayDim theme)
       , ("modal-muted/dim", themeMuted theme, themeOverlayDim theme)
       , ("modal-accent/dim", themeAccent theme, themeOverlayDim theme)
+      , ( "scroll-thumb/floating"
+        , scrollBarThumbColor (themeFloatingWindow theme) theme True
+        , styleBg (themeFloatingWindow theme)
+        )
+      , ( "scroll-thumb/track"
+        , scrollBarThumbColor (themeFloatingWindow theme) theme True
+        , scrollBarTrackColor (themeFloatingWindow theme) theme True
+        )
       ]
     ]
   where

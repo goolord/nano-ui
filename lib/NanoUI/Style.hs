@@ -15,6 +15,8 @@ module NanoUI.Style
   , terminalThemeFromColors
   , terminalDefaultFg
   , terminalDefaultBg
+  , scrollBarTrackColor
+  , scrollBarThumbColor
   , sdlTheme
   , panelPaintPad
   , windowPad
@@ -37,7 +39,9 @@ module NanoUI.Style
   , aspect
 ) where
 
-import NanoUI.Types (Color, colorB, colorG, colorLuminance, colorR, colorRGBA, lerpColor)
+import Data.Bits ((.&.), (.|.))
+import Data.Word (Word8)
+import NanoUI.Types (Color (..), colorB, colorG, colorLuminance, colorR, colorRGBA, lerpColor)
 
 data Sizing
   = Fixed Float
@@ -344,3 +348,18 @@ terminalThemeFromColors fg bg =
 
 terminalTheme :: Theme
 terminalTheme = terminalThemeFromColors terminalDefaultFg terminalDefaultBg
+
+-- Scroll track/thumb tints. Terminal uses opaque theme mixes so light palettes
+-- stay visible on floating windows; SDL keeps the old translucent overlay.
+scrollBarTrackColor :: Style -> Theme -> Bool -> Color
+scrollBarTrackColor base theme terminal =
+  let solid = lerpColor (styleBg base) (themeSeparator theme) 0.28
+   in if terminal then solid else fadeAlpha solid 20
+
+scrollBarThumbColor :: Style -> Theme -> Bool -> Color
+scrollBarThumbColor base theme terminal =
+  let solid = lerpColor (themeSeparator theme) (styleFg base) 0.58
+   in if terminal then solid else fadeAlpha solid 130
+
+fadeAlpha :: Color -> Word8 -> Color
+fadeAlpha (Color w) a = Color ((w .&. 0xFFFFFF00) .|. fromIntegral a)

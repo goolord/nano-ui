@@ -96,6 +96,7 @@ import NanoUI.Context
   , markEscapeConsumed
   , pointerBlockedByModal
   )
+import NanoUI.Icons (Icons (..), checkboxMark, terminalTextColumns)
 import NanoUI.Id (WidgetId (..))
 import NanoUI.Input (Input (..), Key (..), Modifiers (..), inputChars, inputKeys, inputModifiers)
 import NanoUI.Layout.Arena
@@ -334,7 +335,7 @@ modal open title child
                 close <-
                   row (titleBarLayoutFor fm) $ do
                     when (not (T.null title)) $
-                      void (labelEx (titleLabelLayoutFor fm) title)
+                      void (labelEx (titleLabelLayoutFor fm) (titleMark fm (iconModalTitle (ctxIcons ctx)) <> title))
                     flex
                     withKey ("close" :: Text) closeButton
                 when (not (T.null title)) sep
@@ -427,7 +428,7 @@ window open title child
                 close <-
                   row (titleBarLayoutFor fm) $ do
                     when (not (T.null title)) $
-                      withKey title (void (labelEx (titleLabelLayoutFor fm) title))
+                      withKey title (void (labelEx (titleLabelLayoutFor fm) (titleMark fm (iconWindowTitle (ctxIcons ctx)) <> title)))
                     flex
                     withKey ("close" :: Text) closeButton
                 sep
@@ -505,6 +506,10 @@ labelEx layout txt = do
 closeButtonMarker :: Text
 closeButtonMarker = T.singleton '\x01'
 
+-- Title bar marks are a TUI affordance; SDL draws its own chrome.
+titleMark :: FontMetrics -> Text -> Text
+titleMark fm mark = if isTerminalFont fm then mark else ""
+
 {-# INLINE closeButton #-}
 closeButton :: (HasCallStack, Ui :> es) => Eff es Response
 closeButton = do
@@ -512,11 +517,18 @@ closeButton = do
   ctx <- askContext
   uiIO $ registerFocusable ctx wid
   let fm = ctxFontMetrics ctx
-      stored = "[ " <> closeButtonMarker <> "X ]"
+      stored = "[ " <> closeButtonMarker <> iconClose (ctxIcons ctx) <> " ]"
       h = titleBarHFor fm
       layout =
         if isTerminalFont fm
-          then tight . fixedW 3 . alignMid $ defaultLayout
+          then
+            let slotW =
+                  max
+                    3
+                    ( fromIntegral (terminalTextColumns (iconClose (ctxIcons ctx)))
+                        + 1
+                    )
+             in tight . fixedW slotW . alignMid $ defaultLayout
           else tight . fixedWH h h . alignMid $ defaultLayout
   resp <- addWidget wid NodeButton stored 0 layout
   disabled <- uiIO (isDisabled ctx wid)
@@ -552,7 +564,7 @@ checkbox txt initial = do
       fm = ctxFontMetrics ctx
       nodeText =
         if isTerminalFont fm
-          then (if current then "[x] " else "[ ] ") <> txt
+          then checkboxMark (ctxIcons ctx) current <> txt
           else txt
   resp <- addWidgetResp wid NodeCheckbox nodeText (if current then 1 else 0) defaultLayout Nothing
   let display = if respClicked resp then not current else current
