@@ -338,7 +338,10 @@ modal open title child
                     flex
                     withKey ("close" :: Text) closeButton
                 when (not (T.null title)) sep
-                r <- child
+                r <-
+                  if isTerminalFont fm
+                    then scroll (tight . grow $ defaultLayout) child
+                    else child
                 pure (close, r)
             )
               `uiFinally` do

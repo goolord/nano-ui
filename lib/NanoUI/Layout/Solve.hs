@@ -129,12 +129,17 @@ measureNode na fm measure useAssignedWidth idx = do
   nt <- getNodeType na idx
   case nt of
     NodeText -> measureTextNode na fm measure useAssignedWidth idx
-    NodeSpacer -> measureSpacer na idx
+    NodeSpacer -> measureSpacer na fm idx
     NodeSeparator -> measureSeparator na idx
     NodeContainer -> measureContainer na fm useAssignedWidth idx
     NodePanel -> measureContainer na fm useAssignedWidth idx
     NodeScrollContainer -> measureScrollContainer na fm idx
-    NodeModal -> measureScrollContainer na fm idx
+    NodeModal
+      | isTerminalFont fm -> do
+          measureContainer na fm useAssignedWidth idx
+          -- Body scroll owns overflow. Stale value would paint a phantom gutter.
+          setNodeValue na idx 0
+      | otherwise -> measureScrollContainer na fm idx
     NodeWindow -> measureContainer na fm useAssignedWidth idx
     NodeImage -> measureImage na idx
     _ -> measureWidget na fm measure idx
@@ -202,12 +207,19 @@ measureImage na idx = do
           _ -> if minH > 0 then minH else 32
   setRect na idx 0 0 (clamp w minW maxW) (clamp h minH maxH)
 
-measureSpacer :: NodeArena -> NodeIdx -> IO ()
-measureSpacer na idx = do
+measureSpacer :: NodeArena -> FontMetrics -> NodeIdx -> IO ()
+measureSpacer na fm idx = do
   (wTag, wVal) <- getWidthSizing na idx
   (hTag, hVal) <- getHeightSizing na idx
-  let w = case wTag of SizingFixed -> wVal; _ -> 8
-      h = case hTag of SizingFixed -> hVal; _ -> 8
+  -- SDL uses 8px for non-Fixed spacers. On TUI that becomes 8 cells and
+  -- blows Fit rows (About Close + flex). Only Fit spacers shrink to 0.
+  let along tag val =
+        case tag of
+          SizingFixed -> val
+          SizingFit -> if isTerminalFont fm then 0 else 8
+          _ -> 8
+      w = along wTag wVal
+      h = along hTag hVal
   setRect na idx 0 0 w h
 
 measureSeparator :: NodeArena -> NodeIdx -> IO ()
@@ -508,7 +520,9 @@ positionNode na fm idx x y availW availH = do
     NodeContainer -> positionChildren na fm idx dir gap pad x y w h
     NodePanel -> positionChildren na fm idx dir gap pad x y w h
     NodeScrollContainer -> positionScrollChildren na fm idx dir gap pad x y w h
-    NodeModal -> positionScrollChildren na fm idx dir gap pad x y w h
+    NodeModal
+      | isTerminalFont fm -> positionChildren na fm idx dir gap pad x y w h
+      | otherwise -> positionScrollChildren na fm idx dir gap pad x y w h
     NodeWindow -> positionChildren na fm idx dir gap pad x y w h
     _ -> pure ()
 

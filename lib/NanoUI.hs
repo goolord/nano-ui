@@ -121,6 +121,7 @@ module NanoUI
   , runFrameEff
   , needsRedraw
   , needsRedrawIdle
+  , pointerDragActive
   , collectRasterSpans
   , textFieldActive
   , floatingPanelActive
@@ -204,7 +205,7 @@ import NanoUI.Context (Context (..), FrameMsg (..), anyAnimating, atlasSnapshot,
 import NanoUI.Draw (DrawCmd (..), DrawData (..), Layer (..), backdropDimTextureId, indexSize, vertexSize)
 import NanoUI.Font (FontMetrics (..), hasMonoFontMarker, headingFontMarker, isTerminalFont, labelContentInset, monoFontMarker, monospaceMetrics, mutedFontMarker, resolveLayoutGap, resolveLayoutPadding, scrollBarGutter, scrollBarListExtra, scrollBarPageExtra, scrollBarWidth, scrollBarWindowGutter, sliderTrackBounds, stripMonoFontMarker, stripWidgetMarkers, widgetContentInset, widgetPadding)
 import Effectful (Eff, IOE, runEff, type (:>))
-import NanoUI.Frame (collectOverlayTextSpans, collectRasterSpans, collectTextSpans, cursorKindIs, debugPanelOpen, floatingPanelActive, needsRedraw, needsRedrawIdle, pointerCursorWanted, runFrame, runFrameEff, textFieldActive, uiCursorKind, widgetNodeCount, UiCursorKind (..))
+import NanoUI.Frame (collectOverlayTextSpans, collectRasterSpans, collectTextSpans, cursorKindIs, debugPanelOpen, floatingPanelActive, needsRedraw, needsRedrawIdle, pointerDragActive, pointerCursorWanted, runFrame, runFrameEff, textFieldActive, uiCursorKind, widgetNodeCount, UiCursorKind (..))
 import NanoUI.Id (WidgetId (..), hashWidgetId, widgetId)
 import NanoUI.Input
   ( Input (..)

@@ -5,6 +5,7 @@ module NanoUI.Frame
   , runFrameEff
   , needsRedraw
   , needsRedrawIdle
+  , pointerDragActive
   , textFieldActive
   , floatingPanelActive
   , debugPanelOpen
@@ -268,6 +269,14 @@ needsRedraw = needsRedraw' True
 -- Terminal keeps the last blit while idle; SDL windows tick live for damage.
 needsRedrawIdle :: Context -> Input -> Input -> IO Bool
 needsRedrawIdle = needsRedraw' False
+
+-- Window/scroll/resize drag marks dirty every frame. TUI must still poll input then.
+pointerDragActive :: Context -> IO Bool
+pointerDragActive ctx = do
+  winDrag <- isJust <$> readIORef (ctxWindowDrag ctx)
+  scrollDrag <- isJust <$> readIORef (ctxScrollDrag ctx)
+  winResize <- isJust <$> readIORef (ctxWindowResize ctx)
+  pure (winDrag || scrollDrag || winResize)
 
 needsRedraw' :: Bool -> Context -> Input -> Input -> IO Bool
 needsRedraw' includeLive ctx prev inp = do
@@ -1644,13 +1653,16 @@ applyScrollOffsets ctx = do
     forM_ [0 .. count - 1] $ \idx -> do
       nt <- getNodeType (ctxNodeArena ctx) idx
       when (isScrollNode nt) $ do
-        wid <- getWidgetId (ctxNodeArena ctx) idx
-        off <- getScrollOffset ctx wid
-        when (off > 0) $ do
-          dir <- getDirection (ctxNodeArena ctx) idx
-          case dir of
-            DirColumn -> shiftDescendants ctx idx 0 (-off)
-            DirRow -> shiftDescendants ctx idx (-off) 0
+        -- TUI modal chrome does not scroll; the inner body scroller does.
+        let skipModal = isTerminalFont (ctxFontMetrics ctx) && nt == NodeModal
+        when (not skipModal) $ do
+          wid <- getWidgetId (ctxNodeArena ctx) idx
+          off <- getScrollOffset ctx wid
+          when (off > 0) $ do
+            dir <- getDirection (ctxNodeArena ctx) idx
+            case dir of
+              DirColumn -> shiftDescendants ctx idx 0 (-off)
+              DirRow -> shiftDescendants ctx idx (-off) 0
 
 shiftDescendants :: Context -> NodeIdx -> Float -> Float -> IO ()
 shiftDescendants ctx idx dx dy = do
@@ -3379,9 +3391,13 @@ drawModalOverlays ctx (Size ww wh) = do
         dir <- getDirection (ctxNodeArena ctx) idx
         contentSize <- getNodeValue (ctxNodeArena ctx) idx
         slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
-        let clip = scrollContentClip fm slot dir x y w h pad contentSize
+        let clip =
+              if terminal
+                then terminalModalOuterClip fm x y w h pad
+                else scrollContentClip fm slot dir x y w h pad contentSize
         withClip da clip $ walkChildren ctx idx
-        paintScrollChrome ctx da idx wid x y w h pad theme terminal
+        when (not terminal) $
+          paintScrollChrome ctx da idx wid x y w h pad theme terminal
 
 collectFloatingSpans :: Context -> IM.IntMap (Maybe NodeType) -> NodeType -> IO [(Rect, T.Text, Color, Color, Rect)]
 collectFloatingSpans ctx floatCache wanted = do
@@ -3400,9 +3416,12 @@ collectFloatingSpans ctx floatCache wanted = do
                 contentSize <- getNodeValue (ctxNodeArena ctx) idx
                 slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
                 let clip =
-                      if isScrollNode nt
-                        then scrollContentClip fm slot dir x y w h pad contentSize
-                        else padContentClip fm x y w h pad
+                      if isTerminalFont fm && nt == NodeModal
+                        then terminalModalOuterClip fm x y w h pad
+                        else
+                          if isScrollNode nt
+                            then scrollContentClip fm slot dir x y w h pad contentSize
+                            else padContentClip fm x y w h pad
                 here <- walkChildSpans ctx floatCache idx clip
                 rest <- go (idx + 1)
                 pure (here ++ rest)
@@ -3558,6 +3577,11 @@ padContentClip fm x y w h pad0 =
         (y + padT pad)
         (max 0 (w - padL pad - padR pad))
         (max 0 (h - padT pad - padB pad))
+
+-- TUI modal: title and separator stay fixed; modal/2 wraps body in scroll.
+-- Outer clip is the padded panel. Inner NodeScrollContainer clips overflow.
+terminalModalOuterClip :: FontMetrics -> Float -> Float -> Float -> Float -> Padding -> Rect
+terminalModalOuterClip = padContentClip
 
 scrollContentClip ::
   FontMetrics ->

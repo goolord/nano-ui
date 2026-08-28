@@ -35,9 +35,11 @@ import NanoUI
   , V2 (..)
   , anyAnimating
   , collectRasterSpans
+  , isDirty
   , debugPanelOpen
   , emptyInput
   , needsRedrawIdle
+  , pointerDragActive
   , overlayConsumesQuit
   , runEff
   , runFrameEff
@@ -198,8 +200,15 @@ termMainLoop unlift ctx shouldQuit ui getSize readEvents present = do
       pending <-
         if null queued
           then do
-            animating <- anyAnimating ctx
-            readEvents (if animating then animateTimeout else idleBlock)
+            dirty <- isDirty ctx
+            dragging <- pointerDragActive ctx
+            -- Open/close marks dirty for the next tree. Skip blocking read unless
+            -- a drag is in progress (drag also marks dirty every frame).
+            if dirty && not dragging
+              then pure []
+              else do
+                animating <- anyAnimating ctx
+                readEvents (if animating then animateTimeout else idleBlock)
           else pure []
       let (group, rest) = splitFrame (queued ++ pending)
       editActive <- textInputEditActive ctx

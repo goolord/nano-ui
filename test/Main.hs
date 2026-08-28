@@ -110,7 +110,11 @@ main = do
   run "terminal-slider-track" runTerminalSliderTrackTest
   run "terminal-text-input" runTerminalTextInputDisplayTest
   run "terminal-modal-overlay" runTerminalModalOverlayTest
+  run "terminal-modal-scroll" runTerminalModalScrollTest
+  run "terminal-modal-tight" runTerminalModalTightTest
+  run "terminal-modal-open-redraw" runTerminalModalOpenRedrawTest
   run "terminal-window-overlay" runTerminalWindowOverlayTest
+  run "terminal-window-drag" runTerminalWindowDragTest
   run "terminal-close-button" runTerminalCloseButtonTest
   run "terminal-theme-contrast" runTerminalThemeContrastTest
   run "scroll-bar-gutter" runScrollBarGutterTest
@@ -2269,6 +2273,136 @@ runTerminalModalOverlayTest _ failed = do
   when (not (any (\c -> cmdTextureId c == backdropDimTextureId) (drawCommands drawData))) $
     bump failed
 
+-- TUI About modal: title + sep + 4 body lines + float pad/gap (see modal/2).
+terminalAboutModalMaxH :: FontMetrics -> Float
+terminalAboutModalMaxH fm =
+  let pad = resolveLayoutPadding fm (Padding 4 4 4 4)
+      modalGap = resolveLayoutGap fm 8
+      bodyGap = resolveLayoutGap fm (layoutGap defaultLayout)
+      line = fmLineHeight fm
+      titleH = if isTerminalFont fm then 1 else 28
+      sepH = 1
+      bodyRows = (4 :: Int)
+      bodyH =
+        fromIntegral bodyRows * line
+          + bodyGap * fromIntegral (pred bodyRows)
+      chromeH = titleH + sepH + bodyH + modalGap * 2
+   in padT pad + padB pad + chromeH + 0.5
+
+terminalAboutModalMaxFooter :: FontMetrics -> Float
+terminalAboutModalMaxFooter fm =
+  let pad = resolveLayoutPadding fm (Padding 4 4 4 4)
+   in padB pad + fmLineHeight fm
+
+-- Title stays pinned. Body clips and scrolls inside the modal.
+runTerminalModalScrollTest :: Context -> IORef Int -> IO ()
+runTerminalModalScrollTest _ failed = do
+  ctx <- newAdaptiveTerminalContext
+  let inp0 = emptyInput {inputWindowSize = Size 80 16}
+      line1 = T.pack "line 1"
+      ui = do
+        (dlg, _) <-
+          modal True "About" $
+            column defaultLayout $
+              mapM_ (\i -> label (T.pack ("line " <> show (i :: Int)))) [1 .. 24]
+        pure dlg
+  _ <- runFrame ctx inp0 ui
+  (dlg, _, _, _) <- runFrame ctx inp0 ui
+  let Rect mx _ mw mh = respRect dlg
+  when (mw <= 0 || mh <= 0 || mh > 16) $ bump failed
+  spans0 <- collectOverlayTextSpans ctx inp0
+  let titleYs0 = spanYs (T.pack "About") spans0
+      line1Ys0 = spanLabelYs line1 spans0
+  when (null titleYs0) $ bump failed
+  case line1Ys0 of
+    [] -> bump failed
+    b0 : _ -> do
+      let wheelAt = V2 (mx + mw / 2) (b0 + 0.5)
+          wheel =
+            inp0
+              { inputMousePos = wheelAt
+              , inputScroll = V2 0 1
+              }
+      _ <- runFrame ctx wheel ui
+      spans1 <- collectOverlayTextSpans ctx wheel
+      let titleYs1 = spanYs (T.pack "About") spans1
+          line1Ys1 = spanLabelYs line1 spans1
+      case (titleYs0, titleYs1) of
+        (y0 : _, y1 : _) -> when (y1 /= y0) $ bump failed
+        _ -> bump failed
+      case line1Ys1 of
+        [] -> pure ()
+        b1 : _ -> when (b1 >= b0) $ bump failed
+      when (any (\(Rect _ y _ h, _, _, _, _) -> y < 0 || y + h > 16.5) spans1) $
+        bump failed
+
+-- About body should sit on the modal, not a tall empty footer under Close.
+runTerminalModalTightTest :: Context -> IORef Int -> IO ()
+runTerminalModalTightTest _ failed = do
+  ctx <- newAdaptiveTerminalContext
+  let inp0 = emptyInput {inputWindowSize = Size 80 24}
+      ui = do
+        (dlg, _) <-
+          modal True "About" $ do
+            heading "nano-ui"
+            muted "Immediate-mode GUI for Haskell."
+            muted "Terminal backend demo."
+            row (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fit}) $ do
+              flex
+              clickButton "Close" (pure ())
+            pure ()
+        pure dlg
+  _ <- runFrame ctx inp0 ui
+  (dlg, _, _, _) <- runFrame ctx inp0 ui
+  overlays <- collectOverlayTextSpans ctx inp0
+  let fm = ctxFontMetrics ctx
+      Rect _ my _ mh = respRect dlg
+      maxH = terminalAboutModalMaxH fm
+      maxFooter = terminalAboutModalMaxFooter fm
+  case closeSpanBottom overlays of
+    Nothing -> bump failed
+    Just bottom ->
+      let footer = my + mh - bottom
+       in when (mh > maxH || footer > maxFooter) $ bump failed
+
+-- Flag open must redraw on the next idle frame without waiting for input.
+runTerminalModalOpenRedrawTest :: Context -> IORef Int -> IO ()
+runTerminalModalOpenRedrawTest _ failed = do
+  ctx <- newAdaptiveTerminalContext
+  let inp0 = emptyInput {inputWindowSize = Size 80 24, inputMousePos = V2 (-10) (-10)}
+      ui = do
+        (open, setOpen) <- useFlag False
+        resp <- button "Open"
+        onClick resp (setOpen True)
+        _ <- modal open "About" (label "body")
+        pure resp
+  _ <- runFrame ctx inp0 ui
+  (resp, _, _, _) <- runFrame ctx inp0 ui
+  let Rect rx ry rw rh = respRect resp
+      press =
+        inp0
+          { inputMousePos = V2 (rx + rw / 2) (ry + rh / 2)
+          , inputMouseDown = True
+          , inputMousePressed = True
+          }
+  _ <- runFrame ctx press ui
+  let release =
+        press
+          { inputMouseDown = False
+          , inputMousePressed = False
+          , inputMouseReleased = True
+          }
+  _ <- runFrame ctx release ui
+  let idle = inp0 {inputDeltaTime = 0}
+  need <- needsRedrawIdle ctx release idle
+  when (not need) $ bump failed
+  _ <- runFrame ctx idle ui
+  overlays <- collectOverlayTextSpans ctx idle
+  let hasAbout = any (\(_, txt, _, _, _) -> "About" `T.isInfixOf` txt) overlays
+  when (not hasAbout) $ bump failed
+  dmg <- takeDamage ctx
+  when (damageIsEmpty dmg) $ bump failed
+
 runTerminalWindowOverlayTest :: Context -> IORef Int -> IO ()
 runTerminalWindowOverlayTest _ failed = do
   ctx <- newAdaptiveTerminalContext
@@ -2295,7 +2429,35 @@ runTerminalWindowOverlayTest _ failed = do
   when (not ("Floating window" `isInfixOf` blob)) $ bump failed
   when (not ('\x2500' `elem` blob)) $ bump failed
 
--- Title-bar close: 3-cell hit target on TUI; full slot + padding on SDL.
+runTerminalWindowDragTest :: Context -> IORef Int -> IO ()
+runTerminalWindowDragTest _ failed = do
+  ctx <- newAdaptiveTerminalContext
+  let inp0 = emptyInput {inputWindowSize = Size 80 24}
+      ui = do
+        (win, _) <- window True "Debug" (label "Body")
+        pure win
+  _ <- runFrame ctx inp0 ui
+  (win0, _, _, _) <- runFrame ctx inp0 ui
+  let Rect x0 y0 _ _ = respRect win0
+      grab = V2 (x0 + 4) (y0 + 1.5)
+      press =
+        inp0
+          { inputMousePos = grab
+          , inputMouseDown = True
+          , inputMousePressed = True
+          }
+  _ <- runFrame ctx press ui
+  let moved =
+        press
+          { inputMousePos = V2 (x0 + 4 - 8) (y0 + 1.5 + 4)
+          , inputMousePressed = False
+          }
+  _ <- runFrame ctx moved ui
+  (win1, _, _, _) <- runFrame ctx moved ui
+  let Rect x1 y1 _ _ = respRect win1
+  when (x1 >= x0 - 2) $ bump failed
+  when (y1 <= y0 + 1) $ bump failed
+
 runTerminalCloseButtonTest :: Context -> IORef Int -> IO ()
 runTerminalCloseButtonTest _ failed = do
   ctx <- newAdaptiveTerminalContext
@@ -2647,6 +2809,18 @@ spanYs needle spans = [rectY r | (r, txt, _, _, _) <- spans, needle `T.isInfixOf
 
 spanLabelYs :: T.Text -> [(Rect, T.Text, a, b, c)] -> [Float]
 spanLabelYs needle spans = [rectY r | (r, txt, _, _, _) <- spans, txt == needle]
+
+closeSpanBottom :: [(Rect, T.Text, a, b, c)] -> Maybe Float
+closeSpanBottom spans =
+  case
+    [ rectY r + rectH r
+    | (r, txt, _, _, _) <- spans
+    , "Close" `T.isInfixOf` txt
+    , T.strip txt /= "X"
+    ]
+  of
+    [] -> Nothing
+    bs -> Just (maximum bs)
 
 -- Wheel over an open floating window must scroll overflowing body content.
 -- The title bar stays pinned and does not move with the body.
