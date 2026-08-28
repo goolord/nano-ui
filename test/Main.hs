@@ -92,6 +92,7 @@ main = do
   run "select-initial" runSelectTest
   run "select-dropdown" runSelectDropdownTest
   run "select-dropdown-hover" runSelectDropdownHoverTest
+  runSdl "select-drop-flush" runSelectDropFlushTest
   run "select-pick-low" runSelectPickLowTest
   run "select-keyboard" runSelectKeyboardTest
   run "text-wrap" runTextWrapTest
@@ -108,6 +109,7 @@ main = do
   run "terminal-text-input" runTerminalTextInputDisplayTest
   run "terminal-modal-overlay" runTerminalModalOverlayTest
   run "terminal-window-overlay" runTerminalWindowOverlayTest
+  run "terminal-theme-contrast" runTerminalThemeContrastTest
   run "scroll-bar-gutter" runScrollBarGutterTest
   runSdl "scroll-bar-gutter-grow" runGrowScrollGutterTest
   runSdl "scroll-bar-gutter-panel" runPanelGrowScrollGutterTest
@@ -1842,6 +1844,35 @@ runSelectDropdownHoverTest _ failed = do
         _ -> bump failed
     _ -> bump failed
 
+-- The option list hangs off the select bottom; only the menu pad separates them.
+runSelectDropFlushTest :: Context -> IORef Int -> IO ()
+runSelectDropFlushTest ctx failed = do
+  let inp0 = emptyInput {inputWindowSize = Size 320 200}
+      ui = select "Quality" ["Low", "High"] 1
+  _ <- runFrame ctx inp0 ui
+  ((resp, _), _, _, _) <- runFrame ctx inp0 ui
+  let Rect sx sy sw sh = respRect resp
+      press =
+        inp0
+          { inputMousePos = V2 (sx + sw / 2) (sy + sh / 2)
+          , inputMouseDown = True
+          , inputMousePressed = True
+          }
+      release =
+        press
+          { inputMousePressed = False
+          , inputMouseDown = False
+          , inputMouseReleased = True
+          }
+  _ <- runFrame ctx press ui
+  _ <- runFrame ctx release ui
+  overlays <- collectOverlayTextSpans ctx release
+  -- 6 menu pad plus text centering in the 28px row. A gap would add 6 more.
+  let maxOffset = 12
+  case [rectY r | (r, txt, _, _, _) <- overlays, "Low" `T.isInfixOf` txt] of
+    (lowY : _) -> when (lowY - (sy + sh) > maxOffset) $ bump failed
+    [] -> bump failed
+
 runSelectPickLowTest :: Context -> IORef Int -> IO ()
 runSelectPickLowTest ctx failed = do
   let inp0 = emptyInput {inputWindowSize = Size 320 200}
@@ -2230,6 +2261,53 @@ runTerminalWindowOverlayTest _ failed = do
   let blob = concat (cellRows cells)
   when (not ("Debug" `isInfixOf` blob)) $ bump failed
   when (not ("Floating window" `isInfixOf` blob)) $ bump failed
+
+-- Body, chrome, accent, and muted text must stay WCAG AA against every fill
+-- they can land on, including the hover and active states.
+runTerminalThemeContrastTest :: Context -> IORef Int -> IO ()
+runTerminalThemeContrastTest _ failed = do
+  checkThemeContrast "terminalTheme" terminalTheme failed
+  checkThemeContrast "sdlTheme" sdlTheme failed
+
+checkThemeContrast :: String -> Theme -> IORef Int -> IO ()
+checkThemeContrast themeName theme failed =
+  mapM_ check (themeContrastPairs theme)
+  where
+    aa = 4.5
+    check (pairName, fg, bg) = do
+      let ratio = contrastRatio fg bg
+      when (ratio < aa) $ do
+        putStrLn $
+          "  contrast "
+            ++ themeName
+            ++ " "
+            ++ pairName
+            ++ ": "
+            ++ show ratio
+            ++ " < "
+            ++ show aa
+        bump failed
+
+-- Each text colour against every fill it is painted on.
+themeContrastPairs :: Theme -> [(String, Color, Color)]
+themeContrastPairs theme =
+  concat
+    [ styleStates "panel" (themePanel theme)
+    , styleStates "button" (themeButton theme)
+    , styleStates "input" (themeInput theme)
+    , [ ("panel-fg/window", styleFg (themePanel theme), themeWindow theme)
+      , ("accent/panel", themeAccent theme, styleBg (themePanel theme))
+      , ("accent/window", themeAccent theme, themeWindow theme)
+      , ("muted/panel", themeMuted theme, styleBg (themePanel theme))
+      , ("muted/window", themeMuted theme, themeWindow theme)
+      ]
+    ]
+  where
+    styleStates name style =
+      [ (name ++ "-fg/bg", styleFg style, styleBg style)
+      , (name ++ "-fg/hover", styleFg style, styleHoverBg style)
+      , (name ++ "-fg/active", styleFg style, styleActiveBg style)
+      ]
 
 -- Label stays in node text; display must not accumulate "Name: ...: ...".
 runTerminalTextInputDisplayTest :: Context -> IORef Int -> IO ()

@@ -7,6 +7,11 @@ module NanoUI.Types
   , Color (..)
   , colorRGBA
   , colorToWord32
+  , colorR
+  , colorG
+  , colorB
+  , colorA
+  , contrastRatio
   , ImageId (..)
   , rectContains
   , rectUnion
@@ -23,7 +28,7 @@ module NanoUI.Types
   , v2Sub
   ) where
 
-import Data.Bits (shiftL, (.|.))
+import Data.Bits (shiftL, shiftR, (.&.), (.|.))
 import Data.Word (Word8, Word32)
 
 data V2 = V2
@@ -66,6 +71,42 @@ colorRGBA r g b a =
 {-# INLINE colorToWord32 #-}
 colorToWord32 :: Color -> Word32
 colorToWord32 (Color w) = w
+
+{-# INLINE colorR #-}
+colorR :: Color -> Word8
+colorR (Color w) = fromIntegral ((w `shiftR` 24) .&. 0xFF)
+
+{-# INLINE colorG #-}
+colorG :: Color -> Word8
+colorG (Color w) = fromIntegral ((w `shiftR` 16) .&. 0xFF)
+
+{-# INLINE colorB #-}
+colorB :: Color -> Word8
+colorB (Color w) = fromIntegral ((w `shiftR` 8) .&. 0xFF)
+
+{-# INLINE colorA #-}
+colorA :: Color -> Word8
+colorA (Color w) = fromIntegral (w .&. 0xFF)
+
+-- | WCAG 2 relative-luminance contrast. 4.5 is AA for normal text.
+--
+-- Alpha is ignored, so both colours must be opaque. Passing a translucent
+-- colour such as 'NanoUI.Style.themeOverlayDim' gives a meaningless ratio;
+-- composite it over its backdrop first.
+contrastRatio :: Color -> Color -> Double
+contrastRatio a b =
+  let hi = max (relLum a) (relLum b)
+      lo = min (relLum a) (relLum b)
+   in (hi + 0.05) / (lo + 0.05)
+
+relLum :: Color -> Double
+relLum c =
+  0.2126 * srgb (colorR c) + 0.7152 * srgb (colorG c) + 0.0722 * srgb (colorB c)
+
+srgb :: Word8 -> Double
+srgb ch =
+  let x = fromIntegral ch / 255
+   in if x <= 0.04045 then x / 12.92 else ((x + 0.055) / 1.055) ** 2.4
 
 {-# INLINE word32Of #-}
 word32Of :: Word8 -> Word32

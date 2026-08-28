@@ -209,6 +209,7 @@ data Theme = Theme
   , themeInput :: Style
   , themeSeparator :: Color
   , themeAccent :: Color
+  , themeMuted :: Color
   , themeOverlayDim :: Color
   }
   deriving (Eq, Show)
@@ -250,47 +251,50 @@ sdlTheme =
           }
     , themeSeparator = colorRGBA 78 80 88 255
     , themeAccent = colorRGBA 88 156 246 255
+    , themeMuted = colorRGBA 176 172 164 255
     , themeOverlayDim = colorRGBA 8 8 10 176
     }
 
 defaultTheme :: Theme
 defaultTheme = sdlTheme
 
+-- Dusk ink, bone text, copper headings. Tuned for cell-grid contrast, not SDL chrome.
 terminalTheme :: Theme
 terminalTheme =
   Theme
-    { themeWindow = colorRGBA 18 18 22 255
+    { themeWindow = colorRGBA 16 18 28 255
     , themePanel =
         Style
-          { styleBg = colorRGBA 28 28 32 255
-          , styleFg = colorRGBA 230 230 235 255
-          , styleBorder = colorRGBA 140 145 160 255
+          { styleBg = colorRGBA 26 30 44 255
+          , styleFg = colorRGBA 236 228 210 255
+          , styleBorder = colorRGBA 92 100 122 255
           , styleBorderWidth = 1
           , styleCornerRadius = 0
-          , styleHoverBg = colorRGBA 38 38 44 255
-          , styleActiveBg = colorRGBA 22 22 26 255
-        }
+          , styleHoverBg = colorRGBA 36 42 60 255
+          , styleActiveBg = colorRGBA 20 24 36 255
+          }
     , themeButton =
         Style
-          { styleBg = colorRGBA 55 60 72 255
-          , styleFg = colorRGBA 240 240 245 255
-          , styleBorder = colorRGBA 160 165 180 255
+          { styleBg = colorRGBA 42 48 68 255
+          , styleFg = colorRGBA 236 228 210 255
+          , styleBorder = colorRGBA 110 118 140 255
           , styleBorderWidth = 1
           , styleCornerRadius = 0
-          , styleHoverBg = colorRGBA 75 80 95 255
-          , styleActiveBg = colorRGBA 40 45 55 255
-        }
+          , styleHoverBg = colorRGBA 58 66 90 255
+          , styleActiveBg = colorRGBA 32 38 54 255
+          }
     , themeInput =
         Style
-          { styleBg = colorRGBA 14 14 18 255
-          , styleFg = colorRGBA 240 240 245 255
-          , styleBorder = colorRGBA 120 125 140 255
+          { styleBg = colorRGBA 12 14 22 255
+          , styleFg = colorRGBA 236 228 210 255
+          , styleBorder = colorRGBA 92 100 122 255
           , styleBorderWidth = 1
           , styleCornerRadius = 0
-          , styleHoverBg = colorRGBA 20 20 24 255
-          , styleActiveBg = colorRGBA 10 10 14 255
+          , styleHoverBg = colorRGBA 20 24 36 255
+          , styleActiveBg = colorRGBA 10 12 18 255
           }
-    , themeSeparator = colorRGBA 100 105 120 255
-    , themeAccent = colorRGBA 90 160 255 255
-    , themeOverlayDim = colorRGBA 0 0 0 80
+    , themeSeparator = colorRGBA 92 100 122 255
+    , themeAccent = colorRGBA 214 154 96 255
+    , themeMuted = colorRGBA 184 176 160 255
+    , themeOverlayDim = colorRGBA 8 10 16 186
     }

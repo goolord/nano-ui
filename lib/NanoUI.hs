@@ -6,6 +6,7 @@ module NanoUI
   , Color (..)
   , colorRGBA
   , colorToWord32
+  , contrastRatio
   , ImageId (..)
   , registerImage
   , registerImages
@@ -242,7 +243,7 @@ import NanoUI.Style
   , percentH
   , aspect
   )
-import NanoUI.Types (Color (..), Damage (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, colorToWord32, damageIsEmpty, rectContains, rectIntersect, v2Add)
+import NanoUI.Types (Color (..), Damage (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, colorToWord32, contrastRatio, damageIsEmpty, rectContains, rectIntersect, v2Add)
 import NanoUI.Widgets
   ( Response (..)
   , button

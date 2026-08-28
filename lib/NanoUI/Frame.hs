@@ -154,7 +154,7 @@ import NanoUI.WidgetText
   , selectChevronReserve
   , selectChevronCenterX
   )
-import NanoUI.Style (Padding (..), Style (..), Theme (..), themeAccent, themeButton, themeInput, themeOverlayDim, themePanel, themeSeparator, themeWindow)
+import NanoUI.Style (Padding (..), Style (..), Theme (..), themeAccent, themeButton, themeInput, themeMuted, themeOverlayDim, themePanel, themeSeparator, themeWindow)
 import NanoUI.Types (Color (..), Damage (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, rectArea, rectContains, rectH, rectInflate, rectIntersect, rectOverlapArea, rectUnion, rectW, rectX, rectY, sliderTrackRect, v2X, v2Y)
 
 runFrame :: Context -> Input -> NanoUI a -> IO (a, [FrameMsg], DrawData, Bool)
@@ -543,7 +543,7 @@ nodeLabelPaint theme raw =
   let style = themePanel theme
       fg
         | hasHeadingMarker raw = themeAccent theme
-        | hasMutedMarker raw = lerpColor (styleFg style) (styleBg style) 0.42
+        | hasMutedMarker raw = themeMuted theme
         | otherwise = styleFg style
    in (stripWidgetMarkers raw, fg, styleBg style)
 
@@ -3295,9 +3295,6 @@ strokeRect da x y w h bw col =
 selectItemH :: FontMetrics -> Float -> Float
 selectItemH fm rh = if isTerminalFont fm then max 1 rh else 28
 
-selectDropGap :: FontMetrics -> Float
-selectDropGap fm = if isTerminalFont fm then 0 else 6
-
 selectDropOuterPad :: FontMetrics -> Float
 selectDropOuterPad fm = if isTerminalFont fm then 0 else textInputMenuOuterPad
 
@@ -3310,11 +3307,12 @@ selectDropActiveBg st = styleActiveBg st
 selectDropHoverBg :: Style -> Color
 selectDropHoverBg st = styleHoverBg st
 
+-- The list hangs directly off the select, with no gap on any backend.
 selectDropRect :: FontMetrics -> Float -> Float -> Float -> Float -> Int -> Rect
 selectDropRect fm x y w h nOpts =
   let itemH = selectItemH fm h
       pad = selectDropOuterPad fm
-   in Rect x (y + h + selectDropGap fm) w (itemH * fromIntegral nOpts + 2 * pad)
+   in Rect x (y + h) w (itemH * fromIntegral nOpts + 2 * pad)
 
 selectDropItemY :: FontMetrics -> Rect -> Float -> Int -> Float
 selectDropItemY fm dropRect itemH i =
