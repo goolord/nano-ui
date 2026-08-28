@@ -11,6 +11,8 @@ module NanoUI.Types
   , colorG
   , colorB
   , colorA
+  , lerpColor
+  , colorLuminance
   , contrastRatio
   , ImageId (..)
   , rectContains
@@ -95,13 +97,31 @@ colorA (Color w) = fromIntegral (w .&. 0xFF)
 -- composite it over its backdrop first.
 contrastRatio :: Color -> Color -> Double
 contrastRatio a b =
-  let hi = max (relLum a) (relLum b)
-      lo = min (relLum a) (relLum b)
+  let hi = max (colorLuminance a) (colorLuminance b)
+      lo = min (colorLuminance a) (colorLuminance b)
    in (hi + 0.05) / (lo + 0.05)
+
+colorLuminance :: Color -> Double
+colorLuminance = relLum
 
 relLum :: Color -> Double
 relLum c =
   0.2126 * srgb (colorR c) + 0.7152 * srgb (colorG c) + 0.0722 * srgb (colorB c)
+
+{-# INLINE lerpColor #-}
+lerpColor :: Color -> Color -> Float -> Color
+lerpColor (Color a) (Color b) t =
+  let u = max 0 (min 1 t)
+      ch shift =
+        round $
+          fromIntegral ((a `shiftR` shift) .&. 0xFF) * (1 - u)
+            + fromIntegral ((b `shiftR` shift) .&. 0xFF) * u
+   in Color
+        ( (ch 24 `shiftL` 24)
+            .|. (ch 16 `shiftL` 16)
+            .|. (ch 8 `shiftL` 8)
+            .|. ch 0
+        )
 
 srgb :: Word8 -> Double
 srgb ch =

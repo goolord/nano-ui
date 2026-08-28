@@ -4,11 +4,14 @@ module NanoUI.Frame
   ( runFrame
   , runFrameEff
   , needsRedraw
+  , needsRedrawIdle
   , textFieldActive
   , floatingPanelActive
   , debugPanelOpen
   , collectTextSpans
   , collectOverlayTextSpans
+  , collectRasterSpans
+  , widgetNodeCount
   , pointerCursorWanted
   , cursorKindIs
   , uiCursorKind
@@ -16,7 +19,7 @@ module NanoUI.Frame
   , sliderTrackRect
   ) where
 
-import Control.Monad (filterM, forM, forM_, unless, void, when)
+import Control.Monad (filterM, foldM, forM, forM_, unless, void, when)
 import Data.Char (isAlphaNum, isSpace)
 import Data.IORef (readIORef, writeIORef)
 import Data.List (findIndex)
@@ -70,6 +73,7 @@ import NanoUI.Draw
   , pushLine
   , pushFilledTriangle
   , pushRect
+  , pushBackdropDim
   , pushImage
   , pushRoundedRect
   , pushRoundedStroke
@@ -128,7 +132,7 @@ import NanoUI.Layout.Arena
   , isContainerNode
   , isFloatingNode
   , isScrollNode
-  , NodeType (NodeButton, NodeCheckbox, NodeSelect, NodeSlider, NodeTextInput, NodeModal, NodeImage, NodePanel)
+  , NodeType (NodeButton, NodeCheckbox, NodeSelect, NodeSlider, NodeTextInput, NodeModal, NodeImage, NodePanel, NodeWindow)
   , resetNodeArena
   , setNodeText
   , setNodeValue
@@ -154,7 +158,7 @@ import NanoUI.WidgetText
   , selectChevronReserve
   , selectChevronCenterX
   )
-import NanoUI.Style (Padding (..), Style (..), Theme (..), themeAccent, themeButton, themeInput, themeMuted, themeOverlayDim, themePanel, themeSeparator, themeWindow)
+import NanoUI.Style (Padding (..), Style (..), Theme (..), themeAccent, themeButton, themeFloatingWindow, themeInput, themeMuted, themeOverlayDim, themePanel, themeSeparator, themeWindow)
 import NanoUI.Types (Color (..), Damage (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, rectArea, rectContains, rectH, rectInflate, rectIntersect, rectOverlapArea, rectUnion, rectW, rectX, rectY, sliderTrackRect, v2X, v2Y)
 
 runFrame :: Context -> Input -> NanoUI a -> IO (a, [FrameMsg], DrawData, Bool)
@@ -260,7 +264,14 @@ runFrameEff unlift ctx inp ui = do
   pure (result, msgs, drawData, dirtyAfterUi)
 
 needsRedraw :: Context -> Input -> Input -> IO Bool
-needsRedraw ctx prev inp = do
+needsRedraw = needsRedraw' True
+
+-- Terminal keeps the last blit while idle; SDL windows tick live for damage.
+needsRedrawIdle :: Context -> Input -> Input -> IO Bool
+needsRedrawIdle = needsRedraw' False
+
+needsRedraw' :: Bool -> Context -> Input -> Input -> IO Bool
+needsRedraw' includeLive ctx prev inp = do
   dirty <- isDirty ctx
   anim <- anyAnimating ctx
   hover <- hoverWouldChange ctx inp
@@ -280,7 +291,7 @@ needsRedraw ctx prev inp = do
         || isJust mWinDrag
         || overlayMove
         || edit
-        || winLive
+        || (includeLive && winLive)
     )
 
 -- Select dropdown or text-input menu is open. Overlay hover is not a widget id.
@@ -386,32 +397,52 @@ hoverWouldChange ctx inp = do
 
 collectTextSpans :: Context -> IO [(Rect, T.Text, Color, Color, Rect)]
 collectTextSpans ctx = do
+  floatCache <- buildFloatingAncestorMap ctx
+  collectTextSpansCached ctx floatCache
+
+collectOverlayTextSpans :: Context -> Input -> IO [(Rect, T.Text, Color, Color, Rect)]
+collectOverlayTextSpans ctx inp = do
+  floatCache <- buildFloatingAncestorMap ctx
+  collectOverlayTextSpansCached ctx inp floatCache
+
+collectRasterSpans :: Context -> Input -> IO ([(Rect, T.Text, Color, Color, Rect)], [(Rect, T.Text, Color, Color, Rect)])
+collectRasterSpans ctx inp = do
+  floatCache <- buildFloatingAncestorMap ctx
+  base <- collectTextSpansCached ctx floatCache
+  overlay <- collectOverlayTextSpansCached ctx inp floatCache
+  pure (base, overlay)
+
+collectTextSpansCached :: Context -> IM.IntMap (Maybe NodeType) -> IO [(Rect, T.Text, Color, Color, Rect)]
+collectTextSpansCached ctx floatCache = do
   count <- arenaCount (ctxNodeArena ctx)
   spans <-
     if count > 0
-      then collectClippedSpans ctx 0 (Rect 0 0 1e9 1e9)
+      then collectClippedSpans ctx floatCache 0 (Rect 0 0 1e9 1e9)
       else pure []
   panels <- floatingPanelRects ctx
   pure (filterOccludedBaseSpans panels spans)
 
-collectOverlayTextSpans :: Context -> Input -> IO [(Rect, T.Text, Color, Color, Rect)]
-collectOverlayTextSpans ctx inp = do
+collectOverlayTextSpansCached :: Context -> Input -> IM.IntMap (Maybe NodeType) -> IO [(Rect, T.Text, Color, Color, Rect)]
+collectOverlayTextSpansCached ctx inp floatCache = do
   drops <- collectSelectDropdownSpans ctx inp
   menu <- collectTextInputMenuSpans ctx inp
   tips <- collectTooltipSpans ctx
-  windows <- collectWindowSpans ctx
-  modals <- collectModalSpans ctx
+  windows <- collectFloatingSpans ctx floatCache NodeWindow
+  modals <- collectFloatingSpans ctx floatCache NodeModal
   pure (windows ++ modals ++ drops ++ menu ++ tips)
 
-collectClippedSpans :: Context -> NodeIdx -> Rect -> IO [(Rect, T.Text, Color, Color, Rect)]
-collectClippedSpans ctx idx clip = do
+widgetNodeCount :: Context -> IO Int
+widgetNodeCount ctx = arenaCount (ctxNodeArena ctx)
+
+collectClippedSpans :: Context -> IM.IntMap (Maybe NodeType) -> NodeIdx -> Rect -> IO [(Rect, T.Text, Color, Color, Rect)]
+collectClippedSpans ctx floatCache idx clip = do
   nt <- getNodeType (ctxNodeArena ctx) idx
   if isFloatingNode nt
     then pure []
-    else collectClippedSpans' ctx idx nt clip
+    else collectClippedSpans' ctx floatCache idx nt clip
 
-collectClippedSpans' :: Context -> NodeIdx -> NodeType -> Rect -> IO [(Rect, T.Text, Color, Color, Rect)]
-collectClippedSpans' ctx idx nt clip = do
+collectClippedSpans' :: Context -> IM.IntMap (Maybe NodeType) -> NodeIdx -> NodeType -> Rect -> IO [(Rect, T.Text, Color, Color, Rect)]
+collectClippedSpans' ctx floatCache idx nt clip = do
   (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
   pad <- getPadding (ctxNodeArena ctx) idx
   let nodeRect = Rect x y w h
@@ -434,25 +465,32 @@ collectClippedSpans' ctx idx nt clip = do
       here <-
         case nt of
           NodeSelect -> do
-            spans <- collectNodeTextSpans ctx idx
+            spans <- collectNodeTextSpans ctx floatCache idx
             pure (tagSelectClippedSpans clipHere x y w h fm spans)
           NodeTextInput
             | not (isTerminalFont fm) -> do
-                spans <- collectNodeTextSpans ctx idx
+                spans <- collectNodeTextSpans ctx floatCache idx
                 pure (tagTextInputClippedSpans clipHere x y w h fm spans)
-          _ -> tagClippedSpans clipHere <$> collectNodeTextSpans ctx idx
-      childSpans <- walkChildSpans ctx idx clipHere
+          NodeSeparator
+            | isTerminalFont fm ->
+                pure
+                  ( tagClippedSpans
+                      (Rect x y w h)
+                      (terminalSeparatorSpans (ctxTheme ctx) x y w h)
+                  )
+          _ -> tagClippedSpans clipHere <$> collectNodeTextSpans ctx floatCache idx
+      childSpans <- walkChildSpans ctx floatCache idx clipHere
       pure (here ++ childSpans)
 
-walkChildSpans :: Context -> NodeIdx -> Rect -> IO [(Rect, T.Text, Color, Color, Rect)]
-walkChildSpans ctx idx clip = do
+walkChildSpans :: Context -> IM.IntMap (Maybe NodeType) -> NodeIdx -> Rect -> IO [(Rect, T.Text, Color, Color, Rect)]
+walkChildSpans ctx floatCache idx clip = do
   fc <- getFirstChild (ctxNodeArena ctx) idx
   go fc
   where
     go ci
       | ci < 0 = pure []
       | otherwise = do
-          spans <- collectClippedSpans ctx ci clip
+          spans <- collectClippedSpans ctx floatCache ci clip
           ns <- getNextSibling (ctxNodeArena ctx) ci
           rest <- go ns
           pure (spans ++ rest)
@@ -539,16 +577,77 @@ tagTextInputClippedSpans parentClip x y w h fm spans =
    in concatMap tagOne spans
 
 nodeLabelPaint :: Theme -> T.Text -> (T.Text, Color, Color)
-nodeLabelPaint theme raw =
-  let style = themePanel theme
-      fg
+nodeLabelPaint theme raw = labelPaintWith (themePanel theme) theme raw
+
+windowLabelPaint :: Theme -> T.Text -> (T.Text, Color, Color)
+windowLabelPaint theme raw = labelPaintWith (themeFloatingWindow theme) theme raw
+
+-- Modal chrome is transparent on SDL; TUI matches floating-window fills.
+modalLabelPaint :: Theme -> Bool -> T.Text -> (T.Text, Color, Color)
+modalLabelPaint theme terminal raw =
+  if terminal
+    then windowLabelPaint theme raw
+    else
+      labelPaintWithBg (themePanel theme) (colorRGBA 0 0 0 0) theme raw
+
+labelPaintWith :: Style -> Theme -> T.Text -> (T.Text, Color, Color)
+labelPaintWith style theme raw =
+  labelPaintWithBg style (styleBg style) theme raw
+
+labelPaintWithBg :: Style -> Color -> Theme -> T.Text -> (T.Text, Color, Color)
+labelPaintWithBg style bg theme raw =
+  let fg
         | hasHeadingMarker raw = themeAccent theme
         | hasMutedMarker raw = themeMuted theme
         | otherwise = styleFg style
-   in (stripWidgetMarkers raw, fg, styleBg style)
+   in (stripWidgetMarkers raw, fg, bg)
 
-collectNodeTextSpans :: Context -> NodeIdx -> IO [(Rect, T.Text, Color, Color)]
-collectNodeTextSpans ctx idx = do
+floatingLabelPaint ::
+  IM.IntMap (Maybe NodeType) -> Context -> NodeIdx -> Theme -> T.Text -> (T.Text, Color, Color)
+floatingLabelPaint floatCache ctx idx theme raw =
+  let terminal = isTerminalFont (ctxFontMetrics ctx)
+   in case IM.lookup idx floatCache of
+        Just (Just NodeWindow) -> windowLabelPaint theme raw
+        Just (Just NodeModal) -> modalLabelPaint theme terminal raw
+        _ -> nodeLabelPaint theme raw
+
+floatingAncestor :: Context -> NodeIdx -> IO (Maybe NodeType)
+floatingAncestor ctx idx = go idx
+  where
+    go i
+      | i < 0 = pure Nothing
+      | otherwise = do
+          nt <- getNodeType (ctxNodeArena ctx) i
+          if isFloatingNode nt
+            then pure (Just nt)
+            else do
+              parent <- getParent (ctxNodeArena ctx) i
+              go parent
+
+buildFloatingAncestorMap :: Context -> IO (IM.IntMap (Maybe NodeType))
+buildFloatingAncestorMap ctx = do
+  count <- arenaCount (ctxNodeArena ctx)
+  foldM resolve IM.empty [0 .. count - 1]
+  where
+    resolve :: IM.IntMap (Maybe NodeType) -> Int -> IO (IM.IntMap (Maybe NodeType))
+    resolve cache idx =
+      if IM.member idx cache
+        then pure cache
+        else do
+          nt <- getNodeType (ctxNodeArena ctx) idx
+          if isFloatingNode nt
+            then pure (IM.insert idx (Just nt) cache)
+            else do
+              parent <- getParent (ctxNodeArena ctx) idx
+              if parent < 0
+                then pure (IM.insert idx Nothing cache)
+                else do
+                  cache' <- resolve cache parent
+                  let ancestor = IM.findWithDefault Nothing parent cache'
+                  pure (IM.insert idx ancestor cache')
+
+collectNodeTextSpans :: Context -> IM.IntMap (Maybe NodeType) -> NodeIdx -> IO [(Rect, T.Text, Color, Color)]
+collectNodeTextSpans ctx floatCache idx = do
   nt <- getNodeType (ctxNodeArena ctx) idx
   (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
   let fm = ctxFontMetrics ctx
@@ -559,20 +658,21 @@ collectNodeTextSpans ctx idx = do
       if T.null raw
         then pure []
         else do
-          let (txt, fg, bg) = nodeLabelPaint theme raw
-              (ix, _) = labelContentInset fm
+          let (txt, fg, bg) = floatingLabelPaint floatCache ctx idx theme raw
+          let (ix, _) = labelContentInset fm
           ax <- getAlignX (ctxNodeArena ctx) idx
           (_, _, maxW, _) <- getMinMax (ctxNodeArena ctx) idx
           (wTag, _) <- getWidthSizing (ctxNodeArena ctx) idx
           (tw0, th0) <- ctxMeasureText ctx txt
-          let wrapCap
+          let hasNewlines = T.any (== '\n') txt
+              wrapCap
                 | maxW < 1e8 = max 0 maxW
                 | wTag == SizingGrow && w > 0 = w
                 | otherwise = maxW
               canWrap = wrapCap < 1e8
               wrapW = max 0 (wrapCap - 2 * ix)
               lineH = layoutLineHeight fm
-          if canWrap && wrapCap + 0.5 < tw0
+          if hasNewlines || (canWrap && wrapCap + 0.5 < tw0)
             then do
               textLines <-
                 if isTerminalFont fm
@@ -585,9 +685,9 @@ collectNodeTextSpans ctx idx = do
               pure
                 [ ( Rect
                       tx
-                      (centeredTextY fm (y + fromIntegral i * lineH) lineH th0)
+                      (centeredTextY fm (y + fromIntegral i * lineH) lineH lineH)
                       tw
-                      th0
+                      lineH
                   , line
                   , fg
                   , bg
@@ -595,9 +695,9 @@ collectNodeTextSpans ctx idx = do
                 | (i, line, lw) <- zip3 [(0 :: Int) ..] textLines lineWs
                 , let (tx, tw) = alignedTextBox ax x w ix lw
                 ]
-            else
+            else do
               let (tx, used) = alignedTextBox ax x w ix tw0
-               in pure [(Rect tx (centeredTextY fm y h th0) used th0, txt, fg, bg)]
+              pure [(Rect tx (centeredTextY fm y h th0) used th0, txt, fg, bg)]
     else
       if isWidgetNode nt
         then widgetTextSpans ctx nt idx x y w h
@@ -687,10 +787,14 @@ widgetHitRect ctx nt idx x y w h = do
   let fm = ctxFontMetrics ctx
   if not (isTerminalFont fm)
     then
-      pure $
-        case nt of
-          NodeTextInput -> tigFieldRect (textInputGeom fm x y w h)
-          _ -> Rect x y w h
+      case nt of
+        NodeTextInput -> pure (tigFieldRect (textInputGeom fm x y w h))
+        NodeButton -> do
+          stored <- getText (ctxNodeArena ctx) idx
+          if isCloseButtonText stored
+            then pure (closeButtonHitRect fm x y w h)
+            else pure (Rect x y w h)
+        _ -> pure (Rect x y w h)
     else
       case nt of
         NodeSlider -> do
@@ -698,8 +802,11 @@ widgetHitRect ctx nt idx x y w h = do
           let lbl = sliderLabelText (T.takeWhile (/= '\US') txt)
           pure (sliderTrackBounds fm lbl x y w h)
         NodeButton -> do
+          stored <- getText (ctxNodeArena ctx) idx
           txt <- displayText ctx nt idx
-          pure (terminalTextHitRect fm x y h txt True)
+          if isCloseButtonText stored
+            then pure (closeButtonHitRect fm x y w h)
+            else pure (terminalTextHitRect fm x y h txt True)
         NodeCheckbox -> do
           txt <- displayText ctx nt idx
           pure (terminalTextHitRect fm x y h txt True)
@@ -719,6 +826,23 @@ terminalTextHitRect fm x y h txt atOrigin =
       tx = if atOrigin then x else x + ix
       ty = centeredTextY fm y h th
    in Rect tx ty tw th
+
+-- Paint rect: center the X glyph in the close slot.
+terminalClosePaintRect :: FontMetrics -> Float -> Float -> Float -> Float -> T.Text -> Rect
+terminalClosePaintRect fm x y w h txt =
+  let tw = lineWidth fm txt
+      th = layoutLineHeight fm
+   in Rect (x + (w - tw) / 2) (centeredTextY fm y h th) tw th
+
+-- Hit rect: full close slot (terminal) or padded in the title bar (SDL).
+closeButtonHitRect :: FontMetrics -> Float -> Float -> Float -> Float -> Rect
+closeButtonHitRect fm x y w h =
+  if isTerminalFont fm
+    then Rect x y w h
+    else
+      -- Easier to tap; keep the target inside the title bar so inner east resize
+      -- still works below the close control.
+      Rect (x - 8) (y - 4) (w + 10) (h + 4)
 
 data UiCursorKind
   = UiCursorDefault
@@ -997,13 +1121,8 @@ widgetTextSpans ctx nt idx x y w h = do
               else pure False
           if isClose
             then
-              pure
-                [ ( Rect (x + (w - tw) / 2) (centeredTextY fm y h th) tw th
-                  , txt
-                  , fg
-                  , bg
-                  )
-                ]
+              let closeRect = terminalClosePaintRect fm x y w h txt
+               in pure [(closeRect, txt, fg, bg)]
             else do
               let tx =
                     if nt == NodeButton || nt == NodeCheckbox
@@ -1146,6 +1265,7 @@ widgetVisualStyle ctx nt idx = do
   active <- readIORef (ctxActiveId ctx)
   focus <- readIORef (ctxFocusId ctx)
   animT <- getAnimationValue ctx wid
+  mFloat <- floatingAncestor ctx idx
   storedText <-
     if nt == NodeButton
       then getText (ctxNodeArena ctx) idx
@@ -1184,16 +1304,25 @@ widgetVisualStyle ctx nt idx = do
               }
           NodeButton
             | isClose -> closeButtonStyle theme isHot animT
+            | Just NodeWindow <- mFloat -> themeFloatingWindow theme
+            | Just NodeModal <- mFloat, terminal -> themeFloatingWindow theme
           _ -> themeButton theme
+      widgetBase =
+        case mFloat of
+          Just NodeModal
+            | terminal -> base
+            | nt == NodeCheckbox || nt == NodeSlider -> overlayModalStyle theme
+            | otherwise -> base
+          _ -> base
       bg
-        | terminal, widKey == hashWidgetId active = styleActiveBg base
-        | terminal, isHot = styleHoverBg base
-        | terminal = styleBg base
-        | nt == NodeTextInput, isFocus = styleActiveBg base
-        | widKey == hashWidgetId active = styleActiveBg base
-        | nt == NodeCheckbox || nt == NodeSlider || isClose = styleBg base
-        | otherwise = hoverBackground base animT isHot
-  pure base {styleBg = bg}
+        | terminal, widKey == hashWidgetId active = styleActiveBg widgetBase
+        | terminal, isHot = styleHoverBg widgetBase
+        | terminal = styleBg widgetBase
+        | nt == NodeTextInput, isFocus = styleActiveBg widgetBase
+        | widKey == hashWidgetId active = styleActiveBg widgetBase
+        | nt == NodeCheckbox || nt == NodeSlider || isClose = styleBg widgetBase
+        | otherwise = hoverBackground widgetBase animT isHot
+  pure widgetBase {styleBg = bg}
 
 hoverBackground :: Style -> Float -> Bool -> Color
 hoverBackground base val isHot
@@ -1252,9 +1381,10 @@ lowerNode ctx idx = do
         pushRect da (Rect tx (centeredTextY fm y h th) used th) fg
     NodeSeparator -> do
       let hair = 1
-      if w >= h
-        then pushRect da (Rect x (y + (h - hair) / 2) w hair) (themeSeparator theme)
-        else pushRect da (Rect (x + (w - hair) / 2) y hair h) (themeSeparator theme)
+      when (not terminal) $
+        if w >= h
+          then pushRect da (Rect x (y + (h - hair) / 2) w hair) (themeSeparator theme)
+          else pushRect da (Rect (x + (w - hair) / 2) y hair h) (themeSeparator theme)
     NodeTextInput
       | not terminal -> do
           style <- widgetVisualStyle ctx nt idx
@@ -2271,10 +2401,22 @@ overlayMenuStyle theme =
         , styleActiveBg = selected
         }
 
+overlayWindowStyle :: Theme -> Style
+overlayWindowStyle theme =
+  let win = themeFloatingWindow theme
+   in win {styleCornerRadius = 2, styleBorderWidth = 1}
+
 overlayModalStyle :: Theme -> Style
 overlayModalStyle theme =
   let base = overlayMenuStyle theme
-   in base {styleCornerRadius = 2, styleBorderWidth = 1}
+      clear = colorRGBA 0 0 0 0
+   in base
+        { styleBg = clear
+        , styleHoverBg = clear
+        , styleActiveBg = clear
+        , styleCornerRadius = 2
+        , styleBorderWidth = 1
+        }
 
 textInputMenuStyle :: Theme -> Style
 textInputMenuStyle = overlayMenuStyle
@@ -2735,10 +2877,10 @@ modalHitAllowed ctx idx = do
 
 overlayHitAllowed :: Context -> NodeIdx -> V2 -> IO Bool
 overlayHitAllowed ctx idx mouse = do
-  modalOk <- modalHitAllowed ctx idx
-  if not modalOk
-    then pure False
-    else do
+  mModal <- topmostModalIdx ctx
+  case mModal of
+    Just _ -> modalHitAllowed ctx idx
+    Nothing -> do
       mWin <- topmostWindowAtMouse ctx mouse
       case mWin of
         Nothing -> pure True
@@ -3213,7 +3355,7 @@ drawWindowOverlays ctx = do
   let da = ctxDrawArena ctx
       theme = ctxTheme ctx
       terminal = isTerminalFont (ctxFontMetrics ctx)
-      style = overlayModalStyle theme
+      style = overlayWindowStyle theme
   forM_ [0 .. count - 1] $ \idx -> do
     nt <- getNodeType (ctxNodeArena ctx) idx
     when (nt == NodeWindow) $ do
@@ -3224,9 +3366,6 @@ drawWindowOverlays ctx = do
       strokeStyledRect da terminal style x y w h
       withClip da rect $ walkChildren ctx idx
 
-collectWindowSpans :: Context -> IO [(Rect, T.Text, Color, Color, Rect)]
-collectWindowSpans ctx = collectFloatingSpans ctx NodeWindow
-
 drawModalOverlays :: Context -> Size -> IO ()
 drawModalOverlays ctx (Size ww wh) = do
   count <- arenaCount (ctxNodeArena ctx)
@@ -3236,7 +3375,10 @@ drawModalOverlays ctx (Size ww wh) = do
       terminal = isTerminalFont fm
   found <- modalTreeOpen ctx
   when found $ do
-    pushRect da (Rect 0 0 ww wh) (themeOverlayDim theme)
+    when terminal $
+      pushBackdropDim da (Rect 0 0 ww wh) (themeOverlayDim theme)
+    when (not terminal) $
+      pushRect da (Rect 0 0 ww wh) (themeOverlayDim theme)
     forM_ [0 .. count - 1] $ \idx -> do
       nt <- getNodeType (ctxNodeArena ctx) idx
       when (nt == NodeModal) $ do
@@ -3244,7 +3386,10 @@ drawModalOverlays ctx (Size ww wh) = do
         pad <- getPadding (ctxNodeArena ctx) idx
         wid <- getWidgetId (ctxNodeArena ctx) idx
         let rect = Rect x y w h
-            style = overlayModalStyle theme
+            style =
+              if terminal
+                then overlayWindowStyle theme
+                else overlayModalStyle theme
         when (not terminal) $ pushMenuShadow da rect (styleCornerRadius style)
         fillStyledRect da terminal style rect
         strokeStyledRect da terminal style x y w h
@@ -3255,13 +3400,11 @@ drawModalOverlays ctx (Size ww wh) = do
         withClip da clip $ walkChildren ctx idx
         paintScrollChrome ctx da idx wid x y w h pad theme terminal
 
-collectModalSpans :: Context -> IO [(Rect, T.Text, Color, Color, Rect)]
-collectModalSpans ctx = collectFloatingSpans ctx NodeModal
-
-collectFloatingSpans :: Context -> NodeType -> IO [(Rect, T.Text, Color, Color, Rect)]
-collectFloatingSpans ctx wanted = do
+collectFloatingSpans :: Context -> IM.IntMap (Maybe NodeType) -> NodeType -> IO [(Rect, T.Text, Color, Color, Rect)]
+collectFloatingSpans ctx floatCache wanted = do
   count <- arenaCount (ctxNodeArena ctx)
-  let go idx
+  let fm = ctxFontMetrics ctx
+      go idx
         | idx >= count = pure []
         | otherwise = do
             nt <- getNodeType (ctxNodeArena ctx) idx
@@ -3272,13 +3415,12 @@ collectFloatingSpans ctx wanted = do
                 pad <- getPadding (ctxNodeArena ctx) idx
                 dir <- getDirection (ctxNodeArena ctx) idx
                 contentSize <- getNodeValue (ctxNodeArena ctx) idx
-                fm <- pure (ctxFontMetrics ctx)
                 slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
                 let clip =
                       if isScrollNode nt
                         then scrollContentClip fm slot dir x y w h pad contentSize
                         else padContentClip fm x y w h pad
-                here <- walkChildSpans ctx idx clip
+                here <- walkChildSpans ctx floatCache idx clip
                 rest <- go (idx + 1)
                 pure (here ++ rest)
   go 0
@@ -3331,6 +3473,43 @@ selectDropPickIndex dropRect itemH nOpts mouseY =
 terminalDropRow :: Int -> Int -> Int -> T.Text -> Color -> Color -> Rect -> (Rect, T.Text, Color, Color, Rect)
 terminalDropRow x y w txt fg bg clip =
   (Rect (fromIntegral x) (fromIntegral y) (fromIntegral w) 1, txt, fg, bg, clip)
+
+-- Title-bar rule and other column separators: glyphs, not a filled hairline.
+terminalSeparatorSpans :: Theme -> Float -> Float -> Float -> Float -> [(Rect, T.Text, Color, Color)]
+terminalSeparatorSpans theme x y w h =
+  let sepFg = themeSeparator theme
+      sepBg = colorRGBA 0 0 0 0
+      hair = 1 :: Float
+   in if w >= h
+        then
+          let wi :: Int
+              wi = max 1 (round w)
+              rowY :: Int
+              rowY = round (y + (h - hair) / 2)
+              rowX :: Int
+              rowX = round x
+           in
+            [ ( Rect (fromIntegral rowX) (fromIntegral rowY) (fromIntegral wi) hair
+              , T.replicate wi (T.singleton '\x2500')
+              , sepFg
+              , sepBg
+              )
+            ]
+        else
+          let hi :: Int
+              hi = max 1 (round h)
+              colX :: Int
+              colX = round (x + (w - hair) / 2)
+              colY :: Int
+              colY = round y
+           in
+            [ ( Rect (fromIntegral colX) (fromIntegral (colY + i)) hair hair
+              , T.singleton '\x2502'
+              , sepFg
+              , sepBg
+              )
+            | i <- [0 .. hi - 1]
+            ]
 
 padDropText :: Int -> T.Text -> T.Text
 padDropText n txt =

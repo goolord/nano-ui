@@ -23,6 +23,7 @@ import NanoUI.Font
   , measureTextWrapped
   , measureTextWrappedIO
   , labelContentInset
+  , stripWidgetMarkers
   , ScrollBarSlot
   , scrollLayoutGutter
   , widgetPadding
@@ -169,18 +170,20 @@ measureTextNode na fm measure useAssignedWidth idx = do
     else do
       txt <- getText na idx
       (tw0, th0) <- measure txt
-      let (ix, _) = labelContentInset fm
+      let plain = stripWidgetMarkers txt
+          (ix, _) = labelContentInset fm
+          hasNewlines = T.any (== '\n') plain
           wrapCap
             | maxW < 1e8 = max 0 maxW
             | needsAssignedWrap = assignedW
             | otherwise = maxW
-          wrapW = max 0 (wrapCap - ix)
+          wrapW = max 0 (wrapCap - 2 * ix)
       (tw, th) <-
-        if wrapCap < 1e8 && wrapCap + 0.5 < tw0
+        if hasNewlines || (wrapCap < 1e8 && wrapCap + 0.5 < tw0)
           then
             if isTerminalFont fm
-              then pure (measureTextWrapped fm txt wrapW)
-              else measureTextWrappedIO (\t -> fmap fst (measure t)) fm txt wrapW
+              then pure (measureTextWrapped fm plain wrapW)
+              else measureTextWrappedIO (\t -> fmap fst (measure t)) fm plain wrapW
           else pure (tw0, th0)
       setRect na idx 0 0 (clamp tw minW maxW) (clamp (max (layoutLineHeight fm) th) minH maxH)
 

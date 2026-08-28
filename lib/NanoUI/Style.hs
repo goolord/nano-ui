@@ -13,6 +13,9 @@ module NanoUI.Style
   , Theme (..)
   , defaultTheme
   , terminalTheme
+  , terminalThemeFromColors
+  , terminalDefaultFg
+  , terminalDefaultBg
   , sdlTheme
   , panelPaintPad
   , windowPad
@@ -36,7 +39,7 @@ module NanoUI.Style
   , aspect
 ) where
 
-import NanoUI.Types (Color, colorRGBA)
+import NanoUI.Types (Color, colorB, colorG, colorLuminance, colorR, colorRGBA, lerpColor)
 
 data Sizing
   = Fixed Float
@@ -205,6 +208,7 @@ defaultStyle =
 data Theme = Theme
   { themeWindow :: Color
   , themePanel :: Style
+  , themeFloatingWindow :: Style
   , themeButton :: Style
   , themeInput :: Style
   , themeSeparator :: Color
@@ -228,6 +232,16 @@ sdlTheme =
           , styleCornerRadius = 2
           , styleHoverBg = colorRGBA 34 34 38 255
           , styleActiveBg = colorRGBA 30 30 34 255
+          }
+    , themeFloatingWindow =
+        Style
+          { styleBg = colorRGBA 48 52 64 255
+          , styleFg = colorRGBA 248 247 245 255
+          , styleBorder = colorRGBA 88 156 246 255
+          , styleBorderWidth = 1
+          , styleCornerRadius = 2
+          , styleHoverBg = colorRGBA 56 60 74 255
+          , styleActiveBg = colorRGBA 40 44 54 255
           }
     , themeButton =
         Style
@@ -258,43 +272,101 @@ sdlTheme =
 defaultTheme :: Theme
 defaultTheme = sdlTheme
 
--- Dusk ink, bone text, copper headings. Tuned for cell-grid contrast, not SDL chrome.
+-- Fallback when the terminal palette cannot be read (tests, pipes).
+terminalDefaultFg :: Color
+terminalDefaultFg = colorRGBA 236 228 210 255
+
+terminalDefaultBg :: Color
+terminalDefaultBg = colorRGBA 16 18 28 255
+
+-- Build TUI chrome from the emulator default fg/bg with lighter/darker fills.
+terminalThemeFromColors :: Color -> Color -> Theme
+terminalThemeFromColors fg bg =
+  let dark = colorLuminance bg < 0.45
+      white = colorRGBA 255 255 255 255
+      black = colorRGBA 0 0 0 255
+      lift c t =
+        if dark
+          then lerpColor c white t
+          else lerpColor c black t
+      sink c t =
+        if dark
+          then lerpColor c black t
+          else lerpColor c white t
+      window = bg
+      panelBg = lift bg 0.09
+      panelHover = lift bg 0.14
+      panelActive = sink bg 0.04
+      buttonBg = lift bg 0.15
+      buttonHover = lift bg 0.22
+      buttonActive = lift bg 0.08
+      inputBg = sink bg 0.08
+      inputHover = sink bg 0.04
+      inputActive = sink bg 0.12
+      floatBg = lift bg 0.12
+      floatHover = lift bg 0.17
+      floatActive = lift bg 0.08
+      border = lerpColor fg bg 0.58
+      accent =
+        if dark
+          then lift fg 0.22
+          else sink fg 0.28
+      muted = lerpColor fg bg 0.40
+      separator = lerpColor fg bg 0.52
+      dimBase = sink bg 0.55
+      overlayDim =
+        colorRGBA (colorR dimBase) (colorG dimBase) (colorB dimBase) 186
+      panelStyle =
+        Style
+          { styleBg = panelBg
+          , styleFg = fg
+          , styleBorder = border
+          , styleBorderWidth = 1
+          , styleCornerRadius = 0
+          , styleHoverBg = panelHover
+          , styleActiveBg = panelActive
+          }
+      buttonStyle =
+        Style
+          { styleBg = buttonBg
+          , styleFg = fg
+          , styleBorder = lerpColor fg bg 0.48
+          , styleBorderWidth = 1
+          , styleCornerRadius = 0
+          , styleHoverBg = buttonHover
+          , styleActiveBg = buttonActive
+          }
+      inputStyle =
+        Style
+          { styleBg = inputBg
+          , styleFg = fg
+          , styleBorder = border
+          , styleBorderWidth = 1
+          , styleCornerRadius = 0
+          , styleHoverBg = inputHover
+          , styleActiveBg = inputActive
+          }
+      floatStyle =
+        Style
+          { styleBg = floatBg
+          , styleFg = fg
+          , styleBorder = accent
+          , styleBorderWidth = 1
+          , styleCornerRadius = 0
+          , styleHoverBg = floatHover
+          , styleActiveBg = floatActive
+          }
+   in Theme
+        { themeWindow = window
+        , themePanel = panelStyle
+        , themeFloatingWindow = floatStyle
+        , themeButton = buttonStyle
+        , themeInput = inputStyle
+        , themeSeparator = separator
+        , themeAccent = accent
+        , themeMuted = muted
+        , themeOverlayDim = overlayDim
+        }
+
 terminalTheme :: Theme
-terminalTheme =
-  Theme
-    { themeWindow = colorRGBA 16 18 28 255
-    , themePanel =
-        Style
-          { styleBg = colorRGBA 26 30 44 255
-          , styleFg = colorRGBA 236 228 210 255
-          , styleBorder = colorRGBA 92 100 122 255
-          , styleBorderWidth = 1
-          , styleCornerRadius = 0
-          , styleHoverBg = colorRGBA 36 42 60 255
-          , styleActiveBg = colorRGBA 20 24 36 255
-          }
-    , themeButton =
-        Style
-          { styleBg = colorRGBA 42 48 68 255
-          , styleFg = colorRGBA 236 228 210 255
-          , styleBorder = colorRGBA 110 118 140 255
-          , styleBorderWidth = 1
-          , styleCornerRadius = 0
-          , styleHoverBg = colorRGBA 58 66 90 255
-          , styleActiveBg = colorRGBA 32 38 54 255
-          }
-    , themeInput =
-        Style
-          { styleBg = colorRGBA 12 14 22 255
-          , styleFg = colorRGBA 236 228 210 255
-          , styleBorder = colorRGBA 92 100 122 255
-          , styleBorderWidth = 1
-          , styleCornerRadius = 0
-          , styleHoverBg = colorRGBA 20 24 36 255
-          , styleActiveBg = colorRGBA 10 12 18 255
-          }
-    , themeSeparator = colorRGBA 92 100 122 255
-    , themeAccent = colorRGBA 214 154 96 255
-    , themeMuted = colorRGBA 184 176 160 255
-    , themeOverlayDim = colorRGBA 8 10 16 186
-    }
+terminalTheme = terminalThemeFromColors terminalDefaultFg terminalDefaultBg

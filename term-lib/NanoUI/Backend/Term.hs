@@ -10,6 +10,10 @@ module NanoUI.Backend.Term
   , runTermAppEff
   , runTermAppWithQuit
   , runTermAppWithQuitEff
+  , newAdaptiveTerminalContext
+  , queryTerminalColors
+  , TermDebugSnapshot (..)
+  , askTermDebug
   ) where
 
 #if defined(mingw32_HOST_OS)
@@ -20,6 +24,7 @@ import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import GHC.Clock (getMonotonicTime)
 import NanoUI
   ( Context
+  , ctxTheme
   , Input (..)
   , Modifiers (..)
   , Size (..)
@@ -29,16 +34,39 @@ import NanoUI
   , IOE
   , V2 (..)
   , anyAnimating
-  , collectTextSpans
-  , collectOverlayTextSpans
+  , collectRasterSpans
+  , debugPanelOpen
   , emptyInput
-  , needsRedraw
+  , needsRedrawIdle
   , overlayConsumesQuit
   , runEff
   , runFrameEff
   , textInputEditActive
+  , defaultTheme
+  , terminalTheme
+  , terminalThemeFromColors
+  , widgetNodeCount
   , type (:>)
+  , withTheme
+  , setHost
+  , askHost
+  , uiIO
+  , askContext
+  , askInput
   )
+import NanoUI.Term.Debug
+  ( TermDebugHost (..)
+  , TermDebugSnapshot (..)
+  , TermDrawStats (..)
+  , emptyTermDebug
+  , newTermDebugSampler
+  , noteLoop
+  , notePresent
+  , noteSkip
+  , readTermDebug
+  , takeDebugLive
+  )
+import NanoUI.Term.Palette (newAdaptiveTerminalContext, queryTerminalColors)
 import NanoUI.Term.Cells
   ( Cells
   , rasterizeLayered
@@ -62,6 +90,14 @@ animateTimeout = 16
 -- Win32 INFINITE / notcurses: negative timeout blocks until input.
 idleBlock :: Int
 idleBlock = -1
+
+termContextIO :: Context -> IO Context
+termContextIO ctx =
+  if ctxTheme ctx == defaultTheme || ctxTheme ctx == terminalTheme
+    then do
+      (fg, bg) <- queryTerminalColors
+      pure (withTheme ctx (terminalThemeFromColors fg bg))
+    else pure ctx
 
 runTermApp :: Context -> NanoUI () -> IO ()
 runTermApp = runTermAppEff runEff
@@ -87,6 +123,7 @@ runTermAppWithQuitEff ::
   Eff (Ui : es) () ->
   IO ()
 runTermAppWithQuitEff unlift ctx shouldQuit ui =
+  termContextIO ctx >>= \ctx' ->
   withDriver $ \drv ->
     ( do
         drvWrite drv setup
@@ -94,7 +131,7 @@ runTermAppWithQuitEff unlift ctx shouldQuit ui =
         drvRefreshViewport drv
         termMainLoop
           unlift
-          ctx
+          ctx'
           shouldQuit
           ui
           (drvSize drv)
@@ -121,10 +158,11 @@ runTermAppWithQuitEff ::
   Eff (Ui : es) () ->
   IO ()
 runTermAppWithQuitEff unlift ctx shouldQuit ui =
+  termContextIO ctx >>= \ctx' ->
   withNotcurses $ \nc ->
     termMainLoop
       unlift
-      ctx
+      ctx'
       shouldQuit
       ui
       (ncSize nc)
@@ -144,19 +182,19 @@ termMainLoop ::
   (Maybe Cells -> Cells -> IO ()) ->
   IO ()
 termMainLoop unlift ctx shouldQuit ui getSize readEvents present = do
+  debugRef <- newTermDebugSampler
+  setHost ctx (TermDebugHost debugRef)
   (w0, h0) <- getSize
-  prev <- newIORef Nothing
-  now <- getMonotonicTime
+  cellsRef <- newIORef Nothing
+  startTime <- getMonotonicTime
   let inp0 =
         emptyInput
           { inputWindowSize = Size (fromIntegral w0) (fromIntegral h0)
           }
-  prevInp <- newIORef inp0
+  prevInpRef <- newIORef inp0
   clickRef <- newIORef (0, V2 (-999) (-999), 0)
-  draw prev prevInp inp0
-  loop prev prevInp clickRef inp0 [] now
-  where
-    loop prev prevInp clickRef inp queued lastT = do
+  let
+    loop cellsRef' prevInpRef' clickRef' inp queued lastT = do
       pending <-
         if null queued
           then do
@@ -168,37 +206,55 @@ termMainLoop unlift ctx shouldQuit ui getSize readEvents present = do
       if any isHardQuit group && not editActive
         then pure ()
         else do
-          now <- getMonotonicTime
+          nowT <- getMonotonicTime
+          let dt = realToFrac (nowT - lastT)
+          noteLoop debugRef dt
           let inpRaw =
                 foldl'
                   applyEvent
-                  (clearEphemeral inp {inputDeltaTime = realToFrac (now - lastT)})
+                  (clearEphemeral inp {inputDeltaTime = dt})
                   group
-          inp' <- stampClicks clickRef inpRaw
+          inp' <- stampClicks clickRef' inpRaw
           editActive' <- textInputEditActive ctx
           if isHardQuitInput inp' && not editActive'
             then pure ()
             else do
-              draw prev prevInp inp'
-              writeIORef prevInp inp'
+              draw cellsRef' prevInpRef' inp'
+              writeIORef prevInpRef' inp'
               overlayQuit <- overlayConsumesQuit ctx inp'
               if shouldQuit inp' && not overlayQuit
                 then pure ()
-                else loop prev prevInp clickRef inp' rest now
+                else loop cellsRef' prevInpRef' clickRef' inp' rest nowT
 
-    draw prevCells prevInpRef inp = do
-      prevI <- readIORef prevInpRef
-      need <- needsRedraw ctx prevI inp
-      when need $ do
-        (_, _, drawData, _) <- runFrameEff unlift ctx inp ui
-        baseSpans <- collectTextSpans ctx
-        overlaySpans <- collectOverlayTextSpans ctx inp
-        let Size w h = inputWindowSize inp
-        cells <- rasterizeLayered (round w) (round h) drawData baseSpans overlaySpans
-        before <- readIORef prevCells
-        when (before /= Just cells) $ do
-          present before cells
-          writeIORef prevCells (Just cells)
+    draw prevCells prevInpCell inp = do
+      prevI <- readIORef prevInpCell
+      debugLive <- debugPanelOpen ctx
+      wantDebug <- takeDebugLive debugRef debugLive
+      need <- needsRedrawIdle ctx prevI inp
+      if need || wantDebug
+        then do
+          t0 <- getMonotonicTime
+          (_, _, drawData, _) <- runFrameEff unlift ctx inp ui
+          (baseSpans, overlaySpans) <- collectRasterSpans ctx inp
+          nodes <- widgetNodeCount ctx
+          let Size w h = inputWindowSize inp
+              stats =
+                TermDrawStats
+                  { tdsNodes = nodes
+                  , tdsBaseSpans = length baseSpans
+                  , tdsOverlaySpans = length overlaySpans
+                  }
+          cells <- rasterizeLayered (round w) (round h) drawData baseSpans overlaySpans
+          before <- readIORef prevCells
+          let blitted = before /= Just cells
+          when blitted $ do
+            present before cells
+            writeIORef prevCells (Just cells)
+          t1 <- getMonotonicTime
+          notePresent debugRef ((t1 - t0) * 1000) drawData stats blitted
+        else noteSkip debugRef
+  draw cellsRef prevInpRef inp0
+  loop cellsRef prevInpRef clickRef inp0 [] startTime
 
 splitFrame :: [TermEvent] -> ([TermEvent], [TermEvent])
 splitFrame events =
@@ -273,3 +329,13 @@ applyEvent inp ev =
             MouseScrollDown -> positioned {inputScroll = V2 0 1}
             MouseScrollLeft -> positioned {inputScroll = V2 (-1) 0}
             MouseScrollRight -> positioned {inputScroll = V2 1 0}
+
+askTermDebug :: Ui :> es => Eff es TermDebugSnapshot
+askTermDebug = do
+  ctx <- askContext
+  inp <- askInput
+  mhost <- askHost @TermDebugHost
+  case mhost of
+    Nothing -> pure emptyTermDebug
+    Just (TermDebugHost ref) ->
+      uiIO (readTermDebug ref (inputWindowSize inp) (inputMousePos inp) ctx)
