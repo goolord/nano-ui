@@ -24,7 +24,6 @@ module NanoUI
   , Key (..)
   , Modifiers (..)
   , emptyInput
-  , inputChanged
   , inputInteracted
   , inputPointerHeld
   , -- Style
@@ -61,7 +60,6 @@ module NanoUI
   , wrap
   , tight
   , percent
-  , percentH
   , aspect
   , -- ID
     WidgetId (..)
@@ -112,6 +110,7 @@ module NanoUI
   , heading
   , muted
   , kv
+  , kvBlock
   , card
   , toolbar
   , sep
@@ -133,7 +132,6 @@ module NanoUI
   , cursorKindIs
   , uiCursorKind
   , UiCursorKind (..)
-  , sliderTrackRect
   , sliderTrackBounds
   , -- Context
     Context
@@ -199,7 +197,6 @@ module NanoUI
   , scrollBarWindowGutter
   , -- ASCII
     renderASCII
-  , renderASCIIFromRects
   ) where
 
 import NanoUI.Compact (Compact, askCompact, compactHost)
@@ -207,19 +204,18 @@ import NanoUI.Context (Context (..), FrameMsg (..), anyAnimating, atlasSnapshot,
 import NanoUI.Draw (DrawCmd (..), DrawData (..), Layer (..), backdropDimTextureId, indexSize, vertexSize)
 import NanoUI.Font (FontMetrics (..), hasMonoFontMarker, headingFontMarker, isTerminalFont, labelContentInset, monoFontMarker, monospaceMetrics, mutedFontMarker, resolveLayoutGap, resolveLayoutPadding, scrollBarGutter, scrollBarListExtra, scrollBarPageExtra, scrollBarWidth, scrollBarWindowGutter, sliderTrackBounds, stripMonoFontMarker, stripWidgetMarkers, widgetContentInset, widgetPadding)
 import Effectful (Eff, IOE, runEff, type (:>))
-import NanoUI.Frame (collectOverlayTextSpans, collectRasterSpans, collectTextSpans, cursorKindIs, debugPanelOpen, floatingPanelActive, needsRedraw, needsRedrawIdle, pointerCursorWanted, runFrame, runFrameEff, sliderTrackRect, textFieldActive, uiCursorKind, widgetNodeCount, UiCursorKind (..))
+import NanoUI.Frame (collectOverlayTextSpans, collectRasterSpans, collectTextSpans, cursorKindIs, debugPanelOpen, floatingPanelActive, needsRedraw, needsRedrawIdle, pointerCursorWanted, runFrame, runFrameEff, textFieldActive, uiCursorKind, widgetNodeCount, UiCursorKind (..))
 import NanoUI.Id (WidgetId (..), hashWidgetId, widgetId)
 import NanoUI.Input
   ( Input (..)
   , Key (..)
   , Modifiers (..)
   , emptyInput
-  , inputChanged
   , inputInteracted
   , inputPointerHeld
   )
 import NanoUI.Monad (NanoUI, Ui, askContext, askInput, askHost, currentId, emit, runNanoUI, runUi, uiIO, withKey)
-import NanoUI.Render.ASCII (renderASCII, renderASCIIFromRects)
+import NanoUI.Render.ASCII (renderASCII)
 import NanoUI.Style
   ( AlignX (..)
   , AlignY (..)
@@ -254,7 +250,6 @@ import NanoUI.Style
   , wrap
   , tight
   , percent
-  , percentH
   , aspect
   )
 import NanoUI.Types (Color (..), Damage (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, colorToWord32, contrastRatio, damageIsEmpty, lerpColor, rectContains, rectIntersect, v2Add)
@@ -288,6 +283,7 @@ import NanoUI.Widgets
   , heading
   , muted
   , kv
+  , kvBlock
   , card
   , toolbar
   , sep

@@ -29,6 +29,7 @@ module NanoUI.Widgets
   , heading
   , muted
   , kv
+  , kvBlock
   , card
   , toolbar
   , sep
@@ -58,6 +59,7 @@ import NanoUI.Font
   ( FontMetrics
   , headingFontMarker
   , isTerminalFont
+  , monoFontMarker
   , layoutUnitScale
   , mutedFontMarker
   , resolveLayoutGap
@@ -271,6 +273,13 @@ kv k v = do
     row rowLayout $ do
       void (labelEx (keyLayout defaultLayout) k)
       void (labelEx (tight . fillW . alignEnd $ defaultLayout) (T.stripEnd v))
+
+kvBlock :: (HasCallStack, Ui :> es) => [(String, String)] -> Eff es ()
+kvBlock rows =
+  void $
+    labelEx
+      (tight . gap 0 $ defaultLayout)
+      (monoFontMarker <> T.unlines [T.pack (k <> ": " <> v) | (k, v) <- rows])
 
 card :: Ui :> es => Eff es a -> Eff es a
 card = panel (minW 300 . padXY 12 10 . gap 8 . fillW $ defaultLayout)

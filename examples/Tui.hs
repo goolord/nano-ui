@@ -111,9 +111,7 @@ tuiApp lastClick = do
     onClick aboutResp (setAbout False)
 
 debugWindowBody :: TermDebugSnapshot -> NanoUI ()
-debugWindowBody snap = do
-  let body = T.unlines [T.pack (k <> ": " <> v) | (k, v) <- allDebugRows snap]
-  void $ labelEx (tight . gap 0 $ defaultLayout) (monoFontMarker <> body)
+debugWindowBody snap = kvBlock (allDebugRows snap)
 
 allDebugRows :: TermDebugSnapshot -> [(String, String)]
 allDebugRows s =

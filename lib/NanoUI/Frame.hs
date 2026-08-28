@@ -16,7 +16,6 @@ module NanoUI.Frame
   , cursorKindIs
   , uiCursorKind
   , UiCursorKind (..)
-  , sliderTrackRect
   ) where
 
 import Control.Monad (filterM, foldM, forM, forM_, unless, void, when)
@@ -159,7 +158,7 @@ import NanoUI.WidgetText
   , selectChevronCenterX
   )
 import NanoUI.Style (Padding (..), Style (..), Theme (..), themeAccent, themeButton, themeFloatingWindow, themeInput, themeMuted, themeOverlayDim, themePanel, themeSeparator, themeWindow)
-import NanoUI.Types (Color (..), Damage (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, rectArea, rectContains, rectH, rectInflate, rectIntersect, rectOverlapArea, rectUnion, rectW, rectX, rectY, sliderTrackRect, v2X, v2Y)
+import NanoUI.Types (Color (..), Damage (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, rectArea, rectContains, rectH, rectInflate, rectIntersect, rectOverlapArea, rectUnion, rectW, rectX, rectY, v2X, v2Y)
 
 runFrame :: Context -> Input -> NanoUI a -> IO (a, [FrameMsg], DrawData, Bool)
 runFrame = runFrameEff runEff
@@ -579,17 +578,6 @@ tagTextInputClippedSpans parentClip x y w h fm spans =
 nodeLabelPaint :: Theme -> T.Text -> (T.Text, Color, Color)
 nodeLabelPaint theme raw = labelPaintWith (themePanel theme) theme raw
 
-windowLabelPaint :: Theme -> T.Text -> (T.Text, Color, Color)
-windowLabelPaint theme raw = labelPaintWith (themeFloatingWindow theme) theme raw
-
--- Modal chrome is transparent on SDL; TUI matches floating-window fills.
-modalLabelPaint :: Theme -> Bool -> T.Text -> (T.Text, Color, Color)
-modalLabelPaint theme terminal raw =
-  if terminal
-    then windowLabelPaint theme raw
-    else
-      labelPaintWithBg (themePanel theme) (colorRGBA 0 0 0 0) theme raw
-
 labelPaintWith :: Style -> Theme -> T.Text -> (T.Text, Color, Color)
 labelPaintWith style theme raw =
   labelPaintWithBg style (styleBg style) theme raw
@@ -607,8 +595,10 @@ floatingLabelPaint ::
 floatingLabelPaint floatCache ctx idx theme raw =
   let terminal = isTerminalFont (ctxFontMetrics ctx)
    in case IM.lookup idx floatCache of
-        Just (Just NodeWindow) -> windowLabelPaint theme raw
-        Just (Just NodeModal) -> modalLabelPaint theme terminal raw
+        Just (Just NodeWindow) -> labelPaintWith (themeFloatingWindow theme) theme raw
+        Just (Just NodeModal)
+          | terminal -> labelPaintWith (themeFloatingWindow theme) theme raw
+          | otherwise -> labelPaintWithBg (themePanel theme) (colorRGBA 0 0 0 0) theme raw
         _ -> nodeLabelPaint theme raw
 
 floatingAncestor :: Context -> NodeIdx -> IO (Maybe NodeType)

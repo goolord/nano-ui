@@ -9,7 +9,6 @@ module NanoUI.Style
   , Layout (..)
   , defaultLayout
   , Style (..)
-  , defaultStyle
   , Theme (..)
   , defaultTheme
   , terminalTheme
@@ -35,7 +34,6 @@ module NanoUI.Style
   , wrap
   , tight
   , percent
-  , percentH
   , aspect
 ) where
 
@@ -173,10 +171,6 @@ tight l = l {layoutPadding = Padding 0 0 0 0}
 percent :: Float -> Layout -> Layout
 percent p l = l {layoutWidth = Percent p}
 
-{-# INLINE percentH #-}
-percentH :: Float -> Layout -> Layout
-percentH p l = l {layoutHeight = Percent p}
-
 -- Width over height. After width is known, height becomes width / ratio.
 {-# INLINE aspect #-}
 aspect :: Float -> Layout -> Layout
@@ -192,18 +186,6 @@ data Style = Style
   , styleActiveBg :: !Color
   }
   deriving (Eq, Show)
-
-defaultStyle :: Style
-defaultStyle =
-  Style
-    { styleBg = colorRGBA 60 60 60 255
-    , styleFg = colorRGBA 240 240 240 255
-    , styleBorder = colorRGBA 100 100 100 255
-    , styleBorderWidth = 1
-    , styleCornerRadius = 2
-    , styleHoverBg = colorRGBA 80 80 80 255
-    , styleActiveBg = colorRGBA 40 40 40 255
-    }
 
 data Theme = Theme
   { themeWindow :: Color

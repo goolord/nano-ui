@@ -23,8 +23,6 @@ module NanoUI.Types
   , rectArea
   , Damage (..)
   , damageIsEmpty
-  , sliderTrackRect
-  , sliderTrackMargin
   , sliderBarCells
   , v2Add
   , v2Sub
@@ -184,20 +182,9 @@ damageIsEmpty dmg =
     DamageFull -> False
     DamageClip r -> rectW r <= 0 || rectH r <= 0
 
--- End inset above and below the hit band (handle sits in this slack).
-sliderTrackMargin :: Float
-sliderTrackMargin = 3
-
 -- Terminal inline slider bar width in cells (matches WidgetText.sliderText).
 sliderBarCells :: Int
 sliderBarCells = 12
-
-{-# INLINE sliderTrackRect #-}
-sliderTrackRect :: Float -> Float -> Float -> Float -> Rect
-sliderTrackRect x y w h =
-  let trackH = max 4 (h * 0.18)
-      trackY = y + h - trackH - sliderTrackMargin
-   in Rect x trackY w trackH
 
 {-# INLINE v2Add #-}
 v2Add :: V2 -> V2 -> V2
