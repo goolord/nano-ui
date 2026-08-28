@@ -595,10 +595,10 @@ floatingLabelPaint ::
 floatingLabelPaint floatCache ctx idx theme raw =
   let terminal = isTerminalFont (ctxFontMetrics ctx)
    in case IM.lookup idx floatCache of
-        Just (Just NodeWindow) -> labelPaintWith (themeFloatingWindow theme) theme raw
+        Just (Just NodeWindow)
+          | terminal -> labelPaintWith (themeFloatingWindow theme) theme raw
         Just (Just NodeModal)
           | terminal -> labelPaintWith (themeFloatingWindow theme) theme raw
-          | otherwise -> labelPaintWithBg (themePanel theme) (colorRGBA 0 0 0 0) theme raw
         _ -> nodeLabelPaint theme raw
 
 floatingAncestor :: Context -> NodeIdx -> IO (Maybe NodeType)
@@ -1294,7 +1294,7 @@ widgetVisualStyle ctx nt idx = do
               }
           NodeButton
             | isClose -> closeButtonStyle theme isHot animT
-            | Just NodeWindow <- mFloat -> themeFloatingWindow theme
+            | Just NodeWindow <- mFloat, terminal -> themeFloatingWindow theme
             | Just NodeModal <- mFloat, terminal -> themeFloatingWindow theme
           _ -> themeButton theme
       widgetBase =
@@ -2399,14 +2399,7 @@ overlayWindowStyle theme =
 overlayModalStyle :: Theme -> Style
 overlayModalStyle theme =
   let base = overlayMenuStyle theme
-      clear = colorRGBA 0 0 0 0
-   in base
-        { styleBg = clear
-        , styleHoverBg = clear
-        , styleActiveBg = clear
-        , styleCornerRadius = 2
-        , styleBorderWidth = 1
-        }
+   in base {styleCornerRadius = 2, styleBorderWidth = 1}
 
 textInputMenuStyle :: Theme -> Style
 textInputMenuStyle = overlayMenuStyle

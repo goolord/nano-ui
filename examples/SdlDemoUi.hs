@@ -87,7 +87,19 @@ orDash "" = "-"
 orDash s = T.pack s
 
 debugBody :: SdlDebugSnapshot -> NanoUI ()
-debugBody s = kvBlock (frameRows s ++ drawRows s ++ displayRows s ++ rtsRows s)
+debugBody s = do
+  debugSection "Frame" (frameRows s)
+  sep
+  debugSection "Draw" (drawRows s)
+  sep
+  debugSection "Display" (displayRows s)
+  sep
+  debugSection "Runtime" (rtsRows s)
+
+debugSection :: T.Text -> [(String, String)] -> NanoUI ()
+debugSection title rows = do
+  heading title
+  mapM_ (\(k, v) -> kv (T.pack k) (monoFontMarker <> T.pack v)) rows
 
 clipField :: Int -> String -> String
 clipField n s =

@@ -203,9 +203,7 @@ data Theme = Theme
 -- Charcoal tiling surfaces (Untitled.png) with Adwaita-dark widget chrome.
 sdlTheme :: Theme
 sdlTheme =
-  Theme
-    { themeWindow = colorRGBA 24 24 27 255
-    , themePanel =
+  let panelStyle =
         Style
           { styleBg = colorRGBA 34 34 38 255
           , styleFg = colorRGBA 236 234 230 255
@@ -215,41 +213,35 @@ sdlTheme =
           , styleHoverBg = colorRGBA 34 34 38 255
           , styleActiveBg = colorRGBA 30 30 34 255
           }
-    , themeFloatingWindow =
-        Style
-          { styleBg = colorRGBA 48 52 64 255
-          , styleFg = colorRGBA 248 247 245 255
-          , styleBorder = colorRGBA 88 156 246 255
-          , styleBorderWidth = 1
-          , styleCornerRadius = 2
-          , styleHoverBg = colorRGBA 56 60 74 255
-          , styleActiveBg = colorRGBA 40 44 54 255
-          }
-    , themeButton =
-        Style
-          { styleBg = colorRGBA 52 52 58 255
-          , styleFg = colorRGBA 248 247 245 255
-          , styleBorder = colorRGBA 74 76 84 255
-          , styleBorderWidth = 1
-          , styleCornerRadius = 2
-          , styleHoverBg = colorRGBA 68 70 78 255
-          , styleActiveBg = colorRGBA 42 42 48 255
-          }
-    , themeInput =
-        Style
-          { styleBg = colorRGBA 18 18 21 255
-          , styleFg = colorRGBA 236 234 230 255
-          , styleBorder = colorRGBA 70 72 80 255
-          , styleBorderWidth = 1
-          , styleCornerRadius = 2
-          , styleHoverBg = colorRGBA 24 24 28 255
-          , styleActiveBg = colorRGBA 14 14 17 255
-          }
-    , themeSeparator = colorRGBA 78 80 88 255
-    , themeAccent = colorRGBA 88 156 246 255
-    , themeMuted = colorRGBA 176 172 164 255
-    , themeOverlayDim = colorRGBA 8 8 10 176
-    }
+   in Theme
+        { themeWindow = colorRGBA 24 24 27 255
+        , themePanel = panelStyle
+        , themeFloatingWindow = panelStyle
+        , themeButton =
+            Style
+              { styleBg = colorRGBA 52 52 58 255
+              , styleFg = colorRGBA 248 247 245 255
+              , styleBorder = colorRGBA 74 76 84 255
+              , styleBorderWidth = 1
+              , styleCornerRadius = 2
+              , styleHoverBg = colorRGBA 68 70 78 255
+              , styleActiveBg = colorRGBA 42 42 48 255
+              }
+        , themeInput =
+            Style
+              { styleBg = colorRGBA 18 18 21 255
+              , styleFg = colorRGBA 236 234 230 255
+              , styleBorder = colorRGBA 70 72 80 255
+              , styleBorderWidth = 1
+              , styleCornerRadius = 2
+              , styleHoverBg = colorRGBA 24 24 28 255
+              , styleActiveBg = colorRGBA 14 14 17 255
+              }
+        , themeSeparator = colorRGBA 78 80 88 255
+        , themeAccent = colorRGBA 88 156 246 255
+        , themeMuted = colorRGBA 176 172 164 255
+        , themeOverlayDim = colorRGBA 8 8 10 176
+        }
 
 defaultTheme :: Theme
 defaultTheme = sdlTheme

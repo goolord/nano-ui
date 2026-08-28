@@ -2,19 +2,14 @@
 
 -- | Read the terminal default fg/bg for adaptive TUI theming.
 --
--- Prefer OSC 10/11 (truecolor) when stdin is a TTY. On Windows, fall back to
--- the visible-window origin cell attribute (not cursor @wAttributes@). ANSI
--- index mapping is last resort when OSC is unavailable.
+-- POSIX: OSC 10/11 when stdin is a TTY. Windows: visible-window origin cell
+-- (not cursor @wAttributes@). OSC is skipped on Windows because it prints as
+-- garbage in conhost/PowerShell before VT is enabled (notcurses #2914).
 module NanoUI.Term.Palette
   ( queryTerminalColors
   , newAdaptiveTerminalContext
   ) where
 
-import Control.Exception (bracketOnError)
-import Data.Bits ((.&.), shiftR)
-import Data.Char (isDigit, ord)
-import Data.List (isPrefixOf)
-import Data.Word (Word8, Word16)
 import NanoUI
   ( Color
   , Context
@@ -29,21 +24,11 @@ import NanoUI
   , withFontMetrics
   , withTheme
   )
-import System.IO
-  ( BufferMode (..)
-  , hFlush
-  , hGetBuffering
-  , hGetChar
-  , hIsTerminalDevice
-  , hSetBuffering
-  , hWaitForInput
-  , stdin
-  , stdout
-  )
 
 #if defined(mingw32_HOST_OS)
 import Control.Exception (bracket)
-import Data.Bits ((.|.))
+import Data.Bits ((.&.), (.|.), shiftR)
+import Data.Word (Word8, Word16)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Marshal.Array (allocaArray)
 import Foreign.Ptr (Ptr)
@@ -65,6 +50,21 @@ import System.Win32.File
   , oPEN_EXISTING
   )
 import System.Win32.Types (DWORD, HANDLE)
+#else
+import Control.Exception (bracket)
+import Data.Char (isDigit, ord)
+import Data.List (isPrefixOf)
+import System.IO
+  ( BufferMode (..)
+  , hFlush
+  , hGetBuffering
+  , hGetChar
+  , hIsTerminalDevice
+  , hSetBuffering
+  , hWaitForInput
+  , stdin
+  , stdout
+  )
 #endif
 
 -- | Default fg/bg from the connected terminal, or 'terminalDefaultFg' /
@@ -92,23 +92,24 @@ newAdaptiveTerminalContext = do
 
 queryPlatformColors :: IO (Maybe (Color, Color))
 queryPlatformColors =
-  queryOscColors >>= \case
-    Just pair -> pure (Just pair)
-    Nothing ->
 #if defined(mingw32_HOST_OS)
-      queryWindowsConsoleColors
+  -- OSC 10/11 before VT is on prints as garbage in conhost/PowerShell
+  -- (same class as notcurses #2914). Read the visible cell instead.
+  queryWindowsConsoleColors
 #else
-      pure Nothing
+  queryOscColors
 #endif
 
--- | OSC 10 (fg) and 11 (bg). Works on Windows Terminal, iTerm2, kitty, etc.
+#if !defined(mingw32_HOST_OS)
+
+-- | OSC 10 (fg) and 11 (bg). POSIX emulators (iTerm2, kitty, etc.).
 queryOscColors :: IO (Maybe (Color, Color))
 queryOscColors = do
   tty <- hIsTerminalDevice stdin
   if not tty
     then pure Nothing
     else
-      bracketOnError
+      bracket
         (do
             buf <- hGetBuffering stdin
             bout <- hGetBuffering stdout
@@ -229,6 +230,8 @@ parseRgbSpec spec =
     isHex c =
       isDigit c || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
 
+#endif
+
 #if defined(mingw32_HOST_OS)
 
 foreign import ccall unsafe "windows.h ReadConsoleOutputAttribute"
@@ -270,7 +273,7 @@ openConsole name =
     0
     Nothing
 
--- ANSI index to RGB when OSC is unavailable (approximate; prefer OSC on WT).
+-- ANSI index to RGB for the visible origin cell (OSC is skipped on Windows).
 ansi16 :: Word8 -> Color
 ansi16 n =
   case n of
