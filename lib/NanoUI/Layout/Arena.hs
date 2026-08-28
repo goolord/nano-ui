@@ -70,6 +70,9 @@ data NodeType
   | NodeImage
   | NodePanel
   | NodeWindow
+  -- Appended last: stored as Word8 in the arena. Update every exhaustive
+  -- NodeType case when adding variants.
+  | NodeBox
   deriving (Eq, Show, Enum, Bounded)
 
 isWidgetNode :: NodeType -> Bool

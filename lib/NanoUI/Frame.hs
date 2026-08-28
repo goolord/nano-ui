@@ -26,7 +26,8 @@ import Data.Char (isAlphaNum, isSpace)
 import Data.IORef (readIORef, writeIORef)
 import Data.Typeable (Typeable)
 import Data.List (findIndex)
-import Data.Maybe (catMaybes, isJust)
+import Data.Maybe (catMaybes, isJust, isNothing)
+import Data.Word (Word32)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Text as T
 import NanoUI.Context
@@ -49,6 +50,7 @@ import NanoUI.Context
   , markDirty
   , getHotId
   , getPrevRect
+  , getPrevRectByKey
   , setScrollOffset
   , setStore
   , setPrevRect
@@ -56,6 +58,7 @@ import NanoUI.Context
   , setAnimationValue
   , tickAnimations
   , getAnimationValue
+  , animInProgress
   , lerpColor
   , clearTooltips
   , readTooltips
@@ -130,6 +133,7 @@ import NanoUI.Layout.Arena
   , getNodeValue
   , getPadding
   , getRect
+  , getStyleIdx
   , getText
   , getWidthSizing
   , getWidgetId
@@ -214,11 +218,12 @@ runFrameEff unlift ctx inp ui = do
   oldActiveRect <- getPrevRect ctx oldActive
   oldFocusRect <- getPrevRect ctx oldFocus
   oldFloatingRects <- readIORef (ctxPrevFloatingRects ctx)
+  oldRects <- readIORef (ctxPrevRects ctx)
   oldSize <- readIORef (ctxLastWindowSize ctx)
   oldStore <- getStore ctx
   wasDirty <- isDirty ctx
   writeIORef (ctxDirty ctx) False
-  animKeys <- IM.keys <$> readIORef (ctxAnimations ctx)
+  animKeys <- IM.keys . IM.filter animInProgress <$> readIORef (ctxAnimations ctx)
   resetNodeArena (ctxNodeArena ctx)
   resetDrawArena (ctxDrawArena ctx)
   clearMeasureCache ctx
@@ -290,6 +295,7 @@ runFrameEff unlift ctx inp ui = do
     oldActiveRect
     oldFocusRect
     oldFloatingRects
+    oldRects
     animKeys
   msgs <- drainMessages ctx
   dirtyAfterUi <- isDirty ctx
@@ -1453,6 +1459,10 @@ lowerNode ctx idx = do
     NodeSpacer -> pure ()
     NodeModal -> pure ()
     NodeWindow -> pure ()
+    NodeBox -> do
+      si <- getStyleIdx (ctxNodeArena ctx) idx
+      -- styleIdx holds RGBA Word32 bits; see `box` in NanoUI.Widgets.
+      pushRect da rect (Color (fromIntegral si :: Word32))
     NodeImage -> do
       tex <- imageIdFromText <$> getText (ctxNodeArena ctx) idx
       mUv <- lookupImageUv ctx (ImageId tex)
@@ -4194,11 +4204,13 @@ writeDamage ::
   Maybe Rect ->
   Maybe Rect ->
   IM.IntMap Rect ->
+  IM.IntMap Rect ->
   [Int] ->
   IO ()
-writeDamage ctx inp wasDirty oldSize oldStore oldHot oldActive oldFocus oldHotR oldActiveR oldFocusR oldFloatingRects animKeys = do
+writeDamage ctx inp wasDirty oldSize oldStore oldHot oldActive oldFocus oldHotR oldActiveR oldFocusR oldFloatingRects oldRects animKeys = do
   let Size winW winH = inputWindowSize inp
-      sizeChanged = oldSize /= Size winW winH
+      sizeChanged =
+        oldSize /= Size 0 0 && oldSize /= Size winW winH
       commanded =
         inputPointerHeld inp
           || inputMousePressed inp
@@ -4210,17 +4222,31 @@ writeDamage ctx inp wasDirty oldSize oldStore oldHot oldActive oldFocus oldHotR 
           || not (null (inputChars inp))
   newStore <- getStore ctx
   newFloatingRects <- floatingPanelRects ctx
+  newRects <- readIORef (ctxPrevRects ctx)
   overlay <- overlayMenuOpen ctx
   wasModal <- readIORef (ctxModalWasActive ctx)
   nowModal <- readIORef (ctxModalActive ctx)
+  dirtyNow <- isDirty ctx
+  liveAnims <- IM.filter animInProgress <$> readIORef (ctxAnimations ctx)
+  settled <- readIORef (ctxAnimSettled ctx)
+  writeIORef (ctxAnimSettled ctx) False
+  orphanAnim <-
+    fmap or $
+      forM (IM.keys liveAnims) $ \k ->
+        isNothing <$> getPrevRectByKey ctx k
   let storePaintChanged = paintStore oldStore /= paintStore newStore
       modalFlip = wasModal /= nowModal
       floatingChanged = oldFloatingRects /= newFloatingRects
       windowLive =
         not (IM.null (storeWindow newStore))
           || not (IM.null (storeWindowSize newStore))
+      layoutShifted =
+        not (IM.null oldRects)
+          && oldRects /= newRects
+          && (not (IM.null liveAnims) || settled)
       full =
         wasDirty
+          || dirtyNow
           || sizeChanged
           || commanded
           || storePaintChanged
@@ -4228,6 +4254,8 @@ writeDamage ctx inp wasDirty oldSize oldStore oldHot oldActive oldFocus oldHotR 
           || modalFlip
           || floatingChanged
           || windowLive
+          || orphanAnim
+          || layoutShifted
   dmg <-
     if full
       then pure DamageFull
@@ -4235,14 +4263,7 @@ writeDamage ctx inp wasDirty oldSize oldStore oldHot oldActive oldFocus oldHotR 
         newHot <- readIORef (ctxHotId ctx)
         newActive <- readIORef (ctxActiveId ctx)
         newFocus <- readIORef (ctxFocusId ctx)
-        let ids =
-              oldHot
-                : oldActive
-                : oldFocus
-                : newHot
-                : newActive
-                : newFocus
-                : fmap (WidgetId . fromIntegral) animKeys
+        let ids = [oldHot, oldActive, oldFocus, newHot, newActive, newFocus]
             oldOf wid
               | wid == oldHot = oldHotR
               | wid == oldActive = oldActiveR
@@ -4256,7 +4277,18 @@ writeDamage ctx inp wasDirty oldSize oldStore oldHot oldActive oldFocus oldHotR 
                 else do
                   newR <- getPrevRect ctx wid
                   pure (catMaybes [oldOf wid, newR])
-        let base = unionRects (rs ++ floatingRectDamage oldFloatingRects newFloatingRects)
+        animRs <-
+          fmap concat $
+            forM animKeys $ \k ->
+              if k == 0
+                then pure []
+                else pure (catMaybes [IM.lookup k oldRects, IM.lookup k newRects])
+        let base =
+              unionRects
+                ( rs
+                    ++ animRs
+                    ++ floatingRectDamage oldFloatingRects newFloatingRects
+                )
             clip =
               if rectW base <= 0 || rectH base <= 0
                 then Rect 0 0 0 0
@@ -4268,7 +4300,8 @@ writeDamage ctx inp wasDirty oldSize oldStore oldHot oldActive oldFocus oldHotR 
   writeIORef (ctxDamage ctx) dmg
   writeIORef (ctxLastWindowSize ctx) (Size winW winH)
   writeIORef (ctxPrevFloatingRects ctx) newFloatingRects
-  when floatingChanged $ markDirty ctx
+  when (floatingChanged && not (IM.null oldFloatingRects && not (IM.null newFloatingRects))) $
+    markDirty ctx
 
 -- Window drag writes store every frame. Ignore it for damage.
 paintStore :: WidgetStore -> WidgetStore

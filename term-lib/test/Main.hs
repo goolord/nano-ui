@@ -84,6 +84,13 @@ main = do
   run "window-drag-damage" runWindowDragDamageTest
   run "overlay-panel-live" runOverlayPanelLiveTest
   run "animation-idle" runAnimationIdleTest
+  run "animation-settle" runAnimationSettleTest
+  run "animation-ease" runAnimationEaseTest
+  run "animation-hold" runAnimationHoldTest
+  run "animation-damage" runAnimationDamageTest
+  run "animation-delay" runAnimationDelayTest
+  run "animation-stagger" runAnimationStaggerTest
+  run "animation-shared-ctx" runAnimationSharedCtxTest
   run "ascii" runAsciiTest
   run "vt-decode" runVtTest
   run "cells-and-diff" runCellsTest
@@ -1453,12 +1460,152 @@ runOverlayPanelLiveTest _ failed = do
   checkDirtyWake (void (modal True "About" (label "body")))
 
 runAnimationIdleTest :: Context -> IORef Int -> IO ()
-runAnimationIdleTest ctx failed = do
+runAnimationIdleTest _ failed = do
+  ctx <- newContext
   let inp = emptyInput {inputWindowSize = Size 100 100, inputDeltaTime = 0.05}
   _ <- runFrame ctx inp (label "anim")
   startAnimation ctx (WidgetId 42) 0 1 0.5
   need <- needsRedraw ctx inp inp
   when (not need) $ bump failed
+
+-- Finished tweens keep the end value and stop waking the loop.
+runAnimationSettleTest :: Context -> IORef Int -> IO ()
+runAnimationSettleTest _ failed = do
+  ctx <- newContext
+  let inp = emptyInput {inputWindowSize = Size 100 100, inputDeltaTime = 0.1}
+      wid = WidgetId 99
+  startAnimation ctx wid 0 1 0.25
+  void $ replicateM 4 (runFrame ctx inp (label "settle"))
+  val <- getAnimationValue ctx wid
+  when (abs (val - 1) > 0.01) $ bump failed
+  live <- anyAnimating ctx
+  when live $ bump failed
+  need <- needsRedraw ctx inp inp
+  when need $ bump failed
+
+-- EaseOutCubic at halfway is well above linear 0.5.
+runAnimationEaseTest :: Context -> IORef Int -> IO ()
+runAnimationEaseTest _ failed = do
+  ctx <- newContext
+  let inp = emptyInput {inputWindowSize = Size 100 100, inputDeltaTime = 0.5}
+      wid = WidgetId 100
+  startAnimationEase ctx wid 0 1 1 EaseOutCubic
+  _ <- runFrame ctx inp (label "ease")
+  val <- getAnimationValue ctx wid
+  when (val < 0.8) $ bump failed
+
+-- animateTo holds after the duration elapses.
+runAnimationHoldTest :: Context -> IORef Int -> IO ()
+runAnimationHoldTest _ failed = do
+  ctx <- newContext
+  let inp = emptyInput {inputWindowSize = Size 200 100, inputDeltaTime = 0.1}
+      ui = do
+        t <- animateTo 1 0.2
+        label_ (T.pack (show t))
+  void $ replicateM 5 (runFrame ctx inp ui)
+  (_, _, _, _) <- runFrame ctx inp ui
+  live <- anyAnimating ctx
+  when live $ bump failed
+  spans <- collectTextSpans ctx
+  let shown = [txt | (_, txt, _, _, _) <- spans]
+  when (not (any (\t -> t == "1.0" || "1.0" `T.isPrefixOf` t) shown)) $ bump failed
+  startAnimationEase ctx (WidgetId 101) 0 1 0.2 EaseLinear
+  void $ replicateM 5 (runFrame ctx inp (label "hold"))
+  val <- getAnimationValue ctx (WidgetId 101)
+  when (abs (val - 1) > 0.01) $ bump failed
+  void $ replicateM 3 (runFrame ctx inp (label "hold"))
+  val2 <- getAnimationValue ctx (WidgetId 101)
+  when (abs (val2 - 1) > 0.01) $ bump failed
+  live2 <- anyAnimating ctx
+  when live2 $ bump failed
+
+-- Layout tweens use a call-site id with no node rect. Damage must be full.
+-- Drain newContext Full first so the assertion is a mid-tween frame, not
+-- the first paint. Also cover start-and-finish in one tick (dt > dur).
+runAnimationDamageTest :: Context -> IORef Int -> IO ()
+runAnimationDamageTest _ failed = do
+  ctx <- newContext
+  let idleInp = emptyInput {inputWindowSize = Size 200 100, inputDeltaTime = 0}
+      idle = label_ "anim"
+      tweenInp = idleInp {inputDeltaTime = 0.05}
+      ui = do
+        t <- animateTo 1 0.4
+        void (spacer (Fixed (20 + 80 * t)) Fit)
+        label_ "anim"
+  _ <- runFrame ctx idleInp idle
+  _ <- runFrame ctx idleInp idle
+  dIdle <- takeDamage ctx
+  when (dIdle == DamageFull) $ bump failed
+  _ <- runFrame ctx tweenInp ui
+  dMid <- takeDamage ctx
+  when (dMid /= DamageFull) $ bump failed
+  ctx2 <- newContext
+  let fastInp = idleInp {inputDeltaTime = 0.5}
+      uiFast = do
+        t <- animateTo 1 0.2
+        void (spacer (Fixed (20 + 80 * t)) Fit)
+        label_ "anim"
+  _ <- runFrame ctx2 idleInp idle
+  _ <- runFrame ctx2 idleInp idle
+  _ <- runFrame ctx2 fastInp uiFast
+  dFast <- takeDamage ctx2
+  when (dFast /= DamageFull) $ bump failed
+
+-- Delay holds the start value, then leftover dt applies after the wait.
+runAnimationDelayTest :: Context -> IORef Int -> IO ()
+runAnimationDelayTest _ failed = do
+  ctx <- newContext
+  let inp0 = emptyInput {inputWindowSize = Size 100 100, inputDeltaTime = 0.1}
+      wid = WidgetId 202
+  startAnimationEaseDelay ctx wid 0 1 0.2 EaseLinear 0.15
+  _ <- runFrame ctx inp0 (label "delay")
+  v0 <- getAnimationValue ctx wid
+  when (abs v0 > 0.01) $ bump failed
+  live0 <- anyAnimating ctx
+  when (not live0) $ bump failed
+  _ <- runFrame ctx inp0 (label "delay")
+  v1 <- getAnimationValue ctx wid
+  when (abs (v1 - 0.25) > 0.03) $ bump failed
+
+-- Staggered delays must count down through animateToEaseDelay, not reset.
+runAnimationStaggerTest :: Context -> IORef Int -> IO ()
+runAnimationStaggerTest _ failed = do
+  ctx <- newContext
+  let inp = emptyInput {inputWindowSize = Size 200 100, inputDeltaTime = 0.02}
+      ui = do
+        _ <- withKey ("lead" :: String) (animateToEaseDelay EaseLinear 1 0.4 0)
+        t <- withKey ("trail" :: String) (animateToEaseDelay EaseLinear 1 0.4 0.08)
+        label_ (T.pack ("t=" ++ show t))
+      trailVal = do
+        spans <- collectTextSpans ctx
+        let shown = [txt | (_, txt, _, _, _) <- spans]
+            tagged = [T.drop 2 txt | txt <- shown, "t=" `T.isPrefixOf` txt]
+        case tagged of
+          (raw : _) ->
+            case reads (T.unpack raw) of
+              [(n, "")] -> pure (n :: Float)
+              _ -> bump failed >> pure 0
+          _ -> bump failed >> pure 0
+  void $ replicateM 3 (runFrame ctx inp ui)
+  early <- trailVal
+  when (early > 0.01) $ bump failed
+  void $ replicateM 10 (runFrame ctx inp ui)
+  late <- trailVal
+  when (late < 0.15) $ bump failed
+
+-- Settled tweens on a shared Context must not leave dirty or wake idle loops.
+runAnimationSharedCtxTest :: Context -> IORef Int -> IO ()
+runAnimationSharedCtxTest ctx failed = do
+  let inp = emptyInput {inputWindowSize = Size 80 80, inputDeltaTime = 0.1}
+      wid = WidgetId 777
+  startAnimation ctx wid 0 1 0.1
+  void $ replicateM 3 (runFrame ctx inp (label "shared"))
+  val <- getAnimationValue ctx wid
+  when (abs (val - 1) > 0.01) $ bump failed
+  need <- needsRedraw ctx inp inp
+  when need $ bump failed
+  (_, _, _, dirty) <- runFrame ctx inp (label "idle")
+  when dirty $ bump failed
 
 runAsciiTest :: Context -> IORef Int -> IO ()
 runAsciiTest ctx failed = do

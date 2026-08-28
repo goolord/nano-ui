@@ -103,11 +103,18 @@ module NanoUI
   , modal
   , window
   , image
+  , box
   , onClick
   , clickButton
   , useFlag
   , useText
   , useToggle
+  , animate
+  , animateEase
+  , animateEaseDelay
+  , animateTo
+  , animateToEase
+  , animateToEaseDelay
   , heading
   , muted
   , kv
@@ -176,6 +183,7 @@ module NanoUI
   , wideTrailChar
   , textDisplayWidth
   , markDirty
+  , clearDirty
   , isDirty
   , setWakeLoop
   , getHotId
@@ -188,8 +196,12 @@ module NanoUI
   , getStore
   , getScrollOffset
   , startAnimation
+  , startAnimationEase
+  , startAnimationEaseDelay
   , setAnimationValue
   , getAnimationValue
+  , applyEase
+  , Ease (..)
   , anyAnimating
   , FrameMsg (..)
   , decodeMessages
@@ -226,7 +238,7 @@ module NanoUI
   ) where
 
 import NanoUI.Compact (Compact, askCompact, compactHost)
-import NanoUI.Context (Context (..), FrameMsg (..), anyAnimating, atlasSnapshot, atlasTextureId, ctxTheme, decodeMessages, enableMeasureCache, getAnimationValue, getFocusId, getHotId, getPrevRect, getScrollOffset, getStore, isDirty, markDirty, modalActive, newContext, overlayConsumesQuit, reduceMessages, reduceUpdates, registerImage, registerImages, setAnimationValue, setHost, setWakeLoop, startAnimation, takeDamage, textInputEditActive, withClipboard, withExternalText, withFontMetrics, withHostProfile, withIcons, withMeasureText, withMonoFontMetrics, withTheme, wrapMeasureCache)
+import NanoUI.Context (Context (..), Ease (..), FrameMsg (..), anyAnimating, applyEase, atlasSnapshot, atlasTextureId, clearDirty, ctxTheme, decodeMessages, enableMeasureCache, getAnimationValue, getFocusId, getHotId, getPrevRect, getScrollOffset, getStore, isDirty, markDirty, modalActive, newContext, overlayConsumesQuit, reduceMessages, reduceUpdates, registerImage, registerImages, setAnimationValue, setHost, setWakeLoop, startAnimation, startAnimationEase, startAnimationEaseDelay, takeDamage, textInputEditActive, withClipboard, withExternalText, withFontMetrics, withHostProfile, withIcons, withMeasureText, withMonoFontMetrics, withTheme, wrapMeasureCache)
 import NanoUI.Host (HostProfile (..))
 import NanoUI.Icons (IconSet (..), Icons (..), asciiIcons, checkboxMark, fontAwesomeIcon, glyphIcons, iconSetName, iconsFor, parseIconSet, loneFontAwesome, terminalCharColumns, terminalTextColumns, terminalPaintColumns, terminalTextPositions, wideTrailChar)
 import NanoUI.Draw (DrawCmd (..), DrawData (..), Layer (..), backdropDimTextureId, indexSize, vertexSize)
@@ -302,6 +314,7 @@ import NanoUI.Widgets
   , modal
   , window
   , image
+  , box
   , useFlag
   , useText
   , useToggle
@@ -314,4 +327,10 @@ import NanoUI.Widgets
   , sep
   , flex
   , image_
+  , animate
+  , animateEase
+  , animateEaseDelay
+  , animateTo
+  , animateToEase
+  , animateToEaseDelay
   )

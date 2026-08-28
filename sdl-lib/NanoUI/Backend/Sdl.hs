@@ -61,8 +61,10 @@ import NanoUI
   , damageIsEmpty
   , defaultTheme
   , emptyInput
+  , inputInteracted
   , enableMeasureCache
   , isDirty
+  , clearDirty
   , monospaceMetrics
   , needsRedraw
   , newContext
@@ -239,27 +241,66 @@ runSdlSession ctx setup shouldQuit drawFn =
   withSdl ctx "nano-ui" defaultWindowSize $ \ctx0 env -> do
     setup env
     void $ setRenderDrawBlendModeSafe (sdlRenderer env) (fromIntegral sDL_BLENDMODE_BLEND)
-    now <- getMonotonicTime
-    (ctx1, inp0) <- syncDisplay ctx0 env emptyInput
-    prev <- newIORef inp0
+    ctxRef <- newIORef ctx0
+    prev <- newIORef emptyInput
     pendingRedraw <- newIORef False
     wasAnimating <- newIORef False
-    (_, synced0) <- drawFn ctx1 env inp0 True
-    writeIORef pendingRedraw False
-    writeIORef prev synced0
-    ctxRef <- newIORef ctx1
     drawing <- newIORef False
+    startupDone <- newIORef False
+    startupCatchup <- newIORef False
+    startupGrace <- newIORef (2 :: Int)
     let onResize = do
           void $
             tryWithDrawingLock drawing $ do
               liveCtx <- readIORef ctxRef
               inp <- readIORef prev
+              scale0 <- readIORef (sdlScaleRef env)
               (ctx', inpSynced) <- syncDisplay liveCtx env (clearEphemeral inp)
-              (_, s) <- drawFn ctx' env inpSynced True
               writeIORef ctxRef ctx'
-              writeIORef prev s
+              done <- readIORef startupDone
+              if not done
+                then do
+                  writeIORef prev inpSynced
+                  writeIORef startupCatchup True
+                else do
+                  scale1 <- readIORef (sdlScaleRef env)
+                  if inputWindowSize inpSynced == inputWindowSize inp && scale1 == scale0
+                    then writeIORef prev inpSynced
+                    else do
+                      (_, s) <- drawFn ctx' env inpSynced True
+                      writeIORef prev s
+    let drainUntilQuiet c inp = do
+          pending <- pollEvents
+          let inp' = foldl' applyEvent inp pending
+          (c', inp'') <- syncDisplay c env inp'
+          if null pending
+            then pure (c', inp'')
+            else drainUntilQuiet c' inp''
+    let inpSeed = emptyInput {inputWindowSize = defaultWindowSize}
+    (ctx1, inp0) <- drainUntilQuiet ctx0 inpSeed
+    writeIORef ctxRef ctx1
+    scale0 <- readIORef (sdlScaleRef env)
+    let paintedSize = inputWindowSize inp0
+    (_, synced0) <- drawFn ctx1 env inp0 True
+    clearDirty ctx1
+    (ctx2, inp1) <- drainUntilQuiet ctx1 synced0
+    writeIORef ctxRef ctx2
+    scale1 <- readIORef (sdlScaleRef env)
+    catchup <- readIORef startupCatchup
+    synced1 <-
+      if catchup || inputWindowSize inp1 /= paintedSize || abs (scale1 - scale0) > 0.001
+        then do
+          (_, s) <- drawFn ctx2 env inp1 True
+          clearDirty ctx2
+          pure s
+        else pure inp1
+    writeIORef startupCatchup False
+    writeIORef startupDone True
+    writeIORef pendingRedraw False
+    writeIORef prev synced1
+    now <- getMonotonicTime
     bracket (installResizeWatch onResize) id $ \_ ->
-      loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing shouldQuit synced0 [] now
+      loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace shouldQuit synced1 [] now
 
 loop ::
   IORef Context ->
@@ -269,12 +310,13 @@ loop ::
   IORef Bool ->
   IORef Bool ->
   IORef Bool ->
+  IORef Int ->
   (Input -> Bool) ->
   Input ->
   [SdlEvent] ->
   Double ->
   IO ()
-loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing shouldQuit inp queued lastT = do
+loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace shouldQuit inp queued lastT = do
   ctx <- readIORef ctxRef
   debugOpen <- debugPanelOpen ctx
   wantDebug <- takeDebugLive (sdlDebug env) debugOpen
@@ -317,16 +359,24 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing shouldQuit inp qu
           dirtyNow <- isDirty ctx'
           anim <- anyAnimating ctx'
           editing <- textFieldActive ctx'
-          let forceFinal = wasAnim && not anim
+          grace <- readIORef startupGrace
+          let sizeChanged = inputWindowSize prevInp /= inputWindowSize inpSynced
+              interacted = inputInteracted prevInp inpSynced
+              graceAllow =
+                grace <= 0 || sizeChanged || interacted || anim || editing || dirtyNow || pendingDirty || need
+              forceFinal = wasAnim && not anim
               shouldDraw =
-                need
-                  || anim
-                  || forceFinal
-                  || pendingDirty
-                  || dirtyNow
-                  || debugOpen
-                  || wantDebug
-                  || editing
+                graceAllow
+                  && ( need
+                         || anim
+                         || forceFinal
+                         || pendingDirty
+                         || dirtyNow
+                         || debugOpen
+                         || wantDebug
+                         || editing
+                     )
+          when (grace > 0) $ writeIORef startupGrace (grace - 1)
           writeIORef wasAnimating anim
           synced <-
             if shouldDraw
@@ -354,6 +404,7 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing shouldQuit inp qu
                 pendingRedraw
                 wasAnimating
                 drawing
+                startupGrace
                 shouldQuit
                 synced
                 (if null rest then [] else rest)
@@ -420,16 +471,16 @@ finishDraw ctx env inp forceFull t0 drawData dirtyAfterUi = do
   t1 <- getMonotonicTime
   syncPointerCursor (sdlCursors env) ctx inp
   dmg0 <- takeDamage ctx
-  let damage = if forceFull then DamageFull else snapDamage scale dmg0
-  if damageIsEmpty damage
+  let Size lw lh = inputWindowSize inp
+      pw = max 1 (round (lw * scale))
+      ph = max 1 (round (lh * scale))
+  (tex, retainNew) <- ensureRetain env pw ph
+  let damage = if forceFull || retainNew then DamageFull else snapDamage scale dmg0
+  if damageIsEmpty damage || lw <= 0 || lh <= 0
     then do
       notePresent (sdlDebug env) ((t1 - t0) * 1000) drawData
       pure (dirtyAfterUi, inp)
     else do
-      let Size lw lh = inputWindowSize inp
-          pw = max 1 (round (lw * scale))
-          ph = max 1 (round (lh * scale))
-      tex <- ensureRetain env pw ph
       okBegin <- retainBegin (sdlRenderer env) tex
       unless okBegin $ fail "SDL_SetRenderTarget(retain) failed"
       (baseSpans, overlaySpans) <- collectRasterSpans ctx inp
@@ -450,17 +501,17 @@ finishDraw ctx env inp forceFull t0 drawData dirtyAfterUi = do
       notePresent (sdlDebug env) ((t1 - t0) * 1000) drawData
       pure (dirtyAfterUi, inp)
 
-ensureRetain :: SdlEnv -> Int -> Int -> IO (Ptr ())
+ensureRetain :: SdlEnv -> Int -> Int -> IO (Ptr (), Bool)
 ensureRetain env w h = do
   (tex, ow, oh) <- readIORef (sdlRetain env)
   if tex /= nullPtr && ow == w && oh == h
-    then pure tex
+    then pure (tex, False)
     else do
       retainDestroy tex
       tex' <- retainCreate (sdlRenderer env) w h
       when (tex' == nullPtr) $ fail "SDL_CreateTexture(retain) failed"
       writeIORef (sdlRetain env) (tex', w, h)
-      pure tex'
+      pure (tex', True)
 
 filterSpans :: Damage -> [(Rect, a, b, c, Rect)] -> [(Rect, a, b, c, Rect)]
 filterSpans DamageFull spans = spans

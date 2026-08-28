@@ -144,6 +144,7 @@ measureNode na host fm measure useAssignedWidth idx = do
       | otherwise -> measureScrollContainer na host fm idx
     NodeWindow -> measureContainer na host fm useAssignedWidth idx
     NodeImage -> measureImage na idx
+    NodeBox -> measureImage na idx
     _ -> measureWidget na host fm measure idx
   applyAspectAfterMeasure na assignedW useAssignedWidth idx
 

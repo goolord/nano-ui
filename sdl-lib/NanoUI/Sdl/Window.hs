@@ -108,7 +108,10 @@ syncDisplay ctx env inp = do
   queried <- queryWindowLogicalSize (sdlWindow env) scale
   let winSize =
         case queried of
-          Size 0 0 -> inputWindowSize inp
+          Size 0 0 ->
+            case inputWindowSize inp of
+              Size 0 0 -> defaultWindowSize
+              s -> s
           s -> s
   inpSized <- syncInput env scale inp {inputWindowSize = winSize}
   font <- readIORef (sdlFontRef env)

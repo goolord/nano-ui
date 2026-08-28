@@ -9,7 +9,7 @@ Purely functional immediate-mode GUI core for Haskell. Backend-agnostic: emits b
 - **Two-pass flex layout**: measure/position over struct-of-arrays node arena. `percent` and `aspect` (width / height) are first-class constraints
 - **Compact regions**: `compactHost` / `askCompact` keep large read-heavy app state off the GC walk
 - **Zero-allocation draw path**: pinned `ForeignPtr` vertex/index arenas reused each frame
-- **Damage tracking**: `needsRedraw` gates on commands, hover target change, scroll drag, focused text field, `markDirty`, or active animation. Mouse motion on the same widget is skipped. Scroll or widget-store text changes force a full redraw. SDL scissors hover and animation into the retain texture; partial damage blits only the dirty rect to the window.
+- **Damage tracking**: `needsRedraw` gates on commands, hover target change, scroll drag, focused text field, `markDirty`, or active animation. Mouse motion on the same widget is skipped. Hover and widget tweens clip to changed rects. Layout-driving tweens (call-site ids with no node rect, or any node move while an animation is live) force `DamageFull` so siblings do not ghost. Scroll or widget-store text changes force a full redraw. SDL scissors partial damage into the retain texture.
 - **Headless verification**: ASCII renderer + golden-style tests, no window/GL dependency
 
 ## Build
@@ -20,6 +20,8 @@ cabal test
 cabal run nano-ui-demo
 ```
 
+On Linux/macOS, pass `-fnotcurses` for `nano-ui-term` tests (`cabal test -fnotcurses`). SDL and Windows do not need notcurses.
+
 ## Nix
 
 Linux and macOS only (Nix does not replace the Windows MSYS2/Zig workflow).
@@ -28,6 +30,7 @@ Linux and macOS only (Nix does not replace the Windows MSYS2/Zig workflow).
 nix develop          # GHC 9.14, cabal, HLS, SDL3, SDL3_ttf, pkg-config; sdl flag on
 nix build            # build all wired packages
 nix run .#nano-ui-sdl-demo
+nix run .#nano-ui-sdl-anim
 nix run .#nano-ui-tui
 nix flake check      # run the test suite
 ```
@@ -98,6 +101,7 @@ Requires SDL3, SDL3_ttf, and `pkg-config`. Unlike the TUI, SDL needs no MSYS2 wr
 
 ```bash
 cabal run -fsdl nano-ui-sdl-demo
+cabal run -fsdl nano-ui-sdl-anim
 ```
 
 On Windows, install the UCRT64 packages and keep `<msys2>\ucrt64\bin` on PATH.
@@ -159,7 +163,7 @@ Workspace packages: `nano-ui` (core), `nano-ui-term` (`term-lib`), `nano-ui-sdl`
 | `NanoUI` | Public API re-export |
 | `NanoUI.Host` | `HostProfile` (`PixelHost` / `CellHost`) |
 | `NanoUI.Monad` | `NanoUI` effect stack, `emit`, `withKey`, `currentId` |
-| `NanoUI.Widgets` | `button`, `checkbox`, `slider lbl min max initial`, `textInput`, `panel` / `row` / `column`, `useFlag` / `useText` |
+| `NanoUI.Widgets` | `button`, `checkbox`, `slider lbl min max initial`, `textInput`, `panel` / `row` / `column`, `useFlag` / `useText`, `animate` / `animateTo` / delay, `box` |
 | `NanoUI.Frame` | `runFrame`, `runFrameReduce`, `needsRedraw` |
 | `NanoUI.Draw` | Pinned vertex arena, draw command batching |
 | `NanoUI.Layout.Solve` | Two-pass flexbox constraint solver |

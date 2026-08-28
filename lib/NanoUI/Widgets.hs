@@ -35,6 +35,13 @@ module NanoUI.Widgets
   , sep
   , flex
   , image_
+  , box
+  , animate
+  , animateEase
+  , animateEaseDelay
+  , animateTo
+  , animateToEase
+  , animateToEaseDelay
   , sliderText
   , sliderDisplayText
   , sliderLabelText
@@ -80,8 +87,12 @@ import NanoUI.WidgetText
   , selectLabelText
   )
 import NanoUI.Context
-  ( Context (..)
+  ( Animation (..)
+  , Context (..)
+  , Ease (..)
   , WidgetStore (..)
+  , approxEq
+  , getAnimationValue
   , getPrevRect
   , getStore
   , intKey
@@ -94,6 +105,7 @@ import NanoUI.Context
   , endModal
   , markEscapeConsumed
   , pointerBlockedByModal
+  , startAnimationEaseDelay
   )
 import NanoUI.Icons (Icons (..), checkboxMark)
 import NanoUI.Id (WidgetId (..))
@@ -106,6 +118,7 @@ import NanoUI.Layout.Arena
   , setAspect
   , setNodeText
   , setNodeValue
+  , setStyleIdx
   , setWidgetId
   )
 import NanoUI.Monad (Ui, askContext, askInput, currentId, uiFinally, uiIO, withKey)
@@ -131,7 +144,7 @@ import NanoUI.Style
   , windowPad
   , windowMargin
   )
-import NanoUI.Types (ImageId (..), Rect (..), Size (..), V2 (..), rectContains, rectH, rectW, rectX, v2X)
+import NanoUI.Types (Color (..), ImageId (..), Rect (..), Size (..), V2 (..), colorToWord32, rectContains, rectH, rectW, rectX, v2X)
 
 parentIdx :: [Int] -> Int
 parentIdx = \case
@@ -218,6 +231,67 @@ flex = void (spacer (Grow 1) Fit)
 {-# INLINE image_ #-}
 image_ :: (HasCallStack, Ui :> es) => Layout -> ImageId -> Eff es ()
 image_ layout iid = void (image layout iid)
+
+-- Solid colored rect. Not a hover target. RGBA is stored as Word32 bits in
+-- styleIdx; GHC `fromIntegral` roundtrips Int on all supported targets.
+box :: (HasCallStack, Ui :> es) => Layout -> Color -> Eff es Response
+box layout col = do
+  wid <- currentId
+  addWidgetStyled
+    wid
+    NodeBox
+    T.empty
+    0
+    layout
+    (fromIntegral (colorToWord32 col))
+    Nothing
+
+-- Call every frame. After each settle, the next call restarts from `from`.
+animate :: (HasCallStack, Ui :> es) => Float -> Float -> Float -> Eff es Float
+animate = animateEase EaseLinear
+
+animateEase :: (HasCallStack, Ui :> es) => Ease -> Float -> Float -> Float -> Eff es Float
+animateEase ease from to dur = animateEaseDelay ease from to dur 0
+
+animateEaseDelay :: (HasCallStack, Ui :> es) => Ease -> Float -> Float -> Float -> Float -> Eff es Float
+animateEaseDelay ease from to dur delay = do
+  wid <- currentId
+  ctx <- askContext
+  uiIO $ do
+    startAnimationEaseDelay ctx wid from to dur ease delay
+    getAnimationValue ctx wid
+
+-- Tween toward `to` and hold. Reverses from the current value if the target changes.
+animateTo :: (HasCallStack, Ui :> es) => Float -> Float -> Eff es Float
+animateTo = animateToEase EaseLinear
+
+animateToEase :: (HasCallStack, Ui :> es) => Ease -> Float -> Float -> Eff es Float
+animateToEase ease target dur = animateToEaseDelay ease target dur 0
+
+animateToEaseDelay :: (HasCallStack, Ui :> es) => Ease -> Float -> Float -> Float -> Eff es Float
+animateToEaseDelay ease target dur delay = do
+  wid <- currentId
+  ctx <- askContext
+  uiIO $ do
+    cur <- getAnimationValue ctx wid
+    anims <- readIORef (ctxAnimations ctx)
+    let key = intKey wid
+        manim = IM.lookup key anims
+        sameSpec a =
+          animEase a == ease
+            && approxEq (animDuration a) dur
+            && approxEq delay (animDelayReq a)
+    case manim of
+      Just a
+        | approxEq (animEnd a) target && sameSpec a -> pure cur
+        | otherwise -> do
+            startAnimationEaseDelay ctx wid cur target dur ease delay
+            getAnimationValue ctx wid
+      Nothing
+        | approxEq cur target -> pure cur
+        | otherwise -> do
+            startAnimationEaseDelay ctx wid cur target dur ease delay
+            getAnimationValue ctx wid
 
 useFlag :: (HasCallStack, Ui :> es) => Bool -> Eff es (Bool, Bool -> Eff es ())
 useFlag initial = do
@@ -845,7 +919,20 @@ addWidgetResp ::
   Layout ->
   Maybe Response ->
   Eff es Response
-addWidgetResp wid nt txt value layout mResp = do
+addWidgetResp wid nt txt value layout mResp =
+  addWidgetStyled wid nt txt value layout 0 mResp
+
+addWidgetStyled ::
+  Ui :> es =>
+  WidgetId ->
+  NodeType ->
+  Text ->
+  Float ->
+  Layout ->
+  Int ->
+  Maybe Response ->
+  Eff es Response
+addWidgetStyled wid nt txt value layout styleIdx mResp = do
   ctx <- askContext
   inp <- askInput
   uiIO $ do
@@ -872,6 +959,7 @@ addWidgetResp wid nt txt value layout mResp = do
     setAspect (ctxNodeArena ctx) idx (layoutAspect layout)
     setNodeText (ctxNodeArena ctx) idx txt
     setNodeValue (ctxNodeArena ctx) idx value
+    setStyleIdx (ctxNodeArena ctx) idx styleIdx
     setWidgetId (ctxNodeArena ctx) idx wid
     case mResp of
       Just resp -> pure resp
