@@ -7,9 +7,10 @@
 -- only the Font Awesome block (U+F000 to U+F2E0): every Nerd Font ships it, and a
 -- bare Font Awesome font covers it too, so one table serves both.
 --
--- Font Awesome icons (U+F000 to U+F2E0) occupy two terminal cells in Nerd Font
--- and Font Awesome faces. Layout and rasterisation use 'terminalTextColumns'
--- instead of 'T.length'.
+-- Font Awesome PUA (U+F000 to U+F2E0) is wcwidth 1 on glibc / Nerd Mono.
+-- A lone FA codepoint therefore paints one cell ('terminalPaintColumns').
+-- FA inside a longer string still reserves two columns via
+-- 'terminalTextColumns' so following text does not sit on the glyph.
 module NanoUI.Icons
   ( IconSet (..)
   , Icons (..)
@@ -21,8 +22,10 @@ module NanoUI.Icons
   , checkboxMark
   , checkboxPrefixes
   , fontAwesomeIcon
+  , loneFontAwesome
   , terminalCharColumns
   , terminalTextColumns
+  , terminalPaintColumns
   , terminalTextPositions
   , wideTrailChar
   ) where
@@ -135,19 +138,32 @@ checkboxPrefixes =
   , iconUnchecked glyphIcons
   ]
 
--- | Font Awesome private-use block. Every Nerd Font maps these, and terminals
--- render them double-width.
+-- | Font Awesome private-use block. Every Nerd Font maps these.
 fontAwesomeIcon :: Char -> Bool
 fontAwesomeIcon c =
   let o = ord c
    in o >= 0xF000 && o <= 0xF2E0
 
+-- | A single Font Awesome codepoint with no neighbors.
+loneFontAwesome :: Text -> Bool
+loneFontAwesome txt =
+  case T.uncons txt of
+    Just (c, rest) -> T.null rest && fontAwesomeIcon c
+    Nothing -> False
+
+-- | Layout reserve: FA keeps a trailing column so mixed runs do not collide.
 terminalCharColumns :: Char -> Int
 terminalCharColumns c = if fontAwesomeIcon c then 2 else 1
 
 terminalTextColumns :: Text -> Int
 terminalTextColumns =
   T.foldl' (\n c -> n + terminalCharColumns c) 0
+
+-- | Paint / measure width. Lone FA is one cell (Nerd Mono / wcwidth 1).
+terminalPaintColumns :: Text -> Int
+terminalPaintColumns txt
+  | loneFontAwesome txt = 1
+  | otherwise = terminalTextColumns txt
 
 -- | Second cell of a double-width glyph. The ANSI writer skips this slot.
 wideTrailChar :: Char

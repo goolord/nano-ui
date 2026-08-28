@@ -30,16 +30,43 @@ channels_from_rgba(uint32_t fg, uint32_t bg)
 static int
 put_cell(struct ncplane *plane, int y, int x, uint32_t ch, uint32_t fg, uint32_t bg)
 {
-  uint64_t channels = channels_from_rgba(fg, bg);
-  nccell c = NCCELL_INITIALIZER(' ', 0, channels);
-  if (ch <= 0x7fu) {
-    if (nccell_load_char(plane, &c, (char)ch) < 0) {
+  unsigned rows = 0;
+  unsigned cols = 0;
+  uint64_t channels;
+  nccell c;
+  int wrote;
+
+  ncplane_dim_yx(plane, &rows, &cols);
+  if (y < 0 || x < 0 || (unsigned)y >= rows || (unsigned)x >= cols) {
+    return 0;
+  }
+
+  /* wideTrailChar is NUL. Write a space so a diff blit cannot leave a ghost. */
+  if (ch == 0) {
+    ch = 32;
+  }
+
+  channels = channels_from_rgba(fg, bg);
+  c = (nccell)NCCELL_INITIALIZER(' ', 0, channels);
+  if (ch > 0x7fu) {
+    if (nccell_load_ucs32(plane, &c, ch) < 0) {
       return -1;
     }
-  } else if (nccell_load_ucs32(plane, &c, ch) < 0) {
+  } else if (nccell_load_char(plane, &c, (char)ch) < 0) {
     return -1;
   }
-  return ncplane_putc_yx(plane, y, x, &c);
+  /* ncplane_putc_yx returns columns advanced (1 or 2), not 0.
+   * Do not force width 2: notcurses then replaces the glyph with a space
+   * when the next cell already has a gcluster (see paint() in render.c). */
+  wrote = ncplane_putc_yx(plane, y, x, &c);
+  return wrote < 0 ? -1 : 0;
+}
+
+static int
+blit_cell(struct ncplane *plane, const uint32_t *cells, int w, int x, int y)
+{
+  const uint32_t *cell = cells + (y * w + x) * 3u;
+  return put_cell(plane, y, x, cell[0], cell[1], cell[2]);
 }
 
 static int
@@ -47,8 +74,7 @@ blit_all_cells(struct ncplane *plane, int w, int h, const uint32_t *cells)
 {
   for (int y = 0; y < h; ++y) {
     for (int x = 0; x < w; ++x) {
-      const uint32_t *cell = cells + (y * w + x) * 3u;
-      if (put_cell(plane, y, x, cell[0], cell[1], cell[2])) {
+      if (blit_cell(plane, cells, w, x, y) < 0) {
         return -1;
       }
     }
@@ -169,9 +195,9 @@ nano_ui_nc_blit_cells(
         }
       }
 
-      if (put_cell(plane, y, x, ch, fg, bg)) {
+      if (blit_cell(plane, cells, w, x, y) < 0) {
         ncplane_erase(plane);
-        if (blit_all_cells(plane, w, h, cells)) {
+        if (blit_all_cells(plane, w, h, cells) < 0) {
           return -1;
         }
         return notcurses_render(nui->nc);

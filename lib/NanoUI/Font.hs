@@ -53,7 +53,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import NanoUI.Host (HostProfile, isCellHost)
 import NanoUI.Style (AlignX (..), Padding (..), defaultLayout, layoutGap)
-import NanoUI.Icons (terminalTextColumns)
+import NanoUI.Icons (terminalPaintColumns)
 import NanoUI.Types (Rect (..), sliderBarCells)
 
 data GlyphQuad = GlyphQuad
@@ -313,7 +313,7 @@ measureText host fm txt =
   let h = fmLineHeight fm
       w =
         if isCellHost host
-          then fromIntegral (terminalTextColumns txt)
+          then fromIntegral (terminalPaintColumns txt)
           else fromIntegral (T.length txt) * fmAdvance fm ' '
    in (w, h)
 
@@ -321,7 +321,7 @@ measureText host fm txt =
 textDisplayWidth :: HostProfile -> FontMetrics -> Text -> Float
 textDisplayWidth host fm txt =
   if isCellHost host
-    then fromIntegral (terminalTextColumns txt)
+    then fromIntegral (terminalPaintColumns txt)
     else lineWidth fm txt
 
 measureTextWrapped :: HostProfile -> FontMetrics -> Text -> Float -> (Float, Float)

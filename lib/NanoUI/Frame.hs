@@ -110,7 +110,7 @@ import NanoUI.Font
   , wrapTextLinesIO
   )
 import NanoUI.Host (HostProfile, isCellHost)
-import NanoUI.Icons (Icons (..), checkboxMark, terminalTextColumns)
+import NanoUI.Icons (Icons (..), checkboxMark, loneFontAwesome, terminalPaintColumns)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), Key (..), Modifiers (..), inputInteracted, inputKeys, inputPointerHeld)
 import NanoUI.Layout.Arena
@@ -868,15 +868,19 @@ terminalTextHitRect host fm x y h txt atOrigin =
       ty = centeredTextY host fm y h th
    in Rect tx ty tw th
 
--- Paint rect: center the X glyph in the close slot.
+-- Paint rect: lone FA is one cell, right-aligned so the spare hit cell
+-- sits left of the glyph. ASCII "X" stays centered in the 3-cell slot.
 terminalClosePaintRect :: HostProfile -> FontMetrics -> Float -> Float -> Float -> Float -> T.Text -> Rect
 terminalClosePaintRect host fm x y w h txt =
-  let tw = textDisplayWidth host fm txt
+  let tw = fromIntegral (terminalPaintColumns txt)
       th = layoutLineHeight host fm
       lo = x
       hi = x + w - tw
       raw = x + (w - tw) / 2
-      lead = fromIntegral (round (max lo (min hi raw)) :: Int)
+      lead =
+        if loneFontAwesome txt
+          then hi
+          else fromIntegral (round (max lo (min hi raw)) :: Int)
    in Rect lead (centeredTextY host fm y h th) tw th
 
 -- Hit rect: full close slot (cell host) or padded in the title bar (pixel host).
@@ -3584,12 +3588,14 @@ terminalScrollCapSpans ctx idx x y w h pad clip
             Just layout
               | rectH (sbTrack layout) >= 3
               , let trackW = rectW (sbTrack layout)
-              , all (\t -> T.null t || fromIntegral (terminalTextColumns t) <= trackW) [up, down] ->
+              , all (\t -> T.null t || fromIntegral (terminalPaintColumns t) <= trackW) [up, down] ->
                   do
               let track = sbTrack layout
                   fg = themeSeparator (ctxTheme ctx)
                   bg = colorRGBA 0 0 0 0
-                  cell ty txt = (Rect (rectX track) ty (rectW track) 1, txt, fg, bg)
+                  cell ty txt =
+                    let pw = fromIntegral (terminalPaintColumns txt)
+                     in (Rect (rectX track) ty pw 1, txt, fg, bg)
               pure $
                 tagClippedSpans
                   clip

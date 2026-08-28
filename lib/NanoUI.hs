@@ -168,8 +168,10 @@ module NanoUI
   , parseIconSet
   , checkboxMark
   , fontAwesomeIcon
+  , loneFontAwesome
   , terminalCharColumns
   , terminalTextColumns
+  , terminalPaintColumns
   , terminalTextPositions
   , wideTrailChar
   , textDisplayWidth
@@ -226,7 +228,7 @@ module NanoUI
 import NanoUI.Compact (Compact, askCompact, compactHost)
 import NanoUI.Context (Context (..), FrameMsg (..), anyAnimating, atlasSnapshot, atlasTextureId, ctxTheme, decodeMessages, enableMeasureCache, getAnimationValue, getFocusId, getHotId, getPrevRect, getScrollOffset, getStore, isDirty, markDirty, modalActive, newContext, overlayConsumesQuit, reduceMessages, reduceUpdates, registerImage, registerImages, setAnimationValue, setHost, setWakeLoop, startAnimation, takeDamage, textInputEditActive, withClipboard, withExternalText, withFontMetrics, withHostProfile, withIcons, withMeasureText, withMonoFontMetrics, withTheme, wrapMeasureCache)
 import NanoUI.Host (HostProfile (..))
-import NanoUI.Icons (IconSet (..), Icons (..), asciiIcons, checkboxMark, fontAwesomeIcon, glyphIcons, iconSetName, iconsFor, parseIconSet, terminalCharColumns, terminalTextColumns, terminalTextPositions, wideTrailChar)
+import NanoUI.Icons (IconSet (..), Icons (..), asciiIcons, checkboxMark, fontAwesomeIcon, glyphIcons, iconSetName, iconsFor, parseIconSet, loneFontAwesome, terminalCharColumns, terminalTextColumns, terminalPaintColumns, terminalTextPositions, wideTrailChar)
 import NanoUI.Draw (DrawCmd (..), DrawData (..), Layer (..), backdropDimTextureId, indexSize, vertexSize)
 import NanoUI.Font (FontMetrics (..), hasMonoFontMarker, headingFontMarker, labelContentInset, monoFontMarker, monospaceMetrics, mutedFontMarker, resolveLayoutGap, resolveLayoutPadding, scrollBarGutter, scrollBarListExtra, scrollBarPageExtra, scrollBarWidth, scrollBarWindowGutter, sliderTrackBounds, stripMonoFontMarker, stripWidgetMarkers, textDisplayWidth, widgetContentInset, widgetPadding)
 import Effectful (Eff, IOE, runEff, type (:>))

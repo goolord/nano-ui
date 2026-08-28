@@ -135,12 +135,14 @@ mapEvent evId y x mods evtype
       mouseEvent evId (fromIntegral x) (fromIntegral y) mods evtype
   | evId == nckeyInvalid || evId == nckeySignal = Nothing
   | evId == nckeyTab = Just (EvKey KeyTab (toMods mods))
+  | evId == nckeyEsc = Just (EvKey KeyEscape (toMods mods))
   | synthesized evId = keyEvent evId mods
   | otherwise = charEvent evId mods
 
 charEvent :: Word32 -> CUInt -> Maybe TermEvent
 charEvent evId mods
   | evId == nckeyTab = Just (EvKey KeyTab (toMods mods))
+  | evId == nckeyEsc = Just (EvKey KeyEscape (toMods mods))
   | otherwise =
       case codePointToChar evId of
         Nothing -> Nothing
@@ -190,7 +192,6 @@ keyEvent evId mods =
         k | k == nckeyDel -> Just (EvKey KeyDelete m)
         k | k == nckeyEnter -> Just (EvKey KeyEnter m)
         k | k == nckeyTab -> Just (EvKey KeyTab m)
-        k | k == nckeyEsc -> Just (EvKey KeyEscape m)
         _ -> Nothing
 
 toMods :: CUInt -> Modifiers

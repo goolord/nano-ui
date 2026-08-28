@@ -269,22 +269,23 @@ stampSpan arr w h (Rect rx ry rw _rh, txt, fg, bg, clip) =
     x0 = clamp 0 (w - 1) (round rx)
     y0 = clamp 0 (h - 1) (round ry)
     clipW = min (terminalTextColumns txt) (min (max 0 (ceiling rw)) (w - x0))
-    positions = keepWideTrails w
+    clipEnd = x0 + clipW
+    positions = keepWideTrails w clipEnd
       [ (x0 + col, c)
       | (col, c) <- terminalTextPositions txt
       , col < clipW
       , narrowChar c || c == wideTrailChar
       ]
 
--- If clipW kept a Font Awesome lead, always keep its trail cell on the grid.
-keepWideTrails :: Int -> [(Int, Char)] -> [(Int, Char)]
-keepWideTrails w = go
+-- Keep a Font Awesome trail only when the paint span reserved that column.
+keepWideTrails :: Int -> Int -> [(Int, Char)] -> [(Int, Char)]
+keepWideTrails w clipEnd = go
   where
     go [] = []
     go ((cx, c) : rest)
       | fontAwesomeIcon c =
           let rest' = dropWhile (\(x, _) -> x == cx + 1) rest
-           in if cx + 1 < w
+           in if cx + 1 < w && cx + 1 < clipEnd
                 then (cx, c) : (cx + 1, wideTrailChar) : go rest'
                 else (cx, c) : go rest'
       | otherwise = (cx, c) : go rest
