@@ -110,7 +110,7 @@ import NanoUI.Font
   , wrapTextLinesIO
   )
 import NanoUI.Host (HostProfile, isCellHost)
-import NanoUI.Icons (Icons (..), checkboxMark, loneFontAwesome, terminalPaintColumns)
+import NanoUI.Icons (Icons (..), checkboxMark, terminalPaintColumns)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), Key (..), Modifiers (..), inputInteracted, inputKeys, inputPointerHeld)
 import NanoUI.Layout.Arena
@@ -868,8 +868,7 @@ terminalTextHitRect host fm x y h txt atOrigin =
       ty = centeredTextY host fm y h th
    in Rect tx ty tw th
 
--- Paint rect: lone FA is one cell, right-aligned so the spare hit cell
--- sits left of the glyph. ASCII "X" stays centered in the 3-cell slot.
+-- Paint rect: one cell, centered in the 3-cell slot (Win32 / ASCII "X").
 terminalClosePaintRect :: HostProfile -> FontMetrics -> Float -> Float -> Float -> Float -> T.Text -> Rect
 terminalClosePaintRect host fm x y w h txt =
   let tw = fromIntegral (terminalPaintColumns txt)
@@ -877,10 +876,7 @@ terminalClosePaintRect host fm x y w h txt =
       lo = x
       hi = x + w - tw
       raw = x + (w - tw) / 2
-      lead =
-        if loneFontAwesome txt
-          then hi
-          else fromIntegral (round (max lo (min hi raw)) :: Int)
+      lead = fromIntegral (round (max lo (min hi raw)) :: Int)
    in Rect lead (centeredTextY host fm y h th) tw th
 
 -- Hit rect: full close slot (cell host) or padded in the title bar (pixel host).

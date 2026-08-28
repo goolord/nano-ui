@@ -95,7 +95,7 @@ import NanoUI.Context
   , markEscapeConsumed
   , pointerBlockedByModal
   )
-import NanoUI.Icons (Icons (..), checkboxMark, loneFontAwesome)
+import NanoUI.Icons (Icons (..), checkboxMark)
 import NanoUI.Id (WidgetId (..))
 import NanoUI.Input (Input (..), Key (..), Modifiers (..), inputChars, inputKeys, inputModifiers)
 import NanoUI.Layout.Arena
@@ -523,10 +523,8 @@ closeButton = do
       layout =
         if isCellHost host
           then
-            let icon = iconClose (ctxIcons ctx)
-                -- Lone FA paints one cell. Slot stays two so the hit target
-                -- is not a single cell. ASCII "X" stays in a 3-cell slot.
-                slotW = if loneFontAwesome icon then 2 else 3
+            -- Same 3-cell slot as Win32 / ASCII so the glyph column matches.
+            let slotW = 3
              in tight . fixedW slotW . alignMid $ defaultLayout
           else tight . fixedWH h h . alignMid $ defaultLayout
   resp <- addWidget wid NodeButton stored 0 layout
