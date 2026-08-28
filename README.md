@@ -110,7 +110,7 @@ That one PATH entry covers both steps: `pkg-config.exe` resolves `sdl3.pc` at co
 
 SDL benchmarks statically link SDL3 (`executable-static` in `cabal.project`). The demo and library use dynamic SDL DLLs.
 
-Text uses a system TrueType font (Segoe UI on Windows). Override with `NANO_UI_FONT=/path/to/font.ttf`.
+Text uses a system TrueType font (Adwaita, Liberation, or Noto on Linux; Segoe UI on Windows). Override with `NANO_UI_FONT=/path/to/font.ttf`.
 
 Profile the SDL demo draw path (hidden window, 400 timed frames):
 

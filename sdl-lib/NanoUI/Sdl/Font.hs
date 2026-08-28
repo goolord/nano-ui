@@ -15,8 +15,8 @@ module NanoUI.Sdl.Font
   , renderTextSpans
   ) where
 
-import Control.Exception (bracket)
-import Control.Monad (forM_, when)
+import Control.Exception (IOException, bracket, catch)
+import Control.Monad (filterM, forM_, when)
 import Data.Bits (shiftR, (.&.))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Text (Text)
@@ -31,7 +31,7 @@ import NanoUI (Color (..), Context, FontMetrics (..), Rect (..), hasMonoFontMark
 import NanoUI.Sdl.Batch (RenderBatch, batchTextureDst, flushRenderBatch)
 import NanoUI.Sdl.Render (logicalClipKey, setLogicalClipRect)
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
-import System.Directory (doesFileExist)
+import System.Directory (doesDirectoryExist, doesFileExist, listDirectory)
 import System.Environment (lookupEnv)
 import qualified Data.ByteString as BS
 import qualified Data.Map.Strict as Map
@@ -338,37 +338,137 @@ firstExistingPath (p : ps) = do
   ok <- doesFileExist p
   if ok then pure (Just p) else firstExistingPath ps
 
-findMonoFontPath :: IO (Maybe FilePath)
-findMonoFontPath = do
-  envPath <- lookupEnv "NANO_UI_MONO_FONT"
+joinDir :: FilePath -> FilePath -> FilePath
+joinDir dir name = dir ++ "/" ++ name
+
+-- Distro layouts differ (Arch: /usr/share/fonts/Adwaita, Debian: truetype/).
+-- Check known paths first, then look up preferred file names under common roots.
+resolveFont :: [FilePath] -> [FilePath] -> Maybe String -> IO (Maybe FilePath)
+resolveFont candidates names envPath =
   case envPath of
     Just p -> pathExists p
-    Nothing -> firstExistingPath monoFontCandidates
+    Nothing -> do
+      hit <- firstExistingPath candidates
+      case hit of
+        Just p -> pure (Just p)
+        Nothing -> findNamedFont names
+
+findMonoFontPath :: IO (Maybe FilePath)
+findMonoFontPath = lookupEnv "NANO_UI_MONO_FONT" >>= resolveFont monoFontCandidates monoFontFileNames
+
+findFontPath :: IO (Maybe FilePath)
+findFontPath = lookupEnv "NANO_UI_FONT" >>= resolveFont fontCandidates fontFileNames
+
+fontSearchRoots :: IO [FilePath]
+fontSearchRoots = do
+  home <- lookupEnv "HOME"
+  profile <- lookupEnv "USERPROFILE"
+  let userRoots =
+        maybe [] (\h -> [joinDir h ".local/share/fonts", joinDir h ".fonts", joinDir h ".nix-profile/share/fonts"]) home
+          ++ maybe [] (\p -> [p ++ "\\AppData\\Local\\Microsoft\\Windows\\Fonts"]) profile
+  pure
+    ( [ "/usr/share/fonts"
+      , "/usr/local/share/fonts"
+      , "/usr/share/fonts/TTF"
+      , "/usr/share/fonts/OTF"
+      , "/usr/share/fonts/truetype"
+      , "/usr/share/fonts/opentype"
+      , "/run/current-system/sw/share/fonts"
+      , "C:\\Windows\\Fonts"
+      ]
+        ++ userRoots
+    )
+
+maxFontDirDepth :: Int
+maxFontDirDepth = 6
+
+findNamedFont :: [FilePath] -> IO (Maybe FilePath)
+findNamedFont names = do
+  roots <- fontSearchRoots
+  searchNames names roots
+
+searchNames :: [FilePath] -> [FilePath] -> IO (Maybe FilePath)
+searchNames [] _ = pure Nothing
+searchNames (n : ns) roots = do
+  hit <- findInTree n roots 0
+  case hit of
+    Just p -> pure (Just p)
+    Nothing -> searchNames ns roots
+
+findInTree :: FilePath -> [FilePath] -> Int -> IO (Maybe FilePath)
+findInTree _ [] _ = pure Nothing
+findInTree _ _ depth
+  | depth > maxFontDirDepth = pure Nothing
+findInTree name dirs depth = do
+  hit <- firstExistingPath (map (`joinDir` name) dirs)
+  case hit of
+    Just p -> pure (Just p)
+    Nothing -> do
+      kids <- concat <$> mapM listSubdirs dirs
+      findInTree name kids (depth + 1)
+
+listSubdirs :: FilePath -> IO [FilePath]
+listSubdirs dir =
+  ( do
+      names <- listDirectory dir
+      filterM doesDirectoryExist (map (joinDir dir) names)
+  )
+    `catch` \(_ :: IOException) -> pure []
+
+monoFontFileNames :: [FilePath]
+monoFontFileNames =
+  [ "AdwaitaMono-Regular.ttf"
+  , "DejaVuSansMono.ttf"
+  , "LiberationMono-Regular.ttf"
+  , "NotoSansMono-Regular.ttf"
+  , "consola.ttf"
+  , "Consolas.ttf"
+  , "CascadiaMono.ttf"
+  , "lucon.ttf"
+  , "Menlo.ttc"
+  , "Courier New.ttf"
+  ]
 
 monoFontCandidates :: [FilePath]
 monoFontCandidates =
-  [ "C:\\Windows\\Fonts\\consola.ttf"
+  [ "/usr/share/fonts/Adwaita/AdwaitaMono-Regular.ttf"
+  , "/usr/share/fonts/adwaita-mono/AdwaitaMono-Regular.ttf"
+  , "C:\\Windows\\Fonts\\consola.ttf"
   , "C:\\Windows\\Fonts\\Consolas.ttf"
   , "C:\\Windows\\Fonts\\CascadiaMono.ttf"
   , "C:\\Windows\\Fonts\\lucon.ttf"
   , "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"
   , "/usr/share/fonts/TTF/DejaVuSansMono.ttf"
+  , "/usr/share/fonts/liberation/LiberationMono-Regular.ttf"
   , "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf"
+  , "/usr/share/fonts/noto/NotoSansMono-Regular.ttf"
   , "/System/Library/Fonts/Menlo.ttc"
   , "/System/Library/Fonts/Supplemental/Courier New.ttf"
   , "C:\\msys64\\ucrt64\\share\\fonts\\TTF\\DejaVuSansMono.ttf"
   ]
 
-findFontPath :: IO (Maybe FilePath)
-findFontPath = do
-  envPath <- lookupEnv "NANO_UI_FONT"
-  case envPath of
-    Just p -> pathExists p
-    Nothing -> firstExistingPath fontCandidates
+fontFileNames :: [FilePath]
+fontFileNames =
+  [ "AdwaitaSans-Regular.ttf"
+  , "Cantarell-Regular.otf"
+  , "Cantarell-Regular.ttf"
+  , "Inter-Regular.ttf"
+  , "segoeui.ttf"
+  , "SegoeUI.ttf"
+  , "arial.ttf"
+  , "DejaVuSans.ttf"
+  , "LiberationSans-Regular.ttf"
+  , "NotoSans-Regular.ttf"
+  , "FreeSans.otf"
+  , "FreeSans.ttf"
+  , "Arial.ttf"
+  , "Helvetica.ttf"
+  ]
 
 fontCandidates :: [FilePath]
 fontCandidates =
-  [ "/usr/share/fonts/adwaita-sans/AdwaitaSans-Regular.ttf"
+  [ "/usr/share/fonts/Adwaita/AdwaitaSans-Regular.ttf"
+  , "/usr/share/fonts/adwaita-sans/AdwaitaSans-Regular.ttf"
   , "/usr/share/fonts/truetype/adwaita/AdwaitaSans-Regular.ttf"
   , "/usr/share/fonts/cantarell/Cantarell-Regular.otf"
   , "/usr/share/fonts/truetype/cantarell/Cantarell-Regular.otf"
@@ -381,7 +481,10 @@ fontCandidates =
   , "C:\\Windows\\Fonts\\arial.ttf"
   , "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
   , "/usr/share/fonts/TTF/DejaVuSans.ttf"
+  , "/usr/share/fonts/liberation/LiberationSans-Regular.ttf"
   , "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
+  , "/usr/share/fonts/noto/NotoSans-Regular.ttf"
+  , "/usr/share/fonts/gnu-free/FreeSans.otf"
   , "/System/Library/Fonts/Supplemental/Arial.ttf"
   , "/System/Library/Fonts/Supplemental/Helvetica.ttf"
   , "C:\\msys64\\ucrt64\\share\\fonts\\TTF\\DejaVuSans.ttf"
