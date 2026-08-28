@@ -1,4 +1,7 @@
-packages: .
+packages:
+  .
+  term-lib
+  sdl-lib
 
 tests: True
 benchmarks: True

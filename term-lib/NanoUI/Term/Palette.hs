@@ -8,20 +8,31 @@
 module NanoUI.Term.Palette
   ( queryTerminalColors
   , newAdaptiveTerminalContext
+  , newTerminalContext
+  , terminalTheme
+  , terminalThemeFromColors
+  , terminalDefaultFg
+  , terminalDefaultBg
   ) where
 
 import NanoUI
-  ( Color
+  ( Color (..)
   , Context
+  , HostProfile (..)
+  , Style (..)
+  , Theme (..)
+  , colorB
+  , colorG
+  , colorLuminance
+  , colorR
   , colorRGBA
   , contrastRatio
+  , lerpColor
   , monospaceMetrics
   , newContext
-  , terminalDefaultBg
-  , terminalDefaultFg
-  , terminalThemeFromColors
   , withExternalText
   , withFontMetrics
+  , withHostProfile
   , withTheme
   )
 
@@ -67,6 +78,119 @@ import System.IO
   )
 #endif
 
+-- Fallback when the terminal palette cannot be read (tests, pipes).
+terminalDefaultFg :: Color
+terminalDefaultFg = colorRGBA 236 228 210 255
+
+terminalDefaultBg :: Color
+terminalDefaultBg = colorRGBA 16 18 28 255
+
+-- Build TUI chrome from the emulator default fg/bg with lighter/darker fills.
+terminalThemeFromColors :: Color -> Color -> Theme
+terminalThemeFromColors fg bg =
+  let dark = colorLuminance bg < 0.45
+      white = colorRGBA 255 255 255 255
+      black = colorRGBA 0 0 0 255
+      lift c t =
+        if dark
+          then lerpColor c white t
+          else lerpColor c black t
+      sink c t =
+        if dark
+          then lerpColor c black t
+          else lerpColor c white t
+      window = bg
+      panelBg = lift bg 0.09
+      panelHover = lift bg 0.14
+      panelActive = sink bg 0.04
+      buttonBg = lift bg 0.15
+      buttonHover = lift bg 0.22
+      buttonActive = lift bg 0.08
+      inputBg = sink bg 0.08
+      inputHover = sink bg 0.04
+      inputActive = sink bg 0.12
+      floatBg = lift bg 0.12
+      floatHover = lift bg 0.17
+      floatActive = lift bg 0.08
+      border = lerpColor fg bg 0.58
+      accent =
+        if dark
+          then lift fg 0.22
+          else sink fg 0.28
+      muted = lerpColor fg bg 0.40
+      separator = lerpColor fg bg 0.52
+      dimBase = sink bg 0.55
+      overlayDim =
+        colorRGBA (colorR dimBase) (colorG dimBase) (colorB dimBase) 186
+      panelStyle =
+        Style
+          { styleBg = panelBg
+          , styleFg = fg
+          , styleBorder = border
+          , styleBorderWidth = 1
+          , styleCornerRadius = 0
+          , styleHoverBg = panelHover
+          , styleActiveBg = panelActive
+          }
+      buttonStyle =
+        Style
+          { styleBg = buttonBg
+          , styleFg = fg
+          , styleBorder = lerpColor fg bg 0.48
+          , styleBorderWidth = 1
+          , styleCornerRadius = 0
+          , styleHoverBg = buttonHover
+          , styleActiveBg = buttonActive
+          }
+      inputStyle =
+        Style
+          { styleBg = inputBg
+          , styleFg = fg
+          , styleBorder = border
+          , styleBorderWidth = 1
+          , styleCornerRadius = 0
+          , styleHoverBg = inputHover
+          , styleActiveBg = inputActive
+          }
+      floatStyle =
+        Style
+          { styleBg = floatBg
+          , styleFg = fg
+          , styleBorder = accent
+          , styleBorderWidth = 1
+          , styleCornerRadius = 0
+          , styleHoverBg = floatHover
+          , styleActiveBg = floatActive
+          }
+   in Theme
+        { themeWindow = window
+        , themePanel = panelStyle
+        , themeFloatingWindow = floatStyle
+        , themeButton = buttonStyle
+        , themeInput = inputStyle
+        , themeSeparator = separator
+        , themeAccent = accent
+        , themeMuted = muted
+        , themeOverlayDim = overlayDim
+        }
+
+terminalTheme :: Theme
+terminalTheme = terminalThemeFromColors terminalDefaultFg terminalDefaultBg
+
+-- | Cell metrics and fallback dusk theme. Runtime apps should query
+-- the emulator palette via 'newAdaptiveTerminalContext'.
+newTerminalContext :: IO Context
+newTerminalContext = do
+  ctx <- newContext
+  pure
+    ( withExternalText
+        ( withTheme
+            (withFontMetrics (withHostProfile ctx CellHost) (monospaceMetrics 1))
+            terminalTheme
+        )
+        True
+    )
+
 -- | Default fg/bg from the connected terminal, or 'terminalDefaultFg' /
 -- 'terminalDefaultBg' when the palette cannot be read.
 queryTerminalColors :: IO (Color, Color)
@@ -86,7 +210,10 @@ newAdaptiveTerminalContext = do
   ctx <- newContext
   pure
     ( withExternalText
-        (withTheme (withFontMetrics ctx (monospaceMetrics 1)) (terminalThemeFromColors fg bg))
+        ( withTheme
+            (withFontMetrics (withHostProfile ctx CellHost) (monospaceMetrics 1))
+            (terminalThemeFromColors fg bg)
+        )
         True
     )
 

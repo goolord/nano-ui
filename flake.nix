@@ -32,7 +32,7 @@
 
           defaults.settings = {
             imports = [ haskell-flake.modules.haskellProjects.default ];
-            nano-ui.flags.sdl = lib.mkDefault true;
+            nano-ui-sdl.flags.sdl = lib.mkDefault true;
           };
 
           devShell = {

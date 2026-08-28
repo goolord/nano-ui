@@ -4,7 +4,7 @@ import Control.Monad (void, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import NanoUI
-import NanoUI.Backend.Term (TermDebugSnapshot (..), askTermDebug, runTermAppWithQuit)
+import NanoUI.Backend.Term (TermDebugSnapshot (..), askTermDebug, newTerminalContext, runTermAppWithQuit)
 import Text.Printf (printf)
 import qualified Data.Text as T
 

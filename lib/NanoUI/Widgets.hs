@@ -56,9 +56,7 @@ import qualified Data.IntMap.Strict as IM
 import qualified Data.Text as T
 import GHC.Stack (HasCallStack)
 import NanoUI.Font
-  ( FontMetrics
-  , headingFontMarker
-  , isTerminalFont
+  ( headingFontMarker
   , monoFontMarker
   , layoutUnitScale
   , mutedFontMarker
@@ -66,6 +64,7 @@ import NanoUI.Font
   , resolveLayoutPadding
   , sliderTrackBounds
   )
+import NanoUI.Host (HostProfile, isCellHost)
 import NanoUI.WidgetText
   ( checkboxLabelText
   , sliderDisplayText
@@ -142,35 +141,35 @@ parentIdx = \case
 titleBarH :: Float
 titleBarH = 28
 
-titleBarHFor :: FontMetrics -> Float
-titleBarHFor fm
-  | isTerminalFont fm = 1
+titleBarHFor :: HostProfile -> Float
+titleBarHFor host
+  | isCellHost host = 1
   | otherwise = titleBarH
 
-titleBarLayoutFor :: FontMetrics -> Layout
-titleBarLayoutFor fm =
-  tight . gap (if isTerminalFont fm then 1 else 6) . alignMid . fixedH (titleBarHFor fm) . fillW $ defaultLayout
+titleBarLayoutFor :: HostProfile -> Layout
+titleBarLayoutFor host =
+  tight . gap (if isCellHost host then 1 else 6) . alignMid . fixedH (titleBarHFor host) . fillW $ defaultLayout
 
-titleLabelLayoutFor :: FontMetrics -> Layout
-titleLabelLayoutFor fm =
-  tight . alignMid . fixedH (titleBarHFor fm) $ defaultLayout
+titleLabelLayoutFor :: HostProfile -> Layout
+titleLabelLayoutFor host =
+  tight . alignMid . fixedH (titleBarHFor host) $ defaultLayout
 
--- Pixel-authored chrome. Terminal maps one cell per defaultLayout gap step.
-floatPadFor :: FontMetrics -> Padding -> Padding
-floatPadFor fm pad
-  | isTerminalFont fm = Padding 4 4 4 4
+-- Pixel-authored chrome. Cell hosts map one cell per defaultLayout gap step.
+floatPadFor :: HostProfile -> Padding -> Padding
+floatPadFor host pad
+  | isCellHost host = Padding 4 4 4 4
   | otherwise = pad
 
-floatGapFor :: FontMetrics -> Float -> Float
-floatGapFor fm g
-  | isTerminalFont fm = 4
+floatGapFor :: HostProfile -> Float -> Float
+floatGapFor host g
+  | isCellHost host = 4
   | otherwise = g
 
-floatMinFor :: FontMetrics -> Float -> Float -> Float
-floatMinFor fm authored avail =
+floatMinFor :: HostProfile -> Float -> Float -> Float
+floatMinFor host authored avail =
   let raw =
-        if isTerminalFont fm
-          then authored * layoutUnitScale fm
+        if isCellHost host
+          then authored * layoutUnitScale host
           else authored
    in max 1 (min raw avail)
 
@@ -264,8 +263,8 @@ muted txt = void (labelEx (fillW defaultLayout) (mutedFontMarker <> txt))
 kv :: (HasCallStack, Ui :> es) => Text -> Text -> Eff es ()
 kv k v = do
   ctx <- askContext
-  let fm = ctxFontMetrics ctx
-      terminal = isTerminalFont fm
+  let host = ctxHostProfile ctx
+      terminal = isCellHost host
       rowLayout =
         tight . gap (if terminal then 1 else 12) . alignMid . fillW $ defaultLayout
       keyLayout =
@@ -300,12 +299,13 @@ modal open title child
       (closeResp, body) <- do
           stack <- uiIO (readIORef (ctxContainerStack ctx))
           let fm = ctxFontMetrics ctx
+              host = ctxHostProfile ctx
               parent = parentIdx stack
               Size winW winH = inputWindowSize inp
-              margin = resolveLayoutGap fm windowMargin
+              margin = resolveLayoutGap host fm windowMargin
               availW = max 1 (winW - 2 * margin)
               availH = max 1 (winH - 2 * margin)
-              minWidth = floatMinFor fm 260 availW
+              minWidth = floatMinFor host 260 availW
               maxW = availW
               maxH = availH
           uiIO $ do
@@ -317,8 +317,8 @@ modal open title child
                 Column
                 Fit
                 Fit
-                (floatPadFor fm (Padding 14 14 12 12))
-                (floatGapFor fm 8)
+                (floatPadFor host (Padding 14 14 12 12))
+                (floatGapFor host 8)
                 minWidth
                 0
                 maxW
@@ -333,14 +333,14 @@ modal open title child
           (closeResp, r) <-
             ( do
                 close <-
-                  row (titleBarLayoutFor fm) $ do
+                  row (titleBarLayoutFor host) $ do
                     when (not (T.null title)) $
-                      void (labelEx (titleLabelLayoutFor fm) (titleMark fm (iconModalTitle (ctxIcons ctx)) <> title))
+                      void (labelEx (titleLabelLayoutFor host) (titleMark host (iconModalTitle (ctxIcons ctx)) <> title))
                     flex
                     withKey ("close" :: Text) closeButton
                 when (not (T.null title)) sep
                 r <-
-                  if isTerminalFont fm
+                  if isCellHost host
                     then scroll (tight . grow $ defaultLayout) child
                     else child
                 pure (close, r)
@@ -390,16 +390,17 @@ window open title child
       (closeResp, body) <- do
           stack <- uiIO (readIORef (ctxContainerStack ctx))
           let fm = ctxFontMetrics ctx
+              host = ctxHostProfile ctx
               parent = parentIdx stack
               Size winW winH = inputWindowSize inp
-              margin = resolveLayoutGap fm windowMargin
+              margin = resolveLayoutGap host fm windowMargin
               availW = max 1 (winW - 2 * margin)
               availH = max 1 (winH - 2 * margin)
-              pad = resolveLayoutPadding fm (floatPadFor fm windowPad)
-              authoredMin = if isTerminalFont fm then 160 else 280
-              minWidth = floatMinFor fm authoredMin availW
+              pad = resolveLayoutPadding host fm (floatPadFor host windowPad)
+              authoredMin = if isCellHost host then 160 else 280
+              minWidth = floatMinFor host authoredMin availW
               minHeight =
-                min availH (padT pad + titleBarHFor fm + padB pad)
+                min availH (padT pad + titleBarHFor host + padB pad)
               maxW = availW
               maxH = availH
           uiIO $ do
@@ -411,8 +412,8 @@ window open title child
                 Column
                 Fit
                 Fit
-                (floatPadFor fm windowPad)
-                (floatGapFor fm 10)
+                (floatPadFor host windowPad)
+                (floatGapFor host 10)
                 minWidth
                 minHeight
                 maxW
@@ -426,9 +427,9 @@ window open title child
           (closeResp, body) <-
             ( do
                 close <-
-                  row (titleBarLayoutFor fm) $ do
+                  row (titleBarLayoutFor host) $ do
                     when (not (T.null title)) $
-                      withKey title (void (labelEx (titleLabelLayoutFor fm) (titleMark fm (iconWindowTitle (ctxIcons ctx)) <> title)))
+                      withKey title (void (labelEx (titleLabelLayoutFor host) (titleMark host (iconWindowTitle (ctxIcons ctx)) <> title)))
                     flex
                     withKey ("close" :: Text) closeButton
                 sep
@@ -506,9 +507,9 @@ labelEx layout txt = do
 closeButtonMarker :: Text
 closeButtonMarker = T.singleton '\x01'
 
--- Title bar marks are a TUI affordance; SDL draws its own chrome.
-titleMark :: FontMetrics -> Text -> Text
-titleMark fm mark = if isTerminalFont fm then mark else ""
+-- Title bar marks are a cell-host affordance; pixel hosts draw their own chrome.
+titleMark :: HostProfile -> Text -> Text
+titleMark host mark = if isCellHost host then mark else ""
 
 {-# INLINE closeButton #-}
 closeButton :: (HasCallStack, Ui :> es) => Eff es Response
@@ -516,11 +517,11 @@ closeButton = do
   wid <- currentId
   ctx <- askContext
   uiIO $ registerFocusable ctx wid
-  let fm = ctxFontMetrics ctx
+  let host = ctxHostProfile ctx
       stored = "[ " <> closeButtonMarker <> iconClose (ctxIcons ctx) <> " ]"
-      h = titleBarHFor fm
+      h = titleBarHFor host
       layout =
-        if isTerminalFont fm
+        if isCellHost host
           then
             let slotW =
                   max
@@ -561,9 +562,9 @@ checkbox txt initial = do
   store <- uiIO (getStore ctx)
   let key = intKey wid
       current = IM.findWithDefault initial key (storeCheckbox store)
-      fm = ctxFontMetrics ctx
+      host = ctxHostProfile ctx
       nodeText =
-        if isTerminalFont fm
+        if isCellHost host
           then checkboxMark (ctxIcons ctx) current <> txt
           else txt
   resp <- addWidgetResp wid NodeCheckbox nodeText (if current then 1 else 0) defaultLayout Nothing
@@ -584,9 +585,10 @@ sliderEx layout lbl minV maxV initial = do
   let key = intKey wid
       current = IM.findWithDefault initial key (storeSlider store)
       frac = if maxV > minV then (current - minV) / (maxV - minV) else 0
+      host = ctxHostProfile ctx
       fm = ctxFontMetrics ctx
       nodeText =
-        if isTerminalFont fm
+        if isCellHost host
           then sliderPackTerminal lbl frac current minV maxV
           else sliderPackRange lbl minV maxV
   resp <- addWidget wid NodeSlider nodeText frac layout
@@ -597,7 +599,7 @@ sliderEx layout lbl minV maxV initial = do
       case mrect of
         Nothing -> False
         Just (Rect x y w h) ->
-          rectContains (sliderTrackBounds fm lbl x y w h) (inputMousePos inp)
+          rectContains (sliderTrackBounds host fm lbl x y w h) (inputMousePos inp)
   let isActive = active == wid
       pressed = inputMouseDown inp && (trackHover || isActive)
   val <-
@@ -607,7 +609,7 @@ sliderEx layout lbl minV maxV initial = do
             case mrect of
               Nothing -> frac
               Just (Rect x y w h) ->
-                let track = sliderTrackBounds fm lbl x y w h
+                let track = sliderTrackBounds host fm lbl x y w h
                     tx = rectX track
                     tw = rectW track
                     px = v2X (inputMousePos inp)

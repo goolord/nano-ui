@@ -11,6 +11,11 @@ module NanoUI.Backend.Term
   , runTermAppWithQuit
   , runTermAppWithQuitEff
   , newAdaptiveTerminalContext
+  , newTerminalContext
+  , terminalTheme
+  , terminalThemeFromColors
+  , terminalDefaultFg
+  , terminalDefaultBg
   , detectIconSet
   , queryTerminalColors
   , TermDebugSnapshot (..)
@@ -49,11 +54,11 @@ import NanoUI
   , runFrameEff
   , textInputEditActive
   , defaultTheme
-  , terminalTheme
-  , terminalThemeFromColors
   , widgetNodeCount
   , type (:>)
   , withTheme
+  , withHostProfile
+  , HostProfile (CellHost)
   , setHost
   , askHost
   , uiIO
@@ -73,7 +78,15 @@ import NanoUI.Term.Debug
   , takeDebugLive
   )
 import NanoUI.Term.Icons (detectIconSet)
-import NanoUI.Term.Palette (newAdaptiveTerminalContext, queryTerminalColors)
+import NanoUI.Term.Palette
+  ( newAdaptiveTerminalContext
+  , newTerminalContext
+  , queryTerminalColors
+  , terminalDefaultBg
+  , terminalDefaultFg
+  , terminalTheme
+  , terminalThemeFromColors
+  )
 import NanoUI.Term.Cells
   ( Cells
   , rasterizeLayered
@@ -102,12 +115,13 @@ idleBlock = -1
 -- app that set either one keeps its choice.
 termContextIO :: Context -> IO Context
 termContextIO ctx0 = do
+  let ctxHost = withHostProfile ctx0 CellHost
   ctx <-
-    if ctxTheme ctx0 == defaultTheme || ctxTheme ctx0 == terminalTheme
+    if ctxTheme ctxHost == defaultTheme || ctxTheme ctxHost == terminalTheme
       then do
         (fg, bg) <- queryTerminalColors
-        pure (withTheme ctx0 (terminalThemeFromColors fg bg))
-      else pure ctx0
+        pure (withTheme ctxHost (terminalThemeFromColors fg bg))
+      else pure ctxHost
   if ctxIcons ctx == asciiIcons
     then do
       icons <- detectIconSet

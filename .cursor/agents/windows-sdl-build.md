@@ -38,7 +38,7 @@ Fix order:
 
 Constraints:
 
-- `-fsdl` is manual and default False. TUI/tests do not need SDL3.
+- `-fsdl` lives on the `nano-ui-sdl` package, is manual, and defaults to False. TUI/tests do not need SDL3.
 - `cabal run -fsdl nano-ui-sdl-demo -O2` passes `-O2` to the exe, not GHC. For optimize: `cabal run -fsdl nano-ui-sdl-demo --enable-optimization` or `--ghc-options=-O2`.
 - Do not gate SDL pkg-config outside `if flag(sdl)`. That was already fixed so TUI configures without SDL.
 - No em dashes in repo docs or comments.

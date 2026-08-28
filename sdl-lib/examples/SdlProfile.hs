@@ -2,7 +2,7 @@ module Main (main) where
 
 import Control.Monad (replicateM_, unless, void)
 import NanoUI
-import NanoUI.Backend.Sdl (sdlDrawFrame, syncDisplay, withSdlBench)
+import NanoUI.Backend.Sdl (newSdlContext, sdlDrawFrame, syncDisplay, withSdlBench)
 import SdlDemoUi (demoImages, demoUi)
 
 -- Enough timed frames for a stable SDL profile without an interactive loop.

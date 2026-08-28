@@ -20,7 +20,6 @@ module NanoUI.Font
   , layoutLineHeight
   , checkboxBoxSize
   , checkboxLeading
-  , isTerminalFont
   , layoutUnitScale
   , resolveLayoutGap
   , resolveLayoutPadding
@@ -52,6 +51,7 @@ module NanoUI.Font
 
 import Data.Text (Text)
 import qualified Data.Text as T
+import NanoUI.Host (HostProfile, isCellHost)
 import NanoUI.Style (AlignX (..), Padding (..), defaultLayout, layoutGap)
 import NanoUI.Icons (terminalTextColumns)
 import NanoUI.Types (Rect (..), sliderBarCells)
@@ -85,25 +85,21 @@ monospaceMetrics cell =
     , fmGlyph = \_ -> Nothing
     }
 
-{-# INLINE isTerminalFont #-}
-isTerminalFont :: FontMetrics -> Bool
-isTerminalFont fm = fmLineHeight fm == 1 && fmAdvance fm ' ' == 1
-
--- Layout gap/pad are authored in pixel steps (see defaultLayout). Terminal maps one cell per step.
+-- Layout gap/pad are authored in pixel steps (see defaultLayout). Cell hosts map one cell per step.
 {-# INLINE layoutUnitScale #-}
-layoutUnitScale :: FontMetrics -> Float
-layoutUnitScale fm
-  | isTerminalFont fm = 1 / layoutGap defaultLayout
+layoutUnitScale :: HostProfile -> Float
+layoutUnitScale host
+  | isCellHost host = 1 / layoutGap defaultLayout
   | otherwise = 1
 
 {-# INLINE resolveLayoutGap #-}
-resolveLayoutGap :: FontMetrics -> Float -> Float
-resolveLayoutGap fm g = g * layoutUnitScale fm
+resolveLayoutGap :: HostProfile -> FontMetrics -> Float -> Float
+resolveLayoutGap host _fm g = g * layoutUnitScale host
 
 {-# INLINE resolveLayoutPadding #-}
-resolveLayoutPadding :: FontMetrics -> Padding -> Padding
-resolveLayoutPadding fm (Padding l t r b) =
-  let s = layoutUnitScale fm
+resolveLayoutPadding :: HostProfile -> FontMetrics -> Padding -> Padding
+resolveLayoutPadding host _fm (Padding l t r b) =
+  let s = layoutUnitScale host
    in Padding (l * s) (t * s) (r * s) (b * s)
 
 monoFontMarker :: Text
@@ -142,36 +138,36 @@ stripWidgetMarkers txt =
     else txt
 
 {-# INLINE labelContentInset #-}
-labelContentInset :: FontMetrics -> (Float, Float)
-labelContentInset fm
-  | isTerminalFont fm = (0, 0)
-  | otherwise = (0.55 * fmAdvance fm ' ', 0.16 * layoutLineHeight fm)
+labelContentInset :: HostProfile -> FontMetrics -> (Float, Float)
+labelContentInset host fm
+  | isCellHost host = (0, 0)
+  | otherwise = (0.55 * fmAdvance fm ' ', 0.16 * layoutLineHeight host fm)
 
 {-# INLINE widgetContentInset #-}
-widgetContentInset :: FontMetrics -> (Float, Float)
-widgetContentInset fm
-  | isTerminalFont fm = (fmAdvance fm ' ', 0)
-  | otherwise = (fmAdvance fm ' ' * 1.25, 0.28 * layoutLineHeight fm)
+widgetContentInset :: HostProfile -> FontMetrics -> (Float, Float)
+widgetContentInset host fm
+  | isCellHost host = (fmAdvance fm ' ', 0)
+  | otherwise = (fmAdvance fm ' ' * 1.25, 0.28 * layoutLineHeight host fm)
 
 {-# INLINE buttonPadding #-}
-buttonPadding :: FontMetrics -> (Float, Float)
-buttonPadding fm
-  | isTerminalFont fm = (0, 0)
+buttonPadding :: HostProfile -> FontMetrics -> (Float, Float)
+buttonPadding host fm
+  | isCellHost host = (0, 0)
   | otherwise =
       let adv = fmAdvance fm ' '
-          lh = layoutLineHeight fm
+          lh = layoutLineHeight host fm
        in (adv * 2.0, lh * 0.30)
 
 {-# INLINE layoutLineHeight #-}
-layoutLineHeight :: FontMetrics -> Float
-layoutLineHeight fm
-  | isTerminalFont fm = fmLineHeight fm
+layoutLineHeight :: HostProfile -> FontMetrics -> Float
+layoutLineHeight host fm
+  | isCellHost host = fmLineHeight fm
   | otherwise = fmLineHeight fm * 0.82
 
 {-# INLINE centeredTextY #-}
-centeredTextY :: FontMetrics -> Float -> Float -> Float -> Float
-centeredTextY fm y h th
-  | isTerminalFont fm = y + (h - th) / 2
+centeredTextY :: HostProfile -> FontMetrics -> Float -> Float -> Float -> Float
+centeredTextY host fm y h th
+  | isCellHost host = y + (h - th) / 2
   | otherwise =
       let slack = max 0 (th - fmAscent fm)
        in y + (h - th) / 2 - slack * 0.45
@@ -189,22 +185,22 @@ alignedTextBox ax x w ix tw =
    in (tx, used)
 
 {-# INLINE widgetPadding #-}
-widgetPadding :: FontMetrics -> (Float, Float)
-widgetPadding fm =
-  let (cx, cy) = widgetContentInset fm
+widgetPadding :: HostProfile -> FontMetrics -> (Float, Float)
+widgetPadding host fm =
+  let (cx, cy) = widgetContentInset host fm
    in (2 * cx, 2 * cy)
 
 {-# INLINE checkboxBoxSize #-}
-checkboxBoxSize :: FontMetrics -> Float
-checkboxBoxSize fm
-  | isTerminalFont fm = fmLineHeight fm
+checkboxBoxSize :: HostProfile -> FontMetrics -> Float
+checkboxBoxSize host fm
+  | isCellHost host = fmLineHeight fm
   | otherwise = min 22 (max 18 (fmLineHeight fm * 1.15))
 
 {-# INLINE checkboxLeading #-}
-checkboxLeading :: FontMetrics -> Float
-checkboxLeading fm
-  | isTerminalFont fm = 0
-  | otherwise = checkboxBoxSize fm + 8
+checkboxLeading :: HostProfile -> FontMetrics -> Float
+checkboxLeading host fm
+  | isCellHost host = 0
+  | otherwise = checkboxBoxSize host fm + 8
 
 sliderTrackHeight :: Float
 sliderTrackHeight = 10
@@ -212,18 +208,18 @@ sliderTrackHeight = 10
 sliderTrackMargin :: Float
 sliderTrackMargin = 3
 
--- SDL track spans the label row insets. Terminal uses the inline [bar] cells.
+-- Pixel hosts: track spans the label row insets. Cell hosts: inline [bar] cells.
 {-# INLINE sliderTrackBounds #-}
-sliderTrackBounds :: FontMetrics -> Text -> Float -> Float -> Float -> Float -> Rect
-sliderTrackBounds fm lbl x y w h
-  | isTerminalFont fm =
+sliderTrackBounds :: HostProfile -> FontMetrics -> Text -> Float -> Float -> Float -> Float -> Rect
+sliderTrackBounds host fm lbl x y w h
+  | isCellHost host =
       let adv = fmAdvance fm ' '
-          (ix, _) = widgetContentInset fm
+          (ix, _) = widgetContentInset host fm
           prefix = lineWidth fm (lbl <> " ")
           trackW = fromIntegral (sliderBarCells + 2) * adv
        in Rect (x + ix + prefix) y trackW h
   | otherwise =
-      let (lx, _) = labelContentInset fm
+      let (lx, _) = labelContentInset host fm
           bandH = max 4 (h * 0.18)
           bandY = y + h - bandH - sliderTrackMargin
           trackY = bandY + (bandH - sliderTrackHeight) / 2
@@ -241,12 +237,12 @@ scrollBarWindowWidth = 4
 scrollBarMargin :: Float
 scrollBarMargin = 3
 
-scrollBarGeom :: FontMetrics -> (Float, Float)
-scrollBarGeom fm = scrollBarGeomFor fm ScrollBarList
+scrollBarGeom :: HostProfile -> FontMetrics -> (Float, Float)
+scrollBarGeom host fm = scrollBarGeomFor host fm ScrollBarList
 
-scrollBarGeomFor :: FontMetrics -> ScrollBarSlot -> (Float, Float)
-scrollBarGeomFor fm slot =
-  if isTerminalFont fm
+scrollBarGeomFor :: HostProfile -> FontMetrics -> ScrollBarSlot -> (Float, Float)
+scrollBarGeomFor host _fm slot =
+  if isCellHost host
     then (1, 0)
     else
       let barW = case slot of
@@ -259,9 +255,9 @@ scrollBarGeomFor fm slot =
        in (barW, endM)
 
 -- Bar plus end margin. List/page overflow reserves this on the cross axis.
-scrollBarGutter :: FontMetrics -> Float
-scrollBarGutter fm =
-  let (barW, barMargin) = scrollBarGeom fm
+scrollBarGutter :: HostProfile -> FontMetrics -> Float
+scrollBarGutter host fm =
+  let (barW, barMargin) = scrollBarGeom host fm
    in barW + barMargin
 
 data ScrollBarSlot = ScrollBarPage | ScrollBarList | ScrollBarWindow
@@ -285,19 +281,19 @@ scrollBarListExtra = 3
 scrollBarWindowSide :: Float
 scrollBarWindowSide = 2
 
-scrollLayoutGutter :: FontMetrics -> ScrollBarSlot -> Float -> Float -> Float
-scrollLayoutGutter fm slot contentSize innerMain
+scrollLayoutGutter :: HostProfile -> FontMetrics -> ScrollBarSlot -> Float -> Float -> Float
+scrollLayoutGutter host fm slot contentSize innerMain
   | contentSize <= innerMain = 0
   | otherwise =
       case slot of
         -- Window bar hangs into the parent pad. Content keeps the full inner width.
         ScrollBarWindow -> 0
-        ScrollBarList -> scrollBarGutter fm + scrollBarListExtra
-        ScrollBarPage -> scrollBarGutter fm + scrollBarPageExtra
+        ScrollBarList -> scrollBarGutter host fm + scrollBarListExtra
+        ScrollBarPage -> scrollBarGutter host fm + scrollBarPageExtra
 
-scrollBarOuterGap :: FontMetrics -> ScrollBarSlot -> Float
-scrollBarOuterGap fm slot =
-  if isTerminalFont fm
+scrollBarOuterGap :: HostProfile -> FontMetrics -> ScrollBarSlot -> Float
+scrollBarOuterGap host _fm slot =
+  if isCellHost host
     then 0
     else
       case slot of
@@ -306,35 +302,35 @@ scrollBarOuterGap fm slot =
         ScrollBarWindow -> scrollBarWindowSide
 
 -- Width the window bar occupies in the parent pad (not taken from content).
-scrollBarWindowGutter :: FontMetrics -> Float
-scrollBarWindowGutter fm =
-  let (barW, _) = scrollBarGeomFor fm ScrollBarWindow
-      side = scrollBarOuterGap fm ScrollBarWindow
+scrollBarWindowGutter :: HostProfile -> FontMetrics -> Float
+scrollBarWindowGutter host fm =
+  let (barW, _) = scrollBarGeomFor host fm ScrollBarWindow
+      side = scrollBarOuterGap host fm ScrollBarWindow
    in barW + 2 * side
 
-measureText :: FontMetrics -> Text -> (Float, Float)
-measureText fm txt =
+measureText :: HostProfile -> FontMetrics -> Text -> (Float, Float)
+measureText host fm txt =
   let h = fmLineHeight fm
       w =
-        if isTerminalFont fm
+        if isCellHost host
           then fromIntegral (terminalTextColumns txt)
           else fromIntegral (T.length txt) * fmAdvance fm ' '
    in (w, h)
 
--- | Line width for hit testing and centering. Terminal uses column counts.
-textDisplayWidth :: FontMetrics -> Text -> Float
-textDisplayWidth fm txt =
-  if isTerminalFont fm
+-- | Line width for hit testing and centering. Cell hosts use column counts.
+textDisplayWidth :: HostProfile -> FontMetrics -> Text -> Float
+textDisplayWidth host fm txt =
+  if isCellHost host
     then fromIntegral (terminalTextColumns txt)
     else lineWidth fm txt
 
-measureTextWrapped :: FontMetrics -> Text -> Float -> (Float, Float)
-measureTextWrapped fm txt maxW =
+measureTextWrapped :: HostProfile -> FontMetrics -> Text -> Float -> (Float, Float)
+measureTextWrapped host fm txt maxW =
   let lineH = fmLineHeight fm
-      textLines = wrapTextLines fm txt maxW
+      textLines = wrapTextLines host fm txt maxW
    in wrappedSize lineW lineH maxW textLines
   where
-    lineW = textDisplayWidth fm
+    lineW = textDisplayWidth host fm
 
 measureTextWrappedIO :: (Text -> IO Float) -> FontMetrics -> Text -> Float -> IO (Float, Float)
 measureTextWrappedIO lineW fm txt maxW = do
@@ -352,8 +348,8 @@ wrappedSizeFrom lineH maxW textLines ws =
     [] -> (0, lineH)
     _ -> (min maxW (maximum ws), lineH * fromIntegral (length textLines))
 
-wrapTextLines :: FontMetrics -> Text -> Float -> [Text]
-wrapTextLines fm txt maxW = wrapTextLinesWith (textDisplayWidth fm) txt maxW
+wrapTextLines :: HostProfile -> FontMetrics -> Text -> Float -> [Text]
+wrapTextLines host fm txt maxW = wrapTextLinesWith (textDisplayWidth host fm) txt maxW
 
 wrapTextLinesWith :: (Text -> Float) -> Text -> Float -> [Text]
 wrapTextLinesWith lineW txt maxW =
