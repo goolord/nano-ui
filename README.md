@@ -61,32 +61,39 @@ The demo and TUI set these via cabal `-with-rtsopts`.
 
 ### Terminal backend
 
+Uses `nano-ui-term` (`runTermApp`, `newTerminalContext`) with 1-cell font metrics.
+
+**Linux / macOS / Nix** uses [notcurses](https://github.com/dankamongmen/notcurses). **`notcurses-core` is required** (pkg-config). Changed cells are patched each frame; a full plane erase also runs on resize, dimension mismatch, or when a cell update fails mid-blit.
+
 ```bash
 cabal run nano-ui-tui
 ```
 
-Uses `nano-ui-term` (`runTermApp`, `newTerminalContext`) with 1-cell font metrics.
+**Windows** uses the native Win32 console API in CMD, PowerShell, and Windows Terminal. Frames are cell-rasterised and diffed to ANSI. No notcurses, no MSYS2 wrapper.
 
-**Windows** uses the native Win32 console API in CMD, PowerShell, and Windows Terminal. Frames are cell-rasterised and diffed to ANSI. No notcurses.
-
-**Linux / macOS / Nix** uses [notcurses](https://github.com/dankamongmen/notcurses). **Requires `notcurses-core`** (pkg-config). Use `nix develop` or your distro package. Changed cells are patched each frame; a full plane erase also runs on resize, dimension mismatch, or when a cell update fails mid-blit.
+```bash
+cabal run nano-ui-tui
+```
 
 ### SDL3 backend
 
-Requires SDL3, SDL3_ttf, and `pkg-config`. On Windows, MSYS2 UCRT64 is the usual path:
+Requires SDL3, SDL3_ttf, and `pkg-config`. Unlike the TUI, SDL needs no MSYS2 wrapper: it builds and runs natively.
 
 ```bash
-pacman -S mingw-w64-ucrt-x86_64-sdl3 mingw-w64-ucrt-x86_64-sdl3-ttf mingw-w64-ucrt-x86_64-pkg-config
+cabal run -fsdl nano-ui-sdl-demo
 ```
+
+On Windows, install the UCRT64 packages and keep `<msys2>\ucrt64\bin` on PATH.
+
+```bash
+pacman -S mingw-w64-ucrt-x86_64-sdl3 mingw-w64-ucrt-x86_64-sdl3-ttf
+```
+
+That one PATH entry covers both steps: `pkg-config.exe` resolves `sdl3.pc` at configure time, and `SDL3.dll` loads at runtime. Configure reads `sdl3.pc`, never the DLL, so copying `SDL3.dll` next to the exe does not fix a resolver error.
 
 SDL benchmarks statically link SDL3 (`executable-static` in `cabal.project`). The demo and library use dynamic SDL DLLs.
 
 Text uses a system TrueType font (Segoe UI on Windows). Override with `NANO_UI_FONT=/path/to/font.ttf`.
-
-```bash
-cabal build -fsdl
-cabal run -fsdl nano-ui-sdl-demo
-```
 
 Profile the SDL demo draw path (hidden window, 400 timed frames):
 

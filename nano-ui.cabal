@@ -15,7 +15,7 @@ extra-doc-files:
     README.md
 
 flag sdl
-    description: Build the SDL3 window backend (requires SDL3 dev libraries and pkg-config)
+    description: Build the SDL3 window backend (requires SDL3, SDL3_ttf, and pkg-config)
     manual: True
     default: False
 
@@ -122,8 +122,7 @@ executable nano-ui-profile
     hs-source-dirs:   examples
     default-language: GHC2024
 
--- Terminal backend: Win32 console on Windows, notcurses on POSIX.
--- notcurses OSC probes echo as garbage in conhost/PowerShell.
+-- Terminal backend: Win32 console on Windows, notcurses elsewhere.
 library nano-ui-term
     import:           extensions
     import:           ghc-options
@@ -152,7 +151,7 @@ library nano-ui-term
         c-sources:        term-lib/cbits/nano_ui_notcurses.c
         include-dirs:     term-lib/cbits
         pkgconfig-depends: notcurses-core >= 3.0
-        other-modules: NanoUI.Term.Notcurses
+        other-modules:    NanoUI.Term.Notcurses
 
 executable nano-ui-tui
     import:           extensions
@@ -199,13 +198,13 @@ library nano-ui-sdl
     hs-source-dirs:   sdl-lib
     default-language: GHC2024
     if flag(sdl)
-        pkgconfig-depends: sdl3 >= 3.2, sdl3-ttf >= 3.2
         c-sources:        sdl-lib/cbits/nano_ui_ttf.c
                           sdl-lib/cbits/nano_ui_display.c
                           sdl-lib/cbits/nano_ui_image.c
                           sdl-lib/cbits/nano_ui_batch.c
                           sdl-lib/cbits/nano_ui_text_atlas.c
         include-dirs:     sdl-lib/cbits
+        pkgconfig-depends: sdl3 >= 3.2, sdl3-ttf >= 3.2
     else
         buildable: False
 
