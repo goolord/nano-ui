@@ -61,7 +61,7 @@ The demo and TUI set these via cabal `-with-rtsopts`.
 
 ### Terminal backend
 
-Uses `nano-ui-term` (`runTermApp`, `newTerminalContext`) with 1-cell font metrics.
+Uses `nano-ui-term` (`runTermApp`, `newTerminalContext` from `NanoUI.Backend.Term`) with `CellHost` metrics.
 
 **Linux / macOS / Nix** uses [notcurses](https://github.com/dankamongmen/notcurses). **`notcurses-core` is required** (pkg-config). Changed cells are patched each frame; a full plane erase also runs on resize, dimension mismatch, or when a cell update fails mid-blit.
 
@@ -120,7 +120,7 @@ cd profiles
 
 Uses `nano-ui-sdl-profile` with RTS `-pj` / `-P`. Open `profile-sdl-json.prof` in [speedscope](https://www.speedscope.app/).
 
-Uses `nano-ui-sdl` (`runSdlApp`, `newSdlContext`) with SDL_ttf text rendering.
+Uses `nano-ui-sdl` (`runSdlApp`, `newSdlContext` from `NanoUI.Backend.Sdl`) with SDL_ttf text rendering.
 Window DPI is read via `SDL_GetWindowDisplayScale`; fonts and geometry rasterize
 at native pixel density while layout stays in logical coordinates.
 The backend renders pinned `DrawData` quads through SDL3's 2D renderer, sorts
@@ -146,24 +146,28 @@ cabal run -fsdl nano-ui-sdl-demo
 ```
 NanoUI → node arena → layout solver → shape lowering → DrawData
                 ↑                              ↓
-         persistent Context (hot/active/focus, prev rects, store)
+         persistent Context (HostProfile, hot/active/focus, prev rects, store)
 ```
+
+Workspace packages: `nano-ui` (core), `nano-ui-term` (`term-lib`), `nano-ui-sdl` (`sdl-lib`, `-fsdl`). Backends set `CellHost` or `PixelHost` on `Context`. Core does not name terminal or SDL.
 
 ## Modules
 
 | Module | Role |
 |--------|------|
 | `NanoUI` | Public API re-export |
+| `NanoUI.Host` | `HostProfile` (`PixelHost` / `CellHost`) |
 | `NanoUI.Monad` | `NanoUI` effect stack, `emit`, `withKey`, `currentId` |
 | `NanoUI.Widgets` | `button`, `checkbox`, `slider lbl min max initial`, `textInput`, `panel` / `row` / `column`, `useFlag` / `useText` |
 | `NanoUI.Frame` | `runFrame`, `needsRedraw` |
 | `NanoUI.Draw` | Pinned vertex arena, draw command batching |
 | `NanoUI.Layout.Solve` | Two-pass flexbox constraint solver |
 | `NanoUI.Render.ASCII` | Headless ASCII rasterizer |
-| `NanoUI.Backend.Term` | `runTermApp`, terminal event loop |
+| `NanoUI.Backend.Term` | `runTermApp`, `newTerminalContext`, terminal event loop |
 | `NanoUI.Term.Cells` | Draw commands and spans to a terminal cell grid |
 | `NanoUI.Term.Ansi` | Cell grid to ANSI bytes, diffed against the last frame |
 | `NanoUI.Term.Vt` | Incremental VT input decoder, including mouse motion |
+| `NanoUI.Backend.Sdl` | `runSdlApp`, `newSdlContext`, SDL3 event loop |
 
 ## License
 

@@ -4,7 +4,7 @@ module Main (main) where
 
 import Control.Monad (unless)
 import NanoUI
-import NanoUI.Backend.Sdl (runSdlAppWithQuit)
+import NanoUI.Backend.Sdl (newSdlContext, runSdlAppWithQuit)
 import SdlDemoUi (demoImages, demoUi)
 
 main :: IO ()

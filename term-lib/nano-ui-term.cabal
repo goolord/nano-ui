@@ -1,18 +1,14 @@
 cabal-version:      3.4
-name:               nano-ui
+name:               nano-ui-term
 version:            0.1.0.0
-synopsis:           Purely functional immediate-mode GUI core for Haskell
-description:        Backend-agnostic IMGUI library with SrcLoc IDs, two-pass flex layout,
-                    pinned vertex arenas, and damage-tracked idle rendering.
+synopsis:           Terminal backend for nano-ui
+description:        Cell-grid host for nano-ui. Win32 console on Windows, notcurses elsewhere.
 license:            MIT
 license-file:       LICENSE
 author:             goolord
 maintainer:         zacharyachurchill@gmail.com
 category:           Graphics
 build-type:         Simple
-extra-doc-files:
-    CHANGELOG.md
-    README.md
 
 common extensions
     default-language: GHC2021
@@ -35,6 +31,9 @@ common rts-options
         -threaded
         "-with-rtsopts=-N --nonmoving-gc -qb0 -T -I0"
 
+common test-rts-options
+    ghc-options: -rtsopts -threaded "-with-rtsopts=-A8m -H64m"
+
 common warnings
   ghc-options:
     -Wall
@@ -54,59 +53,62 @@ library
     import:           ghc-options
     import:           warnings
     exposed-modules:
-        NanoUI
-    other-modules:
-        NanoUI.Atlas
-        NanoUI.Compact
-        NanoUI.Context
-        NanoUI.Draw
-        NanoUI.Font
-        NanoUI.Frame
-        NanoUI.Host
-        NanoUI.Icons
-        NanoUI.Id
-        NanoUI.Input
-        NanoUI.Layout.Arena
-        NanoUI.Layout.Solve
-        NanoUI.Monad
-        NanoUI.Render.ASCII
-        NanoUI.Style
-        NanoUI.Types
-        NanoUI.WidgetText
-        NanoUI.Widgets
+        NanoUI.Backend.Term
+        NanoUI.Term.Ansi
+        NanoUI.Term.Cells
+        NanoUI.Term.Event
+        NanoUI.Term.Vt
     build-depends:
         base ^>=4.22.0.0,
-        bytestring ^>=0.12,
-        containers ^>=0.8,
-        effectful ^>=2.6,
-        effectful-core ^>=2.6,
-        ghc-compact ^>=0.1,
-        hashable ^>=1.5,
+        bytestring,
+        nano-ui,
         primitive ^>=0.9,
         text ^>=2.1
-    hs-source-dirs:   lib
+    hs-source-dirs:   .
     default-language: GHC2024
+    other-modules:
+        NanoUI.Term.Debug
+        NanoUI.Term.Icons
+        NanoUI.Term.Palette
+    if os(windows)
+        build-depends: Win32 >=2.14
+        other-modules:
+            NanoUI.Term.Driver
+            NanoUI.Term.Driver.Types
+            NanoUI.Term.Driver.Windows
+    else
+        c-sources:        cbits/nano_ui_notcurses.c
+        include-dirs:     cbits
+        pkgconfig-depends: notcurses-core >= 3.0
+        other-modules:    NanoUI.Term.Notcurses
 
-executable nano-ui-demo
+executable nano-ui-tui
     import:           extensions
     import:           ghc-options
     import:           rts-options
     import:           warnings
-    main-is:          Demo.hs
+    main-is:          Tui.hs
     build-depends:
         base ^>=4.22.0.0,
-        nano-ui
+        nano-ui,
+        nano-ui-term,
+        text ^>=2.1
     hs-source-dirs:   examples
     default-language: GHC2024
 
-executable nano-ui-profile
+test-suite nano-ui-test
     import:           extensions
     import:           ghc-options
-    import:           rts-options
+    import:           test-rts-options
     import:           warnings
-    main-is:          Profile.hs
+    type:             exitcode-stdio-1.0
+    main-is:          Main.hs
     build-depends:
         base ^>=4.22.0.0,
-        nano-ui
-    hs-source-dirs:   examples
+        bytestring,
+        effectful ^>=2.6,
+        nano-ui,
+        nano-ui-term,
+        text ^>=2.1
+    hs-source-dirs:   test
     default-language: GHC2024

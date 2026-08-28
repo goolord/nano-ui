@@ -90,7 +90,6 @@ import NanoUI.Font
   , hasHeadingMarker
   , hasMonoFontMarker
   , hasMutedMarker
-  , isTerminalFont
   , labelContentInset
   , resolveLayoutPadding
   , stripWidgetMarkers
@@ -107,6 +106,7 @@ import NanoUI.Font
   , wrapTextLines
   , wrapTextLinesIO
   )
+import NanoUI.Host (HostProfile, isCellHost)
 import NanoUI.Icons (Icons (..), checkboxMark, terminalTextColumns)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), Key (..), Modifiers (..), inputInteracted, inputKeys, inputPointerHeld)
@@ -205,13 +205,13 @@ runFrameEff unlift ctx inp ui = do
   -- Terminal sliders embed the bar in node text; sync before measure so width is correct.
   syncWidgetLabels ctx
   let Size w h = inputWindowSize inp
-  solveLayout (ctxNodeArena ctx) (ctxFontMetrics ctx) (ctxMeasureText ctx) w h
-  placeModals (ctxNodeArena ctx) (ctxFontMetrics ctx) w h
-  placeWindows (ctxNodeArena ctx) (ctxFontMetrics ctx) w h (lookupWindowPos ctx) (lookupWindowSize ctx)
+  solveLayout (ctxNodeArena ctx) (ctxHostProfile ctx) (ctxFontMetrics ctx) (ctxMeasureText ctx) w h
+  placeModals (ctxNodeArena ctx) (ctxHostProfile ctx) (ctxFontMetrics ctx) w h
+  placeWindows (ctxNodeArena ctx) (ctxHostProfile ctx) (ctxFontMetrics ctx) w h (lookupWindowPos ctx) (lookupWindowSize ctx)
   movedResize <- updateWindowResize ctx inp w h
   movedWindow <- updateWindowDrag ctx inp
   when (movedResize || movedWindow) $
-    placeWindows (ctxNodeArena ctx) (ctxFontMetrics ctx) w h (lookupWindowPos ctx) (lookupWindowSize ctx)
+    placeWindows (ctxNodeArena ctx) (ctxHostProfile ctx) (ctxFontMetrics ctx) w h (lookupWindowPos ctx) (lookupWindowSize ctx)
   persistWindowPositions ctx
   updateScrollWheel ctx inp
   updateScrollDrag ctx inp
@@ -338,7 +338,7 @@ openSelectOwnerAt ctx mouse = do
                     txt <- getText (ctxNodeArena ctx) idx
                     (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
                     let (_, opts) = selectParseOptions txt
-                        dropRect = selectDropRect (ctxFontMetrics ctx) x y w h (length opts)
+                        dropRect = selectDropRect (ctxHostProfile ctx) (ctxFontMetrics ctx) x y w h (length opts)
                     if rectContains dropRect mouse
                       then pure (Just wid)
                       else go (idx + 1)
@@ -463,7 +463,7 @@ collectClippedSpans' ctx floatCache idx nt clip = do
         dir <- getDirection (ctxNodeArena ctx) idx
         contentSize <- getNodeValue (ctxNodeArena ctx) idx
         slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
-        let content = scrollContentClip fm slot dir x y w h pad contentSize
+        let content = scrollContentClip (ctxHostProfile ctx) fm slot dir x y w h pad contentSize
         pure (rectIntersect clip content)
       else
         if nt == NodePanel
@@ -476,13 +476,13 @@ collectClippedSpans' ctx floatCache idx nt clip = do
         case nt of
           NodeSelect -> do
             spans <- collectNodeTextSpans ctx floatCache idx
-            pure (tagSelectClippedSpans clipHere x y w h fm spans)
+            pure (tagSelectClippedSpans (ctxHostProfile ctx) clipHere x y w h fm spans)
           NodeTextInput
-            | not (isTerminalFont fm) -> do
+            | not (isCellHost (ctxHostProfile ctx)) -> do
                 spans <- collectNodeTextSpans ctx floatCache idx
-                pure (tagTextInputClippedSpans clipHere x y w h fm spans)
+                pure (tagTextInputClippedSpans (ctxHostProfile ctx) clipHere x y w h fm spans)
           NodeSeparator
-            | isTerminalFont fm ->
+            | isCellHost (ctxHostProfile ctx) ->
                 pure
                   ( tagClippedSpans
                       (Rect x y w h)
@@ -492,7 +492,7 @@ collectClippedSpans' ctx floatCache idx nt clip = do
       -- TUI modal chrome does not scroll (the inner body scroller does), so it
       -- has no track to cap.
       caps <-
-        if isTerminalFont fm && isScrollNode nt && nt /= NodeModal
+        if isCellHost (ctxHostProfile ctx) && isScrollNode nt && nt /= NodeModal
           then terminalScrollCapSpans ctx idx x y w h pad clip
           else pure []
       childSpans <- walkChildSpans ctx floatCache idx clipHere
@@ -548,15 +548,15 @@ textClipSlop = 4
 padTextClipRect :: Rect -> Rect
 padTextClipRect (Rect x y w h) = Rect x y (w + textClipSlop) h
 
-selectTextClip :: Float -> Float -> Float -> Float -> FontMetrics -> Rect
-selectTextClip x y w h fm =
-  let (ix, iy) = widgetContentInset fm
+selectTextClip :: HostProfile -> Float -> Float -> Float -> Float -> FontMetrics -> Rect
+selectTextClip host x y w h fm =
+  let (ix, iy) = widgetContentInset host fm
    in Rect (x + ix) (y + iy) (max 0 (w - ix - selectChevronReserve)) (max 0 (h - 2 * iy))
 
 tagSelectClippedSpans ::
-  Rect -> Float -> Float -> Float -> Float -> FontMetrics -> [(Rect, T.Text, Color, Color)] -> [(Rect, T.Text, Color, Color, Rect)]
-tagSelectClippedSpans parentClip x y w h fm =
-  let textClip = padTextClipRect (selectTextClip x y w h fm)
+  HostProfile -> Rect -> Float -> Float -> Float -> Float -> FontMetrics -> [(Rect, T.Text, Color, Color)] -> [(Rect, T.Text, Color, Color, Rect)]
+tagSelectClippedSpans host parentClip x y w h fm =
+  let textClip = padTextClipRect (selectTextClip host x y w h fm)
    in concatMap
         ( \(rect, txt, fg, bg) ->
             case rectIntersect parentClip textClip of
@@ -564,10 +564,10 @@ tagSelectClippedSpans parentClip x y w h fm =
               Just clip -> [(rect, txt, fg, bg, clip)]
         )
 
-textInputFieldTextClip :: TextInputGeom -> FontMetrics -> Rect
-textInputFieldTextClip geom fm =
+textInputFieldTextClip :: HostProfile -> TextInputGeom -> FontMetrics -> Rect
+textInputFieldTextClip host geom fm =
   let field = tigFieldRect geom
-      (ix, iy) = widgetContentInset fm
+      (ix, iy) = widgetContentInset host fm
    in Rect
         (rectX field + ix)
         (rectY field + iy)
@@ -575,10 +575,10 @@ textInputFieldTextClip geom fm =
         (max 0 (rectH field - 2 * iy))
 
 tagTextInputClippedSpans ::
-  Rect -> Float -> Float -> Float -> Float -> FontMetrics -> [(Rect, T.Text, Color, Color)] -> [(Rect, T.Text, Color, Color, Rect)]
-tagTextInputClippedSpans parentClip x y w h fm spans =
-  let geom = textInputGeom fm x y w h
-      fieldClip = textInputFieldTextClip geom fm
+  HostProfile -> Rect -> Float -> Float -> Float -> Float -> FontMetrics -> [(Rect, T.Text, Color, Color)] -> [(Rect, T.Text, Color, Color, Rect)]
+tagTextInputClippedSpans host parentClip x y w h fm spans =
+  let geom = textInputGeom host fm x y w h
+      fieldClip = textInputFieldTextClip host geom fm
       labelClip = Rect x y w (fmLineHeight fm)
       tagOne (rect, txt, fg, bg) =
         let clipRect = padTextClipRect rect
@@ -610,7 +610,7 @@ labelPaintWithBg style bg theme raw =
 floatingLabelPaint ::
   IM.IntMap (Maybe NodeType) -> Context -> NodeIdx -> Theme -> T.Text -> (T.Text, Color, Color)
 floatingLabelPaint floatCache ctx idx theme raw =
-  let terminal = isTerminalFont (ctxFontMetrics ctx)
+  let terminal = isCellHost (ctxHostProfile ctx)
    in case IM.lookup idx floatCache of
         Just (Just NodeWindow)
           | terminal -> labelPaintWith (themeFloatingWindow theme) theme raw
@@ -666,7 +666,7 @@ collectNodeTextSpans ctx floatCache idx = do
         then pure []
         else do
           let (txt, fg, bg) = floatingLabelPaint floatCache ctx idx theme raw
-          let (ix, _) = labelContentInset fm
+          let (ix, _) = labelContentInset (ctxHostProfile ctx) fm
           ax <- getAlignX (ctxNodeArena ctx) idx
           (_, _, maxW, _) <- getMinMax (ctxNodeArena ctx) idx
           (wTag, _) <- getWidthSizing (ctxNodeArena ctx) idx
@@ -678,21 +678,21 @@ collectNodeTextSpans ctx floatCache idx = do
                 | otherwise = maxW
               canWrap = wrapCap < 1e8
               wrapW = max 0 (wrapCap - 2 * ix)
-              lineH = layoutLineHeight fm
+              lineH = layoutLineHeight (ctxHostProfile ctx) fm
           if hasNewlines || (canWrap && wrapCap + 0.5 < tw0)
             then do
               textLines <-
-                if isTerminalFont fm
-                  then pure (wrapTextLines fm txt wrapW)
+                if isCellHost (ctxHostProfile ctx)
+                  then pure (wrapTextLines (ctxHostProfile ctx) fm txt wrapW)
                   else wrapTextLinesIO (\t -> fmap fst (ctxMeasureText ctx t)) fm txt wrapW
               lineWs <-
-                if isTerminalFont fm
+                if isCellHost (ctxHostProfile ctx)
                   then pure (map (lineWidth fm) textLines)
                   else mapM (fmap fst . ctxMeasureText ctx) textLines
               pure
                 [ ( Rect
                       tx
-                      (centeredTextY fm (y + fromIntegral i * lineH) lineH lineH)
+                      (centeredTextY (ctxHostProfile ctx) fm (y + fromIntegral i * lineH) lineH lineH)
                       tw
                       lineH
                   , line
@@ -704,7 +704,7 @@ collectNodeTextSpans ctx floatCache idx = do
                 ]
             else do
               let (tx, used) = alignedTextBox ax x w ix tw0
-              pure [(Rect tx (centeredTextY fm y h th0) used th0, txt, fg, bg)]
+              pure [(Rect tx (centeredTextY (ctxHostProfile ctx) fm y h th0) used th0, txt, fg, bg)]
     else
       if isWidgetNode nt
         then widgetTextSpans ctx nt idx x y w h
@@ -713,7 +713,7 @@ collectNodeTextSpans ctx floatCache idx = do
 displayText :: Context -> NodeType -> NodeIdx -> IO T.Text
 displayText ctx nt idx = do
   txt <- getText (ctxNodeArena ctx) idx
-  let terminal = isTerminalFont (ctxFontMetrics ctx)
+  let terminal = isCellHost (ctxHostProfile ctx)
   if terminal
     then
       case nt of
@@ -782,9 +782,9 @@ data TextInputGeom = TextInputGeom
   { tigFieldRect :: Rect
   }
 
-textInputGeom :: FontMetrics -> Float -> Float -> Float -> Float -> TextInputGeom
-textInputGeom fm x y w _h =
-  let labelH = layoutLineHeight fm
+textInputGeom :: HostProfile -> FontMetrics -> Float -> Float -> Float -> Float -> TextInputGeom
+textInputGeom host fm x y w _h =
+  let labelH = layoutLineHeight host fm
       gap = textInputLabelGap fm
       fieldH = textInputFieldHeight fm
       fieldY = y + labelH + gap
@@ -793,14 +793,14 @@ textInputGeom fm x y w _h =
 widgetHitRect :: Context -> NodeType -> NodeIdx -> Float -> Float -> Float -> Float -> IO Rect
 widgetHitRect ctx nt idx x y w h = do
   let fm = ctxFontMetrics ctx
-  if not (isTerminalFont fm)
+  if not (isCellHost (ctxHostProfile ctx))
     then
       case nt of
-        NodeTextInput -> pure (tigFieldRect (textInputGeom fm x y w h))
+        NodeTextInput -> pure (tigFieldRect (textInputGeom (ctxHostProfile ctx) fm x y w h))
         NodeButton -> do
           stored <- getText (ctxNodeArena ctx) idx
           if isCloseButtonText stored
-            then pure (closeButtonHitRect fm x y w h)
+            then pure (closeButtonHitRect (ctxHostProfile ctx) fm x y w h)
             else pure (Rect x y w h)
         _ -> pure (Rect x y w h)
     else
@@ -808,48 +808,48 @@ widgetHitRect ctx nt idx x y w h = do
         NodeSlider -> do
           txt <- getText (ctxNodeArena ctx) idx
           let lbl = sliderLabelText (T.takeWhile (/= '\US') txt)
-          pure (sliderTrackBounds fm lbl x y w h)
+          pure (sliderTrackBounds (ctxHostProfile ctx) fm lbl x y w h)
         NodeButton -> do
           stored <- getText (ctxNodeArena ctx) idx
           txt <- displayText ctx nt idx
           if isCloseButtonText stored
-            then pure (closeButtonHitRect fm x y w h)
-            else pure (terminalTextHitRect fm x y h txt True)
+            then pure (closeButtonHitRect (ctxHostProfile ctx) fm x y w h)
+            else pure (terminalTextHitRect (ctxHostProfile ctx) fm x y h txt True)
         NodeCheckbox -> do
           txt <- displayText ctx nt idx
-          pure (terminalTextHitRect fm x y h txt True)
+          pure (terminalTextHitRect (ctxHostProfile ctx) fm x y h txt True)
         NodeSelect -> do
           txt <- displayText ctx nt idx
-          pure (terminalTextHitRect fm x y h txt False)
+          pure (terminalTextHitRect (ctxHostProfile ctx) fm x y h txt False)
         NodeTextInput -> do
           txt <- displayText ctx nt idx
-          pure (terminalTextHitRect fm x y h txt False)
+          pure (terminalTextHitRect (ctxHostProfile ctx) fm x y h txt False)
         _ -> pure (Rect x y w h)
 
-terminalTextHitRect :: FontMetrics -> Float -> Float -> Float -> T.Text -> Bool -> Rect
-terminalTextHitRect fm x y h txt atOrigin =
-  let (ix, _) = widgetContentInset fm
-      tw = textDisplayWidth fm txt
-      th = layoutLineHeight fm
+terminalTextHitRect :: HostProfile -> FontMetrics -> Float -> Float -> Float -> T.Text -> Bool -> Rect
+terminalTextHitRect host fm x y h txt atOrigin =
+  let (ix, _) = widgetContentInset host fm
+      tw = textDisplayWidth host fm txt
+      th = layoutLineHeight host fm
       tx = if atOrigin then x else x + ix
-      ty = centeredTextY fm y h th
+      ty = centeredTextY host fm y h th
    in Rect tx ty tw th
 
 -- Paint rect: center the X glyph in the close slot.
-terminalClosePaintRect :: FontMetrics -> Float -> Float -> Float -> Float -> T.Text -> Rect
-terminalClosePaintRect fm x y w h txt =
-  let tw = textDisplayWidth fm txt
-      th = layoutLineHeight fm
+terminalClosePaintRect :: HostProfile -> FontMetrics -> Float -> Float -> Float -> Float -> T.Text -> Rect
+terminalClosePaintRect host fm x y w h txt =
+  let tw = textDisplayWidth host fm txt
+      th = layoutLineHeight host fm
       lo = x
       hi = x + w - tw
       raw = x + (w - tw) / 2
       lead = fromIntegral (round (max lo (min hi raw)) :: Int)
-   in Rect lead (centeredTextY fm y h th) tw th
+   in Rect lead (centeredTextY host fm y h th) tw th
 
--- Hit rect: full close slot (terminal) or padded in the title bar (SDL).
-closeButtonHitRect :: FontMetrics -> Float -> Float -> Float -> Float -> Rect
-closeButtonHitRect fm x y w h =
-  if isTerminalFont fm
+-- Hit rect: full close slot (cell host) or padded in the title bar (pixel host).
+closeButtonHitRect :: HostProfile -> FontMetrics -> Float -> Float -> Float -> Float -> Rect
+closeButtonHitRect host _fm x y w h =
+  if isCellHost host
     then Rect x y w h
     else
       -- Easier to tap; keep the target inside the title bar so inner east resize
@@ -926,7 +926,7 @@ selectDropdownCursorKind ctx inp = do
                 let (_, opts) = selectParseOptions txt
                 (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
                 let fm = ctxFontMetrics ctx
-                    dropRect = selectDropRect fm x y w h (length opts)
+                    dropRect = selectDropRect (ctxHostProfile ctx) fm x y w h (length opts)
                     inDrop = rectContains dropRect mouse
                 if inDrop && (open || dropPress)
                   then pure (Just UiCursorPointer)
@@ -965,7 +965,7 @@ scrollThumbHit ctx mouse = do
               off <- getScrollOffset ctx wid
               let fm = ctxFontMetrics ctx
               slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
-              case scrollBarLayout fm slot dir x y w h pad contentSize off of
+              case scrollBarLayout (ctxHostProfile ctx) fm slot dir x y w h pad contentSize off of
                 Nothing -> go (idx + 1) count
                 Just layout ->
                   if rectContains (sbThumb layout) mouse
@@ -1025,7 +1025,7 @@ sliderCursorKind ctx wid mouse inp = do
     case mrect of
       Nothing -> UiCursorDefault
       Just (Rect x y w h) ->
-        grabDragKind (rectContains (sliderTrackBounds fm lbl x y w h) mouse) dragging inp
+        grabDragKind (rectContains (sliderTrackBounds (ctxHostProfile ctx) fm lbl x y w h) mouse) dragging inp
 
 textInputCursorKind :: Context -> WidgetId -> V2 -> IO UiCursorKind
 textInputCursorKind ctx wid mouse = do
@@ -1034,7 +1034,7 @@ textInputCursorKind ctx wid mouse = do
     Nothing -> pure UiCursorDefault
     Just (Rect x y w h) -> do
       let fm = ctxFontMetrics ctx
-          field = tigFieldRect (textInputGeom fm x y w h)
+          field = tigFieldRect (textInputGeom (ctxHostProfile ctx) fm x y w h)
       pure $
         if rectContains field mouse
           then UiCursorText
@@ -1115,7 +1115,7 @@ widgetTextSpans ::
   Context -> NodeType -> NodeIdx -> Float -> Float -> Float -> Float -> IO [(Rect, T.Text, Color, Color)]
 widgetTextSpans ctx nt idx x y w h = do
   fm <- pure (ctxFontMetrics ctx)
-  terminal <- pure (isTerminalFont fm)
+  terminal <- pure (isCellHost (ctxHostProfile ctx))
   style <- widgetVisualStyle ctx nt idx
   let fg = styleFg style
       bg = styleBg style
@@ -1125,7 +1125,7 @@ widgetTextSpans ctx nt idx x y w h = do
       if T.null txt
         then pure []
         else do
-          let (ix, _) = widgetContentInset fm
+          let (ix, _) = widgetContentInset (ctxHostProfile ctx) fm
           (tw, th) <- ctxMeasureText ctx txt
           isClose <-
             if nt == NodeButton
@@ -1133,7 +1133,7 @@ widgetTextSpans ctx nt idx x y w h = do
               else pure False
           if isClose
             then
-              let closeRect = terminalClosePaintRect fm x y w h txt
+              let closeRect = terminalClosePaintRect (ctxHostProfile ctx) fm x y w h txt
                in pure [(closeRect, txt, fg, bg)]
             else do
               let tx =
@@ -1141,7 +1141,7 @@ widgetTextSpans ctx nt idx x y w h = do
                       then x
                       else x + ix
                   textSpan =
-                    [ ( Rect tx (centeredTextY fm y h th) tw th
+                    [ ( Rect tx (centeredTextY (ctxHostProfile ctx) fm y h th) tw th
                       , txt
                       , fg
                       , bg
@@ -1185,8 +1185,8 @@ widgetTextPlacements ::
   Context -> NodeType -> NodeIdx -> Float -> Float -> Float -> Float -> IO [(T.Text, Float, Float, Float, Float)]
 widgetTextPlacements ctx nt idx x y w h = do
   let fm = ctxFontMetrics ctx
-      terminal = isTerminalFont fm
-      (ix, _) = widgetContentInset fm
+      terminal = isCellHost (ctxHostProfile ctx)
+      (ix, _) = widgetContentInset (ctxHostProfile ctx) fm
   case nt of
     NodeButton -> do
       stored <- getText (ctxNodeArena ctx) idx
@@ -1195,38 +1195,38 @@ widgetTextPlacements ctx nt idx x y w h = do
         else do
           txt <- displayText ctx nt idx
           (tw, th) <- ctxMeasureText ctx txt
-          pure [(txt, x + (w - tw) / 2, centeredTextY fm y h th, tw, th)]
+          pure [(txt, x + (w - tw) / 2, centeredTextY (ctxHostProfile ctx) fm y h th, tw, th)]
     NodeSelect -> do
       txt <- displayText ctx nt idx
       (tw, th) <- ctxMeasureText ctx txt
-      pure [(txt, x + ix, centeredTextY fm y h th, min tw (w - ix - selectChevronReserve), th)]
+      pure [(txt, x + ix, centeredTextY (ctxHostProfile ctx) fm y h th, min tw (w - ix - selectChevronReserve), th)]
     NodeCheckbox -> do
       txt <- displayText ctx nt idx
       (tw, th) <- ctxMeasureText ctx txt
       let (cx, _) =
             if terminal
-              then widgetContentInset fm
-              else labelContentInset fm
-          tx = x + cx + checkboxLeading fm
-          ty = centeredTextY fm y h th
+              then widgetContentInset (ctxHostProfile ctx) fm
+              else labelContentInset (ctxHostProfile ctx) fm
+          tx = x + cx + checkboxLeading (ctxHostProfile ctx) fm
+          ty = centeredTextY (ctxHostProfile ctx) fm y h th
       pure [(txt, tx, ty, tw, th)]
     NodeSlider -> do
       lbl <- displayText ctx nt idx
       if terminal
         then do
           (lw, lh) <- ctxMeasureText ctx lbl
-          let ty = centeredTextY fm y lh lh
+          let ty = centeredTextY (ctxHostProfile ctx) fm y lh lh
           pure [(lbl, x + ix, ty, lw, lh)]
         else do
           val <- sliderValue ctx idx
           let valTxt = sliderValueText val
-              (lx, _) = labelContentInset fm
+              (lx, _) = labelContentInset (ctxHostProfile ctx) fm
           (lw, lh) <- ctxMeasureText ctx lbl
           (vw, vh) <- ctxMeasureText ctx valTxt
-          let ty = centeredTextY fm y lh lh
+          let ty = centeredTextY (ctxHostProfile ctx) fm y lh lh
           pure
             [ (lbl, x + lx, ty, lw, lh)
-            , (valTxt, x + w - lx - vw, centeredTextY fm y vh vh, vw, vh)
+            , (valTxt, x + w - lx - vw, centeredTextY (ctxHostProfile ctx) fm y vh vh, vw, vh)
             ]
     NodeTextInput -> do
       lbl <- getText (ctxNodeArena ctx) idx
@@ -1239,17 +1239,17 @@ widgetTextPlacements ctx nt idx x y w h = do
           let cursor = IM.findWithDefault (length value) (intKey wid) (storeCursor store)
               shown = textInputTerminalText lbl value cursor focus
           (tw, th) <- ctxMeasureText ctx shown
-          pure [(shown, x + ix, centeredTextY fm y h th, tw, th)]
+          pure [(shown, x + ix, centeredTextY (ctxHostProfile ctx) fm y h th, tw, th)]
         else do
-          let geom = textInputGeom fm x y w h
+          let geom = textInputGeom (ctxHostProfile ctx) fm x y w h
               field = tigFieldRect geom
               fieldTxt = textInputFieldText lbl value focus
-              labelH = layoutLineHeight fm
+              labelH = layoutLineHeight (ctxHostProfile ctx) fm
           (lw, lh) <- ctxMeasureText ctx lbl
           (fw, fh) <- ctxMeasureText ctx fieldTxt
           pure
-            [ (lbl, x, centeredTextY fm y labelH lh, lw, lh)
-            , (fieldTxt, x + ix, centeredTextY fm (rectY field) (rectH field) fh, fw, fh)
+            [ (lbl, x, centeredTextY (ctxHostProfile ctx) fm y labelH lh, lw, lh)
+            , (fieldTxt, x + ix, centeredTextY (ctxHostProfile ctx) fm (rectY field) (rectH field) fh, fw, fh)
             ]
     _ -> do
       txt <- displayText ctx nt idx
@@ -1260,7 +1260,7 @@ widgetTextPlacements ctx nt idx x y w h = do
               else fm
       (tw, th) <- ctxMeasureText ctx txt
       let (tx, used) = alignedTextBox ax x w ix tw
-      pure [(txt, tx, centeredTextY fm' y h th, used, th)]
+      pure [(txt, tx, centeredTextY (ctxHostProfile ctx) fm' y h th, used, th)]
 
 sliderValue :: Context -> NodeIdx -> IO Float
 sliderValue ctx idx = do
@@ -1284,8 +1284,7 @@ widgetVisualStyle ctx nt idx = do
       else pure T.empty
   let isClose = nt == NodeButton && isCloseButtonText storedText
   let theme = ctxTheme ctx
-      fm = ctxFontMetrics ctx
-      terminal = isTerminalFont fm
+      terminal = isCellHost (ctxHostProfile ctx)
       isFocus = focus == wid
       widKey = hashWidgetId wid
       isHot = wid == hot
@@ -1354,7 +1353,7 @@ lowerNode ctx idx = do
   let rect = Rect x y w h
       fm = ctxFontMetrics ctx
       theme = ctxTheme ctx
-      terminal = isTerminalFont fm
+      terminal = isCellHost (ctxHostProfile ctx)
       da = ctxDrawArena ctx
   case nt of
     NodeContainer -> walkChildren ctx idx
@@ -1378,19 +1377,19 @@ lowerNode ctx idx = do
       dir <- getDirection (ctxNodeArena ctx) idx
       contentSize <- getNodeValue (ctxNodeArena ctx) idx
       slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
-      let inner = scrollContentClip fm slot dir x y w h pad contentSize
+      let inner = scrollContentClip (ctxHostProfile ctx) fm slot dir x y w h pad contentSize
       withClip da inner $ walkChildren ctx idx
       wid <- getWidgetId (ctxNodeArena ctx) idx
       paintScrollChrome ctx da idx wid x y w h pad theme terminal
     NodeText -> do
       raw <- getText (ctxNodeArena ctx) idx
       let (txt, fg, _) = nodeLabelPaint theme raw
-          (ix, _) = labelContentInset fm
+          (ix, _) = labelContentInset (ctxHostProfile ctx) fm
       ax <- getAlignX (ctxNodeArena ctx) idx
       when (not (ctxExternalText ctx) && not (T.null txt)) $ do
         (tw, th) <- ctxMeasureText ctx raw
         let (tx, used) = alignedTextBox ax x w ix tw
-        pushRect da (Rect tx (centeredTextY fm y h th) used th) fg
+        pushRect da (Rect tx (centeredTextY (ctxHostProfile ctx) fm y h th) used th) fg
     NodeSeparator -> do
       let hair = 1
       when (not terminal) $
@@ -1401,7 +1400,7 @@ lowerNode ctx idx = do
       | not terminal -> do
           style <- widgetVisualStyle ctx nt idx
           focus <- textInputFocused ctx idx
-          let geom = textInputGeom fm x y w h
+          let geom = textInputGeom (ctxHostProfile ctx) fm x y w h
               fieldRect = tigFieldRect geom
               borderCol =
                 if focus
@@ -1453,6 +1452,7 @@ lowerNode ctx idx = do
         when opaqueBg $ strokeStyledRect da terminal style x y w h
         when (nt == NodeCheckbox) $
           drawCheckbox
+            (ctxHostProfile ctx)
             da
             fm
             style
@@ -1466,7 +1466,7 @@ lowerNode ctx idx = do
         when (nt == NodeSlider) $ do
           txt <- getText (ctxNodeArena ctx) idx
           let lbl = sliderLabelText (T.takeWhile (/= '\US') txt)
-              track = sliderTrackBounds fm lbl x y w h
+              track = sliderTrackBounds (ctxHostProfile ctx) fm lbl x y w h
               tx = rectX track
               ty = rectY track
               tw = rectW track
@@ -1506,7 +1506,7 @@ lowerNode ctx idx = do
           pushRoundedRect da handle (handleD / 2) (styleBorder (themeInput theme))
           pushRoundedRect da handleInner (innerD / 2) (colorRGBA 255 255 255 255)
         when isClose $
-          drawCloseIcon fm da x y w h (styleFg style)
+          drawCloseIcon (ctxHostProfile ctx) fm da x y w h (styleFg style)
         when (nt == NodeSelect) $
           drawSelectChevron da x y w h (styleFg style)
       placements <- widgetTextPlacements ctx nt idx x y w h
@@ -1516,6 +1516,7 @@ lowerNode ctx idx = do
             pushText da fm px py txt (styleFg style)
 
 drawCheckbox ::
+  HostProfile ->
   DrawArena ->
   FontMetrics ->
   Style ->
@@ -1527,12 +1528,12 @@ drawCheckbox ::
   Color ->
   Color ->
   IO ()
-drawCheckbox da fm style x y h value accent well markCol = do
+drawCheckbox host da fm style x y h value accent well markCol = do
   let (ix, _) =
-        if isTerminalFont fm
-          then widgetContentInset fm
-          else labelContentInset fm
-      box = checkboxBoxSize fm
+        if isCellHost host
+          then widgetContentInset host fm
+          else labelContentInset host fm
+      box = checkboxBoxSize host fm
       bx = x + ix
       by = y + (h - box) / 2
       r = min 6 (box / 3.5)
@@ -1562,7 +1563,7 @@ drawCheckboxMark da bx by box markCol = do
 
 drawTextInputCaret :: DrawArena -> Context -> NodeIdx -> Float -> Float -> Float -> Float -> Style -> IO ()
 drawTextInputCaret da ctx idx x y w h style = do
-  let terminal = isTerminalFont (ctxFontMetrics ctx)
+  let terminal = isCellHost (ctxHostProfile ctx)
   if terminal
     then pure ()
     else do
@@ -1579,9 +1580,9 @@ drawTextInputCaret da ctx idx x y w h style = do
             hasSel = selLo < selHi
         lbl <- getText (ctxNodeArena ctx) idx
         let fm = ctxFontMetrics ctx
-            geom = textInputGeom fm x y w h
+            geom = textInputGeom (ctxHostProfile ctx) fm x y w h
             fieldRect = tigFieldRect geom
-            (ix, _) = widgetContentInset fm
+            (ix, _) = widgetContentInset (ctxHostProfile ctx) fm
             theme = ctxTheme ctx
             accent = themeAccent theme
             selBg = lerpColor accent (styleBg style) 0.55
@@ -1589,7 +1590,7 @@ drawTextInputCaret da ctx idx x y w h style = do
           (wLo, _) <- ctxMeasureText ctx (T.pack (take selLo value))
           (wHi, _) <- ctxMeasureText ctx (T.pack (take selHi value))
           (_, ph) <- ctxMeasureText ctx (T.pack value)
-          let ty = centeredTextY fm (rectY fieldRect) (rectH fieldRect) ph
+          let ty = centeredTextY (ctxHostProfile ctx) fm (rectY fieldRect) (rectH fieldRect) ph
               selX = rectX fieldRect + ix + wLo
               selW = max 1 (wHi - wLo)
               selH = max 4 ph
@@ -1598,7 +1599,7 @@ drawTextInputCaret da ctx idx x y w h style = do
             prefix = T.take (max 0 (min (T.length fieldTxt) cursor)) fieldTxt
         (pw, _) <- ctxMeasureText ctx prefix
         (_, ph) <- ctxMeasureText ctx fieldTxt
-        let ty = centeredTextY fm (rectY fieldRect) (rectH fieldRect) ph
+        let ty = centeredTextY (ctxHostProfile ctx) fm (rectY fieldRect) (rectH fieldRect) ph
             caretX = rectX fieldRect + ix + pw
             caretY = ty + 1
             caretH = max 4 (ph - 2)
@@ -1652,8 +1653,8 @@ borderContentClip style (Rect x y w h) =
 clamp01 :: Float -> Float
 clamp01 v = max 0 (min 1 v)
 
-scrollLineFor :: FontMetrics -> Float
-scrollLineFor fm = if isTerminalFont fm then 1 else scrollLine
+scrollLineFor :: HostProfile -> Float
+scrollLineFor host = if isCellHost host then 1 else scrollLine
 
 scrollLine :: Float
 scrollLine = 20
@@ -1667,7 +1668,7 @@ applyScrollOffsets ctx = do
       nt <- getNodeType (ctxNodeArena ctx) idx
       when (isScrollNode nt) $ do
         -- TUI modal chrome does not scroll; the inner body scroller does.
-        let skipModal = isTerminalFont (ctxFontMetrics ctx) && nt == NodeModal
+        let skipModal = isCellHost (ctxHostProfile ctx) && nt == NodeModal
         when (not skipModal) $ do
           wid <- getWidgetId (ctxNodeArena ctx) idx
           off <- getScrollOffset ctx wid
@@ -1750,7 +1751,7 @@ tryApplyScrollWheelDelta ctx wid scroll = do
     Nothing -> pure False
     Just (_idx, dir, _x, _y, w, h, pad, contentSize) -> do
       cur <- getScrollOffset ctx wid
-      let step = scrollLineFor (ctxFontMetrics ctx)
+      let step = scrollLineFor (ctxHostProfile ctx)
       case dir of
         DirColumn -> applyAxis cur (h - padT pad - padB pad) contentSize (v2Y scroll * step)
         DirRow -> applyAxis cur (w - padL pad - padR pad) contentSize (v2X scroll * step)
@@ -1823,8 +1824,8 @@ scrollHitClip ctx idx nt parentClip = do
       dir <- getDirection (ctxNodeArena ctx) idx
       contentSize <- getNodeValue (ctxNodeArena ctx) idx
       slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
-      let local = scrollContentClip fm slot dir x y w h pad contentSize
-          lane = scrollChromeLane fm slot dir x y w h pad
+      let local = scrollContentClip (ctxHostProfile ctx) fm slot dir x y w h pad contentSize
+          lane = scrollChromeLane (ctxHostProfile ctx) fm slot dir x y w h pad
           hit = rectUnion local lane
       -- Window hang stays hittable: the window clip includes padR.
       pure (rectIntersect parentClip hit)
@@ -2027,9 +2028,9 @@ finalizeSelectPick ctx inp =
                           let (_, opts) = selectParseOptions txt
                           (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
                           let fm = ctxFontMetrics ctx
-                              dropRect = selectDropRect fm x y w h (length opts)
+                              dropRect = selectDropRect (ctxHostProfile ctx) fm x y w h (length opts)
                           when (rectContains dropRect mouse) $
-                            case selectDropPickIndex dropRect (selectItemH fm h) (length opts) (v2Y mouse) of
+                            case selectDropPickIndex dropRect (selectItemH (ctxHostProfile ctx) h) (length opts) (v2Y mouse) of
                               Nothing -> pure ()
                               Just picked -> do
                                 st <- getStore ctx
@@ -2065,7 +2066,7 @@ openSelectHit ctx count mouse opens = go 0
                   let fm = ctxFontMetrics ctx
                       (_, opts) = selectParseOptions txt
                       btnRect = Rect x y w h
-                      dropRect = selectDropRect fm x y w h (length opts)
+                      dropRect = selectDropRect (ctxHostProfile ctx) fm x y w h (length opts)
                   if rectContains btnRect mouse || rectContains dropRect mouse
                     then pure True
                     else go (idx + 1)
@@ -2080,7 +2081,7 @@ refreshHover ctx inp = do
   newHot <- probeHotId ctx (inputMousePos inp)
   writeIORef (ctxHotId ctx) newHot
   writeIORef (ctxLastHotId ctx) newHot
-  let terminal = isTerminalFont (ctxFontMetrics ctx)
+  let terminal = isCellHost (ctxHostProfile ctx)
   when (prevHot /= newHot) $ do
     unless terminal $ do
       when (hashWidgetId prevHot /= 0) $ startAnimation ctx prevHot 1 0 0.12
@@ -2194,7 +2195,7 @@ finalizePointerRelease ctx inp =
                 _ -> pure ()
         writeIORef (ctxActiveId ctx) (WidgetId 0)
         when releasedOver $
-          unless (isTerminalFont (ctxFontMetrics ctx)) $
+          unless (isCellHost (ctxHostProfile ctx)) $
             setAnimationValue ctx active 1
 
 checkReleasedOver :: Context -> Int -> WidgetId -> V2 -> IO Bool
@@ -2278,7 +2279,7 @@ findSelectUnderMouse ctx count mouse = go (count - 1)
                       fm = ctxFontMetrics ctx
                       (_, opts) = selectParseOptions txt
                       btnRect = Rect x y w h
-                      dropRect = selectDropRect fm x y w h (length opts)
+                      dropRect = selectDropRect (ctxHostProfile ctx) fm x y w h (length opts)
                   if rectContains btnRect mouse || (open && rectContains dropRect mouse)
                     then pure (Just wid)
                     else go (idx - 1)
@@ -2377,8 +2378,8 @@ textInputMenuOuterPad = 6
 textInputMenuItemPadX :: Float
 textInputMenuItemPadX = 10
 
-textInputMenuSepH :: FontMetrics -> Float
-textInputMenuSepH fm = if isTerminalFont fm then 1 else 9
+textInputMenuSepH :: HostProfile -> Float
+textInputMenuSepH host = if isCellHost host then 1 else 9
 
 textInputMenuCornerR :: Float
 textInputMenuCornerR = 2
@@ -2389,16 +2390,16 @@ textInputMenuShadowOff = 3
 textInputMenuMinW :: Float
 textInputMenuMinW = 148
 
-textInputMenuItemH :: FontMetrics -> Float
-textInputMenuItemH fm = if isTerminalFont fm then 1 else 28
+textInputMenuItemH :: HostProfile -> Float
+textInputMenuItemH host = if isCellHost host then 1 else 28
 
-textInputMenuRowH :: FontMetrics -> TextInputMenuRow -> Float
-textInputMenuRowH fm = \case
-  TextInputMenuSep -> textInputMenuSepH fm
-  TextInputMenuItem {} -> textInputMenuItemH fm
+textInputMenuRowH :: HostProfile -> TextInputMenuRow -> Float
+textInputMenuRowH host = \case
+  TextInputMenuSep -> textInputMenuSepH host
+  TextInputMenuItem {} -> textInputMenuItemH host
 
-textInputMenuContentH :: FontMetrics -> Float
-textInputMenuContentH fm = sum (map (textInputMenuRowH fm) textInputMenuRows)
+textInputMenuContentH :: HostProfile -> Float
+textInputMenuContentH host = sum (map (textInputMenuRowH host) textInputMenuRows)
 
 overlayMenuStyle :: Theme -> Style
 overlayMenuStyle theme =
@@ -2436,38 +2437,38 @@ textInputMenuWidth ctx = do
   let maxTw = maximum (map fst ws)
   pure (max textInputMenuMinW (maxTw + 2 * textInputMenuItemPadX + 2 * textInputMenuOuterPad))
 
-textInputMenuRectAt :: FontMetrics -> Float -> Float -> Float -> Size -> Rect
-textInputMenuRectAt fm x y menuW win =
-  let h = 2 * textInputMenuOuterPad + textInputMenuContentH fm
+textInputMenuRectAt :: HostProfile -> FontMetrics -> Float -> Float -> Float -> Size -> Rect
+textInputMenuRectAt host _fm x y menuW win =
+  let h = 2 * textInputMenuOuterPad + textInputMenuContentH host
       Size ww wh = win
       rx = max 0 (min x (ww - menuW))
       ry = max 0 (min y (wh - h))
    in Rect rx ry menuW h
 
-textInputMenuContentRect :: Rect -> FontMetrics -> Rect
-textInputMenuContentRect menuRect fm =
+textInputMenuContentRect :: HostProfile -> Rect -> FontMetrics -> Rect
+textInputMenuContentRect host menuRect _fm =
   let pad = textInputMenuOuterPad
    in Rect
         (rectX menuRect + pad)
         (rectY menuRect + pad)
         (rectW menuRect - 2 * pad)
-        (textInputMenuContentH fm)
+        (textInputMenuContentH host)
 
-textInputMenuLayout :: FontMetrics -> [(TextInputMenuRow, Float, Float)]
-textInputMenuLayout fm = go 0 textInputMenuRows
+textInputMenuLayout :: HostProfile -> [(TextInputMenuRow, Float, Float)]
+textInputMenuLayout host = go 0 textInputMenuRows
   where
     go _ [] = []
     go y (entry : rest) =
-      let h = textInputMenuRowH fm entry
+      let h = textInputMenuRowH host entry
        in (entry, y, h) : go (y + h) rest
 
-textInputMenuPickAction :: Rect -> FontMetrics -> V2 -> Maybe Int
-textInputMenuPickAction menuRect fm mouse =
-  let content = textInputMenuContentRect menuRect fm
+textInputMenuPickAction :: HostProfile -> Rect -> FontMetrics -> V2 -> Maybe Int
+textInputMenuPickAction host menuRect fm mouse =
+  let content = textInputMenuContentRect host menuRect fm
       relY = v2Y mouse - rectY content
-   in if relY < 0 || relY >= textInputMenuContentH fm
+   in if relY < 0 || relY >= textInputMenuContentH host
         then Nothing
-        else pick relY (textInputMenuLayout fm)
+        else pick relY (textInputMenuLayout host)
   where
     pick _ [] = Nothing
     pick y ((TextInputMenuSep, _, h) : rest)
@@ -2526,7 +2527,7 @@ openTextInputMenu ctx inp =
           when (rectContains fieldRect mouse) $ do
             fm <- pure (ctxFontMetrics ctx)
             menuW <- textInputMenuWidth ctx
-            let menuRect = textInputMenuRectAt fm (v2X mouse) (v2Y mouse) menuW (inputWindowSize inp)
+            let menuRect = textInputMenuRectAt (ctxHostProfile ctx) fm (v2X mouse) (v2Y mouse) menuW (inputWindowSize inp)
             writeIORef (ctxTextInputMenu ctx) (Just (TextInputMenu focus menuRect))
             markDirty ctx
 
@@ -2541,7 +2542,7 @@ finalizeTextInputMenuPick ctx inp =
             rect = textInputMenuRect menu
          in when (rectContains rect mouse) $ do
               let fm = ctxFontMetrics ctx
-              case textInputMenuPickAction rect fm mouse of
+              case textInputMenuPickAction (ctxHostProfile ctx) rect fm mouse of
                 Nothing -> writeIORef (ctxTextInputMenu ctx) Nothing
                 Just idx -> do
                   enabled <- textInputMenuActionEnabled ctx (textInputMenuWidget menu) idx
@@ -2581,7 +2582,7 @@ textInputMenuCursorKind ctx inp = do
       if not (rectContains rect mouse)
         then pure Nothing
         else
-          case textInputMenuPickAction rect fm mouse of
+          case textInputMenuPickAction (ctxHostProfile ctx) rect fm mouse of
             Nothing -> pure Nothing
             Just idx -> do
               enabled <- textInputMenuActionEnabled ctx (textInputMenuWidget menu) idx
@@ -2596,13 +2597,13 @@ drawTextInputMenuOverlays ctx inp = do
       allow <- widgetOverlayAllowed ctx (textInputMenuWidget menu)
       when allow $ do
         let fm = ctxFontMetrics ctx
-        when (not (isTerminalFont fm)) $ do
+        when (not (isCellHost (ctxHostProfile ctx))) $ do
           let da = ctxDrawArena ctx
               theme = ctxTheme ctx
               mouse = inputMousePos inp
               menuRect = textInputMenuRect menu
               menuStyle = textInputMenuStyle theme
-              content = textInputMenuContentRect menuRect fm
+              content = textInputMenuContentRect (ctxHostProfile ctx) menuRect fm
               r = styleCornerRadius menuStyle
               wid = textInputMenuWidget menu
           pushMenuShadow da menuRect r
@@ -2615,7 +2616,7 @@ drawTextInputMenuOverlays ctx inp = do
             (rectY menuRect)
             (rectW menuRect)
             (rectH menuRect)
-          forM_ (textInputMenuLayout fm) $ \(entry, relY, h) -> do
+          forM_ (textInputMenuLayout (ctxHostProfile ctx)) $ \(entry, relY, h) -> do
             let rowRect = Rect (rectX menuRect) (rectY content + relY) (rectW menuRect) h
             case entry of
               TextInputMenuSep -> do
@@ -2646,18 +2647,18 @@ collectTextInputMenuSpans ctx inp = do
           mouse = inputMousePos inp
           menuRect = textInputMenuRect menu
           menuStyle = textInputMenuStyle theme
-          content = textInputMenuContentRect menuRect fm
+          content = textInputMenuContentRect (ctxHostProfile ctx) menuRect fm
           wid = textInputMenuWidget menu
       allow <- widgetOverlayAllowed ctx wid
       if not allow
         then pure []
-        else if isTerminalFont fm
+        else if isCellHost (ctxHostProfile ctx)
         then terminalTextInputMenuSpans ctx menuRect content fm menuStyle mouse wid
         else do
-          let (ix, _) = widgetContentInset fm
+          let (ix, _) = widgetContentInset (ctxHostProfile ctx) fm
               bg = styleBg menuStyle
           spans <-
-            forM (textInputMenuLayout fm) $ \(entry, relY, h) -> do
+            forM (textInputMenuLayout (ctxHostProfile ctx)) $ \(entry, relY, h) -> do
               let rowRect = Rect (rectX menuRect) (rectY content + relY) (rectW menuRect) h
               case entry of
                 TextInputMenuSep -> pure []
@@ -2671,7 +2672,7 @@ collectTextInputMenuSpans ctx inp = do
                           else bg
                   (tw, th) <- ctxMeasureText ctx lbl
                   let tx = rectX content + textInputMenuItemPadX + ix
-                      ty = centeredTextY fm (rectY content + relY) h th
+                      ty = centeredTextY (ctxHostProfile ctx) fm (rectY content + relY) h th
                   pure [(Rect tx ty tw th, lbl, fg, rowBg, menuRect)]
           pure (concat spans)
 
@@ -2684,7 +2685,7 @@ terminalTextInputMenuSpans ::
   V2 ->
   WidgetId ->
   IO [(Rect, T.Text, Color, Color, Rect)]
-terminalTextInputMenuSpans ctx menuRect content fm menuStyle mouse wid = do
+terminalTextInputMenuSpans ctx menuRect content _fm menuStyle mouse wid = do
   let rx :: Int
       rx = round (rectX menuRect)
       wi :: Int
@@ -2694,7 +2695,7 @@ terminalTextInputMenuSpans ctx menuRect content fm menuStyle mouse wid = do
       dropHoverBg = styleHoverBg menuStyle
       sepFg = themeSeparator (ctxTheme ctx)
   rows <-
-    forM (textInputMenuLayout fm) $ \(entry, relY, _h) -> do
+    forM (textInputMenuLayout (ctxHostProfile ctx)) $ \(entry, relY, _h) -> do
       let rowY :: Int
           rowY = round (rectY content + relY)
       case entry of
@@ -2710,7 +2711,7 @@ terminalTextInputMenuSpans ctx menuRect content fm menuStyle mouse wid = do
         TextInputMenuItem action lbl -> do
           enabled <- textInputMenuActionEnabled ctx wid action
           let fg = textInputMenuItemFg menuStyle enabled
-              rowRect = Rect (rectX menuRect) (rectY content + relY) (rectW menuRect) (textInputMenuItemH fm)
+              rowRect = Rect (rectX menuRect) (rectY content + relY) (rectW menuRect) (textInputMenuItemH (ctxHostProfile ctx))
               hovered = enabled && rectContains rowRect mouse
               rowBg = if hovered then dropHoverBg else dropBg
               rowText = T.singleton ' ' <> padDropText innerW lbl
@@ -2735,8 +2736,8 @@ textInputGeomForWidget ctx wid = do
                 else do
                   (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
                   let fm = ctxFontMetrics ctx
-                      field = tigFieldRect (textInputGeom fm x y w h)
-                      (ix, _) = widgetContentInset fm
+                      field = tigFieldRect (textInputGeom (ctxHostProfile ctx) fm x y w h)
+                      (ix, _) = widgetContentInset (ctxHostProfile ctx) fm
                       contentX = rectX field + ix
                   value <- textInputValue ctx idx
                   pure (Just (field, contentX, value))
@@ -2808,25 +2809,24 @@ syncWidgetLabels ctx = do
         txt <- getText (ctxNodeArena ctx) idx
         let body = checkboxLabelText txt
             val = IM.findWithDefault False key (storeCheckbox store)
-            terminal = isTerminalFont (ctxFontMetrics ctx)
+            terminal = isCellHost (ctxHostProfile ctx)
             mark = if terminal then checkboxMark (ctxIcons ctx) val else ""
         setNodeText (ctxNodeArena ctx) idx (mark <> body)
         setNodeValue (ctxNodeArena ctx) idx (if val then 1 else 0)
       NodeSlider -> do
         let val = IM.findWithDefault 0 key (storeSlider store)
         txt <- getText (ctxNodeArena ctx) idx
-        let fm = ctxFontMetrics ctx
-            (lbl, minV, maxV) = sliderParseRange txt
+        let (lbl, minV, maxV) = sliderParseRange txt
             frac = if maxV > minV then (val - minV) / (maxV - minV) else 0
             shown =
-              if isTerminalFont fm
+              if isCellHost (ctxHostProfile ctx)
                 then sliderPackTerminal lbl frac val minV maxV
                 else sliderPackRange lbl minV maxV
         setNodeText (ctxNodeArena ctx) idx shown
         setNodeValue (ctxNodeArena ctx) idx frac
       NodeButton -> do
         txt <- getText (ctxNodeArena ctx) idx
-        when (not (isTerminalFont (ctxFontMetrics ctx))) $
+        when (not (isCellHost (ctxHostProfile ctx))) $
           setNodeText (ctxNodeArena ctx) idx (stripButtonBrackets txt)
       _ -> pure ()
 
@@ -3081,7 +3081,7 @@ windowBodyScrollLane ctx winIdx = do
                     else
                       pure
                         ( Just
-                            (scrollChromeLane fm slot dir x y w h pad)
+                            (scrollChromeLane (ctxHostProfile ctx) fm slot dir x y w h pad)
                         )
             _ -> go ns
 
@@ -3197,7 +3197,7 @@ relayoutWindow ctx winW winH wid nw nh = do
       let (x0, y0) = maybe (x, y) id mpos
           x' = max 0 (min x0 (max 0 (winW - w)))
           y' = max 0 (min y0 (max 0 (winH - h)))
-      positionWindowNode (ctxNodeArena ctx) (ctxFontMetrics ctx) idx x' y' w h
+      positionWindowNode (ctxNodeArena ctx) (ctxHostProfile ctx) (ctxFontMetrics ctx) idx x' y' w h
 
 tryStartWindowResize :: Context -> V2 -> IO Bool
 tryStartWindowResize ctx mouse = do
@@ -3362,7 +3362,7 @@ drawWindowOverlays ctx = do
   count <- arenaCount (ctxNodeArena ctx)
   let da = ctxDrawArena ctx
       theme = ctxTheme ctx
-      terminal = isTerminalFont (ctxFontMetrics ctx)
+      terminal = isCellHost (ctxHostProfile ctx)
       style = overlayWindowStyle theme
   forM_ [0 .. count - 1] $ \idx -> do
     nt <- getNodeType (ctxNodeArena ctx) idx
@@ -3380,7 +3380,7 @@ drawModalOverlays ctx (Size ww wh) = do
   let da = ctxDrawArena ctx
       theme = ctxTheme ctx
       fm = ctxFontMetrics ctx
-      terminal = isTerminalFont fm
+      terminal = isCellHost (ctxHostProfile ctx)
   found <- modalTreeOpen ctx
   when found $ do
     when terminal $
@@ -3406,8 +3406,8 @@ drawModalOverlays ctx (Size ww wh) = do
         slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
         let clip =
               if terminal
-                then terminalModalOuterClip fm x y w h pad
-                else scrollContentClip fm slot dir x y w h pad contentSize
+                then terminalModalOuterClip (ctxHostProfile ctx) fm x y w h pad
+                else scrollContentClip (ctxHostProfile ctx) fm slot dir x y w h pad contentSize
         withClip da clip $ walkChildren ctx idx
         when (not terminal) $
           paintScrollChrome ctx da idx wid x y w h pad theme terminal
@@ -3429,12 +3429,12 @@ collectFloatingSpans ctx floatCache wanted = do
                 contentSize <- getNodeValue (ctxNodeArena ctx) idx
                 slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
                 let clip =
-                      if isTerminalFont fm && nt == NodeModal
-                        then terminalModalOuterClip fm x y w h pad
+                      if isCellHost (ctxHostProfile ctx) && nt == NodeModal
+                        then terminalModalOuterClip (ctxHostProfile ctx) fm x y w h pad
                         else
                           if isScrollNode nt
-                            then scrollContentClip fm slot dir x y w h pad contentSize
-                            else padContentClip fm x y w h pad
+                            then scrollContentClip (ctxHostProfile ctx) fm slot dir x y w h pad contentSize
+                            else padContentClip (ctxHostProfile ctx) fm x y w h pad
                 here <- walkChildSpans ctx floatCache idx clip
                 rest <- go (idx + 1)
                 pure (here ++ rest)
@@ -3449,11 +3449,11 @@ strokeRect da x y w h bw col =
       oh = max 0 (h - 2 * inset)
    in pushRoundedStroke da (Rect ox oy ow oh) 0 (max 1 bw) col
 
-selectItemH :: FontMetrics -> Float -> Float
-selectItemH fm rh = if isTerminalFont fm then max 1 rh else 28
+selectItemH :: HostProfile -> Float -> Float
+selectItemH host rh = if isCellHost host then max 1 rh else 28
 
-selectDropOuterPad :: FontMetrics -> Float
-selectDropOuterPad fm = if isTerminalFont fm then 0 else textInputMenuOuterPad
+selectDropOuterPad :: HostProfile -> Float
+selectDropOuterPad host = if isCellHost host then 0 else textInputMenuOuterPad
 
 selectDropBg :: Style -> Color
 selectDropBg st = styleBg st
@@ -3465,15 +3465,15 @@ selectDropHoverBg :: Style -> Color
 selectDropHoverBg st = styleHoverBg st
 
 -- The list hangs directly off the select, with no gap on any backend.
-selectDropRect :: FontMetrics -> Float -> Float -> Float -> Float -> Int -> Rect
-selectDropRect fm x y w h nOpts =
-  let itemH = selectItemH fm h
-      pad = selectDropOuterPad fm
+selectDropRect :: HostProfile -> FontMetrics -> Float -> Float -> Float -> Float -> Int -> Rect
+selectDropRect host _fm x y w h nOpts =
+  let itemH = selectItemH host h
+      pad = selectDropOuterPad host
    in Rect x (y + h) w (itemH * fromIntegral nOpts + 2 * pad)
 
-selectDropItemY :: FontMetrics -> Rect -> Float -> Int -> Float
-selectDropItemY fm dropRect itemH i =
-  rectY dropRect + selectDropOuterPad fm + itemH * fromIntegral i
+selectDropItemY :: HostProfile -> FontMetrics -> Rect -> Float -> Int -> Float
+selectDropItemY host _fm dropRect itemH i =
+  rectY dropRect + selectDropOuterPad host + itemH * fromIntegral i
 
 selectDropPickIndex :: Rect -> Float -> Int -> Float -> Maybe Int
 selectDropPickIndex dropRect itemH nOpts mouseY =
@@ -3549,7 +3549,7 @@ terminalScrollCapSpans ctx idx x y w h pad clip
           contentSize <- getNodeValue (ctxNodeArena ctx) idx
           off <- getScrollOffset ctx wid
           slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
-          case scrollBarLayout fm slot dir x y w h pad contentSize off of
+          case scrollBarLayout (ctxHostProfile ctx) fm slot dir x y w h pad contentSize off of
             Just layout
               | rectH (sbTrack layout) >= 3
               , let trackW = rectW (sbTrack layout)
@@ -3609,11 +3609,11 @@ terminalSelectDropdownSpans rx ry wi opts picked hoverIdx fg dropBg dropActiveBg
       , let rowText = if T.null opt then T.replicate wi (T.singleton ' ') else itemRow opt
       ]
 
-drawCloseIcon :: FontMetrics -> DrawArena -> Float -> Float -> Float -> Float -> Color -> IO ()
-drawCloseIcon fm da x y w h col = do
+drawCloseIcon :: HostProfile -> FontMetrics -> DrawArena -> Float -> Float -> Float -> Float -> Color -> IO ()
+drawCloseIcon host fm da x y w h col = do
   let s = min w h * 0.72
       th = s
-      ty = centeredTextY fm y h th
+      ty = centeredTextY host fm y h th
       tx = x + (w - s) / 2
       inset = s * 0.32
       t = max 1.6 (s * 0.10)
@@ -3632,9 +3632,9 @@ drawSelectChevron da x y w h col = do
       hh = 2.6
   pushFilledTriangle da (cx - hw) (cy - hh * 0.35) (cx + hw) (cy - hh * 0.35) cx (cy + hh) col
 
-padContentClip :: FontMetrics -> Float -> Float -> Float -> Float -> Padding -> Rect
-padContentClip fm x y w h pad0 =
-  let pad = resolveLayoutPadding fm pad0
+padContentClip :: HostProfile -> FontMetrics -> Float -> Float -> Float -> Float -> Padding -> Rect
+padContentClip host fm x y w h pad0 =
+  let pad = resolveLayoutPadding host fm pad0
    in Rect
         (x + padL pad)
         (y + padT pad)
@@ -3643,10 +3643,11 @@ padContentClip fm x y w h pad0 =
 
 -- TUI modal: title and separator stay fixed; modal/2 wraps body in scroll.
 -- Outer clip is the padded panel. Inner NodeScrollContainer clips overflow.
-terminalModalOuterClip :: FontMetrics -> Float -> Float -> Float -> Float -> Padding -> Rect
+terminalModalOuterClip :: HostProfile -> FontMetrics -> Float -> Float -> Float -> Float -> Padding -> Rect
 terminalModalOuterClip = padContentClip
 
 scrollContentClip ::
+  HostProfile ->
   FontMetrics ->
   ScrollBarSlot ->
   DirTag ->
@@ -3657,23 +3658,23 @@ scrollContentClip ::
   Padding ->
   Float ->
   Rect
-scrollContentClip fm slot dir x y w h pad contentSize =
-  let base = padContentClip fm x y w h pad
+scrollContentClip host fm slot dir x y w h pad contentSize =
+  let base = padContentClip host fm x y w h pad
       innerMain =
         case dir of
           DirColumn -> rectH base
           DirRow -> rectW base
-      gutter = scrollLayoutGutter fm slot contentSize innerMain
+      gutter = scrollLayoutGutter host fm slot contentSize innerMain
    in case dir of
         DirColumn -> Rect (rectX base) (rectY base) (max 0 (rectW base - gutter)) (rectH base)
         DirRow -> Rect (rectX base) (rectY base) (rectW base) (max 0 (rectH base - gutter))
 
 -- List/page bars sit in the scroll rect. Window body hangs into the parent pad.
 scrollChromeLane ::
-  FontMetrics -> ScrollBarSlot -> DirTag -> Float -> Float -> Float -> Float -> Padding -> Rect
-scrollChromeLane fm slot dir x y w h pad =
-  let (barW, _) = scrollBarGeomFor fm slot
-      outer = scrollBarOuterGap fm slot
+  HostProfile -> FontMetrics -> ScrollBarSlot -> DirTag -> Float -> Float -> Float -> Float -> Padding -> Rect
+scrollChromeLane host fm slot dir x y w h pad =
+  let (barW, _) = scrollBarGeomFor host fm slot
+      outer = scrollBarOuterGap host fm slot
       hang = slot == ScrollBarWindow
    in case dir of
         DirColumn ->
@@ -3697,6 +3698,7 @@ data ScrollBarLayout = ScrollBarLayout
   deriving (Eq, Show)
 
 scrollBarLayout ::
+  HostProfile ->
   FontMetrics ->
   ScrollBarSlot ->
   DirTag ->
@@ -3708,9 +3710,9 @@ scrollBarLayout ::
   Float ->
   Float ->
   Maybe ScrollBarLayout
-scrollBarLayout fm slot dir x y w h pad contentSize off =
-  let (barW, barMargin) = scrollBarGeomFor fm slot
-      minThumb = if isTerminalFont fm then barW else 16
+scrollBarLayout host fm slot dir x y w h pad contentSize off =
+  let (barW, barMargin) = scrollBarGeomFor host fm slot
+      minThumb = if isCellHost host then barW else 16
    in case dir of
     DirColumn ->
       let innerH = h - padT pad - padB pad
@@ -3718,7 +3720,7 @@ scrollBarLayout fm slot dir x y w h pad contentSize off =
        in if maxOff <= 0
             then Nothing
             else
-              let lane = scrollChromeLane fm slot DirColumn x y w h pad
+              let lane = scrollChromeLane host fm slot DirColumn x y w h pad
                   trackX = rectX lane
                   trackY = y + padT pad + barMargin
                   trackH = max 0 (innerH - 2 * barMargin)
@@ -3738,7 +3740,7 @@ scrollBarLayout fm slot dir x y w h pad contentSize off =
        in if maxOff <= 0
             then Nothing
             else
-              let lane = scrollChromeLane fm slot DirRow x y w h pad
+              let lane = scrollChromeLane host fm slot DirRow x y w h pad
                   trackY = rectY lane
                   trackX = x + padL pad + barMargin
                   trackW = max 0 (innerW - 2 * barMargin)
@@ -3790,7 +3792,7 @@ updateScrollDrag ctx inp = do
               off <- getScrollOffset ctx wid
               let fm = ctxFontMetrics ctx
               slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
-              case scrollBarLayout fm slot dir x y w h pad contentSize off of
+              case scrollBarLayout (ctxHostProfile ctx) fm slot dir x y w h pad contentSize off of
                 Nothing -> pure ()
                 Just layout -> do
                   let newOff = scrollOffsetFromThumb dir layout grabOff (inputMousePos inp)
@@ -3838,7 +3840,7 @@ tryStartScrollDragOn ctx wid mouse = do
       off <- getScrollOffset ctx wid
       let fm = ctxFontMetrics ctx
       slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
-      case scrollBarLayout fm slot dir x y w h pad contentSize off of
+      case scrollBarLayout (ctxHostProfile ctx) fm slot dir x y w h pad contentSize off of
         Nothing -> pure ()
         Just layout -> do
           let thumb = sbThumb layout
@@ -3926,7 +3928,7 @@ drawScrollBar ctx da idx wid x y w h pad theme terminal = do
           _ -> themePanel theme
       trackBg = scrollBarTrackColor base theme terminal
       thumbCol = scrollBarThumbColor base theme terminal
-  case scrollBarLayout fm slot dir x y w h pad contentSize off of
+  case scrollBarLayout (ctxHostProfile ctx) fm slot dir x y w h pad contentSize off of
     Nothing -> pure ()
     Just layout -> do
       let track = sbTrack layout
@@ -3947,7 +3949,7 @@ drawSelectOverlays ctx inp = do
       da = ctxDrawArena ctx
       theme = ctxTheme ctx
       fm = ctxFontMetrics ctx
-      terminal = isTerminalFont fm
+      terminal = isCellHost (ctxHostProfile ctx)
   count <- arenaCount (ctxNodeArena ctx)
   when (not terminal) $ do
     let go idx
@@ -3971,8 +3973,8 @@ drawSelectOverlays ctx inp = do
                           let (_, opts) = selectParseOptions txt
                           (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
                           let picked = IM.findWithDefault 0 key (storeSelect store)
-                              itemH = selectItemH fm h
-                              dropRect = selectDropRect fm x y w h (length opts)
+                              itemH = selectItemH (ctxHostProfile ctx) h
+                              dropRect = selectDropRect (ctxHostProfile ctx) fm x y w h (length opts)
                               dropStyle = overlayMenuStyle theme
                               r = styleCornerRadius dropStyle
                           pushMenuShadow da dropRect r
@@ -3986,7 +3988,7 @@ drawSelectOverlays ctx inp = do
                             (rectW dropRect)
                             (rectH dropRect)
                           forM_ (zip ([0 ..] :: [Int]) opts) $ \(i, _opt) -> do
-                            let iy = selectDropItemY fm dropRect itemH i
+                            let iy = selectDropItemY (ctxHostProfile ctx) fm dropRect itemH i
                                 itemRect = Rect (rectX dropRect) iy (rectW dropRect) itemH
                                 hovered = rectContains itemRect mouse
                             when (hovered || i == picked) $ do
@@ -4028,12 +4030,12 @@ collectSelectDropdownSpans ctx inp = do
                         txt <- getText (ctxNodeArena ctx) idx
                         let (_, opts) = selectParseOptions txt
                         (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-                        let itemH = selectItemH fm h
-                            dropRect = selectDropRect fm x y w h (length opts)
+                        let itemH = selectItemH (ctxHostProfile ctx) h
+                            dropRect = selectDropRect (ctxHostProfile ctx) fm x y w h (length opts)
                             picked = IM.findWithDefault 0 key (storeSelect store)
                             dropStyle = overlayMenuStyle theme
                             fg = styleFg dropStyle
-                        if isTerminalFont fm
+                        if isCellHost (ctxHostProfile ctx)
                           then do
                             let wi = max 1 (round w)
                                 rx = round (rectX dropRect)
@@ -4049,7 +4051,7 @@ collectSelectDropdownSpans ctx inp = do
                                   ++ rest
                               )
                           else do
-                            let (ix, _) = widgetContentInset fm
+                            let (ix, _) = widgetContentInset (ctxHostProfile ctx) fm
                                 dropBg = styleBg dropStyle
                             itemSpans <-
                               forM (zip ([0 ..] :: [Int]) opts) $ \(i, opt) ->
@@ -4057,14 +4059,14 @@ collectSelectDropdownSpans ctx inp = do
                                   then pure []
                                   else do
                                     (tw, th) <- ctxMeasureText ctx opt
-                                    let itemY = selectDropItemY fm dropRect itemH i
+                                    let itemY = selectDropItemY (ctxHostProfile ctx) fm dropRect itemH i
                                         itemRect = Rect (rectX dropRect) itemY (rectW dropRect) itemH
                                         hovered = rectContains itemRect mouse
                                         rowBg
                                           | hovered = styleHoverBg dropStyle
                                           | i == picked = styleActiveBg dropStyle
                                           | otherwise = dropBg
-                                        ty = centeredTextY fm itemY itemH th
+                                        ty = centeredTextY (ctxHostProfile ctx) fm itemY itemH th
                                         tx = rectX dropRect + textInputMenuItemPadX + ix
                                     pure [(Rect tx ty tw th, opt, fg, rowBg, dropRect)]
                             rest <- go (idx + 1)
@@ -4075,7 +4077,7 @@ drawTooltipOverlays :: Context -> IO ()
 drawTooltipOverlays ctx = do
   let da = ctxDrawArena ctx
       theme = ctxTheme ctx
-      terminal = isTerminalFont (ctxFontMetrics ctx)
+      terminal = isCellHost (ctxHostProfile ctx)
   when (not terminal) $ do
     tips <- readTooltips ctx
     let panelStyle = themePanel theme
@@ -4087,18 +4089,18 @@ collectTooltipSpans :: Context -> IO [(Rect, T.Text, Color, Color, Rect)]
 collectTooltipSpans ctx = do
   let fm = ctxFontMetrics ctx
       theme = ctxTheme ctx
-  if isTerminalFont fm
+  if isCellHost (ctxHostProfile ctx)
     then pure []
     else do
       tips <- readTooltips ctx
       filtered <- filterM (\(PendingTooltip wid _ _) -> widgetOverlayAllowed ctx wid) tips
       forM filtered $ \(PendingTooltip _ rect txt) -> do
-        let (ix, _) = widgetContentInset fm
+        let (ix, _) = widgetContentInset (ctxHostProfile ctx) fm
             fg = styleFg (themePanel theme)
             bg = styleBg (themePanel theme)
         (tw, th) <- ctxMeasureText ctx txt
         let tx = rectX rect + ix
-            ty = centeredTextY fm (rectY rect) (rectH rect) th
+            ty = centeredTextY (ctxHostProfile ctx) fm (rectY rect) (rectH rect) th
             textRect = Rect tx ty tw th
         pure (textRect, txt, fg, bg, rect)
 

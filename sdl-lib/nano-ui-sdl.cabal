@@ -1,0 +1,161 @@
+cabal-version:      3.4
+name:               nano-ui-sdl
+version:            0.1.0.0
+synopsis:           SDL3 backend for nano-ui
+description:        Pixel-host window backend for nano-ui. Requires SDL3, SDL3_ttf, and pkg-config.
+license:            MIT
+license-file:       LICENSE
+author:             goolord
+maintainer:         zacharyachurchill@gmail.com
+category:           Graphics
+build-type:         Simple
+
+flag sdl
+    description: Build the SDL3 window backend (requires SDL3, SDL3_ttf, and pkg-config)
+    manual: True
+    default: False
+
+common extensions
+    default-language: GHC2021
+    default-extensions:
+        BangPatterns
+        DeriveGeneric
+        FlexibleContexts
+        GeneralizedNewtypeDeriving
+        MagicHash
+        OverloadedStrings
+        ScopedTypeVariables
+        UnboxedTuples
+
+common ghc-options
+    ghc-options: -Wall -Widentities
+
+common rts-options
+    ghc-options:
+        -rtsopts
+        -threaded
+        "-with-rtsopts=-N --nonmoving-gc -qb0 -T -I0"
+
+-- -N1 keeps the threaded runtime on one capability. Do not pass tasty's -j1
+-- via -with-rtsopts; use: cabal bench ... --benchmark-options=-j1
+common bench-rts-options
+    ghc-options: -rtsopts -threaded "-with-rtsopts=-N1 -T"
+
+common warnings
+  ghc-options:
+    -Wall
+    -Wextra
+    -Werror
+    -Wcompat
+    -Widentities
+    -Wincomplete-record-updates
+    -Wincomplete-uni-patterns
+    -Wmissing-export-lists
+    -Wmissing-home-modules
+    -Wpartial-fields
+    -Wredundant-constraints
+
+library
+    import:           extensions
+    import:           ghc-options
+    import:           warnings
+    exposed-modules:
+        NanoUI.Backend.Sdl
+        NanoUI.Sdl.Event
+    other-modules:
+        NanoUI.Sdl.Batch
+        NanoUI.Sdl.Clipboard
+        NanoUI.Sdl.Cursor
+        NanoUI.Sdl.Debug
+        NanoUI.Sdl.Display
+        NanoUI.Sdl.Font
+        NanoUI.Sdl.Image
+        NanoUI.Sdl.Input
+        NanoUI.Sdl.Render
+        NanoUI.Sdl.Shape
+        NanoUI.Sdl.Window
+    build-depends:
+        base ^>=4.22.0.0,
+        bytestring ^>=0.12,
+        containers ^>=0.8,
+        directory ^>=1.3,
+        nano-ui,
+        record-hasfield ^>=1.0,
+        sdl3-bindgen-sys ^>=0.0.0.2,
+        text ^>=2.1
+    hs-source-dirs:   .
+    default-language: GHC2024
+    if flag(sdl)
+        c-sources:        cbits/nano_ui_ttf.c
+                          cbits/nano_ui_display.c
+                          cbits/nano_ui_image.c
+                          cbits/nano_ui_batch.c
+                          cbits/nano_ui_text_atlas.c
+        include-dirs:     cbits
+        pkgconfig-depends: sdl3 >= 3.2, sdl3-ttf >= 3.2
+    else
+        buildable: False
+
+executable nano-ui-sdl-demo
+    import:           extensions
+    import:           ghc-options
+    import:           rts-options
+    import:           warnings
+    main-is:          SdlDemo.hs
+    other-modules:    SdlDemoUi
+    build-depends:
+        base ^>=4.22.0.0,
+        bytestring ^>=0.12,
+        nano-ui,
+        nano-ui-sdl,
+        text ^>=2.1
+    hs-source-dirs:   examples
+    default-language: GHC2024
+    if !flag(sdl)
+        buildable: False
+
+executable nano-ui-sdl-profile
+    import:           extensions
+    import:           ghc-options
+    import:           bench-rts-options
+    import:           warnings
+    main-is:          SdlProfile.hs
+    other-modules:    SdlDemoUi
+    build-depends:
+        base ^>=4.22.0.0,
+        bytestring ^>=0.12,
+        nano-ui,
+        nano-ui-sdl,
+        text ^>=2.1
+    hs-source-dirs:   examples
+    default-language: GHC2024
+    if os(windows)
+        ghc-options: -optl-mconsole
+    if !flag(sdl)
+        buildable: False
+
+benchmark nano-ui-sdl-bench
+    import:           extensions
+    import:           ghc-options
+    import:           bench-rts-options
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    main-is:          SdlBench.hs
+    build-depends:
+        base ^>=4.22.0.0,
+        tasty-bench ^>=0.5,
+        nano-ui,
+        nano-ui-sdl,
+        text ^>=2.1
+    hs-source-dirs:   benchmark
+    default-language: GHC2024
+    default-extensions: CPP
+    if flag(sdl)
+        pkgconfig-depends: sdl3 >= 3.2, sdl3-ttf >= 3.2
+    if os(windows)
+        build-depends: Win32 >=2.14
+        cpp-options: -Dmingw32_HOST_OS
+        -- Static SDL pkg-config adds -mwindows; keep a console for tasty output.
+        ghc-options: -optl-mconsole
+    if !flag(sdl)
+        buildable: False

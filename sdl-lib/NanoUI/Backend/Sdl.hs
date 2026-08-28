@@ -7,6 +7,8 @@
 -- Hover and animation frames scissor into the retain texture; partial damage blits only the dirty rect to the window.
 module NanoUI.Backend.Sdl
   ( SdlEnv (..)
+  , newSdlContext
+  , sdlTheme
   , runSdlApp
   , runSdlAppEff
   , runSdlAppWithQuit
@@ -37,6 +39,7 @@ import NanoUI
   , Input (..)
   , Layer (..)
   , NanoUI
+  , Theme
   , Ui
   , Eff
   , IOE
@@ -49,9 +52,13 @@ import NanoUI
   , ctxTheme
   , Damage (..)
   , damageIsEmpty
+  , defaultTheme
   , emptyInput
+  , enableMeasureCache
   , isDirty
+  , monospaceMetrics
   , needsRedraw
+  , newContext
   , textFieldActive
   , debugPanelOpen
   , overlayConsumesQuit
@@ -63,6 +70,9 @@ import NanoUI
   , takeDamage
   , textInputEditActive
   , themeWindow
+  , withExternalText
+  , withFontMetrics
+  , withTheme
   , V2 (..)
   )
 import NanoUI.Sdl.Debug
@@ -109,6 +119,19 @@ import NanoUI.Sdl.Render (renderDrawDataPass, snapDamage, clipPixelRect)
 import NanoUI.Sdl.Window (SdlEnv (..), acquireSdlBench, defaultWindowSize, releaseSdlBench, syncDisplay, withSdl, withSdlBench)
 import SDL3.Sys.Bindgen.Blendmode (sDL_BLENDMODE_BLEND)
 import SDL3.Sys.Render (renderPresentSafe, setRenderDrawBlendModeSafe)
+
+sdlTheme :: Theme
+sdlTheme = defaultTheme
+
+newSdlContext :: IO Context
+newSdlContext = do
+  ctx0 <- newContext
+  ctx <- enableMeasureCache ctx0
+  pure
+    ( withExternalText
+        (withTheme (withFontMetrics ctx (monospaceMetrics 16)) defaultTheme)
+        True
+    )
 
 animateTimeout :: Int
 animateTimeout = 16

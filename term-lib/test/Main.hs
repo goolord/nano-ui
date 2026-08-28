@@ -9,7 +9,13 @@ import Foreign.Storable (peekByteOff)
 import Data.List (isInfixOf, nub, sort)
 import Effectful.State.Static.Local (State, evalState, get, modify)
 import NanoUI
-import NanoUI.Backend.Term (newAdaptiveTerminalContext, queryTerminalColors)
+import NanoUI.Backend.Term
+  ( newAdaptiveTerminalContext
+  , queryTerminalColors
+  , terminalDefaultBg
+  , terminalDefaultFg
+  , terminalThemeFromColors
+  )
 import NanoUI.Term.Ansi (frameBytes)
 import NanoUI.Term.Cells (cellChar, cellRows, cellsH, narrowChar, rasterize, rasterizeLayered)
 import NanoUI.Term.Event (MouseAction (..), MouseBtn (..), TermEvent (..), noMods)
@@ -22,8 +28,8 @@ main :: IO ()
 main = do
   failed <- newIORef 0
   ctx <- newContext
-  -- SDL font metrics only (headless); no SDL3 libs required for these tests.
-  sdlCtx <- newSdlContext
+  -- Pixel-host metrics only (headless); no SDL3 libs required for these tests.
+  sdlCtx <- newPixelContext
 
   let run name test = do
         before <- readIORef failed
@@ -132,6 +138,8 @@ main = do
   runSdl "window-scroll-gutter" runWindowScrollGutterTest
   run "use-flag-click" runUseFlagClickTest
   run "host-slot" runHostSlotTest
+  run "host-profile-gap" runHostProfileGapTest
+  run "host-profile-measure" runHostProfileMeasureTest
   run "compact-host" runCompactHostTest
   run "embed-state" runEmbedStateTest
   run "panel-paints" runPanelPaintsTest
@@ -154,6 +162,37 @@ main = do
 
 bump :: IORef Int -> IO ()
 bump r = modifyIORef r (+ 1)
+
+-- HostProfile drives cell vs pixel layout even when font metrics suggest the other host.
+runHostProfileGapTest :: Context -> IORef Int -> IO ()
+runHostProfileGapTest _ failed = do
+  let defaultGap = layoutGap defaultLayout
+      cellGap = resolveLayoutGap CellHost (monospaceMetrics 1) defaultGap
+      pixelGap = resolveLayoutGap PixelHost (monospaceMetrics 16) defaultGap
+  when (cellGap /= 1) $ bump failed
+  when (pixelGap /= defaultGap) $ bump failed
+
+runHostProfileMeasureTest :: Context -> IORef Int -> IO ()
+runHostProfileMeasureTest _ failed = do
+  let txt = "abcde"
+      fmCell = monospaceMetrics 1
+      fmPixel = monospaceMetrics 16
+      cellW = textDisplayWidth CellHost fmCell txt
+      pixelW = textDisplayWidth PixelHost fmPixel txt
+  when (cellW /= fromIntegral (terminalTextColumns txt)) $ bump failed
+  when (pixelW /= fromIntegral (T.length txt) * fmAdvance fmPixel ' ') $ bump failed
+
+-- Pixel host used by former SDL-named checks. Same defaults as newSdlContext
+-- without depending on nano-ui-sdl.
+newPixelContext :: IO Context
+newPixelContext = do
+  ctx0 <- newContext
+  ctx <- enableMeasureCache ctx0
+  pure
+    ( withExternalText
+        (withTheme (withFontMetrics ctx (monospaceMetrics 16)) defaultTheme)
+        True
+    )
 
 findGrabHover :: Context -> NanoUI a -> Input -> Float -> [Float] -> IO (Maybe Input)
 findGrabHover ctx ui inp0 thumbX = go
@@ -831,7 +870,7 @@ runSliderCursorTest ctx failed = do
   _ <- runFrame ctx inp0 ui
   ((resp, _), _, _, _) <- runFrame ctx inp0 ui
   let Rect rx ry rw rh = respRect resp
-      track = sliderTrackBounds (ctxFontMetrics ctx) "Volume" rx ry rw rh
+      track = sliderTrackBounds (ctxHostProfile ctx) (ctxFontMetrics ctx) "Volume" rx ry rw rh
       trackMid = V2 (rectX track + rectW track / 2) (rectY track + rectH track / 2)
       labelPos = V2 (rx + 4) (ry + 4)
   let hoverTrack = inp0 {inputMousePos = trackMid}
@@ -914,7 +953,7 @@ runScrollBarGutterTest ctx failed = do
     Just (Rect sx _ sw _) -> do
       let Rect cx _ cw _ = respRect child
           endPad = padR (layoutPadding defaultLayout)
-          gutter = scrollBarGutter (ctxFontMetrics ctx) + scrollBarListExtra
+          gutter = scrollBarGutter (ctxHostProfile ctx) (ctxFontMetrics ctx) + scrollBarListExtra
           contentRight = sx + sw - endPad - gutter
       when (cx + cw < contentRight - 0.5) $ bump failed
       when (cx + cw > contentRight + 0.01) $ bump failed
@@ -941,7 +980,7 @@ runGrowScrollGutterTest ctx failed = do
     Just (Rect sx _ sw _) -> do
       let Rect cx _ cw _ = respRect child
           fm = ctxFontMetrics ctx
-          gutter = scrollBarGutter fm + scrollBarPageExtra
+          gutter = scrollBarGutter (ctxHostProfile ctx) fm + scrollBarPageExtra
           contentRight = sx + sw - gutter
       when (cx + cw < contentRight - 0.5) $ bump failed
       when (cx + cw > contentRight + 0.01) $ bump failed
@@ -965,7 +1004,7 @@ runPanelGrowScrollGutterTest ctx failed = do
     Nothing -> bump failed
     Just (Rect sx _ sw _) -> do
       let Rect cx _ cw _ = respRect child
-          gutter = scrollBarGutter (ctxFontMetrics ctx) + scrollBarListExtra
+          gutter = scrollBarGutter (ctxHostProfile ctx) (ctxFontMetrics ctx) + scrollBarListExtra
           contentRight = sx + sw - gutter
       when (cx + cw < contentRight - 0.5) $ bump failed
       when (cx + cw > contentRight + 0.01) $ bump failed
@@ -1531,7 +1570,7 @@ runSliderTest ctx failed = do
   _ <- runFrame ctx inp0 ui
   ((resp, _), _, _, _) <- runFrame ctx inp0 ui
   let Rect rx ry rw rh = respRect resp
-      track = sliderTrackBounds (ctxFontMetrics ctx) "Vol" rx ry rw rh
+      track = sliderTrackBounds (ctxHostProfile ctx) (ctxFontMetrics ctx) "Vol" rx ry rw rh
       drag = V2 (rectX track + rectW track * 0.75) (rectY track + rectH track / 2)
   let inpDrag =
         inp0
@@ -1551,7 +1590,7 @@ runSliderFillWidthTest ctx failed = do
   ((resp, _), _, _, _) <- runFrame ctx inp0 ui
   let Rect rx ry rw rh = respRect resp
   when (rw < 300) $ bump failed
-  let track = sliderTrackBounds (ctxFontMetrics ctx) "Vol" rx ry rw rh
+  let track = sliderTrackBounds (ctxHostProfile ctx) (ctxFontMetrics ctx) "Vol" rx ry rw rh
       endDrag =
         V2 (rectX track + rectW track - 2) (rectY track + rectH track / 2)
       inpDrag =
@@ -2135,12 +2174,12 @@ runPercentLayoutTest ctx failed = do
 runLabelAlignEndTest :: Context -> IORef Int -> IO ()
 runLabelAlignEndTest _ failed = do
   checkLabelAlignEnd failed =<< newAdaptiveTerminalContext
-  checkLabelAlignEnd failed =<< newSdlContext
+  checkLabelAlignEnd failed =<< newPixelContext
 
 checkLabelAlignEnd :: IORef Int -> Context -> IO ()
 checkLabelAlignEnd failed ctx = do
   let fm = ctxFontMetrics ctx
-      (ix, _) = labelContentInset fm
+      (ix, _) = labelContentInset (ctxHostProfile ctx) fm
       tw = fmAdvance fm ' ' * 2
       boxW = tw + 2 * ix + 4
       inp = emptyInput {inputWindowSize = Size (boxW + 8) 8}
@@ -2211,7 +2250,7 @@ runTerminalDefaultGapTest :: Context -> IORef Int -> IO ()
 runTerminalDefaultGapTest _ failed = do
   ctx <- newAdaptiveTerminalContext
   let fm = ctxFontMetrics ctx
-      expectedStep = fmLineHeight fm + resolveLayoutGap fm (layoutGap defaultLayout)
+      expectedStep = fmLineHeight fm + resolveLayoutGap (ctxHostProfile ctx) fm (layoutGap defaultLayout)
       inp = emptyInput {inputWindowSize = Size 20 10}
       ui =
         column defaultLayout $ do
@@ -2235,7 +2274,7 @@ runTerminalSliderTrackTest _ failed = do
   ((resp, _), _, _, _) <- runFrame ctx inp0 ui
   let Rect rx ry rw rh = respRect resp
       fm = ctxFontMetrics ctx
-      track = sliderTrackBounds fm "Vol" rx ry rw rh
+      track = sliderTrackBounds (ctxHostProfile ctx) fm "Vol" rx ry rw rh
   when (rectW track >= rw - 1) $ bump failed
   when (rectW track < 10) $ bump failed
   let endDrag =
@@ -2289,13 +2328,13 @@ runTerminalModalOverlayTest _ failed = do
     bump failed
 
 -- TUI About modal: title + sep + 4 body lines + float pad/gap (see modal/2).
-terminalAboutModalMaxH :: FontMetrics -> Float
-terminalAboutModalMaxH fm =
-  let pad = resolveLayoutPadding fm (Padding 4 4 4 4)
-      modalGap = resolveLayoutGap fm 8
-      bodyGap = resolveLayoutGap fm (layoutGap defaultLayout)
+terminalAboutModalMaxH :: HostProfile -> FontMetrics -> Float
+terminalAboutModalMaxH host fm =
+  let pad = resolveLayoutPadding host fm (Padding 4 4 4 4)
+      modalGap = resolveLayoutGap host fm 8
+      bodyGap = resolveLayoutGap host fm (layoutGap defaultLayout)
       line = fmLineHeight fm
-      titleH = if isTerminalFont fm then 1 else 28
+      titleH = if host == CellHost then 1 else 28
       sepH = 1
       bodyRows = (4 :: Int)
       bodyH =
@@ -2304,9 +2343,9 @@ terminalAboutModalMaxH fm =
       chromeH = titleH + sepH + bodyH + modalGap * 2
    in padT pad + padB pad + chromeH + 0.5
 
-terminalAboutModalMaxFooter :: FontMetrics -> Float
-terminalAboutModalMaxFooter fm =
-  let pad = resolveLayoutPadding fm (Padding 4 4 4 4)
+terminalAboutModalMaxFooter :: HostProfile -> FontMetrics -> Float
+terminalAboutModalMaxFooter host fm =
+  let pad = resolveLayoutPadding host fm (Padding 4 4 4 4)
    in padB pad + fmLineHeight fm
 
 -- Title stays pinned. Body clips and scrolls inside the modal.
@@ -2372,8 +2411,8 @@ runTerminalModalTightTest _ failed = do
   overlays <- collectOverlayTextSpans ctx inp0
   let fm = ctxFontMetrics ctx
       Rect _ my _ mh = respRect dlg
-      maxH = terminalAboutModalMaxH fm
-      maxFooter = terminalAboutModalMaxFooter fm
+      maxH = terminalAboutModalMaxH (ctxHostProfile ctx) fm
+      maxFooter = terminalAboutModalMaxFooter (ctxHostProfile ctx) fm
   case closeSpanBottom overlays of
     Nothing -> bump failed
     Just bottom ->
@@ -2950,7 +2989,7 @@ runTerminalThemeContrastTest _ failed = do
     "terminalTheme-adaptive"
     (terminalThemeFromColors fg bg)
     failed
-  checkThemeContrast "sdlTheme" sdlTheme failed
+  checkThemeContrast "defaultTheme" defaultTheme failed
 
 checkThemeContrast :: String -> Theme -> IORef Int -> IO ()
 checkThemeContrast themeName theme failed =

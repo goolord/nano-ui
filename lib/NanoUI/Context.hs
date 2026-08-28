@@ -16,8 +16,8 @@ module NanoUI.Context
   , withExternalText
   , withTheme
   , withIcons
-  , newTerminalContext
-  , newSdlContext
+  , withHostProfile
+  , enableMeasureCache
   , markDirty
   , isDirty
   , setWakeLoop
@@ -85,11 +85,12 @@ import NanoUI.Atlas (ImageAtlas, atlasTextureId)
 import NanoUI.Draw (DrawArena, newDrawArena)
 import NanoUI.Types (Damage (..), ImageId (..), Rect (..), Size (..), lerpColor)
 import NanoUI.Font (FontMetrics, hasMonoFontMarker, measureText, monospaceMetrics, stripWidgetMarkers)
+import NanoUI.Host (HostProfile (..))
 import NanoUI.Icons (IconSet, Icons, asciiIcons, iconsFor)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), Key (KeyEscape))
 import NanoUI.Layout.Arena (NodeArena, NodeType, newNodeArena)
-import NanoUI.Style (Theme, defaultTheme, sdlTheme, terminalTheme)
+import NanoUI.Style (Theme, defaultTheme)
 
 data FrameMsg where
   FrameMsg :: a -> FrameMsg
@@ -229,6 +230,7 @@ data Context = Context
   , ctxImageAtlas :: ImageAtlas
   , ctxWakeLoop :: IORef (Maybe (IO ()))
   , ctxHost :: IORef (Map.Map TypeRep Dynamic)
+  , ctxHostProfile :: HostProfile
   }
 
 {-# INLINE newContext #-}
@@ -286,7 +288,7 @@ newContext = do
       , ctxIdSalt
       , ctxFontMetrics = fm0
       , ctxMonoFontMetrics = fm0
-      , ctxMeasureText = \txt -> pure (measureText fm0 (stripWidgetMarkers txt))
+      , ctxMeasureText = \txt -> pure (measureText PixelHost fm0 (stripWidgetMarkers txt))
       , ctxMeasureCache = Nothing
       , ctxExternalText = False
       , ctxTheme = defaultTheme
@@ -312,6 +314,7 @@ newContext = do
       , ctxImageAtlas
       , ctxWakeLoop
       , ctxHost
+      , ctxHostProfile = PixelHost
       }
 
 fontMetricsForText :: Context -> Text -> FontMetrics
@@ -327,7 +330,7 @@ withFontMetrics ctx fm =
     { ctxFontMetrics = fm
     , ctxMeasureText =
         \txt ->
-          pure (measureText (fontMetricsForText ctx {ctxFontMetrics = fm} txt) (stripWidgetMarkers txt))
+          pure (measureText (ctxHostProfile ctx) (fontMetricsForText ctx {ctxFontMetrics = fm} txt) (stripWidgetMarkers txt))
     }
 
 {-# INLINE withMonoFontMetrics #-}
@@ -376,6 +379,16 @@ withTheme ctx theme = ctx {ctxTheme = theme}
 withIcons :: Context -> IconSet -> Context
 withIcons ctx set = ctx {ctxIcons = iconsFor set}
 
+{-# INLINE withHostProfile #-}
+withHostProfile :: Context -> HostProfile -> Context
+withHostProfile ctx host =
+  let ctx' = ctx {ctxHostProfile = host}
+   in ctx'
+        { ctxMeasureText =
+            \txt ->
+              pure (measureText host (fontMetricsForText ctx' txt) (stripWidgetMarkers txt))
+        }
+
 {-# INLINE setHost #-}
 setHost :: Typeable a => Context -> a -> IO ()
 setHost ctx a = modifyIORef' (ctxHost ctx) (Map.insert (typeOf a) (toDyn a))
@@ -386,21 +399,11 @@ askHostIO ctx = do
   hosts <- readIORef (ctxHost ctx)
   pure (Map.lookup (typeRep (Proxy @a)) hosts >>= fromDynamic)
 
-{-# INLINE newTerminalContext #-}
--- | Terminal font metrics and fallback dusk theme. Runtime apps should query
--- the emulator palette via 'NanoUI.Term.Palette.newAdaptiveTerminalContext'.
-newTerminalContext :: IO Context
-newTerminalContext = do
-  ctx <- newContext
-  pure (withExternalText (withTheme (withFontMetrics ctx (monospaceMetrics 1)) terminalTheme) True)
-
-{-# INLINE newSdlContext #-}
-newSdlContext :: IO Context
-newSdlContext = do
-  ctx0 <- newContext
+{-# INLINE enableMeasureCache #-}
+enableMeasureCache :: Context -> IO Context
+enableMeasureCache ctx = do
   cacheRef <- newIORef Map.empty
-  let ctx = ctx0 {ctxMeasureCache = Just cacheRef}
-  pure (withExternalText (withTheme (withFontMetrics ctx (monospaceMetrics 16)) sdlTheme) True)
+  pure (ctx {ctxMeasureCache = Just cacheRef})
 
 {-# INLINE markDirty #-}
 markDirty :: Context -> IO ()
