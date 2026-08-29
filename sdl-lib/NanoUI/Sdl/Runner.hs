@@ -13,16 +13,18 @@ module NanoUI.Sdl.Runner
   ) where
 
 import Control.Monad (unless, void, when)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, readIORef, writeIORef)
 import Data.Typeable (Typeable)
 import GHC.Clock (getMonotonicTime)
 import NanoUI
   ( Input (..)
   , NanoUI
+  , Rect (..)
   , Size (..)
+  , V2 (..)
+  , rectIntersect
   , themeWindow
   )
-import NanoUI.Types (Rect (..), V2 (..), rectIntersect)
 import Effectful (Eff, IOE, type (:>))
 import NanoUI.Testing
   ( Context

@@ -6,7 +6,7 @@ module NanoUI.Sdl.Session
   ) where
 
 import Control.Exception (bracket, finally)
-import Control.Monad (unless, void, when)
+import Control.Monad (void, when)
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
 import GHC.Clock (getMonotonicTime)
 import NanoUI

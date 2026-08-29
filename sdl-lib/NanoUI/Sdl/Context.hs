@@ -5,8 +5,7 @@ module NanoUI.Sdl.Context
   ( newSdlContext
   ) where
 
-import NanoUI.Context.Internal (Context)
-import NanoUI.Context.New (newPixelHostContext)
+import NanoUI.Testing (Context, newPixelContext)
 
 newSdlContext :: IO Context
-newSdlContext = newPixelHostContext
+newSdlContext = newPixelContext
