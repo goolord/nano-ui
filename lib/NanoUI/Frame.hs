@@ -40,6 +40,7 @@ import NanoUI.Context
   , animInProgress
   , clearTooltips
   )
+import NanoUI.Context.Modal (beginFrameModal)
 import NanoUI.Draw (DrawData, Layer (..), beginLayer, finishDraw, resetDrawArena)
 import NanoUI.Id (WidgetId (..))
 import NanoUI.Input (Input (..), inputMouseDown)
@@ -167,10 +168,7 @@ runFrameEff unlift ctx inp ui = do
   writeIORef (ctxWidgetNodeTypes ctx) Nothing
   unless (inputMouseDown inp) $
     writeIORef (ctxSelectDropPress ctx) False
-  modalNow <- readIORef (ctxModalActive ctx)
-  writeIORef (ctxModalWasActive ctx) modalNow
-  writeIORef (ctxModalActive ctx) False
-  writeIORef (ctxModalDepth ctx) 0
+  beginFrameModal ctx
   writeIORef (ctxEscapeConsumed ctx) False
   clearTooltips ctx
   result <- unlift (runUi ctx inp ui)

@@ -61,6 +61,21 @@ library
         NanoUI.Atlas
         NanoUI.Compact
         NanoUI.Context
+        NanoUI.Context.Animation
+        NanoUI.Context.Internal
+        NanoUI.Context.Modal
+        NanoUI.Context.Tooltip
+        NanoUI.Context.Atlas
+        NanoUI.Context.PrevRects
+        NanoUI.Context.Store
+        NanoUI.Context.Config
+        NanoUI.Context.Dirty
+        NanoUI.Context.Host
+        NanoUI.Context.Focus
+        NanoUI.Context.Messages
+        NanoUI.Context.Focusables
+        NanoUI.Context.Clipboard
+        NanoUI.Context.New
         NanoUI.Damage
         NanoUI.Draw
         NanoUI.Ease
