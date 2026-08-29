@@ -9,6 +9,7 @@ module NanoUI.Widgets.Internal
   , floatPadFor
   , floatGapFor
   , floatMinFor
+  , mkResponse
   , emptyModalResp
   , container
   , titleMark
@@ -38,8 +39,7 @@ import NanoUI.Id (WidgetId (..))
 import NanoUI.Input (Input (..), inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased)
 import NanoUI.Layout.Arena
   ( NodeType (..)
-  , addNode
-  , setAspect
+  , addNodeFromLayout
   , setNodeText
   , setNodeValue
   , setStyleIdx
@@ -110,16 +110,19 @@ data Response = Response
   }
   deriving (Eq, Show)
 
-emptyModalResp :: WidgetId -> Response
-emptyModalResp wid =
+mkResponse :: WidgetId -> Rect -> Bool -> Bool -> Bool -> Bool -> Response
+mkResponse wid rect hovered pressed clicked changed =
   Response
     { respId = wid
-    , respRect = Rect 0 0 0 0
-    , respHovered = False
-    , respPressed = False
-    , respClicked = False
-    , respChanged = False
+    , respRect = rect
+    , respHovered = hovered
+    , respPressed = pressed
+    , respClicked = clicked
+    , respChanged = changed
     }
+
+emptyModalResp :: WidgetId -> Response
+emptyModalResp wid = mkResponse wid (Rect 0 0 0 0) False False False False
 
 container :: Ui :> es => NodeType -> Layout -> Eff es a -> Eff es a
 container nt layout child = do
@@ -127,25 +130,7 @@ container nt layout child = do
   stack <- uiIO $ do
     stack <- readIORef (ctxContainerStack ctx)
     let parent = parentIdx stack
-    idx <-
-      addNode
-        (ctxNodeArena ctx)
-        nt
-        parent
-        (layoutDirection layout)
-        (layoutWidth layout)
-        (layoutHeight layout)
-        (layoutPadding layout)
-        (layoutGap layout)
-        (layoutMinW layout)
-        (layoutMinH layout)
-        (layoutMaxW layout)
-        (layoutMaxH layout)
-        0
-        (layoutAlignX layout)
-        (layoutAlignY layout)
-        (layoutWrap layout)
-    setAspect (ctxNodeArena ctx) idx (layoutAspect layout)
+    idx <- addNodeFromLayout (ctxNodeArena ctx) nt parent layout
     writeIORef (ctxContainerStack ctx) (idx : stack)
     pure stack
   r <- uiFinally child (writeIORef (ctxContainerStack ctx) stack)
@@ -217,25 +202,7 @@ addWidgetStyled wid nt txt value layout styleIdx mResp = do
   uiIO $ do
     stack <- readIORef (ctxContainerStack ctx)
     let parent = parentIdx stack
-    idx <-
-      addNode
-        (ctxNodeArena ctx)
-        nt
-        parent
-        (layoutDirection layout)
-        (layoutWidth layout)
-        (layoutHeight layout)
-        (layoutPadding layout)
-        (layoutGap layout)
-        (layoutMinW layout)
-        (layoutMinH layout)
-        (layoutMaxW layout)
-        (layoutMaxH layout)
-        0
-        (layoutAlignX layout)
-        (layoutAlignY layout)
-        (layoutWrap layout)
-    setAspect (ctxNodeArena ctx) idx (layoutAspect layout)
+    idx <- addNodeFromLayout (ctxNodeArena ctx) nt parent layout
     setNodeText (ctxNodeArena ctx) idx txt
     setNodeValue (ctxNodeArena ctx) idx value
     setStyleIdx (ctxNodeArena ctx) idx styleIdx
@@ -251,15 +218,7 @@ resolveInteraction ctx inp wid = do
     then do
       mrect <- getPrevRect ctx wid
       let rect = maybe (Rect 0 0 0 0) id mrect
-      pure
-        Response
-          { respId = wid
-          , respRect = rect
-          , respHovered = False
-          , respPressed = False
-          , respClicked = False
-          , respChanged = False
-          }
+      pure (mkResponse wid rect False False False False)
     else do
       mrect <- getPrevRect ctx wid
       blocked <- pointerBlockedByModal ctx
@@ -274,12 +233,4 @@ resolveInteraction ctx inp wid = do
           isActive = active == wid || activating
       let pressed = inputMouseDown inp && (hovered || active == wid)
           clicked = inputMouseReleased inp && isActive
-      pure
-        Response
-          { respId = wid
-          , respRect = rect
-          , respHovered = hovered
-          , respPressed = pressed
-          , respClicked = clicked
-          , respChanged = False
-          }
+      pure (mkResponse wid rect hovered pressed clicked False)

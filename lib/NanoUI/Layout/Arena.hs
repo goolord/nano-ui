@@ -12,6 +12,7 @@ module NanoUI.Layout.Arena
   , resetNodeArena
   , arenaCount
   , addNode
+  , addNodeFromLayout
   , setNodeText
   , getParent
   , getFirstChild
@@ -50,7 +51,7 @@ import Data.Text (Text)
 import Data.Word (Word8, Word64)
 import qualified Data.Text as T
 import NanoUI.Id (WidgetId (..), hashWidgetId)
-import NanoUI.Style (AlignX (..), AlignY (..), Direction (..), Padding (..), Sizing (..))
+import NanoUI.Style (AlignX (..), AlignY (..), Direction (..), Layout (..), Padding (..), Sizing (..))
 
 type NodeIdx = Int
 
@@ -466,6 +467,30 @@ addNode na nt parent dir wSiz hSiz pad gap minW minH maxW maxH grow ax ay wrap =
       writeInt (naChildCount na) parent (cc + 1)
     else pure ()
   writeIORef (naCount na) (idx + 1)
+  pure idx
+
+{-# INLINE addNodeFromLayout #-}
+addNodeFromLayout :: NodeArena -> NodeType -> Int -> Layout -> IO NodeIdx
+addNodeFromLayout na nt parent layout = do
+  idx <-
+    addNode
+      na
+      nt
+      parent
+      (layoutDirection layout)
+      (layoutWidth layout)
+      (layoutHeight layout)
+      (layoutPadding layout)
+      (layoutGap layout)
+      (layoutMinW layout)
+      (layoutMinH layout)
+      (layoutMaxW layout)
+      (layoutMaxH layout)
+      0
+      (layoutAlignX layout)
+      (layoutAlignY layout)
+      (layoutWrap layout)
+  setAspect na idx (layoutAspect layout)
   pure idx
 
 {-# INLINE setNodeText #-}

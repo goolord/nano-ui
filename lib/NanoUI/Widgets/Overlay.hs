@@ -46,6 +46,7 @@ import NanoUI.Widgets.Internal
   , floatGapFor
   , floatMinFor
   , floatPadFor
+  , mkResponse
   , parentIdx
   , titleBarLayoutFor
   , titleLabelLayoutFor
@@ -134,14 +135,7 @@ modal open title child
           dismiss = backdrop || esc || respClicked closeResp
       when esc $ uiIO (markEscapeConsumed ctx)
       pure
-        ( Response
-            { respId = wid
-            , respRect = maybe (Rect 0 0 0 0) id mrect
-            , respHovered = inPanel
-            , respPressed = False
-            , respClicked = dismiss
-            , respChanged = dismiss
-            }
+        ( mkResponse wid (maybe (Rect 0 0 0 0) id mrect) inPanel False dismiss dismiss
         , Just body
         )
 
@@ -209,13 +203,6 @@ window open title child
       let mouse = inputMousePos inp
           inPanel = maybe False (\r -> rectW r > 0 && rectH r > 0 && rectContains r mouse) mrect
       pure
-        ( Response
-            { respId = wid
-            , respRect = maybe (Rect 0 0 0 0) id mrect
-            , respHovered = inPanel
-            , respPressed = False
-            , respClicked = respClicked closeResp
-            , respChanged = respClicked closeResp
-            }
+        ( mkResponse wid (maybe (Rect 0 0 0 0) id mrect) inPanel False (respClicked closeResp) (respClicked closeResp)
         , Just body
         )
