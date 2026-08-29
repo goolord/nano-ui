@@ -39,20 +39,17 @@ import NanoUI.Style
   , windowMargin
   )
 import NanoUI.Types (Rect (..), Size (..), rectContains, rectH, rectW)
-import NanoUI.Widgets.Internal
-  ( Response (..)
-  , closeButton
-  , emptyModalResp
+import NanoUI.Widgets.Chrome
+  ( closeButton
   , floatGapFor
   , floatMinFor
   , floatPadFor
-  , mkResponse
-  , parentIdx
+  , titleBarHFor
   , titleBarLayoutFor
   , titleLabelLayoutFor
   , titleMark
-  , titleBarHFor
   )
+import NanoUI.Widgets.Node (Response (..), emptyModalResp, mkResponse, parentIdx)
 import NanoUI.Widgets.Layout
   ( flex
   , labelEx
