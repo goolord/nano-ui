@@ -106,28 +106,32 @@ useStoreField ::
   (WidgetStore -> IM.IntMap a) ->
   (WidgetStore -> Int -> a -> WidgetStore) ->
   a ->
-  Eff es (a, a -> Eff es ())
+  Eff es (Eff es a, a -> Eff es ())
 useStoreField field update initial = do
   wid <- currentId
   ctx <- askContext
-  store <- uiIO (getStore ctx)
   let key = intKey wid
-      cur = IM.findWithDefault initial key (field store)
+      get = uiIO $ do
+        st <- getStore ctx
+        pure (IM.findWithDefault initial key (field st))
       set v = uiIO $ do
         st <- getStore ctx
         let prev = IM.findWithDefault initial key (field st)
         when (prev /= v) $ do
           setStore ctx (update st key v)
           markDirty ctx
-  pure (cur, set)
+  pure (get, set)
 
-useFlag :: (HasCallStack, Ui :> es) => Bool -> Eff es (Bool, Bool -> Eff es ())
+useFlag :: (HasCallStack, Ui :> es) => Bool -> Eff es (Eff es Bool, Bool -> Eff es ())
 useFlag initial = useStoreField storeFlag (\st k v -> st {storeFlag = IM.insert k v (storeFlag st)}) initial
 
-useText :: (HasCallStack, Ui :> es) => Text -> Eff es (Text, Text -> Eff es ())
+useText :: (HasCallStack, Ui :> es) => Text -> Eff es (Eff es Text, Text -> Eff es ())
 useText initial = useStoreField storeNote (\st k v -> st {storeNote = IM.insert k v (storeNote st)}) initial
 
-useToggle :: (HasCallStack, Ui :> es) => Bool -> Eff es (Bool, Eff es ())
+useToggle :: (HasCallStack, Ui :> es) => Bool -> Eff es (Eff es Bool, Eff es ())
 useToggle initial = do
-  (cur, set) <- useFlag initial
-  pure (cur, set (not cur))
+  (get, set) <- useFlag initial
+  let toggle = do
+        cur <- get
+        set (not cur)
+  pure (get, toggle)

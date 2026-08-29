@@ -48,8 +48,8 @@ main =
 
 tuiApp :: TuiClick -> NanoUI ()
 tuiApp st = do
-  (aboutOpen, setAbout) <- useFlag False
-  (debugOpen, setDebug) <- useFlag False
+  (readAbout, setAbout) <- useFlag False
+  (readDebug, setDebug) <- useFlag False
   column page $ do
     void $
       panel inset $
@@ -70,25 +70,33 @@ tuiApp st = do
               clickButton "About" (setAbout True)
               clickButton "Debug" (setDebug True)
             sep
-            (_, vol) <- slider "Volume" 0 100 50
-            (_, quality) <- select "Quality" ["Low", "High"] 0
-            (_, name) <- textInput "Name" ""
-            sep
-            muted "List"
-            (_, _) <-
-              scrollArea
-                ( page
-                    { layoutHeight = Fixed 5
-                    }
-                )
-                $ column stack $ do
-                    _ <- label "Scroll line 1"
-                    _ <- label "Scroll line 2"
-                    _ <- label "Scroll line 3"
-                    _ <- label "Scroll line 4"
-                    _ <- label "Scroll line 5"
-                    _ <- label "Scroll line 6"
-                    pure ()
+            (curTab, setTab) <- useTab ("Controls" :: Text)
+            (tabResp, nextTab) <- tabs curTab
+              [ tab "Controls" "Controls" $ do
+                  (_, vol) <- slider "Volume" 0 100 50
+                  (_, quality) <- select "Quality" ["Low", "High"] 0
+                  (_, name) <- textInput "Name" ""
+                  _ <- labelEx (stack {layoutWidth = Grow 1}) $
+                    T.intercalate " "
+                      [ "vol=" <> T.pack (show (round vol :: Int))
+                      , "quality=" <> T.pack (show quality)
+                      , "name=" <> name
+                      ]
+                  pure ()
+              , tab "Logs" "Logs" $ do
+                  muted "Log Stream"
+                  (_, _) <-
+                    scrollArea (page {layoutHeight = Fixed 4}) $ column stack $ do
+                      _ <- label "Log line 1: system online"
+                      _ <- label "Log line 2: arena reset"
+                      _ <- label "Log line 3: ready"
+                      pure ()
+                  pure ()
+              , tab "Info" "Info" $ do
+                  kv "Engine" "nano-ui immediate mode"
+                  kv "Tabs" "Zero-cost inactive evaluation"
+              ]
+            onClick tabResp (setTab nextTab)
             sep
             let click = tuiClick st
             _ <-
@@ -96,17 +104,17 @@ tuiApp st = do
                 T.intercalate
                   " "
                   [ "checked=" <> T.pack (show checked)
-                  , "vol=" <> T.pack (show (round vol :: Int))
-                  , "quality=" <> T.pack (show quality)
-                  , "name=" <> name
+                  , "tab=" <> curTab
                   , "click=" <> T.pack click
                   ]
             muted "About opens a dialog. Debug opens a window. Esc closes, then quits."
             pure ()
+    debugOpen <- readDebug
     when debugOpen $ do
       snap <- askTermDebug
       (win, _) <- window True "Debug" (debugWindowBody snap)
       onClick win (setDebug False)
+    aboutOpen <- readAbout
     (aboutResp, _) <-
       modal aboutOpen "About" $ do
         heading "nano-ui"

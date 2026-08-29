@@ -105,6 +105,7 @@ import NanoUI.WidgetMarkers
   ( buttonDisplayText
   , closeButtonDisplayText
   , isCloseButtonText
+  , isTabButtonText
   , stripButtonBrackets
   )
 import NanoUI.Icons (Icons (..), checkboxMark, terminalPaintColumns)
@@ -172,6 +173,7 @@ import NanoUI.Frame.Chrome
   , overlayModalStyle
   , overlayWindowStyle
   , strokeStyledRect
+  , paintTabHeader
   , textInputFocused
   , textInputValue
   , widgetVisualStyle
@@ -309,8 +311,10 @@ lowerNode ctx idx = do
           then getText (ctxNodeArena ctx) idx
           else pure T.empty
       let isClose = nt == NodeButton && isCloseButtonText storedText
+          isTab = nt == NodeButton && isTabButtonText storedText
       let opaqueBg
             | isClose = False
+            | isTab = False
             | terminal, nt == NodeButton = False
             | terminal, nt == NodeCheckbox = False
             | terminal, nt == NodeSlider = False
@@ -322,7 +326,20 @@ lowerNode ctx idx = do
                 nt /= NodeCheckbox && nt /= NodeSlider && nt /= NodeTextInput
       when opaqueBg $ fillStyledRect da terminal style rect
       when (not terminal) $ do
-        when opaqueBg $ strokeStyledRect da terminal style x y w h
+        when (opaqueBg && not isTab) $ strokeStyledRect da terminal style x y w h
+        when isTab $ do
+          si <- getStyleIdx (ctxNodeArena ctx) idx
+          paintTabHeader
+            da
+            (ctxHostProfile ctx)
+            theme
+            si
+            (value > 0.5)
+            style
+            x
+            y
+            w
+            h
         when (nt == NodeCheckbox) $
           drawCheckbox
             (ctxHostProfile ctx)

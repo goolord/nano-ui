@@ -34,6 +34,7 @@ newContext = do
   ctxActiveId <- newIORef (WidgetId 0)
   ctxFocusId <- newIORef (WidgetId 0)
   ctxPrevRects <- newIORef IM.empty
+  ctxPrevNodeTexts <- newIORef IM.empty
   ctxStore <- newIORef emptyWidgetStore
   ctxAnimations <- newIORef IM.empty
   ctxAnimRest <- newIORef IM.empty
@@ -72,6 +73,7 @@ newContext = do
       , ctxActiveId
       , ctxFocusId
       , ctxPrevRects
+      , ctxPrevNodeTexts
       , ctxStore
       , ctxAnimations
       , ctxAnimRest

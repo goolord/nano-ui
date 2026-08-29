@@ -49,7 +49,7 @@ import NanoUI.Widgets.Chrome
   , titleLabelLayoutFor
   , titleMark
   )
-import NanoUI.Widgets.Node (Response (..), emptyModalResp, mkResponse, parentIdx)
+import NanoUI.Widgets.Node (Responding (..), Response (..), emptyModalResp, mkResponse, parentIdx)
 import NanoUI.Widgets.Layout
   ( flex
   , labelEx
