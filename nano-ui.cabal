@@ -60,6 +60,7 @@ library
         NanoUI.Atlas
         NanoUI.Compact
         NanoUI.Context
+        NanoUI.Damage
         NanoUI.Draw
         NanoUI.Ease
         NanoUI.Font
