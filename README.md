@@ -163,7 +163,7 @@ Workspace packages: `nano-ui` (core), `nano-ui-term` (`term-lib`), `nano-ui-sdl`
 | `NanoUI` | Public API re-export |
 | `NanoUI.Host` | `HostProfile` (`PixelHost` / `CellHost`) |
 | `NanoUI.Monad` | `NanoUI` effect stack, `emit`, `withKey`, `currentId` |
-| `NanoUI.Widgets` | `button`, `checkbox`, `slider lbl min max initial`, `textInput`, `panel` / `row` / `column`, `useFlag` / `useText`, `animate` / `animateTo` / delay, `box` |
+| `NanoUI.Widgets` | `button`, `checkbox`, `slider lbl min max initial`, `textInput`, `panel` / `row` / `column`, `useFlag` / `useText`, `animate` / `animateTo` / `animateToSpring` / delay, `box` |
 | `NanoUI.Frame` | `runFrame`, `runFrameReduce`, `needsRedraw` |
 | `NanoUI.Draw` | Pinned vertex arena, draw command batching |
 | `NanoUI.Layout.Solve` | Two-pass flexbox constraint solver |

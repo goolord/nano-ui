@@ -145,6 +145,10 @@ newSdlContext = do
 animateTimeout :: Int
 animateTimeout = 16
 
+-- One hitch must not skip a whole ease segment.
+maxFrameDt :: Float
+maxFrameDt = 0.05
+
 runSdlApp :: Context -> NanoUI () -> IO ()
 runSdlApp = runSdlAppEff runEff
 
@@ -249,6 +253,7 @@ runSdlSession ctx setup shouldQuit drawFn =
     startupDone <- newIORef False
     startupCatchup <- newIORef False
     startupGrace <- newIORef (2 :: Int)
+    startupFull <- newIORef (2 :: Int)
     let onResize = do
           void $
             tryWithDrawingLock drawing $ do
@@ -300,7 +305,7 @@ runSdlSession ctx setup shouldQuit drawFn =
     writeIORef prev synced1
     now <- getMonotonicTime
     bracket (installResizeWatch onResize) id $ \_ ->
-      loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace shouldQuit synced1 [] now
+      loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace startupFull shouldQuit synced1 [] now
 
 loop ::
   IORef Context ->
@@ -311,12 +316,13 @@ loop ::
   IORef Bool ->
   IORef Bool ->
   IORef Int ->
+  IORef Int ->
   (Input -> Bool) ->
   Input ->
   [SdlEvent] ->
   Double ->
   IO ()
-loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace shouldQuit inp queued lastT = do
+loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace startupFull shouldQuit inp queued lastT = do
   ctx <- readIORef ctxRef
   debugOpen <- debugPanelOpen ctx
   wantDebug <- takeDebugLive (sdlDebug env) debugOpen
@@ -329,9 +335,18 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace shou
           else do
             animating <- anyAnimating ctx
             editing <- textFieldActive ctx
-            if animating || wantDebug || editing || debugOpen
-              then waitEventTimeout animateTimeout
-              else waitEvent
+            wasAnimWait <- readIORef wasAnimating
+            nFullWait <- readIORef startupFull
+            -- Live tweens: poll only. Present already vsyncs. A 16ms wait
+            -- here stacks with vsync and drops the demo to ~30fps.
+            -- After settle, one timeout frame so looping animateEase can
+            -- restart. Startup Full must not sit in waitEvent.
+            if animating
+              then pure []
+              else
+                if wasAnimWait || nFullWait > 0 || wantDebug || editing || debugOpen
+                  then waitEventTimeout animateTimeout
+                  else waitEvent
       else pure queued
   let (group, rest) = splitFrame pending
   editActive <- textInputEditActive ctx
@@ -339,7 +354,7 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace shou
     then pure ()
     else do
       now <- getMonotonicTime
-      let dt = realToFrac (now - lastT)
+      let dt = min maxFrameDt (realToFrac (now - lastT))
       noteLoop (sdlDebug env) dt
       let inp' =
             foldl'
@@ -360,10 +375,11 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace shou
           anim <- anyAnimating ctx'
           editing <- textFieldActive ctx'
           grace <- readIORef startupGrace
+          nFull <- readIORef startupFull
           let sizeChanged = inputWindowSize prevInp /= inputWindowSize inpSynced
               interacted = inputInteracted prevInp inpSynced
               graceAllow =
-                grace <= 0 || sizeChanged || interacted || anim || editing || dirtyNow || pendingDirty || need
+                grace <= 0 || sizeChanged || interacted || anim || editing || dirtyNow || pendingDirty || need || nFull > 0
               forceFinal = wasAnim && not anim
               shouldDraw =
                 graceAllow
@@ -375,15 +391,16 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace shou
                          || debugOpen
                          || wantDebug
                          || editing
+                         || nFull > 0
                      )
           when (grace > 0) $ writeIORef startupGrace (grace - 1)
-          writeIORef wasAnimating anim
           synced <-
             if shouldDraw
               then do
                 ms <-
                   tryWithDrawingLock drawing $ do
-                    (_, s) <- drawFn ctx' env inpSynced (debugOpen || wantDebug)
+                    (_, s) <- drawFn ctx' env inpSynced (debugOpen || wantDebug || nFull > 0)
+                    when (nFull > 0) $ writeIORef startupFull (nFull - 1)
                     writeIORef pendingRedraw False
                     writeIORef prev s
                     pure s
@@ -392,6 +409,10 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace shou
                 noteSkip (sdlDebug env)
                 writeIORef prev inpSynced
                 pure inpSynced
+          animAfter <- anyAnimating ctx'
+          -- Pre-draw live or post-draw live/restart. Settle then looping
+          -- animateEase must not fall into waitEvent.
+          writeIORef wasAnimating (anim || animAfter)
           overlayQuit <- overlayConsumesQuit ctx' inpSynced
           if shouldQuit inpSynced && not overlayQuit
             then pure ()
@@ -405,6 +426,7 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace shou
                 wasAnimating
                 drawing
                 startupGrace
+                startupFull
                 shouldQuit
                 synced
                 (if null rest then [] else rest)
@@ -475,7 +497,12 @@ finishDraw ctx env inp forceFull t0 drawData dirtyAfterUi = do
       pw = max 1 (round (lw * scale))
       ph = max 1 (round (lh * scale))
   (tex, retainNew) <- ensureRetain env pw ph
-  let damage = if forceFull || retainNew then DamageFull else snapDamage scale dmg0
+  animating <- anyAnimating ctx
+  let damage0 = if forceFull || retainNew then DamageFull else snapDamage scale dmg0
+      damage =
+        if damageIsEmpty damage0 && animating
+          then DamageFull
+          else damage0
   if damageIsEmpty damage || lw <= 0 || lh <= 0
     then do
       notePresent (sdlDebug env) ((t1 - t0) * 1000) drawData

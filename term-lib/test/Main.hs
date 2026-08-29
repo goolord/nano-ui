@@ -91,6 +91,12 @@ main = do
   run "animation-delay" runAnimationDelayTest
   run "animation-stagger" runAnimationStaggerTest
   run "animation-shared-ctx" runAnimationSharedCtxTest
+  run "animation-bezier" runAnimationBezierTest
+  run "animation-spring" runAnimationSpringTest
+  run "animation-spring-retarget" runAnimationSpringRetargetTest
+  run "animation-spring-dt" runAnimationSpringDtTest
+  run "animation-spring-hold" runAnimationSpringHoldTest
+  run "animation-spring-a" runAnimationSpringATest
   run "ascii" runAsciiTest
   run "vt-decode" runVtTest
   run "cells-and-diff" runCellsTest
@@ -1519,9 +1525,9 @@ runAnimationHoldTest _ failed = do
   live2 <- anyAnimating ctx
   when live2 $ bump failed
 
--- Layout tweens use a call-site id with no node rect. Damage must be full.
--- Drain newContext Full first so the assertion is a mid-tween frame, not
--- the first paint. Also cover start-and-finish in one tick (dt > dur).
+-- Layout tweens clip the moved spacer (old+new). Drain newContext Full
+-- first so the assertion is a mid-tween frame, not the first paint.
+-- Also cover start-and-finish in one tick (dt > dur).
 runAnimationDamageTest :: Context -> IORef Int -> IO ()
 runAnimationDamageTest _ failed = do
   ctx <- newContext
@@ -1532,13 +1538,16 @@ runAnimationDamageTest _ failed = do
         t <- animateTo 1 0.4
         void (spacer (Fixed (20 + 80 * t)) Fit)
         label_ "anim"
+      hasMove dmg = case dmg of
+        DamageFull -> True
+        DamageClip r -> rectW r > 0 && rectH r > 0
   _ <- runFrame ctx idleInp idle
   _ <- runFrame ctx idleInp idle
   dIdle <- takeDamage ctx
   when (dIdle == DamageFull) $ bump failed
   _ <- runFrame ctx tweenInp ui
   dMid <- takeDamage ctx
-  when (dMid /= DamageFull) $ bump failed
+  when (not (hasMove dMid)) $ bump failed
   ctx2 <- newContext
   let fastInp = idleInp {inputDeltaTime = 0.5}
       uiFast = do
@@ -1549,7 +1558,7 @@ runAnimationDamageTest _ failed = do
   _ <- runFrame ctx2 idleInp idle
   _ <- runFrame ctx2 fastInp uiFast
   dFast <- takeDamage ctx2
-  when (dFast /= DamageFull) $ bump failed
+  when (not (hasMove dFast)) $ bump failed
 
 -- Delay holds the start value, then leftover dt applies after the wait.
 runAnimationDelayTest :: Context -> IORef Int -> IO ()
@@ -1592,6 +1601,97 @@ runAnimationStaggerTest _ failed = do
   void $ replicateM 10 (runFrame ctx inp ui)
   late <- trailVal
   when (late < 0.15) $ bump failed
+
+-- CubicBezier (0,0,1,1) matches linear. A standard ease-out sits above it.
+runAnimationBezierTest :: Context -> IORef Int -> IO ()
+runAnimationBezierTest _ failed = do
+  let lin = applyEase (EaseCubicBezier 0 0 1 1) 0.5
+      out = applyEase (EaseCubicBezier 0 0 0.58 1) 0.5
+  when (abs (lin - 0.5) > 0.01) $ bump failed
+  when (out <= 0.5) $ bump failed
+  when (abs (applyEase EaseInQuad 0.5 - 0.25) > 0.01) $ bump failed
+  when (abs (applyEase (EaseCubicBezier 0.33 0 0.2 1) 0) > 0.001) $ bump failed
+  when (abs (applyEase (EaseCubicBezier 0.33 0 0.2 1) 1 - 1) > 0.001) $ bump failed
+
+-- Smooth spring reaches the target and drops the wake flag.
+runAnimationSpringTest :: Context -> IORef Int -> IO ()
+runAnimationSpringTest _ failed = do
+  ctx <- newContext
+  let inp = emptyInput {inputWindowSize = Size 100 100, inputDeltaTime = 0.05}
+      wid = WidgetId 401
+  startSpring ctx wid presetSmooth 1
+  void $ replicateM 80 (runFrame ctx inp (label "spring"))
+  val <- getAnimationValue ctx wid
+  when (abs (val - 1) > 0.02) $ bump failed
+  live <- anyAnimating ctx
+  when live $ bump failed
+  need <- needsRedraw ctx inp inp
+  when need $ bump failed
+
+-- Retarget keeps the current position. Value must not jump to the new start.
+runAnimationSpringRetargetTest :: Context -> IORef Int -> IO ()
+runAnimationSpringRetargetTest _ failed = do
+  ctx <- newContext
+  let inp = emptyInput {inputWindowSize = Size 100 100, inputDeltaTime = 0.02}
+      wid = WidgetId 402
+  startSpring ctx wid presetBouncy 1
+  void $ replicateM 5 (runFrame ctx inp (label "retarget"))
+  v1 <- getAnimationValue ctx wid
+  when (v1 < 0.02 || v1 > 0.98) $ bump failed
+  startSpring ctx wid presetBouncy 0
+  v2 <- getAnimationValue ctx wid
+  when (abs (v2 - v1) > 0.02) $ bump failed
+  live <- anyAnimating ctx
+  when (not live) $ bump failed
+
+-- One large dt stays finite after substeps.
+runAnimationSpringDtTest :: Context -> IORef Int -> IO ()
+runAnimationSpringDtTest _ failed = do
+  ctx <- newContext
+  let inp = emptyInput {inputWindowSize = Size 100 100, inputDeltaTime = 2}
+      wid = WidgetId 403
+  startSpring ctx wid presetStiff 1
+  _ <- runFrame ctx inp (label "dt")
+  val <- getAnimationValue ctx wid
+  when (isNaN val || isInfinite val || val < 0 || val > 1.5) $ bump failed
+
+-- animateToSpring holds after settle, same as animateTo.
+runAnimationSpringHoldTest :: Context -> IORef Int -> IO ()
+runAnimationSpringHoldTest _ failed = do
+  ctx <- newContext
+  let inp = emptyInput {inputWindowSize = Size 200 100, inputDeltaTime = 0.05}
+      ui = do
+        t <- animateToSpring presetSmooth 1
+        label_ (T.pack (show t))
+  void $ replicateM 80 (runFrame ctx inp ui)
+  (_, _, _, _) <- runFrame ctx inp ui
+  live <- anyAnimating ctx
+  when live $ bump failed
+  spans <- collectTextSpans ctx
+  let shown = [txt | (_, txt, _, _, _) <- spans]
+  when (not (any (\t -> t == "1.0" || "1.0" `T.isPrefixOf` t) shown)) $ bump failed
+
+-- animateToSpringA springs each V2 component and holds.
+runAnimationSpringATest :: Context -> IORef Int -> IO ()
+runAnimationSpringATest _ failed = do
+  ctx <- newContext
+  let inp = emptyInput {inputWindowSize = Size 200 100, inputDeltaTime = 0.05}
+      ui = do
+        V2 x y <- withKey ("vec" :: String) (animateToSpringA presetSmooth (V2 1 2))
+        label_ (T.pack (show x ++ "," ++ show y))
+  void $ replicateM 80 (runFrame ctx inp ui)
+  live <- anyAnimating ctx
+  when live $ bump failed
+  spans <- collectTextSpans ctx
+  let shown = [txt | (_, txt, _, _, _) <- spans]
+      ok t =
+        case break (== ',') (T.unpack t) of
+          (xs, ',' : ys) ->
+            case (reads xs, reads ys) of
+              ([(x, "")], [(y, "")]) -> abs (x - 1 :: Float) < 0.05 && abs (y - 2 :: Float) < 0.05
+              _ -> False
+          _ -> False
+  when (not (any ok shown)) $ bump failed
 
 -- Settled tweens on a shared Context must not leave dirty or wake idle loops.
 runAnimationSharedCtxTest :: Context -> IORef Int -> IO ()

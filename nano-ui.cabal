@@ -56,10 +56,12 @@ library
     exposed-modules:
         NanoUI
     other-modules:
+        NanoUI.Animatable
         NanoUI.Atlas
         NanoUI.Compact
         NanoUI.Context
         NanoUI.Draw
+        NanoUI.Ease
         NanoUI.Font
         NanoUI.Frame
         NanoUI.Host
@@ -70,6 +72,7 @@ library
         NanoUI.Layout.Solve
         NanoUI.Monad
         NanoUI.Render.ASCII
+        NanoUI.Spring
         NanoUI.Style
         NanoUI.Types
         NanoUI.WidgetText
