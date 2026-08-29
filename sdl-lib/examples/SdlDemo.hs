@@ -144,14 +144,18 @@ clipField n s =
 
 frameRows :: SdlDebugSnapshot -> SmallArray (T.Text, T.Text)
 frameRows s =
-  smallArrayFromList
-    [ ("present", T.pack (printf "%.1f fps" (dbgPresentFps s)))
-    , ("loop", T.pack (printf "%.1f fps" (dbgLoopFps s)))
-    , ("frame", T.pack (printf "%.1f ms" (dbgFrameMs s)))
-    , ("ui", T.pack (printf "%.1f ms" (dbgUiMs s)))
-    , ("draws", T.pack (printf "%d" (dbgPresents s)))
-    , ("skips", T.pack (printf "%d" (dbgSkips s)))
-    ]
+  let haskellMs = dbgUiMs s + dbgRenderMs s
+   in smallArrayFromList
+        [ ("present", T.pack (printf "%.1f fps" (dbgPresentFps s)))
+        , ("loop", T.pack (printf "%.1f fps" (dbgLoopFps s)))
+        , ("frame cpu", T.pack (printf "%.2f ms" (dbgFrameMs s)))
+        , ("haskell", T.pack (printf "%.2f ms" haskellMs))
+        , ("  ui", T.pack (printf "%.2f ms" (dbgUiMs s)))
+        , ("  render", T.pack (printf "%.2f ms" (dbgRenderMs s)))
+        , ("sdl present", T.pack (printf "%.2f ms" (dbgPresentMs s)))
+        , ("draws", T.pack (printf "%d" (dbgPresents s)))
+        , ("skips", T.pack (printf "%d" (dbgSkips s)))
+        ]
 
 drawRows :: SdlDebugSnapshot -> SmallArray (T.Text, T.Text)
 drawRows s =

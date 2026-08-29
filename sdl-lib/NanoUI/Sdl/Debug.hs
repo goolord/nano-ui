@@ -24,6 +24,8 @@ data SdlDebugSnapshot = SdlDebugSnapshot
   , dbgLoopFps :: Double
   , dbgFrameMs :: Double
   , dbgUiMs :: Double
+  , dbgRenderMs :: Double
+  , dbgPresentMs :: Double
   , dbgPresents :: Word64
   , dbgSkips :: Word64
   , dbgVerts :: Int
@@ -60,6 +62,8 @@ data SdlDebugSampler = SdlDebugSampler
   , smPresents :: Word64
   , smSkips :: Word64
   , smUiMs :: Double
+  , smRenderMs :: Double
+  , smPresentMs :: Double
   , smFrameMs :: Double
   , smVerts :: Int
   , smIndices :: Int
@@ -85,6 +89,8 @@ newSdlDebugSampler = do
       , smPresents = 0
       , smSkips = 0
       , smUiMs = 0
+      , smRenderMs = 0
+      , smPresentMs = 0
       , smFrameMs = 0
       , smVerts = 0
       , smIndices = 0
@@ -100,6 +106,8 @@ emptySdlDebug =
     , dbgLoopFps = 0
     , dbgFrameMs = 0
     , dbgUiMs = 0
+    , dbgRenderMs = 0
+    , dbgPresentMs = 0
     , dbgPresents = 0
     , dbgSkips = 0
     , dbgVerts = 0
@@ -147,19 +155,20 @@ takeDebugLive ref True = do
         want = smWantFrame s || due
      in (s {smWantFrame = False}, want)
 
-notePresent :: SamplerRef -> Double -> DrawData -> IO ()
-notePresent ref uiMs dd = do
+notePresent :: SamplerRef -> Double -> Double -> Double -> Double -> DrawData -> IO ()
+notePresent ref uiMs renderMs presentMs frameMs dd = do
   now <- getMonotonicTime
   atomicModifyIORef' ref $ \s ->
     let dt = now - smLastPresentT s
         fps = if dt > 1e-4 then 1 / dt else 0
-        frameMs = dt * 1000
      in
       ( s
           { smPresentEma = blend (smPresentEma s) fps
           , smLastPresentT = now
           , smPresents = smPresents s + 1
           , smUiMs = uiMs
+          , smRenderMs = renderMs
+          , smPresentMs = presentMs
           , smFrameMs = frameMs
           , smVerts = drawVertexCount dd
           , smIndices = drawIndexCount dd
@@ -193,6 +202,8 @@ readSdlDebug ref (Size ww wh) (V2 mx my) fontPath scale renderer vsync = do
               , dbgLoopFps = smLoopEma cur
               , dbgFrameMs = smFrameMs cur
               , dbgUiMs = smUiMs cur
+              , dbgRenderMs = smRenderMs cur
+              , dbgPresentMs = smPresentMs cur
               , dbgPresents = smPresents cur
               , dbgSkips = smSkips cur
               , dbgVerts = smVerts cur
