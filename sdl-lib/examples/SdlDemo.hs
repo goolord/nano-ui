@@ -7,6 +7,8 @@ module SdlDemo
     ) where
 
 import Control.Monad (when)
+import Data.Primitive.SmallArray (SmallArray, smallArrayFromList)
+import Data.Text (Text)
 import NanoUI
 import NanoUI.Backend.Sdl (RgbaImage (..), SdlDebugSnapshot (..), askSdlDebug, SdlOptions (..), defaultSdlOptions, runSdlApp)
 import Text.Printf (printf)
@@ -24,8 +26,9 @@ main =
 
 ------------------------------------------------------------------
 
-demoImages :: [RgbaImage]
+demoImages :: SmallArray RgbaImage
 demoImages =
+  smallArrayFromList
     [ RgbaImage (ImageId 1) 32 32 swatchPixels
     , RgbaImage (ImageId 2) 32 32 checkerPixels
     , RgbaImage (ImageId 3) 32 32 stripePixels
@@ -108,61 +111,68 @@ debugBody s = do
   sep
   debugSection "Runtime" (rtsRows s)
 
-debugSection :: T.Text -> [(String, String)] -> NanoUI ()
+debugSection :: T.Text -> SmallArray (T.Text, T.Text) -> NanoUI ()
 debugSection title rows = do
   heading title
-  mapM_ (\(k, v) -> kv (T.pack k) (monoFontMarker <> T.pack v)) rows
+  mapM_ (\(k, v) -> kv k (monoFontMarker <> v)) rows
 
-clipField :: Int -> String -> String
+clipField :: Int -> Text -> Text
 clipField n s =
-  if length s > n
-    then take (max 0 (n - 3)) s ++ "..."
+  if T.length s > n
+    then T.take (max 0 (n - 3)) s <> "..."
     else s
 
-frameRows :: SdlDebugSnapshot -> [(String, String)]
+frameRows :: SdlDebugSnapshot -> SmallArray (T.Text, T.Text)
 frameRows s =
-  [ ("present", printf "%.1f fps" (dbgPresentFps s))
-  , ("loop", printf "%.1f fps" (dbgLoopFps s))
-  , ("frame", printf "%.1f ms" (dbgFrameMs s))
-  , ("ui", printf "%.1f ms" (dbgUiMs s))
-  , ("draws", printf "%d" (dbgPresents s))
-  , ("skips", printf "%d" (dbgSkips s))
-  ]
+  smallArrayFromList
+    [ ("present", T.pack (printf "%.1f fps" (dbgPresentFps s)))
+    , ("loop", T.pack (printf "%.1f fps" (dbgLoopFps s)))
+    , ("frame", T.pack (printf "%.1f ms" (dbgFrameMs s)))
+    , ("ui", T.pack (printf "%.1f ms" (dbgUiMs s)))
+    , ("draws", T.pack (printf "%d" (dbgPresents s)))
+    , ("skips", T.pack (printf "%d" (dbgSkips s)))
+    ]
 
-drawRows :: SdlDebugSnapshot -> [(String, String)]
+drawRows :: SdlDebugSnapshot -> SmallArray (T.Text, T.Text)
 drawRows s =
-  [ ("verts", printf "%d" (dbgVerts s))
-  , ("indices", printf "%d" (dbgIndices s))
-  , ("cmds", printf "%d" (dbgCmds s))
-  ]
+  smallArrayFromList
+    [ ("verts", T.pack (printf "%d" (dbgVerts s)))
+    , ("indices", T.pack (printf "%d" (dbgIndices s)))
+    , ("cmds", T.pack (printf "%d" (dbgCmds s)))
+    ]
 
-displayRows :: SdlDebugSnapshot -> [(String, String)]
+displayRows :: SdlDebugSnapshot -> SmallArray (T.Text, T.Text)
 displayRows s =
-  [ ("window", printf "%.0fx%.0f" (dbgWinW s) (dbgWinH s))
-  , ("scale", printf "%.2f" (dbgScale s))
-  , ("mouse", printf "%.0f, %.0f" (dbgMouseX s) (dbgMouseY s))
-  , ("renderer", clipField 36 (dbgRenderer s <> if dbgVsync s then "  vsync on" else "  vsync off"))
-  , ("font", clipField 36 (dbgFontPath s))
-  ]
+  smallArrayFromList
+    [ ("window", T.pack (printf "%.0fx%.0f" (dbgWinW s) (dbgWinH s)))
+    , ("scale", T.pack (printf "%.2f" (dbgScale s)))
+    , ("mouse", T.pack (printf "%.0f, %.0f" (dbgMouseX s) (dbgMouseY s)))
+    , ( "renderer"
+      , clipField 36 (dbgRenderer s <> if dbgVsync s then "  vsync on" else "  vsync off")
+      )
+    , ("font", clipField 36 (T.pack (dbgFontPath s)))
+    ]
 
-rtsRows :: SdlDebugSnapshot -> [(String, String)]
+rtsRows :: SdlDebugSnapshot -> SmallArray (T.Text, T.Text)
 rtsRows s
   | not (dbgRtsOn s) =
-      [ ("rts", "stats off (need +RTS -T)")
-      , ("haskell", printf "%d cap / %d cpu" (dbgCaps s) (dbgCpus s))
-      ]
+      smallArrayFromList
+        [ ("rts", "stats off (need +RTS -T)")
+        , ("haskell", T.pack (printf "%d cap / %d cpu" (dbgCaps s) (dbgCpus s)))
+        ]
   | otherwise =
-      [ ("haskell", printf "%d cap / %d cpu" (dbgCaps s) (dbgCpus s))
-      , ("gc total", printf "%d" (dbgGcs s))
-      , ("gc major", printf "%d" (dbgMajorGcs s))
-      , ("last gen", printf "%d" (dbgLastGcGen s))
-      , ("last gc", printf "%.2f ms" (dbgLastGcMs s))
-      , ("heap live", printf "%.1f MiB" (dbgLiveMb s))
-      , ("heap alloc", printf "%.1f MiB" (dbgAllocMb s))
-      , ("copied", printf "%.1f MiB" (dbgCopiedMb s))
-      , ("rss max", printf "%.1f MiB" (dbgMaxMemMb s))
-      , ("gc time", printf "%.1f%%" (dbgGcPct s))
-      ]
+      smallArrayFromList
+        [ ("haskell", T.pack (printf "%d cap / %d cpu" (dbgCaps s) (dbgCpus s)))
+        , ("gc total", T.pack (printf "%d" (dbgGcs s)))
+        , ("gc major", T.pack (printf "%d" (dbgMajorGcs s)))
+        , ("last gen", T.pack (printf "%d" (dbgLastGcGen s)))
+        , ("last gc", T.pack (printf "%.2f ms" (dbgLastGcMs s)))
+        , ("heap live", T.pack (printf "%.1f MiB" (dbgLiveMb s)))
+        , ("heap alloc", T.pack (printf "%.1f MiB" (dbgAllocMb s)))
+        , ("copied", T.pack (printf "%.1f MiB" (dbgCopiedMb s)))
+        , ("rss max", T.pack (printf "%.1f MiB" (dbgMaxMemMb s)))
+        , ("gc time", T.pack (printf "%.1f%%" (dbgGcPct s)))
+        ]
 
 thumb :: ImageId -> T.Text -> NanoUI ()
 thumb iid caption =

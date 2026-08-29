@@ -16,8 +16,8 @@ import Data.Bits (shiftR, (.&.))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (sortBy)
 import Data.Ord (comparing)
+import Data.Primitive.SmallArray (SmallArray, sizeofSmallArray)
 import Data.Word (Word8)
-import Foreign.C.Types (CInt)
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr, nullPtr)
@@ -50,37 +50,37 @@ data ClipState
 {-# INLINE snapDamage #-}
 snapDamage :: Float -> Damage -> Damage
 snapDamage _ DamageFull = DamageFull
-snapDamage uiScale (DamageClip r) = DamageClip (snapClipRect uiScale r)
+snapDamage scale (DamageClip (Rect x y w h)) =
+  let px = fromIntegral (floor (x * scale) :: Int) / scale
+      py = fromIntegral (floor (y * scale) :: Int) / scale
+      pw = fromIntegral (ceiling ((x + w) * scale) :: Int) / scale - px
+      ph = fromIntegral (ceiling ((y + h) * scale) :: Int) / scale - py
+   in DamageClip (Rect px py pw ph)
 
-snapClipRect :: Float -> Rect -> Rect
-snapClipRect uiScale (Rect x y w h) =
+{-# INLINE clipPixelRect #-}
+clipPixelRect :: Float -> Rect -> (Float, Float, Float, Float)
+clipPixelRect uiScale (Rect x y w h) =
   let s = if uiScale > 0 then uiScale else 1
-      x0 = fromIntegral (floor (x * s) :: Int)
-      y0 = fromIntegral (floor (y * s) :: Int)
-      x1 = fromIntegral (ceiling ((x + w) * s) :: Int)
-      y1 = fromIntegral (ceiling ((y + h) * s) :: Int)
-   in Rect (x0 / s) (y0 / s) ((x1 - x0) / s) ((y1 - y0) / s)
+      x0 = fromIntegral (floor (x * s) :: Int) :: Float
+      y0 = fromIntegral (floor (y * s) :: Int) :: Float
+      x1 = fromIntegral (ceiling ((x + w) * s) :: Int) :: Float
+      y1 = fromIntegral (ceiling ((y + h) * s) :: Int) :: Float
+   in (x0, y0, x1 - x0, y1 - y0)
+
+logicalClipKey :: Float -> Rect -> (Int, Int, Int, Int)
+logicalClipKey scale (Rect x y w h) =
+  let px = round (x * scale) :: Int
+      py = round (y * scale) :: Int
+      pw = max 1 (round (w * scale)) :: Int
+      ph = max 1 (round (h * scale)) :: Int
+   in (px, py, pw, ph)
 
 setLogicalClipRect :: Ptr SDL_Renderer -> Float -> Rect -> IO ()
-setLogicalClipRect ren uiScale (Rect x y w h) =
-  alloca $ \(r :: Ptr SDL_Rect) -> do
-    let lx = x * uiScale
-        ly = y * uiScale
-        rx = (x + w) * uiScale
-        by = (y + h) * uiScale
-        x0 = floor lx
-        y0 = floor ly
-        x1 = ceiling rx
-        y1 = ceiling by
-    poke
-      r
-      SDL_Rect
-        { x = ci x0
-        , y = ci y0
-        , w = ci (max (0 :: Int) (x1 - x0))
-        , h = ci (max (0 :: Int) (y1 - y0))
-        }
-    void $ setRenderClipRectSafe ren (PtrConst.unsafeFromPtr r)
+setLogicalClipRect ren uiScale r =
+  alloca $ \(sr :: Ptr SDL_Rect) -> do
+    let (px, py, pw, ph) = logicalClipKey uiScale r
+    poke sr (SDL_Rect (fromIntegral px) (fromIntegral py) (fromIntegral pw) (fromIntegral ph))
+    void $ setRenderClipRectSafe ren (PtrConst.unsafeFromPtr sr)
 
 clearLogicalClipRect :: Ptr SDL_Renderer -> IO ()
 clearLogicalClipRect ren = void $ setRenderClipRectSafe ren nullClip
@@ -99,9 +99,9 @@ renderDrawData :: Ptr SDL_Renderer -> Float -> Color -> DrawData -> ImageAtlas -
 renderDrawData _ _ _ _ _ =
   error "renderDrawData requires an active RenderBatch; use renderDrawDataPass"
 
-renderDrawDataPass :: RenderBatch -> Ptr SDL_Renderer -> Float -> Maybe Color -> DrawData -> [Layer] -> ImageAtlas -> Damage -> IO ()
+renderDrawDataPass :: RenderBatch -> Ptr SDL_Renderer -> Float -> Maybe Color -> DrawData -> SmallArray Layer -> ImageAtlas -> Damage -> IO ()
 renderDrawDataPass batch ren uiScale mClear drawData layers images damage = do
-  when (not (damageIsEmpty damage) && not (null layers)) $ do
+  when (not (damageIsEmpty damage) && sizeofSmallArray layers /= 0) $ do
     clipRef <- newIORef ClipNone
     clearLogicalClipRect ren
     case (mClear, damage) of
@@ -199,33 +199,11 @@ drawCmd batch ren uiScale vp vc ip ic images mDamage clipRef cmd = do
             else pure (nullPtr, 0, 0)
         batchDrawRange batch vp vc ip ic start count texId tex tw th uiScale mDamage
 
-ci :: Int -> CInt
-ci = fromIntegral
-
+{-# INLINE unpackColor #-}
 unpackColor :: Color -> (Word8, Word8, Word8, Word8)
 unpackColor (Color w) =
-  ( fromIntegral $ (w `shiftR` 24) .&. 0xFF
-  , fromIntegral $ (w `shiftR` 16) .&. 0xFF
-  , fromIntegral $ (w `shiftR` 8) .&. 0xFF
-  , fromIntegral $ w .&. 0xFF
+  ( fromIntegral ((w `shiftR` 24) .&. 0xFF)
+  , fromIntegral ((w `shiftR` 16) .&. 0xFF)
+  , fromIntegral ((w `shiftR` 8) .&. 0xFF)
+  , fromIntegral (w .&. 0xFF)
   )
-
-{-# INLINE logicalClipKey #-}
-logicalClipKey :: Float -> Rect -> (Int, Int, Int, Int)
-logicalClipKey uiScale (Rect x y w h) =
-  let s = if uiScale > 0 then uiScale else 1
-      x0 = floor (x * s) :: Int
-      y0 = floor (y * s) :: Int
-      x1 = ceiling ((x + w) * s) :: Int
-      y1 = ceiling ((y + h) * s) :: Int
-   in (x0, y0, max 0 (x1 - x0), max 0 (y1 - y0))
-
-{-# INLINE clipPixelRect #-}
-clipPixelRect :: Float -> Rect -> (Float, Float, Float, Float)
-clipPixelRect uiScale (Rect x y w h) =
-  let s = if uiScale > 0 then uiScale else 1
-      x0 = fromIntegral (floor (x * s) :: Int) :: Float
-      y0 = fromIntegral (floor (y * s) :: Int) :: Float
-      x1 = fromIntegral (ceiling ((x + w) * s) :: Int) :: Float
-      y1 = fromIntegral (ceiling ((y + h) * s) :: Int) :: Float
-   in (x0, y0, max 0 (x1 - x0), max 0 (y1 - y0))

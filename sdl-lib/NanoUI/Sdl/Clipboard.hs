@@ -4,8 +4,11 @@ module NanoUI.Sdl.Clipboard
   , withSdlClipboard
   ) where
 
-import Foreign.C.Types (CChar, CInt(CInt))
-import Foreign.C.String (CString, peekCString, withCString)
+import Data.Text (Text)
+import qualified Data.Text as T
+import Data.Text.Foreign (peekCString, withCString)
+import Foreign.C.String (CString)
+import Foreign.C.Types (CChar, CInt (CInt))
 import Foreign.Ptr (Ptr, nullPtr)
 import NanoUI.Testing (Context, withClipboard)
 
@@ -18,13 +21,13 @@ foreign import ccall unsafe "SDL_GetClipboardText"
 foreign import ccall unsafe "SDL_free"
   c_SDL_free :: Ptr a -> IO ()
 
-setClipboardText :: String -> IO Bool
+setClipboardText :: Text -> IO Bool
 setClipboardText txt =
   withCString txt $ \cstr -> do
     ok <- c_SDL_SetClipboardText cstr
     pure (ok /= 0)
 
-getClipboardText :: IO (Maybe String)
+getClipboardText :: IO (Maybe Text)
 getClipboardText = do
   ptr <- c_SDL_GetClipboardText
   if ptr == nullPtr
@@ -32,7 +35,11 @@ getClipboardText = do
     else do
       txt <- peekCString ptr
       c_SDL_free ptr
-      pure (if null txt then Nothing else Just txt)
+      pure (if T.null txt then Nothing else Just txt)
 
 withSdlClipboard :: Context -> Context
-withSdlClipboard ctx = withClipboard ctx getClipboardText setClipboardText
+withSdlClipboard ctx =
+  withClipboard
+    ctx
+    (fmap (fmap T.unpack) getClipboardText)
+    (\s -> setClipboardText (T.pack s))

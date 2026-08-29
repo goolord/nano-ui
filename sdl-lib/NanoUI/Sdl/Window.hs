@@ -16,7 +16,9 @@ import Control.Monad (unless, void, when)
 import Data.Bits ((.|.))
 import Data.ByteString (ByteString)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import Foreign.C.String (withCString)
+import Data.Primitive.SmallArray (SmallArray)
+import Data.Text (Text)
+import Data.Text.Foreign qualified as TextForeign
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (peek)
@@ -72,7 +74,7 @@ data RgbaImage = RgbaImage
 
 -- | Application-owned SDL settings.
 data SdlOptions = SdlOptions
-  { sdlWindowTitle :: !String
+  { sdlWindowTitle :: !Text
   -- ^ Window title (default: @"nano-ui"@).
   , sdlWindowSize :: !Size
   -- ^ Initial window size in logical units (default: 1280x800).
@@ -97,8 +99,8 @@ data SdlOptions = SdlOptions
   , sdlAppTheme :: !(Maybe Theme)
   -- ^ Initial UI theme override (default: 'Nothing').
   , sdlAppShouldQuit :: !(Input -> Bool)
-  -- ^ Predicate on user input to trigger application exit (default: @const False@).
-  , sdlAppImages :: ![RgbaImage]
+  -- ^ Predicate on user input to trigger application exit (default: @const False@).\
+  , sdlAppImages :: !(SmallArray RgbaImage)
   -- ^ Initial RGBA textures registered before the first frame.
   }
 
@@ -118,7 +120,7 @@ defaultSdlOptions =
     , sdlAppFontSize = defaultFontSize
     , sdlAppTheme = Nothing
     , sdlAppShouldQuit = const False
-    , sdlAppImages = []
+    , sdlAppImages = mempty
     }
 
 computeWindowFlags :: Bool -> Bool -> Bool -> Bool -> Bool -> SDL_WindowFlags
@@ -242,7 +244,7 @@ withSdlBench ctx act =
 
 withSdlWindow ::
   Context ->
-  String ->
+  Text ->
   Float ->
   Float ->
   SDL_WindowFlags ->
@@ -283,7 +285,7 @@ resolveMonoFontPath Nothing fontPath =
 
 startSdlWindow ::
   Context ->
-  String ->
+  Text ->
   Float ->
   Float ->
   SDL_WindowFlags ->
@@ -299,7 +301,7 @@ startSdlWindow ctx title w h flags bench vsync fontPath monoPath fontSize = do
   unlessM initRefreshEvent $
     fail "SDL_RegisterEvents failed for refresh wake"
   env <-
-    withCString title $ \titlePtr ->
+    TextForeign.withCString title $ \titlePtr ->
       alloca $ \winPtr ->
         alloca $ \renPtr -> do
           ok <-

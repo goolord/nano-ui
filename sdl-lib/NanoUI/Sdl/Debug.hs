@@ -11,6 +11,7 @@ module NanoUI.Sdl.Debug
   ) where
 
 import Data.IORef (IORef, atomicModifyIORef', newIORef)
+import Data.Text (Text)
 import Data.Word (Word32, Word64)
 import GHC.Clock (getMonotonicTime)
 import GHC.Conc (getNumCapabilities, getNumProcessors)
@@ -34,7 +35,7 @@ data SdlDebugSnapshot = SdlDebugSnapshot
   , dbgMouseY :: Float
   , dbgScale :: Float
   , dbgFontPath :: FilePath
-  , dbgRenderer :: String
+  , dbgRenderer :: Text
   , dbgVsync :: Bool
   , dbgRtsOn :: Bool
   , dbgGcs :: Word32
@@ -167,7 +168,7 @@ notePresent ref uiMs dd = do
       , ()
       )
 
-readSdlDebug :: SamplerRef -> Size -> V2 -> FilePath -> Float -> String -> Bool -> IO SdlDebugSnapshot
+readSdlDebug :: SamplerRef -> Size -> V2 -> FilePath -> Float -> Text -> Bool -> IO SdlDebugSnapshot
 readSdlDebug ref (Size ww wh) (V2 mx my) fontPath scale renderer vsync = do
   now <- getMonotonicTime
   (refresh, cur) <-

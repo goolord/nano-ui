@@ -1,6 +1,8 @@
 module Main (main) where
 
 import Control.Monad (replicateM_, void)
+import Data.Foldable (foldlM)
+import Data.Primitive.SmallArray (SmallArray)
 import NanoUI
 import NanoUI.Backend.Sdl (RgbaImage (..))
 import NanoUI.Testing (Context, registerImage)
@@ -33,15 +35,19 @@ main = do
         replicateM_ iterations (void (sdlDrawFrame ctx' demoUi sdlEnv inp False))
   putStrLn ("profiled " ++ show iterations ++ " SDL demo frames (plus 1 warmup)")
 
-registerDemoImages :: Context -> [RgbaImage] -> IO Bool
-registerDemoImages ctx =
-  fmap and
-    . mapM
-      ( \img ->
-          registerImage
-            ctx
-            (rgbaImageId img)
-            (rgbaImageWidth img)
-            (rgbaImageHeight img)
-            (rgbaImagePixels img)
-      )
+registerDemoImages :: Context -> SmallArray RgbaImage -> IO Bool
+registerDemoImages ctx images =
+  foldlM
+    ( \ok img ->
+        if ok
+          then
+            registerImage
+              ctx
+              (rgbaImageId img)
+              (rgbaImageWidth img)
+              (rgbaImageHeight img)
+              (rgbaImagePixels img)
+          else pure False
+    )
+    True
+    images
