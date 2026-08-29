@@ -12,12 +12,10 @@ import NanoUI.Sdl.Batch (RenderBatch, batchDrawRange, batchFillSolid, flushRende
 import NanoUI.Sdl.Image (ImageAtlas, lookupAtlasTex)
 
 import Control.Monad (void, when)
-import Data.Bits (shiftR, (.&.))
+import Data.Bits (shiftL, shiftR, (.&.), (.|.))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import Data.List (sortBy)
-import Data.Ord (comparing)
 import qualified Data.Vector as V
-import Data.Primitive.SmallArray (SmallArray, sizeofSmallArray)
+import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray)
 import Data.Word (Word8)
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Marshal.Alloc (alloca)
@@ -30,7 +28,6 @@ import NanoUI.Testing
   , DrawData (..)
   , Layer (..)
   , damageIsEmpty
-  , drawCmdFilter
   )
 import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
@@ -121,45 +118,51 @@ renderDrawDataPass batch ren uiScale mClear drawData layers images damage = do
         applyClipState batch clipRef ren uiScale (ClipRect r)
       (Nothing, DamageClip r) -> applyClipState batch clipRef ren uiScale (ClipRect r)
       (Nothing, DamageFull) -> pure ()
-    let selected = drawCmdFilter (\c -> cmdLayer c `elem` layers) drawData
-        cmds = sortBy (comparing layerOrder) (V.toList selected)
-        clip = case damage of
+    let clip = case damage of
           DamageFull -> Nothing
           DamageClip r -> Just r
         vc = drawVertexCount drawData
         ic = drawIndexCount drawData
+        cmds = drawCommands drawData
+        !n = V.length cmds
+        !layerMask = computeLayerMask layers
     withForeignPtr (drawVertices drawData) $ \vp ->
       withForeignPtr (drawIndices drawData) $ \ip ->
-        drawCmds batch ren uiScale vp vc ip ic images clip clipRef cmds
+        let go !i
+              | i >= n = pure ()
+              | otherwise = do
+                  let !cmd = V.unsafeIndex cmds i
+                  when (testLayerMask layerMask (cmdLayer cmd)) $
+                    drawCmd batch ren uiScale vp vc ip ic images clip clipRef cmd
+                  go (i + 1)
+         in go 0
     applyClipState batch clipRef ren uiScale ClipNone
 
-layerOrder :: DrawCmd -> Int
-layerOrder cmd =
-  case cmdLayer cmd of
+{-# INLINE layerOrder #-}
+layerOrder :: Layer -> Int
+layerOrder ly =
+  case ly of
     LayerBackground -> 0
     LayerContent -> 1
     LayerOverlay -> 2
     LayerChrome -> 3
 
-drawCmds ::
-  RenderBatch ->
-  Ptr SDL_Renderer ->
-  Float ->
-  Ptr Word8 ->
-  Int ->
-  Ptr Word8 ->
-  Int ->
-  ImageAtlas ->
-  Maybe Rect ->
-  IORef ClipState ->
-  [DrawCmd] ->
-  IO ()
-drawCmds batch ren uiScale vp vc ip ic images mDamage clipRef = go
+{-# INLINE computeLayerMask #-}
+computeLayerMask :: SmallArray Layer -> Int
+computeLayerMask arr = go 0 0
   where
-    go [] = pure ()
-    go (cmd : rest) = do
-      drawCmd batch ren uiScale vp vc ip ic images mDamage clipRef cmd
-      go rest
+    !len = sizeofSmallArray arr
+    go !acc !i
+      | i >= len = acc
+      | otherwise =
+          let !l = indexSmallArray arr i
+              !bit = 1 `shiftL` layerOrder l
+           in go (acc .|. bit) (i + 1)
+
+{-# INLINE testLayerMask #-}
+testLayerMask :: Int -> Layer -> Bool
+testLayerMask !mask !l =
+  (mask .&. (1 `shiftL` layerOrder l)) /= 0
 
 {-# INLINE drawCmd #-}
 drawCmd ::

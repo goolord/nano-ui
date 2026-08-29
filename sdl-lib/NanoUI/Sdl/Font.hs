@@ -18,8 +18,7 @@ module NanoUI.Sdl.Font
 import Control.Exception (IOException, bracket, catch)
 import Control.Monad (filterM, forM_, when)
 import Data.Bits (shiftR, (.&.))
-import Data.Foldable (toList)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Primitive.SmallArray
   ( SmallArray
   , emptySmallArray
@@ -62,16 +61,20 @@ data SdlFont = SdlFont
   }
 
 data TextSlot = TextSlot
-  { tsX :: Float
-  , tsY :: Float
-  , tsW :: Float
-  , tsH :: Float
+  { tsW :: {-# UNPACK #-} !Float
+  , tsH :: {-# UNPACK #-} !Float
+  , tsU0 :: {-# UNPACK #-} !Float
+  , tsV0 :: {-# UNPACK #-} !Float
+  , tsU1 :: {-# UNPACK #-} !Float
+  , tsV1 :: {-# UNPACK #-} !Float
+  , tsAtlasW :: {-# UNPACK #-} !Float
+  , tsAtlasH :: {-# UNPACK #-} !Float
+  , tsTex :: !(Ptr ())
   }
 
 data TextCache = TextCache
-  { tcAtlas :: Ptr ()
-  , tcEntries :: IORef (Map.Map CacheKey TextSlot)
-  , tcOrder :: IORef (SmallArray CacheKey)
+  { tcAtlas :: !(Ptr ())
+  , tcEntries :: !(IORef (Map.Map CacheKey TextSlot))
   }
 
 type CacheKey = (Ptr (), Text, Word32)
@@ -84,8 +87,7 @@ newTextCache ren = do
   atlas <- textAtlasCreate ren
   when (atlas == nullPtr) $ fail "nano_ui_text_atlas_create failed"
   entries <- newIORef Map.empty
-  order <- newIORef emptySmallArray
-  pure TextCache {tcAtlas = atlas, tcEntries = entries, tcOrder = order}
+  pure TextCache {tcAtlas = atlas, tcEntries = entries}
 
 destroyTextCache :: TextCache -> IO ()
 destroyTextCache cache = textAtlasDestroy (tcAtlas cache)
@@ -176,6 +178,7 @@ renderTextSpans ::
   TextCache ->
   [(Rect, Text, Color, Color, Rect)] ->
   IO ()
+renderTextSpans _ _ _ _ _ _ [] = pure ()
 renderTextSpans batch ren scale font monoFont cache spans = do
   lastClip <- newIORef (Nothing :: Maybe (Int, Int, Int, Int))
   forM_ spans $ \(Rect x y _ _, txt, fg, _bg, clip) -> do
@@ -198,51 +201,42 @@ drawSpan batch scale font monoFont cache txt col x y =
           else (font, txt)
    in drawSpanFont batch scale pick cache shown col x y
 
+{-# INLINE drawSpanFont #-}
 drawSpanFont :: RenderBatch -> Float -> SdlFont -> TextCache -> Text -> Color -> Float -> Float -> IO ()
 drawSpanFont _ _ _ _ txt _ _ _
   | T.null txt = pure ()
-drawSpanFont batch scale font cache txt col x y =
-  withUtf8 txt $ \cstr len -> do
-    let keyCol = colorWord col
-        cacheKey = (sfFont font, txt, keyCol)
-    mSlot <-
-      lookupCache cache cacheKey >>= \case
-        Just hit -> pure (Just hit)
-        Nothing -> do
-          flushRenderBatch batch
+drawSpanFont batch scale font cache txt col x y = do
+  let !keyCol = colorWord col
+      !cacheKey = (sfFont font, txt, keyCol)
+  mSlot <-
+    lookupCache cache cacheKey >>= \case
+      Just hit -> pure (Just hit)
+      Nothing -> do
+        flushRenderBatch batch
+        withUtf8 txt $ \cstr len ->
           createCached font cache cacheKey cstr len col
-    case mSlot of
-      Nothing -> pure ()
-      Just slot -> do
-        (atW, atH) <- atlasSize (tcAtlas cache)
-        tex <- textAtlasTexture (tcAtlas cache)
-        let px = x * scale
-            py = y * scale
-            ax = tsX slot
-            ay = tsY slot
-            aw = tsW slot
-            ah = tsH slot
-            u0 = ax / atW
-            v0 = ay / atH
-            u1 = (ax + aw) / atW
-            v1 = (ay + ah) / atH
-        batchTextureDst
-          batch
-          tex
-          atW
-          atH
-          px
-          py
-          aw
-          ah
-          u0
-          v0
-          u1
-          v1
-          255
-          255
-          255
-          255
+  case mSlot of
+    Nothing -> pure ()
+    Just (TextSlot aw ah u0 v0 u1 v1 atW atH tex) -> do
+      let !px = x * scale
+          !py = y * scale
+      batchTextureDst
+        batch
+        tex
+        atW
+        atH
+        px
+        py
+        aw
+        ah
+        u0
+        v0
+        u1
+        v1
+        255
+        255
+        255
+        255
 
 createCached ::
   SdlFont ->
@@ -275,13 +269,27 @@ createCached font cache cacheKey cstr len col =
     freeSurface surf
     case mSlot of
       Nothing -> pure Nothing
-      Just slot -> do
+      Just (px, py, tw, th) -> do
+        (atW, atH) <- atlasSize (tcAtlas cache)
+        tex <- textAtlasTexture (tcAtlas cache)
+        let slot =
+              TextSlot
+                { tsW = tw
+                , tsH = th
+                , tsU0 = px / atW
+                , tsV0 = py / atH
+                , tsU1 = (px + tw) / atW
+                , tsV1 = (py + th) / atH
+                , tsAtlasW = atW
+                , tsAtlasH = atH
+                , tsTex = tex
+                }
         insertCache cache cacheKey slot
         pure (Just slot)
   where
     (r, g, b, a) = unpackColor col
 
-insertSurface :: TextCache -> Ptr () -> IO (Maybe TextSlot)
+insertSurface :: TextCache -> Ptr () -> IO (Maybe (Float, Float, Float, Float))
 insertSurface cache surf = do
   let atlas = tcAtlas cache
   tryInsert atlas surf >>= \case
@@ -291,7 +299,7 @@ insertSurface cache surf = do
       textAtlasReset atlas
       tryInsert atlas surf
 
-tryInsert :: Ptr () -> Ptr () -> IO (Maybe TextSlot)
+tryInsert :: Ptr () -> Ptr () -> IO (Maybe (Float, Float, Float, Float))
 tryInsert atlas surf =
   alloca $ \px ->
     alloca $ \py ->
@@ -300,19 +308,16 @@ tryInsert atlas surf =
           ok <- textAtlasInsertSurface atlas surf px py tw th
           if ok
             then do
-              slot <-
-                TextSlot
-                  <$> (realToFrac <$> peek px)
-                  <*> (realToFrac <$> peek py)
-                  <*> (realToFrac <$> peek tw)
-                  <*> (realToFrac <$> peek th)
-              pure (Just slot)
+              x <- realToFrac <$> peek px
+              y <- realToFrac <$> peek py
+              w <- realToFrac <$> peek tw
+              h <- realToFrac <$> peek th
+              pure (Just (x, y, w, h))
             else pure Nothing
 
 clearTextCacheEntries :: TextCache -> IO ()
-clearTextCacheEntries cache = do
+clearTextCacheEntries cache =
   writeIORef (tcEntries cache) Map.empty
-  writeIORef (tcOrder cache) emptySmallArray
 
 resetTextCache :: TextCache -> IO ()
 resetTextCache cache = do
@@ -320,18 +325,13 @@ resetTextCache cache = do
   textAtlasReset (tcAtlas cache)
 
 insertCache :: TextCache -> CacheKey -> TextSlot -> IO ()
-insertCache cache key val = do
-  modifyIORef (tcEntries cache) (Map.insert key val)
-  modifyIORef (tcOrder cache) (\ord -> smallArrayFromList (key : filter (/= key) (toList ord)))
+insertCache cache key val =
+  modifyIORef' (tcEntries cache) (Map.insert key val)
 
 lookupCache :: TextCache -> CacheKey -> IO (Maybe TextSlot)
 lookupCache cache key = do
   entries <- readIORef (tcEntries cache)
-  case Map.lookup key entries of
-    Nothing -> pure Nothing
-    Just hit -> do
-      modifyIORef (tcOrder cache) (\ord -> smallArrayFromList (key : filter (/= key) (toList ord)))
-      pure (Just hit)
+  pure $! Map.lookup key entries
 
 atlasSize :: Ptr () -> IO (Float, Float)
 atlasSize atlas =
@@ -534,13 +534,17 @@ withUtf8 txt k =
   let bytes = TE.encodeUtf8 txt
    in BS.useAsCStringLen bytes $ \(cstr, len) -> k cstr (fromIntegral len)
 
-modifyIORef :: IORef a -> (a -> a) -> IO ()
-modifyIORef ref f = do
-  v <- readIORef ref
-  writeIORef ref (f v)
-
 colorWord :: Color -> Word32
 colorWord (Color w) = w
+
+{-# INLINE unpackColor #-}
+unpackColor :: Color -> (Word8, Word8, Word8, Word8)
+unpackColor (Color w) =
+  ( fromIntegral ((w `shiftR` 24) .&. 0xFF)
+  , fromIntegral ((w `shiftR` 16) .&. 0xFF)
+  , fromIntegral ((w `shiftR` 8) .&. 0xFF)
+  , fromIntegral (w .&. 0xFF)
+  )
 
 foreign import ccall safe "nano_ui_ttf_init"
   ttfInit :: IO Bool
@@ -598,13 +602,5 @@ foreign import ccall unsafe "nano_ui_text_atlas_reset"
 foreign import ccall unsafe "nano_ui_text_atlas_size"
   textAtlasSize :: Ptr () -> Ptr CFloat -> Ptr CFloat -> IO Bool
 
-foreign import ccall unsafe "nano_ui_free_surface"
+foreign import ccall unsafe "SDL_DestroySurface"
   freeSurface :: Ptr () -> IO ()
-
-unpackColor :: Color -> (Word8, Word8, Word8, Word8)
-unpackColor (Color w) =
-  ( fromIntegral ((w `shiftR` 24) .&. 0xFF)
-  , fromIntegral ((w `shiftR` 16) .&. 0xFF)
-  , fromIntegral ((w `shiftR` 8) .&. 0xFF)
-  , fromIntegral (w .&. 0xFF)
-  )
