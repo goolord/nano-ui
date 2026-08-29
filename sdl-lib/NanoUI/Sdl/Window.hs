@@ -29,6 +29,7 @@ import NanoUI.Sdl.Display
   , queryWindowLogicalSize
   , retainDestroy
   , setRenderScale
+  , setRenderVSync
   , windowToLogicalCoords
   )
 import NanoUI.Sdl.Clipboard (withSdlClipboard)
@@ -82,6 +83,7 @@ data SdlEnv = SdlEnv
   , sdlCursors :: SdlCursors
   , sdlDebug :: IORef SdlDebugSampler
   , sdlRetain :: IORef (Ptr (), Int, Int)
+  , sdlVsync :: !Bool
   }
 
 defaultWindowSize :: Size
@@ -128,12 +130,12 @@ syncInput _env scale inp = do
       Just windowPos -> inp {inputMousePos = windowToLogicalCoords scale windowPos}
       Nothing -> inp
 
-withSdl :: Context -> String -> Size -> (Context -> SdlEnv -> IO a) -> IO a
-withSdl ctx title size act = withSdlWindow ctx title size sdlWindowResizable False act
+withSdl :: Bool -> Context -> String -> Size -> (Context -> SdlEnv -> IO a) -> IO a
+withSdl vsync ctx title size act = withSdlWindow ctx title size sdlWindowResizable False vsync act
 
 withSdlBench :: Context -> (Context -> SdlEnv -> IO a) -> IO a
 withSdlBench ctx act =
-  withSdlWindow ctx "nano-ui-bench" benchWindowSize sdlWindowHidden True act
+  withSdlWindow ctx "nano-ui-bench" benchWindowSize sdlWindowHidden True False act
 
 withSdlWindow ::
   Context ->
@@ -141,15 +143,16 @@ withSdlWindow ::
   Size ->
   SDL_WindowFlags ->
   Bool ->
+  Bool ->
   (Context -> SdlEnv -> IO a) ->
   IO a
-withSdlWindow ctx title (Size w h) flags bench act =
+withSdlWindow ctx title (Size w h) flags bench vsync act =
   withTtf $ do
-    if bench then initBenchHints else initSdlHints
+    if bench then initBenchHints else initSdlHints vsync
     fontPath <- resolveFontPath
     monoPath <- resolveMonoFontPath fontPath
     bracket
-      (startSdlWindow ctx title w h flags bench fontPath monoPath)
+      (startSdlWindow ctx title w h flags bench vsync fontPath monoPath)
       (\(_, env) -> stopSdlWindow bench env)
       $ \(ctx', env) -> act ctx' env
 
@@ -176,10 +179,11 @@ startSdlWindow ::
   Float ->
   SDL_WindowFlags ->
   Bool ->
+  Bool ->
   FilePath ->
   FilePath ->
   IO (Context, SdlEnv)
-startSdlWindow ctx title w h flags bench fontPath monoPath = do
+startSdlWindow ctx title w h flags bench vsync fontPath monoPath = do
   unlessM (initSafe (SDL_InitFlags 32)) $
     fail "SDL_Init(SDL_INIT_VIDEO) failed"
   unlessM initRefreshEvent $
@@ -212,6 +216,7 @@ startSdlWindow ctx title w h flags bench fontPath monoPath = do
           retain <- newIORef (nullPtr, 0, 0)
           unlessM (setRenderScale ren defaultUiScale) $
             fail "SDL_SetRenderScale failed"
+          unless bench $ void $ setRenderVSync ren vsync
           when (not bench) $ void $ startTextInputSafe win
           pure
             SdlEnv
@@ -227,6 +232,7 @@ startSdlWindow ctx title w h flags bench fontPath monoPath = do
               , sdlCursors = cursors
               , sdlDebug = debug
               , sdlRetain = retain
+              , sdlVsync = vsync
               }
   scale <- readIORef (sdlScaleRef env)
   font <- readIORef (sdlFontRef env)
@@ -260,7 +266,7 @@ acquireSdlBench ctx =
     fontPath <- resolveFontPath
     monoPath <- resolveMonoFontPath fontPath
     let Size w h = benchWindowSize
-    startSdlWindow ctx "nano-ui-bench" w h sdlWindowHidden True fontPath monoPath
+    startSdlWindow ctx "nano-ui-bench" w h sdlWindowHidden True False fontPath monoPath
 
 releaseSdlBench :: SdlEnv -> IO ()
 releaseSdlBench env = withTtf $ stopSdlWindow True env

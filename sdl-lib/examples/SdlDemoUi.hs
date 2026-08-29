@@ -129,7 +129,7 @@ displayRows s =
   [ ("window", printf "%.0fx%.0f" (dbgWinW s) (dbgWinH s))
   , ("scale", printf "%.2f" (dbgScale s))
   , ("mouse", printf "%.0f, %.0f" (dbgMouseX s) (dbgMouseY s))
-  , ("renderer", clipField 36 (dbgRenderer s <> "  vsync on"))
+  , ("renderer", clipField 36 (dbgRenderer s <> if dbgVsync s then "  vsync on" else "  vsync off"))
   , ("font", clipField 36 (dbgFontPath s))
   ]
 

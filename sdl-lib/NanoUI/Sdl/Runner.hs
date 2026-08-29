@@ -193,4 +193,4 @@ readSdlDebugEnv env = do
   size <- queryWindowLogicalSize (sdlWindow env) scale
   mouse <- queryMouseWindowPos
   let pos = maybe (V2 0 0) (windowToLogicalCoords scale) mouse
-  readSdlDebug (sdlDebug env) size pos (sdlFontPath env) scale name
+  readSdlDebug (sdlDebug env) size pos (sdlFontPath env) scale name (sdlVsync env)
