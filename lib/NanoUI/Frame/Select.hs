@@ -87,6 +87,7 @@ import NanoUI.Font
   , layoutLineHeight
   , hasHeadingMarker
   , hasMonoFontMarker
+  , stripMonoFontMarker
   , hasMutedMarker
   , labelContentInset
   , resolveLayoutPadding
@@ -509,7 +510,8 @@ drawSelectOverlays ctx inp = do
                             (rectY dropRect)
                             (rectW dropRect)
                             (rectH dropRect)
-                          forM_ (zip ([0 ..] :: [Int]) opts) $ \(i, _opt) -> do
+                          let (ix, _) = widgetContentInset (ctxHostProfile ctx) fm
+                          forM_ (zip ([0 ..] :: [Int]) opts) $ \(i, opt) -> do
                             let iy = selectDropItemY (ctxHostProfile ctx) fm dropRect itemH i
                                 itemRect = Rect (rectX dropRect) iy (rectW dropRect) itemH
                                 hovered = rectContains itemRect mouse
@@ -523,6 +525,15 @@ drawSelectOverlays ctx inp = do
                                 let accent = themeAccent theme
                                     barRect = Rect (rectX itemRect) (rectY itemRect + 3) 2 (rectH itemRect - 6)
                                 pushRoundedRect da barRect 1 accent
+                            unless (T.null opt) $ do
+                              (_tw, th) <- ctxMeasureText ctx opt
+                              let tx = rectX dropRect + textInputMenuItemPadX + ix
+                                  ty = centeredTextY (ctxHostProfile ctx) fm iy itemH th
+                                  itemFg = if i == picked then themeAccent theme else styleFg dropStyle
+                                  (fm', shown) = if hasMonoFontMarker opt
+                                                   then (ctxMonoFontMetrics ctx, stripMonoFontMarker opt)
+                                                   else (fm, opt)
+                              pushText da fm' tx ty shown itemFg
                           go (idx + 1)
     go 0
 

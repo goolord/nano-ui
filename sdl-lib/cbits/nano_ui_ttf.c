@@ -1,6 +1,7 @@
 #include "nano_ui_opt.h"
 #include <SDL3/SDL.h>
 #include <SDL3_ttf/SDL_ttf.h>
+#include <stdio.h>
 #include <math.h>
 #include <stddef.h>
 #include <stdbool.h>
@@ -375,6 +376,55 @@ bool nano_ui_ttf_render_surface(
     if (out_h) {
         *out_h = (float)surface->h;
     }
+    return true;
+}
+
+bool nano_ui_ttf_glyph_metrics(
+    TTF_Font *font,
+    Uint32 codepoint,
+    int *out_minx,
+    int *out_maxx,
+    int *out_miny,
+    int *out_maxy,
+    int *out_advance)
+{
+    if (!font) {
+        return false;
+    }
+    int minx = 0, maxx = 0, miny = 0, maxy = 0, advance = 0;
+    if (!TTF_GetGlyphMetrics(font, codepoint, &minx, &maxx, &miny, &maxy, &advance)) {
+        return false;
+    }
+    if (out_minx)   *out_minx   = minx;
+    if (out_maxx)   *out_maxx   = maxx;
+    if (out_miny)   *out_miny   = miny;
+    if (out_maxy)   *out_maxy   = maxy;
+    if (out_advance) *out_advance = advance;
+    return true;
+}
+
+/* Render a single glyph as a white-on-alpha surface so vertex color can tint it.
+   The surface uses SDL_PIXELFORMAT_RGBA32 with R=G=B=255, A=coverage. */
+bool nano_ui_ttf_render_glyph_surface(
+    TTF_Font *font,
+    Uint32 codepoint,
+    SDL_Surface **out_surface)
+{
+    if (!font || !out_surface) {
+        return false;
+    }
+    SDL_Color white = {255, 255, 255, 255};
+    SDL_Surface *raw = TTF_RenderGlyph_Blended(font, codepoint, white);
+    if (!raw) {
+        return false;
+    }
+    /* Convert to RGBA32 to ensure consistent pixel layout for the atlas blitter. */
+    SDL_Surface *converted = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_RGBA32);
+    SDL_DestroySurface(raw);
+    if (!converted) {
+        return false;
+    }
+    *out_surface = converted;
     return true;
 }
 

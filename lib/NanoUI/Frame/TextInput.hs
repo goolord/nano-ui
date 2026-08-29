@@ -98,6 +98,7 @@ import NanoUI.Font
   , layoutLineHeight
   , hasHeadingMarker
   , hasMonoFontMarker
+  , stripMonoFontMarker
   , hasMutedMarker
   , labelContentInset
   , resolveLayoutPadding
@@ -572,7 +573,7 @@ drawTextInputMenuOverlays ctx inp = do
                   da
                   (Rect (rectX rowRect + margin) lineY (rectW rowRect - 2 * margin) 1)
                   sepCol
-              TextInputMenuItem action _ -> do
+              TextInputMenuItem action lbl -> do
                 enabled <- textInputMenuActionEnabled ctx wid action
                 let hovered = enabled && rectContains rowRect mouse
                 when hovered $ do
@@ -580,6 +581,16 @@ drawTextInputMenuOverlays ctx inp = do
                   let accent = themeAccent theme
                       barRect = Rect (rectX rowRect) (rectY rowRect + 3) 2 (rectH rowRect - 6)
                   pushRoundedRect da barRect 1 accent
+                unless (T.null lbl) $ do
+                  (_tw, th) <- ctxMeasureText ctx lbl
+                  let (ix, _) = widgetContentInset (ctxHostProfile ctx) fm
+                      tx = rectX content + textInputMenuItemPadX + ix
+                      ty = centeredTextY (ctxHostProfile ctx) fm (rectY content + relY) h th
+                      fg = textInputMenuItemFg menuStyle enabled
+                      (fm', shown) = if hasMonoFontMarker lbl
+                                       then (ctxMonoFontMetrics ctx, stripMonoFontMarker lbl)
+                                       else (fm, lbl)
+                  pushText da fm' tx ty shown fg
 
 collectTextInputMenuSpans :: Context -> Input -> IO [(Rect, T.Text, Color, Color, Rect)]
 collectTextInputMenuSpans ctx inp = do

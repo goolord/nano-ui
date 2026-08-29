@@ -82,6 +82,7 @@ import NanoUI.Font
   , layoutLineHeight
   , hasHeadingMarker
   , hasMonoFontMarker
+  , stripMonoFontMarker
   , hasMutedMarker
   , labelContentInset
   , resolveLayoutPadding
@@ -178,8 +179,8 @@ import NanoUI.Frame.Chrome
 import NanoUI.Frame.Clip (scrollContentClip, terminalModalOuterClip)
 import NanoUI.Frame.Hit (widgetOverlayAllowed)
 import NanoUI.Frame.Scroll (paintScrollChrome)
-import NanoUI.Frame.Spans (sliderValue, widgetTextPlacements)
-import NanoUI.Frame.TextInput (TextInputGeom (..), drawTextInputCaret, textInputGeom)
+import NanoUI.Frame.Spans (collectNodeTextSpans, sliderValue, widgetTextPlacements, widgetTextSpans)
+import NanoUI.Frame.TextInput (TextInputGeom (..), drawTextInputCaret, textInputFieldTextClip, textInputGeom)
 
 lowerShapes :: Context -> IO ()
 lowerShapes ctx = do
@@ -223,13 +224,14 @@ lowerNode ctx idx = do
       paintScrollChrome ctx da idx wid x y w h pad theme terminal
     NodeText -> do
       raw <- getText (ctxNodeArena ctx) idx
-      let (txt, fg, _) = nodeLabelPaint theme raw
-          (ix, _) = labelContentInset (ctxHostProfile ctx) fm
-      ax <- getAlignX (ctxNodeArena ctx) idx
-      when (not (ctxExternalText ctx) && not (T.null txt)) $ do
-        (tw, th) <- ctxMeasureText ctx raw
-        let (tx, used) = alignedTextBox ax x w ix tw
-        pushRect da (Rect tx (centeredTextY (ctxHostProfile ctx) fm y h th) used th) fg
+      unless (T.null raw) $ do
+        spans <- collectNodeTextSpans ctx IM.empty idx
+        forM_ spans $ \(Rect tx ty _ _, line, spanFg, _) ->
+          unless (T.null line) $ do
+            let (fm', shown) = if hasMonoFontMarker line
+                                 then (ctxMonoFontMetrics ctx, stripMonoFontMarker line)
+                                 else (fm, line)
+            pushText da fm' tx ty shown spanFg
     NodeSeparator -> do
       let hair = 1
       when (not terminal) $
@@ -256,6 +258,31 @@ lowerNode ctx idx = do
             (rectY fieldRect)
             (rectW fieldRect)
             (rectH fieldRect)
+          spans <- widgetTextSpans ctx nt idx x y w h
+          case spans of
+            (lblSpan : fieldSpan : _) -> do
+              let (Rect lx ly _ _, lbl, lfg, _) = lblSpan
+                  (Rect fx fy _ _, field, ffg, _) = fieldSpan
+                  clip = textInputFieldTextClip (ctxHostProfile ctx) geom fm
+              unless (T.null lbl) $ do
+                let (lblFm, lblShown) = if hasMonoFontMarker lbl
+                                          then (ctxMonoFontMetrics ctx, stripMonoFontMarker lbl)
+                                          else (fm, lbl)
+                pushText da lblFm lx ly lblShown lfg
+              withClip da clip $
+                unless (T.null field) $ do
+                  let (fieldFm, fieldShown) = if hasMonoFontMarker field
+                                                then (ctxMonoFontMetrics ctx, stripMonoFontMarker field)
+                                                else (fm, field)
+                  pushText da fieldFm fx fy fieldShown ffg
+            [lblSpan] -> do
+              let (Rect lx ly _ _, lbl, lfg, _) = lblSpan
+              unless (T.null lbl) $ do
+                let (lblFm, lblShown) = if hasMonoFontMarker lbl
+                                          then (ctxMonoFontMetrics ctx, stripMonoFontMarker lbl)
+                                          else (fm, lbl)
+                pushText da lblFm lx ly lblShown lfg
+            _ -> pure ()
           drawTextInputCaret da ctx idx x y w h style
     NodeSpacer -> pure ()
     NodeModal -> pure ()
@@ -354,10 +381,12 @@ lowerNode ctx idx = do
         when (nt == NodeSelect) $
           drawSelectChevron da x y w h (styleFg style)
       placements <- widgetTextPlacements ctx nt idx x y w h
-      when (terminal && not (ctxExternalText ctx)) $
-        forM_ placements $ \(txt, px, py, _, _) ->
-          when (not (T.null txt)) $
-            pushText da fm px py txt (styleFg style)
+      forM_ placements $ \(txt, px, py, _, _) ->
+        unless (T.null txt) $ do
+          let (fm', shown) = if hasMonoFontMarker txt
+                               then (ctxMonoFontMetrics ctx, stripMonoFontMarker txt)
+                               else (fm, txt)
+          pushText da fm' px py shown (styleFg style)
 
 drawCheckbox ::
   HostProfile ->
@@ -453,11 +482,24 @@ drawTooltipOverlays :: Context -> IO ()
 drawTooltipOverlays ctx = do
   let da = ctxDrawArena ctx
       theme = ctxTheme ctx
+      fm = ctxFontMetrics ctx
       terminal = isCellHost (ctxHostProfile ctx)
   when (not terminal) $ do
     tips <- readTooltips ctx
     let panelStyle = themePanel theme
-    forM_ tips $ \(PendingTooltip wid rect _) -> do
+        (ix, _) = labelContentInset (ctxHostProfile ctx) fm
+    forM_ tips $ \(PendingTooltip wid rect@(Rect x y w h) text) -> do
       allow <- widgetOverlayAllowed ctx wid
-      when allow $ fillStyledRect da False panelStyle rect
+      when allow $ do
+        fillStyledRect da False panelStyle rect
+        strokeStyledRect da False panelStyle x y w h
+        unless (T.null text) $ do
+          (_tw, th) <- ctxMeasureText ctx text
+          let tx = x + ix
+              ty = centeredTextY (ctxHostProfile ctx) fm y h th
+              fg = styleFg panelStyle
+              (fm', shown) = if hasMonoFontMarker text
+                               then (ctxMonoFontMetrics ctx, stripMonoFontMarker text)
+                               else (fm, text)
+          pushText da fm' tx ty shown fg
 

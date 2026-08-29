@@ -44,14 +44,20 @@ import NanoUI.Sdl.Cursor (SdlCursors (..), destroyCursors, initCursors)
 import NanoUI.Sdl.Font
   ( SdlFont
   , TextCache
+  , GlyphAtlas
   , closeFont
   , destroyTextCache
+  , destroyGlyphAtlas
   , findFontPath
   , findMonoFontPath
   , newTextCache
+  , newGlyphAtlas
   , openFont
+  , resetGlyphAtlas
+  , warmGlyphAtlas
   , withTtf
-  , withTtfMeasureScaled
+  , buildGlyphFontMetrics
+  , withTtfMeasureGlyph
   )
 import NanoUI.Sdl.Debug (SdlDebugSampler, newSdlDebugSampler)
 import NanoUI.Sdl.Image (ImageAtlas, destroyImageAtlas, newImageAtlas)
@@ -152,6 +158,7 @@ data SdlEnv = SdlEnv
   , sdlFontRef :: IORef SdlFont
   , sdlMonoFontRef :: IORef SdlFont
   , sdlTextCache :: TextCache
+  , sdlGlyphAtlas :: GlyphAtlas
   , sdlImages :: ImageAtlas
   , sdlCursors :: SdlCursors
   , sdlDebug :: IORef SdlDebugSampler
@@ -180,6 +187,10 @@ syncDisplay ctx env inp = do
     newMono <- openFont (sdlMonoFontPath env) (sdlFontSize env * scale)
     writeIORef (sdlMonoFontRef env) newMono
     destroyTextCache (sdlTextCache env)
+    -- Glyph atlas entries are at the old pixel size — must discard and re-warm.
+    resetGlyphAtlas (sdlGlyphAtlas env)
+    warmGlyphAtlas (sdlGlyphAtlas env) newFont
+    warmGlyphAtlas (sdlGlyphAtlas env) newMono
     markDirty ctx
   queried <- queryWindowLogicalSize (sdlWindow env) scale
   let winSize =
@@ -192,7 +203,10 @@ syncDisplay ctx env inp = do
   inpSized <- syncInput env scale inp {inputWindowSize = winSize}
   font <- readIORef (sdlFontRef env)
   monoFont <- readIORef (sdlMonoFontRef env)
-  let ctx' = withTtfMeasureScaled ctx font monoFont scale
+  let ga = sdlGlyphAtlas env
+      fm = buildGlyphFontMetrics ga font scale
+      monoFm = buildGlyphFontMetrics ga monoFont scale
+      ctx' = withTtfMeasureGlyph ctx font monoFont fm monoFm scale
   pure (ctx', inpSized)
 
 syncInput :: SdlEnv -> Float -> Input -> IO Input
@@ -322,6 +336,9 @@ startSdlWindow ctx title w h flags bench vsync fontPath monoPath fontSize = do
           fontRef <- newIORef font
           monoFontRef <- newIORef monoFont
           cache <- newTextCache ren
+          glyphAtlas <- newGlyphAtlas ren
+          warmGlyphAtlas glyphAtlas font
+          warmGlyphAtlas glyphAtlas monoFont
           images <- newImageAtlas
           cursors <- initCursors
           debug <- newSdlDebugSampler
@@ -341,6 +358,7 @@ startSdlWindow ctx title w h flags bench vsync fontPath monoPath fontSize = do
               , sdlFontRef = fontRef
               , sdlMonoFontRef = monoFontRef
               , sdlTextCache = cache
+              , sdlGlyphAtlas = glyphAtlas
               , sdlImages = images
               , sdlCursors = cursors
               , sdlDebug = debug
@@ -350,7 +368,11 @@ startSdlWindow ctx title w h flags bench vsync fontPath monoPath fontSize = do
   scale <- readIORef (sdlScaleRef env)
   font <- readIORef (sdlFontRef env)
   monoFont <- readIORef (sdlMonoFontRef env)
-  let ctx' = withSdlClipboard (withTtfMeasureScaled ctx font monoFont scale)
+  let ga = sdlGlyphAtlas env
+      -- Build FontMetrics backed by the glyph atlas so pushText emits real quads.
+      fm = buildGlyphFontMetrics ga font scale
+      monoFm = buildGlyphFontMetrics ga monoFont scale
+      ctx' = withSdlClipboard (withTtfMeasureGlyph ctx font monoFont fm monoFm scale)
   setHost ctx' env
   setWakeLoop ctx' pushRefreshEvent
   pure (ctx', env)
@@ -362,6 +384,7 @@ stopSdlWindow bench env = do
   destroyCursors (sdlCursors env)
   destroyImageAtlas (sdlImages env)
   destroyTextCache (sdlTextCache env)
+  destroyGlyphAtlas (sdlGlyphAtlas env)
   font <- readIORef (sdlFontRef env)
   closeFont font
   monoFont <- readIORef (sdlMonoFontRef env)
