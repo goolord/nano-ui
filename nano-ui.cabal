@@ -66,6 +66,16 @@ library
         NanoUI.Ease
         NanoUI.Font
         NanoUI.Frame
+        NanoUI.Frame.Cursor
+        NanoUI.Frame.Input
+        NanoUI.Frame.Internal
+        NanoUI.Frame.Paint
+        NanoUI.Frame.Redraw
+        NanoUI.Frame.Scroll
+        NanoUI.Frame.Select
+        NanoUI.Frame.Spans
+        NanoUI.Frame.TextInput
+        NanoUI.Frame.Window
         NanoUI.Host
         NanoUI.Icons
         NanoUI.Id
