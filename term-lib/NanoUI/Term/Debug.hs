@@ -19,19 +19,16 @@ import GHC.Clock (getMonotonicTime)
 import GHC.Conc (getNumCapabilities, getNumProcessors)
 import GHC.Stats (GCDetails (..), RTSStats (..), getRTSStats, getRTSStatsEnabled)
 import NanoUI
-  ( Context
-  , Color (..)
-  , DrawData (..)
+  ( Color (..)
   , Size (..)
   , Style (..)
   , Theme (..)
   , V2 (..)
-  , ctxTheme
-  , drawCommands
   , styleFg
   , themePanel
   , themeWindow
   )
+import NanoUI.Testing (Context, DrawData (..), ctxTheme)
 
 data TermDrawStats = TermDrawStats
   { tdsNodes :: Int

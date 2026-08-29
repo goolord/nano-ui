@@ -27,7 +27,15 @@ import Foreign.C.Types (CFloat (..), CSize (..))
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (peek, poke)
-import NanoUI (Color (..), Context, FontMetrics (..), Rect (..), hasMonoFontMarker, monospaceMetrics, stripMonoFontMarker, withExternalText, withFontMetrics, withMeasureText, withMonoFontMetrics, wrapMeasureCache)
+import NanoUI (Color (..), FontMetrics (..), Rect (..), hasMonoFontMarker, monospaceMetrics, stripMonoFontMarker)
+import NanoUI.Testing
+  ( Context
+  , withExternalText
+  , withFontMetrics
+  , withMeasureText
+  , withMonoFontMetrics
+  , wrapMeasureCache
+  )
 import NanoUI.Sdl.Batch (RenderBatch, batchTextureDst, flushRenderBatch)
 import NanoUI.Sdl.Render (logicalClipKey, setLogicalClipRect)
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)

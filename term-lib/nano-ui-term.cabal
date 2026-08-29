@@ -59,6 +59,11 @@ library
     import:           warnings
     exposed-modules:
         NanoUI.Backend.Term
+        NanoUI.Testing.Term
+    other-modules:
+        NanoUI.Term.Debug
+        NanoUI.Term.Icons
+        NanoUI.Term.Palette
         NanoUI.Term.Ansi
         NanoUI.Term.Cells
         NanoUI.Term.Event
@@ -66,15 +71,12 @@ library
     build-depends:
         base ^>=4.22.0.0,
         bytestring,
+        effectful ^>=2.6,
         nano-ui,
         primitive ^>=0.9,
         text ^>=2.1
     hs-source-dirs:   .
     default-language: GHC2024
-    other-modules:
-        NanoUI.Term.Debug
-        NanoUI.Term.Icons
-        NanoUI.Term.Palette
     if os(windows)
         build-depends: Win32 >=2.14
         other-modules:
@@ -112,6 +114,7 @@ test-suite nano-ui-test
     import:           warnings
     type:             exitcode-stdio-1.0
     main-is:          Main.hs
+    other-modules:    ApiBoundary
     build-depends:
         base ^>=4.22.0.0,
         bytestring,

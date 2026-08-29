@@ -17,8 +17,6 @@ module NanoUI.Term.Palette
 
 import NanoUI
   ( Color (..)
-  , Context
-  , HostProfile (..)
   , Style (..)
   , Theme (..)
   , colorB
@@ -29,6 +27,10 @@ import NanoUI
   , contrastRatio
   , lerpColor
   , monospaceMetrics
+  )
+import NanoUI.Testing
+  ( Context
+  , HostProfile (..)
   , newContext
   , withExternalText
   , withFontMetrics

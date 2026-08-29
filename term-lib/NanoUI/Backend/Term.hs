@@ -6,24 +6,10 @@
 -- notcurses OSC/DA probes echo as garbage in conhost/PowerShell
 -- (notcurses #2914). The Win32 driver writes ANSI through the console API.
 module NanoUI.Backend.Term
-  ( runTermApp
-  , runTermAppEff
-  , runTermAppWithQuit
-  , runTermAppWithQuitEff
+  ( TermOptions (..)
+  , defaultTermOptions
+  , runTermApp
   , runTermAppReduce
-  , runTermAppReduceEff
-  , runTermAppWithQuitReduce
-  , runTermAppWithQuitReduceEff
-  , newAdaptiveTerminalContext
-  , newTerminalContext
-  , terminalTheme
-  , terminalThemeFromColors
-  , terminalDefaultFg
-  , terminalDefaultBg
-  , detectIconSet
-  , queryTerminalColors
-  , TermDebugSnapshot (..)
-  , askTermDebug
   ) where
 
 #if defined(mingw32_HOST_OS)
@@ -32,27 +18,35 @@ import Control.Exception (finally)
 import Control.Monad (when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Typeable (Typeable)
+import Effectful (Eff, IOE, type (:>))
 import GHC.Clock (getMonotonicTime)
 import NanoUI
-  ( Context
-  , DrawData
-  , asciiIcons
-  , ctxIcons
-  , ctxTheme
-  , withIcons
-  , Input (..)
+  ( Input (..)
   , Modifiers (..)
   , Size (..)
   , NanoUI
-  , Ui
-  , Eff
-  , IOE
+  , Theme
+  , IconSet
+  , asciiIcons
+  , defaultTheme
+  , emptyInput
   , V2 (..)
+  )
+import NanoUI.Testing
+  ( Context
+  , DrawData
+  , Ui
+  , ctxIcons
+  , ctxTheme
+  , withIcons
+  , withTheme
+  , withHostProfile
+  , HostProfile (CellHost)
+  , setHost
   , anyAnimating
   , collectRasterSpans
   , isDirty
   , debugPanelOpen
-  , emptyInput
   , needsRedrawIdle
   , pointerDragActive
   , overlayConsumesQuit
@@ -60,37 +54,21 @@ import NanoUI
   , runFrameEff
   , runFrameReduceEff
   , textInputEditActive
-  , defaultTheme
   , widgetNodeCount
-  , type (:>)
-  , withTheme
-  , withHostProfile
-  , HostProfile (CellHost)
-  , setHost
-  , askHost
-  , uiIO
-  , askContext
-  , askInput
   )
 import NanoUI.Term.Debug
   ( TermDebugHost (..)
-  , TermDebugSnapshot (..)
   , TermDrawStats (..)
-  , emptyTermDebug
   , newTermDebugSampler
   , noteLoop
   , notePresent
   , noteSkip
-  , readTermDebug
   , takeDebugLive
   )
 import NanoUI.Term.Icons (detectIconSet)
 import NanoUI.Term.Palette
-  ( newAdaptiveTerminalContext
-  , newTerminalContext
+  ( newTerminalContext
   , queryTerminalColors
-  , terminalDefaultBg
-  , terminalDefaultFg
   , terminalTheme
   , terminalThemeFromColors
   )
@@ -118,6 +96,22 @@ animateTimeout = 16
 idleBlock :: Int
 idleBlock = -1
 
+-- | Application-owned terminal settings. 'Nothing' keeps runtime palette and
+-- icon detection; explicit values are never overwritten by that detection.
+data TermOptions = TermOptions
+  { termAppTheme :: !(Maybe Theme)
+  , termAppIcons :: !(Maybe IconSet)
+  , termAppShouldQuit :: !(Input -> Bool)
+  }
+
+defaultTermOptions :: TermOptions
+defaultTermOptions =
+  TermOptions
+    { termAppTheme = Nothing
+    , termAppIcons = Nothing
+    , termAppShouldQuit = const False
+    }
+
 -- Upgrade the theme and icon tier only while they are still the defaults, so an
 -- app that set either one keeps its choice.
 termContextIO :: Context -> IO Context
@@ -135,39 +129,30 @@ termContextIO ctx0 = do
       pure (withIcons ctx icons)
     else pure ctx
 
-runTermApp :: Context -> NanoUI () -> IO ()
-runTermApp = runTermAppEff runEff
-
-runTermAppEff ::
-  IOE :> es =>
-  (forall x. Eff es x -> IO x) ->
-  Context ->
-  Eff (Ui : es) () ->
-  IO ()
-runTermAppEff unlift ctx ui = runTermAppWithQuitEff unlift ctx (const False) ui
+runTermApp :: TermOptions -> NanoUI () -> IO ()
+runTermApp options ui = do
+  ctx <- termContext options
+  runTermAppWithQuit ctx (termAppShouldQuit options) ui
 
 runTermAppWithQuit :: Context -> (Input -> Bool) -> NanoUI () -> IO ()
 runTermAppWithQuit = runTermAppWithQuitEff runEff
 
 runTermAppReduce ::
   (Typeable msg, Eq model) =>
+  TermOptions ->
   (msg -> model -> model) ->
-  Context ->
   model ->
   (model -> NanoUI ()) ->
   IO ()
-runTermAppReduce = runTermAppReduceEff runEff
+runTermAppReduce options update model view = do
+  ctx <- termContext options
+  runTermAppWithQuitReduce update ctx model (termAppShouldQuit options) view
 
-runTermAppReduceEff ::
-  (IOE :> es, Typeable msg, Eq model) =>
-  (forall x. Eff es x -> IO x) ->
-  (msg -> model -> model) ->
-  Context ->
-  model ->
-  (model -> Eff (Ui : es) ()) ->
-  IO ()
-runTermAppReduceEff unlift update ctx model view =
-  runTermAppWithQuitReduceEff unlift update ctx model (const False) view
+termContext :: TermOptions -> IO Context
+termContext options = do
+  ctx0 <- newTerminalContext
+  let themed = maybe ctx0 (withTheme ctx0) (termAppTheme options)
+  pure $ maybe themed (withIcons themed) (termAppIcons options)
 
 runTermAppWithQuitReduce ::
   (Typeable msg, Eq model) =>
@@ -423,13 +408,3 @@ applyEvent inp ev =
             MouseScrollDown -> positioned {inputScroll = V2 0 1}
             MouseScrollLeft -> positioned {inputScroll = V2 (-1) 0}
             MouseScrollRight -> positioned {inputScroll = V2 1 0}
-
-askTermDebug :: Ui :> es => Eff es TermDebugSnapshot
-askTermDebug = do
-  ctx <- askContext
-  inp <- askInput
-  mhost <- askHost @TermDebugHost
-  case mhost of
-    Nothing -> pure emptyTermDebug
-    Just (TermDebugHost ref) ->
-      uiIO (readTermDebug ref (inputWindowSize inp) (inputMousePos inp) ctx)

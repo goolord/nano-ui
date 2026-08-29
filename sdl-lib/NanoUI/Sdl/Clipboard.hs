@@ -7,7 +7,7 @@ module NanoUI.Sdl.Clipboard
 import Foreign.C.Types (CChar, CInt(CInt))
 import Foreign.C.String (CString, peekCString, withCString)
 import Foreign.Ptr (Ptr, nullPtr)
-import NanoUI (Context, withClipboard)
+import NanoUI.Testing (Context, withClipboard)
 
 foreign import ccall unsafe "SDL_SetClipboardText"
   c_SDL_SetClipboardText :: CString -> IO CInt

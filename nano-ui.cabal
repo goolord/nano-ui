@@ -55,6 +55,7 @@ library
     import:           warnings
     exposed-modules:
         NanoUI
+        NanoUI.Testing
     other-modules:
         NanoUI.Animatable
         NanoUI.Animation

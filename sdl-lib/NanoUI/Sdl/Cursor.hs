@@ -12,7 +12,8 @@ import Foreign.C.Types (CUInt (..))
 import Foreign.Marshal.Alloc (allocaBytes)
 import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (peekByteOff)
-import NanoUI (Context, Input (..), UiCursorKind (..), uiCursorKind)
+import NanoUI (Input (..))
+import NanoUI.Testing (Context, UiCursorKind (..), uiCursorKind)
 import qualified SDL3.Sys.Bindgen.Mouse as Mouse
 import SDL3.Sys.Mouse
   ( createSystemCursorSafe

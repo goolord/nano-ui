@@ -13,16 +13,9 @@ module NanoUI
   , lerpColor
   , contrastRatio
   , ImageId (..)
-  , registerImage
-  , registerImages
-  , atlasTextureId
-  , atlasSnapshot
   , rectContains
   , rectIntersect
   , v2Add
-  , Damage (..)
-  , damageIsEmpty
-  , takeDamage
   , -- Input
     Input (..)
   , Key (..)
@@ -69,15 +62,9 @@ module NanoUI
   , -- Monad
     NanoUI
   , Ui
-  , Eff
-  , type (:>)
-  , IOE
-  , runEff
   , runUi
   , runNanoUI
   , uiIO
-  , askContext
-  , askInput
   , emit
   , withKey
   , currentId
@@ -128,49 +115,19 @@ module NanoUI
   , sep
   , flex
   , image_
-  , -- Frame
-    runFrame
-  , runFrameEff
-  , runFrameReduce
-  , runFrameReduceEff
-  , needsRedraw
-  , needsRedrawIdle
-  , pointerDragActive
-  , collectRasterSpans
-  , textFieldActive
-  , floatingPanelActive
-  , debugPanelOpen
-  , collectTextSpans
-  , collectOverlayTextSpans
-  , widgetNodeCount
-  , pointerCursorWanted
-  , cursorKindIs
-  , uiCursorKind
-  , UiCursorKind (..)
-  , sliderTrackBounds
-  , -- Context
-    Context
-  , ctxTheme
-  , ctxFontMetrics
-  , setHost
-  , askHost
-  , Compact
+  , -- Animation
+    Ease (..)
+  , applyEase
+  , SpringParams (..)
+  , presetBouncy
+  , presetSmooth
+  , presetStiff
+  , -- Compact
+    Compact
   , compactHost
   , askCompact
-  , newContext
-  , withFontMetrics
-  , withMonoFontMetrics
-  , withMeasureText
-  , wrapMeasureCache
-  , withExternalText
-  , enableMeasureCache
-  , withTheme
-  , withIcons
-  , withHostProfile
-  , ctxHostProfile
-  , HostProfile (..)
-  , ctxIcons
-  , IconSet (..)
+  , -- Icons
+    IconSet (..)
   , Icons (..)
   , asciiIcons
   , glyphIcons
@@ -180,49 +137,6 @@ module NanoUI
   , checkboxMark
   , fontAwesomeIcon
   , loneFontAwesome
-  , terminalCharColumns
-  , terminalTextColumns
-  , terminalPaintColumns
-  , terminalTextPositions
-  , wideTrailChar
-  , textDisplayWidth
-  , markDirty
-  , clearDirty
-  , isDirty
-  , setWakeLoop
-  , getHotId
-  , getFocusId
-  , withClipboard
-  , textInputEditActive
-  , modalActive
-  , overlayConsumesQuit
-  , getPrevRect
-  , getStore
-  , getScrollOffset
-  , startAnimation
-  , startAnimationEase
-  , startAnimationEaseDelay
-  , startSpring
-  , setAnimationValue
-  , getAnimationValue
-  , applyEase
-  , Ease (..)
-  , SpringParams (..)
-  , presetBouncy
-  , presetSmooth
-  , presetStiff
-  , anyAnimating
-  , FrameMsg (..)
-  , decodeMessages
-  , reduceMessages
-  , reduceUpdates
-  , -- Draw
-    DrawData (..)
-  , DrawCmd (..)
-  , Layer (..)
-  , vertexSize
-  , indexSize
-  , backdropDimTextureId
   , -- Font
     FontMetrics (..)
   , monospaceMetrics
@@ -242,20 +156,43 @@ module NanoUI
   , scrollBarListExtra
   , scrollBarWidth
   , scrollBarWindowGutter
-  , -- ASCII
-    renderASCII
   ) where
 
-import NanoUI.Compact (Compact, askCompact, compactHost)
 import NanoUI.Animatable (Animatable (..))
-import NanoUI.Context (Context (..), Ease (..), FrameMsg (..), anyAnimating, applyEase, atlasSnapshot, atlasTextureId, clearDirty, ctxTheme, decodeMessages, enableMeasureCache, getAnimationValue, getFocusId, getHotId, getPrevRect, getScrollOffset, getStore, isDirty, markDirty, modalActive, newContext, overlayConsumesQuit, reduceMessages, reduceUpdates, registerImage, registerImages, setAnimationValue, setHost, setWakeLoop, startAnimation, startAnimationEase, startAnimationEaseDelay, startSpring, takeDamage, textInputEditActive, withClipboard, withExternalText, withFontMetrics, withHostProfile, withIcons, withMeasureText, withMonoFontMetrics, withTheme, wrapMeasureCache)
-import NanoUI.Spring (SpringParams (..), presetBouncy, presetSmooth, presetStiff)
-import NanoUI.Host (HostProfile (..))
-import NanoUI.Icons (IconSet (..), Icons (..), asciiIcons, checkboxMark, fontAwesomeIcon, glyphIcons, iconSetName, iconsFor, parseIconSet, loneFontAwesome, terminalCharColumns, terminalTextColumns, terminalPaintColumns, terminalTextPositions, wideTrailChar)
-import NanoUI.Draw (DrawCmd (..), DrawData (..), Layer (..), backdropDimTextureId, indexSize, vertexSize)
-import NanoUI.Font (FontMetrics (..), hasMonoFontMarker, headingFontMarker, labelContentInset, monoFontMarker, monospaceMetrics, mutedFontMarker, resolveLayoutGap, resolveLayoutPadding, scrollBarGutter, scrollBarListExtra, scrollBarPageExtra, scrollBarWidth, scrollBarWindowGutter, sliderTrackBounds, stripMonoFontMarker, stripWidgetMarkers, textDisplayWidth, widgetContentInset, widgetPadding)
-import Effectful (Eff, IOE, runEff, type (:>))
-import NanoUI.Frame (collectOverlayTextSpans, collectRasterSpans, collectTextSpans, cursorKindIs, debugPanelOpen, floatingPanelActive, needsRedraw, needsRedrawIdle, pointerDragActive, pointerCursorWanted, runFrame, runFrameEff, runFrameReduce, runFrameReduceEff, textFieldActive, uiCursorKind, widgetNodeCount, UiCursorKind (..))
+import NanoUI.Compact (Compact, askCompact, compactHost)
+import NanoUI.Context (Ease (..), applyEase)
+import NanoUI.Icons
+  ( IconSet (..)
+  , Icons (..)
+  , asciiIcons
+  , checkboxMark
+  , fontAwesomeIcon
+  , glyphIcons
+  , iconSetName
+  , iconsFor
+  , loneFontAwesome
+  , parseIconSet
+  )
+import NanoUI.Font
+  ( FontMetrics (..)
+  , hasMonoFontMarker
+  , headingFontMarker
+  , labelContentInset
+  , monoFontMarker
+  , monospaceMetrics
+  , mutedFontMarker
+  , resolveLayoutGap
+  , resolveLayoutPadding
+  , scrollBarGutter
+  , scrollBarListExtra
+  , scrollBarPageExtra
+  , scrollBarWidth
+  , scrollBarWindowGutter
+  , stripMonoFontMarker
+  , stripWidgetMarkers
+  , widgetContentInset
+  , widgetPadding
+  )
 import NanoUI.Id (WidgetId (..), hashWidgetId, widgetId)
 import NanoUI.Input
   ( Input (..)
@@ -265,8 +202,8 @@ import NanoUI.Input
   , inputInteracted
   , inputPointerHeld
   )
-import NanoUI.Monad (NanoUI, Ui, askContext, askInput, askHost, currentId, emit, runNanoUI, runUi, uiIO, withKey)
-import NanoUI.Render.ASCII (renderASCII)
+import NanoUI.Monad (NanoUI, Ui, currentId, emit, runNanoUI, runUi, uiIO, withKey)
+import NanoUI.Spring (SpringParams (..), presetBouncy, presetSmooth, presetStiff)
 import NanoUI.Style
   ( AlignX (..)
   , AlignY (..)
@@ -300,51 +237,68 @@ import NanoUI.Style
   , percent
   , aspect
   )
-import NanoUI.Types (Color (..), Damage (..), ImageId (..), Rect (..), Size (..), V2 (..), colorB, colorG, colorLuminance, colorR, colorRGBA, colorToWord32, contrastRatio, damageIsEmpty, lerpColor, rectContains, rectIntersect, v2Add)
+import NanoUI.Types
+  ( Color (..)
+  , ImageId (..)
+  , Rect (..)
+  , Size (..)
+  , V2 (..)
+  , colorB
+  , colorG
+  , colorLuminance
+  , colorR
+  , colorRGBA
+  , colorToWord32
+  , contrastRatio
+  , lerpColor
+  , rectContains
+  , rectIntersect
+  , v2Add
+  )
 import NanoUI.Widgets
   ( Response (..)
+  , animate
+  , animateEase
+  , animateEaseDelay
+  , animateTo
+  , animateToA
+  , animateToEase
+  , animateToEaseDelay
+  , animateToSpring
+  , animateToSpringA
+  , box
   , button
+  , card
   , checkbox
   , clickButton
   , column
+  , flex
+  , heading
+  , image
+  , image_
+  , kv
+  , kvBlock
   , label
   , labelEx
   , label_
+  , modal
+  , muted
   , onClick
   , panel
   , row
+  , scroll
+  , scrollArea
+  , select
+  , sep
   , separator
   , slider
   , sliderEx
   , spacer
   , textInput
+  , toolbar
   , tooltip
-  , scroll
-  , scrollArea
-  , select
-  , modal
-  , window
-  , image
-  , box
   , useFlag
   , useText
   , useToggle
-  , heading
-  , muted
-  , kv
-  , kvBlock
-  , card
-  , toolbar
-  , sep
-  , flex
-  , image_
-  , animate
-  , animateEase
-  , animateEaseDelay
-  , animateTo
-  , animateToEase
-  , animateToEaseDelay
-  , animateToSpring
-  , animateToA
-  , animateToSpringA
+  , window
   )

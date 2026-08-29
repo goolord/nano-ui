@@ -1,19 +1,18 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 module Main (main) where
 
 import Control.Monad (forM_, void, when)
 import NanoUI
-import NanoUI.Backend.Sdl (newSdlContext, runSdlAppWithQuit)
+import NanoUI.Backend.Sdl (SdlOptions (..), defaultSdlOptions, runSdlApp)
 import qualified Data.Text as T
 import Text.Printf (printf)
 
 main :: IO ()
-main = do
-  ctx <- newSdlContext
-  runSdlAppWithQuit
-    (withTheme ctx benchTheme)
-    (\inp -> KeyEscape `elem` inputKeys inp)
+main =
+  runSdlApp
+    defaultSdlOptions
+      { sdlAppTheme = Just benchTheme
+      , sdlAppShouldQuit = \inp -> KeyEscape `elem` inputKeys inp
+      }
     animUi
 
 -- Steenbeck flatbed: putty Formica, black 16mm path, cream frame, ruby rec.
@@ -59,10 +58,9 @@ benchTheme =
         , themeOverlayDim = colorRGBA 40 36 30 160
         }
 
-formica, film, rail, paper, ruby, lamp, punch :: Color
+formica, film, paper, ruby, lamp, punch :: Color
 formica = colorRGBA 184 176 162 255
 film = colorRGBA 18 16 14 255
-rail = colorRGBA 42 38 34 255
 paper = colorRGBA 244 236 220 255
 ruby = colorRGBA 154 42 36 255
 lamp = colorRGBA 255 196 92 255
@@ -142,17 +140,11 @@ settled :: Float -> Bool
 settled x = abs x < 0.001
 
 lockThrow :: Bool -> Float -> NanoUI Float
-lockThrow exposed throwSec = withKey ("cycleThrow" :: String) $ do
-  ctx <- askContext
-  wid <- currentId
-  uiIO $ do
-    cur <- getAnimationValue ctx wid
+lockThrow exposed throwSec =
+  withKey ("cycleThrow" :: String) $
     if exposed
-      then
-        if cur < 0.05
-          then setAnimationValue ctx wid throwSec >> pure throwSec
-          else pure cur
-      else setAnimationValue ctx wid 0 >> pure throwSec
+      then pure throwSec
+      else animateTo 0 0.35 >> pure throwSec
 
 transport :: Bool -> Bool -> Float -> Float -> Float -> Float -> NanoUI [Float]
 transport exposed rewinding throwSec time wash glow = do
@@ -230,19 +222,10 @@ trackRow name t shuttle =
     row (tight . gap 12 . alignMid . fillW $ defaultLayout) $ do
       void (labelEx (tight . fixedW 72 $ defaultLayout) name)
       column (tight . gap 0 . fillW $ defaultLayout) $ do
-        travel <- railTravel name
+        let travel = 394.0 :: Float
         row (tight . alignMid . fillW $ defaultLayout) $ do
           void (box (fixedWH 4 22 defaultLayout) film)
           void (spacer (Fixed (max 0 (t * travel))) Fit)
           void (box (fixedWH 16 16 defaultLayout) shuttle)
           flex
           void (box (fixedWH 4 22 defaultLayout) film)
-
-railTravel :: T.Text -> NanoUI Float
-railTravel name = withKey (name <> "-rail") $ do
-  ctx <- askContext
-  wid <- currentId
-  mrect <- uiIO (getPrevRect ctx wid)
-  void (box (fillW . fixedH 3 $ defaultLayout) rail)
-  let w = maybe 418 rectW mrect
-  pure (max 0 (w - 24))

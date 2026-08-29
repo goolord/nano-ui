@@ -5,7 +5,8 @@ module Main (main) where
 import Control.Monad (replicateM_, void)
 import GHC.IO.Encoding (setLocaleEncoding, utf8)
 import NanoUI
-import NanoUI.Backend.Sdl (SdlEnv (..), newSdlContext, sdlDrawFrame, syncDisplay, withSdlBench)
+import NanoUI.Testing (Context, runFrame)
+import NanoUI.Testing.Sdl (SdlEnv (..), newSdlContext, sdlDrawFrame, syncDisplay, withSdlBench)
 import System.IO (hSetEncoding, stderr, stdout)
 import Test.Tasty.Bench
 #if defined(mingw32_HOST_OS)

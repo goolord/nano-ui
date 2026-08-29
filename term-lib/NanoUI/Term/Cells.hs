@@ -35,15 +35,17 @@ import Foreign.ForeignPtr (ForeignPtr, withForeignPtr)
 import Foreign.Storable (peekByteOff)
 import NanoUI
   ( Color (..)
-  , DrawCmd (..)
-  , DrawData (..)
-  , Layer (..)
   , Rect (..)
-  , backdropDimTextureId
   , colorToWord32
   , fontAwesomeIcon
-  , indexSize
   , lerpColor
+  )
+import NanoUI.Testing
+  ( DrawCmd (..)
+  , DrawData (..)
+  , Layer (..)
+  , backdropDimTextureId
+  , indexSize
   , terminalTextColumns
   , terminalTextPositions
   , vertexSize

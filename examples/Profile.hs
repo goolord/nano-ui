@@ -2,6 +2,7 @@ module Main (main) where
 
 import Control.Monad (replicateM_, void)
 import NanoUI
+import NanoUI.Testing (newContext, runFrame)
 
 -- Enough frames for a stable time profile without an interactive window.
 iterations :: Int

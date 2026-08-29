@@ -1,6 +1,7 @@
 module Main (main) where
 
 import NanoUI
+import NanoUI.Testing (newContext, renderASCII, runFrame)
 
 main :: IO ()
 main = do

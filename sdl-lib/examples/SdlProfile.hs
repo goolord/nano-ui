@@ -1,8 +1,10 @@
 module Main (main) where
 
-import Control.Monad (replicateM_, unless, void)
+import Control.Monad (replicateM_, void)
 import NanoUI
-import NanoUI.Backend.Sdl (newSdlContext, sdlDrawFrame, syncDisplay, withSdlBench)
+import NanoUI.Backend.Sdl (RgbaImage (..))
+import NanoUI.Testing (Context, registerImage)
+import NanoUI.Testing.Sdl (newSdlContext, sdlDrawFrame, syncDisplay, withSdlBench)
 import SdlDemoUi (demoImages, demoUi)
 
 -- Enough timed frames for a stable SDL profile without an interactive loop.
@@ -21,11 +23,25 @@ profileInput =
 main :: IO ()
 main = do
   ctx0 <- newSdlContext
-  ok <- registerImages ctx0 demoImages
-  unless ok $ fail "registerImage failed"
-  withSdlBench ctx0 $ \ctx sdlEnv -> do
-    (ctx', inp) <- syncDisplay ctx sdlEnv profileInput
-    -- One warmup frame, then timed iterations.
-    void (sdlDrawFrame ctx' demoUi sdlEnv inp False)
-    replicateM_ iterations (void (sdlDrawFrame ctx' demoUi sdlEnv inp False))
+  ok <- registerDemoImages ctx0 demoImages
+  if not ok
+    then fail "registerImage failed"
+    else
+      withSdlBench ctx0 $ \ctx sdlEnv -> do
+        (ctx', inp) <- syncDisplay ctx sdlEnv profileInput
+        void (sdlDrawFrame ctx' demoUi sdlEnv inp False)
+        replicateM_ iterations (void (sdlDrawFrame ctx' demoUi sdlEnv inp False))
   putStrLn ("profiled " ++ show iterations ++ " SDL demo frames (plus 1 warmup)")
+
+registerDemoImages :: Context -> [RgbaImage] -> IO Bool
+registerDemoImages ctx =
+  fmap and
+    . mapM
+      ( \img ->
+          registerImage
+            ctx
+            (rgbaImageId img)
+            (rgbaImageWidth img)
+            (rgbaImageHeight img)
+            (rgbaImagePixels img)
+      )
