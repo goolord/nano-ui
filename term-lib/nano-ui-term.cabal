@@ -61,6 +61,7 @@ library
         NanoUI.Backend.Term
         NanoUI.Testing.Term
     other-modules:
+        NanoUI.Term.Session
         NanoUI.Term.Debug
         NanoUI.Term.Icons
         NanoUI.Term.Palette

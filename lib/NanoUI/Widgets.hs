@@ -115,7 +115,7 @@ import NanoUI.Style
   )
 import NanoUI.Store (WidgetStore (..))
 import NanoUI.Types (Color (..), ImageId (..), Rect (..), V2 (..), colorToWord32, rectContains, rectX, rectW, v2X)
-import NanoUI.Widgets.Internal
+import NanoUI.Widgets.Node
   ( Response (..)
   , addWidget
   , addWidgetResp

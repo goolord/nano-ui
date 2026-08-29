@@ -5,10 +5,12 @@ module SdlDemoUi
   , demoUi
   ) where
 
+import Control.Monad (when)
 import NanoUI
-import NanoUI.Backend.Sdl (RgbaImage (..))
+import NanoUI.Backend.Sdl (RgbaImage (..), SdlDebugSnapshot (..), askSdlDebug)
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
+import Text.Printf (printf)
 
 demoImages :: [RgbaImage]
 demoImages =
@@ -21,6 +23,7 @@ demoUi :: NanoUI ()
 demoUi = do
   (click, setClick) <- useText ""
   (aboutOpen, setAbout) <- useFlag False
+  (debugOpen, setDebug) <- useFlag False
   scroll (tight (grow defaultLayout)) $
     column (padAll 8 . gap 8 . fillW $ defaultLayout) $ do
       panel (padXY 14 10 . gap 8 . fillW $ defaultLayout) $
@@ -32,6 +35,7 @@ demoUi = do
           clickButton "OK" (setClick "OK")
           clickButton "Cancel" (setClick "Cancel")
           clickButton "About" (setAbout True)
+          clickButton "Debug" (setDebug (not debugOpen))
       row (tight . gap 8 . wrap . fillW $ defaultLayout) $ do
         card $ do
           heading "Controls"
@@ -60,6 +64,10 @@ demoUi = do
           sep
           muted "Click widgets or type in Name."
           muted "Esc closes About, then quits."
+  when debugOpen $ do
+    snap <- askSdlDebug
+    (win, _) <- window True "Debug" (debugBody snap)
+    onClick win (setDebug False)
   (aboutResp, _) <-
     modal aboutOpen "About" $ do
       heading "nano-ui"
@@ -77,6 +85,72 @@ onOff False = "off"
 orDash :: String -> T.Text
 orDash "" = "-"
 orDash s = T.pack s
+
+debugBody :: SdlDebugSnapshot -> NanoUI ()
+debugBody s = do
+  debugSection "Frame" (frameRows s)
+  sep
+  debugSection "Draw" (drawRows s)
+  sep
+  debugSection "Display" (displayRows s)
+  sep
+  debugSection "Runtime" (rtsRows s)
+
+debugSection :: T.Text -> [(String, String)] -> NanoUI ()
+debugSection title rows = do
+  heading title
+  mapM_ (\(k, v) -> kv (T.pack k) (monoFontMarker <> T.pack v)) rows
+
+clipField :: Int -> String -> String
+clipField n s =
+  if length s > n
+    then take (max 0 (n - 3)) s ++ "..."
+    else s
+
+frameRows :: SdlDebugSnapshot -> [(String, String)]
+frameRows s =
+  [ ("present", printf "%.1f fps" (dbgPresentFps s))
+  , ("loop", printf "%.1f fps" (dbgLoopFps s))
+  , ("frame", printf "%.1f ms" (dbgFrameMs s))
+  , ("ui", printf "%.1f ms" (dbgUiMs s))
+  , ("draws", printf "%d" (dbgPresents s))
+  , ("skips", printf "%d" (dbgSkips s))
+  ]
+
+drawRows :: SdlDebugSnapshot -> [(String, String)]
+drawRows s =
+  [ ("verts", printf "%d" (dbgVerts s))
+  , ("indices", printf "%d" (dbgIndices s))
+  , ("cmds", printf "%d" (dbgCmds s))
+  ]
+
+displayRows :: SdlDebugSnapshot -> [(String, String)]
+displayRows s =
+  [ ("window", printf "%.0fx%.0f" (dbgWinW s) (dbgWinH s))
+  , ("scale", printf "%.2f" (dbgScale s))
+  , ("mouse", printf "%.0f, %.0f" (dbgMouseX s) (dbgMouseY s))
+  , ("renderer", clipField 36 (dbgRenderer s <> "  vsync on"))
+  , ("font", clipField 36 (dbgFontPath s))
+  ]
+
+rtsRows :: SdlDebugSnapshot -> [(String, String)]
+rtsRows s
+  | not (dbgRtsOn s) =
+      [ ("rts", "stats off (need +RTS -T)")
+      , ("haskell", printf "%d cap / %d cpu" (dbgCaps s) (dbgCpus s))
+      ]
+  | otherwise =
+      [ ("haskell", printf "%d cap / %d cpu" (dbgCaps s) (dbgCpus s))
+      , ("gc total", printf "%d" (dbgGcs s))
+      , ("gc major", printf "%d" (dbgMajorGcs s))
+      , ("last gen", printf "%d" (dbgLastGcGen s))
+      , ("last gc", printf "%.2f ms" (dbgLastGcMs s))
+      , ("heap live", printf "%.1f MiB" (dbgLiveMb s))
+      , ("heap alloc", printf "%.1f MiB" (dbgAllocMb s))
+      , ("copied", printf "%.1f MiB" (dbgCopiedMb s))
+      , ("rss max", printf "%.1f MiB" (dbgMaxMemMb s))
+      , ("gc time", printf "%.1f%%" (dbgGcPct s))
+      ]
 
 thumb :: ImageId -> T.Text -> NanoUI ()
 thumb iid caption =

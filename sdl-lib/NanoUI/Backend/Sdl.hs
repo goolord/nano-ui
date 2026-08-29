@@ -3,7 +3,9 @@
 -- | SDL3 backend: event loop, rendering, and application runners.
 module NanoUI.Backend.Sdl
   ( RgbaImage (..)
+  , SdlDebugSnapshot (..)
   , SdlOptions (..)
+  , askSdlDebug
   , defaultSdlOptions
   , runSdlApp
   , runSdlAppReduce
@@ -21,7 +23,8 @@ import NanoUI
   , Theme
   , Ui
   )
-import NanoUI.Sdl.Runner (drawEff, drawReduceEff, newSdlContext, runSdlSession)
+import NanoUI.Sdl.Runner (askSdlDebug, drawEff, drawReduceEff, newSdlContext, runSdlSession)
+import NanoUI.Sdl.Debug (SdlDebugSnapshot (..))
 import NanoUI.Testing (Context, registerImage, runEff, withTheme)
 
 -- | Initial RGBA asset uploaded before the first frame.
