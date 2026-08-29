@@ -19,6 +19,7 @@ import NanoUI.Context
   , isDirty
   , markDirty
   )
+import NanoUI.Context.Modal (modalDamageFlip)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input
   ( Input (..)
@@ -114,8 +115,7 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
   newStore <- getStore ctx
   newFloatingRects <- floatingPanelRects ctx
   newRects <- readIORef (ctxPrevRects ctx)
-  wasModal <- readIORef (ctxModalWasActive ctx)
-  nowModal <- readIORef (ctxModalActive ctx)
+  modalFlip <- modalDamageFlip ctx
   dirtyNow <- isDirty ctx
   liveAnims <- IM.filter animInProgress <$> readIORef (ctxAnimations ctx)
   settled <- readIORef (ctxAnimSettled ctx)
@@ -125,7 +125,6 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
       forM (IM.keys liveAnims) $ \k ->
         isNothing <$> getPrevRectByKey ctx k
   let storePaintChanged = paintStore oldStore /= paintStore newStore
-      modalFlip = wasModal /= nowModal
       floatingChanged = oldFloatingRects /= newFloatingRects
       windowLive =
         not (IM.null (storeWindow newStore))
@@ -212,6 +211,7 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
   writeIORef (ctxDamage ctx) dmg
   writeIORef (ctxLastWindowSize ctx) (Size winW winH)
   writeIORef (ctxPrevFloatingRects ctx) newFloatingRects
+  when modalFlip (markDirty ctx)
   when (floatingChanged && not (IM.null oldFloatingRects && not (IM.null newFloatingRects))) $
     markDirty ctx
 
