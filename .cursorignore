@@ -1,0 +1,37 @@
+# Scratch design docs (large; gitignored)
+scratch/
+
+# Cabal / GHC build outputs
+dist/
+dist-*/
+dist-newstyle/
+.stack-work/
+cabal.project.local
+cabal.project.local~
+*.hi
+*.hi-boot
+*.hie
+*.chi
+*.chs.h
+*.dyn_hi
+*.dyn_o
+*.o
+*.prof
+*.aux
+*.hp
+*.eventlog
+.hpc
+.HTF/
+.ghc.environment.*
+cabal.sandbox.config
+.cabal-sandbox/
+
+# Nix outputs
+result
+result-*
+
+# Copied runtime DLLs (Windows SDL)
+*.dll
+
+# Generated cabal plan cache
+**/cache/plan.json

@@ -100,35 +100,31 @@ animateToSpringA params target = do
       (zip [0 ..] (toComponents target))
   pure (fromComponents comps)
 
-useFlag :: (HasCallStack, Ui :> es) => Bool -> Eff es (Bool, Bool -> Eff es ())
-useFlag initial = do
+useStoreField ::
+  (HasCallStack, Eq a, Ui :> es) =>
+  (WidgetStore -> IM.IntMap a) ->
+  (WidgetStore -> Int -> a -> WidgetStore) ->
+  a ->
+  Eff es (a, a -> Eff es ())
+useStoreField field update initial = do
   wid <- currentId
   ctx <- askContext
   store <- uiIO (getStore ctx)
   let key = intKey wid
-      cur = IM.findWithDefault initial key (storeFlag store)
+      cur = IM.findWithDefault initial key (field store)
       set v = uiIO $ do
         st <- getStore ctx
-        let prev = IM.findWithDefault initial key (storeFlag st)
+        let prev = IM.findWithDefault initial key (field st)
         when (prev /= v) $ do
-          setStore ctx (st {storeFlag = IM.insert key v (storeFlag st)})
+          setStore ctx (update st key v)
           markDirty ctx
   pure (cur, set)
 
+useFlag :: (HasCallStack, Ui :> es) => Bool -> Eff es (Bool, Bool -> Eff es ())
+useFlag initial = useStoreField storeFlag (\st k v -> st {storeFlag = IM.insert k v (storeFlag st)}) initial
+
 useText :: (HasCallStack, Ui :> es) => String -> Eff es (String, String -> Eff es ())
-useText initial = do
-  wid <- currentId
-  ctx <- askContext
-  store <- uiIO (getStore ctx)
-  let key = intKey wid
-      cur = IM.findWithDefault initial key (storeNote store)
-      set v = uiIO $ do
-        st <- getStore ctx
-        let prev = IM.findWithDefault initial key (storeNote st)
-        when (prev /= v) $ do
-          setStore ctx (st {storeNote = IM.insert key v (storeNote st)})
-          markDirty ctx
-  pure (cur, set)
+useText initial = useStoreField storeNote (\st k v -> st {storeNote = IM.insert k v (storeNote st)}) initial
 
 useToggle :: (HasCallStack, Ui :> es) => Bool -> Eff es (Bool, Eff es ())
 useToggle initial = do

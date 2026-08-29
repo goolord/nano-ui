@@ -23,6 +23,7 @@ import NanoUI.Layout.Arena
   ( DirTag (..)
   , NodeType (..)
   , addNode
+  , addNodeFromLayout
   , getDirection
   , setWidgetId
   )
@@ -158,24 +159,7 @@ scrollArea layout child = do
   stack <- uiIO $ do
     stack <- readIORef (ctxContainerStack ctx)
     let parent = parentIdx stack
-    idx <-
-      addNode
-        (ctxNodeArena ctx)
-        NodeScrollContainer
-        parent
-        (layoutDirection layout)
-        (layoutWidth layout)
-        (layoutHeight layout)
-        (layoutPadding layout)
-        (layoutGap layout)
-        (layoutMinW layout)
-        (layoutMinH layout)
-        (layoutMaxW layout)
-        (layoutMaxH layout)
-        0
-        (layoutAlignX layout)
-        (layoutAlignY layout)
-        (layoutWrap layout)
+    idx <- addNodeFromLayout (ctxNodeArena ctx) NodeScrollContainer parent layout
     setWidgetId (ctxNodeArena ctx) idx wid
     writeIORef (ctxContainerStack ctx) (idx : stack)
     pure stack

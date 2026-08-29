@@ -127,6 +127,7 @@ import NanoUI.Context.Store
 import NanoUI.Context.Config
   ( clearMeasureCache
   , enableMeasureCache
+  , withClipboard
   , withExternalText
   , withFontMetrics
   , withHostProfile
@@ -174,7 +175,5 @@ import NanoUI.Context.Modal
   , textInputEditActive
   )
 import NanoUI.Context.Host (askHostIO, setHost)
-import NanoUI.Context.Focus (getFocusId, getHotId)
+import NanoUI.Context.Focus (getFocusId, getFocusables, getHotId, registerFocusable)
 import NanoUI.Context.Messages (drainMessages, pushMessage)
-import NanoUI.Context.Focusables (getFocusables, registerFocusable)
-import NanoUI.Context.Clipboard (withClipboard)

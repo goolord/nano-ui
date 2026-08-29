@@ -8,6 +8,7 @@ module NanoUI.Context.Config
   , withTheme
   , withIcons
   , withHostProfile
+  , withClipboard
   , enableMeasureCache
   ) where
 
@@ -97,3 +98,8 @@ enableMeasureCache :: Context -> IO Context
 enableMeasureCache ctx = do
   cacheRef <- newIORef Map.empty
   pure (ctx {ctxMeasureCache = Just cacheRef})
+
+{-# INLINE withClipboard #-}
+withClipboard :: Context -> IO (Maybe String) -> (String -> IO Bool) -> Context
+withClipboard ctx get set =
+  ctx {ctxClipboardGet = get, ctxClipboardSet = set}
