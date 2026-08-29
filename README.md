@@ -153,8 +153,20 @@ Workspace packages: `nano-ui` (core DSL + `NanoUI.Testing`), `nano-ui-term` (`te
 |--------|------|
 | `NanoUI` | App-facing DSL: widgets, layout, style, animation, input types |
 | `NanoUI.Testing` | Deterministic frames, context setup, ASCII render inspection |
+| `NanoUI.Testing.Term` | Terminal test helpers (palette, Ansi, Cells, Event, Vt) |
+| `NanoUI.Testing.Sdl` | SDL bench/test helpers (`newSdlContext`, `sdlDrawFrame`, `withSdlBench`) |
 | `NanoUI.Backend.Term` | `TermOptions`, `runTermApp`, `runTermAppReduce` |
 | `NanoUI.Backend.Sdl` | `SdlOptions`, `RgbaImage`, `runSdlApp`, `runSdlAppReduce` |
+
+Internal ownership (not exported from packages):
+
+| Area | Modules |
+|------|---------|
+| Context state | `NanoUI.Context.*`, `NanoUI.Context.Types` |
+| Frame loop | `NanoUI.Frame.{Hit,Focus,Clip,Chrome,CursorKind,...}` |
+| Widget build | `NanoUI.Widgets.{Node,Chrome,Layout,...}` |
+| Term session | `NanoUI.Term.Session` (loop inside `NanoUI.Backend.Term`) |
+| SDL session | `NanoUI.Sdl.{Context,Session,Runner}` (draw inside `Runner`) |
 
 ## License
 
