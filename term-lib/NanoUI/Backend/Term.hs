@@ -5,7 +5,9 @@
 -- notcurses OSC/DA probes echo as garbage in conhost/PowerShell
 -- (notcurses #2914). The Win32 driver writes ANSI through the console API.
 module NanoUI.Backend.Term
-  ( TermOptions (..)
+  ( TermDebugSnapshot (..)
+  , TermOptions (..)
+  , askTermDebug
   , defaultTermOptions
   , runTermApp
   , runTermAppReduce
@@ -19,15 +21,27 @@ import NanoUI
   , NanoUI
   , Theme
   , IconSet
+  , inputMousePos
+  , inputWindowSize
   )
 import NanoUI.Testing
   ( Context
   , Ui
+  , askContext
+  , askHost
+  , askInput
   , runEff
   , runFrameEff
   , runFrameReduceEff
+  , uiIO
   , withIcons
   , withTheme
+  )
+import NanoUI.Term.Debug
+  ( TermDebugHost (..)
+  , TermDebugSnapshot (..)
+  , emptyTermDebug
+  , readTermDebug
   )
 import NanoUI.Term.Palette (newTerminalContext)
 import NanoUI.Term.Session (withTermSession)
@@ -109,3 +123,13 @@ runTermAppWithQuitReduceEff unlift update ctx model0 shouldQuit view = do
     (_, m', _, d, _) <- runFrameReduceEff unlift update c i m view
     writeIORef modelRef m'
     pure d
+
+askTermDebug :: Ui :> es => Eff es TermDebugSnapshot
+askTermDebug = do
+  ctx <- askContext
+  inp <- askInput
+  mhost <- askHost @TermDebugHost
+  case mhost of
+    Nothing -> pure emptyTermDebug
+    Just (TermDebugHost ref) ->
+      uiIO (readTermDebug ref (inputWindowSize inp) (inputMousePos inp) ctx)
