@@ -70,6 +70,12 @@ library
         NanoUI.Context.Store
         NanoUI.Context.Config
         NanoUI.Context.Dirty
+        NanoUI.Context.Host
+        NanoUI.Context.Focus
+        NanoUI.Context.Messages
+        NanoUI.Context.Focusables
+        NanoUI.Context.Clipboard
+        NanoUI.Context.New
         NanoUI.Damage
         NanoUI.Draw
         NanoUI.Ease
