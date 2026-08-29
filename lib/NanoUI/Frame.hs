@@ -4240,10 +4240,19 @@ writeDamage ctx inp wasDirty oldSize oldStore oldHot oldActive oldFocus oldHotR 
       windowLive =
         not (IM.null (storeWindow newStore))
           || not (IM.null (storeWindowSize newStore))
-      layoutShifted =
+      moved = rectDeltas oldRects newRects
+      animLive = not (IM.null liveAnims) || settled
+      keysAppeared =
         not (IM.null oldRects)
-          && oldRects /= newRects
-          && (not (IM.null liveAnims) || settled)
+          && not (IM.null (IM.difference newRects oldRects))
+      -- First populate, or widgets appearing, or a settle with no live tween:
+      -- a clip AABB would clear panel gaps to the window color.
+      layoutSettle =
+        not (IM.null oldRects)
+          && not (null moved)
+          && not animLive
+      -- Call-site tween with no node and no layout move (color/text only).
+      paintOrphan = orphanAnim && null moved && animLive
       full =
         wasDirty
           || dirtyNow
@@ -4254,8 +4263,9 @@ writeDamage ctx inp wasDirty oldSize oldStore oldHot oldActive oldFocus oldHotR 
           || modalFlip
           || floatingChanged
           || windowLive
-          || orphanAnim
-          || layoutShifted
+          || paintOrphan
+          || keysAppeared
+          || layoutSettle
   dmg <-
     if full
       then pure DamageFull
@@ -4269,6 +4279,7 @@ writeDamage ctx inp wasDirty oldSize oldStore oldHot oldActive oldFocus oldHotR 
               | wid == oldActive = oldActiveR
               | wid == oldFocus = oldFocusR
               | otherwise = Nothing
+            clipKeys = animKeys ++ IM.keys liveAnims
         rs <-
           fmap concat $
             forM ids $ \wid ->
@@ -4279,14 +4290,16 @@ writeDamage ctx inp wasDirty oldSize oldStore oldHot oldActive oldFocus oldHotR 
                   pure (catMaybes [oldOf wid, newR])
         animRs <-
           fmap concat $
-            forM animKeys $ \k ->
+            forM clipKeys $ \k ->
               if k == 0
                 then pure []
                 else pure (catMaybes [IM.lookup k oldRects, IM.lookup k newRects])
-        let base =
+        let layoutRs = if animLive && orphanAnim then moved else []
+            base =
               unionRects
                 ( rs
                     ++ animRs
+                    ++ layoutRs
                     ++ floatingRectDamage oldFloatingRects newFloatingRects
                 )
             clip =
@@ -4310,3 +4323,17 @@ paintStore s = s {storeWindow = IM.empty, storeWindowSize = IM.empty}
 unionRects :: [Rect] -> Rect
 unionRects [] = Rect 0 0 0 0
 unionRects (r : rs) = foldl' rectUnion r rs
+
+rectDeltas :: IM.IntMap Rect -> IM.IntMap Rect -> [Rect]
+rectDeltas old new =
+  filter nonzeroRect $
+    IM.elems (IM.difference old new)
+      ++ IM.elems (IM.difference new old)
+      ++ IM.elems (IM.mapMaybe id (IM.intersectionWith delta old new))
+  where
+    delta a b
+      | a == b = Nothing
+      | otherwise = Just (rectUnion a b)
+
+nonzeroRect :: Rect -> Bool
+nonzeroRect r = rectW r > 0 && rectH r > 0

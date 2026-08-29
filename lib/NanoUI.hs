@@ -115,6 +115,10 @@ module NanoUI
   , animateTo
   , animateToEase
   , animateToEaseDelay
+  , animateToSpring
+  , animateToA
+  , animateToSpringA
+  , Animatable (..)
   , heading
   , muted
   , kv
@@ -198,10 +202,15 @@ module NanoUI
   , startAnimation
   , startAnimationEase
   , startAnimationEaseDelay
+  , startSpring
   , setAnimationValue
   , getAnimationValue
   , applyEase
   , Ease (..)
+  , SpringParams (..)
+  , presetBouncy
+  , presetSmooth
+  , presetStiff
   , anyAnimating
   , FrameMsg (..)
   , decodeMessages
@@ -238,7 +247,9 @@ module NanoUI
   ) where
 
 import NanoUI.Compact (Compact, askCompact, compactHost)
-import NanoUI.Context (Context (..), Ease (..), FrameMsg (..), anyAnimating, applyEase, atlasSnapshot, atlasTextureId, clearDirty, ctxTheme, decodeMessages, enableMeasureCache, getAnimationValue, getFocusId, getHotId, getPrevRect, getScrollOffset, getStore, isDirty, markDirty, modalActive, newContext, overlayConsumesQuit, reduceMessages, reduceUpdates, registerImage, registerImages, setAnimationValue, setHost, setWakeLoop, startAnimation, startAnimationEase, startAnimationEaseDelay, takeDamage, textInputEditActive, withClipboard, withExternalText, withFontMetrics, withHostProfile, withIcons, withMeasureText, withMonoFontMetrics, withTheme, wrapMeasureCache)
+import NanoUI.Animatable (Animatable (..))
+import NanoUI.Context (Context (..), Ease (..), FrameMsg (..), anyAnimating, applyEase, atlasSnapshot, atlasTextureId, clearDirty, ctxTheme, decodeMessages, enableMeasureCache, getAnimationValue, getFocusId, getHotId, getPrevRect, getScrollOffset, getStore, isDirty, markDirty, modalActive, newContext, overlayConsumesQuit, reduceMessages, reduceUpdates, registerImage, registerImages, setAnimationValue, setHost, setWakeLoop, startAnimation, startAnimationEase, startAnimationEaseDelay, startSpring, takeDamage, textInputEditActive, withClipboard, withExternalText, withFontMetrics, withHostProfile, withIcons, withMeasureText, withMonoFontMetrics, withTheme, wrapMeasureCache)
+import NanoUI.Spring (SpringParams (..), presetBouncy, presetSmooth, presetStiff)
 import NanoUI.Host (HostProfile (..))
 import NanoUI.Icons (IconSet (..), Icons (..), asciiIcons, checkboxMark, fontAwesomeIcon, glyphIcons, iconSetName, iconsFor, parseIconSet, loneFontAwesome, terminalCharColumns, terminalTextColumns, terminalPaintColumns, terminalTextPositions, wideTrailChar)
 import NanoUI.Draw (DrawCmd (..), DrawData (..), Layer (..), backdropDimTextureId, indexSize, vertexSize)
@@ -333,4 +344,7 @@ import NanoUI.Widgets
   , animateTo
   , animateToEase
   , animateToEaseDelay
+  , animateToSpring
+  , animateToA
+  , animateToSpringA
   )

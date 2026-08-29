@@ -249,6 +249,7 @@ runSdlSession ctx setup shouldQuit drawFn =
     startupDone <- newIORef False
     startupCatchup <- newIORef False
     startupGrace <- newIORef (2 :: Int)
+    startupFull <- newIORef (2 :: Int)
     let onResize = do
           void $
             tryWithDrawingLock drawing $ do
@@ -300,7 +301,7 @@ runSdlSession ctx setup shouldQuit drawFn =
     writeIORef prev synced1
     now <- getMonotonicTime
     bracket (installResizeWatch onResize) id $ \_ ->
-      loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace shouldQuit synced1 [] now
+      loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace startupFull shouldQuit synced1 [] now
 
 loop ::
   IORef Context ->
@@ -311,12 +312,13 @@ loop ::
   IORef Bool ->
   IORef Bool ->
   IORef Int ->
+  IORef Int ->
   (Input -> Bool) ->
   Input ->
   [SdlEvent] ->
   Double ->
   IO ()
-loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace shouldQuit inp queued lastT = do
+loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace startupFull shouldQuit inp queued lastT = do
   ctx <- readIORef ctxRef
   debugOpen <- debugPanelOpen ctx
   wantDebug <- takeDebugLive (sdlDebug env) debugOpen
@@ -329,7 +331,12 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace shou
           else do
             animating <- anyAnimating ctx
             editing <- textFieldActive ctx
-            if animating || wantDebug || editing || debugOpen
+            wasAnimWait <- readIORef wasAnimating
+            nFullWait <- readIORef startupFull
+            -- Looping animateEase settles, then the next UI call restarts.
+            -- Keep a timeout frame after settle or waitEvent blocks until input.
+            -- Startup Full presents must not sit in waitEvent before they run.
+            if animating || wasAnimWait || nFullWait > 0 || wantDebug || editing || debugOpen
               then waitEventTimeout animateTimeout
               else waitEvent
       else pure queued
@@ -360,10 +367,11 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace shou
           anim <- anyAnimating ctx'
           editing <- textFieldActive ctx'
           grace <- readIORef startupGrace
+          nFull <- readIORef startupFull
           let sizeChanged = inputWindowSize prevInp /= inputWindowSize inpSynced
               interacted = inputInteracted prevInp inpSynced
               graceAllow =
-                grace <= 0 || sizeChanged || interacted || anim || editing || dirtyNow || pendingDirty || need
+                grace <= 0 || sizeChanged || interacted || anim || editing || dirtyNow || pendingDirty || need || nFull > 0
               forceFinal = wasAnim && not anim
               shouldDraw =
                 graceAllow
@@ -375,6 +383,7 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace shou
                          || debugOpen
                          || wantDebug
                          || editing
+                         || nFull > 0
                      )
           when (grace > 0) $ writeIORef startupGrace (grace - 1)
           writeIORef wasAnimating anim
@@ -383,7 +392,8 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace shou
               then do
                 ms <-
                   tryWithDrawingLock drawing $ do
-                    (_, s) <- drawFn ctx' env inpSynced (debugOpen || wantDebug)
+                    (_, s) <- drawFn ctx' env inpSynced (debugOpen || wantDebug || nFull > 0)
+                    when (nFull > 0) $ writeIORef startupFull (nFull - 1)
                     writeIORef pendingRedraw False
                     writeIORef prev s
                     pure s
@@ -405,6 +415,7 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace shou
                 wasAnimating
                 drawing
                 startupGrace
+                startupFull
                 shouldQuit
                 synced
                 (if null rest then [] else rest)

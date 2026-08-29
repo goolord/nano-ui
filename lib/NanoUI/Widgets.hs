@@ -42,6 +42,9 @@ module NanoUI.Widgets
   , animateTo
   , animateToEase
   , animateToEaseDelay
+  , animateToSpring
+  , animateToA
+  , animateToSpringA
   , sliderText
   , sliderDisplayText
   , sliderLabelText
@@ -86,12 +89,13 @@ import NanoUI.WidgetText
   , selectParseOptions
   , selectLabelText
   )
+import NanoUI.Animatable (Animatable (..))
 import NanoUI.Context
-  ( Animation (..)
-  , Context (..)
+  ( Context (..)
   , Ease (..)
   , WidgetStore (..)
   , approxEq
+  , easeSameSpec
   , getAnimationValue
   , getPrevRect
   , getStore
@@ -106,7 +110,9 @@ import NanoUI.Context
   , markEscapeConsumed
   , pointerBlockedByModal
   , startAnimationEaseDelay
+  , startSpring
   )
+import NanoUI.Spring (SpringParams)
 import NanoUI.Icons (Icons (..), checkboxMark)
 import NanoUI.Id (WidgetId (..))
 import NanoUI.Input (Input (..), Key (..), Modifiers (..), inputChars, inputKeys, inputModifiers)
@@ -275,15 +281,10 @@ animateToEaseDelay ease target dur delay = do
   uiIO $ do
     cur <- getAnimationValue ctx wid
     anims <- readIORef (ctxAnimations ctx)
-    let key = intKey wid
-        manim = IM.lookup key anims
-        sameSpec a =
-          animEase a == ease
-            && approxEq (animDuration a) dur
-            && approxEq delay (animDelayReq a)
+    let manim = IM.lookup (intKey wid) anims
     case manim of
       Just a
-        | approxEq (animEnd a) target && sameSpec a -> pure cur
+        | easeSameSpec a ease dur delay target -> pure cur
         | otherwise -> do
             startAnimationEaseDelay ctx wid cur target dur ease delay
             getAnimationValue ctx wid
@@ -292,6 +293,33 @@ animateToEaseDelay ease target dur delay = do
         | otherwise -> do
             startAnimationEaseDelay ctx wid cur target dur ease delay
             getAnimationValue ctx wid
+
+-- Spring toward `to` and hold. Retarget keeps velocity.
+animateToSpring :: (HasCallStack, Ui :> es) => SpringParams -> Float -> Eff es Float
+animateToSpring params target = do
+  wid <- currentId
+  ctx <- askContext
+  uiIO $ do
+    startSpring ctx wid params target
+    getAnimationValue ctx wid
+
+-- Ease each component of an Animatable under a derived key.
+animateToA :: (HasCallStack, Animatable a, Ui :> es) => Ease -> Float -> a -> Eff es a
+animateToA ease dur target = do
+  comps <-
+    mapM
+      (\(i, c) -> withKey (i :: Int) (animateToEase ease c dur))
+      (zip [0 ..] (toComponents target))
+  pure (fromComponents comps)
+
+-- Spring each component of an Animatable under a derived key.
+animateToSpringA :: (HasCallStack, Animatable a, Ui :> es) => SpringParams -> a -> Eff es a
+animateToSpringA params target = do
+  comps <-
+    mapM
+      (\(i, c) -> withKey (i :: Int) (animateToSpring params c))
+      (zip [0 ..] (toComponents target))
+  pure (fromComponents comps)
 
 useFlag :: (HasCallStack, Ui :> es) => Bool -> Eff es (Bool, Bool -> Eff es ())
 useFlag initial = do
