@@ -17,6 +17,14 @@ enum {
 #define NANO_UI_PI 3.14159265358979323846f
 #endif
 
+typedef struct {
+    float x;
+    float y;
+    float u;
+    float v;
+    uint32_t rgba;
+} NanoUiVertex;
+
 bool nano_ui_fill_rounded_rect(
     SDL_Renderer *renderer,
     uint8_t r,
@@ -513,20 +521,6 @@ void nano_ui_batch_stroke_rounded_rect(
     nano_ui_stroke_rounded_rect(batch->renderer, r, g, b, a, x, y, w, h, radius, bw);
 }
 
-static bool load_vtx(const uint8_t *verts, int vert_count, uint32_t idx, float *x, float *y, float *u, float *v, uint32_t *rgba)
-{
-    if ((int)idx < 0 || (int)idx >= vert_count) {
-        return false;
-    }
-    const uint8_t *p = verts + (size_t)idx * (size_t)NANO_UI_VTX_STRIDE;
-    memcpy(x, p, 4);
-    memcpy(y, p + 4, 4);
-    memcpy(u, p + 8, 4);
-    memcpy(v, p + 12, 4);
-    memcpy(rgba, p + 16, 4);
-    return true;
-}
-
 static bool hits_damage(
     int has_damage,
     float dx,
@@ -583,21 +577,28 @@ void nano_ui_batch_draw_range(
     if (end > index_count) {
         end = index_count;
     }
+    const NanoUiVertex *vtx = (const NanoUiVertex *)verts;
     const uint32_t *idx = (const uint32_t *)indices;
     for (int i = index_start; i + 2 < end; i += 3) {
-        float x0, y0, u0, v0, x1, y1, u1, v1, x2, y2, u2, v2;
-        uint32_t rgba0, rgba1, rgba2;
-        if (!load_vtx(verts, vert_count, idx[i], &x0, &y0, &u0, &v0, &rgba0)
-            || !load_vtx(verts, vert_count, idx[i + 1], &x1, &y1, &u1, &v1, &rgba1)
-            || !load_vtx(verts, vert_count, idx[i + 2], &x2, &y2, &u2, &v2, &rgba2)) {
+        uint32_t i0 = idx[i];
+        uint32_t i1 = idx[i + 1];
+        uint32_t i2 = idx[i + 2];
+        if ((int)i0 >= vert_count || (int)i1 >= vert_count || (int)i2 >= vert_count) {
             continue;
         }
-        (void)u1;
-        (void)v1;
-        (void)u2;
-        (void)v2;
-        (void)rgba1;
-        (void)rgba2;
+        const NanoUiVertex *v0 = &vtx[i0];
+        const NanoUiVertex *v1 = &vtx[i1];
+        const NanoUiVertex *v2 = &vtx[i2];
+        float x0 = v0->x;
+        float y0 = v0->y;
+        float u0 = v0->u;
+        float v0_coord = v0->v;
+        float x1 = v1->x;
+        float y1 = v1->y;
+        float x2 = v2->x;
+        float y2 = v2->y;
+        uint32_t rgba0 = v0->rgba;
+
         if (!hits_damage(has_damage, dmg_x, dmg_y, dmg_w, dmg_h, x0, y0, x1, y1, x2, y2)) {
             continue;
         }
@@ -616,10 +617,11 @@ void nano_ui_batch_draw_range(
             float pw = w * scale;
             float ph = h * scale;
             if (texture) {
-                nano_ui_batch_texture_dst(batch, texture, tex_w, tex_h, px, py, pw, ph, u0, v0, u2, v2, r, g, b, a);
+                nano_ui_batch_texture_dst(batch, texture, tex_w, tex_h, px, py, pw, ph, u0, v0_coord, v2->u, v2->v, r, g, b, a);
             } else {
                 nano_ui_batch_fill_solid(batch, r, g, b, a, px, py, pw, ph);
             }
+            i += 3;
         } else if (u0 <= -1.5f) {
             nano_ui_batch_triangle(
                 batch,
@@ -643,10 +645,10 @@ void nano_ui_batch_draw_range(
             float py = y0 * scale;
             float pw = w * scale;
             float ph = h * scale;
-            if (v0 < 0.f) {
+            if (v0_coord < 0.f) {
                 float rad = u0 * scale;
-                if (v0 <= -2.f) {
-                    float bw = (-v0 - 1.f) * scale;
+                if (v0_coord <= -2.f) {
+                    float bw = (-v0_coord - 1.f) * scale;
                     if (bw < 1.f) {
                         bw = 1.f;
                     }
@@ -654,10 +656,11 @@ void nano_ui_batch_draw_range(
                 } else {
                     nano_ui_batch_rounded_rect(batch, r, g, b, a, px, py, pw, ph, rad);
                 }
-                /* Quads emit two tris. Skip the paired tri so we stroke once. */
+                /* Quads emit two tris. Skip the paired tri so we stroke/fill once. */
                 i += 3;
             } else {
                 nano_ui_batch_fill_solid(batch, r, g, b, a, px, py, pw, ph);
+                i += 3;
             }
         }
     }

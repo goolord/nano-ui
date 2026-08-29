@@ -27,7 +27,7 @@ import qualified Data.Text as T
 import Foreign.C.String (peekCString)
 import Foreign.C.Types (CChar, CFloat (..), CInt (..), CSize (..))
 import Foreign.Marshal.Alloc (alloca, allocaBytes)
-import Foreign.Ptr (FunPtr, Ptr, freeHaskellFunPtr, nullPtr)
+import Foreign.Ptr (FunPtr, Ptr, freeHaskellFunPtr)
 import Foreign.Storable (peek)
 import Data.Word (Word32)
 import NanoUI (Size (..), V2 (..))
@@ -94,7 +94,7 @@ windowToLogicalCoords scale (V2 wx wy) =
    in V2 (wx / s) (wy / s)
 
 -- Windows runs a modal loop while the user drags the border, so the app
--- event wait does not run. SDL still delivers resize events to this watch.
+-- event watch does not run. SDL still delivers resize events to this watch.
 installResizeWatch :: IO () -> IO (IO ())
 installResizeWatch act = do
   fp <- mkResizeCb act
@@ -104,19 +104,19 @@ installResizeWatch act = do
     removeResizeWatchC
     freeHaskellFunPtr fp
 
-foreign import ccall safe "nano_ui_sdl_init_hints"
+foreign import ccall unsafe "nano_ui_sdl_init_hints"
   sdlInitHintsC :: Bool -> IO ()
 
-foreign import ccall safe "nano_ui_sdl_init_bench_hints"
+foreign import ccall unsafe "nano_ui_sdl_init_bench_hints"
   sdlInitBenchHintsC :: IO ()
 
-foreign import ccall safe "nano_ui_set_render_vsync"
+foreign import ccall unsafe "nano_ui_set_render_vsync"
   setRenderVSyncC :: Ptr SDL_Renderer -> Bool -> IO Bool
 
-foreign import ccall safe "nano_ui_window_display_scale"
+foreign import ccall unsafe "nano_ui_window_display_scale"
   windowDisplayScaleC :: Ptr SDL_Window -> IO CFloat
 
-foreign import ccall safe "nano_ui_window_logical_size"
+foreign import ccall unsafe "nano_ui_window_logical_size"
   windowLogicalSizeC ::
     Ptr SDL_Window ->
     CFloat ->
@@ -124,13 +124,13 @@ foreign import ccall safe "nano_ui_window_logical_size"
     Ptr CFloat ->
     IO Bool
 
-foreign import ccall safe "nano_ui_mouse_window_pos"
+foreign import ccall unsafe "nano_ui_mouse_window_pos"
   mouseWindowPosC :: Ptr CFloat -> Ptr CFloat -> IO Bool
 
-foreign import ccall safe "nano_ui_set_render_scale"
+foreign import ccall unsafe "nano_ui_set_render_scale"
   setRenderScaleC :: Ptr SDL_Renderer -> CFloat -> IO Bool
 
-foreign import ccall safe "nano_ui_renderer_name"
+foreign import ccall unsafe "nano_ui_renderer_name"
   rendererNameC :: Ptr SDL_Renderer -> Ptr CChar -> CSize -> IO Bool
 
 foreign import ccall "wrapper"
@@ -145,10 +145,10 @@ foreign import ccall safe "nano_ui_remove_resize_watch"
 foreign import ccall safe "nano_ui_register_refresh_event"
   registerRefreshEventC :: IO Bool
 
-foreign import ccall safe "nano_ui_refresh_event_type"
+foreign import ccall unsafe "nano_ui_refresh_event_type"
   refreshEventTypeC :: IO Word32
 
-foreign import ccall safe "nano_ui_push_refresh_event"
+foreign import ccall unsafe "nano_ui_push_refresh_event"
   pushRefreshEventC :: IO Bool
 
 initRefreshEvent :: IO Bool
@@ -160,10 +160,10 @@ readRefreshEventType = refreshEventTypeC
 pushRefreshEvent :: IO ()
 pushRefreshEvent = void pushRefreshEventC
 
-foreign import ccall safe "nano_ui_retain_create"
+foreign import ccall unsafe "nano_ui_retain_create"
   retainCreateC :: Ptr SDL_Renderer -> CInt -> CInt -> IO (Ptr ())
 
-foreign import ccall safe "nano_ui_retain_begin"
+foreign import ccall unsafe "nano_ui_retain_begin"
   retainBeginC :: Ptr SDL_Renderer -> Ptr () -> IO Bool
 
 foreign import ccall unsafe "nano_ui_retain_blit"
@@ -181,8 +181,11 @@ foreign import ccall unsafe "nano_ui_retain_blit_rect"
     CFloat ->
     IO Bool
 
-foreign import ccall safe "nano_ui_destroy_texture"
+foreign import ccall unsafe "nano_ui_destroy_texture"
   retainDestroyC :: Ptr () -> IO ()
+
+retainDestroy :: Ptr () -> IO ()
+retainDestroy = retainDestroyC
 
 retainCreate :: Ptr SDL_Renderer -> Int -> Int -> IO (Ptr ())
 retainCreate ren w h = retainCreateC ren (fromIntegral w) (fromIntegral h)
@@ -198,9 +201,3 @@ retainBlitRect ren tex sx sy sw sh dx dy =
   retainBlitRectC ren tex (cf sx) (cf sy) (cf sw) (cf sh) (cf dx) (cf dy)
   where
     cf = realToFrac :: Float -> CFloat
-
-retainDestroy :: Ptr () -> IO ()
-retainDestroy tex =
-  if tex == nullPtr
-    then pure ()
-    else retainDestroyC tex

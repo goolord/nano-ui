@@ -99,7 +99,8 @@ drawEff unlift ctx ui env inp forceFull = do
   SdlImage.syncImageAtlas (sdlRenderer env) (sdlImages env) ctx
   t0 <- getMonotonicTime
   (_, _, drawData, dirtyAfterUi) <- runFrameEff unlift ctx inp ui
-  finishDraw ctx env inp forceFull t0 drawData dirtyAfterUi
+  t1 <- getMonotonicTime
+  finishDraw ctx env inp forceFull t0 t1 drawData dirtyAfterUi
 
 drawReduceEff ::
   (IOE :> es, Typeable msg, Eq model) =>
@@ -118,12 +119,13 @@ drawReduceEff unlift update modelRef view ctx env inp forceFull = do
   m <- readIORef modelRef
   (_, m', _, drawData, dirtyAfterUi) <- runFrameReduceEff unlift update ctx inp m view
   writeIORef modelRef m'
-  finishDraw ctx env inp forceFull t0 drawData dirtyAfterUi
-
-finishDraw :: Context -> SdlEnv -> Input -> Bool -> Double -> DrawData -> Bool -> IO (Bool, Input)
-finishDraw ctx env inp forceFull t0 drawData dirtyAfterUi = do
-  scale <- readIORef (sdlScaleRef env)
   t1 <- getMonotonicTime
+  finishDraw ctx env inp forceFull t0 t1 drawData dirtyAfterUi
+
+finishDraw :: Context -> SdlEnv -> Input -> Bool -> Double -> Double -> DrawData -> Bool -> IO (Bool, Input)
+finishDraw ctx env inp forceFull t0 t1 drawData dirtyAfterUi = do
+  let uiMs = (t1 - t0) * 1000
+  scale <- readIORef (sdlScaleRef env)
   syncPointerCursor (sdlCursors env) ctx inp
   dmg0 <- takeDamage ctx
   let Size lw lh = inputWindowSize inp
@@ -138,7 +140,11 @@ finishDraw ctx env inp forceFull t0 drawData dirtyAfterUi = do
           else damage0
   if damageIsEmpty damage || lw <= 0 || lh <= 0
     then do
-      notePresent (sdlDebug env) ((t1 - t0) * 1000) drawData
+      tEnd <- getMonotonicTime
+      let renderMs = 0
+          presentMs = 0
+          frameMs = (tEnd - t0) * 1000
+      notePresent (sdlDebug env) uiMs renderMs presentMs frameMs drawData
       pure (dirtyAfterUi, inp)
     else do
       okBegin <- retainBegin (sdlRenderer env) tex
@@ -155,10 +161,15 @@ finishDraw ctx env inp forceFull t0 drawData dirtyAfterUi = do
         renderDrawDataPass batch (sdlRenderer env) scale Nothing drawData layerOverlayArr (sdlImages env) damage
         renderTextSpans batch (sdlRenderer env) scale font monoFont (sdlTextCache env) (spansIn overlaySpans)
         renderDrawDataPass batch (sdlRenderer env) scale Nothing drawData layerChromeArr (sdlImages env) damage
+      t2 <- getMonotonicTime
       okBlit <- blitRetain (sdlRenderer env) scale tex damage
       unless okBlit $ fail "SDL_RenderTexture(retain) failed"
       void $ renderPresentSafe (sdlRenderer env)
-      notePresent (sdlDebug env) ((t1 - t0) * 1000) drawData
+      t3 <- getMonotonicTime
+      let renderMs = (t2 - t1) * 1000
+          presentMs = (t3 - t2) * 1000
+          frameMs = (t3 - t0) * 1000
+      notePresent (sdlDebug env) uiMs renderMs presentMs frameMs drawData
       pure (dirtyAfterUi, inp)
 
 ensureRetain :: SdlEnv -> Int -> Int -> IO (Ptr (), Bool)

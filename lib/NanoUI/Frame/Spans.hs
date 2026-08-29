@@ -215,7 +215,7 @@ collectTextSpansCached ctx floatCache = do
   count <- arenaCount (ctxNodeArena ctx)
   spans <-
     if count > 0
-      then collectClippedSpans ctx floatCache 0 (Rect 0 0 1e9 1e9)
+      then collectClippedSpans ctx floatCache 0 (Rect 0 0 1e9 1e9) []
       else pure []
   panels <- floatingPanelRects ctx
   pure (filterOccludedBaseSpans panels spans)
@@ -232,15 +232,15 @@ collectOverlayTextSpansCached ctx inp floatCache = do
 widgetNodeCount :: Context -> IO Int
 widgetNodeCount ctx = arenaCount (ctxNodeArena ctx)
 
-collectClippedSpans :: Context -> IM.IntMap (Maybe NodeType) -> NodeIdx -> Rect -> IO [(Rect, T.Text, Color, Color, Rect)]
-collectClippedSpans ctx floatCache idx clip = do
+collectClippedSpans :: Context -> IM.IntMap (Maybe NodeType) -> NodeIdx -> Rect -> [(Rect, T.Text, Color, Color, Rect)] -> IO [(Rect, T.Text, Color, Color, Rect)]
+collectClippedSpans ctx floatCache idx clip acc = do
   nt <- getNodeType (ctxNodeArena ctx) idx
   if isFloatingNode nt
-    then pure []
-    else collectClippedSpans' ctx floatCache idx nt clip
+    then pure acc
+    else collectClippedSpans' ctx floatCache idx nt clip acc
 
-collectClippedSpans' :: Context -> IM.IntMap (Maybe NodeType) -> NodeIdx -> NodeType -> Rect -> IO [(Rect, T.Text, Color, Color, Rect)]
-collectClippedSpans' ctx floatCache idx nt clip = do
+collectClippedSpans' :: Context -> IM.IntMap (Maybe NodeType) -> NodeIdx -> NodeType -> Rect -> [(Rect, T.Text, Color, Color, Rect)] -> IO [(Rect, T.Text, Color, Color, Rect)]
+collectClippedSpans' ctx floatCache idx nt clip acc = do
   (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
   pad <- getPadding (ctxNodeArena ctx) idx
   let nodeRect = Rect x y w h
@@ -258,7 +258,7 @@ collectClippedSpans' ctx floatCache idx nt clip = do
           then pure (rectIntersect clip nodeRect)
           else pure (Just clip)
   case mClipChildren of
-    Nothing -> pure []
+    Nothing -> pure acc
     Just clipHere -> do
       here <-
         case nt of
@@ -283,21 +283,20 @@ collectClippedSpans' ctx floatCache idx nt clip = do
         if isCellHost (ctxHostProfile ctx) && isScrollNode nt && nt /= NodeModal
           then terminalScrollCapSpans ctx idx x y w h pad clip
           else pure []
-      childSpans <- walkChildSpans ctx floatCache idx clipHere
-      pure (here ++ caps ++ childSpans)
+      childSpans <- walkChildSpans ctx floatCache idx clipHere acc
+      pure (here ++ (caps ++ childSpans))
 
-walkChildSpans :: Context -> IM.IntMap (Maybe NodeType) -> NodeIdx -> Rect -> IO [(Rect, T.Text, Color, Color, Rect)]
-walkChildSpans ctx floatCache idx clip = do
+walkChildSpans :: Context -> IM.IntMap (Maybe NodeType) -> NodeIdx -> Rect -> [(Rect, T.Text, Color, Color, Rect)] -> IO [(Rect, T.Text, Color, Color, Rect)]
+walkChildSpans ctx floatCache idx clip acc = do
   fc <- getFirstChild (ctxNodeArena ctx) idx
-  go fc
+  go fc acc
   where
-    go ci
-      | ci < 0 = pure []
+    go ci kAcc
+      | ci < 0 = pure kAcc
       | otherwise = do
-          spans <- collectClippedSpans ctx floatCache ci clip
           ns <- getNextSibling (ctxNodeArena ctx) ci
-          rest <- go ns
-          pure (spans ++ rest)
+          rest <- go ns kAcc
+          collectClippedSpans ctx floatCache ci clip rest
 
 filterOccludedBaseSpans :: IM.IntMap Rect -> [(Rect, T.Text, Color, Color, Rect)] -> [(Rect, T.Text, Color, Color, Rect)]
 filterOccludedBaseSpans panels spans
@@ -607,7 +606,7 @@ collectFloatingSpans :: Context -> IM.IntMap (Maybe NodeType) -> NodeType -> IO 
 collectFloatingSpans ctx floatCache wanted = do
   count <- arenaCount (ctxNodeArena ctx)
   let fm = ctxFontMetrics ctx
-      go idx
+      go !idx
         | idx >= count = pure []
         | otherwise = do
             nt <- getNodeType (ctxNodeArena ctx) idx
@@ -626,9 +625,8 @@ collectFloatingSpans ctx floatCache wanted = do
                           if isScrollNode nt
                             then scrollContentClip (ctxHostProfile ctx) fm slot dir x y w h pad contentSize
                             else padContentClip (ctxHostProfile ctx) fm x y w h pad
-                here <- walkChildSpans ctx floatCache idx clip
                 rest <- go (idx + 1)
-                pure (here ++ rest)
+                walkChildSpans ctx floatCache idx clip rest
   go 0
 
 terminalSeparatorSpans :: Theme -> Float -> Float -> Float -> Float -> [(Rect, T.Text, Color, Color)]
@@ -737,4 +735,3 @@ collectTooltipSpans ctx = do
             ty = centeredTextY (ctxHostProfile ctx) fm (rectY rect) (rectH rect) th
             textRect = Rect tx ty tw th
         pure (textRect, txt, fg, bg, rect)
-

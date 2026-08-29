@@ -28,4 +28,6 @@ closeButtonDisplayText txt = T.drop 1 (stripButtonBrackets txt)
 buttonDisplayText :: T.Text -> T.Text
 buttonDisplayText txt =
   let lbl = stripButtonBrackets txt
-   in if isCloseButtonText txt then closeButtonDisplayText txt else lbl
+   in if closeButtonMarker `T.isPrefixOf` lbl
+        then T.drop 1 lbl
+        else lbl

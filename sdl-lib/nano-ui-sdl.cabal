@@ -120,6 +120,8 @@ executable nano-ui-sdl-demo
         text ^>=2.1
     hs-source-dirs:   examples
     default-language: GHC2024
+    if os(windows)
+        ghc-options: -optl-mconsole
     if !flag(sdl)
         buildable: False
 
@@ -138,6 +140,8 @@ executable nano-ui-sdl-anim
         text ^>=2.1
     hs-source-dirs:   examples
     default-language: GHC2024
+    if os(windows)
+        ghc-options: -optl-mconsole
     if !flag(sdl)
         buildable: False
 

@@ -38,11 +38,12 @@ module NanoUI.Draw
 
 import Control.Monad (forM_, unless, when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import Data.Primitive.Array (MutableArray, newArray, readArray, writeArray)
+import Data.Primitive.Array (MutableArray, copyMutableArray, newArray, readArray, writeArray)
 import Data.Vector (Vector)
 import qualified Data.Vector as V
 import Data.Word (Word8, Word32)
 import Foreign.ForeignPtr (ForeignPtr, mallocForeignPtrBytes, withForeignPtr)
+import Foreign.ForeignPtr.Unsafe (unsafeForeignPtrToPtr)
 import Foreign.Marshal.Array (copyArray)
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (pokeByteOff)
@@ -87,19 +88,23 @@ data DrawData = DrawData
 type BufferPool = IORef [(ForeignPtr Word8, Int)]
 
 data DrawArena = DrawArena
-  { daVertices :: IORef (ForeignPtr Word8, Int)
-  , daVertexCount :: IORef Int
-  , daVertexPool :: BufferPool
-  , daIndices :: IORef (ForeignPtr Word8, Int)
-  , daIndexCount :: IORef Int
-  , daIndexPool :: BufferPool
-  , daCmdStore :: IORef (MutableArray RealWorld DrawCmd)
-  , daCmdCount :: IORef Int
-  , daCmdCapacity :: IORef Int
-  , daCurrentLayer :: IORef Layer
-  , daCurrentClip :: IORef (Float, Float, Float, Float)
-  , daCurrentTexture :: IORef Int
-  , daCmdStartIndex :: IORef Int
+  { daVertexFPtr :: !(IORef (ForeignPtr Word8))
+  , daVertexPtr :: !(IORef (Ptr Word8))
+  , daVertexCap :: !(IORef Int)
+  , daVertexCount :: !(IORef Int)
+  , daVertexPool :: !BufferPool
+  , daIndexFPtr :: !(IORef (ForeignPtr Word8))
+  , daIndexPtr :: !(IORef (Ptr Word8))
+  , daIndexCap :: !(IORef Int)
+  , daIndexCount :: !(IORef Int)
+  , daIndexPool :: !BufferPool
+  , daCmdStore :: !(IORef (MutableArray RealWorld DrawCmd))
+  , daCmdCount :: !(IORef Int)
+  , daCmdCapacity :: !(IORef Int)
+  , daCurrentLayer :: !(IORef Layer)
+  , daCurrentClip :: !(IORef (Float, Float, Float, Float))
+  , daCurrentTexture :: !(IORef Int)
+  , daCmdStartIndex :: !(IORef Int)
   }
 
 vertexCapacity :: Int
@@ -120,40 +125,21 @@ bufferPoolLimit = 4
 cmdInitialCapacity :: Int
 cmdInitialCapacity = 64
 
-{-# INLINE pokeVertex #-}
-pokeVertex :: Ptr Word8 -> Int -> Float -> Float -> Float -> Float -> Word32 -> IO ()
-pokeVertex p i x y u v rgba = do
-  let off = i * vertexSize
-  pokeByteOff p off x
-  pokeByteOff p (off + 4) y
-  pokeByteOff p (off + 8) u
-  pokeByteOff p (off + 12) v
-  pokeByteOff p (off + 16) rgba
-
-{-# INLINE pokeIndex #-}
-pokeIndex :: Ptr Word8 -> Int -> Int -> IO ()
-pokeIndex p i idx =
-  pokeByteOff p (i * indexSize) (fromIntegral idx :: Word32)
-
-{-# INLINE pokeQuadIndices #-}
-pokeQuadIndices :: Ptr Word8 -> Int -> Int -> IO ()
-pokeQuadIndices p baseIdx base = do
-  pokeIndex p baseIdx base
-  pokeIndex p (baseIdx + 1) (base + 1)
-  pokeIndex p (baseIdx + 2) (base + 2)
-  pokeIndex p (baseIdx + 3) base
-  pokeIndex p (baseIdx + 4) (base + 2)
-  pokeIndex p (baseIdx + 5) (base + 3)
-
 {-# INLINE newDrawArena #-}
 newDrawArena :: IO DrawArena
 newDrawArena = do
-  vPtr <- mallocForeignPtrBytes (vertexCapacity * vertexSize)
-  iPtr <- mallocForeignPtrBytes (indexCapacity * indexSize)
-  daVertices <- newIORef (vPtr, vertexCapacity)
+  vFPtr <- mallocForeignPtrBytes (vertexCapacity * vertexSize)
+  iFPtr <- mallocForeignPtrBytes (indexCapacity * indexSize)
+  let !vRaw = unsafeForeignPtrToPtr vFPtr
+      !iRaw = unsafeForeignPtrToPtr iFPtr
+  daVertexFPtr <- newIORef vFPtr
+  daVertexPtr <- newIORef vRaw
+  daVertexCap <- newIORef vertexCapacity
   daVertexCount <- newIORef 0
   daVertexPool <- newIORef []
-  daIndices <- newIORef (iPtr, indexCapacity)
+  daIndexFPtr <- newIORef iFPtr
+  daIndexPtr <- newIORef iRaw
+  daIndexCap <- newIORef indexCapacity
   daIndexCount <- newIORef 0
   daIndexPool <- newIORef []
   cmdStore <- newArray cmdInitialCapacity (DrawCmd 0 0 0 0 0 0 0 LayerContent)
@@ -166,10 +152,14 @@ newDrawArena = do
   daCmdStartIndex <- newIORef 0
   pure
     DrawArena
-      { daVertices
+      { daVertexFPtr
+      , daVertexPtr
+      , daVertexCap
       , daVertexCount
       , daVertexPool
-      , daIndices
+      , daIndexFPtr
+      , daIndexPtr
+      , daIndexCap
       , daIndexCount
       , daIndexPool
       , daCmdStore
@@ -208,38 +198,40 @@ poolGive pool ptr cap = do
   entries <- readIORef pool
   writeIORef pool (take bufferPoolLimit ((ptr, cap) : entries))
 
-{-# NOINLINE growBufferWithCount #-}
-growBufferWithCount ::
+{-# NOINLINE growBuffer #-}
+growBuffer ::
   Int ->
-  IORef (ForeignPtr Word8, Int) ->
+  IORef (ForeignPtr Word8) ->
+  IORef (Ptr Word8) ->
+  IORef Int ->
   BufferPool ->
   Int ->
   Int ->
   IO ()
-growBufferWithCount count bufRef pool elemBytes needElems = do
-  (ptr, cap) <- readIORef bufRef
+growBuffer count fptrRef ptrRef capRef pool elemBytes needElems = do
+  cap <- readIORef capRef
   let required = count + needElems
   if required <= cap
     then pure ()
     else do
+      oldFPtr <- readIORef fptrRef
       let newCap = max (cap * 2) required
           newBytes = newCap * elemBytes
-      newPtr <- poolTake pool newBytes newCap
-      withForeignPtr ptr $ \oldP ->
-        withForeignPtr newPtr $ \newP ->
-          copyArray newP oldP (count * elemBytes)
-      poolGive pool ptr cap
-      writeIORef bufRef (newPtr, newCap)
+      newFPtr <- poolTake pool newBytes newCap
+      let !newRaw = unsafeForeignPtrToPtr newFPtr
+      withForeignPtr oldFPtr $ \oldP ->
+        copyArray newRaw oldP (count * elemBytes)
+      poolGive pool oldFPtr cap
+      writeIORef fptrRef newFPtr
+      writeIORef ptrRef newRaw
+      writeIORef capRef newCap
 
-ensureVerts :: DrawArena -> Int -> IO ()
-ensureVerts da needVerts = do
-  count <- readIORef (daVertexCount da)
-  growBufferWithCount count (daVertices da) (daVertexPool da) vertexSize needVerts
-
-ensureIndices :: DrawArena -> Int -> IO ()
-ensureIndices da needIndices = do
-  count <- readIORef (daIndexCount da)
-  growBufferWithCount count (daIndices da) (daIndexPool da) indexSize needIndices
+ensureCapacity :: DrawArena -> Int -> Int -> IO ()
+ensureCapacity da needVerts needIndices = do
+  vCount <- readIORef (daVertexCount da)
+  growBuffer vCount (daVertexFPtr da) (daVertexPtr da) (daVertexCap da) (daVertexPool da) vertexSize needVerts
+  iCount <- readIORef (daIndexCount da)
+  growBuffer iCount (daIndexFPtr da) (daIndexPtr da) (daIndexCap da) (daIndexPool da) indexSize needIndices
 
 {-# NOINLINE growCmdStore #-}
 growCmdStore :: DrawArena -> Int -> IO ()
@@ -247,8 +239,7 @@ growCmdStore da oldCap = do
   let newCap = oldCap * 2
   arr <- readIORef (daCmdStore da)
   newArr <- newArray newCap (DrawCmd 0 0 0 0 0 0 0 LayerContent)
-  forM_ [0 .. oldCap - 1] $ \i ->
-    readArray arr i >>= writeArray newArr i
+  copyMutableArray newArr 0 arr 0 oldCap
   writeIORef (daCmdStore da) newArr
   writeIORef (daCmdCapacity da) newCap
 
@@ -355,20 +346,55 @@ setTexture da tex = do
 {-# INLINE pushQuad #-}
 pushQuad :: DrawArena -> Rect -> Float -> Float -> Float -> Float -> Color -> IO ()
 pushQuad da (Rect x y w h) u0 v0 u1 v1 col = do
-  ensureVerts da 4
-  ensureIndices da 6
-  base <- readIORef (daVertexCount da)
-  baseIdx <- readIORef (daIndexCount da)
-  (vPtr, _) <- readIORef (daVertices da)
-  (iPtr, _) <- readIORef (daIndices da)
-  let rgba = colorToWord32 col
-  withForeignPtr vPtr $ \vp -> do
-    pokeVertex vp base x y u0 v0 rgba
-    pokeVertex vp (base + 1) (x + w) y u1 v0 rgba
-    pokeVertex vp (base + 2) (x + w) (y + h) u1 v1 rgba
-    pokeVertex vp (base + 3) x (y + h) u0 v1 rgba
-  withForeignPtr iPtr $ \ip ->
-    pokeQuadIndices ip baseIdx base
+  vCount <- readIORef (daVertexCount da)
+  iCount <- readIORef (daIndexCount da)
+  vCap <- readIORef (daVertexCap da)
+  iCap <- readIORef (daIndexCap da)
+  (vp, ip, base, baseIdx) <-
+    if vCount + 4 <= vCap && iCount + 6 <= iCap
+      then do
+        vp <- readIORef (daVertexPtr da)
+        ip <- readIORef (daIndexPtr da)
+        pure (vp, ip, vCount, iCount)
+      else do
+        ensureCapacity da 4 6
+        vp <- readIORef (daVertexPtr da)
+        ip <- readIORef (daIndexPtr da)
+        vc <- readIORef (daVertexCount da)
+        ic <- readIORef (daIndexCount da)
+        pure (vp, ip, vc, ic)
+  let !rgba = colorToWord32 col
+      !vOff = base * vertexSize
+      !iOff = baseIdx * indexSize
+      !b = fromIntegral base :: Word32
+      !x1 = x + w
+      !y1 = y + h
+  pokeByteOff vp vOff x
+  pokeByteOff vp (vOff + 4) y
+  pokeByteOff vp (vOff + 8) u0
+  pokeByteOff vp (vOff + 12) v0
+  pokeByteOff vp (vOff + 16) rgba
+  pokeByteOff vp (vOff + 20) x1
+  pokeByteOff vp (vOff + 24) y
+  pokeByteOff vp (vOff + 28) u1
+  pokeByteOff vp (vOff + 32) v0
+  pokeByteOff vp (vOff + 36) rgba
+  pokeByteOff vp (vOff + 40) x1
+  pokeByteOff vp (vOff + 44) y1
+  pokeByteOff vp (vOff + 48) u1
+  pokeByteOff vp (vOff + 52) v1
+  pokeByteOff vp (vOff + 56) rgba
+  pokeByteOff vp (vOff + 60) x
+  pokeByteOff vp (vOff + 64) y1
+  pokeByteOff vp (vOff + 68) u0
+  pokeByteOff vp (vOff + 72) v1
+  pokeByteOff vp (vOff + 76) rgba
+  pokeByteOff ip iOff b
+  pokeByteOff ip (iOff + 4) (b + 1)
+  pokeByteOff ip (iOff + 8) (b + 2)
+  pokeByteOff ip (iOff + 12) b
+  pokeByteOff ip (iOff + 16) (b + 2)
+  pokeByteOff ip (iOff + 20) (b + 3)
   writeIORef (daVertexCount da) (base + 4)
   writeIORef (daIndexCount da) (baseIdx + 6)
 
@@ -411,21 +437,56 @@ pushRoundedStroke da rect radius bw col =
 pushRoundedCoded :: DrawArena -> Rect -> Float -> Float -> Color -> IO ()
 pushRoundedCoded da (Rect x y w h) radius v col = do
   setTexture da 0
-  ensureVerts da 4
-  ensureIndices da 6
-  base <- readIORef (daVertexCount da)
-  baseIdx <- readIORef (daIndexCount da)
-  (vPtr, _) <- readIORef (daVertices da)
-  (iPtr, _) <- readIORef (daIndices da)
-  let rgba = colorToWord32 col
-      r = max 0 radius
-  withForeignPtr vPtr $ \vp -> do
-    pokeVertex vp base x y r v rgba
-    pokeVertex vp (base + 1) (x + w) y r v rgba
-    pokeVertex vp (base + 2) (x + w) (y + h) r v rgba
-    pokeVertex vp (base + 3) x (y + h) r v rgba
-  withForeignPtr iPtr $ \ip ->
-    pokeQuadIndices ip baseIdx base
+  vCount <- readIORef (daVertexCount da)
+  iCount <- readIORef (daIndexCount da)
+  vCap <- readIORef (daVertexCap da)
+  iCap <- readIORef (daIndexCap da)
+  (vp, ip, base, baseIdx) <-
+    if vCount + 4 <= vCap && iCount + 6 <= iCap
+      then do
+        vp <- readIORef (daVertexPtr da)
+        ip <- readIORef (daIndexPtr da)
+        pure (vp, ip, vCount, iCount)
+      else do
+        ensureCapacity da 4 6
+        vp <- readIORef (daVertexPtr da)
+        ip <- readIORef (daIndexPtr da)
+        vc <- readIORef (daVertexCount da)
+        ic <- readIORef (daIndexCount da)
+        pure (vp, ip, vc, ic)
+  let !rgba = colorToWord32 col
+      !r = max 0 radius
+      !vOff = base * vertexSize
+      !iOff = baseIdx * indexSize
+      !b = fromIntegral base :: Word32
+      !x1 = x + w
+      !y1 = y + h
+  pokeByteOff vp vOff x
+  pokeByteOff vp (vOff + 4) y
+  pokeByteOff vp (vOff + 8) r
+  pokeByteOff vp (vOff + 12) v
+  pokeByteOff vp (vOff + 16) rgba
+  pokeByteOff vp (vOff + 20) x1
+  pokeByteOff vp (vOff + 24) y
+  pokeByteOff vp (vOff + 28) r
+  pokeByteOff vp (vOff + 32) v
+  pokeByteOff vp (vOff + 36) rgba
+  pokeByteOff vp (vOff + 40) x1
+  pokeByteOff vp (vOff + 44) y1
+  pokeByteOff vp (vOff + 48) r
+  pokeByteOff vp (vOff + 52) v
+  pokeByteOff vp (vOff + 56) rgba
+  pokeByteOff vp (vOff + 60) x
+  pokeByteOff vp (vOff + 64) y1
+  pokeByteOff vp (vOff + 68) r
+  pokeByteOff vp (vOff + 72) v
+  pokeByteOff vp (vOff + 76) rgba
+  pokeByteOff ip iOff b
+  pokeByteOff ip (iOff + 4) (b + 1)
+  pokeByteOff ip (iOff + 8) (b + 2)
+  pokeByteOff ip (iOff + 12) b
+  pokeByteOff ip (iOff + 16) (b + 2)
+  pokeByteOff ip (iOff + 20) (b + 3)
   writeIORef (daVertexCount da) (base + 4)
   writeIORef (daIndexCount da) (baseIdx + 6)
 
@@ -452,40 +513,66 @@ pushLine da x1 y1 x2 y2 thickness col = do
 pushFilledTriangle :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
 pushFilledTriangle da x0 y0 x1 y1 x2 y2 col = do
   setTexture da 0
-  ensureVerts da 3
-  ensureIndices da 3
-  base <- readIORef (daVertexCount da)
-  baseIdx <- readIORef (daIndexCount da)
-  (vPtr, _) <- readIORef (daVertices da)
-  (iPtr, _) <- readIORef (daIndices da)
-  let rgba = colorToWord32 col
-  withForeignPtr vPtr $ \vp -> do
-    pokeVertex vp base x0 y0 (-3) 0 rgba
-    pokeVertex vp (base + 1) x1 y1 (-3) 0 rgba
-    pokeVertex vp (base + 2) x2 y2 (-3) 0 rgba
-  withForeignPtr iPtr $ \ip -> do
-    pokeIndex ip baseIdx base
-    pokeIndex ip (baseIdx + 1) (base + 1)
-    pokeIndex ip (baseIdx + 2) (base + 2)
+  vCount <- readIORef (daVertexCount da)
+  iCount <- readIORef (daIndexCount da)
+  vCap <- readIORef (daVertexCap da)
+  iCap <- readIORef (daIndexCap da)
+  (vp, ip, base, baseIdx) <-
+    if vCount + 3 <= vCap && iCount + 3 <= iCap
+      then do
+        vp <- readIORef (daVertexPtr da)
+        ip <- readIORef (daIndexPtr da)
+        pure (vp, ip, vCount, iCount)
+      else do
+        ensureCapacity da 3 3
+        vp <- readIORef (daVertexPtr da)
+        ip <- readIORef (daIndexPtr da)
+        vc <- readIORef (daVertexCount da)
+        ic <- readIORef (daIndexCount da)
+        pure (vp, ip, vc, ic)
+  let !rgba = colorToWord32 col
+      !vOff = base * vertexSize
+      !iOff = baseIdx * indexSize
+      !b = fromIntegral base :: Word32
+  pokeByteOff vp vOff x0
+  pokeByteOff vp (vOff + 4) y0
+  pokeByteOff vp (vOff + 8) (-3 :: Float)
+  pokeByteOff vp (vOff + 12) (0 :: Float)
+  pokeByteOff vp (vOff + 16) rgba
+  pokeByteOff vp (vOff + 20) x1
+  pokeByteOff vp (vOff + 24) y1
+  pokeByteOff vp (vOff + 28) (-3 :: Float)
+  pokeByteOff vp (vOff + 32) (0 :: Float)
+  pokeByteOff vp (vOff + 36) rgba
+  pokeByteOff vp (vOff + 40) x2
+  pokeByteOff vp (vOff + 44) y2
+  pokeByteOff vp (vOff + 48) (-3 :: Float)
+  pokeByteOff vp (vOff + 52) (0 :: Float)
+  pokeByteOff vp (vOff + 56) rgba
+  pokeByteOff ip iOff b
+  pokeByteOff ip (iOff + 4) (b + 1)
+  pokeByteOff ip (iOff + 8) (b + 2)
   writeIORef (daVertexCount da) (base + 3)
   writeIORef (daIndexCount da) (baseIdx + 3)
 
 {-# INLINE pushText #-}
 pushText :: DrawArena -> FontMetrics -> Float -> Float -> T.Text -> Color -> IO ()
-pushText da fm x y txt col = go x (T.unpack txt)
+pushText da fm x y txt col = go x txt
   where
     adv = fmAdvance fm ' '
-    go _ [] = pure ()
-    go ox (c : rest) =
-      case fmGlyph fm c of
-        Nothing -> go (ox + adv) rest
-        Just gq -> do
-          let gx = ox + gqX gq
-              gy = y + gqY gq
-              gw = gqW gq
-              gh = gqH gq
-          pushRect da (Rect gx gy gw gh) col
-          go (ox + adv) rest
+    go !ox !t =
+      case T.uncons t of
+        Nothing -> pure ()
+        Just (c, rest) -> do
+          case fmGlyph fm c of
+            Nothing -> go (ox + adv) rest
+            Just gq -> do
+              let gx = ox + gqX gq
+                  gy = y + gqY gq
+                  gw = gqW gq
+                  gh = gqH gq
+              pushRect da (Rect gx gy gw gh) col
+              go (ox + adv) rest
 
 readCmdVector :: MutableArray RealWorld DrawCmd -> Int -> IO (Vector DrawCmd)
 readCmdVector arr count = V.generateM count (readArray arr)
@@ -537,8 +624,8 @@ drawCmdElems dd = V.toList (drawCommands dd)
 finishDraw :: DrawArena -> IO DrawData
 finishDraw da = do
   flushCmd da
-  (vPtr, _) <- readIORef (daVertices da)
-  (iPtr, _) <- readIORef (daIndices da)
+  vFPtr <- readIORef (daVertexFPtr da)
+  iFPtr <- readIORef (daIndexFPtr da)
   vCount <- readIORef (daVertexCount da)
   iCount <- readIORef (daIndexCount da)
   count <- readIORef (daCmdCount da)
@@ -546,9 +633,9 @@ finishDraw da = do
   cmds <- readCmdVector arr count
   pure
     DrawData
-      { drawVertices = vPtr
+      { drawVertices = vFPtr
       , drawVertexCount = vCount
-      , drawIndices = iPtr
+      , drawIndices = iFPtr
       , drawIndexCount = iCount
       , drawCommands = cmds
       }

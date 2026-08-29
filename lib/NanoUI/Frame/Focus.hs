@@ -10,7 +10,7 @@ module NanoUI.Frame.Focus
   , unlessHit
   ) where
 
-import Control.Monad (filterM, forM_, unless, when)
+import Control.Monad (filterM, unless, when)
 import Data.IORef (readIORef, writeIORef)
 import Data.List (findIndex)
 import qualified Data.IntMap.Strict as IM
@@ -73,32 +73,38 @@ syncWidgetLabels :: Context -> IO ()
 syncWidgetLabels ctx = do
   store <- getStore ctx
   count <- arenaCount (ctxNodeArena ctx)
-  forM_ [0 .. count - 1] $ \idx -> do
-    nt <- getNodeType (ctxNodeArena ctx) idx
-    wid <- getWidgetId (ctxNodeArena ctx) idx
-    let key = intKey wid
-    case nt of
-      NodeCheckbox -> do
-        txt <- getText (ctxNodeArena ctx) idx
-        let body = checkboxLabelText txt
-            val = IM.findWithDefault False key (storeCheckbox store)
-            terminal = isCellHost (ctxHostProfile ctx)
-            mark = if terminal then checkboxMark (ctxIcons ctx) val else ""
-        setNodeText (ctxNodeArena ctx) idx (mark <> body)
-        setNodeValue (ctxNodeArena ctx) idx (if val then 1 else 0)
-      NodeSlider -> do
-        let val = IM.findWithDefault 0 key (storeSlider store)
-        txt <- getText (ctxNodeArena ctx) idx
-        let (lbl, minV, maxV) = sliderParseRange txt
-            frac = if maxV > minV then (val - minV) / (maxV - minV) else 0
-            shown =
-              if isCellHost (ctxHostProfile ctx)
-                then sliderPackTerminal lbl frac val minV maxV
-                else sliderPackRange lbl minV maxV
-        setNodeText (ctxNodeArena ctx) idx shown
-        setNodeValue (ctxNodeArena ctx) idx frac
-      NodeButton -> do
-        txt <- getText (ctxNodeArena ctx) idx
-        when (not (isCellHost (ctxHostProfile ctx))) $
-          setNodeText (ctxNodeArena ctx) idx (stripButtonBrackets txt)
-      _ -> pure ()
+  let na = ctxNodeArena ctx
+      terminal = isCellHost (ctxHostProfile ctx)
+      icons = ctxIcons ctx
+      go !idx
+        | idx >= count = pure ()
+        | otherwise = do
+            nt <- getNodeType na idx
+            wid <- getWidgetId na idx
+            let key = intKey wid
+            case nt of
+              NodeCheckbox -> do
+                txt <- getText na idx
+                let body = checkboxLabelText txt
+                    val = IM.findWithDefault False key (storeCheckbox store)
+                    mark = if terminal then checkboxMark icons val else ""
+                setNodeText na idx (mark <> body)
+                setNodeValue na idx (if val then 1 else 0)
+              NodeSlider -> do
+                let val = IM.findWithDefault 0 key (storeSlider store)
+                txt <- getText na idx
+                let (lbl, minV, maxV) = sliderParseRange txt
+                    frac = if maxV > minV then (val - minV) / (maxV - minV) else 0
+                    shown =
+                      if terminal
+                        then sliderPackTerminal lbl frac val minV maxV
+                        else sliderPackRange lbl minV maxV
+                setNodeText na idx shown
+                setNodeValue na idx frac
+              NodeButton -> do
+                txt <- getText na idx
+                unless terminal $
+                  setNodeText na idx (stripButtonBrackets txt)
+              _ -> pure ()
+            go (idx + 1)
+  go 0

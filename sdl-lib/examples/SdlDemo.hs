@@ -8,19 +8,40 @@ module SdlDemo
 
 import Control.Monad (when)
 import Data.Primitive.SmallArray (SmallArray, smallArrayFromList)
-import Data.Text (Text)
 import NanoUI
 import NanoUI.Backend.Sdl (RgbaImage (..), SdlDebugSnapshot (..), askSdlDebug, SdlOptions (..), defaultSdlOptions, runSdlApp)
+import System.Console.GetOpt
+  ( ArgDescr (ReqArg)
+  , ArgOrder (Permute)
+  , OptDescr (Option)
+  , getOpt
+  )
+import System.Environment (getArgs)
 import Text.Printf (printf)
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
 
+options :: [OptDescr Bool]
+options =
+  [ Option [] ["vsync"] (ReqArg parseVsync "BOOL") "Enable or disable vsync (true/false)"
+  ]
+
+parseVsync :: String -> Bool
+parseVsync s = s `elem` ["true", "True", "1"]
+
+parseArgs :: [String] -> Bool
+parseArgs argv =
+  case getOpt Permute options argv of
+    (flags, _, _) -> last (True : flags)
+
 main :: IO ()
-main =
+main = do
+  args <- getArgs
   runSdlApp
     defaultSdlOptions
       { sdlAppShouldQuit = \inp -> inputKeysElem KeyEscape (inputKeys inp)
       , sdlAppImages = demoImages
+      , sdlAppVsync = parseArgs args
       }
     demoUi
 
@@ -115,7 +136,7 @@ debugSection title rows = do
   heading title
   mapM_ (\(k, v) -> kv k (monoFontMarker <> v)) rows
 
-clipField :: Int -> Text -> Text
+clipField :: Int -> T.Text -> T.Text
 clipField n s =
   if T.length s > n
     then T.take (max 0 (n - 3)) s <> "..."
@@ -123,14 +144,18 @@ clipField n s =
 
 frameRows :: SdlDebugSnapshot -> SmallArray (T.Text, T.Text)
 frameRows s =
-  smallArrayFromList
-    [ ("present", T.pack (printf "%.1f fps" (dbgPresentFps s)))
-    , ("loop", T.pack (printf "%.1f fps" (dbgLoopFps s)))
-    , ("frame", T.pack (printf "%.1f ms" (dbgFrameMs s)))
-    , ("ui", T.pack (printf "%.1f ms" (dbgUiMs s)))
-    , ("draws", T.pack (printf "%d" (dbgPresents s)))
-    , ("skips", T.pack (printf "%d" (dbgSkips s)))
-    ]
+  let haskellMs = dbgUiMs s + dbgRenderMs s
+   in smallArrayFromList
+        [ ("present", T.pack (printf "%.1f fps" (dbgPresentFps s)))
+        , ("loop", T.pack (printf "%.1f fps" (dbgLoopFps s)))
+        , ("frame cpu", T.pack (printf "%.2f ms" (dbgFrameMs s)))
+        , ("haskell", T.pack (printf "%.2f ms" haskellMs))
+        , ("  ui", T.pack (printf "%.2f ms" (dbgUiMs s)))
+        , ("  render", T.pack (printf "%.2f ms" (dbgRenderMs s)))
+        , ("sdl present", T.pack (printf "%.2f ms" (dbgPresentMs s)))
+        , ("draws", T.pack (printf "%d" (dbgPresents s)))
+        , ("skips", T.pack (printf "%d" (dbgSkips s)))
+        ]
 
 drawRows :: SdlDebugSnapshot -> SmallArray (T.Text, T.Text)
 drawRows s =
