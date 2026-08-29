@@ -53,7 +53,6 @@ import NanoUI.Context
   , getPrevRectByKey
   , setScrollOffset
   , setStore
-  , setPrevRect
   , startAnimation
   , setAnimationValue
   , tickAnimations
@@ -4156,11 +4155,19 @@ imageIdFromText txt =
 updatePrevRects :: Context -> IO ()
 updatePrevRects ctx = do
   count <- arenaCount (ctxNodeArena ctx)
-  forM_ [0 .. count - 1] $ \idx -> do
-    wid <- getWidgetId (ctxNodeArena ctx) idx
-    (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-    when (hashWidgetId wid /= 0) $
-      setPrevRect ctx wid (Rect x y w h)
+  acc <- foldM add IM.empty [0 .. count - 1]
+  writeIORef (ctxPrevRects ctx) acc
+  where
+    add m idx = do
+      wid <- getWidgetId (ctxNodeArena ctx) idx
+      (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+      if hashWidgetId wid == 0
+        then pure m
+        else
+          let r = Rect x y w h
+           in if nonzeroRect r
+                then pure (IM.insertWith rectUnion (intKey wid) r m)
+                else pure m
 
 floatingPanelRects :: Context -> IO (IM.IntMap Rect)
 floatingPanelRects ctx = do
@@ -4251,8 +4258,9 @@ writeDamage ctx inp wasDirty oldSize oldStore oldHot oldActive oldFocus oldHotR 
         not (IM.null oldRects)
           && not (null moved)
           && not animLive
-      -- Call-site tween with no node and no layout move (color/text only).
-      paintOrphan = orphanAnim && null moved && animLive
+      -- Call-site tween with no node. Color/text orphans must Full even
+      -- when a spacer also moved, or wash/labels stay outside the clip.
+      paintOrphan = orphanAnim && animLive
       full =
         wasDirty
           || dirtyNow
@@ -4280,36 +4288,48 @@ writeDamage ctx inp wasDirty oldSize oldStore oldHot oldActive oldFocus oldHotR 
               | wid == oldFocus = oldFocusR
               | otherwise = Nothing
             clipKeys = animKeys ++ IM.keys liveAnims
-        rs <-
-          fmap concat $
-            forM ids $ \wid ->
-              if hashWidgetId wid == 0
-                then pure []
-                else do
-                  newR <- getPrevRect ctx wid
-                  pure (catMaybes [oldOf wid, newR])
-        animRs <-
-          fmap concat $
-            forM clipKeys $ \k ->
-              if k == 0
-                then pure []
-                else pure (catMaybes [IM.lookup k oldRects, IM.lookup k newRects])
-        let layoutRs = if animLive && orphanAnim then moved else []
-            base =
-              unionRects
-                ( rs
-                    ++ animRs
-                    ++ layoutRs
-                    ++ floatingRectDamage oldFloatingRects newFloatingRects
+            missingAnim =
+              any
+                ( \k ->
+                    k /= 0
+                      && isNothing (IM.lookup k oldRects)
+                      && isNothing (IM.lookup k newRects)
                 )
-            clip =
-              if rectW base <= 0 || rectH base <= 0
-                then Rect 0 0 0 0
-                else rectInflate textClipSlop base
-            winArea = winW * winH
-        if winArea > 0 && rectArea clip > winArea * 0.5
+                clipKeys
+        if missingAnim && animLive
           then pure DamageFull
-          else pure (DamageClip clip)
+          else do
+            rs <-
+              fmap concat $
+                forM ids $ \wid ->
+                  if hashWidgetId wid == 0
+                    then pure []
+                    else do
+                      newR <- getPrevRect ctx wid
+                      pure (catMaybes [oldOf wid, newR])
+            animRs <-
+              fmap concat $
+                forM clipKeys $ \k ->
+                  if k == 0
+                    then pure []
+                    else pure (catMaybes [IM.lookup k oldRects, IM.lookup k newRects])
+            let layoutRs = if animLive then moved else []
+                base =
+                  unionRects
+                    ( rs
+                        ++ animRs
+                        ++ layoutRs
+                        ++ floatingRectDamage oldFloatingRects newFloatingRects
+                    )
+                clip =
+                  if rectW base <= 0 || rectH base <= 0
+                    then Rect 0 0 0 0
+                    else rectInflate textClipSlop base
+                winArea = winW * winH
+            if (animLive && not (nonzeroRect clip))
+                 || (winArea > 0 && rectArea clip > winArea * 0.5)
+              then pure DamageFull
+              else pure (DamageClip clip)
   writeIORef (ctxDamage ctx) dmg
   writeIORef (ctxLastWindowSize ctx) (Size winW winH)
   writeIORef (ctxPrevFloatingRects ctx) newFloatingRects

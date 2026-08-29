@@ -145,6 +145,10 @@ newSdlContext = do
 animateTimeout :: Int
 animateTimeout = 16
 
+-- One hitch must not skip a whole ease segment.
+maxFrameDt :: Float
+maxFrameDt = 0.05
+
 runSdlApp :: Context -> NanoUI () -> IO ()
 runSdlApp = runSdlAppEff runEff
 
@@ -333,12 +337,16 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace star
             editing <- textFieldActive ctx
             wasAnimWait <- readIORef wasAnimating
             nFullWait <- readIORef startupFull
-            -- Looping animateEase settles, then the next UI call restarts.
-            -- Keep a timeout frame after settle or waitEvent blocks until input.
-            -- Startup Full presents must not sit in waitEvent before they run.
-            if animating || wasAnimWait || nFullWait > 0 || wantDebug || editing || debugOpen
-              then waitEventTimeout animateTimeout
-              else waitEvent
+            -- Live tweens: poll only. Present already vsyncs. A 16ms wait
+            -- here stacks with vsync and drops the demo to ~30fps.
+            -- After settle, one timeout frame so looping animateEase can
+            -- restart. Startup Full must not sit in waitEvent.
+            if animating
+              then pure []
+              else
+                if wasAnimWait || nFullWait > 0 || wantDebug || editing || debugOpen
+                  then waitEventTimeout animateTimeout
+                  else waitEvent
       else pure queued
   let (group, rest) = splitFrame pending
   editActive <- textInputEditActive ctx
@@ -346,7 +354,7 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace star
     then pure ()
     else do
       now <- getMonotonicTime
-      let dt = realToFrac (now - lastT)
+      let dt = min maxFrameDt (realToFrac (now - lastT))
       noteLoop (sdlDebug env) dt
       let inp' =
             foldl'
@@ -386,7 +394,6 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace star
                          || nFull > 0
                      )
           when (grace > 0) $ writeIORef startupGrace (grace - 1)
-          writeIORef wasAnimating anim
           synced <-
             if shouldDraw
               then do
@@ -402,6 +409,10 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace star
                 noteSkip (sdlDebug env)
                 writeIORef prev inpSynced
                 pure inpSynced
+          animAfter <- anyAnimating ctx'
+          -- Pre-draw live or post-draw live/restart. Settle then looping
+          -- animateEase must not fall into waitEvent.
+          writeIORef wasAnimating (anim || animAfter)
           overlayQuit <- overlayConsumesQuit ctx' inpSynced
           if shouldQuit inpSynced && not overlayQuit
             then pure ()
@@ -486,7 +497,12 @@ finishDraw ctx env inp forceFull t0 drawData dirtyAfterUi = do
       pw = max 1 (round (lw * scale))
       ph = max 1 (round (lh * scale))
   (tex, retainNew) <- ensureRetain env pw ph
-  let damage = if forceFull || retainNew then DamageFull else snapDamage scale dmg0
+  animating <- anyAnimating ctx
+  let damage0 = if forceFull || retainNew then DamageFull else snapDamage scale dmg0
+      damage =
+        if damageIsEmpty damage0 && animating
+          then DamageFull
+          else damage0
   if damageIsEmpty damage || lw <= 0 || lh <= 0
     then do
       notePresent (sdlDebug env) ((t1 - t0) * 1000) drawData

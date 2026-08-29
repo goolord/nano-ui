@@ -16,53 +16,57 @@ main = do
     (\inp -> KeyEscape `elem` inputKeys inp)
     animUi
 
--- Ink chassis, pewter metal, ivory stock, tungsten lamp.
+-- Steenbeck flatbed: putty Formica, black 16mm path, cream frame, ruby rec.
 benchTheme :: Theme
 benchTheme =
-  let panelStyle =
+  let plate =
         Style
-          { styleBg = colorRGBA 30 34 42 255
-          , styleFg = colorRGBA 236 234 228 255
-          , styleBorder = colorRGBA 16 18 22 255
+          { styleBg = colorRGBA 214 208 196 255
+          , styleFg = colorRGBA 28 26 22 255
+          , styleBorder = colorRGBA 92 86 76 255
           , styleBorderWidth = 1
-          , styleCornerRadius = 2
-          , styleHoverBg = colorRGBA 40 46 56 255
-          , styleActiveBg = colorRGBA 24 28 34 255
+          , styleCornerRadius = 1
+          , styleHoverBg = colorRGBA 222 216 204 255
+          , styleActiveBg = colorRGBA 196 190 178 255
           }
    in defaultTheme
-        { themeWindow = colorRGBA 12 14 18 255
-        , themePanel = panelStyle
-        , themeFloatingWindow = panelStyle
+        { themeWindow = formica
+        , themePanel = plate
+        , themeFloatingWindow = plate
         , themeButton =
             Style
-              { styleBg = colorRGBA 44 50 62 255
-              , styleFg = colorRGBA 240 238 232 255
-              , styleBorder = colorRGBA 110 122 142 255
+              { styleBg = colorRGBA 196 190 176 255
+              , styleFg = colorRGBA 28 26 22 255
+              , styleBorder = colorRGBA 74 68 58 255
               , styleBorderWidth = 1
-              , styleCornerRadius = 2
-              , styleHoverBg = colorRGBA 58 68 84 255
-              , styleActiveBg = colorRGBA 32 36 46 255
+              , styleCornerRadius = 1
+              , styleHoverBg = colorRGBA 228 222 208 255
+              , styleActiveBg = colorRGBA 168 162 148 255
               }
         , themeInput =
             Style
-              { styleBg = colorRGBA 20 22 28 255
-              , styleFg = colorRGBA 236 234 228 255
-              , styleBorder = colorRGBA 78 88 104 255
+              { styleBg = colorRGBA 176 170 156 255
+              , styleFg = colorRGBA 28 26 22 255
+              , styleBorder = colorRGBA 74 68 58 255
               , styleBorderWidth = 1
-              , styleCornerRadius = 2
-              , styleHoverBg = colorRGBA 28 32 40 255
-              , styleActiveBg = colorRGBA 14 16 20 255
+              , styleCornerRadius = 1
+              , styleHoverBg = colorRGBA 186 180 166 255
+              , styleActiveBg = colorRGBA 158 152 138 255
               }
-        , themeSeparator = colorRGBA 78 88 104 255
-        , themeAccent = tungsten
-        , themeMuted = colorRGBA 148 156 170 255
+        , themeSeparator = colorRGBA 92 86 76 255
+        , themeAccent = ruby
+        , themeMuted = colorRGBA 90 84 74 255
+        , themeOverlayDim = colorRGBA 40 36 30 160
         }
 
-film, paper, tungsten, hole :: Color
-film = colorRGBA 8 10 14 255
-paper = colorRGBA 244 240 232 255
-tungsten = colorRGBA 232 186 110 255
-hole = colorRGBA 12 14 18 255
+formica, film, rail, paper, ruby, lamp, punch :: Color
+formica = colorRGBA 184 176 162 255
+film = colorRGBA 18 16 14 255
+rail = colorRGBA 42 38 34 255
+paper = colorRGBA 244 236 220 255
+ruby = colorRGBA 154 42 36 255
+lamp = colorRGBA 255 196 92 255
+punch = colorRGBA 232 224 208 255
 
 animUi :: NanoUI ()
 animUi = do
@@ -97,14 +101,16 @@ animUi = do
       footage = T.pack (printf "%d+%02d" (frames `div` 16) (frames `mod` 16))
       lampGlow = sin (lampT * pi)
   scroll (tight (grow defaultLayout)) $
-    column (padAll 22 . gap 16 . fillW $ defaultLayout) $ do
-      row (tight . gap 12 . alignMid . fillW $ defaultLayout) $ do
+    column (padAll 28 . gap 18 . fillW $ defaultLayout) $ do
+      row (tight . gap 10 . alignMid . fillW $ defaultLayout) $ do
         heading "16mm"
-        muted footage
         flex
+        withKey ("footage" :: String) (muted footage)
+      row (tight . gap 8 . alignMid . fillW $ defaultLayout) $ do
         clickButton "Expose" (setExposed True >> setRewinding False)
         clickButton "Rewind" (setExposed False >> setRewinding True)
         clickButton (if lampOn then "Lamp off" else "Lamp on") (setLamp (not lampOn))
+        flex
         clickButton (if tossed then "Catch" else "Toss") (setTossed (not tossed))
         clickButton (if stiffSpring then "Stiff" else "Bouncy") (setStiffSpring (not stiffSpring))
       throwSec <- do
@@ -129,7 +135,8 @@ animUi = do
             (setBellows (not bellowsOpen))
           flex
           let iris = 12 + 22 * bellowsT
-          void (box (fixedWH iris iris defaultLayout) (lerpColor film paper bellowsT))
+              irisCol = lerpColor film (lerpColor paper ruby 0.18) bellowsT
+          void (box (fixedWH iris iris defaultLayout) irisCol)
 
 settled :: Float -> Bool
 settled x = abs x < 0.001
@@ -149,30 +156,34 @@ lockThrow exposed throwSec = withKey ("cycleThrow" :: String) $ do
 
 transport :: Bool -> Bool -> Float -> Float -> Float -> Float -> NanoUI [Float]
 transport exposed rewinding throwSec time wash glow = do
-  let washCol = lerpColor film tungsten (wash * (0.2 + 0.55 * glow))
-  panel (padXY 0 0 . gap 0 . fillW $ defaultLayout) $
-    column (tight . gap 0 . fillW $ defaultLayout) $ do
-      perfs
-      void (box (fixedH 8 . fillW $ defaultLayout) washCol)
-      ts <-
-        column (padXY 14 10 . gap 8 . fillW $ defaultLayout) $
-          sequence
-            [ lane exposed rewinding throwSec time "Leader" EaseLinear
-            , lane exposed rewinding throwSec time "Gate" EaseInCubic
-            , lane exposed rewinding throwSec time "Shuttle" EaseOutCubic
-            , lane exposed rewinding throwSec time "Reg" EaseInOutCubic
-            , lane exposed rewinding throwSec time "Claw" EaseOutBack
-            , lane exposed rewinding throwSec time "Bezier" (EaseCubicBezier 0.33 0 0.2 1)
-            ]
-      void (box (fixedH 8 . fillW $ defaultLayout) washCol)
-      perfs
-      pure ts
+  let washCol = lerpColor film lamp (wash * (0.45 + 0.55 * glow))
+  column (tight . gap 0 . fillW $ defaultLayout) $ do
+    perfs
+    withKey ("washTop" :: String) (void (box (fixedH 10 . fillW $ defaultLayout) washCol))
+    ts <-
+      column (padXY 0 10 . gap 10 . fillW $ defaultLayout) $
+        sequence
+          [ lane exposed rewinding throwSec time "Leader" EaseLinear
+          , lane exposed rewinding throwSec time "Gate" EaseInCubic
+          , lane exposed rewinding throwSec time "Shuttle" EaseOutCubic
+          , lane exposed rewinding throwSec time "Reg" EaseInOutCubic
+          , lane exposed rewinding throwSec time "Claw" EaseOutBack
+          , lane exposed rewinding throwSec time "Bezier" (EaseCubicBezier 0.33 0 0.2 1)
+          ]
+    withKey ("washBot" :: String) (void (box (fixedH 10 . fillW $ defaultLayout) washCol))
+    perfs
+    pure ts
 
 perfs :: NanoUI ()
 perfs =
-  row (tight . gap 10 . padXY 10 4 . fillW $ defaultLayout) $
-    forM_ [0 .. 17 :: Int] $ \_ ->
-      void (box (fixedWH 7 5 defaultLayout) hole)
+  row (tight . gap 0 . alignMid . fillW $ defaultLayout) $ do
+    withKey ("perfL" :: String) (void (box (fixedWH 12 18 defaultLayout) film))
+    forM_ [0 .. 16 :: Int] $ \i ->
+      withKey i $ do
+        void (box (fixedWH 6 18 defaultLayout) film)
+        void (box (fixedWH 7 6 defaultLayout) punch)
+        void (box (fixedWH 3 18 defaultLayout) film)
+    withKey ("perfR" :: String) (void (box (fillW . fixedH 18 $ defaultLayout) film))
 
 pullHoldSec :: Float
 pullHoldSec = 1
@@ -199,17 +210,7 @@ laneT ease throwSec time =
               else 0
 
 tossRail :: Float -> NanoUI ()
-tossRail t =
-  row (tight . gap 10 . alignMid . fillW $ defaultLayout) $ do
-    void (labelEx (tight . fixedW 64 $ defaultLayout) "Spring")
-    void (box (fixedWH 3 16 defaultLayout) film)
-    column (tight . gap 0 . fillW $ defaultLayout) $ do
-      travel <- railTravel "Spring"
-      row (tight . alignMid . fillW $ defaultLayout) $ do
-        void (spacer (Fixed (max 0 (t * travel))) Fit)
-        void (box (fixedWH 18 18 defaultLayout) tungsten)
-        flex
-    void (box (fixedWH 3 16 defaultLayout) film)
+tossRail t = trackRow "Spring" t ruby
 
 lane :: Bool -> Bool -> Float -> Float -> T.Text -> Ease -> NanoUI Float
 lane exposed rewinding throwSec time name ease = do
@@ -220,23 +221,28 @@ lane exposed rewinding throwSec time name ease = do
         if rewinding
           then withKey name (animateToEase ease 0 throwSec)
           else pure 0
-  row (tight . gap 10 . alignMid . fillW $ defaultLayout) $ do
-    void (labelEx (tight . fixedW 64 $ defaultLayout) name)
-    void (box (fixedWH 3 16 defaultLayout) film)
-    column (tight . gap 0 . fillW $ defaultLayout) $ do
-      travel <- railTravel name
-      row (tight . alignMid . fillW $ defaultLayout) $ do
-        void (spacer (Fixed (max 0 (t * travel))) Fit)
-        void (box (fixedWH 18 18 defaultLayout) paper)
-        flex
-    void (box (fixedWH 3 16 defaultLayout) film)
+  trackRow name t paper
   pure t
+
+trackRow :: T.Text -> Float -> Color -> NanoUI ()
+trackRow name t shuttle =
+  withKey name $
+    row (tight . gap 12 . alignMid . fillW $ defaultLayout) $ do
+      void (labelEx (tight . fixedW 72 $ defaultLayout) name)
+      column (tight . gap 0 . fillW $ defaultLayout) $ do
+        travel <- railTravel name
+        row (tight . alignMid . fillW $ defaultLayout) $ do
+          void (box (fixedWH 4 22 defaultLayout) film)
+          void (spacer (Fixed (max 0 (t * travel))) Fit)
+          void (box (fixedWH 16 16 defaultLayout) shuttle)
+          flex
+          void (box (fixedWH 4 22 defaultLayout) film)
 
 railTravel :: T.Text -> NanoUI Float
 railTravel name = withKey (name <> "-rail") $ do
   ctx <- askContext
   wid <- currentId
   mrect <- uiIO (getPrevRect ctx wid)
-  void (box (fillW . fixedH 2 $ defaultLayout) film)
+  void (box (fillW . fixedH 3 $ defaultLayout) rail)
   let w = maybe 418 rectW mrect
-  pure (max 0 (w - 18))
+  pure (max 0 (w - 24))
