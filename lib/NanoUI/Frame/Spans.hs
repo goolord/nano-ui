@@ -172,7 +172,23 @@ import NanoUI.WidgetText
   )
 import NanoUI.Style (Padding (..), Style (..), Theme (..), scrollBarThumbColor, scrollBarTrackColor, themeAccent, themeButton, themeFloatingWindow, themeInput, themeMuted, themeOverlayDim, themePanel, themeSeparator, themeWindow)
 import NanoUI.Types (Color (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, lerpColor, rectContains, rectH, rectIntersect, rectOverlapArea, rectUnion, rectW, rectX, rectY, v2X, v2Y)
-import NanoUI.Frame.Internal (buildFloatingAncestorMap, displayText, floatingAncestor, floatingLabelPaint, nodeLabelPaint, padContentClip, scrollContentClip, tagClippedSpans, terminalModalOuterClip, textInputFocused, textInputValue, widgetOverlayAllowed, widgetVisualStyle)
+import NanoUI.Frame.Chrome
+  ( buildFloatingAncestorMap
+  , displayText
+  , floatingAncestor
+  , floatingLabelPaint
+  , nodeLabelPaint
+  , textInputFocused
+  , textInputValue
+  , widgetVisualStyle
+  )
+import NanoUI.Frame.Clip
+  ( padContentClip
+  , scrollContentClip
+  , tagClippedSpans
+  , terminalModalOuterClip
+  )
+import NanoUI.Frame.Hit (widgetOverlayAllowed)
 import NanoUI.Frame.Select (collectSelectDropdownSpans, selectDropRect)
 import NanoUI.Frame.TextInput (TextInputGeom (..), collectTextInputMenuSpans, tagSelectClippedSpans, tagTextInputClippedSpans, textInputFieldTextClip, textInputGeom, selectTextClip)
 import NanoUI.Frame.Scroll (scrollBarLayout, ScrollBarLayout (..))

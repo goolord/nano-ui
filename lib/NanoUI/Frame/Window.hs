@@ -167,7 +167,24 @@ import NanoUI.WidgetText
   )
 import NanoUI.Style (Padding (..), Style (..), Theme (..), scrollBarThumbColor, scrollBarTrackColor, themeAccent, themeButton, themeFloatingWindow, themeInput, themeMuted, themeOverlayDim, themePanel, themeSeparator, themeWindow)
 import NanoUI.Types (Color (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, lerpColor, rectContains, rectH, rectIntersect, rectOverlapArea, rectUnion, rectW, rectX, rectY, v2X, v2Y)
-import NanoUI.Frame.Internal (UiCursorKind (..), fillStyledRect, findNodeByWidgetId, modalTreeOpen, nodeInSubtree, nodeInTopmostModal, overlayModalStyle, overlayWindowStyle, pushMenuShadow, scrollChromeLane, scrollContentClip, strokeStyledRect, terminalModalOuterClip, topmostModalIdx, topmostWindowAtMouse, widgetOverlayAllowed)
+import NanoUI.Frame.CursorKind (UiCursorKind (..))
+import NanoUI.Frame.Chrome
+  ( fillStyledRect
+  , overlayModalStyle
+  , overlayWindowStyle
+  , pushMenuShadow
+  , strokeStyledRect
+  )
+import NanoUI.Frame.Clip (scrollChromeLane, scrollContentClip, terminalModalOuterClip)
+import NanoUI.Frame.Hit
+  ( findNodeByWidgetId
+  , modalTreeOpen
+  , nodeInSubtree
+  , nodeInTopmostModal
+  , topmostModalIdx
+  , topmostWindowAtMouse
+  , widgetOverlayAllowed
+  )
 import NanoUI.Frame.Input (findTopWidgetUnderMouse, isInteractiveNode)
 import NanoUI.Frame.Paint (walkChildren)
 import NanoUI.Frame.Redraw (probeHotId)

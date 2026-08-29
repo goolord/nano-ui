@@ -2,11 +2,6 @@
 
 module NanoUI.Context.Internal
   ( Context (..)
-  , PendingTooltip (..)
-  , TextInputMenu (..)
-  , TextInputDrag (..)
-  , WindowResizeEdge (..)
-  , WindowResizeDrag (..)
   , MeasureCacheKey
   , intKey
   , markDirty
@@ -22,6 +17,12 @@ import Data.Typeable (TypeRep)
 import Data.Word (Word64)
 import NanoUI.Animation (Animation)
 import NanoUI.Atlas (ImageAtlas)
+import NanoUI.Context.Types
+  ( PendingTooltip (..)
+  , TextInputDrag (..)
+  , TextInputMenu (..)
+  , WindowResizeDrag (..)
+  )
 import NanoUI.Draw (DrawArena)
 import NanoUI.Font (FontMetrics)
 import NanoUI.Host (HostProfile)
@@ -32,53 +33,6 @@ import NanoUI.Messages (FrameMsg)
 import NanoUI.Store (WidgetStore)
 import NanoUI.Style (Theme)
 import NanoUI.Types (Damage (..), Rect (..), Size (..))
-
-data PendingTooltip = PendingTooltip
-  { pendingTooltipWidget :: WidgetId
-  , pendingTooltipRect :: Rect
-  , pendingTooltipText :: Text
-  }
-  deriving (Eq, Show)
-
-data TextInputMenu = TextInputMenu
-  { textInputMenuWidget :: WidgetId
-  , textInputMenuRect :: Rect
-  }
-  deriving (Eq, Show)
-
-data TextInputDrag = TextInputDrag
-  { textInputDragWidget :: WidgetId
-  , textInputDragAnchor :: Int
-  , textInputDragClicks :: Int
-  }
-  deriving (Eq, Show)
-
-data WindowResizeEdge
-  = ResizeN
-  | ResizeS
-  | ResizeE
-  | ResizeW
-  | ResizeNE
-  | ResizeNW
-  | ResizeSE
-  | ResizeSW
-  deriving (Eq, Show)
-
-data WindowResizeDrag = WindowResizeDrag
-  { wrdWidget :: WidgetId
-  , wrdEdge :: WindowResizeEdge
-  , wrdGrabX :: Float
-  , wrdGrabY :: Float
-  , wrdStartX :: Float
-  , wrdStartY :: Float
-  , wrdStartW :: Float
-  , wrdStartH :: Float
-  , wrdMinW :: Float
-  , wrdMinH :: Float
-  , wrdMaxW :: Float
-  , wrdMaxH :: Float
-  }
-  deriving (Eq, Show)
 
 type MeasureCacheKey = (Text, Bool, Float)
 

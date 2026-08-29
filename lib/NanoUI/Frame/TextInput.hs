@@ -177,7 +177,23 @@ import NanoUI.WidgetText
   )
 import NanoUI.Style (Padding (..), Style (..), Theme (..), scrollBarThumbColor, scrollBarTrackColor, themeAccent, themeButton, themeFloatingWindow, themeInput, themeMuted, themeOverlayDim, themePanel, themeSeparator, themeWindow)
 import NanoUI.Types (Color (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, lerpColor, rectContains, rectH, rectIntersect, rectOverlapArea, rectUnion, rectW, rectX, rectY, v2X, v2Y)
-import NanoUI.Frame.Internal (UiCursorKind (..), displayText, fillStyledRect, overlayMenuStyle, padDropText, padTextClipRect, pushMenuShadow, strokeStyledRect, textInputFocused, textInputMenuCornerR, textInputMenuItemPadX, textInputMenuOuterPad, textInputMenuShadowOff, textInputValue, widgetOverlayAllowed)
+import NanoUI.Frame.Clip (padTextClipRect)
+import NanoUI.Frame.CursorKind (UiCursorKind (..))
+import NanoUI.Frame.Chrome
+  ( displayText
+  , fillStyledRect
+  , overlayMenuStyle
+  , padDropText
+  , pushMenuShadow
+  , strokeStyledRect
+  , textInputFocused
+  , textInputMenuCornerR
+  , textInputMenuItemPadX
+  , textInputMenuOuterPad
+  , textInputMenuShadowOff
+  , textInputValue
+  )
+import NanoUI.Frame.Hit (widgetOverlayAllowed)
 
 selectTextClip :: HostProfile -> Float -> Float -> Float -> Float -> FontMetrics -> Rect
 selectTextClip host x y w h fm =

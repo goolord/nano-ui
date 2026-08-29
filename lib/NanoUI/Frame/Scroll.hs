@@ -165,7 +165,8 @@ import NanoUI.WidgetText
   )
 import NanoUI.Style (Padding (..), Style (..), Theme (..), scrollBarThumbColor, scrollBarTrackColor, themeAccent, themeButton, themeFloatingWindow, themeInput, themeMuted, themeOverlayDim, themePanel, themeSeparator, themeWindow)
 import NanoUI.Types (Color (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, lerpColor, rectContains, rectH, rectIntersect, rectOverlapArea, rectUnion, rectW, rectX, rectY, v2X, v2Y)
-import NanoUI.Frame.Internal (findNodeByWidgetId, scrollContentClip, scrollChromeLane, topmostWindowAtMouse)
+import NanoUI.Frame.Clip (scrollChromeLane, scrollContentClip)
+import NanoUI.Frame.Hit (findNodeByWidgetId, topmostWindowAtMouse)
 
 scrollLineFor :: HostProfile -> Float
 scrollLineFor host = if isCellHost host then 1 else scrollLine

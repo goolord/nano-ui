@@ -169,7 +169,7 @@ import NanoUI.WidgetText
   )
 import NanoUI.Style (Padding (..), Style (..), Theme (..), scrollBarThumbColor, scrollBarTrackColor, themeAccent, themeButton, themeFloatingWindow, themeInput, themeMuted, themeOverlayDim, themePanel, themeSeparator, themeWindow)
 import NanoUI.Types (Color (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, lerpColor, rectContains, rectH, rectIntersect, rectOverlapArea, rectUnion, rectW, rectX, rectY, v2X, v2Y)
-import NanoUI.Frame.Internal (findNodeByWidgetId, overlayHitAllowed)
+import NanoUI.Frame.Hit (findNodeByWidgetId, overlayHitAllowed)
 import NanoUI.Frame.Select (selectDropRect)
 
 needsRedraw :: Context -> Input -> Input -> IO Bool
