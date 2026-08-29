@@ -38,6 +38,7 @@ module NanoUI.Draw
   ) where
 
 import Control.Monad (forM_, unless, when)
+import Data.Bits (shiftR, (.&.))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Primitive.Array (MutableArray, copyMutableArray, newArray, readArray, writeArray)
 import Data.Vector (Vector)
@@ -50,7 +51,7 @@ import Foreign.Ptr (Ptr)
 import Foreign.Storable (pokeByteOff)
 import GHC.Exts (RealWorld)
 import NanoUI.Font (FontMetrics (..), GlyphQuad (..))
-import NanoUI.Types (Color, Rect (..), colorToWord32, rectIntersect)
+import NanoUI.Types (Color (..), Rect (..), rectIntersect)
 import qualified Data.Text as T
 
 data Layer = LayerBackground | LayerContent | LayerOverlay | LayerChrome
@@ -59,9 +60,12 @@ data Layer = LayerBackground | LayerContent | LayerOverlay | LayerChrome
 data Vertex = Vertex
   { vtxX :: {-# UNPACK #-} !Float
   , vtxY :: {-# UNPACK #-} !Float
+  , vtxR :: {-# UNPACK #-} !Float
+  , vtxG :: {-# UNPACK #-} !Float
+  , vtxB :: {-# UNPACK #-} !Float
+  , vtxA :: {-# UNPACK #-} !Float
   , vtxU :: {-# UNPACK #-} !Float
   , vtxV :: {-# UNPACK #-} !Float
-  , vtxRgba :: {-# UNPACK #-} !Word32
   }
   deriving (Eq, Show)
 
@@ -115,7 +119,7 @@ indexCapacity :: Int
 indexCapacity = 8192
 
 vertexSize :: Int
-vertexSize = 20
+vertexSize = 32
 
 indexSize :: Int
 indexSize = 4
@@ -344,6 +348,16 @@ setTexture da tex = do
     flushCmd da
     writeIORef (daCurrentTexture da) tex
 
+{-# INLINE unpackColorF #-}
+unpackColorF :: Color -> (Float, Float, Float, Float)
+unpackColorF (Color w) =
+  let !inv255 = 1.0 / 255.0
+      !r = fromIntegral ((w `shiftR` 24) .&. 0xFF) * inv255
+      !g = fromIntegral ((w `shiftR` 16) .&. 0xFF) * inv255
+      !b = fromIntegral ((w `shiftR` 8) .&. 0xFF) * inv255
+      !a = fromIntegral (w .&. 0xFF) * inv255
+   in (r, g, b, a)
+
 {-# INLINE pushQuad #-}
 pushQuad :: DrawArena -> Rect -> Float -> Float -> Float -> Float -> Color -> IO ()
 pushQuad da (Rect x y w h) u0 v0 u1 v1 col = do
@@ -364,38 +378,54 @@ pushQuad da (Rect x y w h) u0 v0 u1 v1 col = do
         vc <- readIORef (daVertexCount da)
         ic <- readIORef (daIndexCount da)
         pure (vp, ip, vc, ic)
-  let !rgba = colorToWord32 col
+  let !(r, g, b, a) = unpackColorF col
       !vOff = base * vertexSize
       !iOff = baseIdx * indexSize
-      !b = fromIntegral base :: Word32
+      !baseIdxWord = fromIntegral base :: Word32
       !x1 = x + w
       !y1 = y + h
   pokeByteOff vp vOff x
   pokeByteOff vp (vOff + 4) y
-  pokeByteOff vp (vOff + 8) u0
-  pokeByteOff vp (vOff + 12) v0
-  pokeByteOff vp (vOff + 16) rgba
-  pokeByteOff vp (vOff + 20) x1
-  pokeByteOff vp (vOff + 24) y
-  pokeByteOff vp (vOff + 28) u1
-  pokeByteOff vp (vOff + 32) v0
-  pokeByteOff vp (vOff + 36) rgba
-  pokeByteOff vp (vOff + 40) x1
-  pokeByteOff vp (vOff + 44) y1
-  pokeByteOff vp (vOff + 48) u1
-  pokeByteOff vp (vOff + 52) v1
-  pokeByteOff vp (vOff + 56) rgba
-  pokeByteOff vp (vOff + 60) x
-  pokeByteOff vp (vOff + 64) y1
-  pokeByteOff vp (vOff + 68) u0
-  pokeByteOff vp (vOff + 72) v1
-  pokeByteOff vp (vOff + 76) rgba
-  pokeByteOff ip iOff b
-  pokeByteOff ip (iOff + 4) (b + 1)
-  pokeByteOff ip (iOff + 8) (b + 2)
-  pokeByteOff ip (iOff + 12) b
-  pokeByteOff ip (iOff + 16) (b + 2)
-  pokeByteOff ip (iOff + 20) (b + 3)
+  pokeByteOff vp (vOff + 8) r
+  pokeByteOff vp (vOff + 12) g
+  pokeByteOff vp (vOff + 16) b
+  pokeByteOff vp (vOff + 20) a
+  pokeByteOff vp (vOff + 24) u0
+  pokeByteOff vp (vOff + 28) v0
+
+  pokeByteOff vp (vOff + 32) x1
+  pokeByteOff vp (vOff + 36) y
+  pokeByteOff vp (vOff + 40) r
+  pokeByteOff vp (vOff + 44) g
+  pokeByteOff vp (vOff + 48) b
+  pokeByteOff vp (vOff + 52) a
+  pokeByteOff vp (vOff + 56) u1
+  pokeByteOff vp (vOff + 60) v0
+
+  pokeByteOff vp (vOff + 64) x1
+  pokeByteOff vp (vOff + 68) y1
+  pokeByteOff vp (vOff + 72) r
+  pokeByteOff vp (vOff + 76) g
+  pokeByteOff vp (vOff + 80) b
+  pokeByteOff vp (vOff + 84) a
+  pokeByteOff vp (vOff + 88) u1
+  pokeByteOff vp (vOff + 92) v1
+
+  pokeByteOff vp (vOff + 96) x
+  pokeByteOff vp (vOff + 100) y1
+  pokeByteOff vp (vOff + 104) r
+  pokeByteOff vp (vOff + 108) g
+  pokeByteOff vp (vOff + 112) b
+  pokeByteOff vp (vOff + 116) a
+  pokeByteOff vp (vOff + 120) u0
+  pokeByteOff vp (vOff + 124) v1
+
+  pokeByteOff ip iOff baseIdxWord
+  pokeByteOff ip (iOff + 4) (baseIdxWord + 1)
+  pokeByteOff ip (iOff + 8) (baseIdxWord + 2)
+  pokeByteOff ip (iOff + 12) baseIdxWord
+  pokeByteOff ip (iOff + 16) (baseIdxWord + 2)
+  pokeByteOff ip (iOff + 20) (baseIdxWord + 3)
   writeIORef (daVertexCount da) (base + 4)
   writeIORef (daIndexCount da) (baseIdx + 6)
 
@@ -430,72 +460,194 @@ pushImage da rect tex u0 v0 u1 v1 col
       setTexture da tex
       pushQuad da rect u0 v0 u1 v1 col
 
--- Rounded fills: vtxU = radius, vtxV = -1. Strokes: vtxV = -(1 + borderWidth).
-{-# INLINE pushRoundedRect #-}
-pushRoundedRect :: DrawArena -> Rect -> Float -> Color -> IO ()
-pushRoundedRect da rect radius col = pushRoundedCoded da rect radius (-1) col
+cornerSegments :: Int
+cornerSegments = 4
 
-{-# INLINE pushRoundedStroke #-}
-pushRoundedStroke :: DrawArena -> Rect -> Float -> Float -> Color -> IO ()
-pushRoundedStroke da rect radius bw col =
-  pushRoundedCoded da rect radius (-(1 + max 1 bw)) col
-
-{-# INLINE pushRoundedCoded #-}
-pushRoundedCoded :: DrawArena -> Rect -> Float -> Float -> Color -> IO ()
-pushRoundedCoded da (Rect x y w h) radius v col = do
-  setTexture da 0
+pushCornerFan :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
+pushCornerFan da cx cy rad a0 a1 col = do
+  let !segs = cornerSegments
+      !needV = segs + 2
+      !needI = segs * 3
   vCount <- readIORef (daVertexCount da)
   iCount <- readIORef (daIndexCount da)
   vCap <- readIORef (daVertexCap da)
   iCap <- readIORef (daIndexCap da)
   (vp, ip, base, baseIdx) <-
-    if vCount + 4 <= vCap && iCount + 6 <= iCap
+    if vCount + needV <= vCap && iCount + needI <= iCap
       then do
         vp <- readIORef (daVertexPtr da)
         ip <- readIORef (daIndexPtr da)
         pure (vp, ip, vCount, iCount)
       else do
-        ensureCapacity da 4 6
+        ensureCapacity da needV needI
         vp <- readIORef (daVertexPtr da)
         ip <- readIORef (daIndexPtr da)
         vc <- readIORef (daVertexCount da)
         ic <- readIORef (daIndexCount da)
         pure (vp, ip, vc, ic)
-  let !rgba = colorToWord32 col
-      !r = max 0 radius
-      !vOff = base * vertexSize
-      !iOff = baseIdx * indexSize
-      !b = fromIntegral base :: Word32
-      !x1 = x + w
-      !y1 = y + h
-  pokeByteOff vp vOff x
-  pokeByteOff vp (vOff + 4) y
-  pokeByteOff vp (vOff + 8) r
-  pokeByteOff vp (vOff + 12) v
-  pokeByteOff vp (vOff + 16) rgba
-  pokeByteOff vp (vOff + 20) x1
-  pokeByteOff vp (vOff + 24) y
-  pokeByteOff vp (vOff + 28) r
-  pokeByteOff vp (vOff + 32) v
-  pokeByteOff vp (vOff + 36) rgba
-  pokeByteOff vp (vOff + 40) x1
-  pokeByteOff vp (vOff + 44) y1
-  pokeByteOff vp (vOff + 48) r
-  pokeByteOff vp (vOff + 52) v
-  pokeByteOff vp (vOff + 56) rgba
-  pokeByteOff vp (vOff + 60) x
-  pokeByteOff vp (vOff + 64) y1
-  pokeByteOff vp (vOff + 68) r
-  pokeByteOff vp (vOff + 72) v
-  pokeByteOff vp (vOff + 76) rgba
-  pokeByteOff ip iOff b
-  pokeByteOff ip (iOff + 4) (b + 1)
-  pokeByteOff ip (iOff + 8) (b + 2)
-  pokeByteOff ip (iOff + 12) b
-  pokeByteOff ip (iOff + 16) (b + 2)
-  pokeByteOff ip (iOff + 20) (b + 3)
-  writeIORef (daVertexCount da) (base + 4)
-  writeIORef (daIndexCount da) (baseIdx + 6)
+  let !(r, g, b, a) = unpackColorF col
+      !centerOff = base * vertexSize
+      !centerIdx = fromIntegral base :: Word32
+  pokeByteOff vp centerOff cx
+  pokeByteOff vp (centerOff + 4) cy
+  pokeByteOff vp (centerOff + 8) r
+  pokeByteOff vp (centerOff + 12) g
+  pokeByteOff vp (centerOff + 16) b
+  pokeByteOff vp (centerOff + 20) a
+  pokeByteOff vp (centerOff + 24) (0 :: Float)
+  pokeByteOff vp (centerOff + 28) (0 :: Float)
+
+  let !step = (a1 - a0) / fromIntegral segs
+  forM_ [0 .. segs] $ \i -> do
+    let !ang = a0 + step * fromIntegral i
+        !vx = cx + rad * cos ang
+        !vy = cy + rad * sin ang
+        !vOff = (base + 1 + i) * vertexSize
+    pokeByteOff vp vOff vx
+    pokeByteOff vp (vOff + 4) vy
+    pokeByteOff vp (vOff + 8) r
+    pokeByteOff vp (vOff + 12) g
+    pokeByteOff vp (vOff + 16) b
+    pokeByteOff vp (vOff + 20) a
+    pokeByteOff vp (vOff + 24) (0 :: Float)
+    pokeByteOff vp (vOff + 28) (0 :: Float)
+    when (i > 0) $ do
+      let !rim0 = fromIntegral (base + i) :: Word32
+          !rim1 = fromIntegral (base + 1 + i) :: Word32
+          !iOff = (baseIdx + (i - 1) * 3) * indexSize
+      pokeByteOff ip iOff centerIdx
+      pokeByteOff ip (iOff + 4) rim0
+      pokeByteOff ip (iOff + 8) rim1
+
+  writeIORef (daVertexCount da) (base + needV)
+  writeIORef (daIndexCount da) (baseIdx + needI)
+
+pushCornerArc :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
+pushCornerArc da cx cy outerR innerR a0 a1 col
+  | innerR <= 0.001 = pushCornerFan da cx cy outerR a0 a1 col
+  | otherwise = do
+      let !segs = cornerSegments
+          !needV = (segs + 1) * 2
+          !needI = segs * 6
+      vCount <- readIORef (daVertexCount da)
+      iCount <- readIORef (daIndexCount da)
+      vCap <- readIORef (daVertexCap da)
+      iCap <- readIORef (daIndexCap da)
+      (vp, ip, base, baseIdx) <-
+        if vCount + needV <= vCap && iCount + needI <= iCap
+          then do
+            vp <- readIORef (daVertexPtr da)
+            ip <- readIORef (daIndexPtr da)
+            pure (vp, ip, vCount, iCount)
+          else do
+            ensureCapacity da needV needI
+            vp <- readIORef (daVertexPtr da)
+            ip <- readIORef (daIndexPtr da)
+            vc <- readIORef (daVertexCount da)
+            ic <- readIORef (daIndexCount da)
+            pure (vp, ip, vc, ic)
+      let !(r, g, b, a) = unpackColorF col
+          !step = (a1 - a0) / fromIntegral segs
+      forM_ [0 .. segs] $ \i -> do
+        let !ang = a0 + step * fromIntegral i
+            !ca = cos ang
+            !sa = sin ang
+            !ox = cx + outerR * ca
+            !oy = cy + outerR * sa
+            !ix = cx + innerR * ca
+            !iy = cy + innerR * sa
+            !oOff = (base + i * 2) * vertexSize
+            !iOffV = (base + i * 2 + 1) * vertexSize
+        pokeByteOff vp oOff ox
+        pokeByteOff vp (oOff + 4) oy
+        pokeByteOff vp (oOff + 8) r
+        pokeByteOff vp (oOff + 12) g
+        pokeByteOff vp (oOff + 16) b
+        pokeByteOff vp (oOff + 20) a
+        pokeByteOff vp (oOff + 24) (0 :: Float)
+        pokeByteOff vp (oOff + 28) (0 :: Float)
+
+        pokeByteOff vp iOffV ix
+        pokeByteOff vp (iOffV + 4) iy
+        pokeByteOff vp (iOffV + 8) r
+        pokeByteOff vp (iOffV + 12) g
+        pokeByteOff vp (iOffV + 16) b
+        pokeByteOff vp (iOffV + 20) a
+        pokeByteOff vp (iOffV + 24) (0 :: Float)
+        pokeByteOff vp (iOffV + 28) (0 :: Float)
+
+        when (i > 0) $ do
+          let !o0 = fromIntegral (base + (i - 1) * 2) :: Word32
+              !i0 = fromIntegral (base + (i - 1) * 2 + 1) :: Word32
+              !o1 = fromIntegral (base + i * 2) :: Word32
+              !i1 = fromIntegral (base + i * 2 + 1) :: Word32
+              !idxOff = (baseIdx + (i - 1) * 6) * indexSize
+          pokeByteOff ip idxOff o0
+          pokeByteOff ip (idxOff + 4) i0
+          pokeByteOff ip (idxOff + 8) i1
+          pokeByteOff ip (idxOff + 12) o0
+          pokeByteOff ip (idxOff + 16) i1
+          pokeByteOff ip (idxOff + 20) o1
+
+      writeIORef (daVertexCount da) (base + needV)
+      writeIORef (daIndexCount da) (baseIdx + needI)
+
+{-# INLINE pushRoundedRect #-}
+pushRoundedRect :: DrawArena -> Rect -> Float -> Color -> IO ()
+pushRoundedRect da rect@(Rect x y w h) radius col
+  | w <= 0 || h <= 0 = pure ()
+  | radius <= 0.5 = pushRect da rect col
+  | otherwise = do
+      let !rad = min radius (min (w * 0.5) (h * 0.5))
+      if rad <= 0.5
+        then pushRect da rect col
+        else do
+          setTexture da 0
+          let !midW = max 0 (w - 2 * rad)
+              !midH = max 0 (h - 2 * rad)
+          when (midW > 0 && midH > 0) $
+            pushQuad da (Rect (x + rad) (y + rad) midW midH) 0 0 1 1 col
+          when (midW > 0) $ do
+            pushQuad da (Rect (x + rad) y midW rad) 0 0 1 1 col
+            pushQuad da (Rect (x + rad) (y + h - rad) midW rad) 0 0 1 1 col
+          when (midH > 0) $ do
+            pushQuad da (Rect x (y + rad) rad midH) 0 0 1 1 col
+            pushQuad da (Rect (x + w - rad) (y + rad) rad midH) 0 0 1 1 col
+          pushCornerFan da (x + rad) (y + rad) rad pi (pi * 1.5) col
+          pushCornerFan da (x + w - rad) (y + rad) rad (pi * 1.5) (pi * 2) col
+          pushCornerFan da (x + w - rad) (y + h - rad) rad 0 (pi * 0.5) col
+          pushCornerFan da (x + rad) (y + h - rad) rad (pi * 0.5) pi col
+
+{-# INLINE pushRoundedStroke #-}
+pushRoundedStroke :: DrawArena -> Rect -> Float -> Float -> Color -> IO ()
+pushRoundedStroke da (Rect x y w h) radius bw col
+  | w <= 0 || h <= 0 || bw <= 0 = pure ()
+  | otherwise = do
+      setTexture da 0
+      let !rad = min (max 0 radius) (min (w * 0.5) (h * 0.5))
+          !ibw = min bw (min (w * 0.5) (h * 0.5))
+      if rad <= 0.5
+        then do
+          let !midH = max 0 (h - 2 * ibw)
+          pushQuad da (Rect x y w ibw) 0 0 1 1 col
+          pushQuad da (Rect x (y + h - ibw) w ibw) 0 0 1 1 col
+          when (midH > 0) $ do
+            pushQuad da (Rect x (y + ibw) ibw midH) 0 0 1 1 col
+            pushQuad da (Rect (x + w - ibw) (y + ibw) ibw midH) 0 0 1 1 col
+        else do
+          let !midW = max 0 (w - 2 * rad)
+              !midH = max 0 (h - 2 * rad)
+              !innerR = max 0 (rad - ibw)
+          when (midW > 0) $ do
+            pushQuad da (Rect (x + rad) y midW ibw) 0 0 1 1 col
+            pushQuad da (Rect (x + rad) (y + h - ibw) midW ibw) 0 0 1 1 col
+          when (midH > 0) $ do
+            pushQuad da (Rect x (y + rad) ibw midH) 0 0 1 1 col
+            pushQuad da (Rect (x + w - ibw) (y + rad) ibw midH) 0 0 1 1 col
+          pushCornerArc da (x + rad) (y + rad) rad innerR pi (pi * 1.5) col
+          pushCornerArc da (x + w - rad) (y + rad) rad innerR (pi * 1.5) (pi * 2) col
+          pushCornerArc da (x + w - rad) (y + h - rad) rad innerR 0 (pi * 0.5) col
+          pushCornerArc da (x + rad) (y + h - rad) rad innerR (pi * 0.5) pi col
 
 {-# INLINE pushLine #-}
 pushLine :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
@@ -537,28 +689,40 @@ pushFilledTriangle da x0 y0 x1 y1 x2 y2 col = do
         vc <- readIORef (daVertexCount da)
         ic <- readIORef (daIndexCount da)
         pure (vp, ip, vc, ic)
-  let !rgba = colorToWord32 col
+  let !(r, g, b, a) = unpackColorF col
       !vOff = base * vertexSize
       !iOff = baseIdx * indexSize
-      !b = fromIntegral base :: Word32
+      !baseIdxWord = fromIntegral base :: Word32
   pokeByteOff vp vOff x0
   pokeByteOff vp (vOff + 4) y0
-  pokeByteOff vp (vOff + 8) (-3 :: Float)
-  pokeByteOff vp (vOff + 12) (0 :: Float)
-  pokeByteOff vp (vOff + 16) rgba
-  pokeByteOff vp (vOff + 20) x1
-  pokeByteOff vp (vOff + 24) y1
-  pokeByteOff vp (vOff + 28) (-3 :: Float)
-  pokeByteOff vp (vOff + 32) (0 :: Float)
-  pokeByteOff vp (vOff + 36) rgba
-  pokeByteOff vp (vOff + 40) x2
-  pokeByteOff vp (vOff + 44) y2
-  pokeByteOff vp (vOff + 48) (-3 :: Float)
-  pokeByteOff vp (vOff + 52) (0 :: Float)
-  pokeByteOff vp (vOff + 56) rgba
-  pokeByteOff ip iOff b
-  pokeByteOff ip (iOff + 4) (b + 1)
-  pokeByteOff ip (iOff + 8) (b + 2)
+  pokeByteOff vp (vOff + 8) r
+  pokeByteOff vp (vOff + 12) g
+  pokeByteOff vp (vOff + 16) b
+  pokeByteOff vp (vOff + 20) a
+  pokeByteOff vp (vOff + 24) (-3 :: Float)
+  pokeByteOff vp (vOff + 28) (0 :: Float)
+
+  pokeByteOff vp (vOff + 32) x1
+  pokeByteOff vp (vOff + 36) y1
+  pokeByteOff vp (vOff + 40) r
+  pokeByteOff vp (vOff + 44) g
+  pokeByteOff vp (vOff + 48) b
+  pokeByteOff vp (vOff + 52) a
+  pokeByteOff vp (vOff + 56) (-3 :: Float)
+  pokeByteOff vp (vOff + 60) (0 :: Float)
+
+  pokeByteOff vp (vOff + 64) x2
+  pokeByteOff vp (vOff + 68) y2
+  pokeByteOff vp (vOff + 72) r
+  pokeByteOff vp (vOff + 76) g
+  pokeByteOff vp (vOff + 80) b
+  pokeByteOff vp (vOff + 84) a
+  pokeByteOff vp (vOff + 88) (-3 :: Float)
+  pokeByteOff vp (vOff + 92) (0 :: Float)
+
+  pokeByteOff ip iOff baseIdxWord
+  pokeByteOff ip (iOff + 4) (baseIdxWord + 1)
+  pokeByteOff ip (iOff + 8) (baseIdxWord + 2)
   writeIORef (daVertexCount da) (base + 3)
   writeIORef (daIndexCount da) (baseIdx + 3)
 

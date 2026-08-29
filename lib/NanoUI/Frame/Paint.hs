@@ -180,7 +180,7 @@ import NanoUI.Frame.Clip (scrollContentClip, terminalModalOuterClip)
 import NanoUI.Frame.Hit (widgetOverlayAllowed)
 import NanoUI.Frame.Scroll (paintScrollChrome)
 import NanoUI.Frame.Spans (collectNodeTextSpans, sliderValue, widgetTextPlacements, widgetTextSpans)
-import NanoUI.Frame.TextInput (TextInputGeom (..), drawTextInputCaret, textInputFieldTextClip, textInputGeom)
+import NanoUI.Frame.TextInput (TextInputGeom (..), drawTextInputCaret, drawTextInputSelection, textInputFieldTextClip, textInputGeom)
 
 lowerShapes :: Context -> IO ()
 lowerShapes ctx = do
@@ -269,12 +269,14 @@ lowerNode ctx idx = do
                                           then (ctxMonoFontMetrics ctx, stripMonoFontMarker lbl)
                                           else (fm, lbl)
                 pushText da lblFm lx ly lblShown lfg
-              withClip da clip $
+              withClip da clip $ do
+                drawTextInputSelection da ctx idx x y w h style
                 unless (T.null field) $ do
                   let (fieldFm, fieldShown) = if hasMonoFontMarker field
                                                 then (ctxMonoFontMetrics ctx, stripMonoFontMarker field)
                                                 else (fm, field)
                   pushText da fieldFm fx fy fieldShown ffg
+                drawTextInputCaret da ctx idx x y w h style
             [lblSpan] -> do
               let (Rect lx ly _ _, lbl, lfg, _) = lblSpan
               unless (T.null lbl) $ do
@@ -282,8 +284,8 @@ lowerNode ctx idx = do
                                           then (ctxMonoFontMetrics ctx, stripMonoFontMarker lbl)
                                           else (fm, lbl)
                 pushText da lblFm lx ly lblShown lfg
+              drawTextInputCaret da ctx idx x y w h style
             _ -> pure ()
-          drawTextInputCaret da ctx idx x y w h style
     NodeSpacer -> pure ()
     NodeModal -> pure ()
     NodeWindow -> pure ()

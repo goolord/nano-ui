@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum { NANO_UI_VTX_STRIDE = 20 };
+enum { NANO_UI_VTX_STRIDE = sizeof(SDL_Vertex) };
 enum { NANO_UI_CORNER_SEGS = 8 };
 enum {
     NANO_UI_SOLID_BATCH = 512,
@@ -17,13 +17,7 @@ enum {
 #define NANO_UI_PI 3.14159265358979323846f
 #endif
 
-typedef struct {
-    float x;
-    float y;
-    float u;
-    float v;
-    uint32_t rgba;
-} NanoUiVertex;
+typedef SDL_Vertex NanoUiVertex;
 
 bool nano_ui_fill_rounded_rect(
     SDL_Renderer *renderer,
@@ -521,33 +515,6 @@ void nano_ui_batch_stroke_rounded_rect(
     nano_ui_stroke_rounded_rect(batch->renderer, r, g, b, a, x, y, w, h, radius, bw);
 }
 
-static bool hits_damage(
-    int has_damage,
-    float dx,
-    float dy,
-    float dw,
-    float dh,
-    float x0,
-    float y0,
-    float x1,
-    float y1,
-    float x2,
-    float y2)
-{
-    if (!has_damage) {
-        return true;
-    }
-    float minx = fminf(x0, fminf(x1, x2));
-    float maxx = fmaxf(x0, fmaxf(x1, x2));
-    float miny = fminf(y0, fminf(y1, y2));
-    float maxy = fmaxf(y0, fmaxf(y1, y2));
-    float ix = fmaxf(minx, dx);
-    float iy = fmaxf(miny, dy);
-    float ix1 = fminf(maxx, dx + dw);
-    float iy1 = fminf(maxy, dy + dh);
-    return ix < ix1 && iy < iy1;
-}
-
 void nano_ui_batch_draw_range(
     NanoUiBatch *batch,
     const uint8_t *verts,
@@ -567,101 +534,25 @@ void nano_ui_batch_draw_range(
     float dmg_w,
     float dmg_h)
 {
-    if (!batch || !verts || !indices || vert_count <= 0 || index_n < 3 || scale <= 0.f) {
+    (void)index_count;
+    (void)tex_id;
+    (void)tex_w;
+    (void)tex_h;
+    (void)scale;
+    (void)has_damage;
+    (void)dmg_x;
+    (void)dmg_y;
+    (void)dmg_w;
+    (void)dmg_h;
+
+    if (!batch || !verts || !indices || vert_count <= 0 || index_n < 3) {
         return;
     }
-    int end = index_start + index_n;
     if (index_start < 0) {
         index_start = 0;
     }
-    if (end > index_count) {
-        end = index_count;
-    }
-    const NanoUiVertex *vtx = (const NanoUiVertex *)verts;
-    const uint32_t *idx = (const uint32_t *)indices;
-    for (int i = index_start; i + 2 < end; i += 3) {
-        uint32_t i0 = idx[i];
-        uint32_t i1 = idx[i + 1];
-        uint32_t i2 = idx[i + 2];
-        if ((int)i0 >= vert_count || (int)i1 >= vert_count || (int)i2 >= vert_count) {
-            continue;
-        }
-        const NanoUiVertex *v0 = &vtx[i0];
-        const NanoUiVertex *v1 = &vtx[i1];
-        const NanoUiVertex *v2 = &vtx[i2];
-        float x0 = v0->x;
-        float y0 = v0->y;
-        float u0 = v0->u;
-        float v0_coord = v0->v;
-        float x1 = v1->x;
-        float y1 = v1->y;
-        float x2 = v2->x;
-        float y2 = v2->y;
-        uint32_t rgba0 = v0->rgba;
-
-        if (!hits_damage(has_damage, dmg_x, dmg_y, dmg_w, dmg_h, x0, y0, x1, y1, x2, y2)) {
-            continue;
-        }
-        uint8_t r = (uint8_t)((rgba0 >> 24) & 0xFFu);
-        uint8_t g = (uint8_t)((rgba0 >> 16) & 0xFFu);
-        uint8_t b = (uint8_t)((rgba0 >> 8) & 0xFFu);
-        uint8_t a = (uint8_t)(rgba0 & 0xFFu);
-        if (tex_id > 0) {
-            float w = x2 - x0;
-            float h = y2 - y0;
-            if (w <= 0.f || h <= 0.f) {
-                continue;
-            }
-            float px = x0 * scale;
-            float py = y0 * scale;
-            float pw = w * scale;
-            float ph = h * scale;
-            if (texture) {
-                nano_ui_batch_texture_dst(batch, texture, tex_w, tex_h, px, py, pw, ph, u0, v0_coord, v2->u, v2->v, r, g, b, a);
-            } else {
-                nano_ui_batch_fill_solid(batch, r, g, b, a, px, py, pw, ph);
-            }
-            i += 3;
-        } else if (u0 <= -1.5f) {
-            nano_ui_batch_triangle(
-                batch,
-                r,
-                g,
-                b,
-                a,
-                x0 * scale,
-                y0 * scale,
-                x1 * scale,
-                y1 * scale,
-                x2 * scale,
-                y2 * scale);
-        } else {
-            float w = x2 - x0;
-            float h = y2 - y0;
-            if (w <= 0.f || h <= 0.f) {
-                continue;
-            }
-            float px = x0 * scale;
-            float py = y0 * scale;
-            float pw = w * scale;
-            float ph = h * scale;
-            if (v0_coord < 0.f) {
-                float rad = u0 * scale;
-                if (v0_coord <= -2.f) {
-                    float bw = (-v0_coord - 1.f) * scale;
-                    if (bw < 1.f) {
-                        bw = 1.f;
-                    }
-                    nano_ui_batch_stroke_rounded_rect(batch, r, g, b, a, px, py, pw, ph, rad, bw);
-                } else {
-                    nano_ui_batch_rounded_rect(batch, r, g, b, a, px, py, pw, ph, rad);
-                }
-                /* Quads emit two tris. Skip the paired tri so we stroke/fill once. */
-                i += 3;
-            } else {
-                nano_ui_batch_fill_solid(batch, r, g, b, a, px, py, pw, ph);
-                i += 3;
-            }
-        }
-    }
+    nano_ui_batch_flush(batch);
+    const SDL_Vertex *sdl_verts = (const SDL_Vertex *)verts;
+    const int *idx = (const int *)indices + index_start;
+    SDL_RenderGeometry(batch->renderer, texture, sdl_verts, vert_count, idx, index_n);
 }
