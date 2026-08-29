@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module NanoUI
   ( -- Types
     V2 (..)
@@ -76,6 +78,8 @@ module NanoUI
   , currentId
   , -- Widgets
     Response (..)
+  , Responding (..)
+  , Clickable (..)
   , panel
   , row
   , column
@@ -95,6 +99,24 @@ module NanoUI
   , select
   , modal
   , window
+  , Tab (..)
+  , TabStyle (..)
+  , TabOrientation (..)
+  , TabResponse (..)
+  , tabRespClicked
+  , tabRespChanged
+  , tab
+  , closableTab
+  , mkTab
+  , tabs
+  , tabsEx
+  , tabBar
+  , tabBarEx
+  , tabsEmit
+  , tabsEmitEx
+  , useTab
+  , useTabIdx
+  , boundedTabs
   , image
   , box
   , onClick
@@ -270,7 +292,9 @@ import NanoUI.Types
   , v2Add
   )
 import NanoUI.Widgets
-  ( Response (..)
+  ( Clickable (..)
+  , Responding (..)
+  , Response (..)
   , animate
   , animateEase
   , animateEaseDelay
@@ -315,4 +339,24 @@ import NanoUI.Widgets
   , useText
   , useToggle
   , window
+  )
+import NanoUI.Widgets.Tabs
+  ( Tab (..)
+  , TabOrientation (..)
+  , TabResponse (..)
+  , TabStyle (..)
+  , boundedTabs
+  , closableTab
+  , mkTab
+  , tab
+  , tabBar
+  , tabBarEx
+  , tabRespChanged
+  , tabRespClicked
+  , tabs
+  , tabsEx
+  , tabsEmit
+  , tabsEmitEx
+  , useTab
+  , useTabIdx
   )

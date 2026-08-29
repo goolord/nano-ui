@@ -153,7 +153,9 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace star
             editing <- textFieldActive ctx
             wasAnimWait <- readIORef wasAnimating
             nFullWait <- readIORef startupFull
-            if animating
+            pendingDirtyWait <- readIORef pendingRedraw
+            dirtyWait <- isDirty ctx
+            if animating || pendingDirtyWait || dirtyWait
               then pure emptySmallArray
               else
                 if wasAnimWait || nFullWait > 0 || wantDebug || editing || debugOpen
@@ -211,9 +213,9 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace star
               then do
                 ms <-
                   tryWithDrawingLock drawing $ do
-                    (_, s) <- drawFn ctx' env inpSynced (debugOpen || wantDebug || nFull > 0)
+                    (dirtyOut, s) <- drawFn ctx' env inpSynced (debugOpen || wantDebug || nFull > 0)
                     when (nFull > 0) $ writeIORef startupFull (nFull - 1)
-                    writeIORef pendingRedraw False
+                    writeIORef pendingRedraw dirtyOut
                     writeIORef prev s
                     pure s
                 maybe (pure inpSynced) pure ms

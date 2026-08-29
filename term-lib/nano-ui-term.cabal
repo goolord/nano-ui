@@ -20,6 +20,7 @@ common extensions
     default-extensions:
         BangPatterns
         DeriveGeneric
+        DuplicateRecordFields
         FlexibleContexts
         GeneralizedNewtypeDeriving
         MagicHash

@@ -34,7 +34,7 @@ import NanoUI.Style
   , gap
   , tight
   )
-import NanoUI.Widgets.Node (Response (..), addWidget)
+import NanoUI.Widgets.Node (Responding (..), Response, addWidget, setClicked, setHovered)
 
 titleBarH :: Float
 titleBarH = 28
@@ -90,8 +90,6 @@ closeButton = do
           else tight . fixedWH h h . alignMid $ defaultLayout
   resp <- addWidget wid NodeButton stored 0 layout
   disabled <- uiIO (isDisabled ctx wid)
-  pure
-    resp
-      { respClicked = not disabled && respClicked resp
-      , respHovered = not disabled && respHovered resp
-      }
+  pure $
+    setClicked (not disabled && respClicked resp) $
+      setHovered (not disabled && respHovered resp) resp

@@ -25,6 +25,7 @@ module NanoUI.Frame.Chrome
   , padDropText
   , imageIdFromText
   , clamp01
+  , paintTabHeader
   ) where
 
 import Control.Monad (foldM, when)
@@ -41,7 +42,7 @@ import NanoUI.Context
   )
 import NanoUI.Draw (DrawArena, pushRect, pushRoundedRect, pushRoundedStroke)
 import NanoUI.Font (hasHeadingMarker, hasMutedMarker, stripWidgetMarkers)
-import NanoUI.Host (isCellHost)
+import NanoUI.Host (HostProfile, isCellHost)
 import NanoUI.Icons (iconSelectClosed, iconSelectOpen)
 import NanoUI.Id (hashWidgetId)
 import NanoUI.Layout.Arena
@@ -49,7 +50,9 @@ import NanoUI.Layout.Arena
   , NodeType (..)
   , arenaCount
   , getNodeType
+  , getNodeValue
   , getParent
+  , getStyleIdx
   , getText
   , getWidgetId
   , isFloatingNode
@@ -59,7 +62,9 @@ import NanoUI.WidgetMarkers
   ( buttonDisplayText
   , closeButtonDisplayText
   , isCloseButtonText
+  , isTabButtonText
   , stripButtonBrackets
+  , tabButtonDisplayText
   )
 import NanoUI.WidgetText
   ( checkboxLabelText
@@ -78,6 +83,7 @@ import NanoUI.Style
   , themeInput
   , themeMuted
   , themePanel
+  , themeWindow
   )
 import NanoUI.Types (Color (..), Rect (..), colorRGBA, lerpColor, rectH, rectW, rectX, rectY)
 
@@ -166,7 +172,9 @@ displayText ctx nt idx = do
         NodeButton ->
           if isCloseButtonText txt
             then pure (closeButtonDisplayText txt)
-            else pure txt
+            else if isTabButtonText txt
+                   then pure (tabButtonDisplayText txt)
+                   else pure (buttonDisplayText txt)
         NodeTextInput -> do
           value <- textInputValue ctx idx
           focused <- textInputFocused ctx idx
@@ -252,9 +260,126 @@ closeButtonStyle theme isHot animT =
         , styleFg = fg
         }
 
+tabHeaderVisualStyle :: Theme -> Int -> Bool -> Bool -> Float -> Style
+tabHeaderVisualStyle theme styleIdx isActive _isHot _animT =
+  let panel = themePanel theme
+      btn = themeButton theme
+      muted = themeMuted theme
+      window = themeWindow theme
+      accent = themeAccent theme
+      clear = colorRGBA 0 0 0 0
+      hoverLift = lerpColor window (styleHoverBg btn) 0.55
+   in case styleIdx of
+        1 ->
+          if isActive
+            then panel
+                { styleBg = accent
+                , styleHoverBg = accent
+                , styleFg = colorRGBA 255 255 255 255
+                , styleBorder = accent
+                , styleBorderWidth = 0
+                , styleCornerRadius = 6
+                }
+            else
+              panel
+                { styleBg = clear
+                , styleHoverBg = hoverLift
+                , styleFg = muted
+                , styleBorder = clear
+                , styleBorderWidth = 0
+                , styleCornerRadius = 6
+                }
+        2 ->
+          if isActive
+            then
+              panel
+                { styleBg = styleBg panel
+                , styleHoverBg = styleBg panel
+                , styleFg = styleFg panel
+                , styleBorder = styleBorder panel
+                , styleBorderWidth = 1
+                , styleCornerRadius = 8
+                }
+            else
+              panel
+                { styleBg = clear
+                , styleHoverBg = hoverLift
+                , styleFg = muted
+                , styleBorder = clear
+                , styleBorderWidth = 0
+                , styleCornerRadius = 8
+                }
+        _ ->
+          if isActive
+            then
+              panel
+                { styleBg = styleBg panel
+                , styleHoverBg = styleBg panel
+                , styleFg = styleFg panel
+                , styleBorder = styleBorder panel
+                , styleBorderWidth = 1
+                , styleCornerRadius = 6
+                }
+            else
+              panel
+                { styleBg = clear
+                , styleHoverBg = hoverLift
+                , styleFg = lerpColor muted (styleFg panel) 0.78
+                , styleBorder = clear
+                , styleBorderWidth = 0
+                , styleCornerRadius = 6
+                }
+
+paintTabHeader ::
+  DrawArena ->
+  HostProfile ->
+  Theme ->
+  Int ->
+  Bool ->
+  Style ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  IO ()
+paintTabHeader da host theme styleIdx isActive style x y w h =
+  when (not (isCellHost host)) $ do
+    let rect = Rect x y w h
+        r = max 0 (styleCornerRadius style)
+        accent = themeAccent theme
+        panel = themePanel theme
+        border = styleBorder panel
+        bg = styleBg style
+        clear = colorRGBA 0 0 0 0
+        hasFill = bg /= clear
+    if isActive
+      then case styleIdx of
+        1 -> pushRoundedRect da rect r bg
+        2 -> do
+          pushRoundedRect da rect r bg
+          strokeStyledRect da False style x y w h
+        _ -> do
+          pushRoundedRect da rect r bg
+          strokeTabHeaderSides da x y w h r border
+          pushRect da (Rect x (y + h - 2) w 2) accent
+      else when hasFill $ pushRoundedRect da rect r bg
+
+strokeTabHeaderSides ::
+  DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
+strokeTabHeaderSides da x y w h r col =
+  let bw = 1
+      inset = 0.5
+      ox = x + inset
+      oy = y + inset
+      ow = max 0 (w - 2 * inset)
+      oh = max 0 (h - 2 * inset)
+      rr = min r (min (ow / 2) (oh / 2))
+   in pushRoundedStroke da (Rect ox oy ow (oh + 1)) rr bw col
+
 widgetVisualStyle :: Context -> NodeType -> NodeIdx -> IO Style
 widgetVisualStyle ctx nt idx = do
   wid <- getWidgetId (ctxNodeArena ctx) idx
+  val <- getNodeValue (ctxNodeArena ctx) idx
   hot <- readIORef (ctxHotId ctx)
   active <- readIORef (ctxActiveId ctx)
   focus <- readIORef (ctxFocusId ctx)
@@ -264,7 +389,12 @@ widgetVisualStyle ctx nt idx = do
     if nt == NodeButton
       then getText (ctxNodeArena ctx) idx
       else pure T.empty
+  styleIdx <-
+    if nt == NodeButton
+      then getStyleIdx (ctxNodeArena ctx) idx
+      else pure 0
   let isClose = nt == NodeButton && isCloseButtonText storedText
+      isTab = nt == NodeButton && isTabButtonText storedText
   let theme = ctxTheme ctx
       terminal = isCellHost (ctxHostProfile ctx)
       isFocus = focus == wid
@@ -297,6 +427,34 @@ widgetVisualStyle ctx nt idx = do
               }
           NodeButton
             | isClose -> closeButtonStyle theme isHot animT
+            | isTab, terminal ->
+                let btn = themeButton theme
+                    accent = themeAccent theme
+                    muted = themeMuted theme
+                 in if val > 0.5
+                      then btn
+                        { styleBg = accent
+                        , styleHoverBg = accent
+                        , styleFg = colorRGBA 255 255 255 255
+                        , styleBorder = accent
+                        , styleBorderWidth = 0
+                        }
+                      else btn
+                        { styleBg = colorRGBA 0 0 0 0
+                        , styleHoverBg = colorRGBA 0 0 0 0
+                        , styleFg = muted
+                        , styleBorderWidth = 0
+                        }
+            | isTab ->
+                tabHeaderVisualStyle theme styleIdx (val > 0.5) isHot animT
+            | not terminal && val > 0.5 ->
+                let btn = themeButton theme
+                 in btn
+                      { styleBg = themeAccent theme
+                      , styleHoverBg = themeAccent theme
+                      , styleFg = colorRGBA 255 255 255 255
+                      , styleBorder = themeAccent theme
+                      }
             | Just NodeWindow <- mFloat, terminal -> themeFloatingWindow theme
             | Just NodeModal <- mFloat, terminal -> themeFloatingWindow theme
           _ -> themeButton theme
@@ -314,6 +472,7 @@ widgetVisualStyle ctx nt idx = do
         | nt == NodeTextInput, isFocus = styleActiveBg widgetBase
         | widKey == hashWidgetId active = styleActiveBg widgetBase
         | nt == NodeCheckbox || nt == NodeSlider || isClose = styleBg widgetBase
+        | isTab = hoverBackground widgetBase animT isHot
         | otherwise = hoverBackground widgetBase animT isHot
   pure widgetBase {styleBg = bg}
 

@@ -20,8 +20,20 @@ main = do
       ( column
           (defaultLayout {layoutWidth = Grow 1, layoutHeight = Grow 1})
           ( do
-              _ <- button "OK"
-              _ <- button "Cancel"
+              (tabResp, _) <- tabs ("Controls" :: String)
+                [ tab "Controls" "Controls" $ do
+                    _ <- button "OK"
+                    _ <- button "Cancel"
+                    _ <- label "Controls Tab Content"
+                    pure ()
+                , tab "Settings" "Settings" $ do
+                    _ <- label "Settings Tab Content"
+                    pure ()
+                , tab "Logs" "Logs" $ do
+                    _ <- label "Logs Tab Content"
+                    pure ()
+                ]
+              onClick tabResp (pure ())
               label "nano-ui demo"
           )
       )

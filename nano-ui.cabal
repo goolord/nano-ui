@@ -19,6 +19,7 @@ common extensions
     default-extensions:
         BangPatterns
         DeriveGeneric
+        DuplicateRecordFields
         FlexibleContexts
         GeneralizedNewtypeDeriving
         MagicHash
@@ -116,6 +117,7 @@ library
         NanoUI.Widgets.Node
         NanoUI.Widgets.Chrome
         NanoUI.Widgets.Layout
+        NanoUI.Widgets.Tabs
         NanoUI.Widgets.TextInput
         NanoUI.Widgets.Animate
         NanoUI.Widgets.Overlay
@@ -151,8 +153,13 @@ executable nano-ui-profile
     import:           rts-options
     import:           warnings
     main-is:          Profile.hs
+    hs-source-dirs:   examples
     build-depends:
         base ^>=4.22.0.0,
-        nano-ui
-    hs-source-dirs:   examples
+        bytestring ^>=0.12,
+        containers ^>=0.8,
+        effectful-core ^>=2.6,
+        nano-ui,
+        text ^>=2.1,
+        vector ^>=0.13
     default-language: GHC2024

@@ -4,6 +4,7 @@ module SdlDemo
     ( main
     , demoImages
     , demoUi
+    , DemoTab (..)
     ) where
 
 import Control.Monad (when)
@@ -47,6 +48,12 @@ main = do
 
 ------------------------------------------------------------------
 
+data DemoTab
+  = Controls
+  | List
+  | Diagnostics
+  deriving (Bounded, Enum, Eq, Ord, Read, Show)
+
 demoImages :: SmallArray RgbaImage
 demoImages =
   smallArrayFromList
@@ -57,9 +64,11 @@ demoImages =
 
 demoUi :: NanoUI ()
 demoUi = do
-  (click, setClick) <- useText ""
-  (aboutOpen, setAbout) <- useFlag False
-  (debugOpen, setDebug) <- useFlag False
+  (readClick, setClick) <- useText ""
+  (readAbout, setAbout) <- useFlag False
+  (readDebug, setDebug) <- useFlag False
+  debugOpen <- readDebug
+  aboutOpen <- readAbout
   scroll (tight (grow defaultLayout)) $
     column (padAll 8 . gap 8 . fillW $ defaultLayout) $ do
       panel (padXY 14 10 . gap 8 . fillW $ defaultLayout) $
@@ -74,23 +83,31 @@ demoUi = do
           clickButton "Debug" (setDebug (not debugOpen))
       row (tight . gap 8 . wrap . fillW $ defaultLayout) $ do
         card $ do
-          heading "Controls"
-          (_, checked) <- checkbox "Feature" False
-          (_, vol) <- slider "Volume" 0 100 50
-          (_, quality) <- select "Quality" ["Low", "Medium", "High"] 1
-          (_, name) <- textInput "Name" ""
-          sep
-          heading "List"
-          scroll (padAll 6 . fixedH 136 . fillW $ defaultLayout) $
-            column (tight . gap 0 . fillW $ defaultLayout) $
-              mapM_ (label_ . T.pack . ("Item " <>) . show) [1 .. 12 :: Int]
-          sep
-          heading "State"
-          kv "Feature" (onOff checked)
-          kv "Volume" (T.pack (show (round vol :: Int)))
-          kv "Quality" (T.pack (show quality))
-          kv "Name" (orDash name)
-          kv "Clicked" (orDash click)
+          boundedTabs Controls (T.pack . show) $ \case
+            Controls -> do
+              heading "Controls"
+              (_, checked) <- checkbox "Feature" False
+              (_, vol) <- slider "Volume" 0 100 50
+              (_, quality) <- select "Quality" ["Low", "Medium", "High"] 1
+              (_, name) <- textInput "Name" ""
+              sep
+              heading "State"
+              kv "Feature" (onOff checked)
+              kv "Volume" (T.pack (show (round vol :: Int)))
+              kv "Quality" (T.pack (show quality))
+              kv "Name" (orDash name)
+              click <- readClick
+              kv "Clicked" (orDash click)
+            List -> do
+              heading "Items"
+              scroll (padAll 6 . fixedH 136 . fillW $ defaultLayout) $
+                column (tight . gap 0 . fillW $ defaultLayout) $
+                  mapM_ (label_ . T.pack . ("Item " <>) . show) [1 .. 12 :: Int]
+            Diagnostics -> do
+              heading "Diagnostics"
+              kv "Renderer" "SDL3 Pinned Vertex Arena"
+              kv "Evaluation" "Zero-Cost Inactive Tabs"
+              kv "State" "SrcLoc Preserved"
         card $ do
           heading "Gallery"
           row (tight . gap 10 . wrap $ defaultLayout) $ do
@@ -233,11 +250,11 @@ checkerPixels =
 stripePixels =
   BS.pack
     [ chan
-    | y <- [0 .. 31] :: [Int]
+    | _y <- [0 .. 31] :: [Int]
     , x <- [0 .. 31] :: [Int]
-    , let on = (x + y) `mod` 8 < 4
+    , let on = (x `div` 4) `mod` 2 == 0
     , chan <-
         if on
-          then [80, 200, 220, 255]
-          else [20, 30, 90, 255]
+          then [80, 160, 220, 255]
+          else [30, 40, 60, 255]
     ]

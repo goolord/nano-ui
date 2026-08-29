@@ -47,7 +47,7 @@ import NanoUI.Input (Input (..), inputMouseDown)
 import NanoUI.Layout.Arena (resetNodeArena)
 import NanoUI.Layout.Solve (placeModals, placeWindows, solveLayout)
 import NanoUI.Monad (NanoUI, Ui, runUi)
-import NanoUI.Damage (updatePrevRects, writeDamage)
+import NanoUI.Damage (updatePrevRects, updatePrevNodeTexts, writeDamage)
 import NanoUI.Types (Size (..))
 
 import NanoUI.Frame.Cursor (UiCursorKind (..), cursorKindIs, pointerCursorWanted, uiCursorKind)
@@ -154,6 +154,7 @@ runFrameEff unlift ctx inp ui = do
   oldFocusRect <- getPrevRect ctx oldFocus
   oldFloatingRects <- readIORef (ctxPrevFloatingRects ctx)
   oldRects <- readIORef (ctxPrevRects ctx)
+  oldTexts <- readIORef (ctxPrevNodeTexts ctx)
   oldSize <- readIORef (ctxLastWindowSize ctx)
   oldStore <- getStore ctx
   wasDirty <- isDirty ctx
@@ -214,6 +215,8 @@ runFrameEff unlift ctx inp ui = do
   drawTooltipOverlays ctx
   drawData <- finishDraw (ctxDrawArena ctx)
   updatePrevRects ctx
+  updatePrevNodeTexts ctx
+  newTexts <- readIORef (ctxPrevNodeTexts ctx)
   overlayOpen <- overlayMenuOpen ctx
   writeDamage
     ctx
@@ -230,6 +233,8 @@ runFrameEff unlift ctx inp ui = do
     oldFocusRect
     oldFloatingRects
     oldRects
+    oldTexts
+    newTexts
     animKeys
   msgs <- drainMessages ctx
   dirtyAfterUi <- isDirty ctx

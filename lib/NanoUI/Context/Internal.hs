@@ -44,6 +44,7 @@ data Context = Context
   , ctxActiveId :: IORef WidgetId
   , ctxFocusId :: IORef WidgetId
   , ctxPrevRects :: IORef (IntMap Rect)
+  , ctxPrevNodeTexts :: IORef (IntMap Text)
   , ctxStore :: IORef WidgetStore
   , ctxAnimations :: IORef (IntMap Animation)
   , ctxAnimRest :: IORef (IntMap Float)

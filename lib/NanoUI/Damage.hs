@@ -1,5 +1,6 @@
 module NanoUI.Damage
   ( updatePrevRects
+  , updatePrevNodeTexts
   , floatingPanelRects
   , writeDamage
   ) where
@@ -8,6 +9,7 @@ import Control.Monad (foldM, forM, when)
 import Data.IORef (readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Maybe (catMaybes, isNothing)
+import Data.Text (Text)
 import Data.Text qualified as T
 import NanoUI.Context
   ( Context (..)
@@ -34,6 +36,7 @@ import NanoUI.Layout.Arena
   , arenaCount
   , getNodeType
   , getRect
+  , getText
   , getWidgetId
   )
 import NanoUI.Types
@@ -68,6 +71,25 @@ updatePrevRects ctx = do
                 then pure (IM.insertWith rectUnion (intKey wid) r m)
                 else pure m
 
+updatePrevNodeTexts :: Context -> IO ()
+updatePrevNodeTexts ctx = do
+  count <- arenaCount (ctxNodeArena ctx)
+  acc <- foldM add IM.empty [0 .. count - 1]
+  writeIORef (ctxPrevNodeTexts ctx) acc
+  where
+    add m idx = do
+      wid <- getWidgetId (ctxNodeArena ctx) idx
+      (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+      if hashWidgetId wid == 0
+        then pure m
+        else
+          let r = Rect x y w h
+           in if nonzeroRect r
+                then do
+                  txt <- getText (ctxNodeArena ctx) idx
+                  pure (IM.insert (intKey wid) txt m)
+                else pure m
+
 floatingPanelRects :: Context -> IO (IM.IntMap Rect)
 floatingPanelRects ctx = do
   n <- arenaCount (ctxNodeArena ctx)
@@ -100,9 +122,11 @@ writeDamage ::
   Maybe Rect ->
   IM.IntMap Rect ->
   IM.IntMap Rect ->
+  IM.IntMap Text ->
+  IM.IntMap Text ->
   [Int] ->
   IO ()
-writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFocus oldHotR oldActiveR oldFocusR oldFloatingRects oldRects animKeys = do
+writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFocus oldHotR oldActiveR oldFocusR oldFloatingRects oldRects oldTexts newTexts animKeys = do
   let Size winW winH = inputWindowSize inp
       sizeChanged =
         oldSize /= Size 0 0 && oldSize /= Size winW winH
@@ -134,14 +158,17 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
           || not (IM.null (storeWindowSize newStore))
       moved = rectDeltas oldRects newRects
       animLive = not (IM.null liveAnims) || settled
-      keysAppeared =
+      keysChanged =
         not (IM.null oldRects)
-          && not (IM.null (IM.difference newRects oldRects))
+          && ( not (IM.null (IM.difference newRects oldRects))
+                 || not (IM.null (IM.difference oldRects newRects))
+             )
       layoutSettle =
         not (IM.null oldRects)
           && not (null moved)
           && not animLive
       paintOrphan = orphanAnim && animLive
+      textChanged = not (IM.null (textChangeKeys oldTexts newTexts))
       full =
         wasDirty
           || dirtyNow
@@ -153,7 +180,8 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
           || floatingChanged
           || windowLive
           || paintOrphan
-          || keysAppeared
+          || keysChanged
+          || textChanged
           || layoutSettle
   dmg <-
     if full
@@ -188,6 +216,8 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
                     else do
                       newR <- getPrevRect ctx wid
                       pure (catMaybes [oldOf wid, newR])
+            let vanishedRs = IM.elems (IM.difference oldRects newRects)
+                textRs = textChangeRects oldTexts newTexts oldRects newRects
             animRs <-
               fmap concat $
                 forM clipKeys $ \k ->
@@ -200,6 +230,8 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
                     ( rs
                         ++ animRs
                         ++ layoutRs
+                        ++ vanishedRs
+                        ++ textRs
                         ++ floatingRectDamage oldFloatingRects newFloatingRects
                     )
                 clip =
@@ -250,3 +282,28 @@ rectDeltas old new =
 
 nonzeroRect :: Rect -> Bool
 nonzeroRect r = rectW r > 0 && rectH r > 0
+
+textChangeKeys :: IM.IntMap Text -> IM.IntMap Text -> IM.IntMap ()
+textChangeKeys old new =
+  IM.fromList
+    [ (k, ())
+    | (k, tNew) <- IM.toList new
+    , Just tOld <- [IM.lookup k old]
+    , tOld /= tNew
+    ]
+
+textChangeRects ::
+  IM.IntMap Text ->
+  IM.IntMap Text ->
+  IM.IntMap Rect ->
+  IM.IntMap Rect ->
+  [Rect]
+textChangeRects old new oldRects newRects =
+  catMaybes
+    [ case (IM.lookup k oldRects, IM.lookup k newRects) of
+        (Just r1, Just r2) -> Just (rectUnion r1 r2)
+        (Nothing, Just r) -> Just r
+        (Just r, Nothing) -> Just r
+        (Nothing, Nothing) -> Nothing
+    | k <- IM.keys (textChangeKeys old new)
+    ]

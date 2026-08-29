@@ -1,5 +1,7 @@
 module NanoUI.Widgets
   ( Response (..)
+  , Responding (..)
+  , Clickable (..)
   , panel
   , row
   , column
@@ -116,10 +118,15 @@ import NanoUI.Style
 import NanoUI.Store (WidgetStore (..))
 import NanoUI.Types (Color (..), ImageId (..), Rect (..), V2 (..), colorToWord32, rectContains, rectX, rectW, v2X)
 import NanoUI.Widgets.Node
-  ( Response (..)
+  ( Clickable (..)
+  , Responding (..)
+  , Response (..)
   , addWidget
   , addWidgetResp
   , addWidgetStyled
+  , setChanged
+  , setClicked
+  , setHovered
   )
 import NanoUI.Widgets.Layout
   ( column
@@ -157,8 +164,8 @@ import NanoUI.Widgets.TextInput
   )
 
 {-# INLINE onClick #-}
-onClick :: Response -> Eff es () -> Eff es ()
-onClick resp act = when (respClicked resp) act
+onClick :: Clickable r => r -> Eff es () -> Eff es ()
+onClick resp act = when (respIsClicked resp) act
 
 {-# INLINE clickButton #-}
 clickButton :: (HasCallStack, Ui :> es) => Text -> Eff es () -> Eff es ()
@@ -224,7 +231,7 @@ image layout (ImageId tid) = do
   addWidget wid NodeImage stored 0 layout
 
 button :: (HasCallStack, Ui :> es) => Text -> Eff es Response
-button txt = buttonEx True txt
+button = buttonEx True
 
 buttonEx :: (HasCallStack, Ui :> es) => Bool -> Text -> Eff es Response
 buttonEx enabled txt = do
@@ -234,7 +241,7 @@ buttonEx enabled txt = do
   resp <- addWidget wid NodeButton ("[ " <> txt <> " ]") 0 defaultLayout
   disabled <- uiIO (isDisabled ctx wid)
   let active = enabled && not disabled
-  pure resp {respClicked = active && respClicked resp, respHovered = active && respHovered resp}
+  pure $ setClicked (active && respClicked resp) $ setHovered (active && respHovered resp) resp
 
 checkbox :: (HasCallStack, Ui :> es) => Text -> Bool -> Eff es (Response, Bool)
 checkbox txt initial = do
@@ -303,7 +310,7 @@ sliderEx layout lbl minV maxV initial = do
   let finalVal = if pressed then val else current
   when (finalVal /= current) $
     uiIO $ setStore ctx (store {storeSlider = IM.insert key finalVal (storeSlider store)})
-  pure (resp {respChanged = finalVal /= current}, finalVal)
+  pure (setChanged (finalVal /= current) resp, finalVal)
 
 textInput :: (HasCallStack, Ui :> es) => Text -> Text -> Eff es (Response, Text)
 textInput lbl initial = do
@@ -340,7 +347,7 @@ textInput lbl initial = do
         )
   resp <-
     addWidget wid NodeTextInput lbl 0 textInputLayout
-  pure (resp {respChanged = newText /= current}, newText)
+  pure (setChanged (newText /= current) resp, newText)
 
 select :: (HasCallStack, Ui :> es) => Text -> [Text] -> Int -> Eff es (Response, Int)
 select lbl options initial = do
@@ -380,7 +387,7 @@ select lbl options initial = do
         )
   store1 <- uiIO (getStore ctx)
   let finalIdx = IM.findWithDefault clamped key (storeSelect store1)
-  pure (resp {respChanged = finalIdx /= initial}, finalIdx)
+  pure (setChanged (finalIdx /= initial) resp, finalIdx)
 
 tooltip :: Ui :> es => Text -> Response -> Eff es Response
 tooltip tipTxt resp = do

@@ -3,8 +3,14 @@
 -- | Widget node construction and interaction responses.
 module NanoUI.Widgets.Node
   ( Response (..)
+  , Responding (..)
+  , Clickable (..)
   , mkResponse
   , emptyModalResp
+  , setClicked
+  , setChanged
+  , setHovered
+  , setPressed
   , parentIdx
   , container
   , addWidget
@@ -24,7 +30,7 @@ import NanoUI.Context
   , pointerBlockedByModal
   )
 import NanoUI.Id (WidgetId (..))
-import NanoUI.Input (Input (..), inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased)
+import NanoUI.Input (Input (..), inputMouseDown, inputMousePos, inputMouseReleased)
 import NanoUI.Layout.Arena
   ( NodeType (..)
   , addNode
@@ -43,25 +49,59 @@ parentIdx = \case
   [] -> -1
   (p : _) -> p
 
+class Responding r where
+  respId :: r -> WidgetId
+  respRect :: r -> Rect
+  respHovered :: r -> Bool
+  respPressed :: r -> Bool
+  respClicked :: r -> Bool
+  respChanged :: r -> Bool
+
+class Clickable r where
+  respIsClicked :: r -> Bool
+
 data Response = Response
-  { respId :: WidgetId
-  , respRect :: Rect
-  , respHovered :: Bool
-  , respPressed :: Bool
-  , respClicked :: Bool
-  , respChanged :: Bool
+  { rawRespId :: !WidgetId
+  , rawRespRect :: !Rect
+  , rawRespHovered :: !Bool
+  , rawRespPressed :: !Bool
+  , rawRespClicked :: !Bool
+  , rawRespChanged :: !Bool
   }
   deriving (Eq, Show)
+
+instance Responding Response where
+  respId = rawRespId
+  respRect = rawRespRect
+  respHovered = rawRespHovered
+  respPressed = rawRespPressed
+  respClicked = rawRespClicked
+  respChanged = rawRespChanged
+
+instance Clickable Response where
+  respIsClicked = rawRespClicked
+
+setClicked :: Bool -> Response -> Response
+setClicked c r = r {rawRespClicked = c}
+
+setChanged :: Bool -> Response -> Response
+setChanged c r = r {rawRespChanged = c}
+
+setHovered :: Bool -> Response -> Response
+setHovered h r = r {rawRespHovered = h}
+
+setPressed :: Bool -> Response -> Response
+setPressed p r = r {rawRespPressed = p}
 
 mkResponse :: WidgetId -> Rect -> Bool -> Bool -> Bool -> Bool -> Response
 mkResponse wid rect hovered pressed clicked changed =
   Response
-    { respId = wid
-    , respRect = rect
-    , respHovered = hovered
-    , respPressed = pressed
-    , respClicked = clicked
-    , respChanged = changed
+    { rawRespId = wid
+    , rawRespRect = rect
+    , rawRespHovered = hovered
+    , rawRespPressed = pressed
+    , rawRespClicked = clicked
+    , rawRespChanged = changed
     }
 
 emptyModalResp :: WidgetId -> Response
@@ -162,23 +202,21 @@ addWidgetStyled wid nt txt value layout styleIdx mResp = do
 resolveInteraction :: Context -> Input -> WidgetId -> IO Response
 resolveInteraction ctx inp wid = do
   disabled <- isDisabled ctx wid
-  if disabled
-    then do
-      mrect <- getPrevRect ctx wid
-      let rect = maybe (Rect 0 0 0 0) id mrect
-      pure (mkResponse wid rect False False False False)
-    else do
-      mrect <- getPrevRect ctx wid
-      blocked <- pointerBlockedByModal ctx
-      let rect = maybe (Rect 0 0 0 0) id mrect
-          mouse = inputMousePos inp
-          hovered =
-            case rect of
-              Rect _ _ rw rh ->
-                not blocked && rw > 0 && rh > 0 && rectContains rect mouse
-      active <- readIORef (ctxActiveId ctx)
-      let activating = inputMousePressed inp && hovered
-          isActive = active == wid || activating
-      let pressed = inputMouseDown inp && (hovered || active == wid)
-          clicked = inputMouseReleased inp && isActive
-      pure (mkResponse wid rect hovered pressed clicked False)
+  mrect <- getPrevRect ctx wid
+  blocked <- pointerBlockedByModal ctx
+  let rect = case mrect of
+        Just r -> r
+        Nothing -> Rect 0 0 0 0
+      mouse = inputMousePos inp
+      hovered = not disabled && not blocked && maybe False (`rectContains` mouse) mrect
+      pressed = hovered && inputMouseDown inp
+      clicked = hovered && inputMouseReleased inp
+  pure $
+    Response
+      { rawRespId = wid
+      , rawRespRect = rect
+      , rawRespHovered = hovered
+      , rawRespPressed = pressed
+      , rawRespClicked = clicked
+      , rawRespChanged = False
+      }
