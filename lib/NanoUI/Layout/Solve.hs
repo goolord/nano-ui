@@ -7,8 +7,7 @@ module NanoUI.Layout.Solve
   , scrollBarSlotOf
   ) where
 
-import Control.Monad (forM, forM_, when)
-import Data.IORef (newIORef, readIORef, writeIORef)
+import Control.Monad (forM, when)
 import Data.Text (Text)
 import qualified Data.Text as T
 import NanoUI.Font
@@ -75,6 +74,7 @@ import NanoUI.WidgetText
   , textInputPlaceholder
   , sliderValueText
   )
+
 solveLayout :: NodeArena -> HostProfile -> FontMetrics -> (Text -> IO (Float, Float)) -> Float -> Float -> IO ()
 solveLayout na host fm measure rootW rootH = do
   count <- arenaCount na
@@ -98,8 +98,12 @@ measurePass ::
   IO ()
 measurePass na host fm measure useAssignedWidth = do
   count <- arenaCount na
-  forM_ (reverse [0 .. count - 1]) $ \idx ->
-    measureNode na host fm measure useAssignedWidth idx
+  let go !idx
+        | idx < 0 = pure ()
+        | otherwise = do
+            measureNode na host fm measure useAssignedWidth idx
+            go (idx - 1)
+  go (count - 1)
 
 whenPositive :: Int -> IO () -> IO ()
 whenPositive n act = if n > 0 then act else pure ()
@@ -600,21 +604,22 @@ positionColumnScroll ::
 positionColumnScroll na host fm children gap cx cy innerW innerH contentSize = do
   childInfos <- loadChildInfos na children innerW innerH
   sizes <- distributeMainAxis na childInfos contentSize gap False
-  oy <- newIORef cy
-  forM_ (zip childInfos sizes) $ \((ci, _, _), (_, fh)) -> do
-    nt <- getNodeType na ci
-    (_, _, iw, _) <- getRect na ci
-    curY <- readIORef oy
-    ax <- getAlignX na ci
-    let cw = innerW
-        fx = alignX ax cx cw iw
-        visibleSlice = max 0 (innerH - (curY - cy))
-        nodeH =
-          if isScrollNode nt
-            then min fh visibleSlice
-            else fh
-    positionNode na host fm ci fx curY cw nodeH
-    writeIORef oy (curY + fh + gap)
+  let pairs = zip childInfos sizes
+      go _ [] = pure ()
+      go !curY (((ci, _, _), (_, fh)) : rest) = do
+        nt <- getNodeType na ci
+        (_, _, iw, _) <- getRect na ci
+        ax <- getAlignX na ci
+        let cw = innerW
+            fx = alignX ax cx cw iw
+            visibleSlice = max 0 (innerH - (curY - cy))
+            nodeH =
+              if isScrollNode nt
+                then min fh visibleSlice
+                else fh
+        positionNode na host fm ci fx curY cw nodeH
+        go (curY + fh + gap) rest
+  go cy pairs
 
 resolveSize :: SizingTag -> Float -> Float -> Float -> Float -> Float -> Float
 resolveSize SizingFixed v _ _ _ _ = v
@@ -679,34 +684,35 @@ positionRow :: NodeArena -> HostProfile -> FontMetrics -> [NodeIdx] -> Float -> 
 positionRow na host fm children gap cx cy cw ch = do
   childInfos <- loadChildInfos na children cw ch
   sizes <- distributeMainAxis na childInfos cw gap True
-  ox <- newIORef cx
-  forM_ (zip childInfos sizes) $ \((ci, _, _), (fw, _)) -> do
-    crossH <- childRowCrossSize na ci ch
-    curX <- readIORef ox
-    ay <- getAlignY na ci
-    let fy = alignY ay cy ch crossH
-    positionNode na host fm ci curX fy fw crossH
-    writeIORef ox (curX + fw + gap)
+  let pairs = zip childInfos sizes
+      go _ [] = pure ()
+      go !curX (((ci, _, _), (fw, _)) : rest) = do
+        crossH <- childRowCrossSize na ci ch
+        ay <- getAlignY na ci
+        let fy = alignY ay cy ch crossH
+        positionNode na host fm ci curX fy fw crossH
+        go (curX + fw + gap) rest
+  go cx pairs
 
 positionRowWrap :: NodeArena -> HostProfile -> FontMetrics -> [NodeIdx] -> Float -> Float -> Float -> Float -> Float -> IO ()
 positionRowWrap na host fm children gap cx cy cw ch = do
   childInfos <- loadChildInfos na children cw ch
   let lineGroups = packRowLines childInfos cw gap
-  go cy lineGroups
-  where
-    go _ [] = pure ()
-    go oy (rowItems : rest) = do
-      let rowH = lineCrossSize rowItems
-      sizes <- distributeMainAxis na rowItems cw gap True
-      ox <- newIORef cx
-      forM_ (zip rowItems sizes) $ \((ci, _, _), (fw, _)) -> do
-        crossH <- childRowCrossSize na ci rowH
-        curX <- readIORef ox
-        ay <- getAlignY na ci
-        let fy = alignY ay oy rowH crossH
-        positionNode na host fm ci curX fy fw crossH
-        writeIORef ox (curX + fw + gap)
-      go (oy + rowH + gap) rest
+      goLines _ [] = pure ()
+      goLines !oy (rowItems : restLines) = do
+        let rowH = lineCrossSize rowItems
+        sizes <- distributeMainAxis na rowItems cw gap True
+        let pairs = zip rowItems sizes
+            goRow _ [] = pure ()
+            goRow !curX (((ci, _, _), (fw, _)) : restRow) = do
+              crossH <- childRowCrossSize na ci rowH
+              ay <- getAlignY na ci
+              let fy = alignY ay oy rowH crossH
+              positionNode na host fm ci curX fy fw crossH
+              goRow (curX + fw + gap) restRow
+        goRow cx pairs
+        goLines (oy + rowH + gap) restLines
+  goLines cy lineGroups
 
 positionColumn ::
   NodeArena ->
@@ -727,24 +733,24 @@ positionColumn na host fm children gap chrome px _ pw cx cy cw ch = do
   gapSum <- columnGapSum na chrome children gap
   childInfos <- loadChildInfos na children cw ch
   sizes <- distributeMainAxisGap na childInfos ch gapSum False
-  oy <- newIORef cy
-  let len = length children
-  forM_ (zip3 [0 .. len - 1] childInfos sizes) $ \(i, (ci, _, _), (_, fh)) -> do
-    nt <- getNodeType na ci
-    curY <- readIORef oy
-    (fx, fw) <-
-      if chrome && nt == NodeSeparator
-        then pure (px, pw)
-        else do
-          (_, _, iw, _) <- getRect na ci
-          ax <- getAlignX na ci
-          pure (alignX ax cx cw iw, cw)
-    positionNode na host fm ci fx curY fw fh
-    gapAfter <-
-      if i >= len - 1
-        then pure 0
-        else pairColumnGap na chrome (children !! i) (children !! (i + 1)) gap
-    writeIORef oy (curY + fh + gapAfter)
+  let pairs = zip childInfos sizes
+      go _ [] = pure ()
+      go !curY (((ci, _, _), (_, fh)) : rest) = do
+        nt <- getNodeType na ci
+        (fx, fw) <-
+          if chrome && nt == NodeSeparator
+            then pure (px, pw)
+            else do
+              (_, _, iw, _) <- getRect na ci
+              ax <- getAlignX na ci
+              pure (alignX ax cx cw iw, cw)
+        positionNode na host fm ci fx curY fw fh
+        gapAfter <-
+          case rest of
+            [] -> pure 0
+            (((nextCi, _, _), _) : _) -> pairColumnGap na chrome ci nextCi gap
+        go (curY + fh + gapAfter) rest
+  go cy pairs
 
 loadChildInfos :: NodeArena -> [NodeIdx] -> Float -> Float -> IO [(NodeIdx, Float, Float)]
 loadChildInfos na children availW availH =
@@ -868,17 +874,21 @@ placeModals :: NodeArena -> HostProfile -> FontMetrics -> Float -> Float -> IO (
 placeModals na host fm winW winH = do
   count <- arenaCount na
   let margin = resolveLayoutGap host fm windowMargin
-  forM_ [0 .. count - 1] $ \idx -> do
-    nt <- getNodeType na idx
-    when (nt == NodeModal) $ do
-      (_, _, iw, ih) <- getRect na idx
-      let maxW = max 0 (winW - 2 * margin)
-          maxH = max 0 (winH - 2 * margin)
-          w = min iw maxW
-          h = min ih maxH
-          x = max 0 ((winW - w) / 2)
-          y = max 0 ((winH - h) / 2)
-      positionNode na host fm idx x y w h
+      go !idx
+        | idx >= count = pure ()
+        | otherwise = do
+            nt <- getNodeType na idx
+            when (nt == NodeModal) $ do
+              (_, _, iw, ih) <- getRect na idx
+              let maxW = max 0 (winW - 2 * margin)
+                  maxH = max 0 (winH - 2 * margin)
+                  w = min iw maxW
+                  h = min ih maxH
+                  x = max 0 ((winW - w) / 2)
+                  y = max 0 ((winH - h) / 2)
+              positionNode na host fm idx x y w h
+            go (idx + 1)
+  go 0
 
 placeWindows ::
   NodeArena ->
@@ -892,28 +902,32 @@ placeWindows ::
 placeWindows na host fm winW winH lookupPos lookupSize = do
   count <- arenaCount na
   let margin = resolveLayoutGap host fm windowMargin
-  forM_ [0 .. count - 1] $ \idx -> do
-    nt <- getNodeType na idx
-    when (nt == NodeWindow) $ do
-      wid <- getWidgetId na idx
-      (minW, minH, maxW, maxH) <- getMinMax na idx
-      (_, _, iw, ih) <- getRect na idx
-      msize <- lookupSize wid
-      let w0 =
-            case msize of
-              Just (sw, _) -> sw
-              Nothing -> min iw winW
-          h0 =
-            case msize of
-              Just (_, sh) -> sh
-              Nothing -> min ih winH
-          w = clamp w0 minW (min maxW winW)
-          h = clamp h0 minH (min maxH winH)
-      mpos <- lookupPos wid
-      let (x0, y0) = maybe (max 0 (winW - w - margin), margin) id mpos
-          x = clamp x0 0 (max 0 (winW - w))
-          y = clamp y0 0 (max 0 (winH - h))
-      positionWindowNode na host fm idx x y w h
+      go !idx
+        | idx >= count = pure ()
+        | otherwise = do
+            nt <- getNodeType na idx
+            when (nt == NodeWindow) $ do
+              wid <- getWidgetId na idx
+              (minW, minH, maxW, maxH) <- getMinMax na idx
+              (_, _, iw, ih) <- getRect na idx
+              msize <- lookupSize wid
+              let w0 =
+                    case msize of
+                      Just (sw, _) -> sw
+                      Nothing -> min iw winW
+                  h0 =
+                    case msize of
+                      Just (_, sh) -> sh
+                      Nothing -> min ih winH
+                  w = clamp w0 minW (min maxW winW)
+                  h = clamp h0 minH (min maxH winH)
+              mpos <- lookupPos wid
+              let (x0, y0) = maybe (max 0 (winW - w - margin), margin) id mpos
+                  x = clamp x0 0 (max 0 (winW - w))
+                  y = clamp y0 0 (max 0 (winH - h))
+              positionWindowNode na host fm idx x y w h
+            go (idx + 1)
+  go 0
 
 -- Fit sizing caps at intrinsic size; floating windows use an explicit frame size.
 positionWindowNode :: NodeArena -> HostProfile -> FontMetrics -> NodeIdx -> Float -> Float -> Float -> Float -> IO ()
