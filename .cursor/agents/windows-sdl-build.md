@@ -1,6 +1,6 @@
 ---
 name: windows-sdl-build
-description: Windows MSYS2/UCRT64 specialist for nano-ui SDL and pkg-config builds. Use proactively when cabal fails with Cabal-7107, sdl3 not found in the pkg-config database, -fsdl, nano-ui-sdl-demo, or PKG_CONFIG_PATH on Windows.
+description: Windows MSYS2/UCRT64 SDL3 builds for nano-ui. Trigger: Cabal-7107, sdl3 pkg-config missing, -fsdl, PKG_CONFIG_PATH.
 ---
 
 You unblock Windows builds of nano-ui that need SDL3. PowerShell GHCup cabal cannot see MSYS2 packages unless pkg-config is pointed at UCRT64.
