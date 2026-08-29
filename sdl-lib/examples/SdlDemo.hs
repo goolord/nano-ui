@@ -8,19 +8,40 @@ module SdlDemo
 
 import Control.Monad (when)
 import Data.Primitive.SmallArray (SmallArray, smallArrayFromList)
-import Data.Text (Text)
 import NanoUI
 import NanoUI.Backend.Sdl (RgbaImage (..), SdlDebugSnapshot (..), askSdlDebug, SdlOptions (..), defaultSdlOptions, runSdlApp)
+import System.Console.GetOpt
+  ( ArgDescr (ReqArg)
+  , ArgOrder (Permute)
+  , OptDescr (Option)
+  , getOpt
+  )
+import System.Environment (getArgs)
 import Text.Printf (printf)
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
 
+options :: [OptDescr Bool]
+options =
+  [ Option [] ["vsync"] (ReqArg parseVsync "BOOL") "Enable or disable vsync (true/false)"
+  ]
+
+parseVsync :: String -> Bool
+parseVsync s = s `elem` ["true", "True", "1"]
+
+parseArgs :: [String] -> Bool
+parseArgs argv =
+  case getOpt Permute options argv of
+    (flags, _, _) -> last (True : flags)
+
 main :: IO ()
-main =
+main = do
+  args <- getArgs
   runSdlApp
     defaultSdlOptions
       { sdlAppShouldQuit = \inp -> inputKeysElem KeyEscape (inputKeys inp)
       , sdlAppImages = demoImages
+      , sdlAppVsync = parseArgs args
       }
     demoUi
 
@@ -115,7 +136,7 @@ debugSection title rows = do
   heading title
   mapM_ (\(k, v) -> kv k (monoFontMarker <> v)) rows
 
-clipField :: Int -> Text -> Text
+clipField :: Int -> T.Text -> T.Text
 clipField n s =
   if T.length s > n
     then T.take (max 0 (n - 3)) s <> "..."
