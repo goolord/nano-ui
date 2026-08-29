@@ -58,7 +58,6 @@ import NanoUI.Context
   , tickAnimations
   , getAnimationValue
   , animInProgress
-  , lerpColor
   , clearTooltips
   , readTooltips
   , PendingTooltip (..)
@@ -112,6 +111,12 @@ import NanoUI.Font
   , wrapTextLinesIO
   )
 import NanoUI.Host (HostProfile, isCellHost)
+import NanoUI.WidgetMarkers
+  ( buttonDisplayText
+  , closeButtonDisplayText
+  , isCloseButtonText
+  , stripButtonBrackets
+  )
 import NanoUI.Icons (Icons (..), checkboxMark, terminalPaintColumns)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), Key (..), Modifiers (..), inputInteracted, inputKeys, inputPointerHeld)
@@ -167,7 +172,7 @@ import NanoUI.WidgetText
   , selectChevronCenterX
   )
 import NanoUI.Style (Padding (..), Style (..), Theme (..), scrollBarThumbColor, scrollBarTrackColor, themeAccent, themeButton, themeFloatingWindow, themeInput, themeMuted, themeOverlayDim, themePanel, themeSeparator, themeWindow)
-import NanoUI.Types (Color (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, rectContains, rectH, rectIntersect, rectOverlapArea, rectUnion, rectW, rectX, rectY, v2X, v2Y)
+import NanoUI.Types (Color (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, lerpColor, rectContains, rectH, rectIntersect, rectOverlapArea, rectUnion, rectW, rectX, rectY, v2X, v2Y)
 
 runFrame :: Context -> Input -> NanoUI a -> IO (a, [FrameMsg], DrawData, Bool)
 runFrame = runFrameEff runEff
@@ -1111,28 +1116,6 @@ widgetNodeTypeTable ctx = do
             go 0 IM.empty
       writeIORef (ctxWidgetNodeTypes ctx) (Just table)
       pure table
-
-stripButtonBrackets :: T.Text -> T.Text
-stripButtonBrackets txt =
-  let t = T.strip txt
-   in if T.isPrefixOf "[ " t && T.isSuffixOf " ]" t
-        then T.strip $ T.dropEnd 2 $ T.drop 2 t
-        else txt
-
-closeButtonMarker :: T.Text
-closeButtonMarker = T.singleton '\x01'
-
-isCloseButtonText :: T.Text -> Bool
-isCloseButtonText txt =
-  closeButtonMarker `T.isPrefixOf` stripButtonBrackets txt
-
-closeButtonDisplayText :: T.Text -> T.Text
-closeButtonDisplayText txt = T.drop 1 (stripButtonBrackets txt)
-
-buttonDisplayText :: T.Text -> T.Text
-buttonDisplayText txt =
-  let lbl = stripButtonBrackets txt
-   in if isCloseButtonText txt then closeButtonDisplayText txt else lbl
 
 closeButtonStyle :: Theme -> Bool -> Float -> Style
 closeButtonStyle theme isHot animT =

@@ -57,6 +57,7 @@ library
         NanoUI
     other-modules:
         NanoUI.Animatable
+        NanoUI.Animation
         NanoUI.Atlas
         NanoUI.Compact
         NanoUI.Context
@@ -71,12 +72,15 @@ library
         NanoUI.Input
         NanoUI.Layout.Arena
         NanoUI.Layout.Solve
+        NanoUI.Messages
         NanoUI.Monad
         NanoUI.Render.ASCII
         NanoUI.Spring
+        NanoUI.Store
         NanoUI.Style
         NanoUI.Types
         NanoUI.WidgetText
+        NanoUI.WidgetMarkers
         NanoUI.Widgets
     build-depends:
         base ^>=4.22.0.0,

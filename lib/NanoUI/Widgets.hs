@@ -74,6 +74,7 @@ import NanoUI.Font
   , resolveLayoutPadding
   , sliderTrackBounds
   )
+import NanoUI.WidgetMarkers (closeButtonMarker)
 import NanoUI.Host (HostProfile, isCellHost)
 import NanoUI.WidgetText
   ( checkboxLabelText
@@ -605,9 +606,6 @@ labelEx :: (HasCallStack, Ui :> es) => Layout -> Text -> Eff es Response
 labelEx layout txt = do
   wid <- currentId
   addWidget wid NodeText txt 0 layout
-
-closeButtonMarker :: Text
-closeButtonMarker = T.singleton '\x01'
 
 -- Title bar marks are a cell-host affordance; pixel hosts draw their own chrome.
 titleMark :: HostProfile -> Text -> Text

@@ -32,7 +32,8 @@ import Effectful.Dispatch.Static
   )
 import Effectful.Dispatch.Static.Unsafe (reallyUnsafeLiftMapIO)
 import GHC.Stack (CallStack, HasCallStack, callStack, getCallStack)
-import NanoUI.Context (Context (..), FrameMsg (..), askHostIO, pushMessage)
+import NanoUI.Messages (FrameMsg (..))
+import NanoUI.Context (Context (..), askHostIO, pushMessage)
 import NanoUI.Id (WidgetId (..), fnv1a, hashSrcLoc, hashWidgetId)
 import NanoUI.Input (Input)
 
