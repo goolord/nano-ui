@@ -21,7 +21,6 @@ import Data.Bits (shiftR, (.&.))
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Primitive.SmallArray
   ( SmallArray
-  , emptySmallArray
   , indexSmallArray
   , sizeofSmallArray
   , smallArrayFromList
@@ -31,9 +30,10 @@ import qualified Data.Text as T
 import Data.Word (Word32, Word8)
 import Foreign.C.String (CString, withCString)
 import Foreign.C.Types (CFloat (..), CSize (..))
-import Foreign.Marshal.Alloc (alloca)
-import Foreign.Ptr (Ptr, nullPtr)
-import Foreign.Storable (peek, poke)
+import Foreign.ForeignPtr (ForeignPtr, mallocForeignPtrBytes, withForeignPtr)
+import Foreign.Ptr (Ptr, nullPtr, plusPtr)
+import Foreign.Storable (peek, poke, sizeOf)
+import GHC.IO (unsafePerformIO)
 import NanoUI (Color (..), FontMetrics (..), Rect (..), hasMonoFontMarker, monospaceMetrics, stripMonoFontMarker)
 import NanoUI.Testing
   ( Context
@@ -44,7 +44,7 @@ import NanoUI.Testing
   , wrapMeasureCache
   )
 import NanoUI.Sdl.Batch (RenderBatch, batchTextureDst, flushRenderBatch)
-import NanoUI.Sdl.Render (logicalClipKey, setLogicalClipRect)
+import NanoUI.Sdl.Render (logicalClipKey, setLogicalClipKey)
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
 import System.Directory (doesDirectoryExist, doesFileExist, listDirectory)
 import System.Environment (lookupEnv)
@@ -81,6 +81,18 @@ type CacheKey = (Ptr (), Text, Word32)
 
 textCacheLimit :: Int
 textCacheLimit = 256
+
+{-# NOINLINE measureScratch #-}
+measureScratch :: ForeignPtr CFloat
+measureScratch = unsafePerformIO (mallocForeignPtrBytes (2 * sizeOf (0 :: CFloat)))
+
+{-# NOINLINE surfaceScratch #-}
+surfaceScratch :: ForeignPtr (Ptr ())
+surfaceScratch = unsafePerformIO (mallocForeignPtrBytes (sizeOf (nullPtr :: Ptr ())))
+
+{-# NOINLINE insertScratch #-}
+insertScratch :: ForeignPtr CFloat
+insertScratch = unsafePerformIO (mallocForeignPtrBytes (4 * sizeOf (0 :: CFloat)))
 
 newTextCache :: Ptr SDL_Renderer -> IO TextCache
 newTextCache ren = do
@@ -159,15 +171,15 @@ measureTtfTextScaled sf scale txt = do
 measureTtfText :: SdlFont -> Text -> IO (Float, Float)
 measureTtfText sf txt =
   withUtf8 txt $ \cstr len ->
-    alloca $ \wp ->
-      alloca $ \hp -> do
-        ok <- ttfStringSize (sfFont sf) cstr len wp hp
-        if ok
-          then do
-            w <- peek wp
-            h <- peek hp
-            pure (realToFrac w, realToFrac h)
-          else pure (0, sfLineSkip sf)
+    withForeignPtr measureScratch $ \wp -> do
+      let hp = plusPtr wp (sizeOf (0 :: CFloat))
+      ok <- ttfStringSize (sfFont sf) cstr len wp hp
+      if ok
+        then do
+          w <- peek wp
+          h <- peek hp
+          pure (realToFrac w, realToFrac h)
+        else pure (0, sfLineSkip sf)
 
 renderTextSpans ::
   RenderBatch ->
@@ -187,7 +199,7 @@ renderTextSpans batch ren scale font monoFont cache spans = do
     when (prev /= Just clipKey) $ do
       flushRenderBatch batch
       writeIORef lastClip (Just clipKey)
-      setLogicalClipRect ren scale clip
+      setLogicalClipKey ren clipKey
     drawSpan batch scale font monoFont cache txt fg x y
   flushRenderBatch batch
 
@@ -247,7 +259,7 @@ createCached ::
   Color ->
   IO (Maybe TextSlot)
 createCached font cache cacheKey cstr len col =
-  alloca $ \(surfPtr :: Ptr (Ptr ())) -> do
+  withForeignPtr surfaceScratch $ \(surfPtr :: Ptr (Ptr ())) -> do
     poke surfPtr nullPtr
     ok <-
       ttfRenderSurface
@@ -301,19 +313,19 @@ insertSurface cache surf = do
 
 tryInsert :: Ptr () -> Ptr () -> IO (Maybe (Float, Float, Float, Float))
 tryInsert atlas surf =
-  alloca $ \px ->
-    alloca $ \py ->
-      alloca $ \tw ->
-        alloca $ \th -> do
-          ok <- textAtlasInsertSurface atlas surf px py tw th
-          if ok
-            then do
-              x <- realToFrac <$> peek px
-              y <- realToFrac <$> peek py
-              w <- realToFrac <$> peek tw
-              h <- realToFrac <$> peek th
-              pure (Just (x, y, w, h))
-            else pure Nothing
+  withForeignPtr insertScratch $ \px -> do
+    let py = plusPtr px (sizeOf (0 :: CFloat))
+        tw = plusPtr py (sizeOf (0 :: CFloat))
+        th = plusPtr tw (sizeOf (0 :: CFloat))
+    ok <- textAtlasInsertSurface atlas surf px py tw th
+    if ok
+      then do
+        x <- realToFrac <$> peek px
+        y <- realToFrac <$> peek py
+        w <- realToFrac <$> peek tw
+        h <- realToFrac <$> peek th
+        pure (Just (x, y, w, h))
+      else pure Nothing
 
 clearTextCacheEntries :: TextCache -> IO ()
 clearTextCacheEntries cache =
@@ -335,11 +347,11 @@ lookupCache cache key = do
 
 atlasSize :: Ptr () -> IO (Float, Float)
 atlasSize atlas =
-  alloca $ \w ->
-    alloca $ \h -> do
-      ok <- textAtlasSize atlas w h
-      when (not ok) $ fail "text atlas size failed"
-      (,) <$> (realToFrac <$> peek w) <*> (realToFrac <$> peek h)
+  withForeignPtr insertScratch $ \w -> do
+    let h = plusPtr w (sizeOf (0 :: CFloat))
+    ok <- textAtlasSize atlas w h
+    when (not ok) $ fail "text atlas size failed"
+    (,) <$> (realToFrac <$> peek w) <*> (realToFrac <$> peek h)
 
 pathExists :: FilePath -> IO (Maybe FilePath)
 pathExists p = do
@@ -399,56 +411,51 @@ fontSearchRoots = do
           ++ userRoots
       )
 
-maxFontDirDepth :: Int
-maxFontDirDepth = 6
+fontCandidates :: SmallArray FilePath
+fontCandidates =
+  smallArrayFromList
+    [ "/usr/share/fonts/Adwaita/AdwaitaSans-Regular.ttf"
+    , "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+    , "/usr/share/fonts/TTF/DejaVuSans.ttf"
+    , "/usr/share/fonts/liberation-sans/LiberationSans-Regular.ttf"
+    , "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
+    , "/usr/share/fonts/noto/NotoSans-Regular.ttf"
+    , "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"
+    , "/usr/share/fonts/truetype/freefont/FreeSans.ttf"
+    , "/System/Library/Fonts/SFNS.ttf"
+    , "/System/Library/Fonts/Helvetica.ttc"
+    , "C:\\Windows\\Fonts\\segoeui.ttf"
+    , "C:\\Windows\\Fonts\\arial.ttf"
+    ]
 
-findNamedFont :: SmallArray FilePath -> IO (Maybe FilePath)
-findNamedFont names = do
-  roots <- fontSearchRoots
-  searchNames names roots
+fontFileNames :: SmallArray FilePath
+fontFileNames =
+  smallArrayFromList
+    [ "AdwaitaSans-Regular.ttf"
+    , "DejaVuSans.ttf"
+    , "LiberationSans-Regular.ttf"
+    , "NotoSans-Regular.ttf"
+    , "FreeSans.ttf"
+    , "segoeui.ttf"
+    , "arial.ttf"
+    ]
 
-searchNames :: SmallArray FilePath -> SmallArray FilePath -> IO (Maybe FilePath)
-searchNames names roots = go 0
-  where
-    len = sizeofSmallArray names
-    go i
-      | i >= len = pure Nothing
-      | otherwise = do
-          hit <- findInTree (indexSmallArray names i) roots 0
-          case hit of
-            Just p -> pure (Just p)
-            Nothing -> go (i + 1)
-
-findInTree :: FilePath -> SmallArray FilePath -> Int -> IO (Maybe FilePath)
-findInTree _ dirs depth
-  | sizeofSmallArray dirs == 0 || depth > maxFontDirDepth = pure Nothing
-findInTree name dirs depth = do
-  let testPaths = fmap (`joinDir` name) dirs
-  hit <- firstExistingPath testPaths
-  case hit of
-    Just p -> pure (Just p)
-    Nothing -> do
-      kids <- concatSubdirs dirs
-      findInTree name kids (depth + 1)
-
-concatSubdirs :: SmallArray FilePath -> IO (SmallArray FilePath)
-concatSubdirs dirs = go 0 emptySmallArray
-  where
-    len = sizeofSmallArray dirs
-    go i acc
-      | i >= len = pure acc
-      | otherwise = do
-          sub <- listSubdirs (indexSmallArray dirs i)
-          go (i + 1) (acc <> sub)
-
-listSubdirs :: FilePath -> IO (SmallArray FilePath)
-listSubdirs dir =
-  ( do
-      names <- listDirectory dir
-      dirs <- filterM doesDirectoryExist (map (joinDir dir) names)
-      pure (smallArrayFromList dirs)
-  )
-    `catch` \(_ :: IOException) -> pure emptySmallArray
+monoFontCandidates :: SmallArray FilePath
+monoFontCandidates =
+  smallArrayFromList
+    [ "/usr/share/fonts/Adwaita/AdwaitaMono-Regular.ttf"
+    , "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"
+    , "/usr/share/fonts/TTF/DejaVuSansMono.ttf"
+    , "/usr/share/fonts/liberation-mono/LiberationMono-Regular.ttf"
+    , "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf"
+    , "/usr/share/fonts/noto/NotoSansMono-Regular.ttf"
+    , "/usr/share/fonts/truetype/noto/NotoSansMono-Regular.ttf"
+    , "/usr/share/fonts/truetype/freefont/FreeMono.ttf"
+    , "/System/Library/Fonts/SFNSMono.ttf"
+    , "/System/Library/Fonts/Menlo.ttc"
+    , "C:\\Windows\\Fonts\\consola.ttf"
+    , "C:\\Windows\\Fonts\\cour.ttf"
+    ]
 
 monoFontFileNames :: SmallArray FilePath
 monoFontFileNames =
@@ -456,88 +463,60 @@ monoFontFileNames =
     [ "AdwaitaMono-Regular.ttf"
     , "DejaVuSansMono.ttf"
     , "LiberationMono-Regular.ttf"
-    , "NotoSansMono-Regular.ttf"
+    , "NotoSansMono.ttf"
+    , "FreeMono.ttf"
     , "consola.ttf"
-    , "Consolas.ttf"
-    , "CascadiaMono.ttf"
-    , "lucon.ttf"
-    , "Menlo.ttc"
-    , "Courier New.ttf"
+    , "cour.ttf"
     ]
 
-monoFontCandidates :: SmallArray FilePath
-monoFontCandidates =
-  smallArrayFromList
-    [ "/usr/share/fonts/Adwaita/AdwaitaMono-Regular.ttf"
-    , "/usr/share/fonts/adwaita-mono/AdwaitaMono-Regular.ttf"
-    , "C:\\Windows\\Fonts\\consola.ttf"
-    , "C:\\Windows\\Fonts\\Consolas.ttf"
-    , "C:\\Windows\\Fonts\\CascadiaMono.ttf"
-    , "C:\\Windows\\Fonts\\lucon.ttf"
-    , "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"
-    , "/usr/share/fonts/TTF/DejaVuSansMono.ttf"
-    , "/usr/share/fonts/liberation/LiberationMono-Regular.ttf"
-    , "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf"
-    , "/usr/share/fonts/noto/NotoSansMono-Regular.ttf"
-    , "/System/Library/Fonts/Menlo.ttc"
-    , "/System/Library/Fonts/Supplemental/Courier New.ttf"
-    , "C:\\msys64\\ucrt64\\share\\fonts\\TTF\\DejaVuSansMono.ttf"
-    ]
-
-fontFileNames :: SmallArray FilePath
-fontFileNames =
-  smallArrayFromList
-    [ "AdwaitaSans-Regular.ttf"
-    , "Cantarell-Regular.otf"
-    , "Cantarell-Regular.ttf"
-    , "Inter-Regular.ttf"
-    , "segoeui.ttf"
-    , "SegoeUI.ttf"
-    , "arial.ttf"
-    , "DejaVuSans.ttf"
-    , "LiberationSans-Regular.ttf"
-    , "NotoSans-Regular.ttf"
-    , "FreeSans.otf"
-    , "FreeSans.ttf"
-    , "Arial.ttf"
-    , "Helvetica.ttf"
-    ]
-
-fontCandidates :: SmallArray FilePath
-fontCandidates =
-  smallArrayFromList
-    [ "/usr/share/fonts/Adwaita/AdwaitaSans-Regular.ttf"
-    , "/usr/share/fonts/adwaita-sans/AdwaitaSans-Regular.ttf"
-    , "/usr/share/fonts/truetype/adwaita/AdwaitaSans-Regular.ttf"
-    , "/usr/share/fonts/cantarell/Cantarell-Regular.otf"
-    , "/usr/share/fonts/truetype/cantarell/Cantarell-Regular.otf"
-    , "/usr/share/fonts/truetype/cantarell/Cantarell-Regular.ttf"
-    , "/usr/share/fonts/inter/Inter-Regular.ttf"
-    , "/usr/share/fonts/truetype/inter/Inter-Regular.ttf"
-    , "C:\\Windows\\Fonts\\segoeui.ttf"
-    , "C:\\Windows\\Fonts\\SegoeUI.ttf"
-    , "C:\\Windows\\Fonts\\segoeuib.ttf"
-    , "C:\\Windows\\Fonts\\arial.ttf"
-    , "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-    , "/usr/share/fonts/TTF/DejaVuSans.ttf"
-    , "/usr/share/fonts/liberation/LiberationSans-Regular.ttf"
-    , "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
-    , "/usr/share/fonts/noto/NotoSans-Regular.ttf"
-    , "/usr/share/fonts/gnu-free/FreeSans.otf"
-    , "/System/Library/Fonts/Supplemental/Arial.ttf"
-    , "/System/Library/Fonts/Supplemental/Helvetica.ttf"
-    , "C:\\msys64\\ucrt64\\share\\fonts\\TTF\\DejaVuSans.ttf"
-    ]
+findNamedFont :: SmallArray FilePath -> IO (Maybe FilePath)
+findNamedFont names = do
+  roots <- fontSearchRoots
+  let nRoots = sizeofSmallArray roots
+      nNames = sizeofSmallArray names
+      walkRoots !i
+        | i >= nRoots = pure Nothing
+        | otherwise = do
+            let root = indexSmallArray roots i
+            doesDirectoryExist root >>= \case
+              False -> walkRoots (i + 1)
+              True ->
+                scanDir root >>= \case
+                  Just hit -> pure (Just hit)
+                  Nothing -> walkRoots (i + 1)
+      scanDir dir = do
+        entries <- listDirectory dir `catch` \(_ :: IOException) -> pure []
+        let nEntries = length entries
+            matchDirect = goDirect entries 0
+            goDirect [] _ = Nothing
+            goDirect (e : rest) !idx
+              | idx >= nEntries = Nothing
+              | otherwise =
+                  if matchesName e
+                    then Just (joinDir dir e)
+                    else goDirect rest (idx + 1)
+        case matchDirect of
+          Just hit -> pure (Just hit)
+          Nothing -> do
+            subdirs <- filterM (\e -> doesDirectoryExist (joinDir dir e)) entries
+            searchSubdirs subdirs
+      searchSubdirs [] = pure Nothing
+      searchSubdirs (d : rest) = do
+        scanDir (joinDir d "") >>= \case
+          Just hit -> pure (Just hit)
+          Nothing -> searchSubdirs rest
+      matchesName name = go 0
+        where
+          go !j
+            | j >= nNames = False
+            | otherwise = name == indexSmallArray names j || go (j + 1)
+  walkRoots 0
 
 withUtf8 :: Text -> (CString -> CSize -> IO a) -> IO a
-withUtf8 txt k =
-  let bytes = TE.encodeUtf8 txt
-   in BS.useAsCStringLen bytes $ \(cstr, len) -> k cstr (fromIntegral len)
+withUtf8 txt act =
+  let bs = TE.encodeUtf8 txt
+   in BS.useAsCStringLen bs $ \(cstr, len) -> act cstr (fromIntegral len)
 
-colorWord :: Color -> Word32
-colorWord (Color w) = w
-
-{-# INLINE unpackColor #-}
 unpackColor :: Color -> (Word8, Word8, Word8, Word8)
 unpackColor (Color w) =
   ( fromIntegral ((w `shiftR` 24) .&. 0xFF)
@@ -546,29 +525,32 @@ unpackColor (Color w) =
   , fromIntegral (w .&. 0xFF)
   )
 
-foreign import ccall safe "nano_ui_ttf_init"
+colorWord :: Color -> Word32
+colorWord (Color w) = w
+
+foreign import ccall unsafe "nano_ui_ttf_init"
   ttfInit :: IO Bool
 
-foreign import ccall safe "nano_ui_ttf_quit"
+foreign import ccall unsafe "nano_ui_ttf_quit"
   ttfQuit :: IO ()
 
-foreign import ccall safe "nano_ui_ttf_open_font"
+foreign import ccall unsafe "nano_ui_ttf_open_font"
   ttfOpenFont :: CString -> CFloat -> IO (Ptr ())
 
-foreign import ccall safe "nano_ui_ttf_close_font"
+foreign import ccall unsafe "nano_ui_ttf_close_font"
   ttfCloseFont :: Ptr () -> IO ()
 
-foreign import ccall safe "nano_ui_ttf_line_skip"
+foreign import ccall unsafe "nano_ui_ttf_line_skip"
   ttfLineSkip :: Ptr () -> IO CFloat
 
-foreign import ccall safe "nano_ui_ttf_ascent"
+foreign import ccall unsafe "nano_ui_ttf_ascent"
   ttfAscent :: Ptr () -> IO CFloat
 
-foreign import ccall safe "nano_ui_ttf_space_advance"
-  ttfSpaceAdvance :: Ptr () -> IO CFloat
-
-foreign import ccall safe "nano_ui_ttf_string_size"
+foreign import ccall unsafe "nano_ui_ttf_string_size"
   ttfStringSize :: Ptr () -> CString -> CSize -> Ptr CFloat -> Ptr CFloat -> IO Bool
+
+foreign import ccall unsafe "nano_ui_ttf_space_advance"
+  ttfSpaceAdvance :: Ptr () -> IO CFloat
 
 foreign import ccall unsafe "nano_ui_ttf_render_surface"
   ttfRenderSurface ::
@@ -590,17 +572,24 @@ foreign import ccall unsafe "nano_ui_text_atlas_create"
 foreign import ccall unsafe "nano_ui_text_atlas_destroy"
   textAtlasDestroy :: Ptr () -> IO ()
 
-foreign import ccall unsafe "nano_ui_text_atlas_texture"
-  textAtlasTexture :: Ptr () -> IO (Ptr ())
-
-foreign import ccall unsafe "nano_ui_text_atlas_insert_surface"
-  textAtlasInsertSurface :: Ptr () -> Ptr () -> Ptr CFloat -> Ptr CFloat -> Ptr CFloat -> Ptr CFloat -> IO Bool
-
 foreign import ccall unsafe "nano_ui_text_atlas_reset"
   textAtlasReset :: Ptr () -> IO ()
 
+foreign import ccall unsafe "nano_ui_text_atlas_texture"
+  textAtlasTexture :: Ptr () -> IO (Ptr ())
+
 foreign import ccall unsafe "nano_ui_text_atlas_size"
   textAtlasSize :: Ptr () -> Ptr CFloat -> Ptr CFloat -> IO Bool
+
+foreign import ccall unsafe "nano_ui_text_atlas_insert_surface"
+  textAtlasInsertSurface ::
+    Ptr () ->
+    Ptr () ->
+    Ptr CFloat ->
+    Ptr CFloat ->
+    Ptr CFloat ->
+    Ptr CFloat ->
+    IO Bool
 
 foreign import ccall unsafe "SDL_DestroySurface"
   freeSurface :: Ptr () -> IO ()

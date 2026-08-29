@@ -1,9 +1,12 @@
 module NanoUI.Sdl.Render
-  ( renderDrawData
+  ( ClipState (..)
+  , renderDrawData
   , renderDrawDataPass
   , setLogicalClipRect
+  , setLogicalClipKey
   , clearLogicalClipRect
   , logicalClipKey
+  , toClipKey
   , clipPixelRect
   , snapDamage
   ) where
@@ -17,10 +20,10 @@ import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import qualified Data.Vector as V
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray)
 import Data.Word (Word8)
-import Foreign.ForeignPtr (withForeignPtr)
-import Foreign.Marshal.Alloc (alloca)
+import Foreign.ForeignPtr (ForeignPtr, mallocForeignPtrBytes, withForeignPtr)
 import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (Storable (..), poke)
+import GHC.IO (unsafePerformIO)
 import NanoUI (Color (..), Rect (..), rectIntersect)
 import NanoUI.Testing
   ( Damage (..)
@@ -43,8 +46,12 @@ nullClip = PtrConst.unsafeFromPtr (nullPtr :: Ptr SDL_Rect)
 
 data ClipState
   = ClipNone
-  | ClipRect !Rect
+  | ClipKey {-# UNPACK #-} !Int {-# UNPACK #-} !Int {-# UNPACK #-} !Int {-# UNPACK #-} !Int
   deriving (Eq)
+
+{-# NOINLINE clipRectScratch #-}
+clipRectScratch :: ForeignPtr SDL_Rect
+clipRectScratch = unsafePerformIO (mallocForeignPtrBytes (sizeOf (undefined :: SDL_Rect)))
 
 {-# INLINE snapDamage #-}
 snapDamage :: Float -> Damage -> Damage
@@ -66,6 +73,7 @@ clipPixelRect uiScale (Rect x y w h) =
       y1 = fromIntegral (ceiling ((y + h) * s) :: Int) :: Float
    in (x0, y0, x1 - x0, y1 - y0)
 
+{-# INLINE logicalClipKey #-}
 logicalClipKey :: Float -> Rect -> (Int, Int, Int, Int)
 logicalClipKey scale (Rect x y w h) =
   let px = round (x * scale) :: Int
@@ -74,25 +82,34 @@ logicalClipKey scale (Rect x y w h) =
       ph = max 1 (round (h * scale)) :: Int
    in (px, py, pw, ph)
 
-setLogicalClipRect :: Ptr SDL_Renderer -> Float -> Rect -> IO ()
-setLogicalClipRect ren uiScale r =
-  alloca $ \(sr :: Ptr SDL_Rect) -> do
-    let (px, py, pw, ph) = logicalClipKey uiScale r
+{-# INLINE toClipKey #-}
+toClipKey :: Float -> Rect -> ClipState
+toClipKey scale r =
+  let (px, py, pw, ph) = logicalClipKey scale r
+   in ClipKey px py pw ph
+
+setLogicalClipKey :: Ptr SDL_Renderer -> (Int, Int, Int, Int) -> IO ()
+setLogicalClipKey ren (px, py, pw, ph) =
+  withForeignPtr clipRectScratch $ \(sr :: Ptr SDL_Rect) -> do
     poke sr (SDL_Rect (fromIntegral px) (fromIntegral py) (fromIntegral pw) (fromIntegral ph))
     void $ setRenderClipRectSafe ren (PtrConst.unsafeFromPtr sr)
+
+setLogicalClipRect :: Ptr SDL_Renderer -> Float -> Rect -> IO ()
+setLogicalClipRect ren uiScale r =
+  setLogicalClipKey ren (logicalClipKey uiScale r)
 
 clearLogicalClipRect :: Ptr SDL_Renderer -> IO ()
 clearLogicalClipRect ren = void $ setRenderClipRectSafe ren nullClip
 
-applyClipState :: RenderBatch -> IORef ClipState -> Ptr SDL_Renderer -> Float -> ClipState -> IO ()
-applyClipState batch ref ren uiScale next = do
+applyClipState :: RenderBatch -> IORef ClipState -> Ptr SDL_Renderer -> ClipState -> IO ()
+applyClipState batch ref ren next = do
   prev <- readIORef ref
   when (prev /= next) $ do
     flushRenderBatch batch
     writeIORef ref next
     case next of
       ClipNone -> clearLogicalClipRect ren
-      ClipRect r -> setLogicalClipRect ren uiScale r
+      ClipKey px py pw ph -> setLogicalClipKey ren (px, py, pw, ph)
 
 renderDrawData :: Ptr SDL_Renderer -> Float -> Color -> DrawData -> ImageAtlas -> IO ()
 renderDrawData _ _ _ _ _ =
@@ -115,8 +132,8 @@ renderDrawDataPass batch ren uiScale mClear drawData layers images damage = do
             pw = rectW r * uiScale
             ph = rectH r * uiScale
         batchFillSolid batch cr cg cb ca px py pw ph
-        applyClipState batch clipRef ren uiScale (ClipRect r)
-      (Nothing, DamageClip r) -> applyClipState batch clipRef ren uiScale (ClipRect r)
+        applyClipState batch clipRef ren (toClipKey uiScale r)
+      (Nothing, DamageClip r) -> applyClipState batch clipRef ren (toClipKey uiScale r)
       (Nothing, DamageFull) -> pure ()
     let clip = case damage of
           DamageFull -> Nothing
@@ -136,7 +153,7 @@ renderDrawDataPass batch ren uiScale mClear drawData layers images damage = do
                     drawCmd batch ren uiScale vp vc ip ic images clip clipRef cmd
                   go (i + 1)
          in go 0
-    applyClipState batch clipRef ren uiScale ClipNone
+    applyClipState batch clipRef ren ClipNone
 
 {-# INLINE layerOrder #-}
 layerOrder :: Layer -> Int
@@ -191,8 +208,8 @@ drawCmd batch ren uiScale vp vc ip ic images mDamage clipRef cmd = do
       Nothing -> pure ()
       Just clip -> do
         if cmdOpen && mDamage == Nothing
-          then applyClipState batch clipRef ren uiScale ClipNone
-          else applyClipState batch clipRef ren uiScale (ClipRect clip)
+          then applyClipState batch clipRef ren ClipNone
+          else applyClipState batch clipRef ren (toClipKey uiScale clip)
         let !start = fromIntegral (cmdIndexOffset cmd)
             !texId = cmdTextureId cmd
         (tex, tw, th) <-
