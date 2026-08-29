@@ -9,17 +9,8 @@ import Foreign.Storable (peekByteOff)
 import Data.List (isInfixOf, nub, sort)
 import Effectful.State.Static.Local (State, evalState, get, modify)
 import NanoUI
-import NanoUI.Backend.Term
-  ( newAdaptiveTerminalContext
-  , queryTerminalColors
-  , terminalDefaultBg
-  , terminalDefaultFg
-  , terminalThemeFromColors
-  )
-import NanoUI.Term.Ansi (frameBytes)
-import NanoUI.Term.Cells (cellChar, cellRows, cellsH, narrowChar, rasterize, rasterizeLayered)
-import NanoUI.Term.Event (MouseAction (..), MouseBtn (..), TermEvent (..), noMods)
-import NanoUI.Term.Vt (decode, flushPending)
+import NanoUI.Testing
+import NanoUI.Testing.Term
 import qualified Data.ByteString.Char8 as BS8
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.Text as T
@@ -199,18 +190,6 @@ runHostProfileMeasureTest _ failed = do
       pixelW = textDisplayWidth PixelHost fmPixel txt
   when (cellW /= fromIntegral (terminalPaintColumns txt)) $ bump failed
   when (pixelW /= fromIntegral (T.length txt) * fmAdvance fmPixel ' ') $ bump failed
-
--- Pixel host used by former SDL-named checks. Same defaults as newSdlContext
--- without depending on nano-ui-sdl.
-newPixelContext :: IO Context
-newPixelContext = do
-  ctx0 <- newContext
-  ctx <- enableMeasureCache ctx0
-  pure
-    ( withExternalText
-        (withTheme (withFontMetrics ctx (monospaceMetrics 16)) defaultTheme)
-        True
-    )
 
 findGrabHover :: Context -> NanoUI a -> Input -> Float -> [Float] -> IO (Maybe Input)
 findGrabHover ctx ui inp0 thumbX = go

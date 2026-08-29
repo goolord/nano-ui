@@ -15,7 +15,8 @@ import Foreign.C.String (withCString)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (peek)
-import NanoUI (Context, Input (..), Size (..), markDirty, setHost, setWakeLoop)
+import NanoUI (Input (..), Size (..))
+import NanoUI.Testing (Context, markDirty, setHost, setWakeLoop)
 import NanoUI.Sdl.Display
   ( defaultFontSize
   , defaultUiScale

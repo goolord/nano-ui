@@ -22,7 +22,14 @@ import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (Storable (..), poke)
-import NanoUI (Color (..), Damage (..), DrawCmd (..), DrawData (..), Layer (..), Rect (..), damageIsEmpty, rectIntersect)
+import NanoUI (Color (..), Rect (..), rectIntersect)
+import NanoUI.Testing
+  ( Damage (..)
+  , DrawCmd (..)
+  , DrawData (..)
+  , Layer (..)
+  , damageIsEmpty
+  )
 import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst

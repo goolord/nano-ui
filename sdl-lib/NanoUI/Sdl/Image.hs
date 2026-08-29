@@ -15,7 +15,7 @@ import Foreign.ForeignPtr (ForeignPtr, withForeignPtr)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import Foreign.Storable (peek, poke)
-import NanoUI (Context, atlasSnapshot, atlasTextureId)
+import NanoUI.Testing (Context, atlasSnapshot, atlasTextureId)
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
 
 data ImageAtlas = ImageAtlas

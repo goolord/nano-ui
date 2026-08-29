@@ -15,7 +15,8 @@ import Data.Word (Word32, Word64)
 import GHC.Clock (getMonotonicTime)
 import GHC.Conc (getNumCapabilities, getNumProcessors)
 import GHC.Stats (GCDetails (..), RTSStats (..), getRTSStats, getRTSStatsEnabled)
-import NanoUI (DrawData (..), Size (..), V2 (..), drawCommands)
+import NanoUI (Size (..), V2 (..))
+import NanoUI.Testing (DrawData (..))
 
 data SdlDebugSnapshot = SdlDebugSnapshot
   { dbgPresentFps :: Double
