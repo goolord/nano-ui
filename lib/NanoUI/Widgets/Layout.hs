@@ -1,0 +1,183 @@
+{-# LANGUAGE OverloadedStrings #-}
+
+module NanoUI.Widgets.Layout
+  ( panel
+  , row
+  , column
+  , label
+  , labelEx
+  , separator
+  , spacer
+  , scroll
+  , scrollArea
+  , flex
+  , sep
+  ) where
+
+import Control.Monad (void)
+import Data.IORef (readIORef, writeIORef)
+import Effectful (Eff, type (:>))
+import Data.Text (Text)
+import GHC.Stack (HasCallStack)
+import NanoUI.Layout.Arena
+  ( DirTag (..)
+  , NodeType (..)
+  , addNode
+  , getDirection
+  , setWidgetId
+  )
+import NanoUI.Monad (Ui, askContext, askInput, currentId, uiFinally, uiIO)
+import NanoUI.Style
+  ( AlignX (..)
+  , AlignY (..)
+  , Direction (..)
+  , Layout (..)
+  , Padding (..)
+  , Sizing (..)
+  , defaultLayout
+  )
+import NanoUI.Context (Context (..))
+import NanoUI.Id (WidgetId)
+import NanoUI.Widgets.Internal
+  ( Response
+  , addWidget
+  , container
+  , parentIdx
+  , resolveInteraction
+  )
+
+{-# INLINE panel #-}
+panel :: Ui :> es => Layout -> Eff es a -> Eff es a
+panel = container NodePanel
+
+{-# INLINE row #-}
+row :: Ui :> es => Layout -> Eff es a -> Eff es a
+row layout child = container NodeContainer (layout {layoutDirection = Row}) child
+
+{-# INLINE column #-}
+column :: Ui :> es => Layout -> Eff es a -> Eff es a
+column layout child = container NodeContainer (layout {layoutDirection = Column}) child
+
+{-# INLINE label #-}
+label :: (HasCallStack, Ui :> es) => Text -> Eff es Response
+label = labelEx defaultLayout
+
+{-# INLINE labelEx #-}
+labelEx :: (HasCallStack, Ui :> es) => Layout -> Text -> Eff es Response
+labelEx layout txt = do
+  wid <- currentId
+  addWidget wid NodeText txt 0 layout
+
+{-# INLINE sep #-}
+sep :: (HasCallStack, Ui :> es) => Eff es ()
+sep = void separator
+
+{-# INLINE flex #-}
+flex :: (HasCallStack, Ui :> es) => Eff es ()
+flex = void (spacer (Grow 1) Fit)
+
+{-# INLINE separator #-}
+separator :: (HasCallStack, Ui :> es) => Eff es Response
+separator = do
+  wid <- currentId
+  ctx <- askContext
+  inp <- askInput
+  uiIO $ do
+    stack <- readIORef (ctxContainerStack ctx)
+    let parent = parentIdx stack
+    parentDir <-
+      if parent < 0
+        then pure DirColumn
+        else getDirection (ctxNodeArena ctx) parent
+    let (dir, wSiz, hSiz) =
+          case parentDir of
+            DirColumn -> (Column, Grow 1, Fixed 1)
+            DirRow -> (Row, Fixed 1, Grow 1)
+    idx <-
+      addNode
+        (ctxNodeArena ctx)
+        NodeSeparator
+        parent
+        dir
+        wSiz
+        hSiz
+        (Padding 0 0 0 0)
+        0
+        0
+        0
+        1e9
+        1e9
+        0
+        AlignStart
+        AlignTop
+        False
+    setWidgetId (ctxNodeArena ctx) idx wid
+    resolveInteraction ctx inp wid
+
+{-# INLINE spacer #-}
+spacer :: (HasCallStack, Ui :> es) => Sizing -> Sizing -> Eff es Response
+spacer w h = do
+  wid <- currentId
+  ctx <- askContext
+  inp <- askInput
+  uiIO $ do
+    stack <- readIORef (ctxContainerStack ctx)
+    let parent = parentIdx stack
+    idx <-
+      addNode
+        (ctxNodeArena ctx)
+        NodeSpacer
+        parent
+        Row
+        w
+        h
+        (Padding 0 0 0 0)
+        0
+        0
+        0
+        1e9
+        1e9
+        0
+        AlignStart
+        AlignTop
+        False
+    setWidgetId (ctxNodeArena ctx) idx wid
+    resolveInteraction ctx inp wid
+
+{-# INLINE scroll #-}
+scroll :: (HasCallStack, Ui :> es) => Layout -> Eff es a -> Eff es a
+scroll layout child = do
+  (_, r) <- scrollArea layout child
+  pure r
+
+{-# INLINE scrollArea #-}
+scrollArea :: (HasCallStack, Ui :> es) => Layout -> Eff es a -> Eff es (WidgetId, a)
+scrollArea layout child = do
+  wid <- currentId
+  ctx <- askContext
+  stack <- uiIO $ do
+    stack <- readIORef (ctxContainerStack ctx)
+    let parent = parentIdx stack
+    idx <-
+      addNode
+        (ctxNodeArena ctx)
+        NodeScrollContainer
+        parent
+        (layoutDirection layout)
+        (layoutWidth layout)
+        (layoutHeight layout)
+        (layoutPadding layout)
+        (layoutGap layout)
+        (layoutMinW layout)
+        (layoutMinH layout)
+        (layoutMaxW layout)
+        (layoutMaxH layout)
+        0
+        (layoutAlignX layout)
+        (layoutAlignY layout)
+        (layoutWrap layout)
+    setWidgetId (ctxNodeArena ctx) idx wid
+    writeIORef (ctxContainerStack ctx) (idx : stack)
+    pure stack
+  childR <- uiFinally child (writeIORef (ctxContainerStack ctx) stack)
+  pure (wid, childR)
