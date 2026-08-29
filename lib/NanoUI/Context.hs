@@ -86,19 +86,15 @@ module NanoUI.Context
 
 import Control.Monad (when)
 import Data.Dynamic (fromDynamic, toDyn)
-import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
+import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Proxy (Proxy (..))
 import Data.Typeable (Typeable, typeOf, typeRep)
 import Data.Text (Text)
-import Data.Word (Word8)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Map.Strict as Map
-import Data.ByteString (ByteString)
-import Foreign.ForeignPtr (ForeignPtr)
 import qualified NanoUI.Atlas as Atlas
-import NanoUI.Atlas (atlasTextureId)
 import NanoUI.Draw (newDrawArena)
-import NanoUI.Types (Damage (..), ImageId (..), Rect (..), Size (..))
+import NanoUI.Types (Damage (..), Rect (..), Size (..))
 import NanoUI.Messages (FrameMsg (..), decodeMessages, reduceMessages, reduceUpdates)
 import NanoUI.Animation
   ( Animation (..)
@@ -131,6 +127,19 @@ import NanoUI.Context.Internal
   , getPrevRectByKey
   , intKey
   , markDirty
+  , modifyIORefList
+  )
+import NanoUI.Context.Tooltip
+  ( clearTooltips
+  , pushTooltip
+  , readTooltips
+  )
+import NanoUI.Context.Atlas
+  ( atlasSnapshot
+  , atlasTextureId
+  , lookupImageUv
+  , registerImage
+  , registerImages
   )
 import NanoUI.Context.Animation
   ( anyAnimating
@@ -426,34 +435,3 @@ setScrollOffset ctx wid off = do
   when (prev /= off) $ do
     setStore ctx (store {storeScroll = IM.insert key off (storeScroll store)})
     markDirty ctx
-
-modifyIORefList :: IORef [a] -> ([a] -> [a]) -> IO ()
-modifyIORefList ref f = readIORef ref >>= writeIORef ref . f
-
-{-# INLINE clearTooltips #-}
-clearTooltips :: Context -> IO ()
-clearTooltips ctx = writeIORef (ctxTooltips ctx) []
-
-{-# INLINE pushTooltip #-}
-pushTooltip :: Context -> WidgetId -> Rect -> Text -> IO ()
-pushTooltip ctx wid rect txt =
-  modifyIORefList (ctxTooltips ctx) (PendingTooltip wid rect txt :)
-
-{-# INLINE readTooltips #-}
-readTooltips :: Context -> IO [PendingTooltip]
-readTooltips ctx = readIORef (ctxTooltips ctx)
-
-registerImage :: Context -> ImageId -> Int -> Int -> ByteString -> IO Bool
-registerImage ctx iid w h pixels = do
-  ok <- Atlas.registerImage (ctxImageAtlas ctx) iid w h pixels
-  when ok (markDirty ctx)
-  pure ok
-
-registerImages :: Context -> [(ImageId, Int, Int, ByteString)] -> IO Bool
-registerImages ctx = fmap and . mapM (\(iid, w, h, px) -> registerImage ctx iid w h px)
-
-lookupImageUv :: Context -> ImageId -> IO (Maybe (Float, Float, Float, Float))
-lookupImageUv ctx = Atlas.lookupImageUv (ctxImageAtlas ctx)
-
-atlasSnapshot :: Context -> IO (Maybe (Int, Int, ForeignPtr Word8, Int))
-atlasSnapshot ctx = Atlas.atlasSnapshot (ctxImageAtlas ctx)

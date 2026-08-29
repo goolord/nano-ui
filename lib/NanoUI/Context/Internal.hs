@@ -11,6 +11,7 @@ module NanoUI.Context.Internal
   , intKey
   , markDirty
   , getPrevRectByKey
+  , modifyIORefList
   ) where
 
 import Data.Dynamic (Dynamic)
@@ -148,3 +149,6 @@ markDirty ctx = do
 getPrevRectByKey :: Context -> Int -> IO (Maybe Rect)
 getPrevRectByKey ctx key =
   readIORef (ctxPrevRects ctx) >>= pure . IM.lookup key
+
+modifyIORefList :: IORef [a] -> ([a] -> [a]) -> IO ()
+modifyIORefList ref f = readIORef ref >>= writeIORef ref . f

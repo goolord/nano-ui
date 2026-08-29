@@ -64,6 +64,8 @@ library
         NanoUI.Context.Animation
         NanoUI.Context.Internal
         NanoUI.Context.Modal
+        NanoUI.Context.Tooltip
+        NanoUI.Context.Atlas
         NanoUI.Damage
         NanoUI.Draw
         NanoUI.Ease
