@@ -50,13 +50,14 @@ maxFrameDt :: Float
 maxFrameDt = 0.05
 
 runSdlSession ::
+  Bool ->
   Context ->
   (SdlEnv -> IO ()) ->
   (Input -> Bool) ->
   (Context -> SdlEnv -> Input -> Bool -> IO (Bool, Input)) ->
   IO ()
-runSdlSession ctx setup shouldQuit drawFn =
-  withSdl ctx "nano-ui" defaultWindowSize $ \ctx0 env -> do
+runSdlSession vsync ctx setup shouldQuit drawFn =
+  withSdl vsync ctx "nano-ui" defaultWindowSize $ \ctx0 env -> do
     setup env
     void $ setRenderDrawBlendModeSafe (sdlRenderer env) (fromIntegral sDL_BLENDMODE_BLEND)
     ctxRef <- newIORef ctx0

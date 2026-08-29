@@ -3,15 +3,23 @@
 #include <stddef.h>
 #include <stdbool.h>
 
-void nano_ui_sdl_init_hints(void)
+void nano_ui_sdl_init_hints(bool vsync)
 {
-    SDL_SetHint(SDL_HINT_RENDER_VSYNC, "1");
+    SDL_SetHint(SDL_HINT_RENDER_VSYNC, vsync ? "1" : "0");
 }
 
 void nano_ui_sdl_init_bench_hints(void)
 {
     SDL_SetHint(SDL_HINT_ASSERT, "always_ignore");
     SDL_SetHint(SDL_HINT_RENDER_VSYNC, "0");
+}
+
+bool nano_ui_set_render_vsync(SDL_Renderer *renderer, bool vsync)
+{
+    if (!renderer) {
+        return false;
+    }
+    return SDL_SetRenderVSync(renderer, vsync ? 1 : 0);
 }
 
 float nano_ui_window_display_scale(SDL_Window *window)

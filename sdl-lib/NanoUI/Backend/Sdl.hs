@@ -40,6 +40,7 @@ data SdlOptions = SdlOptions
   { sdlAppTheme :: !(Maybe Theme)
   , sdlAppShouldQuit :: !(Input -> Bool)
   , sdlAppImages :: ![RgbaImage]
+  , sdlAppVsync :: !Bool
   }
 
 defaultSdlOptions :: SdlOptions
@@ -48,12 +49,13 @@ defaultSdlOptions =
     { sdlAppTheme = Nothing
     , sdlAppShouldQuit = const False
     , sdlAppImages = []
+    , sdlAppVsync = True
     }
 
 runSdlApp :: SdlOptions -> NanoUI () -> IO ()
 runSdlApp options ui = do
   ctx <- sdlContext options
-  runSdlAppWithQuit ctx (sdlAppShouldQuit options) ui
+  runSdlAppWithQuit options ctx (sdlAppShouldQuit options) ui
 
 runSdlAppReduce ::
   (Typeable msg, Eq model) =>
@@ -64,7 +66,7 @@ runSdlAppReduce ::
   IO ()
 runSdlAppReduce options update model view = do
   ctx <- sdlContext options
-  runSdlAppWithQuitReduce update ctx model (sdlAppShouldQuit options) view
+  runSdlAppWithQuitReduce options update ctx model (sdlAppShouldQuit options) view
 
 sdlContext :: SdlOptions -> IO Context
 sdlContext options = do
@@ -87,32 +89,35 @@ registerRgbaImage ctx img =
     (rgbaImageHeight img)
     (rgbaImagePixels img)
 
-runSdlAppWithQuit :: Context -> (Input -> Bool) -> NanoUI () -> IO ()
-runSdlAppWithQuit = runSdlAppWithQuitEff runEff
+runSdlAppWithQuit :: SdlOptions -> Context -> (Input -> Bool) -> NanoUI () -> IO ()
+runSdlAppWithQuit options = runSdlAppWithQuitEff (sdlAppVsync options) runEff
 
 runSdlAppWithQuitEff ::
   IOE :> es =>
+  Bool ->
   (forall x. Eff es x -> IO x) ->
   Context ->
   (Input -> Bool) ->
   Eff (Ui : es) () ->
   IO ()
-runSdlAppWithQuitEff unlift ctx shouldQuit ui =
-  runSdlSession ctx (const (pure ())) shouldQuit $ \c env i force ->
+runSdlAppWithQuitEff vsync unlift ctx shouldQuit ui =
+  runSdlSession vsync ctx (const (pure ())) shouldQuit $ \c env i force ->
     drawEff unlift c ui env i force
 
 runSdlAppWithQuitReduce ::
   (Typeable msg, Eq model) =>
+  SdlOptions ->
   (msg -> model -> model) ->
   Context ->
   model ->
   (Input -> Bool) ->
   (model -> NanoUI ()) ->
   IO ()
-runSdlAppWithQuitReduce = runSdlAppWithQuitReduceEff runEff
+runSdlAppWithQuitReduce options = runSdlAppWithQuitReduceEff (sdlAppVsync options) runEff
 
 runSdlAppWithQuitReduceEff ::
   (IOE :> es, Typeable msg, Eq model) =>
+  Bool ->
   (forall x. Eff es x -> IO x) ->
   (msg -> model -> model) ->
   Context ->
@@ -120,7 +125,7 @@ runSdlAppWithQuitReduceEff ::
   (Input -> Bool) ->
   (model -> Eff (Ui : es) ()) ->
   IO ()
-runSdlAppWithQuitReduceEff unlift update ctx model0 shouldQuit view = do
+runSdlAppWithQuitReduceEff vsync unlift update ctx model0 shouldQuit view = do
   modelRef <- newIORef model0
-  runSdlSession ctx (const (pure ())) shouldQuit $ \c env i force ->
+  runSdlSession vsync ctx (const (pure ())) shouldQuit $ \c env i force ->
     drawReduceEff unlift update modelRef view c env i force

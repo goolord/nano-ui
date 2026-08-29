@@ -7,6 +7,7 @@ module NanoUI.Sdl.Display
   , queryWindowLogicalSize
   , queryMouseWindowPos
   , setRenderScale
+  , setRenderVSync
   , queryRendererName
   , windowToLogicalCoords
   , installResizeWatch
@@ -37,8 +38,8 @@ defaultUiScale = 1
 defaultFontSize :: Float
 defaultFontSize = 16
 
-initSdlHints :: IO ()
-initSdlHints = sdlInitHintsC
+initSdlHints :: Bool -> IO ()
+initSdlHints vsync = sdlInitHintsC vsync
 
 initBenchHints :: IO ()
 initBenchHints = sdlInitBenchHintsC
@@ -76,6 +77,9 @@ queryMouseWindowPos =
 setRenderScale :: Ptr SDL_Renderer -> Float -> IO Bool
 setRenderScale ren scale = setRenderScaleC ren (realToFrac scale)
 
+setRenderVSync :: Ptr SDL_Renderer -> Bool -> IO Bool
+setRenderVSync ren vsync = setRenderVSyncC ren vsync
+
 queryRendererName :: Ptr SDL_Renderer -> IO String
 queryRendererName ren =
   allocaBytes 64 $ \buf -> do
@@ -99,10 +103,13 @@ installResizeWatch act = do
     freeHaskellFunPtr fp
 
 foreign import ccall safe "nano_ui_sdl_init_hints"
-  sdlInitHintsC :: IO ()
+  sdlInitHintsC :: Bool -> IO ()
 
 foreign import ccall safe "nano_ui_sdl_init_bench_hints"
   sdlInitBenchHintsC :: IO ()
+
+foreign import ccall safe "nano_ui_set_render_vsync"
+  setRenderVSyncC :: Ptr SDL_Renderer -> Bool -> IO Bool
 
 foreign import ccall safe "nano_ui_window_display_scale"
   windowDisplayScaleC :: Ptr SDL_Window -> IO CFloat

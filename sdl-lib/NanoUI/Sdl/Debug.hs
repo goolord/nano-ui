@@ -35,6 +35,7 @@ data SdlDebugSnapshot = SdlDebugSnapshot
   , dbgScale :: Float
   , dbgFontPath :: FilePath
   , dbgRenderer :: String
+  , dbgVsync :: Bool
   , dbgRtsOn :: Bool
   , dbgGcs :: Word32
   , dbgMajorGcs :: Word32
@@ -110,6 +111,7 @@ emptySdlDebug =
     , dbgScale = 1
     , dbgFontPath = ""
     , dbgRenderer = ""
+    , dbgVsync = True
     , dbgRtsOn = False
     , dbgGcs = 0
     , dbgMajorGcs = 0
@@ -165,8 +167,8 @@ notePresent ref uiMs dd = do
       , ()
       )
 
-readSdlDebug :: SamplerRef -> Size -> V2 -> FilePath -> Float -> String -> IO SdlDebugSnapshot
-readSdlDebug ref (Size ww wh) (V2 mx my) fontPath scale renderer = do
+readSdlDebug :: SamplerRef -> Size -> V2 -> FilePath -> Float -> String -> Bool -> IO SdlDebugSnapshot
+readSdlDebug ref (Size ww wh) (V2 mx my) fontPath scale renderer vsync = do
   now <- getMonotonicTime
   (refresh, cur) <-
     atomicModifyIORef' ref $ \s ->
@@ -202,6 +204,7 @@ readSdlDebug ref (Size ww wh) (V2 mx my) fontPath scale renderer = do
               , dbgScale = scale
               , dbgFontPath = fontPath
               , dbgRenderer = renderer
+              , dbgVsync = vsync
               , dbgRtsOn = rtsOn
               , dbgGcs = gcs
               , dbgMajorGcs = major
