@@ -47,7 +47,7 @@ main :: IO ()
 main =
   runTermApp
     defaultTermOptions
-      { termAppShouldQuit = \inp -> KeyEscape `elem` inputKeys inp
+      { termAppShouldQuit = \inp -> inputKeysElem KeyEscape (inputKeys inp)
       }
     app
 
@@ -126,7 +126,7 @@ main =
   runSdlApp
     defaultSdlOptions
       { sdlAppImages = [RgbaImage (ImageId 1) 32 32 pixels]
-      , sdlAppShouldQuit = \inp -> KeyEscape `elem` inputKeys inp
+      , sdlAppShouldQuit = \inp -> inputKeysElem KeyEscape (inputKeys inp)
       }
     app
 ```

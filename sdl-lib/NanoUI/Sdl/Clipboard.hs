@@ -39,7 +39,4 @@ getClipboardText = do
 
 withSdlClipboard :: Context -> Context
 withSdlClipboard ctx =
-  withClipboard
-    ctx
-    (fmap (fmap T.unpack) getClipboardText)
-    (\s -> setClipboardText (T.pack s))
+  withClipboard ctx getClipboardText setClipboardText

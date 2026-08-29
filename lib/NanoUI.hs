@@ -23,6 +23,12 @@ module NanoUI
   , emptyInput
   , inputInteracted
   , inputPointerHeld
+  , appendInputKey
+  , emptyInputKeys
+  , inputKeysElem
+  , inputKeysFromList
+  , inputKeysNull
+  , foldInputKeys
   , -- Style
     Sizing (..)
   , Direction (..)
@@ -198,8 +204,14 @@ import NanoUI.Input
   ( Input (..)
   , Key (..)
   , Modifiers (..)
+  , appendInputKey
   , emptyInput
+  , emptyInputKeys
+  , foldInputKeys
   , inputInteracted
+  , inputKeysElem
+  , inputKeysFromList
+  , inputKeysNull
   , inputPointerHeld
   )
 import NanoUI.Monad (NanoUI, Ui, currentId, emit, runNanoUI, runUi, uiIO, withKey)

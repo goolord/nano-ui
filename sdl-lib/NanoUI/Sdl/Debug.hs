@@ -17,7 +17,7 @@ import GHC.Clock (getMonotonicTime)
 import GHC.Conc (getNumCapabilities, getNumProcessors)
 import GHC.Stats (GCDetails (..), RTSStats (..), getRTSStats, getRTSStatsEnabled)
 import NanoUI (Size (..), V2 (..))
-import NanoUI.Testing (DrawData (..))
+import NanoUI.Testing (DrawData (..), drawCmdCount)
 
 data SdlDebugSnapshot = SdlDebugSnapshot
   { dbgPresentFps :: Double
@@ -163,7 +163,7 @@ notePresent ref uiMs dd = do
           , smFrameMs = frameMs
           , smVerts = drawVertexCount dd
           , smIndices = drawIndexCount dd
-          , smCmds = length (drawCommands dd)
+          , smCmds = drawCmdCount dd
           }
       , ()
       )

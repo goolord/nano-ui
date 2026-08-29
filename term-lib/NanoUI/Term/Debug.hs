@@ -28,7 +28,7 @@ import NanoUI
   , themePanel
   , themeWindow
   )
-import NanoUI.Testing (Context, DrawData (..), ctxTheme)
+import NanoUI.Testing (Context, DrawData (..), ctxTheme, drawCmdCount)
 
 data TermDrawStats = TermDrawStats
   { tdsNodes :: Int
@@ -196,7 +196,7 @@ notePresent ref uiMs dd stats blitted = do
           , smFrameMs = frameMs
           , smVerts = drawVertexCount dd
           , smIndices = drawIndexCount dd
-          , smCmds = length (drawCommands dd)
+          , smCmds = drawCmdCount dd
           , smNodes = tdsNodes stats
           , smBaseSpans = tdsBaseSpans stats
           , smOverlaySpans = tdsOverlaySpans stats

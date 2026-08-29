@@ -21,7 +21,7 @@ import NanoUI.Context
   , markEscapeConsumed
   )
 import NanoUI.Icons (Icons (..))
-import NanoUI.Input (Key (..), inputKeys, inputMousePos, inputMousePressed, inputWindowSize)
+import NanoUI.Input (Key (..), inputKeys, inputKeysElem, inputMousePos, inputMousePressed, inputWindowSize)
 import NanoUI.Layout.Arena (NodeType (..), addNode, setWidgetId)
 import NanoUI.Monad (Ui, askContext, askInput, currentId, uiFinally, uiIO, withKey)
 import NanoUI.Style
@@ -150,7 +150,7 @@ overlay kind open title child
                 Just r | rectW r > 0 && rectH r > 0 ->
                   inputMousePressed inp && not (rectContains r mouse)
                 _ -> False
-          esc = kind == ModalOverlay && KeyEscape `elem` inputKeys inp
+          esc = kind == ModalOverlay && inputKeysElem KeyEscape (inputKeys inp)
           dismissed = backdrop || esc || respClicked closeResp
       when esc $ uiIO (markEscapeConsumed ctx)
       pure

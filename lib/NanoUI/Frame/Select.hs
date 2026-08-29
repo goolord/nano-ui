@@ -113,7 +113,7 @@ import NanoUI.WidgetMarkers
   )
 import NanoUI.Icons (Icons (..), checkboxMark, terminalPaintColumns)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
-import NanoUI.Input (Input (..), Key (..), Modifiers (..), inputInteracted, inputKeys, inputPointerHeld, inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased, inputMouseRightPressed, inputScroll, inputDeltaTime, inputWindowSize, modShift)
+import NanoUI.Input (Input (..), Key (..), Modifiers (..), inputInteracted, inputKeys, foldInputKeys, inputPointerHeld, inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased, inputMouseRightPressed, inputScroll, inputDeltaTime, inputWindowSize, modShift)
 import NanoUI.Layout.Arena
   ( DirTag (..)
   , NodeIdx
@@ -203,10 +203,17 @@ closeSelectOnOutsideClick ctx inp =
 finalizeSelectKeyboard :: Context -> Input -> IO ()
 finalizeSelectKeyboard ctx inp = do
   let keys = inputKeys inp
-      wantNext = KeyDown `elem` keys || KeyRight `elem` keys
-      wantPrev = KeyUp `elem` keys || KeyLeft `elem` keys
-      wantEsc = KeyEscape `elem` keys
-      wantEnter = KeyEnter `elem` keys
+      (wantNext, wantPrev, wantEsc, wantEnter) =
+        foldInputKeys
+          ( \(n, p, e, r) k ->
+              ( n || k == KeyDown || k == KeyRight
+              , p || k == KeyUp || k == KeyLeft
+              , e || k == KeyEscape
+              , r || k == KeyEnter
+              )
+          )
+          (False, False, False, False)
+          keys
       wantStep = wantNext || wantPrev
   when (wantStep || wantEsc || wantEnter) $ do
     focus <- readIORef (ctxFocusId ctx)

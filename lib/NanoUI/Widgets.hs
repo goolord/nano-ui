@@ -204,12 +204,12 @@ kv k v = do
       void (labelEx (keyLayout defaultLayout) k)
       void (labelEx (tight . fillW . alignEnd $ defaultLayout) (T.stripEnd v))
 
-kvBlock :: (HasCallStack, Ui :> es) => [(String, String)] -> Eff es ()
+kvBlock :: (HasCallStack, Ui :> es) => [(Text, Text)] -> Eff es ()
 kvBlock rows =
   void $
     labelEx
       (tight . gap 0 $ defaultLayout)
-      (monoFontMarker <> T.unlines [T.pack (k <> ": " <> v) | (k, v) <- rows])
+      (monoFontMarker <> T.unlines [k <> ": " <> v | (k, v) <- rows])
 
 card :: Ui :> es => Eff es a -> Eff es a
 card = panel (minW 300 . padXY 12 10 . gap 8 . fillW $ defaultLayout)
@@ -305,7 +305,7 @@ sliderEx layout lbl minV maxV initial = do
     uiIO $ setStore ctx (store {storeSlider = IM.insert key finalVal (storeSlider store)})
   pure (resp {respChanged = finalVal /= current}, finalVal)
 
-textInput :: (HasCallStack, Ui :> es) => Text -> String -> Eff es (Response, String)
+textInput :: (HasCallStack, Ui :> es) => Text -> Text -> Eff es (Response, Text)
 textInput lbl initial = do
   wid <- currentId
   ctx <- askContext
@@ -316,7 +316,7 @@ textInput lbl initial = do
   when (not (IM.member key (storeText store))) $
     uiIO $ setStore ctx (store {storeText = IM.insert key initial (storeText store)})
   let current = IM.findWithDefault initial key (storeText store)
-      cursor = IM.findWithDefault (length current) key (storeCursor store)
+      cursor = IM.findWithDefault (T.length current) key (storeCursor store)
       anchor = IM.findWithDefault cursor key (storeSelAnchor store)
   focus <- uiIO (readIORef (ctxFocusId ctx))
   blocked <- uiIO (pointerBlockedByModal ctx)
@@ -391,5 +391,5 @@ tooltip tipTxt resp = do
       pushTooltip ctx (respId resp) (Rect (rx + rw + 4) ry 100 (max rh 20)) tipTxt
   pure resp
 
-textInputText :: Text -> String -> Int -> Bool -> Text
+textInputText :: Text -> Text -> Int -> Bool -> Text
 textInputText = textInputTerminalText

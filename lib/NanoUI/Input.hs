@@ -7,8 +7,17 @@ module NanoUI.Input
   , emptyInput
   , inputInteracted
   , inputPointerHeld
+  , appendInputKey
+  , inputKeysNull
+  , inputKeysElem
+  , foldInputKeys
+  , inputKeysFromList
+  , emptyInputKeys
   ) where
 
+import Data.Text (Text)
+import Data.Vector (Vector)
+import qualified Data.Vector as V
 import NanoUI.Types (Size (..), V2 (..))
 
 data Key
@@ -42,8 +51,8 @@ data Input = Input
   , inputMouseRightReleased :: !Bool
   , inputMouseClicks :: !Int
   , inputScroll :: !V2
-  , inputKeys :: [Key]
-  , inputChars :: [Char]
+  , inputKeys :: Vector Key
+  , inputChars :: !Text
   , inputModifiers :: !Modifiers
   , inputWindowSize :: !Size
   , inputDeltaTime :: {-# UNPACK #-} !Float
@@ -62,12 +71,35 @@ emptyInput =
     , inputMouseRightReleased = False
     , inputMouseClicks = 1
     , inputScroll = V2 0 0
-    , inputKeys = []
-    , inputChars = []
+    , inputKeys = emptyInputKeys
+    , inputChars = ""
     , inputModifiers = Modifiers False False False
     , inputWindowSize = Size 800 600
     , inputDeltaTime = 0
     }
+
+{-# INLINE appendInputKey #-}
+appendInputKey :: Key -> Vector Key -> Vector Key
+appendInputKey k ks = V.snoc ks k
+
+{-# INLINE inputKeysFromList #-}
+inputKeysFromList :: [Key] -> Vector Key
+inputKeysFromList = V.fromList
+
+emptyInputKeys :: Vector Key
+emptyInputKeys = V.empty
+
+{-# INLINE inputKeysNull #-}
+inputKeysNull :: Vector Key -> Bool
+inputKeysNull = V.null
+
+{-# INLINE inputKeysElem #-}
+inputKeysElem :: Key -> Vector Key -> Bool
+inputKeysElem = V.elem
+
+{-# INLINE foldInputKeys #-}
+foldInputKeys :: (a -> Key -> a) -> a -> Vector Key -> a
+foldInputKeys = V.foldl
 
 -- Buttons, keys, scroll, resize. Mouse motion alone does not count.
 {-# INLINE inputInteracted #-}

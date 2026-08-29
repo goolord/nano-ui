@@ -100,6 +100,6 @@ enableMeasureCache ctx = do
   pure (ctx {ctxMeasureCache = Just cacheRef})
 
 {-# INLINE withClipboard #-}
-withClipboard :: Context -> IO (Maybe String) -> (String -> IO Bool) -> Context
+withClipboard :: Context -> IO (Maybe Text) -> (Text -> IO Bool) -> Context
 withClipboard ctx get set =
   ctx {ctxClipboardGet = get, ctxClipboardSet = set}

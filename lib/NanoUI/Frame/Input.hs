@@ -114,7 +114,7 @@ import NanoUI.WidgetMarkers
   )
 import NanoUI.Icons (Icons (..), checkboxMark, terminalPaintColumns)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
-import NanoUI.Input (Input (..), Key (..), Modifiers (..), inputInteracted, inputKeys, inputPointerHeld, inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased, inputMouseRightPressed, inputScroll, inputDeltaTime, inputWindowSize, modShift)
+import NanoUI.Input (Input (..), Key (..), Modifiers (..), inputInteracted, inputKeys, inputKeysElem, inputPointerHeld, inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased, inputMouseRightPressed, inputScroll, inputDeltaTime, inputWindowSize, modShift)
 import NanoUI.Layout.Arena
   ( DirTag (..)
   , NodeIdx
@@ -178,7 +178,7 @@ import NanoUI.Frame.TextInput (collapseTextInputSelection, textInputGeomForWidge
 
 finalizeTabFocus :: Context -> Input -> IO ()
 finalizeTabFocus ctx inp =
-  when (KeyTab `elem` inputKeys inp) $ do
+  when (inputKeysElem KeyTab (inputKeys inp)) $ do
     focusables <- getFocusables ctx
     let raw = filter (/= WidgetId 0) focusables
     ids <- filterModalFocusables ctx raw

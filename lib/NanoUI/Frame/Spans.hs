@@ -490,7 +490,7 @@ widgetTextSpans ctx nt idx x y w h = do
           let theme = ctxTheme ctx
               windowBg = themeWindow theme
               labelFg = lerpColor fg windowBg 0.32
-              placeholder = T.null (T.pack value) && not focus
+              placeholder = T.null value && not focus
               fieldFg
                 | placeholder = lerpColor fg bg 0.40
                 | otherwise = fg
@@ -569,7 +569,7 @@ widgetTextPlacements ctx nt idx x y w h = do
         then do
           wid <- getWidgetId (ctxNodeArena ctx) idx
           store <- getStore ctx
-          let cursor = IM.findWithDefault (length value) (intKey wid) (storeCursor store)
+          let cursor = IM.findWithDefault (T.length value) (intKey wid) (storeCursor store)
               shown = textInputTerminalText lbl value cursor focus
           (tw, th) <- ctxMeasureText ctx shown
           pure [(shown, x + ix, centeredTextY (ctxHostProfile ctx) fm y h th, tw, th)]

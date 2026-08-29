@@ -5,8 +5,10 @@ module NanoUI.Widgets.TextInput
   , applyTextInputMenuAction
   ) where
 
-import Control.Monad (foldM, void, when)
+import Control.Monad (void, when)
 import Data.IORef (writeIORef)
+import Data.Text (Text)
+import qualified Data.Text as T
 import qualified Data.IntMap.Strict as IM
 import NanoUI.Context
   ( Context (..)
@@ -16,7 +18,15 @@ import NanoUI.Context
   , setStore
   )
 import NanoUI.Id (WidgetId)
-import NanoUI.Input (Input (..), Key (..), Modifiers (..), inputChars, inputKeys, inputModifiers)
+import NanoUI.Input
+  ( Input (..)
+  , Key (..)
+  , Modifiers (..)
+  , foldInputKeys
+  , inputChars
+  , inputKeys
+  , inputModifiers
+  )
 import NanoUI.Style (Layout (..), Sizing (..), defaultLayout)
 import NanoUI.Store (WidgetStore (..))
 
@@ -28,7 +38,7 @@ textInputLayout =
     }
 
 data TextInputState = TextInputState
-  { tisText :: String
+  { tisText :: Text
   , tisCursor :: Int
   , tisAnchor :: Int
   }
@@ -39,15 +49,15 @@ textInputSelRange s
   | tisAnchor s == tisCursor s = Nothing
   | otherwise = Just (min (tisAnchor s) (tisCursor s), max (tisAnchor s) (tisCursor s))
 
-selectionText :: TextInputState -> Maybe String
+selectionText :: TextInputState -> Maybe Text
 selectionText s =
   case textInputSelRange s of
     Nothing -> Nothing
-    Just (lo, hi) -> Just (take (hi - lo) (drop lo (tisText s)))
+    Just (lo, hi) -> Just (T.take (hi - lo) (T.drop lo (tisText s)))
 
 selectAllTextInput :: TextInputState -> TextInputState
 selectAllTextInput s =
-  s {tisAnchor = 0, tisCursor = length (tisText s)}
+  s {tisAnchor = 0, tisCursor = T.length (tisText s)}
 
 textInputCopy :: Context -> TextInputState -> IO ()
 textInputCopy ctx s = do
@@ -55,7 +65,7 @@ textInputCopy ctx s = do
         case selectionText s of
           Just slice -> slice
           Nothing -> tisText s
-  when (not (null txt)) $
+  when (not (T.null txt)) $
     void (ctxClipboardSet ctx txt)
 
 textInputCut :: Context -> TextInputState -> IO TextInputState
@@ -72,16 +82,15 @@ textInputPaste ctx s = do
   case mtxt of
     Nothing -> pure s
     Just paste ->
-      let p = paste
-          pos = case textInputSelRange s of
+      let pos = case textInputSelRange s of
             Nothing -> tisCursor s
             Just (lo, _) -> lo
           t = tisText s
           t' =
             case textInputSelRange s of
-              Nothing -> take pos t ++ p ++ drop pos t
-              Just (lo, hi) -> take lo t ++ p ++ drop hi t
-          end = pos + length p
+              Nothing -> T.take pos t <> paste <> T.drop pos t
+              Just (lo, hi) -> T.take lo t <> paste <> T.drop hi t
+          end = pos + T.length paste
        in pure s {tisText = t', tisCursor = end, tisAnchor = end}
 
 applyTextInputMenuAction :: Context -> WidgetId -> Int -> IO ()
@@ -89,7 +98,7 @@ applyTextInputMenuAction ctx wid item = do
   store <- getStore ctx
   let key = intKey wid
       text = IM.findWithDefault "" key (storeText store)
-      cursor = IM.findWithDefault (length text) key (storeCursor store)
+      cursor = IM.findWithDefault (T.length text) key (storeCursor store)
       anchor = IM.findWithDefault cursor key (storeSelAnchor store)
       s0 = TextInputState text cursor anchor
   s1 <-
@@ -119,13 +128,21 @@ processTextInput ctx inp s0 = do
       chars = inputChars inp
   s1 <-
     if ctrl
-      then foldM (handleCtrlChar ctx) s0 chars
+      then foldTextM (handleCtrlChar ctx) s0 chars
       else pure s0
-  let filtered = filter (not . isCtrlCombo ctrl) chars
-      s2 = foldl insertChar s1 filtered
-  pure (foldl (applyKey shift) s2 keys)
+  let filtered = T.filter (not . isCtrlCombo ctrl) chars
+      s2 = T.foldl insertChar s1 filtered
+  pure (foldInputKeys (applyKey shift) s2 keys)
   where
-    isCtrlCombo c ch = c && ch `elem` ("aAcCxXvV\x01" :: String)
+    isCtrlCombo c ch = c && T.elem ch "aAcCxXvV\x01"
+
+foldTextM :: Monad m => (a -> Char -> m a) -> a -> Text -> m a
+foldTextM f z t =
+  case T.uncons t of
+    Nothing -> pure z
+    Just (c, rest) -> do
+      z' <- f z c
+      foldTextM f z' rest
 
 handleCtrlChar :: Context -> TextInputState -> Char -> IO TextInputState
 handleCtrlChar ctx s ch
@@ -142,11 +159,11 @@ insertChar s ch =
       let t = tisText s
           c = tisCursor s
           pos = c + 1
-       in s {tisText = take c t ++ [ch] ++ drop c t, tisCursor = pos, tisAnchor = pos}
+       in s {tisText = T.take c t <> T.singleton ch <> T.drop c t, tisCursor = pos, tisAnchor = pos}
     Just (lo, hi) ->
       let t = tisText s
           pos = lo + 1
-       in s {tisText = take lo t ++ [ch] ++ drop hi t, tisCursor = pos, tisAnchor = pos}
+       in s {tisText = T.take lo t <> T.singleton ch <> T.drop hi t, tisCursor = pos, tisAnchor = pos}
 
 applyKey :: Bool -> TextInputState -> Key -> TextInputState
 applyKey shift s key =
@@ -154,33 +171,33 @@ applyKey shift s key =
     KeyBackspace -> deleteBackward s
     KeyDelete -> deleteForward s
     KeyLeft -> moveCursor s (max 0 (tisCursor s - 1)) shift
-    KeyRight -> moveCursor s (min (length (tisText s)) (tisCursor s + 1)) shift
+    KeyRight -> moveCursor s (min (T.length (tisText s)) (tisCursor s + 1)) shift
     KeyHome -> moveCursor s 0 shift
-    KeyEnd -> moveCursor s (length (tisText s)) shift
+    KeyEnd -> moveCursor s (T.length (tisText s)) shift
     _ -> s
 
 deleteBackward :: TextInputState -> TextInputState
 deleteBackward s =
   case textInputSelRange s of
-    Just (lo, hi) -> s {tisText = take lo (tisText s) ++ drop hi (tisText s), tisCursor = lo, tisAnchor = lo}
+    Just (lo, hi) -> s {tisText = T.take lo (tisText s) <> T.drop hi (tisText s), tisCursor = lo, tisAnchor = lo}
     Nothing ->
       let c = tisCursor s
        in if c > 0
             then
               let t = tisText s
                   pos = c - 1
-               in s {tisText = take pos t ++ drop c t, tisCursor = pos, tisAnchor = pos}
+               in s {tisText = T.take pos t <> T.drop c t, tisCursor = pos, tisAnchor = pos}
             else s
 
 deleteForward :: TextInputState -> TextInputState
 deleteForward s =
   case textInputSelRange s of
-    Just (lo, hi) -> s {tisText = take lo (tisText s) ++ drop hi (tisText s), tisCursor = lo, tisAnchor = lo}
+    Just (lo, hi) -> s {tisText = T.take lo (tisText s) <> T.drop hi (tisText s), tisCursor = lo, tisAnchor = lo}
     Nothing ->
       let c = tisCursor s
           t = tisText s
-       in if c < length t
-            then s {tisText = take c t ++ drop (c + 1) t}
+       in if c < T.length t
+            then s {tisText = T.take c t <> T.drop (c + 1) t}
             else s
 
 moveCursor :: TextInputState -> Int -> Bool -> TextInputState

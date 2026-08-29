@@ -11,7 +11,7 @@ main =
   runSdlApp
     defaultSdlOptions
       { sdlAppTheme = Just benchTheme
-      , sdlAppShouldQuit = \inp -> KeyEscape `elem` inputKeys inp
+      , sdlAppShouldQuit = \inp -> inputKeysElem KeyEscape (inputKeys inp)
       }
     animUi
 

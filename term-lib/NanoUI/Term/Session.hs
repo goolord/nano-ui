@@ -11,14 +11,17 @@ import Control.Exception (finally)
 #endif
 import Control.Monad (when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import qualified Data.Text as T
 import GHC.Clock (getMonotonicTime)
 import NanoUI
   ( Input (..)
   , Modifiers (..)
   , Size (..)
+  , appendInputKey
   , asciiIcons
   , defaultTheme
   , emptyInput
+  , emptyInputKeys
   , V2 (..)
   )
 import NanoUI.Testing
@@ -251,13 +254,14 @@ isHardQuit ev =
 
 isHardQuitInput :: Input -> Bool
 isHardQuitInput inp =
-  any (\c -> modCtrl (inputModifiers inp) && (c == 'c' || c == '\ETX')) (inputChars inp)
+  modCtrl (inputModifiers inp)
+    && (T.elem 'c' (inputChars inp) || T.elem '\ETX' (inputChars inp))
 
 clearEphemeral :: Input -> Input
 clearEphemeral inp =
   inp
-    { inputKeys = []
-    , inputChars = []
+    { inputKeys = emptyInputKeys
+    , inputChars = ""
     , inputMousePressed = False
     , inputMouseReleased = False
     , inputMouseRightPressed = False
@@ -284,8 +288,8 @@ applyEvent :: Input -> TermEvent -> Input
 applyEvent inp ev =
   case ev of
     EvResize w h -> inp {inputWindowSize = Size (fromIntegral w) (fromIntegral h)}
-    EvKey k mods -> inp {inputKeys = inputKeys inp ++ [k], inputModifiers = mods}
-    EvChar c mods -> inp {inputChars = inputChars inp ++ [c], inputModifiers = mods}
+    EvKey k mods -> inp {inputKeys = appendInputKey k (inputKeys inp), inputModifiers = mods}
+    EvChar c mods -> inp {inputChars = inputChars inp <> T.singleton c, inputModifiers = mods}
     EvMouse action col row mods ->
       let positioned =
             inp

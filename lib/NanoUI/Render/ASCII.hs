@@ -2,12 +2,12 @@ module NanoUI.Render.ASCII
   ( renderASCII
   ) where
 
-import NanoUI.Draw (DrawCmd (..), DrawData (..), Layer (..))
+import NanoUI.Draw (DrawCmd (..), DrawData (..), Layer (..), foldDrawCmds)
 
 renderASCII :: Int -> Int -> DrawData -> [String]
 renderASCII width height drawData =
   let grid = replicate height (replicate width ' ')
-   in foldl (applyCmd width height) grid (drawCommands drawData)
+   in foldDrawCmds (applyCmd width height) grid drawData
 
 stamp :: [String] -> Int -> Int -> Int -> Int -> Char -> [String]
 stamp grid x y w h ch =

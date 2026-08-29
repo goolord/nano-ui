@@ -1,5 +1,17 @@
 # Revision history for nano-ui
 
+## Unreleased
+
+Breaking API: prefer `Text` and `Vector` over `String` and `[ ]` in core types.
+
+* `inputKeys`: `[Key]` -> `Vector Key`. Use `inputKeysElem`, `foldInputKeys`, `inputKeysFromList` instead of list `elem`/`++`.
+* `inputChars`: `[Char]` -> `Text`. Append with `(<>)`, test empty with `T.null`.
+* `drawCommands` in `DrawData`: `[DrawCmd]` -> `Vector DrawCmd`. Use `drawCmdNull`, `drawCmdElems`, `drawCmdFilter`, `drawCmdPartitionByLayer`.
+* `textInput`, `useText`, `kvBlock`: `String` -> `Text`.
+* Clipboard hooks: `ctxClipboardGet` returns `Maybe Text`; `ctxClipboardSet` takes `Text`.
+* `storeText` / `storeNote`: `IntMap Text`.
+* Dependency: core adds `vector ^>=0.13`.
+
 ## 0.1.0.0 -- YYYY-mm-dd
 
 * First version.

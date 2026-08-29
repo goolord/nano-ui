@@ -4,12 +4,13 @@ module NanoUI.Store
   ) where
 
 import Data.IntMap.Strict (IntMap)
+import Data.Text (Text)
 import qualified Data.IntMap.Strict as IM
 
 data WidgetStore = WidgetStore
   { storeCheckbox :: IntMap Bool
   , storeSlider :: IntMap Float
-  , storeText :: IntMap String
+  , storeText :: IntMap Text
   , storeCursor :: IntMap Int
   , storeSelAnchor :: IntMap Int
   , storeScroll :: IntMap Float
@@ -17,7 +18,7 @@ data WidgetStore = WidgetStore
   , storeSelectOpen :: IntMap Bool
   , storeDisabled :: IntMap Bool
   , storeFlag :: IntMap Bool
-  , storeNote :: IntMap String
+  , storeNote :: IntMap Text
   , storeWindow :: IntMap (Float, Float)
   , storeWindowSize :: IntMap (Float, Float)
   }

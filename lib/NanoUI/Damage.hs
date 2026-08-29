@@ -8,6 +8,7 @@ import Control.Monad (foldM, forM, when)
 import Data.IORef (readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Maybe (catMaybes, isNothing)
+import Data.Text qualified as T
 import NanoUI.Context
   ( Context (..)
   , WidgetStore (..)
@@ -23,7 +24,9 @@ import NanoUI.Context.Modal (modalDamageFlip)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input
   ( Input (..)
+  , inputChars
   , inputKeys
+  , inputKeysNull
   , inputPointerHeld
   )
 import NanoUI.Layout.Arena
@@ -110,8 +113,8 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
           || inputMouseRightPressed inp
           || inputMouseRightReleased inp
           || inputScroll inp /= V2 0 0
-          || not (null (inputKeys inp))
-          || not (null (inputChars inp))
+          || not (inputKeysNull (inputKeys inp))
+          || not (T.null (inputChars inp))
   newStore <- getStore ctx
   newFloatingRects <- floatingPanelRects ctx
   newRects <- readIORef (ctxPrevRects ctx)

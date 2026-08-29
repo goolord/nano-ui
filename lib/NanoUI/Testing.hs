@@ -76,6 +76,13 @@ module NanoUI.Testing
   , DrawData (..)
   , DrawCmd (..)
   , Layer (..)
+  , drawCmdNull
+  , drawCmdElems
+  , drawCmdFilter
+  , drawCmdForLayer
+  , drawCmdElemsForLayer
+  , drawCmdPartitionByLayer
+  , drawCmdCount
   , vertexSize
   , indexSize
   , backdropDimTextureId
@@ -156,6 +163,13 @@ import NanoUI.Draw
   , DrawData (..)
   , Layer (..)
   , backdropDimTextureId
+  , drawCmdElems
+  , drawCmdFilter
+  , drawCmdForLayer
+  , drawCmdElemsForLayer
+  , drawCmdPartitionByLayer
+  , drawCmdNull
+  , drawCmdCount
   , indexSize
   , vertexSize
   )
