@@ -16,7 +16,7 @@ module NanoUI.Sdl.Font
   ) where
 
 import Control.Exception (IOException, bracket, catch)
-import Control.Monad (filterM, forM_, when)
+import Control.Monad (filterM, when)
 import Data.Bits (shiftR, (.&.))
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Primitive.SmallArray
@@ -192,15 +192,15 @@ renderTextSpans ::
   IO ()
 renderTextSpans _ _ _ _ _ _ [] = pure ()
 renderTextSpans batch ren scale font monoFont cache spans = do
-  lastClip <- newIORef (Nothing :: Maybe (Int, Int, Int, Int))
-  forM_ spans $ \(Rect x y _ _, txt, fg, _bg, clip) -> do
-    let clipKey = logicalClipKey scale clip
-    prev <- readIORef lastClip
-    when (prev /= Just clipKey) $ do
-      flushRenderBatch batch
-      writeIORef lastClip (Just clipKey)
-      setLogicalClipKey ren clipKey
-    drawSpan batch scale font monoFont cache txt fg x y
+  let go _ [] = pure ()
+      go !prevClip ((Rect x y _ _, txt, fg, _bg, clip) : rest) = do
+        let !clipKey = logicalClipKey scale clip
+        when (prevClip /= Just clipKey) $ do
+          flushRenderBatch batch
+          setLogicalClipKey ren clipKey
+        drawSpan batch scale font monoFont cache txt fg x y
+        go (Just clipKey) rest
+  go Nothing spans
   flushRenderBatch batch
 
 drawSpan :: RenderBatch -> Float -> SdlFont -> SdlFont -> TextCache -> Text -> Color -> Float -> Float -> IO ()
