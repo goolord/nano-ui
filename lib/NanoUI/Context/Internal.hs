@@ -10,7 +10,6 @@ module NanoUI.Context.Internal
   , MeasureCacheKey
   , intKey
   , markDirty
-  , getPrevRectByKey
   , modifyIORefList
   ) where
 
@@ -21,7 +20,6 @@ import Data.Map.Strict (Map)
 import Data.Text (Text)
 import Data.Typeable (TypeRep)
 import Data.Word (Word64)
-import qualified Data.IntMap.Strict as IM
 import NanoUI.Animation (Animation)
 import NanoUI.Atlas (ImageAtlas)
 import NanoUI.Draw (DrawArena)
@@ -144,11 +142,6 @@ markDirty ctx = do
   case mWake of
     Just wake -> wake
     Nothing -> pure ()
-
-{-# INLINE getPrevRectByKey #-}
-getPrevRectByKey :: Context -> Int -> IO (Maybe Rect)
-getPrevRectByKey ctx key =
-  readIORef (ctxPrevRects ctx) >>= pure . IM.lookup key
 
 modifyIORefList :: IORef [a] -> ([a] -> [a]) -> IO ()
 modifyIORefList ref f = readIORef ref >>= writeIORef ref . f

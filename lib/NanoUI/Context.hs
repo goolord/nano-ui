@@ -94,7 +94,7 @@ import qualified Data.IntMap.Strict as IM
 import qualified Data.Map.Strict as Map
 import qualified NanoUI.Atlas as Atlas
 import NanoUI.Draw (newDrawArena)
-import NanoUI.Types (Damage (..), Rect (..), Size (..))
+import NanoUI.Types (Damage (..), Size (..))
 import NanoUI.Messages (FrameMsg (..), decodeMessages, reduceMessages, reduceUpdates)
 import NanoUI.Animation
   ( Animation (..)
@@ -124,10 +124,14 @@ import NanoUI.Context.Internal
   , TextInputMenu (..)
   , WindowResizeDrag (..)
   , WindowResizeEdge (..)
-  , getPrevRectByKey
   , intKey
   , markDirty
   , modifyIORefList
+  )
+import NanoUI.Context.PrevRects
+  ( getPrevRect
+  , getPrevRectByKey
+  , setPrevRect
   )
 import NanoUI.Context.Tooltip
   ( clearTooltips
@@ -364,16 +368,6 @@ withClipboard ctx get set =
 {-# INLINE getHotId #-}
 getHotId :: Context -> IO WidgetId
 getHotId ctx = readIORef (ctxHotId ctx)
-
-{-# INLINE getPrevRect #-}
-getPrevRect :: Context -> WidgetId -> IO (Maybe Rect)
-getPrevRect ctx wid = getPrevRectByKey ctx (intKey wid)
-
-{-# INLINE setPrevRect #-}
-setPrevRect :: Context -> WidgetId -> Rect -> IO ()
-setPrevRect ctx wid rect = do
-  rects <- readIORef (ctxPrevRects ctx)
-  writeIORef (ctxPrevRects ctx) (IM.insert (intKey wid) rect rects)
 
 {-# INLINE getStore #-}
 getStore :: Context -> IO WidgetStore

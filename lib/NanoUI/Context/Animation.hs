@@ -23,10 +23,10 @@ import NanoUI.Animation
   )
 import NanoUI.Context.Internal
   ( Context (..)
-  , getPrevRectByKey
   , intKey
   , markDirty
   )
+import NanoUI.Context.PrevRects (getPrevRectByKey)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import Data.IORef (readIORef, writeIORef)
 import NanoUI.Layout.Arena (arenaCount, getRect, getWidgetId)
