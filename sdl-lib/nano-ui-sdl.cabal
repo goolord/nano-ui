@@ -63,6 +63,8 @@ library
         NanoUI.Backend.Sdl
         NanoUI.Testing.Sdl
     other-modules:
+        NanoUI.Sdl.Context
+        NanoUI.Sdl.Session
         NanoUI.Sdl.Runner
         NanoUI.Sdl.Batch
         NanoUI.Sdl.Clipboard

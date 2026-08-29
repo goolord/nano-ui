@@ -1,11 +1,18 @@
 module NanoUI.Context.New
   ( newContext
+  , newPixelHostContext
   ) where
 
 import Data.IORef (newIORef)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Map.Strict as Map
 import qualified NanoUI.Atlas as Atlas
+import NanoUI.Context.Config
+  ( enableMeasureCache
+  , withExternalText
+  , withFontMetrics
+  , withTheme
+  )
 import NanoUI.Draw (newDrawArena)
 import NanoUI.Types (Damage (..), Size (..))
 import NanoUI.Store (emptyWidgetStore)
@@ -104,3 +111,14 @@ newContext = do
       , ctxHost
       , ctxHostProfile = PixelHost
       }
+
+{-# INLINE newPixelHostContext #-}
+newPixelHostContext :: IO Context
+newPixelHostContext = do
+  ctx0 <- newContext
+  ctx <- enableMeasureCache ctx0
+  pure
+    ( withExternalText
+        (withTheme (withFontMetrics ctx (monospaceMetrics 16)) defaultTheme)
+        True
+    )

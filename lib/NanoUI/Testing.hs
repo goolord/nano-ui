@@ -150,7 +150,7 @@ import NanoUI.Context
   , withTheme
   , wrapMeasureCache
   )
-import NanoUI.Context.New (newContext)
+import NanoUI.Context.New (newContext, newPixelHostContext)
 import NanoUI.Draw
   ( DrawCmd (..)
   , DrawData (..)
@@ -159,7 +159,7 @@ import NanoUI.Draw
   , indexSize
   , vertexSize
   )
-import NanoUI.Font (monospaceMetrics, sliderTrackBounds, textDisplayWidth)
+import NanoUI.Font (sliderTrackBounds, textDisplayWidth)
 import NanoUI.Frame
   ( UiCursorKind (..)
   , collectOverlayTextSpans
@@ -190,17 +190,9 @@ import NanoUI.Icons
   )
 import NanoUI.Monad (Ui, askContext, askHost, askInput, uiIO)
 import NanoUI.Render.ASCII (renderASCII)
-import NanoUI.Style (defaultTheme)
 import NanoUI.Types (Damage (..), damageIsEmpty)
 import Effectful (Eff, IOE, runEff, type (:>))
 
 -- | Pixel-host context with SDL-like defaults for headless tests.
 newPixelContext :: IO Context
-newPixelContext = do
-  ctx0 <- newContext
-  ctx <- enableMeasureCache ctx0
-  pure
-    ( withExternalText
-        (withTheme (withFontMetrics ctx (monospaceMetrics 16)) defaultTheme)
-        True
-    )
+newPixelContext = newPixelHostContext
