@@ -100,15 +100,13 @@ import NanoUI.Spring
   , presetSmooth
   , presetStiff
   )
-import NanoUI.Context.Internal
-  ( Context (..)
-  , PendingTooltip (..)
+import NanoUI.Context.Internal (Context (..), intKey, markDirty)
+import NanoUI.Context.Types
+  ( PendingTooltip (..)
   , TextInputDrag (..)
   , TextInputMenu (..)
   , WindowResizeDrag (..)
   , WindowResizeEdge (..)
-  , intKey
-  , markDirty
   )
 import NanoUI.Context.New (newContext)
 import NanoUI.Context.PrevRects

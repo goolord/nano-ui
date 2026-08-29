@@ -167,7 +167,17 @@ import NanoUI.WidgetText
   )
 import NanoUI.Style (Padding (..), Style (..), Theme (..), scrollBarThumbColor, scrollBarTrackColor, themeAccent, themeButton, themeFloatingWindow, themeInput, themeMuted, themeOverlayDim, themePanel, themeSeparator, themeWindow)
 import NanoUI.Types (Color (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, lerpColor, rectContains, rectH, rectIntersect, rectOverlapArea, rectUnion, rectW, rectX, rectY, v2X, v2Y)
-import NanoUI.Frame.Internal (fillStyledRect, findNodeByWidgetId, overlayMenuStyle, padDropText, pushMenuShadow, strokeStyledRect, textInputMenuItemPadX, textInputMenuOuterPad, unlessHit, widgetOverlayAllowed)
+import NanoUI.Frame.Chrome
+  ( fillStyledRect
+  , pushMenuShadow
+  , strokeStyledRect
+  , overlayMenuStyle
+  , padDropText
+  , textInputMenuItemPadX
+  , textInputMenuOuterPad
+  )
+import NanoUI.Frame.Focus (unlessHit)
+import NanoUI.Frame.Hit (findNodeByWidgetId, widgetOverlayAllowed)
 
 markSelectDropPress :: Context -> Input -> IO ()
 markSelectDropPress ctx inp =

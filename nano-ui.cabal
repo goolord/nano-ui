@@ -62,6 +62,7 @@ library
         NanoUI.Atlas
         NanoUI.Compact
         NanoUI.Context
+        NanoUI.Context.Types
         NanoUI.Context.Animation
         NanoUI.Context.Internal
         NanoUI.Context.Modal
@@ -81,7 +82,12 @@ library
         NanoUI.Font
         NanoUI.Frame
         NanoUI.Frame.Cursor
+        NanoUI.Frame.CursorKind
         NanoUI.Frame.Input
+        NanoUI.Frame.Clip
+        NanoUI.Frame.Chrome
+        NanoUI.Frame.Focus
+        NanoUI.Frame.Hit
         NanoUI.Frame.Internal
         NanoUI.Frame.Paint
         NanoUI.Frame.Redraw

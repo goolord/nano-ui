@@ -6,11 +6,8 @@ module NanoUI.Context.Tooltip
 
 import Data.IORef (readIORef, writeIORef)
 import Data.Text (Text)
-import NanoUI.Context.Internal
-  ( Context (..)
-  , PendingTooltip (..)
-  , modifyIORefList
-  )
+import NanoUI.Context.Internal (Context (..), modifyIORefList)
+import NanoUI.Context.Types (PendingTooltip (..))
 import NanoUI.Id (WidgetId)
 import NanoUI.Types (Rect)
 

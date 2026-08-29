@@ -162,7 +162,21 @@ import NanoUI.WidgetText
   )
 import NanoUI.Style (Padding (..), Style (..), Theme (..), scrollBarThumbColor, scrollBarTrackColor, themeAccent, themeButton, themeFloatingWindow, themeInput, themeMuted, themeOverlayDim, themePanel, themeSeparator, themeWindow)
 import NanoUI.Types (Color (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, lerpColor, rectContains, rectH, rectIntersect, rectOverlapArea, rectUnion, rectW, rectX, rectY, v2X, v2Y)
-import NanoUI.Frame.Internal (clamp01, displayText, fillStyledRect, imageIdFromText, nodeLabelPaint, overlayModalStyle, overlayWindowStyle, scrollContentClip, strokeStyledRect, terminalModalOuterClip, textInputFocused, textInputValue, widgetOverlayAllowed, widgetVisualStyle)
+import NanoUI.Frame.Chrome
+  ( clamp01
+  , displayText
+  , fillStyledRect
+  , imageIdFromText
+  , nodeLabelPaint
+  , overlayModalStyle
+  , overlayWindowStyle
+  , strokeStyledRect
+  , textInputFocused
+  , textInputValue
+  , widgetVisualStyle
+  )
+import NanoUI.Frame.Clip (scrollContentClip, terminalModalOuterClip)
+import NanoUI.Frame.Hit (widgetOverlayAllowed)
 import NanoUI.Frame.Scroll (paintScrollChrome)
 import NanoUI.Frame.Spans (sliderValue, widgetTextPlacements)
 import NanoUI.Frame.TextInput (TextInputGeom (..), drawTextInputCaret, textInputGeom)

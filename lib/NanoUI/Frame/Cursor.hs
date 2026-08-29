@@ -4,13 +4,12 @@
 
 module NanoUI.Frame.Cursor
   ( UiCursorKind (..)
+  , grabHoverKind
+  , grabDragKind
   , uiCursorKind
   , pointerCursorWanted
   , cursorKindIs
   ) where
-
-
-import Control.Monad (filterM, foldM, forM, forM_, unless, void, when)
 import Data.Char (isAlphaNum, isSpace)
 import Data.IORef (readIORef, writeIORef)
 import Data.Typeable (Typeable)
@@ -162,7 +161,9 @@ import NanoUI.WidgetText
   )
 import NanoUI.Style (Padding (..), Style (..), Theme (..), scrollBarThumbColor, scrollBarTrackColor, themeAccent, themeButton, themeFloatingWindow, themeInput, themeMuted, themeOverlayDim, themePanel, themeSeparator, themeWindow)
 import NanoUI.Types (Color (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, lerpColor, rectContains, rectH, rectIntersect, rectOverlapArea, rectUnion, rectW, rectX, rectY, v2X, v2Y)
-import NanoUI.Frame.Internal (UiCursorKind (..), displayText, findNodeByWidgetId, grabDragKind, grabHoverKind, widgetNodeTypeTable)
+import NanoUI.Frame.CursorKind (UiCursorKind (..), grabDragKind, grabHoverKind)
+import NanoUI.Frame.Chrome (displayText, widgetNodeTypeTable)
+import NanoUI.Frame.Hit (findNodeByWidgetId)
 import NanoUI.Frame.Scroll (scrollBarLayout, ScrollBarLayout (..))
 import NanoUI.Frame.Select (selectDropRect)
 import NanoUI.Frame.TextInput (TextInputGeom (..), textInputGeom, textInputMenuCursorKind)
