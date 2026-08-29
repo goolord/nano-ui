@@ -85,6 +85,7 @@ library
         directory ^>=1.3,
         effectful ^>=2.6,
         nano-ui,
+        primitive ^>=0.9,
         record-hasfield ^>=1.0,
         sdl3-bindgen-sys ^>=0.0.0.2,
         text ^>=2.1
@@ -113,6 +114,7 @@ executable nano-ui-sdl-demo
         bytestring ^>=0.12,
         nano-ui,
         nano-ui-sdl,
+        primitive ^>=0.9,
         text ^>=2.1
     hs-source-dirs:   examples
     default-language: GHC2024
@@ -129,6 +131,7 @@ executable nano-ui-sdl-anim
         base ^>=4.22.0.0,
         nano-ui,
         nano-ui-sdl,
+        primitive ^>=0.9,
         text ^>=2.1
     hs-source-dirs:   examples
     default-language: GHC2024
@@ -147,6 +150,7 @@ executable nano-ui-sdl-profile
         bytestring ^>=0.12,
         nano-ui,
         nano-ui-sdl,
+        primitive ^>=0.9,
         text ^>=2.1
     hs-source-dirs:   examples
     default-language: GHC2024
@@ -167,6 +171,7 @@ benchmark nano-ui-sdl-bench
         tasty-bench ^>=0.5,
         nano-ui,
         nano-ui-sdl,
+        primitive ^>=0.9,
         text ^>=2.1
     hs-source-dirs:   benchmark
     default-language: GHC2024
@@ -178,5 +183,3 @@ benchmark nano-ui-sdl-bench
         cpp-options: -Dmingw32_HOST_OS
         -- Static SDL pkg-config adds -mwindows; keep a console for tasty output.
         ghc-options: -optl-mconsole
-    if !flag(sdl)
-        buildable: False

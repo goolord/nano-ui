@@ -12,7 +12,9 @@ module NanoUI.Backend.Sdl
   ) where
 
 import Control.Monad (unless)
+import Data.Foldable (foldlM)
 import Data.IORef (newIORef)
+import Data.Primitive.SmallArray (SmallArray)
 import Data.Typeable (Typeable)
 import Effectful (Eff, IOE, type (:>))
 import NanoUI
@@ -49,9 +51,9 @@ sdlContext options = do
   unless ok $ fail "registerImage failed"
   pure themed
 
-registerImages :: Context -> [RgbaImage] -> IO Bool
+registerImages :: Context -> SmallArray RgbaImage -> IO Bool
 registerImages ctx images =
-  and <$> mapM (registerRgbaImage ctx) images
+  foldlM (\ok img -> if ok then registerRgbaImage ctx img else pure False) True images
 
 registerRgbaImage :: Context -> RgbaImage -> IO Bool
 registerRgbaImage ctx img =

@@ -22,6 +22,8 @@ module NanoUI.Sdl.Display
 ) where
 
 import Control.Monad (unless, void)
+import Data.Text (Text)
+import qualified Data.Text as T
 import Foreign.C.String (peekCString)
 import Foreign.C.Types (CChar, CFloat (..), CInt (..), CSize (..))
 import Foreign.Marshal.Alloc (alloca, allocaBytes)
@@ -80,11 +82,11 @@ setRenderScale ren scale = setRenderScaleC ren (realToFrac scale)
 setRenderVSync :: Ptr SDL_Renderer -> Bool -> IO Bool
 setRenderVSync ren vsync = setRenderVSyncC ren vsync
 
-queryRendererName :: Ptr SDL_Renderer -> IO String
+queryRendererName :: Ptr SDL_Renderer -> IO Text
 queryRendererName ren =
   allocaBytes 64 $ \buf -> do
     ok <- rendererNameC ren buf 64
-    if ok then peekCString buf else pure "unknown"
+    if ok then T.pack <$> peekCString buf else pure "unknown"
 
 windowToLogicalCoords :: Float -> V2 -> V2
 windowToLogicalCoords scale (V2 wx wy) =

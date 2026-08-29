@@ -1,5 +1,6 @@
 module NanoUI.Sdl.Event (SdlEvent (..)) where
 
+import Data.Text (Text)
 import NanoUI (Key, Modifiers, V2 (..))
 
 data SdlEvent
@@ -7,7 +8,7 @@ data SdlEvent
   | EvResize Int Int
   | EvDisplayScale
   | EvKey Key Modifiers
-  | EvText String Modifiers
+  | EvText Text Modifiers
   | EvMouseMotion V2 Modifiers
   | EvMousePress V2 Modifiers Int
   | EvMouseRelease V2 Modifiers

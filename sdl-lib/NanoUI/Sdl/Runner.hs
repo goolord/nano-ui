@@ -14,6 +14,7 @@ module NanoUI.Sdl.Runner
 
 import Control.Monad (unless, void, when)
 import Data.IORef (IORef, readIORef, writeIORef)
+import Data.Primitive.SmallArray (SmallArray, smallArrayFromListN)
 import Data.Typeable (Typeable)
 import GHC.Clock (getMonotonicTime)
 import NanoUI
@@ -72,6 +73,15 @@ import qualified NanoUI.Sdl.Image as SdlImage
 import NanoUI.Sdl.Render (renderDrawDataPass, snapDamage, clipPixelRect)
 import Data.Maybe (isJust)
 import SDL3.Sys.Render (renderPresentSafe)
+
+singletonLayer :: Layer -> SmallArray Layer
+singletonLayer l = smallArrayFromListN 1 [l]
+
+layerBackgroundArr, layerContentArr, layerOverlayArr, layerChromeArr :: SmallArray Layer
+layerBackgroundArr = singletonLayer LayerBackground
+layerContentArr = singletonLayer LayerContent
+layerOverlayArr = singletonLayer LayerOverlay
+layerChromeArr = singletonLayer LayerChrome
 
 sdlDrawFrame :: Context -> NanoUI () -> SdlEnv -> Input -> Bool -> IO (Bool, Input)
 sdlDrawFrame ctx ui env inp forceFull = drawEff runEff ctx ui env inp forceFull
@@ -139,12 +149,12 @@ finishDraw ctx env inp forceFull t0 drawData dirtyAfterUi = do
       let clear = themeWindow (ctxTheme ctx)
           spansIn = filterSpans damage
       withRenderBatch (sdlRenderer env) $ \batch -> do
-        renderDrawDataPass batch (sdlRenderer env) scale (Just clear) drawData [LayerBackground] (sdlImages env) damage
+        renderDrawDataPass batch (sdlRenderer env) scale (Just clear) drawData layerBackgroundArr (sdlImages env) damage
         renderTextSpans batch (sdlRenderer env) scale font monoFont (sdlTextCache env) (spansIn baseSpans)
-        renderDrawDataPass batch (sdlRenderer env) scale Nothing drawData [LayerContent] (sdlImages env) damage
-        renderDrawDataPass batch (sdlRenderer env) scale Nothing drawData [LayerOverlay] (sdlImages env) damage
+        renderDrawDataPass batch (sdlRenderer env) scale Nothing drawData layerContentArr (sdlImages env) damage
+        renderDrawDataPass batch (sdlRenderer env) scale Nothing drawData layerOverlayArr (sdlImages env) damage
         renderTextSpans batch (sdlRenderer env) scale font monoFont (sdlTextCache env) (spansIn overlaySpans)
-        renderDrawDataPass batch (sdlRenderer env) scale Nothing drawData [LayerChrome] (sdlImages env) damage
+        renderDrawDataPass batch (sdlRenderer env) scale Nothing drawData layerChromeArr (sdlImages env) damage
       okBlit <- blitRetain (sdlRenderer env) scale tex damage
       unless okBlit $ fail "SDL_RenderTexture(retain) failed"
       void $ renderPresentSafe (sdlRenderer env)

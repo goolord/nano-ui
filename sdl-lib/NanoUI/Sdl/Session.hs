@@ -8,6 +8,7 @@ module NanoUI.Sdl.Session
 import Control.Exception (bracket, finally)
 import Control.Monad (void, when)
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
+import Data.Primitive.SmallArray (SmallArray, emptySmallArray, sizeofSmallArray)
 import GHC.Clock (getMonotonicTime)
 import NanoUI
   ( Input (..)
@@ -93,7 +94,7 @@ runSdlSession options ctx setup shouldQuit drawFn =
           pending <- pollEvents
           let inp' = foldl' applyEvent inp pending
           (c', inp'') <- syncDisplay c env inp'
-          if null pending
+          if sizeofSmallArray pending == 0
             then pure (c', inp'')
             else drainUntilQuiet c' inp''
     let inpSeed = emptyInput {inputWindowSize = sdlWindowSize options}
@@ -120,7 +121,7 @@ runSdlSession options ctx setup shouldQuit drawFn =
     writeIORef prev synced1
     now <- getMonotonicTime
     bracket (installResizeWatch onResize) id $ \_ ->
-      loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace startupFull shouldQuit synced1 [] now
+      loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace startupFull shouldQuit synced1 emptySmallArray now
 
 loop ::
   IORef Context ->
@@ -134,7 +135,7 @@ loop ::
   IORef Int ->
   (Input -> Bool) ->
   Input ->
-  [SdlEvent] ->
+  SmallArray SdlEvent ->
   Double ->
   IO ()
 loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace startupFull shouldQuit inp queued lastT = do
@@ -142,10 +143,10 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace star
   debugOpen <- debugPanelOpen ctx
   wantDebug <- takeDebugLive (sdlDebug env) debugOpen
   pending <-
-    if null queued
+    if sizeofSmallArray queued == 0
       then do
         polled <- pollEvents
-        if not (null polled)
+        if sizeofSmallArray polled /= 0
           then pure polled
           else do
             animating <- anyAnimating ctx
@@ -153,7 +154,7 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace star
             wasAnimWait <- readIORef wasAnimating
             nFullWait <- readIORef startupFull
             if animating
-              then pure []
+              then pure emptySmallArray
               else
                 if wasAnimWait || nFullWait > 0 || wantDebug || editing || debugOpen
                   then waitEventTimeout animateTimeout
@@ -238,7 +239,7 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace star
                 startupFull
                 shouldQuit
                 synced
-                (if null rest then [] else rest)
+                rest
                 now
 
 tryWithDrawingLock :: IORef Bool -> IO a -> IO (Maybe a)
