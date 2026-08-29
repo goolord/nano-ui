@@ -113,6 +113,8 @@ library
         NanoUI.WidgetMarkers
         NanoUI.Widgets
         NanoUI.Widgets.Internal
+        NanoUI.Widgets.Node
+        NanoUI.Widgets.Chrome
         NanoUI.Widgets.Layout
         NanoUI.Widgets.TextInput
         NanoUI.Widgets.Animate

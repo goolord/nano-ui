@@ -22,29 +22,25 @@ import GHC.Stack (HasCallStack)
 import NanoUI.Layout.Arena
   ( DirTag (..)
   , NodeType (..)
-  , addNode
   , addNodeFromLayout
   , getDirection
   , setWidgetId
   )
 import NanoUI.Monad (Ui, askContext, askInput, currentId, uiFinally, uiIO)
 import NanoUI.Style
-  ( AlignX (..)
-  , AlignY (..)
-  , Direction (..)
+  ( Direction (..)
   , Layout (..)
-  , Padding (..)
   , Sizing (..)
   , defaultLayout
   )
 import NanoUI.Context (Context (..))
 import NanoUI.Id (WidgetId)
-import NanoUI.Widgets.Internal
+import NanoUI.Widgets.Node
   ( Response
+  , addSizingLeafNode
   , addWidget
   , container
   , parentIdx
-  , resolveInteraction
   )
 
 {-# INLINE panel #-}
@@ -94,26 +90,7 @@ separator = do
           case parentDir of
             DirColumn -> (Column, Grow 1, Fixed 1)
             DirRow -> (Row, Fixed 1, Grow 1)
-    idx <-
-      addNode
-        (ctxNodeArena ctx)
-        NodeSeparator
-        parent
-        dir
-        wSiz
-        hSiz
-        (Padding 0 0 0 0)
-        0
-        0
-        0
-        1e9
-        1e9
-        0
-        AlignStart
-        AlignTop
-        False
-    setWidgetId (ctxNodeArena ctx) idx wid
-    resolveInteraction ctx inp wid
+    addSizingLeafNode ctx inp wid NodeSeparator dir wSiz hSiz
 
 {-# INLINE spacer #-}
 spacer :: (HasCallStack, Ui :> es) => Sizing -> Sizing -> Eff es Response
@@ -121,29 +98,7 @@ spacer w h = do
   wid <- currentId
   ctx <- askContext
   inp <- askInput
-  uiIO $ do
-    stack <- readIORef (ctxContainerStack ctx)
-    let parent = parentIdx stack
-    idx <-
-      addNode
-        (ctxNodeArena ctx)
-        NodeSpacer
-        parent
-        Row
-        w
-        h
-        (Padding 0 0 0 0)
-        0
-        0
-        0
-        1e9
-        1e9
-        0
-        AlignStart
-        AlignTop
-        False
-    setWidgetId (ctxNodeArena ctx) idx wid
-    resolveInteraction ctx inp wid
+  uiIO $ addSizingLeafNode ctx inp wid NodeSpacer Row w h
 
 {-# INLINE scroll #-}
 scroll :: (HasCallStack, Ui :> es) => Layout -> Eff es a -> Eff es a
