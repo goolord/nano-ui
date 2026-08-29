@@ -587,24 +587,13 @@ windowTitleHasInteractive ctx idx mouse = do
 
 drawWindowOverlays :: Context -> IO ()
 drawWindowOverlays ctx = do
-  count <- arenaCount (ctxNodeArena ctx)
-  let da = ctxDrawArena ctx
-      theme = ctxTheme ctx
-      terminal = isCellHost (ctxHostProfile ctx)
+  let theme = ctxTheme ctx
       style = overlayWindowStyle theme
-  forM_ [0 .. count - 1] $ \idx -> do
-    nt <- getNodeType (ctxNodeArena ctx) idx
-    when (nt == NodeWindow) $ do
-      (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-      let rect = Rect x y w h
-      when (not terminal) $ pushMenuShadow da rect (styleCornerRadius style)
-      fillStyledRect da terminal style rect
-      strokeStyledRect da terminal style x y w h
-      withClip da rect $ walkChildren ctx idx
+  forFloatingNode ctx NodeWindow $ \idx rect ->
+    drawFloatingPanel ctx idx style rect rect
 
 drawModalOverlays :: Context -> Size -> IO ()
 drawModalOverlays ctx (Size ww wh) = do
-  count <- arenaCount (ctxNodeArena ctx)
   let da = ctxDrawArena ctx
       theme = ctxTheme ctx
       fm = ctxFontMetrics ctx
@@ -615,28 +604,36 @@ drawModalOverlays ctx (Size ww wh) = do
       pushBackdropDim da (Rect 0 0 ww wh) (themeOverlayDim theme)
     when (not terminal) $
       pushRect da (Rect 0 0 ww wh) (themeOverlayDim theme)
-    forM_ [0 .. count - 1] $ \idx -> do
-      nt <- getNodeType (ctxNodeArena ctx) idx
-      when (nt == NodeModal) $ do
-        (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-        pad <- getPadding (ctxNodeArena ctx) idx
-        wid <- getWidgetId (ctxNodeArena ctx) idx
-        let rect = Rect x y w h
-            style =
-              if terminal
-                then overlayWindowStyle theme
-                else overlayModalStyle theme
-        when (not terminal) $ pushMenuShadow da rect (styleCornerRadius style)
-        fillStyledRect da terminal style rect
-        strokeStyledRect da terminal style x y w h
-        dir <- getDirection (ctxNodeArena ctx) idx
-        contentSize <- getNodeValue (ctxNodeArena ctx) idx
-        slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
-        let clip =
-              if terminal
-                then terminalModalOuterClip (ctxHostProfile ctx) fm x y w h pad
-                else scrollContentClip (ctxHostProfile ctx) fm slot dir x y w h pad contentSize
-        withClip da clip $ walkChildren ctx idx
-        when (not terminal) $
-          paintScrollChrome ctx da idx wid x y w h pad theme terminal
+    forFloatingNode ctx NodeModal $ \idx rect@(Rect x y w h) -> do
+      pad <- getPadding (ctxNodeArena ctx) idx
+      wid <- getWidgetId (ctxNodeArena ctx) idx
+      dir <- getDirection (ctxNodeArena ctx) idx
+      contentSize <- getNodeValue (ctxNodeArena ctx) idx
+      slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
+      let style = if terminal then overlayWindowStyle theme else overlayModalStyle theme
+          clip =
+            if terminal
+              then terminalModalOuterClip (ctxHostProfile ctx) fm x y w h pad
+              else scrollContentClip (ctxHostProfile ctx) fm slot dir x y w h pad contentSize
+      drawFloatingPanel ctx idx style rect clip
+      when (not terminal) $
+        paintScrollChrome ctx da idx wid x y w h pad theme terminal
+
+forFloatingNode :: Context -> NodeType -> (NodeIdx -> Rect -> IO ()) -> IO ()
+forFloatingNode ctx nodeType draw = do
+  count <- arenaCount (ctxNodeArena ctx)
+  forM_ [0 .. count - 1] $ \idx -> do
+    actualType <- getNodeType (ctxNodeArena ctx) idx
+    when (actualType == nodeType) $ do
+      (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+      draw idx (Rect x y w h)
+
+drawFloatingPanel :: Context -> NodeIdx -> Style -> Rect -> Rect -> IO ()
+drawFloatingPanel ctx idx style rect@(Rect x y w h) clip = do
+  let da = ctxDrawArena ctx
+      terminal = isCellHost (ctxHostProfile ctx)
+  when (not terminal) $ pushMenuShadow da rect (styleCornerRadius style)
+  fillStyledRect da terminal style rect
+  strokeStyledRect da terminal style x y w h
+  withClip da clip $ walkChildren ctx idx
 
