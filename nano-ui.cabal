@@ -107,6 +107,11 @@ library
         NanoUI.WidgetText
         NanoUI.WidgetMarkers
         NanoUI.Widgets
+        NanoUI.Widgets.Internal
+        NanoUI.Widgets.Layout
+        NanoUI.Widgets.TextInput
+        NanoUI.Widgets.Animate
+        NanoUI.Widgets.Overlay
     build-depends:
         base ^>=4.22.0.0,
         bytestring ^>=0.12,
