@@ -12,45 +12,18 @@ module NanoUI.Backend.Sdl
   ) where
 
 import Control.Monad (unless)
-import Data.ByteString (ByteString)
 import Data.IORef (newIORef)
 import Data.Typeable (Typeable)
 import Effectful (Eff, IOE, type (:>))
 import NanoUI
-  ( ImageId
-  , Input (..)
+  ( Input (..)
   , NanoUI
-  , Theme
   , Ui
   )
 import NanoUI.Sdl.Runner (askSdlDebug, drawEff, drawReduceEff, newSdlContext, runSdlSession)
 import NanoUI.Sdl.Debug (SdlDebugSnapshot (..))
+import NanoUI.Sdl.Window (RgbaImage (..), SdlOptions (..), defaultSdlOptions)
 import NanoUI.Testing (Context, registerImage, runEff, withTheme)
-
--- | Initial RGBA asset uploaded before the first frame.
-data RgbaImage = RgbaImage
-  { rgbaImageId :: !ImageId
-  , rgbaImageWidth :: !Int
-  , rgbaImageHeight :: !Int
-  , rgbaImagePixels :: !ByteString
-  }
-
--- | Application-owned SDL settings.
-data SdlOptions = SdlOptions
-  { sdlAppTheme :: !(Maybe Theme)
-  , sdlAppShouldQuit :: !(Input -> Bool)
-  , sdlAppImages :: ![RgbaImage]
-  , sdlAppVsync :: !Bool
-  }
-
-defaultSdlOptions :: SdlOptions
-defaultSdlOptions =
-  SdlOptions
-    { sdlAppTheme = Nothing
-    , sdlAppShouldQuit = const False
-    , sdlAppImages = []
-    , sdlAppVsync = True
-    }
 
 runSdlApp :: SdlOptions -> NanoUI () -> IO ()
 runSdlApp options ui = do
@@ -90,18 +63,18 @@ registerRgbaImage ctx img =
     (rgbaImagePixels img)
 
 runSdlAppWithQuit :: SdlOptions -> Context -> (Input -> Bool) -> NanoUI () -> IO ()
-runSdlAppWithQuit options = runSdlAppWithQuitEff (sdlAppVsync options) runEff
+runSdlAppWithQuit options = runSdlAppWithQuitEff options runEff
 
 runSdlAppWithQuitEff ::
   IOE :> es =>
-  Bool ->
+  SdlOptions ->
   (forall x. Eff es x -> IO x) ->
   Context ->
   (Input -> Bool) ->
   Eff (Ui : es) () ->
   IO ()
-runSdlAppWithQuitEff vsync unlift ctx shouldQuit ui =
-  runSdlSession vsync ctx (const (pure ())) shouldQuit $ \c env i force ->
+runSdlAppWithQuitEff options unlift ctx shouldQuit ui =
+  runSdlSession options ctx (const (pure ())) shouldQuit $ \c env i force ->
     drawEff unlift c ui env i force
 
 runSdlAppWithQuitReduce ::
@@ -113,11 +86,11 @@ runSdlAppWithQuitReduce ::
   (Input -> Bool) ->
   (model -> NanoUI ()) ->
   IO ()
-runSdlAppWithQuitReduce options = runSdlAppWithQuitReduceEff (sdlAppVsync options) runEff
+runSdlAppWithQuitReduce options = runSdlAppWithQuitReduceEff options runEff
 
 runSdlAppWithQuitReduceEff ::
   (IOE :> es, Typeable msg, Eq model) =>
-  Bool ->
+  SdlOptions ->
   (forall x. Eff es x -> IO x) ->
   (msg -> model -> model) ->
   Context ->
@@ -125,7 +98,7 @@ runSdlAppWithQuitReduceEff ::
   (Input -> Bool) ->
   (model -> Eff (Ui : es) ()) ->
   IO ()
-runSdlAppWithQuitReduceEff vsync unlift update ctx model0 shouldQuit view = do
+runSdlAppWithQuitReduceEff options unlift update ctx model0 shouldQuit view = do
   modelRef <- newIORef model0
-  runSdlSession vsync ctx (const (pure ())) shouldQuit $ \c env i force ->
+  runSdlSession options ctx (const (pure ())) shouldQuit $ \c env i force ->
     drawReduceEff unlift update modelRef view c env i force

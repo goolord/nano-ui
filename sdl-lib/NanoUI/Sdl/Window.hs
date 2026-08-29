@@ -1,21 +1,26 @@
 module NanoUI.Sdl.Window
-  ( SdlEnv (..)
+  ( RgbaImage (..)
+  , SdlEnv (..)
+  , SdlOptions (..)
+  , defaultSdlOptions
+  , defaultWindowSize
   , withSdl
   , withSdlBench
   , acquireSdlBench
   , releaseSdlBench
-  , defaultWindowSize
   , syncDisplay
   ) where
 
 import Control.Exception (bracket)
 import Control.Monad (unless, void, when)
+import Data.Bits ((.|.))
+import Data.ByteString (ByteString)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Foreign.C.String (withCString)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (peek)
-import NanoUI (Input (..), Size (..))
+import NanoUI (ImageId, Input (..), Size (..), Theme)
 import NanoUI.Testing (Context, markDirty, setHost, setWakeLoop)
 import NanoUI.Sdl.Display
   ( defaultFontSize
@@ -57,12 +62,77 @@ import SDL3.Sys.Keyboard (startTextInputSafe, stopTextInputSafe)
 import SDL3.Sys.Render (createWindowAndRendererSafe, destroyRendererSafe)
 import SDL3.Sys.Video (destroyWindowSafe)
 
-sdlWindowResizable :: SDL_WindowFlags
-sdlWindowResizable = SDL_WindowFlags 0x0000000000000020
+-- | Initial RGBA asset uploaded before the first frame.
+data RgbaImage = RgbaImage
+  { rgbaImageId :: !ImageId
+  , rgbaImageWidth :: !Int
+  , rgbaImageHeight :: !Int
+  , rgbaImagePixels :: !ByteString
+  }
+
+-- | Application-owned SDL settings.
+data SdlOptions = SdlOptions
+  { sdlWindowTitle :: !String
+  -- ^ Window title (default: @"nano-ui"@).
+  , sdlWindowSize :: !Size
+  -- ^ Initial window size in logical units (default: 1280x800).
+  , sdlWindowResizable :: !Bool
+  -- ^ Allow the window to be resized (default: 'True').
+  , sdlWindowFullscreen :: !Bool
+  -- ^ Open the window in fullscreen mode (default: 'False').
+  , sdlWindowBorderless :: !Bool
+  -- ^ Create a borderless window (default: 'False').
+  , sdlWindowAlwaysOnTop :: !Bool
+  -- ^ Keep the window on top of other windows (default: 'False').
+  , sdlWindowHidden :: !Bool
+  -- ^ Start the window hidden (default: 'False').
+  , sdlAppVsync :: !Bool
+  -- ^ Enable vertical synchronization (default: 'True').
+  , sdlAppFontPath :: !(Maybe FilePath)
+  -- ^ Optional custom TrueType font file path.
+  , sdlAppMonoFontPath :: !(Maybe FilePath)
+  -- ^ Optional custom monospace TrueType font file path.
+  , sdlAppFontSize :: !Float
+  -- ^ Base font size in points (default: 16).
+  , sdlAppTheme :: !(Maybe Theme)
+  -- ^ Initial UI theme override (default: 'Nothing').
+  , sdlAppShouldQuit :: !(Input -> Bool)
+  -- ^ Predicate on user input to trigger application exit (default: @const False@).
+  , sdlAppImages :: ![RgbaImage]
+  -- ^ Initial RGBA textures registered before the first frame.
+  }
+
+defaultSdlOptions :: SdlOptions
+defaultSdlOptions =
+  SdlOptions
+    { sdlWindowTitle = "nano-ui"
+    , sdlWindowSize = defaultWindowSize
+    , sdlWindowResizable = True
+    , sdlWindowFullscreen = False
+    , sdlWindowBorderless = False
+    , sdlWindowAlwaysOnTop = False
+    , sdlWindowHidden = False
+    , sdlAppVsync = True
+    , sdlAppFontPath = Nothing
+    , sdlAppMonoFontPath = Nothing
+    , sdlAppFontSize = defaultFontSize
+    , sdlAppTheme = Nothing
+    , sdlAppShouldQuit = const False
+    , sdlAppImages = []
+    }
+
+computeWindowFlags :: Bool -> Bool -> Bool -> Bool -> Bool -> SDL_WindowFlags
+computeWindowFlags resizable fullscreen borderless alwaysOnTop hidden =
+  SDL_WindowFlags $
+    (if resizable then 0x0000000000000020 else 0)
+      .|. (if fullscreen then 0x0000000000000001 else 0)
+      .|. (if borderless then 0x0000000000000010 else 0)
+      .|. (if alwaysOnTop then 0x0000000000010000 else 0)
+      .|. (if hidden then 0x0000000000000008 else 0)
 
 -- Hidden only. Do not combine with resizable for bench windows on Windows.
-sdlWindowHidden :: SDL_WindowFlags
-sdlWindowHidden = SDL_WindowFlags 0x0000000000000008
+sdlWindowHiddenFlag :: SDL_WindowFlags
+sdlWindowHiddenFlag = SDL_WindowFlags 0x0000000000000008
 
 benchWindowSize :: Size
 benchWindowSize = Size 800 600
@@ -75,6 +145,7 @@ data SdlEnv = SdlEnv
   , sdlRenderer :: Ptr SDL_Renderer
   , sdlFontPath :: FilePath
   , sdlMonoFontPath :: FilePath
+  , sdlFontSize :: !Float
   , sdlScaleRef :: IORef Float
   , sdlFontRef :: IORef SdlFont
   , sdlMonoFontRef :: IORef SdlFont
@@ -100,11 +171,11 @@ syncDisplay ctx env inp = do
     writeIORef (sdlScaleRef env) scale
     oldFont <- readIORef (sdlFontRef env)
     closeFont oldFont
-    newFont <- openFont (sdlFontPath env) (defaultFontSize * scale)
+    newFont <- openFont (sdlFontPath env) (sdlFontSize env * scale)
     writeIORef (sdlFontRef env) newFont
     oldMono <- readIORef (sdlMonoFontRef env)
     closeFont oldMono
-    newMono <- openFont (sdlMonoFontPath env) (defaultFontSize * scale)
+    newMono <- openFont (sdlMonoFontPath env) (sdlFontSize env * scale)
     writeIORef (sdlMonoFontRef env) newMono
     destroyTextCache (sdlTextCache env)
     markDirty ctx
@@ -130,34 +201,71 @@ syncInput _env scale inp = do
       Just windowPos -> inp {inputMousePos = windowToLogicalCoords scale windowPos}
       Nothing -> inp
 
-withSdl :: Bool -> Context -> String -> Size -> (Context -> SdlEnv -> IO a) -> IO a
-withSdl vsync ctx title size act = withSdlWindow ctx title size sdlWindowResizable False vsync act
+withSdl :: SdlOptions -> Context -> (Context -> SdlEnv -> IO a) -> IO a
+withSdl opts ctx act =
+  let Size w h = sdlWindowSize opts
+      flags =
+        computeWindowFlags
+          (sdlWindowResizable opts)
+          (sdlWindowFullscreen opts)
+          (sdlWindowBorderless opts)
+          (sdlWindowAlwaysOnTop opts)
+          (sdlWindowHidden opts)
+   in withSdlWindow
+        ctx
+        (sdlWindowTitle opts)
+        w
+        h
+        flags
+        False
+        (sdlAppVsync opts)
+        (sdlAppFontPath opts)
+        (sdlAppMonoFontPath opts)
+        (sdlAppFontSize opts)
+        act
 
 withSdlBench :: Context -> (Context -> SdlEnv -> IO a) -> IO a
 withSdlBench ctx act =
-  withSdlWindow ctx "nano-ui-bench" benchWindowSize sdlWindowHidden True False act
+  let Size w h = benchWindowSize
+   in withSdlWindow
+        ctx
+        "nano-ui-bench"
+        w
+        h
+        sdlWindowHiddenFlag
+        True
+        False
+        Nothing
+        Nothing
+        defaultFontSize
+        act
 
 withSdlWindow ::
   Context ->
   String ->
-  Size ->
+  Float ->
+  Float ->
   SDL_WindowFlags ->
   Bool ->
   Bool ->
+  Maybe FilePath ->
+  Maybe FilePath ->
+  Float ->
   (Context -> SdlEnv -> IO a) ->
   IO a
-withSdlWindow ctx title (Size w h) flags bench vsync act =
+withSdlWindow ctx title w h flags bench vsync mFont mMono fontSize act =
   withTtf $ do
     if bench then initBenchHints else initSdlHints vsync
-    fontPath <- resolveFontPath
-    monoPath <- resolveMonoFontPath fontPath
+    fontPath <- resolveFontPath mFont
+    monoPath <- resolveMonoFontPath mMono fontPath
     bracket
-      (startSdlWindow ctx title w h flags bench vsync fontPath monoPath)
+      (startSdlWindow ctx title w h flags bench vsync fontPath monoPath fontSize)
       (\(_, env) -> stopSdlWindow bench env)
       $ \(ctx', env) -> act ctx' env
 
-resolveFontPath :: IO FilePath
-resolveFontPath =
+resolveFontPath :: Maybe FilePath -> IO FilePath
+resolveFontPath (Just p) = pure p
+resolveFontPath Nothing =
   findFontPath >>= \case
     Nothing ->
       fail
@@ -166,8 +274,9 @@ resolveFontPath =
         )
     Just p -> pure p
 
-resolveMonoFontPath :: FilePath -> IO FilePath
-resolveMonoFontPath fontPath =
+resolveMonoFontPath :: Maybe FilePath -> FilePath -> IO FilePath
+resolveMonoFontPath (Just p) _ = pure p
+resolveMonoFontPath Nothing fontPath =
   findMonoFontPath >>= \case
     Nothing -> pure fontPath
     Just p -> pure p
@@ -182,8 +291,9 @@ startSdlWindow ::
   Bool ->
   FilePath ->
   FilePath ->
+  Float ->
   IO (Context, SdlEnv)
-startSdlWindow ctx title w h flags bench vsync fontPath monoPath = do
+startSdlWindow ctx title w h flags bench vsync fontPath monoPath fontSize = do
   unlessM (initSafe (SDL_InitFlags 32)) $
     fail "SDL_Init(SDL_INIT_VIDEO) failed"
   unlessM initRefreshEvent $
@@ -204,8 +314,8 @@ startSdlWindow ctx title w h flags bench vsync fontPath monoPath = do
           win <- peek winPtr
           ren <- peek renPtr
           scale <- queryWindowDisplayScale win
-          font <- openFont fontPath (defaultFontSize * scale)
-          monoFont <- openFont monoPath (defaultFontSize * scale)
+          font <- openFont fontPath (fontSize * scale)
+          monoFont <- openFont monoPath (fontSize * scale)
           scaleRef <- newIORef scale
           fontRef <- newIORef font
           monoFontRef <- newIORef monoFont
@@ -224,6 +334,7 @@ startSdlWindow ctx title w h flags bench vsync fontPath monoPath = do
               , sdlRenderer = ren
               , sdlFontPath = fontPath
               , sdlMonoFontPath = monoPath
+              , sdlFontSize = fontSize
               , sdlScaleRef = scaleRef
               , sdlFontRef = fontRef
               , sdlMonoFontRef = monoFontRef
@@ -263,10 +374,10 @@ acquireSdlBench :: Context -> IO (Context, SdlEnv)
 acquireSdlBench ctx =
   withTtf $ do
     initBenchHints
-    fontPath <- resolveFontPath
-    monoPath <- resolveMonoFontPath fontPath
+    fontPath <- resolveFontPath Nothing
+    monoPath <- resolveMonoFontPath Nothing fontPath
     let Size w h = benchWindowSize
-    startSdlWindow ctx "nano-ui-bench" w h sdlWindowHidden True False fontPath monoPath
+    startSdlWindow ctx "nano-ui-bench" w h sdlWindowHiddenFlag True False fontPath monoPath defaultFontSize
 
 releaseSdlBench :: SdlEnv -> IO ()
 releaseSdlBench env = withTtf $ stopSdlWindow True env

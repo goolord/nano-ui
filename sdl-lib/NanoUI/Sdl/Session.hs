@@ -39,7 +39,7 @@ import NanoUI.Sdl.Input
   , waitEventTimeout
   )
 import NanoUI.Sdl.Display (installResizeWatch)
-import NanoUI.Sdl.Window (SdlEnv (..), defaultWindowSize, syncDisplay, withSdl)
+import NanoUI.Sdl.Window (SdlEnv (..), SdlOptions (..), syncDisplay, withSdl)
 import SDL3.Sys.Bindgen.Blendmode (sDL_BLENDMODE_BLEND)
 import SDL3.Sys.Render (setRenderDrawBlendModeSafe)
 
@@ -50,14 +50,14 @@ maxFrameDt :: Float
 maxFrameDt = 0.05
 
 runSdlSession ::
-  Bool ->
+  SdlOptions ->
   Context ->
   (SdlEnv -> IO ()) ->
   (Input -> Bool) ->
   (Context -> SdlEnv -> Input -> Bool -> IO (Bool, Input)) ->
   IO ()
-runSdlSession vsync ctx setup shouldQuit drawFn =
-  withSdl vsync ctx "nano-ui" defaultWindowSize $ \ctx0 env -> do
+runSdlSession options ctx setup shouldQuit drawFn =
+  withSdl options ctx $ \ctx0 env -> do
     setup env
     void $ setRenderDrawBlendModeSafe (sdlRenderer env) (fromIntegral sDL_BLENDMODE_BLEND)
     ctxRef <- newIORef ctx0
@@ -96,7 +96,7 @@ runSdlSession vsync ctx setup shouldQuit drawFn =
           if null pending
             then pure (c', inp'')
             else drainUntilQuiet c' inp''
-    let inpSeed = emptyInput {inputWindowSize = defaultWindowSize}
+    let inpSeed = emptyInput {inputWindowSize = sdlWindowSize options}
     (ctx1, inp0) <- drainUntilQuiet ctx0 inpSeed
     writeIORef ctxRef ctx1
     scale0 <- readIORef (sdlScaleRef env)
