@@ -10,6 +10,7 @@ module NanoUI.Frame.Spans
   , widgetHitRect
   , widgetTextSpans
   , widgetTextPlacements
+  , collectNodeTextSpans
   , sliderValue
   , collectFloatingSpans
   , collectTooltipSpans

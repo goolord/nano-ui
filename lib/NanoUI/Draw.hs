@@ -14,6 +14,7 @@ module NanoUI.Draw
   , pushRect
   , pushBackdropDim
   , backdropDimTextureId
+  , glyphAtlasTextureId
   , pushImage
   , pushRoundedRect
   , pushRoundedStroke
@@ -403,6 +404,12 @@ pushQuad da (Rect x y w h) u0 v0 u1 v1 col = do
 backdropDimTextureId :: Int
 backdropDimTextureId = 0x7ffffffe
 
+-- Reserved texture id for the per-glyph SDL_ttf atlas. The renderer binds
+-- the glyph atlas SDL_Texture when it sees this id. Glyphs are cached as
+-- white-on-alpha so vertex color tints them at draw time.
+glyphAtlasTextureId :: Int
+glyphAtlasTextureId = 0x7ffffffd
+
 {-# INLINE pushRect #-}
 pushRect :: DrawArena -> Rect -> Color -> IO ()
 pushRect da rect col = do
@@ -559,19 +566,23 @@ pushFilledTriangle da x0 y0 x1 y1 x2 y2 col = do
 pushText :: DrawArena -> FontMetrics -> Float -> Float -> T.Text -> Color -> IO ()
 pushText da fm x y txt col = go x txt
   where
-    adv = fmAdvance fm ' '
     go !ox !t =
       case T.uncons t of
         Nothing -> pure ()
         Just (c, rest) -> do
+          let !adv = fmAdvance fm c
           case fmGlyph fm c of
-            Nothing -> go (ox + adv) rest
+            Nothing -> do
+              when (adv > 0 && c /= ' ') $
+                pushRect da (Rect ox y adv (fmLineHeight fm)) col
+              go (ox + adv) rest
             Just gq -> do
-              let gx = ox + gqX gq
-                  gy = y + gqY gq
-                  gw = gqW gq
-                  gh = gqH gq
-              pushRect da (Rect gx gy gw gh) col
+              let !gx = ox + gqX gq
+                  !gy = y + gqY gq
+                  !gw = gqW gq
+                  !gh = gqH gq
+              setTexture da glyphAtlasTextureId
+              pushQuad da (Rect gx gy gw gh) (gqU0 gq) (gqV0 gq) (gqU1 gq) (gqV1 gq) col
               go (ox + adv) rest
 
 readCmdVector :: MutableArray RealWorld DrawCmd -> Int -> IO (Vector DrawCmd)

@@ -31,6 +31,7 @@ import NanoUI.Testing
   , DrawData (..)
   , Layer (..)
   , damageIsEmpty
+  , glyphAtlasTextureId
   )
 import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
@@ -115,8 +116,8 @@ renderDrawData :: Ptr SDL_Renderer -> Float -> Color -> DrawData -> ImageAtlas -
 renderDrawData _ _ _ _ _ =
   error "renderDrawData requires an active RenderBatch; use renderDrawDataPass"
 
-renderDrawDataPass :: RenderBatch -> Ptr SDL_Renderer -> Float -> Maybe Color -> DrawData -> SmallArray Layer -> ImageAtlas -> Damage -> IO ()
-renderDrawDataPass batch ren uiScale mClear drawData layers images damage = do
+renderDrawDataPass :: RenderBatch -> Ptr SDL_Renderer -> Float -> Maybe Color -> DrawData -> SmallArray Layer -> ImageAtlas -> Ptr () -> Damage -> IO ()
+renderDrawDataPass batch ren uiScale mClear drawData layers images glyphTex damage = do
   when (not (damageIsEmpty damage) && sizeofSmallArray layers /= 0) $ do
     clipRef <- newIORef ClipNone
     clearLogicalClipRect ren
@@ -150,7 +151,7 @@ renderDrawDataPass batch ren uiScale mClear drawData layers images damage = do
               | otherwise = do
                   let !cmd = V.unsafeIndex cmds i
                   when (testLayerMask layerMask (cmdLayer cmd)) $
-                    drawCmd batch ren uiScale vp vc ip ic images clip clipRef cmd
+                    drawCmd batch ren uiScale vp vc ip ic images glyphTex clip clipRef cmd
                   go (i + 1)
          in go 0
     applyClipState batch clipRef ren ClipNone
@@ -191,11 +192,12 @@ drawCmd ::
   Ptr Word8 ->
   Int ->
   ImageAtlas ->
+  Ptr () ->
   Maybe Rect ->
   IORef ClipState ->
   DrawCmd ->
   IO ()
-drawCmd batch ren uiScale vp vc ip ic images mDamage clipRef cmd = do
+drawCmd batch ren uiScale vp vc ip ic images glyphTex mDamage clipRef cmd = do
   let !count = fromIntegral (cmdIndexCount cmd)
       !cmdRect = Rect (cmdClipX cmd) (cmdClipY cmd) (cmdClipW cmd) (cmdClipH cmd)
       !cmdOpen = cmdClipW cmd >= 1e8 || cmdClipH cmd >= 1e8
@@ -213,12 +215,14 @@ drawCmd batch ren uiScale vp vc ip ic images mDamage clipRef cmd = do
         let !start = fromIntegral (cmdIndexOffset cmd)
             !texId = cmdTextureId cmd
         (tex, tw, th) <-
-          if texId > 0
-            then
-              lookupAtlasTex images texId >>= \case
-                Just hit -> pure hit
-                Nothing -> pure (nullPtr, 0, 0)
-            else pure (nullPtr, 0, 0)
+          if texId == glyphAtlasTextureId
+            then pure (glyphTex, 0, 0)
+            else if texId > 0
+              then
+                lookupAtlasTex images texId >>= \case
+                  Just hit -> pure hit
+                  Nothing  -> pure (nullPtr, 0, 0)
+              else pure (nullPtr, 0, 0)
         batchDrawRange batch vp vc ip ic start count texId tex tw th uiScale mDamage
 
 {-# INLINE unpackColor #-}

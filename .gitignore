@@ -28,3 +28,4 @@ result-*
 SDL3.dll
 SDL3_ttf.dll
 libiconv-2.dll
+sdl-lib/bench.csv

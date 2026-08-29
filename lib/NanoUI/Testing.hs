@@ -86,6 +86,7 @@ module NanoUI.Testing
   , vertexSize
   , indexSize
   , backdropDimTextureId
+  , glyphAtlasTextureId
   , Damage (..)
   , takeDamage
   , damageIsEmpty
@@ -163,6 +164,7 @@ import NanoUI.Draw
   , DrawData (..)
   , Layer (..)
   , backdropDimTextureId
+  , glyphAtlasTextureId
   , drawCmdElems
   , drawCmdFilter
   , drawCmdForLayer

@@ -1,6 +1,7 @@
 module NanoUI.Sdl.Font
   ( SdlFont (..)
   , TextCache
+  , GlyphAtlas
   , withTtf
   , openFont
   , closeFont
@@ -8,16 +9,24 @@ module NanoUI.Sdl.Font
   , findMonoFontPath
   , newTextCache
   , destroyTextCache
+  , newGlyphAtlas
+  , destroyGlyphAtlas
+  , resetGlyphAtlas
+  , warmGlyphAtlas
   , withTtfMeasure
   , withTtfMeasureScaled
+  , withTtfMeasureGlyph
   , ttfFontMetricsScaled
+  , buildGlyphFontMetrics
   , measureTtfText
   , renderTextSpans
+  , glyphAtlasTexture
   ) where
 
 import Control.Exception (IOException, bracket, catch)
 import Control.Monad (filterM, when)
 import Data.Bits (shiftR, (.&.))
+import Data.Char (ord)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Primitive.SmallArray
   ( SmallArray
@@ -29,12 +38,12 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Word (Word32, Word8)
 import Foreign.C.String (CString, withCString)
-import Foreign.C.Types (CFloat (..), CSize (..))
+import Foreign.C.Types (CFloat (..), CInt (..), CSize (..), CUInt (..))
 import Foreign.ForeignPtr (ForeignPtr, mallocForeignPtrBytes, withForeignPtr)
 import Foreign.Ptr (Ptr, nullPtr, plusPtr)
 import Foreign.Storable (peek, poke, sizeOf)
 import GHC.IO (unsafePerformIO)
-import NanoUI (Color (..), FontMetrics (..), Rect (..), hasMonoFontMarker, monospaceMetrics, stripMonoFontMarker)
+import NanoUI (Color (..), FontMetrics (..), GlyphQuad (..), Rect (..), hasMonoFontMarker, monospaceMetrics, stripMonoFontMarker)
 import NanoUI.Testing
   ( Context
   , withExternalText
@@ -82,6 +91,27 @@ type CacheKey = (Ptr (), Text, Word32)
 textCacheLimit :: Int
 textCacheLimit = 256
 
+-- | Per-glyph atlas slot. UVs are normalised to [0,1] within the atlas texture.
+data GlyphSlot = GlyphSlot
+  { gsW :: {-# UNPACK #-} !Float -- pixel width of glyph image
+  , gsH :: {-# UNPACK #-} !Float -- pixel height of glyph image
+  , gsU0 :: {-# UNPACK #-} !Float
+  , gsV0 :: {-# UNPACK #-} !Float
+  , gsU1 :: {-# UNPACK #-} !Float
+  , gsV1 :: {-# UNPACK #-} !Float
+  , gsOffX :: {-# UNPACK #-} !Float -- bearing x (pixels, at font scale)
+  , gsOffY :: {-# UNPACK #-} !Float -- bearing y (pixels, at font scale)
+  , gsAdvX :: {-# UNPACK #-} !Float -- horizontal advance (pixels, at font scale)
+  }
+
+-- | (font pointer, Unicode codepoint)
+type GlyphKey = (Ptr (), Char)
+
+data GlyphAtlas = GlyphAtlas
+  { gaAtlas :: !(Ptr ())
+  , gaEntries :: !(IORef (Map.Map GlyphKey GlyphSlot))
+  }
+
 {-# NOINLINE measureScratch #-}
 measureScratch :: ForeignPtr CFloat
 measureScratch = unsafePerformIO (mallocForeignPtrBytes (2 * sizeOf (0 :: CFloat)))
@@ -94,6 +124,10 @@ surfaceScratch = unsafePerformIO (mallocForeignPtrBytes (sizeOf (nullPtr :: Ptr 
 insertScratch :: ForeignPtr CFloat
 insertScratch = unsafePerformIO (mallocForeignPtrBytes (4 * sizeOf (0 :: CFloat)))
 
+{-# NOINLINE glyphMetricsScratch #-}
+glyphMetricsScratch :: ForeignPtr CInt
+glyphMetricsScratch = unsafePerformIO (mallocForeignPtrBytes (5 * sizeOf (0 :: CInt)))
+
 newTextCache :: Ptr SDL_Renderer -> IO TextCache
 newTextCache ren = do
   atlas <- textAtlasCreate ren
@@ -104,6 +138,198 @@ newTextCache ren = do
 destroyTextCache :: TextCache -> IO ()
 destroyTextCache cache = textAtlasDestroy (tcAtlas cache)
 
+-- ---------------------------------------------------------------------------
+-- Glyph Atlas
+
+newGlyphAtlas :: Ptr SDL_Renderer -> IO GlyphAtlas
+newGlyphAtlas ren = do
+  atlas <- textAtlasCreate ren
+  when (atlas == nullPtr) $ fail "nano_ui_text_atlas_create failed (glyph)"
+  entries <- newIORef Map.empty
+  pure GlyphAtlas {gaAtlas = atlas, gaEntries = entries}
+
+destroyGlyphAtlas :: GlyphAtlas -> IO ()
+destroyGlyphAtlas ga = textAtlasDestroy (gaAtlas ga)
+
+resetGlyphAtlas :: GlyphAtlas -> IO ()
+resetGlyphAtlas ga = do
+  writeIORef (gaEntries ga) Map.empty
+  textAtlasReset (gaAtlas ga)
+
+-- | Pre-rasterise printable ASCII into the glyph atlas to avoid cold misses
+-- on the first rendered frame.
+warmGlyphAtlas :: GlyphAtlas -> SdlFont -> IO ()
+warmGlyphAtlas ga sf =
+  mapM_ (\c -> lookupOrInsertGlyph ga sf c) [' ' .. '~']
+
+-- | Look up or insert a glyph into the atlas.  Returns 'Nothing' for
+-- characters that have no glyph (e.g. control characters).
+lookupOrInsertGlyph :: GlyphAtlas -> SdlFont -> Char -> IO (Maybe GlyphSlot)
+lookupOrInsertGlyph ga sf c = do
+  let !key = (sfFont sf, c)
+  entries <- readIORef (gaEntries ga)
+  case Map.lookup key entries of
+    Just slot -> pure (Just slot)
+    Nothing   -> insertGlyph ga sf key c
+
+insertGlyph :: GlyphAtlas -> SdlFont -> GlyphKey -> Char -> IO (Maybe GlyphSlot)
+insertGlyph ga sf key c = do
+  let !cp = fromIntegral (ord c) :: CUInt
+  -- Get glyph metrics at the current font scale.
+  mMetrics <- withForeignPtr glyphMetricsScratch $ \p -> do
+    let pMinX = p
+        pMaxX = plusPtr pMinX (sizeOf (0 :: CInt))
+        pMinY = plusPtr pMaxX (sizeOf (0 :: CInt))
+        pMaxY = plusPtr pMinY (sizeOf (0 :: CInt))
+        pAdv  = plusPtr pMaxY (sizeOf (0 :: CInt))
+    ok <- ttfGlyphMetrics (sfFont sf) cp pMinX pMaxX pMinY pMaxY pAdv
+    if not ok
+      then pure Nothing
+      else do
+        minX <- peek pMinX
+        _maxX <- peek pMaxX
+        _minY <- peek pMinY
+        _maxY <- peek pMaxY
+        adv  <- peek pAdv
+        pure
+          ( Just
+              ( fromIntegral minX  :: Float
+              , fromIntegral adv   :: Float
+              )
+          )
+  case mMetrics of
+    Nothing -> pure Nothing
+    Just (minX, adv) -> do
+      -- Render a white-on-alpha surface for the glyph.
+      mSurf <- withForeignPtr surfaceScratch $ \sp -> do
+        poke sp nullPtr
+        ok <- ttfRenderGlyphSurface (sfFont sf) cp sp
+        if not ok
+          then pure Nothing
+          else do
+            surf <- peek sp
+            if surf == nullPtr then pure Nothing else pure (Just surf)
+      case mSurf of
+        Nothing   -> pure Nothing
+        Just surf -> do
+          -- Try to insert; if atlas is full, evict all entries and retry.
+          mPos <- tryInsert (gaAtlas ga) surf >>= \case
+            Just p  -> pure (Just p)
+            Nothing -> do
+              writeIORef (gaEntries ga) Map.empty
+              textAtlasReset (gaAtlas ga)
+              tryInsert (gaAtlas ga) surf
+          freeSurface surf
+          case mPos of
+            Nothing -> pure Nothing
+            Just (px, py, tw, th) -> do
+              (atW, atH) <- atlasSize (gaAtlas ga)
+              -- In SDL3_ttf, TTF_RenderGlyph_Blended returns a full font-height
+              -- surface aligned to the font baseline. Its top is already at lineTop (y=0).
+              let !offX = min 0 minX
+                  !offY = 0
+                  !slot =
+                    GlyphSlot
+                      { gsW    = tw
+                      , gsH    = th
+                      , gsU0   = px / atW
+                      , gsV0   = py / atH
+                      , gsU1   = (px + tw) / atW
+                      , gsV1   = (py + th) / atH
+                      , gsOffX = offX
+                      , gsOffY = offY
+                      , gsAdvX = adv
+                      }
+              modifyIORef' (gaEntries ga) (Map.insert key slot)
+              pure (Just slot)
+
+-- | Build a 'FontMetrics' that populates 'fmGlyph' from the glyph atlas,
+-- so 'pushText' can emit real textured quads.  This must be called after
+-- the atlas has been warmed (or lazily, as missing glyphs are inserted on
+-- first use).  The returned metrics work at *logical* (unscaled) coordinates;
+-- scale is the display pixel ratio already baked into the font's point size.
+--
+-- Standard ASCII (0..127) lookups are backed by a high-performance 'SmallArray'
+-- fast path for branchless O(1) in-memory indexing without Map traversal or IORef reads.
+buildGlyphFontMetrics :: GlyphAtlas -> SdlFont -> Float -> FontMetrics
+buildGlyphFontMetrics ga sf scale =
+  let !inv = if scale > 0 then scale else 1
+      baseFm = ttfFontMetricsScaled sf scale
+
+      -- Precompute ASCII 0..127 fast lookup arrays backed by SmallArray
+      !asciiSlots = unsafePerformIO $
+        mapM (\i -> lookupOrInsertGlyph ga sf (toEnum i)) [0 .. 127]
+
+      !asciiQuads =
+        smallArrayFromList
+          [ case mSlot of
+              Nothing -> Nothing
+              Just gs ->
+                Just
+                  GlyphQuad
+                    { gqX  = gsOffX gs / inv
+                    , gqY  = gsOffY gs / inv
+                    , gqW  = gsW    gs / inv
+                    , gqH  = gsH    gs / inv
+                    , gqU0 = gsU0   gs
+                    , gqV0 = gsV0   gs
+                    , gqU1 = gsU1   gs
+                    , gqV1 = gsV1   gs
+                    }
+          | mSlot <- asciiSlots
+          ]
+
+      !asciiAdvances =
+        smallArrayFromList
+          [ case mSlot of
+              Nothing -> sfSpaceAdvance sf / inv
+              Just gs -> gsAdvX gs / inv
+          | mSlot <- asciiSlots
+          ]
+
+      {-# INLINE glyphLookup #-}
+      glyphLookup !c =
+        let !cp = ord c
+         in if (fromIntegral cp :: Word) < 128
+              then indexSmallArray asciiQuads cp
+              else unsafePerformIO $ do
+                mSlot <- lookupOrInsertGlyph ga sf c
+                case mSlot of
+                  Nothing -> pure Nothing
+                  Just gs ->
+                    pure $
+                      Just
+                        GlyphQuad
+                          { gqX  = gsOffX gs / inv
+                          , gqY  = gsOffY gs / inv
+                          , gqW  = gsW    gs / inv
+                          , gqH  = gsH    gs / inv
+                          , gqU0 = gsU0   gs
+                          , gqV0 = gsV0   gs
+                          , gqU1 = gsU1   gs
+                          , gqV1 = gsV1   gs
+                          }
+
+      {-# INLINE advanceLookup #-}
+      advanceLookup !c =
+        let !cp = ord c
+         in if (fromIntegral cp :: Word) < 128
+              then indexSmallArray asciiAdvances cp
+              else unsafePerformIO $ do
+                mSlot <- lookupOrInsertGlyph ga sf c
+                pure $! case mSlot of
+                  Nothing -> sfSpaceAdvance sf / inv
+                  Just gs -> gsAdvX gs / inv
+   in baseFm
+        { fmGlyph   = glyphLookup
+        , fmAdvance = advanceLookup
+        }
+
+-- | Return the SDL_Texture backing the glyph atlas, for passing to the renderer.
+glyphAtlasTexture :: GlyphAtlas -> IO (Ptr ())
+glyphAtlasTexture ga = textAtlasTexture (gaAtlas ga)
+
+-- ---------------------------------------------------------------------------
 withTtf :: IO a -> IO a
 withTtf act =
   bracket startup shutdown $ \_ -> act
@@ -152,6 +378,32 @@ withTtfMeasureScaled ctx sf monoSf scale =
               measure
           )
           True
+   in wrapMeasureCache scale ctx1 measure
+
+-- | Like 'withTtfMeasureScaled' but uses glyph-atlas-backed 'FontMetrics'
+-- (produced by 'buildGlyphFontMetrics') so that 'pushText' emits real
+-- per-glyph textured quads into the draw arena.  Text measurement still
+-- uses the SDL_ttf string-size path for accurate layout.
+withTtfMeasureGlyph ::
+  Context ->
+  SdlFont ->
+  SdlFont ->
+  FontMetrics -> -- ^ glyph-atlas fm for primary font
+  FontMetrics -> -- ^ glyph-atlas fm for mono font
+  Float ->
+  Context
+withTtfMeasureGlyph ctx sf monoSf fm monoFm scale =
+  let measure txt =
+        if hasMonoFontMarker txt
+          then measureTtfTextScaled monoSf scale (stripMonoFontMarker txt)
+          else measureTtfTextScaled sf scale txt
+      ctx1 =
+        withExternalText
+          ( withMeasureText
+              (withMonoFontMetrics (withFontMetrics ctx fm) monoFm)
+              measure
+          )
+          False
    in wrapMeasureCache scale ctx1 measure
 
 ttfFontMetricsScaled :: SdlFont -> Float -> FontMetrics
@@ -593,3 +845,21 @@ foreign import ccall unsafe "nano_ui_text_atlas_insert_surface"
 
 foreign import ccall unsafe "SDL_DestroySurface"
   freeSurface :: Ptr () -> IO ()
+
+foreign import ccall unsafe "nano_ui_ttf_glyph_metrics"
+  ttfGlyphMetrics ::
+    Ptr () ->   -- font
+    CUInt ->    -- codepoint
+    Ptr CInt -> -- out_minx
+    Ptr CInt -> -- out_maxx
+    Ptr CInt -> -- out_miny
+    Ptr CInt -> -- out_maxy
+    Ptr CInt -> -- out_advance
+    IO Bool
+
+foreign import ccall unsafe "nano_ui_ttf_render_glyph_surface"
+  ttfRenderGlyphSurface ::
+    Ptr () ->        -- font
+    CUInt ->         -- codepoint
+    Ptr (Ptr ()) ->  -- out_surface
+    IO Bool

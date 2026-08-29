@@ -145,6 +145,7 @@ module NanoUI
   , loneFontAwesome
   , -- Font
     FontMetrics (..)
+  , GlyphQuad (..)
   , monospaceMetrics
   , labelContentInset
   , widgetContentInset
@@ -181,6 +182,7 @@ import NanoUI.Icons
   )
 import NanoUI.Font
   ( FontMetrics (..)
+  , GlyphQuad (..)
   , hasMonoFontMarker
   , headingFontMarker
   , labelContentInset

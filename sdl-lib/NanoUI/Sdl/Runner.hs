@@ -20,10 +20,8 @@ import GHC.Clock (getMonotonicTime)
 import NanoUI
   ( Input (..)
   , NanoUI
-  , Rect (..)
   , Size (..)
   , V2 (..)
-  , rectIntersect
   , themeWindow
   )
 import Effectful (Eff, IOE, type (:>))
@@ -34,7 +32,6 @@ import NanoUI.Testing
   , Layer (..)
   , Ui
   , anyAnimating
-  , collectRasterSpans
   , ctxTheme
   , damageIsEmpty
   , runEff
@@ -65,23 +62,16 @@ import NanoUI.Sdl.Display
   , windowToLogicalCoords
   )
 import NanoUI.Sdl.Batch (withRenderBatch)
-import NanoUI.Sdl.Font (renderTextSpans)
+import NanoUI.Sdl.Font (glyphAtlasTexture)
 import NanoUI.Sdl.Window (SdlEnv (..))
 import Foreign.Ptr (Ptr, nullPtr)
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
 import qualified NanoUI.Sdl.Image as SdlImage
 import NanoUI.Sdl.Render (renderDrawDataPass, snapDamage, clipPixelRect)
-import Data.Maybe (isJust)
 import SDL3.Sys.Render (renderPresentSafe)
 
-singletonLayer :: Layer -> SmallArray Layer
-singletonLayer l = smallArrayFromListN 1 [l]
-
-layerBackgroundArr, layerContentArr, layerOverlayArr, layerChromeArr :: SmallArray Layer
-layerBackgroundArr = singletonLayer LayerBackground
-layerContentArr = singletonLayer LayerContent
-layerOverlayArr = singletonLayer LayerOverlay
-layerChromeArr = singletonLayer LayerChrome
+allLayersArr :: SmallArray Layer
+allLayersArr = smallArrayFromListN 4 [LayerBackground, LayerContent, LayerOverlay, LayerChrome]
 
 sdlDrawFrame :: Context -> NanoUI () -> SdlEnv -> Input -> Bool -> IO (Bool, Input)
 sdlDrawFrame ctx ui env inp forceFull = drawEff runEff ctx ui env inp forceFull
@@ -149,18 +139,10 @@ finishDraw ctx env inp forceFull t0 t1 drawData dirtyAfterUi = do
     else do
       okBegin <- retainBegin (sdlRenderer env) tex
       unless okBegin $ fail "SDL_SetRenderTarget(retain) failed"
-      (baseSpans, overlaySpans) <- collectRasterSpans ctx inp
-      font <- readIORef (sdlFontRef env)
-      monoFont <- readIORef (sdlMonoFontRef env)
       let clear = themeWindow (ctxTheme ctx)
-          spansIn = filterSpans damage
-      withRenderBatch (sdlRenderer env) $ \batch -> do
-        renderDrawDataPass batch (sdlRenderer env) scale (Just clear) drawData layerBackgroundArr (sdlImages env) damage
-        renderTextSpans batch (sdlRenderer env) scale font monoFont (sdlTextCache env) (spansIn baseSpans)
-        renderDrawDataPass batch (sdlRenderer env) scale Nothing drawData layerContentArr (sdlImages env) damage
-        renderDrawDataPass batch (sdlRenderer env) scale Nothing drawData layerOverlayArr (sdlImages env) damage
-        renderTextSpans batch (sdlRenderer env) scale font monoFont (sdlTextCache env) (spansIn overlaySpans)
-        renderDrawDataPass batch (sdlRenderer env) scale Nothing drawData layerChromeArr (sdlImages env) damage
+      glyphTex <- glyphAtlasTexture (sdlGlyphAtlas env)
+      withRenderBatch (sdlRenderer env) $ \batch ->
+        renderDrawDataPass batch (sdlRenderer env) scale (Just clear) drawData allLayersArr (sdlImages env) glyphTex damage
       t2 <- getMonotonicTime
       okBlit <- blitRetain (sdlRenderer env) scale tex damage
       unless okBlit $ fail "SDL_RenderTexture(retain) failed"
@@ -183,11 +165,6 @@ ensureRetain env w h = do
       when (tex' == nullPtr) $ fail "SDL_CreateTexture(retain) failed"
       writeIORef (sdlRetain env) (tex', w, h)
       pure (tex', True)
-
-filterSpans :: Damage -> [(Rect, a, b, c, Rect)] -> [(Rect, a, b, c, Rect)]
-filterSpans DamageFull spans = spans
-filterSpans (DamageClip clip) spans =
-  filter (\(box, _, _, _, _) -> isJust (rectIntersect clip box)) spans
 
 blitRetain :: Ptr SDL_Renderer -> Float -> Ptr () -> Damage -> IO Bool
 blitRetain ren scale tex damage =
