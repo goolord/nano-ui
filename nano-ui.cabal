@@ -67,6 +67,7 @@ library
         NanoUI.Context.Tooltip
         NanoUI.Context.Atlas
         NanoUI.Context.PrevRects
+        NanoUI.Context.Store
         NanoUI.Damage
         NanoUI.Draw
         NanoUI.Ease
