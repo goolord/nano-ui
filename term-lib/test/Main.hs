@@ -293,7 +293,7 @@ runDrawTest ctx failed = do
       inp
       (column defaultLayout (label "draw"))
   when (drawIndexCount draw < 6) $ bump failed
-  when (null (drawCommands draw)) $ bump failed
+  when (drawCmdNull draw) $ bump failed
 
 -- Widget identity is the call site, so every frame must run the same `ui`
 -- binding; re-typing the widget on another line makes a different widget.
@@ -310,7 +310,7 @@ runOverlayTest ctx failed = do
           , inputMouseReleased = False
           }
   (_, _, draw, _) <- runFrame ctx inp1 ui
-  let hasOverlay = any ((== LayerOverlay) . cmdLayer) (drawCommands draw)
+  let hasOverlay = any ((== LayerOverlay) . cmdLayer) (drawCmdElems draw)
   when (not hasOverlay) $ bump failed
 
 runInteractionTest :: Context -> IORef Int -> IO ()
@@ -437,32 +437,32 @@ runTextInputSelectionTest ctx failed = do
           textInput "Name" "hello"
   _ <- runFrame ctx inp0 ui
   _ <- runFrame ctx inp0 ui
-  let tab1 = inp0 {inputKeys = [KeyTab]}
+  let tab1 = inp0 {inputKeys = inputKeysFromList [KeyTab]}
   _ <- runFrame ctx tab1 ui
-  let tab2 = inp0 {inputKeys = [KeyTab]}
+  let tab2 = inp0 {inputKeys = inputKeysFromList [KeyTab]}
   _ <- runFrame ctx tab2 ui
   let shiftLeft1 =
         inp0
-          { inputKeys = [KeyLeft]
+          { inputKeys = inputKeysFromList [KeyLeft]
           , inputModifiers = Modifiers True False False
           }
   _ <- runFrame ctx shiftLeft1 ui
-  let shiftLeft2 = shiftLeft1 {inputKeys = [KeyLeft]}
+  let shiftLeft2 = shiftLeft1 {inputKeys = inputKeysFromList [KeyLeft]}
   _ <- runFrame ctx shiftLeft2 ui
   let typed =
         inp0
-          { inputChars = ['X']
+          { inputChars = "X"
           , inputModifiers = Modifiers False False False
           }
   ((_, valReplace), _, _, _) <- runFrame ctx typed ui
   when (valReplace /= "helX") $ bump failed
   let selectAll =
         inp0
-          { inputChars = ['a']
+          { inputChars = "a"
           , inputModifiers = Modifiers False True False
           }
   _ <- runFrame ctx selectAll ui
-  let deleteSel = inp0 {inputKeys = [KeyBackspace]}
+  let deleteSel = inp0 {inputKeys = inputKeysFromList [KeyBackspace]}
   ((_, valClear), _, _, _) <- runFrame ctx deleteSel ui
   when (valClear /= "") $ bump failed
 
@@ -473,15 +473,15 @@ runTextInputCtrlATest ctx failed = do
       ui = column defaultLayout (textInput "Name" "hello")
   forM_ [ctx, term] $ \c -> do
     _ <- runFrame c inp0 ui
-    let tab = inp0 {inputKeys = [KeyTab]}
+    let tab = inp0 {inputKeys = inputKeysFromList [KeyTab]}
     _ <- runFrame c tab ui
     let selectAll =
           inp0
-            { inputChars = ['\x01']
+            { inputChars = "\x01"
             , inputModifiers = Modifiers False True False
             }
     _ <- runFrame c selectAll ui
-    let deleteSel = inp0 {inputKeys = [KeyBackspace]}
+    let deleteSel = inp0 {inputKeys = inputKeysFromList [KeyBackspace]}
     ((_, valClear), _, _, _) <- runFrame c deleteSel ui
     when (valClear /= "") $ bump failed
 
@@ -516,7 +516,7 @@ runTextInputMouseSelectionTest ctx failed = do
               , inputMouseReleased = True
               }
       _ <- runFrame ctx dragRelease ui
-      let typed = inp0 {inputChars = ['z']}
+      let typed = inp0 {inputChars = "z"}
       ((_, val), _, _, _) <- runFrame ctx typed ui
       when (val /= "z") $ bump failed
     _ -> bump failed
@@ -541,7 +541,7 @@ runTextInputClickSelectTest _ failed = do
               , inputMouseClicks = 2
               }
       _ <- runFrame wordCtx click wordUi
-      let del = inp0 {inputKeys = [KeyBackspace]}
+      let del = inp0 {inputKeys = inputKeysFromList [KeyBackspace]}
       ((_, val), _, _, _) <- runFrame wordCtx del wordUi
       when (val /= " world") $ bump failed
     _ -> bump failed
@@ -558,7 +558,7 @@ runTextInputClickSelectTest _ failed = do
               , inputMouseClicks = 3
               }
       _ <- runFrame allCtx click allUi
-      let del = inp0 {inputKeys = [KeyBackspace]}
+      let del = inp0 {inputKeys = inputKeysFromList [KeyBackspace]}
       ((_, val), _, _, _) <- runFrame allCtx del allUi
       when (val /= "") $ bump failed
     _ -> bump failed
@@ -634,7 +634,7 @@ runModalOverlayTest ctx failed = do
               }
       ((_, dlg, _), _, _, _) <- runFrame ctx backdrop ui
       when (not (respClicked dlg)) $ bump failed
-      let esc = inp0 {inputKeys = [KeyEscape]}
+      let esc = inp0 {inputKeys = inputKeysFromList [KeyEscape]}
       ((_, dlgEsc, _), _, _, _) <- runFrame ctx esc ui
       when (not (respClicked dlgEsc)) $ bump failed
       consumed <- overlayConsumesQuit ctx esc
@@ -707,7 +707,7 @@ runImageTest ctx failed = do
   (resp, _, drawData, _) <- runFrame ctx inp0 ui
   let Rect _ _ w h = respRect resp
   when (abs (w - 40) > 0.5 || abs (h - 24) > 0.5) $ bump failed
-  let texCmds = filter (\c -> cmdTextureId c == atlasTextureId) (drawCommands drawData)
+  let texCmds = filter (\c -> cmdTextureId c == atlasTextureId) (drawCmdElems drawData)
   when (length texCmds /= 1) $ bump failed
   when (not (any (\c -> cmdIndexCount c == 12) texCmds)) $ bump failed
   (u0, _) <- vertUv drawData 0
@@ -723,7 +723,7 @@ runImageTest ctx failed = do
           (ImageId 0)
   _ <- runFrame ctx inp0 missing
   (_, _, missingData, _) <- runFrame ctx inp0 missing
-  when (any (\c -> cmdTextureId c > 0) (drawCommands missingData)) $ bump failed
+  when (any (\c -> cmdTextureId c > 0) (drawCmdElems missingData)) $ bump failed
 
 vertUv :: DrawData -> Int -> IO (Float, Float)
 vertUv dd i =
@@ -735,7 +735,7 @@ vertUv dd i =
 
 runTextInputClipboardTest :: Context -> IORef Int -> IO ()
 runTextInputClipboardTest ctx failed = do
-  clipRef <- newIORef (Nothing :: Maybe String)
+  clipRef <- newIORef (Nothing :: Maybe T.Text)
   let ctx' =
         withClipboard
           ctx
@@ -745,28 +745,28 @@ runTextInputClipboardTest ctx failed = do
       ui = column defaultLayout (textInput "Name" "hello")
   _ <- runFrame ctx' inp0 ui
   _ <- runFrame ctx' inp0 ui
-  let tab = inp0 {inputKeys = [KeyTab]}
+  let tab = inp0 {inputKeys = inputKeysFromList [KeyTab]}
   _ <- runFrame ctx' tab ui
   let selectAll =
         inp0
-          { inputChars = ['a']
+          { inputChars = "a"
           , inputModifiers = Modifiers False True False
           }
   _ <- runFrame ctx' selectAll ui
   let copy =
         inp0
-          { inputChars = ['c']
+          { inputChars = "c"
           , inputModifiers = Modifiers False True False
           }
   _ <- runFrame ctx' copy ui
   clip <- readIORef clipRef
   when (clip /= Just "hello") $ bump failed
   _ <- runFrame ctx' selectAll ui
-  let clear = inp0 {inputKeys = [KeyBackspace]}
+  let clear = inp0 {inputKeys = inputKeysFromList [KeyBackspace]}
   _ <- runFrame ctx' clear ui
   let paste =
         inp0
-          { inputChars = ['v']
+          { inputChars = "v"
           , inputModifiers = Modifiers False True False
           }
   ((_, val), _, _, _) <- runFrame ctx' paste ui
@@ -784,7 +784,7 @@ runTextInputMenuTest ctx failed = do
       ui = column defaultLayout (textInput "Name" "hello")
   _ <- runFrame ctx' inp0 ui
   _ <- runFrame ctx' inp0 ui
-  let tab = inp0 {inputKeys = [KeyTab]}
+  let tab = inp0 {inputKeys = inputKeysFromList [KeyTab]}
   _ <- runFrame ctx' tab ui
   spans <- collectTextSpans ctx'
   case [r | (r, txt, _, _, _) <- spans, txt == "hello"] of
@@ -1321,7 +1321,7 @@ runModalCloseDamageTest _ failed = do
       inp0 = emptyInput {inputWindowSize = Size 320 240, inputMousePos = V2 1 1}
   _ <- runFrame ctx inp0 ui
   _ <- runFrame ctx inp0 ui
-  let esc = inp0 {inputKeys = [KeyEscape]}
+  let esc = inp0 {inputKeys = inputKeysFromList [KeyEscape]}
   _ <- runFrame ctx esc ui
   let idle = inp0 {inputDeltaTime = 1}
   need <- needsRedraw ctx idle idle
@@ -2023,7 +2023,7 @@ runNestedScrollFocusTest ctx failed = do
         pure (outer, inner, btn)
   _ <- runFrame ctx inp0 ui
   ((_, inner, _), _, _, _) <- runFrame ctx inp0 ui
-  _ <- runFrame ctx (inp0 {inputKeys = [KeyTab]}) ui
+  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   focus <- getFocusId ctx
   when (focus == WidgetId 0) $ bump failed
   offI0 <- getScrollOffset ctx inner
@@ -2045,9 +2045,9 @@ runTabFocusTest ctx failed = do
           _ <- button "Two"
           pure ()
   _ <- runFrame ctx inp0 ui
-  _ <- runFrame ctx (inp0 {inputKeys = [KeyTab]}) ui
+  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   focus1 <- getFocusId ctx
-  _ <- runFrame ctx (inp0 {inputKeys = [KeyTab]}) ui
+  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   focus2 <- getFocusId ctx
   when (focus1 == WidgetId 0 || focus2 == WidgetId 0 || focus1 == focus2) $ bump failed
 
@@ -2247,13 +2247,13 @@ runSelectKeyboardTest ctx failed = do
           , inputMouseReleased = True
           }
   _ <- runFrame ctx openRelease ui
-  _ <- runFrame ctx (openRelease {inputKeys = [KeyDown]}) ui
+  _ <- runFrame ctx (openRelease {inputKeys = inputKeysFromList [KeyDown]}) ui
   ((_, idx1), _, _, _) <- runFrame ctx openRelease ui
   when (idx1 /= 2) $ bump failed
-  _ <- runFrame ctx (openRelease {inputKeys = [KeyUp]}) ui
+  _ <- runFrame ctx (openRelease {inputKeys = inputKeysFromList [KeyUp]}) ui
   ((_, idx2), _, _, _) <- runFrame ctx openRelease ui
   when (idx2 /= 1) $ bump failed
-  _ <- runFrame ctx (openRelease {inputKeys = [KeyEscape]}) ui
+  _ <- runFrame ctx (openRelease {inputKeys = inputKeysFromList [KeyEscape]}) ui
   _ <- runFrame ctx openRelease ui
   overlays <- collectOverlayTextSpans ctx openRelease
   let dropdownOpen =
@@ -2262,10 +2262,10 @@ runSelectKeyboardTest ctx failed = do
           overlays
   when dropdownOpen $ bump failed
   -- Focused with menu closed: arrows change value without opening the list.
-  _ <- runFrame ctx (inp0 {inputKeys = [KeyTab]}) ui
+  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   focus <- getFocusId ctx
   when (focus == WidgetId 0) $ bump failed
-  _ <- runFrame ctx (inp0 {inputKeys = [KeyRight]}) ui
+  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyRight]}) ui
   ((_, idx3), _, _, _) <- runFrame ctx inp0 ui
   when (idx3 /= 2) $ bump failed
   closedOverlays <- collectOverlayTextSpans ctx inp0
@@ -2274,7 +2274,7 @@ runSelectKeyboardTest ctx failed = do
           (\(_, txt, _, _, _) -> txt `elem` ["Low", "Medium", "High"])
           closedOverlays
   when closedMenuOpen $ bump failed
-  _ <- runFrame ctx (inp0 {inputKeys = [KeyLeft]}) ui
+  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyLeft]}) ui
   ((_, idx4), _, _, _) <- runFrame ctx inp0 ui
   when (idx4 /= 1) $ bump failed
 
@@ -2559,7 +2559,7 @@ runTerminalModalOverlayTest _ failed = do
   when (not ("Immediate-mode" `isInfixOf` blob)) $ bump failed
   when (not ("Behind" `isInfixOf` blob)) $ bump failed
   when (not ('\x2500' `elem` blob)) $ bump failed
-  when (not (any (\c -> cmdTextureId c == backdropDimTextureId) (drawCommands drawData))) $
+  when (not (any (\c -> cmdTextureId c == backdropDimTextureId) (drawCmdElems drawData))) $
     bump failed
 
 -- TUI About modal: title + sep + 4 body lines + float pad/gap (see modal/2).
@@ -3583,7 +3583,7 @@ runWindowOverlayTest ctx failed = do
           }
   ((outsideMid, _, _), _, _, _) <- runFrame ctx clickWin ui
   when (respClicked outsideMid) $ bump failed
-  let esc = inp0 {inputKeys = [KeyEscape]}
+  let esc = inp0 {inputKeys = inputKeysFromList [KeyEscape]}
   ((_, winEsc, _), _, _, _) <- runFrame ctx esc ui
   when (respClicked winEsc) $ bump failed
   let closeAt = V2 (wx + ww - padR windowPad - 14) (wy + padT windowPad + 14)

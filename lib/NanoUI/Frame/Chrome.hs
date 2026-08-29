@@ -30,6 +30,7 @@ module NanoUI.Frame.Chrome
 import Control.Monad (foldM, when)
 import Data.IORef (readIORef, writeIORef)
 import qualified Data.IntMap.Strict as IM
+import Data.Text (Text)
 import qualified Data.Text as T
 import NanoUI.Context
   ( Context (..)
@@ -171,7 +172,7 @@ displayText ctx nt idx = do
           focused <- textInputFocused ctx idx
           wid <- getWidgetId (ctxNodeArena ctx) idx
           store <- getStore ctx
-          let cursor = IM.findWithDefault (length value) (intKey wid) (storeCursor store)
+          let cursor = IM.findWithDefault (T.length value) (intKey wid) (storeCursor store)
           pure (textInputTerminalText txt value cursor focused)
         _ -> pure txt
     else
@@ -195,7 +196,7 @@ displayText ctx nt idx = do
         NodeButton -> pure (buttonDisplayText txt)
         _ -> pure (stripButtonBrackets txt)
 
-textInputValue :: Context -> NodeIdx -> IO String
+textInputValue :: Context -> NodeIdx -> IO Text
 textInputValue ctx idx = do
   wid <- getWidgetId (ctxNodeArena ctx) idx
   store <- getStore ctx

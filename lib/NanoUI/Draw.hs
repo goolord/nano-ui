@@ -21,6 +21,15 @@ module NanoUI.Draw
   , pushLine
   , pushFilledTriangle
   , finishDraw
+  , drawCmdCount
+  , drawCmdNull
+  , drawCmdAt
+  , foldDrawCmds
+  , drawCmdFilter
+  , drawCmdForLayer
+  , drawCmdElemsForLayer
+  , drawCmdPartitionByLayer
+  , drawCmdElems
   , vertexSize
   , indexSize
   , withClip
@@ -30,6 +39,8 @@ module NanoUI.Draw
 import Control.Monad (forM_, unless, when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Primitive.Array (MutableArray, newArray, readArray, writeArray)
+import Data.Vector (Vector)
+import qualified Data.Vector as V
 import Data.Word (Word8, Word32)
 import Foreign.ForeignPtr (ForeignPtr, mallocForeignPtrBytes, withForeignPtr)
 import Foreign.Marshal.Array (copyArray)
@@ -69,7 +80,7 @@ data DrawData = DrawData
   , drawVertexCount :: Int
   , drawIndices :: ForeignPtr Word8
   , drawIndexCount :: Int
-  , drawCommands :: [DrawCmd]
+  , drawCommands :: Vector DrawCmd
   }
   deriving (Eq, Show)
 
@@ -476,12 +487,51 @@ pushText da fm x y txt col = go x (T.unpack txt)
           pushRect da (Rect gx gy gw gh) col
           go (ox + adv) rest
 
-readCmdList :: MutableArray RealWorld DrawCmd -> Int -> IO [DrawCmd]
-readCmdList arr count = reverse <$> go 0 []
+readCmdVector :: MutableArray RealWorld DrawCmd -> Int -> IO (Vector DrawCmd)
+readCmdVector arr count = V.generateM count (readArray arr)
+
+{-# INLINE drawCmdCount #-}
+drawCmdCount :: DrawData -> Int
+drawCmdCount dd = V.length (drawCommands dd)
+
+{-# INLINE drawCmdNull #-}
+drawCmdNull :: DrawData -> Bool
+drawCmdNull dd = V.null (drawCommands dd)
+
+{-# INLINE drawCmdAt #-}
+drawCmdAt :: DrawData -> Int -> DrawCmd
+drawCmdAt dd i = drawCommands dd V.! i
+
+{-# INLINE foldDrawCmds #-}
+foldDrawCmds :: (a -> DrawCmd -> a) -> a -> DrawData -> a
+foldDrawCmds f z dd = V.foldl f z (drawCommands dd)
+
+{-# INLINE drawCmdFilter #-}
+drawCmdFilter :: (DrawCmd -> Bool) -> DrawData -> Vector DrawCmd
+drawCmdFilter p dd = V.filter p (drawCommands dd)
+
+{-# INLINE drawCmdForLayer #-}
+drawCmdForLayer :: Layer -> DrawData -> Vector DrawCmd
+drawCmdForLayer ly dd = drawCmdFilter ((== ly) . cmdLayer) dd
+
+drawCmdElemsForLayer :: Layer -> DrawData -> [DrawCmd]
+drawCmdElemsForLayer ly dd = V.toList (drawCmdForLayer ly dd)
+
+-- | One pass over draw commands, bucketed by layer in paint order.
+drawCmdPartitionByLayer :: DrawData -> ([DrawCmd], [DrawCmd], [DrawCmd], [DrawCmd])
+drawCmdPartitionByLayer dd =
+  let (bg, ct, ov, ch) = foldDrawCmds go ([], [], [], []) dd
+   in (reverse bg, reverse ct, reverse ov, reverse ch)
   where
-    go i acc
-      | i >= count = pure acc
-      | otherwise = readArray arr i >>= \cmd -> go (i + 1) (cmd : acc)
+    go (bg, ct, ov, ch) cmd =
+      case cmdLayer cmd of
+        LayerBackground -> (cmd : bg, ct, ov, ch)
+        LayerContent -> (bg, cmd : ct, ov, ch)
+        LayerOverlay -> (bg, ct, cmd : ov, ch)
+        LayerChrome -> (bg, ct, ov, cmd : ch)
+
+drawCmdElems :: DrawData -> [DrawCmd]
+drawCmdElems dd = V.toList (drawCommands dd)
 
 {-# INLINE finishDraw #-}
 finishDraw :: DrawArena -> IO DrawData
@@ -493,7 +543,7 @@ finishDraw da = do
   iCount <- readIORef (daIndexCount da)
   count <- readIORef (daCmdCount da)
   arr <- readIORef (daCmdStore da)
-  cmds <- readCmdList arr count
+  cmds <- readCmdVector arr count
   pure
     DrawData
       { drawVertices = vPtr

@@ -86,6 +86,7 @@ library
         effectful ^>=2.6,
         nano-ui,
         primitive ^>=0.9,
+        vector ^>=0.13,
         record-hasfield ^>=1.0,
         sdl3-bindgen-sys ^>=0.0.0.2,
         text ^>=2.1
@@ -115,6 +116,7 @@ executable nano-ui-sdl-demo
         nano-ui,
         nano-ui-sdl,
         primitive ^>=0.9,
+        vector ^>=0.13,
         text ^>=2.1
     hs-source-dirs:   examples
     default-language: GHC2024
@@ -132,6 +134,7 @@ executable nano-ui-sdl-anim
         nano-ui,
         nano-ui-sdl,
         primitive ^>=0.9,
+        vector ^>=0.13,
         text ^>=2.1
     hs-source-dirs:   examples
     default-language: GHC2024
@@ -151,6 +154,7 @@ executable nano-ui-sdl-profile
         nano-ui,
         nano-ui-sdl,
         primitive ^>=0.9,
+        vector ^>=0.13,
         text ^>=2.1
     hs-source-dirs:   examples
     default-language: GHC2024
@@ -172,6 +176,7 @@ benchmark nano-ui-sdl-bench
         nano-ui,
         nano-ui-sdl,
         primitive ^>=0.9,
+        vector ^>=0.13,
         text ^>=2.1
     hs-source-dirs:   benchmark
     default-language: GHC2024

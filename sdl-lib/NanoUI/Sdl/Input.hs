@@ -36,6 +36,8 @@ import NanoUI
   , Key (..)
   , Modifiers (..)
   , V2 (..)
+  , appendInputKey
+  , emptyInputKeys
   , v2Add
   )
 import NanoUI.Sdl.Display (readRefreshEventType)
@@ -247,8 +249,8 @@ mousePos x y = V2 x y
 clearEphemeral :: Input -> Input
 clearEphemeral inp =
   inp
-    { inputKeys = []
-    , inputChars = []
+    { inputKeys = emptyInputKeys
+    , inputChars = ""
     , inputMousePressed = False
     , inputMouseReleased = False
     , inputMouseRightPressed = False
@@ -263,9 +265,9 @@ applyEvent inp ev =
     EvQuit -> inp
     EvDisplayScale -> inp
     EvResize _ _ -> inp
-    EvKey k mods -> inp {inputKeys = inputKeys inp ++ [k], inputModifiers = mods}
+    EvKey k mods -> inp {inputKeys = appendInputKey k (inputKeys inp), inputModifiers = mods}
     EvText txt mods ->
-      inp {inputChars = inputChars inp ++ T.unpack txt, inputModifiers = mods}
+      inp {inputChars = inputChars inp <> txt, inputModifiers = mods}
     EvMouseMotion pos mods ->
       inp {inputMousePos = pos, inputModifiers = mods}
     EvMousePress pos mods clicks ->
@@ -302,7 +304,8 @@ applyEvent inp ev =
 
 isHardQuitInput :: Input -> Bool
 isHardQuitInput inp =
-  any (\c -> modCtrl (inputModifiers inp) && (c == 'c' || c == '\ETX')) (inputChars inp)
+  modCtrl (inputModifiers inp)
+    && (T.elem 'c' (inputChars inp) || T.elem '\ETX' (inputChars inp))
 
 splitFrame :: SmallArray SdlEvent -> (SmallArray SdlEvent, SmallArray SdlEvent)
 splitFrame events =

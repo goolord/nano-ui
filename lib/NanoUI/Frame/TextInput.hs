@@ -33,6 +33,7 @@ import Data.List (findIndex)
 import Data.Maybe (isJust)
 import Data.Word (Word32)
 import qualified Data.IntMap.Strict as IM
+import Data.Text (Text)
 import qualified Data.Text as T
 import NanoUI.Damage (floatingPanelRects, updatePrevRects, writeDamage)
 import NanoUI.Context
@@ -123,7 +124,7 @@ import NanoUI.WidgetMarkers
   )
 import NanoUI.Icons (Icons (..), checkboxMark, terminalPaintColumns)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
-import NanoUI.Input (Input (..), Key (..), Modifiers (..), inputInteracted, inputKeys, inputPointerHeld, inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased, inputMouseRightPressed, inputScroll, inputDeltaTime, inputWindowSize, modShift)
+import NanoUI.Input (Input (..), Key (..), Modifiers (..), inputInteracted, inputKeys, inputKeysElem, inputPointerHeld, inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased, inputMouseRightPressed, inputScroll, inputDeltaTime, inputWindowSize, modShift)
 import NanoUI.Layout.Arena
   ( DirTag (..)
   , NodeIdx
@@ -263,7 +264,7 @@ drawTextInputCaret da ctx idx x y w h style = do
         wid <- getWidgetId (ctxNodeArena ctx) idx
         store <- getStore ctx
         let key = intKey wid
-            cursor = IM.findWithDefault (length value) key (storeCursor store)
+            cursor = IM.findWithDefault (T.length value) key (storeCursor store)
             anchor = IM.findWithDefault cursor key (storeSelAnchor store)
             selLo = min anchor cursor
             selHi = max anchor cursor
@@ -277,9 +278,9 @@ drawTextInputCaret da ctx idx x y w h style = do
             accent = themeAccent theme
             selBg = lerpColor accent (styleBg style) 0.55
         when hasSel $ do
-          (wLo, _) <- ctxMeasureText ctx (T.pack (take selLo value))
-          (wHi, _) <- ctxMeasureText ctx (T.pack (take selHi value))
-          (_, ph) <- ctxMeasureText ctx (T.pack value)
+          (wLo, _) <- ctxMeasureText ctx (T.take selLo value)
+          (wHi, _) <- ctxMeasureText ctx (T.take selHi value)
+          (_, ph) <- ctxMeasureText ctx value
           let ty = centeredTextY (ctxHostProfile ctx) fm (rectY fieldRect) (rectH fieldRect) ph
               selX = rectX fieldRect + ix + wLo
               selW = max 1 (wHi - wLo)
@@ -312,37 +313,39 @@ textCharClass c
   | isSpace c = TextSpace
   | otherwise = TextOther
 
-textInputWordBounds :: String -> Int -> (Int, Int)
+-- Word bounds for double-click selection. Uses T.index (UTF-16 code units), not
+-- grapheme clusters. Fine for ASCII identifiers and typical terminal input.
+textInputWordBounds :: Text -> Int -> (Int, Int)
 textInputWordBounds text raw
-  | null text = (0, 0)
+  | T.null text = (0, 0)
   | otherwise =
-      let n = length text
+      let n = T.length text
           i = max 0 (min (n - 1) raw)
-          cls = textCharClass (text !! i)
+          cls = textCharClass (T.index text i)
           lo = goLeft cls i
           hi = goRight cls n i + 1
        in (lo, hi)
   where
     goLeft cls i
       | i <= 0 = 0
-      | textCharClass (text !! (i - 1)) == cls = goLeft cls (i - 1)
+      | textCharClass (T.index text (i - 1)) == cls = goLeft cls (i - 1)
       | otherwise = i
     goRight cls n i
       | i + 1 >= n = i
-      | textCharClass (text !! (i + 1)) == cls = goRight cls n (i + 1)
+      | textCharClass (T.index text (i + 1)) == cls = goRight cls n (i + 1)
       | otherwise = i
 
-applyTextInputClick :: Context -> WidgetId -> String -> Int -> Int -> IO ()
+applyTextInputClick :: Context -> WidgetId -> Text -> Int -> Int -> IO ()
 applyTextInputClick ctx wid value idx clicks
-  | clicks >= 3 = updateTextInputSelection ctx wid 0 (length value)
+  | clicks >= 3 = updateTextInputSelection ctx wid 0 (T.length value)
   | clicks == 2 =
       let (lo, hi) = textInputWordBounds value idx
        in updateTextInputSelection ctx wid lo hi
   | otherwise = updateTextInputSelection ctx wid idx idx
 
-applyTextInputDrag :: Context -> WidgetId -> String -> Int -> Int -> Int -> IO ()
+applyTextInputDrag :: Context -> WidgetId -> Text -> Int -> Int -> Int -> IO ()
 applyTextInputDrag ctx wid value anchor idx clicks
-  | clicks >= 3 = updateTextInputSelection ctx wid 0 (length value)
+  | clicks >= 3 = updateTextInputSelection ctx wid 0 (T.length value)
   | clicks == 2 =
       let (a0, a1) = textInputWordBounds value anchor
           (c0, c1) = textInputWordBounds value idx
@@ -437,7 +440,7 @@ textInputMenuActionEnabled ctx wid item = do
   store <- getStore ctx
   let key = intKey wid
       text = IM.findWithDefault "" key (storeText store)
-      cursor = IM.findWithDefault (length text) key (storeCursor store)
+      cursor = IM.findWithDefault (T.length text) key (storeCursor store)
       anchor = IM.findWithDefault cursor key (storeSelAnchor store)
       hasSel = anchor /= cursor
   mclip <- ctxClipboardGet ctx
@@ -445,9 +448,9 @@ textInputMenuActionEnabled ctx wid item = do
   pure $
     case item of
       0 -> hasSel
-      1 -> not (null text)
-      2 -> not (null clipTxt)
-      3 -> not (null text)
+      1 -> not (T.null text)
+      2 -> not (T.null clipTxt)
+      3 -> not (T.null text)
       _ -> False
 
 textInputMenuItemFg :: Style -> Bool -> Color
@@ -504,7 +507,7 @@ closeTextInputMenuOnOutsideClick ctx inp =
 
 closeTextInputMenuOnEscape :: Context -> Input -> IO ()
 closeTextInputMenuOnEscape ctx inp =
-  when (KeyEscape `elem` inputKeys inp) $
+  when (inputKeysElem KeyEscape (inputKeys inp)) $
     readIORef (ctxTextInputMenu ctx) >>= \case
       Nothing -> pure ()
       Just _ -> do
@@ -660,7 +663,7 @@ terminalTextInputMenuSpans ctx menuRect content _fm menuStyle mouse wid = do
           pure [(Rect (fromIntegral rx) (fromIntegral rowY) (fromIntegral wi) 1, rowText, fg, rowBg, menuRect)]
   pure (concat rows)
 
-textInputGeomForWidget :: Context -> WidgetId -> IO (Maybe (Rect, Float, String))
+textInputGeomForWidget :: Context -> WidgetId -> IO (Maybe (Rect, Float, Text))
 textInputGeomForWidget ctx wid = do
   count <- arenaCount (ctxNodeArena ctx)
   go 0 count
@@ -700,9 +703,9 @@ updateTextInputSelection ctx wid anchor cursor = do
       )
     markDirty ctx
 
-textInputCharAtX :: Context -> String -> Float -> Float -> IO Int
+textInputCharAtX :: Context -> Text -> Float -> Float -> IO Int
 textInputCharAtX ctx text startX mouseX = do
-  let len = length text
+  let len = T.length text
       relX = max 0 (mouseX - startX)
   if len <= 0
     then pure 0
@@ -711,11 +714,11 @@ textInputCharAtX ctx text startX mouseX = do
     search lo hi x =
       if hi - lo <= 1
         then do
-          (wLo, _) <- ctxMeasureText ctx (T.pack (take lo text))
-          (wHi, _) <- ctxMeasureText ctx (T.pack (take hi text))
+          (wLo, _) <- ctxMeasureText ctx (T.take lo text)
+          (wHi, _) <- ctxMeasureText ctx (T.take hi text)
           if x - wLo <= wHi - x then pure lo else pure hi
         else do
           let mid = (lo + hi) `div` 2
-          (wMid, _) <- ctxMeasureText ctx (T.pack (take mid text))
+          (wMid, _) <- ctxMeasureText ctx (T.take mid text)
           if wMid <= x then search mid hi x else search lo mid x
 

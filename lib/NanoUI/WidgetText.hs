@@ -112,16 +112,16 @@ textInputPlaceholder lbl =
     then "Enter text"
     else "Enter " <> T.toLower lbl
 
-textInputFieldText :: Text -> String -> Bool -> Text
+textInputFieldText :: Text -> Text -> Bool -> Text
 textInputFieldText lbl value focused =
-  let body = T.pack value
+  let body = value
    in if T.null body && not focused
         then textInputPlaceholder lbl
         else body
 
-textInputTerminalText :: Text -> String -> Int -> Bool -> Text
+textInputTerminalText :: Text -> Text -> Int -> Bool -> Text
 textInputTerminalText lbl value cursor focused =
-  let body = T.pack value
+  let body = value
       shown =
         if focused
           then
@@ -130,7 +130,7 @@ textInputTerminalText lbl value cursor focused =
           else body
    in lbl <> ": " <> shown
 
-textInputDisplayText :: Text -> String -> Bool -> Text
+textInputDisplayText :: Text -> Text -> Bool -> Text
 textInputDisplayText lbl value focused =
   textInputFieldText lbl value focused
 

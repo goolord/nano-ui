@@ -19,7 +19,7 @@ main :: IO ()
 main =
   runSdlApp
     defaultSdlOptions
-      { sdlAppShouldQuit = \inp -> KeyEscape `elem` inputKeys inp
+      { sdlAppShouldQuit = \inp -> inputKeysElem KeyEscape (inputKeys inp)
       , sdlAppImages = demoImages
       }
     demoUi
@@ -97,9 +97,8 @@ onOff :: Bool -> T.Text
 onOff True = "on"
 onOff False = "off"
 
-orDash :: String -> T.Text
-orDash "" = "-"
-orDash s = T.pack s
+orDash :: T.Text -> T.Text
+orDash s = if T.null s then "-" else s
 
 debugBody :: SdlDebugSnapshot -> NanoUI ()
 debugBody s = do

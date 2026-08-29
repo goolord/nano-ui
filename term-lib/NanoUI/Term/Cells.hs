@@ -43,8 +43,8 @@ import NanoUI
 import NanoUI.Testing
   ( DrawCmd (..)
   , DrawData (..)
-  , Layer (..)
   , backdropDimTextureId
+  , drawCmdPartitionByLayer
   , indexSize
   , terminalTextColumns
   , terminalTextPositions
@@ -104,16 +104,15 @@ rasterizeLayered width height drawData baseSpans overlaySpans = do
   arr <- newPrimArray len
   setPrimArray arr 0 len 0
   fillBlanks arr len
-  let cmds = drawCommands drawData
-      ofLayer ly = filter ((== ly) . cmdLayer) cmds
-  mapM_ (applyCmd arr w h drawData) (ofLayer LayerBackground)
-  mapM_ (applyCmd arr w h drawData) (ofLayer LayerContent)
+  let (bg, ct, ov, ch) = drawCmdPartitionByLayer drawData
+  mapM_ (applyCmd arr w h drawData) bg
+  mapM_ (applyCmd arr w h drawData) ct
   -- Text spans after content quads so scroll tracks do not erase box rules.
   mapM_ (stampSpan arr w h) baseSpans
-  mapM_ (applyCmd arr w h drawData) (ofLayer LayerOverlay)
+  mapM_ (applyCmd arr w h drawData) ov
   -- Chrome (window scrollbars) before overlay text. A 1-cell bar expands to 2
   -- cells under floor/ceiling, and would wipe a close-icon trail if it ran last.
-  mapM_ (applyCmd arr w h drawData) (ofLayer LayerChrome)
+  mapM_ (applyCmd arr w h drawData) ch
   mapM_ (stampSpan arr w h) overlaySpans
   frozen <- unsafeFreezePrimArray arr
   pure Cells {cellsW = w, cellsH = h, cellsData = frozen}

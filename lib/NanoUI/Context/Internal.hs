@@ -66,8 +66,8 @@ data Context = Context
   , ctxScrollDrag :: IORef (Maybe (WidgetId, Float))
   , ctxTextInputDrag :: IORef (Maybe TextInputDrag)
   , ctxTextInputMenu :: IORef (Maybe TextInputMenu)
-  , ctxClipboardGet :: IO (Maybe String)
-  , ctxClipboardSet :: String -> IO Bool
+  , ctxClipboardGet :: IO (Maybe Text)
+  , ctxClipboardSet :: Text -> IO Bool
   , ctxTooltips :: IORef [PendingTooltip]
   , ctxWidgetNodeTypes :: IORef (Maybe (IntMap NodeType))
   , ctxSelectDropPress :: IORef Bool

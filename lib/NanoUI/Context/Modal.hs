@@ -13,7 +13,7 @@ module NanoUI.Context.Modal
 import Data.IORef (readIORef, writeIORef)
 import NanoUI.Context.Internal (Context (..))
 import NanoUI.Id (hashWidgetId)
-import NanoUI.Input (Input (..), Key (KeyEscape))
+import NanoUI.Input (Input (..), Key (KeyEscape), inputKeys, inputKeysElem)
 
 textInputEditActive :: Context -> IO Bool
 textInputEditActive ctx = do
@@ -32,7 +32,7 @@ modalActive ctx = do
 overlayConsumesQuit :: Context -> Input -> IO Bool
 overlayConsumesQuit ctx inp = do
   consumed <- readIORef (ctxEscapeConsumed ctx)
-  let esc = KeyEscape `elem` inputKeys inp
+  let esc = inputKeysElem KeyEscape (inputKeys inp)
   pure (esc && consumed)
 
 markEscapeConsumed :: Context -> IO ()

@@ -16,6 +16,7 @@ import Data.Bits (shiftR, (.&.))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (sortBy)
 import Data.Ord (comparing)
+import qualified Data.Vector as V
 import Data.Primitive.SmallArray (SmallArray, sizeofSmallArray)
 import Data.Word (Word8)
 import Foreign.ForeignPtr (withForeignPtr)
@@ -29,6 +30,7 @@ import NanoUI.Testing
   , DrawData (..)
   , Layer (..)
   , damageIsEmpty
+  , drawCmdFilter
   )
 import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
@@ -119,8 +121,8 @@ renderDrawDataPass batch ren uiScale mClear drawData layers images damage = do
         applyClipState batch clipRef ren uiScale (ClipRect r)
       (Nothing, DamageClip r) -> applyClipState batch clipRef ren uiScale (ClipRect r)
       (Nothing, DamageFull) -> pure ()
-    let selected = [c | c <- drawCommands drawData, cmdLayer c `elem` layers]
-        cmds = sortBy (comparing layerOrder) selected
+    let selected = drawCmdFilter (\c -> cmdLayer c `elem` layers) drawData
+        cmds = sortBy (comparing layerOrder) (V.toList selected)
         clip = case damage of
           DamageFull -> Nothing
           DamageClip r -> Just r

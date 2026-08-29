@@ -15,6 +15,7 @@ module NanoUI.Widgets.Animate
 
 import Control.Monad (when)
 import Data.IORef (readIORef)
+import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import qualified Data.IntMap.Strict as IM
 import GHC.Stack (HasCallStack)
@@ -123,7 +124,7 @@ useStoreField field update initial = do
 useFlag :: (HasCallStack, Ui :> es) => Bool -> Eff es (Bool, Bool -> Eff es ())
 useFlag initial = useStoreField storeFlag (\st k v -> st {storeFlag = IM.insert k v (storeFlag st)}) initial
 
-useText :: (HasCallStack, Ui :> es) => String -> Eff es (String, String -> Eff es ())
+useText :: (HasCallStack, Ui :> es) => Text -> Eff es (Text, Text -> Eff es ())
 useText initial = useStoreField storeNote (\st k v -> st {storeNote = IM.insert k v (storeNote st)}) initial
 
 useToggle :: (HasCallStack, Ui :> es) => Bool -> Eff es (Bool, Eff es ())

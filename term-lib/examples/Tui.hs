@@ -3,6 +3,7 @@ module Main (main) where
 import Control.Monad (void, when)
 import NanoUI
 import NanoUI.Backend.Term (TermDebugSnapshot (..), TermOptions (..), askTermDebug, defaultTermOptions, runTermAppReduce)
+import Data.Text (Text)
 import Text.Printf (printf)
 import qualified Data.Text as T
 
@@ -39,7 +40,7 @@ main :: IO ()
 main =
   runTermAppReduce
     defaultTermOptions
-      { termAppShouldQuit = \inp -> KeyEscape `elem` inputKeys inp
+      { termAppShouldQuit = \inp -> inputKeysElem KeyEscape (inputKeys inp)
       }
     updateClick
     (TuiClick "")
@@ -92,14 +93,14 @@ tuiApp st = do
             let click = tuiClick st
             _ <-
               labelEx (stack {layoutWidth = Grow 1}) $
-                T.pack $
-                  unwords
-                    [ "checked=" <> show checked
-                    , "vol=" <> show (round vol :: Int)
-                    , "quality=" <> show quality
-                    , "name=" <> name
-                    , "click=" <> click
-                    ]
+                T.intercalate
+                  " "
+                  [ "checked=" <> T.pack (show checked)
+                  , "vol=" <> T.pack (show (round vol :: Int))
+                  , "quality=" <> T.pack (show quality)
+                  , "name=" <> name
+                  , "click=" <> T.pack click
+                  ]
             muted "About opens a dialog. Debug opens a window. Esc closes, then quits."
             pure ()
     when debugOpen $ do
@@ -119,57 +120,57 @@ tuiApp st = do
 debugWindowBody :: TermDebugSnapshot -> NanoUI ()
 debugWindowBody snap = kvBlock (allDebugRows snap)
 
-allDebugRows :: TermDebugSnapshot -> [(String, String)]
+allDebugRows :: TermDebugSnapshot -> [(Text, Text)]
 allDebugRows s =
   frameRows s ++ drawRows s ++ terminalRows s ++ rtsRows s
 
-frameRows :: TermDebugSnapshot -> [(String, String)]
+frameRows :: TermDebugSnapshot -> [(Text, Text)]
 frameRows s =
-  [ ("present", printf "%.1f fps" (dbgPresentFps s))
-  , ("loop", printf "%.1f fps" (dbgLoopFps s))
-  , ("frame", printf "%.1f ms" (dbgFrameMs s))
-  , ("ui", printf "%.1f ms" (dbgUiMs s))
-  , ("redraws", printf "%d" (dbgRedraws s))
-  , ("blits", printf "%d" (dbgBlits s))
-  , ("skips", printf "%d" (dbgSkips s))
+  [ ("present", T.pack (printf "%.1f fps" (dbgPresentFps s)))
+  , ("loop", T.pack (printf "%.1f fps" (dbgLoopFps s)))
+  , ("frame", T.pack (printf "%.1f ms" (dbgFrameMs s)))
+  , ("ui", T.pack (printf "%.1f ms" (dbgUiMs s)))
+  , ("redraws", T.pack (printf "%d" (dbgRedraws s)))
+  , ("blits", T.pack (printf "%d" (dbgBlits s)))
+  , ("skips", T.pack (printf "%d" (dbgSkips s)))
   ]
 
-drawRows :: TermDebugSnapshot -> [(String, String)]
+drawRows :: TermDebugSnapshot -> [(Text, Text)]
 drawRows s =
-  [ ("verts", printf "%d" (dbgVerts s))
-  , ("indices", printf "%d" (dbgIndices s))
-  , ("cmds", printf "%d" (dbgCmds s))
-  , ("nodes", printf "%d" (dbgNodes s))
-  , ("base spans", printf "%d" (dbgBaseSpans s))
-  , ("overlay spans", printf "%d" (dbgOverlaySpans s))
+  [ ("verts", T.pack (printf "%d" (dbgVerts s)))
+  , ("indices", T.pack (printf "%d" (dbgIndices s)))
+  , ("cmds", T.pack (printf "%d" (dbgCmds s)))
+  , ("nodes", T.pack (printf "%d" (dbgNodes s)))
+  , ("base spans", T.pack (printf "%d" (dbgBaseSpans s)))
+  , ("overlay spans", T.pack (printf "%d" (dbgOverlaySpans s)))
   ]
 
-terminalRows :: TermDebugSnapshot -> [(String, String)]
+terminalRows :: TermDebugSnapshot -> [(Text, Text)]
 terminalRows s =
   let (fr, fg, fb) = dbgThemeFg s
       (br, bg, bb) = dbgThemeBg s
    in
-    [ ("size", printf "%.0fx%.0f" (dbgWinW s) (dbgWinH s))
-    , ("mouse", printf "%.0f, %.0f" (dbgMouseX s) (dbgMouseY s))
-    , ("theme fg", printf "%d,%d,%d" fr fg fb)
-    , ("theme bg", printf "%d,%d,%d" br bg bb)
+    [ ("size", T.pack (printf "%.0fx%.0f" (dbgWinW s) (dbgWinH s)))
+    , ("mouse", T.pack (printf "%.0f, %.0f" (dbgMouseX s) (dbgMouseY s)))
+    , ("theme fg", T.pack (printf "%d,%d,%d" fr fg fb))
+    , ("theme bg", T.pack (printf "%d,%d,%d" br bg bb))
     ]
 
-rtsRows :: TermDebugSnapshot -> [(String, String)]
+rtsRows :: TermDebugSnapshot -> [(Text, Text)]
 rtsRows s
   | not (dbgRtsOn s) =
       [ ("rts", "stats off (need +RTS -T)")
-      , ("haskell", printf "%d cap / %d cpu" (dbgCaps s) (dbgCpus s))
+      , ("haskell", T.pack (printf "%d cap / %d cpu" (dbgCaps s) (dbgCpus s)))
       ]
   | otherwise =
-      [ ("haskell", printf "%d cap / %d cpu" (dbgCaps s) (dbgCpus s))
-      , ("gc total", printf "%d" (dbgGcs s))
-      , ("gc major", printf "%d" (dbgMajorGcs s))
-      , ("last gen", printf "%d" (dbgLastGcGen s))
-      , ("last gc", printf "%.2f ms" (dbgLastGcMs s))
-      , ("heap live", printf "%.1f MiB" (dbgLiveMb s))
-      , ("heap alloc", printf "%.1f MiB" (dbgAllocMb s))
-      , ("copied", printf "%.1f MiB" (dbgCopiedMb s))
-      , ("rss max", printf "%.1f MiB" (dbgMaxMemMb s))
-      , ("gc time", printf "%.1f%%" (dbgGcPct s))
+      [ ("haskell", T.pack (printf "%d cap / %d cpu" (dbgCaps s) (dbgCpus s)))
+      , ("gc total", T.pack (printf "%d" (dbgGcs s)))
+      , ("gc major", T.pack (printf "%d" (dbgMajorGcs s)))
+      , ("last gen", T.pack (printf "%d" (dbgLastGcGen s)))
+      , ("last gc", T.pack (printf "%.2f ms" (dbgLastGcMs s)))
+      , ("heap live", T.pack (printf "%.1f MiB" (dbgLiveMb s)))
+      , ("heap alloc", T.pack (printf "%.1f MiB" (dbgAllocMb s)))
+      , ("copied", T.pack (printf "%.1f MiB" (dbgCopiedMb s)))
+      , ("rss max", T.pack (printf "%.1f MiB" (dbgMaxMemMb s)))
+      , ("gc time", T.pack (printf "%.1f%%" (dbgGcPct s)))
       ]
