@@ -107,7 +107,7 @@ executable nano-ui-sdl-demo
     import:           rts-options
     import:           warnings
     main-is:          SdlDemo.hs
-    other-modules:    SdlDemoUi
+    ghc-options:      -main-is SdlDemo
     build-depends:
         base ^>=4.22.0.0,
         bytestring ^>=0.12,
@@ -141,7 +141,7 @@ executable nano-ui-sdl-profile
     import:           bench-rts-options
     import:           warnings
     main-is:          SdlProfile.hs
-    other-modules:    SdlDemoUi
+    other-modules:    SdlDemo
     build-depends:
         base ^>=4.22.0.0,
         bytestring ^>=0.12,

@@ -5,7 +5,7 @@ import NanoUI
 import NanoUI.Backend.Sdl (RgbaImage (..))
 import NanoUI.Testing (Context, registerImage)
 import NanoUI.Testing.Sdl (newSdlContext, sdlDrawFrame, syncDisplay, withSdlBench)
-import SdlDemoUi (demoImages, demoUi)
+import SdlDemo (demoImages, demoUi)
 
 -- Enough timed frames for a stable SDL profile without an interactive loop.
 iterations :: Int
