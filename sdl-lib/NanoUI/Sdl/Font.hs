@@ -446,7 +446,7 @@ renderTextSpans _ _ _ _ _ _ [] = pure ()
 renderTextSpans batch ren scale font monoFont cache spans = do
   let go _ [] = pure ()
       go !prevClip ((Rect x y _ _, txt, fg, _bg, clip) : rest) = do
-        let !clipKey = logicalClipKey scale clip
+        let !clipKey = logicalClipKey clip
         when (prevClip /= Just clipKey) $ do
           flushRenderBatch batch
           setLogicalClipKey ren clipKey

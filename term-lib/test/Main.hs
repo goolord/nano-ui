@@ -729,8 +729,8 @@ vertUv :: DrawData -> Int -> IO (Float, Float)
 vertUv dd i =
   withForeignPtr (drawVertices dd) $ \p -> do
     let off = i * vertexSize
-    u <- peekByteOff p (off + 8)
-    v <- peekByteOff p (off + 12)
+    u <- peekByteOff p (off + 24)
+    v <- peekByteOff p (off + 28)
     pure (u, v)
 
 runTextInputClipboardTest :: Context -> IORef Int -> IO ()

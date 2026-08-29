@@ -195,12 +195,18 @@ SDL_Texture *nano_ui_retain_create(SDL_Renderer *renderer, int w, int h)
     return tex;
 }
 
-bool nano_ui_retain_begin(SDL_Renderer *renderer, SDL_Texture *tex)
+bool nano_ui_retain_begin(SDL_Renderer *renderer, SDL_Texture *tex, float scale)
 {
     if (!renderer || !tex) {
         return false;
     }
-    return SDL_SetRenderTarget(renderer, tex);
+    if (!SDL_SetRenderTarget(renderer, tex)) {
+        return false;
+    }
+    if (scale > 0.f) {
+        (void)SDL_SetRenderScale(renderer, scale, scale);
+    }
+    return true;
 }
 
 bool nano_ui_retain_blit(SDL_Renderer *renderer, SDL_Texture *tex)
@@ -214,6 +220,7 @@ bool nano_ui_retain_blit(SDL_Renderer *renderer, SDL_Texture *tex)
     if (!SDL_SetRenderClipRect(renderer, NULL)) {
         return false;
     }
+    (void)SDL_SetRenderScale(renderer, 1.f, 1.f);
     return SDL_RenderTexture(renderer, tex, NULL, NULL);
 }
 
@@ -236,6 +243,7 @@ bool nano_ui_retain_blit_rect(
     if (!SDL_SetRenderClipRect(renderer, NULL)) {
         return false;
     }
+    (void)SDL_SetRenderScale(renderer, 1.f, 1.f);
     SDL_FRect src = {src_x, src_y, src_w, src_h};
     SDL_FRect dst = {dst_x, dst_y, src_w, src_h};
     return SDL_RenderTexture(renderer, tex, &src, &dst);

@@ -137,7 +137,7 @@ finishDraw ctx env inp forceFull t0 t1 drawData dirtyAfterUi = do
       notePresent (sdlDebug env) uiMs renderMs presentMs frameMs drawData
       pure (dirtyAfterUi, inp)
     else do
-      okBegin <- retainBegin (sdlRenderer env) tex
+      okBegin <- retainBegin (sdlRenderer env) tex scale
       unless okBegin $ fail "SDL_SetRenderTarget(retain) failed"
       let clear = themeWindow (ctxTheme ctx)
       glyphTex <- glyphAtlasTexture (sdlGlyphAtlas env)

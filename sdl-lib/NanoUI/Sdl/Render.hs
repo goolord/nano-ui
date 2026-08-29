@@ -75,18 +75,18 @@ clipPixelRect uiScale (Rect x y w h) =
    in (x0, y0, x1 - x0, y1 - y0)
 
 {-# INLINE logicalClipKey #-}
-logicalClipKey :: Float -> Rect -> (Int, Int, Int, Int)
-logicalClipKey scale (Rect x y w h) =
-  let px = round (x * scale) :: Int
-      py = round (y * scale) :: Int
-      pw = max 1 (round (w * scale)) :: Int
-      ph = max 1 (round (h * scale)) :: Int
+logicalClipKey :: Rect -> (Int, Int, Int, Int)
+logicalClipKey (Rect x y w h) =
+  let px = round x :: Int
+      py = round y :: Int
+      pw = max 1 (round w) :: Int
+      ph = max 1 (round h) :: Int
    in (px, py, pw, ph)
 
 {-# INLINE toClipKey #-}
-toClipKey :: Float -> Rect -> ClipState
-toClipKey scale r =
-  let (px, py, pw, ph) = logicalClipKey scale r
+toClipKey :: Rect -> ClipState
+toClipKey r =
+  let (px, py, pw, ph) = logicalClipKey r
    in ClipKey px py pw ph
 
 setLogicalClipKey :: Ptr SDL_Renderer -> (Int, Int, Int, Int) -> IO ()
@@ -95,9 +95,9 @@ setLogicalClipKey ren (px, py, pw, ph) =
     poke sr (SDL_Rect (fromIntegral px) (fromIntegral py) (fromIntegral pw) (fromIntegral ph))
     void $ setRenderClipRectSafe ren (PtrConst.unsafeFromPtr sr)
 
-setLogicalClipRect :: Ptr SDL_Renderer -> Float -> Rect -> IO ()
-setLogicalClipRect ren uiScale r =
-  setLogicalClipKey ren (logicalClipKey uiScale r)
+setLogicalClipRect :: Ptr SDL_Renderer -> Rect -> IO ()
+setLogicalClipRect ren r =
+  setLogicalClipKey ren (logicalClipKey r)
 
 clearLogicalClipRect :: Ptr SDL_Renderer -> IO ()
 clearLogicalClipRect ren = void $ setRenderClipRectSafe ren nullClip
@@ -128,13 +128,9 @@ renderDrawDataPass batch ren uiScale mClear drawData layers images glyphTex dama
         void $ renderClearSafe ren
       (Just clearColor, DamageClip r) -> do
         let (cr, cg, cb, ca) = unpackColor clearColor
-            px = rectX r * uiScale
-            py = rectY r * uiScale
-            pw = rectW r * uiScale
-            ph = rectH r * uiScale
-        batchFillSolid batch cr cg cb ca px py pw ph
-        applyClipState batch clipRef ren (toClipKey uiScale r)
-      (Nothing, DamageClip r) -> applyClipState batch clipRef ren (toClipKey uiScale r)
+        batchFillSolid batch cr cg cb ca (rectX r) (rectY r) (rectW r) (rectH r)
+        applyClipState batch clipRef ren (toClipKey r)
+      (Nothing, DamageClip r) -> applyClipState batch clipRef ren (toClipKey r)
       (Nothing, DamageFull) -> pure ()
     let clip = case damage of
           DamageFull -> Nothing
@@ -211,7 +207,7 @@ drawCmd batch ren uiScale vp vc ip ic images glyphTex mDamage clipRef cmd = do
       Just clip -> do
         if cmdOpen && mDamage == Nothing
           then applyClipState batch clipRef ren ClipNone
-          else applyClipState batch clipRef ren (toClipKey uiScale clip)
+          else applyClipState batch clipRef ren (toClipKey clip)
         let !start = fromIntegral (cmdIndexOffset cmd)
             !texId = cmdTextureId cmd
         (tex, tw, th) <-

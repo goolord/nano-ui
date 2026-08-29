@@ -164,7 +164,7 @@ foreign import ccall unsafe "nano_ui_retain_create"
   retainCreateC :: Ptr SDL_Renderer -> CInt -> CInt -> IO (Ptr ())
 
 foreign import ccall unsafe "nano_ui_retain_begin"
-  retainBeginC :: Ptr SDL_Renderer -> Ptr () -> IO Bool
+  retainBeginC :: Ptr SDL_Renderer -> Ptr () -> CFloat -> IO Bool
 
 foreign import ccall unsafe "nano_ui_retain_blit"
   retainBlitC :: Ptr SDL_Renderer -> Ptr () -> IO Bool
@@ -190,8 +190,8 @@ retainDestroy = retainDestroyC
 retainCreate :: Ptr SDL_Renderer -> Int -> Int -> IO (Ptr ())
 retainCreate ren w h = retainCreateC ren (fromIntegral w) (fromIntegral h)
 
-retainBegin :: Ptr SDL_Renderer -> Ptr () -> IO Bool
-retainBegin = retainBeginC
+retainBegin :: Ptr SDL_Renderer -> Ptr () -> Float -> IO Bool
+retainBegin ren tex scale = retainBeginC ren tex (realToFrac scale)
 
 retainBlit :: Ptr SDL_Renderer -> Ptr () -> IO Bool
 retainBlit = retainBlitC

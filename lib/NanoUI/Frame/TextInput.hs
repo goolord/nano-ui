@@ -6,6 +6,7 @@ module NanoUI.Frame.TextInput
   ( TextInputGeom (..)
   , textInputGeom
   , drawTextInputCaret
+  , drawTextInputSelection
   , textInputCharAtX
   , openTextInputMenu
   , finalizeTextInputMenuPick
@@ -253,8 +254,8 @@ textInputGeom host fm x y w _h =
       fieldY = y + labelH + gap
    in TextInputGeom {tigFieldRect = Rect x fieldY w fieldH}
 
-drawTextInputCaret :: DrawArena -> Context -> NodeIdx -> Float -> Float -> Float -> Float -> Style -> IO ()
-drawTextInputCaret da ctx idx x y w h style = do
+drawTextInputSelection :: DrawArena -> Context -> NodeIdx -> Float -> Float -> Float -> Float -> Style -> IO ()
+drawTextInputSelection da ctx idx x y w h style = do
   let terminal = isCellHost (ctxHostProfile ctx)
   if terminal
     then pure ()
@@ -270,15 +271,14 @@ drawTextInputCaret da ctx idx x y w h style = do
             selLo = min anchor cursor
             selHi = max anchor cursor
             hasSel = selLo < selHi
-        lbl <- getText (ctxNodeArena ctx) idx
-        let fm = ctxFontMetrics ctx
-            geom = textInputGeom (ctxHostProfile ctx) fm x y w h
-            fieldRect = tigFieldRect geom
-            (ix, _) = widgetContentInset (ctxHostProfile ctx) fm
-            theme = ctxTheme ctx
-            accent = themeAccent theme
-            selBg = lerpColor accent (styleBg style) 0.55
         when hasSel $ do
+          let fm = ctxFontMetrics ctx
+              geom = textInputGeom (ctxHostProfile ctx) fm x y w h
+              fieldRect = tigFieldRect geom
+              (ix, _) = widgetContentInset (ctxHostProfile ctx) fm
+              theme = ctxTheme ctx
+              accent = themeAccent theme
+              selBg = lerpColor accent (styleBg style) 0.55
           (wLo, _) <- ctxMeasureText ctx (T.take selLo value)
           (wHi, _) <- ctxMeasureText ctx (T.take selHi value)
           (_, ph) <- ctxMeasureText ctx value
@@ -287,7 +287,26 @@ drawTextInputCaret da ctx idx x y w h style = do
               selW = max 1 (wHi - wLo)
               selH = max 4 ph
           pushRect da (Rect selX ty selW selH) selBg
-        let fieldTxt = textInputFieldText lbl value focus
+
+drawTextInputCaret :: DrawArena -> Context -> NodeIdx -> Float -> Float -> Float -> Float -> Style -> IO ()
+drawTextInputCaret da ctx idx x y w h style = do
+  let terminal = isCellHost (ctxHostProfile ctx)
+  if terminal
+    then pure ()
+    else do
+      focus <- textInputFocused ctx idx
+      when focus $ do
+        value <- textInputValue ctx idx
+        wid <- getWidgetId (ctxNodeArena ctx) idx
+        store <- getStore ctx
+        let key = intKey wid
+            cursor = IM.findWithDefault (T.length value) key (storeCursor store)
+        lbl <- getText (ctxNodeArena ctx) idx
+        let fm = ctxFontMetrics ctx
+            geom = textInputGeom (ctxHostProfile ctx) fm x y w h
+            fieldRect = tigFieldRect geom
+            (ix, _) = widgetContentInset (ctxHostProfile ctx) fm
+            fieldTxt = textInputFieldText lbl value focus
             prefix = T.take (max 0 (min (T.length fieldTxt) cursor)) fieldTxt
         (pw, _) <- ctxMeasureText ctx prefix
         (_, ph) <- ctxMeasureText ctx fieldTxt

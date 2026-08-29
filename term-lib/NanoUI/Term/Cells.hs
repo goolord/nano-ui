@@ -17,7 +17,7 @@ module NanoUI.Term.Cells
 
 import Control.Monad (when)
 import Control.Monad.Primitive (PrimState)
-import Data.Bits ((.&.), (.|.))
+import Data.Bits (shiftL, (.&.), (.|.))
 import Data.Char (chr, ord)
 import Data.Primitive.PrimArray
   ( MutablePrimArray
@@ -336,9 +336,18 @@ vertexAt dd slot = do
     Just vi
       | vi < 0 || vi >= drawVertexCount dd -> pure Nothing
       | otherwise -> do
-          x <- peekFloatAt (drawVertices dd) (vi * vertexSize)
-          y <- peekFloatAt (drawVertices dd) (vi * vertexSize + 4)
-          rgba <- peekWord32At (drawVertices dd) (vi * vertexSize + 16)
+          let !off = vi * vertexSize
+          x <- peekFloatAt (drawVertices dd) off
+          y <- peekFloatAt (drawVertices dd) (off + 4)
+          r <- peekFloatAt (drawVertices dd) (off + 8)
+          g <- peekFloatAt (drawVertices dd) (off + 12)
+          b <- peekFloatAt (drawVertices dd) (off + 16)
+          a <- peekFloatAt (drawVertices dd) (off + 20)
+          let !ru = fromIntegral (clamp 0 255 (round (r * 255))) :: Word32
+              !gu = fromIntegral (clamp 0 255 (round (g * 255))) :: Word32
+              !bu = fromIntegral (clamp 0 255 (round (b * 255))) :: Word32
+              !au = fromIntegral (clamp 0 255 (round (a * 255))) :: Word32
+              !rgba = (ru `shiftL` 24) .|. (gu `shiftL` 16) .|. (bu `shiftL` 8) .|. au
           pure (Just (x, y, rgba))
 
 readIndexAt :: DrawData -> Int -> IO (Maybe Int)
