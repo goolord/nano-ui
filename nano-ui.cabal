@@ -68,6 +68,8 @@ library
         NanoUI.Context.Atlas
         NanoUI.Context.PrevRects
         NanoUI.Context.Store
+        NanoUI.Context.Config
+        NanoUI.Context.Dirty
         NanoUI.Damage
         NanoUI.Draw
         NanoUI.Ease

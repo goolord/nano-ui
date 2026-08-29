@@ -88,7 +88,6 @@ import Data.Dynamic (fromDynamic, toDyn)
 import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Proxy (Proxy (..))
 import Data.Typeable (Typeable, typeOf, typeRep)
-import Data.Text (Text)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Map.Strict as Map
 import qualified NanoUI.Atlas as Atlas
@@ -104,9 +103,9 @@ import NanoUI.Animation
   , easeSameSpec
   )
 import NanoUI.Store (WidgetStore (..), emptyWidgetStore)
-import NanoUI.Font (FontMetrics, hasMonoFontMarker, measureText, monospaceMetrics, stripWidgetMarkers)
+import NanoUI.Font (measureText, monospaceMetrics, stripWidgetMarkers)
 import NanoUI.Host (HostProfile (..))
-import NanoUI.Icons (IconSet, asciiIcons, iconsFor)
+import NanoUI.Icons (asciiIcons)
 import NanoUI.Id (WidgetId (..))
 import NanoUI.Layout.Arena (newNodeArena)
 import NanoUI.Spring
@@ -115,7 +114,7 @@ import NanoUI.Spring
   , presetSmooth
   , presetStiff
   )
-import NanoUI.Style (Theme, defaultTheme)
+import NanoUI.Style (defaultTheme)
 import NanoUI.Context.Internal
   ( Context (..)
   , PendingTooltip (..)
@@ -139,6 +138,24 @@ import NanoUI.Context.Store
   , setDisabled
   , setScrollOffset
   , setStore
+  )
+import NanoUI.Context.Config
+  ( clearMeasureCache
+  , enableMeasureCache
+  , withExternalText
+  , withFontMetrics
+  , withHostProfile
+  , withIcons
+  , withMeasureText
+  , withMonoFontMetrics
+  , withTheme
+  , wrapMeasureCache
+  )
+import NanoUI.Context.Dirty
+  ( clearDirty
+  , isDirty
+  , setWakeLoop
+  , takeDamage
   )
 import NanoUI.Context.Tooltip
   ( clearTooltips
@@ -260,78 +277,6 @@ newContext = do
       , ctxHostProfile = PixelHost
       }
 
-fontMetricsForText :: Context -> Text -> FontMetrics
-fontMetricsForText ctx txt =
-  if hasMonoFontMarker txt
-    then ctxMonoFontMetrics ctx
-    else ctxFontMetrics ctx
-
-{-# INLINE withFontMetrics #-}
-withFontMetrics :: Context -> FontMetrics -> Context
-withFontMetrics ctx fm =
-  ctx
-    { ctxFontMetrics = fm
-    , ctxMeasureText =
-        \txt ->
-          pure (measureText (ctxHostProfile ctx) (fontMetricsForText ctx {ctxFontMetrics = fm} txt) (stripWidgetMarkers txt))
-    }
-
-{-# INLINE withMonoFontMetrics #-}
-withMonoFontMetrics :: Context -> FontMetrics -> Context
-withMonoFontMetrics ctx monoFm = ctx {ctxMonoFontMetrics = monoFm}
-
-{-# INLINE withMeasureText #-}
-withMeasureText :: Context -> (Text -> IO (Float, Float)) -> Context
-withMeasureText ctx measure = ctx {ctxMeasureText = measure}
-
-{-# INLINE wrapMeasureCache #-}
-wrapMeasureCache :: Float -> Context -> (Text -> IO (Float, Float)) -> Context
-wrapMeasureCache scale ctx measure =
-  case ctxMeasureCache ctx of
-    Nothing -> ctx {ctxMeasureText = measure}
-    Just cacheRef ->
-      ctx
-        { ctxMeasureText = \txt -> do
-            let mono = hasMonoFontMarker txt
-                key = (stripWidgetMarkers txt, mono, scale)
-            cache <- readIORef cacheRef
-            case Map.lookup key cache of
-              Just wh -> pure wh
-              Nothing -> do
-                wh <- measure txt
-                writeIORef cacheRef (Map.insert key wh cache)
-                pure wh
-        }
-
-{-# INLINE clearMeasureCache #-}
-clearMeasureCache :: Context -> IO ()
-clearMeasureCache ctx =
-  case ctxMeasureCache ctx of
-    Nothing -> pure ()
-    Just cacheRef -> writeIORef cacheRef Map.empty
-
-{-# INLINE withExternalText #-}
-withExternalText :: Context -> Bool -> Context
-withExternalText ctx on = ctx {ctxExternalText = on}
-
-{-# INLINE withTheme #-}
-withTheme :: Context -> Theme -> Context
-withTheme ctx theme = ctx {ctxTheme = theme}
-
-{-# INLINE withIcons #-}
-withIcons :: Context -> IconSet -> Context
-withIcons ctx set = ctx {ctxIcons = iconsFor set}
-
-{-# INLINE withHostProfile #-}
-withHostProfile :: Context -> HostProfile -> Context
-withHostProfile ctx host =
-  let ctx' = ctx {ctxHostProfile = host}
-   in ctx'
-        { ctxMeasureText =
-            \txt ->
-              pure (measureText host (fontMetricsForText ctx' txt) (stripWidgetMarkers txt))
-        }
-
 {-# INLINE setHost #-}
 setHost :: Typeable a => Context -> a -> IO ()
 setHost ctx a = modifyIORef' (ctxHost ctx) (Map.insert (typeOf a) (toDyn a))
@@ -341,28 +286,6 @@ askHostIO :: forall a. Typeable a => Context -> IO (Maybe a)
 askHostIO ctx = do
   hosts <- readIORef (ctxHost ctx)
   pure (Map.lookup (typeRep (Proxy @a)) hosts >>= fromDynamic)
-
-{-# INLINE enableMeasureCache #-}
-enableMeasureCache :: Context -> IO Context
-enableMeasureCache ctx = do
-  cacheRef <- newIORef Map.empty
-  pure (ctx {ctxMeasureCache = Just cacheRef})
-
-{-# INLINE clearDirty #-}
-clearDirty :: Context -> IO ()
-clearDirty ctx = writeIORef (ctxDirty ctx) False
-
-{-# INLINE setWakeLoop #-}
-setWakeLoop :: Context -> IO () -> IO ()
-setWakeLoop ctx wake = writeIORef (ctxWakeLoop ctx) (Just wake)
-
-{-# INLINE isDirty #-}
-isDirty :: Context -> IO Bool
-isDirty ctx = readIORef (ctxDirty ctx)
-
-{-# INLINE takeDamage #-}
-takeDamage :: Context -> IO Damage
-takeDamage ctx = readIORef (ctxDamage ctx)
 
 {-# INLINE getFocusId #-}
 getFocusId :: Context -> IO WidgetId
