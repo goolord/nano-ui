@@ -17,10 +17,10 @@ import qualified Data.IntMap.Strict as IM
 import NanoUI.Context (Context (..), WidgetStore (..), getStore, intKey)
 import NanoUI.Frame.Hit (modalTreeOpen, widgetIdInModal)
 import NanoUI.Host (isCellHost)
-import NanoUI.Icons (checkboxMark)
+import NanoUI.Icons (checkboxMark, radioMark)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Layout.Arena
-  ( NodeType (NodeButton, NodeCheckbox, NodeSlider)
+  ( NodeType (NodeButton, NodeCheckbox, NodeRadio, NodeSlider)
   , arenaCount
   , getNodeType
   , getText
@@ -31,10 +31,15 @@ import NanoUI.Layout.Arena
 import NanoUI.WidgetMarkers (stripButtonBrackets)
 import NanoUI.WidgetText
   ( checkboxLabelText
+  , radioLabelText
+  , radioPackOption
+  , radioParseOption
   , sliderPackRange
   , sliderPackTerminal
   , sliderParseRange
+  , sliderRangeSep
   )
+import qualified Data.Text as T
 
 tabNext :: WidgetId -> [WidgetId] -> Bool -> WidgetId
 tabNext cur ids shift =
@@ -90,6 +95,21 @@ syncWidgetLabels ctx = do
                     mark = if terminal then checkboxMark icons val else ""
                 setNodeText na idx (mark <> body)
                 setNodeValue na idx (if val then 1 else 0)
+              NodeRadio -> do
+                txt <- getText na idx
+                case T.splitOn sliderRangeSep txt of
+                  [_g, _i, _lbl] -> do
+                    let (groupKey, optIdx, _) = radioParseOption txt
+                        selected = IM.findWithDefault optIdx groupKey (storeRadio store)
+                        val = selected == optIdx
+                        label = radioLabelText txt
+                        display =
+                          if terminal
+                            then radioMark icons val <> label
+                            else label
+                    setNodeText na idx (radioPackOption groupKey optIdx display)
+                    setNodeValue na idx (if val then 1 else 0)
+                  _ -> pure ()
               NodeSlider -> do
                 let val = IM.findWithDefault 0 key (storeSlider store)
                 txt <- getText na idx

@@ -63,6 +63,7 @@ import NanoUI.Id (WidgetId)
 import NanoUI.Style (AlignX (..), AlignY (..), Padding (..), windowMargin)
 import NanoUI.WidgetText
   ( checkboxLabelText
+  , radioLabelText
   , selectDisplayText
   , selectChevronReserve
   , selectParseOptions
@@ -258,6 +259,11 @@ measureWidget na host fm measure idx = do
             | otherwise ->
                 let (cx, cy) = labelContentInset host fm
                  in (2 * cx, cy)
+          NodeRadio
+            | isCellHost host -> (0, 0)
+            | otherwise ->
+                let (cx, cy) = labelContentInset host fm
+                 in (2 * cx, cy)
           _ -> widgetPadding host fm
   (tw, th, extraW, extraH) <-
     case nt of
@@ -283,6 +289,17 @@ measureWidget na host fm measure idx = do
               if T.null txt
                 then " "
                 else if isCellHost host then txt else checkboxLabelText txt
+        (mw, mh) <- measure body
+        if isCellHost host
+          then pure (mw, mh, 0, 0)
+          else do
+            let box = checkboxBoxSize host fm
+            pure (mw, max mh box, checkboxLeading host fm, 0)
+      NodeRadio -> do
+        let body =
+              if T.null txt
+                then " "
+                else if isCellHost host then txt else radioLabelText txt
         (mw, mh) <- measure body
         if isCellHost host
           then pure (mw, mh, 0, 0)

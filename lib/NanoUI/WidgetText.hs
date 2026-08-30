@@ -8,6 +8,9 @@ module NanoUI.WidgetText
   , sliderParseRange
   , sliderText
   , checkboxLabelText
+  , radioPackOption
+  , radioParseOption
+  , radioLabelText
   , textInputDisplayText
   , textInputTerminalText
   , textInputFieldText
@@ -26,7 +29,7 @@ module NanoUI.WidgetText
 
 import Data.Text (Text)
 import NanoUI.Font (FontMetrics (..), fmLineHeight)
-import NanoUI.Icons (checkboxPrefixes)
+import NanoUI.Icons (checkboxPrefixes, radioPrefixes)
 import NanoUI.Types (sliderBarCells)
 import qualified Data.Text as T
 
@@ -92,6 +95,42 @@ checkboxLabelText txt = go checkboxPrefixes
       if T.isPrefixOf p txt
         then T.drop (T.length p) txt
         else go ps
+
+radioPackOption :: Int -> Int -> Text -> Text
+radioPackOption groupKey optionIdx label =
+  T.pack (show groupKey)
+    <> sliderRangeSep
+    <> T.pack (show optionIdx)
+    <> sliderRangeSep
+    <> label
+
+radioParseOption :: Text -> (Int, Int, Text)
+radioParseOption txt =
+  case T.splitOn sliderRangeSep txt of
+    [g, i, lbl] ->
+      ( readInt g 0
+      , readInt i 0
+      , lbl
+      )
+    _ -> (0, 0, txt)
+  where
+    readInt t fallback =
+      case reads (T.unpack t) of
+        [(v, "")] -> v
+        _ -> fallback
+
+radioLabelText :: Text -> Text
+radioLabelText txt =
+  let (_, _, raw) = radioParseOption txt
+   in stripRadioPrefixes raw
+  where
+    stripRadioPrefixes t = go radioPrefixes
+      where
+        go [] = t
+        go (p : ps) =
+          if T.isPrefixOf p t
+            then T.drop (T.length p) t
+            else go ps
 
 textInputMinWidth :: Float
 textInputMinWidth = 160

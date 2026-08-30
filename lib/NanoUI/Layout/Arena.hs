@@ -74,6 +74,7 @@ data NodeType
   -- Appended last: stored as Word8 in the arena. Update every exhaustive
   -- NodeType case when adding variants.
   | NodeBox
+  | NodeRadio
   deriving (Eq, Show, Enum, Bounded)
 
 isWidgetNode :: NodeType -> Bool
@@ -82,6 +83,7 @@ isWidgetNode nt =
     NodeWidget -> True
     NodeButton -> True
     NodeCheckbox -> True
+    NodeRadio -> True
     NodeSlider -> True
     NodeTextInput -> True
     NodeSelect -> True

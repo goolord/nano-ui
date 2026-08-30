@@ -21,6 +21,8 @@ module NanoUI.Icons
   , iconSetName
   , checkboxMark
   , checkboxPrefixes
+  , radioMark
+  , radioPrefixes
   , fontAwesomeIcon
   , loneFontAwesome
   , terminalCharColumns
@@ -50,6 +52,10 @@ data Icons = Icons
   -- ^ Checkbox prefix when set. Includes its trailing space.
   , iconUnchecked :: Text
   -- ^ Checkbox prefix when clear. Same terminal column count as 'iconChecked'.
+  , iconRadioChecked :: Text
+  -- ^ Radio prefix when selected. Includes its trailing space.
+  , iconRadioUnchecked :: Text
+  -- ^ Radio prefix when clear. Same terminal column count as 'iconRadioChecked'.
   , iconClose :: Text
   -- ^ Window and modal close button.
   , iconSelectOpen :: Text
@@ -73,6 +79,8 @@ asciiIcons =
   Icons
     { iconChecked = "[x] "
     , iconUnchecked = "[ ] "
+    , iconRadioChecked = "(*) "
+    , iconRadioUnchecked = "( ) "
     , iconClose = "X"
     , iconSelectOpen = " v"
     , iconSelectClosed = " >"
@@ -88,6 +96,8 @@ glyphIcons =
   Icons
     { iconChecked = "\xf046 " -- check-square-o
     , iconUnchecked = "\xf096 " -- square-o
+    , iconRadioChecked = "\xf192 " -- dot-circle-o
+    , iconRadioUnchecked = "\xf10c " -- circle-o
     , iconClose = "\xf00d" -- times
     , iconSelectOpen = " \xf078" -- chevron-down
     , iconSelectClosed = " \xf054" -- chevron-right
@@ -128,6 +138,9 @@ iconSetName IconsNerd = "nerd"
 checkboxMark :: Icons -> Bool -> Text
 checkboxMark icons value = if value then iconChecked icons else iconUnchecked icons
 
+radioMark :: Icons -> Bool -> Text
+radioMark icons value = if value then iconRadioChecked icons else iconRadioUnchecked icons
+
 -- | Every prefix a checkbox label may carry, so stripping works after a tier
 -- change (or a terminal node rendered through the SDL path).
 checkboxPrefixes :: [Text]
@@ -136,6 +149,14 @@ checkboxPrefixes =
   , iconUnchecked asciiIcons
   , iconChecked glyphIcons
   , iconUnchecked glyphIcons
+  ]
+
+radioPrefixes :: [Text]
+radioPrefixes =
+  [ iconRadioChecked asciiIcons
+  , iconRadioUnchecked asciiIcons
+  , iconRadioChecked glyphIcons
+  , iconRadioUnchecked glyphIcons
   ]
 
 -- | Font Awesome private-use block. Every Nerd Font maps these.

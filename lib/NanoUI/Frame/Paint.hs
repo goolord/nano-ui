@@ -136,7 +136,7 @@ import NanoUI.Layout.Arena
   , isContainerNode
   , isFloatingNode
   , isScrollNode
-  , NodeType (NodeButton, NodeCheckbox, NodeSelect, NodeSlider, NodeTextInput, NodeModal, NodeImage, NodePanel, NodeWindow, NodeContainer, NodeScrollContainer, NodeText, NodeSeparator, NodeSpacer, NodeBox)
+  , NodeType (NodeButton, NodeCheckbox, NodeRadio, NodeSelect, NodeSlider, NodeTextInput, NodeModal, NodeImage, NodePanel, NodeWindow, NodeContainer, NodeScrollContainer, NodeText, NodeSeparator, NodeSpacer, NodeBox)
   , resetNodeArena
   , setNodeText
   , setNodeValue
@@ -317,13 +317,14 @@ lowerNode ctx idx = do
             | isTab = False
             | terminal, nt == NodeButton = False
             | terminal, nt == NodeCheckbox = False
+            | terminal, nt == NodeRadio = False
             | terminal, nt == NodeSlider = False
             | terminal, nt == NodeSelect = False
             | terminal, nt == NodeTextInput = False
             | terminal, nt == NodeText = False
             | terminal = True
             | otherwise =
-                nt /= NodeCheckbox && nt /= NodeSlider && nt /= NodeTextInput
+                nt /= NodeCheckbox && nt /= NodeRadio && nt /= NodeSlider && nt /= NodeTextInput
       when opaqueBg $ fillStyledRect da terminal style rect
       when (not terminal) $ do
         when (opaqueBg && not isTab) $ strokeStyledRect da terminal style x y w h
@@ -353,6 +354,18 @@ lowerNode ctx idx = do
             (themeAccent theme)
             (styleBg (themeInput theme))
             (colorRGBA 255 255 255 255)
+        when (nt == NodeRadio) $
+          drawRadio
+            (ctxHostProfile ctx)
+            da
+            fm
+            style
+            x
+            y
+            h
+            value
+            (themeAccent theme)
+            (styleBg (themeInput theme))
         when (nt == NodeSlider) $ do
           txt <- getText (ctxNodeArena ctx) idx
           let lbl = sliderLabelText (T.takeWhile (/= '\US') txt)
@@ -452,6 +465,42 @@ drawCheckboxMark da bx by box markCol = do
       y2 = by + box * 0.28
   pushLine da x0 y0 x1 y1 t markCol
   pushLine da x1 y1 x2 y2 t markCol
+
+drawRadio ::
+  HostProfile ->
+  DrawArena ->
+  FontMetrics ->
+  Style ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Color ->
+  Color ->
+  IO ()
+drawRadio host da fm style x y h value accent well = do
+  let (ix, _) =
+        if isCellHost host
+          then widgetContentInset host fm
+          else labelContentInset host fm
+      box = checkboxBoxSize host fm
+      bx = x + ix
+      by = y + (h - box) / 2
+      r = box / 2
+      bw = 2
+      outer = Rect bx by box box
+      innerR = max 0 (r - bw)
+  if value >= 0.5
+    then do
+      pushRoundedRect da outer r accent
+      let dot = box * 0.42
+          dx = bx + (box - dot) / 2
+          dy = by + (box - dot) / 2
+      pushRoundedRect da (Rect dx dy dot dot) (dot / 2) accent
+    else do
+      pushRoundedRect da outer r (styleBorder style)
+      when (innerR > 0) $
+        pushRoundedRect da (Rect (bx + bw) (by + bw) (box - 2 * bw) (box - 2 * bw)) innerR well
 
 borderContentClip :: Style -> Rect -> Rect
 borderContentClip style (Rect x y w h) =

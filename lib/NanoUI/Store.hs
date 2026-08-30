@@ -9,6 +9,7 @@ import qualified Data.IntMap.Strict as IM
 
 data WidgetStore = WidgetStore
   { storeCheckbox :: IntMap Bool
+  , storeRadio :: IntMap Int
   , storeSlider :: IntMap Float
   , storeText :: IntMap Text
   , storeCursor :: IntMap Int
@@ -28,6 +29,7 @@ emptyWidgetStore :: WidgetStore
 emptyWidgetStore =
   WidgetStore
     { storeCheckbox = IM.empty
+    , storeRadio = IM.empty
     , storeSlider = IM.empty
     , storeText = IM.empty
     , storeCursor = IM.empty

@@ -145,7 +145,7 @@ import NanoUI.Layout.Arena
   , isContainerNode
   , isFloatingNode
   , isScrollNode
-  , NodeType (NodeButton, NodeCheckbox, NodeSelect, NodeSlider, NodeTextInput, NodeModal, NodeImage, NodePanel, NodeWindow, NodeContainer, NodeScrollContainer, NodeText, NodeSeparator, NodeSpacer, NodeBox)
+  , NodeType (NodeButton, NodeCheckbox, NodeRadio, NodeSelect, NodeSlider, NodeTextInput, NodeModal, NodeImage, NodePanel, NodeWindow, NodeContainer, NodeScrollContainer, NodeText, NodeSeparator, NodeSpacer, NodeBox)
   , resetNodeArena
   , setNodeText
   , setNodeValue
@@ -406,6 +406,9 @@ widgetHitRect ctx nt idx x y w h = do
         NodeCheckbox -> do
           txt <- displayText ctx nt idx
           pure (terminalTextHitRect (ctxHostProfile ctx) fm x y h txt True)
+        NodeRadio -> do
+          txt <- displayText ctx nt idx
+          pure (terminalTextHitRect (ctxHostProfile ctx) fm x y h txt True)
         NodeSelect -> do
           txt <- displayText ctx nt idx
           pure (terminalTextHitRect (ctxHostProfile ctx) fm x y h txt False)
@@ -470,7 +473,7 @@ widgetTextSpans ctx nt idx x y w h = do
                in pure [(closeRect, txt, fg, bg)]
             else do
               let tx =
-                    if nt == NodeButton || nt == NodeCheckbox
+                    if nt == NodeButton || nt == NodeCheckbox || nt == NodeRadio
                       then x
                       else x + ix
                   textSpan =
@@ -534,6 +537,16 @@ widgetTextPlacements ctx nt idx x y w h = do
       (tw, th) <- ctxMeasureText ctx txt
       pure [(txt, x + ix, centeredTextY (ctxHostProfile ctx) fm y h th, min tw (w - ix - selectChevronReserve), th)]
     NodeCheckbox -> do
+      txt <- displayText ctx nt idx
+      (tw, th) <- ctxMeasureText ctx txt
+      let (cx, _) =
+            if terminal
+              then widgetContentInset (ctxHostProfile ctx) fm
+              else labelContentInset (ctxHostProfile ctx) fm
+          tx = x + cx + checkboxLeading (ctxHostProfile ctx) fm
+          ty = centeredTextY (ctxHostProfile ctx) fm y h th
+      pure [(txt, tx, ty, tw, th)]
+    NodeRadio -> do
       txt <- displayText ctx nt idx
       (tw, th) <- ctxMeasureText ctx txt
       let (cx, _) =

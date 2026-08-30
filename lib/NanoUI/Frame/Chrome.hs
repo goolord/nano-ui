@@ -68,6 +68,7 @@ import NanoUI.WidgetMarkers
   )
 import NanoUI.WidgetText
   ( checkboxLabelText
+  , radioLabelText
   , selectDisplayText
   , selectParseOptions
   , sliderLabelText
@@ -186,6 +187,7 @@ displayText ctx nt idx = do
     else
       case nt of
         NodeCheckbox -> pure (checkboxLabelText txt)
+        NodeRadio -> pure (radioLabelText txt)
         NodeTextInput -> do
           value <- textInputValue ctx idx
           focused <- textInputFocused ctx idx
@@ -425,6 +427,13 @@ widgetVisualStyle ctx nt idx = do
               , styleActiveBg = colorRGBA 0 0 0 0
               , styleBorderWidth = 0
               }
+          NodeRadio ->
+            (themeButton theme)
+              { styleBg = colorRGBA 0 0 0 0
+              , styleHoverBg = colorRGBA 0 0 0 0
+              , styleActiveBg = colorRGBA 0 0 0 0
+              , styleBorderWidth = 0
+              }
           NodeButton
             | isClose -> closeButtonStyle theme isHot animT
             | isTab, terminal ->
@@ -462,7 +471,7 @@ widgetVisualStyle ctx nt idx = do
         case mFloat of
           Just NodeModal
             | terminal -> base
-            | nt == NodeCheckbox || nt == NodeSlider -> overlayModalStyle theme
+            | nt == NodeCheckbox || nt == NodeRadio || nt == NodeSlider -> overlayModalStyle theme
             | otherwise -> base
           _ -> base
       bg
@@ -471,7 +480,7 @@ widgetVisualStyle ctx nt idx = do
         | terminal = styleBg widgetBase
         | nt == NodeTextInput, isFocus = styleActiveBg widgetBase
         | widKey == hashWidgetId active = styleActiveBg widgetBase
-        | nt == NodeCheckbox || nt == NodeSlider || isClose = styleBg widgetBase
+        | nt == NodeCheckbox || nt == NodeRadio || nt == NodeSlider || isClose = styleBg widgetBase
         | isTab = hoverBackground widgetBase animT isHot
         | otherwise = hoverBackground widgetBase animT isHot
   pure widgetBase {styleBg = bg}
