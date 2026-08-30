@@ -10,6 +10,7 @@ module NanoUI.Term.Cells
   , cellBg
   , rasterize
   , rasterizeLayered
+  , rasterizeLayeredArena
   , cellRows
   , narrowChar
   , wideTrailChar
@@ -43,8 +44,10 @@ import NanoUI
 import NanoUI.Testing
   ( DrawCmd (..)
   , DrawData (..)
+  , SpanArena
   , backdropDimTextureId
   , drawCmdPartitionByLayer
+  , foldSpanArena
   , indexSize
   , terminalTextColumns
   , terminalTextPositions
@@ -116,12 +119,38 @@ rasterizeLayered width height drawData baseSpans overlaySpans = do
   mapM_ (stampSpan arr w h) overlaySpans
   frozen <- unsafeFreezePrimArray arr
   pure Cells {cellsW = w, cellsH = h, cellsData = frozen}
+
+rasterizeLayeredArena ::
+  Int ->
+  Int ->
+  DrawData ->
+  SpanArena ->
+  SpanArena ->
+  IO Cells
+rasterizeLayeredArena width height drawData baseArena overlayArena = do
+  let w = max 1 width
+      h = max 1 height
+      len = w * h * 3
+  arr <- newPrimArray len
+  setPrimArray arr 0 len 0
+  fillBlanks arr len
+  let (bg, ct, ov, ch) = drawCmdPartitionByLayer drawData
+      stamp r t fg bg' c = stampSpan arr w h (r, t, fg, bg', c)
+  mapM_ (applyCmd arr w h drawData) bg
+  mapM_ (applyCmd arr w h drawData) ct
+  foldSpanArena baseArena stamp
+  mapM_ (applyCmd arr w h drawData) ov
+  mapM_ (applyCmd arr w h drawData) ch
+  foldSpanArena overlayArena stamp
+  frozen <- unsafeFreezePrimArray arr
+  pure Cells {cellsW = w, cellsH = h, cellsData = frozen}
+
+fillBlanks :: MutablePrimArray (PrimState IO) Word32 -> Int -> IO ()
+fillBlanks arr len = go 0
   where
-    fillBlanks arr len = go 0
-      where
-        go i
-          | i >= len = pure ()
-          | otherwise = writePrimArray arr i 32 >> go (i + 3)
+    go i
+      | i >= len = pure ()
+      | otherwise = writePrimArray arr i 32 >> go (i + 3)
 
 applyCmd ::
   MutablePrimArray (PrimState IO) Word32 ->
@@ -130,13 +159,15 @@ applyCmd ::
   DrawData ->
   DrawCmd ->
   IO ()
-applyCmd arr w h drawData cmd =
-  mapM_ (stampQuad arr w h drawData isDim) [start, start + 6 .. end - 1]
+applyCmd arr w h drawData cmd = go start
   where
     start = fromIntegral (cmdIndexOffset cmd)
     count = fromIntegral (cmdIndexCount cmd)
     end = start + count
     isDim = cmdTextureId cmd == backdropDimTextureId
+    go !i
+      | i >= end = pure ()
+      | otherwise = stampQuad arr w h drawData isDim i >> go (i + 6)
 
 -- | Each quad covers a rectangle of cells; fill them with its colour as the
 -- background so a solid rect renders flat regardless of the font's block
@@ -179,16 +210,18 @@ stampQuad arr w h drawData isDim i = do
             case rgba .&. 0xff of
               n
                 | n >= 32 ->
-                    mapM_
-                      ( \dy ->
-                          mapM_
-                            (\dx -> writeCell arr w h (ix + dx) (iy + dy) 32 rgba rgba)
-                            [0 .. iw - 1]
-                      )
-                      [0 .. ih - 1]
+                    let goY !dy
+                          | dy >= ih = pure ()
+                          | otherwise = goX 0 >> goY (dy + 1)
+                          where
+                            goX !dx
+                              | dx >= iw = pure ()
+                              | otherwise = do
+                                  writeCell arr w h (ix + dx) (iy + dy) 32 rgba rgba
+                                  goX (dx + 1)
+                     in goY 0
               _ -> pure ()
     _ -> pure ()
-
 -- | Uniform backdrop dim; keeps glyphs, lerps fg and bg toward dim.
 stampBackdropDim ::
   MutablePrimArray (PrimState IO) Word32 ->
@@ -203,30 +236,30 @@ stampBackdropDim ::
 stampBackdropDim arr w _ ix iy iw ih rgba =
   let dim = Color (rgba .|. 0xff)
       t = fromIntegral (rgba .&. 0xff) / 255
-   in mapM_
-        ( \dy ->
-            mapM_
-              ( \dx ->
-                  let cx = ix + dx
-                      cy = iy + dy
-                      off = (cy * w + cx) * 3
-                   in do
-                        fgW <- readPrimArray arr (off + 1)
-                        bgW <- readPrimArray arr (off + 2)
-                        let newFgW
-                              | (fgW .&. 0xff) < 32 = colorToWord32 dim
-                              | otherwise =
-                                  colorToWord32 (lerpColor (Color fgW) dim t)
-                            newBgW
-                              | (bgW .&. 0xff) < 32 = colorToWord32 dim
-                              | otherwise =
-                                  colorToWord32 (lerpColor (Color bgW) dim t)
-                        writePrimArray arr (off + 1) newFgW
-                        writePrimArray arr (off + 2) newBgW
-              )
-              [0 .. iw - 1]
-        )
-        [0 .. ih - 1]
+      goY !dy
+        | dy >= ih = pure ()
+        | otherwise = goX 0 >> goY (dy + 1)
+        where
+          goX !dx
+            | dx >= iw = pure ()
+            | otherwise = do
+                let cx = ix + dx
+                    cy = iy + dy
+                    off = (cy * w + cx) * 3
+                fgW <- readPrimArray arr (off + 1)
+                bgW <- readPrimArray arr (off + 2)
+                let newFgW
+                      | (fgW .&. 0xff) < 32 = colorToWord32 dim
+                      | otherwise =
+                          colorToWord32 (lerpColor (Color fgW) dim t)
+                    newBgW
+                      | (bgW .&. 0xff) < 32 = colorToWord32 dim
+                      | otherwise =
+                          colorToWord32 (lerpColor (Color bgW) dim t)
+                writePrimArray arr (off + 1) newFgW
+                writePrimArray arr (off + 2) newBgW
+                goX (dx + 1)
+   in goY 0
 
 stampSpan ::
   MutablePrimArray (PrimState IO) Word32 ->

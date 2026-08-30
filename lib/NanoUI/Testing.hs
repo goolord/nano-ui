@@ -22,6 +22,11 @@ module NanoUI.Testing
   , collectTextSpans
   , collectRasterSpans
   , collectOverlayTextSpans
+  , ctxSpanBase
+  , ctxSpanOverlay
+  , SpanArena
+  , spanArenaCount
+  , foldSpanArena
     -- * Context
   , Context
   , newContext
@@ -159,6 +164,7 @@ import NanoUI.Context
   , wrapMeasureCache
   )
 import NanoUI.Context.New (newContext, newPixelHostContext)
+import NanoUI.Frame.SpanArena (SpanArena, foldSpanArena, spanArenaCount)
 import NanoUI.Draw
   ( DrawCmd (..)
   , DrawData (..)

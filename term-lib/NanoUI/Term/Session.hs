@@ -36,6 +36,9 @@ import NanoUI.Testing
   , setHost
   , anyAnimating
   , collectRasterSpans
+  , ctxSpanBase
+  , ctxSpanOverlay
+  , spanArenaCount
   , isDirty
   , debugPanelOpen
   , needsRedrawIdle
@@ -57,7 +60,7 @@ import NanoUI.Term.Icons (detectIconSet)
 import NanoUI.Term.Palette (queryTerminalColors, terminalTheme, terminalThemeFromColors)
 import NanoUI.Term.Cells
   ( Cells
-  , rasterizeLayered
+  , rasterizeLayeredArena
 #if defined(mingw32_HOST_OS)
   , cellsSize
 #endif
@@ -212,16 +215,24 @@ termMainLoop ctx shouldQuit runOnce getSize readEvents present = do
         then do
           t0 <- getMonotonicTime
           drawData <- runOnce ctx inp
-          (baseSpans, overlaySpans) <- collectRasterSpans ctx inp
+          _ <- collectRasterSpans ctx inp
           nodes <- widgetNodeCount ctx
+          nBase <- spanArenaCount (ctxSpanBase ctx)
+          nOver <- spanArenaCount (ctxSpanOverlay ctx)
           let Size w h = inputWindowSize inp
               stats =
                 TermDrawStats
                   { tdsNodes = nodes
-                  , tdsBaseSpans = length baseSpans
-                  , tdsOverlaySpans = length overlaySpans
+                  , tdsBaseSpans = nBase
+                  , tdsOverlaySpans = nOver
                   }
-          cells <- rasterizeLayered (round w) (round h) drawData baseSpans overlaySpans
+          cells <-
+            rasterizeLayeredArena
+              (round w)
+              (round h)
+              drawData
+              (ctxSpanBase ctx)
+              (ctxSpanOverlay ctx)
           before <- readIORef prevCells
           let blitted = before /= Just cells
           when blitted $ do

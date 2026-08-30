@@ -170,8 +170,8 @@ import NanoUI.WidgetText
 import NanoUI.Style (Padding (..), Style (..), Theme (..), scrollBarThumbColor, scrollBarTrackColor, themeAccent, themeButton, themeFloatingWindow, themeInput, themeMuted, themeOverlayDim, themePanel, themeSeparator, themeWindow)
 import NanoUI.Types (Color (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, lerpColor, rectContains, rectH, rectIntersect, rectOverlapArea, rectUnion, rectW, rectX, rectY, v2X, v2Y)
 import NanoUI.Frame.Chrome (displayText)
-import NanoUI.Frame.Focus (filterModalFocusables, tabNext, unlessHit)
-import NanoUI.Frame.Hit (overlayHitAllowed)
+import NanoUI.Frame.Focus (filterModalFocusables, tabNext, tabNextFocusables, unlessHit)
+import NanoUI.Frame.Hit (modalTreeOpen, overlayHitAllowed)
 import NanoUI.Frame.Redraw (probeHotId)
 import NanoUI.Frame.Select (findSelectUnderMouse, selectDropRect)
 import NanoUI.Frame.Spans (widgetHitRect)
@@ -180,17 +180,27 @@ import NanoUI.Frame.TextInput (collapseTextInputSelection, textInputGeomForWidge
 finalizeTabFocus :: Context -> Input -> IO ()
 finalizeTabFocus ctx inp =
   when (inputKeysElem KeyTab (inputKeys inp)) $ do
-    focusables <- getFocusables ctx
-    let raw = filter (/= WidgetId 0) focusables
-    ids <- filterModalFocusables ctx raw
-    if null ids
-      then pure ()
-      else do
+    open <- modalTreeOpen ctx
+    if not open
+      then do
         cur <- readIORef (ctxFocusId ctx)
-        let shift = modShift (inputModifiers inp)
-            next = tabNext cur ids shift
-        writeIORef (ctxFocusId ctx) next
-        markDirty ctx
+        next <- tabNextFocusables ctx cur (modShift (inputModifiers inp))
+        when (hashWidgetId next /= 0) $ do
+          writeIORef (ctxFocusId ctx) next
+          markDirty ctx
+      else do
+        focusables <- getFocusables ctx
+        let raw = filter (/= WidgetId 0) focusables
+        ids <- filterModalFocusables ctx raw
+        if null ids
+          then pure ()
+          else do
+            cur <- readIORef (ctxFocusId ctx)
+            let shift = modShift (inputModifiers inp)
+                next = tabNext cur ids shift
+            writeIORef (ctxFocusId ctx) next
+            markDirty ctx
+
 
 refreshHover :: Context -> Input -> IO ()
 refreshHover ctx inp = do

@@ -9,6 +9,7 @@ module NanoUI.Context.Internal
   ) where
 
 import Data.Dynamic (Dynamic)
+import Data.HashMap.Strict (HashMap)
 import Data.IORef (IORef, readIORef, writeIORef)
 import Data.IntMap.Strict (IntMap)
 import Data.Map.Strict (Map)
@@ -30,6 +31,7 @@ import NanoUI.Font (FontMetrics)
 import NanoUI.Host (HostProfile)
 import NanoUI.Icons (Icons)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
+import NanoUI.Frame.SpanArena (SpanArena)
 import NanoUI.Layout.Arena (NodeArena, NodeType)
 import NanoUI.Messages (FrameMsg)
 import NanoUI.Store (WidgetStore)
@@ -59,7 +61,7 @@ data Context = Context
   , ctxFontMetrics :: FontMetrics
   , ctxMonoFontMetrics :: FontMetrics
   , ctxMeasureText :: Text -> IO (Float, Float)
-  , ctxMeasureCache :: Maybe (IORef (Map MeasureCacheKey (Float, Float)))
+  , ctxMeasureCache :: Maybe (IORef (HashMap MeasureCacheKey (Float, Float)))
   , ctxExternalText :: Bool
   , ctxTheme :: Theme
   , ctxIcons :: Icons
@@ -68,6 +70,8 @@ data Context = Context
   , ctxFocusables :: IORef (MutablePrimArray RealWorld WidgetId)
   , ctxFocusablesCount :: IORef Int
   , ctxFocusablesCap :: IORef Int
+  , ctxSpanBase :: SpanArena
+  , ctxSpanOverlay :: SpanArena
   , ctxScrollDrag :: IORef (Maybe (WidgetId, Float))
   , ctxTextInputDrag :: IORef (Maybe TextInputDrag)
   , ctxTextInputMenu :: IORef (Maybe TextInputMenu)

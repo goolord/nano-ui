@@ -96,6 +96,7 @@ library
         NanoUI.Frame.Scroll
         NanoUI.Frame.Select
         NanoUI.Frame.Spans
+        NanoUI.Frame.SpanArena
         NanoUI.Frame.TextInput
         NanoUI.Frame.Window
         NanoUI.Host
@@ -133,8 +134,10 @@ library
         effectful-core ^>=2.6,
         ghc-compact ^>=0.1,
         hashable ^>=1.5,
+        hashtables ^>=1.4,
         primitive ^>=0.9,
         text ^>=2.1,
+        unordered-containers ^>=0.2,
         vector ^>=0.13
     hs-source-dirs:   lib
     default-language: GHC2024

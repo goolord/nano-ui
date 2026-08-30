@@ -14,7 +14,7 @@ module NanoUI.Context.Config
 
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Text (Text)
-import qualified Data.Map.Strict as Map
+import qualified Data.HashMap.Strict as HashMap
 import NanoUI.Context.Internal (Context (..))
 import NanoUI.Font (FontMetrics, hasMonoFontMarker, measureText, stripWidgetMarkers)
 import NanoUI.Host (HostProfile (..))
@@ -56,11 +56,11 @@ wrapMeasureCache scale ctx measure =
             let mono = hasMonoFontMarker txt
                 key = (stripWidgetMarkers txt, mono, scale)
             cache <- readIORef cacheRef
-            case Map.lookup key cache of
+            case HashMap.lookup key cache of
               Just wh -> pure wh
               Nothing -> do
                 wh <- measure txt
-                writeIORef cacheRef (Map.insert key wh cache)
+                writeIORef cacheRef (HashMap.insert key wh cache)
                 pure wh
         }
 
@@ -69,7 +69,7 @@ clearMeasureCache :: Context -> IO ()
 clearMeasureCache ctx =
   case ctxMeasureCache ctx of
     Nothing -> pure ()
-    Just cacheRef -> writeIORef cacheRef Map.empty
+    Just cacheRef -> writeIORef cacheRef HashMap.empty
 
 {-# INLINE withExternalText #-}
 withExternalText :: Context -> Bool -> Context
@@ -96,7 +96,7 @@ withHostProfile ctx host =
 {-# INLINE enableMeasureCache #-}
 enableMeasureCache :: Context -> IO Context
 enableMeasureCache ctx = do
-  cacheRef <- newIORef Map.empty
+  cacheRef <- newIORef HashMap.empty
   pure (ctx {ctxMeasureCache = Just cacheRef})
 
 {-# INLINE withClipboard #-}
