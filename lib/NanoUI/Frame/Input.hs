@@ -140,7 +140,7 @@ import NanoUI.Layout.Arena
   , isContainerNode
   , isFloatingNode
   , isScrollNode
-  , NodeType (NodeButton, NodeCheckbox, NodeSelect, NodeSlider, NodeTextInput, NodeModal, NodeImage, NodePanel, NodeWindow, NodeContainer, NodeScrollContainer, NodeText, NodeSeparator, NodeSpacer, NodeBox)
+  , NodeType (NodeButton, NodeCheckbox, NodeRadio, NodeSelect, NodeSlider, NodeTextInput, NodeModal, NodeImage, NodePanel, NodeWindow, NodeContainer, NodeScrollContainer, NodeText, NodeSeparator, NodeSpacer, NodeBox)
   , resetNodeArena
   , setNodeText
   , setNodeValue
@@ -165,6 +165,7 @@ import NanoUI.WidgetText
   , selectDisplayText
   , selectChevronReserve
   , selectChevronCenterX
+  , radioParseOption
   )
 import NanoUI.Style (Padding (..), Style (..), Theme (..), scrollBarThumbColor, scrollBarTrackColor, themeAccent, themeButton, themeFloatingWindow, themeInput, themeMuted, themeOverlayDim, themePanel, themeSeparator, themeWindow)
 import NanoUI.Types (Color (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, lerpColor, rectContains, rectH, rectIntersect, rectOverlapArea, rectUnion, rectW, rectX, rectY, v2X, v2Y)
@@ -240,6 +241,7 @@ isInteractiveNode :: NodeType -> Bool
 isInteractiveNode nt =
   nt == NodeButton
     || nt == NodeCheckbox
+    || nt == NodeRadio
     || nt == NodeSlider
     || nt == NodeSelect
     || nt == NodeTextInput
@@ -276,6 +278,16 @@ finalizePointerRelease ctx inp =
                     ctx
                     ( store
                         { storeCheckbox = IM.insert key newVal (storeCheckbox store)
+                        }
+                    )
+                NodeRadio -> do
+                  store <- getStore ctx
+                  txt <- getText (ctxNodeArena ctx) idx
+                  let (groupKey, optIdx, _) = radioParseOption txt
+                  setStore
+                    ctx
+                    ( store
+                        { storeRadio = IM.insert groupKey optIdx (storeRadio store)
                         }
                     )
                 _ -> pure ()

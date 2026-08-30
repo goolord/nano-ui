@@ -54,6 +54,10 @@ data DemoTab
   | Diagnostics
   deriving (Bounded, Enum, Eq, Ord, Read, Show)
 
+data Theme = Light | Dark | System deriving (Bounded, Enum, Eq, Ord, Read, Show)
+
+------------------------------------------------------------------
+
 demoImages :: SmallArray RgbaImage
 demoImages =
   smallArrayFromList
@@ -89,12 +93,14 @@ demoUi = do
               (_, checked) <- checkbox "Feature" False
               (_, vol) <- slider "Volume" 0 100 50
               (_, quality) <- select "Quality" ["Low", "Medium", "High"] 1
+              (_, theme) <- boundedRadioFieldset "Theme" Dark (T.pack . show)
               (_, name) <- textInput "Name" ""
               sep
               heading "State"
               kv "Feature" (onOff checked)
               kv "Volume" (T.pack (show (round vol :: Int)))
               kv "Quality" (T.pack (show quality))
+              kv "Theme" (T.pack (show theme))
               kv "Name" (orDash name)
               click <- readClick
               kv "Clicked" (orDash click)

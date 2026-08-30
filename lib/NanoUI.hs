@@ -97,6 +97,9 @@ module NanoUI
   , scroll
   , scrollArea
   , select
+  , radioFieldset
+  , boundedRadioFieldset
+  , useRadio
   , modal
   , window
   , Tab (..)
@@ -163,6 +166,7 @@ module NanoUI
   , iconSetName
   , parseIconSet
   , checkboxMark
+  , radioMark
   , fontAwesomeIcon
   , loneFontAwesome
   , -- Font
@@ -195,6 +199,7 @@ import NanoUI.Icons
   , Icons (..)
   , asciiIcons
   , checkboxMark
+  , radioMark
   , fontAwesomeIcon
   , glyphIcons
   , iconSetName
@@ -327,6 +332,9 @@ import NanoUI.Widgets
   , scroll
   , scrollArea
   , select
+  , radioFieldset
+  , boundedRadioFieldset
+  , useRadio
   , sep
   , separator
   , slider
