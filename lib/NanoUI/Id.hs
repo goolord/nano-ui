@@ -19,7 +19,7 @@ import Data.Primitive.Types (Prim)
 
 newtype WidgetId = WidgetId Word64
   deriving stock (Eq, Ord, Show)
-  deriving newtype (Prim)
+  deriving newtype (Hashable, Prim)
 
 {-# INLINE widgetId #-}
 widgetId :: HasCallStack => WidgetId

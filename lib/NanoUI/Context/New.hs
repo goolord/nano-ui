@@ -21,6 +21,7 @@ import NanoUI.Font (measureText, monospaceMetrics, stripWidgetMarkers)
 import NanoUI.Host (HostProfile (..))
 import NanoUI.Icons (asciiIcons)
 import NanoUI.Id (WidgetId (..))
+import NanoUI.Frame.SpanArena (newSpanArena)
 import NanoUI.Layout.Arena (newNodeArena)
 import NanoUI.Style (defaultTheme)
 import NanoUI.Context.Internal (Context (..))
@@ -51,6 +52,8 @@ newContext = do
   ctxFocusables <- newIORef =<< newPrimArray initCap
   ctxFocusablesCount <- newIORef 0
   ctxFocusablesCap <- newIORef initCap
+  ctxSpanBase <- newSpanArena 64
+  ctxSpanOverlay <- newSpanArena 64
   ctxScrollDrag <- newIORef Nothing
   ctxTextInputDrag <- newIORef Nothing
   ctxTextInputMenu <- newIORef Nothing
@@ -103,6 +106,8 @@ newContext = do
       , ctxFocusables
       , ctxFocusablesCount
       , ctxFocusablesCap
+      , ctxSpanBase
+      , ctxSpanOverlay
       , ctxScrollDrag
       , ctxTextInputDrag
       , ctxTextInputMenu

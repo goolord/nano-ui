@@ -3,12 +3,15 @@ module NanoUI.Context.Focus
   , getHotId
   , registerFocusable
   , getFocusables
+  , getFocusablesPrim
   ) where
 
 import Control.Monad (forM)
 import Data.IORef (readIORef, writeIORef)
 import Data.Primitive.PrimArray
-  ( copyMutablePrimArray
+  ( PrimArray
+  , copyMutablePrimArray
+  , freezePrimArray
   , newPrimArray
   , readPrimArray
   , writePrimArray
@@ -49,3 +52,10 @@ getFocusables ctx = do
   count <- readIORef (ctxFocusablesCount ctx)
   arr <- readIORef (ctxFocusables ctx)
   forM [0 .. count - 1] (readPrimArray arr)
+
+{-# INLINE getFocusablesPrim #-}
+getFocusablesPrim :: Context -> IO (PrimArray WidgetId)
+getFocusablesPrim ctx = do
+  count <- readIORef (ctxFocusablesCount ctx)
+  arr <- readIORef (ctxFocusables ctx)
+  freezePrimArray arr 0 count

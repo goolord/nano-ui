@@ -40,9 +40,12 @@ module NanoUI.Layout.Arena
   , setStyleIdx
   , getNodeValue
   , setNodeValue
+  , ensureScratchCapacity
   ) where
 
 import Control.Monad (forM_, when)
+import Data.HashTable.IO (BasicHashTable)
+import qualified Data.HashTable.IO as HT
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Primitive.Array (MutableArray, newArray, readArray, sizeofMutableArray, writeArray)
 import Data.Primitive.PrimArray (MutablePrimArray, newPrimArray, readPrimArray, writePrimArray)
@@ -50,7 +53,7 @@ import GHC.Exts (RealWorld)
 import Data.Text (Text)
 import Data.Word (Word8)
 import qualified Data.Text as T
-import NanoUI.Id (WidgetId (..))
+import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Style (AlignX (..), AlignY (..), Direction (..), Layout (..), Padding (..), Sizing (..))
 
 type NodeIdx = Int
@@ -161,6 +164,15 @@ data NodeArena = NodeArena
   , naStyleIdx :: IORef (MutablePrimArray RealWorld Int)
   , naTextStore :: IORef (MutableArray RealWorld Text)
   , naTextIdx :: IORef (MutablePrimArray RealWorld Int)
+  -- Flex solver scratch: child node indices + main/cross sizes + distributed outs.
+  , naScratchCap :: IORef Int
+  , naScratchCount :: IORef Int
+  , naScratchIdx :: IORef (MutablePrimArray RealWorld Int)
+  , naScratchMain :: IORef (MutablePrimArray RealWorld Float)
+  , naScratchCross :: IORef (MutablePrimArray RealWorld Float)
+  , naScratchOutMain :: IORef (MutablePrimArray RealWorld Float)
+  , naScratchOutCross :: IORef (MutablePrimArray RealWorld Float)
+  , naWidgetIndex :: IORef (BasicHashTable WidgetId NodeIdx)
   }
 
 initialCapacity :: Int
@@ -205,6 +217,15 @@ newNodeArena = do
   naStyleIdx <- newIORef =<< newPrimArray cap
   naTextStore <- newIORef =<< newArray cap T.empty
   naTextIdx <- newIORef =<< newPrimArray cap
+  let scratchCap = 64
+  naScratchCap <- newIORef scratchCap
+  naScratchCount <- newIORef 0
+  naScratchIdx <- newIORef =<< newPrimArray scratchCap
+  naScratchMain <- newIORef =<< newPrimArray scratchCap
+  naScratchCross <- newIORef =<< newPrimArray scratchCap
+  naScratchOutMain <- newIORef =<< newPrimArray scratchCap
+  naScratchOutCross <- newIORef =<< newPrimArray scratchCap
+  naWidgetIndex <- newIORef =<< HT.new
   pure
     NodeArena
       { naCount
@@ -242,11 +263,21 @@ newNodeArena = do
       , naStyleIdx
       , naTextStore
       , naTextIdx
+      , naScratchCap
+      , naScratchCount
+      , naScratchIdx
+      , naScratchMain
+      , naScratchCross
+      , naScratchOutMain
+      , naScratchOutCross
+      , naWidgetIndex
       }
 
 {-# INLINE resetNodeArena #-}
 resetNodeArena :: NodeArena -> IO ()
-resetNodeArena na = writeIORef (naCount na) 0
+resetNodeArena na = do
+  writeIORef (naCount na) 0
+  writeIORef (naWidgetIndex na) =<< HT.new
 
 {-# INLINE arenaCount #-}
 arenaCount :: NodeArena -> IO Int
@@ -646,7 +677,14 @@ getWidgetId na idx = readWidgetId (naWidgetId na) idx
 
 {-# INLINE setWidgetId #-}
 setWidgetId :: NodeArena -> NodeIdx -> WidgetId -> IO ()
-setWidgetId na idx wid = writeWidgetId (naWidgetId na) idx wid
+setWidgetId na idx wid = do
+  writeWidgetId (naWidgetId na) idx wid
+  when (hashWidgetId wid /= 0) $ do
+    table <- readIORef (naWidgetIndex na)
+    existing <- HT.lookup table wid
+    case existing of
+      Nothing -> HT.insert table wid idx
+      Just _ -> pure ()
 
 {-# INLINE getNodeValue #-}
 getNodeValue :: NodeArena -> NodeIdx -> IO Float
@@ -663,3 +701,18 @@ getStyleIdx na idx = readInt (naStyleIdx na) idx
 {-# INLINE setStyleIdx #-}
 setStyleIdx :: NodeArena -> NodeIdx -> Int -> IO ()
 setStyleIdx na idx v = writeInt (naStyleIdx na) idx v
+
+{-# NOINLINE ensureScratchCapacity #-}
+ensureScratchCapacity :: NodeArena -> Int -> IO ()
+ensureScratchCapacity na needed = do
+  cap <- readIORef (naScratchCap na)
+  if needed <= cap
+    then pure ()
+    else do
+      let newCap = max needed (cap * 2)
+      growInt (naScratchIdx na) cap newCap (-1)
+      growFloat (naScratchMain na) cap newCap 0
+      growFloat (naScratchCross na) cap newCap 0
+      growFloat (naScratchOutMain na) cap newCap 0
+      growFloat (naScratchOutCross na) cap newCap 0
+      writeIORef (naScratchCap na) newCap

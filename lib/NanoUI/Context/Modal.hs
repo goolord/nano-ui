@@ -14,13 +14,9 @@ module NanoUI.Context.Modal
 
 import Data.IORef (readIORef, writeIORef)
 import qualified Data.IntMap.Strict as IM
-import Data.List (nub)
 import NanoUI.Context.Internal (Context (..), intKey)
-import NanoUI.Context.PrevRects (getPrevRectByKey)
-import NanoUI.Context.Store (getStore)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), Key (KeyEscape), inputKeys, inputKeysElem)
-import NanoUI.Store (WidgetStore (..))
 import NanoUI.Types (Rect (..), V2 (..), rectContains, rectH, rectW)
 
 textInputEditActive :: Context -> IO Bool
@@ -109,31 +105,6 @@ seedFloatingPanel ctx wid rect
       writeIORef (ctxPrevFloatingOrder ctx) (filter (/= k) order ++ [k])
       writeIORef (ctxOverlayTopmostCache ctx) Nothing
 
-seedFloatingFromStore :: Context -> IO ()
-seedFloatingFromStore ctx = do
-  store <- getStore ctx
-  let keys = nub (IM.keys (storeWindow store) ++ IM.keys (storeWindowSize store))
-  mapM_ (seedStoreKey ctx store) keys
-
-seedStoreKey :: Context -> WidgetStore -> Int -> IO ()
-seedStoreKey ctx store k = do
-  rects <- readIORef (ctxPrevFloatingRects ctx)
-  case IM.lookup k rects of
-    Just r | rectW r > 0 && rectH r > 0 -> pure ()
-    _ -> do
-      mPrev <- getPrevRectByKey ctx k
-      let fromStore =
-            case (IM.lookup k (storeWindow store), IM.lookup k (storeWindowSize store)) of
-              (Just (x, y), Just (w, h)) | w > 0 && h > 0 -> Just (Rect x y w h)
-              _ -> Nothing
-          picked =
-            case mPrev of
-              Just r | rectW r > 0 && rectH r > 0 -> Just r
-              _ -> fromStore
-      case picked of
-        Just r -> seedFloatingPanel ctx (WidgetId (fromIntegral k)) r
-        Nothing -> pure ()
-
 beginModal :: Context -> IO ()
 beginModal ctx = do
   writeIORef (ctxModalActive ctx) True
@@ -147,6 +118,9 @@ endModal ctx = do
 
 -- | Start-of-frame modal bookkeeping. Saves last frame's open flag, then clears
 -- live refs before UI runs 'beginModal' again.
+-- Floating hit rects stay from last frame's writeDamage / live 'seedFloatingPanel'
+-- calls. Do not re-seed closed windows from storeWindow (that left phantom hit
+-- rects over the page after Debug/About closed).
 beginFrameModal :: Context -> IO ()
 beginFrameModal ctx = do
   modalNow <- readIORef (ctxModalActive ctx)
@@ -156,7 +130,6 @@ beginFrameModal ctx = do
   writeIORef (ctxOverlayTopmostCache ctx) Nothing
   writeIORef (ctxCurrentFloatingId ctx) Nothing
   writeIORef (ctxLastPointerBlocked ctx) False
-  seedFloatingFromStore ctx
 
 -- | True when modal presence changed this frame (open or close).
 modalDamageFlip :: Context -> IO Bool

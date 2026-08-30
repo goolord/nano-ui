@@ -46,6 +46,7 @@ module NanoUI.Context
   , reduceUpdates
   , registerFocusable
   , getFocusables
+  , getFocusablesPrim
   , isDisabled
   , setDisabled
   , getScrollOffset
@@ -177,5 +178,5 @@ import NanoUI.Context.Modal
   , textInputEditActive
   )
 import NanoUI.Context.Host (askHostIO, setHost)
-import NanoUI.Context.Focus (getFocusId, getFocusables, getHotId, registerFocusable)
+import NanoUI.Context.Focus (getFocusId, getFocusables, getFocusablesPrim, getHotId, registerFocusable)
 import NanoUI.Context.Messages (drainMessages, pushMessage)

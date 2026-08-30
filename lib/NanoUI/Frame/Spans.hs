@@ -202,6 +202,7 @@ import NanoUI.Frame.Hit (widgetOverlayAllowed)
 import NanoUI.Frame.Select (collectSelectDropdownSpans, selectDropRect)
 import NanoUI.Frame.TextInput (TextInputGeom (..), collectTextInputMenuSpans, tagSelectClippedSpans, tagTextInputClippedSpans, textInputFieldTextClip, textInputGeom, selectTextClip)
 import NanoUI.Frame.Scroll (scrollBarLayout, ScrollBarLayout (..))
+import NanoUI.Frame.SpanArena (SpanArena, pushSpan, resetSpanArena, spanArenaToList)
 
 collectTextSpans :: Context -> IO [(Rect, T.Text, Color, Color, Rect)]
 collectTextSpans ctx = do
@@ -223,34 +224,40 @@ collectRasterSpans ctx inp = do
 collectTextSpansCached :: Context -> IM.IntMap (Maybe NodeType) -> IO [(Rect, T.Text, Color, Color, Rect)]
 collectTextSpansCached ctx floatCache = do
   count <- arenaCount (ctxNodeArena ctx)
-  spans <-
-    if count > 0
-      then collectClippedSpans ctx floatCache 0 (Rect 0 0 1e9 1e9) []
-      else pure []
+  let arena = ctxSpanBase ctx
+  resetSpanArena arena
+  when (count > 0) $
+    collectClippedSpans ctx floatCache 0 (Rect 0 0 1e9 1e9) arena
+  spans <- spanArenaToList arena
   panels <- floatingPanelRects ctx
   pure (filterOccludedBaseSpans panels spans)
 
 collectOverlayTextSpansCached :: Context -> Input -> IM.IntMap (Maybe NodeType) -> IO [(Rect, T.Text, Color, Color, Rect)]
 collectOverlayTextSpansCached ctx inp floatCache = do
+  let arena = ctxSpanOverlay ctx
+  resetSpanArena arena
+  collectFloatingSpansInto ctx floatCache NodeWindow arena
+  collectFloatingSpansInto ctx floatCache NodeModal arena
   drops <- collectSelectDropdownSpans ctx inp
   menu <- collectTextInputMenuSpans ctx inp
   tips <- collectTooltipSpans ctx
-  windows <- collectFloatingSpans ctx floatCache NodeWindow
-  modals <- collectFloatingSpans ctx floatCache NodeModal
-  pure (windows ++ modals ++ drops ++ menu ++ tips)
+  mapM_ (pushSpan5 arena) (drops ++ menu ++ tips)
+  spanArenaToList arena
+
+pushSpan5 :: SpanArena -> (Rect, T.Text, Color, Color, Rect) -> IO ()
+pushSpan5 arena (r, t, fg, bg, c) = pushSpan arena r t fg bg c
 
 widgetNodeCount :: Context -> IO Int
 widgetNodeCount ctx = arenaCount (ctxNodeArena ctx)
 
-collectClippedSpans :: Context -> IM.IntMap (Maybe NodeType) -> NodeIdx -> Rect -> [(Rect, T.Text, Color, Color, Rect)] -> IO [(Rect, T.Text, Color, Color, Rect)]
-collectClippedSpans ctx floatCache idx clip acc = do
+collectClippedSpans :: Context -> IM.IntMap (Maybe NodeType) -> NodeIdx -> Rect -> SpanArena -> IO ()
+collectClippedSpans ctx floatCache idx clip arena = do
   nt <- getNodeType (ctxNodeArena ctx) idx
-  if isFloatingNode nt
-    then pure acc
-    else collectClippedSpans' ctx floatCache idx nt clip acc
+  unless (isFloatingNode nt) $
+    collectClippedSpans' ctx floatCache idx nt clip arena
 
-collectClippedSpans' :: Context -> IM.IntMap (Maybe NodeType) -> NodeIdx -> NodeType -> Rect -> [(Rect, T.Text, Color, Color, Rect)] -> IO [(Rect, T.Text, Color, Color, Rect)]
-collectClippedSpans' ctx floatCache idx nt clip acc = do
+collectClippedSpans' :: Context -> IM.IntMap (Maybe NodeType) -> NodeIdx -> NodeType -> Rect -> SpanArena -> IO ()
+collectClippedSpans' ctx floatCache idx nt clip arena = do
   (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
   pad <- getPadding (ctxNodeArena ctx) idx
   let nodeRect = Rect x y w h
@@ -268,7 +275,7 @@ collectClippedSpans' ctx floatCache idx nt clip acc = do
           then pure (rectIntersect clip nodeRect)
           else pure (Just clip)
   case mClipChildren of
-    Nothing -> pure acc
+    Nothing -> pure ()
     Just clipHere -> do
       here <-
         case nt of
@@ -287,26 +294,26 @@ collectClippedSpans' ctx floatCache idx nt clip acc = do
                       (terminalSeparatorSpans (ctxTheme ctx) x y w h)
                   )
           _ -> tagClippedSpans clipHere <$> collectNodeTextSpans ctx floatCache idx
+      mapM_ (\(r, t, fg, bg, c) -> pushSpan arena r t fg bg c) here
       -- TUI modal chrome does not scroll (the inner body scroller does), so it
       -- has no track to cap.
-      caps <-
-        if isCellHost (ctxHostProfile ctx) && isScrollNode nt && nt /= NodeModal
-          then terminalScrollCapSpans ctx idx x y w h pad clip
-          else pure []
-      childSpans <- walkChildSpans ctx floatCache idx clipHere acc
-      pure (here ++ (caps ++ childSpans))
+      when (isCellHost (ctxHostProfile ctx) && isScrollNode nt && nt /= NodeModal) $ do
+        caps <- terminalScrollCapSpans ctx idx x y w h pad clip
+        mapM_ (\(r, t, fg, bg, c) -> pushSpan arena r t fg bg c) caps
+      walkChildSpans ctx floatCache idx clipHere arena
 
-walkChildSpans :: Context -> IM.IntMap (Maybe NodeType) -> NodeIdx -> Rect -> [(Rect, T.Text, Color, Color, Rect)] -> IO [(Rect, T.Text, Color, Color, Rect)]
-walkChildSpans ctx floatCache idx clip acc = do
+walkChildSpans :: Context -> IM.IntMap (Maybe NodeType) -> NodeIdx -> Rect -> SpanArena -> IO ()
+walkChildSpans ctx floatCache idx clip arena = do
   fc <- getFirstChild (ctxNodeArena ctx) idx
-  go fc acc
+  go fc
   where
-    go ci kAcc
-      | ci < 0 = pure kAcc
+    go ci
+      | ci < 0 = pure ()
       | otherwise = do
           ns <- getNextSibling (ctxNodeArena ctx) ci
-          rest <- go ns kAcc
-          collectClippedSpans ctx floatCache ci clip rest
+          -- Later siblings paint under earlier ones; walk reverse then collect.
+          go ns
+          collectClippedSpans ctx floatCache ci clip arena
 
 filterOccludedBaseSpans :: IM.IntMap Rect -> [(Rect, T.Text, Color, Color, Rect)] -> [(Rect, T.Text, Color, Color, Rect)]
 filterOccludedBaseSpans panels spans
@@ -661,10 +668,17 @@ sliderValue ctx idx = do
 -- rect fill and the text cells agree on one color.
 collectFloatingSpans :: Context -> IM.IntMap (Maybe NodeType) -> NodeType -> IO [(Rect, T.Text, Color, Color, Rect)]
 collectFloatingSpans ctx floatCache wanted = do
+  let arena = ctxSpanOverlay ctx
+  resetSpanArena arena
+  collectFloatingSpansInto ctx floatCache wanted arena
+  spanArenaToList arena
+
+collectFloatingSpansInto :: Context -> IM.IntMap (Maybe NodeType) -> NodeType -> SpanArena -> IO ()
+collectFloatingSpansInto ctx floatCache wanted arena = do
   count <- arenaCount (ctxNodeArena ctx)
   let fm = ctxFontMetrics ctx
       go !idx
-        | idx >= count = pure []
+        | idx >= count = pure ()
         | otherwise = do
             nt <- getNodeType (ctxNodeArena ctx) idx
             if nt /= wanted
@@ -682,8 +696,8 @@ collectFloatingSpans ctx floatCache wanted = do
                           if isScrollNode nt
                             then scrollContentClip (ctxHostProfile ctx) fm slot dir x y w h pad contentSize
                             else padContentClip (ctxHostProfile ctx) fm x y w h pad
-                rest <- go (idx + 1)
-                walkChildSpans ctx floatCache idx clip rest
+                walkChildSpans ctx floatCache idx clip arena
+                go (idx + 1)
   go 0
 
 terminalSeparatorSpans :: Theme -> Float -> Float -> Float -> Float -> [(Rect, T.Text, Color, Color)]

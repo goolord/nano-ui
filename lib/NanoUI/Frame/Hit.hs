@@ -14,9 +14,11 @@ module NanoUI.Frame.Hit
   , widgetIdInModal
   ) where
 
+import Data.IORef (readIORef)
 import Data.Maybe (isJust)
+import qualified Data.HashTable.IO as HT
 import NanoUI.Context (Context (..))
-import NanoUI.Id (WidgetId (..))
+import NanoUI.Id (WidgetId)
 import NanoUI.Layout.Arena
   ( NodeIdx
   , NodeType (NodeModal, NodeWindow)
@@ -24,21 +26,14 @@ import NanoUI.Layout.Arena
   , getNodeType
   , getParent
   , getRect
-  , getWidgetId
+  , naWidgetIndex
   )
 import NanoUI.Types (Rect (..), V2 (..), rectContains)
 
 findNodeByWidgetId :: Context -> WidgetId -> IO (Maybe NodeIdx)
 findNodeByWidgetId ctx wid = do
-  count <- arenaCount (ctxNodeArena ctx)
-  let go idx
-        | idx >= count = pure Nothing
-        | otherwise = do
-            w' <- getWidgetId (ctxNodeArena ctx) idx
-            if w' == wid
-              then pure (Just idx)
-              else go (idx + 1)
-  go 0
+  table <- readIORef (naWidgetIndex (ctxNodeArena ctx))
+  HT.lookup table wid
 
 modalTreeOpen :: Context -> IO Bool
 modalTreeOpen ctx = do
@@ -115,13 +110,7 @@ widgetOverlayAllowed ctx wid = do
 
 widgetIdInModal :: Context -> WidgetId -> IO Bool
 widgetIdInModal ctx wid = do
-  count <- arenaCount (ctxNodeArena ctx)
-  go 0 count
-  where
-    go idx count
-      | idx >= count = pure False
-      | otherwise = do
-          w' <- getWidgetId (ctxNodeArena ctx) idx
-          if w' == wid
-            then nodeInTopmostModal ctx idx
-            else go (idx + 1) count
+  mIdx <- findNodeByWidgetId ctx wid
+  case mIdx of
+    Nothing -> pure False
+    Just idx -> nodeInTopmostModal ctx idx
