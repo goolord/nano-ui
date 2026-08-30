@@ -6,7 +6,8 @@ module NanoUI.Context.Internal
   , intKey
   , markDirty
   , modifyIORefList
-  ) where
+  )
+where
 
 import Data.Dynamic (Dynamic)
 import Data.HashMap.Strict (HashMap)
@@ -16,7 +17,6 @@ import Data.Map.Strict (Map)
 import Data.Primitive.PrimArray (MutablePrimArray)
 import Data.Text (Text)
 import Data.Typeable (TypeRep)
-import Data.Word (Word64)
 import GHC.Exts (RealWorld)
 import NanoUI.Animation (Animation)
 import NanoUI.Atlas (ImageAtlas)
@@ -30,7 +30,7 @@ import NanoUI.Draw (DrawArena)
 import NanoUI.Font (FontMetrics)
 import NanoUI.Host (HostProfile)
 import NanoUI.Icons (Icons)
-import NanoUI.Id (WidgetId (..), hashWidgetId)
+import NanoUI.Id (IdContext, WidgetId (..), hashWidgetId)
 import NanoUI.Frame.SpanArena (SpanArena)
 import NanoUI.Layout.Arena (NodeArena, NodeType)
 import NanoUI.Messages (FrameMsg)
@@ -57,7 +57,7 @@ data Context = Context
   , ctxDirty :: IORef Bool
   , ctxDamage :: IORef Damage
   , ctxLastWindowSize :: IORef Size
-  , ctxIdSalt :: IORef Word64
+  , ctxIdContext :: IORef IdContext
   , ctxFontMetrics :: FontMetrics
   , ctxMonoFontMetrics :: FontMetrics
   , ctxMeasureText :: Text -> IO (Float, Float)
@@ -87,8 +87,8 @@ data Context = Context
   , ctxWindowDrag :: IORef (Maybe (WidgetId, Float, Float))
   , ctxWindowResize :: IORef (Maybe WindowResizeDrag)
   , ctxPrevFloatingRects :: IORef (IntMap Rect)
-  -- | Widget keys in paint order. Later is on top.
   , ctxPrevFloatingOrder :: IORef [Int]
+  -- ^ Widget keys in paint order. Later is on top.
   , ctxOverlayTopmostCache :: IORef (Maybe (V2, Maybe WidgetId))
   , ctxCurrentFloatingId :: IORef (Maybe WidgetId)
   , ctxLastPointerBlocked :: IORef Bool

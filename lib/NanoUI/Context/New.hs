@@ -1,30 +1,31 @@
 module NanoUI.Context.New
   ( newContext
   , newPixelHostContext
-  ) where
+  )
+where
 
 import Data.IORef (newIORef)
-import qualified Data.IntMap.Strict as IM
-import qualified Data.Map.Strict as Map
+import Data.IntMap.Strict qualified as IM
+import Data.Map.Strict qualified as Map
 import Data.Primitive.PrimArray (newPrimArray)
-import qualified NanoUI.Atlas as Atlas
+import NanoUI.Atlas qualified as Atlas
 import NanoUI.Context.Config
   ( enableMeasureCache
   , withExternalText
   , withFontMetrics
   , withTheme
   )
+import NanoUI.Context.Internal (Context (..))
 import NanoUI.Draw (newDrawArena)
-import NanoUI.Types (Damage (..), Size (..))
-import NanoUI.Store (emptyWidgetStore)
 import NanoUI.Font (measureText, monospaceMetrics, stripWidgetMarkers)
 import NanoUI.Host (HostProfile (..))
 import NanoUI.Icons (asciiIcons)
-import NanoUI.Id (WidgetId (..))
+import NanoUI.Id (WidgetId (..), initialIdContext)
 import NanoUI.Frame.SpanArena (newSpanArena)
 import NanoUI.Layout.Arena (newNodeArena)
+import NanoUI.Store (emptyWidgetStore)
 import NanoUI.Style (defaultTheme)
-import NanoUI.Context.Internal (Context (..))
+import NanoUI.Types (Damage (..), Size (..))
 
 {-# INLINE newContext #-}
 newContext :: IO Context
@@ -45,10 +46,11 @@ newContext = do
   ctxDirty <- newIORef True
   ctxDamage <- newIORef DamageFull
   ctxLastWindowSize <- newIORef (Size 0 0)
-  ctxIdSalt <- newIORef 0
+  ctxIdContext <- newIORef initialIdContext
   ctxContainerStack <- newIORef []
   ctxMessages <- newIORef []
-  let initCap = 64
+  let
+    initCap = 64
   ctxFocusables <- newIORef =<< newPrimArray initCap
   ctxFocusablesCount <- newIORef 0
   ctxFocusablesCap <- newIORef initCap
@@ -74,7 +76,8 @@ newContext = do
   ctxImageAtlas <- Atlas.newImageAtlas
   ctxWakeLoop <- newIORef Nothing
   ctxHost <- newIORef Map.empty
-  let fm0 = monospaceMetrics 12
+  let
+    fm0 = monospaceMetrics 12
   pure
     Context
       { ctxNodeArena = nodeArena
@@ -93,7 +96,7 @@ newContext = do
       , ctxDirty
       , ctxDamage
       , ctxLastWindowSize
-      , ctxIdSalt
+      , ctxIdContext
       , ctxFontMetrics = fm0
       , ctxMonoFontMetrics = fm0
       , ctxMeasureText = \txt -> pure (measureText PixelHost fm0 (stripWidgetMarkers txt))

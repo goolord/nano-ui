@@ -19,41 +19,42 @@ module NanoUI.Frame
   , cursorKindIs
   , uiCursorKind
   , UiCursorKind (..)
-  ) where
+  )
+where
 
 import Control.Monad (unless, when)
 import Data.IORef (readIORef, writeIORef)
+import Data.IntMap.Strict qualified as IM
 import Data.Typeable (Typeable)
-import qualified Data.IntMap.Strict as IM
 import Effectful (Eff, IOE, runEff, type (:>))
 import NanoUI.Context
   ( Context (..)
   , FrameMsg (..)
+  , animInProgress
+  , clearMeasureCache
+  , clearTooltips
   , decodeMessages
   , drainMessages
-  , getStore
   , getPrevRect
+  , getStore
   , isDirty
   , markDirty
-  , clearMeasureCache
   , tickAnimations
-  , animInProgress
-  , clearTooltips
   )
 import NanoUI.Context.Modal (beginFrameModal)
-import NanoUI.Draw (DrawData, Layer (..), beginLayer, finishDraw, resetDrawArena)
-import NanoUI.Id (WidgetId (..))
-import NanoUI.Input (Input (..), inputMouseDown)
-import NanoUI.Layout.Arena (resetNodeArena)
-import NanoUI.Layout.Solve (placeModals, placeWindows, solveLayout)
-import NanoUI.Monad (NanoUI, Ui, runUi)
-import NanoUI.Damage (updatePrevRects, updatePrevNodeTexts, writeDamage)
-import NanoUI.Types (Size (..))
-
-import NanoUI.Frame.Cursor (UiCursorKind (..), cursorKindIs, pointerCursorWanted, uiCursorKind)
-import NanoUI.Frame.Internal
-  ( constrainFocusToModal
-  , syncWidgetLabels
+import NanoUI.Damage (updatePrevNodeTexts, updatePrevRects, writeDamage)
+import NanoUI.Draw
+  ( DrawData
+  , Layer (..)
+  , beginLayer
+  , finishDraw
+  , resetDrawArena
+  )
+import NanoUI.Frame.Cursor
+  ( UiCursorKind (..)
+  , cursorKindIs
+  , pointerCursorWanted
+  , uiCursorKind
   )
 import NanoUI.Frame.Input
   ( finalizePointerPress
@@ -63,6 +64,10 @@ import NanoUI.Frame.Input
   , finalizeTextInputFocus
   , finalizeTextInputMouse
   , refreshHover
+  )
+import NanoUI.Frame.Internal
+  ( constrainFocusToModal
+  , syncWidgetLabels
   )
 import NanoUI.Frame.Paint (drawTooltipOverlays, lowerShapes)
 import NanoUI.Frame.Redraw
@@ -74,12 +79,17 @@ import NanoUI.Frame.Redraw
   , pointerDragActive
   , textFieldActive
   )
+import NanoUI.Frame.Scroll
+  ( applyScrollOffsets
+  , updateScrollDrag
+  , updateScrollWheel
+  )
 import NanoUI.Frame.Select
   ( closeSelectOnOutsideClick
+  , drawSelectOverlays
   , finalizeSelectKeyboard
   , finalizeSelectPick
   , markSelectDropPress
-  , drawSelectOverlays
   )
 import NanoUI.Frame.Spans
   ( collectOverlayTextSpans
@@ -87,7 +97,6 @@ import NanoUI.Frame.Spans
   , collectTextSpans
   , widgetNodeCount
   )
-import NanoUI.Frame.Scroll (applyScrollOffsets, updateScrollDrag, updateScrollWheel)
 import NanoUI.Frame.TextInput
   ( closeTextInputMenuOnEscape
   , closeTextInputMenuOnOutsideClick
@@ -96,14 +105,20 @@ import NanoUI.Frame.TextInput
   , openTextInputMenu
   )
 import NanoUI.Frame.Window
-  ( lookupWindowPos
+  ( drawModalOverlays
+  , drawWindowOverlays
+  , lookupWindowPos
   , lookupWindowSize
   , persistWindowPositions
   , updateWindowDrag
   , updateWindowResize
-  , drawModalOverlays
-  , drawWindowOverlays
   )
+import NanoUI.Id (WidgetId (..), initialIdContext)
+import NanoUI.Input (Input (..), inputMouseDown)
+import NanoUI.Layout.Arena (resetNodeArena)
+import NanoUI.Layout.Solve (placeModals, placeWindows, solveLayout)
+import NanoUI.Monad (NanoUI, Ui, runUi)
+import NanoUI.Types (Size (..))
 
 runFrame :: Context -> Input -> NanoUI a -> IO (a, [FrameMsg], DrawData, Bool)
 runFrame = runFrameEff runEff
@@ -113,38 +128,39 @@ runFrame = runFrameEff runEff
 -- loop redraws when the reduced model differs.
 runFrameReduce ::
   (Typeable msg, Eq model) =>
-  (msg -> model -> model) ->
-  Context ->
-  Input ->
-  model ->
-  (model -> NanoUI a) ->
-  IO (a, model, [msg], DrawData, Bool)
+  (msg -> model -> model)
+  -> Context
+  -> Input
+  -> model
+  -> (model -> NanoUI a)
+  -> IO (a, model, [msg], DrawData, Bool)
 runFrameReduce = runFrameReduceEff runEff
 
 runFrameReduceEff ::
   (IOE :> es, Typeable msg, Eq model) =>
-  (forall x. Eff es x -> IO x) ->
-  (msg -> model -> model) ->
-  Context ->
-  Input ->
-  model ->
-  (model -> Eff (Ui : es) a) ->
-  IO (a, model, [msg], DrawData, Bool)
+  (forall x. Eff es x -> IO x)
+  -> (msg -> model -> model)
+  -> Context
+  -> Input
+  -> model
+  -> (model -> Eff (Ui : es) a)
+  -> IO (a, model, [msg], DrawData, Bool)
 runFrameReduceEff unlift update ctx inp model view = do
   (a, msgs, draw, dirty) <- runFrameEff unlift ctx inp (view model)
-  let typed = decodeMessages msgs
-      model' = foldl' (flip update) model typed
+  let
+    typed = decodeMessages msgs
+    model' = foldl' (flip update) model typed
   when (model' /= model) (markDirty ctx)
   dirty' <- isDirty ctx
   pure (a, model', typed, draw, dirty || dirty')
 
 runFrameEff ::
   IOE :> es =>
-  (forall x. Eff es x -> IO x) ->
-  Context ->
-  Input ->
-  Eff (Ui : es) a ->
-  IO (a, [FrameMsg], DrawData, Bool)
+  (forall x. Eff es x -> IO x)
+  -> Context
+  -> Input
+  -> Eff (Ui : es) a
+  -> IO (a, [FrameMsg], DrawData, Bool)
 runFrameEff unlift ctx inp ui = do
   oldHot <- readIORef (ctxLastHotId ctx)
   oldActive <- readIORef (ctxActiveId ctx)
@@ -164,6 +180,7 @@ runFrameEff unlift ctx inp ui = do
   resetDrawArena (ctxDrawArena ctx)
   clearMeasureCache ctx
   writeIORef (ctxContainerStack ctx) []
+  writeIORef (ctxIdContext ctx) initialIdContext
   writeIORef (ctxFocusablesCount ctx) 0
   writeIORef (ctxHotId ctx) (WidgetId 0)
   writeIORef (ctxWidgetNodeTypes ctx) Nothing
@@ -175,14 +192,35 @@ runFrameEff unlift ctx inp ui = do
   result <- unlift (runUi ctx inp ui)
   -- Terminal sliders embed the bar in node text; sync before measure so width is correct.
   syncWidgetLabels ctx
-  let Size w h = inputWindowSize inp
-  solveLayout (ctxNodeArena ctx) (ctxHostProfile ctx) (ctxFontMetrics ctx) (ctxMeasureText ctx) w h
+  let
+    Size w h = inputWindowSize inp
+  solveLayout
+    (ctxNodeArena ctx)
+    (ctxHostProfile ctx)
+    (ctxFontMetrics ctx)
+    (ctxMeasureText ctx)
+    w
+    h
   placeModals (ctxNodeArena ctx) (ctxHostProfile ctx) (ctxFontMetrics ctx) w h
-  placeWindows (ctxNodeArena ctx) (ctxHostProfile ctx) (ctxFontMetrics ctx) w h (lookupWindowPos ctx) (lookupWindowSize ctx)
+  placeWindows
+    (ctxNodeArena ctx)
+    (ctxHostProfile ctx)
+    (ctxFontMetrics ctx)
+    w
+    h
+    (lookupWindowPos ctx)
+    (lookupWindowSize ctx)
   movedResize <- updateWindowResize ctx inp w h
   movedWindow <- updateWindowDrag ctx inp
   when (movedResize || movedWindow) $
-    placeWindows (ctxNodeArena ctx) (ctxHostProfile ctx) (ctxFontMetrics ctx) w h (lookupWindowPos ctx) (lookupWindowSize ctx)
+    placeWindows
+      (ctxNodeArena ctx)
+      (ctxHostProfile ctx)
+      (ctxFontMetrics ctx)
+      w
+      h
+      (lookupWindowPos ctx)
+      (lookupWindowSize ctx)
   persistWindowPositions ctx
   updateScrollWheel ctx inp
   updateScrollDrag ctx inp

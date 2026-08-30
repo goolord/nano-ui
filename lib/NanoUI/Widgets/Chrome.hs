@@ -14,14 +14,13 @@ module NanoUI.Widgets.Chrome
 
 import Effectful (Eff, type (:>))
 import Data.Text (Text)
-import GHC.Stack (HasCallStack)
 import NanoUI.Font (layoutUnitScale)
 import NanoUI.WidgetMarkers (closeButtonMarker)
 import NanoUI.Host (HostProfile, isCellHost)
 import NanoUI.Context (Context (..), isDisabled, registerFocusable)
 import NanoUI.Icons (Icons (..))
 import NanoUI.Layout.Arena (NodeType (NodeButton))
-import NanoUI.Monad (Ui, askContext, currentId, uiIO)
+import NanoUI.Monad (Ui, askContext, nextId, uiIO)
 import NanoUI.Style
   ( Layout (..)
   , Padding (..)
@@ -74,9 +73,9 @@ titleMark :: HostProfile -> Text -> Text
 titleMark host mark = if isCellHost host then mark else ""
 
 {-# INLINE closeButton #-}
-closeButton :: (HasCallStack, Ui :> es) => Eff es Response
+closeButton :: (Ui :> es) => Eff es Response
 closeButton = do
-  wid <- currentId
+  wid <- nextId
   ctx <- askContext
   uiIO $ registerFocusable ctx wid
   let host = ctxHostProfile ctx
