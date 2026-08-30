@@ -9,8 +9,9 @@ module NanoUI.Id
 
 import Data.Bits (xor)
 import Data.Hashable (Hashable, hash)
-import Data.Word (Word64)
+import Data.Word (Word64, Word8)
 import GHC.Stack (HasCallStack, SrcLoc (..), callStack, getCallStack)
+import Data.Char (ord)
 
 newtype WidgetId = WidgetId Word64
   deriving (Eq, Ord, Show)
@@ -44,11 +45,15 @@ mixId (WidgetId base) k = WidgetId (base `mix64` fromIntegral (hash k))
 
 {-# INLINE fnv1a #-}
 fnv1a :: String -> Word64
-fnv1a s = go 14695981039346656037 s
+fnv1a s = foldl'
+  ( \acc c -> (fromIntegral @Word8 @Word64 (c2w c) `xor` acc) * 0x00000100000001B3
+  )
+  0xcbf29ce484222325
+  s
   where
-    go :: Word64 -> String -> Word64
-    go h [] = h
-    go h (c : cs) = go ((h `xor` fromIntegral (fromEnum c)) * 1099511628211) cs
+  c2w :: Char -> Word8
+  c2w = fromIntegral . ord
+  {-# INLINE c2w #-}
 
 {-# INLINE mix64 #-}
 mix64 :: Word64 -> Word64 -> Word64
