@@ -32,7 +32,7 @@ import NanoUI.Layout.Arena (NodeArena, NodeType)
 import NanoUI.Messages (FrameMsg)
 import NanoUI.Store (WidgetStore)
 import NanoUI.Style (Theme)
-import NanoUI.Types (Damage (..), Rect (..), Size (..))
+import NanoUI.Types (Damage (..), Rect (..), Size (..), V2)
 
 type MeasureCacheKey = (Text, Bool, Float)
 
@@ -79,6 +79,11 @@ data Context = Context
   , ctxWindowDrag :: IORef (Maybe (WidgetId, Float, Float))
   , ctxWindowResize :: IORef (Maybe WindowResizeDrag)
   , ctxPrevFloatingRects :: IORef (IntMap Rect)
+  -- | Widget keys in paint order. Later is on top.
+  , ctxPrevFloatingOrder :: IORef [Int]
+  , ctxOverlayTopmostCache :: IORef (Maybe (V2, Maybe WidgetId))
+  , ctxCurrentFloatingId :: IORef (Maybe WidgetId)
+  , ctxLastPointerBlocked :: IORef Bool
   , ctxImageAtlas :: ImageAtlas
   , ctxWakeLoop :: IORef (Maybe (IO ()))
   , ctxHost :: IORef (Map TypeRep Dynamic)

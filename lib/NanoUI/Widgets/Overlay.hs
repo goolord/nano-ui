@@ -9,6 +9,7 @@ import Control.Monad (void, when)
 import Data.IORef (readIORef, writeIORef)
 import Effectful (Eff, type (:>))
 import Data.Text (Text)
+import qualified Data.IntMap.Strict as IM
 import qualified Data.Text as T
 import GHC.Stack (HasCallStack)
 import NanoUI.Font (resolveLayoutGap, resolveLayoutPadding)
@@ -18,8 +19,13 @@ import NanoUI.Context
   , beginModal
   , endModal
   , getPrevRect
+  , getStore
+  , intKey
   , markEscapeConsumed
+  , seedFloatingPanel
   )
+import NanoUI.Id (WidgetId)
+import NanoUI.Store (WidgetStore (..))
 import NanoUI.Icons (Icons (..))
 import NanoUI.Input (Key (..), inputKeys, inputKeysElem, inputMousePos, inputMousePressed, inputWindowSize)
 import NanoUI.Layout.Arena (NodeType (..), addNode, setWidgetId)
@@ -98,7 +104,7 @@ overlay kind open title child
                      in min availH (padT pad + titleBarHFor host + padB pad)
               maxW = availW
               maxH = availH
-          uiIO $ do
+          prevFloat <- uiIO $ do
             idx <-
               addNode
                 (ctxNodeArena ctx)
@@ -120,6 +126,11 @@ overlay kind open title child
             setWidgetId (ctxNodeArena ctx) idx wid
             writeIORef (ctxContainerStack ctx) (idx : stack)
             when isModal (beginModal ctx)
+            seedRect <- floatingSeedRect ctx wid isModal minWidth minHeight margin winW winH
+            seedFloatingPanel ctx wid seedRect
+            prev <- readIORef (ctxCurrentFloatingId ctx)
+            writeIORef (ctxCurrentFloatingId ctx) (Just wid)
+            pure prev
           (closeResp, r) <-
             ( do
                 close <-
@@ -140,6 +151,7 @@ overlay kind open title child
               `uiFinally` do
                 when isModal (endModal ctx)
                 writeIORef (ctxContainerStack ctx) stack
+                writeIORef (ctxCurrentFloatingId ctx) prevFloat
           pure (closeResp, r)
       mrect <- uiIO (getPrevRect ctx wid)
       let mouse = inputMousePos inp
@@ -157,3 +169,33 @@ overlay kind open title child
         ( mkResponse wid (maybe (Rect 0 0 0 0) id mrect) inPanel False dismissed dismissed
         , Just body
         )
+
+floatingSeedRect ::
+  Context ->
+  WidgetId ->
+  Bool ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  IO Rect
+floatingSeedRect ctx wid isModal minWidth minHeight margin winW winH = do
+  mPrev <- getPrevRect ctx wid
+  case mPrev of
+    Just r | rectW r > 0 && rectH r > 0 -> pure r
+    _ -> do
+      store <- getStore ctx
+      let k = intKey wid
+          pos = IM.lookup k (storeWindow store)
+          sz = IM.lookup k (storeWindowSize store)
+      pure $
+        case (pos, sz) of
+          (Just (x, y), Just (w, h)) | w > 0 && h > 0 -> Rect x y w h
+          (Just (x, y), _) -> Rect x y minWidth (max minHeight 1)
+          _ ->
+            let w = minWidth
+                h = max minHeight 1
+             in if isModal
+                  then Rect ((winW - w) / 2) ((winH - h) / 2) w h
+                  else Rect (max 0 (winW - w - margin)) margin w h

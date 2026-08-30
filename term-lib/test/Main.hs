@@ -168,6 +168,7 @@ main = do
   run "header-top-pad" runHeaderTopPadTest
   run "fit-header-no-shrink" runFitHeaderNoShrinkTest
   run "window-overlay" runWindowOverlayTest
+  run "overlay-click-through" runOverlayClickThroughTest
   run "window-drag" runWindowDragTest
   run "window-scroll-wheel" runWindowScrollWheelTest
   run "window-resize" runWindowResizeTest
@@ -3739,6 +3740,102 @@ runWindowOverlayTest ctx failed = do
           }
   ((_, winClose, _), _, _, _) <- runFrame ctx releaseClose ui
   when (not (respClicked winClose)) $ bump failed
+
+-- Empty overlay chrome must eat clicks. Page widgets under that box stay idle.
+-- Widgets inside the overlay still click. Lower window children stay idle.
+runOverlayClickThroughTest :: Context -> IORef Int -> IO ()
+runOverlayClickThroughTest _ failed = do
+  ctx <- newContext
+  let inp0 = emptyInput {inputWindowSize = Size 300 220}
+      windowUi = do
+        outsides <- column defaultLayout (replicateM 10 (button "Outside"))
+        (win, mInside) <-
+          window True "Cover" $ do
+            button "Inside"
+        pure (outsides, win, mInside)
+      modalUi = do
+        outsides <- column defaultLayout (replicateM 10 (button "Outside"))
+        (dlg, mInside) <-
+          modal True "Cover" $ do
+            button "Inside"
+        pure (outsides, dlg, mInside)
+      stackedUi = do
+        (lo, mLo) <- window True "Low" (button "LowBtn")
+        (hi, mHi) <- window True "High" (button "HighBtn")
+        pure (lo, mLo, hi, mHi)
+      childSafePoint cover childRects =
+        let Rect x y w h = cover
+            titleSkip = 40
+            cands =
+              [ V2 (x + 6) (y + h * 0.72)
+              , V2 (x + w - 6) (y + h * 0.72)
+              , V2 (x + w / 2) (y + h - 6)
+              , V2 (x + 6) (y + h - 6)
+              , V2 (x + w - 6) (y + titleSkip + 6)
+              ]
+            inCover p = rectContains cover p
+            missesKids p = not (any (`rectContains` p) childRects)
+         in case filter (\p -> inCover p && missesKids p) cands of
+              (p : _) -> Just p
+              [] -> Nothing
+      clickNone clicked ui pos = do
+        let (press, release) = clickAt inp0 pos
+        _ <- runFrame ctx press ui
+        runFrame ctx release ui
+          >>= \(hit, _, _, _) -> when (clicked hit) (bump failed)
+      runCovered ui = do
+        _ <- runFrame ctx inp0 ui
+        _ <- runFrame ctx inp0 ui
+        ((_, cover0, mInside0), _, _, _) <- runFrame ctx inp0 ui
+        let coverRect = respRect cover0
+        when (rectW coverRect <= 0 || rectH coverRect <= 0) $ bump failed
+        case mInside0 of
+          Nothing -> bump failed
+          Just inside0 -> do
+            let kids = [respRect inside0]
+            case childSafePoint coverRect kids of
+              Nothing -> bump failed
+              Just pos -> do
+                let (press, release) = clickAt inp0 pos
+                _ <- runFrame ctx press ui
+                ((outsidesHit, _, _), _, _, _) <- runFrame ctx release ui
+                when (any respClicked outsidesHit) $ bump failed
+            let ir = respRect inside0
+                ip = V2 (rectX ir + rectW ir / 2) (rectY ir + rectH ir / 2)
+            when (rectW ir <= 0 || rectH ir <= 0) $ bump failed
+            let (ipress, irelease) = clickAt inp0 ip
+            _ <- runFrame ctx ipress ui
+            ((_, _, mInsideHit), _, _, _) <- runFrame ctx irelease ui
+            case mInsideHit of
+              Just r -> when (not (respClicked r)) $ bump failed
+              Nothing -> bump failed
+      runStacked = do
+        _ <- runFrame ctx inp0 stackedUi
+        _ <- runFrame ctx inp0 stackedUi
+        ((_, mLo0, hi0, mHi0), _, _, _) <- runFrame ctx inp0 stackedUi
+        case (mLo0, mHi0) of
+          (Just loBtn, Just hiBtn) -> do
+            let cover = respRect hi0
+                kids = [respRect loBtn, respRect hiBtn]
+            when (rectW cover <= 0 || rectH cover <= 0) $ bump failed
+            case childSafePoint cover kids of
+              Nothing -> bump failed
+              Just pos ->
+                clickNone
+                  (\(_, loHit, _, _) -> maybe False respClicked loHit)
+                  stackedUi
+                  pos
+            let hp = V2 (rectX (respRect hiBtn) + rectW (respRect hiBtn) / 2) (rectY (respRect hiBtn) + rectH (respRect hiBtn) / 2)
+                (hpress, hrelease) = clickAt inp0 hp
+            _ <- runFrame ctx hpress stackedUi
+            ((_, _, _, mHiHit), _, _, _) <- runFrame ctx hrelease stackedUi
+            case mHiHit of
+              Just r -> when (not (respClicked r)) $ bump failed
+              Nothing -> bump failed
+          _ -> bump failed
+  runCovered windowUi
+  runCovered modalUi
+  runStacked
 
 runWindowDragTest :: Context -> IORef Int -> IO ()
 runWindowDragTest ctx failed = do

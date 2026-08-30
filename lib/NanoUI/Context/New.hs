@@ -60,6 +60,10 @@ newContext = do
   ctxWindowDrag <- newIORef Nothing
   ctxWindowResize <- newIORef Nothing
   ctxPrevFloatingRects <- newIORef IM.empty
+  ctxPrevFloatingOrder <- newIORef []
+  ctxOverlayTopmostCache <- newIORef Nothing
+  ctxCurrentFloatingId <- newIORef Nothing
+  ctxLastPointerBlocked <- newIORef False
   ctxImageAtlas <- Atlas.newImageAtlas
   ctxWakeLoop <- newIORef Nothing
   ctxHost <- newIORef Map.empty
@@ -108,6 +112,10 @@ newContext = do
       , ctxWindowDrag
       , ctxWindowResize
       , ctxPrevFloatingRects
+      , ctxPrevFloatingOrder
+      , ctxOverlayTopmostCache
+      , ctxCurrentFloatingId
+      , ctxLastPointerBlocked
       , ctxImageAtlas
       , ctxWakeLoop
       , ctxHost

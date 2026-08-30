@@ -27,7 +27,7 @@ import NanoUI.Context
   ( Context (..)
   , getPrevRect
   , isDisabled
-  , pointerBlockedByModal
+  , pointerBlockedByOverlay
   )
 import NanoUI.Id (WidgetId (..))
 import NanoUI.Input (Input (..), inputMouseDown, inputMousePos, inputMouseReleased)
@@ -203,7 +203,7 @@ resolveInteraction :: Context -> Input -> WidgetId -> IO Response
 resolveInteraction ctx inp wid = do
   disabled <- isDisabled ctx wid
   mrect <- getPrevRect ctx wid
-  blocked <- pointerBlockedByModal ctx
+  blocked <- pointerBlockedByOverlay ctx (inputMousePos inp)
   let rect = case mrect of
         Just r -> r
         Nothing -> Rect 0 0 0 0

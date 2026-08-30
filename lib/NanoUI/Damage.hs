@@ -97,11 +97,11 @@ updatePrevNodeTexts ctx = do
                   pure (IM.insert (intKey wid) txt m)
                 else pure m
 
-floatingPanelRects :: Context -> IO (IM.IntMap Rect)
-floatingPanelRects ctx = do
+floatingPanelsInOrder :: Context -> IO [(Int, Rect)]
+floatingPanelsInOrder ctx = do
   n <- arenaCount (ctxNodeArena ctx)
   let go idx acc
-        | idx >= n = pure acc
+        | idx >= n = pure (reverse acc)
         | otherwise = do
             nt <- getNodeType (ctxNodeArena ctx) idx
             if nt == NodeWindow || nt == NodeModal
@@ -110,9 +110,12 @@ floatingPanelRects ctx = do
                 (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
                 if hashWidgetId wid == 0
                   then go (idx + 1) acc
-                  else go (idx + 1) (IM.insert (intKey wid) (Rect x y w h) acc)
+                  else go (idx + 1) ((intKey wid, Rect x y w h) : acc)
               else go (idx + 1) acc
-  go 0 IM.empty
+  go 0 []
+
+floatingPanelRects :: Context -> IO (IM.IntMap Rect)
+floatingPanelRects ctx = IM.fromList <$> floatingPanelsInOrder ctx
 
 writeDamage ::
   Context ->
@@ -147,7 +150,8 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
           || not (inputKeysNull (inputKeys inp))
           || not (T.null (inputChars inp))
   newStore <- getStore ctx
-  newFloatingRects <- floatingPanelRects ctx
+  panels <- floatingPanelsInOrder ctx
+  let newFloatingRects = IM.fromList panels
   newRects <- readIORef (ctxPrevRects ctx)
   modalFlip <- modalDamageFlip ctx
   dirtyNow <- isDirty ctx
@@ -272,6 +276,7 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
   writeIORef (ctxDamage ctx) dmg
   writeIORef (ctxLastWindowSize ctx) (Size winW winH)
   writeIORef (ctxPrevFloatingRects ctx) newFloatingRects
+  writeIORef (ctxPrevFloatingOrder ctx) (map fst panels)
   -- Color/drag already clipped or covered by pointer-held. Drop leftover dirty Full.
   when colorClipOnly (clearDirty ctx)
   when modalFlip (markDirty ctx)

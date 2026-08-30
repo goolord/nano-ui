@@ -73,6 +73,8 @@ module NanoUI.Context
   , overlayConsumesQuit
   , markEscapeConsumed
   , pointerBlockedByModal
+  , pointerBlockedByOverlay
+  , seedFloatingPanel
   , beginModal
   , endModal
   , registerImage
@@ -170,6 +172,8 @@ import NanoUI.Context.Modal
   , modalActive
   , overlayConsumesQuit
   , pointerBlockedByModal
+  , pointerBlockedByOverlay
+  , seedFloatingPanel
   , textInputEditActive
   )
 import NanoUI.Context.Host (askHostIO, setHost)
