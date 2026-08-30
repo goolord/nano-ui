@@ -145,11 +145,17 @@ import NanoUI.Layout.Arena
   , isContainerNode
   , isFloatingNode
   , isScrollNode
-  , NodeType (NodeButton, NodeCheckbox, NodeRadio, NodeSelect, NodeSlider, NodeTextInput, NodeModal, NodeImage, NodePanel, NodeWindow, NodeContainer, NodeScrollContainer, NodeText, NodeSeparator, NodeSpacer, NodeBox)
+  , NodeType (NodeButton, NodeCheckbox, NodeRadio, NodeSelect, NodeColorPicker, NodeSlider, NodeTextInput, NodeModal, NodeImage, NodePanel, NodeWindow, NodeContainer, NodeScrollContainer, NodeText, NodeSeparator, NodeSpacer, NodeBox)
   , resetNodeArena
   , setNodeText
   , setNodeValue
   , setRect
+  )
+import NanoUI.ColorPicker
+  ( ColorPickerGeom (..)
+  , colorPickerDefaultColor
+  , colorPickerGeom
+  , widgetStoreColor
   )
 import NanoUI.Layout.Solve (placeModals, placeWindows, positionWindowNode, scrollBarSlotOf, solveLayout)
 import Effectful (Eff, IOE, runEff, type (:>))
@@ -170,6 +176,7 @@ import NanoUI.WidgetText
   , selectDisplayText
   , selectChevronReserve
   , selectChevronCenterX
+  , colorPickerToHex
   )
 import NanoUI.Style (Padding (..), Style (..), Theme (..), scrollBarThumbColor, scrollBarTrackColor, themeAccent, themeButton, themeFloatingWindow, themeInput, themeMuted, themeOverlayDim, themePanel, themeSeparator, themeWindow)
 import NanoUI.Types (Color (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, lerpColor, rectContains, rectH, rectIntersect, rectOverlapArea, rectUnion, rectW, rectX, rectY, v2X, v2Y)
@@ -536,6 +543,25 @@ widgetTextPlacements ctx nt idx x y w h = do
       txt <- displayText ctx nt idx
       (tw, th) <- ctxMeasureText ctx txt
       pure [(txt, x + ix, centeredTextY (ctxHostProfile ctx) fm y h th, min tw (w - ix - selectChevronReserve), th)]
+    NodeColorPicker -> do
+      if terminal
+        then do
+          txt <- displayText ctx nt idx
+          (tw, th) <- ctxMeasureText ctx txt
+          pure [(txt, x + ix, centeredTextY (ctxHostProfile ctx) fm y h th, tw, th)]
+        else do
+          lbl <- getText (ctxNodeArena ctx) idx
+          store <- getStore ctx
+          wid <- getWidgetId (ctxNodeArena ctx) idx
+          let geom = colorPickerGeom (ctxHostProfile ctx) fm x y w h
+              hex = colorPickerToHex (widgetStoreColor store wid colorPickerDefaultColor)
+              (lx, ly) = labelContentInset (ctxHostProfile ctx) fm
+          (lw, lh) <- ctxMeasureText ctx lbl
+          (hw, hh) <- ctxMeasureText ctx hex
+          pure
+            [ (lbl, x + lx, y + ly, lw, lh)
+            , (hex, x + lx, centeredTextY (ctxHostProfile ctx) fm (cpgHexY geom) (cpgHexH geom) hh, hw, hh)
+            ]
     NodeCheckbox -> do
       txt <- displayText ctx nt idx
       (tw, th) <- ctxMeasureText ctx txt

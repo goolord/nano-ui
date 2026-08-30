@@ -75,6 +75,7 @@ data NodeType
   -- NodeType case when adding variants.
   | NodeBox
   | NodeRadio
+  | NodeColorPicker
   deriving (Eq, Show, Enum, Bounded)
 
 isWidgetNode :: NodeType -> Bool
@@ -87,6 +88,7 @@ isWidgetNode nt =
     NodeSlider -> True
     NodeTextInput -> True
     NodeSelect -> True
+    NodeColorPicker -> True
     NodeImage -> True
     _ -> False
 

@@ -15,6 +15,7 @@ import NanoUI.Context
   ( Context (..)
   , WidgetStore (..)
   , animInProgress
+  , clearDirty
   , getPrevRect
   , getPrevRectByKey
   , getStore
@@ -29,7 +30,13 @@ import NanoUI.Input
   , inputChars
   , inputKeys
   , inputKeysNull
+  , inputMousePressed
+  , inputMouseReleased
+  , inputMouseRightPressed
+  , inputMouseRightReleased
   , inputPointerHeld
+  , inputScroll
+  , inputWindowSize
   )
 import NanoUI.Layout.Arena
   ( NodeType (..)
@@ -152,6 +159,14 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
       forM (IM.keys liveAnims) $ \k ->
         isNothing <$> getPrevRectByKey ctx k
   let storePaintChanged = paintStore oldStore /= paintStore newStore
+      colorStoreChanged =
+        storeColor oldStore /= storeColor newStore
+          || storeColorHue oldStore /= storeColorHue newStore
+          || storeColorSv oldStore /= storeColorSv newStore
+      dragStoreChanged = storeColorDrag oldStore /= storeColorDrag newStore
+      -- Color/drag live in store but paint via widget rects. Do not Full for those alone.
+      colorClipOnly =
+        not storePaintChanged && (colorStoreChanged || dragStoreChanged)
       floatingChanged = oldFloatingRects /= newFloatingRects
       windowLive =
         not (IM.null (storeWindow newStore))
@@ -170,8 +185,7 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
       paintOrphan = orphanAnim && animLive
       textChanged = not (IM.null (textChangeKeys oldTexts newTexts))
       full =
-        wasDirty
-          || dirtyNow
+        ((wasDirty || dirtyNow) && not colorClipOnly)
           || sizeChanged
           || commanded
           || storePaintChanged
@@ -218,6 +232,11 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
                       pure (catMaybes [oldOf wid, newR])
             let vanishedRs = IM.elems (IM.difference oldRects newRects)
                 textRs = textChangeRects oldTexts newTexts oldRects newRects
+                colorRs =
+                  storeKeyChangeRects (storeColor oldStore) (storeColor newStore) oldRects newRects
+                    ++ storeKeyChangeRects (storeColorHue oldStore) (storeColorHue newStore) oldRects newRects
+                    ++ storeKeyChangeRects (storeColorSv oldStore) (storeColorSv newStore) oldRects newRects
+                    ++ storeKeyChangeRects (storeColorDrag oldStore) (storeColorDrag newStore) oldRects newRects
             animRs <-
               fmap concat $
                 forM clipKeys $ \k ->
@@ -232,6 +251,7 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
                         ++ layoutRs
                         ++ vanishedRs
                         ++ textRs
+                        ++ colorRs
                         ++ floatingRectDamage oldFloatingRects newFloatingRects
                     )
                 clip =
@@ -246,12 +266,23 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
   writeIORef (ctxDamage ctx) dmg
   writeIORef (ctxLastWindowSize ctx) (Size winW winH)
   writeIORef (ctxPrevFloatingRects ctx) newFloatingRects
+  -- Color/drag already clipped or covered by pointer-held. Drop leftover dirty Full.
+  when colorClipOnly (clearDirty ctx)
   when modalFlip (markDirty ctx)
   when (floatingChanged && not (IM.null oldFloatingRects && not (IM.null newFloatingRects))) $
     markDirty ctx
 
+-- Windows live in their own path. Color/drag clip to widget rects, not Full.
 paintStore :: WidgetStore -> WidgetStore
-paintStore s = s {storeWindow = IM.empty, storeWindowSize = IM.empty}
+paintStore s =
+  s
+    { storeWindow = IM.empty
+    , storeWindowSize = IM.empty
+    , storeColor = IM.empty
+    , storeColorHue = IM.empty
+    , storeColorSv = IM.empty
+    , storeColorDrag = IM.empty
+    }
 
 floatingRectDamage :: IM.IntMap Rect -> IM.IntMap Rect -> [Rect]
 floatingRectDamage old new =
@@ -299,11 +330,29 @@ textChangeRects ::
   IM.IntMap Rect ->
   [Rect]
 textChangeRects old new oldRects newRects =
+  storeKeyChangeRects old new oldRects newRects
+
+storeKeyChangeRects ::
+  Eq a =>
+  IM.IntMap a ->
+  IM.IntMap a ->
+  IM.IntMap Rect ->
+  IM.IntMap Rect ->
+  [Rect]
+storeKeyChangeRects old new oldRects newRects =
   catMaybes
     [ case (IM.lookup k oldRects, IM.lookup k newRects) of
         (Just r1, Just r2) -> Just (rectUnion r1 r2)
         (Nothing, Just r) -> Just r
         (Just r, Nothing) -> Just r
         (Nothing, Nothing) -> Nothing
-    | k <- IM.keys (textChangeKeys old new)
+    | k <- IM.keys (storeChangeKeys old new)
+    ]
+
+storeChangeKeys :: Eq a => IM.IntMap a -> IM.IntMap a -> IM.IntMap ()
+storeChangeKeys old new =
+  IM.fromList
+    [ (k, ())
+    | k <- IM.keys (IM.union old new)
+    , IM.lookup k old /= IM.lookup k new
     ]

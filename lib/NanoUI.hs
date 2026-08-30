@@ -97,6 +97,9 @@ module NanoUI
   , scroll
   , scrollArea
   , select
+  , colorPicker
+  , colorPickerToHex
+  , colorPickerFromHex
   , radioFieldset
   , boundedRadioFieldset
   , useRadio
@@ -332,6 +335,9 @@ import NanoUI.Widgets
   , scroll
   , scrollArea
   , select
+  , colorPicker
+  , colorPickerToHex
+  , colorPickerFromHex
   , radioFieldset
   , boundedRadioFieldset
   , useRadio

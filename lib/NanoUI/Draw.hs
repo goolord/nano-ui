@@ -12,6 +12,7 @@ module NanoUI.Draw
   , beginLayer
   , setClip
   , pushRect
+  , pushQuadGradient
   , pushBackdropDim
   , backdropDimTextureId
   , glyphAtlasTextureId
@@ -428,6 +429,59 @@ pushQuad da (Rect x y w h) u0 v0 u1 v1 col = do
   pokeByteOff ip (iOff + 20) (baseIdxWord + 3)
   writeIORef (daVertexCount da) (base + 4)
   writeIORef (daIndexCount da) (baseIdx + 6)
+
+-- Quad with a color per corner. GPU interpolates across the two triangles.
+-- Corners: top-left, top-right, bottom-right, bottom-left.
+{-# INLINE pushQuadGradient #-}
+pushQuadGradient :: DrawArena -> Rect -> Color -> Color -> Color -> Color -> IO ()
+pushQuadGradient da (Rect x y w h) tl tr br bl
+  | w <= 0 || h <= 0 = pure ()
+  | otherwise = do
+      setTexture da 0
+      vCount <- readIORef (daVertexCount da)
+      iCount <- readIORef (daIndexCount da)
+      vCap <- readIORef (daVertexCap da)
+      iCap <- readIORef (daIndexCap da)
+      (vp, ip, base, baseIdx) <-
+        if vCount + 4 <= vCap && iCount + 6 <= iCap
+          then do
+            vp <- readIORef (daVertexPtr da)
+            ip <- readIORef (daIndexPtr da)
+            pure (vp, ip, vCount, iCount)
+          else do
+            ensureCapacity da 4 6
+            vp <- readIORef (daVertexPtr da)
+            ip <- readIORef (daIndexPtr da)
+            vc <- readIORef (daVertexCount da)
+            ic <- readIORef (daIndexCount da)
+            pure (vp, ip, vc, ic)
+      let !vOff = base * vertexSize
+          !iOff = baseIdx * indexSize
+          !baseIdxWord = fromIntegral base :: Word32
+          !x1 = x + w
+          !y1 = y + h
+          pokeVert off px py col = do
+            let !(r, g, b, a) = unpackColorF col
+            pokeByteOff vp off px
+            pokeByteOff vp (off + 4) py
+            pokeByteOff vp (off + 8) r
+            pokeByteOff vp (off + 12) g
+            pokeByteOff vp (off + 16) b
+            pokeByteOff vp (off + 20) a
+            pokeByteOff vp (off + 24) (0 :: Float)
+            pokeByteOff vp (off + 28) (0 :: Float)
+      pokeVert vOff x y tl
+      pokeVert (vOff + 32) x1 y tr
+      pokeVert (vOff + 64) x1 y1 br
+      pokeVert (vOff + 96) x y1 bl
+      pokeByteOff ip iOff baseIdxWord
+      pokeByteOff ip (iOff + 4) (baseIdxWord + 1)
+      pokeByteOff ip (iOff + 8) (baseIdxWord + 2)
+      pokeByteOff ip (iOff + 12) baseIdxWord
+      pokeByteOff ip (iOff + 16) (baseIdxWord + 2)
+      pokeByteOff ip (iOff + 20) (baseIdxWord + 3)
+      writeIORef (daVertexCount da) (base + 4)
+      writeIORef (daIndexCount da) (baseIdx + 6)
 
 -- Reserved texture id. Terminal raster treats these quads as backdrop dim,
 -- not a solid fill. Mix comes from the vertex color alpha.

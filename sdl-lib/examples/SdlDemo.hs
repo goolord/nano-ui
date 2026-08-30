@@ -7,7 +7,8 @@ module SdlDemo
     , DemoTab (..)
     ) where
 
-import Control.Monad (when)
+import Control.Monad (void, when)
+import Data.Maybe (fromMaybe)
 import Data.Primitive.SmallArray (SmallArray, smallArrayFromList)
 import NanoUI
 import NanoUI.Backend.Sdl (RgbaImage (..), SdlDebugSnapshot (..), askSdlDebug, SdlOptions (..), defaultSdlOptions, runSdlApp)
@@ -66,11 +67,20 @@ demoImages =
     , RgbaImage (ImageId 3) 32 32 stripePixels
     ]
 
+demoAccent :: Color
+demoAccent = colorRGBA 204 102 102 255
+
 demoUi :: NanoUI ()
 demoUi = do
   (readClick, setClick) <- useText ""
   (readAbout, setAbout) <- useFlag False
   (readDebug, setDebug) <- useFlag False
+  (readChecked, setChecked) <- useFlag False
+  (readVol, setVol) <- useText "50"
+  (readQuality, setQuality) <- useText "Medium"
+  (readAccent, setAccent) <- useText (colorPickerToHex demoAccent)
+  (readTheme, setTheme) <- useText (T.pack (show Dark))
+  (readName, setName) <- useText ""
   debugOpen <- readDebug
   aboutOpen <- readAbout
   scroll (tight (grow defaultLayout)) $
@@ -86,24 +96,56 @@ demoUi = do
           clickButton "About" (setAbout True)
           clickButton "Debug" (setDebug (not debugOpen))
       row (tight . gap 8 . wrap . fillW $ defaultLayout) $ do
+        column (tight . gap 8 $ defaultLayout) $ do
+          card $ do
+            heading "State"
+            checked <- readChecked
+            vol <- readVol
+            quality <- readQuality
+            accentHex <- readAccent
+            theme <- readTheme
+            name <- readName
+            let accent = fromMaybe demoAccent (colorPickerFromHex accentHex)
+            kv "Feature" (onOff checked)
+            kv "Volume" vol
+            kv "Quality" quality
+            row (tight . gap 8 . alignMid . fillW $ defaultLayout) $ do
+              void (box (fixedWH 20 20 defaultLayout) accent)
+              kv "Accent" accentHex
+            kv "Theme" theme
+            kv "Name" (orDash name)
+            click <- readClick
+            kv "Clicked" (orDash click)
+          card $ do
+            heading "Gallery"
+            row (tight . gap 10 . wrap $ defaultLayout) $ do
+              thumb (ImageId 1) "Swatch"
+              thumb (ImageId 2) "Checker"
+              thumb (ImageId 3) "Stripe"
+            sep
+            muted "Click widgets or type in Name."
+            muted "Esc closes About, then quits."
         card $ do
           boundedTabs Controls (T.pack . show) $ \case
             Controls -> do
               heading "Controls"
               (_, checked) <- checkbox "Feature" False
+              setChecked checked
               (_, vol) <- slider "Volume" 0 100 50
-              (_, quality) <- select "Quality" ["Low", "Medium", "High"] 1
+              setVol (T.pack (show (round vol :: Int)))
+              let qualities = ["Low", "Medium", "High"]
+              (_, qualityIdx) <- select "Quality" qualities 1
+              setQuality (qualities !! qualityIdx)
+              (_, accent) <- colorPicker "Accent" demoAccent
+              setAccent (colorPickerToHex accent)
+              row (tight . gap 8 . alignMid . fillW $ defaultLayout) $ do
+                void (box (fixedWH 28 28 defaultLayout) accent)
+                label_ (colorPickerToHex accent)
               (_, theme) <- boundedRadioFieldset "Theme" Dark (T.pack . show)
+              setTheme (T.pack (show theme))
               (_, name) <- textInput "Name" ""
+              setName name
               sep
-              heading "State"
-              kv "Feature" (onOff checked)
-              kv "Volume" (T.pack (show (round vol :: Int)))
-              kv "Quality" (T.pack (show quality))
-              kv "Theme" (T.pack (show theme))
-              kv "Name" (orDash name)
-              click <- readClick
-              kv "Clicked" (orDash click)
             List -> do
               heading "Items"
               scroll (padAll 6 . fixedH 136 . fillW $ defaultLayout) $
@@ -114,15 +156,6 @@ demoUi = do
               kv "Renderer" "SDL3 Pinned Vertex Arena"
               kv "Evaluation" "Zero-Cost Inactive Tabs"
               kv "State" "SrcLoc Preserved"
-        card $ do
-          heading "Gallery"
-          row (tight . gap 10 . wrap $ defaultLayout) $ do
-            thumb (ImageId 1) "Swatch"
-            thumb (ImageId 2) "Checker"
-            thumb (ImageId 3) "Stripe"
-          sep
-          muted "Click widgets or type in Name."
-          muted "Esc closes About, then quits."
   when debugOpen $ do
     snap <- askSdlDebug
     (win, _) <- window True "Debug" (debugBody snap)

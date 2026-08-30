@@ -22,6 +22,7 @@ module NanoUI.Widgets
   , radioFieldset
   , boundedRadioFieldset
   , useRadio
+  , colorPicker
   , modal
   , window
   , image
@@ -64,6 +65,10 @@ module NanoUI.Widgets
   , radioPackOption
   , radioParseOption
   , radioLabelText
+  , colorPickerLabelText
+  , colorPickerDisplayText
+  , colorPickerToHex
+  , colorPickerFromHex
   ) where
 
 import Control.Monad (void, when)
@@ -96,6 +101,10 @@ import NanoUI.WidgetText
   , radioPackOption
   , radioParseOption
   , radioLabelText
+  , colorPickerLabelText
+  , colorPickerDisplayText
+  , colorPickerToHex
+  , colorPickerFromHex
   )
 import NanoUI.Context
   ( Context (..)
@@ -109,8 +118,8 @@ import NanoUI.Context
   , setStore
   )
 import NanoUI.Icons (checkboxMark)
-import NanoUI.Id (WidgetId (..))
-import NanoUI.Input (inputMouseDown, inputMousePos)
+import NanoUI.Id (WidgetId (..), hashWidgetId)
+import NanoUI.Input (inputMouseDown, inputMousePos, inputMousePressed)
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, askInput, currentId, uiIO)
 import NanoUI.Style
@@ -165,6 +174,7 @@ import NanoUI.Widgets.Animate
   , useToggle
   )
 import NanoUI.Widgets.Overlay (modal, window)
+import NanoUI.Widgets.ColorPicker (colorPicker)
 import NanoUI.Widgets.Radio
   ( boundedRadioFieldset
   , radioFieldset
@@ -301,7 +311,12 @@ sliderEx layout lbl minV maxV initial = do
         Just (Rect x y w h) ->
           rectContains (sliderTrackBounds host fm lbl x y w h) (inputMousePos inp)
   let isActive = active == wid
-      pressed = inputMouseDown inp && (trackHover || isActive)
+      heldByOther =
+        inputMouseDown inp
+          && not (inputMousePressed inp)
+          && hashWidgetId active /= 0
+          && not isActive
+      pressed = inputMouseDown inp && (isActive || (trackHover && not heldByOther))
   val <-
     uiIO $ do
       mrect <- getPrevRect ctx wid

@@ -61,6 +61,7 @@ library
         NanoUI.Animatable
         NanoUI.Animation
         NanoUI.Atlas
+        NanoUI.ColorPicker
         NanoUI.Compact
         NanoUI.Context
         NanoUI.Context.Types
@@ -119,6 +120,7 @@ library
         NanoUI.Widgets.Layout
         NanoUI.Widgets.Tabs
         NanoUI.Widgets.Radio
+        NanoUI.Widgets.ColorPicker
         NanoUI.Widgets.TextInput
         NanoUI.Widgets.Animate
         NanoUI.Widgets.Overlay

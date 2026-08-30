@@ -141,7 +141,7 @@ import NanoUI.Layout.Arena
   , isContainerNode
   , isFloatingNode
   , isScrollNode
-  , NodeType (NodeButton, NodeCheckbox, NodeRadio, NodeSelect, NodeSlider, NodeTextInput, NodeModal, NodeImage, NodePanel, NodeWindow, NodeContainer, NodeScrollContainer, NodeText, NodeSeparator, NodeSpacer, NodeBox)
+  , NodeType (NodeButton, NodeCheckbox, NodeRadio, NodeSelect, NodeColorPicker, NodeSlider, NodeTextInput, NodeModal, NodeImage, NodePanel, NodeWindow, NodeContainer, NodeScrollContainer, NodeText, NodeSeparator, NodeSpacer, NodeBox)
   , resetNodeArena
   , setNodeText
   , setNodeValue
@@ -180,12 +180,29 @@ needsRedrawIdle :: Context -> Input -> Input -> IO Bool
 needsRedrawIdle = needsRedraw' False
 
 -- Window/scroll/resize drag marks dirty every frame. TUI must still poll input then.
+-- Color picker and slider hold ctxActiveId / storeColorDrag without those refs.
 pointerDragActive :: Context -> IO Bool
 pointerDragActive ctx = do
   winDrag <- isJust <$> readIORef (ctxWindowDrag ctx)
   scrollDrag <- isJust <$> readIORef (ctxScrollDrag ctx)
   winResize <- isJust <$> readIORef (ctxWindowResize ctx)
-  pure (winDrag || scrollDrag || winResize)
+  store <- getStore ctx
+  let colorDrag = any (/= 0) (IM.elems (storeColorDrag store))
+  sliderOrPicker <- widgetDragActive ctx
+  pure (winDrag || scrollDrag || winResize || colorDrag || sliderOrPicker)
+
+widgetDragActive :: Context -> IO Bool
+widgetDragActive ctx = do
+  active <- readIORef (ctxActiveId ctx)
+  if hashWidgetId active == 0
+    then pure False
+    else do
+      mIdx <- findNodeByWidgetId ctx active
+      case mIdx of
+        Nothing -> pure False
+        Just idx -> do
+          nt <- getNodeType (ctxNodeArena ctx) idx
+          pure (nt == NodeSlider || nt == NodeColorPicker)
 
 needsRedraw' :: Bool -> Context -> Input -> Input -> IO Bool
 needsRedraw' includeLive ctx prev inp = do

@@ -136,7 +136,7 @@ import NanoUI.Layout.Arena
   , isContainerNode
   , isFloatingNode
   , isScrollNode
-  , NodeType (NodeButton, NodeCheckbox, NodeRadio, NodeSelect, NodeSlider, NodeTextInput, NodeModal, NodeImage, NodePanel, NodeWindow, NodeContainer, NodeScrollContainer, NodeText, NodeSeparator, NodeSpacer, NodeBox)
+  , NodeType (NodeButton, NodeCheckbox, NodeRadio, NodeSelect, NodeColorPicker, NodeSlider, NodeTextInput, NodeModal, NodeImage, NodePanel, NodeWindow, NodeContainer, NodeScrollContainer, NodeText, NodeSeparator, NodeSpacer, NodeBox)
   , resetNodeArena
   , setNodeText
   , setNodeValue
@@ -162,6 +162,7 @@ import NanoUI.WidgetText
   , selectChevronReserve
   , selectChevronCenterX
   )
+import NanoUI.ColorPicker (drawColorPickerPanel)
 import NanoUI.Style (Padding (..), Style (..), Theme (..), scrollBarThumbColor, scrollBarTrackColor, themeAccent, themeButton, themeFloatingWindow, themeInput, themeMuted, themeOverlayDim, themePanel, themeSeparator, themeWindow)
 import NanoUI.Types (Color (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, lerpColor, rectContains, rectH, rectIntersect, rectOverlapArea, rectUnion, rectW, rectX, rectY, v2X, v2Y)
 import NanoUI.Frame.Chrome
@@ -320,6 +321,7 @@ lowerNode ctx idx = do
             | terminal, nt == NodeRadio = False
             | terminal, nt == NodeSlider = False
             | terminal, nt == NodeSelect = False
+            | terminal, nt == NodeColorPicker = False
             | terminal, nt == NodeTextInput = False
             | terminal, nt == NodeText = False
             | terminal = True
@@ -412,6 +414,10 @@ lowerNode ctx idx = do
           drawCloseIcon (ctxHostProfile ctx) fm da x y w h (styleFg style)
         when (nt == NodeSelect) $
           drawSelectChevron da x y w h (styleFg style)
+        when (nt == NodeColorPicker) $ do
+          store <- getStore ctx
+          wid <- getWidgetId (ctxNodeArena ctx) idx
+          drawColorPickerPanel (ctxHostProfile ctx) fm da store wid style x y w h
       placements <- widgetTextPlacements ctx nt idx x y w h
       forM_ placements $ \(txt, px, py, _, _) ->
         unless (T.null txt) $ do

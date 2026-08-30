@@ -61,6 +61,7 @@ import NanoUI.Layout.Arena
   )
 import NanoUI.Id (WidgetId)
 import NanoUI.Style (AlignX (..), AlignY (..), Padding (..), windowMargin)
+import NanoUI.ColorPicker (colorPickerMeasureSize)
 import NanoUI.WidgetText
   ( checkboxLabelText
   , radioLabelText
@@ -249,6 +250,11 @@ measureWidget na host fm measure idx = do
         case nt of
           NodeButton -> buttonPadding host fm
           NodeSelect -> buttonPadding host fm
+          NodeColorPicker
+            | isCellHost host -> widgetPadding host fm
+            | otherwise ->
+                let (cx, cy) = labelContentInset host fm
+                 in (2 * cx, cy)
           NodeSlider
             | isCellHost host -> widgetPadding host fm
             | otherwise ->
@@ -315,6 +321,10 @@ measureWidget na host fm measure idx = do
                 [] -> (0, 0)
                 ds -> (maximum (map fst ds), maximum (map snd ds))
         pure (mw, mh, selectChevronReserve, 0)
+      NodeColorPicker -> do
+        let lbl = if T.null txt then " " else txt
+        (mw, mh, extraH) <- colorPickerMeasureSize host fm measure lbl
+        pure (mw, mh, 0, extraH)
       NodeTextInput -> do
         let lbl = if T.null txt then " " else txt
         (lw, lh) <- measure lbl
