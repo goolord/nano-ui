@@ -1,3 +1,6 @@
+{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+
 module NanoUI.Id
   ( WidgetId (..)
   , widgetId
@@ -12,9 +15,11 @@ import Data.Hashable (Hashable, hash)
 import Data.Word (Word64, Word8)
 import GHC.Stack (HasCallStack, SrcLoc (..), callStack, getCallStack)
 import Data.Char (ord)
+import Data.Primitive.Types (Prim)
 
 newtype WidgetId = WidgetId Word64
-  deriving (Eq, Ord, Show)
+  deriving stock (Eq, Ord, Show)
+  deriving newtype (Prim)
 
 {-# INLINE widgetId #-}
 widgetId :: HasCallStack => WidgetId

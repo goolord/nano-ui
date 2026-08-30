@@ -5,8 +5,15 @@ module NanoUI.Context.Focus
   , getFocusables
   ) where
 
-import Data.IORef (readIORef)
-import NanoUI.Context.Internal (Context (..), modifyIORefList)
+import Control.Monad (forM)
+import Data.IORef (readIORef, writeIORef)
+import Data.Primitive.PrimArray
+  ( copyMutablePrimArray
+  , newPrimArray
+  , readPrimArray
+  , writePrimArray
+  )
+import NanoUI.Context.Internal (Context (..))
 import NanoUI.Id (WidgetId)
 
 {-# INLINE getFocusId #-}
@@ -19,9 +26,26 @@ getHotId ctx = readIORef (ctxHotId ctx)
 
 {-# INLINE registerFocusable #-}
 registerFocusable :: Context -> WidgetId -> IO ()
-registerFocusable ctx wid =
-  modifyIORefList (ctxFocusables ctx) (wid :)
+registerFocusable ctx wid = do
+  idx <- readIORef (ctxFocusablesCount ctx)
+  cap <- readIORef (ctxFocusablesCap ctx)
+  arr <- readIORef (ctxFocusables ctx)
+  arr' <-
+    if idx >= cap
+      then do
+        let newCap = max 16 (cap * 2)
+        newArr <- newPrimArray newCap
+        copyMutablePrimArray newArr 0 arr 0 idx
+        writeIORef (ctxFocusables ctx) newArr
+        writeIORef (ctxFocusablesCap ctx) newCap
+        pure newArr
+      else pure arr
+  writePrimArray arr' idx wid
+  writeIORef (ctxFocusablesCount ctx) (idx + 1)
 
 {-# INLINE getFocusables #-}
 getFocusables :: Context -> IO [WidgetId]
-getFocusables ctx = reverse <$> readIORef (ctxFocusables ctx)
+getFocusables ctx = do
+  count <- readIORef (ctxFocusablesCount ctx)
+  arr <- readIORef (ctxFocusables ctx)
+  forM [0 .. count - 1] (readPrimArray arr)

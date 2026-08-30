@@ -42,15 +42,15 @@ module NanoUI.Layout.Arena
   , setNodeValue
   ) where
 
-import Control.Monad (forM_)
+import Control.Monad (forM_, when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import Data.Primitive.Array (MutableArray, newArray, readArray, writeArray)
+import Data.Primitive.Array (MutableArray, newArray, readArray, sizeofMutableArray, writeArray)
 import Data.Primitive.PrimArray (MutablePrimArray, newPrimArray, readPrimArray, writePrimArray)
 import GHC.Exts (RealWorld)
 import Data.Text (Text)
-import Data.Word (Word8, Word64)
+import Data.Word (Word8)
 import qualified Data.Text as T
-import NanoUI.Id (WidgetId (..), hashWidgetId)
+import NanoUI.Id (WidgetId (..))
 import NanoUI.Style (AlignX (..), AlignY (..), Direction (..), Layout (..), Padding (..), Sizing (..))
 
 type NodeIdx = Int
@@ -156,7 +156,7 @@ data NodeArena = NodeArena
   , naY :: IORef (MutablePrimArray RealWorld Float)
   , naW :: IORef (MutablePrimArray RealWorld Float)
   , naH :: IORef (MutablePrimArray RealWorld Float)
-  , naWidgetId :: IORef (MutablePrimArray RealWorld Word64)
+  , naWidgetId :: IORef (MutablePrimArray RealWorld WidgetId)
   , naValue :: IORef (MutablePrimArray RealWorld Float)
   , naStyleIdx :: IORef (MutablePrimArray RealWorld Int)
   , naTextStore :: IORef (MutableArray RealWorld Text)
@@ -276,13 +276,13 @@ writeFloat mv i v = readIORef mv >>= \arr -> writePrimArray arr i v
 readFloat :: IORef (MutablePrimArray RealWorld Float) -> Int -> IO Float
 readFloat mv i = readIORef mv >>= \arr -> readPrimArray arr i
 
-{-# INLINE writeWord64 #-}
-writeWord64 :: IORef (MutablePrimArray RealWorld Word64) -> Int -> Word64 -> IO ()
-writeWord64 mv i v = readIORef mv >>= \arr -> writePrimArray arr i v
+{-# INLINE writeWidgetId #-}
+writeWidgetId :: IORef (MutablePrimArray RealWorld WidgetId) -> Int -> WidgetId -> IO ()
+writeWidgetId mv i v = readIORef mv >>= \arr -> writePrimArray arr i v
 
-{-# INLINE readWord64 #-}
-readWord64 :: IORef (MutablePrimArray RealWorld Word64) -> Int -> IO Word64
-readWord64 mv i = readIORef mv >>= \arr -> readPrimArray arr i
+{-# INLINE readWidgetId #-}
+readWidgetId :: IORef (MutablePrimArray RealWorld WidgetId) -> Int -> IO WidgetId
+readWidgetId mv i = readIORef mv >>= \arr -> readPrimArray arr i
 
 {-# NOINLINE ensureCapacity #-}
 ensureCapacity :: NodeArena -> Int -> IO ()
@@ -321,7 +321,7 @@ ensureCapacity na needed = do
         growFloat (naY na) cap newCap 0
         growFloat (naW na) cap newCap 0
         growFloat (naH na) cap newCap 0
-        growWord64 (naWidgetId na) cap newCap 0
+        growWidgetId (naWidgetId na) cap newCap (WidgetId 0)
         growFloat (naValue na) cap newCap 0
         growInt (naStyleIdx na) cap newCap 0
         growInt (naTextIdx na) cap newCap (-1)
@@ -361,9 +361,9 @@ growFloat mv oldCap newCap fill = do
     writePrimArray newArr i fill
   writeIORef mv newArr
 
-{-# NOINLINE growWord64 #-}
-growWord64 :: IORef (MutablePrimArray RealWorld Word64) -> Int -> Int -> Word64 -> IO ()
-growWord64 mv oldCap newCap fill = do
+{-# NOINLINE growWidgetId #-}
+growWidgetId :: IORef (MutablePrimArray RealWorld WidgetId) -> Int -> Int -> WidgetId -> IO ()
+growWidgetId mv oldCap newCap fill = do
   arr <- readIORef mv
   newArr <- newPrimArray newCap
   forM_ [0 .. oldCap - 1] $ \i ->
@@ -457,7 +457,7 @@ addNode na nt parent dir wSiz hSiz pad gap minW minH maxW maxH grow ax ay wrap =
   writeFloat (naY na) idx 0
   writeFloat (naW na) idx 0
   writeFloat (naH na) idx 0
-  writeWord64 (naWidgetId na) idx 0
+  writeWidgetId (naWidgetId na) idx (WidgetId 0)
   writeFloat (naValue na) idx 0
   writeInt (naStyleIdx na) idx 0
   writeInt (naTextIdx na) idx (-1)
@@ -477,45 +477,52 @@ addNode na nt parent dir wSiz hSiz pad gap minW minH maxW maxH grow ax ay wrap =
 
 {-# INLINE addNodeFromLayout #-}
 addNodeFromLayout :: NodeArena -> NodeType -> Int -> Layout -> IO NodeIdx
-addNodeFromLayout na nt parent layout = do
+addNodeFromLayout na nt parent l = do
   idx <-
     addNode
       na
       nt
       parent
-      (layoutDirection layout)
-      (layoutWidth layout)
-      (layoutHeight layout)
-      (layoutPadding layout)
-      (layoutGap layout)
-      (layoutMinW layout)
-      (layoutMinH layout)
-      (layoutMaxW layout)
-      (layoutMaxH layout)
+      (layoutDirection l)
+      (layoutWidth l)
+      (layoutHeight l)
+      (layoutPadding l)
+      (layoutGap l)
+      (layoutMinW l)
+      (layoutMinH l)
+      (layoutMaxW l)
+      (layoutMaxH l)
       0
-      (layoutAlignX layout)
-      (layoutAlignY layout)
-      (layoutWrap layout)
-  setAspect na idx (layoutAspect layout)
+      (layoutAlignX l)
+      (layoutAlignY l)
+      (layoutWrap l)
+  setAspect na idx (layoutAspect l)
   pure idx
 
 {-# INLINE setNodeText #-}
 setNodeText :: NodeArena -> NodeIdx -> Text -> IO ()
 setNodeText na idx txt = do
-  textStore <- readIORef (naTextStore na)
-  writeArray textStore idx txt
-  writeInt (naTextIdx na) idx idx
+  ti <- readInt (naTextIdx na) idx
+  if ti >= 0
+    then readIORef (naTextStore na) >>= \arr -> writeArray arr ti txt
+    else do
+      storeCap <- readIORef (naTextStore na) >>= \arr -> pure (sizeofMutableArray arr)
+      count <- readIORef (naCount na)
+      when (count >= storeCap) $ growTextStore (naTextStore na) storeCap (storeCap * 2)
+      storeArr <- readIORef (naTextStore na)
+      writeArray storeArr idx txt
+      writeInt (naTextIdx na) idx idx
 
 {-# INLINE getParent #-}
-getParent :: NodeArena -> NodeIdx -> IO Int
+getParent :: NodeArena -> NodeIdx -> IO NodeIdx
 getParent na idx = readInt (naParent na) idx
 
 {-# INLINE getFirstChild #-}
-getFirstChild :: NodeArena -> NodeIdx -> IO Int
+getFirstChild :: NodeArena -> NodeIdx -> IO NodeIdx
 getFirstChild na idx = readInt (naFirstChild na) idx
 
 {-# INLINE getNextSibling #-}
-getNextSibling :: NodeArena -> NodeIdx -> IO Int
+getNextSibling :: NodeArena -> NodeIdx -> IO NodeIdx
 getNextSibling na idx = readInt (naNextSibling na) idx
 
 {-# INLINE getChildCount #-}
@@ -635,11 +642,11 @@ getText na idx = do
 
 {-# INLINE getWidgetId #-}
 getWidgetId :: NodeArena -> NodeIdx -> IO WidgetId
-getWidgetId na idx = readWord64 (naWidgetId na) idx >>= pure . WidgetId
+getWidgetId na idx = readWidgetId (naWidgetId na) idx
 
 {-# INLINE setWidgetId #-}
 setWidgetId :: NodeArena -> NodeIdx -> WidgetId -> IO ()
-setWidgetId na idx wid = writeWord64 (naWidgetId na) idx (hashWidgetId wid)
+setWidgetId na idx wid = writeWidgetId (naWidgetId na) idx wid
 
 {-# INLINE getNodeValue #-}
 getNodeValue :: NodeArena -> NodeIdx -> IO Float
@@ -655,4 +662,4 @@ getStyleIdx na idx = readInt (naStyleIdx na) idx
 
 {-# INLINE setStyleIdx #-}
 setStyleIdx :: NodeArena -> NodeIdx -> Int -> IO ()
-setStyleIdx na idx si = writeInt (naStyleIdx na) idx si
+setStyleIdx na idx v = writeInt (naStyleIdx na) idx v

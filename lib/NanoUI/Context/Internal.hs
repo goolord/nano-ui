@@ -12,9 +12,11 @@ import Data.Dynamic (Dynamic)
 import Data.IORef (IORef, readIORef, writeIORef)
 import Data.IntMap.Strict (IntMap)
 import Data.Map.Strict (Map)
+import Data.Primitive.PrimArray (MutablePrimArray)
 import Data.Text (Text)
 import Data.Typeable (TypeRep)
 import Data.Word (Word64)
+import GHC.Exts (RealWorld)
 import NanoUI.Animation (Animation)
 import NanoUI.Atlas (ImageAtlas)
 import NanoUI.Context.Types
@@ -63,7 +65,9 @@ data Context = Context
   , ctxIcons :: Icons
   , ctxContainerStack :: IORef [Int]
   , ctxMessages :: IORef [FrameMsg]
-  , ctxFocusables :: IORef [WidgetId]
+  , ctxFocusables :: IORef (MutablePrimArray RealWorld WidgetId)
+  , ctxFocusablesCount :: IORef Int
+  , ctxFocusablesCap :: IORef Int
   , ctxScrollDrag :: IORef (Maybe (WidgetId, Float))
   , ctxTextInputDrag :: IORef (Maybe TextInputDrag)
   , ctxTextInputMenu :: IORef (Maybe TextInputMenu)

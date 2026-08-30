@@ -18,6 +18,7 @@ module NanoUI.Term.Vt
 
 import Data.Bits ((.&.), (.|.), shiftL, testBit)
 import Data.ByteString (ByteString)
+import Data.ByteString.Short (ShortByteString)
 import Data.Char (chr)
 import Data.Word (Word8)
 import NanoUI (Key (..), Modifiers (..))
@@ -33,11 +34,12 @@ import qualified Data.ByteString.Char8 as BS8
 -- | Ask the terminal for SGR-encoded any-motion mouse reporting. 1000 is
 -- press/release, 1002 adds drag, 1003 adds motion with no button held (hover),
 -- and 1006 switches to the SGR encoding so coordinates are not capped at 223.
-enableMouse :: ByteString
-enableMouse = BS8.pack "\ESC[?1000h\ESC[?1002h\ESC[?1003h\ESC[?1006h"
+-- Short CAF: ShortByteString stays unpinned (ByteString would pin).
+enableMouse :: ShortByteString
+enableMouse = "\ESC[?1000h\ESC[?1002h\ESC[?1003h\ESC[?1006h"
 
-disableMouse :: ByteString
-disableMouse = BS8.pack "\ESC[?1006l\ESC[?1003l\ESC[?1002l\ESC[?1000l"
+disableMouse :: ShortByteString
+disableMouse = "\ESC[?1006l\ESC[?1003l\ESC[?1002l\ESC[?1000l"
 
 data Step
   = -- | Not enough bytes yet; wait for more input.
