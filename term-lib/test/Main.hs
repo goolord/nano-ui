@@ -106,6 +106,10 @@ main = do
   runSdl "select-drop-flush" runSelectDropFlushTest
   run "select-pick-low" runSelectPickLowTest
   run "select-keyboard" runSelectKeyboardTest
+  run "tree-initial" runTreeInitialTest
+  run "tree-select" runTreeSelectTest
+  run "tree-expand-damage" runTreeExpandDamageTest
+  run "tree-keyboard" runTreeKeyboardTest
   run "text-wrap" runTextWrapTest
   run "text-wrap-width" runTextWrapAssignedTest
   run "text-multiline" runTextMultilineTest
@@ -2096,6 +2100,128 @@ runSelectDropdownTest ctx failed = do
   let hasLow = any (\(_, txt, _, _, _) -> "Low" `T.isInfixOf` txt) overlays
       hasHigh = any (\(_, txt, _, _, _) -> "High" `T.isInfixOf` txt) overlays
   when (not (hasLow && hasHigh)) $ bump failed
+
+runTreeInitialTest :: Context -> IORef Int -> IO ()
+runTreeInitialTest _ failed = do
+  ctx <- newContext
+  let inp0 = emptyInput {inputWindowSize = Size 40 12}
+      items =
+        [ TreeItem "root" [TreeItem "child" []]
+        , TreeItem "leaf" []
+        ]
+      ui = column defaultLayout (void (tree "t" items 0))
+  _ <- runFrame ctx inp0 ui
+  spans <- collectTextSpans ctx
+  let texts = [txt | (_, txt, _, _, _) <- spans]
+      hasRoot = any ("root" `T.isInfixOf`) texts
+      hasChild = any ("child" `T.isInfixOf`) texts
+      hasLeaf = any ("leaf" `T.isInfixOf`) texts
+  when (not (hasRoot && hasChild && hasLeaf)) $ bump failed
+
+runTreeSelectTest :: Context -> IORef Int -> IO ()
+runTreeSelectTest _ failed = do
+  ctx <- newContext
+  let inp0 = emptyInput {inputWindowSize = Size 40 12}
+      items = [TreeItem "alpha" [], TreeItem "beta" []]
+      ui = column defaultLayout (tree "t" items 0)
+  _ <- runFrame ctx inp0 ui
+  ((resp, sel0), _, _, _) <- runFrame ctx inp0 ui
+  when (sel0 /= 0) $ bump failed
+  let Rect rx ry _rw rh = respRect resp
+      -- Second row: below mid-height of the merged tree rect.
+      click = V2 (rx + 1) (ry + rh * 0.75)
+      inpPress =
+        inp0
+          { inputMousePos = click
+          , inputMouseDown = True
+          , inputMousePressed = True
+          , inputMouseReleased = False
+          }
+  _ <- runFrame ctx inpPress ui
+  let inpRelease =
+        inpPress
+          { inputMousePressed = False
+          , inputMouseDown = False
+          , inputMouseReleased = True
+          }
+  ((_, sel), _, _, _) <- runFrame ctx inpRelease ui
+  when (sel /= 1) $ bump failed
+
+-- Collapse must not flip the chevron while children still emit. Next idle
+-- frame drops the kids and Fulls so the retain buffer cannot keep ghosts.
+runTreeExpandDamageTest :: Context -> IORef Int -> IO ()
+runTreeExpandDamageTest _ failed = do
+  ctx <- newAdaptiveTerminalContext
+  let items =
+        [ TreeItem "root" [TreeItem "child" []]
+        , TreeItem "leaf" []
+        ]
+      ui = column defaultLayout (void (tree "t" items 0))
+      inp0 = emptyInput {inputWindowSize = Size 40 12, inputMousePos = V2 (-10) (-10)}
+  _ <- runFrame ctx inp0 ui
+  _ <- takeDamage ctx
+  _ <- runFrame ctx inp0 ui
+  _ <- takeDamage ctx
+  _ <- runFrame ctx inp0 ui
+  dIdle <- takeDamage ctx
+  when (dIdle == DamageFull) $ bump failed
+  spans <- collectTextSpans ctx
+  case [r | (r, txt, _, _, _) <- spans, "root" `T.isInfixOf` txt] of
+    (Rect x y _w h : _) -> do
+      let click = V2 (x + 0.5) (y + h / 2)
+          press =
+            inp0
+              { inputMousePos = click
+              , inputMouseDown = True
+              , inputMousePressed = True
+              }
+          release =
+            press
+              { inputMouseDown = False
+              , inputMousePressed = False
+              , inputMouseReleased = True
+              }
+      _ <- runFrame ctx press ui
+      _ <- runFrame ctx release ui
+      spansClick <- collectTextSpans ctx
+      when (not (any (\(_, t, _, _, _) -> "child" `T.isInfixOf` t) spansClick)) $ bump failed
+      dClick <- takeDamage ctx
+      when (dClick /= DamageFull) $ bump failed
+      _ <- runFrame ctx inp0 ui
+      spansNext <- collectTextSpans ctx
+      when (any (\(_, t, _, _, _) -> "child" `T.isInfixOf` t) spansNext) $ bump failed
+      when (not (any (\(_, t, _, _, _) -> "root" `T.isInfixOf` t) spansNext)) $ bump failed
+      dNext <- takeDamage ctx
+      when (dNext /= DamageFull) $ bump failed
+      _ <- runFrame ctx inp0 ui
+      dSettled <- takeDamage ctx
+      when (dSettled == DamageFull) $ bump failed
+    _ -> bump failed
+
+runTreeKeyboardTest :: Context -> IORef Int -> IO ()
+runTreeKeyboardTest _ failed = do
+  ctx <- newContext
+  let items =
+        [ TreeItem "root" [TreeItem "child" []]
+        , TreeItem "leaf" []
+        ]
+      ui = column defaultLayout (tree "k" items 0)
+      inp0 = emptyInput {inputWindowSize = Size 40 12}
+  _ <- runFrame ctx inp0 ui
+  _ <- runFrame ctx inp0 ui
+  let tabInp = inp0 {inputKeys = inputKeysFromList [KeyTab]}
+  _ <- runFrame ctx tabInp ui
+  let downInp = inp0 {inputKeys = inputKeysFromList [KeyDown]}
+  ((_, sel1), _, _, _) <- runFrame ctx downInp ui
+  when (sel1 /= 1) $ bump failed
+  let upInp = inp0 {inputKeys = inputKeysFromList [KeyUp]}
+  ((_, sel0), _, _, _) <- runFrame ctx upInp ui
+  when (sel0 /= 0) $ bump failed
+  let enterInp = inp0 {inputKeys = inputKeysFromList [KeyEnter]}
+  _ <- runFrame ctx enterInp ui
+  _ <- runFrame ctx inp0 ui
+  spans <- collectTextSpans ctx
+  when (any (\(_, t, _, _, _) -> "child" `T.isInfixOf` t) spans) $ bump failed
 
 runSelectDropdownHoverTest :: Context -> IORef Int -> IO ()
 runSelectDropdownHoverTest _ failed = do

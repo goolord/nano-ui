@@ -76,6 +76,7 @@ data NodeType
   | NodeBox
   | NodeRadio
   | NodeColorPicker
+  | NodeTree
   deriving (Eq, Show, Enum, Bounded)
 
 isWidgetNode :: NodeType -> Bool
@@ -89,6 +90,7 @@ isWidgetNode nt =
     NodeTextInput -> True
     NodeSelect -> True
     NodeColorPicker -> True
+    NodeTree -> True
     NodeImage -> True
     _ -> False
 

@@ -159,6 +159,11 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
       forM (IM.keys liveAnims) $ \k ->
         isNothing <$> getPrevRectByKey ctx k
   let storePaintChanged = paintStore oldStore /= paintStore newStore
+      -- Expand changes which rows exist. Selection is node value, not text.
+      -- Either one must Full: retain clips would leave ghost children / old highlight.
+      treeStoreChanged =
+        storeTreeSelected oldStore /= storeTreeSelected newStore
+          || storeTreeExpanded oldStore /= storeTreeExpanded newStore
       colorStoreChanged =
         storeColor oldStore /= storeColor newStore
           || storeColorHue oldStore /= storeColorHue newStore
@@ -189,6 +194,7 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
           || sizeChanged
           || commanded
           || storePaintChanged
+          || treeStoreChanged
           || overlayOpen
           || modalFlip
           || floatingChanged
@@ -282,6 +288,8 @@ paintStore s =
     , storeColorHue = IM.empty
     , storeColorSv = IM.empty
     , storeColorDrag = IM.empty
+    , storeTreeSelected = IM.empty
+    , storeTreeExpanded = IM.empty
     }
 
 floatingRectDamage :: IM.IntMap Rect -> IM.IntMap Rect -> [Rect]

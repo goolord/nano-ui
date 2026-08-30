@@ -22,6 +22,8 @@ module NanoUI.Widgets
   , radioFieldset
   , boundedRadioFieldset
   , useRadio
+  , TreeItem (..)
+  , tree
   , colorPicker
   , modal
   , window
@@ -179,6 +181,10 @@ import NanoUI.Widgets.Radio
   ( boundedRadioFieldset
   , radioFieldset
   , useRadio
+  )
+import NanoUI.Widgets.Tree
+  ( TreeItem (..)
+  , tree
   )
 import NanoUI.Widgets.TextInput
   ( TextInputState (..)

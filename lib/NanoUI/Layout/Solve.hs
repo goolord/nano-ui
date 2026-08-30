@@ -14,6 +14,7 @@ import NanoUI.Font
   ( FontMetrics (..)
   , checkboxBoxSize
   , checkboxLeading
+  , treeRowLeading
   , classifyScrollBar
   , fmLineHeight
   , resolveLayoutGap
@@ -65,6 +66,9 @@ import NanoUI.ColorPicker (colorPickerMeasureSize)
 import NanoUI.WidgetText
   ( checkboxLabelText
   , radioLabelText
+  , treeLabelText
+  , treeMeasureLabel
+  , treeParseRow
   , selectDisplayText
   , selectChevronReserve
   , selectParseOptions
@@ -312,6 +316,16 @@ measureWidget na host fm measure idx = do
           else do
             let box = checkboxBoxSize host fm
             pure (mw, max mh box, checkboxLeading host fm, 0)
+      NodeTree -> do
+        let (_, _, depth, _, _, raw) = treeParseRow txt
+            lbl = if T.null raw then " " else treeLabelText txt
+            body = if isCellHost host then treeMeasureLabel depth lbl else lbl
+        (mw, mh) <- measure body
+        if isCellHost host
+          then pure (mw, mh, 0, 0)
+          else do
+            let box = checkboxBoxSize host fm
+            pure (mw, max mh box, treeRowLeading host fm depth, 0)
       NodeSelect -> do
         let (lbl, opts) = selectParseOptions txt
             choices = if null opts then [""] else opts

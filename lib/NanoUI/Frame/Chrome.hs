@@ -69,6 +69,9 @@ import NanoUI.WidgetMarkers
 import NanoUI.WidgetText
   ( checkboxLabelText
   , radioLabelText
+  , treeDisplayText
+  , treeLabelText
+  , treeParseRow
   , selectDisplayText
   , selectParseOptions
   , colorPickerDisplayText
@@ -88,7 +91,7 @@ import NanoUI.Style
   , themeWindow
   )
 import NanoUI.ColorPicker (colorPickerDefaultColor, widgetStoreColor)
-import NanoUI.Types (Color (..), Rect (..), colorRGBA, clamp01, lerpColor, rectH, rectW, rectX, rectY)
+import NanoUI.Types (Color (..), Rect (..), colorRGBA, colorR, colorG, colorB, clamp01, lerpColor, rectH, rectW, rectX, rectY)
 
 nodeLabelPaint :: Theme -> T.Text -> (T.Text, Color, Color)
 nodeLabelPaint theme raw = labelPaintWith (themePanel theme) theme raw
@@ -177,6 +180,9 @@ displayText ctx nt idx = do
           let current = widgetStoreColor store wid colorPickerDefaultColor
           pure (colorPickerDisplayText txt current)
         NodeSlider -> pure (T.takeWhile (/= '\US') txt)
+        NodeTree -> do
+          let (_, _, depth, hasKids, expanded, lbl) = treeParseRow txt
+          pure (treeDisplayText (ctxIcons ctx) depth hasKids expanded lbl)
         NodeButton ->
           if isCloseButtonText txt
             then pure (closeButtonDisplayText txt)
@@ -195,6 +201,7 @@ displayText ctx nt idx = do
       case nt of
         NodeCheckbox -> pure (checkboxLabelText txt)
         NodeRadio -> pure (radioLabelText txt)
+        NodeTree -> pure (treeLabelText txt)
         NodeTextInput -> do
           value <- textInputValue ctx idx
           focused <- textInputFocused ctx idx
@@ -447,6 +454,24 @@ widgetVisualStyle ctx nt idx = do
               , styleActiveBg = colorRGBA 0 0 0 0
               , styleBorderWidth = 0
               }
+          NodeTree ->
+            let btn = themeButton theme
+                accent = themeAccent theme
+             in if val > 0.5
+                  then
+                    btn
+                      { styleBg = colorRGBA (colorR accent) (colorG accent) (colorB accent) 48
+                      , styleHoverBg = colorRGBA (colorR accent) (colorG accent) (colorB accent) 72
+                      , styleActiveBg = colorRGBA (colorR accent) (colorG accent) (colorB accent) 96
+                      , styleBorderWidth = 0
+                      }
+                  else
+                    btn
+                      { styleBg = colorRGBA 0 0 0 0
+                      , styleHoverBg = colorRGBA (colorR accent) (colorG accent) (colorB accent) 32
+                      , styleActiveBg = colorRGBA (colorR accent) (colorG accent) (colorB accent) 48
+                      , styleBorderWidth = 0
+                      }
           NodeButton
             | isClose -> closeButtonStyle theme isHot animT
             | isTab, terminal ->
@@ -484,7 +509,7 @@ widgetVisualStyle ctx nt idx = do
         case mFloat of
           Just NodeModal
             | terminal -> base
-            | nt == NodeCheckbox || nt == NodeRadio || nt == NodeSlider -> overlayModalStyle theme
+            | nt == NodeCheckbox || nt == NodeRadio || nt == NodeTree || nt == NodeSlider -> overlayModalStyle theme
             | otherwise -> base
           _ -> base
       bg
@@ -494,6 +519,7 @@ widgetVisualStyle ctx nt idx = do
         | nt == NodeTextInput, isFocus = styleActiveBg widgetBase
         | widKey == hashWidgetId active = styleActiveBg widgetBase
         | nt == NodeCheckbox || nt == NodeRadio || nt == NodeSlider || isClose = styleBg widgetBase
+        | nt == NodeTree = hoverBackground widgetBase animT isHot
         | isTab = hoverBackground widgetBase animT isHot
         | otherwise = hoverBackground widgetBase animT isHot
   pure widgetBase {styleBg = bg}

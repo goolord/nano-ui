@@ -242,6 +242,7 @@ isInteractiveNode nt =
   nt == NodeButton
     || nt == NodeCheckbox
     || nt == NodeRadio
+    || nt == NodeTree
     || nt == NodeSlider
     || nt == NodeSelect
     || nt == NodeColorPicker
