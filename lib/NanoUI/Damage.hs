@@ -253,7 +253,7 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
                   if k == 0
                     then pure []
                     else pure (catMaybes [IM.lookup k oldRects, IM.lookup k newRects])
-            let layoutRs = if animLive then moved else []
+            let layoutRs = moved
                 base =
                   unionRects
                     ( rs

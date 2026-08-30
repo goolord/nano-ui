@@ -47,7 +47,7 @@ import Control.Monad (forM_, when)
 import Data.HashTable.IO (BasicHashTable)
 import qualified Data.HashTable.IO as HT
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import Data.Primitive.Array (MutableArray, newArray, readArray, sizeofMutableArray, writeArray)
+import Data.Primitive.Array (MutableArray, newArray, readArray, writeArray)
 import Data.Primitive.PrimArray (MutablePrimArray, newPrimArray, readPrimArray, writePrimArray)
 import GHC.Exts (RealWorld)
 import Data.Text (Text)
@@ -533,16 +533,9 @@ addNodeFromLayout na nt parent l = do
 {-# INLINE setNodeText #-}
 setNodeText :: NodeArena -> NodeIdx -> Text -> IO ()
 setNodeText na idx txt = do
-  ti <- readInt (naTextIdx na) idx
-  if ti >= 0
-    then readIORef (naTextStore na) >>= \arr -> writeArray arr ti txt
-    else do
-      storeCap <- readIORef (naTextStore na) >>= \arr -> pure (sizeofMutableArray arr)
-      count <- readIORef (naCount na)
-      when (count >= storeCap) $ growTextStore (naTextStore na) storeCap (storeCap * 2)
-      storeArr <- readIORef (naTextStore na)
-      writeArray storeArr idx txt
-      writeInt (naTextIdx na) idx idx
+  textStore <- readIORef (naTextStore na)
+  writeArray textStore idx txt
+  writeInt (naTextIdx na) idx idx
 
 {-# INLINE getParent #-}
 getParent :: NodeArena -> NodeIdx -> IO NodeIdx
@@ -681,10 +674,7 @@ setWidgetId na idx wid = do
   writeWidgetId (naWidgetId na) idx wid
   when (hashWidgetId wid /= 0) $ do
     table <- readIORef (naWidgetIndex na)
-    existing <- HT.lookup table wid
-    case existing of
-      Nothing -> HT.insert table wid idx
-      Just _ -> pure ()
+    HT.insert table wid idx
 
 {-# INLINE getNodeValue #-}
 getNodeValue :: NodeArena -> NodeIdx -> IO Float

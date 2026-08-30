@@ -241,6 +241,11 @@ runFrameEff unlift ctx inp ui = do
   finalizeSelectPick ctx inp
   closeSelectOnOutsideClick ctx inp
   syncWidgetLabels ctx
+  -- Store/input finalization can change measured widget text (sliders, marks).
+  solveLayout (ctxNodeArena ctx) (ctxHostProfile ctx) (ctxFontMetrics ctx) (ctxMeasureText ctx) w h
+  placeModals (ctxNodeArena ctx) (ctxHostProfile ctx) (ctxFontMetrics ctx) w h
+  placeWindows (ctxNodeArena ctx) (ctxHostProfile ctx) (ctxFontMetrics ctx) w h (lookupWindowPos ctx) (lookupWindowSize ctx)
+  applyScrollOffsets ctx
   refreshHover ctx inp
   tickAnimations ctx (inputDeltaTime inp)
   beginLayer (ctxDrawArena ctx) LayerBackground
