@@ -19,15 +19,15 @@ module NanoUI.Widgets.Tabs
   , useTab
   , useTabIdx
   , boundedTabs
-  ) where
+  )
+where
 
 import Control.Monad (forM_, when, zipWithM)
 import Data.Maybe (isJust)
 import Data.Text (Text)
+import Data.Text qualified as T
 import Data.Typeable (Typeable)
 import Effectful (Eff, type (:>))
-import qualified Data.Text as T
-import GHC.Stack (HasCallStack)
 import NanoUI.Context
   ( Context (..)
   , markDirty
@@ -40,7 +40,7 @@ import NanoUI.Layout.Arena
   , getWidgetId
   , setNodeValue
   )
-import NanoUI.Monad (Ui, askContext, currentId, emit, uiIO, withKey)
+import NanoUI.Monad (Ui, askContext, emit, nextId, uiIO, withKey)
 import NanoUI.Style
   ( AlignX (..)
   , AlignY (..)
@@ -56,6 +56,7 @@ import NanoUI.Style
 import NanoUI.Types (Rect (..))
 import NanoUI.WidgetMarkers (closeButtonMarker, tabButtonMarker)
 import NanoUI.Widgets.Animate (useText)
+import NanoUI.Widgets.Layout (column, row)
 import NanoUI.Widgets.Node
   ( Clickable (..)
   , Responding (..)
@@ -65,7 +66,6 @@ import NanoUI.Widgets.Node
   , setChanged
   , setClicked
   )
-import NanoUI.Widgets.Layout (column, row)
 
 -- | Visual style for tab headers.
 data TabStyle
@@ -177,109 +177,119 @@ tabHeaderHeight host
 
 tabHeaderLayout :: Context -> TabStyle -> Layout
 tabHeaderLayout ctx _style =
-  let h = tabHeaderHeight (ctxHostProfile ctx)
-   in defaultLayout
-        { layoutHeight = Fixed h
-        , layoutPadding = Padding 8 8 4 4
-        , layoutAlignX = AlignCenter
-        , layoutAlignY = AlignMiddle
-        , layoutGap = 4
-        }
+  let
+    h = tabHeaderHeight (ctxHostProfile ctx)
+   in
+    defaultLayout
+      { layoutHeight = Fixed h
+      , layoutPadding = Padding 8 8 4 4
+      , layoutAlignX = AlignCenter
+      , layoutAlignY = AlignMiddle
+      , layoutGap = 4
+      }
 
 tabListContainerLayout :: Context -> TabStyle -> TabOrientation -> Layout
 tabListContainerLayout ctx style orient =
-  let h = tabHeaderHeight (ctxHostProfile ctx)
-      dir = tabOrientationDirection orient
-   in case orient of
-        TabVertical ->
-          defaultLayout
-            { layoutDirection = dir
-            , layoutWidth = Fit
-            , layoutHeight = Grow 1
-            , layoutGap = 2
-            , layoutPadding = Padding 2 2 2 2
-            }
-        TabLeft ->
-          defaultLayout
-            { layoutDirection = dir
-            , layoutWidth = Fit
-            , layoutHeight = Grow 1
-            , layoutGap = 2
-            , layoutPadding = Padding 2 2 2 2
-            }
-        TabRight ->
-          defaultLayout
-            { layoutDirection = dir
-            , layoutWidth = Fit
-            , layoutHeight = Grow 1
-            , layoutGap = 2
-            , layoutPadding = Padding 2 2 2 2
-            }
-        _ ->
-          defaultLayout
-            { layoutDirection = dir
-            , layoutWidth = Grow 1
-            , layoutHeight = Fixed (h + 4)
-            , layoutGap = if style == TabSegmented || style == TabStyleSegmented then 0 else 4
-            , layoutPadding = if style == TabContained || style == TabStyleContained then Padding 0 0 2 0 else Padding 0 0 0 0
-            }
+  let
+    h = tabHeaderHeight (ctxHostProfile ctx)
+    dir = tabOrientationDirection orient
+   in
+    case orient of
+      TabVertical ->
+        defaultLayout
+          { layoutDirection = dir
+          , layoutWidth = Fit
+          , layoutHeight = Grow 1
+          , layoutGap = 2
+          , layoutPadding = Padding 2 2 2 2
+          }
+      TabLeft ->
+        defaultLayout
+          { layoutDirection = dir
+          , layoutWidth = Fit
+          , layoutHeight = Grow 1
+          , layoutGap = 2
+          , layoutPadding = Padding 2 2 2 2
+          }
+      TabRight ->
+        defaultLayout
+          { layoutDirection = dir
+          , layoutWidth = Fit
+          , layoutHeight = Grow 1
+          , layoutGap = 2
+          , layoutPadding = Padding 2 2 2 2
+          }
+      _ ->
+        defaultLayout
+          { layoutDirection = dir
+          , layoutWidth = Grow 1
+          , layoutHeight = Fixed (h + 4)
+          , layoutGap = if style == TabSegmented || style == TabStyleSegmented then 0 else 4
+          , layoutPadding =
+              if style == TabContained || style == TabStyleContained
+                then Padding 0 0 2 0
+                else Padding 0 0 0 0
+          }
 
 -- | Render a standard tab bar with panels.
 tabs ::
-  (Eq a, HasCallStack, Ui :> es) =>
-  a ->
-  [Tab a (Eff es ())] ->
-  Eff es (TabResponse a, a)
+  (Eq a, Ui :> es) =>
+  a
+  -> [Tab a (Eff es ())]
+  -> Eff es (TabResponse a, a)
 tabs curTab tabList = tabsEx TabStyleUnderline TabTop curTab tabList
 
 -- | Render tabs with custom styling and orientation.
 tabsEx ::
-  (Eq a, HasCallStack, Ui :> es) =>
-  TabStyle ->
-  TabOrientation ->
-  a ->
-  [Tab a (Eff es ())] ->
-  Eff es (TabResponse a, a)
+  (Eq a, Ui :> es) =>
+  TabStyle
+  -> TabOrientation
+  -> a
+  -> [Tab a (Eff es ())]
+  -> Eff es (TabResponse a, a)
 tabsEx style orient curTab tabList =
   -- Bar + body must share one parent. Sequential root siblings leave the body unpositioned.
-  let shell layout = layout $ do
-        (tabResp, nextTab) <- tabBarEx style orient curTab tabList
-        renderActiveBody nextTab tabList
-        pure (tabResp, nextTab)
-   in case orient of
-        TabVertical -> shell (row (tight . fillW . grow $ defaultLayout))
-        TabLeft -> shell (row (tight . fillW . grow $ defaultLayout))
-        TabRight -> shell (row (tight . fillW . grow $ defaultLayout))
-        _ -> shell (column (tight . fillW . grow $ defaultLayout))
-  where
-    renderActiveBody activeKey ts =
-      case filter (\t -> tabKey t == activeKey) ts of
-        (selected : _) -> tabBody selected
-        [] -> case ts of
-          (firstTab : _) -> tabBody firstTab
-          [] -> pure ()
+  let
+    shell layout = layout $ do
+      (tabResp, nextTab) <- tabBarEx style orient curTab tabList
+      renderActiveBody nextTab tabList
+      pure (tabResp, nextTab)
+   in
+    case orient of
+      TabVertical -> shell (row (tight . fillW . grow $ defaultLayout))
+      TabLeft -> shell (row (tight . fillW . grow $ defaultLayout))
+      TabRight -> shell (row (tight . fillW . grow $ defaultLayout))
+      _ -> shell (column (tight . fillW . grow $ defaultLayout))
+ where
+  renderActiveBody activeKey ts =
+    case filter (\t -> tabKey t == activeKey) ts of
+      (selected : _) -> tabBody selected
+      [] -> case ts of
+        (firstTab : _) -> tabBody firstTab
+        [] -> pure ()
 
 -- | Render just the tab headers without rendering the tab bodies.
 tabBar ::
-  (Eq a, HasCallStack, Ui :> es) =>
-  a ->
-  [Tab a body] ->
-  Eff es (TabResponse a, a)
+  (Eq a, Ui :> es) =>
+  a
+  -> [Tab a body]
+  -> Eff es (TabResponse a, a)
 tabBar curTab tabList = tabBarEx TabStyleUnderline TabTop curTab tabList
 
 -- | Render just the tab headers with styling options.
 tabBarEx ::
-  (Eq a, HasCallStack, Ui :> es) =>
-  TabStyle ->
-  TabOrientation ->
-  a ->
-  [Tab a body] ->
-  Eff es (TabResponse a, a)
+  (Eq a, Ui :> es) =>
+  TabStyle
+  -> TabOrientation
+  -> a
+  -> [Tab a body]
+  -> Eff es (TabResponse a, a)
 tabBarEx style orient curTab tabList = do
   ctx <- askContext
-  let containerLayout = tabListContainerLayout ctx style orient
-      headerLayout = tabHeaderLayout ctx style
-      styleVal = tabStyleIndex style
+  let
+    containerLayout = tabListContainerLayout ctx style orient
+    headerLayout = tabHeaderLayout ctx style
+    styleVal = tabStyleIndex style
 
   case orient of
     TabVertical ->
@@ -290,97 +300,128 @@ tabBarEx style orient curTab tabList = do
       column containerLayout $ renderHeaders ctx headerLayout styleVal
     _ ->
       row containerLayout $ renderHeaders ctx headerLayout styleVal
-  where
-    renderHeaders ctx headerLayout styleVal = do
-      resps <-
-        zipWithM
-          (\i t -> withKey i (renderSingleHeader headerLayout styleVal t))
-          [0 :: Int ..]
-          tabList
-      let clickedKeys = [k | (k, clicked, _, _) <- resps, clicked]
-          closedKeys = [k | (_, _, Just k, _) <- resps]
-          nextTab = case clickedKeys of
-            (k : _) -> k
-            [] -> curTab
-          closedKey = case closedKeys of
-            (k : _) -> Just k
-            [] -> Nothing
-          hasChanged = nextTab /= curTab
-          hasClicked = not (null clickedKeys)
-          baseResp = case resps of
-            ((_, _, _, r) : _) -> r
-            [] -> mkResponse (WidgetId 0) (Rect 0 0 0 0) False False False False
-          modifiedResp = setChanged hasChanged (setClicked hasClicked baseResp)
-          overallResp = TabResponse
-            { tabResponse = modifiedResp
-            , tabClosed = closedKey
-            , tabActive = nextTab
-            }
-      -- Header activeVal is painted from nextTab (click frame), not lagged curTab.
-      -- Active underline is node value, not text: damage alone would miss it.
-      when (hasChanged || isJust closedKey) $ uiIO (markDirty ctx)
-      when hasChanged $ uiIO (syncTabHeaderActive ctx nextTab resps)
-      pure (overallResp, nextTab)
+ where
+  renderHeaders ctx headerLayout styleVal = do
+    resps <-
+      zipWithM
+        (\i t -> withKey i (renderSingleHeader headerLayout styleVal t))
+        [0 :: Int ..]
+        tabList
+    let
+      clickedKeys = [k | (k, clicked, _, _) <- resps, clicked]
+      closedKeys = [k | (_, _, Just k, _) <- resps]
+      nextTab = case clickedKeys of
+        (k : _) -> k
+        [] -> curTab
+      closedKey = case closedKeys of
+        (k : _) -> Just k
+        [] -> Nothing
+      hasChanged = nextTab /= curTab
+      hasClicked = not (null clickedKeys)
+      baseResp = case resps of
+        ((_, _, _, r) : _) -> r
+        [] -> mkResponse (WidgetId 0) (Rect 0 0 0 0) False False False False
+      modifiedResp = setChanged hasChanged (setClicked hasClicked baseResp)
+      overallResp =
+        TabResponse
+          { tabResponse = modifiedResp
+          , tabClosed = closedKey
+          , tabActive = nextTab
+          }
+    -- Header activeVal is painted from nextTab (click frame), not lagged curTab.
+    -- Active underline is node value, not text: damage alone would miss it.
+    when (hasChanged || isJust closedKey) $ uiIO (markDirty ctx)
+    when hasChanged $ uiIO (syncTabHeaderActive ctx nextTab resps)
+    pure (overallResp, nextTab)
 
-    renderSingleHeader headerLayout styleVal t = do
-      let isActive = tabKey t == curTab
-          activeVal = if isActive then 1 else 0
-          baseTitle = tabTitle t
-          badgeSuffix = case tabBadge t of
-            Just b -> " (" <> b <> ")"
-            Nothing -> ""
-          headerText = tabButtonMarker <> baseTitle <> badgeSuffix
+  renderSingleHeader headerLayout styleVal t = do
+    let
+      isActive = tabKey t == curTab
+      activeVal = if isActive then 1 else 0
+      baseTitle = tabTitle t
+      badgeSuffix = case tabBadge t of
+        Just b -> " (" <> b <> ")"
+        Nothing -> ""
+      headerText = tabButtonMarker <> baseTitle <> badgeSuffix
 
-      if tabClosable t
-        then do
-          (tabResp, closed) <- row (tight defaultLayout) $ do
-            wid <- currentId
-            resp <- addWidgetStyled wid NodeButton headerText activeVal headerLayout styleVal Nothing
-            closeWid <- currentId
-            closeResp <- addWidgetStyled closeWid NodeButton (closeButtonMarker <> "×") 0 (headerLayout { layoutPadding = Padding 2 4 4 4 }) 0 Nothing
-            pure (resp, respClicked closeResp)
-          let closeKey = if closed then Just (tabKey t) else Nothing
-          pure (tabKey t, respClicked tabResp && not closed, closeKey, tabResp)
-        else do
-          wid <- currentId
-          resp <- addWidgetStyled wid NodeButton headerText activeVal headerLayout styleVal Nothing
-          pure (tabKey t, respClicked resp, Nothing, resp)
+    if tabClosable t
+      then do
+        (tabResp, closed) <- row (tight defaultLayout) $ do
+          wid <- nextId
+          resp <-
+            addWidgetStyled
+              wid
+              NodeButton
+              headerText
+              activeVal
+              headerLayout
+              styleVal
+              Nothing
+          closeWid <- nextId
+          closeResp <-
+            addWidgetStyled
+              closeWid
+              NodeButton
+              (closeButtonMarker <> "×")
+              0
+              (headerLayout {layoutPadding = Padding 2 4 4 4})
+              0
+              Nothing
+          pure (resp, respClicked closeResp)
+        let
+          closeKey = if closed then Just (tabKey t) else Nothing
+        pure (tabKey t, respClicked tabResp && not closed, closeKey, tabResp)
+      else do
+        wid <- nextId
+        resp <-
+          addWidgetStyled
+            wid
+            NodeButton
+            headerText
+            activeVal
+            headerLayout
+            styleVal
+            Nothing
+        pure (tabKey t, respClicked resp, Nothing, resp)
 
 -- | Patch tab button node values so the active underline matches selection this frame.
-syncTabHeaderActive :: Eq a => Context -> a -> [(a, Bool, Maybe a, Response)] -> IO ()
+syncTabHeaderActive ::
+  Eq a => Context -> a -> [(a, Bool, Maybe a, Response)] -> IO ()
 syncTabHeaderActive ctx active resps = do
-  let na = ctxNodeArena ctx
+  let
+    na = ctxNodeArena ctx
   count <- arenaCount na
   forM_ resps $ \(k, _, _, r) -> do
-    let wid = respId r
-        target = if k == active then 1 else 0
-        go i
-          | i >= count = pure ()
-          | otherwise = do
-              w <- getWidgetId na i
-              if w == wid
-                then setNodeValue na i target
-                else go (i + 1)
+    let
+      wid = respId r
+      target = if k == active then 1 else 0
+      go i
+        | i >= count = pure ()
+        | otherwise = do
+            w <- getWidgetId na i
+            if w == wid
+              then setNodeValue na i target
+              else go (i + 1)
     go 0
 
 -- | Event-emitting variant of tabs that dispatches actions.
 tabsEmit ::
-  (Typeable action, Eq a, HasCallStack, Ui :> es) =>
-  (a -> action) ->
-  a ->
-  [Tab a (Eff es ())] ->
-  Eff es (TabResponse a, a)
+  (Typeable action, Eq a, Ui :> es) =>
+  (a -> action)
+  -> a
+  -> [Tab a (Eff es ())]
+  -> Eff es (TabResponse a, a)
 tabsEmit toAction curTab tabList = tabsEmitEx TabStyleUnderline TabTop toAction curTab tabList
 
 -- | Event-emitting variant of tabs with full styling control.
 tabsEmitEx ::
-  (Typeable action, Eq a, HasCallStack, Ui :> es) =>
-  TabStyle ->
-  TabOrientation ->
-  (a -> action) ->
-  a ->
-  [Tab a (Eff es ())] ->
-  Eff es (TabResponse a, a)
+  (Typeable action, Eq a, Ui :> es) =>
+  TabStyle
+  -> TabOrientation
+  -> (a -> action)
+  -> a
+  -> [Tab a (Eff es ())]
+  -> Eff es (TabResponse a, a)
 tabsEmitEx style orient toAction curTab tabList = do
   (tabResp, nextTab) <- tabsEx style orient curTab tabList
   when (tabRespClicked tabResp && nextTab /= curTab) $
@@ -388,28 +429,30 @@ tabsEmitEx style orient toAction curTab tabList = do
   pure (tabResp, nextTab)
 
 -- | Uncontrolled tab hook storing the active tab in component local store.
-useTab :: (Eq a, Show a, Read a, HasCallStack, Ui :> es) => a -> Eff es (a, a -> Eff es ())
+useTab :: (Eq a, Show a, Read a, Ui :> es) => a -> Eff es (a, a -> Eff es ())
 useTab initial = do
   (readTxt, setTxt) <- useText (T.pack (show initial))
   txt <- readTxt
-  let current = case reads (T.unpack txt) of
-        [(v, "")] -> v
-        _         -> initial
-      set v = when (v /= current) $ setTxt (T.pack (show v))
+  let
+    current = case reads (T.unpack txt) of
+      [(v, "")] -> v
+      _ -> initial
+    set v = when (v /= current) $ setTxt (T.pack (show v))
   pure (current, set)
 
 -- | Uncontrolled tab hook by integer index.
-useTabIdx :: (HasCallStack, Ui :> es) => Int -> Eff es (Int, Int -> Eff es ())
+useTabIdx :: Ui :> es => Int -> Eff es (Int, Int -> Eff es ())
 useTabIdx = useTab
 
 -- | Render a set of tabs for any bounded enumerable type.
 boundedTabs ::
-  (Bounded a, Enum a, Eq a, Show a, Read a, HasCallStack, Ui :> es) =>
-  a ->
-  (a -> Text) ->
-  (a -> Eff es ()) ->
-  Eff es ()
+  (Bounded a, Enum a, Eq a, Show a, Read a, Ui :> es) =>
+  a
+  -> (a -> Text)
+  -> (a -> Eff es ())
+  -> Eff es ()
 boundedTabs initial encodeTab tabf = do
   (curTab, setTab) <- useTab initial
-  (tabResp, nextTab) <- tabs curTab (fmap (\x -> tab x (encodeTab x) (tabf x)) [minBound .. maxBound])
+  (tabResp, nextTab) <-
+    tabs curTab (fmap (\x -> tab x (encodeTab x) (tabf x)) [minBound .. maxBound])
   when (tabRespChanged tabResp) (setTab nextTab)

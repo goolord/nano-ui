@@ -4,7 +4,7 @@ Purely functional immediate-mode GUI core for Haskell. Backend-agnostic: emits b
 
 ## Features
 
-- **SrcLoc IDs**: `HasCallStack` hashing for stable widget identity without manual ID stacks
+- **Topological path IDs**: zero-allocation `Word64` widget IDs from `nextId`/`scope`/`keyed` (no `HasCallStack` or manual ID stacks)
 - **Typed reducers**: `emit` collects messages; backend `run*AppReduce` applies them to app state at frame end
 - **Two-pass flex layout**: measure/position over struct-of-arrays node arena. `percent` and `aspect` (width / height) are first-class constraints
 - **Compact regions**: `compactHost` / `askCompact` keep large read-heavy app state off the GC walk

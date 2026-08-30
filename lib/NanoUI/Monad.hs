@@ -10,19 +10,31 @@ module NanoUI.Monad
   , uiFinally
   , emit
   , withKey
+  , keyed
+  , keyedTag
+  , scope
+  , nextId
   , currentId
   , askContext
   , askInput
   , askHost
-  ) where
+  )
+where
 
 import Control.Exception (finally)
-import Data.Bits (xor)
 import Data.Hashable (Hashable, hash)
 import Data.IORef (readIORef, writeIORef)
 import Data.Typeable (Typeable)
 import Data.Word (Word64)
-import Effectful (Dispatch (Static), DispatchOf, Eff, Effect, IOE, runEff, type (:>))
+import Effectful
+  ( Dispatch (Static)
+  , DispatchOf
+  , Eff
+  , Effect
+  , IOE
+  , runEff
+  , type (:>)
+  )
 import Effectful.Dispatch.Static
   ( SideEffects (WithSideEffects)
   , StaticRep
@@ -31,14 +43,18 @@ import Effectful.Dispatch.Static
   , unsafeEff_
   )
 import Effectful.Dispatch.Static.Unsafe (reallyUnsafeLiftMapIO)
-import GHC.Stack (CallStack, HasCallStack, callStack, getCallStack)
-import NanoUI.Messages (FrameMsg (..))
 import NanoUI.Context (Context (..), askHostIO, pushMessage)
-import NanoUI.Id (WidgetId (..), fnv1a, hashSrcLoc, hashWidgetId)
+import NanoUI.Id
+  ( IdContext (IdContext, siblingId)
+  , WidgetId (..)
+  , enterKeyed
+  , enterScope
+  , mix64
+  , scopeTag
+  )
 import NanoUI.Input (Input)
+import NanoUI.Messages (FrameMsg (..))
 
--- Concrete app stack: Ui plus IO. Widgets stay polymorphic so other
--- effects (State, Error, extra IO) can sit under Ui.
 type NanoUI = Eff '[Ui, IOE]
 
 data Ui :: Effect
@@ -71,30 +87,66 @@ emit msg = do
   ctx <- askContext
   uiIO (pushMessage ctx (FrameMsg msg))
 
+{-# INLINE peekId #-}
+peekId :: Ui :> es => Eff es WidgetId
+peekId = do
+  ctx <- askContext
+  ic <- uiIO (readIORef (ctxIdContext ctx))
+  let
+    IdContext cid sid = ic
+    raw = mix64 cid sid
+  pure (if raw == 0 then WidgetId 1 else WidgetId raw)
+
+{-# INLINE nextId #-}
+nextId :: Ui :> es => Eff es WidgetId
+nextId = do
+  ctx <- askContext
+  uiIO $ do
+    ic <- readIORef (ctxIdContext ctx)
+    let
+      IdContext cid sid = ic
+      raw = mix64 cid sid
+      wid = if raw == 0 then WidgetId 1 else WidgetId raw
+    writeIORef (ctxIdContext ctx) (ic {siblingId = sid + 1})
+    pure wid
+
+{-# INLINE currentId #-}
+currentId :: Ui :> es => Eff es WidgetId
+currentId = peekId
+
+{-# INLINE scope #-}
+scope :: Ui :> es => Eff es a -> Eff es a
+scope m = do
+  ctx <- askContext
+  parent' <- uiIO $ do
+    old <- readIORef (ctxIdContext ctx)
+    let
+      (p, c) = enterScope scopeTag old
+    writeIORef (ctxIdContext ctx) c
+    pure p
+  uiFinally m (writeIORef (ctxIdContext ctx) parent')
+
+{-# INLINE keyed #-}
+
+-- | Stable child path from @tag@. Keys must be unique among siblings in the same scope.
+keyed :: (Hashable k, Ui :> es) => k -> Eff es a -> Eff es a
+keyed k = keyedTag (fromIntegral (hash k))
+
+{-# INLINE keyedTag #-}
+keyedTag :: Ui :> es => Word64 -> Eff es a -> Eff es a
+keyedTag tag m = do
+  ctx <- askContext
+  parent' <- uiIO $ do
+    old <- readIORef (ctxIdContext ctx)
+    let
+      (p, c) = enterKeyed tag old
+    writeIORef (ctxIdContext ctx) c
+    pure p
+  uiFinally m (writeIORef (ctxIdContext ctx) parent')
+
 {-# INLINE withKey #-}
 withKey :: (Hashable k, Ui :> es) => k -> Eff es a -> Eff es a
-withKey k m = do
-  ctx <- askContext
-  old <- uiIO (readIORef (ctxIdSalt ctx))
-  uiIO (writeIORef (ctxIdSalt ctx) (old `mix64` fromIntegral (hash k)))
-  uiFinally m (writeIORef (ctxIdSalt ctx) old)
-
--- The whole stack is hashed, not just its head: the head always points at this
--- module, so distinct user call sites are only distinguishable by outer frames.
-{-# INLINE currentId #-}
-currentId :: (HasCallStack, Ui :> es) => Eff es WidgetId
-currentId = do
-  ctx <- askContext
-  salt <- uiIO (readIORef (ctxIdSalt ctx))
-  let base = hashCallStack callStack
-  pure (WidgetId (base `mix64` salt))
-
-hashCallStack :: CallStack -> Word64
-hashCallStack cs =
-  foldl
-    (\acc (fn, loc) -> acc `mix64` fnv1a fn `mix64` hashWidgetId (hashSrcLoc loc))
-    14695981039346656037
-    (getCallStack cs)
+withKey = keyed
 
 {-# INLINE askContext #-}
 askContext :: Ui :> es => Eff es Context
@@ -113,7 +165,3 @@ askHost :: (Typeable a, Ui :> es) => Eff es (Maybe a)
 askHost = do
   ctx <- askContext
   uiIO (askHostIO ctx)
-
-{-# INLINE mix64 #-}
-mix64 :: Word64 -> Word64 -> Word64
-mix64 h k = (h `xor` k) * 1099511628211

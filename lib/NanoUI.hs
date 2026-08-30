@@ -18,8 +18,8 @@ module NanoUI
   , rectContains
   , rectIntersect
   , v2Add
-  , -- Input
-    Input (..)
+  -- Input
+  , Input (..)
   , Key (..)
   , Modifiers (..)
   , emptyInput
@@ -31,8 +31,8 @@ module NanoUI
   , inputKeysFromList
   , inputKeysNull
   , foldInputKeys
-  , -- Style
-    Sizing (..)
+  -- Style
+  , Sizing (..)
   , Direction (..)
   , AlignX (..)
   , AlignY (..)
@@ -63,21 +63,29 @@ module NanoUI
   , tight
   , percent
   , aspect
-  , -- ID
-    WidgetId (..)
+  -- ID
+  , WidgetId (..)
+  , IdContext
+  , initialIdContext
+  , mix64
+  , mixFnv
   , widgetId
   , hashWidgetId
-  , -- Monad
-    NanoUI
+  -- Monad
+  , NanoUI
   , Ui
   , runUi
   , runNanoUI
   , uiIO
   , emit
-  , withKey
+  , nextId
   , currentId
-  , -- Widgets
-    Response (..)
+  , scope
+  , keyed
+  , keyedTag
+  , withKey
+  -- Widgets
+  , Response (..)
   , Responding (..)
   , Clickable (..)
   , panel
@@ -151,19 +159,19 @@ module NanoUI
   , sep
   , flex
   , image_
-  , -- Animation
-    Ease (..)
+  -- Animation
+  , Ease (..)
   , applyEase
   , SpringParams (..)
   , presetBouncy
   , presetSmooth
   , presetStiff
-  , -- Compact
-    Compact
+  -- Compact
+  , Compact
   , compactHost
   , askCompact
-  , -- Icons
-    IconSet (..)
+  -- Icons
+  , IconSet (..)
   , Icons (..)
   , asciiIcons
   , glyphIcons
@@ -175,8 +183,8 @@ module NanoUI
   , treeExpandMark
   , fontAwesomeIcon
   , loneFontAwesome
-  , -- Font
-    FontMetrics (..)
+  -- Font
+  , FontMetrics (..)
   , GlyphQuad (..)
   , monospaceMetrics
   , labelContentInset
@@ -195,25 +203,12 @@ module NanoUI
   , scrollBarListExtra
   , scrollBarWidth
   , scrollBarWindowGutter
-  ) where
+  )
+where
 
 import NanoUI.Animatable (Animatable (..))
 import NanoUI.Compact (Compact, askCompact, compactHost)
 import NanoUI.Context (Ease (..), applyEase)
-import NanoUI.Icons
-  ( IconSet (..)
-  , Icons (..)
-  , asciiIcons
-  , checkboxMark
-  , radioMark
-  , treeExpandMark
-  , fontAwesomeIcon
-  , glyphIcons
-  , iconSetName
-  , iconsFor
-  , loneFontAwesome
-  , parseIconSet
-  )
 import NanoUI.Font
   ( FontMetrics (..)
   , GlyphQuad (..)
@@ -235,7 +230,29 @@ import NanoUI.Font
   , widgetContentInset
   , widgetPadding
   )
-import NanoUI.Id (WidgetId (..), hashWidgetId, widgetId)
+import NanoUI.Icons
+  ( IconSet (..)
+  , Icons (..)
+  , asciiIcons
+  , checkboxMark
+  , fontAwesomeIcon
+  , glyphIcons
+  , iconSetName
+  , iconsFor
+  , loneFontAwesome
+  , parseIconSet
+  , radioMark
+  , treeExpandMark
+  )
+import NanoUI.Id
+  ( IdContext
+  , WidgetId (..)
+  , hashWidgetId
+  , initialIdContext
+  , mix64
+  , mixFnv
+  , widgetId
+  )
 import NanoUI.Input
   ( Input (..)
   , Key (..)
@@ -250,8 +267,26 @@ import NanoUI.Input
   , inputKeysNull
   , inputPointerHeld
   )
-import NanoUI.Monad (NanoUI, Ui, currentId, emit, runNanoUI, runUi, uiIO, withKey)
-import NanoUI.Spring (SpringParams (..), presetBouncy, presetSmooth, presetStiff)
+import NanoUI.Monad
+  ( NanoUI
+  , Ui
+  , currentId
+  , emit
+  , keyed
+  , keyedTag
+  , nextId
+  , runNanoUI
+  , runUi
+  , scope
+  , uiIO
+  , withKey
+  )
+import NanoUI.Spring
+  ( SpringParams (..)
+  , presetBouncy
+  , presetSmooth
+  , presetStiff
+  )
 import NanoUI.Style
   ( AlignX (..)
   , AlignY (..)
@@ -261,29 +296,29 @@ import NanoUI.Style
   , Sizing (..)
   , Style (..)
   , Theme (..)
+  , alignEnd
+  , alignMid
+  , aspect
   , defaultLayout
   , defaultTheme
-  , scrollBarTrackColor
-  , scrollBarThumbColor
-  , panelPaintPad
-  , windowPad
-  , windowMargin
-  , padAll
-  , padXY
-  , gap
-  , fillW
   , fillH
+  , fillW
+  , fixedH
+  , fixedW
+  , fixedWH
+  , gap
   , grow
   , minW
-  , fixedW
-  , fixedH
-  , fixedWH
-  , alignMid
-  , alignEnd
-  , wrap
-  , tight
+  , padAll
+  , padXY
+  , panelPaintPad
   , percent
-  , aspect
+  , scrollBarThumbColor
+  , scrollBarTrackColor
+  , tight
+  , windowMargin
+  , windowPad
+  , wrap
   )
 import NanoUI.Types
   ( Color (..)
@@ -307,6 +342,7 @@ import NanoUI.Widgets
   ( Clickable (..)
   , Responding (..)
   , Response (..)
+  , TreeItem (..)
   , animate
   , animateEase
   , animateEaseDelay
@@ -316,11 +352,15 @@ import NanoUI.Widgets
   , animateToEaseDelay
   , animateToSpring
   , animateToSpringA
+  , boundedRadioFieldset
   , box
   , button
   , card
   , checkbox
   , clickButton
+  , colorPicker
+  , colorPickerFromHex
+  , colorPickerToHex
   , column
   , flex
   , heading
@@ -335,18 +375,11 @@ import NanoUI.Widgets
   , muted
   , onClick
   , panel
+  , radioFieldset
   , row
   , scroll
   , scrollArea
   , select
-  , colorPicker
-  , colorPickerToHex
-  , colorPickerFromHex
-  , radioFieldset
-  , boundedRadioFieldset
-  , useRadio
-  , TreeItem (..)
-  , tree
   , sep
   , separator
   , slider
@@ -355,7 +388,9 @@ import NanoUI.Widgets
   , textInput
   , toolbar
   , tooltip
+  , tree
   , useFlag
+  , useRadio
   , useText
   , useToggle
   , window
@@ -374,9 +409,9 @@ import NanoUI.Widgets.Tabs
   , tabRespChanged
   , tabRespClicked
   , tabs
-  , tabsEx
   , tabsEmit
   , tabsEmitEx
+  , tabsEx
   , useTab
   , useTabIdx
   )

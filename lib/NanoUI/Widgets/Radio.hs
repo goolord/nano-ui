@@ -11,7 +11,6 @@ import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Text as T
-import GHC.Stack (HasCallStack)
 import NanoUI.Context
   ( Context (..)
   , getStore
@@ -21,7 +20,7 @@ import NanoUI.Context
 import NanoUI.Host (isCellHost)
 import NanoUI.Icons (radioMark)
 import NanoUI.Id (WidgetId (..))
-import NanoUI.Monad (Ui, askContext, currentId, uiIO, withKey)
+import NanoUI.Monad (Ui, askContext, nextId, uiIO, withKey)
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Store (WidgetStore (..))
 import NanoUI.Font (mutedFontMarker)
@@ -38,14 +37,14 @@ import NanoUI.Widgets.Node
   )
 
 radioOption ::
-  (HasCallStack, Ui :> es) =>
+  (Ui :> es) =>
   Int ->
   Int ->
   Text ->
   Int ->
   Eff es (Response, Int)
 radioOption groupKey optionIdx label selectedIdx = do
-  wid <- currentId
+  wid <- nextId
   ctx <- askContext
   store <- uiIO (getStore ctx)
   let current = IM.findWithDefault selectedIdx groupKey (storeRadio store)
@@ -85,14 +84,14 @@ mergeResponses (r : rs) =
 
 -- | Mutually exclusive radio options grouped under a legend label.
 radioFieldset ::
-  (HasCallStack, Ui :> es) =>
+  (Ui :> es) =>
   Text ->
   [Text] ->
   Int ->
   Eff es (Response, Int)
 radioFieldset legend options initial =
   withKey ("radio:" <> legend) $ do
-    groupId <- currentId
+    groupId <- nextId
     let groupKey = intKey groupId
         opts = if null options then [""] else options
         clamped = max 0 (min (length opts - 1) initial)
@@ -125,7 +124,7 @@ radioFieldset legend options initial =
 
 -- | Radio fieldset for any bounded enumerable type.
 boundedRadioFieldset ::
-  (Bounded a, Enum a, HasCallStack, Ui :> es) =>
+  (Bounded a, Enum a, Ui :> es) =>
   Text ->
   a ->
   (a -> Text) ->
@@ -143,7 +142,7 @@ boundedRadioFieldset legend initial encode = do
 
 -- | Uncontrolled radio hook storing the selected value in component local store.
 useRadio ::
-  (Eq a, Show a, Read a, HasCallStack, Ui :> es) =>
+  (Eq a, Show a, Read a, Ui :> es) =>
   a ->
   Eff es (a, a -> Eff es ())
 useRadio initial = do

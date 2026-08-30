@@ -13,7 +13,6 @@ import Effectful (Eff, type (:>))
 import qualified Data.IntMap.Strict as IM
 import qualified Data.IntSet as IS
 import qualified Data.Text as T
-import GHC.Stack (HasCallStack)
 import NanoUI.Context
   ( Context (..)
   , getFocusId
@@ -27,7 +26,7 @@ import NanoUI.Font (treeChevronRect)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), Key (..), inputChars, inputKeys, inputKeysElem, inputMousePos)
 import NanoUI.Layout.Arena (NodeType (..))
-import NanoUI.Monad (Ui, askContext, askInput, currentId, uiIO, withKey)
+import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
 import NanoUI.Store (WidgetStore (..))
 import NanoUI.Style (defaultLayout, fillW, gap, tight)
 import NanoUI.Types (Rect (..), rectContains, rectUnion)
@@ -182,14 +181,14 @@ toggle idx s
   | otherwise = IS.insert idx s
 
 treeRow ::
-  (HasCallStack, Ui :> es) =>
+  (Ui :> es) =>
   Int ->
   FlatRow ->
   Int ->
   IS.IntSet ->
   Eff es (Response, Maybe Int, Maybe IS.IntSet)
 treeRow groupKey row selectedIdx expandedSet = do
-  wid <- currentId
+  wid <- nextId
   ctx <- askContext
   inp <- askInput
   uiIO $ registerFocusable ctx wid
@@ -239,14 +238,14 @@ treeRow groupKey row selectedIdx expandedSet = do
 -- over the full item list (collapsed nodes keep their indices).
 -- The key distinguishes two trees at the same call site.
 tree ::
-  (HasCallStack, Ui :> es) =>
+  (Ui :> es) =>
   Text ->
   [TreeItem] ->
   Int ->
   Eff es (Response, Int)
 tree key items initial =
   withKey ("tree:" <> key) $ do
-    groupId <- currentId
+    groupId <- nextId
     let groupKey = intKey groupId
         total = countNodes items
         clamped =

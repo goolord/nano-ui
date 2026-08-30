@@ -9,7 +9,6 @@ import Data.IORef (readIORef, writeIORef)
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import qualified Data.IntMap.Strict as IM
-import GHC.Stack (HasCallStack)
 import NanoUI.ColorPicker
   ( ColorPickerGeom (..)
   , colorPickerDragHue
@@ -43,15 +42,15 @@ import NanoUI.Input
   , inputMousePressed
   )
 import NanoUI.Layout.Arena (NodeType (..))
-import NanoUI.Monad (Ui, askContext, askInput, currentId, uiIO)
+import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO)
 import NanoUI.Style (defaultLayout, fillW)
 import NanoUI.Types (Color (..), Rect (..), clamp01, colorToWord32, hsvToRgb, rectContains, rgbToHsv)
 import NanoUI.WidgetText (colorPickerLabelText)
 import NanoUI.Widgets.Node (Response (..), addWidget, setChanged)
 
-colorPicker :: (HasCallStack, Ui :> es) => Text -> Color -> Eff es (Response, Color)
+colorPicker :: (Ui :> es) => Text -> Color -> Eff es (Response, Color)
 colorPicker lbl initial = do
-  wid <- currentId
+  wid <- nextId
   ctx <- askContext
   inp <- askInput
   uiIO $ registerFocusable ctx wid

@@ -77,10 +77,12 @@ clipPixelRect uiScale (Rect x y w h) =
 {-# INLINE logicalClipKey #-}
 logicalClipKey :: Rect -> (Int, Int, Int, Int)
 logicalClipKey (Rect x y w h) =
-  let px = round x :: Int
-      py = round y :: Int
-      pw = max 1 (round w) :: Int
-      ph = max 1 (round h) :: Int
+  let px = floor x :: Int
+      py = floor y :: Int
+      x1 = ceiling (x + w) :: Int
+      y1 = ceiling (y + h) :: Int
+      pw = max 1 (x1 - px)
+      ph = max 1 (y1 - py)
    in (px, py, pw, ph)
 
 {-# INLINE toClipKey #-}
