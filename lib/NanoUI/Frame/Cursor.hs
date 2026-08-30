@@ -133,7 +133,7 @@ import NanoUI.Layout.Arena
   , isContainerNode
   , isFloatingNode
   , isScrollNode
-  , NodeType (NodeButton, NodeCheckbox, NodeRadio, NodeSelect, NodeSlider, NodeTextInput, NodeModal, NodeImage, NodePanel, NodeWindow, NodeContainer, NodeScrollContainer, NodeText, NodeSeparator, NodeSpacer, NodeBox)
+  , NodeType (NodeButton, NodeCheckbox, NodeRadio, NodeSelect, NodeColorPicker, NodeSlider, NodeTextInput, NodeModal, NodeImage, NodePanel, NodeWindow, NodeContainer, NodeScrollContainer, NodeText, NodeSeparator, NodeSpacer, NodeBox)
   , resetNodeArena
   , setNodeText
   , setNodeValue
@@ -276,6 +276,7 @@ cursorKindAt table ctx wid mouse inp
             Just NodeCheckbox -> pure UiCursorPointer
             Just NodeRadio -> pure UiCursorPointer
             Just NodeSelect -> selectCursorKind ctx wid mouse
+            Just NodeColorPicker -> pure UiCursorPointer
             Just NodeTextInput -> textInputCursorKind ctx wid mouse
             Just NodeSlider -> sliderCursorKind ctx wid mouse inp
             _ -> pure UiCursorDefault

@@ -11,6 +11,10 @@ module NanoUI.Types
   , colorG
   , colorB
   , colorA
+  , colorFromWord32
+  , rgbToHsv
+  , hsvToRgb
+  , clamp01
   , lerpColor
   , colorLuminance
   , contrastRatio
@@ -87,6 +91,54 @@ colorB (Color w) = fromIntegral ((w `shiftR` 8) .&. 0xFF)
 {-# INLINE colorA #-}
 colorA :: Color -> Word8
 colorA (Color w) = fromIntegral (w .&. 0xFF)
+
+{-# INLINE colorFromWord32 #-}
+colorFromWord32 :: Word32 -> Color
+colorFromWord32 = Color
+
+{-# INLINE clamp01 #-}
+clamp01 :: Float -> Float
+clamp01 x = max 0 (min 1 x)
+
+{-# INLINE rgbToHsv #-}
+rgbToHsv :: Color -> (Float, Float, Float)
+rgbToHsv c =
+  let r = fromIntegral (colorR c) / 255
+      g = fromIntegral (colorG c) / 255
+      b = fromIntegral (colorB c) / 255
+      maxC = max r (max g b)
+      minC = min r (min g b)
+      delta = maxC - minC
+      v = maxC
+      s = if maxC <= 0 then 0 else delta / maxC
+      rawH
+        | delta <= 0 = 0
+        | maxC == r =
+            let t = (g - b) / delta
+             in if t < 0 then 60 * (t + 6) else 60 * t
+        | maxC == g = 60 * (((b - r) / delta) + 2)
+        | otherwise = 60 * (((r - g) / delta) + 4)
+      h = if rawH < 0 then rawH + 360 else rawH
+   in (h, s, v)
+
+{-# INLINE hsvToRgb #-}
+hsvToRgb :: Float -> Float -> Float -> Color
+hsvToRgb h s v =
+  let hi = floor (h / 60) :: Int
+      f = h / 60 - fromIntegral hi
+      p = v * (1 - s)
+      q = v * (1 - f * s)
+      t = v * (1 - (1 - f) * s)
+      (r, g, b) =
+        case hi `mod` 6 of
+          0 -> (v, t, p)
+          1 -> (q, v, p)
+          2 -> (p, v, t)
+          3 -> (p, q, v)
+          4 -> (t, p, v)
+          _ -> (v, p, q)
+      toCh x = round (clamp01 x * 255) :: Word8
+   in colorRGBA (toCh r) (toCh g) (toCh b) 255
 
 -- | WCAG 2 relative-luminance contrast. 4.5 is AA for normal text.
 --

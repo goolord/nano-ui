@@ -25,12 +25,18 @@ module NanoUI.WidgetText
   , selectDisplayText
   , selectChevronReserve
   , selectChevronCenterX
+  , colorPickerLabelText
+  , colorPickerDisplayText
+  , colorPickerToHex
+  , colorPickerFromHex
   ) where
 
+import Data.Char (chr)
 import Data.Text (Text)
+import Data.Word (Word8)
 import NanoUI.Font (FontMetrics (..), fmLineHeight)
 import NanoUI.Icons (checkboxPrefixes, radioPrefixes)
-import NanoUI.Types (sliderBarCells)
+import NanoUI.Types (Color (..), colorB, colorG, colorR, colorRGBA, sliderBarCells)
 import qualified Data.Text as T
 
 sliderRangeSep :: Text
@@ -195,3 +201,47 @@ selectChevronReserve = 16
 
 selectChevronCenterX :: Float -> Float -> Float
 selectChevronCenterX x w = x + w - selectChevronReserve / 2
+
+colorPickerLabelText :: Text -> Text
+colorPickerLabelText = T.strip
+
+colorPickerToHex :: Color -> Text
+colorPickerToHex c =
+  "#" <> hexByte (colorR c) <> hexByte (colorG c) <> hexByte (colorB c)
+
+hexByte :: Word8 -> Text
+hexByte n = T.pack (showHexWord8 n)
+
+showHexWord8 :: Word8 -> String
+showHexWord8 n =
+  let hi = n `div` 16
+      lo = n `mod` 16
+      ch i = if i < 10 then chr (48 + fromIntegral i) else chr (87 + fromIntegral i)
+   in [ch hi, ch lo]
+
+colorPickerFromHex :: Text -> Maybe Color
+colorPickerFromHex txt =
+  let bare = T.dropWhile (== '#') (T.strip txt)
+   in if T.length bare /= 6
+        then Nothing
+        else do
+          r <- parseHexPair (T.take 2 bare)
+          g <- parseHexPair (T.take 2 (T.drop 2 bare))
+          b <- parseHexPair (T.take 2 (T.drop 4 bare))
+          pure (colorRGBA r g b 255)
+
+parseHexPair :: Text -> Maybe Word8
+parseHexPair t =
+  case (parseHexDigit (T.index t 0), parseHexDigit (T.index t 1)) of
+    (Just a, Just b) -> Just (a * 16 + b)
+    _ -> Nothing
+
+parseHexDigit :: Char -> Maybe Word8
+parseHexDigit c
+  | c >= '0' && c <= '9' = Just (fromIntegral (fromEnum c - 48))
+  | c >= 'a' && c <= 'f' = Just (fromIntegral (fromEnum c - 87))
+  | c >= 'A' && c <= 'F' = Just (fromIntegral (fromEnum c - 55))
+  | otherwise = Nothing
+
+colorPickerDisplayText :: Text -> Color -> Text
+colorPickerDisplayText lbl col = colorPickerLabelText lbl <> ": " <> colorPickerToHex col

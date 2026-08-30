@@ -71,6 +71,7 @@ import NanoUI.WidgetText
   , radioLabelText
   , selectDisplayText
   , selectParseOptions
+  , colorPickerDisplayText
   , sliderLabelText
   , textInputFieldText
   , textInputTerminalText
@@ -86,7 +87,8 @@ import NanoUI.Style
   , themePanel
   , themeWindow
   )
-import NanoUI.Types (Color (..), Rect (..), colorRGBA, lerpColor, rectH, rectW, rectX, rectY)
+import NanoUI.ColorPicker (colorPickerDefaultColor, widgetStoreColor)
+import NanoUI.Types (Color (..), Rect (..), colorRGBA, clamp01, lerpColor, rectH, rectW, rectX, rectY)
 
 nodeLabelPaint :: Theme -> T.Text -> (T.Text, Color, Color)
 nodeLabelPaint theme raw = labelPaintWith (themePanel theme) theme raw
@@ -169,6 +171,11 @@ displayText ctx nt idx = do
               icons = ctxIcons ctx
               caret = if open then iconSelectOpen icons else iconSelectClosed icons
           pure (selectDisplayText lbl opt <> caret)
+        NodeColorPicker -> do
+          store <- getStore ctx
+          wid <- getWidgetId (ctxNodeArena ctx) idx
+          let current = widgetStoreColor store wid colorPickerDefaultColor
+          pure (colorPickerDisplayText txt current)
         NodeSlider -> pure (T.takeWhile (/= '\US') txt)
         NodeButton ->
           if isCloseButtonText txt
@@ -203,6 +210,7 @@ displayText ctx nt idx = do
                   (o : _) -> o
                   _ -> ""
           pure (selectDisplayText lbl opt)
+        NodeColorPicker -> pure txt
         NodeButton -> pure (buttonDisplayText txt)
         _ -> pure (stripButtonBrackets txt)
 
@@ -410,6 +418,11 @@ widgetVisualStyle ctx nt idx = do
              in if isFocus
                   then sel {styleBorder = themeAccent theme}
                   else sel
+          NodeColorPicker ->
+            let sel = themeInput theme
+             in if isFocus
+                  then sel {styleBorder = themeAccent theme}
+                  else sel
           NodeSlider ->
             if terminal
               then themeInput theme
@@ -525,9 +538,6 @@ strokeRoundedBorder da x y w h r bw col = do
       oh = max 0 (h - 2 * inset)
       rr = min r (min (ow / 2) (oh / 2))
   pushRoundedStroke da (Rect ox oy ow oh) rr bw col
-
-clamp01 :: Float -> Float
-clamp01 v = max 0 (min 1 v)
 
 textInputMenuOuterPad :: Float
 textInputMenuOuterPad = 6
