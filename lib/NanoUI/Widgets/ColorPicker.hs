@@ -78,6 +78,7 @@ colorPicker lbl initial = do
   active <- uiIO (readIORef (ctxActiveId ctx))
   focus <- uiIO (readIORef (ctxFocusId ctx))
   mrect <- uiIO (getPrevRect ctx wid)
+  blocked <- uiIO (readIORef (ctxLastPointerBlocked ctx))
   let mouse = inputMousePos inp
       geom =
         case mrect of
@@ -85,8 +86,8 @@ colorPicker lbl initial = do
           Nothing -> colorPickerGeom host fm 0 0 0 0
       sv = cpgSv geom
       hueRect = cpgHue geom
-      svHit = rectContains sv mouse
-      hueHit = rectContains (colorPickerHueHitRect hueRect) mouse
+      svHit = not blocked && rectContains sv mouse
+      hueHit = not blocked && rectContains (colorPickerHueHitRect hueRect) mouse
       isActive = active == wid
       heldByOther =
         inputMouseDown inp
@@ -95,7 +96,7 @@ colorPicker lbl initial = do
           && not isActive
       down = inputMouseDown inp
       drag =
-        if not down
+        if not down || blocked
           then 0
           else
             if drag0 /= 0
@@ -121,7 +122,7 @@ colorPicker lbl initial = do
       dragged = hsvToRgb draggedHue draggedS draggedV
   when (down && drag /= 0 && not isActive) $
     uiIO $ writeIORef (ctxActiveId ctx) wid
-  when (not down && isActive) $
+  when ((not down || blocked) && isActive) $
     uiIO $ writeIORef (ctxActiveId ctx) (WidgetId 0)
   when (drag /= drag0) $
     uiIO $ do

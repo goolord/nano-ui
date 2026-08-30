@@ -120,6 +120,7 @@ library
         NanoUI.Widgets.Layout
         NanoUI.Widgets.Tabs
         NanoUI.Widgets.Radio
+        NanoUI.Widgets.Tree
         NanoUI.Widgets.ColorPicker
         NanoUI.Widgets.TextInput
         NanoUI.Widgets.Animate

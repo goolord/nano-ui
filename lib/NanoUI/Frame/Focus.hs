@@ -20,7 +20,7 @@ import NanoUI.Host (isCellHost)
 import NanoUI.Icons (checkboxMark, radioMark)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Layout.Arena
-  ( NodeType (NodeButton, NodeCheckbox, NodeRadio, NodeSlider)
+  ( NodeType (NodeButton, NodeCheckbox, NodeRadio, NodeTree, NodeSlider)
   , arenaCount
   , getNodeType
   , getText
@@ -34,6 +34,7 @@ import NanoUI.WidgetText
   , radioLabelText
   , radioPackOption
   , radioParseOption
+  , treeParseRow
   , sliderPackRange
   , sliderPackTerminal
   , sliderParseRange
@@ -110,6 +111,11 @@ syncWidgetLabels ctx = do
                     setNodeText na idx (radioPackOption groupKey optIdx display)
                     setNodeValue na idx (if val then 1 else 0)
                   _ -> pure ()
+              NodeTree -> do
+                txt <- getText na idx
+                let (groupKey, nodeIdx, _, _, _, _) = treeParseRow txt
+                    selected = IM.findWithDefault nodeIdx groupKey (storeTreeSelected store)
+                setNodeValue na idx (if selected == nodeIdx then 1 else 0)
               NodeSlider -> do
                 let val = IM.findWithDefault 0 key (storeSlider store)
                 txt <- getText na idx

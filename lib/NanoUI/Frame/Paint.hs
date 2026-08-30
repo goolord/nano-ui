@@ -78,6 +78,7 @@ import NanoUI.Font
   ( FontMetrics (..)
   , checkboxBoxSize
   , checkboxLeading
+  , treeChevronRect
   , fmLineHeight
   , layoutLineHeight
   , hasHeadingMarker
@@ -161,10 +162,11 @@ import NanoUI.WidgetText
   , selectDisplayText
   , selectChevronReserve
   , selectChevronCenterX
+  , treeParseRow
   )
 import NanoUI.ColorPicker (drawColorPickerPanel)
 import NanoUI.Style (Padding (..), Style (..), Theme (..), scrollBarThumbColor, scrollBarTrackColor, themeAccent, themeButton, themeFloatingWindow, themeInput, themeMuted, themeOverlayDim, themePanel, themeSeparator, themeWindow)
-import NanoUI.Types (Color (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, lerpColor, rectContains, rectH, rectIntersect, rectOverlapArea, rectUnion, rectW, rectX, rectY, v2X, v2Y)
+import NanoUI.Types (Color (..), ImageId (..), Rect (..), Size (..), V2 (..), colorA, colorRGBA, lerpColor, rectContains, rectH, rectIntersect, rectOverlapArea, rectUnion, rectW, rectX, rectY, v2X, v2Y)
 import NanoUI.Frame.Chrome
   ( clamp01
   , displayText
@@ -319,6 +321,7 @@ lowerNode ctx idx = do
             | terminal, nt == NodeButton = False
             | terminal, nt == NodeCheckbox = False
             | terminal, nt == NodeRadio = False
+            | nt == NodeTree = colorA (styleBg style) > 0
             | terminal, nt == NodeSlider = False
             | terminal, nt == NodeSelect = False
             | terminal, nt == NodeColorPicker = False
@@ -329,7 +332,7 @@ lowerNode ctx idx = do
                 nt /= NodeCheckbox && nt /= NodeRadio && nt /= NodeSlider && nt /= NodeTextInput
       when opaqueBg $ fillStyledRect da terminal style rect
       when (not terminal) $ do
-        when (opaqueBg && not isTab) $ strokeStyledRect da terminal style x y w h
+        when (opaqueBg && not isTab && nt /= NodeTree) $ strokeStyledRect da terminal style x y w h
         when isTab $ do
           si <- getStyleIdx (ctxNodeArena ctx) idx
           paintTabHeader
@@ -368,6 +371,21 @@ lowerNode ctx idx = do
             value
             (themeAccent theme)
             (styleBg (themeInput theme))
+        when (nt == NodeTree) $ do
+          txt <- getText (ctxNodeArena ctx) idx
+          let (_, _, depth, hasKids, expanded, _) = treeParseRow txt
+          when hasKids $
+            drawTreeChevron
+              da
+              (ctxHostProfile ctx)
+              fm
+              x
+              y
+              w
+              h
+              depth
+              expanded
+              (styleFg style)
         when (nt == NodeSlider) $ do
           txt <- getText (ctxNodeArena ctx) idx
           let lbl = sliderLabelText (T.takeWhile (/= '\US') txt)
@@ -551,6 +569,27 @@ drawSelectChevron da x y w h col = do
       hw = 4.2
       hh = 2.6
   pushFilledTriangle da (cx - hw) (cy - hh * 0.35) (cx + hw) (cy - hh * 0.35) cx (cy + hh) col
+
+drawTreeChevron ::
+  DrawArena ->
+  HostProfile ->
+  FontMetrics ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Int ->
+  Bool ->
+  Color ->
+  IO ()
+drawTreeChevron da host fm x y w h depth expanded col = do
+  let Rect cx cy cw ch = treeChevronRect host fm x y w h depth
+      mx = cx + cw / 2
+      my = cy + ch / 2
+      s = min 4.5 (min cw ch * 0.28)
+  if expanded
+    then pushFilledTriangle da (mx - s) (my - s * 0.45) (mx + s) (my - s * 0.45) mx (my + s * 0.7) col
+    else pushFilledTriangle da (mx - s * 0.45) (my - s) (mx + s * 0.7) my (mx - s * 0.45) (my + s) col
 
 drawTooltipOverlays :: Context -> IO ()
 drawTooltipOverlays ctx = do

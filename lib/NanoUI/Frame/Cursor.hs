@@ -275,6 +275,7 @@ cursorKindAt table ctx wid mouse inp
             Just NodeButton -> pure UiCursorPointer
             Just NodeCheckbox -> pure UiCursorPointer
             Just NodeRadio -> pure UiCursorPointer
+            Just NodeTree -> pure UiCursorPointer
             Just NodeSelect -> selectCursorKind ctx wid mouse
             Just NodeColorPicker -> pure UiCursorPointer
             Just NodeTextInput -> textInputCursorKind ctx wid mouse

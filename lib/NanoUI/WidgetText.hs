@@ -11,6 +11,11 @@ module NanoUI.WidgetText
   , radioPackOption
   , radioParseOption
   , radioLabelText
+  , treePackRow
+  , treeParseRow
+  , treeLabelText
+  , treeDisplayText
+  , treeMeasureLabel
   , textInputDisplayText
   , textInputTerminalText
   , textInputFieldText
@@ -35,7 +40,7 @@ import Data.Char (chr)
 import Data.Text (Text)
 import Data.Word (Word8)
 import NanoUI.Font (FontMetrics (..), fmLineHeight)
-import NanoUI.Icons (checkboxPrefixes, radioPrefixes)
+import NanoUI.Icons (Icons, checkboxPrefixes, radioPrefixes, treeExpandMark, treeExpandPrefixes)
 import NanoUI.Types (Color (..), colorB, colorG, colorR, colorRGBA, sliderBarCells)
 import qualified Data.Text as T
 
@@ -137,6 +142,66 @@ radioLabelText txt =
           if T.isPrefixOf p t
             then T.drop (T.length p) t
             else go ps
+
+-- | Pack tree row metadata ahead of the visible label.
+-- Fields: groupKey, nodeIdx, depth, hasChildren, expanded, then label
+-- (label may contain the separator).
+treePackRow :: Int -> Int -> Int -> Bool -> Bool -> Text -> Text
+treePackRow groupKey nodeIdx depth hasChildren expanded label =
+  T.intercalate
+    sliderRangeSep
+    [ T.pack (show groupKey)
+    , T.pack (show nodeIdx)
+    , T.pack (show depth)
+    , if hasChildren then "1" else "0"
+    , if expanded then "1" else "0"
+    , label
+    ]
+
+treeParseRow :: Text -> (Int, Int, Int, Bool, Bool, Text)
+treeParseRow txt =
+  case T.splitOn sliderRangeSep txt of
+    (g : i : d : hc : ex : rest) ->
+      ( readInt g 0
+      , readInt i 0
+      , readInt d 0
+      , hc == "1"
+      , ex == "1"
+      , T.intercalate sliderRangeSep rest
+      )
+    _ -> (0, 0, 0, False, False, txt)
+  where
+    readInt t fallback =
+      case reads (T.unpack t) of
+        [(v, "")] -> v
+        _ -> fallback
+
+treeLabelText :: Text -> Text
+treeLabelText txt =
+  let (_, _, _, _, _, raw) = treeParseRow txt
+   in stripTreePrefixes raw
+  where
+    stripTreePrefixes t = go treeExpandPrefixes
+      where
+        go [] = t
+        go (p : ps) =
+          if T.isPrefixOf p t
+            then T.drop (T.length p) t
+            else go ps
+
+-- | Visible terminal row: indent, expand mark, label.
+treeDisplayText :: Icons -> Int -> Bool -> Bool -> Text -> Text
+treeDisplayText icons depth hasKids expanded label =
+  T.replicate (max 0 depth) "  "
+    <> treeExpandMark icons hasKids expanded
+    <> label
+
+-- | Cell-host measure stand-in. Mark width matches ASCII "v " / "> ".
+treeMeasureLabel :: Int -> Text -> Text
+treeMeasureLabel depth label =
+  T.replicate (max 0 depth) "  "
+    <> "  "
+    <> if T.null label then " " else label
 
 textInputMinWidth :: Float
 textInputMinWidth = 160

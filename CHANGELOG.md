@@ -11,6 +11,7 @@ Breaking API: prefer `Text` and `Vector` over `String` and `[ ]` in core types.
 * Clipboard hooks: `ctxClipboardGet` returns `Maybe Text`; `ctxClipboardSet` takes `Text`.
 * `storeText` / `storeNote`: `IntMap Text`.
 * Dependency: core adds `vector ^>=0.13`.
+* `enableMouse` / `disableMouse`: `ByteString` -> `ShortByteString` (short long-lived CAFs stay unpinned).
 
 ## 0.1.0.0 -- YYYY-mm-dd
 

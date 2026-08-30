@@ -103,6 +103,8 @@ module NanoUI
   , radioFieldset
   , boundedRadioFieldset
   , useRadio
+  , TreeItem (..)
+  , tree
   , modal
   , window
   , Tab (..)
@@ -170,6 +172,7 @@ module NanoUI
   , parseIconSet
   , checkboxMark
   , radioMark
+  , treeExpandMark
   , fontAwesomeIcon
   , loneFontAwesome
   , -- Font
@@ -203,6 +206,7 @@ import NanoUI.Icons
   , asciiIcons
   , checkboxMark
   , radioMark
+  , treeExpandMark
   , fontAwesomeIcon
   , glyphIcons
   , iconSetName
@@ -341,6 +345,8 @@ import NanoUI.Widgets
   , radioFieldset
   , boundedRadioFieldset
   , useRadio
+  , TreeItem (..)
+  , tree
   , sep
   , separator
   , slider

@@ -20,6 +20,10 @@ module NanoUI.Font
   , layoutLineHeight
   , checkboxBoxSize
   , checkboxLeading
+  , treeIndentStep
+  , treeChevronLeading
+  , treeRowLeading
+  , treeChevronRect
   , layoutUnitScale
   , resolveLayoutGap
   , resolveLayoutPadding
@@ -201,6 +205,36 @@ checkboxLeading :: HostProfile -> FontMetrics -> Float
 checkboxLeading host fm
   | isCellHost host = 0
   | otherwise = checkboxBoxSize host fm + 8
+
+{-# INLINE treeIndentStep #-}
+treeIndentStep :: HostProfile -> FontMetrics -> Float
+treeIndentStep host fm
+  | isCellHost host = 2
+  | otherwise = max 12 (fmLineHeight fm * 0.85)
+
+{-# INLINE treeChevronLeading #-}
+treeChevronLeading :: HostProfile -> FontMetrics -> Float
+treeChevronLeading host fm
+  | isCellHost host = 2
+  | otherwise = checkboxBoxSize host fm + 6
+
+{-# INLINE treeRowLeading #-}
+treeRowLeading :: HostProfile -> FontMetrics -> Int -> Float
+treeRowLeading host fm depth
+  | isCellHost host = 0
+  | otherwise =
+      treeIndentStep host fm * fromIntegral (max 0 depth) + treeChevronLeading host fm
+
+{-# INLINE treeChevronRect #-}
+treeChevronRect :: HostProfile -> FontMetrics -> Float -> Float -> Float -> Float -> Int -> Rect
+treeChevronRect host fm x y _w h depth =
+  let (ix, _) =
+        if isCellHost host
+          then (0, 0)
+          else labelContentInset host fm
+      indent = treeIndentStep host fm * fromIntegral (max 0 depth)
+      lead = max 1 (treeChevronLeading host fm)
+   in Rect (x + ix + indent) y lead h
 
 sliderTrackHeight :: Float
 sliderTrackHeight = 10

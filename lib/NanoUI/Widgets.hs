@@ -22,6 +22,8 @@ module NanoUI.Widgets
   , radioFieldset
   , boundedRadioFieldset
   , useRadio
+  , TreeItem (..)
+  , tree
   , colorPicker
   , modal
   , window
@@ -180,6 +182,10 @@ import NanoUI.Widgets.Radio
   , radioFieldset
   , useRadio
   )
+import NanoUI.Widgets.Tree
+  ( TreeItem (..)
+  , tree
+  )
 import NanoUI.Widgets.TextInput
   ( TextInputState (..)
   , applyTextInputMenuAction
@@ -303,20 +309,29 @@ sliderEx layout lbl minV maxV initial = do
           else sliderPackRange lbl minV maxV
   resp <- addWidget wid NodeSlider nodeText frac layout
   active <- uiIO (readIORef (ctxActiveId ctx))
+  blocked <- uiIO (readIORef (ctxLastPointerBlocked ctx))
   trackHover <- uiIO $ do
-    mrect <- getPrevRect ctx wid
-    pure $
-      case mrect of
-        Nothing -> False
-        Just (Rect x y w h) ->
-          rectContains (sliderTrackBounds host fm lbl x y w h) (inputMousePos inp)
+    if blocked
+      then pure False
+      else do
+        mrect <- getPrevRect ctx wid
+        pure $
+          case mrect of
+            Nothing -> False
+            Just (Rect x y w h) ->
+              rectContains (sliderTrackBounds host fm lbl x y w h) (inputMousePos inp)
   let isActive = active == wid
       heldByOther =
         inputMouseDown inp
           && not (inputMousePressed inp)
           && hashWidgetId active /= 0
           && not isActive
-      pressed = inputMouseDown inp && (isActive || (trackHover && not heldByOther))
+      pressed =
+        inputMouseDown inp
+          && not blocked
+          && (isActive || (trackHover && not heldByOther))
+  when (blocked && isActive) $
+    uiIO $ writeIORef (ctxActiveId ctx) (WidgetId 0)
   val <-
     uiIO $ do
       mrect <- getPrevRect ctx wid

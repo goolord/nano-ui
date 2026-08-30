@@ -12,9 +12,11 @@ import Data.Dynamic (Dynamic)
 import Data.IORef (IORef, readIORef, writeIORef)
 import Data.IntMap.Strict (IntMap)
 import Data.Map.Strict (Map)
+import Data.Primitive.PrimArray (MutablePrimArray)
 import Data.Text (Text)
 import Data.Typeable (TypeRep)
 import Data.Word (Word64)
+import GHC.Exts (RealWorld)
 import NanoUI.Animation (Animation)
 import NanoUI.Atlas (ImageAtlas)
 import NanoUI.Context.Types
@@ -32,7 +34,7 @@ import NanoUI.Layout.Arena (NodeArena, NodeType)
 import NanoUI.Messages (FrameMsg)
 import NanoUI.Store (WidgetStore)
 import NanoUI.Style (Theme)
-import NanoUI.Types (Damage (..), Rect (..), Size (..))
+import NanoUI.Types (Damage (..), Rect (..), Size (..), V2)
 
 type MeasureCacheKey = (Text, Bool, Float)
 
@@ -63,7 +65,9 @@ data Context = Context
   , ctxIcons :: Icons
   , ctxContainerStack :: IORef [Int]
   , ctxMessages :: IORef [FrameMsg]
-  , ctxFocusables :: IORef [WidgetId]
+  , ctxFocusables :: IORef (MutablePrimArray RealWorld WidgetId)
+  , ctxFocusablesCount :: IORef Int
+  , ctxFocusablesCap :: IORef Int
   , ctxScrollDrag :: IORef (Maybe (WidgetId, Float))
   , ctxTextInputDrag :: IORef (Maybe TextInputDrag)
   , ctxTextInputMenu :: IORef (Maybe TextInputMenu)
@@ -79,6 +83,11 @@ data Context = Context
   , ctxWindowDrag :: IORef (Maybe (WidgetId, Float, Float))
   , ctxWindowResize :: IORef (Maybe WindowResizeDrag)
   , ctxPrevFloatingRects :: IORef (IntMap Rect)
+  -- | Widget keys in paint order. Later is on top.
+  , ctxPrevFloatingOrder :: IORef [Int]
+  , ctxOverlayTopmostCache :: IORef (Maybe (V2, Maybe WidgetId))
+  , ctxCurrentFloatingId :: IORef (Maybe WidgetId)
+  , ctxLastPointerBlocked :: IORef Bool
   , ctxImageAtlas :: ImageAtlas
   , ctxWakeLoop :: IORef (Maybe (IO ()))
   , ctxHost :: IORef (Map TypeRep Dynamic)

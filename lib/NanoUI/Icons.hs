@@ -23,6 +23,8 @@ module NanoUI.Icons
   , checkboxPrefixes
   , radioMark
   , radioPrefixes
+  , treeExpandMark
+  , treeExpandPrefixes
   , fontAwesomeIcon
   , loneFontAwesome
   , terminalCharColumns
@@ -56,6 +58,12 @@ data Icons = Icons
   -- ^ Radio prefix when selected. Includes its trailing space.
   , iconRadioUnchecked :: Text
   -- ^ Radio prefix when clear. Same terminal column count as 'iconRadioChecked'.
+  , iconTreeExpanded :: Text
+  -- ^ Tree parent prefix when open. Includes its trailing space.
+  , iconTreeCollapsed :: Text
+  -- ^ Tree parent prefix when closed. Same column count as 'iconTreeExpanded'.
+  , iconTreeLeaf :: Text
+  -- ^ Tree leaf prefix (spacer). Same column count as parent marks.
   , iconClose :: Text
   -- ^ Window and modal close button.
   , iconSelectOpen :: Text
@@ -81,6 +89,9 @@ asciiIcons =
     , iconUnchecked = "[ ] "
     , iconRadioChecked = "(*) "
     , iconRadioUnchecked = "( ) "
+    , iconTreeExpanded = "v "
+    , iconTreeCollapsed = "> "
+    , iconTreeLeaf = "  "
     , iconClose = "X"
     , iconSelectOpen = " v"
     , iconSelectClosed = " >"
@@ -98,6 +109,9 @@ glyphIcons =
     , iconUnchecked = "\xf096 " -- square-o
     , iconRadioChecked = "\xf192 " -- dot-circle-o
     , iconRadioUnchecked = "\xf10c " -- circle-o
+    , iconTreeExpanded = "\xf078 " -- chevron-down
+    , iconTreeCollapsed = "\xf054 " -- chevron-right
+    , iconTreeLeaf = "  "
     , iconClose = "\xf00d" -- times
     , iconSelectOpen = " \xf078" -- chevron-down
     , iconSelectClosed = " \xf054" -- chevron-right
@@ -141,6 +155,12 @@ checkboxMark icons value = if value then iconChecked icons else iconUnchecked ic
 radioMark :: Icons -> Bool -> Text
 radioMark icons value = if value then iconRadioChecked icons else iconRadioUnchecked icons
 
+treeExpandMark :: Icons -> Bool -> Bool -> Text
+treeExpandMark icons hasChildren expanded
+  | not hasChildren = iconTreeLeaf icons
+  | expanded = iconTreeExpanded icons
+  | otherwise = iconTreeCollapsed icons
+
 -- | Every prefix a checkbox label may carry, so stripping works after a tier
 -- change (or a terminal node rendered through the SDL path).
 checkboxPrefixes :: [Text]
@@ -157,6 +177,14 @@ radioPrefixes =
   , iconRadioUnchecked asciiIcons
   , iconRadioChecked glyphIcons
   , iconRadioUnchecked glyphIcons
+  ]
+
+treeExpandPrefixes :: [Text]
+treeExpandPrefixes =
+  [ iconTreeExpanded asciiIcons
+  , iconTreeCollapsed asciiIcons
+  , iconTreeExpanded glyphIcons
+  , iconTreeCollapsed glyphIcons
   ]
 
 -- | Font Awesome private-use block. Every Nerd Font maps these.

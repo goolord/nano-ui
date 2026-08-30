@@ -4,6 +4,7 @@ module NanoUI.Store
   ) where
 
 import Data.IntMap.Strict (IntMap)
+import Data.IntSet (IntSet)
 import Data.Text (Text)
 import Data.Word (Word32)
 import qualified Data.IntMap.Strict as IM
@@ -22,6 +23,8 @@ data WidgetStore = WidgetStore
   , storeColorHue :: IntMap Float
   , storeColorSv :: IntMap (Float, Float)
   , storeColorDrag :: IntMap Int
+  , storeTreeSelected :: IntMap Int
+  , storeTreeExpanded :: IntMap IntSet
   , storeDisabled :: IntMap Bool
   , storeFlag :: IntMap Bool
   , storeNote :: IntMap Text
@@ -46,6 +49,8 @@ emptyWidgetStore =
     , storeColorHue = IM.empty
     , storeColorSv = IM.empty
     , storeColorDrag = IM.empty
+    , storeTreeSelected = IM.empty
+    , storeTreeExpanded = IM.empty
     , storeDisabled = IM.empty
     , storeFlag = IM.empty
     , storeNote = IM.empty

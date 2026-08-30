@@ -81,6 +81,7 @@ demoUi = do
   (readAccent, setAccent) <- useText (colorPickerToHex demoAccent)
   (readTheme, setTheme) <- useText (T.pack (show Dark))
   (readName, setName) <- useText ""
+  (readTreeSel, setTreeSel) <- useText "0"
   debugOpen <- readDebug
   aboutOpen <- readAbout
   scroll (tight (grow defaultLayout)) $
@@ -96,7 +97,7 @@ demoUi = do
           clickButton "About" (setAbout True)
           clickButton "Debug" (setDebug (not debugOpen))
       row (tight . gap 8 . wrap . fillW $ defaultLayout) $ do
-        column (tight . gap 8 $ defaultLayout) $ do
+        column (tight . gap 8 . fillW $ defaultLayout) $ do
           card $ do
             heading "State"
             checked <- readChecked
@@ -105,6 +106,7 @@ demoUi = do
             accentHex <- readAccent
             theme <- readTheme
             name <- readName
+            treeSel <- readTreeSel
             let accent = fromMaybe demoAccent (colorPickerFromHex accentHex)
             kv "Feature" (onOff checked)
             kv "Volume" vol
@@ -114,6 +116,7 @@ demoUi = do
               kv "Accent" accentHex
             kv "Theme" theme
             kv "Name" (orDash name)
+            kv "Tree" treeSel
             click <- readClick
             kv "Clicked" (orDash click)
           card $ do
@@ -147,10 +150,31 @@ demoUi = do
               setName name
               sep
             List -> do
-              heading "Items"
-              scroll (padAll 6 . fixedH 136 . fillW $ defaultLayout) $
-                column (tight . gap 0 . fillW $ defaultLayout) $
-                  mapM_ (label_ . T.pack . ("Item " <>) . show) [1 .. 12 :: Int]
+              heading "Tree"
+              selTxt <- readTreeSel
+              let sel0 =
+                    case reads (T.unpack selTxt) of
+                      [(n, "")] -> n
+                      _ -> 0
+                  demoTree =
+                    [ TreeItem
+                        "src"
+                        [ TreeItem "Main.hs" []
+                        , TreeItem
+                            "NanoUI"
+                            [ TreeItem "Widgets.hs" []
+                            , TreeItem "Frame.hs" []
+                            ]
+                        ]
+                    , TreeItem
+                        "test"
+                        [ TreeItem "Main.hs" []
+                        ]
+                    , TreeItem "README.md" []
+                    ]
+              scroll (padAll 6 . fixedH 160 . fillW $ defaultLayout) $ do
+                (_, sel) <- tree "demo" demoTree sel0
+                setTreeSel (T.pack (show sel))
             Diagnostics -> do
               heading "Diagnostics"
               kv "Renderer" "SDL3 Pinned Vertex Arena"

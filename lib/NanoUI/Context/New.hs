@@ -6,6 +6,7 @@ module NanoUI.Context.New
 import Data.IORef (newIORef)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Map.Strict as Map
+import Data.Primitive.PrimArray (newPrimArray)
 import qualified NanoUI.Atlas as Atlas
 import NanoUI.Context.Config
   ( enableMeasureCache
@@ -46,7 +47,10 @@ newContext = do
   ctxIdSalt <- newIORef 0
   ctxContainerStack <- newIORef []
   ctxMessages <- newIORef []
-  ctxFocusables <- newIORef []
+  let initCap = 64
+  ctxFocusables <- newIORef =<< newPrimArray initCap
+  ctxFocusablesCount <- newIORef 0
+  ctxFocusablesCap <- newIORef initCap
   ctxScrollDrag <- newIORef Nothing
   ctxTextInputDrag <- newIORef Nothing
   ctxTextInputMenu <- newIORef Nothing
@@ -60,6 +64,10 @@ newContext = do
   ctxWindowDrag <- newIORef Nothing
   ctxWindowResize <- newIORef Nothing
   ctxPrevFloatingRects <- newIORef IM.empty
+  ctxPrevFloatingOrder <- newIORef []
+  ctxOverlayTopmostCache <- newIORef Nothing
+  ctxCurrentFloatingId <- newIORef Nothing
+  ctxLastPointerBlocked <- newIORef False
   ctxImageAtlas <- Atlas.newImageAtlas
   ctxWakeLoop <- newIORef Nothing
   ctxHost <- newIORef Map.empty
@@ -93,6 +101,8 @@ newContext = do
       , ctxContainerStack
       , ctxMessages
       , ctxFocusables
+      , ctxFocusablesCount
+      , ctxFocusablesCap
       , ctxScrollDrag
       , ctxTextInputDrag
       , ctxTextInputMenu
@@ -108,6 +118,10 @@ newContext = do
       , ctxWindowDrag
       , ctxWindowResize
       , ctxPrevFloatingRects
+      , ctxPrevFloatingOrder
+      , ctxOverlayTopmostCache
+      , ctxCurrentFloatingId
+      , ctxLastPointerBlocked
       , ctxImageAtlas
       , ctxWakeLoop
       , ctxHost

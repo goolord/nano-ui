@@ -164,7 +164,7 @@ runFrameEff unlift ctx inp ui = do
   resetDrawArena (ctxDrawArena ctx)
   clearMeasureCache ctx
   writeIORef (ctxContainerStack ctx) []
-  writeIORef (ctxFocusables ctx) []
+  writeIORef (ctxFocusablesCount ctx) 0
   writeIORef (ctxHotId ctx) (WidgetId 0)
   writeIORef (ctxWidgetNodeTypes ctx) Nothing
   unless (inputMouseDown inp) $
@@ -242,4 +242,3 @@ runFrameEff unlift ctx inp ui = do
   -- the modal flag one frame after the click, so that follow-up must run.
   writeIORef (ctxDirty ctx) dirtyAfterUi
   pure (result, msgs, drawData, dirtyAfterUi)
-

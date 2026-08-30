@@ -89,6 +89,7 @@ import NanoUI.Font
   ( FontMetrics (..)
   , checkboxBoxSize
   , checkboxLeading
+  , treeRowLeading
   , fmLineHeight
   , layoutLineHeight
   , hasHeadingMarker
@@ -177,6 +178,7 @@ import NanoUI.WidgetText
   , selectChevronReserve
   , selectChevronCenterX
   , colorPickerToHex
+  , treeParseRow
   )
 import NanoUI.Style (Padding (..), Style (..), Theme (..), scrollBarThumbColor, scrollBarTrackColor, themeAccent, themeButton, themeFloatingWindow, themeInput, themeMuted, themeOverlayDim, themePanel, themeSeparator, themeWindow)
 import NanoUI.Types (Color (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, lerpColor, rectContains, rectH, rectIntersect, rectOverlapArea, rectUnion, rectW, rectX, rectY, v2X, v2Y)
@@ -416,6 +418,9 @@ widgetHitRect ctx nt idx x y w h = do
         NodeRadio -> do
           txt <- displayText ctx nt idx
           pure (terminalTextHitRect (ctxHostProfile ctx) fm x y h txt True)
+        NodeTree -> do
+          txt <- displayText ctx nt idx
+          pure (terminalTextHitRect (ctxHostProfile ctx) fm x y h txt True)
         NodeSelect -> do
           txt <- displayText ctx nt idx
           pure (terminalTextHitRect (ctxHostProfile ctx) fm x y h txt False)
@@ -480,7 +485,7 @@ widgetTextSpans ctx nt idx x y w h = do
                in pure [(closeRect, txt, fg, bg)]
             else do
               let tx =
-                    if nt == NodeButton || nt == NodeCheckbox || nt == NodeRadio
+                    if nt == NodeButton || nt == NodeCheckbox || nt == NodeRadio || nt == NodeTree
                       then x
                       else x + ix
                   textSpan =
@@ -580,6 +585,18 @@ widgetTextPlacements ctx nt idx x y w h = do
               then widgetContentInset (ctxHostProfile ctx) fm
               else labelContentInset (ctxHostProfile ctx) fm
           tx = x + cx + checkboxLeading (ctxHostProfile ctx) fm
+          ty = centeredTextY (ctxHostProfile ctx) fm y h th
+      pure [(txt, tx, ty, tw, th)]
+    NodeTree -> do
+      txt <- displayText ctx nt idx
+      (tw, th) <- ctxMeasureText ctx txt
+      stored <- getText (ctxNodeArena ctx) idx
+      let (_, _, depth, _, _, _) = treeParseRow stored
+          (cx, _) =
+            if terminal
+              then widgetContentInset (ctxHostProfile ctx) fm
+              else labelContentInset (ctxHostProfile ctx) fm
+          tx = x + cx + treeRowLeading (ctxHostProfile ctx) fm depth
           ty = centeredTextY (ctxHostProfile ctx) fm y h th
       pure [(txt, tx, ty, tw, th)]
     NodeSlider -> do

@@ -106,6 +106,10 @@ main = do
   runSdl "select-drop-flush" runSelectDropFlushTest
   run "select-pick-low" runSelectPickLowTest
   run "select-keyboard" runSelectKeyboardTest
+  run "tree-initial" runTreeInitialTest
+  run "tree-select" runTreeSelectTest
+  run "tree-expand-damage" runTreeExpandDamageTest
+  run "tree-keyboard" runTreeKeyboardTest
   run "text-wrap" runTextWrapTest
   run "text-wrap-width" runTextWrapAssignedTest
   run "text-multiline" runTextMultilineTest
@@ -164,6 +168,7 @@ main = do
   run "header-top-pad" runHeaderTopPadTest
   run "fit-header-no-shrink" runFitHeaderNoShrinkTest
   run "window-overlay" runWindowOverlayTest
+  run "overlay-click-through" runOverlayClickThroughTest
   run "window-drag" runWindowDragTest
   run "window-scroll-wheel" runWindowScrollWheelTest
   run "window-resize" runWindowResizeTest
@@ -2097,6 +2102,128 @@ runSelectDropdownTest ctx failed = do
       hasHigh = any (\(_, txt, _, _, _) -> "High" `T.isInfixOf` txt) overlays
   when (not (hasLow && hasHigh)) $ bump failed
 
+runTreeInitialTest :: Context -> IORef Int -> IO ()
+runTreeInitialTest _ failed = do
+  ctx <- newContext
+  let inp0 = emptyInput {inputWindowSize = Size 40 12}
+      items =
+        [ TreeItem "root" [TreeItem "child" []]
+        , TreeItem "leaf" []
+        ]
+      ui = column defaultLayout (void (tree "t" items 0))
+  _ <- runFrame ctx inp0 ui
+  spans <- collectTextSpans ctx
+  let texts = [txt | (_, txt, _, _, _) <- spans]
+      hasRoot = any ("root" `T.isInfixOf`) texts
+      hasChild = any ("child" `T.isInfixOf`) texts
+      hasLeaf = any ("leaf" `T.isInfixOf`) texts
+  when (not (hasRoot && hasChild && hasLeaf)) $ bump failed
+
+runTreeSelectTest :: Context -> IORef Int -> IO ()
+runTreeSelectTest _ failed = do
+  ctx <- newContext
+  let inp0 = emptyInput {inputWindowSize = Size 40 12}
+      items = [TreeItem "alpha" [], TreeItem "beta" []]
+      ui = column defaultLayout (tree "t" items 0)
+  _ <- runFrame ctx inp0 ui
+  ((resp, sel0), _, _, _) <- runFrame ctx inp0 ui
+  when (sel0 /= 0) $ bump failed
+  let Rect rx ry _rw rh = respRect resp
+      -- Second row: below mid-height of the merged tree rect.
+      click = V2 (rx + 1) (ry + rh * 0.75)
+      inpPress =
+        inp0
+          { inputMousePos = click
+          , inputMouseDown = True
+          , inputMousePressed = True
+          , inputMouseReleased = False
+          }
+  _ <- runFrame ctx inpPress ui
+  let inpRelease =
+        inpPress
+          { inputMousePressed = False
+          , inputMouseDown = False
+          , inputMouseReleased = True
+          }
+  ((_, sel), _, _, _) <- runFrame ctx inpRelease ui
+  when (sel /= 1) $ bump failed
+
+-- Collapse must not flip the chevron while children still emit. Next idle
+-- frame drops the kids and Fulls so the retain buffer cannot keep ghosts.
+runTreeExpandDamageTest :: Context -> IORef Int -> IO ()
+runTreeExpandDamageTest _ failed = do
+  ctx <- newAdaptiveTerminalContext
+  let items =
+        [ TreeItem "root" [TreeItem "child" []]
+        , TreeItem "leaf" []
+        ]
+      ui = column defaultLayout (void (tree "t" items 0))
+      inp0 = emptyInput {inputWindowSize = Size 40 12, inputMousePos = V2 (-10) (-10)}
+  _ <- runFrame ctx inp0 ui
+  _ <- takeDamage ctx
+  _ <- runFrame ctx inp0 ui
+  _ <- takeDamage ctx
+  _ <- runFrame ctx inp0 ui
+  dIdle <- takeDamage ctx
+  when (dIdle == DamageFull) $ bump failed
+  spans <- collectTextSpans ctx
+  case [r | (r, txt, _, _, _) <- spans, "root" `T.isInfixOf` txt] of
+    (Rect x y _w h : _) -> do
+      let click = V2 (x + 0.5) (y + h / 2)
+          press =
+            inp0
+              { inputMousePos = click
+              , inputMouseDown = True
+              , inputMousePressed = True
+              }
+          release =
+            press
+              { inputMouseDown = False
+              , inputMousePressed = False
+              , inputMouseReleased = True
+              }
+      _ <- runFrame ctx press ui
+      _ <- runFrame ctx release ui
+      spansClick <- collectTextSpans ctx
+      when (not (any (\(_, t, _, _, _) -> "child" `T.isInfixOf` t) spansClick)) $ bump failed
+      dClick <- takeDamage ctx
+      when (dClick /= DamageFull) $ bump failed
+      _ <- runFrame ctx inp0 ui
+      spansNext <- collectTextSpans ctx
+      when (any (\(_, t, _, _, _) -> "child" `T.isInfixOf` t) spansNext) $ bump failed
+      when (not (any (\(_, t, _, _, _) -> "root" `T.isInfixOf` t) spansNext)) $ bump failed
+      dNext <- takeDamage ctx
+      when (dNext /= DamageFull) $ bump failed
+      _ <- runFrame ctx inp0 ui
+      dSettled <- takeDamage ctx
+      when (dSettled == DamageFull) $ bump failed
+    _ -> bump failed
+
+runTreeKeyboardTest :: Context -> IORef Int -> IO ()
+runTreeKeyboardTest _ failed = do
+  ctx <- newContext
+  let items =
+        [ TreeItem "root" [TreeItem "child" []]
+        , TreeItem "leaf" []
+        ]
+      ui = column defaultLayout (tree "k" items 0)
+      inp0 = emptyInput {inputWindowSize = Size 40 12}
+  _ <- runFrame ctx inp0 ui
+  _ <- runFrame ctx inp0 ui
+  let tabInp = inp0 {inputKeys = inputKeysFromList [KeyTab]}
+  _ <- runFrame ctx tabInp ui
+  let downInp = inp0 {inputKeys = inputKeysFromList [KeyDown]}
+  ((_, sel1), _, _, _) <- runFrame ctx downInp ui
+  when (sel1 /= 1) $ bump failed
+  let upInp = inp0 {inputKeys = inputKeysFromList [KeyUp]}
+  ((_, sel0), _, _, _) <- runFrame ctx upInp ui
+  when (sel0 /= 0) $ bump failed
+  let enterInp = inp0 {inputKeys = inputKeysFromList [KeyEnter]}
+  _ <- runFrame ctx enterInp ui
+  _ <- runFrame ctx inp0 ui
+  spans <- collectTextSpans ctx
+  when (any (\(_, t, _, _, _) -> "child" `T.isInfixOf` t) spans) $ bump failed
+
 runSelectDropdownHoverTest :: Context -> IORef Int -> IO ()
 runSelectDropdownHoverTest _ failed = do
   ctx <- newAdaptiveTerminalContext
@@ -3613,6 +3740,102 @@ runWindowOverlayTest ctx failed = do
           }
   ((_, winClose, _), _, _, _) <- runFrame ctx releaseClose ui
   when (not (respClicked winClose)) $ bump failed
+
+-- Empty overlay chrome must eat clicks. Page widgets under that box stay idle.
+-- Widgets inside the overlay still click. Lower window children stay idle.
+runOverlayClickThroughTest :: Context -> IORef Int -> IO ()
+runOverlayClickThroughTest _ failed = do
+  ctx <- newContext
+  let inp0 = emptyInput {inputWindowSize = Size 300 220}
+      windowUi = do
+        outsides <- column defaultLayout (replicateM 10 (button "Outside"))
+        (win, mInside) <-
+          window True "Cover" $ do
+            button "Inside"
+        pure (outsides, win, mInside)
+      modalUi = do
+        outsides <- column defaultLayout (replicateM 10 (button "Outside"))
+        (dlg, mInside) <-
+          modal True "Cover" $ do
+            button "Inside"
+        pure (outsides, dlg, mInside)
+      stackedUi = do
+        (lo, mLo) <- window True "Low" (button "LowBtn")
+        (hi, mHi) <- window True "High" (button "HighBtn")
+        pure (lo, mLo, hi, mHi)
+      childSafePoint cover childRects =
+        let Rect x y w h = cover
+            titleSkip = 40
+            cands =
+              [ V2 (x + 6) (y + h * 0.72)
+              , V2 (x + w - 6) (y + h * 0.72)
+              , V2 (x + w / 2) (y + h - 6)
+              , V2 (x + 6) (y + h - 6)
+              , V2 (x + w - 6) (y + titleSkip + 6)
+              ]
+            inCover p = rectContains cover p
+            missesKids p = not (any (`rectContains` p) childRects)
+         in case filter (\p -> inCover p && missesKids p) cands of
+              (p : _) -> Just p
+              [] -> Nothing
+      clickNone clicked ui pos = do
+        let (press, release) = clickAt inp0 pos
+        _ <- runFrame ctx press ui
+        runFrame ctx release ui
+          >>= \(hit, _, _, _) -> when (clicked hit) (bump failed)
+      runCovered ui = do
+        _ <- runFrame ctx inp0 ui
+        _ <- runFrame ctx inp0 ui
+        ((_, cover0, mInside0), _, _, _) <- runFrame ctx inp0 ui
+        let coverRect = respRect cover0
+        when (rectW coverRect <= 0 || rectH coverRect <= 0) $ bump failed
+        case mInside0 of
+          Nothing -> bump failed
+          Just inside0 -> do
+            let kids = [respRect inside0]
+            case childSafePoint coverRect kids of
+              Nothing -> bump failed
+              Just pos -> do
+                let (press, release) = clickAt inp0 pos
+                _ <- runFrame ctx press ui
+                ((outsidesHit, _, _), _, _, _) <- runFrame ctx release ui
+                when (any respClicked outsidesHit) $ bump failed
+            let ir = respRect inside0
+                ip = V2 (rectX ir + rectW ir / 2) (rectY ir + rectH ir / 2)
+            when (rectW ir <= 0 || rectH ir <= 0) $ bump failed
+            let (ipress, irelease) = clickAt inp0 ip
+            _ <- runFrame ctx ipress ui
+            ((_, _, mInsideHit), _, _, _) <- runFrame ctx irelease ui
+            case mInsideHit of
+              Just r -> when (not (respClicked r)) $ bump failed
+              Nothing -> bump failed
+      runStacked = do
+        _ <- runFrame ctx inp0 stackedUi
+        _ <- runFrame ctx inp0 stackedUi
+        ((_, mLo0, hi0, mHi0), _, _, _) <- runFrame ctx inp0 stackedUi
+        case (mLo0, mHi0) of
+          (Just loBtn, Just hiBtn) -> do
+            let cover = respRect hi0
+                kids = [respRect loBtn, respRect hiBtn]
+            when (rectW cover <= 0 || rectH cover <= 0) $ bump failed
+            case childSafePoint cover kids of
+              Nothing -> bump failed
+              Just pos ->
+                clickNone
+                  (\(_, loHit, _, _) -> maybe False respClicked loHit)
+                  stackedUi
+                  pos
+            let hp = V2 (rectX (respRect hiBtn) + rectW (respRect hiBtn) / 2) (rectY (respRect hiBtn) + rectH (respRect hiBtn) / 2)
+                (hpress, hrelease) = clickAt inp0 hp
+            _ <- runFrame ctx hpress stackedUi
+            ((_, _, _, mHiHit), _, _, _) <- runFrame ctx hrelease stackedUi
+            case mHiHit of
+              Just r -> when (not (respClicked r)) $ bump failed
+              Nothing -> bump failed
+          _ -> bump failed
+  runCovered windowUi
+  runCovered modalUi
+  runStacked
 
 runWindowDragTest :: Context -> IORef Int -> IO ()
 runWindowDragTest ctx failed = do
