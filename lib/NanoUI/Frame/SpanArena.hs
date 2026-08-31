@@ -15,7 +15,7 @@ module NanoUI.Frame.SpanArena
 import Control.Monad (when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import qualified Data.IntMap.Strict as IM
-import Data.Primitive.Array (MutableArray, newArray, readArray, writeArray)
+import Data.Primitive.Array (MutableArray, copyMutableArray, newArray, readArray, writeArray)
 import Data.Primitive.PrimArray
   ( MutablePrimArray
   , copyMutablePrimArray
@@ -105,10 +105,7 @@ growT :: IORef (MutableArray RealWorld Text) -> Int -> Int -> IO ()
 growT ref oldCap newCap = do
   arr <- readIORef ref
   newArr <- newArray newCap T.empty
-  let go !i
-        | i >= oldCap = pure ()
-        | otherwise = readArray arr i >>= writeArray newArr i >> go (i + 1)
-  go 0
+  copyMutableArray newArr 0 arr 0 oldCap
   writeIORef ref newArr
 
 {-# INLINE pushSpan #-}

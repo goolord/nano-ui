@@ -39,6 +39,7 @@ module NanoUI.WidgetText
 import Data.Char (chr)
 import Data.List (find)
 import Data.Text (Text)
+import Data.Text.Read (double, signed, decimal)
 import Data.Word (Word8)
 import NanoUI.Font (FontMetrics (..), fmLineHeight)
 import NanoUI.Icons (Icons, checkboxPrefixes, radioPrefixes, treeExpandMark, treeExpandPrefixes)
@@ -95,8 +96,8 @@ sliderParseRange txt =
    in (sliderLabelText bare, minV, maxV)
   where
     readFloat t fallback =
-      case reads (T.unpack t) of
-        [(v, "")] -> v
+      case double t of
+        Right (v, "") -> realToFrac v
         _ -> fallback
 
 checkboxLabelText :: Text -> Text
@@ -124,8 +125,8 @@ radioParseOption txt =
     _ -> (0, 0, txt)
   where
     readInt t fallback =
-      case reads (T.unpack t) of
-        [(v, "")] -> v
+      case signed decimal t of
+        Right (v, "") -> v
         _ -> fallback
 
 radioLabelText :: Text -> Text
@@ -167,8 +168,8 @@ treeParseRow txt =
     _ -> (0, 0, 0, False, False, txt)
   where
     readInt t fallback =
-      case reads (T.unpack t) of
-        [(v, "")] -> v
+      case signed decimal t of
+        Right (v, "") -> v
         _ -> fallback
 
 treeLabelText :: Text -> Text
