@@ -92,6 +92,7 @@ data Context = Context
   , ctxOverlayTopmostCache :: IORef (Maybe (V2, Maybe WidgetId))
   , ctxCurrentFloatingId :: IORef (Maybe WidgetId)
   , ctxLastPointerBlocked :: IORef Bool
+  , ctxFloatingAncestor :: IORef (Maybe (IntMap (Maybe NodeType)))
   , ctxImageAtlas :: ImageAtlas
   , ctxWakeLoop :: IORef (Maybe (IO ()))
   , ctxHost :: IORef (Map TypeRep Dynamic)

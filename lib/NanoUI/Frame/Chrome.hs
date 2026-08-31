@@ -60,11 +60,9 @@ import NanoUI.Layout.Arena
   )
 import NanoUI.WidgetMarkers
   ( buttonDisplayText
-  , closeButtonDisplayText
-  , isCloseButtonText
-  , isTabButtonText
+  , buttonDisplayTextFromFlags
+  , buttonFlags
   , stripButtonBrackets
-  , tabButtonDisplayText
   )
 import NanoUI.WidgetText
   ( checkboxLabelText
@@ -134,6 +132,16 @@ floatingAncestor ctx idx = go idx
 
 buildFloatingAncestorMap :: Context -> IO (IM.IntMap (Maybe NodeType))
 buildFloatingAncestorMap ctx = do
+  cached <- readIORef (ctxFloatingAncestor ctx)
+  case cached of
+    Just table -> pure table
+    Nothing -> do
+      table <- buildFloatingAncestorMapFresh ctx
+      writeIORef (ctxFloatingAncestor ctx) (Just table)
+      pure table
+
+buildFloatingAncestorMapFresh :: Context -> IO (IM.IntMap (Maybe NodeType))
+buildFloatingAncestorMapFresh ctx = do
   count <- arenaCount (ctxNodeArena ctx)
   foldM resolve IM.empty [0 .. count - 1]
   where
@@ -184,11 +192,8 @@ displayText ctx nt idx = do
           let (_, _, depth, hasKids, expanded, lbl) = treeParseRow txt
           pure (treeDisplayText (ctxIcons ctx) depth hasKids expanded lbl)
         NodeButton ->
-          if isCloseButtonText txt
-            then pure (closeButtonDisplayText txt)
-            else if isTabButtonText txt
-                   then pure (tabButtonDisplayText txt)
-                   else pure (buttonDisplayText txt)
+          let flags = buttonFlags txt
+           in pure (buttonDisplayTextFromFlags flags txt)
         NodeTextInput -> do
           value <- textInputValue ctx idx
           focused <- textInputFocused ctx idx
@@ -410,8 +415,10 @@ widgetVisualStyle ctx nt idx = do
     if nt == NodeButton
       then getStyleIdx (ctxNodeArena ctx) idx
       else pure 0
-  let isClose = nt == NodeButton && isCloseButtonText storedText
-      isTab = nt == NodeButton && isTabButtonText storedText
+  let (isClose, isTab) =
+        if nt == NodeButton
+          then buttonFlags storedText
+          else (False, False)
   let theme = ctxTheme ctx
       terminal = isCellHost (ctxHostProfile ctx)
       isFocus = focus == wid

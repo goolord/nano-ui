@@ -5,7 +5,7 @@ module NanoUI.Damage
   , writeDamage
   ) where
 
-import Control.Monad (foldM, forM, when)
+import Control.Monad (forM, when)
 import Data.IORef (readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Maybe (catMaybes, isNothing)
@@ -38,13 +38,25 @@ import NanoUI.Input
   , inputScroll
   , inputWindowSize
   )
+import NanoUI.Frame.Chrome (displayText, textInputFocused, textInputValue)
+import NanoUI.Host (isCellHost)
 import NanoUI.Layout.Arena
   ( NodeType (..)
+  , SizingTag (..)
   , arenaCount
+  , getHeightSizing
   , getNodeType
+  , getNodeValue
+  , getParent
   , getRect
   , getText
   , getWidgetId
+  , getWidthSizing
+  )
+import NanoUI.WidgetText
+  ( radioParseOption
+  , sliderValueText
+  , textInputFieldText
   )
 import NanoUI.Types
   ( Damage (..)
@@ -61,41 +73,164 @@ import NanoUI.Types
 textClipSlop :: Float
 textClipSlop = 4
 
+-- Partial retain clears with themeWindow. Expand interaction clips to the painted
+-- panel/window backdrop so slop pixels get the correct fill, not window color.
+backdropRectForWidget :: Context -> WidgetId -> IO (Maybe Rect)
+backdropRectForWidget ctx wid
+  | hashWidgetId wid == 0 = pure Nothing
+  | otherwise =
+      findWidgetNode ctx wid >>= \case
+        Nothing -> pure Nothing
+        Just idx -> backdropRectFromNode ctx idx
+
+backdropRectForKey :: Context -> Int -> IO (Maybe Rect)
+backdropRectForKey ctx k
+  | k == 0 = pure Nothing
+  | otherwise =
+      findWidgetNodeByKey ctx k >>= \case
+        Nothing -> pure Nothing
+        Just idx -> backdropRectFromNode ctx idx
+
+backdropRectsForInteraction :: Context -> [WidgetId] -> [Int] -> IO [Rect]
+backdropRectsForInteraction ctx wids keys = do
+  ws <- catMaybes <$> forM wids (backdropRectForWidget ctx)
+  ks <- catMaybes <$> forM keys (backdropRectForKey ctx)
+  pure (ws ++ ks)
+
+findWidgetNode :: Context -> WidgetId -> IO (Maybe Int)
+findWidgetNode ctx wid = do
+  count <- arenaCount (ctxNodeArena ctx)
+  go (count - 1)
+  where
+    go idx
+      | idx < 0 = pure Nothing
+      | otherwise = do
+          w <- getWidgetId (ctxNodeArena ctx) idx
+          if w == wid
+            then pure (Just idx)
+            else go (idx - 1)
+
+findWidgetNodeByKey :: Context -> Int -> IO (Maybe Int)
+findWidgetNodeByKey ctx k = do
+  count <- arenaCount (ctxNodeArena ctx)
+  go (count - 1)
+  where
+    go idx
+      | idx < 0 = pure Nothing
+      | otherwise = do
+          w <- getWidgetId (ctxNodeArena ctx) idx
+          if intKey w == k
+            then pure (Just idx)
+            else go (idx - 1)
+
+backdropRectFromNode :: Context -> Int -> IO (Maybe Rect)
+backdropRectFromNode ctx idx = do
+  let na = ctxNodeArena ctx
+  nt <- getNodeType na idx
+  case nt of
+    NodePanel -> nodeRect na idx
+    NodeWindow -> nodeRect na idx
+    NodeModal -> nodeRect na idx
+    NodeScrollContainer -> do
+      (wTag, _) <- getWidthSizing na idx
+      (hTag, _) <- getHeightSizing na idx
+      if wTag == SizingGrow && hTag == SizingGrow
+        then walkParent na idx
+        else nodeRect na idx
+    _ -> walkParent na idx
+  where
+    nodeRect arena i = do
+      (x, y, w, h) <- getRect arena i
+      let r = Rect x y w h
+      pure (if nonzeroRect r then Just r else Nothing)
+    walkParent arena i = do
+      p <- getParent arena i
+      if p < 0
+        then pure Nothing
+        else backdropRectFromNode ctx p
+
 updatePrevRects :: Context -> IO ()
 updatePrevRects ctx = do
   count <- arenaCount (ctxNodeArena ctx)
-  acc <- foldM add IM.empty [0 .. count - 1]
-  writeIORef (ctxPrevRects ctx) acc
-  where
-    add m idx = do
+  if count <= 0
+    then writeIORef (ctxPrevRects ctx) IM.empty
+    else do
+      pairs <- collectPrevRectPairs ctx (count - 1) []
+      writeIORef (ctxPrevRects ctx) (IM.fromListWith rectUnion pairs)
+
+collectPrevRectPairs :: Context -> Int -> [(Int, Rect)] -> IO [(Int, Rect)]
+collectPrevRectPairs ctx !idx acc
+  | idx < 0 = pure acc
+  | otherwise = do
       wid <- getWidgetId (ctxNodeArena ctx) idx
       (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-      if hashWidgetId wid == 0
-        then pure m
-        else
-          let r = Rect x y w h
-           in if nonzeroRect r
-                then pure (IM.insertWith rectUnion (intKey wid) r m)
-                else pure m
+      let acc'
+            | hashWidgetId wid == 0 = acc
+            | otherwise =
+                let r = Rect x y w h
+                 in if nonzeroRect r
+                      then (intKey wid, r) : acc
+                      else acc
+      collectPrevRectPairs ctx (idx - 1) acc'
 
 updatePrevNodeTexts :: Context -> IO ()
 updatePrevNodeTexts ctx = do
   count <- arenaCount (ctxNodeArena ctx)
-  acc <- foldM add IM.empty [0 .. count - 1]
-  writeIORef (ctxPrevNodeTexts ctx) acc
-  where
-    add m idx = do
+  if count <= 0
+    then writeIORef (ctxPrevNodeTexts ctx) IM.empty
+    else do
+      pairs <- collectPrevTextPairs ctx (count - 1) []
+      writeIORef (ctxPrevNodeTexts ctx) (IM.fromList pairs)
+
+collectPrevTextPairs :: Context -> Int -> [(Int, Text)] -> IO [(Int, Text)]
+collectPrevTextPairs ctx !idx acc
+  | idx < 0 = pure acc
+  | otherwise = do
       wid <- getWidgetId (ctxNodeArena ctx) idx
       (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
       if hashWidgetId wid == 0
-        then pure m
+        then collectPrevTextPairs ctx (idx - 1) acc
         else
           let r = Rect x y w h
            in if nonzeroRect r
                 then do
-                  txt <- getText (ctxNodeArena ctx) idx
-                  pure (IM.insert (intKey wid) txt m)
-                else pure m
+                  nt <- getNodeType (ctxNodeArena ctx) idx
+                  snap <- paintTextSnapshot ctx nt idx
+                  collectPrevTextPairs ctx (idx - 1) ((intKey wid, snap) : acc)
+                else collectPrevTextPairs ctx (idx - 1) acc
+
+-- Painted text fingerprint, not packed node text. Text inputs draw from store;
+-- radio/checkbox dots follow node value in pixel mode.
+paintTextSnapshot :: Context -> NodeType -> Int -> IO Text
+paintTextSnapshot ctx nt idx = do
+  let terminal = isCellHost (ctxHostProfile ctx)
+  case nt of
+    NodeTextInput -> do
+      lbl <- getText (ctxNodeArena ctx) idx
+      value <- textInputValue ctx idx
+      focus <- textInputFocused ctx idx
+      pure (lbl <> "\US" <> textInputFieldText lbl value focus)
+    NodeSlider
+      | not terminal -> do
+          lbl <- displayText ctx nt idx
+          wid <- getWidgetId (ctxNodeArena ctx) idx
+          store <- getStore ctx
+          let val = IM.findWithDefault 0 (intKey wid) (storeSlider store)
+          pure (lbl <> "\US" <> sliderValueText val)
+      | otherwise -> displayText ctx nt idx
+    NodeRadio
+      | not terminal -> do
+          lbl <- displayText ctx nt idx
+          val <- getNodeValue (ctxNodeArena ctx) idx
+          pure (lbl <> "\US" <> T.pack (show (round val :: Int)))
+      | otherwise -> displayText ctx nt idx
+    NodeCheckbox
+      | not terminal -> do
+          lbl <- displayText ctx nt idx
+          val <- getNodeValue (ctxNodeArena ctx) idx
+          pure (lbl <> "\US" <> T.pack (show (round val :: Int)))
+      | otherwise -> displayText ctx nt idx
+    _ -> displayText ctx nt idx
 
 floatingPanelsInOrder :: Context -> IO [(Int, Rect)]
 floatingPanelsInOrder ctx = do
@@ -247,20 +382,32 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
                     ++ storeKeyChangeRects (storeColorHue oldStore) (storeColorHue newStore) oldRects newRects
                     ++ storeKeyChangeRects (storeColorSv oldStore) (storeColorSv newStore) oldRects newRects
                     ++ storeKeyChangeRects (storeColorDrag oldStore) (storeColorDrag newStore) oldRects newRects
+                textStoreRs =
+                  storeKeyChangeRects (storeText oldStore) (storeText newStore) oldRects newRects
+                    ++ storeKeyChangeRects (storeCursor oldStore) (storeCursor newStore) oldRects newRects
+                    ++ storeKeyChangeRects (storeSelAnchor oldStore) (storeSelAnchor newStore) oldRects newRects
+                    ++ storeKeyChangeRects (storeSlider oldStore) (storeSlider newStore) oldRects newRects
+                    ++ storeKeyChangeRects (storeSelect oldStore) (storeSelect newStore) oldRects newRects
+                    ++ storeKeyChangeRects (storeCheckbox oldStore) (storeCheckbox newStore) oldRects newRects
+            radioStoreRs <- radioStoreChangeRects ctx oldStore newStore oldRects newRects
             animRs <-
               fmap concat $
                 forM clipKeys $ \k ->
                   if k == 0
                     then pure []
                     else pure (catMaybes [IM.lookup k oldRects, IM.lookup k newRects])
+            backdropRs <- backdropRectsForInteraction ctx ids clipKeys
             let layoutRs = moved
                 base =
                   unionRects
                     ( rs
                         ++ animRs
+                        ++ backdropRs
                         ++ layoutRs
                         ++ vanishedRs
                         ++ textRs
+                        ++ textStoreRs
+                        ++ radioStoreRs
                         ++ colorRs
                         ++ floatingRectDamage oldFloatingRects newFloatingRects
                     )
@@ -332,9 +479,38 @@ textChangeKeys old new =
   IM.fromList
     [ (k, ())
     | (k, tNew) <- IM.toList new
-    , Just tOld <- [IM.lookup k old]
-    , tOld /= tNew
+    , IM.findWithDefault "" k old /= tNew
     ]
+
+radioStoreChangeRects ::
+  Context ->
+  WidgetStore ->
+  WidgetStore ->
+  IM.IntMap Rect ->
+  IM.IntMap Rect ->
+  IO [Rect]
+radioStoreChangeRects ctx oldStore newStore oldRects newRects = do
+  let changed = storeChangeKeys (storeRadio oldStore) (storeRadio newStore)
+  if IM.null changed
+    then pure []
+    else do
+      let groups = IM.keys changed
+      count <- arenaCount (ctxNodeArena ctx)
+      rs <-
+        forM [0 .. count - 1] $ \idx -> do
+          nt <- getNodeType (ctxNodeArena ctx) idx
+          if nt /= NodeRadio
+            then pure []
+            else do
+              txt <- getText (ctxNodeArena ctx) idx
+              wid <- getWidgetId (ctxNodeArena ctx) idx
+              let (groupKey, _, _) = radioParseOption txt
+              if groupKey `elem` groups
+                then
+                  let k = intKey wid
+                   in pure (catMaybes [IM.lookup k oldRects, IM.lookup k newRects])
+                else pure []
+      pure (concat rs)
 
 textChangeRects ::
   IM.IntMap Text ->

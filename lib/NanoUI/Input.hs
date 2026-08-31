@@ -13,6 +13,7 @@ module NanoUI.Input
   , foldInputKeys
   , inputKeysFromList
   , emptyInputKeys
+  , stripInteractionInput
   ) where
 
 import Data.Text (Text)

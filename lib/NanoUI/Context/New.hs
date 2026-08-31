@@ -73,6 +73,7 @@ newContext = do
   ctxOverlayTopmostCache <- newIORef Nothing
   ctxCurrentFloatingId <- newIORef Nothing
   ctxLastPointerBlocked <- newIORef False
+  ctxFloatingAncestor <- newIORef Nothing
   ctxImageAtlas <- Atlas.newImageAtlas
   ctxWakeLoop <- newIORef Nothing
   ctxHost <- newIORef Map.empty
@@ -130,6 +131,7 @@ newContext = do
       , ctxOverlayTopmostCache
       , ctxCurrentFloatingId
       , ctxLastPointerBlocked
+      , ctxFloatingAncestor
       , ctxImageAtlas
       , ctxWakeLoop
       , ctxHost

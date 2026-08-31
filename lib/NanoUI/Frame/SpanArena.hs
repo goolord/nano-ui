@@ -8,11 +8,13 @@ module NanoUI.Frame.SpanArena
   , pushSpan
   , spanArenaCount
   , spanArenaToList
+  , spanArenaToListOccluded
   , foldSpanArena
   ) where
 
 import Control.Monad (when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import qualified Data.IntMap.Strict as IM
 import Data.Primitive.Array (MutableArray, newArray, readArray, writeArray)
 import Data.Primitive.PrimArray
   ( MutablePrimArray
@@ -25,7 +27,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Word (Word32)
 import GHC.Exts (RealWorld)
-import NanoUI.Types (Color (..), Rect (..), colorToWord32)
+import NanoUI.Types (Color (..), Rect (..), colorToWord32, rectIntersect)
 
 data SpanArena = SpanArena
   { saCount :: IORef Int
@@ -128,33 +130,58 @@ pushSpan sa (Rect x y w h) txt fg bg (Rect cx cy cw ch) = do
   writeIORef (saCount sa) (i + 1)
 
 spanArenaToList :: SpanArena -> IO [(Rect, Text, Color, Color, Rect)]
-spanArenaToList sa = do
+spanArenaToList sa = spanArenaToListOccluded IM.empty sa
+
+spanArenaToListOccluded :: IM.IntMap Rect -> SpanArena -> IO [(Rect, Text, Color, Color, Rect)]
+spanArenaToListOccluded panels sa = do
   n <- readIORef (saCount sa)
-  let go !i acc
-        | i < 0 = pure acc
-        | otherwise = do
-            x <- readIORef (saX sa) >>= \a -> readPrimArray a i
-            y <- readIORef (saY sa) >>= \a -> readPrimArray a i
-            w <- readIORef (saW sa) >>= \a -> readPrimArray a i
-            h <- readIORef (saH sa) >>= \a -> readPrimArray a i
-            cx <- readIORef (saClipX sa) >>= \a -> readPrimArray a i
-            cy <- readIORef (saClipY sa) >>= \a -> readPrimArray a i
-            cw <- readIORef (saClipW sa) >>= \a -> readPrimArray a i
-            ch <- readIORef (saClipH sa) >>= \a -> readPrimArray a i
-            fg <- readIORef (saFg sa) >>= \a -> readPrimArray a i
-            bg <- readIORef (saBg sa) >>= \a -> readPrimArray a i
-            txt <- readIORef (saText sa) >>= \a -> readArray a i
-            go
-              (i - 1)
-              ( ( Rect x y w h
-                , txt
-                , Color fg
-                , Color bg
-                , Rect cx cy cw ch
-                )
-                  : acc
-              )
-  go (n - 1) []
+  if n <= 0
+    then pure []
+    else do
+      let panelRects
+            | IM.null panels = []
+            | otherwise = IM.elems panels
+      go (n - 1) [] panelRects
+  where
+    go !i acc panelRects
+      | i < 0 = pure acc
+      | otherwise = do
+          (Rect x y w h, txt, fg, bg, clip) <- readSpanAt sa i
+          acc' <-
+            if null panelRects || not (spanOccluded panelRects (Rect x y w h) clip)
+              then pure ((Rect x y w h, txt, fg, bg, clip) : acc)
+              else pure acc
+          go (i - 1) acc' panelRects
+
+readSpanAt :: SpanArena -> Int -> IO (Rect, Text, Color, Color, Rect)
+readSpanAt sa i = do
+  x <- readIORef (saX sa) >>= \a -> readPrimArray a i
+  y <- readIORef (saY sa) >>= \a -> readPrimArray a i
+  w <- readIORef (saW sa) >>= \a -> readPrimArray a i
+  h <- readIORef (saH sa) >>= \a -> readPrimArray a i
+  cx <- readIORef (saClipX sa) >>= \a -> readPrimArray a i
+  cy <- readIORef (saClipY sa) >>= \a -> readPrimArray a i
+  cw <- readIORef (saClipW sa) >>= \a -> readPrimArray a i
+  ch <- readIORef (saClipH sa) >>= \a -> readPrimArray a i
+  fg <- readIORef (saFg sa) >>= \a -> readPrimArray a i
+  bg <- readIORef (saBg sa) >>= \a -> readPrimArray a i
+  txt <- readIORef (saText sa) >>= \a -> readArray a i
+  pure (Rect x y w h, txt, Color fg, Color bg, Rect cx cy cw ch)
+
+spanOccluded :: [Rect] -> Rect -> Rect -> Bool
+spanOccluded panelRects rect clip =
+  case rectIntersect rect clip of
+    Nothing -> True
+    Just visible -> any (rectFullyInside visible) panelRects
+
+rectFullyInside :: Rect -> Rect -> Bool
+rectFullyInside (Rect ix iy iw ih) (Rect ox oy ow oh) =
+  iw > 0
+    && ih > 0
+    && ix >= ox
+    && iy >= oy
+    && ix + iw <= ox + ow
+    && iy + ih <= oy + oh
 
 foldSpanArena :: SpanArena -> (Rect -> Text -> Color -> Color -> Rect -> IO ()) -> IO ()
 foldSpanArena sa f = do
@@ -162,17 +189,7 @@ foldSpanArena sa f = do
   let go !i
         | i >= n = pure ()
         | otherwise = do
-            x <- readIORef (saX sa) >>= \a -> readPrimArray a i
-            y <- readIORef (saY sa) >>= \a -> readPrimArray a i
-            w <- readIORef (saW sa) >>= \a -> readPrimArray a i
-            h <- readIORef (saH sa) >>= \a -> readPrimArray a i
-            cx <- readIORef (saClipX sa) >>= \a -> readPrimArray a i
-            cy <- readIORef (saClipY sa) >>= \a -> readPrimArray a i
-            cw <- readIORef (saClipW sa) >>= \a -> readPrimArray a i
-            ch <- readIORef (saClipH sa) >>= \a -> readPrimArray a i
-            fg <- readIORef (saFg sa) >>= \a -> readPrimArray a i
-            bg <- readIORef (saBg sa) >>= \a -> readPrimArray a i
-            txt <- readIORef (saText sa) >>= \a -> readArray a i
-            f (Rect x y w h) txt (Color fg) (Color bg) (Rect cx cy cw ch)
+            (Rect x y w h, txt, fg, bg, clip) <- readSpanAt sa i
+            f (Rect x y w h) txt fg bg clip
             go (i + 1)
   go 0

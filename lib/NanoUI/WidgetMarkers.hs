@@ -7,16 +7,11 @@ module NanoUI.WidgetMarkers
   , closeButtonDisplayText
   , tabButtonDisplayText
   , buttonDisplayText
+  , buttonFlags
+  , buttonDisplayTextFromFlags
   ) where
 
 import qualified Data.Text as T
-
-stripButtonBrackets :: T.Text -> T.Text
-stripButtonBrackets txt =
-  let t = T.strip txt
-   in if T.isPrefixOf "[ " t && T.isSuffixOf " ]" t
-        then T.strip $ T.dropEnd 2 $ T.drop 2 t
-        else txt
 
 closeButtonMarker :: T.Text
 closeButtonMarker = T.singleton '\x01'
@@ -24,25 +19,48 @@ closeButtonMarker = T.singleton '\x01'
 tabButtonMarker :: T.Text
 tabButtonMarker = T.singleton '\x02'
 
-isCloseButtonText :: T.Text -> Bool
-isCloseButtonText txt =
-  closeButtonMarker `T.isPrefixOf` stripButtonBrackets txt
+{-# INLINE stripButtonBrackets #-}
+stripButtonBrackets :: T.Text -> T.Text
+stripButtonBrackets txt
+  | not (T.isPrefixOf "[ " txt) = txt
+  | otherwise =
+      let t = T.strip txt
+       in if T.isSuffixOf " ]" t
+            then T.strip $ T.dropEnd 2 $ T.drop 2 t
+            else txt
 
-closeButtonDisplayText :: T.Text -> T.Text
-closeButtonDisplayText txt = T.drop 1 (stripButtonBrackets txt)
-
-isTabButtonText :: T.Text -> Bool
-isTabButtonText txt =
-  tabButtonMarker `T.isPrefixOf` stripButtonBrackets txt
-
-tabButtonDisplayText :: T.Text -> T.Text
-tabButtonDisplayText txt = T.drop 1 (stripButtonBrackets txt)
-
-buttonDisplayText :: T.Text -> T.Text
-buttonDisplayText txt =
+{-# INLINE buttonFlags #-}
+buttonFlags :: T.Text -> (Bool, Bool)
+buttonFlags txt =
   let lbl = stripButtonBrackets txt
-   in if closeButtonMarker `T.isPrefixOf` lbl
+   in ( closeButtonMarker `T.isPrefixOf` lbl
+      , tabButtonMarker `T.isPrefixOf` lbl
+      )
+
+{-# INLINE isCloseButtonText #-}
+isCloseButtonText :: T.Text -> Bool
+isCloseButtonText txt = fst (buttonFlags txt)
+
+{-# INLINE isTabButtonText #-}
+isTabButtonText :: T.Text -> Bool
+isTabButtonText txt = snd (buttonFlags txt)
+
+{-# INLINE buttonDisplayTextFromFlags #-}
+buttonDisplayTextFromFlags :: (Bool, Bool) -> T.Text -> T.Text
+buttonDisplayTextFromFlags (isClose, isTab) txt =
+  let lbl = stripButtonBrackets txt
+   in if isClose || isTab
         then T.drop 1 lbl
-        else if tabButtonMarker `T.isPrefixOf` lbl
-               then T.drop 1 lbl
-               else lbl
+        else lbl
+
+{-# INLINE closeButtonDisplayText #-}
+closeButtonDisplayText :: T.Text -> T.Text
+closeButtonDisplayText txt = buttonDisplayTextFromFlags (True, False) txt
+
+{-# INLINE tabButtonDisplayText #-}
+tabButtonDisplayText :: T.Text -> T.Text
+tabButtonDisplayText txt = buttonDisplayTextFromFlags (False, True) txt
+
+{-# INLINE buttonDisplayText #-}
+buttonDisplayText :: T.Text -> T.Text
+buttonDisplayText txt = buttonDisplayTextFromFlags (buttonFlags txt) txt
