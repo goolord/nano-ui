@@ -1,13 +1,13 @@
 {-# LANGUAGE OverloadedStrings #-}
-import Control.Monad (replicateM_)
-import Data.IORef (newIORef, readIORef)
+import Control.Monad (replicateM_, void)
+import Data.IORef (newIORef)
 import NanoUI
-import NanoUI.Context (storeWindowSize)
+import NanoUI.Context (getPrevRect, getStore, newContext, storeFloatList)
 import qualified Data.IntMap.Strict as IM
 
 main :: IO ()
 main = do
-  failed <- newIORef 0
+  _failed <- newIORef 0
   ctx <- newContext
   let inp0 = emptyInput {inputWindowSize = Size 640 400}
       ui = do
@@ -29,7 +29,7 @@ main = do
               }
       (_, _, _, _) <- runFrame ctx press ui
       store1 <- getStore ctx
-      print ("store after press" :: String, IM.toList (storeWindowSize store1))
+      print ("store after press" :: String, IM.toList (storeFloatList store1))
       mPress <- getPrevRect ctx (respId win)
       print ("prev press" :: String, mPress)
       let moved =
@@ -39,6 +39,6 @@ main = do
               }
       (_, _, _, _) <- runFrame ctx moved ui
       store2 <- getStore ctx
-      print ("store after move" :: String, IM.toList (storeWindowSize store2))
+      print ("store after move" :: String, IM.toList (storeFloatList store2))
       m1 <- getPrevRect ctx (respId win)
       print ("prev1" :: String, m1)

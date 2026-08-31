@@ -13,7 +13,7 @@ import Data.IORef (readIORef)
 import Data.Maybe (isJust)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Text as T
-import NanoUI.Context (Context (..), WidgetStore (..), getHotId, getScrollOffset, getStore, intKey, isDisabled)
+import NanoUI.Context (Context (..), WidgetStore (..), getHotId, getScrollOffset, getStore, intKey, isDisabled, isSelectOpen)
 import NanoUI.Font (sliderTrackBounds)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), inputMouseDown, inputMousePos)
@@ -88,7 +88,7 @@ selectDropdownCursorKind ctx inp = do
               else do
                 wid <- getWidgetId (ctxNodeArena ctx) idx
                 let key = intKey wid
-                    open = IM.findWithDefault False key (storeSelectOpen store)
+                    open = isSelectOpen store key
                 txt <- getText (ctxNodeArena ctx) idx
                 let (_, opts) = selectParseOptions txt
                 (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
@@ -207,7 +207,7 @@ textInputCursorKind ctx wid mouse = do
 tableColResizeCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
 tableColResizeCursorKind ctx inp = do
   store <- getStore ctx
-  let dragging = any (\n -> n >= 1000 && n < 2000) (IM.elems (storeTableDrag store))
+  let dragging = any (\n -> n <= -1000 && n > -2000) (IM.elems (storeInt store))
   if dragging && inputMouseDown inp
     then pure (Just UiCursorEwResize)
     else do

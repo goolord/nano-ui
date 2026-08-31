@@ -14,8 +14,7 @@ module NanoUI.Frame.Scroll
 
 import Control.Monad (forM_, void, when)
 import Data.IORef (readIORef, writeIORef)
-import qualified Data.IntMap.Strict as IM
-import NanoUI.Context (Context (..), WidgetStore (..), getScrollOffset, getStore, setScrollOffset)
+import NanoUI.Context (Context (..), getScrollOffset, setScrollOffset)
 import NanoUI.Draw (DrawArena, Layer (..), beginLayer, currentLayer, pushRect, pushRoundedRect)
 import NanoUI.Font (FontMetrics, ScrollBarSlot (..), scrollBarGeomFor)
 import NanoUI.Host (HostProfile, isCellHost)
@@ -55,10 +54,8 @@ scrollLine = 20
 
 applyScrollOffsets :: Context -> IO ()
 applyScrollOffsets ctx = do
-  store <- getStore ctx
-  when (any (> 0) (IM.elems (storeScroll store))) $ do
-    count <- arenaCount (ctxNodeArena ctx)
-    forM_ [0 .. count - 1] $ \idx -> do
+  count <- arenaCount (ctxNodeArena ctx)
+  forM_ [0 .. count - 1] $ \idx -> do
       nt <- getNodeType (ctxNodeArena ctx) idx
       when (isScrollNode nt) $ do
         -- TUI modal chrome does not scroll; the inner body scroller does.

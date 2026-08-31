@@ -28,7 +28,7 @@ import NanoUI.Input
   , inputModifiers
   )
 import NanoUI.Style (Layout (..), Sizing (..), defaultLayout)
-import NanoUI.Store (WidgetStore (..))
+import NanoUI.Store (WidgetStore (..), slotAnchor, slotCursor, slotKey)
 
 textInputLayout :: Layout
 textInputLayout =
@@ -98,8 +98,8 @@ applyTextInputMenuAction ctx wid item = do
   store <- getStore ctx
   let key = intKey wid
       text = IM.findWithDefault "" key (storeText store)
-      cursor = IM.findWithDefault (T.length text) key (storeCursor store)
-      anchor = IM.findWithDefault cursor key (storeSelAnchor store)
+      cursor = IM.findWithDefault (T.length text) (slotKey slotCursor key) (storeInt store)
+      anchor = IM.findWithDefault cursor (slotKey slotAnchor key) (storeInt store)
       s0 = TextInputState text cursor anchor
   s1 <-
     case item of
@@ -112,8 +112,9 @@ applyTextInputMenuAction ctx wid item = do
     ctx
     ( store
         { storeText = IM.insert key (tisText s1) (storeText store)
-        , storeCursor = IM.insert key (tisCursor s1) (storeCursor store)
-        , storeSelAnchor = IM.insert key (tisAnchor s1) (storeSelAnchor store)
+        , storeInt =
+            IM.insert (slotKey slotCursor key) (tisCursor s1) $
+              IM.insert (slotKey slotAnchor key) (tisAnchor s1) (storeInt store)
         }
     )
   writeIORef (ctxTextInputMenu ctx) Nothing

@@ -25,8 +25,12 @@ import NanoUI.Context
   , WindowResizeEdge (..)
   , getStore
   , intKey
+  , listPair
   , markDirty
+  , pairList
   , setStore
+  , slotKey
+  , slotWinSize
   )
 import NanoUI.Draw (pushBackdropDim, pushRect, withClip)
 import NanoUI.Font (ScrollBarSlot (..))
@@ -96,23 +100,21 @@ windowInnerEastResizeHit ctx winIdx winRect mouse@(V2 mx _) = do
 lookupWindowPos :: Context -> WidgetId -> IO (Maybe (Float, Float))
 lookupWindowPos ctx wid = do
   store <- getStore ctx
-  pure (IM.lookup (intKey wid) (storeWindow store))
+  pure (IM.lookup (intKey wid) (storeFloatList store) >>= listPair)
 
 lookupWindowSize :: Context -> WidgetId -> IO (Maybe (Float, Float))
 lookupWindowSize ctx wid = do
   store <- getStore ctx
-  pure (IM.lookup (intKey wid) (storeWindowSize store))
+  pure (IM.lookup (slotKey slotWinSize (intKey wid)) (storeFloatList store) >>= listPair)
 
 persistWindowPositions :: Context -> IO ()
 persistWindowPositions ctx = do
   count <- arenaCount (ctxNodeArena ctx)
   store0 <- getStore ctx
-  pos1 <- foldlPos 0 count (storeWindow store0)
-  size1 <- foldlSize 0 count (storeWindowSize store0)
-  let store1 = store0 {storeWindow = pos1, storeWindowSize = size1}
+  store1 <- foldlWin 0 count store0
   when (store1 /= store0) $ setStore ctx store1
   where
-    foldlPos idx count acc
+    foldlWin idx count acc
       | idx >= count = pure acc
       | otherwise = do
           nt <- getNodeType (ctxNodeArena ctx) idx
@@ -121,21 +123,15 @@ persistWindowPositions ctx = do
               then pure acc
               else do
                 wid <- getWidgetId (ctxNodeArena ctx) idx
-                (x, y, _, _) <- getRect (ctxNodeArena ctx) idx
-                pure (IM.insert (intKey wid) (x, y) acc)
-          foldlPos (idx + 1) count acc'
-    foldlSize idx count acc
-      | idx >= count = pure acc
-      | otherwise = do
-          nt <- getNodeType (ctxNodeArena ctx) idx
-          acc' <-
-            if nt /= NodeWindow
-              then pure acc
-              else do
-                wid <- getWidgetId (ctxNodeArena ctx) idx
-                (_, _, w, h) <- getRect (ctxNodeArena ctx) idx
-                pure (IM.insert (intKey wid) (w, h) acc)
-          foldlSize (idx + 1) count acc'
+                (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+                let k = intKey wid
+                pure
+                  acc
+                    { storeFloatList =
+                        IM.insert k (pairList (x, y)) $
+                          IM.insert (slotKey slotWinSize k) (pairList (w, h)) (storeFloatList acc)
+                    }
+          foldlWin (idx + 1) count acc'
 
 updateWindowDrag :: Context -> Input -> IO Bool
 updateWindowDrag ctx inp = do
@@ -150,7 +146,13 @@ updateWindowDrag ctx inp = do
               let V2 mx my = inputMousePos inp
                   pos = (mx - gx, my - gy)
               store <- getStore ctx
-              setStore ctx (store {storeWindow = IM.insert (intKey wid) pos (storeWindow store)})
+              setStore
+                ctx
+                ( store
+                    { storeFloatList =
+                        IM.insert (intKey wid) (pairList pos) (storeFloatList store)
+                    }
+                )
               markDirty ctx
               pure True
           | otherwise -> do
@@ -315,8 +317,9 @@ updateWindowResize ctx inp winW winH = do
           setStore
             ctx
             ( store
-                { storeWindowSize = IM.insert (intKey (wrdWidget wrd)) (nw, nh) (storeWindowSize store)
-                , storeWindow = IM.insert (intKey (wrdWidget wrd)) (nx, ny) (storeWindow store)
+                { storeFloatList =
+                    IM.insert (slotKey slotWinSize (intKey (wrdWidget wrd))) (pairList (nw, nh)) $
+                      IM.insert (intKey (wrdWidget wrd)) (pairList (nx, ny)) (storeFloatList store)
                 }
             )
           relayoutWindow ctx winW winH (wrdWidget wrd) nw nh

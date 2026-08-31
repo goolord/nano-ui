@@ -22,11 +22,12 @@ import qualified Data.IntMap.Strict as IM
 import NanoUI.Context
   ( Context (..)
   , TextInputMenu (..)
-  , WidgetStore (..)
   , anyAnimating
+  , anySelectOpen
   , getStore
   , intKey
   , isDirty
+  , isSelectOpen
   )
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), inputInteracted, inputMousePos, inputPointerHeld)
@@ -54,16 +55,14 @@ needsRedrawIdle :: Context -> Input -> Input -> IO Bool
 needsRedrawIdle = needsRedraw' False
 
 -- Window/scroll/resize drag marks dirty every frame. TUI must still poll input then.
--- Color picker and slider hold ctxActiveId / storeColorDrag without those refs.
+-- Color picker and slider hold ctxActiveId without extra window/scroll refs.
 pointerDragActive :: Context -> IO Bool
 pointerDragActive ctx = do
   winDrag <- isJust <$> readIORef (ctxWindowDrag ctx)
   scrollDrag <- isJust <$> readIORef (ctxScrollDrag ctx)
   winResize <- isJust <$> readIORef (ctxWindowResize ctx)
-  store <- getStore ctx
-  let colorDrag = any (/= 0) (IM.elems (storeColorDrag store))
   sliderOrPicker <- widgetDragActive ctx
-  pure (winDrag || scrollDrag || winResize || colorDrag || sliderOrPicker)
+  pure (winDrag || scrollDrag || winResize || sliderOrPicker)
 
 widgetDragActive :: Context -> IO Bool
 widgetDragActive ctx = do
@@ -107,7 +106,7 @@ overlayMenuOpen :: Context -> IO Bool
 overlayMenuOpen ctx = do
   store <- getStore ctx
   menu <- readIORef (ctxTextInputMenu ctx)
-  pure (any id (IM.elems (storeSelectOpen store)) || isJust menu)
+  pure (anySelectOpen store || isJust menu)
 
 overlayMenuOwnerAt :: Context -> V2 -> IO (Maybe WidgetId)
 overlayMenuOwnerAt ctx mouse = do
@@ -130,7 +129,7 @@ openSelectOwnerAt ctx mouse = do
               else do
                 wid <- getWidgetId (ctxNodeArena ctx) idx
                 let key = intKey wid
-                if not (IM.findWithDefault False key (storeSelectOpen store))
+                if not (isSelectOpen store key)
                   then go (idx + 1)
                   else do
                     txt <- getText (ctxNodeArena ctx) idx
@@ -179,12 +178,11 @@ floatingPanelActive ctx = do
                   else go (idx + 1)
       go 0
 
--- Floating window overlay (debug HUD). Uses persisted window store because
--- the node arena is empty between skipped idle frames.
+-- Floating window overlay (debug HUD). Prev floating rects persist across idle frames.
 debugPanelOpen :: Context -> IO Bool
 debugPanelOpen ctx = do
-  store <- getStore ctx
-  if not (IM.null (storeWindow store))
+  floating <- readIORef (ctxPrevFloatingRects ctx)
+  if not (IM.null floating)
     then pure True
     else do
       count <- arenaCount (ctxNodeArena ctx)

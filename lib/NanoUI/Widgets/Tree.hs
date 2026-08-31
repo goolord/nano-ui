@@ -257,20 +257,20 @@ tree key items initial =
         defaultExpanded = IS.fromList (allParentIndices items)
     ctx <- askContext
     store0 <- uiIO (getStore ctx)
-    when (not (IM.member groupKey (storeTreeSelected store0))) $
+    when (not (IM.member groupKey (storeInt store0))) $
       uiIO $
         setStore
           ctx
           ( store0
-              { storeTreeSelected = IM.insert groupKey clamped (storeTreeSelected store0)
-              , storeTreeExpanded =
-                  IM.insert groupKey defaultExpanded (storeTreeExpanded store0)
+              { storeInt = IM.insert groupKey clamped (storeInt store0)
+              , storeIntSet =
+                  IM.insert groupKey defaultExpanded (storeIntSet store0)
               }
           )
     store1 <- uiIO (getStore ctx)
-    let selected = IM.findWithDefault clamped groupKey (storeTreeSelected store1)
+    let selected = IM.findWithDefault clamped groupKey (storeInt store1)
         expandedSet =
-          IM.findWithDefault defaultExpanded groupKey (storeTreeExpanded store1)
+          IM.findWithDefault defaultExpanded groupKey (storeIntSet store1)
         rows = visibleRows items expandedSet
     column (tight . gap 0 . fillW $ defaultLayout) $ do
       results <-
@@ -292,15 +292,15 @@ tree key items initial =
         uiIO $
           setStore
             ctx
-            (store2 {storeTreeSelected = IM.insert groupKey keySel (storeTreeSelected store2)})
+            (store2 {storeInt = IM.insert groupKey keySel (storeInt store2)})
       store3 <- uiIO (getStore ctx)
       when (keyExp /= expandedSet) $
         uiIO $
           setStore
             ctx
             ( store3
-                { storeTreeExpanded =
-                    IM.insert groupKey keyExp (storeTreeExpanded store3)
+                { storeIntSet =
+                    IM.insert groupKey keyExp (storeIntSet store3)
                 }
             )
       case mFocus of

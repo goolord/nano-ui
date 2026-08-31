@@ -35,12 +35,14 @@ import NanoUI.Context
   ( Context (..)
   , TextInputMenu (..)
   , WidgetStore (..)
-  , ctxClipboardGet
   , getStore
   , intKey
   , markDirty
   , markEscapeConsumed
   , setStore
+  , slotAnchor
+  , slotCursor
+  , slotKey
   )
 import NanoUI.Draw (DrawArena, pushRect, pushRoundedRect, pushText)
 import NanoUI.Font
@@ -157,8 +159,8 @@ drawTextInputSelection da ctx idx x y w h style = do
         wid <- getWidgetId (ctxNodeArena ctx) idx
         store <- getStore ctx
         let key = intKey wid
-            cursor = IM.findWithDefault (T.length value) key (storeCursor store)
-            anchor = IM.findWithDefault cursor key (storeSelAnchor store)
+            cursor = IM.findWithDefault (T.length value) (slotKey slotCursor key) (storeInt store)
+            anchor = IM.findWithDefault cursor (slotKey slotAnchor key) (storeInt store)
             selLo = min anchor cursor
             selHi = max anchor cursor
             hasSel = selLo < selHi
@@ -191,7 +193,7 @@ drawTextInputCaret da ctx idx x y w h style = do
         wid <- getWidgetId (ctxNodeArena ctx) idx
         store <- getStore ctx
         let key = intKey wid
-            cursor = IM.findWithDefault (T.length value) key (storeCursor store)
+            cursor = IM.findWithDefault (T.length value) (slotKey slotCursor key) (storeInt store)
         lbl <- getText (ctxNodeArena ctx) idx
         let fm = ctxFontMetrics ctx
             geom = textInputGeom (ctxHostProfile ctx) fm x y w h
@@ -212,8 +214,8 @@ collapseTextInputSelection ctx wid =
   when (hashWidgetId wid /= 0) $ do
     store <- getStore ctx
     let key = intKey wid
-        cur = IM.findWithDefault 0 key (storeCursor store)
-    setStore ctx (store {storeSelAnchor = IM.insert key cur (storeSelAnchor store)})
+        cur = IM.findWithDefault 0 (slotKey slotCursor key) (storeInt store)
+    setStore ctx (store {storeInt = IM.insert (slotKey slotAnchor key) cur (storeInt store)})
 
 data TextCharClass = TextWord | TextSpace | TextOther
   deriving (Eq)
@@ -351,8 +353,8 @@ textInputMenuActionEnabled ctx wid item = do
   store <- getStore ctx
   let key = intKey wid
       text = IM.findWithDefault "" key (storeText store)
-      cursor = IM.findWithDefault (T.length text) key (storeCursor store)
-      anchor = IM.findWithDefault cursor key (storeSelAnchor store)
+      cursor = IM.findWithDefault (T.length text) (slotKey slotCursor key) (storeInt store)
+      anchor = IM.findWithDefault cursor (slotKey slotAnchor key) (storeInt store)
       hasSel = anchor /= cursor
   mclip <- ctxClipboardGet ctx
   let clipTxt = maybe "" id mclip
@@ -612,14 +614,15 @@ updateTextInputSelection :: Context -> WidgetId -> Int -> Int -> IO ()
 updateTextInputSelection ctx wid anchor cursor = do
   store <- getStore ctx
   let key = intKey wid
-      oldAnchor = IM.findWithDefault cursor key (storeSelAnchor store)
-      oldCursor = IM.findWithDefault 0 key (storeCursor store)
+      oldAnchor = IM.findWithDefault cursor (slotKey slotAnchor key) (storeInt store)
+      oldCursor = IM.findWithDefault 0 (slotKey slotCursor key) (storeInt store)
   when (oldAnchor /= anchor || oldCursor /= cursor) $ do
     setStore
       ctx
       ( store
-          { storeSelAnchor = IM.insert key anchor (storeSelAnchor store)
-          , storeCursor = IM.insert key cursor (storeCursor store)
+          { storeInt =
+              IM.insert (slotKey slotAnchor key) anchor $
+                IM.insert (slotKey slotCursor key) cursor (storeInt store)
           }
       )
     markDirty ctx

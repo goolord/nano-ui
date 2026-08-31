@@ -41,6 +41,9 @@ import NanoUI.Context
   , getAnimationValue
   , getStore
   , intKey
+  , isSelectOpen
+  , slotCursor
+  , slotKey
   )
 import NanoUI.Draw (DrawArena, pushRect, pushRoundedRect, pushRoundedStroke)
 import NanoUI.Font (hasHeadingMarker, hasMutedMarker, stripWidgetMarkers)
@@ -185,8 +188,8 @@ displayTextRest ctx nt idx txt terminal =
           store <- getStore ctx
           let (lbl, opts) = selectParseOptions txt
           wid <- getWidgetId (ctxNodeArena ctx) idx
-          let picked = IM.findWithDefault 0 (intKey wid) (storeSelect store)
-              open = IM.findWithDefault False (intKey wid) (storeSelectOpen store)
+          let picked = IM.findWithDefault 0 (intKey wid) (storeInt store)
+              open = isSelectOpen store (intKey wid)
               opt =
                 case drop picked opts of
                   (o : _) -> o
@@ -211,7 +214,7 @@ displayTextRest ctx nt idx txt terminal =
           focused <- textInputFocused ctx idx
           wid <- getWidgetId (ctxNodeArena ctx) idx
           store <- getStore ctx
-          let cursor = IM.findWithDefault (T.length value) (intKey wid) (storeCursor store)
+          let cursor = IM.findWithDefault (T.length value) (slotKey slotCursor (intKey wid)) (storeInt store)
           pure (textInputTerminalText txt value cursor focused)
         _ -> pure txt
     else
@@ -228,7 +231,7 @@ displayTextRest ctx nt idx txt terminal =
           store <- getStore ctx
           let (lbl, opts) = selectParseOptions txt
           wid <- getWidgetId (ctxNodeArena ctx) idx
-          let picked = IM.findWithDefault 0 (intKey wid) (storeSelect store)
+          let picked = IM.findWithDefault 0 (intKey wid) (storeInt store)
               opt =
                 case drop picked opts of
                   (o : _) -> o
