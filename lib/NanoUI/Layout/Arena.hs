@@ -42,6 +42,10 @@ module NanoUI.Layout.Arena
   , getNodeValue
   , setNodeValue
   , ensureScratchCapacity
+  , forNodes_
+  , forChildNodes_
+  , findNodeRevM
+  , foldChildNodesM
   ) where
 
 import Control.Monad (forM_, when)
@@ -722,3 +726,39 @@ ensureScratchCapacity na needed = do
       growFloat (naScratchOutMain na) cap newCap 0
       growFloat (naScratchOutCross na) cap newCap 0
       writeIORef (naScratchCap na) newCap
+
+{-# INLINE forNodes_ #-}
+forNodes_ :: NodeArena -> (NodeIdx -> IO ()) -> IO ()
+forNodes_ na f = do
+  n <- arenaCount na
+  let go !i
+        | i >= n = pure ()
+        | otherwise = f i >> go (i + 1)
+  go 0
+
+{-# INLINE forChildNodes_ #-}
+forChildNodes_ :: NodeArena -> NodeIdx -> (NodeIdx -> IO ()) -> IO ()
+forChildNodes_ na parentIdx f = do
+  fc <- getFirstChild na parentIdx
+  let go !ci
+        | ci < 0 = pure ()
+        | otherwise = do
+            f ci
+            ns <- getNextSibling na ci
+            go ns
+  go fc
+
+{-# INLINE findNodeRevM #-}
+findNodeRevM :: NodeArena -> (NodeIdx -> IO Bool) -> IO (Maybe NodeIdx)
+findNodeRevM na p = do
+  n <- arenaCount na
+  let go !i
+        | i < 0 = pure Nothing
+        | otherwise = do
+            ok <- p i
+            if ok then pure (Just i) else go (i - 1)
+  go (n - 1)
+
+{-# INLINE foldChildNodesM #-}
+foldChildNodesM :: NodeArena -> NodeIdx -> (NodeIdx -> IO ()) -> IO ()
+foldChildNodesM = forChildNodes_

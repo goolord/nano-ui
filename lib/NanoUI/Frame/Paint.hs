@@ -114,10 +114,9 @@ import NanoUI.Layout.Arena
   , arenaCount
   , getAlignX
   , getDirection
-  , getFirstChild
+  , forChildNodes_
   , getHeightSizing
   , getMinMax
-  , getNextSibling
   , getParent
   , getNodeType
   , getNodeValue
@@ -536,17 +535,8 @@ borderContentClip style (Rect x y w h) =
        in Rect (x + bw) (y + bw) (max 0 (w - 2 * bw)) (max 0 (h - 2 * bw))
 
 walkChildren :: Context -> NodeIdx -> IO ()
-walkChildren ctx idx = do
-  fc <- getFirstChild (ctxNodeArena ctx) idx
-  go fc
-  where
-    go ci =
-      if ci < 0
-        then pure ()
-        else do
-          lowerNode ctx ci
-          ns <- getNextSibling (ctxNodeArena ctx) ci
-          go ns
+walkChildren ctx idx =
+  forChildNodes_ (ctxNodeArena ctx) idx (lowerNode ctx)
 
 drawCloseIcon :: HostProfile -> FontMetrics -> DrawArena -> Float -> Float -> Float -> Float -> Color -> IO ()
 drawCloseIcon host fm da x y w h col = do

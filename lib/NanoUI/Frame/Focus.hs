@@ -23,7 +23,7 @@ import NanoUI.Icons (checkboxMark, radioMark)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Layout.Arena
   ( NodeType (NodeButton, NodeCheckbox, NodeRadio, NodeTree, NodeSlider)
-  , arenaCount
+  , forNodes_
   , getNodeType
   , getText
   , getWidgetId
@@ -111,59 +111,54 @@ constrainFocusToModal ctx = do
 syncWidgetLabels :: Context -> IO ()
 syncWidgetLabels ctx = do
   store <- getStore ctx
-  count <- arenaCount (ctxNodeArena ctx)
   let na = ctxNodeArena ctx
       terminal = isCellHost (ctxHostProfile ctx)
       icons = ctxIcons ctx
-      go !idx
-        | idx >= count = pure ()
-        | otherwise = do
-            nt <- getNodeType na idx
-            wid <- getWidgetId na idx
-            let key = intKey wid
-            case nt of
-              NodeCheckbox -> do
-                txt <- getText na idx
-                let body = checkboxLabelText txt
-                    val = IM.findWithDefault False key (storeCheckbox store)
-                    mark = if terminal then checkboxMark icons val else ""
-                setNodeText na idx (mark <> body)
-                setNodeValue na idx (if val then 1 else 0)
-              NodeRadio -> do
-                txt <- getText na idx
-                case T.splitOn sliderRangeSep txt of
-                  [_g, _i, _lbl] -> do
-                    let (groupKey, optIdx, _) = radioParseOption txt
-                        selected = IM.findWithDefault optIdx groupKey (storeRadio store)
-                        val = selected == optIdx
-                        label = radioLabelText txt
-                        display =
-                          if terminal
-                            then radioMark icons val <> label
-                            else label
-                    setNodeText na idx (radioPackOption groupKey optIdx display)
-                    setNodeValue na idx (if val then 1 else 0)
-                  _ -> pure ()
-              NodeTree -> do
-                txt <- getText na idx
-                let (groupKey, nodeIdx, _, _, _, _) = treeParseRow txt
-                    selected = IM.findWithDefault nodeIdx groupKey (storeTreeSelected store)
-                setNodeValue na idx (if selected == nodeIdx then 1 else 0)
-              NodeSlider -> do
-                let val = IM.findWithDefault 0 key (storeSlider store)
-                txt <- getText na idx
-                let (lbl, minV, maxV) = sliderParseRange txt
-                    frac = if maxV > minV then (val - minV) / (maxV - minV) else 0
-                    shown =
-                      if terminal
-                        then sliderPackTerminal lbl frac val minV maxV
-                        else sliderPackRange lbl minV maxV
-                setNodeText na idx shown
-                setNodeValue na idx frac
-              NodeButton -> do
-                txt <- getText na idx
-                unless terminal $
-                  setNodeText na idx (stripButtonBrackets txt)
-              _ -> pure ()
-            go (idx + 1)
-  go 0
+  forNodes_ na $ \idx -> do
+    nt <- getNodeType na idx
+    wid <- getWidgetId na idx
+    let key = intKey wid
+    case nt of
+      NodeCheckbox -> do
+        txt <- getText na idx
+        let body = checkboxLabelText txt
+            val = IM.findWithDefault False key (storeCheckbox store)
+            mark = if terminal then checkboxMark icons val else ""
+        setNodeText na idx (mark <> body)
+        setNodeValue na idx (if val then 1 else 0)
+      NodeRadio -> do
+        txt <- getText na idx
+        case T.splitOn sliderRangeSep txt of
+          [_g, _i, _lbl] -> do
+            let (groupKey, optIdx, _) = radioParseOption txt
+                selected = IM.findWithDefault optIdx groupKey (storeRadio store)
+                val = selected == optIdx
+                label = radioLabelText txt
+                display =
+                  if terminal
+                    then radioMark icons val <> label
+                    else label
+            setNodeText na idx (radioPackOption groupKey optIdx display)
+            setNodeValue na idx (if val then 1 else 0)
+          _ -> pure ()
+      NodeTree -> do
+        txt <- getText na idx
+        let (groupKey, nodeIdx, _, _, _, _) = treeParseRow txt
+            selected = IM.findWithDefault nodeIdx groupKey (storeTreeSelected store)
+        setNodeValue na idx (if selected == nodeIdx then 1 else 0)
+      NodeSlider -> do
+        let val = IM.findWithDefault 0 key (storeSlider store)
+        txt <- getText na idx
+        let (lbl, minV, maxV) = sliderParseRange txt
+            frac = if maxV > minV then (val - minV) / (maxV - minV) else 0
+            shown =
+              if terminal
+                then sliderPackTerminal lbl frac val minV maxV
+                else sliderPackRange lbl minV maxV
+        setNodeText na idx shown
+        setNodeValue na idx frac
+      NodeButton -> do
+        txt <- getText na idx
+        unless terminal $
+          setNodeText na idx (stripButtonBrackets txt)
+      _ -> pure ()

@@ -120,6 +120,7 @@ import NanoUI.Layout.Arena
   , arenaCount
   , getAlignX
   , getDirection
+  , forChildNodes_
   , getFirstChild
   , getHeightSizing
   , getMinMax
@@ -193,19 +194,12 @@ applyScrollOffsets ctx = do
               DirRow -> shiftDescendants ctx idx (-off) 0
 
 shiftDescendants :: Context -> NodeIdx -> Float -> Float -> IO ()
-shiftDescendants ctx idx dx dy = do
-  fc <- getFirstChild (ctxNodeArena ctx) idx
-  go fc
-  where
-    go ci
-      | ci < 0 = pure ()
-      | otherwise = do
-          (x, y, w, h) <- getRect (ctxNodeArena ctx) ci
-          setRect (ctxNodeArena ctx) ci (x + dx) (y + dy) w h
-          nt <- getNodeType (ctxNodeArena ctx) ci
-          when (isContainerNode nt) (shiftDescendants ctx ci dx dy)
-          ns <- getNextSibling (ctxNodeArena ctx) ci
-          go ns
+shiftDescendants ctx idx dx dy =
+  forChildNodes_ (ctxNodeArena ctx) idx $ \ci -> do
+    (x, y, w, h) <- getRect (ctxNodeArena ctx) ci
+    setRect (ctxNodeArena ctx) ci (x + dx) (y + dy) w h
+    nt <- getNodeType (ctxNodeArena ctx) ci
+    when (isContainerNode nt) (shiftDescendants ctx ci dx dy)
 
 updateScrollWheel :: Context -> Input -> IO ()
 updateScrollWheel ctx inp = do
