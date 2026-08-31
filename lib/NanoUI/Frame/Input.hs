@@ -217,9 +217,7 @@ finalizePointerRelease ctx inp =
                               }
                           )
                       writeIORef (ctxClickedId ctx) active
-                    else do
-                      uiHit <- inUiClickHit ctx active mouse
-                      unless uiHit $ writeIORef (ctxClickedId ctx) active
+                    else pure ()
                 _ | postsLayoutClick nt -> do
                   uiHit <- inUiClickHit ctx active mouse
                   unless uiHit $ writeIORef (ctxClickedId ctx) active

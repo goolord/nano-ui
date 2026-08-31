@@ -105,7 +105,7 @@ demoUi = do
           clickButton "About" (setAbout True)
           clickButton "Debug" (setDebug (not debugOpen))
       row (tight . gap 8 . fillW $ defaultLayout) $ do
-        column (tight . gap 8 $ defaultLayout {layoutMaxW = 420}) $ do
+        column (tight . gap 8 . fillW $ defaultLayout) $ do
           card $ do
             heading "State"
             checked <- readChecked
@@ -509,6 +509,11 @@ selftest = do
     void (sdlDrawFrame ctx' demoUi env base False)
     spansClosed <- collectOverlayTextSpans ctx' base
     when (hasText "Immediate-mode" spansClosed) $ fail "selftest: Escape did not dismiss About"
+    spansLatest <- collectTextSpans ctx'
+    debugBtn <- requireSpan "selftest: Debug button" (findExact "Debug" spansLatest)
+    clickPos ctx' env base debugBtn
+    spansDebug <- collectOverlayTextSpans ctx' base
+    unless (hasText "Frame" spansDebug) $ fail "selftest: Debug window missing"
   putStrLn "selftest: ok"
 
 type DemoSpan = (Rect, T.Text, Color, Color, Rect)
