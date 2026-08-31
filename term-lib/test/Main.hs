@@ -122,6 +122,13 @@ testSpecs =
   , TestSpec "scroll-hover-clip" False runScrollHoverClipTest
   , TestSpec "scroll-hit-offset" False runScrollHitOffsetTest
   , TestSpec "scroll-button-click" False runScrollButtonClickTest
+  , TestSpec "scroll-scrolled-out-click" False runScrolledOutClickImmunityTest
+  , TestSpec "scroll-scrolled-out-hover" False runScrolledOutHoverImmunityTest
+  , TestSpec "scroll-scrolled-out-cursor" False runScrolledOutCursorImmunityTest
+  , TestSpec "scroll-localized-damage" False runLocalizedScrollDamageTest
+  , TestSpec "scroll-child-damage-offset" False runScrollChildDamageOffsetTest
+  , TestSpec "scroll-2d-wheel" False run2DScrollWheelTest
+  , TestSpec "table-2d-scroll-sync" False runTable2DScrollSyncTest
   , TestSpec "tab-focus" False runTabFocusTest
   , TestSpec "select-initial" False runSelectTest
   , TestSpec "select-dropdown" False runSelectDropdownTest
