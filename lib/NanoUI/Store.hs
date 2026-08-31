@@ -31,6 +31,13 @@ data WidgetStore = WidgetStore
   , storeNote :: IntMap Text
   , storeWindow :: IntMap (Float, Float)
   , storeWindowSize :: IntMap (Float, Float)
+  , storeTableSort :: IntMap Int
+  , storeTableColW :: IntMap [Float]
+  , storeTableOrder :: IntMap [Int]
+  , storeTableHidden :: IntMap IntSet
+  , storeTableDrag :: IntMap Int
+  , storeTableDragX :: IntMap Float
+  , storeTableDragW :: IntMap Float
   }
   deriving (Eq, Show)
 
@@ -57,6 +64,13 @@ emptyWidgetStore =
     , storeNote = IM.empty
     , storeWindow = IM.empty
     , storeWindowSize = IM.empty
+    , storeTableSort = IM.empty
+    , storeTableColW = IM.empty
+    , storeTableOrder = IM.empty
+    , storeTableHidden = IM.empty
+    , storeTableDrag = IM.empty
+    , storeTableDragX = IM.empty
+    , storeTableDragW = IM.empty
     }
 
 -- useText/useFlag mirror into these maps. Frame re-runs UI when they change.

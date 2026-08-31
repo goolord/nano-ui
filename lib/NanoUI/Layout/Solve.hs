@@ -89,6 +89,8 @@ import NanoUI.WidgetText
   , textInputMinWidth
   , textInputPlaceholder
   , sliderValueText
+  , isTableHeaderText
+  , buttonDisplayText
   )
 
 solveLayout :: NodeArena -> HostProfile -> FontMetrics -> (Text -> IO (Float, Float)) -> Float -> Float -> IO ()
@@ -276,6 +278,9 @@ measureWidget na host fm measure idx = do
   (hTag, hVal) <- getHeightSizing na idx
   let (padX, padY) =
         case nt of
+          NodeButton
+            | isTableHeaderText txt ->
+                if isCellHost host then (0, 0) else labelContentInset host fm
           NodeButton -> buttonPadding host fm
           NodeSelect -> buttonPadding host fm
           NodeColorPicker
@@ -365,7 +370,7 @@ measureWidget na host fm measure idx = do
         let body =
               if T.null txt
                 then " "
-                else txt
+                else if isTableHeaderText txt then buttonDisplayText txt else txt
         (mw, mh) <- measure body
         pure (mw, mh, 0, 0)
   let rawW = tw + padX + extraW
@@ -588,7 +593,13 @@ positionScrollChildren na host fm idx dir gap pad px py pw ph = do
       gutterCol = scrollLayoutGutter host fm slot contentSize innerH
       gutterRow = scrollLayoutGutter host fm slot contentSize innerW
   case dir of
-    DirRow -> positionRowFromParent na host fm idx gap cx cy contentSize (innerH - gutterRow)
+    DirRow -> do
+      (wTag, _) <- getWidthSizing na idx
+      let rowMain =
+            if wTag == SizingGrow
+              then max contentSize (innerW - gutterRow)
+              else contentSize
+      positionRowFromParent na host fm idx gap cx cy rowMain (innerH - gutterRow)
     DirColumn -> positionColumnScroll na host fm idx gap cx cy (innerW - gutterCol) innerH contentSize
 
 scrollBarSlotOf :: NodeArena -> NodeIdx -> IO ScrollBarSlot
@@ -640,8 +651,14 @@ positionColumnScroll na host fm parent gap cx cy innerW innerH contentSize = do
         nt <- getNodeType na ci
         (_, _, iw, _) <- getRect na ci
         ax <- getAlignX na ci
+        (wTag, _) <- getWidthSizing na ci
         let cw = innerW
-            fx = alignX ax cx cw iw
+            -- Grow/Percent already take full width. AlignX is for text, not for
+            -- shifting a full-width box (that would draw past the column).
+            fx =
+              if wTag == SizingGrow || wTag == SizingPercent
+                then cx
+                else alignX ax cx cw iw
             visibleSlice = max 0 (innerH - (curY - cy))
             nodeH =
               if isScrollNode nt
@@ -786,7 +803,10 @@ positionColumnFromParent na host fm parent gap chrome px _ pw cx cy cw ch = do
             else do
               (_, _, iw, _) <- getRect na ci
               ax <- getAlignX na ci
-              pure (alignX ax cx cw iw, cw)
+              (wTag, _) <- getWidthSizing na ci
+              if wTag == SizingGrow || wTag == SizingPercent
+                then pure (cx, cw)
+                else pure (alignX ax cx cw iw, cw)
         childH <- columnChildHeight na ci fh
         positionNode na host fm ci fx curY nodeW childH
         gapAfter <-

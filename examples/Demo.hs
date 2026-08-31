@@ -1,14 +1,37 @@
 module Main (main) where
 
+import Control.Monad (when)
+import Data.Text (Text)
+import Data.Text qualified as T
 import NanoUI
 import NanoUI.Testing (newContext, renderASCII, runFrame)
+
+data Person = Person
+  { personName :: !Text
+  , personAge :: !Int
+  }
+  deriving (Eq, Show)
+
+colPeople :: Colonnade Headed Person Text
+colPeople =
+  mconcat
+    [ headed "Name" personName
+    , headed "Age" (T.pack . show . personAge)
+    ]
+
+people :: [Person]
+people =
+  [ Person "David" 63
+  , Person "Ava" 34
+  , Person "Sonia" 12
+  ]
 
 main :: IO ()
 main = do
   ctx <- newContext
   let inp =
         emptyInput
-          { inputWindowSize = Size 60 20
+          { inputWindowSize = Size 60 24
           , inputMousePos = V2 30 10
           , inputMousePressed = True
           , inputMouseDown = True
@@ -20,24 +43,14 @@ main = do
       ( column
           (defaultLayout {layoutWidth = Grow 1, layoutHeight = Grow 1})
           ( do
-              (tabResp, _) <- tabs ("Controls" :: String)
-                [ tab "Controls" "Controls" $ do
-                    _ <- button "OK"
-                    _ <- button "Cancel"
-                    _ <- label "Controls Tab Content"
-                    pure ()
-                , tab "Settings" "Settings" $ do
-                    _ <- label "Settings Tab Content"
-                    pure ()
-                , tab "Logs" "Logs" $ do
-                    _ <- label "Logs Tab Content"
-                    pure ()
-                ]
-              onClick tabResp (pure ())
+              (readSort, setSort) <- useTableSort (SortCol 0 SortAsc)
+              sort <- readSort
+              (tableResp, nextSort) <- table "people" colPeople people sort
+              when (tableRespChanged tableResp) (setSort nextSort)
               label "nano-ui demo"
           )
       )
   putStrLn "=== nano-ui ASCII demo ==="
-  mapM_ putStrLn (renderASCII 60 20 drawData)
+  mapM_ putStrLn (renderASCII 60 24 drawData)
   putStrLn "--- messages ---"
   print (length msgs)

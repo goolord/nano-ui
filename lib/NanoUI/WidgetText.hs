@@ -36,9 +36,17 @@ module NanoUI.WidgetText
   , colorPickerFromHex
   , closeButtonMarker
   , tabButtonMarker
+  , tableHeaderMarker
+  , tableStripeEven
+  , tableStripeOdd
+  , tableScrollSlaveStyle
+  , tableSortReserve
+  , tableHeaderLabel
+  , tableHeaderDisplayText
   , stripButtonBrackets
   , isCloseButtonText
   , isTabButtonText
+  , isTableHeaderText
   , closeButtonDisplayText
   , tabButtonDisplayText
   , buttonDisplayText
@@ -48,6 +56,7 @@ module NanoUI.WidgetText
 
 import Data.Char (chr)
 import Data.List (find)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text.Read (double, signed, decimal)
 import Data.Word (Word8)
@@ -317,6 +326,42 @@ closeButtonMarker = T.singleton '\x01'
 tabButtonMarker :: Text
 tabButtonMarker = T.singleton '\x02'
 
+tableHeaderMarker :: Text
+tableHeaderMarker = T.singleton '\x05'
+
+tableStripeEven :: Int
+tableStripeEven = 1
+
+tableStripeOdd :: Int
+tableStripeOdd = 2
+
+-- | Scroll container that shares an id with a master pane and must not paint chrome.
+tableScrollSlaveStyle :: Int
+tableScrollSlaveStyle = 1
+
+-- | Trailing slot reserved in every header so the sort mark never changes column width.
+tableSortReserve :: Bool -> Text
+tableSortReserve True = " ^"
+tableSortReserve False = "  ▲"
+
+tableSortMark :: Bool -> Bool -> Text
+tableSortMark True True = " v"
+tableSortMark True False = " ^"
+tableSortMark False True = "  ▼"
+tableSortMark False False = "  ▲"
+
+tableHeaderLabel :: Bool -> Text -> Text
+tableHeaderLabel terminal hdr = tableHeaderMarker <> hdr <> tableSortReserve terminal
+
+tableHeaderDisplayText :: Bool -> Int -> Text -> Text
+tableHeaderDisplayText terminal styleIdx txt =
+  let full = T.drop 1 (stripButtonBrackets txt)
+      title = fromMaybe full (T.stripSuffix (tableSortReserve terminal) full)
+   in case styleIdx of
+        1 -> title <> tableSortMark terminal False
+        2 -> title <> tableSortMark terminal True
+        _ -> title
+
 {-# INLINE stripButtonBrackets #-}
 stripButtonBrackets :: Text -> Text
 stripButtonBrackets txt =
@@ -326,34 +371,45 @@ stripButtonBrackets txt =
         else txt
 
 {-# INLINE buttonFlags #-}
-buttonFlags :: Text -> (Bool, Bool)
+buttonFlags :: Text -> (Bool, Bool, Bool)
 buttonFlags txt =
   let lbl = stripButtonBrackets txt
    in ( closeButtonMarker `T.isPrefixOf` lbl
       , tabButtonMarker `T.isPrefixOf` lbl
+      , tableHeaderMarker `T.isPrefixOf` lbl
       )
 
 {-# INLINE isCloseButtonText #-}
 isCloseButtonText :: Text -> Bool
-isCloseButtonText txt = fst (buttonFlags txt)
+isCloseButtonText txt =
+  let (c, _, _) = buttonFlags txt
+   in c
 
 {-# INLINE isTabButtonText #-}
 isTabButtonText :: Text -> Bool
-isTabButtonText txt = snd (buttonFlags txt)
+isTabButtonText txt =
+  let (_, t, _) = buttonFlags txt
+   in t
+
+{-# INLINE isTableHeaderText #-}
+isTableHeaderText :: Text -> Bool
+isTableHeaderText txt =
+  let (_, _, h) = buttonFlags txt
+   in h
 
 {-# INLINE buttonDisplayTextFromFlags #-}
-buttonDisplayTextFromFlags :: (Bool, Bool) -> Text -> Text
-buttonDisplayTextFromFlags (isClose, isTab) txt
-  | isClose || isTab = T.drop 1 (stripButtonBrackets txt)
+buttonDisplayTextFromFlags :: (Bool, Bool, Bool) -> Text -> Text
+buttonDisplayTextFromFlags (isClose, isTab, isTable) txt
+  | isClose || isTab || isTable = T.drop 1 (stripButtonBrackets txt)
   | otherwise = txt
 
 {-# INLINE closeButtonDisplayText #-}
 closeButtonDisplayText :: Text -> Text
-closeButtonDisplayText txt = buttonDisplayTextFromFlags (True, False) txt
+closeButtonDisplayText txt = buttonDisplayTextFromFlags (True, False, False) txt
 
 {-# INLINE tabButtonDisplayText #-}
 tabButtonDisplayText :: Text -> Text
-tabButtonDisplayText txt = buttonDisplayTextFromFlags (False, True) txt
+tabButtonDisplayText txt = buttonDisplayTextFromFlags (False, True, False) txt
 
 {-# INLINE buttonDisplayText #-}
 buttonDisplayText :: Text -> Text

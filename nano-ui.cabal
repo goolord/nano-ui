@@ -125,9 +125,11 @@ library
         NanoUI.Widgets.TextInput
         NanoUI.Widgets.Animate
         NanoUI.Widgets.Overlay
+        NanoUI.Widgets.Table
     build-depends:
         base ^>=4.22.0.0,
         bytestring ^>=0.12,
+        colonnade ^>=1.2,
         containers ^>=0.8,
         effectful ^>=2.6,
         effectful-core ^>=2.6,
@@ -163,7 +165,8 @@ executable nano-ui-demo
     main-is:          Demo.hs
     build-depends:
         base ^>=4.22.0.0,
-        nano-ui
+        nano-ui,
+        text ^>=2.1
     hs-source-dirs:   examples
     default-language: GHC2024
 

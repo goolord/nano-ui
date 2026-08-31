@@ -52,6 +52,7 @@ main = do
 data DemoTab
   = Controls
   | List
+  | Table
   | Diagnostics
   deriving (Bounded, Enum, Eq, Ord, Read, Show)
 
@@ -82,6 +83,7 @@ demoUi = do
   (readTheme, setTheme) <- useText (T.pack (show Dark))
   (readName, setName) <- useText ""
   (readTreeSel, setTreeSel) <- useText "0"
+  (readTableSort, setTableSort) <- useTableSort (SortCol 0 SortAsc)
   debugOpen <- readDebug
   aboutOpen <- readAbout
   scroll (tight (grow defaultLayout)) $
@@ -107,6 +109,7 @@ demoUi = do
             theme <- readTheme
             name <- readName
             treeSel <- readTreeSel
+            tableSort <- readTableSort
             let accent = fromMaybe demoAccent (colorPickerFromHex accentHex)
             kv "Feature" (onOff checked)
             kv "Volume" vol
@@ -117,6 +120,8 @@ demoUi = do
             kv "Theme" theme
             kv "Name" (orDash name)
             kv "Tree" treeSel
+            kv "Table sort" (tableColumnLabel tableSort)
+            kv "Table order" (tableSortDirText tableSort)
             click <- readClick
             kv "Clicked" (orDash click)
           card $ do
@@ -175,6 +180,23 @@ demoUi = do
               scroll (padAll 6 . fixedH 160 . fillW $ defaultLayout) $ do
                 (_, sel) <- tree "demo" demoTree sel0
                 setTreeSel (T.pack (show sel))
+            Table -> do
+              heading "Table"
+              muted "Click a header to sort. Drag a header to reorder. Drag a header edge to resize. Right-click a header to hide."
+              sort <- readTableSort
+              (tableResp, nextSort) <-
+                tableCfg
+                  demoTableCfg
+                  (tight . fillW . fixedH 280 $ defaultLayout {layoutGap = 0})
+                  "people"
+                  colPeople
+                  demoPeople
+                  sort
+              when (tableRespChanged tableResp) (setTableSort nextSort)
+              sep
+              kv "Sorted by" (tableColumnLabel nextSort)
+              kv "Order" (tableSortDirText nextSort)
+              kv "Hidden" (tableHiddenLabel (tableHiddenIndices tableResp))
             Diagnostics -> do
               heading "Diagnostics"
               kv "Renderer" "SDL3 Pinned Vertex Arena"
@@ -200,6 +222,82 @@ onOff False = "off"
 
 orDash :: T.Text -> T.Text
 orDash s = if T.null s then "-" else s
+
+data DemoPerson = DemoPerson
+  { demoPersonName :: !T.Text
+  , demoPersonDept :: !T.Text
+  , demoPersonAge :: !Int
+  , demoPersonCity :: !T.Text
+  , demoPersonRole :: !T.Text
+  }
+  deriving (Eq, Show)
+
+colPeople :: Colonnade Headed DemoPerson T.Text
+colPeople =
+  mconcat
+    [ headed "Name" demoPersonName
+    , headed "Dept" demoPersonDept
+    , headed "Age" (T.pack . show . demoPersonAge)
+    , headed "City" demoPersonCity
+    , headed "Role" demoPersonRole
+    ]
+
+demoTableCfg :: TableCfg
+demoTableCfg =
+  defaultTableCfg
+    { tableFreezeCols = 1
+    , tableColSizes =
+        [ ColContent
+        , ColStretch
+        , ColFixed 64
+        , ColStretch
+        , ColContent
+        ]
+    }
+
+demoPeople :: [DemoPerson]
+demoPeople =
+  [ DemoPerson "David" "Eng" 63 "Austin" "Staff"
+  , DemoPerson "Ava" "Design" 34 "Berlin" "Lead"
+  , DemoPerson "Sonia" "Eng" 12 "Lisbon" "Intern"
+  , DemoPerson "Maya" "Ops" 41 "Tokyo" "Manager"
+  , DemoPerson "Leo" "Design" 28 "Paris" "IC"
+  , DemoPerson "Noah" "Eng" 37 "Seoul" "Staff"
+  , DemoPerson "Iris" "Ops" 19 "Austin" "IC"
+  , DemoPerson "Jules" "Sales" 45 "London" "Manager"
+  , DemoPerson "Priya" "Eng" 31 "Bengaluru" "Lead"
+  , DemoPerson "Chen" "Design" 26 "Shanghai" "IC"
+  , DemoPerson "Omar" "Ops" 52 "Cairo" "Lead"
+  , DemoPerson "Elena" "Sales" 39 "Madrid" "Staff"
+  , DemoPerson "Kai" "Eng" 23 "Oslo" "IC"
+  , DemoPerson "Ruth" "Ops" 47 "Boston" "Staff"
+  ]
+
+demoTableColumnLabels :: [T.Text]
+demoTableColumnLabels = ["Name", "Dept", "Age", "City", "Role"]
+
+tableHiddenLabel :: [Int] -> T.Text
+tableHiddenLabel [] = "none"
+tableHiddenLabel hidden =
+  T.intercalate
+    ", "
+    [ demoTableColumnLabels !! i
+    | i <- hidden
+    , i >= 0 && i < length demoTableColumnLabels
+    ]
+
+tableColumnLabel :: SortCol -> T.Text
+tableColumnLabel s =
+  let idx = sortColIndex s
+   in if idx >= 0 && idx < length demoTableColumnLabels
+        then demoTableColumnLabels !! idx
+        else "-"
+
+tableSortDirText :: SortCol -> T.Text
+tableSortDirText s =
+  case sortColDir s of
+    SortAsc -> "ascending"
+    SortDesc -> "descending"
 
 debugBody :: SdlDebugSnapshot -> NanoUI ()
 debugBody s = do

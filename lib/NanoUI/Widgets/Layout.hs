@@ -10,6 +10,7 @@ module NanoUI.Widgets.Layout
   , spacer
   , scroll
   , scrollArea
+  , scrollAreaId
   , flex
   , sep
   )
@@ -26,6 +27,7 @@ import NanoUI.Layout.Arena
   , NodeType (..)
   , addNodeFromLayout
   , getDirection
+  , setStyleIdx
   , setWidgetId
   )
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiFinally, uiIO)
@@ -123,3 +125,18 @@ scrollArea layout child = do
     pure stack0
   childR <- uiFinally child (writeIORef (ctxContainerStack ctx) stack)
   pure (wid, childR)
+
+-- | Scroll container with a chosen widget id. Same id on two panes shares the offset.
+scrollAreaId :: Ui :> es => WidgetId -> Layout -> Int -> Eff es a -> Eff es a
+scrollAreaId wid layout styleIdx child = do
+  ctx <- askContext
+  stack <- uiIO $ do
+    stack0 <- readIORef (ctxContainerStack ctx)
+    let
+      parent = parentIdx stack0
+    idx <- addNodeFromLayout (ctxNodeArena ctx) NodeScrollContainer parent layout
+    setWidgetId (ctxNodeArena ctx) idx wid
+    setStyleIdx (ctxNodeArena ctx) idx styleIdx
+    writeIORef (ctxContainerStack ctx) (idx : stack0)
+    pure stack0
+  uiFinally child (writeIORef (ctxContainerStack ctx) stack)

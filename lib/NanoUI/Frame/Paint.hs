@@ -81,6 +81,8 @@ import NanoUI.Frame.Chrome
   ( fillStyledRect
   , imageIdFromText
   , paintTabHeader
+  , paintTableHeader
+  , tableStripeColor
   , strokeStyledRect
   , textInputFocused
   , widgetVisualStyle
@@ -117,9 +119,10 @@ lowerNode ctx idx = do
       pad <- getPadding (ctxNodeArena ctx) idx
       (wTag, _) <- getWidthSizing (ctxNodeArena ctx) idx
       (hTag, _) <- getHeightSizing (ctxNodeArena ctx) idx
+      si <- getStyleIdx (ctxNodeArena ctx) idx
       -- Paint bounded wells; full-page Grow/Grow viewports stay on the window fill.
       -- Square corners so axis-aligned clip does not leave rounded leftover pixels.
-      let paintWell = not (wTag == SizingGrow && hTag == SizingGrow)
+      let paintWell = si == 0 && not (wTag == SizingGrow && hTag == SizingGrow)
           wellStyle = style {styleCornerRadius = 0}
       when paintWell $ do
         fillStyledRect da terminal wellStyle rect
@@ -129,9 +132,14 @@ lowerNode ctx idx = do
       slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
       let inner = scrollContentClip (ctxHostProfile ctx) fm slot dir x y w h pad contentSize
       withClip da inner $ walkChildren ctx idx
-      wid <- getWidgetId (ctxNodeArena ctx) idx
-      paintScrollChrome ctx da idx wid x y w h pad theme terminal
+      when (si == 0) $ do
+        wid <- getWidgetId (ctxNodeArena ctx) idx
+        paintScrollChrome ctx da idx wid x y w h pad theme terminal
     NodeText -> do
+      si <- getStyleIdx (ctxNodeArena ctx) idx
+      case tableStripeColor theme si of
+        Just stripe | not terminal -> pushRect da rect stripe
+        _ -> pure ()
       raw <- getText (ctxNodeArena ctx) idx
       unless (T.null raw) $ do
         spans <- collectNodeTextSpans ctx IM.empty idx
@@ -217,13 +225,14 @@ lowerNode ctx idx = do
         if nt == NodeButton
           then getText (ctxNodeArena ctx) idx
           else pure T.empty
-      let (isClose, isTab) =
+      let (isClose, isTab, isTable) =
             if nt == NodeButton
               then buttonFlags storedText
-              else (False, False)
+              else (False, False, False)
       let opaqueBg
             | isClose = False
             | isTab = False
+            | isTable = colorA (styleBg style) > 0
             | terminal, nt == NodeButton = False
             | terminal, nt == NodeCheckbox = False
             | terminal, nt == NodeRadio = False
@@ -238,7 +247,7 @@ lowerNode ctx idx = do
                 nt /= NodeCheckbox && nt /= NodeRadio && nt /= NodeSlider && nt /= NodeTextInput && nt /= NodeColorPicker
       when opaqueBg $ fillStyledRect da terminal style rect
       when (not terminal) $ do
-        when (opaqueBg && not isTab && nt /= NodeTree) $ strokeStyledRect da terminal style x y w h
+        when (opaqueBg && not isTab && not isTable && nt /= NodeTree) $ strokeStyledRect da terminal style x y w h
         when isTab $ do
           si <- getStyleIdx (ctxNodeArena ctx) idx
           paintTabHeader
@@ -246,6 +255,17 @@ lowerNode ctx idx = do
             (ctxHostProfile ctx)
             theme
             si
+            (value > 0.5)
+            style
+            x
+            y
+            w
+            h
+        when isTable $
+          paintTableHeader
+            da
+            (ctxHostProfile ctx)
+            theme
             (value > 0.5)
             style
             x

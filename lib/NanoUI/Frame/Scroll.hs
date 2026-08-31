@@ -35,6 +35,7 @@ import NanoUI.Layout.Arena
   , getParent
   , getNodeType
   , getRect
+  , getStyleIdx
   , getWidgetId
   , isContainerNode
   , isScrollNode
@@ -83,24 +84,85 @@ updateScrollWheel :: Context -> Input -> IO ()
 updateScrollWheel ctx inp = do
   let scroll = inputScroll inp
   when (v2Y scroll /= 0 || v2X scroll /= 0) $ do
-    mTarget <- pickScrollWheelTarget ctx (inputMousePos inp)
-    case mTarget of
-      Nothing -> pure ()
-      Just wid -> void (tryApplyScrollWheelDelta ctx wid scroll)
+    mNode <- findScrollNodeUnderMouse ctx (inputMousePos inp)
+    case mNode of
+      Just idx -> do
+        wid <- getWidgetId (ctxNodeArena ctx) idx
+        void (tryApplyScrollWheelDelta ctx wid scroll)
+        applyCrossAxisScroll ctx idx scroll
+      Nothing -> do
+        focus <- readIORef (ctxFocusId ctx)
+        if hashWidgetId focus == 0
+          then pure ()
+          else do
+            mWid <- findScrollOwningWidget ctx focus
+            case mWid of
+              Just wid -> void (tryApplyScrollWheelDelta ctx wid scroll)
+              Nothing -> pure ()
+
+-- Nested 2D: apply the unused axis to a paired scroller in the same panel.
+-- Do not walk past panel/window/modal into the page scroller.
+applyCrossAxisScroll :: Context -> NodeIdx -> V2 -> IO ()
+applyCrossAxisScroll ctx idx scroll = do
+  dir <- getDirection (ctxNodeArena ctx) idx
+  mAnc <- walkOppositeAncestor ctx idx dir
+  case mAnc of
+    Just pwid -> void (tryApplyScrollWheelDelta ctx pwid scroll)
+    Nothing -> do
+      mDesc <- findOppositeScrollDescendant ctx idx dir
+      case mDesc of
+        Just dwid -> void (tryApplyScrollWheelDelta ctx dwid scroll)
+        Nothing -> pure ()
+
+scrollCrossAxisStop :: NodeType -> Bool
+scrollCrossAxisStop nt =
+  nt == NodePanel || nt == NodeWindow || nt == NodeModal
+
+walkOppositeAncestor :: Context -> NodeIdx -> DirTag -> IO (Maybe WidgetId)
+walkOppositeAncestor ctx idx childDir = do
+  p <- getParent (ctxNodeArena ctx) idx
+  if p < 0
+    then pure Nothing
+    else do
+      nt <- getNodeType (ctxNodeArena ctx) p
+      if scrollCrossAxisStop nt
+        then pure Nothing
+        else
+          if not (isScrollNode nt)
+            then walkOppositeAncestor ctx p childDir
+            else do
+              pdir <- getDirection (ctxNodeArena ctx) p
+              if pdir == childDir
+                then walkOppositeAncestor ctx p childDir
+                else Just <$> getWidgetId (ctxNodeArena ctx) p
+
+findOppositeScrollDescendant :: Context -> NodeIdx -> DirTag -> IO (Maybe WidgetId)
+findOppositeScrollDescendant ctx idx childDir = goChildren idx
+  where
+    want = if childDir == DirColumn then DirRow else DirColumn
+    goChildren parent = do
+      fc <- getFirstChild (ctxNodeArena ctx) parent
+      go fc
+    go ci
+      | ci < 0 = pure Nothing
+      | otherwise = do
+          nt <- getNodeType (ctxNodeArena ctx) ci
+          found <-
+            if isScrollNode nt
+              then do
+                d <- getDirection (ctxNodeArena ctx) ci
+                if d == want
+                  then Just <$> getWidgetId (ctxNodeArena ctx) ci
+                  else goChildren ci
+              else goChildren ci
+          case found of
+            Just w -> pure (Just w)
+            Nothing -> do
+              ns <- getNextSibling (ctxNodeArena ctx) ci
+              go ns
 
 -- Nested scrollers take the wheel only while hovered or while they own focus.
 -- No leftover chain to the parent at a limit.
-pickScrollWheelTarget :: Context -> V2 -> IO (Maybe WidgetId)
-pickScrollWheelTarget ctx mouse = do
-  hovered <- findScrollTargetUnderMouse ctx mouse
-  case hovered of
-    Just wid -> pure (Just wid)
-    Nothing -> do
-      focus <- readIORef (ctxFocusId ctx)
-      if hashWidgetId focus == 0
-        then pure Nothing
-        else findScrollOwningWidget ctx focus
-
 findScrollOwningWidget :: Context -> WidgetId -> IO (Maybe WidgetId)
 findScrollOwningWidget ctx wid = do
   mIdx <- findNodeByWidgetId ctx wid
@@ -141,6 +203,13 @@ tryApplyScrollWheelDelta ctx wid scroll = do
 
 findScrollTargetUnderMouse :: Context -> V2 -> IO (Maybe WidgetId)
 findScrollTargetUnderMouse ctx mouse = do
+  mIdx <- findScrollNodeUnderMouse ctx mouse
+  case mIdx of
+    Nothing -> pure Nothing
+    Just idx -> Just <$> getWidgetId (ctxNodeArena ctx) idx
+
+findScrollNodeUnderMouse :: Context -> V2 -> IO (Maybe NodeIdx)
+findScrollNodeUnderMouse ctx mouse = do
   mWin <- topmostWindowAtMouse ctx mouse
   case mWin of
     Just idx -> do
@@ -150,7 +219,7 @@ findScrollTargetUnderMouse ctx mouse = do
       (x, y, w, h) <- getRect (ctxNodeArena ctx) 0
       queryScrollTarget ctx 0 mouse (Rect x y w h)
 
-queryScrollTarget :: Context -> NodeIdx -> V2 -> Rect -> IO (Maybe WidgetId)
+queryScrollTarget :: Context -> NodeIdx -> V2 -> Rect -> IO (Maybe NodeIdx)
 queryScrollTarget ctx idx mouse parentClip = do
   nt <- getNodeType (ctxNodeArena ctx) idx
   mClipHere <- scrollHitClip ctx idx nt parentClip
@@ -159,10 +228,10 @@ queryScrollTarget ctx idx mouse parentClip = do
     Just clip -> do
       childHit <- walkScrollSiblings ctx idx mouse clip
       case childHit of
-        Just wid -> pure (Just wid)
+        Just hit -> pure (Just hit)
         Nothing -> scrollHitSelf ctx idx mouse clip
 
-walkScrollSiblings :: Context -> NodeIdx -> V2 -> Rect -> IO (Maybe WidgetId)
+walkScrollSiblings :: Context -> NodeIdx -> V2 -> Rect -> IO (Maybe NodeIdx)
 walkScrollSiblings ctx parent mouse clip = do
   fc <- getFirstChild (ctxNodeArena ctx) parent
   go fc
@@ -172,19 +241,19 @@ walkScrollSiblings ctx parent mouse clip = do
       | otherwise = do
           hit <- queryScrollTarget ctx ci mouse clip
           case hit of
-            Just wid -> pure (Just wid)
+            Just found -> pure (Just found)
             Nothing -> do
               ns <- getNextSibling (ctxNodeArena ctx) ci
               go ns
 
-scrollHitSelf :: Context -> NodeIdx -> V2 -> Rect -> IO (Maybe WidgetId)
+scrollHitSelf :: Context -> NodeIdx -> V2 -> Rect -> IO (Maybe NodeIdx)
 scrollHitSelf ctx idx mouse clip = do
   nt <- getNodeType (ctxNodeArena ctx) idx
   if not (isScrollNode nt)
     then pure Nothing
     else
       if rectW clip > 0 && rectH clip > 0 && rectContains clip mouse
-        then Just <$> getWidgetId (ctxNodeArena ctx) idx
+        then pure (Just idx)
         else pure Nothing
 
 -- Same clip stack as collectClippedSpans': scroll viewport, then panel bounds.
@@ -339,7 +408,8 @@ scrollContainerGeom ctx wid = do
               then go (idx + 1)
               else do
                 w' <- getWidgetId (ctxNodeArena ctx) idx
-                if w' /= wid
+                si <- getStyleIdx (ctxNodeArena ctx) idx
+                if w' /= wid || si /= 0
                   then go (idx + 1)
                   else do
                     dir <- getDirection (ctxNodeArena ctx) idx

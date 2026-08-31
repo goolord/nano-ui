@@ -72,6 +72,7 @@ import NanoUI.Layout.Arena
   , getNodeValue
   , getPadding
   , getRect
+  , getStyleIdx
   , getText
   , getWidthSizing
   , getWidgetId
@@ -82,7 +83,7 @@ import NanoUI.Layout.Arena
 import NanoUI.Layout.Solve (scrollBarSlotOf)
 import NanoUI.Style (Padding (..), Style (..), Theme (..), styleBg, styleFg, themePanel, themeSeparator, themeWindow)
 import NanoUI.Types (Color (..), Rect (..), colorRGBA, lerpColor, rectH, rectIntersect, rectW, rectX, rectY)
-import NanoUI.WidgetText (isCloseButtonText)
+import NanoUI.WidgetText (isCloseButtonText, isTableHeaderText)
 import NanoUI.WidgetText
   ( colorPickerToHex
   , selectChevronReserve
@@ -96,6 +97,7 @@ import NanoUI.Frame.Chrome
   ( buildFloatingAncestorMap
   , displayText
   , floatingLabelPaint
+  , tableStripeColor
   , textInputFocused
   , textInputValue
   , widgetVisualStyle
@@ -207,8 +209,10 @@ collectClippedSpans' ctx floatCache idx nt clip arena = do
       -- TUI modal chrome does not scroll (the inner body scroller does), so it
       -- has no track to cap.
       when (isCellHost (ctxHostProfile ctx) && isScrollNode nt && nt /= NodeModal) $ do
-        caps <- terminalScrollCapSpans ctx idx x y w h pad clip
-        mapM_ (\(r, t, fg, bg, c) -> pushSpan arena r t fg bg c) caps
+        si <- getStyleIdx (ctxNodeArena ctx) idx
+        when (si == 0) $ do
+          caps <- terminalScrollCapSpans ctx idx x y w h pad clip
+          mapM_ (\(r, t, fg, bg, c) -> pushSpan arena r t fg bg c) caps
       walkChildSpans ctx floatCache idx clipHere arena
 
 walkChildSpans :: Context -> IM.IntMap (Maybe NodeType) -> NodeIdx -> Rect -> SpanArena -> IO ()
@@ -234,16 +238,38 @@ collectNodeTextSpans ctx floatCache idx = do
   if nt == NodeText
     then do
       raw <- getText (ctxNodeArena ctx) idx
+      si <- getStyleIdx (ctxNodeArena ctx) idx
+      let mStripe = tableStripeColor theme si
+          stripeSpans =
+            case mStripe of
+              Just bg | isCellHost (ctxHostProfile ctx) ->
+                let wi = max 1 (round w :: Int)
+                    hi = max 1 (round h :: Int)
+                    ox = fromIntegral (round x :: Int)
+                    oy = fromIntegral (round y :: Int)
+                 in
+                  [ ( Rect ox (oy + fromIntegral r) (fromIntegral wi) 1
+                    , T.replicate wi " "
+                    , fgFill
+                    , bg
+                    )
+                  | r <- [0 .. hi - 1]
+                  ]
+              _ -> []
+          (txt0, fg, defaultBg) = floatingLabelPaint floatCache ctx idx theme raw
+          fgFill = fg
+          paintBg = case mStripe of
+            Just bg -> bg
+            Nothing -> defaultBg
       if T.null raw
-        then pure []
+        then pure stripeSpans
         else do
-          let (txt, fg, bg) = floatingLabelPaint floatCache ctx idx theme raw
           let (ix, _) = labelContentInset (ctxHostProfile ctx) fm
           ax <- getAlignX (ctxNodeArena ctx) idx
           (_, _, maxW, _) <- getMinMax (ctxNodeArena ctx) idx
           (wTag, _) <- getWidthSizing (ctxNodeArena ctx) idx
-          (tw0, th0) <- ctxMeasureText ctx txt
-          let hasNewlines = T.any (== '\n') txt
+          (tw0, th0) <- ctxMeasureText ctx txt0
+          let hasNewlines = T.any (== '\n') txt0
               wrapCap
                 | maxW < 1e8 = max 0 maxW
                 | wTag == SizingGrow && w > 0 = w
@@ -251,32 +277,34 @@ collectNodeTextSpans ctx floatCache idx = do
               canWrap = wrapCap < 1e8
               wrapW = max 0 (wrapCap - 2 * ix)
               lineH = layoutLineHeight (ctxHostProfile ctx) fm
-          if hasNewlines || (canWrap && wrapCap + 0.5 < tw0)
-            then do
-              textLines <-
-                if isCellHost (ctxHostProfile ctx)
-                  then pure (wrapTextLines (ctxHostProfile ctx) fm txt wrapW)
-                  else wrapTextLinesIO (\t -> fmap fst (ctxMeasureText ctx t)) fm txt wrapW
-              lineWs <-
-                if isCellHost (ctxHostProfile ctx)
-                  then pure (map (lineWidth fm) textLines)
-                  else mapM (fmap fst . ctxMeasureText ctx) textLines
-              pure
-                [ ( Rect
-                      tx
-                      (centeredTextY (ctxHostProfile ctx) fm (y + fromIntegral i * lineH) lineH lineH)
-                      tw
-                      lineH
-                  , line
-                  , fg
-                  , bg
-                  )
-                | (i, line, lw) <- zip3 [(0 :: Int) ..] textLines lineWs
-                , let (tx, tw) = alignedTextBox ax x w ix lw
-                ]
-            else do
-              let (tx, used) = alignedTextBox ax x w ix tw0
-              pure [(Rect tx (centeredTextY (ctxHostProfile ctx) fm y h th0) used th0, txt, fg, bg)]
+          textSpans <-
+            if hasNewlines || (canWrap && wrapCap + 0.5 < tw0)
+              then do
+                textLines <-
+                  if isCellHost (ctxHostProfile ctx)
+                    then pure (wrapTextLines (ctxHostProfile ctx) fm txt0 wrapW)
+                    else wrapTextLinesIO (\t -> fmap fst (ctxMeasureText ctx t)) fm txt0 wrapW
+                lineWs <-
+                  if isCellHost (ctxHostProfile ctx)
+                    then pure (map (lineWidth fm) textLines)
+                    else mapM (fmap fst . ctxMeasureText ctx) textLines
+                pure
+                  [ ( Rect
+                        tx
+                        (centeredTextY (ctxHostProfile ctx) fm (y + fromIntegral i * lineH) lineH lineH)
+                        tw
+                        lineH
+                    , line
+                    , fg
+                    , paintBg
+                    )
+                  | (i, line, lw) <- zip3 [(0 :: Int) ..] textLines lineWs
+                  , let (tx, tw) = alignedTextBox ax x w ix lw
+                  ]
+              else do
+                let (tx, used) = alignedTextBox ax x w ix tw0
+                pure [(Rect tx (centeredTextY (ctxHostProfile ctx) fm y h th0) used th0, txt0, fg, paintBg)]
+          pure (stripeSpans ++ textSpans)
     else
       if isWidgetNode nt
         then widgetTextSpans ctx nt idx x y w h
@@ -438,7 +466,14 @@ widgetTextPlacements ctx nt idx x y w h = do
         else do
           txt <- displayText ctx nt idx
           (tw, th) <- ctxMeasureText ctx txt
-          pure [(txt, x + (w - tw) / 2, centeredTextY (ctxHostProfile ctx) fm y h th, tw, th)]
+          if isTableHeaderText stored
+            then do
+              ax <- getAlignX (ctxNodeArena ctx) idx
+              let (labelIx, _) = labelContentInset (ctxHostProfile ctx) fm
+                  (tx, used) = alignedTextBox ax x w labelIx tw
+              pure [(txt, tx, centeredTextY (ctxHostProfile ctx) fm y h th, used, th)]
+            else
+              pure [(txt, x + (w - tw) / 2, centeredTextY (ctxHostProfile ctx) fm y h th, tw, th)]
     NodeSelect -> do
       txt <- displayText ctx nt idx
       (tw, th) <- ctxMeasureText ctx txt
