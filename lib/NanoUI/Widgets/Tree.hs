@@ -14,10 +14,10 @@ import Effectful (Eff, type (:>))
 import qualified Data.IntMap.Strict as IM
 import qualified Data.IntSet as IS
 import qualified Data.Text as T
+import NanoUI.Frame.Hit (scrollHitRect)
 import NanoUI.Context
   ( Context (..)
   , getFocusId
-  , getPrevRect
   , getStore
   , intKey
   , registerFocusable
@@ -214,7 +214,7 @@ treeRow groupKey row selectedIdx expandedSet = do
     then pure (resp, Nothing, Nothing)
     else
       uiIO $ do
-        mrect <- getPrevRect ctx wid
+        mrect <- scrollHitRect ctx wid
         let mouse = inputMousePos inp
             onChevron =
               case mrect of

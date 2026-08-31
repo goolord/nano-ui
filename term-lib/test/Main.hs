@@ -110,6 +110,7 @@ main = do
   run "nested-scroll-focus" runNestedScrollFocusTest
   run "scroll-hover-clip" runScrollHoverClipTest
   run "scroll-hit-offset" runScrollHitOffsetTest
+  run "scroll-button-click" runScrollButtonClickTest
   run "tab-focus" runTabFocusTest
   run "select-initial" runSelectTest
   run "select-dropdown" runSelectDropdownTest
@@ -132,6 +133,7 @@ main = do
   run "label-align-end" runLabelAlignEndTest
   run "grow-wrap-sibling" runGrowWrapPushesSiblingTest
   runSdl "controls-tab-height" runControlsTabHeightTest
+  runSdl "scroll-grow-click" runScrollButtonClickSdlTest
   run "terminal-default-gap" runTerminalDefaultGapTest
   run "terminal-slider-track" runTerminalSliderTrackTest
   run "terminal-text-input" runTerminalTextInputDisplayTest
@@ -2364,6 +2366,128 @@ runScrollHoverClipTest ctx failed = do
           _ <- runFrame ctx hoverHidden ui
           offI1 <- getScrollOffset ctx inner
           when (offI1 > offI0) $ bump failed
+    _ -> bump failed
+
+-- Clicks on scrolled content must use post-scroll prev rects.
+runScrollButtonClickTest :: Context -> IORef Int -> IO ()
+runScrollButtonClickTest ctx failed = do
+  let
+    inp0 = emptyInput {inputWindowSize = Size 240 160}
+    ui = do
+      (readHit, setHit) <- useText ""
+      (sid, resp) <-
+        scrollArea
+          (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 80})
+          ( column defaultLayout $ do
+              mapM_ (\_ -> void (label "pad")) [(1 :: Int) .. 12]
+              b <- button "Target"
+              onClick b (setHit "yes")
+              pure b
+          )
+      hit <- readHit
+      pure (sid, hit, resp)
+  _ <- runFrame ctx inp0 ui
+  ((sid, hit0, _), _, _, _) <- runFrame ctx inp0 ui
+  when (hit0 /= "") $ bump failed
+  mScroll <- getPrevRect ctx sid
+  case mScroll of
+    Just (Rect sx sy sw sh) -> do
+      let
+        wheel =
+          inp0
+            { inputMousePos = V2 (sx + sw / 2) (sy + sh / 2)
+            , inputScroll = V2 0 1
+            }
+      forM_ [(1 :: Int) .. 8] $ \_ -> void (runFrame ctx wheel ui)
+      off <- getScrollOffset ctx sid
+      when (off <= 0) $ bump failed
+      ((_, _, resp1), _, _, _) <- runFrame ctx inp0 ui
+      let
+        Rect bx by bw bh = respRect resp1
+        clickPos = V2 (bx + bw / 2) (by + bh / 2)
+        press =
+          inp0
+            { inputMousePos = clickPos
+            , inputMouseDown = True
+            , inputMousePressed = True
+            }
+        release =
+          press
+            { inputMouseDown = False
+            , inputMousePressed = False
+            , inputMouseReleased = True
+            }
+      _ <- runFrame ctx press ui
+      ((_, hit1, _), _, _, _) <- runFrame ctx release ui
+      when (hit1 /= "yes") $ bump failed
+    _ -> bump failed
+
+runScrollButtonClickSdlTest :: Context -> IORef Int -> IO ()
+runScrollButtonClickSdlTest ctx failed = do
+  let
+    inp0 = emptyInput {inputWindowSize = Size 640 480}
+    ui = do
+      (readHit, setHit) <- useText ""
+      (sid, resp) <-
+        scrollArea
+          (tight (grow defaultLayout))
+          ( column (padAll 8 . gap 8 . fillW $ defaultLayout) $ do
+              panel (padXY 14 10 . gap 8 . fillW $ defaultLayout) $
+                void (heading "nano-ui")
+              card $ do
+                heading "Controls"
+                b <- button "Target"
+                onClick b (setHit "yes")
+                mapM_ (\_ -> void (label "pad")) [(1 :: Int) .. 40]
+                pure b
+          )
+      hit <- readHit
+      pure (sid, hit, resp)
+  _ <- runFrame ctx inp0 ui
+  ((sid, hit0, respBase), _, _, _) <- runFrame ctx inp0 ui
+  let y0 = rectY (respRect respBase)
+  when (hit0 /= "") $ bump failed
+  mScroll <- getPrevRect ctx sid
+  case mScroll of
+    Just (Rect sx sy sw sh) -> do
+      let
+        wheel =
+          inp0
+            { inputMousePos = V2 (sx + sw / 2) (sy + sh / 2)
+            , inputScroll = V2 0 1
+            }
+      forM_ [(1 :: Int) .. 12] $ \_ -> void (runFrame ctx wheel ui)
+      off <- getScrollOffset ctx sid
+      when (off <= 0) $ bump failed
+      ((_, _, resp1), _, _, _) <- runFrame ctx inp0 ui
+      let y1 = rectY (respRect resp1)
+      when (abs (y1 - (y0 - off)) > 2) $ bump failed
+      let
+        Rect bx by bw bh = respRect resp1
+        clickPos = V2 (bx + bw / 2) (by + bh / 2)
+        press =
+          inp0
+            { inputMousePos = clickPos
+            , inputMouseDown = True
+            , inputMousePressed = True
+            }
+        release =
+          press
+            { inputMouseDown = False
+            , inputMousePressed = False
+            , inputMouseReleased = True
+            }
+      _ <- runFrame ctx press ui
+      ((_, hit1, _), _, _, _) <- runFrame ctx release ui
+      when (hit1 /= "yes") $ do
+        putStrLn $
+          "click miss hit="
+            ++ show hit1
+            ++ " pos="
+            ++ show clickPos
+            ++ " rect="
+            ++ show (respRect resp1)
+        bump failed
     _ -> bump failed
 
 -- Wheel hit-test must use post-scroll rects. Above the shifted viewport is not a hit.

@@ -231,6 +231,8 @@ runFrameEff unlift ctx inp ui = do
   syncWidgetLabels ctx
   -- Store/input finalization can change measured widget text (sliders, marks).
   solvePlaceWindows ctx w h
+  updatePrevRects ctx
+  applyScrollOffsets ctx
   refreshHover ctx inp
   tickAnimations ctx (inputDeltaTime inp)
   beginLayer (ctxDrawArena ctx) LayerBackground
@@ -242,7 +244,6 @@ runFrameEff unlift ctx inp ui = do
   drawTextInputMenuOverlays ctx inp
   drawTooltipOverlays ctx
   drawData <- finishDraw (ctxDrawArena ctx)
-  updatePrevRects ctx
   updatePrevNodeTexts ctx
   newTexts <- readIORef (ctxPrevNodeTexts ctx)
   overlayOpen <- overlayMenuOpen ctx
@@ -306,4 +307,3 @@ solvePlaceWindows ctx w h = do
     h
     (lookupWindowPos ctx)
     (lookupWindowSize ctx)
-  applyScrollOffsets ctx

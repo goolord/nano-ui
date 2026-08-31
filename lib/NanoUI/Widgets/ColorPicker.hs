@@ -25,7 +25,6 @@ import NanoUI.ColorPicker
 import NanoUI.Context
   ( Context (..)
   , WidgetStore (..)
-  , getPrevRect
   , getStore
   , intKey
   , registerFocusable
@@ -46,6 +45,7 @@ import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO)
 import NanoUI.Style (defaultLayout, fillW)
 import NanoUI.Types (Color (..), Rect (..), clamp01, colorToWord32, hsvToRgb, rectContains, rgbToHsv)
 import NanoUI.WidgetText (colorPickerLabelText)
+import NanoUI.Frame.Hit (scrollHitRect)
 import NanoUI.Widgets.Node (Response (..), addWidget, setChanged)
 
 colorPicker :: (Ui :> es) => Text -> Color -> Eff es (Response, Color)
@@ -76,7 +76,7 @@ colorPicker lbl initial = do
       drag0 = IM.findWithDefault 0 key (storeColorDrag store)
   active <- uiIO (readIORef (ctxActiveId ctx))
   focus <- uiIO (readIORef (ctxFocusId ctx))
-  mrect <- uiIO (getPrevRect ctx wid)
+  mrect <- uiIO (scrollHitRect ctx wid)
   blocked <- uiIO (readIORef (ctxLastPointerBlocked ctx))
   let mouse = inputMousePos inp
       geom =

@@ -318,6 +318,7 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
         ((wasDirty || dirtyNow) && not colorClipOnly)
           || sizeChanged
           || commanded
+          || scrollChanged
           || storePaintChanged
           || treeStoreChanged
           || overlayOpen

@@ -82,7 +82,6 @@ import Data.Text qualified as T
 import Effectful (Eff, type (:>))
 import NanoUI.Context
   ( Context (..)
-  , getPrevRect
   , getStore
   , intKey
   , isDisabled
@@ -97,6 +96,7 @@ import NanoUI.Font
   , mutedFontMarker
   , sliderTrackBounds
   )
+import NanoUI.Frame.Hit (scrollHitRect)
 import NanoUI.Host (isCellHost)
 import NanoUI.Icons (checkboxMark)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
@@ -342,7 +342,7 @@ sliderEx layout lbl minV maxV initial = do
     if blocked
       then pure False
       else do
-        mrect <- getPrevRect ctx wid
+        mrect <- scrollHitRect ctx wid
         pure $
           case mrect of
             Nothing -> False
@@ -364,7 +364,7 @@ sliderEx layout lbl minV maxV initial = do
     $ writeIORef (ctxActiveId ctx) (WidgetId 0)
   val <-
     uiIO $ do
-      mrect <- getPrevRect ctx wid
+      mrect <- scrollHitRect ctx wid
       let
         dragFrac =
           case mrect of

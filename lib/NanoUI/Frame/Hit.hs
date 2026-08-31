@@ -13,20 +13,26 @@ module NanoUI.Frame.Hit
   , topmostWindowAtMouse
   , widgetOverlayAllowed
   , widgetIdInModal
+  , ancestorScrollShift
+  , scrollHitRect
   ) where
 
 import Data.IORef (readIORef)
 import Data.Maybe (isJust)
 import qualified Data.HashTable.IO as HT
-import NanoUI.Context (Context (..))
+import NanoUI.Context (Context (..), getPrevRect, getScrollOffset)
 import NanoUI.Id (WidgetId)
 import NanoUI.Layout.Arena
-  ( NodeIdx
+  ( DirTag (..)
+  , NodeIdx
   , NodeType (NodeModal, NodeWindow)
   , arenaCount
+  , getDirection
   , getNodeType
   , getParent
   , getRect
+  , getWidgetId
+  , isScrollNode
   , lookupNodeByKey
   , naWidgetIndex
   )
@@ -119,3 +125,41 @@ widgetIdInModal ctx wid = do
   case mIdx of
     Nothing -> pure False
     Just idx -> nodeInTopmostModal ctx idx
+
+ancestorScrollShift :: Context -> NodeIdx -> IO (Float, Float)
+ancestorScrollShift ctx idx = go idx (0, 0)
+  where
+    go i (sx, sy)
+      | i <= 0 = pure (sx, sy)
+      | otherwise = do
+          p <- getParent (ctxNodeArena ctx) i
+          if p < 0
+            then pure (sx, sy)
+            else do
+              (sx', sy') <- parentScrollShift ctx p (sx, sy)
+              go p (sx', sy')
+
+-- Prev rects are stored in layout space. Shift by live scroll before hit tests.
+scrollHitRect :: Context -> WidgetId -> IO (Maybe Rect)
+scrollHitRect ctx wid = do
+  mIdx <- findNodeByWidgetId ctx wid
+  mprev <- getPrevRect ctx wid
+  case (mIdx, mprev) of
+    (Just idx, Just (Rect x y w h)) -> do
+      (dx, dy) <- ancestorScrollShift ctx idx
+      pure (Just (Rect (x + dx) (y + dy) w h))
+    _ -> pure mprev
+
+parentScrollShift :: Context -> NodeIdx -> (Float, Float) -> IO (Float, Float)
+parentScrollShift ctx p (sx, sy) = do
+  nt <- getNodeType (ctxNodeArena ctx) p
+  if isScrollNode nt
+    then do
+      wid <- getWidgetId (ctxNodeArena ctx) p
+      off <- getScrollOffset ctx wid
+      dir <- getDirection (ctxNodeArena ctx) p
+      pure $
+        case dir of
+          DirColumn -> (sx, sy - off)
+          DirRow -> (sx - off, sy)
+    else pure (sx, sy)

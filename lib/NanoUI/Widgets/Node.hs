@@ -26,7 +26,6 @@ import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import NanoUI.Context
   ( Context (..)
-  , getPrevRect
   , isDisabled
   , pointerBlockedByOverlay
   )
@@ -56,6 +55,7 @@ import NanoUI.Style
   , Sizing (..)
   )
 import NanoUI.Types (Rect (..), rectContains)
+import NanoUI.Frame.Hit (scrollHitRect)
 
 parentIdx :: [Int] -> Int
 parentIdx = \case
@@ -225,7 +225,7 @@ addWidgetStyled wid nt txt value layout styleIdx mResp = do
 resolveInteraction :: Context -> Input -> WidgetId -> IO Response
 resolveInteraction ctx inp wid = do
   disabled <- isDisabled ctx wid
-  mrect <- getPrevRect ctx wid
+  mrect <- scrollHitRect ctx wid
   blocked <- pointerBlockedByOverlay ctx (inputMousePos inp)
   let
     rect = case mrect of
