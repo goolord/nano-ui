@@ -474,29 +474,43 @@ lineWidth fm line =
   T.foldl' (\w c -> w + fmAdvance fm c) 0 line
 
 takeWidthWith :: (Text -> Float) -> Float -> Text -> (Text, Text)
-takeWidthWith lineW maxW txt = go 1
+takeWidthWith lineW maxW txt =
+  let n = T.length txt
+   in if n <= 0
+        then (txt, T.empty)
+        else
+          let fit = maxFit 1 n
+           in if fit <= 0
+                then (T.take 1 txt, T.drop 1 txt)
+                else if fit >= n
+                  then (txt, T.empty)
+                  else (T.take fit txt, T.drop fit txt)
   where
-    n = T.length txt
-    go k
-      | k > n = (txt, T.empty)
-      | lineW (T.take k txt) > maxW =
-          if k == 1
-            then (T.take 1 txt, T.drop 1 txt)
-            else (T.take (k - 1) txt, T.drop (k - 1) txt)
-      | otherwise = go (k + 1)
+    maxFit lo hi
+      | lo > hi = hi
+      | otherwise =
+          let mid = (lo + hi + 1) `div` 2
+           in if lineW (T.take mid txt) <= maxW
+                then maxFit mid hi
+                else maxFit lo (mid - 1)
 
 takeWidthIO :: (Text -> IO Float) -> Float -> Text -> IO (Text, Text)
-takeWidthIO lineW maxW txt = go 1
+takeWidthIO lineW maxW txt = do
+  let n = T.length txt
+  if n <= 0
+    then pure (txt, T.empty)
+    else do
+      fit <- maxFit 1 n
+      if fit <= 0
+        then pure (T.take 1 txt, T.drop 1 txt)
+        else
+          if fit >= n
+            then pure (txt, T.empty)
+            else pure (T.take fit txt, T.drop fit txt)
   where
-    n = T.length txt
-    go k
-      | k > n = pure (txt, T.empty)
+    maxFit lo hi
+      | lo > hi = pure hi
       | otherwise = do
-          tooWide <- (> maxW) <$> lineW (T.take k txt)
-          if tooWide
-            then
-              pure $
-                if k == 1
-                  then (T.take 1 txt, T.drop 1 txt)
-                  else (T.take (k - 1) txt, T.drop (k - 1) txt)
-            else go (k + 1)
+          let mid = (lo + hi + 1) `div` 2
+          ok <- (<= maxW) <$> lineW (T.take mid txt)
+          if ok then maxFit mid hi else maxFit lo (mid - 1)
