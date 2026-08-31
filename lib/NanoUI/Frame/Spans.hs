@@ -36,6 +36,8 @@ import NanoUI.Context
   , getStore
   , intKey
   , readTooltips
+  , slotCursor
+  , slotKey
   )
 import NanoUI.Damage (floatingPanelRects)
 import NanoUI.Font
@@ -555,7 +557,7 @@ widgetTextPlacements ctx nt idx x y w h = do
         then do
           wid <- getWidgetId (ctxNodeArena ctx) idx
           store <- getStore ctx
-          let cursor = IM.findWithDefault (T.length value) (intKey wid) (storeCursor store)
+          let cursor = IM.findWithDefault (T.length value) (slotKey slotCursor (intKey wid)) (storeInt store)
               shown = textInputTerminalText lbl value cursor focus
           (tw, th) <- ctxMeasureText ctx shown
           pure [(shown, x + ix, centeredTextY (ctxHostProfile ctx) fm y h th, tw, th)]
@@ -585,7 +587,7 @@ sliderValue :: Context -> NodeIdx -> IO Float
 sliderValue ctx idx = do
   wid <- getWidgetId (ctxNodeArena ctx) idx
   store <- getStore ctx
-  pure (IM.findWithDefault 0 (intKey wid) (storeSlider store))
+  pure (IM.findWithDefault 0 (intKey wid) (storeFloat store))
 
 -- Returns a style whose background already reflects hover/active state, so the
 -- rect fill and the text cells agree on one color.

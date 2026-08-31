@@ -49,7 +49,7 @@ import NanoUI.Input
   )
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
-import NanoUI.Store (WidgetStore (..))
+import NanoUI.Store (WidgetStore (..), slotDrag, slotDragW, slotKey)
 import NanoUI.Style
   ( AlignX (..)
   , AlignY (..)
@@ -294,14 +294,14 @@ useTableSort initial = do
     readSort =
       uiIO $ do
         st <- getStore ctx
-        pure (unpackSort (IM.findWithDefault packedInitial key (storeTableSort st)))
+        pure (unpackSort (IM.findWithDefault packedInitial key (storeInt st)))
     setSort sort =
       uiIO $ do
         st <- getStore ctx
         let packed = packSort sort
-            prev = IM.findWithDefault packedInitial key (storeTableSort st)
+            prev = IM.findWithDefault packedInitial key (storeInt st)
         when (prev /= packed) $ do
-          setStore ctx (st {storeTableSort = IM.insert key packed (storeTableSort st)})
+          setStore ctx (st {storeInt = IM.insert key packed (storeInt st)})
           markDirty ctx
   pure (readSort, setSort)
 
@@ -352,12 +352,12 @@ tableCfg cfg outerLayout key cols rows curSort =
       terminal = isCellHost host
       contentWs = columnWidths ctx cols rows
       sizes = tableColSizes cfg
-      order0 = normalizeOrder n (IM.findWithDefault [0 .. n - 1] stateKey (storeTableOrder st0))
-      hidden0 = IM.findWithDefault (tableHidden cfg) stateKey (storeTableHidden st0)
-      widths0 = fitList n 0 (IM.findWithDefault [] stateKey (storeTableColW st0))
-      drag0 = IM.findWithDefault 0 stateKey (storeTableDrag st0)
-      dragX0 = IM.findWithDefault 0 stateKey (storeTableDragX st0)
-      dragW0 = IM.findWithDefault 0 stateKey (storeTableDragW st0)
+      order0 = normalizeOrder n (IM.findWithDefault [0 .. n - 1] stateKey (storeIntList st0))
+      hidden0 = IM.findWithDefault (tableHidden cfg) stateKey (storeIntSet st0)
+      widths0 = fitList n 0 (IM.findWithDefault [] stateKey (storeFloatList st0))
+      drag0 = IM.findWithDefault 0 (slotKey slotDrag stateKey) (storeInt st0)
+      dragX0 = IM.findWithDefault 0 stateKey (storeFloat st0)
+      dragW0 = IM.findWithDefault 0 (slotKey slotDragW stateKey) (storeFloat st0)
       mx = v2X (inputMousePos inp)
       mouse = inputMousePos inp
       resizing = isResizeDrag drag0 && inputMouseDown inp
@@ -608,11 +608,12 @@ tableCfg cfg outerLayout key cols rows curSort =
         st <- getStore ctx
         let st1 =
               st
-                { storeTableOrder = IM.insert stateKey nextOrder (storeTableOrder st)
-                , storeTableHidden = IM.insert stateKey nextHidden (storeTableHidden st)
-                , storeTableDrag = IM.insert stateKey nextDrag' (storeTableDrag st)
-                , storeTableDragX = IM.insert stateKey nextDragX (storeTableDragX st)
-                , storeTableDragW = IM.insert stateKey nextDragW (storeTableDragW st)
+                { storeIntList = IM.insert stateKey nextOrder (storeIntList st)
+                , storeIntSet = IM.insert stateKey nextHidden (storeIntSet st)
+                , storeInt = IM.insert (slotKey slotDrag stateKey) nextDrag' (storeInt st)
+                , storeFloat =
+                    IM.insert stateKey nextDragX $
+                      IM.insert (slotKey slotDragW stateKey) nextDragW (storeFloat st)
                 }
         when (st1 /= st) $ do
           setStore ctx st1
@@ -630,19 +631,19 @@ minColW :: Float
 minColW = 40
 
 packResize :: Int -> Int
-packResize i = 1000 + i
+packResize i = -(1000 + i)
 
 packReorder :: Int -> Int
-packReorder i = 2000 + i
+packReorder i = -(2000 + i)
 
 isResizeDrag :: Int -> Bool
-isResizeDrag n = n >= 1000 && n < 2000
+isResizeDrag n = n <= -1000 && n > -2000
 
 isReorderDrag :: Int -> Bool
-isReorderDrag n = n >= 2000
+isReorderDrag n = n <= -2000
 
 dragCol :: Int -> Int
-dragCol n = n `mod` 1000
+dragCol n = abs n `mod` 1000
 
 fitList :: Int -> a -> [a] -> [a]
 fitList n d xs = take n (xs ++ repeat d)
@@ -748,7 +749,7 @@ rebuildOrder hidden newVis old =
 writeColW :: Context -> Int -> [Float] -> IO ()
 writeColW ctx key ws = do
   st <- getStore ctx
-  setStore ctx (st {storeTableColW = IM.insert key ws (storeTableColW st)})
+  setStore ctx (st {storeFloatList = IM.insert key ws (storeFloatList st)})
   markDirty ctx
 
 listAt :: [a] -> Int -> a -> a

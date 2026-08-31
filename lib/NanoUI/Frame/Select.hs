@@ -18,7 +18,19 @@ import Control.Monad (forM, forM_, unless, when)
 import Data.IORef (readIORef, writeIORef)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Text as T
-import NanoUI.Context (Context (..), WidgetStore (..), getStore, intKey, markDirty, markEscapeConsumed, setStore)
+import NanoUI.Context
+  ( Context (..)
+  , WidgetStore (..)
+  , anySelectOpen
+  , closeSelects
+  , getStore
+  , intKey
+  , isSelectOpen
+  , markDirty
+  , markEscapeConsumed
+  , setSelectOpen
+  , setStore
+  )
 import NanoUI.Draw (pushRect, pushRoundedRect, pushText)
 import NanoUI.Font (FontMetrics, centeredTextY, hasMonoFontMarker, stripMonoFontMarker, widgetContentInset)
 import NanoUI.Host (HostProfile, isCellHost)
@@ -44,22 +56,22 @@ markSelectDropPress :: Context -> Input -> IO ()
 markSelectDropPress ctx inp =
   when (inputMouseDown inp) $ do
     store <- getStore ctx
-    when (any id (IM.elems (storeSelectOpen store))) $ do
+    when (anySelectOpen store) $ do
       let mouse = inputMousePos inp
       count <- arenaCount (ctxNodeArena ctx)
-      hit <- openSelectHit ctx count mouse (storeSelectOpen store)
+      hit <- openSelectHit ctx count mouse store
       when hit $ writeIORef (ctxSelectDropPress ctx) True
 
 closeSelectOnOutsideClick :: Context -> Input -> IO ()
 closeSelectOnOutsideClick ctx inp =
   when (inputMousePressed inp) $ do
     store <- getStore ctx
-    when (any id (IM.elems (storeSelectOpen store))) $ do
+    when (anySelectOpen store) $ do
       let mouse = inputMousePos inp
       count <- arenaCount (ctxNodeArena ctx)
-      hit <- openSelectHit ctx count mouse (storeSelectOpen store)
+      hit <- openSelectHit ctx count mouse store
       unlessHit hit $
-        setStore ctx (store {storeSelectOpen = IM.map (const False) (storeSelectOpen store)})
+        setStore ctx (closeSelects store)
 
 finalizeSelectKeyboard :: Context -> Input -> IO ()
 finalizeSelectKeyboard ctx inp = do
@@ -88,7 +100,7 @@ finalizeSelectKeyboard ctx inp = do
           case () of
             _ | wantEsc || wantEnter ->
                 when open $ do
-                  setStore ctx (store {storeSelectOpen = IM.insert (intKey wid) False (storeSelectOpen store)})
+                  setStore ctx (setSelectOpen store (intKey wid) False)
                   when wantEsc $ markEscapeConsumed ctx
                   markDirty ctx
             _ | wantStep -> do
@@ -103,11 +115,11 @@ finalizeSelectKeyboard ctx inp = do
                       then pure ()
                       else do
                         let key = intKey wid
-                            cur = IM.findWithDefault 0 key (storeSelect store)
+                            cur = IM.findWithDefault 0 key (storeInt store)
                             delta = if wantNext then 1 else -1
                             next = max 0 (min (n - 1) (cur + delta))
                         when (next /= cur) $ do
-                          setStore ctx (store {storeSelect = IM.insert key next (storeSelect store)})
+                          setStore ctx (store {storeInt = IM.insert key next (storeInt store)})
                           markDirty ctx
             _ -> pure ()
 
@@ -119,7 +131,7 @@ pickSelectKeyboardTarget ctx focus store wantStep = do
       mFocus <- selectWidgetIfAny ctx focus
       case mFocus of
         Just wid -> do
-          let open = IM.findWithDefault False (intKey wid) (storeSelectOpen store)
+          let open = isSelectOpen store (intKey wid)
           pure (Just (wid, open))
         Nothing -> do
           mOpen <- findOpenSelectWidget ctx
@@ -155,7 +167,7 @@ findOpenSelectWidget ctx = do
               then go (idx + 1)
               else do
                 wid <- getWidgetId (ctxNodeArena ctx) idx
-                if IM.findWithDefault False (intKey wid) (storeSelectOpen store)
+                if isSelectOpen store (intKey wid)
                   then pure (Just wid)
                   else go (idx + 1)
   go 0
@@ -175,7 +187,7 @@ finalizeSelectPick ctx inp =
                   wid <- getWidgetId (ctxNodeArena ctx) idx
                   store <- getStore ctx
                   let key = intKey wid
-                  if not (IM.findWithDefault False key (storeSelectOpen store))
+                  if not (isSelectOpen store key)
                     then go (idx + 1)
                     else do
                       allow <- widgetOverlayAllowed ctx wid
@@ -194,18 +206,18 @@ finalizeSelectPick ctx inp =
                                 st <- getStore ctx
                                 setStore
                                   ctx
-                                  ( st
-                                      { storeSelect = IM.insert key picked (storeSelect st)
-                                      , storeSelectOpen = IM.insert key False (storeSelectOpen st)
-                                      }
+                                  ( setSelectOpen
+                                      (st {storeInt = IM.insert key picked (storeInt st)})
+                                      key
+                                      False
                                   )
                                 writeIORef (ctxFocusId ctx) wid
                                 markDirty ctx
                           go (idx + 1)
     go 0
 
-openSelectHit :: Context -> Int -> V2 -> IM.IntMap Bool -> IO Bool
-openSelectHit ctx count mouse opens = go 0
+openSelectHit :: Context -> Int -> V2 -> WidgetStore -> IO Bool
+openSelectHit ctx count mouse store = go 0
   where
     go idx
       | idx >= count = pure False
@@ -216,7 +228,7 @@ openSelectHit ctx count mouse opens = go 0
             else do
               wid <- getWidgetId (ctxNodeArena ctx) idx
               let key = intKey wid
-              if not (IM.findWithDefault False key opens)
+              if not (isSelectOpen store key)
                 then go (idx + 1)
                 else do
                   (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
@@ -246,7 +258,7 @@ findSelectUnderMouse ctx mouse = do
               txt <- getText (ctxNodeArena ctx) idx
               store <- getStore ctx
               let key = intKey wid
-                  open = IM.findWithDefault False key (storeSelectOpen store)
+                  open = isSelectOpen store key
                   fm = ctxFontMetrics ctx
                   (_, opts) = selectParseOptions txt
                   btnRect = Rect x y w h
@@ -344,7 +356,7 @@ drawSelectOverlays ctx inp = do
                   wid <- getWidgetId (ctxNodeArena ctx) idx
                   store <- getStore ctx
                   let key = intKey wid
-                  if not (IM.findWithDefault False key (storeSelectOpen store))
+                  if not (isSelectOpen store key)
                     then go (idx + 1)
                     else do
                       allow <- widgetOverlayAllowed ctx wid
@@ -354,7 +366,7 @@ drawSelectOverlays ctx inp = do
                           txt <- getText (ctxNodeArena ctx) idx
                           let (_, opts) = selectParseOptions txt
                           (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-                          let picked = IM.findWithDefault 0 key (storeSelect store)
+                          let picked = IM.findWithDefault 0 key (storeInt store)
                               itemH = selectItemH (ctxHostProfile ctx) h
                               dropRect = selectDropRect (ctxHostProfile ctx) fm x y w h (length opts)
                               dropStyle = overlayMenuStyle theme
@@ -412,7 +424,7 @@ collectSelectDropdownSpans ctx inp = do
                 wid <- getWidgetId (ctxNodeArena ctx) idx
                 store <- getStore ctx
                 let key = intKey wid
-                if not (IM.findWithDefault False key (storeSelectOpen store))
+                if not (isSelectOpen store key)
                   then go (idx + 1)
                   else do
                     allow <- widgetOverlayAllowed ctx wid
@@ -424,7 +436,7 @@ collectSelectDropdownSpans ctx inp = do
                         (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
                         let itemH = selectItemH (ctxHostProfile ctx) h
                             dropRect = selectDropRect (ctxHostProfile ctx) fm x y w h (length opts)
-                            picked = IM.findWithDefault 0 key (storeSelect store)
+                            picked = IM.findWithDefault 0 key (storeInt store)
                             dropStyle = overlayMenuStyle theme
                             fg = styleFg dropStyle
                         if isCellHost (ctxHostProfile ctx)

@@ -121,7 +121,16 @@ import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (inputMouseDown, inputMousePos, inputMousePressed)
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO)
-import NanoUI.Store (WidgetStore (..))
+import NanoUI.Store
+  ( WidgetStore (..)
+  , boolInt
+  , intBool
+  , isSelectOpen
+  , setSelectOpen
+  , slotAnchor
+  , slotCursor
+  , slotKey
+  )
 import NanoUI.Style
   ( Layout (..)
   , alignEnd
@@ -333,7 +342,7 @@ checkbox txt initial = do
   store <- uiIO (getStore ctx)
   let
     key = intKey wid
-    current = IM.findWithDefault initial key (storeCheckbox store)
+    current = intBool (IM.findWithDefault (boolInt initial) key (storeInt store))
     host = ctxHostProfile ctx
     nodeText =
       if isCellHost host
@@ -365,7 +374,7 @@ sliderEx layout lbl minV maxV initial = do
   store <- uiIO (getStore ctx)
   let
     key = intKey wid
-    current = IM.findWithDefault initial key (storeSlider store)
+    current = IM.findWithDefault initial key (storeFloat store)
     frac = if maxV > minV then (current - minV) / (maxV - minV) else 0
     host = ctxHostProfile ctx
     fm = ctxFontMetrics ctx
@@ -428,7 +437,7 @@ sliderEx layout lbl minV maxV initial = do
     finalVal = if pressed then val else current
   when (finalVal /= current)
     $ uiIO
-    $ setStore ctx (store {storeSlider = IM.insert key finalVal (storeSlider store)})
+    $ setStore ctx (store {storeFloat = IM.insert key finalVal (storeFloat store)})
   pure (setChanged (finalVal /= current) resp, finalVal)
 
 textInput :: Ui :> es => Text -> Text -> Eff es (Response, Text)
@@ -445,8 +454,8 @@ textInput lbl initial = do
     $ setStore ctx (store {storeText = IM.insert key initial (storeText store)})
   let
     current = IM.findWithDefault initial key (storeText store)
-    cursor = IM.findWithDefault (T.length current) key (storeCursor store)
-    anchor = IM.findWithDefault cursor key (storeSelAnchor store)
+    cursor = IM.findWithDefault (T.length current) (slotKey slotCursor key) (storeInt store)
+    anchor = IM.findWithDefault cursor (slotKey slotAnchor key) (storeInt store)
   focus <- uiIO (readIORef (ctxFocusId ctx))
   blocked <- uiIO (pointerBlockedByModal ctx)
   let
@@ -465,8 +474,9 @@ textInput lbl initial = do
       ctx
       ( store
           { storeText = IM.insert key newText (storeText store)
-          , storeCursor = IM.insert key newCursor (storeCursor store)
-          , storeSelAnchor = IM.insert key newAnchor (storeSelAnchor store)
+          , storeInt =
+              IM.insert (slotKey slotCursor key) newCursor $
+                IM.insert (slotKey slotAnchor key) newAnchor (storeInt store)
           }
       )
   resp <-
@@ -483,17 +493,17 @@ select lbl options initial = do
     key = intKey wid
   store0 <- uiIO (getStore ctx)
   let
-    current = IM.findWithDefault initial key (storeSelect store0)
+    current = IM.findWithDefault initial key (storeInt store0)
     clamped = max 0 (min (length opts - 1) current)
     nodeText = selectPackOptions lbl opts
-  when (not (IM.member key (storeSelect store0)))
+  when (not (IM.member key (storeInt store0)))
     $ uiIO
-    $ setStore ctx (store0 {storeSelect = IM.insert key clamped (storeSelect store0)})
+    $ setStore ctx (store0 {storeInt = IM.insert key clamped (storeInt store0)})
   resp <- addWidget wid NodeSelect nodeText 0 defaultLayout
   inp <- askInput
   open <- uiIO $ do
     st <- getStore ctx
-    pure (IM.findWithDefault False key (storeSelectOpen st))
+    pure (isSelectOpen st key)
   when (respClicked resp) $
     uiIO $ do
       st <- getStore ctx
@@ -505,16 +515,16 @@ select lbl options initial = do
         ( if open
             then
               if onButton
-                then st {storeSelectOpen = IM.insert key False (storeSelectOpen st)}
+                then setSelectOpen st key False
                 else st
             else
               if onButton
-                then st {storeSelectOpen = IM.singleton key True}
+                then setSelectOpen st key True
                 else st
         )
   store1 <- uiIO (getStore ctx)
   let
-    finalIdx = IM.findWithDefault clamped key (storeSelect store1)
+    finalIdx = IM.findWithDefault clamped key (storeInt store1)
   pure (setChanged (finalIdx /= initial) resp, finalIdx)
 
 tooltip :: Ui :> es => Text -> Response -> Eff es Response

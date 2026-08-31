@@ -7,6 +7,22 @@ module NanoUI.Context
   , FrameMsg (..)
   , Animation (..)
   , WidgetStore (..)
+  , bumpMirror
+  , slotKey
+  , slotDisabled
+  , slotCursor
+  , slotAnchor
+  , slotDrag
+  , slotDragW
+  , slotWinSize
+  , boolInt
+  , intBool
+  , pairList
+  , listPair
+  , anySelectOpen
+  , isSelectOpen
+  , setSelectOpen
+  , closeSelects
   , newContext
   , withFontMetrics
   , withMonoFontMetrics
@@ -96,7 +112,25 @@ import NanoUI.Animation
   , approxEq
   , easeSameSpec
   )
-import NanoUI.Store (WidgetStore (..))
+import NanoUI.Store
+  ( WidgetStore (..)
+  , anySelectOpen
+  , boolInt
+  , bumpMirror
+  , closeSelects
+  , intBool
+  , isSelectOpen
+  , listPair
+  , pairList
+  , setSelectOpen
+  , slotAnchor
+  , slotCursor
+  , slotDisabled
+  , slotDrag
+  , slotDragW
+  , slotKey
+  , slotWinSize
+  )
 import NanoUI.Spring
   ( SpringParams (..)
   , presetBouncy

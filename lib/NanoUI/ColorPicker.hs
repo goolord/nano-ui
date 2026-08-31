@@ -22,6 +22,7 @@ module NanoUI.ColorPicker
   ) where
 
 import Control.Monad (unless)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.IntMap.Strict as IM
 import NanoUI.Context (intKey)
@@ -40,7 +41,7 @@ import NanoUI.Font
   )
 import NanoUI.Host (HostProfile, isCellHost)
 import NanoUI.Id (WidgetId (..))
-import NanoUI.Store (WidgetStore (..))
+import NanoUI.Store (WidgetStore (..), listPair)
 import NanoUI.Style (Style (..))
 import NanoUI.Types
   ( Color (..)
@@ -89,19 +90,26 @@ data ColorPickerGeom = ColorPickerGeom
 
 widgetStoreColor :: WidgetStore -> WidgetId -> Color -> Color
 widgetStoreColor store wid fallback =
-  colorFromWord32 (IM.findWithDefault (colorToWord32 fallback) (intKey wid) (storeColor store))
+  colorFromWord32
+    ( fromIntegral
+        ( IM.findWithDefault
+            (fromIntegral (colorToWord32 fallback))
+            (intKey wid)
+            (storeInt store)
+        )
+    )
 
 -- RGB cannot tell hue 0 from 360. Keep the slider end the user last set.
 widgetStoreHue :: WidgetStore -> WidgetId -> Color -> Float
 widgetStoreHue store wid fallback =
   let (h0, _, _) = rgbToHsv (widgetStoreColor store wid fallback)
-   in IM.findWithDefault h0 (intKey wid) (storeColorHue store)
+   in IM.findWithDefault h0 (intKey wid) (storeFloat store)
 
 -- Black collapses S in RGB. Keep the last mouse S/V so the marker does not jitter.
 widgetStoreSv :: WidgetStore -> WidgetId -> Color -> (Float, Float)
 widgetStoreSv store wid fallback =
   let (_, s0, v0) = rgbToHsv (widgetStoreColor store wid fallback)
-   in IM.findWithDefault (s0, v0) (intKey wid) (storeColorSv store)
+   in fromMaybe (s0, v0) (IM.lookup (intKey wid) (storeFloatList store) >>= listPair)
 
 -- Hue slider is a line, not a wheel.
 clampHue :: Float -> Float

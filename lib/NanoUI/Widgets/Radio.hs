@@ -47,7 +47,7 @@ radioOption groupKey optionIdx label selectedIdx = do
   wid <- nextId
   ctx <- askContext
   store <- uiIO (getStore ctx)
-  let current = IM.findWithDefault selectedIdx groupKey (storeRadio store)
+  let current = IM.findWithDefault selectedIdx groupKey (storeInt store)
       host = ctxHostProfile ctx
       body =
         if isCellHost host
@@ -97,13 +97,13 @@ radioFieldset legend options initial =
         clamped = max 0 (min (length opts - 1) initial)
     ctx <- askContext
     store0 <- uiIO (getStore ctx)
-    when (not (IM.member groupKey (storeRadio store0))) $
+    when (not (IM.member groupKey (storeInt store0))) $
       uiIO $
         setStore
           ctx
-          (store0 {storeRadio = IM.insert groupKey clamped (storeRadio store0)})
+          (store0 {storeInt = IM.insert groupKey clamped (storeInt store0)})
     store1 <- uiIO (getStore ctx)
-    let selected = IM.findWithDefault clamped groupKey (storeRadio store1)
+    let selected = IM.findWithDefault clamped groupKey (storeInt store1)
     column (tight . gap 4 . fillW $ defaultLayout) $ do
       unless (T.null legend) $
         void (labelEx (tight . fillW $ defaultLayout) (mutedFontMarker <> legend))
@@ -113,7 +113,7 @@ radioFieldset legend options initial =
           [0 ..]
           opts
       store2 <- uiIO (getStore ctx)
-      let stored = IM.findWithDefault clamped groupKey (storeRadio store2)
+      let stored = IM.findWithDefault clamped groupKey (storeInt store2)
           (resps, nextIdxs) = unzip results
           resp = mergeResponses resps
           finalIdx =

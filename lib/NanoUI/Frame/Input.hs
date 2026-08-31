@@ -23,8 +23,10 @@ import NanoUI.Context
   , TextInputDrag (..)
   , TextInputMenu (..)
   , WidgetStore (..)
+  , boolInt
   , getFocusables
   , getStore
+  , intBool
   , intKey
   , isDisabled
   , markDirty
@@ -171,12 +173,12 @@ finalizePointerRelease ctx inp =
                   store <- getStore ctx
                   let key = intKey wid
                       current =
-                        IM.findWithDefault False key (storeCheckbox store)
+                        intBool (IM.findWithDefault 0 key (storeInt store))
                       newVal = not current
                   setStore
                     ctx
                     ( store
-                        { storeCheckbox = IM.insert key newVal (storeCheckbox store)
+                        { storeInt = IM.insert key (boolInt newVal) (storeInt store)
                         }
                     )
                 NodeRadio -> do
@@ -186,7 +188,7 @@ finalizePointerRelease ctx inp =
                   setStore
                     ctx
                     ( store
-                        { storeRadio = IM.insert groupKey optIdx (storeRadio store)
+                        { storeInt = IM.insert groupKey optIdx (storeInt store)
                         }
                     )
                 _ -> pure ()

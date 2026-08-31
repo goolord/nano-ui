@@ -34,7 +34,7 @@ import NanoUI.Context
   )
 import NanoUI.Spring (SpringParams)
 import NanoUI.Monad (Ui, askContext, nextId, uiIO, withKey)
-import NanoUI.Store (WidgetStore (..))
+import NanoUI.Store (WidgetStore (..), boolInt, bumpMirror, intBool)
 
 animate :: (Ui :> es) => Float -> Float -> Float -> Eff es Float
 animate = animateEase EaseLinear
@@ -122,10 +122,20 @@ useStoreField field update initial = do
   pure (get, set)
 
 useFlag :: (Ui :> es) => Bool -> Eff es (Eff es Bool, Bool -> Eff es ())
-useFlag initial = useStoreField storeFlag (\st k v -> st {storeFlag = IM.insert k v (storeFlag st)}) initial
+useFlag initial = do
+  (getI, setI) <-
+    useStoreField
+      storeInt
+      (\st k v -> bumpMirror (st {storeInt = IM.insert k v (storeInt st)}))
+      (boolInt initial)
+  pure (fmap intBool getI, setI . boolInt)
 
 useText :: (Ui :> es) => Text -> Eff es (Eff es Text, Text -> Eff es ())
-useText initial = useStoreField storeNote (\st k v -> st {storeNote = IM.insert k v (storeNote st)}) initial
+useText initial =
+  useStoreField
+    storeText
+    (\st k v -> bumpMirror (st {storeText = IM.insert k v (storeText st)}))
+    initial
 
 useToggle :: (Ui :> es) => Bool -> Eff es (Eff es Bool, Eff es ())
 useToggle initial = do

@@ -27,8 +27,11 @@ import NanoUI.Context
   , WidgetStore (..)
   , getStore
   , intKey
+  , pairList
   , registerFocusable
   , setStore
+  , slotDrag
+  , slotKey
   )
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input
@@ -56,15 +59,15 @@ colorPicker lbl initial = do
   uiIO $ registerFocusable ctx wid
   let key = intKey wid
   store0 <- uiIO (getStore ctx)
-  when (not (IM.member key (storeColor store0))) $
+  when (not (IM.member key (storeInt store0))) $
     uiIO $
       let (hInit, sInit, vInit) = rgbToHsv initial
        in setStore
             ctx
             ( store0
-                { storeColor = IM.insert key (colorToWord32 initial) (storeColor store0)
-                , storeColorHue = IM.insert key (clampHue hInit) (storeColorHue store0)
-                , storeColorSv = IM.insert key (sInit, vInit) (storeColorSv store0)
+                { storeInt = IM.insert key (fromIntegral (colorToWord32 initial)) (storeInt store0)
+                , storeFloat = IM.insert key (clampHue hInit) (storeFloat store0)
+                , storeFloatList = IM.insert key (pairList (sInit, vInit)) (storeFloatList store0)
                 }
             )
   let nodeText = colorPickerLabelText lbl
@@ -73,7 +76,7 @@ colorPicker lbl initial = do
   let current = widgetStoreColor store wid initial
       host = ctxHostProfile ctx
       fm = ctxFontMetrics ctx
-      drag0 = IM.findWithDefault 0 key (storeColorDrag store)
+      drag0 = IM.findWithDefault 0 (slotKey slotDrag key) (storeInt store)
   active <- uiIO (readIORef (ctxActiveId ctx))
   focus <- uiIO (readIORef (ctxFocusId ctx))
   mrect <- uiIO (scrollHitRect ctx wid)
@@ -129,10 +132,10 @@ colorPicker lbl initial = do
       setStore
         ctx
         ( st
-            { storeColorDrag =
+            { storeInt =
                 if drag == 0
-                  then IM.delete key (storeColorDrag st)
-                  else IM.insert key drag (storeColorDrag st)
+                  then IM.delete (slotKey slotDrag key) (storeInt st)
+                  else IM.insert (slotKey slotDrag key) drag (storeInt st)
             }
         )
   when (dragged /= current || draggedHue /= h0 || draggedS /= s0 || draggedV /= v0) $
@@ -141,9 +144,9 @@ colorPicker lbl initial = do
       setStore
         ctx
         ( st
-            { storeColor = IM.insert key (colorToWord32 dragged) (storeColor st)
-            , storeColorHue = IM.insert key draggedHue (storeColorHue st)
-            , storeColorSv = IM.insert key (draggedS, draggedV) (storeColorSv st)
+            { storeInt = IM.insert key (fromIntegral (colorToWord32 dragged)) (storeInt st)
+            , storeFloat = IM.insert key draggedHue (storeFloat st)
+            , storeFloatList = IM.insert key (pairList (draggedS, draggedV)) (storeFloatList st)
             }
         )
   let next = if drag /= 0 then dragged else current
@@ -180,8 +183,8 @@ applyColorPickerKeys ctx wid current inp =
           setStore
             ctx
             ( store
-                { storeColor = IM.insert (intKey wid) (colorToWord32 next) (storeColor store)
-                , storeColorHue = IM.insert (intKey wid) nextHue (storeColorHue store)
-                , storeColorSv = IM.insert (intKey wid) (s, nextV) (storeColorSv store)
+                { storeInt = IM.insert (intKey wid) (fromIntegral (colorToWord32 next)) (storeInt store)
+                , storeFloat = IM.insert (intKey wid) nextHue (storeFloat store)
+                , storeFloatList = IM.insert (intKey wid) (pairList (s, nextV)) (storeFloatList store)
                 }
             )

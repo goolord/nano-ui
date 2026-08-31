@@ -193,7 +193,7 @@ paintTextSnapshot ctx nt idx = do
           lbl <- displayText ctx nt idx
           wid <- getWidgetId (ctxNodeArena ctx) idx
           store <- getStore ctx
-          let val = IM.findWithDefault 0 (intKey wid) (storeSlider store)
+          let val = IM.findWithDefault 0 (intKey wid) (storeFloat store)
           pure (lbl <> "\US" <> sliderValueText val)
       | otherwise -> displayText ctx nt idx
     NodeRadio
@@ -280,27 +280,15 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
   let keyedMoved = keyedRectDeltas oldRects newRects
   moved <- mapM (clipDeltaToScrollViewport ctx newRects) keyedMoved
   let settledMoved = filter significantLayoutRect moved
-      storePaintChanged = paintStore oldStore /= paintStore newStore
-      -- Expand changes which rows exist. Selection is node value, not text.
-      -- Either one must Full: retain clips would leave ghost children / old highlight.
-      treeStoreChanged =
-        storeTreeSelected oldStore /= storeTreeSelected newStore
-          || storeTreeExpanded oldStore /= storeTreeExpanded newStore
-      colorStoreChanged =
-        storeColor oldStore /= storeColor newStore
-          || storeColorHue oldStore /= storeColorHue newStore
-          || storeColorSv oldStore /= storeColorSv newStore
-      dragStoreChanged = storeColorDrag oldStore /= storeColorDrag newStore
-      -- Color/drag live in store but paint via widget rects. Do not Full for those alone.
-      colorClipOnly =
-        not storePaintChanged && (colorStoreChanged || dragStoreChanged)
+      storePaintChanged = oldStore /= newStore
+      treeStoreChanged = storeIntSet oldStore /= storeIntSet newStore
+      colorClipOnly = False
       floatingChanged = oldFloatingRects /= newFloatingRects
-      windowKeys =
-        IM.keys (IM.union (storeWindow newStore) (storeWindowSize newStore))
+      windowKeys = IM.keys (IM.union oldFloatingRects newFloatingRects)
       windowLive = winDragActive || winResizeActive
       windowClipRs =
         catMaybes [IM.lookup k newFloatingRects | k <- windowKeys]
-      scrollChanged = storeScroll oldStore /= storeScroll newStore
+      scrollChanged = storeFloat oldStore /= storeFloat newStore
       animLive = not (IM.null liveAnims) || settled
       keysChanged =
         not (IM.null oldRects)
@@ -368,17 +356,11 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
             let vanishedRs = IM.elems (IM.difference oldRects newRects)
                 textRs = textChangeRects oldTexts newTexts oldRects newRects
                 colorRs =
-                  storeKeyChangeRects (storeColor oldStore) (storeColor newStore) oldRects newRects
-                    ++ storeKeyChangeRects (storeColorHue oldStore) (storeColorHue newStore) oldRects newRects
-                    ++ storeKeyChangeRects (storeColorSv oldStore) (storeColorSv newStore) oldRects newRects
-                    ++ storeKeyChangeRects (storeColorDrag oldStore) (storeColorDrag newStore) oldRects newRects
+                  storeKeyChangeRects (storeInt oldStore) (storeInt newStore) oldRects newRects
+                    ++ storeKeyChangeRects (storeFloat oldStore) (storeFloat newStore) oldRects newRects
+                    ++ storeKeyChangeRects (storeFloatList oldStore) (storeFloatList newStore) oldRects newRects
                 textStoreRs =
                   storeKeyChangeRects (storeText oldStore) (storeText newStore) oldRects newRects
-                    ++ storeKeyChangeRects (storeCursor oldStore) (storeCursor newStore) oldRects newRects
-                    ++ storeKeyChangeRects (storeSelAnchor oldStore) (storeSelAnchor newStore) oldRects newRects
-                    ++ storeKeyChangeRects (storeSlider oldStore) (storeSlider newStore) oldRects newRects
-                    ++ storeKeyChangeRects (storeSelect oldStore) (storeSelect newStore) oldRects newRects
-                    ++ storeKeyChangeRects (storeCheckbox oldStore) (storeCheckbox newStore) oldRects newRects
             radioStoreRs <- radioStoreChangeRects ctx oldStore newStore oldRects newRects
             animRs <-
               fmap concat $
@@ -428,20 +410,6 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
   when modalFlip (markDirty ctx)
   when (floatingChanged && not (IM.null oldFloatingRects && not (IM.null newFloatingRects))) $
     markDirty ctx
-
--- Windows live in their own path. Color/drag clip to widget rects, not Full.
-paintStore :: WidgetStore -> WidgetStore
-paintStore s =
-  s
-    { storeWindow = IM.empty
-    , storeWindowSize = IM.empty
-    , storeColor = IM.empty
-    , storeColorHue = IM.empty
-    , storeColorSv = IM.empty
-    , storeColorDrag = IM.empty
-    , storeTreeSelected = IM.empty
-    , storeTreeExpanded = IM.empty
-    }
 
 floatingRectDamage :: IM.IntMap Rect -> IM.IntMap Rect -> [Rect]
 floatingRectDamage old new =
@@ -550,7 +518,7 @@ radioStoreChangeRects ::
   IM.IntMap Rect ->
   IO [Rect]
 radioStoreChangeRects ctx oldStore newStore oldRects newRects = do
-  let changed = storeChangeKeys (storeRadio oldStore) (storeRadio newStore)
+  let changed = storeChangeKeys (storeInt oldStore) (storeInt newStore)
   if IM.null changed
     then pure []
     else do

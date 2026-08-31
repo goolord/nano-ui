@@ -16,7 +16,7 @@ import Data.IORef (readIORef, writeIORef)
 import Data.List (findIndex)
 import Data.Primitive.PrimArray (readPrimArray)
 import qualified Data.IntMap.Strict as IM
-import NanoUI.Context (Context (..), WidgetStore (..), getStore, intKey)
+import NanoUI.Context (Context (..), WidgetStore (..), getStore, intBool, intKey)
 import NanoUI.Frame.Hit (modalTreeOpen, widgetIdInModal)
 import NanoUI.Host (isCellHost)
 import NanoUI.Icons (checkboxMark, radioMark)
@@ -122,7 +122,7 @@ syncWidgetLabels ctx = do
       NodeCheckbox -> do
         txt <- getText na idx
         let body = checkboxLabelText txt
-            val = IM.findWithDefault False key (storeCheckbox store)
+            val = intBool (IM.findWithDefault 0 key (storeInt store))
             mark = if terminal then checkboxMark icons val else ""
         setNodeText na idx (mark <> body)
         setNodeValue na idx (if val then 1 else 0)
@@ -131,7 +131,7 @@ syncWidgetLabels ctx = do
         case T.splitOn sliderRangeSep txt of
           [_g, _i, _lbl] -> do
             let (groupKey, optIdx, _) = radioParseOption txt
-                selected = IM.findWithDefault optIdx groupKey (storeRadio store)
+                selected = IM.findWithDefault optIdx groupKey (storeInt store)
                 val = selected == optIdx
                 label = radioLabelText txt
                 display =
@@ -144,10 +144,10 @@ syncWidgetLabels ctx = do
       NodeTree -> do
         txt <- getText na idx
         let (groupKey, nodeIdx, _, _, _, _) = treeParseRow txt
-            selected = IM.findWithDefault nodeIdx groupKey (storeTreeSelected store)
+            selected = IM.findWithDefault nodeIdx groupKey (storeInt store)
         setNodeValue na idx (if selected == nodeIdx then 1 else 0)
       NodeSlider -> do
-        let val = IM.findWithDefault 0 key (storeSlider store)
+        let val = IM.findWithDefault 0 key (storeFloat store)
         txt <- getText na idx
         let (lbl, minV, maxV) = sliderParseRange txt
             frac = if maxV > minV then (val - minV) / (maxV - minV) else 0
