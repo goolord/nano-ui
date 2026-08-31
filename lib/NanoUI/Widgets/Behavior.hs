@@ -7,6 +7,10 @@ module NanoUI.Widgets.Behavior
   , useKeyNav
   , KeyNav (..)
   , useDismissable
+  , ensureInt
+  , ensureIntSet
+  , putInt
+  , putIntSet
   )
 where
 
@@ -15,6 +19,7 @@ import Data.List (find)
 import Data.Maybe (fromMaybe)
 import Effectful (Eff, type (:>))
 import qualified Data.IntMap.Strict as IM
+import qualified Data.IntSet as IS
 import NanoUI.Context
   ( bumpMirror
   , getFocusId
@@ -220,3 +225,41 @@ useDismissable panel = do
       dismissed = esc || backdrop
   when esc $ uiIO (markEscapeConsumed ctx)
   pure dismissed
+
+-- | Read 'storeInt', inserting 'initial' on first use.
+ensureInt :: (Ui :> es) => Int -> Int -> Eff es Int
+ensureInt key initial = do
+  ctx <- askContext
+  st <- uiIO (getStore ctx)
+  case IM.lookup key (storeInt st) of
+    Just v -> pure v
+    Nothing -> do
+      uiIO $ setStore ctx (st {storeInt = IM.insert key initial (storeInt st)})
+      pure initial
+
+-- | Read 'storeIntSet', inserting 'initial' on first use.
+ensureIntSet :: (Ui :> es) => Int -> IS.IntSet -> Eff es IS.IntSet
+ensureIntSet key initial = do
+  ctx <- askContext
+  st <- uiIO (getStore ctx)
+  case IM.lookup key (storeIntSet st) of
+    Just v -> pure v
+    Nothing -> do
+      uiIO $ setStore ctx (st {storeIntSet = IM.insert key initial (storeIntSet st)})
+      pure initial
+
+putInt :: (Ui :> es) => Int -> Int -> Eff es ()
+putInt key v = do
+  ctx <- askContext
+  st <- uiIO (getStore ctx)
+  case IM.lookup key (storeInt st) of
+    Just old | old == v -> pure ()
+    _ -> uiIO $ setStore ctx (st {storeInt = IM.insert key v (storeInt st)})
+
+putIntSet :: (Ui :> es) => Int -> IS.IntSet -> Eff es ()
+putIntSet key v = do
+  ctx <- askContext
+  st <- uiIO (getStore ctx)
+  case IM.lookup key (storeIntSet st) of
+    Just old | old == v -> pure ()
+    _ -> uiIO $ setStore ctx (st {storeIntSet = IM.insert key v (storeIntSet st)})
