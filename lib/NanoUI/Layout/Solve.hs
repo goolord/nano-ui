@@ -253,6 +253,20 @@ measureSeparator na idx = do
     DirRow -> setRect na idx 0 0 1 20
     DirColumn -> setRect na idx 0 0 20 1
 
+{-# INLINE measureMarkedWidget #-}
+measureMarkedWidget ::
+  HostProfile ->
+  FontMetrics ->
+  (Text -> IO (Float, Float)) ->
+  Text ->
+  Float ->
+  IO (Float, Float, Float, Float)
+measureMarkedWidget host fm measure body leading = do
+  (mw, mh) <- measure (if T.null body then " " else body)
+  if isCellHost host
+    then pure (mw, mh, 0, 0)
+    else pure (mw, max mh (checkboxBoxSize host fm), leading, 0)
+
 measureWidget :: NodeArena -> HostProfile -> FontMetrics -> (Text -> IO (Float, Float)) -> NodeIdx -> IO ()
 measureWidget na host fm measure idx = do
   nt <- getNodeType na idx
@@ -309,33 +323,18 @@ measureWidget na host fm measure idx = do
               if T.null txt
                 then " "
                 else if isCellHost host then txt else checkboxLabelText txt
-        (mw, mh) <- measure body
-        if isCellHost host
-          then pure (mw, mh, 0, 0)
-          else do
-            let box = checkboxBoxSize host fm
-            pure (mw, max mh box, checkboxLeading host fm, 0)
+        measureMarkedWidget host fm measure body (checkboxLeading host fm)
       NodeRadio -> do
         let body =
               if T.null txt
                 then " "
                 else if isCellHost host then txt else radioLabelText txt
-        (mw, mh) <- measure body
-        if isCellHost host
-          then pure (mw, mh, 0, 0)
-          else do
-            let box = checkboxBoxSize host fm
-            pure (mw, max mh box, checkboxLeading host fm, 0)
+        measureMarkedWidget host fm measure body (checkboxLeading host fm)
       NodeTree -> do
         let (_, _, depth, _, _, raw) = treeParseRow txt
             lbl = if T.null raw then " " else treeLabelText txt
             body = if isCellHost host then treeMeasureLabel depth lbl else lbl
-        (mw, mh) <- measure body
-        if isCellHost host
-          then pure (mw, mh, 0, 0)
-          else do
-            let box = checkboxBoxSize host fm
-            pure (mw, max mh box, treeRowLeading host fm depth, 0)
+        measureMarkedWidget host fm measure body (treeRowLeading host fm depth)
       NodeSelect -> do
         let (lbl, opts) = selectParseOptions txt
             choices = if null opts then [""] else opts
