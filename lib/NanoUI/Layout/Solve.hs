@@ -691,24 +691,21 @@ childRowCrossSize na ci availCross = do
   (hTag, hVal) <- getHeightSizing na ci
   (_, _, _, intrinsic) <- getRect na ci
   (_, minH, _, maxH) <- getMinMax na ci
-  case hTag of
-    SizingGrow ->
-      pure (clamp (resolveSize hTag hVal intrinsic availCross minH maxH) minH maxH)
-    SizingPercent ->
-      pure (clamp (resolveSize hTag hVal intrinsic availCross minH maxH) minH maxH)
-    -- Fit/Fixed/Shrink keep the measured box. Do not use the wrap-line
-    -- or row slot as availH: that stretches every child when leftover
-    -- leaks into scratch `fh`.
-    _ -> pure (max minH intrinsic)
+  if hTag == SizingGrow || hTag == SizingPercent
+    then pure (clamp (resolveSize hTag hVal intrinsic availCross minH maxH) minH maxH)
+    else
+      -- Fit/Fixed/Shrink keep the measured box. Do not use the wrap-line
+      -- or row slot as availH: that stretches every child when leftover
+      -- leaks into scratch `fh`.
+      pure (max minH intrinsic)
 
 -- Column leftover must not change Fit/Fixed/Shrink step height.
 columnChildHeight :: NodeArena -> NodeIdx -> Float -> IO Float
 columnChildHeight na ci scratchH = do
   (hTag, _) <- getHeightSizing na ci
-  case hTag of
-    SizingGrow -> pure scratchH
-    SizingPercent -> pure scratchH
-    _ -> do
+  if hTag == SizingGrow || hTag == SizingPercent
+    then pure scratchH
+    else do
       (_, minH, _, _) <- getMinMax na ci
       (_, _, _, ih) <- getRect na ci
       pure (max minH ih)

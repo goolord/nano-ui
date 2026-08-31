@@ -85,18 +85,19 @@ layoutSettleMinArea = 0.25
 backdropRectForWidget :: Context -> WidgetId -> IO (Maybe Rect)
 backdropRectForWidget ctx wid
   | hashWidgetId wid == 0 = pure Nothing
-  | otherwise =
-      findNodeByWidgetId ctx wid >>= \case
-        Nothing -> pure Nothing
-        Just idx -> backdropRectFromNode ctx idx
+  | otherwise = nodeBackdrop ctx (findNodeByWidgetId ctx wid)
 
 backdropRectForKey :: Context -> Int -> IO (Maybe Rect)
 backdropRectForKey ctx k
   | k == 0 = pure Nothing
-  | otherwise =
-      findNodeByKey ctx k >>= \case
-        Nothing -> pure Nothing
-        Just idx -> backdropRectFromNode ctx idx
+  | otherwise = nodeBackdrop ctx (findNodeByKey ctx k)
+
+nodeBackdrop :: Context -> IO (Maybe Int) -> IO (Maybe Rect)
+nodeBackdrop ctx mIdxAct = do
+  mIdx <- mIdxAct
+  case mIdx of
+    Nothing -> pure Nothing
+    Just idx -> backdropRectFromNode ctx idx
 
 backdropRectsForInteraction :: Context -> [WidgetId] -> [Int] -> IO [Rect]
 backdropRectsForInteraction ctx wids keys = do
@@ -209,18 +210,18 @@ paintTextSnapshot ctx nt idx = do
           pure (lbl <> "\US" <> sliderValueText val)
       | otherwise -> displayText ctx nt idx
     NodeRadio
-      | not terminal -> do
-          lbl <- displayText ctx nt idx
-          val <- getNodeValue (ctxNodeArena ctx) idx
-          pure (lbl <> "\US" <> T.pack (show (round val :: Int)))
+      | not terminal -> paintedMarkSnapshot ctx nt idx
       | otherwise -> displayText ctx nt idx
     NodeCheckbox
-      | not terminal -> do
-          lbl <- displayText ctx nt idx
-          val <- getNodeValue (ctxNodeArena ctx) idx
-          pure (lbl <> "\US" <> T.pack (show (round val :: Int)))
+      | not terminal -> paintedMarkSnapshot ctx nt idx
       | otherwise -> displayText ctx nt idx
     _ -> displayText ctx nt idx
+
+paintedMarkSnapshot :: Context -> NodeType -> Int -> IO Text
+paintedMarkSnapshot ctx nt idx = do
+  lbl <- displayText ctx nt idx
+  val <- getNodeValue (ctxNodeArena ctx) idx
+  pure (lbl <> "\US" <> T.pack (show (round val :: Int)))
 
 floatingPanelsInOrder :: Context -> IO [(Int, Rect)]
 floatingPanelsInOrder ctx = do

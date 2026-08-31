@@ -22,6 +22,7 @@ module NanoUI.Types
   , rectContains
   , rectUnion
   , rectIntersect
+  , rectFullyInside
   , rectOverlapArea
   , rectInflate
   , rectArea
@@ -206,6 +207,16 @@ rectIntersect (Rect x1 y1 w1 h1) (Rect x2 y2 w2 h2) =
       w = xEnd - x
       h = yEnd - y
    in if w > 0 && h > 0 then Just (Rect x y w h) else Nothing
+
+{-# INLINE rectFullyInside #-}
+rectFullyInside :: Rect -> Rect -> Bool
+rectFullyInside (Rect ix iy iw ih) (Rect ox oy ow oh) =
+  iw > 0
+    && ih > 0
+    && ix >= ox
+    && iy >= oy
+    && ix + iw <= ox + ow
+    && iy + ih <= oy + oh
 
 {-# INLINE rectOverlapArea #-}
 rectOverlapArea :: Rect -> Rect -> Float

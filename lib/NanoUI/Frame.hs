@@ -180,17 +180,11 @@ runFrameEff unlift ctx inp ui = do
   resetNodeArena (ctxNodeArena ctx)
   resetDrawArena (ctxDrawArena ctx)
   clearMeasureCache ctx
-  writeIORef (ctxContainerStack ctx) []
-  writeIORef (ctxIdContext ctx) initialIdContext
-  writeIORef (ctxFocusablesCount ctx) 0
-  writeIORef (ctxHotId ctx) (WidgetId 0)
-  writeIORef (ctxWidgetNodeTypes ctx) Nothing
-  writeIORef (ctxFloatingAncestor ctx) Nothing
+  resetUiBuildScopes ctx
   unless (inputMouseDown inp) $
     writeIORef (ctxSelectDropPress ctx) False
   beginFrameModal ctx
   writeIORef (ctxEscapeConsumed ctx) False
-  clearTooltips ctx
   result0 <- unlift (runUi ctx inp ui)
   storeMid <- getStore ctx
   result <-
@@ -203,22 +197,7 @@ runFrameEff unlift ctx inp ui = do
   syncWidgetLabels ctx
   let
     Size w h = inputWindowSize inp
-  solveLayout
-    (ctxNodeArena ctx)
-    (ctxHostProfile ctx)
-    (ctxFontMetrics ctx)
-    (ctxMeasureText ctx)
-    w
-    h
-  placeModals (ctxNodeArena ctx) (ctxHostProfile ctx) (ctxFontMetrics ctx) w h
-  placeWindows
-    (ctxNodeArena ctx)
-    (ctxHostProfile ctx)
-    (ctxFontMetrics ctx)
-    w
-    h
-    (lookupWindowPos ctx)
-    (lookupWindowSize ctx)
+  solvePlaceWindows ctx w h
   movedResize <- updateWindowResize ctx inp w h
   movedWindow <- updateWindowDrag ctx inp
   when (movedResize || movedWindow) $
@@ -251,10 +230,7 @@ runFrameEff unlift ctx inp ui = do
   closeSelectOnOutsideClick ctx inp
   syncWidgetLabels ctx
   -- Store/input finalization can change measured widget text (sliders, marks).
-  solveLayout (ctxNodeArena ctx) (ctxHostProfile ctx) (ctxFontMetrics ctx) (ctxMeasureText ctx) w h
-  placeModals (ctxNodeArena ctx) (ctxHostProfile ctx) (ctxFontMetrics ctx) w h
-  placeWindows (ctxNodeArena ctx) (ctxHostProfile ctx) (ctxFontMetrics ctx) w h (lookupWindowPos ctx) (lookupWindowSize ctx)
-  applyScrollOffsets ctx
+  solvePlaceWindows ctx w h
   refreshHover ctx inp
   tickAnimations ctx (inputDeltaTime inp)
   beginLayer (ctxDrawArena ctx) LayerBackground
@@ -300,6 +276,10 @@ runFrameEff unlift ctx inp ui = do
 resetUiBuild :: Context -> IO ()
 resetUiBuild ctx = do
   resetNodeArena (ctxNodeArena ctx)
+  resetUiBuildScopes ctx
+
+resetUiBuildScopes :: Context -> IO ()
+resetUiBuildScopes ctx = do
   writeIORef (ctxContainerStack ctx) []
   writeIORef (ctxIdContext ctx) initialIdContext
   writeIORef (ctxFocusablesCount ctx) 0
@@ -307,3 +287,23 @@ resetUiBuild ctx = do
   writeIORef (ctxWidgetNodeTypes ctx) Nothing
   writeIORef (ctxFloatingAncestor ctx) Nothing
   clearTooltips ctx
+
+solvePlaceWindows :: Context -> Float -> Float -> IO ()
+solvePlaceWindows ctx w h = do
+  solveLayout
+    (ctxNodeArena ctx)
+    (ctxHostProfile ctx)
+    (ctxFontMetrics ctx)
+    (ctxMeasureText ctx)
+    w
+    h
+  placeModals (ctxNodeArena ctx) (ctxHostProfile ctx) (ctxFontMetrics ctx) w h
+  placeWindows
+    (ctxNodeArena ctx)
+    (ctxHostProfile ctx)
+    (ctxFontMetrics ctx)
+    w
+    h
+    (lookupWindowPos ctx)
+    (lookupWindowSize ctx)
+  applyScrollOffsets ctx

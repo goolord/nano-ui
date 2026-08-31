@@ -440,6 +440,11 @@ lowerNode ctx idx = do
                                else (fm, txt)
           pushText da fm' px py shown (styleFg style)
 
+verticallyCenteredBox :: Float -> Float -> Float -> Float
+verticallyCenteredBox y h box =
+  let slotH = min h (box + 4)
+   in y + max 0 ((slotH - box) / 2)
+
 drawCheckbox ::
   HostProfile ->
   DrawArena ->
@@ -460,8 +465,7 @@ drawCheckbox host da fm style x y h value accent well markCol = do
           else labelContentInset host fm
       box = checkboxBoxSize host fm
       bx = x + ix
-      slotH = min h (box + 4)
-      by = y + max 0 ((slotH - box) / 2)
+      by = verticallyCenteredBox y h box
       r = min 6 (box / 3.5)
       bw = 2
       outer = Rect bx by box box
@@ -506,8 +510,7 @@ drawRadio host da fm style x y h value accent well = do
           else labelContentInset host fm
       box = checkboxBoxSize host fm
       bx = x + ix
-      slotH = min h (box + 4)
-      by = y + max 0 ((slotH - box) / 2)
+      by = verticallyCenteredBox y h box
       r = box / 2
       bw = 2
       outer = Rect bx by box box

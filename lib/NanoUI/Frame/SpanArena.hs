@@ -27,7 +27,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Word (Word32)
 import GHC.Exts (RealWorld)
-import NanoUI.Types (Color (..), Rect (..), colorToWord32, rectIntersect)
+import NanoUI.Types (Color (..), Rect (..), colorToWord32, rectFullyInside, rectIntersect)
 
 data SpanArena = SpanArena
   { saCount :: IORef Int
@@ -173,15 +173,6 @@ spanOccluded panelRects rect clip =
   case rectIntersect rect clip of
     Nothing -> True
     Just visible -> any (rectFullyInside visible) panelRects
-
-rectFullyInside :: Rect -> Rect -> Bool
-rectFullyInside (Rect ix iy iw ih) (Rect ox oy ow oh) =
-  iw > 0
-    && ih > 0
-    && ix >= ox
-    && iy >= oy
-    && ix + iw <= ox + ow
-    && iy + ih <= oy + oh
 
 foldSpanArena :: SpanArena -> (Rect -> Text -> Color -> Color -> Rect -> IO ()) -> IO ()
 foldSpanArena sa f = do
