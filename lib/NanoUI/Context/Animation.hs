@@ -27,9 +27,9 @@ import NanoUI.Context.Internal
   , markDirty
   )
 import NanoUI.Context.PrevRects (getPrevRectByKey)
-import NanoUI.Id (WidgetId (..), hashWidgetId)
+import NanoUI.Id (WidgetId (..))
 import Data.IORef (readIORef, writeIORef)
-import NanoUI.Layout.Arena (arenaCount, getRect, getWidgetId)
+import NanoUI.Layout.Arena (getRect, lookupNodeByKey)
 import NanoUI.Spring (SpringParams, springEps)
 
 refreshAnimating :: Context -> IO ()
@@ -133,17 +133,12 @@ markDirtyIfOrphan ctx key = do
 -- before prev rects are written; those must not force Full.
 nodeHasKey :: Context -> Int -> IO Bool
 nodeHasKey ctx key = do
-  n <- arenaCount (ctxNodeArena ctx)
-  let go i
-        | i >= n = pure False
-        | otherwise = do
-            wid <- getWidgetId (ctxNodeArena ctx) i
-            if intKey wid == key && hashWidgetId wid /= 0
-              then do
-                (_, _, w, h) <- getRect (ctxNodeArena ctx) i
-                if w > 0 && h > 0 then pure True else go (i + 1)
-              else go (i + 1)
-  go 0
+  mIdx <- lookupNodeByKey (ctxNodeArena ctx) key
+  case mIdx of
+    Nothing -> pure False
+    Just idx -> do
+      (_, _, w, h) <- getRect (ctxNodeArena ctx) idx
+      pure (w > 0 && h > 0)
 
 settleKey :: Context -> Int -> Float -> IO ()
 settleKey ctx key val = do

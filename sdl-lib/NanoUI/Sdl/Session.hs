@@ -70,6 +70,7 @@ runSdlSession options ctx setup shouldQuit drawFn =
     startupCatchup <- newIORef False
     startupGrace <- newIORef (2 :: Int)
     startupFull <- newIORef (2 :: Int)
+    firstPointerFull <- newIORef True
     let onResize = do
           void $
             tryWithDrawingLock drawing $ do
@@ -101,15 +102,22 @@ runSdlSession options ctx setup shouldQuit drawFn =
     (ctx1, inp0) <- drainUntilQuiet ctx0 inpSeed
     writeIORef ctxRef ctx1
     scale0 <- readIORef (sdlScaleRef env)
-    let paintedSize = inputWindowSize inp0
     (_, synced0) <- drawFn ctx1 env inp0 True
-    clearDirty ctx1
-    (ctx2, inp1) <- drainUntilQuiet ctx1 synced0
+    -- First present can apply DPI. Prev rects are empty on that frame.
+    -- Draw once more before idle or the Controls page stays stretched
+    -- until the first mouse move.
+    (ctx1b, inp0b) <- drainUntilQuiet ctx1 synced0
+    writeIORef ctxRef ctx1b
+    scaleSettle <- readIORef (sdlScaleRef env)
+    let paintedSize = inputWindowSize inp0b
+    (_, synced0b) <- drawFn ctx1b env inp0b True
+    clearDirty ctx1b
+    (ctx2, inp1) <- drainUntilQuiet ctx1b synced0b
     writeIORef ctxRef ctx2
     scale1 <- readIORef (sdlScaleRef env)
     catchup <- readIORef startupCatchup
     synced1 <-
-      if catchup || inputWindowSize inp1 /= paintedSize || abs (scale1 - scale0) > 0.001
+      if catchup || inputWindowSize inp1 /= paintedSize || abs (scale1 - scaleSettle) > 0.001 || abs (scaleSettle - scale0) > 0.001
         then do
           (_, s) <- drawFn ctx2 env inp1 True
           clearDirty ctx2
@@ -121,7 +129,7 @@ runSdlSession options ctx setup shouldQuit drawFn =
     writeIORef prev synced1
     now <- getMonotonicTime
     bracket (installResizeWatch onResize) id $ \_ ->
-      loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace startupFull shouldQuit synced1 emptySmallArray now
+      loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace startupFull firstPointerFull shouldQuit synced1 emptySmallArray now
 
 loop ::
   IORef Context ->
@@ -133,12 +141,13 @@ loop ::
   IORef Bool ->
   IORef Int ->
   IORef Int ->
+  IORef Bool ->
   (Input -> Bool) ->
   Input ->
   SmallArray SdlEvent ->
   Double ->
   IO ()
-loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace startupFull shouldQuit inp queued lastT = do
+loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace startupFull firstPointerFull shouldQuit inp queued lastT = do
   ctx <- readIORef ctxRef
   debugOpen <- debugPanelOpen ctx
   wantDebug <- takeDebugLive (sdlDebug env) debugOpen
@@ -190,10 +199,14 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace star
           editing <- textFieldActive ctx'
           grace <- readIORef startupGrace
           nFull <- readIORef startupFull
+          wantFirstFull <- readIORef firstPointerFull
           let sizeChanged = inputWindowSize prevInp /= inputWindowSize inpSynced
               interacted = inputInteracted prevInp inpSynced
+              displayScale = any (== EvDisplayScale) group
+              userEvent = any isUserPresentEvent group
+              firstUserFull = wantFirstFull && userEvent
               graceAllow =
-                grace <= 0 || sizeChanged || interacted || anim || editing || dirtyNow || pendingDirty || need || nFull > 0
+                grace <= 0 || sizeChanged || interacted || anim || editing || dirtyNow || pendingDirty || need || nFull > 0 || displayScale
               forceFinal = wasAnim && not anim
               shouldDraw =
                 graceAllow
@@ -206,6 +219,8 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace star
                          || wantDebug
                          || editing
                          || nFull > 0
+                         || displayScale
+                         || firstUserFull
                      )
           when (grace > 0) $ writeIORef startupGrace (grace - 1)
           synced <-
@@ -213,7 +228,13 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace star
               then do
                 ms <-
                   tryWithDrawingLock drawing $ do
-                    (dirtyOut, s) <- drawFn ctx' env inpSynced (debugOpen || wantDebug || nFull > 0)
+                    when firstUserFull $ writeIORef firstPointerFull False
+                    (dirtyOut, s) <-
+                      drawFn
+                        ctx'
+                        env
+                        inpSynced
+                        (debugOpen || wantDebug || nFull > 0 || displayScale || firstUserFull)
                     when (nFull > 0) $ writeIORef startupFull (nFull - 1)
                     writeIORef pendingRedraw dirtyOut
                     writeIORef prev s
@@ -239,10 +260,26 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace star
                 drawing
                 startupGrace
                 startupFull
+                firstPointerFull
                 shouldQuit
                 synced
                 rest
                 now
+
+isUserPresentEvent :: SdlEvent -> Bool
+isUserPresentEvent ev =
+  case ev of
+    EvMouseMotion {} -> True
+    EvMousePress {} -> True
+    EvMouseRelease {} -> True
+    EvMouseRightPress {} -> True
+    EvMouseRightRelease {} -> True
+    EvDisplayScale -> True
+    EvResize {} -> True
+    EvKey {} -> True
+    EvText {} -> True
+    EvScroll {} -> True
+    _ -> False
 
 tryWithDrawingLock :: IORef Bool -> IO a -> IO (Maybe a)
 tryWithDrawingLock ref act = do

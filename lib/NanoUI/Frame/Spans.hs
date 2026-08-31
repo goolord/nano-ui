@@ -15,7 +15,6 @@ module NanoUI.Frame.Spans
   , collectFloatingSpans
   , collectTooltipSpans
   , terminalSeparatorSpans
-  , filterOccludedBaseSpans
   , walkChildSpans
   , terminalScrollCapSpans
   ) where
@@ -315,27 +314,6 @@ walkChildSpans ctx floatCache idx clip arena = do
           -- Later siblings paint under earlier ones; walk reverse then collect.
           go ns
           collectClippedSpans ctx floatCache ci clip arena
-
-filterOccludedBaseSpans :: IM.IntMap Rect -> [(Rect, T.Text, Color, Color, Rect)] -> [(Rect, T.Text, Color, Color, Rect)]
-filterOccludedBaseSpans panels spans
-  | IM.null panels = spans
-  | otherwise = filter (not . occluded) spans
-  where
-    panelRects = IM.elems panels
-    occluded (rect, _, _, _, clip) =
-      case rectIntersect rect clip of
-        Nothing -> True
-        Just visible -> any (rectFullyInside visible) panelRects
-
--- Visible text is gone only when a floating panel covers every pixel.
-rectFullyInside :: Rect -> Rect -> Bool
-rectFullyInside (Rect ix iy iw ih) (Rect ox oy ow oh) =
-  iw > 0
-    && ih > 0
-    && ix >= ox
-    && iy >= oy
-    && ix + iw <= ox + ow
-    && iy + ih <= oy + oh
 
 -- TTF measure is often a fraction narrower than the rendered texture.
 collectNodeTextSpans :: Context -> IM.IntMap (Maybe NodeType) -> NodeIdx -> IO [(Rect, T.Text, Color, Color)]

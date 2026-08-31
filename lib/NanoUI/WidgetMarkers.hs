@@ -21,13 +21,11 @@ tabButtonMarker = T.singleton '\x02'
 
 {-# INLINE stripButtonBrackets #-}
 stripButtonBrackets :: T.Text -> T.Text
-stripButtonBrackets txt
-  | not (T.isPrefixOf "[ " txt) = txt
-  | otherwise =
-      let t = T.strip txt
-       in if T.isSuffixOf " ]" t
-            then T.strip $ T.dropEnd 2 $ T.drop 2 t
-            else txt
+stripButtonBrackets txt =
+  let t = T.strip txt
+   in if T.isPrefixOf "[ " t && T.isSuffixOf " ]" t
+        then T.strip $ T.dropEnd 2 $ T.drop 2 t
+        else txt
 
 {-# INLINE buttonFlags #-}
 buttonFlags :: T.Text -> (Bool, Bool)
@@ -47,11 +45,9 @@ isTabButtonText txt = snd (buttonFlags txt)
 
 {-# INLINE buttonDisplayTextFromFlags #-}
 buttonDisplayTextFromFlags :: (Bool, Bool) -> T.Text -> T.Text
-buttonDisplayTextFromFlags (isClose, isTab) txt =
-  let lbl = stripButtonBrackets txt
-   in if isClose || isTab
-        then T.drop 1 lbl
-        else lbl
+buttonDisplayTextFromFlags (isClose, isTab) txt
+  | isClose || isTab = T.drop 1 (stripButtonBrackets txt)
+  | otherwise = txt
 
 {-# INLINE closeButtonDisplayText #-}
 closeButtonDisplayText :: T.Text -> T.Text

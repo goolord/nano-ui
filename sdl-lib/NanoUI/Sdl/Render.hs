@@ -11,7 +11,7 @@ module NanoUI.Sdl.Render
   , snapDamage
   ) where
 
-import NanoUI.Sdl.Batch (RenderBatch, batchDrawRange, batchFillSolid, flushRenderBatch)
+import NanoUI.Sdl.Batch (RenderBatch, batchDrawRange, flushRenderBatch)
 import NanoUI.Sdl.Image (ImageAtlas, lookupAtlasTex)
 
 import Control.Monad (void, when)
@@ -128,9 +128,9 @@ renderDrawDataPass batch ren uiScale mClear drawData layers images glyphTex dama
         let (cr, cg, cb, ca) = unpackColor clearColor
         void $ setRenderDrawColorSafe ren cr cg cb ca
         void $ renderClearSafe ren
-      (Just clearColor, DamageClip r) -> do
-        let (cr, cg, cb, ca) = unpackColor clearColor
-        batchFillSolid batch cr cg cb ca (rectX r) (rectY r) (rectW r) (rectH r)
+      (Just _clearColor, DamageClip r) ->
+        -- Retain texture already holds backdrop pixels. Clearing with window
+        -- color here leaves halos on partial clips (hover slop, text slop).
         applyClipState batch clipRef ren (toClipKey r)
       (Nothing, DamageClip r) -> applyClipState batch clipRef ren (toClipKey r)
       (Nothing, DamageFull) -> pure ()

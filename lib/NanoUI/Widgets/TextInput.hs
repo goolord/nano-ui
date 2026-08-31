@@ -128,21 +128,13 @@ processTextInput ctx inp s0 = do
       chars = inputChars inp
   s1 <-
     if ctrl
-      then foldTextM (handleCtrlChar ctx) s0 chars
+      then T.foldlM' (handleCtrlChar ctx) s0 chars
       else pure s0
   let filtered = T.filter (not . isCtrlCombo ctrl) chars
       s2 = T.foldl insertChar s1 filtered
   pure (foldInputKeys (applyKey shift) s2 keys)
   where
     isCtrlCombo c ch = c && T.elem ch "aAcCxXvV\x01"
-
-foldTextM :: Monad m => (a -> Char -> m a) -> a -> Text -> m a
-foldTextM f z t =
-  case T.uncons t of
-    Nothing -> pure z
-    Just (c, rest) -> do
-      z' <- f z c
-      foldTextM f z' rest
 
 handleCtrlChar :: Context -> TextInputState -> Char -> IO TextInputState
 handleCtrlChar ctx s ch

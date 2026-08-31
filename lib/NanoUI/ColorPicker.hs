@@ -113,7 +113,7 @@ colorPickerExtraH hexH =
   colorPickerGap + colorPickerSvH + colorPickerGap + colorPickerHueH + colorPickerHexGap + hexH
 
 colorPickerGeom :: HostProfile -> FontMetrics -> Float -> Float -> Float -> Float -> ColorPickerGeom
-colorPickerGeom host fm x y w h =
+colorPickerGeom host fm x y w _h =
   let (ix, iy) =
         if isCellHost host
           then widgetContentInset host fm
@@ -123,10 +123,10 @@ colorPickerGeom host fm x y w h =
       labelH = layoutLineHeight host fm
       hexH = layoutLineHeight host fm
       hueH = colorPickerHueH
-      hexY = y + h - iy - hexH
-      hueY = hexY - colorPickerHexGap - hueH
       svY = y + iy + labelH + colorPickerGap
-      svH = max 0 (hueY - colorPickerGap - svY)
+      svH = colorPickerSvH
+      hueY = svY + svH + colorPickerGap
+      hexY = hueY + hueH + colorPickerHexGap
    in ColorPickerGeom
         { cpgLabelH = labelH
         , cpgSv = Rect innerX svY innerW svH

@@ -120,6 +120,7 @@ import NanoUI.Layout.Arena
   , arenaCount
   , getAlignX
   , getDirection
+  , forChildNodes_
   , getFirstChild
   , getHeightSizing
   , getMinMax
@@ -146,7 +147,6 @@ import NanoUI.Layout.Arena
 import NanoUI.Layout.Solve (placeModals, placeWindows, positionWindowNode, scrollBarSlotOf, solveLayout)
 import Effectful (Eff, IOE, runEff, type (:>))
 import NanoUI.Monad (NanoUI, Ui, runUi)
-import NanoUI.Widgets (applyTextInputMenuAction)
 import NanoUI.WidgetText
   ( checkboxLabelText
   , sliderLabelText
@@ -166,7 +166,7 @@ import NanoUI.WidgetText
 import NanoUI.Style (Padding (..), Style (..), Theme (..), scrollBarThumbColor, scrollBarTrackColor, themeAccent, themeButton, themeFloatingWindow, themeInput, themeMuted, themeOverlayDim, themePanel, themeSeparator, themeWindow)
 import NanoUI.Types (Color (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, lerpColor, rectContains, rectH, rectIntersect, rectOverlapArea, rectUnion, rectW, rectX, rectY, v2X, v2Y)
 import NanoUI.Frame.Clip (scrollChromeLane, scrollContentClip)
-import NanoUI.Frame.Hit (findNodeByWidgetId, topmostWindowAtMouse)
+import NanoUI.Frame.Hit (ancestorScrollShift, findNodeByWidgetId, topmostWindowAtMouse)
 
 scrollLineFor :: HostProfile -> Float
 scrollLineFor host = if isCellHost host then 1 else scrollLine
@@ -194,19 +194,12 @@ applyScrollOffsets ctx = do
               DirRow -> shiftDescendants ctx idx (-off) 0
 
 shiftDescendants :: Context -> NodeIdx -> Float -> Float -> IO ()
-shiftDescendants ctx idx dx dy = do
-  fc <- getFirstChild (ctxNodeArena ctx) idx
-  go fc
-  where
-    go ci
-      | ci < 0 = pure ()
-      | otherwise = do
-          (x, y, w, h) <- getRect (ctxNodeArena ctx) ci
-          setRect (ctxNodeArena ctx) ci (x + dx) (y + dy) w h
-          nt <- getNodeType (ctxNodeArena ctx) ci
-          when (isContainerNode nt) (shiftDescendants ctx ci dx dy)
-          ns <- getNextSibling (ctxNodeArena ctx) ci
-          go ns
+shiftDescendants ctx idx dx dy =
+  forChildNodes_ (ctxNodeArena ctx) idx $ \ci -> do
+    (x, y, w, h) <- getRect (ctxNodeArena ctx) ci
+    setRect (ctxNodeArena ctx) ci (x + dx) (y + dy) w h
+    nt <- getNodeType (ctxNodeArena ctx) ci
+    when (isContainerNode nt) (shiftDescendants ctx ci dx dy)
 
 updateScrollWheel :: Context -> Input -> IO ()
 updateScrollWheel ctx inp = do
@@ -345,33 +338,6 @@ getScrollVisualRect ctx idx = do
   (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
   (dx, dy) <- ancestorScrollShift ctx idx
   pure (x + dx, y + dy, w, h)
-
-ancestorScrollShift :: Context -> NodeIdx -> IO (Float, Float)
-ancestorScrollShift ctx idx = go idx (0, 0)
-  where
-    go i (sx, sy)
-      | i <= 0 = pure (sx, sy)
-      | otherwise = do
-          p <- getParent (ctxNodeArena ctx) i
-          if p < 0
-            then pure (sx, sy)
-            else do
-              (sx', sy') <- parentScrollShift ctx p (sx, sy)
-              go p (sx', sy')
-
-parentScrollShift :: Context -> NodeIdx -> (Float, Float) -> IO (Float, Float)
-parentScrollShift ctx p (sx, sy) = do
-  nt <- getNodeType (ctxNodeArena ctx) p
-  if isScrollNode nt
-    then do
-      wid <- getWidgetId (ctxNodeArena ctx) p
-      off <- getScrollOffset ctx wid
-      dir <- getDirection (ctxNodeArena ctx) p
-      pure $
-        case dir of
-          DirColumn -> (sx, sy - off)
-          DirRow -> (sx - off, sy)
-    else pure (sx, sy)
 
 data ScrollBarLayout = ScrollBarLayout
   { sbTrack :: Rect

@@ -15,7 +15,7 @@ module NanoUI.Frame.SpanArena
 import Control.Monad (when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import qualified Data.IntMap.Strict as IM
-import Data.Primitive.Array (MutableArray, newArray, readArray, writeArray)
+import Data.Primitive.Array (MutableArray, copyMutableArray, newArray, readArray, writeArray)
 import Data.Primitive.PrimArray
   ( MutablePrimArray
   , copyMutablePrimArray
@@ -27,7 +27,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Word (Word32)
 import GHC.Exts (RealWorld)
-import NanoUI.Types (Color (..), Rect (..), colorToWord32, rectIntersect)
+import NanoUI.Types (Color (..), Rect (..), colorToWord32, rectFullyInside, rectIntersect)
 
 data SpanArena = SpanArena
   { saCount :: IORef Int
@@ -105,10 +105,7 @@ growT :: IORef (MutableArray RealWorld Text) -> Int -> Int -> IO ()
 growT ref oldCap newCap = do
   arr <- readIORef ref
   newArr <- newArray newCap T.empty
-  let go !i
-        | i >= oldCap = pure ()
-        | otherwise = readArray arr i >>= writeArray newArr i >> go (i + 1)
-  go 0
+  copyMutableArray newArr 0 arr 0 oldCap
   writeIORef ref newArr
 
 {-# INLINE pushSpan #-}
@@ -173,15 +170,6 @@ spanOccluded panelRects rect clip =
   case rectIntersect rect clip of
     Nothing -> True
     Just visible -> any (rectFullyInside visible) panelRects
-
-rectFullyInside :: Rect -> Rect -> Bool
-rectFullyInside (Rect ix iy iw ih) (Rect ox oy ow oh) =
-  iw > 0
-    && ih > 0
-    && ix >= ox
-    && iy >= oy
-    && ix + iw <= ox + ow
-    && iy + ih <= oy + oh
 
 foldSpanArena :: SpanArena -> (Rect -> Text -> Color -> Color -> Rect -> IO ()) -> IO ()
 foldSpanArena sa f = do

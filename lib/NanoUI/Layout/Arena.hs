@@ -36,16 +36,24 @@ module NanoUI.Layout.Arena
   , getText
   , getWidgetId
   , setWidgetId
+  , lookupNodeByKey
   , getStyleIdx
   , setStyleIdx
   , getNodeValue
   , setNodeValue
   , ensureScratchCapacity
+  , forNodes_
+  , forChildNodes_
+  , findNodeRevM
+  , foldChildNodesM
+  , foldNodeRevM
   ) where
 
 import Control.Monad (forM_, when)
 import Data.HashTable.IO (BasicHashTable)
 import qualified Data.HashTable.IO as HT
+import Data.IntMap.Strict (IntMap)
+import qualified Data.IntMap.Strict as IM
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Primitive.Array (MutableArray, newArray, readArray, writeArray)
 import Data.Primitive.PrimArray (MutablePrimArray, newPrimArray, readPrimArray, writePrimArray)
@@ -173,6 +181,7 @@ data NodeArena = NodeArena
   , naScratchOutMain :: IORef (MutablePrimArray RealWorld Float)
   , naScratchOutCross :: IORef (MutablePrimArray RealWorld Float)
   , naWidgetIndex :: IORef (BasicHashTable WidgetId NodeIdx)
+  , naKeyIndex :: IORef (IntMap NodeIdx)
   }
 
 initialCapacity :: Int
@@ -226,6 +235,7 @@ newNodeArena = do
   naScratchOutMain <- newIORef =<< newPrimArray scratchCap
   naScratchOutCross <- newIORef =<< newPrimArray scratchCap
   naWidgetIndex <- newIORef =<< HT.new
+  naKeyIndex <- newIORef IM.empty
   pure
     NodeArena
       { naCount
@@ -271,6 +281,7 @@ newNodeArena = do
       , naScratchOutMain
       , naScratchOutCross
       , naWidgetIndex
+      , naKeyIndex
       }
 
 {-# INLINE resetNodeArena #-}
@@ -278,6 +289,7 @@ resetNodeArena :: NodeArena -> IO ()
 resetNodeArena na = do
   writeIORef (naCount na) 0
   writeIORef (naWidgetIndex na) =<< HT.new
+  writeIORef (naKeyIndex na) IM.empty
 
 {-# INLINE arenaCount #-}
 arenaCount :: NodeArena -> IO Int
@@ -675,6 +687,15 @@ setWidgetId na idx wid = do
   when (hashWidgetId wid /= 0) $ do
     table <- readIORef (naWidgetIndex na)
     HT.insert table wid idx
+    let key = fromIntegral (hashWidgetId wid)
+    keys <- readIORef (naKeyIndex na)
+    writeIORef (naKeyIndex na) (IM.insert key idx keys)
+
+{-# INLINE lookupNodeByKey #-}
+lookupNodeByKey :: NodeArena -> Int -> IO (Maybe NodeIdx)
+lookupNodeByKey na key
+  | key == 0 = pure Nothing
+  | otherwise = IM.lookup key <$> readIORef (naKeyIndex na)
 
 {-# INLINE getNodeValue #-}
 getNodeValue :: NodeArena -> NodeIdx -> IO Float
@@ -706,3 +727,58 @@ ensureScratchCapacity na needed = do
       growFloat (naScratchOutMain na) cap newCap 0
       growFloat (naScratchOutCross na) cap newCap 0
       writeIORef (naScratchCap na) newCap
+
+{-# INLINE forNodes_ #-}
+forNodes_ :: NodeArena -> (NodeIdx -> IO ()) -> IO ()
+forNodes_ na f = do
+  n <- arenaCount na
+  let go !i
+        | i >= n = pure ()
+        | otherwise = f i >> go (i + 1)
+  go 0
+
+{-# INLINE forChildNodes_ #-}
+forChildNodes_ :: NodeArena -> NodeIdx -> (NodeIdx -> IO ()) -> IO ()
+forChildNodes_ na parentIdx f = do
+  fc <- getFirstChild na parentIdx
+  let go !ci
+        | ci < 0 = pure ()
+        | otherwise = do
+            f ci
+            ns <- getNextSibling na ci
+            go ns
+  go fc
+
+{-# INLINE findNodeRevM #-}
+findNodeRevM :: NodeArena -> (NodeIdx -> IO Bool) -> IO (Maybe NodeIdx)
+findNodeRevM na p = do
+  n <- arenaCount na
+  let go !i
+        | i < 0 = pure Nothing
+        | otherwise = do
+            ok <- p i
+            if ok then pure (Just i) else go (i - 1)
+  go (n - 1)
+
+{-# INLINE foldChildNodesM #-}
+foldChildNodesM :: NodeArena -> NodeIdx -> (a -> NodeIdx -> IO a) -> a -> IO a
+foldChildNodesM na parentIdx f z = do
+  fc <- getFirstChild na parentIdx
+  let go !ci !acc
+        | ci < 0 = pure acc
+        | otherwise = do
+            acc' <- f acc ci
+            ns <- getNextSibling na ci
+            go ns acc'
+  go fc z
+
+{-# INLINE foldNodeRevM #-}
+foldNodeRevM :: NodeArena -> (a -> NodeIdx -> IO a) -> a -> IO a
+foldNodeRevM na f z = do
+  n <- arenaCount na
+  let go !i !acc
+        | i < 0 = pure acc
+        | otherwise = do
+            acc' <- f acc i
+            go (i - 1) acc'
+  go (n - 1) z

@@ -82,7 +82,6 @@ import Data.Text qualified as T
 import Effectful (Eff, type (:>))
 import NanoUI.Context
   ( Context (..)
-  , getPrevRect
   , getStore
   , intKey
   , isDisabled
@@ -97,6 +96,7 @@ import NanoUI.Font
   , mutedFontMarker
   , sliderTrackBounds
   )
+import NanoUI.Frame.Hit (scrollHitRect)
 import NanoUI.Host (isCellHost)
 import NanoUI.Icons (checkboxMark)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
@@ -275,16 +275,12 @@ image layout (ImageId tid) = do
 button :: Ui :> es => Text -> Eff es Response
 button = buttonEx True
 
-buttonEx :: Ui :> es => Bool -> Text -> Eff es Response
+buttonEx :: (Ui :> es) => Bool -> Text -> Eff es Response
 buttonEx enabled txt = do
   wid <- nextId
   ctx <- askContext
   uiIO $ registerFocusable ctx wid
-  let stored =
-        if isCellHost (ctxHostProfile ctx)
-          then "[ " <> txt <> " ]"
-          else txt
-  resp <- addWidget wid NodeButton stored 0 defaultLayout
+  resp <- addWidget wid NodeButton ("[ " <> txt <> " ]") 0 defaultLayout
   disabled <- uiIO (isDisabled ctx wid)
   let
     active = enabled && not disabled
@@ -346,7 +342,7 @@ sliderEx layout lbl minV maxV initial = do
     if blocked
       then pure False
       else do
-        mrect <- getPrevRect ctx wid
+        mrect <- scrollHitRect ctx wid
         pure $
           case mrect of
             Nothing -> False
@@ -368,7 +364,7 @@ sliderEx layout lbl minV maxV initial = do
     $ writeIORef (ctxActiveId ctx) (WidgetId 0)
   val <-
     uiIO $ do
-      mrect <- getPrevRect ctx wid
+      mrect <- scrollHitRect ctx wid
       let
         dragFrac =
           case mrect of

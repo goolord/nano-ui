@@ -38,7 +38,6 @@ import NanoUI.Context
   , isDisabled
   , markDirty
   , getHotId
-  , getPrevRect
   , setScrollOffset
   , setStore
   , startAnimation
@@ -163,7 +162,7 @@ import NanoUI.Style (Padding (..), Style (..), Theme (..), scrollBarThumbColor, 
 import NanoUI.Types (Color (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, lerpColor, rectContains, rectH, rectIntersect, rectOverlapArea, rectUnion, rectW, rectX, rectY, v2X, v2Y)
 import NanoUI.Frame.CursorKind (UiCursorKind (..), grabDragKind, grabHoverKind)
 import NanoUI.Frame.Chrome (displayText, widgetNodeTypeTable)
-import NanoUI.Frame.Hit (findNodeByWidgetId)
+import NanoUI.Frame.Hit (findNodeByWidgetId, scrollHitRect)
 import NanoUI.Frame.Scroll (scrollBarLayout, ScrollBarLayout (..))
 import NanoUI.Frame.Select (selectDropRect)
 import NanoUI.Frame.TextInput (TextInputGeom (..), textInputGeom, textInputMenuCursorKind)
@@ -284,7 +283,7 @@ cursorKindAt table ctx wid mouse inp
 
 selectCursorKind :: Context -> WidgetId -> V2 -> IO UiCursorKind
 selectCursorKind ctx wid mouse = do
-  mrect <- getPrevRect ctx wid
+  mrect <- scrollHitRect ctx wid
   pure $
     case mrect of
       Nothing -> UiCursorDefault
@@ -295,7 +294,7 @@ selectCursorKind ctx wid mouse = do
 
 sliderCursorKind :: Context -> WidgetId -> V2 -> Input -> IO UiCursorKind
 sliderCursorKind ctx wid mouse inp = do
-  mrect <- getPrevRect ctx wid
+  mrect <- scrollHitRect ctx wid
   active <- readIORef (ctxActiveId ctx)
   let fm = ctxFontMetrics ctx
       dragging = active == wid && inputMouseDown inp
@@ -313,7 +312,7 @@ sliderCursorKind ctx wid mouse inp = do
 
 textInputCursorKind :: Context -> WidgetId -> V2 -> IO UiCursorKind
 textInputCursorKind ctx wid mouse = do
-  mrect <- getPrevRect ctx wid
+  mrect <- scrollHitRect ctx wid
   case mrect of
     Nothing -> pure UiCursorDefault
     Just (Rect x y w h) -> do

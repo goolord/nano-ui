@@ -37,7 +37,9 @@ module NanoUI.WidgetText
   ) where
 
 import Data.Char (chr)
+import Data.List (find)
 import Data.Text (Text)
+import Data.Text.Read (double, signed, decimal)
 import Data.Word (Word8)
 import NanoUI.Font (FontMetrics (..), fmLineHeight)
 import NanoUI.Icons (Icons, checkboxPrefixes, radioPrefixes, treeExpandMark, treeExpandPrefixes)
@@ -46,6 +48,18 @@ import qualified Data.Text as T
 
 sliderRangeSep :: Text
 sliderRangeSep = T.singleton '\US'
+
+parseInt :: Text -> Int -> Int
+parseInt t fallback =
+  case signed decimal t of
+    Right (v, "") -> v
+    _ -> fallback
+
+parseFloat :: Text -> Float -> Float
+parseFloat t fallback =
+  case double t of
+    Right (v, "") -> realToFrac v
+    _ -> fallback
 
 sliderDisplayText :: Text -> Float -> Text
 sliderDisplayText lbl value = lbl <> ": " <> T.pack (show (round value :: Int))
@@ -87,25 +101,17 @@ sliderParseRange txt =
             | not (T.null suffix) ->
                 case T.breakOn "," (T.drop 1 suffix) of
                   (a, b) ->
-                    ( readFloat a 0
-                    , readFloat (T.drop 1 b) 100
+                    ( parseFloat a 0
+                    , parseFloat (T.drop 1 b) 100
                     )
           _ -> (0, 100)
    in (sliderLabelText bare, minV, maxV)
-  where
-    readFloat t fallback =
-      case reads (T.unpack t) of
-        [(v, "")] -> v
-        _ -> fallback
 
 checkboxLabelText :: Text -> Text
-checkboxLabelText txt = go checkboxPrefixes
-  where
-    go [] = txt
-    go (p : ps) =
-      if T.isPrefixOf p txt
-        then T.drop (T.length p) txt
-        else go ps
+checkboxLabelText txt =
+  case find (`T.isPrefixOf` txt) checkboxPrefixes of
+    Nothing -> txt
+    Just p -> T.drop (T.length p) txt
 
 radioPackOption :: Int -> Int -> Text -> Text
 radioPackOption groupKey optionIdx label =
@@ -119,29 +125,21 @@ radioParseOption :: Text -> (Int, Int, Text)
 radioParseOption txt =
   case T.splitOn sliderRangeSep txt of
     [g, i, lbl] ->
-      ( readInt g 0
-      , readInt i 0
+      ( parseInt g 0
+      , parseInt i 0
       , lbl
       )
     _ -> (0, 0, txt)
-  where
-    readInt t fallback =
-      case reads (T.unpack t) of
-        [(v, "")] -> v
-        _ -> fallback
 
 radioLabelText :: Text -> Text
 radioLabelText txt =
   let (_, _, raw) = radioParseOption txt
    in stripRadioPrefixes raw
   where
-    stripRadioPrefixes t = go radioPrefixes
-      where
-        go [] = t
-        go (p : ps) =
-          if T.isPrefixOf p t
-            then T.drop (T.length p) t
-            else go ps
+    stripRadioPrefixes t =
+      case find (`T.isPrefixOf` t) radioPrefixes of
+        Nothing -> t
+        Just p -> T.drop (T.length p) t
 
 -- | Pack tree row metadata ahead of the visible label.
 -- Fields: groupKey, nodeIdx, depth, hasChildren, expanded, then label
@@ -162,32 +160,24 @@ treeParseRow :: Text -> (Int, Int, Int, Bool, Bool, Text)
 treeParseRow txt =
   case T.splitOn sliderRangeSep txt of
     (g : i : d : hc : ex : rest) ->
-      ( readInt g 0
-      , readInt i 0
-      , readInt d 0
+      ( parseInt g 0
+      , parseInt i 0
+      , parseInt d 0
       , hc == "1"
       , ex == "1"
       , T.intercalate sliderRangeSep rest
       )
     _ -> (0, 0, 0, False, False, txt)
-  where
-    readInt t fallback =
-      case reads (T.unpack t) of
-        [(v, "")] -> v
-        _ -> fallback
 
 treeLabelText :: Text -> Text
 treeLabelText txt =
   let (_, _, _, _, _, raw) = treeParseRow txt
    in stripTreePrefixes raw
   where
-    stripTreePrefixes t = go treeExpandPrefixes
-      where
-        go [] = t
-        go (p : ps) =
-          if T.isPrefixOf p t
-            then T.drop (T.length p) t
-            else go ps
+    stripTreePrefixes t =
+      case find (`T.isPrefixOf` t) treeExpandPrefixes of
+        Nothing -> t
+        Just p -> T.drop (T.length p) t
 
 -- | Visible terminal row: indent, expand mark, label.
 treeDisplayText :: Icons -> Int -> Bool -> Bool -> Text -> Text

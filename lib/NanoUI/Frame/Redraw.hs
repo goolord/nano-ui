@@ -122,6 +122,7 @@ import NanoUI.Layout.Arena
   , NodeType (..)
   , SizingTag (..)
   , arenaCount
+  , foldNodeRevM
   , getAlignX
   , getDirection
   , getFirstChild
@@ -334,26 +335,19 @@ probeHotId ctx mouse = do
   mOverlay <- overlayMenuOwnerAt ctx mouse
   case mOverlay of
     Just wid -> pure wid
-    Nothing -> do
-      count <- arenaCount (ctxNodeArena ctx)
-      if count <= 0
-        then pure (WidgetId 0)
-        else go (WidgetId 0) (count - 1)
+    Nothing ->
+      foldNodeRevM (ctxNodeArena ctx) updateHot (WidgetId 0)
   where
-    go acc idx
-      | idx < 0 = pure acc
-      | otherwise = do
-          nt <- getNodeType (ctxNodeArena ctx) idx
-          acc' <-
-            if not (isWidgetNode nt)
-              then pure acc
-              else do
-                wid <- getWidgetId (ctxNodeArena ctx) idx
-                (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-                if w > 0 && h > 0 && rectContains (Rect x y w h) mouse
-                  then do
-                    allow <- overlayHitAllowed ctx idx mouse
-                    pure (if allow then wid else acc)
-                  else pure acc
-          go acc' (idx - 1)
+    updateHot acc idx = do
+      nt <- getNodeType (ctxNodeArena ctx) idx
+      if not (isWidgetNode nt)
+        then pure acc
+        else do
+          wid <- getWidgetId (ctxNodeArena ctx) idx
+          (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+          if w > 0 && h > 0 && rectContains (Rect x y w h) mouse
+            then do
+              allow <- overlayHitAllowed ctx idx mouse
+              pure (if allow then wid else acc)
+            else pure acc
 

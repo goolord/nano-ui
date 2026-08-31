@@ -17,6 +17,7 @@ module NanoUI.Frame.Input
 
 
 import Control.Monad (filterM, foldM, forM, forM_, unless, void, when)
+
 import Data.Char (isAlphaNum, isSpace)
 import Data.IORef (readIORef, writeIORef)
 import Data.Typeable (Typeable)
@@ -121,6 +122,7 @@ import NanoUI.Layout.Arena
   , NodeType (..)
   , SizingTag (..)
   , arenaCount
+  , findNodeRevM
   , getAlignX
   , getDirection
   , getFirstChild
@@ -177,6 +179,9 @@ import NanoUI.Frame.Select (findSelectUnderMouse, selectDropRect)
 import NanoUI.Frame.Spans (widgetHitRect)
 import NanoUI.Frame.TextInput (collapseTextInputSelection, textInputGeomForWidget, applyTextInputClick, applyTextInputDrag, textInputCharAtX)
 
+whenM :: Monad m => m Bool -> m () -> m ()
+whenM mb ma = mb >>= \b -> when b ma
+
 finalizeTabFocus :: Context -> Input -> IO ()
 finalizeTabFocus ctx inp =
   when (inputKeysElem KeyTab (inputKeys inp)) $ do
@@ -219,33 +224,30 @@ finalizePointerPress :: Context -> Input -> IO ()
 finalizePointerPress ctx inp =
   when (inputMousePressed inp) $ do
     let mouse = inputMousePos inp
-    count <- arenaCount (ctxNodeArena ctx)
-    mWid <- findTopWidgetUnderMouse ctx count mouse isInteractiveNode
+    mWid <- findTopWidgetUnderMouse ctx mouse isInteractiveNode
     case mWid of
       Nothing -> pure ()
-      Just wid -> do
-        disabled <- isDisabled ctx wid
-        unless disabled $ writeIORef (ctxActiveId ctx) wid
+      Just wid ->
+        whenM (not <$> isDisabled ctx wid) $
+          writeIORef (ctxActiveId ctx) wid
 
 findTopWidgetUnderMouse ::
-  Context -> Int -> V2 -> (NodeType -> Bool) -> IO (Maybe WidgetId)
-findTopWidgetUnderMouse ctx count mouse wanted = go (count - 1)
-  where
-    go idx
-      | idx < 0 = pure Nothing
-      | otherwise = do
-          nt <- getNodeType (ctxNodeArena ctx) idx
-          if not (wanted nt)
-            then go (idx - 1)
-            else do
-              wid <- getWidgetId (ctxNodeArena ctx) idx
-              (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-              rect <- widgetHitRect ctx nt idx x y w h
-              if rectW rect > 0 && rectH rect > 0 && rectContains rect mouse
-                then do
-                  allow <- overlayHitAllowed ctx idx mouse
-                  if allow then pure (Just wid) else go (idx - 1)
-                else go (idx - 1)
+  Context -> V2 -> (NodeType -> Bool) -> IO (Maybe WidgetId)
+findTopWidgetUnderMouse ctx mouse wanted = do
+  mIdx <-
+    findNodeRevM (ctxNodeArena ctx) $ \idx -> do
+      nt <- getNodeType (ctxNodeArena ctx) idx
+      if not (wanted nt)
+        then pure False
+        else do
+          (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+          rect <- widgetHitRect ctx nt idx x y w h
+          if rectW rect > 0 && rectH rect > 0 && rectContains rect mouse
+            then overlayHitAllowed ctx idx mouse
+            else pure False
+  case mIdx of
+    Nothing -> pure Nothing
+    Just idx -> Just <$> getWidgetId (ctxNodeArena ctx) idx
 
 isInteractiveNode :: NodeType -> Bool
 isInteractiveNode nt =
@@ -347,13 +349,11 @@ finalizeTextInputFocus ctx inp =
 finalizeSelectFocus :: Context -> Input -> IO ()
 finalizeSelectFocus ctx inp =
   when (inputMousePressed inp) $ do
-    count <- arenaCount (ctxNodeArena ctx)
-    mWid <- findSelectUnderMouse ctx count (inputMousePos inp)
+    mWid <- findSelectUnderMouse ctx (inputMousePos inp)
     case mWid of
       Nothing -> pure ()
-      Just wid -> do
-        disabled <- isDisabled ctx wid
-        unless disabled $ do
+      Just wid ->
+        whenM (not <$> isDisabled ctx wid) $ do
           prev <- readIORef (ctxFocusId ctx)
           writeIORef (ctxFocusId ctx) wid
           when (prev /= wid) $ markDirty ctx
