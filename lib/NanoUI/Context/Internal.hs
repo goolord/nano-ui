@@ -34,6 +34,8 @@ module NanoUI.Context.Internal
   , setScrollOffset
   , getPrevRectByKey
   , getPrevRect
+  , getPrevClipRectByKey
+  , getPrevClipRect
   , setPrevRect
   , atlasTextureId
   , registerImage
@@ -412,6 +414,16 @@ getPrevRectByKey ctx k = do
 {-# INLINE getPrevRect #-}
 getPrevRect :: Context -> WidgetId -> IO (Maybe Rect)
 getPrevRect ctx wid = getPrevRectByKey ctx (intKey wid)
+
+{-# INLINE getPrevClipRectByKey #-}
+getPrevClipRectByKey :: Context -> Int -> IO (Maybe Rect)
+getPrevClipRectByKey ctx k = do
+  m <- readIORef (ctxPrevClips ctx)
+  pure (IM.lookup k m)
+
+{-# INLINE getPrevClipRect #-}
+getPrevClipRect :: Context -> WidgetId -> IO (Maybe Rect)
+getPrevClipRect ctx wid = getPrevClipRectByKey ctx (intKey wid)
 
 {-# INLINE setPrevRect #-}
 setPrevRect :: Context -> WidgetId -> Rect -> IO ()

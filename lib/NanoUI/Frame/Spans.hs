@@ -63,6 +63,7 @@ import NanoUI.Layout.Arena
   , SizingTag (..)
   , arenaCount
   , getAlignX
+  , getClipRect
   , getDirection
   , getFirstChild
   , getMinMax
@@ -173,11 +174,16 @@ collectClippedSpans' ctx floatCache idx nt clip arena = do
   mClipChildren <-
     if isScrollNode nt
       then do
-        dir <- getDirection (ctxNodeArena ctx) idx
-        contentSize <- getNodeValue (ctxNodeArena ctx) idx
-        slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
-        let content = scrollContentClip (ctxHostProfile ctx) fm slot dir x y w h pad contentSize
-        pure (rectIntersect clip content)
+        mLive <- getClipRect (ctxNodeArena ctx) idx
+        case mLive of
+          Just live ->
+            pure (rectIntersect clip live)
+          Nothing -> do
+            dir <- getDirection (ctxNodeArena ctx) idx
+            contentSize <- getNodeValue (ctxNodeArena ctx) idx
+            slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
+            let content = scrollContentClip (ctxHostProfile ctx) fm slot dir x y w h pad contentSize
+            pure (rectIntersect clip content)
       else
         if nt == NodePanel
           then pure (rectIntersect clip nodeRect)

@@ -12,11 +12,20 @@ module NanoUI.Frame.Scroll
   ) where
 
 
-import Control.Monad (forM_, unless, void, when)
+import Control.Monad (void, when)
 import Data.IORef (readIORef, writeIORef)
-import NanoUI.Context (Context (..), getScrollOffset, setScrollOffset)
+import Data.Maybe (fromMaybe)
+import NanoUI.Context
+  ( Context (..)
+  , getScrollConfig
+  , getScrollOffset
+  , getScrollOffset2D
+  , setScrollOffset
+  , setScrollOffset2D
+  )
+import NanoUI.WidgetText (scrollNative2DStyle)
 import NanoUI.Draw (DrawArena, Layer (..), beginLayer, currentLayer, pushRect, pushRoundedRect)
-import NanoUI.Font (FontMetrics, ScrollBarSlot (..), scrollBarGeomFor)
+import NanoUI.Font (ScrollBarSlot (..))
 import NanoUI.Host (HostProfile, isCellHost)
 import NanoUI.Id (WidgetId, hashWidgetId)
 import NanoUI.Input (Input (..), inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased, inputScroll)
@@ -25,9 +34,10 @@ import NanoUI.Layout.Arena
   , NodeIdx
   , NodeType (..)
   , arenaCount
-  , forChildNodes_
   , getDirection
   , getFirstChild
+  , getAspect
+  , getLayoutRect
   , getNextSibling
   , getNodeValue
   , getPadding
@@ -36,15 +46,28 @@ import NanoUI.Layout.Arena
   , getRect
   , getStyleIdx
   , getWidgetId
-  , isContainerNode
   , isFloatingNode
   , isScrollNode
+  , setClipRect
   , setRect
+  , snapshotLayoutRects
   )
 import NanoUI.Layout.Solve (scrollBarSlotOf)
 import NanoUI.Style (Padding (..), Theme (..), scrollBarThumbColor, scrollBarTrackColor, themeFloatingWindow, themePanel)
 import NanoUI.Types (Rect (..), V2 (..), rectContains, rectH, rectIntersect, rectUnion, rectW, rectX, rectY, v2X, v2Y)
-import NanoUI.Frame.Clip (scrollChromeLane, scrollContentClip)
+import NanoUI.Frame.Clip (borderContentClip)
+import NanoUI.Frame.Scroll.Geometry
+  ( ScrollBarLayout (..)
+  , scrollBarLayout
+  , scrollChromeLane
+  , scrollContentClip
+  , scrollOffsetFromThumb
+  , scrollViewportClip2D
+  , scrollChromeSuppressed
+  , scrollShowsChrome
+  , ScrollConfig (..)
+  , ScrollPolicy (..)
+  )
 import NanoUI.Frame.Hit (ancestorScrollShift, findNodeByWidgetId, topmostOverlayAtMouse)
 
 scrollLineFor :: HostProfile -> Float
@@ -55,30 +78,93 @@ scrollLine = 20
 
 applyScrollOffsets :: Context -> IO ()
 applyScrollOffsets ctx = do
-  count <- arenaCount (ctxNodeArena ctx)
-  forM_ [0 .. count - 1] $ \idx -> do
-      nt <- getNodeType (ctxNodeArena ctx) idx
-      when (isScrollNode nt) $ do
-        -- TUI modal chrome does not scroll; the inner body scroller does.
-        let skipModal = isCellHost (ctxHostProfile ctx) && nt == NodeModal
-        when (not skipModal) $ do
-          wid <- getWidgetId (ctxNodeArena ctx) idx
-          off <- getScrollOffset ctx wid
-          when (off > 0) $ do
-            dir <- getDirection (ctxNodeArena ctx) idx
-            case dir of
-              DirColumn -> shiftDescendants ctx idx 0 (-off)
-              DirRow -> shiftDescendants ctx idx (-off) 0
+  snapshotLayoutRects (ctxNodeArena ctx)
+  (wx, wy, ww, wh) <- getRect (ctxNodeArena ctx) 0
+  let rootClip = Rect wx wy ww wh
+  transformSubtree ctx 0 0 0 rootClip
 
-shiftDescendants :: Context -> NodeIdx -> Float -> Float -> IO ()
-shiftDescendants ctx idx dx dy =
-  forChildNodes_ (ctxNodeArena ctx) idx $ \ci -> do
-    nt <- getNodeType (ctxNodeArena ctx) ci
-    -- Floating nodes already sit in window space from placePopups/placeWindows.
-    unless (isFloatingNode nt) $ do
-      (x, y, w, h) <- getRect (ctxNodeArena ctx) ci
-      setRect (ctxNodeArena ctx) ci (x + dx) (y + dy) w h
-      when (isContainerNode nt) (shiftDescendants ctx ci dx dy)
+transformSubtree :: Context -> NodeIdx -> Float -> Float -> Rect -> IO ()
+transformSubtree ctx idx scrollX scrollY parentClip = do
+  let na = ctxNodeArena ctx
+  nt <- getNodeType na idx
+  (lx, ly, lw, lh) <- getLayoutRect na idx
+  let floating = isFloatingNode nt
+      (sx, sy) =
+        if floating
+          then (0, 0)
+          else (scrollX, scrollY)
+  (vx, vy, vw, vh) <-
+    if floating
+      then getRect na idx
+      else pure (lx + sx, ly + sy, lw, lh)
+  when (not floating) $ setRect na idx vx vy vw vh
+  let nodeRect = Rect vx vy vw vh
+  (childScrollX, childScrollY, childClip) <-
+    if isScrollNode nt
+      then do
+        let skipModal = isCellHost (ctxHostProfile ctx) && nt == NodeModal
+        if skipModal
+          then do
+            setClipRect na idx nodeRect
+            pure (sx, sy, nodeRect)
+          else do
+            pad <- getPadding na idx
+            dir <- getDirection na idx
+            slot <- scrollBarSlotOf na idx
+            let fm = ctxFontMetrics ctx
+            wid <- getWidgetId na idx
+            si <- getStyleIdx na idx
+            if si == scrollNative2DStyle
+              then do
+                contentH <- getNodeValue na idx
+                contentW <- getAspect na idx
+                let viewport2d =
+                      scrollViewportClip2D
+                        (ctxHostProfile ctx)
+                        fm
+                        slot
+                        vx
+                        vy
+                        lw
+                        lh
+                        pad
+                        contentW
+                        contentH
+                    clip2d = fromMaybe parentClip (rectIntersect parentClip viewport2d)
+                V2 offX offY <- getScrollOffset2D ctx wid
+                setClipRect na idx clip2d
+                pure (sx - offX, sy - offY, clip2d)
+              else do
+                contentSize <- getNodeValue na idx
+                let viewport1d =
+                      scrollContentClip (ctxHostProfile ctx) fm slot dir vx vy lw lh pad contentSize
+                    clip1d = fromMaybe parentClip (rectIntersect parentClip viewport1d)
+                off <- getScrollOffset ctx wid
+                let (nsx, nsy) =
+                      case dir of
+                        DirColumn -> (sx, sy - off)
+                        DirRow -> (sx - off, sy)
+                setClipRect na idx clip1d
+                pure (nsx, nsy, clip1d)
+      else do
+        case nt of
+          NodePanel -> do
+            let style = themePanel (ctxTheme ctx)
+                inner = borderContentClip style nodeRect
+                clipHere = fromMaybe parentClip (rectIntersect parentClip inner)
+            setClipRect na idx clipHere
+            pure (sx, sy, clipHere)
+          _ -> do
+            setClipRect na idx parentClip
+            pure (sx, sy, parentClip)
+  fc <- getFirstChild na idx
+  let go ci
+        | ci < 0 = pure ()
+        | otherwise = do
+            transformSubtree ctx ci childScrollX childScrollY childClip
+            ns <- getNextSibling na ci
+            go ns
+  go fc
 
 updateScrollWheel :: Context -> Input -> IO ()
 updateScrollWheel ctx inp = do
@@ -185,12 +271,35 @@ tryApplyScrollWheelDelta ctx wid scroll = do
   mGeom <- scrollContainerGeom ctx wid
   case mGeom of
     Nothing -> pure False
-    Just (_idx, dir, _x, _y, w, h, pad, contentSize) -> do
-      cur <- getScrollOffset ctx wid
+    Just (idx, dir, _x, _y, w, h, pad, contentSize) -> do
+      si <- getStyleIdx (ctxNodeArena ctx) idx
       let step = scrollLineFor (ctxHostProfile ctx)
-      case dir of
-        DirColumn -> applyAxis cur (h - padT pad - padB pad) contentSize (v2Y scroll * step)
-        DirRow -> applyAxis cur (w - padL pad - padR pad) contentSize (v2X scroll * step)
+          innerW = w - padL pad - padR pad
+          innerH = h - padT pad - padB pad
+      if si == scrollNative2DStyle
+        then do
+          contentW <- getAspect (ctxNodeArena ctx) idx
+          contentH <- getNodeValue (ctxNodeArena ctx) idx
+          V2 curX curY <- getScrollOffset2D ctx wid
+          let maxX = max 0 (contentW - innerW)
+              maxY = max 0 (contentH - innerH)
+              newX = max 0 (min maxX (curX + v2X scroll * step))
+              newY = max 0 (min maxY (curY + v2Y scroll * step))
+          if newX == curX && newY == curY
+            then pure False
+            else do
+              setScrollOffset2D ctx wid (V2 newX newY)
+              pure True
+        else do
+          cur <- getScrollOffset ctx wid
+          cfg <- getScrollConfig ctx wid
+          case dir of
+            DirColumn
+              | scrollPolicyY cfg == ScrollNone -> pure False
+              | otherwise -> applyAxis cur innerH contentSize (v2Y scroll * step)
+            DirRow
+              | scrollPolicyX cfg == ScrollNone -> pure False
+              | otherwise -> applyAxis cur innerW contentSize (v2X scroll * step)
   where
     applyAxis cur inner contentSize delta = do
       let maxOff = max 0 (contentSize - inner)
@@ -265,12 +374,20 @@ scrollHitClip ctx idx nt parentClip = do
     then do
       (x, y, w, h) <- getScrollVisualRect ctx idx
       dir <- getDirection (ctxNodeArena ctx) idx
-      contentSize <- getNodeValue (ctxNodeArena ctx) idx
       slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
-      let local = scrollContentClip (ctxHostProfile ctx) fm slot dir x y w h pad contentSize
-          lane = scrollChromeLane (ctxHostProfile ctx) fm slot dir x y w h pad
-          hit = rectUnion local lane
-      -- Window hang stays hittable: the window clip includes padR.
+      si <- getStyleIdx (ctxNodeArena ctx) idx
+      localClip <-
+        if si == scrollNative2DStyle
+          then do
+            contentH <- getNodeValue (ctxNodeArena ctx) idx
+            contentW <- getAspect (ctxNodeArena ctx) idx
+            pure $
+              scrollViewportClip2D (ctxHostProfile ctx) fm slot x y w h pad contentW contentH
+          else do
+            contentSize <- getNodeValue (ctxNodeArena ctx) idx
+            pure $ scrollContentClip (ctxHostProfile ctx) fm slot dir x y w h pad contentSize
+      let lane = scrollChromeLane (ctxHostProfile ctx) fm slot dir x y w h pad
+          hit = rectUnion localClip lane
       pure (rectIntersect parentClip hit)
     else
       if nt == NodePanel
@@ -282,96 +399,9 @@ scrollHitClip ctx idx nt parentClip = do
 -- Layout position plus ancestor scroll shifts (before applyScrollOffsets runs).
 getScrollVisualRect :: Context -> NodeIdx -> IO (Float, Float, Float, Float)
 getScrollVisualRect ctx idx = do
-  (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+  (lx, ly, w, h) <- getLayoutRect (ctxNodeArena ctx) idx
   (dx, dy) <- ancestorScrollShift ctx idx
-  pure (x + dx, y + dy, w, h)
-
-data ScrollBarLayout = ScrollBarLayout
-  { sbTrack :: Rect
-  , sbThumb :: Rect
-  , sbMaxOff :: Float
-  }
-  deriving (Eq, Show)
-
-scrollBarLayout ::
-  HostProfile ->
-  FontMetrics ->
-  ScrollBarSlot ->
-  DirTag ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
-  Padding ->
-  Float ->
-  Float ->
-  Maybe ScrollBarLayout
-scrollBarLayout host fm slot dir x y w h pad contentSize off =
-  let (barW, barMargin) = scrollBarGeomFor host fm slot
-      minThumb = if isCellHost host then barW else 16
-   in case dir of
-    DirColumn ->
-      let innerH = h - padT pad - padB pad
-          maxOff = max 0 (contentSize - innerH)
-       in if maxOff <= 0
-            then Nothing
-            else
-              let lane = scrollChromeLane host fm slot DirColumn x y w h pad
-                  trackX = rectX lane
-                  trackY = y + padT pad + barMargin
-                  trackH = max 0 (innerH - 2 * barMargin)
-                  thumbH = max minThumb (trackH * innerH / contentSize)
-                  ratio = off / maxOff
-                  thumbY = trackY + ratio * (trackH - thumbH)
-               in
-                Just
-                  ScrollBarLayout
-                    { sbTrack = Rect trackX trackY barW trackH
-                    , sbThumb = Rect trackX thumbY barW thumbH
-                    , sbMaxOff = maxOff
-                    }
-    DirRow ->
-      let innerW = w - padL pad - padR pad
-          maxOff = max 0 (contentSize - innerW)
-       in if maxOff <= 0
-            then Nothing
-            else
-              let lane = scrollChromeLane host fm slot DirRow x y w h pad
-                  trackY = rectY lane
-                  trackX = x + padL pad + barMargin
-                  trackW = max 0 (innerW - 2 * barMargin)
-                  thumbW = max minThumb (trackW * innerW / contentSize)
-                  ratio = off / maxOff
-                  thumbX = trackX + ratio * (trackW - thumbW)
-               in
-                Just
-                  ScrollBarLayout
-                    { sbTrack = Rect trackX trackY trackW barW
-                    , sbThumb = Rect thumbX trackY thumbW barW
-                    , sbMaxOff = maxOff
-                    }
-
-scrollOffsetFromThumb ::
-  DirTag -> ScrollBarLayout -> Float -> V2 -> Float
-scrollOffsetFromThumb dir layout grabOff mouse =
-  let maxOff = sbMaxOff layout
-      track = sbTrack layout
-      thumb = sbThumb layout
-   in case dir of
-        DirColumn ->
-          let trackY = rectY track
-              trackH = rectH track
-              thumbH = rectH thumb
-              thumbTop = v2Y mouse - grabOff
-              ratio = (thumbTop - trackY) / max 1 (trackH - thumbH)
-           in max 0 (min maxOff (ratio * maxOff))
-        DirRow ->
-          let trackX = rectX track
-              trackW = rectW track
-              thumbW = rectW thumb
-              thumbLeft = v2X mouse - grabOff
-              ratio = (thumbLeft - trackX) / max 1 (trackW - thumbW)
-           in max 0 (min maxOff (ratio * maxOff))
+  pure (lx + dx, ly + dy, w, h)
 
 updateScrollDrag :: Context -> Input -> IO ()
 updateScrollDrag ctx inp = do
@@ -408,15 +438,19 @@ scrollContainerGeom ctx wid = do
               then go (idx + 1)
               else do
                 w' <- getWidgetId (ctxNodeArena ctx) idx
-                si <- getStyleIdx (ctxNodeArena ctx) idx
-                if w' /= wid || si /= 0
+                if w' /= wid
                   then go (idx + 1)
                   else do
                     dir <- getDirection (ctxNodeArena ctx) idx
-                    pad <- getPadding (ctxNodeArena ctx) idx
-                    contentSize <- getNodeValue (ctxNodeArena ctx) idx
-                    (x, y, w, h) <- getScrollVisualRect ctx idx
-                    pure (Just (idx, dir, x, y, w, h, pad, contentSize))
+                    si <- getStyleIdx (ctxNodeArena ctx) idx
+                    cfg <- getScrollConfig ctx wid
+                    if scrollChromeSuppressed cfg (si == scrollNative2DStyle) dir
+                      then go (idx + 1)
+                      else do
+                        pad <- getPadding (ctxNodeArena ctx) idx
+                        contentSize <- getNodeValue (ctxNodeArena ctx) idx
+                        (x, y, w, h) <- getScrollVisualRect ctx idx
+                        pure (Just (idx, dir, x, y, w, h, pad, contentSize))
   go 0
 
 tryStartScrollDrag :: Context -> Input -> IO ()
@@ -514,8 +548,8 @@ drawScrollBar ::
   Bool ->
   IO ()
 drawScrollBar ctx da idx wid x y w h pad theme terminal = do
+  si <- getStyleIdx (ctxNodeArena ctx) idx
   dir <- getDirection (ctxNodeArena ctx) idx
-  contentSize <- getNodeValue (ctxNodeArena ctx) idx
   off <- getScrollOffset ctx wid
   let fm = ctxFontMetrics ctx
   slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
@@ -525,18 +559,35 @@ drawScrollBar ctx da idx wid x y w h pad theme terminal = do
           _ -> themePanel theme
       trackBg = scrollBarTrackColor base theme terminal
       thumbCol = scrollBarThumbColor base theme terminal
-  case scrollBarLayout (ctxHostProfile ctx) fm slot dir x y w h pad contentSize off of
-    Nothing -> pure ()
-    Just layout -> do
-      let track = sbTrack layout
-          thumb = sbThumb layout
-      if terminal
-        then do
-          pushRect da track trackBg
-          pushRect da thumb thumbCol
-        else do
-          let trackR = min 4 (min (rectW track) (rectH track) / 2)
-              thumbR = min 4 (min (rectW thumb) (rectH thumb) / 2)
-          pushRoundedRect da track trackR trackBg
-          pushRoundedRect da thumb thumbR thumbCol
+      drawLayout layout =
+        let track = sbTrack layout
+            thumb = sbThumb layout
+         in if terminal
+              then do
+                pushRect da track trackBg
+                pushRect da thumb thumbCol
+              else do
+                let trackR = min 4 (min (rectW track) (rectH track) / 2)
+                    thumbR = min 4 (min (rectW thumb) (rectH thumb) / 2)
+                pushRoundedRect da track trackR trackBg
+                pushRoundedRect da thumb thumbR thumbCol
+      drawAxis axis contentSize axisOff =
+        case scrollBarLayout (ctxHostProfile ctx) fm slot axis x y w h pad contentSize axisOff of
+          Nothing -> pure ()
+          Just layout -> drawLayout layout
+  if si == scrollNative2DStyle
+    then do
+      cfg <- getScrollConfig ctx wid
+      contentH <- getNodeValue (ctxNodeArena ctx) idx
+      contentW <- getAspect (ctxNodeArena ctx) idx
+      V2 offX offY <- getScrollOffset2D ctx wid
+      when (scrollShowsChrome cfg True DirColumn) $
+        drawAxis DirColumn contentH offY
+      when (scrollShowsChrome cfg True DirRow) $
+        drawAxis DirRow contentW offX
+    else do
+      cfg <- getScrollConfig ctx wid
+      contentSize <- getNodeValue (ctxNodeArena ctx) idx
+      when (scrollShowsChrome cfg False dir) $
+        drawAxis dir contentSize off
 

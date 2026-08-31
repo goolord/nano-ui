@@ -64,8 +64,8 @@ import NanoUI.Style
   , Padding (..)
   , Sizing (..)
   )
-import NanoUI.Types (Rect (..), rectContains, rectH, rectUnion, rectW)
-import NanoUI.Frame.Hit (scrollHitRect)
+import NanoUI.Types (Rect (..), rectH, rectUnion, rectW)
+import NanoUI.Frame.Hit (findNodeByWidgetId, nodeInteractionHit, scrollHitRect)
 
 parentIdx :: [Int] -> Int
 parentIdx = \case
@@ -302,12 +302,21 @@ resolveInteraction ctx inp wid = do
   disabled <- isDisabled ctx wid
   mrect <- scrollHitRect ctx wid
   blocked <- pointerBlockedByOverlay ctx (inputMousePos inp)
+  let mouse = inputMousePos inp
+  hovered <-
+    if disabled || blocked
+      then pure False
+      else
+        findNodeByWidgetId ctx wid >>= \case
+          Nothing -> pure False
+          Just idx ->
+            case mrect of
+              Nothing -> pure False
+              Just r -> nodeInteractionHit ctx idx r mouse
   let
     rect = case mrect of
       Just r -> r
       Nothing -> Rect 0 0 0 0
-    mouse = inputMousePos inp
-    hovered = not disabled && not blocked && maybe False (`rectContains` mouse) mrect
     pressed = hovered && inputMouseDown inp
     rightPressed = hovered && inputMouseRightDown inp
   pending <- readIORef (ctxClickedId ctx)

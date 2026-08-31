@@ -64,7 +64,6 @@ import NanoUI.Style
   , Theme (..)
   , styleBg
   , styleBorder
-  , styleBorderWidth
   , styleFg
   , themeAccent
   , themeInput
@@ -82,7 +81,7 @@ import NanoUI.Frame.Chrome
   , textInputFocused
   , widgetVisualStyle
   )
-import NanoUI.Frame.Clip (scrollContentClip)
+import NanoUI.Frame.Clip (borderContentClip, scrollContentClip)
 import NanoUI.Frame.Scroll (paintScrollChrome)
 import NanoUI.Frame.Spans (collectNodeTextSpans, widgetTextPlacements, widgetTextSpans)
 import NanoUI.Frame.TextInput (TextInputGeom (..), drawTextInputCaret, drawTextInputSelection, textInputFieldTextClip, textInputGeom)
@@ -456,14 +455,6 @@ drawRadio host da fm style x y h value accent well = do
       pushRoundedRect da outer r (styleBorder style)
       when (innerR > 0) $
         pushRoundedRect da (Rect (bx + bw) (by + bw) (box - 2 * bw) (box - 2 * bw)) innerR well
-
-borderContentClip :: Style -> Rect -> Rect
-borderContentClip style (Rect x y w h) =
-  if styleBorderWidth style <= 0
-    then Rect x y w h
-    else
-      let bw = max 1 (styleBorderWidth style)
-       in Rect (x + bw) (y + bw) (max 0 (w - 2 * bw)) (max 0 (h - 2 * bw))
 
 walkChildren :: Context -> NodeIdx -> IO ()
 walkChildren ctx idx =

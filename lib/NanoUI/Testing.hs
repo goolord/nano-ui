@@ -61,8 +61,10 @@ module NanoUI.Testing
   , getHotId
   , getFocusId
   , getPrevRect
+  , getPrevClipRect
   , getStore
   , getScrollOffset
+  , setScrollOffset
   , textInputEditActive
   , modalActive
   , overlayConsumesQuit
@@ -158,7 +160,9 @@ import NanoUI.Context
   , getFocusId
   , getHotId
   , getPrevRect
+  , getPrevClipRect
   , getScrollOffset
+  , setScrollOffset
   , getStore
   , isDirty
   , markDirty

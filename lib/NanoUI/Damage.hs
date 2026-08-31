@@ -30,10 +30,10 @@ import NanoUI.Input
   )
 import NanoUI.Frame.Hit (findNodeByKey, findNodeByWidgetId)
 import NanoUI.Layout.Arena
-  ( NodeArena
-  , NodeType (..)
+  ( NodeType (..)
   , SizingTag (..)
   , arenaCount
+  , getClipRect
   , getHeightSizing
   , getNodeType
   , getParent
@@ -49,7 +49,6 @@ import NanoUI.Types
   , Size (..)
   , defaultDamageSlop
   , rectArea
-  , rectH
   , rectInflate
   , rectIntersect
   , rectUnion
@@ -116,21 +115,31 @@ updatePrevRects :: Context -> IO ()
 updatePrevRects ctx = do
   count <- arenaCount (ctxNodeArena ctx)
   if count <= 0
-    then writeIORef (ctxPrevRects ctx) IM.empty
+    then do
+      writeIORef (ctxPrevRects ctx) IM.empty
+      writeIORef (ctxPrevClips ctx) IM.empty
     else do
-      acc <- foldM add IM.empty [0 .. count - 1]
-      writeIORef (ctxPrevRects ctx) acc
+      (rectAcc, clipAcc) <- foldM add (IM.empty, IM.empty) [0 .. count - 1]
+      writeIORef (ctxPrevRects ctx) rectAcc
+      writeIORef (ctxPrevClips ctx) clipAcc
   where
-    add m idx = do
+    add (m, cm) idx = do
       wid <- getWidgetId (ctxNodeArena ctx) idx
       (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
       if hashWidgetId wid == 0
-        then pure m
-        else
+        then pure (m, cm)
+        else do
           let r = Rect x y w h
-           in if nonzeroRect r
-                then pure (IM.insert (intKey wid) r m)
-                else pure m
+          (m', cm') <-
+            if nonzeroRect r
+              then do
+                mClip <- getClipRect (ctxNodeArena ctx) idx
+                pure
+                  ( IM.insert (intKey wid) r m
+                  , maybe cm (\c -> IM.insert (intKey wid) c cm) mClip
+                  )
+              else pure (m, cm)
+          pure (m', cm')
 
 floatingPanelsInOrder :: Context -> IO [(Int, Rect)]
 floatingPanelsInOrder ctx = do
@@ -385,38 +394,15 @@ keyedRectDeltas old new =
       ]
 
 clipDeltaToScrollViewport :: Context -> IM.IntMap Rect -> (Int, Rect) -> IO Rect
-clipDeltaToScrollViewport ctx newRects (k, r) = do
-  mVp <- scrollViewportForKey ctx k newRects
-  pure $
-    case mVp of
-      Nothing -> r
-      Just vp -> fromMaybe (Rect 0 0 0 0) (rectIntersect r vp)
-
-scrollViewportForKey :: Context -> Int -> IM.IntMap Rect -> IO (Maybe Rect)
-scrollViewportForKey ctx k newRects =
+clipDeltaToScrollViewport ctx _newRects (k, r) = do
   findNodeByKey ctx k >>= \case
-    Nothing -> pure Nothing
-    Just idx -> scrollViewportForNode ctx idx newRects
-
-scrollViewportForNode :: Context -> Int -> IM.IntMap Rect -> IO (Maybe Rect)
-scrollViewportForNode ctx idx newRects = do
-  mScroll <- findScrollAncestor (ctxNodeArena ctx) idx
-  case mScroll of
-    Nothing -> pure Nothing
-    Just scrollIdx -> do
-      wid <- getWidgetId (ctxNodeArena ctx) scrollIdx
-      pure (IM.lookup (intKey wid) newRects)
-
-findScrollAncestor :: NodeArena -> Int -> IO (Maybe Int)
-findScrollAncestor na idx = do
-  nt <- getNodeType na idx
-  if isScrollNode nt
-    then pure (Just idx)
-    else do
-      p <- getParent na idx
-      if p < 0
-        then pure Nothing
-        else findScrollAncestor na p
+    Nothing -> pure r
+    Just idx -> do
+      mClip <- getClipRect (ctxNodeArena ctx) idx
+      pure $
+        case mClip of
+          Nothing -> r
+          Just clip -> fromMaybe (Rect 0 0 0 0) (rectIntersect r clip)
 
 clipRectToWindow :: Float -> Float -> Rect -> Rect
 clipRectToWindow winW winH r =
@@ -440,10 +426,15 @@ scrollOffsetDamage ctx oldStore newStore = do
         | k <- IM.keys (IM.union oldF newF)
         , IM.findWithDefault 0 k oldF /= IM.findWithDefault 0 k newF
         ]
-  newRects <- readIORef (ctxPrevRects ctx)
   fmap catMaybes $
     forM changed $ \k ->
-      scrollViewportForKey ctx k newRects
+      findNodeByKey ctx k >>= \case
+        Nothing -> pure Nothing
+        Just idx -> do
+          nt <- getNodeType (ctxNodeArena ctx) idx
+          if isScrollNode nt
+            then getClipRect (ctxNodeArena ctx) idx
+            else pure Nothing
 
 nonzeroRect :: Rect -> Bool
 nonzeroRect r = rectW r > 0 && rectH r > 0

@@ -35,7 +35,7 @@ import NanoUI.Types (Rect (..), V2 (..), rectContains, v2X, v2Y)
 import NanoUI.WidgetText (isTableHeaderStyle, selectOptions, sliderLabelText)
 import NanoUI.Frame.CursorKind (UiCursorKind (..), grabDragKind, grabHoverKind)
 import NanoUI.Frame.Chrome (widgetNodeTypeTable)
-import NanoUI.Frame.Hit (findNodeByWidgetId, scrollHitRect)
+import NanoUI.Frame.Hit (findNodeByWidgetId, scrollHitRect, nodePointVisible)
 import NanoUI.Frame.Scroll (scrollBarLayout, ScrollBarLayout (..))
 import NanoUI.Frame.Select (selectDropRect)
 import NanoUI.Frame.TextInput (TextInputGeom (..), textInputGeom, textInputMenuCursorKind)
@@ -152,10 +152,10 @@ cursorKindAt table ctx wid mouse inp
         then pure UiCursorDefault
         else
           case IM.lookup (intKey wid) table of
-            Just NodeButton -> pure UiCursorPointer
-            Just NodeCheckbox -> pure UiCursorPointer
-            Just NodeRadio -> pure UiCursorPointer
-            Just NodeTree -> pure UiCursorPointer
+            Just NodeButton -> widgetPointerCursor ctx wid mouse
+            Just NodeCheckbox -> widgetPointerCursor ctx wid mouse
+            Just NodeRadio -> widgetPointerCursor ctx wid mouse
+            Just NodeTree -> widgetPointerCursor ctx wid mouse
             Just NodeSelect -> selectCursorKind ctx wid mouse
             Just NodeColorPicker -> pure UiCursorPointer
             Just NodeTextInput -> textInputCursorKind ctx wid mouse
@@ -164,45 +164,69 @@ cursorKindAt table ctx wid mouse inp
 
 selectCursorKind :: Context -> WidgetId -> V2 -> IO UiCursorKind
 selectCursorKind ctx wid mouse = do
-  mrect <- scrollHitRect ctx wid
-  pure $
-    case mrect of
-      Nothing -> UiCursorDefault
-      Just rect ->
-        if rectContains rect mouse
-          then UiCursorPointer
-          else UiCursorDefault
+  visible <- widgetVisibleAt ctx wid mouse
+  if not visible
+    then pure UiCursorDefault
+    else do
+      mrect <- scrollHitRect ctx wid
+      pure $
+        case mrect of
+          Nothing -> UiCursorDefault
+          Just rect ->
+            if rectContains rect mouse
+              then UiCursorPointer
+              else UiCursorDefault
+
+widgetVisibleAt :: Context -> WidgetId -> V2 -> IO Bool
+widgetVisibleAt ctx wid mouse = do
+  mIdx <- findNodeByWidgetId ctx wid
+  case mIdx of
+    Nothing -> pure False
+    Just idx -> nodePointVisible ctx idx mouse
+
+widgetPointerCursor :: Context -> WidgetId -> V2 -> IO UiCursorKind
+widgetPointerCursor ctx wid mouse = do
+  visible <- widgetVisibleAt ctx wid mouse
+  pure (if visible then UiCursorPointer else UiCursorDefault)
 
 sliderCursorKind :: Context -> WidgetId -> V2 -> Input -> IO UiCursorKind
 sliderCursorKind ctx wid mouse inp = do
-  mrect <- scrollHitRect ctx wid
-  active <- readIORef (ctxActiveId ctx)
-  let fm = ctxFontMetrics ctx
-      dragging = active == wid && inputMouseDown inp
-  lbl <-
-    findNodeByWidgetId ctx wid >>= \case
-      Nothing -> pure T.empty
-      Just idx -> do
-        txt <- getText (ctxNodeArena ctx) idx
-        pure (sliderLabelText txt)
-  pure $
-    case mrect of
-      Nothing -> UiCursorDefault
-      Just (Rect x y w h) ->
-        grabDragKind (rectContains (sliderTrackBounds (ctxHostProfile ctx) fm lbl x y w h) mouse) dragging inp
+  visible <- widgetVisibleAt ctx wid mouse
+  if not visible
+    then pure UiCursorDefault
+    else do
+      mrect <- scrollHitRect ctx wid
+      active <- readIORef (ctxActiveId ctx)
+      let fm = ctxFontMetrics ctx
+          dragging = active == wid && inputMouseDown inp
+      lbl <-
+        findNodeByWidgetId ctx wid >>= \case
+          Nothing -> pure T.empty
+          Just idx -> do
+            txt <- getText (ctxNodeArena ctx) idx
+            pure (sliderLabelText txt)
+      pure $
+        case mrect of
+          Nothing -> UiCursorDefault
+          Just (Rect x y w h) ->
+            grabDragKind (rectContains (sliderTrackBounds (ctxHostProfile ctx) fm lbl x y w h) mouse) dragging inp
 
 textInputCursorKind :: Context -> WidgetId -> V2 -> IO UiCursorKind
 textInputCursorKind ctx wid mouse = do
-  mrect <- scrollHitRect ctx wid
-  case mrect of
-    Nothing -> pure UiCursorDefault
-    Just (Rect x y w h) -> do
-      let fm = ctxFontMetrics ctx
-          field = tigFieldRect (textInputGeom (ctxHostProfile ctx) fm x y w h)
-      pure $
-        if rectContains field mouse
-          then UiCursorText
-          else UiCursorDefault
+  visible <- widgetVisibleAt ctx wid mouse
+  if not visible
+    then pure UiCursorDefault
+    else do
+      mrect <- scrollHitRect ctx wid
+      case mrect of
+        Nothing -> pure UiCursorDefault
+        Just (Rect x y w h) -> do
+          let fm = ctxFontMetrics ctx
+              field = tigFieldRect (textInputGeom (ctxHostProfile ctx) fm x y w h)
+          pure $
+            if rectContains field mouse
+              then UiCursorText
+              else UiCursorDefault
 
 tableColResizeCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
 tableColResizeCursorKind ctx inp = do

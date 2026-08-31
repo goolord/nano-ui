@@ -36,6 +36,10 @@ module NanoUI.Layout.Arena
   , getAlignY
   , getRect
   , setRect
+  , getLayoutRect
+  , getClipRect
+  , setClipRect
+  , snapshotLayoutRects
   , getText
   , getWidgetId
   , setWidgetId
@@ -72,6 +76,7 @@ import Data.Word (Word8)
 import qualified Data.Text as T
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Style (AlignX (..), AlignY (..), Direction (..), Layout (..), Padding (..), Sizing (..))
+import NanoUI.Types (Rect (..))
 
 type NodeIdx = Int
 
@@ -174,6 +179,12 @@ data NodeArenaArrays = NodeArenaArrays
   , naArrAlignY :: !(MutablePrimArray RealWorld Word8)
   , naArrX :: !(MutablePrimArray RealWorld Float)
   , naArrY :: !(MutablePrimArray RealWorld Float)
+  , naArrLayoutX :: !(MutablePrimArray RealWorld Float)
+  , naArrLayoutY :: !(MutablePrimArray RealWorld Float)
+  , naArrClipX :: !(MutablePrimArray RealWorld Float)
+  , naArrClipY :: !(MutablePrimArray RealWorld Float)
+  , naArrClipW :: !(MutablePrimArray RealWorld Float)
+  , naArrClipH :: !(MutablePrimArray RealWorld Float)
   , naArrW :: !(MutablePrimArray RealWorld Float)
   , naArrH :: !(MutablePrimArray RealWorld Float)
   , naArrWidgetId :: !(MutablePrimArray RealWorld WidgetId)
@@ -229,6 +240,12 @@ newNodeArenaArrays cap = do
   naArrAlignY <- newPrimArray cap
   naArrX <- newPrimArray cap
   naArrY <- newPrimArray cap
+  naArrLayoutX <- newPrimArray cap
+  naArrLayoutY <- newPrimArray cap
+  naArrClipX <- newPrimArray cap
+  naArrClipY <- newPrimArray cap
+  naArrClipW <- newPrimArray cap
+  naArrClipH <- newPrimArray cap
   naArrW <- newPrimArray cap
   naArrH <- newPrimArray cap
   naArrWidgetId <- newPrimArray cap
@@ -324,6 +341,12 @@ ensureCapacity na needed = do
       naArrAlignY <- growPrimArrayCopy (naArrAlignY a) cap newCap 0
       naArrX <- growPrimArrayCopy (naArrX a) cap newCap 0
       naArrY <- growPrimArrayCopy (naArrY a) cap newCap 0
+      naArrLayoutX <- growPrimArrayCopy (naArrLayoutX a) cap newCap 0
+      naArrLayoutY <- growPrimArrayCopy (naArrLayoutY a) cap newCap 0
+      naArrClipX <- growPrimArrayCopy (naArrClipX a) cap newCap 0
+      naArrClipY <- growPrimArrayCopy (naArrClipY a) cap newCap 0
+      naArrClipW <- growPrimArrayCopy (naArrClipW a) cap newCap 0
+      naArrClipH <- growPrimArrayCopy (naArrClipH a) cap newCap 0
       naArrW <- growPrimArrayCopy (naArrW a) cap newCap 0
       naArrH <- growPrimArrayCopy (naArrH a) cap newCap 0
       naArrWidgetId <- growPrimArrayCopy (naArrWidgetId a) cap newCap (WidgetId 0)
@@ -432,6 +455,12 @@ addNode na nt parent dir wSiz hSiz pad gap minW minH maxW maxH grow ax ay wrap =
   writePrimArray (naArrAlignY a) idx (alignYTag ay)
   writePrimArray (naArrX a) idx 0
   writePrimArray (naArrY a) idx 0
+  writePrimArray (naArrLayoutX a) idx 0
+  writePrimArray (naArrLayoutY a) idx 0
+  writePrimArray (naArrClipX a) idx 0
+  writePrimArray (naArrClipY a) idx 0
+  writePrimArray (naArrClipW a) idx 0
+  writePrimArray (naArrClipH a) idx 0
   writePrimArray (naArrW a) idx 0
   writePrimArray (naArrH a) idx 0
   writePrimArray (naArrWidgetId a) idx (WidgetId 0)
@@ -605,6 +634,51 @@ setRect na idx x y w h = do
   writePrimArray (naArrY a) idx y
   writePrimArray (naArrW a) idx w
   writePrimArray (naArrH a) idx h
+
+{-# INLINE getLayoutRect #-}
+getLayoutRect :: NodeArena -> NodeIdx -> IO (Float, Float, Float, Float)
+getLayoutRect na idx = do
+  a <- arenaArrays na
+  x <- readPrimArray (naArrLayoutX a) idx
+  y <- readPrimArray (naArrLayoutY a) idx
+  w <- readPrimArray (naArrW a) idx
+  h <- readPrimArray (naArrH a) idx
+  pure (x, y, w, h)
+
+{-# INLINE getClipRect #-}
+getClipRect :: NodeArena -> NodeIdx -> IO (Maybe Rect)
+getClipRect na idx = do
+  a <- arenaArrays na
+  x <- readPrimArray (naArrClipX a) idx
+  y <- readPrimArray (naArrClipY a) idx
+  w <- readPrimArray (naArrClipW a) idx
+  h <- readPrimArray (naArrClipH a) idx
+  let r = Rect x y w h
+  pure (if w > 0 && h > 0 then Just r else Nothing)
+
+{-# INLINE setClipRect #-}
+setClipRect :: NodeArena -> NodeIdx -> Rect -> IO ()
+setClipRect na idx (Rect x y w h) = do
+  a <- arenaArrays na
+  writePrimArray (naArrClipX a) idx x
+  writePrimArray (naArrClipY a) idx y
+  writePrimArray (naArrClipW a) idx w
+  writePrimArray (naArrClipH a) idx h
+
+{-# INLINE snapshotLayoutRects #-}
+snapshotLayoutRects :: NodeArena -> IO ()
+snapshotLayoutRects na = do
+  n <- arenaCount na
+  a <- arenaArrays na
+  let go !i
+        | i >= n = pure ()
+        | otherwise = do
+            x <- readPrimArray (naArrX a) i
+            y <- readPrimArray (naArrY a) i
+            writePrimArray (naArrLayoutX a) i x
+            writePrimArray (naArrLayoutY a) i y
+            go (i + 1)
+  go 0
 
 {-# INLINE getText #-}
 getText :: NodeArena -> NodeIdx -> IO Text

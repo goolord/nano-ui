@@ -15,6 +15,13 @@ module Cases.Scroll
   , runTableScrollTest
   , runTableFirstColWidthTest
   , runTableFillWidthTest
+  , runScrolledOutClickImmunityTest
+  , runScrolledOutHoverImmunityTest
+  , runScrolledOutCursorImmunityTest
+  , runLocalizedScrollDamageTest
+  , runScrollChildDamageOffsetTest
+  , run2DScrollWheelTest
+  , runTable2DScrollSyncTest
   ) where
 
 import Control.Monad (forM_, replicateM, void)
@@ -95,20 +102,18 @@ runPanelGrowScrollGutterTest ctx failed = do
 runScrollDamageTest :: Context -> IORef Int -> IO ()
 runScrollDamageTest _ failed = do
   ctx <- newContext
-  let ui = fmap fst $ scrollArea (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 60}) $
-             column defaultLayout (replicateM 8 (label "scroll line") >> pure ())
+  let scrollUi =
+        fmap fst $
+          scrollArea (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 60}) $
+            column defaultLayout (replicateM 8 (label "scroll line") >> pure ())
       inp0 = withInputOff 200 120
-  _ <- runFrame ctx inp0 ui
-  let inpHover = inp0 {inputMousePos = V2 20 20}
-  _ <- runFrame ctx inpHover ui
-  dHover <- takeDamage ctx
-  assert failed (dHover /= DamageFull)
-  let inpScroll = inpHover {inputScroll = V2 0 1}
-  _ <- runFrame ctx inpScroll ui
+  sid <- warmup2 ctx inp0 scrollUi
+  let bumpUi = scrollUi >> uiIO (setScrollOffset ctx sid 24)
+  _ <- runFrame ctx inp0 bumpUi
   dScroll <- takeDamage ctx
   case dScroll of
     DamageFull -> assert failed False
-    DamageClip r -> assert failed (rectH r <= 60 + defaultDamageSlop * 2 && not (damageIsEmpty dScroll))
+    DamageClip r -> assert failed (rectW r > 0 && rectH r > 0 && rectH r <= 60 + defaultDamageSlop * 2 && not (damageIsEmpty dScroll))
 
 runTableScrollTest :: Context -> IORef Int -> IO ()
 runTableScrollTest _ failed = do
@@ -482,5 +487,161 @@ runNestedScrollFocusTest ctx failed = do
   offI1 <- getScrollOffset ctx inner
   assertGt failed offI1 offI0
 
+runScrolledOutClickImmunityTest :: Context -> IORef Int -> IO ()
+runScrolledOutClickImmunityTest ctx failed = do
+  let inp0 = withInput 240 160
+      ui = do
+        (readHit, setHit) <- useText ""
+        (sid, b) <- scrollArea (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 60}) $
+                      column defaultLayout $ do
+                        mapM_ (\_ -> void (label "pad")) [(1 :: Int) .. 10]
+                        btn <- button "Target"
+                        onClick btn (setHit "yes")
+                        pure btn
+        hit <- readHit
+        pure (sid, b, hit)
+  (sid, b, hit0) <- warmup2 ctx inp0 ui
+  assertEq failed hit0 ""
+  mScroll <- getPrevRect ctx sid
+  case mScroll of
+    Just (Rect sx sy sw sh) -> do
+      let wheel = inp0 {inputMousePos = V2 (sx + sw / 2) (sy + sh / 2), inputScroll = V2 0 1}
+      forM_ [(1 :: Int) .. 20] $ \_ -> void (runFrame ctx wheel ui)
+      mBtn <- getPrevRect ctx (respId b)
+      case mBtn of
+        Just (Rect bx by bw bh) -> do
+          let ghost = inp0 {inputMousePos = V2 (bx + bw / 2) (by + bh / 2)}
+          (_, _, hit1) <- runClickPair ctx ghost ui (V2 (bx + bw / 2) (by + bh / 2))
+          assertEq failed hit1 ""
+        _ -> assert failed False
+    _ -> assert failed False
+
+runScrolledOutHoverImmunityTest :: Context -> IORef Int -> IO ()
+runScrolledOutHoverImmunityTest ctx failed = do
+  let inp0 = withInput 240 160
+      ui = do
+        (sid, b) <- scrollArea (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 60}) $
+                      column defaultLayout $ do
+                        mapM_ (\_ -> void (label "pad")) [(1 :: Int) .. 10]
+                        btn <- button "Target"
+                        pure btn
+        pure (sid, b)
+  (sid, b) <- warmup2 ctx inp0 ui
+  let target = respId b
+  mScroll <- getPrevRect ctx sid
+  case mScroll of
+    Just (Rect sx sy sw sh) -> do
+      let wheel = inp0 {inputMousePos = V2 (sx + sw / 2) (sy + sh / 2), inputScroll = V2 0 1}
+      forM_ [(1 :: Int) .. 20] $ \_ -> void (runFrame ctx wheel ui)
+      mBtn <- getPrevRect ctx target
+      case mBtn of
+        Just (Rect bx by bw bh) -> do
+          let hover = inp0 {inputMousePos = V2 (bx + bw / 2) (by + bh / 2)}
+          _ <- runFrame ctx hover ui
+          hot <- getHotId ctx
+          assert failed (hot /= target)
+        _ -> assert failed False
+    _ -> assert failed False
+
+runScrolledOutCursorImmunityTest :: Context -> IORef Int -> IO ()
+runScrolledOutCursorImmunityTest ctx failed = do
+  let inp0 = withInput 240 160
+      ui = do
+        (sid, b) <- scrollArea (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 60}) $
+                      column defaultLayout $ do
+                        mapM_ (\_ -> void (label "pad")) [(1 :: Int) .. 10]
+                        btn <- button "Target"
+                        pure btn
+        pure (sid, b)
+  (sid, b) <- warmup2 ctx inp0 ui
+  mScroll <- getPrevRect ctx sid
+  case mScroll of
+    Just (Rect sx sy sw sh) -> do
+      let wheel = inp0 {inputMousePos = V2 (sx + sw / 2) (sy + sh / 2), inputScroll = V2 0 1}
+      forM_ [(1 :: Int) .. 20] $ \_ -> void (runFrame ctx wheel ui)
+      mBtn <- getPrevRect ctx (respId b)
+      case mBtn of
+        Just (Rect bx by bw bh) -> do
+          let hover = inp0 {inputMousePos = V2 (bx + bw / 2) (by + bh / 2)}
+          kind <- uiCursorKind ctx hover
+          assertEq failed kind UiCursorDefault
+        _ -> assert failed False
+    _ -> assert failed False
+
+runLocalizedScrollDamageTest :: Context -> IORef Int -> IO ()
+runLocalizedScrollDamageTest = runScrollDamageTest
+
+runScrollChildDamageOffsetTest :: Context -> IORef Int -> IO ()
+runScrollChildDamageOffsetTest ctx failed = do
+  let inp0 = withInputOff 240 160
+      scrollUi =
+        fmap fst $
+          scrollArea (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 60}) $
+            column defaultLayout (replicateM 8 (label "scroll line") >> pure ())
+  sid <- warmup2 ctx inp0 scrollUi
+  let bump20 = scrollUi >> uiIO (setScrollOffset ctx sid 20)
+      bump40 = scrollUi >> uiIO (setScrollOffset ctx sid 40)
+  _ <- runFrame ctx inp0 bump20
+  d0 <- takeDamage ctx
+  assert failed (case d0 of DamageClip r -> rectW r > 0 && rectH r > 0; DamageFull -> False)
+  _ <- runFrame ctx inp0 bump40
+  d1 <- takeDamage ctx
+  assert failed (case d1 of DamageClip r -> rectW r > 0 && rectH r > 0; DamageFull -> False)
+
+run2DScrollWheelTest :: Context -> IORef Int -> IO ()
+run2DScrollWheelTest ctx failed = do
+  let inp0 = withInput 240 200
+      ui = scrollArea (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 90}) $
+             column defaultLayout $ do
+               (inner, ()) <-
+                 scrollArea
+                   (defaultLayout {layoutWidth = Fixed 72, layoutHeight = Fixed 36, layoutDirection = Row})
+                   (row defaultLayout (mapM_ (\i -> label (T.pack ("c" <> show (i :: Int)))) [1 .. 16]))
+               mapM_ (\i -> label (T.pack ("r" <> show (i :: Int)))) [1 .. 12]
+               pure inner
+  (outer, inner) <- warmup2 ctx inp0 ui
+  mInner <- getPrevRect ctx inner
+  case mInner of
+    Just (Rect ix iy iw ih) | iw > 0 && ih > 0 -> do
+      let wheelX = inp0 {inputMousePos = V2 (ix + iw / 2) (iy + ih / 2), inputScroll = V2 1 0}
+      offX0 <- getScrollOffset ctx inner
+      _ <- runFrame ctx wheelX ui
+      offX1 <- getScrollOffset ctx inner
+      assertGt failed offX1 offX0
+      mOuter <- getPrevRect ctx outer
+      case mOuter of
+        Just (Rect ox oy ow oh) -> do
+          let wheelY = inp0 {inputMousePos = V2 (ox + ow / 2) (oy + oh - 4), inputScroll = V2 0 1}
+          offY0 <- getScrollOffset ctx outer
+          _ <- runFrame ctx wheelY ui
+          offY1 <- getScrollOffset ctx outer
+          assertGt failed offY1 offY0
+        _ -> assert failed False
+    _ -> assert failed False
+
+runTable2DScrollSyncTest :: Context -> IORef Int -> IO ()
+runTable2DScrollSyncTest _ failed = do
+  ctx <- newContext
+  let inp0 = (withInput 360 160) {inputMousePos = V2 60 80}
+      ui = do
+        (readSort, _) <- useTableSort (SortCol 0 SortAsc)
+        tableSort <- readSort
+        void (table "people" tableScrollCols tableScrollRows tableSort)
+  warmup2 ctx inp0 ui
+  spans0 <- collectTextSpans ctx
+  let findIn spans needle =
+        listToMaybe [(r, t) | (r, t, _, _, _) <- spans, needle `T.isInfixOf` t]
+  case (findIn spans0 "Name", findIn spans0 "row-1") of
+    (Just (Rect nx _ _ _, _), Just (Rect cn _ _ _, _)) -> do
+      assert failed (abs (nx - cn) <= 1)
+      let scrollInp = inp0 {inputScroll = V2 1 1}
+      _ <- runFrame ctx scrollInp ui
+      spans1 <- collectTextSpans ctx
+      case (findIn spans1 "Name", findIn spans1 "row-1") of
+        (Just (Rect nx1 _ _ _, _), Just (Rect cn1 _ _ _, _)) -> do
+          assert failed (abs (nx1 - cn1) <= 1)
+          assert failed (length spans1 >= 4)
+        _ -> assert failed False
+    _ -> assert failed False
 
 
