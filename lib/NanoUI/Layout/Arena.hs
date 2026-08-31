@@ -56,7 +56,15 @@ import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IM
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Primitive.Array (MutableArray, newArray, readArray, writeArray)
-import Data.Primitive.PrimArray (MutablePrimArray, newPrimArray, readPrimArray, writePrimArray)
+import Data.Primitive.PrimArray
+  ( MutablePrimArray
+  , copyMutablePrimArray
+  , newPrimArray
+  , readPrimArray
+  , setPrimArray
+  , writePrimArray
+  )
+import Data.Primitive.Types (Prim)
 import GHC.Exts (RealWorld)
 import Data.Text (Text)
 import Data.Word (Word8)
@@ -336,84 +344,49 @@ ensureCapacity na needed = do
     else
       let newCap = cap * 2
        in do
-        growInt (naParent na) cap newCap (-1)
-        growInt (naFirstChild na) cap newCap (-1)
-        growInt (naNextSibling na) cap newCap (-1)
-        growInt (naChildCount na) cap newCap 0
-        growWord8 (naNodeType na) cap newCap 0
-        growWord8 (naDirection na) cap newCap 0
-        growWord8 (naWidthSizing na) cap newCap 0
-        growWord8 (naHeightSizing na) cap newCap 0
-        growFloat (naWidthValue na) cap newCap 0
-        growFloat (naHeightValue na) cap newCap 0
-        growFloat (naPadL na) cap newCap 0
-        growFloat (naPadR na) cap newCap 0
-        growFloat (naPadT na) cap newCap 0
-        growFloat (naPadB na) cap newCap 0
-        growFloat (naGap na) cap newCap 0
-        growFloat (naMinW na) cap newCap 0
-        growFloat (naMinH na) cap newCap 0
-        growFloat (naMaxW na) cap newCap 1e9
-        growFloat (naMaxH na) cap newCap 1e9
-        growFloat (naGrow na) cap newCap 0
-        growFloat (naAspect na) cap newCap 0
-        growWord8 (naWrap na) cap newCap 0
-        growWord8 (naAlignX na) cap newCap 0
-        growWord8 (naAlignY na) cap newCap 0
-        growFloat (naX na) cap newCap 0
-        growFloat (naY na) cap newCap 0
-        growFloat (naW na) cap newCap 0
-        growFloat (naH na) cap newCap 0
-        growWidgetId (naWidgetId na) cap newCap (WidgetId 0)
-        growFloat (naValue na) cap newCap 0
-        growInt (naStyleIdx na) cap newCap 0
-        growInt (naTextIdx na) cap newCap (-1)
+        growPrimArray (naParent na) cap newCap (-1)
+        growPrimArray (naFirstChild na) cap newCap (-1)
+        growPrimArray (naNextSibling na) cap newCap (-1)
+        growPrimArray (naChildCount na) cap newCap 0
+        growPrimArray (naNodeType na) cap newCap 0
+        growPrimArray (naDirection na) cap newCap 0
+        growPrimArray (naWidthSizing na) cap newCap 0
+        growPrimArray (naHeightSizing na) cap newCap 0
+        growPrimArray (naWidthValue na) cap newCap 0
+        growPrimArray (naHeightValue na) cap newCap 0
+        growPrimArray (naPadL na) cap newCap 0
+        growPrimArray (naPadR na) cap newCap 0
+        growPrimArray (naPadT na) cap newCap 0
+        growPrimArray (naPadB na) cap newCap 0
+        growPrimArray (naGap na) cap newCap 0
+        growPrimArray (naMinW na) cap newCap 0
+        growPrimArray (naMinH na) cap newCap 0
+        growPrimArray (naMaxW na) cap newCap 1e9
+        growPrimArray (naMaxH na) cap newCap 1e9
+        growPrimArray (naGrow na) cap newCap 0
+        growPrimArray (naAspect na) cap newCap 0
+        growPrimArray (naWrap na) cap newCap 0
+        growPrimArray (naAlignX na) cap newCap 0
+        growPrimArray (naAlignY na) cap newCap 0
+        growPrimArray (naX na) cap newCap 0
+        growPrimArray (naY na) cap newCap 0
+        growPrimArray (naW na) cap newCap 0
+        growPrimArray (naH na) cap newCap 0
+        growPrimArray (naWidgetId na) cap newCap (WidgetId 0)
+        growPrimArray (naValue na) cap newCap 0
+        growPrimArray (naStyleIdx na) cap newCap 0
+        growPrimArray (naTextIdx na) cap newCap (-1)
         growTextStore (naTextStore na) cap newCap
         writeIORef (naCapacity na) newCap
 
-{-# NOINLINE growInt #-}
-growInt :: IORef (MutablePrimArray RealWorld Int) -> Int -> Int -> Int -> IO ()
-growInt mv oldCap newCap fill = do
-  arr <- readIORef mv
+{-# NOINLINE growPrimArray #-}
+growPrimArray :: Prim a => IORef (MutablePrimArray RealWorld a) -> Int -> Int -> a -> IO ()
+growPrimArray ref cap newCap defVal = do
+  oldArr <- readIORef ref
   newArr <- newPrimArray newCap
-  forM_ [0 .. oldCap - 1] $ \i ->
-    readPrimArray arr i >>= writePrimArray newArr i
-  forM_ [oldCap .. newCap - 1] $ \i ->
-    writePrimArray newArr i fill
-  writeIORef mv newArr
-
-{-# NOINLINE growWord8 #-}
-growWord8 :: IORef (MutablePrimArray RealWorld Word8) -> Int -> Int -> Word8 -> IO ()
-growWord8 mv oldCap newCap fill = do
-  arr <- readIORef mv
-  newArr <- newPrimArray newCap
-  forM_ [0 .. oldCap - 1] $ \i ->
-    readPrimArray arr i >>= writePrimArray newArr i
-  forM_ [oldCap .. newCap - 1] $ \i ->
-    writePrimArray newArr i fill
-  writeIORef mv newArr
-
-{-# NOINLINE growFloat #-}
-growFloat :: IORef (MutablePrimArray RealWorld Float) -> Int -> Int -> Float -> IO ()
-growFloat mv oldCap newCap fill = do
-  arr <- readIORef mv
-  newArr <- newPrimArray newCap
-  forM_ [0 .. oldCap - 1] $ \i ->
-    readPrimArray arr i >>= writePrimArray newArr i
-  forM_ [oldCap .. newCap - 1] $ \i ->
-    writePrimArray newArr i fill
-  writeIORef mv newArr
-
-{-# NOINLINE growWidgetId #-}
-growWidgetId :: IORef (MutablePrimArray RealWorld WidgetId) -> Int -> Int -> WidgetId -> IO ()
-growWidgetId mv oldCap newCap fill = do
-  arr <- readIORef mv
-  newArr <- newPrimArray newCap
-  forM_ [0 .. oldCap - 1] $ \i ->
-    readPrimArray arr i >>= writePrimArray newArr i
-  forM_ [oldCap .. newCap - 1] $ \i ->
-    writePrimArray newArr i fill
-  writeIORef mv newArr
+  copyMutablePrimArray newArr 0 oldArr 0 cap
+  setPrimArray newArr cap (newCap - cap) defVal
+  writeIORef ref newArr
 
 {-# NOINLINE growTextStore #-}
 growTextStore :: IORef (MutableArray RealWorld Text) -> Int -> Int -> IO ()
@@ -721,11 +694,11 @@ ensureScratchCapacity na needed = do
     then pure ()
     else do
       let newCap = max needed (cap * 2)
-      growInt (naScratchIdx na) cap newCap (-1)
-      growFloat (naScratchMain na) cap newCap 0
-      growFloat (naScratchCross na) cap newCap 0
-      growFloat (naScratchOutMain na) cap newCap 0
-      growFloat (naScratchOutCross na) cap newCap 0
+      growPrimArray (naScratchIdx na) cap newCap (-1)
+      growPrimArray (naScratchMain na) cap newCap 0
+      growPrimArray (naScratchCross na) cap newCap 0
+      growPrimArray (naScratchOutMain na) cap newCap 0
+      growPrimArray (naScratchOutCross na) cap newCap 0
       writeIORef (naScratchCap na) newCap
 
 {-# INLINE forNodes_ #-}

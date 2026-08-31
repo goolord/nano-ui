@@ -54,7 +54,7 @@ import NanoUI.Style
   , tight
   )
 import NanoUI.Types (Rect (..))
-import NanoUI.WidgetMarkers (closeButtonMarker, tabButtonMarker)
+import NanoUI.WidgetText (closeButtonMarker, tabButtonMarker)
 import NanoUI.Widgets.Animate (useText)
 import NanoUI.Widgets.Layout (column, row)
 import NanoUI.Widgets.Node
@@ -231,81 +231,54 @@ tabListContainerLayout ctx style orient =
                 else Padding 0 0 0 0
           }
 
--- | Render a standard tab bar with panels.
-tabs ::
-  (Eq a, Ui :> es) =>
-  a
-  -> [Tab a (Eff es ())]
-  -> Eff es (TabResponse a, a)
-tabs curTab tabList = tabsEx TabStyleUnderline TabTop curTab tabList
+renderActiveBody :: (Eq a, Ui :> es) => [Tab a (Eff es ())] -> a -> Eff es ()
+renderActiveBody ts activeKey =
+  column (tight . fillW $ defaultLayout) $
+    case filter (\t -> tabKey t == activeKey) ts of
+      (selected : _) -> tabBody selected
+      [] -> case ts of
+        (firstTab : _) -> tabBody firstTab
+        [] -> pure ()
 
--- | Render tabs with custom styling and orientation.
-tabsEx ::
-  (Eq a, Ui :> es) =>
-  TabStyle
-  -> TabOrientation
-  -> a
-  -> [Tab a (Eff es ())]
-  -> Eff es (TabResponse a, a)
-tabsEx style orient curTab tabList =
-  -- Bar + body must share one parent. Sequential root siblings leave the body unpositioned.
-  let
-    shell layout = layout $ do
-      (tabResp, nextTab) <- tabBarEx style orient curTab tabList
-      renderActiveBody nextTab tabList
-      pure (tabResp, nextTab)
-   in
-    case orient of
-      -- Vertical tab lists share height with the body. Horizontal shells
-      -- must stay Fit: Grow here fills a wrap-row line and stretches every
-      -- body widget until a later frame remasures.
-      TabVertical -> shell (row (tight . fillW . grow $ defaultLayout))
-      TabLeft -> shell (row (tight . fillW . grow $ defaultLayout))
-      TabRight -> shell (row (tight . fillW . grow $ defaultLayout))
-      _ -> shell (column (tight . fillW $ defaultLayout))
- where
-  -- Own Fit column so a Grow shell (wrap-line leftover) cannot step
-  -- body widgets with a tall scratch height.
-  renderActiveBody activeKey ts =
-    column (tight . fillW $ defaultLayout) $
-      case filter (\t -> tabKey t == activeKey) ts of
-        (selected : _) -> tabBody selected
-        [] -> case ts of
-          (firstTab : _) -> tabBody firstTab
-          [] -> pure ()
-
--- | Render just the tab headers without rendering the tab bodies.
-tabBar ::
-  (Eq a, Ui :> es) =>
-  a
-  -> [Tab a body]
-  -> Eff es (TabResponse a, a)
-tabBar curTab tabList = tabBarEx TabStyleUnderline TabTop curTab tabList
-
--- | Render just the tab headers with styling options.
-tabBarEx ::
+renderTabsCore ::
   (Eq a, Ui :> es) =>
   TabStyle
   -> TabOrientation
   -> a
   -> [Tab a body]
+  -> Maybe (a -> Eff es ())
   -> Eff es (TabResponse a, a)
-tabBarEx style orient curTab tabList = do
+renderTabsCore style orient curTab tabList mRenderBody = do
   ctx <- askContext
   let
     containerLayout = tabListContainerLayout ctx style orient
     headerLayout = tabHeaderLayout ctx style
     styleVal = tabStyleIndex style
+    verticalList =
+      case orient of
+        TabVertical -> True
+        TabLeft -> True
+        TabRight -> True
+        _ -> False
+    headerBar
+      | verticalList =
+          column containerLayout (renderHeaders ctx headerLayout styleVal)
+      | otherwise =
+          row containerLayout (renderHeaders ctx headerLayout styleVal)
 
-  case orient of
-    TabVertical ->
-      column containerLayout $ renderHeaders ctx headerLayout styleVal
-    TabLeft ->
-      column containerLayout $ renderHeaders ctx headerLayout styleVal
-    TabRight ->
-      column containerLayout $ renderHeaders ctx headerLayout styleVal
-    _ ->
-      row containerLayout $ renderHeaders ctx headerLayout styleVal
+  case mRenderBody of
+    Nothing -> headerBar
+    Just renderBody ->
+      let
+        -- Bar + body must share one parent. Sequential root siblings leave the body unpositioned.
+        shell layout = layout $ do
+          (tabResp, nextTab) <- headerBar
+          renderBody nextTab
+          pure (tabResp, nextTab)
+       in
+        if verticalList
+          then shell (row (tight . fillW . grow $ defaultLayout))
+          else shell (column (tight . fillW $ defaultLayout))
  where
   renderHeaders ctx headerLayout styleVal = do
     resps <-
@@ -390,6 +363,46 @@ tabBarEx style orient curTab tabList = do
             Nothing
         pure (tabKey t, respClicked resp, Nothing, resp)
 
+-- | Render a standard tab bar with panels.
+tabs ::
+  (Eq a, Ui :> es) =>
+  a
+  -> [Tab a (Eff es ())]
+  -> Eff es (TabResponse a, a)
+tabs curTab tabList =
+  renderTabsCore TabStyleUnderline TabTop curTab tabList (Just (renderActiveBody tabList))
+
+-- | Render tabs with custom styling and orientation.
+tabsEx ::
+  (Eq a, Ui :> es) =>
+  TabStyle
+  -> TabOrientation
+  -> a
+  -> [Tab a (Eff es ())]
+  -> Eff es (TabResponse a, a)
+tabsEx style orient curTab tabList =
+  renderTabsCore style orient curTab tabList (Just (renderActiveBody tabList))
+
+-- | Render just the tab headers without rendering the tab bodies.
+tabBar ::
+  (Eq a, Ui :> es) =>
+  a
+  -> [Tab a body]
+  -> Eff es (TabResponse a, a)
+tabBar curTab tabList =
+  renderTabsCore TabStyleUnderline TabTop curTab tabList Nothing
+
+-- | Render just the tab headers with styling options.
+tabBarEx ::
+  (Eq a, Ui :> es) =>
+  TabStyle
+  -> TabOrientation
+  -> a
+  -> [Tab a body]
+  -> Eff es (TabResponse a, a)
+tabBarEx style orient curTab tabList =
+  renderTabsCore style orient curTab tabList Nothing
+
 -- | Patch tab button node values so the active underline matches selection this frame.
 syncTabHeaderActive ::
   Eq a => Context -> a -> [(a, Bool, Maybe a, Response)] -> IO ()
@@ -417,7 +430,8 @@ tabsEmit ::
   -> a
   -> [Tab a (Eff es ())]
   -> Eff es (TabResponse a, a)
-tabsEmit toAction curTab tabList = tabsEmitEx TabStyleUnderline TabTop toAction curTab tabList
+tabsEmit toAction curTab tabList =
+  tabsEmitEx TabStyleUnderline TabTop toAction curTab tabList
 
 -- | Event-emitting variant of tabs with full styling control.
 tabsEmitEx ::
@@ -429,7 +443,8 @@ tabsEmitEx ::
   -> [Tab a (Eff es ())]
   -> Eff es (TabResponse a, a)
 tabsEmitEx style orient toAction curTab tabList = do
-  (tabResp, nextTab) <- tabsEx style orient curTab tabList
+  (tabResp, nextTab) <-
+    renderTabsCore style orient curTab tabList (Just (renderActiveBody tabList))
   when (tabRespClicked tabResp && nextTab /= curTab) $
     emit (toAction nextTab)
   pure (tabResp, nextTab)

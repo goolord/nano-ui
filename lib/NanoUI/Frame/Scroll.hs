@@ -1,5 +1,4 @@
 {-# LANGUAGE DataKinds #-}
-{-# OPTIONS_GHC -Wno-unused-imports #-}
 {-# OPTIONS_GHC -Wno-unused-top-binds #-}
 
 module NanoUI.Frame.Scroll
@@ -13,158 +12,37 @@ module NanoUI.Frame.Scroll
   ) where
 
 
-import Control.Monad (filterM, foldM, forM, forM_, unless, void, when)
-import Data.Char (isAlphaNum, isSpace)
+import Control.Monad (forM_, void, when)
 import Data.IORef (readIORef, writeIORef)
-import Data.Typeable (Typeable)
-import Data.List (findIndex)
-import Data.Maybe (isJust)
-import Data.Word (Word32)
 import qualified Data.IntMap.Strict as IM
-import qualified Data.Text as T
-import NanoUI.Damage (floatingPanelRects, updatePrevRects, writeDamage)
-import NanoUI.Context
-  ( Context (..)
-  , FrameMsg (..)
-  , WidgetStore (..)
-  , TextInputMenu (..)
-  , TextInputDrag (..)
-  , WindowResizeDrag (..)
-  , WindowResizeEdge (..)
-  , anyAnimating
-  , decodeMessages
-  , drainMessages
-  , getFocusables
-  , getScrollOffset
-  , getStore
-  , intKey
-  , isDirty
-  , isDisabled
-  , markDirty
-  , getHotId
-  , getPrevRect
-  , setScrollOffset
-  , setStore
-  , startAnimation
-  , setAnimationValue
-  , tickAnimations
-  , getAnimationValue
-  , animInProgress
-  , clearTooltips
-  , readTooltips
-  , PendingTooltip (..)
-  , ctxClipboardGet
-  , clearMeasureCache
-  , markEscapeConsumed
-  , lookupImageUv
-  , atlasTextureId
-  )
-import NanoUI.Draw
-  ( DrawArena
-  , DrawData
-  , Layer (..)
-  , beginLayer
-  , currentLayer
-  , finishDraw
-  , pushLine
-  , pushFilledTriangle
-  , pushRect
-  , pushBackdropDim
-  , pushImage
-  , pushRoundedRect
-  , pushRoundedStroke
-  , pushText
-  , resetDrawArena
-  , withClip
-  )
-import NanoUI.Font
-  ( FontMetrics (..)
-  , checkboxBoxSize
-  , checkboxLeading
-  , fmLineHeight
-  , layoutLineHeight
-  , hasHeadingMarker
-  , hasMonoFontMarker
-  , hasMutedMarker
-  , labelContentInset
-  , resolveLayoutPadding
-  , stripWidgetMarkers
-  , lineWidth
-  , textDisplayWidth
-  , ScrollBarSlot (..)
-  , scrollBarGeomFor
-  , scrollBarOuterGap
-  , scrollLayoutGutter
-  , sliderTrackBounds
-  , widgetContentInset
-  , centeredTextY
-  , alignedTextBox
-  , wrapTextLines
-  , wrapTextLinesIO
-  )
+import NanoUI.Context (Context (..), WidgetStore (..), getScrollOffset, getStore, setScrollOffset)
+import NanoUI.Draw (DrawArena, Layer (..), beginLayer, currentLayer, pushRect, pushRoundedRect)
+import NanoUI.Font (FontMetrics, ScrollBarSlot (..), scrollBarGeomFor)
 import NanoUI.Host (HostProfile, isCellHost)
-import NanoUI.WidgetMarkers
-  ( buttonDisplayText
-  , closeButtonDisplayText
-  , isCloseButtonText
-  , stripButtonBrackets
-  )
-import NanoUI.Icons (Icons (..), checkboxMark, terminalPaintColumns)
-import NanoUI.Id (WidgetId (..), hashWidgetId)
-import NanoUI.Input (Input (..), Key (..), Modifiers (..), inputInteracted, inputKeys, inputPointerHeld, inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased, inputMouseRightPressed, inputScroll, inputDeltaTime, inputWindowSize, modShift)
+import NanoUI.Id (WidgetId, hashWidgetId)
+import NanoUI.Input (Input (..), inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased, inputScroll)
 import NanoUI.Layout.Arena
   ( DirTag (..)
   , NodeIdx
   , NodeType (..)
-  , SizingTag (..)
   , arenaCount
-  , getAlignX
-  , getDirection
   , forChildNodes_
+  , getDirection
   , getFirstChild
-  , getHeightSizing
-  , getMinMax
   , getNextSibling
-  , getParent
-  , getNodeType
   , getNodeValue
   , getPadding
+  , getParent
+  , getNodeType
   , getRect
-  , getStyleIdx
-  , getText
-  , getWidthSizing
   , getWidgetId
-  , isWidgetNode
   , isContainerNode
-  , isFloatingNode
   , isScrollNode
-  , NodeType (NodeButton, NodeCheckbox, NodeRadio, NodeSelect, NodeColorPicker, NodeSlider, NodeTextInput, NodeModal, NodeImage, NodePanel, NodeWindow, NodeContainer, NodeScrollContainer, NodeText, NodeSeparator, NodeSpacer, NodeBox)
-  , resetNodeArena
-  , setNodeText
-  , setNodeValue
   , setRect
   )
-import NanoUI.Layout.Solve (placeModals, placeWindows, positionWindowNode, scrollBarSlotOf, solveLayout)
-import Effectful (Eff, IOE, runEff, type (:>))
-import NanoUI.Monad (NanoUI, Ui, runUi)
-import NanoUI.WidgetText
-  ( checkboxLabelText
-  , sliderLabelText
-  , sliderPackRange
-  , sliderParseRange
-  , sliderPackTerminal
-  , sliderValueText
-  , textInputFieldHeight
-  , textInputFieldText
-  , textInputLabelGap
-  , textInputTerminalText
-  , selectParseOptions
-  , selectDisplayText
-  , selectChevronReserve
-  , selectChevronCenterX
-  )
-import NanoUI.Style (Padding (..), Style (..), Theme (..), scrollBarThumbColor, scrollBarTrackColor, themeAccent, themeButton, themeFloatingWindow, themeInput, themeMuted, themeOverlayDim, themePanel, themeSeparator, themeWindow)
-import NanoUI.Types (Color (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, lerpColor, rectContains, rectH, rectIntersect, rectOverlapArea, rectUnion, rectW, rectX, rectY, v2X, v2Y)
+import NanoUI.Layout.Solve (scrollBarSlotOf)
+import NanoUI.Style (Padding (..), Theme (..), scrollBarThumbColor, scrollBarTrackColor, themeFloatingWindow, themePanel)
+import NanoUI.Types (Rect (..), V2 (..), rectContains, rectH, rectIntersect, rectUnion, rectW, rectX, rectY, v2X, v2Y)
 import NanoUI.Frame.Clip (scrollChromeLane, scrollContentClip)
 import NanoUI.Frame.Hit (ancestorScrollShift, findNodeByWidgetId, topmostWindowAtMouse)
 

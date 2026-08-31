@@ -93,14 +93,11 @@ terminalThemeFromColors fg bg =
   let dark = colorLuminance bg < 0.45
       white = colorRGBA 255 255 255 255
       black = colorRGBA 0 0 0 255
-      lift c t =
-        if dark
-          then lerpColor c white t
-          else lerpColor c black t
-      sink c t =
-        if dark
-          then lerpColor c black t
-          else lerpColor c white t
+      pole light = if dark == light then white else black
+      shade light c t = lerpColor c (pole light) t
+      lift = shade True
+      sink = shade False
+      blend t = lerpColor fg bg t
       window = bg
       panelBg = lift bg 0.09
       panelHover = lift bg 0.14
@@ -114,13 +111,10 @@ terminalThemeFromColors fg bg =
       floatBg = lift bg 0.12
       floatHover = lift bg 0.17
       floatActive = lift bg 0.08
-      border = lerpColor fg bg 0.58
-      accent =
-        if dark
-          then lift fg 0.22
-          else sink fg 0.28
-      muted = lerpColor fg bg 0.40
-      separator = lerpColor fg bg 0.52
+      border = blend 0.58
+      accent = shade dark fg (if dark then 0.22 else 0.28)
+      muted = blend 0.40
+      separator = blend 0.52
       dimBase = sink bg 0.55
       overlayDim =
         colorRGBA (colorR dimBase) (colorG dimBase) (colorB dimBase) 186
@@ -138,7 +132,7 @@ terminalThemeFromColors fg bg =
         Style
           { styleBg = buttonBg
           , styleFg = fg
-          , styleBorder = lerpColor fg bg 0.48
+          , styleBorder = blend 0.48
           , styleBorderWidth = 1
           , styleCornerRadius = 0
           , styleHoverBg = buttonHover

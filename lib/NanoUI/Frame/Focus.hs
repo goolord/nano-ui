@@ -30,7 +30,7 @@ import NanoUI.Layout.Arena
   , setNodeText
   , setNodeValue
   )
-import NanoUI.WidgetMarkers (stripButtonBrackets)
+import NanoUI.WidgetText (stripButtonBrackets)
 import NanoUI.WidgetText
   ( checkboxLabelText
   , radioLabelText

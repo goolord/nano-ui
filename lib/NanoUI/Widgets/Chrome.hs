@@ -15,7 +15,7 @@ module NanoUI.Widgets.Chrome
 import Effectful (Eff, type (:>))
 import Data.Text (Text)
 import NanoUI.Font (layoutUnitScale)
-import NanoUI.WidgetMarkers (closeButtonMarker)
+import NanoUI.WidgetText (closeButtonMarker)
 import NanoUI.Host (HostProfile, isCellHost)
 import NanoUI.Context (Context (..), isDisabled, registerFocusable)
 import NanoUI.Icons (Icons (..))

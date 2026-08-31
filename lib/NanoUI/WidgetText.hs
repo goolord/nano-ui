@@ -34,6 +34,16 @@ module NanoUI.WidgetText
   , colorPickerDisplayText
   , colorPickerToHex
   , colorPickerFromHex
+  , closeButtonMarker
+  , tabButtonMarker
+  , stripButtonBrackets
+  , isCloseButtonText
+  , isTabButtonText
+  , closeButtonDisplayText
+  , tabButtonDisplayText
+  , buttonDisplayText
+  , buttonFlags
+  , buttonDisplayTextFromFlags
   ) where
 
 import Data.Char (chr)
@@ -300,3 +310,51 @@ parseHexDigit c
 
 colorPickerDisplayText :: Text -> Color -> Text
 colorPickerDisplayText lbl col = colorPickerLabelText lbl <> ": " <> colorPickerToHex col
+
+closeButtonMarker :: Text
+closeButtonMarker = T.singleton '\x01'
+
+tabButtonMarker :: Text
+tabButtonMarker = T.singleton '\x02'
+
+{-# INLINE stripButtonBrackets #-}
+stripButtonBrackets :: Text -> Text
+stripButtonBrackets txt =
+  let t = T.strip txt
+   in if T.isPrefixOf "[ " t && T.isSuffixOf " ]" t
+        then T.strip $ T.dropEnd 2 $ T.drop 2 t
+        else txt
+
+{-# INLINE buttonFlags #-}
+buttonFlags :: Text -> (Bool, Bool)
+buttonFlags txt =
+  let lbl = stripButtonBrackets txt
+   in ( closeButtonMarker `T.isPrefixOf` lbl
+      , tabButtonMarker `T.isPrefixOf` lbl
+      )
+
+{-# INLINE isCloseButtonText #-}
+isCloseButtonText :: Text -> Bool
+isCloseButtonText txt = fst (buttonFlags txt)
+
+{-# INLINE isTabButtonText #-}
+isTabButtonText :: Text -> Bool
+isTabButtonText txt = snd (buttonFlags txt)
+
+{-# INLINE buttonDisplayTextFromFlags #-}
+buttonDisplayTextFromFlags :: (Bool, Bool) -> Text -> Text
+buttonDisplayTextFromFlags (isClose, isTab) txt
+  | isClose || isTab = T.drop 1 (stripButtonBrackets txt)
+  | otherwise = txt
+
+{-# INLINE closeButtonDisplayText #-}
+closeButtonDisplayText :: Text -> Text
+closeButtonDisplayText txt = buttonDisplayTextFromFlags (True, False) txt
+
+{-# INLINE tabButtonDisplayText #-}
+tabButtonDisplayText :: Text -> Text
+tabButtonDisplayText txt = buttonDisplayTextFromFlags (False, True) txt
+
+{-# INLINE buttonDisplayText #-}
+buttonDisplayText :: Text -> Text
+buttonDisplayText txt = buttonDisplayTextFromFlags (buttonFlags txt) txt

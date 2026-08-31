@@ -58,14 +58,12 @@ import NanoUI.Layout.Arena
   , isFloatingNode
   , isWidgetNode
   )
-import NanoUI.WidgetMarkers
+import NanoUI.WidgetText
   ( buttonDisplayText
   , buttonDisplayTextFromFlags
   , buttonFlags
   , stripButtonBrackets
-  )
-import NanoUI.WidgetText
-  ( checkboxLabelText
+  , checkboxLabelText
   , radioLabelText
   , treeDisplayText
   , treeLabelText
