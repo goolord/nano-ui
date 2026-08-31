@@ -83,6 +83,24 @@ cellBg cs x y = indexPrimArray (cellsData cs) (base cs x y + 2)
 base :: Cells -> Int -> Int -> Int
 base cs x y = (y * cellsW cs + x) * 3
 
+{-# INLINE clampByte #-}
+clampByte :: Float -> Word32
+clampByte f = fromIntegral (clamp 0 255 (round (f * 255)))
+
+{-# INLINE packRgba #-}
+packRgba :: Word32 -> Word32 -> Word32 -> Word32 -> Word32
+packRgba r g b a = (r `shiftL` 24) .|. (g `shiftL` 16) .|. (b `shiftL` 8) .|. a
+
+{-# INLINE isTerminalDefault #-}
+isTerminalDefault :: Word32 -> Bool
+isTerminalDefault w = (w .&. 0xff) < 32
+
+{-# INLINE lerpCellOrDim #-}
+lerpCellOrDim :: Color -> Float -> Word32 -> Word32
+lerpCellOrDim dim t w
+  | isTerminalDefault w = colorToWord32 dim
+  | otherwise = colorToWord32 (lerpColor (Color w) dim t)
+
 -- | Character-only view, for snapshot tests.
 cellRows :: Cells -> [String]
 cellRows cs =
@@ -248,16 +266,8 @@ stampBackdropDim arr w _ ix iy iw ih rgba =
                     off = (cy * w + cx) * 3
                 fgW <- readPrimArray arr (off + 1)
                 bgW <- readPrimArray arr (off + 2)
-                let newFgW
-                      | (fgW .&. 0xff) < 32 = colorToWord32 dim
-                      | otherwise =
-                          colorToWord32 (lerpColor (Color fgW) dim t)
-                    newBgW
-                      | (bgW .&. 0xff) < 32 = colorToWord32 dim
-                      | otherwise =
-                          colorToWord32 (lerpColor (Color bgW) dim t)
-                writePrimArray arr (off + 1) newFgW
-                writePrimArray arr (off + 2) newBgW
+                writePrimArray arr (off + 1) (lerpCellOrDim dim t fgW)
+                writePrimArray arr (off + 2) (lerpCellOrDim dim t bgW)
                 goX (dx + 1)
    in goY 0
 
@@ -289,7 +299,7 @@ stampSpan arr w h (Rect rx ry rw _rh, txt, fg, bg, clip) =
           else
             when inClip $ do
               breakWidePair arr w h cx y0
-              if (bgW .&. 0xff) < 32
+              if isTerminalDefault bgW
                 then do
                   let off = (y0 * w + cx) * 3
                   writePrimArray arr off (fromIntegral (ord c))
@@ -376,11 +386,7 @@ vertexAt dd slot = do
           g <- peekFloatAt (drawVertices dd) (off + 12)
           b <- peekFloatAt (drawVertices dd) (off + 16)
           a <- peekFloatAt (drawVertices dd) (off + 20)
-          let !ru = fromIntegral (clamp 0 255 (round (r * 255))) :: Word32
-              !gu = fromIntegral (clamp 0 255 (round (g * 255))) :: Word32
-              !bu = fromIntegral (clamp 0 255 (round (b * 255))) :: Word32
-              !au = fromIntegral (clamp 0 255 (round (a * 255))) :: Word32
-              !rgba = (ru `shiftL` 24) .|. (gu `shiftL` 16) .|. (bu `shiftL` 8) .|. au
+          let !rgba = packRgba (clampByte r) (clampByte g) (clampByte b) (clampByte a)
           pure (Just (x, y, rgba))
 
 readIndexAt :: DrawData -> Int -> IO (Maybe Int)
