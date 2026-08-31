@@ -239,6 +239,26 @@ ensureCapacity da needVerts needIndices = do
   iCount <- readIORef (daIndexCount da)
   growBuffer iCount (daIndexFPtr da) (daIndexPtr da) (daIndexCap da) (daIndexPool da) indexSize needIndices
 
+{-# INLINE ensureAndAlloc #-}
+ensureAndAlloc :: DrawArena -> Int -> Int -> IO (Ptr Word8, Ptr Word8, Int, Int)
+ensureAndAlloc da needV needI = do
+  vCount <- readIORef (daVertexCount da)
+  iCount <- readIORef (daIndexCount da)
+  vCap <- readIORef (daVertexCap da)
+  iCap <- readIORef (daIndexCap da)
+  if vCount + needV <= vCap && iCount + needI <= iCap
+    then do
+      vp <- readIORef (daVertexPtr da)
+      ip <- readIORef (daIndexPtr da)
+      pure (vp, ip, vCount, iCount)
+    else do
+      ensureCapacity da needV needI
+      vp <- readIORef (daVertexPtr da)
+      ip <- readIORef (daIndexPtr da)
+      vc <- readIORef (daVertexCount da)
+      ic <- readIORef (daIndexCount da)
+      pure (vp, ip, vc, ic)
+
 {-# NOINLINE growCmdStore #-}
 growCmdStore :: DrawArena -> Int -> IO ()
 growCmdStore da oldCap = do
@@ -362,23 +382,7 @@ unpackColorF (Color w) =
 {-# INLINE pushQuad #-}
 pushQuad :: DrawArena -> Rect -> Float -> Float -> Float -> Float -> Color -> IO ()
 pushQuad da (Rect x y w h) u0 v0 u1 v1 col = do
-  vCount <- readIORef (daVertexCount da)
-  iCount <- readIORef (daIndexCount da)
-  vCap <- readIORef (daVertexCap da)
-  iCap <- readIORef (daIndexCap da)
-  (vp, ip, base, baseIdx) <-
-    if vCount + 4 <= vCap && iCount + 6 <= iCap
-      then do
-        vp <- readIORef (daVertexPtr da)
-        ip <- readIORef (daIndexPtr da)
-        pure (vp, ip, vCount, iCount)
-      else do
-        ensureCapacity da 4 6
-        vp <- readIORef (daVertexPtr da)
-        ip <- readIORef (daIndexPtr da)
-        vc <- readIORef (daVertexCount da)
-        ic <- readIORef (daIndexCount da)
-        pure (vp, ip, vc, ic)
+  (vp, ip, base, baseIdx) <- ensureAndAlloc da 4 6
   let !(r, g, b, a) = unpackColorF col
       !vOff = base * vertexSize
       !iOff = baseIdx * indexSize
@@ -438,23 +442,7 @@ pushQuadGradient da (Rect x y w h) tl tr br bl
   | w <= 0 || h <= 0 = pure ()
   | otherwise = do
       setTexture da 0
-      vCount <- readIORef (daVertexCount da)
-      iCount <- readIORef (daIndexCount da)
-      vCap <- readIORef (daVertexCap da)
-      iCap <- readIORef (daIndexCap da)
-      (vp, ip, base, baseIdx) <-
-        if vCount + 4 <= vCap && iCount + 6 <= iCap
-          then do
-            vp <- readIORef (daVertexPtr da)
-            ip <- readIORef (daIndexPtr da)
-            pure (vp, ip, vCount, iCount)
-          else do
-            ensureCapacity da 4 6
-            vp <- readIORef (daVertexPtr da)
-            ip <- readIORef (daIndexPtr da)
-            vc <- readIORef (daVertexCount da)
-            ic <- readIORef (daIndexCount da)
-            pure (vp, ip, vc, ic)
+      (vp, ip, base, baseIdx) <- ensureAndAlloc da 4 6
       let !vOff = base * vertexSize
           !iOff = baseIdx * indexSize
           !baseIdxWord = fromIntegral base :: Word32
@@ -522,23 +510,7 @@ pushCornerFan da cx cy rad a0 a1 col = do
   let !segs = cornerSegments
       !needV = segs + 2
       !needI = segs * 3
-  vCount <- readIORef (daVertexCount da)
-  iCount <- readIORef (daIndexCount da)
-  vCap <- readIORef (daVertexCap da)
-  iCap <- readIORef (daIndexCap da)
-  (vp, ip, base, baseIdx) <-
-    if vCount + needV <= vCap && iCount + needI <= iCap
-      then do
-        vp <- readIORef (daVertexPtr da)
-        ip <- readIORef (daIndexPtr da)
-        pure (vp, ip, vCount, iCount)
-      else do
-        ensureCapacity da needV needI
-        vp <- readIORef (daVertexPtr da)
-        ip <- readIORef (daIndexPtr da)
-        vc <- readIORef (daVertexCount da)
-        ic <- readIORef (daIndexCount da)
-        pure (vp, ip, vc, ic)
+  (vp, ip, base, baseIdx) <- ensureAndAlloc da needV needI
   let !(r, g, b, a) = unpackColorF col
       !centerOff = base * vertexSize
       !centerIdx = fromIntegral base :: Word32
@@ -583,23 +555,7 @@ pushCornerArc da cx cy outerR innerR a0 a1 col
       let !segs = cornerSegments
           !needV = (segs + 1) * 2
           !needI = segs * 6
-      vCount <- readIORef (daVertexCount da)
-      iCount <- readIORef (daIndexCount da)
-      vCap <- readIORef (daVertexCap da)
-      iCap <- readIORef (daIndexCap da)
-      (vp, ip, base, baseIdx) <-
-        if vCount + needV <= vCap && iCount + needI <= iCap
-          then do
-            vp <- readIORef (daVertexPtr da)
-            ip <- readIORef (daIndexPtr da)
-            pure (vp, ip, vCount, iCount)
-          else do
-            ensureCapacity da needV needI
-            vp <- readIORef (daVertexPtr da)
-            ip <- readIORef (daIndexPtr da)
-            vc <- readIORef (daVertexCount da)
-            ic <- readIORef (daIndexCount da)
-            pure (vp, ip, vc, ic)
+      (vp, ip, base, baseIdx) <- ensureAndAlloc da needV needI
       let !(r, g, b, a) = unpackColorF col
           !step = (a1 - a0) / fromIntegral segs
       forM_ [0 .. segs] $ \i -> do
@@ -726,23 +682,7 @@ pushLine da x1 y1 x2 y2 thickness col = do
 pushFilledTriangle :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
 pushFilledTriangle da x0 y0 x1 y1 x2 y2 col = do
   setTexture da 0
-  vCount <- readIORef (daVertexCount da)
-  iCount <- readIORef (daIndexCount da)
-  vCap <- readIORef (daVertexCap da)
-  iCap <- readIORef (daIndexCap da)
-  (vp, ip, base, baseIdx) <-
-    if vCount + 3 <= vCap && iCount + 3 <= iCap
-      then do
-        vp <- readIORef (daVertexPtr da)
-        ip <- readIORef (daIndexPtr da)
-        pure (vp, ip, vCount, iCount)
-      else do
-        ensureCapacity da 3 3
-        vp <- readIORef (daVertexPtr da)
-        ip <- readIORef (daIndexPtr da)
-        vc <- readIORef (daVertexCount da)
-        ic <- readIORef (daIndexCount da)
-        pure (vp, ip, vc, ic)
+  (vp, ip, base, baseIdx) <- ensureAndAlloc da 3 3
   let !(r, g, b, a) = unpackColorF col
       !vOff = base * vertexSize
       !iOff = baseIdx * indexSize
