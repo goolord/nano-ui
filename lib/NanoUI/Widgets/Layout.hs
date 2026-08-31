@@ -2,8 +2,11 @@
 
 module NanoUI.Widgets.Layout
   ( panel
+  , panelResponse
   , row
+  , rowResponse
   , column
+  , columnResponse
   , label
   , labelEx
   , separator
@@ -42,6 +45,7 @@ import NanoUI.Widgets.Node
   , addSizingLeafNode
   , addWidget
   , container
+  , containerResponse
   , parentIdx
   )
 
@@ -49,13 +53,25 @@ import NanoUI.Widgets.Node
 panel :: Ui :> es => Layout -> Eff es a -> Eff es a
 panel = container NodePanel
 
+{-# INLINE panelResponse #-}
+panelResponse :: Ui :> es => Layout -> Eff es a -> Eff es (a, Response)
+panelResponse = containerResponse NodePanel
+
 {-# INLINE row #-}
 row :: Ui :> es => Layout -> Eff es a -> Eff es a
 row layout child = container NodeContainer (layout {layoutDirection = Row}) child
 
+{-# INLINE rowResponse #-}
+rowResponse :: Ui :> es => Layout -> Eff es a -> Eff es (a, Response)
+rowResponse layout child = containerResponse NodeContainer (layout {layoutDirection = Row}) child
+
 {-# INLINE column #-}
 column :: Ui :> es => Layout -> Eff es a -> Eff es a
 column layout child = container NodeContainer (layout {layoutDirection = Column}) child
+
+{-# INLINE columnResponse #-}
+columnResponse :: Ui :> es => Layout -> Eff es a -> Eff es (a, Response)
+columnResponse layout child = containerResponse NodeContainer (layout {layoutDirection = Column}) child
 
 {-# INLINE label #-}
 label :: Ui :> es => Text -> Eff es Response

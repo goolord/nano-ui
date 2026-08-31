@@ -5,7 +5,6 @@ module NanoUI.Frame.Paint
   ( lowerShapes
   , lowerNode
   , walkChildren
-  , drawTooltipOverlays
   ) where
 
 
@@ -16,11 +15,9 @@ import qualified Data.Text as T
 import NanoUI.ColorPicker (drawColorPickerPanel)
 import NanoUI.Context
   ( Context (..)
-  , PendingTooltip (..)
   , atlasTextureId
   , getStore
   , lookupImageUv
-  , readTooltips
   )
 import NanoUI.Draw
   ( DrawArena
@@ -86,7 +83,6 @@ import NanoUI.Frame.Chrome
   , widgetVisualStyle
   )
 import NanoUI.Frame.Clip (scrollContentClip)
-import NanoUI.Frame.Hit (widgetOverlayAllowed)
 import NanoUI.Frame.Scroll (paintScrollChrome)
 import NanoUI.Frame.Spans (collectNodeTextSpans, widgetTextPlacements, widgetTextSpans)
 import NanoUI.Frame.TextInput (TextInputGeom (..), drawTextInputCaret, drawTextInputSelection, textInputFieldTextClip, textInputGeom)
@@ -216,6 +212,7 @@ lowerNodeVisible ctx idx nt x y w h rect fm theme terminal da =
     NodeSpacer -> pure ()
     NodeModal -> pure ()
     NodeWindow -> pure ()
+    NodePopup -> pure ()
     NodeBox -> do
       si <- getStyleIdx (ctxNodeArena ctx) idx
       -- styleIdx holds RGBA Word32 bits; see `box` in NanoUI.Widgets.
@@ -515,27 +512,4 @@ drawTreeChevron da host fm x y w h depth expanded col = do
   if expanded
     then pushFilledTriangle da (mx - s) (my - s * 0.45) (mx + s) (my - s * 0.45) mx (my + s * 0.7) col
     else pushFilledTriangle da (mx - s * 0.45) (my - s) (mx + s * 0.7) my (mx - s * 0.45) (my + s) col
-
-drawTooltipOverlays :: Context -> IO ()
-drawTooltipOverlays ctx = do
-  let da = ctxDrawArena ctx
-      theme = ctxTheme ctx
-      fm = ctxFontMetrics ctx
-      terminal = isCellHost (ctxHostProfile ctx)
-  when (not terminal) $ do
-    tips <- readTooltips ctx
-    let panelStyle = themePanel theme
-        (ix, _) = labelContentInset (ctxHostProfile ctx) fm
-    forM_ tips $ \(PendingTooltip wid rect@(Rect x y w h) text) -> do
-      allow <- widgetOverlayAllowed ctx wid
-      when allow $ do
-        fillStyledRect da False panelStyle rect
-        strokeStyledRect da False panelStyle x y w h
-        unless (T.null text) $ do
-          (_tw, th) <- ctxMeasureText ctx text
-          let tx = x + ix
-              ty = centeredTextY (ctxHostProfile ctx) fm y h th
-              fg = styleFg panelStyle
-              (fm', shown) = pickMonoFont fm (ctxMonoFontMetrics ctx) text
-          pushText da fm' tx ty shown fg
 

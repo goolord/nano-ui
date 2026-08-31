@@ -31,6 +31,8 @@ module NanoUI.Types
   , sliderBarCells
   , v2Add
   , v2Sub
+  , PopupAnchor (..)
+  , PopupPlacement (..)
   ) where
 
 import Data.Bits (shiftL, shiftR, (.&.), (.|.))
@@ -256,3 +258,17 @@ v2Add (V2 x1 y1) (V2 x2 y2) = V2 (x1 + x2) (y1 + y2)
 {-# INLINE v2Sub #-}
 v2Sub :: V2 -> V2 -> V2
 v2Sub (V2 x1 y1) (V2 x2 y2) = V2 (x1 - x2) (y1 - y2)
+
+data PopupAnchor
+  = AnchorPoint !V2
+  | AnchorRect !Rect
+  deriving (Eq, Show)
+
+data PopupPlacement
+  = PlacementBelow
+  | PlacementAbove
+  | PlacementRight
+  | PlacementLeft
+  | PlacementAtCursor
+  | PlacementAuto
+  deriving (Eq, Show)

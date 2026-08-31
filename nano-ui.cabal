@@ -110,6 +110,8 @@ library
         NanoUI.Widgets.TextInput
         NanoUI.Widgets.Animate
         NanoUI.Widgets.Overlay
+        NanoUI.Widgets.Popup
+        NanoUI.Widgets.Menu
         NanoUI.Widgets.Table
         NanoUI.Widgets.Behavior
         NanoUI.Widgets.Combinators

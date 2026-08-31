@@ -1,7 +1,9 @@
 module NanoUI.Layout.Solve
-  (   solveLayout
+  ( solveLayout
   , placeModals
   , placeWindows
+  , placePopups
+  , computePopupPosition
   , positionNode
   , positionWindowNode
   , scrollBarSlotOf
@@ -82,6 +84,7 @@ import NanoUI.Layout.Arena
   )
 import NanoUI.Id (WidgetId)
 import NanoUI.Style (AlignX (..), AlignY (..), Padding (..), windowMargin)
+import NanoUI.Types (PopupAnchor (..), PopupPlacement (..), Rect (..), V2 (..))
 import NanoUI.ColorPicker (colorPickerMeasureSize)
 import NanoUI.WidgetText
   ( checkboxLabelText
@@ -173,6 +176,7 @@ measureNode na host fm measure useAssignedWidth idx = do
           setNodeValue na idx 0
       | otherwise -> measureScrollContainer na host fm idx
     NodeWindow -> measureContainer na host fm useAssignedWidth idx
+    NodePopup -> measureContainer na host fm useAssignedWidth idx
     NodeImage -> measureImage na idx
     NodeBox -> measureImage na idx
     _ -> measureWidget na host fm measure idx
@@ -573,6 +577,7 @@ positionNode na host fm idx x y availW availH = do
       | isCellHost host -> positionChildren na host fm idx dir gap pad x y w h
       | otherwise -> positionScrollChildren na host fm idx dir gap pad x y w h
     NodeWindow -> positionChildren na host fm idx dir gap pad x y w h
+    NodePopup -> positionChildren na host fm idx dir gap pad x y w h
     _ -> pure ()
 
 positionScrollChildren ::
@@ -633,6 +638,7 @@ hasPanelAncestor na = go
             NodePanel -> pure True
             NodeWindow -> pure False
             NodeModal -> pure False
+            NodePopup -> pure False
             _ -> getParent na p >>= go
 
 positionColumnScroll ::
@@ -1175,3 +1181,103 @@ positionWindowNode na host fm idx x y w h = do
       gap = resolveLayoutGap host fm gap0
   dir <- getDirection na idx
   positionChildren na host fm idx dir gap pad x y w h
+
+computePopupPosition ::
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  PopupAnchor ->
+  PopupPlacement ->
+  Float ->
+  (Float, Float)
+computePopupPosition winW winH margin iw ih anchor placement offset =
+  case anchor of
+    AnchorPoint (V2 px py) ->
+      let x0 = case placement of
+            PlacementLeft -> px - iw - offset
+            PlacementRight -> px + offset
+            _ -> px
+          y0 = case placement of
+            PlacementAbove -> py - ih - offset
+            PlacementBelow -> py + offset
+            _ -> py
+          x = if x0 + iw > winW - margin && px - iw - margin >= 0
+                then px - iw - offset
+                else max margin (min (winW - iw - margin) x0)
+          y = if y0 + ih > winH - margin && py - ih - margin >= 0
+                then py - ih - offset
+                else max margin (min (winH - ih - margin) y0)
+       in (x, y)
+    AnchorRect (Rect rx ry rw rh) ->
+      case placement of
+        PlacementBelow ->
+          let x0 = rx
+              y0 = ry + rh + offset
+              y = if y0 + ih > winH - margin && ry - ih - offset >= margin
+                    then ry - ih - offset
+                    else y0
+              x = max margin (min (winW - iw - margin) x0)
+           in (x, max margin (min (winH - ih - margin) y))
+        PlacementAbove ->
+          let x0 = rx
+              y0 = ry - ih - offset
+              y = if y0 < margin && ry + rh + offset + ih <= winH - margin
+                    then ry + rh + offset
+                    else y0
+              x = max margin (min (winW - iw - margin) x0)
+           in (x, max margin (min (winH - ih - margin) y))
+        PlacementRight ->
+          let x0 = rx + rw + offset
+              y0 = ry
+              x = if x0 + iw > winW - margin && rx - iw - offset >= margin
+                    then rx - iw - offset
+                    else x0
+              y = max margin (min (winH - ih - margin) y0)
+           in (max margin (min (winW - iw - margin) x), y)
+        PlacementLeft ->
+          let x0 = rx - iw - offset
+              y0 = ry
+              x = if x0 < margin && rx + rw + offset + iw <= winW - margin
+                    then rx + rw + offset
+                    else x0
+              y = max margin (min (winH - ih - margin) y0)
+           in (max margin (min (winW - iw - margin) x), y)
+        PlacementAuto ->
+          let spaceBelow = winH - margin - (ry + rh + offset)
+              spaceAbove = ry - offset - margin
+              y = if spaceBelow >= ih || spaceBelow >= spaceAbove
+                    then ry + rh + offset
+                    else ry - ih - offset
+              x = max margin (min (winW - iw - margin) rx)
+           in (x, max margin (min (winH - ih - margin) y))
+        PlacementAtCursor ->
+          (max margin (min (winW - iw - margin) rx), max margin (min (winH - ih - margin) (ry + rh + offset)))
+
+placePopups ::
+  NodeArena ->
+  HostProfile ->
+  FontMetrics ->
+  Float ->
+  Float ->
+  (WidgetId -> IO (Maybe (PopupAnchor, PopupPlacement, Float))) ->
+  IO ()
+placePopups na host fm winW winH lookupAnchor = do
+  count <- arenaCount na
+  let margin = resolveLayoutGap host fm windowMargin
+      go !idx
+        | idx >= count = pure ()
+        | otherwise = do
+            nt <- getNodeType na idx
+            when (nt == NodePopup) $ do
+              wid <- getWidgetId na idx
+              (_, _, iw, ih) <- getRect na idx
+              mcfg <- lookupAnchor wid
+              let (anchor, placement, offset) = case mcfg of
+                    Just (a, p, o) -> (a, p, o)
+                    Nothing -> (AnchorPoint (V2 0 0), PlacementAuto, 4)
+                  (x, y) = computePopupPosition winW winH margin iw ih anchor placement offset
+              positionNode na host fm idx x y iw ih
+            go (idx + 1)
+  go 0

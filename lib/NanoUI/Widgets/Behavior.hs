@@ -42,6 +42,7 @@ import NanoUI.Input
   , inputMousePos
   , inputMousePressed
   , inputMouseReleased
+  , inputMouseRightPressed
   )
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO)
 import NanoUI.Store (WidgetStore (..))
@@ -221,7 +222,7 @@ useDismissable panel = do
       inside =
         rectW panel > 0 && rectH panel > 0 && rectContains panel mouse
       esc = inputKeysElem KeyEscape (inputKeys inp)
-      backdrop = inputMousePressed inp && not inside
+      backdrop = (inputMousePressed inp || inputMouseRightPressed inp) && not inside
       dismissed = esc || backdrop
   when esc $ uiIO (markEscapeConsumed ctx)
   pure dismissed

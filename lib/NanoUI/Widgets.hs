@@ -2,6 +2,8 @@ module NanoUI.Widgets
   ( Response (..)
   , Responding (..)
   , Clickable (..)
+  , RightClickable (..)
+  , onRightClick
   , panel
   , row
   , column
@@ -16,6 +18,25 @@ module NanoUI.Widgets
   , separator
   , spacer
   , tooltip
+  , tooltipWidget
+  , tooltipWith
+  , withTooltip
+  , popup
+  , popupEx
+  , PopupAnchor (..)
+  , PopupPlacement (..)
+  , PopupConfig (..)
+  , defaultPopupConfig
+  , contextMenu
+  , withContextMenu
+  , contextMenuArea
+  , useContextMenu
+  , menuItem
+  , menuItemWithShortcut
+  , menuItemWithIcon
+  , menuItemDisabled
+  , menuSeparator
+  , menuHeader
   , scroll
   , scrollArea
   , select
@@ -101,10 +122,34 @@ import NanoUI.Context
   , intKey
   , isDisabled
   , pointerBlockedByModal
-  , pushTooltip
   , registerFocusable
   , setStore
   )
+import NanoUI.Widgets.Popup
+  ( PopupAnchor (..)
+  , PopupConfig (..)
+  , PopupPlacement (..)
+  , defaultPopupConfig
+  , popup
+  , popupEx
+  , tooltip
+  , tooltipWidget
+  , tooltipWith
+  , withTooltip
+  )
+import NanoUI.Widgets.Menu
+  ( contextMenu
+  , withContextMenu
+  , contextMenuArea
+  , useContextMenu
+  , menuItem
+  , menuItemWithShortcut
+  , menuItemWithIcon
+  , menuItemDisabled
+  , menuSeparator
+  , menuHeader
+  )
+import NanoUI.Widgets.Node (RightClickable (..), onRightClick)
 import NanoUI.Font
   ( headingFontMarker
   , monoFontMarker
@@ -255,17 +300,19 @@ label_ txt = void (label txt)
 image_ :: Ui :> es => Layout -> ImageId -> Eff es ()
 image_ layout iid = void (image layout iid)
 
-box :: Ui :> es => Layout -> Color -> Eff es Response
+box :: Ui :> es => Layout -> Color -> Eff es ()
 box layout col = do
   wid <- nextId
-  addWidgetStyled
-    wid
-    NodeBox
-    T.empty
-    0
-    layout
-    (fromIntegral (colorToWord32 col))
-    Nothing
+  void
+    ( addWidgetStyled
+        wid
+        NodeBox
+        T.empty
+        0
+        layout
+        (fromIntegral (colorToWord32 col))
+        Nothing
+    )
 
 heading :: Ui :> es => Text -> Eff es ()
 heading txt = void (labelEx (tight . padXY 0 3 $ defaultLayout) (headingFontMarker <> txt))
@@ -482,16 +529,6 @@ select lbl options initial = do
   let
     finalIdx = IM.findWithDefault clamped key (storeInt store1)
   pure (setChanged (finalIdx /= initial) resp, finalIdx)
-
-tooltip :: Ui :> es => Text -> Response -> Eff es Response
-tooltip tipTxt resp = do
-  when (respHovered resp) $ do
-    ctx <- askContext
-    uiIO $ do
-      let
-        (Rect rx ry rw rh) = respRect resp
-      pushTooltip ctx (respId resp) (Rect (rx + rw + 4) ry 100 (max rh 20)) tipTxt
-  pure resp
 
 textInputText :: Text -> Text -> Int -> Bool -> Text
 textInputText = textInputTerminalText

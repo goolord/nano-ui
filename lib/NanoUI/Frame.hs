@@ -32,12 +32,13 @@ import NanoUI.Context
   , FrameMsg (..)
   , animInProgress
   , clearMeasureCache
-  , clearTooltips
+  , clearPopupConfigs
   , decodeMessages
   , drainMessages
   , getPrevRect
   , getStore
   , isDirty
+  , lookupPopupConfig
   , markDirty
   , tickAnimations
   )
@@ -66,7 +67,7 @@ import NanoUI.Frame.Input
   , refreshHover
   )
 import NanoUI.Frame.Focus (constrainFocusToModal, syncWidgetLabels)
-import NanoUI.Frame.Paint (drawTooltipOverlays, lowerShapes)
+import NanoUI.Frame.Paint (lowerShapes)
 import NanoUI.Frame.Redraw
   ( debugPanelOpen
   , floatingPanelActive
@@ -103,6 +104,7 @@ import NanoUI.Frame.TextInput
   )
 import NanoUI.Frame.Window
   ( drawModalOverlays
+  , drawPopupOverlays
   , drawWindowOverlays
   , lookupWindowPos
   , lookupWindowSize
@@ -113,7 +115,7 @@ import NanoUI.Frame.Window
 import NanoUI.Id (WidgetId (..), initialIdContext)
 import NanoUI.Input (Input (..), inputMouseDown, stripInteractionInput)
 import NanoUI.Layout.Arena (resetNodeArena)
-import NanoUI.Layout.Solve (placeModals, placeWindows, solveLayout)
+import NanoUI.Layout.Solve (placeModals, placePopups, placeWindows, solveLayout)
 import NanoUI.Monad (NanoUI, Ui, runUi)
 import NanoUI.Store (mirrorStoresChanged)
 import NanoUI.Types (Size (..))
@@ -241,9 +243,9 @@ runFrameEff unlift ctx inp ui = do
   beginLayer (ctxDrawArena ctx) LayerOverlay
   drawWindowOverlays ctx
   drawModalOverlays ctx (inputWindowSize inp)
+  drawPopupOverlays ctx
   drawSelectOverlays ctx inp
   drawTextInputMenuOverlays ctx inp
-  drawTooltipOverlays ctx
   drawData <- finishDraw (ctxDrawArena ctx)
   updatePrevNodeTexts ctx
   newTexts <- readIORef (ctxPrevNodeTexts ctx)
@@ -274,7 +276,7 @@ runFrameEff unlift ctx inp ui = do
   pure (result, msgs, drawData, dirtyAfterUi)
 
 -- Second UI pass after mirror store write. Keeps ctxStore, animations, and
--- prev rects; only rebuilds node arena, id scopes, and tooltip state.
+-- prev rects; only rebuilds node arena and id scopes.
 resetUiBuild :: Context -> IO ()
 resetUiBuild ctx = do
   resetNodeArena (ctxNodeArena ctx)
@@ -288,7 +290,7 @@ resetUiBuildScopes ctx = do
   writeIORef (ctxHotId ctx) (WidgetId 0)
   writeIORef (ctxWidgetNodeTypes ctx) Nothing
   writeIORef (ctxFloatingAncestor ctx) Nothing
-  clearTooltips ctx
+  clearPopupConfigs ctx
 
 solvePlaceWindows :: Context -> Float -> Float -> IO ()
 solvePlaceWindows ctx w h = do
@@ -308,3 +310,10 @@ solvePlaceWindows ctx w h = do
     h
     (lookupWindowPos ctx)
     (lookupWindowSize ctx)
+  placePopups
+    (ctxNodeArena ctx)
+    (ctxHostProfile ctx)
+    (ctxFontMetrics ctx)
+    w
+    h
+    (lookupPopupConfig ctx)

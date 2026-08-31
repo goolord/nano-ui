@@ -44,7 +44,7 @@ import NanoUI.Layout.Solve (scrollBarSlotOf)
 import NanoUI.Style (Padding (..), Theme (..), scrollBarThumbColor, scrollBarTrackColor, themeFloatingWindow, themePanel)
 import NanoUI.Types (Rect (..), V2 (..), rectContains, rectH, rectIntersect, rectUnion, rectW, rectX, rectY, v2X, v2Y)
 import NanoUI.Frame.Clip (scrollChromeLane, scrollContentClip)
-import NanoUI.Frame.Hit (ancestorScrollShift, findNodeByWidgetId, topmostWindowAtMouse)
+import NanoUI.Frame.Hit (ancestorScrollShift, findNodeByWidgetId, topmostOverlayAtMouse)
 
 scrollLineFor :: HostProfile -> Float
 scrollLineFor host = if isCellHost host then 1 else scrollLine
@@ -207,8 +207,8 @@ findScrollTargetUnderMouse ctx mouse = do
 
 findScrollNodeUnderMouse :: Context -> V2 -> IO (Maybe NodeIdx)
 findScrollNodeUnderMouse ctx mouse = do
-  mWin <- topmostWindowAtMouse ctx mouse
-  case mWin of
+  mTop <- topmostOverlayAtMouse ctx mouse
+  case mTop of
     Just idx -> do
       (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
       queryScrollTarget ctx idx mouse (Rect x y w h)

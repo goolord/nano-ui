@@ -88,6 +88,8 @@ module NanoUI
   , Response (..)
   , Responding (..)
   , Clickable (..)
+  , RightClickable (..)
+  , onRightClick
   , panel
   , row
   , column
@@ -102,6 +104,25 @@ module NanoUI
   , separator
   , spacer
   , tooltip
+  , tooltipWidget
+  , tooltipWith
+  , withTooltip
+  , popup
+  , popupEx
+  , PopupAnchor (..)
+  , PopupPlacement (..)
+  , PopupConfig (..)
+  , defaultPopupConfig
+  , contextMenu
+  , withContextMenu
+  , contextMenuArea
+  , useContextMenu
+  , menuItem
+  , menuItemWithShortcut
+  , menuItemWithIcon
+  , menuItemDisabled
+  , menuSeparator
+  , menuHeader
   , scroll
   , scrollArea
   , select
@@ -395,6 +416,29 @@ import NanoUI.Widgets
   , panel
   , radioFieldset
   , row
+  , Clickable (..)
+  , RightClickable (..)
+  , onRightClick
+  , popup
+  , popupEx
+  , PopupAnchor (..)
+  , PopupPlacement (..)
+  , PopupConfig (..)
+  , defaultPopupConfig
+  , tooltip
+  , tooltipWidget
+  , tooltipWith
+  , withTooltip
+  , contextMenu
+  , withContextMenu
+  , contextMenuArea
+  , useContextMenu
+  , menuItem
+  , menuItemWithShortcut
+  , menuItemWithIcon
+  , menuItemDisabled
+  , menuSeparator
+  , menuHeader
   , scroll
   , scrollArea
   , select

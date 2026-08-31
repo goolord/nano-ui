@@ -194,4 +194,14 @@ testSpecs =
   , TestSpec "window-scroll-wheel" False runWindowScrollWheelTest
   , TestSpec "window-resize" False runWindowResizeTest
   , TestSpec "window-resize-halo-hit" False runWindowResizeHaloHitTest
+  , TestSpec "context-menu-open" False runContextMenuOpenTest
+  , TestSpec "context-menu-dismiss" False runContextMenuDismissTest
+  , TestSpec "context-menu-right-dismiss" False runContextMenuRightDismissTest
+  , TestSpec "context-menu-pick" False runContextMenuPickTest
+  , TestSpec "context-menu-area" False runContextMenuAreaTest
+  , TestSpec "context-menu-spans" False runContextMenuSpansTest
+  , TestSpec "tooltip-hover" False runTooltipHoverTest
+  , TestSpec "tooltip-widget" False runTooltipWidgetTest
+  , TestSpec "tooltip-spans" False runTooltipSpansTest
+  , TestSpec "tooltip-id-stable" False runTooltipIdStableTest
   ]
