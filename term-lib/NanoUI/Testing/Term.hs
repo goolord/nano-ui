@@ -1,6 +1,7 @@
 -- | Terminal test helpers: adaptive contexts, palette probes, and raster checks.
 module NanoUI.Testing.Term
   ( newAdaptiveTerminalContext
+  , newTerminalContext
   , queryTerminalColors
   , terminalDefaultFg
   , terminalDefaultBg
@@ -25,6 +26,7 @@ import NanoUI.Term.Cells (cellChar, cellRows, cellsH, narrowChar, rasterize, ras
 import NanoUI.Term.Event (MouseAction (..), MouseBtn (..), TermEvent (..), noMods)
 import NanoUI.Term.Palette
   ( newAdaptiveTerminalContext
+  , newTerminalContext
   , queryTerminalColors
   , terminalDefaultBg
   , terminalDefaultFg

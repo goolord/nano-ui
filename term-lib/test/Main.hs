@@ -15,14 +15,23 @@ import GHC.Stats (RTSStats (..), getRTSStats, getRTSStatsEnabled)
 import NanoUI
 import NanoUI.Testing
 import NanoUI.Testing.Term
+import System.Environment (getArgs)
+import System.IO (hFlush, stdout)
 import System.Mem (performGC)
 
 main :: IO ()
 main = do
+  args <- getArgs
+  let
+    wantAll = null args
+    want name = wantAll || name `elem` args
+    runWhen name act = when (want name) act
   failed <- newIORef 0
   failedTests <- newIORef 0
   let
-    run name test = do
+    run name test = runWhen name $ do
+      putStrLn ("RUN: " ++ name)
+      hFlush stdout
       before <- readIORef failed
       ctx <- newContext
       test ctx failed
@@ -32,7 +41,9 @@ main = do
         putStrLn ("FAIL: " ++ name)
 
   let
-    runSdl name test = do
+    runSdl name test = runWhen name $ do
+      putStrLn ("RUN: " ++ name)
+      hFlush stdout
       before <- readIORef failed
       sdlCtx <- newPixelContext
       test sdlCtx failed

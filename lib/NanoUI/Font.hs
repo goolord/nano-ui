@@ -529,6 +529,7 @@ takeWidthWith lineW maxW txt =
   where
     maxFit lo hi
       | lo > hi = hi
+      | lo == hi = lo
       | otherwise =
           let mid = (lo + hi + 1) `div` 2
            in if lineW (T.take mid txt) <= maxW
@@ -551,6 +552,7 @@ takeWidthIO lineW maxW txt = do
   where
     maxFit lo hi
       | lo > hi = pure hi
+      | lo == hi = pure lo
       | otherwise = do
           let mid = (lo + hi + 1) `div` 2
           ok <- (<= maxW) <$> lineW (T.take mid txt)
