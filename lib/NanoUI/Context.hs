@@ -103,7 +103,6 @@ module NanoUI.Context
   , askHostIO
   ) where
 
-import NanoUI.Messages (FrameMsg (..), decodeMessages, reduceMessages, reduceUpdates)
 import NanoUI.Animation
   ( Animation (..)
   , Ease (..)
@@ -111,6 +110,82 @@ import NanoUI.Animation
   , applyEase
   , approxEq
   , easeSameSpec
+  )
+import NanoUI.Context.Internal
+  ( Context (..)
+  , PendingTooltip (..)
+  , TextInputDrag (..)
+  , TextInputMenu (..)
+  , WindowResizeDrag (..)
+  , WindowResizeEdge (..)
+  , anyAnimating
+  , askHostIO
+  , atlasSnapshot
+  , atlasTextureId
+  , beginModal
+  , clearDirty
+  , clearMeasureCache
+  , clearTooltips
+  , drainMessages
+  , enableMeasureCache
+  , endModal
+  , getAnimationValue
+  , getFocusId
+  , getFocusables
+  , getFocusablesPrim
+  , getHotId
+  , getPrevRect
+  , getPrevRectByKey
+  , getScrollOffset
+  , getStore
+  , intKey
+  , isDisabled
+  , isDirty
+  , lookupImageUv
+  , markDirty
+  , markEscapeConsumed
+  , modalActive
+  , newContext
+  , overlayConsumesQuit
+  , pointerBlockedByModal
+  , pointerBlockedByOverlay
+  , pushMessage
+  , pushTooltip
+  , readTooltips
+  , registerFocusable
+  , registerImage
+  , registerImages
+  , seedFloatingPanel
+  , setAnimationValue
+  , setDisabled
+  , setHost
+  , setPrevRect
+  , setScrollOffset
+  , setStore
+  , setWakeLoop
+  , startAnimation
+  , startAnimationEase
+  , startAnimationEaseDelay
+  , startSpring
+  , takeDamage
+  , textInputEditActive
+  , tickAnimations
+  , withClipboard
+  , withExternalText
+  , withFontMetrics
+  , withHostProfile
+  , withIcons
+  , withMeasureText
+  , withMonoFontMetrics
+  , withTheme
+  , wrapMeasureCache
+  )
+import NanoUI.Messages (FrameMsg (..), decodeMessages, reduceMessages, reduceUpdates)
+import NanoUI.Spring
+  ( SpringParams (..)
+  , presetBouncy
+  , presetSmooth
+  , presetStiff
   )
 import NanoUI.Store
   ( WidgetStore (..)
@@ -131,80 +206,3 @@ import NanoUI.Store
   , slotKey
   , slotWinSize
   )
-import NanoUI.Spring
-  ( SpringParams (..)
-  , presetBouncy
-  , presetSmooth
-  , presetStiff
-  )
-import NanoUI.Context.Internal
-  ( Context (..)
-  , intKey
-  , markDirty
-  , getPrevRect
-  , getPrevRectByKey
-  , setPrevRect
-  , getScrollOffset
-  , getStore
-  , isDisabled
-  , setDisabled
-  , setScrollOffset
-  , setStore
-  , clearMeasureCache
-  , enableMeasureCache
-  , withClipboard
-  , withExternalText
-  , withFontMetrics
-  , withHostProfile
-  , withIcons
-  , withMeasureText
-  , withMonoFontMetrics
-  , withTheme
-  , wrapMeasureCache
-  , clearDirty
-  , isDirty
-  , setWakeLoop
-  , takeDamage
-  , clearTooltips
-  , pushTooltip
-  , readTooltips
-  , atlasSnapshot
-  , atlasTextureId
-  , lookupImageUv
-  , registerImage
-  , registerImages
-  , askHostIO
-  , setHost
-  , drainMessages
-  , pushMessage
-  )
-import NanoUI.Context.Types
-  ( PendingTooltip (..)
-  , TextInputDrag (..)
-  , TextInputMenu (..)
-  , WindowResizeDrag (..)
-  , WindowResizeEdge (..)
-  )
-import NanoUI.Context.New (newContext)
-import NanoUI.Context.Animation
-  ( anyAnimating
-  , getAnimationValue
-  , setAnimationValue
-  , startAnimation
-  , startAnimationEase
-  , startAnimationEaseDelay
-  , startSpring
-  , tickAnimations
-  )
-import NanoUI.Context.Modal
-  ( beginModal
-  , endModal
-  , markEscapeConsumed
-  , modalActive
-  , overlayConsumesQuit
-  , pointerBlockedByModal
-  , pointerBlockedByOverlay
-  , seedFloatingPanel
-  , textInputEditActive
-  )
-import NanoUI.Context.Focus (getFocusId, getFocusables, getFocusablesPrim, getHotId, registerFocusable)

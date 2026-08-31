@@ -79,6 +79,8 @@ testSpecs =
   , TestSpec "hover-damage" False runHoverDamageTest
   , TestSpec "scroll-damage" False runScrollDamageTest
   , TestSpec "table-scroll" False runTableScrollTest
+  , TestSpec "table-first-col" False runTableFirstColWidthTest
+  , TestSpec "table-fill-width" False runTableFillWidthTest
   , TestSpec "scroll-top-clip" True runScrollTopClipTest
   , TestSpec "select-overlay-damage" False runSelectOverlayDamageTest
   , TestSpec "text-input-dirty" False runTextInputDirtyTest

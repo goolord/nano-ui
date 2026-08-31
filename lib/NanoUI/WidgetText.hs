@@ -273,11 +273,13 @@ tableHeaderLabel terminal hdr = tableHeaderMarker <> hdr <> tableSortReserve ter
 tableHeaderDisplayText :: Bool -> Int -> Text -> Text
 tableHeaderDisplayText terminal styleIdx txt =
   let full = T.drop 1 (stripButtonBrackets txt)
-      title = fromMaybe full (T.stripSuffix (tableSortReserve terminal) full)
+      reserve = tableSortReserve terminal
+      title = fromMaybe full (T.stripSuffix reserve full)
+      blank = T.map (const ' ') reserve
    in case styleIdx of
         1 -> title <> tableSortMark terminal False
         2 -> title <> tableSortMark terminal True
-        _ -> title
+        _ -> title <> blank
 
 {-# INLINE stripButtonBrackets #-}
 stripButtonBrackets :: Text -> Text

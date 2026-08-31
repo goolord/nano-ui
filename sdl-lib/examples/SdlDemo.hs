@@ -251,8 +251,7 @@ colPeople =
 demoTableCfg :: TableCfg
 demoTableCfg =
   defaultTableCfg
-    { tableFreezeCols = 1
-    , tableColSizes =
+    { tableColSizes =
         [ ColContent
         , ColStretch
         , ColFixed 64
