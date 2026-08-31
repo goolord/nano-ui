@@ -7,11 +7,14 @@ module SdlDemo
     , DemoTab (..)
     ) where
 
-import Control.Monad (void, when)
+import Control.Monad (unless, void, when)
+import Data.Foldable (foldlM)
 import Data.Maybe (fromMaybe)
 import Data.Primitive.SmallArray (SmallArray, smallArrayFromList)
 import NanoUI
 import NanoUI.Backend.Sdl (RgbaImage (..), SdlDebugSnapshot (..), askSdlDebug, SdlOptions (..), defaultSdlOptions, runSdlApp)
+import NanoUI.Testing (Context, collectOverlayTextSpans, collectTextSpans, registerImage)
+import NanoUI.Testing.Sdl (SdlEnv, newSdlContext, sdlDrawFrame, syncDisplay, withSdl)
 import System.Console.GetOpt
   ( ArgDescr (ReqArg)
   , ArgOrder (Permute)
@@ -39,13 +42,16 @@ parseArgs argv =
 main :: IO ()
 main = do
   args <- getArgs
-  runSdlApp
-    defaultSdlOptions
-      { sdlAppShouldQuit = \inp -> inputKeysElem KeyEscape (inputKeys inp)
-      , sdlAppImages = demoImages
-      , sdlAppVsync = parseArgs args
-      }
-    demoUi
+  if "--selftest" `elem` args
+    then selftest
+    else
+      runSdlApp
+        defaultSdlOptions
+          { sdlAppShouldQuit = \inp -> inputKeysElem KeyEscape (inputKeys inp)
+          , sdlAppImages = demoImages
+          , sdlAppVsync = parseArgs args
+          }
+        demoUi
 
 ------------------------------------------------------------------
 
@@ -99,7 +105,7 @@ demoUi = do
           clickButton "About" (setAbout True)
           clickButton "Debug" (setDebug (not debugOpen))
       row (tight . gap 8 . wrap . fillW $ defaultLayout) $ do
-        column (tight . gap 8 . fillW $ defaultLayout) $ do
+        column (tight . gap 8 $ defaultLayout {layoutMaxW = 420}) $ do
           card $ do
             heading "State"
             checked <- readChecked
@@ -419,3 +425,113 @@ stripePixels =
           then [80, 160, 220, 255]
           else [30, 40, 60, 255]
     ]
+
+-- Hidden SDL window: click through demoUi the same path as the interactive demo.
+selftest :: IO ()
+selftest = do
+  ctx0 <- newSdlContext
+  ok <-
+    foldlM
+      ( \acc img ->
+          if acc
+            then
+              registerImage
+                ctx0
+                (rgbaImageId img)
+                (rgbaImageWidth img)
+                (rgbaImageHeight img)
+                (rgbaImagePixels img)
+            else pure False
+      )
+      True
+      demoImages
+  unless ok $ fail "selftest: registerImage failed"
+  withSdl
+    defaultSdlOptions
+      { sdlWindowHidden = True
+      , sdlWindowSize = Size 1280 800
+      , sdlWindowResizable = False
+      }
+    ctx0
+    $ \ctx env -> do
+    let idle =
+          emptyInput
+            { inputWindowSize = Size 1280 800
+            , inputMousePos = V2 640 400
+            }
+    (ctx', base) <- syncDisplay ctx env idle
+    void (sdlDrawFrame ctx' demoUi env base True)
+    spans0 <- collectTextSpans ctx'
+    unless (hasText "Feature" spans0) $ fail "selftest: Controls body missing"
+    feat0 <- requireSpan "selftest: Feature checkbox" (findRightmost "Feature" spans0)
+    clickPos ctx' env base feat0
+    spansOn <- collectTextSpans ctx'
+    unless (hasText "on" spansOn) $ fail "selftest: checkbox did not turn Feature on"
+    light <- requireSpan "selftest: Light radio" (findExact "Light" spansOn)
+    clickPos ctx' env base light
+    spansTheme <- collectTextSpans ctx'
+    unless (hasText "Light" spansTheme) $ fail "selftest: radio did not select Light"
+    vol <- requireSpan "selftest: Volume slider" (findRightmost "Volume" spansTheme)
+    clickPos ctx' env base (V2 (v2X vol + 80) (v2Y vol))
+    about <- requireSpan "selftest: About button" (findExact "About" spansTheme)
+    clickPos ctx' env base about
+    spansModal <- collectOverlayTextSpans ctx' base
+    unless (hasText "Immediate-mode" spansModal) $ fail "selftest: About modal missing"
+    void
+      ( sdlDrawFrame
+          ctx'
+          demoUi
+          env
+          (base {inputKeys = inputKeysFromList [KeyEscape]})
+          False
+      )
+    void (sdlDrawFrame ctx' demoUi env base False)
+    spansClosed <- collectOverlayTextSpans ctx' base
+    when (hasText "Immediate-mode" spansClosed) $ fail "selftest: Escape did not dismiss About"
+  putStrLn "selftest: ok"
+
+type DemoSpan = (Rect, T.Text, Color, Color, Rect)
+
+spanCenter :: Rect -> V2
+spanCenter (Rect x y w h) = V2 (x + w / 2) (y + h / 2)
+
+hasText :: T.Text -> [DemoSpan] -> Bool
+hasText needle spans = any (\(_, txt, _, _, _) -> needle `T.isInfixOf` txt) spans
+
+findExact :: T.Text -> [DemoSpan] -> Maybe V2
+findExact needle spans =
+  pickRight
+    [ (x, spanCenter r)
+    | (r@(Rect x _ w h), txt, _, _, _) <- spans
+    , w > 1 && h > 1
+    , T.dropWhile (`elem` ['\x01', '\x02', '\x05']) (T.strip txt) == needle
+    ]
+
+findRightmost :: T.Text -> [DemoSpan] -> Maybe V2
+findRightmost needle spans =
+  pickRight [(x, spanCenter r) | (r@(Rect x _ _ _), txt, _, _, _) <- spans, needle `T.isInfixOf` txt]
+
+pickRight :: [(Float, V2)] -> Maybe V2
+pickRight [] = Nothing
+pickRight (p : ps) = Just (go p ps)
+ where
+  go acc [] = snd acc
+  go acc@(ax, _) (q@(qx, _) : qs) = go (if qx >= ax then q else acc) qs
+
+requireSpan :: String -> Maybe V2 -> IO V2
+requireSpan msg = maybe (fail msg) pure
+
+clickAt :: Input -> V2 -> (Input, Input, Input)
+clickAt base pos =
+  let press = base {inputMousePos = pos, inputMouseDown = True, inputMousePressed = True}
+      hold = press {inputMousePressed = False}
+      release = hold {inputMouseDown = False, inputMouseReleased = True}
+   in (press, hold, release)
+
+clickPos :: Context -> SdlEnv -> Input -> V2 -> IO ()
+clickPos ctx env base pos = do
+  let (press, hold, release) = clickAt base pos
+  void (sdlDrawFrame ctx demoUi env press False)
+  void (sdlDrawFrame ctx demoUi env hold False)
+  void (sdlDrawFrame ctx demoUi env release False)
+  void (sdlDrawFrame ctx demoUi env base False)
