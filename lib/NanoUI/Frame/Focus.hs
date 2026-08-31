@@ -25,6 +25,8 @@ import NanoUI.Layout.Arena
   ( NodeType (NodeButton, NodeCheckbox, NodeRadio, NodeTree, NodeSlider)
   , forNodes_
   , getNodeType
+  , getParent
+  , getStyleIdx
   , getText
   , getWidgetId
   , setNodeText
@@ -34,15 +36,11 @@ import NanoUI.WidgetText (stripButtonBrackets)
 import NanoUI.WidgetText
   ( checkboxLabelText
   , radioLabelText
-  , radioPackOption
-  , radioParseOption
   , treeParseRow
   , sliderPackRange
   , sliderPackTerminal
   , sliderParseRange
-  , sliderRangeSep
   )
-import qualified Data.Text as T
 
 tabNext :: WidgetId -> [WidgetId] -> Bool -> WidgetId
 tabNext cur ids shift =
@@ -128,19 +126,18 @@ syncWidgetLabels ctx = do
         setNodeValue na idx (if val then 1 else 0)
       NodeRadio -> do
         txt <- getText na idx
-        case T.splitOn sliderRangeSep txt of
-          [_g, _i, _lbl] -> do
-            let (groupKey, optIdx, _) = radioParseOption txt
-                selected = IM.findWithDefault optIdx groupKey (storeInt store)
-                val = selected == optIdx
-                label = radioLabelText txt
-                display =
-                  if terminal
-                    then radioMark icons val <> label
-                    else label
-            setNodeText na idx (radioPackOption groupKey optIdx display)
-            setNodeValue na idx (if val then 1 else 0)
-          _ -> pure ()
+        parent <- getParent na idx
+        optIdx <- getStyleIdx na idx
+        groupWid <- getWidgetId na parent
+        let selected = IM.findWithDefault optIdx (intKey groupWid) (storeInt store)
+            val = selected == optIdx
+            label = radioLabelText txt
+            display =
+              if terminal
+                then radioMark icons val <> label
+                else label
+        setNodeText na idx display
+        setNodeValue na idx (if val then 1 else 0)
       NodeTree -> do
         txt <- getText na idx
         let (groupKey, nodeIdx, _, _, _, _) = treeParseRow txt

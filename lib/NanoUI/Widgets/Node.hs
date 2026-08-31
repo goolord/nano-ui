@@ -18,6 +18,7 @@ module NanoUI.Widgets.Node
   , addWidgetStyled
   , addSizingLeafNode
   , resolveInteraction
+  , tagContainer
   )
 where
 
@@ -54,7 +55,7 @@ import NanoUI.Style
   , Padding (..)
   , Sizing (..)
   )
-import NanoUI.Types (Rect (..), rectContains)
+import NanoUI.Types (Rect (..), rectContains, rectUnion)
 import NanoUI.Frame.Hit (scrollHitRect)
 
 parentIdx :: [Int] -> Int
@@ -93,6 +94,20 @@ instance Responding Response where
 
 instance Clickable Response where
   respIsClicked = rawRespClicked
+
+instance Semigroup Response where
+  a <> b =
+    Response
+      { rawRespId = rawRespId b
+      , rawRespRect = rectUnion (rawRespRect a) (rawRespRect b)
+      , rawRespHovered = rawRespHovered a || rawRespHovered b
+      , rawRespPressed = rawRespPressed a || rawRespPressed b
+      , rawRespClicked = rawRespClicked a || rawRespClicked b
+      , rawRespChanged = rawRespChanged a || rawRespChanged b
+      }
+
+instance Monoid Response where
+  mempty = mkResponse (WidgetId 0) (Rect 0 0 0 0) False False False False
 
 setClicked :: Bool -> Response -> Response
 setClicked c r = r {rawRespClicked = c}
@@ -244,3 +259,13 @@ resolveInteraction ctx inp wid = do
       , rawRespClicked = clicked
       , rawRespChanged = False
       }
+
+-- | Stamp the current container with a widget id (radio/tree group key).
+tagContainer :: Ui :> es => WidgetId -> Eff es ()
+tagContainer wid = do
+  ctx <- askContext
+  uiIO $ do
+    stack <- readIORef (ctxContainerStack ctx)
+    case stack of
+      (idx : _) -> setWidgetId (ctxNodeArena ctx) idx wid
+      [] -> pure ()

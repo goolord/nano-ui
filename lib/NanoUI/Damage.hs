@@ -57,8 +57,7 @@ import NanoUI.Layout.Arena
   , isScrollNode
   )
 import NanoUI.WidgetText
-  ( radioParseOption
-  , sliderValueText
+  ( sliderValueText
   , textInputFieldText
   )
 import NanoUI.Types
@@ -529,10 +528,11 @@ radioStoreChangeRects ctx oldStore newStore oldRects newRects = do
           if nt /= NodeRadio
             then pure []
             else do
-              txt <- getText (ctxNodeArena ctx) idx
+              parent <- getParent (ctxNodeArena ctx) idx
               wid <- getWidgetId (ctxNodeArena ctx) idx
-              let (groupKey, _, _) = radioParseOption txt
-              if IM.member groupKey changed
+              groupWid <- getWidgetId (ctxNodeArena ctx) parent
+              let groupKey = intKey groupWid
+              if parent >= 0 && IM.member groupKey changed
                 then
                   let k = intKey wid
                    in pure (catMaybes [IM.lookup k oldRects, IM.lookup k newRects])

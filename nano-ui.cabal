@@ -126,6 +126,8 @@ library
         NanoUI.Widgets.Animate
         NanoUI.Widgets.Overlay
         NanoUI.Widgets.Table
+        NanoUI.Widgets.Behavior
+        NanoUI.Widgets.Combinators
     build-depends:
         base ^>=4.22.0.0,
         bytestring ^>=0.12,
