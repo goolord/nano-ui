@@ -57,7 +57,6 @@ import NanoUI.Layout.Arena
   , getParent
   , getRect
   , getStyleIdx
-  , getText
   , getWidgetId
   )
 import NanoUI.Types (Rect (..), V2 (..), rectContains, rectH, rectW, v2X)
@@ -66,7 +65,7 @@ import NanoUI.Frame.Hit (modalTreeOpen, overlayHitAllowed, scrollHitRect)
 import NanoUI.Frame.Redraw (probeHotId)
 import NanoUI.Frame.Select (findSelectUnderMouse)
 import NanoUI.Frame.Spans (widgetHitRect)
-import NanoUI.WidgetText (isTabButtonText)
+import NanoUI.WidgetText (buttonVisualStyle, isTabButtonStyle)
 import NanoUI.Frame.TextInput (collapseTextInputSelection, textInputGeomForWidget, applyTextInputClick, applyTextInputDrag, textInputCharAtX)
 
 whenM :: Monad m => m Bool -> m () -> m ()
@@ -200,16 +199,15 @@ finalizePointerRelease ctx inp =
                           }
                       )
                 NodeButton -> do
-                  txt <- getText (ctxNodeArena ctx) idx
-                  if isTabButtonText txt
+                  packed <- getStyleIdx (ctxNodeArena ctx) idx
+                  if isTabButtonStyle packed
                     then do
                       parent <- getParent (ctxNodeArena ctx) idx
                       when (parent >= 0) $ do
                         store <- getStore ctx
-                        packed <- getStyleIdx (ctxNodeArena ctx) idx
                         groupWid <- getWidgetId (ctxNodeArena ctx) parent
                         let groupKey = intKey groupWid
-                            tabIdx = packed `div` 4
+                            tabIdx = buttonVisualStyle packed `div` 4
                         setStore
                           ctx
                           ( store

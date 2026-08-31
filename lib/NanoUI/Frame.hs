@@ -227,7 +227,9 @@ runFrameEff unlift ctx inp ui = do
   markSelectDropPress ctx inp
   finalizeSelectPick ctx inp
   closeSelectOnOutsideClick ctx inp
-  syncWidgetLabels ctx
+  storeAfter <- getStore ctx
+  when (mirrorStoresChanged storeMid storeAfter) $
+    syncWidgetLabels ctx
   -- Store/input finalization can change measured widget text (sliders, marks).
   solvePlaceWindows ctx w h
   updatePrevRects ctx

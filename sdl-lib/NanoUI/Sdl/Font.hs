@@ -33,7 +33,7 @@ import Data.Text (Text)
 import Foreign.C.String (CString, withCString)
 import Foreign.C.Types (CFloat (..), CInt (..), CSize (..), CUInt (..))
 import Foreign.ForeignPtr (ForeignPtr, mallocForeignPtrBytes, withForeignPtr)
-import Foreign.Ptr (Ptr, nullPtr, plusPtr)
+import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
 import Foreign.Storable (peek, poke, sizeOf)
 import GHC.IO (unsafePerformIO)
 import NanoUI (FontMetrics (..), GlyphQuad (..), hasMonoFontMarker, monospaceMetrics, stripMonoFontMarker)
@@ -48,9 +48,8 @@ import NanoUI.Testing
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
 import System.Directory (doesDirectoryExist, doesFileExist, listDirectory)
 import System.Environment (lookupEnv)
-import qualified Data.ByteString as BS
 import qualified Data.Map.Strict as Map
-import qualified Data.Text.Encoding as TE
+import qualified Data.Text.Foreign as TF
 
 data SdlFont = SdlFont
   { sfFont :: Ptr ()
@@ -574,8 +573,8 @@ findNamedFont names = do
 
 withUtf8 :: Text -> (CString -> CSize -> IO a) -> IO a
 withUtf8 txt act =
-  let bs = TE.encodeUtf8 txt
-   in BS.useAsCStringLen bs $ \(cstr, len) -> act cstr (fromIntegral len)
+  TF.useAsPtr txt $ \ptr len ->
+    act (castPtr ptr) (fromIntegral len)
 
 foreign import ccall unsafe "nano_ui_ttf_init"
   ttfInit :: IO Bool

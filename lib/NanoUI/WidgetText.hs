@@ -41,6 +41,12 @@ module NanoUI.WidgetText
   , isCloseButtonText
   , isTabButtonText
   , isTableHeaderText
+  , isCloseButtonStyle
+  , isTabButtonStyle
+  , isTableHeaderStyle
+  , packButtonStyle
+  , buttonVisualStyle
+  , buttonFlagsFromStyle
   , closeButtonDisplayText
   , tabButtonDisplayText
   , buttonDisplayText
@@ -48,7 +54,7 @@ module NanoUI.WidgetText
   , buttonDisplayTextFromFlags
   ) where
 
-import Data.Bits ((.&.), (.|.), shiftL, shiftR)
+import Data.Bits (complement, (.&.), (.|.), shiftL, shiftR)
 import Data.Char (chr)
 import Data.List (find)
 import Data.Maybe (fromMaybe)
@@ -276,18 +282,78 @@ tableHeaderDisplayText terminal styleIdx txt =
       reserve = tableSortReserve terminal
       title = fromMaybe full (T.stripSuffix reserve full)
       blank = T.map (const ' ') reserve
-   in case styleIdx of
+   in case buttonVisualStyle styleIdx of
         1 -> title <> tableSortMark terminal False
         2 -> title <> tableSortMark terminal True
         _ -> title <> blank
 
+-- Type flags live in bits 29-31 so visual style and tab index stay in the low bits.
+buttonFlagClose :: Int
+buttonFlagClose = 0x20000000
+
+buttonFlagTab :: Int
+buttonFlagTab = 0x40000000
+
+buttonFlagTable :: Int
+buttonFlagTable = 0x80000000
+
+buttonFlagMask :: Int
+buttonFlagMask = buttonFlagClose .|. buttonFlagTab .|. buttonFlagTable
+
+{-# INLINE buttonVisualStyle #-}
+buttonVisualStyle :: Int -> Int
+buttonVisualStyle si = si .&. complement buttonFlagMask
+
+{-# INLINE packButtonStyle #-}
+packButtonStyle :: Int -> Text -> Int
+packButtonStyle visual txt = visual .|. buttonStyleFlags txt
+
+{-# INLINE buttonStyleFlags #-}
+buttonStyleFlags :: Text -> Int
+buttonStyleFlags txt =
+  let (c, t, h) = buttonFlags txt
+   in (if c then buttonFlagClose else 0)
+        .|. (if t then buttonFlagTab else 0)
+        .|. (if h then buttonFlagTable else 0)
+
+{-# INLINE buttonFlagsFromStyle #-}
+buttonFlagsFromStyle :: Int -> (Bool, Bool, Bool)
+buttonFlagsFromStyle si =
+  ( si .&. buttonFlagClose /= 0
+  , si .&. buttonFlagTab /= 0
+  , si .&. buttonFlagTable /= 0
+  )
+
+{-# INLINE isCloseButtonStyle #-}
+isCloseButtonStyle :: Int -> Bool
+isCloseButtonStyle si = si .&. buttonFlagClose /= 0
+
+{-# INLINE isTabButtonStyle #-}
+isTabButtonStyle :: Int -> Bool
+isTabButtonStyle si = si .&. buttonFlagTab /= 0
+
+{-# INLINE isTableHeaderStyle #-}
+isTableHeaderStyle :: Int -> Bool
+isTableHeaderStyle si = si .&. buttonFlagTable /= 0
+
 {-# INLINE stripButtonBrackets #-}
 stripButtonBrackets :: Text -> Text
-stripButtonBrackets txt =
-  let t = T.strip txt
-   in if T.isPrefixOf "[ " t && T.isSuffixOf " ]" t
-        then T.strip $ T.dropEnd 2 $ T.drop 2 t
-        else txt
+stripButtonBrackets txt
+  | T.null txt = txt
+  | otherwise =
+      let !c0 = T.index txt 0
+       in if c0 == '[' || c0 == ' ' || c0 == '\t'
+            then
+              let !t = T.strip txt
+                  !len = T.length t
+               in if len >= 4
+                    && T.index t 0 == '['
+                    && T.index t 1 == ' '
+                    && T.index t (len - 1) == ']'
+                    && T.index t (len - 2) == ' '
+                    then T.strip (T.dropEnd 2 (T.drop 2 t))
+                    else txt
+            else txt
 
 {-# INLINE buttonFlags #-}
 buttonFlags :: Text -> (Bool, Bool, Bool)

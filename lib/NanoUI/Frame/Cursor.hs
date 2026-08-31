@@ -32,7 +32,7 @@ import NanoUI.Layout.Arena
   )
 import NanoUI.Layout.Solve (scrollBarSlotOf)
 import NanoUI.Types (Rect (..), V2 (..), rectContains, v2X, v2Y)
-import NanoUI.WidgetText (isTableHeaderText, selectOptions, sliderLabelText)
+import NanoUI.WidgetText (isTableHeaderStyle, selectOptions, sliderLabelText)
 import NanoUI.Frame.CursorKind (UiCursorKind (..), grabDragKind, grabHoverKind)
 import NanoUI.Frame.Chrome (widgetNodeTypeTable)
 import NanoUI.Frame.Hit (findNodeByWidgetId, scrollHitRect)
@@ -220,8 +220,8 @@ tableColResizeCursorKind ctx inp = do
                 if nt /= NodeButton
                   then go (idx + 1)
                   else do
-                    txt <- getText (ctxNodeArena ctx) idx
-                    if not (isTableHeaderText txt)
+                    si <- getStyleIdx (ctxNodeArena ctx) idx
+                    if not (isTableHeaderStyle si)
                       then go (idx + 1)
                       else do
                         (x, y, w, h) <- getRect (ctxNodeArena ctx) idx

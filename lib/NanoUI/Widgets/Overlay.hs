@@ -35,7 +35,6 @@ import NanoUI.Monad
   , askContext
   , askInput
   , nextId
-  , uiFinally
   , uiIO
   , withKey
   )
@@ -157,40 +156,38 @@ overlay kind open title child
           prev <- readIORef (ctxCurrentFloatingId ctx)
           writeIORef (ctxCurrentFloatingId ctx) (Just wid)
           pure prev
-        (closeResp, r) <-
-          ( do
-              close <-
-                row (titleBarLayoutFor host) $ do
-                  when (not (T.null title)) $
-                    case kind of
-                      ModalOverlay ->
-                        void
+        (closeResp, r) <- do
+          close <-
+            row (titleBarLayoutFor host) $ do
+              when (not (T.null title)) $
+                case kind of
+                  ModalOverlay ->
+                    void
+                      ( labelEx
+                          (titleLabelLayoutFor host)
+                          (titleMark host (iconModalTitle (ctxIcons ctx)) <> title)
+                      )
+                  WindowOverlay ->
+                    withKey
+                      title
+                      ( void
                           ( labelEx
                               (titleLabelLayoutFor host)
-                              (titleMark host (iconModalTitle (ctxIcons ctx)) <> title)
+                              (titleMark host (iconWindowTitle (ctxIcons ctx)) <> title)
                           )
-                      WindowOverlay ->
-                        withKey
-                          title
-                          ( void
-                              ( labelEx
-                                  (titleLabelLayoutFor host)
-                                  (titleMark host (iconWindowTitle (ctxIcons ctx)) <> title)
-                              )
-                          )
-                  flex
-                  withKey ("close" :: Text) closeButton
-              when (isModal && not (T.null title) || not isModal) sep
-              r <-
-                if isModal && not (isCellHost host)
-                  then child
-                  else scroll (tight . grow $ defaultLayout) child
-              pure (close, r)
-          )
-            `uiFinally` do
-              when isModal (endModal ctx)
-              writeIORef (ctxContainerStack ctx) stack
-              writeIORef (ctxCurrentFloatingId ctx) prevFloat
+                      )
+              flex
+              withKey ("close" :: Text) closeButton
+          when (isModal && not (T.null title) || not isModal) sep
+          r <-
+            if isModal && not (isCellHost host)
+              then child
+              else scroll (tight . grow $ defaultLayout) child
+          pure (close, r)
+        uiIO $ do
+          when isModal (endModal ctx)
+          writeIORef (ctxContainerStack ctx) stack
+          writeIORef (ctxCurrentFloatingId ctx) prevFloat
         pure (closeResp, r)
       mrect <- uiIO (getPrevRect ctx wid)
       let

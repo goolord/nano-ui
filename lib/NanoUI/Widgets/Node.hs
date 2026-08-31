@@ -46,7 +46,8 @@ import NanoUI.Layout.Arena
   , setStyleIdx
   , setWidgetId
   )
-import NanoUI.Monad (Ui, askContext, askInput, uiFinally, uiIO)
+import NanoUI.Monad (Ui, askContext, askInput, uiIO)
+import NanoUI.WidgetText (packButtonStyle)
 import NanoUI.Style
   ( AlignX (..)
   , AlignY (..)
@@ -155,10 +156,10 @@ container nt layout child = do
       (parent', childCtx) = enterScope scopeTag oldCtx
     writeIORef (ctxIdContext ctx) childCtx
     pure (stack0, parent')
-  r <-
-    uiFinally child $ do
-      writeIORef (ctxContainerStack ctx) stack
-      writeIORef (ctxIdContext ctx) parent'
+  r <- child
+  uiIO $ do
+    writeIORef (ctxContainerStack ctx) stack
+    writeIORef (ctxIdContext ctx) parent'
   pure r
 
 addSizingLeafNode ::
@@ -237,7 +238,10 @@ addWidgetStyled wid nt txt value layout styleIdx mResp = do
     idx <- addNodeFromLayout (ctxNodeArena ctx) nt parent layout
     setNodeText (ctxNodeArena ctx) idx txt
     setNodeValue (ctxNodeArena ctx) idx value
-    setStyleIdx (ctxNodeArena ctx) idx styleIdx
+    setStyleIdx
+      (ctxNodeArena ctx)
+      idx
+      (if nt == NodeButton then packButtonStyle styleIdx txt else styleIdx)
     setWidgetId (ctxNodeArena ctx) idx wid
     case mResp of
       Just resp -> pure resp

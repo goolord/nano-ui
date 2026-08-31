@@ -1,0 +1,100 @@
+Building nano-ui-profile (late cost centres, -O2)...
+Configuration is affected by cabal.project and cabal.project.local at
+'C:\Users\zach\Dev\nano-ui'.
+Build profile: -w ghc-9.14.1 -O1
+In order, the following will be built (use -v for more details):
+ - nano-ui-0.1.0.0 (lib)  --enable-profiling (configuration changed)
+ - nano-ui-0.1.0.0 (exe:nano-ui-profile)  --enable-profiling (configuration changed)
+Configuring library for nano-ui-0.1.0.0...
+Preprocessing library for nano-ui-0.1.0.0...
+Building library for nano-ui-0.1.0.0...
+[ 4 of 57] Compiling NanoUI.Id        ( lib\NanoUI\Id.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Id.o ) [Data.Hashable package changed]
+[ 8 of 57] Compiling NanoUI.Store     ( lib\NanoUI\Store.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Store.o ) [NanoUI.Id changed]
+[11 of 57] Compiling NanoUI.Layout.Arena ( lib\NanoUI\Layout\Arena.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Layout\Arena.o ) [Data.HashTable.IO package changed]
+[12 of 57] Compiling NanoUI.Input     ( lib\NanoUI\Input.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Input.o ) [Data.Vector package changed]
+[13 of 57] Compiling NanoUI.Frame.CursorKind ( lib\NanoUI\Frame\CursorKind.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Frame\CursorKind.o ) [NanoUI.Input changed]
+[14 of 57] Compiling NanoUI.Frame.SpanArena ( lib\NanoUI\Frame\SpanArena.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Frame\SpanArena.o ) [Data.Primitive.PrimArray package changed]
+[16 of 57] Compiling NanoUI.Frame.Clip ( lib\NanoUI\Frame\Clip.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Frame\Clip.o ) [NanoUI.Layout.Arena changed]
+[17 of 57] Compiling NanoUI.Draw      ( lib\NanoUI\Draw.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Draw.o ) [Data.Primitive.Array package changed]
+[18 of 57] Compiling NanoUI.Render.ASCII ( lib\NanoUI\Render\ASCII.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Render\ASCII.o ) [NanoUI.Draw changed]
+[20 of 57] Compiling NanoUI.Context.Internal ( lib\NanoUI\Context\Internal.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Context\Internal.o ) [Data.Primitive.PrimArray package changed]
+[21 of 57] Compiling NanoUI.Context   ( lib\NanoUI\Context.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Context.o ) [NanoUI.Context.Internal changed]
+[22 of 57] Compiling NanoUI.Monad     ( lib\NanoUI\Monad.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Monad.o ) [Effectful.Dispatch.Static package changed]
+[23 of 57] Compiling NanoUI.Frame.Hit ( lib\NanoUI\Frame\Hit.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Frame\Hit.o ) [Data.HashTable.IO package changed]
+[24 of 57] Compiling NanoUI.Compact   ( lib\NanoUI\Compact.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Compact.o ) [Effectful package changed]
+[27 of 57] Compiling NanoUI.Frame.Focus ( lib\NanoUI\Frame\Focus.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Frame\Focus.o ) [Data.Primitive.PrimArray package changed]
+[28 of 57] Compiling NanoUI.ColorPicker ( lib\NanoUI\ColorPicker.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\ColorPicker.o ) [NanoUI.Context changed]
+[29 of 57] Compiling NanoUI.Layout.Solve ( lib\NanoUI\Layout\Solve.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Layout\Solve.o ) [Data.Primitive.PrimArray package changed]
+[30 of 57] Compiling NanoUI.Frame.Scroll ( lib\NanoUI\Frame\Scroll.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Frame\Scroll.o ) [NanoUI.Context changed]
+[31 of 57] Compiling NanoUI.Frame.Chrome ( lib\NanoUI\Frame\Chrome.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Frame\Chrome.o ) [NanoUI.ColorPicker changed]
+[32 of 57] Compiling NanoUI.Frame.Select ( lib\NanoUI\Frame\Select.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Frame\Select.o ) [NanoUI.Context changed]
+[33 of 57] Compiling NanoUI.Frame.Redraw ( lib\NanoUI\Frame\Redraw.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Frame\Redraw.o ) [NanoUI.Context changed]
+[34 of 57] Compiling NanoUI.Damage    ( lib\NanoUI\Damage.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Damage.o ) [NanoUI.Context changed]
+[35 of 57] Compiling NanoUI.Widgets.Animate ( lib\NanoUI\Widgets\Animate.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Widgets\Animate.o ) [Effectful package changed]
+[36 of 57] Compiling NanoUI.Widgets.Behavior ( lib\NanoUI\Widgets\Behavior.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Widgets\Behavior.o ) [Effectful package changed]
+[37 of 57] Compiling NanoUI.Widgets.Node ( lib\NanoUI\Widgets\Node.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Widgets\Node.o ) [Effectful package changed]
+[38 of 57] Compiling NanoUI.Widgets.Layout ( lib\NanoUI\Widgets\Layout.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Widgets\Layout.o ) [Effectful package changed]
+[39 of 57] Compiling NanoUI.Widgets.Combinators ( lib\NanoUI\Widgets\Combinators.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Widgets\Combinators.o ) [Colonnade.Encode package changed]
+[40 of 57] Compiling NanoUI.Widgets.ColorPicker ( lib\NanoUI\Widgets\ColorPicker.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Widgets\ColorPicker.o ) [Effectful package changed]
+[41 of 57] Compiling NanoUI.Widgets.Chrome ( lib\NanoUI\Widgets\Chrome.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Widgets\Chrome.o ) [Effectful package changed]
+[42 of 57] Compiling NanoUI.Widgets.Overlay ( lib\NanoUI\Widgets\Overlay.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Widgets\Overlay.o ) [Effectful package changed]
+[43 of 57] Compiling NanoUI.Widgets.Radio ( lib\NanoUI\Widgets\Radio.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Widgets\Radio.o ) [Effectful package changed]
+[44 of 57] Compiling NanoUI.Widgets.Table ( lib\NanoUI\Widgets\Table.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Widgets\Table.o ) [Colonnade package changed]
+[45 of 57] Compiling NanoUI.Widgets.Tabs ( lib\NanoUI\Widgets\Tabs.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Widgets\Tabs.o ) [Effectful package changed]
+[46 of 57] Compiling NanoUI.Widgets.TextInput ( lib\NanoUI\Widgets\TextInput.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Widgets\TextInput.o ) [NanoUI.Context changed]
+[47 of 57] Compiling NanoUI.Widgets.Tree ( lib\NanoUI\Widgets\Tree.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Widgets\Tree.o ) [Effectful package changed]
+[48 of 57] Compiling NanoUI.Widgets   ( lib\NanoUI\Widgets.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Widgets.o ) [Effectful package changed]
+[49 of 57] Compiling NanoUI.Frame.TextInput ( lib\NanoUI\Frame\TextInput.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Frame\TextInput.o ) [NanoUI.Context changed]
+[50 of 57] Compiling NanoUI.Frame.Spans ( lib\NanoUI\Frame\Spans.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Frame\Spans.o ) [NanoUI.ColorPicker changed]
+[51 of 57] Compiling NanoUI.Frame.Paint ( lib\NanoUI\Frame\Paint.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Frame\Paint.o ) [NanoUI.ColorPicker changed]
+[52 of 57] Compiling NanoUI.Frame.Input ( lib\NanoUI\Frame\Input.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Frame\Input.o ) [NanoUI.Context changed]
+[53 of 57] Compiling NanoUI.Frame.Window ( lib\NanoUI\Frame\Window.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Frame\Window.o ) [NanoUI.Context changed]
+[54 of 57] Compiling NanoUI.Frame.Cursor ( lib\NanoUI\Frame\Cursor.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Frame\Cursor.o ) [NanoUI.Context changed]
+[55 of 57] Compiling NanoUI.Frame     ( lib\NanoUI\Frame.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Frame.o ) [Effectful package changed]
+[56 of 57] Compiling NanoUI.Testing   ( lib\NanoUI\Testing.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Testing.o ) [Effectful package changed]
+[57 of 57] Compiling NanoUI           ( lib\NanoUI.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI.o ) [NanoUI.Compact changed]
+[22 of 57] Compiling NanoUI.Monad     ( lib\NanoUI\Monad.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Monad.p_o ) [Source file changed]
+[24 of 57] Compiling NanoUI.Compact   ( lib\NanoUI\Compact.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Compact.p_o ) [NanoUI.Monad changed]
+[26 of 57] Compiling NanoUI.WidgetText ( lib\NanoUI\WidgetText.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\WidgetText.p_o ) [Source file changed]
+[27 of 57] Compiling NanoUI.Frame.Focus ( lib\NanoUI\Frame\Focus.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Frame\Focus.p_o ) [NanoUI.WidgetText changed]
+[29 of 57] Compiling NanoUI.Layout.Solve ( lib\NanoUI\Layout\Solve.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Layout\Solve.p_o ) [Source file changed]
+[31 of 57] Compiling NanoUI.Frame.Chrome ( lib\NanoUI\Frame\Chrome.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Frame\Chrome.p_o ) [Source file changed]
+[34 of 57] Compiling NanoUI.Damage    ( lib\NanoUI\Damage.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Damage.p_o ) [NanoUI.Frame.Chrome changed]
+[35 of 57] Compiling NanoUI.Widgets.Animate ( lib\NanoUI\Widgets\Animate.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Widgets\Animate.p_o ) [NanoUI.Monad changed]
+[36 of 57] Compiling NanoUI.Widgets.Behavior ( lib\NanoUI\Widgets\Behavior.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Widgets\Behavior.p_o ) [NanoUI.Monad changed]
+[37 of 57] Compiling NanoUI.Widgets.Node ( lib\NanoUI\Widgets\Node.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Widgets\Node.p_o ) [Source file changed]
+[38 of 57] Compiling NanoUI.Widgets.Layout ( lib\NanoUI\Widgets\Layout.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Widgets\Layout.p_o ) [Source file changed]
+[39 of 57] Compiling NanoUI.Widgets.Combinators ( lib\NanoUI\Widgets\Combinators.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Widgets\Combinators.p_o ) [NanoUI.Monad changed]
+[40 of 57] Compiling NanoUI.Widgets.ColorPicker ( lib\NanoUI\Widgets\ColorPicker.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Widgets\ColorPicker.p_o ) [NanoUI.Monad changed]
+[41 of 57] Compiling NanoUI.Widgets.Chrome ( lib\NanoUI\Widgets\Chrome.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Widgets\Chrome.p_o ) [NanoUI.Monad changed]
+[42 of 57] Compiling NanoUI.Widgets.Overlay ( lib\NanoUI\Widgets\Overlay.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Widgets\Overlay.p_o ) [Source file changed]
+[43 of 57] Compiling NanoUI.Widgets.Radio ( lib\NanoUI\Widgets\Radio.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Widgets\Radio.p_o ) [NanoUI.Monad changed]
+[44 of 57] Compiling NanoUI.Widgets.Table ( lib\NanoUI\Widgets\Table.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Widgets\Table.p_o ) [NanoUI.Monad changed]
+[45 of 57] Compiling NanoUI.Widgets.Tabs ( lib\NanoUI\Widgets\Tabs.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Widgets\Tabs.p_o ) [NanoUI.Monad changed]
+[47 of 57] Compiling NanoUI.Widgets.Tree ( lib\NanoUI\Widgets\Tree.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Widgets\Tree.p_o ) [NanoUI.Monad changed]
+[48 of 57] Compiling NanoUI.Widgets   ( lib\NanoUI\Widgets.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Widgets.p_o ) [NanoUI.Monad changed]
+[49 of 57] Compiling NanoUI.Frame.TextInput ( lib\NanoUI\Frame\TextInput.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Frame\TextInput.p_o ) [NanoUI.Frame.Chrome changed]
+[50 of 57] Compiling NanoUI.Frame.Spans ( lib\NanoUI\Frame\Spans.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Frame\Spans.p_o ) [Source file changed]
+[51 of 57] Compiling NanoUI.Frame.Paint ( lib\NanoUI\Frame\Paint.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Frame\Paint.p_o ) [Source file changed]
+[52 of 57] Compiling NanoUI.Frame.Input ( lib\NanoUI\Frame\Input.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Frame\Input.p_o ) [Source file changed]
+[54 of 57] Compiling NanoUI.Frame.Cursor ( lib\NanoUI\Frame\Cursor.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Frame\Cursor.p_o ) [Source file changed]
+[55 of 57] Compiling NanoUI.Frame     ( lib\NanoUI\Frame.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Frame.p_o ) [Source file changed]
+[56 of 57] Compiling NanoUI.Testing   ( lib\NanoUI\Testing.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI\Testing.p_o ) [NanoUI.Compact changed]
+[57 of 57] Compiling NanoUI           ( lib\NanoUI.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\build\NanoUI.p_o ) [NanoUI.Compact changed]
+Configuring executable 'nano-ui-profile' for nano-ui-0.1.0.0...
+Preprocessing executable 'nano-ui-profile' for nano-ui-0.1.0.0...
+Building executable 'nano-ui-profile' for nano-ui-0.1.0.0...
+[1 of 1] Compiling Main             ( examples\Profile.hs, dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\x\nano-ui-profile\opt\build\nano-ui-profile\nano-ui-profile-tmp\Main.p_o ) [NanoUI.Widgets changed]
+[2 of 2] Linking dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\x\nano-ui-profile\opt\build\nano-ui-profile\nano-ui-profile.exe [Objects changed]
+JSON profile for speedscope...
+Configuration is affected by cabal.project and cabal.project.local at
+'C:\Users\zach\Dev\nano-ui'.
+profiled 3000 frames
+Text profile for hp2ps / reading...
+Configuration is affected by cabal.project and cabal.project.local at
+'C:\Users\zach\Dev\nano-ui'.
+profiled 3000 frames
+Summary:
+Python was not found; run without arguments to install from the Microsoft Store, or disable this shortcut from Settings > Apps > Advanced app settings > App execution aliases.
+
+Open profile-json.prof in https://www.speedscope.app/

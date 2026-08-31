@@ -1,0 +1,43 @@
+profile: profile-json.prof
+total_time: 5.06s  total_ticks: 9792
+   ticks      %    alloc MB  cost centre
+      23   0.2%       312.1  Effectful.Internal.Monad.unsafeEff_
+      20   0.2%       195.3  Effectful.Internal.Monad.unsafeEff
+      19   0.2%       426.8  NanoUI.Layout.Solve.$wpositionChildren
+      14   0.1%        36.4  Data.HashTable.ST.Basic.growTable/rehash
+      11   0.1%        39.4  NanoUI.Layout.Solve.$wfillLayoutChildren
+      11   0.1%       100.3  NanoUI.Layout.Solve.$wmeasurePass
+      10   0.1%        66.3  NanoUI.Frame.Paint.lowerNode1
+      10   0.1%       186.4  NanoUI.Layout.Solve.$wpositionNode
+       8   0.1%        36.9  NanoUI.Draw.$wpushCornerFan
+       8   0.1%        63.4  Data.HashTable.Internal.Array.readArray
+       7   0.1%        84.5  Data.HashTable.Internal.Array.writeArray
+       6   0.1%        32.9  Data.HashTable.ST.Basic.insertRecord/probe
+       6   0.1%         0.0  Effectful.Internal.Env.fromAnyEffect
+       5   0.1%        36.9  NanoUI.Draw.$wpushCornerArc
+       5   0.1%       179.7  NanoUI.Frame.Chrome.$wwidgetVisualStyle
+       5   0.1%        56.7  Data.IntMap.Strict.Internal.$winsert
+       4   0.0%        23.2  Main.$wlvl
+       4   0.0%         0.0  NanoUI.Layout.Solve.resolveSize
+       4   0.0%       186.4  Data.HashTable.Internal.IntArray.readArray
+       4   0.0%        62.8  NanoUI.Frame.Hit.scrollHitRect1
+       3   0.0%        96.8  NanoUI.Frame.Chrome.$wfillStyledRect
+       3   0.0%        92.2  NanoUI.Frame.Chrome.$wstrokeStyledRect
+       3   0.0%        18.5  NanoUI.Frame.Chrome.displayText2
+       3   0.0%        73.7  NanoUI.Layout.Solve.$wchildRowCrossSize
+       3   0.0%        58.5  Effectful.Internal.Env.getEnv
+       2   0.0%         2.5  NanoUI.Frame.$w$srunFrameEff
+       2   0.0%         0.0  NanoUI.Frame.Chrome.displayText1
+       2   0.0%        31.1  GHC.Internal.List.reverse1
+       2   0.0%       118.1  NanoUI.Layout.Solve.$wcountLayoutChildren
+       2   0.0%        62.0  NanoUI.Layout.Solve.$wmeasureContainer
+       2   0.0%        44.7  NanoUI.Damage.$wupdatePrevRects
+       2   0.0%         9.3  Data.HashTable.ST.Basic.lookup/go
+       2   0.0%         0.0  Data.IntMap.Internal.\\1
+       1   0.0%         0.0  NanoUI.Draw.$wcornerCosSin
+       1   0.0%         0.0  NanoUI.Frame.Chrome.$wfloatingAncestor
+       1   0.0%        64.5  NanoUI.Frame.Spans.widgetTextPlacements1
+       1   0.0%        92.7  Main.lvl13
+       1   0.0%       101.4  GHC.Internal.Base.map
+       1   0.0%         0.0  NanoUI.Layout.Solve.thd3
+       1   0.0%         0.0  NanoUI.Layout.Solve.$wloadChildrenScratchFromParent
