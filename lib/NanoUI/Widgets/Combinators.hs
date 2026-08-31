@@ -80,7 +80,7 @@ import Data.Text.Read (decimal, signed)
 import Data.Vector qualified as V
 import Effectful (Eff, type (:>))
 import qualified Data.IntMap.Strict as IM
-import NanoUI.Context (Context (..), getScrollOffset, getStore, intKey, markDirty, setScrollOffset, setStore)
+import NanoUI.Context (Context (..), bumpMirror, getScrollOffset, getStore, intKey, markDirty, setScrollOffset, setStore)
 import NanoUI.Font (measureText)
 import NanoUI.Frame.Hit (findNodeByWidgetId)
 import NanoUI.Host (isCellHost)
@@ -120,6 +120,7 @@ import NanoUI.Widgets.Node
   , addWidgetStyled
   , setChanged
   , setClicked
+  , tagContainer
   )
 
 -- | One row of cells keyed by caller ids (column index, not visible position).
@@ -367,6 +368,7 @@ tabStrip ::
   Eff es (TabResponse a, a)
 tabStrip style orient cur tabList mRenderBody = do
   ctx <- askContext
+  groupId <- nextId
   let vertical = orient == TabLeft || orient == TabRight
       h = if isCellHost (ctxHostProfile ctx) then 1 else 28
       styleVal = fromEnum style
@@ -389,7 +391,10 @@ tabStrip style orient cur tabList mRenderBody = do
               , layoutGap = if style == TabSegmented then 0 else 4
               , layoutPadding = if style == TabContained then Padding 0 0 2 0 else Padding 0 0 0 0
               }
-      headerBar = (if vertical then column else row) barLay (renderHeaders ctx hdrLay styleVal)
+      headerBar =
+        (if vertical then column else row) barLay $ do
+          tagContainer groupId
+          renderHeaders ctx hdrLay styleVal
   case mRenderBody of
     Nothing -> headerBar
     Just renderBody ->
@@ -402,7 +407,7 @@ tabStrip style orient cur tabList mRenderBody = do
             else shell (column (tight . fillW $ defaultLayout))
  where
   renderHeaders ctx hdrLay styleVal = do
-    resps <- zipWithM (\i t -> withKey i (renderSingleHeader hdrLay styleVal t)) [0 :: Int ..] tabList
+    resps <- zipWithM (\i t -> withKey i (renderSingleHeader hdrLay (styleVal + 4 * i) t)) [0 :: Int ..] tabList
     let clickedKeys = [k | (k, clicked, _, _) <- resps, clicked]
         closedKey = listToMaybe [k | (_, _, Just k, _) <- resps]
         nextTab = case clickedKeys of
@@ -420,19 +425,19 @@ tabStrip style orient cur tabList mRenderBody = do
     when hasChanged $ uiIO (syncTabHeaderActive ctx nextTab resps)
     pure (overallResp, nextTab)
 
-  renderSingleHeader hdrLay styleVal t = do
+  renderSingleHeader hdrLay packedStyle t = do
     let isActive = tabKey t == cur
         badge = maybe "" (\b -> " (" <> b <> ")") (tabBadge t)
         headerText = tabButtonMarker <> tabTitle t <> badge
     if tabClosable t
       then do
         (tabResp, closed) <- row (tight defaultLayout) $ do
-          resp <- buttonStyled headerText (if isActive then 1 else 0) hdrLay styleVal
+          resp <- buttonStyled headerText (if isActive then 1 else 0) hdrLay packedStyle
           closeResp <- buttonStyled (closeButtonMarker <> "\215") 0 (hdrLay {layoutPadding = Padding 2 4 4 4}) 0
           pure (resp, respClicked closeResp)
         pure (tabKey t, respClicked tabResp && not closed, if closed then Just (tabKey t) else Nothing, tabResp)
       else do
-        resp <- buttonStyled headerText (if isActive then 1 else 0) hdrLay styleVal
+        resp <- buttonStyled headerText (if isActive then 1 else 0) hdrLay packedStyle
         pure (tabKey t, respClicked resp, Nothing, resp)
 
 syncTabHeaderActive :: Eq a => Context -> a -> [(a, Bool, Maybe a, Response)] -> IO ()
@@ -653,7 +658,7 @@ useTableSort initial = do
         let packed = packSort sort
             prev = IM.findWithDefault packedInitial key (storeInt st)
         when (prev /= packed) $ do
-          setStore ctx (st {storeInt = IM.insert key packed (storeInt st)})
+          setStore ctx (bumpMirror (st {storeInt = IM.insert key packed (storeInt st)}))
           markDirty ctx
   pure (readSort, setSort)
 
@@ -762,9 +767,12 @@ finishTable n stateKey terminal vis order0 hidden0 drag0 dragX0 dragW0 widths0 w
           (i : _) | IS.size hidden0 + 1 < n -> IS.insert i hidden0
           _ -> hidden0
       sortClick =
-        if dragged || isJust mReorder || vis' /= vis || isResizeDrag drag0 || isJust edgeCol
+        if dragged || isJust mReorder || vis' /= vis || isResizeDrag drag0
           then Nothing
-          else listToMaybe [i | (i, r) <- headerPairs, respClicked r]
+          else
+            if isJust edgeCol && (inputMouseDown inp || inputMouseReleased inp)
+              then Nothing
+              else listToMaybe [i | (i, r) <- headerPairs, respClicked r]
       nextSort = maybe sort0 (nextSortCol n sort0) sortClick
       hasChanged = nextSort /= sort0 || nextOrder /= order0 || nextHidden /= hidden0 || widths1 /= widths0
       widgetResp =

@@ -254,7 +254,7 @@ lowerNode ctx idx = do
             da
             (ctxHostProfile ctx)
             theme
-            si
+            (si `mod` 4)
             (value > 0.5)
             style
             x

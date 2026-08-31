@@ -255,7 +255,9 @@ resolveInteraction ctx inp wid = do
     mouse = inputMousePos inp
     hovered = not disabled && not blocked && maybe False (`rectContains` mouse) mrect
     pressed = hovered && inputMouseDown inp
-    clicked = hovered && inputMouseReleased inp
+  pending <- readIORef (ctxClickedId ctx)
+  let
+    clicked = (hovered && inputMouseReleased inp) || pending == wid
   pure $
     Response
       { rawRespId = wid

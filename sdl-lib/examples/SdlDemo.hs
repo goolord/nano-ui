@@ -104,7 +104,7 @@ demoUi = do
           clickButton "Cancel" (setClick "Cancel")
           clickButton "About" (setAbout True)
           clickButton "Debug" (setDebug (not debugOpen))
-      row (tight . gap 8 . wrap . fillW $ defaultLayout) $ do
+      row (tight . gap 8 . fillW $ defaultLayout) $ do
         column (tight . gap 8 $ defaultLayout {layoutMaxW = 420}) $ do
           card $ do
             heading "State"
@@ -183,7 +183,7 @@ demoUi = do
                         ]
                     , TreeItem "README.md" []
                     ]
-              scroll (padAll 6 . fixedH 160 . fillW $ defaultLayout) $ do
+              scroll (padAll 6 . fixedH 240 . fillW $ defaultLayout) $ do
                 (_, sel) <- tree "demo" demoTree sel0
                 setTreeSel (T.pack (show sel))
             Table -> do
@@ -463,7 +463,28 @@ selftest = do
     void (sdlDrawFrame ctx' demoUi env base True)
     spans0 <- collectTextSpans ctx'
     unless (hasText "Feature" spans0) $ fail "selftest: Controls body missing"
-    feat0 <- requireSpan "selftest: Feature checkbox" (findRightmost "Feature" spans0)
+    clickTab ctx' env base "Table"
+    spansTable <- collectTextSpans ctx'
+    unless (hasText "David" spansTable) $ fail "selftest: table body missing after Table tab"
+    hdr <- requireSpan "selftest: Name header" (findHeader "Name" spansTable)
+    clickPos ctx' env base hdr
+    spansSorted <- collectTextSpans ctx'
+    unless (hasText "descending" spansSorted) $ fail "selftest: header click did not toggle sort"
+    dept <- requireSpan "selftest: Dept header" (findHeader "Dept" spansSorted)
+    dragPos ctx' env base dept (V2 (v2X dept + 180) (v2Y dept))
+    spansDrag <- collectTextSpans ctx'
+    unless (hasText "Sonia" spansDrag) $ fail "selftest: table missing after header drag"
+    clickTab ctx' env base "List"
+    spansTree <- collectTextSpans ctx'
+    unless (hasText "src" spansTree) $ fail "selftest: tree missing after List tab"
+    readme <- requireSpan "selftest: README.md" (findExact "README.md" spansTree)
+    clickPos ctx' env base readme
+    spansSel <- collectTextSpans ctx'
+    unless (hasText "7" spansSel) $ fail "selftest: tree click did not select README.md"
+    clickTab ctx' env base "Controls"
+    spansCtl <- collectTextSpans ctx'
+    unless (hasText "Feature" spansCtl) $ fail "selftest: Controls missing after tab back"
+    feat0 <- requireSpan "selftest: Feature checkbox" (findRightmost "Feature" spansCtl)
     clickPos ctx' env base feat0
     spansOn <- collectTextSpans ctx'
     unless (hasText "on" spansOn) $ fail "selftest: checkbox did not turn Feature on"
@@ -498,14 +519,33 @@ spanCenter (Rect x y w h) = V2 (x + w / 2) (y + h / 2)
 hasText :: T.Text -> [DemoSpan] -> Bool
 hasText needle spans = any (\(_, txt, _, _, _) -> needle `T.isInfixOf` txt) spans
 
+spanLabel :: T.Text -> T.Text
+spanLabel txt = T.dropWhile (`elem` ['\x01', '\x02', '\x05']) (T.strip txt)
+
 findExact :: T.Text -> [DemoSpan] -> Maybe V2
 findExact needle spans =
   pickRight
     [ (x, spanCenter r)
     | (r@(Rect x _ w h), txt, _, _, _) <- spans
     , w > 1 && h > 1
-    , T.dropWhile (`elem` ['\x01', '\x02', '\x05']) (T.strip txt) == needle
+    , spanLabel txt == needle
     ]
+
+findHeader :: T.Text -> [DemoSpan] -> Maybe V2
+findHeader needle spans =
+  let marked =
+        [ (x, spanCenter r)
+        | (r@(Rect x _ w h), txt, _, _, _) <- spans
+        , w > 1 && h > 1
+        , T.isPrefixOf (needle <> " ") (spanLabel txt)
+        ]
+      exact =
+        [ (x, spanCenter r)
+        | (r@(Rect x _ w h), txt, _, _, _) <- spans
+        , w > 1 && h > 1
+        , spanLabel txt == needle
+        ]
+   in pickRight (if null marked then exact else marked)
 
 findRightmost :: T.Text -> [DemoSpan] -> Maybe V2
 findRightmost needle spans =
@@ -534,4 +574,22 @@ clickPos ctx env base pos = do
   void (sdlDrawFrame ctx demoUi env press False)
   void (sdlDrawFrame ctx demoUi env hold False)
   void (sdlDrawFrame ctx demoUi env release False)
+  void (sdlDrawFrame ctx demoUi env base False)
+  void (sdlDrawFrame ctx demoUi env base False)
+
+clickTab :: Context -> SdlEnv -> Input -> T.Text -> IO ()
+clickTab ctx env base name = do
+  spans <- collectTextSpans ctx
+  pos <- requireSpan ("selftest: tab " <> T.unpack name) (findExact name spans)
+  clickPos ctx env base pos
+
+dragPos :: Context -> SdlEnv -> Input -> V2 -> V2 -> IO ()
+dragPos ctx env base from to = do
+  let press = base {inputMousePos = from, inputMouseDown = True, inputMousePressed = True}
+      hold = press {inputMousePressed = False, inputMousePos = to}
+      release = hold {inputMouseDown = False, inputMouseReleased = True, inputMousePos = to}
+  void (sdlDrawFrame ctx demoUi env press False)
+  void (sdlDrawFrame ctx demoUi env hold False)
+  void (sdlDrawFrame ctx demoUi env release False)
+  void (sdlDrawFrame ctx demoUi env base False)
   void (sdlDrawFrame ctx demoUi env base False)

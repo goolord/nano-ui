@@ -416,7 +416,7 @@ paintTabHeader da host theme styleIdx isActive style x y w h =
         clear = colorRGBA 0 0 0 0
         hasFill = bg /= clear
     if isActive
-      then case styleIdx of
+      then case styleIdx `mod` 4 of
         1 -> pushRoundedRect da rect r bg
         2 -> do
           pushRoundedRect da rect r bg
@@ -561,7 +561,7 @@ widgetVisualStyle ctx nt idx = do
                         , styleBorderWidth = 0
                         }
             | isTab ->
-                tabHeaderVisualStyle theme styleIdx (val > 0.5) isHot animT
+                tabHeaderVisualStyle theme (styleIdx `mod` 4) (val > 0.5) isHot animT
             | isTable ->
                 tableHeaderVisualStyle theme (val > 0.5)
             | not terminal && val > 0.5 ->

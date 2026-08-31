@@ -30,6 +30,7 @@ import NanoUI.Context
   , intKey
   , isDisabled
   , markDirty
+  , pointerBlockedByOverlay
   , setAnimationValue
   , setStore
   , startAnimation
@@ -56,14 +57,16 @@ import NanoUI.Layout.Arena
   , getParent
   , getRect
   , getStyleIdx
+  , getText
   , getWidgetId
   )
 import NanoUI.Types (Rect (..), V2 (..), rectContains, rectH, rectW, v2X)
 import NanoUI.Frame.Focus (filterModalFocusables, tabNext, tabNextFocusables)
-import NanoUI.Frame.Hit (modalTreeOpen, overlayHitAllowed)
+import NanoUI.Frame.Hit (modalTreeOpen, overlayHitAllowed, scrollHitRect)
 import NanoUI.Frame.Redraw (probeHotId)
 import NanoUI.Frame.Select (findSelectUnderMouse)
 import NanoUI.Frame.Spans (widgetHitRect)
+import NanoUI.WidgetText (isTabButtonText)
 import NanoUI.Frame.TextInput (collapseTextInputSelection, textInputGeomForWidget, applyTextInputClick, applyTextInputDrag, textInputCharAtX)
 
 whenM :: Monad m => m Bool -> m () -> m ()
@@ -148,6 +151,8 @@ isInteractiveNode nt =
     || nt == NodeTextInput
 
 -- Clicks are finalized against solved layout rects; widgets only track press state.
+-- Checkbox/radio write the store here. Buttons, tree rows, and select use the same
+-- solved hit; if in-UI prev-rect tests missed, ctxClickedId fires next frame.
 finalizePointerRelease :: Context -> Input -> IO ()
 finalizePointerRelease ctx inp =
   if not (inputMouseReleased inp)
@@ -194,11 +199,46 @@ finalizePointerRelease ctx inp =
                           { storeInt = IM.insert groupKey optIdx (storeInt store)
                           }
                       )
+                NodeButton -> do
+                  txt <- getText (ctxNodeArena ctx) idx
+                  if isTabButtonText txt
+                    then do
+                      parent <- getParent (ctxNodeArena ctx) idx
+                      when (parent >= 0) $ do
+                        store <- getStore ctx
+                        packed <- getStyleIdx (ctxNodeArena ctx) idx
+                        groupWid <- getWidgetId (ctxNodeArena ctx) parent
+                        let groupKey = intKey groupWid
+                            tabIdx = packed `div` 4
+                        setStore
+                          ctx
+                          ( store
+                              { storeInt = IM.insert groupKey tabIdx (storeInt store)
+                              }
+                          )
+                      writeIORef (ctxClickedId ctx) active
+                    else do
+                      uiHit <- inUiClickHit ctx active mouse
+                      unless uiHit $ writeIORef (ctxClickedId ctx) active
+                _ | postsLayoutClick nt -> do
+                  uiHit <- inUiClickHit ctx active mouse
+                  unless uiHit $ writeIORef (ctxClickedId ctx) active
                 _ -> pure ()
         writeIORef (ctxActiveId ctx) (WidgetId 0)
         when releasedOver $
           unless (isCellHost (ctxHostProfile ctx)) $
             setAnimationValue ctx active 1
+
+postsLayoutClick :: NodeType -> Bool
+postsLayoutClick nt =
+  nt == NodeTree || nt == NodeSelect
+
+inUiClickHit :: Context -> WidgetId -> V2 -> IO Bool
+inUiClickHit ctx wid mouse = do
+  disabled <- isDisabled ctx wid
+  blocked <- pointerBlockedByOverlay ctx mouse
+  mrect <- scrollHitRect ctx wid
+  pure (not disabled && not blocked && maybe False (`rectContains` mouse) mrect)
 
 checkReleasedOver :: Context -> Int -> WidgetId -> V2 -> IO Bool
 checkReleasedOver ctx count active mouse = go 0
