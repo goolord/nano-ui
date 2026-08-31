@@ -463,7 +463,7 @@ tableSplitPanes ::
   (Int -> Eff es Response) ->
   (Int -> row -> Int -> Eff es ()) ->
   Eff es [(Int, Response)]
-tableSplitPanes vWid hWid rowMinH hChromeH frozenIdx unfrozenIdx pinned scrollRows itemLay colBox renderHeader renderCell =
+tableSplitPanes vWid hWid _rowMinH hChromeH frozenIdx unfrozenIdx pinned scrollRows itemLay colBox renderHeader renderCell =
   panel (tight . fillW . fillH $ defaultLayout) $
     row (tight . fillW . fillH $ defaultLayout {layoutGap = 0}) $ do
       frozenHs <-
@@ -484,17 +484,18 @@ tableSplitPanes vWid hWid rowMinH hChromeH frozenIdx unfrozenIdx pinned scrollRo
   paneLay fill idxs =
     let base = tight $ defaultLayout {layoutGap = 0, layoutMinW = minSum idxs, layoutHeight = Grow 1}
      in if fill then fillW base else base {layoutWidth = Fit}
-  headerLine = keyedRow
-  pinLay = tight . fillW $ defaultLayout {layoutGap = 0, layoutMinH = rowMinH}
+  headerLine idxs renderHeader' =
+    keyedRowLay (tight . fillW $ defaultLayout {layoutGap = 0}) idxs $ \i ->
+      column (colBox i) (renderHeader' i)
   pinnedBlock idxs =
     mapM_
       ( \(ri, r) ->
           withKey ("pin" :: Text, ri) $ do
             when (ri > 0) $ void separator
-            void $
-              keyedRowLay pinLay idxs $ \i -> do
-                renderCell ri r i
-                pure ()
+            gridColumns
+              idxs
+              (map colBox idxs)
+              [void (renderCell ri r i) | i <- idxs]
       )
       (zip [0 ..] pinned)
   bodyBlock idxs =
@@ -529,9 +530,10 @@ tableSplitPanes vWid hWid rowMinH hChromeH frozenIdx unfrozenIdx pinned scrollRo
             when (not (null pinned) && not (null scrollRows)) $ void separator
             pure hs
       scrollAreaId vWid (vLay True) 0 $
-        scrollAreaId hWid (fillW . fillH $ hRowLay) tableScrollSlaveStyle (bodyBlock idxs)
-      scrollAreaId hWid (fillW $ hRowLay {layoutHeight = Fixed hChromeH, layoutMinH = hChromeH, layoutMaxH = hChromeH}) 0 $
-        void (spacer (Fixed (max minColW (minSum idxs))) (Fixed 1))
+        scrollAreaId hWid (fillW . fillH $ hRowLay) 0 (bodyBlock idxs)
+      void $
+        row (fillW $ hRowLay {layoutHeight = Fixed hChromeH, layoutMinH = hChromeH, layoutMaxH = hChromeH}) $
+          spacer (Fixed (max minColW (minSum idxs))) (Fixed 1)
       pure hs
 
 data SortDir = SortAsc | SortDesc
@@ -687,14 +689,14 @@ resolvedWidth sizes contentWs stored i =
           ColFixed f -> max minColW f
           _ -> contentW
 
-colSizing :: [ColSize] -> [Float] -> Int -> Sizing
-colSizing sizes stored i =
+colSizing :: [ColSize] -> [Float] -> Float -> Int -> Sizing
+colSizing sizes stored resolved i =
   let saved = listAt stored i 0
    in if saved > 0
         then Fixed saved
         else case listAt sizes i ColStretch of
           ColFixed f -> Fixed (max minColW f)
-          ColContent -> Fit
+          ColContent -> Fixed resolved
           ColStretch -> Grow 1
 
 colBoxLayout :: Sizing -> Float -> Layout
@@ -774,6 +776,7 @@ finishTable n stateKey terminal vis order0 hidden0 drag0 dragX0 dragW0 widths0 w
               then Nothing
               else listToMaybe [i | (i, r) <- headerPairs, respClicked r]
       nextSort = maybe sort0 (nextSortCol n sort0) sortClick
+      seedWidths = fitList n 0 [headerW i | i <- [0 .. n - 1]]
       hasChanged = nextSort /= sort0 || nextOrder /= order0 || nextHidden /= hidden0 || widths1 /= widths0
       widgetResp =
         setChanged hasChanged $
@@ -790,4 +793,6 @@ finishTable n stateKey terminal vis order0 hidden0 drag0 dragX0 dragW0 widths0 w
                   IM.insert (slotKey slotDragW stateKey) nextDragW (storeFloat st)
             }
     when (st1 /= st) $ setStore ctx st1 >> markDirty ctx
+    when (drag0 == 0 && not resizing && seedWidths /= widths0 && any (> 0) seedWidths) $
+      writeColW ctx stateKey seedWidths
   pure (TableResponse widgetResp nextSort nextOrder nextHidden, nextSort)

@@ -36,7 +36,7 @@ import NanoUI.Input (inputMouseDown, inputMousePos)
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
 import NanoUI.Store (WidgetStore (..), slotDrag, slotDragW, slotKey)
-import NanoUI.Style (AlignX (..), AlignY (..), Layout (..), Padding (..), defaultLayout, fillW, tight)
+import NanoUI.Style (AlignX (..), AlignY (..), Layout (..), Padding (..), Sizing (..), defaultLayout, fillW, tight)
 import NanoUI.Types (v2X)
 import NanoUI.WidgetText (tableHeaderLabel)
 import NanoUI.Widgets.Combinators
@@ -103,19 +103,25 @@ tableCfg cfg outerLayout key cols rows curSort =
         cellPad = if terminal then Padding 0 0 0 0 else Padding 10 8 10 8
         rowMinH = if terminal then 1 else 28
         resolvedW i = resolvedWidth sizes contentWs widths1 i
+        colSizingFor i = colSizing sizes widths1 (resolvedW i) i
         itemLayout i =
-          (colBoxLayout (colSizing sizes widths1 i) (resolvedW i))
+          (colBoxLayout (colSizingFor i) (resolvedW i))
             { layoutAlignX = if listAt numeric i False then AlignEnd else AlignStart
             , layoutAlignY = AlignMiddle
             , layoutPadding = cellPad
             , layoutMinH = rowMinH
             }
+        cellLayout i =
+          (itemLayout i)
+            { layoutWidth = Grow 1
+            , layoutMinW = 0
+            }
         shown i txt = if listAt numeric i False then monoFontMarker <> txt else txt
         hChromeH = if terminal then 1 else scrollBarGutter host (ctxFontMetrics ctx)
         renderHeader i =
           buttonStyled (tableHeaderLabel terminal (listAt hdrs i T.empty)) (if sortColIndex sort0 == i then 1 else 0) (itemLayout i) (sortMarkStyle sort0 i)
-        renderCell ri r i = void (stripedRow ri (itemLayout i) (shown i (columnCells cols r !! i)))
-        colBox i = colBoxLayout (colSizing sizes widths1 i) (resolvedW i)
+        renderCell ri r i = void (stripedRow ri (cellLayout i) (shown i (columnCells cols r !! i)))
+        colBox i = colBoxLayout (colSizingFor i) (resolvedW i)
     column outerLayout $ do
       showAllResp <-
         if IS.null hidden0

@@ -7,6 +7,7 @@ import Data.ByteString.Char8 qualified as BS8
 import Data.ByteString.Lazy qualified as BL
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.List (isInfixOf, nub, sort)
+import Data.Maybe (listToMaybe)
 import Data.Text qualified as T
 import Effectful.State.Static.Local (State, evalState, get, modify)
 import Foreign.ForeignPtr (withForeignPtr)
@@ -88,6 +89,7 @@ main = do
   run "hover-skip" runHoverSkipTest
   run "hover-damage" runHoverDamageTest
   run "scroll-damage" runScrollDamageTest
+  run "table-scroll" runTableScrollTest
   runSdl "scroll-top-clip" runScrollTopClipTest
   run "select-overlay-damage" runSelectOverlayDamageTest
   run "text-input-dirty" runTextInputDirtyTest
@@ -1539,6 +1541,59 @@ runScrollDamageTest _ failed = do
   _ <- runFrame ctx inpScroll ui
   dScroll <- takeDamage ctx
   when (dScroll /= DamageFull) $ bump failed
+
+runTableScrollTest :: Context -> IORef Int -> IO ()
+runTableScrollTest _ failed = do
+  ctx <- newContext
+  let
+    win = Size 320 120
+    inp0 =
+      emptyInput
+        { inputWindowSize = win
+        , inputMousePos = V2 40 70
+        }
+    ui = do
+      (readSort, _) <- useTableSort (SortCol 0 SortAsc)
+      tableSort <- readSort
+      void (table "people" tableScrollCols tableScrollRows tableSort)
+  _ <- runFrame ctx inp0 ui
+  _ <- runFrame ctx inp0 ui
+  spans0 <- collectTextSpans ctx
+  let findLabel needle =
+        listToMaybe [(r, t, fg, bg, c) | (r, t, fg, bg, c) <- spans0, needle `T.isInfixOf` t]
+  case (findLabel "Name", findLabel "row-1", findLabel "val-1") of
+    (Just (Rect nx _ _ _, _, _, _, _), Just (Rect cn _ _ _, _, _, _, _), Just (Rect cvx _ _ _, _, _, _, _)) -> do
+      when (abs (nx - cn) > 1) $ do
+        putStrLn ("table-scroll: x mismatch nx=" ++ show nx ++ " cn=" ++ show cn)
+        bump failed
+      when (cvx <= cn) $ bump failed
+    _ -> do
+      putStrLn "table-scroll: missing header/body spans"
+      bump failed
+  let scrollInp = inp0 {inputScroll = V2 0 1}
+  _ <- runFrame ctx scrollInp ui
+  spans1 <- collectTextSpans ctx
+  when (length spans1 < length spans0 `div` 2) $ do
+    putStrLn ("table-scroll: span drop " ++ show (length spans0) ++ " -> " ++ show (length spans1))
+    bump failed
+
+tableScrollCols :: Colonnade Headed TableScrollRow T.Text
+tableScrollCols =
+  mconcat
+    [ headed "Name" tableScrollName
+    , headed "Value" tableScrollVal
+    ]
+
+data TableScrollRow = TableScrollRow
+  { tableScrollName :: T.Text
+  , tableScrollVal :: T.Text
+  }
+
+tableScrollRows :: [TableScrollRow]
+tableScrollRows =
+  [ TableScrollRow ("row-" <> T.pack (show (i :: Int))) ("val-" <> T.pack (show i))
+  | i <- [1 .. 20]
+  ]
 
 -- Tall card in a page scroller: hover at scroll top must not clip taller
 -- than the window. That blit stretches the retain texture.
