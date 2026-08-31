@@ -117,6 +117,15 @@ module NanoUI.Testing
   , terminalTextPositions
   , wideTrailChar
   , textDisplayWidth
+  , iconClose
+  , iconChecked
+  , iconUnchecked
+  , iconSelectClosed
+  , iconWindowTitle
+  , iconModalTitle
+  , iconScrollDown
+  , iconScrollUp
+  , iconSelectOpen
   ) where
 
 import NanoUI.Compact (Compact, askCompact, compactHost)
@@ -178,6 +187,7 @@ import NanoUI.Draw
   , drawCmdPartitionByLayer
   , drawCmdNull
   , drawCmdCount
+  , drawVertices
   , indexSize
   , vertexSize
   )
@@ -204,7 +214,16 @@ import NanoUI.Frame
   )
 import NanoUI.Host (HostProfile (..))
 import NanoUI.Icons
-  ( terminalCharColumns
+  ( iconChecked
+  , iconClose
+  , iconModalTitle
+  , iconScrollDown
+  , iconScrollUp
+  , iconSelectOpen
+  , iconSelectClosed
+  , iconUnchecked
+  , iconWindowTitle
+  , terminalCharColumns
   , terminalPaintColumns
   , terminalTextColumns
   , terminalTextPositions

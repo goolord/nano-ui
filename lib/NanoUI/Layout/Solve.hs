@@ -637,8 +637,7 @@ positionColumnScroll ::
   IO ()
 positionColumnScroll na host fm parent gap cx cy innerW innerH contentSize = do
   n <- loadChildrenScratchFromParent na parent innerW innerH
-  distributeScratch na 0 n contentSize (gap * fromIntegral (max 0 (n - 1))) False
-  pairs <- snapshotScratchColumn na 0 n
+  pairs <- prepareAxisScratch na n contentSize (gap * fromIntegral (max 0 (n - 1))) False
   let go [] _ = pure ()
       go ((ci, fh) : rest) !curY = do
         nt <- getNodeType na ci
@@ -719,6 +718,17 @@ columnChildHeight na ci scratchH = do
       (_, _, _, ih) <- getRect na ci
       pure (max minH ih)
 
+prepareAxisScratch ::
+  NodeArena ->
+  Int ->
+  Float ->
+  Float ->
+  Bool ->
+  IO [(NodeIdx, Float)]
+prepareAxisScratch na n availMain gapSum horizontal = do
+  distributeScratch na 0 n availMain gapSum horizontal
+  snapshotScratchMain na 0 n horizontal
+
 positionRowFromParent ::
   NodeArena ->
   HostProfile ->
@@ -732,8 +742,7 @@ positionRowFromParent ::
   IO ()
 positionRowFromParent na host fm parent gap cx cy cw ch = do
   n <- loadChildrenScratchFromParent na parent cw ch
-  distributeScratch na 0 n cw (gap * fromIntegral (max 0 (n - 1))) True
-  pairs <- snapshotScratchRow na 0 n
+  pairs <- prepareAxisScratch na n cw (gap * fromIntegral (max 0 (n - 1))) True
   let goRow [] _ = pure ()
       goRow ((ci, fw) : rest) !curX = do
         -- Fit/fixed children keep content height. Only Grow/Percent eat `ch`.
@@ -753,8 +762,7 @@ positionRowWrap na host fm parent gap cx cy cw ch = do
       goLines !oy (rowItems : restLines) = do
         lineBudget <- lineRowCrossBudget na rowItems
         nLine <- writeScratchDims na rowItems
-        distributeScratch na 0 nLine cw (gap * fromIntegral (max 0 (nLine - 1))) True
-        rowEntries <- snapshotScratchRow na 0 nLine
+        rowEntries <- prepareAxisScratch na nLine cw (gap * fromIntegral (max 0 (nLine - 1))) True
         rowH <- goRow rowEntries cx oy lineBudget lineBudget
         goLines (oy + rowH + gap) restLines
       goRow [] _ _ _ maxH = pure maxH
@@ -785,8 +793,7 @@ positionColumnFromParent ::
 positionColumnFromParent na host fm parent gap chrome px _ pw cx cy cw ch = do
   n <- loadChildrenScratchFromParent na parent cw ch
   gapSum <- columnGapSumScratch na chrome n gap
-  distributeScratch na 0 n ch gapSum False
-  pairs <- snapshotScratchColumn na 0 n
+  pairs <- prepareAxisScratch na n ch gapSum False
   let go [] _ = pure ()
       go ((ci, fh) : rest) !curY = do
         nt <- getNodeType na ci
@@ -872,23 +879,17 @@ snd3 (_, b, _) = b
 thd3 :: (a, b, c) -> c
 thd3 (_, _, c) = c
 
-snapshotScratchRow :: NodeArena -> Int -> Int -> IO [(NodeIdx, Float)]
-snapshotScratchRow na off n = do
+snapshotScratchMain :: NodeArena -> Int -> Int -> Bool -> IO [(NodeIdx, Float)]
+snapshotScratchMain na off n horizontal = do
   idxArr <- readIORef (naScratchIdx na)
-  outW <- readIORef (naScratchOutMain na)
+  outArr <-
+    if horizontal
+      then readIORef (naScratchOutMain na)
+      else readIORef (naScratchOutCross na)
   forM [off .. off + n - 1] $ \i -> do
     ci <- readPrimArray idxArr i
-    fw <- readPrimArray outW i
-    pure (ci, fw)
-
-snapshotScratchColumn :: NodeArena -> Int -> Int -> IO [(NodeIdx, Float)]
-snapshotScratchColumn na off n = do
-  idxArr <- readIORef (naScratchIdx na)
-  outH <- readIORef (naScratchOutCross na)
-  forM [off .. off + n - 1] $ \i -> do
-    ci <- readPrimArray idxArr i
-    fh <- readPrimArray outH i
-    pure (ci, fh)
+    v <- readPrimArray outArr i
+    pure (ci, v)
 
 loadChildrenScratchFromParent :: NodeArena -> NodeIdx -> Float -> Float -> IO Int
 loadChildrenScratchFromParent na parent availW availH = do

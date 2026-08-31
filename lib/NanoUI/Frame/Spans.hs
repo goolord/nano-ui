@@ -94,12 +94,12 @@ import NanoUI.WidgetText
   , textInputFieldText
   , textInputTerminalText
   , treeDecodeStyle
+  , tableStripeColor
   )
 import NanoUI.Frame.Chrome
   ( buildFloatingAncestorMap
   , displayText
   , floatingLabelPaint
-  , tableStripeColor
   , textInputFocused
   , textInputValue
   , widgetVisualStyle

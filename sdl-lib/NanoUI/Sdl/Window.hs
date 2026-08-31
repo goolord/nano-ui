@@ -43,14 +43,11 @@ import NanoUI.Sdl.Clipboard (withSdlClipboard)
 import NanoUI.Sdl.Cursor (SdlCursors (..), destroyCursors, initCursors)
 import NanoUI.Sdl.Font
   ( SdlFont
-  , TextCache
   , GlyphAtlas
   , closeFont
-  , destroyTextCache
   , destroyGlyphAtlas
   , findFontPath
   , findMonoFontPath
-  , newTextCache
   , newGlyphAtlas
   , openFont
   , resetGlyphAtlas
@@ -157,7 +154,6 @@ data SdlEnv = SdlEnv
   , sdlScaleRef :: IORef Float
   , sdlFontRef :: IORef SdlFont
   , sdlMonoFontRef :: IORef SdlFont
-  , sdlTextCache :: TextCache
   , sdlGlyphAtlas :: GlyphAtlas
   , sdlImages :: ImageAtlas
   , sdlCursors :: SdlCursors
@@ -186,7 +182,6 @@ syncDisplay ctx env inp = do
     closeFont oldMono
     newMono <- openFont (sdlMonoFontPath env) (sdlFontSize env * scale)
     writeIORef (sdlMonoFontRef env) newMono
-    destroyTextCache (sdlTextCache env)
     -- Glyph atlas entries are at the old pixel size — must discard and re-warm.
     resetGlyphAtlas (sdlGlyphAtlas env)
     warmGlyphAtlas (sdlGlyphAtlas env) newFont
@@ -335,7 +330,6 @@ startSdlWindow ctx title w h flags bench vsync fontPath monoPath fontSize = do
           scaleRef <- newIORef scale
           fontRef <- newIORef font
           monoFontRef <- newIORef monoFont
-          cache <- newTextCache ren
           glyphAtlas <- newGlyphAtlas ren
           warmGlyphAtlas glyphAtlas font
           warmGlyphAtlas glyphAtlas monoFont
@@ -357,7 +351,6 @@ startSdlWindow ctx title w h flags bench vsync fontPath monoPath fontSize = do
               , sdlScaleRef = scaleRef
               , sdlFontRef = fontRef
               , sdlMonoFontRef = monoFontRef
-              , sdlTextCache = cache
               , sdlGlyphAtlas = glyphAtlas
               , sdlImages = images
               , sdlCursors = cursors
@@ -383,7 +376,6 @@ stopSdlWindow bench env = do
   retainDestroy tex
   destroyCursors (sdlCursors env)
   destroyImageAtlas (sdlImages env)
-  destroyTextCache (sdlTextCache env)
   destroyGlyphAtlas (sdlGlyphAtlas env)
   font <- readIORef (sdlFontRef env)
   closeFont font

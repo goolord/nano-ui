@@ -34,6 +34,7 @@ module NanoUI.WidgetText
   , tableStripeOdd
   , tableScrollSlaveStyle
   , tableSortReserve
+  , tableStripeColor
   , tableHeaderLabel
   , tableHeaderDisplayText
   , stripButtonBrackets
@@ -55,7 +56,8 @@ import Data.Text (Text)
 import Data.Word (Word8)
 import NanoUI.Font (FontMetrics (..), fmLineHeight)
 import NanoUI.Icons (Icons, checkboxPrefixes, radioPrefixes, treeExpandMark, treeExpandPrefixes)
-import NanoUI.Types (Color (..), colorB, colorG, colorR, colorRGBA, sliderBarCells)
+import NanoUI.Style (Theme (..), styleBg, themeButton, themePanel, themeWindow)
+import NanoUI.Types (Color (..), colorB, colorG, colorR, colorRGBA, lerpColor, sliderBarCells)
 import qualified Data.Text as T
 
 sliderDisplayText :: Text -> Float -> Text
@@ -241,6 +243,14 @@ tableStripeEven = 1
 
 tableStripeOdd :: Int
 tableStripeOdd = 2
+
+tableStripeColor :: Theme -> Int -> Maybe Color
+tableStripeColor theme si
+  | si == tableStripeEven =
+      Just (lerpColor (styleBg (themePanel theme)) (themeWindow theme) 0.18)
+  | si == tableStripeOdd =
+      Just (lerpColor (styleBg (themePanel theme)) (styleBg (themeButton theme)) 0.42)
+  | otherwise = Nothing
 
 -- | Scroll container that shares an id with a master pane and must not paint chrome.
 tableScrollSlaveStyle :: Int

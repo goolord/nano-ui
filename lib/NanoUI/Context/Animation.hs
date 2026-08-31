@@ -25,8 +25,8 @@ import NanoUI.Context.Internal
   ( Context (..)
   , intKey
   , markDirty
+  , getPrevRectByKey
   )
-import NanoUI.Context.PrevRects (getPrevRectByKey)
 import NanoUI.Id (WidgetId (..))
 import Data.IORef (readIORef, writeIORef)
 import NanoUI.Layout.Arena (getRect, lookupNodeByKey)

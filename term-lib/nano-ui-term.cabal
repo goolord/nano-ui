@@ -61,6 +61,8 @@ library
     exposed-modules:
         NanoUI.Backend.Term
         NanoUI.Testing.Term
+        NanoUI.Testing.Assert
+        NanoUI.Testing.Harness
     other-modules:
         NanoUI.Term.Session
         NanoUI.Term.Debug
@@ -116,7 +118,18 @@ test-suite nano-ui-test
     import:           warnings
     type:             exitcode-stdio-1.0
     main-is:          Main.hs
-    other-modules:    ApiBoundary
+    other-modules:
+        ApiBoundary
+        Cases
+        Cases.Animation
+        Cases.Demo
+        Cases.Modal
+        Cases.Scroll
+        Cases.Select
+        Cases.Tabs
+        Cases.Terminal
+        Cases.TextInput
+        Cases.Window
     build-depends:
         base ^>=4.22.0.0,
         bytestring,

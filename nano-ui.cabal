@@ -68,15 +68,7 @@ library
         NanoUI.Context.Animation
         NanoUI.Context.Internal
         NanoUI.Context.Modal
-        NanoUI.Context.Tooltip
-        NanoUI.Context.Atlas
-        NanoUI.Context.PrevRects
-        NanoUI.Context.Store
-        NanoUI.Context.Config
-        NanoUI.Context.Dirty
-        NanoUI.Context.Host
         NanoUI.Context.Focus
-        NanoUI.Context.Messages
         NanoUI.Context.New
         NanoUI.Damage
         NanoUI.Draw

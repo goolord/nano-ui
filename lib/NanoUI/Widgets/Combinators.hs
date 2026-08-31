@@ -12,6 +12,8 @@ module NanoUI.Widgets.Combinators
   , keyedRow
   , listAt
   , fitList
+  , listClipper
+  , virtualIndices
   , setAt
   , normalizeOrder
   , visibleCols
@@ -80,7 +82,7 @@ import Data.Text.Read (decimal, signed)
 import Data.Vector qualified as V
 import Effectful (Eff, type (:>))
 import qualified Data.IntMap.Strict as IM
-import NanoUI.Context (Context (..), bumpMirror, getScrollOffset, getStore, intKey, markDirty, setScrollOffset, setStore)
+import NanoUI.Context (Context (..), bumpMirror, getPrevRect, getScrollOffset, getStore, intKey, markDirty, setScrollOffset, setStore)
 import NanoUI.Font (measureText)
 import NanoUI.Frame.Hit (findNodeByWidgetId)
 import NanoUI.Host (isCellHost)
@@ -109,7 +111,7 @@ import NanoUI.Style
   , grow
   , tight
   )
-import NanoUI.Types (Rect (..), V2 (..), rectContains, rectW, v2X, v2Y)
+import NanoUI.Types (Rect (..), V2 (..), rectContains, rectH, rectW, v2X, v2Y)
 import NanoUI.WidgetText (closeButtonMarker, tabButtonMarker, tableScrollSlaveStyle, tableSortReserve)
 import NanoUI.Widgets.Behavior (KeyNav (..), useReorder)
 import NanoUI.Widgets.Layout (column, panel, row, scrollAreaId, separator, spacer)
@@ -197,6 +199,21 @@ listAt xs i d = case drop i xs of
 
 fitList :: Int -> a -> [a] -> [a]
 fitList n d xs = take n (xs ++ repeat d)
+
+{-# INLINE listClipper #-}
+listClipper :: Int -> Float -> Float -> Float -> (Int, Int)
+listClipper itemCount scrollOff viewH itemH
+  | itemCount <= 0 || itemH <= 0 || viewH <= 0 = (0, -1)
+  | otherwise =
+      let firstVis = max 0 (floor (scrollOff / itemH))
+          lastVis = min (itemCount - 1) (floor ((scrollOff + viewH - 1) / itemH))
+       in if lastVis < firstVis then (0, -1) else (firstVis, lastVis)
+
+{-# INLINE virtualIndices #-}
+virtualIndices :: Int -> Float -> Float -> Float -> [Int]
+virtualIndices n scrollOff viewH itemH =
+  let (lo, hi) = listClipper n scrollOff viewH itemH
+   in if hi < lo then [] else [lo .. hi]
 
 setAt :: Int -> a -> [a] -> [a]
 setAt i x xs
@@ -463,7 +480,7 @@ tableSplitPanes ::
   (Int -> Eff es Response) ->
   (Int -> row -> Int -> Eff es ()) ->
   Eff es [(Int, Response)]
-tableSplitPanes vWid hWid _rowMinH hChromeH frozenIdx unfrozenIdx pinned scrollRows itemLay colBox renderHeader renderCell =
+tableSplitPanes vWid hWid rowMinH hChromeH frozenIdx unfrozenIdx pinned scrollRows itemLay colBox renderHeader renderCell =
   panel (tight . fillW . fillH $ defaultLayout) $
     row (tight . fillW . fillH $ defaultLayout {layoutGap = 0}) $ do
       frozenHs <-
@@ -498,18 +515,31 @@ tableSplitPanes vWid hWid _rowMinH hChromeH frozenIdx unfrozenIdx pinned scrollR
               [void (renderCell ri r i) | i <- idxs]
       )
       (zip [0 ..] pinned)
-  bodyBlock idxs =
+  bodyBlock idxs = do
+    ctx <- askContext
+    vis <-
+      let n = length scrollRows
+       in if n == 0 || rowMinH <= 0
+            then pure []
+            else uiIO $ do
+              scroll <- getScrollOffset ctx vWid
+              viewH <-
+                getPrevRect ctx vWid >>= \case
+                  Nothing -> pure (rowMinH * 8)
+                  Just r -> pure (rectH r)
+              pure (virtualIndices n scroll viewH rowMinH)
     gridColumns
       idxs
       (map colBox idxs)
       [ mapM_
-          ( \(ri, r) ->
-              withKey ri $ do
-                when (ri > 0) $ void separator
-                renderCell (ri + freezeR) r i
+          ( \rowIdx ->
+              withKey rowIdx $ do
+                when (rowIdx > 0) $ void separator
+                let r = scrollRows !! rowIdx
+                renderCell (rowIdx + freezeR) r colIdx
           )
-          (zip [0 ..] scrollRows)
-      | i <- idxs
+          vis
+      | colIdx <- idxs
       ]
   pane fill slaveStyle idxs = do
     column (paneLay fill idxs) $ do

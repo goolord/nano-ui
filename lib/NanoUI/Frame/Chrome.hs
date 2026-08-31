@@ -27,7 +27,6 @@ module NanoUI.Frame.Chrome
   , clamp01
   , paintTabHeader
   , paintTableHeader
-  , tableStripeColor
   ) where
 
 import Control.Monad (foldM, when)
@@ -79,8 +78,6 @@ import NanoUI.WidgetText
   , sliderLabelText
   , textInputFieldText
   , textInputTerminalText
-  , tableStripeEven
-  , tableStripeOdd
   , tableHeaderDisplayText
   , isTableHeaderText
   )
@@ -384,14 +381,6 @@ tableHeaderVisualStyle theme isSorted =
         , styleBorderWidth = 0
         , styleCornerRadius = 0
         }
-
-tableStripeColor :: Theme -> Int -> Maybe Color
-tableStripeColor theme si
-  | si == tableStripeEven =
-      Just (lerpColor (styleBg (themePanel theme)) (themeWindow theme) 0.18)
-  | si == tableStripeOdd =
-      Just (lerpColor (styleBg (themePanel theme)) (styleBg (themeButton theme)) 0.42)
-  | otherwise = Nothing
 
 paintTabHeader ::
   DrawArena ->
