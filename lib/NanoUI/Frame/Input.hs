@@ -1,5 +1,4 @@
 {-# LANGUAGE DataKinds #-}
-{-# OPTIONS_GHC -Wno-unused-imports #-}
 {-# OPTIONS_GHC -Wno-unused-top-binds #-}
 
 module NanoUI.Frame.Input
@@ -16,166 +15,52 @@ module NanoUI.Frame.Input
   ) where
 
 
-import Control.Monad (filterM, foldM, forM, forM_, unless, void, when)
-
-import Data.Char (isAlphaNum, isSpace)
+import Control.Monad (forM_, unless, when)
 import Data.IORef (readIORef, writeIORef)
-import Data.Typeable (Typeable)
-import Data.List (findIndex)
-import Data.Maybe (isJust)
-import Data.Word (Word32)
 import qualified Data.IntMap.Strict as IM
-import qualified Data.Text as T
-import NanoUI.Damage (floatingPanelRects, updatePrevRects, writeDamage)
 import NanoUI.Context
   ( Context (..)
-  , FrameMsg (..)
-  , WidgetStore (..)
-  , TextInputMenu (..)
   , TextInputDrag (..)
-  , WindowResizeDrag (..)
-  , WindowResizeEdge (..)
-  , anyAnimating
-  , decodeMessages
-  , drainMessages
+  , TextInputMenu (..)
+  , WidgetStore (..)
   , getFocusables
-  , getScrollOffset
   , getStore
   , intKey
-  , isDirty
   , isDisabled
   , markDirty
-  , getHotId
-  , getPrevRect
-  , setScrollOffset
+  , setAnimationValue
   , setStore
   , startAnimation
-  , setAnimationValue
-  , tickAnimations
-  , getAnimationValue
-  , animInProgress
-  , clearTooltips
-  , readTooltips
-  , PendingTooltip (..)
-  , ctxClipboardGet
-  , clearMeasureCache
-  , markEscapeConsumed
-  , lookupImageUv
-  , atlasTextureId
   )
-import NanoUI.Draw
-  ( DrawArena
-  , DrawData
-  , Layer (..)
-  , beginLayer
-  , currentLayer
-  , finishDraw
-  , pushLine
-  , pushFilledTriangle
-  , pushRect
-  , pushBackdropDim
-  , pushImage
-  , pushRoundedRect
-  , pushRoundedStroke
-  , pushText
-  , resetDrawArena
-  , withClip
-  )
-import NanoUI.Font
-  ( FontMetrics (..)
-  , checkboxBoxSize
-  , checkboxLeading
-  , fmLineHeight
-  , layoutLineHeight
-  , hasHeadingMarker
-  , hasMonoFontMarker
-  , hasMutedMarker
-  , labelContentInset
-  , resolveLayoutPadding
-  , stripWidgetMarkers
-  , lineWidth
-  , textDisplayWidth
-  , ScrollBarSlot (..)
-  , scrollBarGeomFor
-  , scrollBarOuterGap
-  , scrollLayoutGutter
-  , sliderTrackBounds
-  , widgetContentInset
-  , centeredTextY
-  , alignedTextBox
-  , wrapTextLines
-  , wrapTextLinesIO
-  )
-import NanoUI.Host (HostProfile, isCellHost)
-import NanoUI.WidgetMarkers
-  ( buttonDisplayText
-  , closeButtonDisplayText
-  , isCloseButtonText
-  , stripButtonBrackets
-  )
-import NanoUI.Icons (Icons (..), checkboxMark, terminalPaintColumns)
+import NanoUI.Host (isCellHost)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
-import NanoUI.Input (Input (..), Key (..), Modifiers (..), inputInteracted, inputKeys, inputKeysElem, inputPointerHeld, inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased, inputMouseRightPressed, inputScroll, inputDeltaTime, inputWindowSize, modShift)
+import NanoUI.Input
+  ( Input (..)
+  , Key (..)
+  , inputKeysElem
+  , inputMouseClicks
+  , inputMouseDown
+  , inputMousePos
+  , inputMousePressed
+  , inputMouseReleased
+  , inputModifiers
+  , modShift
+  )
 import NanoUI.Layout.Arena
-  ( DirTag (..)
-  , NodeIdx
-  , NodeType (..)
-  , SizingTag (..)
+  ( NodeType (..)
   , arenaCount
   , findNodeRevM
-  , getAlignX
-  , getDirection
-  , getFirstChild
-  , getHeightSizing
-  , getMinMax
-  , getNextSibling
-  , getParent
   , getNodeType
-  , getNodeValue
-  , getPadding
   , getRect
-  , getStyleIdx
   , getText
-  , getWidthSizing
   , getWidgetId
-  , isWidgetNode
-  , isContainerNode
-  , isFloatingNode
-  , isScrollNode
-  , NodeType (NodeButton, NodeCheckbox, NodeRadio, NodeSelect, NodeColorPicker, NodeSlider, NodeTextInput, NodeModal, NodeImage, NodePanel, NodeWindow, NodeContainer, NodeScrollContainer, NodeText, NodeSeparator, NodeSpacer, NodeBox)
-  , resetNodeArena
-  , setNodeText
-  , setNodeValue
-  , setRect
   )
-import NanoUI.Layout.Solve (placeModals, placeWindows, positionWindowNode, scrollBarSlotOf, solveLayout)
-import Effectful (Eff, IOE, runEff, type (:>))
-import NanoUI.Monad (NanoUI, Ui, runUi)
-import NanoUI.Widgets (applyTextInputMenuAction)
-import NanoUI.WidgetText
-  ( checkboxLabelText
-  , sliderLabelText
-  , sliderPackRange
-  , sliderParseRange
-  , sliderPackTerminal
-  , sliderValueText
-  , textInputFieldHeight
-  , textInputFieldText
-  , textInputLabelGap
-  , textInputTerminalText
-  , selectParseOptions
-  , selectDisplayText
-  , selectChevronReserve
-  , selectChevronCenterX
-  , radioParseOption
-  )
-import NanoUI.Style (Padding (..), Style (..), Theme (..), scrollBarThumbColor, scrollBarTrackColor, themeAccent, themeButton, themeFloatingWindow, themeInput, themeMuted, themeOverlayDim, themePanel, themeSeparator, themeWindow)
-import NanoUI.Types (Color (..), ImageId (..), Rect (..), Size (..), V2 (..), colorRGBA, lerpColor, rectContains, rectH, rectIntersect, rectOverlapArea, rectUnion, rectW, rectX, rectY, v2X, v2Y)
-import NanoUI.Frame.Chrome (displayText)
-import NanoUI.Frame.Focus (filterModalFocusables, tabNext, tabNextFocusables, unlessHit)
+import NanoUI.Types (Rect (..), V2 (..), rectContains, rectH, rectW, v2X)
+import NanoUI.WidgetText (radioParseOption)
+import NanoUI.Frame.Focus (filterModalFocusables, tabNext, tabNextFocusables)
 import NanoUI.Frame.Hit (modalTreeOpen, overlayHitAllowed)
 import NanoUI.Frame.Redraw (probeHotId)
-import NanoUI.Frame.Select (findSelectUnderMouse, selectDropRect)
+import NanoUI.Frame.Select (findSelectUnderMouse)
 import NanoUI.Frame.Spans (widgetHitRect)
 import NanoUI.Frame.TextInput (collapseTextInputSelection, textInputGeomForWidget, applyTextInputClick, applyTextInputDrag, textInputCharAtX)
 

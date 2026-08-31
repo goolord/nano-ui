@@ -1,5 +1,4 @@
 {-# LANGUAGE DataKinds #-}
-{-# OPTIONS_GHC -Wno-unused-imports #-}
 {-# OPTIONS_GHC -Wno-unused-top-binds #-}
 
 module NanoUI.Frame.Paint
@@ -10,114 +9,49 @@ module NanoUI.Frame.Paint
   ) where
 
 
-import Control.Monad (filterM, foldM, forM, forM_, unless, void, when)
-import Data.Char (isAlphaNum, isSpace)
-import Data.IORef (readIORef, writeIORef)
-import Data.Typeable (Typeable)
-import Data.List (findIndex)
-import Data.Maybe (isJust)
+import Control.Monad (forM_, unless, when)
 import Data.Word (Word32)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Text as T
-import NanoUI.Damage (floatingPanelRects, updatePrevRects, writeDamage)
+import NanoUI.ColorPicker (drawColorPickerPanel)
 import NanoUI.Context
   ( Context (..)
-  , FrameMsg (..)
-  , WidgetStore (..)
-  , TextInputMenu (..)
-  , TextInputDrag (..)
-  , WindowResizeDrag (..)
-  , WindowResizeEdge (..)
-  , anyAnimating
-  , decodeMessages
-  , drainMessages
-  , getFocusables
-  , getScrollOffset
-  , getStore
-  , intKey
-  , isDirty
-  , isDisabled
-  , markDirty
-  , getHotId
-  , getPrevRect
-  , setScrollOffset
-  , setStore
-  , startAnimation
-  , setAnimationValue
-  , tickAnimations
-  , getAnimationValue
-  , animInProgress
-  , clearTooltips
-  , readTooltips
   , PendingTooltip (..)
-  , ctxClipboardGet
-  , clearMeasureCache
-  , markEscapeConsumed
-  , lookupImageUv
   , atlasTextureId
+  , getStore
+  , lookupImageUv
+  , readTooltips
   )
 import NanoUI.Draw
   ( DrawArena
-  , DrawData
-  , Layer (..)
-  , beginLayer
-  , currentLayer
-  , finishDraw
-  , pushLine
   , pushFilledTriangle
-  , pushRect
-  , pushBackdropDim
   , pushImage
+  , pushLine
+  , pushRect
   , pushRoundedRect
-  , pushRoundedStroke
   , pushText
-  , resetDrawArena
   , withClip
   )
 import NanoUI.Font
-  ( FontMetrics (..)
+  ( FontMetrics
   , checkboxBoxSize
-  , checkboxLeading
-  , treeChevronRect
-  , fmLineHeight
-  , layoutLineHeight
-  , hasHeadingMarker
-  , hasMonoFontMarker
-  , stripMonoFontMarker
-  , hasMutedMarker
-  , labelContentInset
-  , resolveLayoutPadding
-  , stripWidgetMarkers
-  , lineWidth
-  , textDisplayWidth
-  , ScrollBarSlot (..)
-  , scrollBarGeomFor
-  , scrollBarOuterGap
-  , scrollLayoutGutter
-  , sliderTrackBounds
-  , widgetContentInset
   , centeredTextY
-  , alignedTextBox
-  , wrapTextLines
-  , wrapTextLinesIO
+  , hasMonoFontMarker
+  , labelContentInset
+  , sliderTrackBounds
+  , stripMonoFontMarker
+  , treeChevronRect
+  , widgetContentInset
   )
 import NanoUI.Host (HostProfile, isCellHost)
-import NanoUI.WidgetMarkers (buttonFlags, stripButtonBrackets)
-import NanoUI.Icons (Icons (..), checkboxMark, terminalPaintColumns)
-import NanoUI.Id (WidgetId (..), hashWidgetId)
-import NanoUI.Input (Input (..), Key (..), Modifiers (..), inputInteracted, inputKeys, inputPointerHeld, inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased, inputMouseRightPressed, inputScroll, inputDeltaTime, inputWindowSize, modShift)
 import NanoUI.Layout.Arena
-  ( DirTag (..)
-  , NodeIdx
+  ( NodeIdx
   , NodeType (..)
   , SizingTag (..)
   , arenaCount
-  , getAlignX
-  , getDirection
   , forChildNodes_
+  , getDirection
   , getHeightSizing
-  , getMinMax
-  , getParent
   , getNodeType
   , getNodeValue
   , getPadding
@@ -126,58 +60,35 @@ import NanoUI.Layout.Arena
   , getText
   , getWidthSizing
   , getWidgetId
-  , isWidgetNode
-  , isContainerNode
-  , isFloatingNode
-  , isScrollNode
-  , NodeType (NodeButton, NodeCheckbox, NodeRadio, NodeSelect, NodeColorPicker, NodeSlider, NodeTextInput, NodeModal, NodeImage, NodePanel, NodeWindow, NodeContainer, NodeScrollContainer, NodeText, NodeSeparator, NodeSpacer, NodeBox)
-  , resetNodeArena
-  , setNodeText
-  , setNodeValue
-  , setRect
   )
-import NanoUI.Layout.Solve (placeModals, placeWindows, positionWindowNode, scrollBarSlotOf, solveLayout)
-import Effectful (Eff, IOE, runEff, type (:>))
-import NanoUI.Monad (NanoUI, Ui, runUi)
-import NanoUI.Widgets (applyTextInputMenuAction)
-import NanoUI.WidgetText
-  ( checkboxLabelText
-  , sliderLabelText
-  , sliderPackRange
-  , sliderParseRange
-  , sliderPackTerminal
-  , sliderValueText
-  , textInputFieldHeight
-  , textInputFieldText
-  , textInputLabelGap
-  , textInputTerminalText
-  , selectParseOptions
-  , selectDisplayText
-  , selectChevronReserve
-  , selectChevronCenterX
-  , treeParseRow
+import NanoUI.Layout.Solve (scrollBarSlotOf)
+import NanoUI.Style
+  ( Style (..)
+  , Theme (..)
+  , styleBg
+  , styleBorder
+  , styleBorderWidth
+  , styleFg
+  , themeAccent
+  , themeInput
+  , themePanel
+  , themeSeparator
   )
-import NanoUI.ColorPicker (drawColorPickerPanel)
-import NanoUI.Style (Padding (..), Style (..), Theme (..), scrollBarThumbColor, scrollBarTrackColor, themeAccent, themeButton, themeFloatingWindow, themeInput, themeMuted, themeOverlayDim, themePanel, themeSeparator, themeWindow)
-import NanoUI.Types (Color (..), ImageId (..), Rect (..), Size (..), V2 (..), colorA, colorRGBA, lerpColor, rectContains, rectH, rectIntersect, rectOverlapArea, rectUnion, rectW, rectX, rectY, v2X, v2Y)
+import NanoUI.Types (Color (..), ImageId (..), Rect (..), colorA, colorRGBA, clamp01)
+import NanoUI.WidgetMarkers (buttonFlags)
+import NanoUI.WidgetText (selectChevronCenterX, sliderLabelText, treeParseRow)
 import NanoUI.Frame.Chrome
-  ( clamp01
-  , displayText
-  , fillStyledRect
+  ( fillStyledRect
   , imageIdFromText
-  , nodeLabelPaint
-  , overlayModalStyle
-  , overlayWindowStyle
-  , strokeStyledRect
   , paintTabHeader
+  , strokeStyledRect
   , textInputFocused
-  , textInputValue
   , widgetVisualStyle
   )
-import NanoUI.Frame.Clip (scrollContentClip, terminalModalOuterClip)
+import NanoUI.Frame.Clip (scrollContentClip)
 import NanoUI.Frame.Hit (widgetOverlayAllowed)
 import NanoUI.Frame.Scroll (paintScrollChrome)
-import NanoUI.Frame.Spans (collectNodeTextSpans, sliderValue, widgetTextPlacements, widgetTextSpans)
+import NanoUI.Frame.Spans (collectNodeTextSpans, widgetTextPlacements, widgetTextSpans)
 import NanoUI.Frame.TextInput (TextInputGeom (..), drawTextInputCaret, drawTextInputSelection, textInputFieldTextClip, textInputGeom)
 
 lowerShapes :: Context -> IO ()
