@@ -860,6 +860,9 @@ packRowLines dims avail gap = reverse (go 0 [] 0 [])
     finalize [] acc = acc
     finalize cur acc = reverse cur : acc
 
+snd3 :: (a, b, c) -> b
+snd3 (_, b, _) = b
+
 lineCrossSize :: [(NodeIdx, Float, Float)] -> Float
 lineCrossSize line =
   if null line then 0 else maximum (map thd3 line)
@@ -872,9 +875,6 @@ lineRowCrossBudget na items = do
       (_, minH, _, _) <- getMinMax na ci
       pure (max h minH)
   pure (max intrinsic (if null mins then 0 else maximum mins))
-
-snd3 :: (a, b, c) -> b
-snd3 (_, b, _) = b
 
 thd3 :: (a, b, c) -> c
 thd3 (_, _, c) = c

@@ -4,6 +4,7 @@ module NanoUI.Testing.Assert
   , failWhen
   , assert
   , assertEq
+  , assertNeq
   , assertGt
   , assertLt
   , withInput
@@ -12,6 +13,7 @@ module NanoUI.Testing.Assert
   , measureResp
   , measureRespW
   , evalUi
+  , eval2Ui
   , runClickReduce
   ) where
 
@@ -37,6 +39,10 @@ assert r ok = unless ok (bump r)
 assertEq :: Eq a => IORef Int -> a -> a -> IO ()
 assertEq r a b = failWhen r (a /= b)
 
+{-# INLINE assertNeq #-}
+assertNeq :: Eq a => IORef Int -> a -> a -> IO ()
+assertNeq r a b = failWhen r (a == b)
+
 {-# INLINE assertGt #-}
 assertGt :: Ord a => IORef Int -> a -> a -> IO ()
 assertGt r a b = failWhen r (a <= b)
@@ -48,6 +54,11 @@ assertLt r a b = failWhen r (a >= b)
 {-# INLINE withInput #-}
 withInput :: Float -> Float -> Input
 withInput w h = emptyInput {inputWindowSize = Size w h}
+
+eval2Ui :: Context -> Input -> NanoUI a -> IO a
+eval2Ui ctx inp ui = do
+  _ <- runFrame ctx inp ui
+  evalUi ctx inp ui
 
 runFrameDraw :: Context -> Input -> NanoUI a -> IO DrawData
 runFrameDraw ctx inp ui = do

@@ -64,12 +64,7 @@ library
         NanoUI.ColorPicker
         NanoUI.Compact
         NanoUI.Context
-        NanoUI.Context.Types
-        NanoUI.Context.Animation
         NanoUI.Context.Internal
-        NanoUI.Context.Modal
-        NanoUI.Context.Focus
-        NanoUI.Context.New
         NanoUI.Damage
         NanoUI.Draw
         NanoUI.Ease
@@ -82,7 +77,6 @@ library
         NanoUI.Frame.Chrome
         NanoUI.Frame.Focus
         NanoUI.Frame.Hit
-        NanoUI.Frame.Internal
         NanoUI.Frame.Paint
         NanoUI.Frame.Redraw
         NanoUI.Frame.Scroll
@@ -106,7 +100,6 @@ library
         NanoUI.Types
         NanoUI.WidgetText
         NanoUI.Widgets
-        NanoUI.Widgets.Internal
         NanoUI.Widgets.Node
         NanoUI.Widgets.Chrome
         NanoUI.Widgets.Layout

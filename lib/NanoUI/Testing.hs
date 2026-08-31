@@ -172,7 +172,7 @@ import NanoUI.Context
   , withTheme
   , wrapMeasureCache
   )
-import NanoUI.Context.New (newContext, newPixelHostContext)
+import NanoUI.Context.Internal (newContext, newPixelHostContext)
 import NanoUI.Frame.SpanArena (SpanArena, foldSpanArena, spanArenaCount)
 import NanoUI.Draw
   ( DrawCmd (..)
@@ -191,6 +191,7 @@ import NanoUI.Draw
   , indexSize
   , vertexSize
   )
+import NanoUI.Render.ASCII (renderASCII)
 import NanoUI.Font (sliderTrackBounds, textDisplayWidth)
 import NanoUI.Frame
   ( UiCursorKind (..)
@@ -230,7 +231,6 @@ import NanoUI.Icons
   , wideTrailChar
   )
 import NanoUI.Monad (Ui, askContext, askHost, askInput, uiIO)
-import NanoUI.Render.ASCII (renderASCII)
 import NanoUI.Types (Damage (..), damageIsEmpty)
 import Effectful (Eff, IOE, runEff, type (:>))
 

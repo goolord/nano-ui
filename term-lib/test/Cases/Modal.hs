@@ -5,157 +5,107 @@ module Cases.Modal
   , runModalOverlayTest
   ) where
 
-import Control.Monad (when)
+import Control.Monad (forM_)
 import Data.IORef (IORef)
 import Data.Text qualified as T
 import NanoUI
 import NanoUI.Testing
-import NanoUI.Testing.Assert (bump, failWhen, withInput)
+import NanoUI.Testing.Assert (assert, assertEq, eval2Ui, evalUi, withInput)
 import NanoUI.Testing.Harness
   ( centerOf
   , checkIdleFullDamage
+  , clickPair
   , runClickRelease
   , warmup2
   , withInputOff
   )
+
 runModalOverlayTest :: Context -> IORef Int -> IO ()
 runModalOverlayTest ctx failed = do
   let
     inp0 = withInput 320 200
-    ui =
-      column defaultLayout $ do
-        outside <- button "Outside"
-        (dlg, mInside) <-
-          modal True "Title" $ do
-            button "Inside"
-        pure (outside, dlg, mInside)
-    closedUi =
-      column defaultLayout $ do
-        _ <- button "Outside"
-        (dlg, mInside) <-
-          modal False "Title" $ do
-            button "Inside"
-        pure (dlg, mInside)
-  do
-    ((dlg, mInside), _, _, _) <- runFrame ctx inp0 closedUi
-    when (respClicked dlg) $ bump failed
-    case mInside of
-      Nothing -> pure ()
-      Just _ -> bump failed
-    closedSpans <- collectOverlayTextSpans ctx inp0
-    let
-      closedTitle = any (\(_, txt, _, _, _) -> "Title" `T.isInfixOf` txt) closedSpans
-    when closedTitle $ bump failed
+    ui = column defaultLayout $ do
+      outside <- button "Outside"
+      (dlg, mInside) <- modal True "Title" (button "Inside")
+      pure (outside, dlg, mInside)
+    closedUi = column defaultLayout $ do
+      _ <- button "Outside"
+      (dlg, mInside) <- modal False "Title" (button "Inside")
+      pure (dlg, mInside)
+
+  (dlgClosed, mInsideClosed) <- evalUi ctx inp0 closedUi
+  assert failed (not (respClicked dlgClosed))
+  assert failed (case mInsideClosed of Nothing -> True; _ -> False)
+  closedSpans <- collectOverlayTextSpans ctx inp0
+  assert failed (not (any (\(_, txt, _, _, _) -> "Title" `T.isInfixOf` txt) closedSpans))
+
   (outside0, _, mInside0) <- warmup2 ctx inp0 ui
   overlays <- collectOverlayTextSpans ctx inp0
-  let
-    hasTitle = any (\(_, txt, _, _, _) -> "Title" `T.isInfixOf` txt) overlays
-    hasInside = any (\(_, txt, _, _, _) -> "Inside" `T.isInfixOf` txt) overlays
-    hasCloseGlyph = any (\(_, txt, _, _, _) -> T.strip txt == "X") overlays
-  when (not (hasTitle && hasInside)) $ bump failed
-  when hasCloseGlyph $ bump failed
+  assert failed (any (\(_, txt, _, _, _) -> "Title" `T.isInfixOf` txt) overlays)
+  assert failed (any (\(_, txt, _, _, _) -> "Inside" `T.isInfixOf` txt) overlays)
+  assert failed (not (any (\(_, txt, _, _, _) -> T.strip txt == "X") overlays))
+
   case mInside0 of
+    Nothing -> assert failed False
     Just inside -> do
-      let
-        Rect ix iy iw ih = respRect inside
-        clickIn =
-          inp0
-            { inputMousePos = V2 (ix + iw / 2) (iy + ih / 2)
-            , inputMouseDown = True
-            , inputMousePressed = True
-            }
-      _ <- runFrame ctx clickIn ui
-      let
-        releaseIn =
-          clickIn
-            { inputMouseDown = False
-            , inputMousePressed = False
-            , inputMouseReleased = True
-            }
+      let (pressIn, releaseIn) = clickPair inp0 (centerOf inside)
+      _ <- runFrame ctx pressIn ui
       ((_, _, mClicked), _, _, _) <- runFrame ctx releaseIn ui
-      case mClicked of
-        Just r -> when (not (respClicked r)) $ bump failed
-        Nothing -> bump failed
-      let
-        Rect ox oy ow oh = respRect outside0
-        clickOut =
-          inp0
-            { inputMousePos = V2 (ox + ow / 2) (oy + oh / 2)
-            , inputMouseDown = True
-            , inputMousePressed = True
-            }
-      ((outsideHit, _, _), _, _, _) <- runFrame ctx clickOut ui
-      when (respClicked outsideHit) $ bump failed
-      let
-        backdrop =
-          inp0
-            { inputMousePos = V2 4 4
-            , inputMouseDown = True
-            , inputMousePressed = True
-            }
-      ((_, dlg, _), _, _, _) <- runFrame ctx backdrop ui
-      when (not (respClicked dlg)) $ bump failed
-      let
-        esc = inp0 {inputKeys = inputKeysFromList [KeyEscape]}
+      assert failed (maybe False respClicked mClicked)
+
+      let (pressOut, _) = clickPair inp0 (centerOf outside0)
+      ((outsideHit, _, _), _, _, _) <- runFrame ctx pressOut ui
+      assert failed (not (respClicked outsideHit))
+
+      let (backdrop, _) = clickPair inp0 (V2 4 4)
+      ((_, dlgHit, _), _, _, _) <- runFrame ctx backdrop ui
+      assert failed (respClicked dlgHit)
+
+      let esc = inp0 {inputKeys = inputKeysFromList [KeyEscape]}
       ((_, dlgEsc, _), _, _, _) <- runFrame ctx esc ui
-      when (not (respClicked dlgEsc)) $ bump failed
+      assert failed (respClicked dlgEsc)
       consumed <- overlayConsumesQuit ctx esc
-      failWhen failed (not consumed)
+      assert failed consumed
       _ <- runFrame ctx esc closedUi
       leftover <- overlayConsumesQuit ctx esc
-      when leftover $ bump failed
-    Nothing -> bump failed
-  let
-    tallUi =
-      modal True "Tall" $ do
-        mapM_ (\i -> label (T.pack ("Row " <> show (i :: Int)))) [1 .. 40]
+      assert failed (not leftover)
+
+  let tallUi = modal True "Tall" $ do
+        forM_ [1 .. 40 :: Int] (\i -> label (T.pack ("Row " <> show i)))
         button "Close"
-  _ <- runFrame ctx inp0 tallUi
-  ((dlgTall, _), _, _, _) <- runFrame ctx inp0 tallUi
-  let
-    Rect _ _ _ mh = respRect dlgTall
-  when (mh > 200) $ bump failed
+  (dlgTall, _) <- eval2Ui ctx inp0 tallUi
+  assert failed (rectH (respRect dlgTall) <= 200)
 
 runModalNoPhantomScrollTest :: Context -> IORef Int -> IO ()
 runModalNoPhantomScrollTest ctx failed = do
-  let
-    inp0 = withInput 400 300
-    ui =
-      modal True "About" $ do
+  let inp0 = withInput 400 300
+      ui = modal True "About" $ do
         _ <- label "Immediate-mode GUI for Haskell."
-        row
-          (defaultLayout {layoutWidth = Grow 1})
-          $ do
-            _ <- spacer (Grow 1) Fit
-            _ <- button "Close"
-            pure ()
+        row (defaultLayout {layoutWidth = Grow 1}) $ do
+          _ <- spacer (Grow 1) Fit
+          _ <- button "Close"
+          pure ()
   (dlg, _) <- warmup2 ctx inp0 ui
-  let
-    Rect mx my mw mh = respRect dlg
-  when (mw <= 0 || mh <= 0) $ bump failed
+  let Rect mx my mw mh = respRect dlg
+  assert failed (mw > 0 && mh > 0)
   off0 <- getScrollOffset ctx (respId dlg)
-  let
-    wheel =
-      inp0
-        { inputMousePos = V2 (mx + mw / 2) (my + mh / 2)
-        , inputScroll = V2 0 1
-        }
+  let wheel = inp0 {inputMousePos = V2 (mx + mw / 2) (my + mh / 2), inputScroll = V2 0 1}
   _ <- runFrame ctx wheel ui
   off1 <- getScrollOffset ctx (respId dlg)
-  when (off0 /= 0 || off1 /= 0) $ bump failed
+  assertEq failed off0 0
+  assertEq failed off1 0
 
 runModalCloseDamageTest :: Context -> IORef Int -> IO ()
 runModalCloseDamageTest _ failed = do
   ctx <- newContext
-  let
-    ui = do
-      (readOpen, setOpen) <- useFlag True
-      open <- readOpen
-      (resp, _) <- modal open "Title" (label "body")
-      onClick resp (setOpen False)
-    inp0 = (withInput 320 240) {inputMousePos = V2 1 1}
-    esc = inp0 {inputKeys = inputKeysFromList [KeyEscape]}
-    idle = inp0 {inputDeltaTime = 1}
+  let ui = do
+        (readOpen, setOpen) <- useFlag True
+        open <- readOpen
+        (resp, _) <- modal open "Title" (label "body")
+        onClick resp (setOpen False)
+      inp0 = (withInput 320 240) {inputMousePos = V2 1 1}
+      esc = inp0 {inputKeys = inputKeysFromList [KeyEscape]}
+      idle = inp0 {inputDeltaTime = 1}
   _ <- runFrame ctx inp0 ui
   _ <- runFrame ctx inp0 ui
   _ <- runFrame ctx esc ui
@@ -164,16 +114,15 @@ runModalCloseDamageTest _ failed = do
 runModalOpenDamageTest :: Context -> IORef Int -> IO ()
 runModalOpenDamageTest _ failed = do
   ctx <- newContext
-  let
-    ui = do
-      (readOpen, setOpen) <- useFlag False
-      resp <- button "Open"
-      onClick resp (setOpen True)
-      open <- readOpen
-      _ <- modal open "Title" (label "body")
-      pure resp
-    inp0 = withInputOff 320 240
-    idle = inp0 {inputDeltaTime = 1}
+  let ui = do
+        (readOpen, setOpen) <- useFlag False
+        resp <- button "Open"
+        onClick resp (setOpen True)
+        open <- readOpen
+        _ <- modal open "Title" (label "body")
+        pure resp
+      inp0 = withInputOff 320 240
+      idle = inp0 {inputDeltaTime = 1}
   _ <- runFrame ctx inp0 ui
   (resp, _, _, _) <- runFrame ctx inp0 ui
   _ <- runClickRelease ctx inp0 ui (centerOf resp)

@@ -162,7 +162,7 @@ Internal ownership (not exported from packages):
 
 | Area | Modules |
 |------|---------|
-| Context state | `NanoUI.Context.*`, `NanoUI.Context.Types` |
+| Context state | `NanoUI.Context`, `NanoUI.Context.Internal` |
 | Frame loop | `NanoUI.Frame.{Hit,Focus,Clip,Chrome,CursorKind,...}` |
 | Widget build | `NanoUI.Widgets.{Node,Chrome,Layout,...}` |
 | Term session | `NanoUI.Term.Session` (loop inside `NanoUI.Backend.Term`) |

@@ -41,7 +41,7 @@ import NanoUI.Context
   , markDirty
   , tickAnimations
   )
-import NanoUI.Context.Modal (beginFrameModal)
+import NanoUI.Context.Internal (beginFrameModal)
 import NanoUI.Damage (updatePrevNodeTexts, updatePrevRects, writeDamage)
 import NanoUI.Draw
   ( DrawData
@@ -65,10 +65,7 @@ import NanoUI.Frame.Input
   , finalizeTextInputMouse
   , refreshHover
   )
-import NanoUI.Frame.Internal
-  ( constrainFocusToModal
-  , syncWidgetLabels
-  )
+import NanoUI.Frame.Focus (constrainFocusToModal, syncWidgetLabels)
 import NanoUI.Frame.Paint (drawTooltipOverlays, lowerShapes)
 import NanoUI.Frame.Redraw
   ( debugPanelOpen

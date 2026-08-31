@@ -2,12 +2,12 @@ module Cases.Demo
   ( runControlsTabHeightTest
   ) where
 
-import Control.Monad (void, when)
+import Control.Monad (void)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Text qualified as T
 import NanoUI
 import NanoUI.Testing
-import NanoUI.Testing.Assert (bump)
+import NanoUI.Testing.Assert (assert)
 import NanoUI.Testing.Harness (withInputOff)
 
 data DemoTab
@@ -160,9 +160,9 @@ runControlsTabHeightTest _ failed = do
     jumped a b = case (a, b) of
       (Just x, Just y) -> abs (x - y) > 1
       _ -> True
-  when (tooTall hCb0 loneCbH || tooTall hCp0 loneCpH || tooTall hTi0 loneTiH) $ bump failed
-  when (tooTall hCbH loneCbH || tooTall hCpH loneCpH || tooTall hTiH loneTiH) $ bump failed
-  when (jumped hCb0 hCbH || jumped hCp0 hCpH || jumped hTi0 hTiH) $ bump failed
+  assert failed (not (tooTall hCb0 loneCbH || tooTall hCp0 loneCpH || tooTall hTi0 loneTiH))
+  assert failed (not (tooTall hCbH loneCbH || tooTall hCpH loneCpH || tooTall hTiH loneTiH))
+  assert failed (not (jumped hCb0 hCbH || jumped hCp0 hCpH || jumped hTi0 hTiH))
   -- Body must not fill the wrap-line height of the left column.
-  when (left0 > 80 && body0 > left0 * 0.92) $ bump failed
-  when (leftH > 80 && bodyH > leftH * 0.92) $ bump failed
+  assert failed (not (left0 > 80 && body0 > left0 * 0.92))
+  assert failed (not (leftH > 80 && bodyH > leftH * 0.92))

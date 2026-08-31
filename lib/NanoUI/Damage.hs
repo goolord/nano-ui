@@ -23,7 +23,7 @@ import NanoUI.Context
   , isDirty
   , markDirty
   )
-import NanoUI.Context.Modal (modalDamageFlip)
+import NanoUI.Context.Internal (modalDamageFlip)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input
   ( Input (..)
