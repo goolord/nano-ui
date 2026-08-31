@@ -280,7 +280,11 @@ buttonEx enabled txt = do
   wid <- nextId
   ctx <- askContext
   uiIO $ registerFocusable ctx wid
-  resp <- addWidget wid NodeButton ("[ " <> txt <> " ]") 0 defaultLayout
+  let stored =
+        if isCellHost (ctxHostProfile ctx)
+          then "[ " <> txt <> " ]"
+          else txt
+  resp <- addWidget wid NodeButton stored 0 defaultLayout
   disabled <- uiIO (isDisabled ctx wid)
   let
     active = enabled && not disabled

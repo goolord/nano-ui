@@ -25,6 +25,7 @@ where
 import Control.Monad (unless, when)
 import Data.IORef (readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
+import Data.List (foldl')
 import Data.Typeable (Typeable)
 import Effectful (Eff, IOE, runEff, type (:>))
 import NanoUI.Context
@@ -114,10 +115,11 @@ import NanoUI.Frame.Window
   , updateWindowResize
   )
 import NanoUI.Id (WidgetId (..), initialIdContext)
-import NanoUI.Input (Input (..), inputMouseDown)
+import NanoUI.Input (Input (..), inputMouseDown, stripInteractionInput)
 import NanoUI.Layout.Arena (resetNodeArena)
 import NanoUI.Layout.Solve (placeModals, placeWindows, solveLayout)
 import NanoUI.Monad (NanoUI, Ui, runUi)
+import NanoUI.Store (mirrorStoresChanged)
 import NanoUI.Types (Size (..))
 
 runFrame :: Context -> Input -> NanoUI a -> IO (a, [FrameMsg], DrawData, Bool)
@@ -184,12 +186,20 @@ runFrameEff unlift ctx inp ui = do
   writeIORef (ctxFocusablesCount ctx) 0
   writeIORef (ctxHotId ctx) (WidgetId 0)
   writeIORef (ctxWidgetNodeTypes ctx) Nothing
+  writeIORef (ctxFloatingAncestor ctx) Nothing
   unless (inputMouseDown inp) $
     writeIORef (ctxSelectDropPress ctx) False
   beginFrameModal ctx
   writeIORef (ctxEscapeConsumed ctx) False
   clearTooltips ctx
-  result <- unlift (runUi ctx inp ui)
+  result0 <- unlift (runUi ctx inp ui)
+  storeMid <- getStore ctx
+  result <-
+    if mirrorStoresChanged oldStore storeMid
+      then do
+        resetUiBuild ctx
+        unlift (runUi ctx (stripInteractionInput inp) ui)
+      else pure result0
   -- Terminal sliders embed the bar in node text; sync before measure so width is correct.
   syncWidgetLabels ctx
   let
@@ -285,3 +295,16 @@ runFrameEff unlift ctx inp ui = do
   -- the modal flag one frame after the click, so that follow-up must run.
   writeIORef (ctxDirty ctx) dirtyAfterUi
   pure (result, msgs, drawData, dirtyAfterUi)
+
+-- Second UI pass after mirror store write. Keeps ctxStore, animations, and
+-- prev rects; only rebuilds node arena, id scopes, and tooltip state.
+resetUiBuild :: Context -> IO ()
+resetUiBuild ctx = do
+  resetNodeArena (ctxNodeArena ctx)
+  writeIORef (ctxContainerStack ctx) []
+  writeIORef (ctxIdContext ctx) initialIdContext
+  writeIORef (ctxFocusablesCount ctx) 0
+  writeIORef (ctxHotId ctx) (WidgetId 0)
+  writeIORef (ctxWidgetNodeTypes ctx) Nothing
+  writeIORef (ctxFloatingAncestor ctx) Nothing
+  clearTooltips ctx

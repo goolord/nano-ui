@@ -7,12 +7,12 @@ module NanoUI.Layout.Solve
   , scrollBarSlotOf
   ) where
 
-import Control.Monad (when)
+import Control.Monad (forM, void, when)
 import Data.IORef (readIORef, writeIORef)
-import Data.Primitive.PrimArray (readPrimArray, writePrimArray)
+import Data.Primitive.PrimArray (MutablePrimArray, readPrimArray, writePrimArray)
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified Data.Vector as V
+import GHC.Exts (RealWorld)
 import NanoUI.Font
   ( FontMetrics (..)
   , checkboxBoxSize
@@ -386,12 +386,11 @@ measureContainer na host fm useAssignedWidth idx = do
   (minW, minH, maxW, maxH) <- getMinMax na idx
   (wTag, wVal) <- getWidthSizing na idx
   (hTag, hVal) <- getHeightSizing na idx
-  (_, _, assignedW, _) <- getRect na idx
+  (_, _, assignedW, assignedH) <- getRect na idx
   nt <- getNodeType na idx
-  children <- collectChildren na idx
-  childDims <- collectChildDims na idx
   let chrome = isChromeColumn nt dir
       padX = padL pad + padR pad
+      padY = padT pad + padB pad
       innerMaxW =
         case wTag of
           SizingFixed -> max 0 (wVal - padX)
@@ -399,12 +398,23 @@ measureContainer na host fm useAssignedWidth idx = do
             | useAssignedWidth && assignedW > 0 ->
                 max 0 (assignedW - padX)
             | otherwise -> max 0 (maxW - padX)
+      innerAvailH =
+        case hTag of
+          SizingFixed -> max 0 (hVal - padY)
+          _
+            | useAssignedWidth && assignedH > 0 ->
+                max 0 (assignedH - padY)
+            | otherwise -> max 0 (maxH - padY)
   (contentW, contentH) <-
     if wrap && dir == DirRow && innerMaxW > 0
-      then pure (foldWrappedRow childDims innerMaxW gap)
-      else case dir of
-        DirColumn | chrome -> foldChromeColumn na children childDims gap
-        _ -> pure (foldChildren dir gap childDims)
+      then do
+        n <- loadChildrenScratchFromParent na idx innerMaxW innerAvailH
+        foldWrappedRowScratch na n innerMaxW gap
+      else if dir == DirColumn && chrome
+        then do
+          n <- loadChildrenScratchFromParent na idx innerMaxW innerAvailH
+          foldChromeColumnScratch na n gap
+        else foldChildDimsFromParent na idx dir gap
   let w =
         case wTag of
           SizingFixed -> clamp wVal minW maxW
@@ -425,9 +435,8 @@ measureScrollContainer na host fm idx = do
   (minW, minH, maxW, maxH) <- getMinMax na idx
   (wTag, wVal) <- getWidthSizing na idx
   (hTag, hVal) <- getHeightSizing na idx
-  childDims <- collectChildDims na idx
-  let (contentW, contentH) = foldChildren dir gap childDims
-      fullW = contentW + padL pad + padR pad
+  (contentW, contentH) <- foldChildDimsFromParent na idx dir gap
+  let fullW = contentW + padL pad + padR pad
       fullH = contentH + padT pad + padB pad
   -- Overflow compares against the inner viewport, so store content only.
   -- Including pad made every padded Fit modal/list think it could scroll.
@@ -442,37 +451,37 @@ measureScrollContainer na host fm idx = do
           _ -> fullH
   setRect na idx 0 0 (clamp viewportW minW maxW) (clamp viewportH minH maxH)
 
-collectChildDims :: NodeArena -> NodeIdx -> IO [(Float, Float)]
-collectChildDims na idx = do
+foldChildDimsFromParent :: NodeArena -> NodeIdx -> DirTag -> Float -> IO (Float, Float)
+foldChildDimsFromParent na idx dir gap = do
   fc <- getFirstChild na idx
-  go fc []
+  go fc (0 :: Int) (0 :: Float) (0 :: Float)
   where
-    go ci acc =
-      if ci < 0
-        then pure acc
-        else do
+    go ci !count !main !cross
+      | ci < 0 =
+          pure
+            ( case dir of
+                DirRow ->
+                  ( main + gap * fromIntegral (max 0 (count - 1))
+                  , if count <= 0 then 0 else cross
+                  )
+                DirColumn ->
+                  ( if count <= 0 then 0 else main
+                  , cross + gap * fromIntegral (max 0 (count - 1))
+                  )
+            )
+      | otherwise = do
           nt <- getNodeType na ci
           ns <- getNextSibling na ci
           if isFloatingNode nt
-            then go ns acc
+            then go ns count main cross
             else do
               (_, _, w, h) <- getRect na ci
-              go ns ((w, h) : acc)
-
-foldChildren :: DirTag -> Float -> [(Float, Float)] -> (Float, Float)
-foldChildren _ _ [] = (0, 0)
-foldChildren DirRow gap dims =
-  let ws = map fst dims
-      hs = map snd dims
-      totalW = sum ws + gap * fromIntegral (max 0 (length ws - 1))
-      maxH = if null hs then 0 else maximum hs
-   in (totalW, maxH)
-foldChildren DirColumn gap dims =
-  let ws = map fst dims
-      hs = map snd dims
-      maxW = if null ws then 0 else maximum ws
-      totalH = sum hs + gap * fromIntegral (max 0 (length hs - 1))
-   in (maxW, totalH)
+              let count' = count + 1
+                  (main', cross') =
+                    case dir of
+                      DirRow -> (main + w, max cross h)
+                      DirColumn -> (max main w, cross + h)
+              go ns count' main' cross'
 
 isChromeColumn :: NodeType -> DirTag -> Bool
 isChromeColumn nt dir =
@@ -485,58 +494,66 @@ pairColumnGap na True a b gap = do
   ntB <- getNodeType na b
   pure (if ntA == NodeSeparator || ntB == NodeSeparator then 0 else gap)
 
-columnGapSum :: NodeArena -> Bool -> [NodeIdx] -> Float -> IO Float
-columnGapSum _ False _ _ = pure 0
-columnGapSum _ True [] _ = pure 0
-columnGapSum _ True [_] _ = pure 0
-columnGapSum na True (a : b : rest) gap = do
-  g <- pairColumnGap na True a b gap
-  restG <- columnGapSum na True (b : rest) gap
-  pure (g + restG)
+foldChromeColumnScratch :: NodeArena -> Int -> Float -> IO (Float, Float)
+foldChromeColumnScratch na n gap = do
+  wArr <- readIORef (naScratchMain na)
+  hArr <- readIORef (naScratchCross na)
+  gapSum <- columnGapSumScratch na True n gap
+  let go !i !maxW !totalH
+        | i >= n = pure (maxW, totalH + gapSum)
+        | otherwise = do
+            w <- readPrimArray wArr i
+            h <- readPrimArray hArr i
+            go (i + 1) (max maxW w) (totalH + h)
+  go 0 0 0
 
-foldChromeColumn :: NodeArena -> [NodeIdx] -> [(Float, Float)] -> Float -> IO (Float, Float)
-foldChromeColumn na children dims gap = do
-  let ws = map fst dims
-      hs = map snd dims
-      maxW = if null ws then 0 else maximum ws
-  gapSum <- columnGapSum na True children gap
-  pure (maxW, sum hs + gapSum)
+foldWrappedRowScratch :: NodeArena -> Int -> Float -> Float -> IO (Float, Float)
+foldWrappedRowScratch na n avail gap = do
+  wArr <- readIORef (naScratchMain na)
+  hArr <- readIORef (naScratchCross na)
+  let go !start !maxW !totalH !rowCount
+        | start >= n =
+            pure (maxW, totalH + gap * fromIntegral (max 0 (rowCount - 1)))
+        | otherwise = do
+            (end, rowH, lineW) <- packWrapLineEnd wArr hArr start n avail gap
+            go end (max maxW lineW) (totalH + rowH) (rowCount + 1)
+  go 0 (0 :: Float) (0 :: Float) (0 :: Int)
 
-foldWrappedRow :: [(Float, Float)] -> Float -> Float -> (Float, Float)
-foldWrappedRow dims avail gap =
-  let rows = packDimLines dims avail gap
-      heights = map lineDimCross rows
-      widths = map (lineDimMain gap) rows
-   in ( if null widths then 0 else maximum widths
-      , if null heights then 0 else sum heights + gap * fromIntegral (max 0 (length heights - 1))
-      )
-
-packDimLines :: [(Float, Float)] -> Float -> Float -> [[(Float, Float)]]
-packDimLines dims avail gap = reverse (go 0 [] 0 [])
+packWrapLineStarts ::
+  MutablePrimArray RealWorld Float ->
+  MutablePrimArray RealWorld Float ->
+  Int ->
+  Float ->
+  Float ->
+  IO [Int]
+packWrapLineStarts wArr hArr n avail gap = go 0
   where
-    v = V.fromList dims
-    n = V.length v
-    go i curLine curW acc
-      | i >= n = finalize curLine acc
-      | otherwise =
-          let item = v V.! i
-              (w, _) = item
-              need = if null curLine then w else w + gap
-           in if null curLine || curW + need <= avail + 0.001
-                then go (i + 1) (item : curLine) (curW + need) acc
-                -- Oversized children get a row alone; parent may clip or scroll.
-                else go i [] 0 (curLine : acc)
-    finalize [] acc = acc
-    finalize cur acc = cur : acc
+    go start
+      | start >= n = pure [n]
+      | otherwise = do
+          (end, _, _) <- packWrapLineEnd wArr hArr start n avail gap
+          rest <- go end
+          pure (start : rest)
 
-lineDimMain :: Float -> [(Float, Float)] -> Float
-lineDimMain gap line =
-  let ws = map fst line
-   in sum ws + gap * fromIntegral (max 0 (length ws - 1))
-
-lineDimCross :: [(Float, Float)] -> Float
-lineDimCross line =
-  if null line then 0 else maximum (map snd line)
+packWrapLineEnd ::
+  MutablePrimArray RealWorld Float ->
+  MutablePrimArray RealWorld Float ->
+  Int ->
+  Int ->
+  Float ->
+  Float ->
+  IO (Int, Float, Float)
+packWrapLineEnd wArr hArr start n avail gap = go start (0 :: Float) (0 :: Float)
+  where
+    go !i !lineW !lineH
+      | i >= n = pure (i, lineH, lineW)
+      | otherwise = do
+          w <- readPrimArray wArr i
+          h <- readPrimArray hArr i
+          let need = if lineW <= 0 then w else w + gap
+          if lineW <= 0 || lineW + need <= avail + 0.001
+            then go (i + 1) (lineW + need) (max lineH h)
+            else pure (i, lineH, lineW)
 
 positionNode :: NodeArena -> HostProfile -> FontMetrics -> NodeIdx -> Float -> Float -> Float -> Float -> IO ()
 positionNode na host fm idx x y availW availH = do
@@ -587,10 +604,9 @@ positionScrollChildren na host fm idx dir gap pad px py pw ph = do
       innerH = ph - padT pad - padB pad
       gutterCol = scrollLayoutGutter host fm slot contentSize innerH
       gutterRow = scrollLayoutGutter host fm slot contentSize innerW
-  children <- collectChildren na idx
   case dir of
-    DirRow -> positionRow na host fm children gap cx cy contentSize (innerH - gutterRow)
-    DirColumn -> positionColumnScroll na host fm children gap cx cy (innerW - gutterCol) innerH contentSize
+    DirRow -> positionRowFromParent na host fm idx gap cx cy contentSize (innerH - gutterRow)
+    DirColumn -> positionColumnScroll na host fm idx gap cx cy (innerW - gutterCol) innerH contentSize
 
 scrollBarSlotOf :: NodeArena -> NodeIdx -> IO ScrollBarSlot
 scrollBarSlotOf na idx = do
@@ -624,7 +640,7 @@ positionColumnScroll ::
   NodeArena ->
   HostProfile ->
   FontMetrics ->
-  [NodeIdx] ->
+  NodeIdx ->
   Float ->
   Float ->
   Float ->
@@ -632,12 +648,12 @@ positionColumnScroll ::
   Float ->
   Float ->
   IO ()
-positionColumnScroll na host fm children gap cx cy innerW innerH contentSize = do
-  n <- loadChildrenScratch na children innerW innerH
+positionColumnScroll na host fm parent gap cx cy innerW innerH contentSize = do
+  n <- loadChildrenScratchFromParent na parent innerW innerH
   distributeScratch na 0 n contentSize (gap * fromIntegral (max 0 (n - 1))) False
-  pairs <- freezeScratch na 0 n True
-  let go _ [] = pure ()
-      go !curY ((ci, _, fh) : rest) = do
+  pairs <- snapshotScratchColumn na 0 n
+  let go [] _ = pure ()
+      go ((ci, fh) : rest) !curY = do
         nt <- getNodeType na ci
         (_, _, iw, _) <- getRect na ci
         ax <- getAlignX na ci
@@ -649,8 +665,8 @@ positionColumnScroll na host fm children gap cx cy innerW innerH contentSize = d
                 then min fh visibleSlice
                 else fh
         positionNode na host fm ci fx curY cw nodeH
-        go (curY + fh + gap) rest
-  go cy pairs
+        go rest (curY + fh + gap)
+  go pairs cy
 
 resolveSize :: SizingTag -> Float -> Float -> Float -> Float -> Float -> Float
 resolveSize SizingFixed v _ _ _ _ = v
@@ -680,29 +696,11 @@ positionChildren na host fm idx dir gap pad px py pw ph = do
       cy = py + padT pad
       cw = pw - padL pad - padR pad
       ch = ph - padT pad - padB pad
-  children <- collectChildren na idx
   case dir of
     DirRow
-      | wrap -> positionRowWrap na host fm children gap cx cy cw ch
-      | otherwise -> positionRow na host fm children gap cx cy cw ch
-    DirColumn -> positionColumn na host fm children gap chrome px py pw cx cy cw ch
-
--- Children are linked newest-first, so prepending while walking restores
--- declaration order.
-collectChildren :: NodeArena -> NodeIdx -> IO [NodeIdx]
-collectChildren na idx = do
-  fc <- getFirstChild na idx
-  go fc []
-  where
-    go ci acc =
-      if ci < 0
-        then pure acc
-        else do
-          nt <- getNodeType na ci
-          ns <- getNextSibling na ci
-          if isFloatingNode nt
-            then go ns acc
-            else go ns (ci : acc)
+      | wrap -> positionRowWrap na host fm idx gap cx cy cw ch
+      | otherwise -> positionRowFromParent na host fm idx gap cx cy cw ch
+    DirColumn -> positionColumnFromParent na host fm idx gap chrome px py pw cx cy cw ch
 
 childRowCrossSize :: NodeArena -> NodeIdx -> Float -> IO Float
 childRowCrossSize na ci availCross = do
@@ -711,46 +709,61 @@ childRowCrossSize na ci availCross = do
   (hTag, hVal) <- getHeightSizing na ci
   pure (clamp (resolveSize hTag hVal intrinsic availCross minH maxH) minH maxH)
 
-positionRow :: NodeArena -> HostProfile -> FontMetrics -> [NodeIdx] -> Float -> Float -> Float -> Float -> Float -> IO ()
-positionRow na host fm children gap cx cy cw ch = do
-  n <- loadChildrenScratch na children cw ch
+positionRowFromParent ::
+  NodeArena ->
+  HostProfile ->
+  FontMetrics ->
+  NodeIdx ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  IO ()
+positionRowFromParent na host fm parent gap cx cy cw ch = do
+  n <- loadChildrenScratchFromParent na parent cw ch
   distributeScratch na 0 n cw (gap * fromIntegral (max 0 (n - 1))) True
-  pairs <- freezeScratch na 0 n True
-  let go _ [] = pure ()
-      go !curX ((ci, fw, _) : rest) = do
+  pairs <- snapshotScratchRow na 0 n
+  let goRow [] _ = pure ()
+      goRow ((ci, fw) : rest) !curX = do
         crossH <- childRowCrossSize na ci ch
         ay <- getAlignY na ci
         let fy = alignY ay cy ch crossH
         positionNode na host fm ci curX fy fw crossH
-        go (curX + fw + gap) rest
-  go cx pairs
+        goRow rest (curX + fw + gap)
+  goRow pairs cx
 
-positionRowWrap :: NodeArena -> HostProfile -> FontMetrics -> [NodeIdx] -> Float -> Float -> Float -> Float -> Float -> IO ()
-positionRowWrap na host fm children gap cx cy cw ch = do
-  n <- loadChildrenScratch na children cw ch
-  dims <- freezeScratch na 0 n False
-  let goLines _ [] = pure ()
-      goLines !oy (rowItems : restLines) = do
-        let rowH = lineCrossSize rowItems
-        nLine <- writeScratchDims na rowItems
-        distributeScratch na 0 nLine cw (gap * fromIntegral (max 0 (nLine - 1))) True
-        pairs <- freezeScratch na 0 nLine True
-        let goRow _ [] = pure ()
-            goRow !curX ((ci, fw, _) : restRow) = do
-              crossH <- childRowCrossSize na ci rowH
-              ay <- getAlignY na ci
-              let fy = alignY ay oy rowH crossH
-              positionNode na host fm ci curX fy fw crossH
-              goRow (curX + fw + gap) restRow
-        goRow cx pairs
-        goLines (oy + rowH + gap) restLines
-  goLines cy (packRowLines dims cw gap)
+positionRowWrap :: NodeArena -> HostProfile -> FontMetrics -> NodeIdx -> Float -> Float -> Float -> Float -> Float -> IO ()
+positionRowWrap na host fm parent gap cx cy cw ch = do
+  n <- loadChildrenScratchFromParent na parent cw ch
+  wArr <- readIORef (naScratchMain na)
+  hArr <- readIORef (naScratchCross na)
+  starts <- packWrapLineStarts wArr hArr n cw gap
+  let goLines !oy (lineStart : lineEnd : rest)
+        | lineStart >= n = pure ()
+        | otherwise = do
+            let lineLen = lineEnd - lineStart
+            (_, rowH, _) <- packWrapLineEnd wArr hArr lineStart n cw gap
+            distributeScratch na lineStart lineLen cw (gap * fromIntegral (max 0 (lineLen - 1))) True
+            rowEntries <- snapshotScratchRow na lineStart lineLen
+            let goRow [] _ = pure ()
+                goRow ((ci, fw) : es) !curX = do
+                  crossH <- childRowCrossSize na ci rowH
+                  ay <- getAlignY na ci
+                  let fy = alignY ay oy rowH crossH
+                  positionNode na host fm ci curX fy fw crossH
+                  goRow es (curX + fw + gap)
+            goRow rowEntries cx
+            goLines (oy + rowH + gap) (lineEnd : rest)
+      goLines _ [] = pure ()
+      goLines _ [_] = pure ()
+  goLines cy starts
 
-positionColumn ::
+positionColumnFromParent ::
   NodeArena ->
   HostProfile ->
   FontMetrics ->
-  [NodeIdx] ->
+  NodeIdx ->
   Float ->
   Bool ->
   Float ->
@@ -761,118 +774,134 @@ positionColumn ::
   Float ->
   Float ->
   IO ()
-positionColumn na host fm children gap chrome px _ pw cx cy cw ch = do
-  gapSum <- columnGapSum na chrome children gap
-  n <- loadChildrenScratch na children cw ch
+positionColumnFromParent na host fm parent gap chrome px _ pw cx cy cw ch = do
+  n <- loadChildrenScratchFromParent na parent cw ch
+  gapSum <- columnGapSumScratch na chrome n gap
   distributeScratch na 0 n ch gapSum False
-  pairs <- freezeScratch na 0 n True
-  let go _ [] = pure ()
-      go !curY ((ci, _, fh) : rest) = do
+  pairs <- snapshotScratchColumn na 0 n
+  let go [] _ = pure ()
+      go ((ci, fh) : rest) !curY = do
         nt <- getNodeType na ci
-        (fx, fw) <-
+        (fx, nodeW) <-
           if chrome && nt == NodeSeparator
             then pure (px, pw)
             else do
               (_, _, iw, _) <- getRect na ci
               ax <- getAlignX na ci
               pure (alignX ax cx cw iw, cw)
-        positionNode na host fm ci fx curY fw fh
+        positionNode na host fm ci fx curY nodeW fh
         gapAfter <-
           case rest of
             [] -> pure 0
-            ((nextCi, _, _) : _) -> pairColumnGap na chrome ci nextCi gap
-        go (curY + fh + gapAfter) rest
-  go cy pairs
+            ((nextCi, _) : _) -> pairColumnGap na chrome ci nextCi gap
+        go rest (curY + fh + gapAfter)
+  go pairs cy
 
-loadChildrenScratch :: NodeArena -> [NodeIdx] -> Float -> Float -> IO Int
-loadChildrenScratch na children availW availH = do
-  let n = length children
-  ensureScratchCapacity na n
+snapshotScratchRow :: NodeArena -> Int -> Int -> IO [(NodeIdx, Float)]
+snapshotScratchRow na off n = do
   idxArr <- readIORef (naScratchIdx na)
-  mainArr <- readIORef (naScratchMain na)
-  crossArr <- readIORef (naScratchCross na)
-  let write !i [] = do
-        writeIORef (naScratchCount na) i
-        pure i
-      write !i (ci : rest) = do
-        (_, _, w, h) <- getRect na ci
-        (wTag, wVal) <- getWidthSizing na ci
-        (hTag, hVal) <- getHeightSizing na ci
-        (minW, minH, maxW, maxH) <- getMinMax na ci
-        let w' =
-              case wTag of
-                SizingPercent -> clamp (availW * wVal / 100) minW maxW
-                _ -> w
-            h' =
-              case hTag of
-                SizingPercent -> clamp (availH * hVal / 100) minH maxH
-                _ -> h
-        writePrimArray idxArr i ci
-        writePrimArray mainArr i w'
-        writePrimArray crossArr i h'
-        write (i + 1) rest
-  write 0 children
+  outW <- readIORef (naScratchOutMain na)
+  forM [off .. off + n - 1] $ \i -> do
+    ci <- readPrimArray idxArr i
+    fw <- readPrimArray outW i
+    pure (ci, fw)
 
-writeScratchDims :: NodeArena -> [(NodeIdx, Float, Float)] -> IO Int
-writeScratchDims na items = do
-  let n = length items
-  ensureScratchCapacity na n
+snapshotScratchColumn :: NodeArena -> Int -> Int -> IO [(NodeIdx, Float)]
+snapshotScratchColumn na off n = do
   idxArr <- readIORef (naScratchIdx na)
-  mainArr <- readIORef (naScratchMain na)
-  crossArr <- readIORef (naScratchCross na)
-  let write !i [] = do
-        writeIORef (naScratchCount na) i
-        pure i
-      write !i ((ci, w, h) : rest) = do
-        writePrimArray idxArr i ci
-        writePrimArray mainArr i w
-        writePrimArray crossArr i h
-        write (i + 1) rest
-  write 0 items
+  outH <- readIORef (naScratchOutCross na)
+  forM [off .. off + n - 1] $ \i -> do
+    ci <- readPrimArray idxArr i
+    fh <- readPrimArray outH i
+    pure (ci, fh)
 
--- Snapshot scratch before positionNode. Nested layout reuses the same arrays.
-freezeScratch :: NodeArena -> Int -> Int -> Bool -> IO [(NodeIdx, Float, Float)]
-freezeScratch na off n useOut = do
+loadChildrenScratchFromParent :: NodeArena -> NodeIdx -> Float -> Float -> IO Int
+loadChildrenScratchFromParent na parent availW availH = do
+  fc <- getFirstChild na parent
+  count <- countLayoutChildren na fc
+  ensureScratchCapacity na count
+  writeIORef (naScratchCount na) count
+  if count <= 0
+    then pure 0
+    else do
+      idxArr <- readIORef (naScratchIdx na)
+      mainArr <- readIORef (naScratchMain na)
+      crossArr <- readIORef (naScratchCross na)
+      void (fillLayoutChildren na fc idxArr mainArr crossArr availW availH)
+      pure count
+
+countLayoutChildren :: NodeArena -> NodeIdx -> IO Int
+countLayoutChildren na ci
+  | ci < 0 = pure 0
+  | otherwise = do
+      nt <- getNodeType na ci
+      ns <- getNextSibling na ci
+      rest <- countLayoutChildren na ns
+      pure (if isFloatingNode nt then rest else 1 + rest)
+
+fillLayoutChildren ::
+  NodeArena ->
+  NodeIdx ->
+  MutablePrimArray RealWorld Int ->
+  MutablePrimArray RealWorld Float ->
+  MutablePrimArray RealWorld Float ->
+  Float ->
+  Float ->
+  IO Int
+fillLayoutChildren na ci idxArr mainArr crossArr availW availH
+  | ci < 0 = pure 0
+  | otherwise = do
+      nt <- getNodeType na ci
+      ns <- getNextSibling na ci
+      slot <- fillLayoutChildren na ns idxArr mainArr crossArr availW availH
+      if isFloatingNode nt
+        then pure slot
+        else do
+          writeScratchEntry na ci slot idxArr mainArr crossArr availW availH
+          pure (slot + 1)
+
+writeScratchEntry ::
+  NodeArena ->
+  NodeIdx ->
+  Int ->
+  MutablePrimArray RealWorld Int ->
+  MutablePrimArray RealWorld Float ->
+  MutablePrimArray RealWorld Float ->
+  Float ->
+  Float ->
+  IO ()
+writeScratchEntry na ci i idxArr mainArr crossArr availW availH = do
+  (_, _, w, h) <- getRect na ci
+  (wTag, wVal) <- getWidthSizing na ci
+  (hTag, hVal) <- getHeightSizing na ci
+  (minW, minH, maxW, maxH) <- getMinMax na ci
+  let w' =
+        case wTag of
+          SizingPercent -> clamp (availW * wVal / 100) minW maxW
+          _ -> w
+      h' =
+        case hTag of
+          SizingPercent -> clamp (availH * hVal / 100) minH maxH
+          _ -> h
+  writePrimArray idxArr i ci
+  writePrimArray mainArr i w'
+  writePrimArray crossArr i h'
+
+columnGapSumScratch :: NodeArena -> Bool -> Int -> Float -> IO Float
+columnGapSumScratch _ False _ _ = pure 0
+columnGapSumScratch _ True n _
+  | n <= 1 = pure 0
+columnGapSumScratch na True n gap = do
   idxArr <- readIORef (naScratchIdx na)
-  wArr <- readIORef (if useOut then naScratchOutMain na else naScratchMain na)
-  hArr <- readIORef (if useOut then naScratchOutCross na else naScratchCross na)
-  let end = off + n
-      go !i acc
-        | i >= end = pure (reverse acc)
+  let go !i !acc
+        | i >= n - 1 = pure acc
         | otherwise = do
-            ci <- readPrimArray idxArr i
-            w <- readPrimArray wArr i
-            h <- readPrimArray hArr i
-            go (i + 1) ((ci, w, h) : acc)
-  go off []
+            a <- readPrimArray idxArr i
+            b <- readPrimArray idxArr (i + 1)
+            g <- pairColumnGap na True a b gap
+            go (i + 1) (acc + g)
+  go 0 0
 
-packRowLines :: [(NodeIdx, Float, Float)] -> Float -> Float -> [[(NodeIdx, Float, Float)]]
-packRowLines dims avail gap = reverse (go 0 [] 0 [])
-  where
-    n = length dims
-    go i curLine curW acc
-      | i >= n = finalize curLine acc
-      | otherwise =
-          let item = dims !! i
-              (w, _) = (snd3 item, thd3 item)
-              need = if null curLine then w else w + gap
-           in if null curLine || curW + need <= avail + 0.001
-                then go (i + 1) (item : curLine) (curW + need) acc
-                else go i [] 0 (curLine : acc)
-    finalize [] acc = acc
-    finalize cur acc = cur : acc
-
-snd3 :: (a, b, c) -> b
-snd3 (_, b, _) = b
-
-thd3 :: (a, b, c) -> c
-thd3 (_, _, c) = c
-
-lineCrossSize :: [(NodeIdx, Float, Float)] -> Float
-lineCrossSize line =
-  if null line then 0 else maximum (map thd3 line)
-
--- Write resolved (width, height) into outMain / outCross for [off, off+n).
 distributeScratch :: NodeArena -> Int -> Int -> Float -> Float -> Bool -> IO ()
 distributeScratch na off n avail gapSum horizontal = do
   idxArr <- readIORef (naScratchIdx na)

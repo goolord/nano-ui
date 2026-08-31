@@ -102,13 +102,7 @@ import NanoUI.Font
   , wrapTextLinesIO
   )
 import NanoUI.Host (HostProfile, isCellHost)
-import NanoUI.WidgetMarkers
-  ( buttonDisplayText
-  , closeButtonDisplayText
-  , isCloseButtonText
-  , isTabButtonText
-  , stripButtonBrackets
-  )
+import NanoUI.WidgetMarkers (buttonFlags, stripButtonBrackets)
 import NanoUI.Icons (Icons (..), checkboxMark, terminalPaintColumns)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), Key (..), Modifiers (..), inputInteracted, inputKeys, inputPointerHeld, inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased, inputMouseRightPressed, inputScroll, inputDeltaTime, inputWindowSize, modShift)
@@ -313,8 +307,10 @@ lowerNode ctx idx = do
         if nt == NodeButton
           then getText (ctxNodeArena ctx) idx
           else pure T.empty
-      let isClose = nt == NodeButton && isCloseButtonText storedText
-          isTab = nt == NodeButton && isTabButtonText storedText
+      let (isClose, isTab) =
+            if nt == NodeButton
+              then buttonFlags storedText
+              else (False, False)
       let opaqueBg
             | isClose = False
             | isTab = False

@@ -202,7 +202,7 @@ import NanoUI.Frame.Hit (widgetOverlayAllowed)
 import NanoUI.Frame.Select (collectSelectDropdownSpans, selectDropRect)
 import NanoUI.Frame.TextInput (TextInputGeom (..), collectTextInputMenuSpans, tagSelectClippedSpans, tagTextInputClippedSpans, textInputFieldTextClip, textInputGeom, selectTextClip)
 import NanoUI.Frame.Scroll (scrollBarLayout, ScrollBarLayout (..))
-import NanoUI.Frame.SpanArena (SpanArena, pushSpan, resetSpanArena, spanArenaToList)
+import NanoUI.Frame.SpanArena (SpanArena, pushSpan, resetSpanArena, spanArenaToList, spanArenaToListOccluded)
 
 collectTextSpans :: Context -> IO [(Rect, T.Text, Color, Color, Rect)]
 collectTextSpans ctx = do
@@ -228,9 +228,8 @@ collectTextSpansCached ctx floatCache = do
   resetSpanArena arena
   when (count > 0) $
     collectClippedSpans ctx floatCache 0 (Rect 0 0 1e9 1e9) arena
-  spans <- spanArenaToList arena
   panels <- floatingPanelRects ctx
-  pure (filterOccludedBaseSpans panels spans)
+  spanArenaToListOccluded panels arena
 
 collectOverlayTextSpansCached :: Context -> Input -> IM.IntMap (Maybe NodeType) -> IO [(Rect, T.Text, Color, Color, Rect)]
 collectOverlayTextSpansCached ctx inp floatCache = do
@@ -241,7 +240,9 @@ collectOverlayTextSpansCached ctx inp floatCache = do
   drops <- collectSelectDropdownSpans ctx inp
   menu <- collectTextInputMenuSpans ctx inp
   tips <- collectTooltipSpans ctx
-  mapM_ (pushSpan5 arena) (drops ++ menu ++ tips)
+  mapM_ (pushSpan5 arena) drops
+  mapM_ (pushSpan5 arena) menu
+  mapM_ (pushSpan5 arena) tips
   spanArenaToList arena
 
 pushSpan5 :: SpanArena -> (Rect, T.Text, Color, Color, Rect) -> IO ()

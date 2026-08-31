@@ -173,6 +173,7 @@ benchmark nano-ui-sdl-bench
     import:           ghc-options
     import:           bench-rts-options
     import:           warnings
+    default-extensions: CPP
     type:             exitcode-stdio-1.0
     main-is:          SdlBench.hs
     build-depends:
@@ -188,6 +189,8 @@ benchmark nano-ui-sdl-bench
         tasty-bench ^>=0.4,
         vector ^>=0.13,
         text ^>=2.1
+    if os(windows)
+        build-depends: Win32 ^>=2.14
     hs-source-dirs:   benchmark
     default-language: GHC2024
     if os(windows)
