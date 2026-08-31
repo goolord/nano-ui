@@ -22,6 +22,7 @@ import NanoUI.Context
   , markDirty
   )
 import NanoUI.Context.Internal (modalDamageFlip)
+import NanoUI.Store (mirrorStoresChanged)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input
   ( Input (..)
@@ -222,10 +223,12 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
 
   requests <- getDamageRequests ctx
   let hasReqFull = ReqFull `elem` requests
+      mirrorChanged = mirrorStoresChanged oldStore newStore
       full =
         hasReqFull
           || not onlyScrollFloatsChanged
             && ( wasDirty
+                   || mirrorChanged
                    || sizeChanged
                    || overlayOpen
                    || modalFlip

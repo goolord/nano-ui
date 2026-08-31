@@ -56,7 +56,6 @@ import NanoUI.Sdl.Display
   , queryWindowLogicalSize
   , retainBegin
   , retainBlit
-  , retainBlitRect
   , retainCreate
   , retainDestroy
   , windowToLogicalCoords
@@ -67,7 +66,7 @@ import NanoUI.Sdl.Window (SdlEnv (..))
 import Foreign.Ptr (Ptr, nullPtr)
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
 import qualified NanoUI.Sdl.Image as SdlImage
-import NanoUI.Sdl.Render (renderDrawDataPass, snapDamage, clipPixelRect)
+import NanoUI.Sdl.Render (renderDrawDataPass, snapDamage)
 import SDL3.Sys.Render (renderPresentSafe)
 
 allLayersArr :: SmallArray Layer
@@ -171,12 +170,7 @@ ensureRetain env w h scale = do
       pure (tex', True)
 
 blitRetain :: Ptr SDL_Renderer -> Float -> Ptr () -> Damage -> IO Bool
-blitRetain ren scale tex damage =
-  case damage of
-    DamageFull -> retainBlit ren tex
-    DamageClip r ->
-      let (px, py, pw, ph) = clipPixelRect scale r
-       in retainBlitRect ren tex px py pw ph px py
+blitRetain ren _scale tex _damage = retainBlit ren tex
 
 askSdlEnv :: Ui :> es => Eff es (Maybe SdlEnv)
 askSdlEnv = askHost

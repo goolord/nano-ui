@@ -5,8 +5,10 @@ module Cases.Damage
   , runExplicitDamageRectTest
   , runExplicitDamageFullTest
   , runDamageQueueClearedPerFrameTest
+  , runStateChangeDamageTest
   ) where
 
+import Control.Monad (when)
 import Data.IORef (IORef)
 import NanoUI
 import NanoUI.Testing
@@ -121,3 +123,25 @@ runDamageQueueClearedPerFrameTest _ failed = do
   _ <- runFrame ctx inp ui
   dmg2 <- takeDamage ctx
   assert failed (damageIsEmpty dmg2)
+
+runStateChangeDamageTest :: Context -> IORef Int -> IO ()
+runStateChangeDamageTest _ failed = do
+  ctx <- newContext
+  let inp0 = withInput 400 300
+      ui = do
+        (readName, setName) <- useText ""
+        name <- readName
+        row defaultLayout $ do
+          label_ ("Left pane: " <> name)
+          (resp, typed) <- textInput "Name" ""
+          when (respChanged resp) (setName typed)
+
+  -- Warm up and focus textInput via Tab
+  _ <- runFrame ctx inp0 ui >> runFrame ctx inp0 ui
+  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
+  _ <- takeDamage ctx
+
+  -- Type a character into focused textInput
+  _ <- runFrame ctx (inp0 {inputChars = "a"}) ui
+  dmg <- takeDamage ctx
+  assertEq failed dmg DamageFull
