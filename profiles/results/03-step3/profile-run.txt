@@ -1,0 +1,9 @@
+cabal build --enable-profiling --enable-executable-profiling nano-ui-profile
+cabal exec --enable-profiling nano-ui-profile -- +RTS -pj -poprofile-json -RTS
+profiled 3000 frames
+cabal exec --enable-profiling nano-ui-profile -- +RTS -P -poprofile-time -RTS
+profiled 3000 frames
+
+JSON: profiles/profile-json.prof
+total_time: 3.44s
+total_alloc: 2890801952 (2890.8 MB)

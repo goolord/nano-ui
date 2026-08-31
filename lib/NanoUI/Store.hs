@@ -32,6 +32,7 @@ import NanoUI.Id (mix64)
 data WidgetStore = WidgetStore
   { storeInt :: !(IntMap Int)
   , storeFloat :: !(IntMap Float)
+  , storePoint :: !(IntMap (Float, Float))
   , storeText :: !(IntMap Text)
   , storeIntSet :: !(IntMap IntSet)
   , storeFloatList :: !(IntMap [Float])
@@ -44,6 +45,7 @@ emptyWidgetStore =
   WidgetStore
     { storeInt = IM.empty
     , storeFloat = IM.empty
+    , storePoint = IM.empty
     , storeText = IM.empty
     , storeIntSet = IM.empty
     , storeFloatList = IM.empty

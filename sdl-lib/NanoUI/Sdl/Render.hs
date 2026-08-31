@@ -17,7 +17,7 @@ import NanoUI.Sdl.Image (ImageAtlas, lookupAtlasTex)
 import Control.Monad (void, when)
 import Data.Bits (shiftL, shiftR, (.&.), (.|.))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import qualified Data.Vector as V
+import Data.Primitive.PrimArray (indexPrimArray, sizeofPrimArray)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray)
 import Data.Word (Word8)
 import Foreign.ForeignPtr (ForeignPtr, mallocForeignPtrBytes, withForeignPtr)
@@ -30,6 +30,7 @@ import NanoUI.Testing
   , DrawCmd (..)
   , DrawData (..)
   , Layer (..)
+  , LayerSlice (..)
   , damageIsEmpty
   , glyphAtlasTextureId
   )
@@ -140,18 +141,25 @@ renderDrawDataPass batch ren uiScale mClear drawData layers images glyphTex dama
         vc = drawVertexCount drawData
         ic = drawIndexCount drawData
         cmds = drawCommands drawData
-        !n = V.length cmds
+        slices = drawLayerSlices drawData
         !layerMask = computeLayerMask layers
     withForeignPtr (drawVertices drawData) $ \vp ->
       withForeignPtr (drawIndices drawData) $ \ip ->
-        let go !i
-              | i >= n = pure ()
+        let drawOne !cmd =
+              when (testLayerMask layerMask (cmdLayer cmd)) $
+                drawCmd batch ren uiScale vp vc ip ic images glyphTex clip clipRef cmd
+            goLy !li
+              | li >= sizeofPrimArray slices = pure ()
               | otherwise = do
-                  let !cmd = V.unsafeIndex cmds i
-                  when (testLayerMask layerMask (cmdLayer cmd)) $
-                    drawCmd batch ren uiScale vp vc ip ic images glyphTex clip clipRef cmd
-                  go (i + 1)
-         in go 0
+                  let LayerSlice off cnt = indexPrimArray slices li
+                      goCmd !j
+                        | j >= cnt = pure ()
+                        | otherwise = do
+                            drawOne (indexPrimArray cmds (off + j))
+                            goCmd (j + 1)
+                  goCmd 0
+                  goLy (li + 1)
+         in goLy 0
     applyClipState batch clipRef ren ClipNone
 
 {-# INLINE layerOrder #-}

@@ -34,13 +34,13 @@ import NanoUI.Layout.Arena
   , getWidgetId
   , isScrollNode
   , lookupNodeByKey
-  , naWidgetIndex
+  , naIndex
   )
 import NanoUI.Types (Rect (..), V2 (..), rectContains)
 
 findNodeByWidgetId :: Context -> WidgetId -> IO (Maybe NodeIdx)
 findNodeByWidgetId ctx wid = do
-  table <- readIORef (naWidgetIndex (ctxNodeArena ctx))
+  table <- readIORef (naIndex (ctxNodeArena ctx))
   HT.lookup table wid
 
 findNodeByKey :: Context -> Int -> IO (Maybe NodeIdx)

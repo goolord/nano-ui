@@ -38,7 +38,7 @@ import NanoUI.Monad
   , uiIO
   , withKey
   )
-import NanoUI.Store (WidgetStore (..), listPair, slotKey, slotWinSize)
+import NanoUI.Store (WidgetStore (..), slotKey, slotWinSize)
 import NanoUI.Style
   ( AlignX (..)
   , AlignY (..)
@@ -222,8 +222,8 @@ floatingSeedRect ctx wid isModal minWidth minHeight margin winW winH = do
       store <- getStore ctx
       let
         k = intKey wid
-        pos = IM.lookup k (storeFloatList store) >>= listPair
-        sz = IM.lookup (slotKey slotWinSize k) (storeFloatList store) >>= listPair
+        pos = IM.lookup k (storePoint store)
+        sz = IM.lookup (slotKey slotWinSize k) (storePoint store)
       pure $
         case (pos, sz) of
           (Just (x, y), Just (w, h)) | w > 0 && h > 0 -> Rect x y w h
