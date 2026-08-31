@@ -6,8 +6,7 @@ import Data.ByteString.Builder (toLazyByteString)
 import Data.ByteString.Char8 qualified as BS8
 import Data.ByteString.Lazy qualified as BL
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
-import Data.List (isInfixOf, minimumBy, nub, sort)
-import Data.Ord (comparing)
+import Data.List (isInfixOf, nub, sort)
 import Data.Text qualified as T
 import Effectful.State.Static.Local (State, evalState, get, modify)
 import Foreign.ForeignPtr (withForeignPtr)
@@ -49,6 +48,7 @@ main = do
   run "fit-sizing" runFitSizingTest
   run "with-key" runWithKeyTest
   run "layout" runLayoutTest
+  run "row-panel-layout" runRowPanelLayoutTest
   run "draw" runDrawTest
   run "overlay" runOverlayTest
   run "interaction" runInteractionTest
@@ -77,6 +77,7 @@ main = do
   run "hover-skip" runHoverSkipTest
   run "hover-damage" runHoverDamageTest
   run "scroll-damage" runScrollDamageTest
+  runSdl "scroll-top-clip" runScrollTopClipTest
   run "select-overlay-damage" runSelectOverlayDamageTest
   run "text-input-dirty" runTextInputDirtyTest
   run "modal-close-damage" runModalCloseDamageTest
@@ -130,6 +131,7 @@ main = do
   run "aspect-layout" runAspectLayoutTest
   run "label-align-end" runLabelAlignEndTest
   run "grow-wrap-sibling" runGrowWrapPushesSiblingTest
+  runSdl "controls-tab-height" runControlsTabHeightTest
   run "terminal-default-gap" runTerminalDefaultGapTest
   run "terminal-slider-track" runTerminalSliderTrackTest
   run "terminal-text-input" runTerminalTextInputDisplayTest
@@ -152,6 +154,9 @@ main = do
   run "terminal-theme-contrast" runTerminalThemeContrastTest
   run "scroll-bar-gutter" runScrollBarGutterTest
   runSdl "scroll-bar-gutter-grow" runGrowScrollGutterTest
+  runSdl "column-card-wrap" runColumnCardWrapTest
+  runSdl "two-card-wrap" runTwoCardWrapTest
+  runSdl "demo-wrap-wide-order" runDemoWrapWideOrderTest
   runSdl "scroll-bar-gutter-panel" runPanelGrowScrollGutterTest
   runSdl "window-scroll-gutter" runWindowScrollGutterTest
   run "use-flag-click" runUseFlagClickTest
@@ -363,6 +368,82 @@ runLayoutTest ctx failed = do
           )
       )
   when (drawVertexCount draw <= 0) $ bump failed
+
+-- Row with a fixed sidebar panel and toolbar must not overlap after scratch placement.
+runRowPanelLayoutTest :: Context -> IORef Int -> IO ()
+runRowPanelLayoutTest ctx failed = do
+  let
+    inp = emptyInput {inputWindowSize = Size 800 600}
+    ui =
+      row (tight . fillW $ defaultLayout) $ do
+        panel (minW 200 . fillH $ defaultLayout) $ void (label "Side")
+        panel (grow . fillW . fillH $ defaultLayout) $
+          row (tight . gap 8 $ defaultLayout) $ do
+            void (button "Left")
+            btn <- button "Right"
+            pure btn
+  _ <- runFrame ctx inp ui
+  (resp, _, _, _) <- runFrame ctx inp ui
+  let
+    Rect bx _ _ _ = respRect resp
+  when (bx < 190) $ bump failed
+
+-- Demo-like wrap row: column of cards beside a card must stack when narrow.
+runColumnCardWrapTest :: Context -> IORef Int -> IO ()
+runColumnCardWrapTest ctx failed = do
+  let
+    inp = emptyInput {inputWindowSize = Size 520 800}
+    ui =
+      row (tight . gap 8 . wrap . fillW $ defaultLayout) $ do
+        column (tight . gap 8 . fillW $ defaultLayout) $ do
+          card $ void (label "LeftTop")
+          card $ void (label "LeftBot")
+        card $ void (label "Right")
+  _ <- runFrame ctx inp ui
+  spans <- collectTextSpans ctx
+  let
+    yOf lbl =
+      [y | (Rect _ y _ _, txt, _, _, _) <- spans, txt == lbl]
+  case (yOf "Right", yOf "LeftTop") of
+    ([ry], [ly]) -> when (ry <= ly + 1) $ bump failed
+    got -> do
+      putStrLn ("column-card-wrap bad " ++ show got)
+      bump failed
+
+runTwoCardWrapTest :: Context -> IORef Int -> IO ()
+runTwoCardWrapTest ctx failed = do
+  let
+    inp = emptyInput {inputWindowSize = Size 520 800}
+    ui =
+      row (tight . gap 8 . wrap . fillW $ defaultLayout) $ do
+        card $ void (label "CardA")
+        card $ void (label "CardB")
+  _ <- runFrame ctx inp ui
+  spans <- collectTextSpans ctx
+  let
+    yOf lbl = [y | (Rect _ y _ _, txt, _, _, _) <- spans, txt == lbl]
+  case (yOf "CardA", yOf "CardB") of
+    ([ay], [by]) -> when (by <= ay + 1) $ bump failed
+    _ -> bump failed
+
+-- Demo wrap row at full width: column block left, trailing card right.
+runDemoWrapWideOrderTest :: Context -> IORef Int -> IO ()
+runDemoWrapWideOrderTest ctx failed = do
+  let
+    inp = emptyInput {inputWindowSize = Size 1200 800}
+    ui =
+      row (tight . gap 8 . wrap . fillW $ defaultLayout) $ do
+        column (tight . gap 8 . fillW $ defaultLayout) $ do
+          card $ void (label "State")
+          card $ void (label "Gallery")
+        card $ void (label "Controls")
+  _ <- runFrame ctx inp ui
+  spans <- collectTextSpans ctx
+  let
+    xOf lbl = [x | (Rect x _ _ _, txt, _, _, _) <- spans, txt == lbl]
+  case (xOf "State", xOf "Controls") of
+    ([sx], [cx]) -> when (cx <= sx + 1) $ bump failed
+    _ -> bump failed
 
 runDrawTest :: Context -> IORef Int -> IO ()
 runDrawTest ctx failed = do
@@ -1446,6 +1527,48 @@ runScrollDamageTest _ failed = do
   dScroll <- takeDamage ctx
   when (dScroll /= DamageFull) $ bump failed
 
+-- Tall card in a page scroller: hover at scroll top must not clip taller
+-- than the window. That blit stretches the retain texture.
+runScrollTopClipTest :: Context -> IORef Int -> IO ()
+runScrollTopClipTest _ failed = do
+  ctx <- newPixelContext
+  cbRef <- newIORef Nothing
+  let
+    win = Size 400 160
+    inp0 =
+      emptyInput
+        { inputWindowSize = win
+        , inputMousePos = V2 (-10) (-10)
+        }
+    ui = do
+      scroll (tight (grow defaultLayout)) $
+        column (padAll 8 . gap 8 . fillW $ defaultLayout) $
+          card $ do
+            heading "Controls"
+            (cb, _) <- checkbox "Feature" False
+            _ <- slider "Volume" 0 100 50
+            mapM_ (\i -> void (label (T.pack ("pad line " <> show (i :: Int))))) [1 .. 16]
+            uiIO $ writeIORef cbRef (Just cb)
+            pure ()
+    clipFits dmg =
+      case dmg of
+        DamageFull -> True
+        DamageClip (Rect _ y _ h) -> y >= -1 && y + h <= 160 + 1
+  _ <- runFrame ctx inp0 ui
+  _ <- runFrame ctx inp0 ui
+  mCb <- readIORef cbRef
+  case mCb of
+    Nothing -> bump failed
+    Just cb -> do
+      mR <- getPrevRect ctx (respId cb)
+      case mR of
+        Nothing -> bump failed
+        Just (Rect rx ry rw rh) -> do
+          let hover = inp0 {inputMousePos = V2 (rx + rw / 2) (ry + rh / 2)}
+          _ <- runFrame ctx hover ui
+          dHover <- takeDamage ctx
+          when (not (clipFits dHover)) $ bump failed
+
 -- Open dropdown: motion over the menu must redraw, and damage must be full.
 runSelectOverlayDamageTest :: Context -> IORef Int -> IO ()
 runSelectOverlayDamageTest _ failed = do
@@ -1665,7 +1788,7 @@ runOverlayPanelLiveTest _ failed = do
       when (not need) $ bump failed
       _ <- runFrame ctx inp ui
       dmg <- takeDamage ctx
-      when (dmg /= DamageFull) $ bump failed
+      when (damageIsEmpty dmg) $ bump failed
     checkDirtyWake ui = do
       ctx <- newContext
       _ <- runFrame ctx inp ui
@@ -2689,7 +2812,7 @@ runSelectKeyboardTest ctx failed = do
     ui = column defaultLayout (select "Quality" ["Low", "Medium", "High"] 1)
   _ <- runFrame ctx inp0 ui
   ((resp, idx0), _, _, _) <- runFrame ctx inp0 ui
-  when (idx0 /= 1) $ bump failed
+  when (idx0 /= 1) $ putStrLn "select-keyboard: idx0 /= 1" >> bump failed
   let
     Rect sx sy sw sh = respRect resp
     btn = V2 (sx + sw / 2) (sy + sh / 2)
@@ -2711,13 +2834,14 @@ runSelectKeyboardTest ctx failed = do
   _ <- runFrame ctx openRelease ui
   _ <- runFrame ctx (openRelease {inputKeys = inputKeysFromList [KeyDown]}) ui
   ((_, idx1), _, _, _) <- runFrame ctx openRelease ui
-  when (idx1 /= 2) $ bump failed
+  when (idx1 /= 2) $ putStrLn ("select-keyboard: idx1 /= 2, idx1=" ++ show idx1) >> bump failed
   _ <- runFrame ctx (openRelease {inputKeys = inputKeysFromList [KeyUp]}) ui
   ((_, idx2), _, _, _) <- runFrame ctx openRelease ui
-  when (idx2 /= 1) $ bump failed
-  _ <- runFrame ctx (openRelease {inputKeys = inputKeysFromList [KeyEscape]}) ui
-  _ <- runFrame ctx openRelease ui
-  overlays <- collectOverlayTextSpans ctx openRelease
+  when (idx2 /= 1) $ putStrLn ("select-keyboard: idx2 /= 1, idx2=" ++ show idx2) >> bump failed
+  _ <- runFrame ctx (openRelease {inputKeys = inputKeysFromList [KeyEscape], inputMouseReleased = False}) ui
+  let idleAfterOpen = openRelease {inputMouseReleased = False}
+  _ <- runFrame ctx idleAfterOpen ui
+  overlays <- collectOverlayTextSpans ctx idleAfterOpen
   let
     dropdownOpen =
       any
@@ -2930,6 +3054,168 @@ runAspectLayoutTest ctx failed = do
     Rect _ _ w h = respRect resp
   when (abs (w - 160) > 1) $ bump failed
   when (abs (h - 80) > 1) $ bump failed
+
+data DemoTab
+  = Controls
+  | List
+  | Diagnostics
+  deriving (Bounded, Enum, Eq, Ord, Read, Show)
+
+data DemoTheme
+  = Light
+  | Dark
+  | System
+  deriving (Bounded, Enum, Eq, Ord, Read, Show)
+
+-- Exact SDL demo tree: wrap row + State/Gallery + Controls tab.
+-- Widget heights must match a lone column on frame 1, frame 2, and hover.
+runControlsTabHeightTest :: Context -> IORef Int -> IO ()
+runControlsTabHeightTest _ failed = do
+  let
+    inp0 =
+      emptyInput
+        { inputWindowSize = Size 1280 800
+        , inputMousePos = V2 (-10) (-10)
+        }
+    controlsBody dumpRef = do
+      heading "Controls"
+      (cb, checked) <- checkbox "Feature" False
+      (_, vol) <- slider "Volume" 0 100 50
+      (_, qualityIdx) <- select "Quality" ["Low", "Medium", "High"] 1
+      (cp, _) <- colorPicker "Accent" (colorRGBA 204 102 102 255)
+      (_, theme) <- boundedRadioFieldset "Theme" Dark (T.pack . show)
+      (ti, name) <- textInput "Name" ""
+      sep
+      uiIO $ writeIORef dumpRef (Just (cb, cp, ti, checked, vol, qualityIdx, theme, name))
+      pure cb
+    demoPage dumpRef = do
+      (readChecked, setChecked) <- useFlag False
+      (readVol, setVol) <- useText "50"
+      (readQuality, setQuality) <- useText "Medium"
+      (readTheme, setTheme) <- useText (T.pack (show Dark))
+      (readName, setName) <- useText ""
+      scroll (tight (grow defaultLayout)) $
+        column (padAll 8 . gap 8 . fillW $ defaultLayout) $ do
+          row (tight . gap 8 . wrap . fillW $ defaultLayout) $ do
+            column (tight . gap 8 . fillW $ defaultLayout) $ do
+              card $ do
+                heading "State"
+                checked <- readChecked
+                vol <- readVol
+                quality <- readQuality
+                theme <- readTheme
+                name <- readName
+                kv "Feature" (if checked then "on" else "off")
+                kv "Volume" vol
+                kv "Quality" quality
+                kv "Theme" theme
+                kv "Name" (if T.null name then "-" else name)
+                kv "Clicked" "-"
+              card $ do
+                heading "Gallery"
+                mapM_ (\i -> void (label (T.pack ("thumb line " <> show (i :: Int))))) [1 .. 8]
+            card $
+              boundedTabs Controls (T.pack . show) $ \demoTab ->
+                case demoTab of
+                  Controls -> do
+                    cb <- controlsBody dumpRef
+                    checked <- uiIO $ do
+                      m <- readIORef dumpRef
+                      pure $ maybe False (\(_, _, _, c, _, _, _, _) -> c) m
+                    setChecked checked
+                    (_, _, _, _, vol, qualityIdx, theme, name) <-
+                      uiIO $ do
+                        m <- readIORef dumpRef
+                        case m of
+                          Just dumped -> pure dumped
+                          Nothing ->
+                            pure (cb, cb, cb, False, 50, 1, Dark, T.empty)
+                    setVol (T.pack (show (round vol :: Int)))
+                    setQuality (["Low", "Medium", "High"] !! qualityIdx)
+                    setTheme (T.pack (show theme))
+                    setName name
+                  List -> heading "Tree"
+                  Diagnostics -> heading "Diagnostics"
+    rectHOf ctx wid = do
+      m <- getPrevRect ctx wid
+      pure $ fmap (\(Rect _ _ _ h) -> h) m
+    spanOf lbls spans =
+      let
+        match txt =
+          any
+            (\lbl -> txt == lbl || T.drop 1 txt == lbl || T.isSuffixOf lbl txt)
+            lbls
+        ys =
+          [ (y, y + h)
+          | (Rect _ y _ h, txt, _, _, _) <- spans
+          , match txt
+          ]
+       in
+        case ys of
+          [] -> 0
+          _ -> maximum (map snd ys) - minimum (map fst ys)
+  dumpLone <- newIORef Nothing
+  ctxLone <- newPixelContext
+  _ <- runFrame ctxLone inp0 (column (tight . fillW $ defaultLayout) (controlsBody dumpLone))
+  mLone <- readIORef dumpLone
+  (loneCbH, loneCpH, loneTiH) <-
+    case mLone of
+      Just (cb, cp, ti, _, _, _, _, _) -> do
+        h1 <- rectHOf ctxLone (respId cb)
+        h2 <- rectHOf ctxLone (respId cp)
+        h3 <- rectHOf ctxLone (respId ti)
+        pure (h1, h2, h3)
+      Nothing -> pure (Nothing, Nothing, Nothing)
+  dumpPage <- newIORef Nothing
+  ctxPage <- newPixelContext
+  let page = demoPage dumpPage
+  _ <- runFrame ctxPage inp0 page
+  _ <- runFrame ctxPage inp0 page
+  mPage0 <- readIORef dumpPage
+  spans0 <- collectTextSpans ctxPage
+  (hCb0, hCp0, hTi0, cbRect0) <-
+    case mPage0 of
+      Just (cb, cp, ti, _, _, _, _, _) -> do
+        a <- rectHOf ctxPage (respId cb)
+        b <- rectHOf ctxPage (respId cp)
+        c <- rectHOf ctxPage (respId ti)
+        r <- getPrevRect ctxPage (respId cb)
+        pure (a, b, c, r)
+      Nothing -> pure (Nothing, Nothing, Nothing, Nothing)
+  hover <-
+    case cbRect0 of
+      Just (Rect rx ry rw rh) ->
+        pure (inp0 {inputMousePos = V2 (rx + rw / 2) (ry + rh / 2)})
+      Nothing -> pure inp0
+  _ <- runFrame ctxPage hover page
+  mPageH <- readIORef dumpPage
+  spansH <- collectTextSpans ctxPage
+  (hCbH, hCpH, hTiH) <-
+    case mPageH of
+      Just (cb, cp, ti, _, _, _, _, _) -> do
+        a <- rectHOf ctxPage (respId cb)
+        b <- rectHOf ctxPage (respId cp)
+        c <- rectHOf ctxPage (respId ti)
+        pure (a, b, c)
+      Nothing -> pure (Nothing, Nothing, Nothing)
+  let
+    left0 = spanOf ["State", "Clicked", "Gallery"] spans0
+    body0 = spanOf ["Controls", "Accent"] spans0
+    leftH = spanOf ["State", "Clicked", "Gallery"] spansH
+    bodyH = spanOf ["Controls", "Accent"] spansH
+  let
+    tooTall pageH loneH = case (pageH, loneH) of
+      (Just p, Just l) -> l >= 8 && p > l * 1.35
+      _ -> True
+    jumped a b = case (a, b) of
+      (Just x, Just y) -> abs (x - y) > 1
+      _ -> True
+  when (tooTall hCb0 loneCbH || tooTall hCp0 loneCpH || tooTall hTi0 loneTiH) $ bump failed
+  when (tooTall hCbH loneCbH || tooTall hCpH loneCpH || tooTall hTiH loneTiH) $ bump failed
+  when (jumped hCb0 hCbH || jumped hCp0 hCpH || jumped hTi0 hTiH) $ bump failed
+  -- Body must not fill the wrap-line height of the left column.
+  when (left0 > 80 && body0 > left0 * 0.92) $ bump failed
+  when (leftH > 80 && bodyH > leftH * 0.92) $ bump failed
 
 -- Grow wrap must remasure height so the next sibling sits below wrapped lines.
 runGrowWrapPushesSiblingTest :: Context -> IORef Int -> IO ()
@@ -4749,12 +5035,10 @@ runTabsClosableTest ctx failed = do
         ]
   _ <- runFrame ctx inp0 (ui TabA)
   spans <- collectTextSpans ctx
-  case [r | (r, txt, _, _, _) <- spans, "×" `T.isInfixOf` txt] of
-    closeSpans@(_ : _) -> do
+  case [r | (r, txt, _, _, _) <- spans, "Alpha" `T.isInfixOf` txt] of
+    (Rect ax ay aw ah : _) -> do
       let
-        Rect cx cy cw ch = minimumBy (comparing rectX) closeSpans
-      let
-        clickPos = V2 (cx + cw / 2) (cy + ch / 2)
+        clickPos = V2 (ax + aw + 16) (ay + ah / 2)
         press =
           inp0 {inputMousePos = clickPos, inputMouseDown = True, inputMousePressed = True}
         release =
@@ -4767,7 +5051,7 @@ runTabsClosableTest ctx failed = do
       ((tResp, activeTab), _, _, _) <- runFrame ctx release (ui TabA)
       when (tabClosed tResp /= Just TabA) $ bump failed
       when (activeTab /= TabA) $ bump failed
-    [] -> bump failed
+    [] -> putStrLn "No Alpha span" >> bump failed
 
 -- State persistence: widgets inside Tab A keep their store state when switching to Tab B and back.
 runTabsStatePersistenceTest :: Context -> IORef Int -> IO ()

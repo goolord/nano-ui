@@ -5,10 +5,10 @@ module NanoUI.Damage
   , writeDamage
   ) where
 
-import Control.Monad (forM, when)
+import Control.Monad (foldM, forM, when)
 import Data.IORef (readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
-import Data.Maybe (catMaybes, isNothing)
+import Data.Maybe (catMaybes, fromMaybe, isJust, isNothing)
 import Data.Text (Text)
 import Data.Text qualified as T
 import NanoUI.Context
@@ -39,9 +39,11 @@ import NanoUI.Input
   , inputWindowSize
   )
 import NanoUI.Frame.Chrome (displayText, textInputFocused, textInputValue)
+import NanoUI.Frame.Hit (findNodeByWidgetId)
 import NanoUI.Host (isCellHost)
 import NanoUI.Layout.Arena
-  ( NodeType (..)
+  ( NodeArena
+  , NodeType (..)
   , SizingTag (..)
   , arenaCount
   , getHeightSizing
@@ -52,6 +54,7 @@ import NanoUI.Layout.Arena
   , getText
   , getWidgetId
   , getWidthSizing
+  , isScrollNode
   )
 import NanoUI.WidgetText
   ( radioParseOption
@@ -66,6 +69,7 @@ import NanoUI.Types
   , rectArea
   , rectH
   , rectInflate
+  , rectIntersect
   , rectUnion
   , rectW
   )
@@ -73,13 +77,16 @@ import NanoUI.Types
 textClipSlop :: Float
 textClipSlop = 4
 
+layoutSettleMinArea :: Float
+layoutSettleMinArea = 0.25
+
 -- Partial retain clears with themeWindow. Expand interaction clips to the painted
 -- panel/window backdrop so slop pixels get the correct fill, not window color.
 backdropRectForWidget :: Context -> WidgetId -> IO (Maybe Rect)
 backdropRectForWidget ctx wid
   | hashWidgetId wid == 0 = pure Nothing
   | otherwise =
-      findWidgetNode ctx wid >>= \case
+      findNodeByWidgetId ctx wid >>= \case
         Nothing -> pure Nothing
         Just idx -> backdropRectFromNode ctx idx
 
@@ -87,7 +94,7 @@ backdropRectForKey :: Context -> Int -> IO (Maybe Rect)
 backdropRectForKey ctx k
   | k == 0 = pure Nothing
   | otherwise =
-      findWidgetNodeByKey ctx k >>= \case
+      findNodeByKey ctx k >>= \case
         Nothing -> pure Nothing
         Just idx -> backdropRectFromNode ctx idx
 
@@ -97,21 +104,8 @@ backdropRectsForInteraction ctx wids keys = do
   ks <- catMaybes <$> forM keys (backdropRectForKey ctx)
   pure (ws ++ ks)
 
-findWidgetNode :: Context -> WidgetId -> IO (Maybe Int)
-findWidgetNode ctx wid = do
-  count <- arenaCount (ctxNodeArena ctx)
-  go (count - 1)
-  where
-    go idx
-      | idx < 0 = pure Nothing
-      | otherwise = do
-          w <- getWidgetId (ctxNodeArena ctx) idx
-          if w == wid
-            then pure (Just idx)
-            else go (idx - 1)
-
-findWidgetNodeByKey :: Context -> Int -> IO (Maybe Int)
-findWidgetNodeByKey ctx k = do
+findNodeByKey :: Context -> Int -> IO (Maybe Int)
+findNodeByKey ctx k = do
   count <- arenaCount (ctxNodeArena ctx)
   go (count - 1)
   where
@@ -155,23 +149,19 @@ updatePrevRects ctx = do
   if count <= 0
     then writeIORef (ctxPrevRects ctx) IM.empty
     else do
-      pairs <- collectPrevRectPairs ctx (count - 1) []
-      writeIORef (ctxPrevRects ctx) (IM.fromListWith rectUnion pairs)
-
-collectPrevRectPairs :: Context -> Int -> [(Int, Rect)] -> IO [(Int, Rect)]
-collectPrevRectPairs ctx !idx acc
-  | idx < 0 = pure acc
-  | otherwise = do
+      acc <- foldM add IM.empty [0 .. count - 1]
+      writeIORef (ctxPrevRects ctx) acc
+  where
+    add m idx = do
       wid <- getWidgetId (ctxNodeArena ctx) idx
       (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-      let acc'
-            | hashWidgetId wid == 0 = acc
-            | otherwise =
-                let r = Rect x y w h
-                 in if nonzeroRect r
-                      then (intKey wid, r) : acc
-                      else acc
-      collectPrevRectPairs ctx (idx - 1) acc'
+      if hashWidgetId wid == 0
+        then pure m
+        else
+          let r = Rect x y w h
+           in if nonzeroRect r
+                then pure (IM.insert (intKey wid) r m)
+                else pure m
 
 updatePrevNodeTexts :: Context -> IO ()
 updatePrevNodeTexts ctx = do
@@ -180,7 +170,7 @@ updatePrevNodeTexts ctx = do
     then writeIORef (ctxPrevNodeTexts ctx) IM.empty
     else do
       pairs <- collectPrevTextPairs ctx (count - 1) []
-      writeIORef (ctxPrevNodeTexts ctx) (IM.fromList pairs)
+      writeIORef (ctxPrevNodeTexts ctx) (IM.fromListWith preferTextSnapshot pairs)
 
 collectPrevTextPairs :: Context -> Int -> [(Int, Text)] -> IO [(Int, Text)]
 collectPrevTextPairs ctx !idx acc
@@ -297,7 +287,12 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
     fmap or $
       forM (IM.keys liveAnims) $ \k ->
         isNothing <$> getPrevRectByKey ctx k
-  let storePaintChanged = paintStore oldStore /= paintStore newStore
+  winDragActive <- isJust <$> readIORef (ctxWindowDrag ctx)
+  winResizeActive <- isJust <$> readIORef (ctxWindowResize ctx)
+  let keyedMoved = keyedRectDeltas oldRects newRects
+  moved <- mapM (clipDeltaToScrollViewport ctx newRects) keyedMoved
+  let settledMoved = filter significantLayoutRect moved
+      storePaintChanged = paintStore oldStore /= paintStore newStore
       -- Expand changes which rows exist. Selection is node value, not text.
       -- Either one must Full: retain clips would leave ghost children / old highlight.
       treeStoreChanged =
@@ -312,10 +307,12 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
       colorClipOnly =
         not storePaintChanged && (colorStoreChanged || dragStoreChanged)
       floatingChanged = oldFloatingRects /= newFloatingRects
-      windowLive =
-        not (IM.null (storeWindow newStore))
-          || not (IM.null (storeWindowSize newStore))
-      moved = rectDeltas oldRects newRects
+      windowKeys =
+        IM.keys (IM.union (storeWindow newStore) (storeWindowSize newStore))
+      windowLive = winDragActive || winResizeActive
+      windowClipRs =
+        catMaybes [IM.lookup k newFloatingRects | k <- windowKeys]
+      scrollChanged = storeScroll oldStore /= storeScroll newStore
       animLive = not (IM.null liveAnims) || settled
       keysChanged =
         not (IM.null oldRects)
@@ -324,8 +321,9 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
              )
       layoutSettle =
         not (IM.null oldRects)
-          && not (null moved)
+          && not (null settledMoved)
           && not animLive
+          && not scrollChanged
       paintOrphan = orphanAnim && animLive
       textChanged = not (IM.null (textChangeKeys oldTexts newTexts))
       full =
@@ -374,7 +372,10 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
                     then pure []
                     else do
                       newR <- getPrevRect ctx wid
-                      pure (catMaybes [oldOf wid, newR])
+                      let rects = catMaybes [oldOf wid, newR]
+                      fmap catMaybes $
+                        forM rects $ \r ->
+                          clipWidgetRect ctx newRects wid r
             let vanishedRs = IM.elems (IM.difference oldRects newRects)
                 textRs = textChangeRects oldTexts newTexts oldRects newRects
                 colorRs =
@@ -395,9 +396,14 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
                 forM clipKeys $ \k ->
                   if k == 0
                     then pure []
-                    else pure (catMaybes [IM.lookup k oldRects, IM.lookup k newRects])
-            backdropRs <- backdropRectsForInteraction ctx ids clipKeys
-            let layoutRs = moved
+                    else
+                      fmap catMaybes $
+                        forM (catMaybes [IM.lookup k oldRects, IM.lookup k newRects]) $ \r ->
+                          clipDeltaToScrollViewport ctx newRects (k, r) >>= \c ->
+                            if nonzeroRect c then pure (Just c) else pure Nothing
+            backdropRs0 <- backdropRectsForInteraction ctx ids clipKeys
+            let backdropRs = map (clipRectToWindow winW winH) backdropRs0
+            let layoutRs = settledMoved
                 base =
                   unionRects
                     ( rs
@@ -409,12 +415,16 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
                         ++ textStoreRs
                         ++ radioStoreRs
                         ++ colorRs
+                        ++ windowClipRs
                         ++ floatingRectDamage oldFloatingRects newFloatingRects
                     )
-                clip =
+                rawClip =
                   if rectW base <= 0 || rectH base <= 0
                     then Rect 0 0 0 0
                     else rectInflate textClipSlop base
+                -- Retain texture is the window. A clip taller than that
+                -- stretches on blit (visible at scroll top, not bottom).
+                clip = fromMaybe (Rect 0 0 0 0) (rectIntersect rawClip (Rect 0 0 winW winH))
                 winArea = winW * winH
             if (animLive && not (nonzeroRect clip))
                  || (winArea > 0 && rectArea clip > winArea * 0.5)
@@ -460,27 +470,88 @@ unionRects :: [Rect] -> Rect
 unionRects [] = Rect 0 0 0 0
 unionRects (r : rs) = foldl' rectUnion r rs
 
-rectDeltas :: IM.IntMap Rect -> IM.IntMap Rect -> [Rect]
-rectDeltas old new =
-  filter nonzeroRect $
-    IM.elems (IM.difference old new)
-      ++ IM.elems (IM.difference new old)
-      ++ IM.elems (IM.mapMaybe id (IM.intersectionWith delta old new))
-  where
-    delta a b
-      | a == b = Nothing
-      | otherwise = Just (rectUnion a b)
+keyedRectDeltas :: IM.IntMap Rect -> IM.IntMap Rect -> [(Int, Rect)]
+keyedRectDeltas old new =
+  filter (nonzeroRect . snd) $
+    concat
+      [ [ (k, r) | (k, r) <- IM.toList (IM.difference old new) ]
+      , [ (k, r) | (k, r) <- IM.toList (IM.difference new old) ]
+      , [ (k, rectUnion a b)
+        | (k, a) <- IM.toList old
+        , Just b <- [IM.lookup k new]
+        , a /= b
+        ]
+      ]
+
+clipDeltaToScrollViewport :: Context -> IM.IntMap Rect -> (Int, Rect) -> IO Rect
+clipDeltaToScrollViewport ctx newRects (k, r) = do
+  mVp <- scrollViewportForKey ctx k newRects
+  pure $
+    case mVp of
+      Nothing -> r
+      -- Off-screen scroll children must drop out. Keeping `r` makes the
+      -- clip taller than the retain texture and the blit stretches.
+      Just vp -> fromMaybe (Rect 0 0 0 0) (rectIntersect r vp)
+
+clipRectToWindow :: Float -> Float -> Rect -> Rect
+clipRectToWindow winW winH r =
+  fromMaybe (Rect 0 0 0 0) (rectIntersect r (Rect 0 0 winW winH))
+
+clipWidgetRect :: Context -> IM.IntMap Rect -> WidgetId -> Rect -> IO (Maybe Rect)
+clipWidgetRect ctx newRects wid r =
+  if hashWidgetId wid == 0
+    then pure (Just r)
+    else do
+      let k = intKey wid
+      clipped <- clipDeltaToScrollViewport ctx newRects (k, r)
+      if nonzeroRect clipped then pure (Just clipped) else pure Nothing
+
+scrollViewportForKey :: Context -> Int -> IM.IntMap Rect -> IO (Maybe Rect)
+scrollViewportForKey ctx k newRects =
+  findNodeByKey ctx k >>= \case
+    Nothing -> pure Nothing
+    Just idx -> scrollViewportForNode ctx idx newRects
+
+scrollViewportForNode :: Context -> Int -> IM.IntMap Rect -> IO (Maybe Rect)
+scrollViewportForNode ctx idx newRects = do
+  mScroll <- findScrollAncestor (ctxNodeArena ctx) idx
+  case mScroll of
+    Nothing -> pure Nothing
+    Just scrollIdx -> do
+      wid <- getWidgetId (ctxNodeArena ctx) scrollIdx
+      pure (IM.lookup (intKey wid) newRects)
+
+findScrollAncestor :: NodeArena -> Int -> IO (Maybe Int)
+findScrollAncestor na idx = do
+  nt <- getNodeType na idx
+  if isScrollNode nt
+    then pure (Just idx)
+    else do
+      p <- getParent na idx
+      if p < 0
+        then pure Nothing
+        else findScrollAncestor na p
 
 nonzeroRect :: Rect -> Bool
 nonzeroRect r = rectW r > 0 && rectH r > 0
 
 textChangeKeys :: IM.IntMap Text -> IM.IntMap Text -> IM.IntMap ()
-textChangeKeys old new =
-  IM.fromList
-    [ (k, ())
-    | (k, tNew) <- IM.toList new
-    , IM.findWithDefault "" k old /= tNew
-    ]
+textChangeKeys old new
+  | IM.null old = IM.empty
+  | otherwise =
+      IM.fromList
+        [ (k, ())
+        | (k, tNew) <- IM.toList new
+        , case IM.lookup k old of
+            Nothing -> True
+            Just tOld -> tOld /= tNew
+        ]
+
+preferTextSnapshot :: Text -> Text -> Text
+preferTextSnapshot _ b = b
+
+significantLayoutRect :: Rect -> Bool
+significantLayoutRect r = rectArea r >= layoutSettleMinArea
 
 radioStoreChangeRects ::
   Context ->
@@ -494,7 +565,6 @@ radioStoreChangeRects ctx oldStore newStore oldRects newRects = do
   if IM.null changed
     then pure []
     else do
-      let groups = IM.keys changed
       count <- arenaCount (ctxNodeArena ctx)
       rs <-
         forM [0 .. count - 1] $ \idx -> do
@@ -505,7 +575,7 @@ radioStoreChangeRects ctx oldStore newStore oldRects newRects = do
               txt <- getText (ctxNodeArena ctx) idx
               wid <- getWidgetId (ctxNodeArena ctx) idx
               let (groupKey, _, _) = radioParseOption txt
-              if groupKey `elem` groups
+              if IM.member groupKey changed
                 then
                   let k = intKey wid
                    in pure (catMaybes [IM.lookup k oldRects, IM.lookup k newRects])
