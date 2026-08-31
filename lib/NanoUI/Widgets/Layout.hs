@@ -14,16 +14,25 @@ module NanoUI.Widgets.Layout
   , scroll
   , scrollArea
   , scrollAreaId
+  , scrollAreaIdConfigured
+  , scrollArea2D
+  , scrollConfigured
   , flex
   , sep
   )
 where
 
-import Control.Monad (void)
+import Control.Monad (void, when)
 import Data.IORef (readIORef, writeIORef)
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
-import NanoUI.Context (Context (..))
+import NanoUI.Context (Context (..), setScrollConfig)
+import NanoUI.Frame.Scroll.Geometry
+  ( ScrollConfig (..)
+  , defaultScrollConfig
+  , scrollConfigNative2D
+  , scrollDefault1D
+  )
 import NanoUI.Id (WidgetId)
 import NanoUI.Layout.Arena
   ( DirTag (..)
@@ -33,6 +42,7 @@ import NanoUI.Layout.Arena
   , setStyleIdx
   , setWidgetId
   )
+import NanoUI.WidgetText (scrollNative2DStyle)
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO)
 import NanoUI.Style
   ( Direction (..)
@@ -137,6 +147,7 @@ scrollArea layout child = do
       parent = parentIdx stack0
     idx <- addNodeFromLayout (ctxNodeArena ctx) NodeScrollContainer parent layout
     setWidgetId (ctxNodeArena ctx) idx wid
+    setScrollConfig ctx wid (scrollDefault1D (layoutDirection layout))
     writeIORef (ctxContainerStack ctx) (idx : stack0)
     pure stack0
   childR <- child
@@ -159,3 +170,44 @@ scrollAreaId wid layout styleIdx child = do
   r <- child
   uiIO (writeIORef (ctxContainerStack ctx) stack)
   pure r
+
+{-# INLINE scrollAreaIdConfigured #-}
+scrollAreaIdConfigured :: Ui :> es => WidgetId -> Layout -> ScrollConfig -> Eff es a -> Eff es a
+scrollAreaIdConfigured wid layout cfg child = do
+  ctx <- askContext
+  stack <- uiIO $ do
+    stack0 <- readIORef (ctxContainerStack ctx)
+    let parent = parentIdx stack0
+    idx <- addNodeFromLayout (ctxNodeArena ctx) NodeScrollContainer parent layout
+    setWidgetId (ctxNodeArena ctx) idx wid
+    when (scrollConfigNative2D cfg) $
+      setStyleIdx (ctxNodeArena ctx) idx scrollNative2DStyle
+    setScrollConfig ctx wid cfg
+    writeIORef (ctxContainerStack ctx) (idx : stack0)
+    pure stack0
+  r <- child
+  uiIO (writeIORef (ctxContainerStack ctx) stack)
+  pure r
+
+{-# INLINE scrollArea2D #-}
+scrollArea2D :: Ui :> es => Layout -> Eff es a -> Eff es (WidgetId, a)
+scrollArea2D layout child = scrollConfigured defaultScrollConfig layout child
+
+{-# INLINE scrollConfigured #-}
+scrollConfigured :: Ui :> es => ScrollConfig -> Layout -> Eff es a -> Eff es (WidgetId, a)
+scrollConfigured cfg layout child = do
+  ctx <- askContext
+  wid <- nextId
+  stack <- uiIO $ do
+    stack0 <- readIORef (ctxContainerStack ctx)
+    let parent = parentIdx stack0
+    idx <- addNodeFromLayout (ctxNodeArena ctx) NodeScrollContainer parent layout
+    setWidgetId (ctxNodeArena ctx) idx wid
+    when (scrollConfigNative2D cfg) $
+      setStyleIdx (ctxNodeArena ctx) idx scrollNative2DStyle
+    setScrollConfig ctx wid cfg
+    writeIORef (ctxContainerStack ctx) (idx : stack0)
+    pure stack0
+  childR <- child
+  uiIO (writeIORef (ctxContainerStack ctx) stack)
+  pure (wid, childR)

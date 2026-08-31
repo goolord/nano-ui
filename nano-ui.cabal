@@ -80,6 +80,7 @@ library
         NanoUI.Frame.Paint
         NanoUI.Frame.Redraw
         NanoUI.Frame.Scroll
+        NanoUI.Frame.Scroll.Geometry
         NanoUI.Frame.Select
         NanoUI.Frame.Spans
         NanoUI.Frame.SpanArena

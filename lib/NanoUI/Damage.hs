@@ -29,6 +29,7 @@ import NanoUI.Input
   , inputWindowSize
   )
 import NanoUI.Frame.Hit (findNodeByKey, findNodeByWidgetId)
+import NanoUI.Store (slotKey, slotScrollCross)
 import NanoUI.Layout.Arena
   ( NodeType (..)
   , SizingTag (..)
@@ -417,6 +418,24 @@ clipWidgetRect ctx newRects wid r =
       clipped <- clipDeltaToScrollViewport ctx newRects (k, r)
       if nonzeroRect clipped then pure (Just clipped) else pure Nothing
 
+findScrollNodeByStoreKey :: Context -> Int -> IO (Maybe Int)
+findScrollNodeByStoreKey ctx k = do
+  count <- arenaCount (ctxNodeArena ctx)
+  let go idx
+        | idx >= count = pure Nothing
+        | otherwise = do
+            nt <- getNodeType (ctxNodeArena ctx) idx
+            if not (isScrollNode nt)
+              then go (idx + 1)
+              else do
+                wid <- getWidgetId (ctxNodeArena ctx) idx
+                let widKey = intKey wid
+                    crossKey = slotKey slotScrollCross widKey
+                if k == widKey || k == crossKey
+                  then pure (Just idx)
+                  else go (idx + 1)
+  go 0
+
 scrollOffsetDamage :: Context -> WidgetStore -> WidgetStore -> IO [Rect]
 scrollOffsetDamage ctx oldStore newStore = do
   let oldF = storeFloat oldStore
@@ -428,7 +447,7 @@ scrollOffsetDamage ctx oldStore newStore = do
         ]
   fmap catMaybes $
     forM changed $ \k ->
-      findNodeByKey ctx k >>= \case
+      findScrollNodeByStoreKey ctx k >>= \case
         Nothing -> pure Nothing
         Just idx -> do
           nt <- getNodeType (ctxNodeArena ctx) idx

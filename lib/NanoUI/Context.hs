@@ -77,7 +77,13 @@ module NanoUI.Context
   , isDisabled
   , setDisabled
   , getScrollOffset
+  , getScrollOffset2D
+  , getScrollConfig
+  , getScrollContentExtent
   , setScrollOffset
+  , setScrollOffset2D
+  , setScrollConfig
+  , setScrollContentExtent
   , getAnimationValue
   , applyEase
   , animInProgress
@@ -156,6 +162,9 @@ import NanoUI.Context.Internal
   , getPrevClipRect
   , getPrevClipRectByKey
   , getScrollOffset
+  , getScrollOffset2D
+  , getScrollConfig
+  , getScrollContentExtent
   , getStore
   , intKey
   , isDisabled
@@ -181,6 +190,9 @@ import NanoUI.Context.Internal
   , setHost
   , setPrevRect
   , setScrollOffset
+  , setScrollOffset2D
+  , setScrollConfig
+  , setScrollContentExtent
   , setStore
   , setWakeLoop
   , startAnimation

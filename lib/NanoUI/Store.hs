@@ -12,6 +12,10 @@ module NanoUI.Store
   , slotWinSize
   , slotMenuOpen
   , slotMenuPos
+  , slotScrollCfg
+  , slotScrollOff
+  , slotScrollContent
+  , slotScrollCross
   , boolInt
   , intBool
   , pairList
@@ -90,6 +94,18 @@ slotMenuOpen = 0x4D454E5500000007
 
 slotMenuPos :: Word64
 slotMenuPos = 0x4D454E5500000008
+
+slotScrollCfg :: Word64
+slotScrollCfg = 0x5343524346000009
+
+slotScrollOff :: Word64
+slotScrollOff = 0x53434F464600000A
+
+slotScrollCross :: Word64
+slotScrollCross = 0x5343524F5800000C
+
+slotScrollContent :: Word64
+slotScrollContent = 0x534352435400000B
 
 boolInt :: Bool -> Int
 boolInt b = if b then 1 else 0
