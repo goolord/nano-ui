@@ -120,6 +120,7 @@ import NanoUI.Layout.Arena
   , NodeType (..)
   , SizingTag (..)
   , arenaCount
+  , findNodeRevM
   , getAlignX
   , getDirection
   , getFirstChild
@@ -191,29 +192,20 @@ import NanoUI.Frame.Redraw (probeHotId)
 import NanoUI.Frame.Scroll (paintScrollChrome)
 
 topmostWindowAtResizeHalo :: Context -> V2 -> IO (Maybe NodeIdx)
-topmostWindowAtResizeHalo ctx mouse = do
-  count <- arenaCount (ctxNodeArena ctx)
-  go (count - 1)
-  where
-    go idx
-      | idx < 0 = pure Nothing
-      | otherwise = do
-          nt <- getNodeType (ctxNodeArena ctx) idx
-          if nt /= NodeWindow
-            then go (idx - 1)
-            else do
-              (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-              if w <= 0 || h <= 0
-                then go (idx - 1)
-                else do
-                  let rect = Rect x y w h
-                  if rectContains (windowResizeHalo rect) mouse
-                    then pure (Just idx)
-                    else do
-                      inInner <- windowInnerEastResizeHit ctx idx rect mouse
-                      if inInner
-                        then pure (Just idx)
-                        else go (idx - 1)
+topmostWindowAtResizeHalo ctx mouse =
+  findNodeRevM (ctxNodeArena ctx) $ \idx -> do
+    nt <- getNodeType (ctxNodeArena ctx) idx
+    if nt /= NodeWindow
+      then pure False
+      else do
+        (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+        if w <= 0 || h <= 0
+          then pure False
+          else do
+            let rect = Rect x y w h
+            if rectContains (windowResizeHalo rect) mouse
+              then pure True
+              else windowInnerEastResizeHit ctx idx rect mouse
 
 windowInnerEastResizeHit :: Context -> NodeIdx -> Rect -> V2 -> IO Bool
 windowInnerEastResizeHit ctx winIdx winRect mouse@(V2 mx _) = do

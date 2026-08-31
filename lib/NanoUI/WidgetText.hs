@@ -49,6 +49,18 @@ import qualified Data.Text as T
 sliderRangeSep :: Text
 sliderRangeSep = T.singleton '\US'
 
+parseInt :: Text -> Int -> Int
+parseInt t fallback =
+  case signed decimal t of
+    Right (v, "") -> v
+    _ -> fallback
+
+parseFloat :: Text -> Float -> Float
+parseFloat t fallback =
+  case double t of
+    Right (v, "") -> realToFrac v
+    _ -> fallback
+
 sliderDisplayText :: Text -> Float -> Text
 sliderDisplayText lbl value = lbl <> ": " <> T.pack (show (round value :: Int))
 
@@ -89,16 +101,11 @@ sliderParseRange txt =
             | not (T.null suffix) ->
                 case T.breakOn "," (T.drop 1 suffix) of
                   (a, b) ->
-                    ( readFloat a 0
-                    , readFloat (T.drop 1 b) 100
+                    ( parseFloat a 0
+                    , parseFloat (T.drop 1 b) 100
                     )
           _ -> (0, 100)
    in (sliderLabelText bare, minV, maxV)
-  where
-    readFloat t fallback =
-      case double t of
-        Right (v, "") -> realToFrac v
-        _ -> fallback
 
 checkboxLabelText :: Text -> Text
 checkboxLabelText txt =
@@ -118,16 +125,11 @@ radioParseOption :: Text -> (Int, Int, Text)
 radioParseOption txt =
   case T.splitOn sliderRangeSep txt of
     [g, i, lbl] ->
-      ( readInt g 0
-      , readInt i 0
+      ( parseInt g 0
+      , parseInt i 0
       , lbl
       )
     _ -> (0, 0, txt)
-  where
-    readInt t fallback =
-      case signed decimal t of
-        Right (v, "") -> v
-        _ -> fallback
 
 radioLabelText :: Text -> Text
 radioLabelText txt =
@@ -158,19 +160,14 @@ treeParseRow :: Text -> (Int, Int, Int, Bool, Bool, Text)
 treeParseRow txt =
   case T.splitOn sliderRangeSep txt of
     (g : i : d : hc : ex : rest) ->
-      ( readInt g 0
-      , readInt i 0
-      , readInt d 0
+      ( parseInt g 0
+      , parseInt i 0
+      , parseInt d 0
       , hc == "1"
       , ex == "1"
       , T.intercalate sliderRangeSep rest
       )
     _ -> (0, 0, 0, False, False, txt)
-  where
-    readInt t fallback =
-      case signed decimal t of
-        Right (v, "") -> v
-        _ -> fallback
 
 treeLabelText :: Text -> Text
 treeLabelText txt =

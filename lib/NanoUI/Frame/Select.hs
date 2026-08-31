@@ -121,6 +121,7 @@ import NanoUI.Layout.Arena
   , NodeType (..)
   , SizingTag (..)
   , arenaCount
+  , findNodeRevM
   , getAlignX
   , getDirection
   , getFirstChild
@@ -369,33 +370,32 @@ openSelectHit ctx count mouse opens = go 0
                     then pure True
                     else go (idx + 1)
 
-findSelectUnderMouse :: Context -> Int -> V2 -> IO (Maybe WidgetId)
-findSelectUnderMouse ctx count mouse = go (count - 1)
-  where
-    go idx
-      | idx < 0 = pure Nothing
-      | otherwise = do
-          nt <- getNodeType (ctxNodeArena ctx) idx
-          if nt /= NodeSelect
-            then go (idx - 1)
+findSelectUnderMouse :: Context -> V2 -> IO (Maybe WidgetId)
+findSelectUnderMouse ctx mouse = do
+  mIdx <-
+    findNodeRevM (ctxNodeArena ctx) $ \idx -> do
+      nt <- getNodeType (ctxNodeArena ctx) idx
+      if nt /= NodeSelect
+        then pure False
+        else do
+          wid <- getWidgetId (ctxNodeArena ctx) idx
+          allow <- widgetOverlayAllowed ctx wid
+          if not allow
+            then pure False
             else do
-              wid <- getWidgetId (ctxNodeArena ctx) idx
-              allow <- widgetOverlayAllowed ctx wid
-              if not allow
-                then go (idx - 1)
-                else do
-                  (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-                  txt <- getText (ctxNodeArena ctx) idx
-                  store <- getStore ctx
-                  let key = intKey wid
-                      open = IM.findWithDefault False key (storeSelectOpen store)
-                      fm = ctxFontMetrics ctx
-                      (_, opts) = selectParseOptions txt
-                      btnRect = Rect x y w h
-                      dropRect = selectDropRect (ctxHostProfile ctx) fm x y w h (length opts)
-                  if rectContains btnRect mouse || (open && rectContains dropRect mouse)
-                    then pure (Just wid)
-                    else go (idx - 1)
+              (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+              txt <- getText (ctxNodeArena ctx) idx
+              store <- getStore ctx
+              let key = intKey wid
+                  open = IM.findWithDefault False key (storeSelectOpen store)
+                  fm = ctxFontMetrics ctx
+                  (_, opts) = selectParseOptions txt
+                  btnRect = Rect x y w h
+                  dropRect = selectDropRect (ctxHostProfile ctx) fm x y w h (length opts)
+              pure (rectContains btnRect mouse || (open && rectContains dropRect mouse))
+  case mIdx of
+    Nothing -> pure Nothing
+    Just idx -> Just <$> getWidgetId (ctxNodeArena ctx) idx
 
 selectItemH :: HostProfile -> Float -> Float
 selectItemH host rh = if isCellHost host then max 1 rh else 28

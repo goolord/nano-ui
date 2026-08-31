@@ -46,6 +46,7 @@ module NanoUI.Layout.Arena
   , forChildNodes_
   , findNodeRevM
   , foldChildNodesM
+  , foldNodeRevM
   ) where
 
 import Control.Monad (forM_, when)
@@ -760,5 +761,24 @@ findNodeRevM na p = do
   go (n - 1)
 
 {-# INLINE foldChildNodesM #-}
-foldChildNodesM :: NodeArena -> NodeIdx -> (NodeIdx -> IO ()) -> IO ()
-foldChildNodesM = forChildNodes_
+foldChildNodesM :: NodeArena -> NodeIdx -> (a -> NodeIdx -> IO a) -> a -> IO a
+foldChildNodesM na parentIdx f z = do
+  fc <- getFirstChild na parentIdx
+  let go !ci !acc
+        | ci < 0 = pure acc
+        | otherwise = do
+            acc' <- f acc ci
+            ns <- getNextSibling na ci
+            go ns acc'
+  go fc z
+
+{-# INLINE foldNodeRevM #-}
+foldNodeRevM :: NodeArena -> (a -> NodeIdx -> IO a) -> a -> IO a
+foldNodeRevM na f z = do
+  n <- arenaCount na
+  let go !i !acc
+        | i < 0 = pure acc
+        | otherwise = do
+            acc' <- f acc i
+            go (i - 1) acc'
+  go (n - 1) z

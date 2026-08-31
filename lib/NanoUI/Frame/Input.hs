@@ -17,7 +17,7 @@ module NanoUI.Frame.Input
 
 
 import Control.Monad (filterM, foldM, forM, forM_, unless, void, when)
-import Control.Monad.Extra (whenM)
+
 import Data.Char (isAlphaNum, isSpace)
 import Data.IORef (readIORef, writeIORef)
 import Data.Typeable (Typeable)
@@ -178,6 +178,9 @@ import NanoUI.Frame.Redraw (probeHotId)
 import NanoUI.Frame.Select (findSelectUnderMouse, selectDropRect)
 import NanoUI.Frame.Spans (widgetHitRect)
 import NanoUI.Frame.TextInput (collapseTextInputSelection, textInputGeomForWidget, applyTextInputClick, applyTextInputDrag, textInputCharAtX)
+
+whenM :: Monad m => m Bool -> m () -> m ()
+whenM mb ma = mb >>= \b -> when b ma
 
 finalizeTabFocus :: Context -> Input -> IO ()
 finalizeTabFocus ctx inp =
@@ -346,8 +349,7 @@ finalizeTextInputFocus ctx inp =
 finalizeSelectFocus :: Context -> Input -> IO ()
 finalizeSelectFocus ctx inp =
   when (inputMousePressed inp) $ do
-    count <- arenaCount (ctxNodeArena ctx)
-    mWid <- findSelectUnderMouse ctx count (inputMousePos inp)
+    mWid <- findSelectUnderMouse ctx (inputMousePos inp)
     case mWid of
       Nothing -> pure ()
       Just wid ->

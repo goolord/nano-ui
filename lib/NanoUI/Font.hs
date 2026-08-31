@@ -384,11 +384,23 @@ wrappedSizeFrom lineH maxW textLines ws =
     _ -> (min maxW (maximum ws), lineH * fromIntegral (length textLines))
 
 wrapTextLines :: HostProfile -> FontMetrics -> Text -> Float -> [Text]
-wrapTextLines host fm txt maxW = wrapTextLinesWith (textDisplayWidth host fm) txt maxW
+wrapTextLines host fm txt maxW =
+  if isCellHost host
+    then wrapTextLinesWith (textDisplayWidth host fm) txt maxW
+    else
+      wrapTextLinesFit
+        (takeWidthAdvance (fmAdvance fm))
+        (lineWidth fm)
+        txt
+        maxW
 
 wrapTextLinesWith :: (Text -> Float) -> Text -> Float -> [Text]
 wrapTextLinesWith lineW txt maxW =
   concatMap (\para -> wrapParagraphWith lineW para maxW) (T.lines txt)
+
+wrapTextLinesFit :: (Float -> Text -> (Text, Text)) -> (Text -> Float) -> Text -> Float -> [Text]
+wrapTextLinesFit fit lineW txt maxW =
+  concatMap (\para -> wrapParagraphFit fit lineW para maxW) (T.lines txt)
 
 wrapTextLinesIO :: (Text -> IO Float) -> FontMetrics -> Text -> Float -> IO [Text]
 wrapTextLinesIO lineW _ txt maxW =
@@ -400,6 +412,13 @@ wrapParagraphWith lineW para maxW
   | T.null para = [""]
   | T.any (== ' ') para = wrapWordsWith lineW (T.words para) maxW []
   | otherwise = reverse (charLinesWith lineW maxW para [])
+
+wrapParagraphFit :: (Float -> Text -> (Text, Text)) -> (Text -> Float) -> Text -> Float -> [Text]
+wrapParagraphFit fit lineW para maxW
+  | maxW <= 0 = []
+  | T.null para = [""]
+  | T.any (== ' ') para = wrapWordsWith lineW (T.words para) maxW []
+  | otherwise = reverse (charLinesFit fit maxW para [])
 
 wrapParagraphIO :: (Text -> IO Float) -> Text -> Float -> IO [Text]
 wrapParagraphIO lineW para maxW
@@ -450,14 +469,17 @@ wrapWordsIO lineW (w : ws) maxW acc =
               wrapWordsIO lineW ws maxW (broken ++ (line : rest))
 
 charLinesWith :: (Text -> Float) -> Float -> Text -> [Text] -> [Text]
-charLinesWith lineW maxW txt acc =
+charLinesWith lineW = charLinesFit (takeWidthWith lineW)
+
+charLinesFit :: (Float -> Text -> (Text, Text)) -> Float -> Text -> [Text] -> [Text]
+charLinesFit fit maxW txt acc =
   if T.null txt
     then acc
     else
-      let (line, rest) = takeWidthWith lineW maxW txt
+      let (line, rest) = fit maxW txt
        in if T.null line
             then acc
-            else charLinesWith lineW maxW rest (line : acc)
+            else charLinesFit fit maxW rest (line : acc)
 
 charLinesIO :: (Text -> IO Float) -> Float -> Text -> [Text] -> IO [Text]
 charLinesIO lineW maxW txt acc =
@@ -472,6 +494,25 @@ charLinesIO lineW maxW txt acc =
 lineWidth :: FontMetrics -> Text -> Float
 lineWidth fm line =
   T.foldl' (\w c -> w + fmAdvance fm c) 0 line
+
+takeWidthAdvance :: (Char -> Float) -> Float -> Text -> (Text, Text)
+takeWidthAdvance advance maxW txt =
+  let (!len, _) = T.foldl' step (0, 0.0 :: Float) txt
+   in if len <= 0
+        then
+          if T.null txt
+            then (txt, T.empty)
+            else (T.take 1 txt, T.drop 1 txt)
+        else
+          if len >= T.length txt
+            then (txt, T.empty)
+            else (T.take len txt, T.drop len txt)
+  where
+    step (!len, !w) c =
+      let w' = w + advance c
+       in if w' > maxW
+            then if len == 0 then (1, w') else (len, w)
+            else (len + 1, w')
 
 takeWidthWith :: (Text -> Float) -> Float -> Text -> (Text, Text)
 takeWidthWith lineW maxW txt =
