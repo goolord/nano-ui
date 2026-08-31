@@ -123,3 +123,16 @@ inputInteracted a b =
 inputPointerHeld :: Input -> Bool
 inputPointerHeld inp =
   inputMouseDown inp || inputMouseRightDown inp
+
+-- Rebuild UI after store mirrors update. Keep hover/drag; drop one-shot input.
+{-# INLINE stripInteractionInput #-}
+stripInteractionInput :: Input -> Input
+stripInteractionInput inp =
+  inp
+    { inputMousePressed = False
+    , inputMouseReleased = False
+    , inputMouseRightPressed = False
+    , inputMouseRightReleased = False
+    , inputKeys = emptyInputKeys
+    , inputChars = ""
+    }

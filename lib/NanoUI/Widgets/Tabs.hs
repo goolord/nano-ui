@@ -256,17 +256,23 @@ tabsEx style orient curTab tabList =
       pure (tabResp, nextTab)
    in
     case orient of
+      -- Vertical tab lists share height with the body. Horizontal shells
+      -- must stay Fit: Grow here fills a wrap-row line and stretches every
+      -- body widget until a later frame remasures.
       TabVertical -> shell (row (tight . fillW . grow $ defaultLayout))
       TabLeft -> shell (row (tight . fillW . grow $ defaultLayout))
       TabRight -> shell (row (tight . fillW . grow $ defaultLayout))
-      _ -> shell (column (tight . fillW . grow $ defaultLayout))
+      _ -> shell (column (tight . fillW $ defaultLayout))
  where
+  -- Own Fit column so a Grow shell (wrap-line leftover) cannot step
+  -- body widgets with a tall scratch height.
   renderActiveBody activeKey ts =
-    case filter (\t -> tabKey t == activeKey) ts of
-      (selected : _) -> tabBody selected
-      [] -> case ts of
-        (firstTab : _) -> tabBody firstTab
-        [] -> pure ()
+    column (tight . fillW $ defaultLayout) $
+      case filter (\t -> tabKey t == activeKey) ts of
+        (selected : _) -> tabBody selected
+        [] -> case ts of
+          (firstTab : _) -> tabBody firstTab
+          [] -> pure ()
 
 -- | Render just the tab headers without rendering the tab bodies.
 tabBar ::

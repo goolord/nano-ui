@@ -121,7 +121,7 @@ finishDraw ctx env inp forceFull t0 t1 drawData dirtyAfterUi = do
   let Size lw lh = inputWindowSize inp
       pw = max 1 (round (lw * scale))
       ph = max 1 (round (lh * scale))
-  (tex, retainNew) <- ensureRetain env pw ph
+  (tex, retainNew) <- ensureRetain env pw ph scale
   animating <- anyAnimating ctx
   let damage0 = if forceFull || retainNew then DamageFull else snapDamage scale dmg0
       damage =
@@ -154,16 +154,20 @@ finishDraw ctx env inp forceFull t0 t1 drawData dirtyAfterUi = do
       notePresent (sdlDebug env) uiMs renderMs presentMs frameMs drawData
       pure (dirtyAfterUi, inp)
 
-ensureRetain :: SdlEnv -> Int -> Int -> IO (Ptr (), Bool)
-ensureRetain env w h = do
-  (tex, ow, oh) <- readIORef (sdlRetain env)
+ensureRetain :: SdlEnv -> Int -> Int -> Float -> IO (Ptr (), Bool)
+ensureRetain env w h scale = do
+  (tex, ow, oh, oldScale) <- readIORef (sdlRetain env)
+  let scaleChanged = abs (oldScale - scale) > 0.001
   if tex /= nullPtr && ow == w && oh == h
-    then pure (tex, False)
+    then do
+      when scaleChanged $ writeIORef (sdlRetain env) (tex, w, h, scale)
+      -- Same pixel size after a DPI change still holds the old present.
+      pure (tex, scaleChanged)
     else do
       retainDestroy tex
       tex' <- retainCreate (sdlRenderer env) w h
       when (tex' == nullPtr) $ fail "SDL_CreateTexture(retain) failed"
-      writeIORef (sdlRetain env) (tex', w, h)
+      writeIORef (sdlRetain env) (tex', w, h, scale)
       pure (tex', True)
 
 blitRetain :: Ptr SDL_Renderer -> Float -> Ptr () -> Damage -> IO Bool

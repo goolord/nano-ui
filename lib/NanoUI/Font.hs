@@ -253,10 +253,11 @@ sliderTrackBounds host fm lbl x y w h
           trackW = fromIntegral (sliderBarCells + 2) * adv
        in Rect (x + ix + prefix) y trackW h
   | otherwise =
-      let (lx, _) = labelContentInset host fm
-          bandH = max 4 (h * 0.18)
-          bandY = y + h - bandH - sliderTrackMargin
-          trackY = bandY + (bandH - sliderTrackHeight) / 2
+      let (lx, ly) = labelContentInset host fm
+          labelH = layoutLineHeight host fm
+          packedY = y + ly + labelH + sliderTrackMargin
+          maxY = y + h - sliderTrackHeight - sliderTrackMargin
+          trackY = if maxY >= packedY then packedY else max (y + ly) maxY
           trackX = x + lx
           trackW = max 0 (w - 2 * lx)
        in Rect trackX trackY trackW sliderTrackHeight

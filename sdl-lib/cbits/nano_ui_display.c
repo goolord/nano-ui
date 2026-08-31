@@ -85,7 +85,8 @@ static bool nano_ui_resize_watch(void *userdata, SDL_Event *event)
         return true;
     }
     if (event->type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED
-        || event->type == SDL_EVENT_WINDOW_RESIZED) {
+        || event->type == SDL_EVENT_WINDOW_RESIZED
+        || event->type == SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED) {
         g_resize_cb();
     }
     return true;

@@ -361,7 +361,7 @@ measureWidget na host fm measure idx = do
             let fieldH = textInputFieldHeight fm
                 gap = textInputLabelGap fm
                 contentW = max textInputMinWidth (max lw pw)
-            pure (contentW, lh + gap + fieldH, 0, lh + gap)
+            pure (contentW, lh + gap + fieldH, 0, 0)
       _ -> do
         let body =
               if T.null txt
@@ -518,22 +518,6 @@ foldWrappedRowScratch na n avail gap = do
             (end, rowH, lineW) <- packWrapLineEnd wArr hArr start n avail gap
             go end (max maxW lineW) (totalH + rowH) (rowCount + 1)
   go 0 (0 :: Float) (0 :: Float) (0 :: Int)
-
-packWrapLineStarts ::
-  MutablePrimArray RealWorld Float ->
-  MutablePrimArray RealWorld Float ->
-  Int ->
-  Float ->
-  Float ->
-  IO [Int]
-packWrapLineStarts wArr hArr n avail gap = go 0
-  where
-    go start
-      | start >= n = pure [n]
-      | otherwise = do
-          (end, _, _) <- packWrapLineEnd wArr hArr start n avail gap
-          rest <- go end
-          pure (start : rest)
 
 packWrapLineEnd ::
   MutablePrimArray RealWorld Float ->
@@ -704,10 +688,30 @@ positionChildren na host fm idx dir gap pad px py pw ph = do
 
 childRowCrossSize :: NodeArena -> NodeIdx -> Float -> IO Float
 childRowCrossSize na ci availCross = do
+  (hTag, hVal) <- getHeightSizing na ci
   (_, _, _, intrinsic) <- getRect na ci
   (_, minH, _, maxH) <- getMinMax na ci
-  (hTag, hVal) <- getHeightSizing na ci
-  pure (clamp (resolveSize hTag hVal intrinsic availCross minH maxH) minH maxH)
+  case hTag of
+    SizingGrow ->
+      pure (clamp (resolveSize hTag hVal intrinsic availCross minH maxH) minH maxH)
+    SizingPercent ->
+      pure (clamp (resolveSize hTag hVal intrinsic availCross minH maxH) minH maxH)
+    -- Fit/Fixed/Shrink keep the measured box. Do not use the wrap-line
+    -- or row slot as availH: that stretches every child when leftover
+    -- leaks into scratch `fh`.
+    _ -> pure (max minH intrinsic)
+
+-- Column leftover must not change Fit/Fixed/Shrink step height.
+columnChildHeight :: NodeArena -> NodeIdx -> Float -> IO Float
+columnChildHeight na ci scratchH = do
+  (hTag, _) <- getHeightSizing na ci
+  case hTag of
+    SizingGrow -> pure scratchH
+    SizingPercent -> pure scratchH
+    _ -> do
+      (_, minH, _, _) <- getMinMax na ci
+      (_, _, _, ih) <- getRect na ci
+      pure (max minH ih)
 
 positionRowFromParent ::
   NodeArena ->
@@ -726,6 +730,7 @@ positionRowFromParent na host fm parent gap cx cy cw ch = do
   pairs <- snapshotScratchRow na 0 n
   let goRow [] _ = pure ()
       goRow ((ci, fw) : rest) !curX = do
+        -- Fit/fixed children keep content height. Only Grow/Percent eat `ch`.
         crossH <- childRowCrossSize na ci ch
         ay <- getAlignY na ci
         let fy = alignY ay cy ch crossH
@@ -736,28 +741,25 @@ positionRowFromParent na host fm parent gap cx cy cw ch = do
 positionRowWrap :: NodeArena -> HostProfile -> FontMetrics -> NodeIdx -> Float -> Float -> Float -> Float -> Float -> IO ()
 positionRowWrap na host fm parent gap cx cy cw ch = do
   n <- loadChildrenScratchFromParent na parent cw ch
-  wArr <- readIORef (naScratchMain na)
-  hArr <- readIORef (naScratchCross na)
-  starts <- packWrapLineStarts wArr hArr n cw gap
-  let goLines !oy (lineStart : lineEnd : rest)
-        | lineStart >= n = pure ()
-        | otherwise = do
-            let lineLen = lineEnd - lineStart
-            (_, rowH, _) <- packWrapLineEnd wArr hArr lineStart n cw gap
-            distributeScratch na lineStart lineLen cw (gap * fromIntegral (max 0 (lineLen - 1))) True
-            rowEntries <- snapshotScratchRow na lineStart lineLen
-            let goRow [] _ = pure ()
-                goRow ((ci, fw) : es) !curX = do
-                  crossH <- childRowCrossSize na ci rowH
-                  ay <- getAlignY na ci
-                  let fy = alignY ay oy rowH crossH
-                  positionNode na host fm ci curX fy fw crossH
-                  goRow es (curX + fw + gap)
-            goRow rowEntries cx
-            goLines (oy + rowH + gap) (lineEnd : rest)
-      goLines _ [] = pure ()
-      goLines _ [_] = pure ()
-  goLines cy starts
+  -- Snapshot before positionNode. Nested layout reuses the same scratch arrays.
+  dims <- snapshotScratchDims na 0 n
+  let goLines _ [] = pure ()
+      goLines !oy (rowItems : restLines) = do
+        lineBudget <- lineRowCrossBudget na rowItems
+        nLine <- writeScratchDims na rowItems
+        distributeScratch na 0 nLine cw (gap * fromIntegral (max 0 (nLine - 1))) True
+        rowEntries <- snapshotScratchRow na 0 nLine
+        rowH <- goRow rowEntries cx oy lineBudget lineBudget
+        goLines (oy + rowH + gap) restLines
+      goRow [] _ _ _ maxH = pure maxH
+      goRow ((ci, fw) : es) !curX !oy !lineCross !maxH = do
+        crossH <- childRowCrossSize na ci lineCross
+        let lineCross' = max lineCross crossH
+        ay <- getAlignY na ci
+        let fy = alignY ay oy lineCross' crossH
+        positionNode na host fm ci curX fy fw crossH
+        goRow es (curX + fw + gap) oy lineCross' (max maxH crossH)
+  goLines cy (packRowLines dims cw gap)
 
 positionColumnFromParent ::
   NodeArena ->
@@ -789,13 +791,77 @@ positionColumnFromParent na host fm parent gap chrome px _ pw cx cy cw ch = do
               (_, _, iw, _) <- getRect na ci
               ax <- getAlignX na ci
               pure (alignX ax cx cw iw, cw)
-        positionNode na host fm ci fx curY nodeW fh
+        childH <- columnChildHeight na ci fh
+        positionNode na host fm ci fx curY nodeW childH
         gapAfter <-
           case rest of
             [] -> pure 0
             ((nextCi, _) : _) -> pairColumnGap na chrome ci nextCi gap
-        go rest (curY + fh + gapAfter)
+        go rest (curY + childH + gapAfter)
   go pairs cy
+
+snapshotScratchDims :: NodeArena -> Int -> Int -> IO [(NodeIdx, Float, Float)]
+snapshotScratchDims na off n = do
+  idxArr <- readIORef (naScratchIdx na)
+  wArr <- readIORef (naScratchMain na)
+  hArr <- readIORef (naScratchCross na)
+  forM [off .. off + n - 1] $ \i -> do
+    ci <- readPrimArray idxArr i
+    w <- readPrimArray wArr i
+    h <- readPrimArray hArr i
+    pure (ci, w, h)
+
+writeScratchDims :: NodeArena -> [(NodeIdx, Float, Float)] -> IO Int
+writeScratchDims na items = do
+  let n = length items
+  ensureScratchCapacity na n
+  idxArr <- readIORef (naScratchIdx na)
+  mainArr <- readIORef (naScratchMain na)
+  crossArr <- readIORef (naScratchCross na)
+  let write !i [] = do
+        writeIORef (naScratchCount na) i
+        pure i
+      write !i ((ci, w, h) : rest) = do
+        writePrimArray idxArr i ci
+        writePrimArray mainArr i w
+        writePrimArray crossArr i h
+        write (i + 1) rest
+  write 0 items
+
+packRowLines :: [(NodeIdx, Float, Float)] -> Float -> Float -> [[(NodeIdx, Float, Float)]]
+packRowLines dims avail gap = reverse (go 0 [] 0 [])
+  where
+    n = length dims
+    go i curLine curW acc
+      | i >= n = finalize curLine acc
+      | otherwise =
+          let item = dims !! i
+              w = snd3 item
+              need = if null curLine then w else w + gap
+           in if null curLine || curW + need <= avail + 0.001
+                then go (i + 1) (item : curLine) (curW + need) acc
+                else go i [] 0 (reverse curLine : acc)
+    finalize [] acc = acc
+    finalize cur acc = reverse cur : acc
+
+lineCrossSize :: [(NodeIdx, Float, Float)] -> Float
+lineCrossSize line =
+  if null line then 0 else maximum (map thd3 line)
+
+lineRowCrossBudget :: NodeArena -> [(NodeIdx, Float, Float)] -> IO Float
+lineRowCrossBudget na items = do
+  let intrinsic = lineCrossSize items
+  mins <-
+    forM items $ \(ci, _, h) -> do
+      (_, minH, _, _) <- getMinMax na ci
+      pure (max h minH)
+  pure (max intrinsic (if null mins then 0 else maximum mins))
+
+snd3 :: (a, b, c) -> b
+snd3 (_, b, _) = b
+
+thd3 :: (a, b, c) -> c
+thd3 (_, _, c) = c
 
 snapshotScratchRow :: NodeArena -> Int -> Int -> IO [(NodeIdx, Float)]
 snapshotScratchRow na off n = do

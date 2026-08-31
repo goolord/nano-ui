@@ -1,6 +1,7 @@
 module NanoUI.Store
   ( WidgetStore (..)
   , emptyWidgetStore
+  , mirrorStoresChanged
   ) where
 
 import Data.IntMap.Strict (IntMap)
@@ -57,3 +58,8 @@ emptyWidgetStore =
     , storeWindow = IM.empty
     , storeWindowSize = IM.empty
     }
+
+-- useText/useFlag mirror into these maps. Frame re-runs UI when they change.
+mirrorStoresChanged :: WidgetStore -> WidgetStore -> Bool
+mirrorStoresChanged old new =
+  storeNote old /= storeNote new || storeFlag old /= storeFlag new

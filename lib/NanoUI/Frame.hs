@@ -25,7 +25,6 @@ where
 import Control.Monad (unless, when)
 import Data.IORef (readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
-import Data.List (foldl')
 import Data.Typeable (Typeable)
 import Effectful (Eff, IOE, runEff, type (:>))
 import NanoUI.Context

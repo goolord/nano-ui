@@ -325,7 +325,7 @@ lowerNode ctx idx = do
             | terminal, nt == NodeText = False
             | terminal = True
             | otherwise =
-                nt /= NodeCheckbox && nt /= NodeRadio && nt /= NodeSlider && nt /= NodeTextInput
+                nt /= NodeCheckbox && nt /= NodeRadio && nt /= NodeSlider && nt /= NodeTextInput && nt /= NodeColorPicker
       when opaqueBg $ fillStyledRect da terminal style rect
       when (not terminal) $ do
         when (opaqueBg && not isTab && nt /= NodeTree) $ strokeStyledRect da terminal style x y w h
@@ -460,7 +460,8 @@ drawCheckbox host da fm style x y h value accent well markCol = do
           else labelContentInset host fm
       box = checkboxBoxSize host fm
       bx = x + ix
-      by = y + (h - box) / 2
+      slotH = min h (box + 4)
+      by = y + max 0 ((slotH - box) / 2)
       r = min 6 (box / 3.5)
       bw = 2
       outer = Rect bx by box box
@@ -505,7 +506,8 @@ drawRadio host da fm style x y h value accent well = do
           else labelContentInset host fm
       box = checkboxBoxSize host fm
       bx = x + ix
-      by = y + (h - box) / 2
+      slotH = min h (box + 4)
+      by = y + max 0 ((slotH - box) / 2)
       r = box / 2
       bw = 2
       outer = Rect bx by box box

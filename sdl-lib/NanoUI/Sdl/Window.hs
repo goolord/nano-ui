@@ -162,7 +162,7 @@ data SdlEnv = SdlEnv
   , sdlImages :: ImageAtlas
   , sdlCursors :: SdlCursors
   , sdlDebug :: IORef SdlDebugSampler
-  , sdlRetain :: IORef (Ptr (), Int, Int)
+  , sdlRetain :: IORef (Ptr (), Int, Int, Float)
   , sdlVsync :: !Bool
   }
 
@@ -342,7 +342,7 @@ startSdlWindow ctx title w h flags bench vsync fontPath monoPath fontSize = do
           images <- newImageAtlas
           cursors <- initCursors
           debug <- newSdlDebugSampler
-          retain <- newIORef (nullPtr, 0, 0)
+          retain <- newIORef (nullPtr, 0, 0, 0)
           unlessM (setRenderScale ren defaultUiScale) $
             fail "SDL_SetRenderScale failed"
           unless bench $ void $ setRenderVSync ren vsync
@@ -379,7 +379,7 @@ startSdlWindow ctx title w h flags bench vsync fontPath monoPath fontSize = do
 
 stopSdlWindow :: Bool -> SdlEnv -> IO ()
 stopSdlWindow bench env = do
-  (tex, _, _) <- readIORef (sdlRetain env)
+  (tex, _, _, _) <- readIORef (sdlRetain env)
   retainDestroy tex
   destroyCursors (sdlCursors env)
   destroyImageAtlas (sdlImages env)
