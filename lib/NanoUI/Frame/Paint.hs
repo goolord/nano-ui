@@ -76,7 +76,7 @@ import NanoUI.Style
   )
 import NanoUI.Types (Color (..), ImageId (..), Rect (..), colorA, colorRGBA, clamp01)
 import NanoUI.WidgetText (buttonFlags)
-import NanoUI.WidgetText (selectChevronCenterX, sliderLabelText, treeParseRow)
+import NanoUI.WidgetText (selectChevronCenterX, sliderLabelText, treeDecodeStyle)
 import NanoUI.Frame.Chrome
   ( fillStyledRect
   , imageIdFromText
@@ -298,8 +298,8 @@ lowerNode ctx idx = do
             (themeAccent theme)
             (styleBg (themeInput theme))
         when (nt == NodeTree) $ do
-          txt <- getText (ctxNodeArena ctx) idx
-          let (_, _, depth, hasKids, expanded, _) = treeParseRow txt
+          si <- getStyleIdx (ctxNodeArena ctx) idx
+          let (_, depth, hasKids, expanded) = treeDecodeStyle si
           when hasKids $
             drawTreeChevron
               da

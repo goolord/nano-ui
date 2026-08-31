@@ -51,6 +51,7 @@ import NanoUI.Layout.Arena
   , getNextSibling
   , getNodeType
   , getParent
+  , getStyleIdx
   , getPadding
   , getRect
   , getText
@@ -76,9 +77,8 @@ import NanoUI.ColorPicker (colorPickerMeasureSize)
 import NanoUI.WidgetText
   ( checkboxLabelText
   , radioLabelText
-  , treeLabelText
+  , treeDecodeStyle
   , treeMeasureLabel
-  , treeParseRow
   , selectDisplayText
   , selectChevronReserve
   , selectParseOptions
@@ -336,8 +336,9 @@ measureWidget na host fm measure idx = do
                 else if isCellHost host then txt else radioLabelText txt
         measureMarkedWidget host fm measure body (checkboxLeading host fm)
       NodeTree -> do
-        let (_, _, depth, _, _, raw) = treeParseRow txt
-            lbl = if T.null raw then " " else treeLabelText txt
+        si <- getStyleIdx na idx
+        let (_, depth, _, _) = treeDecodeStyle si
+            lbl = if T.null txt then " " else txt
             body = if isCellHost host then treeMeasureLabel depth lbl else lbl
         measureMarkedWidget host fm measure body (treeRowLeading host fm depth)
       NodeSelect -> do

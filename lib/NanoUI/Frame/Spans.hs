@@ -93,7 +93,7 @@ import NanoUI.WidgetText
   , sliderValueText
   , textInputFieldText
   , textInputTerminalText
-  , treeParseRow
+  , treeDecodeStyle
   )
 import NanoUI.Frame.Chrome
   ( buildFloatingAncestorMap
@@ -522,8 +522,8 @@ widgetTextPlacements ctx nt idx x y w h = do
     NodeTree -> do
       txt <- displayText ctx nt idx
       (tw, th) <- ctxMeasureText ctx txt
-      stored <- getText (ctxNodeArena ctx) idx
-      let (_, _, depth, _, _, _) = treeParseRow stored
+      si <- getStyleIdx (ctxNodeArena ctx) idx
+      let (_, depth, _, _) = treeDecodeStyle si
           (cx, _) =
             if terminal
               then widgetContentInset (ctxHostProfile ctx) fm

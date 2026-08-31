@@ -11,8 +11,8 @@ module NanoUI.WidgetText
   , radioPackOption
   , radioParseOption
   , radioLabelText
-  , treePackRow
-  , treeParseRow
+  , treeEncodeStyle
+  , treeDecodeStyle
   , treeLabelText
   , treeDisplayText
   , treeMeasureLabel
@@ -54,6 +54,7 @@ module NanoUI.WidgetText
   , buttonDisplayTextFromFlags
   ) where
 
+import Data.Bits ((.&.), (.|.), shiftL, shiftR)
 import Data.Char (chr)
 import Data.List (find)
 import Data.Maybe (fromMaybe)
@@ -160,43 +161,27 @@ radioLabelText txt =
         Nothing -> t
         Just p -> T.drop (T.length p) t
 
--- | Pack tree row metadata ahead of the visible label.
--- Fields: groupKey, nodeIdx, depth, hasChildren, expanded, then label
--- (label may contain the separator).
-treePackRow :: Int -> Int -> Int -> Bool -> Bool -> Text -> Text
-treePackRow groupKey nodeIdx depth hasChildren expanded label =
-  T.intercalate
-    sliderRangeSep
-    [ T.pack (show groupKey)
-    , T.pack (show nodeIdx)
-    , T.pack (show depth)
-    , if hasChildren then "1" else "0"
-    , if expanded then "1" else "0"
-    , label
-    ]
+-- | styleIdx: nodeIdx in high bits, depth in 0-7, hasKids bit 8, expanded bit 9.
+treeEncodeStyle :: Int -> Int -> Bool -> Bool -> Int
+treeEncodeStyle nodeIdx depth hasKids expanded =
+  (nodeIdx `shiftL` 10)
+    .|. (depth .&. 0xff)
+    .|. (if hasKids then 0x100 else 0)
+    .|. (if expanded then 0x200 else 0)
 
-treeParseRow :: Text -> (Int, Int, Int, Bool, Bool, Text)
-treeParseRow txt =
-  case T.splitOn sliderRangeSep txt of
-    (g : i : d : hc : ex : rest) ->
-      ( parseInt g 0
-      , parseInt i 0
-      , parseInt d 0
-      , hc == "1"
-      , ex == "1"
-      , T.intercalate sliderRangeSep rest
-      )
-    _ -> (0, 0, 0, False, False, txt)
+treeDecodeStyle :: Int -> (Int, Int, Bool, Bool)
+treeDecodeStyle s =
+  ( s `shiftR` 10
+  , s .&. 0xff
+  , s .&. 0x100 /= 0
+  , s .&. 0x200 /= 0
+  )
 
 treeLabelText :: Text -> Text
 treeLabelText txt =
-  let (_, _, _, _, _, raw) = treeParseRow txt
-   in stripTreePrefixes raw
-  where
-    stripTreePrefixes t =
-      case find (`T.isPrefixOf` t) treeExpandPrefixes of
-        Nothing -> t
-        Just p -> T.drop (T.length p) t
+  case find (`T.isPrefixOf` txt) treeExpandPrefixes of
+    Nothing -> txt
+    Just p -> T.drop (T.length p) txt
 
 -- | Visible terminal row: indent, expand mark, label.
 treeDisplayText :: Icons -> Int -> Bool -> Bool -> Text -> Text
