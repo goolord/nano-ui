@@ -1,0 +1,14 @@
+Build profile: -w ghc-9.14.1 -O1
+In order, the following will be built (use -v for more details):
+ - nano-ui-0.1.0.0 (bench:nano-ui-id-bench) (file C:\Users\zach\Dev\nano-ui\dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\opt\cache\build changed)
+Preprocessing benchmark 'nano-ui-id-bench' for nano-ui-0.1.0.0...
+Building benchmark 'nano-ui-id-bench' for nano-ui-0.1.0.0...
+[2 of 2] Linking dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-0.1.0.0\b\nano-ui-id-bench\opt\build\nano-ui-id-bench\nano-ui-id-bench.exe [Library changed]
+All
+  id/nextId
+    burst4096:     OK
+      298  ╬╝s ┬▒ 5.9 ╬╝s, 822 KB allocated, 5.7 KB copied, 176 MB peak memory
+    scopedWidgets: OK
+      302  ╬╝s ┬▒  28 ╬╝s, 571 KB allocated, 5.1 KB copied, 176 MB peak memory
+
+All 2 tests passed (57.98s)
