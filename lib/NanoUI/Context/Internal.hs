@@ -14,6 +14,15 @@ module NanoUI.Context.Internal
   , isDirty
   , setWakeLoop
   , takeDamage
+  , DamageRequest (..)
+  , requestDamage
+  , damageWidget
+  , damageKey
+  , damageRect
+  , damagePeers
+  , damageFull
+  , clearDamageRequests
+  , getDamageRequests
   , registerPopupConfig
   , lookupPopupConfig
   , clearPopupConfigs
@@ -78,7 +87,7 @@ module NanoUI.Context.Internal
   , getAnimationValue
   ) where
 
-import Control.Monad (forM, when)
+import Control.Monad (forM, forM_, when)
 import Data.ByteString (ByteString)
 import Data.Dynamic (Dynamic, fromDynamic, toDyn)
 import Data.HashMap.Strict (HashMap)
@@ -120,9 +129,31 @@ import NanoUI.Messages (FrameMsg)
 import NanoUI.Spring (SpringParams, springEps)
 import NanoUI.Store (WidgetStore (..), boolInt, emptyWidgetStore, intBool, slotDisabled, slotKey)
 import NanoUI.Style (Theme, defaultTheme)
-import NanoUI.Types (Damage (..), ImageId (..), PopupAnchor (..), PopupPlacement (..), Rect (..), Size (..), V2 (..), rectContains, rectH, rectW)
+import NanoUI.Types
+  ( Damage (..)
+  , DamageBounds (..)
+  , ImageId (..)
+  , PopupAnchor (..)
+  , PopupPlacement (..)
+  , Rect (..)
+  , Size (..)
+  , V2 (..)
+  , defaultDamageSlop
+  , rectContains
+  , rectH
+  , rectW
+  )
 
 type MeasureCacheKey = (Text, Bool, Float)
+
+-- | Explicit damage invalidation request queued during frame evaluation.
+data DamageRequest
+  = ReqWidget !WidgetId !DamageBounds      -- ^ Invalidate widget layout bounds (old & new)
+  | ReqKey !Int !DamageBounds              -- ^ Invalidate widget bounds by integer key
+  | ReqRect !Rect                          -- ^ Invalidate an explicit window-space rectangle
+  | ReqPeers ![WidgetId] !DamageBounds     -- ^ Invalidate a collection of widgets
+  | ReqFull                                -- ^ Force full window invalidation
+  deriving (Eq, Show)
 
 data TextInputMenu = TextInputMenu
   { textInputMenuWidget :: WidgetId
@@ -173,6 +204,7 @@ data Context = Context
   , ctxClickedId :: IORef WidgetId
   , ctxFocusId :: IORef WidgetId
   , ctxPrevRects :: IORef (IntMap Rect)
+  , ctxPrevClips :: IORef (IntMap Rect)
   , ctxPrevNodeTexts :: IORef (IntMap Text)
   , ctxStore :: IORef WidgetStore
   , ctxAnimations :: IORef (IntMap Animation)
@@ -181,6 +213,7 @@ data Context = Context
   , ctxAnimSettled :: IORef Bool
   , ctxDirty :: IORef Bool
   , ctxDamage :: IORef Damage
+  , ctxDamageRequests :: IORef [DamageRequest]
   , ctxLastWindowSize :: IORef Size
   , ctxIdContext :: IORef IdContext
   , ctxFontMetrics :: FontMetrics
@@ -226,6 +259,47 @@ data Context = Context
 {-# INLINE intKey #-}
 intKey :: WidgetId -> Int
 intKey = fromIntegral . hashWidgetId
+
+{-# INLINE requestDamage #-}
+requestDamage :: Context -> DamageRequest -> IO ()
+requestDamage ctx req = modifyIORef' (ctxDamageRequests ctx) (req :)
+
+{-# INLINE damageWidget #-}
+damageWidget :: Context -> WidgetId -> DamageBounds -> IO ()
+damageWidget ctx wid bounds
+  | hashWidgetId wid == 0 = pure ()
+  | otherwise = requestDamage ctx (ReqWidget wid bounds)
+
+{-# INLINE damageKey #-}
+damageKey :: Context -> Int -> DamageBounds -> IO ()
+damageKey ctx k bounds
+  | k == 0 = pure ()
+  | otherwise = requestDamage ctx (ReqKey k bounds)
+
+{-# INLINE damageRect #-}
+damageRect :: Context -> Rect -> IO ()
+damageRect ctx r
+  | rectW r <= 0 || rectH r <= 0 = pure ()
+  | otherwise = requestDamage ctx (ReqRect r)
+
+{-# INLINE damagePeers #-}
+damagePeers :: Context -> [WidgetId] -> DamageBounds -> IO ()
+damagePeers ctx wids bounds =
+  case filter (\w -> hashWidgetId w /= 0) wids of
+    [] -> pure ()
+    valid -> requestDamage ctx (ReqPeers valid bounds)
+
+{-# INLINE damageFull #-}
+damageFull :: Context -> IO ()
+damageFull ctx = requestDamage ctx ReqFull
+
+{-# INLINE clearDamageRequests #-}
+clearDamageRequests :: Context -> IO ()
+clearDamageRequests ctx = writeIORef (ctxDamageRequests ctx) []
+
+{-# INLINE getDamageRequests #-}
+getDamageRequests :: Context -> IO [DamageRequest]
+getDamageRequests ctx = readIORef (ctxDamageRequests ctx)
 
 {-# INLINE markDirty #-}
 markDirty :: Context -> IO ()
@@ -283,7 +357,24 @@ setStore :: Context -> WidgetStore -> IO ()
 setStore ctx store = do
   prev <- readIORef (ctxStore ctx)
   writeIORef (ctxStore ctx) store
-  when (prev /= store) (markDirty ctx)
+  when (prev /= store) $ do
+    let changedKeys =
+          IM.keys (storeChangeKeys (storeInt prev) (storeInt store))
+            ++ IM.keys (storeChangeKeys (storeFloat prev) (storeFloat store))
+            ++ IM.keys (storeChangeKeys (storePoint prev) (storePoint store))
+            ++ IM.keys (storeChangeKeys (storeText prev) (storeText store))
+            ++ IM.keys (storeChangeKeys (storeFloatList prev) (storeFloatList store))
+            ++ IM.keys (storeChangeKeys (storeIntSet prev) (storeIntSet store))
+    forM_ changedKeys $ \k -> damageKey ctx k (DamageInflated defaultDamageSlop)
+    markDirty ctx
+
+storeChangeKeys :: Eq a => IntMap a -> IntMap a -> IntMap ()
+storeChangeKeys old new =
+  IM.fromList
+    [ (k, ())
+    | k <- IM.keys (IM.union old new)
+    , IM.lookup k old /= IM.lookup k new
+    ]
 
 {-# INLINE isDisabled #-}
 isDisabled :: Context -> WidgetId -> IO Bool
@@ -462,6 +553,7 @@ newContext = do
   ctxClickedId <- newIORef (WidgetId 0)
   ctxFocusId <- newIORef (WidgetId 0)
   ctxPrevRects <- newIORef IM.empty
+  ctxPrevClips <- newIORef IM.empty
   ctxPrevNodeTexts <- newIORef IM.empty
   ctxStore <- newIORef emptyWidgetStore
   ctxAnimations <- newIORef IM.empty
@@ -470,6 +562,7 @@ newContext = do
   ctxAnimSettled <- newIORef False
   ctxDirty <- newIORef True
   ctxDamage <- newIORef DamageFull
+  ctxDamageRequests <- newIORef []
   ctxLastWindowSize <- newIORef (Size 0 0)
   ctxIdContext <- newIORef initialIdContext
   ctxContainerStack <- newIORef []
@@ -511,6 +604,7 @@ newContext = do
     , ctxClickedId
     , ctxFocusId
     , ctxPrevRects
+    , ctxPrevClips
     , ctxPrevNodeTexts
     , ctxStore
     , ctxAnimations
@@ -519,6 +613,7 @@ newContext = do
     , ctxAnimSettled
     , ctxDirty
     , ctxDamage
+    , ctxDamageRequests
     , ctxLastWindowSize
     , ctxIdContext
     , ctxFontMetrics = fm0
@@ -831,7 +926,9 @@ settleKey ctx key val = do
         Nothing -> not (approxEq prevRest val)
   writeIORef (ctxAnimations ctx) (IM.delete key anims)
   writeIORef (ctxAnimRest ctx) (if approxEq val 0 then IM.delete key rest else IM.insert key val rest)
-  when changed (markDirty ctx)
+  when changed $ do
+    damageKey ctx key (DamageInflated defaultDamageSlop)
+    markDirty ctx
   refreshAnimating ctx
 
 {-# INLINE getAnimationValue #-}

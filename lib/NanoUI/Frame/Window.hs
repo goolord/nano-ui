@@ -24,6 +24,7 @@ import NanoUI.Context
   , WidgetStore (..)
   , WindowResizeDrag (..)
   , WindowResizeEdge (..)
+  , damageWidget
   , getStore
   , intKey
   , markDirty
@@ -53,7 +54,7 @@ import NanoUI.Layout.Arena
   )
 import NanoUI.Layout.Solve (positionWindowNode, scrollBarSlotOf)
 import NanoUI.Style (Padding (..), Style (..), Theme (..), themeOverlayDim)
-import NanoUI.Types (Rect (..), Size (..), V2 (..), rectContains, rectY)
+import NanoUI.Types (DamageBounds (..), Rect (..), Size (..), V2 (..), haloDamageSlop, rectContains, rectY)
 import NanoUI.Frame.CursorKind (UiCursorKind (..))
 import NanoUI.Frame.Chrome
   ( fillStyledRect
@@ -153,6 +154,7 @@ updateWindowDrag ctx inp = do
                         IM.insert (intKey wid) pos (storePoint store)
                     }
                 )
+              damageWidget ctx wid (DamageInflated haloDamageSlop)
               markDirty ctx
               pure True
           | otherwise -> do
@@ -323,6 +325,7 @@ updateWindowResize ctx inp winW winH = do
                 }
             )
           relayoutWindow ctx winW winH (wrdWidget wrd) nw nh
+          damageWidget ctx (wrdWidget wrd) (DamageInflated haloDamageSlop)
           markDirty ctx
           pure True
       | otherwise -> do

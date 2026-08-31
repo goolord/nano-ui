@@ -78,6 +78,12 @@ testSpecs =
   , TestSpec "hover-skip" False runHoverSkipTest
   , TestSpec "hover-damage" False runHoverDamageTest
   , TestSpec "scroll-damage" False runScrollDamageTest
+  , TestSpec "damage-bounds-resolution" False runDamageBoundsResolutionTest
+  , TestSpec "damage-bounds-monoid" False runDamageBoundsMonoidTest
+  , TestSpec "damage-widget-explicit" False runExplicitDamageWidgetTest
+  , TestSpec "damage-rect-explicit" False runExplicitDamageRectTest
+  , TestSpec "damage-full-explicit" False runExplicitDamageFullTest
+  , TestSpec "damage-queue-cleared" False runDamageQueueClearedPerFrameTest
   , TestSpec "table-scroll" False runTableScrollTest
   , TestSpec "table-first-col" False runTableFirstColWidthTest
   , TestSpec "table-fill-width" False runTableFillWidthTest

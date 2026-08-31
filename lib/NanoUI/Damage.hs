@@ -1,6 +1,5 @@
 module NanoUI.Damage
   ( updatePrevRects
-  , updatePrevNodeTexts
   , floatingPanelRects
   , writeDamage
   ) where
@@ -9,38 +8,26 @@ import Control.Monad (foldM, forM, when)
 import Data.IORef (readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Maybe (catMaybes, fromMaybe, isJust, isNothing)
-import Data.Text (Text)
-import Data.Text qualified as T
 import NanoUI.Context
   ( Context (..)
+  , DamageRequest (..)
   , WidgetStore (..)
   , animInProgress
-  , clearDirty
+  , clearDamageRequests
+  , getDamageRequests
   , getPrevRect
   , getPrevRectByKey
   , getStore
   , intKey
-  , isDirty
   , markDirty
   )
 import NanoUI.Context.Internal (modalDamageFlip)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input
   ( Input (..)
-  , inputChars
-  , inputKeys
-  , inputKeysNull
-  , inputMousePressed
-  , inputMouseReleased
-  , inputMouseRightPressed
-  , inputMouseRightReleased
-  , inputPointerHeld
-  , inputScroll
   , inputWindowSize
   )
-import NanoUI.Frame.Chrome (displayText, textInputFocused, textInputValue)
 import NanoUI.Frame.Hit (findNodeByKey, findNodeByWidgetId)
-import NanoUI.Host (isCellHost)
 import NanoUI.Layout.Arena
   ( NodeArena
   , NodeType (..)
@@ -48,33 +35,26 @@ import NanoUI.Layout.Arena
   , arenaCount
   , getHeightSizing
   , getNodeType
-  , getNodeValue
   , getParent
   , getRect
-  , getText
   , getWidgetId
   , getWidthSizing
   , isScrollNode
   )
-import NanoUI.WidgetText
-  ( sliderValueText
-  , textInputFieldText
-  )
 import NanoUI.Types
   ( Damage (..)
+  , DamageBounds (..)
   , Rect (..)
   , Size (..)
-  , V2 (..)
+  , defaultDamageSlop
   , rectArea
   , rectH
   , rectInflate
   , rectIntersect
   , rectUnion
   , rectW
+  , resolveDamageRect
   )
-
-textClipSlop :: Float
-textClipSlop = 4
 
 layoutSettleMinArea :: Float
 layoutSettleMinArea = 0.25
@@ -151,65 +131,6 @@ updatePrevRects ctx = do
                 then pure (IM.insert (intKey wid) r m)
                 else pure m
 
-updatePrevNodeTexts :: Context -> IO ()
-updatePrevNodeTexts ctx = do
-  count <- arenaCount (ctxNodeArena ctx)
-  if count <= 0
-    then writeIORef (ctxPrevNodeTexts ctx) IM.empty
-    else do
-      pairs <- collectPrevTextPairs ctx (count - 1) []
-      writeIORef (ctxPrevNodeTexts ctx) (IM.fromListWith preferTextSnapshot pairs)
-
-collectPrevTextPairs :: Context -> Int -> [(Int, Text)] -> IO [(Int, Text)]
-collectPrevTextPairs ctx !idx acc
-  | idx < 0 = pure acc
-  | otherwise = do
-      wid <- getWidgetId (ctxNodeArena ctx) idx
-      (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-      if hashWidgetId wid == 0
-        then collectPrevTextPairs ctx (idx - 1) acc
-        else
-          let r = Rect x y w h
-           in if nonzeroRect r
-                then do
-                  nt <- getNodeType (ctxNodeArena ctx) idx
-                  snap <- paintTextSnapshot ctx nt idx
-                  collectPrevTextPairs ctx (idx - 1) ((intKey wid, snap) : acc)
-                else collectPrevTextPairs ctx (idx - 1) acc
-
--- Painted text fingerprint, not packed node text. Text inputs draw from store;
--- radio/checkbox dots follow node value in pixel mode.
-paintTextSnapshot :: Context -> NodeType -> Int -> IO Text
-paintTextSnapshot ctx nt idx = do
-  let terminal = isCellHost (ctxHostProfile ctx)
-  case nt of
-    NodeTextInput -> do
-      lbl <- getText (ctxNodeArena ctx) idx
-      value <- textInputValue ctx idx
-      focus <- textInputFocused ctx idx
-      pure (lbl <> "\US" <> textInputFieldText lbl value focus)
-    NodeSlider
-      | not terminal -> do
-          lbl <- displayText ctx nt idx
-          wid <- getWidgetId (ctxNodeArena ctx) idx
-          store <- getStore ctx
-          let val = IM.findWithDefault 0 (intKey wid) (storeFloat store)
-          pure (lbl <> "\US" <> sliderValueText val)
-      | otherwise -> displayText ctx nt idx
-    NodeRadio
-      | not terminal -> paintedMarkSnapshot ctx nt idx
-      | otherwise -> displayText ctx nt idx
-    NodeCheckbox
-      | not terminal -> paintedMarkSnapshot ctx nt idx
-      | otherwise -> displayText ctx nt idx
-    _ -> displayText ctx nt idx
-
-paintedMarkSnapshot :: Context -> NodeType -> Int -> IO Text
-paintedMarkSnapshot ctx nt idx = do
-  lbl <- displayText ctx nt idx
-  val <- getNodeValue (ctxNodeArena ctx) idx
-  pure (lbl <> "\US" <> T.pack (show (round val :: Int)))
-
 floatingPanelsInOrder :: Context -> IO [(Int, Rect)]
 floatingPanelsInOrder ctx = do
   n <- arenaCount (ctxNodeArena ctx)
@@ -255,29 +176,17 @@ writeDamage ::
   Maybe Rect ->
   IM.IntMap Rect ->
   IM.IntMap Rect ->
-  IM.IntMap Text ->
-  IM.IntMap Text ->
   [Int] ->
   IO ()
-writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFocus oldHotR oldActiveR oldFocusR oldFloatingRects oldRects oldTexts newTexts animKeys = do
+writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFocus oldHotR oldActiveR oldFocusR oldFloatingRects oldRects animKeys = do
   let Size winW winH = inputWindowSize inp
       sizeChanged =
         oldSize /= Size 0 0 && oldSize /= Size winW winH
-      commanded =
-        inputPointerHeld inp
-          || inputMousePressed inp
-          || inputMouseReleased inp
-          || inputMouseRightPressed inp
-          || inputMouseRightReleased inp
-          || inputScroll inp /= V2 0 0
-          || not (inputKeysNull (inputKeys inp))
-          || not (T.null (inputChars inp))
   newStore <- getStore ctx
   panels <- floatingPanelsInOrder ctx
   let newFloatingRects = IM.fromList panels
   newRects <- readIORef (ctxPrevRects ctx)
   modalFlip <- modalDamageFlip ctx
-  dirtyNow <- isDirty ctx
   liveAnims <- IM.filter animInProgress <$> readIORef (ctxAnimations ctx)
   settled <- readIORef (ctxAnimSettled ctx)
   writeIORef (ctxAnimSettled ctx) False
@@ -290,16 +199,17 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
   windowOpen <- hasWindowNode ctx
   let keyedMoved = keyedRectDeltas oldRects newRects
   moved <- mapM (clipDeltaToScrollViewport ctx newRects) keyedMoved
-  let settledMoved = filter significantLayoutRect moved
-      storePaintChanged = oldStore /= newStore
-      treeStoreChanged = storeIntSet oldStore /= storeIntSet newStore
-      colorClipOnly = False
+  let stripFloat s = s {storeFloat = IM.empty}
+      scrollChanged = storeFloat oldStore /= storeFloat newStore
+      onlyScrollFloatsChanged =
+        scrollChanged && stripFloat oldStore == stripFloat newStore
+      settledMoved = filter significantLayoutRect moved
       floatingChanged = oldFloatingRects /= newFloatingRects
       windowLive = winDragActive || winResizeActive
-      scrollChanged = storeFloat oldStore /= storeFloat newStore
       animLive = not (IM.null liveAnims) || settled
       keysChanged =
-        not (IM.null oldRects)
+        not onlyScrollFloatsChanged
+          && not (IM.null oldRects)
           && ( not (IM.null (IM.difference newRects oldRects))
                  || not (IM.null (IM.difference oldRects newRects))
              )
@@ -309,23 +219,23 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
           && not animLive
           && not scrollChanged
       paintOrphan = orphanAnim && animLive
-      textChanged = not (IM.null (textChangeKeys oldTexts newTexts))
+
+  requests <- getDamageRequests ctx
+  let hasReqFull = ReqFull `elem` requests
       full =
-        ((wasDirty || dirtyNow) && not colorClipOnly)
-          || sizeChanged
-          || commanded
-          || scrollChanged
-          || storePaintChanged
-          || treeStoreChanged
-          || overlayOpen
-          || modalFlip
-          || floatingChanged
-          || windowLive
-          || windowOpen
-          || paintOrphan
-          || keysChanged
-          || textChanged
-          || layoutSettle
+        hasReqFull
+          || not onlyScrollFloatsChanged
+            && ( wasDirty
+                   || sizeChanged
+                   || overlayOpen
+                   || modalFlip
+                   || floatingChanged
+                   || windowLive
+                   || windowOpen
+                   || paintOrphan
+                   || keysChanged
+                   || layoutSettle
+               )
   dmg <-
     if full
       then pure DamageFull
@@ -351,7 +261,8 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
         if missingAnim && animLive
           then pure DamageFull
           else do
-            rs <-
+            reqRs <- resolveDamageRequests ctx oldRects newRects requests
+            interactiveRs <-
               fmap concat $
                 forM ids $ \wid ->
                   if hashWidgetId wid == 0
@@ -361,17 +272,11 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
                       let rects = catMaybes [oldOf wid, newR]
                       fmap catMaybes $
                         forM rects $ \r ->
-                          clipWidgetRect ctx newRects wid r
-            let vanishedRs = IM.elems (IM.difference oldRects newRects)
-                textRs = textChangeRects oldTexts newTexts oldRects newRects
-                colorRs =
-                  storeKeyChangeRects (storeInt oldStore) (storeInt newStore) oldRects newRects
-                    ++ storeKeyChangeRects (storeFloat oldStore) (storeFloat newStore) oldRects newRects
-                    ++ storeKeyChangeRects (storeFloatList oldStore) (storeFloatList newStore) oldRects newRects
-                    ++ storeKeyChangeRects (storePoint oldStore) (storePoint newStore) oldRects newRects
-                textStoreRs =
-                  storeKeyChangeRects (storeText oldStore) (storeText newStore) oldRects newRects
-            radioStoreRs <- radioStoreChangeRects ctx oldStore newStore oldRects newRects
+                          clipWidgetRect ctx newRects wid (rectInflate defaultDamageSlop r)
+            scrollRs <-
+              if scrollChanged
+                then scrollOffsetDamage ctx oldStore newStore
+                else pure []
             animRs <-
               fmap concat $
                 forM clipKeys $ \k ->
@@ -380,30 +285,25 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
                     else
                       fmap catMaybes $
                         forM (catMaybes [IM.lookup k oldRects, IM.lookup k newRects]) $ \r ->
-                          clipDeltaToScrollViewport ctx newRects (k, r) >>= \c ->
+                          clipDeltaToScrollViewport ctx newRects (k, rectInflate defaultDamageSlop r) >>= \c ->
                             if nonzeroRect c then pure (Just c) else pure Nothing
-            backdropRs0 <- backdropRectsForInteraction ctx ids clipKeys
+            backdropRs0 <- backdropRectsForInteraction ctx ids (clipKeys ++ [k | ReqKey k _ <- requests])
             let backdropRs = map (clipRectToWindow winW winH) backdropRs0
-            let layoutRs = settledMoved
+            let layoutRs = if onlyScrollFloatsChanged then [] else settledMoved
+                vanishedRs = IM.elems (IM.difference oldRects newRects)
+                floatingRs = floatingRectDamage oldFloatingRects newFloatingRects
                 base =
                   unionRects
-                    ( rs
+                    ( reqRs
+                        ++ interactiveRs
+                        ++ scrollRs
                         ++ animRs
                         ++ backdropRs
                         ++ layoutRs
                         ++ vanishedRs
-                        ++ textRs
-                        ++ textStoreRs
-                        ++ radioStoreRs
-                        ++ colorRs
-                        ++ floatingRectDamage oldFloatingRects newFloatingRects
+                        ++ floatingRs
                     )
-                rawClip =
-                  if rectW base <= 0 || rectH base <= 0
-                    then Rect 0 0 0 0
-                    else rectInflate textClipSlop base
-                -- Retain texture is the window. A clip taller than that
-                -- stretches on blit (visible at scroll top, not bottom).
+                rawClip = base
                 clip = fromMaybe (Rect 0 0 0 0) (rectIntersect rawClip (Rect 0 0 winW winH))
                 winArea = winW * winH
             if (animLive && not (nonzeroRect clip))
@@ -414,11 +314,43 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
   writeIORef (ctxLastWindowSize ctx) (Size winW winH)
   writeIORef (ctxPrevFloatingRects ctx) newFloatingRects
   writeIORef (ctxPrevFloatingOrder ctx) (map fst panels)
-  -- Color/drag already clipped or covered by pointer-held. Drop leftover dirty Full.
-  when colorClipOnly (clearDirty ctx)
+  clearDamageRequests ctx
   when modalFlip (markDirty ctx)
   when (floatingChanged && not (IM.null oldFloatingRects && not (IM.null newFloatingRects))) $
     markDirty ctx
+
+resolveDamageRequests ::
+  Context ->
+  IM.IntMap Rect ->
+  IM.IntMap Rect ->
+  [DamageRequest] ->
+  IO [Rect]
+resolveDamageRequests ctx oldRects newRects reqs =
+  fmap concat $
+    forM reqs $ \req ->
+      case req of
+        ReqFull -> pure []
+        ReqRect r -> pure [r]
+        ReqWidget wid bounds -> resolveSingleKey ctx oldRects newRects (intKey wid) bounds
+        ReqKey k bounds -> resolveSingleKey ctx oldRects newRects k bounds
+        ReqPeers wids bounds ->
+          fmap concat $ forM wids $ \wid ->
+            resolveSingleKey ctx oldRects newRects (intKey wid) bounds
+
+resolveSingleKey ::
+  Context ->
+  IM.IntMap Rect ->
+  IM.IntMap Rect ->
+  Int ->
+  DamageBounds ->
+  IO [Rect]
+resolveSingleKey ctx oldRects newRects k bounds = do
+  let oldR = IM.lookup k oldRects
+      newR = IM.lookup k newRects
+      resolved = catMaybes [fmap (resolveDamageRect bounds) oldR, fmap (resolveDamageRect bounds) newR]
+  fmap (filter nonzeroRect) $
+    forM resolved $ \r ->
+      clipDeltaToScrollViewport ctx newRects (k, r)
 
 floatingRectDamage :: IM.IntMap Rect -> IM.IntMap Rect -> [Rect]
 floatingRectDamage old new =
@@ -455,22 +387,7 @@ clipDeltaToScrollViewport ctx newRects (k, r) = do
   pure $
     case mVp of
       Nothing -> r
-      -- Off-screen scroll children must drop out. Keeping `r` makes the
-      -- clip taller than the retain texture and the blit stretches.
       Just vp -> fromMaybe (Rect 0 0 0 0) (rectIntersect r vp)
-
-clipRectToWindow :: Float -> Float -> Rect -> Rect
-clipRectToWindow winW winH r =
-  fromMaybe (Rect 0 0 0 0) (rectIntersect r (Rect 0 0 winW winH))
-
-clipWidgetRect :: Context -> IM.IntMap Rect -> WidgetId -> Rect -> IO (Maybe Rect)
-clipWidgetRect ctx newRects wid r =
-  if hashWidgetId wid == 0
-    then pure (Just r)
-    else do
-      let k = intKey wid
-      clipped <- clipDeltaToScrollViewport ctx newRects (k, r)
-      if nonzeroRect clipped then pure (Just clipped) else pure Nothing
 
 scrollViewportForKey :: Context -> Int -> IM.IntMap Rect -> IO (Maybe Rect)
 scrollViewportForKey ctx k newRects =
@@ -498,87 +415,35 @@ findScrollAncestor na idx = do
         then pure Nothing
         else findScrollAncestor na p
 
+clipRectToWindow :: Float -> Float -> Rect -> Rect
+clipRectToWindow winW winH r =
+  fromMaybe (Rect 0 0 0 0) (rectIntersect r (Rect 0 0 winW winH))
+
+clipWidgetRect :: Context -> IM.IntMap Rect -> WidgetId -> Rect -> IO (Maybe Rect)
+clipWidgetRect ctx newRects wid r =
+  if hashWidgetId wid == 0
+    then pure (Just r)
+    else do
+      let k = intKey wid
+      clipped <- clipDeltaToScrollViewport ctx newRects (k, r)
+      if nonzeroRect clipped then pure (Just clipped) else pure Nothing
+
+scrollOffsetDamage :: Context -> WidgetStore -> WidgetStore -> IO [Rect]
+scrollOffsetDamage ctx oldStore newStore = do
+  let oldF = storeFloat oldStore
+      newF = storeFloat newStore
+      changed =
+        [ k
+        | k <- IM.keys (IM.union oldF newF)
+        , IM.findWithDefault 0 k oldF /= IM.findWithDefault 0 k newF
+        ]
+  newRects <- readIORef (ctxPrevRects ctx)
+  fmap catMaybes $
+    forM changed $ \k ->
+      scrollViewportForKey ctx k newRects
+
 nonzeroRect :: Rect -> Bool
 nonzeroRect r = rectW r > 0 && rectH r > 0
 
-textChangeKeys :: IM.IntMap Text -> IM.IntMap Text -> IM.IntMap ()
-textChangeKeys old new
-  | IM.null old = IM.empty
-  | otherwise =
-      IM.fromList
-        [ (k, ())
-        | (k, tNew) <- IM.toList new
-        , case IM.lookup k old of
-            Nothing -> True
-            Just tOld -> tOld /= tNew
-        ]
-
-preferTextSnapshot :: Text -> Text -> Text
-preferTextSnapshot _ b = b
-
 significantLayoutRect :: Rect -> Bool
 significantLayoutRect r = rectArea r >= layoutSettleMinArea
-
-radioStoreChangeRects ::
-  Context ->
-  WidgetStore ->
-  WidgetStore ->
-  IM.IntMap Rect ->
-  IM.IntMap Rect ->
-  IO [Rect]
-radioStoreChangeRects ctx oldStore newStore oldRects newRects = do
-  let changed = storeChangeKeys (storeInt oldStore) (storeInt newStore)
-  if IM.null changed
-    then pure []
-    else do
-      count <- arenaCount (ctxNodeArena ctx)
-      rs <-
-        forM [0 .. count - 1] $ \idx -> do
-          nt <- getNodeType (ctxNodeArena ctx) idx
-          if nt /= NodeRadio
-            then pure []
-            else do
-              parent <- getParent (ctxNodeArena ctx) idx
-              wid <- getWidgetId (ctxNodeArena ctx) idx
-              groupWid <- getWidgetId (ctxNodeArena ctx) parent
-              let groupKey = intKey groupWid
-              if parent >= 0 && IM.member groupKey changed
-                then
-                  let k = intKey wid
-                   in pure (catMaybes [IM.lookup k oldRects, IM.lookup k newRects])
-                else pure []
-      pure (concat rs)
-
-textChangeRects ::
-  IM.IntMap Text ->
-  IM.IntMap Text ->
-  IM.IntMap Rect ->
-  IM.IntMap Rect ->
-  [Rect]
-textChangeRects old new oldRects newRects =
-  storeKeyChangeRects old new oldRects newRects
-
-storeKeyChangeRects ::
-  Eq a =>
-  IM.IntMap a ->
-  IM.IntMap a ->
-  IM.IntMap Rect ->
-  IM.IntMap Rect ->
-  [Rect]
-storeKeyChangeRects old new oldRects newRects =
-  catMaybes
-    [ case (IM.lookup k oldRects, IM.lookup k newRects) of
-        (Just r1, Just r2) -> Just (rectUnion r1 r2)
-        (Nothing, Just r) -> Just r
-        (Just r, Nothing) -> Just r
-        (Nothing, Nothing) -> Nothing
-    | k <- IM.keys (storeChangeKeys old new)
-    ]
-
-storeChangeKeys :: Eq a => IM.IntMap a -> IM.IntMap a -> IM.IntMap ()
-storeChangeKeys old new =
-  IM.fromList
-    [ (k, ())
-    | k <- IM.keys (IM.union old new)
-    , IM.lookup k old /= IM.lookup k new
-    ]

@@ -51,6 +51,13 @@ module NanoUI.Testing
   , clearDirty
   , isDirty
   , setWakeLoop
+  , DamageRequest (..)
+  , requestDamage
+  , damageWidget
+  , damageKey
+  , damageRect
+  , damagePeers
+  , damageFull
   , getHotId
   , getFocusId
   , getPrevRect
@@ -139,6 +146,12 @@ import NanoUI.Context
   , atlasTextureId
   , clearDirty
   , ctxTheme
+  , DamageRequest (..)
+  , damageFull
+  , damageKey
+  , damagePeers
+  , damageRect
+  , damageWidget
   , decodeMessages
   , enableMeasureCache
   , getAnimationValue
@@ -155,6 +168,7 @@ import NanoUI.Context
   , reduceUpdates
   , registerImage
   , registerImages
+  , requestDamage
   , setAnimationValue
   , setHost
   , setWakeLoop

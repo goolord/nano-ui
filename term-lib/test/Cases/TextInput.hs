@@ -247,7 +247,7 @@ runTextInputDirtyTest _ failed = do
   assert failed needFocus
   _ <- runFrame ctx (idle {inputChars = "ab"}) ui
   dmg <- takeDamage ctx
-  assertEq failed dmg DamageFull
+  assert failed (not (damageIsEmpty dmg))
 
 
 

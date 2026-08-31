@@ -122,6 +122,7 @@ test-suite nano-ui-test
         ApiBoundary
         Cases
         Cases.Animation
+        Cases.Damage
         Cases.Demo
         Cases.Modal
         Cases.Scroll

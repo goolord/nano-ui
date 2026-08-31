@@ -15,9 +15,18 @@ module NanoUI
   , lerpColor
   , contrastRatio
   , ImageId (..)
+  , Damage (..)
+  , DamageBounds (..)
+  , defaultDamageSlop
+  , sliderDamageSlop
+  , haloDamageSlop
+  , resolveDamageRect
   , rectContains
+  , rectInflate
   , rectIntersect
+  , rectUnion
   , v2Add
+  , v2Sub
   -- Input
   , Input (..)
   , Key (..)
@@ -84,6 +93,11 @@ module NanoUI
   , keyed
   , keyedTag
   , withKey
+  , damageWidgetNow
+  , damageKeyNow
+  , damageRectNow
+  , damageGroupNow
+  , damageFullNow
   -- Widgets
   , Response (..)
   , Responding (..)
@@ -310,6 +324,11 @@ import NanoUI.Monad
   ( NanoUI
   , Ui
   , currentId
+  , damageFullNow
+  , damageGroupNow
+  , damageKeyNow
+  , damageRectNow
+  , damageWidgetNow
   , emit
   , keyed
   , keyedTag
@@ -361,6 +380,8 @@ import NanoUI.Style
   )
 import NanoUI.Types
   ( Color (..)
+  , Damage (..)
+  , DamageBounds (..)
   , ImageId (..)
   , Rect (..)
   , Size (..)
@@ -372,10 +393,17 @@ import NanoUI.Types
   , colorRGBA
   , colorToWord32
   , contrastRatio
+  , defaultDamageSlop
+  , haloDamageSlop
   , lerpColor
   , rectContains
+  , rectInflate
   , rectIntersect
+  , rectUnion
+  , resolveDamageRect
+  , sliderDamageSlop
   , v2Add
+  , v2Sub
   )
 import NanoUI.Widgets
   ( Clickable (..)

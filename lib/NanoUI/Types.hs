@@ -27,6 +27,11 @@ module NanoUI.Types
   , rectInflate
   , rectArea
   , Damage (..)
+  , DamageBounds (..)
+  , defaultDamageSlop
+  , sliderDamageSlop
+  , haloDamageSlop
+  , resolveDamageRect
   , damageIsEmpty
   , sliderBarCells
   , v2Add
@@ -246,6 +251,61 @@ damageIsEmpty dmg =
   case dmg of
     DamageFull -> False
     DamageClip r -> rectW r <= 0 || rectH r <= 0
+
+-- | Invalidation bounding strategy for a widget and its interaction events.
+data DamageBounds
+  = DamageSelf                              -- ^ Exact layout bounding box Rect
+  | DamageInflated !Float                   -- ^ Layout bounding box inflated by margin (focus rings, shadows, text slop)
+  | DamageExact !Rect                       -- ^ Explicit rectangle in window space
+  | DamageCustom (Rect -> Rect)             -- ^ Custom transformation on layout bounding box
+  | DamageUnion !DamageBounds !DamageBounds -- ^ Combined invalidation bounds
+  | DamageNone                              -- ^ No invalidation bounds
+
+instance Show DamageBounds where
+  show DamageSelf = "DamageSelf"
+  show (DamageInflated f) = "DamageInflated " ++ show f
+  show (DamageExact r) = "DamageExact " ++ show r
+  show (DamageCustom _) = "DamageCustom <fn>"
+  show (DamageUnion a b) = "DamageUnion (" ++ show a ++ ") (" ++ show b ++ ")"
+  show DamageNone = "DamageNone"
+
+instance Eq DamageBounds where
+  DamageSelf == DamageSelf = True
+  DamageInflated a == DamageInflated b = a == b
+  DamageExact a == DamageExact b = a == b
+  DamageUnion a1 b1 == DamageUnion a2 b2 = a1 == a2 && b1 == b2
+  DamageNone == DamageNone = True
+  _ == _ = False
+
+instance Semigroup DamageBounds where
+  (<>) = DamageUnion
+
+instance Monoid DamageBounds where
+  mempty = DamageSelf
+
+-- | Standard damage slop for text overhang, focus rings, and border anti-aliasing.
+defaultDamageSlop :: Float
+defaultDamageSlop = 4.0
+
+-- | Damage slop for slider handles that extend past track bounds.
+sliderDamageSlop :: Float
+sliderDamageSlop = 8.0
+
+-- | Damage slop for window resize halos and shadows.
+haloDamageSlop :: Float
+haloDamageSlop = 12.0
+
+-- | Resolve damage bounds against a given layout rect.
+{-# INLINE resolveDamageRect #-}
+resolveDamageRect :: DamageBounds -> Rect -> Rect
+resolveDamageRect bounds r =
+  case bounds of
+    DamageSelf -> r
+    DamageInflated pad -> rectInflate pad r
+    DamageExact exactR -> exactR
+    DamageCustom f -> f r
+    DamageUnion a b -> rectUnion (resolveDamageRect a r) (resolveDamageRect b r)
+    DamageNone -> Rect 0 0 0 0
 
 -- Terminal inline slider bar width in cells (matches WidgetText.sliderText).
 sliderBarCells :: Int
