@@ -26,7 +26,7 @@ import NanoUI.Layout.Arena
   ( DirTag (..)
   , NodeIdx
   , NodeType (NodeModal, NodeWindow)
-  , arenaCount
+  , findNodeRevM
   , getDirection
   , getNodeType
   , getParent
@@ -52,15 +52,9 @@ modalTreeOpen ctx = do
   pure (isJust top)
 
 topmostModalIdx :: Context -> IO (Maybe NodeIdx)
-topmostModalIdx ctx = do
-  count <- arenaCount (ctxNodeArena ctx)
-  go (count - 1)
-  where
-    go idx
-      | idx < 0 = pure Nothing
-      | otherwise = do
-          nt <- getNodeType (ctxNodeArena ctx) idx
-          if nt == NodeModal then pure (Just idx) else go (idx - 1)
+topmostModalIdx ctx =
+  findNodeRevM (ctxNodeArena ctx) $ \i ->
+    (== NodeModal) <$> getNodeType (ctxNodeArena ctx) i
 
 nodeInTopmostModal :: Context -> NodeIdx -> IO Bool
 nodeInTopmostModal ctx idx = do
@@ -98,21 +92,14 @@ overlayHitAllowed ctx idx mouse = do
         Just widx -> nodeInSubtree ctx idx widx
 
 topmostWindowAtMouse :: Context -> V2 -> IO (Maybe NodeIdx)
-topmostWindowAtMouse ctx mouse = do
-  count <- arenaCount (ctxNodeArena ctx)
-  go (count - 1)
-  where
-    go idx
-      | idx < 0 = pure Nothing
-      | otherwise = do
-          nt <- getNodeType (ctxNodeArena ctx) idx
-          if nt /= NodeWindow
-            then go (idx - 1)
-            else do
-              (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-              if w > 0 && h > 0 && rectContains (Rect x y w h) mouse
-                then pure (Just idx)
-                else go (idx - 1)
+topmostWindowAtMouse ctx mouse =
+  findNodeRevM (ctxNodeArena ctx) $ \idx -> do
+    nt <- getNodeType (ctxNodeArena ctx) idx
+    if nt /= NodeWindow
+      then pure False
+      else do
+        (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+        pure (w > 0 && h > 0 && rectContains (Rect x y w h) mouse)
 
 widgetOverlayAllowed :: Context -> WidgetId -> IO Bool
 widgetOverlayAllowed ctx wid = do

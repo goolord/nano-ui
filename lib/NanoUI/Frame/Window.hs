@@ -592,8 +592,7 @@ windowTitleRect ctx idx = do
 
 windowTitleHasInteractive :: Context -> NodeIdx -> V2 -> IO Bool
 windowTitleHasInteractive ctx idx mouse = do
-  count <- arenaCount (ctxNodeArena ctx)
-  mWid <- findTopWidgetUnderMouse ctx count mouse isInteractiveNode
+  mWid <- findTopWidgetUnderMouse ctx mouse isInteractiveNode
   case mWid of
     Nothing -> pure False
     Just wid -> do
