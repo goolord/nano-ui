@@ -55,7 +55,7 @@ import NanoUI.Style
   , Padding (..)
   , Sizing (..)
   )
-import NanoUI.Types (Rect (..), rectContains, rectUnion)
+import NanoUI.Types (Rect (..), rectContains, rectH, rectUnion, rectW)
 import NanoUI.Frame.Hit (scrollHitRect)
 
 parentIdx :: [Int] -> Int
@@ -99,7 +99,7 @@ instance Semigroup Response where
   a <> b =
     Response
       { rawRespId = rawRespId b
-      , rawRespRect = rectUnion (rawRespRect a) (rawRespRect b)
+      , rawRespRect = unionRespRect (rawRespRect a) (rawRespRect b)
       , rawRespHovered = rawRespHovered a || rawRespHovered b
       , rawRespPressed = rawRespPressed a || rawRespPressed b
       , rawRespClicked = rawRespClicked a || rawRespClicked b
@@ -108,6 +108,12 @@ instance Semigroup Response where
 
 instance Monoid Response where
   mempty = mkResponse (WidgetId 0) (Rect 0 0 0 0) False False False False
+
+unionRespRect :: Rect -> Rect -> Rect
+unionRespRect a b
+  | rectW a <= 0 || rectH a <= 0 = b
+  | rectW b <= 0 || rectH b <= 0 = a
+  | otherwise = rectUnion a b
 
 setClicked :: Bool -> Response -> Response
 setClicked c r = r {rawRespClicked = c}
@@ -249,7 +255,9 @@ resolveInteraction ctx inp wid = do
     mouse = inputMousePos inp
     hovered = not disabled && not blocked && maybe False (`rectContains` mouse) mrect
     pressed = hovered && inputMouseDown inp
-    clicked = hovered && inputMouseReleased inp
+  pending <- readIORef (ctxClickedId ctx)
+  let
+    clicked = (hovered && inputMouseReleased inp) || pending == wid
   pure $
     Response
       { rawRespId = wid

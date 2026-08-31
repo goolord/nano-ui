@@ -39,7 +39,7 @@ import NanoUI.Input (Input (..), Key (..), foldInputKeys, inputKeys, inputMouseD
 import NanoUI.Layout.Arena (NodeType (NodeSelect), arenaCount, findNodeRevM, getNodeType, getRect, getText, getWidgetId)
 import NanoUI.Style (Style (..), Theme (..), themeAccent)
 import NanoUI.Types (Color (..), Rect (..), V2 (..), rectContains, rectH, rectW, rectX, rectY, v2Y)
-import NanoUI.WidgetText (selectParseOptions)
+import NanoUI.WidgetText (selectOptions)
 import NanoUI.Frame.Chrome
   ( fillStyledRect
   , pushMenuShadow
@@ -109,7 +109,7 @@ finalizeSelectKeyboard ctx inp = do
                   Nothing -> pure ()
                   Just idx -> do
                     txt <- getText (ctxNodeArena ctx) idx
-                    let (_, opts) = selectParseOptions txt
+                    let (_, opts) = selectOptions txt
                         n = length opts
                     if n <= 0
                       then pure ()
@@ -195,7 +195,7 @@ finalizeSelectPick ctx inp =
                         then go (idx + 1)
                         else do
                           txt <- getText (ctxNodeArena ctx) idx
-                          let (_, opts) = selectParseOptions txt
+                          let (_, opts) = selectOptions txt
                           (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
                           let fm = ctxFontMetrics ctx
                               dropRect = selectDropRect (ctxHostProfile ctx) fm x y w h (length opts)
@@ -234,7 +234,7 @@ openSelectHit ctx count mouse store = go 0
                   (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
                   txt <- getText (ctxNodeArena ctx) idx
                   let fm = ctxFontMetrics ctx
-                      (_, opts) = selectParseOptions txt
+                      (_, opts) = selectOptions txt
                       btnRect = Rect x y w h
                       dropRect = selectDropRect (ctxHostProfile ctx) fm x y w h (length opts)
                   if rectContains btnRect mouse || rectContains dropRect mouse
@@ -260,7 +260,7 @@ findSelectUnderMouse ctx mouse = do
               let key = intKey wid
                   open = isSelectOpen store key
                   fm = ctxFontMetrics ctx
-                  (_, opts) = selectParseOptions txt
+                  (_, opts) = selectOptions txt
                   btnRect = Rect x y w h
                   dropRect = selectDropRect (ctxHostProfile ctx) fm x y w h (length opts)
               pure (rectContains btnRect mouse || (open && rectContains dropRect mouse))
@@ -364,7 +364,7 @@ drawSelectOverlays ctx inp = do
                         then go (idx + 1)
                         else do
                           txt <- getText (ctxNodeArena ctx) idx
-                          let (_, opts) = selectParseOptions txt
+                          let (_, opts) = selectOptions txt
                           (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
                           let picked = IM.findWithDefault 0 key (storeInt store)
                               itemH = selectItemH (ctxHostProfile ctx) h
@@ -432,7 +432,7 @@ collectSelectDropdownSpans ctx inp = do
                       then go (idx + 1)
                       else do
                         txt <- getText (ctxNodeArena ctx) idx
-                        let (_, opts) = selectParseOptions txt
+                        let (_, opts) = selectOptions txt
                         (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
                         let itemH = selectItemH (ctxHostProfile ctx) h
                             dropRect = selectDropRect (ctxHostProfile ctx) fm x y w h (length opts)

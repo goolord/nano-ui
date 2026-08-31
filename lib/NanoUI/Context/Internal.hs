@@ -46,6 +46,9 @@ data Context = Context
   , ctxHotId :: IORef WidgetId
   , ctxLastHotId :: IORef WidgetId
   , ctxActiveId :: IORef WidgetId
+  -- ^ Widget that released over a solved rect but missed in-UI prev-rect hits.
+  -- Consumed on the next frame's first UI pass, then cleared.
+  , ctxClickedId :: IORef WidgetId
   , ctxFocusId :: IORef WidgetId
   , ctxPrevRects :: IORef (IntMap Rect)
   , ctxPrevNodeTexts :: IORef (IntMap Text)

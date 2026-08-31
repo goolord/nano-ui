@@ -74,7 +74,7 @@ import NanoUI.WidgetText
   , treeDisplayText
   , treeLabelText
   , selectDisplayText
-  , selectParseOptions
+  , selectOptions
   , colorPickerDisplayText
   , sliderLabelText
   , textInputFieldText
@@ -186,7 +186,7 @@ displayTextRest ctx nt idx txt terminal =
       case nt of
         NodeSelect -> do
           store <- getStore ctx
-          let (lbl, opts) = selectParseOptions txt
+          let (lbl, opts) = selectOptions txt
           wid <- getWidgetId (ctxNodeArena ctx) idx
           let picked = IM.findWithDefault 0 (intKey wid) (storeInt store)
               open = isSelectOpen store (intKey wid)
@@ -202,7 +202,7 @@ displayTextRest ctx nt idx txt terminal =
           wid <- getWidgetId (ctxNodeArena ctx) idx
           let current = widgetStoreColor store wid colorPickerDefaultColor
           pure (colorPickerDisplayText txt current)
-        NodeSlider -> pure (T.takeWhile (/= '\US') txt)
+        NodeSlider -> pure (sliderLabelText txt)
         NodeTree -> do
           si <- getStyleIdx (ctxNodeArena ctx) idx
           let (_, depth, hasKids, expanded) = treeDecodeStyle si
@@ -230,7 +230,7 @@ displayTextRest ctx nt idx txt terminal =
         NodeSlider -> pure (sliderLabelText txt)
         NodeSelect -> do
           store <- getStore ctx
-          let (lbl, opts) = selectParseOptions txt
+          let (lbl, opts) = selectOptions txt
           wid <- getWidgetId (ctxNodeArena ctx) idx
           let picked = IM.findWithDefault 0 (intKey wid) (storeInt store)
               opt =
@@ -416,7 +416,7 @@ paintTabHeader da host theme styleIdx isActive style x y w h =
         clear = colorRGBA 0 0 0 0
         hasFill = bg /= clear
     if isActive
-      then case styleIdx of
+      then case styleIdx `mod` 4 of
         1 -> pushRoundedRect da rect r bg
         2 -> do
           pushRoundedRect da rect r bg
@@ -561,7 +561,7 @@ widgetVisualStyle ctx nt idx = do
                         , styleBorderWidth = 0
                         }
             | isTab ->
-                tabHeaderVisualStyle theme styleIdx (val > 0.5) isHot animT
+                tabHeaderVisualStyle theme (styleIdx `mod` 4) (val > 0.5) isHot animT
             | isTable ->
                 tableHeaderVisualStyle theme (val > 0.5)
             | not terminal && val > 0.5 ->

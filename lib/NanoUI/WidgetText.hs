@@ -1,15 +1,9 @@
 module NanoUI.WidgetText
-  ( sliderRangeSep
-  , sliderDisplayText
+  ( sliderDisplayText
   , sliderLabelText
   , sliderValueText
-  , sliderPackRange
-  , sliderPackTerminal
-  , sliderParseRange
   , sliderText
   , checkboxLabelText
-  , radioPackOption
-  , radioParseOption
   , radioLabelText
   , treeEncodeStyle
   , treeDecodeStyle
@@ -24,8 +18,7 @@ module NanoUI.WidgetText
   , textInputLabelGap
   , textInputFieldPadY
   , textInputFieldHeight
-  , selectPackOptions
-  , selectParseOptions
+  , selectOptions
   , selectLabelText
   , selectDisplayText
   , selectChevronReserve
@@ -59,36 +52,19 @@ import Data.Char (chr)
 import Data.List (find)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
-import Data.Text.Read (double, signed, decimal)
 import Data.Word (Word8)
 import NanoUI.Font (FontMetrics (..), fmLineHeight)
 import NanoUI.Icons (Icons, checkboxPrefixes, radioPrefixes, treeExpandMark, treeExpandPrefixes)
 import NanoUI.Types (Color (..), colorB, colorG, colorR, colorRGBA, sliderBarCells)
 import qualified Data.Text as T
 
-sliderRangeSep :: Text
-sliderRangeSep = T.singleton '\US'
-
-parseInt :: Text -> Int -> Int
-parseInt t fallback =
-  case signed decimal t of
-    Right (v, "") -> v
-    _ -> fallback
-
-parseFloat :: Text -> Float -> Float
-parseFloat t fallback =
-  case double t of
-    Right (v, "") -> realToFrac v
-    _ -> fallback
-
 sliderDisplayText :: Text -> Float -> Text
 sliderDisplayText lbl value = lbl <> ": " <> T.pack (show (round value :: Int))
 
 sliderLabelText :: Text -> Text
 sliderLabelText txt =
-  let bare = T.takeWhile (/= '\US') txt
-      (lbl, rest) = T.breakOn ": " bare
-   in if T.null rest then T.stripEnd (T.takeWhile (/= '[') bare) else lbl
+  let (lbl, rest) = T.breakOn ": " txt
+   in if T.null rest then T.stripEnd (T.takeWhile (/= '[') txt) else lbl
 
 sliderValueText :: Float -> Text
 sliderValueText = T.pack . show . (round :: Float -> Int)
@@ -99,67 +75,17 @@ sliderText lbl frac value =
       bar = T.replicate filled "\x2588" <> T.replicate (sliderBarCells - filled) "\x2591"
    in lbl <> " [" <> bar <> "] " <> T.pack (show (round value :: Int))
 
-sliderPackRange :: Text -> Float -> Float -> Text
-sliderPackRange lbl minV maxV =
-  lbl <> sliderRangeSep <> sliderValueText minV <> "," <> sliderValueText maxV
-
--- | Terminal slider node text: visible bar plus hidden min/max suffix after US.
-sliderPackTerminal :: Text -> Float -> Float -> Float -> Float -> Text
-sliderPackTerminal lbl frac val minV maxV =
-  sliderText lbl frac val
-    <> sliderRangeSep
-    <> sliderValueText minV
-    <> ","
-    <> sliderValueText maxV
-
-sliderParseRange :: Text -> (Text, Float, Float)
-sliderParseRange txt =
-  let bare = T.takeWhile (/= '\US') txt
-      (minV, maxV) =
-        case T.breakOn sliderRangeSep txt of
-          (_, suffix)
-            | not (T.null suffix) ->
-                case T.breakOn "," (T.drop 1 suffix) of
-                  (a, b) ->
-                    ( parseFloat a 0
-                    , parseFloat (T.drop 1 b) 100
-                    )
-          _ -> (0, 100)
-   in (sliderLabelText bare, minV, maxV)
-
 checkboxLabelText :: Text -> Text
 checkboxLabelText txt =
   case find (`T.isPrefixOf` txt) checkboxPrefixes of
     Nothing -> txt
     Just p -> T.drop (T.length p) txt
 
-radioPackOption :: Int -> Int -> Text -> Text
-radioPackOption groupKey optionIdx label =
-  T.pack (show groupKey)
-    <> sliderRangeSep
-    <> T.pack (show optionIdx)
-    <> sliderRangeSep
-    <> label
-
-radioParseOption :: Text -> (Int, Int, Text)
-radioParseOption txt =
-  case T.splitOn sliderRangeSep txt of
-    [g, i, lbl] ->
-      ( parseInt g 0
-      , parseInt i 0
-      , lbl
-      )
-    _ -> (0, 0, txt)
-
 radioLabelText :: Text -> Text
 radioLabelText txt =
-  let (_, _, raw) = radioParseOption txt
-   in stripRadioPrefixes raw
-  where
-    stripRadioPrefixes t =
-      case find (`T.isPrefixOf` t) radioPrefixes of
-        Nothing -> t
-        Just p -> T.drop (T.length p) t
+  case find (`T.isPrefixOf` txt) radioPrefixes of
+    Nothing -> txt
+    Just p -> T.drop (T.length p) txt
 
 -- | styleIdx: nodeIdx in high bits, depth in 0-7, hasKids bit 8, expanded bit 9.
 treeEncodeStyle :: Int -> Int -> Bool -> Bool -> Int
@@ -238,18 +164,14 @@ textInputDisplayText :: Text -> Text -> Bool -> Text
 textInputDisplayText lbl value focused =
   textInputFieldText lbl value focused
 
-selectPackOptions :: Text -> [Text] -> Text
-selectPackOptions lbl opts =
-  T.intercalate sliderRangeSep (lbl : opts)
-
-selectParseOptions :: Text -> (Text, [Text])
-selectParseOptions txt =
-  case T.splitOn sliderRangeSep txt of
+selectOptions :: Text -> (Text, [Text])
+selectOptions txt =
+  case T.splitOn "\n" txt of
     [] -> ("", [])
     (lbl : rest) -> (lbl, rest)
 
 selectLabelText :: Text -> Text
-selectLabelText txt = fst (selectParseOptions txt)
+selectLabelText txt = fst (selectOptions txt)
 
 selectDisplayText :: Text -> Text -> Text
 selectDisplayText lbl opt = lbl <> ": " <> opt

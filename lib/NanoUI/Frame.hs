@@ -186,6 +186,8 @@ runFrameEff unlift ctx inp ui = do
   beginFrameModal ctx
   writeIORef (ctxEscapeConsumed ctx) False
   result0 <- unlift (runUi ctx inp ui)
+  -- Pending click is one-shot. Clear before a mirror rebuild so toggles do not fire twice.
+  writeIORef (ctxClickedId ctx) (WidgetId 0)
   storeMid <- getStore ctx
   result <-
     if mirrorStoresChanged oldStore storeMid

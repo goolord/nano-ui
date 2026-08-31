@@ -18,7 +18,6 @@ module NanoUI.Frame.Redraw
 
 import Data.IORef (readIORef)
 import Data.Maybe (isJust)
-import qualified Data.IntMap.Strict as IM
 import NanoUI.Context
   ( Context (..)
   , TextInputMenu (..)
@@ -43,7 +42,7 @@ import NanoUI.Layout.Arena
   , isWidgetNode
   )
 import NanoUI.Types (Rect (..), V2 (..), rectContains)
-import NanoUI.WidgetText (selectParseOptions)
+import NanoUI.WidgetText (selectOptions)
 import NanoUI.Frame.Hit (findNodeByWidgetId, overlayHitAllowed)
 import NanoUI.Frame.Select (selectDropRect)
 
@@ -134,7 +133,7 @@ openSelectOwnerAt ctx mouse = do
                   else do
                     txt <- getText (ctxNodeArena ctx) idx
                     (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-                    let (_, opts) = selectParseOptions txt
+                    let (_, opts) = selectOptions txt
                         dropRect = selectDropRect (ctxHostProfile ctx) (ctxFontMetrics ctx) x y w h (length opts)
                     if rectContains dropRect mouse
                       then pure (Just wid)
@@ -181,19 +180,15 @@ floatingPanelActive ctx = do
 -- Floating window overlay (debug HUD). Prev floating rects persist across idle frames.
 debugPanelOpen :: Context -> IO Bool
 debugPanelOpen ctx = do
-  floating <- readIORef (ctxPrevFloatingRects ctx)
-  if not (IM.null floating)
-    then pure True
-    else do
-      count <- arenaCount (ctxNodeArena ctx)
-      let go idx
-            | idx >= count = pure False
-            | otherwise = do
-                nt <- getNodeType (ctxNodeArena ctx) idx
-                if nt == NodeWindow
-                  then pure True
-                  else go (idx + 1)
-      go 0
+  count <- arenaCount (ctxNodeArena ctx)
+  let go idx
+        | idx >= count = pure False
+        | otherwise = do
+            nt <- getNodeType (ctxNodeArena ctx) idx
+            if nt == NodeWindow
+              then pure True
+              else go (idx + 1)
+  go 0
 
 hoverWouldChange :: Context -> Input -> IO Bool
 hoverWouldChange ctx inp = do

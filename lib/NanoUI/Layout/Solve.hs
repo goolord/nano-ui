@@ -81,14 +81,13 @@ import NanoUI.WidgetText
   , treeMeasureLabel
   , selectDisplayText
   , selectChevronReserve
-  , selectParseOptions
+  , selectOptions
   , sliderLabelText
-  , sliderParseRange
+  , sliderValueText
   , textInputFieldHeight
   , textInputLabelGap
   , textInputMinWidth
   , textInputPlaceholder
-  , sliderValueText
   , isTableHeaderText
   , buttonDisplayText
   )
@@ -307,20 +306,13 @@ measureWidget na host fm measure idx = do
   (tw, th, extraW, extraH) <-
     case nt of
       NodeSlider -> do
-        let lbl =
-              if T.null txt
-                then " "
-                else sliderLabelText txt
-            (_, minV, maxV) = sliderParseRange txt
+        let lbl = if T.null txt then " " else sliderLabelText txt
         (lw, lh) <- measure lbl
-        (vwMin, _) <- measure (sliderValueText minV)
-        (vwMax, _) <- measure (sliderValueText maxV)
-        let vw = max vwMin vwMax
+        (vw, _) <- measure (sliderValueText 100)
         let trackExtra =
               if isCellHost host
                 then fmLineHeight fm * 0.35
                 else 18
-            -- Min width for column sizing; Grow still expands in positionNode.
             contentW = max lw vw
         pure (contentW, lh, 0, trackExtra)
       NodeCheckbox -> do
@@ -342,7 +334,7 @@ measureWidget na host fm measure idx = do
             body = if isCellHost host then treeMeasureLabel depth lbl else lbl
         measureMarkedWidget host fm measure body (treeRowLeading host fm depth)
       NodeSelect -> do
-        let (lbl, opts) = selectParseOptions txt
+        let (lbl, opts) = selectOptions txt
             choices = if null opts then [""] else opts
         dims <- mapM (measure . selectDisplayText lbl) choices
         let (mw, mh) =

@@ -11,13 +11,9 @@ import Effectful (Eff, type (:>))
 import qualified Data.IntMap.Strict as IM
 import NanoUI.ColorPicker
   ( ColorPickerGeom (..)
-  , colorPickerDragHue
-  , colorPickerDragSv
   , colorPickerGeom
   , colorPickerHueHitRect
   , clampHue
-  , hueFromMouse
-  , svFromMouse
   , widgetStoreColor
   , widgetStoreHue
   , widgetStoreSv
@@ -30,25 +26,16 @@ import NanoUI.Context
   , pairList
   , registerFocusable
   , setStore
-  , slotDrag
-  , slotKey
   )
 import NanoUI.Id (WidgetId (..), hashWidgetId)
-import NanoUI.Input
-  ( Input (..)
-  , Key (..)
-  , foldInputKeys
-  , inputKeys
-  , inputMouseDown
-  , inputMousePos
-  , inputMousePressed
-  )
+import NanoUI.Input (Input (..), inputMouseDown, inputMousePressed)
 import NanoUI.Layout.Arena (NodeType (..))
-import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO)
+import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
 import NanoUI.Style (defaultLayout, fillW)
-import NanoUI.Types (Color (..), Rect (..), clamp01, colorToWord32, hsvToRgb, rectContains, rgbToHsv)
+import NanoUI.Types (Color (..), Rect (..), clamp01, colorToWord32, hsvToRgb, rgbToHsv)
 import NanoUI.WidgetText (colorPickerLabelText)
 import NanoUI.Frame.Hit (scrollHitRect)
+import NanoUI.Widgets.Behavior (DragAxis (..), KeyNav (..), useDrag1D, useKeyNav)
 import NanoUI.Widgets.Node (Response (..), addWidget, setChanged)
 
 colorPicker :: (Ui :> es) => Text -> Color -> Eff es (Response, Color)
@@ -70,121 +57,71 @@ colorPicker lbl initial = do
                 , storeFloatList = IM.insert key (pairList (sInit, vInit)) (storeFloatList store0)
                 }
             )
-  let nodeText = colorPickerLabelText lbl
-  resp <- addWidget wid NodeColorPicker nodeText 0 (fillW defaultLayout)
+  resp <- addWidget wid NodeColorPicker (colorPickerLabelText lbl) 0 (fillW defaultLayout)
   store <- uiIO (getStore ctx)
   let current = widgetStoreColor store wid initial
       host = ctxHostProfile ctx
       fm = ctxFontMetrics ctx
-      drag0 = IM.findWithDefault 0 (slotKey slotDrag key) (storeInt store)
   active <- uiIO (readIORef (ctxActiveId ctx))
-  focus <- uiIO (readIORef (ctxFocusId ctx))
   mrect <- uiIO (scrollHitRect ctx wid)
   blocked <- uiIO (readIORef (ctxLastPointerBlocked ctx))
-  let mouse = inputMousePos inp
-      geom =
-        case mrect of
-          Just (Rect x y w h) -> colorPickerGeom host fm x y w h
-          Nothing -> colorPickerGeom host fm 0 0 0 0
-      sv = cpgSv geom
-      hueRect = cpgHue geom
-      svHit = not blocked && rectContains sv mouse
-      hueHit = not blocked && rectContains (colorPickerHueHitRect hueRect) mouse
+  let geom = maybe (colorPickerGeom host fm 0 0 0 0) (\(Rect x y w h) -> colorPickerGeom host fm x y w h) mrect
+      empty = Rect 0 0 0 0
       isActive = active == wid
       heldByOther =
         inputMouseDown inp
           && not (inputMousePressed inp)
           && hashWidgetId active /= 0
           && not isActive
-      down = inputMouseDown inp
-      drag =
-        if not down || blocked
-          then 0
-          else
-            if drag0 /= 0
-              then drag0
-              else
-                if heldByOther
-                  then 0
-                  else
-                    if svHit
-                      then colorPickerDragSv
-                      else if hueHit then colorPickerDragHue else 0
+      svRect = if blocked || heldByOther then empty else cpgSv geom
+      hueRect = if blocked || heldByOther then empty else colorPickerHueHitRect (cpgHue geom)
       h0 = widgetStoreHue store wid initial
       (s0, v0) = widgetStoreSv store wid initial
-      (draggedHue, draggedS, draggedV) =
-        if drag == colorPickerDragSv
-          then
-            let (s, v) = svFromMouse sv mouse
-             in (h0, s, v)
-          else
-            if drag == colorPickerDragHue
-              then (hueFromMouse hueRect mouse, s0, v0)
-              else (h0, s0, v0)
-      dragged = hsvToRgb draggedHue draggedS draggedV
-  when (down && drag /= 0 && not isActive) $
-    uiIO $ writeIORef (ctxActiveId ctx) wid
-  when ((not down || blocked) && isActive) $
-    uiIO $ writeIORef (ctxActiveId ctx) (WidgetId 0)
-  when (drag /= drag0) $
-    uiIO $ do
-      st <- getStore ctx
-      setStore
-        ctx
-        ( st
-            { storeInt =
-                if drag == 0
-                  then IM.delete (slotKey slotDrag key) (storeInt st)
-                  else IM.insert (slotKey slotDrag key) drag (storeInt st)
-            }
-        )
-  when (dragged /= current || draggedHue /= h0 || draggedS /= s0 || draggedV /= v0) $
+  (sDrag, sA) <- withKey ("s" :: Text) (useDrag1D DragAxisX 0 1 s0 svRect)
+  (vDrag, vA) <- withKey ("v" :: Text) (useDrag1D DragAxisY 1 0 v0 svRect)
+  let svA = sA || vA
+  (hDrag, hA) <- withKey ("hue" :: Text) (useDrag1D DragAxisX 0 360 h0 (if svA then empty else hueRect))
+  let dragging = svA || hA
+      nextHue = if hA then hDrag else h0
+      nextS = if sA then sDrag else s0
+      nextV = if vA then vDrag else v0
+      dragged = hsvToRgb nextHue nextS nextV
+  when (dragging && not isActive) $ uiIO $ writeIORef (ctxActiveId ctx) wid
+  when ((not dragging || blocked) && isActive) $ uiIO $ writeIORef (ctxActiveId ctx) (WidgetId 0)
+  when (dragging && (dragged /= current || nextHue /= h0 || nextS /= s0 || nextV /= v0)) $
     uiIO $ do
       st <- getStore ctx
       setStore
         ctx
         ( st
             { storeInt = IM.insert key (fromIntegral (colorToWord32 dragged)) (storeInt st)
-            , storeFloat = IM.insert key draggedHue (storeFloat st)
-            , storeFloatList = IM.insert key (pairList (draggedS, draggedV)) (storeFloatList st)
+            , storeFloat = IM.insert key nextHue (storeFloat st)
+            , storeFloatList = IM.insert key (pairList (nextS, nextV)) (storeFloatList st)
             }
         )
-  let next = if drag /= 0 then dragged else current
-  when (focus == wid) $
-    uiIO $ applyColorPickerKeys ctx wid next inp
+  nav <- useKeyNav wid
+  when (knLeft nav || knRight nav || knUp nav || knDown nav) $
+    uiIO $ applyColorPickerKeys ctx wid current nav
   store1 <- uiIO (getStore ctx)
   let final = widgetStoreColor store1 wid initial
   pure (setChanged (final /= initial) resp, final)
 
-applyColorPickerKeys :: Context -> WidgetId -> Color -> Input -> IO ()
-applyColorPickerKeys ctx wid current inp =
-  let keys = inputKeys inp
-      (wantLeft, wantRight, wantUp, wantDown) =
-        foldInputKeys
-          ( \(l, r, u, d) k ->
-              ( l || k == KeyLeft
-              , r || k == KeyRight
-              , u || k == KeyUp
-              , d || k == KeyDown
-              )
-          )
-          (False, False, False, False)
-          keys
-   in when (wantLeft || wantRight || wantUp || wantDown) $ do
-        store <- getStore ctx
-        let h = widgetStoreHue store wid current
-            (s, v) = widgetStoreSv store wid current
-            stepHue = if wantLeft then -6 else if wantRight then 6 else 0
-            stepVal = if wantUp then 0.05 else if wantDown then -0.05 else 0
-            nextHue = clampHue (if stepHue /= 0 then h + stepHue else h)
-            nextV = clamp01 (v + stepVal)
-            next = hsvToRgb nextHue s nextV
-        when (next /= current || nextHue /= h || nextV /= v) $
-          setStore
-            ctx
-            ( store
-                { storeInt = IM.insert (intKey wid) (fromIntegral (colorToWord32 next)) (storeInt store)
-                , storeFloat = IM.insert (intKey wid) nextHue (storeFloat store)
-                , storeFloatList = IM.insert (intKey wid) (pairList (s, nextV)) (storeFloatList store)
-                }
-            )
+applyColorPickerKeys :: Context -> WidgetId -> Color -> KeyNav -> IO ()
+applyColorPickerKeys ctx wid current nav = do
+  store <- getStore ctx
+  let h = widgetStoreHue store wid current
+      (s, v) = widgetStoreSv store wid current
+      stepHue = if knLeft nav then -6 else if knRight nav then 6 else 0
+      stepVal = if knUp nav then 0.05 else if knDown nav then -0.05 else 0
+      nextHue = clampHue (if stepHue /= 0 then h + stepHue else h)
+      nextV = clamp01 (v + stepVal)
+      next = hsvToRgb nextHue s nextV
+  when (next /= current || nextHue /= h || nextV /= v) $
+    setStore
+      ctx
+      ( store
+          { storeInt = IM.insert (intKey wid) (fromIntegral (colorToWord32 next)) (storeInt store)
+          , storeFloat = IM.insert (intKey wid) nextHue (storeFloat store)
+          , storeFloatList = IM.insert (intKey wid) (pairList (s, nextV)) (storeFloatList store)
+          }
+      )

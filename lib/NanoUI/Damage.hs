@@ -229,6 +229,16 @@ floatingPanelsInOrder ctx = do
 floatingPanelRects :: Context -> IO (IM.IntMap Rect)
 floatingPanelRects ctx = IM.fromList <$> floatingPanelsInOrder ctx
 
+hasWindowNode :: Context -> IO Bool
+hasWindowNode ctx = do
+  n <- arenaCount (ctxNodeArena ctx)
+  let go i
+        | i >= n = pure False
+        | otherwise = do
+            nt <- getNodeType (ctxNodeArena ctx) i
+            if nt == NodeWindow then pure True else go (i + 1)
+  go 0
+
 writeDamage ::
   Context ->
   Input ->
@@ -276,6 +286,7 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
         isNothing <$> getPrevRectByKey ctx k
   winDragActive <- isJust <$> readIORef (ctxWindowDrag ctx)
   winResizeActive <- isJust <$> readIORef (ctxWindowResize ctx)
+  windowOpen <- hasWindowNode ctx
   let keyedMoved = keyedRectDeltas oldRects newRects
   moved <- mapM (clipDeltaToScrollViewport ctx newRects) keyedMoved
   let settledMoved = filter significantLayoutRect moved
@@ -283,10 +294,7 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
       treeStoreChanged = storeIntSet oldStore /= storeIntSet newStore
       colorClipOnly = False
       floatingChanged = oldFloatingRects /= newFloatingRects
-      windowKeys = IM.keys (IM.union oldFloatingRects newFloatingRects)
       windowLive = winDragActive || winResizeActive
-      windowClipRs =
-        catMaybes [IM.lookup k newFloatingRects | k <- windowKeys]
       scrollChanged = storeFloat oldStore /= storeFloat newStore
       animLive = not (IM.null liveAnims) || settled
       keysChanged =
@@ -312,6 +320,7 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
           || modalFlip
           || floatingChanged
           || windowLive
+          || windowOpen
           || paintOrphan
           || keysChanged
           || textChanged
@@ -385,7 +394,6 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
                         ++ textStoreRs
                         ++ radioStoreRs
                         ++ colorRs
-                        ++ windowClipRs
                         ++ floatingRectDamage oldFloatingRects newFloatingRects
                     )
                 rawClip =

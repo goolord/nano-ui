@@ -61,11 +61,8 @@ module NanoUI.Widgets
   , textInputText
   , textInputDisplayText
   , textInputTerminalText
-  , selectPackOptions
   , selectLabelText
-  , selectParseOptions
-  , radioPackOption
-  , radioParseOption
+  , selectOptions
   , radioLabelText
   , colorPickerLabelText
   , colorPickerDisplayText
@@ -120,7 +117,7 @@ import NanoUI.Icons (checkboxMark)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (inputMouseDown, inputMousePos, inputMousePressed)
 import NanoUI.Layout.Arena (NodeType (..))
-import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO)
+import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
 import NanoUI.Store
   ( WidgetStore (..)
   , boolInt
@@ -146,13 +143,10 @@ import NanoUI.Types
   ( Color (..)
   , ImageId (..)
   , Rect (..)
-  , V2 (..)
   , colorToWord32
   , rectContains
-  , rectW
-  , rectX
-  , v2X
   )
+import NanoUI.Widgets.Behavior (DragAxis (..), useDrag1D)
 import NanoUI.WidgetText
   ( checkboxLabelText
   , colorPickerDisplayText
@@ -160,15 +154,10 @@ import NanoUI.WidgetText
   , colorPickerLabelText
   , colorPickerToHex
   , radioLabelText
-  , radioPackOption
-  , radioParseOption
   , selectLabelText
-  , selectPackOptions
-  , selectParseOptions
+  , selectOptions
   , sliderDisplayText
   , sliderLabelText
-  , sliderPackRange
-  , sliderPackTerminal
   , sliderText
   , sliderValueText
   , textInputDisplayText
@@ -380,21 +369,12 @@ sliderEx layout lbl minV maxV initial = do
     fm = ctxFontMetrics ctx
     nodeText =
       if isCellHost host
-        then sliderPackTerminal lbl frac current minV maxV
-        else sliderPackRange lbl minV maxV
+        then sliderText lbl frac current
+        else lbl
   resp <- addWidget wid NodeSlider nodeText frac layout
   active <- uiIO (readIORef (ctxActiveId ctx))
   blocked <- uiIO (readIORef (ctxLastPointerBlocked ctx))
-  trackHover <- uiIO $ do
-    if blocked
-      then pure False
-      else do
-        mrect <- scrollHitRect ctx wid
-        pure $
-          case mrect of
-            Nothing -> False
-            Just (Rect x y w h) ->
-              rectContains (sliderTrackBounds host fm lbl x y w h) (inputMousePos inp)
+  mrect <- uiIO (scrollHitRect ctx wid)
   let
     isActive = active == wid
     heldByOther =
@@ -402,42 +382,18 @@ sliderEx layout lbl minV maxV initial = do
         && not (inputMousePressed inp)
         && hashWidgetId active /= 0
         && not isActive
-    pressed =
-      inputMouseDown inp
-        && not blocked
-        && (isActive || (trackHover && not heldByOther))
-  when (blocked && isActive)
-    $ uiIO
-    $ writeIORef (ctxActiveId ctx) (WidgetId 0)
-  val <-
-    uiIO $ do
-      mrect <- scrollHitRect ctx wid
-      let
-        dragFrac =
-          case mrect of
-            Nothing -> frac
-            Just (Rect x y w h) ->
-              let
-                track = sliderTrackBounds host fm lbl x y w h
-                tx = rectX track
-                tw = rectW track
-                px = v2X (inputMousePos inp)
-                f = (px - tx) / max tw 1
-               in
-                max 0 (min 1 f)
-        computed = minV + dragFrac * (maxV - minV)
-      if pressed then pure computed else pure current
-  when (pressed && trackHover && not isActive)
-    $ uiIO
-    $ writeIORef (ctxActiveId ctx) wid
-  when (not (inputMouseDown inp) && isActive)
-    $ uiIO
-    $ writeIORef (ctxActiveId ctx) (WidgetId 0)
-  let
-    finalVal = if pressed then val else current
-  when (finalVal /= current)
-    $ uiIO
-    $ setStore ctx (store {storeFloat = IM.insert key finalVal (storeFloat store)})
+    track0 =
+      case mrect of
+        Just (Rect x y w h) -> sliderTrackBounds host fm lbl x y w h
+        Nothing -> Rect 0 0 0 0
+    track = if blocked || heldByOther then Rect 0 0 0 0 else track0
+  (dragged, dragging) <- withKey ("drag" :: Text) (useDrag1D DragAxisX minV maxV current track)
+  when (dragging && not isActive) $ uiIO $ writeIORef (ctxActiveId ctx) wid
+  when ((not dragging || blocked) && isActive) $
+    uiIO $ writeIORef (ctxActiveId ctx) (WidgetId 0)
+  let finalVal = if dragging then dragged else current
+  when (finalVal /= current) $
+    uiIO $ setStore ctx (store {storeFloat = IM.insert key finalVal (storeFloat store)})
   pure (setChanged (finalVal /= current) resp, finalVal)
 
 textInput :: Ui :> es => Text -> Text -> Eff es (Response, Text)
@@ -495,7 +451,7 @@ select lbl options initial = do
   let
     current = IM.findWithDefault initial key (storeInt store0)
     clamped = max 0 (min (length opts - 1) current)
-    nodeText = selectPackOptions lbl opts
+    nodeText = T.intercalate "\n" (lbl : opts)
   when (not (IM.member key (storeInt store0)))
     $ uiIO
     $ setStore ctx (store0 {storeInt = IM.insert key clamped (storeInt store0)})
