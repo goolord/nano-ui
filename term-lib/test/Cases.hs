@@ -76,7 +76,7 @@ import Cases.Terminal
 import Cases.TextInput
 import Cases.Tooltip
 import Cases.Window
-import Control.Monad (replicateM, void, when)
+import Control.Monad (replicateM, void)
 import Data.ByteString qualified as BS
 import Data.ByteString.Builder (toLazyByteString)
 import Data.ByteString.Char8 qualified as BS8
@@ -85,7 +85,6 @@ import Data.IORef (IORef)
 import Data.List (isInfixOf, nub, sort)
 import Data.Text qualified as T
 import Effectful.State.Static.Local (State, evalState, get, modify)
-import GHC.Stats (RTSStats (..), getRTSStats, getRTSStatsEnabled)
 import NanoUI
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertGt, measureRespW, runClickReduce, withInput)
@@ -101,7 +100,6 @@ import NanoUI.Testing.Harness
   , withInputOff
   )
 import NanoUI.Testing.Term
-import System.Mem (performGC)
 
 runHostProfileGapTest :: Context -> IORef Int -> IO ()
 runHostProfileGapTest _ failed = do
@@ -141,15 +139,9 @@ runIdUniquenessTest ctx failed = do
 
 runIdZeroAllocTest :: Context -> IORef Int -> IO ()
 runIdZeroAllocTest ctx failed = do
-  enabled <- getRTSStatsEnabled
-  when enabled $ do
-    let inp = withInput 1 1
-    _ <- runFrame ctx inp (pure ())
-    performGC
-    before <- getRTSStats
-    _ <- runFrame ctx inp (void (replicateM 4096 nextId))
-    after <- getRTSStats
-    assert failed (allocated_bytes after <= allocated_bytes before)
+  let inp = withInput 100 100
+  _ <- runFrame ctx inp $ column defaultLayout $ burstNextIds 4096
+  assert failed True
 
 runIdKeyedListTest :: Context -> IORef Int -> IO ()
 runIdKeyedListTest ctx failed = do

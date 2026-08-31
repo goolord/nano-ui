@@ -38,7 +38,7 @@ common rts-options
         "-with-rtsopts=-N --nonmoving-gc -qb0 -T -I0"
 
 common test-rts-options
-    ghc-options: -rtsopts -threaded "-with-rtsopts=-A8m -H64m -T"
+    ghc-options: -rtsopts -threaded "-with-rtsopts=-A8m -H64m -K128m -T"
 
 common warnings
   ghc-options:

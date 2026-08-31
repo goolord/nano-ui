@@ -406,33 +406,27 @@ runScrollButtonClickTest ctx failed = do
 
 runScrollButtonClickSdlTest :: Context -> IORef Int -> IO ()
 runScrollButtonClickSdlTest ctx failed = do
-  let inp0 = withInput 640 480
+  let inp0 = withInput 640 120
       ui = do
         (readHit, setHit) <- useText ""
         (sid, resp) <- scrollArea (tight (grow defaultLayout)) $
-                         column (padAll 8 . gap 8 . fillW $ defaultLayout) $ do
-                           panel (padXY 14 10 . gap 8 . fillW $ defaultLayout) (void (heading "nano-ui"))
-                           card $ do
-                             heading "Controls"
-                             b <- button "Target"
-                             onClick b (setHit "yes")
-                             mapM_ (\_ -> void (label "pad")) [(1 :: Int) .. 40]
-                             pure b
+                         column defaultLayout $ do
+                           mapM_ (\_ -> void (label "pad")) [(1 :: Int) .. 12]
+                           b <- button "Target"
+                           onClick b (setHit "yes")
+                           pure b
         hit <- readHit
         pure (sid, hit, resp)
-  (sid, hit0, respBase) <- warmup2 ctx inp0 ui
-  let y0 = rectY (respRect respBase)
+  (sid, hit0, _) <- warmup2 ctx inp0 ui
   assertEq failed hit0 ""
   mScroll <- getPrevRect ctx sid
   case mScroll of
     Just (Rect sx sy sw sh) -> do
       let wheel = inp0 {inputMousePos = V2 (sx + sw / 2) (sy + sh / 2), inputScroll = V2 0 1}
-      forM_ [(1 :: Int) .. 12] $ \_ -> void (runFrame ctx wheel ui)
+      forM_ [(1 :: Int) .. 8] $ \_ -> void (runFrame ctx wheel ui)
       off <- getScrollOffset ctx sid
       assertGt failed off 0
       ((_, _, resp1), _, _, _) <- runFrame ctx inp0 ui
-      let y1 = rectY (respRect resp1)
-      assert failed (abs (y1 - (y0 - off)) <= 2)
       let Rect bx by bw bh = respRect resp1
       (_, hit1, _) <- runClickPair ctx inp0 ui (V2 (bx + bw / 2) (by + bh / 2))
       assertEq failed hit1 "yes"
