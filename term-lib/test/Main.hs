@@ -200,8 +200,10 @@ testSpecs =
   , TestSpec "context-menu-pick" False runContextMenuPickTest
   , TestSpec "context-menu-area" False runContextMenuAreaTest
   , TestSpec "context-menu-spans" False runContextMenuSpansTest
+  , TestSpec "context-menu-scroll-pos" False runContextMenuScrollPosTest
   , TestSpec "tooltip-hover" False runTooltipHoverTest
   , TestSpec "tooltip-widget" False runTooltipWidgetTest
   , TestSpec "tooltip-spans" False runTooltipSpansTest
   , TestSpec "tooltip-id-stable" False runTooltipIdStableTest
+  , TestSpec "tooltip-scroll-pos" False runTooltipScrollPosTest
   ]

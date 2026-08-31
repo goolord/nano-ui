@@ -33,6 +33,7 @@ import NanoUI.Layout.Arena
   , getParent
   , getRect
   , getWidgetId
+  , isFloatingNode
   , isScrollNode
   , lookupNodeByKey
   , naIndex
@@ -122,18 +123,23 @@ widgetIdInModal ctx wid = do
     Nothing -> pure False
     Just idx -> nodeInTopmostModal ctx idx
 
+-- Prev rects are layout space. Floating nodes are window space after placePopups.
 ancestorScrollShift :: Context -> NodeIdx -> IO (Float, Float)
 ancestorScrollShift ctx idx = go idx (0, 0)
   where
     go i (sx, sy)
       | i <= 0 = pure (sx, sy)
       | otherwise = do
-          p <- getParent (ctxNodeArena ctx) i
-          if p < 0
+          nt <- getNodeType (ctxNodeArena ctx) i
+          if isFloatingNode nt
             then pure (sx, sy)
             else do
-              (sx', sy') <- parentScrollShift ctx p (sx, sy)
-              go p (sx', sy')
+              p <- getParent (ctxNodeArena ctx) i
+              if p < 0
+                then pure (sx, sy)
+                else do
+                  (sx', sy') <- parentScrollShift ctx p (sx, sy)
+                  go p (sx', sy')
 
 -- Prev rects are stored in layout space. Shift by live scroll before hit tests.
 scrollHitRect :: Context -> WidgetId -> IO (Maybe Rect)

@@ -12,7 +12,7 @@ module NanoUI.Frame.Scroll
   ) where
 
 
-import Control.Monad (forM_, void, when)
+import Control.Monad (forM_, unless, void, when)
 import Data.IORef (readIORef, writeIORef)
 import NanoUI.Context (Context (..), getScrollOffset, setScrollOffset)
 import NanoUI.Draw (DrawArena, Layer (..), beginLayer, currentLayer, pushRect, pushRoundedRect)
@@ -37,6 +37,7 @@ import NanoUI.Layout.Arena
   , getStyleIdx
   , getWidgetId
   , isContainerNode
+  , isFloatingNode
   , isScrollNode
   , setRect
   )
@@ -72,10 +73,12 @@ applyScrollOffsets ctx = do
 shiftDescendants :: Context -> NodeIdx -> Float -> Float -> IO ()
 shiftDescendants ctx idx dx dy =
   forChildNodes_ (ctxNodeArena ctx) idx $ \ci -> do
-    (x, y, w, h) <- getRect (ctxNodeArena ctx) ci
-    setRect (ctxNodeArena ctx) ci (x + dx) (y + dy) w h
     nt <- getNodeType (ctxNodeArena ctx) ci
-    when (isContainerNode nt) (shiftDescendants ctx ci dx dy)
+    -- Floating nodes already sit in window space from placePopups/placeWindows.
+    unless (isFloatingNode nt) $ do
+      (x, y, w, h) <- getRect (ctxNodeArena ctx) ci
+      setRect (ctxNodeArena ctx) ci (x + dx) (y + dy) w h
+      when (isContainerNode nt) (shiftDescendants ctx ci dx dy)
 
 updateScrollWheel :: Context -> Input -> IO ()
 updateScrollWheel ctx inp = do
