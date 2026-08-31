@@ -64,6 +64,7 @@ module NanoUI.Widgets.Combinators
   , resolvedWidth
   , colSizing
   , colBoxLayout
+  , distributeColWidths
   , writeColW
   , finishTable
   )
@@ -83,7 +84,7 @@ import Data.Vector qualified as V
 import Effectful (Eff, type (:>))
 import qualified Data.IntMap.Strict as IM
 import NanoUI.Context (Context (..), bumpMirror, getPrevRect, getScrollOffset, getStore, intKey, markDirty, setScrollOffset, setStore)
-import NanoUI.Font (measureText)
+import NanoUI.Font (labelContentInset, stripWidgetMarkers, textDisplayWidth)
 import NanoUI.Frame.Hit (findNodeByWidgetId)
 import NanoUI.Host (isCellHost)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
@@ -129,7 +130,7 @@ import NanoUI.Widgets.Node
 gridColumns :: (Ui :> es) => [Int] -> [Layout] -> [Eff es ()] -> Eff es ()
 gridColumns keys layouts cells =
   void $
-    row (tight . fillW $ defaultLayout {layoutGap = 0}) $
+    row (tight $ defaultLayout {layoutGap = 0}) $
       mapM_
         ( \(n, (k, lay, cell)) -> do
             when (n > 0) $ void separator
@@ -469,19 +470,20 @@ tableSplitPanes ::
   (Ui :> es) =>
   WidgetId ->
   WidgetId ->
+  WidgetId ->
   Float ->
   Float ->
   [Int] ->
   [Int] ->
   [row] ->
   [row] ->
-  (Int -> Layout) ->
   (Int -> Layout) ->
   (Int -> Eff es Response) ->
   (Int -> row -> Int -> Eff es ()) ->
   Eff es [(Int, Response)]
-tableSplitPanes vWid hWid rowMinH hChromeH frozenIdx unfrozenIdx pinned scrollRows itemLay colBox renderHeader renderCell =
-  panel (tight . fillW . fillH $ defaultLayout) $
+tableSplitPanes tableWid vWid hWid rowMinH hChromeH frozenIdx unfrozenIdx pinned scrollRows colBox renderHeader renderCell =
+  panel (tight . fillW . fillH $ defaultLayout) $ do
+    tagContainer tableWid
     row (tight . fillW . fillH $ defaultLayout {layoutGap = 0}) $ do
       frozenHs <-
         if null frozenIdx
@@ -493,7 +495,7 @@ tableSplitPanes vWid hWid rowMinH hChromeH frozenIdx unfrozenIdx pinned scrollRo
       pure (frozenHs ++ unfrozenHs)
  where
   freezeR = length pinned
-  minSum idxs = sum (map (layoutMinW . itemLay) idxs) + fromIntegral (max 0 (length idxs - 1))
+  minSum idxs = sum (map (layoutMinW . colBox) idxs) + fromIntegral (max 0 (length idxs - 1))
   vLay fill =
     let base = tight . fillH $ defaultLayout {layoutGap = 0}
      in if fill then fillW base else base
@@ -502,7 +504,7 @@ tableSplitPanes vWid hWid rowMinH hChromeH frozenIdx unfrozenIdx pinned scrollRo
     let base = tight $ defaultLayout {layoutGap = 0, layoutMinW = minSum idxs, layoutHeight = Grow 1}
      in if fill then fillW base else base {layoutWidth = Fit}
   headerLine idxs renderHeader' =
-    keyedRowLay (tight . fillW $ defaultLayout {layoutGap = 0}) idxs $ \i ->
+    keyedRowLay (tight $ defaultLayout {layoutGap = 0}) idxs $ \i ->
       column (colBox i) (renderHeader' i)
   pinnedBlock idxs =
     mapM_
@@ -666,10 +668,38 @@ columnWidths :: Context -> Colonnade Headed row Text -> [row] -> [Float]
 columnWidths ctx cols rows =
   let host = ctxHostProfile ctx
       fm = ctxFontMetrics ctx
-      measure txt = let (w, _) = measureText host fm txt in w + if isCellHost host then 0 else 20
+      mono = ctxMonoFontMetrics ctx
+      terminal = isCellHost host
+      (ix, _) = labelContentInset host fm
+      cellPadX = if terminal then 0 else 20
+      headerPadX = cellPadX + if terminal then 0 else 2 * ix
+      measure metrics txt = textDisplayWidth host metrics (stripWidgetMarkers txt)
       hdrs = columnHeaders cols
-      pad = tableSortReserve (isCellHost host)
-   in zipWith (\hdr i -> maximum (measure (hdr <> pad) : [measure (columnCells cols r !! i) | r <- rows])) hdrs [0 ..]
+      numeric = numericColumns cols rows
+      hdrW hdr = measure fm (hdr <> tableSortReserve terminal) + headerPadX
+      cellW i txt =
+        if listAt numeric i False
+          then measure mono txt + cellPadX
+          else measure fm txt + cellPadX
+   in zipWith
+        (\hdr i -> maximum (minColW : hdrW hdr : [cellW i (columnCells cols r !! i) | r <- rows]))
+        hdrs
+        [0 ..]
+
+distributeColWidths :: Int -> [Int] -> [ColSize] -> [Float] -> [Float] -> Float -> [Float]
+distributeColWidths n vis sizes contentWs stored tableW =
+  let mins = [resolvedWidth sizes contentWs stored i | i <- [0 .. n - 1]]
+      seps = fromIntegral (max 0 (length vis - 1))
+      visMin = sum [listAt mins i 0 | i <- vis] + seps
+      autoStretch i =
+        case listAt sizes i ColStretch of
+          ColStretch ->
+            listAt stored i 0 <= max minColW (listAt contentWs i minColW)
+          _ -> False
+      stretchVis = [i | i <- vis, autoStretch i]
+      slack = max 0 (tableW - visMin)
+      extra = if null stretchVis then 0 else slack / fromIntegral (length stretchVis)
+   in [if autoStretch i then listAt mins i 0 + extra else listAt mins i 0 | i <- [0 .. n - 1]]
 
 nextSortCol :: Int -> SortCol -> Int -> SortCol
 nextSortCol n cur clicked =
@@ -713,21 +743,15 @@ resolvedWidth :: [ColSize] -> [Float] -> [Float] -> Int -> Float
 resolvedWidth sizes contentWs stored i =
   let contentW = max minColW (listAt contentWs i minColW)
       saved = listAt stored i 0
-   in if saved > 0
-        then saved
-        else case listAt sizes i ColStretch of
-          ColFixed f -> max minColW f
-          _ -> contentW
+   in case listAt sizes i ColStretch of
+        ColStretch -> if saved > contentW then saved else contentW
+        ColFixed f ->
+          let base = max minColW f
+           in if saved > 0 then max base saved else base
+        ColContent -> if saved > 0 then max contentW saved else contentW
 
 colSizing :: [ColSize] -> [Float] -> Float -> Int -> Sizing
-colSizing sizes stored resolved i =
-  let saved = listAt stored i 0
-   in if saved > 0
-        then Fixed saved
-        else case listAt sizes i ColStretch of
-          ColFixed f -> Fixed (max minColW f)
-          ColContent -> Fixed resolved
-          ColStretch -> Grow 1
+colSizing _sizes _stored resolved _i = Fixed resolved
 
 colBoxLayout :: Sizing -> Float -> Layout
 colBoxLayout sizing resolved =
@@ -806,7 +830,6 @@ finishTable n stateKey terminal vis order0 hidden0 drag0 dragX0 dragW0 widths0 w
               then Nothing
               else listToMaybe [i | (i, r) <- headerPairs, respClicked r]
       nextSort = maybe sort0 (nextSortCol n sort0) sortClick
-      seedWidths = fitList n 0 [headerW i | i <- [0 .. n - 1]]
       hasChanged = nextSort /= sort0 || nextOrder /= order0 || nextHidden /= hidden0 || widths1 /= widths0
       widgetResp =
         setChanged hasChanged $
@@ -823,6 +846,4 @@ finishTable n stateKey terminal vis order0 hidden0 drag0 dragX0 dragW0 widths0 w
                   IM.insert (slotKey slotDragW stateKey) nextDragW (storeFloat st)
             }
     when (st1 /= st) $ setStore ctx st1 >> markDirty ctx
-    when (drag0 == 0 && not resizing && seedWidths /= widths0 && any (> 0) seedWidths) $
-      writeColW ctx stateKey seedWidths
   pure (TableResponse widgetResp nextSort nextOrder nextHidden, nextSort)

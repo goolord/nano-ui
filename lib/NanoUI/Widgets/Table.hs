@@ -29,7 +29,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Effectful (Eff, type (:>))
 import qualified Data.IntMap.Strict as IM
-import NanoUI.Context (Context (..), getStore, intKey)
+import NanoUI.Context (Context (..), getPrevRect, getStore, intKey, markDirty)
 import NanoUI.Font (monoFontMarker, scrollBarGutter)
 import NanoUI.Host (isCellHost)
 import NanoUI.Input (inputMouseDown, inputMousePos)
@@ -37,15 +37,16 @@ import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
 import NanoUI.Store (WidgetStore (..), slotDrag, slotDragW, slotKey)
 import NanoUI.Style (AlignX (..), AlignY (..), Layout (..), Padding (..), Sizing (..), defaultLayout, fillW, tight)
-import NanoUI.Types (v2X)
+import NanoUI.Types (rectW, v2X)
 import NanoUI.WidgetText (tableHeaderLabel)
 import NanoUI.Widgets.Combinators
   ( ColSize (..), SortCol (..), SortDir (..), TableCfg (..), TableResponse (..)
   , buttonStyled, clampSortCol, colBoxLayout, colSizing, columnCells, columnCount
-  , columnHeaders, columnWidths, defaultTableCfg, dragCol, finishTable, fitList
-  , isResizeDrag, listAt, minColW, normalizeOrder, numericColumns, resolvedWidth
-  , setAt, sortMarkStyle, sortRows, stripedRow, tableHiddenIndices, tableRespChanged
-  , tableRespClicked, tableSplitPanes, useTableSort, visibleCols, writeColW
+  , columnHeaders, columnWidths, defaultTableCfg, distributeColWidths, dragCol
+  , finishTable, fitList, isResizeDrag, listAt, minColW, normalizeOrder
+  , numericColumns, setAt, sortMarkStyle, sortRows, stripedRow
+  , tableHiddenIndices, tableRespChanged, tableRespClicked, tableSplitPanes
+  , useTableSort, visibleCols, writeColW
   )
 import NanoUI.Widgets.Layout (column)
 import NanoUI.Widgets.Node (addWidgetStyled)
@@ -70,6 +71,7 @@ tableCfg cfg outerLayout key cols rows curSort =
     stateWid <- nextId
     vWid <- nextId
     hWid <- nextId
+    tableWid <- nextId
     let n = columnCount cols
         sort0 = clampSortCol n curSort
         stateKey = intKey stateWid
@@ -102,26 +104,26 @@ tableCfg cfg outerLayout key cols rows curSort =
         numeric = numericColumns cols rows
         cellPad = if terminal then Padding 0 0 0 0 else Padding 10 8 10 8
         rowMinH = if terminal then 1 else 28
-        resolvedW i = resolvedWidth sizes contentWs widths1 i
-        colSizingFor i = colSizing sizes widths1 (resolvedW i) i
-        itemLayout i =
-          (colBoxLayout (colSizingFor i) (resolvedW i))
-            { layoutAlignX = if listAt numeric i False then AlignEnd else AlignStart
+    mPrev <- uiIO (getPrevRect ctx tableWid)
+    let tableW = maybe 0 rectW mPrev
+        finals = distributeColWidths n vis sizes contentWs widths1 tableW
+        resolvedW i = listAt finals i minColW
+        colBox i = colBoxLayout (colSizing sizes widths1 (resolvedW i) i) (resolvedW i)
+        inner i =
+          (tight defaultLayout)
+            { layoutWidth = Grow 1
+            , layoutHeight = Grow 1
+            , layoutAlignX = if listAt numeric i False then AlignEnd else AlignStart
             , layoutAlignY = AlignMiddle
             , layoutPadding = cellPad
             , layoutMinH = rowMinH
             }
-        cellLayout i =
-          (itemLayout i)
-            { layoutWidth = Grow 1
-            , layoutMinW = 0
-            }
         shown i txt = if listAt numeric i False then monoFontMarker <> txt else txt
         hChromeH = if terminal then 1 else scrollBarGutter host (ctxFontMetrics ctx)
         renderHeader i =
-          buttonStyled (tableHeaderLabel terminal (listAt hdrs i T.empty)) (if sortColIndex sort0 == i then 1 else 0) (itemLayout i) (sortMarkStyle sort0 i)
-        renderCell ri r i = void (stripedRow ri (cellLayout i) (shown i (columnCells cols r !! i)))
-        colBox i = colBoxLayout (colSizingFor i) (resolvedW i)
+          buttonStyled (tableHeaderLabel terminal (listAt hdrs i T.empty)) (if sortColIndex sort0 == i then 1 else 0) (inner i) (sortMarkStyle sort0 i)
+        renderCell ri r i = void (stripedRow ri (inner i) (shown i (columnCells cols r !! i)))
+    when (mPrev == Nothing) $ uiIO (markDirty ctx)
     column outerLayout $ do
       showAllResp <-
         if IS.null hidden0
@@ -130,5 +132,5 @@ tableCfg cfg outerLayout key cols rows curSort =
             wid <- nextId
             addWidgetStyled wid NodeButton "Show all columns" 0 (tight . fillW $ defaultLayout) 0 Nothing
       headerPairs <-
-        tableSplitPanes vWid hWid rowMinH hChromeH frozenIdx unfrozenIdx pinned scrollRows itemLayout colBox renderHeader renderCell
+        tableSplitPanes tableWid vWid hWid rowMinH hChromeH frozenIdx unfrozenIdx pinned scrollRows colBox renderHeader renderCell
       finishTable n stateKey terminal vis order0 hidden0 drag0 dragX0 dragW0 widths0 widths1 sort0 headerPairs showAllResp resolvedW

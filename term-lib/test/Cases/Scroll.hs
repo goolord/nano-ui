@@ -13,6 +13,8 @@ module Cases.Scroll
   , runScrollThumbCursorTest
   , runScrollTopClipTest
   , runTableScrollTest
+  , runTableFirstColWidthTest
+  , runTableFillWidthTest
   ) where
 
 import Control.Monad (forM_, replicateM, void)
@@ -145,6 +147,122 @@ tableScrollRows :: [TableScrollRow]
 tableScrollRows =
   [ TableScrollRow ("row-" <> T.pack (show (i :: Int))) ("val-" <> T.pack (show i))
   | i <- [1 .. 20]
+  ]
+
+runTableFirstColWidthTest :: Context -> IORef Int -> IO ()
+runTableFirstColWidthTest _ failed = do
+  ctx <- newContext
+  let inp0 = (withInput 400 200) {inputMousePos = V2 60 80}
+      cfg =
+        defaultTableCfg
+          { tableColSizes = [ColContent, ColStretch]
+          }
+      ui = do
+        (readSort, _) <- useTableSort (SortCol 0 SortAsc)
+        tableSort <- readSort
+        void
+          ( tableCfg
+              cfg
+              (tight . fillW $ defaultLayout {layoutGap = 0})
+              "people"
+              tableFirstColCols
+              tableFirstColRows
+              tableSort
+          )
+  warmup2 ctx inp0 ui
+  spans <- collectTextSpans ctx
+  let findLabel needle =
+        listToMaybe [(r, t) | (r, t, _, _, _) <- spans, needle `T.isInfixOf` t]
+  case (findLabel "long-first-col", findLabel "val-1") of
+    (Just (Rect cn _ cw _, _), Just (Rect vx _ _ _, _)) -> do
+      assertGt failed cw 50
+      assert failed (vx > cn + cw - 2)
+    _ -> assert failed False
+
+tableFirstColCols :: Colonnade Headed TableFirstColRow T.Text
+tableFirstColCols =
+  mconcat
+    [ headed "Name" tableFirstColName
+    , headed "Value" tableFirstColVal
+    ]
+
+data TableFirstColRow = TableFirstColRow
+  { tableFirstColName :: T.Text
+  , tableFirstColVal :: T.Text
+  }
+
+tableFirstColRows :: [TableFirstColRow]
+tableFirstColRows =
+  TableFirstColRow "long-first-col" "short"
+    : [ TableFirstColRow ("row-" <> T.pack (show (i :: Int))) ("val-" <> T.pack (show i))
+      | i <- [1 .. 8 :: Int]
+      ]
+
+runTableFillWidthTest :: Context -> IORef Int -> IO ()
+runTableFillWidthTest _ failed = do
+  ctx <- newContext
+  let inp0 = (withInput 500 200) {inputMousePos = V2 200 80}
+      cfg =
+        defaultTableCfg
+          { tableColSizes =
+              [ ColContent
+              , ColStretch
+              , ColFixed 64
+              , ColStretch
+              , ColContent
+              ]
+          }
+      ui = do
+        (readSort, _) <- useTableSort (SortCol 0 SortAsc)
+        tableSort <- readSort
+        void
+          ( tableCfg
+              cfg
+              (tight . fillW $ defaultLayout {layoutGap = 0})
+              "people"
+              tableFillCols
+              tableFillRows
+              tableSort
+          )
+  warmup2 ctx inp0 ui
+  spans <- collectTextSpans ctx
+  let findLabel needle =
+        listToMaybe [(r, t) | (r, t, _, _, _) <- spans, needle `T.isInfixOf` t]
+  case (findLabel "Name", findLabel "David", findLabel "Role", findLabel "Manager") of
+    ( Just (Rect nx _ _ _, _)
+      , Just (Rect cx _ _ _, _)
+      , Just (Rect rx _ rw _, _)
+      , Just (Rect mx _ mw _, _)
+      ) -> do
+      assert failed (abs (nx - cx) <= 1)
+      assertGt failed (rx + rw) 380
+      assertGt failed mw 50
+      assert failed (mx >= rx - 2)
+    _ -> assert failed False
+
+tableFillCols :: Colonnade Headed TableFillRow T.Text
+tableFillCols =
+  mconcat
+    [ headed "Name" tableFillName
+    , headed "Dept" tableFillDept
+    , headed "Age" tableFillAge
+    , headed "City" tableFillCity
+    , headed "Role" tableFillRole
+    ]
+
+data TableFillRow = TableFillRow
+  { tableFillName :: T.Text
+  , tableFillDept :: T.Text
+  , tableFillAge :: T.Text
+  , tableFillCity :: T.Text
+  , tableFillRole :: T.Text
+  }
+
+tableFillRows :: [TableFillRow]
+tableFillRows =
+  [ TableFillRow "David" "Eng" "63" "Austin" "Staff"
+  , TableFillRow "Maya" "Ops" "41" "Tokyo" "Manager"
+  , TableFillRow "Chen" "Design" "26" "Shanghai" "IC"
   ]
 
 runScrollTopClipTest :: Context -> IORef Int -> IO ()

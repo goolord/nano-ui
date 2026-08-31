@@ -89,7 +89,7 @@ import NanoUI.WidgetText
   , textInputMinWidth
   , textInputPlaceholder
   , isTableHeaderText
-  , buttonDisplayText
+  , tableHeaderDisplayText
   )
 
 solveLayout :: NodeArena -> HostProfile -> FontMetrics -> (Text -> IO (Float, Float)) -> Float -> Float -> IO ()
@@ -360,10 +360,15 @@ measureWidget na host fm measure idx = do
                 contentW = max textInputMinWidth (max lw pw)
             pure (contentW, lh + gap + fieldH, 0, 0)
       _ -> do
-        let body =
-              if T.null txt
-                then " "
-                else if isTableHeaderText txt then buttonDisplayText txt else txt
+        body <-
+          if T.null txt
+            then pure " "
+            else
+              if isTableHeaderText txt
+                then do
+                  si <- getStyleIdx na idx
+                  pure (tableHeaderDisplayText (isCellHost host) si txt)
+                else pure txt
         (mw, mh) <- measure body
         pure (mw, mh, 0, 0)
   let rawW = tw + padX + extraW
