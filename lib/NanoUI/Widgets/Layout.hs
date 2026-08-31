@@ -30,7 +30,7 @@ import NanoUI.Layout.Arena
   , setStyleIdx
   , setWidgetId
   )
-import NanoUI.Monad (Ui, askContext, askInput, nextId, uiFinally, uiIO)
+import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO)
 import NanoUI.Style
   ( Direction (..)
   , Layout (..)
@@ -123,7 +123,8 @@ scrollArea layout child = do
     setWidgetId (ctxNodeArena ctx) idx wid
     writeIORef (ctxContainerStack ctx) (idx : stack0)
     pure stack0
-  childR <- uiFinally child (writeIORef (ctxContainerStack ctx) stack)
+  childR <- child
+  uiIO (writeIORef (ctxContainerStack ctx) stack)
   pure (wid, childR)
 
 -- | Scroll container with a chosen widget id. Same id on two panes shares the offset.
@@ -139,4 +140,6 @@ scrollAreaId wid layout styleIdx child = do
     setStyleIdx (ctxNodeArena ctx) idx styleIdx
     writeIORef (ctxContainerStack ctx) (idx : stack0)
     pure stack0
-  uiFinally child (writeIORef (ctxContainerStack ctx) stack)
+  r <- child
+  uiIO (writeIORef (ctxContainerStack ctx) stack)
+  pure r

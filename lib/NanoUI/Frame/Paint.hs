@@ -75,7 +75,7 @@ import NanoUI.Style
   , themeSeparator
   )
 import NanoUI.Types (Color (..), ImageId (..), Rect (..), colorA, colorRGBA, clamp01, rectIntersect)
-import NanoUI.WidgetText (buttonFlags, selectChevronCenterX, sliderLabelText, tableStripeColor, treeDecodeStyle)
+import NanoUI.WidgetText (buttonFlagsFromStyle, buttonVisualStyle, selectChevronCenterX, sliderLabelText, tableStripeColor, treeDecodeStyle)
 import NanoUI.Frame.Chrome
   ( fillStyledRect
   , imageIdFromText
@@ -231,13 +231,10 @@ lowerNodeVisible ctx idx nt x y w h rect fm theme terminal da =
     _ -> do
       style <- widgetVisualStyle ctx nt idx
       value <- getNodeValue (ctxNodeArena ctx) idx
-      storedText <-
-        if nt == NodeButton
-          then getText (ctxNodeArena ctx) idx
-          else pure T.empty
+      si <- getStyleIdx (ctxNodeArena ctx) idx
       let (isClose, isTab, isTable) =
             if nt == NodeButton
-              then buttonFlags storedText
+              then buttonFlagsFromStyle si
               else (False, False, False)
       let opaqueBg
             | isClose = False
@@ -258,13 +255,12 @@ lowerNodeVisible ctx idx nt x y w h rect fm theme terminal da =
       when opaqueBg $ fillStyledRect da terminal style rect
       when (not terminal) $ do
         when (opaqueBg && not isTab && not isTable && nt /= NodeTree) $ strokeStyledRect da terminal style x y w h
-        when isTab $ do
-          si <- getStyleIdx (ctxNodeArena ctx) idx
+        when isTab $
           paintTabHeader
             da
             (ctxHostProfile ctx)
             theme
-            (si `mod` 4)
+            (buttonVisualStyle si `mod` 4)
             (value > 0.5)
             style
             x
@@ -308,7 +304,6 @@ lowerNodeVisible ctx idx nt x y w h rect fm theme terminal da =
             (themeAccent theme)
             (styleBg (themeInput theme))
         when (nt == NodeTree) $ do
-          si <- getStyleIdx (ctxNodeArena ctx) idx
           let (_, depth, hasKids, expanded) = treeDecodeStyle si
           when hasKids $
             drawTreeChevron

@@ -7,7 +7,6 @@ module NanoUI.Monad
   , runNanoUI
   , runUi
   , uiIO
-  , uiFinally
   , emit
   , withKey
   , keyed
@@ -21,7 +20,6 @@ module NanoUI.Monad
   )
 where
 
-import Control.Exception (finally)
 import Data.Hashable (Hashable, hash)
 import Data.IORef (readIORef, writeIORef)
 import Data.Typeable (Typeable)
@@ -42,7 +40,6 @@ import Effectful.Dispatch.Static
   , getStaticRep
   , unsafeEff_
   )
-import Effectful.Dispatch.Static.Unsafe (reallyUnsafeLiftMapIO)
 import NanoUI.Context (Context (..), askHostIO, pushMessage)
 import NanoUI.Id
   ( IdContext (IdContext, siblingId)
@@ -76,10 +73,6 @@ uiIO :: Ui :> es => IO a -> Eff es a
 uiIO m = do
   UiRep {} <- getStaticRep
   unsafeEff_ m
-
-{-# INLINE uiFinally #-}
-uiFinally :: Eff es a -> IO b -> Eff es a
-uiFinally m cleanup = reallyUnsafeLiftMapIO (`finally` cleanup) m
 
 {-# INLINE emit #-}
 emit :: (Typeable msg, Ui :> es) => msg -> Eff es ()
@@ -124,7 +117,9 @@ scope m = do
       (p, c) = enterScope scopeTag old
     writeIORef (ctxIdContext ctx) c
     pure p
-  uiFinally m (writeIORef (ctxIdContext ctx) parent')
+  r <- m
+  uiIO (writeIORef (ctxIdContext ctx) parent')
+  pure r
 
 {-# INLINE keyed #-}
 
@@ -142,7 +137,9 @@ keyedTag tag m = do
       (p, c) = enterKeyed tag old
     writeIORef (ctxIdContext ctx) c
     pure p
-  uiFinally m (writeIORef (ctxIdContext ctx) parent')
+  r <- m
+  uiIO (writeIORef (ctxIdContext ctx) parent')
+  pure r
 
 {-# INLINE withKey #-}
 withKey :: (Hashable k, Ui :> es) => k -> Eff es a -> Eff es a

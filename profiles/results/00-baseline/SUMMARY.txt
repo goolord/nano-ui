@@ -1,0 +1,35 @@
+nano-ui perf baseline (pre-change)
+date: 2026-08-31
+commit: 953df88
+
+cabal test all
+  nano-ui-term nano-ui-test: PASS (all listed cases)
+
+cabal run nano-ui-id-bench
+  burst4096 / scopedWidgets: 0 bytes during runFrame (invariant hold)
+  burst4096:     343 us, 822 KB allocated (tasty-bench, includes setup)
+  scopedWidgets: 291 us, 573 KB allocated
+
+cabal run nano-ui-profile +RTS -pj / -P (3000 frames)
+  total_time: 6.55s
+  total_alloc: 5599195416 bytes (5599.2 MB)
+
+key alloc (JSON cost centres, MB):
+  Layout.Solve.$wmeasurePass           874.5
+  Layout.Solve.$wpositionChildren      426.8
+  Frame.Paint.lowerNode1               303.6
+  Frame.Spans.$wwidgetTextPlacements   258.0
+  Frame.Chrome.$wwidgetVisualStyle     258.0
+  Frame.Chrome.$wdisplayText           207.4
+  WidgetText.buttonDisplayText         193.5
+  WidgetText.stripButtonBrackets       147.5
+  Data.Text.isPrefixOf                 145.2
+  Layout.Solve.$wcountLayoutChildren   118.1
+  Layout.Solve.$wprepareAxisScratch    104.6
+  Frame.Focus.$wsyncWidgetLabels        14.1
+
+plan targets (for later comparison):
+  currentId / nextId: 0 bytes
+  stripButtonBrackets: < 0.5% alloc (from 6.6% cited)
+  solver map / list cons: < 2% alloc (from 15.9% cited)
+  total frame alloc: > 40% reduction vs this 5599.2 MB

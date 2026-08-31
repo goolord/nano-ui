@@ -1,0 +1,8 @@
+All
+  id/nextId
+    burst4096:     OK
+      337  ╬╝s ┬▒  27 ╬╝s, 822 KB allocated, 5.7 KB copied, 175 MB peak memory
+    scopedWidgets: OK
+      292  ╬╝s ┬▒ 4.9 ╬╝s, 568 KB allocated, 5.1 KB copied, 175 MB peak memory
+
+All 2 tests passed (228.02s)

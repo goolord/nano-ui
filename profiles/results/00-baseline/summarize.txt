@@ -1,0 +1,43 @@
+profile: profile-json.prof
+total_time: 6.55s  total_ticks: 12672
+   ticks      %    alloc MB  cost centre
+      34   0.3%       874.5  NanoUI.Layout.Solve.$wmeasurePass
+      27   0.2%       199.4  Effectful.Internal.Monad.unsafeEff
+      27   0.2%       165.7  Effectful.Internal.Monad.unsafeEff_
+      19   0.1%       303.6  NanoUI.Frame.Paint.lowerNode1
+      17   0.1%        39.4  NanoUI.Layout.Solve.$wfillLayoutChildren
+      15   0.1%       426.8  NanoUI.Layout.Solve.$wpositionChildren
+      13   0.1%        36.4  Data.HashTable.ST.Basic.growTable/rehash
+      12   0.1%       186.4  NanoUI.Layout.Solve.$wpositionNode
+      10   0.1%       258.0  NanoUI.Frame.Spans.$wwidgetTextPlacements
+       8   0.1%       103.7  Data.Text.Show.$wunpackCStringAscii#
+       8   0.1%       258.0  NanoUI.Frame.Chrome.$wwidgetVisualStyle
+       7   0.1%        23.2  Main.$wlvl
+       7   0.1%       186.4  Data.HashTable.Internal.IntArray.readArray
+       6   0.0%        73.7  NanoUI.Layout.Solve.$wchildRowCrossSize
+       6   0.0%        84.5  Data.HashTable.Internal.Array.writeArray
+       6   0.0%        63.4  Data.HashTable.Internal.Array.readArray
+       5   0.0%        62.8  NanoUI.Frame.Hit.scrollHitRect1
+       4   0.0%        36.9  NanoUI.Draw.$wpushCornerArc
+       4   0.0%       193.5  NanoUI.WidgetText.buttonDisplayText
+       4   0.0%       118.1  NanoUI.Layout.Solve.$wcountLayoutChildren
+       4   0.0%       147.5  NanoUI.WidgetText.stripButtonBrackets
+       4   0.0%        32.9  Data.HashTable.ST.Basic.insertRecord/probe
+       4   0.0%         9.3  Data.HashTable.ST.Basic.lookup/go
+       4   0.0%        57.5  Effectful.Internal.Env.getEnv
+       4   0.0%         0.0  Effectful.Internal.Env.fromAnyEffect
+       3   0.0%        36.9  NanoUI.Draw.$wpushCornerFan
+       3   0.0%        92.2  NanoUI.Frame.Chrome.$wstrokeStyledRect
+       3   0.0%       207.4  NanoUI.Frame.Chrome.$wdisplayText
+       3   0.0%       104.6  NanoUI.Layout.Solve.$wprepareAxisScratch
+       3   0.0%        25.6  NanoUI.Damage.$wcollectPrevTextPairs
+       3   0.0%         5.9  Data.HashTable.Internal.IntArray.newArray
+       3   0.0%        12.2  NanoUI.Damage.writeDamage1
+       2   0.0%        14.1  NanoUI.Frame.Focus.$wsyncWidgetLabels
+       2   0.0%         0.0  GHC.Internal.Word.eqWord64
+       1   0.0%         2.5  NanoUI.Frame.$w$srunFrameEff
+       1   0.0%         0.0  Data.Primitive.Array.marray#
+       1   0.0%        96.8  NanoUI.Frame.Chrome.$wfillStyledRect
+       1   0.0%         0.0  NanoUI.Draw.$wcornerCosSin
+       1   0.0%        92.7  Main.lvl13
+       1   0.0%       145.2  Data.Text.isPrefixOf

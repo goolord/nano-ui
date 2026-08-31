@@ -63,9 +63,9 @@ import NanoUI.Layout.Arena
   , isWidgetNode
   )
 import NanoUI.WidgetText
-  ( buttonDisplayText
-  , buttonDisplayTextFromFlags
-  , buttonFlags
+  ( buttonDisplayTextFromFlags
+  , buttonFlagsFromStyle
+  , buttonVisualStyle
   , stripButtonBrackets
   , checkboxLabelText
   , radioLabelText
@@ -79,7 +79,7 @@ import NanoUI.WidgetText
   , textInputFieldText
   , textInputTerminalText
   , tableHeaderDisplayText
-  , isTableHeaderText
+  , isTableHeaderStyle
   )
 import NanoUI.Style
   ( Style (..)
@@ -170,10 +170,12 @@ displayText :: Context -> NodeType -> NodeIdx -> IO T.Text
 displayText ctx nt idx = do
   txt <- getText (ctxNodeArena ctx) idx
   let terminal = isCellHost (ctxHostProfile ctx)
-  if nt == NodeButton && isTableHeaderText txt
+  if nt == NodeButton
     then do
       si <- getStyleIdx (ctxNodeArena ctx) idx
-      pure (tableHeaderDisplayText terminal si txt)
+      if isTableHeaderStyle si
+        then pure (tableHeaderDisplayText terminal si txt)
+        else displayTextRest ctx nt idx txt terminal
     else displayTextRest ctx nt idx txt terminal
 
 displayTextRest :: Context -> NodeType -> NodeIdx -> T.Text -> Bool -> IO T.Text
@@ -204,9 +206,9 @@ displayTextRest ctx nt idx txt terminal =
           si <- getStyleIdx (ctxNodeArena ctx) idx
           let (_, depth, hasKids, expanded) = treeDecodeStyle si
           pure (treeDisplayText (ctxIcons ctx) depth hasKids expanded txt)
-        NodeButton ->
-          let flags = buttonFlags txt
-           in pure (buttonDisplayTextFromFlags flags txt)
+        NodeButton -> do
+          si <- getStyleIdx (ctxNodeArena ctx) idx
+          pure (buttonDisplayTextFromFlags (buttonFlagsFromStyle si) txt)
         NodeTextInput -> do
           value <- textInputValue ctx idx
           focused <- textInputFocused ctx idx
@@ -236,7 +238,9 @@ displayTextRest ctx nt idx txt terminal =
                   _ -> ""
           pure (selectDisplayText lbl opt)
         NodeColorPicker -> pure txt
-        NodeButton -> pure (buttonDisplayText txt)
+        NodeButton -> do
+          si <- getStyleIdx (ctxNodeArena ctx) idx
+          pure (buttonDisplayTextFromFlags (buttonFlagsFromStyle si) txt)
         _ -> pure (stripButtonBrackets txt)
 
 textInputValue :: Context -> NodeIdx -> IO Text
@@ -457,17 +461,13 @@ widgetVisualStyle ctx nt idx = do
   focus <- readIORef (ctxFocusId ctx)
   animT <- getAnimationValue ctx wid
   mFloat <- floatingAncestor ctx idx
-  storedText <-
-    if nt == NodeButton
-      then getText (ctxNodeArena ctx) idx
-      else pure T.empty
   styleIdx <-
     if nt == NodeButton
       then getStyleIdx (ctxNodeArena ctx) idx
       else pure 0
   let (isClose, isTab, isTable) =
         if nt == NodeButton
-          then buttonFlags storedText
+          then buttonFlagsFromStyle styleIdx
           else (False, False, False)
   let theme = ctxTheme ctx
       terminal = isCellHost (ctxHostProfile ctx)
@@ -550,7 +550,7 @@ widgetVisualStyle ctx nt idx = do
                         , styleBorderWidth = 0
                         }
             | isTab ->
-                tabHeaderVisualStyle theme (styleIdx `mod` 4) (val > 0.5) isHot animT
+                tabHeaderVisualStyle theme (buttonVisualStyle styleIdx `mod` 4) (val > 0.5) isHot animT
             | isTable ->
                 tableHeaderVisualStyle theme (val > 0.5)
             | not terminal && val > 0.5 ->

@@ -88,7 +88,7 @@ import NanoUI.WidgetText
   , textInputLabelGap
   , textInputMinWidth
   , textInputPlaceholder
-  , isTableHeaderText
+  , isTableHeaderStyle
   , tableHeaderDisplayText
   )
 
@@ -272,13 +272,14 @@ measureWidget :: NodeArena -> HostProfile -> FontMetrics -> (Text -> IO (Float, 
 measureWidget na host fm measure idx = do
   nt <- getNodeType na idx
   txt <- getText na idx
+  si <- getStyleIdx na idx
   (minW, minH, maxW, maxH) <- getMinMax na idx
   (wTag, wVal) <- getWidthSizing na idx
   (hTag, hVal) <- getHeightSizing na idx
   let (padX, padY) =
         case nt of
           NodeButton
-            | isTableHeaderText txt ->
+            | isTableHeaderStyle si ->
                 if isCellHost host then (0, 0) else labelContentInset host fm
           NodeButton -> buttonPadding host fm
           NodeSelect -> buttonPadding host fm
@@ -328,7 +329,6 @@ measureWidget na host fm measure idx = do
                 else if isCellHost host then txt else radioLabelText txt
         measureMarkedWidget host fm measure body (checkboxLeading host fm)
       NodeTree -> do
-        si <- getStyleIdx na idx
         let (_, depth, _, _) = treeDecodeStyle si
             lbl = if T.null txt then " " else txt
             body = if isCellHost host then treeMeasureLabel depth lbl else lbl
@@ -364,10 +364,8 @@ measureWidget na host fm measure idx = do
           if T.null txt
             then pure " "
             else
-              if isTableHeaderText txt
-                then do
-                  si <- getStyleIdx na idx
-                  pure (tableHeaderDisplayText (isCellHost host) si txt)
+              if isTableHeaderStyle si
+                then pure (tableHeaderDisplayText (isCellHost host) si txt)
                 else pure txt
         (mw, mh) <- measure body
         pure (mw, mh, 0, 0)

@@ -1,0 +1,30 @@
+nano-ui perf after Step 1 (strictness / low-risk)
+date: 2026-08-31
+vs baseline commit 953df88 / profiles/results/00-baseline
+
+changes:
+  O(1) stripButtonBrackets guard
+  button type flags in styleIdx bits 29-31 (visual/tab index stay low)
+  remove uiFinally from builders (scope, keyed, container, scroll, overlay)
+  syncWidgetLabels once; rerun only if WidgetStore changed
+  SDL withUtf8 via Data.Text.Foreign.useAsPtr (sdl package not built here: -fsdl off)
+
+cabal test all: PASS
+cabal run nano-ui-id-bench:
+  burst4096 / scopedWidgets: 0 bytes during runFrame
+  burst4096:     337 us, 822 KB (tasty-bench)
+  scopedWidgets: 292 us, 568 KB
+
+nano-ui-profile 3000 frames:
+  total_time:  5.06s  (baseline 6.55s)
+  total_alloc: 3687.2 MB (baseline 5599.2 MB)
+  reduction:   34.1% vs baseline
+
+key alloc vs baseline (MB):
+  Layout.Solve.$wmeasurePass           100.3  (was 874.5)
+  Frame.Spans widgetTextPlacements      64.5  (was 258.0)
+  Frame.Chrome.$wwidgetVisualStyle     179.7  (was 258.0)
+  Frame.Chrome displayText              18.5  (was 207.4)
+  WidgetText.stripButtonBrackets       not in top 40 (was 147.5)
+  Layout.Solve.$wcountLayoutChildren   118.1  (unchanged; Step 2)
+  Layout.Solve.$wprepareAxisScratch    still present; Step 2

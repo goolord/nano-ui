@@ -85,7 +85,7 @@ import NanoUI.Layout.Arena
 import NanoUI.Layout.Solve (scrollBarSlotOf)
 import NanoUI.Style (Padding (..), Style (..), Theme (..), styleBg, styleFg, themePanel, themeSeparator, themeWindow)
 import NanoUI.Types (Color (..), Rect (..), colorRGBA, lerpColor, rectH, rectIntersect, rectW, rectX, rectY)
-import NanoUI.WidgetText (isCloseButtonText, isTableHeaderText)
+import NanoUI.WidgetText (isCloseButtonStyle, isTableHeaderStyle)
 import NanoUI.WidgetText
   ( colorPickerToHex
   , selectChevronReserve
@@ -320,8 +320,8 @@ widgetHitRect ctx nt idx x y w h = do
       case nt of
         NodeTextInput -> pure (tigFieldRect (textInputGeom (ctxHostProfile ctx) fm x y w h))
         NodeButton -> do
-          stored <- getText (ctxNodeArena ctx) idx
-          if isCloseButtonText stored
+          si <- getStyleIdx (ctxNodeArena ctx) idx
+          if isCloseButtonStyle si
             then pure (closeButtonHitRect (ctxHostProfile ctx) fm x y w h)
             else pure (Rect x y w h)
         _ -> pure (Rect x y w h)
@@ -332,9 +332,9 @@ widgetHitRect ctx nt idx x y w h = do
           let lbl = sliderLabelText txt
           pure (sliderTrackBounds (ctxHostProfile ctx) fm lbl x y w h)
         NodeButton -> do
-          stored <- getText (ctxNodeArena ctx) idx
+          si <- getStyleIdx (ctxNodeArena ctx) idx
           txt <- displayText ctx nt idx
-          if isCloseButtonText stored
+          if isCloseButtonStyle si
             then pure (closeButtonHitRect (ctxHostProfile ctx) fm x y w h)
             else pure (terminalTextHitRect (ctxHostProfile ctx) fm x y h txt True)
         NodeCheckbox -> do
@@ -402,7 +402,7 @@ widgetTextSpans ctx nt idx x y w h = do
           (tw, th) <- ctxMeasureText ctx txt
           isClose <-
             if nt == NodeButton
-              then isCloseButtonText <$> getText (ctxNodeArena ctx) idx
+              then isCloseButtonStyle <$> getStyleIdx (ctxNodeArena ctx) idx
               else pure False
           if isClose
             then
@@ -462,13 +462,13 @@ widgetTextPlacements ctx nt idx x y w h = do
       (ix, _) = widgetContentInset (ctxHostProfile ctx) fm
   case nt of
     NodeButton -> do
-      stored <- getText (ctxNodeArena ctx) idx
-      if not terminal && isCloseButtonText stored
+      si <- getStyleIdx (ctxNodeArena ctx) idx
+      if not terminal && isCloseButtonStyle si
         then pure []
         else do
           txt <- displayText ctx nt idx
           (tw, th) <- ctxMeasureText ctx txt
-          if isTableHeaderText stored
+          if isTableHeaderStyle si
             then do
               ax <- getAlignX (ctxNodeArena ctx) idx
               let (labelIx, _) = labelContentInset (ctxHostProfile ctx) fm
