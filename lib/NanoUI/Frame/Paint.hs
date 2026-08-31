@@ -314,7 +314,7 @@ lowerNode ctx idx = do
               (styleFg style)
         when (nt == NodeSlider) $ do
           txt <- getText (ctxNodeArena ctx) idx
-          let lbl = sliderLabelText (T.takeWhile (/= '\US') txt)
+          let lbl = sliderLabelText txt
               track = sliderTrackBounds (ctxHostProfile ctx) fm lbl x y w h
               tx = rectX track
               ty = rectY track

@@ -43,7 +43,7 @@ import NanoUI.Layout.Arena
   , isWidgetNode
   )
 import NanoUI.Types (Rect (..), V2 (..), rectContains)
-import NanoUI.WidgetText (selectParseOptions)
+import NanoUI.WidgetText (selectOptions)
 import NanoUI.Frame.Hit (findNodeByWidgetId, overlayHitAllowed)
 import NanoUI.Frame.Select (selectDropRect)
 
@@ -134,7 +134,7 @@ openSelectOwnerAt ctx mouse = do
                   else do
                     txt <- getText (ctxNodeArena ctx) idx
                     (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-                    let (_, opts) = selectParseOptions txt
+                    let (_, opts) = selectOptions txt
                         dropRect = selectDropRect (ctxHostProfile ctx) (ctxFontMetrics ctx) x y w h (length opts)
                     if rectContains dropRect mouse
                       then pure (Just wid)

@@ -74,7 +74,7 @@ import NanoUI.WidgetText
   , treeDisplayText
   , treeLabelText
   , selectDisplayText
-  , selectParseOptions
+  , selectOptions
   , colorPickerDisplayText
   , sliderLabelText
   , textInputFieldText
@@ -186,7 +186,7 @@ displayTextRest ctx nt idx txt terminal =
       case nt of
         NodeSelect -> do
           store <- getStore ctx
-          let (lbl, opts) = selectParseOptions txt
+          let (lbl, opts) = selectOptions txt
           wid <- getWidgetId (ctxNodeArena ctx) idx
           let picked = IM.findWithDefault 0 (intKey wid) (storeInt store)
               open = isSelectOpen store (intKey wid)
@@ -202,7 +202,7 @@ displayTextRest ctx nt idx txt terminal =
           wid <- getWidgetId (ctxNodeArena ctx) idx
           let current = widgetStoreColor store wid colorPickerDefaultColor
           pure (colorPickerDisplayText txt current)
-        NodeSlider -> pure (T.takeWhile (/= '\US') txt)
+        NodeSlider -> pure (sliderLabelText txt)
         NodeTree -> do
           si <- getStyleIdx (ctxNodeArena ctx) idx
           let (_, depth, hasKids, expanded) = treeDecodeStyle si
@@ -230,7 +230,7 @@ displayTextRest ctx nt idx txt terminal =
         NodeSlider -> pure (sliderLabelText txt)
         NodeSelect -> do
           store <- getStore ctx
-          let (lbl, opts) = selectParseOptions txt
+          let (lbl, opts) = selectOptions txt
           wid <- getWidgetId (ctxNodeArena ctx) idx
           let picked = IM.findWithDefault 0 (intKey wid) (storeInt store)
               opt =

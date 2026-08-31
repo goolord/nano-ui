@@ -28,6 +28,7 @@ import NanoUI.Layout.Arena
   , getParent
   , getStyleIdx
   , getText
+  , getNodeValue
   , getWidgetId
   , setNodeText
   , setNodeValue
@@ -37,9 +38,8 @@ import NanoUI.WidgetText
   ( checkboxLabelText
   , radioLabelText
   , treeDecodeStyle
-  , sliderPackRange
-  , sliderPackTerminal
-  , sliderParseRange
+  , sliderLabelText
+  , sliderText
   )
 
 tabNext :: WidgetId -> [WidgetId] -> Bool -> WidgetId
@@ -148,12 +148,9 @@ syncWidgetLabels ctx = do
       NodeSlider -> do
         let val = IM.findWithDefault 0 key (storeFloat store)
         txt <- getText na idx
-        let (lbl, minV, maxV) = sliderParseRange txt
-            frac = if maxV > minV then (val - minV) / (maxV - minV) else 0
-            shown =
-              if terminal
-                then sliderPackTerminal lbl frac val minV maxV
-                else sliderPackRange lbl minV maxV
+        frac <- getNodeValue na idx
+        let lbl = sliderLabelText txt
+            shown = if terminal then sliderText lbl frac val else lbl
         setNodeText na idx shown
         setNodeValue na idx frac
       NodeButton -> do

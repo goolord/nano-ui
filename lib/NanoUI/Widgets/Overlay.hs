@@ -19,7 +19,6 @@ import NanoUI.Context
   , getPrevRect
   , getStore
   , intKey
-  , markEscapeConsumed
   , seedFloatingPanel
   )
 import NanoUI.Font (resolveLayoutGap, resolveLayoutPadding)
@@ -27,11 +26,7 @@ import NanoUI.Host (isCellHost)
 import NanoUI.Icons (Icons (..))
 import NanoUI.Id (WidgetId)
 import NanoUI.Input
-  ( Key (..)
-  , inputKeys
-  , inputKeysElem
-  , inputMousePos
-  , inputMousePressed
+  ( inputMousePos
   , inputWindowSize
   )
 import NanoUI.Layout.Arena (NodeType (..), addNode, setWidgetId)
@@ -70,6 +65,7 @@ import NanoUI.Widgets.Chrome
   , titleLabelLayoutFor
   , titleMark
   )
+import NanoUI.Widgets.Behavior (useDismissable)
 import NanoUI.Widgets.Layout
   ( flex
   , labelEx
@@ -199,19 +195,15 @@ overlay kind open title child
       mrect <- uiIO (getPrevRect ctx wid)
       let
         mouse = inputMousePos inp
-        inPanel = maybe False (\r -> rectW r > 0 && rectH r > 0 && rectContains r mouse) mrect
-        backdrop =
-          kind == ModalOverlay
-            && case mrect of
-              Just r
-                | rectW r > 0 && rectH r > 0 ->
-                    inputMousePressed inp && not (rectContains r mouse)
-              _ -> False
-        esc = kind == ModalOverlay && inputKeysElem KeyEscape (inputKeys inp)
-        dismissed = backdrop || esc || respClicked closeResp
-      when esc $ uiIO (markEscapeConsumed ctx)
+        panel = maybe (Rect 0 0 0 0) id mrect
+        inPanel = rectW panel > 0 && rectH panel > 0 && rectContains panel mouse
+      outside <-
+        if kind == ModalOverlay && rectW panel > 0 && rectH panel > 0
+          then useDismissable panel
+          else pure False
+      let dismissed = outside || respClicked closeResp
       pure
-        ( mkResponse wid (maybe (Rect 0 0 0 0) id mrect) inPanel False dismissed dismissed
+        ( mkResponse wid panel inPanel False dismissed dismissed
         , Just body
         )
 

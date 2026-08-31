@@ -329,7 +329,7 @@ widgetHitRect ctx nt idx x y w h = do
       case nt of
         NodeSlider -> do
           txt <- getText (ctxNodeArena ctx) idx
-          let lbl = sliderLabelText (T.takeWhile (/= '\US') txt)
+          let lbl = sliderLabelText txt
           pure (sliderTrackBounds (ctxHostProfile ctx) fm lbl x y w h)
         NodeButton -> do
           stored <- getText (ctxNodeArena ctx) idx

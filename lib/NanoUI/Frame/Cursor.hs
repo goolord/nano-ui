@@ -32,7 +32,7 @@ import NanoUI.Layout.Arena
   )
 import NanoUI.Layout.Solve (scrollBarSlotOf)
 import NanoUI.Types (Rect (..), V2 (..), rectContains, v2X, v2Y)
-import NanoUI.WidgetText (isTableHeaderText, selectParseOptions, sliderLabelText)
+import NanoUI.WidgetText (isTableHeaderText, selectOptions, sliderLabelText)
 import NanoUI.Frame.CursorKind (UiCursorKind (..), grabDragKind, grabHoverKind)
 import NanoUI.Frame.Chrome (widgetNodeTypeTable)
 import NanoUI.Frame.Hit (findNodeByWidgetId, scrollHitRect)
@@ -90,7 +90,7 @@ selectDropdownCursorKind ctx inp = do
                 let key = intKey wid
                     open = isSelectOpen store key
                 txt <- getText (ctxNodeArena ctx) idx
-                let (_, opts) = selectParseOptions txt
+                let (_, opts) = selectOptions txt
                 (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
                 let fm = ctxFontMetrics ctx
                     dropRect = selectDropRect (ctxHostProfile ctx) fm x y w h (length opts)
@@ -184,7 +184,7 @@ sliderCursorKind ctx wid mouse inp = do
       Nothing -> pure T.empty
       Just idx -> do
         txt <- getText (ctxNodeArena ctx) idx
-        pure (sliderLabelText (T.takeWhile (/= '\US') txt))
+        pure (sliderLabelText txt)
   pure $
     case mrect of
       Nothing -> UiCursorDefault
