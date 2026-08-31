@@ -1,5 +1,6 @@
 module Cases
   ( module Cases.Animation
+  , module Cases.ContextMenu
   , module Cases.Demo
   , module Cases.Modal
   , module Cases.Scroll
@@ -7,6 +8,7 @@ module Cases
   , module Cases.Tabs
   , module Cases.Terminal
   , module Cases.TextInput
+  , module Cases.Tooltip
   , module Cases.Window
   , runAsciiTest
   , runAspectLayoutTest
@@ -62,6 +64,7 @@ module Cases
   ) where
 
 import Cases.Animation
+import Cases.ContextMenu
 import Cases.Demo
 import Cases.Modal
 import Cases.Scroll
@@ -69,6 +72,7 @@ import Cases.Select
 import Cases.Tabs
 import Cases.Terminal
 import Cases.TextInput
+import Cases.Tooltip
 import Cases.Window
 import Control.Monad (replicateM, void, when)
 import Data.ByteString qualified as BS

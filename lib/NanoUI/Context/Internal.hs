@@ -3,7 +3,6 @@
 module NanoUI.Context.Internal
   ( Context (..)
   , MeasureCacheKey
-  , PendingTooltip (..)
   , TextInputMenu (..)
   , TextInputDrag (..)
   , WindowResizeEdge (..)
@@ -15,9 +14,9 @@ module NanoUI.Context.Internal
   , isDirty
   , setWakeLoop
   , takeDamage
-  , clearTooltips
-  , pushTooltip
-  , readTooltips
+  , registerPopupConfig
+  , lookupPopupConfig
+  , clearPopupConfigs
   , getStore
   , setStore
   , isDisabled
@@ -121,16 +120,9 @@ import NanoUI.Messages (FrameMsg)
 import NanoUI.Spring (SpringParams, springEps)
 import NanoUI.Store (WidgetStore (..), boolInt, emptyWidgetStore, intBool, slotDisabled, slotKey)
 import NanoUI.Style (Theme, defaultTheme)
-import NanoUI.Types (Damage (..), ImageId (..), Rect (..), Size (..), V2 (..), rectContains, rectH, rectW)
+import NanoUI.Types (Damage (..), ImageId (..), PopupAnchor (..), PopupPlacement (..), Rect (..), Size (..), V2 (..), rectContains, rectH, rectW)
 
 type MeasureCacheKey = (Text, Bool, Float)
-
-data PendingTooltip = PendingTooltip
-  { pendingTooltipWidget :: WidgetId
-  , pendingTooltipRect :: Rect
-  , pendingTooltipText :: Text
-  }
-  deriving (Eq, Show)
 
 data TextInputMenu = TextInputMenu
   { textInputMenuWidget :: WidgetId
@@ -210,7 +202,7 @@ data Context = Context
   , ctxTextInputMenu :: IORef (Maybe TextInputMenu)
   , ctxClipboardGet :: IO (Maybe Text)
   , ctxClipboardSet :: Text -> IO Bool
-  , ctxTooltips :: IORef [PendingTooltip]
+  , ctxPopupConfigs :: IORef (IntMap (PopupAnchor, PopupPlacement, Float))
   , ctxWidgetNodeTypes :: IORef (Maybe (IntMap NodeType))
   , ctxSelectDropPress :: IORef Bool
   , ctxModalWasActive :: IORef Bool
@@ -266,17 +258,21 @@ setWakeLoop ctx wake = writeIORef (ctxWakeLoop ctx) (Just wake)
 takeDamage :: Context -> IO Damage
 takeDamage ctx = readIORef (ctxDamage ctx)
 
-{-# INLINE clearTooltips #-}
-clearTooltips :: Context -> IO ()
-clearTooltips ctx = writeIORef (ctxTooltips ctx) []
+{-# INLINE registerPopupConfig #-}
+registerPopupConfig :: Context -> WidgetId -> PopupAnchor -> PopupPlacement -> Float -> IO ()
+registerPopupConfig ctx wid anchor placement offset = do
+  let k = intKey wid
+  modifyIORef' (ctxPopupConfigs ctx) (IM.insert k (anchor, placement, offset))
 
-{-# INLINE pushTooltip #-}
-pushTooltip :: Context -> WidgetId -> Rect -> Text -> IO ()
-pushTooltip ctx wid r txt = modifyIORefList (ctxTooltips ctx) (:) (PendingTooltip wid r txt)
+{-# INLINE lookupPopupConfig #-}
+lookupPopupConfig :: Context -> WidgetId -> IO (Maybe (PopupAnchor, PopupPlacement, Float))
+lookupPopupConfig ctx wid = do
+  m <- readIORef (ctxPopupConfigs ctx)
+  pure (IM.lookup (intKey wid) m)
 
-{-# INLINE readTooltips #-}
-readTooltips :: Context -> IO [PendingTooltip]
-readTooltips ctx = readIORef (ctxTooltips ctx)
+{-# INLINE clearPopupConfigs #-}
+clearPopupConfigs :: Context -> IO ()
+clearPopupConfigs ctx = writeIORef (ctxPopupConfigs ctx) IM.empty
 
 {-# INLINE getStore #-}
 getStore :: Context -> IO WidgetStore
@@ -487,7 +483,7 @@ newContext = do
   ctxScrollDrag <- newIORef Nothing
   ctxTextInputDrag <- newIORef Nothing
   ctxTextInputMenu <- newIORef Nothing
-  ctxTooltips <- newIORef []
+  ctxPopupConfigs <- newIORef IM.empty
   ctxWidgetNodeTypes <- newIORef Nothing
   ctxSelectDropPress <- newIORef False
   ctxModalWasActive <- newIORef False
@@ -544,7 +540,7 @@ newContext = do
     , ctxTextInputMenu
     , ctxClipboardGet = pure Nothing
     , ctxClipboardSet = \_ -> pure False
-    , ctxTooltips
+    , ctxPopupConfigs
     , ctxWidgetNodeTypes
     , ctxSelectDropPress
     , ctxModalWasActive

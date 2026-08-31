@@ -76,10 +76,9 @@ module NanoUI.Context
   , presetBouncy
   , presetSmooth
   , presetStiff
-  , clearTooltips
-  , pushTooltip
-  , readTooltips
-  , PendingTooltip (..)
+  , registerPopupConfig
+  , lookupPopupConfig
+  , clearPopupConfigs
   , TextInputMenu (..)
   , TextInputDrag (..)
   , WindowResizeEdge (..)
@@ -113,7 +112,6 @@ import NanoUI.Animation
   )
 import NanoUI.Context.Internal
   ( Context (..)
-  , PendingTooltip (..)
   , TextInputDrag (..)
   , TextInputMenu (..)
   , WindowResizeDrag (..)
@@ -125,7 +123,7 @@ import NanoUI.Context.Internal
   , beginModal
   , clearDirty
   , clearMeasureCache
-  , clearTooltips
+  , clearPopupConfigs
   , drainMessages
   , enableMeasureCache
   , endModal
@@ -142,6 +140,7 @@ import NanoUI.Context.Internal
   , isDisabled
   , isDirty
   , lookupImageUv
+  , lookupPopupConfig
   , markDirty
   , markEscapeConsumed
   , modalActive
@@ -150,11 +149,10 @@ import NanoUI.Context.Internal
   , pointerBlockedByModal
   , pointerBlockedByOverlay
   , pushMessage
-  , pushTooltip
-  , readTooltips
   , registerFocusable
   , registerImage
   , registerImages
+  , registerPopupConfig
   , seedFloatingPanel
   , setAnimationValue
   , setDisabled

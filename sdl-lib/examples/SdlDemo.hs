@@ -121,7 +121,7 @@ demoUi = do
             kv "Volume" vol
             kv "Quality" quality
             row (tight . gap 8 . alignMid . fillW $ defaultLayout) $ do
-              void (box (fixedWH 20 20 defaultLayout) accent)
+              box (fixedWH 20 20 defaultLayout) accent
               kv "Accent" accentHex
             kv "Theme" theme
             kv "Name" (orDash name)
@@ -153,12 +153,29 @@ demoUi = do
               (_, accent) <- colorPicker "Accent" demoAccent
               setAccent (colorPickerToHex accent)
               row (tight . gap 8 . alignMid . fillW $ defaultLayout) $ do
-                void (box (fixedWH 28 28 defaultLayout) accent)
+                box (fixedWH 28 28 defaultLayout) accent
                 label_ (colorPickerToHex accent)
               (_, theme) <- boundedRadioFieldset "Theme" Dark (T.pack . show)
               setTheme (T.pack (show theme))
               (_, name) <- textInput "Name" ""
               setName name
+              sep
+              heading "Popups & Menus"
+              row (tight . gap 8 . fillW $ defaultLayout) $ do
+                btnTip <- button "Hover for Tooltip"
+                tooltip "This is a floating tooltip widget!" btnTip
+                btnMenu <- button "Right-click Menu"
+                void $ contextMenu btnMenu $ do
+                  menuHeader "Context Menu"
+                  menuSeparator
+                  cut <- menuItemWithShortcut "Cut" "Ctrl+X"
+                  copy <- menuItemWithShortcut "Copy" "Ctrl+C"
+                  paste <- menuItemWithShortcut "Paste" "Ctrl+V"
+                  menuSeparator
+                  menuItemDisabled "Disabled Option"
+                  when (respClicked cut) (setClick "Cut")
+                  when (respClicked copy) (setClick "Copy")
+                  when (respClicked paste) (setClick "Paste")
               sep
             List -> do
               heading "Tree"

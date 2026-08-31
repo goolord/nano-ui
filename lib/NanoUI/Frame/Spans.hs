@@ -12,14 +12,13 @@ module NanoUI.Frame.Spans
   , collectNodeTextSpans
   , sliderValue
   , collectFloatingSpans
-  , collectTooltipSpans
   , terminalSeparatorSpans
   , walkChildSpans
   , terminalScrollCapSpans
   ) where
 
 
-import Control.Monad (filterM, forM, unless, when)
+import Control.Monad (unless, when)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Text as T
 import NanoUI.ColorPicker
@@ -30,12 +29,10 @@ import NanoUI.ColorPicker
   )
 import NanoUI.Context
   ( Context (..)
-  , PendingTooltip (..)
   , WidgetStore (..)
   , getScrollOffset
   , getStore
   , intKey
-  , readTooltips
   , slotCursor
   , slotKey
   )
@@ -83,7 +80,7 @@ import NanoUI.Layout.Arena
   , isWidgetNode
   )
 import NanoUI.Layout.Solve (scrollBarSlotOf)
-import NanoUI.Style (Padding (..), Style (..), Theme (..), styleBg, styleFg, themePanel, themeSeparator, themeWindow)
+import NanoUI.Style (Padding (..), Style (..), Theme (..), styleBg, styleFg, themeSeparator, themeWindow)
 import NanoUI.Types (Color (..), Rect (..), colorRGBA, lerpColor, rectH, rectIntersect, rectW, rectX, rectY)
 import NanoUI.WidgetText (isCloseButtonStyle, isTableHeaderStyle)
 import NanoUI.WidgetText
@@ -110,7 +107,6 @@ import NanoUI.Frame.Clip
   , tagClippedSpans
   , terminalModalOuterClip
   )
-import NanoUI.Frame.Hit (widgetOverlayAllowed)
 import NanoUI.Frame.Select (collectSelectDropdownSpans)
 import NanoUI.Frame.TextInput (TextInputGeom (..), collectTextInputMenuSpans, tagSelectClippedSpans, tagTextInputClippedSpans, textInputGeom)
 import NanoUI.Frame.Scroll (scrollBarLayout, ScrollBarLayout (..))
@@ -149,12 +145,11 @@ collectOverlayTextSpansCached ctx inp floatCache = do
   resetSpanArena arena
   collectFloatingSpansInto ctx floatCache NodeWindow arena
   collectFloatingSpansInto ctx floatCache NodeModal arena
+  collectFloatingSpansInto ctx floatCache NodePopup arena
   drops <- collectSelectDropdownSpans ctx inp
   menu <- collectTextInputMenuSpans ctx inp
-  tips <- collectTooltipSpans ctx
   mapM_ (pushSpan5 arena) drops
   mapM_ (pushSpan5 arena) menu
-  mapM_ (pushSpan5 arena) tips
   spanArenaToList arena
 
 pushSpan5 :: SpanArena -> (Rect, T.Text, Color, Color, Rect) -> IO ()
@@ -712,22 +707,3 @@ terminalScrollCapSpans ctx idx x y w h pad clip
     icons = ctxIcons ctx
     up = iconScrollUp icons
     down = iconScrollDown icons
-
-collectTooltipSpans :: Context -> IO [(Rect, T.Text, Color, Color, Rect)]
-collectTooltipSpans ctx = do
-  let fm = ctxFontMetrics ctx
-      theme = ctxTheme ctx
-  if isCellHost (ctxHostProfile ctx)
-    then pure []
-    else do
-      tips <- readTooltips ctx
-      filtered <- filterM (\(PendingTooltip wid _ _) -> widgetOverlayAllowed ctx wid) tips
-      forM filtered $ \(PendingTooltip _ rect txt) -> do
-        let (ix, _) = widgetContentInset (ctxHostProfile ctx) fm
-            fg = styleFg (themePanel theme)
-            bg = styleBg (themePanel theme)
-        (tw, th) <- ctxMeasureText ctx txt
-        let tx = rectX rect + ix
-            ty = centeredTextY (ctxHostProfile ctx) fm (rectY rect) (rectH rect) th
-            textRect = Rect tx ty tw th
-        pure (textRect, txt, fg, bg, rect)

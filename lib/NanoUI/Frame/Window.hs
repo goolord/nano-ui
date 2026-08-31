@@ -9,6 +9,7 @@ module NanoUI.Frame.Window
   , updateWindowResize
   , drawWindowOverlays
   , drawModalOverlays
+  , drawPopupOverlays
   , windowResizeCursorKind
   , topmostWindowAtResizeHalo
   ) where
@@ -56,13 +57,14 @@ import NanoUI.Types (Rect (..), Size (..), V2 (..), rectContains, rectY)
 import NanoUI.Frame.CursorKind (UiCursorKind (..))
 import NanoUI.Frame.Chrome
   ( fillStyledRect
+  , overlayMenuStyle
   , overlayModalStyle
   , overlayWindowStyle
   , pushMenuShadow
   , strokeStyledRect
   )
 import NanoUI.Frame.Clip (scrollChromeLane, scrollContentClip, terminalModalOuterClip)
-import NanoUI.Frame.Hit (findNodeByWidgetId, modalTreeOpen, nodeInSubtree, topmostWindowAtMouse)
+import NanoUI.Frame.Hit (findNodeByWidgetId, modalTreeOpen, nodeInSubtree, topmostOverlayAtMouse)
 import NanoUI.Frame.Input (findTopWidgetUnderMouse, isInteractiveNode)
 import NanoUI.Frame.Paint (walkChildren)
 import NanoUI.Frame.Redraw (probeHotId)
@@ -406,7 +408,7 @@ windowResizeCursorKind ctx inp = do
 -- Halo must not steal hits from page widgets or another window's interior.
 resizeHaloBlocked :: Context -> V2 -> NodeIdx -> IO Bool
 resizeHaloBlocked ctx mouse winIdx = do
-  mInside <- topmostWindowAtMouse ctx mouse
+  mInside <- topmostOverlayAtMouse ctx mouse
   case mInside of
     Just other | other /= winIdx -> pure True
     _ -> do
@@ -421,25 +423,29 @@ resizeHaloBlocked ctx mouse winIdx = do
 
 tryStartWindowDrag :: Context -> V2 -> IO Bool
 tryStartWindowDrag ctx mouse = do
-  mWin <- topmostWindowAtMouse ctx mouse
-  case mWin of
+  mTop <- topmostOverlayAtMouse ctx mouse
+  case mTop of
     Nothing -> pure False
     Just idx -> do
-      mTitle <- windowTitleRect ctx idx
-      case mTitle of
-        Nothing -> pure False
-        Just title -> do
-          let overTitle = rectContains title mouse
-          overClose <- windowTitleHasInteractive ctx idx mouse
-          if overTitle && not overClose
-            then do
-              wid <- getWidgetId (ctxNodeArena ctx) idx
-              (wx, wy, _, _) <- getRect (ctxNodeArena ctx) idx
-              let V2 mx my = mouse
-              writeIORef (ctxWindowDrag ctx) (Just (wid, mx - wx, my - wy))
-              markDirty ctx
-              pure True
-            else pure False
+      nt <- getNodeType (ctxNodeArena ctx) idx
+      if nt /= NodeWindow
+        then pure False
+        else do
+          mTitle <- windowTitleRect ctx idx
+          case mTitle of
+            Nothing -> pure False
+            Just title -> do
+              let overTitle = rectContains title mouse
+              overClose <- windowTitleHasInteractive ctx idx mouse
+              if overTitle && not overClose
+                then do
+                  wid <- getWidgetId (ctxNodeArena ctx) idx
+                  (wx, wy, _, _) <- getRect (ctxNodeArena ctx) idx
+                  let V2 mx my = mouse
+                  writeIORef (ctxWindowDrag ctx) (Just (wid, mx - wx, my - wy))
+                  markDirty ctx
+                  pure True
+                else pure False
 
 windowTitleRect :: Context -> NodeIdx -> IO (Maybe Rect)
 windowTitleRect ctx idx = do
@@ -474,6 +480,13 @@ drawWindowOverlays ctx = do
   let theme = ctxTheme ctx
       style = overlayWindowStyle theme
   forFloatingNode ctx NodeWindow $ \idx rect ->
+    drawFloatingPanel ctx idx style rect rect
+
+drawPopupOverlays :: Context -> IO ()
+drawPopupOverlays ctx = do
+  let theme = ctxTheme ctx
+      style = overlayMenuStyle theme
+  forFloatingNode ctx NodePopup $ \idx rect ->
     drawFloatingPanel ctx idx style rect rect
 
 drawModalOverlays :: Context -> Size -> IO ()

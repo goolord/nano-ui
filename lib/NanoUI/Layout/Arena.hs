@@ -97,6 +97,7 @@ data NodeType
   | NodeRadio
   | NodeColorPicker
   | NodeTree
+  | NodePopup
   deriving (Eq, Show, Enum, Bounded)
 
 isWidgetNode :: NodeType -> Bool
@@ -122,6 +123,7 @@ isContainerNode nt =
     NodeModal -> True
     NodePanel -> True
     NodeWindow -> True
+    NodePopup -> True
     _ -> False
 
 isScrollNode :: NodeType -> Bool
@@ -132,7 +134,7 @@ isScrollNode nt =
     _ -> False
 
 isFloatingNode :: NodeType -> Bool
-isFloatingNode nt = nt == NodeModal || nt == NodeWindow
+isFloatingNode nt = nt == NodeModal || nt == NodeWindow || nt == NodePopup
 
 data SizingTag
   = SizingFixed

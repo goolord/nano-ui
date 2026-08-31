@@ -118,6 +118,7 @@ import NanoUI.Widgets.Behavior (KeyNav (..), useReorder)
 import NanoUI.Widgets.Layout (column, panel, row, scrollAreaId, separator, spacer)
 import NanoUI.Widgets.Node
   ( Clickable (..)
+  , RightClickable (..)
   , Responding (..)
   , Response (..)
   , addWidgetStyled
@@ -357,9 +358,14 @@ instance Responding (TabResponse a) where
   respPressed (TabResponse r _ _) = respPressed r
   respClicked (TabResponse r _ _) = respClicked r
   respChanged (TabResponse r _ _) = respChanged r
+  respRightPressed (TabResponse r _ _) = respRightPressed r
+  respRightClicked (TabResponse r _ _) = respRightClicked r
 
 instance Clickable (TabResponse a) where
   respIsClicked (TabResponse r _ _) = respClicked r
+
+instance RightClickable (TabResponse a) where
+  respIsRightClicked (TabResponse r _ _) = respRightClicked r
 
 tabRespClicked :: TabResponse a -> Bool
 tabRespClicked = respClicked
@@ -603,9 +609,14 @@ instance Responding TableResponse where
   respPressed = respPressed . tableWidgetResponse
   respClicked = respClicked . tableWidgetResponse
   respChanged = respChanged . tableWidgetResponse
+  respRightPressed = respRightPressed . tableWidgetResponse
+  respRightClicked = respRightClicked . tableWidgetResponse
 
 instance Clickable TableResponse where
   respIsClicked = respClicked
+
+instance RightClickable TableResponse where
+  respIsRightClicked = respRightClicked . tableWidgetResponse
 
 tableRespChanged :: TableResponse -> Bool
 tableRespChanged = respChanged

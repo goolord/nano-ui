@@ -10,6 +10,8 @@ module NanoUI.Store
   , slotDrag
   , slotDragW
   , slotWinSize
+  , slotMenuOpen
+  , slotMenuPos
   , boolInt
   , intBool
   , pairList
@@ -82,6 +84,12 @@ slotDragW = 0xD2A6000500000005
 
 slotWinSize :: Word64
 slotWinSize = 0x5712E00600000006
+
+slotMenuOpen :: Word64
+slotMenuOpen = 0x4D454E5500000007
+
+slotMenuPos :: Word64
+slotMenuPos = 0x4D454E5500000008
 
 boolInt :: Bool -> Int
 boolInt b = if b then 1 else 0

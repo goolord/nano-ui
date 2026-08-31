@@ -10,6 +10,7 @@ module NanoUI.Frame.Hit
   , nodeInSubtree
   , modalHitAllowed
   , overlayHitAllowed
+  , topmostOverlayAtMouse
   , topmostWindowAtMouse
   , widgetOverlayAllowed
   , widgetIdInModal
@@ -25,13 +26,14 @@ import NanoUI.Id (WidgetId)
 import NanoUI.Layout.Arena
   ( DirTag (..)
   , NodeIdx
-  , NodeType (NodeModal, NodeWindow)
+  , NodeType (NodeModal, NodePopup, NodeWindow)
   , findNodeRevM
   , getDirection
   , getNodeType
   , getParent
   , getRect
   , getWidgetId
+  , isFloatingNode
   , isScrollNode
   , lookupNodeByKey
   , naIndex
@@ -86,16 +88,24 @@ overlayHitAllowed ctx idx mouse = do
   case mModal of
     Just _ -> modalHitAllowed ctx idx
     Nothing -> do
-      mWin <- topmostWindowAtMouse ctx mouse
-      case mWin of
+      mTop <- topmostOverlayAtMouse ctx mouse
+      case mTop of
         Nothing -> pure True
-        Just widx -> nodeInSubtree ctx idx widx
+        Just tidx -> nodeInSubtree ctx idx tidx
+
+topmostOverlayAtMouse :: Context -> V2 -> IO (Maybe NodeIdx)
+topmostOverlayAtMouse ctx mouse =
+  topmostFloatingAtMouse ctx mouse (\nt -> nt == NodeWindow || nt == NodePopup)
 
 topmostWindowAtMouse :: Context -> V2 -> IO (Maybe NodeIdx)
 topmostWindowAtMouse ctx mouse =
+  topmostFloatingAtMouse ctx mouse (== NodeWindow)
+
+topmostFloatingAtMouse :: Context -> V2 -> (NodeType -> Bool) -> IO (Maybe NodeIdx)
+topmostFloatingAtMouse ctx mouse wanted =
   findNodeRevM (ctxNodeArena ctx) $ \idx -> do
     nt <- getNodeType (ctxNodeArena ctx) idx
-    if nt /= NodeWindow
+    if not (wanted nt)
       then pure False
       else do
         (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
@@ -113,18 +123,23 @@ widgetIdInModal ctx wid = do
     Nothing -> pure False
     Just idx -> nodeInTopmostModal ctx idx
 
+-- Prev rects are layout space. Floating nodes are window space after placePopups.
 ancestorScrollShift :: Context -> NodeIdx -> IO (Float, Float)
 ancestorScrollShift ctx idx = go idx (0, 0)
   where
     go i (sx, sy)
       | i <= 0 = pure (sx, sy)
       | otherwise = do
-          p <- getParent (ctxNodeArena ctx) i
-          if p < 0
+          nt <- getNodeType (ctxNodeArena ctx) i
+          if isFloatingNode nt
             then pure (sx, sy)
             else do
-              (sx', sy') <- parentScrollShift ctx p (sx, sy)
-              go p (sx', sy')
+              p <- getParent (ctxNodeArena ctx) i
+              if p < 0
+                then pure (sx, sy)
+                else do
+                  (sx', sy') <- parentScrollShift ctx p (sx, sy)
+                  go p (sx', sy')
 
 -- Prev rects are stored in layout space. Shift by live scroll before hit tests.
 scrollHitRect :: Context -> WidgetId -> IO (Maybe Rect)

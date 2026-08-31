@@ -129,6 +129,8 @@ test-suite nano-ui-test
         Cases.Tabs
         Cases.Terminal
         Cases.TextInput
+        Cases.ContextMenu
+        Cases.Tooltip
         Cases.Window
     build-depends:
         base ^>=4.22.0.0,

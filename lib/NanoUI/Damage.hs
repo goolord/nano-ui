@@ -112,6 +112,7 @@ backdropRectFromNode ctx idx = do
     NodePanel -> nodeRect na idx
     NodeWindow -> nodeRect na idx
     NodeModal -> nodeRect na idx
+    NodePopup -> nodeRect na idx
     NodeScrollContainer -> do
       (wTag, _) <- getWidthSizing na idx
       (hTag, _) <- getHeightSizing na idx
@@ -216,7 +217,7 @@ floatingPanelsInOrder ctx = do
         | idx >= n = pure (reverse acc)
         | otherwise = do
             nt <- getNodeType (ctxNodeArena ctx) idx
-            if nt == NodeWindow || nt == NodeModal
+            if nt == NodeWindow || nt == NodeModal || nt == NodePopup
               then do
                 wid <- getWidgetId (ctxNodeArena ctx) idx
                 (x, y, w, h) <- getRect (ctxNodeArena ctx) idx

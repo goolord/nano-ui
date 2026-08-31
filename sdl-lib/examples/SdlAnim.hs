@@ -140,7 +140,7 @@ animUi = do
           flex
           let iris = 12 + 22 * bellowsT
               irisCol = lerpColor film (lerpColor paper ruby 0.18) bellowsT
-          void (box (fixedWH iris iris defaultLayout) irisCol)
+          box (fixedWH iris iris defaultLayout) irisCol
 
 settled :: Float -> Bool
 settled x = abs x < 0.001

@@ -5,14 +5,19 @@ module NanoUI.Widgets.Node
   ( Response (..)
   , Responding (..)
   , Clickable (..)
+  , RightClickable (..)
+  , onRightClick
   , mkResponse
   , emptyModalResp
   , setClicked
   , setChanged
   , setHovered
   , setPressed
+  , setRightClicked
+  , setRightPressed
   , parentIdx
   , container
+  , containerResponse
   , addWidget
   , addWidgetResp
   , addWidgetStyled
@@ -22,6 +27,7 @@ module NanoUI.Widgets.Node
   )
 where
 
+import Control.Monad (when)
 import Data.IORef (readIORef, writeIORef)
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
@@ -36,6 +42,8 @@ import NanoUI.Input
   , inputMouseDown
   , inputMousePos
   , inputMouseReleased
+  , inputMouseRightDown
+  , inputMouseRightReleased
   )
 import NanoUI.Layout.Arena
   ( NodeType (..)
@@ -46,7 +54,7 @@ import NanoUI.Layout.Arena
   , setStyleIdx
   , setWidgetId
   )
-import NanoUI.Monad (Ui, askContext, askInput, uiIO)
+import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO)
 import NanoUI.WidgetText (packButtonStyle)
 import NanoUI.Style
   ( AlignX (..)
@@ -71,9 +79,19 @@ class Responding r where
   respPressed :: r -> Bool
   respClicked :: r -> Bool
   respChanged :: r -> Bool
+  respRightPressed :: r -> Bool
+  respRightPressed _ = False
+  respRightClicked :: r -> Bool
+  respRightClicked _ = False
 
 class Clickable r where
   respIsClicked :: r -> Bool
+
+class RightClickable r where
+  respIsRightClicked :: r -> Bool
+
+onRightClick :: RightClickable r => r -> Eff es () -> Eff es ()
+onRightClick resp act = when (respIsRightClicked resp) act
 
 data Response = Response
   { rawRespId :: !WidgetId
@@ -82,6 +100,8 @@ data Response = Response
   , rawRespPressed :: !Bool
   , rawRespClicked :: !Bool
   , rawRespChanged :: !Bool
+  , rawRespRightPressed :: !Bool
+  , rawRespRightClicked :: !Bool
   }
   deriving (Eq, Show)
 
@@ -92,9 +112,14 @@ instance Responding Response where
   respPressed = rawRespPressed
   respClicked = rawRespClicked
   respChanged = rawRespChanged
+  respRightPressed = rawRespRightPressed
+  respRightClicked = rawRespRightClicked
 
 instance Clickable Response where
   respIsClicked = rawRespClicked
+
+instance RightClickable Response where
+  respIsRightClicked = rawRespRightClicked
 
 instance Semigroup Response where
   a <> b =
@@ -105,6 +130,8 @@ instance Semigroup Response where
       , rawRespPressed = rawRespPressed a || rawRespPressed b
       , rawRespClicked = rawRespClicked a || rawRespClicked b
       , rawRespChanged = rawRespChanged a || rawRespChanged b
+      , rawRespRightPressed = rawRespRightPressed a || rawRespRightPressed b
+      , rawRespRightClicked = rawRespRightClicked a || rawRespRightClicked b
       }
 
 instance Monoid Response where
@@ -128,6 +155,12 @@ setHovered h r = r {rawRespHovered = h}
 setPressed :: Bool -> Response -> Response
 setPressed p r = r {rawRespPressed = p}
 
+setRightClicked :: Bool -> Response -> Response
+setRightClicked c r = r {rawRespRightClicked = c}
+
+setRightPressed :: Bool -> Response -> Response
+setRightPressed p r = r {rawRespRightPressed = p}
+
 mkResponse :: WidgetId -> Rect -> Bool -> Bool -> Bool -> Bool -> Response
 mkResponse wid rect hovered pressed clicked changed =
   Response
@@ -137,19 +170,36 @@ mkResponse wid rect hovered pressed clicked changed =
     , rawRespPressed = pressed
     , rawRespClicked = clicked
     , rawRespChanged = changed
+    , rawRespRightPressed = False
+    , rawRespRightClicked = False
     }
 
 emptyModalResp :: WidgetId -> Response
 emptyModalResp wid = mkResponse wid (Rect 0 0 0 0) False False False False
 
 container :: Ui :> es => NodeType -> Layout -> Eff es a -> Eff es a
-container nt layout child = do
+container nt layout child = runContainer nt layout Nothing child
+
+containerResponse :: Ui :> es => NodeType -> Layout -> Eff es a -> Eff es (a, Response)
+containerResponse nt layout child = do
+  wid <- nextId
+  ctx <- askContext
+  inp <- askInput
+  r <- runContainer nt layout (Just wid) child
+  resp <- uiIO (resolveInteraction ctx inp wid)
+  pure (r, resp)
+
+runContainer :: Ui :> es => NodeType -> Layout -> Maybe WidgetId -> Eff es a -> Eff es a
+runContainer nt layout mWid child = do
   ctx <- askContext
   (stack, parent') <- uiIO $ do
     stack0 <- readIORef (ctxContainerStack ctx)
     let
       parent = parentIdx stack0
     idx <- addNodeFromLayout (ctxNodeArena ctx) nt parent layout
+    case mWid of
+      Just wid -> setWidgetId (ctxNodeArena ctx) idx wid
+      Nothing -> pure ()
     writeIORef (ctxContainerStack ctx) (idx : stack0)
     oldCtx <- readIORef (ctxIdContext ctx)
     let
@@ -259,9 +309,11 @@ resolveInteraction ctx inp wid = do
     mouse = inputMousePos inp
     hovered = not disabled && not blocked && maybe False (`rectContains` mouse) mrect
     pressed = hovered && inputMouseDown inp
+    rightPressed = hovered && inputMouseRightDown inp
   pending <- readIORef (ctxClickedId ctx)
   let
     clicked = (hovered && inputMouseReleased inp) || pending == wid
+    rightClicked = hovered && inputMouseRightReleased inp
   pure $
     Response
       { rawRespId = wid
@@ -270,6 +322,8 @@ resolveInteraction ctx inp wid = do
       , rawRespPressed = pressed
       , rawRespClicked = clicked
       , rawRespChanged = False
+      , rawRespRightPressed = rightPressed
+      , rawRespRightClicked = rightClicked
       }
 
 -- | Stamp the current container with a widget id (radio/tree group key).

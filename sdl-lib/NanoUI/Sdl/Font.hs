@@ -30,6 +30,7 @@ import Data.Primitive.SmallArray
   , smallArrayFromList
   )
 import Data.Text (Text)
+import qualified Data.Text as T
 import Foreign.C.String (CString, withCString)
 import Foreign.C.Types (CFloat (..), CInt (..), CSize (..), CUInt (..))
 import Foreign.ForeignPtr (ForeignPtr, mallocForeignPtrBytes, withForeignPtr)
@@ -376,17 +377,22 @@ measureTtfTextScaled sf scale txt = do
   pure (w / inv, h / inv)
 
 measureTtfText :: SdlFont -> Text -> IO (Float, Float)
-measureTtfText sf txt =
-  withUtf8 txt $ \cstr len ->
-    withForeignPtr measureScratch $ \wp -> do
-      let hp = plusPtr wp (sizeOf (0 :: CFloat))
-      ok <- ttfStringSize (sfFont sf) cstr len wp hp
-      if ok
-        then do
-          w <- peek wp
-          h <- peek hp
-          pure (realToFrac w, realToFrac h)
-        else pure (0, sfLineSkip sf)
+measureTtfText sf txt
+  -- TTF_GetStringSize treats length 0 as NUL-terminated. Empty Text is a
+  -- byte-array slice, not a C string, so strlen would read heap garbage and
+  -- the caret would jump. Same for T.take 0 of a non-empty value.
+  | T.null txt = pure (0, sfLineSkip sf)
+  | otherwise =
+      withUtf8 txt $ \cstr len ->
+        withForeignPtr measureScratch $ \wp -> do
+          let hp = plusPtr wp (sizeOf (0 :: CFloat))
+          ok <- ttfStringSize (sfFont sf) cstr len wp hp
+          if ok
+            then do
+              w <- peek wp
+              h <- peek hp
+              pure (realToFrac w, realToFrac h)
+            else pure (0, sfLineSkip sf)
 
 tryInsert :: Ptr () -> Ptr () -> IO (Maybe (Float, Float, Float, Float))
 tryInsert atlas surf =
