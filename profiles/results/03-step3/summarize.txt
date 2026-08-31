@@ -1,0 +1,43 @@
+profile: profile-json.prof
+total_time: 3.44s  total_ticks: 6656
+   ticks      %    alloc MB  cost centre
+      32   0.5%       195.3  Effectful.Internal.Monad.unsafeEff
+      23   0.3%       295.8  Effectful.Internal.Monad.unsafeEff_
+       9   0.1%        71.5  NanoUI.Frame.Paint.lowerNode1
+       7   0.1%        37.3  Data.HashTable.Internal.Array.writeArray
+       7   0.1%       100.3  NanoUI.Layout.Solve.$wmeasurePass
+       6   0.1%       150.3  NanoUI.Layout.Solve.$wwithAxisSnaps
+       5   0.1%        36.9  NanoUI.Draw.$wpushCornerFan
+       5   0.1%        92.2  NanoUI.Frame.Chrome.$wstrokeStyledRect
+       5   0.1%       242.9  Data.HashTable.Internal.IntArray.readArray
+       5   0.1%       186.4  NanoUI.Layout.Solve.$wpositionNode
+       5   0.1%        62.0  NanoUI.Layout.Solve.$wmeasureContainer
+       4   0.1%        36.9  NanoUI.Draw.$wpushCornerArc
+       4   0.1%        23.2  Main.$wlvl
+       4   0.1%        62.8  NanoUI.Frame.Hit.scrollHitRect1
+       4   0.1%         0.0  Effectful.Internal.Env.fromAnyEffect
+       3   0.0%        96.8  NanoUI.Frame.Chrome.$wfillStyledRect
+       3   0.0%       179.7  NanoUI.Frame.Chrome.$wwidgetVisualStyle
+       3   0.0%        44.7  NanoUI.Damage.$wupdatePrevRects
+       2   0.0%         1.9  NanoUI.Frame.$w$srunFrameEff
+       2   0.0%        18.5  NanoUI.Frame.Chrome.displayText2
+       2   0.0%        34.9  Data.HashTable.Internal.Array.readArray
+       2   0.0%         0.0  NanoUI.Frame.Scroll.$wapplyScrollOffsets
+       2   0.0%         9.6  NanoUI.Layout.Solve.$wloadChildrenScratchFromParent
+       2   0.0%         7.1  NanoUI.Frame.Focus.$wsyncWidgetLabels
+       2   0.0%        14.2  Data.HashTable.ST.Basic.foldM
+       2   0.0%         9.3  Data.HashTable.ST.Basic.lookup/go
+       2   0.0%         0.0  GHC.Internal.Classes.==
+       2   0.0%        58.5  Effectful.Internal.Env.getEnv
+       1   0.0%         0.0  NanoUI.Frame.Chrome.$whoverBackground
+       1   0.0%         0.0  NanoUI.Frame.Chrome.displayText1
+       1   0.0%        92.7  Main.lvl13
+       1   0.0%        14.0  NanoUI.Layout.Arena.$s$w$sdelete1
+       1   0.0%        18.6  NanoUI.Layout.Arena.$s$w$sdelete1_$s$wfindSafeSlots
+       1   0.0%         0.0  NanoUI.Layout.Solve.resolveSize
+       1   0.0%       108.8  NanoUI.Layout.Solve.$wpositionChildren
+       1   0.0%         0.0  Data.IntMap.Internal.$wpoly_go1
+       1   0.0%        30.9  NanoUI.Damage.updatePrevNodeTexts2
+       1   0.0%        56.7  Data.IntMap.Strict.Internal.$winsert
+       1   0.0%         1.5  Effectful.Internal.Env.consEnv
+       1   0.0%         0.2  Main.k

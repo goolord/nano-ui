@@ -1,0 +1,3 @@
+Test suite nano-ui-test: RUNNING...
+Test suite nano-ui-test: PASS
+Test suite logged to: C:\Users\zach\Dev\nano-ui\dist-newstyle\build\x86_64-windows\ghc-9.14.1\nano-ui-term-0.1.0.0\t\nano-ui-test\opt\test\nano-ui-term-0.1.0.0-nano-ui-test.log

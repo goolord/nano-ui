@@ -4,6 +4,7 @@
 module NanoUI.Draw
   ( Layer (..)
   , DrawCmd (..)
+  , LayerSlice (..)
   , DrawData (..)
   , DrawArena (..)
   , Vertex (..)
@@ -29,6 +30,7 @@ module NanoUI.Draw
   , foldDrawCmds
   , drawCmdFilter
   , drawCmdForLayer
+  , forDrawCmdsInLayer_
   , drawCmdElemsForLayer
   , drawCmdPartitionByLayer
   , drawCmdElems
@@ -42,7 +44,18 @@ module NanoUI.Draw
 import Control.Monad (forM_, unless, when)
 import Data.Bits (shiftR, (.&.))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import Data.Primitive.Array (MutableArray, copyMutableArray, newArray, readArray, writeArray)
+import Data.Primitive.PrimArray
+  ( MutablePrimArray
+  , PrimArray
+  , copyMutablePrimArray
+  , indexPrimArray
+  , newPrimArray
+  , readPrimArray
+  , sizeofPrimArray
+  , unsafeFreezePrimArray
+  , writePrimArray
+  )
+import Data.Primitive.Types (Prim (..))
 import Data.Vector (Vector)
 import qualified Data.Vector as V
 import Data.Word (Word8, Word32)
@@ -51,7 +64,46 @@ import Foreign.ForeignPtr.Unsafe (unsafeForeignPtrToPtr)
 import Foreign.Marshal.Array (copyArray)
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (pokeByteOff)
-import GHC.Exts (RealWorld)
+import GHC.Exts
+  ( Addr#
+  , Float (F#)
+  , Int (I#)
+  , Int#
+  , MutableByteArray#
+  , RealWorld
+  , State#
+  , (*#)
+  , (+#)
+  , (-#)
+  , (==#)
+  , indexFloatOffAddr#
+  , indexIntOffAddr#
+  , indexWord8Array#
+  , indexWord8ArrayAsFloat#
+  , indexWord8ArrayAsInt#
+  , indexWord8ArrayAsWord32#
+  , indexWord8OffAddr#
+  , indexWord32OffAddr#
+  , isTrue#
+  , plusAddr#
+  , readFloatOffAddr#
+  , readIntOffAddr#
+  , readWord8Array#
+  , readWord8ArrayAsFloat#
+  , readWord8ArrayAsInt#
+  , readWord8ArrayAsWord32#
+  , readWord8OffAddr#
+  , readWord32OffAddr#
+  , writeFloatOffAddr#
+  , writeIntOffAddr#
+  , writeWord8Array#
+  , writeWord8ArrayAsFloat#
+  , writeWord8ArrayAsInt#
+  , writeWord8ArrayAsWord32#
+  , writeWord8OffAddr#
+  , writeWord32OffAddr#
+  )
+import GHC.Word (Word8 (W8#), Word32 (W32#))
 import NanoUI.Font (FontMetrics (..), GlyphQuad (..))
 import NanoUI.Types (Color (..), Rect (..), rectIntersect)
 import qualified Data.Text as T
@@ -76,19 +128,59 @@ data DrawCmd = DrawCmd
   , cmdClipY :: {-# UNPACK #-} !Float
   , cmdClipW :: {-# UNPACK #-} !Float
   , cmdClipH :: {-# UNPACK #-} !Float
-  , cmdTextureId :: !Int
+  , cmdTextureId :: {-# UNPACK #-} !Int
   , cmdIndexOffset :: {-# UNPACK #-} !Word32
   , cmdIndexCount :: {-# UNPACK #-} !Word32
   , cmdLayer :: !Layer
   }
   deriving (Eq, Show)
 
+data LayerSlice = LayerSlice
+  { sliceOffset :: {-# UNPACK #-} !Int
+  , sliceCount :: {-# UNPACK #-} !Int
+  }
+  deriving (Eq, Show)
+
+-- Two packed Ints, 16 bytes, 8-byte aligned.
+instance Prim LayerSlice where
+  sizeOfType# _ = 16#
+  alignmentOfType# _ = 8#
+  indexByteArray# arr# i# =
+    let o# = i# *# 16#
+     in LayerSlice
+          (I# (indexWord8ArrayAsInt# arr# o#))
+          (I# (indexWord8ArrayAsInt# arr# (o# +# 8#)))
+  readByteArray# arr# i# s0 =
+    let o# = i# *# 16#
+     in case readWord8ArrayAsInt# arr# o# s0 of
+          (# s1, off# #) ->
+            case readWord8ArrayAsInt# arr# (o# +# 8#) s1 of
+              (# s2, cnt# #) -> (# s2, LayerSlice (I# off#) (I# cnt#) #)
+  writeByteArray# arr# i# (LayerSlice (I# off#) (I# cnt#)) s0 =
+    let o# = i# *# 16#
+     in writeWord8ArrayAsInt# arr# (o# +# 8#) cnt# (writeWord8ArrayAsInt# arr# o# off# s0)
+  setByteArray# = primLoopSetByteArray
+  indexOffAddr# addr# i# =
+    let a# = addr# `plusAddr#` (i# *# 16#)
+     in LayerSlice (I# (indexIntOffAddr# a# 0#)) (I# (indexIntOffAddr# (a# `plusAddr#` 8#) 0#))
+  readOffAddr# addr# i# s0 =
+    let a# = addr# `plusAddr#` (i# *# 16#)
+     in case readIntOffAddr# a# 0# s0 of
+          (# s1, off# #) ->
+            case readIntOffAddr# (a# `plusAddr#` 8#) 0# s1 of
+              (# s2, cnt# #) -> (# s2, LayerSlice (I# off#) (I# cnt#) #)
+  writeOffAddr# addr# i# (LayerSlice (I# off#) (I# cnt#)) s0 =
+    let a# = addr# `plusAddr#` (i# *# 16#)
+     in writeIntOffAddr# (a# `plusAddr#` 8#) 0# cnt# (writeIntOffAddr# a# 0# off# s0)
+  setOffAddr# = primLoopSetOffAddr
+
 data DrawData = DrawData
   { drawVertices :: ForeignPtr Word8
-  , drawVertexCount :: Int
+  , drawVertexCount :: {-# UNPACK #-} !Int
   , drawIndices :: ForeignPtr Word8
-  , drawIndexCount :: Int
-  , drawCommands :: Vector DrawCmd
+  , drawIndexCount :: {-# UNPACK #-} !Int
+  , drawCommands :: !(PrimArray DrawCmd)
+  , drawLayerSlices :: !(PrimArray LayerSlice)
   }
   deriving (Eq, Show)
 
@@ -105,7 +197,7 @@ data DrawArena = DrawArena
   , daIndexCap :: !(IORef Int)
   , daIndexCount :: !(IORef Int)
   , daIndexPool :: !BufferPool
-  , daCmdStore :: !(IORef (MutableArray RealWorld DrawCmd))
+  , daCmdStore :: !(IORef (MutablePrimArray RealWorld DrawCmd))
   , daCmdCount :: !(IORef Int)
   , daCmdCapacity :: !(IORef Int)
   , daCurrentLayer :: !(IORef Layer)
@@ -113,6 +205,141 @@ data DrawArena = DrawArena
   , daCurrentTexture :: !(IORef Int)
   , daCmdStartIndex :: !(IORef Int)
   }
+
+{-# INLINE layerToWord8 #-}
+layerToWord8 :: Layer -> Word8
+layerToWord8 ly = fromIntegral (fromEnum ly)
+
+{-# INLINE layerFromWord8 #-}
+layerFromWord8 :: Word8 -> Layer
+layerFromWord8 w = toEnum (fromIntegral w)
+
+-- Clip floats (16) + Int tex (8) + two Word32 (8) + Layer Word8 + pad = 40.
+instance Prim DrawCmd where
+  sizeOfType# _ = 40#
+  alignmentOfType# _ = 8#
+  indexByteArray# arr# i# =
+    let o# = i# *# 40#
+     in DrawCmd
+          (F# (indexWord8ArrayAsFloat# arr# o#))
+          (F# (indexWord8ArrayAsFloat# arr# (o# +# 4#)))
+          (F# (indexWord8ArrayAsFloat# arr# (o# +# 8#)))
+          (F# (indexWord8ArrayAsFloat# arr# (o# +# 12#)))
+          (I# (indexWord8ArrayAsInt# arr# (o# +# 16#)))
+          (W32# (indexWord8ArrayAsWord32# arr# (o# +# 24#)))
+          (W32# (indexWord8ArrayAsWord32# arr# (o# +# 28#)))
+          (layerFromWord8 (W8# (indexWord8Array# arr# (o# +# 32#))))
+  readByteArray# arr# i# s0 =
+    let o# = i# *# 40#
+     in case readWord8ArrayAsFloat# arr# o# s0 of
+          (# s1, x# #) ->
+            case readWord8ArrayAsFloat# arr# (o# +# 4#) s1 of
+              (# s2, y# #) ->
+                case readWord8ArrayAsFloat# arr# (o# +# 8#) s2 of
+                  (# s3, w# #) ->
+                    case readWord8ArrayAsFloat# arr# (o# +# 12#) s3 of
+                      (# s4, h# #) ->
+                        case readWord8ArrayAsInt# arr# (o# +# 16#) s4 of
+                          (# s5, tex# #) ->
+                            case readWord8ArrayAsWord32# arr# (o# +# 24#) s5 of
+                              (# s6, off# #) ->
+                                case readWord8ArrayAsWord32# arr# (o# +# 28#) s6 of
+                                  (# s7, cnt# #) ->
+                                    case readWord8Array# arr# (o# +# 32#) s7 of
+                                      (# s8, ly# #) ->
+                                        (# s8
+                                         , DrawCmd
+                                            (F# x#)
+                                            (F# y#)
+                                            (F# w#)
+                                            (F# h#)
+                                            (I# tex#)
+                                            (W32# off#)
+                                            (W32# cnt#)
+                                            (layerFromWord8 (W8# ly#))
+                                         #)
+  writeByteArray# arr# i# cmd s0 =
+    case cmd of
+      DrawCmd (F# x#) (F# y#) (F# w#) (F# h#) (I# tex#) (W32# off#) (W32# cnt#) ly ->
+        let o# = i# *# 40#
+            !(W8# ly#) = layerToWord8 ly
+         in writeWord8Array# arr# (o# +# 32#) ly# $
+              writeWord8ArrayAsWord32# arr# (o# +# 28#) cnt# $
+                writeWord8ArrayAsWord32# arr# (o# +# 24#) off# $
+                  writeWord8ArrayAsInt# arr# (o# +# 16#) tex# $
+                    writeWord8ArrayAsFloat# arr# (o# +# 12#) h# $
+                      writeWord8ArrayAsFloat# arr# (o# +# 8#) w# $
+                        writeWord8ArrayAsFloat# arr# (o# +# 4#) y# $
+                          writeWord8ArrayAsFloat# arr# o# x# s0
+  setByteArray# = primLoopSetByteArray
+  indexOffAddr# addr# i# =
+    let a# = addr# `plusAddr#` (i# *# 40#)
+     in DrawCmd
+          (F# (indexFloatOffAddr# a# 0#))
+          (F# (indexFloatOffAddr# (a# `plusAddr#` 4#) 0#))
+          (F# (indexFloatOffAddr# (a# `plusAddr#` 8#) 0#))
+          (F# (indexFloatOffAddr# (a# `plusAddr#` 12#) 0#))
+          (I# (indexIntOffAddr# (a# `plusAddr#` 16#) 0#))
+          (W32# (indexWord32OffAddr# (a# `plusAddr#` 24#) 0#))
+          (W32# (indexWord32OffAddr# (a# `plusAddr#` 28#) 0#))
+          (layerFromWord8 (W8# (indexWord8OffAddr# (a# `plusAddr#` 32#) 0#)))
+  readOffAddr# addr# i# s0 =
+    let a# = addr# `plusAddr#` (i# *# 40#)
+     in case readFloatOffAddr# a# 0# s0 of
+          (# s1, x# #) ->
+            case readFloatOffAddr# (a# `plusAddr#` 4#) 0# s1 of
+              (# s2, y# #) ->
+                case readFloatOffAddr# (a# `plusAddr#` 8#) 0# s2 of
+                  (# s3, w# #) ->
+                    case readFloatOffAddr# (a# `plusAddr#` 12#) 0# s3 of
+                      (# s4, h# #) ->
+                        case readIntOffAddr# (a# `plusAddr#` 16#) 0# s4 of
+                          (# s5, tex# #) ->
+                            case readWord32OffAddr# (a# `plusAddr#` 24#) 0# s5 of
+                              (# s6, off# #) ->
+                                case readWord32OffAddr# (a# `plusAddr#` 28#) 0# s6 of
+                                  (# s7, cnt# #) ->
+                                    case readWord8OffAddr# (a# `plusAddr#` 32#) 0# s7 of
+                                      (# s8, ly# #) ->
+                                        (# s8
+                                         , DrawCmd
+                                            (F# x#)
+                                            (F# y#)
+                                            (F# w#)
+                                            (F# h#)
+                                            (I# tex#)
+                                            (W32# off#)
+                                            (W32# cnt#)
+                                            (layerFromWord8 (W8# ly#))
+                                         #)
+  writeOffAddr# addr# i# cmd s0 =
+    case cmd of
+      DrawCmd (F# x#) (F# y#) (F# w#) (F# h#) (I# tex#) (W32# off#) (W32# cnt#) ly ->
+        let a# = addr# `plusAddr#` (i# *# 40#)
+            !(W8# ly#) = layerToWord8 ly
+         in writeWord8OffAddr# (a# `plusAddr#` 32#) 0# ly# $
+              writeWord32OffAddr# (a# `plusAddr#` 28#) 0# cnt# $
+                writeWord32OffAddr# (a# `plusAddr#` 24#) 0# off# $
+                  writeIntOffAddr# (a# `plusAddr#` 16#) 0# tex# $
+                    writeFloatOffAddr# (a# `plusAddr#` 12#) 0# h# $
+                      writeFloatOffAddr# (a# `plusAddr#` 8#) 0# w# $
+                        writeFloatOffAddr# (a# `plusAddr#` 4#) 0# y# $
+                          writeFloatOffAddr# a# 0# x# s0
+  setOffAddr# = primLoopSetOffAddr
+
+primLoopSetByteArray :: Prim a => MutableByteArray# s -> Int# -> Int# -> a -> State# s -> State# s
+primLoopSetByteArray arr# i# n# x s0 = go i# n# s0
+  where
+    go j# m# s
+      | isTrue# (m# ==# 0#) = s
+      | otherwise = go (j# +# 1#) (m# -# 1#) (writeByteArray# arr# j# x s)
+
+primLoopSetOffAddr :: Prim a => Addr# -> Int# -> Int# -> a -> State# s -> State# s
+primLoopSetOffAddr addr# i# n# x s0 = go i# n# s0
+  where
+    go j# m# s
+      | isTrue# (m# ==# 0#) = s
+      | otherwise = go (j# +# 1#) (m# -# 1#) (writeOffAddr# addr# j# x s)
 
 vertexCapacity :: Int
 vertexCapacity = 4096
@@ -149,7 +376,7 @@ newDrawArena = do
   daIndexCap <- newIORef indexCapacity
   daIndexCount <- newIORef 0
   daIndexPool <- newIORef []
-  cmdStore <- newArray cmdInitialCapacity (DrawCmd 0 0 0 0 0 0 0 LayerContent)
+  cmdStore <- newPrimArray cmdInitialCapacity
   daCmdStore <- newIORef cmdStore
   daCmdCount <- newIORef 0
   daCmdCapacity <- newIORef cmdInitialCapacity
@@ -265,8 +492,8 @@ growCmdStore :: DrawArena -> Int -> IO ()
 growCmdStore da oldCap = do
   let newCap = oldCap * 2
   arr <- readIORef (daCmdStore da)
-  newArr <- newArray newCap (DrawCmd 0 0 0 0 0 0 0 LayerContent)
-  copyMutableArray newArr 0 arr 0 oldCap
+  newArr <- newPrimArray newCap
+  copyMutablePrimArray newArr 0 arr 0 oldCap
   writeIORef (daCmdStore da) newArr
   writeIORef (daCmdCapacity da) newCap
 
@@ -277,7 +504,7 @@ appendCmd da cmd = do
   cap <- readIORef (daCmdCapacity da)
   when (count >= cap) $ growCmdStore da cap
   arr <- readIORef (daCmdStore da)
-  writeArray arr count cmd
+  writePrimArray arr count cmd
   writeIORef (daCmdCount da) (count + 1)
 
 {-# INLINE currentLayer #-}
@@ -319,10 +546,10 @@ flushCmd da = do
         if cmdCount > 0
           then do
             arr <- readIORef (daCmdStore da)
-            prev <- readArray arr (cmdCount - 1)
+            prev <- readPrimArray arr (cmdCount - 1)
             if sameDrawBatch prev newCmd
               then do
-                writeArray
+                writePrimArray
                   arr
                   (cmdCount - 1)
                   prev {cmdIndexCount = cmdIndexCount prev + cmdIndexCount newCmd}
@@ -785,51 +1012,76 @@ pushText da fm x y txt col = go x txt
               pushQuad da (Rect gx gy gw gh) (gqU0 gq) (gqV0 gq) (gqU1 gq) (gqV1 gq) col
               go (ox + adv) rest
 
-readCmdVector :: MutableArray RealWorld DrawCmd -> Int -> IO (Vector DrawCmd)
-readCmdVector arr count = V.generateM count (readArray arr)
-
 {-# INLINE drawCmdCount #-}
 drawCmdCount :: DrawData -> Int
-drawCmdCount dd = V.length (drawCommands dd)
+drawCmdCount dd = sizeofPrimArray (drawCommands dd)
 
 {-# INLINE drawCmdNull #-}
 drawCmdNull :: DrawData -> Bool
-drawCmdNull dd = V.null (drawCommands dd)
+drawCmdNull dd = sizeofPrimArray (drawCommands dd) == 0
 
 {-# INLINE drawCmdAt #-}
 drawCmdAt :: DrawData -> Int -> DrawCmd
-drawCmdAt dd i = drawCommands dd V.! i
+drawCmdAt dd i = indexPrimArray (drawCommands dd) i
 
 {-# INLINE foldDrawCmds #-}
 foldDrawCmds :: (a -> DrawCmd -> a) -> a -> DrawData -> a
-foldDrawCmds f z dd = V.foldl f z (drawCommands dd)
+foldDrawCmds f z dd =
+  let cmds = drawCommands dd
+      n = sizeofPrimArray cmds
+      go !i !acc
+        | i >= n = acc
+        | otherwise = go (i + 1) (f acc (indexPrimArray cmds i))
+   in go 0 z
 
 {-# INLINE drawCmdFilter #-}
 drawCmdFilter :: (DrawCmd -> Bool) -> DrawData -> Vector DrawCmd
-drawCmdFilter p dd = V.filter p (drawCommands dd)
+drawCmdFilter p dd =
+  let cmds = drawCommands dd
+      n = sizeofPrimArray cmds
+   in V.fromList [indexPrimArray cmds i | i <- [0 .. n - 1], p (indexPrimArray cmds i)]
 
 {-# INLINE drawCmdForLayer #-}
 drawCmdForLayer :: Layer -> DrawData -> Vector DrawCmd
-drawCmdForLayer ly dd = drawCmdFilter ((== ly) . cmdLayer) dd
+drawCmdForLayer ly dd =
+  let LayerSlice off cnt = layerSliceOf dd ly
+      cmds = drawCommands dd
+   in V.generate cnt (\i -> indexPrimArray cmds (off + i))
+
+{-# INLINE forDrawCmdsInLayer_ #-}
+forDrawCmdsInLayer_ :: Layer -> DrawData -> (DrawCmd -> IO ()) -> IO ()
+forDrawCmdsInLayer_ ly dd f =
+  let LayerSlice off cnt = layerSliceOf dd ly
+      cmds = drawCommands dd
+      go !i
+        | i >= cnt = pure ()
+        | otherwise = f (indexPrimArray cmds (off + i)) >> go (i + 1)
+   in go 0
+
+{-# INLINE layerSliceOf #-}
+layerSliceOf :: DrawData -> Layer -> LayerSlice
+layerSliceOf dd ly = indexPrimArray (drawLayerSlices dd) (fromEnum ly)
 
 drawCmdElemsForLayer :: Layer -> DrawData -> [DrawCmd]
-drawCmdElemsForLayer ly dd = V.toList (drawCmdForLayer ly dd)
+drawCmdElemsForLayer ly dd =
+  let LayerSlice off cnt = layerSliceOf dd ly
+      cmds = drawCommands dd
+   in [indexPrimArray cmds (off + i) | i <- [0 .. cnt - 1]]
 
--- | One pass over draw commands, bucketed by layer in paint order.
+-- | Layer buckets as contiguous slices. No per-frame list partition.
 drawCmdPartitionByLayer :: DrawData -> ([DrawCmd], [DrawCmd], [DrawCmd], [DrawCmd])
 drawCmdPartitionByLayer dd =
-  let (bg, ct, ov, ch) = foldDrawCmds go ([], [], [], []) dd
-   in (reverse bg, reverse ct, reverse ov, reverse ch)
-  where
-    go (bg, ct, ov, ch) cmd =
-      case cmdLayer cmd of
-        LayerBackground -> (cmd : bg, ct, ov, ch)
-        LayerContent -> (bg, cmd : ct, ov, ch)
-        LayerOverlay -> (bg, ct, cmd : ov, ch)
-        LayerChrome -> (bg, ct, ov, cmd : ch)
+  ( drawCmdElemsForLayer LayerBackground dd
+  , drawCmdElemsForLayer LayerContent dd
+  , drawCmdElemsForLayer LayerOverlay dd
+  , drawCmdElemsForLayer LayerChrome dd
+  )
 
 drawCmdElems :: DrawData -> [DrawCmd]
-drawCmdElems dd = V.toList (drawCommands dd)
+drawCmdElems dd =
+  let cmds = drawCommands dd
+      n = sizeofPrimArray cmds
+   in [indexPrimArray cmds i | i <- [0 .. n - 1]]
 
 {-# INLINE finishDraw #-}
 finishDraw :: DrawArena -> IO DrawData
@@ -841,7 +1093,7 @@ finishDraw da = do
   iCount <- readIORef (daIndexCount da)
   count <- readIORef (daCmdCount da)
   arr <- readIORef (daCmdStore da)
-  cmds <- readCmdVector arr count
+  (cmds, slices) <- groupCmdsByLayer arr count
   pure
     DrawData
       { drawVertices = vFPtr
@@ -849,4 +1101,58 @@ finishDraw da = do
       , drawIndices = iFPtr
       , drawIndexCount = iCount
       , drawCommands = cmds
+      , drawLayerSlices = slices
       }
+
+groupCmdsByLayer ::
+  MutablePrimArray RealWorld DrawCmd ->
+  Int ->
+  IO (PrimArray DrawCmd, PrimArray LayerSlice)
+groupCmdsByLayer src n = do
+  nBg <- countLayer src n LayerBackground
+  nCt <- countLayer src n LayerContent
+  nOv <- countLayer src n LayerOverlay
+  nCh <- countLayer src n LayerChrome
+  let offBg = 0
+      offCt = offBg + nBg
+      offOv = offCt + nCt
+      offCh = offOv + nOv
+  dest <- newPrimArray n
+  cBg <- newIORef offBg
+  cCt <- newIORef offCt
+  cOv <- newIORef offOv
+  cCh <- newIORef offCh
+  let writeSlot ly cmd = do
+        slotRef <-
+          case ly of
+            LayerBackground -> pure cBg
+            LayerContent -> pure cCt
+            LayerOverlay -> pure cOv
+            LayerChrome -> pure cCh
+        i <- readIORef slotRef
+        writePrimArray dest i cmd
+        writeIORef slotRef (i + 1)
+      scatter !i
+        | i >= n = pure ()
+        | otherwise = do
+            cmd <- readPrimArray src i
+            writeSlot (cmdLayer cmd) cmd
+            scatter (i + 1)
+  scatter 0
+  frozen <- unsafeFreezePrimArray dest
+  sliceArr <- newPrimArray 4
+  writePrimArray sliceArr 0 (LayerSlice offBg nBg)
+  writePrimArray sliceArr 1 (LayerSlice offCt nCt)
+  writePrimArray sliceArr 2 (LayerSlice offOv nOv)
+  writePrimArray sliceArr 3 (LayerSlice offCh nCh)
+  slices <- unsafeFreezePrimArray sliceArr
+  pure (frozen, slices)
+
+countLayer :: MutablePrimArray RealWorld DrawCmd -> Int -> Layer -> IO Int
+countLayer src n ly = go 0 0
+  where
+    go !i !acc
+      | i >= n = pure acc
+      | otherwise = do
+          cmd <- readPrimArray src i
+          go (i + 1) (if cmdLayer cmd == ly then acc + 1 else acc)

@@ -1,0 +1,38 @@
+nano-ui perf after Step 3 (SoA arena, unbox, streaming)
+date: 2026-08-31
+vs 0126013 Step 2 / 953df88 baseline
+
+changes:
+  NodeArenaArrays SoA behind one IORef; getters read arrays once
+  reuse BasicHashTable across frames (fold keys then delete); drop naKeyIndex
+  Prim DrawCmd / LayerSlice; DrawData holds PrimArray plus 4 layer slices
+  finishDraw groups cmds by layer into unboxed arrays
+  SpanArena foldSpanArena / foldSpanArenaOccluded (term raster stamps without 5-tuples)
+  WidgetStore storePoint for window/drag/overlay/color-picker pairs
+  table column widths/order stay on storeFloatList / storeIntList
+
+cabal test all: PASS
+cabal run nano-ui-id-bench:
+  burst4096 / scopedWidgets: 0 bytes during runFrame (id-zero-alloc PASS)
+  burst4096:     353 us, 822 KB (tasty-bench)
+  scopedWidgets: 267 us, 571 KB
+
+nano-ui-profile 3000 frames:
+  total_time:  3.44s  (step2 4.38s, baseline 6.55s)
+  total_alloc: 2890.8 MB (step2 3142.8 MB, baseline 5599.2 MB)
+  vs baseline: 48.4% less
+  vs step 2:    8.0% less
+
+plan targets:
+  currentId / nextId: 0 bytes (id-zero-alloc PASS; not in profile)
+  stripButtonBrackets: 0.0 MB (0.00% alloc; target < 0.5%)
+  solver list cons: countLayoutChildren / snapshotScratchMain gone
+  total frame alloc: 48.4% reduction vs 5599.2 MB (target > 40%)
+
+key alloc vs step 2 (MB):
+  Layout.Solve.$wwithAxisSnaps         150.3  (was 153.8)
+  Layout.Solve.$wpositionChildren      108.8  (was 113.5)
+  Layout.Solve.$wmeasurePass           100.3  (was 100.3)
+  Layout.Arena hashtable delete         14.0  (reuse table; no HT.new)
+  Draw.$wgroupCmdsByLayer                0.8
+  WidgetText.stripButtonBrackets         0.0

@@ -367,6 +367,7 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
                   storeKeyChangeRects (storeInt oldStore) (storeInt newStore) oldRects newRects
                     ++ storeKeyChangeRects (storeFloat oldStore) (storeFloat newStore) oldRects newRects
                     ++ storeKeyChangeRects (storeFloatList oldStore) (storeFloatList newStore) oldRects newRects
+                    ++ storeKeyChangeRects (storePoint oldStore) (storePoint newStore) oldRects newRects
                 textStoreRs =
                   storeKeyChangeRects (storeText oldStore) (storeText newStore) oldRects newRects
             radioStoreRs <- radioStoreChangeRects ctx oldStore newStore oldRects newRects

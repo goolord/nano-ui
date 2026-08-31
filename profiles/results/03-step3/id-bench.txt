@@ -1,0 +1,11 @@
+Build profile: -w ghc-9.14.1 -O1
+cabal run nano-ui-id-bench --enable-benchmarks
+All
+  id/nextId
+    burst4096:     OK
+      353  us +/- 34 us, 822 KB allocated, 5.8 KB copied, 173 MB peak memory
+    scopedWidgets: OK
+      267  us +/- 4.3 us, 571 KB allocated, 5.2 KB copied, 174 MB peak memory
+
+All 2 tests passed (9.53s)
+id-zero-alloc (cabal test): PASS

@@ -25,9 +25,7 @@ import NanoUI.Context
   , WindowResizeEdge (..)
   , getStore
   , intKey
-  , listPair
   , markDirty
-  , pairList
   , setStore
   , slotKey
   , slotWinSize
@@ -100,12 +98,12 @@ windowInnerEastResizeHit ctx winIdx winRect mouse@(V2 mx _) = do
 lookupWindowPos :: Context -> WidgetId -> IO (Maybe (Float, Float))
 lookupWindowPos ctx wid = do
   store <- getStore ctx
-  pure (IM.lookup (intKey wid) (storeFloatList store) >>= listPair)
+  pure (IM.lookup (intKey wid) (storePoint store))
 
 lookupWindowSize :: Context -> WidgetId -> IO (Maybe (Float, Float))
 lookupWindowSize ctx wid = do
   store <- getStore ctx
-  pure (IM.lookup (slotKey slotWinSize (intKey wid)) (storeFloatList store) >>= listPair)
+  pure (IM.lookup (slotKey slotWinSize (intKey wid)) (storePoint store))
 
 persistWindowPositions :: Context -> IO ()
 persistWindowPositions ctx = do
@@ -127,9 +125,9 @@ persistWindowPositions ctx = do
                 let k = intKey wid
                 pure
                   acc
-                    { storeFloatList =
-                        IM.insert k (pairList (x, y)) $
-                          IM.insert (slotKey slotWinSize k) (pairList (w, h)) (storeFloatList acc)
+                    { storePoint =
+                        IM.insert k (x, y) $
+                          IM.insert (slotKey slotWinSize k) (w, h) (storePoint acc)
                     }
           foldlWin (idx + 1) count acc'
 
@@ -149,8 +147,8 @@ updateWindowDrag ctx inp = do
               setStore
                 ctx
                 ( store
-                    { storeFloatList =
-                        IM.insert (intKey wid) (pairList pos) (storeFloatList store)
+                    { storePoint =
+                        IM.insert (intKey wid) pos (storePoint store)
                     }
                 )
               markDirty ctx
@@ -317,9 +315,9 @@ updateWindowResize ctx inp winW winH = do
           setStore
             ctx
             ( store
-                { storeFloatList =
-                    IM.insert (slotKey slotWinSize (intKey (wrdWidget wrd))) (pairList (nw, nh)) $
-                      IM.insert (intKey (wrdWidget wrd)) (pairList (nx, ny)) (storeFloatList store)
+                { storePoint =
+                    IM.insert (slotKey slotWinSize (intKey (wrdWidget wrd))) (nw, nh) $
+                      IM.insert (intKey (wrdWidget wrd)) (nx, ny) (storePoint store)
                 }
             )
           relayoutWindow ctx winW winH (wrdWidget wrd) nw nh

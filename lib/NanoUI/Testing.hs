@@ -81,10 +81,12 @@ module NanoUI.Testing
   , DrawData (..)
   , DrawCmd (..)
   , Layer (..)
+  , LayerSlice (..)
   , drawCmdNull
   , drawCmdElems
   , drawCmdFilter
   , drawCmdForLayer
+  , forDrawCmdsInLayer_
   , drawCmdElemsForLayer
   , drawCmdPartitionByLayer
   , drawCmdCount
@@ -178,11 +180,13 @@ import NanoUI.Draw
   ( DrawCmd (..)
   , DrawData (..)
   , Layer (..)
+  , LayerSlice (..)
   , backdropDimTextureId
   , glyphAtlasTextureId
   , drawCmdElems
   , drawCmdFilter
   , drawCmdForLayer
+  , forDrawCmdsInLayer_
   , drawCmdElemsForLayer
   , drawCmdPartitionByLayer
   , drawCmdNull

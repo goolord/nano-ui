@@ -41,7 +41,7 @@ import NanoUI.Font
   )
 import NanoUI.Host (HostProfile, isCellHost)
 import NanoUI.Id (WidgetId (..))
-import NanoUI.Store (WidgetStore (..), listPair)
+import NanoUI.Store (WidgetStore (..))
 import NanoUI.Style (Style (..))
 import NanoUI.Types
   ( Color (..)
@@ -109,7 +109,7 @@ widgetStoreHue store wid fallback =
 widgetStoreSv :: WidgetStore -> WidgetId -> Color -> (Float, Float)
 widgetStoreSv store wid fallback =
   let (_, s0, v0) = rgbToHsv (widgetStoreColor store wid fallback)
-   in fromMaybe (s0, v0) (IM.lookup (intKey wid) (storeFloatList store) >>= listPair)
+   in fromMaybe (s0, v0) (IM.lookup (intKey wid) (storePoint store))
 
 -- Hue slider is a line, not a wheel.
 clampHue :: Float -> Float

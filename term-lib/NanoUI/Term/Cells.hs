@@ -44,9 +44,10 @@ import NanoUI
 import NanoUI.Testing
   ( DrawCmd (..)
   , DrawData (..)
+  , Layer (..)
   , SpanArena
   , backdropDimTextureId
-  , drawCmdPartitionByLayer
+  , forDrawCmdsInLayer_
   , foldSpanArena
   , indexSize
   , terminalTextColumns
@@ -125,15 +126,14 @@ rasterizeLayered width height drawData baseSpans overlaySpans = do
   arr <- newPrimArray len
   setPrimArray arr 0 len 0
   fillBlanks arr len
-  let (bg, ct, ov, ch) = drawCmdPartitionByLayer drawData
-  mapM_ (applyCmd arr w h drawData) bg
-  mapM_ (applyCmd arr w h drawData) ct
+  forDrawCmdsInLayer_ LayerBackground drawData (applyCmd arr w h drawData)
+  forDrawCmdsInLayer_ LayerContent drawData (applyCmd arr w h drawData)
   -- Text spans after content quads so scroll tracks do not erase box rules.
   mapM_ (stampSpan arr w h) baseSpans
-  mapM_ (applyCmd arr w h drawData) ov
+  forDrawCmdsInLayer_ LayerOverlay drawData (applyCmd arr w h drawData)
   -- Chrome (window scrollbars) before overlay text. A 1-cell bar expands to 2
   -- cells under floor/ceiling, and would wipe a close-icon trail if it ran last.
-  mapM_ (applyCmd arr w h drawData) ch
+  forDrawCmdsInLayer_ LayerChrome drawData (applyCmd arr w h drawData)
   mapM_ (stampSpan arr w h) overlaySpans
   frozen <- unsafeFreezePrimArray arr
   pure Cells {cellsW = w, cellsH = h, cellsData = frozen}
@@ -152,13 +152,12 @@ rasterizeLayeredArena width height drawData baseArena overlayArena = do
   arr <- newPrimArray len
   setPrimArray arr 0 len 0
   fillBlanks arr len
-  let (bg, ct, ov, ch) = drawCmdPartitionByLayer drawData
-      stamp r t fg bg' c = stampSpan arr w h (r, t, fg, bg', c)
-  mapM_ (applyCmd arr w h drawData) bg
-  mapM_ (applyCmd arr w h drawData) ct
+  let stamp r t fg bg' c = stampSpan arr w h (r, t, fg, bg', c)
+  forDrawCmdsInLayer_ LayerBackground drawData (applyCmd arr w h drawData)
+  forDrawCmdsInLayer_ LayerContent drawData (applyCmd arr w h drawData)
   foldSpanArena baseArena stamp
-  mapM_ (applyCmd arr w h drawData) ov
-  mapM_ (applyCmd arr w h drawData) ch
+  forDrawCmdsInLayer_ LayerOverlay drawData (applyCmd arr w h drawData)
+  forDrawCmdsInLayer_ LayerChrome drawData (applyCmd arr w h drawData)
   foldSpanArena overlayArena stamp
   frozen <- unsafeFreezePrimArray arr
   pure Cells {cellsW = w, cellsH = h, cellsData = frozen}

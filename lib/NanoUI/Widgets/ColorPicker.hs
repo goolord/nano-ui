@@ -23,7 +23,6 @@ import NanoUI.Context
   , WidgetStore (..)
   , getStore
   , intKey
-  , pairList
   , registerFocusable
   , setStore
   )
@@ -54,7 +53,7 @@ colorPicker lbl initial = do
             ( store0
                 { storeInt = IM.insert key (fromIntegral (colorToWord32 initial)) (storeInt store0)
                 , storeFloat = IM.insert key (clampHue hInit) (storeFloat store0)
-                , storeFloatList = IM.insert key (pairList (sInit, vInit)) (storeFloatList store0)
+                , storePoint = IM.insert key (sInit, vInit) (storePoint store0)
                 }
             )
   resp <- addWidget wid NodeColorPicker (colorPickerLabelText lbl) 0 (fillW defaultLayout)
@@ -96,7 +95,7 @@ colorPicker lbl initial = do
         ( st
             { storeInt = IM.insert key (fromIntegral (colorToWord32 dragged)) (storeInt st)
             , storeFloat = IM.insert key nextHue (storeFloat st)
-            , storeFloatList = IM.insert key (pairList (nextS, nextV)) (storeFloatList st)
+            , storePoint = IM.insert key (nextS, nextV) (storePoint st)
             }
         )
   nav <- useKeyNav wid
@@ -122,6 +121,6 @@ applyColorPickerKeys ctx wid current nav = do
       ( store
           { storeInt = IM.insert (intKey wid) (fromIntegral (colorToWord32 next)) (storeInt store)
           , storeFloat = IM.insert (intKey wid) nextHue (storeFloat store)
-          , storeFloatList = IM.insert (intKey wid) (pairList (s, nextV)) (storeFloatList store)
+          , storePoint = IM.insert (intKey wid) (s, nextV) (storePoint store)
           }
       )

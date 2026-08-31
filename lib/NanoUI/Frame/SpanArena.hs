@@ -10,10 +10,11 @@ module NanoUI.Frame.SpanArena
   , spanArenaToList
   , spanArenaToListOccluded
   , foldSpanArena
+  , foldSpanArenaOccluded
   ) where
 
-import Control.Monad (when)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Control.Monad (unless, when)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import qualified Data.IntMap.Strict as IM
 import Data.Primitive.Array (MutableArray, copyMutableArray, newArray, readArray, writeArray)
 import Data.Primitive.PrimArray
@@ -131,24 +132,34 @@ spanArenaToList sa = spanArenaToListOccluded IM.empty sa
 
 spanArenaToListOccluded :: IM.IntMap Rect -> SpanArena -> IO [(Rect, Text, Color, Color, Rect)]
 spanArenaToListOccluded panels sa = do
+  accRef <- newIORef []
+  foldSpanArenaOccluded panels sa $ \r t fg bg c ->
+    modifyIORef' accRef ((r, t, fg, bg, c) :)
+  reverse <$> readIORef accRef
+
+foldSpanArena :: SpanArena -> (Rect -> Text -> Color -> Color -> Rect -> IO ()) -> IO ()
+foldSpanArena = foldSpanArenaOccluded IM.empty
+
+{-# INLINE foldSpanArenaOccluded #-}
+foldSpanArenaOccluded ::
+  IM.IntMap Rect ->
+  SpanArena ->
+  (Rect -> Text -> Color -> Color -> Rect -> IO ()) ->
+  IO ()
+foldSpanArenaOccluded panels sa f = do
   n <- readIORef (saCount sa)
-  if n <= 0
-    then pure []
-    else do
-      let panelRects
-            | IM.null panels = []
-            | otherwise = IM.elems panels
-      go (n - 1) [] panelRects
-  where
-    go !i acc panelRects
-      | i < 0 = pure acc
-      | otherwise = do
-          (Rect x y w h, txt, fg, bg, clip) <- readSpanAt sa i
-          acc' <-
-            if null panelRects || not (spanOccluded panelRects (Rect x y w h) clip)
-              then pure ((Rect x y w h, txt, fg, bg, clip) : acc)
-              else pure acc
-          go (i - 1) acc' panelRects
+  let panelRects
+        | IM.null panels = []
+        | otherwise = IM.elems panels
+  let go !i
+        | i >= n = pure ()
+        | otherwise = do
+            (Rect x y w h, txt, fg, bg, clip) <- readSpanAt sa i
+            let rect = Rect x y w h
+            unless (not (null panelRects) && spanOccluded panelRects rect clip) $
+              f rect txt fg bg clip
+            go (i + 1)
+  go 0
 
 readSpanAt :: SpanArena -> Int -> IO (Rect, Text, Color, Color, Rect)
 readSpanAt sa i = do
@@ -170,14 +181,3 @@ spanOccluded panelRects rect clip =
   case rectIntersect rect clip of
     Nothing -> True
     Just visible -> any (rectFullyInside visible) panelRects
-
-foldSpanArena :: SpanArena -> (Rect -> Text -> Color -> Color -> Rect -> IO ()) -> IO ()
-foldSpanArena sa f = do
-  n <- readIORef (saCount sa)
-  let go !i
-        | i >= n = pure ()
-        | otherwise = do
-            (Rect x y w h, txt, fg, bg, clip) <- readSpanAt sa i
-            f (Rect x y w h) txt fg bg clip
-            go (i + 1)
-  go 0
