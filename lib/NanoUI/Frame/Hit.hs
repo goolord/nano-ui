@@ -25,11 +25,12 @@ import Data.IORef (readIORef)
 import Data.Maybe (isJust)
 import qualified Data.HashTable.IO as HT
 import NanoUI.Context (Context (..), getPrevRect, getScrollOffset, getPrevClipRect)
+import NanoUI.Host (HostProfile, isCellHost)
 import NanoUI.Id (WidgetId)
 import NanoUI.Layout.Arena
   ( DirTag (..)
   , NodeIdx
-  , NodeType (NodeModal, NodePopup, NodeWindow)
+  , NodeType (NodeModal, NodePopup, NodeScrollContainer, NodeWindow)
   , findNodeRevM
   , getDirection
   , getClipRect
@@ -195,6 +196,7 @@ nodeInteractionHit ctx idx rect mouse = do
 scrollViewportHit :: Context -> NodeIdx -> V2 -> IO Bool
 scrollViewportHit ctx idx mouse = go idx
   where
+    host = ctxHostProfile ctx
     go i
       | i <= 0 = pure True
       | otherwise = do
@@ -203,7 +205,7 @@ scrollViewportHit ctx idx mouse = go idx
             then pure True
             else do
               nt <- getNodeType (ctxNodeArena ctx) p
-              if isScrollNode nt
+              if scrollViewportGate host nt
                 then do
                   wid <- getWidgetId (ctxNodeArena ctx) p
                   mClip <- getPrevClipRect ctx wid
@@ -212,6 +214,14 @@ scrollViewportHit ctx idx mouse = go idx
                     Just clip ->
                       if rectContains clip mouse then go p else pure False
                 else go p
+
+-- Desktop modals are not scroll containers; only cell-host modals scroll.
+scrollViewportGate :: HostProfile -> NodeType -> Bool
+scrollViewportGate host nt =
+  case nt of
+    NodeScrollContainer -> True
+    NodeModal -> isCellHost host
+    _ -> False
 
 parentScrollShift :: Context -> NodeIdx -> (Float, Float) -> IO (Float, Float)
 parentScrollShift ctx p (sx, sy) = do
