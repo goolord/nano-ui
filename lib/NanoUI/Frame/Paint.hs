@@ -75,7 +75,7 @@ import NanoUI.Style
   , themeSeparator
   )
 import NanoUI.Types (Color (..), ImageId (..), Rect (..), colorA, colorRGBA, clamp01)
-import NanoUI.WidgetMarkers (buttonFlags)
+import NanoUI.WidgetText (buttonFlags)
 import NanoUI.WidgetText (selectChevronCenterX, sliderLabelText, treeParseRow)
 import NanoUI.Frame.Chrome
   ( fillStyledRect

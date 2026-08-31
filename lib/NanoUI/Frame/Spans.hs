@@ -82,7 +82,7 @@ import NanoUI.Layout.Arena
 import NanoUI.Layout.Solve (scrollBarSlotOf)
 import NanoUI.Style (Padding (..), Style (..), Theme (..), styleBg, styleFg, themePanel, themeSeparator, themeWindow)
 import NanoUI.Types (Color (..), Rect (..), colorRGBA, lerpColor, rectH, rectIntersect, rectW, rectX, rectY)
-import NanoUI.WidgetMarkers (isCloseButtonText)
+import NanoUI.WidgetText (isCloseButtonText)
 import NanoUI.WidgetText
   ( colorPickerToHex
   , selectChevronReserve

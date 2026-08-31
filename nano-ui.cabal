@@ -113,7 +113,6 @@ library
         NanoUI.Style
         NanoUI.Types
         NanoUI.WidgetText
-        NanoUI.WidgetMarkers
         NanoUI.Widgets
         NanoUI.Widgets.Internal
         NanoUI.Widgets.Node
