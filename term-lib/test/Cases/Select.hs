@@ -159,13 +159,19 @@ runTreeExpandDamageTest _ failed = do
       spansClick <- collectTextSpans ctx
       assert failed (any (\(_, t, _, _, _) -> "child" `T.isInfixOf` t) spansClick)
       dClick <- takeDamage ctx
-      assertEq failed dClick DamageFull
-      _ <- runFrame ctx inp0 ui
+      case dClick of
+        DamageFull -> assert failed False
+        DamageClip r -> assert failed (not (damageIsEmpty dClick) && rectW r < 40 && rectH r < 12)
+      _ <- runFrame ctx press ui
+      _ <- runFrame ctx release ui
       spansNext <- collectTextSpans ctx
       assert failed (not (any (\(_, t, _, _, _) -> "child" `T.isInfixOf` t) spansNext))
       assert failed (any (\(_, t, _, _, _) -> "root" `T.isInfixOf` t) spansNext)
       dNext <- takeDamage ctx
-      assertEq failed dNext DamageFull
+      case dNext of
+        DamageFull -> assert failed False
+        DamageClip r -> assert failed (not (damageIsEmpty dNext) && rectW r < 40 && rectH r < 12)
+      _ <- runFrame ctx inp0 ui
       _ <- runFrame ctx inp0 ui
       dSettled <- takeDamage ctx
       assert failed (dSettled /= DamageFull)

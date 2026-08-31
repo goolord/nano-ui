@@ -1,6 +1,7 @@
 module Cases
   ( module Cases.Animation
   , module Cases.ContextMenu
+  , module Cases.Damage
   , module Cases.Demo
   , module Cases.Modal
   , module Cases.Scroll
@@ -65,6 +66,7 @@ module Cases
 
 import Cases.Animation
 import Cases.ContextMenu
+import Cases.Damage
 import Cases.Demo
 import Cases.Modal
 import Cases.Scroll
@@ -368,7 +370,9 @@ runHoverDamageTest _ failed = do
   let inpClick = inp1 {inputMouseDown = True, inputMousePressed = True}
   _ <- runFrame ctx inpClick ui
   d2 <- takeDamage ctx
-  assertEq failed d2 DamageFull
+  case d2 of
+    DamageFull -> assert failed False
+    DamageClip (Rect _ _ w h) -> assert failed (w * h < 240 * 80 * 0.5)
 
 
 runAsciiTest :: Context -> IORef Int -> IO ()

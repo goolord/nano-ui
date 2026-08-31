@@ -106,7 +106,9 @@ runScrollDamageTest _ failed = do
   let inpScroll = inpHover {inputScroll = V2 0 1}
   _ <- runFrame ctx inpScroll ui
   dScroll <- takeDamage ctx
-  assertEq failed dScroll DamageFull
+  case dScroll of
+    DamageFull -> assert failed False
+    DamageClip r -> assert failed (rectH r <= 60 + defaultDamageSlop * 2 && not (damageIsEmpty dScroll))
 
 runTableScrollTest :: Context -> IORef Int -> IO ()
 runTableScrollTest _ failed = do

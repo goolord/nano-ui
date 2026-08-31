@@ -39,6 +39,15 @@ module NanoUI.Context
   , isDirty
   , setWakeLoop
   , takeDamage
+  , DamageRequest (..)
+  , requestDamage
+  , damageWidget
+  , damageKey
+  , damageRect
+  , damagePeers
+  , damageFull
+  , clearDamageRequests
+  , getDamageRequests
   , getHotId
   , getFocusId
   , anyAnimating
@@ -122,12 +131,20 @@ import NanoUI.Context.Internal
   , atlasTextureId
   , beginModal
   , clearDirty
+  , clearDamageRequests
   , clearMeasureCache
   , clearPopupConfigs
+  , DamageRequest (..)
+  , damageFull
+  , damageKey
+  , damagePeers
+  , damageRect
+  , damageWidget
   , drainMessages
   , enableMeasureCache
   , endModal
   , getAnimationValue
+  , getDamageRequests
   , getFocusId
   , getFocusables
   , getFocusablesPrim
@@ -153,6 +170,7 @@ import NanoUI.Context.Internal
   , registerImage
   , registerImages
   , registerPopupConfig
+  , requestDamage
   , seedFloatingPanel
   , setAnimationValue
   , setDisabled

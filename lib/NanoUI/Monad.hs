@@ -17,6 +17,11 @@ module NanoUI.Monad
   , askContext
   , askInput
   , askHost
+  , damageWidgetNow
+  , damageKeyNow
+  , damageRectNow
+  , damageGroupNow
+  , damageFullNow
   )
 where
 
@@ -40,7 +45,8 @@ import Effectful.Dispatch.Static
   , getStaticRep
   , unsafeEff_
   )
-import NanoUI.Context (Context (..), askHostIO, pushMessage)
+import NanoUI.Context (Context (..), askHostIO, damageFull, damageKey, damagePeers, damageRect, damageWidget, pushMessage)
+import NanoUI.Types (DamageBounds, Rect)
 import NanoUI.Id
   ( IdContext (IdContext, siblingId)
   , WidgetId (..)
@@ -162,3 +168,33 @@ askHost :: (Typeable a, Ui :> es) => Eff es (Maybe a)
 askHost = do
   ctx <- askContext
   uiIO (askHostIO ctx)
+
+{-# INLINE damageWidgetNow #-}
+damageWidgetNow :: (Ui :> es) => WidgetId -> DamageBounds -> Eff es ()
+damageWidgetNow wid bounds = do
+  ctx <- askContext
+  uiIO (damageWidget ctx wid bounds)
+
+{-# INLINE damageKeyNow #-}
+damageKeyNow :: (Ui :> es) => Int -> DamageBounds -> Eff es ()
+damageKeyNow k bounds = do
+  ctx <- askContext
+  uiIO (damageKey ctx k bounds)
+
+{-# INLINE damageRectNow #-}
+damageRectNow :: (Ui :> es) => Rect -> Eff es ()
+damageRectNow r = do
+  ctx <- askContext
+  uiIO (damageRect ctx r)
+
+{-# INLINE damageGroupNow #-}
+damageGroupNow :: (Ui :> es) => [WidgetId] -> DamageBounds -> Eff es ()
+damageGroupNow wids bounds = do
+  ctx <- askContext
+  uiIO (damagePeers ctx wids bounds)
+
+{-# INLINE damageFullNow #-}
+damageFullNow :: (Ui :> es) => Eff es ()
+damageFullNow = do
+  ctx <- askContext
+  uiIO (damageFull ctx)

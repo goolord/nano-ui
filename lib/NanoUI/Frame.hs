@@ -43,7 +43,7 @@ import NanoUI.Context
   , tickAnimations
   )
 import NanoUI.Context.Internal (beginFrameModal)
-import NanoUI.Damage (updatePrevNodeTexts, updatePrevRects, writeDamage)
+import NanoUI.Damage (updatePrevRects, writeDamage)
 import NanoUI.Draw
   ( DrawData
   , Layer (..)
@@ -170,7 +170,6 @@ runFrameEff unlift ctx inp ui = do
   oldFocusRect <- getPrevRect ctx oldFocus
   oldFloatingRects <- readIORef (ctxPrevFloatingRects ctx)
   oldRects <- readIORef (ctxPrevRects ctx)
-  oldTexts <- readIORef (ctxPrevNodeTexts ctx)
   oldSize <- readIORef (ctxLastWindowSize ctx)
   oldStore <- getStore ctx
   wasDirty <- isDirty ctx
@@ -247,8 +246,6 @@ runFrameEff unlift ctx inp ui = do
   drawSelectOverlays ctx inp
   drawTextInputMenuOverlays ctx inp
   drawData <- finishDraw (ctxDrawArena ctx)
-  updatePrevNodeTexts ctx
-  newTexts <- readIORef (ctxPrevNodeTexts ctx)
   overlayOpen <- overlayMenuOpen ctx
   writeDamage
     ctx
@@ -265,13 +262,9 @@ runFrameEff unlift ctx inp ui = do
     oldFocusRect
     oldFloatingRects
     oldRects
-    oldTexts
-    newTexts
     animKeys
   msgs <- drainMessages ctx
   dirtyAfterUi <- isDirty ctx
-  -- Keep mid-frame markDirty for the next loop. Open and close both flip
-  -- the modal flag one frame after the click, so that follow-up must run.
   writeIORef (ctxDirty ctx) dirtyAfterUi
   pure (result, msgs, drawData, dirtyAfterUi)
 
