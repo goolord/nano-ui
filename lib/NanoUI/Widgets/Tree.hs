@@ -30,13 +30,12 @@ import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
 import NanoUI.Store (WidgetStore (..))
 import NanoUI.Style (defaultLayout, fillW, gap, tight)
-import NanoUI.Types (Rect (..), rectContains, rectUnion)
+import NanoUI.Types (Rect (..), rectContains)
 import NanoUI.WidgetText (treePackRow)
 import NanoUI.Widgets.Layout (column)
 import NanoUI.Widgets.Node
   ( Response (..)
   , addWidgetResp
-  , mkResponse
   , setChanged
   )
 
@@ -96,21 +95,7 @@ allParentIndices items =
   ]
 
 mergeResponses :: [Response] -> Response
-mergeResponses [] = mkResponse (WidgetId 0) (Rect 0 0 0 0) False False False False
-mergeResponses (r : rs) =
-  foldl'
-    ( \acc x ->
-        Response
-          { rawRespId = rawRespId x
-          , rawRespRect = rectUnion (rawRespRect acc) (rawRespRect x)
-          , rawRespHovered = rawRespHovered acc || rawRespHovered x
-          , rawRespPressed = rawRespPressed acc || rawRespPressed x
-          , rawRespClicked = rawRespClicked acc || rawRespClicked x
-          , rawRespChanged = rawRespChanged acc || rawRespChanged x
-          }
-    )
-    r
-    rs
+mergeResponses = mconcat
 
 parentVisibleIdx :: [FlatRow] -> Int -> Int
 parentVisibleIdx rows idx =

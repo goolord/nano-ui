@@ -53,12 +53,12 @@ import NanoUI.Layout.Arena
   , arenaCount
   , findNodeRevM
   , getNodeType
+  , getParent
   , getRect
-  , getText
+  , getStyleIdx
   , getWidgetId
   )
 import NanoUI.Types (Rect (..), V2 (..), rectContains, rectH, rectW, v2X)
-import NanoUI.WidgetText (radioParseOption)
 import NanoUI.Frame.Focus (filterModalFocusables, tabNext, tabNextFocusables)
 import NanoUI.Frame.Hit (modalTreeOpen, overlayHitAllowed)
 import NanoUI.Frame.Redraw (probeHotId)
@@ -182,15 +182,18 @@ finalizePointerRelease ctx inp =
                         }
                     )
                 NodeRadio -> do
-                  store <- getStore ctx
-                  txt <- getText (ctxNodeArena ctx) idx
-                  let (groupKey, optIdx, _) = radioParseOption txt
-                  setStore
-                    ctx
-                    ( store
-                        { storeInt = IM.insert groupKey optIdx (storeInt store)
-                        }
-                    )
+                  parent <- getParent (ctxNodeArena ctx) idx
+                  when (parent >= 0) $ do
+                    store <- getStore ctx
+                    optIdx <- getStyleIdx (ctxNodeArena ctx) idx
+                    groupWid <- getWidgetId (ctxNodeArena ctx) parent
+                    let groupKey = intKey groupWid
+                    setStore
+                      ctx
+                      ( store
+                          { storeInt = IM.insert groupKey optIdx (storeInt store)
+                          }
+                      )
                 _ -> pure ()
         writeIORef (ctxActiveId ctx) (WidgetId 0)
         when releasedOver $

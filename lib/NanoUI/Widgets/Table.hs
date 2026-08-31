@@ -38,7 +38,6 @@ import Effectful (Eff, type (:>))
 import NanoUI.Context (Context (..), getStore, intKey, markDirty, setStore)
 import NanoUI.Font (measureText, monoFontMarker, scrollBarGutter)
 import NanoUI.Host (isCellHost)
-import NanoUI.Id (WidgetId (..))
 import NanoUI.Input
   ( Input (..)
   , inputMouseDown
@@ -62,7 +61,7 @@ import NanoUI.Style
   , fillW
   , tight
   )
-import NanoUI.Types (Rect (..), V2 (..), rectContains, rectUnion, v2X, v2Y)
+import NanoUI.Types (Rect (..), V2 (..), rectContains, v2X, v2Y)
 import NanoUI.WidgetText
   ( tableHeaderLabel
   , tableScrollSlaveStyle
@@ -76,7 +75,6 @@ import NanoUI.Widgets.Node
   , Responding (..)
   , Response (..)
   , addWidgetStyled
-  , mkResponse
   , setChanged
   , setClicked
   )
@@ -246,21 +244,7 @@ columnWidths ctx cols rows =
       bodyCols
 
 mergeResponses :: [Response] -> Response
-mergeResponses [] = mkResponse (WidgetId 0) (Rect 0 0 0 0) False False False False
-mergeResponses (r : rs) =
-  foldl'
-    ( \acc x ->
-        Response
-          { rawRespId = rawRespId x
-          , rawRespRect = rectUnion (rawRespRect acc) (rawRespRect x)
-          , rawRespHovered = rawRespHovered acc || rawRespHovered x
-          , rawRespPressed = rawRespPressed acc || rawRespPressed x
-          , rawRespClicked = rawRespClicked acc || rawRespClicked x
-          , rawRespChanged = rawRespChanged acc || rawRespChanged x
-          }
-    )
-    r
-    rs
+mergeResponses = mconcat
 
 nextSortCol :: Int -> SortCol -> Int -> SortCol
 nextSortCol n cur clicked =
