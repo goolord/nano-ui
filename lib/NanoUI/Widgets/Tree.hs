@@ -6,6 +6,7 @@ module NanoUI.Widgets.Tree
   ) where
 
 import Control.Monad (when)
+import Data.List (unfoldr)
 import Data.IORef (writeIORef)
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
@@ -68,10 +69,11 @@ countNodes = foldl' (\n i -> n + 1 + countNodes (treeItemChildren i)) 0
 
 -- | Visible rows given which parent indices are expanded.
 visibleRows :: [TreeItem] -> IS.IntSet -> [FlatRow]
-visibleRows items expanded = go (indexTree items)
+visibleRows items expanded =
+  unfoldr step (indexTree items)
   where
-    go [] = []
-    go ((idx, depth, item) : rest) =
+    step [] = Nothing
+    step ((idx, depth, item) : rest) =
       let hasKids = not (null (treeItemChildren item))
           row =
             FlatRow
@@ -80,11 +82,11 @@ visibleRows items expanded = go (indexTree items)
               , flatHasChildren = hasKids
               , flatLabel = treeItemLabel item
               }
-          skipDesc =
+          pending =
             if hasKids && not (IS.member idx expanded)
               then dropWhile (\(_, d, _) -> d > depth) rest
               else rest
-       in row : go skipDesc
+       in Just (row, pending)
 
 allParentIndices :: [TreeItem] -> [Int]
 allParentIndices items =

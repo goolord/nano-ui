@@ -39,7 +39,7 @@ import NanoUI.Input
   , inputWindowSize
   )
 import NanoUI.Frame.Chrome (displayText, textInputFocused, textInputValue)
-import NanoUI.Frame.Hit (findNodeByWidgetId)
+import NanoUI.Frame.Hit (findNodeByKey, findNodeByWidgetId)
 import NanoUI.Host (isCellHost)
 import NanoUI.Layout.Arena
   ( NodeArena
@@ -104,19 +104,6 @@ backdropRectsForInteraction ctx wids keys = do
   ws <- catMaybes <$> forM wids (backdropRectForWidget ctx)
   ks <- catMaybes <$> forM keys (backdropRectForKey ctx)
   pure (ws ++ ks)
-
-findNodeByKey :: Context -> Int -> IO (Maybe Int)
-findNodeByKey ctx k = do
-  count <- arenaCount (ctxNodeArena ctx)
-  go (count - 1)
-  where
-    go idx
-      | idx < 0 = pure Nothing
-      | otherwise = do
-          w <- getWidgetId (ctxNodeArena ctx) idx
-          if intKey w == k
-            then pure (Just idx)
-            else go (idx - 1)
 
 backdropRectFromNode :: Context -> Int -> IO (Maybe Rect)
 backdropRectFromNode ctx idx = do

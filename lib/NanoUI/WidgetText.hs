@@ -37,6 +37,7 @@ module NanoUI.WidgetText
   ) where
 
 import Data.Char (chr)
+import Data.List (find)
 import Data.Text (Text)
 import Data.Word (Word8)
 import NanoUI.Font (FontMetrics (..), fmLineHeight)
@@ -99,13 +100,10 @@ sliderParseRange txt =
         _ -> fallback
 
 checkboxLabelText :: Text -> Text
-checkboxLabelText txt = go checkboxPrefixes
-  where
-    go [] = txt
-    go (p : ps) =
-      if T.isPrefixOf p txt
-        then T.drop (T.length p) txt
-        else go ps
+checkboxLabelText txt =
+  case find (`T.isPrefixOf` txt) checkboxPrefixes of
+    Nothing -> txt
+    Just p -> T.drop (T.length p) txt
 
 radioPackOption :: Int -> Int -> Text -> Text
 radioPackOption groupKey optionIdx label =
@@ -135,13 +133,10 @@ radioLabelText txt =
   let (_, _, raw) = radioParseOption txt
    in stripRadioPrefixes raw
   where
-    stripRadioPrefixes t = go radioPrefixes
-      where
-        go [] = t
-        go (p : ps) =
-          if T.isPrefixOf p t
-            then T.drop (T.length p) t
-            else go ps
+    stripRadioPrefixes t =
+      case find (`T.isPrefixOf` t) radioPrefixes of
+        Nothing -> t
+        Just p -> T.drop (T.length p) t
 
 -- | Pack tree row metadata ahead of the visible label.
 -- Fields: groupKey, nodeIdx, depth, hasChildren, expanded, then label
@@ -181,13 +176,10 @@ treeLabelText txt =
   let (_, _, _, _, _, raw) = treeParseRow txt
    in stripTreePrefixes raw
   where
-    stripTreePrefixes t = go treeExpandPrefixes
-      where
-        go [] = t
-        go (p : ps) =
-          if T.isPrefixOf p t
-            then T.drop (T.length p) t
-            else go ps
+    stripTreePrefixes t =
+      case find (`T.isPrefixOf` t) treeExpandPrefixes of
+        Nothing -> t
+        Just p -> T.drop (T.length p) t
 
 -- | Visible terminal row: indent, expand mark, label.
 treeDisplayText :: Icons -> Int -> Bool -> Bool -> Text -> Text

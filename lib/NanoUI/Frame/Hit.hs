@@ -3,6 +3,7 @@
 -- | Layout hit testing for modals, windows, and overlay stacking.
 module NanoUI.Frame.Hit
   ( findNodeByWidgetId
+  , findNodeByKey
   , modalTreeOpen
   , topmostModalIdx
   , nodeInTopmostModal
@@ -26,6 +27,7 @@ import NanoUI.Layout.Arena
   , getNodeType
   , getParent
   , getRect
+  , lookupNodeByKey
   , naWidgetIndex
   )
 import NanoUI.Types (Rect (..), V2 (..), rectContains)
@@ -34,6 +36,9 @@ findNodeByWidgetId :: Context -> WidgetId -> IO (Maybe NodeIdx)
 findNodeByWidgetId ctx wid = do
   table <- readIORef (naWidgetIndex (ctxNodeArena ctx))
   HT.lookup table wid
+
+findNodeByKey :: Context -> Int -> IO (Maybe NodeIdx)
+findNodeByKey ctx k = lookupNodeByKey (ctxNodeArena ctx) k
 
 modalTreeOpen :: Context -> IO Bool
 modalTreeOpen ctx = do

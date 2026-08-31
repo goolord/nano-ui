@@ -36,6 +36,7 @@ module NanoUI.Layout.Arena
   , getText
   , getWidgetId
   , setWidgetId
+  , lookupNodeByKey
   , getStyleIdx
   , setStyleIdx
   , getNodeValue
@@ -46,6 +47,8 @@ module NanoUI.Layout.Arena
 import Control.Monad (forM_, when)
 import Data.HashTable.IO (BasicHashTable)
 import qualified Data.HashTable.IO as HT
+import Data.IntMap.Strict (IntMap)
+import qualified Data.IntMap.Strict as IM
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Primitive.Array (MutableArray, newArray, readArray, writeArray)
 import Data.Primitive.PrimArray (MutablePrimArray, newPrimArray, readPrimArray, writePrimArray)
@@ -173,6 +176,7 @@ data NodeArena = NodeArena
   , naScratchOutMain :: IORef (MutablePrimArray RealWorld Float)
   , naScratchOutCross :: IORef (MutablePrimArray RealWorld Float)
   , naWidgetIndex :: IORef (BasicHashTable WidgetId NodeIdx)
+  , naKeyIndex :: IORef (IntMap NodeIdx)
   }
 
 initialCapacity :: Int
@@ -226,6 +230,7 @@ newNodeArena = do
   naScratchOutMain <- newIORef =<< newPrimArray scratchCap
   naScratchOutCross <- newIORef =<< newPrimArray scratchCap
   naWidgetIndex <- newIORef =<< HT.new
+  naKeyIndex <- newIORef IM.empty
   pure
     NodeArena
       { naCount
@@ -271,6 +276,7 @@ newNodeArena = do
       , naScratchOutMain
       , naScratchOutCross
       , naWidgetIndex
+      , naKeyIndex
       }
 
 {-# INLINE resetNodeArena #-}
@@ -278,6 +284,7 @@ resetNodeArena :: NodeArena -> IO ()
 resetNodeArena na = do
   writeIORef (naCount na) 0
   writeIORef (naWidgetIndex na) =<< HT.new
+  writeIORef (naKeyIndex na) IM.empty
 
 {-# INLINE arenaCount #-}
 arenaCount :: NodeArena -> IO Int
@@ -675,6 +682,15 @@ setWidgetId na idx wid = do
   when (hashWidgetId wid /= 0) $ do
     table <- readIORef (naWidgetIndex na)
     HT.insert table wid idx
+    let key = fromIntegral (hashWidgetId wid)
+    keys <- readIORef (naKeyIndex na)
+    writeIORef (naKeyIndex na) (IM.insert key idx keys)
+
+{-# INLINE lookupNodeByKey #-}
+lookupNodeByKey :: NodeArena -> Int -> IO (Maybe NodeIdx)
+lookupNodeByKey na key
+  | key == 0 = pure Nothing
+  | otherwise = IM.lookup key <$> readIORef (naKeyIndex na)
 
 {-# INLINE getNodeValue #-}
 getNodeValue :: NodeArena -> NodeIdx -> IO Float

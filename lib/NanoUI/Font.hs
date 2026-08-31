@@ -476,28 +476,27 @@ lineWidth fm line =
 takeWidthWith :: (Text -> Float) -> Float -> Text -> (Text, Text)
 takeWidthWith lineW maxW txt = go 1
   where
+    n = T.length txt
     go k
-      | k > T.length txt = (txt, T.empty)
-      | otherwise =
-          let chunk = T.take k txt
-           in if lineW chunk > maxW
-                then
-                  if k == 1
-                    then (chunk, T.drop 1 txt)
-                    else (T.take (k - 1) txt, T.drop (k - 1) txt)
-                else go (k + 1)
+      | k > n = (txt, T.empty)
+      | lineW (T.take k txt) > maxW =
+          if k == 1
+            then (T.take 1 txt, T.drop 1 txt)
+            else (T.take (k - 1) txt, T.drop (k - 1) txt)
+      | otherwise = go (k + 1)
 
 takeWidthIO :: (Text -> IO Float) -> Float -> Text -> IO (Text, Text)
 takeWidthIO lineW maxW txt = go 1
   where
+    n = T.length txt
     go k
-      | k > T.length txt = pure (txt, T.empty)
+      | k > n = pure (txt, T.empty)
       | otherwise = do
-          let chunk = T.take k txt
-          w <- lineW chunk
-          if w > maxW
+          tooWide <- (> maxW) <$> lineW (T.take k txt)
+          if tooWide
             then
-              if k == 1
-                then pure (chunk, T.drop 1 txt)
-                else pure (T.take (k - 1) txt, T.drop (k - 1) txt)
+              pure $
+                if k == 1
+                  then (T.take 1 txt, T.drop 1 txt)
+                  else (T.take (k - 1) txt, T.drop (k - 1) txt)
             else go (k + 1)
