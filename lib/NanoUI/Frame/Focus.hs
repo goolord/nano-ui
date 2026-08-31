@@ -36,7 +36,7 @@ import NanoUI.WidgetText (stripButtonBrackets)
 import NanoUI.WidgetText
   ( checkboxLabelText
   , radioLabelText
-  , treeParseRow
+  , treeDecodeStyle
   , sliderPackRange
   , sliderPackTerminal
   , sliderParseRange
@@ -139,9 +139,11 @@ syncWidgetLabels ctx = do
         setNodeText na idx display
         setNodeValue na idx (if val then 1 else 0)
       NodeTree -> do
-        txt <- getText na idx
-        let (groupKey, nodeIdx, _, _, _, _) = treeParseRow txt
-            selected = IM.findWithDefault nodeIdx groupKey (storeInt store)
+        parent <- getParent na idx
+        si <- getStyleIdx na idx
+        groupWid <- getWidgetId na parent
+        let (nodeIdx, _, _, _) = treeDecodeStyle si
+            selected = IM.findWithDefault nodeIdx (intKey groupWid) (storeInt store)
         setNodeValue na idx (if selected == nodeIdx then 1 else 0)
       NodeSlider -> do
         let val = IM.findWithDefault 0 key (storeFloat store)

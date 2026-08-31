@@ -70,9 +70,9 @@ tuiApp st = do
               clickButton "About" (setAbout True)
               clickButton "Debug" (setDebug True)
             sep
-            (curTab, setTab) <- useTab ("Controls" :: Text)
-            (tabResp, nextTab) <- tabs curTab
-              [ tab "Controls" "Controls" $ do
+            (curIdx, setTab) <- useTabIdx 0
+            (tabResp, nextTab) <- tabs curIdx
+              [ tab (0 :: Int) "Controls" $ do
                   (_, vol) <- slider "Volume" 0 100 50
                   (_, quality) <- select "Quality" ["Low", "High"] 0
                   (_, name) <- textInput "Name" ""
@@ -83,7 +83,7 @@ tuiApp st = do
                       , "name=" <> name
                       ]
                   pure ()
-              , tab "Logs" "Logs" $ do
+              , tab 1 "Logs" $ do
                   muted "Log Stream"
                   (_, _) <-
                     scrollArea (page {layoutHeight = Fixed 4}) $ column stack $ do
@@ -92,7 +92,7 @@ tuiApp st = do
                       _ <- label "Log line 3: ready"
                       pure ()
                   pure ()
-              , tab "Info" "Info" $ do
+              , tab 2 "Info" $ do
                   kv "Engine" "nano-ui immediate mode"
                   kv "Tabs" "Zero-cost inactive evaluation"
               ]
@@ -104,7 +104,7 @@ tuiApp st = do
                 T.intercalate
                   " "
                   [ "checked=" <> T.pack (show checked)
-                  , "tab=" <> curTab
+                  , "tab=" <> T.pack (show nextTab)
                   , "click=" <> T.pack click
                   ]
             muted "About opens a dialog. Debug opens a window. Esc closes, then quits."

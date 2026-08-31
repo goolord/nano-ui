@@ -70,9 +70,9 @@ import NanoUI.WidgetText
   , stripButtonBrackets
   , checkboxLabelText
   , radioLabelText
+  , treeDecodeStyle
   , treeDisplayText
   , treeLabelText
-  , treeParseRow
   , selectDisplayText
   , selectParseOptions
   , colorPickerDisplayText
@@ -204,8 +204,9 @@ displayTextRest ctx nt idx txt terminal =
           pure (colorPickerDisplayText txt current)
         NodeSlider -> pure (T.takeWhile (/= '\US') txt)
         NodeTree -> do
-          let (_, _, depth, hasKids, expanded, lbl) = treeParseRow txt
-          pure (treeDisplayText (ctxIcons ctx) depth hasKids expanded lbl)
+          si <- getStyleIdx (ctxNodeArena ctx) idx
+          let (_, depth, hasKids, expanded) = treeDecodeStyle si
+          pure (treeDisplayText (ctxIcons ctx) depth hasKids expanded txt)
         NodeButton ->
           let flags = buttonFlags txt
            in pure (buttonDisplayTextFromFlags flags txt)
