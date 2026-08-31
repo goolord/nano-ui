@@ -133,6 +133,24 @@ module NanoUI
   , useTab
   , useTabIdx
   , boundedTabs
+  , SortDir (..)
+  , SortCol (..)
+  , ColSize (..)
+  , TableCfg (..)
+  , TableResponse (..)
+  , defaultTableCfg
+  , table
+  , tableEx
+  , tableCfg
+  , useTableSort
+  , tableRespChanged
+  , tableRespClicked
+  , tableHiddenIndices
+  , sortRows
+  , headed
+  , headless
+  , Colonnade
+  , Headed (..)
   , image
   , box
   , onClick
@@ -414,4 +432,24 @@ import NanoUI.Widgets.Tabs
   , tabsEx
   , useTab
   , useTabIdx
+  )
+import NanoUI.Widgets.Table
+  ( Colonnade
+  , ColSize (..)
+  , Headed (..)
+  , SortCol (..)
+  , SortDir (..)
+  , TableCfg (..)
+  , TableResponse (..)
+  , defaultTableCfg
+  , headed
+  , headless
+  , sortRows
+  , table
+  , tableCfg
+  , tableEx
+  , tableRespChanged
+  , tableRespClicked
+  , tableHiddenIndices
+  , useTableSort
   )

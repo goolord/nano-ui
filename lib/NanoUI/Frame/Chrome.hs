@@ -26,6 +26,8 @@ module NanoUI.Frame.Chrome
   , imageIdFromText
   , clamp01
   , paintTabHeader
+  , paintTableHeader
+  , tableStripeColor
   ) where
 
 import Control.Monad (foldM, when)
@@ -74,6 +76,10 @@ import NanoUI.WidgetText
   , sliderLabelText
   , textInputFieldText
   , textInputTerminalText
+  , tableStripeEven
+  , tableStripeOdd
+  , tableHeaderDisplayText
+  , isTableHeaderText
   )
 import NanoUI.Style
   ( Style (..)
@@ -164,6 +170,14 @@ displayText :: Context -> NodeType -> NodeIdx -> IO T.Text
 displayText ctx nt idx = do
   txt <- getText (ctxNodeArena ctx) idx
   let terminal = isCellHost (ctxHostProfile ctx)
+  if nt == NodeButton && isTableHeaderText txt
+    then do
+      si <- getStyleIdx (ctxNodeArena ctx) idx
+      pure (tableHeaderDisplayText terminal si txt)
+    else displayTextRest ctx nt idx txt terminal
+
+displayTextRest :: Context -> NodeType -> NodeIdx -> T.Text -> Bool -> IO T.Text
+displayTextRest ctx nt idx txt terminal =
   if terminal
     then
       case nt of
@@ -350,6 +364,31 @@ tabHeaderVisualStyle theme styleIdx isActive _isHot _animT =
                 , styleCornerRadius = 6
                 }
 
+tableHeaderVisualStyle :: Theme -> Bool -> Style
+tableHeaderVisualStyle theme isSorted =
+  let panel = themePanel theme
+      btn = themeButton theme
+      muted = themeMuted theme
+      accent = themeAccent theme
+      headerBg = lerpColor (styleBg panel) (styleBg btn) 0.55
+      hover = lerpColor headerBg accent 0.18
+   in btn
+        { styleBg = headerBg
+        , styleHoverBg = hover
+        , styleActiveBg = lerpColor headerBg accent 0.28
+        , styleFg = if isSorted then styleFg btn else muted
+        , styleBorderWidth = 0
+        , styleCornerRadius = 0
+        }
+
+tableStripeColor :: Theme -> Int -> Maybe Color
+tableStripeColor theme si
+  | si == tableStripeEven =
+      Just (lerpColor (styleBg (themePanel theme)) (themeWindow theme) 0.18)
+  | si == tableStripeOdd =
+      Just (lerpColor (styleBg (themePanel theme)) (styleBg (themeButton theme)) 0.42)
+  | otherwise = Nothing
+
 paintTabHeader ::
   DrawArena ->
   HostProfile ->
@@ -384,6 +423,26 @@ paintTabHeader da host theme styleIdx isActive style x y w h =
           pushRect da (Rect x (y + h - 2) w 2) accent
       else when hasFill $ pushRoundedRect da rect r bg
 
+paintTableHeader ::
+  DrawArena ->
+  HostProfile ->
+  Theme ->
+  Bool ->
+  Style ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  IO ()
+paintTableHeader da host theme isSorted style x y w h =
+  when (not (isCellHost host)) $ do
+    let rect = Rect x y w h
+        bg = styleBg style
+        accent = themeAccent theme
+    pushRect da rect bg
+    when isSorted $
+      pushRect da (Rect x (y + h - 2) w 2) accent
+
 strokeTabHeaderSides ::
   DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
 strokeTabHeaderSides da x y w h r col =
@@ -413,10 +472,10 @@ widgetVisualStyle ctx nt idx = do
     if nt == NodeButton
       then getStyleIdx (ctxNodeArena ctx) idx
       else pure 0
-  let (isClose, isTab) =
+  let (isClose, isTab, isTable) =
         if nt == NodeButton
           then buttonFlags storedText
-          else (False, False)
+          else (False, False, False)
   let theme = ctxTheme ctx
       terminal = isCellHost (ctxHostProfile ctx)
       isFocus = focus == wid
@@ -499,6 +558,8 @@ widgetVisualStyle ctx nt idx = do
                         }
             | isTab ->
                 tabHeaderVisualStyle theme styleIdx (val > 0.5) isHot animT
+            | isTable ->
+                tableHeaderVisualStyle theme (val > 0.5)
             | not terminal && val > 0.5 ->
                 let btn = themeButton theme
                  in btn
@@ -526,6 +587,7 @@ widgetVisualStyle ctx nt idx = do
         | nt == NodeCheckbox || nt == NodeRadio || nt == NodeSlider || isClose = styleBg widgetBase
         | nt == NodeTree = hoverBackground widgetBase animT isHot
         | isTab = hoverBackground widgetBase animT isHot
+        | isTable = hoverBackground widgetBase animT isHot
         | otherwise = hoverBackground widgetBase animT isHot
   pure widgetBase {styleBg = bg}
 

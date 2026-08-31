@@ -71,6 +71,24 @@ module NanoUI.Widgets
   , colorPickerDisplayText
   , colorPickerToHex
   , colorPickerFromHex
+  , SortDir (..)
+  , SortCol (..)
+  , ColSize (..)
+  , TableCfg (..)
+  , TableResponse (..)
+  , defaultTableCfg
+  , table
+  , tableEx
+  , tableCfg
+  , useTableSort
+  , tableRespChanged
+  , tableRespClicked
+  , tableHiddenIndices
+  , sortRows
+  , headed
+  , headless
+  , Colonnade
+  , Headed (..)
   )
 where
 
@@ -201,6 +219,26 @@ import NanoUI.Widgets.TextInput
 import NanoUI.Widgets.Tree
   ( TreeItem (..)
   , tree
+  )
+import NanoUI.Widgets.Table
+  ( Colonnade
+  , ColSize (..)
+  , Headed (..)
+  , SortCol (..)
+  , SortDir (..)
+  , TableCfg (..)
+  , TableResponse (..)
+  , defaultTableCfg
+  , headed
+  , headless
+  , sortRows
+  , table
+  , tableCfg
+  , tableEx
+  , tableRespChanged
+  , tableRespClicked
+  , tableHiddenIndices
+  , useTableSort
   )
 
 {-# INLINE onClick #-}

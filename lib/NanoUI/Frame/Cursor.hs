@@ -25,13 +25,14 @@ import NanoUI.Layout.Arena
   , getNodeValue
   , getPadding
   , getRect
+  , getStyleIdx
   , getText
   , getWidgetId
   , isScrollNode
   )
 import NanoUI.Layout.Solve (scrollBarSlotOf)
-import NanoUI.Types (Rect (..), V2 (..), rectContains)
-import NanoUI.WidgetText (selectParseOptions, sliderLabelText)
+import NanoUI.Types (Rect (..), V2 (..), rectContains, v2X, v2Y)
+import NanoUI.WidgetText (isTableHeaderText, selectParseOptions, sliderLabelText)
 import NanoUI.Frame.CursorKind (UiCursorKind (..), grabDragKind, grabHoverKind)
 import NanoUI.Frame.Chrome (widgetNodeTypeTable)
 import NanoUI.Frame.Hit (findNodeByWidgetId, scrollHitRect)
@@ -56,17 +57,21 @@ uiCursorKind ctx inp = do
           case mResize of
             Just k -> pure k
             Nothing -> do
-              mScroll <- scrollThumbCursorKind ctx inp
-              case mScroll of
+              mCol <- tableColResizeCursorKind ctx inp
+              case mCol of
                 Just k -> pure k
                 Nothing -> do
-                  active <- readIORef (ctxActiveId ctx)
-                  activeKind <- cursorKindAt table ctx active mouse inp
-                  if activeKind /= UiCursorDefault
-                    then pure activeKind
-                    else do
-                      hot <- getHotId ctx
-                      cursorKindAt table ctx hot mouse inp
+                  mScroll <- scrollThumbCursorKind ctx inp
+                  case mScroll of
+                    Just k -> pure k
+                    Nothing -> do
+                      active <- readIORef (ctxActiveId ctx)
+                      activeKind <- cursorKindAt table ctx active mouse inp
+                      if activeKind /= UiCursorDefault
+                        then pure activeKind
+                        else do
+                          hot <- getHotId ctx
+                          cursorKindAt table ctx hot mouse inp
 
 selectDropdownCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
 selectDropdownCursorKind ctx inp = do
@@ -119,20 +124,24 @@ scrollThumbHit ctx mouse = do
           if not (isScrollNode nt)
             then go (idx + 1) count
             else do
-              wid <- getWidgetId (ctxNodeArena ctx) idx
-              pad <- getPadding (ctxNodeArena ctx) idx
-              contentSize <- getNodeValue (ctxNodeArena ctx) idx
-              (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-              dir <- getDirection (ctxNodeArena ctx) idx
-              off <- getScrollOffset ctx wid
-              let fm = ctxFontMetrics ctx
-              slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
-              case scrollBarLayout (ctxHostProfile ctx) fm slot dir x y w h pad contentSize off of
-                Nothing -> go (idx + 1) count
-                Just layout ->
-                  if rectContains (sbThumb layout) mouse
-                    then pure True
-                    else go (idx + 1) count
+              si <- getStyleIdx (ctxNodeArena ctx) idx
+              if si /= 0
+                then go (idx + 1) count
+                else do
+                  wid <- getWidgetId (ctxNodeArena ctx) idx
+                  pad <- getPadding (ctxNodeArena ctx) idx
+                  contentSize <- getNodeValue (ctxNodeArena ctx) idx
+                  (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+                  dir <- getDirection (ctxNodeArena ctx) idx
+                  off <- getScrollOffset ctx wid
+                  let fm = ctxFontMetrics ctx
+                  slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
+                  case scrollBarLayout (ctxHostProfile ctx) fm slot dir x y w h pad contentSize off of
+                    Nothing -> go (idx + 1) count
+                    Just layout ->
+                      if rectContains (sbThumb layout) mouse
+                        then pure True
+                        else go (idx + 1) count
 
 cursorKindAt :: IM.IntMap NodeType -> Context -> WidgetId -> V2 -> Input -> IO UiCursorKind
 cursorKindAt table ctx wid mouse inp
@@ -194,6 +203,34 @@ textInputCursorKind ctx wid mouse = do
         if rectContains field mouse
           then UiCursorText
           else UiCursorDefault
+
+tableColResizeCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
+tableColResizeCursorKind ctx inp = do
+  store <- getStore ctx
+  let dragging = any (\n -> n >= 1000 && n < 2000) (IM.elems (storeTableDrag store))
+  if dragging && inputMouseDown inp
+    then pure (Just UiCursorEwResize)
+    else do
+      count <- arenaCount (ctxNodeArena ctx)
+      let mouse = inputMousePos inp
+          go idx
+            | idx >= count = pure Nothing
+            | otherwise = do
+                nt <- getNodeType (ctxNodeArena ctx) idx
+                if nt /= NodeButton
+                  then go (idx + 1)
+                  else do
+                    txt <- getText (ctxNodeArena ctx) idx
+                    if not (isTableHeaderText txt)
+                      then go (idx + 1)
+                      else do
+                        (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+                        let hitY = v2Y mouse >= y && v2Y mouse <= y + h
+                            hitEdge = abs (v2X mouse - (x + w)) <= 4
+                        if hitY && hitEdge && w > 0 && h > 0
+                          then pure (Just UiCursorEwResize)
+                          else go (idx + 1)
+      go 0
 
 pointerCursorWanted :: Context -> Input -> IO Bool
 pointerCursorWanted ctx inp = cursorKindIs ctx inp UiCursorPointer
