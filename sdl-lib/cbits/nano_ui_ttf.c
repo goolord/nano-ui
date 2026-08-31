@@ -57,6 +57,11 @@ bool nano_ui_ttf_string_size(
 {
     int w = 0;
     int h = 0;
+    /* TTF_GetStringSize: length 0 means NUL-terminated. Haskell empty Text
+     * is not a C string, so pass a real empty literal instead of strlen. */
+    if (len == 0) {
+        text = "";
+    }
     if (!TTF_GetStringSize(font, text, len, &w, &h)) {
         return false;
     }
@@ -315,6 +320,9 @@ bool nano_ui_ttf_create_texture(
     float *out_h)
 {
     SDL_Color fg = {r, g, b, a};
+    if (len == 0) {
+        return false;
+    }
     SDL_Surface *surface = TTF_RenderText_Blended(font, text, len, fg);
     if (!surface) {
         return false;
@@ -365,6 +373,9 @@ bool nano_ui_ttf_render_surface(
         return false;
     }
     SDL_Color fg = {r, g, b, a};
+    if (len == 0) {
+        return false;
+    }
     SDL_Surface *surface = TTF_RenderText_Blended(font, text, len, fg);
     if (!surface) {
         return false;

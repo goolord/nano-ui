@@ -179,6 +179,18 @@ runTextInputFocusSdlTest ctx failed = do
       assertEq failed focus (respId resp)
       spans' <- collectTextSpans ctx
       assert failed (any (\(_, txt, _, _, _) -> txt == "Name") spans')
+      let idle = inp0 {inputMousePos = V2 fx fy}
+      samples <- replicateM 5 $ do
+        _ <- runFrame ctx idle ui
+        focusN <- getFocusId ctx
+        spansN <- collectTextSpans ctx
+        let emptyRs = [r | (r, txt, _, _, _) <- spansN, T.null txt]
+        pure (focusN, emptyRs)
+      case samples of
+        [] -> assert failed False
+        (f0, rs0) : rest -> do
+          assertEq failed f0 (respId resp)
+          assert failed (all (\(f, rs) -> f == respId resp && rs == rs0) rest)
     _ -> assert failed False
 
 runButtonHoverAnimTest :: Context -> IORef Int -> IO ()
