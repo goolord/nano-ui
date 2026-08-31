@@ -9,13 +9,13 @@ import Data.IntMap.Strict qualified as IM
 import Data.Map.Strict qualified as Map
 import Data.Primitive.PrimArray (newPrimArray)
 import NanoUI.Atlas qualified as Atlas
-import NanoUI.Context.Config
-  ( enableMeasureCache
+import NanoUI.Context.Internal
+  ( Context (..)
+  , enableMeasureCache
   , withExternalText
   , withFontMetrics
   , withTheme
   )
-import NanoUI.Context.Internal (Context (..))
 import NanoUI.Draw (newDrawArena)
 import NanoUI.Font (measureText, monospaceMetrics, stripWidgetMarkers)
 import NanoUI.Host (HostProfile (..))

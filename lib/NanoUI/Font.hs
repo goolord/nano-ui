@@ -30,6 +30,7 @@ module NanoUI.Font
   , monoFontMarker
   , hasMonoFontMarker
   , stripMonoFontMarker
+  , pickMonoFont
   , headingFontMarker
   , hasHeadingMarker
   , mutedFontMarker
@@ -119,6 +120,13 @@ stripMonoFontMarker txt =
   if hasMonoFontMarker txt
     then T.drop 1 txt
     else txt
+
+{-# INLINE pickMonoFont #-}
+pickMonoFont :: FontMetrics -> FontMetrics -> Text -> (FontMetrics, Text)
+pickMonoFont fm mono txt =
+  if hasMonoFontMarker txt
+    then (mono, stripMonoFontMarker txt)
+    else (fm, txt)
 
 headingFontMarker :: Text
 headingFontMarker = T.singleton '\x03'

@@ -265,6 +265,41 @@ static bool push_tri(
     return true;
 }
 
+static int corner_quadrant(float a0)
+{
+    if (a0 >= NANO_UI_PI && a0 < NANO_UI_PI * 1.5f) {
+        return 0;
+    }
+    if (a0 >= NANO_UI_PI * 1.5f) {
+        return 1;
+    }
+    if (a0 < NANO_UI_PI * 0.5f) {
+        return 2;
+    }
+    return 3;
+}
+
+/* cos/sin at k * (pi/16), k = 0..32 */
+static const float trig_cos[33] = {
+    1.f, 0.98078528f, 0.92387953f, 0.86602540f, 0.78531693f, 0.70710678f,
+    0.59569930f, 0.46472317f, 0.31622777f, 0.15643447f, 0.f,
+    -0.15643447f, -0.31622777f, -0.46472317f, -0.59569930f, -0.70710678f,
+    -0.78531693f, -0.86602540f, -0.92387953f, -0.98078528f, -1.f,
+    -0.98078528f, -0.92387953f, -0.86602540f, -0.78531693f, -0.70710678f,
+    -0.59569930f, -0.46472317f, -0.31622777f, -0.15643447f, 0.f,
+    0.15643447f, 0.31622777f
+};
+static const float trig_sin[33] = {
+    0.f, 0.19509032f, 0.38268343f, 0.5f, 0.64278761f, 0.70710678f,
+    0.80320753f, 0.88545643f, 0.94832366f, 0.98768834f, 1.f,
+    0.98768834f, 0.94832366f, 0.88545643f, 0.80320753f, 0.70710678f,
+    0.64278761f, 0.5f, 0.38268343f, 0.19509032f, 0.f,
+    -0.19509032f, -0.38268343f, -0.5f, -0.64278761f, -0.70710678f,
+    -0.80320753f, -0.88545643f, -0.94832366f, -0.98768834f, -1.f,
+    -0.98768834f, -0.94832366f
+};
+static const int corner_trig_base[4] = {16, 24, 0, 8};
+
 static bool push_corner(
     NanoUiBatch *batch,
     float cx,
@@ -275,6 +310,7 @@ static bool push_corner(
     SDL_FColor col)
 {
     int segs = NANO_UI_CORNER_SEGS;
+    int q = corner_quadrant(a0);
     if (!ensure_geom(batch, segs + 2, segs * 3)) {
         return false;
     }
@@ -282,10 +318,11 @@ static bool push_corner(
     batch->verts[center] = (SDL_Vertex){{cx, cy}, col, {0.f, 0.f}};
     batch->vert_count++;
     for (int i = 0; i <= segs; i++) {
-        float t = (float)i / (float)segs;
-        float a = a0 + (a1 - a0) * t;
-        float x = cx + cosf(a) * rad;
-        float y = cy + sinf(a) * rad;
+        int ti = corner_trig_base[q] + i;
+        float ca = trig_cos[ti];
+        float sa = trig_sin[ti];
+        float x = cx + ca * rad;
+        float y = cy + sa * rad;
         batch->verts[batch->vert_count] = (SDL_Vertex){{x, y}, col, {0.f, 0.f}};
         if (i > 0) {
             int rim1 = batch->vert_count - 1;

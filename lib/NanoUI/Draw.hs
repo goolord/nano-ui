@@ -35,6 +35,7 @@ module NanoUI.Draw
   , vertexSize
   , indexSize
   , withClip
+  , getCurrentClip
   , currentLayer
   ) where
 
@@ -505,11 +506,55 @@ pushImage da rect tex u0 v0 u1 v1 col
 cornerSegments :: Int
 cornerSegments = 4
 
+-- Precomputed unit-circle cos/sin for rounded-rect corners (4 segments per 90° arc).
+{-# NOINLINE cornerQuadrant #-}
+cornerQuadrant :: Float -> Int
+cornerQuadrant a0 =
+  if a0 >= pi && a0 < pi * 1.5
+    then 0
+    else
+      if a0 >= pi * 1.5
+        then 1
+        else if a0 < pi * 0.5 then 2 else 3
+
+{-# NOINLINE cornerCosSin #-}
+cornerCosSin :: Int -> Int -> (Float, Float)
+cornerCosSin q seg =
+  case q * 5 + seg of
+    0 -> (-1.0, 0.0)
+    1 -> (-0.9238795325, -0.3826834324)
+    2 -> (-0.7071067812, -0.7071067812)
+    3 -> (-0.3826834324, -0.9238795325)
+    4 -> (0.0, -1.0)
+    5 -> (0.0, -1.0)
+    6 -> (0.3826834324, -0.9238795325)
+    7 -> (0.7071067812, -0.7071067812)
+    8 -> (0.9238795325, -0.3826834324)
+    9 -> (1.0, 0.0)
+    10 -> (1.0, 0.0)
+    11 -> (0.9238795325, 0.3826834324)
+    12 -> (0.7071067812, 0.7071067812)
+    13 -> (0.3826834324, 0.9238795325)
+    14 -> (0.0, 1.0)
+    15 -> (0.0, 1.0)
+    16 -> (-0.3826834324, 0.9238795325)
+    17 -> (-0.7071067812, 0.7071067812)
+    18 -> (-0.9238795325, 0.3826834324)
+    19 -> (-1.0, 0.0)
+    _ -> (0.0, 0.0)
+
+{-# INLINE getCurrentClip #-}
+getCurrentClip :: DrawArena -> IO Rect
+getCurrentClip da = do
+  (x, y, w, h) <- readIORef (daCurrentClip da)
+  pure (Rect x y w h)
+
 pushCornerFan :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
-pushCornerFan da cx cy rad a0 a1 col = do
+pushCornerFan da cx cy rad a0 _a1 col = do
   let !segs = cornerSegments
       !needV = segs + 2
       !needI = segs * 3
+      !q = cornerQuadrant a0
   (vp, ip, base, baseIdx) <- ensureAndAlloc da needV needI
   let !(r, g, b, a) = unpackColorF col
       !centerOff = base * vertexSize
@@ -523,11 +568,10 @@ pushCornerFan da cx cy rad a0 a1 col = do
   pokeByteOff vp (centerOff + 24) (0 :: Float)
   pokeByteOff vp (centerOff + 28) (0 :: Float)
 
-  let !step = (a1 - a0) / fromIntegral segs
   forM_ [0 .. segs] $ \i -> do
-    let !ang = a0 + step * fromIntegral i
-        !vx = cx + rad * cos ang
-        !vy = cy + rad * sin ang
+    let !(ca, sa) = cornerCosSin q i
+        !vx = cx + rad * ca
+        !vy = cy + rad * sa
         !vOff = (base + 1 + i) * vertexSize
     pokeByteOff vp vOff vx
     pokeByteOff vp (vOff + 4) vy
@@ -555,13 +599,11 @@ pushCornerArc da cx cy outerR innerR a0 a1 col
       let !segs = cornerSegments
           !needV = (segs + 1) * 2
           !needI = segs * 6
+          !q = cornerQuadrant a0
       (vp, ip, base, baseIdx) <- ensureAndAlloc da needV needI
       let !(r, g, b, a) = unpackColorF col
-          !step = (a1 - a0) / fromIntegral segs
       forM_ [0 .. segs] $ \i -> do
-        let !ang = a0 + step * fromIntegral i
-            !ca = cos ang
-            !sa = sin ang
+        let !(ca, sa) = cornerCosSin q i
             !ox = cx + outerR * ca
             !oy = cy + outerR * sa
             !ix = cx + innerR * ca

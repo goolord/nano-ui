@@ -137,30 +137,20 @@ import NanoUI.Spring
   , presetSmooth
   , presetStiff
   )
-import NanoUI.Context.Internal (Context (..), intKey, markDirty)
-import NanoUI.Context.Types
-  ( PendingTooltip (..)
-  , TextInputDrag (..)
-  , TextInputMenu (..)
-  , WindowResizeDrag (..)
-  , WindowResizeEdge (..)
-  )
-import NanoUI.Context.New (newContext)
-import NanoUI.Context.PrevRects
-  ( getPrevRect
+import NanoUI.Context.Internal
+  ( Context (..)
+  , intKey
+  , markDirty
+  , getPrevRect
   , getPrevRectByKey
   , setPrevRect
-  )
-import NanoUI.Context.Store
-  ( getScrollOffset
+  , getScrollOffset
   , getStore
   , isDisabled
   , setDisabled
   , setScrollOffset
   , setStore
-  )
-import NanoUI.Context.Config
-  ( clearMeasureCache
+  , clearMeasureCache
   , enableMeasureCache
   , withClipboard
   , withExternalText
@@ -171,25 +161,31 @@ import NanoUI.Context.Config
   , withMonoFontMetrics
   , withTheme
   , wrapMeasureCache
-  )
-import NanoUI.Context.Dirty
-  ( clearDirty
+  , clearDirty
   , isDirty
   , setWakeLoop
   , takeDamage
-  )
-import NanoUI.Context.Tooltip
-  ( clearTooltips
+  , clearTooltips
   , pushTooltip
   , readTooltips
-  )
-import NanoUI.Context.Atlas
-  ( atlasSnapshot
+  , atlasSnapshot
   , atlasTextureId
   , lookupImageUv
   , registerImage
   , registerImages
+  , askHostIO
+  , setHost
+  , drainMessages
+  , pushMessage
   )
+import NanoUI.Context.Types
+  ( PendingTooltip (..)
+  , TextInputDrag (..)
+  , TextInputMenu (..)
+  , WindowResizeDrag (..)
+  , WindowResizeEdge (..)
+  )
+import NanoUI.Context.New (newContext)
 import NanoUI.Context.Animation
   ( anyAnimating
   , getAnimationValue
@@ -211,6 +207,4 @@ import NanoUI.Context.Modal
   , seedFloatingPanel
   , textInputEditActive
   )
-import NanoUI.Context.Host (askHostIO, setHost)
 import NanoUI.Context.Focus (getFocusId, getFocusables, getFocusablesPrim, getHotId, registerFocusable)
-import NanoUI.Context.Messages (drainMessages, pushMessage)

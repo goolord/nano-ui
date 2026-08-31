@@ -1,14 +1,11 @@
 module NanoUI.Sdl.Font
   ( SdlFont (..)
-  , TextCache
   , GlyphAtlas
   , withTtf
   , openFont
   , closeFont
   , findFontPath
   , findMonoFontPath
-  , newTextCache
-  , destroyTextCache
   , newGlyphAtlas
   , destroyGlyphAtlas
   , resetGlyphAtlas
@@ -19,13 +16,11 @@ module NanoUI.Sdl.Font
   , ttfFontMetricsScaled
   , buildGlyphFontMetrics
   , measureTtfText
-  , renderTextSpans
   , glyphAtlasTexture
   ) where
 
 import Control.Exception (IOException, bracket, catch)
 import Control.Monad (filterM, when)
-import Data.Bits (shiftR, (.&.))
 import Data.Char (ord)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Primitive.SmallArray
@@ -35,15 +30,13 @@ import Data.Primitive.SmallArray
   , smallArrayFromList
   )
 import Data.Text (Text)
-import qualified Data.Text as T
-import Data.Word (Word32, Word8)
 import Foreign.C.String (CString, withCString)
 import Foreign.C.Types (CFloat (..), CInt (..), CSize (..), CUInt (..))
 import Foreign.ForeignPtr (ForeignPtr, mallocForeignPtrBytes, withForeignPtr)
 import Foreign.Ptr (Ptr, nullPtr, plusPtr)
 import Foreign.Storable (peek, poke, sizeOf)
 import GHC.IO (unsafePerformIO)
-import NanoUI (Color (..), FontMetrics (..), GlyphQuad (..), Rect (..), hasMonoFontMarker, monospaceMetrics, stripMonoFontMarker)
+import NanoUI (FontMetrics (..), GlyphQuad (..), hasMonoFontMarker, monospaceMetrics, stripMonoFontMarker)
 import NanoUI.Testing
   ( Context
   , withExternalText
@@ -52,8 +45,6 @@ import NanoUI.Testing
   , withMonoFontMetrics
   , wrapMeasureCache
   )
-import NanoUI.Sdl.Batch (RenderBatch, batchTextureDst, flushRenderBatch)
-import NanoUI.Sdl.Render (logicalClipKey, setLogicalClipKey)
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
 import System.Directory (doesDirectoryExist, doesFileExist, listDirectory)
 import System.Environment (lookupEnv)
@@ -68,28 +59,6 @@ data SdlFont = SdlFont
   , sfSpaceAdvance :: Float
   , sfPath :: FilePath
   }
-
-data TextSlot = TextSlot
-  { tsW :: {-# UNPACK #-} !Float
-  , tsH :: {-# UNPACK #-} !Float
-  , tsU0 :: {-# UNPACK #-} !Float
-  , tsV0 :: {-# UNPACK #-} !Float
-  , tsU1 :: {-# UNPACK #-} !Float
-  , tsV1 :: {-# UNPACK #-} !Float
-  , tsAtlasW :: {-# UNPACK #-} !Float
-  , tsAtlasH :: {-# UNPACK #-} !Float
-  , tsTex :: !(Ptr ())
-  }
-
-data TextCache = TextCache
-  { tcAtlas :: !(Ptr ())
-  , tcEntries :: !(IORef (Map.Map CacheKey TextSlot))
-  }
-
-type CacheKey = (Ptr (), Text, Word32)
-
-textCacheLimit :: Int
-textCacheLimit = 256
 
 -- | Per-glyph atlas slot. UVs are normalised to [0,1] within the atlas texture.
 data GlyphSlot = GlyphSlot
@@ -127,19 +96,6 @@ insertScratch = unsafePerformIO (mallocForeignPtrBytes (4 * sizeOf (0 :: CFloat)
 {-# NOINLINE glyphMetricsScratch #-}
 glyphMetricsScratch :: ForeignPtr CInt
 glyphMetricsScratch = unsafePerformIO (mallocForeignPtrBytes (5 * sizeOf (0 :: CInt)))
-
-newTextCache :: Ptr SDL_Renderer -> IO TextCache
-newTextCache ren = do
-  atlas <- textAtlasCreate ren
-  when (atlas == nullPtr) $ fail "nano_ui_text_atlas_create failed"
-  entries <- newIORef Map.empty
-  pure TextCache {tcAtlas = atlas, tcEntries = entries}
-
-destroyTextCache :: TextCache -> IO ()
-destroyTextCache cache = textAtlasDestroy (tcAtlas cache)
-
--- ---------------------------------------------------------------------------
--- Glyph Atlas
 
 newGlyphAtlas :: Ptr SDL_Renderer -> IO GlyphAtlas
 newGlyphAtlas ren = do
@@ -433,136 +389,6 @@ measureTtfText sf txt =
           pure (realToFrac w, realToFrac h)
         else pure (0, sfLineSkip sf)
 
-renderTextSpans ::
-  RenderBatch ->
-  Ptr SDL_Renderer ->
-  Float ->
-  SdlFont ->
-  SdlFont ->
-  TextCache ->
-  [(Rect, Text, Color, Color, Rect)] ->
-  IO ()
-renderTextSpans _ _ _ _ _ _ [] = pure ()
-renderTextSpans batch ren scale font monoFont cache spans = do
-  let go _ [] = pure ()
-      go !prevClip ((Rect x y _ _, txt, fg, _bg, clip) : rest) = do
-        let !clipKey = logicalClipKey clip
-        when (prevClip /= Just clipKey) $ do
-          flushRenderBatch batch
-          setLogicalClipKey ren clipKey
-        drawSpan batch scale font monoFont cache txt fg x y
-        go (Just clipKey) rest
-  go Nothing spans
-  flushRenderBatch batch
-
-drawSpan :: RenderBatch -> Float -> SdlFont -> SdlFont -> TextCache -> Text -> Color -> Float -> Float -> IO ()
-drawSpan _ _ _ _ _ txt _ _ _
-  | T.null txt = pure ()
-drawSpan batch scale font monoFont cache txt col x y =
-  let (pick, shown) =
-        if hasMonoFontMarker txt
-          then (monoFont, stripMonoFontMarker txt)
-          else (font, txt)
-   in drawSpanFont batch scale pick cache shown col x y
-
-{-# INLINE drawSpanFont #-}
-drawSpanFont :: RenderBatch -> Float -> SdlFont -> TextCache -> Text -> Color -> Float -> Float -> IO ()
-drawSpanFont _ _ _ _ txt _ _ _
-  | T.null txt = pure ()
-drawSpanFont batch scale font cache txt col x y = do
-  let !keyCol = colorWord col
-      !cacheKey = (sfFont font, txt, keyCol)
-  mSlot <-
-    lookupCache cache cacheKey >>= \case
-      Just hit -> pure (Just hit)
-      Nothing -> do
-        flushRenderBatch batch
-        withUtf8 txt $ \cstr len ->
-          createCached font cache cacheKey cstr len col
-  case mSlot of
-    Nothing -> pure ()
-    Just (TextSlot aw ah u0 v0 u1 v1 atW atH tex) -> do
-      let !px = x * scale
-          !py = y * scale
-      batchTextureDst
-        batch
-        tex
-        atW
-        atH
-        px
-        py
-        aw
-        ah
-        u0
-        v0
-        u1
-        v1
-        255
-        255
-        255
-        255
-
-createCached ::
-  SdlFont ->
-  TextCache ->
-  CacheKey ->
-  CString ->
-  CSize ->
-  Color ->
-  IO (Maybe TextSlot)
-createCached font cache cacheKey cstr len col =
-  withForeignPtr surfaceScratch $ \(surfPtr :: Ptr (Ptr ())) -> do
-    poke surfPtr nullPtr
-    ok <-
-      ttfRenderSurface
-        (sfFont font)
-        cstr
-        len
-        r
-        g
-        b
-        a
-        surfPtr
-        nullPtr
-        nullPtr
-    when (not ok) $ fail "TTF render failed"
-    sz <- Map.size <$> readIORef (tcEntries cache)
-    when (sz >= textCacheLimit) $ resetTextCache cache
-    surf <- peek surfPtr
-    mSlot <- insertSurface cache surf
-    freeSurface surf
-    case mSlot of
-      Nothing -> pure Nothing
-      Just (px, py, tw, th) -> do
-        (atW, atH) <- atlasSize (tcAtlas cache)
-        tex <- textAtlasTexture (tcAtlas cache)
-        let slot =
-              TextSlot
-                { tsW = tw
-                , tsH = th
-                , tsU0 = px / atW
-                , tsV0 = py / atH
-                , tsU1 = (px + tw) / atW
-                , tsV1 = (py + th) / atH
-                , tsAtlasW = atW
-                , tsAtlasH = atH
-                , tsTex = tex
-                }
-        insertCache cache cacheKey slot
-        pure (Just slot)
-  where
-    (r, g, b, a) = unpackColor col
-
-insertSurface :: TextCache -> Ptr () -> IO (Maybe (Float, Float, Float, Float))
-insertSurface cache surf = do
-  let atlas = tcAtlas cache
-  tryInsert atlas surf >>= \case
-    Just slot -> pure (Just slot)
-    Nothing -> do
-      clearTextCacheEntries cache
-      textAtlasReset atlas
-      tryInsert atlas surf
-
 tryInsert :: Ptr () -> Ptr () -> IO (Maybe (Float, Float, Float, Float))
 tryInsert atlas surf =
   withForeignPtr insertScratch $ \px -> do
@@ -578,24 +404,6 @@ tryInsert atlas surf =
         h <- realToFrac <$> peek th
         pure (Just (x, y, w, h))
       else pure Nothing
-
-clearTextCacheEntries :: TextCache -> IO ()
-clearTextCacheEntries cache =
-  writeIORef (tcEntries cache) Map.empty
-
-resetTextCache :: TextCache -> IO ()
-resetTextCache cache = do
-  clearTextCacheEntries cache
-  textAtlasReset (tcAtlas cache)
-
-insertCache :: TextCache -> CacheKey -> TextSlot -> IO ()
-insertCache cache key val =
-  modifyIORef' (tcEntries cache) (Map.insert key val)
-
-lookupCache :: TextCache -> CacheKey -> IO (Maybe TextSlot)
-lookupCache cache key = do
-  entries <- readIORef (tcEntries cache)
-  pure $! Map.lookup key entries
 
 atlasSize :: Ptr () -> IO (Float, Float)
 atlasSize atlas =
@@ -769,17 +577,6 @@ withUtf8 txt act =
   let bs = TE.encodeUtf8 txt
    in BS.useAsCStringLen bs $ \(cstr, len) -> act cstr (fromIntegral len)
 
-unpackColor :: Color -> (Word8, Word8, Word8, Word8)
-unpackColor (Color w) =
-  ( fromIntegral ((w `shiftR` 24) .&. 0xFF)
-  , fromIntegral ((w `shiftR` 16) .&. 0xFF)
-  , fromIntegral ((w `shiftR` 8) .&. 0xFF)
-  , fromIntegral (w .&. 0xFF)
-  )
-
-colorWord :: Color -> Word32
-colorWord (Color w) = w
-
 foreign import ccall unsafe "nano_ui_ttf_init"
   ttfInit :: IO Bool
 
@@ -803,20 +600,6 @@ foreign import ccall unsafe "nano_ui_ttf_string_size"
 
 foreign import ccall unsafe "nano_ui_ttf_space_advance"
   ttfSpaceAdvance :: Ptr () -> IO CFloat
-
-foreign import ccall unsafe "nano_ui_ttf_render_surface"
-  ttfRenderSurface ::
-    Ptr () ->
-    CString ->
-    CSize ->
-    Word8 ->
-    Word8 ->
-    Word8 ->
-    Word8 ->
-    Ptr (Ptr ()) ->
-    Ptr CFloat ->
-    Ptr CFloat ->
-    IO Bool
 
 foreign import ccall unsafe "nano_ui_text_atlas_create"
   textAtlasCreate :: Ptr SDL_Renderer -> IO (Ptr ())
