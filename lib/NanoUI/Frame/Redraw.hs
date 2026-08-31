@@ -41,9 +41,9 @@ import NanoUI.Layout.Arena
   , isFloatingNode
   , isWidgetNode
   )
-import NanoUI.Types (Rect (..), V2 (..), rectContains)
+import NanoUI.Types (V2 (..), rectContains)
 import NanoUI.WidgetText (selectOptions)
-import NanoUI.Frame.Hit (findNodeByWidgetId, overlayHitAllowed)
+import NanoUI.Frame.Hit (findNodeByWidgetId, overlayHitAllowed, nodePointVisible)
 import NanoUI.Frame.Select (selectDropRect)
 
 needsRedraw :: Context -> Input -> Input -> IO Bool
@@ -210,8 +210,8 @@ probeHotId ctx mouse = do
         then pure acc
         else do
           wid <- getWidgetId (ctxNodeArena ctx) idx
-          (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-          if w > 0 && h > 0 && rectContains (Rect x y w h) mouse
+          visible <- nodePointVisible ctx idx mouse
+          if visible
             then do
               allow <- overlayHitAllowed ctx idx mouse
               pure (if allow then wid else acc)

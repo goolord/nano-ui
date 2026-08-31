@@ -16,12 +16,15 @@ module NanoUI.Frame.Hit
   , widgetIdInModal
   , ancestorScrollShift
   , scrollHitRect
+  , nodePointVisible
+  , nodeClippedHit
+  , nodeInteractionHit
   ) where
 
 import Data.IORef (readIORef)
 import Data.Maybe (isJust)
 import qualified Data.HashTable.IO as HT
-import NanoUI.Context (Context (..), getPrevRect, getScrollOffset)
+import NanoUI.Context (Context (..), getPrevRect, getScrollOffset, getPrevClipRect)
 import NanoUI.Id (WidgetId)
 import NanoUI.Layout.Arena
   ( DirTag (..)
@@ -29,6 +32,7 @@ import NanoUI.Layout.Arena
   , NodeType (NodeModal, NodePopup, NodeWindow)
   , findNodeRevM
   , getDirection
+  , getClipRect
   , getNodeType
   , getParent
   , getRect
@@ -38,7 +42,7 @@ import NanoUI.Layout.Arena
   , lookupNodeByKey
   , naIndex
   )
-import NanoUI.Types (Rect (..), V2 (..), rectContains)
+import NanoUI.Types (Rect (..), V2 (..), rectContains, rectH, rectW)
 
 findNodeByWidgetId :: Context -> WidgetId -> IO (Maybe NodeIdx)
 findNodeByWidgetId ctx wid = do
@@ -141,7 +145,7 @@ ancestorScrollShift ctx idx = go idx (0, 0)
                   (sx', sy') <- parentScrollShift ctx p (sx, sy)
                   go p (sx', sy')
 
--- Prev rects are stored in layout space. Shift by live scroll before hit tests.
+-- Prev rects are visual space; during UI build add live scroll delta since snapshot.
 scrollHitRect :: Context -> WidgetId -> IO (Maybe Rect)
 scrollHitRect ctx wid = do
   mIdx <- findNodeByWidgetId ctx wid
@@ -151,6 +155,63 @@ scrollHitRect ctx wid = do
       (dx, dy) <- ancestorScrollShift ctx idx
       pure (Just (Rect (x + dx) (y + dy) w h))
     _ -> pure mprev
+
+{-# INLINE nodePointVisible #-}
+nodePointVisible :: Context -> NodeIdx -> V2 -> IO Bool
+nodePointVisible ctx idx mouse = do
+  (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+  let vis = Rect x y w h
+  if not (w > 0 && h > 0 && rectContains vis mouse)
+    then pure False
+    else do
+      mClip <- getClipRect (ctxNodeArena ctx) idx
+      pure (maybe True (`rectContains` mouse) mClip)
+
+{-# INLINE nodeClippedHit #-}
+nodeClippedHit :: Context -> NodeIdx -> Rect -> V2 -> IO Bool
+nodeClippedHit ctx idx rect mouse = do
+  if not (rectW rect > 0 && rectH rect > 0 && rectContains rect mouse)
+    then pure False
+    else do
+      na <- pure (ctxNodeArena ctx)
+      mLive <- getClipRect na idx
+      mClip <-
+        case mLive of
+          Just r -> pure (Just r)
+          Nothing -> do
+            wid <- getWidgetId na idx
+            getPrevClipRect ctx wid
+      pure (maybe True (`rectContains` mouse) mClip)
+
+-- | Hit test during UI build (before applyScrollOffsets). Uses prev rects and
+-- scroll viewport clips only, not per-node live clips.
+{-# INLINE nodeInteractionHit #-}
+nodeInteractionHit :: Context -> NodeIdx -> Rect -> V2 -> IO Bool
+nodeInteractionHit ctx idx rect mouse = do
+  if not (rectW rect > 0 && rectH rect > 0 && rectContains rect mouse)
+    then pure False
+    else scrollViewportHit ctx idx mouse
+
+scrollViewportHit :: Context -> NodeIdx -> V2 -> IO Bool
+scrollViewportHit ctx idx mouse = go idx
+  where
+    go i
+      | i <= 0 = pure True
+      | otherwise = do
+          p <- getParent (ctxNodeArena ctx) i
+          if p < 0
+            then pure True
+            else do
+              nt <- getNodeType (ctxNodeArena ctx) p
+              if isScrollNode nt
+                then do
+                  wid <- getWidgetId (ctxNodeArena ctx) p
+                  mClip <- getPrevClipRect ctx wid
+                  case mClip of
+                    Nothing -> go p
+                    Just clip ->
+                      if rectContains clip mouse then go p else pure False
+                else go p
 
 parentScrollShift :: Context -> NodeIdx -> (Float, Float) -> IO (Float, Float)
 parentScrollShift ctx p (sx, sy) = do

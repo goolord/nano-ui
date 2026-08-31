@@ -61,7 +61,7 @@ import NanoUI.Layout.Arena
   )
 import NanoUI.Types (Rect (..), V2 (..), rectContains, rectH, rectW, v2X)
 import NanoUI.Frame.Focus (filterModalFocusables, tabNext, tabNextFocusables)
-import NanoUI.Frame.Hit (modalTreeOpen, overlayHitAllowed, scrollHitRect)
+import NanoUI.Frame.Hit (modalTreeOpen, overlayHitAllowed, scrollHitRect, nodeClippedHit)
 import NanoUI.Frame.Redraw (probeHotId)
 import NanoUI.Frame.Select (findSelectUnderMouse)
 import NanoUI.Frame.Spans (widgetHitRect)
@@ -131,8 +131,10 @@ findTopWidgetUnderMouse ctx mouse wanted = do
         else do
           (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
           rect <- widgetHitRect ctx nt idx x y w h
-          if rectW rect > 0 && rectH rect > 0 && rectContains rect mouse
-            then overlayHitAllowed ctx idx mouse
+          if rectW rect > 0 && rectH rect > 0
+            then do
+              hit <- nodeClippedHit ctx idx rect mouse
+              if hit then overlayHitAllowed ctx idx mouse else pure False
             else pure False
   case mIdx of
     Nothing -> pure Nothing
@@ -171,7 +173,8 @@ finalizePointerRelease ctx inp =
             nt <- getNodeType (ctxNodeArena ctx) idx
             (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
             let rect = Rect x y w h
-            when (w > 0 && h > 0 && rectContains rect mouse) $
+            visible <- nodeClippedHit ctx idx rect mouse
+            when visible $
               case nt of
                 NodeCheckbox -> do
                   store <- getStore ctx
@@ -200,22 +203,20 @@ finalizePointerRelease ctx inp =
                       )
                 NodeButton -> do
                   packed <- getStyleIdx (ctxNodeArena ctx) idx
-                  if isTabButtonStyle packed
-                    then do
-                      parent <- getParent (ctxNodeArena ctx) idx
-                      when (parent >= 0) $ do
-                        store <- getStore ctx
-                        groupWid <- getWidgetId (ctxNodeArena ctx) parent
-                        let groupKey = intKey groupWid
-                            tabIdx = buttonVisualStyle packed `div` 4
-                        setStore
-                          ctx
-                          ( store
-                              { storeInt = IM.insert groupKey tabIdx (storeInt store)
-                              }
-                          )
-                      writeIORef (ctxClickedId ctx) active
-                    else pure ()
+                  when (isTabButtonStyle packed) $ do
+                    parent <- getParent (ctxNodeArena ctx) idx
+                    when (parent >= 0) $ do
+                      store <- getStore ctx
+                      groupWid <- getWidgetId (ctxNodeArena ctx) parent
+                      let groupKey = intKey groupWid
+                          tabIdx = buttonVisualStyle packed `div` 4
+                      setStore
+                        ctx
+                        ( store
+                            { storeInt = IM.insert groupKey tabIdx (storeInt store)
+                            }
+                        )
+                  writeIORef (ctxClickedId ctx) active
                 _ | postsLayoutClick nt -> do
                   uiHit <- inUiClickHit ctx active mouse
                   unless uiHit $ writeIORef (ctxClickedId ctx) active
@@ -248,7 +249,7 @@ checkReleasedOver ctx count active mouse = go 0
             else do
               (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
               let rect = Rect x y w h
-              pure (w > 0 && h > 0 && rectContains rect mouse)
+              nodeClippedHit ctx idx rect mouse
 
 -- Focus text inputs using solved layout rects so the caret appears on first press.
 finalizeTextInputFocus :: Context -> Input -> IO ()
@@ -323,7 +324,8 @@ findTextInputUnderMouse ctx count mouse = go 0
               wid <- getWidgetId (ctxNodeArena ctx) idx
               (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
               rect <- widgetHitRect ctx nt idx x y w h
-              if rectW rect > 0 && rectH rect > 0 && rectContains rect mouse
+              hit <- nodeClippedHit ctx idx rect mouse
+              if hit
                 then do
                   allow <- overlayHitAllowed ctx idx mouse
                   if allow then pure (Just wid) else go (idx + 1)

@@ -8,6 +8,7 @@ module NanoUI.Frame.Clip
   , terminalModalOuterClip
   , scrollContentClip
   , scrollChromeLane
+  , borderContentClip
   ) where
 
 import qualified Data.Text as T
@@ -21,7 +22,7 @@ import NanoUI.Font
   )
 import NanoUI.Host (HostProfile)
 import NanoUI.Layout.Arena (DirTag (..))
-import NanoUI.Style (Padding (..))
+import NanoUI.Style (Padding (..), Style (..), styleBorderWidth)
 import NanoUI.Types (Color, Rect (..), rectH, rectIntersect, rectW, rectX, rectY)
 
 tagClippedSpans :: Rect -> [(Rect, T.Text, Color, Color)] -> [(Rect, T.Text, Color, Color, Rect)]
@@ -96,3 +97,11 @@ scrollChromeLane host fm slot dir x y w h pad =
                   then y + h + outer
                   else max y (y + h - outer - barW)
            in Rect (x + padL pad) laneY (max 0 (w - padL pad - padR pad)) barW
+
+borderContentClip :: Style -> Rect -> Rect
+borderContentClip style (Rect x y w h) =
+  if styleBorderWidth style <= 0
+    then Rect x y w h
+    else
+      let bw = max 1 (styleBorderWidth style)
+       in Rect (x + bw) (y + bw) (max 0 (w - 2 * bw)) (max 0 (h - 2 * bw))

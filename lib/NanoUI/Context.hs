@@ -60,6 +60,8 @@ module NanoUI.Context
   , easeSameSpec
   , getPrevRect
   , getPrevRectByKey
+  , getPrevClipRect
+  , getPrevClipRectByKey
   , setPrevRect
   , getStore
   , setStore
@@ -151,6 +153,8 @@ import NanoUI.Context.Internal
   , getHotId
   , getPrevRect
   , getPrevRectByKey
+  , getPrevClipRect
+  , getPrevClipRectByKey
   , getScrollOffset
   , getStore
   , intKey
