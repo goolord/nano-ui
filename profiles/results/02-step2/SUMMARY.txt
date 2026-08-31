@@ -1,0 +1,24 @@
+nano-ui perf after Step 2 (layout scratch)
+date: 2026-08-31
+vs 014700e Step 1 / 953df88 baseline
+
+changes:
+  single-pass tail-recursive child scratch load (reverse sibling chain)
+  withAxisSnaps freezes PrimArray instead of [(NodeIdx, Float)] lists
+  wrap packing via PrimArray slice offsets (no dims !! i)
+
+cabal test all: PASS
+cabal run nano-ui-id-bench: 0 bytes during runFrame (burst4096, scopedWidgets)
+
+nano-ui-profile 3000 frames:
+  total_time:  4.38s  (step1 5.06s, baseline 6.55s)
+  total_alloc: 3142.8 MB (step1 3687.2 MB, baseline 5599.2 MB)
+  vs baseline: 43.9% less
+  vs step 1:   14.8% less
+
+key alloc vs step 1 (MB):
+  Layout.Solve.$wpositionChildren      113.5  (was 426.8)
+  Layout.Solve.$wcountLayoutChildren   gone   (was 118.1)
+  Layout.Solve.$wwithAxisSnaps         153.8  (new; freezePrimArray)
+  Layout.Solve.$wloadChildrenScratch     9.6
+  WidgetText.stripButtonBrackets         0.0

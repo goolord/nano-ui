@@ -7,9 +7,17 @@ module NanoUI.Layout.Solve
   , scrollBarSlotOf
   ) where
 
-import Control.Monad (forM, void, when)
+import Control.Monad (when)
 import Data.IORef (readIORef, writeIORef)
-import Data.Primitive.PrimArray (MutablePrimArray, readPrimArray, writePrimArray)
+import Data.Primitive.PrimArray
+  ( MutablePrimArray
+  , PrimArray
+  , freezePrimArray
+  , indexPrimArray
+  , readPrimArray
+  , writePrimArray
+  )
+import Data.Primitive.Types (Prim)
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.Exts (RealWorld)
@@ -43,6 +51,7 @@ import NanoUI.Layout.Arena
   , getAlignX
   , getAlignY
   , getAspect
+  , getChildCount
   , getDirection
   , getFirstChild
   , getGap
@@ -640,28 +649,31 @@ positionColumnScroll ::
   IO ()
 positionColumnScroll na host fm parent gap cx cy innerW innerH contentSize = do
   n <- loadChildrenScratchFromParent na parent innerW innerH
-  pairs <- prepareAxisScratch na n contentSize (gap * fromIntegral (max 0 (n - 1))) False
-  let go [] _ = pure ()
-      go ((ci, fh) : rest) !curY = do
-        nt <- getNodeType na ci
-        (_, _, iw, _) <- getRect na ci
-        ax <- getAlignX na ci
-        (wTag, _) <- getWidthSizing na ci
-        let cw = innerW
-            -- Grow/Percent already take full width. AlignX is for text, not for
-            -- shifting a full-width box (that would draw past the column).
-            fx =
-              if wTag == SizingGrow || wTag == SizingPercent
-                then cx
-                else alignX ax cx cw iw
-            visibleSlice = max 0 (innerH - (curY - cy))
-            nodeH =
-              if isScrollNode nt
-                then min fh visibleSlice
-                else fh
-        positionNode na host fm ci fx curY cw nodeH
-        go rest (curY + fh + gap)
-  go pairs cy
+  withAxisSnaps na n contentSize (gap * fromIntegral (max 0 (n - 1))) False $ \idxSnap outSnap -> do
+    let go !i !curY
+          | i >= n = pure ()
+          | otherwise = do
+              let ci = indexPrimArray idxSnap i
+                  fh = indexPrimArray outSnap i
+              nt <- getNodeType na ci
+              (_, _, iw, _) <- getRect na ci
+              ax <- getAlignX na ci
+              (wTag, _) <- getWidthSizing na ci
+              let cw = innerW
+                  -- Grow/Percent already take full width. AlignX is for text, not for
+                  -- shifting a full-width box (that would draw past the column).
+                  fx =
+                    if wTag == SizingGrow || wTag == SizingPercent
+                      then cx
+                      else alignX ax cx cw iw
+                  visibleSlice = max 0 (innerH - (curY - cy))
+                  nodeH =
+                    if isScrollNode nt
+                      then min fh visibleSlice
+                      else fh
+              positionNode na host fm ci fx curY cw nodeH
+              go (i + 1) (curY + fh + gap)
+    go 0 cy
 
 resolveSize :: SizingTag -> Float -> Float -> Float -> Float -> Float -> Float
 resolveSize SizingFixed v _ _ _ _ = v
@@ -721,16 +733,24 @@ columnChildHeight na ci scratchH = do
       (_, _, _, ih) <- getRect na ci
       pure (max minH ih)
 
-prepareAxisScratch ::
+withAxisSnaps ::
   NodeArena ->
   Int ->
   Float ->
   Float ->
   Bool ->
-  IO [(NodeIdx, Float)]
-prepareAxisScratch na n availMain gapSum horizontal = do
+  (PrimArray Int -> PrimArray Float -> IO a) ->
+  IO a
+withAxisSnaps na n availMain gapSum horizontal act = do
   distributeScratch na 0 n availMain gapSum horizontal
-  snapshotScratchMain na 0 n horizontal
+  idxArr <- readIORef (naScratchIdx na)
+  outArr <-
+    if horizontal
+      then readIORef (naScratchOutMain na)
+      else readIORef (naScratchOutCross na)
+  idxSnap <- freezePrimArray idxArr 0 n
+  outSnap <- freezePrimArray outArr 0 n
+  act idxSnap outSnap
 
 positionRowFromParent ::
   NodeArena ->
@@ -745,38 +765,51 @@ positionRowFromParent ::
   IO ()
 positionRowFromParent na host fm parent gap cx cy cw ch = do
   n <- loadChildrenScratchFromParent na parent cw ch
-  pairs <- prepareAxisScratch na n cw (gap * fromIntegral (max 0 (n - 1))) True
-  let goRow [] _ = pure ()
-      goRow ((ci, fw) : rest) !curX = do
-        -- Fit/fixed children keep content height. Only Grow/Percent eat `ch`.
-        crossH <- childRowCrossSize na ci ch
-        ay <- getAlignY na ci
-        let fy = alignY ay cy ch crossH
-        positionNode na host fm ci curX fy fw crossH
-        goRow rest (curX + fw + gap)
-  goRow pairs cx
+  withAxisSnaps na n cw (gap * fromIntegral (max 0 (n - 1))) True $ \idxSnap outSnap -> do
+    let goRow !i !curX
+          | i >= n = pure ()
+          | otherwise = do
+              let ci = indexPrimArray idxSnap i
+                  fw = indexPrimArray outSnap i
+              -- Fit/fixed children keep content height. Only Grow/Percent eat `ch`.
+              crossH <- childRowCrossSize na ci ch
+              ay <- getAlignY na ci
+              let fy = alignY ay cy ch crossH
+              positionNode na host fm ci curX fy fw crossH
+              goRow (i + 1) (curX + fw + gap)
+    goRow 0 cx
 
 positionRowWrap :: NodeArena -> HostProfile -> FontMetrics -> NodeIdx -> Float -> Float -> Float -> Float -> Float -> IO ()
 positionRowWrap na host fm parent gap cx cy cw ch = do
   n <- loadChildrenScratchFromParent na parent cw ch
-  -- Snapshot before positionNode. Nested layout reuses the same scratch arrays.
-  dims <- snapshotScratchDims na 0 n
-  let goLines _ [] = pure ()
-      goLines !oy (rowItems : restLines) = do
-        lineBudget <- lineRowCrossBudget na rowItems
-        nLine <- writeScratchDims na rowItems
-        rowEntries <- prepareAxisScratch na nLine cw (gap * fromIntegral (max 0 (nLine - 1))) True
-        rowH <- goRow rowEntries cx oy lineBudget lineBudget
-        goLines (oy + rowH + gap) restLines
-      goRow [] _ _ _ maxH = pure maxH
-      goRow ((ci, fw) : es) !curX !oy !lineCross !maxH = do
-        crossH <- childRowCrossSize na ci lineCross
-        let lineCross' = max lineCross crossH
-        ay <- getAlignY na ci
-        let fy = alignY ay oy lineCross' crossH
-        positionNode na host fm ci curX fy fw crossH
-        goRow es (curX + fw + gap) oy lineCross' (max maxH crossH)
-  goLines cy (packRowLines dims cw gap)
+  idxArr <- readIORef (naScratchIdx na)
+  wArr <- readIORef (naScratchMain na)
+  hArr <- readIORef (naScratchCross na)
+  idxSnap <- freezePrimArray idxArr 0 n
+  wSnap <- freezePrimArray wArr 0 n
+  hSnap <- freezePrimArray hArr 0 n
+  let goLines !start !oy
+        | start >= n = pure ()
+        | otherwise = do
+            end <- packRowLineEndPrim wSnap start n cw gap
+            let nLine = end - start
+            lineBudget <- lineRowCrossBudgetSnap na idxSnap hSnap start nLine
+            writeScratchSlice na idxSnap wSnap hSnap start nLine
+            withAxisSnaps na nLine cw (gap * fromIntegral (max 0 (nLine - 1))) True $ \lineIdx lineOut -> do
+              rowH <- goRow lineIdx lineOut nLine 0 cx oy lineBudget lineBudget
+              goLines end (oy + rowH + gap)
+      goRow lineIdx lineOut nLine !j !curX !oy !lineCross !maxH
+        | j >= nLine = pure maxH
+        | otherwise = do
+            let ci = indexPrimArray lineIdx j
+                fw = indexPrimArray lineOut j
+            crossH <- childRowCrossSize na ci lineCross
+            let lineCross' = max lineCross crossH
+            ay <- getAlignY na ci
+            let fy = alignY ay oy lineCross' crossH
+            positionNode na host fm ci curX fy fw crossH
+            goRow lineIdx lineOut nLine (j + 1) (curX + fw + gap) oy lineCross' (max maxH crossH)
+  goLines 0 cy
 
 positionColumnFromParent ::
   NodeArena ->
@@ -796,148 +829,124 @@ positionColumnFromParent ::
 positionColumnFromParent na host fm parent gap chrome px _ pw cx cy cw ch = do
   n <- loadChildrenScratchFromParent na parent cw ch
   gapSum <- columnGapSumScratch na chrome n gap
-  pairs <- prepareAxisScratch na n ch gapSum False
-  let go [] _ = pure ()
-      go ((ci, fh) : rest) !curY = do
-        nt <- getNodeType na ci
-        (fx, nodeW) <-
-          if chrome && nt == NodeSeparator
-            then pure (px, pw)
-            else do
-              (_, _, iw, _) <- getRect na ci
-              ax <- getAlignX na ci
-              (wTag, _) <- getWidthSizing na ci
-              if wTag == SizingGrow || wTag == SizingPercent
-                then pure (cx, cw)
-                else pure (alignX ax cx cw iw, cw)
-        childH <- columnChildHeight na ci fh
-        positionNode na host fm ci fx curY nodeW childH
-        gapAfter <-
-          case rest of
-            [] -> pure 0
-            ((nextCi, _) : _) -> pairColumnGap na chrome ci nextCi gap
-        go rest (curY + childH + gapAfter)
-  go pairs cy
+  withAxisSnaps na n ch gapSum False $ \idxSnap outSnap -> do
+    let go !i !curY
+          | i >= n = pure ()
+          | otherwise = do
+              let ci = indexPrimArray idxSnap i
+                  fh = indexPrimArray outSnap i
+              nt <- getNodeType na ci
+              (fx, nodeW) <-
+                if chrome && nt == NodeSeparator
+                  then pure (px, pw)
+                  else do
+                    (_, _, iw, _) <- getRect na ci
+                    ax <- getAlignX na ci
+                    (wTag, _) <- getWidthSizing na ci
+                    if wTag == SizingGrow || wTag == SizingPercent
+                      then pure (cx, cw)
+                      else pure (alignX ax cx cw iw, cw)
+              childH <- columnChildHeight na ci fh
+              positionNode na host fm ci fx curY nodeW childH
+              gapAfter <-
+                if i + 1 >= n
+                  then pure 0
+                  else pairColumnGap na chrome ci (indexPrimArray idxSnap (i + 1)) gap
+              go (i + 1) (curY + childH + gapAfter)
+    go 0 cy
 
-snapshotScratchDims :: NodeArena -> Int -> Int -> IO [(NodeIdx, Float, Float)]
-snapshotScratchDims na off n = do
-  idxArr <- readIORef (naScratchIdx na)
-  wArr <- readIORef (naScratchMain na)
-  hArr <- readIORef (naScratchCross na)
-  forM [off .. off + n - 1] $ \i -> do
-    ci <- readPrimArray idxArr i
-    w <- readPrimArray wArr i
-    h <- readPrimArray hArr i
-    pure (ci, w, h)
+packRowLineEndPrim :: PrimArray Float -> Int -> Int -> Float -> Float -> IO Int
+packRowLineEndPrim wSnap start n avail gap = go start (0 :: Float)
+  where
+    go !i !lineW
+      | i >= n = pure i
+      | otherwise =
+          let w = indexPrimArray wSnap i
+              need = if lineW <= 0 then w else w + gap
+           in if lineW <= 0 || lineW + need <= avail + 0.001
+                then go (i + 1) (lineW + need)
+                else pure i
 
-writeScratchDims :: NodeArena -> [(NodeIdx, Float, Float)] -> IO Int
-writeScratchDims na items = do
-  let n = length items
-  ensureScratchCapacity na n
+lineRowCrossBudgetSnap :: NodeArena -> PrimArray Int -> PrimArray Float -> Int -> Int -> IO Float
+lineRowCrossBudgetSnap na idxSnap hSnap start nLine = do
+  let go !j !accH !accMin
+        | j >= nLine = pure (max accH accMin)
+        | otherwise = do
+            let ci = indexPrimArray idxSnap (start + j)
+                h = indexPrimArray hSnap (start + j)
+            (_, minH, _, _) <- getMinMax na ci
+            go (j + 1) (max accH h) (max accMin (max h minH))
+  go 0 0 0
+
+writeScratchSlice ::
+  NodeArena ->
+  PrimArray Int ->
+  PrimArray Float ->
+  PrimArray Float ->
+  Int ->
+  Int ->
+  IO ()
+writeScratchSlice na idxSnap wSnap hSnap start nLine = do
+  ensureScratchCapacity na nLine
   idxArr <- readIORef (naScratchIdx na)
   mainArr <- readIORef (naScratchMain na)
   crossArr <- readIORef (naScratchCross na)
-  let write !i [] = do
-        writeIORef (naScratchCount na) i
-        pure i
-      write !i ((ci, w, h) : rest) = do
-        writePrimArray idxArr i ci
-        writePrimArray mainArr i w
-        writePrimArray crossArr i h
-        write (i + 1) rest
-  write 0 items
-
-packRowLines :: [(NodeIdx, Float, Float)] -> Float -> Float -> [[(NodeIdx, Float, Float)]]
-packRowLines dims avail gap = reverse (go 0 [] 0 [])
-  where
-    n = length dims
-    go i curLine curW acc
-      | i >= n = finalize curLine acc
-      | otherwise =
-          let item = dims !! i
-              w = snd3 item
-              need = if null curLine then w else w + gap
-           in if null curLine || curW + need <= avail + 0.001
-                then go (i + 1) (item : curLine) (curW + need) acc
-                else go i [] 0 (reverse curLine : acc)
-    finalize [] acc = acc
-    finalize cur acc = reverse cur : acc
-
-snd3 :: (a, b, c) -> b
-snd3 (_, b, _) = b
-
-lineCrossSize :: [(NodeIdx, Float, Float)] -> Float
-lineCrossSize line =
-  if null line then 0 else maximum (map thd3 line)
-
-lineRowCrossBudget :: NodeArena -> [(NodeIdx, Float, Float)] -> IO Float
-lineRowCrossBudget na items = do
-  let intrinsic = lineCrossSize items
-  mins <-
-    forM items $ \(ci, _, h) -> do
-      (_, minH, _, _) <- getMinMax na ci
-      pure (max h minH)
-  pure (max intrinsic (if null mins then 0 else maximum mins))
-
-thd3 :: (a, b, c) -> c
-thd3 (_, _, c) = c
-
-snapshotScratchMain :: NodeArena -> Int -> Int -> Bool -> IO [(NodeIdx, Float)]
-snapshotScratchMain na off n horizontal = do
-  idxArr <- readIORef (naScratchIdx na)
-  outArr <-
-    if horizontal
-      then readIORef (naScratchOutMain na)
-      else readIORef (naScratchOutCross na)
-  forM [off .. off + n - 1] $ \i -> do
-    ci <- readPrimArray idxArr i
-    v <- readPrimArray outArr i
-    pure (ci, v)
+  let go !j
+        | j >= nLine = writeIORef (naScratchCount na) nLine
+        | otherwise = do
+            writePrimArray idxArr j (indexPrimArray idxSnap (start + j))
+            writePrimArray mainArr j (indexPrimArray wSnap (start + j))
+            writePrimArray crossArr j (indexPrimArray hSnap (start + j))
+            go (j + 1)
+  go 0
 
 loadChildrenScratchFromParent :: NodeArena -> NodeIdx -> Float -> Float -> IO Int
 loadChildrenScratchFromParent na parent availW availH = do
   fc <- getFirstChild na parent
-  count <- countLayoutChildren na fc
-  ensureScratchCapacity na count
-  writeIORef (naScratchCount na) count
-  if count <= 0
-    then pure 0
-    else do
-      idxArr <- readIORef (naScratchIdx na)
-      mainArr <- readIORef (naScratchMain na)
-      crossArr <- readIORef (naScratchCross na)
-      void (fillLayoutChildren na fc idxArr mainArr crossArr availW availH)
-      pure count
+  cc <- getChildCount na parent
+  ensureScratchCapacity na cc
+  idxArr <- readIORef (naScratchIdx na)
+  mainArr <- readIORef (naScratchMain na)
+  crossArr <- readIORef (naScratchCross na)
+  let go !ci !i
+        | ci < 0 = do
+            reverseScratchTriple idxArr mainArr crossArr 0 (i - 1)
+            writeIORef (naScratchCount na) i
+            pure i
+        | otherwise = do
+            nt <- getNodeType na ci
+            ns <- getNextSibling na ci
+            if isFloatingNode nt
+              then go ns i
+              else do
+                writeScratchEntry na ci i idxArr mainArr crossArr availW availH
+                go ns (i + 1)
+  go fc 0
 
-countLayoutChildren :: NodeArena -> NodeIdx -> IO Int
-countLayoutChildren na ci
-  | ci < 0 = pure 0
-  | otherwise = do
-      nt <- getNodeType na ci
-      ns <- getNextSibling na ci
-      rest <- countLayoutChildren na ns
-      pure (if isFloatingNode nt then rest else 1 + rest)
-
-fillLayoutChildren ::
-  NodeArena ->
-  NodeIdx ->
+reverseScratchTriple ::
   MutablePrimArray RealWorld Int ->
   MutablePrimArray RealWorld Float ->
   MutablePrimArray RealWorld Float ->
-  Float ->
-  Float ->
-  IO Int
-fillLayoutChildren na ci idxArr mainArr crossArr availW availH
-  | ci < 0 = pure 0
-  | otherwise = do
-      nt <- getNodeType na ci
-      ns <- getNextSibling na ci
-      slot <- fillLayoutChildren na ns idxArr mainArr crossArr availW availH
-      if isFloatingNode nt
-        then pure slot
-        else do
-          writeScratchEntry na ci slot idxArr mainArr crossArr availW availH
-          pure (slot + 1)
+  Int ->
+  Int ->
+  IO ()
+reverseScratchTriple idxArr mainArr crossArr lo hi = do
+  let go !a !b
+        | a >= b = pure ()
+        | otherwise = do
+            swapPrim idxArr a b
+            swapPrim mainArr a b
+            swapPrim crossArr a b
+            go (a + 1) (b - 1)
+  go lo hi
+
+{-# INLINE swapPrim #-}
+swapPrim :: (Prim a) => MutablePrimArray RealWorld a -> Int -> Int -> IO ()
+swapPrim arr a b = do
+  x <- readPrimArray arr a
+  y <- readPrimArray arr b
+  writePrimArray arr a y
+  writePrimArray arr b x
 
 writeScratchEntry ::
   NodeArena ->
