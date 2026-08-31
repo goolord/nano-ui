@@ -5162,7 +5162,7 @@ runTabsClosableTest ctx failed = do
     inp0 = emptyInput {inputWindowSize = Size 300 100}
     ui curTab =
       tabsEx
-        TabStyleUnderline
+        TabUnderline
         TabTop
         curTab
         [ closableTab TabA "Alpha" (label_ "Body A")
