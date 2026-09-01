@@ -214,8 +214,15 @@ data NodeArena = NodeArena
   , naScratchOutMain :: IORef (MutablePrimArray RealWorld Float)
   , naScratchOutCross :: IORef (MutablePrimArray RealWorld Float)
   -- Stable copies for flex distribute callbacks (scratch is reused during positionNode).
+  , naDistNest :: IORef Int
   , naDistIdx :: IORef (MutablePrimArray RealWorld Int)
   , naDistOut :: IORef (MutablePrimArray RealWorld Float)
+  , naDistIdx1 :: IORef (MutablePrimArray RealWorld Int)
+  , naDistOut1 :: IORef (MutablePrimArray RealWorld Float)
+  , naDistIdx2 :: IORef (MutablePrimArray RealWorld Int)
+  , naDistOut2 :: IORef (MutablePrimArray RealWorld Float)
+  , naDistIdx3 :: IORef (MutablePrimArray RealWorld Int)
+  , naDistOut3 :: IORef (MutablePrimArray RealWorld Float)
   , naIndex :: IORef (BasicHashTable WidgetId NodeIdx)
   }
 
@@ -281,8 +288,15 @@ newNodeArena = do
   naScratchCross <- newIORef =<< newPrimArray scratchCap
   naScratchOutMain <- newIORef =<< newPrimArray scratchCap
   naScratchOutCross <- newIORef =<< newPrimArray scratchCap
+  naDistNest <- newIORef 0
   naDistIdx <- newIORef =<< newPrimArray scratchCap
   naDistOut <- newIORef =<< newPrimArray scratchCap
+  naDistIdx1 <- newIORef =<< newPrimArray scratchCap
+  naDistOut1 <- newIORef =<< newPrimArray scratchCap
+  naDistIdx2 <- newIORef =<< newPrimArray scratchCap
+  naDistOut2 <- newIORef =<< newPrimArray scratchCap
+  naDistIdx3 <- newIORef =<< newPrimArray scratchCap
+  naDistOut3 <- newIORef =<< newPrimArray scratchCap
   naIndex <- newIORef =<< HT.new
   pure
     NodeArena
@@ -297,8 +311,15 @@ newNodeArena = do
       , naScratchCross
       , naScratchOutMain
       , naScratchOutCross
+      , naDistNest
       , naDistIdx
       , naDistOut
+      , naDistIdx1
+      , naDistOut1
+      , naDistIdx2
+      , naDistOut2
+      , naDistIdx3
+      , naDistOut3
       , naIndex
       }
 
@@ -793,6 +814,12 @@ ensureScratchCapacity na needed = do
       growPrimArray (naScratchOutCross na) cap newCap 0
       growPrimArray (naDistIdx na) cap newCap (-1)
       growPrimArray (naDistOut na) cap newCap 0
+      growPrimArray (naDistIdx1 na) cap newCap (-1)
+      growPrimArray (naDistOut1 na) cap newCap 0
+      growPrimArray (naDistIdx2 na) cap newCap (-1)
+      growPrimArray (naDistOut2 na) cap newCap 0
+      growPrimArray (naDistIdx3 na) cap newCap (-1)
+      growPrimArray (naDistOut3 na) cap newCap 0
       writeIORef (naScratchCap na) newCap
 
 {-# INLINE forNodes_ #-}

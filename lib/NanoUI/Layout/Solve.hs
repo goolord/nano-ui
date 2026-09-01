@@ -9,6 +9,7 @@ module NanoUI.Layout.Solve
   , scrollBarSlotOf
   ) where
 
+import Control.Exception (bracket_)
 import Control.Monad (when)
 import Data.IORef (readIORef, writeIORef)
 import Data.Primitive.PrimArray
@@ -84,8 +85,15 @@ import NanoUI.Layout.Arena
   , naScratchCross
   , naScratchOutMain
   , naScratchOutCross
+  , naDistNest
   , naDistIdx
   , naDistOut
+  , naDistIdx1
+  , naDistOut1
+  , naDistIdx2
+  , naDistOut2
+  , naDistIdx3
+  , naDistOut3
   )
 import NanoUI.Id (WidgetId)
 import NanoUI.Style (AlignX (..), AlignY (..), Padding (..), windowMargin)
@@ -855,6 +863,9 @@ columnChildHeight na ci scratchH = do
       (_, _, _, ih) <- getRect na ci
       pure (max minH ih)
 
+maxDistNest :: Int
+maxDistNest = 4
+
 withAxisSnaps ::
   NodeArena ->
   Int ->
@@ -863,19 +874,42 @@ withAxisSnaps ::
   Bool ->
   (MutablePrimArray RealWorld Int -> MutablePrimArray RealWorld Float -> IO a) ->
   IO a
-withAxisSnaps na n availMain gapSum horizontal act = do
-  distributeScratch na 0 n availMain gapSum horizontal
-  ensureScratchCapacity na n
-  idxArr <- readIORef (naScratchIdx na)
-  outArr <-
-    if horizontal
-      then readIORef (naScratchOutMain na)
-      else readIORef (naScratchOutCross na)
-  distIdx <- readIORef (naDistIdx na)
-  distOut <- readIORef (naDistOut na)
-  copyPrimSlice idxArr distIdx 0 n
-  copyPrimSlice outArr distOut 0 n
-  act distIdx distOut
+withAxisSnaps na n availMain gapSum horizontal act =
+  bracket_
+    ( do
+        d <- readIORef (naDistNest na)
+        writeIORef (naDistNest na) (d + 1)
+    )
+    ( do
+        d <- readIORef (naDistNest na)
+        writeIORef (naDistNest na) (max 0 (d - 1))
+    )
+    $ do
+      depth <- subtract 1 <$> readIORef (naDistNest na)
+      if depth >= maxDistNest
+        then fail "withAxisSnaps nesting depth exceeded"
+        else do
+          distributeScratch na 0 n availMain gapSum horizontal
+          ensureScratchCapacity na n
+          idxArr <- readIORef (naScratchIdx na)
+          outArr <-
+            if horizontal
+              then readIORef (naScratchOutMain na)
+              else readIORef (naScratchOutCross na)
+          (distIdx, distOut) <- distBuffersAt na depth
+          copyPrimSlice idxArr distIdx 0 n
+          copyPrimSlice outArr distOut 0 n
+          act distIdx distOut
+
+{-# INLINE distBuffersAt #-}
+distBuffersAt :: NodeArena -> Int -> IO (MutablePrimArray RealWorld Int, MutablePrimArray RealWorld Float)
+distBuffersAt na depth =
+  case depth of
+    0 -> (,) <$> readIORef (naDistIdx na) <*> readIORef (naDistOut na)
+    1 -> (,) <$> readIORef (naDistIdx1 na) <*> readIORef (naDistOut1 na)
+    2 -> (,) <$> readIORef (naDistIdx2 na) <*> readIORef (naDistOut2 na)
+    3 -> (,) <$> readIORef (naDistIdx3 na) <*> readIORef (naDistOut3 na)
+    _ -> fail "withAxisSnaps nesting depth exceeded"
 
 {-# INLINE copyPrimSlice #-}
 copyPrimSlice ::
