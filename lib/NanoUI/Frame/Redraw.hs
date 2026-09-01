@@ -1,5 +1,4 @@
 {-# LANGUAGE DataKinds #-}
-{-# OPTIONS_GHC -Wno-unused-top-binds #-}
 
 module NanoUI.Frame.Redraw
   ( needsRedraw

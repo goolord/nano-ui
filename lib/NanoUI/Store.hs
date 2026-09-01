@@ -27,8 +27,6 @@ module NanoUI.Store
   , slotTextAreaAnchorCol
   , boolInt
   , intBool
-  , pairList
-  , listPair
   , anySelectOpen
   , isSelectOpen
   , setSelectOpen
@@ -148,13 +146,6 @@ boolInt b = if b then 1 else 0
 
 intBool :: Int -> Bool
 intBool n = n /= 0
-
-pairList :: (Float, Float) -> [Float]
-pairList (a, b) = [a, b]
-
-listPair :: [Float] -> Maybe (Float, Float)
-listPair [a, b] = Just (a, b)
-listPair _ = Nothing
 
 -- One open select at a time (replaces IM.singleton on the old Bool map).
 anySelectOpen :: WidgetStore -> Bool

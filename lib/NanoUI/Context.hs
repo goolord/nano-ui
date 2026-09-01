@@ -17,8 +17,6 @@ module NanoUI.Context
   , slotWinSize
   , boolInt
   , intBool
-  , pairList
-  , listPair
   , anySelectOpen
   , isSelectOpen
   , setSelectOpen
@@ -235,8 +233,6 @@ import NanoUI.Store
   , closeSelects
   , intBool
   , isSelectOpen
-  , listPair
-  , pairList
   , setSelectOpen
   , slotAnchor
   , slotCursor

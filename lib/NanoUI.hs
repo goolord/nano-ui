@@ -450,7 +450,6 @@ import NanoUI.Widgets
   , panel
   , radioFieldset
   , row
-  , Clickable (..)
   , RightClickable (..)
   , onRightClick
   , popup
@@ -487,7 +486,6 @@ import NanoUI.Widgets
   , textInput
   , textArea
   , toolbar
-  , tooltip
   , tree
   , useFlag
   , useRadio
