@@ -68,7 +68,7 @@ import NanoUI.Frame.Scroll.Geometry
   , ScrollConfig (..)
   , ScrollPolicy (..)
   )
-import NanoUI.Frame.Hit (ancestorScrollShift, findNodeByWidgetId, topmostOverlayAtMouse)
+import NanoUI.Frame.Hit (ancestorScrollShift, findNodeByWidgetId, topmostModalAtMouse, topmostOverlayAtMouse)
 
 scrollLineFor :: HostProfile -> Float
 scrollLineFor host = if isCellHost host then 1 else scrollLine
@@ -319,8 +319,13 @@ findScrollTargetUnderMouse ctx mouse = do
 
 findScrollNodeUnderMouse :: Context -> V2 -> IO (Maybe NodeIdx)
 findScrollNodeUnderMouse ctx mouse = do
+  mModal <- topmostModalAtMouse ctx mouse
   mTop <- topmostOverlayAtMouse ctx mouse
-  case mTop of
+  let mStart =
+        case mModal of
+          Just idx -> Just idx
+          Nothing -> mTop
+  case mStart of
     Just idx -> do
       (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
       queryScrollTarget ctx idx mouse (Rect x y w h)
@@ -358,7 +363,9 @@ walkScrollSiblings ctx parent mouse clip = do
 scrollHitSelf :: Context -> NodeIdx -> V2 -> Rect -> IO (Maybe NodeIdx)
 scrollHitSelf ctx idx mouse clip = do
   nt <- getNodeType (ctxNodeArena ctx) idx
-  if not (isScrollNode nt)
+  let
+    cellModalShell = isCellHost (ctxHostProfile ctx) && nt == NodeModal
+  if not (isScrollNode nt) || cellModalShell
     then pure Nothing
     else
       if rectW clip > 0 && rectH clip > 0 && rectContains clip mouse
@@ -399,9 +406,9 @@ scrollHitClip ctx idx nt parentClip = do
 -- Layout position plus ancestor scroll shifts (before applyScrollOffsets runs).
 getScrollVisualRect :: Context -> NodeIdx -> IO (Float, Float, Float, Float)
 getScrollVisualRect ctx idx = do
-  (lx, ly, w, h) <- getLayoutRect (ctxNodeArena ctx) idx
+  (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
   (dx, dy) <- ancestorScrollShift ctx idx
-  pure (lx + dx, ly + dy, w, h)
+  pure (x + dx, y + dy, w, h)
 
 updateScrollDrag :: Context -> Input -> IO ()
 updateScrollDrag ctx inp = do
@@ -440,17 +447,20 @@ scrollContainerGeom ctx wid = do
                 w' <- getWidgetId (ctxNodeArena ctx) idx
                 if w' /= wid
                   then go (idx + 1)
-                  else do
-                    dir <- getDirection (ctxNodeArena ctx) idx
-                    si <- getStyleIdx (ctxNodeArena ctx) idx
-                    cfg <- getScrollConfig ctx wid
-                    if scrollChromeSuppressed cfg (si == scrollNative2DStyle) dir
+                  else
+                    if isCellHost (ctxHostProfile ctx) && nt == NodeModal
                       then go (idx + 1)
                       else do
-                        pad <- getPadding (ctxNodeArena ctx) idx
-                        contentSize <- getNodeValue (ctxNodeArena ctx) idx
-                        (x, y, w, h) <- getScrollVisualRect ctx idx
-                        pure (Just (idx, dir, x, y, w, h, pad, contentSize))
+                        dir <- getDirection (ctxNodeArena ctx) idx
+                        si <- getStyleIdx (ctxNodeArena ctx) idx
+                        cfg <- getScrollConfig ctx wid
+                        if scrollChromeSuppressed cfg (si == scrollNative2DStyle) dir
+                          then go (idx + 1)
+                          else do
+                            pad <- getPadding (ctxNodeArena ctx) idx
+                            contentSize <- getNodeValue (ctxNodeArena ctx) idx
+                            (x, y, w, h) <- getScrollVisualRect ctx idx
+                            pure (Just (idx, dir, x, y, w, h, pad, contentSize))
   go 0
 
 tryStartScrollDrag :: Context -> Input -> IO ()

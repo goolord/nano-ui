@@ -216,7 +216,8 @@ finalizePointerRelease ctx inp =
                             { storeInt = IM.insert groupKey tabIdx (storeInt store)
                             }
                         )
-                  writeIORef (ctxClickedId ctx) active
+                  uiHit <- inUiClickHit ctx active mouse
+                  unless uiHit $ writeIORef (ctxClickedId ctx) active
                 _ | postsLayoutClick nt -> do
                   uiHit <- inUiClickHit ctx active mouse
                   unless uiHit $ writeIORef (ctxClickedId ctx) active

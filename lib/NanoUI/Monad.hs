@@ -13,6 +13,7 @@ module NanoUI.Monad
   , keyedTag
   , scope
   , nextId
+  , burstNextIds
   , currentId
   , askContext
   , askInput
@@ -25,6 +26,7 @@ module NanoUI.Monad
   )
 where
 
+import Control.Monad (forM_)
 import Data.Hashable (Hashable, hash)
 import Data.IORef (readIORef, writeIORef)
 import Data.Typeable (Typeable)
@@ -108,6 +110,18 @@ nextId = do
       wid = if raw == 0 then WidgetId 1 else WidgetId raw
     writeIORef (ctxIdContext ctx) (ic {siblingId = sid + 1})
     pure wid
+
+-- | Issue many widget ids in one IO loop (avoids deep Eff bind chains).
+{-# INLINE burstNextIds #-}
+burstNextIds :: Ui :> es => Int -> Eff es ()
+burstNextIds n
+  | n <= 0 = pure ()
+  | otherwise = do
+      ctx <- askContext
+      uiIO $ forM_ [1 .. n] $ \_ -> do
+        ic <- readIORef (ctxIdContext ctx)
+        let IdContext _ sid = ic
+        writeIORef (ctxIdContext ctx) (ic {siblingId = sid + 1})
 
 {-# INLINE currentId #-}
 currentId :: Ui :> es => Eff es WidgetId

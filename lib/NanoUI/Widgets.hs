@@ -39,6 +39,9 @@ module NanoUI.Widgets
   , menuHeader
   , scroll
   , scrollArea
+  , scrollArea2D
+  , scrollAreaIdConfigured
+  , scrollConfigured
   , select
   , radioFieldset
   , boundedRadioFieldset
@@ -232,6 +235,9 @@ import NanoUI.Widgets.Layout
   , row
   , scroll
   , scrollArea
+  , scrollArea2D
+  , scrollAreaIdConfigured
+  , scrollConfigured
   , sep
   , separator
   , spacer

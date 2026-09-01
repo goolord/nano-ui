@@ -88,6 +88,7 @@ module NanoUI
   , uiIO
   , emit
   , nextId
+  , burstNextIds
   , currentId
   , scope
   , keyed
@@ -139,6 +140,9 @@ module NanoUI
   , menuHeader
   , scroll
   , scrollArea
+  , scrollArea2D
+  , scrollAreaIdConfigured
+  , scrollConfigured
   , select
   , colorPicker
   , colorPickerToHex
@@ -333,6 +337,7 @@ import NanoUI.Monad
   , keyed
   , keyedTag
   , nextId
+  , burstNextIds
   , runNanoUI
   , runUi
   , scope
@@ -469,6 +474,9 @@ import NanoUI.Widgets
   , menuHeader
   , scroll
   , scrollArea
+  , scrollArea2D
+  , scrollAreaIdConfigured
+  , scrollConfigured
   , select
   , sep
   , separator

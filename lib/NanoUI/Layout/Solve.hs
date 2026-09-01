@@ -74,6 +74,7 @@ import NanoUI.Layout.Arena
   , setRect
   , getNodeValue
   , setNodeValue
+  , setAspect
   , ensureScratchCapacity
   , naScratchCount
   , naScratchIdx
@@ -101,6 +102,7 @@ import NanoUI.WidgetText
   , textInputMinWidth
   , textInputPlaceholder
   , isTableHeaderStyle
+  , scrollNative2DStyle
   , tableHeaderDisplayText
   )
 
@@ -445,24 +447,39 @@ measureScrollContainer na host fm idx = do
   let pad = resolveLayoutPadding host fm pad0
       gap = resolveLayoutGap host fm gap0
   dir <- getDirection na idx
+  si <- getStyleIdx na idx
   (minW, minH, maxW, maxH) <- getMinMax na idx
   (wTag, wVal) <- getWidthSizing na idx
   (hTag, hVal) <- getHeightSizing na idx
   (contentW, contentH) <- foldChildDimsFromParent na idx dir gap
-  let fullW = contentW + padL pad + padR pad
-      fullH = contentH + padT pad + padB pad
-  -- Overflow compares against the inner viewport, so store content only.
-  -- Including pad made every padded Fit modal/list think it could scroll.
-  setNodeValue na idx (case dir of DirColumn -> contentH; DirRow -> contentW)
-  let viewportW =
-        case wTag of
-          SizingFixed -> wVal
-          _ -> fullW
-      viewportH =
-        case hTag of
-          SizingFixed -> hVal
-          _ -> fullH
-  setRect na idx 0 0 (clamp viewportW minW maxW) (clamp viewportH minH maxH)
+  if si == scrollNative2DStyle
+    then do
+      setNodeValue na idx contentH
+      setAspect na idx contentW
+      let fullW = contentW + padL pad + padR pad
+          fullH = contentH + padT pad + padB pad
+          viewportW =
+            case wTag of
+              SizingFixed -> wVal
+              _ -> fullW
+          viewportH =
+            case hTag of
+              SizingFixed -> hVal
+              _ -> fullH
+      setRect na idx 0 0 (clamp viewportW minW maxW) (clamp viewportH minH maxH)
+    else do
+      let fullW = contentW + padL pad + padR pad
+          fullH = contentH + padT pad + padB pad
+      setNodeValue na idx (case dir of DirColumn -> contentH; DirRow -> contentW)
+      let viewportW =
+            case wTag of
+              SizingFixed -> wVal
+              _ -> fullW
+          viewportH =
+            case hTag of
+              SizingFixed -> hVal
+              _ -> fullH
+      setRect na idx 0 0 (clamp viewportW minW maxW) (clamp viewportH minH maxH)
 
 foldChildDimsFromParent :: NodeArena -> NodeIdx -> DirTag -> Float -> IO (Float, Float)
 foldChildDimsFromParent na idx dir gap = do
@@ -594,23 +611,31 @@ positionScrollChildren ::
   Float ->
   IO ()
 positionScrollChildren na host fm idx dir gap pad px py pw ph = do
+  si <- getStyleIdx na idx
   contentSize <- getNodeValue na idx
   slot <- scrollBarSlotOf na idx
   let cx = px + padL pad
       cy = py + padT pad
       innerW = pw - padL pad - padR pad
       innerH = ph - padT pad - padB pad
-      gutterCol = scrollLayoutGutter host fm slot contentSize innerH
-      gutterRow = scrollLayoutGutter host fm slot contentSize innerW
-  case dir of
-    DirRow -> do
-      (wTag, _) <- getWidthSizing na idx
-      let rowMain =
-            if wTag == SizingGrow
-              then max contentSize (innerW - gutterRow)
-              else contentSize
-      positionRowFromParent na host fm idx gap cx cy rowMain (innerH - gutterRow)
-    DirColumn -> positionColumnScroll na host fm idx gap cx cy (innerW - gutterCol) innerH contentSize
+  if si == scrollNative2DStyle
+    then do
+      contentW <- getAspect na idx
+      let gutterX = scrollLayoutGutter host fm slot contentW innerW
+          gutterY = scrollLayoutGutter host fm slot contentSize innerH
+      positionChildren na host fm idx DirColumn gap pad cx cy (max 0 (innerW - gutterX)) (max 0 (innerH - gutterY))
+    else do
+      let gutterCol = scrollLayoutGutter host fm slot contentSize innerH
+          gutterRow = scrollLayoutGutter host fm slot contentSize innerW
+      case dir of
+        DirRow -> do
+          (wTag, _) <- getWidthSizing na idx
+          let rowMain =
+                if wTag == SizingGrow
+                  then max contentSize (innerW - gutterRow)
+                  else contentSize
+          positionRowFromParent na host fm idx gap cx cy rowMain (innerH - gutterRow)
+        DirColumn -> positionColumnScroll na host fm idx gap cx cy (innerW - gutterCol) innerH contentSize
 
 scrollBarSlotOf :: NodeArena -> NodeIdx -> IO ScrollBarSlot
 scrollBarSlotOf na idx = do

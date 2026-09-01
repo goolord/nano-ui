@@ -233,8 +233,8 @@ runFrameEff unlift ctx inp ui = do
     syncWidgetLabels ctx
   -- Store/input finalization can change measured widget text (sliders, marks).
   solvePlaceWindows ctx w h
-  updatePrevRects ctx
   applyScrollOffsets ctx
+  updatePrevRects ctx
   refreshHover ctx inp
   tickAnimations ctx (inputDeltaTime inp)
   beginLayer (ctxDrawArena ctx) LayerBackground

@@ -33,6 +33,7 @@ module NanoUI.WidgetText
   , tableStripeEven
   , tableStripeOdd
   , tableScrollSlaveStyle
+  , scrollNative2DStyle
   , tableSortReserve
   , tableStripeColor
   , tableHeaderLabel
@@ -261,6 +262,10 @@ tableStripeColor theme si
 -- | Scroll container that shares an id with a master pane and must not paint chrome.
 tableScrollSlaveStyle :: Int
 tableScrollSlaveStyle = 1
+
+-- | Native 2D scroll container (both axes active).
+scrollNative2DStyle :: Int
+scrollNative2DStyle = 2
 
 -- | Trailing slot reserved in every header so the sort mark never changes column width.
 tableSortReserve :: Bool -> Text

@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Widget node construction and interaction responses.
@@ -64,7 +65,7 @@ import NanoUI.Style
   , Padding (..)
   , Sizing (..)
   )
-import NanoUI.Types (Rect (..), rectH, rectUnion, rectW)
+import NanoUI.Types (Rect (..), rectContains, rectH, rectUnion, rectW)
 import NanoUI.Frame.Hit (findNodeByWidgetId, nodeInteractionHit, scrollHitRect)
 
 parentIdx :: [Int] -> Int
@@ -307,12 +308,13 @@ resolveInteraction ctx inp wid = do
     if disabled || blocked
       then pure False
       else
-        findNodeByWidgetId ctx wid >>= \case
+        case mrect of
           Nothing -> pure False
-          Just idx ->
-            case mrect of
-              Nothing -> pure False
-              Just r -> nodeInteractionHit ctx idx r mouse
+          Just r ->
+            findNodeByWidgetId ctx wid >>= \case
+              Nothing ->
+                pure (rectContains r mouse)
+              Just idx -> nodeInteractionHit ctx idx r mouse
   let
     rect = case mrect of
       Just r -> r

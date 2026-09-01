@@ -2,7 +2,7 @@
 
 module Main (main) where
 
-import Control.Monad (forM_, replicateM, replicateM_, void, when)
+import Control.Monad (forM_, replicateM_, void, when)
 import GHC.Stats (RTSStats (..), getRTSStats)
 import NanoUI
 import NanoUI.Testing (newContext, runFrame)
@@ -14,14 +14,14 @@ benchInput :: Input
 benchInput = emptyInput {inputWindowSize = Size 1 1}
 
 idBurst :: NanoUI ()
-idBurst = void (replicateM 4096 nextId)
+idBurst = burstNextIds 4096
 
 scopedWidgets :: NanoUI ()
 scopedWidgets =
-  column (defaultLayout {layoutGap = 2})
-    $ replicateM_ 32
-    $ row (defaultLayout {layoutGap = 2})
-    $ replicateM_ 32 (void nextId)
+  column (defaultLayout {layoutGap = 2}) $
+    replicateM_ 32 $
+      row (defaultLayout {layoutGap = 2}) $
+        replicateM_ 32 (void nextId)
 
 measureFrameAlloc :: NanoUI a -> IO Integer
 measureFrameAlloc ui = do

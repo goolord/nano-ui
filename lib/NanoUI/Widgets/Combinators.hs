@@ -113,9 +113,22 @@ import NanoUI.Style
   , tight
   )
 import NanoUI.Types (Rect (..), V2 (..), rectContains, rectH, rectW, v2X, v2Y)
-import NanoUI.WidgetText (closeButtonMarker, tabButtonMarker, tableScrollSlaveStyle, tableSortReserve)
+import NanoUI.WidgetText (closeButtonMarker, tabButtonMarker, tableSortReserve)
 import NanoUI.Widgets.Behavior (KeyNav (..), useReorder)
-import NanoUI.Widgets.Layout (column, panel, row, scrollAreaId, separator, spacer)
+import NanoUI.Widgets.Layout
+  ( column
+  , panel
+  , row
+  , scrollAreaIdConfigured
+  , separator
+  , spacer
+  )
+import NanoUI.Frame.Scroll.Geometry
+  ( scrollHorizontalAuto
+  , scrollHorizontalHidden
+  , scrollVerticalAuto
+  , scrollVerticalHidden
+  )
 import NanoUI.Widgets.Node
   ( Clickable (..)
   , RightClickable (..)
@@ -494,7 +507,7 @@ tableSplitPanes tableWid vWid hWid rowMinH hChromeH frozenIdx unfrozenIdx pinned
       frozenHs <-
         if null frozenIdx
           then pure []
-          else zip frozenIdx <$> pane False (if null unfrozenIdx then 0 else tableScrollSlaveStyle) frozenIdx
+          else zip frozenIdx <$> pane False (not (null unfrozenIdx)) frozenIdx
       when (not (null frozenIdx) && not (null unfrozenIdx)) $ void separator
       unfrozenHs <-
         if null unfrozenIdx then pure [] else zip unfrozenIdx <$> unfrozenPane unfrozenIdx
@@ -549,26 +562,30 @@ tableSplitPanes tableWid vWid hWid rowMinH hChromeH frozenIdx unfrozenIdx pinned
           vis
       | colIdx <- idxs
       ]
-  pane fill slaveStyle idxs = do
+  pane fill hideVertBar idxs = do
     column (paneLay fill idxs) $ do
       hs <- headerLine idxs renderHeader
       void separator
       pinnedBlock idxs
       when (not (null pinned) && not (null scrollRows)) $ void separator
-      scrollAreaId vWid (vLay fill) slaveStyle (bodyBlock idxs)
+      scrollAreaIdConfigured
+        vWid
+        (vLay fill)
+        (if hideVertBar then scrollVerticalHidden else scrollVerticalAuto)
+        (bodyBlock idxs)
       pure hs
   unfrozenPane idxs = do
     column (paneLay True idxs) $ do
       hs <-
-        scrollAreaId hWid (fillW hRowLay) tableScrollSlaveStyle $
+        scrollAreaIdConfigured hWid (fillW hRowLay) scrollHorizontalHidden $
           column (tight . fillW $ defaultLayout {layoutGap = 0, layoutMinW = minSum idxs}) $ do
             hs <- headerLine idxs renderHeader
             void separator
             pinnedBlock idxs
             when (not (null pinned) && not (null scrollRows)) $ void separator
             pure hs
-      scrollAreaId vWid (vLay True) 0 $
-        scrollAreaId hWid (fillW . fillH $ hRowLay) 0 (bodyBlock idxs)
+      scrollAreaIdConfigured vWid (vLay True) scrollVerticalAuto $
+        scrollAreaIdConfigured hWid (fillW . fillH $ hRowLay) scrollHorizontalAuto (bodyBlock idxs)
       void $
         row (fillW $ hRowLay {layoutHeight = Fixed hChromeH, layoutMinH = hChromeH, layoutMaxH = hChromeH}) $
           spacer (Fixed (max minColW (minSum idxs))) (Fixed 1)

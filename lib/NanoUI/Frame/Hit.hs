@@ -11,6 +11,7 @@ module NanoUI.Frame.Hit
   , modalHitAllowed
   , overlayHitAllowed
   , topmostOverlayAtMouse
+  , topmostModalAtMouse
   , topmostWindowAtMouse
   , widgetOverlayAllowed
   , widgetIdInModal
@@ -102,6 +103,10 @@ topmostOverlayAtMouse :: Context -> V2 -> IO (Maybe NodeIdx)
 topmostOverlayAtMouse ctx mouse =
   topmostFloatingAtMouse ctx mouse (\nt -> nt == NodeWindow || nt == NodePopup)
 
+topmostModalAtMouse :: Context -> V2 -> IO (Maybe NodeIdx)
+topmostModalAtMouse ctx mouse =
+  topmostFloatingAtMouse ctx mouse (== NodeModal)
+
 topmostWindowAtMouse :: Context -> V2 -> IO (Maybe NodeIdx)
 topmostWindowAtMouse ctx mouse =
   topmostFloatingAtMouse ctx mouse (== NodeWindow)
@@ -146,16 +151,9 @@ ancestorScrollShift ctx idx = go idx (0, 0)
                   (sx', sy') <- parentScrollShift ctx p (sx, sy)
                   go p (sx', sy')
 
--- Prev rects are visual space; during UI build add live scroll delta since snapshot.
+-- Prev rects are visual space (snapshot after applyScrollOffsets).
 scrollHitRect :: Context -> WidgetId -> IO (Maybe Rect)
-scrollHitRect ctx wid = do
-  mIdx <- findNodeByWidgetId ctx wid
-  mprev <- getPrevRect ctx wid
-  case (mIdx, mprev) of
-    (Just idx, Just (Rect x y w h)) -> do
-      (dx, dy) <- ancestorScrollShift ctx idx
-      pure (Just (Rect (x + dx) (y + dy) w h))
-    _ -> pure mprev
+scrollHitRect = getPrevRect
 
 {-# INLINE nodePointVisible #-}
 nodePointVisible :: Context -> NodeIdx -> V2 -> IO Bool
@@ -226,7 +224,7 @@ scrollViewportGate host nt =
 parentScrollShift :: Context -> NodeIdx -> (Float, Float) -> IO (Float, Float)
 parentScrollShift ctx p (sx, sy) = do
   nt <- getNodeType (ctxNodeArena ctx) p
-  if isScrollNode nt
+  if isScrollNode nt && not (isCellHost (ctxHostProfile ctx) && nt == NodeModal)
     then do
       wid <- getWidgetId (ctxNodeArena ctx) p
       off <- getScrollOffset ctx wid

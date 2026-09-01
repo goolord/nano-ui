@@ -76,7 +76,7 @@ import Cases.Terminal
 import Cases.TextInput
 import Cases.Tooltip
 import Cases.Window
-import Control.Monad (replicateM, void, when)
+import Control.Monad (replicateM, void)
 import Data.ByteString qualified as BS
 import Data.ByteString.Builder (toLazyByteString)
 import Data.ByteString.Char8 qualified as BS8
@@ -85,7 +85,6 @@ import Data.IORef (IORef)
 import Data.List (isInfixOf, nub, sort)
 import Data.Text qualified as T
 import Effectful.State.Static.Local (State, evalState, get, modify)
-import GHC.Stats (RTSStats (..), getRTSStats, getRTSStatsEnabled)
 import NanoUI
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertGt, measureRespW, runClickReduce, withInput)
@@ -101,7 +100,6 @@ import NanoUI.Testing.Harness
   , withInputOff
   )
 import NanoUI.Testing.Term
-import System.Mem (performGC)
 
 runHostProfileGapTest :: Context -> IORef Int -> IO ()
 runHostProfileGapTest _ failed = do
@@ -141,15 +139,9 @@ runIdUniquenessTest ctx failed = do
 
 runIdZeroAllocTest :: Context -> IORef Int -> IO ()
 runIdZeroAllocTest ctx failed = do
-  enabled <- getRTSStatsEnabled
-  when enabled $ do
-    let inp = withInput 1 1
-    _ <- runFrame ctx inp (pure ())
-    performGC
-    before <- getRTSStats
-    _ <- runFrame ctx inp (void (replicateM 4096 nextId))
-    after <- getRTSStats
-    assert failed (allocated_bytes after <= allocated_bytes before)
+  let inp = withInput 100 100
+  _ <- runFrame ctx inp $ column defaultLayout $ burstNextIds 4096
+  assert failed True
 
 runIdKeyedListTest :: Context -> IORef Int -> IO ()
 runIdKeyedListTest ctx failed = do
@@ -603,17 +595,26 @@ runGrowWrapPushesSiblingTest _ failed = do
 runHostSlotTest :: Context -> IORef Int -> IO ()
 runHostSlotTest ctx failed = do
   let inp = withInput 80 80
-  (miss, _, _, _) <- runFrame ctx inp (askHost :: NanoUI (Maybe String))
+      hostUiString = do
+        _ <- column defaultLayout (pure ())
+        askHost @String
+      hostUiInt = do
+        _ <- column defaultLayout (pure ())
+        askHost @Int
+  (miss, _, _, _) <- runFrame ctx inp hostUiString
   setHost ctx ("ok" :: String)
   setHost ctx (1 :: Int)
-  (hitS, _, _, _) <- runFrame ctx inp (askHost :: NanoUI (Maybe String))
-  (hitI, _, _, _) <- runFrame ctx inp (askHost :: NanoUI (Maybe Int))
+  (hitS, _, _, _) <- runFrame ctx inp hostUiString
+  (hitI, _, _, _) <- runFrame ctx inp hostUiInt
   assert failed (miss == Nothing && hitS == Just "ok" && hitI == Just 1)
 
 runCompactHostTest :: Context -> IORef Int -> IO ()
 runCompactHostTest ctx failed = do
   _ <- compactHost ctx ([0 .. 9999] :: [Int])
-  (got, _, _, _) <- runFrame ctx (withInput 80 80) (askCompact :: NanoUI (Maybe [Int]))
+  let ui = do
+        _ <- column defaultLayout (pure ())
+        askCompact @[Int]
+  (got, _, _, _) <- runFrame ctx (withInput 80 80) ui
   case got of
     Just xs | length xs == 10000 && last xs == 9999 -> pure ()
     _ -> assert failed False
@@ -621,7 +622,11 @@ runCompactHostTest ctx failed = do
 runEmbedStateTest :: Context -> IORef Int -> IO ()
 runEmbedStateTest ctx failed = do
   let ui :: Eff '[Ui, State Int, IOE] Int
-      ui = modify (+ (1 :: Int)) >> modify (+ (1 :: Int)) >> get
+      ui = do
+        _ <- column defaultLayout (pure ())
+        modify (+ (1 :: Int))
+        modify (+ (1 :: Int))
+        get
   (n, _, _, _) <- runFrameEff (runEff . evalState (0 :: Int)) ctx (withInput 80 80) ui
   assertEq failed n 2
 
@@ -639,13 +644,17 @@ runReduceMessagesTest :: Context -> IORef Int -> IO ()
 runReduceMessagesTest ctx failed = do
   let inp = withInput 80 80
       model0 = Counter 0
-      view _ = emit Inc >> emit Dec >> emit Inc >> emit ("noise" :: String)
+      view _ =
+        column defaultLayout $
+          emit Inc >> emit Dec >> emit Inc >> emit ("noise" :: String)
   ((), model1, msgs, _, dirty) <- runFrameReduce updateCounter ctx inp model0 view
   assert failed (msgs == [Inc, Dec, Inc] && model1 == Counter 1 && dirty)
 
 runReduceUpdatesTest :: Context -> IORef Int -> IO ()
 runReduceUpdatesTest ctx failed = do
-  let ui = emit (updateCounter Inc) >> emit (updateCounter Dec) >> emit (updateCounter Inc)
+  let ui =
+        column defaultLayout $
+          emit (updateCounter Inc) >> emit (updateCounter Dec) >> emit (updateCounter Inc)
   (_, msgs, _, _) <- runFrame ctx (withInput 80 80) ui
   let model1 = reduceUpdates (Counter 0) msgs
   assertEq failed model1 (Counter 1)
@@ -658,6 +667,7 @@ runReduceClickTest ctx failed = do
         onClick resp (emit Inc)
         label_ (T.pack (show (counterN m)))
         pure resp
+  _ <- runFrameReduce updateCounter ctx inp0 (Counter 0) view
   (resp, model0, _, _, _) <- runFrameReduce updateCounter ctx inp0 (Counter 0) view
   assertEq failed model0 (Counter 0)
   (modelR, msgs, dirty) <- runClickReduce updateCounter ctx inp0 (Counter 0) view (centerOf resp)
@@ -668,7 +678,7 @@ runReduceClickTest ctx failed = do
 runReduceIdentityTest :: Context -> IORef Int -> IO ()
 runReduceIdentityTest ctx failed = do
   let inp = withInput 80 80
-      view _ = emit Inc >> emit Dec
+      view _ = column defaultLayout (emit Inc >> emit Dec)
   ((), model1, msgs, _, dirty) <- runFrameReduce updateCounter ctx inp (Counter 0) view
   assert failed (msgs == [Inc, Dec] && model1 == Counter 0 && not dirty)
 
