@@ -77,7 +77,6 @@ library
         NanoUI.Sdl.Image
         NanoUI.Sdl.Input
         NanoUI.Sdl.Render
-        NanoUI.Sdl.Shape
         NanoUI.Sdl.Window
     build-depends:
         base ^>=4.22.0.0,
