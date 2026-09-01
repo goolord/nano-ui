@@ -95,6 +95,12 @@ import NanoUI.Style
 import NanoUI.ColorPicker (colorPickerDefaultColor, widgetStoreColor)
 import NanoUI.Types (Color (..), Rect (..), colorRGBA, colorR, colorG, colorB, clamp01, lerpColor, rectH, rectW, rectX, rectY)
 
+textAreaStoredValue :: Context -> NodeIdx -> IO Text
+textAreaStoredValue ctx idx = do
+  wid <- getWidgetId (ctxNodeArena ctx) idx
+  store <- getStore ctx
+  pure (IM.findWithDefault "" (intKey wid) (storeText store))
+
 nodeLabelPaint :: Theme -> T.Text -> (T.Text, Color, Color)
 nodeLabelPaint theme raw = labelPaintWith (themePanel theme) theme raw
 
@@ -216,6 +222,7 @@ displayTextRest ctx nt idx txt terminal =
           store <- getStore ctx
           let cursor = IM.findWithDefault (T.length value) (slotKey slotCursor (intKey wid)) (storeInt store)
           pure (textInputTerminalText txt value cursor focused)
+        NodeTextArea -> textAreaStoredValue ctx idx
         _ -> pure txt
     else
       case nt of
@@ -226,6 +233,7 @@ displayTextRest ctx nt idx txt terminal =
           value <- textInputValue ctx idx
           focused <- textInputFocused ctx idx
           pure (textInputFieldText txt value focused)
+        NodeTextArea -> textAreaStoredValue ctx idx
         NodeSlider -> pure (sliderLabelText txt)
         NodeSelect -> do
           store <- getStore ctx
@@ -477,6 +485,7 @@ widgetVisualStyle ctx nt idx = do
       base =
         case nt of
           NodeTextInput -> themeInput theme
+          NodeTextArea -> themeInput theme
           NodeSelect ->
             let sel = themeButton theme
              in if isFocus
@@ -576,6 +585,7 @@ widgetVisualStyle ctx nt idx = do
         | terminal, isHot = styleHoverBg widgetBase
         | terminal = styleBg widgetBase
         | nt == NodeTextInput, isFocus = styleActiveBg widgetBase
+        | nt == NodeTextArea, isFocus = styleActiveBg widgetBase
         | widKey == hashWidgetId active = styleActiveBg widgetBase
         | nt == NodeCheckbox || nt == NodeRadio || nt == NodeSlider || isClose = styleBg widgetBase
         | nt == NodeTree = hoverBackground widgetBase animT isHot

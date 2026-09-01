@@ -18,6 +18,13 @@ module NanoUI.Store
   , slotScrollCross
   , slotScrollLinkX
   , slotScrollLinkY
+  , slotTextAreaRow
+  , slotTextAreaCol
+  , slotTextAreaPrefCol
+  , slotTextAreaScroll
+  , slotTextAreaViewport
+  , slotTextAreaAnchorRow
+  , slotTextAreaAnchorCol
   , boolInt
   , intBool
   , pairList
@@ -114,6 +121,27 @@ slotScrollLinkY = 0x534C4E4B5900000E
 
 slotScrollContent :: Word64
 slotScrollContent = 0x534352435400000B
+
+slotTextAreaRow :: Word64
+slotTextAreaRow = 0x5441524100000010
+
+slotTextAreaCol :: Word64
+slotTextAreaCol = 0x5441524100000011
+
+slotTextAreaPrefCol :: Word64
+slotTextAreaPrefCol = 0x5441524100000012
+
+slotTextAreaScroll :: Word64
+slotTextAreaScroll = 0x5441524100000013
+
+slotTextAreaViewport :: Word64
+slotTextAreaViewport = 0x5441524100000014
+
+slotTextAreaAnchorRow :: Word64
+slotTextAreaAnchorRow = 0x5441524100000015
+
+slotTextAreaAnchorCol :: Word64
+slotTextAreaAnchorCol = 0x5441524100000016
 
 boolInt :: Bool -> Int
 boolInt b = if b then 1 else 0

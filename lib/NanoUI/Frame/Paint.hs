@@ -71,8 +71,9 @@ import NanoUI.Style
   , themeInput
   , themePanel
   , themeSeparator
+  , themeWindow
   )
-import NanoUI.Types (Color (..), ImageId (..), Rect (..), colorA, colorRGBA, clamp01, rectIntersect)
+import NanoUI.Types (Color (..), ImageId (..), Rect (..), colorA, colorRGBA, clamp01, lerpColor, rectIntersect, rectH, rectW, rectX, rectY)
 import NanoUI.WidgetText (buttonFlagsFromStyle, buttonVisualStyle, selectChevronCenterX, sliderLabelText, tableStripeColor, treeDecodeStyle)
 import NanoUI.Frame.Chrome
   ( fillStyledRect
@@ -93,6 +94,7 @@ import NanoUI.Frame.Scroll.Geometry
   )
 import NanoUI.Frame.Spans (collectNodeTextSpans, widgetTextPlacements, widgetTextSpans)
 import NanoUI.Frame.TextInput (TextInputGeom (..), drawTextInputCaret, drawTextInputSelection, textInputFieldTextClip, textInputGeom)
+import NanoUI.Frame.TextArea (TextAreaGeom (..), drawTextAreaContent, textAreaGeom)
 
 lowerShapes :: Context -> IO ()
 lowerShapes ctx = do
@@ -230,6 +232,32 @@ lowerNodeVisible ctx idx nt x y w h rect fm theme terminal da =
                 pushText da lblFm lx ly lblShown lfg
               drawTextInputCaret da ctx idx x y w h style
             _ -> pure ()
+    NodeTextArea
+      | not terminal -> do
+          style <- widgetVisualStyle ctx nt idx
+          focus <- textInputFocused ctx idx
+          let geom = textAreaGeom (ctxHostProfile ctx) fm x y w h
+              fieldRect = tagFieldRect geom
+              borderCol =
+                if focus
+                  then themeAccent theme
+                  else styleBorder style
+              fieldStyle = style {styleBorder = borderCol}
+          fillStyledRect da False style fieldRect
+          strokeStyledRect
+            da
+            False
+            fieldStyle
+            (rectX fieldRect)
+            (rectY fieldRect)
+            (rectW fieldRect)
+            (rectH fieldRect)
+          lbl <- getText (ctxNodeArena ctx) idx
+          unless (T.null lbl) $ do
+            let (lblFm, lblShown) = pickMonoFont fm (ctxMonoFontMetrics ctx) lbl
+                lfg = lerpColor (styleFg style) (themeWindow theme) 0.32
+            pushText da lblFm x y lblShown lfg
+          drawTextAreaContent da ctx idx x y w h style
     NodeSpacer -> pure ()
     NodeModal -> pure ()
     NodeWindow -> pure ()
@@ -266,10 +294,11 @@ lowerNodeVisible ctx idx nt x y w h rect fm theme terminal da =
             | terminal, nt == NodeSelect = False
             | terminal, nt == NodeColorPicker = False
             | terminal, nt == NodeTextInput = False
+            | terminal, nt == NodeTextArea = False
             | terminal, nt == NodeText = False
             | terminal = True
             | otherwise =
-                nt /= NodeCheckbox && nt /= NodeRadio && nt /= NodeSlider && nt /= NodeTextInput && nt /= NodeColorPicker
+                nt /= NodeCheckbox && nt /= NodeRadio && nt /= NodeSlider && nt /= NodeTextInput && nt /= NodeTextArea && nt /= NodeColorPicker
       when opaqueBg $ fillStyledRect da terminal style rect
       when (not terminal) $ do
         when (opaqueBg && not isTab && not isTable && nt /= NodeTree) $ strokeStyledRect da terminal style x y w h

@@ -57,8 +57,8 @@ library
     exposed-modules:
         NanoUI
         NanoUI.Testing
-        NanoUI.Widget.TextBuffer
-        NanoUI.Widget.TextArea
+        NanoUI.Widgets.TextBuffer
+        NanoUI.Widgets.TextArea
     other-modules:
         NanoUI.Animatable
         NanoUI.Animation
@@ -87,6 +87,8 @@ library
         NanoUI.Frame.Spans
         NanoUI.Frame.SpanArena
         NanoUI.Frame.TextInput
+        NanoUI.Frame.TextEdit
+        NanoUI.Frame.TextArea
         NanoUI.Frame.Window
         NanoUI.Host
         NanoUI.Icons
@@ -111,6 +113,7 @@ library
         NanoUI.Widgets.Tree
         NanoUI.Widgets.ColorPicker
         NanoUI.Widgets.TextInput
+        NanoUI.Widgets.TextEdit
         NanoUI.Widgets.Animate
         NanoUI.Widgets.Overlay
         NanoUI.Widgets.Popup

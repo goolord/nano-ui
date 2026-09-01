@@ -111,6 +111,7 @@ import NanoUI.Frame.Clip
   )
 import NanoUI.Frame.Select (collectSelectDropdownSpans)
 import NanoUI.Frame.TextInput (TextInputGeom (..), collectTextInputMenuSpans, tagSelectClippedSpans, tagTextInputClippedSpans, textInputGeom)
+import NanoUI.Frame.TextArea (TextAreaGeom (..), textAreaGeom, textAreaValue)
 import NanoUI.Frame.Scroll (scrollBarLayout, ScrollBarLayout (..))
 import NanoUI.Frame.Scroll.Geometry
   ( decodeScrollConfig
@@ -339,6 +340,7 @@ widgetHitRect ctx nt idx x y w h = do
     then
       case nt of
         NodeTextInput -> pure (tigFieldRect (textInputGeom (ctxHostProfile ctx) fm x y w h))
+        NodeTextArea -> pure (tagFieldRect (textAreaGeom (ctxHostProfile ctx) fm x y w h))
         NodeButton -> do
           si <- getStyleIdx (ctxNodeArena ctx) idx
           if isCloseButtonStyle si
@@ -591,6 +593,23 @@ widgetTextPlacements ctx nt idx x y w h = do
           pure
             [ (lbl, x, centeredTextY (ctxHostProfile ctx) fm y labelH lh, lw, lh)
             , (fieldTxt, x + ix, centeredTextY (ctxHostProfile ctx) fm (rectY field) (rectH field) fh, fw, fh)
+            ]
+    NodeTextArea -> do
+      lbl <- getText (ctxNodeArena ctx) idx
+      value <- textAreaValue ctx idx
+      if terminal
+        then do
+          (tw, th) <- ctxMeasureText ctx value
+          pure [(value, x + ix, centeredTextY (ctxHostProfile ctx) fm y h th, tw, th)]
+        else do
+          let geom = textAreaGeom (ctxHostProfile ctx) fm x y w h
+              field = tagFieldRect geom
+              labelH = layoutLineHeight (ctxHostProfile ctx) fm
+          (lw, lh) <- ctxMeasureText ctx lbl
+          (fw, _) <- ctxMeasureText ctx (if T.null value then " " else value)
+          pure
+            [ (lbl, x, centeredTextY (ctxHostProfile ctx) fm y labelH lh, lw, lh)
+            , (value, x + ix, rectY field, fw, rectH field)
             ]
     _ -> do
       txt <- displayText ctx nt idx

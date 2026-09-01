@@ -99,6 +99,7 @@ module NanoUI.Context
   , clearPopupConfigs
   , TextInputMenu (..)
   , TextInputDrag (..)
+  , TextFieldClickCell (..)
   , WindowResizeEdge (..)
   , WindowResizeDrag (..)
   , withClipboard
@@ -133,6 +134,7 @@ import NanoUI.Animation
 import NanoUI.Context.Internal
   ( Context (..)
   , TextInputDrag (..)
+  , TextFieldClickCell (..)
   , TextInputMenu (..)
   , WindowResizeDrag (..)
   , WindowResizeEdge (..)

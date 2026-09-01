@@ -1,6 +1,6 @@
 {-# LANGUAGE BangPatterns #-}
 
-module NanoUI.Widget.TextBuffer
+module NanoUI.Widgets.TextBuffer
   ( -- * Types
     TextBuffer (..)
   , Cursor (..)
@@ -12,6 +12,7 @@ module NanoUI.Widget.TextBuffer
     -- * Cursor & Metrics
   , getCursor
   , getLineCount
+  , withCursor
     -- * Navigation
   , moveLeft
   , moveRight
@@ -23,6 +24,14 @@ module NanoUI.Widget.TextBuffer
   , moveToBottom
   , moveWordLeft
   , moveWordRight
+    -- * Selection
+  , compareCursor
+  , cursorBefore
+  , selectionRange
+  , selectedText
+  , deleteRange
+  , replaceRange
+  , documentEnd
     -- * Editing Operations
   , insertChar
   , insertText
@@ -83,6 +92,20 @@ getCursor (TextBuffer z _) =
 -- | Return the total line count.
 getLineCount :: TextBuffer -> Int
 getLineCount = length . toLines
+
+-- | Move to an absolute cursor position without changing document text.
+withCursor :: Cursor -> TextBuffer -> TextBuffer
+withCursor (Cursor row col) buf =
+  let lineTexts = toLines buf
+      lastRow = max 0 (length lineTexts - 1)
+      r = clamp 0 lastRow row
+      lineText =
+        if null lineTexts
+          then ""
+          else lineTexts !! r
+      c = clamp 0 (T.length lineText) col
+      z = TZ.moveCursor (r, c) (unTextBuffer (fromText (toText buf)))
+  in TextBuffer z c
 
 zipperCol :: TZ.TextZipper T.Text -> Int
 zipperCol = snd . TZ.cursorPosition
@@ -183,3 +206,69 @@ killToEOL = withZipper TZ.killToEOL
 
 killToBOL :: TextBuffer -> TextBuffer
 killToBOL = withZipper TZ.killToBOL
+
+compareCursor :: Cursor -> Cursor -> Ordering
+compareCursor (Cursor r1 c1) (Cursor r2 c2) =
+  compare r1 r2 <> compare c1 c2
+
+cursorBefore :: Cursor -> Cursor -> Bool
+cursorBefore a b = compareCursor a b == LT
+
+selectionRange :: Cursor -> Cursor -> (Cursor, Cursor)
+selectionRange a b =
+  if cursorBefore a b
+    then (a, b)
+    else (b, a)
+
+selectedText :: Cursor -> Cursor -> TextBuffer -> T.Text
+selectedText a b buf =
+  let (lo, hi) = selectionRange a b
+      text = toText buf
+      loOff = cursorOffset buf lo
+      hiOff = cursorOffset buf hi
+   in T.take (hiOff - loOff) (T.drop loOff text)
+
+cursorOffset :: TextBuffer -> Cursor -> Int
+cursorOffset buf (Cursor row col) =
+  let lineTexts = toLines buf
+   in sum (map ((+ 1) . T.length) (take row lineTexts)) + col
+
+deleteRange :: Cursor -> Cursor -> TextBuffer -> TextBuffer
+deleteRange a b buf =
+  let text = toText buf
+      (lo, hi) = selectionRange a b
+      loOff = cursorOffset buf lo
+      hiOff = cursorOffset buf hi
+   in fromText (T.take loOff text <> T.drop hiOff text)
+
+replaceRange :: T.Text -> Cursor -> Cursor -> TextBuffer -> TextBuffer
+replaceRange insert a b buf =
+  let text = toText buf
+      (lo, hi) = selectionRange a b
+      loOff = cursorOffset buf lo
+      hiOff = cursorOffset buf hi
+      newText = T.take loOff text <> insert <> T.drop hiOff text
+      newBuf = fromText newText
+      endOff = loOff + T.length insert
+   in withCursor (offsetToCursor newBuf endOff) newBuf
+
+offsetToCursor :: TextBuffer -> Int -> Cursor
+offsetToCursor buf off =
+  let lineTexts = toLines buf
+      go _ [] _ = Cursor 0 0
+      go r (ln : rest) acc =
+        let len = T.length ln
+         in if off <= acc + len
+              then Cursor r (off - acc)
+              else go (r + 1) rest (acc + len + 1)
+   in go 0 lineTexts 0
+
+documentEnd :: TextBuffer -> Cursor
+documentEnd buf =
+  let lineTexts = toLines buf
+      r = max 0 (length lineTexts - 1)
+      c =
+        if null lineTexts
+          then 0
+          else T.length (lineTexts !! r)
+   in Cursor r c

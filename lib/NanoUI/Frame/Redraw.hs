@@ -116,7 +116,7 @@ textFieldActive ctx = do
             Nothing -> pure False
             Just idx -> do
               nt <- getNodeType (ctxNodeArena ctx) idx
-              pure (nt == NodeTextInput)
+              pure (nt == NodeTextInput || nt == NodeTextArea)
 
 -- Last frame still has a floating node (modal or window). Used by backends to
 -- decide whether overlay content might need periodic refresh (debug HUD).

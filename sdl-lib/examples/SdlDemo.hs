@@ -88,6 +88,7 @@ demoUi = do
   (readAccent, setAccent) <- useText (colorPickerToHex demoAccent)
   (readTheme, setTheme) <- useText (T.pack (show Dark))
   (readName, setName) <- useText ""
+  (readNotes, setNotes) <- useText ""
   (readTreeSel, setTreeSel) <- useText "0"
   (readTableSort, setTableSort) <- useTableSort (SortCol 0 SortAsc)
   debugOpen <- readDebug
@@ -114,6 +115,7 @@ demoUi = do
             accentHex <- readAccent
             theme <- readTheme
             name <- readName
+            notes <- readNotes
             treeSel <- readTreeSel
             tableSort <- readTableSort
             let accent = fromMaybe demoAccent (colorPickerFromHex accentHex)
@@ -125,6 +127,7 @@ demoUi = do
               kv "Accent" accentHex
             kv "Theme" theme
             kv "Name" (orDash name)
+            kv "Notes" (orDash notes)
             kv "Tree" treeSel
             kv "Table sort" (tableColumnLabel tableSort)
             kv "Table order" (tableSortDirText tableSort)
@@ -137,7 +140,7 @@ demoUi = do
               thumb (ImageId 2) "Checker"
               thumb (ImageId 3) "Stripe"
             sep
-            muted "Click widgets or type in Name."
+            muted "Click widgets or type in Name or Notes."
             muted "Esc closes About, then quits."
         card $ do
           boundedTabs Controls (T.pack . show) $ \case
@@ -159,6 +162,8 @@ demoUi = do
               setTheme (T.pack (show theme))
               (_, name) <- textInput "Name" ""
               setName name
+              (_, notes) <- textArea "Notes" "Edit me.\nSecond line."
+              setNotes notes
               sep
               heading "Popups & Menus"
               row (tight . gap 8 . fillW $ defaultLayout) $ do

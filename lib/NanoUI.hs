@@ -116,6 +116,7 @@ module NanoUI
   , slider
   , sliderEx
   , textInput
+  , textArea
   , separator
   , spacer
   , tooltip
@@ -484,6 +485,7 @@ import NanoUI.Widgets
   , sliderEx
   , spacer
   , textInput
+  , textArea
   , toolbar
   , tooltip
   , tree

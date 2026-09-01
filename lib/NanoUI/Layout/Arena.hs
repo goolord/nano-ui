@@ -91,6 +91,7 @@ data NodeType
   | NodeCheckbox
   | NodeSlider
   | NodeTextInput
+  | NodeTextArea
   | NodeScrollContainer
   | NodeSelect
   | NodeModal
@@ -115,6 +116,7 @@ isWidgetNode nt =
     NodeRadio -> True
     NodeSlider -> True
     NodeTextInput -> True
+    NodeTextArea -> True
     NodeSelect -> True
     NodeColorPicker -> True
     NodeTree -> True

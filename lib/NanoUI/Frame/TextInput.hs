@@ -7,6 +7,7 @@ module NanoUI.Frame.TextInput
   , drawTextInputCaret
   , drawTextInputSelection
   , textInputCharAtX
+  , textWordBounds
   , openTextInputMenu
   , finalizeTextInputMenuPick
   , closeTextInputMenuOnOutsideClick
@@ -24,72 +25,56 @@ module NanoUI.Frame.TextInput
   , selectTextClip
   ) where
 
-
-import Control.Monad (forM, forM_, unless, when)
-import Data.Char (isAlphaNum, isSpace)
-import Data.IORef (readIORef, writeIORef)
+import Control.Monad (when)
 import qualified Data.IntMap.Strict as IM
 import Data.Text (Text)
 import qualified Data.Text as T
 import NanoUI.Context
   ( Context (..)
-  , TextInputMenu (..)
   , WidgetStore (..)
   , getStore
   , intKey
   , markDirty
-  , markEscapeConsumed
   , setStore
   , slotAnchor
   , slotCursor
   , slotKey
   )
-import NanoUI.Draw (DrawArena, pushRect, pushRoundedRect, pushText)
+import NanoUI.Draw (DrawArena, pushRect)
 import NanoUI.Font
   ( FontMetrics
   , centeredTextY
   , fmLineHeight
-  , hasMonoFontMarker
   , layoutLineHeight
-  , stripMonoFontMarker
   , widgetContentInset
   )
-import NanoUI.Host (HostProfile, isCellHost)
-import NanoUI.Id (WidgetId (..), hashWidgetId)
-import NanoUI.Input
-  ( Input (..)
-  , Key (..)
-  , inputKeys
-  , inputKeysElem
-  , inputMousePos
-  , inputMousePressed
-  , inputMouseRightPressed
-  , inputWindowSize
+import NanoUI.Frame.Clip (padTextClipRect)
+import NanoUI.Frame.CursorKind (UiCursorKind (..))
+import NanoUI.Frame.TextEdit qualified as FE
+import NanoUI.Frame.TextEdit
+  ( closeTextEditMenuOnEscape
+  , closeTextEditMenuOnOutsideClick
+  , collectTextEditMenuSpans
+  , drawTextEditMenuOverlays
+  , finalizeTextEditMenuPick
+  , openTextEditMenu
+  , textCharAtX
+  , textEditMenuCursorKind
   )
+import NanoUI.Frame.Chrome (textInputFocused, textInputValue)
+import NanoUI.Host (HostProfile, isCellHost)
+import NanoUI.Id (WidgetId)
 import NanoUI.Layout.Arena (NodeIdx, NodeType (NodeTextInput), arenaCount, getNodeType, getRect, getText, getWidgetId)
-import NanoUI.Style (Style (..), Theme (..), themeAccent, themeSeparator)
-import NanoUI.Types (Color (..), Rect (..), Size (..), V2 (..), lerpColor, rectContains, rectIntersect, rectOverlapArea, rectH, rectW, rectX, rectY, v2X, v2Y)
-import NanoUI.Widgets (applyTextInputMenuAction)
+import NanoUI.Input (Input)
+import NanoUI.Style (Style (..), Theme (..), styleBg, styleFg, themeAccent)
+import NanoUI.Types (Color (..), Rect (..), lerpColor, rectH, rectIntersect, rectOverlapArea, rectW, rectX, rectY)
 import NanoUI.WidgetText
   ( selectChevronReserve
   , textInputFieldHeight
   , textInputFieldText
   , textInputLabelGap
   )
-import NanoUI.Frame.Clip (padTextClipRect)
-import NanoUI.Frame.CursorKind (UiCursorKind (..))
-import NanoUI.Frame.Chrome
-  ( fillStyledRect
-  , overlayMenuStyle
-  , padDropText
-  , pushMenuShadow
-  , strokeStyledRect
-  , textInputFocused
-  , textInputMenuItemPadX
-  , textInputMenuOuterPad
-  , textInputValue
-  )
-import NanoUI.Frame.Hit (widgetOverlayAllowed)
+import NanoUI.Widgets.TextEdit qualified as WE
 
 selectTextClip :: HostProfile -> Float -> Float -> Float -> Float -> FontMetrics -> Rect
 selectTextClip host x y w h fm =
@@ -210,49 +195,19 @@ drawTextInputCaret da ctx idx x y w h style = do
         pushRect da (Rect caretX caretY 1 caretH) (styleFg style)
 
 collapseTextInputSelection :: Context -> WidgetId -> IO ()
-collapseTextInputSelection ctx wid =
-  when (hashWidgetId wid /= 0) $ do
-    store <- getStore ctx
-    let key = intKey wid
-        cur = IM.findWithDefault 0 (slotKey slotCursor key) (storeInt store)
-    setStore ctx (store {storeInt = IM.insert (slotKey slotAnchor key) cur (storeInt store)})
+collapseTextInputSelection = WE.collapseTextInputSelection
 
-data TextCharClass = TextWord | TextSpace | TextOther
-  deriving (Eq)
+textInputCharAtX :: Context -> Text -> Float -> Float -> IO Int
+textInputCharAtX = textCharAtX
 
-textCharClass :: Char -> TextCharClass
-textCharClass c
-  | isAlphaNum c || c == '_' = TextWord
-  | isSpace c = TextSpace
-  | otherwise = TextOther
-
--- Word bounds for double-click selection. Uses T.index (UTF-16 code units), not
--- grapheme clusters. Fine for ASCII identifiers and typical terminal input.
-textInputWordBounds :: Text -> Int -> (Int, Int)
-textInputWordBounds text raw
-  | T.null text = (0, 0)
-  | otherwise =
-      let n = T.length text
-          i = max 0 (min (n - 1) raw)
-          cls = textCharClass (T.index text i)
-          lo = goLeft cls i
-          hi = goRight cls n i + 1
-       in (lo, hi)
-  where
-    goLeft cls i
-      | i <= 0 = 0
-      | textCharClass (T.index text (i - 1)) == cls = goLeft cls (i - 1)
-      | otherwise = i
-    goRight cls n i
-      | i + 1 >= n = i
-      | textCharClass (T.index text (i + 1)) == cls = goRight cls n (i + 1)
-      | otherwise = i
+textWordBounds :: Text -> Int -> (Int, Int)
+textWordBounds = FE.textWordBounds
 
 applyTextInputClick :: Context -> WidgetId -> Text -> Int -> Int -> IO ()
 applyTextInputClick ctx wid value idx clicks
   | clicks >= 3 = updateTextInputSelection ctx wid 0 (T.length value)
   | clicks == 2 =
-      let (lo, hi) = textInputWordBounds value idx
+      let (lo, hi) = textWordBounds value idx
        in updateTextInputSelection ctx wid lo hi
   | otherwise = updateTextInputSelection ctx wid idx idx
 
@@ -260,331 +215,31 @@ applyTextInputDrag :: Context -> WidgetId -> Text -> Int -> Int -> Int -> IO ()
 applyTextInputDrag ctx wid value anchor idx clicks
   | clicks >= 3 = updateTextInputSelection ctx wid 0 (T.length value)
   | clicks == 2 =
-      let (a0, a1) = textInputWordBounds value anchor
-          (c0, c1) = textInputWordBounds value idx
+      let (a0, a1) = textWordBounds value anchor
+          (c0, c1) = textWordBounds value idx
        in updateTextInputSelection ctx wid (min a0 c0) (max a1 c1)
   | otherwise = updateTextInputSelection ctx wid anchor idx
 
-data TextInputMenuRow
-  = TextInputMenuSep
-  | TextInputMenuItem Int T.Text
-  deriving (Eq, Show)
-
-textInputMenuRows :: [TextInputMenuRow]
-textInputMenuRows =
-  [ TextInputMenuItem 0 "Cut"
-  , TextInputMenuItem 1 "Copy"
-  , TextInputMenuSep
-  , TextInputMenuItem 2 "Paste"
-  , TextInputMenuSep
-  , TextInputMenuItem 3 "Select All"
-  ]
-
-textInputMenuSepH :: HostProfile -> Float
-textInputMenuSepH host = if isCellHost host then 1 else 9
-
-textInputMenuMinW :: Float
-textInputMenuMinW = 148
-
-textInputMenuItemH :: HostProfile -> Float
-textInputMenuItemH host = if isCellHost host then 1 else 28
-
-textInputMenuRowH :: HostProfile -> TextInputMenuRow -> Float
-textInputMenuRowH host = \case
-  TextInputMenuSep -> textInputMenuSepH host
-  TextInputMenuItem {} -> textInputMenuItemH host
-
-textInputMenuContentH :: HostProfile -> Float
-textInputMenuContentH host = sum (map (textInputMenuRowH host) textInputMenuRows)
-
-textInputMenuStyle :: Theme -> Style
-textInputMenuStyle = overlayMenuStyle
-
-textInputMenuWidth :: Context -> IO Float
-textInputMenuWidth ctx = do
-  let labels = [lbl | TextInputMenuItem _ lbl <- textInputMenuRows]
-  ws <- mapM (ctxMeasureText ctx) labels
-  let maxTw = maximum (map fst ws)
-  pure (max textInputMenuMinW (maxTw + 2 * textInputMenuItemPadX + 2 * textInputMenuOuterPad))
-
-textInputMenuRectAt :: HostProfile -> FontMetrics -> Float -> Float -> Float -> Size -> Rect
-textInputMenuRectAt host _fm x y menuW win =
-  let h = 2 * textInputMenuOuterPad + textInputMenuContentH host
-      Size ww wh = win
-      rx = max 0 (min x (ww - menuW))
-      ry = max 0 (min y (wh - h))
-   in Rect rx ry menuW h
-
-textInputMenuContentRect :: HostProfile -> Rect -> FontMetrics -> Rect
-textInputMenuContentRect host menuRect _fm =
-  let pad = textInputMenuOuterPad
-   in Rect
-        (rectX menuRect + pad)
-        (rectY menuRect + pad)
-        (rectW menuRect - 2 * pad)
-        (textInputMenuContentH host)
-
-textInputMenuLayout :: HostProfile -> [(TextInputMenuRow, Float, Float)]
-textInputMenuLayout host = go 0 textInputMenuRows
-  where
-    go _ [] = []
-    go y (entry : rest) =
-      let h = textInputMenuRowH host entry
-       in (entry, y, h) : go (y + h) rest
-
-textInputMenuPickAction :: HostProfile -> Rect -> FontMetrics -> V2 -> Maybe Int
-textInputMenuPickAction host menuRect fm mouse =
-  let content = textInputMenuContentRect host menuRect fm
-      relY = v2Y mouse - rectY content
-   in if relY < 0 || relY >= textInputMenuContentH host
-        then Nothing
-        else pick relY (textInputMenuLayout host)
-  where
-    pick _ [] = Nothing
-    pick y ((TextInputMenuSep, _, h) : rest)
-      | y < h = Nothing
-      | otherwise = pick (y - h) rest
-    pick y ((TextInputMenuItem action _, _, h) : rest)
-      | y < h = Just action
-      | otherwise = pick (y - h) rest
-
-textInputMenuActionEnabled :: Context -> WidgetId -> Int -> IO Bool
-textInputMenuActionEnabled ctx wid item = do
-  store <- getStore ctx
-  let key = intKey wid
-      text = IM.findWithDefault "" key (storeText store)
-      cursor = IM.findWithDefault (T.length text) (slotKey slotCursor key) (storeInt store)
-      anchor = IM.findWithDefault cursor (slotKey slotAnchor key) (storeInt store)
-      hasSel = anchor /= cursor
-  mclip <- ctxClipboardGet ctx
-  let clipTxt = maybe "" id mclip
-  pure $
-    case item of
-      0 -> hasSel
-      1 -> not (T.null text)
-      2 -> not (T.null clipTxt)
-      3 -> not (T.null text)
-      _ -> False
-
-textInputMenuItemFg :: Style -> Bool -> Color
-textInputMenuItemFg style enabled =
-  if enabled
-    then styleFg style
-    else lerpColor (styleFg style) (styleBg style) 0.55
-
 openTextInputMenu :: Context -> Input -> IO ()
-openTextInputMenu ctx inp =
-  when (inputMouseRightPressed inp) $ do
-    focus <- readIORef (ctxFocusId ctx)
-    when (hashWidgetId focus /= 0) $ do
-      mGeom <- textInputGeomForWidget ctx focus
-      case mGeom of
-        Nothing -> pure ()
-        Just (fieldRect, _, _) -> do
-          let mouse = inputMousePos inp
-          when (rectContains fieldRect mouse) $ do
-            fm <- pure (ctxFontMetrics ctx)
-            menuW <- textInputMenuWidth ctx
-            let menuRect = textInputMenuRectAt (ctxHostProfile ctx) fm (v2X mouse) (v2Y mouse) menuW (inputWindowSize inp)
-            writeIORef (ctxTextInputMenu ctx) (Just (TextInputMenu focus menuRect))
-            markDirty ctx
+openTextInputMenu = openTextEditMenu
 
 finalizeTextInputMenuPick :: Context -> Input -> IO ()
-finalizeTextInputMenuPick ctx inp =
-  when (inputMousePressed inp) $ do
-    mMenu <- readIORef (ctxTextInputMenu ctx)
-    case mMenu of
-      Nothing -> pure ()
-      Just menu ->
-        let mouse = inputMousePos inp
-            rect = textInputMenuRect menu
-         in when (rectContains rect mouse) $ do
-              let fm = ctxFontMetrics ctx
-              case textInputMenuPickAction (ctxHostProfile ctx) rect fm mouse of
-                Nothing -> writeIORef (ctxTextInputMenu ctx) Nothing
-                Just idx -> do
-                  enabled <- textInputMenuActionEnabled ctx (textInputMenuWidget menu) idx
-                  when enabled $
-                    applyTextInputMenuAction ctx (textInputMenuWidget menu) idx
+finalizeTextInputMenuPick = finalizeTextEditMenuPick
 
 closeTextInputMenuOnOutsideClick :: Context -> Input -> IO ()
-closeTextInputMenuOnOutsideClick ctx inp =
-  when (inputMousePressed inp || inputMouseRightPressed inp) $ do
-    mMenu <- readIORef (ctxTextInputMenu ctx)
-    case mMenu of
-      Nothing -> pure ()
-      Just menu -> do
-        let mouse = inputMousePos inp
-        unless (rectContains (textInputMenuRect menu) mouse) $
-          writeIORef (ctxTextInputMenu ctx) Nothing
+closeTextInputMenuOnOutsideClick = closeTextEditMenuOnOutsideClick
 
 closeTextInputMenuOnEscape :: Context -> Input -> IO ()
-closeTextInputMenuOnEscape ctx inp =
-  when (inputKeysElem KeyEscape (inputKeys inp)) $
-    readIORef (ctxTextInputMenu ctx) >>= \case
-      Nothing -> pure ()
-      Just _ -> do
-        writeIORef (ctxTextInputMenu ctx) Nothing
-        markEscapeConsumed ctx
-        markDirty ctx
+closeTextInputMenuOnEscape = closeTextEditMenuOnEscape
 
 textInputMenuCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
-textInputMenuCursorKind ctx inp = do
-  mMenu <- readIORef (ctxTextInputMenu ctx)
-  case mMenu of
-    Nothing -> pure Nothing
-    Just menu -> do
-      let mouse = inputMousePos inp
-          rect = textInputMenuRect menu
-          fm = ctxFontMetrics ctx
-      if not (rectContains rect mouse)
-        then pure Nothing
-        else
-          case textInputMenuPickAction (ctxHostProfile ctx) rect fm mouse of
-            Nothing -> pure Nothing
-            Just idx -> do
-              enabled <- textInputMenuActionEnabled ctx (textInputMenuWidget menu) idx
-              pure (if enabled then Just UiCursorPointer else Just UiCursorDefault)
+textInputMenuCursorKind = textEditMenuCursorKind
 
 drawTextInputMenuOverlays :: Context -> Input -> IO ()
-drawTextInputMenuOverlays ctx inp = do
-  mMenu <- readIORef (ctxTextInputMenu ctx)
-  case mMenu of
-    Nothing -> pure ()
-    Just menu -> do
-      allow <- widgetOverlayAllowed ctx (textInputMenuWidget menu)
-      when allow $ do
-        let fm = ctxFontMetrics ctx
-        when (not (isCellHost (ctxHostProfile ctx))) $ do
-          let da = ctxDrawArena ctx
-              theme = ctxTheme ctx
-              mouse = inputMousePos inp
-              menuRect = textInputMenuRect menu
-              menuStyle = textInputMenuStyle theme
-              content = textInputMenuContentRect (ctxHostProfile ctx) menuRect fm
-              r = styleCornerRadius menuStyle
-              wid = textInputMenuWidget menu
-          pushMenuShadow da menuRect r
-          fillStyledRect da False menuStyle menuRect
-          strokeStyledRect
-            da
-            False
-            menuStyle
-            (rectX menuRect)
-            (rectY menuRect)
-            (rectW menuRect)
-            (rectH menuRect)
-          forM_ (textInputMenuLayout (ctxHostProfile ctx)) $ \(entry, relY, h) -> do
-            let rowRect = Rect (rectX menuRect) (rectY content + relY) (rectW menuRect) h
-            case entry of
-              TextInputMenuSep -> do
-                let sepCol = themeSeparator theme
-                    margin = textInputMenuItemPadX
-                    lineY = rectY rowRect + h / 2
-                pushRect
-                  da
-                  (Rect (rectX rowRect + margin) lineY (rectW rowRect - 2 * margin) 1)
-                  sepCol
-              TextInputMenuItem action lbl -> do
-                enabled <- textInputMenuActionEnabled ctx wid action
-                let hovered = enabled && rectContains rowRect mouse
-                when hovered $ do
-                  pushRect da rowRect (styleHoverBg menuStyle)
-                  let accent = themeAccent theme
-                      barRect = Rect (rectX rowRect) (rectY rowRect + 3) 2 (rectH rowRect - 6)
-                  pushRoundedRect da barRect 1 accent
-                unless (T.null lbl) $ do
-                  (_tw, th) <- ctxMeasureText ctx lbl
-                  let (ix, _) = widgetContentInset (ctxHostProfile ctx) fm
-                      tx = rectX content + textInputMenuItemPadX + ix
-                      ty = centeredTextY (ctxHostProfile ctx) fm (rectY content + relY) h th
-                      fg = textInputMenuItemFg menuStyle enabled
-                      (fm', shown) = if hasMonoFontMarker lbl
-                                       then (ctxMonoFontMetrics ctx, stripMonoFontMarker lbl)
-                                       else (fm, lbl)
-                  pushText da fm' tx ty shown fg
+drawTextInputMenuOverlays = drawTextEditMenuOverlays
 
 collectTextInputMenuSpans :: Context -> Input -> IO [(Rect, T.Text, Color, Color, Rect)]
-collectTextInputMenuSpans ctx inp = do
-  mMenu <- readIORef (ctxTextInputMenu ctx)
-  case mMenu of
-    Nothing -> pure []
-    Just menu -> do
-      let fm = ctxFontMetrics ctx
-          theme = ctxTheme ctx
-          mouse = inputMousePos inp
-          menuRect = textInputMenuRect menu
-          menuStyle = textInputMenuStyle theme
-          content = textInputMenuContentRect (ctxHostProfile ctx) menuRect fm
-          wid = textInputMenuWidget menu
-      allow <- widgetOverlayAllowed ctx wid
-      if not allow
-        then pure []
-        else if isCellHost (ctxHostProfile ctx)
-        then terminalTextInputMenuSpans ctx menuRect content fm menuStyle mouse wid
-        else do
-          let (ix, _) = widgetContentInset (ctxHostProfile ctx) fm
-              bg = styleBg menuStyle
-          spans <-
-            forM (textInputMenuLayout (ctxHostProfile ctx)) $ \(entry, relY, h) -> do
-              let rowRect = Rect (rectX menuRect) (rectY content + relY) (rectW menuRect) h
-              case entry of
-                TextInputMenuSep -> pure []
-                TextInputMenuItem action lbl -> do
-                  enabled <- textInputMenuActionEnabled ctx wid action
-                  let fg = textInputMenuItemFg menuStyle enabled
-                      hovered = enabled && rectContains rowRect mouse
-                      rowBg =
-                        if hovered
-                          then styleHoverBg menuStyle
-                          else bg
-                  (tw, th) <- ctxMeasureText ctx lbl
-                  let tx = rectX content + textInputMenuItemPadX + ix
-                      ty = centeredTextY (ctxHostProfile ctx) fm (rectY content + relY) h th
-                  pure [(Rect tx ty tw th, lbl, fg, rowBg, menuRect)]
-          pure (concat spans)
-
-terminalTextInputMenuSpans ::
-  Context ->
-  Rect ->
-  Rect ->
-  FontMetrics ->
-  Style ->
-  V2 ->
-  WidgetId ->
-  IO [(Rect, T.Text, Color, Color, Rect)]
-terminalTextInputMenuSpans ctx menuRect content _fm menuStyle mouse wid = do
-  let rx :: Int
-      rx = round (rectX menuRect)
-      wi :: Int
-      wi = max 1 (round (rectW menuRect))
-      innerW = max 0 (wi - 1)
-      dropBg = styleBg menuStyle
-      dropHoverBg = styleHoverBg menuStyle
-      sepFg = themeSeparator (ctxTheme ctx)
-  rows <-
-    forM (textInputMenuLayout (ctxHostProfile ctx)) $ \(entry, relY, _h) -> do
-      let rowY :: Int
-          rowY = round (rectY content + relY)
-      case entry of
-        TextInputMenuSep ->
-          pure
-            [ ( Rect (fromIntegral rx) (fromIntegral rowY) (fromIntegral wi) 1
-              , T.replicate innerW (T.singleton '\x2500')
-              , sepFg
-              , dropBg
-              , menuRect
-              )
-            ]
-        TextInputMenuItem action lbl -> do
-          enabled <- textInputMenuActionEnabled ctx wid action
-          let fg = textInputMenuItemFg menuStyle enabled
-              rowRect = Rect (rectX menuRect) (rectY content + relY) (rectW menuRect) (textInputMenuItemH (ctxHostProfile ctx))
-              hovered = enabled && rectContains rowRect mouse
-              rowBg = if hovered then dropHoverBg else dropBg
-              rowText = T.singleton ' ' <> padDropText innerW lbl
-          pure [(Rect (fromIntegral rx) (fromIntegral rowY) (fromIntegral wi) 1, rowText, fg, rowBg, menuRect)]
-  pure (concat rows)
+collectTextInputMenuSpans = collectTextEditMenuSpans
 
 textInputGeomForWidget :: Context -> WidgetId -> IO (Maybe (Rect, Float, Text))
 textInputGeomForWidget ctx wid = do
@@ -626,23 +281,3 @@ updateTextInputSelection ctx wid anchor cursor = do
           }
       )
     markDirty ctx
-
-textInputCharAtX :: Context -> Text -> Float -> Float -> IO Int
-textInputCharAtX ctx text startX mouseX = do
-  let len = T.length text
-      relX = max 0 (mouseX - startX)
-  if len <= 0
-    then pure 0
-    else search 0 len relX
-  where
-    search lo hi x =
-      if hi - lo <= 1
-        then do
-          (wLo, _) <- ctxMeasureText ctx (T.take lo text)
-          (wHi, _) <- ctxMeasureText ctx (T.take hi text)
-          if x - wLo <= wHi - x then pure lo else pure hi
-        else do
-          let mid = (lo + hi) `div` 2
-          (wMid, _) <- ctxMeasureText ctx (T.take mid text)
-          if wMid <= x then search mid hi x else search lo mid x
-

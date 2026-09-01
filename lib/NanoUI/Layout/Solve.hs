@@ -382,6 +382,18 @@ measureWidget na host fm measure idx = do
                 gap = textInputLabelGap fm
                 contentW = max textInputMinWidth (max lw pw)
             pure (contentW, lh + gap + fieldH, 0, 0)
+      NodeTextArea -> do
+        let lbl = if T.null txt then " " else txt
+        (lw, lh) <- measure lbl
+        if isCellHost host
+          then do
+            (vw, vh) <- measure " "
+            pure (max lw vw, max lh vh, 0, 0)
+          else do
+            let gap = textInputLabelGap fm
+                fieldH = max 96 (textInputFieldHeight fm * 4)
+                contentW = max textInputMinWidth lw
+            pure (contentW, lh + gap + fieldH, 0, 0)
       _ -> do
         body <-
           if T.null txt

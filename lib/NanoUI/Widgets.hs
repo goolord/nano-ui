@@ -14,6 +14,7 @@ module NanoUI.Widgets
   , slider
   , sliderEx
   , textInput
+  , textArea
   , applyTextInputMenuAction
   , separator
   , spacer
@@ -154,7 +155,8 @@ import NanoUI.Widgets.Menu
   )
 import NanoUI.Widgets.Node (RightClickable (..), onRightClick)
 import NanoUI.Font
-  ( headingFontMarker
+  ( fmLineHeight
+  , headingFontMarker
   , monoFontMarker
   , mutedFontMarker
   , sliderTrackBounds
@@ -175,6 +177,7 @@ import NanoUI.Store
   , slotAnchor
   , slotCursor
   , slotKey
+  , slotTextAreaViewport
   )
 import NanoUI.Style
   ( Layout (..)
@@ -265,6 +268,14 @@ import NanoUI.Widgets.TextInput
   , processTextInput
   , textInputLayout
   )
+import NanoUI.Widgets.TextArea
+  ( loadTextAreaState
+  , processTextArea
+  , saveTextAreaState
+  , textAreaLayout
+  )
+import qualified NanoUI.Widgets.TextArea as TA
+import NanoUI.Widgets.TextBuffer as TB
 import NanoUI.Widgets.Tree
   ( TreeItem (..)
   , tree
@@ -490,6 +501,37 @@ textInput lbl initial = do
       )
   resp <-
     addWidget wid NodeTextInput lbl 0 textInputLayout
+  pure (setChanged (newText /= current) resp, newText)
+
+textArea :: Ui :> es => Text -> Text -> Eff es (Response, Text)
+textArea lbl initial = do
+  wid <- nextId
+  ctx <- askContext
+  uiIO $ registerFocusable ctx wid
+  inp <- askInput
+  store <- uiIO (getStore ctx)
+  let key = intKey wid
+  when (not (IM.member key (storeText store)))
+    $ uiIO
+    $ setStore ctx (store {storeText = IM.insert key initial (storeText store)})
+  let current = IM.findWithDefault initial key (storeText store)
+  focus <- uiIO (readIORef (ctxFocusId ctx))
+  blocked <- uiIO (pointerBlockedByModal ctx)
+  let isFocus = focus == wid && not blocked
+      (vpW, vpH) =
+        let (vw, vh) =
+              IM.findWithDefault (200, 96) (slotKey slotTextAreaViewport key) (storePoint store)
+         in (realToFrac vw, realToFrac vh)
+      lineH = realToFrac (fmLineHeight (ctxFontMetrics ctx))
+      oldState = loadTextAreaState store key initial
+  newState <-
+    if isFocus
+      then uiIO (processTextArea ctx inp vpW vpH lineH oldState)
+      else pure oldState
+  let newText = TB.toText (TA.buffer newState)
+  when (newText /= current || isFocus) $
+    uiIO $ setStore ctx (saveTextAreaState key newState store)
+  resp <- addWidget wid NodeTextArea lbl 0 textAreaLayout
   pure (setChanged (newText /= current) resp, newText)
 
 select :: Ui :> es => Text -> [Text] -> Int -> Eff es (Response, Int)

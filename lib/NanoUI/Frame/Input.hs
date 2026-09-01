@@ -22,7 +22,6 @@ import qualified Data.IntMap.Strict as IM
 import NanoUI.Context
   ( Context (..)
   , TextInputDrag (..)
-  , TextInputMenu (..)
   , WidgetStore (..)
   , boolInt
   , getFocusables
@@ -74,7 +73,14 @@ import NanoUI.Frame.Redraw (probeHotId)
 import NanoUI.Frame.Select (findSelectUnderMouse, overlayMenuOwnerAt)
 import NanoUI.Frame.Spans (widgetHitRect)
 import NanoUI.WidgetText (buttonVisualStyle, isTabButtonStyle)
-import NanoUI.Frame.TextInput (collapseTextInputSelection, textInputGeomForWidget, applyTextInputClick, applyTextInputDrag, textInputCharAtX)
+import NanoUI.Frame.TextEdit (normalizeTextFieldClicks, textCharAtX, textEditMenuRect)
+import NanoUI.Frame.TextInput
+  ( applyTextInputClick
+  , applyTextInputDrag
+  , textInputGeomForWidget
+  )
+import NanoUI.Widgets.TextEdit (collapseTextFieldSelection)
+import NanoUI.Frame.TextArea (finalizeTextAreaMouse)
 
 whenM :: Monad m => m Bool -> m () -> m ()
 whenM mb ma = mb >>= \b -> when b ma
@@ -168,6 +174,7 @@ isInteractiveNode nt =
     || nt == NodeSelect
     || nt == NodeColorPicker
     || nt == NodeTextInput
+    || nt == NodeTextArea
 
 -- Clicks are finalized against solved layout rects; widgets only track press state.
 -- Checkbox/radio write the store here. Buttons, tree rows, and select use the same
@@ -295,7 +302,7 @@ finalizeTextInputFocus ctx inp =
     mMenu <- readIORef (ctxTextInputMenu ctx)
     let mouse = inputMousePos inp
     when (case mMenu of
-            Just menu -> not (rectContains (textInputMenuRect menu) mouse)
+            Just menu -> not (rectContains (textEditMenuRect menu) mouse)
             Nothing -> True) $ do
       prevFocus <- readIORef (ctxFocusId ctx)
       count <- arenaCount (ctxNodeArena ctx)
@@ -303,7 +310,7 @@ finalizeTextInputFocus ctx inp =
       case mFocused of
         Nothing -> do
           when (prevFocus /= WidgetId 0) $ markDirty ctx
-          collapseTextInputSelection ctx prevFocus
+          collapseTextFieldSelection ctx prevFocus
           writeIORef (ctxFocusId ctx) (WidgetId 0)
           writeIORef (ctxTextInputMenu ctx) Nothing
         Just wid -> do
@@ -328,24 +335,32 @@ finalizeTextInputMouse ctx inp = do
   when (hashWidgetId focus /= 0) $ do
     mGeom <- textInputGeomForWidget ctx focus
     case mGeom of
-      Nothing -> pure ()
       Just (fieldRect, contentX, value) -> do
         let mouse = inputMousePos inp
             inField = rectContains fieldRect mouse
         if inputMousePressed inp && inField
           then do
-            idx <- textInputCharAtX ctx value contentX (v2X mouse)
-            let clicks = max 1 (inputMouseClicks inp)
+            idx <- textCharAtX ctx value contentX (v2X mouse)
+            clicks <-
+              normalizeTextFieldClicks
+                ctx
+                focus
+                idx
+                0
+                0
+                False
+                (max 1 (inputMouseClicks inp))
             applyTextInputClick ctx focus value idx clicks
-            writeIORef (ctxTextInputDrag ctx) (Just (TextInputDrag focus idx clicks))
+            writeIORef (ctxTextInputDrag ctx) (Just (TextInputDrag focus idx 0 0 False clicks))
           else do
             mDrag <- readIORef (ctxTextInputDrag ctx)
             case mDrag of
               Just drag
                 | textInputDragWidget drag == focus && (inputMouseDown inp || inputMouseReleased inp) -> do
-                    idx <- textInputCharAtX ctx value contentX (v2X mouse)
+                    idx <- textCharAtX ctx value contentX (v2X mouse)
                     applyTextInputDrag ctx focus value (textInputDragAnchor drag) idx (textInputDragClicks drag)
               _ -> pure ()
+      Nothing -> finalizeTextAreaMouse ctx inp focus
   when (inputMouseReleased inp) $
     writeIORef (ctxTextInputDrag ctx) Nothing
 
@@ -356,7 +371,7 @@ findTextInputUnderMouse ctx count mouse = go 0
       | idx >= count = pure Nothing
       | otherwise = do
           nt <- getNodeType (ctxNodeArena ctx) idx
-          if nt == NodeTextInput
+          if nt == NodeTextInput || nt == NodeTextArea
             then do
               wid <- getWidgetId (ctxNodeArena ctx) idx
               (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
