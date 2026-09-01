@@ -421,26 +421,30 @@ getScrollVisualRect ctx idx = do
 
 updateScrollDrag :: Context -> Input -> IO ()
 updateScrollDrag ctx inp = do
-  mDrag <- readIORef (ctxScrollDrag ctx)
-  if inputMouseReleased inp
-    then writeIORef (ctxScrollDrag ctx) Nothing
-    else
-      case mDrag of
-        Just (wid, grabOff) | inputMouseDown inp -> do
-          mGeom <- scrollContainerGeom ctx wid
-          case mGeom of
-            Nothing -> pure ()
-            Just (idx, dir, x, y, w, h, pad, contentSize) -> do
-              off <- getScrollOffset ctx wid
-              let fm = ctxFontMetrics ctx
-              slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
-              case scrollBarLayout (ctxHostProfile ctx) fm slot dir x y w h pad contentSize off of
+  gesture <- readIORef (ctxMenuPointerGesture ctx)
+  if gesture
+    then when (inputMouseReleased inp) $ writeIORef (ctxScrollDrag ctx) Nothing
+    else do
+      mDrag <- readIORef (ctxScrollDrag ctx)
+      if inputMouseReleased inp
+        then writeIORef (ctxScrollDrag ctx) Nothing
+        else
+          case mDrag of
+            Just (wid, grabOff) | inputMouseDown inp -> do
+              mGeom <- scrollContainerGeom ctx wid
+              case mGeom of
                 Nothing -> pure ()
-                Just layout -> do
-                  let newOff = scrollOffsetFromThumb dir layout grabOff (inputMousePos inp)
-                  when (newOff /= off) $ setScrollOffset ctx wid newOff
-        Nothing | inputMousePressed inp -> tryStartScrollDrag ctx inp
-        _ -> pure ()
+                Just (idx, dir, x, y, w, h, pad, contentSize) -> do
+                  off <- getScrollOffset ctx wid
+                  let fm = ctxFontMetrics ctx
+                  slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
+                  case scrollBarLayout (ctxHostProfile ctx) fm slot dir x y w h pad contentSize off of
+                    Nothing -> pure ()
+                    Just layout -> do
+                      let newOff = scrollOffsetFromThumb dir layout grabOff (inputMousePos inp)
+                      when (newOff /= off) $ setScrollOffset ctx wid newOff
+            Nothing | inputMousePressed inp -> tryStartScrollDrag ctx inp
+            _ -> pure ()
 
 scrollContainerGeom ::
   Context -> WidgetId -> IO (Maybe (NodeIdx, DirTag, Float, Float, Float, Float, Padding, Float))

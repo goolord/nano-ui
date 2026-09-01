@@ -11,8 +11,6 @@ module NanoUI.Frame.Redraw
   , overlayMenuOpen
   , hoverWouldChange
   , probeHotId
-  , overlayMenuOwnerAt
-  , openSelectOwnerAt
   ) where
 
 
@@ -20,13 +18,10 @@ import Data.IORef (readIORef)
 import Data.Maybe (isJust)
 import NanoUI.Context
   ( Context (..)
-  , TextInputMenu (..)
   , anyAnimating
   , anySelectOpen
   , getStore
-  , intKey
   , isDirty
-  , isSelectOpen
   )
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), inputInteracted, inputMousePos, inputPointerHeld)
@@ -35,16 +30,13 @@ import NanoUI.Layout.Arena
   , arenaCount
   , foldNodeRevM
   , getNodeType
-  , getRect
-  , getText
   , getWidgetId
   , isFloatingNode
   , isWidgetNode
   )
-import NanoUI.Types (V2 (..), rectContains)
-import NanoUI.WidgetText (selectOptions)
+import NanoUI.Types (V2 (..))
 import NanoUI.Frame.Hit (findNodeByWidgetId, overlayHitAllowed, nodePointVisible)
-import NanoUI.Frame.Select (selectDropRect)
+import NanoUI.Frame.Select (overlayMenuOwnerAt)
 
 needsRedraw :: Context -> Input -> Input -> IO Bool
 needsRedraw = needsRedraw' True
@@ -107,39 +99,6 @@ overlayMenuOpen ctx = do
   menu <- readIORef (ctxTextInputMenu ctx)
   pure (anySelectOpen store || isJust menu)
 
-overlayMenuOwnerAt :: Context -> V2 -> IO (Maybe WidgetId)
-overlayMenuOwnerAt ctx mouse = do
-  menu <- readIORef (ctxTextInputMenu ctx)
-  case menu of
-    Just m | rectContains (textInputMenuRect m) mouse ->
-      pure (Just (textInputMenuWidget m))
-    _ -> openSelectOwnerAt ctx mouse
-
-openSelectOwnerAt :: Context -> V2 -> IO (Maybe WidgetId)
-openSelectOwnerAt ctx mouse = do
-  store <- getStore ctx
-  count <- arenaCount (ctxNodeArena ctx)
-  let go idx
-        | idx >= count = pure Nothing
-        | otherwise = do
-            nt <- getNodeType (ctxNodeArena ctx) idx
-            if nt /= NodeSelect
-              then go (idx + 1)
-              else do
-                wid <- getWidgetId (ctxNodeArena ctx) idx
-                let key = intKey wid
-                if not (isSelectOpen store key)
-                  then go (idx + 1)
-                  else do
-                    txt <- getText (ctxNodeArena ctx) idx
-                    (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-                    let (_, opts) = selectOptions txt
-                        dropRect = selectDropRect (ctxHostProfile ctx) (ctxFontMetrics ctx) x y w h (length opts)
-                    if rectContains dropRect mouse
-                      then pure (Just wid)
-                      else go (idx + 1)
-  go 0
-
 -- Focused text field or its context menu. Keep the loop live so typed bytes
 -- are not stuck behind SDL_WaitEvent.
 textFieldActive :: Context -> IO Bool
@@ -198,11 +157,15 @@ hoverWouldChange ctx inp = do
 
 probeHotId :: Context -> V2 -> IO WidgetId
 probeHotId ctx mouse = do
-  mOverlay <- overlayMenuOwnerAt ctx mouse
-  case mOverlay of
-    Just wid -> pure wid
-    Nothing ->
-      foldNodeRevM (ctxNodeArena ctx) updateHot (WidgetId 0)
+  gesture <- readIORef (ctxMenuPointerGesture ctx)
+  if gesture
+    then pure (WidgetId 0)
+    else do
+      mOverlay <- overlayMenuOwnerAt ctx mouse
+      case mOverlay of
+        Just wid -> pure wid
+        Nothing ->
+          foldNodeRevM (ctxNodeArena ctx) updateHot (WidgetId 0)
   where
     updateHot acc idx = do
       nt <- getNodeType (ctxNodeArena ctx) idx

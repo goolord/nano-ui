@@ -14,6 +14,10 @@ import NanoUI
   ( Input (..)
   , emptyInput
   , inputInteracted
+  , inputMousePressed
+  , inputMouseReleased
+  , inputMouseRightPressed
+  , inputMouseRightReleased
   , inputWindowSize
   )
 import NanoUI.Testing
@@ -205,6 +209,11 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace star
               displayScale = any (== EvDisplayScale) group
               userEvent = any isUserPresentEvent group
               firstUserFull = wantFirstFull && userEvent
+              pointerEdge =
+                inputMousePressed inpSynced
+                  || inputMouseReleased inpSynced
+                  || inputMouseRightPressed inpSynced
+                  || inputMouseRightReleased inpSynced
               graceAllow =
                 grace <= 0 || sizeChanged || interacted || anim || editing || dirtyNow || pendingDirty || need || nFull > 0 || displayScale
               forceFinal = wasAnim && not anim
@@ -221,25 +230,30 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace star
                          || nFull > 0
                          || displayScale
                          || firstUserFull
+                         || pointerEdge
                      )
           when (grace > 0) $ writeIORef startupGrace (grace - 1)
+          let runDraw = do
+                when firstUserFull $ writeIORef firstPointerFull False
+                (dirtyOut, s) <-
+                  drawFn
+                    ctx'
+                    env
+                    inpSynced
+                    (debugOpen || wantDebug || nFull > 0 || displayScale || firstUserFull)
+                when (nFull > 0) $ writeIORef startupFull (nFull - 1)
+                writeIORef pendingRedraw dirtyOut
+                writeIORef prev s
+                pure s
           synced <-
             if shouldDraw
               then do
-                ms <-
-                  tryWithDrawingLock drawing $ do
-                    when firstUserFull $ writeIORef firstPointerFull False
-                    (dirtyOut, s) <-
-                      drawFn
-                        ctx'
-                        env
-                        inpSynced
-                        (debugOpen || wantDebug || nFull > 0 || displayScale || firstUserFull)
-                    when (nFull > 0) $ writeIORef startupFull (nFull - 1)
-                    writeIORef pendingRedraw dirtyOut
-                    writeIORef prev s
-                    pure s
-                maybe (pure inpSynced) pure ms
+                ms <- tryWithDrawingLock drawing runDraw
+                case ms of
+                  Just s -> pure s
+                  Nothing
+                    | pointerEdge -> runDraw
+                    | otherwise -> pure inpSynced
               else do
                 noteSkip (sdlDebug env)
                 writeIORef prev inpSynced

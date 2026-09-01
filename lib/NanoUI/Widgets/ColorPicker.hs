@@ -23,6 +23,7 @@ import NanoUI.Context
   , WidgetStore (..)
   , getStore
   , intKey
+  , menuPointerGestureActive
   , registerFocusable
   , setStore
   )
@@ -34,7 +35,7 @@ import NanoUI.Style (defaultLayout, fillW)
 import NanoUI.Types (Color (..), Rect (..), clamp01, colorToWord32, hsvToRgb, rgbToHsv)
 import NanoUI.WidgetText (colorPickerLabelText)
 import NanoUI.Frame.Hit (scrollHitRect)
-import NanoUI.Widgets.Behavior (DragAxis (..), KeyNav (..), useDrag1D, useKeyNav)
+import NanoUI.Widgets.Behavior (DragAxis (..), KeyNav (..), keyedDragHeld, useDrag1D, useKeyNav)
 import NanoUI.Widgets.Node (Response (..), addWidget, setChanged)
 
 colorPicker :: (Ui :> es) => Text -> Color -> Eff es (Response, Color)
@@ -64,6 +65,12 @@ colorPicker lbl initial = do
   active <- uiIO (readIORef (ctxActiveId ctx))
   mrect <- uiIO (scrollHitRect ctx wid)
   blocked <- uiIO (readIORef (ctxLastPointerBlocked ctx))
+  gesture <- uiIO (menuPointerGestureActive ctx)
+  hueHeld0 <- keyedDragHeld ("hue" :: Text)
+  svHeld0 <- do
+    s <- keyedDragHeld ("s" :: Text)
+    v <- keyedDragHeld ("v" :: Text)
+    pure (s || v)
   let geom = maybe (colorPickerGeom host fm 0 0 0 0) (\(Rect x y w h) -> colorPickerGeom host fm x y w h) mrect
       empty = Rect 0 0 0 0
       isActive = active == wid
@@ -72,14 +79,21 @@ colorPicker lbl initial = do
           && not (inputMousePressed inp)
           && hashWidgetId active /= 0
           && not isActive
-      svRect = if blocked || heldByOther then empty else cpgSv geom
-      hueRect = if blocked || heldByOther then empty else colorPickerHueHitRect (cpgHue geom)
+      svRect =
+        if blocked || heldByOther || hueHeld0 || gesture
+          then empty
+          else cpgSv geom
+      hueRect =
+        if blocked || heldByOther || svHeld0 || gesture
+          then empty
+          else colorPickerHueHitRect (cpgHue geom)
       h0 = widgetStoreHue store wid initial
       (s0, v0) = widgetStoreSv store wid initial
   (sDrag, sA) <- withKey ("s" :: Text) (useDrag1D DragAxisX 0 1 s0 svRect)
   (vDrag, vA) <- withKey ("v" :: Text) (useDrag1D DragAxisY 1 0 v0 svRect)
   let svA = sA || vA
-  (hDrag, hA) <- withKey ("hue" :: Text) (useDrag1D DragAxisX 0 360 h0 (if svA then empty else hueRect))
+  (hDrag, hA) <-
+    withKey ("hue" :: Text) (useDrag1D DragAxisX 0 360 h0 (if svA then empty else hueRect))
   let dragging = svA || hA
       nextHue = if hA then hDrag else h0
       nextS = if sA then sDrag else s0

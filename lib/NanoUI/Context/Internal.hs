@@ -80,6 +80,8 @@ module NanoUI.Context.Internal
   , markEscapeConsumed
   , pointerBlockedByModal
   , pointerBlockedByOverlay
+  , menuPointerGestureActive
+  , armMenuPointerCapture
   , seedFloatingPanel
   , beginModal
   , endModal
@@ -139,7 +141,7 @@ import NanoUI.Frame.Scroll.Geometry
   , scrollConfigNative2D
   )
 import NanoUI.Id (IdContext, WidgetId (..), hashWidgetId, initialIdContext)
-import NanoUI.Input (Input (..), Key (KeyEscape), inputKeys, inputKeysElem)
+import NanoUI.Input (Input (..), Key (KeyEscape), inputKeys, inputKeysElem, inputMousePos, inputMousePressed)
 import NanoUI.Layout.Arena (NodeArena, NodeType, getRect, lookupNodeByKey, newNodeArena)
 import NanoUI.Messages (FrameMsg)
 import NanoUI.Spring (SpringParams, springEps)
@@ -269,6 +271,8 @@ data Context = Context
   , ctxPopupConfigs :: IORef (IntMap (PopupAnchor, PopupPlacement, Float))
   , ctxWidgetNodeTypes :: IORef (Maybe (IntMap NodeType))
   , ctxSelectDropPress :: IORef Bool
+  , ctxOpenSelectDrop :: IORef (Maybe (WidgetId, Rect))
+  , ctxMenuPointerGesture :: IORef Bool
   , ctxModalWasActive :: IORef Bool
   , ctxModalActive :: IORef Bool
   , ctxModalDepth :: IORef Int
@@ -736,6 +740,8 @@ newContext = do
   ctxPopupConfigs <- newIORef IM.empty
   ctxWidgetNodeTypes <- newIORef Nothing
   ctxSelectDropPress <- newIORef False
+  ctxOpenSelectDrop <- newIORef Nothing
+  ctxMenuPointerGesture <- newIORef False
   ctxModalWasActive <- newIORef False
   ctxModalActive <- newIORef False
   ctxModalDepth <- newIORef 0
@@ -795,6 +801,8 @@ newContext = do
     , ctxPopupConfigs
     , ctxWidgetNodeTypes
     , ctxSelectDropPress
+    , ctxOpenSelectDrop
+    , ctxMenuPointerGesture
     , ctxModalWasActive
     , ctxModalActive
     , ctxModalDepth
@@ -897,19 +905,53 @@ pointerBlockedByModal ctx = do
 
 pointerBlockedByOverlay :: Context -> V2 -> IO Bool
 pointerBlockedByOverlay ctx mouse = do
-  modalBlocked <- pointerBlockedByModal ctx
+  gesture <- readIORef (ctxMenuPointerGesture ctx)
   blocked <-
-    if modalBlocked
+    if gesture
       then pure True
       else do
-        mTop <- cachedTopmost ctx mouse
-        case mTop of
-          Nothing -> pure False
-          Just top -> do
-            mCur <- readIORef (ctxCurrentFloatingId ctx)
-            pure (mCur /= Just top)
+        menuBlocked <- overlayMenuBlocksPointer ctx mouse
+        if menuBlocked
+          then pure True
+          else do
+            modalBlocked <- pointerBlockedByModal ctx
+            if modalBlocked
+              then pure True
+              else do
+                mTop <- cachedTopmost ctx mouse
+                case mTop of
+                  Nothing -> pure False
+                  Just top -> do
+                    mCur <- readIORef (ctxCurrentFloatingId ctx)
+                    pure (mCur /= Just top)
   writeIORef (ctxLastPointerBlocked ctx) blocked
   pure blocked
+
+menuPointerGestureActive :: Context -> IO Bool
+menuPointerGestureActive ctx = readIORef (ctxMenuPointerGesture ctx)
+
+armMenuPointerCapture :: Context -> Input -> IO ()
+armMenuPointerCapture ctx inp =
+  when (inputMousePressed inp) $ do
+    blocked <- overlayMenuBlocksPointer ctx (inputMousePos inp)
+    writeIORef (ctxMenuPointerGesture ctx) blocked
+
+overlayMenuBlocksPointer :: Context -> V2 -> IO Bool
+overlayMenuBlocksPointer ctx mouse = do
+  mMenu <- readIORef (ctxTextInputMenu ctx)
+  let textMenu =
+        case mMenu of
+          Just m | rectContains (textInputMenuRect m) mouse -> True
+          _ -> False
+  if textMenu
+    then pure True
+    else do
+      mDrop <- readIORef (ctxOpenSelectDrop ctx)
+      pure
+        ( case mDrop of
+            Just (_, r) -> rectContains r mouse
+            Nothing -> False
+        )
 
 cachedTopmost :: Context -> V2 -> IO (Maybe WidgetId)
 cachedTopmost ctx mouse = do

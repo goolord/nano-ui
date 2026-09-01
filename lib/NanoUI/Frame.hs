@@ -29,6 +29,7 @@ import Data.Typeable (Typeable)
 import Effectful (Eff, IOE, runEff, type (:>))
 import NanoUI.Context
   ( Context (..)
+  , armMenuPointerCapture
   , FrameMsg (..)
   , animInProgress
   , clearMeasureCache
@@ -83,7 +84,8 @@ import NanoUI.Frame.Scroll
   , updateScrollWheel
   )
 import NanoUI.Frame.Select
-  ( closeSelectOnOutsideClick
+  ( cacheOpenSelectDrop
+  , closeSelectOnOutsideClick
   , drawSelectOverlays
   , finalizeSelectKeyboard
   , finalizeSelectPick
@@ -181,8 +183,11 @@ runFrameEff unlift ctx inp ui = do
   resetUiBuildScopes ctx
   unless (inputMouseDown inp) $
     writeIORef (ctxSelectDropPress ctx) False
+  when (not (inputMouseDown inp) && not (inputMouseReleased inp)) $
+    writeIORef (ctxMenuPointerGesture ctx) False
   beginFrameModal ctx
   writeIORef (ctxEscapeConsumed ctx) False
+  armMenuPointerCapture ctx inp
   result0 <- unlift (runUi ctx inp ui)
   -- Pending click is one-shot. Clear before a mirror rebuild so toggles do not fire twice.
   writeIORef (ctxClickedId ctx) (WidgetId 0)
@@ -234,6 +239,7 @@ runFrameEff unlift ctx inp ui = do
   -- Store/input finalization can change measured widget text (sliders, marks).
   solvePlaceWindows ctx w h
   applyScrollOffsets ctx
+  cacheOpenSelectDrop ctx
   updatePrevRects ctx
   refreshHover ctx inp
   tickAnimations ctx (inputDeltaTime inp)

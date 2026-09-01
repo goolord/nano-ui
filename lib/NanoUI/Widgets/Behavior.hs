@@ -1,6 +1,7 @@
 -- | Concrete interaction hooks. No generic view trait; store-backed state only.
 module NanoUI.Widgets.Behavior
   ( DragAxis (..)
+  , keyedDragHeld
   , useDrag1D
   , useReorder
   , useSelection
@@ -15,23 +16,27 @@ module NanoUI.Widgets.Behavior
 where
 
 import Control.Monad (when)
+import Data.Hashable (Hashable, hash)
+import Data.IORef (readIORef)
 import Data.List (find)
 import Data.Maybe (fromMaybe)
 import Effectful (Eff, type (:>))
 import qualified Data.IntMap.Strict as IM
 import qualified Data.IntSet as IS
 import NanoUI.Context
-  ( bumpMirror
+  ( Context (..)
+  , bumpMirror
   , getFocusId
   , getStore
   , intKey
   , markEscapeConsumed
+  , menuPointerGestureActive
   , setStore
   , slotDrag
   , slotDragW
   , slotKey
   )
-import NanoUI.Id (WidgetId (..), hashWidgetId)
+import NanoUI.Id (IdContext (..), WidgetId (..), enterKeyed, hashWidgetId, mix64)
 import NanoUI.Input
   ( Input (..)
   , Key (..)
@@ -51,6 +56,21 @@ import qualified Data.Text as T
 
 data DragAxis = DragAxisX | DragAxisY
   deriving (Eq, Show)
+
+-- | True when a prior keyed useDrag1D on this path is still held.
+-- Peeks the keyed first-id without enterKeyed bumping parent siblingId.
+keyedDragHeld :: (Hashable k, Ui :> es) => k -> Eff es Bool
+keyedDragHeld k = do
+  ctx <- askContext
+  uiIO $ do
+    old <- readIORef (ctxIdContext ctx)
+    let (_, child) = enterKeyed (fromIntegral (hash k)) old
+        IdContext cid sid = child
+        raw = mix64 cid sid
+        wid = if raw == 0 then WidgetId 1 else WidgetId raw
+        dragK = slotKey slotDrag (intKey wid)
+    store <- getStore ctx
+    pure (IM.findWithDefault 0 dragK (storeInt store) /= 0)
 
 -- | Clamped 1D drag. Maps pointer position on 'track' into [lo, hi].
 useDrag1D ::
@@ -77,10 +97,11 @@ useDrag1D axis lo hi current track = do
         DragAxisX -> v2X (inputMousePos inp)
         DragAxisY -> v2Y (inputMousePos inp)
       down = inputMouseDown inp
-      hit = rectW track > 0 && rectH track > 0 && rectContains track (inputMousePos inp)
   store <- uiIO (getStore ctx)
+  gesture <- uiIO (menuPointerGestureActive ctx)
   let active0 = IM.findWithDefault 0 dragK (storeInt store) /= 0
-      active = down && (active0 || hit)
+      hit = rectW track > 0 && rectH track > 0 && rectContains track (inputMousePos inp) && not gesture
+      active = down && not gesture && (active0 || hit)
       frac =
         if trackLen <= 0
           then 0
