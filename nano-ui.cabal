@@ -57,6 +57,8 @@ library
     exposed-modules:
         NanoUI
         NanoUI.Testing
+        NanoUI.Widget.TextBuffer
+        NanoUI.Widget.TextArea
     other-modules:
         NanoUI.Animatable
         NanoUI.Animation
@@ -128,6 +130,7 @@ library
         hashtables ^>=1.4,
         primitive ^>=0.9,
         text ^>=2.1,
+        text-zipper >=0.11 && <0.14,
         unordered-containers ^>=0.2,
         vector ^>=0.13
     hs-source-dirs:   lib
@@ -158,6 +161,20 @@ executable nano-ui-demo
         nano-ui,
         text ^>=2.1
     hs-source-dirs:   examples
+    default-language: GHC2024
+
+test-suite text-buffer-spec
+    import:           extensions
+    import:           ghc-options
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    main-is:          NanoUI/TextBufferSpec.hs
+    build-depends:
+        base ^>=4.22.0.0,
+        hspec ^>=2.11,
+        nano-ui,
+        text ^>=2.1
+    hs-source-dirs:   test
     default-language: GHC2024
 
 executable nano-ui-profile
