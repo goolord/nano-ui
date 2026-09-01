@@ -84,6 +84,8 @@ import NanoUI.Layout.Arena
   , naScratchCross
   , naScratchOutMain
   , naScratchOutCross
+  , naDistIdx
+  , naDistOut
   )
 import NanoUI.Id (WidgetId)
 import NanoUI.Style (AlignX (..), AlignY (..), Padding (..), windowMargin)
@@ -769,12 +771,12 @@ positionColumnScroll ::
   IO ()
 positionColumnScroll na host fm parent gap cx cy innerW innerH contentSize = do
   n <- loadChildrenScratchFromParent na parent innerW innerH
-  withAxisSnaps na n contentSize (gap * fromIntegral (max 0 (n - 1))) False $ \idxSnap outSnap -> do
+  withAxisSnaps na n contentSize (gap * fromIntegral (max 0 (n - 1))) False $ \idxArr outArr -> do
     let go !i !curY
           | i >= n = pure ()
           | otherwise = do
-              let ci = indexPrimArray idxSnap i
-                  fh = indexPrimArray outSnap i
+              ci <- readPrimArray idxArr i
+              fh <- readPrimArray outArr i
               nt <- getNodeType na ci
               (_, _, iw, _) <- getRect na ci
               ax <- getAlignX na ci
@@ -859,18 +861,38 @@ withAxisSnaps ::
   Float ->
   Float ->
   Bool ->
-  (PrimArray Int -> PrimArray Float -> IO a) ->
+  (MutablePrimArray RealWorld Int -> MutablePrimArray RealWorld Float -> IO a) ->
   IO a
 withAxisSnaps na n availMain gapSum horizontal act = do
   distributeScratch na 0 n availMain gapSum horizontal
+  ensureScratchCapacity na n
   idxArr <- readIORef (naScratchIdx na)
   outArr <-
     if horizontal
       then readIORef (naScratchOutMain na)
       else readIORef (naScratchOutCross na)
-  idxSnap <- freezePrimArray idxArr 0 n
-  outSnap <- freezePrimArray outArr 0 n
-  act idxSnap outSnap
+  distIdx <- readIORef (naDistIdx na)
+  distOut <- readIORef (naDistOut na)
+  copyPrimSlice idxArr distIdx 0 n
+  copyPrimSlice outArr distOut 0 n
+  act distIdx distOut
+
+{-# INLINE copyPrimSlice #-}
+copyPrimSlice ::
+  (Prim a) =>
+  MutablePrimArray RealWorld a ->
+  MutablePrimArray RealWorld a ->
+  Int ->
+  Int ->
+  IO ()
+copyPrimSlice src dst off n = go 0
+  where
+    go !i
+      | i >= n = pure ()
+      | otherwise = do
+          v <- readPrimArray src (off + i)
+          writePrimArray dst i v
+          go (i + 1)
 
 positionRowFromParent ::
   NodeArena ->
@@ -885,12 +907,12 @@ positionRowFromParent ::
   IO ()
 positionRowFromParent na host fm parent gap cx cy cw ch = do
   n <- loadChildrenScratchFromParent na parent cw ch
-  withAxisSnaps na n cw (gap * fromIntegral (max 0 (n - 1))) True $ \idxSnap outSnap -> do
+  withAxisSnaps na n cw (gap * fromIntegral (max 0 (n - 1))) True $ \idxArr outArr -> do
     let goRow !i !curX
           | i >= n = pure ()
           | otherwise = do
-              let ci = indexPrimArray idxSnap i
-                  fw = indexPrimArray outSnap i
+              ci <- readPrimArray idxArr i
+              fw <- readPrimArray outArr i
               -- Fit/fixed children keep content height. Only Grow/Percent eat `ch`.
               crossH <- childRowCrossSize na ci ch
               ay <- getAlignY na ci
@@ -911,18 +933,18 @@ positionRowWrap na host fm parent gap cx cy cw ch = do
   let goLines !start !oy
         | start >= n = pure ()
         | otherwise = do
-            end <- packRowLineEndPrim wSnap start n cw gap
+            end <- packRowLineEnd wSnap start n cw gap
             let nLine = end - start
-            lineBudget <- lineRowCrossBudgetSnap na idxSnap hSnap start nLine
-            writeScratchSlice na idxSnap wSnap hSnap start nLine
+            lineBudget <- lineRowCrossBudget na idxSnap hSnap start nLine
+            writeScratchSlice idxArr wArr hArr idxSnap wSnap hSnap start nLine
             withAxisSnaps na nLine cw (gap * fromIntegral (max 0 (nLine - 1))) True $ \lineIdx lineOut -> do
               rowH <- goRow lineIdx lineOut nLine 0 cx oy lineBudget lineBudget
               goLines end (oy + rowH + gap)
       goRow lineIdx lineOut nLine !j !curX !oy !lineCross !maxH
         | j >= nLine = pure maxH
         | otherwise = do
-            let ci = indexPrimArray lineIdx j
-                fw = indexPrimArray lineOut j
+            ci <- readPrimArray lineIdx j
+            fw <- readPrimArray lineOut j
             crossH <- childRowCrossSize na ci lineCross
             let lineCross' = max lineCross crossH
             ay <- getAlignY na ci
@@ -949,12 +971,12 @@ positionColumnFromParent ::
 positionColumnFromParent na host fm parent gap chrome px _ pw cx cy cw ch = do
   n <- loadChildrenScratchFromParent na parent cw ch
   gapSum <- columnGapSumScratch na chrome n gap
-  withAxisSnaps na n ch gapSum False $ \idxSnap outSnap -> do
+  withAxisSnaps na n ch gapSum False $ \idxArr outArr -> do
     let go !i !curY
           | i >= n = pure ()
           | otherwise = do
-              let ci = indexPrimArray idxSnap i
-                  fh = indexPrimArray outSnap i
+              ci <- readPrimArray idxArr i
+              fh <- readPrimArray outArr i
               nt <- getNodeType na ci
               (fx, nodeW) <-
                 if chrome && nt == NodeSeparator
@@ -971,12 +993,14 @@ positionColumnFromParent na host fm parent gap chrome px _ pw cx cy cw ch = do
               gapAfter <-
                 if i + 1 >= n
                   then pure 0
-                  else pairColumnGap na chrome ci (indexPrimArray idxSnap (i + 1)) gap
+                  else do
+                    nextCi <- readPrimArray idxArr (i + 1)
+                    pairColumnGap na chrome ci nextCi gap
               go (i + 1) (curY + childH + gapAfter)
     go 0 cy
 
-packRowLineEndPrim :: PrimArray Float -> Int -> Int -> Float -> Float -> IO Int
-packRowLineEndPrim wSnap start n avail gap = go start (0 :: Float)
+packRowLineEnd :: PrimArray Float -> Int -> Int -> Float -> Float -> IO Int
+packRowLineEnd wSnap start n avail gap = go start (0 :: Float)
   where
     go !i !lineW
       | i >= n = pure i
@@ -987,8 +1011,14 @@ packRowLineEndPrim wSnap start n avail gap = go start (0 :: Float)
                 then go (i + 1) (lineW + need)
                 else pure i
 
-lineRowCrossBudgetSnap :: NodeArena -> PrimArray Int -> PrimArray Float -> Int -> Int -> IO Float
-lineRowCrossBudgetSnap na idxSnap hSnap start nLine = do
+lineRowCrossBudget ::
+  NodeArena ->
+  PrimArray Int ->
+  PrimArray Float ->
+  Int ->
+  Int ->
+  IO Float
+lineRowCrossBudget na idxSnap hSnap start nLine = do
   let go !j !accH !accMin
         | j >= nLine = pure (max accH accMin)
         | otherwise = do
@@ -999,24 +1029,22 @@ lineRowCrossBudgetSnap na idxSnap hSnap start nLine = do
   go 0 0 0
 
 writeScratchSlice ::
-  NodeArena ->
+  MutablePrimArray RealWorld Int ->
+  MutablePrimArray RealWorld Float ->
+  MutablePrimArray RealWorld Float ->
   PrimArray Int ->
   PrimArray Float ->
   PrimArray Float ->
   Int ->
   Int ->
   IO ()
-writeScratchSlice na idxSnap wSnap hSnap start nLine = do
-  ensureScratchCapacity na nLine
-  idxArr <- readIORef (naScratchIdx na)
-  mainArr <- readIORef (naScratchMain na)
-  crossArr <- readIORef (naScratchCross na)
+writeScratchSlice idxArr wArr hArr idxSnap wSnap hSnap start nLine = do
   let go !j
-        | j >= nLine = writeIORef (naScratchCount na) nLine
+        | j >= nLine = pure ()
         | otherwise = do
             writePrimArray idxArr j (indexPrimArray idxSnap (start + j))
-            writePrimArray mainArr j (indexPrimArray wSnap (start + j))
-            writePrimArray crossArr j (indexPrimArray hSnap (start + j))
+            writePrimArray wArr j (indexPrimArray wSnap (start + j))
+            writePrimArray hArr j (indexPrimArray hSnap (start + j))
             go (j + 1)
   go 0
 

@@ -213,6 +213,9 @@ data NodeArena = NodeArena
   , naScratchCross :: IORef (MutablePrimArray RealWorld Float)
   , naScratchOutMain :: IORef (MutablePrimArray RealWorld Float)
   , naScratchOutCross :: IORef (MutablePrimArray RealWorld Float)
+  -- Stable copies for flex distribute callbacks (scratch is reused during positionNode).
+  , naDistIdx :: IORef (MutablePrimArray RealWorld Int)
+  , naDistOut :: IORef (MutablePrimArray RealWorld Float)
   , naIndex :: IORef (BasicHashTable WidgetId NodeIdx)
   }
 
@@ -278,6 +281,8 @@ newNodeArena = do
   naScratchCross <- newIORef =<< newPrimArray scratchCap
   naScratchOutMain <- newIORef =<< newPrimArray scratchCap
   naScratchOutCross <- newIORef =<< newPrimArray scratchCap
+  naDistIdx <- newIORef =<< newPrimArray scratchCap
+  naDistOut <- newIORef =<< newPrimArray scratchCap
   naIndex <- newIORef =<< HT.new
   pure
     NodeArena
@@ -292,6 +297,8 @@ newNodeArena = do
       , naScratchCross
       , naScratchOutMain
       , naScratchOutCross
+      , naDistIdx
+      , naDistOut
       , naIndex
       }
 
@@ -784,6 +791,8 @@ ensureScratchCapacity na needed = do
       growPrimArray (naScratchCross na) cap newCap 0
       growPrimArray (naScratchOutMain na) cap newCap 0
       growPrimArray (naScratchOutCross na) cap newCap 0
+      growPrimArray (naDistIdx na) cap newCap (-1)
+      growPrimArray (naDistOut na) cap newCap 0
       writeIORef (naScratchCap na) newCap
 
 {-# INLINE forNodes_ #-}
