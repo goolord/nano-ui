@@ -13,6 +13,7 @@ import Data.IORef (IORef)
 import NanoUI
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, withInput)
+import NanoUI.Testing.Harness (warmup2)
 
 runDamageBoundsResolutionTest :: Context -> IORef Int -> IO ()
 runDamageBoundsResolutionTest _ failed = do
@@ -77,7 +78,7 @@ runExplicitDamageRectTest _ failed = do
       damagedUi = column defaultLayout $ do
         damageRectNow customRect
         label "Hello"
-  _ <- runFrame ctx inp ui >> runFrame ctx inp ui
+  _ <- warmup2 ctx inp ui
   _ <- takeDamage ctx
 
   _ <- runFrame ctx inp damagedUi
@@ -94,7 +95,7 @@ runExplicitDamageFullTest _ failed = do
       fullDamagedUi = column defaultLayout $ do
         damageFullNow
         label "Hello"
-  _ <- runFrame ctx inp ui >> runFrame ctx inp ui
+  _ <- warmup2 ctx inp ui
   _ <- takeDamage ctx
 
   _ <- runFrame ctx inp fullDamagedUi
@@ -106,7 +107,7 @@ runDamageQueueClearedPerFrameTest _ failed = do
   ctx <- newContext
   let inp = withInput 400 300
       ui = column defaultLayout (label "Static content")
-  _ <- runFrame ctx inp ui >> runFrame ctx inp ui
+  _ <- warmup2 ctx inp ui
   _ <- takeDamage ctx
 
   -- Explicit damage in this frame
@@ -137,7 +138,7 @@ runStateChangeDamageTest _ failed = do
           when (respChanged resp) (setName typed)
 
   -- Warm up and focus textInput via Tab
-  _ <- runFrame ctx inp0 ui >> runFrame ctx inp0 ui
+  _ <- warmup2 ctx inp0 ui
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   _ <- takeDamage ctx
 

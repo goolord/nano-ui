@@ -35,6 +35,7 @@ import NanoUI.Testing.Harness
   ( assertWheelTitlePinned
   , clickPair
   , closeSpanBottom
+  , closeSpanCenter
   , closeSpanPos
   , closeSpanStart
   , runDragFrom
@@ -337,7 +338,7 @@ runTerminalWideTransitionTest _ failed = do
   assert failed (terminalPairsOk cellsM (baseM ++ overM))
   assert failed (closeSpanPos overM /= Nothing)
   assert failed (terminalBracketsOk cellsC baseC)
-  _ <- runFrame ctx inp0 windowUi >> runFrame ctx inp0 windowUi
+  _ <- warmup2 ctx inp0 windowUi
   overW0 <- collectOverlayTextSpans ctx inp0
   (win0, _, _, _) <- runFrame ctx inp0 windowUi
   let Rect wx wy _ _ = respRect win0
@@ -374,7 +375,7 @@ runTerminalCloseButtonTest _ failed = do
       modalUi = column defaultLayout (fmap fst (modal True "About" (label_ "Body")))
       windowUi = fmap fst (window True "Debug" (label_ "Body"))
       testClose ui = do
-        _ <- runFrame ctx inp0 ui >> runFrame ctx inp0 ui
+        _ <- warmup2 ctx inp0 ui
         overlays <- collectOverlayTextSpans ctx inp0
         case closeSpanCenter overlays of
           Nothing -> assert failed False
@@ -413,16 +414,11 @@ runTerminalIconCloseTest _ failed = do
   let ctx = withIcons term IconsNerd
       inp = withInput 60 20
       ui = fmap fst (window True "Debug" (label_ "Body"))
-  _ <- runFrame ctx inp ui >> runFrame ctx inp ui
+  _ <- warmup2 ctx inp ui
   overlays <- collectOverlayTextSpans ctx inp
   let texts = [T.strip txt | (_, txt, _, _, _) <- overlays]
   assert failed (iconClose glyphIcons `elem` texts)
   assert failed (any (T.isPrefixOf (iconWindowTitle glyphIcons)) texts)
-
-closeSpanCenter :: [(Rect, T.Text, Color, Color, Rect)] -> Maybe V2
-closeSpanCenter spans = case [Rect x y w h | (Rect x y w h, txt, _, _, _) <- spans, T.strip txt == "X"] of
-  (Rect x y w h : _) -> Just (V2 (x + w / 2) (y + h / 2))
-  [] -> Nothing
 
 runTerminalThemeContrastTest :: Context -> IORef Int -> IO ()
 runTerminalThemeContrastTest _ failed = do
@@ -476,7 +472,7 @@ runTerminalTextInputDisplayTest _ failed = do
   ctx <- newAdaptiveTerminalContext
   let inp = withInput 40 10
       ui = column defaultLayout (textInput "Name" "hello")
-  _ <- runFrame ctx inp ui >> runFrame ctx inp ui
+  _ <- warmup2 ctx inp ui
   spans <- collectTextSpans ctx
   case [txt | (_, txt, _, _, _) <- spans, "Name:" `T.isPrefixOf` txt] of
     [one] -> do

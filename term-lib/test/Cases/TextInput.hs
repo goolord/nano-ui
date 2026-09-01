@@ -27,7 +27,7 @@ runTextInputCursorTest :: Context -> IORef Int -> IO ()
 runTextInputCursorTest ctx failed = do
   let inp0 = withInput 320 120
       ui = column defaultLayout (textInput "Name" "")
-  _ <- runFrame ctx inp0 ui >> runFrame ctx inp0 ui
+  _ <- warmup2 ctx inp0 ui
   spans <- collectTextSpans ctx
   let labelPos = [(rectX r + rectW r / 2, rectY r + 0.5) | (r, txt, _, _, _) <- spans, txt == "Name"]
       fieldPos = [(rectX r + rectW r / 2, rectY r + 0.5) | (r, txt, _, _, _) <- spans, "Enter" `T.isInfixOf` txt]
@@ -51,11 +51,11 @@ runTextInputSelectionTest :: Context -> IORef Int -> IO ()
 runTextInputSelectionTest ctx failed = do
   let inp0 = withInput 320 120
       ui = column defaultLayout (button "Other" >> textInput "Name" "hello")
-  _ <- runFrame ctx inp0 ui >> runFrame ctx inp0 ui
+  _ <- warmup2 ctx inp0 ui
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   let shiftLeft = inp0 {inputKeys = inputKeysFromList [KeyLeft], inputModifiers = Modifiers True False False}
-  _ <- runFrame ctx shiftLeft ui >> runFrame ctx shiftLeft ui
+  _ <- warmup2 ctx shiftLeft ui
   ((_, valReplace), _, _, _) <- runFrame ctx (inp0 {inputChars = "X"}) ui
   assertEq failed valReplace "helX"
   _ <- runFrame ctx (inp0 {inputChars = "a", inputModifiers = Modifiers False True False}) ui
@@ -78,7 +78,7 @@ runTextInputMouseSelectionTest :: Context -> IORef Int -> IO ()
 runTextInputMouseSelectionTest ctx failed = do
   let inp0 = withInput 320 120
       ui = column defaultLayout (textInput "Name" "hello")
-  _ <- runFrame ctx inp0 ui >> runFrame ctx inp0 ui
+  _ <- warmup2 ctx inp0 ui
   spans <- collectTextSpans ctx
   case [r | (r, txt, _, _, _) <- spans, txt == "hello"] of
     (Rect fx fy fw fh : _) -> do
@@ -97,7 +97,7 @@ runTextInputClickSelectTest _ failed = do
   let inp0 = withInput 320 120
       uiWord = column defaultLayout (textInput "Name" "hello world")
       uiAll = column defaultLayout (textInput "Name" "hello")
-  _ <- runFrame wordCtx inp0 uiWord >> runFrame wordCtx inp0 uiWord
+  _ <- warmup2 wordCtx inp0 uiWord
   spans <- collectTextSpans wordCtx
   case [r | (r, txt, _, _, _) <- spans, txt == "hello world"] of
     (Rect fx fy _ fh : _) -> do
@@ -109,7 +109,7 @@ runTextInputClickSelectTest _ failed = do
       ((_, val), _, _, _) <- runFrame wordCtx (inp0 {inputKeys = inputKeysFromList [KeyBackspace]}) uiWord
       assertEq failed val " world"
     _ -> assert failed False
-  _ <- runFrame allCtx inp0 uiAll >> runFrame allCtx inp0 uiAll
+  _ <- warmup2 allCtx inp0 uiAll
   spansAll <- collectTextSpans allCtx
   case [r | (r, txt, _, _, _) <- spansAll, txt == "hello"] of
     (Rect fx fy _ fh : _) -> do
@@ -130,7 +130,7 @@ runTextInputClipboardTest ctx failed = do
   let ctx' = withClipboard ctx (readIORef clipRef) (\s -> writeIORef clipRef (Just s) >> pure True)
       inp0 = withInput 320 120
       ui = column defaultLayout (textInput "Name" "hello")
-  _ <- runFrame ctx' inp0 ui >> runFrame ctx' inp0 ui
+  _ <- warmup2 ctx' inp0 ui
   _ <- runFrame ctx' (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   let selectAll = inp0 {inputChars = "a", inputModifiers = Modifiers False True False}
       copy = inp0 {inputChars = "c", inputModifiers = Modifiers False True False}
@@ -150,7 +150,7 @@ runTextInputMenuTest ctx failed = do
   let ctx' = withClipboard ctx (readIORef clipRef) (\s -> writeIORef clipRef (Just s) >> pure True)
       inp0 = withInput 320 160
       ui = column defaultLayout (textInput "Name" "hello")
-  _ <- runFrame ctx' inp0 ui >> runFrame ctx' inp0 ui
+  _ <- warmup2 ctx' inp0 ui
   _ <- runFrame ctx' (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   spans <- collectTextSpans ctx'
   case [r | (r, txt, _, _, _) <- spans, txt == "hello"] of

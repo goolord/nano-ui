@@ -14,7 +14,7 @@ import Data.Text qualified as T
 import NanoUI
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, eval2Ui, evalUi, withInput)
-import NanoUI.Testing.Harness (centerOf, clickPair, warmup2)
+import NanoUI.Testing.Harness (centerOf, clickPair, rightClickPair, runRightClick, warmup2)
 
 menuUi :: NanoUI (Response, Maybe (Response, Response))
 menuUi = column defaultLayout $ do
@@ -28,9 +28,7 @@ menuUi = column defaultLayout $ do
 openMenu :: Context -> IORef Int -> Input -> IO (Response, Maybe (Response, Response))
 openMenu ctx failed inp0 = do
   (btnWarm, _) <- warmup2 ctx inp0 menuUi
-  let rightClickPos = centerOf btnWarm
-      inpRightDown = inp0 {inputMousePos = rightClickPos, inputMouseRightDown = True, inputMouseRightPressed = True}
-      inpRightUp = inp0 {inputMousePos = rightClickPos, inputMouseRightReleased = True}
+  let (inpRightDown, inpRightUp) = rightClickPair inp0 (centerOf btnWarm)
   ((btnDown, _), _, _, _) <- runFrame ctx inpRightDown menuUi
   assert failed (not (respRightClicked btnDown))
   ((btnUp, mInside), _, _, _) <- runFrame ctx inpRightUp menuUi
@@ -60,12 +58,7 @@ runContextMenuRightDismissTest :: Context -> IORef Int -> IO ()
 runContextMenuRightDismissTest ctx failed = do
   let inp0 = withInput 640 480
   _ <- openMenu ctx failed inp0
-  let inpRightOut =
-        inp0
-          { inputMousePos = V2 500 400
-          , inputMouseRightDown = True
-          , inputMouseRightPressed = True
-          }
+  let inpRightOut = fst (rightClickPair inp0 (V2 500 400))
   _ <- runFrame ctx inpRightOut menuUi
   ((_, mInsideAfterDismiss), _, _, _) <- runFrame ctx inp0 menuUi
   assert failed (case mInsideAfterDismiss of Nothing -> True; Just _ -> False)
@@ -113,11 +106,7 @@ runContextMenuSpansTest ctx failed = do
           void $ menuItemWithShortcut "Find" "Ctrl+F"
 
   (btnWarm) <- eval2Ui ctx inp0 (button "Target Button")
-  let rightClickPos = centerOf btnWarm
-      inpRightDown = inp0 {inputMousePos = rightClickPos, inputMouseRightDown = True, inputMouseRightPressed = True}
-      inpRightUp = inp0 {inputMousePos = rightClickPos, inputMouseRightReleased = True}
-  _ <- runFrame ctx inpRightDown ui
-  _ <- runFrame ctx inpRightUp ui
+  runRightClick ctx inp0 ui (centerOf btnWarm)
 
   spans <- collectOverlayTextSpans ctx inp0
   assert failed (any (\(_, txt, _, _, _) -> "Special Action" `T.isInfixOf` txt) spans)
@@ -155,13 +144,7 @@ runContextMenuScrollPosTest ctx failed = do
       assert failed (off > 0)
       let clickPos = centerOf btn1
           layoutY = rectY (respRect btn1) + off
-          inpRightDown =
-            inp0
-              { inputMousePos = clickPos
-              , inputMouseRightDown = True
-              , inputMouseRightPressed = True
-              }
-          inpRightUp = inp0 {inputMousePos = clickPos, inputMouseRightReleased = True}
+          (inpRightDown, inpRightUp) = rightClickPair inp0 clickPos
       _ <- runFrame ctx inpRightDown ui
       _ <- runFrame ctx inpRightUp ui
       spans <- collectOverlayTextSpans ctx inpRightUp
