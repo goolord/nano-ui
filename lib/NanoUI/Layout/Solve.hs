@@ -37,7 +37,6 @@ import NanoUI.Font
   , labelContentInset
   , stripWidgetMarkers
   , ScrollBarSlot
-  , scrollLayoutGutter
   , widgetPadding
   , buttonPadding
   , layoutLineHeight
@@ -102,8 +101,14 @@ import NanoUI.WidgetText
   , textInputMinWidth
   , textInputPlaceholder
   , isTableHeaderStyle
-  , scrollNative2DStyle
   , tableHeaderDisplayText
+  )
+import NanoUI.Frame.Scroll.Geometry
+  ( decodeScrollConfig
+  , isScrollStyle2D
+  , scrollAxisGutter
+  , scrollPolicyX
+  , scrollPolicyY
   )
 
 solveLayout :: NodeArena -> HostProfile -> FontMetrics -> (Text -> IO (Float, Float)) -> Float -> Float -> IO ()
@@ -149,7 +154,8 @@ anyNeedsRemeasure na count = go 0
           wrapped <- getWrap na idx
           nt <- getNodeType na idx
           ratio <- getAspect na idx
-          if wrapped || nt == NodeText || ratio > 0
+          -- 2D scroll stores content width in aspect. That is not a layout ratio.
+          if wrapped || nt == NodeText || (ratio > 0 && not (isScrollNode nt))
             then pure True
             else go (idx + 1)
 
@@ -186,16 +192,18 @@ measureNode na host fm measure useAssignedWidth idx = do
 
 applyAspectAfterMeasure :: NodeArena -> Float -> Bool -> NodeIdx -> IO ()
 applyAspectAfterMeasure na assignedW useAssignedWidth idx = do
-  ratio <- getAspect na idx
-  when (ratio > 0) $ do
-    (x, y, w, _) <- getRect na idx
-    (_, minH, _, maxH) <- getMinMax na idx
-    (wTag, wVal) <- getWidthSizing na idx
-    let baseW
-          | wTag == SizingFixed = wVal
-          | useAssignedWidth && assignedW > 0 = assignedW
-          | otherwise = w
-    setRect na idx x y w (clamp (baseW / ratio) minH maxH)
+  nt <- getNodeType na idx
+  when (not (isScrollNode nt)) $ do
+    ratio <- getAspect na idx
+    when (ratio > 0) $ do
+      (x, y, w, _) <- getRect na idx
+      (_, minH, _, maxH) <- getMinMax na idx
+      (wTag, wVal) <- getWidthSizing na idx
+      let baseW
+            | wTag == SizingFixed = wVal
+            | useAssignedWidth && assignedW > 0 = assignedW
+            | otherwise = w
+      setRect na idx x y w (clamp (baseW / ratio) minH maxH)
 
 measureTextNode ::
   NodeArena ->
@@ -452,7 +460,7 @@ measureScrollContainer na host fm idx = do
   (wTag, wVal) <- getWidthSizing na idx
   (hTag, hVal) <- getHeightSizing na idx
   (contentW, contentH) <- foldChildDimsFromParent na idx dir gap
-  if si == scrollNative2DStyle
+  if isScrollStyle2D si
     then do
       setNodeValue na idx contentH
       setAspect na idx contentW
@@ -575,17 +583,20 @@ positionNode na host fm idx x y availW availH = do
   (wTag, wVal) <- getWidthSizing na idx
   (hTag, hVal) <- getHeightSizing na idx
   (_, _, intrinsicW, intrinsicH) <- getRect na idx
+  nt <- getNodeType na idx
   ratio <- getAspect na idx
   let w = clamp (resolveSize wTag wVal intrinsicW availW minW maxW) minW maxW
       h0 = clamp (resolveSize hTag hVal intrinsicH availH minH maxH) minH maxH
-      h = if ratio > 0 then clamp (w / ratio) minH maxH else h0
+      h =
+        if ratio > 0 && not (isScrollNode nt)
+          then clamp (w / ratio) minH maxH
+          else h0
   setRect na idx x y w h
   pad0 <- getPadding na idx
   gap0 <- getGap na idx
   let pad = resolveLayoutPadding host fm pad0
       gap = resolveLayoutGap host fm gap0
   dir <- getDirection na idx
-  nt <- getNodeType na idx
   case nt of
     NodeContainer -> positionChildren na host fm idx dir gap pad x y w h
     NodePanel -> positionChildren na host fm idx dir gap pad x y w h
@@ -618,15 +629,17 @@ positionScrollChildren na host fm idx dir gap pad px py pw ph = do
       cy = py + padT pad
       innerW = pw - padL pad - padR pad
       innerH = ph - padT pad - padB pad
-  if si == scrollNative2DStyle
+  if isScrollStyle2D si
     then do
       contentW <- getAspect na idx
-      let gutterX = scrollLayoutGutter host fm slot contentW innerW
-          gutterY = scrollLayoutGutter host fm slot contentSize innerH
+      let cfg = decodeScrollConfig si
+          gutterX = scrollAxisGutter (scrollPolicyX cfg) host fm slot contentW innerW
+          gutterY = scrollAxisGutter (scrollPolicyY cfg) host fm slot contentSize innerH
       positionChildren na host fm idx DirColumn gap pad cx cy (max 0 (innerW - gutterX)) (max 0 (innerH - gutterY))
     else do
-      let gutterCol = scrollLayoutGutter host fm slot contentSize innerH
-          gutterRow = scrollLayoutGutter host fm slot contentSize innerW
+      let cfg = decodeScrollConfig si
+          gutterCol = scrollAxisGutter (scrollPolicyY cfg) host fm slot contentSize innerH
+          gutterRow = scrollAxisGutter (scrollPolicyX cfg) host fm slot contentSize innerW
       case dir of
         DirRow -> do
           (wTag, _) <- getWidthSizing na idx

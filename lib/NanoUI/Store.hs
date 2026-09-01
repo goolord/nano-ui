@@ -16,6 +16,8 @@ module NanoUI.Store
   , slotScrollOff
   , slotScrollContent
   , slotScrollCross
+  , slotScrollLinkX
+  , slotScrollLinkY
   , boolInt
   , intBool
   , pairList
@@ -103,6 +105,12 @@ slotScrollOff = 0x53434F464600000A
 
 slotScrollCross :: Word64
 slotScrollCross = 0x5343524F5800000C
+
+slotScrollLinkX :: Word64
+slotScrollLinkX = 0x534C4E4B5800000D
+
+slotScrollLinkY :: Word64
+slotScrollLinkY = 0x534C4E4B5900000E
 
 slotScrollContent :: Word64
 slotScrollContent = 0x534352435400000B

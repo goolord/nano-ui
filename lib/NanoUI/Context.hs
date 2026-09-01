@@ -84,6 +84,7 @@ module NanoUI.Context
   , setScrollOffset2D
   , setScrollConfig
   , setScrollContentExtent
+  , linkScrollAxes
   , getAnimationValue
   , applyEase
   , animInProgress
@@ -193,6 +194,7 @@ import NanoUI.Context.Internal
   , setScrollOffset2D
   , setScrollConfig
   , setScrollContentExtent
+  , linkScrollAxes
   , setStore
   , setWakeLoop
   , startAnimation

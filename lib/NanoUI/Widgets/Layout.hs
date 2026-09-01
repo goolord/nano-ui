@@ -22,7 +22,7 @@ module NanoUI.Widgets.Layout
   )
 where
 
-import Control.Monad (void, when)
+import Control.Monad (void)
 import Data.IORef (readIORef, writeIORef)
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
@@ -30,7 +30,7 @@ import NanoUI.Context (Context (..), setScrollConfig)
 import NanoUI.Frame.Scroll.Geometry
   ( ScrollConfig (..)
   , defaultScrollConfig
-  , scrollConfigNative2D
+  , encodeScrollConfig
   , scrollDefault1D
   )
 import NanoUI.Id (WidgetId)
@@ -42,7 +42,6 @@ import NanoUI.Layout.Arena
   , setStyleIdx
   , setWidgetId
   )
-import NanoUI.WidgetText (scrollNative2DStyle)
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO)
 import NanoUI.Style
   ( Direction (..)
@@ -147,7 +146,9 @@ scrollArea layout child = do
       parent = parentIdx stack0
     idx <- addNodeFromLayout (ctxNodeArena ctx) NodeScrollContainer parent layout
     setWidgetId (ctxNodeArena ctx) idx wid
-    setScrollConfig ctx wid (scrollDefault1D (layoutDirection layout))
+    let cfg = scrollDefault1D (layoutDirection layout)
+    setStyleIdx (ctxNodeArena ctx) idx (encodeScrollConfig cfg)
+    setScrollConfig ctx wid cfg
     writeIORef (ctxContainerStack ctx) (idx : stack0)
     pure stack0
   childR <- child
@@ -180,8 +181,7 @@ scrollAreaIdConfigured wid layout cfg child = do
     let parent = parentIdx stack0
     idx <- addNodeFromLayout (ctxNodeArena ctx) NodeScrollContainer parent layout
     setWidgetId (ctxNodeArena ctx) idx wid
-    when (scrollConfigNative2D cfg) $
-      setStyleIdx (ctxNodeArena ctx) idx scrollNative2DStyle
+    setStyleIdx (ctxNodeArena ctx) idx (encodeScrollConfig cfg)
     setScrollConfig ctx wid cfg
     writeIORef (ctxContainerStack ctx) (idx : stack0)
     pure stack0
@@ -203,8 +203,7 @@ scrollConfigured cfg layout child = do
     let parent = parentIdx stack0
     idx <- addNodeFromLayout (ctxNodeArena ctx) NodeScrollContainer parent layout
     setWidgetId (ctxNodeArena ctx) idx wid
-    when (scrollConfigNative2D cfg) $
-      setStyleIdx (ctxNodeArena ctx) idx scrollNative2DStyle
+    setStyleIdx (ctxNodeArena ctx) idx (encodeScrollConfig cfg)
     setScrollConfig ctx wid cfg
     writeIORef (ctxContainerStack ctx) (idx : stack0)
     pure stack0
