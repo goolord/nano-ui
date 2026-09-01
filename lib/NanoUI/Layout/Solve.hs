@@ -9,7 +9,6 @@ module NanoUI.Layout.Solve
   , scrollBarSlotOf
   ) where
 
-import Control.Exception (bracket_)
 import Control.Monad (when)
 import Data.IORef (readIORef, writeIORef)
 import Data.Primitive.PrimArray
@@ -85,15 +84,6 @@ import NanoUI.Layout.Arena
   , naScratchCross
   , naScratchOutMain
   , naScratchOutCross
-  , naDistNest
-  , naDistIdx
-  , naDistOut
-  , naDistIdx1
-  , naDistOut1
-  , naDistIdx2
-  , naDistOut2
-  , naDistIdx3
-  , naDistOut3
   )
 import NanoUI.Id (WidgetId)
 import NanoUI.Style (AlignX (..), AlignY (..), Padding (..), windowMargin)
@@ -782,12 +772,12 @@ positionColumnScroll ::
   IO ()
 positionColumnScroll a na host fm parent gap cx cy innerW innerH contentSize = do
   n <- loadChildrenScratchFromParent na parent innerW innerH
-  withAxisSnaps na n contentSize (gap * fromIntegral (max 0 (n - 1))) False $ \idxArr outArr -> do
+  withAxisSnaps na n contentSize (gap * fromIntegral (max 0 (n - 1))) False $ \idxSnap outSnap -> do
     let go !i !curY
           | i >= n = pure ()
           | otherwise = do
-              ci <- readPrimArray idxArr i
-              fh <- readPrimArray outArr i
+              let ci = indexPrimArray idxSnap i
+                  fh = indexPrimArray outSnap i
               nt <- getNodeType na ci
               (_, _, iw, _) <- getRect na ci
               ax <- getAlignX na ci
@@ -867,70 +857,24 @@ columnChildHeight na ci scratchH = do
       (_, _, _, ih) <- getRect na ci
       pure (max minH ih)
 
-maxDistNest :: Int
-maxDistNest = 4
-
 withAxisSnaps ::
   NodeArena ->
   Int ->
   Float ->
   Float ->
   Bool ->
-  (MutablePrimArray RealWorld Int -> MutablePrimArray RealWorld Float -> IO a) ->
+  (PrimArray Int -> PrimArray Float -> IO a) ->
   IO a
-withAxisSnaps na n availMain gapSum horizontal act =
-  bracket_
-    ( do
-        d <- readIORef (naDistNest na)
-        writeIORef (naDistNest na) (d + 1)
-    )
-    ( do
-        d <- readIORef (naDistNest na)
-        writeIORef (naDistNest na) (max 0 (d - 1))
-    )
-    $ do
-      depth <- subtract 1 <$> readIORef (naDistNest na)
-      if depth >= maxDistNest
-        then fail "withAxisSnaps nesting depth exceeded"
-        else do
-          distributeScratch na 0 n availMain gapSum horizontal
-          ensureScratchCapacity na n
-          idxArr <- readIORef (naScratchIdx na)
-          outArr <-
-            if horizontal
-              then readIORef (naScratchOutMain na)
-              else readIORef (naScratchOutCross na)
-          (distIdx, distOut) <- distBuffersAt na depth
-          copyPrimSlice idxArr distIdx 0 n
-          copyPrimSlice outArr distOut 0 n
-          act distIdx distOut
-
-{-# INLINE distBuffersAt #-}
-distBuffersAt :: NodeArena -> Int -> IO (MutablePrimArray RealWorld Int, MutablePrimArray RealWorld Float)
-distBuffersAt na depth =
-  case depth of
-    0 -> (,) <$> readIORef (naDistIdx na) <*> readIORef (naDistOut na)
-    1 -> (,) <$> readIORef (naDistIdx1 na) <*> readIORef (naDistOut1 na)
-    2 -> (,) <$> readIORef (naDistIdx2 na) <*> readIORef (naDistOut2 na)
-    3 -> (,) <$> readIORef (naDistIdx3 na) <*> readIORef (naDistOut3 na)
-    _ -> fail "withAxisSnaps nesting depth exceeded"
-
-{-# INLINE copyPrimSlice #-}
-copyPrimSlice ::
-  (Prim a) =>
-  MutablePrimArray RealWorld a ->
-  MutablePrimArray RealWorld a ->
-  Int ->
-  Int ->
-  IO ()
-copyPrimSlice src dst off n = go 0
-  where
-    go !i
-      | i >= n = pure ()
-      | otherwise = do
-          v <- readPrimArray src (off + i)
-          writePrimArray dst i v
-          go (i + 1)
+withAxisSnaps na n availMain gapSum horizontal act = do
+  distributeScratch na 0 n availMain gapSum horizontal
+  idxArr <- readIORef (naScratchIdx na)
+  outArr <-
+    if horizontal
+      then readIORef (naScratchOutMain na)
+      else readIORef (naScratchOutCross na)
+  idxSnap <- freezePrimArray idxArr 0 n
+  outSnap <- freezePrimArray outArr 0 n
+  act idxSnap outSnap
 
 positionRowFromParent ::
   NodeArenaArrays ->
@@ -946,12 +890,12 @@ positionRowFromParent ::
   IO ()
 positionRowFromParent a na host fm parent gap cx cy cw ch = do
   n <- loadChildrenScratchFromParent na parent cw ch
-  withAxisSnaps na n cw (gap * fromIntegral (max 0 (n - 1))) True $ \idxArr outArr -> do
+  withAxisSnaps na n cw (gap * fromIntegral (max 0 (n - 1))) True $ \idxSnap outSnap -> do
     let goRow !i !curX
           | i >= n = pure ()
           | otherwise = do
-              ci <- readPrimArray idxArr i
-              fw <- readPrimArray outArr i
+              let ci = indexPrimArray idxSnap i
+                  fw = indexPrimArray outSnap i
               -- Fit/fixed children keep content height. Only Grow/Percent eat `ch`.
               crossH <- childRowCrossSize na ci ch
               ay <- getAlignY na ci
@@ -993,8 +937,8 @@ positionRowWrap a na host fm parent gap cx cy cw ch = do
       goRow lineIdx lineOut nLine !j !curX !oy !lineCross !maxH
         | j >= nLine = pure maxH
         | otherwise = do
-            ci <- readPrimArray lineIdx j
-            fw <- readPrimArray lineOut j
+            let ci = indexPrimArray lineIdx j
+                fw = indexPrimArray lineOut j
             crossH <- childRowCrossSize na ci lineCross
             let lineCross' = max lineCross crossH
             ay <- getAlignY na ci
@@ -1022,12 +966,12 @@ positionColumnFromParent ::
 positionColumnFromParent a na host fm parent gap chrome px _ pw cx cy cw ch = do
   n <- loadChildrenScratchFromParent na parent cw ch
   gapSum <- columnGapSumScratch na chrome n gap
-  withAxisSnaps na n ch gapSum False $ \idxArr outArr -> do
+  withAxisSnaps na n ch gapSum False $ \idxSnap outSnap -> do
     let go !i !curY
           | i >= n = pure ()
           | otherwise = do
-              ci <- readPrimArray idxArr i
-              fh <- readPrimArray outArr i
+              let ci = indexPrimArray idxSnap i
+                  fh = indexPrimArray outSnap i
               nt <- getNodeType na ci
               (fx, nodeW) <-
                 if chrome && nt == NodeSeparator
@@ -1044,9 +988,7 @@ positionColumnFromParent a na host fm parent gap chrome px _ pw cx cy cw ch = do
               gapAfter <-
                 if i + 1 >= n
                   then pure 0
-                  else do
-                    nextCi <- readPrimArray idxArr (i + 1)
-                    pairColumnGap na chrome ci nextCi gap
+                  else pairColumnGap na chrome ci (indexPrimArray idxSnap (i + 1)) gap
               go (i + 1) (curY + childH + gapAfter)
     go 0 cy
 
