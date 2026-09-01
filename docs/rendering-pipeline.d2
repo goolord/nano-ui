@@ -1,0 +1,138 @@
+# One runFrame cycle, then backend present when needsRedraw is true.
+# Render: d2 docs/rendering-pipeline.d2 docs/rendering-pipeline.svg
+
+vars: {
+  d2-config: {
+    layout-engine: elk
+    pad: 48
+  }
+}
+
+direction: down
+
+classes: {
+  box: {
+    style: {
+      border-radius: 10
+      font-size: 15
+      font-color: "#1b2a41"
+      stroke-width: 2
+      shadow: true
+    }
+  }
+  gate: {
+    shape: diamond
+    style: {
+      font-size: 14
+      font-color: "#1b2a41"
+      fill: "#f4e8c1"
+      stroke: "#b08900"
+      stroke-width: 2
+    }
+  }
+}
+
+style.fill: "#f6f4ef"
+style.stroke: "#f6f4ef"
+
+heading: {
+  label: Rendering pipeline
+  near: top-center
+  shape: text
+  style: {
+    font-size: 28
+    bold: true
+    font-color: "#1b2a41"
+  }
+}
+
+idle: Backend idle loop {
+  class: box
+  style.fill: "#ece7dc"
+  style.stroke: "#8a8174"
+  direction: down
+
+  poll: Poll input { class: box; style.fill: "#fffdf8"; style.stroke: "#8a8174" }
+  gate: needsRedraw? { class: gate }
+  skip: Keep last blit { class: box; style.fill: "#e4e0d6"; style.stroke: "#8a8174" }
+  present: Present frame { class: box; style.fill: "#fffdf8"; style.stroke: "#8a8174" }
+
+  poll -> gate
+  gate -> skip: idle
+  gate -> present: dirty
+}
+
+frame: runFrameEff {
+  class: box
+  style.fill: "#dce6f2"
+  style.stroke: "#3d5a80"
+  direction: down
+
+  reset: "1  Reset arenas\nnode, draw, id scopes" {
+    class: box
+    style.fill: "#f4f7fb"
+    style.stroke: "#3d5a80"
+  }
+  build: "2  UI build\nwidgets emit nodes, msgs, store writes" {
+    class: box
+    style.fill: "#f4f7fb"
+    style.stroke: "#3d5a80"
+  }
+  mirror: "Mirror store\nchanged?" {
+    class: gate
+  }
+  layout: "3  Layout solve\nflex measure/place, windows, scroll" {
+    class: box
+    style.fill: "#f4f7fb"
+    style.stroke: "#3d5a80"
+  }
+  input: "4  Input and focus\npointer, text, select, menus, anim tick" {
+    class: box
+    style.fill: "#f4f7fb"
+    style.stroke: "#3d5a80"
+  }
+  paint: "5  Paint\nLayerBackground then LayerOverlay" {
+    class: box
+    style.fill: "#c5d4e8"
+    style.stroke: "#3d5a80"
+  }
+  damage: "6  Damage\nprev vs current rects, clip or full" {
+    class: box
+    style.fill: "#adc2dc"
+    style.stroke: "#3d5a80"
+  }
+
+  reset -> build
+  build -> mirror
+  mirror -> layout: once or twice
+  layout -> input -> paint -> damage
+}
+
+drawdata: "DrawData\npinned verts/indices, layered cmds" {
+  class: box
+  style.fill: "#f3ead8"
+  style.stroke: "#9a6b2f"
+}
+
+hosts: Hosts {
+  class: box
+  style.fill: "#dceee6"
+  style.stroke: "#2d6a4f"
+  direction: right
+
+  sdl: "SDL  PixelHost\nsnapDamage, renderDrawDataPass, present" {
+    class: box
+    style.fill: "#eef7f2"
+    style.stroke: "#2d6a4f"
+  }
+  term: "Term  CellHost\nrasterizeLayeredArena, blit cells" {
+    class: box
+    style.fill: "#eef7f2"
+    style.stroke: "#2d6a4f"
+  }
+}
+
+idle.present -> frame.reset: run frame
+frame.damage -> drawdata
+drawdata -> hosts.sdl
+drawdata -> hosts.term
