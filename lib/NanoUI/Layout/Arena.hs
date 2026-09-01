@@ -292,14 +292,21 @@ newNodeArena = do
 {-# INLINE resetNodeArena #-}
 resetNodeArena :: NodeArena -> IO ()
 resetNodeArena na = do
-  writeIORef (naCount na) 0
   table <- readIORef (naIndex na)
-  clearWidgetIndex table
+  n <- readIORef (naCount na)
+  writeIORef (naCount na) 0
+  clearWidgetIndex na table n
 
-clearWidgetIndex :: BasicHashTable WidgetId NodeIdx -> IO ()
-clearWidgetIndex table = do
-  keys <- HT.foldM (\acc (k, _) -> pure (k : acc)) [] table
-  mapM_ (HT.delete table) keys
+clearWidgetIndex :: NodeArena -> BasicHashTable WidgetId NodeIdx -> Int -> IO ()
+clearWidgetIndex na table n = do
+  a <- arenaArrays na
+  let go !i
+        | i >= n = pure ()
+        | otherwise = do
+            wid <- readPrimArray (naArrWidgetId a) i
+            when (hashWidgetId wid /= 0) $ HT.delete table wid
+            go (i + 1)
+  go 0
 
 {-# INLINE arenaCount #-}
 arenaCount :: NodeArena -> IO Int

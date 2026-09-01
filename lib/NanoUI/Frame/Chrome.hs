@@ -66,7 +66,6 @@ import NanoUI.WidgetText
   ( buttonDisplayTextFromFlags
   , buttonFlagsFromStyle
   , buttonVisualStyle
-  , stripButtonBrackets
   , checkboxLabelText
   , radioLabelText
   , treeDecodeStyle
@@ -249,7 +248,7 @@ displayTextRest ctx nt idx txt terminal =
         NodeButton -> do
           si <- getStyleIdx (ctxNodeArena ctx) idx
           pure (buttonDisplayTextFromFlags (buttonFlagsFromStyle si) txt)
-        _ -> pure (stripButtonBrackets txt)
+        _ -> pure txt
 
 textInputValue :: Context -> NodeIdx -> IO Text
 textInputValue ctx idx = do

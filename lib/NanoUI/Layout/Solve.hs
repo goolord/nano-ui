@@ -148,14 +148,16 @@ whenPositive n act = if n > 0 then act else pure ()
 anyNeedsRemeasure :: NodeArena -> Int -> IO Bool
 anyNeedsRemeasure na count = go 0
   where
-    go idx
+    go !idx
       | idx >= count = pure False
       | otherwise = do
           wrapped <- getWrap na idx
           nt <- getNodeType na idx
           ratio <- getAspect na idx
-          -- 2D scroll stores content width in aspect. That is not a layout ratio.
-          if wrapped || nt == NodeText || (ratio > 0 && not (isScrollNode nt))
+          (wTag, _) <- getWidthSizing na idx
+          (_, _, maxW, _) <- getMinMax na idx
+          let textNeedsRemeasure = nt == NodeText && (wTag == SizingGrow || maxW < 1e8)
+          if wrapped || textNeedsRemeasure || (ratio > 0 && not (isScrollNode nt))
             then pure True
             else go (idx + 1)
 

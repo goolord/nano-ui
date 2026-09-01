@@ -34,7 +34,7 @@ common rts-options
     ghc-options:
         -rtsopts
         -threaded
-        "-with-rtsopts=-N --nonmoving-gc -qb0 -T -I0"
+        "-with-rtsopts=-N1 -A64m -T -I0"
 
 common warnings
   ghc-options:

@@ -79,10 +79,7 @@ closeButton = do
   ctx <- askContext
   uiIO $ registerFocusable ctx wid
   let host = ctxHostProfile ctx
-      stored =
-        if isCellHost host
-          then "[ " <> closeButtonMarker <> iconClose (ctxIcons ctx) <> " ]"
-          else closeButtonMarker <> iconClose (ctxIcons ctx)
+      stored = closeButtonMarker <> iconClose (ctxIcons ctx)
       h = titleBarHFor host
       layout =
         if isCellHost host
