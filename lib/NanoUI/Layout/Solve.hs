@@ -45,10 +45,13 @@ import NanoUI.Host (HostProfile, isCellHost)
 import NanoUI.Layout.Arena
   ( DirTag (..)
   , NodeArena
+  , NodeArenaArrays (..)
   , NodeIdx
   , NodeType (..)
   , SizingTag (..)
+  , arenaArrays
   , arenaCount
+  , withArenaArraysSnap
   , getAlignX
   , getAlignY
   , getAspect
@@ -112,18 +115,60 @@ import NanoUI.Frame.Scroll.Geometry
   )
 
 solveLayout :: NodeArena -> HostProfile -> FontMetrics -> (Text -> IO (Float, Float)) -> Float -> Float -> IO ()
-solveLayout na host fm measure rootW rootH = do
-  count <- arenaCount na
-  whenPositive count $ do
-    -- Wrap rows and wrapping labels need a known width. First pass sizes Grow
-    -- rows unconstrained, position assigns widths, second pass remasures wrap
-    -- height, then we position again so siblings sit below the wrapped content.
-    measurePass na host fm measure False
-    positionNode na host fm 0 0 0 rootW rootH
-    needsRemeasure <- anyNeedsRemeasure na count
-    when needsRemeasure $ do
-      measurePass na host fm measure True
+solveLayout na host fm measure rootW rootH =
+  withArenaArraysSnap na $ do
+    count <- arenaCount na
+    whenPositive count $ do
+      -- Wrap rows and wrapping labels need a known width. First pass sizes Grow
+      -- rows unconstrained, position assigns widths, second pass remasures wrap
+      -- height, then we position again so siblings sit below the wrapped content.
+      measurePass na host fm measure False
       positionNode na host fm 0 0 0 rootW rootH
+      needsRemeasure <- anyNeedsRemeasure na count
+      when needsRemeasure $ do
+        measurePass na host fm measure True
+        positionNode na host fm 0 0 0 rootW rootH
+
+{-# INLINE nodeTypeA #-}
+nodeTypeA :: NodeArenaArrays -> NodeIdx -> IO NodeType
+nodeTypeA NodeArenaArrays {naArrNodeType} idx =
+  readPrimArray naArrNodeType idx >>= pure . toEnum . fromIntegral
+
+{-# INLINE rectA #-}
+rectA :: NodeArenaArrays -> NodeIdx -> IO (Float, Float, Float, Float)
+rectA NodeArenaArrays {naArrX, naArrY, naArrW, naArrH} idx = do
+  x <- readPrimArray naArrX idx
+  y <- readPrimArray naArrY idx
+  w <- readPrimArray naArrW idx
+  h <- readPrimArray naArrH idx
+  pure (x, y, w, h)
+
+{-# INLINE minMaxA #-}
+minMaxA :: NodeArenaArrays -> NodeIdx -> IO (Float, Float, Float, Float)
+minMaxA NodeArenaArrays {naArrMinW, naArrMinH, naArrMaxW, naArrMaxH} idx = do
+  minW <- readPrimArray naArrMinW idx
+  minH <- readPrimArray naArrMinH idx
+  maxW <- readPrimArray naArrMaxW idx
+  maxH <- readPrimArray naArrMaxH idx
+  pure (minW, minH, maxW, maxH)
+
+{-# INLINE widthSizingA #-}
+widthSizingA :: NodeArenaArrays -> NodeIdx -> IO (SizingTag, Float)
+widthSizingA NodeArenaArrays {naArrWidthSizing, naArrWidthValue} idx = do
+  tag <- readPrimArray naArrWidthSizing idx
+  val <- readPrimArray naArrWidthValue idx
+  pure (toEnum (fromIntegral tag), val)
+
+{-# INLINE heightSizingA #-}
+heightSizingA :: NodeArenaArrays -> NodeIdx -> IO (SizingTag, Float)
+heightSizingA NodeArenaArrays {naArrHeightSizing, naArrHeightValue} idx = do
+  tag <- readPrimArray naArrHeightSizing idx
+  val <- readPrimArray naArrHeightValue idx
+  pure (toEnum (fromIntegral tag), val)
+
+{-# INLINE aspectA #-}
+aspectA :: NodeArenaArrays -> NodeIdx -> IO Float
+aspectA NodeArenaArrays {naArrAspect} idx = readPrimArray naArrAspect idx
 
 measurePass ::
   NodeArena ->
@@ -133,11 +178,12 @@ measurePass ::
   Bool ->
   IO ()
 measurePass na host fm measure useAssignedWidth = do
+  a <- arenaArrays na
   count <- arenaCount na
   let go !idx
         | idx < 0 = pure ()
         | otherwise = do
-            measureNode na host fm measure useAssignedWidth idx
+            measureNode a na host fm measure useAssignedWidth idx
             go (idx - 1)
   go (count - 1)
 
@@ -162,6 +208,7 @@ anyNeedsRemeasure na count = go 0
             else go (idx + 1)
 
 measureNode ::
+  NodeArenaArrays ->
   NodeArena ->
   HostProfile ->
   FontMetrics ->
@@ -169,9 +216,9 @@ measureNode ::
   Bool ->
   NodeIdx ->
   IO ()
-measureNode na host fm measure useAssignedWidth idx = do
-  (_, _, assignedW, _) <- getRect na idx
-  nt <- getNodeType na idx
+measureNode a na host fm measure useAssignedWidth idx = do
+  (_, _, assignedW, _) <- rectA a idx
+  nt <- nodeTypeA a idx
   case nt of
     NodeText -> measureTextNode na host fm measure useAssignedWidth idx
     NodeSpacer -> measureSpacer na host fm idx
@@ -593,12 +640,27 @@ packWrapLineEnd wArr hArr start n avail gap = go start (0 :: Float) (0 :: Float)
 
 positionNode :: NodeArena -> HostProfile -> FontMetrics -> NodeIdx -> Float -> Float -> Float -> Float -> IO ()
 positionNode na host fm idx x y availW availH = do
-  (minW, minH, maxW, maxH) <- getMinMax na idx
-  (wTag, wVal) <- getWidthSizing na idx
-  (hTag, hVal) <- getHeightSizing na idx
-  (_, _, intrinsicW, intrinsicH) <- getRect na idx
-  nt <- getNodeType na idx
-  ratio <- getAspect na idx
+  a <- arenaArrays na
+  positionNodeA a na host fm idx x y availW availH
+
+positionNodeA ::
+  NodeArenaArrays ->
+  NodeArena ->
+  HostProfile ->
+  FontMetrics ->
+  NodeIdx ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  IO ()
+positionNodeA a na host fm idx x y availW availH = do
+  (minW, minH, maxW, maxH) <- minMaxA a idx
+  (wTag, wVal) <- widthSizingA a idx
+  (hTag, hVal) <- heightSizingA a idx
+  (_, _, intrinsicW, intrinsicH) <- rectA a idx
+  nt <- nodeTypeA a idx
+  ratio <- aspectA a idx
   let w = clamp (resolveSize wTag wVal intrinsicW availW minW maxW) minW maxW
       h0 = clamp (resolveSize hTag hVal intrinsicH availH minH maxH) minH maxH
       h =
