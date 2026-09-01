@@ -276,7 +276,7 @@ runTerminalWideClearBracketTest ctx failed = do
       clip = Rect 0 0 2 1
       fg = colorRGBA 220 220 220 255
       bg = colorRGBA 20 20 24 255
-  (_, _, draw, _) <- runFrame ctx inp (pure ())
+  (_, _, draw, _) <- runFrame ctx inp (column defaultLayout (pure ()))
   cellsA <- rasterize 2 1 draw [(clip, "[O", fg, bg, clip)]
   cellsB <- rasterize 2 1 draw [(clip, iconClose glyphIcons, fg, bg, clip)]
   let bytes = toLazyByteString (frameBytes (Just cellsA) cellsB)
@@ -295,7 +295,7 @@ runTerminalWideCursorCupTest ctx failed = do
       clip = Rect 0 0 4 1
       fg = colorRGBA 220 220 220 255
       bg = colorRGBA 20 20 24 255
-  (_, _, draw, _) <- runFrame ctx inp (pure ())
+  (_, _, draw, _) <- runFrame ctx inp (column defaultLayout (pure ()))
   cells <- rasterize 4 1 draw [(Rect 0 0 2 1, iconClose glyphIcons, fg, bg, clip), (Rect 2 0 2 1, "[O", fg, bg, clip)]
   assert failed (fontAwesomeIcon (cellChar cells 0 0))
   assertEq failed (cellChar cells 1 0) wideTrailChar

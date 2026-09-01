@@ -101,11 +101,13 @@ runTabsStatePersistenceTest :: Context -> IORef Int -> IO ()
 runTabsStatePersistenceTest ctx failed = do
   let inp0 = withInput 300 100
       ui curTab = tabs curTab
-        [ tab TabA "A" $ do
-            (readFlag, setFlag) <- useFlag False
-            clickButton "ToggleA" (readFlag >>= \f -> setFlag (not f))
-            flag <- readFlag
-            label_ (if flag then "FlagIsOn" else "FlagIsOff")
+        [ tab TabA "A" $
+            withKey ("tab-a" :: T.Text) $
+              withKey ("flag" :: T.Text) $ do
+                (readFlag, setFlag) <- useFlag False
+                clickButton "ToggleA" (readFlag >>= \f -> setFlag (not f))
+                flag <- readFlag
+                label_ (if flag then "FlagIsOn" else "FlagIsOff")
         , tab TabB "B" (label_ "OtherTab")
         ]
   _ <- runFrame ctx inp0 (ui TabA)

@@ -11,6 +11,7 @@ module NanoUI.Frame.Hit
   , modalHitAllowed
   , overlayHitAllowed
   , topmostOverlayAtMouse
+  , topmostModalAtMouse
   , topmostWindowAtMouse
   , widgetOverlayAllowed
   , widgetIdInModal
@@ -101,6 +102,10 @@ overlayHitAllowed ctx idx mouse = do
 topmostOverlayAtMouse :: Context -> V2 -> IO (Maybe NodeIdx)
 topmostOverlayAtMouse ctx mouse =
   topmostFloatingAtMouse ctx mouse (\nt -> nt == NodeWindow || nt == NodePopup)
+
+topmostModalAtMouse :: Context -> V2 -> IO (Maybe NodeIdx)
+topmostModalAtMouse ctx mouse =
+  topmostFloatingAtMouse ctx mouse (== NodeModal)
 
 topmostWindowAtMouse :: Context -> V2 -> IO (Maybe NodeIdx)
 topmostWindowAtMouse ctx mouse =
@@ -226,7 +231,7 @@ scrollViewportGate host nt =
 parentScrollShift :: Context -> NodeIdx -> (Float, Float) -> IO (Float, Float)
 parentScrollShift ctx p (sx, sy) = do
   nt <- getNodeType (ctxNodeArena ctx) p
-  if isScrollNode nt
+  if isScrollNode nt && not (isCellHost (ctxHostProfile ctx) && nt == NodeModal)
     then do
       wid <- getWidgetId (ctxNodeArena ctx) p
       off <- getScrollOffset ctx wid
