@@ -63,6 +63,7 @@ import NanoUI.Layout.Arena
   , SizingTag (..)
   , arenaCount
   , getAlignX
+  , getAspect
   , getClipRect
   , getDirection
   , getFirstChild
@@ -111,6 +112,12 @@ import NanoUI.Frame.Clip
 import NanoUI.Frame.Select (collectSelectDropdownSpans)
 import NanoUI.Frame.TextInput (TextInputGeom (..), collectTextInputMenuSpans, tagSelectClippedSpans, tagTextInputClippedSpans, textInputGeom)
 import NanoUI.Frame.Scroll (scrollBarLayout, ScrollBarLayout (..))
+import NanoUI.Frame.Scroll.Geometry
+  ( decodeScrollConfig
+  , isScrollStyle2D
+  , scrollShowsChrome
+  , scrollViewportClip2D
+  )
 import NanoUI.Frame.SpanArena (SpanArena, pushSpan, resetSpanArena, spanArenaToList, spanArenaToListOccluded)
 
 collectTextSpans :: Context -> IO [(Rect, T.Text, Color, Color, Rect)]
@@ -179,10 +186,21 @@ collectClippedSpans' ctx floatCache idx nt clip arena = do
           Just live ->
             pure (rectIntersect clip live)
           Nothing -> do
+            si <- getStyleIdx (ctxNodeArena ctx) idx
             dir <- getDirection (ctxNodeArena ctx) idx
-            contentSize <- getNodeValue (ctxNodeArena ctx) idx
             slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
-            let content = scrollContentClip (ctxHostProfile ctx) fm slot dir x y w h pad contentSize
+            let cfg = decodeScrollConfig si
+            content <-
+              if isScrollStyle2D si
+                then do
+                  contentH <- getNodeValue (ctxNodeArena ctx) idx
+                  contentW <- getAspect (ctxNodeArena ctx) idx
+                  pure $
+                    scrollViewportClip2D (ctxHostProfile ctx) fm slot cfg x y w h pad contentW contentH
+                else do
+                  contentSize <- getNodeValue (ctxNodeArena ctx) idx
+                  pure $
+                    scrollContentClip (ctxHostProfile ctx) fm slot cfg dir x y w h pad contentSize
             pure (rectIntersect clip content)
       else
         if nt == NodePanel
@@ -213,7 +231,8 @@ collectClippedSpans' ctx floatCache idx nt clip arena = do
       -- has no track to cap.
       when (isCellHost (ctxHostProfile ctx) && isScrollNode nt && nt /= NodeModal) $ do
         si <- getStyleIdx (ctxNodeArena ctx) idx
-        when (si == 0) $ do
+        let cfg = decodeScrollConfig si
+        when (scrollShowsChrome cfg (isScrollStyle2D si) DirColumn) $ do
           caps <- terminalScrollCapSpans ctx idx x y w h pad clip
           mapM_ (\(r, t, fg, bg, c) -> pushSpan arena r t fg bg c) caps
       walkChildSpans ctx floatCache idx clipHere arena
@@ -613,15 +632,26 @@ collectFloatingSpansInto ctx floatCache wanted arena = do
                 (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
                 pad <- getPadding (ctxNodeArena ctx) idx
                 dir <- getDirection (ctxNodeArena ctx) idx
-                contentSize <- getNodeValue (ctxNodeArena ctx) idx
+                si <- getStyleIdx (ctxNodeArena ctx) idx
                 slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
-                let clip =
-                      if isCellHost (ctxHostProfile ctx) && nt == NodeModal
-                        then terminalModalOuterClip (ctxHostProfile ctx) fm x y w h pad
-                        else
-                          if isScrollNode nt
-                            then scrollContentClip (ctxHostProfile ctx) fm slot dir x y w h pad contentSize
-                            else padContentClip (ctxHostProfile ctx) fm x y w h pad
+                let cfg = decodeScrollConfig si
+                clip <-
+                  if isCellHost (ctxHostProfile ctx) && nt == NodeModal
+                    then pure $ terminalModalOuterClip (ctxHostProfile ctx) fm x y w h pad
+                    else
+                      if isScrollNode nt
+                        then
+                          if isScrollStyle2D si
+                            then do
+                              contentH <- getNodeValue (ctxNodeArena ctx) idx
+                              contentW <- getAspect (ctxNodeArena ctx) idx
+                              pure $
+                                scrollViewportClip2D (ctxHostProfile ctx) fm slot cfg x y w h pad contentW contentH
+                            else do
+                              contentSize <- getNodeValue (ctxNodeArena ctx) idx
+                              pure $
+                                scrollContentClip (ctxHostProfile ctx) fm slot cfg dir x y w h pad contentSize
+                        else pure $ padContentClip (ctxHostProfile ctx) fm x y w h pad
                 walkChildSpans ctx floatCache idx clip arena
                 go (idx + 1)
   go 0

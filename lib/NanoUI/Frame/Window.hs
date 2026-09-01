@@ -50,6 +50,7 @@ import NanoUI.Layout.Arena
   , getNodeValue
   , getPadding
   , getRect
+  , getStyleIdx
   , getWidgetId
   )
 import NanoUI.Layout.Solve (positionWindowNode, scrollBarSlotOf)
@@ -70,6 +71,7 @@ import NanoUI.Frame.Input (findTopWidgetUnderMouse, isInteractiveNode)
 import NanoUI.Frame.Paint (walkChildren)
 import NanoUI.Frame.Redraw (probeHotId)
 import NanoUI.Frame.Scroll (paintScrollChrome)
+import NanoUI.Frame.Scroll.Geometry (decodeScrollConfig)
 
 topmostWindowAtResizeHalo :: Context -> V2 -> IO (Maybe NodeIdx)
 topmostWindowAtResizeHalo ctx mouse =
@@ -510,11 +512,13 @@ drawModalOverlays ctx (Size ww wh) = do
       dir <- getDirection (ctxNodeArena ctx) idx
       contentSize <- getNodeValue (ctxNodeArena ctx) idx
       slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
+      si <- getStyleIdx (ctxNodeArena ctx) idx
       let style = if terminal then overlayWindowStyle theme else overlayModalStyle theme
+          cfg = decodeScrollConfig si
           clip =
             if terminal
               then terminalModalOuterClip (ctxHostProfile ctx) fm x y w h pad
-              else scrollContentClip (ctxHostProfile ctx) fm slot dir x y w h pad contentSize
+              else scrollContentClip (ctxHostProfile ctx) fm slot cfg dir x y w h pad contentSize
       drawFloatingPanel ctx idx style rect clip
       when (not terminal) $
         paintScrollChrome ctx da idx wid x y w h pad theme terminal

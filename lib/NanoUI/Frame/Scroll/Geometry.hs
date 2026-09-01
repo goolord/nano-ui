@@ -23,6 +23,7 @@ module NanoUI.Frame.Scroll.Geometry
   , scrollAxisGutter
   , scrollShowsChrome
   , scrollChromeSuppressed
+  , isScrollStyle2D
   ) where
 
 import Data.Bits ((.&.), shiftL, shiftR)
@@ -134,14 +135,14 @@ scrollAxisGutter policy host fm slot contentSize innerMain =
         ScrollBarList -> scrollBarGutter host fm + scrollBarListExtra
         ScrollBarPage -> scrollBarGutter host fm + scrollBarPageExtra
 
+isScrollStyle2D :: Int -> Bool
+isScrollStyle2D si = si /= 0 && scrollConfigNative2D (decodeScrollConfig si)
+
 scrollShowsChrome :: ScrollConfig -> Bool -> DirTag -> Bool
-scrollShowsChrome cfg native2D dir =
-  if native2D
-    then axisShows (scrollPolicyX cfg) || axisShows (scrollPolicyY cfg)
-    else
-      case dir of
-        DirColumn -> axisShows (scrollPolicyY cfg)
-        DirRow -> axisShows (scrollPolicyX cfg)
+scrollShowsChrome cfg _native2D dir =
+  case dir of
+    DirColumn -> axisShows (scrollPolicyY cfg)
+    DirRow -> axisShows (scrollPolicyX cfg)
   where
     axisShows = \case
       ScrollAuto -> True
@@ -171,6 +172,7 @@ scrollContentClip ::
   HostProfile ->
   FontMetrics ->
   ScrollBarSlot ->
+  ScrollConfig ->
   DirTag ->
   Float ->
   Float ->
@@ -179,13 +181,17 @@ scrollContentClip ::
   Padding ->
   Float ->
   Rect
-scrollContentClip host fm slot dir x y w h pad contentSize =
+scrollContentClip host fm slot cfg dir x y w h pad contentSize =
   let base = padContentClip host fm x y w h pad
       innerMain =
         case dir of
           DirColumn -> rectH base
           DirRow -> rectW base
-      gutter = scrollLayoutGutter host fm slot contentSize innerMain
+      policy =
+        case dir of
+          DirColumn -> scrollPolicyY cfg
+          DirRow -> scrollPolicyX cfg
+      gutter = scrollAxisGutter policy host fm slot contentSize innerMain
    in case dir of
         DirColumn -> Rect (rectX base) (rectY base) (max 0 (rectW base - gutter)) (rectH base)
         DirRow -> Rect (rectX base) (rectY base) (rectW base) (max 0 (rectH base - gutter))
@@ -194,6 +200,7 @@ scrollViewportClip2D ::
   HostProfile ->
   FontMetrics ->
   ScrollBarSlot ->
+  ScrollConfig ->
   Float ->
   Float ->
   Float ->
@@ -202,12 +209,12 @@ scrollViewportClip2D ::
   Float ->
   Float ->
   Rect
-scrollViewportClip2D host fm slot x y w h pad contentW contentH =
+scrollViewportClip2D host fm slot cfg x y w h pad contentW contentH =
   let base = padContentClip host fm x y w h pad
       innerW = rectW base
       innerH = rectH base
-      gutterX = scrollLayoutGutter host fm slot contentW innerW
-      gutterY = scrollLayoutGutter host fm slot contentH innerH
+      gutterX = scrollAxisGutter (scrollPolicyX cfg) host fm slot contentW innerW
+      gutterY = scrollAxisGutter (scrollPolicyY cfg) host fm slot contentH innerH
    in Rect (rectX base) (rectY base) (max 0 (innerW - gutterX)) (max 0 (innerH - gutterY))
 
 scrollChromeLane ::

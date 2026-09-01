@@ -17,13 +17,11 @@ import Data.IORef (readIORef, writeIORef)
 import Data.Maybe (fromMaybe)
 import NanoUI.Context
   ( Context (..)
-  , getScrollConfig
   , getScrollOffset
   , getScrollOffset2D
   , setScrollOffset
   , setScrollOffset2D
   )
-import NanoUI.WidgetText (scrollNative2DStyle)
 import NanoUI.Draw (DrawArena, Layer (..), beginLayer, currentLayer, pushRect, pushRoundedRect)
 import NanoUI.Font (ScrollBarSlot (..))
 import NanoUI.Host (HostProfile, isCellHost)
@@ -65,6 +63,8 @@ import NanoUI.Frame.Scroll.Geometry
   , scrollViewportClip2D
   , scrollChromeSuppressed
   , scrollShowsChrome
+  , decodeScrollConfig
+  , isScrollStyle2D
   , ScrollConfig (..)
   , ScrollPolicy (..)
   )
@@ -114,15 +114,17 @@ transformSubtree ctx idx scrollX scrollY parentClip = do
             let fm = ctxFontMetrics ctx
             wid <- getWidgetId na idx
             si <- getStyleIdx na idx
-            if si == scrollNative2DStyle
+            if isScrollStyle2D si
               then do
                 contentH <- getNodeValue na idx
                 contentW <- getAspect na idx
-                let viewport2d =
+                let cfg = decodeScrollConfig si
+                    viewport2d =
                       scrollViewportClip2D
                         (ctxHostProfile ctx)
                         fm
                         slot
+                        cfg
                         vx
                         vy
                         lw
@@ -136,8 +138,9 @@ transformSubtree ctx idx scrollX scrollY parentClip = do
                 pure (sx - offX, sy - offY, clip2d)
               else do
                 contentSize <- getNodeValue na idx
-                let viewport1d =
-                      scrollContentClip (ctxHostProfile ctx) fm slot dir vx vy lw lh pad contentSize
+                let cfg = decodeScrollConfig si
+                    viewport1d =
+                      scrollContentClip (ctxHostProfile ctx) fm slot cfg dir vx vy lw lh pad contentSize
                     clip1d = fromMaybe parentClip (rectIntersect parentClip viewport1d)
                 off <- getScrollOffset ctx wid
                 let (nsx, nsy) =
@@ -276,7 +279,7 @@ tryApplyScrollWheelDelta ctx wid scroll = do
       let step = scrollLineFor (ctxHostProfile ctx)
           innerW = w - padL pad - padR pad
           innerH = h - padT pad - padB pad
-      if si == scrollNative2DStyle
+      if isScrollStyle2D si
         then do
           contentW <- getAspect (ctxNodeArena ctx) idx
           contentH <- getNodeValue (ctxNodeArena ctx) idx
@@ -292,7 +295,7 @@ tryApplyScrollWheelDelta ctx wid scroll = do
               pure True
         else do
           cur <- getScrollOffset ctx wid
-          cfg <- getScrollConfig ctx wid
+          let cfg = decodeScrollConfig si
           case dir of
             DirColumn
               | scrollPolicyY cfg == ScrollNone -> pure False
@@ -383,18 +386,24 @@ scrollHitClip ctx idx nt parentClip = do
       dir <- getDirection (ctxNodeArena ctx) idx
       slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
       si <- getStyleIdx (ctxNodeArena ctx) idx
+      let cfg = decodeScrollConfig si
       localClip <-
-        if si == scrollNative2DStyle
+        if isScrollStyle2D si
           then do
             contentH <- getNodeValue (ctxNodeArena ctx) idx
             contentW <- getAspect (ctxNodeArena ctx) idx
             pure $
-              scrollViewportClip2D (ctxHostProfile ctx) fm slot x y w h pad contentW contentH
+              scrollViewportClip2D (ctxHostProfile ctx) fm slot cfg x y w h pad contentW contentH
           else do
             contentSize <- getNodeValue (ctxNodeArena ctx) idx
-            pure $ scrollContentClip (ctxHostProfile ctx) fm slot dir x y w h pad contentSize
-      let lane = scrollChromeLane (ctxHostProfile ctx) fm slot dir x y w h pad
-          hit = rectUnion localClip lane
+            pure $ scrollContentClip (ctxHostProfile ctx) fm slot cfg dir x y w h pad contentSize
+      let laneDir = scrollChromeLane (ctxHostProfile ctx) fm slot dir x y w h pad
+          laneCol = scrollChromeLane (ctxHostProfile ctx) fm slot DirColumn x y w h pad
+          laneRow = scrollChromeLane (ctxHostProfile ctx) fm slot DirRow x y w h pad
+          hit =
+            if isScrollStyle2D si
+              then rectUnion localClip (rectUnion laneCol laneRow)
+              else rectUnion localClip laneDir
       pure (rectIntersect parentClip hit)
     else
       if nt == NodePanel
@@ -453,8 +462,8 @@ scrollContainerGeom ctx wid = do
                       else do
                         dir <- getDirection (ctxNodeArena ctx) idx
                         si <- getStyleIdx (ctxNodeArena ctx) idx
-                        cfg <- getScrollConfig ctx wid
-                        if scrollChromeSuppressed cfg (si == scrollNative2DStyle) dir
+                        let cfg = decodeScrollConfig si
+                        if scrollChromeSuppressed cfg (isScrollStyle2D si) dir
                           then go (idx + 1)
                           else do
                             pad <- getPadding (ctxNodeArena ctx) idx
@@ -585,9 +594,9 @@ drawScrollBar ctx da idx wid x y w h pad theme terminal = do
         case scrollBarLayout (ctxHostProfile ctx) fm slot axis x y w h pad contentSize axisOff of
           Nothing -> pure ()
           Just layout -> drawLayout layout
-  if si == scrollNative2DStyle
+  if isScrollStyle2D si
     then do
-      cfg <- getScrollConfig ctx wid
+      let cfg = decodeScrollConfig si
       contentH <- getNodeValue (ctxNodeArena ctx) idx
       contentW <- getAspect (ctxNodeArena ctx) idx
       V2 offX offY <- getScrollOffset2D ctx wid
@@ -596,7 +605,7 @@ drawScrollBar ctx da idx wid x y w h pad theme terminal = do
       when (scrollShowsChrome cfg True DirRow) $
         drawAxis DirRow contentW offX
     else do
-      cfg <- getScrollConfig ctx wid
+      let cfg = decodeScrollConfig si
       contentSize <- getNodeValue (ctxNodeArena ctx) idx
       when (scrollShowsChrome cfg False dir) $
         drawAxis dir contentSize off

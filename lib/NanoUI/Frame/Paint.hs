@@ -42,11 +42,13 @@ import NanoUI.Font
   )
 import NanoUI.Host (HostProfile, isCellHost)
 import NanoUI.Layout.Arena
-  ( NodeIdx
+  ( DirTag (..)
+  , NodeIdx
   , NodeType (..)
   , SizingTag (..)
   , arenaCount
   , forChildNodes_
+  , getAspect
   , getDirection
   , getHeightSizing
   , getNodeType
@@ -83,6 +85,12 @@ import NanoUI.Frame.Chrome
   )
 import NanoUI.Frame.Clip (borderContentClip, scrollContentClip)
 import NanoUI.Frame.Scroll (paintScrollChrome)
+import NanoUI.Frame.Scroll.Geometry
+  ( decodeScrollConfig
+  , isScrollStyle2D
+  , scrollShowsChrome
+  , scrollViewportClip2D
+  )
 import NanoUI.Frame.Spans (collectNodeTextSpans, widgetTextPlacements, widgetTextSpans)
 import NanoUI.Frame.TextInput (TextInputGeom (..), drawTextInputCaret, drawTextInputSelection, textInputFieldTextClip, textInputGeom)
 
@@ -133,19 +141,33 @@ lowerNodeVisible ctx idx nt x y w h rect fm theme terminal da =
       (wTag, _) <- getWidthSizing (ctxNodeArena ctx) idx
       (hTag, _) <- getHeightSizing (ctxNodeArena ctx) idx
       si <- getStyleIdx (ctxNodeArena ctx) idx
-      -- Paint bounded wells; full-page Grow/Grow viewports stay on the window fill.
-      -- Square corners so axis-aligned clip does not leave rounded leftover pixels.
-      let paintWell = si == 0 && not (wTag == SizingGrow && hTag == SizingGrow)
+      dir <- getDirection (ctxNodeArena ctx) idx
+      slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
+      let cfg = decodeScrollConfig si
+          native2D = isScrollStyle2D si
+          showChrome =
+            scrollShowsChrome cfg native2D DirColumn
+              || scrollShowsChrome cfg native2D DirRow
+          -- Paint bounded wells; full-page Grow/Grow viewports stay on the window fill.
+          -- Square corners so axis-aligned clip does not leave rounded leftover pixels.
+          paintWell = showChrome && not (wTag == SizingGrow && hTag == SizingGrow)
           wellStyle = style {styleCornerRadius = 0}
       when paintWell $ do
         fillStyledRect da terminal wellStyle rect
         strokeStyledRect da terminal wellStyle x y w h
-      dir <- getDirection (ctxNodeArena ctx) idx
-      contentSize <- getNodeValue (ctxNodeArena ctx) idx
-      slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
-      let inner = scrollContentClip (ctxHostProfile ctx) fm slot dir x y w h pad contentSize
+      inner <-
+        if native2D
+          then do
+            contentH <- getNodeValue (ctxNodeArena ctx) idx
+            contentW <- getAspect (ctxNodeArena ctx) idx
+            pure $
+              scrollViewportClip2D (ctxHostProfile ctx) fm slot cfg x y w h pad contentW contentH
+          else do
+            contentSize <- getNodeValue (ctxNodeArena ctx) idx
+            pure $
+              scrollContentClip (ctxHostProfile ctx) fm slot cfg dir x y w h pad contentSize
       withClip da inner $ walkChildren ctx idx
-      when (si == 0) $ do
+      when showChrome $ do
         wid <- getWidgetId (ctxNodeArena ctx) idx
         paintScrollChrome ctx da idx wid x y w h pad theme terminal
     NodeText -> do

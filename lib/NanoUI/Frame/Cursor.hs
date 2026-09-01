@@ -13,13 +13,15 @@ import Data.IORef (readIORef)
 import Data.Maybe (isJust)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Text as T
-import NanoUI.Context (Context (..), WidgetStore (..), getHotId, getScrollOffset, getStore, intKey, isDisabled, isSelectOpen)
+import NanoUI.Context (Context (..), WidgetStore (..), getHotId, getScrollOffset, getScrollOffset2D, getStore, intKey, isDisabled, isSelectOpen)
 import NanoUI.Font (sliderTrackBounds)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), inputMouseDown, inputMousePos)
 import NanoUI.Layout.Arena
-  ( NodeType (..)
+  ( DirTag (..)
+  , NodeType (..)
   , arenaCount
+  , getAspect
   , getDirection
   , getNodeType
   , getNodeValue
@@ -37,6 +39,12 @@ import NanoUI.Frame.CursorKind (UiCursorKind (..), grabDragKind, grabHoverKind)
 import NanoUI.Frame.Chrome (widgetNodeTypeTable)
 import NanoUI.Frame.Hit (findNodeByWidgetId, scrollHitRect, nodePointVisible)
 import NanoUI.Frame.Scroll (scrollBarLayout, ScrollBarLayout (..))
+import NanoUI.Frame.Scroll.Geometry
+  ( decodeScrollConfig
+  , isScrollStyle2D
+  , scrollChromeSuppressed
+  , scrollShowsChrome
+  )
 import NanoUI.Frame.Select (selectDropRect)
 import NanoUI.Frame.TextInput (TextInputGeom (..), textInputGeom, textInputMenuCursorKind)
 import NanoUI.Frame.Window (windowResizeCursorKind)
@@ -125,23 +133,40 @@ scrollThumbHit ctx mouse = do
             then go (idx + 1) count
             else do
               si <- getStyleIdx (ctxNodeArena ctx) idx
-              if si /= 0
-                then go (idx + 1) count
-                else do
-                  wid <- getWidgetId (ctxNodeArena ctx) idx
-                  pad <- getPadding (ctxNodeArena ctx) idx
-                  contentSize <- getNodeValue (ctxNodeArena ctx) idx
-                  (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-                  dir <- getDirection (ctxNodeArena ctx) idx
-                  off <- getScrollOffset ctx wid
-                  let fm = ctxFontMetrics ctx
-                  slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
-                  case scrollBarLayout (ctxHostProfile ctx) fm slot dir x y w h pad contentSize off of
-                    Nothing -> go (idx + 1) count
-                    Just layout ->
-                      if rectContains (sbThumb layout) mouse
-                        then pure True
-                        else go (idx + 1) count
+              let cfg = decodeScrollConfig si
+              wid <- getWidgetId (ctxNodeArena ctx) idx
+              pad <- getPadding (ctxNodeArena ctx) idx
+              (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+              dir <- getDirection (ctxNodeArena ctx) idx
+              slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
+              let fm = ctxFontMetrics ctx
+                  thumbHit axis contentSize axisOff =
+                    case scrollBarLayout (ctxHostProfile ctx) fm slot axis x y w h pad contentSize axisOff of
+                      Just layout -> rectContains (sbThumb layout) mouse
+                      Nothing -> False
+              onThumb <-
+                if isScrollStyle2D si
+                  then do
+                    contentH <- getNodeValue (ctxNodeArena ctx) idx
+                    contentW <- getAspect (ctxNodeArena ctx) idx
+                    V2 offX offY <- getScrollOffset2D ctx wid
+                    let hitY =
+                          scrollShowsChrome cfg True DirColumn
+                            && thumbHit DirColumn contentH offY
+                        hitX =
+                          scrollShowsChrome cfg True DirRow
+                            && thumbHit DirRow contentW offX
+                    pure (hitY || hitX)
+                  else
+                    if scrollChromeSuppressed cfg False dir
+                      then pure False
+                      else do
+                        contentSize <- getNodeValue (ctxNodeArena ctx) idx
+                        off <- getScrollOffset ctx wid
+                        pure (thumbHit dir contentSize off)
+              if onThumb
+                then pure True
+                else go (idx + 1) count
 
 cursorKindAt :: IM.IntMap NodeType -> Context -> WidgetId -> V2 -> Input -> IO UiCursorKind
 cursorKindAt table ctx wid mouse inp
