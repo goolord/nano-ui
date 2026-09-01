@@ -142,10 +142,13 @@ library
 benchmark nano-ui-id-bench
     import:           extensions
     import:           ghc-options
-    import:           rts-options
     import:           warnings
     type:             exitcode-stdio-1.0
     main-is:          IdBench.hs
+    ghc-options:
+        -rtsopts
+        -threaded
+        "-with-rtsopts=-A8m -H64m -K128m -T"
     build-depends:
         base ^>=4.22.0.0,
         nano-ui,

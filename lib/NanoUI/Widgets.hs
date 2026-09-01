@@ -562,8 +562,9 @@ select lbl options initial = do
   when (respClicked resp) $
     uiIO $ do
       st <- getStore ctx
-      let Rect rx ry rw rh = respRect resp
-          onButton = rw > 0 && rh > 0 && rectContains (Rect rx ry rw rh) (inputMousePos inp)
+      let
+        Rect rx ry rw rh = respRect resp
+        onButton = rw > 0 && rh > 0 && rectContains (Rect rx ry rw rh) (inputMousePos inp)
       when onButton $
         setStore ctx (setSelectOpen st key (not open))
   store1 <- uiIO (getStore ctx)
