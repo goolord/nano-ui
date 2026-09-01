@@ -71,7 +71,6 @@ import System.IO
   ( BufferMode (..)
   , hFlush
   , hGetBuffering
-  , hGetChar
   , hIsTerminalDevice
   , hSetBuffering
   , hWaitForInput
@@ -94,10 +93,10 @@ terminalThemeFromColors fg bg =
       white = colorRGBA 255 255 255 255
       black = colorRGBA 0 0 0 255
       pole light = if dark == light then white else black
-      shade light c t = lerpColor c (pole light) t
+      shade light c = lerpColor c (pole light)
       lift = shade True
       sink = shade False
-      blend t = lerpColor fg bg t
+      blend = lerpColor fg bg
       window = bg
       panelBg = lift bg 0.09
       panelHover = lift bg 0.14
@@ -261,7 +260,7 @@ readOscBuffer budget = go budget ""
       ready <- hWaitForInput stdin 1
       if ready
         then do
-          c <- hGetChar stdin
+          c <- getChar
           go (ms - 1) (acc ++ [c])
         else
           if null acc

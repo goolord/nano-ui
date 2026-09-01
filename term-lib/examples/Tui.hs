@@ -27,10 +27,10 @@ stack =
 inset :: Layout
 inset = stack {layoutPadding = Padding 4 4 4 4, layoutHeight = Grow 1}
 
-data ClickMsg = Clicked String
+newtype ClickMsg = Clicked String
   deriving (Eq, Show)
 
-data TuiClick = TuiClick {tuiClick :: String}
+newtype TuiClick = TuiClick {tuiClick :: String}
   deriving (Eq, Show)
 
 updateClick :: ClickMsg -> TuiClick -> TuiClick
@@ -40,7 +40,7 @@ main :: IO ()
 main =
   runTermAppReduce
     defaultTermOptions
-      { termAppShouldQuit = \inp -> inputKeysElem KeyEscape (inputKeys inp)
+      { termAppShouldQuit = inputKeysElem KeyEscape . inputKeys
       }
     updateClick
     (TuiClick "")
