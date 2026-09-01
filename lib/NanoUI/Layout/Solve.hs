@@ -127,17 +127,18 @@ import NanoUI.Frame.Scroll.Geometry
 solveLayout :: NodeArena -> HostProfile -> FontMetrics -> (Text -> IO (Float, Float)) -> Float -> Float -> IO ()
 solveLayout na host fm measure rootW rootH =
   withArenaArraysSnap na $ do
+    a <- arenaArrays na
     count <- arenaCount na
     whenPositive count $ do
       -- Wrap rows and wrapping labels need a known width. First pass sizes Grow
       -- rows unconstrained, position assigns widths, second pass remasures wrap
       -- height, then we position again so siblings sit below the wrapped content.
       measurePass na host fm measure False
-      positionNode na host fm 0 0 0 rootW rootH
+      positionNodeA a na host fm 0 0 0 rootW rootH
       needsRemeasure <- anyNeedsRemeasure na count
       when needsRemeasure $ do
         measurePass na host fm measure True
-        positionNode na host fm 0 0 0 rootW rootH
+        positionNodeA a na host fm 0 0 0 rootW rootH
 
 {-# INLINE nodeTypeA #-}
 nodeTypeA :: NodeArenaArrays -> NodeIdx -> IO NodeType
@@ -684,17 +685,18 @@ positionNodeA a na host fm idx x y availW availH = do
       gap = resolveLayoutGap host fm gap0
   dir <- getDirection na idx
   case nt of
-    NodeContainer -> positionChildren na host fm idx dir gap pad x y w h
-    NodePanel -> positionChildren na host fm idx dir gap pad x y w h
-    NodeScrollContainer -> positionScrollChildren na host fm idx dir gap pad x y w h
+    NodeContainer -> positionChildren a na host fm idx dir gap pad x y w h
+    NodePanel -> positionChildren a na host fm idx dir gap pad x y w h
+    NodeScrollContainer -> positionScrollChildren a na host fm idx dir gap pad x y w h
     NodeModal
-      | isCellHost host -> positionChildren na host fm idx dir gap pad x y w h
-      | otherwise -> positionScrollChildren na host fm idx dir gap pad x y w h
-    NodeWindow -> positionChildren na host fm idx dir gap pad x y w h
-    NodePopup -> positionChildren na host fm idx dir gap pad x y w h
+      | isCellHost host -> positionChildren a na host fm idx dir gap pad x y w h
+      | otherwise -> positionScrollChildren a na host fm idx dir gap pad x y w h
+    NodeWindow -> positionChildren a na host fm idx dir gap pad x y w h
+    NodePopup -> positionChildren a na host fm idx dir gap pad x y w h
     _ -> pure ()
 
 positionScrollChildren ::
+  NodeArenaArrays ->
   NodeArena ->
   HostProfile ->
   FontMetrics ->
@@ -707,7 +709,7 @@ positionScrollChildren ::
   Float ->
   Float ->
   IO ()
-positionScrollChildren na host fm idx dir gap pad px py pw ph = do
+positionScrollChildren a na host fm idx dir gap pad px py pw ph = do
   si <- getStyleIdx na idx
   contentSize <- getNodeValue na idx
   slot <- scrollBarSlotOf na idx
@@ -721,7 +723,7 @@ positionScrollChildren na host fm idx dir gap pad px py pw ph = do
       let cfg = decodeScrollConfig si
           gutterX = scrollAxisGutter (scrollPolicyX cfg) host fm slot contentW innerW
           gutterY = scrollAxisGutter (scrollPolicyY cfg) host fm slot contentSize innerH
-      positionChildren na host fm idx DirColumn gap pad cx cy (max 0 (innerW - gutterX)) (max 0 (innerH - gutterY))
+      positionChildren a na host fm idx DirColumn gap pad cx cy (max 0 (innerW - gutterX)) (max 0 (innerH - gutterY))
     else do
       let cfg = decodeScrollConfig si
           gutterCol = scrollAxisGutter (scrollPolicyY cfg) host fm slot contentSize innerH
@@ -733,8 +735,8 @@ positionScrollChildren na host fm idx dir gap pad px py pw ph = do
                 if wTag == SizingGrow
                   then max contentSize (innerW - gutterRow)
                   else contentSize
-          positionRowFromParent na host fm idx gap cx cy rowMain (innerH - gutterRow)
-        DirColumn -> positionColumnScroll na host fm idx gap cx cy (innerW - gutterCol) innerH contentSize
+          positionRowFromParent a na host fm idx gap cx cy rowMain (innerH - gutterRow)
+        DirColumn -> positionColumnScroll a na host fm idx gap cx cy (innerW - gutterCol) innerH contentSize
 
 scrollBarSlotOf :: NodeArena -> NodeIdx -> IO ScrollBarSlot
 scrollBarSlotOf na idx = do
@@ -766,6 +768,7 @@ hasPanelAncestor na = go
             _ -> getParent na p >>= go
 
 positionColumnScroll ::
+  NodeArenaArrays ->
   NodeArena ->
   HostProfile ->
   FontMetrics ->
@@ -777,7 +780,7 @@ positionColumnScroll ::
   Float ->
   Float ->
   IO ()
-positionColumnScroll na host fm parent gap cx cy innerW innerH contentSize = do
+positionColumnScroll a na host fm parent gap cx cy innerW innerH contentSize = do
   n <- loadChildrenScratchFromParent na parent innerW innerH
   withAxisSnaps na n contentSize (gap * fromIntegral (max 0 (n - 1))) False $ \idxArr outArr -> do
     let go !i !curY
@@ -801,7 +804,7 @@ positionColumnScroll na host fm parent gap cx cy innerW innerH contentSize = do
                     if isScrollNode nt
                       then min fh visibleSlice
                       else fh
-              positionNode na host fm ci fx curY cw nodeH
+              positionNodeA a na host fm ci fx curY cw nodeH
               go (i + 1) (curY + fh + gap)
     go 0 cy
 
@@ -813,6 +816,7 @@ resolveSize SizingGrow _ _ avail _ maxS = min avail maxS
 resolveSize SizingPercent _ _ avail _ maxS = min avail maxS
 
 positionChildren ::
+  NodeArenaArrays ->
   NodeArena ->
   HostProfile ->
   FontMetrics ->
@@ -825,7 +829,7 @@ positionChildren ::
   Float ->
   Float ->
   IO ()
-positionChildren na host fm idx dir gap pad px py pw ph = do
+positionChildren a na host fm idx dir gap pad px py pw ph = do
   wrap <- getWrap na idx
   nt <- getNodeType na idx
   let chrome = isChromeColumn nt dir
@@ -835,9 +839,9 @@ positionChildren na host fm idx dir gap pad px py pw ph = do
       ch = ph - padT pad - padB pad
   case dir of
     DirRow
-      | wrap -> positionRowWrap na host fm idx gap cx cy cw ch
-      | otherwise -> positionRowFromParent na host fm idx gap cx cy cw ch
-    DirColumn -> positionColumnFromParent na host fm idx gap chrome px py pw cx cy cw ch
+      | wrap -> positionRowWrap a na host fm idx gap cx cy cw ch
+      | otherwise -> positionRowFromParent a na host fm idx gap cx cy cw ch
+    DirColumn -> positionColumnFromParent a na host fm idx gap chrome px py pw cx cy cw ch
 
 childRowCrossSize :: NodeArena -> NodeIdx -> Float -> IO Float
 childRowCrossSize na ci availCross = do
@@ -929,6 +933,7 @@ copyPrimSlice src dst off n = go 0
           go (i + 1)
 
 positionRowFromParent ::
+  NodeArenaArrays ->
   NodeArena ->
   HostProfile ->
   FontMetrics ->
@@ -939,7 +944,7 @@ positionRowFromParent ::
   Float ->
   Float ->
   IO ()
-positionRowFromParent na host fm parent gap cx cy cw ch = do
+positionRowFromParent a na host fm parent gap cx cy cw ch = do
   n <- loadChildrenScratchFromParent na parent cw ch
   withAxisSnaps na n cw (gap * fromIntegral (max 0 (n - 1))) True $ \idxArr outArr -> do
     let goRow !i !curX
@@ -951,12 +956,23 @@ positionRowFromParent na host fm parent gap cx cy cw ch = do
               crossH <- childRowCrossSize na ci ch
               ay <- getAlignY na ci
               let fy = alignY ay cy ch crossH
-              positionNode na host fm ci curX fy fw crossH
+              positionNodeA a na host fm ci curX fy fw crossH
               goRow (i + 1) (curX + fw + gap)
     goRow 0 cx
 
-positionRowWrap :: NodeArena -> HostProfile -> FontMetrics -> NodeIdx -> Float -> Float -> Float -> Float -> Float -> IO ()
-positionRowWrap na host fm parent gap cx cy cw ch = do
+positionRowWrap ::
+  NodeArenaArrays ->
+  NodeArena ->
+  HostProfile ->
+  FontMetrics ->
+  NodeIdx ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  IO ()
+positionRowWrap a na host fm parent gap cx cy cw ch = do
   n <- loadChildrenScratchFromParent na parent cw ch
   idxArr <- readIORef (naScratchIdx na)
   wArr <- readIORef (naScratchMain na)
@@ -983,11 +999,12 @@ positionRowWrap na host fm parent gap cx cy cw ch = do
             let lineCross' = max lineCross crossH
             ay <- getAlignY na ci
             let fy = alignY ay oy lineCross' crossH
-            positionNode na host fm ci curX fy fw crossH
+            positionNodeA a na host fm ci curX fy fw crossH
             goRow lineIdx lineOut nLine (j + 1) (curX + fw + gap) oy lineCross' (max maxH crossH)
   goLines 0 cy
 
 positionColumnFromParent ::
+  NodeArenaArrays ->
   NodeArena ->
   HostProfile ->
   FontMetrics ->
@@ -1002,7 +1019,7 @@ positionColumnFromParent ::
   Float ->
   Float ->
   IO ()
-positionColumnFromParent na host fm parent gap chrome px _ pw cx cy cw ch = do
+positionColumnFromParent a na host fm parent gap chrome px _ pw cx cy cw ch = do
   n <- loadChildrenScratchFromParent na parent cw ch
   gapSum <- columnGapSumScratch na chrome n gap
   withAxisSnaps na n ch gapSum False $ \idxArr outArr -> do
@@ -1023,7 +1040,7 @@ positionColumnFromParent na host fm parent gap chrome px _ pw cx cy cw ch = do
                       then pure (cx, cw)
                       else pure (alignX ax cx cw iw, cw)
               childH <- columnChildHeight na ci fh
-              positionNode na host fm ci fx curY nodeW childH
+              positionNodeA a na host fm ci fx curY nodeW childH
               gapAfter <-
                 if i + 1 >= n
                   then pure 0
@@ -1356,7 +1373,8 @@ positionWindowNode na host fm idx x y w h = do
   let pad = resolveLayoutPadding host fm pad0
       gap = resolveLayoutGap host fm gap0
   dir <- getDirection na idx
-  positionChildren na host fm idx dir gap pad x y w h
+  a <- arenaArrays na
+  positionChildren a na host fm idx dir gap pad x y w h
 
 computePopupPosition ::
   Float ->
