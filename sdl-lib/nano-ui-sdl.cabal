@@ -35,7 +35,7 @@ common rts-options
     ghc-options:
         -rtsopts
         -threaded
-        "-with-rtsopts=-N --nonmoving-gc -qb0 -T -I0"
+        "-with-rtsopts=-N1 -A64m -T -I0"
 
 -- -N1 keeps the threaded runtime on one capability. Do not pass tasty's -j1
 -- via -with-rtsopts; use: cabal bench ... --benchmark-options=-j1

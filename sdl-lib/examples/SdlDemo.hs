@@ -25,6 +25,7 @@ import System.Environment (getArgs)
 import Text.Printf (printf)
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
+import qualified Data.Text.Read as T.Read
 
 options :: [OptDescr Bool]
 options =
@@ -186,9 +187,9 @@ demoUi = do
               heading "Tree"
               selTxt <- readTreeSel
               let sel0 =
-                    case reads (T.unpack selTxt) of
-                      [(n, "")] -> n
-                      _ -> 0
+                    case T.Read.decimal selTxt of
+                      Right (n, _) -> n
+                      Left _ -> 0
                   demoTree =
                     [ TreeItem
                         "src"

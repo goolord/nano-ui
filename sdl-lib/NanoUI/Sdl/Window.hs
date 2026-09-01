@@ -22,8 +22,8 @@ import Data.Text.Foreign qualified as TextForeign
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (peek)
-import NanoUI (ImageId, Input (..), Size (..), Theme)
-import NanoUI.Testing (Context, markDirty, setHost, setWakeLoop)
+import NanoUI (FontMetrics (..), ImageId, Input (..), Size (..), Theme)
+import NanoUI.Testing (Context, clearMeasureCache, markDirty, setHost, setWakeLoop)
 import NanoUI.Sdl.Display
   ( defaultFontSize
   , defaultUiScale
@@ -160,6 +160,9 @@ data SdlEnv = SdlEnv
   , sdlDebug :: IORef SdlDebugSampler
   , sdlRetain :: IORef (Ptr (), Int, Int, Float)
   , sdlVsync :: !Bool
+  , sdlCachedFm :: !(IORef FontMetrics)
+  , sdlCachedMonoFm :: !(IORef FontMetrics)
+  , sdlCachedCtx :: !(IORef Context)
   }
 
 defaultWindowSize :: Size
@@ -182,10 +185,17 @@ syncDisplay ctx env inp = do
     closeFont oldMono
     newMono <- openFont (sdlMonoFontPath env) (sdlFontSize env * scale)
     writeIORef (sdlMonoFontRef env) newMono
-    -- Glyph atlas entries are at the old pixel size — must discard and re-warm.
     resetGlyphAtlas (sdlGlyphAtlas env)
     warmGlyphAtlas (sdlGlyphAtlas env) newFont
     warmGlyphAtlas (sdlGlyphAtlas env) newMono
+    let ga = sdlGlyphAtlas env
+        fm = buildGlyphFontMetrics ga newFont scale
+        monoFm = buildGlyphFontMetrics ga newMono scale
+        ctx' = withTtfMeasureGlyph ctx newFont newMono fm monoFm scale
+    writeIORef (sdlCachedFm env) fm
+    writeIORef (sdlCachedMonoFm env) monoFm
+    writeIORef (sdlCachedCtx env) ctx'
+    clearMeasureCache ctx
     markDirty ctx
   queried <- queryWindowLogicalSize (sdlWindow env) scale
   let winSize =
@@ -196,12 +206,8 @@ syncDisplay ctx env inp = do
               s -> s
           s -> s
   inpSized <- syncInput env scale inp {inputWindowSize = winSize}
-  font <- readIORef (sdlFontRef env)
-  monoFont <- readIORef (sdlMonoFontRef env)
-  let ga = sdlGlyphAtlas env
-      fm = buildGlyphFontMetrics ga font scale
-      monoFm = buildGlyphFontMetrics ga monoFont scale
-      ctx' = withTtfMeasureGlyph ctx font monoFont fm monoFm scale
+  ctxMeasured <- readIORef (sdlCachedCtx env)
+  let ctx' = withSdlClipboard ctxMeasured
   pure (ctx', inpSized)
 
 syncInput :: SdlEnv -> Float -> Input -> IO Input
@@ -337,6 +343,12 @@ startSdlWindow ctx title w h flags bench vsync fontPath monoPath fontSize = do
           cursors <- initCursors
           debug <- newSdlDebugSampler
           retain <- newIORef (nullPtr, 0, 0, 0)
+          let ga = glyphAtlas
+              fm = buildGlyphFontMetrics ga font scale
+              monoFm = buildGlyphFontMetrics ga monoFont scale
+          cachedFm <- newIORef fm
+          cachedMonoFm <- newIORef monoFm
+          cachedCtx <- newIORef (withTtfMeasureGlyph ctx font monoFont fm monoFm scale)
           unlessM (setRenderScale ren defaultUiScale) $
             fail "SDL_SetRenderScale failed"
           unless bench $ void $ setRenderVSync ren vsync
@@ -357,15 +369,12 @@ startSdlWindow ctx title w h flags bench vsync fontPath monoPath fontSize = do
               , sdlDebug = debug
               , sdlRetain = retain
               , sdlVsync = vsync
+              , sdlCachedFm = cachedFm
+              , sdlCachedMonoFm = cachedMonoFm
+              , sdlCachedCtx = cachedCtx
               }
-  scale <- readIORef (sdlScaleRef env)
-  font <- readIORef (sdlFontRef env)
-  monoFont <- readIORef (sdlMonoFontRef env)
-  let ga = sdlGlyphAtlas env
-      -- Build FontMetrics backed by the glyph atlas so pushText emits real quads.
-      fm = buildGlyphFontMetrics ga font scale
-      monoFm = buildGlyphFontMetrics ga monoFont scale
-      ctx' = withSdlClipboard (withTtfMeasureGlyph ctx font monoFont fm monoFm scale)
+  ctxMeasured <- readIORef (sdlCachedCtx env)
+  let ctx' = withSdlClipboard ctxMeasured
   setHost ctx' env
   setWakeLoop ctx' pushRefreshEvent
   pure (ctx', env)

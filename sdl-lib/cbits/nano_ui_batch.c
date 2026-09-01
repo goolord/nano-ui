@@ -593,3 +593,14 @@ void nano_ui_batch_draw_range(
     const int *idx = (const int *)indices + index_start;
     SDL_RenderGeometry(batch->renderer, texture, sdl_verts, vert_count, idx, index_n);
 }
+
+void nano_ui_set_clip_rect(SDL_Renderer *renderer, int x, int y, int w, int h)
+{
+    SDL_Rect r = {x, y, w, h};
+    SDL_SetRenderClipRect(renderer, &r);
+}
+
+void nano_ui_clear_clip_rect(SDL_Renderer *renderer)
+{
+    SDL_SetRenderClipRect(renderer, NULL);
+}
