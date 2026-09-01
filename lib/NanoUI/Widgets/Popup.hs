@@ -27,7 +27,7 @@ import NanoUI.Context
 import NanoUI.Font (resolveLayoutGap, resolveLayoutPadding)
 import NanoUI.Host (isCellHost)
 import NanoUI.Input (inputMousePos)
-import NanoUI.Layout.Arena (NodeType (..), addNode, setWidgetId)
+import NanoUI.Layout.Arena (NodeType (..), addNode, rootAttachParent, setWidgetId)
 import NanoUI.Id (enterScope, scopeTag)
 import NanoUI.Monad
   ( Ui
@@ -113,7 +113,7 @@ popupEx open cfg layout child = do
           let
             fm = ctxFontMetrics ctx
             host = ctxHostProfile ctx
-            parent = parentIdx stack
+            parent0 = parentIdx stack
             terminal = isCellHost host
             pad = if terminal then Padding 0 0 0 0 else Padding 6 6 6 6
             gap = if terminal then 0 else 4
@@ -123,6 +123,7 @@ popupEx open cfg layout child = do
             wSiz = layoutWidth layout
             hSiz = layoutHeight layout
           prevFloat <- uiIO $ do
+            parent <- rootAttachParent (ctxNodeArena ctx) parent0
             registerPopupConfig ctx wid (cfgAnchor cfg) (cfgPlacement cfg) (cfgOffset cfg)
             idx <-
               addNode

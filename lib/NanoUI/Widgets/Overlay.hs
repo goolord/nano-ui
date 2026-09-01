@@ -29,7 +29,7 @@ import NanoUI.Input
   ( inputMousePos
   , inputWindowSize
   )
-import NanoUI.Layout.Arena (NodeType (..), addNode, setWidgetId)
+import NanoUI.Layout.Arena (NodeType (..), addNode, rootAttachParent, setWidgetId)
 import NanoUI.Monad
   ( Ui
   , askContext
@@ -107,7 +107,7 @@ overlay kind open title child
         let
           fm = ctxFontMetrics ctx
           host = ctxHostProfile ctx
-          parent = parentIdx stack
+          parent0 = parentIdx stack
           Size winW winH = inputWindowSize inp
           margin = resolveLayoutGap host fm windowMargin
           availW = max 1 (winW - 2 * margin)
@@ -130,6 +130,7 @@ overlay kind open title child
           maxW = availW
           maxH = availH
         prevFloat <- uiIO $ do
+          parent <- rootAttachParent (ctxNodeArena ctx) parent0
           idx <-
             addNode
               (ctxNodeArena ctx)

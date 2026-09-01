@@ -11,6 +11,8 @@ module NanoUI.Frame.Select
   , drawSelectOverlays
   , collectSelectDropdownSpans
   , findSelectUnderMouse
+  , overlayMenuOwnerAt
+  , cacheOpenSelectDrop
   ) where
 
 
@@ -20,6 +22,7 @@ import qualified Data.IntMap.Strict as IM
 import qualified Data.Text as T
 import NanoUI.Context
   ( Context (..)
+  , TextInputMenu (..)
   , WidgetStore (..)
   , anySelectOpen
   , closeSelects
@@ -51,6 +54,69 @@ import NanoUI.Frame.Chrome
   )
 import NanoUI.Frame.Focus (unlessHit)
 import NanoUI.Frame.Hit (findNodeByWidgetId, widgetOverlayAllowed)
+
+overlayMenuOwnerAt :: Context -> V2 -> IO (Maybe WidgetId)
+overlayMenuOwnerAt ctx mouse = do
+  mMenu <- readIORef (ctxTextInputMenu ctx)
+  case mMenu of
+    Just m | rectContains (textInputMenuRect m) mouse ->
+      pure (Just (textInputMenuWidget m))
+    _ -> openSelectDropOwnerAt ctx mouse
+
+openSelectDropOwnerAt :: Context -> V2 -> IO (Maybe WidgetId)
+openSelectDropOwnerAt ctx mouse = do
+  store <- getStore ctx
+  count <- arenaCount (ctxNodeArena ctx)
+  let go idx
+        | idx >= count = pure Nothing
+        | otherwise = do
+            nt <- getNodeType (ctxNodeArena ctx) idx
+            if nt /= NodeSelect
+              then go (idx + 1)
+              else do
+                wid <- getWidgetId (ctxNodeArena ctx) idx
+                let key = intKey wid
+                if not (isSelectOpen store key)
+                  then go (idx + 1)
+                  else do
+                    txt <- getText (ctxNodeArena ctx) idx
+                    (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+                    let (_, opts) = selectOptions txt
+                        dropRect =
+                          selectDropRect (ctxHostProfile ctx) (ctxFontMetrics ctx) x y w h (length opts)
+                    if rectContains dropRect mouse
+                      then pure (Just wid)
+                      else go (idx + 1)
+  go 0
+
+cacheOpenSelectDrop :: Context -> IO ()
+cacheOpenSelectDrop ctx = do
+  store <- getStore ctx
+  if not (anySelectOpen store)
+    then writeIORef (ctxOpenSelectDrop ctx) Nothing
+    else do
+      count <- arenaCount (ctxNodeArena ctx)
+      m <- go 0 count store
+      writeIORef (ctxOpenSelectDrop ctx) m
+  where
+    go idx n st
+      | idx >= n = pure Nothing
+      | otherwise = do
+          nt <- getNodeType (ctxNodeArena ctx) idx
+          if nt /= NodeSelect
+            then go (idx + 1) n st
+            else do
+              wid <- getWidgetId (ctxNodeArena ctx) idx
+              let key = intKey wid
+              if not (isSelectOpen st key)
+                then go (idx + 1) n st
+                else do
+                  txt <- getText (ctxNodeArena ctx) idx
+                  (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+                  let (_, opts) = selectOptions txt
+                      dropRect =
+                        selectDropRect (ctxHostProfile ctx) (ctxFontMetrics ctx) x y w h (length opts)
+                  pure (Just (wid, dropRect))
 
 markSelectDropPress :: Context -> Input -> IO ()
 markSelectDropPress ctx inp =

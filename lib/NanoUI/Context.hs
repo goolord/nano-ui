@@ -108,6 +108,8 @@ module NanoUI.Context
   , markEscapeConsumed
   , pointerBlockedByModal
   , pointerBlockedByOverlay
+  , menuPointerGestureActive
+  , armMenuPointerCapture
   , seedFloatingPanel
   , beginModal
   , endModal
@@ -135,6 +137,7 @@ import NanoUI.Context.Internal
   , WindowResizeDrag (..)
   , WindowResizeEdge (..)
   , anyAnimating
+  , armMenuPointerCapture
   , askHostIO
   , atlasSnapshot
   , atlasTextureId
@@ -174,6 +177,7 @@ import NanoUI.Context.Internal
   , lookupPopupConfig
   , markDirty
   , markEscapeConsumed
+  , menuPointerGestureActive
   , modalActive
   , newContext
   , overlayConsumesQuit

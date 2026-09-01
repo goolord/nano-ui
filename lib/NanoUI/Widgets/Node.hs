@@ -37,7 +37,7 @@ import NanoUI.Context
   , isDisabled
   , pointerBlockedByOverlay
   )
-import NanoUI.Id (WidgetId (..), enterScope, scopeTag)
+import NanoUI.Id (WidgetId (..), enterScope, hashWidgetId, scopeTag)
 import NanoUI.Input
   ( Input (..)
   , inputMouseDown
@@ -303,9 +303,12 @@ resolveInteraction ctx inp wid = do
   disabled <- isDisabled ctx wid
   mrect <- scrollHitRect ctx wid
   blocked <- pointerBlockedByOverlay ctx (inputMousePos inp)
+  active <- readIORef (ctxActiveId ctx)
   let mouse = inputMousePos inp
+      captured =
+        hashWidgetId active /= 0 && active /= wid && inputMouseDown inp
   hovered <-
-    if disabled || blocked
+    if disabled || blocked || captured
       then pure False
       else
         case mrect of
@@ -322,6 +325,8 @@ resolveInteraction ctx inp wid = do
     pressed = hovered && inputMouseDown inp
     rightPressed = hovered && inputMouseRightDown inp
   pending <- readIORef (ctxClickedId ctx)
+  when (hovered && inputMouseReleased inp && wid == active) $
+    writeIORef (ctxReleaseClickedId ctx) wid
   let
     clicked = (hovered && inputMouseReleased inp) || pending == wid
     rightClicked = hovered && inputMouseRightReleased inp

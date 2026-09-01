@@ -17,6 +17,7 @@ module NanoUI.Frame.Input
 
 import Control.Monad (forM_, unless, when)
 import Data.IORef (readIORef, writeIORef)
+import Data.Maybe (isJust)
 import qualified Data.IntMap.Strict as IM
 import NanoUI.Context
   ( Context (..)
@@ -61,9 +62,16 @@ import NanoUI.Layout.Arena
   )
 import NanoUI.Types (Rect (..), V2 (..), rectContains, rectH, rectW, v2X)
 import NanoUI.Frame.Focus (filterModalFocusables, tabNext, tabNextFocusables)
-import NanoUI.Frame.Hit (modalTreeOpen, overlayHitAllowed, scrollHitRect, nodeClippedHit)
+import NanoUI.Frame.Hit
+  ( findNodeByWidgetId
+  , modalTreeOpen
+  , nodeClippedHit
+  , nodeInteractionHit
+  , overlayHitAllowed
+  , scrollHitRect
+  )
 import NanoUI.Frame.Redraw (probeHotId)
-import NanoUI.Frame.Select (findSelectUnderMouse)
+import NanoUI.Frame.Select (findSelectUnderMouse, overlayMenuOwnerAt)
 import NanoUI.Frame.Spans (widgetHitRect)
 import NanoUI.WidgetText (buttonVisualStyle, isTabButtonStyle)
 import NanoUI.Frame.TextInput (collapseTextInputSelection, textInputGeomForWidget, applyTextInputClick, applyTextInputDrag, textInputCharAtX)
@@ -112,13 +120,23 @@ refreshHover ctx inp = do
 finalizePointerPress :: Context -> Input -> IO ()
 finalizePointerPress ctx inp =
   when (inputMousePressed inp) $ do
-    let mouse = inputMousePos inp
-    mWid <- findTopWidgetUnderMouse ctx mouse isInteractiveNode
-    case mWid of
-      Nothing -> pure ()
-      Just wid ->
-        whenM (not <$> isDisabled ctx wid) $
-          writeIORef (ctxActiveId ctx) wid
+    gesture <- readIORef (ctxMenuPointerGesture ctx)
+    if gesture
+      then writeIORef (ctxActiveId ctx) (WidgetId 0)
+      else do
+        let mouse = inputMousePos inp
+        mMenu <- overlayMenuOwnerAt ctx mouse
+        case mMenu of
+          Just _ -> do
+            writeIORef (ctxMenuPointerGesture ctx) True
+            writeIORef (ctxActiveId ctx) (WidgetId 0)
+          Nothing -> do
+            mWid <- findTopWidgetUnderMouse ctx mouse isInteractiveNode
+            case mWid of
+              Nothing -> pure ()
+              Just wid ->
+                whenM (not <$> isDisabled ctx wid) $
+                  writeIORef (ctxActiveId ctx) wid
 
 findTopWidgetUnderMouse ::
   Context -> V2 -> (NodeType -> Bool) -> IO (Maybe WidgetId)
@@ -159,73 +177,83 @@ finalizePointerRelease ctx inp =
   if not (inputMouseReleased inp)
     then pure ()
     else do
-      active <- readIORef (ctxActiveId ctx)
-      when (hashWidgetId active /= 0) $ do
-        let mouse = inputMousePos inp
-        count <- arenaCount (ctxNodeArena ctx)
-        releasedOver <-
-          if count <= 0
-            then pure False
-            else checkReleasedOver ctx count active mouse
-        forM_ [0 .. count - 1] $ \idx -> do
-          wid <- getWidgetId (ctxNodeArena ctx) idx
-          when (wid == active) $ do
-            nt <- getNodeType (ctxNodeArena ctx) idx
-            (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-            let rect = Rect x y w h
-            visible <- nodeClippedHit ctx idx rect mouse
-            when visible $
-              case nt of
-                NodeCheckbox -> do
-                  store <- getStore ctx
-                  let key = intKey wid
-                      current =
-                        intBool (IM.findWithDefault 0 key (storeInt store))
-                      newVal = not current
-                  setStore
-                    ctx
-                    ( store
-                        { storeInt = IM.insert key (boolInt newVal) (storeInt store)
-                        }
-                    )
-                NodeRadio -> do
-                  parent <- getParent (ctxNodeArena ctx) idx
-                  when (parent >= 0) $ do
-                    store <- getStore ctx
-                    optIdx <- getStyleIdx (ctxNodeArena ctx) idx
-                    groupWid <- getWidgetId (ctxNodeArena ctx) parent
-                    let groupKey = intKey groupWid
-                    setStore
-                      ctx
-                      ( store
-                          { storeInt = IM.insert groupKey optIdx (storeInt store)
-                          }
-                      )
-                NodeButton -> do
-                  packed <- getStyleIdx (ctxNodeArena ctx) idx
-                  when (isTabButtonStyle packed) $ do
-                    parent <- getParent (ctxNodeArena ctx) idx
-                    when (parent >= 0) $ do
+      let mouse = inputMousePos inp
+      gesture <- readIORef (ctxMenuPointerGesture ctx)
+      mMenu <- overlayMenuOwnerAt ctx mouse
+      if gesture || isJust mMenu
+        then do
+          writeIORef (ctxActiveId ctx) (WidgetId 0)
+          writeIORef (ctxMenuPointerGesture ctx) False
+        else do
+          active <- readIORef (ctxActiveId ctx)
+          when (hashWidgetId active /= 0) $ do
+            count <- arenaCount (ctxNodeArena ctx)
+            releasedClicked <- readIORef (ctxReleaseClickedId ctx)
+            releasedOver <-
+              if count <= 0
+                then pure False
+                else checkReleasedOver ctx count active mouse
+            forM_ [0 .. count - 1] $ \idx -> do
+              wid <- getWidgetId (ctxNodeArena ctx) idx
+              when (wid == active) $ do
+                nt <- getNodeType (ctxNodeArena ctx) idx
+                (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+                let rect = Rect x y w h
+                visible <- nodeClippedHit ctx idx rect mouse
+                when visible $
+                  case nt of
+                    NodeCheckbox -> do
                       store <- getStore ctx
-                      groupWid <- getWidgetId (ctxNodeArena ctx) parent
-                      let groupKey = intKey groupWid
-                          tabIdx = buttonVisualStyle packed `div` 4
+                      let key = intKey wid
+                          current =
+                            intBool (IM.findWithDefault 0 key (storeInt store))
+                          newVal = not current
                       setStore
                         ctx
                         ( store
-                            { storeInt = IM.insert groupKey tabIdx (storeInt store)
+                            { storeInt = IM.insert key (boolInt newVal) (storeInt store)
                             }
                         )
-                  uiHit <- inUiClickHit ctx active mouse
-                  unless uiHit $ writeIORef (ctxClickedId ctx) active
-                _ | postsLayoutClick nt -> do
-                  uiHit <- inUiClickHit ctx active mouse
-                  unless uiHit $ writeIORef (ctxClickedId ctx) active
-                _ -> pure ()
-        writeIORef (ctxActiveId ctx) (WidgetId 0)
-        when releasedOver $
-          unless (isCellHost (ctxHostProfile ctx)) $
-            setAnimationValue ctx active 1
+                    NodeRadio -> do
+                      parent <- getParent (ctxNodeArena ctx) idx
+                      when (parent >= 0) $ do
+                        store <- getStore ctx
+                        optIdx <- getStyleIdx (ctxNodeArena ctx) idx
+                        groupWid <- getWidgetId (ctxNodeArena ctx) parent
+                        let groupKey = intKey groupWid
+                        setStore
+                          ctx
+                          ( store
+                              { storeInt = IM.insert groupKey optIdx (storeInt store)
+                              }
+                          )
+                    NodeButton -> do
+                      packed <- getStyleIdx (ctxNodeArena ctx) idx
+                      when (isTabButtonStyle packed) $ do
+                        parent <- getParent (ctxNodeArena ctx) idx
+                        when (parent >= 0) $ do
+                          store <- getStore ctx
+                          groupWid <- getWidgetId (ctxNodeArena ctx) parent
+                          let groupKey = intKey groupWid
+                              tabIdx = buttonVisualStyle packed `div` 4
+                          setStore
+                            ctx
+                            ( store
+                                { storeInt = IM.insert groupKey tabIdx (storeInt store)
+                                }
+                            )
+                      when (releasedClicked /= active) $ do
+                        uiHit <- inUiClickHit ctx active mouse
+                        unless uiHit $ writeIORef (ctxClickedId ctx) active
+                    _ | postsLayoutClick nt -> do
+                      when (releasedClicked /= active) $ do
+                        uiHit <- inUiClickHit ctx active mouse
+                        unless uiHit $ writeIORef (ctxClickedId ctx) active
+                    _ -> pure ()
+            writeIORef (ctxActiveId ctx) (WidgetId 0)
+            when releasedOver $
+              unless (isCellHost (ctxHostProfile ctx)) $
+                setAnimationValue ctx active 1
 
 postsLayoutClick :: NodeType -> Bool
 postsLayoutClick nt =
@@ -235,8 +263,16 @@ inUiClickHit :: Context -> WidgetId -> V2 -> IO Bool
 inUiClickHit ctx wid mouse = do
   disabled <- isDisabled ctx wid
   blocked <- pointerBlockedByOverlay ctx mouse
-  mrect <- scrollHitRect ctx wid
-  pure (not disabled && not blocked && maybe False (`rectContains` mouse) mrect)
+  if disabled || blocked
+    then pure False
+    else do
+      mrect <- scrollHitRect ctx wid
+      case mrect of
+        Nothing -> pure False
+        Just r ->
+          findNodeByWidgetId ctx wid >>= \case
+            Nothing -> pure (rectContains r mouse)
+            Just idx -> nodeInteractionHit ctx idx r mouse
 
 checkReleasedOver :: Context -> Int -> WidgetId -> V2 -> IO Bool
 checkReleasedOver ctx count active mouse = go 0

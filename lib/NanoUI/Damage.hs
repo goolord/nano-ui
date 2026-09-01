@@ -41,6 +41,7 @@ import NanoUI.Layout.Arena
   , getRect
   , getWidgetId
   , getWidthSizing
+  , isFloatingNode
   , isScrollNode
   )
 import NanoUI.Types
@@ -445,15 +446,32 @@ scrollOffsetDamage ctx oldStore newStore = do
         | k <- IM.keys (IM.union oldF newF)
         , IM.findWithDefault 0 k oldF /= IM.findWithDefault 0 k newF
         ]
-  fmap catMaybes $
+  fmap concat $
     forM changed $ \k ->
       findScrollNodeByStoreKey ctx k >>= \case
-        Nothing -> pure Nothing
+        Nothing -> pure []
         Just idx -> do
           nt <- getNodeType (ctxNodeArena ctx) idx
-          if isScrollNode nt
-            then getClipRect (ctxNodeArena ctx) idx
-            else pure Nothing
+          if not (isScrollNode nt)
+            then pure []
+            else do
+              mClip <- getClipRect (ctxNodeArena ctx) idx
+              mFloat <- floatingAncestorRect ctx idx
+              pure (catMaybes [mClip, mFloat])
+
+floatingAncestorRect :: Context -> Int -> IO (Maybe Rect)
+floatingAncestorRect ctx idx = go idx
+  where
+    go i
+      | i < 0 = pure Nothing
+      | otherwise = do
+          nt <- getNodeType (ctxNodeArena ctx) i
+          if isFloatingNode nt
+            then do
+              (x, y, w, h) <- getRect (ctxNodeArena ctx) i
+              let r = Rect x y w h
+              pure (if nonzeroRect r then Just r else Nothing)
+            else getParent (ctxNodeArena ctx) i >>= go
 
 nonzeroRect :: Rect -> Bool
 nonzeroRect r = rectW r > 0 && rectH r > 0
