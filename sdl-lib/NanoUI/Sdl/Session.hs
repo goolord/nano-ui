@@ -12,6 +12,7 @@ import Data.Primitive.SmallArray (SmallArray, emptySmallArray, sizeofSmallArray)
 import GHC.Clock (getMonotonicTime)
 import NanoUI
   ( Input (..)
+  , V2 (..)
   , emptyInput
   , inputInteracted
   , inputMousePressed
@@ -214,6 +215,7 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace star
                   || inputMouseReleased inpSynced
                   || inputMouseRightPressed inpSynced
                   || inputMouseRightReleased inpSynced
+              scrollEdge = inputScroll inpSynced /= V2 0 0
               graceAllow =
                 grace <= 0 || sizeChanged || interacted || anim || editing || dirtyNow || pendingDirty || need || nFull > 0 || displayScale
               forceFinal = wasAnim && not anim
@@ -231,6 +233,7 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace star
                          || displayScale
                          || firstUserFull
                          || pointerEdge
+                         || scrollEdge
                      )
           when (grace > 0) $ writeIORef startupGrace (grace - 1)
           let runDraw = do
@@ -252,7 +255,7 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace star
                 case ms of
                   Just s -> pure s
                   Nothing
-                    | pointerEdge -> runDraw
+                    | pointerEdge || scrollEdge -> runDraw
                     | otherwise -> pure inpSynced
               else do
                 noteSkip (sdlDebug env)

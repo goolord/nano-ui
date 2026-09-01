@@ -158,8 +158,9 @@ transformSubtree ctx idx scrollX scrollY parentClip = do
             setClipRect na idx clipHere
             pure (sx, sy, clipHere)
           _ -> do
-            setClipRect na idx parentClip
-            pure (sx, sy, parentClip)
+            let clipHere = if floating then nodeRect else parentClip
+            setClipRect na idx clipHere
+            pure (sx, sy, clipHere)
   fc <- getFirstChild na idx
   let go ci
         | ci < 0 = pure ()

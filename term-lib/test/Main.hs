@@ -206,6 +206,10 @@ testSpecs =
   , TestSpec "overlay-click-through" False runOverlayClickThroughTest
   , TestSpec "window-drag" False runWindowDragTest
   , TestSpec "window-scroll-wheel" False runWindowScrollWheelTest
+  , TestSpec "page-window-scroll" False runPageWindowScrollTest
+  , TestSpec "sibling-window-scroll" False runSiblingWindowScrollTest
+  , TestSpec "window-scroll-only-damage" False runWindowScrollOnlyDamageTest
+  , TestSpec "scrolled-debug-toggle" False runScrolledDebugToggleTest
   , TestSpec "window-resize" False runWindowResizeTest
   , TestSpec "window-resize-halo-hit" False runWindowResizeHaloHitTest
   , TestSpec "context-menu-open" False runContextMenuOpenTest

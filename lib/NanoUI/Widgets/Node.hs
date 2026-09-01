@@ -325,6 +325,8 @@ resolveInteraction ctx inp wid = do
     pressed = hovered && inputMouseDown inp
     rightPressed = hovered && inputMouseRightDown inp
   pending <- readIORef (ctxClickedId ctx)
+  when (hovered && inputMouseReleased inp && wid == active) $
+    writeIORef (ctxReleaseClickedId ctx) wid
   let
     clicked = (hovered && inputMouseReleased inp) || pending == wid
     rightClicked = hovered && inputMouseRightReleased inp

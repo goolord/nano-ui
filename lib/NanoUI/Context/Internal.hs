@@ -235,6 +235,7 @@ data Context = Context
   , ctxLastHotId :: IORef WidgetId
   , ctxActiveId :: IORef WidgetId
   , ctxClickedId :: IORef WidgetId
+  , ctxReleaseClickedId :: IORef WidgetId
   , ctxFocusId :: IORef WidgetId
   , ctxPrevRects :: IORef (IntMap Rect)
   , ctxPrevClips :: IORef (IntMap Rect)
@@ -712,6 +713,7 @@ newContext = do
   ctxLastHotId <- newIORef (WidgetId 0)
   ctxActiveId <- newIORef (WidgetId 0)
   ctxClickedId <- newIORef (WidgetId 0)
+  ctxReleaseClickedId <- newIORef (WidgetId 0)
   ctxFocusId <- newIORef (WidgetId 0)
   ctxPrevRects <- newIORef IM.empty
   ctxPrevClips <- newIORef IM.empty
@@ -765,6 +767,7 @@ newContext = do
     , ctxLastHotId
     , ctxActiveId
     , ctxClickedId
+    , ctxReleaseClickedId
     , ctxFocusId
     , ctxPrevRects
     , ctxPrevClips

@@ -16,6 +16,7 @@ module NanoUI.Layout.Arena
   , arenaCount
   , addNode
   , addNodeFromLayout
+  , rootAttachParent
   , setNodeText
   , getParent
   , getFirstChild
@@ -406,6 +407,15 @@ alignYTag :: AlignY -> Word8
 alignYTag AlignTop = 0
 alignYTag AlignMiddle = 1
 alignYTag AlignBottom = 2
+
+-- Empty stack attaches to node 0 so walks from the page root still reach
+-- windows/modals/popups built as UI siblings.
+rootAttachParent :: NodeArena -> Int -> IO Int
+rootAttachParent na parent
+  | parent >= 0 = pure parent
+  | otherwise = do
+      n <- arenaCount na
+      pure (if n > 0 then 0 else -1)
 
 {-# INLINE addNode #-}
 addNode ::

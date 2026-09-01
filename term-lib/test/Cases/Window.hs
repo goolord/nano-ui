@@ -12,9 +12,13 @@ module Cases.Window
   , runWindowResizeTest
   , runWindowScrollGutterTest
   , runWindowScrollWheelTest
+  , runPageWindowScrollTest
+  , runSiblingWindowScrollTest
+  , runWindowScrollOnlyDamageTest
+  , runScrolledDebugToggleTest
   ) where
 
-import Control.Monad (replicateM, void)
+import Control.Monad (replicateM, void, when)
 import Data.IORef (IORef)
 import Data.Text qualified as T
 import NanoUI
@@ -22,6 +26,7 @@ import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertGt, assertLt, withInput)
 import NanoUI.Testing.Harness
   ( assertWheelTitlePinned
+  , runClickPair
   , clickPair
   , dragWindowEdge
   , runDragFrom
@@ -275,6 +280,97 @@ runWindowDragTest ctx failed = do
   let Rect x1 y1 _ _ = respRect win1
   assert failed (x1 < x0 - 10)
   assert failed (y1 > y0 + 10)
+
+runPageWindowScrollTest :: Context -> IORef Int -> IO ()
+runPageWindowScrollTest ctx failed = do
+  let inp0 = withInput 320 220
+      line1 = T.pack "line 1"
+      title = T.pack "Debug"
+      ui = do
+        (_, win) <- scrollArea (tight (grow defaultLayout)) $ do
+          void (button "OK")
+          w <- fmap fst $
+            window True "Debug" $
+              column defaultLayout $
+                mapM_ (\i -> label (T.pack ("line " <> show (i :: Int)))) [1 .. 30]
+          pure w
+        pure win
+  win <- warmup2 ctx inp0 ui
+  let Rect wx _ ww _ = respRect win
+  spans0 <- collectOverlayTextSpans ctx inp0
+  case spanLabelYs line1 spans0 of
+    [] -> assert failed False
+    b0 : _ -> do
+      let wheelAt = V2 (wx + ww / 2) (b0 + 2)
+      assertWheelTitlePinned failed ctx inp0 ui title line1 wheelAt Nothing
+
+runSiblingWindowScrollTest :: Context -> IORef Int -> IO ()
+runSiblingWindowScrollTest ctx failed = do
+  let inp0 = withInput 640 400
+      line1 = T.pack "line 1"
+      title = T.pack "Debug"
+      ui = do
+        scroll (tight (grow defaultLayout)) $ void (label "page")
+        fmap fst $
+          window True "Debug" $
+            column defaultLayout $
+              mapM_ (\i -> label (T.pack ("line " <> show (i :: Int)))) [1 .. 30]
+  win <- warmup2 ctx inp0 ui
+  let Rect wx _ ww _ = respRect win
+  spans0 <- collectOverlayTextSpans ctx inp0
+  case spanLabelYs line1 spans0 of
+    [] -> assert failed False
+    b0 : _ -> do
+      let wheelAt = V2 (wx + ww / 2) (b0 + 2)
+      assertWheelTitlePinned failed ctx inp0 ui title line1 wheelAt Nothing
+
+runWindowScrollOnlyDamageTest :: Context -> IORef Int -> IO ()
+runWindowScrollOnlyDamageTest ctx failed = do
+  let inp0 = withInput 640 400
+      ui =
+        fmap fst $
+          window True "Debug" $
+            column defaultLayout $
+              mapM_ (\i -> label (T.pack ("line " <> show (i :: Int)))) [1 .. 30]
+  win <- warmup2 ctx inp0 ui
+  let Rect wx wy ww wh = respRect win
+      wheel =
+        inp0
+          { inputMousePos = V2 (wx + ww / 2) (wy + wh / 2)
+          , inputScroll = V2 0 1
+          }
+  _ <- runFrame ctx wheel ui
+  dmg <- takeDamage ctx
+  let winPanel = Rect wx wy ww wh
+  case dmg of
+    DamageClip r ->
+      assert failed (maybe False (\i -> rectW i > 0 && rectH i > 0) (rectIntersect r winPanel))
+    _ -> assert failed False
+
+runScrolledDebugToggleTest :: Context -> IORef Int -> IO ()
+runScrolledDebugToggleTest ctx failed = do
+  let inp0 = withInput 640 400
+      title = T.pack "Debug"
+      ui = do
+        (readOpen, setOpen) <- useFlag False
+        open <- readOpen
+        (_, dbgBtn) <- scrollArea (tight (grow defaultLayout)) $ do
+          b <- button "Debug"
+          onClick b (setOpen (not open))
+          pure b
+        when open $ void (window True "Debug" (label "fps"))
+        pure dbgBtn
+  dbgBtn <- warmup2 ctx inp0 ui
+  let Rect bx by bw bh = respRect dbgBtn
+      pos = V2 (bx + bw / 2) (by + bh / 2)
+  _ <- runClickPair ctx inp0 ui pos
+  spans <- collectOverlayTextSpans ctx inp0
+  let titles = [t | (_, t, _, _, _) <- spans, title `T.isInfixOf` t]
+  assert failed (not (null titles))
+  _ <- runFrame ctx inp0 ui
+  spansAfter <- collectOverlayTextSpans ctx inp0
+  let titlesAfter = [t | (_, t, _, _, _) <- spansAfter, title `T.isInfixOf` t]
+  assert failed (not (null titlesAfter))
 
 runWindowScrollWheelTest :: Context -> IORef Int -> IO ()
 runWindowScrollWheelTest ctx failed = do

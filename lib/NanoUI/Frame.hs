@@ -187,6 +187,7 @@ runFrameEff unlift ctx inp ui = do
     writeIORef (ctxMenuPointerGesture ctx) False
   beginFrameModal ctx
   writeIORef (ctxEscapeConsumed ctx) False
+  writeIORef (ctxReleaseClickedId ctx) (WidgetId 0)
   armMenuPointerCapture ctx inp
   result0 <- unlift (runUi ctx inp ui)
   -- Pending click is one-shot. Clear before a mirror rebuild so toggles do not fire twice.
