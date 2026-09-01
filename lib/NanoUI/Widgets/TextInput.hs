@@ -3,6 +3,7 @@ module NanoUI.Widgets.TextInput
   , textInputLayout
   , processTextInput
   , applyTextInputMenuAction
+  , textInputMenuActionEnabled
   ) where
 
 import Control.Monad (void, when)
@@ -119,6 +120,24 @@ applyTextInputMenuAction ctx wid item = do
     )
   writeIORef (ctxTextInputMenu ctx) Nothing
   markDirty ctx
+
+textInputMenuActionEnabled :: Context -> WidgetId -> Int -> IO Bool
+textInputMenuActionEnabled ctx wid item = do
+  store <- getStore ctx
+  let key = intKey wid
+      text = IM.findWithDefault "" key (storeText store)
+      cursor = IM.findWithDefault (T.length text) (slotKey slotCursor key) (storeInt store)
+      anchor = IM.findWithDefault cursor (slotKey slotAnchor key) (storeInt store)
+      hasSel = anchor /= cursor
+  mclip <- ctxClipboardGet ctx
+  let clipTxt = maybe "" id mclip
+  pure $
+    case item of
+      0 -> hasSel
+      1 -> not (T.null text)
+      2 -> not (T.null clipTxt)
+      3 -> not (T.null text)
+      _ -> False
 
 processTextInput :: Context -> Input -> TextInputState -> IO TextInputState
 processTextInput ctx inp s0 = do

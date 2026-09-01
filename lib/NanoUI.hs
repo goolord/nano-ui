@@ -116,6 +116,7 @@ module NanoUI
   , slider
   , sliderEx
   , textInput
+  , textArea
   , separator
   , spacer
   , tooltip
@@ -449,7 +450,6 @@ import NanoUI.Widgets
   , panel
   , radioFieldset
   , row
-  , Clickable (..)
   , RightClickable (..)
   , onRightClick
   , popup
@@ -484,8 +484,8 @@ import NanoUI.Widgets
   , sliderEx
   , spacer
   , textInput
+  , textArea
   , toolbar
-  , tooltip
   , tree
   , useFlag
   , useRadio

@@ -62,7 +62,7 @@ runWindowCloseDamageTest _ failed = do
   ctx <- newContext
   let ui open = void (window open "Debug" (label "Body"))
       inp0 = withInput 640 400
-  _ <- runFrame ctx inp0 (ui True) >> runFrame ctx inp0 (ui True)
+  _ <- warmup2 ctx inp0 (ui True)
   _ <- runFrame ctx inp0 (ui False)
   dmg <- takeDamage ctx
   assertEq failed dmg DamageFull
@@ -86,7 +86,7 @@ runOverlayPanelLiveTest _ failed = do
   let inp = withInputOff 320 240
       checkStatic ui = do
         ctx <- newContext
-        _ <- runFrame ctx inp ui >> runFrame ctx inp ui
+        _ <- warmup2 ctx inp ui
         need <- needsRedraw ctx inp inp
         assert failed (not need)
         _ <- runFrame ctx inp ui
@@ -94,7 +94,7 @@ runOverlayPanelLiveTest _ failed = do
         assert failed (damageIsEmpty dmg)
       checkWindowLive ui = do
         ctx <- newContext
-        _ <- runFrame ctx inp ui >> runFrame ctx inp ui
+        _ <- warmup2 ctx inp ui
         need <- needsRedraw ctx inp inp
         assert failed need
         _ <- runFrame ctx inp ui
@@ -223,7 +223,7 @@ runOverlayClickThroughTest _ failed = do
       _ <- runFrame ctx press u
       runFrame ctx release u >>= \(hit, _, _, _) -> assert failed (not (clicked hit))
     runCovered u = do
-      _ <- runFrame ctx inp0 u >> runFrame ctx inp0 u
+      _ <- warmup2 ctx inp0 u
       ((_, cover0, mInside0), _, _, _) <- runFrame ctx inp0 u
       let coverRect = respRect cover0
       assert failed (rectW coverRect > 0 && rectH coverRect > 0)
@@ -246,7 +246,7 @@ runOverlayClickThroughTest _ failed = do
           ((_, _, mInsideHit), _, _, _) <- runFrame ctx irelease u
           assert failed (maybe False respClicked mInsideHit)
     runStacked = do
-      _ <- runFrame ctx inp0 stackedUi >> runFrame ctx inp0 stackedUi
+      _ <- warmup2 ctx inp0 stackedUi
       ((_, mLo0, hi0, mHi0), _, _, _) <- runFrame ctx inp0 stackedUi
       case (mLo0, mHi0) of
         (Just loBtn, Just hiBtn) -> do
@@ -458,17 +458,14 @@ runWindowResizeHaloHitTest ctx failed = do
   let Rect x1 y1 _ h1 = respRect win1
       hit = V2 (bx + bw - 2) (by + bh - 2)
       inHalo = let s = 12
-                in (fst2 hit < x1 && fst2 hit >= x1 - s)
-                    && snd2 hit >= y1 - s
-                    && snd2 hit <= y1 + h1 + s
+                in (v2X hit < x1 && v2X hit >= x1 - s)
+                    && v2Y hit >= y1 - s
+                    && v2Y hit <= y1 + h1 + s
       isResize k = k == UiCursorEwResize || k == UiCursorNsResize || k == UiCursorNwseResize || k == UiCursorNeswResize
   kind <- uiCursorKind ctx (inp0 {inputMousePos = hit})
   assert failed (abs (x1 - destX) <= 8)
   assert failed inHalo
   assert failed (not (isResize kind))
- where
-  fst2 (V2 x _) = x
-  snd2 (V2 _ y) = y
 
 runSeparatorSpanTest :: Context -> IORef Int -> IO ()
 runSeparatorSpanTest ctx failed = do

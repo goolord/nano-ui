@@ -32,7 +32,6 @@ import NanoUI.Context
   , armMenuPointerCapture
   , FrameMsg (..)
   , animInProgress
-  , clearMeasureCache
   , clearPopupConfigs
   , decodeMessages
   , drainMessages
@@ -179,7 +178,6 @@ runFrameEff unlift ctx inp ui = do
   animKeys <- IM.keys . IM.filter animInProgress <$> readIORef (ctxAnimations ctx)
   resetNodeArena (ctxNodeArena ctx)
   resetDrawArena (ctxDrawArena ctx)
-  clearMeasureCache ctx
   resetUiBuildScopes ctx
   unless (inputMouseDown inp) $
     writeIORef (ctxSelectDropPress ctx) False
@@ -235,11 +233,12 @@ runFrameEff unlift ctx inp ui = do
   finalizeSelectPick ctx inp
   closeSelectOnOutsideClick ctx inp
   storeAfter <- getStore ctx
-  when (mirrorStoresChanged storeMid storeAfter) $
-    syncWidgetLabels ctx
-  -- Store/input finalization can change measured widget text (sliders, marks).
-  solvePlaceWindows ctx w h
-  applyScrollOffsets ctx
+  let storeChanged = mirrorStoresChanged storeMid storeAfter
+  when storeChanged $ syncWidgetLabels ctx
+  let layoutDirty = storeChanged || movedResize || movedWindow
+  when layoutDirty $ do
+    solvePlaceWindows ctx w h
+    applyScrollOffsets ctx
   cacheOpenSelectDrop ctx
   updatePrevRects ctx
   refreshHover ctx inp

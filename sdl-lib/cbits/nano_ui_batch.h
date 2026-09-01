@@ -105,4 +105,7 @@ void nano_ui_batch_draw_range(
     float dmg_w,
     float dmg_h);
 
+void nano_ui_set_clip_rect(SDL_Renderer *renderer, int x, int y, int w, int h);
+void nano_ui_clear_clip_rect(SDL_Renderer *renderer);
+
 #endif

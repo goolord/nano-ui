@@ -11,22 +11,23 @@ import System.Mem (performGC)
 import Test.Tasty.Bench
 
 benchInput :: Input
-benchInput = emptyInput {inputWindowSize = Size 1 1}
+benchInput = emptyInput {inputWindowSize = Size 100 100}
 
+-- Match id-zero-alloc: a layout root is required or runFrame overflows.
 idBurst :: NanoUI ()
-idBurst = burstNextIds 4096
+idBurst = column defaultLayout (burstNextIds 4096)
 
 scopedWidgets :: NanoUI ()
 scopedWidgets =
-  column (defaultLayout {layoutGap = 2}) $
-    replicateM_ 32 $
-      row (defaultLayout {layoutGap = 2}) $
-        replicateM_ 32 (void nextId)
+  column (defaultLayout {layoutGap = 2})
+    $ replicateM_ 32
+    $ row (defaultLayout {layoutGap = 2})
+    $ replicateM_ 32 (void nextId)
 
 measureFrameAlloc :: NanoUI a -> IO Integer
 measureFrameAlloc ui = do
   ctx <- newContext
-  _ <- runFrame ctx benchInput (pure ())
+  _ <- runFrame ctx benchInput (column defaultLayout (void nextId))
   performGC
   before <- getRTSStats
   _ <- runFrame ctx benchInput ui

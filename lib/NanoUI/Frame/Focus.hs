@@ -22,7 +22,7 @@ import NanoUI.Host (isCellHost)
 import NanoUI.Icons (checkboxMark, radioMark)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Layout.Arena
-  ( NodeType (NodeButton, NodeCheckbox, NodeRadio, NodeTree, NodeSlider)
+  ( NodeType (NodeCheckbox, NodeRadio, NodeTree, NodeSlider)
   , forNodes_
   , getNodeType
   , getParent
@@ -33,7 +33,6 @@ import NanoUI.Layout.Arena
   , setNodeText
   , setNodeValue
   )
-import NanoUI.WidgetText (stripButtonBrackets)
 import NanoUI.WidgetText
   ( checkboxLabelText
   , radioLabelText
@@ -153,8 +152,4 @@ syncWidgetLabels ctx = do
             shown = if terminal then sliderText lbl frac val else lbl
         setNodeText na idx shown
         setNodeValue na idx frac
-      NodeButton -> do
-        txt <- getText na idx
-        unless terminal $
-          setNodeText na idx (stripButtonBrackets txt)
       _ -> pure ()

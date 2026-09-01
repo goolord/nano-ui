@@ -1,5 +1,4 @@
 {-# LANGUAGE DataKinds #-}
-{-# OPTIONS_GHC -Wno-unused-top-binds #-}
 
 module NanoUI.Frame.Cursor
   ( UiCursorKind (..)
@@ -46,12 +45,13 @@ import NanoUI.Frame.Scroll.Geometry
   , scrollShowsChrome
   )
 import NanoUI.Frame.Select (selectDropRect)
-import NanoUI.Frame.TextInput (TextInputGeom (..), textInputGeom, textInputMenuCursorKind)
+import NanoUI.Frame.TextEdit (textEditMenuCursorKind)
+import NanoUI.Frame.TextInput (TextInputGeom (..), textInputGeom)
 import NanoUI.Frame.Window (windowResizeCursorKind)
 
 uiCursorKind :: Context -> Input -> IO UiCursorKind
 uiCursorKind ctx inp = do
-  mMenu <- textInputMenuCursorKind ctx inp
+  mMenu <- textEditMenuCursorKind ctx inp
   case mMenu of
     Just k -> pure k
     Nothing -> do
@@ -184,6 +184,7 @@ cursorKindAt table ctx wid mouse inp
             Just NodeSelect -> selectCursorKind ctx wid mouse
             Just NodeColorPicker -> pure UiCursorPointer
             Just NodeTextInput -> textInputCursorKind ctx wid mouse
+            Just NodeTextArea -> textInputCursorKind ctx wid mouse
             Just NodeSlider -> sliderCursorKind ctx wid mouse inp
             _ -> pure UiCursorDefault
 

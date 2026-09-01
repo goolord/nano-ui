@@ -183,7 +183,7 @@ runTreeKeyboardTest _ failed = do
   let items = [TreeItem "root" [TreeItem "child" []], TreeItem "leaf" []]
       ui = column defaultLayout (tree "k" items 0)
       inp0 = withInput 40 12
-  _ <- runFrame ctx inp0 ui >> runFrame ctx inp0 ui
+  _ <- warmup2 ctx inp0 ui
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   ((_, sel1), _, _, _) <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyDown]}) ui
   assertEq failed sel1 1

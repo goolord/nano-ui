@@ -18,7 +18,6 @@ module Cases.Scroll
   , runScrolledOutClickImmunityTest
   , runScrolledOutHoverImmunityTest
   , runScrolledOutCursorImmunityTest
-  , runLocalizedScrollDamageTest
   , runScrollChildDamageOffsetTest
   , run2DScrollWheelTest
   , runTable2DScrollSyncTest
@@ -561,9 +560,6 @@ runScrolledOutCursorImmunityTest ctx failed = do
           assertEq failed kind UiCursorDefault
         _ -> assert failed False
     _ -> assert failed False
-
-runLocalizedScrollDamageTest :: Context -> IORef Int -> IO ()
-runLocalizedScrollDamageTest = runScrollDamageTest
 
 runScrollChildDamageOffsetTest :: Context -> IORef Int -> IO ()
 runScrollChildDamageOffsetTest ctx failed = do

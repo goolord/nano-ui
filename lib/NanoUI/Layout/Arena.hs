@@ -14,6 +14,8 @@ module NanoUI.Layout.Arena
   , newNodeArena
   , resetNodeArena
   , arenaCount
+  , arenaArrays
+  , withArenaArraysSnap
   , addNode
   , addNodeFromLayout
   , rootAttachParent
@@ -57,6 +59,7 @@ module NanoUI.Layout.Arena
   , foldNodeRevM
   ) where
 
+import Control.Exception (bracket)
 import Control.Monad (forM_, when)
 import Data.HashTable.IO (BasicHashTable)
 import qualified Data.HashTable.IO as HT
@@ -91,6 +94,7 @@ data NodeType
   | NodeCheckbox
   | NodeSlider
   | NodeTextInput
+  | NodeTextArea
   | NodeScrollContainer
   | NodeSelect
   | NodeModal
@@ -115,6 +119,7 @@ isWidgetNode nt =
     NodeRadio -> True
     NodeSlider -> True
     NodeTextInput -> True
+    NodeTextArea -> True
     NodeSelect -> True
     NodeColorPicker -> True
     NodeTree -> True
@@ -199,6 +204,7 @@ data NodeArena = NodeArena
   { naCount :: IORef Int
   , naCapacity :: IORef Int
   , naArrays :: IORef NodeArenaArrays
+  , naArraysSnap :: IORef (Maybe NodeArenaArrays)
   -- Flex solver scratch: child node indices + main/cross sizes + distributed outs.
   , naScratchCap :: IORef Int
   , naScratchCount :: IORef Int
@@ -263,6 +269,7 @@ newNodeArena = do
   naCount <- newIORef 0
   naCapacity <- newIORef cap
   naArrays <- newIORef =<< newNodeArenaArrays cap
+  naArraysSnap <- newIORef Nothing
   let scratchCap = 64
   naScratchCap <- newIORef scratchCap
   naScratchCount <- newIORef 0
@@ -277,6 +284,7 @@ newNodeArena = do
       { naCount
       , naCapacity
       , naArrays
+      , naArraysSnap
       , naScratchCap
       , naScratchCount
       , naScratchIdx
@@ -290,14 +298,21 @@ newNodeArena = do
 {-# INLINE resetNodeArena #-}
 resetNodeArena :: NodeArena -> IO ()
 resetNodeArena na = do
-  writeIORef (naCount na) 0
   table <- readIORef (naIndex na)
-  clearWidgetIndex table
+  n <- readIORef (naCount na)
+  writeIORef (naCount na) 0
+  clearWidgetIndex na table n
 
-clearWidgetIndex :: BasicHashTable WidgetId NodeIdx -> IO ()
-clearWidgetIndex table = do
-  keys <- HT.foldM (\acc (k, _) -> pure (k : acc)) [] table
-  mapM_ (HT.delete table) keys
+clearWidgetIndex :: NodeArena -> BasicHashTable WidgetId NodeIdx -> Int -> IO ()
+clearWidgetIndex na table n = do
+  a <- arenaArrays na
+  let go !i
+        | i >= n = pure ()
+        | otherwise = do
+            wid <- readPrimArray (naArrWidgetId a) i
+            when (hashWidgetId wid /= 0) $ HT.delete table wid
+            go (i + 1)
+  go 0
 
 {-# INLINE arenaCount #-}
 arenaCount :: NodeArena -> IO Int
@@ -305,7 +320,22 @@ arenaCount na = readIORef (naCount na)
 
 {-# INLINE arenaArrays #-}
 arenaArrays :: NodeArena -> IO NodeArenaArrays
-arenaArrays na = readIORef (naArrays na)
+arenaArrays na = do
+  m <- readIORef (naArraysSnap na)
+  case m of
+    Just a -> pure a
+    Nothing -> readIORef (naArrays na)
+
+-- | Pin arena column arrays for a layout pass so field reads skip naArrays IORef.
+withArenaArraysSnap :: NodeArena -> IO a -> IO a
+withArenaArraysSnap na act =
+  bracket
+    ( do
+        a <- readIORef (naArrays na)
+        writeIORef (naArraysSnap na) (Just a)
+    )
+    (\_ -> writeIORef (naArraysSnap na) Nothing)
+    (\_ -> act)
 
 {-# NOINLINE ensureCapacity #-}
 ensureCapacity :: NodeArena -> Int -> IO ()
@@ -355,7 +385,12 @@ ensureCapacity na needed = do
       naArrStyleIdx <- growPrimArrayCopy (naArrStyleIdx a) cap newCap 0
       naArrTextIdx <- growPrimArrayCopy (naArrTextIdx a) cap newCap (-1)
       naArrTextStore <- growTextStoreCopy (naArrTextStore a) cap newCap
-      writeIORef (naArrays na) NodeArenaArrays {..}
+      let newA = NodeArenaArrays {..}
+      writeIORef (naArrays na) newA
+      m <- readIORef (naArraysSnap na)
+      case m of
+        Just{} -> writeIORef (naArraysSnap na) (Just newA)
+        Nothing -> pure ()
       writeIORef (naCapacity na) newCap
 
 {-# NOINLINE growPrimArrayCopy #-}

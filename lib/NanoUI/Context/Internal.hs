@@ -5,6 +5,7 @@ module NanoUI.Context.Internal
   , MeasureCacheKey
   , TextInputMenu (..)
   , TextInputDrag (..)
+  , TextFieldClickCell (..)
   , WindowResizeEdge (..)
   , WindowResizeDrag (..)
   , intKey
@@ -197,7 +198,19 @@ data TextInputMenu = TextInputMenu
 data TextInputDrag = TextInputDrag
   { textInputDragWidget :: WidgetId
   , textInputDragAnchor :: Int
+  , textInputDragAnchorRow :: Int
+  , textInputDragAnchorCol :: Int
+  , textInputDragMultiline :: Bool
   , textInputDragClicks :: Int
+  }
+  deriving (Eq, Show)
+
+data TextFieldClickCell = TextFieldClickCell
+  { textFieldClickWidget :: WidgetId
+  , textFieldClickFlat :: Int
+  , textFieldClickRow :: Int
+  , textFieldClickCol :: Int
+  , textFieldClickMultiline :: Bool
   }
   deriving (Eq, Show)
 
@@ -266,6 +279,7 @@ data Context = Context
   , ctxSpanOverlay :: SpanArena
   , ctxScrollDrag :: IORef (Maybe (WidgetId, Float))
   , ctxTextInputDrag :: IORef (Maybe TextInputDrag)
+  , ctxTextFieldClickCell :: IORef (Maybe TextFieldClickCell)
   , ctxTextInputMenu :: IORef (Maybe TextInputMenu)
   , ctxClipboardGet :: IO (Maybe Text)
   , ctxClipboardSet :: Text -> IO Bool
@@ -738,6 +752,7 @@ newContext = do
   ctxSpanOverlay <- newSpanArena 64
   ctxScrollDrag <- newIORef Nothing
   ctxTextInputDrag <- newIORef Nothing
+  ctxTextFieldClickCell <- newIORef Nothing
   ctxTextInputMenu <- newIORef Nothing
   ctxPopupConfigs <- newIORef IM.empty
   ctxWidgetNodeTypes <- newIORef Nothing
@@ -798,6 +813,7 @@ newContext = do
     , ctxSpanOverlay
     , ctxScrollDrag
     , ctxTextInputDrag
+    , ctxTextFieldClickCell
     , ctxTextInputMenu
     , ctxClipboardGet = pure Nothing
     , ctxClipboardSet = \_ -> pure False

@@ -1,6 +1,7 @@
 -- | Shared helpers for integration tests: input gestures, spans, scroll checks.
 module NanoUI.Testing.Harness
   ( clickPair
+  , rightClickPair
   , pressAt
   , releaseAt
   , withInputOff
@@ -10,6 +11,7 @@ module NanoUI.Testing.Harness
   , warmup2
   , warmupDraw
   , runClick
+  , runRightClick
   , runClickMsgs
   , runClickPair
   , runClickRelease
@@ -18,6 +20,7 @@ module NanoUI.Testing.Harness
   , spanYs
   , spanLabelYs
   , closeSpanBottom
+  , closeSpanCenter
   , spansHas
   , spanYOf
   , spanXOf
@@ -59,6 +62,24 @@ clickPair inp pos =
   let
     press = pressAt inp pos
     release = releaseAt press
+   in
+    (press, release)
+
+rightClickPair :: Input -> V2 -> (Input, Input)
+rightClickPair inp pos =
+  let
+    press =
+      inp
+        { inputMousePos = pos
+        , inputMouseRightDown = True
+        , inputMouseRightPressed = True
+        }
+    release =
+      press
+        { inputMouseRightDown = False
+        , inputMouseRightPressed = False
+        , inputMouseRightReleased = True
+        }
    in
     (press, release)
 
@@ -118,6 +139,12 @@ runClick ctx inp0 ui pos = do
   _ <- runFrame ctx press ui
   void (runFrame ctx release ui)
 
+runRightClick :: Context -> Input -> NanoUI a -> V2 -> IO ()
+runRightClick ctx inp0 ui pos = do
+  let (press, release) = rightClickPair inp0 pos
+  _ <- runFrame ctx press ui
+  void (runFrame ctx release ui)
+
 runClickMsgs :: Context -> Input -> NanoUI a -> V2 -> IO [FrameMsg]
 runClickMsgs ctx inp0 ui pos = do
   let
@@ -172,6 +199,12 @@ closeSpanBottom spans =
     ] of
     [] -> Nothing
     bs -> Just (maximum bs)
+
+closeSpanCenter :: [(Rect, T.Text, a, b, c)] -> Maybe V2
+closeSpanCenter spans =
+  case [r | (r, txt, _, _, _) <- spans, T.strip txt == "X"] of
+    (Rect x y w h : _) -> Just (V2 (x + w / 2) (y + h / 2))
+    [] -> Nothing
 
 spansHas :: T.Text -> [(Rect, T.Text, a, b, c)] -> Bool
 spansHas needle spans = any (\(_, txt, _, _, _) -> needle `T.isInfixOf` txt) spans

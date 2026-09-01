@@ -47,15 +47,17 @@ withNotcurses act =
     finiNC fp = withForeignPtr fp c_fini
 
 ncSize :: NotcursesCtx -> IO (Int, Int)
-ncSize (NotcursesCtx fp) =
-  withForeignPtr fp $ \p ->
-    alloca $ \rows ->
-      alloca $ \cols -> do
-        r <- c_dim p rows cols
-        when (r /= 0) $ fail "notcurses dim failed"
-        rowCount <- peek rows
-        colCount <- peek cols
-        pure (fromIntegral colCount, fromIntegral rowCount)
+ncSize (NotcursesCtx fp) = withForeignPtr fp peekNotcursesDim
+
+peekNotcursesDim :: Ptr Notcurses -> IO (Int, Int)
+peekNotcursesDim p =
+  alloca $ \rows ->
+    alloca $ \cols -> do
+      r <- c_dim p rows cols
+      when (r /= 0) $ fail "notcurses dim failed"
+      rowCount <- peek rows
+      colCount <- peek cols
+      pure (fromIntegral colCount, fromIntegral rowCount)
 
 ncBlitCells :: NotcursesCtx -> Maybe Cells -> Cells -> IO ()
 ncBlitCells (NotcursesCtx fp) mPrev cells =
@@ -120,14 +122,9 @@ eventFromInput p nip = do
     else pure (maybeToList (mapEvent evId y x mods evtype))
 
 resizeEvent :: Ptr Notcurses -> IO [TermEvent]
-resizeEvent p =
-  alloca $ \rows ->
-    alloca $ \cols -> do
-      r <- c_dim p rows cols
-      when (r /= 0) $ fail "notcurses dim failed"
-      rowCount <- peek rows
-      colCount <- peek cols
-      pure [EvResize (fromIntegral colCount) (fromIntegral rowCount)]
+resizeEvent p = do
+  (w, h) <- peekNotcursesDim p
+  pure [EvResize w h]
 
 mapEvent :: Word32 -> CInt -> CInt -> CUInt -> CInt -> Maybe TermEvent
 mapEvent evId y x mods evtype
@@ -140,13 +137,10 @@ mapEvent evId y x mods evtype
   | otherwise = charEvent evId mods
 
 charEvent :: Word32 -> CUInt -> Maybe TermEvent
-charEvent evId mods
-  | evId == nckeyTab = Just (EvKey KeyTab (toMods mods))
-  | evId == nckeyEsc = Just (EvKey KeyEscape (toMods mods))
-  | otherwise =
-      case codePointToChar evId of
-        Nothing -> Nothing
-        Just c -> Just (EvChar c (toMods mods))
+charEvent evId mods =
+  case codePointToChar evId of
+    Nothing -> Nothing
+    Just c -> Just (EvChar c (toMods mods))
 
 codePointToChar :: Word32 -> Maybe Char
 codePointToChar w =

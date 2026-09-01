@@ -4,8 +4,8 @@ module Main (main) where
 
 import Test.Hspec
 import qualified Data.Text as T
-import NanoUI.Widget.TextArea as TA
-import NanoUI.Widget.TextBuffer as TB
+import NanoUI.Widgets.TextArea as TA
+import NanoUI.Widgets.TextBuffer as TB
 
 main :: IO ()
 main = hspec spec
@@ -18,7 +18,7 @@ ctrlMods = TA.Modifiers False True False False
 
 spec :: Spec
 spec = do
-  describe "NanoUI.Widget.TextBuffer" $ do
+  describe "NanoUI.Widgets.TextBuffer" $ do
     it "initializes an empty buffer with a single line and (0,0) cursor" $ do
       let b = TB.empty
       TB.toText b `shouldBe` ""
@@ -99,7 +99,7 @@ spec = do
       let b = TB.killToBOL (TB.moveToEOL (TB.fromText "hello"))
       TB.toText b `shouldBe` ""
 
-  describe "NanoUI.Widget.TextArea" $ do
+  describe "NanoUI.Widgets.TextArea" $ do
     it "Ctrl+Left/Right move by word" $ do
       let s0 = TA.initTextAreaState "foo bar"
           sRight = TA.handleTextAreaEvent TA.KeyRight ctrlMods s0
@@ -128,10 +128,12 @@ spec = do
       TA.layoutCaretY layout `shouldBe` 0
       map TA.visualLineY (TA.layoutLines layout) `shouldBe` [-16, 0]
 
-    it "Ctrl+A and Ctrl+a both move to beginning of line" $ do
+    it "Ctrl+A and Ctrl+a both select all" $ do
       let s0 = TA.initTextAreaState "hello"
           atEnd = TA.handleTextAreaEvent TA.KeyEnd noMods s0
           fromLower = TA.handleTextAreaEvent (TA.KeyChar 'a') ctrlMods atEnd
           fromUpper = TA.handleTextAreaEvent (TA.KeyChar 'A') ctrlMods atEnd
-      TB.getCursor (TA.buffer fromLower) `shouldBe` TB.Cursor 0 0
-      TB.getCursor (TA.buffer fromUpper) `shouldBe` TB.Cursor 0 0
+      TB.getCursor (TA.buffer fromLower) `shouldBe` TB.Cursor 0 5
+      TA.selectionAnchor fromLower `shouldBe` TB.Cursor 0 0
+      TB.getCursor (TA.buffer fromUpper) `shouldBe` TB.Cursor 0 5
+      TA.selectionAnchor fromUpper `shouldBe` TB.Cursor 0 0

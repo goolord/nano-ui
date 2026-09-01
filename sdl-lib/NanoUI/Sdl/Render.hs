@@ -20,10 +20,9 @@ import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Primitive.PrimArray (indexPrimArray, sizeofPrimArray)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray)
 import Data.Word (Word8)
-import Foreign.ForeignPtr (ForeignPtr, mallocForeignPtrBytes, withForeignPtr)
+import Foreign.C.Types (CInt (..))
+import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Ptr (Ptr, nullPtr)
-import Foreign.Storable (Storable (..), poke)
-import GHC.IO (unsafePerformIO)
 import NanoUI (Color (..), Rect (..), rectIntersect)
 import NanoUI.Testing
   ( Damage (..)
@@ -34,26 +33,22 @@ import NanoUI.Testing
   , damageIsEmpty
   , glyphAtlasTextureId
   )
-import SDL3.Sys.Bindgen.Rect (SDL_Rect (..))
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
-import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Render
   ( renderClearSafe
-  , setRenderClipRectSafe
   , setRenderDrawColorSafe
   )
 
-nullClip :: PtrConst.PtrConst SDL_Rect
-nullClip = PtrConst.unsafeFromPtr (nullPtr :: Ptr SDL_Rect)
+foreign import ccall unsafe "nano_ui_set_clip_rect"
+  c_set_clip_rect :: Ptr SDL_Renderer -> CInt -> CInt -> CInt -> CInt -> IO ()
+
+foreign import ccall unsafe "nano_ui_clear_clip_rect"
+  c_clear_clip_rect :: Ptr SDL_Renderer -> IO ()
 
 data ClipState
   = ClipNone
   | ClipKey {-# UNPACK #-} !Int {-# UNPACK #-} !Int {-# UNPACK #-} !Int {-# UNPACK #-} !Int
   deriving (Eq)
-
-{-# NOINLINE clipRectScratch #-}
-clipRectScratch :: ForeignPtr SDL_Rect
-clipRectScratch = unsafePerformIO (mallocForeignPtrBytes (sizeOf (undefined :: SDL_Rect)))
 
 {-# INLINE snapDamage #-}
 snapDamage :: Float -> Damage -> Damage
@@ -94,16 +89,14 @@ toClipKey r =
 
 setLogicalClipKey :: Ptr SDL_Renderer -> (Int, Int, Int, Int) -> IO ()
 setLogicalClipKey ren (px, py, pw, ph) =
-  withForeignPtr clipRectScratch $ \(sr :: Ptr SDL_Rect) -> do
-    poke sr (SDL_Rect (fromIntegral px) (fromIntegral py) (fromIntegral pw) (fromIntegral ph))
-    void $ setRenderClipRectSafe ren (PtrConst.unsafeFromPtr sr)
+  c_set_clip_rect ren (fromIntegral px) (fromIntegral py) (fromIntegral pw) (fromIntegral ph)
 
 setLogicalClipRect :: Ptr SDL_Renderer -> Rect -> IO ()
 setLogicalClipRect ren r =
   setLogicalClipKey ren (logicalClipKey r)
 
 clearLogicalClipRect :: Ptr SDL_Renderer -> IO ()
-clearLogicalClipRect ren = void $ setRenderClipRectSafe ren nullClip
+clearLogicalClipRect ren = c_clear_clip_rect ren
 
 applyClipState :: RenderBatch -> IORef ClipState -> Ptr SDL_Renderer -> ClipState -> IO ()
 applyClipState batch ref ren next = do

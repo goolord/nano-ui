@@ -25,6 +25,7 @@ import System.Environment (getArgs)
 import Text.Printf (printf)
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
+import qualified Data.Text.Read as T.Read
 
 options :: [OptDescr Bool]
 options =
@@ -88,6 +89,7 @@ demoUi = do
   (readAccent, setAccent) <- useText (colorPickerToHex demoAccent)
   (readTheme, setTheme) <- useText (T.pack (show Dark))
   (readName, setName) <- useText ""
+  (readNotes, setNotes) <- useText ""
   (readTreeSel, setTreeSel) <- useText "0"
   (readTableSort, setTableSort) <- useTableSort (SortCol 0 SortAsc)
   debugOpen <- readDebug
@@ -114,6 +116,7 @@ demoUi = do
             accentHex <- readAccent
             theme <- readTheme
             name <- readName
+            notes <- readNotes
             treeSel <- readTreeSel
             tableSort <- readTableSort
             let accent = fromMaybe demoAccent (colorPickerFromHex accentHex)
@@ -125,6 +128,7 @@ demoUi = do
               kv "Accent" accentHex
             kv "Theme" theme
             kv "Name" (orDash name)
+            kv "Notes" (orDash notes)
             kv "Tree" treeSel
             kv "Table sort" (tableColumnLabel tableSort)
             kv "Table order" (tableSortDirText tableSort)
@@ -137,7 +141,7 @@ demoUi = do
               thumb (ImageId 2) "Checker"
               thumb (ImageId 3) "Stripe"
             sep
-            muted "Click widgets or type in Name."
+            muted "Click widgets or type in Name or Notes."
             muted "Esc closes About, then quits."
         card $ do
           boundedTabs Controls (T.pack . show) $ \case
@@ -159,6 +163,8 @@ demoUi = do
               setTheme (T.pack (show theme))
               (_, name) <- textInput "Name" ""
               setName name
+              (_, notes) <- textArea "Notes" "Edit me.\nSecond line."
+              setNotes notes
               sep
               heading "Popups & Menus"
               row (tight . gap 8 . fillW $ defaultLayout) $ do
@@ -181,9 +187,9 @@ demoUi = do
               heading "Tree"
               selTxt <- readTreeSel
               let sel0 =
-                    case reads (T.unpack selTxt) of
-                      [(n, "")] -> n
-                      _ -> 0
+                    case T.Read.decimal selTxt of
+                      Right (n, _) -> n
+                      Left _ -> 0
                   demoTree =
                     [ TreeItem
                         "src"
@@ -514,15 +520,8 @@ selftest = do
     clickPos ctx' env base about
     spansModal <- collectOverlayTextSpans ctx' base
     unless (hasText "Immediate-mode" spansModal) $ fail "selftest: About modal missing"
-    void
-      ( sdlDrawFrame
-          ctx'
-          demoUi
-          env
-          (base {inputKeys = inputKeysFromList [KeyEscape]})
-          False
-      )
-    void (sdlDrawFrame ctx' demoUi env base False)
+    drawOnce ctx' env (base {inputKeys = inputKeysFromList [KeyEscape]})
+    drawOnce ctx' env base
     spansClosed <- collectOverlayTextSpans ctx' base
     when (hasText "Immediate-mode" spansClosed) $ fail "selftest: Escape did not dismiss About"
     spansLatest <- collectTextSpans ctx'
@@ -538,7 +537,7 @@ spanCenter :: Rect -> V2
 spanCenter (Rect x y w h) = V2 (x + w / 2) (y + h / 2)
 
 hasText :: T.Text -> [DemoSpan] -> Bool
-hasText needle spans = any (\(_, txt, _, _, _) -> needle `T.isInfixOf` txt) spans
+hasText needle = any (\(_, txt, _, _, _) -> needle `T.isInfixOf` txt)
 
 spanLabel :: T.Text -> T.Text
 spanLabel txt = T.dropWhile (`elem` ['\x01', '\x02', '\x05']) (T.strip txt)
@@ -589,14 +588,13 @@ clickAt base pos =
       release = hold {inputMouseDown = False, inputMouseReleased = True}
    in (press, hold, release)
 
+drawOnce :: Context -> SdlEnv -> Input -> IO ()
+drawOnce ctx env inp = void (sdlDrawFrame ctx demoUi env inp False)
+
 clickPos :: Context -> SdlEnv -> Input -> V2 -> IO ()
 clickPos ctx env base pos = do
   let (press, hold, release) = clickAt base pos
-  void (sdlDrawFrame ctx demoUi env press False)
-  void (sdlDrawFrame ctx demoUi env hold False)
-  void (sdlDrawFrame ctx demoUi env release False)
-  void (sdlDrawFrame ctx demoUi env base False)
-  void (sdlDrawFrame ctx demoUi env base False)
+  mapM_ (drawOnce ctx env) [press, hold, release, base, base]
 
 clickTab :: Context -> SdlEnv -> Input -> T.Text -> IO ()
 clickTab ctx env base name = do
@@ -609,8 +607,4 @@ dragPos ctx env base from to = do
   let press = base {inputMousePos = from, inputMouseDown = True, inputMousePressed = True}
       hold = press {inputMousePressed = False, inputMousePos = to}
       release = hold {inputMouseDown = False, inputMouseReleased = True, inputMousePos = to}
-  void (sdlDrawFrame ctx demoUi env press False)
-  void (sdlDrawFrame ctx demoUi env hold False)
-  void (sdlDrawFrame ctx demoUi env release False)
-  void (sdlDrawFrame ctx demoUi env base False)
-  void (sdlDrawFrame ctx demoUi env base False)
+  mapM_ (drawOnce ctx env) [press, hold, release, base, base]

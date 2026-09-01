@@ -17,8 +17,6 @@ module NanoUI.Context
   , slotWinSize
   , boolInt
   , intBool
-  , pairList
-  , listPair
   , anySelectOpen
   , isSelectOpen
   , setSelectOpen
@@ -99,6 +97,7 @@ module NanoUI.Context
   , clearPopupConfigs
   , TextInputMenu (..)
   , TextInputDrag (..)
+  , TextFieldClickCell (..)
   , WindowResizeEdge (..)
   , WindowResizeDrag (..)
   , withClipboard
@@ -133,6 +132,7 @@ import NanoUI.Animation
 import NanoUI.Context.Internal
   ( Context (..)
   , TextInputDrag (..)
+  , TextFieldClickCell (..)
   , TextInputMenu (..)
   , WindowResizeDrag (..)
   , WindowResizeEdge (..)
@@ -233,8 +233,6 @@ import NanoUI.Store
   , closeSelects
   , intBool
   , isSelectOpen
-  , listPair
-  , pairList
   , setSelectOpen
   , slotAnchor
   , slotCursor

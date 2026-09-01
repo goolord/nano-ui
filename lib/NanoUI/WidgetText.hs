@@ -38,7 +38,6 @@ module NanoUI.WidgetText
   , tableStripeColor
   , tableHeaderLabel
   , tableHeaderDisplayText
-  , stripButtonBrackets
   , isCloseButtonText
   , isTabButtonText
   , isTableHeaderText
@@ -283,7 +282,7 @@ tableHeaderLabel terminal hdr = tableHeaderMarker <> hdr <> tableSortReserve ter
 
 tableHeaderDisplayText :: Bool -> Int -> Text -> Text
 tableHeaderDisplayText terminal styleIdx txt =
-  let full = T.drop 1 (stripButtonBrackets txt)
+  let full = T.drop 1 txt
       reserve = tableSortReserve terminal
       title = fromMaybe full (T.stripSuffix reserve full)
       blank = T.map (const ' ') reserve
@@ -341,33 +340,13 @@ isTabButtonStyle si = si .&. buttonFlagTab /= 0
 isTableHeaderStyle :: Int -> Bool
 isTableHeaderStyle si = si .&. buttonFlagTable /= 0
 
-{-# INLINE stripButtonBrackets #-}
-stripButtonBrackets :: Text -> Text
-stripButtonBrackets txt
-  | T.null txt = txt
-  | otherwise =
-      let !c0 = T.index txt 0
-       in if c0 == '[' || c0 == ' ' || c0 == '\t'
-            then
-              let !t = T.strip txt
-                  !len = T.length t
-               in if len >= 4
-                    && T.index t 0 == '['
-                    && T.index t 1 == ' '
-                    && T.index t (len - 1) == ']'
-                    && T.index t (len - 2) == ' '
-                    then T.strip (T.dropEnd 2 (T.drop 2 t))
-                    else txt
-            else txt
-
 {-# INLINE buttonFlags #-}
 buttonFlags :: Text -> (Bool, Bool, Bool)
 buttonFlags txt =
-  let lbl = stripButtonBrackets txt
-   in ( closeButtonMarker `T.isPrefixOf` lbl
-      , tabButtonMarker `T.isPrefixOf` lbl
-      , tableHeaderMarker `T.isPrefixOf` lbl
-      )
+  ( closeButtonMarker `T.isPrefixOf` txt
+  , tabButtonMarker `T.isPrefixOf` txt
+  , tableHeaderMarker `T.isPrefixOf` txt
+  )
 
 {-# INLINE isCloseButtonText #-}
 isCloseButtonText :: Text -> Bool
@@ -390,7 +369,7 @@ isTableHeaderText txt =
 {-# INLINE buttonDisplayTextFromFlags #-}
 buttonDisplayTextFromFlags :: (Bool, Bool, Bool) -> Text -> Text
 buttonDisplayTextFromFlags (isClose, isTab, isTable) txt
-  | isClose || isTab || isTable = T.drop 1 (stripButtonBrackets txt)
+  | isClose || isTab || isTable = T.drop 1 txt
   | otherwise = txt
 
 {-# INLINE closeButtonDisplayText #-}

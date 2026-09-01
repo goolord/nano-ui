@@ -49,6 +49,7 @@ module NanoUI.Testing
   , HostProfile (..)
   , markDirty
   , clearDirty
+  , clearMeasureCache
   , isDirty
   , setWakeLoop
   , DamageRequest (..)
@@ -147,6 +148,7 @@ import NanoUI.Context
   , atlasSnapshot
   , atlasTextureId
   , clearDirty
+  , clearMeasureCache
   , ctxTheme
   , DamageRequest (..)
   , damageFull
