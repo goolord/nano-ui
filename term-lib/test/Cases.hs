@@ -667,6 +667,7 @@ runReduceClickTest ctx failed = do
         onClick resp (emit Inc)
         label_ (T.pack (show (counterN m)))
         pure resp
+  _ <- runFrameReduce updateCounter ctx inp0 (Counter 0) view
   (resp, model0, _, _, _) <- runFrameReduce updateCounter ctx inp0 (Counter 0) view
   assertEq failed model0 (Counter 0)
   (modelR, msgs, dirty) <- runClickReduce updateCounter ctx inp0 (Counter 0) view (centerOf resp)

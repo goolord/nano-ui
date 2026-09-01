@@ -486,9 +486,9 @@ runScrolledOutClickImmunityTest ctx failed = do
   let inp0 = withInput 240 160
       ui = do
         (readHit, setHit) <- useText ""
-        (sid, b) <- scrollArea (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 60}) $
+        (sid, b) <- scrollArea (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 8}) $
                       column defaultLayout $ do
-                        mapM_ (\_ -> void (label "pad")) [(1 :: Int) .. 10]
+                        mapM_ (\_ -> void (label "pad")) [(1 :: Int) .. 40]
                         btn <- button "Target"
                         onClick btn (setHit "yes")
                         pure btn
@@ -500,7 +500,7 @@ runScrolledOutClickImmunityTest ctx failed = do
   case mScroll of
     Just (Rect sx sy sw sh) -> do
       let wheel = inp0 {inputMousePos = V2 (sx + sw / 2) (sy + sh / 2), inputScroll = V2 0 1}
-      forM_ [(1 :: Int) .. 20] $ \_ -> void (runFrame ctx wheel ui)
+      forM_ [(1 :: Int) .. 80] $ \_ -> void (runFrame ctx wheel ui)
       mBtn <- getPrevRect ctx (respId b)
       case mBtn of
         Just (Rect bx by bw bh) -> do
@@ -514,9 +514,9 @@ runScrolledOutHoverImmunityTest :: Context -> IORef Int -> IO ()
 runScrolledOutHoverImmunityTest ctx failed = do
   let inp0 = withInput 240 160
       ui = do
-        (sid, b) <- scrollArea (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 60}) $
+        (sid, b) <- scrollArea (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 8}) $
                       column defaultLayout $ do
-                        mapM_ (\_ -> void (label "pad")) [(1 :: Int) .. 10]
+                        mapM_ (\_ -> void (label "pad")) [(1 :: Int) .. 40]
                         btn <- button "Target"
                         pure btn
         pure (sid, b)
@@ -526,7 +526,7 @@ runScrolledOutHoverImmunityTest ctx failed = do
   case mScroll of
     Just (Rect sx sy sw sh) -> do
       let wheel = inp0 {inputMousePos = V2 (sx + sw / 2) (sy + sh / 2), inputScroll = V2 0 1}
-      forM_ [(1 :: Int) .. 20] $ \_ -> void (runFrame ctx wheel ui)
+      forM_ [(1 :: Int) .. 80] $ \_ -> void (runFrame ctx wheel ui)
       mBtn <- getPrevRect ctx target
       case mBtn of
         Just (Rect bx by bw bh) -> do
@@ -541,9 +541,9 @@ runScrolledOutCursorImmunityTest :: Context -> IORef Int -> IO ()
 runScrolledOutCursorImmunityTest ctx failed = do
   let inp0 = withInput 240 160
       ui = do
-        (sid, b) <- scrollArea (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 60}) $
+        (sid, b) <- scrollArea (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 8}) $
                       column defaultLayout $ do
-                        mapM_ (\_ -> void (label "pad")) [(1 :: Int) .. 10]
+                        mapM_ (\_ -> void (label "pad")) [(1 :: Int) .. 40]
                         btn <- button "Target"
                         pure btn
         pure (sid, b)
@@ -552,7 +552,7 @@ runScrolledOutCursorImmunityTest ctx failed = do
   case mScroll of
     Just (Rect sx sy sw sh) -> do
       let wheel = inp0 {inputMousePos = V2 (sx + sw / 2) (sy + sh / 2), inputScroll = V2 0 1}
-      forM_ [(1 :: Int) .. 20] $ \_ -> void (runFrame ctx wheel ui)
+      forM_ [(1 :: Int) .. 80] $ \_ -> void (runFrame ctx wheel ui)
       mBtn <- getPrevRect ctx (respId b)
       case mBtn of
         Just (Rect bx by bw bh) -> do
