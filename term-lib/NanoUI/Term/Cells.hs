@@ -112,6 +112,16 @@ cellRows cs =
 rasterize :: Int -> Int -> DrawData -> [(Rect, Text, Color, Color, Rect)] -> IO Cells
 rasterize width height drawData spans = rasterizeLayered width height drawData spans []
 
+newBlankCellArray :: Int -> Int -> IO (MutablePrimArray (PrimState IO) Word32, Int, Int)
+newBlankCellArray width height = do
+  let w = max 1 width
+      h = max 1 height
+      len = w * h * 3
+  arr <- newPrimArray len
+  setPrimArray arr 0 len 0
+  fillBlanks arr len
+  pure (arr, w, h)
+
 rasterizeLayered ::
   Int ->
   Int ->
@@ -120,12 +130,7 @@ rasterizeLayered ::
   [(Rect, Text, Color, Color, Rect)] ->
   IO Cells
 rasterizeLayered width height drawData baseSpans overlaySpans = do
-  let w = max 1 width
-      h = max 1 height
-      len = w * h * 3
-  arr <- newPrimArray len
-  setPrimArray arr 0 len 0
-  fillBlanks arr len
+  (arr, w, h) <- newBlankCellArray width height
   forDrawCmdsInLayer_ LayerBackground drawData (applyCmd arr w h drawData)
   forDrawCmdsInLayer_ LayerContent drawData (applyCmd arr w h drawData)
   -- Text spans after content quads so scroll tracks do not erase box rules.
@@ -146,12 +151,7 @@ rasterizeLayeredArena ::
   SpanArena ->
   IO Cells
 rasterizeLayeredArena width height drawData baseArena overlayArena = do
-  let w = max 1 width
-      h = max 1 height
-      len = w * h * 3
-  arr <- newPrimArray len
-  setPrimArray arr 0 len 0
-  fillBlanks arr len
+  (arr, w, h) <- newBlankCellArray width height
   let stamp r t fg bg' c = stampSpan arr w h (r, t, fg, bg', c)
   forDrawCmdsInLayer_ LayerBackground drawData (applyCmd arr w h drawData)
   forDrawCmdsInLayer_ LayerContent drawData (applyCmd arr w h drawData)

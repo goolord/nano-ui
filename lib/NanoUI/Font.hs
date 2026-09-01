@@ -415,11 +415,7 @@ wrapTextLinesIO lineW _ txt maxW =
   concat <$> mapM (\para -> wrapParagraphIO lineW para maxW) (T.lines txt)
 
 wrapParagraphWith :: (Text -> Float) -> Text -> Float -> [Text]
-wrapParagraphWith lineW para maxW
-  | maxW <= 0 = []
-  | T.null para = [""]
-  | T.any (== ' ') para = wrapWordsWith lineW (T.words para) maxW []
-  | otherwise = reverse (charLinesWith lineW maxW para [])
+wrapParagraphWith lineW = wrapParagraphFit (takeWidthWith lineW) lineW
 
 wrapParagraphFit :: (Float -> Text -> (Text, Text)) -> (Text -> Float) -> Text -> Float -> [Text]
 wrapParagraphFit fit lineW para maxW
