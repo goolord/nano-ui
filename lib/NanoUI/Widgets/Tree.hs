@@ -4,6 +4,7 @@ module NanoUI.Widgets.Tree (TreeItem (..), tree) where
 
 import Control.Monad (when)
 import Data.IORef (writeIORef)
+import Data.List (unfoldr)
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
@@ -11,19 +12,88 @@ import qualified Data.IntSet as IS
 import NanoUI.Context (Context (..), getFocusId, intKey, registerFocusable)
 import NanoUI.Font (treeChevronRect)
 import NanoUI.Frame.Hit (scrollHitRect)
+import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (inputMousePos)
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
 import NanoUI.Style (defaultLayout, fillW, gap, tight)
 import NanoUI.Types (Rect (..), rectContains)
 import NanoUI.WidgetText (treeEncodeStyle)
-import NanoUI.Widgets.Behavior (ensureInt, ensureIntSet, putInt, putIntSet, useKeyNav)
-import NanoUI.Widgets.Combinators (countForest, forestParents, selectableItem, treeKeyNav, visibleForest)
+import NanoUI.Widgets.Behavior (KeyNav (..), ensureInt, ensureIntSet, putInt, putIntSet, useKeyNav)
+import NanoUI.Widgets.Combinators (selectableItem)
 import NanoUI.Widgets.Layout (column)
 import NanoUI.Widgets.Node (Response (..), setChanged, tagContainer)
 
 data TreeItem = TreeItem {treeItemLabel :: !Text, treeItemChildren :: ![TreeItem]}
   deriving (Eq, Show)
+
+indexForest :: (n -> [n]) -> [n] -> [(Int, Int, n)]
+indexForest kids items = snd (go 0 0 items)
+  where
+    go next _ [] = (next, [])
+    go next depth (x : xs) =
+      let (n1, ks) = go (next + 1) (depth + 1) (kids x)
+          (n2, rs) = go n1 depth xs
+       in (n2, (next, depth, x) : ks ++ rs)
+
+visibleForest :: (n -> [n]) -> IS.IntSet -> [n] -> [(Int, Int, Bool, n)]
+visibleForest kids expanded items =
+  unfoldr step (indexForest kids items)
+  where
+    step [] = Nothing
+    step ((idx, depth, x) : rest) =
+      let has = not (null (kids x))
+          pending =
+            if has && not (IS.member idx expanded)
+              then dropWhile (\(_, d, _) -> d > depth) rest
+              else rest
+       in Just ((idx, depth, has, x), pending)
+
+forestParents :: (n -> [n]) -> [n] -> [Int]
+forestParents kids items =
+  [idx | (idx, _, x) <- indexForest kids items, not (null (kids x))]
+
+countForest :: (n -> [n]) -> [n] -> Int
+countForest kids = foldl' (\n x -> n + 1 + countForest kids (kids x)) 0
+
+treeKeyNav ::
+  KeyNav ->
+  [(Int, Int, Bool, a)] ->
+  [Response] ->
+  WidgetId ->
+  Int ->
+  IS.IntSet ->
+  (Int, IS.IntSet, Maybe WidgetId)
+treeKeyNav nav rows resps focus selected expanded
+  | hashWidgetId focus == 0 || not moving = (selected, expanded, Nothing)
+  | otherwise = case [(i, trow) | (i, (trow, r)) <- zip [0 ..] (zip rows resps), rawRespId r == focus] of
+      ((pos, trow) : _) -> step pos trow
+      [] -> (selected, expanded, Nothing)
+ where
+  moving = knUp nav || knDown nav || knLeft nav || knRight nav || knEnter nav || knSpace nav
+  n = length rows
+  widAt i = rawRespId (resps !! i)
+  idxAt i = let (idx, _, _, _) = rows !! i in idx
+  wantToggle = knEnter nav || knSpace nav
+  parentOf idx =
+    case break (\(i, _, _, _) -> i == idx) rows of
+      (before, (_, destDepth, _, _) : _) ->
+        case [p | (p, d, _, _) <- reverse before, d < destDepth] of
+          (p : _) -> p
+          [] -> idx
+      _ -> idx
+  step pos (nodeIdx, depth, hasKids, _)
+    | knDown nav, pos + 1 < n = let p = pos + 1 in (idxAt p, expanded, Just (widAt p))
+    | knUp nav, pos > 0 = let p = pos - 1 in (idxAt p, expanded, Just (widAt p))
+    | wantToggle, hasKids = (selected, toggle nodeIdx expanded, Nothing)
+    | knRight nav, hasKids, not (IS.member nodeIdx expanded) = (selected, IS.insert nodeIdx expanded, Nothing)
+    | knLeft nav, hasKids, IS.member nodeIdx expanded = (selected, IS.delete nodeIdx expanded, Nothing)
+    | knLeft nav, depth > 0 =
+        let pidx = parentOf nodeIdx
+         in case [i | (i, (p, _, _, _)) <- zip [0 ..] rows, p == pidx] of
+              (p : _) -> (pidx, expanded, Just (widAt p))
+              [] -> (pidx, expanded, Nothing)
+    | otherwise = (selected, expanded, Nothing)
 
 toggle :: Int -> IS.IntSet -> IS.IntSet
 toggle idx s = if IS.member idx s then IS.delete idx s else IS.insert idx s
