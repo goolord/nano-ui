@@ -239,21 +239,24 @@ demoUi = do
               kv "Order" (tableSortDirText nextSort)
               kv "Hidden" (tableHiddenLabel (tableHiddenIndices tableResp))
             Plots -> do
-              ps <- uiPlotStyle
               heading "Plots"
-              muted "diagrams-lib paths lower to nano-ui strokes and fills."
+              muted "Auto ticks, shared scales, and decimation."
               column (tight . gap 14 . fillW $ defaultLayout) $ do
                 column (tight . gap 4 . fillW $ defaultLayout) $ do
-                  muted "Sine"
-                  void $ diagram (fillW defaultLayout) (sinePlot ps)
+                  muted "Sine + cosine"
+                  void $ plot (fillW defaultLayout) sineCosineChart
                 column (tight . gap 4 . fillW $ defaultLayout) $ do
                   muted "Weekly counts"
-                  void $ diagram (fillW defaultLayout) (barChart ps)
+                  void $ barChart (fillW defaultLayout) weeklyBars
                 column (tight . gap 4 . fillW $ defaultLayout) $ do
                   muted "Sleep vs focus"
-                  void $ diagram (fillW defaultLayout) (xyChart ps)
+                  void $ plot (fillW defaultLayout) sleepFocusChart
+                column (tight . gap 4 . fillW $ defaultLayout) $ do
+                  muted "Area"
+                  void $ areaChart (fillW defaultLayout) areaDemo
                 column (tight . gap 4 . fillW $ defaultLayout) $ do
                   muted "Drawing"
+                  ps <- uiPlotStyle
                   void $ diagram (fillW $ defaultLayout {layoutMaxH = 200}) (drawingSample ps)
             Diagnostics -> do
               heading "Diagnostics"
@@ -274,32 +277,29 @@ demoUi = do
         clickButton "Close" (setAbout False)
   onClick aboutResp (setAbout False)
 
-sinePlot :: PlotStyle -> Diagram B
-sinePlot ps =
-  labeledChart
-    ps
-    [(0, "0"), (0.5, "π"), (1, "2π")]
-    [(0, "-1"), (0.5, "0"), (1, "1")]
-    "x"
-    "sin"
-    (legendLine ps "sin(x)")
-    (inkLine ps [(x, sin x) | x <- [0, 0.1 .. (2 * pi)]])
+sineCosineChart :: Chart
+sineCosineChart =
+  Chart
+    { chartTitle = Just "Trig"
+    , chartXTitle = Just "x"
+    , chartYTitle = Just "y"
+    , chartSeries =
+        [ line "sin(x)" [(x, sin x) | x <- [0, 0.05 .. (2 * pi)]]
+        , line "cos(x)" [(x, cos x) | x <- [0, 0.05 .. (2 * pi)]]
+        ]
+    , chartLegend = LegendRight
+    , chartGrid = GridBoth
+    , chartDecimate = True
+    }
 
-barChart :: PlotStyle -> Diagram B
-barChart ps =
-  labeledChart
-    ps
-    [ (0.1, "Mon")
-    , (0.3, "Tue")
-    , (0.5, "Wed")
-    , (0.7, "Thu")
-    , (0.9, "Fri")
-    ]
-    [(0, "0"), (0.5, "4"), (1, "7")]
-    "day"
-    "count"
-    (legendFill ps "count")
-    (fillBars ps [(1, 2), (2, 5), (3, 4), (4, 7), (5, 3)])
+weeklyBars :: [(T.Text, Double)]
+weeklyBars =
+  [ ("Mon", 2)
+  , ("Tue", 5)
+  , ("Wed", 4)
+  , ("Thu", 7)
+  , ("Fri", 3)
+  ]
 
 -- Hours slept (X) vs focus score (Y).
 sleepFocus :: [(Double, Double)]
@@ -314,23 +314,23 @@ sleepFocus =
   , (9.0, 6.5)
   ]
 
-xyChart :: PlotStyle -> Diagram B
-xyChart ps =
-  labeledChart
-    ps
-    [ (dataUnit 4 9 4, "4")
-    , (dataUnit 4 9 6, "6")
-    , (dataUnit 4 9 8, "8")
-    , (dataUnit 4 9 9, "9")
-    ]
-    [ (dataUnit 3 8.5 3, "3")
-    , (dataUnit 3 8.5 6, "6")
-    , (dataUnit 3 8.5 8.5, "8.5")
-    ]
-    "hours slept"
-    "focus"
-    (legendMarks ps "focus")
-    (inkLine ps sleepFocus <> inkScatter ps sleepFocus)
+sleepFocusChart :: Chart
+sleepFocusChart =
+  Chart
+    { chartTitle = Just "Sleep vs focus"
+    , chartXTitle = Just "hours slept"
+    , chartYTitle = Just "focus"
+    , chartSeries =
+        [ scatter "focus" sleepFocus
+        , line "trend" sleepFocus
+        ]
+    , chartLegend = LegendRight
+    , chartGrid = GridBoth
+    , chartDecimate = False
+    }
+
+areaDemo :: [(Double, Double)]
+areaDemo = [(x, abs (sin x)) | x <- [0, 0.05 .. (2 * pi)]]
 
 drawingSample :: PlotStyle -> Diagram B
 drawingSample ps =
