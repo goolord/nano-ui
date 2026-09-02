@@ -39,9 +39,9 @@ import NanoUI.Frame.Chrome
   , textInputMenuItemPadX
   , textInputMenuOuterPad
   )
-import NanoUI.Frame.CursorKind (UiCursorKind (..))
+import NanoUI.Input (UiCursorKind (..))
 import NanoUI.Frame.Hit (widgetOverlayAllowed)
-import NanoUI.Host (HostProfile, isCellHost)
+import NanoUI.Types (HostProfile, isCellHost)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input
   ( Input (..)

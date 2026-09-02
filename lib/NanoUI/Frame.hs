@@ -42,7 +42,7 @@ import NanoUI.Context
   , markDirty
   , tickAnimations
   )
-import NanoUI.Context.Internal (beginFrameModal)
+import NanoUI.Context (beginFrameModal)
 import NanoUI.Damage (updatePrevRects, writeDamage)
 import NanoUI.Draw
   ( DrawData

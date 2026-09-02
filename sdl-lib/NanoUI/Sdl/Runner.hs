@@ -41,7 +41,7 @@ import NanoUI.Testing
   , askHost
   , uiIO
   )
-import NanoUI.Sdl.Context (newSdlContext)
+import NanoUI.Testing (newPixelContext)
 import NanoUI.Sdl.Session (runSdlSession)
 import NanoUI.Sdl.Debug
   ( SdlDebugSnapshot (..)
@@ -60,7 +60,7 @@ import NanoUI.Sdl.Display
   , retainDestroy
   , windowToLogicalCoords
   )
-import NanoUI.Sdl.Batch (withRenderBatch)
+import NanoUI.Sdl.Render (withRenderBatch)
 import NanoUI.Sdl.Font (glyphAtlasTexture)
 import NanoUI.Sdl.Window (SdlEnv (..))
 import Foreign.Ptr (Ptr, nullPtr)
@@ -68,6 +68,9 @@ import SDL3.Sys.Bindgen.Render (SDL_Renderer)
 import qualified NanoUI.Sdl.Image as SdlImage
 import NanoUI.Sdl.Render (renderDrawDataPass, snapDamage)
 import SDL3.Sys.Render (renderPresentSafe)
+
+newSdlContext :: IO Context
+newSdlContext = newPixelContext
 
 allLayersArr :: SmallArray Layer
 allLayersArr = smallArrayFromListN 4 [LayerBackground, LayerContent, LayerOverlay, LayerChrome]

@@ -33,9 +33,9 @@ import NanoUI.Testing
   , textInputEditActive
   )
 import NanoUI.Sdl.Debug (noteLoop, noteSkip, takeDebugLive)
-import NanoUI.Sdl.Event (SdlEvent (..))
 import NanoUI.Sdl.Input
-  ( applyEvent
+  ( SdlEvent (..)
+  , applyEvent
   , clearEphemeral
   , isHardQuit
   , isHardQuitInput

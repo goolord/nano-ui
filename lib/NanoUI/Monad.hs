@@ -23,6 +23,10 @@ module NanoUI.Monad
   , damageRectNow
   , damageGroupNow
   , damageFullNow
+  , FrameMsg (..)
+  , decodeMessages
+  , reduceMessages
+  , reduceUpdates
   )
 where
 
@@ -47,7 +51,20 @@ import Effectful.Dispatch.Static
   , getStaticRep
   , unsafeEff_
   )
-import NanoUI.Context (Context (..), askHostIO, damageFull, damageKey, damagePeers, damageRect, damageWidget, pushMessage)
+import NanoUI.Context
+  ( Context (..)
+  , FrameMsg (..)
+  , askHostIO
+  , damageFull
+  , damageKey
+  , damagePeers
+  , damageRect
+  , damageWidget
+  , decodeMessages
+  , pushMessage
+  , reduceMessages
+  , reduceUpdates
+  )
 import NanoUI.Types (DamageBounds, Rect)
 import NanoUI.Id
   ( IdContext (IdContext, siblingId)
@@ -58,7 +75,6 @@ import NanoUI.Id
   , scopeTag
   )
 import NanoUI.Input (Input)
-import NanoUI.Messages (FrameMsg (..))
 
 type NanoUI = Eff '[Ui, IOE]
 

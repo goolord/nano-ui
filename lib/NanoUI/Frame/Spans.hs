@@ -20,7 +20,7 @@ module NanoUI.Frame.Spans
 import Control.Monad (unless, when)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Text as T
-import NanoUI.ColorPicker
+import NanoUI.Widgets.ColorPicker
   ( ColorPickerGeom (..)
   , colorPickerDefaultColor
   , colorPickerGeom
@@ -52,7 +52,7 @@ import NanoUI.Font
   , wrapTextLines
   , wrapTextLinesIO
   )
-import NanoUI.Host (HostProfile, isCellHost)
+import NanoUI.Types (HostProfile, isCellHost)
 import NanoUI.Icons (iconScrollDown, iconScrollUp, terminalPaintColumns)
 import NanoUI.Input (Input)
 import NanoUI.Layout.Arena
@@ -102,7 +102,7 @@ import NanoUI.Frame.Chrome
   , textInputValue
   , widgetVisualStyle
   )
-import NanoUI.Frame.Clip
+import NanoUI.Frame.Scroll.Geometry
   ( padContentClip
   , scrollContentClip
   , tagClippedSpans

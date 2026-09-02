@@ -345,7 +345,7 @@ import NanoUI.Monad
   , uiIO
   , withKey
   )
-import NanoUI.Spring
+import NanoUI.Animation
   ( SpringParams (..)
   , presetBouncy
   , presetSmooth

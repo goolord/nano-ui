@@ -14,7 +14,7 @@ import Data.Primitive.SmallArray (SmallArray, smallArrayFromList)
 import NanoUI
 import NanoUI.Backend.Sdl (RgbaImage (..), SdlDebugSnapshot (..), askSdlDebug, SdlOptions (..), defaultSdlOptions, runSdlApp)
 import NanoUI.Testing (Context, collectOverlayTextSpans, collectTextSpans, registerImage)
-import NanoUI.Testing.Sdl (SdlEnv, newSdlContext, sdlDrawFrame, syncDisplay, withSdl)
+import NanoUI.Backend.Sdl (SdlEnv, newSdlContext, sdlDrawFrame, syncDisplay, withSdl)
 import System.Console.GetOpt
   ( ArgDescr (ReqArg)
   , ArgOrder (Permute)

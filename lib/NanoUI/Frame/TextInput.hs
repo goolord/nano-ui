@@ -47,8 +47,8 @@ import NanoUI.Font
   , layoutLineHeight
   , widgetContentInset
   )
-import NanoUI.Frame.Clip (padTextClipRect)
-import NanoUI.Frame.CursorKind (UiCursorKind (..))
+import NanoUI.Frame.Scroll.Geometry (padTextClipRect)
+import NanoUI.Input (UiCursorKind (..))
 import NanoUI.Frame.TextEdit qualified as FE
 import NanoUI.Frame.TextEdit
   ( closeTextEditMenuOnEscape
@@ -61,7 +61,7 @@ import NanoUI.Frame.TextEdit
   , textEditMenuCursorKind
   )
 import NanoUI.Frame.Chrome (textInputFocused, textInputValue)
-import NanoUI.Host (HostProfile, isCellHost)
+import NanoUI.Types (HostProfile, isCellHost)
 import NanoUI.Id (WidgetId)
 import NanoUI.Layout.Arena (NodeIdx, NodeType (NodeTextInput), arenaCount, getNodeType, getRect, getText, getWidgetId)
 import NanoUI.Input (Input)

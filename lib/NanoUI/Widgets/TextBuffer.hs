@@ -45,6 +45,8 @@ module NanoUI.Widgets.TextBuffer
   ) where
 
 import qualified Data.Text as T
+import NanoUI.Types (clamp)
+import NanoUI.Font (tabSentinelChar)
 import qualified Data.Text.Zipper as TZ
 import qualified Data.Text.Zipper.Generic.Words as TZW
 
@@ -115,13 +117,10 @@ withZipper f (TextBuffer z _) =
   let z' = f z
   in TextBuffer z' (zipperCol z')
 
-clamp :: Int -> Int -> Int -> Int
-clamp lo hi x = max lo (min hi x)
-
 -- | text-zipper drops non-printables, including Tab. Store Tab as a printable
 -- stand-in inside the zipper and map it back at the public Text boundary.
 tabSentinel :: Char
-tabSentinel = '\x2409'
+tabSentinel = tabSentinelChar
 
 encodeTabs :: T.Text -> T.Text
 encodeTabs = T.replace "\t" (T.singleton tabSentinel)

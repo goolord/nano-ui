@@ -35,7 +35,7 @@ import NanoUI.Context
   )
 import NanoUI.Draw (pushRect, pushRoundedRect, pushText)
 import NanoUI.Font (FontMetrics, centeredTextY, hasMonoFontMarker, stripMonoFontMarker, widgetContentInset)
-import NanoUI.Host (HostProfile, isCellHost)
+import NanoUI.Types (HostProfile, isCellHost)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), Key (..), foldInputKeys, inputKeys, inputMouseDown, inputMousePos, inputMousePressed)
 import NanoUI.Layout.Arena (NodeType (NodeSelect), arenaCount, findNodeRevM, getNodeType, getRect, getText, getWidgetId)

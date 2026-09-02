@@ -31,7 +31,7 @@ import Effectful (Eff, type (:>))
 import qualified Data.IntMap.Strict as IM
 import NanoUI.Context (Context (..), getPrevRect, getStore, intKey, markDirty)
 import NanoUI.Font (monoFontMarker, scrollBarGutter)
-import NanoUI.Host (isCellHost)
+import NanoUI.Types (isCellHost)
 import NanoUI.Input (inputMouseDown, inputMousePos)
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)

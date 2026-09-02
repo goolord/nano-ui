@@ -46,7 +46,7 @@ import NanoUI.Context
   )
 import NanoUI.Draw (DrawArena, pushRect, pushRoundedRect, pushRoundedStroke)
 import NanoUI.Font (hasHeadingMarker, hasMutedMarker, stripWidgetMarkers)
-import NanoUI.Host (HostProfile, isCellHost)
+import NanoUI.Types (HostProfile, isCellHost)
 import NanoUI.Icons (iconSelectClosed, iconSelectOpen)
 import NanoUI.Id (hashWidgetId)
 import NanoUI.Layout.Arena
@@ -91,7 +91,7 @@ import NanoUI.Style
   , themePanel
   , themeWindow
   )
-import NanoUI.ColorPicker (colorPickerDefaultColor, widgetStoreColor)
+import NanoUI.Widgets.ColorPicker (colorPickerDefaultColor, widgetStoreColor)
 import NanoUI.Types (Color (..), Rect (..), colorRGBA, colorR, colorG, colorB, clamp01, lerpColor, rectH, rectW, rectX, rectY)
 
 textAreaStoredValue :: Context -> NodeIdx -> IO Text

@@ -14,6 +14,7 @@ module NanoUI.Types
   , colorFromWord32
   , rgbToHsv
   , hsvToRgb
+  , clamp
   , clamp01
   , lerpColor
   , colorLuminance
@@ -38,6 +39,8 @@ module NanoUI.Types
   , v2Sub
   , PopupAnchor (..)
   , PopupPlacement (..)
+  , HostProfile (..)
+  , isCellHost
   ) where
 
 import Data.Bits (shiftL, shiftR, (.&.), (.|.))
@@ -104,9 +107,13 @@ colorA (Color w) = fromIntegral (w .&. 0xFF)
 colorFromWord32 :: Word32 -> Color
 colorFromWord32 = Color
 
+{-# INLINE clamp #-}
+clamp :: Ord a => a -> a -> a -> a
+clamp lo hi x = max lo (min hi x)
+
 {-# INLINE clamp01 #-}
 clamp01 :: Float -> Float
-clamp01 x = max 0 (min 1 x)
+clamp01 x = clamp 0 1 x
 
 {-# INLINE rgbToHsv #-}
 rgbToHsv :: Color -> (Float, Float, Float)
@@ -332,3 +339,14 @@ data PopupPlacement
   | PlacementAtCursor
   | PlacementAuto
   deriving (Eq, Show)
+
+-- Pixel hosts (SDL, headless). Cell hosts (terminal).
+data HostProfile
+  = PixelHost
+  | CellHost
+  deriving (Eq, Show)
+
+{-# INLINE isCellHost #-}
+isCellHost :: HostProfile -> Bool
+isCellHost CellHost = True
+isCellHost PixelHost = False

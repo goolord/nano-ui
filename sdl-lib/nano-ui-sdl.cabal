@@ -62,17 +62,13 @@ library
     import:           warnings
     exposed-modules:
         NanoUI.Backend.Sdl
-        NanoUI.Testing.Sdl
     other-modules:
-        NanoUI.Sdl.Context
         NanoUI.Sdl.Session
         NanoUI.Sdl.Runner
-        NanoUI.Sdl.Batch
         NanoUI.Sdl.Clipboard
         NanoUI.Sdl.Cursor
         NanoUI.Sdl.Debug
         NanoUI.Sdl.Display
-        NanoUI.Sdl.Event
         NanoUI.Sdl.Font
         NanoUI.Sdl.Image
         NanoUI.Sdl.Input

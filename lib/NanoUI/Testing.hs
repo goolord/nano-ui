@@ -194,7 +194,7 @@ import NanoUI.Context
   , withTheme
   , wrapMeasureCache
   )
-import NanoUI.Context.Internal (newContext, newPixelHostContext)
+import NanoUI.Context (newContext, newPixelHostContext)
 import NanoUI.Frame.SpanArena (SpanArena, foldSpanArena, spanArenaCount)
 import NanoUI.Draw
   ( DrawCmd (..)
@@ -237,7 +237,7 @@ import NanoUI.Frame
   , uiCursorKind
   , widgetNodeCount
   )
-import NanoUI.Host (HostProfile (..))
+import NanoUI.Types (HostProfile (..))
 import NanoUI.Icons
   ( iconChecked
   , iconClose

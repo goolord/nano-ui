@@ -26,7 +26,7 @@ import Data.IORef (readIORef)
 import Data.Maybe (isJust)
 import qualified Data.HashTable.IO as HT
 import NanoUI.Context (Context (..), getPrevRect, getScrollOffset, getPrevClipRect)
-import NanoUI.Host (HostProfile, isCellHost)
+import NanoUI.Types (HostProfile, isCellHost)
 import NanoUI.Id (WidgetId)
 import NanoUI.Layout.Arena
   ( DirTag (..)

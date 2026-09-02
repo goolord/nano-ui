@@ -1,6 +1,11 @@
 module NanoUI.Animation
   ( Ease (..)
   , Animation (..)
+  , SpringParams (..)
+  , presetBouncy
+  , presetSmooth
+  , presetStiff
+  , springEps
   , applyEase
   , approxEq
   , animInProgress
@@ -12,8 +17,101 @@ module NanoUI.Animation
 
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IM
-import NanoUI.Ease (evaluateBezier)
-import NanoUI.Spring (SpringParams, springEps, stepSpring)
+
+-- Cubic Bezier easing. X control points are clamped to [0, 1] (CSS-style).
+-- t=0 and t=1 return the endpoints so Newton cannot pop the first/last frame.
+evaluateBezier :: Float -> Float -> Float -> Float -> Float -> Float
+evaluateBezier x1 y1 x2 y2 t0
+  | t0 <= 0 = 0
+  | t0 >= 1 = 1
+  | otherwise =
+      let p1 = max 0 (min 1 x1)
+          p2 = max 0 (min 1 x2)
+          tau = solveBezierX p1 p2 t0 0.5 0
+       in sampleBezier y1 y2 tau
+
+sampleBezier :: Float -> Float -> Float -> Float
+sampleBezier p1 p2 u =
+  let one = 1 - u
+   in 3 * one * one * u * p1 + 3 * one * u * u * p2 + u * u * u
+
+bezierDeriv :: Float -> Float -> Float -> Float
+bezierDeriv p1 p2 u =
+  let one = 1 - u
+   in 3 * one * one * p1 + 6 * one * u * (p2 - p1) + 3 * u * u * (1 - p2)
+
+solveBezierX :: Float -> Float -> Float -> Float -> Int -> Float
+solveBezierX p1 p2 targetT estimate iter
+  | iter >= 8 = estimate
+  | otherwise =
+      let currentX = sampleBezier p1 p2 estimate
+          errorVal = currentX - targetT
+       in if abs errorVal < 1e-4
+            then estimate
+            else
+              let deriv = bezierDeriv p1 p2 estimate
+                  safeDeriv =
+                    if abs deriv < 1e-6
+                      then if deriv >= 0 then 1e-6 else -1e-6
+                      else deriv
+                  nextEst = max 0 (min 1 (estimate - errorVal / safeDeriv))
+               in solveBezierX p1 p2 targetT nextEst (iter + 1)
+
+data SpringParams = SpringParams
+  { springStiffness :: {-# UNPACK #-} !Float
+  , springDamping :: {-# UNPACK #-} !Float
+  , springMass :: {-# UNPACK #-} !Float
+  }
+  deriving (Eq, Show)
+
+presetBouncy :: SpringParams
+presetBouncy = SpringParams {springStiffness = 180, springDamping = 12, springMass = 1}
+
+presetSmooth :: SpringParams
+presetSmooth = SpringParams {springStiffness = 120, springDamping = 20, springMass = 1}
+
+presetStiff :: SpringParams
+presetStiff = SpringParams {springStiffness = 300, springDamping = 30, springMass = 1}
+
+springEps :: Float
+springEps = 1e-3
+
+maxSubstep :: Float
+maxSubstep = 1 / 30
+
+maxSubsteps :: Int
+maxSubsteps = 32
+
+stepSpring :: SpringParams -> Float -> Float -> Float -> Float -> (Float, Float)
+stepSpring params x v target dt
+  | dt <= 0 = (x, v)
+  | otherwise = go x v dt 0
+  where
+    go pos vel remain n
+      | remain <= 1e-8 || n >= maxSubsteps = (pos, vel)
+      | otherwise =
+          let h = min maxSubstep remain
+              (pos', vel') = rk4 params pos vel target h
+           in go pos' vel' (remain - h) (n + 1)
+
+rk4 :: SpringParams -> Float -> Float -> Float -> Float -> (Float, Float)
+rk4 params x v xTarget dt =
+  let k1v = accel x v
+      k1x = v
+      k2v = accel (x + 0.5 * dt * k1x) (v + 0.5 * dt * k1v)
+      k2x = v + 0.5 * dt * k1v
+      k3v = accel (x + 0.5 * dt * k2x) (v + 0.5 * dt * k2v)
+      k3x = v + 0.5 * dt * k2v
+      k4v = accel (x + dt * k3x) (v + dt * k3v)
+      k4x = v + dt * k3v
+      xNext = x + (dt / 6) * (k1x + 2 * k2x + 2 * k3x + k4x)
+      vNext = v + (dt / 6) * (k1v + 2 * k2v + 2 * k3v + k4v)
+   in (xNext, vNext)
+  where
+    k = max 0 (springStiffness params)
+    c = max 0 (springDamping params)
+    m = max 1e-6 (springMass params)
+    accel pos vel = (-k * (pos - xTarget) - c * vel) / m
 
 data Ease
   = EaseLinear

@@ -34,7 +34,7 @@ import NanoUI.Context
   , setStore
   , startAnimation
   )
-import NanoUI.Host (isCellHost)
+import NanoUI.Types (isCellHost)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input
   ( Input (..)

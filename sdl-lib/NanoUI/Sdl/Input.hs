@@ -2,7 +2,8 @@
 {-# LANGUAGE NoFieldSelectors #-}
 
 module NanoUI.Sdl.Input
-  ( pollEvents
+  ( SdlEvent (..)
+  , pollEvents
   , waitEvent
   , waitEventTimeout
   , applyEvent
@@ -15,13 +16,13 @@ module NanoUI.Sdl.Input
 import Data.Bits ((.&.))
 import Data.Primitive.SmallArray
   ( SmallArray
-  , cloneSmallArray
   , emptySmallArray
   , indexSmallArray
   , sizeofSmallArray
   , smallArrayFromListN
   )
 import qualified Data.Text as T
+import Data.Text (Text)
 import Data.Word (Word32)
 import Foreign.C.String (peekCString)
 import Foreign.C.Types (CFloat)
@@ -37,11 +38,11 @@ import NanoUI
   , Modifiers (..)
   , V2 (..)
   , appendInputKey
-  , emptyInputKeys
   , v2Add
   )
+import NanoUI.Input (clearEphemeral, isHardQuitInput)
+import qualified NanoUI.Input as Inp
 import NanoUI.Sdl.Display (readRefreshEventType)
-import NanoUI.Sdl.Event (SdlEvent (..))
 import SDL3.Sys.Bindgen.Events
   ( SDL_Event (..)
   , SDL_KeyboardEvent
@@ -68,6 +69,21 @@ import SDL3.Sys.Bindgen.Keycode
 import SDL3.Sys.Bindgen.Mouse (sDL_BUTTON_LEFT, sDL_BUTTON_RIGHT)
 import SDL3.Sys.Bindgen.Stdinc (Sint32 (..), Uint32 (..))
 import SDL3.Sys.Keyboard (getModStateSafe)
+
+data SdlEvent
+  = EvQuit
+  | EvResize Int Int
+  | EvDisplayScale
+  | EvKey Key Modifiers
+  | EvText Text Modifiers
+  | EvMouseMotion V2 Modifiers
+  | EvMousePress V2 Modifiers Int
+  | EvMouseRelease V2 Modifiers
+  | EvMouseRightPress V2 Modifiers
+  | EvMouseRightRelease V2 Modifiers
+  | EvScroll V2
+  | EvRefresh
+  deriving (Eq, Show)
 
 singletonEv :: SdlEvent -> SmallArray SdlEvent
 singletonEv ev = smallArrayFromListN 1 [ev]
@@ -246,19 +262,6 @@ isRepeatableKey _ = False
 mousePos :: Float -> Float -> V2
 mousePos x y = V2 x y
 
-clearEphemeral :: Input -> Input
-clearEphemeral inp =
-  inp
-    { inputKeys = emptyInputKeys
-    , inputChars = ""
-    , inputMousePressed = False
-    , inputMouseReleased = False
-    , inputMouseRightPressed = False
-    , inputMouseRightReleased = False
-    , inputMouseClicks = 1
-    , inputScroll = V2 0 0
-    }
-
 applyEvent :: Input -> SdlEvent -> Input
 applyEvent inp ev =
   case ev of
@@ -302,26 +305,6 @@ applyEvent inp ev =
     EvScroll delta -> inp {inputScroll = v2Add (inputScroll inp) delta}
     EvRefresh -> inp
 
-isHardQuitInput :: Input -> Bool
-isHardQuitInput inp =
-  modCtrl (inputModifiers inp)
-    && (T.elem 'c' (inputChars inp) || T.elem '\ETX' (inputChars inp))
-
-splitFrame :: SmallArray SdlEvent -> (SmallArray SdlEvent, SmallArray SdlEvent)
-splitFrame events =
-  let len = sizeofSmallArray events
-      findEdge i
-        | i >= len = len
-        | isButtonEdge (indexSmallArray events i) = i + 1
-        | otherwise = findEdge (i + 1)
-      splitAtIdx = findEdge 0
-   in if splitAtIdx >= len
-        then (events, emptySmallArray)
-        else
-          ( cloneSmallArray events 0 splitAtIdx
-          , cloneSmallArray events splitAtIdx (len - splitAtIdx)
-          )
-
 isButtonEdge :: SdlEvent -> Bool
 isButtonEdge ev =
   case ev of
@@ -330,6 +313,15 @@ isButtonEdge ev =
     EvMouseRightPress _ _ -> True
     EvMouseRightRelease _ _ -> True
     _ -> False
+
+splitFrame :: SmallArray SdlEvent -> (SmallArray SdlEvent, SmallArray SdlEvent)
+splitFrame events =
+  let len = sizeofSmallArray events
+      lst = [indexSmallArray events i | i <- [0 .. len - 1]]
+      (group, rest) = Inp.splitFrame isButtonEdge lst
+   in ( smallArrayFromListN (length group) group
+      , smallArrayFromListN (length rest) rest
+      )
 
 isHardQuit :: SdlEvent -> Bool
 isHardQuit ev =

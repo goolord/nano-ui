@@ -162,7 +162,7 @@ import NanoUI.Font
   , sliderTrackBounds
   )
 import NanoUI.Frame.Hit (scrollHitRect)
-import NanoUI.Host (isCellHost)
+import NanoUI.Types (isCellHost)
 import NanoUI.Icons (checkboxMark)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (inputMouseDown, inputMousePos, inputMousePressed)

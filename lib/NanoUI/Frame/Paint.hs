@@ -11,7 +11,7 @@ import Control.Monad (forM_, unless, when)
 import Data.Word (Word32)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Text as T
-import NanoUI.ColorPicker (drawColorPickerPanel)
+import NanoUI.Widgets.ColorPicker (drawColorPickerPanel)
 import NanoUI.Context
   ( Context (..)
   , atlasTextureId
@@ -39,7 +39,7 @@ import NanoUI.Font
   , treeChevronRect
   , widgetContentInset
   )
-import NanoUI.Host (HostProfile, isCellHost)
+import NanoUI.Types (HostProfile, isCellHost)
 import NanoUI.Layout.Arena
   ( DirTag (..)
   , NodeIdx
@@ -83,7 +83,7 @@ import NanoUI.Frame.Chrome
   , textInputFocused
   , widgetVisualStyle
   )
-import NanoUI.Frame.Clip (borderContentClip, scrollContentClip)
+import NanoUI.Frame.Scroll.Geometry (borderContentClip, scrollContentClip)
 import NanoUI.Frame.Scroll (paintScrollChrome)
 import NanoUI.Frame.Scroll.Geometry
   ( decodeScrollConfig

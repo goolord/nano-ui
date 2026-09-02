@@ -14,9 +14,16 @@ module NanoUI.Input
   , inputKeysFromList
   , emptyInputKeys
   , stripInteractionInput
+  , UiCursorKind (..)
+  , grabHoverKind
+  , grabDragKind
+  , clearEphemeral
+  , isHardQuitInput
+  , splitFrame
   ) where
 
 import Data.Text (Text)
+import qualified Data.Text as T
 import Data.Vector (Vector)
 import qualified Data.Vector as V
 import NanoUI.Types (Size (..), V2 (..))
@@ -78,6 +85,52 @@ emptyInput =
     , inputWindowSize = Size 800 600
     , inputDeltaTime = 0
     }
+
+data UiCursorKind
+  = UiCursorDefault
+  | UiCursorPointer
+  | UiCursorText
+  | UiCursorGrab
+  | UiCursorGrabbing
+  | UiCursorNsResize
+  | UiCursorEwResize
+  | UiCursorNwseResize
+  | UiCursorNeswResize
+  deriving (Eq, Show)
+
+grabHoverKind :: Bool -> Input -> UiCursorKind
+grabHoverKind onTarget inp = grabDragKind onTarget False inp
+
+grabDragKind :: Bool -> Bool -> Input -> UiCursorKind
+grabDragKind onTarget dragging inp
+  | dragging = UiCursorGrabbing
+  | onTarget, inputMouseDown inp = UiCursorGrabbing
+  | onTarget = UiCursorGrab
+  | otherwise = UiCursorDefault
+
+clearEphemeral :: Input -> Input
+clearEphemeral inp =
+  inp
+    { inputKeys = emptyInputKeys
+    , inputChars = ""
+    , inputMousePressed = False
+    , inputMouseReleased = False
+    , inputMouseRightPressed = False
+    , inputMouseRightReleased = False
+    , inputMouseClicks = 1
+    , inputScroll = V2 0 0
+    }
+
+isHardQuitInput :: Input -> Bool
+isHardQuitInput inp =
+  modCtrl (inputModifiers inp)
+    && (T.elem 'c' (inputChars inp) || T.elem '\ETX' (inputChars inp))
+
+splitFrame :: (a -> Bool) -> [a] -> ([a], [a])
+splitFrame isEdge events =
+  case break isEdge events of
+    (before, edge : rest) -> (before ++ [edge], rest)
+    (before, []) -> (before, [])
 
 {-# INLINE appendInputKey #-}
 appendInputKey :: Key -> Vector Key -> Vector Key

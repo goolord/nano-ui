@@ -22,7 +22,7 @@ import NanoUI.Context
   , seedFloatingPanel
   )
 import NanoUI.Font (resolveLayoutGap, resolveLayoutPadding)
-import NanoUI.Host (isCellHost)
+import NanoUI.Types (isCellHost)
 import NanoUI.Icons (Icons (..))
 import NanoUI.Id (WidgetId)
 import NanoUI.Input

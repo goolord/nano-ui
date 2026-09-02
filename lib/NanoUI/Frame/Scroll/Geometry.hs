@@ -24,9 +24,14 @@ module NanoUI.Frame.Scroll.Geometry
   , scrollShowsChrome
   , scrollChromeSuppressed
   , isScrollStyle2D
+  , tagClippedSpans
+  , padTextClipRect
+  , borderContentClip
+  , terminalModalOuterClip
   ) where
 
 import Data.Bits ((.&.), shiftL, shiftR)
+import Data.Text (Text)
 import NanoUI.Font
   ( FontMetrics
   , ScrollBarSlot (..)
@@ -38,10 +43,9 @@ import NanoUI.Font
   , scrollBarPageExtra
   , scrollLayoutGutter
   )
-import NanoUI.Host (HostProfile, isCellHost)
+import NanoUI.Types (Color, HostProfile, Rect (..), V2 (..), isCellHost, rectH, rectIntersect, rectW, rectX, rectY, v2X, v2Y)
 import NanoUI.Layout.Arena (DirTag (..))
-import NanoUI.Style (Direction (..), Padding (..))
-import NanoUI.Types (Rect (..), V2 (..), rectH, rectW, rectX, rectY, v2X, v2Y)
+import NanoUI.Style (Direction (..), Padding (..), Style (..), styleBorderWidth)
 
 -- | Axis scrollbar visibility and interaction policy.
 data ScrollPolicy
@@ -315,3 +319,29 @@ scrollOffsetFromThumb dir layout grabOff mouse =
               thumbLeft = v2X mouse - grabOff
               ratio = (thumbLeft - trackX) / max 1 (trackW - thumbW)
            in max 0 (min maxOff (ratio * maxOff))
+
+textClipSlop :: Float
+textClipSlop = 4
+
+tagClippedSpans :: Rect -> [(Rect, Text, Color, Color)] -> [(Rect, Text, Color, Color, Rect)]
+tagClippedSpans clip =
+  concatMap
+    ( \(rect, txt, fg, bg) ->
+        case rectIntersect clip (padTextClipRect rect) of
+          Nothing -> []
+          Just clipHere -> [(rect, txt, fg, bg, clipHere)]
+    )
+
+padTextClipRect :: Rect -> Rect
+padTextClipRect (Rect x y w h) = Rect x y (w + textClipSlop) h
+
+terminalModalOuterClip :: HostProfile -> FontMetrics -> Float -> Float -> Float -> Float -> Padding -> Rect
+terminalModalOuterClip = padContentClip
+
+borderContentClip :: Style -> Rect -> Rect
+borderContentClip style (Rect x y w h) =
+  if styleBorderWidth style <= 0
+    then Rect x y w h
+    else
+      let bw = max 1 (styleBorderWidth style)
+       in Rect (x + bw) (y + bw) (max 0 (w - 2 * bw)) (max 0 (h - 2 * bw))
