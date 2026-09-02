@@ -42,10 +42,6 @@ import NanoUI.Testing.Harness
   , spanLabelYs
   , terminalAboutModalMaxFooter
   , terminalAboutModalMaxH
-  , terminalBracketsOk
-  , terminalBracketSpans
-  , terminalGridW
-  , terminalPairsOk
   , warmup2
   , warmupDraw
   , withInputOff

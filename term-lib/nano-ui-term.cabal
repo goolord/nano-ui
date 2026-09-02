@@ -16,7 +16,7 @@ flag notcurses
     default: False
 
 common extensions
-    default-language: GHC2021
+    default-language: GHC2024
     default-extensions:
         BangPatterns
         DeriveGeneric
@@ -56,13 +56,10 @@ common warnings
 
 library
     import:           extensions
-    import:           ghc-options
     import:           warnings
     exposed-modules:
         NanoUI.Backend.Term
         NanoUI.Testing.Term
-        NanoUI.Testing.Assert
-        NanoUI.Testing.Harness
     other-modules:
         NanoUI.Term.Session
         NanoUI.Term.Debug
@@ -97,7 +94,6 @@ library
 
 executable nano-ui-tui
     import:           extensions
-    import:           ghc-options
     import:           rts-options
     import:           warnings
     main-is:          Tui.hs
@@ -113,7 +109,6 @@ executable nano-ui-tui
 
 test-suite nano-ui-test
     import:           extensions
-    import:           ghc-options
     import:           test-rts-options
     import:           warnings
     type:             exitcode-stdio-1.0
