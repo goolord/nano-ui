@@ -10,9 +10,17 @@ module NanoUI.Plot.Widget
 
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
-import NanoUI (Layout, Ui, uiFontMetrics, uiTheme)
+import NanoUI
+  ( Layout
+  , Responding (..)
+  , Ui
+  , uiFontMetrics
+  , uiMousePos
+  , uiTheme
+  )
 import NanoUI.Diagrams.Widget (diagram, uiPlotStyle)
 import NanoUI.Plot.Chrome (chartDiagram)
+import NanoUI.Plot.Hit (hitTestChart)
 import NanoUI.Plot.Series (area, bar, line, scatter)
 import NanoUI.Plot.Types
   ( Chart (..)
@@ -27,7 +35,9 @@ plot layout chart = do
   theme <- uiTheme
   ps <- uiPlotStyle
   resp <- diagram layout (chartDiagram fm theme ps chart)
-  pure PlotResponse {plotResponse = resp, plotHover = Nothing}
+  mouse <- uiMousePos
+  let hover = hitTestChart fm theme ps chart (respRect resp) mouse
+  pure PlotResponse {plotResponse = resp, plotHover = hover}
 
 lineChart :: Ui :> es => Layout -> [(Double, Double)] -> Eff es PlotResponse
 lineChart layout pts =

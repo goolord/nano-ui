@@ -30,9 +30,10 @@ import NanoUI.Diagrams
 import NanoUI.Diagrams.Tessellation (fillPolygon, triangulatePolygon)
 import NanoUI.Plot.Chrome (chartDiagram, seriesDomains)
 import NanoUI.Plot.Decimate (lttb)
+import NanoUI.Plot.Hit (nearestPlotHover)
 import NanoUI.Plot.Scale (formatTick, mergeDomains, niceTicks)
 import NanoUI.Plot.Series (bar, line, scatter)
-import NanoUI.Plot.Types (Chart (..), Domain (..), GridMode (..), LegendPos (..))
+import NanoUI.Plot.Types (Chart (..), Domain (..), GridMode (..), LegendPos (..), PlotHover (..))
 import NanoUI.Testing (Context, DrawData (..), drawCmdNull, newPixelContext, runFrame)
 
 main :: IO ()
@@ -48,6 +49,7 @@ main = do
   testLttb
   testLabelFit fm
   testChartChrome fm
+  testPlotHover fm
   putStrLn "nano-ui-diagrams: ok"
 
 testRendering :: Context -> Input -> FontMetrics -> IO ()
@@ -248,3 +250,21 @@ testChartChrome fm = do
     fail "defaultPlotStyle ink is not themeRed"
   unless (length (themeSeries defaultTheme) == 6) $
     fail "themeSeries dropped a series colour"
+
+testPlotHover :: FontMetrics -> IO ()
+testPlotHover _fm = do
+  let c =
+        Chart
+          { chartTitle = Nothing
+          , chartXTitle = Nothing
+          , chartYTitle = Nothing
+          , chartSeries = [line "a" [(0, 0), (1, 1), (2, 4)]]
+          , chartLegend = LegendNone
+          , chartGrid = GridNone
+          , chartDecimate = False
+          }
+  case nearestPlotHover c 0.5 0.5 of
+    Nothing -> fail "nearestPlotHover missed center point"
+    Just h ->
+      unless (hoverSeriesIdx h == 0 && hoverPointIdx h == 1 && hoverDataX h == 1 && hoverDataY h == 1) $
+        fail "nearestPlotHover picked wrong point"

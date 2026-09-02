@@ -279,18 +279,16 @@ demoUi = do
 
 sineCosineChart :: Chart
 sineCosineChart =
-  Chart
-    { chartTitle = Just "Trig"
-    , chartXTitle = Just "x"
-    , chartYTitle = Just "y"
-    , chartSeries =
-        [ line "sin(x)" [(x, sin x) | x <- [0, 0.05 .. (2 * pi)]]
-        , line "cos(x)" [(x, cos x) | x <- [0, 0.05 .. (2 * pi)]]
-        ]
-    , chartLegend = LegendRight
-    , chartGrid = GridBoth
-    , chartDecimate = True
-    }
+  withDecimate True $
+    withGrid GridBoth $
+      withLegend LegendRight $
+        withYAxis "y" $
+          withXAxis "x" $
+            withTitle "Trig" $
+              chart
+                [ line "sin(x)" [(x, sin x) | x <- [0, 0.05 .. (2 * pi)]]
+                , line "cos(x)" [(x, cos x) | x <- [0, 0.05 .. (2 * pi)]]
+                ]
 
 weeklyBars :: [(T.Text, Double)]
 weeklyBars =
@@ -316,18 +314,12 @@ sleepFocus =
 
 sleepFocusChart :: Chart
 sleepFocusChart =
-  Chart
-    { chartTitle = Just "Sleep vs focus"
-    , chartXTitle = Just "hours slept"
-    , chartYTitle = Just "focus"
-    , chartSeries =
-        [ scatter "focus" sleepFocus
-        , line "trend" sleepFocus
-        ]
-    , chartLegend = LegendRight
-    , chartGrid = GridBoth
-    , chartDecimate = False
-    }
+  withGrid GridBoth $
+    withLegend LegendRight $
+      withYAxis "focus" $
+        withXAxis "hours slept" $
+          withTitle "Sleep vs focus" $
+            chart [scatter "focus" sleepFocus, line "trend" sleepFocus]
 
 areaDemo :: [(Double, Double)]
 areaDemo = [(x, abs (sin x)) | x <- [0, 0.05 .. (2 * pi)]]

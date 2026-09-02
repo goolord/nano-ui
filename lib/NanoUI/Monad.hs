@@ -20,6 +20,7 @@ module NanoUI.Monad
   , askHost
   , uiFontMetrics
   , uiTheme
+  , uiMousePos
   , damageWidgetNow
   , damageKeyNow
   , damageRectNow
@@ -68,8 +69,6 @@ import NanoUI.Context
   , reduceUpdates
   )
 import NanoUI.Font (FontMetrics)
-import NanoUI.Style (Theme)
-import NanoUI.Types (DamageBounds, Rect)
 import NanoUI.Id
   ( IdContext (IdContext, siblingId)
   , WidgetId (..)
@@ -78,7 +77,9 @@ import NanoUI.Id
   , mix64
   , scopeTag
   )
-import NanoUI.Input (Input)
+import NanoUI.Style (Theme)
+import NanoUI.Input (Input, inputMousePos)
+import NanoUI.Types (DamageBounds, Rect, V2)
 
 type NanoUI = Eff '[Ui, IOE]
 
@@ -198,6 +199,10 @@ uiFontMetrics = fmap ctxFontMetrics askContext
 {-# INLINE uiTheme #-}
 uiTheme :: Ui :> es => Eff es Theme
 uiTheme = fmap ctxTheme askContext
+
+{-# INLINE uiMousePos #-}
+uiMousePos :: Ui :> es => Eff es V2
+uiMousePos = fmap inputMousePos askInput
 
 {-# INLINE askInput #-}
 askInput :: Ui :> es => Eff es Input

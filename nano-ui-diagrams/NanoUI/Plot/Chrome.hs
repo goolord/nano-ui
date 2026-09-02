@@ -3,7 +3,10 @@
 module NanoUI.Plot.Chrome
   ( chartDiagram
   , chartMargins
+  , chartXDomain
+  , chartYDomain
   , seriesDomains
+  , seriesPoints
   ) where
 
 import Data.Colour (Colour)
@@ -119,9 +122,8 @@ seriesExtent s =
        in (Domain (-0.5) (fromIntegral n - 0.5), padDomain 0.05 (domainExtent ys))
 
 chartXDomain :: Chart -> Domain
-chartXDomain = fst . seriesDomains
-
 chartYDomain :: Chart -> Domain
+chartXDomain = fst . seriesDomains
 chartYDomain = snd . seriesDomains
 
 chartDiagram :: FontMetrics -> Theme -> PlotStyle -> Chart -> Diagram B
