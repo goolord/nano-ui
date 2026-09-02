@@ -43,12 +43,23 @@ library
     import:           warnings
     exposed-modules:
         NanoUI.Diagrams
+        NanoUI.Diagrams.Backend
+        NanoUI.Diagrams.Tessellation
+        NanoUI.Diagrams.Widget
+        NanoUI.Plot
+        NanoUI.Plot.Types
+        NanoUI.Plot.Scale
+        NanoUI.Plot.Decimate
+        NanoUI.Plot.Series
+        NanoUI.Plot.Chrome
+        NanoUI.Plot.Widget
     build-depends:
         base ^>=4.22.0.0,
         colour >=2.3.2 && <2.4,
         containers ^>=0.8,
         diagrams-core >=1.5 && <1.6,
         diagrams-lib >=1.6 && <1.7,
+        dlist ^>=1.0,
         effectful ^>=2.6,
         hashable ^>=1.5,
         lens >=5.2 && <5.4,
@@ -69,6 +80,7 @@ test-suite nano-ui-diagrams-test
         diagrams-lib >=1.6 && <1.7,
         nano-ui,
         nano-ui-diagrams,
+        text ^>=2.1,
         vector ^>=0.13
     hs-source-dirs:   test
     default-language: GHC2024
