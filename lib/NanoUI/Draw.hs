@@ -905,42 +905,21 @@ pushRoundedStroke da (Rect x y w h) radius bw col
 {-# INLINE pushLine #-}
 pushLine :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
 pushLine da x1 y1 x2 y2 thickness col = do
-  let !dx = x2 - x1
-      !dy = y2 - y1
-      !lenSq = dx * dx + dy * dy
-  if lenSq < 1e-6
+  let dx = x2 - x1
+      dy = y2 - y1
+      len = sqrt (dx * dx + dy * dy)
+  if len < 0.001
     then pure ()
     else do
       setTexture da 0
-      let !invLen = 1 / sqrt lenSq
-          !hx = dx * invLen * (thickness * 0.5)
-          !hy = dy * invLen * (thickness * 0.5)
-          !ax = x1 + hx
-          !ay = y1 + hy
-          !bx = x1 - hx
-          !by = y1 - hy
-          !cx = x2 - hx
-          !cy = y2 - hy
-          !dx' = x2 + hx
-          !dy' = y2 + hy
-      (vp, ip, base, baseIdx) <- ensureAndAlloc da 4 6
-      let !(r, g, b, a) = unpackColorF col
-          !vOff = base * vertexSize
-          !iOff = baseIdx * indexSize
-          !baseIdxWord = fromIntegral base :: Word32
-          poke i px py = pokeVertex vp (vOff + i * vertexSize) px py r g b a (-3) 0
-      poke 0 ax ay
-      poke 1 bx by
-      poke 2 cx cy
-      poke 3 dx' dy'
-      pokeByteOff ip iOff baseIdxWord
-      pokeByteOff ip (iOff + 4) (baseIdxWord + 1)
-      pokeByteOff ip (iOff + 8) (baseIdxWord + 2)
-      pokeByteOff ip (iOff + 12) baseIdxWord
-      pokeByteOff ip (iOff + 16) (baseIdxWord + 2)
-      pokeByteOff ip (iOff + 20) (baseIdxWord + 3)
-      writeIORef (daVertexCount da) (base + 4)
-      writeIORef (daIndexCount da) (baseIdx + 6)
+      let r = thickness / 2
+          step = max 0.5 (r * 0.65)
+          n = max (1 :: Int) (ceiling (len / step))
+      forM_ [0 .. n] $ \i -> do
+        let u = fromIntegral i / fromIntegral n
+            cx = x1 + dx * u
+            cy = y1 + dy * u
+        pushRoundedRect da (Rect (cx - r) (cy - r) thickness thickness) r col
 
 {-# INLINE pushFilledTriangle #-}
 pushFilledTriangle :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
