@@ -705,7 +705,7 @@ pushImage da rect tex u0 v0 u1 v1 col
       pushQuad da rect u0 v0 u1 v1 col
 
 cornerSegments :: Int
-cornerSegments = 4
+cornerSegments = 8
 
 -- Precomputed unit-circle cos/sin for rounded-rect corners (4 segments per 90° arc).
 {-# NOINLINE cornerQuadrant #-}
@@ -881,22 +881,29 @@ pushRoundedStroke da (Rect x y w h) radius bw col
           !ibw = min bw (min (w * 0.5) (h * 0.5))
       if rad <= 0.5
         then do
-          let !midH = max 0 (h - 2 * ibw)
-          pushQuad da (Rect x y w ibw) 0 0 1 1 col
-          pushQuad da (Rect x (y + h - ibw) w ibw) 0 0 1 1 col
-          when (midH > 0) $ do
-            pushQuad da (Rect x (y + ibw) ibw midH) 0 0 1 1 col
-            pushQuad da (Rect (x + w - ibw) (y + ibw) ibw midH) 0 0 1 1 col
+          let !t = ibw
+              !ox = x + t / 2
+              !oy = y + t / 2
+              !ow = max 0 (w - t)
+              !oh = max 0 (h - t)
+          pushLine da ox oy (ox + ow) oy t col
+          pushLine da ox (oy + oh) (ox + ow) (oy + oh) t col
+          when (oh > 0) $ pushLine da ox oy ox (oy + oh) t col
+          when (oh > 0) $ pushLine da (ox + ow) oy (ox + ow) (oy + oh) t col
         else do
           let !midW = max 0 (w - 2 * rad)
               !midH = max 0 (h - 2 * rad)
               !innerR = max 0 (rad - ibw)
+              !topY = y + ibw / 2
+              !botY = y + h - ibw / 2
+              !leftX = x + ibw / 2
+              !rightX = x + w - ibw / 2
           when (midW > 0) $ do
-            pushQuad da (Rect (x + rad) y midW ibw) 0 0 1 1 col
-            pushQuad da (Rect (x + rad) (y + h - ibw) midW ibw) 0 0 1 1 col
+            pushLine da (x + rad) topY (x + rad + midW) topY ibw col
+            pushLine da (x + rad) botY (x + rad + midW) botY ibw col
           when (midH > 0) $ do
-            pushQuad da (Rect x (y + rad) ibw midH) 0 0 1 1 col
-            pushQuad da (Rect (x + w - ibw) (y + rad) ibw midH) 0 0 1 1 col
+            pushLine da leftX (y + rad) leftX (y + rad + midH) ibw col
+            pushLine da rightX (y + rad) rightX (y + rad + midH) ibw col
           pushCornerArc da (x + rad) (y + rad) rad innerR pi (pi * 1.5) col
           pushCornerArc da (x + w - rad) (y + rad) rad innerR (pi * 1.5) (pi * 2) col
           pushCornerArc da (x + w - rad) (y + h - rad) rad innerR 0 (pi * 0.5) col
@@ -913,7 +920,7 @@ pushLine da x1 y1 x2 y2 thickness col = do
     else do
       setTexture da 0
       let r = thickness / 2
-          step = max 0.5 (r * 0.65)
+          step = max 0.3 (r * 0.4)
           n = max (1 :: Int) (ceiling (len / step))
       forM_ [0 .. n] $ \i -> do
         let u = fromIntegral i / fromIntegral n

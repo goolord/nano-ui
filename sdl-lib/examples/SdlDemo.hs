@@ -216,7 +216,7 @@ demoUi = do
               (tableResp, nextSort) <-
                 tableCfg
                   demoTableCfg
-                  (tight . fillW . fixedH 280 $ defaultLayout {layoutGap = 0})
+                  (tight . fixedH 280 $ defaultLayout {layoutGap = 0})
                   "people"
                   colPeople
                   demoPeople
@@ -272,16 +272,7 @@ colPeople =
     ]
 
 demoTableCfg :: TableCfg
-demoTableCfg =
-  defaultTableCfg
-    { tableColSizes =
-        [ ColContent
-        , ColStretch
-        , ColFixed 64
-        , ColStretch
-        , ColContent
-        ]
-    }
+demoTableCfg = defaultTableCfg
 
 demoPeople :: [DemoPerson]
 demoPeople =

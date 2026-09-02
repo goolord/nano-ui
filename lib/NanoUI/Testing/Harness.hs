@@ -440,7 +440,7 @@ checkLabelAlignEndInk failed = do
   when (abs (rd - boxW) > 0.01) $ bump failed
 
 windowTitleGrab :: Rect -> V2
-windowTitleGrab (Rect x0 y0 _ _) = V2 (x0 + 24) (y0 + 22)
+windowTitleGrab (Rect x0 y0 _ _) = V2 (x0 + 24) (y0 + padT windowPad + 19.5)
 
 runDragFrom :: Context -> Input -> NanoUI a -> V2 -> V2 -> IO ()
 runDragFrom ctx inp0 ui grab dest = do

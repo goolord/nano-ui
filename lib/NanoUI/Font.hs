@@ -175,7 +175,12 @@ layoutLineHeight _host fm = fmLineHeight fm
 
 {-# INLINE centeredTextY #-}
 centeredTextY :: HostProfile -> FontMetrics -> Float -> Float -> Float -> Float
-centeredTextY _host _fm y h th = y + (h - th) / 2
+centeredTextY host fm y h th =
+  if isCellHost host
+    then y + (h - th) / 2
+    else case fmGlyph fm 'H' of
+      Nothing -> y + (h - th) / 2
+      Just gq -> y + h / 2 - (gqY gq + gqH gq / 2)
 
 -- Origin and used width inside the node box, inset on all AlignX sides.
 {-# INLINE alignedTextBox #-}

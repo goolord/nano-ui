@@ -102,8 +102,12 @@ import NanoUI.Frame.Chrome
   , widgetVisualStyle
   )
 import NanoUI.Frame.Scroll.Geometry
-  ( padContentClip
+  ( decodeScrollConfig
+  , isScrollStyle2D
+  , padContentClip
+  , scrollChromeActive
   , scrollContentClip
+  , scrollViewportClip2D
   , tagClippedSpans
   , terminalModalOuterClip
   )
@@ -111,12 +115,6 @@ import NanoUI.Frame.Select (collectSelectDropdownSpans)
 import NanoUI.Frame.TextInput (TextInputGeom (..), collectTextInputMenuSpans, tagSelectClippedSpans, tagTextInputClippedSpans, textInputGeom)
 import NanoUI.Frame.TextArea (TextAreaGeom (..), textAreaGeom, textAreaValue)
 import NanoUI.Frame.Scroll (scrollBarLayout, ScrollBarLayout (..))
-import NanoUI.Frame.Scroll.Geometry
-  ( decodeScrollConfig
-  , isScrollStyle2D
-  , scrollShowsChrome
-  , scrollViewportClip2D
-  )
 import NanoUI.Frame.SpanArena (SpanArena, pushSpan, resetSpanArena, spanArenaToList, spanArenaToListOccluded)
 
 collectTextSpans :: Context -> IO [(Rect, T.Text, Color, Color, Rect)]
@@ -231,7 +229,10 @@ collectClippedSpans' ctx floatCache idx nt clip arena = do
       when (isCellHost (ctxHostProfile ctx) && isScrollNode nt && nt /= NodeModal) $ do
         si <- getStyleIdx (ctxNodeArena ctx) idx
         let cfg = decodeScrollConfig si
-        when (scrollShowsChrome cfg (isScrollStyle2D si) DirColumn) $ do
+            padClip = padContentClip (ctxHostProfile ctx) fm x y w h pad
+            innerH = rectH padClip
+        contentSize <- getNodeValue (ctxNodeArena ctx) idx
+        when (scrollChromeActive cfg (isScrollStyle2D si) DirColumn contentSize innerH) $ do
           caps <- terminalScrollCapSpans ctx idx x y w h pad clip
           mapM_ (\(r, t, fg, bg, c) -> pushSpan arena r t fg bg c) caps
       walkChildSpans ctx floatCache idx clipHere arena

@@ -21,6 +21,7 @@ module Cases.Window
 
 import Control.Monad (replicateM, void, when)
 import Data.IORef (IORef)
+import Data.IntMap.Strict qualified as IM
 import Data.Text qualified as T
 import NanoUI
 import NanoUI.Testing
@@ -158,6 +159,7 @@ runWindowOverlayTest ctx failed = do
     closedSpans <- collectOverlayTextSpans ctx inp0
     assert failed (not (any (\(_, txt, _, _, _) -> "Debug" `T.isInfixOf` txt) closedSpans))
   (outside0, win0, mBody0) <- warmup2 ctx inp0 ui
+  panels <- floatingPanelRects ctx
   overlays <- collectOverlayTextSpans ctx inp0
   assert failed (any (\(_, txt, _, _, _) -> "Debug" `T.isInfixOf` txt) overlays)
   assert failed (any (\(_, txt, _, _, _) -> "Body" `T.isInfixOf` txt) overlays)
@@ -175,7 +177,11 @@ runWindowOverlayTest ctx failed = do
   let esc = inp0 {inputKeys = inputKeysFromList [KeyEscape]}
   ((_, winEsc, _), _, _, _) <- runFrame ctx esc ui
   assert failed (not (respClicked winEsc))
-  let closeAt = V2 (wx + ww - padR windowPad - 14) (wy + padT windowPad + 14)
+  let Rect px py pw _ =
+        case map snd (IM.toList panels) of
+          (r : _) -> r
+          _ -> respRect win0
+      closeAt = V2 (px + pw - padR windowPad - 12.5) (py + padT windowPad + 19.5)
       (clickClose, releaseClose) = clickPair inp0 closeAt
   _ <- runFrame ctx clickClose ui
   ((_, winClose, _), _, _, _) <- runFrame ctx releaseClose ui
@@ -185,16 +191,24 @@ runWindowTitleCenterTest :: Context -> IORef Int -> IO ()
 runWindowTitleCenterTest ctx failed = do
   let inp0 = withInput 640 400
       ui = fmap fst (window True "Debug" (label "Body"))
-      titleBarH = 28
-  win <- warmup2 ctx inp0 ui
-  overlays <- collectOverlayTextSpans ctx inp0
-  case [r | (r, txt, _, _, _) <- overlays, T.strip txt == "Debug"] of
+      titleBarChromeH = 39
+  _ <- warmup2 ctx inp0 ui
+  panels <- floatingPanelRects ctx
+  (_, overlays) <- collectRasterSpans ctx inp0
+  let wy =
+        case map snd (IM.toList panels) of
+          (Rect _ wy' _ _ : _) -> wy'
+          _ -> 0
+      barMid = wy + padT windowPad + titleBarChromeH / 2
+  case [r | (r, txt, _, _, _) <- overlays, "Debug" `T.isInfixOf` txt] of
     (Rect _ ty _ th : _) -> do
-      let Rect _ wy _ _ = respRect win
-          barY = wy + padT windowPad
-          barMid = barY + titleBarH / 2
-          textMid = ty + th / 2
-      assert failed (abs (textMid - barMid) <= 2)
+      let fm = ctxFontMetrics ctx
+          capMid =
+            case fmGlyph fm 'H' of
+              Nothing -> th / 2
+              Just gq -> gqY gq + gqH gq / 2
+          textInkMid = ty + capMid
+      assert failed (abs (textInkMid - barMid) <= 4)
     _ -> assert failed False
 
 runOverlayClickThroughTest :: Context -> IORef Int -> IO ()
@@ -449,7 +463,7 @@ runWindowResizeTest ctx failed = do
                 Just (Rect xn yn wn hn) -> do
                   assertGt failed hn (hw + 8)
                   assertLt failed yn (yw - 5)
-                  let minTitleH = padT windowPad + 28 + padB windowPad
+                  let minTitleH = 39 + padT windowPad + padB windowPad
                   mShort <- dragWindowEdge ctx inp0 ui (V2 (xn + wn / 2) (yn + hn + 4)) (V2 (xn + wn / 2) (yn + 4))
                   case mShort of
                     Nothing -> assert failed False

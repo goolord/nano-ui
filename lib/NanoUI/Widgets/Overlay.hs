@@ -48,6 +48,7 @@ import NanoUI.Style
   , defaultLayout
   , grow
   , padB
+  , padL
   , padT
   , tight
   , windowMargin
@@ -59,6 +60,7 @@ import NanoUI.Widgets.Chrome
   , floatGapFor
   , floatMinFor
   , floatPadFor
+  , titleBarChromeHFor
   , titleBarHFor
   , titleBarLayoutFor
   , titleLabelLayoutFor
@@ -114,6 +116,7 @@ overlay kind open title child
           availH = max 1 (winH - 2 * margin)
           isModal = kind == ModalOverlay
           padding = floatPadFor host (if isModal then Padding 14 14 12 12 else windowPad)
+          barH = if isModal then titleBarHFor host else titleBarChromeHFor host
           minWidth =
             floatMinFor
               host
@@ -126,7 +129,7 @@ overlay kind open title child
                 let
                   pad = resolveLayoutPadding host fm padding
                  in
-                  min availH (padT pad + titleBarHFor host + padB pad)
+                  min availH (padT pad + titleBarChromeHFor host + padB pad)
           maxW = availW
           maxH = availH
         prevFloat <- uiIO $ do
@@ -140,7 +143,7 @@ overlay kind open title child
               Fit
               Fit
               padding
-              (floatGapFor host (if isModal then 8 else 10))
+              (floatGapFor host (if isModal then 8 else padL padding))
               minWidth
               minHeight
               maxW
@@ -159,13 +162,13 @@ overlay kind open title child
           pure prev
         (closeResp, r) <- do
           close <-
-            row (titleBarLayoutFor host) $ do
+            row (titleBarLayoutFor host barH) $ do
               when (not (T.null title)) $
                 case kind of
                   ModalOverlay ->
                     void
                       ( labelEx
-                          (titleLabelLayoutFor host)
+                          (titleLabelLayoutFor host barH)
                           (titleMark host (iconModalTitle (ctxIcons ctx)) <> title)
                       )
                   WindowOverlay ->
@@ -173,13 +176,13 @@ overlay kind open title child
                       title
                       ( void
                           ( labelEx
-                              (titleLabelLayoutFor host)
+                              (titleLabelLayoutFor host barH)
                               (titleMark host (iconWindowTitle (ctxIcons ctx)) <> title)
                           )
                       )
               flex
               withKey ("close" :: Text) closeButton
-          when (isModal && not (T.null title) || not isModal) sep
+          when (kind == ModalOverlay && not (T.null title)) sep
           r <-
             if isModal && not (isCellHost host)
               then child

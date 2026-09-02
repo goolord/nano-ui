@@ -12,6 +12,7 @@ module NanoUI.Testing
   , pointerDragActive
   , textFieldActive
   , floatingPanelActive
+  , floatingPanelRects
   , debugPanelOpen
   , widgetNodeCount
   , pointerCursorWanted
@@ -217,6 +218,7 @@ import NanoUI.Draw
   , vertexSize
   )
 import NanoUI.Render.ASCII (renderASCII)
+import NanoUI.Damage (floatingPanelRects)
 import NanoUI.Font (monospaceMetrics, sliderTrackBounds, textDisplayWidth)
 import NanoUI.Frame
   ( UiCursorKind (..)
