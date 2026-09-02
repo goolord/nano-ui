@@ -107,7 +107,7 @@ executable nano-ui-tui
     if !os(windows) && !flag(notcurses)
         buildable: False
 
-test-suite nano-ui-test
+test-suite nano-ui-term-test
     import:           extensions
     import:           test-rts-options
     import:           warnings
@@ -116,18 +116,8 @@ test-suite nano-ui-test
     other-modules:
         ApiBoundary
         Cases
-        Cases.Animation
-        Cases.Damage
-        Cases.Demo
-        Cases.Modal
-        Cases.Scroll
-        Cases.Select
-        Cases.Tabs
         Cases.Terminal
-        Cases.TextInput
-        Cases.ContextMenu
-        Cases.Tooltip
-        Cases.Window
+        Cases.TermCells
     build-depends:
         base ^>=4.22.0.0,
         bytestring,
