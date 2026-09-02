@@ -57,6 +57,7 @@ testSpecs =
   , TestSpec "pointer-cursor" False runPointerCursorTest
   , TestSpec "pointer-cursor-checkbox" False runPointerCursorCheckboxTest
   , TestSpec "text-input-cursor" False runTextInputCursorTest
+  , TestSpec "text-area-cursor" True runTextAreaCursorTest
   , TestSpec "text-input-selection" False runTextInputSelectionTest
   , TestSpec "text-input-ctrl-a" False runTextInputCtrlATest
   , TestSpec "text-input-mouse-selection" False runTextInputMouseSelectionTest
@@ -65,6 +66,7 @@ testSpecs =
   , TestSpec "modal-no-phantom-scroll" False runModalNoPhantomScrollTest
   , TestSpec "image" False runImageTest
   , TestSpec "text-input-clipboard" False runTextInputClipboardTest
+  , TestSpec "text-input-cut-menu" False runTextInputCutMenuTest
   , TestSpec "text-input-menu" False runTextInputMenuTest
   , TestSpec "select-dropdown-cursor" False runSelectDropdownCursorTest
   , TestSpec "slider-cursor" True runSliderCursorTest
@@ -180,6 +182,7 @@ testSpecs =
   , TestSpec "header-top-pad" False runHeaderTopPadTest
   , TestSpec "fit-header-no-shrink" False runFitHeaderNoShrinkTest
   , TestSpec "window-overlay" False runWindowOverlayTest
+  , TestSpec "window-title-center" True runWindowTitleCenterTest
   , TestSpec "overlay-click-through" False runOverlayClickThroughTest
   , TestSpec "window-drag" False runWindowDragTest
   , TestSpec "window-scroll-wheel" False runWindowScrollWheelTest

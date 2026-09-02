@@ -106,7 +106,7 @@ demoUi = do
           clickButton "Cancel" (setClick "Cancel")
           clickButton "About" (setAbout True)
           clickButton "Debug" (setDebug (not debugOpen))
-      row (tight . gap 8 . fillW $ defaultLayout) $ do
+      row (tight . gap 8 . wrap . fillW $ defaultLayout) $ do
         column (tight . gap 8 . fillW $ defaultLayout) $ do
           card $ do
             heading "State"
@@ -216,7 +216,7 @@ demoUi = do
               (tableResp, nextSort) <-
                 tableCfg
                   demoTableCfg
-                  (tight . fillW . fixedH 280 $ defaultLayout {layoutGap = 0})
+                  (tight . fixedH 280 $ defaultLayout {layoutGap = 0})
                   "people"
                   colPeople
                   demoPeople
@@ -272,16 +272,7 @@ colPeople =
     ]
 
 demoTableCfg :: TableCfg
-demoTableCfg =
-  defaultTableCfg
-    { tableColSizes =
-        [ ColContent
-        , ColStretch
-        , ColFixed 64
-        , ColStretch
-        , ColContent
-        ]
-    }
+demoTableCfg = defaultTableCfg
 
 demoPeople :: [DemoPerson]
 demoPeople =

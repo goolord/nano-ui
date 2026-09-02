@@ -35,7 +35,7 @@ import Data.Text.Read (decimal, signed)
 import Data.Vector qualified as V
 import Effectful (Eff, type (:>))
 import qualified Data.IntMap.Strict as IM
-import NanoUI.Context (Context (..), bumpMirror, getPrevRect, getScrollOffset, getStore, intKey, linkScrollAxes, markDirty, setStore)
+import NanoUI.Context (Context (..), bumpMirror, getPrevRect, getScrollOffset2D, getStore, intKey, linkScrollAxes, markDirty, setStore)
 import NanoUI.Font (labelContentInset, monoFontMarker, scrollBarGutter, stripWidgetMarkers, textDisplayWidth)
 import NanoUI.Id (WidgetId (..))
 import NanoUI.Input (Input (..), inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased, inputMouseRightReleased)
@@ -43,7 +43,7 @@ import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
 import NanoUI.Store (WidgetStore (..), slotDrag, slotDragW, slotKey)
 import NanoUI.Style (AlignX (..), AlignY (..), Direction (..), Layout (..), Padding (..), Sizing (..), defaultLayout, fillH, fillW, tight)
-import NanoUI.Types (isCellHost, rectH, rectW, v2X)
+import NanoUI.Types (isCellHost, rectH, rectW, v2X, V2 (..))
 import NanoUI.WidgetText (tableHeaderLabel, tableSortReserve)
 import NanoUI.Widgets.Behavior (useReorder)
 import NanoUI.Widgets.Combinators
@@ -63,7 +63,7 @@ import NanoUI.Widgets.Combinators
   , visibleCols
   )
 import NanoUI.Widgets.Layout (column, panel, row, scrollAreaIdConfigured, separator, spacer)
-import NanoUI.Frame.Scroll.Geometry (defaultScrollConfig, scrollHorizontalHidden, scrollVerticalAuto, scrollVerticalHidden)
+import NanoUI.Frame.Scroll.Geometry (defaultScrollConfig, scrollHorizontalAuto, scrollVerticalAuto, scrollVerticalHidden)
 import NanoUI.Widgets.Node
   ( Clickable (..)
   , Responding (..)
@@ -75,8 +75,12 @@ import NanoUI.Widgets.Node
   , setClicked
   , tagContainer
   )
+tableStretchAny :: TableCfg -> Bool
+tableStretchAny cfg = any (== ColStretch) (tableColSizes cfg)
+
 tableSplitPanes ::
   (Ui :> es) =>
+  Bool ->
   WidgetId ->
   WidgetId ->
   WidgetId ->
@@ -90,10 +94,10 @@ tableSplitPanes ::
   (Int -> Eff es Response) ->
   (Int -> row -> Int -> Eff es ()) ->
   Eff es [(Int, Response)]
-tableSplitPanes tableWid vWid hWid rowMinH _hChromeH frozenIdx unfrozenIdx pinned scrollRows colBox renderHeader renderCell =
-  panel (tight . fillW . fillH $ defaultLayout) $ do
+tableSplitPanes fillInner tableWid vWid hWid rowMinH _hChromeH frozenIdx unfrozenIdx pinned scrollRows colBox renderHeader renderCell =
+  panel ((if fillInner then tight . fillW . fillH else tight . fillH) defaultLayout) $ do
     tagContainer tableWid
-    row (tight . fillW . fillH $ defaultLayout {layoutGap = 0}) $ do
+    row ((if fillInner then tight . fillW . fillH else tight . fillH) (defaultLayout {layoutGap = 0})) $ do
       frozenHs <-
         if null frozenIdx
           then pure []
@@ -110,8 +114,8 @@ tableSplitPanes tableWid vWid hWid rowMinH _hChromeH frozenIdx unfrozenIdx pinne
      in if fill then fillW base else base
   hRowLay = defaultLayout {layoutDirection = Row, layoutPadding = Padding 0 0 0 0, layoutGap = 0}
   paneLay fill idxs =
-    let base = tight $ defaultLayout {layoutGap = 0, layoutMinW = minSum idxs, layoutHeight = Grow 1}
-     in if fill then fillW base else base {layoutWidth = Fit}
+    let base = tight $ defaultLayout {layoutGap = 0, layoutHeight = Grow 1}
+     in if fill then fillW (fillH base) else base {layoutWidth = Fit, layoutMinW = minSum idxs}
   headerLine idxs renderHeader' =
     keyedRowLay (tight $ defaultLayout {layoutGap = 0}) idxs $ \i ->
       column (colBox i) (renderHeader' i)
@@ -126,28 +130,30 @@ tableSplitPanes tableWid vWid hWid rowMinH _hChromeH frozenIdx unfrozenIdx pinne
               [void (renderCell ri r i) | i <- idxs]
       )
       (zip [0 ..] pinned)
-  bodyBlock idxs = do
+  bodyBlock scrollWid virtualize idxs = do
     ctx <- askContext
+    let n = length scrollRows
     (vis, topH, botH) <-
-      let n = length scrollRows
-       in if n == 0 || rowMinH <= 0
-            then pure ([], 0, 0)
-            else uiIO $ do
-              scroll <- getScrollOffset ctx vWid
-              viewH <-
-                getPrevRect ctx vWid >>= \case
-                  Nothing -> pure (rowMinH * 8)
-                  Just r -> pure (rectH r)
-              let vis = virtualIndices n scroll viewH rowMinH
-                  firstVis = case vis of
-                    [] -> 0
-                    (i : _) -> i
-                  lastVis = case vis of
-                    [] -> -1
-                    xs -> last xs
-                  topH = fromIntegral firstVis * rowMinH
-                  botH = fromIntegral (max 0 (n - lastVis - 1)) * rowMinH
-              pure (vis, topH, botH)
+      if n == 0 || rowMinH <= 0
+        then pure ([], 0, 0)
+        else if not virtualize
+          then pure ([0 .. n - 1], 0, 0)
+          else uiIO $ do
+            V2 _ scrollY <- getScrollOffset2D ctx scrollWid
+            viewH <-
+              getPrevRect ctx scrollWid >>= \case
+                Nothing -> pure (rowMinH * 8)
+                Just r -> pure (rectH r)
+            let vis = virtualIndices n scrollY viewH rowMinH
+                firstVis = case vis of
+                  [] -> 0
+                  (i : _) -> i
+                lastVis = case vis of
+                  [] -> -1
+                  xs -> last xs
+                topH = fromIntegral firstVis * rowMinH
+                botH = fromIntegral (max 0 (n - lastVis - 1)) * rowMinH
+            pure (vis, topH, botH)
     column (tight $ defaultLayout {layoutGap = 0}) $ do
       when (topH > 0) $ void (spacer Fit (Fixed topH))
       gridColumns
@@ -174,21 +180,24 @@ tableSplitPanes tableWid vWid hWid rowMinH _hChromeH frozenIdx unfrozenIdx pinne
         vWid
         (vLay fill)
         (if hideVertBar then scrollVerticalHidden else scrollVerticalAuto)
-        (bodyBlock idxs)
+        (bodyBlock vWid True idxs)
       pure hs
   unfrozenPane idxs = do
     ctx <- askContext
-    column (paneLay True idxs) $ do
+    column (paneLay fillInner idxs) $ do
       hs <-
-        scrollAreaIdConfigured hWid (fillW hRowLay) scrollHorizontalHidden $
-          column (tight . fillW $ defaultLayout {layoutGap = 0, layoutMinW = minSum idxs}) $ do
+        scrollAreaIdConfigured
+          hWid
+          (if fillInner then fillW hRowLay else hRowLay)
+          scrollHorizontalAuto $
+          column (tight $ defaultLayout {layoutGap = 0, layoutMinW = minSum idxs}) $ do
             hs <- headerLine idxs renderHeader
             void separator
             pinnedBlock idxs
             when (not (null pinned) && not (null scrollRows)) $ void separator
             pure hs
       uiIO (linkScrollAxes ctx vWid hWid)
-      scrollAreaIdConfigured vWid (vLay True) defaultScrollConfig (bodyBlock idxs)
+      scrollAreaIdConfigured vWid (vLay fillInner) defaultScrollConfig (bodyBlock vWid True idxs)
       pure hs
 
 data SortDir = SortAsc | SortDesc
@@ -320,7 +329,7 @@ distributeColWidths n vis sizes contentWs stored tableW =
       seps = fromIntegral (max 0 (length vis - 1))
       visMin = sum [listAt mins i 0 | i <- vis] + seps
       autoStretch i =
-        case listAt sizes i ColStretch of
+        case listAt sizes i ColContent of
           ColStretch ->
             listAt stored i 0 <= max minColW (listAt contentWs i minColW)
           _ -> False
@@ -371,7 +380,7 @@ resolvedWidth :: [ColSize] -> [Float] -> [Float] -> Int -> Float
 resolvedWidth sizes contentWs stored i =
   let contentW = max minColW (listAt contentWs i minColW)
       saved = listAt stored i 0
-   in case listAt sizes i ColStretch of
+   in case listAt sizes i ColContent of
         ColStretch -> if saved > contentW then saved else contentW
         ColFixed f ->
           let base = max minColW f
@@ -558,5 +567,5 @@ tableCfg cfg outerLayout key cols rows curSort =
             wid <- nextId
             addWidgetStyled wid NodeButton "Show all columns" 0 (tight . fillW $ defaultLayout) 0 Nothing
       headerPairs <-
-        tableSplitPanes tableWid vWid hWid rowMinH hChromeH frozenIdx unfrozenIdx pinned scrollRows colBox renderHeader renderCell
+        tableSplitPanes (tableStretchAny cfg) tableWid vWid hWid rowMinH hChromeH frozenIdx unfrozenIdx pinned scrollRows colBox renderHeader renderCell
       finishTable n stateKey terminal vis order0 hidden0 drag0 dragX0 dragW0 widths0 widths1 sort0 headerPairs showAllResp resolvedW

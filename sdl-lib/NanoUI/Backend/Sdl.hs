@@ -9,6 +9,7 @@ module NanoUI.Backend.Sdl
   , askSdlDebug
   , defaultSdlOptions
   , newSdlContext
+  , NanoUIFont (..)
   , runSdlApp
   , runSdlAppReduce
   , sdlDrawFrame
@@ -31,6 +32,7 @@ import NanoUI
 import NanoUI.Sdl.Runner (askSdlDebug, drawEff, drawReduceEff, newSdlContext, runSdlSession, sdlDrawFrame)
 import NanoUI.Sdl.Debug (SdlDebugSnapshot (..))
 import NanoUI.Sdl.Window (RgbaImage (..), SdlEnv (..), SdlOptions (..), defaultSdlOptions, syncDisplay, withSdl, withSdlBench)
+import NanoUI.Sdl.NanoUIFont (NanoUIFont (..))
 import NanoUI.Testing (Context, registerImage, runEff, withTheme)
 
 runSdlApp :: SdlOptions -> NanoUI () -> IO ()

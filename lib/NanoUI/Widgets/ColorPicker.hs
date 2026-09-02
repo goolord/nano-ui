@@ -248,13 +248,14 @@ drawColorPickerPanel host fm da store wid style x y w h = do
         hx = rectX hueRect + (hue / 360) * rectW hueRect
         handleW = 6
         handle = Rect (hx - handleW / 2) (rectY hueRect) handleW (rectH hueRect)
+        handleInner = Rect (rectX handle + 1) (rectY handle + 1) (handleW - 2) (rectH handle - 2)
     drawSvField da sv hue
     pushRoundedStroke da sv 4 1 border
     drawHueBar da hueRect
     pushRoundedStroke da hueRect 3 1 border
     pushRoundedRect da (Rect (mx - marker / 2) (my - marker / 2) marker marker) (marker / 2) (colorRGBA 255 255 255 255)
     pushRoundedStroke da (Rect (mx - marker / 2) (my - marker / 2) marker marker) (marker / 2) 1 (colorRGBA 0 0 0 180)
-    pushRoundedRect da handle 2 (colorRGBA 255 255 255 255)
+    pushRoundedRect da handleInner 1 (colorRGBA 255 255 255 255)
     pushRoundedStroke da handle 2 1 (colorRGBA 0 0 0 180)
 
 colorPicker :: (Ui :> es) => Text -> Color -> Eff es (Response, Color)

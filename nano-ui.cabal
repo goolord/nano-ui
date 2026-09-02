@@ -201,6 +201,7 @@ test-suite nano-ui-test
     build-depends:
         base ^>=4.22.0.0,
         bytestring,
+        containers,
         effectful ^>=2.6,
         nano-ui,
         text ^>=2.1

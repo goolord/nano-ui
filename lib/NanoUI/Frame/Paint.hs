@@ -26,13 +26,13 @@ import NanoUI.Draw
   , pushLine
   , pushRect
   , pushRoundedRect
+  , pushRoundedStroke
   , pushText
   , withClip
   )
 import NanoUI.Font
   ( FontMetrics
   , checkboxBoxSize
-  , centeredTextY
   , labelContentInset
   , pickMonoFont
   , sliderTrackBounds
@@ -83,12 +83,12 @@ import NanoUI.Frame.Chrome
   , textInputFocused
   , widgetVisualStyle
   )
-import NanoUI.Frame.Scroll.Geometry (borderContentClip, scrollContentClip)
+import NanoUI.Frame.Scroll.Geometry (borderContentClip, padContentClip, scrollContentClip)
 import NanoUI.Frame.Scroll (paintScrollChrome)
 import NanoUI.Frame.Scroll.Geometry
   ( decodeScrollConfig
   , isScrollStyle2D
-  , scrollShowsChrome
+  , scrollChromeActive
   , scrollViewportClip2D
   )
 import NanoUI.Frame.Spans (collectNodeTextSpans, widgetTextPlacements, widgetTextSpans)
@@ -146,27 +146,34 @@ lowerNodeVisible ctx idx nt x y w h rect fm theme terminal da =
       slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
       let cfg = decodeScrollConfig si
           native2D = isScrollStyle2D si
-          showChrome =
-            scrollShowsChrome cfg native2D DirColumn
-              || scrollShowsChrome cfg native2D DirRow
-          -- Paint bounded wells; full-page Grow/Grow viewports stay on the window fill.
-          -- Square corners so axis-aligned clip does not leave rounded leftover pixels.
-          paintWell = showChrome && not (wTag == SizingGrow && hTag == SizingGrow)
+          padClip = padContentClip (ctxHostProfile ctx) fm x y w h pad
+          innerW = rectW padClip
+          innerH = rectH padClip
           wellStyle = style {styleCornerRadius = 0}
-      when paintWell $ do
-        fillStyledRect da terminal wellStyle rect
-        strokeStyledRect da terminal wellStyle x y w h
-      inner <-
+      (showChrome, inner) <-
         if native2D
           then do
             contentH <- getNodeValue (ctxNodeArena ctx) idx
             contentW <- getAspect (ctxNodeArena ctx) idx
-            pure $
-              scrollViewportClip2D (ctxHostProfile ctx) fm slot cfg x y w h pad contentW contentH
+            pure
+              ( scrollChromeActive cfg True DirColumn contentH innerH
+                  || scrollChromeActive cfg True DirRow contentW innerW
+              , scrollViewportClip2D (ctxHostProfile ctx) fm slot cfg x y w h pad contentW contentH
+              )
           else do
             contentSize <- getNodeValue (ctxNodeArena ctx) idx
-            pure $
-              scrollContentClip (ctxHostProfile ctx) fm slot cfg dir x y w h pad contentSize
+            let innerMain =
+                  case dir of
+                    DirColumn -> innerH
+                    DirRow -> innerW
+            pure
+              ( scrollChromeActive cfg False dir contentSize innerMain
+              , scrollContentClip (ctxHostProfile ctx) fm slot cfg dir x y w h pad contentSize
+              )
+      let paintWell = showChrome && not (wTag == SizingGrow && hTag == SizingGrow)
+      when paintWell $ do
+        fillStyledRect da terminal wellStyle rect
+        strokeStyledRect da terminal wellStyle x y w h
       withClip da inner $ walkChildren ctx idx
       when showChrome $ do
         wid <- getWidgetId (ctxNodeArena ctx) idx
@@ -383,7 +390,7 @@ lowerNodeVisible ctx idx nt x y w h rect fm theme terminal da =
               innerW = tw - 2 * bw
               innerH = th - 2 * bw
               innerFillW = max 0 (innerW * clamp01 value)
-          pushRoundedRect da track trackR outline
+          pushRoundedStroke da track trackR bw outline
           when (innerW > 0 && innerH > 0) $
             pushRoundedRect da (Rect innerX innerY innerW innerH) innerR well
           when (innerFillW > 0) $ do
@@ -403,8 +410,8 @@ lowerNodeVisible ctx idx nt x y w h rect fm theme terminal da =
                   (handleHy + (handleD - innerD) / 2)
                   innerD
                   innerD
-          pushRoundedRect da handle (handleD / 2) (styleBorder (themeInput theme))
           pushRoundedRect da handleInner (innerD / 2) (colorRGBA 255 255 255 255)
+          pushRoundedStroke da handle (handleD / 2) bw (styleBorder (themeInput theme))
         when isClose $
           drawCloseIcon (ctxHostProfile ctx) fm da x y w h (styleFg style)
         when (nt == NodeSelect) $
@@ -455,7 +462,7 @@ drawCheckbox host da fm style x y h value accent well markCol = do
       pushRoundedRect da outer r accent
       drawCheckboxMark da bx by box markCol
     else do
-      pushRoundedRect da outer r (styleBorder style)
+      pushRoundedStroke da outer r bw (styleBorder style)
       pushRoundedRect da inner innerR well
 
 drawCheckboxMark :: DrawArena -> Float -> Float -> Float -> Color -> IO ()
@@ -502,28 +509,21 @@ drawRadio host da fm style x y h value accent well = do
           dy = by + (box - dot) / 2
       pushRoundedRect da (Rect dx dy dot dot) (dot / 2) accent
     else do
-      pushRoundedRect da outer r (styleBorder style)
-      when (innerR > 0) $
-        pushRoundedRect da (Rect (bx + bw) (by + bw) (box - 2 * bw) (box - 2 * bw)) innerR well
+      pushRoundedRect da (Rect (bx + bw) (by + bw) (box - 2 * bw) (box - 2 * bw)) innerR well
+      pushRoundedStroke da outer r bw (styleBorder style)
 
 walkChildren :: Context -> NodeIdx -> IO ()
 walkChildren ctx idx =
   forChildNodes_ (ctxNodeArena ctx) idx (lowerNode ctx)
 
 drawCloseIcon :: HostProfile -> FontMetrics -> DrawArena -> Float -> Float -> Float -> Float -> Color -> IO ()
-drawCloseIcon host fm da x y w h col = do
-  let s = min w h * 0.72
-      th = s
-      ty = centeredTextY host fm y h th
-      tx = x + (w - s) / 2
-      inset = s * 0.32
-      t = max 1.6 (s * 0.10)
-      x0 = tx + inset
-      y0 = ty + inset
-      x1 = tx + s - inset
-      y1 = ty + s - inset
-  pushLine da x0 y0 x1 y1 t col
-  pushLine da x0 y1 x1 y0 t col
+drawCloseIcon _host _fm da x y w h col = do
+  let cx = x + w / 2
+      cy = y + h / 2
+      arm = min w h * 0.21
+      t = max 1.75 (min w h * 0.085)
+  pushLine da (cx - arm) (cy - arm) (cx + arm) (cy + arm) t col
+  pushLine da (cx - arm) (cy + arm) (cx + arm) (cy - arm) t col
 
 drawSelectChevron :: DrawArena -> Float -> Float -> Float -> Float -> Color -> IO ()
 drawSelectChevron da x y w h col = do
@@ -550,7 +550,12 @@ drawTreeChevron da host fm x y w h depth expanded col = do
       mx = cx + cw / 2
       my = cy + ch / 2
       s = min 4.5 (min cw ch * 0.28)
+      t = max 1.4 (s * 0.22)
   if expanded
-    then pushFilledTriangle da (mx - s) (my - s * 0.45) (mx + s) (my - s * 0.45) mx (my + s * 0.7) col
-    else pushFilledTriangle da (mx - s * 0.45) (my - s) (mx + s * 0.7) my (mx - s * 0.45) (my + s) col
+    then do
+      pushLine da (mx - s) (my - s * 0.45) mx (my + s * 0.7) t col
+      pushLine da mx (my + s * 0.7) (mx + s) (my - s * 0.45) t col
+    else do
+      pushLine da (mx - s * 0.45) (my - s) (mx + s * 0.7) my t col
+      pushLine da (mx + s * 0.7) my (mx - s * 0.45) (my + s) t col
 

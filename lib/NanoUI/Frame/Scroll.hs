@@ -60,9 +60,10 @@ import NanoUI.Frame.Scroll.Geometry
   , scrollContentClip
   , scrollOffsetFromThumb
   , scrollViewportClip2D
+  , scrollChromeActive
   , scrollChromeSuppressed
-  , scrollShowsChrome
   , decodeScrollConfig
+  , padContentClip
   , isScrollStyle2D
   , ScrollConfig (..)
   , ScrollPolicy (..)
@@ -576,6 +577,9 @@ drawScrollBar ctx da idx wid x y w h pad theme terminal = do
   off <- getScrollOffset ctx wid
   let fm = ctxFontMetrics ctx
   slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
+  let padClip = padContentClip (ctxHostProfile ctx) fm x y w h pad
+      innerW = rectW padClip
+      innerH = rectH padClip
   let base =
         case slot of
           ScrollBarWindow -> themeFloatingWindow theme
@@ -604,13 +608,17 @@ drawScrollBar ctx da idx wid x y w h pad theme terminal = do
       contentH <- getNodeValue (ctxNodeArena ctx) idx
       contentW <- getAspect (ctxNodeArena ctx) idx
       V2 offX offY <- getScrollOffset2D ctx wid
-      when (scrollShowsChrome cfg True DirColumn) $
+      when (scrollChromeActive cfg True DirColumn contentH innerH) $
         drawAxis DirColumn contentH offY
-      when (scrollShowsChrome cfg True DirRow) $
+      when (scrollChromeActive cfg True DirRow contentW innerW) $
         drawAxis DirRow contentW offX
     else do
       let cfg = decodeScrollConfig si
       contentSize <- getNodeValue (ctxNodeArena ctx) idx
-      when (scrollShowsChrome cfg False dir) $
+      let innerMain =
+            case dir of
+              DirColumn -> innerH
+              DirRow -> innerW
+      when (scrollChromeActive cfg False dir contentSize innerMain) $
         drawAxis dir contentSize off
 

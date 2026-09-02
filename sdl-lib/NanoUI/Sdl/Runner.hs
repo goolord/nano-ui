@@ -61,7 +61,7 @@ import NanoUI.Sdl.Display
   , windowToLogicalCoords
   )
 import NanoUI.Sdl.Render (withRenderBatch)
-import NanoUI.Sdl.Font (glyphAtlasTexture)
+import NanoUI.Sdl.Font (fontSourceLabel, glyphAtlasTexture)
 import NanoUI.Sdl.Window (SdlEnv (..))
 import Foreign.Ptr (Ptr, nullPtr)
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
@@ -192,4 +192,4 @@ readSdlDebugEnv env = do
   size <- queryWindowLogicalSize (sdlWindow env) scale
   mouse <- queryMouseWindowPos
   let pos = maybe (V2 0 0) (windowToLogicalCoords scale) mouse
-  readSdlDebug (sdlDebug env) size pos (sdlFontPath env) scale name (sdlVsync env)
+  readSdlDebug (sdlDebug env) size pos (fontSourceLabel (sdlFontSource env)) scale name (sdlVsync env)

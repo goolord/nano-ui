@@ -3,6 +3,7 @@
 -- | Floating overlay chrome: title bars, close buttons, cell-host scaling.
 module NanoUI.Widgets.Chrome
   ( titleBarHFor
+  , titleBarChromeHFor
   , titleBarLayoutFor
   , titleLabelLayoutFor
   , floatPadFor
@@ -10,6 +11,8 @@ module NanoUI.Widgets.Chrome
   , floatMinFor
   , titleMark
   , closeButton
+  , windowChromeTop
+  , windowChromeSepH
   ) where
 
 import Effectful (Eff, type (:>))
@@ -38,18 +41,33 @@ import NanoUI.Widgets.Node (Responding (..), Response, addWidget, setClicked, se
 titleBarH :: Float
 titleBarH = 28
 
+closeButtonSize :: Float
+closeButtonSize = 24
+
+windowChromeTop :: Float
+windowChromeTop = 10
+
 titleBarHFor :: HostProfile -> Float
 titleBarHFor host
   | isCellHost host = 1
   | otherwise = titleBarH
 
-titleBarLayoutFor :: HostProfile -> Layout
-titleBarLayoutFor host =
-  tight . gap (if isCellHost host then 1 else 6) . alignMid . fixedH (titleBarHFor host) . fillW $ defaultLayout
+windowChromeSepH :: Float
+windowChromeSepH = 1
 
-titleLabelLayoutFor :: HostProfile -> Layout
-titleLabelLayoutFor host =
-  tight . alignMid . fixedH (titleBarHFor host) $ defaultLayout
+titleBarChromeHFor :: HostProfile -> Float
+titleBarChromeHFor host
+  | isCellHost host = titleBarHFor host
+  | otherwise = titleBarH + windowChromeTop + windowChromeSepH
+
+titleBarLayoutFor :: HostProfile -> Float -> Layout
+titleBarLayoutFor host barH =
+  tight . gap (if isCellHost host then 1 else 6) . alignMid . fixedH barH . fillW $ defaultLayout
+
+titleLabelLayoutFor :: HostProfile -> Float -> Layout
+titleLabelLayoutFor _host barH =
+  (fixedH barH . alignMid . tight) $
+    defaultLayout {layoutMinH = barH, layoutMaxH = barH}
 
 floatPadFor :: HostProfile -> Padding -> Padding
 floatPadFor host pad
@@ -80,13 +98,12 @@ closeButton = do
   uiIO $ registerFocusable ctx wid
   let host = ctxHostProfile ctx
       stored = closeButtonMarker <> iconClose (ctxIcons ctx)
-      h = titleBarHFor host
       layout =
         if isCellHost host
           then
             let slotW = 3
              in tight . fixedW slotW . alignMid $ defaultLayout
-          else tight . fixedWH h h . alignMid $ defaultLayout
+          else tight . fixedWH closeButtonSize closeButtonSize . alignMid $ defaultLayout
   resp <- addWidget wid NodeButton stored 0 layout
   disabled <- uiIO (isDisabled ctx wid)
   pure $

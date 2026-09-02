@@ -23,6 +23,8 @@ module NanoUI.Frame.Scroll.Geometry
   , scrollAxisGutter
   , scrollShowsChrome
   , scrollChromeSuppressed
+  , scrollAxisOverflows
+  , scrollChromeActive
   , isScrollStyle2D
   , tagClippedSpans
   , padTextClipRect
@@ -155,6 +157,30 @@ scrollShowsChrome cfg _native2D dir =
 
 scrollChromeSuppressed :: ScrollConfig -> Bool -> DirTag -> Bool
 scrollChromeSuppressed cfg native2D dir = not (scrollShowsChrome cfg native2D dir)
+
+scrollAxisOverflows :: ScrollPolicy -> Float -> Float -> Bool
+scrollAxisOverflows policy contentSize innerMain =
+  case policy of
+    ScrollNone -> False
+    ScrollHidden -> False
+    ScrollAlways -> True
+    ScrollAuto -> contentSize > innerMain + 0.5
+
+scrollChromeActive ::
+  ScrollConfig ->
+  Bool ->
+  DirTag ->
+  Float ->
+  Float ->
+  Bool
+scrollChromeActive cfg native2D dir contentSize innerMain =
+  scrollShowsChrome cfg native2D dir
+    && scrollAxisOverflows
+      (case dir of
+         DirColumn -> scrollPolicyY cfg
+         DirRow -> scrollPolicyX cfg)
+      contentSize
+      innerMain
 
 data ScrollBarLayout = ScrollBarLayout
   { sbTrack :: Rect

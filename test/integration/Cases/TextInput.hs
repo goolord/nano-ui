@@ -5,6 +5,8 @@ module Cases.TextInput
   , runTextInputClipboardTest
   , runTextInputCtrlATest
   , runTextInputCursorTest
+  , runTextAreaCursorTest
+  , runTextInputCutMenuTest
   , runTextInputDirtyTest
   , runTextInputFocusSdlTest
   , runTextInputFocusTest
@@ -37,6 +39,31 @@ runTextInputCursorTest ctx failed = do
       labelKind <- uiCursorKind ctx labelHover
       assertEq failed labelKind UiCursorDefault
       let fieldHover = inp0 {inputMousePos = V2 fx fy}
+      _ <- runFrame ctx fieldHover ui
+      fieldKind <- uiCursorKind ctx fieldHover
+      assertEq failed fieldKind UiCursorText
+      let click = fieldHover {inputMouseDown = True, inputMousePressed = True, inputMouseReleased = False}
+      _ <- runFrame ctx click ui
+      clickKind <- uiCursorKind ctx click
+      assertEq failed clickKind UiCursorText
+    _ -> assert failed False
+
+runTextAreaCursorTest :: Context -> IORef Int -> IO ()
+runTextAreaCursorTest ctx failed = do
+  let inp0 = withInput 320 220
+      ui = column defaultLayout (textArea "Notes" "Edit me.\nSecond line.")
+  (resp, _) <- warmup2 ctx inp0 ui
+  spans <- collectTextSpans ctx
+  let labelPos = [(rectX r + rectW r / 2, rectY r + 0.5) | (r, txt, _, _, _) <- spans, txt == "Notes"]
+      Rect rx ry rw rh = respRect resp
+      emptyField = V2 (rx + rw * 0.85) (ry + rh - 10)
+  case labelPos of
+    [(lx, ly)] -> do
+      let labelHover = inp0 {inputMousePos = V2 lx ly}
+      _ <- runFrame ctx labelHover ui
+      labelKind <- uiCursorKind ctx labelHover
+      assertEq failed labelKind UiCursorDefault
+      let fieldHover = inp0 {inputMousePos = emptyField}
       _ <- runFrame ctx fieldHover ui
       fieldKind <- uiCursorKind ctx fieldHover
       assertEq failed fieldKind UiCursorText
@@ -142,6 +169,38 @@ runTextInputClipboardTest ctx failed = do
   _ <- runFrame ctx' selectAll ui >> runFrame ctx' clear ui
   ((_, val), _, _, _) <- runFrame ctx' paste ui
   assertEq failed val "hello"
+
+runTextInputCutMenuTest :: Context -> IORef Int -> IO ()
+runTextInputCutMenuTest ctx failed = do
+  clipRef <- newIORef (Nothing :: Maybe T.Text)
+  let ctx' = withClipboard ctx (readIORef clipRef) (\s -> writeIORef clipRef (Just s) >> pure True)
+      inp0 = withInput 320 160
+      ui = column defaultLayout (textInput "Name" "hello")
+  _ <- warmup2 ctx' inp0 ui
+  _ <- runFrame ctx' (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
+  spans <- collectTextSpans ctx'
+  case [r | (r, txt, _, _, _) <- spans, txt == "hello"] of
+    (Rect fx fy _ fh : _) -> do
+      let menuOpen =
+            inp0
+              { inputMousePos = V2 (fx + 1) (fy + fh / 2)
+              , inputMouseRightDown = True
+              , inputMouseRightPressed = True
+              }
+      _ <- runFrame ctx' menuOpen ui
+      overlays <- collectOverlayTextSpans ctx' menuOpen
+      case [r | (r, txt, _, _, _) <- overlays, txt == "Cut"] of
+        (Rect px py pw ph : _) -> do
+          let (pickPress, pickRelease) = clickPair inp0 (V2 (px + pw / 2) (py + ph / 2))
+          _ <- runFrame ctx' pickPress ui >> runFrame ctx' pickRelease ui
+          clip <- readIORef clipRef
+          assertEq failed clip (Just "hello")
+          ((_, val), _, _, _) <- runFrame ctx' inp0 ui
+          assertEq failed val ""
+          overlaysAfter <- collectOverlayTextSpans ctx' inp0
+          assert failed (not (any (\(_, txt, _, _, _) -> txt == "Cut") overlaysAfter))
+        _ -> assert failed False
+    _ -> assert failed False
 
 runTextInputMenuTest :: Context -> IORef Int -> IO ()
 runTextInputMenuTest ctx failed = do

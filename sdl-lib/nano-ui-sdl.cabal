@@ -9,6 +9,7 @@ author:             goolord
 maintainer:         zacharyachurchill@gmail.com
 category:           Graphics
 build-type:         Simple
+extra-source-files: data/inter.ttf
 
 flag sdl
     description: Build the SDL3 window backend (requires SDL3, SDL3_ttf, and pkg-config)
@@ -61,6 +62,7 @@ library
     import:           warnings
     exposed-modules:
         NanoUI.Backend.Sdl
+        NanoUI.Sdl.NanoUIFont
     other-modules:
         NanoUI.Sdl.Session
         NanoUI.Sdl.Runner
@@ -69,6 +71,9 @@ library
         NanoUI.Sdl.Debug
         NanoUI.Sdl.Display
         NanoUI.Sdl.Font
+        NanoUI.Sdl.Font.Inter
+        NanoUI.Sdl.Font.Resolve
+        NanoUI.Sdl.Font.Search
         NanoUI.Sdl.Image
         NanoUI.Sdl.Input
         NanoUI.Sdl.Render
@@ -79,14 +84,18 @@ library
         containers ^>=0.8,
         directory ^>=1.3,
         effectful ^>=2.6,
+        file-embed ^>=0.0.16,
         nano-ui,
         primitive ^>=0.9,
+        template-haskell,
         vector ^>=0.13,
         record-hasfield ^>=1.0,
         sdl3-bindgen-sys ^>=0.0.0.2,
         text ^>=2.1
     hs-source-dirs:   .
     default-language: GHC2024
+    if !flag(sdl)
+        buildable: False
     if flag(sdl)
         c-sources:        cbits/nano_ui_ttf.c
                           cbits/nano_ui_display.c
@@ -95,8 +104,10 @@ library
                           cbits/nano_ui_text_atlas.c
         include-dirs:     cbits
         pkgconfig-depends: sdl3 >= 3.2, sdl3-ttf >= 3.2
-    else
-        buildable: False
+    if flag(sdl) && !os(windows)
+        build-depends: fontconfig-pure ^>=0.5.1.0
+        pkgconfig-depends: fontconfig
+        cpp-options: -DHAVE_FONTCONFIG
 
 executable nano-ui-sdl-demo
     import:           extensions

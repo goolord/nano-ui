@@ -69,7 +69,7 @@ panelPaintPad = 8
 
 -- Floating window chrome.
 windowPad :: Padding
-windowPad = Padding 10 10 7 9
+windowPad = Padding 10 10 0 10
 
 -- Screen inset for floating window/modal max size and default placement.
 windowMargin :: Float

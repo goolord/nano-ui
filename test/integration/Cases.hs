@@ -84,6 +84,7 @@ import NanoUI.Testing.Assert (assert, assertEq, assertGt, measureRespW, runClick
 import NanoUI.Testing.Harness
   ( centerOf
   , checkLabelAlignEnd
+  , checkLabelAlignEndInk
   , clickPair
   , spanXOf
   , spanYOf
@@ -501,6 +502,7 @@ runLabelAlignEndTest :: Context -> IORef Int -> IO ()
 runLabelAlignEndTest _ failed = do
   checkLabelAlignEnd failed =<< newCellContext
   checkLabelAlignEnd failed =<< newPixelContext
+  checkLabelAlignEndInk failed
 
 runAspectLayoutTest :: Context -> IORef Int -> IO ()
 runAspectLayoutTest ctx failed = do

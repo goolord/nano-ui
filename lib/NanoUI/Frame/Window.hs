@@ -32,7 +32,7 @@ import NanoUI.Context
   , slotWinSize
   )
 import NanoUI.Draw (pushBackdropDim, pushRect, withClip)
-import NanoUI.Font (ScrollBarSlot (..))
+import NanoUI.Font (ScrollBarSlot (..), resolveLayoutPadding)
 import NanoUI.Types (isCellHost)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), inputMouseDown, inputMousePos, inputMousePressed)
@@ -53,7 +53,16 @@ import NanoUI.Layout.Arena
   , getWidgetId
   )
 import NanoUI.Layout.Solve (positionWindowNode, scrollBarSlotOf)
-import NanoUI.Style (Padding (..), Style (..), Theme (..), themeOverlayDim)
+import NanoUI.Style
+  ( Padding (..)
+  , Style (..)
+  , Theme (..)
+  , padL
+  , padR
+  , padT
+  , themeOverlayDim
+  , themeSeparator
+  )
 import NanoUI.Types (DamageBounds (..), Rect (..), Size (..), V2 (..), haloDamageSlop, rectContains, rectY)
 import NanoUI.Input (UiCursorKind (..))
 import NanoUI.Frame.Chrome
@@ -70,6 +79,7 @@ import NanoUI.Frame.Input (findTopWidgetUnderMouse, isInteractiveNode)
 import NanoUI.Frame.Paint (walkChildren)
 import NanoUI.Frame.Redraw (probeHotId)
 import NanoUI.Frame.Scroll (paintScrollChrome)
+import NanoUI.Widgets.Chrome (titleBarChromeHFor, windowChromeSepH)
 import NanoUI.Frame.Scroll.Geometry (decodeScrollConfig)
 
 topmostWindowAtResizeHalo :: Context -> V2 -> IO (Maybe NodeIdx)
@@ -483,8 +493,20 @@ drawWindowOverlays :: Context -> IO ()
 drawWindowOverlays ctx = do
   let theme = ctxTheme ctx
       style = overlayWindowStyle theme
-  forFloatingNode ctx NodeWindow $ \idx rect ->
+      da = ctxDrawArena ctx
+      host = ctxHostProfile ctx
+      fm = ctxFontMetrics ctx
+      terminal = isCellHost host
+  forFloatingNode ctx NodeWindow $ \idx rect@(Rect x y w _) -> do
     drawFloatingPanel ctx idx style rect rect
+    when (not terminal) $ do
+      pad0 <- getPadding (ctxNodeArena ctx) idx
+      let pad = resolveLayoutPadding host fm pad0
+          chromeH = titleBarChromeHFor host
+          sepY = y + padT pad + chromeH - windowChromeSepH
+          sepX = x + padL pad
+          sepW = max 0 (w - padL pad - padR pad)
+      pushRect da (Rect sepX sepY sepW windowChromeSepH) (themeSeparator theme)
 
 drawPopupOverlays :: Context -> IO ()
 drawPopupOverlays ctx = do

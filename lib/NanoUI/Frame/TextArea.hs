@@ -112,10 +112,9 @@ loadTextAreaStateAt ctx idx x y w h = do
       initial = IM.findWithDefault "" key (storeText store)
       fm = ctxFontMetrics ctx
       geom = textAreaGeom (ctxHostProfile ctx) fm x y w h
-      field = tagFieldRect geom
-      (ix, _) = widgetContentInset (ctxHostProfile ctx) fm
-      vpW = max 0 (rectW field - 2 * ix)
-      vpH = max 0 (rectH field)
+      clip = textAreaFieldClip (ctxHostProfile ctx) geom fm
+      vpW = rectW clip
+      vpH = rectH clip
       lineH = tagLineHeight geom
       state0 = TA.loadTextAreaState store key initial
   pure (TA.setTextAreaViewport (realToFrac vpW, realToFrac vpH) (realToFrac lineH) state0)
@@ -127,9 +126,8 @@ syncTextAreaViewport ctx idx x y w h = do
   let key = intKey wid
       fm = ctxFontMetrics ctx
       geom = textAreaGeom (ctxHostProfile ctx) fm x y w h
-      field = tagFieldRect geom
-      (ix, _) = widgetContentInset (ctxHostProfile ctx) fm
-      vp = (max 0 (rectW field - 2 * ix), max 0 (rectH field))
+      clip = textAreaFieldClip (ctxHostProfile ctx) geom fm
+      vp = (rectW clip, rectH clip)
   setStore ctx (store {storePoint = IM.insert (slotKey slotTextAreaViewport key) vp (storePoint store)})
 
 drawTextAreaSelection ::
@@ -150,9 +148,9 @@ drawTextAreaSelection da ctx state geom host fm theme style = do
         lineTexts = TB.toLines (TA.buffer state)
         field = tagFieldRect geom
         lineH = tagLineHeight geom
-        (ix, _) = widgetContentInset host fm
+        (ix, iy) = widgetContentInset host fm
         scrollYf = realToFrac (snd (TA.scrollOffset state))
-        fieldTop = rectY field
+        contentTop = rectY field + iy
         accent = themeAccent theme
         selBg = lerpColor accent (styleBg style) 0.55
         loRow = TB.cursorRow lo
@@ -175,7 +173,7 @@ drawTextAreaSelection da ctx state geom host fm theme style = do
       when (startCol < endCol) $ do
         (wLo, _) <- ctxMeasureText ctx (T.take startCol line)
         (wHi, _) <- ctxMeasureText ctx (T.take endCol line)
-        let ly = fieldTop + fromIntegral row * lineH - scrollYf
+        let ly = contentTop + fromIntegral row * lineH - scrollYf
             selX = rectX field + ix + wLo
             selW = max 1 (wHi - wLo)
             selH = max 4 lineH
@@ -195,8 +193,9 @@ drawTextAreaContent da ctx idx x y w h style = do
           geom = textAreaGeom host fm x y w h
           field = tagFieldRect geom
           lineH = tagLineHeight geom
-          (ix, _) = widgetContentInset host fm
           clip = textAreaFieldClip host geom fm
+          contentX = rectX clip
+          contentTop = rectY clip
           fg = styleFg style
       state <- loadTextAreaStateAt ctx idx x y w h
       let buf = TA.buffer state
@@ -209,11 +208,11 @@ drawTextAreaContent da ctx idx x y w h style = do
         when focus $
           drawTextAreaSelection da ctx state geom host fm theme style
         forM_ (zip [0 :: Int ..] lineTexts) $ \(row, line) -> do
-          let ly = fieldTop + fromIntegral row * lineH - scrollYf
+          let ly = contentTop + fromIntegral row * lineH - scrollYf
           when (ly + lineH >= fieldTop && ly <= fieldBottom) $
             unless (T.null line) $ do
               let (fm', shown) = pickMonoFont fm (ctxMonoFontMetrics ctx) line
-              pushText da fm' (rectX field + ix) ly shown fg
+              pushText da fm' contentX ly shown fg
         when focus $ do
           let TB.Cursor row col = TB.getCursor buf
               currentLine =
@@ -222,8 +221,8 @@ drawTextAreaContent da ctx idx x y w h style = do
                   else ""
               prefix = T.take col currentLine
           (pw, _) <- ctxMeasureText ctx prefix
-          let caretX = rectX field + ix + pw
-              caretY = fieldTop + fromIntegral row * lineH - scrollYf + 1
+          let caretX = contentX + pw
+              caretY = contentTop + fromIntegral row * lineH - scrollYf + 1
               caretH = max 4 (lineH - 2)
           pushRect da (Rect caretX caretY 1 caretH) fg
 
@@ -247,13 +246,13 @@ textAreaHitForWidget ctx wid = do
                   let fm = ctxFontMetrics ctx
                       geom = textAreaGeom (ctxHostProfile ctx) fm x y w h
                       field = tagFieldRect geom
-                      (ix, _) = widgetContentInset (ctxHostProfile ctx) fm
+                      clip = textAreaFieldClip (ctxHostProfile ctx) geom fm
                   pure
                     ( Just
                         TextAreaHit
                           { tahNodeIdx = idx
                           , tahFieldRect = field
-                          , tahContentX = rectX field + ix
+                          , tahContentX = rectX clip
                           , tahLineH = tagLineHeight geom
                           , tahWidgetX = x
                           , tahWidgetY = y
@@ -267,8 +266,10 @@ textAreaCursorAt ctx state hit mouse = do
   let lineTexts = TB.toLines (TA.buffer state)
       lineCount = max 1 (length lineTexts)
       scrollYf = realToFrac (snd (TA.scrollOffset state))
-      fieldTop = rectY (tahFieldRect hit)
-      relY = v2Y mouse - fieldTop + scrollYf
+      fm = ctxFontMetrics ctx
+      (_, iy) = widgetContentInset (ctxHostProfile ctx) fm
+      contentTop = rectY (tahFieldRect hit) + iy
+      relY = v2Y mouse - contentTop + scrollYf
       rawRow = floor (relY / max 1 (tahLineH hit))
       row = max 0 (min (lineCount - 1) rawRow)
       line =
