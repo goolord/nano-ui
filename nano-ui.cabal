@@ -56,6 +56,8 @@ library
     import:           warnings
     exposed-modules:
         NanoUI
+        NanoUI.Debug
+        NanoUI.Input
         NanoUI.Testing
         NanoUI.Widgets.TextBuffer
         NanoUI.Widgets.TextArea
@@ -87,7 +89,6 @@ library
         NanoUI.Frame.Window
         NanoUI.Icons
         NanoUI.Id
-        NanoUI.Input
         NanoUI.Layout.Arena
         NanoUI.Layout.Solve
         NanoUI.Monad
@@ -120,6 +121,7 @@ library
         containers ^>=0.8,
         effectful ^>=2.6,
         effectful-core ^>=2.6,
+        ghc,
         ghc-compact ^>=0.1,
         hashable ^>=1.5,
         hashtables ^>=1.4,

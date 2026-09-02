@@ -17,7 +17,7 @@ import Data.IORef (IORef, atomicModifyIORef', newIORef)
 import Data.Word (Word32, Word64, Word8)
 import GHC.Clock (getMonotonicTime)
 import GHC.Conc (getNumCapabilities, getNumProcessors)
-import GHC.Stats (GCDetails (..), RTSStats (..), getRTSStats, getRTSStatsEnabled)
+import GHC.Stats (getRTSStats, getRTSStatsEnabled)
 import NanoUI
   ( Color (..)
   , Size (..)
@@ -28,6 +28,7 @@ import NanoUI
   , themePanel
   , themeWindow
   )
+import NanoUI.Debug (blend, debugRefreshSec, rtsFields)
 import NanoUI.Testing (Context, DrawData (..), ctxTheme, drawCmdCount)
 
 data TermDrawStats = TermDrawStats
@@ -93,9 +94,6 @@ data TermDebugSampler = TermDebugSampler
   }
 
 newtype TermDebugHost = TermDebugHost {termDebugSampler :: IORef TermDebugSampler}
-
-debugRefreshSec :: Double
-debugRefreshSec = 0.25
 
 type SamplerRef = IORef TermDebugSampler
 
@@ -264,35 +262,6 @@ readTermDebug ref (Size ww wh) (V2 mx my) ctx = do
       atomicModifyIORef' ref $ \s ->
         (s {smLastDebugT = now, smSnapshot = snap', smWantFrame = True}, ())
       pure snap'
-
-blend :: Double -> Double -> Double
-blend prev sample
-  | prev <= 0 = sample
-  | otherwise = prev * 0.85 + sample * 0.15
-
-bytesMb :: Word64 -> Double
-bytesMb n = fromIntegral n / (1024 * 1024)
-
-nsMs :: Integral a => a -> Double
-nsMs n = fromIntegral n / 1.0e6
-
-rtsFields :: RTSStats -> (Word32, Word32, Double, Double, Double, Double, Double, Word32, Double)
-rtsFields st =
-  let tot = elapsed_ns st
-      gcNs = gc_elapsed_ns st
-      pct = if tot > 0 then 100 * fromIntegral gcNs / fromIntegral tot else 0
-      lastGc = gc st
-   in
-    ( gcs st
-    , major_gcs st
-    , bytesMb (allocated_bytes st)
-    , bytesMb (gcdetails_live_bytes lastGc)
-    , bytesMb (max_mem_in_use_bytes st)
-    , bytesMb (copied_bytes st)
-    , pct
-    , gcdetails_gen lastGc
-    , nsMs (gcdetails_elapsed_ns lastGc)
-    )
 
 colorRgb :: Color -> (Word8, Word8, Word8)
 colorRgb (Color w) =

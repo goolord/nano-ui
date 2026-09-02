@@ -13,6 +13,7 @@ import Control.Monad (when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import qualified Data.Text as T
 import GHC.Clock (getMonotonicTime)
+import NanoUI.Input (clearEphemeral, isHardQuitInput, splitFrame)
 import NanoUI
   ( Input (..)
   , Modifiers (..)
@@ -21,7 +22,6 @@ import NanoUI
   , asciiIcons
   , defaultTheme
   , emptyInput
-  , emptyInputKeys
   , V2 (..)
   )
 import NanoUI.Testing
@@ -181,7 +181,7 @@ termMainLoop ctx shouldQuit runOnce getSize readEvents present = do
                 animating <- anyAnimating ctx
                 readEvents (if animating then animateTimeout else idleBlock)
           else pure []
-      let (group, rest) = splitFrame (queued ++ pending)
+      let (group, rest) = splitFrame isButtonEdge (queued ++ pending)
       editActive <- textInputEditActive ctx
       if any isHardQuit group && not editActive
         then pure ()
@@ -244,12 +244,6 @@ termMainLoop ctx shouldQuit runOnce getSize readEvents present = do
   draw cellsRef prevInpRef inp0
   loop cellsRef prevInpRef clickRef inp0 [] startTime
 
-splitFrame :: [TermEvent] -> ([TermEvent], [TermEvent])
-splitFrame events =
-  case break isButtonEdge events of
-    (before, edge : rest) -> (before ++ [edge], rest)
-    (before, []) -> (before, [])
-
 isButtonEdge :: TermEvent -> Bool
 isButtonEdge ev =
   case ev of
@@ -262,24 +256,6 @@ isHardQuit ev =
   case ev of
     EvChar c mods -> modCtrl mods && (c == 'c' || c == '\ETX')
     _ -> False
-
-isHardQuitInput :: Input -> Bool
-isHardQuitInput inp =
-  modCtrl (inputModifiers inp)
-    && (T.elem 'c' (inputChars inp) || T.elem '\ETX' (inputChars inp))
-
-clearEphemeral :: Input -> Input
-clearEphemeral inp =
-  inp
-    { inputKeys = emptyInputKeys
-    , inputChars = ""
-    , inputMousePressed = False
-    , inputMouseReleased = False
-    , inputMouseRightPressed = False
-    , inputMouseRightReleased = False
-    , inputMouseClicks = 1
-    , inputScroll = V2 0 0
-    }
 
 stampClicks :: IORef (Double, V2, Int) -> Input -> IO Input
 stampClicks ref inp
