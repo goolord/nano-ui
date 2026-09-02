@@ -15,7 +15,14 @@ import qualified Data.Text as T
 import NanoUI.Context (Context (..), WidgetStore (..), getHotId, getScrollOffset, getScrollOffset2D, getStore, intKey, isDisabled, isSelectOpen)
 import NanoUI.Font (sliderTrackBounds)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
-import NanoUI.Input (Input (..), inputMouseDown, inputMousePos)
+import NanoUI.Input
+  ( Input (..)
+  , UiCursorKind (..)
+  , grabDragKind
+  , grabHoverKind
+  , inputMouseDown
+  , inputMousePos
+  )
 import NanoUI.Layout.Arena
   ( DirTag (..)
   , NodeType (..)
@@ -34,7 +41,6 @@ import NanoUI.Layout.Arena
 import NanoUI.Layout.Solve (scrollBarSlotOf)
 import NanoUI.Types (Rect (..), V2 (..), rectContains, v2X, v2Y)
 import NanoUI.WidgetText (isTableHeaderStyle, selectOptions, sliderLabelText)
-import NanoUI.Frame.CursorKind (UiCursorKind (..), grabDragKind, grabHoverKind)
 import NanoUI.Frame.Chrome (widgetNodeTypeTable)
 import NanoUI.Frame.Hit (findNodeByWidgetId, scrollHitRect, nodePointVisible)
 import NanoUI.Frame.Scroll (scrollBarLayout, ScrollBarLayout (..))

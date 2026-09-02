@@ -56,7 +56,7 @@ module NanoUI.Font
 
 import Data.Text (Text)
 import qualified Data.Text as T
-import NanoUI.Host (HostProfile, isCellHost)
+import NanoUI.Types (HostProfile, isCellHost)
 import NanoUI.Style (AlignX (..), Padding (..), defaultLayout, layoutGap)
 import NanoUI.Icons (terminalPaintColumns)
 import NanoUI.Types (Rect (..), sliderBarCells)

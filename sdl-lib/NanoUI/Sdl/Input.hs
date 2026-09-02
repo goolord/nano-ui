@@ -2,7 +2,8 @@
 {-# LANGUAGE NoFieldSelectors #-}
 
 module NanoUI.Sdl.Input
-  ( pollEvents
+  ( SdlEvent (..)
+  , pollEvents
   , waitEvent
   , waitEventTimeout
   , applyEvent
@@ -22,6 +23,7 @@ import Data.Primitive.SmallArray
   , smallArrayFromListN
   )
 import qualified Data.Text as T
+import Data.Text (Text)
 import Data.Word (Word32)
 import Foreign.C.String (peekCString)
 import Foreign.C.Types (CFloat)
@@ -41,7 +43,6 @@ import NanoUI
   , v2Add
   )
 import NanoUI.Sdl.Display (readRefreshEventType)
-import NanoUI.Sdl.Event (SdlEvent (..))
 import SDL3.Sys.Bindgen.Events
   ( SDL_Event (..)
   , SDL_KeyboardEvent
@@ -68,6 +69,21 @@ import SDL3.Sys.Bindgen.Keycode
 import SDL3.Sys.Bindgen.Mouse (sDL_BUTTON_LEFT, sDL_BUTTON_RIGHT)
 import SDL3.Sys.Bindgen.Stdinc (Sint32 (..), Uint32 (..))
 import SDL3.Sys.Keyboard (getModStateSafe)
+
+data SdlEvent
+  = EvQuit
+  | EvResize Int Int
+  | EvDisplayScale
+  | EvKey Key Modifiers
+  | EvText Text Modifiers
+  | EvMouseMotion V2 Modifiers
+  | EvMousePress V2 Modifiers Int
+  | EvMouseRelease V2 Modifiers
+  | EvMouseRightPress V2 Modifiers
+  | EvMouseRightRelease V2 Modifiers
+  | EvScroll V2
+  | EvRefresh
+  deriving (Eq, Show)
 
 singletonEv :: SdlEvent -> SmallArray SdlEvent
 singletonEv ev = smallArrayFromListN 1 [ev]

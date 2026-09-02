@@ -33,7 +33,7 @@ import NanoUI.Context
   )
 import NanoUI.Draw (pushBackdropDim, pushRect, withClip)
 import NanoUI.Font (ScrollBarSlot (..))
-import NanoUI.Host (isCellHost)
+import NanoUI.Types (isCellHost)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), inputMouseDown, inputMousePos, inputMousePressed)
 import NanoUI.Layout.Arena
@@ -55,7 +55,7 @@ import NanoUI.Layout.Arena
 import NanoUI.Layout.Solve (positionWindowNode, scrollBarSlotOf)
 import NanoUI.Style (Padding (..), Style (..), Theme (..), themeOverlayDim)
 import NanoUI.Types (DamageBounds (..), Rect (..), Size (..), V2 (..), haloDamageSlop, rectContains, rectY)
-import NanoUI.Frame.CursorKind (UiCursorKind (..))
+import NanoUI.Input (UiCursorKind (..))
 import NanoUI.Frame.Chrome
   ( fillStyledRect
   , overlayMenuStyle
@@ -64,7 +64,7 @@ import NanoUI.Frame.Chrome
   , pushMenuShadow
   , strokeStyledRect
   )
-import NanoUI.Frame.Clip (scrollChromeLane, scrollContentClip, terminalModalOuterClip)
+import NanoUI.Frame.Scroll.Geometry (scrollChromeLane, scrollContentClip, terminalModalOuterClip)
 import NanoUI.Frame.Hit (findNodeByWidgetId, modalTreeOpen, nodeInSubtree, topmostOverlayAtMouse)
 import NanoUI.Frame.Input (findTopWidgetUnderMouse, isInteractiveNode)
 import NanoUI.Frame.Paint (walkChildren)

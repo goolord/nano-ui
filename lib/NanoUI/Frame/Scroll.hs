@@ -23,7 +23,7 @@ import NanoUI.Context
   )
 import NanoUI.Draw (DrawArena, Layer (..), beginLayer, currentLayer, pushRect, pushRoundedRect)
 import NanoUI.Font (ScrollBarSlot (..))
-import NanoUI.Host (HostProfile, isCellHost)
+import NanoUI.Types (HostProfile, isCellHost)
 import NanoUI.Id (WidgetId, hashWidgetId)
 import NanoUI.Input (Input (..), inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased, inputScroll)
 import NanoUI.Layout.Arena
@@ -52,9 +52,9 @@ import NanoUI.Layout.Arena
 import NanoUI.Layout.Solve (scrollBarSlotOf)
 import NanoUI.Style (Padding (..), Theme (..), scrollBarThumbColor, scrollBarTrackColor, themeFloatingWindow, themePanel)
 import NanoUI.Types (Rect (..), V2 (..), rectContains, rectH, rectIntersect, rectUnion, rectW, rectX, rectY, v2X, v2Y)
-import NanoUI.Frame.Clip (borderContentClip)
 import NanoUI.Frame.Scroll.Geometry
   ( ScrollBarLayout (..)
+  , borderContentClip
   , scrollBarLayout
   , scrollChromeLane
   , scrollContentClip

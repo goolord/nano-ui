@@ -32,7 +32,7 @@ import NanoUI.Context
   , startAnimationEaseDelay
   , startSpring
   )
-import NanoUI.Spring (SpringParams)
+import NanoUI.Animation (SpringParams)
 import NanoUI.Monad (Ui, askContext, nextId, uiIO, withKey)
 import NanoUI.Store (WidgetStore (..), boolInt, bumpMirror, intBool)
 

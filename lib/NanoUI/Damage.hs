@@ -21,7 +21,7 @@ import NanoUI.Context
   , intKey
   , markDirty
   )
-import NanoUI.Context.Internal (modalDamageFlip)
+import NanoUI.Context (modalDamageFlip)
 import NanoUI.Store (mirrorStoresChanged)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input

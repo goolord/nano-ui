@@ -25,7 +25,7 @@ import NanoUI.Context
   , seedFloatingPanel
   )
 import NanoUI.Font (resolveLayoutGap, resolveLayoutPadding)
-import NanoUI.Host (isCellHost)
+import NanoUI.Types (isCellHost)
 import NanoUI.Input (inputMousePos)
 import NanoUI.Layout.Arena (NodeType (..), addNode, rootAttachParent, setWidgetId)
 import NanoUI.Id (enterScope, scopeTag)

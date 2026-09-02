@@ -4,11 +4,17 @@
 module NanoUI.Backend.Sdl
   ( RgbaImage (..)
   , SdlDebugSnapshot (..)
+  , SdlEnv (..)
   , SdlOptions (..)
   , askSdlDebug
   , defaultSdlOptions
+  , newSdlContext
   , runSdlApp
   , runSdlAppReduce
+  , sdlDrawFrame
+  , syncDisplay
+  , withSdl
+  , withSdlBench
   ) where
 
 import Control.Monad (unless)
@@ -22,9 +28,9 @@ import NanoUI
   , NanoUI
   , Ui
   )
-import NanoUI.Sdl.Runner (askSdlDebug, drawEff, drawReduceEff, newSdlContext, runSdlSession)
+import NanoUI.Sdl.Runner (askSdlDebug, drawEff, drawReduceEff, newSdlContext, runSdlSession, sdlDrawFrame)
 import NanoUI.Sdl.Debug (SdlDebugSnapshot (..))
-import NanoUI.Sdl.Window (RgbaImage (..), SdlOptions (..), defaultSdlOptions)
+import NanoUI.Sdl.Window (RgbaImage (..), SdlEnv (..), SdlOptions (..), defaultSdlOptions, syncDisplay, withSdl, withSdlBench)
 import NanoUI.Testing (Context, registerImage, runEff, withTheme)
 
 runSdlApp :: SdlOptions -> NanoUI () -> IO ()

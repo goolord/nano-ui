@@ -38,6 +38,8 @@ module NanoUI.Types
   , v2Sub
   , PopupAnchor (..)
   , PopupPlacement (..)
+  , HostProfile (..)
+  , isCellHost
   ) where
 
 import Data.Bits (shiftL, shiftR, (.&.), (.|.))
@@ -332,3 +334,14 @@ data PopupPlacement
   | PlacementAtCursor
   | PlacementAuto
   deriving (Eq, Show)
+
+-- Pixel hosts (SDL, headless). Cell hosts (terminal).
+data HostProfile
+  = PixelHost
+  | CellHost
+  deriving (Eq, Show)
+
+{-# INLINE isCellHost #-}
+isCellHost :: HostProfile -> Bool
+isCellHost CellHost = True
+isCellHost PixelHost = False

@@ -9,7 +9,7 @@ import Effectful (Eff, type (:>))
 import qualified Data.Text as T
 import NanoUI.Context (Context (..), intKey)
 import NanoUI.Font (mutedFontMarker)
-import NanoUI.Host (isCellHost)
+import NanoUI.Types (isCellHost)
 import NanoUI.Icons (radioMark)
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, nextId, withKey)

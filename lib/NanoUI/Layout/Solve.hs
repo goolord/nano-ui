@@ -41,7 +41,7 @@ import NanoUI.Font
   , buttonPadding
   , layoutLineHeight
   )
-import NanoUI.Host (HostProfile, isCellHost)
+import NanoUI.Types (HostProfile, isCellHost)
 import NanoUI.Layout.Arena
   ( DirTag (..)
   , NodeArena
@@ -88,7 +88,7 @@ import NanoUI.Layout.Arena
 import NanoUI.Id (WidgetId)
 import NanoUI.Style (AlignX (..), AlignY (..), Padding (..), windowMargin)
 import NanoUI.Types (PopupAnchor (..), PopupPlacement (..), Rect (..), V2 (..))
-import NanoUI.ColorPicker (colorPickerMeasureSize)
+import NanoUI.Widgets.ColorPicker (colorPickerMeasureSize)
 import NanoUI.WidgetText
   ( checkboxLabelText
   , radioLabelText

@@ -87,7 +87,7 @@ import qualified Data.IntMap.Strict as IM
 import NanoUI.Context (Context (..), bumpMirror, getPrevRect, getScrollOffset, getStore, intKey, linkScrollAxes, markDirty, setScrollOffset, setStore)
 import NanoUI.Font (labelContentInset, stripWidgetMarkers, textDisplayWidth)
 import NanoUI.Frame.Hit (findNodeByWidgetId)
-import NanoUI.Host (isCellHost)
+import NanoUI.Types (isCellHost)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input
   ( Input (..)

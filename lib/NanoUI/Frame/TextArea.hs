@@ -39,7 +39,7 @@ import NanoUI.Font
   )
 import NanoUI.Frame.TextEdit (normalizeTextFieldClicks)
 import NanoUI.Frame.TextInput (textInputCharAtX, textWordBounds)
-import NanoUI.Host (HostProfile, isCellHost)
+import NanoUI.Types (HostProfile, isCellHost)
 import NanoUI.Id (WidgetId (..))
 import NanoUI.Input
   ( Input (..)
