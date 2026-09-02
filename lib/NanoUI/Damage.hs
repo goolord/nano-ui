@@ -31,7 +31,8 @@ import NanoUI.Input
 import NanoUI.Frame.Hit (findNodeByKey, findNodeByWidgetId)
 import NanoUI.Store (slotKey, slotScrollCross)
 import NanoUI.Layout.Arena
-  ( NodeType (..)
+  ( NodeArena
+  , NodeType (..)
   , SizingTag (..)
   , arenaCount
   , getClipRect
@@ -112,6 +113,18 @@ backdropRectFromNode ctx idx = do
       if p < 0
         then pure Nothing
         else backdropRectFromNode ctx p
+
+{-# INLINE walkAncestors #-}
+walkAncestors :: (Int -> IO (Maybe a)) -> NodeArena -> Int -> IO (Maybe a)
+walkAncestors step arena idx = loop idx
+  where
+    loop i
+      | i < 0 = pure Nothing
+      | otherwise = do
+          mr <- step i
+          case mr of
+            Just x -> pure (Just x)
+            Nothing -> getParent arena i >>= loop
 
 updatePrevRects :: Context -> IO ()
 updatePrevRects ctx = do
@@ -460,18 +473,17 @@ scrollOffsetDamage ctx oldStore newStore = do
               pure (catMaybes [mClip, mFloat])
 
 floatingAncestorRect :: Context -> Int -> IO (Maybe Rect)
-floatingAncestorRect ctx idx = go idx
+floatingAncestorRect ctx idx =
+  walkAncestors check (ctxNodeArena ctx) idx
   where
-    go i
-      | i < 0 = pure Nothing
-      | otherwise = do
-          nt <- getNodeType (ctxNodeArena ctx) i
-          if isFloatingNode nt
-            then do
-              (x, y, w, h) <- getRect (ctxNodeArena ctx) i
-              let r = Rect x y w h
-              pure (if nonzeroRect r then Just r else Nothing)
-            else getParent (ctxNodeArena ctx) i >>= go
+    check i = do
+      nt <- getNodeType (ctxNodeArena ctx) i
+      if isFloatingNode nt
+        then do
+          (x, y, w, h) <- getRect (ctxNodeArena ctx) i
+          let r = Rect x y w h
+          pure (if nonzeroRect r then Just r else Nothing)
+        else pure Nothing
 
 nonzeroRect :: Rect -> Bool
 nonzeroRect r = rectW r > 0 && rectH r > 0

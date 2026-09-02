@@ -607,6 +607,18 @@ unpackColorF (Color w) =
       !a = fromIntegral (w .&. 0xFF) * inv255
    in (r, g, b, a)
 
+{-# INLINE pokeVertex #-}
+pokeVertex :: Ptr Word8 -> Int -> Float -> Float -> Float -> Float -> Float -> Float -> Float -> Float -> IO ()
+pokeVertex vp off px py r g b a u v = do
+  pokeByteOff vp off px
+  pokeByteOff vp (off + 4) py
+  pokeByteOff vp (off + 8) r
+  pokeByteOff vp (off + 12) g
+  pokeByteOff vp (off + 16) b
+  pokeByteOff vp (off + 20) a
+  pokeByteOff vp (off + 24) u
+  pokeByteOff vp (off + 28) v
+
 {-# INLINE pushQuad #-}
 pushQuad :: DrawArena -> Rect -> Float -> Float -> Float -> Float -> Color -> IO ()
 pushQuad da (Rect x y w h) u0 v0 u1 v1 col = do
@@ -617,42 +629,11 @@ pushQuad da (Rect x y w h) u0 v0 u1 v1 col = do
       !baseIdxWord = fromIntegral base :: Word32
       !x1 = x + w
       !y1 = y + h
-  pokeByteOff vp vOff x
-  pokeByteOff vp (vOff + 4) y
-  pokeByteOff vp (vOff + 8) r
-  pokeByteOff vp (vOff + 12) g
-  pokeByteOff vp (vOff + 16) b
-  pokeByteOff vp (vOff + 20) a
-  pokeByteOff vp (vOff + 24) u0
-  pokeByteOff vp (vOff + 28) v0
-
-  pokeByteOff vp (vOff + 32) x1
-  pokeByteOff vp (vOff + 36) y
-  pokeByteOff vp (vOff + 40) r
-  pokeByteOff vp (vOff + 44) g
-  pokeByteOff vp (vOff + 48) b
-  pokeByteOff vp (vOff + 52) a
-  pokeByteOff vp (vOff + 56) u1
-  pokeByteOff vp (vOff + 60) v0
-
-  pokeByteOff vp (vOff + 64) x1
-  pokeByteOff vp (vOff + 68) y1
-  pokeByteOff vp (vOff + 72) r
-  pokeByteOff vp (vOff + 76) g
-  pokeByteOff vp (vOff + 80) b
-  pokeByteOff vp (vOff + 84) a
-  pokeByteOff vp (vOff + 88) u1
-  pokeByteOff vp (vOff + 92) v1
-
-  pokeByteOff vp (vOff + 96) x
-  pokeByteOff vp (vOff + 100) y1
-  pokeByteOff vp (vOff + 104) r
-  pokeByteOff vp (vOff + 108) g
-  pokeByteOff vp (vOff + 112) b
-  pokeByteOff vp (vOff + 116) a
-  pokeByteOff vp (vOff + 120) u0
-  pokeByteOff vp (vOff + 124) v1
-
+      poke i px py u v = pokeVertex vp (vOff + i * vertexSize) px py r g b a u v
+  poke 0 x y u0 v0
+  poke 1 x1 y u1 v0
+  poke 2 x1 y1 u1 v1
+  poke 3 x y1 u0 v1
   pokeByteOff ip iOff baseIdxWord
   pokeByteOff ip (iOff + 4) (baseIdxWord + 1)
   pokeByteOff ip (iOff + 8) (baseIdxWord + 2)
@@ -678,14 +659,7 @@ pushQuadGradient da (Rect x y w h) tl tr br bl
           !y1 = y + h
           pokeVert off px py col = do
             let !(r, g, b, a) = unpackColorF col
-            pokeByteOff vp off px
-            pokeByteOff vp (off + 4) py
-            pokeByteOff vp (off + 8) r
-            pokeByteOff vp (off + 12) g
-            pokeByteOff vp (off + 16) b
-            pokeByteOff vp (off + 20) a
-            pokeByteOff vp (off + 24) (0 :: Float)
-            pokeByteOff vp (off + 28) (0 :: Float)
+            pokeVertex vp off px py r g b a 0 0
       pokeVert vOff x y tl
       pokeVert (vOff + 32) x1 y tr
       pokeVert (vOff + 64) x1 y1 br
@@ -931,21 +905,42 @@ pushRoundedStroke da (Rect x y w h) radius bw col
 {-# INLINE pushLine #-}
 pushLine :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
 pushLine da x1 y1 x2 y2 thickness col = do
-  let dx = x2 - x1
-      dy = y2 - y1
-      len = sqrt (dx * dx + dy * dy)
-  if len < 0.001
+  let !dx = x2 - x1
+      !dy = y2 - y1
+      !lenSq = dx * dx + dy * dy
+  if lenSq < 1e-6
     then pure ()
     else do
       setTexture da 0
-      let r = thickness / 2
-          step = max 0.5 (r * 0.65)
-          n = max (1 :: Int) (ceiling (len / step))
-      forM_ [0 .. n] $ \i -> do
-        let u = fromIntegral i / fromIntegral n
-            cx = x1 + dx * u
-            cy = y1 + dy * u
-        pushRoundedRect da (Rect (cx - r) (cy - r) thickness thickness) r col
+      let !invLen = 1 / sqrt lenSq
+          !hx = dx * invLen * (thickness * 0.5)
+          !hy = dy * invLen * (thickness * 0.5)
+          !ax = x1 + hx
+          !ay = y1 + hy
+          !bx = x1 - hx
+          !by = y1 - hy
+          !cx = x2 - hx
+          !cy = y2 - hy
+          !dx' = x2 + hx
+          !dy' = y2 + hy
+      (vp, ip, base, baseIdx) <- ensureAndAlloc da 4 6
+      let !(r, g, b, a) = unpackColorF col
+          !vOff = base * vertexSize
+          !iOff = baseIdx * indexSize
+          !baseIdxWord = fromIntegral base :: Word32
+          poke i px py = pokeVertex vp (vOff + i * vertexSize) px py r g b a (-3) 0
+      poke 0 ax ay
+      poke 1 bx by
+      poke 2 cx cy
+      poke 3 dx' dy'
+      pokeByteOff ip iOff baseIdxWord
+      pokeByteOff ip (iOff + 4) (baseIdxWord + 1)
+      pokeByteOff ip (iOff + 8) (baseIdxWord + 2)
+      pokeByteOff ip (iOff + 12) baseIdxWord
+      pokeByteOff ip (iOff + 16) (baseIdxWord + 2)
+      pokeByteOff ip (iOff + 20) (baseIdxWord + 3)
+      writeIORef (daVertexCount da) (base + 4)
+      writeIORef (daIndexCount da) (baseIdx + 6)
 
 {-# INLINE pushFilledTriangle #-}
 pushFilledTriangle :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
@@ -956,33 +951,9 @@ pushFilledTriangle da x0 y0 x1 y1 x2 y2 col = do
       !vOff = base * vertexSize
       !iOff = baseIdx * indexSize
       !baseIdxWord = fromIntegral base :: Word32
-  pokeByteOff vp vOff x0
-  pokeByteOff vp (vOff + 4) y0
-  pokeByteOff vp (vOff + 8) r
-  pokeByteOff vp (vOff + 12) g
-  pokeByteOff vp (vOff + 16) b
-  pokeByteOff vp (vOff + 20) a
-  pokeByteOff vp (vOff + 24) (-3 :: Float)
-  pokeByteOff vp (vOff + 28) (0 :: Float)
-
-  pokeByteOff vp (vOff + 32) x1
-  pokeByteOff vp (vOff + 36) y1
-  pokeByteOff vp (vOff + 40) r
-  pokeByteOff vp (vOff + 44) g
-  pokeByteOff vp (vOff + 48) b
-  pokeByteOff vp (vOff + 52) a
-  pokeByteOff vp (vOff + 56) (-3 :: Float)
-  pokeByteOff vp (vOff + 60) (0 :: Float)
-
-  pokeByteOff vp (vOff + 64) x2
-  pokeByteOff vp (vOff + 68) y2
-  pokeByteOff vp (vOff + 72) r
-  pokeByteOff vp (vOff + 76) g
-  pokeByteOff vp (vOff + 80) b
-  pokeByteOff vp (vOff + 84) a
-  pokeByteOff vp (vOff + 88) (-3 :: Float)
-  pokeByteOff vp (vOff + 92) (0 :: Float)
-
+  pokeVertex vp vOff x0 y0 r g b a (-3) 0
+  pokeVertex vp (vOff + 32) x1 y1 r g b a (-3) 0
+  pokeVertex vp (vOff + 64) x2 y2 r g b a (-3) 0
   pokeByteOff ip iOff baseIdxWord
   pokeByteOff ip (iOff + 4) (baseIdxWord + 1)
   pokeByteOff ip (iOff + 8) (baseIdxWord + 2)
@@ -1109,10 +1080,7 @@ groupCmdsByLayer ::
   Int ->
   IO (PrimArray DrawCmd, PrimArray LayerSlice)
 groupCmdsByLayer src n = do
-  nBg <- countLayer src n LayerBackground
-  nCt <- countLayer src n LayerContent
-  nOv <- countLayer src n LayerOverlay
-  nCh <- countLayer src n LayerChrome
+  (nBg, nCt, nOv, nCh) <- countLayers src n 0 0 0 0 0
   let offBg = 0
       offCt = offBg + nBg
       offOv = offCt + nCt
@@ -1148,11 +1116,21 @@ groupCmdsByLayer src n = do
   slices <- unsafeFreezePrimArray sliceArr
   pure (frozen, slices)
 
-countLayer :: MutablePrimArray RealWorld DrawCmd -> Int -> Layer -> IO Int
-countLayer src n ly = go 0 0
-  where
-    go !i !acc
-      | i >= n = pure acc
-      | otherwise = do
-          cmd <- readPrimArray src i
-          go (i + 1) (if cmdLayer cmd == ly then acc + 1 else acc)
+countLayers ::
+  MutablePrimArray RealWorld DrawCmd ->
+  Int ->
+  Int ->
+  Int ->
+  Int ->
+  Int ->
+  Int ->
+  IO (Int, Int, Int, Int)
+countLayers src n i bg ct ov ch
+  | i >= n = pure (bg, ct, ov, ch)
+  | otherwise = do
+      cmd <- readPrimArray src i
+      case cmdLayer cmd of
+        LayerBackground -> countLayers src n (i + 1) (bg + 1) ct ov ch
+        LayerContent -> countLayers src n (i + 1) bg (ct + 1) ov ch
+        LayerOverlay -> countLayers src n (i + 1) bg ct (ov + 1) ch
+        LayerChrome -> countLayers src n (i + 1) bg ct ov (ch + 1)

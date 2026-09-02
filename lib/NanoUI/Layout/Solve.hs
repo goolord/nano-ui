@@ -87,7 +87,7 @@ import NanoUI.Layout.Arena
   )
 import NanoUI.Id (WidgetId)
 import NanoUI.Style (AlignX (..), AlignY (..), Padding (..), windowMargin)
-import NanoUI.Types (PopupAnchor (..), PopupPlacement (..), Rect (..), V2 (..))
+import NanoUI.Types (PopupAnchor (..), PopupPlacement (..), Rect (..), V2 (..), clamp)
 import NanoUI.Widgets.ColorPicker (colorPickerMeasureSize)
 import NanoUI.WidgetText
   ( checkboxLabelText
@@ -253,7 +253,7 @@ applyAspectAfterMeasure na assignedW useAssignedWidth idx = do
             | wTag == SizingFixed = wVal
             | useAssignedWidth && assignedW > 0 = assignedW
             | otherwise = w
-      setRect na idx x y w (clamp (baseW / ratio) minH maxH)
+      setRect na idx x y w (clamp minH maxH (baseW / ratio))
 
 measureTextNode ::
   NodeArena ->
@@ -288,7 +288,7 @@ measureTextNode na host fm measure useAssignedWidth idx = do
               then pure (measureTextWrapped host fm plain wrapW)
               else measureTextWrappedIO (\t -> fmap fst (measure t)) fm plain wrapW
           else pure (tw0, th0)
-      setRect na idx 0 0 (clamp tw minW maxW) (clamp (max (layoutLineHeight host fm) th) minH maxH)
+      setRect na idx 0 0 (clamp minW maxW tw) (clamp minH maxH (max (layoutLineHeight host fm) th))
 
 measureImage :: NodeArena -> NodeIdx -> IO ()
 measureImage na idx = do
@@ -303,7 +303,7 @@ measureImage na idx = do
         case hTag of
           SizingFixed -> hVal
           _ -> if minH > 0 then minH else 32
-  setRect na idx 0 0 (clamp w minW maxW) (clamp h minH maxH)
+  setRect na idx 0 0 (clamp minW maxW w) (clamp minH maxH h)
 
 measureSpacer :: NodeArena -> HostProfile -> FontMetrics -> NodeIdx -> IO ()
 measureSpacer na host _fm idx = do
@@ -456,8 +456,8 @@ measureWidget na host fm measure idx = do
         pure (mw, mh, 0, 0)
   let rawW = tw + padX + extraW
       rawH = th + padY + extraH
-      w = case wTag of SizingFixed -> wVal; _ -> clamp rawW minW maxW
-      h = case hTag of SizingFixed -> hVal; _ -> clamp rawH minH maxH
+      w = case wTag of SizingFixed -> wVal; _ -> clamp minW maxW rawW
+      h = case hTag of SizingFixed -> hVal; _ -> clamp minH maxH rawH
   setRect na idx 0 0 w h
 
 measureContainer :: NodeArena -> HostProfile -> FontMetrics -> Bool -> NodeIdx -> IO ()
@@ -502,12 +502,12 @@ measureContainer na host fm useAssignedWidth idx = do
         else foldChildDimsFromParent na idx dir gap
   let w =
         case wTag of
-          SizingFixed -> clamp wVal minW maxW
-          _ -> clamp (contentW + padL pad + padR pad) minW maxW
+          SizingFixed -> clamp minW maxW wVal
+          _ -> clamp minW maxW (contentW + padL pad + padR pad)
       h =
         case hTag of
-          SizingFixed -> clamp hVal minH maxH
-          _ -> clamp (contentH + padT pad + padB pad) minH maxH
+          SizingFixed -> clamp minH maxH hVal
+          _ -> clamp minH maxH (contentH + padT pad + padB pad)
   setRect na idx 0 0 w h
 
 measureScrollContainer :: NodeArena -> HostProfile -> FontMetrics -> NodeIdx -> IO ()
@@ -536,7 +536,7 @@ measureScrollContainer na host fm idx = do
             case hTag of
               SizingFixed -> hVal
               _ -> fullH
-      setRect na idx 0 0 (clamp viewportW minW maxW) (clamp viewportH minH maxH)
+      setRect na idx 0 0 (clamp minW maxW viewportW) (clamp minH maxH viewportH)
     else do
       let fullW = contentW + padL pad + padR pad
           fullH = contentH + padT pad + padB pad
@@ -549,7 +549,7 @@ measureScrollContainer na host fm idx = do
             case hTag of
               SizingFixed -> hVal
               _ -> fullH
-      setRect na idx 0 0 (clamp viewportW minW maxW) (clamp viewportH minH maxH)
+      setRect na idx 0 0 (clamp minW maxW viewportW) (clamp minH maxH viewportH)
 
 foldChildDimsFromParent :: NodeArena -> NodeIdx -> DirTag -> Float -> IO (Float, Float)
 foldChildDimsFromParent na idx dir gap = do
@@ -662,11 +662,11 @@ positionNodeA a na host fm idx x y availW availH = do
   (_, _, intrinsicW, intrinsicH) <- rectA a idx
   nt <- nodeTypeA a idx
   ratio <- aspectA a idx
-  let w = clamp (resolveSize wTag wVal intrinsicW availW minW maxW) minW maxW
-      h0 = clamp (resolveSize hTag hVal intrinsicH availH minH maxH) minH maxH
+  let w = clamp minW maxW (resolveSize wTag wVal intrinsicW availW minW maxW)
+      h0 = clamp minH maxH (resolveSize hTag hVal intrinsicH availH minH maxH)
       h =
         if ratio > 0 && not (isScrollNode nt)
-          then clamp (w / ratio) minH maxH
+          then clamp minH maxH (w / ratio)
           else h0
   setRect na idx x y w h
   pad0 <- getPadding na idx
@@ -800,8 +800,8 @@ positionColumnScroll a na host fm parent gap cx cy innerW innerH contentSize = d
 
 resolveSize :: SizingTag -> Float -> Float -> Float -> Float -> Float -> Float
 resolveSize SizingFixed v _ _ _ _ = v
-resolveSize SizingFit _ intrinsic avail minS maxS = clamp (min intrinsic avail) minS maxS
-resolveSize SizingShrink _ intrinsic avail minS maxS = clamp (min intrinsic avail) minS maxS
+resolveSize SizingFit _ intrinsic avail minS maxS = clamp minS maxS (min intrinsic avail)
+resolveSize SizingShrink _ intrinsic avail minS maxS = clamp minS maxS (min intrinsic avail)
 resolveSize SizingGrow _ _ avail _ maxS = min avail maxS
 resolveSize SizingPercent _ _ avail _ maxS = min avail maxS
 
@@ -839,7 +839,7 @@ childRowCrossSize na ci availCross = do
   (_, _, _, intrinsic) <- getRect na ci
   (_, minH, _, maxH) <- getMinMax na ci
   if hTag == SizingGrow || hTag == SizingPercent
-    then pure (clamp (resolveSize hTag hVal intrinsic availCross minH maxH) minH maxH)
+    then pure (clamp minH maxH (resolveSize hTag hVal intrinsic availCross minH maxH))
     else
       -- Fit/Fixed/Shrink keep the measured box. Do not use the wrap-line
       -- or row slot as availH: that stretches every child when leftover
@@ -1106,11 +1106,11 @@ writeScratchEntry na ci i idxArr mainArr crossArr availW availH = do
   (minW, minH, maxW, maxH) <- getMinMax na ci
   let w' =
         case wTag of
-          SizingPercent -> clamp (availW * wVal / 100) minW maxW
+          SizingPercent -> clamp minW maxW (availW * wVal / 100)
           _ -> w
       h' =
         case hTag of
-          SizingPercent -> clamp (availH * hVal / 100) minH maxH
+          SizingPercent -> clamp minH maxH (availH * hVal / 100)
           _ -> h
   writePrimArray idxArr i ci
   writePrimArray mainArr i w'
@@ -1244,9 +1244,6 @@ alignY AlignTop cy _ _ = cy
 alignY AlignMiddle cy ch ih = cy + (ch - ih) / 2
 alignY AlignBottom cy ch ih = cy + ch - ih
 
-clamp :: Float -> Float -> Float -> Float
-clamp v lo hi = max lo (min hi v)
-
 placeModals :: NodeArena -> HostProfile -> FontMetrics -> Float -> Float -> IO ()
 placeModals na host fm winW winH = do
   count <- arenaCount na
@@ -1296,12 +1293,12 @@ placeWindows na host fm winW winH lookupPos lookupSize = do
                     case msize of
                       Just (_, sh) -> sh
                       Nothing -> min ih winH
-                  w = clamp w0 minW (min maxW winW)
-                  h = clamp h0 minH (min maxH winH)
+                  w = clamp minW (min maxW winW) w0
+                  h = clamp minH (min maxH winH) h0
               mpos <- lookupPos wid
               let (x0, y0) = maybe (max 0 (winW - w - margin), margin) id mpos
-                  x = clamp x0 0 (max 0 (winW - w))
-                  y = clamp y0 0 (max 0 (winH - h))
+                  x = clamp 0 (max 0 (winW - w)) x0
+                  y = clamp 0 (max 0 (winH - h)) y0
               positionWindowNode na host fm idx x y w h
             go (idx + 1)
   go 0

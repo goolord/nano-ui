@@ -28,6 +28,7 @@ module NanoUI.Font
   , resolveLayoutGap
   , resolveLayoutPadding
   , monoFontMarker
+  , tabSentinelChar
   , hasMonoFontMarker
   , stripMonoFontMarker
   , pickMonoFont
@@ -60,6 +61,12 @@ import NanoUI.Types (HostProfile, isCellHost)
 import NanoUI.Style (AlignX (..), Padding (..), defaultLayout, layoutGap)
 import NanoUI.Icons (terminalPaintColumns)
 import NanoUI.Types (Rect (..), sliderBarCells)
+
+monoFontMarker :: Text
+monoFontMarker = T.singleton '\x02'
+
+tabSentinelChar :: Char
+tabSentinelChar = '\x2409'
 
 data GlyphQuad = GlyphQuad
   { gqX :: {-# UNPACK #-} !Float
@@ -106,9 +113,6 @@ resolveLayoutPadding :: HostProfile -> FontMetrics -> Padding -> Padding
 resolveLayoutPadding host _fm (Padding l t r b) =
   let s = layoutUnitScale host
    in Padding (l * s) (t * s) (r * s) (b * s)
-
-monoFontMarker :: Text
-monoFontMarker = T.singleton '\x02'
 
 {-# INLINE hasMonoFontMarker #-}
 hasMonoFontMarker :: Text -> Bool
