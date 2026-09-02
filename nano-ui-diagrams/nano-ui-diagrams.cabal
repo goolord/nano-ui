@@ -1,0 +1,74 @@
+cabal-version:      3.4
+name:               nano-ui-diagrams
+version:            0.1.0.0
+synopsis:           diagrams backend for nano-ui drawings and plots
+description:
+    Lowers diagrams-lib paths into nano-ui draw ops so plots and
+    drawings share the pinned vertex arena.
+license:            MIT
+license-file:       LICENSE
+author:             goolord
+maintainer:         zacharyachurchill@gmail.com
+category:           Graphics
+build-type:         Simple
+
+common extensions
+    default-language: GHC2024
+    default-extensions:
+        BangPatterns
+        DeriveGeneric
+        DuplicateRecordFields
+        FlexibleContexts
+        GeneralizedNewtypeDeriving
+        OverloadedStrings
+        ScopedTypeVariables
+        TypeFamilies
+
+common warnings
+  ghc-options:
+    -Wall
+    -Wextra
+    -Werror
+    -Wcompat
+    -Widentities
+    -Wincomplete-record-updates
+    -Wincomplete-uni-patterns
+    -Wmissing-export-lists
+    -Wmissing-home-modules
+    -Wpartial-fields
+    -Wredundant-constraints
+
+library
+    import:           extensions
+    import:           warnings
+    exposed-modules:
+        NanoUI.Diagrams
+    build-depends:
+        base ^>=4.22.0.0,
+        colour >=2.3.2 && <2.4,
+        containers ^>=0.8,
+        diagrams-core >=1.5 && <1.6,
+        diagrams-lib >=1.6 && <1.7,
+        effectful ^>=2.6,
+        hashable ^>=1.5,
+        lens >=5.2 && <5.4,
+        nano-ui,
+        text ^>=2.1,
+        vector ^>=0.13
+    hs-source-dirs:   .
+    default-language: GHC2024
+
+test-suite nano-ui-diagrams-test
+    import:           extensions
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    main-is:          Main.hs
+    build-depends:
+        base ^>=4.22.0.0,
+        colour >=2.3.2 && <2.4,
+        diagrams-lib >=1.6 && <1.7,
+        nano-ui,
+        nano-ui-diagrams,
+        vector ^>=0.13
+    hs-source-dirs:   test
+    default-language: GHC2024

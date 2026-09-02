@@ -18,6 +18,8 @@ module NanoUI.Monad
   , askContext
   , askInput
   , askHost
+  , uiFontMetrics
+  , uiTheme
   , damageWidgetNow
   , damageKeyNow
   , damageRectNow
@@ -65,6 +67,8 @@ import NanoUI.Context
   , reduceMessages
   , reduceUpdates
   )
+import NanoUI.Font (FontMetrics)
+import NanoUI.Style (Theme)
 import NanoUI.Types (DamageBounds, Rect)
 import NanoUI.Id
   ( IdContext (IdContext, siblingId)
@@ -186,6 +190,14 @@ askContext :: Ui :> es => Eff es Context
 askContext = do
   UiRep ctx _ <- getStaticRep
   pure ctx
+
+{-# INLINE uiFontMetrics #-}
+uiFontMetrics :: Ui :> es => Eff es FontMetrics
+uiFontMetrics = fmap ctxFontMetrics askContext
+
+{-# INLINE uiTheme #-}
+uiTheme :: Ui :> es => Eff es Theme
+uiTheme = fmap ctxTheme askContext
 
 {-# INLINE askInput #-}
 askInput :: Ui :> es => Eff es Input

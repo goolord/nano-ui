@@ -7,6 +7,7 @@ module NanoUI.Frame.Cursor
   , uiCursorKind
   , pointerCursorWanted
   , cursorKindIs
+  , textFieldHoverCursorKind
   ) where
 import Data.IORef (readIORef)
 import Data.Maybe (isJust)
@@ -52,7 +53,7 @@ import NanoUI.Frame.Scroll.Geometry
   )
 import NanoUI.Frame.Select (selectDropRect)
 import NanoUI.Frame.TextArea (TextAreaGeom (..), textAreaGeom)
-import NanoUI.Frame.TextEdit (textEditMenuCursorKind)
+import NanoUI.Frame.TextEdit (textEditMenuCursorKind, textFieldWidgetAtMouse)
 import NanoUI.Frame.TextInput (TextInputGeom (..), textInputGeom)
 import NanoUI.Frame.Window (windowResizeCursorKind)
 
@@ -80,13 +81,17 @@ uiCursorKind ctx inp = do
                   case mScroll of
                     Just k -> pure k
                     Nothing -> do
-                      active <- readIORef (ctxActiveId ctx)
-                      activeKind <- cursorKindAt table ctx active mouse inp
-                      if activeKind /= UiCursorDefault
-                        then pure activeKind
-                        else do
-                          hot <- getHotId ctx
-                          cursorKindAt table ctx hot mouse inp
+                      mField <- textFieldHoverCursorKind ctx inp
+                      case mField of
+                        Just k -> pure k
+                        Nothing -> do
+                          active <- readIORef (ctxActiveId ctx)
+                          activeKind <- cursorKindAt table ctx active mouse inp
+                          if activeKind /= UiCursorDefault
+                            then pure activeKind
+                            else do
+                              hot <- getHotId ctx
+                              cursorKindAt table ctx hot mouse inp
 
 selectDropdownCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
 selectDropdownCursorKind ctx inp = do
@@ -126,6 +131,12 @@ scrollThumbCursorKind ctx inp = do
       if onThumb
         then pure (Just (grabHoverKind True inp))
         else pure Nothing
+
+-- Field well, not the label. Independent of focus and hot.
+textFieldHoverCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
+textFieldHoverCursorKind ctx inp = do
+  mWid <- textFieldWidgetAtMouse ctx (inputMousePos inp)
+  pure (UiCursorText <$ mWid)
 
 scrollThumbHit :: Context -> V2 -> IO Bool
 scrollThumbHit ctx mouse = do

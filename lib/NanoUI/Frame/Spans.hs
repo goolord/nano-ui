@@ -42,6 +42,7 @@ import NanoUI.Font
   , centeredTextY
   , checkboxLeading
   , labelContentInset
+  , tableCellInset
   , layoutLineHeight
   , pickMonoFont
   , sliderTrackBounds
@@ -84,7 +85,9 @@ import NanoUI.Style (AlignX (..), Padding (..), Style (..), Theme (..), styleBg,
 import NanoUI.Types (Color (..), Rect (..), colorRGBA, lerpColor, rectH, rectIntersect, rectW, rectX, rectY)
 import NanoUI.WidgetText (isCloseButtonStyle, isTableHeaderStyle)
 import NanoUI.WidgetText
-  ( colorPickerToHex
+  ( colorPickerCurrentLabel
+  , colorPickerNewLabel
+  , colorPickerToHex
   , selectChevronReserve
   , sliderLabelText
   , sliderValueText
@@ -287,7 +290,10 @@ collectNodeTextSpans ctx floatCache idx = do
       if T.null raw
         then pure stripeSpans
         else do
-          let (ix, _) = labelContentInset (ctxHostProfile ctx) fm
+          let (ix, _) =
+                case mStripe of
+                  Just _ -> tableCellInset (ctxHostProfile ctx) fm
+                  Nothing -> labelContentInset (ctxHostProfile ctx) fm
           ax <- getAlignX (ctxNodeArena ctx) idx
           (_, _, maxW, _) <- getMinMax (ctxNodeArena ctx) idx
           (wTag, _) <- getWidthSizing (ctxNodeArena ctx) idx
@@ -489,7 +495,7 @@ widgetTextPlacements ctx nt idx x y w h = do
           if isTableHeaderStyle si
             then do
               ax <- getAlignX (ctxNodeArena ctx) idx
-              let (labelIx, _) = labelContentInset (ctxHostProfile ctx) fm
+              let (labelIx, _) = tableCellInset (ctxHostProfile ctx) fm
                   (tx, used) = alignedTextPen ax x w labelIx fm txt
               pure [(txt, tx, centeredTextY (ctxHostProfile ctx) fm y h th, used, th)]
             else do
@@ -514,8 +520,14 @@ widgetTextPlacements ctx nt idx x y w h = do
               (lx, ly) = labelContentInset (ctxHostProfile ctx) fm
           (lw, lh) <- ctxMeasureText ctx lbl
           (hw, hh) <- ctxMeasureText ctx hex
+          (cw, ch) <- ctxMeasureText ctx colorPickerCurrentLabel
+          (nw, nh) <- ctxMeasureText ctx colorPickerNewLabel
+          let previewY =
+                centeredTextY (ctxHostProfile ctx) fm (cpgPreviewLabelY geom) (cpgHexH geom) lh
           pure
             [ (lbl, x + lx, y + ly, lw, lh)
+            , (colorPickerCurrentLabel, rectX (cpgCurrent geom), previewY, cw, ch)
+            , (colorPickerNewLabel, rectX (cpgNew geom), previewY, nw, nh)
             , (hex, x + lx, centeredTextY (ctxHostProfile ctx) fm (cpgHexY geom) (cpgHexH geom) hh, hw, hh)
             ]
     NodeCheckbox -> do
@@ -609,6 +621,7 @@ widgetTextPlacements ctx nt idx x y w h = do
             [ (lbl, x, centeredTextY (ctxHostProfile ctx) fm y labelH lh, lw, lh)
             , (value, x + ix, rectY field + iy, fw, rectH field)
             ]
+    NodeDrawing -> pure []
     _ -> do
       txt <- displayText ctx nt idx
       ax <- getAlignX (ctxNodeArena ctx) idx

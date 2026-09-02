@@ -17,8 +17,10 @@ module Cases
   , runCompactHostTest
   , runDemoWrapWideOrderTest
   , runDrawTest
+  , runDrawingTest
   , runEmbedStateTest
   , runFitSizingTest
+  , runFitMutedWidthTest
   , runFlexShrinkTest
   , runFlexWrapTest
   , runGrowFitsWindowTest
@@ -77,6 +79,7 @@ import Data.ByteString qualified as BS
 import Data.IORef (IORef)
 import Data.List (nub, sort)
 import Data.Text qualified as T
+import Data.Vector qualified as V
 import Effectful.State.Static.Local (State, evalState, get, modify)
 import NanoUI
 import NanoUI.Testing
@@ -159,6 +162,16 @@ runFitSizingTest ctx failed = do
   assert failed (w1 > 0 && w1 < 400)
   assertGt failed w2 w1
 
+runFitMutedWidthTest :: Context -> IORef Int -> IO ()
+runFitMutedWidthTest ctx failed = do
+  let inp = withInput 400 100
+      ui = column (tight defaultLayout) (muted "HelloFitMuted")
+  _ <- runFrame ctx inp ui
+  spans <- collectTextSpans ctx
+  case [w | (Rect _ _ w _, t, _, _, _) <- spans, "HelloFitMuted" `T.isInfixOf` t] of
+    (w : _) -> assertGt failed w 8
+    _ -> assert failed False
+
 runWithKeyTest :: Context -> IORef Int -> IO ()
 runWithKeyTest ctx failed = do
   let inp = withInput 200 200
@@ -225,6 +238,25 @@ runDrawTest :: Context -> IORef Int -> IO ()
 runDrawTest ctx failed = do
   (_, _, draw, _) <- runFrame ctx (withInput 100 100) (column defaultLayout (label "draw"))
   assert failed (drawIndexCount draw >= 6 && not (drawCmdNull draw))
+
+runDrawingTest :: Context -> IORef Int -> IO ()
+runDrawingTest ctx failed = do
+  let ui =
+        drawing (fixedWH 80 40 defaultLayout) $ \r ->
+          V.singleton
+            ( Stroke
+                (rectX r)
+                (rectY r + rectH r * 0.5)
+                (rectX r + rectW r)
+                (rectY r + rectH r * 0.5)
+                2
+                (colorRGBA 255 0 0 255)
+            )
+      inp = withInput 200 80
+  (_, _, draw, _) <- runFrame ctx inp ui
+  assert failed (drawIndexCount draw >= 6 && not (drawCmdNull draw))
+  (_, _, draw2, _) <- runFrame ctx inp ui
+  assert failed (drawIndexCount draw2 >= 6 && not (drawCmdNull draw2))
 
 runOverlayTest :: Context -> IORef Int -> IO ()
 runOverlayTest ctx failed = do

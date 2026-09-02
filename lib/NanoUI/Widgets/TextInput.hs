@@ -77,9 +77,10 @@ textInputCut ctx s = do
           ( tisText s
           , s {tisText = T.empty, tisCursor = 0, tisAnchor = 0}
           )
+      collapsed = s' {tisAnchor = tisCursor s'}
   when (not (T.null payload)) $
     void (ctxClipboardSet ctx payload)
-  pure s'
+  pure collapsed
 
 textInputPaste :: Context -> TextInputState -> IO TextInputState
 textInputPaste ctx s = do
@@ -155,13 +156,13 @@ processTextInput ctx inp s0 = do
       s2 = T.foldl insertChar s1 filtered
   pure (foldInputKeys (applyKey shift) s2 keys)
   where
-    isCtrlCombo c ch = c && T.elem ch "aAcCxXvV\x01"
+    isCtrlCombo c ch = c && T.elem ch "aAcCxXvV\x01\x18"
 
 handleCtrlChar :: Context -> TextInputState -> Char -> IO TextInputState
 handleCtrlChar ctx s ch
   | ch `elem` ('a' : 'A' : '\x01' : []) = pure (selectAllTextInput s)
   | ch `elem` ('c' : 'C' : '\ETX' : []) = textInputCopy ctx s >> pure s
-  | ch `elem` ('x' : 'X' : []) = textInputCut ctx s
+  | ch `elem` ('x' : 'X' : '\x18' : []) = textInputCut ctx s
   | ch `elem` ('v' : 'V' : []) = textInputPaste ctx s
   | otherwise = pure s
 

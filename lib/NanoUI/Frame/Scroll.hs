@@ -142,11 +142,11 @@ transformSubtree ctx idx scrollX scrollY parentClip = do
                     viewport1d =
                       scrollContentClip (ctxHostProfile ctx) fm slot cfg dir vx vy lw lh pad contentSize
                     clip1d = fromMaybe parentClip (rectIntersect parentClip viewport1d)
-                off <- getScrollOffset ctx wid
+                V2 offCross offMain <- getScrollOffset2D ctx wid
                 let (nsx, nsy) =
                       case dir of
-                        DirColumn -> (sx, sy - off)
-                        DirRow -> (sx - off, sy)
+                        DirColumn -> (sx - offCross, sy - offMain)
+                        DirRow -> (sx - offMain, sy - offCross)
                 setClipRect na idx clip1d
                 pure (nsx, nsy, clip1d)
       else do

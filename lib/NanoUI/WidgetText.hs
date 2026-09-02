@@ -24,6 +24,8 @@ module NanoUI.WidgetText
   , selectChevronReserve
   , selectChevronCenterX
   , colorPickerLabelText
+  , colorPickerCurrentLabel
+  , colorPickerNewLabel
   , colorPickerDisplayText
   , colorPickerToHex
   , colorPickerFromHex
@@ -194,6 +196,12 @@ selectChevronCenterX x w = x + w - selectChevronReserve / 2
 
 colorPickerLabelText :: Text -> Text
 colorPickerLabelText = T.strip
+
+colorPickerCurrentLabel :: Text
+colorPickerCurrentLabel = "Current Color"
+
+colorPickerNewLabel :: Text
+colorPickerNewLabel = "New Color"
 
 colorPickerToHex :: Color -> Text
 colorPickerToHex c =

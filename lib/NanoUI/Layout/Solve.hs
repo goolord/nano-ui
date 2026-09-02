@@ -35,6 +35,7 @@ import NanoUI.Font
   , measureTextWrapped
   , measureTextWrappedIO
   , labelContentInset
+  , tableCellInset
   , stripWidgetMarkers
   , ScrollBarSlot
   , widgetPadding
@@ -110,6 +111,7 @@ import NanoUI.Frame.Scroll.Geometry
   ( decodeScrollConfig
   , isScrollStyle2D
   , scrollAxisGutter
+  , scrollGutters2D
   , scrollPolicyX
   , scrollPolicyY
   )
@@ -202,9 +204,12 @@ anyNeedsRemeasure na count = go 0
           nt <- getNodeType na idx
           ratio <- getAspect na idx
           (wTag, _) <- getWidthSizing na idx
+          (hTag, _) <- getHeightSizing na idx
           (_, _, maxW, _) <- getMinMax na idx
           let textNeedsRemeasure = nt == NodeText && (wTag == SizingGrow || maxW < 1e8)
-          if wrapped || textNeedsRemeasure || (ratio > 0 && not (isScrollNode nt))
+              scrollGrow =
+                isScrollNode nt && (hTag == SizingGrow || wTag == SizingGrow)
+          if wrapped || textNeedsRemeasure || scrollGrow || (ratio > 0 && not (isScrollNode nt))
             then pure True
             else go (idx + 1)
 
@@ -226,17 +231,18 @@ measureNode a na host fm measure useAssignedWidth idx = do
     NodeSeparator -> measureSeparator na idx
     NodeContainer -> measureContainer na host fm useAssignedWidth idx
     NodePanel -> measureContainer na host fm useAssignedWidth idx
-    NodeScrollContainer -> measureScrollContainer na host fm idx
+    NodeScrollContainer -> measureScrollContainer na host fm useAssignedWidth idx
     NodeModal
       | isCellHost host -> do
           measureContainer na host fm useAssignedWidth idx
           -- Body scroll owns overflow. Stale value would paint a phantom gutter.
           setNodeValue na idx 0
-      | otherwise -> measureScrollContainer na host fm idx
+      | otherwise -> measureScrollContainer na host fm useAssignedWidth idx
     NodeWindow -> measureContainer na host fm useAssignedWidth idx
     NodePopup -> measureContainer na host fm useAssignedWidth idx
     NodeImage -> measureImage na idx
     NodeBox -> measureImage na idx
+    NodeDrawing -> measureImage na idx
     _ -> measureWidget na host fm measure idx
   applyAspectAfterMeasure na assignedW useAssignedWidth idx
 
@@ -268,8 +274,15 @@ measureTextNode na host fm measure useAssignedWidth idx = do
   (wTag, _) <- getWidthSizing na idx
   (hTag, hVal) <- getHeightSizing na idx
   (_, _, assignedW, _) <- getRect na idx
+  parentAssigns <- growOrWrapParent na idx
   let needsAssignedWrap = useAssignedWidth && wTag == SizingGrow && assignedW > 0
-  if useAssignedWidth && maxW >= 1e8 && not needsAssignedWrap
+  -- Grow text wraps to the assigned slot. Reporting the unwrapped string on
+  -- the first pass inflates wrap/Grow parents (Table tab help, kv values).
+  -- A Fit parent sizes from children, so a lone muted must still measure.
+  if wTag == SizingGrow && not needsAssignedWrap && parentAssigns
+    then
+      setRect na idx 0 0 (clamp minW maxW 0) (clamp minH maxH (layoutLineHeight host fm))
+    else if useAssignedWidth && maxW >= 1e8 && not needsAssignedWrap
     then pure ()
     else do
       txt <- getText na idx
@@ -293,6 +306,17 @@ measureTextNode na host fm measure useAssignedWidth idx = do
         case hTag of
           SizingFixed -> clamp minH maxH hVal
           _ -> clamp minH maxH (max (layoutLineHeight host fm) th)
+
+-- Grow/wrap parents assign a width slot. Fit parents take the child's content.
+growOrWrapParent :: NodeArena -> NodeIdx -> IO Bool
+growOrWrapParent na idx = do
+  parent <- getParent na idx
+  if parent < 0
+    then pure False
+    else do
+      wrap <- getWrap na parent
+      (pwTag, _) <- getWidthSizing na parent
+      pure (wrap || pwTag == SizingGrow)
 
 measureImage :: NodeArena -> NodeIdx -> IO ()
 measureImage na idx = do
@@ -356,7 +380,9 @@ measureWidget na host fm measure idx = do
   let (padX, padY) =
         case nt of
           NodeButton
-            | isTableHeaderStyle si -> labelContentInset host fm
+            | isTableHeaderStyle si ->
+                let (cx, cy) = tableCellInset host fm
+                 in (2 * cx, 2 * cy)
           NodeButton -> buttonPadding host fm
           NodeSelect -> buttonPadding host fm
           NodeColorPicker
@@ -513,46 +539,60 @@ measureContainer na host fm useAssignedWidth idx = do
           _ -> clamp minH maxH (contentH + padT pad + padB pad)
   setRect na idx 0 0 w h
 
-measureScrollContainer :: NodeArena -> HostProfile -> FontMetrics -> NodeIdx -> IO ()
-measureScrollContainer na host fm idx = do
+measureScrollContainer :: NodeArena -> HostProfile -> FontMetrics -> Bool -> NodeIdx -> IO ()
+measureScrollContainer na host fm useAssignedWidth idx = do
   pad0 <- getPadding na idx
   gap0 <- getGap na idx
   let pad = resolveLayoutPadding host fm pad0
       gap = resolveLayoutGap host fm gap0
+      padX = padL pad + padR pad
+      padY = padT pad + padB pad
   dir <- getDirection na idx
   si <- getStyleIdx na idx
   (minW, minH, maxW, maxH) <- getMinMax na idx
   (wTag, wVal) <- getWidthSizing na idx
   (hTag, hVal) <- getHeightSizing na idx
+  (_, _, assignedW, assignedH) <- getRect na idx
   (contentW, contentH) <- foldChildDimsFromParent na idx dir gap
+  slot <- scrollBarSlotOf na idx
+  let fullW = contentW + padX
+      fullH = contentH + padT pad + padB pad
+      assignedInnerH =
+        case hTag of
+          SizingFixed -> max 0 (hVal - padY)
+          _
+            | useAssignedWidth && assignedH > 0 -> max 0 (assignedH - padY)
+            | otherwise -> contentH
+      cfg = decodeScrollConfig si
+      -- 2D bars overlay the clip. Inflating Fit width makes a wrap parent
+      -- wrap, then the viewport steals the same gutter from the columns.
+      fitGutterW
+        | wTag == SizingGrow || wTag == SizingFixed = 0
+        | isScrollStyle2D si = 0
+        | otherwise =
+            case dir of
+              DirColumn -> scrollAxisGutter (scrollPolicyY cfg) host fm slot contentH assignedInnerH
+              DirRow -> 0
+      viewportW =
+        case wTag of
+          SizingFixed -> wVal
+          SizingGrow
+            | useAssignedWidth && assignedW > 0 -> assignedW
+            | otherwise -> fullW
+          _ -> fullW + fitGutterW
+      viewportH =
+        case hTag of
+          SizingFixed -> hVal
+          SizingGrow
+            | useAssignedWidth && assignedH > 0 -> assignedH
+            | otherwise -> fullH
+          _ -> fullH
   if isScrollStyle2D si
     then do
       setNodeValue na idx contentH
       setAspect na idx contentW
-      let fullW = contentW + padL pad + padR pad
-          fullH = contentH + padT pad + padB pad
-          viewportW =
-            case wTag of
-              SizingFixed -> wVal
-              _ -> fullW
-          viewportH =
-            case hTag of
-              SizingFixed -> hVal
-              _ -> fullH
-      setRect na idx 0 0 (clamp minW maxW viewportW) (clamp minH maxH viewportH)
-    else do
-      let fullW = contentW + padL pad + padR pad
-          fullH = contentH + padT pad + padB pad
-      setNodeValue na idx (case dir of DirColumn -> contentH; DirRow -> contentW)
-      let viewportW =
-            case wTag of
-              SizingFixed -> wVal
-              _ -> fullW
-          viewportH =
-            case hTag of
-              SizingFixed -> hVal
-              _ -> fullH
-      setRect na idx 0 0 (clamp minW maxW viewportW) (clamp minH maxH viewportH)
+    else setNodeValue na idx (case dir of DirColumn -> contentH; DirRow -> contentW)
+  setRect na idx 0 0 (clamp minW maxW viewportW) (clamp minH maxH viewportH)
 
 foldChildDimsFromParent :: NodeArena -> NodeIdx -> DirTag -> Float -> IO (Float, Float)
 foldChildDimsFromParent na idx dir gap = do
@@ -714,9 +754,13 @@ positionScrollChildren a na host fm idx dir gap pad px py pw ph = do
     then do
       contentW <- getAspect na idx
       let cfg = decodeScrollConfig si
-          gutterX = scrollAxisGutter (scrollPolicyX cfg) host fm slot contentW innerW
-          gutterY = scrollAxisGutter (scrollPolicyY cfg) host fm slot contentSize innerH
-      positionChildren a na host fm idx DirColumn gap pad cx cy (max 0 (innerW - gutterX)) (max 0 (innerH - gutterY))
+          (gutterW, gutterH) = scrollGutters2D host fm slot cfg contentW contentSize innerW innerH
+          viewW = max 0 (innerW - gutterW)
+          viewH = max 0 (innerH - gutterH)
+          -- Keep measured content. Shrinking to the clip wraps table columns.
+          layoutW = max contentW viewW
+          layoutH = max contentSize viewH
+      positionChildren a na host fm idx DirColumn gap pad cx cy layoutW layoutH
     else do
       let cfg = decodeScrollConfig si
           gutterCol = scrollAxisGutter (scrollPolicyY cfg) host fm slot contentSize innerH

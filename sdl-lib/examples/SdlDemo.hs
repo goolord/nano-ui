@@ -11,8 +11,21 @@ import Control.Monad (unless, void, when)
 import Data.Foldable (foldlM)
 import Data.Maybe (fromMaybe)
 import Data.Primitive.SmallArray (SmallArray, smallArrayFromList)
+import Diagrams.Prelude
+  ( Diagram
+  , circle
+  , fc
+  , fromVertices
+  , lc
+  , lw
+  , lwO
+  , none
+  , p2
+  , ( # )
+  )
 import NanoUI
 import NanoUI.Backend.Sdl (RgbaImage (..), SdlDebugSnapshot (..), askSdlDebug, SdlOptions (..), defaultSdlOptions, runSdlApp)
+import NanoUI.Diagrams
 import NanoUI.Testing (Context, collectOverlayTextSpans, collectTextSpans, registerImage)
 import NanoUI.Backend.Sdl (SdlEnv, newSdlContext, sdlDrawFrame, syncDisplay, withSdl)
 import System.Console.GetOpt
@@ -60,6 +73,7 @@ data DemoTab
   = Controls
   | List
   | Table
+  | Plots
   | Diagnostics
   deriving (Bounded, Enum, Eq, Ord, Read, Show)
 
@@ -156,9 +170,6 @@ demoUi = do
               setQuality (qualities !! qualityIdx)
               (_, accent) <- colorPicker "Accent" demoAccent
               setAccent (colorPickerToHex accent)
-              row (tight . gap 8 . alignMid . fillW $ defaultLayout) $ do
-                box (fixedWH 28 28 defaultLayout) accent
-                label_ (colorPickerToHex accent)
               (_, theme) <- boundedRadioFieldset "Theme" Dark (T.pack . show)
               setTheme (T.pack (show theme))
               (_, name) <- textInput "Name" ""
@@ -211,12 +222,13 @@ demoUi = do
                 setTreeSel (T.pack (show sel))
             Table -> do
               heading "Table"
-              muted "Click a header to sort. Drag a header to reorder. Drag a header edge to resize. Right-click a header to hide."
+              muted "Click a header to sort. Drag a header to reorder."
+              muted "Drag a header edge to resize. Right-click a header to hide."
               sort <- readTableSort
               (tableResp, nextSort) <-
                 tableCfg
                   demoTableCfg
-                  (tight . fixedH 280 $ defaultLayout {layoutGap = 0})
+                  (tight . fillW . fixedH 280 $ defaultLayout {layoutGap = 0})
                   "people"
                   colPeople
                   demoPeople
@@ -226,6 +238,23 @@ demoUi = do
               kv "Sorted by" (tableColumnLabel nextSort)
               kv "Order" (tableSortDirText nextSort)
               kv "Hidden" (tableHiddenLabel (tableHiddenIndices tableResp))
+            Plots -> do
+              ps <- uiPlotStyle
+              heading "Plots"
+              muted "diagrams-lib paths lower to nano-ui strokes and fills."
+              column (tight . gap 14 . fillW $ defaultLayout) $ do
+                column (tight . gap 4 . fillW $ defaultLayout) $ do
+                  muted "Sine"
+                  void $ diagram (fillW defaultLayout) (sinePlot ps)
+                column (tight . gap 4 . fillW $ defaultLayout) $ do
+                  muted "Weekly counts"
+                  void $ diagram (fillW defaultLayout) (barChart ps)
+                column (tight . gap 4 . fillW $ defaultLayout) $ do
+                  muted "Sleep vs focus"
+                  void $ diagram (fillW defaultLayout) (xyChart ps)
+                column (tight . gap 4 . fillW $ defaultLayout) $ do
+                  muted "Drawing"
+                  void $ diagram (fillW $ defaultLayout {layoutMaxH = 200}) (drawingSample ps)
             Diagnostics -> do
               heading "Diagnostics"
               kv "Renderer" "SDL3 Pinned Vertex Arena"
@@ -244,6 +273,70 @@ demoUi = do
         flex
         clickButton "Close" (setAbout False)
   onClick aboutResp (setAbout False)
+
+sinePlot :: PlotStyle -> Diagram B
+sinePlot ps =
+  labeledChart
+    ps
+    [(0, "0"), (0.5, "π"), (1, "2π")]
+    [(0, "-1"), (0.5, "0"), (1, "1")]
+    "x"
+    "sin"
+    (legendLine ps "sin(x)")
+    (inkLine ps [(x, sin x) | x <- [0, 0.1 .. (2 * pi)]])
+
+barChart :: PlotStyle -> Diagram B
+barChart ps =
+  labeledChart
+    ps
+    [ (0.1, "Mon")
+    , (0.3, "Tue")
+    , (0.5, "Wed")
+    , (0.7, "Thu")
+    , (0.9, "Fri")
+    ]
+    [(0, "0"), (0.5, "4"), (1, "7")]
+    "day"
+    "count"
+    (legendFill ps "count")
+    (fillBars ps [(1, 2), (2, 5), (3, 4), (4, 7), (5, 3)])
+
+-- Hours slept (X) vs focus score (Y).
+sleepFocus :: [(Double, Double)]
+sleepFocus =
+  [ (4.0, 3.0)
+  , (5.5, 4.5)
+  , (6.0, 6.0)
+  , (6.5, 7.5)
+  , (7.0, 8.0)
+  , (7.5, 8.5)
+  , (8.0, 7.5)
+  , (9.0, 6.5)
+  ]
+
+xyChart :: PlotStyle -> Diagram B
+xyChart ps =
+  labeledChart
+    ps
+    [ (dataUnit 4 9 4, "4")
+    , (dataUnit 4 9 6, "6")
+    , (dataUnit 4 9 8, "8")
+    , (dataUnit 4 9 9, "9")
+    ]
+    [ (dataUnit 3 8.5 3, "3")
+    , (dataUnit 3 8.5 6, "6")
+    , (dataUnit 3 8.5 8.5, "8.5")
+    ]
+    "hours slept"
+    "focus"
+    (legendMarks ps "focus")
+    (inkLine ps sleepFocus <> inkScatter ps sleepFocus)
+
+drawingSample :: PlotStyle -> Diagram B
+drawingSample ps =
+  (circle 0.45 # fc (plotFill ps) # lw none)
+    <> (circle 0.28 # fc (plotInk ps) # lw none)
+    <> (fromVertices [p2 (-0.5, -0.5), p2 (0.5, 0.5)] # lc (plotGrid ps) # lwO 1.5)
 
 onOff :: Bool -> T.Text
 onOff True = "on"

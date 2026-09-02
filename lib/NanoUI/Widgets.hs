@@ -69,6 +69,10 @@ module NanoUI.Widgets
   , flex
   , image_
   , box
+  , drawing
+  , drawingCached
+  , DrawOp (..)
+  , DrawingBuild
   , animate
   , animateEase
   , animateEaseDelay
@@ -90,6 +94,8 @@ module NanoUI.Widgets
   , selectOptions
   , radioLabelText
   , colorPickerLabelText
+  , colorPickerCurrentLabel
+  , colorPickerNewLabel
   , colorPickerDisplayText
   , colorPickerToHex
   , colorPickerFromHex
@@ -200,9 +206,11 @@ import NanoUI.Types
 import NanoUI.Widgets.Behavior (DragAxis (..), useDrag1D)
 import NanoUI.WidgetText
   ( checkboxLabelText
+  , colorPickerCurrentLabel
   , colorPickerDisplayText
   , colorPickerFromHex
   , colorPickerLabelText
+  , colorPickerNewLabel
   , colorPickerToHex
   , radioLabelText
   , selectLabelText
@@ -229,6 +237,7 @@ import NanoUI.Widgets.Animate
   , useToggle
   )
 import NanoUI.Widgets.ColorPicker (colorPicker)
+import NanoUI.Widgets.Drawing (DrawOp (..), DrawingBuild, drawing, drawingCached)
 import NanoUI.Widgets.Layout
   ( column
   , flex
@@ -519,6 +528,9 @@ textArea lbl initial = do
     $ uiIO
     $ setStore ctx (store {storeText = IM.insert key initial (storeText store)})
   let current = IM.findWithDefault initial key (storeText store)
+      oldState = loadTextAreaState store key initial
+      TB.Cursor oldRow oldCol = TB.getCursor (TA.buffer oldState)
+      TB.Cursor oldAnchorRow oldAnchorCol = TA.selectionAnchor oldState
   focus <- uiIO (readIORef (ctxFocusId ctx))
   blocked <- uiIO (pointerBlockedByModal ctx)
   let isFocus = focus == wid && not blocked
@@ -527,13 +539,20 @@ textArea lbl initial = do
               IM.findWithDefault (200, 96) (slotKey slotTextAreaViewport key) (storePoint store)
          in (realToFrac vw, realToFrac vh)
       lineH = realToFrac (fmLineHeight (ctxFontMetrics ctx))
-      oldState = loadTextAreaState store key initial
   newState <-
     if isFocus
       then uiIO (processTextArea ctx inp vpW vpH lineH oldState)
       else pure oldState
   let newText = TB.toText (TA.buffer newState)
-  when (newText /= current || isFocus) $
+      TB.Cursor newRow newCol = TB.getCursor (TA.buffer newState)
+      TB.Cursor newAnchorRow newAnchorCol = TA.selectionAnchor newState
+      stateChanged =
+        newText /= current
+          || newRow /= oldRow
+          || newCol /= oldCol
+          || newAnchorRow /= oldAnchorRow
+          || newAnchorCol /= oldAnchorCol
+  when stateChanged $
     uiIO $ setStore ctx (saveTextAreaState key newState store)
   resp <- addWidget wid NodeTextArea lbl 0 textAreaLayout
   pure (setChanged (newText /= current) resp, newText)

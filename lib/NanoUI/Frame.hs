@@ -33,6 +33,7 @@ import NanoUI.Context
   , FrameMsg (..)
   , animInProgress
   , clearPopupConfigs
+  , clearDrawings
   , decodeMessages
   , drainMessages
   , getPrevRect
@@ -40,6 +41,7 @@ import NanoUI.Context
   , isDirty
   , lookupPopupConfig
   , markDirty
+  , pruneDrawOpCache
   , tickAnimations
   )
 import NanoUI.Context (beginFrameModal)
@@ -243,6 +245,7 @@ runFrameEff unlift ctx inp ui = do
   updatePrevRects ctx
   refreshHover ctx inp
   tickAnimations ctx (inputDeltaTime inp)
+  pruneDrawOpCache ctx
   beginLayer (ctxDrawArena ctx) LayerBackground
   lowerShapes ctx
   beginLayer (ctxDrawArena ctx) LayerOverlay
@@ -290,6 +293,7 @@ resetUiBuildScopes ctx = do
   writeIORef (ctxWidgetNodeTypes ctx) Nothing
   writeIORef (ctxFloatingAncestor ctx) Nothing
   clearPopupConfigs ctx
+  clearDrawings ctx
 
 solvePlaceWindows :: Context -> Float -> Float -> IO ()
 solvePlaceWindows ctx w h = do

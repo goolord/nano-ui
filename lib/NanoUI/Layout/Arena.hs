@@ -108,6 +108,7 @@ data NodeType
   | NodeColorPicker
   | NodeTree
   | NodePopup
+  | NodeDrawing
   deriving (Eq, Show, Enum, Bounded)
 
 isWidgetNode :: NodeType -> Bool
@@ -124,6 +125,7 @@ isWidgetNode nt =
     NodeColorPicker -> True
     NodeTree -> True
     NodeImage -> True
+    NodeDrawing -> True
     _ -> False
 
 isContainerNode :: NodeType -> Bool

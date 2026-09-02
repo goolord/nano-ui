@@ -20,6 +20,10 @@ module NanoUI.Testing
   , uiCursorKind
   , UiCursorKind (..)
   , sliderTrackBounds
+  , colorPickerGeom
+  , ColorPickerGeom (..)
+  , widgetStoreBaseColor
+  , widgetStoreColor
   , collectTextSpans
   , collectRasterSpans
   , collectOverlayTextSpans
@@ -92,6 +96,8 @@ module NanoUI.Testing
     -- * Draw
   , DrawData (..)
   , DrawCmd (..)
+  , DrawOp (..)
+  , drawTextBox
   , Layer (..)
   , LayerSlice (..)
   , drawCmdNull
@@ -131,6 +137,8 @@ module NanoUI.Testing
   , terminalTextPositions
   , wideTrailChar
   , textDisplayWidth
+  , lineWidth
+  , textIndexAtX
   , iconClose
   , iconChecked
   , iconUnchecked
@@ -201,6 +209,7 @@ import NanoUI.Frame.SpanArena (SpanArena, foldSpanArena, spanArenaCount)
 import NanoUI.Draw
   ( DrawCmd (..)
   , DrawData (..)
+  , DrawOp (..)
   , Layer (..)
   , LayerSlice (..)
   , backdropDimTextureId
@@ -213,13 +222,20 @@ import NanoUI.Draw
   , drawCmdPartitionByLayer
   , drawCmdNull
   , drawCmdCount
+  , drawTextBox
   , drawVertices
   , indexSize
   , vertexSize
   )
 import NanoUI.Render.ASCII (renderASCII)
 import NanoUI.Damage (floatingPanelRects)
-import NanoUI.Font (monospaceMetrics, sliderTrackBounds, textDisplayWidth)
+import NanoUI.Font (lineWidth, monospaceMetrics, sliderTrackBounds, textDisplayWidth, textIndexAtX)
+import NanoUI.Widgets.ColorPicker
+  ( ColorPickerGeom (..)
+  , colorPickerGeom
+  , widgetStoreBaseColor
+  , widgetStoreColor
+  )
 import NanoUI.Frame
   ( UiCursorKind (..)
   , collectOverlayTextSpans

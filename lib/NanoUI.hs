@@ -12,6 +12,7 @@ module NanoUI
   , colorR
   , colorG
   , colorB
+  , colorA
   , lerpColor
   , contrastRatio
   , ImageId (..)
@@ -51,6 +52,7 @@ module NanoUI
   , Style (..)
   , Theme (..)
   , defaultTheme
+  , themeSeries
   , scrollBarTrackColor
   , scrollBarThumbColor
   , panelPaintPad
@@ -94,6 +96,8 @@ module NanoUI
   , keyed
   , keyedTag
   , withKey
+  , uiFontMetrics
+  , uiTheme
   , damageWidgetNow
   , damageKeyNow
   , damageRectNow
@@ -193,6 +197,12 @@ module NanoUI
   , Headed (..)
   , image
   , box
+  , drawing
+  , drawingCached
+  , DrawOp (..)
+  , DrawingBuild
+  , drawTextBox
+  , shiftDrawOp
   , onClick
   , clickButton
   , useFlag
@@ -245,7 +255,9 @@ module NanoUI
   , FontMetrics (..)
   , GlyphQuad (..)
   , monospaceMetrics
+  , lineWidth
   , labelContentInset
+  , tableCellInset
   , widgetContentInset
   , widgetPadding
   , resolveLayoutGap
@@ -267,12 +279,15 @@ where
 import NanoUI.Animatable (Animatable (..))
 import NanoUI.Compact (Compact, askCompact, compactHost)
 import NanoUI.Context (Ease (..), applyEase)
+import NanoUI.Draw (drawTextBox, shiftDrawOp)
 import NanoUI.Font
   ( FontMetrics (..)
   , GlyphQuad (..)
   , hasMonoFontMarker
   , headingFontMarker
   , labelContentInset
+  , tableCellInset
+  , lineWidth
   , monoFontMarker
   , monospaceMetrics
   , mutedFontMarker
@@ -343,6 +358,8 @@ import NanoUI.Monad
   , runUi
   , scope
   , uiIO
+  , uiFontMetrics
+  , uiTheme
   , withKey
   )
 import NanoUI.Animation
@@ -365,6 +382,7 @@ import NanoUI.Style
   , aspect
   , defaultLayout
   , defaultTheme
+  , themeSeries
   , fillH
   , fillW
   , fixedH
@@ -396,6 +414,7 @@ import NanoUI.Types
   , colorG
   , colorLuminance
   , colorR
+  , colorA
   , colorRGBA
   , colorToWord32
   , contrastRatio
@@ -427,6 +446,10 @@ import NanoUI.Widgets
   , animateToSpringA
   , boundedRadioFieldset
   , box
+  , drawing
+  , drawingCached
+  , DrawOp (..)
+  , DrawingBuild
   , button
   , card
   , checkbox

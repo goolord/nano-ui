@@ -38,11 +38,12 @@ import NanoUI.Frame.Hit (findNodeByWidgetId, overlayHitAllowed, nodePointVisible
 import NanoUI.Frame.Select (overlayMenuOwnerAt)
 
 needsRedraw :: Context -> Input -> Input -> IO Bool
-needsRedraw = needsRedraw' True
+needsRedraw = needsRedrawBody
 
--- Terminal keeps the last blit while idle; SDL windows tick live for damage.
+-- Terminal keeps the last blit while idle. SDL debug HUD refresh is
+-- rate-limited in the session (`takeDebugLive`), not by this predicate.
 needsRedrawIdle :: Context -> Input -> Input -> IO Bool
-needsRedrawIdle = needsRedraw' False
+needsRedrawIdle = needsRedrawBody
 
 -- Window/scroll/resize drag marks dirty every frame. TUI must still poll input then.
 -- Color picker and slider hold ctxActiveId without extra window/scroll refs.
@@ -67,8 +68,8 @@ widgetDragActive ctx = do
           nt <- getNodeType (ctxNodeArena ctx) idx
           pure (nt == NodeSlider || nt == NodeColorPicker)
 
-needsRedraw' :: Bool -> Context -> Input -> Input -> IO Bool
-needsRedraw' includeLive ctx prev inp = do
+needsRedrawBody :: Context -> Input -> Input -> IO Bool
+needsRedrawBody ctx prev inp = do
   dirty <- isDirty ctx
   anim <- anyAnimating ctx
   hover <- hoverWouldChange ctx inp
@@ -76,7 +77,6 @@ needsRedraw' includeLive ctx prev inp = do
   mWinDrag <- readIORef (ctxWindowDrag ctx)
   overlay <- overlayMenuOpen ctx
   edit <- textFieldActive ctx
-  winLive <- debugPanelOpen ctx
   let overlayMove = overlay && inputMousePos prev /= inputMousePos inp
   pure
     ( dirty
@@ -88,7 +88,6 @@ needsRedraw' includeLive ctx prev inp = do
         || isJust mWinDrag
         || overlayMove
         || edit
-        || (includeLive && winLive)
     )
 
 -- Select dropdown or text-input menu is open. Overlay hover is not a widget id.

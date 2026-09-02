@@ -238,7 +238,8 @@ deleteRange a b buf =
       (lo, hi) = selectionRange a b
       loOff = cursorOffset buf lo
       hiOff = cursorOffset buf hi
-   in fromText (T.take loOff text <> T.drop hiOff text)
+      newBuf = fromText (T.take loOff text <> T.drop hiOff text)
+   in withCursor (offsetToCursor newBuf loOff) newBuf
 
 replaceRange :: T.Text -> Cursor -> Cursor -> TextBuffer -> TextBuffer
 replaceRange insert a b buf =

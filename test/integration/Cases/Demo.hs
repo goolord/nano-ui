@@ -1,14 +1,18 @@
 module Cases.Demo
   ( runControlsTabHeightTest
+  , runColorPickerPreviewTest
+  , runColorPickerCommitTest
+  , runColorPickerKeyCommitTest
   ) where
 
 import Control.Monad (void)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.Maybe (listToMaybe)
 import Data.Text qualified as T
 import NanoUI
 import NanoUI.Testing
-import NanoUI.Testing.Assert (assert)
-import NanoUI.Testing.Harness (withInputOff)
+import NanoUI.Testing.Assert (assert, assertEq, withInput)
+import NanoUI.Testing.Harness (pressAt, releaseAt, warmup2, withInputOff)
 
 data DemoTab
   = Controls
@@ -166,3 +170,60 @@ runControlsTabHeightTest _ failed = do
   -- Body must not fill the wrap-line height of the left column.
   assert failed (not (left0 > 80 && body0 > left0 * 0.92))
   assert failed (not (leftH > 80 && bodyH > leftH * 0.92))
+
+runColorPickerPreviewTest :: Context -> IORef Int -> IO ()
+runColorPickerPreviewTest _ failed = do
+  ctx <- newPixelContext
+  let inp0 = withInputOff 400 420
+      ui = void (colorPicker "Accent" (colorRGBA 204 102 102 255))
+  _ <- runFrame ctx inp0 ui
+  _ <- runFrame ctx inp0 ui
+  spans <- collectTextSpans ctx
+  let findLabel needle =
+        listToMaybe [(r, t) | (r, t, _, _, _) <- spans, needle `T.isInfixOf` t]
+  case (findLabel "Current Color", findLabel "New Color") of
+    (Just (Rect cx cy _ _, _), Just (Rect nx ny _ _, _)) -> do
+      assert failed (nx > cx + 20)
+      assert failed (abs (cy - ny) < 4)
+    _ -> assert failed False
+
+runColorPickerCommitTest :: Context -> IORef Int -> IO ()
+runColorPickerCommitTest ctx failed = do
+  let inp0 = withInput 400 420
+      initial = colorRGBA 204 102 102 255
+      packed c = colorToWord32 c
+      ui = colorPicker "Accent" initial
+  (resp, _) <- warmup2 ctx inp0 ui
+  let Rect x y w h = respRect resp
+      wid = respId resp
+      geom = colorPickerGeom (ctxHostProfile ctx) (ctxFontMetrics ctx) x y w h
+      sv = cpgSv geom
+      pt = V2 (rectX sv + rectW sv * 0.9) (rectY sv + 2)
+      press = pressAt inp0 pt
+      release = releaseAt press
+  _ <- runFrame ctx press ui
+  storeDrag <- getStore ctx
+  assertEq failed (packed (widgetStoreBaseColor storeDrag wid initial)) (packed initial)
+  assert failed (packed (widgetStoreColor storeDrag wid initial) /= packed initial)
+  _ <- runFrame ctx release ui
+  storeDone <- getStore ctx
+  assertEq
+    failed
+    (packed (widgetStoreBaseColor storeDone wid initial))
+    (packed (widgetStoreColor storeDone wid initial))
+
+runColorPickerKeyCommitTest :: Context -> IORef Int -> IO ()
+runColorPickerKeyCommitTest ctx failed = do
+  let inp0 = withInput 400 420
+      initial = colorRGBA 204 102 102 255
+      packed c = colorToWord32 c
+      ui = colorPicker "Accent" initial
+  (resp, _) <- warmup2 ctx inp0 ui
+  let wid = respId resp
+  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
+  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyRight]}) ui
+  store <- getStore ctx
+  let base = packed (widgetStoreBaseColor store wid initial)
+      neu = packed (widgetStoreColor store wid initial)
+  assert failed (neu /= packed initial)
+  assertEq failed base neu

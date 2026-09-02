@@ -35,6 +35,7 @@ import NanoUI.Font
   , fmLineHeight
   , layoutLineHeight
   , pickMonoFont
+  , textDisplayWidth
   , widgetContentInset
   )
 import NanoUI.Frame.TextEdit (normalizeTextFieldClicks)
@@ -162,22 +163,30 @@ drawTextAreaSelection da ctx state geom host fm theme style = do
             if row >= 0 && row < length lineTexts
               then lineTexts !! row
               else ""
+          lineLen = T.length line
+          clampCol c = max 0 (min lineLen c)
           startCol =
-            if row == loRow
-              then loCol
-              else 0
+            clampCol
+              ( if row == loRow
+                  then loCol
+                  else 0
+              )
           endCol =
-            if row == hiRow
-              then hiCol
-              else T.length line
+            clampCol
+              ( if row == hiRow
+                  then hiCol
+                  else lineLen
+              )
       when (startCol < endCol) $ do
-        (wLo, _) <- ctxMeasureText ctx (T.take startCol line)
-        (wHi, _) <- ctxMeasureText ctx (T.take endCol line)
-        let ly = contentTop + fromIntegral row * lineH - scrollYf
+        let (lineFm, _) = pickMonoFont fm (ctxMonoFontMetrics ctx) line
+            wLo = textDisplayWidth host lineFm (T.take startCol line)
+            wHi = textDisplayWidth host lineFm (T.take endCol line)
+            selW = wHi - wLo
+            ly = contentTop + fromIntegral row * lineH - scrollYf
             selX = rectX field + ix + wLo
-            selW = max 1 (wHi - wLo)
             selH = max 4 lineH
-        pushRect da (Rect selX ly selW selH) selBg
+        when (selW > 0) $
+          pushRect da (Rect selX ly selW selH) selBg
 
 drawTextAreaContent :: DrawArena -> Context -> NodeIdx -> Float -> Float -> Float -> Float -> Style -> IO ()
 drawTextAreaContent da ctx idx x y w h style = do
@@ -220,7 +229,8 @@ drawTextAreaContent da ctx idx x y w h style = do
                   then lineTexts !! row
                   else ""
               prefix = T.take col currentLine
-          (pw, _) <- ctxMeasureText ctx prefix
+              (lineFm, _) = pickMonoFont fm (ctxMonoFontMetrics ctx) currentLine
+              pw = textDisplayWidth host lineFm prefix
           let caretX = contentX + pw
               caretY = contentTop + fromIntegral row * lineH - scrollYf + 1
               caretH = max 4 (lineH - 2)

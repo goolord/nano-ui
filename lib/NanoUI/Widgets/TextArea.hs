@@ -42,6 +42,7 @@ import NanoUI.Input
   , foldInputKeys
   , inputChars
   , inputKeys
+  , inputKeysNull
   , inputModifiers
   )
 import qualified NanoUI.Input as Inp
@@ -119,7 +120,7 @@ selectionRangeOf state
 clearSelection :: TextAreaState -> TextAreaState
 clearSelection state =
   let cur = cursorOf state
-   in state {selectionAnchor = cur}
+   in state {selectionAnchor = cur, buffer = TB.withCursor cur (buffer state)}
 
 setTextAreaCursor :: Int -> Int -> TextAreaState -> TextAreaState
 setTextAreaCursor row col state =
@@ -149,7 +150,7 @@ deleteSelection state =
     Nothing -> state
     Just (lo, hi) ->
       let buf' = TB.deleteRange lo hi (buffer state)
-       in clearSelection state {buffer = TB.withCursor lo buf'}
+       in clearSelection state {buffer = buf'}
 
 insertWithSelection :: Char -> TextAreaState -> TextAreaState
 insertWithSelection ch state =
@@ -320,12 +321,14 @@ loadTextAreaState store key initial =
         let (vw, vh) =
               IM.findWithDefault (200, 96) (slotKey slotTextAreaViewport key) (storePoint store)
          in (realToFrac vw, realToFrac vh)
+      buf0 = TB.fromText text
       buf =
-        let b = TB.withCursor (TB.Cursor row col) (TB.fromText text)
+        let b = TB.withCursor (TB.Cursor row col) buf0
          in b {TB.preferredCol = pref}
+      anchor = TB.getCursor (TB.withCursor (TB.Cursor anchorRow anchorCol) buf0)
    in (initTextAreaState text)
      { buffer = buf
-     , selectionAnchor = TB.Cursor anchorRow anchorCol
+     , selectionAnchor = anchor
      , scrollOffset = scroll
      , viewportSize = viewport
      }
@@ -366,7 +369,7 @@ textAreaCut ctx state =
       let slice = TB.selectedText lo hi (buffer state)
       when (not (T.null slice)) $
         void (ctxClipboardSet ctx slice)
-      pure (deleteSelection state)
+      pure (clearSelection (deleteSelection state))
     Nothing -> do
       let txt = TB.toText (buffer state)
       if T.null txt
@@ -374,10 +377,11 @@ textAreaCut ctx state =
         else do
           void (ctxClipboardSet ctx txt)
           pure
-            (initTextAreaState T.empty)
-              { viewportSize = viewportSize state
-              , lineHeight = lineHeight state
-              }
+            ( clearSelection (initTextAreaState T.empty)
+                { viewportSize = viewportSize state
+                , lineHeight = lineHeight state
+                }
+            )
 
 textAreaPaste :: Context -> TextAreaState -> IO TextAreaState
 textAreaPaste ctx state = do
@@ -440,33 +444,41 @@ processTextArea ctx inp vpW vpH lineH s0 = do
           }
       s1 = setTextAreaViewport (vpW, vpH) lineH s0
       ctrl = Inp.modCtrl (inputModifiers inp)
+  when (not (T.null (inputChars inp)) || not (inputKeysNull (inputKeys inp))) $
+    writeIORef (ctxTextInputDrag ctx) Nothing
   s2 <-
     if ctrl
       then T.foldlM' (handleCtrlChar ctx) s1 (inputChars inp)
       else pure s1
   let filtered = T.filter (not . isCtrlCombo ctrl) (inputChars inp)
       s3 = T.foldl' (\s ch -> handleTextAreaEvent (KeyChar ch) mods s) s2 filtered
-  pure (foldInputKeys (\s k -> handleTextAreaEvent (mapKey k) mods s) s3 (inputKeys inp))
+  pure
+    ( foldInputKeys
+        ( \s k -> maybe s (\ki -> handleTextAreaEvent ki mods s) (mapKey k)
+        )
+        s3
+        (inputKeys inp)
+    )
   where
-    isCtrlCombo c ch = c && T.elem ch "aAcCxXvV\x01"
+    isCtrlCombo c ch = c && T.elem ch "aAcCxXvV\x01\x18"
 
 handleCtrlChar :: Context -> TextAreaState -> Char -> IO TextAreaState
 handleCtrlChar ctx s ch
   | ch `elem` ('a' : 'A' : '\x01' : []) = pure (selectAllTextArea s)
   | ch `elem` ('c' : 'C' : '\ETX' : []) = textAreaCopy ctx s >> pure s
-  | ch `elem` ('x' : 'X' : []) = textAreaCut ctx s
+  | ch `elem` ('x' : 'X' : '\x18' : []) = textAreaCut ctx s
   | ch `elem` ('v' : 'V' : []) = textAreaPaste ctx s
   | otherwise = pure s
 
-mapKey :: Key -> KeyInput
+mapKey :: Key -> Maybe KeyInput
 mapKey = \case
-  Inp.KeyBackspace -> KeyBackspace
-  Inp.KeyDelete -> KeyDelete
-  Inp.KeyEnter -> KeyEnter
-  Inp.KeyLeft -> KeyLeft
-  Inp.KeyRight -> KeyRight
-  Inp.KeyUp -> KeyUp
-  Inp.KeyDown -> KeyDown
-  Inp.KeyHome -> KeyHome
-  Inp.KeyEnd -> KeyEnd
-  _ -> KeyRight
+  Inp.KeyBackspace -> Just KeyBackspace
+  Inp.KeyDelete -> Just KeyDelete
+  Inp.KeyEnter -> Just KeyEnter
+  Inp.KeyLeft -> Just KeyLeft
+  Inp.KeyRight -> Just KeyRight
+  Inp.KeyUp -> Just KeyUp
+  Inp.KeyDown -> Just KeyDown
+  Inp.KeyHome -> Just KeyHome
+  Inp.KeyEnd -> Just KeyEnd
+  _ -> Nothing

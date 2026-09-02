@@ -47,10 +47,12 @@ testSpecs =
   , TestSpec "id-zero-alloc" False runIdZeroAllocTest
   , TestSpec "id-keyed-list" False runIdKeyedListTest
   , TestSpec "fit-sizing" False runFitSizingTest
+  , TestSpec "fit-muted-width" False runFitMutedWidthTest
   , TestSpec "with-key" False runWithKeyTest
   , TestSpec "layout" False runLayoutTest
   , TestSpec "row-panel-layout" False runRowPanelLayoutTest
   , TestSpec "draw" False runDrawTest
+  , TestSpec "drawing" False runDrawingTest
   , TestSpec "overlay" False runOverlayTest
   , TestSpec "interaction" False runInteractionTest
   , TestSpec "hover" False runHoverTest
@@ -58,6 +60,9 @@ testSpecs =
   , TestSpec "pointer-cursor-checkbox" False runPointerCursorCheckboxTest
   , TestSpec "text-input-cursor" False runTextInputCursorTest
   , TestSpec "text-area-cursor" True runTextAreaCursorTest
+  , TestSpec "text-area-cut-clears-selection" False runTextAreaCutClearsSelectionTest
+  , TestSpec "text-field-hover-boundary" True runTextFieldHoverBoundaryTest
+  , TestSpec "text-input-cut-clears-selection" False runTextInputCutClearsSelectionTest
   , TestSpec "text-input-selection" False runTextInputSelectionTest
   , TestSpec "text-input-ctrl-a" False runTextInputCtrlATest
   , TestSpec "text-input-mouse-selection" False runTextInputMouseSelectionTest
@@ -68,10 +73,12 @@ testSpecs =
   , TestSpec "text-input-clipboard" False runTextInputClipboardTest
   , TestSpec "text-input-cut-menu" False runTextInputCutMenuTest
   , TestSpec "text-input-menu" False runTextInputMenuTest
+  , TestSpec "text-input-menu-unfocused" False runTextInputMenuUnfocusedTest
   , TestSpec "select-dropdown-cursor" False runSelectDropdownCursorTest
   , TestSpec "slider-cursor" True runSliderCursorTest
   , TestSpec "scroll-thumb-cursor" False runScrollThumbCursorTest
   , TestSpec "text-input-span" True runTextInputSpanTest
+  , TestSpec "text-input-ff-caret" False runTextInputFfCaretTest
   , TestSpec "text-input-focus-sdl" True runTextInputFocusSdlTest
   , TestSpec "button-hover-anim" False runButtonHoverAnimTest
   , TestSpec "button-press-release-hover" False runButtonPressReleaseHoverTest
@@ -90,6 +97,10 @@ testSpecs =
   , TestSpec "table-scroll" False runTableScrollTest
   , TestSpec "table-first-col" False runTableFirstColWidthTest
   , TestSpec "table-fill-width" False runTableFillWidthTest
+  , TestSpec "table-content-slack" False runTableContentSlackTest
+  , TestSpec "table-cell-pad" True runTableCellPadTest
+  , TestSpec "table-fit-scroll-col" False runTableFitScrollColWidthTest
+  , TestSpec "table-tab-wrap-row" True runTableTabWrapRowTest
   , TestSpec "scroll-top-clip" True runScrollTopClipTest
   , TestSpec "select-overlay-damage" False runSelectOverlayDamageTest
   , TestSpec "text-input-dirty" False runTextInputDirtyTest
@@ -150,6 +161,9 @@ testSpecs =
   , TestSpec "label-align-end" False runLabelAlignEndTest
   , TestSpec "grow-wrap-sibling" False runGrowWrapPushesSiblingTest
   , TestSpec "controls-tab-height" True runControlsTabHeightTest
+  , TestSpec "color-picker-preview" True runColorPickerPreviewTest
+  , TestSpec "color-picker-commit" True runColorPickerCommitTest
+  , TestSpec "color-picker-key-commit" True runColorPickerKeyCommitTest
   , TestSpec "scroll-grow-click" True runScrollButtonClickSdlTest
   , TestSpec "icon-set" False runIconSetTest
   , TestSpec "scroll-bar-gutter" False runScrollBarGutterTest
