@@ -57,16 +57,15 @@ module NanoUI.Font
 
 import Data.Text (Text)
 import qualified Data.Text as T
-import NanoUI.Types (HostProfile, isCellHost)
+import NanoUI.Types (HostProfile, Rect (..), isCellHost, sliderBarCells)
+import NanoUI.WidgetMarkers
+  ( headingFontMarker
+  , monoFontMarker
+  , mutedFontMarker
+  , tabSentinelChar
+  )
 import NanoUI.Style (AlignX (..), Padding (..), defaultLayout, layoutGap)
 import NanoUI.Icons (terminalPaintColumns)
-import NanoUI.Types (Rect (..), sliderBarCells)
-
-monoFontMarker :: Text
-monoFontMarker = T.singleton '\x02'
-
-tabSentinelChar :: Char
-tabSentinelChar = '\x2409'
 
 data GlyphQuad = GlyphQuad
   { gqX :: {-# UNPACK #-} !Float
@@ -132,15 +131,9 @@ pickMonoFont fm mono txt =
     then (mono, stripMonoFontMarker txt)
     else (fm, txt)
 
-headingFontMarker :: Text
-headingFontMarker = T.singleton '\x03'
-
 {-# INLINE hasHeadingMarker #-}
 hasHeadingMarker :: Text -> Bool
 hasHeadingMarker txt = T.take 1 txt == headingFontMarker
-
-mutedFontMarker :: Text
-mutedFontMarker = T.singleton '\x04'
 
 {-# INLINE hasMutedMarker #-}
 hasMutedMarker :: Text -> Bool

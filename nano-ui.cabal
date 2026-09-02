@@ -15,7 +15,7 @@ extra-doc-files:
     README.md
 
 common extensions
-    default-language: GHC2021
+    default-language: GHC2024
     default-extensions:
         BangPatterns
         DeriveGeneric
@@ -52,13 +52,14 @@ common warnings
 
 library
     import:           extensions
-    import:           ghc-options
     import:           warnings
     exposed-modules:
         NanoUI
         NanoUI.Debug
         NanoUI.Input
         NanoUI.Testing
+        NanoUI.Testing.Assert
+        NanoUI.Testing.Harness
         NanoUI.Widgets.TextBuffer
         NanoUI.Widgets.TextArea
     other-modules:
@@ -96,6 +97,7 @@ library
         NanoUI.Store
         NanoUI.Style
         NanoUI.Types
+        NanoUI.WidgetMarkers
         NanoUI.WidgetText
         NanoUI.Widgets
         NanoUI.Widgets.Node
@@ -135,7 +137,6 @@ library
 
 benchmark nano-ui-id-bench
     import:           extensions
-    import:           ghc-options
     import:           warnings
     type:             exitcode-stdio-1.0
     main-is:          IdBench.hs
@@ -152,7 +153,6 @@ benchmark nano-ui-id-bench
 
 executable nano-ui-demo
     import:           extensions
-    import:           ghc-options
     import:           rts-options
     import:           warnings
     main-is:          Demo.hs
@@ -165,7 +165,6 @@ executable nano-ui-demo
 
 test-suite text-buffer-spec
     import:           extensions
-    import:           ghc-options
     import:           warnings
     type:             exitcode-stdio-1.0
     main-is:          NanoUI/TextBufferSpec.hs
@@ -179,7 +178,6 @@ test-suite text-buffer-spec
 
 executable nano-ui-profile
     import:           extensions
-    import:           ghc-options
     import:           rts-options
     import:           warnings
     main-is:          Profile.hs

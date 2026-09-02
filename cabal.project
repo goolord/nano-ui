@@ -6,19 +6,12 @@ packages:
 tests: True
 benchmarks: True
 
+package *
+  optimization: 2
+  profiling-detail: late
+
 package nano-ui
-  optimization: 2
   ghc-options: -fspecialise-aggressively
-  profiling-detail: late
-
-package nano-ui-sdl
-  optimization: 2
-  profiling-detail: late
-
-package nano-ui-term
-  optimization: 2
-  profiling-detail: late
 
 package nano-ui-sdl-bench
-  optimization: 2
   executable-static: True
