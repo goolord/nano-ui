@@ -27,6 +27,12 @@ module NanoUI.Context
   , registerPopupConfig
   , lookupPopupConfig
   , clearPopupConfigs
+  , registerDrawing
+  , lookupDrawing
+  , cachedDrawingOps
+  , cachedWidgetLayout
+  , pruneDrawOpCache
+  , clearDrawings
   , getStore
   , setStore
   , isDisabled
@@ -173,7 +179,9 @@ import NanoUI.Animation
   )
 import NanoUI.Atlas (ImageAtlas, atlasTextureId)
 import NanoUI.Atlas qualified as Atlas
-import NanoUI.Draw (DrawArena, newDrawArena)
+import Data.Vector (Vector)
+import Data.Vector qualified as V
+import NanoUI.Draw (DrawArena, DrawingBuild, DrawOp, newDrawArena, shiftDrawOp)
 import NanoUI.Font (FontMetrics, hasMonoFontMarker, measureText, monospaceMetrics, stripWidgetMarkers)
 import NanoUI.Frame.SpanArena (SpanArena, newSpanArena)
 import NanoUI.Types (HostProfile (..))
@@ -214,7 +222,7 @@ import NanoUI.Store
   , slotScrollLinkY
   , slotWinSize
   )
-import NanoUI.Style (Theme, defaultTheme)
+import NanoUI.Style (Layout, Theme, defaultTheme)
 import NanoUI.Types
   ( Damage (..)
   , DamageBounds (..)
@@ -350,6 +358,9 @@ data Context = Context
   , ctxClipboardGet :: IO (Maybe Text)
   , ctxClipboardSet :: Text -> IO Bool
   , ctxPopupConfigs :: IORef (IntMap (PopupAnchor, PopupPlacement, Float))
+  , ctxDrawings :: IORef (IntMap DrawingBuild)
+  , ctxDrawOpCache :: IORef (IntMap (Rect, Vector DrawOp))
+  , ctxDrawFitCache :: IORef (IntMap DrawFitCache)
   , ctxWidgetNodeTypes :: IORef (Maybe (IntMap NodeType))
   , ctxSelectDropPress :: IORef Bool
   , ctxOpenSelectDrop :: IORef (Maybe (WidgetId, Rect))
@@ -463,6 +474,86 @@ lookupPopupConfig ctx wid = do
 {-# INLINE clearPopupConfigs #-}
 clearPopupConfigs :: Context -> IO ()
 clearPopupConfigs ctx = writeIORef (ctxPopupConfigs ctx) IM.empty
+
+data DrawFitCache = DrawFitCache
+  { dfcDw :: {-# UNPACK #-} !Double
+  , dfcDh :: {-# UNPACK #-} !Double
+  , dfcLh :: {-# UNPACK #-} !Float
+  , dfcContent :: {-# UNPACK #-} !Int
+  , dfcIn :: !Layout
+  , dfcOut :: !Layout
+  }
+
+{-# INLINE registerDrawing #-}
+registerDrawing :: Context -> WidgetId -> DrawingBuild -> IO ()
+registerDrawing ctx wid build =
+  modifyIORef' (ctxDrawings ctx) (IM.insert (intKey wid) build)
+
+{-# INLINE lookupDrawing #-}
+lookupDrawing :: Context -> WidgetId -> IO (Maybe DrawingBuild)
+lookupDrawing ctx wid = IM.lookup (intKey wid) <$> readIORef (ctxDrawings ctx)
+
+-- | Rebuild draw ops when width or height change. A move only translates.
+cachedDrawingOps :: Context -> WidgetId -> Rect -> DrawingBuild -> IO (Vector DrawOp)
+cachedDrawingOps ctx wid rect build = do
+  let k = intKey wid
+  cache <- readIORef (ctxDrawOpCache ctx)
+  case IM.lookup k cache of
+    Just (r, ops)
+      | rectW r == rectW rect && rectH r == rectH rect ->
+          if rectX r == rectX rect && rectY r == rectY rect
+            then pure ops
+            else do
+              let ops' =
+                    V.map
+                      (shiftDrawOp (rectX rect - rectX r) (rectY rect - rectY r))
+                      ops
+              modifyIORef' (ctxDrawOpCache ctx) (IM.insert k (rect, ops'))
+              pure ops'
+    _ -> do
+      let ops = build rect
+      modifyIORef' (ctxDrawOpCache ctx) (IM.insert k (rect, ops))
+      pure ops
+
+-- | Reuse a derived layout while envelope, font, content key, and caller layout match.
+cachedWidgetLayout ::
+  Context ->
+  WidgetId ->
+  Double ->
+  Double ->
+  Float ->
+  Int ->
+  Layout ->
+  IO Layout ->
+  IO Layout
+cachedWidgetLayout ctx wid dw dh lh content incoming compute = do
+  let k = intKey wid
+  cache <- readIORef (ctxDrawFitCache ctx)
+  case IM.lookup k cache of
+    Just e
+      | dfcDw e == dw
+          && dfcDh e == dh
+          && dfcLh e == lh
+          && dfcContent e == content
+          && dfcIn e == incoming ->
+          pure (dfcOut e)
+    _ -> do
+      out <- compute
+      modifyIORef'
+        (ctxDrawFitCache ctx)
+        (IM.insert k (DrawFitCache dw dh lh content incoming out))
+      pure out
+
+-- | Drop cached ops for drawings that did not rebuild this frame.
+pruneDrawOpCache :: Context -> IO ()
+pruneDrawOpCache ctx = do
+  live <- readIORef (ctxDrawings ctx)
+  modifyIORef' (ctxDrawOpCache ctx) (`IM.intersection` live)
+  modifyIORef' (ctxDrawFitCache ctx) (`IM.intersection` live)
+
+{-# INLINE clearDrawings #-}
+clearDrawings :: Context -> IO ()
+clearDrawings ctx = writeIORef (ctxDrawings ctx) IM.empty
 
 {-# INLINE getStore #-}
 getStore :: Context -> IO WidgetStore
@@ -821,6 +912,9 @@ newContext = do
   ctxTextFieldClickCell <- newIORef Nothing
   ctxTextInputMenu <- newIORef Nothing
   ctxPopupConfigs <- newIORef IM.empty
+  ctxDrawings <- newIORef IM.empty
+  ctxDrawOpCache <- newIORef IM.empty
+  ctxDrawFitCache <- newIORef IM.empty
   ctxWidgetNodeTypes <- newIORef Nothing
   ctxSelectDropPress <- newIORef False
   ctxOpenSelectDrop <- newIORef Nothing
@@ -884,6 +978,9 @@ newContext = do
     , ctxClipboardGet = pure Nothing
     , ctxClipboardSet = \_ -> pure False
     , ctxPopupConfigs
+    , ctxDrawings
+    , ctxDrawOpCache
+    , ctxDrawFitCache
     , ctxWidgetNodeTypes
     , ctxSelectDropPress
     , ctxOpenSelectDrop

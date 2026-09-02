@@ -176,16 +176,6 @@ floatingPanelsInOrder ctx = do
 floatingPanelRects :: Context -> IO (IM.IntMap Rect)
 floatingPanelRects ctx = IM.fromList <$> floatingPanelsInOrder ctx
 
-hasWindowNode :: Context -> IO Bool
-hasWindowNode ctx = do
-  n <- arenaCount (ctxNodeArena ctx)
-  let go i
-        | i >= n = pure False
-        | otherwise = do
-            nt <- getNodeType (ctxNodeArena ctx) i
-            if nt == NodeWindow then pure True else go (i + 1)
-  go 0
-
 writeDamage ::
   Context ->
   Input ->
@@ -221,7 +211,6 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
         isNothing <$> getPrevRectByKey ctx k
   winDragActive <- isJust <$> readIORef (ctxWindowDrag ctx)
   winResizeActive <- isJust <$> readIORef (ctxWindowResize ctx)
-  windowOpen <- hasWindowNode ctx
   let keyedMoved = keyedRectDeltas oldRects newRects
   moved <- mapM (clipDeltaToScrollViewport ctx newRects) keyedMoved
   let stripFloat s = s {storeFloat = IM.empty}
@@ -258,7 +247,6 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
                    || modalFlip
                    || floatingChanged
                    || windowLive
-                   || windowOpen
                    || paintOrphan
                    || keysChanged
                    || layoutSettle

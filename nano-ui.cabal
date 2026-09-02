@@ -110,6 +110,7 @@ library
         NanoUI.Widgets.Radio
         NanoUI.Widgets.Tree
         NanoUI.Widgets.ColorPicker
+        NanoUI.Widgets.Drawing
         NanoUI.Widgets.TextInput
         NanoUI.Widgets.TextEdit
         NanoUI.Widgets.Animate
@@ -204,7 +205,8 @@ test-suite nano-ui-test
         containers,
         effectful ^>=2.6,
         nano-ui,
-        text ^>=2.1
+        text ^>=2.1,
+        vector ^>=0.13
     hs-source-dirs:   test/integration
     default-language: GHC2024
 

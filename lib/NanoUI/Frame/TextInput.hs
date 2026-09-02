@@ -45,6 +45,8 @@ import NanoUI.Font
   , centeredTextY
   , fmLineHeight
   , layoutLineHeight
+  , pickMonoFont
+  , textDisplayWidth
   , widgetContentInset
   )
 import NanoUI.Frame.Scroll.Geometry (padTextClipRect)
@@ -156,10 +158,12 @@ drawTextInputSelection da ctx idx x y w h style = do
               theme = ctxTheme ctx
               accent = themeAccent theme
               selBg = lerpColor accent (styleBg style) 0.55
-          (wLo, _) <- ctxMeasureText ctx (T.take selLo value)
-          (wHi, _) <- ctxMeasureText ctx (T.take selHi value)
-          let lineH = layoutLineHeight (ctxHostProfile ctx) fm
-              ty = centeredTextY (ctxHostProfile ctx) fm (rectY fieldRect) (rectH fieldRect) lineH
+              (fieldFm, _) = pickMonoFont fm (ctxMonoFontMetrics ctx) value
+              host = ctxHostProfile ctx
+              wLo = textDisplayWidth host fieldFm (T.take selLo value)
+              wHi = textDisplayWidth host fieldFm (T.take selHi value)
+          let lineH = layoutLineHeight host fm
+              ty = centeredTextY host fm (rectY fieldRect) (rectH fieldRect) lineH
               selX = rectX fieldRect + ix + wLo
               selW = max 1 (wHi - wLo)
               selH = max 4 lineH
@@ -185,9 +189,11 @@ drawTextInputCaret da ctx idx x y w h style = do
             (ix, _) = widgetContentInset (ctxHostProfile ctx) fm
             fieldTxt = textInputFieldText lbl value focus
             prefix = T.take (max 0 (min (T.length fieldTxt) cursor)) fieldTxt
-        (pw, _) <- ctxMeasureText ctx prefix
-        let lineH = layoutLineHeight (ctxHostProfile ctx) fm
-            ty = centeredTextY (ctxHostProfile ctx) fm (rectY fieldRect) (rectH fieldRect) lineH
+            (fieldFm, _) = pickMonoFont fm (ctxMonoFontMetrics ctx) fieldTxt
+            host = ctxHostProfile ctx
+            pw = textDisplayWidth host fieldFm prefix
+        let lineH = layoutLineHeight host fm
+            ty = centeredTextY host fm (rectY fieldRect) (rectH fieldRect) lineH
             caretX = rectX fieldRect + ix + pw
             caretY = ty + 1
             caretH = max 4 (lineH - 2)

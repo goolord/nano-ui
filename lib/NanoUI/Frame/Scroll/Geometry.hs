@@ -21,6 +21,7 @@ module NanoUI.Frame.Scroll.Geometry
   , scrollVerticalHidden
   , scrollHorizontalHidden
   , scrollAxisGutter
+  , scrollGutters2D
   , scrollShowsChrome
   , scrollChromeSuppressed
   , scrollAxisOverflows
@@ -141,6 +142,27 @@ scrollAxisGutter policy host fm slot contentSize innerMain =
         ScrollBarList -> scrollBarGutter host fm + scrollBarListExtra
         ScrollBarPage -> scrollBarGutter host fm + scrollBarPageExtra
 
+-- Vertical bar takes width. Horizontal bar takes height. Second pass
+-- covers the corner case where one bar makes the other axis overflow.
+scrollGutters2D ::
+  HostProfile ->
+  FontMetrics ->
+  ScrollBarSlot ->
+  ScrollConfig ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  (Float, Float)
+scrollGutters2D host fm slot cfg contentW contentH innerW innerH =
+  let gVert inner = scrollAxisGutter (scrollPolicyY cfg) host fm slot contentH inner
+      gHorz inner = scrollAxisGutter (scrollPolicyX cfg) host fm slot contentW inner
+      gW0 = gVert innerH
+      gH0 = gHorz innerW
+      gW = gVert (innerH - gH0)
+      gH = gHorz (innerW - gW0)
+   in (gW, gH)
+
 isScrollStyle2D :: Int -> Bool
 isScrollStyle2D si = si /= 0 && scrollConfigNative2D (decodeScrollConfig si)
 
@@ -243,9 +265,8 @@ scrollViewportClip2D host fm slot cfg x y w h pad contentW contentH =
   let base = padContentClip host fm x y w h pad
       innerW = rectW base
       innerH = rectH base
-      gutterX = scrollAxisGutter (scrollPolicyX cfg) host fm slot contentW innerW
-      gutterY = scrollAxisGutter (scrollPolicyY cfg) host fm slot contentH innerH
-   in Rect (rectX base) (rectY base) (max 0 (innerW - gutterX)) (max 0 (innerH - gutterY))
+      (gutterW, gutterH) = scrollGutters2D host fm slot cfg contentW contentH innerW innerH
+   in Rect (rectX base) (rectY base) (max 0 (innerW - gutterW)) (max 0 (innerH - gutterH))
 
 scrollChromeLane ::
   HostProfile -> FontMetrics -> ScrollBarSlot -> DirTag -> Float -> Float -> Float -> Float -> Padding -> Rect

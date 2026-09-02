@@ -11,6 +11,7 @@ module NanoUI.Style
   , Style (..)
   , Theme (..)
   , defaultTheme
+  , themeSeries
   , scrollBarTrackColor
   , scrollBarThumbColor
   , panelPaintPad
@@ -195,6 +196,11 @@ data Theme = Theme
   , themeSeparator :: Color
   , themeAccent :: Color
   , themeMuted :: Color
+  , themeRed :: Color
+  , themeOrange :: Color
+  , themeYellow :: Color
+  , themeGreen :: Color
+  , themePurple :: Color
   , themeOverlayDim :: Color
   }
   deriving (Eq, Show)
@@ -239,8 +245,24 @@ defaultTheme =
         , themeSeparator = colorRGBA 78 80 88 255
         , themeAccent = colorRGBA 88 156 246 255
         , themeMuted = colorRGBA 176 172 164 255
+        , themeRed = colorRGBA 204 102 102 255
+        , themeOrange = colorRGBA 216 140 72 255
+        , themeYellow = colorRGBA 212 176 88 255
+        , themeGreen = colorRGBA 104 168 124 255
+        , themePurple = colorRGBA 176 140 220 255
         , themeOverlayDim = colorRGBA 8 8 10 176
         }
+
+-- Status and series colours in hue order, then accent.
+themeSeries :: Theme -> [Color]
+themeSeries t =
+  [ themeRed t
+  , themeOrange t
+  , themeYellow t
+  , themeGreen t
+  , themeAccent t
+  , themePurple t
+  ]
 
 -- Scroll track/thumb tints. Cell hosts use opaque theme mixes so light palettes
 -- stay visible on floating windows; SDL keeps the old translucent overlay.

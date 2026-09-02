@@ -7,6 +7,7 @@ module NanoUI.Frame.TextEdit
   , textEditMenuRect
   , textFieldMenuRect
   , openTextEditMenu
+  , textFieldWidgetAtMouse
   , finalizeTextEditMenuPick
   , closeTextEditMenuOnOutsideClick
   , closeTextEditMenuOnEscape
@@ -25,11 +26,12 @@ import NanoUI.Context
   ( Context (..)
   , TextFieldClickCell (..)
   , TextInputMenu (..)
+  , isDisabled
   , markDirty
   , markEscapeConsumed
   )
 import NanoUI.Draw (pushRect, pushRoundedRect, pushText)
-import NanoUI.Font (FontMetrics, centeredTextY, hasMonoFontMarker, layoutLineHeight, stripMonoFontMarker, widgetContentInset)
+import NanoUI.Font (FontMetrics, centeredTextY, hasMonoFontMarker, layoutLineHeight, pickMonoFont, stripMonoFontMarker, textIndexAtX, widgetContentInset)
 import NanoUI.Frame.Chrome
   ( fillStyledRect
   , overlayMenuStyle
@@ -40,9 +42,9 @@ import NanoUI.Frame.Chrome
   , textInputMenuOuterPad
   )
 import NanoUI.Input (UiCursorKind (..))
-import NanoUI.Frame.Hit (widgetOverlayAllowed)
+import NanoUI.Frame.Hit (findNodeByWidgetId, nodeClippedHit, overlayHitAllowed, widgetOverlayAllowed)
 import NanoUI.Types (HostProfile, isCellHost)
-import NanoUI.Id (WidgetId (..), hashWidgetId)
+import NanoUI.Id (WidgetId (..))
 import NanoUI.Input
   ( Input (..)
   , Key (..)
@@ -53,7 +55,7 @@ import NanoUI.Input
   , inputMouseRightPressed
   , inputWindowSize
   )
-import NanoUI.Layout.Arena (NodeType (NodeTextArea, NodeTextInput), arenaCount, getNodeType, getRect, getWidgetId)
+import NanoUI.Layout.Arena (NodeIdx, NodeType (NodeTextArea, NodeTextInput), findNodeRevM, getNodeType, getRect, getWidgetId)
 import NanoUI.WidgetText (textInputFieldHeight, textInputLabelGap)
 import NanoUI.Style (Style (..), Theme (..), themeAccent, themeSeparator)
 import NanoUI.Types (Color (..), Rect (..), Size (..), V2 (..), lerpColor, rectContains, rectH, rectW, rectX, rectY, v2X, v2Y)
@@ -69,23 +71,9 @@ textCharClass c
   | otherwise = TextOther
 
 textCharAtX :: Context -> Text -> Float -> Float -> IO Int
-textCharAtX ctx text startX mouseX = do
-  let len = T.length text
-      relX = max 0 (mouseX - startX)
-  if len <= 0
-    then pure 0
-    else search 0 len relX
-  where
-    search lo hi x =
-      if hi - lo <= 1
-        then do
-          (wLo, _) <- ctxMeasureText ctx (T.take lo text)
-          (wHi, _) <- ctxMeasureText ctx (T.take hi text)
-          if x - wLo <= wHi - x then pure lo else pure hi
-        else do
-          let mid = (lo + hi) `div` 2
-          (wMid, _) <- ctxMeasureText ctx (T.take mid text)
-          if wMid <= x then search mid hi x else search lo mid x
+textCharAtX ctx text startX mouseX =
+  let (fm', shown) = pickMonoFont (ctxFontMetrics ctx) (ctxMonoFontMetrics ctx) text
+   in pure (textIndexAtX (ctxHostProfile ctx) fm' shown (max 0 (mouseX - startX)))
 
 textWordBounds :: Text -> Int -> (Int, Int)
 textWordBounds text raw
@@ -199,77 +187,69 @@ textEditMenuItemFg style enabled =
     then styleFg style
     else lerpColor (styleFg style) (styleBg style) 0.55
 
+-- Same box as `textInputGeom` / `textAreaGeom` field rects.
+textFieldRectAt :: Context -> NodeIdx -> IO Rect
+textFieldRectAt ctx idx = do
+  nt <- getNodeType (ctxNodeArena ctx) idx
+  (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+  let host = ctxHostProfile ctx
+      fm = ctxFontMetrics ctx
+      labelH = layoutLineHeight host fm
+      gap = textInputLabelGap fm
+      fieldY = y + labelH + gap
+      fieldH =
+        if nt == NodeTextInput
+          then textInputFieldHeight fm
+          else max 0 (h - labelH - gap)
+  pure (Rect x fieldY w fieldH)
+
 textFieldMenuRect :: Context -> WidgetId -> IO (Maybe Rect)
 textFieldMenuRect ctx wid = do
-  mInput <- textInputFieldRectForWidget ctx wid
-  case mInput of
-    Just fieldRect -> pure (Just fieldRect)
-    Nothing -> textAreaFieldRectForWidget ctx wid
-
-textInputFieldRectForWidget :: Context -> WidgetId -> IO (Maybe Rect)
-textInputFieldRectForWidget ctx wid = do
-  count <- arenaCount (ctxNodeArena ctx)
-  go 0 count
-  where
-    go idx count
-      | idx >= count = pure Nothing
-      | otherwise = do
-          nt <- getNodeType (ctxNodeArena ctx) idx
-          if nt /= NodeTextInput
-            then go (idx + 1) count
-            else do
-              w' <- getWidgetId (ctxNodeArena ctx) idx
-              if w' /= wid
-                then go (idx + 1) count
-                else do
-                  (x, y, w, _) <- getRect (ctxNodeArena ctx) idx
-                  let fm = ctxFontMetrics ctx
-                      labelH = layoutLineHeight (ctxHostProfile ctx) fm
-                      gap = textInputLabelGap fm
-                      fieldH = textInputFieldHeight fm
-                      fieldY = y + labelH + gap
-                  pure (Just (Rect x fieldY w fieldH))
-
-textAreaFieldRectForWidget :: Context -> WidgetId -> IO (Maybe Rect)
-textAreaFieldRectForWidget ctx wid = do
-  count <- arenaCount (ctxNodeArena ctx)
-  go 0 count
-  where
-    go idx count
-      | idx >= count = pure Nothing
-      | otherwise = do
-          nt <- getNodeType (ctxNodeArena ctx) idx
-          if nt /= NodeTextArea
-            then go (idx + 1) count
-            else do
-              w' <- getWidgetId (ctxNodeArena ctx) idx
-              if w' /= wid
-                then go (idx + 1) count
-                else do
-                  (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-                  let fm = ctxFontMetrics ctx
-                      labelH = layoutLineHeight (ctxHostProfile ctx) fm
-                      gap = textInputLabelGap fm
-                      fieldY = y + labelH + gap
-                      fieldH = max 0 (h - labelH - gap)
-                  pure (Just (Rect x fieldY w fieldH))
+  mIdx <- findNodeByWidgetId ctx wid
+  case mIdx of
+    Nothing -> pure Nothing
+    Just idx -> do
+      nt <- getNodeType (ctxNodeArena ctx) idx
+      if nt /= NodeTextInput && nt /= NodeTextArea
+        then pure Nothing
+        else Just <$> textFieldRectAt ctx idx
 
 openTextEditMenu :: Context -> Input -> IO ()
 openTextEditMenu ctx inp =
   when (inputMouseRightPressed inp) $ do
-    focus <- readIORef (ctxFocusId ctx)
-    when (hashWidgetId focus /= 0) $ do
-      mField <- textFieldMenuRect ctx focus
-      case mField of
-        Nothing -> pure ()
-        Just fieldRect -> do
-          let mouse = inputMousePos inp
-          when (rectContains fieldRect mouse) $ do
-            fm <- pure (ctxFontMetrics ctx)
-            menuW <- textEditMenuWidth ctx
-            let menuRect = textEditMenuRectAt (ctxHostProfile ctx) fm (v2X mouse) (v2Y mouse) menuW (inputWindowSize inp)
-            writeIORef (ctxTextInputMenu ctx) (Just (TextInputMenu focus menuRect))
-            markDirty ctx
+    let mouse = inputMousePos inp
+    mWid <- textFieldWidgetAtMouse ctx mouse
+    case mWid of
+      Nothing -> pure ()
+      Just wid -> do
+        writeIORef (ctxFocusId ctx) wid
+        fm <- pure (ctxFontMetrics ctx)
+        menuW <- textEditMenuWidth ctx
+        let menuRect = textEditMenuRectAt (ctxHostProfile ctx) fm (v2X mouse) (v2Y mouse) menuW (inputWindowSize inp)
+        writeIORef (ctxTextInputMenu ctx) (Just (TextInputMenu wid menuRect))
+        markDirty ctx
+
+textFieldWidgetAtMouse :: Context -> V2 -> IO (Maybe WidgetId)
+textFieldWidgetAtMouse ctx mouse = do
+  mIdx <-
+    findNodeRevM (ctxNodeArena ctx) $ \idx -> do
+      nt <- getNodeType (ctxNodeArena ctx) idx
+      if nt /= NodeTextInput && nt /= NodeTextArea
+        then pure False
+        else do
+          wid <- getWidgetId (ctxNodeArena ctx) idx
+          disabled <- isDisabled ctx wid
+          if disabled
+            then pure False
+            else do
+              field <- textFieldRectAt ctx idx
+              hit <- nodeClippedHit ctx idx field mouse
+              if not hit
+                then pure False
+                else overlayHitAllowed ctx idx mouse
+  case mIdx of
+    Nothing -> pure Nothing
+    Just idx -> Just <$> getWidgetId (ctxNodeArena ctx) idx
 
 finalizeTextEditMenuPick :: Context -> Input -> IO ()
 finalizeTextEditMenuPick ctx inp =

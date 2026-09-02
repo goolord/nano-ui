@@ -117,6 +117,23 @@ terminalThemeFromColors fg bg =
       dimBase = sink bg 0.55
       overlayDim =
         colorRGBA (colorR dimBase) (colorG dimBase) (colorB dimBase) 186
+      -- Dark: lifted hues on charcoal. Light: sunk hues on paper.
+      (red, orange, yellow, green, purple) =
+        if dark
+          then
+            ( colorRGBA 204 102 102 255
+            , colorRGBA 216 140 72 255
+            , colorRGBA 212 176 88 255
+            , colorRGBA 104 168 124 255
+            , colorRGBA 176 140 220 255
+            )
+          else
+            ( colorRGBA 180 40 48 255
+            , colorRGBA 180 90 16 255
+            , colorRGBA 140 100 0 255
+            , colorRGBA 16 120 32 255
+            , colorRGBA 120 32 140 255
+            )
       panelStyle =
         Style
           { styleBg = panelBg
@@ -166,6 +183,11 @@ terminalThemeFromColors fg bg =
         , themeSeparator = separator
         , themeAccent = accent
         , themeMuted = muted
+        , themeRed = red
+        , themeOrange = orange
+        , themeYellow = yellow
+        , themeGreen = green
+        , themePurple = purple
         , themeOverlayDim = overlayDim
         }
 

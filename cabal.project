@@ -2,6 +2,7 @@ packages:
   .
   term-lib
   sdl-lib
+  nano-ui-diagrams
 
 tests: True
 benchmarks: True

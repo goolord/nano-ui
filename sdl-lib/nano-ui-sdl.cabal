@@ -119,7 +119,9 @@ executable nano-ui-sdl-demo
     build-depends:
         base ^>=4.22.0.0,
         bytestring ^>=0.12,
+        diagrams-lib >=1.6 && <1.7,
         nano-ui,
+        nano-ui-diagrams,
         nano-ui-sdl,
         primitive ^>=0.9,
         vector ^>=0.13,
@@ -161,7 +163,9 @@ executable nano-ui-sdl-profile
     build-depends:
         base ^>=4.22.0.0,
         bytestring ^>=0.12,
+        diagrams-lib >=1.6 && <1.7,
         nano-ui,
+        nano-ui-diagrams,
         nano-ui-sdl,
         primitive ^>=0.9,
         vector ^>=0.13,

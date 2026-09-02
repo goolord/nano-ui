@@ -29,6 +29,14 @@ spec = do
       TB.getCursor (TB.fromText "hello") `shouldBe` TB.Cursor 0 0
       TB.getCursor (TB.fromText "a\nb") `shouldBe` TB.Cursor 0 0
 
+    it "deleteRange leaves the cursor at the start of the deleted span" $ do
+      let gone = TB.deleteRange (TB.Cursor 0 0) (TB.Cursor 0 5) (TB.fromText "hello")
+          mid = TB.deleteRange (TB.Cursor 0 1) (TB.Cursor 0 4) (TB.fromText "hello")
+      TB.toText gone `shouldBe` ""
+      TB.getCursor gone `shouldBe` TB.Cursor 0 0
+      TB.toText mid `shouldBe` "ho"
+      TB.getCursor mid `shouldBe` TB.Cursor 0 1
+
     it "roundtrips a trailing newline through fromText/toText" $ do
       TB.toText (TB.fromText "a\n") `shouldBe` "a\n"
       TB.toLines (TB.fromText "a\n") `shouldBe` ["a", ""]

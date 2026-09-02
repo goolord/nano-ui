@@ -7,6 +7,7 @@ module NanoUI.Widgets.ColorPicker
   , colorPickerSvH
   , colorPickerExtraH
   , widgetStoreColor
+  , widgetStoreBaseColor
   , widgetStoreHue
   , widgetStoreSv
   , clampHue
@@ -26,6 +27,7 @@ import Control.Monad (unless, when)
 import Data.IORef (readIORef, writeIORef)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
+import Data.Word (Word64)
 import Effectful (Eff, type (:>))
 import qualified Data.IntMap.Strict as IM
 import NanoUI.Context
@@ -72,7 +74,13 @@ import NanoUI.Input (Input (..), inputMouseDown, inputMousePressed)
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
 import NanoUI.Style (Style (..), defaultLayout, fillW)
-import NanoUI.WidgetText (colorPickerLabelText, colorPickerToHex)
+import NanoUI.WidgetText
+  ( colorPickerCurrentLabel
+  , colorPickerLabelText
+  , colorPickerNewLabel
+  , colorPickerToHex
+  )
+import NanoUI.Store (slotKey)
 import NanoUI.Frame.Hit (scrollHitRect)
 import NanoUI.Widgets.Behavior (DragAxis (..), KeyNav (..), keyedDragHeld, useDrag1D, useKeyNav)
 import NanoUI.Widgets.Node (Response (..), addWidget, setChanged)
@@ -81,7 +89,7 @@ colorPickerDefaultColor :: Color
 colorPickerDefaultColor = colorRGBA 128 128 128 255
 
 colorPickerMinWidth :: Float
-colorPickerMinWidth = 180
+colorPickerMinWidth = 220
 
 colorPickerGap :: Float
 colorPickerGap = 6
@@ -89,32 +97,52 @@ colorPickerGap = 6
 colorPickerHexGap :: Float
 colorPickerHexGap = 4
 
--- Fixed SV height. Hue and hex sit below it and add their own extraH.
+colorPickerSwatchH :: Float
+colorPickerSwatchH = 28
+
+colorPickerSwatchGap :: Float
+colorPickerSwatchGap = 4
+
+-- Fixed SV height. Hue, previews, and hex sit below it and add their own extraH.
 colorPickerSvH :: Float
 colorPickerSvH = 120
 
 colorPickerHueH :: Float
 colorPickerHueH = sliderTrackHeight
 
+-- Live RGB in storeInt at the widget key. Opening color stays in this slot.
+slotColorBase :: Word64
+slotColorBase = 0x4355524300000001
+
 data ColorPickerGeom = ColorPickerGeom
   { cpgLabelH :: !Float
   , cpgSv :: !Rect
   , cpgHue :: !Rect
+  , cpgCurrent :: !Rect
+  , cpgNew :: !Rect
+  , cpgPreviewLabelY :: !Float
   , cpgHexY :: !Float
   , cpgHexH :: !Float
   }
   deriving (Eq, Show)
 
-widgetStoreColor :: WidgetStore -> WidgetId -> Color -> Color
-widgetStoreColor store wid fallback =
+storeColorAt :: WidgetStore -> Int -> Color -> Color
+storeColorAt store key fallback =
   colorFromWord32
     ( fromIntegral
         ( IM.findWithDefault
             (fromIntegral (colorToWord32 fallback))
-            (intKey wid)
+            key
             (storeInt store)
         )
     )
+
+widgetStoreColor :: WidgetStore -> WidgetId -> Color -> Color
+widgetStoreColor store wid fallback = storeColorAt store (intKey wid) fallback
+
+widgetStoreBaseColor :: WidgetStore -> WidgetId -> Color -> Color
+widgetStoreBaseColor store wid fallback =
+  storeColorAt store (slotKey slotColorBase (intKey wid)) (widgetStoreColor store wid fallback)
 
 -- RGB cannot tell hue 0 from 360. Keep the slider end the user last set.
 widgetStoreHue :: WidgetStore -> WidgetId -> Color -> Float
@@ -132,10 +160,19 @@ widgetStoreSv store wid fallback =
 clampHue :: Float -> Float
 clampHue h = max 0 (min 360 h)
 
--- extraH: SV + hue track + hex line + gaps. Same pattern as slider trackExtra.
+-- extraH: SV + hue track + Current/New row + hex line + gaps. Same pattern as slider trackExtra.
 colorPickerExtraH :: Float -> Float
-colorPickerExtraH hexH =
-  colorPickerGap + colorPickerSvH + colorPickerGap + colorPickerHueH + colorPickerHexGap + hexH
+colorPickerExtraH previewLabelH =
+  colorPickerGap
+    + colorPickerSvH
+    + colorPickerGap
+    + colorPickerHueH
+    + colorPickerGap
+    + previewLabelH
+    + colorPickerSwatchGap
+    + colorPickerSwatchH
+    + colorPickerHexGap
+    + previewLabelH
 
 colorPickerGeom :: HostProfile -> FontMetrics -> Float -> Float -> Float -> Float -> ColorPickerGeom
 colorPickerGeom host fm x y w _h =
@@ -151,26 +188,35 @@ colorPickerGeom host fm x y w _h =
       svY = y + iy + labelH + colorPickerGap
       svH = colorPickerSvH
       hueY = svY + svH + colorPickerGap
-      hexY = hueY + hueH + colorPickerHexGap
+      previewLabelY = hueY + hueH + colorPickerGap
+      swatchY = previewLabelY + hexH + colorPickerSwatchGap
+      swatchW = max 0 ((innerW - colorPickerGap) / 2)
+      hexY = swatchY + colorPickerSwatchH + colorPickerHexGap
    in ColorPickerGeom
         { cpgLabelH = labelH
         , cpgSv = Rect innerX svY innerW svH
         , cpgHue = Rect innerX hueY innerW hueH
+        , cpgCurrent = Rect innerX swatchY swatchW colorPickerSwatchH
+        , cpgNew = Rect (innerX + swatchW + colorPickerGap) swatchY swatchW colorPickerSwatchH
+        , cpgPreviewLabelY = previewLabelY
         , cpgHexY = hexY
         , cpgHexH = hexH
         }
 
 colorPickerMeasureSize :: HostProfile -> FontMetrics -> (Text -> IO (Float, Float)) -> Text -> IO (Float, Float, Float)
-colorPickerMeasureSize host _fm measure lbl =
+colorPickerMeasureSize host fm measure lbl =
   if isCellHost host
     then do
       (mw, mh) <- measure (lbl <> ": #000000")
       pure (mw, mh, 0)
     else do
       (lw, lh) <- measure lbl
-      (hw, hh) <- measure (colorPickerToHex colorPickerDefaultColor)
-      let contentW = max colorPickerMinWidth (max lw hw)
-      pure (contentW, lh, colorPickerExtraH hh)
+      (hw, _) <- measure (colorPickerToHex colorPickerDefaultColor)
+      (cw, _) <- measure colorPickerCurrentLabel
+      (nw, _) <- measure colorPickerNewLabel
+      let previewW = cw + colorPickerGap + nw
+          contentW = max colorPickerMinWidth (max lw (max hw previewW))
+      pure (contentW, lh, colorPickerExtraH (layoutLineHeight host fm))
 
 -- Clamp each axis on its own so a corner is S/V 0 or 1, not a frozen mid value.
 svFromMouse :: Rect -> V2 -> (Float, Float)
@@ -241,6 +287,8 @@ drawColorPickerPanel host fm da store wid style x y w h = do
         (sat, val) = widgetStoreSv store wid colorPickerDefaultColor
         sv = cpgSv geom
         hueRect = cpgHue geom
+        currentCol = widgetStoreBaseColor store wid colorPickerDefaultColor
+        newCol = widgetStoreColor store wid colorPickerDefaultColor
         border = styleBorder style
         marker = 6
         mx = rectX sv + sat * rectW sv
@@ -253,6 +301,10 @@ drawColorPickerPanel host fm da store wid style x y w h = do
     pushRoundedStroke da sv 4 1 border
     drawHueBar da hueRect
     pushRoundedStroke da hueRect 3 1 border
+    pushRoundedRect da (cpgCurrent geom) 4 currentCol
+    pushRoundedStroke da (cpgCurrent geom) 4 1 border
+    pushRoundedRect da (cpgNew geom) 4 newCol
+    pushRoundedStroke da (cpgNew geom) 4 1 border
     pushRoundedRect da (Rect (mx - marker / 2) (my - marker / 2) marker marker) (marker / 2) (colorRGBA 255 255 255 255)
     pushRoundedStroke da (Rect (mx - marker / 2) (my - marker / 2) marker marker) (marker / 2) 1 (colorRGBA 0 0 0 180)
     pushRoundedRect da handleInner 1 (colorRGBA 255 255 255 255)
@@ -269,10 +321,13 @@ colorPicker lbl initial = do
   when (not (IM.member key (storeInt store0))) $
     uiIO $
       let (hInit, sInit, vInit) = rgbToHsv initial
+          packed = fromIntegral (colorToWord32 initial)
        in setStore
             ctx
             ( store0
-                { storeInt = IM.insert key (fromIntegral (colorToWord32 initial)) (storeInt store0)
+                { storeInt =
+                    IM.insert (slotKey slotColorBase key) packed $
+                      IM.insert key packed (storeInt store0)
                 , storeFloat = IM.insert key (clampHue hInit) (storeFloat store0)
                 , storePoint = IM.insert key (sInit, vInit) (storePoint store0)
                 }
@@ -333,11 +388,24 @@ colorPicker lbl initial = do
             }
         )
   nav <- useKeyNav wid
-  when (knLeft nav || knRight nav || knUp nav || knDown nav) $
+  let keyMoved = knLeft nav || knRight nav || knUp nav || knDown nav
+  when keyMoved $
     uiIO $ applyColorPickerKeys ctx wid current nav
   store1 <- uiIO (getStore ctx)
   let final = widgetStoreColor store1 wid initial
+      releasedDrag = (hueHeld0 || svHeld0) && not dragging
+  when (releasedDrag || keyMoved) $
+    uiIO $ commitColorPickerCurrent ctx wid final
   pure (setChanged (final /= initial) resp, final)
+
+commitColorPickerCurrent :: Context -> WidgetId -> Color -> IO ()
+commitColorPickerCurrent ctx wid col = do
+  st <- getStore ctx
+  let packed = fromIntegral (colorToWord32 col)
+      k = slotKey slotColorBase (intKey wid)
+      old = IM.findWithDefault packed k (storeInt st)
+  when (old /= packed) $
+    setStore ctx (st {storeInt = IM.insert k packed (storeInt st)})
 
 applyColorPickerKeys :: Context -> WidgetId -> Color -> KeyNav -> IO ()
 applyColorPickerKeys ctx wid current nav = do

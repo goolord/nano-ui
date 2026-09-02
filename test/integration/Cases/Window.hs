@@ -94,14 +94,6 @@ runOverlayPanelLiveTest _ failed = do
         _ <- runFrame ctx inp ui
         dmg <- takeDamage ctx
         assert failed (damageIsEmpty dmg)
-      checkWindowLive ui = do
-        ctx <- newContext
-        _ <- warmup2 ctx inp ui
-        need <- needsRedraw ctx inp inp
-        assert failed need
-        _ <- runFrame ctx inp ui
-        dmg <- takeDamage ctx
-        assert failed (not (damageIsEmpty dmg))
       checkDirtyWake ui = do
         ctx <- newContext
         _ <- runFrame ctx inp ui
@@ -111,7 +103,7 @@ runOverlayPanelLiveTest _ failed = do
         _ <- runFrame ctx inp ui
         dmg <- takeDamage ctx
         assertEq failed dmg DamageFull
-  checkWindowLive (void (window True "Debug" (label "fps 0")))
+  checkStatic (void (window True "Debug" (label "fps 0")))
   checkStatic (void (modal True "About" (label "body")))
   checkDirtyWake (void (modal True "About" (label "body")))
 

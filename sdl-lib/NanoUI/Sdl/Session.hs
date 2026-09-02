@@ -21,6 +21,7 @@ import NanoUI
   , inputMouseRightReleased
   , inputWindowSize
   )
+import NanoUI.Debug (debugRefreshSec)
 import NanoUI.Testing
   ( Context
   , anyAnimating
@@ -33,6 +34,7 @@ import NanoUI.Testing
   , textInputEditActive
   )
 import NanoUI.Sdl.Debug (noteLoop, noteSkip, takeDebugLive)
+import NanoUI.Sdl.Cursor (syncPointerCursor)
 import NanoUI.Sdl.Input
   ( SdlEvent (..)
   , applyEvent
@@ -51,6 +53,9 @@ import SDL3.Sys.Render (setRenderDrawBlendModeSafe)
 
 animateTimeout :: Int
 animateTimeout = 16
+
+debugHudTimeout :: Int
+debugHudTimeout = max animateTimeout (round (debugRefreshSec * 1000))
 
 maxFrameDt :: Float
 maxFrameDt = 0.05
@@ -155,7 +160,6 @@ loop ::
 loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace startupFull firstPointerFull shouldQuit inp queued lastT = do
   ctx <- readIORef ctxRef
   debugOpen <- debugPanelOpen ctx
-  wantDebug <- takeDebugLive (sdlDebug env) debugOpen
   pending <-
     if sizeofSmallArray queued == 0
       then do
@@ -172,10 +176,14 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace star
             if animating || pendingDirtyWait || dirtyWait
               then pure emptySmallArray
               else
-                if wasAnimWait || nFullWait > 0 || wantDebug || editing || debugOpen
+                if wasAnimWait || nFullWait > 0 || editing
                   then waitEventTimeout animateTimeout
-                  else waitEvent
+                  else
+                    if debugOpen
+                      then waitEventTimeout debugHudTimeout
+                      else waitEvent
       else pure queued
+  wantDebug <- takeDebugLive (sdlDebug env) debugOpen
   let (group, rest) = splitFrame pending
   editActive <- textInputEditActive ctx
   if any (== EvQuit) group || (any isHardQuit group && not editActive)
@@ -226,7 +234,6 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace star
                          || forceFinal
                          || pendingDirty
                          || dirtyNow
-                         || debugOpen
                          || wantDebug
                          || editing
                          || nFull > 0
@@ -256,9 +263,12 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace star
                   Just s -> pure s
                   Nothing
                     | pointerEdge || scrollEdge -> runDraw
-                    | otherwise -> pure inpSynced
+                    | otherwise -> do
+                        syncPointerCursor (sdlCursors env) ctx' inpSynced
+                        pure inpSynced
               else do
                 noteSkip (sdlDebug env)
+                syncPointerCursor (sdlCursors env) ctx' inpSynced
                 writeIORef prev inpSynced
                 pure inpSynced
           animAfter <- anyAnimating ctx'

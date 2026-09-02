@@ -15,6 +15,10 @@ module Cases.Scroll
   , runTableScrollTest
   , runTableFirstColWidthTest
   , runTableFillWidthTest
+  , runTableContentSlackTest
+  , runTableCellPadTest
+  , runTableFitScrollColWidthTest
+  , runTableTabWrapRowTest
   , runScrolledOutClickImmunityTest
   , runScrolledOutHoverImmunityTest
   , runScrolledOutCursorImmunityTest
@@ -35,6 +39,8 @@ import NanoUI.Testing.Harness
   , assertScrollGutterPad
   , findGrabHover
   , runClickPair
+  , spanXOf
+  , spanYOf
   , warmup2
   , withInputOff
   )
@@ -204,6 +210,62 @@ tableFirstColRows =
       | i <- [1 .. 8 :: Int]
       ]
 
+-- Fit-width 2D table: vertical overflow must not shrink the first column.
+runTableFitScrollColWidthTest :: Context -> IORef Int -> IO ()
+runTableFitScrollColWidthTest _ failed = do
+  ctx <- newPixelContext
+  let inp0 = (withInput 280 180) {inputMousePos = V2 40 60}
+      ui = do
+        (readSort, _) <- useTableSort (SortCol 0 SortAsc)
+        tableSort <- readSort
+        void
+          ( tableCfg
+              defaultTableCfg
+              (tight . fixedH 100 $ defaultLayout {layoutGap = 0})
+              "people"
+              tableFirstColCols
+              tableFirstColRows
+              tableSort
+          )
+  warmup2 ctx inp0 ui
+  spans <- collectTextSpans ctx
+  let findLabel needle =
+        listToMaybe [(r, t) | (r, t, _, _, _) <- spans, needle `T.isInfixOf` t]
+  case findLabel "long-first-col" of
+    Just (Rect _ _ cw ch, _) -> do
+      assertGt failed cw 50
+      assert failed (ch < 40)
+    _ -> assert failed False
+
+-- Long Table-tab help must not inflate a wrap row into a stacked full-width card.
+runTableTabWrapRowTest :: Context -> IORef Int -> IO ()
+runTableTabWrapRowTest ctx failed = do
+  let inp0 = withInput 1200 800
+      ui = row (tight . gap 8 . wrap . fillW $ defaultLayout) $ do
+        card (void (label "State"))
+        card $ do
+          heading "Table"
+          muted "Click a header to sort. Drag a header to reorder."
+          muted "Drag a header edge to resize. Right-click a header to hide."
+          (readSort, _) <- useTableSort (SortCol 0 SortAsc)
+          tableSort <- readSort
+          void
+            ( tableCfg
+                defaultTableCfg
+                (tight . fixedH 100 $ defaultLayout {layoutGap = 0})
+                "people"
+                tableFillCols
+                tableFillRows
+                tableSort
+            )
+  warmup2 ctx inp0 ui
+  spans <- collectTextSpans ctx
+  case (spanXOf "State" spans, spanXOf "Table" spans, spanYOf "State" spans, spanYOf "Table" spans) of
+    ([sx], [tx], [sy], [ty]) -> do
+      assertGt failed tx (sx + 1)
+      assert failed (abs (ty - sy) < 8)
+    _ -> assert failed False
+
 runTableFillWidthTest :: Context -> IORef Int -> IO ()
 runTableFillWidthTest _ failed = do
   ctx <- newContext
@@ -244,6 +306,41 @@ runTableFillWidthTest _ failed = do
       assertGt failed (rx + rw) 380
       assertGt failed mw 50
       assert failed (mx >= rx - 2)
+    _ -> assert failed False
+
+runTableContentSlackTest :: Context -> IORef Int -> IO ()
+runTableContentSlackTest _ failed = do
+  ctx <- newContext
+  let inp0 = (withInput 500 200) {inputMousePos = V2 200 80}
+      ui = do
+        (readSort, _) <- useTableSort (SortCol 0 SortAsc)
+        tableSort <- readSort
+        void (table "people" tableFillCols tableFillRows tableSort)
+  warmup2 ctx inp0 ui
+  spans <- collectTextSpans ctx
+  let findLabel needle =
+        listToMaybe [(r, t) | (r, t, _, _, _) <- spans, needle `T.isInfixOf` t]
+  case (findLabel "David", findLabel "Role") of
+    (Just _, Just (Rect rx _ rw _, _)) -> assertGt failed (rx + rw) 420
+    _ -> assert failed False
+
+-- Pixel host: Age (right) and City (left) must not sit on the shared grid line.
+runTableCellPadTest :: Context -> IORef Int -> IO ()
+runTableCellPadTest ctx failed = do
+  let inp0 = (withInput 500 240) {inputMousePos = V2 200 80}
+      ui = do
+        (readSort, _) <- useTableSort (SortCol 0 SortAsc)
+        tableSort <- readSort
+        void (table "people" tableFillCols tableFillRows tableSort)
+  warmup2 ctx inp0 ui
+  spans <- collectTextSpans ctx
+  let findLabel needle =
+        listToMaybe [(r, t) | (r, t, _, _, _) <- spans, needle `T.isInfixOf` t]
+  case (findLabel "Name", findLabel "David", findLabel "63", findLabel "Austin") of
+    (Just (Rect hx _ _ _, _), Just (Rect nx _ _ _, _), Just (Rect ax _ aw _, _), Just (Rect cx _ _ _, _)) -> do
+      assert failed (abs (hx - nx) <= 1)
+      assertGt failed nx 4
+      assertGt failed (cx - (ax + aw)) 10
     _ -> assert failed False
 
 tableFillCols :: Colonnade Headed TableFillRow T.Text

@@ -11,7 +11,9 @@ module NanoUI.Font
   , wrapTextLinesIO
   , lineWidth
   , textDisplayWidth
+  , textIndexAtX
   , labelContentInset
+  , tableCellInset
   , widgetContentInset
   , widgetPadding
   , buttonPadding
@@ -151,6 +153,13 @@ stripWidgetMarkers txt =
 {-# INLINE labelContentInset #-}
 labelContentInset :: HostProfile -> FontMetrics -> (Float, Float)
 labelContentInset _host _fm = (0, 0)
+
+-- Table text inset. Zebra and header fills use the full cell rect.
+{-# INLINE tableCellInset #-}
+tableCellInset :: HostProfile -> FontMetrics -> (Float, Float)
+tableCellInset host _fm
+  | isCellHost host = (0, 0)
+  | otherwise = (6, 0)
 
 {-# INLINE widgetContentInset #-}
 widgetContentInset :: HostProfile -> FontMetrics -> (Float, Float)
@@ -396,6 +405,26 @@ textDisplayWidth host fm txt =
   if isCellHost host
     then fromIntegral (terminalPaintColumns txt)
     else lineWidth fm txt
+
+-- Caret and click index using the same advances as pushText.
+-- TTF_GetStringSize applies kerning and ff ligatures, so a caret measured
+-- that way sits left of glyphs drawn with fmAdvance.
+textIndexAtX :: HostProfile -> FontMetrics -> Text -> Float -> Int
+textIndexAtX host fm txt x
+  | T.null txt || x <= 0 = 0
+  | otherwise = go 0 0.0 txt
+  where
+    go !i !acc t =
+      case T.uncons t of
+        Nothing -> i
+        Just (c, rest) ->
+          let adv = charW c
+              mid = acc + adv * 0.5
+           in if x < mid then i else go (i + 1) (acc + adv) rest
+    charW c =
+      if isCellHost host
+        then fromIntegral (terminalPaintColumns (T.singleton c))
+        else fmAdvance fm c
 
 measureTextWrapped :: HostProfile -> FontMetrics -> Text -> Float -> (Float, Float)
 measureTextWrapped host fm txt maxW =

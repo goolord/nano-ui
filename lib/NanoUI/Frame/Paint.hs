@@ -17,9 +17,12 @@ import NanoUI.Context
   , atlasTextureId
   , getStore
   , lookupImageUv
+  , lookupDrawing
+  , cachedDrawingOps
   )
 import NanoUI.Draw
   ( DrawArena
+  , emitDrawOps
   , getCurrentClip
   , pushFilledTriangle
   , pushImage
@@ -27,6 +30,7 @@ import NanoUI.Draw
   , pushRect
   , pushRoundedRect
   , pushRoundedStroke
+  , pushStrokeAA
   , pushText
   , withClip
   )
@@ -280,6 +284,14 @@ lowerNodeVisible ctx idx nt x y w h rect fm theme terminal da =
           | not terminal ->
               pushImage da rect atlasTextureId u0 v0 u1 v1 (colorRGBA 255 255 255 255)
         _ -> pushRect da rect (themeAccent theme)
+    NodeDrawing -> do
+      wid <- getWidgetId (ctxNodeArena ctx) idx
+      mBuild <- lookupDrawing ctx wid
+      case mBuild of
+        Nothing -> pure ()
+        Just build -> do
+          ops <- cachedDrawingOps ctx wid rect build
+          withClip da rect (emitDrawOps da fm ops)
     _ -> do
       style <- widgetVisualStyle ctx nt idx
       value <- getNodeValue (ctxNodeArena ctx) idx
@@ -343,7 +355,6 @@ lowerNodeVisible ctx idx nt x y w h rect fm theme terminal da =
             value
             (themeAccent theme)
             (styleBg (themeInput theme))
-            (colorRGBA 255 255 255 255)
         when (nt == NodeRadio) $
           drawRadio
             (ctxHostProfile ctx)
@@ -442,9 +453,8 @@ drawCheckbox ::
   Float ->
   Color ->
   Color ->
-  Color ->
   IO ()
-drawCheckbox host da fm style x y h value accent well markCol = do
+drawCheckbox host da fm style x y h value accent well = do
   let (ix, _) =
         if isCellHost host
           then widgetContentInset host fm
@@ -457,25 +467,29 @@ drawCheckbox host da fm style x y h value accent well markCol = do
       outer = Rect bx by box box
       inner = Rect (bx + bw) (by + bw) (box - 2 * bw) (box - 2 * bw)
       innerR = max 0 (r - bw)
-  if value >= 0.5
-    then do
-      pushRoundedRect da outer r accent
-      drawCheckboxMark da bx by box markCol
-    else do
-      pushRoundedStroke da outer r bw (styleBorder style)
-      pushRoundedRect da inner innerR well
+      strokeCol = if value >= 0.5 then accent else styleBorder style
+  pushRoundedRect da inner innerR well
+  pushRoundedStroke da outer r bw strokeCol
+  when (value >= 0.5) $
+    drawCheckboxMark da bx by box accent
 
 drawCheckboxMark :: DrawArena -> Float -> Float -> Float -> Color -> IO ()
 drawCheckboxMark da bx by box markCol = do
-  let t = max 1.6 (box * 0.11)
+  let t = max 1.9 (box * 0.135)
       x0 = bx + box * 0.22
       y0 = by + box * 0.52
       x1 = bx + box * 0.42
       y1 = by + box * 0.72
       x2 = bx + box * 0.78
       y2 = by + box * 0.28
-  pushLine da x0 y0 x1 y1 t markCol
-  pushLine da x1 y1 x2 y2 t markCol
+      capR = t / 2
+      cap cx cy =
+        pushRoundedRect da (Rect (cx - capR) (cy - capR) t t) capR markCol
+  pushStrokeAA da x0 y0 x1 y1 t markCol
+  pushStrokeAA da x1 y1 x2 y2 t markCol
+  cap x0 y0
+  cap x1 y1
+  cap x2 y2
 
 drawRadio ::
   HostProfile ->
@@ -503,8 +517,9 @@ drawRadio host da fm style x y h value accent well = do
       innerR = max 0 (r - bw)
   if value >= 0.5
     then do
-      pushRoundedRect da outer r accent
-      let dot = box * 0.42
+      pushRoundedRect da (Rect (bx + bw) (by + bw) (box - 2 * bw) (box - 2 * bw)) innerR well
+      pushRoundedStroke da outer r bw accent
+      let dot = box * 0.72
           dx = bx + (box - dot) / 2
           dy = by + (box - dot) / 2
       pushRoundedRect da (Rect dx dy dot dot) (dot / 2) accent

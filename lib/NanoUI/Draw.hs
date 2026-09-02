@@ -22,7 +22,14 @@ module NanoUI.Draw
   , pushRoundedStroke
   , pushText
   , pushLine
+  , pushStrokeAA
+  , pushStroke
   , pushFilledTriangle
+  , DrawOp (..)
+  , DrawingBuild
+  , emitDrawOps
+  , drawTextBox
+  , shiftDrawOp
   , finishDraw
   , drawCmdCount
   , drawCmdNull
@@ -104,7 +111,7 @@ import GHC.Exts
   , writeWord32OffAddr#
   )
 import GHC.Word (Word8 (W8#), Word32 (W32#))
-import NanoUI.Font (FontMetrics (..), GlyphQuad (..))
+import NanoUI.Font (FontMetrics (..), GlyphQuad (..), lineWidth)
 import NanoUI.Types (Color (..), Rect (..), rectIntersect)
 import qualified Data.Text as T
 
@@ -122,6 +129,56 @@ data Vertex = Vertex
   , vtxV :: {-# UNPACK #-} !Float
   }
   deriving (Eq, Show)
+
+-- Immediate vector ops, in widget pixel space. diagrams (and other plotters)
+-- flatten into this list; paint emits them after layout.
+data DrawOp
+  = FillRect !Rect !Color
+  | FillTriangle
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      !Color
+  | Stroke
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      !Color
+  | DrawText !Float !Float !Float !Float !T.Text !Color
+  -- ^ Pen at (x, y) is the alignment point. ax 0..1 is left..right. ay 0..1 is
+  -- bottom..top. ay < 0 means baseline (x is left, y is the baseline). Glyph size
+  -- is the host font (`drawTextBox`).
+  deriving (Eq, Show)
+
+-- | Pixel box for a 'DrawText' using host advances. diagrams text has no
+-- envelope, so plot sizing uses this instead of `fontSizeL`.
+drawTextBox :: FontMetrics -> Float -> Float -> Float -> Float -> T.Text -> Rect
+drawTextBox fm x y ax ay t =
+  let tw = lineWidth fm t
+      th = fmLineHeight fm
+      px = x - tw * max 0 ax
+      py =
+        if ay < 0
+          then y - fmAscent fm
+          else y - th * (1 - ay)
+   in Rect px py tw th
+
+-- | Translate every vertex in a 'DrawOp'. Paint reuses ops when only (x, y) moved.
+shiftDrawOp :: Float -> Float -> DrawOp -> DrawOp
+shiftDrawOp dx dy op =
+  case op of
+    FillRect (Rect x y w h) c -> FillRect (Rect (x + dx) (y + dy) w h) c
+    FillTriangle x0 y0 x1 y1 x2 y2 c ->
+      FillTriangle (x0 + dx) (y0 + dy) (x1 + dx) (y1 + dy) (x2 + dx) (y2 + dy) c
+    Stroke x0 y0 x1 y1 t c -> Stroke (x0 + dx) (y0 + dy) (x1 + dx) (y1 + dy) t c
+    DrawText x y ax ay t c -> DrawText (x + dx) (y + dy) ax ay t c
+
+type DrawingBuild = Rect -> Vector DrawOp
 
 data DrawCmd = DrawCmd
   { cmdClipX :: {-# UNPACK #-} !Float
@@ -704,8 +761,9 @@ pushImage da rect tex u0 v0 u1 v1 col
       setTexture da tex
       pushQuad da rect u0 v0 u1 v1 col
 
+-- 4 segments per 90° arc. Lookup table in cornerCosSin has 5 points per quadrant.
 cornerSegments :: Int
-cornerSegments = 8
+cornerSegments = 4
 
 -- Precomputed unit-circle cos/sin for rounded-rect corners (4 segments per 90° arc).
 {-# NOINLINE cornerQuadrant #-}
@@ -753,97 +811,47 @@ getCurrentClip da = do
 pushCornerFan :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
 pushCornerFan da cx cy rad a0 _a1 col = do
   let !segs = cornerSegments
-      !needV = segs + 2
-      !needI = segs * 3
+      !ring = segs + 1
+      !aa = 1.0
+      !needV = 1 + 2 * ring
+      !needI = segs * 9
       !q = cornerQuadrant a0
   (vp, ip, base, baseIdx) <- ensureAndAlloc da needV needI
-  let !(r, g, b, a) = unpackColorF col
-      !centerOff = base * vertexSize
+  let !(cr, cg, cb, ca) = unpackColorF col
       !centerIdx = fromIntegral base :: Word32
-  pokeByteOff vp centerOff cx
-  pokeByteOff vp (centerOff + 4) cy
-  pokeByteOff vp (centerOff + 8) r
-  pokeByteOff vp (centerOff + 12) g
-  pokeByteOff vp (centerOff + 16) b
-  pokeByteOff vp (centerOff + 20) a
-  pokeByteOff vp (centerOff + 24) (0 :: Float)
-  pokeByteOff vp (centerOff + 28) (0 :: Float)
-
+  pokeVertex vp (base * vertexSize) cx cy cr cg cb ca 0 0
   forM_ [0 .. segs] $ \i -> do
-    let !(ca, sa) = cornerCosSin q i
-        !vx = cx + rad * ca
-        !vy = cy + rad * sa
-        !vOff = (base + 1 + i) * vertexSize
-    pokeByteOff vp vOff vx
-    pokeByteOff vp (vOff + 4) vy
-    pokeByteOff vp (vOff + 8) r
-    pokeByteOff vp (vOff + 12) g
-    pokeByteOff vp (vOff + 16) b
-    pokeByteOff vp (vOff + 20) a
-    pokeByteOff vp (vOff + 24) (0 :: Float)
-    pokeByteOff vp (vOff + 28) (0 :: Float)
+    let !(ct, st) = cornerCosSin q i
+        !rimI = base + 1 + i
+        !outI = base + 1 + ring + i
+        !inRad = max 0 (rad - aa)
+    pokeVertex vp (rimI * vertexSize) (cx + inRad * ct) (cy + inRad * st) cr cg cb ca 0 0
+    pokeVertex vp (outI * vertexSize) (cx + rad * ct) (cy + rad * st) cr cg cb 0 0 0
     when (i > 0) $ do
-      let !rim0 = fromIntegral (base + i) :: Word32
+      let !k = i - 1
+          !rim0 = fromIntegral (base + i) :: Word32
           !rim1 = fromIntegral (base + 1 + i) :: Word32
-          !iOff = (baseIdx + (i - 1) * 3) * indexSize
-      pokeByteOff ip iOff centerIdx
-      pokeByteOff ip (iOff + 4) rim0
-      pokeByteOff ip (iOff + 8) rim1
+          !out0 = fromIntegral (base + 1 + ring + k) :: Word32
+          !out1 = fromIntegral (base + 1 + ring + i) :: Word32
+          !fillOff = (baseIdx + k * 3) * indexSize
+          !fringeOff = (baseIdx + segs * 3 + k * 6) * indexSize
+      pokeByteOff ip fillOff centerIdx
+      pokeByteOff ip (fillOff + 4) rim0
+      pokeByteOff ip (fillOff + 8) rim1
+      pokeQuadIndices ip fringeOff rim0 out0 out1 rim1
 
   writeIORef (daVertexCount da) (base + needV)
   writeIORef (daIndexCount da) (baseIdx + needI)
 
-pushCornerArc :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
-pushCornerArc da cx cy outerR innerR a0 a1 col
-  | innerR <= 0.001 = pushCornerFan da cx cy outerR a0 a1 col
-  | otherwise = do
-      let !segs = cornerSegments
-          !needV = (segs + 1) * 2
-          !needI = segs * 6
-          !q = cornerQuadrant a0
-      (vp, ip, base, baseIdx) <- ensureAndAlloc da needV needI
-      let !(r, g, b, a) = unpackColorF col
-      forM_ [0 .. segs] $ \i -> do
-        let !(ca, sa) = cornerCosSin q i
-            !ox = cx + outerR * ca
-            !oy = cy + outerR * sa
-            !ix = cx + innerR * ca
-            !iy = cy + innerR * sa
-            !oOff = (base + i * 2) * vertexSize
-            !iOffV = (base + i * 2 + 1) * vertexSize
-        pokeByteOff vp oOff ox
-        pokeByteOff vp (oOff + 4) oy
-        pokeByteOff vp (oOff + 8) r
-        pokeByteOff vp (oOff + 12) g
-        pokeByteOff vp (oOff + 16) b
-        pokeByteOff vp (oOff + 20) a
-        pokeByteOff vp (oOff + 24) (0 :: Float)
-        pokeByteOff vp (oOff + 28) (0 :: Float)
-
-        pokeByteOff vp iOffV ix
-        pokeByteOff vp (iOffV + 4) iy
-        pokeByteOff vp (iOffV + 8) r
-        pokeByteOff vp (iOffV + 12) g
-        pokeByteOff vp (iOffV + 16) b
-        pokeByteOff vp (iOffV + 20) a
-        pokeByteOff vp (iOffV + 24) (0 :: Float)
-        pokeByteOff vp (iOffV + 28) (0 :: Float)
-
-        when (i > 0) $ do
-          let !o0 = fromIntegral (base + (i - 1) * 2) :: Word32
-              !i0 = fromIntegral (base + (i - 1) * 2 + 1) :: Word32
-              !o1 = fromIntegral (base + i * 2) :: Word32
-              !i1 = fromIntegral (base + i * 2 + 1) :: Word32
-              !idxOff = (baseIdx + (i - 1) * 6) * indexSize
-          pokeByteOff ip idxOff o0
-          pokeByteOff ip (idxOff + 4) i0
-          pokeByteOff ip (idxOff + 8) i1
-          pokeByteOff ip (idxOff + 12) o0
-          pokeByteOff ip (idxOff + 16) i1
-          pokeByteOff ip (idxOff + 20) o1
-
-      writeIORef (daVertexCount da) (base + needV)
-      writeIORef (daIndexCount da) (baseIdx + needI)
+{-# INLINE pokeQuadIndices #-}
+pokeQuadIndices :: Ptr Word8 -> Int -> Word32 -> Word32 -> Word32 -> Word32 -> IO ()
+pokeQuadIndices ip off a b c d = do
+  pokeByteOff ip off a
+  pokeByteOff ip (off + 4) b
+  pokeByteOff ip (off + 8) c
+  pokeByteOff ip (off + 12) a
+  pokeByteOff ip (off + 16) c
+  pokeByteOff ip (off + 20) d
 
 {-# INLINE pushRoundedRect #-}
 pushRoundedRect :: DrawArena -> Rect -> Float -> Color -> IO ()
@@ -886,38 +894,38 @@ pushRoundedStroke da (Rect x y w h) radius bw col
               !oy = y + t / 2
               !ow = max 0 (w - t)
               !oh = max 0 (h - t)
-          pushLine da ox oy (ox + ow) oy t col
-          pushLine da ox (oy + oh) (ox + ow) (oy + oh) t col
-          when (oh > 0) $ pushLine da ox oy ox (oy + oh) t col
-          when (oh > 0) $ pushLine da (ox + ow) oy (ox + ow) (oy + oh) t col
+          pushStrokeAA da ox oy (ox + ow) oy t col
+          pushStrokeAA da ox (oy + oh) (ox + ow) (oy + oh) t col
+          when (oh > 0) $ pushStrokeAA da ox oy ox (oy + oh) t col
+          when (oh > 0) $ pushStrokeAA da (ox + ow) oy (ox + ow) (oy + oh) t col
         else do
           let !midW = max 0 (w - 2 * rad)
               !midH = max 0 (h - 2 * rad)
-              !innerR = max 0 (rad - ibw)
               !topY = y + ibw / 2
               !botY = y + h - ibw / 2
               !leftX = x + ibw / 2
               !rightX = x + w - ibw / 2
           when (midW > 0) $ do
-            pushLine da (x + rad) topY (x + rad + midW) topY ibw col
-            pushLine da (x + rad) botY (x + rad + midW) botY ibw col
+            pushStrokeAA da (x + rad) topY (x + rad + midW) topY ibw col
+            pushStrokeAA da (x + rad) botY (x + rad + midW) botY ibw col
           when (midH > 0) $ do
-            pushLine da leftX (y + rad) leftX (y + rad + midH) ibw col
-            pushLine da rightX (y + rad) rightX (y + rad + midH) ibw col
-          pushCornerArc da (x + rad) (y + rad) rad innerR pi (pi * 1.5) col
-          pushCornerArc da (x + w - rad) (y + rad) rad innerR (pi * 1.5) (pi * 2) col
-          pushCornerArc da (x + w - rad) (y + h - rad) rad innerR 0 (pi * 0.5) col
-          pushCornerArc da (x + rad) (y + h - rad) rad innerR (pi * 0.5) pi col
+            pushStrokeAA da leftX (y + rad) leftX (y + rad + midH) ibw col
+            pushStrokeAA da rightX (y + rad) rightX (y + rad + midH) ibw col
+          let !cr = max 0.25 (rad - ibw / 2)
+          if midW <= 0 && midH <= 0
+            then forM_ [0 .. 3] $ \q -> pushCornerArcStroke da (x + w * 0.5) (y + h * 0.5) cr ibw q col
+            else do
+              pushCornerArcStroke da (x + rad) (y + rad) cr ibw 0 col
+              pushCornerArcStroke da (x + w - rad) (y + rad) cr ibw 1 col
+              pushCornerArcStroke da (x + w - rad) (y + h - rad) cr ibw 2 col
+              pushCornerArcStroke da (x + rad) (y + h - rad) cr ibw 3 col
 
 {-# INLINE pushLine #-}
 pushLine :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
-pushLine da x1 y1 x2 y2 thickness col = do
-  let dx = x2 - x1
-      dy = y2 - y1
-      len = sqrt (dx * dx + dy * dy)
-  if len < 0.001
-    then pure ()
-    else do
+pushLine da x1 y1 x2 y2 thickness col =
+  case strokeAxes x1 y1 x2 y2 of
+    Nothing -> pure ()
+    Just (dx, dy, len) -> do
       setTexture da 0
       let r = thickness / 2
           step = max 0.3 (r * 0.4)
@@ -927,6 +935,105 @@ pushLine da x1 y1 x2 y2 thickness col = do
             cx = x1 + dx * u
             cy = y1 + dy * u
         pushRoundedRect da (Rect (cx - r) (cy - r) thickness thickness) r col
+
+-- Coverage-AA strip for a straight segment. Same weight as pushCornerArcStroke,
+-- without round caps that blob at rounded-rect corners.
+pushStrokeAA :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
+pushStrokeAA da x0 y0 x1 y1 bw col
+  | bw <= 0 = pure ()
+  | otherwise =
+      case strokeAxes x0 y0 x1 y1 of
+        Nothing -> pure ()
+        Just (dx, dy, len) -> do
+          setTexture da 0
+          let !nx = (-dy) / len
+              !ny = dx / len
+              !half = bw * 0.5
+              !aa = min 1 half
+              !core = half - aa
+              !(cr, cg, cb, ca) = unpackColorF col
+          (vp, ip, base, baseIdx) <- ensureAndAlloc da 8 18
+          let pokeEnd vi px py = do
+                pokeVertex vp ((base + vi) * vertexSize) (px - nx * half) (py - ny * half) cr cg cb 0 0 0
+                pokeVertex vp ((base + vi + 1) * vertexSize) (px - nx * core) (py - ny * core) cr cg cb ca 0 0
+                pokeVertex vp ((base + vi + 2) * vertexSize) (px + nx * core) (py + ny * core) cr cg cb ca 0 0
+                pokeVertex vp ((base + vi + 3) * vertexSize) (px + nx * half) (py + ny * half) cr cg cb 0 0 0
+              !a = fromIntegral base :: Word32
+              !b = a + 4
+          pokeEnd 0 x0 y0
+          pokeEnd 4 x1 y1
+          pokeQuadIndices ip (baseIdx * indexSize) a (a + 1) (b + 1) b
+          pokeQuadIndices ip ((baseIdx + 6) * indexSize) (a + 1) (a + 2) (b + 2) (b + 1)
+          pokeQuadIndices ip ((baseIdx + 12) * indexSize) (a + 2) (a + 3) (b + 3) (b + 2)
+          writeIORef (daVertexCount da) (base + 8)
+          writeIORef (daIndexCount da) (baseIdx + 18)
+
+strokeAxes :: Float -> Float -> Float -> Float -> Maybe (Float, Float, Float)
+strokeAxes x0 y0 x1 y1 =
+  let dx = x1 - x0
+      dy = y1 - y0
+      len = sqrt (dx * dx + dy * dy)
+   in if len < 0.001 then Nothing else Just (dx, dy, len)
+
+-- Coverage fringe on inner and outer edges. Quarter-arcs use `cornerCosSin`.
+pushCornerArcStroke :: DrawArena -> Float -> Float -> Float -> Float -> Int -> Color -> IO ()
+pushCornerArcStroke da cx cy radius bw q col
+  | bw <= 0 || radius <= 0 = pure ()
+  | otherwise = do
+      setTexture da 0
+      let !r = max 0.25 radius
+          !n = cornerSegments
+          !half = bw * 0.5
+          !aa = min 1 half
+          !innerAA = max 0 (r - half)
+          !outerAA = r + half
+          !inner = r - half + aa
+          !outer = r + half - aa
+          !needV = (n + 1) * 4
+          !needI = n * 18
+      (vp, ip, base, baseIdx) <- ensureAndAlloc da needV needI
+      let !(cr, cg, cb, ca) = unpackColorF col
+      forM_ [0 .. n] $ \i -> do
+        let !(ct, st) = cornerCosSin q i
+            !v0 = base + i * 4
+        pokeVertex vp (v0 * vertexSize) (cx + innerAA * ct) (cy + innerAA * st) cr cg cb 0 0 0
+        pokeVertex vp ((v0 + 1) * vertexSize) (cx + inner * ct) (cy + inner * st) cr cg cb ca 0 0
+        pokeVertex vp ((v0 + 2) * vertexSize) (cx + outer * ct) (cy + outer * st) cr cg cb ca 0 0
+        pokeVertex vp ((v0 + 3) * vertexSize) (cx + outerAA * ct) (cy + outerAA * st) cr cg cb 0 0 0
+      forM_ [0 .. n - 1] $ \i -> do
+        let !a = fromIntegral (base + i * 4) :: Word32
+            !b = a + 4
+            !iOff = (baseIdx + i * 18) * indexSize
+        pokeQuadIndices ip iOff a (a + 1) (b + 1) b
+        pokeQuadIndices ip (iOff + 24) (a + 1) (a + 2) (b + 2) (b + 1)
+        pokeQuadIndices ip (iOff + 48) (a + 2) (a + 3) (b + 3) (b + 2)
+      writeIORef (daVertexCount da) (base + needV)
+      writeIORef (daIndexCount da) (baseIdx + needI)
+
+-- One quad per segment. Plots and diagrams use this; pushLine stamps capsules.
+{-# INLINE pushStroke #-}
+pushStroke :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
+pushStroke da x1 y1 x2 y2 thickness col
+  | thickness <= 0 = pure ()
+  | otherwise =
+      case strokeAxes x1 y1 x2 y2 of
+        Nothing -> pure ()
+        Just (dx, dy, len) -> do
+          let hx = (-dy) / len * (thickness * 0.5)
+              hy = dx / len * (thickness * 0.5)
+          pushFilledTriangle da (x1 + hx) (y1 + hy) (x2 + hx) (y2 + hy) (x2 - hx) (y2 - hy) col
+          pushFilledTriangle da (x1 + hx) (y1 + hy) (x2 - hx) (y2 - hy) (x1 - hx) (y1 - hy) col
+
+{-# INLINE emitDrawOps #-}
+emitDrawOps :: DrawArena -> FontMetrics -> Vector DrawOp -> IO ()
+emitDrawOps da fm ops = V.mapM_ emitOne ops
+  where
+    emitOne (FillRect r c) = pushRect da r c
+    emitOne (FillTriangle x0 y0 x1 y1 x2 y2 c) = pushFilledTriangle da x0 y0 x1 y1 x2 y2 c
+    emitOne (Stroke x0 y0 x1 y1 t c) = pushStroke da x0 y0 x1 y1 t c
+    emitOne (DrawText x y ax ay t c) = do
+      let Rect px py _ _ = drawTextBox fm x y ax ay t
+      pushText da fm px py t c
 
 {-# INLINE pushFilledTriangle #-}
 pushFilledTriangle :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
