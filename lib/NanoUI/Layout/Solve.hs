@@ -266,6 +266,7 @@ measureTextNode ::
 measureTextNode na host fm measure useAssignedWidth idx = do
   (minW, minH, maxW, maxH) <- getMinMax na idx
   (wTag, _) <- getWidthSizing na idx
+  (hTag, hVal) <- getHeightSizing na idx
   (_, _, assignedW, _) <- getRect na idx
   let needsAssignedWrap = useAssignedWidth && wTag == SizingGrow && assignedW > 0
   if useAssignedWidth && maxW >= 1e8 && not needsAssignedWrap
@@ -288,7 +289,10 @@ measureTextNode na host fm measure useAssignedWidth idx = do
               then pure (measureTextWrapped host fm plain wrapW)
               else measureTextWrappedIO (\t -> fmap fst (measure t)) fm plain wrapW
           else pure (tw0, th0)
-      setRect na idx 0 0 (clamp minW maxW tw) (clamp minH maxH (max (layoutLineHeight host fm) th))
+      setRect na idx 0 0 (clamp minW maxW tw) $
+        case hTag of
+          SizingFixed -> clamp minH maxH hVal
+          _ -> clamp minH maxH (max (layoutLineHeight host fm) th)
 
 measureImage :: NodeArena -> NodeIdx -> IO ()
 measureImage na idx = do
@@ -352,8 +356,7 @@ measureWidget na host fm measure idx = do
   let (padX, padY) =
         case nt of
           NodeButton
-            | isTableHeaderStyle si ->
-                if isCellHost host then (0, 0) else labelContentInset host fm
+            | isTableHeaderStyle si -> labelContentInset host fm
           NodeButton -> buttonPadding host fm
           NodeSelect -> buttonPadding host fm
           NodeColorPicker
@@ -838,10 +841,13 @@ childRowCrossSize na ci availCross = do
   (hTag, hVal) <- getHeightSizing na ci
   (_, _, _, intrinsic) <- getRect na ci
   (_, minH, _, maxH) <- getMinMax na ci
-  if hTag == SizingGrow || hTag == SizingPercent
-    then pure (clamp minH maxH (resolveSize hTag hVal intrinsic availCross minH maxH))
-    else
-      -- Fit/Fixed/Shrink keep the measured box. Do not use the wrap-line
+  let resolved = clamp minH maxH (resolveSize hTag hVal intrinsic availCross minH maxH)
+  case hTag of
+    SizingFixed -> pure (clamp minH maxH hVal)
+    SizingGrow -> pure resolved
+    SizingPercent -> pure resolved
+    _ ->
+      -- Fit/Shrink keep the measured box. Do not use the wrap-line
       -- or row slot as availH: that stretches every child when leftover
       -- leaks into scratch `fh`.
       pure (max minH intrinsic)

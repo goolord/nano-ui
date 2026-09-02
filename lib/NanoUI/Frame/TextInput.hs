@@ -158,11 +158,11 @@ drawTextInputSelection da ctx idx x y w h style = do
               selBg = lerpColor accent (styleBg style) 0.55
           (wLo, _) <- ctxMeasureText ctx (T.take selLo value)
           (wHi, _) <- ctxMeasureText ctx (T.take selHi value)
-          (_, ph) <- ctxMeasureText ctx value
-          let ty = centeredTextY (ctxHostProfile ctx) fm (rectY fieldRect) (rectH fieldRect) ph
+          let lineH = layoutLineHeight (ctxHostProfile ctx) fm
+              ty = centeredTextY (ctxHostProfile ctx) fm (rectY fieldRect) (rectH fieldRect) lineH
               selX = rectX fieldRect + ix + wLo
               selW = max 1 (wHi - wLo)
-              selH = max 4 ph
+              selH = max 4 lineH
           pushRect da (Rect selX ty selW selH) selBg
 
 drawTextInputCaret :: DrawArena -> Context -> NodeIdx -> Float -> Float -> Float -> Float -> Style -> IO ()
@@ -186,11 +186,11 @@ drawTextInputCaret da ctx idx x y w h style = do
             fieldTxt = textInputFieldText lbl value focus
             prefix = T.take (max 0 (min (T.length fieldTxt) cursor)) fieldTxt
         (pw, _) <- ctxMeasureText ctx prefix
-        (_, ph) <- ctxMeasureText ctx fieldTxt
-        let ty = centeredTextY (ctxHostProfile ctx) fm (rectY fieldRect) (rectH fieldRect) ph
+        let lineH = layoutLineHeight (ctxHostProfile ctx) fm
+            ty = centeredTextY (ctxHostProfile ctx) fm (rectY fieldRect) (rectH fieldRect) lineH
             caretX = rectX fieldRect + ix + pw
             caretY = ty + 1
-            caretH = max 4 (ph - 2)
+            caretH = max 4 (lineH - 2)
         pushRect da (Rect caretX caretY 1 caretH) (styleFg style)
 
 collapseTextInputSelection :: Context -> WidgetId -> IO ()

@@ -286,8 +286,11 @@ finalizeTextEditMenuPick ctx inp =
                 Nothing -> writeIORef (ctxTextInputMenu ctx) Nothing
                 Just idx -> do
                   enabled <- textFieldMenuActionEnabled ctx (textInputMenuWidget menu) idx
-                  when enabled $
-                    applyTextFieldMenuAction ctx (textInputMenuWidget menu) idx
+                  if enabled
+                    then applyTextFieldMenuAction ctx (textInputMenuWidget menu) idx
+                    else do
+                      writeIORef (ctxTextInputMenu ctx) Nothing
+                      markDirty ctx
 
 closeTextEditMenuOnOutsideClick :: Context -> Input -> IO ()
 closeTextEditMenuOnOutsideClick ctx inp =

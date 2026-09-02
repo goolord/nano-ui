@@ -362,10 +362,22 @@ textAreaCopy ctx state = do
 textAreaCut :: Context -> TextAreaState -> IO TextAreaState
 textAreaCut ctx state =
   case selectionRangeOf state of
-    Nothing -> pure state
     Just (lo, hi) -> do
-      void (ctxClipboardSet ctx (TB.selectedText lo hi (buffer state)))
+      let slice = TB.selectedText lo hi (buffer state)
+      when (not (T.null slice)) $
+        void (ctxClipboardSet ctx slice)
       pure (deleteSelection state)
+    Nothing -> do
+      let txt = TB.toText (buffer state)
+      if T.null txt
+        then pure state
+        else do
+          void (ctxClipboardSet ctx txt)
+          pure
+            (initTextAreaState T.empty)
+              { viewportSize = viewportSize state
+              , lineHeight = lineHeight state
+              }
 
 textAreaPaste :: Context -> TextAreaState -> IO TextAreaState
 textAreaPaste ctx state = do
@@ -389,13 +401,12 @@ textAreaMenuActionEnabled ctx wid item = do
   let key = intKey wid
       text = IM.findWithDefault "" key (storeText store)
       state = loadTextAreaState store key text
-      hasSel = hasSelection state
       fullText = TB.toText (buffer state)
   mclip <- ctxClipboardGet ctx
   let clipTxt = maybe "" id mclip
   pure $
     case item of
-      0 -> hasSel
+      0 -> not (T.null fullText)
       1 -> not (T.null fullText)
       2 -> not (T.null clipTxt)
       3 -> not (T.null fullText)

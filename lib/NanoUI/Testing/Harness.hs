@@ -34,6 +34,7 @@ module NanoUI.Testing.Harness
   , vertUv
   , modifyIORef
   , checkLabelAlignEnd
+  , checkLabelAlignEndInk
   , checkIdleFullDamage
   , oneColFaOrigins
   , closeSpanPos
@@ -48,6 +49,7 @@ import Data.Text qualified as T
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Storable (peekByteOff)
 import NanoUI
+import NanoUI.Font (alignedTextPen, textInkEnd)
 import NanoUI.Testing
 import NanoUI.Testing.Assert (bump, failWhen, withInput)
 
@@ -399,6 +401,43 @@ checkLabelAlignEnd failed ctx = do
     Rect x _ w _ : _ -> do
       when (abs ((x + w) - (bx + bw - ix)) > 0.6) $ bump failed
       when (abs (w - tw) > 0.6) $ bump failed
+
+-- AlignEnd pins last-glyph ink, so "10" / "1i" / "1." share one right edge.
+checkLabelAlignEndInk :: IORef Int -> IO ()
+checkLabelAlignEndInk failed = do
+  let
+    gq xoff gw =
+      GlyphQuad
+        { gqX = xoff
+        , gqY = 0
+        , gqW = gw
+        , gqH = 10
+        , gqU0 = 0
+        , gqV0 = 0
+        , gqU1 = 1
+        , gqV1 = 1
+        }
+    fm =
+      (monospaceMetrics 10)
+        { fmAdvance = \c -> case c of
+            'i' -> 4
+            '.' -> 4
+            _ -> 10
+        , fmGlyph = \c -> case c of
+            'i' -> Just (gq 0.5 3)
+            '.' -> Just (gq 1 1)
+            _ -> Just (gq 1 8)
+        }
+    boxW = 100
+    visualRight txt =
+      let (tx, _) = alignedTextPen AlignEnd 0 boxW 0 fm txt
+       in tx + textInkEnd fm txt
+    r0 = visualRight "10"
+    ri = visualRight "1i"
+    rd = visualRight "1."
+  when (abs (r0 - boxW) > 0.01) $ bump failed
+  when (abs (ri - boxW) > 0.01) $ bump failed
+  when (abs (rd - boxW) > 0.01) $ bump failed
 
 windowTitleGrab :: Rect -> V2
 windowTitleGrab (Rect x0 y0 _ _) = V2 (x0 + 24) (y0 + 22)

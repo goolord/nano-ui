@@ -106,7 +106,7 @@ demoUi = do
           clickButton "Cancel" (setClick "Cancel")
           clickButton "About" (setAbout True)
           clickButton "Debug" (setDebug (not debugOpen))
-      row (tight . gap 8 . fillW $ defaultLayout) $ do
+      row (tight . gap 8 . wrap . fillW $ defaultLayout) $ do
         column (tight . gap 8 . fillW $ defaultLayout) $ do
           card $ do
             heading "State"

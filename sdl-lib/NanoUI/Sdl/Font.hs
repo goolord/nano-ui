@@ -1,11 +1,14 @@
 module NanoUI.Sdl.Font
   ( SdlFont (..)
+  , FontSource (..)
   , GlyphAtlas
   , withTtf
   , openFont
+  , openFontFromMemory
+  , openFontSource
+  , openFontSourceWithFallback
   , closeFont
-  , findFontPath
-  , findMonoFontPath
+  , fontSourceLabel
   , newGlyphAtlas
   , destroyGlyphAtlas
   , resetGlyphAtlas
@@ -19,14 +22,14 @@ module NanoUI.Sdl.Font
   , glyphAtlasTexture
   ) where
 
-import Control.Exception (IOException, bracket, catch)
-import Control.Monad (filterM, when)
+import Control.Exception (SomeException, bracket, catch, throwIO)
+import Control.Monad (when)
 import Data.Char (ord)
+import Data.ByteString (ByteString)
+import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Primitive.SmallArray
-  ( SmallArray
-  , indexSmallArray
-  , sizeofSmallArray
+  ( indexSmallArray
   , smallArrayFromList
   )
 import Data.Text (Text)
@@ -37,6 +40,9 @@ import Foreign.ForeignPtr (ForeignPtr, mallocForeignPtrBytes, withForeignPtr)
 import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
 import Foreign.Storable (peek, poke, sizeOf)
 import GHC.IO (unsafePerformIO)
+import qualified Data.ByteString as BS
+import System.Directory (getTemporaryDirectory, removeFile)
+import System.IO (hClose, openTempFile)
 import NanoUI (FontMetrics (..), GlyphQuad (..), hasMonoFontMarker, monospaceMetrics, stripMonoFontMarker)
 import NanoUI.Testing
   ( Context
@@ -47,8 +53,6 @@ import NanoUI.Testing
   , wrapMeasureCache
   )
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
-import System.Directory (doesDirectoryExist, doesFileExist, listDirectory)
-import System.Environment (lookupEnv)
 import qualified Data.Map.Strict as Map
 import qualified Data.Text.Foreign as TF
 
@@ -58,7 +62,17 @@ data SdlFont = SdlFont
   , sfAscent :: Float
   , sfSpaceAdvance :: Float
   , sfPath :: FilePath
+  , sfTempPath :: !(Maybe FilePath)
   }
+
+data FontSource
+  = FontFromPath !FilePath
+  | FontFromMemory !ByteString !FilePath
+  deriving (Show)
+
+fontSourceLabel :: FontSource -> FilePath
+fontSourceLabel (FontFromPath p) = p
+fontSourceLabel (FontFromMemory _ label) = label
 
 -- | Per-glyph atlas slot. UVs are normalised to [0,1] within the atlas texture.
 data GlyphSlot = GlyphSlot
@@ -131,7 +145,6 @@ lookupOrInsertGlyph ga sf c = do
 insertGlyph :: GlyphAtlas -> SdlFont -> GlyphKey -> Char -> IO (Maybe GlyphSlot)
 insertGlyph ga sf key c = do
   let !cp = fromIntegral (ord c) :: CUInt
-  -- Get glyph metrics at the current font scale.
   mMetrics <- withForeignPtr glyphMetricsScratch $ \p -> do
     let pMinX = p
         pMaxX = plusPtr pMinX (sizeOf (0 :: CInt))
@@ -145,18 +158,12 @@ insertGlyph ga sf key c = do
         minX <- peek pMinX
         _maxX <- peek pMaxX
         _minY <- peek pMinY
-        _maxY <- peek pMaxY
+        maxY <- peek pMaxY
         adv  <- peek pAdv
-        pure
-          ( Just
-              ( fromIntegral minX  :: Float
-              , fromIntegral adv   :: Float
-              )
-          )
+        pure (Just (fromIntegral minX, fromIntegral maxY, fromIntegral adv))
   case mMetrics of
     Nothing -> pure Nothing
-    Just (minX, adv) -> do
-      -- Render a white-on-alpha surface for the glyph.
+    Just (minX, maxY, adv) -> do
       mSurf <- withForeignPtr surfaceScratch $ \sp -> do
         poke sp nullPtr
         ok <- ttfRenderGlyphSurface (sfFont sf) cp sp
@@ -180,10 +187,11 @@ insertGlyph ga sf key c = do
             Nothing -> pure Nothing
             Just (px, py, tw, th) -> do
               (atW, atH) <- atlasSize (gaAtlas ga)
-              -- In SDL3_ttf, TTF_RenderGlyph_Blended returns a full font-height
-              -- surface aligned to the font baseline. Its top is already at lineTop (y=0).
-              let !offX = min 0 minX
-                  !offY = 0
+              -- TTF_GetGlyphImage is a tight bitmap. Place it with the font
+              -- bearings: pen + minX, lineTop + (ascent - maxY). Do not clamp
+              -- minX; monospace glyphs are often centered (minX > 0).
+              let !offX = minX
+                  !offY = sfAscent sf - maxY
                   !slot =
                     GlyphSlot
                       { gsW    = tw
@@ -301,20 +309,70 @@ openFont path ptsize =
     font <- ttfOpenFont cpath (realToFrac ptsize)
     when (font == nullPtr) $
       fail ("TTF_OpenFont failed for " ++ path)
-    lineSkip <- ttfLineSkip font
-    ascent <- ttfAscent font
-    spaceAdv <- ttfSpaceAdvance font
-    pure
-      SdlFont
-        { sfFont = font
-        , sfLineSkip = realToFrac lineSkip
-        , sfAscent = realToFrac ascent
-        , sfSpaceAdvance = realToFrac spaceAdv
-        , sfPath = path
-        }
+    readSdlFont path Nothing font
+
+openFontFromMemory :: ByteString -> FilePath -> Float -> IO SdlFont
+openFontFromMemory bs label ptsize =
+  unsafeUseAsCStringLen bs $ \(ptr, len) -> do
+    (fontPtr, mTemp) <-
+      ttfOpenFontMemory (castPtr ptr) (fromIntegral len) (realToFrac ptsize) >>= \f ->
+        if f /= nullPtr
+          then pure (f, Nothing)
+          else openFontFromMemoryTemp bs ptsize
+    when (fontPtr == nullPtr) $
+      fail ("TTF_OpenFont failed for in-memory font " ++ label)
+    readSdlFont label mTemp fontPtr
+
+openFontFromMemoryTemp :: ByteString -> Float -> IO (Ptr (), Maybe FilePath)
+openFontFromMemoryTemp bs openPt = do
+  tmpDir <- getTemporaryDirectory
+  (path, h) <- openTempFile tmpDir "nano-ui-font-"
+  BS.hPut h bs
+  hClose h
+  withCString path $ \cpath -> do
+    font <- ttfOpenFont cpath (realToFrac openPt)
+    if font == nullPtr
+      then removeFile path >> pure (nullPtr, Nothing)
+      else pure (font, Just path)
+
+readSdlFont :: FilePath -> Maybe FilePath -> Ptr () -> IO SdlFont
+readSdlFont path mTemp font = do
+  lineSkip <- ttfLineSkip font
+  ascent <- ttfAscent font
+  spaceAdv <- ttfSpaceAdvance font
+  pure
+    SdlFont
+      { sfFont = font
+      , sfLineSkip = realToFrac lineSkip
+      , sfAscent = realToFrac ascent
+      , sfSpaceAdvance = realToFrac spaceAdv
+      , sfPath = path
+      , sfTempPath = mTemp
+      }
+
+openFontSource :: FontSource -> Float -> IO SdlFont
+openFontSource (FontFromPath path) ptsize = openFont path ptsize
+openFontSource (FontFromMemory bs label) ptsize =
+  openFontFromMemory bs label ptsize
+
+openFontSourceWithFallback :: FontSource -> FontSource -> Float -> IO SdlFont
+openFontSourceWithFallback primary fallback ptsize =
+  openFontSource primary ptsize
+    `catch` \(e :: SomeException) ->
+      if fontSourcesSame primary fallback
+        then throwIO e
+        else openFontSource fallback ptsize
+          `catch` \(_ :: SomeException) -> throwIO e
+
+fontSourcesSame :: FontSource -> FontSource -> Bool
+fontSourcesSame (FontFromPath a) (FontFromPath b) = a == b
+fontSourcesSame (FontFromMemory _ la) (FontFromMemory _ lb) = la == lb
+fontSourcesSame _ _ = False
 
 closeFont :: SdlFont -> IO ()
-closeFont = ttfCloseFont . sfFont
+closeFont sf = do
+  ttfCloseFont (sfFont sf)
+  mapM_ removeFile (sfTempPath sf)
 
 withTtfMeasure :: Context -> SdlFont -> SdlFont -> Context
 withTtfMeasure ctx font monoFont = withTtfMeasureScaled ctx font monoFont 1.0
@@ -418,165 +476,6 @@ atlasSize atlas =
     when (not ok) $ fail "text atlas size failed"
     (,) <$> (realToFrac <$> peek w) <*> (realToFrac <$> peek h)
 
-pathExists :: FilePath -> IO (Maybe FilePath)
-pathExists p = do
-  ok <- doesFileExist p
-  pure (if ok then Just p else Nothing)
-
-firstExistingPath :: SmallArray FilePath -> IO (Maybe FilePath)
-firstExistingPath paths = go 0
-  where
-    len = sizeofSmallArray paths
-    go i
-      | i >= len = pure Nothing
-      | otherwise = do
-          let p = indexSmallArray paths i
-          ok <- doesFileExist p
-          if ok then pure (Just p) else go (i + 1)
-
-joinDir :: FilePath -> FilePath -> FilePath
-joinDir dir name = dir ++ "/" ++ name
-
--- Distro layouts differ (Arch: /usr/share/fonts/Adwaita, Debian: truetype/).
--- Check known paths first, then look up preferred file names under common roots.
-resolveFont :: SmallArray FilePath -> SmallArray FilePath -> Maybe String -> IO (Maybe FilePath)
-resolveFont candidates names envPath =
-  case envPath of
-    Just p -> pathExists p
-    Nothing -> do
-      hit <- firstExistingPath candidates
-      case hit of
-        Just p -> pure (Just p)
-        Nothing -> findNamedFont names
-
-findMonoFontPath :: IO (Maybe FilePath)
-findMonoFontPath = lookupEnv "NANO_UI_MONO_FONT" >>= resolveFont monoFontCandidates monoFontFileNames
-
-findFontPath :: IO (Maybe FilePath)
-findFontPath = lookupEnv "NANO_UI_FONT" >>= resolveFont fontCandidates fontFileNames
-
-fontSearchRoots :: IO (SmallArray FilePath)
-fontSearchRoots = do
-  home <- lookupEnv "HOME"
-  profile <- lookupEnv "USERPROFILE"
-  let userRoots =
-        maybe [] (\h -> [joinDir h ".local/share/fonts", joinDir h ".fonts", joinDir h ".nix-profile/share/fonts"]) home
-          ++ maybe [] (\p -> [p ++ "\\AppData\\Local\\Microsoft\\Windows\\Fonts"]) profile
-  pure $
-    smallArrayFromList
-      ( [ "/usr/share/fonts"
-        , "/usr/local/share/fonts"
-        , "/usr/share/fonts/TTF"
-        , "/usr/share/fonts/OTF"
-        , "/usr/share/fonts/truetype"
-        , "/usr/share/fonts/opentype"
-        , "/run/current-system/sw/share/fonts"
-        , "C:\\Windows\\Fonts"
-        ]
-          ++ userRoots
-      )
-
-fontCandidates :: SmallArray FilePath
-fontCandidates =
-  smallArrayFromList
-    [ "/usr/share/fonts/Adwaita/AdwaitaSans-Regular.ttf"
-    , "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-    , "/usr/share/fonts/TTF/DejaVuSans.ttf"
-    , "/usr/share/fonts/liberation-sans/LiberationSans-Regular.ttf"
-    , "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
-    , "/usr/share/fonts/noto/NotoSans-Regular.ttf"
-    , "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"
-    , "/usr/share/fonts/truetype/freefont/FreeSans.ttf"
-    , "/System/Library/Fonts/SFNS.ttf"
-    , "/System/Library/Fonts/Helvetica.ttc"
-    , "C:\\Windows\\Fonts\\segoeui.ttf"
-    , "C:\\Windows\\Fonts\\arial.ttf"
-    ]
-
-fontFileNames :: SmallArray FilePath
-fontFileNames =
-  smallArrayFromList
-    [ "AdwaitaSans-Regular.ttf"
-    , "DejaVuSans.ttf"
-    , "LiberationSans-Regular.ttf"
-    , "NotoSans-Regular.ttf"
-    , "FreeSans.ttf"
-    , "segoeui.ttf"
-    , "arial.ttf"
-    ]
-
-monoFontCandidates :: SmallArray FilePath
-monoFontCandidates =
-  smallArrayFromList
-    [ "/usr/share/fonts/Adwaita/AdwaitaMono-Regular.ttf"
-    , "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"
-    , "/usr/share/fonts/TTF/DejaVuSansMono.ttf"
-    , "/usr/share/fonts/liberation-mono/LiberationMono-Regular.ttf"
-    , "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf"
-    , "/usr/share/fonts/noto/NotoSansMono-Regular.ttf"
-    , "/usr/share/fonts/truetype/noto/NotoSansMono-Regular.ttf"
-    , "/usr/share/fonts/truetype/freefont/FreeMono.ttf"
-    , "/System/Library/Fonts/SFNSMono.ttf"
-    , "/System/Library/Fonts/Menlo.ttc"
-    , "C:\\Windows\\Fonts\\consola.ttf"
-    , "C:\\Windows\\Fonts\\cour.ttf"
-    ]
-
-monoFontFileNames :: SmallArray FilePath
-monoFontFileNames =
-  smallArrayFromList
-    [ "AdwaitaMono-Regular.ttf"
-    , "DejaVuSansMono.ttf"
-    , "LiberationMono-Regular.ttf"
-    , "NotoSansMono.ttf"
-    , "FreeMono.ttf"
-    , "consola.ttf"
-    , "cour.ttf"
-    ]
-
-findNamedFont :: SmallArray FilePath -> IO (Maybe FilePath)
-findNamedFont names = do
-  roots <- fontSearchRoots
-  let nRoots = sizeofSmallArray roots
-      nNames = sizeofSmallArray names
-      walkRoots !i
-        | i >= nRoots = pure Nothing
-        | otherwise = do
-            let root = indexSmallArray roots i
-            doesDirectoryExist root >>= \case
-              False -> walkRoots (i + 1)
-              True ->
-                scanDir root >>= \case
-                  Just hit -> pure (Just hit)
-                  Nothing -> walkRoots (i + 1)
-      scanDir dir = do
-        entries <- listDirectory dir `catch` \(_ :: IOException) -> pure []
-        let nEntries = length entries
-            matchDirect = goDirect entries 0
-            goDirect [] _ = Nothing
-            goDirect (e : rest) !idx
-              | idx >= nEntries = Nothing
-              | otherwise =
-                  if matchesName e
-                    then Just (joinDir dir e)
-                    else goDirect rest (idx + 1)
-        case matchDirect of
-          Just hit -> pure (Just hit)
-          Nothing -> do
-            subdirs <- filterM (\e -> doesDirectoryExist (joinDir dir e)) entries
-            searchSubdirs subdirs
-      searchSubdirs [] = pure Nothing
-      searchSubdirs (d : rest) = do
-        scanDir (joinDir d "") >>= \case
-          Just hit -> pure (Just hit)
-          Nothing -> searchSubdirs rest
-      matchesName name = go 0
-        where
-          go !j
-            | j >= nNames = False
-            | otherwise = name == indexSmallArray names j || go (j + 1)
-  walkRoots 0
-
 withUtf8 :: Text -> (CString -> CSize -> IO a) -> IO a
 withUtf8 txt act =
   TF.useAsPtr txt $ \ptr len ->
@@ -590,6 +489,9 @@ foreign import ccall unsafe "nano_ui_ttf_quit"
 
 foreign import ccall unsafe "nano_ui_ttf_open_font"
   ttfOpenFont :: CString -> CFloat -> IO (Ptr ())
+
+foreign import ccall unsafe "nano_ui_ttf_open_font_memory"
+  ttfOpenFontMemory :: Ptr () -> CSize -> CFloat -> IO (Ptr ())
 
 foreign import ccall unsafe "nano_ui_ttf_close_font"
   ttfCloseFont :: Ptr () -> IO ()

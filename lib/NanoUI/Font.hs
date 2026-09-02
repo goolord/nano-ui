@@ -16,7 +16,8 @@ module NanoUI.Font
   , widgetPadding
   , buttonPadding
   , centeredTextY
-  , alignedTextBox
+  , alignedTextPen
+  , textInkEnd
   , layoutLineHeight
   , checkboxBoxSize
   , checkboxLeading
@@ -146,17 +147,18 @@ stripWidgetMarkers txt =
     then T.drop 1 txt
     else txt
 
+-- Labels share the node origin with rects and images. Outer gap lives on card/panel padding.
 {-# INLINE labelContentInset #-}
 labelContentInset :: HostProfile -> FontMetrics -> (Float, Float)
-labelContentInset host fm
-  | isCellHost host = (0, 0)
-  | otherwise = (0.55 * fmAdvance fm ' ', 0.16 * layoutLineHeight host fm)
+labelContentInset _host _fm = (0, 0)
 
 {-# INLINE widgetContentInset #-}
 widgetContentInset :: HostProfile -> FontMetrics -> (Float, Float)
 widgetContentInset host fm
   | isCellHost host = (fmAdvance fm ' ', 0)
-  | otherwise = (fmAdvance fm ' ' * 1.25, 0.28 * layoutLineHeight host fm)
+  | otherwise =
+      let pad = fmAdvance fm ' ' * 1.25
+       in (pad, pad)
 
 {-# INLINE buttonPadding #-}
 buttonPadding :: HostProfile -> FontMetrics -> (Float, Float)
@@ -169,17 +171,11 @@ buttonPadding host fm
 
 {-# INLINE layoutLineHeight #-}
 layoutLineHeight :: HostProfile -> FontMetrics -> Float
-layoutLineHeight host fm
-  | isCellHost host = fmLineHeight fm
-  | otherwise = fmLineHeight fm * 0.82
+layoutLineHeight _host fm = fmLineHeight fm
 
 {-# INLINE centeredTextY #-}
 centeredTextY :: HostProfile -> FontMetrics -> Float -> Float -> Float -> Float
-centeredTextY host fm y h th
-  | isCellHost host = y + (h - th) / 2
-  | otherwise =
-      let slack = max 0 (th - fmAscent fm)
-       in y + (h - th) / 2 - slack * 0.45
+centeredTextY _host _fm y h th = y + (h - th) / 2
 
 -- Origin and used width inside the node box, inset on all AlignX sides.
 {-# INLINE alignedTextBox #-}
@@ -191,6 +187,38 @@ alignedTextBox ax x w ix tw =
         AlignEnd -> x + w - ix - used
         AlignCenter -> x + ix + (contentW - used) / 2
         AlignStart -> x + ix
+   in (tx, used)
+
+-- Last glyph ink right in the same space as 'pushText' (pen + gqX + gqW).
+-- Falls back to advance when 'fmGlyph' is Nothing (cell hosts, tests).
+{-# INLINE textInkEnd #-}
+textInkEnd :: FontMetrics -> Text -> Float
+textInkEnd fm txt =
+  case T.unsnoc txt of
+    Nothing -> 0
+    Just (prefix, c) ->
+      let pen = lineWidth fm prefix
+       in case fmGlyph fm c of
+            Just gq -> pen + gqX gq + gqW gq
+            Nothing -> pen + fmAdvance fm c
+
+-- Align using per-glyph advances (same as 'pushText'), not TTF_GetStringSize.
+-- When the line fits, AlignEnd/Center shift by ink so the visual right edge
+-- stays put as the last character's right bearing changes.
+{-# INLINE alignedTextPen #-}
+alignedTextPen :: AlignX -> Float -> Float -> Float -> FontMetrics -> Text -> (Float, Float)
+alignedTextPen ax x w ix fm txt =
+  let tw = lineWidth fm txt
+      ink = textInkEnd fm txt
+      contentW = max 0 (w - 2 * ix)
+      used = min tw contentW
+      shift =
+        if tw > contentW
+          then used
+          else case ax of
+            AlignStart -> used
+            _ -> ink
+      (tx, _) = alignedTextBox ax x w ix shift
    in (tx, used)
 
 {-# INLINE widgetPadding #-}
@@ -247,7 +275,7 @@ sliderTrackHeight = 10
 sliderTrackMargin :: Float
 sliderTrackMargin = 3
 
--- Pixel hosts: track spans the label row insets. Cell hosts: inline [bar] cells.
+-- Pixel hosts: track spans the label row. Cell hosts: inline [bar] cells.
 {-# INLINE sliderTrackBounds #-}
 sliderTrackBounds :: HostProfile -> FontMetrics -> Text -> Float -> Float -> Float -> Float -> Rect
 sliderTrackBounds host fm lbl x y w h
@@ -354,7 +382,7 @@ measureText host fm txt =
       w =
         if isCellHost host
           then fromIntegral (terminalPaintColumns txt)
-          else fromIntegral (T.length txt) * fmAdvance fm ' '
+          else lineWidth fm txt
    in (w, h)
 
 -- | Line width for hit testing and centering. Cell hosts use column counts.

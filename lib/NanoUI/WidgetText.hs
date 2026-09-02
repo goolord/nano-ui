@@ -140,7 +140,7 @@ textInputLabelGap fm =
   if fmLineHeight fm <= 14 then 3 else 4
 
 textInputFieldPadY :: FontMetrics -> Float
-textInputFieldPadY fm = max 3 (fmLineHeight fm * 0.22)
+textInputFieldPadY fm = max 3 (fmAdvance fm ' ' * 1.25)
 
 textInputFieldHeight :: FontMetrics -> Float
 textInputFieldHeight fm = fmLineHeight fm + 2 * textInputFieldPadY fm

@@ -8,6 +8,7 @@ module Cases.Window
   , runWindowDragDamageTest
   , runWindowDragTest
   , runWindowOverlayTest
+  , runWindowTitleCenterTest
   , runWindowResizeHaloHitTest
   , runWindowResizeTest
   , runWindowScrollGutterTest
@@ -179,6 +180,22 @@ runWindowOverlayTest ctx failed = do
   _ <- runFrame ctx clickClose ui
   ((_, winClose, _), _, _, _) <- runFrame ctx releaseClose ui
   assert failed (respClicked winClose)
+
+runWindowTitleCenterTest :: Context -> IORef Int -> IO ()
+runWindowTitleCenterTest ctx failed = do
+  let inp0 = withInput 640 400
+      ui = fmap fst (window True "Debug" (label "Body"))
+      titleBarH = 28
+  win <- warmup2 ctx inp0 ui
+  overlays <- collectOverlayTextSpans ctx inp0
+  case [r | (r, txt, _, _, _) <- overlays, T.strip txt == "Debug"] of
+    (Rect _ ty _ th : _) -> do
+      let Rect _ wy _ _ = respRect win
+          barY = wy + padT windowPad
+          barMid = barY + titleBarH / 2
+          textMid = ty + th / 2
+      assert failed (abs (textMid - barMid) <= 2)
+    _ -> assert failed False
 
 runOverlayClickThroughTest :: Context -> IORef Int -> IO ()
 runOverlayClickThroughTest _ failed = do

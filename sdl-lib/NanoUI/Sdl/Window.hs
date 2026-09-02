@@ -43,19 +43,27 @@ import NanoUI.Sdl.Clipboard (withSdlClipboard)
 import NanoUI.Sdl.Cursor (SdlCursors (..), destroyCursors, initCursors)
 import NanoUI.Sdl.Font
   ( SdlFont
+  , FontSource (..)
   , GlyphAtlas
   , closeFont
   , destroyGlyphAtlas
-  , findFontPath
-  , findMonoFontPath
   , newGlyphAtlas
-  , openFont
+  , openFontSourceWithFallback
   , resetGlyphAtlas
   , warmGlyphAtlas
   , withTtf
   , buildGlyphFontMetrics
   , withTtfMeasureGlyph
   )
+import NanoUI.Sdl.Font.Resolve
+  ( embeddedFontSource
+  , needsFontconfig
+  , resolveNanoUIFont
+  , defaultFontSearch
+  , defaultFontSearchMono
+  )
+import NanoUI.Sdl.Font.Search (bracketFontconfig)
+import NanoUI.Sdl.NanoUIFont (NanoUIFont (..))
 import NanoUI.Sdl.Debug (SdlDebugSampler, newSdlDebugSampler)
 import NanoUI.Sdl.Image (ImageAtlas, destroyImageAtlas, newImageAtlas)
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
@@ -93,10 +101,10 @@ data SdlOptions = SdlOptions
   -- ^ Start the window hidden (default: 'False').
   , sdlAppVsync :: !Bool
   -- ^ Enable vertical synchronization (default: 'True').
-  , sdlAppFontPath :: !(Maybe FilePath)
-  -- ^ Optional custom TrueType font file path.
-  , sdlAppMonoFontPath :: !(Maybe FilePath)
-  -- ^ Optional custom monospace TrueType font file path.
+  , sdlAppFont :: !NanoUIFont
+  -- ^ UI font (default: embedded Inter).
+  , sdlAppMonoFont :: !NanoUIFont
+  -- ^ Monospace font (default: embedded Inter).
   , sdlAppFontSize :: !Float
   -- ^ Base font size in points (default: 16).
   , sdlAppTheme :: !(Maybe Theme)
@@ -118,8 +126,8 @@ defaultSdlOptions =
     , sdlWindowAlwaysOnTop = False
     , sdlWindowHidden = False
     , sdlAppVsync = True
-    , sdlAppFontPath = Nothing
-    , sdlAppMonoFontPath = Nothing
+    , sdlAppFont = defaultFontSearch
+    , sdlAppMonoFont = defaultFontSearchMono
     , sdlAppFontSize = defaultFontSize
     , sdlAppTheme = Nothing
     , sdlAppShouldQuit = const False
@@ -148,8 +156,8 @@ scaleEpsilon = 0.001
 data SdlEnv = SdlEnv
   { sdlWindow :: Ptr SDL_Window
   , sdlRenderer :: Ptr SDL_Renderer
-  , sdlFontPath :: FilePath
-  , sdlMonoFontPath :: FilePath
+  , sdlFontSource :: !FontSource
+  , sdlMonoFontSource :: !FontSource
   , sdlFontSize :: !Float
   , sdlScaleRef :: IORef Float
   , sdlFontRef :: IORef SdlFont
@@ -179,11 +187,11 @@ syncDisplay ctx env inp = do
     writeIORef (sdlScaleRef env) scale
     oldFont <- readIORef (sdlFontRef env)
     closeFont oldFont
-    newFont <- openFont (sdlFontPath env) (sdlFontSize env * scale)
+    newFont <- openFontSourceWithFallback (sdlFontSource env) embeddedFontSource (sdlFontSize env * scale)
     writeIORef (sdlFontRef env) newFont
     oldMono <- readIORef (sdlMonoFontRef env)
     closeFont oldMono
-    newMono <- openFont (sdlMonoFontPath env) (sdlFontSize env * scale)
+    newMono <- openFontSourceWithFallback (sdlMonoFontSource env) embeddedFontSource (sdlFontSize env * scale)
     writeIORef (sdlMonoFontRef env) newMono
     resetGlyphAtlas (sdlGlyphAtlas env)
     warmGlyphAtlas (sdlGlyphAtlas env) newFont
@@ -236,8 +244,8 @@ withSdl opts ctx act =
         flags
         False
         (sdlAppVsync opts)
-        (sdlAppFontPath opts)
-        (sdlAppMonoFontPath opts)
+        (sdlAppFont opts)
+        (sdlAppMonoFont opts)
         (sdlAppFontSize opts)
         act
 
@@ -252,8 +260,8 @@ withSdlBench ctx act =
         sdlWindowHiddenFlag
         True
         False
-        Nothing
-        Nothing
+        DefaultFont
+        DefaultFont
         defaultFontSize
         act
 
@@ -265,38 +273,25 @@ withSdlWindow ::
   SDL_WindowFlags ->
   Bool ->
   Bool ->
-  Maybe FilePath ->
-  Maybe FilePath ->
+  NanoUIFont ->
+  NanoUIFont ->
   Float ->
   (Context -> SdlEnv -> IO a) ->
   IO a
-withSdlWindow ctx title w h flags bench vsync mFont mMono fontSize act =
+withSdlWindow ctx title w h flags bench vsync uiFont monoFont fontSize act =
   withTtf $ do
     if bench then initBenchHints else initSdlHints vsync
-    fontPath <- resolveFontPath mFont
-    monoPath <- resolveMonoFontPath mMono fontPath
-    bracket
-      (startSdlWindow ctx title w h flags bench vsync fontPath monoPath fontSize)
-      (\(_, env) -> stopSdlWindow bench env)
-      $ \(ctx', env) -> act ctx' env
-
-resolveFontPath :: Maybe FilePath -> IO FilePath
-resolveFontPath (Just p) = pure p
-resolveFontPath Nothing =
-  findFontPath >>= \case
-    Nothing ->
-      fail
-        ( "No TrueType font found. Install a system font or set NANO_UI_FONT "
-            <> "to a .ttf path."
-        )
-    Just p -> pure p
-
-resolveMonoFontPath :: Maybe FilePath -> FilePath -> IO FilePath
-resolveMonoFontPath (Just p) _ = pure p
-resolveMonoFontPath Nothing fontPath =
-  findMonoFontPath >>= \case
-    Nothing -> pure fontPath
-    Just p -> pure p
+    let run =
+          if needsFontconfig uiFont || needsFontconfig monoFont
+            then bracketFontconfig
+            else id
+    run $ do
+      fontSource <- resolveNanoUIFont uiFont
+      monoSource <- resolveNanoUIFont monoFont
+      bracket
+        (startSdlWindow ctx title w h flags bench vsync fontSource monoSource fontSize)
+        (\(_, env) -> stopSdlWindow bench env)
+        $ \(ctx', env) -> act ctx' env
 
 startSdlWindow ::
   Context ->
@@ -306,11 +301,11 @@ startSdlWindow ::
   SDL_WindowFlags ->
   Bool ->
   Bool ->
-  FilePath ->
-  FilePath ->
+  FontSource ->
+  FontSource ->
   Float ->
   IO (Context, SdlEnv)
-startSdlWindow ctx title w h flags bench vsync fontPath monoPath fontSize = do
+startSdlWindow ctx title w h flags bench vsync fontSource monoSource fontSize = do
   unlessM (initSafe (SDL_InitFlags 32)) $
     fail "SDL_Init(SDL_INIT_VIDEO) failed"
   unlessM initRefreshEvent $
@@ -331,8 +326,8 @@ startSdlWindow ctx title w h flags bench vsync fontPath monoPath fontSize = do
           win <- peek winPtr
           ren <- peek renPtr
           scale <- queryWindowDisplayScale win
-          font <- openFont fontPath (fontSize * scale)
-          monoFont <- openFont monoPath (fontSize * scale)
+          font <- openFontSourceWithFallback fontSource embeddedFontSource (fontSize * scale)
+          monoFont <- openFontSourceWithFallback monoSource embeddedFontSource (fontSize * scale)
           scaleRef <- newIORef scale
           fontRef <- newIORef font
           monoFontRef <- newIORef monoFont
@@ -357,8 +352,8 @@ startSdlWindow ctx title w h flags bench vsync fontPath monoPath fontSize = do
             SdlEnv
               { sdlWindow = win
               , sdlRenderer = ren
-              , sdlFontPath = fontPath
-              , sdlMonoFontPath = monoPath
+              , sdlFontSource = fontSource
+              , sdlMonoFontSource = monoSource
               , sdlFontSize = fontSize
               , sdlScaleRef = scaleRef
               , sdlFontRef = fontRef
@@ -400,10 +395,9 @@ acquireSdlBench :: Context -> IO (Context, SdlEnv)
 acquireSdlBench ctx =
   withTtf $ do
     initBenchHints
-    fontPath <- resolveFontPath Nothing
-    monoPath <- resolveMonoFontPath Nothing fontPath
+    fontSource <- resolveNanoUIFont DefaultFont
     let Size w h = benchWindowSize
-    startSdlWindow ctx "nano-ui-bench" w h sdlWindowHiddenFlag True False fontPath monoPath defaultFontSize
+    startSdlWindow ctx "nano-ui-bench" w h sdlWindowHiddenFlag True False fontSource fontSource defaultFontSize
 
 releaseSdlBench :: SdlEnv -> IO ()
 releaseSdlBench env = withTtf $ stopSdlWindow True env

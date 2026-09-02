@@ -71,11 +71,15 @@ textInputCopy ctx s = do
 
 textInputCut :: Context -> TextInputState -> IO TextInputState
 textInputCut ctx s = do
-  case selectionText s of
-    Nothing -> pure s
-    Just slice -> do
-      void (ctxClipboardSet ctx slice)
-      pure (deleteBackward s)
+  let (payload, s') = case selectionText s of
+        Just slice -> (slice, deleteBackward s)
+        Nothing ->
+          ( tisText s
+          , s {tisText = T.empty, tisCursor = 0, tisAnchor = 0}
+          )
+  when (not (T.null payload)) $
+    void (ctxClipboardSet ctx payload)
+  pure s'
 
 textInputPaste :: Context -> TextInputState -> IO TextInputState
 textInputPaste ctx s = do
@@ -126,14 +130,11 @@ textInputMenuActionEnabled ctx wid item = do
   store <- getStore ctx
   let key = intKey wid
       text = IM.findWithDefault "" key (storeText store)
-      cursor = IM.findWithDefault (T.length text) (slotKey slotCursor key) (storeInt store)
-      anchor = IM.findWithDefault cursor (slotKey slotAnchor key) (storeInt store)
-      hasSel = anchor /= cursor
   mclip <- ctxClipboardGet ctx
   let clipTxt = maybe "" id mclip
   pure $
     case item of
-      0 -> hasSel
+      0 -> not (T.null text)
       1 -> not (T.null text)
       2 -> not (T.null clipTxt)
       3 -> not (T.null text)

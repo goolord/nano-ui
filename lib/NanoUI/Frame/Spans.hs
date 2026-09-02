@@ -38,13 +38,12 @@ import NanoUI.Context
 import NanoUI.Damage (floatingPanelRects)
 import NanoUI.Font
   ( FontMetrics
-  , alignedTextBox
+  , alignedTextPen
   , centeredTextY
   , checkboxLeading
-  , hasMonoFontMarker
   , labelContentInset
   , layoutLineHeight
-  , lineWidth
+  , pickMonoFont
   , sliderTrackBounds
   , textDisplayWidth
   , treeRowLeading
@@ -81,7 +80,7 @@ import NanoUI.Layout.Arena
   , isWidgetNode
   )
 import NanoUI.Layout.Solve (scrollBarSlotOf)
-import NanoUI.Style (Padding (..), Style (..), Theme (..), styleBg, styleFg, themeSeparator, themeWindow)
+import NanoUI.Style (AlignX (..), Padding (..), Style (..), Theme (..), styleBg, styleFg, themeSeparator, themeWindow)
 import NanoUI.Types (Color (..), Rect (..), colorRGBA, lerpColor, rectH, rectIntersect, rectW, rectX, rectY)
 import NanoUI.WidgetText (isCloseButtonStyle, isTableHeaderStyle)
 import NanoUI.WidgetText
@@ -250,7 +249,8 @@ walkChildSpans ctx floatCache idx clip arena = do
           go ns
           collectClippedSpans ctx floatCache ci clip arena
 
--- TTF measure is often a fraction narrower than the rendered texture.
+-- Placement uses glyph ink (alignedTextPen), not TTF_GetStringSize. Wrap
+-- still measures with the host so line breaks stay on the TTF width.
 collectNodeTextSpans :: Context -> IM.IntMap (Maybe NodeType) -> NodeIdx -> IO [(Rect, T.Text, Color, Color)]
 collectNodeTextSpans ctx floatCache idx = do
   nt <- getNodeType (ctxNodeArena ctx) idx
@@ -290,7 +290,7 @@ collectNodeTextSpans ctx floatCache idx = do
           ax <- getAlignX (ctxNodeArena ctx) idx
           (_, _, maxW, _) <- getMinMax (ctxNodeArena ctx) idx
           (wTag, _) <- getWidthSizing (ctxNodeArena ctx) idx
-          (tw0, th0) <- ctxMeasureText ctx txt0
+          (tw0, _) <- ctxMeasureText ctx txt0
           let hasNewlines = T.any (== '\n') txt0
               wrapCap
                 | maxW < 1e8 = max 0 maxW
@@ -306,26 +306,22 @@ collectNodeTextSpans ctx floatCache idx = do
                   if isCellHost (ctxHostProfile ctx)
                     then pure (wrapTextLines (ctxHostProfile ctx) fm txt0 wrapW)
                     else wrapTextLinesIO (\t -> fmap fst (ctxMeasureText ctx t)) fm txt0 wrapW
-                lineWs <-
-                  if isCellHost (ctxHostProfile ctx)
-                    then pure (map (lineWidth fm) textLines)
-                    else mapM (fmap fst . ctxMeasureText ctx) textLines
                 pure
                   [ ( Rect
                         tx
                         (centeredTextY (ctxHostProfile ctx) fm (y + fromIntegral i * lineH) lineH lineH)
-                        tw
+                        used
                         lineH
                     , line
                     , fg
                     , paintBg
                     )
-                  | (i, line, lw) <- zip3 [(0 :: Int) ..] textLines lineWs
-                  , let (tx, tw) = alignedTextBox ax x w ix lw
+                  | (i, line) <- zip [(0 :: Int) ..] textLines
+                  , let (tx, used) = alignedTextPen ax x w ix fm line
                   ]
               else do
-                let (tx, used) = alignedTextBox ax x w ix tw0
-                pure [(Rect tx (centeredTextY (ctxHostProfile ctx) fm y h th0) used th0, txt0, fg, paintBg)]
+                let (tx, used) = alignedTextPen ax x w ix fm txt0
+                pure [(Rect tx (centeredTextY (ctxHostProfile ctx) fm y h lineH) used lineH, txt0, fg, paintBg)]
           pure (stripeSpans ++ textSpans)
     else
       if isWidgetNode nt
@@ -480,7 +476,7 @@ widgetTextPlacements ::
 widgetTextPlacements ctx nt idx x y w h = do
   let fm = ctxFontMetrics ctx
       terminal = isCellHost (ctxHostProfile ctx)
-      (ix, _) = widgetContentInset (ctxHostProfile ctx) fm
+      (ix, iy) = widgetContentInset (ctxHostProfile ctx) fm
   case nt of
     NodeButton -> do
       si <- getStyleIdx (ctxNodeArena ctx) idx
@@ -488,15 +484,16 @@ widgetTextPlacements ctx nt idx x y w h = do
         then pure []
         else do
           txt <- displayText ctx nt idx
-          (tw, th) <- ctxMeasureText ctx txt
+          (_tw, th) <- ctxMeasureText ctx txt
           if isTableHeaderStyle si
             then do
               ax <- getAlignX (ctxNodeArena ctx) idx
               let (labelIx, _) = labelContentInset (ctxHostProfile ctx) fm
-                  (tx, used) = alignedTextBox ax x w labelIx tw
+                  (tx, used) = alignedTextPen ax x w labelIx fm txt
               pure [(txt, tx, centeredTextY (ctxHostProfile ctx) fm y h th, used, th)]
-            else
-              pure [(txt, x + (w - tw) / 2, centeredTextY (ctxHostProfile ctx) fm y h th, tw, th)]
+            else do
+              let (tx, used) = alignedTextPen AlignCenter x w 0 fm txt
+              pure [(txt, tx, centeredTextY (ctxHostProfile ctx) fm y h th, used, th)]
     NodeSelect -> do
       txt <- displayText ctx nt idx
       (tw, th) <- ctxMeasureText ctx txt
@@ -588,10 +585,11 @@ widgetTextPlacements ctx nt idx x y w h = do
               fieldTxt = textInputFieldText lbl value focus
               labelH = layoutLineHeight (ctxHostProfile ctx) fm
           (lw, lh) <- ctxMeasureText ctx lbl
-          (fw, fh) <- ctxMeasureText ctx fieldTxt
+          (fw, _) <- ctxMeasureText ctx fieldTxt
+          let lineH = layoutLineHeight (ctxHostProfile ctx) fm
           pure
             [ (lbl, x, centeredTextY (ctxHostProfile ctx) fm y labelH lh, lw, lh)
-            , (fieldTxt, x + ix, centeredTextY (ctxHostProfile ctx) fm (rectY field) (rectH field) fh, fw, fh)
+            , (fieldTxt, x + ix, centeredTextY (ctxHostProfile ctx) fm (rectY field) (rectH field) lineH, fw, lineH)
             ]
     NodeTextArea -> do
       lbl <- getText (ctxNodeArena ctx) idx
@@ -608,17 +606,14 @@ widgetTextPlacements ctx nt idx x y w h = do
           (fw, _) <- ctxMeasureText ctx (if T.null value then " " else value)
           pure
             [ (lbl, x, centeredTextY (ctxHostProfile ctx) fm y labelH lh, lw, lh)
-            , (value, x + ix, rectY field, fw, rectH field)
+            , (value, x + ix, rectY field + iy, fw, rectH field)
             ]
     _ -> do
       txt <- displayText ctx nt idx
       ax <- getAlignX (ctxNodeArena ctx) idx
-      let fm' =
-            if hasMonoFontMarker txt
-              then ctxMonoFontMetrics ctx
-              else fm
-      (tw, th) <- ctxMeasureText ctx txt
-      let (tx, used) = alignedTextBox ax x w ix tw
+      let (fm', shown) = pickMonoFont fm (ctxMonoFontMetrics ctx) txt
+      (_tw, th) <- ctxMeasureText ctx txt
+      let (tx, used) = alignedTextPen ax x w ix fm' shown
       pure [(txt, tx, centeredTextY (ctxHostProfile ctx) fm' y h th, used, th)]
 
 sliderValue :: Context -> NodeIdx -> IO Float
