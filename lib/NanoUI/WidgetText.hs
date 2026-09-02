@@ -64,6 +64,7 @@ import NanoUI.Font (FontMetrics (..), fmLineHeight)
 import NanoUI.Icons (Icons, checkboxPrefixes, radioPrefixes, treeExpandMark, treeExpandPrefixes)
 import NanoUI.Style (Theme (..), styleBg, themeButton, themePanel, themeWindow)
 import NanoUI.Types (Color (..), colorB, colorG, colorR, colorRGBA, lerpColor, sliderBarCells)
+import NanoUI.WidgetMarkers (closeButtonMarker, tabButtonMarker, tableHeaderMarker)
 import qualified Data.Text as T
 
 sliderDisplayText :: Text -> Float -> Text
@@ -234,15 +235,6 @@ parseHexDigit c
 
 colorPickerDisplayText :: Text -> Color -> Text
 colorPickerDisplayText lbl col = colorPickerLabelText lbl <> ": " <> colorPickerToHex col
-
-closeButtonMarker :: Text
-closeButtonMarker = T.singleton '\x01'
-
-tabButtonMarker :: Text
-tabButtonMarker = T.singleton '\x02'
-
-tableHeaderMarker :: Text
-tableHeaderMarker = T.singleton '\x05'
 
 tableStripeEven :: Int
 tableStripeEven = 1

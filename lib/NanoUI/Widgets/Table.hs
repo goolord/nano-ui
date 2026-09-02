@@ -23,33 +23,459 @@ module NanoUI.Widgets.Table
 where
 
 import Colonnade (Colonnade, Headed (..), headed, headless)
+import Colonnade.Encode qualified as Encode
 import Control.Monad (void, when)
+import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
+import Data.List (sortBy)
+import Data.Maybe (isJust, listToMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Text.Read (decimal, signed)
+import Data.Vector qualified as V
 import Effectful (Eff, type (:>))
 import qualified Data.IntMap.Strict as IM
-import NanoUI.Context (Context (..), getPrevRect, getStore, intKey, markDirty)
-import NanoUI.Font (monoFontMarker, scrollBarGutter)
-import NanoUI.Types (isCellHost)
-import NanoUI.Input (inputMouseDown, inputMousePos)
+import NanoUI.Context (Context (..), bumpMirror, getPrevRect, getScrollOffset, getStore, intKey, linkScrollAxes, markDirty, setStore)
+import NanoUI.Font (labelContentInset, monoFontMarker, scrollBarGutter, stripWidgetMarkers, textDisplayWidth)
+import NanoUI.Id (WidgetId (..))
+import NanoUI.Input (Input (..), inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased, inputMouseRightReleased)
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
 import NanoUI.Store (WidgetStore (..), slotDrag, slotDragW, slotKey)
-import NanoUI.Style (AlignX (..), AlignY (..), Layout (..), Padding (..), Sizing (..), defaultLayout, fillW, tight)
-import NanoUI.Types (rectW, v2X)
-import NanoUI.WidgetText (tableHeaderLabel)
+import NanoUI.Style (AlignX (..), AlignY (..), Direction (..), Layout (..), Padding (..), Sizing (..), defaultLayout, fillH, fillW, tight)
+import NanoUI.Types (isCellHost, rectH, rectW, v2X)
+import NanoUI.WidgetText (tableHeaderLabel, tableSortReserve)
+import NanoUI.Widgets.Behavior (useReorder)
 import NanoUI.Widgets.Combinators
-  ( ColSize (..), SortCol (..), SortDir (..), TableCfg (..), TableResponse (..)
-  , buttonStyled, clampSortCol, colBoxLayout, colSizing, columnCells, columnCount
-  , columnHeaders, columnWidths, defaultTableCfg, distributeColWidths, dragCol
-  , finishTable, fitList, isResizeDrag, listAt, minColW, normalizeOrder
-  , numericColumns, setAt, sortMarkStyle, sortRows, stripedRow
-  , tableHiddenIndices, tableRespChanged, tableRespClicked, tableSplitPanes
-  , useTableSort, visibleCols, writeColW
+  ( buttonStyled
+  , fitList
+  , gridColumns
+  , headerAtPoint
+  , headerEdgeHit
+  , keyedRowLay
+  , listAt
+  , minColW
+  , normalizeOrder
+  , rebuildOrder
+  , setAt
+  , stripedRow
+  , virtualIndices
+  , visibleCols
   )
-import NanoUI.Widgets.Layout (column)
-import NanoUI.Widgets.Node (addWidgetStyled)
+import NanoUI.Widgets.Layout (column, panel, row, scrollAreaIdConfigured, separator, spacer)
+import NanoUI.Frame.Scroll.Geometry (defaultScrollConfig, scrollHorizontalHidden, scrollVerticalAuto, scrollVerticalHidden)
+import NanoUI.Widgets.Node
+  ( Clickable (..)
+  , Responding (..)
+  , Response (..)
+  , RightClickable (..)
+  , addWidgetStyled
+  , rawRespRect
+  , setChanged
+  , setClicked
+  , tagContainer
+  )
+tableSplitPanes ::
+  (Ui :> es) =>
+  WidgetId ->
+  WidgetId ->
+  WidgetId ->
+  Float ->
+  Float ->
+  [Int] ->
+  [Int] ->
+  [row] ->
+  [row] ->
+  (Int -> Layout) ->
+  (Int -> Eff es Response) ->
+  (Int -> row -> Int -> Eff es ()) ->
+  Eff es [(Int, Response)]
+tableSplitPanes tableWid vWid hWid rowMinH _hChromeH frozenIdx unfrozenIdx pinned scrollRows colBox renderHeader renderCell =
+  panel (tight . fillW . fillH $ defaultLayout) $ do
+    tagContainer tableWid
+    row (tight . fillW . fillH $ defaultLayout {layoutGap = 0}) $ do
+      frozenHs <-
+        if null frozenIdx
+          then pure []
+          else zip frozenIdx <$> pane False (not (null unfrozenIdx)) frozenIdx
+      when (not (null frozenIdx) && not (null unfrozenIdx)) $ void separator
+      unfrozenHs <-
+        if null unfrozenIdx then pure [] else zip unfrozenIdx <$> unfrozenPane unfrozenIdx
+      pure (frozenHs ++ unfrozenHs)
+ where
+  freezeR = length pinned
+  minSum idxs = sum (map (layoutMinW . colBox) idxs) + fromIntegral (max 0 (length idxs - 1))
+  vLay fill =
+    let base = tight . fillH $ defaultLayout {layoutGap = 0}
+     in if fill then fillW base else base
+  hRowLay = defaultLayout {layoutDirection = Row, layoutPadding = Padding 0 0 0 0, layoutGap = 0}
+  paneLay fill idxs =
+    let base = tight $ defaultLayout {layoutGap = 0, layoutMinW = minSum idxs, layoutHeight = Grow 1}
+     in if fill then fillW base else base {layoutWidth = Fit}
+  headerLine idxs renderHeader' =
+    keyedRowLay (tight $ defaultLayout {layoutGap = 0}) idxs $ \i ->
+      column (colBox i) (renderHeader' i)
+  pinnedBlock idxs =
+    mapM_
+      ( \(ri, r) ->
+          withKey ("pin" :: Text, ri) $ do
+            when (ri > 0) $ void separator
+            gridColumns
+              idxs
+              (map colBox idxs)
+              [void (renderCell ri r i) | i <- idxs]
+      )
+      (zip [0 ..] pinned)
+  bodyBlock idxs = do
+    ctx <- askContext
+    (vis, topH, botH) <-
+      let n = length scrollRows
+       in if n == 0 || rowMinH <= 0
+            then pure ([], 0, 0)
+            else uiIO $ do
+              scroll <- getScrollOffset ctx vWid
+              viewH <-
+                getPrevRect ctx vWid >>= \case
+                  Nothing -> pure (rowMinH * 8)
+                  Just r -> pure (rectH r)
+              let vis = virtualIndices n scroll viewH rowMinH
+                  firstVis = case vis of
+                    [] -> 0
+                    (i : _) -> i
+                  lastVis = case vis of
+                    [] -> -1
+                    xs -> last xs
+                  topH = fromIntegral firstVis * rowMinH
+                  botH = fromIntegral (max 0 (n - lastVis - 1)) * rowMinH
+              pure (vis, topH, botH)
+    column (tight $ defaultLayout {layoutGap = 0}) $ do
+      when (topH > 0) $ void (spacer Fit (Fixed topH))
+      gridColumns
+        idxs
+        (map colBox idxs)
+        [ mapM_
+            ( \rowIdx ->
+                withKey rowIdx $ do
+                  when (rowIdx > 0) $ void separator
+                  let r = scrollRows !! rowIdx
+                  renderCell (rowIdx + freezeR) r colIdx
+            )
+            vis
+        | colIdx <- idxs
+        ]
+      when (botH > 0) $ void (spacer Fit (Fixed botH))
+  pane fill hideVertBar idxs = do
+    column (paneLay fill idxs) $ do
+      hs <- headerLine idxs renderHeader
+      void separator
+      pinnedBlock idxs
+      when (not (null pinned) && not (null scrollRows)) $ void separator
+      scrollAreaIdConfigured
+        vWid
+        (vLay fill)
+        (if hideVertBar then scrollVerticalHidden else scrollVerticalAuto)
+        (bodyBlock idxs)
+      pure hs
+  unfrozenPane idxs = do
+    ctx <- askContext
+    column (paneLay True idxs) $ do
+      hs <-
+        scrollAreaIdConfigured hWid (fillW hRowLay) scrollHorizontalHidden $
+          column (tight . fillW $ defaultLayout {layoutGap = 0, layoutMinW = minSum idxs}) $ do
+            hs <- headerLine idxs renderHeader
+            void separator
+            pinnedBlock idxs
+            when (not (null pinned) && not (null scrollRows)) $ void separator
+            pure hs
+      uiIO (linkScrollAxes ctx vWid hWid)
+      scrollAreaIdConfigured vWid (vLay True) defaultScrollConfig (bodyBlock idxs)
+      pure hs
+
+data SortDir = SortAsc | SortDesc
+  deriving (Eq, Show, Enum, Bounded)
+
+data SortCol = SortCol {sortColIndex :: !Int, sortColDir :: !SortDir}
+  deriving (Eq, Show)
+
+data ColSize = ColContent | ColStretch | ColFixed Float
+  deriving (Eq, Show)
+
+data TableCfg = TableCfg
+  { tableFreezeCols :: !Int
+  , tableFreezeRows :: !Int
+  , tableColSizes :: [ColSize]
+  , tableHidden :: IntSet
+  }
+  deriving (Eq, Show)
+
+defaultTableCfg :: TableCfg
+defaultTableCfg = TableCfg 0 0 [] IS.empty
+
+data TableResponse = TableResponse
+  { tableWidgetResponse :: !Response
+  , tableSort :: !SortCol
+  , tableColOrder :: [Int]
+  , tableHiddenCols :: IntSet
+  }
+  deriving (Eq, Show)
+
+instance Responding TableResponse where
+  respId = respId . tableWidgetResponse
+  respRect = respRect . tableWidgetResponse
+  respHovered = respHovered . tableWidgetResponse
+  respPressed = respPressed . tableWidgetResponse
+  respClicked = respClicked . tableWidgetResponse
+  respChanged = respChanged . tableWidgetResponse
+  respRightPressed = respRightPressed . tableWidgetResponse
+  respRightClicked = respRightClicked . tableWidgetResponse
+
+instance Clickable TableResponse where
+  respIsClicked = respClicked
+
+instance RightClickable TableResponse where
+  respIsRightClicked = respRightClicked . tableWidgetResponse
+
+tableRespChanged :: TableResponse -> Bool
+tableRespChanged = respChanged
+
+tableRespClicked :: TableResponse -> Bool
+tableRespClicked = respClicked
+
+tableHiddenIndices :: TableResponse -> [Int]
+tableHiddenIndices = IS.toAscList . tableHiddenCols
+
+packSort :: SortCol -> Int
+packSort (SortCol c SortAsc) = c * 2
+packSort (SortCol c SortDesc) = c * 2 + 1
+
+unpackSort :: Int -> SortCol
+unpackSort n = SortCol (n `div` 2) (if odd n then SortDesc else SortAsc)
+
+clampSortCol :: Int -> SortCol -> SortCol
+clampSortCol n (SortCol idx dir) = SortCol (max 0 (min (max 0 (n - 1)) idx)) dir
+
+sortMarkStyle :: SortCol -> Int -> Int
+sortMarkStyle sort idx
+  | sortColIndex sort /= idx = 0
+  | sortColDir sort == SortDesc = 2
+  | otherwise = 1
+
+sortRows :: Colonnade Headed row Text -> SortCol -> [row] -> [row]
+sortRows _ _ [] = []
+sortRows cols sort rows =
+  let n = V.length (Encode.getColonnade cols)
+      idx = sortColIndex (clampSortCol n sort)
+      enc = maybe (const T.empty) Encode.oneColonnadeEncode (Encode.getColonnade cols V.!? idx)
+   in case sortColDir sort of
+        SortAsc -> sortBy (\a b -> compare (enc a) (enc b)) rows
+        SortDesc -> sortBy (\a b -> compare (enc b) (enc a)) rows
+
+columnCount :: Colonnade Headed row Text -> Int
+columnCount = V.length . Encode.getColonnade
+
+columnHeaders :: Colonnade Headed row Text -> [Text]
+columnHeaders cols = V.toList (Encode.header id cols)
+
+columnCells :: Colonnade Headed row Text -> row -> [Text]
+columnCells cols r = V.toList (Encode.row id cols r)
+
+isNumericCell :: Text -> Bool
+isNumericCell txt =
+  let s = T.strip txt
+   in not (T.null s)
+        && case signed decimal s :: Either String (Integer, Text) of
+          Right (_, rest) | T.null rest -> True
+          _ -> False
+
+numericColumns :: Colonnade Headed row Text -> [row] -> [Bool]
+numericColumns cols rows =
+  let n = length (columnHeaders cols)
+   in [let cells = [columnCells cols r !! i | r <- rows] in not (null cells) && all isNumericCell cells | i <- [0 .. n - 1]]
+
+columnWidths :: Context -> Colonnade Headed row Text -> [row] -> [Float]
+columnWidths ctx cols rows =
+  let host = ctxHostProfile ctx
+      fm = ctxFontMetrics ctx
+      mono = ctxMonoFontMetrics ctx
+      terminal = isCellHost host
+      (ix, _) = labelContentInset host fm
+      cellPadX = if terminal then 0 else 20
+      headerPadX = cellPadX + if terminal then 0 else 2 * ix
+      measure metrics txt = textDisplayWidth host metrics (stripWidgetMarkers txt)
+      hdrs = columnHeaders cols
+      numeric = numericColumns cols rows
+      hdrW hdr = measure fm (hdr <> tableSortReserve terminal) + headerPadX
+      cellW i txt =
+        if listAt numeric i False
+          then measure mono txt + cellPadX
+          else measure fm txt + cellPadX
+   in zipWith
+        (\hdr i -> maximum (minColW : hdrW hdr : [cellW i (columnCells cols r !! i) | r <- rows]))
+        hdrs
+        [0 ..]
+
+distributeColWidths :: Int -> [Int] -> [ColSize] -> [Float] -> [Float] -> Float -> [Float]
+distributeColWidths n vis sizes contentWs stored tableW =
+  let mins = [resolvedWidth sizes contentWs stored i | i <- [0 .. n - 1]]
+      seps = fromIntegral (max 0 (length vis - 1))
+      visMin = sum [listAt mins i 0 | i <- vis] + seps
+      autoStretch i =
+        case listAt sizes i ColStretch of
+          ColStretch ->
+            listAt stored i 0 <= max minColW (listAt contentWs i minColW)
+          _ -> False
+      stretchVis = [i | i <- vis, autoStretch i]
+      slack = max 0 (tableW - visMin)
+      extra = if null stretchVis then 0 else slack / fromIntegral (length stretchVis)
+   in [if autoStretch i then listAt mins i 0 + extra else listAt mins i 0 | i <- [0 .. n - 1]]
+
+nextSortCol :: Int -> SortCol -> Int -> SortCol
+nextSortCol n cur clicked =
+  let clamped = clampSortCol n cur
+   in if clicked == sortColIndex clamped
+        then SortCol clicked (case sortColDir clamped of SortAsc -> SortDesc; SortDesc -> SortAsc)
+        else SortCol clicked SortAsc
+
+useTableSort :: Ui :> es => SortCol -> Eff es (Eff es SortCol, SortCol -> Eff es ())
+useTableSort initial = do
+  wid <- nextId
+  ctx <- askContext
+  let key = intKey wid
+      packedInitial = packSort initial
+      readSort = uiIO $ unpackSort . IM.findWithDefault packedInitial key . storeInt <$> getStore ctx
+      setSort sort = uiIO $ do
+        st <- getStore ctx
+        let packed = packSort sort
+            prev = IM.findWithDefault packedInitial key (storeInt st)
+        when (prev /= packed) $ do
+          setStore ctx (bumpMirror (st {storeInt = IM.insert key packed (storeInt st)}))
+          markDirty ctx
+  pure (readSort, setSort)
+
+packResize :: Int -> Int
+packResize i = -(1000 + i)
+
+packReorder :: Int -> Int
+packReorder i = -(2000 + i)
+
+isResizeDrag :: Int -> Bool
+isResizeDrag n = n <= -1000 && n > -2000
+
+isReorderDrag :: Int -> Bool
+isReorderDrag n = n <= -2000
+
+dragCol :: Int -> Int
+dragCol n = abs n `mod` 1000
+
+resolvedWidth :: [ColSize] -> [Float] -> [Float] -> Int -> Float
+resolvedWidth sizes contentWs stored i =
+  let contentW = max minColW (listAt contentWs i minColW)
+      saved = listAt stored i 0
+   in case listAt sizes i ColStretch of
+        ColStretch -> if saved > contentW then saved else contentW
+        ColFixed f ->
+          let base = max minColW f
+           in if saved > 0 then max base saved else base
+        ColContent -> if saved > 0 then max contentW saved else contentW
+
+colSizing :: [ColSize] -> [Float] -> Float -> Int -> Sizing
+colSizing _sizes _stored resolved _i = Fixed resolved
+
+colBoxLayout :: Sizing -> Float -> Layout
+colBoxLayout sizing resolved =
+  let base = tight $ defaultLayout {layoutGap = 0, layoutMinW = resolved}
+   in case sizing of
+        Fixed w -> base {layoutWidth = Fixed w, layoutMaxW = w}
+        Grow _ -> fillW base
+        _ -> base {layoutWidth = Fit}
+
+writeColW :: Context -> Int -> [Float] -> IO ()
+writeColW ctx key ws = do
+  st <- getStore ctx
+  setStore ctx (st {storeFloatList = IM.insert key ws (storeFloatList st)})
+  markDirty ctx
+
+finishTable ::
+  (Ui :> es) =>
+  Int ->
+  Int ->
+  Bool ->
+  [Int] ->
+  [Int] ->
+  IS.IntSet ->
+  Int ->
+  Float ->
+  Float ->
+  [Float] ->
+  [Float] ->
+  SortCol ->
+  [(Int, Response)] ->
+  Maybe Response ->
+  (Int -> Float) ->
+  Eff es (TableResponse, SortCol)
+finishTable n stateKey terminal vis order0 hidden0 drag0 dragX0 dragW0 widths0 widths1 sort0 headerPairs showAllResp resolvedW = do
+  ctx <- askContext
+  inp <- askInput
+  let mouse = inputMousePos inp
+      mx = v2X mouse
+      edgePad = if terminal then 1 else 4
+      edgeCol = headerEdgeHit edgePad headerPairs mouse
+      hoverCol = headerAtPoint headerPairs mouse
+      headerRects = [(i, rawRespRect r) | (i, r) <- headerPairs]
+      resizing = isResizeDrag drag0 && inputMouseDown inp
+  (vis', mReorder) <-
+    withKey ("reorder" :: Text) $
+      useReorder vis (if resizing || isJust edgeCol then [] else headerRects)
+  let dragged = isReorderDrag drag0 && abs (mx - dragX0) > 8
+      pressResize = inputMousePressed inp && isJust edgeCol
+      pressReorder = inputMousePressed inp && edgeCol == Nothing && isJust hoverCol
+      nextDrag'
+        | pressResize = maybe 0 packResize edgeCol
+        | pressReorder = maybe 0 packReorder hoverCol
+        | inputMouseReleased inp || not (inputMouseDown inp) = 0
+        | otherwise = drag0
+      nextDragX
+        | pressResize || pressReorder = mx
+        | nextDrag' == 0 = 0
+        | otherwise = dragX0
+      nextDragW
+        | pressResize = maybe 0 headerW edgeCol
+        | nextDrag' == 0 = 0
+        | otherwise = dragW0
+      headerW i = maybe (resolvedW i) (\r -> let w = rectW (rawRespRect r) in if w > 0 then w else resolvedW i) (lookup i headerPairs)
+      nextOrder = if vis' /= vis then rebuildOrder hidden0 vis' order0 else order0
+      hideClicked = [i | (i, r) <- headerPairs, respHovered r, inputMouseRightReleased inp, drag0 == 0]
+      nextHidden = case showAllResp of
+        Just r | respClicked r -> IS.empty
+        _ -> case hideClicked of
+          (i : _) | IS.size hidden0 + 1 < n -> IS.insert i hidden0
+          _ -> hidden0
+      sortClick =
+        if dragged || isJust mReorder || vis' /= vis || isResizeDrag drag0
+          then Nothing
+          else
+            if isJust edgeCol && (inputMouseDown inp || inputMouseReleased inp)
+              then Nothing
+              else listToMaybe [i | (i, r) <- headerPairs, respClicked r]
+      nextSort = maybe sort0 (nextSortCol n sort0) sortClick
+      hasChanged = nextSort /= sort0 || nextOrder /= order0 || nextHidden /= hidden0 || widths1 /= widths0
+      widgetResp =
+        setChanged hasChanged $
+          setClicked (hasChanged && isJust sortClick) (mconcat (map snd headerPairs ++ maybe [] pure showAllResp))
+  uiIO $ do
+    st <- getStore ctx
+    let st1 =
+          st
+            { storeIntList = IM.insert stateKey nextOrder (storeIntList st)
+            , storeIntSet = IM.insert stateKey nextHidden (storeIntSet st)
+            , storeInt = IM.insert (slotKey slotDrag stateKey) nextDrag' (storeInt st)
+            , storeFloat =
+                IM.insert stateKey nextDragX $
+                  IM.insert (slotKey slotDragW stateKey) nextDragW (storeFloat st)
+            }
+    when (st1 /= st) $ setStore ctx st1 >> markDirty ctx
+  pure (TableResponse widgetResp nextSort nextOrder nextHidden, nextSort)
+
 
 table :: (Ui :> es) => Text -> Colonnade Headed row Text -> [row] -> SortCol -> Eff es (TableResponse, SortCol)
 table = tableEx (tight . fillW $ defaultLayout {layoutGap = 0})
