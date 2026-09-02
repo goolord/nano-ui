@@ -36,6 +36,9 @@ common rts-options
         -threaded
         "-with-rtsopts=-N1 -A64m -T -I0"
 
+common test-rts-options
+    ghc-options: -rtsopts -threaded "-with-rtsopts=-A8m -H64m -K128m -T"
+
 common warnings
   ghc-options:
     -Wall
@@ -174,6 +177,34 @@ test-suite text-buffer-spec
         nano-ui,
         text ^>=2.1
     hs-source-dirs:   test
+    default-language: GHC2024
+
+test-suite nano-ui-test
+    import:           extensions
+    import:           test-rts-options
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    main-is:          Main.hs
+    other-modules:
+        Cases
+        Cases.Animation
+        Cases.Damage
+        Cases.Demo
+        Cases.Modal
+        Cases.Scroll
+        Cases.Select
+        Cases.Tabs
+        Cases.TextInput
+        Cases.ContextMenu
+        Cases.Tooltip
+        Cases.Window
+    build-depends:
+        base ^>=4.22.0.0,
+        bytestring,
+        effectful ^>=2.6,
+        nano-ui,
+        text ^>=2.1
+    hs-source-dirs:   test/integration
     default-language: GHC2024
 
 executable nano-ui-profile

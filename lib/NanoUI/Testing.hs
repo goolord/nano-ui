@@ -30,6 +30,7 @@ module NanoUI.Testing
     -- * Context
   , Context
   , newContext
+  , newCellContext
   , newPixelContext
   , ctxTheme
   , ctxFontMetrics
@@ -216,7 +217,7 @@ import NanoUI.Draw
   , vertexSize
   )
 import NanoUI.Render.ASCII (renderASCII)
-import NanoUI.Font (sliderTrackBounds, textDisplayWidth)
+import NanoUI.Font (monospaceMetrics, sliderTrackBounds, textDisplayWidth)
 import NanoUI.Frame
   ( UiCursorKind (..)
   , collectOverlayTextSpans
@@ -261,3 +262,10 @@ import Effectful (Eff, IOE, runEff, type (:>))
 -- | Pixel-host context with SDL-like defaults for headless tests.
 newPixelContext :: IO Context
 newPixelContext = newPixelHostContext
+
+-- | Cell-host context (1x1 metrics) for layout tests that assume a terminal grid.
+newCellContext :: IO Context
+newCellContext = do
+  ctx <- newContext
+  let fm = monospaceMetrics 1
+  pure (withExternalText (withFontMetrics (withHostProfile ctx CellHost) fm) True)

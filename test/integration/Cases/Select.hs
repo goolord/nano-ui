@@ -27,7 +27,6 @@ import NanoUI.Testing.Harness
   , warmup2
   , withInputOff
   )
-import NanoUI.Testing.Term (newAdaptiveTerminalContext)
 
 runSelectDropdownCursorTest :: Context -> IORef Int -> IO ()
 runSelectDropdownCursorTest ctx failed = do
@@ -141,7 +140,7 @@ runTreeSelectTest _ failed = do
 
 runTreeExpandDamageTest :: Context -> IORef Int -> IO ()
 runTreeExpandDamageTest _ failed = do
-  ctx <- newAdaptiveTerminalContext
+  ctx <- newCellContext
   let items = [TreeItem "root" [TreeItem "child" []], TreeItem "leaf" []]
       ui = column defaultLayout (void (tree "t" items 0))
       inp0 = withInputOff 40 12
@@ -196,7 +195,7 @@ runTreeKeyboardTest _ failed = do
 
 runSelectDropdownHoverTest :: Context -> IORef Int -> IO ()
 runSelectDropdownHoverTest _ failed = do
-  ctx <- newAdaptiveTerminalContext
+  ctx <- newCellContext
   let layout = defaultLayout {layoutPadding = Padding 0 0 0 0, layoutGap = 0}
       inp0 = withInput 40 6
       ui = column layout (select "Quality" ["Low", "High"] 0)

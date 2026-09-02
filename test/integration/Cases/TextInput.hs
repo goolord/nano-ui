@@ -21,7 +21,6 @@ import NanoUI
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, withInput)
 import NanoUI.Testing.Harness (assertSpansHas, clickPair, warmup2, withDelta)
-import NanoUI.Testing.Term (newAdaptiveTerminalContext)
 
 runTextInputCursorTest :: Context -> IORef Int -> IO ()
 runTextInputCursorTest ctx failed = do
@@ -64,7 +63,7 @@ runTextInputSelectionTest ctx failed = do
 
 runTextInputCtrlATest :: Context -> IORef Int -> IO ()
 runTextInputCtrlATest ctx failed = do
-  term <- newAdaptiveTerminalContext
+  term <- newCellContext
   let inp0 = withInput 320 120
       ui = column defaultLayout (textInput "Name" "hello")
   forM_ [ctx, term] $ \c -> do
@@ -229,7 +228,7 @@ runButtonPressReleaseHoverTest ctx failed = do
 
 runTextInputFocusTest :: Context -> IORef Int -> IO ()
 runTextInputFocusTest _ failed = do
-  ctx <- newAdaptiveTerminalContext
+  ctx <- newCellContext
   let inp0 = withInput 200 100
       ui = column defaultLayout (textInput "Name" "")
   (resp, _) <- warmup2 ctx inp0 ui
@@ -241,7 +240,7 @@ runTextInputFocusTest _ failed = do
 
 runTextInputDirtyTest :: Context -> IORef Int -> IO ()
 runTextInputDirtyTest _ failed = do
-  ctx <- newAdaptiveTerminalContext
+  ctx <- newCellContext
   let ui = column defaultLayout (textInput "Name" "")
       inp0 = (withInput 200 100) {inputMousePos = V2 20 20}
   (resp, _) <- warmup2 ctx inp0 ui
