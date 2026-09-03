@@ -45,7 +45,7 @@ import NanoUI.Context
   , slotKey
   )
 import NanoUI.Draw (DrawArena, pushRect, pushRoundedRect, pushRoundedStroke)
-import NanoUI.Font (hasHeadingMarker, hasMutedMarker, stripWidgetMarkers)
+import NanoUI.Style (FontVariant (..))
 import NanoUI.Types (HostProfile, isCellHost)
 import NanoUI.Icons (iconSelectClosed, iconSelectOpen)
 import NanoUI.Id (hashWidgetId)
@@ -68,7 +68,7 @@ import NanoUI.WidgetText
   , buttonVisualStyle
   , checkboxLabelText
   , radioLabelText
-  , tableStripeColor
+  , stripeColor
   , treeDecodeStripe
   , treeDecodeStyle
   , treeDisplayText
@@ -102,31 +102,31 @@ textAreaStoredValue ctx idx = do
   store <- getStore ctx
   pure (IM.findWithDefault "" (intKey wid) (storeText store))
 
-nodeLabelPaint :: Theme -> T.Text -> (T.Text, Color, Color)
-nodeLabelPaint theme raw = labelPaintWith (themePanel theme) theme raw
+nodeLabelPaint :: Theme -> FontVariant -> T.Text -> (T.Text, Color, Color)
+nodeLabelPaint theme fvar raw = labelPaintWith (themePanel theme) theme fvar raw
 
-labelPaintWith :: Style -> Theme -> T.Text -> (T.Text, Color, Color)
-labelPaintWith style theme raw =
-  labelPaintWithBg style (styleBg style) theme raw
+labelPaintWith :: Style -> Theme -> FontVariant -> T.Text -> (T.Text, Color, Color)
+labelPaintWith style theme fvar raw =
+  labelPaintWithBg style (styleBg style) theme fvar raw
 
-labelPaintWithBg :: Style -> Color -> Theme -> T.Text -> (T.Text, Color, Color)
-labelPaintWithBg style bg theme raw =
-  let fg
-        | hasHeadingMarker raw = themeAccent theme
-        | hasMutedMarker raw = themeMuted theme
-        | otherwise = styleFg style
-   in (stripWidgetMarkers raw, fg, bg)
+labelPaintWithBg :: Style -> Color -> Theme -> FontVariant -> T.Text -> (T.Text, Color, Color)
+labelPaintWithBg style bg theme fvar raw =
+  let fg = case fvar of
+        FontHeading -> themeAccent theme
+        FontMuted -> themeMuted theme
+        _ -> styleFg style
+   in (raw, fg, bg)
 
 floatingLabelPaint ::
-  IM.IntMap (Maybe NodeType) -> Context -> NodeIdx -> Theme -> T.Text -> (T.Text, Color, Color)
-floatingLabelPaint floatCache ctx idx theme raw =
+  IM.IntMap (Maybe NodeType) -> Context -> NodeIdx -> Theme -> FontVariant -> T.Text -> (T.Text, Color, Color)
+floatingLabelPaint floatCache ctx idx theme fvar raw =
   let terminal = isCellHost (ctxHostProfile ctx)
    in case IM.lookup idx floatCache of
         Just (Just NodeWindow)
-          | terminal -> labelPaintWith (themeFloatingWindow theme) theme raw
+          | terminal -> labelPaintWith (themeFloatingWindow theme) theme fvar raw
         Just (Just NodeModal)
-          | terminal -> labelPaintWith (themeFloatingWindow theme) theme raw
-        _ -> nodeLabelPaint theme raw
+          | terminal -> labelPaintWith (themeFloatingWindow theme) theme fvar raw
+        _ -> nodeLabelPaint theme fvar raw
 
 floatingAncestor :: Context -> NodeIdx -> IO (Maybe NodeType)
 floatingAncestor ctx idx = go idx
@@ -526,7 +526,7 @@ widgetVisualStyle ctx nt idx = do
                 accent = themeAccent theme
                 stripe = treeDecodeStripe styleIdx
                 unselectedBg =
-                  case tableStripeColor theme stripe of
+                  case stripeColor theme stripe of
                     Just c -> c
                     Nothing -> styleBg (themePanel theme)
                 selectedBg = lerpColor unselectedBg accent 0.25

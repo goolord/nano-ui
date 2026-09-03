@@ -218,4 +218,5 @@ testSpecs =
   , TestSpec "tooltip-spans" False runTooltipSpansTest
   , TestSpec "tooltip-id-stable" False runTooltipIdStableTest
   , TestSpec "tooltip-scroll-pos" False runTooltipScrollPosTest
+  , TestSpec "heading-mono-truncate" False runHeadingMonoTruncateTest
   ]

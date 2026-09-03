@@ -34,7 +34,6 @@ import NanoUI.Font
   ( FontMetrics
   , fmLineHeight
   , layoutLineHeight
-  , pickMonoFont
   , textDisplayWidth
   , widgetContentInset
   )
@@ -141,7 +140,7 @@ drawTextAreaSelection ::
   Theme ->
   Style ->
   IO ()
-drawTextAreaSelection da ctx state geom host fm theme style = do
+drawTextAreaSelection da _ctx state geom host fm theme style = do
   let anchor = TA.selectionAnchor state
       cursor = TB.getCursor (TA.buffer state)
   when (anchor /= cursor) $ do
@@ -178,9 +177,8 @@ drawTextAreaSelection da ctx state geom host fm theme style = do
                   else lineLen
               )
       when (startCol < endCol) $ do
-        let (lineFm, _) = pickMonoFont fm (ctxMonoFontMetrics ctx) line
-            wLo = textDisplayWidth host lineFm (T.take startCol line)
-            wHi = textDisplayWidth host lineFm (T.take endCol line)
+        let wLo = textDisplayWidth host fm (T.take startCol line)
+            wHi = textDisplayWidth host fm (T.take endCol line)
             selW = wHi - wLo
             ly = contentTop + fromIntegral row * lineH - scrollYf
             selX = rectX field + ix + wLo
@@ -220,8 +218,7 @@ drawTextAreaContent da ctx idx x y w h style = do
           let ly = contentTop + fromIntegral row * lineH - scrollYf
           when (ly + lineH >= fieldTop && ly <= fieldBottom) $
             unless (T.null line) $ do
-              let (fm', shown) = pickMonoFont fm (ctxMonoFontMetrics ctx) line
-              pushText da fm' contentX ly shown fg
+              pushText da fm contentX ly line fg
         when focus $ do
           let TB.Cursor row col = TB.getCursor buf
               currentLine =
@@ -229,8 +226,7 @@ drawTextAreaContent da ctx idx x y w h style = do
                   then lineTexts !! row
                   else ""
               prefix = T.take col currentLine
-              (lineFm, _) = pickMonoFont fm (ctxMonoFontMetrics ctx) currentLine
-              pw = textDisplayWidth host lineFm prefix
+              pw = textDisplayWidth host fm prefix
           let caretX = contentX + pw
               caretY = contentTop + fromIntegral row * lineH - scrollYf + 1
               caretH = max 4 (lineH - 2)

@@ -9,6 +9,9 @@ module NanoUI.Font
   , measureTextWrappedIO
   , wrapTextLines
   , wrapTextLinesIO
+  , truncateTextAdvance
+  , truncateTextWith
+  , truncateTextIO
   , lineWidth
   , textDisplayWidth
   , textIndexAtX
@@ -30,16 +33,7 @@ module NanoUI.Font
   , layoutUnitScale
   , resolveLayoutGap
   , resolveLayoutPadding
-  , monoFontMarker
   , tabSentinelChar
-  , hasMonoFontMarker
-  , stripMonoFontMarker
-  , pickMonoFont
-  , headingFontMarker
-  , hasHeadingMarker
-  , mutedFontMarker
-  , hasMutedMarker
-  , stripWidgetMarkers
   , scrollBarWidth
   , scrollBarWindowWidth
   , scrollBarMargin
@@ -61,12 +55,7 @@ module NanoUI.Font
 import Data.Text (Text)
 import qualified Data.Text as T
 import NanoUI.Types (HostProfile, Rect (..), isCellHost, sliderBarCells)
-import NanoUI.WidgetMarkers
-  ( headingFontMarker
-  , monoFontMarker
-  , mutedFontMarker
-  , tabSentinelChar
-  )
+import NanoUI.WidgetMarkers (tabSentinelChar)
 import NanoUI.Style (AlignX (..), Padding (..), defaultLayout, layoutGap)
 import NanoUI.Icons (terminalPaintColumns)
 
@@ -115,39 +104,6 @@ resolveLayoutPadding :: HostProfile -> FontMetrics -> Padding -> Padding
 resolveLayoutPadding host _fm (Padding l t r b) =
   let s = layoutUnitScale host
    in Padding (l * s) (t * s) (r * s) (b * s)
-
-{-# INLINE hasMonoFontMarker #-}
-hasMonoFontMarker :: Text -> Bool
-hasMonoFontMarker txt = T.take 1 txt == monoFontMarker
-
-{-# INLINE stripMonoFontMarker #-}
-stripMonoFontMarker :: Text -> Text
-stripMonoFontMarker txt =
-  if hasMonoFontMarker txt
-    then T.drop 1 txt
-    else txt
-
-{-# INLINE pickMonoFont #-}
-pickMonoFont :: FontMetrics -> FontMetrics -> Text -> (FontMetrics, Text)
-pickMonoFont fm mono txt =
-  if hasMonoFontMarker txt
-    then (mono, stripMonoFontMarker txt)
-    else (fm, txt)
-
-{-# INLINE hasHeadingMarker #-}
-hasHeadingMarker :: Text -> Bool
-hasHeadingMarker txt = T.take 1 txt == headingFontMarker
-
-{-# INLINE hasMutedMarker #-}
-hasMutedMarker :: Text -> Bool
-hasMutedMarker txt = T.take 1 txt == mutedFontMarker
-
-{-# INLINE stripWidgetMarkers #-}
-stripWidgetMarkers :: Text -> Text
-stripWidgetMarkers txt =
-  if hasMonoFontMarker txt || hasHeadingMarker txt || hasMutedMarker txt
-    then T.drop 1 txt
-    else txt
 
 -- Labels share the node origin with rects and images. Outer gap lives on card/panel padding.
 {-# INLINE labelContentInset #-}
@@ -620,3 +576,45 @@ takeWidthIO lineW maxW txt = do
           let mid = (lo + hi + 1) `div` 2
           ok <- (<= maxW) <$> lineW (T.take mid txt)
           if ok then maxFit mid hi else maxFit lo (mid - 1)
+
+truncateTextAdvance :: (Char -> Float) -> Float -> Text -> Text
+truncateTextAdvance advance maxW txt
+  | maxW <= 0 = ""
+  | otherwise =
+      let !totalW = T.foldl' (\ !w c -> w + advance c) (0.0 :: Float) txt
+       in if totalW <= maxW
+            then txt
+            else
+              let ellW = advance '.' * 3
+               in if maxW <= ellW
+                    then fst (takeWidthAdvance advance maxW txt)
+                    else
+                      let (fit, _) = takeWidthAdvance advance (maxW - ellW) txt
+                       in T.dropWhileEnd (== '.') fit <> "..."
+
+truncateTextWith :: (Text -> Float) -> Float -> Text -> Text
+truncateTextWith lineW maxW txt
+  | maxW <= 0 = ""
+  | lineW txt <= maxW = txt
+  | otherwise =
+      let ellW = lineW "..."
+       in if maxW <= ellW
+            then fst (takeWidthWith lineW maxW txt)
+            else
+              let (fit, _) = takeWidthWith lineW (maxW - ellW) txt
+               in T.dropWhileEnd (== '.') fit <> "..."
+
+truncateTextIO :: (Text -> IO Float) -> Float -> Text -> IO Text
+truncateTextIO lineW maxW txt
+  | maxW <= 0 = pure ""
+  | otherwise = do
+      w <- lineW txt
+      if w <= maxW
+        then pure txt
+        else do
+          ellW <- lineW "..."
+          if maxW <= ellW
+            then fst <$> takeWidthIO lineW maxW txt
+            else do
+              (fit, _) <- takeWidthIO lineW (maxW - ellW) txt
+              pure (T.dropWhileEnd (== '.') fit <> "...")

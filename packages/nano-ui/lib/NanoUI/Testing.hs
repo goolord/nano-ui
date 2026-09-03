@@ -286,4 +286,4 @@ newCellContext :: IO Context
 newCellContext = do
   ctx <- newContext
   let fm = monospaceMetrics 1
-  pure (withExternalText (withFontMetrics (withHostProfile ctx CellHost) fm) True)
+  pure (withExternalText (withMonoFontMetrics (withFontMetrics (withHostProfile ctx CellHost) fm) fm) True)

@@ -38,7 +38,6 @@ import NanoUI.Font
   ( FontMetrics
   , checkboxBoxSize
   , labelContentInset
-  , pickMonoFont
   , sliderTrackBounds
   , treeChevronRect
   , widgetContentInset
@@ -65,7 +64,8 @@ import NanoUI.Layout.Arena
   )
 import NanoUI.Layout.Solve (scrollBarSlotOf)
 import NanoUI.Style
-  ( Style (..)
+  ( FontVariant (..)
+  , Style (..)
   , Theme (..)
   , styleBg
   , styleBorder
@@ -77,7 +77,7 @@ import NanoUI.Style
   , themeWindow
   )
 import NanoUI.Types (Color (..), ImageId (..), Rect (..), colorA, colorRGBA, clamp01, lerpColor, rectIntersect, rectH, rectW, rectX, rectY)
-import NanoUI.WidgetText (buttonFlagsFromStyle, buttonVisualStyle, selectChevronCenterX, sliderLabelText, tableStripeColor, treeDecodeStyle)
+import NanoUI.WidgetText (buttonFlagsFromStyle, buttonVisualStyle, selectChevronCenterX, sliderLabelText, tableStripeColor, textNodeFontVariant, treeDecodeStyle)
 import NanoUI.Frame.Chrome
   ( fillStyledRect
   , imageIdFromText
@@ -190,10 +190,11 @@ lowerNodeVisible ctx idx nt x y w h rect fm theme terminal da =
       raw <- getText (ctxNodeArena ctx) idx
       unless (T.null raw) $ do
         spans <- collectNodeTextSpans ctx IM.empty idx
+        let fvar = textNodeFontVariant si
+            fm' = if fvar == FontMono then ctxMonoFontMetrics ctx else fm
         forM_ spans $ \(Rect tx ty _ _, line, spanFg, _) ->
-          unless (T.null line) $ do
-            let (fm', shown) = pickMonoFont fm (ctxMonoFontMetrics ctx) line
-            pushText da fm' tx ty shown spanFg
+          unless (T.null line) $
+            pushText da fm' tx ty line spanFg
     NodeSeparator -> do
       let hair = 1
       when (not terminal) $
@@ -227,19 +228,16 @@ lowerNodeVisible ctx idx nt x y w h rect fm theme terminal da =
                   (Rect fx fy _ _, field, ffg, _) = fieldSpan
                   clip = textInputFieldTextClip (ctxHostProfile ctx) geom fm
               unless (T.null lbl) $ do
-                let (lblFm, lblShown) = pickMonoFont fm (ctxMonoFontMetrics ctx) lbl
-                pushText da lblFm lx ly lblShown lfg
+                pushText da fm lx ly lbl lfg
               withClip da clip $ do
                 drawTextInputSelection da ctx idx x y w h style
                 unless (T.null field) $ do
-                  let (fieldFm, fieldShown) = pickMonoFont fm (ctxMonoFontMetrics ctx) field
-                  pushText da fieldFm fx fy fieldShown ffg
+                  pushText da fm fx fy field ffg
                 drawTextInputCaret da ctx idx x y w h style
             [lblSpan] -> do
               let (Rect lx ly _ _, lbl, lfg, _) = lblSpan
               unless (T.null lbl) $ do
-                let (lblFm, lblShown) = pickMonoFont fm (ctxMonoFontMetrics ctx) lbl
-                pushText da lblFm lx ly lblShown lfg
+                pushText da fm lx ly lbl lfg
               drawTextInputCaret da ctx idx x y w h style
             _ -> pure ()
     NodeTextArea
@@ -264,9 +262,8 @@ lowerNodeVisible ctx idx nt x y w h rect fm theme terminal da =
             (rectH fieldRect)
           lbl <- getText (ctxNodeArena ctx) idx
           unless (T.null lbl) $ do
-            let (lblFm, lblShown) = pickMonoFont fm (ctxMonoFontMetrics ctx) lbl
-                lfg = lerpColor (styleFg style) (themeWindow theme) 0.32
-            pushText da lblFm x y lblShown lfg
+            let lfg = lerpColor (styleFg style) (themeWindow theme) 0.32
+            pushText da fm x y lbl lfg
           drawTextAreaContent da ctx idx x y w h style
     NodeSpacer -> pure ()
     NodeModal -> pure ()
@@ -434,8 +431,7 @@ lowerNodeVisible ctx idx nt x y w h rect fm theme terminal da =
       placements <- widgetTextPlacements ctx nt idx x y w h
       forM_ placements $ \(txt, px, py, _, _) ->
         unless (T.null txt) $ do
-          let (fm', shown) = pickMonoFont fm (ctxMonoFontMetrics ctx) txt
-          pushText da fm' px py shown (styleFg style)
+          pushText da fm px py txt (styleFg style)
 
 verticallyCenteredBox :: Float -> Float -> Float -> Float
 verticallyCenteredBox y h box =

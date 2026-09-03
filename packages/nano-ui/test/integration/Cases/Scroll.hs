@@ -125,8 +125,7 @@ runTableScrollTest _ failed = do
   ctx <- newContext
   let inp0 = (withInput 320 120) {inputMousePos = V2 40 70}
       ui = do
-        (readSort, _) <- useTableSort (SortCol 0 SortAsc)
-        tableSort <- readSort
+        (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
         void (table "people" tableScrollCols tableScrollRows tableSort)
   _ <- runFrame ctx inp0 ui
   _ <- runFrame ctx inp0 ui
@@ -170,8 +169,7 @@ runTableFirstColWidthTest _ failed = do
           { tableColSizes = [ColContent, ColStretch]
           }
       ui = do
-        (readSort, _) <- useTableSort (SortCol 0 SortAsc)
-        tableSort <- readSort
+        (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
         void
           ( tableCfg
               cfg
@@ -216,8 +214,7 @@ runTableFitScrollColWidthTest _ failed = do
   ctx <- newPixelContext
   let inp0 = (withInput 280 180) {inputMousePos = V2 40 60}
       ui = do
-        (readSort, _) <- useTableSort (SortCol 0 SortAsc)
-        tableSort <- readSort
+        (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
         void
           ( tableCfg
               defaultTableCfg
@@ -247,8 +244,7 @@ runTableTabWrapRowTest ctx failed = do
           heading "Table"
           muted "Click a header to sort. Drag a header to reorder."
           muted "Drag a header edge to resize. Right-click a header to hide."
-          (readSort, _) <- useTableSort (SortCol 0 SortAsc)
-          tableSort <- readSort
+          (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
           void
             ( tableCfg
                 defaultTableCfg
@@ -281,8 +277,7 @@ runTableFillWidthTest _ failed = do
               ]
           }
       ui = do
-        (readSort, _) <- useTableSort (SortCol 0 SortAsc)
-        tableSort <- readSort
+        (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
         void
           ( tableCfg
               cfg
@@ -313,8 +308,7 @@ runTableContentSlackTest _ failed = do
   ctx <- newContext
   let inp0 = (withInput 500 200) {inputMousePos = V2 200 80}
       ui = do
-        (readSort, _) <- useTableSort (SortCol 0 SortAsc)
-        tableSort <- readSort
+        (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
         void (table "people" tableFillCols tableFillRows tableSort)
   warmup2 ctx inp0 ui
   spans <- collectTextSpans ctx
@@ -329,8 +323,7 @@ runTableCellPadTest :: Context -> IORef Int -> IO ()
 runTableCellPadTest ctx failed = do
   let inp0 = (withInput 500 240) {inputMousePos = V2 200 80}
       ui = do
-        (readSort, _) <- useTableSort (SortCol 0 SortAsc)
-        tableSort <- readSort
+        (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
         void (table "people" tableFillCols tableFillRows tableSort)
   warmup2 ctx inp0 ui
   spans <- collectTextSpans ctx
@@ -476,14 +469,13 @@ runScrollButtonClickTest :: Context -> IORef Int -> IO ()
 runScrollButtonClickTest ctx failed = do
   let inp0 = withInput 240 160
       ui = do
-        (readHit, setHit) <- useText ""
+        (hit, setHit) <- useText ""
         (sid, resp) <- scrollArea (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 80}) $
                          column defaultLayout $ do
                            mapM_ (\_ -> void (label "pad")) [(1 :: Int) .. 12]
                            b <- button "Target"
                            onClick b (setHit "yes")
                            pure b
-        hit <- readHit
         pure (sid, hit, resp)
   (sid, hit0, _) <- warmup2 ctx inp0 ui
   assertEq failed hit0 ""
@@ -504,14 +496,13 @@ runScrollButtonClickSdlTest :: Context -> IORef Int -> IO ()
 runScrollButtonClickSdlTest ctx failed = do
   let inp0 = withInput 640 120
       ui = do
-        (readHit, setHit) <- useText ""
+        (hit, setHit) <- useText ""
         (sid, resp) <- scrollArea (tight (grow defaultLayout)) $
                          column defaultLayout $ do
                            mapM_ (\_ -> void (label "pad")) [(1 :: Int) .. 12]
                            b <- button "Target"
                            onClick b (setHit "yes")
                            pure b
-        hit <- readHit
         pure (sid, hit, resp)
   (sid, hit0, _) <- warmup2 ctx inp0 ui
   assertEq failed hit0 ""
@@ -581,14 +572,13 @@ runScrolledOutClickImmunityTest :: Context -> IORef Int -> IO ()
 runScrolledOutClickImmunityTest ctx failed = do
   let inp0 = withInput 240 160
       ui = do
-        (readHit, setHit) <- useText ""
+        (hit, setHit) <- useText ""
         (sid, b) <- scrollArea (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 8}) $
                       column defaultLayout $ do
                         mapM_ (\_ -> void (label "pad")) [(1 :: Int) .. 40]
                         btn <- button "Target"
                         onClick btn (setHit "yes")
                         pure btn
-        hit <- readHit
         pure (sid, b, hit)
   (sid, b, hit0) <- warmup2 ctx inp0 ui
   assertEq failed hit0 ""
@@ -711,8 +701,7 @@ runTable2DScrollSyncTest _ failed = do
   ctx <- newContext
   let inp0 = (withInput 360 160) {inputMousePos = V2 60 80}
       ui = do
-        (readSort, _) <- useTableSort (SortCol 0 SortAsc)
-        tableSort <- readSort
+        (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
         void (table "people" tableScrollCols tableScrollRows tableSort)
   warmup2 ctx inp0 ui
   spans0 <- collectTextSpans ctx

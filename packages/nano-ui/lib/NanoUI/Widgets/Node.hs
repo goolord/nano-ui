@@ -14,6 +14,7 @@ module NanoUI.Widgets.Node
   , setChanged
   , setHovered
   , setPressed
+  , setSubmitted
   , setRightClicked
   , setRightPressed
   , parentIdx
@@ -56,7 +57,7 @@ import NanoUI.Layout.Arena
   , setWidgetId
   )
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO)
-import NanoUI.WidgetText (packButtonStyle)
+import NanoUI.WidgetText (packButtonStyle, packTextNodeStyle)
 import NanoUI.Style
   ( AlignX (..)
   , AlignY (..)
@@ -80,6 +81,8 @@ class Responding r where
   respPressed :: r -> Bool
   respClicked :: r -> Bool
   respChanged :: r -> Bool
+  respSubmitted :: r -> Bool
+  respSubmitted _ = False
   respRightPressed :: r -> Bool
   respRightPressed _ = False
   respRightClicked :: r -> Bool
@@ -101,6 +104,7 @@ data Response = Response
   , rawRespPressed :: !Bool
   , rawRespClicked :: !Bool
   , rawRespChanged :: !Bool
+  , rawRespSubmitted :: !Bool
   , rawRespRightPressed :: !Bool
   , rawRespRightClicked :: !Bool
   }
@@ -113,6 +117,7 @@ instance Responding Response where
   respPressed = rawRespPressed
   respClicked = rawRespClicked
   respChanged = rawRespChanged
+  respSubmitted = rawRespSubmitted
   respRightPressed = rawRespRightPressed
   respRightClicked = rawRespRightClicked
 
@@ -131,6 +136,7 @@ instance Semigroup Response where
       , rawRespPressed = rawRespPressed a || rawRespPressed b
       , rawRespClicked = rawRespClicked a || rawRespClicked b
       , rawRespChanged = rawRespChanged a || rawRespChanged b
+      , rawRespSubmitted = rawRespSubmitted a || rawRespSubmitted b
       , rawRespRightPressed = rawRespRightPressed a || rawRespRightPressed b
       , rawRespRightClicked = rawRespRightClicked a || rawRespRightClicked b
       }
@@ -149,6 +155,9 @@ setClicked c r = r {rawRespClicked = c}
 
 setChanged :: Bool -> Response -> Response
 setChanged c r = r {rawRespChanged = c}
+
+setSubmitted :: Bool -> Response -> Response
+setSubmitted s r = r {rawRespSubmitted = s}
 
 setHovered :: Bool -> Response -> Response
 setHovered h r = r {rawRespHovered = h}
@@ -171,6 +180,7 @@ mkResponse wid rect hovered pressed clicked changed =
     , rawRespPressed = pressed
     , rawRespClicked = clicked
     , rawRespChanged = changed
+    , rawRespSubmitted = False
     , rawRespRightPressed = False
     , rawRespRightClicked = False
     }
@@ -289,10 +299,11 @@ addWidgetStyled wid nt txt value layout styleIdx mResp = do
     idx <- addNodeFromLayout (ctxNodeArena ctx) nt parent layout
     setNodeText (ctxNodeArena ctx) idx txt
     setNodeValue (ctxNodeArena ctx) idx value
-    setStyleIdx
-      (ctxNodeArena ctx)
-      idx
-      (if nt == NodeButton then packButtonStyle styleIdx txt else styleIdx)
+    let effectiveStyle
+          | nt == NodeButton = packButtonStyle styleIdx txt
+          | nt == NodeText = packTextNodeStyle (layoutFontVariant layout) styleIdx
+          | otherwise = styleIdx
+    setStyleIdx (ctxNodeArena ctx) idx effectiveStyle
     setWidgetId (ctxNodeArena ctx) idx wid
     case mResp of
       Just resp -> pure resp
@@ -338,6 +349,7 @@ resolveInteraction ctx inp wid = do
       , rawRespPressed = pressed
       , rawRespClicked = clicked
       , rawRespChanged = False
+      , rawRespSubmitted = False
       , rawRespRightPressed = rightPressed
       , rawRespRightClicked = rightClicked
       }

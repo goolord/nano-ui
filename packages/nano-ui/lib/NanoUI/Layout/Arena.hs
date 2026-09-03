@@ -35,6 +35,7 @@ module NanoUI.Layout.Arena
   , getAspect
   , setAspect
   , getWrap
+  , parentIsNonWrapRow
   , getAlignX
   , getAlignY
   , getRect
@@ -638,6 +639,17 @@ setAspect na idx v = arenaArrays na >>= \a -> writePrimArray (naArrAspect a) idx
 {-# INLINE getWrap #-}
 getWrap :: NodeArena -> NodeIdx -> IO Bool
 getWrap na idx = arenaArrays na >>= \a -> readPrimArray (naArrWrap a) idx >>= pure . (/= 0)
+
+{-# INLINE parentIsNonWrapRow #-}
+parentIsNonWrapRow :: NodeArena -> NodeIdx -> IO Bool
+parentIsNonWrapRow na idx = do
+  p <- getParent na idx
+  if p < 0
+    then pure False
+    else do
+      dir <- getDirection na p
+      w <- getWrap na p
+      pure (dir == DirRow && not w)
 
 {-# INLINE getAlignX #-}
 getAlignX :: NodeArena -> NodeIdx -> IO AlignX

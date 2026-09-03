@@ -205,10 +205,10 @@ withTooltip mainChild tipChild = do
 tooltipWith ::
   (Ui :> es, Responding r) =>
   PopupPlacement ->
-  Text ->
   r ->
+  Text ->
   Eff es ()
-tooltipWith placement txt target = do
+tooltipWith placement target txt = do
   let hovered = respHovered target
       rect = respRect target
       cfg = PopupConfig
@@ -222,7 +222,7 @@ tooltipWith placement txt target = do
 -- | Standard text tooltip widget on hover.
 tooltip ::
   (Ui :> es, Responding r) =>
-  Text ->
   r ->
+  Text ->
   Eff es ()
 tooltip = tooltipWith PlacementBelow

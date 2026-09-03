@@ -31,7 +31,7 @@ import NanoUI.Context
   , markEscapeConsumed
   )
 import NanoUI.Draw (pushRect, pushRoundedRect, pushText)
-import NanoUI.Font (FontMetrics, centeredTextY, hasMonoFontMarker, layoutLineHeight, pickMonoFont, stripMonoFontMarker, textIndexAtX, widgetContentInset)
+import NanoUI.Font (FontMetrics, centeredTextY, layoutLineHeight, textIndexAtX, widgetContentInset)
 import NanoUI.Frame.Chrome
   ( fillStyledRect
   , overlayMenuStyle
@@ -72,8 +72,8 @@ textCharClass c
 
 textCharAtX :: Context -> Text -> Float -> Float -> IO Int
 textCharAtX ctx text startX mouseX =
-  let (fm', shown) = pickMonoFont (ctxFontMetrics ctx) (ctxMonoFontMetrics ctx) text
-   in pure (textIndexAtX (ctxHostProfile ctx) fm' shown (max 0 (mouseX - startX)))
+  let fm = ctxFontMetrics ctx
+   in pure (textIndexAtX (ctxHostProfile ctx) fm text (max 0 (mouseX - startX)))
 
 textWordBounds :: Text -> Int -> (Int, Int)
 textWordBounds text raw
@@ -363,10 +363,7 @@ drawTextEditMenuOverlays ctx inp = do
                       tx = rectX content + textInputMenuItemPadX + ix
                       ty = centeredTextY (ctxHostProfile ctx) fm (rectY content + relY) h th
                       fg = textEditMenuItemFg menuStyle enabled
-                      (fm', shown) = if hasMonoFontMarker lbl
-                                       then (ctxMonoFontMetrics ctx, stripMonoFontMarker lbl)
-                                       else (fm, lbl)
-                  pushText da fm' tx ty shown fg
+                  pushText da fm tx ty lbl fg
 
 collectTextEditMenuSpans :: Context -> Input -> IO [(Rect, T.Text, Color, Color, Rect)]
 collectTextEditMenuSpans ctx inp = do

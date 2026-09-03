@@ -68,18 +68,12 @@ punch = colorRGBA 232 224 208 255
 
 animUi :: NanoUI ()
 animUi = do
-  (readExposed, setExposed) <- useFlag False
-  (readRewinding, setRewinding) <- useFlag False
-  (readLamp, setLamp) <- useFlag False
-  (readBellows, setBellows) <- useFlag False
-  (readTossed, setTossed) <- useFlag False
-  (readStiffSpring, setStiffSpring) <- useFlag False
-  exposed <- readExposed
-  rewinding <- readRewinding
-  lampOn <- readLamp
-  bellowsOpen <- readBellows
-  tossed <- readTossed
-  stiffSpring <- readStiffSpring
+  (exposed, setExposed) <- useFlag False
+  (rewinding, setRewinding) <- useFlag False
+  (lampOn, setLamp) <- useFlag False
+  (bellowsOpen, setBellows) <- useFlag False
+  (tossed, setTossed) <- useFlag False
+  (stiffSpring, setStiffSpring) <- useFlag False
   tossT <-
     withKey ("toss" :: String)
       ( animateToSpring
@@ -113,10 +107,10 @@ animUi = do
       row (tight . gap 8 . alignMid . fillW $ defaultLayout) $ do
         clickButton "Expose" (setExposed True >> setRewinding False)
         clickButton "Rewind" (setExposed False >> setRewinding True)
-        clickButton (if lampOn then "Lamp off" else "Lamp on") (readLamp >>= \l -> setLamp (not l))
+        clickButton (if lampOn then "Lamp off" else "Lamp on") (setLamp (not lampOn))
         flex
-        clickButton (if tossed then "Catch" else "Toss") (readTossed >>= \t -> setTossed (not t))
-        clickButton (if stiffSpring then "Stiff" else "Bouncy") (readStiffSpring >>= \s -> setStiffSpring (not s))
+        clickButton (if tossed then "Catch" else "Toss") (setTossed (not tossed))
+        clickButton (if stiffSpring then "Stiff" else "Bouncy") (setStiffSpring (not stiffSpring))
       throwSec <- do
         (_, throwRaw) <- slider "Throw" 35 140 75
         pure (throwRaw / 100)
@@ -136,7 +130,7 @@ animUi = do
         row (tight . gap 10 . alignMid . fillW $ defaultLayout) $ do
           clickButton
             (if bellowsOpen then "Collapse" else "Extend")
-            (readBellows >>= \b -> setBellows (not b))
+            (setBellows (not bellowsOpen))
           flex
           let iris = 12 + 22 * bellowsT
               irisCol = lerpColor film (lerpColor paper ruby 0.18) bellowsT

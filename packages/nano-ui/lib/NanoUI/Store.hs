@@ -34,6 +34,7 @@ module NanoUI.Store
   )
 where
 
+import Data.Dynamic (Dynamic)
 import Data.IntMap.Strict (IntMap)
 import Data.IntSet (IntSet)
 import Data.Text (Text)
@@ -50,8 +51,31 @@ data WidgetStore = WidgetStore
   , storeIntSet :: !(IntMap IntSet)
   , storeFloatList :: !(IntMap [Float])
   , storeIntList :: !(IntMap [Int])
+  , storeDyn :: !(IntMap Dynamic)
   }
-  deriving (Eq, Show)
+
+instance Eq WidgetStore where
+  a == b =
+    storeInt a == storeInt b
+      && storeFloat a == storeFloat b
+      && storePoint a == storePoint b
+      && storeText a == storeText b
+      && storeIntSet a == storeIntSet b
+      && storeFloatList a == storeFloatList b
+      && storeIntList a == storeIntList b
+
+instance Show WidgetStore where
+  show st =
+    "WidgetStore { "
+      ++ "storeInt = " ++ show (storeInt st)
+      ++ ", storeFloat = " ++ show (storeFloat st)
+      ++ ", storePoint = " ++ show (storePoint st)
+      ++ ", storeText = " ++ show (storeText st)
+      ++ ", storeIntSet = " ++ show (storeIntSet st)
+      ++ ", storeFloatList = " ++ show (storeFloatList st)
+      ++ ", storeIntList = " ++ show (storeIntList st)
+      ++ ", storeDynCount = " ++ show (IM.size (storeDyn st))
+      ++ " }"
 
 emptyWidgetStore :: WidgetStore
 emptyWidgetStore =
@@ -63,6 +87,7 @@ emptyWidgetStore =
     , storeIntSet = IM.empty
     , storeFloatList = IM.empty
     , storeIntList = IM.empty
+    , storeDyn = IM.empty
     }
 
 -- useText/useFlag bump this so Frame can re-run UI without watching every map.

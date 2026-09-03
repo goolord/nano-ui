@@ -1,7 +1,11 @@
 {-# LANGUAGE DataKinds #-}
 
 module NanoUI.Frame
-  ( runFrame
+  ( FrameResult (..)
+  , FrameReduceResult (..)
+  , runFrameResult
+  , runFrameReduceResult
+  , runFrame
   , runFrameEff
   , runFrameReduce
   , runFrameReduceEff
@@ -122,6 +126,38 @@ import NanoUI.Layout.Solve (placeModals, placePopups, placeWindows, solveLayout)
 import NanoUI.Monad (NanoUI, Ui, runUi)
 import NanoUI.Store (mirrorStoresChanged)
 import NanoUI.Types (Size (..))
+
+data FrameResult a = FrameResult
+  { frameValue :: !a
+  , frameMessages :: ![FrameMsg]
+  , frameDrawData :: !DrawData
+  , frameNeedsRedraw :: !Bool
+  }
+
+data FrameReduceResult a model msg = FrameReduceResult
+  { frValue :: !a
+  , frModel :: !model
+  , frMessages :: ![msg]
+  , frDrawData :: !DrawData
+  , frNeedsRedraw :: !Bool
+  }
+
+runFrameResult :: Context -> Input -> NanoUI a -> IO (FrameResult a)
+runFrameResult ctx inp ui = do
+  (a, msgs, draw, dirty) <- runFrame ctx inp ui
+  pure (FrameResult a msgs draw dirty)
+
+runFrameReduceResult ::
+  (Typeable msg, Eq model) =>
+  (msg -> model -> model)
+  -> Context
+  -> Input
+  -> model
+  -> (model -> NanoUI a)
+  -> IO (FrameReduceResult a model msg)
+runFrameReduceResult update ctx inp model view = do
+  (a, model', typed, draw, dirty) <- runFrameReduce update ctx inp model view
+  pure (FrameReduceResult a model' typed draw dirty)
 
 runFrame :: Context -> Input -> NanoUI a -> IO (a, [FrameMsg], DrawData, Bool)
 runFrame = runFrameEff runEff
@@ -301,6 +337,7 @@ solvePlaceWindows ctx w h = do
     (ctxNodeArena ctx)
     (ctxHostProfile ctx)
     (ctxFontMetrics ctx)
+    (ctxMonoFontMetrics ctx)
     (ctxMeasureText ctx)
     w
     h

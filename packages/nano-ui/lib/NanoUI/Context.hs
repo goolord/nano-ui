@@ -182,9 +182,9 @@ import NanoUI.Atlas qualified as Atlas
 import Data.Vector (Vector)
 import Data.Vector qualified as V
 import NanoUI.Draw (DrawArena, DrawingBuild, DrawOp, newDrawArena, shiftDrawOp)
-import NanoUI.Font (FontMetrics, hasMonoFontMarker, measureText, monospaceMetrics, stripWidgetMarkers)
+import NanoUI.Font (FontMetrics, measureText, monospaceMetrics)
 import NanoUI.Frame.SpanArena (SpanArena, newSpanArena)
-import NanoUI.Types (HostProfile (..))
+import NanoUI.Types (HostProfile (..), isCellHost)
 import NanoUI.Icons (IconSet, Icons, asciiIcons, iconsFor)
 import NanoUI.Frame.Scroll.Geometry
   ( ScrollConfig (..)
@@ -252,7 +252,7 @@ reduceMessages update model = foldl' (flip update) model . decodeMessages
 reduceUpdates :: Typeable model => model -> [FrameMsg] -> model
 reduceUpdates = reduceMessages ($)
 
-type MeasureCacheKey = (Text, Bool, Float)
+type MeasureCacheKey = (Text, Float)
 
 -- | Explicit damage invalidation request queued during frame evaluation.
 data DamageRequest
@@ -775,21 +775,16 @@ atlasSnapshot ctx = Atlas.atlasSnapshot (ctxImageAtlas ctx)
 
 withFontMetrics :: Context -> FontMetrics -> Context
 withFontMetrics ctx fm =
-  let mono = ctxMonoFontMetrics ctx
-   in ctx
-        { ctxFontMetrics = fm
-        , ctxMeasureText = \txt ->
-            pure (measureText (ctxHostProfile ctx) (if hasMonoFontMarker txt then mono else fm) (stripWidgetMarkers txt))
-        }
+  ctx
+    { ctxFontMetrics = fm
+    , ctxMonoFontMetrics = if isCellHost (ctxHostProfile ctx) then fm else ctxMonoFontMetrics ctx
+    , ctxMeasureText = \txt ->
+        pure (measureText (ctxHostProfile ctx) fm txt)
+    }
 
 withMonoFontMetrics :: Context -> FontMetrics -> Context
 withMonoFontMetrics ctx mono =
-  let fm = ctxFontMetrics ctx
-   in ctx
-        { ctxMonoFontMetrics = mono
-        , ctxMeasureText = \txt ->
-            pure (measureText (ctxHostProfile ctx) (if hasMonoFontMarker txt then mono else fm) (stripWidgetMarkers txt))
-        }
+  ctx {ctxMonoFontMetrics = mono}
 
 withMeasureText :: Context -> (Text -> IO (Float, Float)) -> Context
 withMeasureText ctx fn = ctx {ctxMeasureText = fn}
@@ -801,7 +796,7 @@ cacheMeasureText ::
   Text ->
   IO (Float, Float)
 cacheMeasureText ref scale base txt = do
-  let key = (stripWidgetMarkers txt, hasMonoFontMarker txt, scale)
+  let key = (txt, scale)
   m <- readIORef ref
   case HashMap.lookup key m of
     Just sz -> pure sz
@@ -959,7 +954,7 @@ newContext = do
     , ctxIdContext
     , ctxFontMetrics = fm0
     , ctxMonoFontMetrics = fm0
-    , ctxMeasureText = \txt -> pure (measureText PixelHost fm0 (stripWidgetMarkers txt))
+    , ctxMeasureText = \txt -> pure (measureText PixelHost fm0 txt)
     , ctxMeasureCache = Nothing
     , ctxExternalText = False
     , ctxTheme = defaultTheme

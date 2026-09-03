@@ -60,6 +60,8 @@ library
         NanoUI
         NanoUI.Debug
         NanoUI.Input
+        NanoUI.Layout
+        NanoUI.State
         NanoUI.Testing
         NanoUI.Testing.Assert
         NanoUI.Testing.Harness

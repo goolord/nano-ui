@@ -17,6 +17,7 @@ module Cases.Window
   , runSiblingWindowScrollTest
   , runWindowScrollOnlyDamageTest
   , runScrolledDebugToggleTest
+  , runHeadingMonoTruncateTest
   ) where
 
 import Control.Monad (replicateM, void, when)
@@ -375,8 +376,7 @@ runScrolledDebugToggleTest ctx failed = do
   let inp0 = withInput 640 400
       title = T.pack "Debug"
       ui = do
-        (readOpen, setOpen) <- useFlag False
-        open <- readOpen
+        (open, setOpen) <- useFlag False
         (_, dbgBtn) <- scrollArea (tight (grow defaultLayout)) $ do
           b <- button "Debug"
           onClick b (setOpen (not open))
@@ -503,5 +503,27 @@ runSeparatorSpanTest ctx failed = do
   let Rect _ _ w h = respRect resp
   assert failed (w >= 100)
   assert failed (h <= 2)
+
+runHeadingMonoTruncateTest :: Context -> IORef Int -> IO ()
+runHeadingMonoTruncateTest ctx failed = do
+  let inp = withInput 640 400
+      longPath = T.pack "C:\\Users\\zach\\AppData\\Local\\Microsoft\\Windows\\Fonts\\JetBrainsMono-Regular.ttf"
+      ui = window True "Debug" $ do
+        heading "Draw"
+        _ <- label "NormalLabel"
+        kvMono "font" longPath
+  _ <- warmup2 ctx inp ui
+  spans <- collectOverlayTextSpans ctx inp
+  let headingSpans = [r | (r, t, _, _, _) <- spans, t == "Draw"]
+      labelSpans = [r | (r, t, _, _, _) <- spans, t == "NormalLabel"]
+      fontSpans = [(r, t) | (r, t, _, _, _) <- spans, "JetBrainsMono" `T.isInfixOf` t || "..." `T.isInfixOf` t]
+  case (headingSpans, labelSpans) of
+    (Rect hx _ _ _ : _, Rect lx _ _ _ : _) -> do
+      assert failed (abs (hx - lx) < 0.1)
+    _ -> assert failed False
+  case fontSpans of
+    [(_, t)] -> do
+      assert failed ("..." `T.isSuffixOf` t)
+    _ -> assert failed False
 
 

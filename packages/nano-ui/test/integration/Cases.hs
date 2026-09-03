@@ -261,7 +261,7 @@ runDrawingTest ctx failed = do
 runOverlayTest :: Context -> IORef Int -> IO ()
 runOverlayTest ctx failed = do
   let inp0 = withInput 200 80
-      ui = column defaultLayout (button "Hover" >>= tooltip "tip")
+      ui = column defaultLayout (button "Hover" >>= \btn -> tooltip btn "tip")
   _ <- runFrame ctx inp0 ui
   (_, _, draw, _) <- runFrame ctx (inp0 {inputMousePos = V2 10 10}) ui
   assert failed (any ((== LayerOverlay) . cmdLayer) (drawCmdElems draw))
@@ -479,7 +479,7 @@ runTextWrapAssignedTest _ failed = do
 runTextMultilineTest :: Context -> IORef Int -> IO ()
 runTextMultilineTest _ failed = do
   ctx <- newCellContext
-  _ <- runFrame ctx (withInput 40 10) (labelEx (tight defaultLayout) (monoFontMarker <> "aa\nbb\ncc"))
+  _ <- runFrame ctx (withInput 40 10) (labelEx (tight . fontMono $ defaultLayout) "aa\nbb\ncc")
   spans <- collectTextSpans ctx
   let rows = sort [(round y :: Int, txt) | (Rect _ y _ _, txt, _, _, _) <- spans]
   assertEq failed (map snd rows) ["aa", "bb", "cc"]
@@ -662,12 +662,10 @@ runUseFlagClickTest :: Context -> IORef Int -> IO ()
 runUseFlagClickTest ctx failed = do
   let inp0 = withInput 240 120
       ui = do
-        (readOpen, setOpen) <- useFlag False
-        (readNote, setNote) <- useText ""
+        (open, setOpen) <- useFlag False
+        (note, setNote) <- useText ""
         resp <- button "Go"
         onClick resp (setOpen True >> setNote "hi")
-        open <- readOpen
-        note <- readNote
         pure (open, note, resp)
   (open0, note0, resp) <- warmup2 ctx inp0 ui
   assert failed (not open0 && note0 == "")

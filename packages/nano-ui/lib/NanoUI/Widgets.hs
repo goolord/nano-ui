@@ -57,13 +57,22 @@ module NanoUI.Widgets
   , label_
   , onClick
   , clickButton
+  , useState
   , useFlag
   , useText
   , useToggle
   , heading
   , muted
+  , mono
+  , styledLabel
   , kv
+  , kvMono
   , kvBlock
+  , TextInputConfig (..)
+  , defaultTextInputConfig
+  , textInputConfigured
+  , textInputWithPlaceholder
+  , textInputPassword
   , card
   , toolbar
   , sep
@@ -109,6 +118,7 @@ module NanoUI.Widgets
   , table
   , tableEx
   , tableCfg
+  , simpleTable
   , useTableSort
   , tableRespChanged
   , tableRespClicked
@@ -160,19 +170,16 @@ import NanoUI.Widgets.Menu
   , menuSeparator
   , menuHeader
   )
-import NanoUI.Widgets.Node (RightClickable (..), onRightClick)
+import NanoUI.Widgets.Node (RightClickable (..), onRightClick, setSubmitted)
 import NanoUI.Font
   ( fmLineHeight
-  , headingFontMarker
-  , monoFontMarker
-  , mutedFontMarker
   , sliderTrackBounds
   )
 import NanoUI.Frame.Hit (scrollHitRect)
 import NanoUI.Types (isCellHost)
 import NanoUI.Icons (checkboxMark)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
-import NanoUI.Input (inputMouseDown, inputMousePos, inputMousePressed)
+import NanoUI.Input (Key (..), inputKeys, inputMouseDown, inputMousePos, inputMousePressed)
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
 import NanoUI.Store
@@ -187,11 +194,15 @@ import NanoUI.Store
   , slotTextAreaViewport
   )
 import NanoUI.Style
-  ( Layout (..)
+  ( FontVariant (..)
+  , Layout (..)
   , alignEnd
   , alignMid
   , defaultLayout
   , fillW
+  , fontHeading
+  , fontMono
+  , fontMuted
   , gap
   , minW
   , padXY
@@ -233,6 +244,7 @@ import NanoUI.Widgets.Animate
   , animateToEaseDelay
   , animateToSpring
   , animateToSpringA
+  , useState
   , useFlag
   , useText
   , useToggle
@@ -306,6 +318,7 @@ import NanoUI.Widgets.Table
   , table
   , tableCfg
   , tableEx
+  , simpleTable
   , tableRespChanged
   , tableRespClicked
   , tableHiddenIndices
@@ -343,10 +356,16 @@ box layout col = do
     )
 
 heading :: Ui :> es => Text -> Eff es ()
-heading txt = void (labelEx (tight . padXY 0 3 $ defaultLayout) (headingFontMarker <> txt))
+heading txt = void (labelEx (tight . padXY 0 3 . fontHeading $ defaultLayout) txt)
 
 muted :: Ui :> es => Text -> Eff es ()
-muted txt = void (labelEx (fillW defaultLayout) (mutedFontMarker <> txt))
+muted txt = void (labelEx (fillW . fontMuted $ defaultLayout) txt)
+
+mono :: Ui :> es => Text -> Eff es ()
+mono txt = void (labelEx (fontMono defaultLayout) txt)
+
+styledLabel :: Ui :> es => FontVariant -> Layout -> Text -> Eff es Response
+styledLabel fvar l txt = labelEx (l {layoutFontVariant = fvar}) txt
 
 kv :: Ui :> es => Text -> Text -> Eff es ()
 kv k v = do
@@ -363,12 +382,27 @@ kv k v = do
       void (labelEx (keyLayout defaultLayout) k)
       void (labelEx (tight . fillW . alignEnd $ defaultLayout) (T.stripEnd v))
 
+kvMono :: Ui :> es => Text -> Text -> Eff es ()
+kvMono k v = do
+  ctx <- askContext
+  let
+    host = ctxHostProfile ctx
+    terminal = isCellHost host
+    rowLayout =
+      tight . gap (if terminal then 1 else 12) . alignMid . fillW $ defaultLayout
+    keyLayout =
+      if terminal then tight else tight . minW 88
+  void $
+    row rowLayout $ do
+      void (labelEx (keyLayout defaultLayout) k)
+      void (labelEx (tight . fillW . alignEnd . fontMono $ defaultLayout) (T.stripEnd v))
+
 kvBlock :: Ui :> es => [(Text, Text)] -> Eff es ()
 kvBlock rows =
   void $
     labelEx
-      (tight . gap 0 $ defaultLayout)
-      (monoFontMarker <> T.unlines [k <> ": " <> v | (k, v) <- rows])
+      (tight . gap 0 . fontMono $ defaultLayout)
+      (T.unlines [k <> ": " <> v | (k, v) <- rows])
 
 card :: Ui :> es => Eff es a -> Eff es a
 card = panel (minW 300 . padXY 12 10 . gap 8 . fillW $ defaultLayout)
@@ -475,8 +509,34 @@ sliderEx layout lbl minV maxV initial = do
     uiIO $ setStore ctx (store {storeFloat = IM.insert key finalVal (storeFloat store)})
   pure (setChanged (finalVal /= current) resp, finalVal)
 
+data TextInputConfig = TextInputConfig
+  { ticPlaceholder :: !Text
+  , ticPassword :: !Bool
+  , ticLayout :: !Layout
+  }
+  deriving (Eq, Show)
+
+defaultTextInputConfig :: TextInputConfig
+defaultTextInputConfig =
+  TextInputConfig
+    { ticPlaceholder = ""
+    , ticPassword = False
+    , ticLayout = textInputLayout
+    }
+
 textInput :: Ui :> es => Text -> Text -> Eff es (Response, Text)
-textInput lbl initial = do
+textInput = textInputConfigured defaultTextInputConfig
+
+textInputWithPlaceholder :: Ui :> es => Text -> Text -> Text -> Eff es (Response, Text)
+textInputWithPlaceholder placeholder lbl initial =
+  textInputConfigured (defaultTextInputConfig {ticPlaceholder = placeholder}) lbl initial
+
+textInputPassword :: Ui :> es => Text -> Text -> Eff es (Response, Text)
+textInputPassword lbl initial =
+  textInputConfigured (defaultTextInputConfig {ticPassword = True}) lbl initial
+
+textInputConfigured :: Ui :> es => TextInputConfig -> Text -> Text -> Eff es (Response, Text)
+textInputConfigured cfg lbl initial = do
   wid <- nextId
   ctx <- askContext
   uiIO $ registerFocusable ctx wid
@@ -514,9 +574,10 @@ textInput lbl initial = do
                 IM.insert (slotKey slotAnchor key) newAnchor (storeInt store)
           }
       )
+  let submitted = isFocus && KeyEnter `elem` inputKeys inp
   resp <-
-    addWidget wid NodeTextInput lbl 0 textInputLayout
-  pure (setChanged (newText /= current) resp, newText)
+    addWidget wid NodeTextInput lbl 0 (ticLayout cfg)
+  pure (setSubmitted submitted (setChanged (newText /= current) resp), newText)
 
 textArea :: Ui :> es => Text -> Text -> Eff es (Response, Text)
 textArea lbl initial = do

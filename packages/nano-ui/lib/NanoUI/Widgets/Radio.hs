@@ -8,12 +8,11 @@ import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import qualified Data.Text as T
 import NanoUI.Context (Context (..), intKey)
-import NanoUI.Font (mutedFontMarker)
 import NanoUI.Types (isCellHost)
 import NanoUI.Icons (radioMark)
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, nextId, withKey)
-import NanoUI.Style (defaultLayout, fillW, gap, tight)
+import NanoUI.Style (defaultLayout, fillW, fontMuted, gap, tight)
 import NanoUI.Widgets.Behavior (ensureInt, useSelection)
 import NanoUI.Widgets.Combinators (selectableItem)
 import NanoUI.Widgets.Layout (column, labelEx)
@@ -29,7 +28,7 @@ radioFieldset legend options initial =
     sel <- ensureInt (intKey gid) c0
     column (tight . gap 4 . fillW $ defaultLayout) $ do
       tagContainer gid
-      unless (T.null legend) $ void (labelEx (tight . fillW $ defaultLayout) (mutedFontMarker <> legend))
+      unless (T.null legend) $ void (labelEx (tight . fillW . fontMuted $ defaultLayout) legend)
       rs <- zipWithM (\i l -> withKey i (bit ctx sel i l)) [0 ..] opts
       pure (mconcat (map fst rs), fromMaybe sel (listToMaybe [i | (r, i) <- rs, rawRespClicked r]))
 

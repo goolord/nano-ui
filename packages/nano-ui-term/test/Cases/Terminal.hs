@@ -148,10 +148,9 @@ runTerminalModalOpenRedrawTest _ failed = do
   ctx <- newAdaptiveTerminalContext
   let inp0 = withInputOff 80 24
       ui = do
-        (readOpen, setOpen) <- useFlag False
+        (open, setOpen) <- useFlag False
         resp <- button "Open"
         onClick resp (setOpen True)
-        open <- readOpen
         _ <- modal open "About" (label "body")
         pure resp
   _ <- runFrame ctx inp0 ui

@@ -114,20 +114,18 @@ demoAccent = colorRGBA 204 102 102 255
 
 demoUi :: NanoUI ()
 demoUi = do
-  (readClick, setClick) <- useText ""
-  (readAbout, setAbout) <- useFlag False
-  (readDebug, setDebug) <- useFlag False
-  (readChecked, setChecked) <- useFlag False
-  (readVol, setVol) <- useText "50"
-  (readQuality, setQuality) <- useText "Medium"
-  (readAccent, setAccent) <- useText (colorPickerToHex demoAccent)
-  (readTheme, setTheme) <- useText (T.pack (show Dark))
-  (readName, setName) <- useText ""
-  (readNotes, setNotes) <- useText ""
-  (readTreeSel, setTreeSel) <- useText "0"
-  (readTableSort, setTableSort) <- useTableSort (SortCol 0 SortAsc)
-  debugOpen <- readDebug
-  aboutOpen <- readAbout
+  (click, setClick) <- useText ""
+  (aboutOpen, setAbout) <- useFlag False
+  (debugOpen, setDebug) <- useFlag False
+  (checked, setChecked) <- useFlag False
+  (vol, setVol) <- useText "50"
+  (quality, setQuality) <- useText "Medium"
+  (accentHex, setAccent) <- useText (colorPickerToHex demoAccent)
+  (themeName, setTheme) <- useText (T.pack (show Dark))
+  (name, setName) <- useText ""
+  (notes, setNotes) <- useText ""
+  (treeSel, setTreeSel) <- useText "0"
+  (tableSortVal, setTableSort) <- useTableSort (SortCol 0 SortAsc)
   scroll (tight (grow defaultLayout)) $
     column (padAll 8 . gap 8 . fillW $ defaultLayout) $ do
       panel (padXY 14 10 . gap 8 . fillW $ defaultLayout) $
@@ -144,15 +142,6 @@ demoUi = do
         column (tight . gap 8 . fillW $ defaultLayout) $ do
           card $ do
             heading "State"
-            checked <- readChecked
-            vol <- readVol
-            quality <- readQuality
-            accentHex <- readAccent
-            theme <- readTheme
-            name <- readName
-            notes <- readNotes
-            treeSel <- readTreeSel
-            tableSort <- readTableSort
             let accent = fromMaybe demoAccent (colorPickerFromHex accentHex)
             kv "Feature" (onOff checked)
             kv "Volume" vol
@@ -160,13 +149,12 @@ demoUi = do
             row (tight . gap 8 . alignMid . fillW $ defaultLayout) $ do
               box (fixedWH 20 20 defaultLayout) accent
               kv "Accent" accentHex
-            kv "Theme" theme
+            kv "Theme" themeName
             kv "Name" (orDash name)
             kv "Notes" (orDash notes)
             kv "Tree" treeSel
-            kv "Table sort" (tableColumnLabel tableSort)
-            kv "Table order" (tableSortDirText tableSort)
-            click <- readClick
+            kv "Table sort" (tableColumnLabel tableSortVal)
+            kv "Table order" (tableSortDirText tableSortVal)
             kv "Clicked" (orDash click)
           card $ do
             heading "Gallery"
@@ -181,26 +169,26 @@ demoUi = do
           boundedTabs Controls (T.pack . show) $ \case
             Controls -> do
               heading "Controls"
-              (_, checked) <- checkbox "Feature" False
-              setChecked checked
-              (_, vol) <- slider "Volume" 0 100 50
-              setVol (T.pack (show (round vol :: Int)))
+              (_, cVal) <- checkbox "Feature" False
+              setChecked cVal
+              (_, vVal) <- slider "Volume" 0 100 50
+              setVol (T.pack (show (round vVal :: Int)))
               let qualities = ["Low", "Medium", "High"]
               (_, qualityIdx) <- select "Quality" qualities 1
               setQuality (qualities !! qualityIdx)
-              (_, accent) <- colorPicker "Accent" demoAccent
-              setAccent (colorPickerToHex accent)
-              (_, theme) <- boundedRadioFieldset "Theme" Dark (T.pack . show)
-              setTheme (T.pack (show theme))
-              (_, name) <- textInput "Name" ""
-              setName name
-              (_, notes) <- textArea "Notes" "Edit me.\nSecond line."
-              setNotes notes
+              (_, aVal) <- colorPicker "Accent" demoAccent
+              setAccent (colorPickerToHex aVal)
+              (_, tVal) <- boundedRadioFieldset "Theme" Dark (T.pack . show)
+              setTheme (T.pack (show tVal))
+              (_, nVal) <- textInput "Name" ""
+              setName nVal
+              (_, notesVal) <- textArea "Notes" "Edit me.\nSecond line."
+              setNotes notesVal
               sep
               heading "Popups & Menus"
               row (tight . gap 8 . fillW $ defaultLayout) $ do
                 btnTip <- button "Hover for Tooltip"
-                tooltip "This is a floating tooltip widget!" btnTip
+                tooltip btnTip "This is a floating tooltip widget!"
                 btnMenu <- button "Right-click Menu"
                 void $ contextMenu btnMenu $ do
                   menuHeader "Context Menu"
@@ -216,9 +204,8 @@ demoUi = do
               sep
             List -> do
               heading "Tree"
-              selTxt <- readTreeSel
               let sel0 =
-                    case T.Read.decimal selTxt of
+                    case T.Read.decimal treeSel of
                       Right (n, _) -> n
                       Left _ -> 0
                   demoTree =
@@ -250,15 +237,15 @@ demoUi = do
               heading "Table"
               muted "Click a header to sort. Drag a header to reorder."
               muted "Drag a header edge to resize. Right-click a header to hide."
-              sort <- readTableSort
-              (tableResp, nextSort) <-
+              tableResp <-
                 tableCfg
                   demoTableCfg
                   (tight . fillW . fixedH 280 $ defaultLayout {layoutGap = 0})
                   "people"
                   colPeople
                   demoPeople
-                  sort
+                  tableSortVal
+              let nextSort = tableSort tableResp
               when (tableRespChanged tableResp) (setTableSort nextSort)
               sep
               kv "Sorted by" (tableColumnLabel nextSort)
@@ -440,7 +427,7 @@ debugBody s = do
 debugSection :: T.Text -> SmallArray (T.Text, T.Text) -> NanoUI ()
 debugSection title rows = do
   heading title
-  mapM_ (\(k, v) -> kv k (monoFontMarker <> v)) rows
+  mapM_ (\(k, v) -> kvMono k v) rows
 
 clipField :: Int -> T.Text -> T.Text
 clipField n s =

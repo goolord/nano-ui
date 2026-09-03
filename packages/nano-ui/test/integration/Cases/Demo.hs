@@ -43,22 +43,17 @@ runControlsTabHeightTest _ failed = do
       uiIO $ writeIORef dumpRef (Just (cb, cp, ti, checked, vol, qualityIdx, theme, name))
       pure cb
     demoPage dumpRef = do
-      (readChecked, setChecked) <- useFlag False
-      (readVol, setVol) <- useText "50"
-      (readQuality, setQuality) <- useText "Medium"
-      (readTheme, setTheme) <- useText (T.pack (show Dark))
-      (readName, setName) <- useText ""
+      (checked, setChecked) <- useFlag False
+      (vol, setVol) <- useText "50"
+      (quality, setQuality) <- useText "Medium"
+      (theme, setTheme) <- useText (T.pack (show Dark))
+      (name, setName) <- useText ""
       scroll (tight (grow defaultLayout)) $
         column (padAll 8 . gap 8 . fillW $ defaultLayout) $ do
           row (tight . gap 8 . wrap . fillW $ defaultLayout) $ do
             column (tight . gap 8 . fillW $ defaultLayout) $ do
               card $ do
                 heading "State"
-                checked <- readChecked
-                vol <- readVol
-                quality <- readQuality
-                theme <- readTheme
-                name <- readName
                 kv "Feature" (if checked then "on" else "off")
                 kv "Volume" vol
                 kv "Quality" quality
@@ -73,21 +68,21 @@ runControlsTabHeightTest _ failed = do
                 case demoTab of
                   Controls -> do
                     cb <- controlsBody dumpRef
-                    checked <- uiIO $ do
+                    cVal <- uiIO $ do
                       m <- readIORef dumpRef
                       pure $ maybe False (\(_, _, _, c, _, _, _, _) -> c) m
-                    setChecked checked
-                    (_, _, _, _, vol, qualityIdx, theme, name) <-
+                    setChecked cVal
+                    (_, _, _, _, vVal, qualityIdx, tVal, nVal) <-
                       uiIO $ do
                         m <- readIORef dumpRef
                         case m of
                           Just dumped -> pure dumped
                           Nothing ->
                             pure (cb, cb, cb, False, 50, 1, Dark, T.empty)
-                    setVol (T.pack (show (round vol :: Int)))
+                    setVol (T.pack (show (round vVal :: Int)))
                     setQuality (["Low", "Medium", "High"] !! qualityIdx)
-                    setTheme (T.pack (show theme))
-                    setName name
+                    setTheme (T.pack (show tVal))
+                    setName nVal
                   List -> heading "Tree"
                   Diagnostics -> heading "Diagnostics"
     rectHOf ctx wid = do
