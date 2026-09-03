@@ -98,6 +98,7 @@ module NanoUI
   , withKey
   , uiFontMetrics
   , uiTheme
+  , uiMousePos
   , damageWidgetNow
   , damageKeyNow
   , damageRectNow
@@ -360,6 +361,7 @@ import NanoUI.Monad
   , uiIO
   , uiFontMetrics
   , uiTheme
+  , uiMousePos
   , withKey
   )
 import NanoUI.Animation

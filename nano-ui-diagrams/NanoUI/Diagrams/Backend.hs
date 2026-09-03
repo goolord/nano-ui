@@ -174,7 +174,14 @@ instance (Typeable n, RealFloat n) => Renderable (Text n) NanoUITextBackend wher
 trailOps :: (Typeable n, RealFloat n) => DiaCore.Style V2 n -> Located (Trail V2 n) -> [DrawOp]
 trailOps sty lt =
   let pts = [(toF x, toF y) | (x, y) <- map unp2 (trailSamples lt)]
-      lineW = toF (fromMaybe 1 (sty ^. _lineWidthU))
+      lineW0 = sty ^. _lineWidthU
+      lineW =
+        case fmap toF lineW0 of
+          Nothing -> 1
+          Just w
+            | w <= 0 -> 0
+            | w < 1 -> 1
+            | otherwise -> w
       fillC = solidColour (sty ^? (_fillTexture . _AC))
       lineC = solidColour (sty ^? (_lineTexture . _AC))
       closed = isLoop (unLoc lt)

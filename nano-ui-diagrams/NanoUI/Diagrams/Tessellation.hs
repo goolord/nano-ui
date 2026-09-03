@@ -45,6 +45,14 @@ isConvex ccw a b c =
       bc = diff b c
    in if ccw then cross ab bc >= 0 else cross ab bc <= 0
 
+-- Fan-fill leftover only when every vertex turns the same way. A concave
+-- remainder fanned from vertex 0 can cover area outside the polygon.
+leftoverConvex :: Bool -> [(Float, Float)] -> Bool
+leftoverConvex ccw vs =
+  let n = length vs
+      at i = vs !! (i `mod` n)
+   in n >= 3 && and [isConvex ccw (at (i - 1)) (at i) (at (i + 1)) | i <- [0 .. n - 1]]
+
 pointInTri :: (Float, Float) -> (Float, Float) -> (Float, Float) -> (Float, Float) -> Bool
 pointInTri p a b c =
   let sign (p1, p2, p3) = cross (diff p1 p3) (diff p2 p3)
@@ -54,19 +62,22 @@ pointInTri p a b c =
    in not ((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0))
 
 isEar :: Bool -> [(Float, Float)] -> Int -> Bool
-isEar ccw vs i =
-  let n = length vs
-      prev = vs !! ((i - 1 + n) `mod` n)
-      cur = vs !! i
-      next = vs !! ((i + 1) `mod` n)
-      others =
-        [ p
-        | (j, p) <- zip [0 ..] vs
-        , j /= (i - 1 + n) `mod` n
-        , j /= i
-        , j /= (i + 1) `mod` n
-        ]
-   in isConvex ccw prev cur next && not (any (pointInTri cur prev next) others)
+isEar ccw vs i
+  | i < 0 || i >= n = False
+  | otherwise =
+      let prev = vs !! ((i - 1 + n) `mod` n)
+          cur = vs !! i
+          next = vs !! ((i + 1) `mod` n)
+          others =
+            [ p
+            | (j, p) <- zip [0 ..] vs
+            , j /= (i - 1 + n) `mod` n
+            , j /= i
+            , j /= (i + 1) `mod` n
+            ]
+       in isConvex ccw prev cur next && not (any (pointInTri cur prev next) others)
+  where
+    n = length vs
 
 earClip :: [(Float, Float)] -> [((Float, Float), (Float, Float), (Float, Float))]
 earClip vs
@@ -74,18 +85,28 @@ earClip vs
   | length vs == 3 = [(vs !! 0, vs !! 1, vs !! 2)]
   | otherwise =
       let ccw = signedArea vs >= 0
-          n = length vs
-          go remaining idx tris
-            | length remaining < 3 = tris
-            | length remaining == 3 = (remaining !! 0, remaining !! 1, remaining !! 2) : tris
+          go remaining idx tries tris
+            | nRem < 3 = tris
+            | nRem == 3 = (remaining !! 0, remaining !! 1, remaining !! 2) : tris
+            | tries >= nRem =
+                if nRem >= 3 && leftoverConvex ccw remaining
+                  then
+                    let origin = remaining !! 0
+                     in tris
+                          ++ [ (origin, remaining !! i, remaining !! (i + 1))
+                             | i <- [1 .. nRem - 2]
+                             ]
+                  else tris
             | isEar ccw remaining idx =
-                let prev = remaining !! ((idx - 1 + length remaining) `mod` length remaining)
+                let prev = remaining !! ((idx - 1 + nRem) `mod` nRem)
                     cur = remaining !! idx
-                    next = remaining !! ((idx + 1) `mod` length remaining)
+                    next = remaining !! ((idx + 1) `mod` nRem)
                     newRem = take idx remaining ++ drop (idx + 1) remaining
-                 in go newRem 0 ((prev, cur, next) : tris)
-            | otherwise = go remaining ((idx + 1) `mod` n) tris
-       in reverse (go vs 0 [])
+                 in go newRem 0 0 ((prev, cur, next) : tris)
+            | otherwise = go remaining ((idx + 1) `mod` nRem) (tries + 1) tris
+            where
+              nRem = length remaining
+       in reverse (go vs 0 0 [])
 
 fillPolygon :: Color -> [(Float, Float)] -> [DrawOp]
 fillPolygon col pts =
@@ -100,12 +121,14 @@ axisAlignedRect :: [(Float, Float)] -> Maybe Rect
 axisAlignedRect pts =
   case stripClosed pts of
     [(x0, y0), (x1, y1), (x2, y2), (x3, y3)]
-      | y0 == y1 && x1 == x2 && y2 == y3 && x3 == x0 ->
-          Just (Rect (min x0 x3) y0 (abs (x1 - x0)) (abs (y2 - y1)))
+      | near y0 y1 && near x1 x2 && near y2 y3 && near x3 x0 ->
+          Just (Rect (min x0 x3) (min y0 y2) (abs (x1 - x0)) (abs (y2 - y0)))
     [(x0, y0), (x1, y1), (x2, y2), (x3, y3)]
-      | x0 == x1 && y1 == y2 && x2 == x3 && y3 == y0 ->
-          Just (Rect x0 (min y0 y3) (abs (x2 - x0)) (abs (y1 - y0)))
+      | near x0 x1 && near y1 y2 && near x2 x3 && near y3 y0 ->
+          Just (Rect (min x0 x2) (min y0 y1) (abs (x2 - x0)) (abs (y1 - y0)))
     _ -> Nothing
+  where
+    near a b = abs (a - b) <= 1e-3
 
 norm :: (Float, Float) -> (Float, Float)
 norm (x, y) =
@@ -154,7 +177,9 @@ strokePolyline col w closed pts0 =
         ]
   where
     quadFill c (x0, y0) (x1, y1) (x2, y2) (x3, y3) =
-      [ FillTriangle x0 y0 x1 y1 x2 y2 c, FillTriangle x1 y1 x2 y2 x3 y3 c ]
+      [ FillTriangle x0 y0 x1 y1 x2 y2 c
+      , FillTriangle x0 y0 x2 y2 x3 y3 c
+      ]
 
 flattenCubic ::
   (Float, Float) ->

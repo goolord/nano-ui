@@ -14,6 +14,7 @@ import Data.List (dropWhileEnd)
 import Data.Text (Text)
 import Data.Text qualified as T
 import NanoUI.Plot.Types (Domain (..), Range (..))
+import Numeric (showEFloat, showFFloat)
 
 domainToPlot :: Domain -> Range -> Double -> Double
 domainToPlot (Domain lo hi) (Range rLo rHi) v =
@@ -92,11 +93,24 @@ niceTicks maxTicks (Domain lo hi) =
 formatTick :: Double -> Text
 formatTick v
   | not (finite v) = T.empty
-  | abs v >= 1000 || (abs v > 0 && abs v < 0.001) = T.pack (show v)
-  | abs (v - fromIntegral (round v :: Integer)) < 1e-9 = T.pack (show (round v :: Integer))
   | otherwise =
-      let s = show v
-          trimmed = dropWhileEnd (== '0') (dropWhileEnd (/= '.') s)
-       in T.pack (case reverse trimmed of
-            '.' : rest -> reverse rest
-            _ -> trimmed)
+      let snapped = snapNoise v
+       in if abs snapped >= 1e6 || (abs snapped > 0 && abs snapped < 1e-6)
+            then T.pack (showEFloat (Just 3) snapped "")
+            else
+              let n = round snapped :: Integer
+               in if abs (snapped - fromIntegral n) < 1e-6
+                    then T.pack (show n)
+                    else T.pack (stripZeros (showFFloat (Just 6) snapped ""))
+
+snapNoise :: Double -> Double
+snapNoise v =
+  let s = 1e10
+   in fromIntegral (round (v * s) :: Integer) / s
+
+stripZeros :: String -> String
+stripZeros s =
+  let t = dropWhileEnd (== '0') s
+   in case reverse t of
+        '.' : rest -> reverse rest
+        _ -> t

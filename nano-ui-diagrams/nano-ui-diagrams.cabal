@@ -52,6 +52,8 @@ library
         NanoUI.Plot.Decimate
         NanoUI.Plot.Series
         NanoUI.Plot.Chrome
+        NanoUI.Plot.Builder
+        NanoUI.Plot.Hit
         NanoUI.Plot.Widget
     build-depends:
         base ^>=4.22.0.0,
