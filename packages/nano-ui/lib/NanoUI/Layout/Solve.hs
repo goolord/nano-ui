@@ -552,7 +552,7 @@ measureScrollContainer na host fm useAssignedWidth idx = do
   (minW, minH, maxW, maxH) <- getMinMax na idx
   (wTag, wVal) <- getWidthSizing na idx
   (hTag, hVal) <- getHeightSizing na idx
-  (_, _, assignedW, assignedH) <- getRect na idx
+  (_, _, _, assignedH) <- getRect na idx
   (contentW, contentH) <- foldChildDimsFromParent na idx dir gap
   slot <- scrollBarSlotOf na idx
   let fullW = contentW + padX
@@ -576,9 +576,6 @@ measureScrollContainer na host fm useAssignedWidth idx = do
       viewportW =
         case wTag of
           SizingFixed -> wVal
-          SizingGrow
-            | useAssignedWidth && assignedW > 0 -> assignedW
-            | otherwise -> fullW
           _ -> fullW + fitGutterW
       viewportH =
         case hTag of

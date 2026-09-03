@@ -36,7 +36,7 @@ import Data.Vector qualified as V
 import Effectful (Eff, type (:>))
 import qualified Data.IntMap.Strict as IM
 import NanoUI.Context (Context (..), bumpMirror, getPrevRect, getScrollOffset2D, getStore, intKey, linkScrollAxes, markDirty, setStore)
-import NanoUI.Font (monoFontMarker, stripWidgetMarkers, tableCellInset, textDisplayWidth)
+import NanoUI.Font (monoFontMarker, scrollBarGutter, stripWidgetMarkers, tableCellInset, textDisplayWidth)
 import NanoUI.Id (WidgetId (..))
 import NanoUI.Input (Input (..), inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased, inputMouseRightReleased)
 import NanoUI.Layout.Arena (NodeType (..))
@@ -49,7 +49,7 @@ import NanoUI.Widgets.Behavior (useReorder)
 import NanoUI.Widgets.Combinators
   ( buttonStyled
   , fitList
-  , gridColumns
+  , gridColumnsLay
   , headerAtPoint
   , headerEdgeHit
   , keyedRowLay
@@ -63,7 +63,7 @@ import NanoUI.Widgets.Combinators
   , visibleCols
   )
 import NanoUI.Widgets.Layout (column, panel, row, scrollAreaIdConfigured, separator, spacer)
-import NanoUI.Frame.Scroll.Geometry (scrollHorizontalAuto, scrollVerticalAuto, scrollVerticalHidden)
+import NanoUI.Frame.Scroll.Geometry (ScrollConfig (..), ScrollPolicy (..), scrollHorizontalAuto, scrollVerticalAuto, scrollVerticalHidden)
 import NanoUI.Widgets.Node
   ( Clickable (..)
   , Responding (..)
@@ -124,15 +124,18 @@ tableSplitPanes fillInner tableWid vWid hWid rowMinH frozenIdx unfrozenIdx pinne
   paneLay fill idxs =
     let base = tight $ defaultLayout {layoutGap = 0, layoutHeight = Grow 1}
      in if fill then fillW (fillH base) else base {layoutWidth = Fit, layoutMinW = minSum idxs}
+  gridRowLay idxs =
+    (if fillInner then fillW else id) (tight $ defaultLayout {layoutGap = 0, layoutMinW = minSum idxs})
   headerLine idxs renderHeader' =
-    keyedRowLay (tight $ defaultLayout {layoutGap = 0}) idxs $ \i ->
+    keyedRowLay (gridRowLay idxs) idxs $ \i ->
       column (colBox i) (renderHeader' i)
   pinnedBlock idxs =
     mapM_
       ( \(ri, r) ->
           withKey ("pin" :: Text, ri) $ do
             when (ri > 0) $ void separator
-            gridColumns
+            gridColumnsLay
+              (gridRowLay idxs)
               idxs
               (map colBox idxs)
               [void (renderCell ri r i) | i <- idxs]
@@ -162,9 +165,10 @@ tableSplitPanes fillInner tableWid vWid hWid rowMinH frozenIdx unfrozenIdx pinne
                 topH = fromIntegral firstVis * rowMinH
                 botH = fromIntegral (max 0 (n - lastVis - 1)) * rowMinH
             pure (vis, topH, botH)
-    column (tight $ defaultLayout {layoutGap = 0}) $ do
+    column ((if fillInner then fillW else id) (tight $ defaultLayout {layoutGap = 0, layoutMinW = minSum idxs})) $ do
       when (topH > 0) $ void (spacer Fit (Fixed topH))
-      gridColumns
+      gridColumnsLay
+        (gridRowLay idxs)
         idxs
         (map colBox idxs)
         [ mapM_
@@ -192,20 +196,34 @@ tableSplitPanes fillInner tableWid vWid hWid rowMinH frozenIdx unfrozenIdx pinne
       pure hs
   unfrozenPane idxs = do
     ctx <- askContext
+    let host = ctxHostProfile ctx
+        fm = ctxFontMetrics ctx
+        vGutter = if isCellHost host then 1 else scrollBarGutter host fm + 2
+    mPrevV <- uiIO (getPrevRect ctx vWid)
+    let totalH = fromIntegral (length scrollRows) * rowMinH
+        hasVertBar = maybe (totalH > 100) (\r -> totalH > rectH r) mPrevV
     column (paneLay fillInner idxs) $ do
       hs <-
-        scrollAreaIdConfigured
-          hWid
-          (if fillInner then fillW hRowLay else hRowLay)
-          scrollHorizontalAuto $
-          column (tight $ defaultLayout {layoutGap = 0, layoutMinW = minSum idxs}) $ do
-            hs <- headerLine idxs renderHeader
-            void separator
-            pinnedBlock idxs
-            when (not (null pinned) && not (null scrollRows)) $ void separator
-            pure hs
+        row (tight . (if fillInner then fillW else id) $ defaultLayout {layoutGap = 0}) $ do
+          hs' <-
+            scrollAreaIdConfigured
+              hWid
+              (if fillInner then fillW (hRowLay {layoutMinW = minSum idxs}) else hRowLay)
+              scrollHorizontalAuto $
+              column ((if fillInner then fillW else id) (tight $ defaultLayout {layoutGap = 0, layoutMinW = minSum idxs})) $ do
+                hs'' <- headerLine idxs renderHeader
+                void separator
+                pinnedBlock idxs
+                when (not (null pinned) && not (null scrollRows)) $ void separator
+                pure hs''
+          when hasVertBar $ void (spacer (Fixed vGutter) Fit)
+          pure hs'
       uiIO (linkScrollAxes ctx vWid hWid)
-      scrollAreaIdConfigured vWid (vLay fillInner) scrollVerticalAuto (bodyBlock vWid True idxs)
+      scrollAreaIdConfigured
+        vWid
+        (vLay fillInner)
+        (ScrollConfig ScrollHidden ScrollAuto True)
+        (bodyBlock vWid True idxs)
       pure hs
 
 data SortDir = SortAsc | SortDesc
@@ -331,21 +349,6 @@ columnWidths ctx cols rows =
         hdrs
         [0 ..]
 
-distributeColWidths :: Int -> [Int] -> [ColSize] -> [Float] -> [Float] -> Float -> [Float]
-distributeColWidths n vis sizes contentWs stored tableW =
-  let mins = [resolvedWidth sizes contentWs stored i | i <- [0 .. n - 1]]
-      seps = fromIntegral (max 0 (length vis - 1))
-      visMin = sum [listAt mins i 0 | i <- vis] + seps
-      autoStretch i =
-        case listAt sizes i ColContent of
-          ColFixed _ -> False
-          _ ->
-            listAt stored i 0 <= max minColW (listAt contentWs i minColW)
-      stretchVis = [i | i <- vis, autoStretch i]
-      slack = max 0 (tableW - visMin)
-      extra = if null stretchVis then 0 else slack / fromIntegral (length stretchVis)
-   in [if i `elem` stretchVis then listAt mins i 0 + extra else listAt mins i 0 | i <- [0 .. n - 1]]
-
 nextSortCol :: Int -> SortCol -> Int -> SortCol
 nextSortCol n cur clicked =
   let clamped = clampSortCol n cur
@@ -395,15 +398,27 @@ resolvedWidth sizes contentWs stored i =
            in if saved > 0 then max base saved else base
         ColContent -> if saved > 0 then max contentW saved else contentW
 
-colSizing :: [ColSize] -> [Float] -> Float -> Int -> Sizing
-colSizing _sizes _stored resolved _i = Fixed resolved
+colSizing :: Bool -> [ColSize] -> [Float] -> [Float] -> Int -> Sizing
+colSizing fillInner sizes contentWs stored i =
+  let saved = listAt stored i 0
+      contentW = max minColW (listAt contentWs i minColW)
+      hasStretch = any (\s -> case s of ColStretch -> True; _ -> False) (take (length contentWs) (sizes ++ repeat ColContent))
+   in if saved > 0
+        then Fixed (max minColW saved)
+        else case listAt sizes i ColContent of
+          ColFixed f -> Fixed (max minColW f)
+          ColStretch -> if fillInner then Grow 1 else Fixed contentW
+          ColContent ->
+            if fillInner && not hasStretch
+              then Grow 1
+              else Fixed contentW
 
 colBoxLayout :: Sizing -> Float -> Layout
-colBoxLayout sizing resolved =
-  let base = tight $ defaultLayout {layoutGap = 0, layoutMinW = resolved}
+colBoxLayout sizing minCol =
+  let base = tight $ defaultLayout {layoutGap = 0, layoutMinW = minCol}
    in case sizing of
         Fixed w -> base {layoutWidth = Fixed w, layoutMaxW = w}
-        Grow _ -> fillW base
+        Grow g -> base {layoutWidth = Grow g}
         _ -> base {layoutWidth = Fit}
 
 writeColW :: Context -> Int -> [Float] -> IO ()
@@ -546,11 +561,10 @@ tableCfg cfg outerLayout key cols rows curSort =
         hdrs = columnHeaders cols
         numeric = numericColumns cols rows
         rowMinH = if terminal then 1 else 28
-    mPrev <- uiIO (getPrevRect ctx tableWid)
-    let tableW = maybe 0 rectW mPrev
-        finals = distributeColWidths n vis sizes contentWs widths1 tableW
-        resolvedW i = listAt finals i minColW
-        colBox i = colBoxLayout (colSizing sizes widths1 (resolvedW i) i) (resolvedW i)
+        fillInner = tableFillInner cfg outerLayout
+        mins = [resolvedWidth sizes contentWs widths1 i | i <- [0 .. n - 1]]
+        colBox i = colBoxLayout (colSizing fillInner sizes contentWs widths1 i) (listAt mins i minColW)
+        resolvedW i = listAt mins i minColW
         inner i =
           (tight defaultLayout)
             { layoutWidth = Grow 1
@@ -563,7 +577,6 @@ tableCfg cfg outerLayout key cols rows curSort =
         renderHeader i =
           buttonStyled (tableHeaderLabel terminal (listAt hdrs i T.empty)) (if sortColIndex sort0 == i then 1 else 0) (inner i) (sortMarkStyle sort0 i)
         renderCell ri r i = void (stripedRow ri (inner i) (shown i (columnCells cols r !! i)))
-    when (mPrev == Nothing) $ uiIO (markDirty ctx)
     column outerLayout $ do
       showAllResp <-
         if IS.null hidden0
