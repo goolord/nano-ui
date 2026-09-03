@@ -8,7 +8,7 @@ module SdlDemo
     ) where
 
 import Control.Monad (unless, void, when)
-import Data.Foldable (foldlM)
+import Data.Foldable (foldlM, for_)
 import Data.Maybe (fromMaybe)
 import Data.Primitive.SmallArray (SmallArray, smallArrayFromList)
 import Diagrams.Prelude
@@ -240,6 +240,12 @@ demoUi = do
               scroll (padAll 6 . fixedH 300 . fillW $ defaultLayout) $ do
                 (_, sel) <- tree "demo" demoTree sel0
                 setTreeSel (T.pack (show sel))
+              sep
+              heading "Items"
+              scroll (padAll 6 . fixedH 136 . fillW $ defaultLayout) $
+                column (tight . gap 0 . fillW $ defaultLayout) $
+                  for_ [1 .. 12 :: Int] $ \i -> do
+                    void $ labelEx (tight . fillW $ defaultLayout) $ T.pack ("Item " <> show i)
             Table -> do
               heading "Table"
               muted "Click a header to sort. Drag a header to reorder."

@@ -98,13 +98,14 @@ treeKeyNav nav rows resps focus selected expanded
 toggle :: Int -> IS.IntSet -> IS.IntSet
 toggle idx s = if IS.member idx s then IS.delete idx s else IS.insert idx s
 
-treeRow :: (Ui :> es) => (Int, Int, Bool, Text) -> Int -> IS.IntSet -> Eff es (Response, Maybe Int, Maybe IS.IntSet)
-treeRow (nodeIdx, depth, hasKids, lbl) selectedIdx expandedSet = do
+treeRow :: (Ui :> es) => Int -> (Int, Int, Bool, Text) -> Int -> IS.IntSet -> Eff es (Response, Maybe Int, Maybe IS.IntSet)
+treeRow rowIdx (nodeIdx, depth, hasKids, lbl) selectedIdx expandedSet = do
   ctx <- askContext
   inp <- askInput
   let expanded = IS.member nodeIdx expandedSet
       selected = selectedIdx == nodeIdx
-  resp <- selectableItem NodeTree lbl selected (tight . fillW $ defaultLayout) (treeEncodeStyle nodeIdx depth hasKids expanded)
+      isOdd = odd rowIdx
+  resp <- selectableItem NodeTree lbl selected (tight . fillW $ defaultLayout) (treeEncodeStyle nodeIdx depth hasKids expanded isOdd)
   uiIO $ registerFocusable ctx (rawRespId resp)
   if not (rawRespClicked resp)
     then pure (resp, Nothing, Nothing)
@@ -134,7 +135,7 @@ tree key items initial =
     ctx <- askContext
     column (tight . gap 0 . fillW $ defaultLayout) $ do
       tagContainer groupId
-      results <- mapM (\(row@(i, _, _, _)) -> withKey i (treeRow row selected expandedSet)) rows
+      results <- mapM (\(rowIdx, row@(i, _, _, _)) -> withKey i (treeRow rowIdx row selected expandedSet)) (zip [0 :: Int ..] rows)
       let resps = [r | (r, _, _) <- results]
           afterClickSel = fromMaybe selected (listToMaybe [idx | (_, Just idx, _) <- results])
           afterClickExp = fromMaybe expandedSet (listToMaybe [s | (_, _, Just s) <- results])

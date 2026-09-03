@@ -68,6 +68,8 @@ import NanoUI.WidgetText
   , buttonVisualStyle
   , checkboxLabelText
   , radioLabelText
+  , tableStripeColor
+  , treeDecodeStripe
   , treeDecodeStyle
   , treeDisplayText
   , treeLabelText
@@ -92,7 +94,7 @@ import NanoUI.Style
   , themeWindow
   )
 import NanoUI.Widgets.ColorPicker (colorPickerDefaultColor, widgetStoreColor)
-import NanoUI.Types (Color (..), Rect (..), colorRGBA, colorR, colorG, colorB, clamp01, lerpColor, rectH, rectW, rectX, rectY)
+import NanoUI.Types (Color (..), Rect (..), colorRGBA, clamp01, lerpColor, rectH, rectW, rectX, rectY)
 
 textAreaStoredValue :: Context -> NodeIdx -> IO Text
 textAreaStoredValue ctx idx = do
@@ -469,7 +471,7 @@ widgetVisualStyle ctx nt idx = do
   animT <- getAnimationValue ctx wid
   mFloat <- floatingAncestor ctx idx
   styleIdx <-
-    if nt == NodeButton
+    if nt == NodeButton || nt == NodeTree
       then getStyleIdx (ctxNodeArena ctx) idx
       else pure 0
   let (isClose, isTab, isTable) =
@@ -522,20 +524,30 @@ widgetVisualStyle ctx nt idx = do
           NodeTree ->
             let btn = themeButton theme
                 accent = themeAccent theme
+                stripe = treeDecodeStripe styleIdx
+                unselectedBg =
+                  case tableStripeColor theme stripe of
+                    Just c -> c
+                    Nothing -> styleBg (themePanel theme)
+                selectedBg = lerpColor unselectedBg accent 0.25
+                selectedHoverBg = lerpColor unselectedBg accent 0.35
+                selectedActiveBg = lerpColor unselectedBg accent 0.45
              in if val > 0.5
                   then
                     btn
-                      { styleBg = colorRGBA (colorR accent) (colorG accent) (colorB accent) 48
-                      , styleHoverBg = colorRGBA (colorR accent) (colorG accent) (colorB accent) 72
-                      , styleActiveBg = colorRGBA (colorR accent) (colorG accent) (colorB accent) 96
+                      { styleBg = selectedBg
+                      , styleHoverBg = selectedHoverBg
+                      , styleActiveBg = selectedActiveBg
                       , styleBorderWidth = 0
+                      , styleCornerRadius = 0
                       }
                   else
                     btn
-                      { styleBg = colorRGBA 0 0 0 0
-                      , styleHoverBg = colorRGBA (colorR accent) (colorG accent) (colorB accent) 32
-                      , styleActiveBg = colorRGBA (colorR accent) (colorG accent) (colorB accent) 48
+                      { styleBg = unselectedBg
+                      , styleHoverBg = lerpColor unselectedBg accent 0.12
+                      , styleActiveBg = lerpColor unselectedBg accent 0.22
                       , styleBorderWidth = 0
+                      , styleCornerRadius = 0
                       }
           NodeButton
             | isClose -> closeButtonStyle theme isHot animT
