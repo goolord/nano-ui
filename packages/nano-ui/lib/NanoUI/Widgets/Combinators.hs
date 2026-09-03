@@ -4,6 +4,7 @@
 -- | Layout and visual helpers shared by Table, Tabs, Tree, and Radio.
 module NanoUI.Widgets.Combinators
   ( gridColumns
+  , gridColumnsLay
   , syncScroll
   , headerRow
   , indentedRow
@@ -58,13 +59,17 @@ import NanoUI.Widgets.Node
 
 -- | One row of cells keyed by caller ids (column index, not visible position).
 gridColumns :: (Ui :> es) => [Int] -> [Layout] -> [Eff es ()] -> Eff es ()
-gridColumns keys layouts cells =
+gridColumns = gridColumnsLay (tight $ defaultLayout {layoutGap = 0})
+
+-- | One row of cells with custom row layout.
+gridColumnsLay :: (Ui :> es) => Layout -> [Int] -> [Layout] -> [Eff es ()] -> Eff es ()
+gridColumnsLay lay keys layouts cells =
   void $
-    row (tight $ defaultLayout {layoutGap = 0}) $
+    row lay $
       mapM_
-        ( \(n, (k, lay, cell)) -> do
+        ( \(n, (k, colLay, cell)) -> do
             when (n > 0) $ void separator
-            withKey k (column lay cell)
+            withKey k (column colLay cell)
         )
         (zip [0 :: Int ..] (zip3 keys layouts cells))
 

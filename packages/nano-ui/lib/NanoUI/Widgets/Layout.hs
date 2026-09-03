@@ -12,6 +12,7 @@ module NanoUI.Widgets.Layout
   , separator
   , spacer
   , scroll
+  , scroll2D
   , scrollArea
   , scrollAreaId
   , scrollAreaIdConfigured
@@ -188,6 +189,10 @@ scrollAreaIdConfigured wid layout cfg child = do
   r <- child
   uiIO (writeIORef (ctxContainerStack ctx) stack)
   pure r
+
+{-# INLINE scroll2D #-}
+scroll2D :: Ui :> es => Layout -> Eff es a -> Eff es a
+scroll2D layout child = fmap snd (scrollArea2D layout child)
 
 {-# INLINE scrollArea2D #-}
 scrollArea2D :: Ui :> es => Layout -> Eff es a -> Eff es (WidgetId, a)

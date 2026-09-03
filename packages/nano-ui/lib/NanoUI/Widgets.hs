@@ -39,6 +39,7 @@ module NanoUI.Widgets
   , menuSeparator
   , menuHeader
   , scroll
+  , scroll2D
   , scrollArea
   , scrollArea2D
   , scrollAreaIdConfigured
@@ -246,6 +247,7 @@ import NanoUI.Widgets.Layout
   , panel
   , row
   , scroll
+  , scroll2D
   , scrollArea
   , scrollArea2D
   , scrollAreaIdConfigured

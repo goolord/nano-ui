@@ -237,12 +237,12 @@ demoUi = do
                         ]
                     , TreeItem "README.md" []
                     ]
-              scroll (padAll 6 . fixedH 300 . fillW $ defaultLayout) $ do
+              scroll2D (fixedH 300 . fillW $ defaultLayout) $ do
                 (_, sel) <- tree "demo" demoTree sel0
                 setTreeSel (T.pack (show sel))
               sep
               heading "Items"
-              scroll (padAll 6 . fixedH 136 . fillW $ defaultLayout) $
+              scroll2D (padAll 6 . fixedH 136 . fillW $ defaultLayout) $
                 column (tight . gap 0 . fillW $ defaultLayout) $
                   for_ [1 .. 12 :: Int] $ \i -> do
                     void $ labelEx (tight . fillW $ defaultLayout) $ T.pack ("Item " <> show i)
@@ -582,9 +582,17 @@ selftest = do
     (ctx', base) <- syncDisplay ctx env idle
     void (sdlDrawFrame ctx' demoUi env base True)
     spans0 <- collectTextSpans ctx'
+    putStrLn $ "--- Controls tab ---"
+    for_ spans0 $ \(r, txt, _, _, _) ->
+      when (txt `elem` ["State", "Gallery", "Controls", "Feature"]) $
+        putStrLn $ "  " ++ T.unpack txt ++ ": " ++ show r
     unless (hasText "Feature" spans0) $ fail "selftest: Controls body missing"
     clickTab ctx' env base "Table"
     spansTable <- collectTextSpans ctx'
+    putStrLn $ "--- Table tab ---"
+    for_ spansTable $ \(r, txt, _, _, _) ->
+      when (txt `elem` ["State", "Gallery", "Table", "Name", "Dept"]) $
+        putStrLn $ "  " ++ T.unpack txt ++ ": " ++ show r
     unless (hasText "David" spansTable) $ fail "selftest: table body missing after Table tab"
     hdr <- requireSpan "selftest: Name header" (findHeader "Name" spansTable)
     clickPos ctx' env base hdr
