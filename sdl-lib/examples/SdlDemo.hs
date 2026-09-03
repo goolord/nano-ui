@@ -284,11 +284,10 @@ sineCosineChart =
       withLegend LegendRight $
         withYAxis "y" $
           withXAxis "x" $
-            withTitle "Trig" $
-              chart
-                [ line "sin(x)" [(x, sin x) | x <- [0, 0.05 .. (2 * pi)]]
-                , line "cos(x)" [(x, cos x) | x <- [0, 0.05 .. (2 * pi)]]
-                ]
+            chart
+              [ line "sin(x)" [(x, sin x) | x <- [0, 0.05 .. (2 * pi)]]
+              , line "cos(x)" [(x, cos x) | x <- [0, 0.05 .. (2 * pi)]]
+              ]
 
 weeklyBars :: [(T.Text, Double)]
 weeklyBars =
@@ -318,8 +317,7 @@ sleepFocusChart =
     withLegend LegendRight $
       withYAxis "focus" $
         withXAxis "hours slept" $
-          withTitle "Sleep vs focus" $
-            chart [scatter "focus" sleepFocus, line "trend" sleepFocus]
+          chart [scatter "focus" sleepFocus, line "trend" sleepFocus]
 
 areaDemo :: [(Double, Double)]
 areaDemo = [(x, abs (sin x)) | x <- [0, 0.05 .. (2 * pi)]]

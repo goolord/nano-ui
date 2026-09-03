@@ -5,7 +5,7 @@ module Main (main) where
 import Control.Monad (unless)
 import Data.Colour.Names (coral, steelblue)
 import Data.List (tails)
-import Data.Maybe (listToMaybe)
+import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text qualified as T
 import Data.Vector qualified as V
 import Diagrams.Prelude
@@ -27,13 +27,21 @@ import NanoUI.Diagrams
   , diagramOps
   , fitLayout
   )
-import NanoUI.Diagrams.Tessellation (fillPolygon, triangulatePolygon)
-import NanoUI.Plot.Chrome (chartDiagram, seriesDomains)
+import NanoUI.Diagrams.Tessellation (fillPolygon, strokePolyline, triangulatePolygon)
+import NanoUI.Plot.Chrome (Margins (..), chartDiagram, chartMargins, seriesDomains)
 import NanoUI.Plot.Decimate (lttb)
 import NanoUI.Plot.Hit (nearestPlotHover)
 import NanoUI.Plot.Scale (formatTick, mergeDomains, niceTicks)
-import NanoUI.Plot.Series (bar, line, scatter)
-import NanoUI.Plot.Types (Chart (..), Domain (..), GridMode (..), LegendPos (..), PlotHover (..))
+import NanoUI.Plot.Series (area, bar, line, scatter, withMarker)
+import NanoUI.Plot.Types
+  ( Chart (..)
+  , Domain (..)
+  , GridMode (..)
+  , LegendPos (..)
+  , MarkShape (..)
+  , PlotHover (..)
+  , Series (..)
+  )
 import NanoUI.Testing (Context, DrawData (..), drawCmdNull, newPixelContext, runFrame)
 
 main :: IO ()
@@ -44,12 +52,16 @@ main = do
   testRendering ctx inp fm
   testConcaveTriangulation
   testRectFastPath
+  testStrokeCoversMidpoint
   testNiceTicks
   testMultiSeriesDomains
+  testDomainFollowsData
   testLttb
   testLabelFit fm
   testChartChrome fm
   testPlotHover fm
+  testClosedSeriesFills fm
+  testGrowPlotHeight fm
   putStrLn "nano-ui-diagrams: ok"
 
 testRendering :: Context -> Input -> FontMetrics -> IO ()
@@ -160,6 +172,24 @@ testRectFastPath = do
     [FillRect _ _] -> pure ()
     _ -> fail "rectangle fast path emitted wrong op"
 
+testStrokeCoversMidpoint :: IO ()
+testStrokeCoversMidpoint = do
+  let col = themeRed defaultTheme
+      ops = strokePolyline col 2 False [(0, 0), (20, 0), (20, 20)]
+      tris =
+        [ ((x0, y0), (x1, y1), (x2, y2))
+        | FillTriangle x0 y0 x1 y1 x2 y2 _ <- ops
+        ]
+      covered p = any (inTri p) tris
+  unless (covered (10, 0) && covered (1, 0) && covered (20, 10)) $
+    fail "stroke polyline left a gap along the segment"
+
+inTri :: (Float, Float) -> ((Float, Float), (Float, Float), (Float, Float)) -> Bool
+inTri p (a, b, c) =
+  let s = triArea a b c
+      s' = triArea p b c + triArea a p c + triArea a b p
+   in s > 1e-6 && abs (s' - s) <= 1e-3
+
 testNiceTicks :: IO ()
 testNiceTicks = do
   let t0 = niceTicks 6 (Domain 0 100)
@@ -176,6 +206,12 @@ testNiceTicks = do
     fail "nice ticks failed for single-value range"
   unless (formatTick 6 == "6") $
     fail "formatTick integer"
+  unless (formatTick 0.2 == "0.2" && formatTick 0.4 == "0.4") $
+    fail "formatTick fractional"
+  unless (formatTick (0.2 + 0.2 + 0.2) == "0.6") $
+    fail "formatTick binary residue"
+  unless (formatTick 0.0008 == "0.0008") $
+    fail "formatTick small decimal"
 
 testMultiSeriesDomains :: IO ()
 testMultiSeriesDomains = do
@@ -196,6 +232,22 @@ testMultiSeriesDomains = do
     fail "multi-series domains do not share bounds"
   unless (mergeDomains (Domain 0 1) (Domain 0 10) == Domain 0 10) $
     fail "mergeDomains broken"
+
+testDomainFollowsData :: IO ()
+testDomainFollowsData = do
+  let c =
+        Chart
+          { chartTitle = Nothing
+          , chartXTitle = Nothing
+          , chartYTitle = Nothing
+          , chartSeries = [scatter "s" [(4, 3), (9, 8)]]
+          , chartLegend = LegendNone
+          , chartGrid = GridNone
+          , chartDecimate = False
+          }
+      (Domain xLo _, Domain yLo _) = seriesDomains c
+  unless (xLo > 2 && yLo > 1) $
+    fail "seriesDomains seeded with 0..1"
 
 testLttb :: IO ()
 testLttb = do
@@ -226,6 +278,68 @@ testLabelFit fm = do
     fail "axis labels did not spread along x"
   unless (not (or [overlap a b | (a : rest) <- tails boxes, b <- rest])) $
     fail "axis label boxes overlap"
+  let sleepChart =
+        (bareChart [scatter "focus" [(4, 3), (9, 8)], line "trend" [(4, 3), (9, 8)]])
+          { chartLegend = LegendRight
+          , chartYTitle = Just "focus"
+          , chartXTitle = Just "hours slept"
+          }
+      legendDump = chartDiagram fm defaultTheme defaultPlotStyle sleepChart
+      legendOps = diagramOps 400 240 legendDump
+      tightOps = diagramOps 220 150 legendDump
+      barDump = chartDiagram fm defaultTheme defaultPlotStyle barChartSample
+      barTightOps = diagramOps 220 150 barDump
+      botChart = sleepChart {chartLegend = LegendBottom}
+      botOps = diagramOps 400 240 (chartDiagram fm defaultTheme defaultPlotStyle botChart)
+      tickText t =
+        T.all (\c -> c == '-' || c == '.' || c >= '0' && c <= '9') t && not (T.null t)
+      boxesOverlap (Rect x1 y1 w1 h1) (Rect x2 y2 w2 h2) =
+        x1 < x2 + w2 && x2 < x1 + w1 && y1 < y2 + h2 && y2 < y1 + h1
+      overlapTitleTick chart w h drawOps =
+        let ts = [(drawTextBox fm x y ax ay t, t) | DrawText x y ax ay t _ <- V.toList drawOps]
+            titles =
+              [ b
+              | (b@(Rect bx by _ _), t) <- ts
+              , (chartXTitle chart == Just t && by < h * 0.45)
+                  || (chartYTitle chart == Just t && bx < w * 0.4)
+              ]
+            ticks = [b | (b, t) <- ts, tickText t]
+         in or [boxesOverlap a b | a <- titles, b <- ticks]
+      overlapLegendTick chart w h drawOps =
+        let names = map seriesName (chartSeries chart)
+            ts = [(drawTextBox fm x y ax ay t, t) | DrawText x y ax ay t _ <- V.toList drawOps]
+            legends =
+              [ b
+              | (b@(Rect bx by _ _), t) <- ts
+              , t `elem` names
+              , case chartLegend chart of
+                  LegendRight -> bx > w * 0.55
+                  LegendBottom -> by < h * 0.45
+                  _ -> False
+              ]
+            ticks = [b | (b, t) <- ts, tickText t]
+         in or [boxesOverlap a b | a <- legends, b <- ticks]
+  unless (not (overlapTitleTick sleepChart 400 240 legendOps)) $
+    fail "axis titles overlap ticks"
+  unless (not (overlapLegendTick sleepChart 400 240 legendOps)) $
+    fail "legend overlaps ticks"
+  unless (not (overlapTitleTick sleepChart 220 150 tightOps)) $
+    fail "axis titles overlap ticks on a small plot"
+  unless (not (overlapTitleTick barChartSample 220 150 barTightOps)) $
+    fail "bar axis titles overlap ticks on a small plot"
+  unless (not (overlapTitleTick botChart 400 240 botOps)) $
+    fail "axis titles overlap ticks with bottom legend"
+  unless (not (overlapLegendTick botChart 400 240 botOps)) $
+    fail "bottom legend overlaps ticks"
+  let shortTitles =
+        (bareChart [line "sin(x)" [(0, 0), (1, 1)]])
+          { chartLegend = LegendRight
+          , chartYTitle = Just "y"
+          , chartXTitle = Just "x"
+          }
+      shortM = chartMargins fm defaultPlotStyle shortTitles
+  unless (marginLeft shortM < 0.85 && marginBottom shortM < 0.65) $
+    fail "short axis titles left a huge gutter"
 
 barChartSample :: Chart
 barChartSample =
@@ -268,3 +382,69 @@ testPlotHover _fm = do
     Just h ->
       unless (hoverSeriesIdx h == 0 && hoverPointIdx h == 1 && hoverDataX h == 1 && hoverDataY h == 1) $
         fail "nearestPlotHover picked wrong point"
+
+bareChart :: [Series] -> Chart
+bareChart ss =
+  Chart
+    { chartTitle = Nothing
+    , chartXTitle = Nothing
+    , chartYTitle = Nothing
+    , chartSeries = ss
+    , chartLegend = LegendNone
+    , chartGrid = GridNone
+    , chartDecimate = False
+    }
+
+fillTriCount :: V.Vector DrawOp -> Int
+fillTriCount ops = length [() | FillTriangle {} <- V.toList ops]
+
+testClosedSeriesFills :: FontMetrics -> IO ()
+testClosedSeriesFills fm = do
+  let areaOps =
+        diagramOps 200 120 (chartDiagram fm defaultTheme defaultPlotStyle (bareChart [area "a" [(0, 1), (1, 2), (2, 0)]]))
+      diamondOps =
+        diagramOps 200 120
+          ( chartDiagram
+              fm
+              defaultTheme
+              defaultPlotStyle
+              (bareChart [withMarker MarkDiamond (scatter "d" [(1, 1), (2, 3)])])
+          )
+      triOps =
+        diagramOps 200 120
+          ( chartDiagram
+              fm
+              defaultTheme
+              defaultPlotStyle
+              (bareChart [withMarker MarkTriangle (scatter "t" [(1, 1)])])
+          )
+      crossOps =
+        diagramOps 200 120
+          ( chartDiagram
+              fm
+              defaultTheme
+              defaultPlotStyle
+              (bareChart [withMarker MarkCross (scatter "x" [(8, 8)])])
+          )
+      ink = fromMaybe (themeRed defaultTheme) (listToMaybe (themeSeries defaultTheme))
+      inkXs =
+        [ x
+        | FillTriangle x0 _ x1 _ x2 _ c <- V.toList crossOps
+        , c == ink
+        , x <- [x0, x1, x2]
+        ]
+  unless (fillTriCount areaOps >= 2) $
+    fail "area series produced no fill triangles"
+  unless (fillTriCount diamondOps >= 2) $
+    fail "diamond marker produced no fill"
+  unless (fillTriCount triOps >= 1) $
+    fail "triangle marker produced no fill"
+  unless (not (null inkXs) && maximum inkXs - minimum inkXs < 40) $
+    fail "MarkCross arm left at origin"
+
+testGrowPlotHeight :: FontMetrics -> IO ()
+testGrowPlotHeight fm = do
+  let dump = chartDiagram fm defaultTheme defaultPlotStyle barChartSample
+      fitted = fitLayout fm (fillW defaultLayout) dump
+  unless (layoutMinH fitted <= 260 && layoutMaxH fitted <= 260) $
+    fail "plot grow height ballooned"

@@ -117,7 +117,7 @@ labelFitScale :: FontMetrics -> Vector DrawOp -> Double
 labelFitScale fm ops =
   let ts = [(x, y, ax, ay, t) | DrawText x y ax ay t _ <- V.toList ops]
       k = maximum (1 : [pairK a b | (a : rest) <- tails ts, b <- rest]) :: Float
-   in min 8 (realToFrac k)
+   in min 2 (realToFrac k)
   where
     pairK (x1, y1, ax1, ay1, t1) (x2, y2, ax2, ay2, t2) =
       let Rect px1 py1 tw1 th1 = drawTextBox fm x1 y1 ax1 ay1 t1
@@ -149,6 +149,10 @@ diagramFrame ps bw (Rect x y w h) =
     , Stroke x (y + h) x y bw (plotFrameBorder ps)
     ]
 
+-- Grow plots cap here unless the caller set a tighter layoutMaxH.
+growPlotCapH :: Float
+growPlotCapH = 260
+
 fitLayout :: FontMetrics -> Layout -> Diagram B -> Layout
 fitLayout fm layout d =
   let V2 dw dh = size d
@@ -179,26 +183,26 @@ fitLayout fm layout d =
       arF = clampSize (max 0.2 ar)
    in if growW
         then
-          let probeH0 =
+          let capH = min growPlotCapH (layoutMaxH layout)
+              floorH = if layoutMinH layout > 0 then layoutMinH layout else 180
+              probeH0 =
                 realToFrac
                   ( if layoutMinH layout > 0
                       then layoutMinH layout
                       else 200
                   ) ::
                   Double
-              probeH = min probeH0 (realToFrac (layoutMaxH layout))
+              probeH = min probeH0 (realToFrac capH)
               probeW = probeH * ar
               k = labelFitScale fm (diagramTextOps probeW probeH d)
               needW = clampSize (probeW * k)
-              needH = clampSize (probeH * k)
-              minH = max (max (layoutMinH layout) 200) needH
-              maxH = max (min (layoutMaxH layout) 320) needH
+              needH = min capH (max floorH (clampSize (probeH * k)))
            in layout
                 { layoutHeight = Fit
                 , layoutAspect = arF
                 , layoutMinW = max (layoutMinW layout) needW
-                , layoutMinH = minH
-                , layoutMaxH = maxH
+                , layoutMinH = needH
+                , layoutMaxH = max needH capH
                 }
         else
           let k = labelFitScale fm (diagramTextOps baseW baseH d)

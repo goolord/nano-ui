@@ -6,8 +6,8 @@ module NanoUI.Plot.Hit
   , nearestPlotHover
   ) where
 
+import Data.Maybe (fromMaybe)
 import Diagrams.Core (QDiagram)
-import Diagrams.Prelude (Any)
 import Diagrams.Prelude qualified as Dia
 import NanoUI (FontMetrics, Rect (..), Theme (..), V2, rectContains, v2X, v2Y)
 import NanoUI.Diagrams.Backend (NanoUIBackend, uniformHeight)
@@ -49,7 +49,7 @@ hitTestChart fm theme ps chart widgetRect mouse =
 diagramPointAt ::
   Double ->
   Double ->
-  QDiagram NanoUIBackend Dia.V2 Double Any ->
+  QDiagram NanoUIBackend Dia.V2 Double Dia.Any ->
   Float ->
   Float ->
   Maybe (Double, Double)
@@ -66,8 +66,10 @@ diagramPointAt w h d px py
        in if lx < offX || ly < offY || lx > offX + outW || ly > offY + outH
             then Nothing
             else
-              let gx = (lx - offX) / outW * dw
-                  gy = dh - (ly - offY) / outH * dh
+              let (x0, x1) = fromMaybe (0, dw) (Dia.extentX d)
+                  (y0, y1) = fromMaybe (0, dh) (Dia.extentY d)
+                  gx = x0 + (lx - offX) / outW * (x1 - x0)
+                  gy = y1 - (ly - offY) / outH * (y1 - y0)
                in Just (gx, gy)
 
 nearestPlotHover :: Chart -> Double -> Double -> Maybe PlotHover
