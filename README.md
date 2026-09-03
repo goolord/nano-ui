@@ -145,18 +145,26 @@ Text uses a system TrueType font (Adwaita, Liberation, or Noto on Linux; Segoe U
 NanoUI (app DSL) -> backend runners -> frame loop -> DrawData -> host render
 ```
 
-Workspace packages: `nano-ui` (core DSL + `NanoUI.Testing`), `nano-ui-term` (`term-lib`), `nano-ui-sdl` (`sdl-lib`, `-fsdl`).
+Workspace packages in `packages/`:
+- `packages/nano-ui`: Core DSL, two-pass flex layout, arenas, damage tracking, and testing harness (`NanoUI`, `NanoUI.Testing`)
+- `packages/nano-ui-term`: Terminal backend for Win32 console and notcurses (`NanoUI.Backend.Term`)
+- `packages/nano-ui-sdl`: Pure SDL3 backend for pixel-host windowing (`NanoUI.Backend.Sdl`)
+- `packages/nano-ui-diagrams`: diagrams-lib vector graphics and plot engine (`NanoUI.Diagrams`, `NanoUI.Plot`)
+- `packages/nano-ui-demo`: Showcase interactive demos and profiling apps (`nano-ui-sdl-demo`, `nano-ui-sdl-profile`)
 
 ## Modules
 
-| Module | Role |
-|--------|------|
-| `NanoUI` | App-facing DSL: widgets, layout, style, animation, input types |
-| `NanoUI.Testing` | Deterministic frames, context setup, ASCII render inspection |
-| `NanoUI.Testing.Term` | Terminal test helpers (palette, Ansi, Cells, Event, Vt) |
-| `NanoUI.Testing.Sdl` | SDL bench/test helpers (`newSdlContext`, `sdlDrawFrame`, `withSdlBench`) |
-| `NanoUI.Backend.Term` | `TermOptions`, `runTermApp`, `runTermAppReduce` |
-| `NanoUI.Backend.Sdl` | `SdlOptions`, `RgbaImage`, `runSdlApp`, `runSdlAppReduce` |
+| Module | Package | Role |
+|--------|---------|------|
+| `NanoUI` | `nano-ui` | App-facing DSL: widgets, layout, style, animation, input types |
+| `NanoUI.Debug` | `nano-ui` | Shared RTS metrics sampling, formatting, and frame timing utilities |
+| `NanoUI.Testing` | `nano-ui` | Deterministic frames, context setup, ASCII render inspection |
+| `NanoUI.Testing.Harness` | `nano-ui` | Test harness gestures and text span query inspection |
+| `NanoUI.Backend.Term` | `nano-ui-term` | `TermOptions`, `runTermApp`, `runTermAppReduce` |
+| `NanoUI.Testing.Term` | `nano-ui-term` | Terminal test helpers (palette, Ansi, Cells, Event, Vt) |
+| `NanoUI.Backend.Sdl` | `nano-ui-sdl` | `SdlOptions`, `RgbaImage`, `runSdlApp`, `runSdlAppReduce`, SDL testing context |
+| `NanoUI.Diagrams` | `nano-ui-diagrams` | diagrams-lib vector graphics canvas and bridge |
+| `NanoUI.Plot` | `nano-ui-diagrams` | High-performance interactive timeseries plotting widgets |
 
 Internal ownership (not exported from packages):
 

@@ -1,8 +1,9 @@
 packages:
-  .
-  term-lib
-  sdl-lib
-  nano-ui-diagrams
+  packages/nano-ui
+  packages/nano-ui-term
+  packages/nano-ui-sdl
+  packages/nano-ui-diagrams
+  packages/nano-ui-demo
 
 tests: True
 benchmarks: True
@@ -14,5 +15,5 @@ package *
 package nano-ui
   ghc-options: -fspecialise-aggressively
 
-package nano-ui-sdl-bench
+package nano-ui-sdl
   executable-static: True
