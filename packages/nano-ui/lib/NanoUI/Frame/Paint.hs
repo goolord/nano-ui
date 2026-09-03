@@ -174,7 +174,7 @@ lowerNodeVisible ctx idx nt x y w h rect fm theme terminal da =
               ( scrollChromeActive cfg False dir contentSize innerMain
               , scrollContentClip (ctxHostProfile ctx) fm slot cfg dir x y w h pad contentSize
               )
-      let paintWell = showChrome && not (wTag == SizingGrow && hTag == SizingGrow)
+      let paintWell = not (wTag == SizingGrow && hTag == SizingGrow)
       when paintWell $ do
         fillStyledRect da terminal wellStyle rect
         strokeStyledRect da terminal wellStyle x y w h

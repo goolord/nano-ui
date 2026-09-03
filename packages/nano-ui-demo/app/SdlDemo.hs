@@ -240,6 +240,11 @@ demoUi = do
               scroll (padAll 6 . fixedH 300 . fillW $ defaultLayout) $ do
                 (_, sel) <- tree "demo" demoTree sel0
                 setTreeSel (T.pack (show sel))
+              sep
+              heading "Items"
+              scroll (padAll 6 . fixedH 136 . fillW $ defaultLayout) $
+                column (tight . gap 0 . fillW $ defaultLayout) $
+                  mapM_ (\i -> stripedRow i (tight . fillW $ defaultLayout) (T.pack ("Item " <> show i))) [1 .. 12 :: Int]
             Table -> do
               heading "Table"
               muted "Click a header to sort. Drag a header to reorder."

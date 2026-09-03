@@ -7,6 +7,7 @@ module NanoUI.WidgetText
   , radioLabelText
   , treeEncodeStyle
   , treeDecodeStyle
+  , treeDecodeStripe
   , treeLabelText
   , treeDisplayText
   , treeMeasureLabel
@@ -98,21 +99,25 @@ radioLabelText txt =
     Nothing -> txt
     Just p -> T.drop (T.length p) txt
 
--- | styleIdx: nodeIdx in high bits, depth in 0-7, hasKids bit 8, expanded bit 9.
-treeEncodeStyle :: Int -> Int -> Bool -> Bool -> Int
-treeEncodeStyle nodeIdx depth hasKids expanded =
-  (nodeIdx `shiftL` 10)
-    .|. (depth .&. 0xff)
-    .|. (if hasKids then 0x100 else 0)
+-- | styleIdx: nodeIdx in bits 11+, depth in 0-7, hasKids bit 8, expanded bit 9, stripeOdd bit 10.
+treeEncodeStyle :: Int -> Int -> Bool -> Bool -> Bool -> Int
+treeEncodeStyle nodeIdx depth hasKids expanded isOdd =
+  (nodeIdx `shiftL` 11)
+    .|. (if isOdd then 0x400 else 0)
     .|. (if expanded then 0x200 else 0)
+    .|. (if hasKids then 0x100 else 0)
+    .|. (depth .&. 0xff)
 
 treeDecodeStyle :: Int -> (Int, Int, Bool, Bool)
 treeDecodeStyle s =
-  ( s `shiftR` 10
+  ( s `shiftR` 11
   , s .&. 0xff
   , s .&. 0x100 /= 0
   , s .&. 0x200 /= 0
   )
+
+treeDecodeStripe :: Int -> Int
+treeDecodeStripe s = if s .&. 0x400 /= 0 then tableStripeOdd else tableStripeEven
 
 treeLabelText :: Text -> Text
 treeLabelText txt =

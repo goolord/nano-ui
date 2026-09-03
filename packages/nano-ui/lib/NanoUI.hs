@@ -156,6 +156,7 @@ module NanoUI
   , radioFieldset
   , boundedRadioFieldset
   , useRadio
+  , stripedRow
   , TreeItem (..)
   , tree
   , modal
@@ -518,6 +519,7 @@ import NanoUI.Widgets
   , useToggle
   , window
   )
+import NanoUI.Widgets.Combinators (stripedRow)
 import NanoUI.Widgets.Tabs
   ( Tab (..)
   , TabOrientation (..)
