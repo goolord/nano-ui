@@ -8,14 +8,17 @@ module NanoUI.Widgets.Animate
   , animateToSpring
   , animateToA
   , animateToSpringA
+  , useState
   , useFlag
   , useText
   , useToggle
   ) where
 
 import Control.Monad (when)
+import Data.Dynamic (fromDynamic, toDyn)
 import Data.IORef (readIORef)
 import Data.Text (Text)
+import Data.Typeable (Typeable)
 import Effectful (Eff, type (:>))
 import qualified Data.IntMap.Strict as IM
 import NanoUI.Animatable (Animatable (..))
@@ -100,47 +103,62 @@ animateToSpringA params target = do
       (zip [0 ..] (toComponents target))
   pure (fromComponents comps)
 
+useState :: (Typeable a, Eq a, Ui :> es) => a -> Eff es (a, a -> Eff es ())
+useState initial = do
+  wid <- nextId
+  ctx <- askContext
+  let key = intKey wid
+  st0 <- uiIO (getStore ctx)
+  let val = case IM.lookup key (storeDyn st0) >>= fromDynamic of
+        Just v -> v
+        Nothing -> initial
+      setVal newV = uiIO $ do
+        st <- getStore ctx
+        let prev = case IM.lookup key (storeDyn st) >>= fromDynamic of
+              Just v -> v
+              Nothing -> initial
+        when (prev /= newV) $ do
+          setStore ctx (bumpMirror (st {storeDyn = IM.insert key (toDyn newV) (storeDyn st)}))
+          markDirty ctx
+  pure (val, setVal)
+
 useStoreField ::
   (Eq a, Ui :> es) =>
   (WidgetStore -> IM.IntMap a) ->
   (WidgetStore -> Int -> a -> WidgetStore) ->
   a ->
-  Eff es (Eff es a, a -> Eff es ())
+  Eff es (a, a -> Eff es ())
 useStoreField field update initial = do
   wid <- nextId
   ctx <- askContext
   let key = intKey wid
-      get = uiIO $ do
-        st <- getStore ctx
-        pure (IM.findWithDefault initial key (field st))
+  st0 <- uiIO (getStore ctx)
+  let val = IM.findWithDefault initial key (field st0)
       set v = uiIO $ do
         st <- getStore ctx
         let prev = IM.findWithDefault initial key (field st)
         when (prev /= v) $ do
           setStore ctx (update st key v)
           markDirty ctx
-  pure (get, set)
+  pure (val, set)
 
-useFlag :: (Ui :> es) => Bool -> Eff es (Eff es Bool, Bool -> Eff es ())
+useFlag :: (Ui :> es) => Bool -> Eff es (Bool, Bool -> Eff es ())
 useFlag initial = do
-  (getI, setI) <-
+  (valI, setI) <-
     useStoreField
       storeInt
       (\st k v -> bumpMirror (st {storeInt = IM.insert k v (storeInt st)}))
       (boolInt initial)
-  pure (fmap intBool getI, setI . boolInt)
+  pure (intBool valI, setI . boolInt)
 
-useText :: (Ui :> es) => Text -> Eff es (Eff es Text, Text -> Eff es ())
+useText :: (Ui :> es) => Text -> Eff es (Text, Text -> Eff es ())
 useText initial =
   useStoreField
     storeText
     (\st k v -> bumpMirror (st {storeText = IM.insert k v (storeText st)}))
     initial
 
-useToggle :: (Ui :> es) => Bool -> Eff es (Eff es Bool, Eff es ())
+useToggle :: (Ui :> es) => Bool -> Eff es (Bool, Eff es ())
 useToggle initial = do
-  (get, set) <- useFlag initial
-  let toggle = do
-        cur <- get
-        set (not cur)
-  pure (get, toggle)
+  (val, set) <- useFlag initial
+  pure (val, set (not val))

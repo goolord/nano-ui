@@ -43,7 +43,7 @@ import GHC.IO (unsafePerformIO)
 import qualified Data.ByteString as BS
 import System.Directory (getTemporaryDirectory, removeFile)
 import System.IO (hClose, openTempFile)
-import NanoUI (FontMetrics (..), GlyphQuad (..), hasMonoFontMarker, monospaceMetrics, stripMonoFontMarker)
+import NanoUI (FontMetrics (..), GlyphQuad (..), monospaceMetrics)
 import NanoUI.Testing
   ( Context
   , withExternalText
@@ -381,10 +381,7 @@ withTtfMeasureScaled :: Context -> SdlFont -> SdlFont -> Float -> Context
 withTtfMeasureScaled ctx sf monoSf scale =
   let fm = ttfFontMetricsScaled sf scale
       monoFm = ttfFontMetricsScaled monoSf scale
-      measure txt =
-        if hasMonoFontMarker txt
-          then measureTtfTextScaled monoSf scale (stripMonoFontMarker txt)
-          else measureTtfTextScaled sf scale txt
+      measure txt = measureTtfTextScaled sf scale txt
       ctx1 =
         withExternalText
           ( withMeasureText
@@ -406,11 +403,8 @@ withTtfMeasureGlyph ::
   FontMetrics -> -- ^ glyph-atlas fm for mono font
   Float ->
   Context
-withTtfMeasureGlyph ctx sf monoSf fm monoFm scale =
-  let measure txt =
-        if hasMonoFontMarker txt
-          then measureTtfTextScaled monoSf scale (stripMonoFontMarker txt)
-          else measureTtfTextScaled sf scale txt
+withTtfMeasureGlyph ctx sf _monoSf fm monoFm scale =
+  let measure txt = measureTtfTextScaled sf scale txt
       ctx1 =
         withExternalText
           ( withMeasureText

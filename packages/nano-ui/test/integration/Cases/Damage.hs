@@ -132,8 +132,7 @@ runStateChangeDamageTest _ failed = do
   ctx <- newContext
   let inp0 = withInput 400 300
       ui = do
-        (readName, setName) <- useText ""
-        name <- readName
+        (name, setName) <- useText ""
         row defaultLayout $ do
           label_ ("Left pane: " <> name)
           (resp, typed) <- textInput "Name" ""

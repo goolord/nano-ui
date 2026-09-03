@@ -39,6 +39,10 @@ module NanoUI.WidgetText
   , scrollNative2DStyle
   , tableSortReserve
   , tableStripeColor
+  , stripeColor
+  , packTextNodeStyle
+  , textNodeFontVariant
+  , textNodeStripe
   , tableHeaderLabel
   , tableHeaderDisplayText
   , isCloseButtonText
@@ -65,7 +69,7 @@ import Data.Text (Text)
 import Data.Word (Word8)
 import NanoUI.Font (FontMetrics (..), fmLineHeight)
 import NanoUI.Icons (Icons, checkboxPrefixes, radioPrefixes, treeExpandMark, treeExpandPrefixes)
-import NanoUI.Style (Theme (..), styleBg, themeButton, themePanel, themeWindow)
+import NanoUI.Style (FontVariant (..), Theme (..), styleBg, themeButton, themePanel, themeWindow)
 import NanoUI.Types (Color (..), colorB, colorG, colorR, colorRGBA, lerpColor, sliderBarCells)
 import NanoUI.WidgetMarkers (closeButtonMarker, tabButtonMarker, tableHeaderMarker)
 import qualified Data.Text as T
@@ -255,13 +259,32 @@ tableStripeEven = 1
 tableStripeOdd :: Int
 tableStripeOdd = 2
 
-tableStripeColor :: Theme -> Int -> Maybe Color
-tableStripeColor theme si
-  | si == tableStripeEven =
-      Just (lerpColor (styleBg (themePanel theme)) (themeWindow theme) 0.18)
-  | si == tableStripeOdd =
-      Just (lerpColor (styleBg (themePanel theme)) (styleBg (themeButton theme)) 0.42)
+{-# INLINE packTextNodeStyle #-}
+packTextNodeStyle :: FontVariant -> Int -> Int
+packTextNodeStyle fvar stripe =
+  (stripe `shiftL` 4) .|. (fromEnum fvar .&. 0x0F)
+
+{-# INLINE textNodeFontVariant #-}
+textNodeFontVariant :: Int -> FontVariant
+textNodeFontVariant si =
+  let v = si .&. 0x0F
+   in if v >= fromEnum (minBound :: FontVariant) && v <= fromEnum (maxBound :: FontVariant)
+        then toEnum v
+        else FontRegular
+
+{-# INLINE textNodeStripe #-}
+textNodeStripe :: Int -> Int
+textNodeStripe si = (si `shiftR` 4) .&. 0x0F
+
+{-# INLINE stripeColor #-}
+stripeColor :: Theme -> Int -> Maybe Color
+stripeColor theme s
+  | s == tableStripeEven = Just (lerpColor (styleBg (themePanel theme)) (themeWindow theme) 0.18)
+  | s == tableStripeOdd = Just (lerpColor (styleBg (themePanel theme)) (styleBg (themeButton theme)) 0.42)
   | otherwise = Nothing
+
+tableStripeColor :: Theme -> Int -> Maybe Color
+tableStripeColor theme si = stripeColor theme (textNodeStripe si)
 
 -- | Scroll container that shares an id with a master pane and must not paint chrome.
 tableScrollSlaveStyle :: Int

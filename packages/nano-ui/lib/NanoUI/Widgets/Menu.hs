@@ -19,11 +19,10 @@ import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import NanoUI.Context (getStore, intKey, markDirty, setStore)
-import NanoUI.Font (mutedFontMarker)
 import NanoUI.Input (inputMousePos, inputMouseReleased)
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO)
 import NanoUI.Store (WidgetStore (..), slotKey, slotMenuOpen, slotMenuPos)
-import NanoUI.Style (Layout (..), defaultLayout, fillW, padXY, tight)
+import NanoUI.Style (Layout (..), defaultLayout, fillW, fontMuted, padXY, tight)
 import NanoUI.Types (PopupAnchor (..), PopupPlacement (..), V2 (..))
 import NanoUI.Widgets.Combinators (buttonStyled)
 import NanoUI.Widgets.Layout (column, columnResponse, labelEx, sep)
@@ -141,7 +140,7 @@ menuItemWithIcon iconName txt =
 -- | Disabled menu item (dimmed, non-interactive).
 menuItemDisabled :: Ui :> es => Text -> Eff es ()
 menuItemDisabled txt =
-  void (labelEx (tight . fillW $ defaultLayout) (mutedFontMarker <> txt))
+  void (labelEx (tight . fillW . fontMuted $ defaultLayout) txt)
 
 -- | Separator line inside a context menu.
 menuSeparator :: Ui :> es => Eff es ()

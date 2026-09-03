@@ -32,11 +32,11 @@ import NanoUI.Font
   , fmLineHeight
   , resolveLayoutGap
   , resolveLayoutPadding
+  , measureText
   , measureTextWrapped
   , measureTextWrappedIO
   , labelContentInset
   , tableCellInset
-  , stripWidgetMarkers
   , ScrollBarSlot
   , widgetPadding
   , buttonPadding
@@ -72,6 +72,7 @@ import NanoUI.Layout.Arena
   , getWidgetId
   , getWidthSizing
   , getWrap
+  , parentIsNonWrapRow
   , isFloatingNode
   , isScrollNode
   , setRect
@@ -87,12 +88,13 @@ import NanoUI.Layout.Arena
   , naScratchOutCross
   )
 import NanoUI.Id (WidgetId)
-import NanoUI.Style (AlignX (..), AlignY (..), Padding (..), windowMargin)
+import NanoUI.Style (AlignX (..), AlignY (..), FontVariant (..), Padding (..), windowMargin)
 import NanoUI.Types (PopupAnchor (..), PopupPlacement (..), Rect (..), V2 (..), clamp)
 import NanoUI.Widgets.ColorPicker (colorPickerMeasureSize)
 import NanoUI.WidgetText
   ( checkboxLabelText
   , radioLabelText
+  , textNodeFontVariant
   , treeDecodeStyle
   , treeMeasureLabel
   , selectDisplayText
@@ -106,6 +108,8 @@ import NanoUI.WidgetText
   , textInputPlaceholder
   , isTableHeaderStyle
   , tableHeaderDisplayText
+  , buttonDisplayTextFromFlags
+  , buttonFlagsFromStyle
   )
 import NanoUI.Frame.Scroll.Geometry
   ( decodeScrollConfig
@@ -116,8 +120,8 @@ import NanoUI.Frame.Scroll.Geometry
   , scrollPolicyY
   )
 
-solveLayout :: NodeArena -> HostProfile -> FontMetrics -> (Text -> IO (Float, Float)) -> Float -> Float -> IO ()
-solveLayout na host fm measure rootW rootH =
+solveLayout :: NodeArena -> HostProfile -> FontMetrics -> FontMetrics -> (Text -> IO (Float, Float)) -> Float -> Float -> IO ()
+solveLayout na host fm monoFm measure rootW rootH =
   withArenaArraysSnap na $ do
     a <- arenaArrays na
     count <- arenaCount na
@@ -125,11 +129,11 @@ solveLayout na host fm measure rootW rootH =
       -- Wrap rows and wrapping labels need a known width. First pass sizes Grow
       -- rows unconstrained, position assigns widths, second pass remasures wrap
       -- height, then we position again so siblings sit below the wrapped content.
-      measurePass na host fm measure False
+      measurePass na host fm monoFm measure False
       positionNodeA a na host fm 0 0 0 rootW rootH
       needsRemeasure <- anyNeedsRemeasure na count
       when needsRemeasure $ do
-        measurePass na host fm measure True
+        measurePass na host fm monoFm measure True
         positionNodeA a na host fm 0 0 0 rootW rootH
 
 {-# INLINE nodeTypeA #-}
@@ -177,16 +181,17 @@ measurePass ::
   NodeArena ->
   HostProfile ->
   FontMetrics ->
+  FontMetrics ->
   (Text -> IO (Float, Float)) ->
   Bool ->
   IO ()
-measurePass na host fm measure useAssignedWidth = do
+measurePass na host fm monoFm measure useAssignedWidth = do
   a <- arenaArrays na
   count <- arenaCount na
   let go !idx
         | idx < 0 = pure ()
         | otherwise = do
-            measureNode a na host fm measure useAssignedWidth idx
+            measureNode a na host fm monoFm measure useAssignedWidth idx
             go (idx - 1)
   go (count - 1)
 
@@ -206,7 +211,8 @@ anyNeedsRemeasure na count = go 0
           (wTag, _) <- getWidthSizing na idx
           (hTag, _) <- getHeightSizing na idx
           (_, _, maxW, _) <- getMinMax na idx
-          let textNeedsRemeasure = nt == NodeText && (wTag == SizingGrow || maxW < 1e8)
+          isRowChild <- parentIsNonWrapRow na idx
+          let textNeedsRemeasure = nt == NodeText && (wrapped || not isRowChild) && (wTag == SizingGrow || maxW < 1e8)
               scrollGrow =
                 isScrollNode nt && (hTag == SizingGrow || wTag == SizingGrow)
           if wrapped || textNeedsRemeasure || scrollGrow || (ratio > 0 && not (isScrollNode nt))
@@ -218,15 +224,16 @@ measureNode ::
   NodeArena ->
   HostProfile ->
   FontMetrics ->
+  FontMetrics ->
   (Text -> IO (Float, Float)) ->
   Bool ->
   NodeIdx ->
   IO ()
-measureNode a na host fm measure useAssignedWidth idx = do
+measureNode a na host fm monoFm measure useAssignedWidth idx = do
   (_, _, assignedW, _) <- rectA a idx
   nt <- nodeTypeA a idx
   case nt of
-    NodeText -> measureTextNode na host fm measure useAssignedWidth idx
+    NodeText -> measureTextNode na host fm monoFm measure useAssignedWidth idx
     NodeSpacer -> measureSpacer na host fm idx
     NodeSeparator -> measureSeparator na idx
     NodeContainer -> measureContainer na host fm useAssignedWidth idx
@@ -265,47 +272,57 @@ measureTextNode ::
   NodeArena ->
   HostProfile ->
   FontMetrics ->
+  FontMetrics ->
   (Text -> IO (Float, Float)) ->
   Bool ->
   NodeIdx ->
   IO ()
-measureTextNode na host fm measure useAssignedWidth idx = do
+measureTextNode na host fm monoFm measure useAssignedWidth idx = do
   (minW, minH, maxW, maxH) <- getMinMax na idx
   (wTag, _) <- getWidthSizing na idx
   (hTag, hVal) <- getHeightSizing na idx
   (_, _, assignedW, _) <- getRect na idx
   parentAssigns <- growOrWrapParent na idx
-  let needsAssignedWrap = useAssignedWidth && wTag == SizingGrow && assignedW > 0
+  si <- getStyleIdx na idx
+  let fvar = textNodeFontVariant si
+      textFm = if fvar == FontMono then monoFm else fm
+      needsAssignedWrap = useAssignedWidth && wTag == SizingGrow && assignedW > 0
   -- Grow text wraps to the assigned slot. Reporting the unwrapped string on
   -- the first pass inflates wrap/Grow parents (Table tab help, kv values).
   -- A Fit parent sizes from children, so a lone muted must still measure.
   if wTag == SizingGrow && not needsAssignedWrap && parentAssigns
     then
-      setRect na idx 0 0 (clamp minW maxW 0) (clamp minH maxH (layoutLineHeight host fm))
+      setRect na idx 0 0 (clamp minW maxW 0) (clamp minH maxH (layoutLineHeight host textFm))
     else if useAssignedWidth && maxW >= 1e8 && not needsAssignedWrap
     then pure ()
     else do
       txt <- getText na idx
-      (tw0, th0) <- measure txt
-      let plain = stripWidgetMarkers txt
-          (ix, _) = labelContentInset host fm
+      (tw0, th0) <-
+        if fvar == FontMono
+          then pure (measureText host monoFm txt)
+          else measure txt
+      wrapped <- getWrap na idx
+      isRowChild <- parentIsNonWrapRow na idx
+      let plain = txt
+          (ix, _) = labelContentInset host textFm
           hasNewlines = T.any (== '\n') plain
           wrapCap
             | maxW < 1e8 = max 0 maxW
             | needsAssignedWrap = assignedW
             | otherwise = maxW
+          canWrap = (wrapped || not isRowChild) && wrapCap < 1e8
           wrapW = max 0 (wrapCap - 2 * ix)
       (tw, th) <-
-        if hasNewlines || (wrapCap < 1e8 && wrapCap + 0.5 < tw0)
+        if hasNewlines || (canWrap && wrapCap + 0.5 < tw0)
           then
-            if isCellHost host
-              then pure (measureTextWrapped host fm plain wrapW)
-              else measureTextWrappedIO (\t -> fmap fst (measure t)) fm plain wrapW
+            if isCellHost host || fvar == FontMono
+              then pure (measureTextWrapped host textFm plain wrapW)
+              else measureTextWrappedIO (\t -> fmap fst (measure t)) textFm plain wrapW
           else pure (tw0, th0)
       setRect na idx 0 0 (clamp minW maxW tw) $
         case hTag of
           SizingFixed -> clamp minH maxH hVal
-          _ -> clamp minH maxH (max (layoutLineHeight host fm) th)
+          _ -> clamp minH maxH (max (layoutLineHeight host textFm) th)
 
 -- Grow/wrap parents assign a width slot. Fit parents take the child's content.
 growOrWrapParent :: NodeArena -> NodeIdx -> IO Bool
@@ -480,7 +497,9 @@ measureWidget na host fm measure idx = do
             else
               if isTableHeaderStyle si
                 then pure (tableHeaderDisplayText (isCellHost host) si txt)
-                else pure txt
+                else if nt == NodeButton
+                  then pure (buttonDisplayTextFromFlags (buttonFlagsFromStyle si) txt)
+                  else pure txt
         (mw, mh) <- measure body
         pure (mw, mh, 0, 0)
   let rawW = tw + padX + extraW

@@ -45,7 +45,6 @@ import NanoUI.Font
   , centeredTextY
   , fmLineHeight
   , layoutLineHeight
-  , pickMonoFont
   , textDisplayWidth
   , widgetContentInset
   )
@@ -158,10 +157,9 @@ drawTextInputSelection da ctx idx x y w h style = do
               theme = ctxTheme ctx
               accent = themeAccent theme
               selBg = lerpColor accent (styleBg style) 0.55
-              (fieldFm, _) = pickMonoFont fm (ctxMonoFontMetrics ctx) value
               host = ctxHostProfile ctx
-              wLo = textDisplayWidth host fieldFm (T.take selLo value)
-              wHi = textDisplayWidth host fieldFm (T.take selHi value)
+              wLo = textDisplayWidth host fm (T.take selLo value)
+              wHi = textDisplayWidth host fm (T.take selHi value)
           let lineH = layoutLineHeight host fm
               ty = centeredTextY host fm (rectY fieldRect) (rectH fieldRect) lineH
               selX = rectX fieldRect + ix + wLo
@@ -189,9 +187,8 @@ drawTextInputCaret da ctx idx x y w h style = do
             (ix, _) = widgetContentInset (ctxHostProfile ctx) fm
             fieldTxt = textInputFieldText lbl value focus
             prefix = T.take (max 0 (min (T.length fieldTxt) cursor)) fieldTxt
-            (fieldFm, _) = pickMonoFont fm (ctxMonoFontMetrics ctx) fieldTxt
             host = ctxHostProfile ctx
-            pw = textDisplayWidth host fieldFm prefix
+            pw = textDisplayWidth host fm prefix
         let lineH = layoutLineHeight host fm
             ty = centeredTextY host fm (rectY fieldRect) (rectH fieldRect) lineH
             caretX = rectX fieldRect + ix + pw

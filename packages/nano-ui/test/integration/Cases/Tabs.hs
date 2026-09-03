@@ -104,9 +104,8 @@ runTabsStatePersistenceTest ctx failed = do
         [ tab TabA "A" $
             withKey ("tab-a" :: T.Text) $
               withKey ("flag" :: T.Text) $ do
-                (readFlag, setFlag) <- useFlag False
-                clickButton "ToggleA" (readFlag >>= \f -> setFlag (not f))
-                flag <- readFlag
+                (flag, setFlag) <- useFlag False
+                clickButton "ToggleA" (setFlag (not flag))
                 label_ (if flag then "FlagIsOn" else "FlagIsOff")
         , tab TabB "B" (label_ "OtherTab")
         ]
@@ -172,13 +171,12 @@ runTabsContentDamageTest _ failed = do
   ctx <- newContext
   let inp0 = withInputOff 320 200
       ui = do
-        (readClick, setClick) <- useText ""
+        (click, setClick) <- useText ""
         row defaultLayout $ do
           btn <- button "OK"
           onClick btn (setClick "OK")
           _ <- tabs ("Controls" :: T.Text)
-            [ tab "Controls" "Controls" $ do
-                click <- readClick
+            [ tab "Controls" "Controls" $
                 kv "Clicked" (if T.null click then "-" else click)
             ]
           pure btn

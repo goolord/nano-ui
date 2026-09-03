@@ -43,10 +43,9 @@ main = do
       ( column
           (defaultLayout {layoutWidth = Grow 1, layoutHeight = Grow 1})
           ( do
-              (readSort, setSort) <- useTableSort (SortCol 0 SortAsc)
-              sort <- readSort
-              (tableResp, nextSort) <- table "people" colPeople people sort
-              when (tableRespChanged tableResp) (setSort nextSort)
+              (sort, setSort) <- useTableSort (SortCol 0 SortAsc)
+              tableResp <- table "people" colPeople people sort
+              when (tableRespChanged tableResp) (setSort (tableSort tableResp))
               label "nano-ui demo"
           )
       )

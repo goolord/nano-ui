@@ -10,6 +10,7 @@ module NanoUI.Widgets.Table
   , table
   , tableEx
   , tableCfg
+  , simpleTable
   , useTableSort
   , tableRespChanged
   , tableRespClicked
@@ -36,13 +37,13 @@ import Data.Vector qualified as V
 import Effectful (Eff, type (:>))
 import qualified Data.IntMap.Strict as IM
 import NanoUI.Context (Context (..), bumpMirror, getPrevRect, getScrollOffset2D, getStore, intKey, linkScrollAxes, markDirty, setStore)
-import NanoUI.Font (monoFontMarker, scrollBarGutter, stripWidgetMarkers, tableCellInset, textDisplayWidth)
+import NanoUI.Font (scrollBarGutter, tableCellInset, textDisplayWidth)
 import NanoUI.Id (WidgetId (..))
 import NanoUI.Input (Input (..), inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased, inputMouseRightReleased)
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
 import NanoUI.Store (WidgetStore (..), slotDrag, slotDragW, slotKey)
-import NanoUI.Style (AlignX (..), AlignY (..), Direction (..), Layout (..), Padding (..), Sizing (..), defaultLayout, fillH, fillW, tight)
+import NanoUI.Style (AlignX (..), AlignY (..), Direction (..), FontVariant (..), Layout (..), Padding (..), Sizing (..), defaultLayout, fillH, fillW, tight)
 import NanoUI.Types (isCellHost, rectH, rectW, v2X, V2 (..))
 import NanoUI.WidgetText (tableHeaderLabel, tableSortReserve)
 import NanoUI.Widgets.Behavior (useReorder)
@@ -336,7 +337,7 @@ columnWidths ctx cols rows =
       (ix, _) = tableCellInset host fm
       cellPadX = 2 * ix
       headerPadX = cellPadX
-      measure metrics txt = textDisplayWidth host metrics (stripWidgetMarkers txt)
+      measure metrics txt = textDisplayWidth host metrics txt
       hdrs = columnHeaders cols
       numeric = numericColumns cols rows
       hdrW hdr = measure fm (hdr <> tableSortReserve terminal) + headerPadX
@@ -356,13 +357,14 @@ nextSortCol n cur clicked =
         then SortCol clicked (case sortColDir clamped of SortAsc -> SortDesc; SortDesc -> SortAsc)
         else SortCol clicked SortAsc
 
-useTableSort :: Ui :> es => SortCol -> Eff es (Eff es SortCol, SortCol -> Eff es ())
+useTableSort :: Ui :> es => SortCol -> Eff es (SortCol, SortCol -> Eff es ())
 useTableSort initial = do
   wid <- nextId
   ctx <- askContext
   let key = intKey wid
       packedInitial = packSort initial
-      readSort = uiIO $ unpackSort . IM.findWithDefault packedInitial key . storeInt <$> getStore ctx
+  st0 <- uiIO (getStore ctx)
+  let sortVal = unpackSort (IM.findWithDefault packedInitial key (storeInt st0))
       setSort sort = uiIO $ do
         st <- getStore ctx
         let packed = packSort sort
@@ -370,7 +372,7 @@ useTableSort initial = do
         when (prev /= packed) $ do
           setStore ctx (bumpMirror (st {storeInt = IM.insert key packed (storeInt st)}))
           markDirty ctx
-  pure (readSort, setSort)
+  pure (sortVal, setSort)
 
 packResize :: Int -> Int
 packResize i = -(1000 + i)
@@ -444,7 +446,7 @@ finishTable ::
   [(Int, Response)] ->
   Maybe Response ->
   (Int -> Float) ->
-  Eff es (TableResponse, SortCol)
+  Eff es TableResponse
 finishTable n stateKey terminal vis order0 hidden0 drag0 dragX0 dragW0 widths0 widths1 sort0 headerPairs showAllResp resolvedW = do
   ctx <- askContext
   inp <- askInput
@@ -506,14 +508,18 @@ finishTable n stateKey terminal vis order0 hidden0 drag0 dragX0 dragW0 widths0 w
                   IM.insert (slotKey slotDragW stateKey) nextDragW (storeFloat st)
             }
     when (st1 /= st) $ setStore ctx st1 >> markDirty ctx
-  pure (TableResponse widgetResp nextSort nextOrder nextHidden, nextSort)
+  pure (TableResponse widgetResp nextSort nextOrder nextHidden)
 
-
-table :: (Ui :> es) => Text -> Colonnade Headed row Text -> [row] -> SortCol -> Eff es (TableResponse, SortCol)
+table :: (Ui :> es) => Text -> Colonnade Headed row Text -> [row] -> SortCol -> Eff es TableResponse
 table = tableEx (tight . fillW $ defaultLayout {layoutGap = 0})
 
-tableEx :: (Ui :> es) => Layout -> Text -> Colonnade Headed row Text -> [row] -> SortCol -> Eff es (TableResponse, SortCol)
+tableEx :: (Ui :> es) => Layout -> Text -> Colonnade Headed row Text -> [row] -> SortCol -> Eff es TableResponse
 tableEx = tableCfg defaultTableCfg
+
+simpleTable :: (Ui :> es) => [Text] -> [[Text]] -> Eff es TableResponse
+simpleTable headers rows = do
+  let cols = mconcat [headed h (\r -> if i < length r then r !! i else "") | (i, h) <- zip [0 ..] headers]
+  table "simple" cols rows (SortCol 0 SortAsc)
 
 tableCfg ::
   (Ui :> es) =>
@@ -523,7 +529,7 @@ tableCfg ::
   Colonnade Headed row Text ->
   [row] ->
   SortCol ->
-  Eff es (TableResponse, SortCol)
+  Eff es TableResponse
 tableCfg cfg outerLayout key cols rows curSort =
   withKey ("table:" <> key) $ do
     stateWid <- nextId
@@ -572,11 +578,11 @@ tableCfg cfg outerLayout key cols rows curSort =
             , layoutAlignX = if listAt numeric i False then AlignEnd else AlignStart
             , layoutAlignY = AlignMiddle
             , layoutMinH = rowMinH
+            , layoutFontVariant = if listAt numeric i False then FontMono else FontRegular
             }
-        shown i txt = if listAt numeric i False then monoFontMarker <> txt else txt
         renderHeader i =
           buttonStyled (tableHeaderLabel terminal (listAt hdrs i T.empty)) (if sortColIndex sort0 == i then 1 else 0) (inner i) (sortMarkStyle sort0 i)
-        renderCell ri r i = void (stripedRow ri (inner i) (shown i (columnCells cols r !! i)))
+        renderCell ri r i = void (stripedRow ri (inner i) (columnCells cols r !! i))
     column outerLayout $ do
       showAllResp <-
         if IS.null hidden0

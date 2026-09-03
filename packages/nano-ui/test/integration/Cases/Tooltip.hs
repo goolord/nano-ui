@@ -19,7 +19,7 @@ runTooltipHoverTest ctx failed = do
   let inp0 = withInput 640 480
       ui = column defaultLayout $ do
         btn <- button "Help Target"
-        tooltip "Helpful advice here" btn
+        tooltip btn "Helpful advice here"
 
   -- Unhovered: no tooltip overlay
   _ <- evalUi ctx inp0 ui
@@ -72,7 +72,7 @@ runTooltipIdStableTest ctx failed = do
   let inp0 = withInput 640 480
       ui = column defaultLayout $ do
         a <- button "Help Target"
-        tooltip "tip" a
+        tooltip a "tip"
         b <- button "After"
         pure (a, b)
   (a0, b0) <- evalUi ctx inp0 ui
@@ -89,7 +89,7 @@ runTooltipScrollPosTest ctx failed = do
           column defaultLayout $ do
             mapM_ (\_ -> void (label "pad line")) [(1 :: Int) .. 40]
             btn <- button "Tip Target"
-            tooltip "Scrolled tip text" btn
+            tooltip btn "Scrolled tip text"
             mapM_ (\_ -> void (label "tail line")) [(1 :: Int) .. 12]
             pure btn
   (sid, _) <- warmup2 ctx inp0 ui

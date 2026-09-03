@@ -14,10 +14,26 @@ module NanoUI.Widgets.Layout
   , scroll
   , scroll2D
   , scrollArea
-  , scrollAreaId
-  , scrollAreaIdConfigured
   , scrollArea2D
   , scrollConfigured
+  , scrollAreaId
+  , scrollAreaIdConfigured
+  , row_
+  , rowWith
+  , row'
+  , column_
+  , columnWith
+  , column'
+  , panel_
+  , panelWith
+  , panel'
+  , scroll_
+  , scrollWith
+  , center
+  , flexRow
+  , flexCol
+  , hGroup
+  , vGroup
   , flex
   , sep
   )
@@ -45,10 +61,16 @@ import NanoUI.Layout.Arena
   )
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO)
 import NanoUI.Style
-  ( Direction (..)
+  ( AlignX (..)
+  , Direction (..)
   , Layout (..)
   , Sizing (..)
+  , alignMid
   , defaultLayout
+  , fillH
+  , fillW
+  , gap
+  , grow
   )
 import NanoUI.Widgets.Node
   ( Response
@@ -63,6 +85,18 @@ import NanoUI.Widgets.Node
 panel :: Ui :> es => Layout -> Eff es a -> Eff es a
 panel = container NodePanel
 
+{-# INLINE panel_ #-}
+panel_ :: Ui :> es => Eff es a -> Eff es a
+panel_ = panel defaultLayout
+
+{-# INLINE panelWith #-}
+panelWith :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es a
+panelWith f = panel (f defaultLayout)
+
+{-# INLINE panel' #-}
+panel' :: Ui :> es => [Layout -> Layout] -> Eff es a -> Eff es a
+panel' mods = panel (foldr (.) id mods defaultLayout)
+
 {-# INLINE panelResponse #-}
 panelResponse :: Ui :> es => Layout -> Eff es a -> Eff es (a, Response)
 panelResponse = containerResponse NodePanel
@@ -71,6 +105,18 @@ panelResponse = containerResponse NodePanel
 row :: Ui :> es => Layout -> Eff es a -> Eff es a
 row layout child = container NodeContainer (layout {layoutDirection = Row}) child
 
+{-# INLINE row_ #-}
+row_ :: Ui :> es => Eff es a -> Eff es a
+row_ = row defaultLayout
+
+{-# INLINE rowWith #-}
+rowWith :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es a
+rowWith f = row (f defaultLayout)
+
+{-# INLINE row' #-}
+row' :: Ui :> es => [Layout -> Layout] -> Eff es a -> Eff es a
+row' mods = row (foldr (.) id mods defaultLayout)
+
 {-# INLINE rowResponse #-}
 rowResponse :: Ui :> es => Layout -> Eff es a -> Eff es (a, Response)
 rowResponse layout child = containerResponse NodeContainer (layout {layoutDirection = Row}) child
@@ -78,6 +124,18 @@ rowResponse layout child = containerResponse NodeContainer (layout {layoutDirect
 {-# INLINE column #-}
 column :: Ui :> es => Layout -> Eff es a -> Eff es a
 column layout child = container NodeContainer (layout {layoutDirection = Column}) child
+
+{-# INLINE column_ #-}
+column_ :: Ui :> es => Eff es a -> Eff es a
+column_ = column defaultLayout
+
+{-# INLINE columnWith #-}
+columnWith :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es a
+columnWith f = column (f defaultLayout)
+
+{-# INLINE column' #-}
+column' :: Ui :> es => [Layout -> Layout] -> Eff es a -> Eff es a
+column' mods = column (foldr (.) id mods defaultLayout)
 
 {-# INLINE columnResponse #-}
 columnResponse :: Ui :> es => Layout -> Eff es a -> Eff es (a, Response)
@@ -135,6 +193,34 @@ scroll :: Ui :> es => Layout -> Eff es a -> Eff es a
 scroll layout child = do
   (_, r) <- scrollArea layout child
   pure r
+
+{-# INLINE scroll_ #-}
+scroll_ :: Ui :> es => Eff es a -> Eff es a
+scroll_ = scroll defaultLayout
+
+{-# INLINE scrollWith #-}
+scrollWith :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es a
+scrollWith f = scroll (f defaultLayout)
+
+{-# INLINE center #-}
+center :: Ui :> es => Eff es a -> Eff es a
+center = column (grow . alignMid $ defaultLayout { layoutAlignX = AlignCenter })
+
+{-# INLINE flexRow #-}
+flexRow :: Ui :> es => Eff es a -> Eff es a
+flexRow = row (fillW defaultLayout)
+
+{-# INLINE flexCol #-}
+flexCol :: Ui :> es => Eff es a -> Eff es a
+flexCol = column (fillH defaultLayout)
+
+{-# INLINE hGroup #-}
+hGroup :: Ui :> es => Float -> Eff es a -> Eff es a
+hGroup g = row (gap g defaultLayout)
+
+{-# INLINE vGroup #-}
+vGroup :: Ui :> es => Float -> Eff es a -> Eff es a
+vGroup g = column (gap g defaultLayout)
 
 {-# INLINE scrollArea #-}
 scrollArea :: Ui :> es => Layout -> Eff es a -> Eff es (WidgetId, a)

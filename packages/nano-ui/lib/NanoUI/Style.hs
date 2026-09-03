@@ -33,7 +33,17 @@ module NanoUI.Style
   , tight
   , percent
   , aspect
-) where
+  , FontVariant (..)
+  , LayoutModifier
+  , fontRegular
+  , fontHeading
+  , fontMuted
+  , fontMono
+  , alignStart
+  , alignCenter
+  , alignTop
+  , alignBottom
+  ) where
 
 import Data.Bits ((.&.), (.|.))
 import Data.Word (Word8)
@@ -76,6 +86,15 @@ windowPad = Padding 10 10 0 10
 windowMargin :: Float
 windowMargin = 16
 
+data FontVariant
+  = FontRegular
+  | FontHeading
+  | FontMuted
+  | FontMono
+  deriving (Eq, Show, Enum, Bounded, Ord)
+
+type LayoutModifier = Layout -> Layout
+
 data Layout = Layout
   { layoutDirection :: !Direction
   , layoutWidth :: !Sizing
@@ -90,6 +109,7 @@ data Layout = Layout
   , layoutMaxW :: {-# UNPACK #-} !Float
   , layoutMaxH :: {-# UNPACK #-} !Float
   , layoutAspect :: {-# UNPACK #-} !Float
+  , layoutFontVariant :: !FontVariant
   }
   deriving (Eq, Show)
 
@@ -109,6 +129,7 @@ defaultLayout =
     , layoutMaxW = 1e9
     , layoutMaxH = 1e9
     , layoutAspect = 0
+    , layoutFontVariant = FontRegular
     }
 
 {-# INLINE padAll #-}
@@ -175,6 +196,38 @@ percent p l = l {layoutWidth = Percent p}
 {-# INLINE aspect #-}
 aspect :: Float -> Layout -> Layout
 aspect r l = l {layoutAspect = r}
+
+{-# INLINE fontRegular #-}
+fontRegular :: Layout -> Layout
+fontRegular l = l {layoutFontVariant = FontRegular}
+
+{-# INLINE fontHeading #-}
+fontHeading :: Layout -> Layout
+fontHeading l = l {layoutFontVariant = FontHeading}
+
+{-# INLINE fontMuted #-}
+fontMuted :: Layout -> Layout
+fontMuted l = l {layoutFontVariant = FontMuted}
+
+{-# INLINE fontMono #-}
+fontMono :: Layout -> Layout
+fontMono l = l {layoutFontVariant = FontMono}
+
+{-# INLINE alignStart #-}
+alignStart :: Layout -> Layout
+alignStart l = l {layoutAlignX = AlignStart}
+
+{-# INLINE alignCenter #-}
+alignCenter :: Layout -> Layout
+alignCenter l = l {layoutAlignX = AlignCenter}
+
+{-# INLINE alignTop #-}
+alignTop :: Layout -> Layout
+alignTop l = l {layoutAlignY = AlignTop}
+
+{-# INLINE alignBottom #-}
+alignBottom :: Layout -> Layout
+alignBottom l = l {layoutAlignY = AlignBottom}
 
 data Style = Style
   { styleBg :: !Color

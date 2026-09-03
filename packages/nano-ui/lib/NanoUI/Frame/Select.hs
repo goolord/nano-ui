@@ -34,7 +34,7 @@ import NanoUI.Context
   , setStore
   )
 import NanoUI.Draw (pushRect, pushRoundedRect, pushText)
-import NanoUI.Font (FontMetrics, centeredTextY, hasMonoFontMarker, stripMonoFontMarker, widgetContentInset)
+import NanoUI.Font (FontMetrics, centeredTextY, widgetContentInset)
 import NanoUI.Types (HostProfile, isCellHost)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), Key (..), foldInputKeys, inputKeys, inputMouseDown, inputMousePos, inputMousePressed)
@@ -466,10 +466,7 @@ drawSelectOverlays ctx inp = do
                               let tx = rectX dropRect + textInputMenuItemPadX + ix
                                   ty = centeredTextY (ctxHostProfile ctx) fm iy itemH th
                                   itemFg = if i == picked then themeAccent theme else styleFg dropStyle
-                                  (fm', shown) = if hasMonoFontMarker opt
-                                                   then (ctxMonoFontMetrics ctx, stripMonoFontMarker opt)
-                                                   else (fm, opt)
-                              pushText da fm' tx ty shown itemFg
+                              pushText da fm tx ty opt itemFg
                           go (idx + 1)
     go 0
 

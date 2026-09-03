@@ -49,8 +49,8 @@ main =
 
 tuiApp :: TuiClick -> NanoUI ()
 tuiApp st = do
-  (readAbout, setAbout) <- useFlag False
-  (readDebug, setDebug) <- useFlag False
+  (aboutOpen, setAbout) <- useFlag False
+  (debugOpen, setDebug) <- useFlag False
   column page $ do
     void $
       panel inset $
@@ -110,12 +110,10 @@ tuiApp st = do
                   ]
             muted "About opens a dialog. Debug opens a window. Esc closes, then quits."
             pure ()
-    debugOpen <- readDebug
     when debugOpen $ do
       snap <- askTermDebug
       (win, _) <- window True "Debug" (debugWindowBody snap)
       onClick win (setDebug False)
-    aboutOpen <- readAbout
     (aboutResp, _) <-
       modal aboutOpen "About" $ do
         heading "nano-ui"

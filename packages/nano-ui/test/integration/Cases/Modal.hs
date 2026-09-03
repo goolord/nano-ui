@@ -99,8 +99,7 @@ runModalCloseDamageTest :: Context -> IORef Int -> IO ()
 runModalCloseDamageTest _ failed = do
   ctx <- newContext
   let ui = do
-        (readOpen, setOpen) <- useFlag True
-        open <- readOpen
+        (open, setOpen) <- useFlag True
         (resp, _) <- modal open "Title" (label "body")
         onClick resp (setOpen False)
       inp0 = (withInput 320 240) {inputMousePos = V2 1 1}
@@ -115,10 +114,9 @@ runModalOpenDamageTest :: Context -> IORef Int -> IO ()
 runModalOpenDamageTest _ failed = do
   ctx <- newContext
   let ui = do
-        (readOpen, setOpen) <- useFlag False
+        (open, setOpen) <- useFlag False
         resp <- button "Open"
         onClick resp (setOpen True)
-        open <- readOpen
         _ <- modal open "Title" (label "body")
         pure resp
       inp0 = withInputOff 320 240
