@@ -15,7 +15,7 @@ def main():
 
     root = Path(__file__).resolve().parent.parent
     src = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(r"C:\Users\zach\Downloads\Inter.ttf")
-    out = root / "sdl-lib" / "data" / "inter.ttf"
+    out = root / "packages" / "nano-ui-sdl" / "data" / "inter.ttf"
 
     options = subset.Options()
     options.drop_tables += [

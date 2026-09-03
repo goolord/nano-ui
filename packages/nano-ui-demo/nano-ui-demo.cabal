@@ -1,0 +1,100 @@
+cabal-version:      3.4
+name:               nano-ui-demo
+version:            0.1.0.0
+synopsis:           Showcase applications and interactive demos for nano-ui
+description:        Multi-backend showcase integrating SDL3, Diagrams, and interactive UI components.
+license:            MIT
+license-file:       LICENSE
+author:             goolord
+maintainer:         zacharyachurchill@gmail.com
+category:           Graphics
+build-type:         Simple
+
+flag sdl
+    description: Build the SDL3 window demos (requires SDL3, SDL3_ttf, and pkg-config)
+    manual: True
+    default: False
+
+common extensions
+    default-language: GHC2024
+    default-extensions:
+        BangPatterns
+        DeriveGeneric
+        DuplicateRecordFields
+        FlexibleContexts
+        GeneralizedNewtypeDeriving
+        MagicHash
+        OverloadedStrings
+        ScopedTypeVariables
+        UnboxedTuples
+
+common ghc-options
+    ghc-options: -Wall -Widentities
+
+common rts-options
+    ghc-options:
+        -rtsopts
+        -threaded
+        "-with-rtsopts=-N1 -A64m -T -I0"
+
+common warnings
+  ghc-options:
+    -Wall
+    -Wextra
+    -Werror
+    -Wcompat
+    -Widentities
+    -Wincomplete-record-updates
+    -Wincomplete-uni-patterns
+    -Wmissing-export-lists
+    -Wmissing-home-modules
+    -Wpartial-fields
+    -Wredundant-constraints
+
+executable nano-ui-sdl-demo
+    import:           extensions
+    import:           ghc-options
+    import:           rts-options
+    import:           warnings
+    main-is:          SdlDemo.hs
+    ghc-options:      -main-is SdlDemo
+    build-depends:
+        base ^>=4.22.0.0,
+        bytestring ^>=0.12,
+        diagrams-lib >=1.6 && <1.7,
+        nano-ui,
+        nano-ui-diagrams,
+        nano-ui-sdl,
+        primitive ^>=0.9,
+        vector ^>=0.13,
+        text ^>=2.1
+    hs-source-dirs:   app
+    default-language: GHC2024
+    if os(windows)
+        ghc-options: -optl-mconsole
+    if !flag(sdl)
+        buildable: False
+
+executable nano-ui-sdl-profile
+    import:           extensions
+    import:           ghc-options
+    import:           rts-options
+    import:           warnings
+    main-is:          SdlProfile.hs
+    other-modules:    SdlDemo
+    build-depends:
+        base ^>=4.22.0.0,
+        bytestring ^>=0.12,
+        diagrams-lib >=1.6 && <1.7,
+        nano-ui,
+        nano-ui-diagrams,
+        nano-ui-sdl,
+        primitive ^>=0.9,
+        vector ^>=0.13,
+        text ^>=2.1
+    hs-source-dirs:   app
+    default-language: GHC2024
+    if os(windows)
+        ghc-options: -optl-mconsole
+    if !flag(sdl)
+        buildable: False
