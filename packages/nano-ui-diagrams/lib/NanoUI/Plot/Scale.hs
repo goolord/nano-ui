@@ -15,6 +15,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import NanoUI.Plot.Types (Domain (..), Range (..))
 import Numeric (showEFloat, showFFloat)
+import qualified Data.Vector.Generic as GV
 
 domainToPlot :: Domain -> Range -> Double -> Double
 domainToPlot (Domain lo hi) (Range rLo rHi) v =
@@ -37,13 +38,21 @@ rangeLo (Range lo _) = lo
 rangeSpan :: Range -> Double
 rangeSpan (Range lo hi) = hi - lo
 
-domainExtent :: [Double] -> Domain
-domainExtent [] = Domain 0 1
-domainExtent [x] = Domain (x - 0.5) (x + 0.5)
-domainExtent xs =
-  let lo = minimum xs
-      hi = maximum xs
-   in if lo == hi then Domain (lo - 0.5) (hi + 0.5) else Domain lo hi
+{-# LANGUAGE BangPatterns #-}
+
+-- Works with Data.Vector, Data.Vector.Unboxed, or Data.Vector.Storable
+domainExtent :: (GV.Vector v Double) => v Double -> Domain
+domainExtent xs = case GV.length xs of
+  0 -> Domain 0 1
+  1 -> let !x = GV.unsafeHead xs in Domain (x - 0.5) (x + 0.5)
+  _ ->
+    -- Single-pass fold to find both min and max simultaneously
+    let !(!lo, !hi) = GV.foldl' (\(!mn, !mx) !x -> (min mn x, max mx x))
+                               (GV.unsafeHead xs, GV.unsafeHead xs)
+                               (GV.unsafeTail xs)
+     in if lo == hi
+          then Domain (lo - 0.5) (hi + 0.5)
+          else Domain lo hi
 
 mergeDomains :: Domain -> Domain -> Domain
 mergeDomains (Domain a b) (Domain c d) = Domain (min a c) (max b d)

@@ -17,7 +17,6 @@ module NanoUI.Diagrams.Widget
 import Data.Colour (Colour)
 import Data.Colour.SRGB (sRGB24)
 import Data.Hashable (hash)
-import Data.List (tails)
 import Data.Vector (Vector)
 import Data.Vector qualified as V
 import Diagrams.Core (QDiagram)
@@ -113,31 +112,48 @@ themePlotKey t =
 uiPlotStyle :: Ui :> es => Eff es PlotStyle
 uiPlotStyle = fmap themePlotStyle uiTheme
 
-labelFitScale :: FontMetrics -> Vector DrawOp -> Double
+labelFitScale :: FontMetrics -> V.Vector DrawOp -> Double
 labelFitScale fm ops =
-  let ts = [(x, y, ax, ay, t) | DrawText x y ax ay t _ <- V.toList ops]
-      k = maximum (1 : [pairK a b | (a : rest) <- tails ts, b <- rest]) :: Float
+  let !ts = V.mapMaybe extractBox ops
+      !n  = V.length ts
+      !k  = outerLoop 0 (1.0 :: Float)
+        where
+          outerLoop !i !acc
+            | i >= n - 1 = acc
+            | otherwise  =
+                let !(x1, y1, px1, py1, tw1, th1) = V.unsafeIndex ts i
+                    innerLoop !j !m
+                      | j >= n    = m
+                      | otherwise =
+                          let !(x2, y2, px2, py2, tw2, th2) = V.unsafeIndex ts j
+                              !pairVal = pairK x1 y1 px1 py1 tw1 th1 x2 y2 px2 py2 tw2 th2
+                          in innerLoop (j + 1) (max m pairVal)
+                in outerLoop (i + 1) (innerLoop (i + 1) acc)
    in min 2 (realToFrac k)
   where
-    pairK (x1, y1, ax1, ay1, t1) (x2, y2, ax2, ay2, t2) =
-      let Rect px1 py1 tw1 th1 = drawTextBox fm x1 y1 ax1 ay1 t1
-          Rect px2 py2 tw2 th2 = drawTextBox fm x2 y2 ax2 ay2 t2
-          overlapX = px1 < px2 + tw2 && px2 < px1 + tw1
-          overlapY = py1 < py2 + th2 && py2 < py1 + th1
+    extractBox (DrawText x y ax ay t _) =
+      let !(Rect px py tw th) = drawTextBox fm x y ax ay t
+       in Just (x, y, px, py, tw, th)
+    extractBox _ = Nothing
+
+    pairK !x1 !y1 !px1 !py1 !tw1 !th1 !x2 !y2 !px2 !py2 !tw2 !th2 =
+      let !overlapX = px1 < px2 + tw2 && px2 < px1 + tw1
+          !overlapY = py1 < py2 + th2 && py2 < py1 + th1
        in if overlapX && overlapY
             then
               max
                 (axisK x1 x2 (px1 - x1) tw1 (px2 - x2) tw2)
                 (axisK y1 y2 (py1 - y1) th1 (py2 - y2) th2)
-            else 1
-    axisK a1 a2 o1 size1 o2 size2 =
-      let (loA, loO, loS, hiA, hiO) =
+            else 1.0
+
+    axisK !a1 !a2 !o1 !size1 !o2 !size2 =
+      let (!loA, !loO, !loS, !hiA, !hiO) =
             if a1 <= a2
               then (a1, o1, size1, a2, o2)
               else (a2, o2, size2, a1, o1)
-          den = hiA - loA
-          need = loO + loS + 2 - hiO
-       in if den <= 1e-6 then 1 else max 1 (need / den)
+          !den  = hiA - loA
+          !need = loO + loS + 2 - hiO
+       in if den <= 1e-6 then 1.0 else max 1.0 (need / den)
 
 diagramFrame :: PlotStyle -> Float -> Rect -> Vector DrawOp
 diagramFrame ps bw (Rect x y w h) =
