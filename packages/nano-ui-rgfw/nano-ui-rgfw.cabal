@@ -1,0 +1,85 @@
+cabal-version:      3.4
+name:               nano-ui-rgfw
+version:            0.1.0.0
+synopsis:           Lean, no-frills RGFW backend for nano-ui with single-pass layout
+description:        Zero-dependency, high-performance RGFW software backend for nano-ui using single-pass layout, exact collision bounding boxes, and embedded Cozette bitmap font.
+license:            MIT
+license-file:       LICENSE
+author:             goolord
+maintainer:         zacharyachurchill@gmail.com
+category:           Graphics
+build-type:         Simple
+data-files:         data/cozette.min.otb
+
+common extensions
+    default-language: GHC2024
+    default-extensions:
+        BangPatterns
+        DeriveGeneric
+        DuplicateRecordFields
+        GeneralizedNewtypeDeriving
+        MagicHash
+        OverloadedStrings
+        RecordWildCards
+        ScopedTypeVariables
+        UnboxedTuples
+
+common warnings
+    ghc-options:
+        -Wall
+        -Wextra
+        -Wcompat
+        -Widentities
+
+library
+    import:           extensions
+    import:           warnings
+    exposed-modules:
+        NanoUI.Backend.Rgfw
+        NanoUI.Rgfw.Font.Cozette
+        NanoUI.Rgfw.Layout
+        NanoUI.Rgfw.Render
+        NanoUI.Rgfw.Session
+        NanoUI.Rgfw.Surface
+        NanoUI.Rgfw.Theme
+    build-depends:
+        base ^>=4.22.0.0,
+        bytestring ^>=0.12,
+        containers,
+        effectful ^>=2.6,
+        file-embed ^>=0.0.16,
+        nano-ui-rgfw-bindings,
+        nano-ui,
+        primitive ^>=0.9,
+        text ^>=2.1,
+        vector ^>=0.13
+    hs-source-dirs:   lib
+    default-language: GHC2024
+
+executable nano-ui-rgfw-demo
+    import:           extensions
+    import:           warnings
+    main-is:          RgfwDemo.hs
+    build-depends:
+        base ^>=4.22.0.0,
+        nano-ui,
+        nano-ui-rgfw,
+        text ^>=2.1
+    hs-source-dirs:   examples
+    default-language: GHC2024
+
+test-suite nano-ui-rgfw-test
+    import:           extensions
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    main-is:          Spec.hs
+    build-depends:
+        base ^>=4.22.0.0,
+        bytestring ^>=0.12,
+        nano-ui,
+        nano-ui-rgfw,
+        nano-ui-rgfw-bindings,
+        primitive ^>=0.9,
+        text ^>=2.1
+    hs-source-dirs:   test
+    default-language: GHC2024

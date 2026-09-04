@@ -1,0 +1,55 @@
+cabal-version:      3.4
+name:               nano-ui-rgfw-bindings
+version:            0.1.0.0
+synopsis:           Haskell bindings for RGFW
+description:        Lightweight, single-header, zero-dependency windowing and input framework for Haskell.
+license:            MIT
+license-file:       LICENSE
+author:             goolord
+maintainer:         zacharyachurchill@gmail.com
+category:           Graphics
+build-type:         Simple
+
+common extensions
+    default-language: GHC2024
+    default-extensions:
+        BangPatterns
+        CApiFFI
+        DeriveGeneric
+        DuplicateRecordFields
+        ForeignFunctionInterface
+        GeneralizedNewtypeDeriving
+        MagicHash
+        OverloadedStrings
+        RecordWildCards
+        ScopedTypeVariables
+        UnboxedTuples
+
+common warnings
+    ghc-options:
+        -Wall
+        -Wextra
+        -Wcompat
+        -Widentities
+
+library
+    import:           extensions
+    import:           warnings
+    exposed-modules:
+        RGFW
+        RGFW.Raw
+    include-dirs:     cbits
+    install-includes: RGFW.h
+    c-sources:        cbits/RGFW.c
+    build-depends:
+        base ^>=4.22.0.0,
+        bytestring ^>=0.12,
+        primitive ^>=0.9
+    hs-source-dirs:   lib
+    default-language: GHC2024
+    if os(windows)
+        extra-libraries: gdi32 user32 shell32
+    elif os(osx)
+        frameworks: Cocoa
+    else
+        extra-libraries: X11 Xcursor Xrandr Xi
