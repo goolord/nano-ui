@@ -510,13 +510,7 @@ debugBody s =
 debugSection :: T.Text -> SmallArray (T.Text, T.Text) -> NanoUI ()
 debugSection title rows = do
   heading title
-  kvBlock (foldr (:) [] rows)
-
-clipField :: Int -> T.Text -> T.Text
-clipField n s =
-  if T.length s > n
-    then T.take (max 0 (n - 3)) s <> "..."
-    else s
+  mapM_ (\(k, v) -> kvMono k v) rows
 
 frameRows :: SdlDebugSnapshot -> SmallArray (T.Text, T.Text)
 frameRows s =
@@ -548,9 +542,9 @@ displayRows s =
     , ("scale", T.pack (printf "%10.2f" (dbgScale s)))
     , ("mouse", T.pack (printf "%4.0f, %-4.0f" (dbgMouseX s) (dbgMouseY s)))
     , ( "renderer"
-      , clipField 32 (dbgRenderer s <> if dbgVsync s then "  vsync on" else "  vsync off")
+      , dbgRenderer s <> if dbgVsync s then "  vsync on" else "  vsync off"
       )
-    , ("font", clipField 32 (T.pack (dbgFontPath s)))
+    , ("font", T.pack (dbgFontPath s))
     ]
 
 rtsRows :: SdlDebugSnapshot -> SmallArray (T.Text, T.Text)
