@@ -1,10 +1,10 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE BangPatterns #-}
 
 module NanoUI.Widgets.Tree (TreeItem (..), tree) where
 
 import Control.Monad (when)
 import Data.IORef (writeIORef)
-import Data.List (unfoldr)
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
@@ -27,34 +27,40 @@ import NanoUI.Widgets.Node (Response (..), setChanged, tagContainer)
 data TreeItem = TreeItem {treeItemLabel :: !Text, treeItemChildren :: ![TreeItem]}
   deriving (Eq, Show)
 
-indexForest :: (n -> [n]) -> [n] -> [(Int, Int, n)]
-indexForest kids items = snd (go 0 0 items)
-  where
-    go next _ [] = (next, [])
-    go next depth (x : xs) =
-      let (n1, ks) = go (next + 1) (depth + 1) (kids x)
-          (n2, rs) = go n1 depth xs
-       in (n2, (next, depth, x) : ks ++ rs)
-
-visibleForest :: (n -> [n]) -> IS.IntSet -> [n] -> [(Int, Int, Bool, n)]
-visibleForest kids expanded items =
-  unfoldr step (indexForest kids items)
-  where
-    step [] = Nothing
-    step ((idx, depth, x) : rest) =
-      let has = not (null (kids x))
-          pending =
-            if has && not (IS.member idx expanded)
-              then dropWhile (\(_, d, _) -> d > depth) rest
-              else rest
-       in Just ((idx, depth, has, x), pending)
-
-forestParents :: (n -> [n]) -> [n] -> [Int]
-forestParents kids items =
-  [idx | (idx, _, x) <- indexForest kids items, not (null (kids x))]
+countSubtree :: (n -> [n]) -> n -> Int
+countSubtree kids node = 1 + foldl' (\acc k -> acc + countSubtree kids k) 0 (kids node)
 
 countForest :: (n -> [n]) -> [n] -> Int
-countForest kids = foldl' (\n x -> n + 1 + countForest kids (kids x)) 0
+countForest kids = foldl' (\acc x -> acc + countSubtree kids x) 0
+
+visibleForest :: (n -> [n]) -> IS.IntSet -> [n] -> [(Int, Int, Bool, n)]
+visibleForest kids expanded items = snd (go 0 0 items)
+  where
+    go !idx _ [] = (idx, [])
+    go !idx !depth (x : xs) =
+      let k = kids x
+          hasKids = not (null k)
+          isExp = hasKids && IS.member idx expanded
+          (afterKidsIdx, kVis) =
+            if isExp
+              then go (idx + 1) (depth + 1) k
+              else if hasKids
+                then (idx + countSubtree kids x, [])
+                else (idx + 1, [])
+          (finalIdx, sVis) = go afterKidsIdx depth xs
+       in (finalIdx, (idx, depth, hasKids, x) : (kVis ++ sVis))
+
+forestParents :: (n -> [n]) -> [n] -> [Int]
+forestParents kids items = snd (go 0 items)
+  where
+    go !idx [] = (idx, [])
+    go !idx (x : xs) =
+      let k = kids x
+          hasKids = not (null k)
+          (afterKids, kParents) = if hasKids then go (idx + 1) k else (idx + 1, [])
+          (finalIdx, sParents) = go afterKids xs
+          thisParent = if hasKids then [idx] else []
+       in (finalIdx, thisParent ++ kParents ++ sParents)
 
 treeKeyNav ::
   KeyNav ->
