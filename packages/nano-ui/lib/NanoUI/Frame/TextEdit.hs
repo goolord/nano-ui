@@ -129,7 +129,6 @@ import NanoUI.Input
 import NanoUI.Layout.Arena
   ( NodeIdx
   , NodeType (NodeTextArea, NodeTextInput)
-  , arenaCount
   , findNodeRevM
   , getNodeType
   , getRect
@@ -706,27 +705,21 @@ updateTextInputSelection ctx wid anchor cursor = do
 
 textInputGeomForWidget :: Context -> WidgetId -> IO (Maybe (Rect, Float, Text))
 textInputGeomForWidget ctx wid = do
-  count <- arenaCount (ctxNodeArena ctx)
-  go 0 count
-  where
-    go idx count
-      | idx >= count = pure Nothing
-      | otherwise = do
-          nt <- getNodeType (ctxNodeArena ctx) idx
-          if nt /= NodeTextInput
-            then go (idx + 1) count
-            else do
-              w' <- getWidgetId (ctxNodeArena ctx) idx
-              if w' /= wid
-                then go (idx + 1) count
-                else do
-                  (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-                  let fm = ctxFontMetrics ctx
-                      field = tigFieldRect (textInputGeom (ctxHostProfile ctx) fm x y w h)
-                      (ix, _) = widgetContentInset (ctxHostProfile ctx) fm
-                      contentX = rectX field + ix
-                  value <- textInputValue ctx idx
-                  pure (Just (field, contentX, value))
+  mIdx <- findNodeByWidgetId ctx wid
+  case mIdx of
+    Nothing -> pure Nothing
+    Just idx -> do
+      nt <- getNodeType (ctxNodeArena ctx) idx
+      if nt /= NodeTextInput
+        then pure Nothing
+        else do
+          (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+          let fm = ctxFontMetrics ctx
+              field = tigFieldRect (textInputGeom (ctxHostProfile ctx) fm x y w h)
+              (ix, _) = widgetContentInset (ctxHostProfile ctx) fm
+              contentX = rectX field + ix
+          value <- textInputValue ctx idx
+          pure (Just (field, contentX, value))
 
 applyTextFieldMenuAction :: Context -> WidgetId -> Int -> IO ()
 applyTextFieldMenuAction ctx wid item = do
@@ -950,38 +943,32 @@ drawTextAreaContent da ctx idx x y w h style = do
 
 textAreaHitForWidget :: Context -> WidgetId -> IO (Maybe TextAreaHit)
 textAreaHitForWidget ctx wid = do
-  count <- arenaCount (ctxNodeArena ctx)
-  go 0 count
-  where
-    go idx count
-      | idx >= count = pure Nothing
-      | otherwise = do
-          nt <- getNodeType (ctxNodeArena ctx) idx
-          if nt /= NodeTextArea
-            then go (idx + 1) count
-            else do
-              w' <- getWidgetId (ctxNodeArena ctx) idx
-              if w' /= wid
-                then go (idx + 1) count
-                else do
-                  (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-                  let fm = ctxFontMetrics ctx
-                      geom = textAreaGeom (ctxHostProfile ctx) fm x y w h
-                      field = tagFieldRect geom
-                      clip = textAreaFieldClip (ctxHostProfile ctx) geom fm
-                  pure
-                    ( Just
-                        TextAreaHit
-                          { tahNodeIdx = idx
-                          , tahFieldRect = field
-                          , tahContentX = rectX clip
-                          , tahLineH = tagLineHeight geom
-                          , tahWidgetX = x
-                          , tahWidgetY = y
-                          , tahWidgetW = w
-                          , tahWidgetH = h
-                          }
-                    )
+  mIdx <- findNodeByWidgetId ctx wid
+  case mIdx of
+    Nothing -> pure Nothing
+    Just idx -> do
+      nt <- getNodeType (ctxNodeArena ctx) idx
+      if nt /= NodeTextArea
+        then pure Nothing
+        else do
+          (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+          let fm = ctxFontMetrics ctx
+              geom = textAreaGeom (ctxHostProfile ctx) fm x y w h
+              field = tagFieldRect geom
+              clip = textAreaFieldClip (ctxHostProfile ctx) geom fm
+          pure
+            ( Just
+                TextAreaHit
+                  { tahNodeIdx = idx
+                  , tahFieldRect = field
+                  , tahContentX = rectX clip
+                  , tahLineH = tagLineHeight geom
+                  , tahWidgetX = x
+                  , tahWidgetY = y
+                  , tahWidgetW = w
+                  , tahWidgetH = h
+                  }
+            )
 
 textAreaCursorAt :: Context -> TA.TextAreaState -> TextAreaHit -> V2 -> IO (Int, Int)
 textAreaCursorAt ctx state hit mouse = do
