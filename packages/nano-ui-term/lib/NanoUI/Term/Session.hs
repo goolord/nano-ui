@@ -10,10 +10,17 @@ module NanoUI.Term.Session
 import Control.Exception (finally)
 #endif
 import Control.Monad (when)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.IORef (newIORef, readIORef, writeIORef)
 import qualified Data.Text as T
 import GHC.Clock (getMonotonicTime)
-import NanoUI.Input (clearEphemeral, isHardQuitInput, splitFrame)
+import NanoUI.Input (clearEphemeral, splitFrame)
+import NanoUI.Runner
+  ( checkHardQuit
+  , checkSessionQuit
+  , newClickTracker
+  , stampClicksWith
+  , stepDeltaTime
+  )
 import NanoUI
   ( Input (..)
   , Modifiers (..)
@@ -42,7 +49,6 @@ import NanoUI.Testing
   , isDirty
   , debugPanelOpen
   , needsRedrawIdle
-  , overlayConsumesQuit
   , pointerDragActive
   , textInputEditActive
   , widgetNodeCount
@@ -167,9 +173,9 @@ termMainLoop ctx shouldQuit runOnce getSize readEvents present = do
           { inputWindowSize = Size (fromIntegral w0) (fromIntegral h0)
           }
   prevInpRef <- newIORef inp0
-  clickRef <- newIORef (0, V2 (-999) (-999), 0)
+  clickTracker <- newClickTracker
   let
-    loop cellsRef' prevInpRef' clickRef' inp queued lastT = do
+    loop cellsRef' prevInpRef' inp queued lastT = do
       pending <-
         if null queued
           then do
@@ -186,25 +192,24 @@ termMainLoop ctx shouldQuit runOnce getSize readEvents present = do
       if any isHardQuit group && not editActive
         then pure ()
         else do
-          nowT <- getMonotonicTime
-          let dt = realToFrac (nowT - lastT)
+          (nowT, dt) <- stepDeltaTime lastT
           noteLoop debugRef dt
           let inpRaw =
                 foldl'
                   applyEvent
                   (clearEphemeral inp {inputDeltaTime = dt})
                   group
-          inp' <- stampClicks clickRef' inpRaw
-          editActive' <- textInputEditActive ctx
-          if isHardQuitInput inp' && not editActive'
+          inp' <- stampClicksWith 1.5 0.4 clickTracker inpRaw
+          hardQuit <- checkHardQuit ctx inp'
+          if hardQuit
             then pure ()
             else do
               draw cellsRef' prevInpRef' inp'
               writeIORef prevInpRef' inp'
-              overlayQuit <- overlayConsumesQuit ctx inp'
-              if shouldQuit inp' && not overlayQuit
+              shouldTerm <- checkSessionQuit ctx shouldQuit inp'
+              if shouldTerm
                 then pure ()
-                else loop cellsRef' prevInpRef' clickRef' inp' rest nowT
+                else loop cellsRef' prevInpRef' inp' rest nowT
 
     draw prevCells prevInpCell inp = do
       prevI <- readIORef prevInpCell
@@ -242,7 +247,7 @@ termMainLoop ctx shouldQuit runOnce getSize readEvents present = do
           notePresent debugRef ((t1 - t0) * 1000) drawData stats blitted
         else noteSkip debugRef
   draw cellsRef prevInpRef inp0
-  loop cellsRef prevInpRef clickRef inp0 [] startTime
+  loop cellsRef prevInpRef inp0 [] startTime
 
 isButtonEdge :: TermEvent -> Bool
 isButtonEdge ev =
@@ -256,20 +261,6 @@ isHardQuit ev =
   case ev of
     EvChar c mods -> modCtrl mods && (c == 'c' || c == '\ETX')
     _ -> False
-
-stampClicks :: IORef (Double, V2, Int) -> Input -> IO Input
-stampClicks ref inp
-  | not (inputMousePressed inp) = pure inp
-  | otherwise = do
-      now <- getMonotonicTime
-      (t, pos, n) <- readIORef ref
-      let V2 x y = inputMousePos inp
-          V2 px py = pos
-          close = abs (x - px) <= 1.5 && abs (y - py) <= 1.5
-          quick = now - t <= 0.4
-          n' = if close && quick then min 3 (n + 1) else 1
-      writeIORef ref (now, inputMousePos inp, n')
-      pure (inp {inputMouseClicks = n'})
 
 applyEvent :: Input -> TermEvent -> Input
 applyEvent inp ev =
