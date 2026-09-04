@@ -181,8 +181,18 @@ displayText ctx nt idx = do
       si <- getStyleIdx (ctxNodeArena ctx) idx
       if isTableHeaderStyle si
         then pure (tableHeaderDisplayText terminal si txt)
-        else displayTextRest ctx nt idx txt terminal
+        else pure txt
     else displayTextRest ctx nt idx txt terminal
+
+selectCurrentOption :: Context -> NodeIdx -> IO T.Text
+selectCurrentOption ctx idx = do
+  store <- getStore ctx
+  opts <- getOptions (ctxNodeArena ctx) idx
+  wid <- getWidgetId (ctxNodeArena ctx) idx
+  let picked = IM.findWithDefault 0 (intKey wid) (storeInt store)
+  pure $ case drop picked opts of
+    (o : _) -> o
+    _ -> ""
 
 displayTextRest :: Context -> NodeType -> NodeIdx -> T.Text -> Bool -> IO T.Text
 displayTextRest ctx nt idx txt terminal =
@@ -190,15 +200,10 @@ displayTextRest ctx nt idx txt terminal =
     then
       case nt of
         NodeSelect -> do
+          opt <- selectCurrentOption ctx idx
           store <- getStore ctx
-          opts <- getOptions (ctxNodeArena ctx) idx
           wid <- getWidgetId (ctxNodeArena ctx) idx
-          let picked = IM.findWithDefault 0 (intKey wid) (storeInt store)
-              open = isSelectOpen store (intKey wid)
-              opt =
-                case drop picked opts of
-                  (o : _) -> o
-                  _ -> ""
+          let open = isSelectOpen store (intKey wid)
               icons = ctxIcons ctx
               caret = if open then iconSelectOpen icons else iconSelectClosed icons
           pure (selectDisplayText txt opt <> caret)
@@ -207,12 +212,10 @@ displayTextRest ctx nt idx txt terminal =
           wid <- getWidgetId (ctxNodeArena ctx) idx
           let current = widgetStoreColor store wid colorPickerDefaultColor
           pure (colorPickerDisplayText txt current)
-        NodeSlider -> pure txt
         NodeTree -> do
           si <- getStyleIdx (ctxNodeArena ctx) idx
           let (_, depth, hasKids, expanded) = treeDecodeStyle si
           pure (treeDisplayText (ctxIcons ctx) depth hasKids expanded txt)
-        NodeButton -> pure txt
         NodeTextInput -> do
           value <- textInputValue ctx idx
           focused <- textInputFocused ctx idx
@@ -224,27 +227,14 @@ displayTextRest ctx nt idx txt terminal =
         _ -> pure txt
     else
       case nt of
-        NodeCheckbox -> pure txt
-        NodeRadio -> pure txt
-        NodeTree -> pure txt
         NodeTextInput -> do
           value <- textInputValue ctx idx
           focused <- textInputFocused ctx idx
           pure (textInputFieldText txt value focused)
         NodeTextArea -> textAreaStoredValue ctx idx
-        NodeSlider -> pure txt
         NodeSelect -> do
-          store <- getStore ctx
-          opts <- getOptions (ctxNodeArena ctx) idx
-          wid <- getWidgetId (ctxNodeArena ctx) idx
-          let picked = IM.findWithDefault 0 (intKey wid) (storeInt store)
-              opt =
-                case drop picked opts of
-                  (o : _) -> o
-                  _ -> ""
+          opt <- selectCurrentOption ctx idx
           pure (selectDisplayText txt opt)
-        NodeColorPicker -> pure txt
-        NodeButton -> pure txt
         _ -> pure txt
 
 textInputValue :: Context -> NodeIdx -> IO Text

@@ -544,12 +544,9 @@ selectTextClip host x y w h fm =
 
 tagSelectClippedSpans ::
   HostProfile -> Rect -> Float -> Float -> Float -> Float -> FontMetrics -> [(Rect, T.Text, Color, Color)] -> [(Rect, T.Text, Color, Color, Rect)]
-tagSelectClippedSpans host parentClip x y w h fm =
+tagSelectClippedSpans host parentClip x y w h fm spans =
   let textClip = padTextClipRect (selectTextClip host x y w h fm)
-   in concatMap
-        ( \(rect, txt, fg, bg) ->
-            case rectIntersect parentClip textClip of
-              Nothing -> []
-              Just clip -> [(rect, txt, fg, bg, clip)]
-        )
+   in case rectIntersect parentClip textClip of
+        Nothing -> []
+        Just clip -> map (\(rect, txt, fg, bg) -> (rect, txt, fg, bg, clip)) spans
 
