@@ -30,6 +30,7 @@ import NanoUI
   , V2 (..)
   , WidgetId (..)
   )
+import NanoUI.Testing (computePopupPosition)
 import NanoUI.Layout.Arena
   ( DirTag (..)
   , NodeArena
@@ -127,80 +128,6 @@ measureTextLines !txt
             Just ('\r', rest) -> go n curLen maxLen rest
             Just (_, rest) -> go n (curLen + 1) maxLen rest
        in go 1 (0 :: Int) (0 :: Int) txt
-
--- | Compute popup floating position clamped to screen bounds
-computePopupPosition ::
-  Float ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
-  PopupAnchor ->
-  PopupPlacement ->
-  Float ->
-  (Float, Float)
-computePopupPosition !winW !winH !margin !iw !ih !anchor !placement !offset =
-  case anchor of
-    AnchorPoint (V2 px py) ->
-      let !x0 = case placement of
-            PlacementLeft -> px - iw - offset
-            PlacementRight -> px + offset
-            _ -> px
-          !y0 = case placement of
-            PlacementAbove -> py - ih - offset
-            PlacementBelow -> py + offset
-            _ -> py
-          !x = if x0 + iw > winW - margin && px - iw - margin >= 0
-                then px - iw - offset
-                else max margin (min (winW - iw - margin) x0)
-          !y = if y0 + ih > winH - margin && py - ih - margin >= 0
-                then py - ih - offset
-                else max margin (min (winH - ih - margin) y0)
-       in (x, y)
-    AnchorRect (Rect rx ry rw rh) ->
-      case placement of
-        PlacementBelow ->
-          let !x0 = rx
-              !y0 = ry + rh + offset
-              !y = if y0 + ih > winH - margin && ry - ih - offset >= margin
-                    then ry - ih - offset
-                    else y0
-              !x = max margin (min (winW - iw - margin) x0)
-           in (x, max margin (min (winH - ih - margin) y))
-        PlacementAbove ->
-          let !x0 = rx
-              !y0 = ry - ih - offset
-              !y = if y0 < margin && ry + rh + offset + ih <= winH - margin
-                    then ry + rh + offset
-                    else y0
-              !x = max margin (min (winW - iw - margin) x0)
-           in (x, max margin (min (winH - ih - margin) y))
-        PlacementRight ->
-          let !x0 = rx + rw + offset
-              !y0 = ry
-              !x = if x0 + iw > winW - margin && rx - iw - offset >= margin
-                    then rx - iw - offset
-                    else x0
-              !y = max margin (min (winH - ih - margin) y0)
-           in (max margin (min (winW - iw - margin) x), y)
-        PlacementLeft ->
-          let !x0 = rx - iw - offset
-              !y0 = ry
-              !x = if x0 < margin && rx + rw + offset + iw <= winW - margin
-                    then rx + rw + offset
-                    else x0
-              !y = max margin (min (winH - ih - margin) y0)
-           in (max margin (min (winW - iw - margin) x), y)
-        PlacementAuto ->
-          let !spaceBelow = winH - margin - (ry + rh + offset)
-              !spaceAbove = ry - offset - margin
-              !y = if spaceBelow >= ih || spaceBelow >= spaceAbove
-                    then ry + rh + offset
-                    else ry - ih - offset
-              !x = max margin (min (winW - iw - margin) rx)
-           in (x, max margin (min (winH - ih - margin) y))
-        PlacementAtCursor ->
-          (max margin (min (winW - iw - margin) rx), max margin (min (winH - ih - margin) (ry + rh + offset)))
 
 -- | Efficient, lean O(N) single-pass layout engine.
 solveSinglePassLayout :: NodeArena -> Float -> Float -> IO ()

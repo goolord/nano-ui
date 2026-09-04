@@ -19,6 +19,9 @@ module NanoUI.Testing
   , cursorKindIs
   , uiCursorKind
   , UiCursorKind (..)
+  , computePopupPosition
+  , scrollBarLayout
+  , ScrollBarLayout (..)
   , sliderTrackBounds
   , colorPickerGeom
   , ColorPickerGeom (..)
@@ -256,6 +259,8 @@ import NanoUI.Frame
   , uiCursorKind
   , widgetNodeCount
   )
+import NanoUI.Frame.Scroll (ScrollBarLayout (..), scrollBarLayout)
+import NanoUI.Layout.Solve (computePopupPosition)
 import NanoUI.Types (HostProfile (..))
 import NanoUI.Icons
   ( iconChecked
