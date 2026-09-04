@@ -19,7 +19,6 @@ module NanoUI.Widgets.TextArea
   , loadTextAreaState
   , saveTextAreaState
   , applyTextAreaMenuAction
-  , textAreaMenuActionEnabled
   ) where
 
 import Control.Monad (when)
@@ -67,7 +66,6 @@ import NanoUI.Widgets.TextCommon
   , dispatchCtrlChar
   , dispatchMenuAction
   , isCtrlCombo
-  , menuActionEnabled
   , pasteBufferText
   )
 
@@ -373,14 +371,6 @@ textAreaPaste ctx state = do
     Just buf' -> do
       let cur = TB.getCursor buf'
       pure (ensureCaretVisible state {buffer = buf', selectionAnchor = cur})
-
-textAreaMenuActionEnabled :: Context -> WidgetId -> Int -> IO Bool
-textAreaMenuActionEnabled ctx wid item = do
-  store <- getStore ctx
-  let key = intKey wid
-      text = IM.findWithDefault "" key (storeText store)
-  mclip <- ctxClipboardGet ctx
-  pure (menuActionEnabled (not (T.null text)) mclip item)
 
 applyTextAreaMenuAction :: Context -> WidgetId -> Int -> IO ()
 applyTextAreaMenuAction ctx wid item = do

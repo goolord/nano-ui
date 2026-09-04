@@ -3,7 +3,6 @@ module NanoUI.Widgets.TextInput
   , textInputLayout
   , processTextInput
   , applyTextInputMenuAction
-  , textInputMenuActionEnabled
   ) where
 
 import Data.Char (isPrint)
@@ -37,7 +36,6 @@ import NanoUI.Widgets.TextCommon
   , dispatchCtrlChar
   , dispatchMenuAction
   , isCtrlCombo
-  , menuActionEnabled
   , pasteBufferText
   )
 
@@ -108,14 +106,6 @@ applyTextInputMenuAction ctx wid item = do
     )
   setTextInputMenu ctx Nothing
   markDirty ctx
-
-textInputMenuActionEnabled :: Context -> WidgetId -> Int -> IO Bool
-textInputMenuActionEnabled ctx wid item = do
-  store <- getStore ctx
-  let key = intKey wid
-      text = IM.findWithDefault "" key (storeText store)
-  mclip <- ctxClipboardGet ctx
-  pure (menuActionEnabled (not (T.null text)) mclip item)
 
 processTextInput :: Context -> Input -> TextInputState -> IO TextInputState
 processTextInput ctx inp s0 = do
