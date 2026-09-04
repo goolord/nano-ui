@@ -473,20 +473,22 @@ renderArena surf font !scale theme ctx na hotId activeId focusId = do
               drawRectOutline surf x y w h (packColor (thBorder theme))
 
             NodeText -> do
-              isO <- readPrimArray isOverlayArr i
               isPop <- readPrimArray isPopupArr i
               pad <- getPadding na i
               styleIdx <- getStyleIdx na i
               let fvar = textNodeFontVariant styleIdx
                   !txtColor = if fvar == FontMuted then thTextMuted theme else thText theme
               when (not (T.null txt)) $ do
-                let (!tx, !ty) =
-                      if isO == 1 && padL pad == 0
+                let !isMultiline = T.elem '\n' txt
+                    (!tx, !ty) =
+                      if isPop == 1 && padL pad == 0
                         then
-                          let !offX = if isPop == 1 then 4.0 else 8.0
+                          let !offX = 4.0
                               !offY = max 0.0 ((rh - 13.0) / 2.0)
                            in (rx + offX, ry + offY)
-                        else (rx + padL pad, ry + padT pad)
+                        else if not isMultiline && padT pad == 0 && rh > 13.0
+                          then (rx + padL pad, ry + max 0.0 ((rh - 13.0) / 2.0))
+                          else (rx + padL pad, ry + padT pad)
                 drawTextScaled surf font scale tx ty txt (packColor txtColor)
 
             NodeSeparator -> do

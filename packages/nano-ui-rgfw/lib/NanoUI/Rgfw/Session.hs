@@ -105,6 +105,7 @@ import NanoUI.Layout.Arena
   , getDirection
   , getFirstChild
   , getMinMax
+  , getNextSibling
   , getNodeType
   , getParent
   , getRect
@@ -1213,13 +1214,16 @@ runRgfwSessionReduceCustom opts getThemeAndScale updateModel initialModel view =
                                 (wx, wy, ww, wh) <- getRect na wIdx
                                 modifyIORef' winRectMapRef (IM.insert wKey (Rect wx wy ww wh))
 
-                                firstChild <- getFirstChild na wIdx
-                                hasTitleRow <- if firstChild >= 0
-                                  then do
-                                    fcNt <- getNodeType na firstChild
-                                    fcDir <- getDirection na firstChild
-                                    pure (fcNt == NodeContainer && fcDir == DirRow)
-                                  else pure False
+                                let findTitleChild !ci
+                                      | ci < 0 = pure (-1)
+                                      | otherwise = do
+                                          cnt <- getNodeType na ci
+                                          cdir <- getDirection na ci
+                                          if cnt == NodeContainer && cdir == DirRow
+                                            then pure ci
+                                            else getNextSibling na ci >>= findTitleChild
+                                titleChild <- findTitleChild =<< getFirstChild na wIdx
+                                let !hasTitleRow = titleChild >= 0
 
                                 let !titleBarH = if hasTitleRow then 24.0 else 0.0
                                     !bodyTop = wy + titleBarH
@@ -1242,7 +1246,7 @@ runRgfwSessionReduceCustom opts getThemeAndScale updateModel initialModel view =
                                     inTitleBar !curr
                                       | not hasTitleRow = pure False
                                       | curr < 0 = pure False
-                                      | curr == firstChild = pure True
+                                      | curr == titleChild = pure True
                                       | curr == wIdx = pure False
                                       | otherwise = do
                                           p <- getParent na curr
@@ -1308,14 +1312,10 @@ runRgfwSessionReduceCustom opts getThemeAndScale updateModel initialModel view =
                                                   let !newX = jx - clampedSX
                                                       !newY = jy - clampedSY
                                                   setRect na j newX newY jw jh
-                                                  mClip <- getClipRect na j
-                                                  let (Rect cx cy cw ch) = case mClip of
-                                                        Just c  -> Rect (rectX c - clampedSX) (rectY c - clampedSY) (rectW c) (rectH c)
-                                                        Nothing -> Rect newX newY jw jh
-                                                      !cx0 = max (rectX bodyRect) cx
-                                                      !cy0 = max (rectY bodyRect) cy
-                                                      !cx1 = min (rectX bodyRect + rectW bodyRect) (cx + cw)
-                                                      !cy1 = min (rectY bodyRect + rectH bodyRect) (cy + ch)
+                                                  let !cx0 = max (rectX bodyRect) newX
+                                                      !cy0 = max (rectY bodyRect) newY
+                                                      !cx1 = min (rectX bodyRect + rectW bodyRect) (newX + jw)
+                                                      !cy1 = min (rectY bodyRect + rectH bodyRect) (newY + jh)
                                                       !finalClip = Rect cx0 cy0 (max 0 (cx1 - cx0)) (max 0 (cy1 - cy0))
                                                   setClipRect na j finalClip
                                                   applyScrollClip (j + 1)

@@ -2,7 +2,7 @@
 
 module Main (main) where
 
-import Control.Monad (forM_, when)
+import Control.Monad (forM, forM_)
 import Data.Bits (shiftR, (.&.))
 import System.Exit (exitFailure)
 
@@ -10,7 +10,7 @@ import qualified Data.IntMap.Strict as IM
 import Data.IORef (newIORef, readIORef, writeIORef)
 import qualified Data.Text as T
 import NanoUI.Rgfw.Debug (RgfwDebugSnapshot (..), debugWindowBody, emptyRgfwDebug)
-import NanoUI.Layout.Arena (DirTag (..), arenaCount, getClipRect, getDirection, getFirstChild, getNodeType, getParent, getText, setClipRect)
+import NanoUI.Layout.Arena (DirTag (..), arenaCount, getClipRect, getDirection, getFirstChild, getNextSibling, getNodeType, getParent, setClipRect)
 import NanoUI (runNanoUI, window)
 
 import NanoUI
@@ -22,6 +22,7 @@ import NanoUI
   , AlignX (..)
   , AlignY (..)
   , Rect (..)
+  , rectContains
   , Size (..)
   , V2 (..)
   )
@@ -561,6 +562,30 @@ testMultilineTextLayout = do
   assert "Multiline text with 3 lines has height 39px (3 * 13)" (th == 39.0)
   assert "Multiline text width equals longest line width (16 * 6 = 96)" (tw == 96.0)
 
+  -- Verify multiline text inside a window does not get offset vertically by (rh - 13) / 2
+  surf <- newOffscreenRgfwSurface 200 200
+  let font = getCozetteFont
+      theme = tomorrowMidnightMinDarkTheme
+  ctx <- newPixelContext
+  naWin <- newNodeArena
+  win <- addNode naWin NodeWindow (-1) Column (Fixed 180) (Fixed 150) (Padding 0 0 0 0) 0 0 0 800 600 0 AlignStart AlignTop False
+  setRect naWin win 10 10 180 150
+  mlTxt <- addNode naWin NodeText win Column Fit Fit (Padding 0 0 0 0) 0 0 0 180 150 0 AlignStart AlignTop False
+  setNodeText naWin mlTxt "AAA\nBBB\nCCC\nDDD\nEEE"
+  setRect naWin mlTxt 20 40 100 65 -- 5 lines * 13 = 65px
+  renderArena surf font 1.0 theme ctx naWin (WidgetId 0) (WidgetId 0) (WidgetId 0)
+
+  -- Line 1 of mlTxt is at y = 40..52. Check for text pixels in y = 40..52
+  let countPixelsInRange y0 y1 x0 x1 = do
+        pixels <- forM [y0 .. y1] $ \y ->
+          forM [x0 .. x1] $ \x -> do
+            c <- peekElemOff (sBuffer surf) (y * 200 + x)
+            pure (if c == packColor (thText theme) then 1 else 0 :: Int)
+        pure (sum (map sum pixels))
+  firstLinePixels <- countPixelsInRange 40 52 20 40
+  assert "Multiline text line 1 is rendered at node top Y (not shifted down by (rh - 13) / 2)" (firstLinePixels > 0)
+  freeRgfwSurface surf
+
 testFloatingWindowLayout :: IO ()
 testFloatingWindowLayout = do
   na <- newNodeArena
@@ -884,7 +909,7 @@ testWindowTitleAndCloseButton = do
   titleBar <- addNode na NodeContainer win Row (Grow 1.0) (Fixed 39.0) (Padding 0 0 0 0) 0 0 0 1000 800 0 AlignStart AlignTop False
   titleTxt <- addNode na NodeText titleBar Column Fit Fit (Padding 0 0 0 0) 0 0 0 1000 800 0 AlignStart AlignTop False
   setNodeText na titleTxt "Window Title"
-  spacer <- addNode na NodeSpacer titleBar Column (Grow 1.0) Fit (Padding 0 0 0 0) 0 0 0 1000 800 0 AlignStart AlignTop False
+  _ <- addNode na NodeSpacer titleBar Column (Grow 1.0) Fit (Padding 0 0 0 0) 0 0 0 1000 800 0 AlignStart AlignTop False
   closeBtn <- addNode na NodeButton titleBar Column Fit Fit (Padding 0 0 0 0) 0 0 0 1000 800 0 AlignStart AlignTop False
   setNodeText na closeBtn "\x01X"
 
@@ -895,7 +920,7 @@ testWindowTitleAndCloseButton = do
   solveSinglePassLayout na 1000 800
 
   (wx, wy, ww, wh) <- getRect na win
-  (tx, ty, tw, th) <- getRect na titleBar
+  (tx, ty, _tw, th) <- getRect na titleBar
   (_lx, _ly, _lw, lh) <- getRect na titleTxt
   (bx, by, bw, bh) <- getRect na closeBtn
   (_sx, sy, _sw, sh) <- getRect na bodyScroll
@@ -927,30 +952,55 @@ testDebugWindow = do
   let na = ctxNodeArena ctx
   solveSinglePassLayout na 800 600
   n <- arenaCount na
-  putStrLn $ "=== Debug Window Nodes (count = " ++ show n ++ ") ==="
-  fc <- getFirstChild na 0
-  fcNt <- getNodeType na fc
-  putStrLn $ "getFirstChild na 0 = " ++ show fc ++ ", fcNt = " ++ show fcNt
-  forM_ [0 .. n - 1] $ \i -> do
-    nt <- getNodeType na i
-    p <- getParent na i
-    (x, y, w, h) <- getRect na i
-    mClip <- getClipRect na i
-    txt <- getText na i
-    putStrLn $ "Node " ++ show i ++ " [parent " ++ show p ++ "] " ++ show nt ++ " rect=(" ++ show x ++ "," ++ show y ++ "," ++ show w ++ "," ++ show h ++ ") clip=" ++ show mClip ++ " txt=" ++ show (T.take 20 txt)
 
-  -- Now replicate Session.hs processWindows
-  firstChild <- getFirstChild na 0
-  fcNt <- getNodeType na firstChild
-  fcDir <- getDirection na firstChild
-  let hasTitleRow = fcNt == NodeContainer && fcDir == DirRow
-      titleBarH = if hasTitleRow then 24.0 else 0.0
-      (wx, wy, ww, wh) = (464.0, 32.0, 320.0, 480.0)
+  let findTitleChild !ci
+        | ci < 0 = pure (-1)
+        | otherwise = do
+            cnt <- getNodeType na ci
+            cdir <- getDirection na ci
+            if cnt == NodeContainer && cdir == DirRow
+              then pure ci
+              else getNextSibling na ci >>= findTitleChild
+
+  titleChild <- findTitleChild =<< getFirstChild na 0
+  let hasTitleRow = titleChild >= 0
+  assert "Debug window title row container is detected" hasTitleRow
+
+  (wx, wy, ww, wh) <- getRect na 0
+  let titleBarH = if hasTitleRow then 24.0 else 0.0
       bodyTop = wy + titleBarH
       bodyH = max 0.0 (wh - titleBarH)
       bodyRect = Rect wx bodyTop ww bodyH
-  putStrLn $ "Session hasTitleRow=" ++ show hasTitleRow ++ ", bodyRect=" ++ show bodyRect
 
+  assert "Debug window bodyTop is placed below 24px title bar" (bodyTop == wy + 24.0)
+  assert "Debug window bodyRect has remaining window height" (bodyH == wh - 24.0)
+
+  let inTitleBar !curr
+        | not hasTitleRow = pure False
+        | curr < 0 = pure False
+        | curr == titleChild = pure True
+        | curr == 0 = pure False
+        | otherwise = do
+            p <- getParent na curr
+            inTitleBar p
+
+  -- Title row (node 1) and close button (node 4) are in title bar
+  closeInTitle <- inTitleBar 4
+  assert "Close button is identified as inside the title bar" closeInTitle
+
+  bodyScrollInTitle <- inTitleBar 5
+  assert "Body scroll container is NOT inside the title bar" (not bodyScrollInTitle)
+
+  -- Verify vertical scrollbar track does not overlap close button at (760, 32)
+  let sbW = 8.0 :: Float
+      sbH = max 0 (bodyH - 14.0)
+      vTrackRect = Rect (wx + ww - sbW - 2.0) bodyTop (sbW + 4.0) sbH
+  (bx, by, _bw, _bh) <- getRect na 4
+  assert "Vertical scrollbar track starts at bodyTop (wy + 24)" (rectY vTrackRect == bodyTop)
+  assert "Close button click position is NOT inside vertical scrollbar track"
+    (not (rectContains vTrackRect (V2 (bx + 12.0) (by + 12.0))))
+
+  -- Replicate scroll and verify clipping prevents text from leaking into title bar
   let belongsToWin !curr
         | curr < 0 = pure False
         | curr == 0 = pure True
@@ -961,15 +1011,6 @@ testDebugWindow = do
               else do
                 p <- getParent na curr
                 belongsToWin p
-
-      inTitleBar !curr
-        | not hasTitleRow = pure False
-        | curr < 0 = pure False
-        | curr == firstChild = pure True
-        | curr == 0 = pure False
-        | otherwise = do
-            p <- getParent na curr
-            inTitleBar p
 
   let clampedSX = 0.0 :: Float
       clampedSY = 60.0 :: Float -- scrolled down by 60px
@@ -989,39 +1030,41 @@ testDebugWindow = do
                     let !newX = jx - clampedSX
                         !newY = jy - clampedSY
                     setRect na j newX newY jw jh
-                    mClip <- getClipRect na j
-                    let (Rect cx cy cw ch) = case mClip of
-                          Just c  -> Rect (rectX c - clampedSX) (rectY c - clampedSY) (rectW c) (rectH c)
-                          Nothing -> Rect newX newY jw jh
-                        !cx0 = max (rectX bodyRect) cx
-                        !cy0 = max (rectY bodyRect) cy
-                        !cx1 = min (rectX bodyRect + rectW bodyRect) (cx + cw)
-                        !cy1 = min (rectY bodyRect + rectH bodyRect) (cy + ch)
+                    let !cx0 = max (rectX bodyRect) newX
+                        !cy0 = max (rectY bodyRect) newY
+                        !cx1 = min (rectX bodyRect + rectW bodyRect) (newX + jw)
+                        !cy1 = min (rectY bodyRect + rectH bodyRect) (newY + jh)
                         !finalClip = Rect cx0 cy0 (max 0 (cx1 - cx0)) (max 0 (cy1 - cy0))
                     setClipRect na j finalClip
                     applyScrollClip (j + 1)
 
   applyScrollClip 0
 
-  putStrLn "=== After applyScrollClip (scrolled by 60px) ==="
-  forM_ [0 .. n - 1] $ \i -> do
-    nt <- getNodeType na i
-    (x, y, w, h) <- getRect na i
-    mClip <- getClipRect na i
-    txt <- getText na i
-    putStrLn $ "Node " ++ show i ++ " " ++ show nt ++ " rect=(" ++ show x ++ "," ++ show y ++ "," ++ show w ++ "," ++ show h ++ ") clip=" ++ show mClip ++ " txt=" ++ show (T.take 20 txt)
+  -- After scrolling, verify title bar nodes stayed at wy and body clips are strictly >= bodyTop
+  (_tx, ty, _tw, _th) <- getRect na 1
+  assert "Title row container Y position is pinned at wy (not scrolled)" (ty == wy)
 
+  (_cx, cy, _cw, _ch) <- getRect na 4
+  assert "Close button Y position is pinned at wy (not scrolled)" (cy == wy)
+
+  forM_ [5 .. n - 1] $ \i -> do
+    mClip <- getClipRect na i
+    case mClip of
+      Just clip -> do
+        assert ("Body node " ++ show i ++ " clip rect does not enter title bar") (rectH clip == 0 || rectY clip >= bodyTop)
+        assert ("Body node " ++ show i ++ " clip rect does not extend below window") (rectY clip + rectH clip <= wy + wh)
+      Nothing -> pure ()
+
+  -- Verify rendering with offscreen surface
   surf <- newOffscreenRgfwSurface 800 600
   let font = getCozetteFont
       theme = tomorrowMidnightMinDarkTheme
   renderArena surf font 1.0 theme ctx na (WidgetId 0) (WidgetId 0) (WidgetId 0)
 
-  -- Check if text is drawn in title bar (y = 32 to 55, x = 472)
-  forM_ [32 .. 55] $ \y -> do
-    let pIdx = y * 800 + 472
-    c <- peekElemOff (sBuffer surf) pIdx
-    when (c /= 0 && c /= packColor (thWindowHeader theme) && c /= packColor (thBorder theme)) $
-      putStrLn $ "PIXEL IN TITLE BAR at y=" ++ show y ++ ": " ++ show c
+  -- Close button area (x = 760..783, y = 32..55) should have close button text drawn
+  -- and no scrollbar drawn over it.
+  closeCenterPixel <- peekElemOff (sBuffer surf) (round (by + 12.0) * 800 + round (bx + 12.0))
+  assert "Close button area is rendered cleanly" (closeCenterPixel /= 0)
 
   freeRgfwSurface surf
 
