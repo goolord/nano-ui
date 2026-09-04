@@ -27,6 +27,16 @@ module NanoUI.Widgets.Layout
   , panel_
   , panelWith
   , panel'
+  , grid
+  , grid_
+  , gridWith
+  , grid'
+  , gridResponse
+  , gridPanel
+  , gridPanel_
+  , gridPanelWith
+  , gridPanel'
+  , gridPanelResponse
   , scroll_
   , scrollWith
   , center
@@ -140,6 +150,46 @@ column' mods = column (foldr (.) id mods defaultLayout)
 {-# INLINE columnResponse #-}
 columnResponse :: Ui :> es => Layout -> Eff es a -> Eff es (a, Response)
 columnResponse layout child = containerResponse NodeContainer (layout {layoutDirection = Column}) child
+
+{-# INLINE grid #-}
+grid :: Ui :> es => Int -> Layout -> Eff es a -> Eff es a
+grid n layout child = container NodeContainer (layout {layoutGridCols = max 1 n}) child
+
+{-# INLINE grid_ #-}
+grid_ :: Ui :> es => Int -> Eff es a -> Eff es a
+grid_ n = grid n defaultLayout
+
+{-# INLINE gridWith #-}
+gridWith :: Ui :> es => Int -> (Layout -> Layout) -> Eff es a -> Eff es a
+gridWith n f = grid n (f defaultLayout)
+
+{-# INLINE grid' #-}
+grid' :: Ui :> es => Int -> [Layout -> Layout] -> Eff es a -> Eff es a
+grid' n mods = grid n (foldr (.) id mods defaultLayout)
+
+{-# INLINE gridResponse #-}
+gridResponse :: Ui :> es => Int -> Layout -> Eff es a -> Eff es (a, Response)
+gridResponse n layout child = containerResponse NodeContainer (layout {layoutGridCols = max 1 n}) child
+
+{-# INLINE gridPanel #-}
+gridPanel :: Ui :> es => Int -> Layout -> Eff es a -> Eff es a
+gridPanel n layout child = container NodePanel (layout {layoutGridCols = max 1 n}) child
+
+{-# INLINE gridPanel_ #-}
+gridPanel_ :: Ui :> es => Int -> Eff es a -> Eff es a
+gridPanel_ n = gridPanel n defaultLayout
+
+{-# INLINE gridPanelWith #-}
+gridPanelWith :: Ui :> es => Int -> (Layout -> Layout) -> Eff es a -> Eff es a
+gridPanelWith n f = gridPanel n (f defaultLayout)
+
+{-# INLINE gridPanel' #-}
+gridPanel' :: Ui :> es => Int -> [Layout -> Layout] -> Eff es a -> Eff es a
+gridPanel' n mods = gridPanel n (foldr (.) id mods defaultLayout)
+
+{-# INLINE gridPanelResponse #-}
+gridPanelResponse :: Ui :> es => Int -> Layout -> Eff es a -> Eff es (a, Response)
+gridPanelResponse n layout child = containerResponse NodePanel (layout {layoutGridCols = max 1 n}) child
 
 {-# INLINE label #-}
 label :: Ui :> es => Text -> Eff es Response

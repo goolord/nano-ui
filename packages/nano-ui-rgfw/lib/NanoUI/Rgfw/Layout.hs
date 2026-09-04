@@ -8,7 +8,7 @@ module NanoUI.Rgfw.Layout
   , getContentWidth
   ) where
 
-import Control.Monad (when)
+import Control.Monad (forM, forM_, when)
 import Data.Primitive.PrimArray
   ( newPrimArray
   , readPrimArray
@@ -33,6 +33,7 @@ import NanoUI.Layout.Arena
   , getClipRect
   , getDirection
   , getGap
+  , getGridCols
   , getHeightSizing
   , getMinMax
   , getNodeType
@@ -185,6 +186,14 @@ solveSinglePassLayoutWith na !viewportW !viewportH lookupPopup lookupWindowPos l
       remAfterHArr <- newPrimArray n
       setPrimArray remAfterWArr 0 n 0
       setPrimArray remAfterHArr 0 n 0
+      gridCellXArr <- newPrimArray n
+      gridCellYArr <- newPrimArray n
+      gridCellWArr <- newPrimArray n
+      gridCellHArr <- newPrimArray n
+      setPrimArray gridCellXArr 0 n 0
+      setPrimArray gridCellYArr 0 n 0
+      setPrimArray gridCellWArr 0 n 0
+      setPrimArray gridCellHArr 0 n 0
 
       let pass1 !i
             | i < 0 = pure ()
@@ -195,6 +204,7 @@ solveSinglePassLayoutWith na !viewportW !viewportH lookupPopup lookupWindowPos l
                 rawPad <- getPadding na i
                 rawGap <- getGap na i
                 dir <- getDirection na i
+                gCols <- getGridCols na i
                 (minW, minH, maxW, maxH) <- getMinMax na i
                 txt <- getText na i
                 let !dispTxt =
@@ -214,63 +224,104 @@ solveSinglePassLayoutWith na !viewportW !viewportH lookupPopup lookupWindowPos l
 
                 if isContainerNode nt
                   then do
-                    -- Container content size from direct children
-                    let loopChildren !c (!count :: Int) !totMain !maxCross
-                          | c < 0 = pure (count, totMain, maxCross)
-                          | otherwise = do
-                              cw <- readPrimArray reqWArr c
-                              ch <- readPrimArray reqHArr c
-                              (cWTag, _) <- getWidthSizing na c
-                              (cHTag, _) <- getHeightSizing na c
-                              next <- readPrimArray nextSibArr c
-                              if dir == DirColumn
-                                then do
-                                  let !mSize = if cHTag == SizingGrow then max 0 ch else ch
-                                      !tot = totMain + mSize + (if count > 0 then gap else 0)
-                                      !cross = max maxCross cw
-                                  loopChildren next (count + 1) tot cross
-                                else do
-                                  let !mSize = if cWTag == SizingGrow then max 0 cw else cw
-                                      !tot = totMain + mSize + (if count > 0 then gap else 0)
-                                      !cross = max maxCross ch
-                                  loopChildren next (count + 1) tot cross
-
                     firstChild <- readPrimArray headChildArr i
-                    (!cCount, !cTot, !cCross) <- loopChildren firstChild 0 0 0
+                    (!contentW, !contentH) <-
+                      if gCols > 0
+                        then do
+                          let getKids !c !acc
+                                | c < 0 = pure (reverse acc)
+                                | otherwise = do
+                                    nxt <- readPrimArray nextSibArr c
+                                    getKids nxt (c : acc)
+                          kids <- getKids firstChild []
+                          let !numKids = length kids
+                              !numRows = if numKids == 0 then 0 else ((numKids - 1) `div` gCols) + 1
 
-                    let (!contentW, !contentH) =
-                          if dir == DirColumn
+                          colWidths <- forM [0 .. gCols - 1] $ \col -> do
+                            let colKids = [ kid | (kid, k) <- zip kids [0 :: Int ..], k `mod` gCols == col ]
+                            ws <- forM colKids $ \kid -> do
+                              cw <- readPrimArray reqWArr kid
+                              (cWTag, cWVal) <- getWidthSizing na kid
+                              pure $ if cWTag == SizingFixed && cWVal > 0
+                                then cWVal
+                                else if cWTag == SizingGrow
+                                  then max 0 cw
+                                  else cw
+                            pure (maximum (0 : ws))
+
+                          rowHeights <- forM [0 .. numRows - 1] $ \row -> do
+                            let rowKids = [ kid | (kid, k) <- zip kids [0 :: Int ..], k `div` gCols == row ]
+                            hs <- forM rowKids $ \kid -> do
+                              ch <- readPrimArray reqHArr kid
+                              (cHTag, cHVal) <- getHeightSizing na kid
+                              pure $ if cHTag == SizingFixed && cHVal > 0
+                                then cHVal
+                                else if cHTag == SizingGrow
+                                  then max 0 ch
+                                  else ch
+                            pure (maximum (0 : hs))
+
+                          let !totGapW = fromIntegral (max 0 (gCols - 1)) * gap
+                              !totGapH = fromIntegral (max 0 (numRows - 1)) * gap
+                              !cw = sum colWidths + totGapW + padL pad + padR pad
+                              !ch = sum rowHeights + totGapH + padT pad + padB pad
+                          pure (cw, ch)
+                        else do
+                          -- Container content size from direct children
+                          let loopChildren !c (!count :: Int) !totMain !maxCross
+                                | c < 0 = pure (count, totMain, maxCross)
+                                | otherwise = do
+                                    cw <- readPrimArray reqWArr c
+                                    ch <- readPrimArray reqHArr c
+                                    (cWTag, _) <- getWidthSizing na c
+                                    (cHTag, _) <- getHeightSizing na c
+                                    next <- readPrimArray nextSibArr c
+                                    if dir == DirColumn
+                                      then do
+                                        let !mSize = if cHTag == SizingGrow then max 0 ch else ch
+                                            !tot = totMain + mSize + (if count > 0 then gap else 0)
+                                            !cross = max maxCross cw
+                                        loopChildren next (count + 1) tot cross
+                                      else do
+                                        let !mSize = if cWTag == SizingGrow then max 0 cw else cw
+                                            !tot = totMain + mSize + (if count > 0 then gap else 0)
+                                            !cross = max maxCross ch
+                                        loopChildren next (count + 1) tot cross
+
+                          (!cCount, !cTot, !cCross) <- loopChildren firstChild 0 0 0
+
+                          -- Precalculate remAfter for children of this container
+                          let calcRemAfter !c
+                                | c < 0 = pure ()
+                                | otherwise = do
+                                    next <- readPrimArray nextSibArr c
+                                    let sumAfter !s !acc
+                                          | s < 0 = pure acc
+                                          | otherwise = do
+                                              (sWTag, _) <- getWidthSizing na s
+                                              (sHTag, _) <- getHeightSizing na s
+                                              sw <- readPrimArray reqWArr s
+                                              sh <- readPrimArray reqHArr s
+                                              sNext <- readPrimArray nextSibArr s
+                                              if dir == DirRow
+                                                then do
+                                                  let !add = if sWTag == SizingGrow then max 0 sw + gap else sw + gap
+                                                  sumAfter sNext (acc + add)
+                                                else do
+                                                  let !add = if sHTag == SizingGrow then max 0 sh + gap else sh + gap
+                                                  sumAfter sNext (acc + add)
+
+                                    !remAfter <- sumAfter next 0
+                                    if dir == DirRow
+                                      then writePrimArray remAfterWArr c remAfter
+                                      else writePrimArray remAfterHArr c remAfter
+                                    calcRemAfter next
+
+                          calcRemAfter firstChild
+
+                          pure $ if dir == DirColumn
                             then (cCross + padL pad + padR pad, (if cCount > 0 then cTot else 0) + padT pad + padB pad)
                             else ((if cCount > 0 then cTot else 0) + padL pad + padR pad, cCross + padT pad + padB pad)
-
-                    -- Precalculate remAfter for children of this container
-                    let calcRemAfter !c
-                          | c < 0 = pure ()
-                          | otherwise = do
-                              next <- readPrimArray nextSibArr c
-                              let sumAfter !s !acc
-                                    | s < 0 = pure acc
-                                    | otherwise = do
-                                        (sWTag, _) <- getWidthSizing na s
-                                        (sHTag, _) <- getHeightSizing na s
-                                        sw <- readPrimArray reqWArr s
-                                        sh <- readPrimArray reqHArr s
-                                        sNext <- readPrimArray nextSibArr s
-                                        if dir == DirRow
-                                          then do
-                                            let !add = if sWTag == SizingGrow then max 0 sw + gap else sw + gap
-                                            sumAfter sNext (acc + add)
-                                          else do
-                                            let !add = if sHTag == SizingGrow then max 0 sh + gap else sh + gap
-                                            sumAfter sNext (acc + add)
-
-                              !remAfter <- sumAfter next 0
-                              if dir == DirRow
-                                then writePrimArray remAfterWArr c remAfter
-                                else writePrimArray remAfterHArr c remAfter
-                              calcRemAfter next
-
-                    calcRemAfter firstChild
 
                     if nt == NodeWindow
                       then do
@@ -348,6 +399,110 @@ solveSinglePassLayoutWith na !viewportW !viewportH lookupPopup lookupWindowPos l
       innerWArr <- newPrimArray n
       innerHArr <- newPrimArray n
 
+      let setupGridChildren !parentIdx !gCols !pix !piy !piw !pih !pGap = do
+            let getKids !c !acc
+                  | c < 0 = pure (reverse acc)
+                  | otherwise = do
+                      nxt <- readPrimArray nextSibArr c
+                      getKids nxt (c : acc)
+            firstChild <- readPrimArray headChildArr parentIdx
+            kids <- getKids firstChild []
+            let !numKids = length kids
+                !numRows = if numKids == 0 then 0 else ((numKids - 1) `div` gCols) + 1
+
+            when (numKids > 0 && gCols > 0) $ do
+              let !totGapW = fromIntegral (max 0 (gCols - 1)) * pGap
+                  !netW = max 0 (piw - totGapW)
+                  !totGapH = fromIntegral (max 0 (numRows - 1)) * pGap
+                  !netH = max 0 (pih - totGapH)
+
+              -- Column sizing: for each col 0..gCols-1, examine children in that col
+              colInfos <- forM [0 .. gCols - 1] $ \col -> do
+                let colKids = [ kid | (kid, k) <- zip kids [0 :: Int ..], k `mod` gCols == col ]
+                sizes <- forM colKids $ \kid -> do
+                  (cWTag, cWVal) <- getWidthSizing na kid
+                  cw <- readPrimArray reqWArr kid
+                  pure (cWTag == SizingGrow, if cWTag == SizingFixed && cWVal > 0 then cWVal else 0, cw)
+                let !hasGrow = any (\(g, _, _) -> g) sizes
+                    !fixedW = maximum (0 : [ fw | (_, fw, _) <- sizes ])
+                    !reqW = maximum (0 : [ rw | (_, _, rw) <- sizes ])
+                pure (hasGrow, fixedW, reqW)
+
+              let anyColGrow = any (\(g, _, _) -> g) colInfos
+                  fixedCols = [ (col, fw) | (col, (_, fw, _)) <- zip [0 :: Int ..] colInfos, fw > 0 ]
+                  numFixedCols = length fixedCols
+
+              colWidths <- if anyColGrow
+                then do
+                  let nonGrowCols = [ (col, if fw > 0 then fw else rw) | (col, (g, fw, rw)) <- zip [0 :: Int ..] colInfos, not g ]
+                      growCols = [ col | (col, (g, _, _)) <- zip [0 :: Int ..] colInfos, g ]
+                      usedW = sum (map snd nonGrowCols)
+                      remW = max 0 (netW - usedW)
+                      growShare = if null growCols then 0 else remW / fromIntegral (length growCols)
+                  pure $ flip map (zip [0 :: Int ..] colInfos) $ \(_, (g, fw, rw)) ->
+                    if g then max rw growShare else (if fw > 0 then fw else rw)
+                else if numFixedCols > 0 && numFixedCols < gCols
+                  then do
+                    let fixedWSum = sum (map snd fixedCols)
+                        remW = max 0 (netW - fixedWSum)
+                        numOther = gCols - numFixedCols
+                        otherShare = remW / fromIntegral numOther
+                    pure $ flip map (zip [0 :: Int ..] colInfos) $ \(_, (_, fw, rw)) ->
+                      if fw > 0 then fw else max rw otherShare
+                else do
+                  let totalReqW = sum [ rw | (_, _, rw) <- colInfos ]
+                  if netW > totalReqW && totalReqW > 0
+                    then do
+                      let extraW = netW - totalReqW
+                          share = extraW / fromIntegral gCols
+                      pure $ map (\(_, _, rw) -> rw + share) colInfos
+                    else if totalReqW > 0
+                      then pure $ map (\(_, _, rw) -> rw) colInfos
+                      else do
+                        let uniformW = netW / fromIntegral gCols
+                        pure $ replicate gCols uniformW
+
+              let colXOffsets = scanl (\acc w -> acc + w + pGap) pix colWidths
+
+              -- Row sizing: for each row 0..numRows-1, examine children in that row
+              rowInfos <- forM [0 .. numRows - 1] $ \row -> do
+                let rowKids = [ kid | (kid, k) <- zip kids [0 :: Int ..], k `div` gCols == row ]
+                sizes <- forM rowKids $ \kid -> do
+                  (cHTag, cHVal) <- getHeightSizing na kid
+                  ch <- readPrimArray reqHArr kid
+                  pure (cHTag == SizingGrow, if cHTag == SizingFixed && cHVal > 0 then cHVal else 0, ch)
+                let !hasGrowH = any (\(g, _, _) -> g) sizes
+                    !fixedH = maximum (0 : [ fh | (_, fh, _) <- sizes ])
+                    !reqH = maximum (0 : [ rh | (_, _, rh) <- sizes ])
+                pure (hasGrowH, fixedH, reqH)
+
+              let anyRowGrow = any (\(g, _, _) -> g) rowInfos
+              rowHeights <- if anyRowGrow
+                then do
+                  let nonGrowRows = [ (row, if fh > 0 then fh else rh) | (row, (g, fh, rh)) <- zip [0 :: Int ..] rowInfos, not g ]
+                      growRows = [ row | (row, (g, _, _)) <- zip [0 :: Int ..] rowInfos, g ]
+                      usedH = sum (map snd nonGrowRows)
+                      remH = max 0 (netH - usedH)
+                      growShare = if null growRows then 0 else remH / fromIntegral (length growRows)
+                  pure $ flip map (zip [0 :: Int ..] rowInfos) $ \(_, (g, fh, rh)) ->
+                    if g then max rh growShare else (if fh > 0 then fh else rh)
+                else do
+                  pure $ map (\(_, fh, rh) -> if fh > 0 then fh else rh) rowInfos
+
+              let rowYOffsets = scanl (\acc h -> acc + h + pGap) piy rowHeights
+
+              forM_ (zip kids [0 :: Int ..]) $ \(kid, k) -> do
+                let !cIdx = k `mod` gCols
+                    !rIdx = k `div` gCols
+                    !cellX = colXOffsets !! cIdx
+                    !cellY = rowYOffsets !! rIdx
+                    !cellW = colWidths !! cIdx
+                    !cellH = rowHeights !! rIdx
+                writePrimArray gridCellXArr kid cellX
+                writePrimArray gridCellYArr kid cellY
+                writePrimArray gridCellWArr kid cellW
+                writePrimArray gridCellHArr kid cellH
+
       let pass2 !i
             | i >= n = pure ()
             | otherwise = do
@@ -376,8 +531,8 @@ solveSinglePassLayoutWith na !viewportW !viewportH lookupPopup lookupWindowPos l
                           _ ->
                             let !defW = if wTag == SizingFixed && wVal > 0 then wVal else min (viewportW * 0.8) (max 320 reqW)
                                 !defH = if hTag == SizingFixed && hVal > 0 then hVal else min (viewportH * 0.8) (max 200 reqH)
-                             in (max effMinW (min (if maxW > 0 then maxW else maxAvailW) defW),
-                                 max effMinH (min (if maxH > 0 then maxH else maxAvailH) defH))
+                              in (max effMinW (min (if maxW > 0 then maxW else maxAvailW) defW),
+                                  max effMinH (min (if maxH > 0 then maxH else maxAvailH) defH))
                         (!winX, !winY) = case mStoredPos of
                           Just (px, py) ->
                             (max 0 (min (viewportW - winW) px), max 0 (min (viewportH - winH) py))
@@ -398,6 +553,10 @@ solveSinglePassLayoutWith na !viewportW !viewportH lookupPopup lookupWindowPos l
                     writePrimArray innerHArr i ih
                     writePrimArray curXArr i ix
                     writePrimArray curYArr i iy
+                    winGCols <- getGridCols na i
+                    when (winGCols > 0) $ do
+                      rawGap <- getGap na i
+                      setupGridChildren i winGCols ix iy iw ih rawGap
 
                 else if p < 0
                   then do
@@ -416,6 +575,10 @@ solveSinglePassLayoutWith na !viewportW !viewportH lookupPopup lookupWindowPos l
                     writePrimArray innerHArr i ih
                     writePrimArray curXArr i ix
                     writePrimArray curYArr i iy
+                    rootGCols <- getGridCols na i
+                    when (rootGCols > 0) $ do
+                      rawGap <- getGap na i
+                      setupGridChildren i rootGCols ix iy iw ih rawGap
 
                   else if nt == NodePopup
                     then do
@@ -444,84 +607,137 @@ solveSinglePassLayoutWith na !viewportW !viewportH lookupPopup lookupWindowPos l
                       writePrimArray innerHArr i ih
                       writePrimArray curXArr i ix
                       writePrimArray curYArr i iy
+                      popGCols <- getGridCols na i
+                      when (popGCols > 0) $
+                        setupGridChildren i popGCols ix iy iw ih 0
 
                   else do
                     -- Child node
-                    pDir <- getDirection na p
-                    rawPGap <- getGap na p
-                    pIsPop <- readPrimArray isPopupArr p
-                    let !pGap = if pIsPop == 1 then 0 else rawPGap
-                    cx <- readPrimArray curXArr p
-                    cy <- readPrimArray curYArr p
-                    pix <- readPrimArray innerXArr p
-                    piy <- readPrimArray innerYArr p
-                    piw <- readPrimArray innerWArr p
-                    pih <- readPrimArray innerHArr p
-                    remAfterW <- readPrimArray remAfterWArr i
-                    remAfterH <- readPrimArray remAfterHArr i
+                    pGCols <- getGridCols na p
+                    if pGCols > 0
+                      then do
+                        cellX <- readPrimArray gridCellXArr i
+                        cellY <- readPrimArray gridCellYArr i
+                        cellW <- readPrimArray gridCellWArr i
+                        cellH <- readPrimArray gridCellHArr i
 
-                    mParentClip <- getClipRect na p
-                    let !parentClip = case mParentClip of
-                          Just r -> r
-                          Nothing -> Rect 0 0 viewportW viewportH
+                        mParentClip <- getClipRect na p
+                        let !parentClip = case mParentClip of
+                              Just r -> r
+                              Nothing -> Rect 0 0 viewportW viewportH
 
-                    -- Compute Width
-                    let !availW = max 0 (pix + piw - cx)
-                        !w =
-                          if wTag == SizingFixed && wVal > 0
-                            then wVal
-                            else if pDir == DirRow
-                              then if wTag == SizingGrow
-                                then max reqW (availW - remAfterW)
-                                else reqW
-                              else if wTag == SizingGrow
-                                then max reqW piw
-                                else reqW
+                        let !w = if wTag == SizingFixed && wVal > 0 then min cellW wVal else cellW
+                            !h = if hTag == SizingFixed && hVal > 0 then min cellH hVal else cellH
+                            !finalW = max minW (min maxW w)
+                            !finalH = max minH (min maxH h)
+                            !x = cellX
+                            !y = cellY
 
-                    -- Compute Height
-                    let !availH = max 0 (piy + pih - cy)
-                        !h =
-                          if hTag == SizingFixed && hVal > 0
-                            then hVal
-                            else if pDir == DirColumn
-                              then if hTag == SizingGrow
-                                then max reqH (availH - remAfterH)
-                                else reqH
-                              else if hTag == SizingGrow
-                                then max reqH pih
-                                else reqH
+                        setRect na i x y finalW finalH
 
-                    let !finalW = max minW (min maxW w)
-                        !finalH = max minH (min maxH h)
-                        !x = cx
-                        !y = cy
+                        let !cx0 = max (rectX parentClip) x
+                            !cy0 = max (rectY parentClip) y
+                            !cx1 = min (rectX parentClip + rectW parentClip) (x + finalW)
+                            !cy1 = min (rectY parentClip + rectH parentClip) (y + finalH)
+                            !childClip = Rect cx0 cy0 (max 0 (cx1 - cx0)) (max 0 (cy1 - cy0))
+                        setClipRect na i childClip
 
-                    setRect na i x y finalW finalH
+                        when (isContainerNode nt) $ do
+                          let !cix = x + padL pad
+                              !ciy = y + padT pad
+                              !ciw = max 0 (finalW - padL pad - padR pad)
+                              !cih = max 0 (finalH - padT pad - padB pad)
+                          writePrimArray innerXArr i cix
+                          writePrimArray innerYArr i ciy
+                          writePrimArray innerWArr i ciw
+                          writePrimArray innerHArr i cih
+                          writePrimArray curXArr i cix
+                          writePrimArray curYArr i ciy
+                          cgCols <- getGridCols na i
+                          when (cgCols > 0) $ do
+                            rawGap <- getGap na i
+                            setupGridChildren i cgCols cix ciy ciw cih rawGap
 
-                    let !cx0 = max (rectX parentClip) x
-                        !cy0 = max (rectY parentClip) y
-                        !cx1 = min (rectX parentClip + rectW parentClip) (x + finalW)
-                        !cy1 = min (rectY parentClip + rectH parentClip) (y + finalH)
-                        !childClip = Rect cx0 cy0 (max 0 (cx1 - cx0)) (max 0 (cy1 - cy0))
-                    setClipRect na i childClip
+                      else do
+                        pDir <- getDirection na p
+                        rawPGap <- getGap na p
+                        pIsPop <- readPrimArray isPopupArr p
+                        let !pGap = if pIsPop == 1 then 0 else rawPGap
+                        cx <- readPrimArray curXArr p
+                        cy <- readPrimArray curYArr p
+                        pix <- readPrimArray innerXArr p
+                        piy <- readPrimArray innerYArr p
+                        piw <- readPrimArray innerWArr p
+                        pih <- readPrimArray innerHArr p
+                        remAfterW <- readPrimArray remAfterWArr i
+                        remAfterH <- readPrimArray remAfterHArr i
 
-                    -- Advance parent cursor
-                    if pDir == DirColumn
-                      then writePrimArray curYArr p (cy + finalH + pGap)
-                      else writePrimArray curXArr p (cx + finalW + pGap)
+                        mParentClip <- getClipRect na p
+                        let !parentClip = case mParentClip of
+                              Just r -> r
+                              Nothing -> Rect 0 0 viewportW viewportH
 
-                    -- If container, initialize its inner bounds and cursor
-                    when (isContainerNode nt) $ do
-                      let !cix = x + padL pad
-                          !ciy = y + padT pad
-                          !ciw = max 0 (finalW - padL pad - padR pad)
-                          !cih = max 0 (finalH - padT pad - padB pad)
-                      writePrimArray innerXArr i cix
-                      writePrimArray innerYArr i ciy
-                      writePrimArray innerWArr i ciw
-                      writePrimArray innerHArr i cih
-                      writePrimArray curXArr i cix
-                      writePrimArray curYArr i ciy
+                        -- Compute Width
+                        let !availW = max 0 (pix + piw - cx)
+                            !w =
+                              if wTag == SizingFixed && wVal > 0
+                                then wVal
+                                else if pDir == DirRow
+                                  then if wTag == SizingGrow
+                                    then max reqW (availW - remAfterW)
+                                    else reqW
+                                  else if wTag == SizingGrow
+                                    then max reqW piw
+                                    else reqW
+
+                        -- Compute Height
+                        let !availH = max 0 (piy + pih - cy)
+                            !h =
+                              if hTag == SizingFixed && hVal > 0
+                                then hVal
+                                else if pDir == DirColumn
+                                  then if hTag == SizingGrow
+                                    then max reqH (availH - remAfterH)
+                                    else reqH
+                                  else if hTag == SizingGrow
+                                    then max reqH pih
+                                    else reqH
+
+                        let !finalW = max minW (min maxW w)
+                            !finalH = max minH (min maxH h)
+                            !x = cx
+                            !y = cy
+
+                        setRect na i x y finalW finalH
+
+                        let !cx0 = max (rectX parentClip) x
+                            !cy0 = max (rectY parentClip) y
+                            !cx1 = min (rectX parentClip + rectW parentClip) (x + finalW)
+                            !cy1 = min (rectY parentClip + rectH parentClip) (y + finalH)
+                            !childClip = Rect cx0 cy0 (max 0 (cx1 - cx0)) (max 0 (cy1 - cy0))
+                        setClipRect na i childClip
+
+                        -- Advance parent cursor
+                        if pDir == DirColumn
+                          then writePrimArray curYArr p (cy + finalH + pGap)
+                          else writePrimArray curXArr p (cx + finalW + pGap)
+
+                        -- If container, initialize its inner bounds and cursor
+                        when (isContainerNode nt) $ do
+                          let !cix = x + padL pad
+                              !ciy = y + padT pad
+                              !ciw = max 0 (finalW - padL pad - padR pad)
+                              !cih = max 0 (finalH - padT pad - padB pad)
+                          writePrimArray innerXArr i cix
+                          writePrimArray innerYArr i ciy
+                          writePrimArray innerWArr i ciw
+                          writePrimArray innerHArr i cih
+                          writePrimArray curXArr i cix
+                          writePrimArray curYArr i ciy
+                          cgCols <- getGridCols na i
+                          when (cgCols > 0) $ do
+                            rawGap <- getGap na i
+                            setupGridChildren i cgCols cix ciy ciw cih rawGap
 
                 pass2 (i + 1)
       pass2 0

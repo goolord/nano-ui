@@ -33,6 +33,8 @@ module NanoUI.Style
   , tight
   , percent
   , aspect
+  , gridCols
+  , cols
   , FontVariant (..)
   , LayoutModifier
   , fontRegular
@@ -110,6 +112,7 @@ data Layout = Layout
   , layoutMaxH :: {-# UNPACK #-} !Float
   , layoutAspect :: {-# UNPACK #-} !Float
   , layoutFontVariant :: !FontVariant
+  , layoutGridCols :: {-# UNPACK #-} !Int
   }
   deriving (Eq, Show)
 
@@ -130,6 +133,7 @@ defaultLayout =
     , layoutMaxH = 1e9
     , layoutAspect = 0
     , layoutFontVariant = FontRegular
+    , layoutGridCols = 0
     }
 
 {-# INLINE padAll #-}
@@ -196,6 +200,14 @@ percent p l = l {layoutWidth = Percent p}
 {-# INLINE aspect #-}
 aspect :: Float -> Layout -> Layout
 aspect r l = l {layoutAspect = r}
+
+{-# INLINE gridCols #-}
+gridCols :: Int -> Layout -> Layout
+gridCols n l = l {layoutGridCols = max 0 n}
+
+{-# INLINE cols #-}
+cols :: Int -> Layout -> Layout
+cols = gridCols
 
 {-# INLINE fontRegular #-}
 fontRegular :: Layout -> Layout
