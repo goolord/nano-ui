@@ -6,17 +6,21 @@ module NanoUI.Rgfw.Render
   , renderTextEditMenuOverlay
   ) where
 
+import Control.Exception (finally)
 import Control.Monad (forM_, when)
 import Data.Bits ((.&.))
 import qualified Data.IntMap.Strict as IM
-import Data.IORef (readIORef)
+import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
 import Data.Maybe (fromMaybe, isJust)
 import Data.Primitive.PrimArray
-  ( newPrimArray
+  ( MutablePrimArray
+  , newPrimArray
   , readPrimArray
   , writePrimArray
   )
 import qualified Data.Text as T
+import GHC.Exts (RealWorld)
+import GHC.IO (unsafePerformIO)
 import NanoUI (Color (..), FontVariant (..), Padding (..), Rect (..), V2 (..), WidgetId (..), colorRGBA, rectContains)
 import NanoUI.Context
   ( Context
@@ -80,6 +84,32 @@ textNodeFontVariant si =
         then toEnum v
         else FontRegular
 
+data RenderScratch = RenderScratch
+  { rsCap     :: {-# UNPACK #-} !Int
+  , rsOverlay :: !(MutablePrimArray RealWorld Int)
+  , rsPopup   :: !(MutablePrimArray RealWorld Int)
+  }
+
+{-# NOINLINE globalRenderScratchPool #-}
+globalRenderScratchPool :: IORef (Maybe RenderScratch)
+globalRenderScratchPool = unsafePerformIO (newIORef Nothing)
+
+allocRenderScratch :: Int -> IO RenderScratch
+allocRenderScratch !cap = do
+  ov <- newPrimArray cap
+  pop <- newPrimArray cap
+  pure $ RenderScratch cap ov pop
+
+withRenderScratch :: Int -> (RenderScratch -> IO a) -> IO a
+withRenderScratch !reqN act = do
+  mSc <- atomicModifyIORef' globalRenderScratchPool (\m -> (Nothing, m))
+  sc <- case mSc of
+    Just s | rsCap s >= reqN -> pure s
+    _ -> do
+      let !cap = max 256 (max reqN (maybe 0 ((* 2) . rsCap) mSc))
+      allocRenderScratch cap
+  act sc `finally` atomicModifyIORef' globalRenderScratchPool (\_ -> (Just sc, ()))
+
 -- | Pure bounding-box painter.
 -- Every widget is strictly drawn as its exact collision / bounding box.
 -- Floating popups and context menus are drawn in an overlay pass on top of all widgets.
@@ -97,10 +127,10 @@ renderArena ::
 renderArena surf font !scale theme ctx na hotId activeId focusId = do
   store <- getStore ctx
   !n <- arenaCount na
-  when (n > 0) $ withArenaArraysSnap na $ do
+  when (n > 0) $ withRenderScratch n $ \scratch -> withArenaArraysSnap na $ do
     -- Precompute overlay and popup status for all nodes in O(N)
-    isOverlayArr <- newPrimArray n
-    isPopupArr   <- newPrimArray n
+    let isOverlayArr = rsOverlay scratch
+        isPopupArr   = rsPopup scratch
     let prepOverlay !i
           | i >= n = pure ()
           | otherwise = do

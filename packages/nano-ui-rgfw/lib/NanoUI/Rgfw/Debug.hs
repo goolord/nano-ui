@@ -19,7 +19,7 @@ module NanoUI.Rgfw.Debug
   , rtsRows
   ) where
 
-import Data.IORef (IORef, atomicModifyIORef', newIORef)
+import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Word (Word32, Word64)
@@ -174,15 +174,13 @@ emptyRgfwDebug =
 noteLoop :: SamplerRef -> IO ()
 noteLoop ref = do
   now <- getMonotonicTime
-  atomicModifyIORef' ref $ \s ->
+  modifyIORef' ref $ \s ->
     let dt = now - smLastLoopT s
         fps = if dt > 1e-4 then 1 / dt else 0
-     in ( s
-            { smLoopEma = blend (smLoopEma s) fps
-            , smLastLoopT = now
-            }
-        , ()
-        )
+     in s
+          { smLoopEma = blend (smLoopEma s) fps
+          , smLastLoopT = now
+          }
 
 notePresent ::
   SamplerRef ->
@@ -200,27 +198,25 @@ notePresent ::
   IO ()
 notePresent ref uiMs renderMs blitMs frameMs nodes contentW contentH physW physH scale monScale = do
   now <- getMonotonicTime
-  atomicModifyIORef' ref $ \s ->
+  modifyIORef' ref $ \s ->
     let dt = now - smLastPresentT s
         fps = if dt > 1e-4 then 1 / dt else 0
-     in ( s
-            { smPresentEma = blend (smPresentEma s) fps
-            , smLastPresentT = now
-            , smPresents = smPresents s + 1
-            , smUiMs = uiMs
-            , smRenderMs = renderMs
-            , smBlitMs = blitMs
-            , smFrameMs = frameMs
-            , smNodes = nodes
-            , smContentW = contentW
-            , smContentH = contentH
-            , smPhysW = physW
-            , smPhysH = physH
-            , smScale = scale
-            , smMonScale = monScale
-            }
-        , ()
-        )
+     in s
+          { smPresentEma = blend (smPresentEma s) fps
+          , smLastPresentT = now
+          , smPresents = smPresents s + 1
+          , smUiMs = uiMs
+          , smRenderMs = renderMs
+          , smBlitMs = blitMs
+          , smFrameMs = frameMs
+          , smNodes = nodes
+          , smContentW = contentW
+          , smContentH = contentH
+          , smPhysW = physW
+          , smPhysH = physH
+          , smScale = scale
+          , smMonScale = monScale
+          }
 
 readRgfwDebug :: SamplerRef -> Size -> V2 -> IO RgfwDebugSnapshot
 readRgfwDebug ref (Size lw lh) (V2 mx my) = do

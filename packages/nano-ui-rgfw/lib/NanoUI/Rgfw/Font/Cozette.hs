@@ -23,6 +23,7 @@ module NanoUI.Rgfw.Font.Cozette
   , renderTextScaledToBuffer
   ) where
 
+import Control.Monad (when)
 import Data.Bits (shiftL, shiftR, (.&.), (.|.))
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
@@ -72,6 +73,7 @@ data CozetteFont = CozetteFont
   { cfNumGlyphs   :: {-# UNPACK #-} !Int
   , cfGroups      :: !(V.Vector CmapGroup)
   , cfGlyphData   :: !(PrimArray Word8)  -- 921 * 12 bytes of packed 7x13 bitmap bits
+  , cfGlyphData1x :: !(PrimArray Word8)  -- 921 * 13 bytes of row-unpacked Word8s (1 byte per row)
   , cfGlyphData2x :: !(PrimArray Word16) -- 921 * 26 Word16s (14 bits per row, 26 rows per glyph)
   , cfGlyphData4x :: !(PrimArray Word32) -- 921 * 52 Word32s (28 bits per row, 52 rows per glyph)
   }
@@ -164,9 +166,34 @@ parseCozette bs = unsafePerformIO $ do
             loadGlyphs (g + 1)
   loadGlyphs 0
   frozen1x <- unsafeFreezePrimArray mutArr
+  frozen1xRows <- build1xRowGlyphs numGlyphs frozen1x
   frozen2x <- buildScale2xGlyphs numGlyphs frozen1x
   frozen4x <- buildScale4xGlyphs numGlyphs frozen2x
-  pure $ CozetteFont numGlyphs (V.fromList groups) frozen1x frozen2x frozen4x
+  pure $ CozetteFont numGlyphs (V.fromList groups) frozen1x frozen1xRows frozen2x frozen4x
+
+-- | Build unpacked 1x glyphs: 13 bytes per glyph (1 byte per row, bit (7 - c) for col c).
+build1xRowGlyphs :: Int -> PrimArray Word8 -> IO (PrimArray Word8)
+build1xRowGlyphs !numGlyphs !arr = do
+  mutArr1x <- newPrimArray (numGlyphs * 13)
+  let forEachGlyph !gid
+        | gid >= numGlyphs = pure ()
+        | otherwise = do
+            let forEachRow !r
+                  | r >= 13 = pure ()
+                  | otherwise = do
+                      let buildRow !c !acc
+                            | c >= 7 = acc
+                            | otherwise =
+                                let !bit = getGlyphBit1x arr gid c r
+                                    !bitVal = bit `shiftL` (7 - c)
+                                 in buildRow (c + 1) (acc .|. bitVal)
+                      let !rowByte = buildRow 0 0
+                      writePrimArray mutArr1x (gid * 13 + r) rowByte
+                      forEachRow (r + 1)
+            forEachRow 0
+            forEachGlyph (gid + 1)
+  forEachGlyph 0
+  unsafeFreezePrimArray mutArr1x
 
 -- | Scale a 2D boolean grid using the Scale2x (AdvMAME2x / EPX) algorithm.
 -- Given width W, height H, and a pixel query function (col -> row -> Bool),
@@ -389,63 +416,110 @@ renderGlyphScaledToBuffer ::
   IO ()
 renderGlyphScaledToBuffer !dstPtr !stride !clipX0 !clipY0 !clipX1 !clipY1 !scale !penX !penY !color !font !gid
   | scale <= 1.0 = do
-      -- 1x fast path (original 7x13 bitmap)
+      -- 1x fast path (unpacked 7x13 rows)
       let !safeGid = if fromIntegral gid < cfNumGlyphs font then fromIntegral gid else 0
-          !baseOff = safeGid * 12
-          !arr = cfGlyphData font
-          renderRow1x !r
-            | r >= 13 = pure ()
-            | otherwise = do
-                let !y = penY + r
-                if y >= clipY0 && y < clipY1
-                  then do
-                    let renderCol1x !c
-                          | c >= 7 = pure ()
-                          | otherwise = do
-                              let !x = penX + c
-                              if x >= clipX0 && x < clipX1
-                                then do
-                                  let !bitIdx = r * 7 + c
-                                      !byteIdx = baseOff + (bitIdx `shiftR` 3)
-                                      !bitInByte = 7 - (bitIdx .&. 7)
-                                      !b = indexPrimArray arr byteIdx
-                                  if (b `shiftR` bitInByte) .&. 1 == 1
-                                    then pokeElemOff dstPtr (y * stride + x) color
-                                    else pure ()
-                                  renderCol1x (c + 1)
-                                else renderCol1x (c + 1)
-                    renderCol1x 0
-                    renderRow1x (r + 1)
-                  else renderRow1x (r + 1)
-      renderRow1x 0
+      when (safeGid /= 1) $ do
+        if penX >= clipX1 || penX + 7 <= clipX0 || penY >= clipY1 || penY + 13 <= clipY0
+          then pure ()
+          else do
+            let !baseOff = safeGid * 13
+                !arr1x = cfGlyphData1x font
+            if penX >= clipX0 && penX + 7 <= clipX1 && penY >= clipY0 && penY + 13 <= clipY1
+              then do
+                -- Unclipped fast path: write directly without per-pixel bounds check
+                let renderRowUnclipped !r
+                      | r >= 13 = pure ()
+                      | otherwise = do
+                          let !rowByte = indexPrimArray arr1x (baseOff + r)
+                          if rowByte == 0
+                            then renderRowUnclipped (r + 1)
+                            else do
+                              let !rowDstOff = (penY + r) * stride + penX
+                              when (rowByte .&. 0x80 /= 0) $ pokeElemOff dstPtr (rowDstOff + 0) color
+                              when (rowByte .&. 0x40 /= 0) $ pokeElemOff dstPtr (rowDstOff + 1) color
+                              when (rowByte .&. 0x20 /= 0) $ pokeElemOff dstPtr (rowDstOff + 2) color
+                              when (rowByte .&. 0x10 /= 0) $ pokeElemOff dstPtr (rowDstOff + 3) color
+                              when (rowByte .&. 0x08 /= 0) $ pokeElemOff dstPtr (rowDstOff + 4) color
+                              when (rowByte .&. 0x04 /= 0) $ pokeElemOff dstPtr (rowDstOff + 5) color
+                              when (rowByte .&. 0x02 /= 0) $ pokeElemOff dstPtr (rowDstOff + 6) color
+                              renderRowUnclipped (r + 1)
+                renderRowUnclipped 0
+              else do
+                -- Partially clipped fallback
+                let renderRowClipped !r
+                      | r >= 13 = pure ()
+                      | otherwise = do
+                          let !y = penY + r
+                          if y >= clipY0 && y < clipY1
+                            then do
+                              let !rowByte = indexPrimArray arr1x (baseOff + r)
+                              if rowByte == 0
+                                then renderRowClipped (r + 1)
+                                else do
+                                  let renderColClipped !c
+                                        | c >= 7 = pure ()
+                                        | otherwise = do
+                                            let !x = penX + c
+                                            when (x >= clipX0 && x < clipX1 && (rowByte .&. (0x80 `shiftR` c) /= 0)) $
+                                              pokeElemOff dstPtr (y * stride + x) color
+                                            renderColClipped (c + 1)
+                                  renderColClipped 0
+                                  renderRowClipped (r + 1)
+                            else renderRowClipped (r + 1)
+                renderRowClipped 0
 
   | abs (scale - 2.0) < 0.05 = do
       -- Exact 2x Scale2x fast path (14x26 bitmap)
       let !safeGid = if fromIntegral gid < cfNumGlyphs font then fromIntegral gid else 0
-          !baseOff = safeGid * 26
-          !arr2x = cfGlyphData2x font
-          renderRow2x !r
-            | r >= 26 = pure ()
-            | otherwise = do
-                let !y = penY + r
-                if y >= clipY0 && y < clipY1
-                  then do
-                    let !rowWord = indexPrimArray arr2x (baseOff + r)
-                        renderCol2x !c
-                          | c >= 14 = pure ()
-                          | otherwise = do
-                              let !x = penX + c
-                              if x >= clipX0 && x < clipX1
-                                then do
-                                  if (rowWord `shiftR` (15 - c)) .&. 1 == 1
-                                    then pokeElemOff dstPtr (y * stride + x) color
-                                    else pure ()
-                                  renderCol2x (c + 1)
-                                else renderCol2x (c + 1)
-                    renderCol2x 0
-                    renderRow2x (r + 1)
-                  else renderRow2x (r + 1)
-      renderRow2x 0
+      when (safeGid /= 1) $ do
+        if penX >= clipX1 || penX + 14 <= clipX0 || penY >= clipY1 || penY + 26 <= clipY0
+          then pure ()
+          else do
+            let !baseOff = safeGid * 26
+                !arr2x = cfGlyphData2x font
+            if penX >= clipX0 && penX + 14 <= clipX1 && penY >= clipY0 && penY + 26 <= clipY1
+              then do
+                -- Unclipped 2x fast path
+                let renderRow2xUnclipped !r
+                      | r >= 26 = pure ()
+                      | otherwise = do
+                          let !rowWord = indexPrimArray arr2x (baseOff + r)
+                          if rowWord == 0
+                            then renderRow2xUnclipped (r + 1)
+                            else do
+                              let !rowDstOff = (penY + r) * stride + penX
+                                  renderCol2x !c
+                                    | c >= 14 = pure ()
+                                    | otherwise = do
+                                        when ((rowWord .&. (0x8000 `shiftR` c)) /= 0) $
+                                          pokeElemOff dstPtr (rowDstOff + c) color
+                                        renderCol2x (c + 1)
+                              renderCol2x 0
+                              renderRow2xUnclipped (r + 1)
+                renderRow2xUnclipped 0
+              else do
+                -- Clipped 2x fallback
+                let renderRow2xClipped !r
+                      | r >= 26 = pure ()
+                      | otherwise = do
+                          let !y = penY + r
+                          if y >= clipY0 && y < clipY1
+                            then do
+                              let !rowWord = indexPrimArray arr2x (baseOff + r)
+                              if rowWord == 0
+                                then renderRow2xClipped (r + 1)
+                                else do
+                                  let renderCol2x !c
+                                        | c >= 14 = pure ()
+                                        | otherwise = do
+                                            let !x = penX + c
+                                            when (x >= clipX0 && x < clipX1 && ((rowWord .&. (0x8000 `shiftR` c)) /= 0)) $
+                                              pokeElemOff dstPtr (y * stride + x) color
+                                            renderCol2x (c + 1)
+                                  renderCol2x 0
+                                  renderRow2xClipped (r + 1)
+                            else renderRow2xClipped (r + 1)
+                renderRow2xClipped 0
 
   | abs (scale - 4.0) < 0.05 = do
       -- Exact 4x Scale4x fast path (28x52 bitmap)
@@ -738,17 +812,20 @@ renderTextScaledToBuffer ::
   Text ->
   IO ()
 renderTextScaledToBuffer !dstPtr !stride !clipX0 !clipY0 !clipX1 !clipY1 !scale !logX !logY !color !font !txt =
-  go (0 :: Int) (0 :: Int) (T.unpack txt)
+  go (0 :: Int) (0 :: Int) txt
   where
-    go _ _ [] = pure ()
-    go !_ !line ('\r' : cs) = go 0 line cs
-    go !_ !line ('\n' : cs) = go 0 (line + 1) cs
-    go !col !line (c : cs) = do
-      let !gid = charToGlyphId font c
-          !penX = round ((logX + (fromIntegral col :: Float) * 6.0) * scale)
-          !penY = round ((logY + (fromIntegral line :: Float) * 13.0) * scale)
-      renderGlyphScaledToBuffer dstPtr stride clipX0 clipY0 clipX1 clipY1 scale penX penY color font gid
-      go (col + 1) line cs
+    go !_ !_ !t | T.null t = pure ()
+    go !col !line !t = case T.uncons t of
+      Nothing -> pure ()
+      Just ('\r', rest) -> go 0 line rest
+      Just ('\n', rest) -> go 0 (line + 1) rest
+      Just (c, rest) -> do
+        let !gid = charToGlyphId font c
+        when (gid /= 1) $ do
+          let !penX = round ((logX + fromIntegral col * 6.0) * scale)
+              !penY = round ((logY + fromIntegral line * 13.0) * scale)
+          renderGlyphScaledToBuffer dstPtr stride clipX0 clipY0 clipX1 clipY1 scale penX penY color font gid
+        go (col + 1) line rest
 
 cozetteMetrics :: FontMetrics
 cozetteMetrics =
