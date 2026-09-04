@@ -385,10 +385,14 @@ textIndexAtX host fm txt x
         else fmAdvance fm c
 
 measureTextWrapped :: HostProfile -> FontMetrics -> Text -> Float -> (Float, Float)
-measureTextWrapped host fm txt maxW =
-  let lineH = fmLineHeight fm
-      textLines = wrapTextLines host fm txt maxW
-   in wrappedSize lineW lineH maxW textLines
+measureTextWrapped host fm txt maxW
+  | maxW <= 0 = (0, fmLineHeight fm)
+  | T.null txt = (0, fmLineHeight fm)
+  | not (T.any (== '\n') txt) && lineW txt <= maxW = (lineW txt, fmLineHeight fm)
+  | otherwise =
+      let lineH = fmLineHeight fm
+          textLines = wrapTextLines host fm txt maxW
+       in wrappedSize lineW lineH maxW textLines
   where
     lineW = textDisplayWidth host fm
 
@@ -438,6 +442,7 @@ wrapParagraphFit :: (Float -> Text -> (Text, Text)) -> (Text -> Float) -> Text -
 wrapParagraphFit fit lineW para maxW
   | maxW <= 0 = []
   | T.null para = [""]
+  | lineW para <= maxW = [para]
   | T.any (== ' ') para = wrapWordsWith lineW (T.words para) maxW []
   | otherwise = reverse (charLinesFit fit maxW para [])
 
@@ -445,8 +450,13 @@ wrapParagraphIO :: (Text -> IO Float) -> Text -> Float -> IO [Text]
 wrapParagraphIO lineW para maxW
   | maxW <= 0 = pure []
   | T.null para = pure [""]
-  | T.any (== ' ') para = wrapWordsIO lineW (T.words para) maxW []
-  | otherwise = reverse <$> charLinesIO lineW maxW para []
+  | otherwise = do
+      w <- lineW para
+      if w <= maxW
+        then pure [para]
+        else if T.any (== ' ') para
+          then wrapWordsIO lineW (T.words para) maxW []
+          else reverse <$> charLinesIO lineW maxW para []
 
 wrapWordsWith :: (Text -> Float) -> [Text] -> Float -> [Text] -> [Text]
 wrapWordsWith _ [] _ acc = reverse acc
