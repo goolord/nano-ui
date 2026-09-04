@@ -9,6 +9,7 @@ import System.Exit (exitFailure)
 import qualified Data.IntMap.Strict as IM
 import Data.IORef (newIORef, readIORef, writeIORef)
 import qualified Data.Text as T
+import NanoUI.Debug (CoreDebugSnapshot (..))
 import NanoUI.Rgfw.Debug (RgfwDebugSnapshot (..), debugWindowBody, emptyRgfwDebug)
 import NanoUI.Layout.Arena (DirTag (..), arenaCount, getClipRect, getDirection, getFirstChild, getNextSibling, getNodeType, getParent, setClipRect)
 import NanoUI (runNanoUI, window)
@@ -947,7 +948,7 @@ testDebugWindow :: IO ()
 testDebugWindow = do
   ctx <- newPixelContext
   let inp = emptyInput { inputWindowSize = Size 800 600 }
-      snap = emptyRgfwDebug { dbgRtsOn = True }
+      snap = emptyRgfwDebug { dbgCore = (dbgCore emptyRgfwDebug) { dbgRtsOn = True } }
   _ <- runNanoUI ctx inp (window True "Debug Diagnostics" (debugWindowBody snap))
   let na = ctxNodeArena ctx
   solveSinglePassLayout na 800 600

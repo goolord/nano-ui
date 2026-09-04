@@ -25,19 +25,7 @@ import Diagrams.Prelude
   )
 import NanoUI
 import NanoUI.Backend.Sdl
-  ( RgbaImage (..)
-  , SdlDebugSnapshot (..)
-  , SdlEnv
-  , SdlOptions (..)
-  , askSdlDebug
-  , defaultSdlOptions
-  , newSdlContext
-  , runSdlApp
-  , sdlDrawFrame
-  , syncDisplay
-  , withSdl
-  )
-import NanoUI.Debug (RtsStatsSnapshot (..), formatRtsRows)
+import NanoUI.Debug (formatCoreRtsRows)
 import NanoUI.Diagrams
 import NanoUI.Testing (Context, collectOverlayTextSpans, collectTextSpans, registerImage)
 import NanoUI.Testing.Harness
@@ -548,23 +536,7 @@ displayRows s =
     ]
 
 rtsRows :: SdlDebugSnapshot -> SmallArray (T.Text, T.Text)
-rtsRows s =
-  smallArrayFromList $
-    formatRtsRows
-      RtsStatsSnapshot
-        { rtsEnabled = dbgRtsOn s
-        , rtsGcs = dbgGcs s
-        , rtsMajorGcs = dbgMajorGcs s
-        , rtsAllocMb = dbgAllocMb s
-        , rtsLiveMb = dbgLiveMb s
-        , rtsMaxMemMb = dbgMaxMemMb s
-        , rtsCopiedMb = dbgCopiedMb s
-        , rtsGcPct = dbgGcPct s
-        , rtsLastGcGen = dbgLastGcGen s
-        , rtsLastGcMs = dbgLastGcMs s
-        , rtsCaps = dbgCaps s
-        , rtsCpus = dbgCpus s
-        }
+rtsRows s = smallArrayFromList (formatCoreRtsRows (dbgCore s))
 
 thumb :: ImageId -> T.Text -> NanoUI ()
 thumb iid caption =

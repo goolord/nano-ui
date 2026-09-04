@@ -11,6 +11,31 @@ module NanoUI.Backend.Term
   , defaultTermOptions
   , runTermApp
   , runTermAppReduce
+  , emptyTermDebug
+  , dbgPresentFps
+  , dbgLoopFps
+  , dbgFrameMs
+  , dbgUiMs
+  , dbgSkips
+  , dbgVerts
+  , dbgIndices
+  , dbgCmds
+  , dbgWinW
+  , dbgWinH
+  , dbgMouseX
+  , dbgMouseY
+  , dbgRtsOn
+  , dbgGcs
+  , dbgMajorGcs
+  , dbgAllocMb
+  , dbgLiveMb
+  , dbgMaxMemMb
+  , dbgCopiedMb
+  , dbgGcPct
+  , dbgLastGcGen
+  , dbgLastGcMs
+  , dbgCaps
+  , dbgCpus
   ) where
 
 import Data.IORef (newIORef, readIORef, writeIORef)
@@ -42,6 +67,30 @@ import NanoUI.Term.Debug
   , TermDebugSnapshot (..)
   , emptyTermDebug
   , readTermDebug
+  , dbgPresentFps
+  , dbgLoopFps
+  , dbgFrameMs
+  , dbgUiMs
+  , dbgSkips
+  , dbgVerts
+  , dbgIndices
+  , dbgCmds
+  , dbgWinW
+  , dbgWinH
+  , dbgMouseX
+  , dbgMouseY
+  , dbgRtsOn
+  , dbgGcs
+  , dbgMajorGcs
+  , dbgAllocMb
+  , dbgLiveMb
+  , dbgMaxMemMb
+  , dbgCopiedMb
+  , dbgGcPct
+  , dbgLastGcGen
+  , dbgLastGcMs
+  , dbgCaps
+  , dbgCpus
   )
 import NanoUI.Term.Palette (newTerminalContext)
 import NanoUI.Term.Session (withTermSession)

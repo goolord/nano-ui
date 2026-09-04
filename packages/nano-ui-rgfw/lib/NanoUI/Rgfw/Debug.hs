@@ -3,7 +3,7 @@
 
 module NanoUI.Rgfw.Debug
   ( RgfwDebugSnapshot (..)
-  , RgfwDebugSampler (..)
+  , RgfwDebugSampler
   , RgfwDebugHost (..)
   , newRgfwDebugSampler
   , noteLoop
@@ -17,9 +17,31 @@ module NanoUI.Rgfw.Debug
   , layoutRows
   , displayRows
   , rtsRows
+  , dbgPresentFps
+  , dbgLoopFps
+  , dbgFrameMs
+  , dbgUiMs
+  , dbgRenderMs
+  , dbgPresents
+  , dbgWinW
+  , dbgWinH
+  , dbgMouseX
+  , dbgMouseY
+  , dbgRtsOn
+  , dbgGcs
+  , dbgMajorGcs
+  , dbgAllocMb
+  , dbgLiveMb
+  , dbgMaxMemMb
+  , dbgCopiedMb
+  , dbgGcPct
+  , dbgLastGcGen
+  , dbgLastGcMs
+  , dbgCaps
+  , dbgCpus
   ) where
 
-import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef)
+import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Word (Word32, Word64)
@@ -43,144 +65,161 @@ import NanoUI.Monad
   , askInput
   )
 import NanoUI.Debug
-  ( RtsStatsSnapshot (..)
-  , blend
+  ( CoreDebugSnapshot
+  , DebugSampler (..)
   , debugRefreshSec
-  , formatRtsRows
+  , emptyCoreDebugSnapshot
+  , formatCoreRtsRows
+  , makeCoreDebugSnapshot
+  , newDebugSampler
+  , noteDebugLoop
+  , noteDebugPresent
   , readRtsSnapshot
   )
+import qualified NanoUI.Debug as D
 
 data RgfwDebugSnapshot = RgfwDebugSnapshot
-  { dbgPresentFps :: !Double
-  , dbgLoopFps :: !Double
-  , dbgFrameMs :: !Double
-  , dbgUiMs :: !Double
-  , dbgRenderMs :: !Double
-  , dbgBlitMs :: !Double
-  , dbgPresents :: !Word64
-  , dbgNodes :: !Int
-  , dbgContentW :: !Float
-  , dbgContentH :: !Float
-  , dbgWinW :: !Float
-  , dbgWinH :: !Float
-  , dbgPhysW :: !Int
-  , dbgPhysH :: !Int
-  , dbgMouseX :: !Float
-  , dbgMouseY :: !Float
-  , dbgScale :: !Float
-  , dbgMonScale :: !Float
+  { dbgCore      :: !CoreDebugSnapshot
+  , dbgBlitMs    :: !Double
+  , dbgNodes     :: !Int
+  , dbgContentW  :: !Float
+  , dbgContentH  :: !Float
+  , dbgPhysW     :: !Int
+  , dbgPhysH     :: !Int
+  , dbgScale     :: !Float
+  , dbgMonScale  :: !Float
   , dbgScaleMode :: !Text
-  , dbgRtsOn :: !Bool
-  , dbgGcs :: !Word32
-  , dbgMajorGcs :: !Word32
-  , dbgAllocMb :: !Double
-  , dbgLiveMb :: !Double
-  , dbgMaxMemMb :: !Double
-  , dbgCopiedMb :: !Double
-  , dbgGcPct :: !Double
-  , dbgLastGcGen :: !Word32
-  , dbgLastGcMs :: !Double
-  , dbgCaps :: !Int
-  , dbgCpus :: !Int
   }
   deriving (Eq, Show)
 
-data RgfwDebugSampler = RgfwDebugSampler
-  { smPresentEma :: !Double
-  , smLoopEma :: !Double
-  , smLastPresentT :: !Double
-  , smLastLoopT :: !Double
-  , smLastDebugT :: !Double
-  , smPresents :: !Word64
-  , smUiMs :: !Double
-  , smRenderMs :: !Double
-  , smBlitMs :: !Double
-  , smFrameMs :: !Double
-  , smNodes :: !Int
-  , smContentW :: !Float
-  , smContentH :: !Float
-  , smPhysW :: !Int
-  , smPhysH :: !Int
-  , smScale :: !Float
-  , smMonScale :: !Float
-  , smSnapshot :: !RgfwDebugSnapshot
+dbgPresentFps :: RgfwDebugSnapshot -> Double
+dbgPresentFps = D.dbgPresentFps . dbgCore
+
+dbgLoopFps :: RgfwDebugSnapshot -> Double
+dbgLoopFps = D.dbgLoopFps . dbgCore
+
+dbgFrameMs :: RgfwDebugSnapshot -> Double
+dbgFrameMs = D.dbgFrameMs . dbgCore
+
+dbgUiMs :: RgfwDebugSnapshot -> Double
+dbgUiMs = D.dbgUiMs . dbgCore
+
+dbgRenderMs :: RgfwDebugSnapshot -> Double
+dbgRenderMs = D.dbgRenderMs . dbgCore
+
+dbgPresents :: RgfwDebugSnapshot -> Word64
+dbgPresents = D.dbgPresents . dbgCore
+
+dbgWinW :: RgfwDebugSnapshot -> Float
+dbgWinW = D.dbgWinW . dbgCore
+
+dbgWinH :: RgfwDebugSnapshot -> Float
+dbgWinH = D.dbgWinH . dbgCore
+
+dbgMouseX :: RgfwDebugSnapshot -> Float
+dbgMouseX = D.dbgMouseX . dbgCore
+
+dbgMouseY :: RgfwDebugSnapshot -> Float
+dbgMouseY = D.dbgMouseY . dbgCore
+
+dbgRtsOn :: RgfwDebugSnapshot -> Bool
+dbgRtsOn = D.dbgRtsOn . dbgCore
+
+dbgGcs :: RgfwDebugSnapshot -> Word32
+dbgGcs = D.dbgGcs . dbgCore
+
+dbgMajorGcs :: RgfwDebugSnapshot -> Word32
+dbgMajorGcs = D.dbgMajorGcs . dbgCore
+
+dbgAllocMb :: RgfwDebugSnapshot -> Double
+dbgAllocMb = D.dbgAllocMb . dbgCore
+
+dbgLiveMb :: RgfwDebugSnapshot -> Double
+dbgLiveMb = D.dbgLiveMb . dbgCore
+
+dbgMaxMemMb :: RgfwDebugSnapshot -> Double
+dbgMaxMemMb = D.dbgMaxMemMb . dbgCore
+
+dbgCopiedMb :: RgfwDebugSnapshot -> Double
+dbgCopiedMb = D.dbgCopiedMb . dbgCore
+
+dbgGcPct :: RgfwDebugSnapshot -> Double
+dbgGcPct = D.dbgGcPct . dbgCore
+
+dbgLastGcGen :: RgfwDebugSnapshot -> Word32
+dbgLastGcGen = D.dbgLastGcGen . dbgCore
+
+dbgLastGcMs :: RgfwDebugSnapshot -> Double
+dbgLastGcMs = D.dbgLastGcMs . dbgCore
+
+dbgCaps :: RgfwDebugSnapshot -> Int
+dbgCaps = D.dbgCaps . dbgCore
+
+dbgCpus :: RgfwDebugSnapshot -> Int
+dbgCpus = D.dbgCpus . dbgCore
+
+data RgfwDebugSamplerState = RgfwDebugSamplerState
+  { smSampler    :: !(IORef DebugSampler)
+  , smSnapshot   :: !(IORef RgfwDebugSnapshot)
+  , smLastLoopT  :: !Double
+  , smBlitMs     :: !Double
+  , smNodes      :: !Int
+  , smContentW   :: !Float
+  , smContentH   :: !Float
+  , smPhysW      :: !Int
+  , smPhysH      :: !Int
+  , smScale      :: !Float
+  , smMonScale   :: !Float
   }
 
-newtype RgfwDebugHost = RgfwDebugHost {rgfwDebugSampler :: IORef RgfwDebugSampler}
+type RgfwDebugSampler = IORef RgfwDebugSamplerState
 
-type SamplerRef = IORef RgfwDebugSampler
+newtype RgfwDebugHost = RgfwDebugHost {rgfwDebugSampler :: RgfwDebugSampler}
+
+type SamplerRef = RgfwDebugSampler
 
 newRgfwDebugSampler :: IO SamplerRef
 newRgfwDebugSampler = do
   now <- getMonotonicTime
+  sRef <- newDebugSampler
+  snapRef <- newIORef emptyRgfwDebug
   newIORef
-    RgfwDebugSampler
-      { smPresentEma = 0
-      , smLoopEma = 0
-      , smLastPresentT = now
-      , smLastLoopT = now
-      , smLastDebugT = 0
-      , smPresents = 0
-      , smUiMs = 0
-      , smRenderMs = 0
-      , smBlitMs = 0
-      , smFrameMs = 0
-      , smNodes = 0
-      , smContentW = 0
-      , smContentH = 0
-      , smPhysW = 0
-      , smPhysH = 0
-      , smScale = 1
-      , smMonScale = 1
-      , smSnapshot = emptyRgfwDebug
+    RgfwDebugSamplerState
+      { smSampler    = sRef
+      , smSnapshot   = snapRef
+      , smLastLoopT  = now
+      , smBlitMs     = 0
+      , smNodes      = 0
+      , smContentW   = 0
+      , smContentH   = 0
+      , smPhysW      = 0
+      , smPhysH      = 0
+      , smScale      = 1
+      , smMonScale   = 1
       }
 
 emptyRgfwDebug :: RgfwDebugSnapshot
 emptyRgfwDebug =
   RgfwDebugSnapshot
-    { dbgPresentFps = 0
-    , dbgLoopFps = 0
-    , dbgFrameMs = 0
-    , dbgUiMs = 0
-    , dbgRenderMs = 0
-    , dbgBlitMs = 0
-    , dbgPresents = 0
-    , dbgNodes = 0
-    , dbgContentW = 0
-    , dbgContentH = 0
-    , dbgWinW = 0
-    , dbgWinH = 0
-    , dbgPhysW = 0
-    , dbgPhysH = 0
-    , dbgMouseX = 0
-    , dbgMouseY = 0
-    , dbgScale = 1
-    , dbgMonScale = 1
+    { dbgCore      = emptyCoreDebugSnapshot
+    , dbgBlitMs    = 0
+    , dbgNodes     = 0
+    , dbgContentW  = 0
+    , dbgContentH  = 0
+    , dbgPhysW     = 0
+    , dbgPhysH     = 0
+    , dbgScale     = 1
+    , dbgMonScale  = 1
     , dbgScaleMode = "None"
-    , dbgRtsOn = False
-    , dbgGcs = 0
-    , dbgMajorGcs = 0
-    , dbgAllocMb = 0
-    , dbgLiveMb = 0
-    , dbgMaxMemMb = 0
-    , dbgCopiedMb = 0
-    , dbgGcPct = 0
-    , dbgLastGcGen = 0
-    , dbgLastGcMs = 0
-    , dbgCaps = 0
-    , dbgCpus = 0
     }
 
 noteLoop :: SamplerRef -> IO ()
 noteLoop ref = do
   now <- getMonotonicTime
-  modifyIORef' ref $ \s ->
-    let dt = now - smLastLoopT s
-        fps = if dt > 1e-4 then 1 / dt else 0
-     in s
-          { smLoopEma = blend (smLoopEma s) fps
-          , smLastLoopT = now
-          }
+  s <- readIORef ref
+  let dt = realToFrac (now - smLastLoopT s) :: Float
+  writeIORef ref (s {smLastLoopT = now})
+  noteDebugLoop (smSampler s) dt
 
 notePresent ::
   SamplerRef ->
@@ -197,40 +236,36 @@ notePresent ::
   Float ->
   IO ()
 notePresent ref uiMs renderMs blitMs frameMs nodes contentW contentH physW physH scale monScale = do
-  now <- getMonotonicTime
-  modifyIORef' ref $ \s ->
-    let dt = now - smLastPresentT s
-        fps = if dt > 1e-4 then 1 / dt else 0
-     in s
-          { smPresentEma = blend (smPresentEma s) fps
-          , smLastPresentT = now
-          , smPresents = smPresents s + 1
-          , smUiMs = uiMs
-          , smRenderMs = renderMs
-          , smBlitMs = blitMs
-          , smFrameMs = frameMs
-          , smNodes = nodes
-          , smContentW = contentW
-          , smContentH = contentH
-          , smPhysW = physW
-          , smPhysH = physH
-          , smScale = scale
-          , smMonScale = monScale
-          }
+  s <- readIORef ref
+  noteDebugPresent (smSampler s) uiMs renderMs 0 frameMs 0 0 0
+  atomicModifyIORef' ref $ \st ->
+    ( st
+        { smBlitMs   = blitMs
+        , smNodes    = nodes
+        , smContentW = contentW
+        , smContentH = contentH
+        , smPhysW    = physW
+        , smPhysH    = physH
+        , smScale    = scale
+        , smMonScale = monScale
+        }
+    , ()
+    )
 
 readRgfwDebug :: SamplerRef -> Size -> V2 -> IO RgfwDebugSnapshot
 readRgfwDebug ref (Size lw lh) (V2 mx my) = do
   now <- getMonotonicTime
+  st <- readIORef ref
   (refresh, cur) <-
-    atomicModifyIORef' ref $ \s ->
+    atomicModifyIORef' (smSampler st) $ \s ->
       let elapsed = now - smLastDebugT s
           refresh = smLastDebugT s <= 0 || elapsed >= debugRefreshSec
        in (s, (refresh, s))
   if not refresh
-    then pure (smSnapshot cur)
+    then readIORef (smSnapshot st)
     else do
       rts <- readRtsSnapshot
-      let curScale = smScale cur
+      let curScale = smScale st
           scaleMode
             | curScale <= 1.0 = "1x (Direct 1:1)"
             | abs (curScale - 2.0) < 0.01 = "2x (Scale2x algorithm)"
@@ -238,42 +273,23 @@ readRgfwDebug ref (Size lw lh) (V2 mx my) = do
                 T.pack (printf "%.0fx (Integer pixel scale)" curScale)
             | otherwise =
                 T.pack (printf "%.2fx (Fractional bilinear)" curScale)
+          core = makeCoreDebugSnapshot cur lw lh mx my rts
           snap' =
             RgfwDebugSnapshot
-              { dbgPresentFps = smPresentEma cur
-              , dbgLoopFps = smLoopEma cur
-              , dbgFrameMs = smFrameMs cur
-              , dbgUiMs = smUiMs cur
-              , dbgRenderMs = smRenderMs cur
-              , dbgBlitMs = smBlitMs cur
-              , dbgPresents = smPresents cur
-              , dbgNodes = smNodes cur
-              , dbgContentW = smContentW cur
-              , dbgContentH = smContentH cur
-              , dbgWinW = lw
-              , dbgWinH = lh
-              , dbgPhysW = smPhysW cur
-              , dbgPhysH = smPhysH cur
-              , dbgMouseX = mx
-              , dbgMouseY = my
-              , dbgScale = curScale
-              , dbgMonScale = smMonScale cur
+              { dbgCore      = core
+              , dbgBlitMs    = smBlitMs st
+              , dbgNodes     = smNodes st
+              , dbgContentW  = smContentW st
+              , dbgContentH  = smContentH st
+              , dbgPhysW     = smPhysW st
+              , dbgPhysH     = smPhysH st
+              , dbgScale     = curScale
+              , dbgMonScale  = smMonScale st
               , dbgScaleMode = scaleMode
-              , dbgRtsOn = rtsEnabled rts
-              , dbgGcs = rtsGcs rts
-              , dbgMajorGcs = rtsMajorGcs rts
-              , dbgAllocMb = rtsAllocMb rts
-              , dbgLiveMb = rtsLiveMb rts
-              , dbgMaxMemMb = rtsMaxMemMb rts
-              , dbgCopiedMb = rtsCopiedMb rts
-              , dbgGcPct = rtsGcPct rts
-              , dbgLastGcGen = rtsLastGcGen rts
-              , dbgLastGcMs = rtsLastGcMs rts
-              , dbgCaps = rtsCaps rts
-              , dbgCpus = rtsCpus rts
               }
-      atomicModifyIORef' ref $ \s ->
-        (s {smLastDebugT = now, smSnapshot = snap'}, ())
+      atomicModifyIORef' (smSampler st) $ \s ->
+        (s {smLastDebugT = now}, ())
+      writeIORef (smSnapshot st) snap'
       pure snap'
 
 askRgfwDebug :: Ui :> es => Eff es RgfwDebugSnapshot
@@ -315,22 +331,7 @@ displayRows s =
   ]
 
 rtsRows :: RgfwDebugSnapshot -> [(Text, Text)]
-rtsRows s =
-  formatRtsRows
-    RtsStatsSnapshot
-      { rtsEnabled = dbgRtsOn s
-      , rtsGcs = dbgGcs s
-      , rtsMajorGcs = dbgMajorGcs s
-      , rtsAllocMb = dbgAllocMb s
-      , rtsLiveMb = dbgLiveMb s
-      , rtsMaxMemMb = dbgMaxMemMb s
-      , rtsCopiedMb = dbgCopiedMb s
-      , rtsGcPct = dbgGcPct s
-      , rtsLastGcGen = dbgLastGcGen s
-      , rtsLastGcMs = dbgLastGcMs s
-      , rtsCaps = dbgCaps s
-      , rtsCpus = dbgCpus s
-      }
+rtsRows = formatCoreRtsRows . dbgCore
 
 allDebugRows :: RgfwDebugSnapshot -> [(Text, Text)]
 allDebugRows s = frameRows s ++ layoutRows s ++ displayRows s ++ rtsRows s
