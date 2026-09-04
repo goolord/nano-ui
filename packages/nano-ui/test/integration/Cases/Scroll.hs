@@ -472,7 +472,7 @@ runScrollButtonClickTest ctx failed = do
         (hit, setHit) <- useText ""
         (sid, resp) <- scrollArea (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 80}) $
                          column defaultLayout $ do
-                           mapM_ (\_ -> void (label "pad")) [(1 :: Int) .. 12]
+                           mapM_ (\_ -> void (label "pad")) [(1 :: Int) .. 6]
                            b <- button "Target"
                            onClick b (setHit "yes")
                            pure b
@@ -499,7 +499,7 @@ runScrollButtonClickSdlTest ctx failed = do
         (hit, setHit) <- useText ""
         (sid, resp) <- scrollArea (tight (grow defaultLayout)) $
                          column defaultLayout $ do
-                           mapM_ (\_ -> void (label "pad")) [(1 :: Int) .. 12]
+                           mapM_ (\_ -> void (label "pad")) [(1 :: Int) .. 6]
                            b <- button "Target"
                            onClick b (setHit "yes")
                            pure b

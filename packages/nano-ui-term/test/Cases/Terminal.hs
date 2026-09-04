@@ -192,8 +192,8 @@ runTerminalWindowDragTest _ failed = do
       ui = fmap fst (window True "Debug" (label "Body"))
   win0 <- warmup2 ctx inp0 ui
   let Rect x0 y0 _ _ = respRect win0
-      dest = V2 (x0 + 4 - 8) (y0 + 1.5 + 4)
-  runDragFrom ctx inp0 ui (V2 (x0 + 4) (y0 + 1.5)) dest
+      dest = V2 (x0 + 4 - 8) (y0 + 0.5 + 4)
+  runDragFrom ctx inp0 ui (V2 (x0 + 4) (y0 + 0.5)) dest
   (win1, _, _, _) <- runFrame ctx (inp0 {inputMousePos = dest}) ui
   let Rect x1 y1 _ _ = respRect win1
   assert failed (x1 < x0 - 2)
@@ -210,10 +210,10 @@ runTerminalWindowDragIconTest _ failed = do
   overlays0 <- collectOverlayTextSpans ctx inp0
   (win0, _, _, _) <- runFrame ctx inp0 ui
   let Rect x0 y0 _ _ = respRect win0
-      grab = V2 (x0 + 4) (y0 + 1.5)
+      grab = V2 (x0 + 4) (y0 + 0.5)
       press = inp0 {inputMousePos = grab, inputMouseDown = True, inputMousePressed = True}
   _ <- runFrame ctx press ui
-  let moved = press {inputMousePos = V2 (x0 + 4 - 10) (y0 + 1.5 + 4), inputMousePressed = False}
+  let moved = press {inputMousePos = V2 (x0 + 4 - 10) (y0 + 0.5 + 4), inputMousePressed = False}
   (_, _, draw1, _) <- runFrame ctx moved ui
   overlays1 <- collectOverlayTextSpans ctx moved
   let Size tw th = inputWindowSize inp0
@@ -337,9 +337,9 @@ runTerminalWideTransitionTest _ failed = do
   overW0 <- collectOverlayTextSpans ctx inp0
   (win0, _, _, _) <- runFrame ctx inp0 windowUi
   let Rect wx wy _ _ = respRect win0
-      press = inp0 {inputMousePos = V2 (wx + 4) (wy + 1.5), inputMouseDown = True, inputMousePressed = True}
+      press = inp0 {inputMousePos = V2 (wx + 4) (wy + 0.5), inputMouseDown = True, inputMousePressed = True}
   _ <- runFrame ctx press windowUi
-  let moved = press {inputMousePos = V2 (wx + 4 - 10) (wy + 1.5 + 4), inputMousePressed = False}
+  let moved = press {inputMousePos = V2 (wx + 4 - 10) (wy + 0.5 + 4), inputMousePressed = False}
   (_, _, drawW1, _) <- runFrame ctx moved windowUi
   overW1 <- collectOverlayTextSpans ctx moved
   cellsW1 <- rasterizeLayered (round tw) (round th) drawW1 [] overW1

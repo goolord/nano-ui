@@ -22,6 +22,8 @@ import NanoUI.Testing.Harness
   , spansHas
   , withInputOff
   )
+import NanoUI.Context (Context (..))
+import NanoUI.Layout.Arena (arenaCount, getRect, getText)
 
 data DummyTab = TabA | TabB | TabC
   deriving (Eq, Show)
@@ -89,13 +91,28 @@ runTabsClosableTest ctx failed = do
         , closableTab TabB "Beta" (label_ "Body B")
         ]
   _ <- runFrame ctx inp0 (ui TabA)
-  spans <- collectTextSpans ctx
-  case [r | (r, txt, _, _, _) <- spans, "Alpha" `T.isInfixOf` txt] of
-    (Rect ax ay aw ah : _) -> do
-      (tResp, activeTab) <- runClickPair ctx inp0 (ui TabA) (V2 (ax + aw + 16) (ay + ah / 2))
+  mClose <- findCloseButtonRect ctx
+  case mClose of
+    Just (Rect cx cy cw ch) -> do
+      (tResp, activeTab) <- runClickPair ctx inp0 (ui TabA) (V2 (cx + cw / 2) (cy + ch / 2))
       assertEq failed (tabClosed tResp) (Just TabA)
       assertEq failed activeTab TabA
-    [] -> assert failed False
+    Nothing -> assert failed False
+
+findCloseButtonRect :: Context -> IO (Maybe Rect)
+findCloseButtonRect ctx = do
+  let na = ctxNodeArena ctx
+  n <- arenaCount na
+  let go i
+        | i >= n = pure Nothing
+        | otherwise = do
+            txt <- getText na i
+            if "\215" `T.isInfixOf` txt
+              then do
+                (x, y, w, h) <- getRect na i
+                pure (Just (Rect x y w h))
+              else go (i + 1)
+  go 0
 
 runTabsStatePersistenceTest :: Context -> IORef Int -> IO ()
 runTabsStatePersistenceTest ctx failed = do
