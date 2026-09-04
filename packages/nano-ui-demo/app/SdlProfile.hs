@@ -57,6 +57,7 @@ measureBench name iters action = do
   t0 <- getMonotonicTimeNSec
   replicateM_ iters action
   t1 <- getMonotonicTimeNSec
+  performGC
   s1 <- getRTSStats
   let totalMs = (fromIntegral (t1 - t0) / 1e6) :: Double
       avgMs = totalMs / fromIntegral iters
