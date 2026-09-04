@@ -6,6 +6,9 @@ module NanoUI.Frame.Window
   , persistWindowPositions
   , updateWindowDrag
   , updateWindowResize
+  , resizeFromEdge
+  , cursorForResizeEdge
+  , WindowResizeEdge (..)
   , drawWindowOverlays
   , drawModalOverlays
   , drawPopupOverlays
@@ -247,13 +250,20 @@ windowBodyScrollLane ctx winIdx = do
             _ -> go ns
 
 windowInnerResizeEdgeAt :: Context -> NodeIdx -> Rect -> V2 -> IO (Maybe WindowResizeEdge)
-windowInnerResizeEdgeAt ctx winIdx winRect mouse = do
+windowInnerResizeEdgeAt ctx winIdx winRect@(Rect x y w h) mouse@(V2 mx my) = do
   hit <- windowInnerEastResizeHit ctx winIdx winRect mouse
   if hit
     then do
       pad <- getPadding (ctxNodeArena ctx) winIdx
       pure (innerEastCornerEdge pad winRect (v2Y mouse))
-    else pure Nothing
+    else do
+      let inBotRightCorner = mx >= x + w - 16 && mx <= x + w && my >= y + h - 16 && my <= y + h
+          inBotEdge = mx >= x && mx <= x + w && my >= y + h - 6 && my <= y + h
+      if inBotRightCorner
+        then pure (Just ResizeSE)
+        else if inBotEdge
+          then pure (Just ResizeS)
+          else pure Nothing
 
 windowResizeEdgeFor :: Context -> NodeIdx -> Rect -> V2 -> IO (Maybe WindowResizeEdge)
 windowResizeEdgeFor ctx winIdx winRect mouse = do

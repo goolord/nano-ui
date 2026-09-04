@@ -61,6 +61,7 @@ testSpecs =
   , TestSpec "text-input-cursor" False runTextInputCursorTest
   , TestSpec "text-area-cursor" True runTextAreaCursorTest
   , TestSpec "text-area-cut-clears-selection" False runTextAreaCutClearsSelectionTest
+  , TestSpec "text-area-ctrl-a" False runTextAreaCtrlATest
   , TestSpec "text-field-hover-boundary" True runTextFieldHoverBoundaryTest
   , TestSpec "text-input-cut-clears-selection" False runTextInputCutClearsSelectionTest
   , TestSpec "text-input-selection" False runTextInputSelectionTest

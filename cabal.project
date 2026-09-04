@@ -19,6 +19,3 @@ package nano-ui
 
 package nano-ui-sdl
   executable-static: True
-
-package nano-ui-rgfw-bindings
-  ghc-options: -pgmc "C:/Users/zach/Dev/nano-ui/scripts/zig-cc.exe"

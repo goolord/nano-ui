@@ -7,6 +7,7 @@ module NanoUI.Widgets.TextInput
   ) where
 
 import Control.Monad (void, when)
+import Data.Char (isPrint)
 import Data.IORef (writeIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -152,18 +153,18 @@ processTextInput ctx inp s0 = do
     if ctrl
       then T.foldlM' (handleCtrlChar ctx) s0 chars
       else pure s0
-  let filtered = T.filter (not . isCtrlCombo ctrl) chars
+  let filtered = T.filter (\ch -> not (isCtrlCombo ctrl ch) && isPrint ch) chars
       s2 = T.foldl insertChar s1 filtered
   pure (foldInputKeys (applyKey shift) s2 keys)
   where
-    isCtrlCombo c ch = c && T.elem ch "aAcCxXvV\x01\x18"
+    isCtrlCombo c ch = c && T.elem ch "aAcCxXvV\x01\x03\x16\x18"
 
 handleCtrlChar :: Context -> TextInputState -> Char -> IO TextInputState
 handleCtrlChar ctx s ch
   | ch `elem` ('a' : 'A' : '\x01' : []) = pure (selectAllTextInput s)
   | ch `elem` ('c' : 'C' : '\ETX' : []) = textInputCopy ctx s >> pure s
   | ch `elem` ('x' : 'X' : '\x18' : []) = textInputCut ctx s
-  | ch `elem` ('v' : 'V' : []) = textInputPaste ctx s
+  | ch `elem` ('v' : 'V' : '\x16' : []) = textInputPaste ctx s
   | otherwise = pure s
 
 insertChar :: TextInputState -> Char -> TextInputState

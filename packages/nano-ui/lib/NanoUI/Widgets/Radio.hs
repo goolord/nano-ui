@@ -2,18 +2,20 @@
 
 module NanoUI.Widgets.Radio (radioFieldset, boundedRadioFieldset, useRadio) where
 
+import qualified Data.IntMap.Strict as IM
 import Control.Monad (unless, void, zipWithM)
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import qualified Data.Text as T
-import NanoUI.Context (Context (..), intKey)
+import NanoUI.Context (Context (..), getStore, intKey, setStore)
+import NanoUI.Store (WidgetStore (..), slotKey)
 import NanoUI.Types (isCellHost)
 import NanoUI.Icons (radioMark)
 import NanoUI.Layout.Arena (NodeType (..))
-import NanoUI.Monad (Ui, askContext, nextId, withKey)
+import NanoUI.Monad (Ui, askContext, nextId, uiIO, withKey)
 import NanoUI.Style (defaultLayout, fillW, fontMuted, gap, tight)
-import NanoUI.Widgets.Behavior (ensureInt, useSelection)
+import NanoUI.Widgets.Behavior (useSelection)
 import NanoUI.Widgets.Combinators (selectableItem)
 import NanoUI.Widgets.Layout (column, labelEx)
 import NanoUI.Widgets.Node (Response (..), setChanged, tagContainer)
@@ -25,12 +27,28 @@ radioFieldset legend options initial =
     ctx <- askContext
     let opts = if null options then [""] else options
         c0 = max 0 (min (length opts - 1) initial)
-    sel <- ensureInt (intKey gid) c0
+        key = intKey gid
+        keyInit = slotKey 1 key
+    st0 <- uiIO (getStore ctx)
+    let lastInit = IM.lookup keyInit (storeInt st0)
+        storedSel = IM.lookup key (storeInt st0)
+        sel = case (lastInit, storedSel) of
+          (Just li, Just s) | li == c0 -> max 0 (min (length opts - 1) s)
+          _                            -> c0
     column (tight . gap 4 . fillW $ defaultLayout) $ do
       tagContainer gid
       unless (T.null legend) $ void (labelEx (tight . fillW . fontMuted $ defaultLayout) legend)
       rs <- zipWithM (\i l -> withKey i (bit ctx sel i l)) [0 ..] opts
-      pure (mconcat (map fst rs), fromMaybe sel (listToMaybe [i | (r, i) <- rs, rawRespClicked r]))
+      let mClicked = listToMaybe [i | (r, i) <- rs, rawRespClicked r]
+          finalSel = fromMaybe sel mClicked
+      uiIO $ do
+        st <- getStore ctx
+        setStore ctx st
+          { storeInt =
+              IM.insert key finalSel $
+                IM.insert keyInit c0 (storeInt st)
+          }
+      pure (setChanged (finalSel /= sel || mClicked /= Nothing) (mconcat (map fst rs)), finalSel)
 
 bit :: (Ui :> es) => Context -> Int -> Int -> Text -> Eff es (Response, Int)
 bit ctx sel i l = do

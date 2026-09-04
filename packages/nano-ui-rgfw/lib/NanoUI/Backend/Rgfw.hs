@@ -10,10 +10,38 @@ module NanoUI.Backend.Rgfw
   , tomorrowMinLightTheme
   , tomorrowNightMinDarkTheme
   , tomorrowMidnightMinDarkTheme
+  , RgfwDebugSnapshot (..)
+  , RgfwDebugSampler
+  , RgfwDebugHost (..)
+  , askRgfwDebug
+  , debugWindowBody
+  , allDebugRows
+  , frameRows
+  , layoutRows
+  , displayRows
+  , rtsRows
+  , emptyRgfwDebug
+  , newRgfwDebugSampler
+  , readRgfwDebug
   ) where
 
 import Data.Typeable (Typeable)
 import NanoUI (NanoUI)
+import NanoUI.Rgfw.Debug
+  ( RgfwDebugHost (..)
+  , RgfwDebugSampler
+  , RgfwDebugSnapshot (..)
+  , allDebugRows
+  , askRgfwDebug
+  , debugWindowBody
+  , displayRows
+  , emptyRgfwDebug
+  , frameRows
+  , layoutRows
+  , newRgfwDebugSampler
+  , readRgfwDebug
+  , rtsRows
+  )
 import NanoUI.Rgfw.Session
   ( RgfwOptions (..)
   , defaultRgfwOptions
@@ -45,7 +73,7 @@ runRgfwAppReduce = runRgfwSessionReduce
 runRgfwAppReduceCustom ::
   (Typeable msg, Eq model) =>
   RgfwOptions ->
-  (model -> (RgfwTheme, Int)) ->
+  (model -> (RgfwTheme, Float)) ->
   (msg -> model -> model) ->
   model ->
   (model -> NanoUI ()) ->

@@ -5,6 +5,10 @@ module NanoUI.Frame.TextEdit
   , textCharAtX
   , textWordBounds
   , textEditMenuRect
+  , textEditMenuRectAt
+  , textEditMenuWidth
+  , textEditMenuContentRect
+  , textEditMenuLayout
   , textFieldMenuRect
   , openTextEditMenu
   , textFieldWidgetAtMouse
@@ -196,12 +200,13 @@ textFieldRectAt ctx idx = do
       fm = ctxFontMetrics ctx
       labelH = layoutLineHeight host fm
       gap = textInputLabelGap fm
-      fieldY = y + labelH + gap
       fieldH =
         if nt == NodeTextInput
           then textInputFieldHeight fm
           else max 0 (h - labelH - gap)
-  pure (Rect x fieldY w fieldH)
+  if h < labelH + gap + (if nt == NodeTextInput then fieldH else 1)
+    then pure (Rect x y w h)
+    else pure (Rect x (y + labelH + gap) w fieldH)
 
 textFieldMenuRect :: Context -> WidgetId -> IO (Maybe Rect)
 textFieldMenuRect ctx wid = do

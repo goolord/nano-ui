@@ -36,6 +36,7 @@ library
     import:           warnings
     exposed-modules:
         NanoUI.Backend.Rgfw
+        NanoUI.Rgfw.Debug
         NanoUI.Rgfw.Font.Cozette
         NanoUI.Rgfw.Layout
         NanoUI.Rgfw.Render
@@ -76,6 +77,7 @@ test-suite nano-ui-rgfw-test
     build-depends:
         base ^>=4.22.0.0,
         bytestring ^>=0.12,
+        containers ^>=0.7 || ^>=0.8,
         nano-ui,
         nano-ui-rgfw,
         nano-ui-rgfw-bindings,

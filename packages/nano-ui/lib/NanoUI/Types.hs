@@ -72,7 +72,7 @@ newtype ImageId = ImageId
   deriving (Eq, Ord, Show)
 
 newtype Color = Color Word32
-  deriving (Eq, Show)
+  deriving (Eq, Show, Num)
 
 {-# INLINE colorRGBA #-}
 colorRGBA :: Word8 -> Word8 -> Word8 -> Word8 -> Color

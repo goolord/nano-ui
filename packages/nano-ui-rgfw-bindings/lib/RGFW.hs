@@ -12,6 +12,9 @@ module RGFW
   , blitSurface
   , freeSurface
   , windowSize
+  , windowScale
+  , setMouseStandard
+  , setMouseDefault
   -- Re-exports
   , module RGFW.Raw
   ) where
@@ -19,7 +22,7 @@ module RGFW
 import Data.Char (chr)
 import Data.Word (Word8, Word32)
 import Foreign.C.String (withCString)
-import Foreign.C.Types (CInt (..), CUChar (..), CUInt (..))
+import Foreign.C.Types (CFloat (..), CInt (..), CUChar (..), CUInt (..))
 import Foreign.Marshal.Alloc (allocaBytes)
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import RGFW.Raw
@@ -39,6 +42,7 @@ data Event
   | EventMouseMotion !Int !Int
   | EventMouseScroll !Float !Float
   | EventWindowResize !Int !Int
+  | EventScaleUpdate !Float !Float
   | EventWindowClose
   | EventOther !Word8
   deriving (Eq, Show)
@@ -99,6 +103,10 @@ pollEvent (Window win) evPtr = do
             CInt uw <- c_rgfw_event_update_w evPtr
             CInt uh <- c_rgfw_event_update_h evPtr
             pure (EventWindowResize (fromIntegral uw) (fromIntegral uh))
+          | t == rgfw_scaleUpdated -> do
+            sx <- c_rgfw_event_scale_x evPtr
+            sy <- c_rgfw_event_scale_y evPtr
+            pure (EventScaleUpdate (realToFrac sx) (realToFrac sy))
           | t == rgfw_windowClose ->
             pure EventWindowClose
           | otherwise ->
@@ -128,3 +136,19 @@ windowSize (Window w) = do
   CInt width <- c_rgfw_window_w w
   CInt height <- c_rgfw_window_h w
   pure (fromIntegral width, fromIntegral height)
+
+windowScale :: Window -> IO Float
+windowScale (Window w) = do
+  CFloat s <- c_rgfw_window_scale w
+  pure s
+
+setMouseStandard :: Window -> Word8 -> IO Bool
+setMouseStandard (Window win) icon = do
+  CUChar res <- c_rgfw_window_set_mouse_standard win (CUChar icon)
+  pure (res /= 0)
+
+setMouseDefault :: Window -> IO Bool
+setMouseDefault (Window win) = do
+  CUChar res <- c_rgfw_window_set_mouse_default win
+  pure (res /= 0)
+

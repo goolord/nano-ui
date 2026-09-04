@@ -5,6 +5,7 @@ module NanoUI.Rgfw.Layout
   , solveSinglePassLayoutWith
   , computePopupPosition
   , getContentHeight
+  , getContentWidth
   ) where
 
 import Control.Monad (when)
@@ -42,6 +43,7 @@ import NanoUI.Layout.Arena
   , getWidgetId
   , getWidthSizing
   , isContainerNode
+  , isFloatingNode
   , setClipRect
   , setRect
   , snapshotLayoutRects
@@ -125,15 +127,17 @@ computePopupPosition !winW !winH !margin !iw !ih !anchor !placement !offset =
 -- | Efficient, lean O(N) single-pass layout engine.
 solveSinglePassLayout :: NodeArena -> Float -> Float -> IO ()
 solveSinglePassLayout na !viewportW !viewportH =
-  solveSinglePassLayoutWith na viewportW viewportH (\_ -> pure Nothing)
+  solveSinglePassLayoutWith na viewportW viewportH (\_ -> pure Nothing) (\_ -> pure Nothing) (\_ -> pure Nothing)
 
 solveSinglePassLayoutWith ::
   NodeArena ->
   Float ->
   Float ->
   (WidgetId -> IO (Maybe (PopupAnchor, PopupPlacement, Float))) ->
+  (WidgetId -> IO (Maybe (Float, Float))) ->
+  (WidgetId -> IO (Maybe (Float, Float))) ->
   IO ()
-solveSinglePassLayoutWith na !viewportW !viewportH lookupPopup = do
+solveSinglePassLayoutWith na !viewportW !viewportH lookupPopup lookupWindowPos lookupWindowSize = do
   !n <- arenaCount na
   when (n > 0) $ do
     -- 1. Build child linked lists in unboxed arrays: headChildArr and nextSibArr
@@ -148,12 +152,31 @@ solveSinglePassLayoutWith na !viewportW !viewportH lookupPopup = do
             | otherwise = do
                 p <- getParent na i
                 nt <- getNodeType na i
-                when (p >= 0 && p < n && nt /= NodePopup) $ do
+                when (p >= 0 && p < n && not (isFloatingNode nt)) $ do
                   oldHead <- readPrimArray headChildArr p
                   writePrimArray nextSibArr i oldHead
                   writePrimArray headChildArr p i
                 buildLists (i - 1)
       buildLists (n - 1)
+
+      -- Precompute overlay hierarchy (floating windows, modals, popups and their descendants)
+      isOverlayArr <- newPrimArray n
+      setPrimArray isOverlayArr 0 n (0 :: Int)
+      isPopupArr <- newPrimArray n
+      setPrimArray isPopupArr 0 n (0 :: Int)
+      let prepOverlay !i
+            | i >= n = pure ()
+            | otherwise = do
+                nt <- getNodeType na i
+                p <- getParent na i
+                isPOverlay <- if p >= 0 && p < n then readPrimArray isOverlayArr p else pure 0
+                let !isO = if isFloatingNode nt || isPOverlay == 1 then 1 else 0
+                writePrimArray isOverlayArr i isO
+                isPPopup <- if p >= 0 && p < n then readPrimArray isPopupArr p else pure 0
+                let !isPop = if nt == NodePopup || isPPopup == 1 then 1 else 0
+                writePrimArray isPopupArr i isPop
+                prepOverlay (i + 1)
+      prepOverlay 0
 
       -- 2. Pass 1: Bottom-up intrinsic / content size computation (i = n-1 down to 0)
       reqWArr <- newPrimArray n
@@ -169,12 +192,25 @@ solveSinglePassLayoutWith na !viewportW !viewportH lookupPopup = do
                 nt <- getNodeType na i
                 (wTag, wVal) <- getWidthSizing na i
                 (hTag, hVal) <- getHeightSizing na i
-                pad <- getPadding na i
-                gap <- getGap na i
+                rawPad <- getPadding na i
+                rawGap <- getGap na i
                 dir <- getDirection na i
                 (minW, minH, maxW, maxH) <- getMinMax na i
                 txt <- getText na i
-                let !txtLen = fromIntegral (T.length txt)
+                let !dispTxt =
+                      if T.isPrefixOf "\x01" txt || T.isPrefixOf "\x02" txt || T.isPrefixOf "\x03" txt
+                        then T.drop 1 txt
+                        else txt
+                    !txtLines = T.splitOn "\n" dispTxt
+                    !lineCount = max 1 (length txtLines)
+                    !maxLineLen = fromIntegral (maximum (0 : map T.length txtLines))
+                    !txtLen = maxLineLen
+                    !isClose = T.isPrefixOf "\x01" txt || txt == "[X]" || txt == "X" || txt == "\xd7" || txt == "\xf00d"
+                isPop <- readPrimArray isPopupArr i
+
+                -- For context menus / popups: compact 2px padding and zero gap between items
+                let !pad = if nt == NodePopup then Padding 2 2 2 2 else rawPad
+                    !gap = if isPop == 1 then 0 else rawGap
 
                 if isContainerNode nt
                   then do
@@ -189,12 +225,12 @@ solveSinglePassLayoutWith na !viewportW !viewportH lookupPopup = do
                               next <- readPrimArray nextSibArr c
                               if dir == DirColumn
                                 then do
-                                  let !mSize = if cHTag == SizingGrow then 0 else ch
+                                  let !mSize = if cHTag == SizingGrow then max 0 ch else ch
                                       !tot = totMain + mSize + (if count > 0 then gap else 0)
                                       !cross = max maxCross cw
                                   loopChildren next (count + 1) tot cross
                                 else do
-                                  let !mSize = if cWTag == SizingGrow then 0 else cw
+                                  let !mSize = if cWTag == SizingGrow then max 0 cw else cw
                                       !tot = totMain + mSize + (if count > 0 then gap else 0)
                                       !cross = max maxCross ch
                                   loopChildren next (count + 1) tot cross
@@ -222,10 +258,10 @@ solveSinglePassLayoutWith na !viewportW !viewportH lookupPopup = do
                                         sNext <- readPrimArray nextSibArr s
                                         if dir == DirRow
                                           then do
-                                            let !add = if sWTag == SizingGrow then 0 else sw + gap
+                                            let !add = if sWTag == SizingGrow then max 0 sw + gap else sw + gap
                                             sumAfter sNext (acc + add)
                                           else do
-                                            let !add = if sHTag == SizingGrow then 0 else sh + gap
+                                            let !add = if sHTag == SizingGrow then max 0 sh + gap else sh + gap
                                             sumAfter sNext (acc + add)
 
                               !remAfter <- sumAfter next 0
@@ -236,10 +272,23 @@ solveSinglePassLayoutWith na !viewportW !viewportH lookupPopup = do
 
                     calcRemAfter firstChild
 
-                    let !rw = if nt == NodePopup then max 120 contentW else if wTag == SizingFixed && wVal > 0 then wVal else contentW
-                        !rh = if hTag == SizingFixed && hVal > 0 then hVal else contentH
-                    writePrimArray reqWArr i (max minW (min maxW rw))
-                    writePrimArray reqHArr i (max minH (min maxH rh))
+                    if nt == NodeWindow
+                      then do
+                        wid <- getWidgetId na i
+                        mStoredSz <- lookupWindowSize wid
+                        let (!rw, !rh) = case mStoredSz of
+                              Just (sw, sh) | sw > 0 && sh > 0 -> (sw, sh)
+                              _ -> (max 320 contentW, max 200 contentH)
+                        writePrimArray reqWArr i (max minW (min maxW rw))
+                        writePrimArray reqHArr i (max minH (min maxH rh))
+                      else do
+                        let !minPopW = 80
+                            !rw = if nt == NodePopup
+                                    then max minPopW contentW
+                                    else if wTag == SizingFixed && wVal > 0 then wVal else contentW
+                            !rh = if hTag == SizingFixed && hVal > 0 then hVal else contentH
+                        writePrimArray reqWArr i (max minW (min maxW rw))
+                        writePrimArray reqHArr i (max minH (min maxH rh))
 
                   else do
                     -- Leaf node
@@ -247,14 +296,20 @@ solveSinglePassLayoutWith na !viewportW !viewportH lookupPopup = do
                           if wTag == SizingFixed && wVal > 0
                             then wVal
                             else case nt of
-                              NodeText        -> txtLen * 6 + padL pad + padR pad
-                              NodeButton      -> txtLen * 6 + 16
+                              NodeText        -> if isPop == 1 && padL pad == 0
+                                                   then maxLineLen * 6 + 10
+                                                   else maxLineLen * 6 + padL pad + padR pad
+                              NodeButton      -> if isClose
+                                                   then if isPop == 1 then 17 else 24
+                                                   else if isPop == 1
+                                                     then txtLen * 6 + 10
+                                                     else txtLen * 6 + 16
                               NodeCheckbox    -> txtLen * 6 + 24
                               NodeRadio       -> txtLen * 6 + 24
                               NodeSlider      -> 120
                               NodeTextInput   -> 160
                               NodeTextArea    -> 200
-                              NodeSeparator   -> 2
+                              NodeSeparator   -> if isPop == 1 then 20 else 2
                               NodeSpacer      -> if wVal > 0 then wVal else 8
                               NodeBox         -> if wVal > 0 then wVal else 20
                               _               -> 60
@@ -263,14 +318,18 @@ solveSinglePassLayoutWith na !viewportW !viewportH lookupPopup = do
                           if hTag == SizingFixed && hVal > 0
                             then hVal
                             else case nt of
-                              NodeText        -> 13 + padT pad + padB pad
-                              NodeButton      -> 21
+                              NodeText        -> if isPop == 1 && padT pad == 0 && padB pad == 0
+                                                   then 17
+                                                   else fromIntegral lineCount * 13 + padT pad + padB pad
+                              NodeButton      -> if isClose
+                                                   then if isPop == 1 then 17 else 24
+                                                   else if isPop == 1 then 17 else 21
                               NodeCheckbox    -> 18
                               NodeRadio       -> 18
                               NodeSlider      -> 20
                               NodeTextInput   -> 21
                               NodeTextArea    -> 80
-                              NodeSeparator   -> 2
+                              NodeSeparator   -> if isPop == 1 then 5 else 2
                               NodeSpacer      -> if hVal > 0 then hVal else 8
                               NodeBox         -> if hVal > 0 then hVal else 20
                               _               -> 21
@@ -301,20 +360,51 @@ solveSinglePassLayoutWith na !viewportW !viewportH lookupPopup = do
                 reqW <- readPrimArray reqWArr i
                 reqH <- readPrimArray reqHArr i
 
-                if p < 0
+                if nt == NodeWindow || nt == NodeModal
                   then do
-                    -- Root node or window
-                    let (!x, !y, !w, !h) =
-                          if nt == NodeWindow
-                            then
-                              let !winW = if wTag == SizingFixed && wVal > 0 then wVal else min 600 (viewportW * 0.8)
-                                  !winH = if hTag == SizingFixed && hVal > 0 then hVal else min 500 (viewportH * 0.8)
-                                  !winX = max 0 ((viewportW - winW) * 0.5)
-                                  !winY = max 0 ((viewportH - winH) * 0.5)
-                               in (winX, winY, winW, winH)
-                            else (0, 0, viewportW, viewportH)
+                    -- Floating Window/Modal: placed at stored pos or top-right, over rest of UI
+                    wid <- getWidgetId na i
+                    mStoredPos <- lookupWindowPos wid
+                    mStoredSz  <- lookupWindowSize wid
+                    let !effMinW = if minW > 0 then minW else 160.0
+                        !effMinH = if minH > 0 then minH else 60.0
+                        !maxAvailW = max effMinW (viewportW - 16.0)
+                        !maxAvailH = max effMinH (viewportH - 16.0)
+                        (!winW, !winH) = case mStoredSz of
+                          Just (sw, sh) | sw > 0 && sh > 0 ->
+                            (max effMinW (min maxAvailW sw), max effMinH (min maxAvailH sh))
+                          _ ->
+                            let !defW = if wTag == SizingFixed && wVal > 0 then wVal else min (viewportW * 0.8) (max 320 reqW)
+                                !defH = if hTag == SizingFixed && hVal > 0 then hVal else min (viewportH * 0.8) (max 200 reqH)
+                             in (max effMinW (min (if maxW > 0 then maxW else maxAvailW) defW),
+                                 max effMinH (min (if maxH > 0 then maxH else maxAvailH) defH))
+                        (!winX, !winY) = case mStoredPos of
+                          Just (px, py) ->
+                            (max 0 (min (viewportW - winW) px), max 0 (min (viewportH - winH) py))
+                          Nothing ->
+                            -- Default: top right with 16px margin, below top bar (y = 32)
+                            (max 10.0 (viewportW - winW - 16.0), 32.0)
+
+                    setRect na i winX winY winW winH
+                    setClipRect na i (Rect winX winY winW winH)
+
+                    let !ix = winX + padL pad
+                        !iy = winY + padT pad
+                        !iw = max 0 (winW - padL pad - padR pad)
+                        !ih = max 0 (winH - padT pad - padB pad)
+                    writePrimArray innerXArr i ix
+                    writePrimArray innerYArr i iy
+                    writePrimArray innerWArr i iw
+                    writePrimArray innerHArr i ih
+                    writePrimArray curXArr i ix
+                    writePrimArray curYArr i iy
+
+                else if p < 0
+                  then do
+                    -- Root node
+                    let (!x, !y, !w, !h) = (0, 0, viewportW, viewportH)
                     setRect na i x y w h
-                    setClipRect na i (if nt == NodeWindow then Rect x y w h else Rect x y w 1e9)
+                    setClipRect na i (Rect x y 1e9 1e9)
 
                     let !ix = x + padL pad
                         !iy = y + padT pad
@@ -335,18 +425,19 @@ solveSinglePassLayoutWith na !viewportW !viewportH lookupPopup = do
                       let (anchor, placement, offset) = case mcfg of
                             Just (a, pl, o) -> (a, pl, o)
                             Nothing -> (AnchorPoint (V2 0 0), PlacementAuto, 4)
-                          !minPopupW = 120
-                          !minPopupH = 20
+                          !minPopupW = 80
+                          !minPopupH = 18
                           !popupW = max minPopupW reqW
                           !popupH = max minPopupH reqH
                           (!popupX, !popupY) = computePopupPosition viewportW viewportH 4 popupW popupH anchor placement offset
                       setRect na i popupX popupY popupW popupH
                       setClipRect na i (Rect popupX popupY popupW popupH)
 
-                      let !ix = popupX + padL pad
-                          !iy = popupY + padT pad
-                          !iw = max 0 (popupW - padL pad - padR pad)
-                          !ih = max 0 (popupH - padT pad - padB pad)
+                      let !effPad = Padding 2 2 2 2
+                          !ix = popupX + padL effPad
+                          !iy = popupY + padT effPad
+                          !iw = max 0 (popupW - padL effPad - padR effPad)
+                          !ih = max 0 (popupH - padT effPad - padB effPad)
                       writePrimArray innerXArr i ix
                       writePrimArray innerYArr i iy
                       writePrimArray innerWArr i iw
@@ -357,7 +448,9 @@ solveSinglePassLayoutWith na !viewportW !viewportH lookupPopup = do
                   else do
                     -- Child node
                     pDir <- getDirection na p
-                    pGap <- getGap na p
+                    rawPGap <- getGap na p
+                    pIsPop <- readPrimArray isPopupArr p
+                    let !pGap = if pIsPop == 1 then 0 else rawPGap
                     cx <- readPrimArray curXArr p
                     cy <- readPrimArray curYArr p
                     pix <- readPrimArray innerXArr p
@@ -441,7 +534,7 @@ getContentHeight na = do
   !n <- arenaCount na
   let isFloating !idx = do
         nt <- getNodeType na idx
-        if nt == NodePopup
+        if isFloatingNode nt
           then pure True
           else do
             p <- getParent na idx
@@ -455,5 +548,28 @@ getContentHeight na = do
               then do
                 (_, ry, _, rh) <- getRect na i
                 loop (i + 1) (max acc (ry + rh))
+              else loop (i + 1) acc
+  loop 0 0
+
+-- | Calculate total content right extent across all non-floating children in the arena.
+getContentWidth :: NodeArena -> IO Float
+getContentWidth na = do
+  !n <- arenaCount na
+  let isFloating !idx = do
+        nt <- getNodeType na idx
+        if isFloatingNode nt
+          then pure True
+          else do
+            p <- getParent na idx
+            if p < 0 then pure False else isFloating p
+      loop !i !acc
+        | i >= n = pure acc
+        | otherwise = do
+            p <- getParent na i
+            floating <- isFloating i
+            if p >= 0 && not floating
+              then do
+                (rx, _, rw, _) <- getRect na i
+                loop (i + 1) (max acc (rx + rw))
               else loop (i + 1) acc
   loop 0 0
