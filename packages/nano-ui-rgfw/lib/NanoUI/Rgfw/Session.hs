@@ -50,6 +50,7 @@ import NanoUI.Context
   , WindowResizeDrag (..)
   , WindowResizeEdge (..)
   , clearPopupConfigs
+  , ctxCurrentFloatingId
   , ctxTextInputDrag
   , ctxTextInputMenu
   , ctxWindowDrag
@@ -184,8 +185,9 @@ detectWindowResizeEdge (Rect wx wy ww wh) (V2 mx my) =
               -- Bottom-left corner
               else if mx >= wx - s && mx <= wx + grip && my >= wy + wh - grip && my <= wy + wh + s
                 then Just ResizeSW
-              -- Top-left corner
-              else if mx >= wx - s && mx <= wx + grip && my >= wy - s && my <= wy + b
+              -- Top-left corner (strictly outside title bar: above top or left of left edge)
+              else if (mx >= wx - s && mx <= wx + grip && my >= wy - s && my < wy)
+                      || (mx >= wx - s && mx < wx && my >= wy - s && my <= wy + grip)
                 then Just ResizeNW
               -- Top-right corner (above or outside, not inside close button)
               else if mx >= wx + ww - grip && mx <= wx + ww + s && my >= wy - s && my < wy
@@ -689,6 +691,10 @@ runRgfwSessionReduceCustom opts getThemeAndScale updateModel initialModel view =
                                   mx < wx || mx > wx + ww || my < wy || my > wy + wh
                                     || (mx >= wx + ww - 18.0 && my >= wy + wh - 18.0)
                             when (isOuterOrGrip || not isChildHit) $ do
+                              writeIORef (ctxCurrentFloatingId ctx) (Just winWid)
+                              seedFloatingPanel ctx winWid (Rect wx wy ww wh)
+                              writeIORef activeRef (WidgetId 0)
+                              writeIORef (ctxActiveId ctx) (WidgetId 0)
                               (minW, minH, maxW, maxH) <- getMinMax naPrev winIdx
                               writeIORef (ctxWindowResize ctx) $
                                 Just
@@ -719,12 +725,12 @@ runRgfwSessionReduceCustom opts getThemeAndScale updateModel initialModel view =
                                           if rectContains headerRect mouse
                                             then do
                                               wid <- getWidgetId naPrev i
-                                              pure (Just (wid, wx, wy, i))
+                                              pure (Just (wid, wx, wy, ww, i))
                                             else findWinDrag (i - 1)
                                         else findWinDrag (i - 1)
                             mWinHeader <- findWinDrag (prevCount - 1)
                             case mWinHeader of
-                              Just (winWid, wx, wy, winIdx) -> do
+                              Just (winWid, wx, wy, ww, winIdx) -> do
                                 let checkChildHit !j
                                       | j < 0 = pure False
                                       | otherwise = do
@@ -738,7 +744,11 @@ runRgfwSessionReduceCustom opts getThemeAndScale updateModel initialModel view =
                                               if hit then pure True else checkChildHit (j - 1)
                                             else checkChildHit (j - 1)
                                 isChildHit <- checkChildHit (prevCount - 1)
-                                when (not isChildHit) $
+                                when (not isChildHit) $ do
+                                  writeIORef (ctxCurrentFloatingId ctx) (Just winWid)
+                                  seedFloatingPanel ctx winWid (Rect wx wy ww 24.0)
+                                  writeIORef activeRef (WidgetId 0)
+                                  writeIORef (ctxActiveId ctx) (WidgetId 0)
                                   writeIORef (ctxWindowDrag ctx) (Just (winWid, mx - wx, my - wy))
                               Nothing -> pure ()
 

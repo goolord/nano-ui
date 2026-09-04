@@ -306,10 +306,14 @@ newNodeArena = do
 {-# INLINE resetNodeArena #-}
 resetNodeArena :: NodeArena -> IO ()
 resetNodeArena na = do
-  table <- readIORef (naIndex na)
   n <- readIORef (naCount na)
   writeIORef (naCount na) 0
-  clearWidgetIndex na table n
+  when (n > 0) $ do
+    if n > 64
+      then writeIORef (naIndex na) =<< HT.new
+      else do
+        table <- readIORef (naIndex na)
+        clearWidgetIndex na table n
 
 clearWidgetIndex :: NodeArena -> BasicHashTable WidgetId NodeIdx -> Int -> IO ()
 clearWidgetIndex na table n = do

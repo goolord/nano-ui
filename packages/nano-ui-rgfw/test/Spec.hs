@@ -12,6 +12,7 @@ import qualified Data.Text as T
 
 import NanoUI
   ( colorRGBA
+  , Color (..)
   , Direction (..)
   , Sizing (..)
   , Padding (..)
@@ -21,6 +22,8 @@ import NanoUI
   , Size (..)
   , V2 (..)
   )
+import Data.Word (Word32)
+import Foreign.Storable (peekElemOff)
 import NanoUI.Input (Input (..), Modifiers (..), emptyInput)
 import NanoUI.Widgets.TextArea (buffer, initTextAreaState, processTextArea, selectionAnchor)
 import NanoUI.Widgets.TextBuffer as TB (Cursor (..), getCursor, toText)
@@ -61,6 +64,8 @@ import NanoUI.Layout.Arena
   , getRect
   , setGridCols
   , setNodeText
+  , setRect
+  , setStyleIdx
   , setWidgetId
   )
 import NanoUI.Rgfw.Font.Cozette
@@ -77,8 +82,15 @@ import NanoUI.Rgfw.Font.Cozette
   , boxAverageCoverage
   )
 import NanoUI.Rgfw.Layout (getContentHeight, getContentWidth, solveSinglePassLayout, solveSinglePassLayoutWith)
+import NanoUI.Rgfw.Render (renderArena)
 import NanoUI.Rgfw.Session (defaultRgfwOptions, detectWindowResizeEdge, optScale)
-import NanoUI.Rgfw.Surface (packColor, toPhysRect)
+import NanoUI.Rgfw.Surface
+  ( freeRgfwSurface
+  , newOffscreenRgfwSurface
+  , packColor
+  , sBuffer
+  , toPhysRect
+  )
 import NanoUI.Rgfw.Theme
   ( RgfwTheme (..)
   , tomorrowMidnightMinDarkTheme
@@ -637,6 +649,34 @@ testWindowResizing = do
   assert "Drag W edge moves origin X to 70" (nxW == 70.0)
   assert "Drag W edge preserves origin Y at 100" (nyW == 100.0)
 
+  let wrdE = wrd { wrdEdge = ResizeE, wrdGrabX = 400, wrdGrabY = 200 }
+      (nwE, nhE, nxE, nyE) = resizeFromEdge wrdE (V2 450 200) 1000 800
+  assert "Drag E edge expands width to 350" (nwE == 350.0)
+  assert "Drag E edge preserves height at 200" (nhE == 200.0)
+  assert "Drag E edge preserves origin X at 100" (nxE == 100.0)
+  assert "Drag E edge preserves origin Y at 100" (nyE == 100.0)
+
+  let (nwEClamp, _, nxEClamp, _) = resizeFromEdge wrdE (V2 150 200) 1000 800
+  assert "Drag E edge clamps to min width 160" (nwEClamp == 160.0)
+  assert "Drag E edge preserves origin X at 100 on clamp" (nxEClamp == 100.0)
+
+  let wrdN = wrd { wrdEdge = ResizeN, wrdGrabX = 250, wrdGrabY = 100 }
+      (nwN, nhN, nxN, nyN) = resizeFromEdge wrdN (V2 250 50) 1000 800
+  assert "Drag N edge expands height to 250" (nhN == 250.0)
+  assert "Drag N edge moves origin Y to 50" (nyN == 50.0)
+  assert "Drag N edge preserves width at 300" (nwN == 300.0)
+  assert "Drag N edge preserves origin X at 100" (nxN == 100.0)
+
+  let (_, nhNClamp, _, nyNClamp) = resizeFromEdge wrdN (V2 250 280) 1000 800
+  assert "Drag N edge clamps to min height 80 and pins bottom at 300" (nhNClamp == 80.0 && nyNClamp == 220.0)
+
+  let wrdS = wrd { wrdEdge = ResizeS, wrdGrabX = 250, wrdGrabY = 300 }
+      (nwS, nhS, nxS, nyS) = resizeFromEdge wrdS (V2 250 350) 1000 800
+  assert "Drag S edge expands height to 250" (nhS == 250.0)
+  assert "Drag S edge preserves origin Y at 100" (nyS == 100.0)
+  assert "Drag S edge preserves width at 300" (nwS == 300.0)
+  assert "Drag S edge preserves origin X at 100" (nxS == 100.0)
+
   -- 3. Test single pass layout with resized window size
   na <- newNodeArena
   root <- addNode na NodeContainer (-1) Column Fit Fit (Padding 0 0 0 0) 0 0 0 1000 800 0 AlignStart AlignTop False
@@ -653,6 +693,17 @@ testWindowResizing = do
   assert "Resized floating window placed at stored height 320" (rh == 320.0)
   assert "Resized floating window placed at stored X 80" (rx == 80.0)
   assert "Resized floating window placed at stored Y 120" (ry == 120.0)
+
+  -- 4. Test SizingGrow child container inside resized window shrinks properly
+  naW <- newNodeArena
+  rootW <- addNode naW NodeContainer (-1) Column Fit Fit (Padding 0 0 0 0) 0 0 0 1000 800 0 AlignStart AlignTop False
+  winW <- addNode naW NodeWindow rootW Column (Fixed 200) (Fixed 150) (Padding 0 0 0 0) 0 0 0 1000 800 0 AlignStart AlignTop False
+  childScroll <- addNode naW NodeScrollContainer winW Column (Grow 1.0) (Grow 1.0) (Padding 0 0 0 0) 0 0 0 1000 800 0 AlignStart AlignTop False
+  _ <- addNode naW NodeBox childScroll Column (Fixed 500) (Fixed 400) (Padding 0 0 0 0) 0 0 0 1000 800 0 AlignStart AlignTop False
+  solveSinglePassLayout naW 1000 800
+  (_, _, cw, ch) <- getRect naW childScroll
+  assert "Child Grow container in 200x150 window gets width 200 (not unconstrained 500)" (cw == 200.0)
+  assert "Child Grow container in 200x150 window gets height 150 (not unconstrained 400)" (ch == 150.0)
 
 testGridLayout :: IO ()
 testGridLayout = do
@@ -770,4 +821,51 @@ main = do
   testCompactContextMenuLayout
   testWindowResizing
   testGridLayout
+  testZIndexRenderArena
   putStrLn "=== All tests passed successfully! ==="
+
+testZIndexRenderArena :: IO ()
+testZIndexRenderArena = do
+  surf <- newOffscreenRgfwSurface 100 100
+  let font = getCozetteFont
+      theme = tomorrowMidnightMinDarkTheme
+  ctx <- newPixelContext
+
+  na <- newNodeArena
+  root <- addNode na NodeContainer (-1) Column (Fixed 100) (Fixed 100) (Padding 0 0 0 0) 0 0 0 100 100 0 AlignStart AlignTop False
+
+  -- Insert in reverse layer order to verify topological Z-layering works regardless of insertion order:
+  -- 1. Popup node at (40, 40, 40, 40), containing a Box filled with 0x778899FF
+  pop <- addNode na NodePopup root Column (Fixed 40) (Fixed 40) (Padding 0 0 0 0) 0 0 0 100 100 0 AlignStart AlignTop False
+  setRect na pop 40 40 40 40
+  b3 <- addNode na NodeBox pop Column (Fixed 40) (Fixed 40) (Padding 0 0 0 0) 0 0 0 100 100 0 AlignStart AlignTop False
+  setStyleIdx na b3 (fromIntegral (0x778899FF :: Word32))
+  setRect na b3 40 40 40 40
+
+  -- 2. Window node at (20, 20, 60, 60), containing a Box filled with 0x445566FF
+  w <- addNode na NodeWindow root Column (Fixed 60) (Fixed 60) (Padding 0 0 0 0) 0 0 0 100 100 0 AlignStart AlignTop False
+  setRect na w 20 20 60 60
+  b2 <- addNode na NodeBox w Column (Fixed 60) (Fixed 60) (Padding 0 0 0 0) 0 0 0 100 100 0 AlignStart AlignTop False
+  setStyleIdx na b2 (fromIntegral (0x445566FF :: Word32))
+  setRect na b2 20 20 60 60
+
+  -- 3. Normal in-flow node at (0, 0, 80, 80) filled with 0x112233FF
+  b1 <- addNode na NodeBox root Column (Fixed 80) (Fixed 80) (Padding 0 0 0 0) 0 0 0 100 100 0 AlignStart AlignTop False
+  setStyleIdx na b1 (fromIntegral (0x112233FF :: Word32))
+  setRect na b1 0 0 80 80
+
+  renderArena surf font 1.0 theme ctx na (WidgetId 0) (WidgetId 0) (WidgetId 0)
+
+  let p10 = 10 * 100 + 10
+      p30 = 30 * 100 + 30
+      p50 = 50 * 100 + 50
+  c10 <- peekElemOff (sBuffer surf) p10
+  c30 <- peekElemOff (sBuffer surf) p30
+  c50 <- peekElemOff (sBuffer surf) p50
+
+  assert "Pixel (10, 10) rendered Normal node color" (c10 == packColor (Color 0x112233FF))
+  assert "Pixel (30, 30) rendered Window overlay node on top of Normal" (c30 == packColor (Color 0x445566FF))
+  assert "Pixel (50, 50) rendered Popup overlay node on top of Window and Normal" (c50 == packColor (Color 0x778899FF))
+
+  freeRgfwSurface surf
+

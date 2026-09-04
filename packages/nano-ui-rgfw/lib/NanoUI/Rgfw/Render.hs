@@ -88,6 +88,8 @@ data RenderScratch = RenderScratch
   { rsCap     :: {-# UNPACK #-} !Int
   , rsOverlay :: !(MutablePrimArray RealWorld Int)
   , rsPopup   :: !(MutablePrimArray RealWorld Int)
+  , rsWindows :: !(MutablePrimArray RealWorld Int)
+  , rsPopups  :: !(MutablePrimArray RealWorld Int)
   }
 
 {-# NOINLINE globalRenderScratchPool #-}
@@ -98,7 +100,9 @@ allocRenderScratch :: Int -> IO RenderScratch
 allocRenderScratch !cap = do
   ov <- newPrimArray cap
   pop <- newPrimArray cap
-  pure $ RenderScratch cap ov pop
+  wins <- newPrimArray cap
+  pops <- newPrimArray cap
+  pure $ RenderScratch cap ov pop wins pops
 
 withRenderScratch :: Int -> (RenderScratch -> IO a) -> IO a
 withRenderScratch !reqN act = do
@@ -128,22 +132,10 @@ renderArena surf font !scale theme ctx na hotId activeId focusId = do
   store <- getStore ctx
   !n <- arenaCount na
   when (n > 0) $ withRenderScratch n $ \scratch -> withArenaArraysSnap na $ do
-    -- Precompute overlay and popup status for all nodes in O(N)
     let isOverlayArr = rsOverlay scratch
         isPopupArr   = rsPopup scratch
-    let prepOverlay !i
-          | i >= n = pure ()
-          | otherwise = do
-              nt <- getNodeType na i
-              p <- getParent na i
-              isPOverlay <- if p >= 0 && p < i then readPrimArray isOverlayArr p else pure (0 :: Int)
-              let !isO = if isFloatingNode nt || isPOverlay == 1 then 1 else 0
-              writePrimArray isOverlayArr i (isO :: Int)
-              isPPopup <- if p >= 0 && p < i then readPrimArray isPopupArr p else pure (0 :: Int)
-              let !isP = if nt == NodePopup || isPPopup == 1 then 1 else 0
-              writePrimArray isPopupArr i (isP :: Int)
-              prepOverlay (i + 1)
-    prepOverlay 0
+        winArr       = rsWindows scratch
+        popArr       = rsPopups scratch
 
     let renderNode !i = do
           nt <- getNodeType na i
@@ -511,33 +503,50 @@ renderArena surf font !scale theme ctx na hotId activeId focusId = do
           when (isJust mClip) $
             popClip surf
 
-    -- Pass 1: Render all in-flow / non-overlay nodes
-    let loopNormal !i
-          | i >= n = pure ()
+    -- Main Pass: Classify overlay status and render in-flow nodes immediately.
+    -- Deferred window and popup node indices are collected into scratch arrays.
+    let loopMain !i !winCount !popCount
+          | i >= n = pure (winCount, popCount)
           | otherwise = do
-              isO <- readPrimArray isOverlayArr i
-              when (isO == 0) $ renderNode i
-              loopNormal (i + 1)
-    loopNormal 0
+              nt <- getNodeType na i
+              p <- getParent na i
+              isPOverlay <- if p >= 0 && p < i then readPrimArray isOverlayArr p else pure (0 :: Int)
+              let !isO = if isFloatingNode nt || isPOverlay == 1 then 1 else 0
+              writePrimArray isOverlayArr i (isO :: Int)
+              isPPopup <- if p >= 0 && p < i then readPrimArray isPopupArr p else pure (0 :: Int)
+              let !isP = if nt == NodePopup || isPPopup == 1 then 1 else 0
+              writePrimArray isPopupArr i (isP :: Int)
+              if isP == 1
+                then do
+                  writePrimArray popArr popCount i
+                  loopMain (i + 1) winCount (popCount + 1)
+                else if isO == 1
+                  then do
+                    writePrimArray winArr winCount i
+                    loopMain (i + 1) (winCount + 1) popCount
+                  else do
+                    renderNode i
+                    loopMain (i + 1) winCount popCount
 
-    -- Pass 2: Render floating windows & modals and their contents over the UI
-    let loopWindows !i
-          | i >= n = pure ()
-          | otherwise = do
-              isO <- readPrimArray isOverlayArr i
-              isP <- readPrimArray isPopupArr i
-              when (isO == 1 && isP == 0) $ renderNode i
-              loopWindows (i + 1)
-    loopWindows 0
+    (!winCount, !popCount) <- loopMain 0 0 0
 
-    -- Pass 3: Render floating popups and context menus on top of everything
-    let loopPopups !i
-          | i >= n = pure ()
+    -- Overlay Pass 1: Render floating windows & modals and their contents over in-flow UI
+    let drawWindows !k
+          | k >= winCount = pure ()
           | otherwise = do
-              isP <- readPrimArray isPopupArr i
-              when (isP == 1) $ renderNode i
-              loopPopups (i + 1)
-    loopPopups 0
+              idx <- readPrimArray winArr k
+              renderNode idx
+              drawWindows (k + 1)
+    drawWindows 0
+
+    -- Overlay Pass 2: Render floating popups and context menus on top of everything
+    let drawPopups !k
+          | k >= popCount = pure ()
+          | otherwise = do
+              idx <- readPrimArray popArr k
+              renderNode idx
+              drawPopups (k + 1)
+    drawPopups 0
 
 -- | Render the built-in text input / text area context menu overlay
 renderTextEditMenuOverlay ::

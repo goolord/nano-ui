@@ -753,10 +753,10 @@ solveSinglePassLayoutWith na !viewportW !viewportH lookupPopup lookupWindowPos l
                                 then wVal
                                 else if pDir == DirRow
                                   then if wTag == SizingGrow
-                                    then max reqW (availW - remAfterW)
+                                    then max 0 (availW - remAfterW)
                                     else reqW
                                   else if wTag == SizingGrow
-                                    then max reqW piw
+                                    then piw
                                     else reqW
 
                         -- Compute Height
@@ -766,10 +766,10 @@ solveSinglePassLayoutWith na !viewportW !viewportH lookupPopup lookupWindowPos l
                                 then hVal
                                 else if pDir == DirColumn
                                   then if hTag == SizingGrow
-                                    then max reqH (availH - remAfterH)
+                                    then max 0 (availH - remAfterH)
                                     else reqH
                                   else if hTag == SizingGrow
-                                    then max reqH pih
+                                    then pih
                                     else reqH
 
                         let !finalW = max minW (min maxW w)
