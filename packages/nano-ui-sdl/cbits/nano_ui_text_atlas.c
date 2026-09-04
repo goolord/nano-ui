@@ -7,7 +7,8 @@
 
 enum {
     NANO_UI_TEXT_ATLAS_SIZE = 1024,
-    NANO_UI_TEXT_ATLAS_PAD = 1
+    NANO_UI_TEXT_ATLAS_PAD = 1,
+    NANO_UI_WHITE_PATCH_SIZE = 4
 };
 
 struct NanoUiTextAtlas {
@@ -20,6 +21,22 @@ struct NanoUiTextAtlas {
     int y;
     int row_h;
 };
+
+static void init_white_pixel(NanoUiTextAtlas *atlas)
+{
+    if (!atlas || !atlas->pixels || atlas->w <= 0 || atlas->h <= 0) {
+        return;
+    }
+    for (int y = 0; y < NANO_UI_WHITE_PATCH_SIZE && y < atlas->h; y++) {
+        for (int x = 0; x < NANO_UI_WHITE_PATCH_SIZE && x < atlas->w; x++) {
+            size_t off = ((size_t)y * (size_t)atlas->w + (size_t)x) * 4;
+            atlas->pixels[off + 0] = 255;
+            atlas->pixels[off + 1] = 255;
+            atlas->pixels[off + 2] = 255;
+            atlas->pixels[off + 3] = 255;
+        }
+    }
+}
 
 static bool upload_all(NanoUiTextAtlas *atlas)
 {
@@ -63,6 +80,7 @@ static bool create_texture(NanoUiTextAtlas *atlas, int w, int h)
     atlas->pixels = px;
     atlas->w = w;
     atlas->h = h;
+    init_white_pixel(atlas);
     return upload_all(atlas);
 }
 
@@ -76,9 +94,9 @@ static bool slot_for(NanoUiTextAtlas *atlas, int gw, int gh, int *out_x, int *ou
         if (!create_texture(atlas, NANO_UI_TEXT_ATLAS_SIZE, NANO_UI_TEXT_ATLAS_SIZE)) {
             return false;
         }
-        atlas->x = pad;
+        atlas->x = NANO_UI_WHITE_PATCH_SIZE + pad;
         atlas->y = pad;
-        atlas->row_h = 0;
+        atlas->row_h = NANO_UI_WHITE_PATCH_SIZE;
     }
     if (atlas->x + gw + pad <= atlas->w && atlas->y + gh + pad <= atlas->h) {
         *out_x = atlas->x;
@@ -216,11 +234,12 @@ void nano_ui_text_atlas_reset(NanoUiTextAtlas *atlas)
     if (!atlas) {
         return;
     }
-    atlas->x = NANO_UI_TEXT_ATLAS_PAD;
+    atlas->x = NANO_UI_WHITE_PATCH_SIZE + NANO_UI_TEXT_ATLAS_PAD;
     atlas->y = NANO_UI_TEXT_ATLAS_PAD;
-    atlas->row_h = 0;
+    atlas->row_h = NANO_UI_WHITE_PATCH_SIZE;
     if (atlas->pixels && atlas->w > 0 && atlas->h > 0) {
         memset(atlas->pixels, 0, (size_t)atlas->w * (size_t)atlas->h * 4);
+        init_white_pixel(atlas);
         upload_all(atlas);
     }
 }

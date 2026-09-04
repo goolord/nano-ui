@@ -25,7 +25,8 @@ where
 
 import Colonnade (Colonnade, Headed (..), headed, headless)
 import Colonnade.Encode qualified as Encode
-import Control.Monad (void, when)
+import Control.Monad (forM_, void, when)
+import Control.Monad.ST (runST)
 import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
 import Data.List (sortBy)
@@ -34,6 +35,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Read (decimal, signed)
 import Data.Vector qualified as V
+import Data.Vector.Mutable qualified as MV
 import Effectful (Eff, type (:>))
 import qualified Data.IntMap.Strict as IM
 import NanoUI.Context (Context (..), bumpMirror, getPrevRect, getScrollOffset2D, getStore, intKey, linkScrollAxes, markDirty, setStore)
@@ -50,7 +52,6 @@ import NanoUI.Widgets.Behavior (useReorder)
 import NanoUI.Widgets.Combinators
   ( buttonStyled
   , fitList
-  , gridColumnsLay
   , headerAtPoint
   , headerEdgeHit
   , keyedRowLay
@@ -128,19 +129,27 @@ tableSplitPanes fillInner tableWid vWid hWid rowMinH frozenIdx unfrozenIdx pinne
      in if fill then fillW (fillH base) else base {layoutWidth = Fit, layoutMinW = minSum idxs}
   gridRowLay idxs =
     (if fillInner then fillW else id) (tight $ defaultLayout {layoutGap = 0, layoutMinW = minSum idxs})
+  renderGridRow rowLay colKeys colLays cells =
+    void $ row rowLay $
+      let go _ [] [] [] = pure ()
+          go !first (k : ks) (clay : clays) (c : cs) = do
+            when (not first) $ void separator
+            void $ withKey k (column clay c)
+            go False ks clays cs
+          go _ _ _ _ = pure ()
+       in go True colKeys colLays cells
   headerLine idxs renderHeader' =
     keyedRowLay (gridRowLay idxs) idxs $ \i ->
       column (colBox i) (renderHeader' i)
-  pinnedBlock idxs =
+  pinnedBlock idxs = do
+    let !rowLay = gridRowLay idxs
+        !colLays = map colBox idxs
     mapM_
       ( \(ri, r) ->
           withKey ("pin" :: Text, ri) $ do
             when (ri > 0) $ void separator
-            gridColumnsLay
-              (gridRowLay idxs)
-              idxs
-              (map colBox idxs)
-              [void (renderCell ri r i) | i <- idxs]
+            let cell = renderCell ri r
+            renderGridRow rowLay idxs colLays [void (cell i) | i <- idxs]
       )
       (zip [0 ..] pinned)
   bodyBlock scrollWid virtualize idxs = do
@@ -167,22 +176,19 @@ tableSplitPanes fillInner tableWid vWid hWid rowMinH frozenIdx unfrozenIdx pinne
                 topH = fromIntegral firstVis * rowMinH
                 botH = fromIntegral (max 0 (n - lastVis - 1)) * rowMinH
             pure (vis, topH, botH)
+    let !rowLay = gridRowLay idxs
+        !colLays = map colBox idxs
     column ((if fillInner then fillW else id) (tight $ defaultLayout {layoutGap = 0, layoutMinW = minSum idxs})) $ do
       when (topH > 0) $ void (spacer Fit (Fixed topH))
-      gridColumnsLay
-        (gridRowLay idxs)
-        idxs
-        (map colBox idxs)
-        [ mapM_
-            ( \rowIdx ->
-                withKey rowIdx $ do
-                  when (rowIdx > 0) $ void separator
-                  let r = scrollRowsVec V.! rowIdx
-                  renderCell (rowIdx + freezeR) r colIdx
-            )
-            vis
-        | colIdx <- idxs
-        ]
+      mapM_
+        ( \rowIdx ->
+            withKey rowIdx $ do
+              when (rowIdx > 0) $ void separator
+              let r = scrollRowsVec V.! rowIdx
+                  cell = renderCell (rowIdx + freezeR) r
+              renderGridRow rowLay idxs colLays [void (cell colIdx) | colIdx <- idxs]
+        )
+        vis
       when (botH > 0) $ void (spacer Fit (Fixed botH))
   pane fill hideVertBar idxs = do
     column (paneLay fill idxs) $ do
@@ -315,9 +321,6 @@ columnCount = V.length . Encode.getColonnade
 columnHeaders :: Colonnade Headed row Text -> [Text]
 columnHeaders cols = V.toList (Encode.header id cols)
 
-columnCells :: Colonnade Headed row Text -> row -> [Text]
-columnCells cols r = V.toList (Encode.row id cols r)
-
 isNumericCell :: Text -> Bool
 isNumericCell txt =
   let s = T.strip txt
@@ -326,15 +329,8 @@ isNumericCell txt =
           Right (_, rest) | T.null rest -> True
           _ -> False
 
-numericColumns :: Colonnade Headed row Text -> [row] -> [Bool]
-numericColumns _ [] = []
-numericColumns cols rows =
-  let n = length (columnHeaders cols)
-      rowVecs = [Encode.row id cols r | r <- rows]
-   in [let cells = [v V.! i | v <- rowVecs] in not (null cells) && all isNumericCell cells | i <- [0 .. n - 1]]
-
-columnWidths :: Context -> Colonnade Headed row Text -> [row] -> [Float]
-columnWidths ctx cols rows =
+columnMetrics :: Context -> Colonnade Headed row Text -> [row] -> ([Float], [Bool])
+columnMetrics ctx cols rows = runST $ do
   let host = ctxHostProfile ctx
       fm = ctxFontMetrics ctx
       mono = ctxMonoFontMetrics ctx
@@ -342,24 +338,32 @@ columnWidths ctx cols rows =
       (ix, _) = tableCellInset host fm
       cellPadX = 2 * ix
       headerPadX = cellPadX
-      measure metrics txt = textDisplayWidth host metrics txt
       hdrs = columnHeaders cols
-      rowVecs = [Encode.row id cols r | r <- rows]
       numCols = length hdrs
-      isColNum i = not (null rowVecs) && all (\v -> isNumericCell (v V.! i)) rowVecs
-      numeric = [isColNum i | i <- [0 .. numCols - 1]]
-      hdrW hdr = measure fm (hdr <> tableSortReserve terminal) + headerPadX
-      cellW i txt =
-        if listAt numeric i False
-          then measure mono txt + cellPadX
-          else measure fm txt + cellPadX
-   in zipWith
-        (\hdr i ->
-           let maxCell = foldl' (\acc v -> max acc (cellW i (v V.! i))) minColW rowVecs
-            in max (hdrW hdr) maxCell
-        )
-        hdrs
-        [0 ..]
+  if null rows || numCols == 0
+    then do
+      let widths = [textDisplayWidth host fm (h <> tableSortReserve terminal) + headerPadX | h <- hdrs]
+      pure (widths, replicate numCols False)
+    else do
+      let !encodedRows = [Encode.row id cols r | r <- rows]
+      numMut <- MV.new numCols
+      forM_ [0 .. numCols - 1] $ \c -> do
+        let !isNum = all (\v -> isNumericCell (v V.! c)) encodedRows
+        MV.write numMut c isNum
+      wMut <- MV.new numCols
+      forM_ (zip [0 .. numCols - 1] hdrs) $ \(c, hdr) -> do
+        isNum <- MV.read numMut c
+        let !fontM = if isNum then mono else fm
+            !hdrW = textDisplayWidth host fm (hdr <> tableSortReserve terminal) + headerPadX
+            calcMax !acc [] = acc
+            calcMax !acc (v : vs) =
+              let !w = textDisplayWidth host fontM (v V.! c) + cellPadX
+               in calcMax (if w > acc then w else acc) vs
+            !maxCell = calcMax minColW encodedRows
+        MV.write wMut c (if hdrW > maxCell then hdrW else maxCell)
+      widths <- V.toList <$> V.freeze wMut
+      numeric <- V.toList <$> V.freeze numMut
+      pure (widths, numeric)
 
 nextSortCol :: Int -> SortCol -> Int -> SortCol
 nextSortCol n cur clicked =
@@ -555,7 +559,7 @@ tableCfg cfg outerLayout key cols rows curSort =
     st0 <- uiIO (getStore ctx)
     let host = ctxHostProfile ctx
         terminal = isCellHost host
-        contentWs = columnWidths ctx cols rows
+        (!contentWs, !numeric) = columnMetrics ctx cols rows
         sizes = tableColSizes cfg
         order0 = normalizeOrder n (IM.findWithDefault [0 .. n - 1] stateKey (storeIntList st0))
         hidden0 = IM.findWithDefault (tableHidden cfg) stateKey (storeIntSet st0)
@@ -576,24 +580,31 @@ tableCfg cfg outerLayout key cols rows curSort =
         pinned = take freezeR sorted
         scrollRows = drop freezeR sorted
         hdrs = columnHeaders cols
-        numeric = numericColumns cols rows
         rowMinH = if terminal then 1 else 28
         fillInner = tableFillInner cfg outerLayout
         mins = [resolvedWidth sizes contentWs widths1 i | i <- [0 .. n - 1]]
-        colBox i = colBoxLayout (colSizing fillInner sizes contentWs widths1 i) (listAt mins i minColW)
+        colBoxes = V.fromList [colBoxLayout (colSizing fillInner sizes contentWs widths1 i) (listAt mins i minColW) | i <- [0 .. n - 1]]
+        colBox i = if i < V.length colBoxes then colBoxes V.! i else tight defaultLayout
         resolvedW i = listAt mins i minColW
-        inner i =
-          (tight defaultLayout)
-            { layoutWidth = Grow 1
-            , layoutHeight = Grow 1
-            , layoutAlignX = if listAt numeric i False then AlignEnd else AlignStart
-            , layoutAlignY = AlignMiddle
-            , layoutMinH = rowMinH
-            , layoutFontVariant = if listAt numeric i False then FontMono else FontRegular
-            }
+        cellLayouts = V.fromList
+          [ (tight defaultLayout)
+              { layoutWidth = Grow 1
+              , layoutHeight = Grow 1
+              , layoutAlignX = if listAt numeric i False then AlignEnd else AlignStart
+              , layoutAlignY = AlignMiddle
+              , layoutMinH = rowMinH
+              , layoutFontVariant = if listAt numeric i False then FontMono else FontRegular
+              }
+          | i <- [0 .. n - 1]
+          ]
         renderHeader i =
-          buttonStyled (tableHeaderLabel terminal (listAt hdrs i T.empty)) (if sortColIndex sort0 == i then 1 else 0) (inner i) (sortMarkStyle sort0 i)
-        renderCell ri r i = void (stripedRow ri (inner i) (columnCells cols r !! i))
+          let !lay = if i < V.length cellLayouts then cellLayouts V.! i else tight defaultLayout
+           in buttonStyled (tableHeaderLabel terminal (listAt hdrs i T.empty)) (if sortColIndex sort0 == i then 1 else 0) lay (sortMarkStyle sort0 i)
+        renderCell ri r =
+          let !rowCells = Encode.row id cols r
+           in \i ->
+                let !lay = if i < V.length cellLayouts then cellLayouts V.! i else tight defaultLayout
+                 in void (stripedRow ri lay (rowCells V.! i))
     column outerLayout $ do
       showAllResp <-
         if IS.null hidden0

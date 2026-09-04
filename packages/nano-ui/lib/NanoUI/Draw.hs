@@ -439,7 +439,7 @@ newDrawArena = do
   daCmdCapacity <- newIORef cmdInitialCapacity
   daCurrentLayer <- newIORef LayerContent
   daCurrentClip <- newIORef (0, 0, 1e9, 1e9)
-  daCurrentTexture <- newIORef 0
+  daCurrentTexture <- newIORef glyphAtlasTextureId
   daCmdStartIndex <- newIORef 0
   pure
     DrawArena
@@ -470,7 +470,7 @@ resetDrawArena da = do
   writeIORef (daCmdCount da) 0
   writeIORef (daCurrentLayer da) LayerContent
   writeIORef (daCurrentClip da) (0, 0, 1e9, 1e9)
-  writeIORef (daCurrentTexture da) 0
+  writeIORef (daCurrentTexture da) glyphAtlasTextureId
   writeIORef (daCmdStartIndex da) 0
 
 {-# NOINLINE poolTake #-}
@@ -571,10 +571,12 @@ currentLayer = readIORef . daCurrentLayer
 {-# INLINE beginLayer #-}
 beginLayer :: DrawArena -> Layer -> IO ()
 beginLayer da layer = do
-  flushCmd da
-  writeIORef (daCurrentLayer da) layer
-  idx <- readIORef (daIndexCount da)
-  writeIORef (daCmdStartIndex da) idx
+  cur <- readIORef (daCurrentLayer da)
+  when (cur /= layer) $ do
+    flushCmd da
+    writeIORef (daCurrentLayer da) layer
+    idx <- readIORef (daIndexCount da)
+    writeIORef (daCmdStartIndex da) idx
 
 {-# INLINE flushCmd #-}
 flushCmd :: DrawArena -> IO ()
@@ -707,7 +709,7 @@ pushQuadGradient :: DrawArena -> Rect -> Color -> Color -> Color -> Color -> IO 
 pushQuadGradient da (Rect x y w h) tl tr br bl
   | w <= 0 || h <= 0 = pure ()
   | otherwise = do
-      setTexture da 0
+      setTexture da glyphAtlasTextureId
       (vp, ip, base, baseIdx) <- ensureAndAlloc da 4 6
       let !vOff = base * vertexSize
           !iOff = baseIdx * indexSize
@@ -716,7 +718,7 @@ pushQuadGradient da (Rect x y w h) tl tr br bl
           !y1 = y + h
           pokeVert off px py col = do
             let !(r, g, b, a) = unpackColorF col
-            pokeVertex vp off px py r g b a 0 0
+            pokeVertex vp off px py r g b a whitePixelU whitePixelV
       pokeVert vOff x y tl
       pokeVert (vOff + 32) x1 y tr
       pokeVert (vOff + 64) x1 y1 br
@@ -741,11 +743,18 @@ backdropDimTextureId = 0x7ffffffe
 glyphAtlasTextureId :: Int
 glyphAtlasTextureId = 0x7ffffffd
 
+-- | Center of the 4x4 white pixel patch in the 1024x1024 font atlas.
+whitePixelU :: Float
+whitePixelU = 1.5 / 1024.0
+
+whitePixelV :: Float
+whitePixelV = 1.5 / 1024.0
+
 {-# INLINE pushRect #-}
 pushRect :: DrawArena -> Rect -> Color -> IO ()
 pushRect da rect col = do
-  setTexture da 0
-  pushQuad da rect 0 0 1 1 col
+  setTexture da glyphAtlasTextureId
+  pushQuad da rect whitePixelU whitePixelV whitePixelU whitePixelV col
 
 {-# INLINE pushBackdropDim #-}
 pushBackdropDim :: DrawArena -> Rect -> Color -> IO ()
@@ -810,6 +819,7 @@ getCurrentClip da = do
 
 pushCornerFan :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
 pushCornerFan da cx cy rad a0 _a1 col = do
+  setTexture da glyphAtlasTextureId
   let !segs = cornerSegments
       !ring = segs + 1
       !aa = 1.0
@@ -819,14 +829,14 @@ pushCornerFan da cx cy rad a0 _a1 col = do
   (vp, ip, base, baseIdx) <- ensureAndAlloc da needV needI
   let !(cr, cg, cb, ca) = unpackColorF col
       !centerIdx = fromIntegral base :: Word32
-  pokeVertex vp (base * vertexSize) cx cy cr cg cb ca 0 0
+  pokeVertex vp (base * vertexSize) cx cy cr cg cb ca whitePixelU whitePixelV
   forM_ [0 .. segs] $ \i -> do
     let !(ct, st) = cornerCosSin q i
         !rimI = base + 1 + i
         !outI = base + 1 + ring + i
         !inRad = max 0 (rad - aa)
-    pokeVertex vp (rimI * vertexSize) (cx + inRad * ct) (cy + inRad * st) cr cg cb ca 0 0
-    pokeVertex vp (outI * vertexSize) (cx + rad * ct) (cy + rad * st) cr cg cb 0 0 0
+    pokeVertex vp (rimI * vertexSize) (cx + inRad * ct) (cy + inRad * st) cr cg cb ca whitePixelU whitePixelV
+    pokeVertex vp (outI * vertexSize) (cx + rad * ct) (cy + rad * st) cr cg cb 0 whitePixelU whitePixelV
     when (i > 0) $ do
       let !k = i - 1
           !rim0 = fromIntegral (base + i) :: Word32
@@ -863,17 +873,17 @@ pushRoundedRect da rect@(Rect x y w h) radius col
       if rad <= 0.5
         then pushRect da rect col
         else do
-          setTexture da 0
+          setTexture da glyphAtlasTextureId
           let !midW = max 0 (w - 2 * rad)
               !midH = max 0 (h - 2 * rad)
           when (midW > 0 && midH > 0) $
-            pushQuad da (Rect (x + rad) (y + rad) midW midH) 0 0 1 1 col
+            pushQuad da (Rect (x + rad) (y + rad) midW midH) whitePixelU whitePixelV whitePixelU whitePixelV col
           when (midW > 0) $ do
-            pushQuad da (Rect (x + rad) y midW rad) 0 0 1 1 col
-            pushQuad da (Rect (x + rad) (y + h - rad) midW rad) 0 0 1 1 col
+            pushQuad da (Rect (x + rad) y midW rad) whitePixelU whitePixelV whitePixelU whitePixelV col
+            pushQuad da (Rect (x + rad) (y + h - rad) midW rad) whitePixelU whitePixelV whitePixelU whitePixelV col
           when (midH > 0) $ do
-            pushQuad da (Rect x (y + rad) rad midH) 0 0 1 1 col
-            pushQuad da (Rect (x + w - rad) (y + rad) rad midH) 0 0 1 1 col
+            pushQuad da (Rect x (y + rad) rad midH) whitePixelU whitePixelV whitePixelU whitePixelV col
+            pushQuad da (Rect (x + w - rad) (y + rad) rad midH) whitePixelU whitePixelV whitePixelU whitePixelV col
           pushCornerFan da (x + rad) (y + rad) rad pi (pi * 1.5) col
           pushCornerFan da (x + w - rad) (y + rad) rad (pi * 1.5) (pi * 2) col
           pushCornerFan da (x + w - rad) (y + h - rad) rad 0 (pi * 0.5) col
@@ -884,7 +894,7 @@ pushRoundedStroke :: DrawArena -> Rect -> Float -> Float -> Color -> IO ()
 pushRoundedStroke da (Rect x y w h) radius bw col
   | w <= 0 || h <= 0 || bw <= 0 = pure ()
   | otherwise = do
-      setTexture da 0
+      setTexture da glyphAtlasTextureId
       let !rad = min (max 0 radius) (min (w * 0.5) (h * 0.5))
           !ibw = min bw (min (w * 0.5) (h * 0.5))
       if rad <= 0.5
@@ -926,7 +936,7 @@ pushLine da x1 y1 x2 y2 thickness col =
   case strokeAxes x1 y1 x2 y2 of
     Nothing -> pure ()
     Just (dx, dy, len) -> do
-      setTexture da 0
+      setTexture da glyphAtlasTextureId
       let r = thickness / 2
           step = max 0.3 (r * 0.4)
           n = max (1 :: Int) (ceiling (len / step))
@@ -945,7 +955,7 @@ pushStrokeAA da x0 y0 x1 y1 bw col
       case strokeAxes x0 y0 x1 y1 of
         Nothing -> pure ()
         Just (dx, dy, len) -> do
-          setTexture da 0
+          setTexture da glyphAtlasTextureId
           let !nx = (-dy) / len
               !ny = dx / len
               !half = bw * 0.5
@@ -954,10 +964,10 @@ pushStrokeAA da x0 y0 x1 y1 bw col
               !(cr, cg, cb, ca) = unpackColorF col
           (vp, ip, base, baseIdx) <- ensureAndAlloc da 8 18
           let pokeEnd vi px py = do
-                pokeVertex vp ((base + vi) * vertexSize) (px - nx * half) (py - ny * half) cr cg cb 0 0 0
-                pokeVertex vp ((base + vi + 1) * vertexSize) (px - nx * core) (py - ny * core) cr cg cb ca 0 0
-                pokeVertex vp ((base + vi + 2) * vertexSize) (px + nx * core) (py + ny * core) cr cg cb ca 0 0
-                pokeVertex vp ((base + vi + 3) * vertexSize) (px + nx * half) (py + ny * half) cr cg cb 0 0 0
+                pokeVertex vp ((base + vi) * vertexSize) (px - nx * half) (py - ny * half) cr cg cb 0 whitePixelU whitePixelV
+                pokeVertex vp ((base + vi + 1) * vertexSize) (px - nx * core) (py - ny * core) cr cg cb ca whitePixelU whitePixelV
+                pokeVertex vp ((base + vi + 2) * vertexSize) (px + nx * core) (py + ny * core) cr cg cb ca whitePixelU whitePixelV
+                pokeVertex vp ((base + vi + 3) * vertexSize) (px + nx * half) (py + ny * half) cr cg cb 0 whitePixelU whitePixelV
               !a = fromIntegral base :: Word32
               !b = a + 4
           pokeEnd 0 x0 y0
@@ -980,7 +990,7 @@ pushCornerArcStroke :: DrawArena -> Float -> Float -> Float -> Float -> Int -> C
 pushCornerArcStroke da cx cy radius bw q col
   | bw <= 0 || radius <= 0 = pure ()
   | otherwise = do
-      setTexture da 0
+      setTexture da glyphAtlasTextureId
       let !r = max 0.25 radius
           !n = cornerSegments
           !half = bw * 0.5
@@ -996,10 +1006,10 @@ pushCornerArcStroke da cx cy radius bw q col
       forM_ [0 .. n] $ \i -> do
         let !(ct, st) = cornerCosSin q i
             !v0 = base + i * 4
-        pokeVertex vp (v0 * vertexSize) (cx + innerAA * ct) (cy + innerAA * st) cr cg cb 0 0 0
-        pokeVertex vp ((v0 + 1) * vertexSize) (cx + inner * ct) (cy + inner * st) cr cg cb ca 0 0
-        pokeVertex vp ((v0 + 2) * vertexSize) (cx + outer * ct) (cy + outer * st) cr cg cb ca 0 0
-        pokeVertex vp ((v0 + 3) * vertexSize) (cx + outerAA * ct) (cy + outerAA * st) cr cg cb 0 0 0
+        pokeVertex vp (v0 * vertexSize) (cx + innerAA * ct) (cy + innerAA * st) cr cg cb 0 whitePixelU whitePixelV
+        pokeVertex vp ((v0 + 1) * vertexSize) (cx + inner * ct) (cy + inner * st) cr cg cb ca whitePixelU whitePixelV
+        pokeVertex vp ((v0 + 2) * vertexSize) (cx + outer * ct) (cy + outer * st) cr cg cb ca whitePixelU whitePixelV
+        pokeVertex vp ((v0 + 3) * vertexSize) (cx + outerAA * ct) (cy + outerAA * st) cr cg cb 0 whitePixelU whitePixelV
       forM_ [0 .. n - 1] $ \i -> do
         let !a = fromIntegral (base + i * 4) :: Word32
             !b = a + 4
@@ -1022,13 +1032,13 @@ pushStroke da x1 y1 x2 y2 thickness col
           let !invLen = (thickness * 0.5) / len
               !hx = (-dy) * invLen
               !hy = dx * invLen
-          setTexture da 0
+          setTexture da glyphAtlasTextureId
           (vp, ip, base, baseIdx) <- ensureAndAlloc da 4 6
           let !(r, g, b, a) = unpackColorF col
               !vOff = base * vertexSize
               !iOff = baseIdx * indexSize
               !baseIdxWord = fromIntegral base :: Word32
-              poke off px py = pokeVertex vp off px py r g b a (-3) 0
+              poke off px py = pokeVertex vp off px py r g b a whitePixelU whitePixelV
           poke vOff (x1 + hx) (y1 + hy)
           poke (vOff + 32) (x2 + hx) (y2 + hy)
           poke (vOff + 64) (x2 - hx) (y2 - hy)
@@ -1056,15 +1066,15 @@ emitDrawOps da fm ops = V.mapM_ emitOne ops
 {-# INLINE pushFilledTriangle #-}
 pushFilledTriangle :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
 pushFilledTriangle da x0 y0 x1 y1 x2 y2 col = do
-  setTexture da 0
+  setTexture da glyphAtlasTextureId
   (vp, ip, base, baseIdx) <- ensureAndAlloc da 3 3
   let !(r, g, b, a) = unpackColorF col
       !vOff = base * vertexSize
       !iOff = baseIdx * indexSize
       !baseIdxWord = fromIntegral base :: Word32
-  pokeVertex vp vOff x0 y0 r g b a (-3) 0
-  pokeVertex vp (vOff + 32) x1 y1 r g b a (-3) 0
-  pokeVertex vp (vOff + 64) x2 y2 r g b a (-3) 0
+  pokeVertex vp vOff x0 y0 r g b a whitePixelU whitePixelV
+  pokeVertex vp (vOff + 32) x1 y1 r g b a whitePixelU whitePixelV
+  pokeVertex vp (vOff + 64) x2 y2 r g b a whitePixelU whitePixelV
   pokeByteOff ip iOff baseIdxWord
   pokeByteOff ip (iOff + 4) (baseIdxWord + 1)
   pokeByteOff ip (iOff + 8) (baseIdxWord + 2)
