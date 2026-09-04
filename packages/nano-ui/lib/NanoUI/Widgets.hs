@@ -416,10 +416,12 @@ kvMono k v = do
 
 kvBlock :: Ui :> es => [(Text, Text)] -> Eff es ()
 kvBlock rows =
-  void $
-    labelEx
-      (tight . gap 0 . fontMono $ defaultLayout)
-      (T.unlines [k <> ": " <> v | (k, v) <- rows])
+  let maxK = foldl' (\acc (k, _) -> max acc (T.length k)) 0 rows
+      padK k = T.justifyLeft maxK ' ' k
+   in void $
+        labelEx
+          (tight . gap 0 . fontMono $ defaultLayout)
+          (T.unlines [padK k <> "  " <> v | (k, v) <- rows])
 
 card :: Ui :> es => Eff es a -> Eff es a
 card = panel (minW 300 . padXY 12 10 . gap 8 . fillW $ defaultLayout)

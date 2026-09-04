@@ -253,7 +253,7 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace star
                     ctx'
                     env
                     inpSynced
-                    (sdlContinuous env || debugWinOpen || wantDebug || nFull > 0 || displayScale || firstUserFull)
+                    (sdlContinuous env || nFull > 0 || displayScale || firstUserFull)
                 when (nFull > 0) $ writeIORef startupFull (nFull - 1)
                 writeIORef pendingRedraw dirtyOut
                 writeIORef prev s

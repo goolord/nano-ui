@@ -510,7 +510,7 @@ debugBody s =
 debugSection :: T.Text -> SmallArray (T.Text, T.Text) -> NanoUI ()
 debugSection title rows = do
   heading title
-  mapM_ (\(k, v) -> kvMono k v) rows
+  kvBlock (foldr (:) [] rows)
 
 clipField :: Int -> T.Text -> T.Text
 clipField n s =
