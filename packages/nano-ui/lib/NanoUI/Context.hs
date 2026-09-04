@@ -8,6 +8,11 @@ module NanoUI.Context
   , TextFieldClickCell (..)
   , WindowResizeEdge (..)
   , WindowResizeDrag (..)
+  , DamageState (..)
+  , OverlayState (..)
+  , AnimationState (..)
+  , DrawingCacheState (..)
+  , DrawFitCache (..)
   , intKey
   , markDirty
   , modifyIORefList
@@ -15,6 +20,9 @@ module NanoUI.Context
   , isDirty
   , setWakeLoop
   , takeDamage
+  , setDamage
+  , getLastWindowSize
+  , setDamageAndWindowSize
   , DamageRequest (..)
   , requestDamage
   , damageWidget
@@ -33,6 +41,9 @@ module NanoUI.Context
   , cachedWidgetLayout
   , pruneDrawOpCache
   , clearDrawings
+  , getWidgetNodeTypes
+  , setWidgetNodeTypes
+  , resetDrawingScopeCache
   , getStore
   , setStore
   , isDisabled
@@ -51,6 +62,9 @@ module NanoUI.Context
   , getPrevClipRectByKey
   , getPrevClipRect
   , setPrevRect
+  , getPrevRects
+  , getPrevClips
+  , setPrevRectsAndClips
   , atlasTextureId
   , registerImage
   , registerImages
@@ -85,6 +99,7 @@ module NanoUI.Context
   , modalActive
   , overlayConsumesQuit
   , markEscapeConsumed
+  , resetEscapeConsumed
   , pointerBlockedByModal
   , pointerBlockedByOverlay
   , menuPointerGestureActive
@@ -94,8 +109,18 @@ module NanoUI.Context
   , endModal
   , beginFrameModal
   , modalDamageFlip
+  , getCurrentFloatingId
+  , setCurrentFloatingId
+  , getLastPointerBlocked
+  , getPrevFloatingRects
+  , setPrevFloatingPanels
+  , getFloatingAncestor
+  , setFloatingAncestor
   -- Animation
   , anyAnimating
+  , getLiveAnimations
+  , takeAnimSettled
+  , lookupAnimation
   , startAnimation
   , startAnimationEase
   , startAnimationEaseDelay
@@ -313,7 +338,85 @@ data WindowResizeDrag = WindowResizeDrag
   , wrdMaxW :: Float
   , wrdMaxH :: Float
   }
-  deriving (Eq, Show)
+data DamageState = DamageState
+  { dsDirty :: !Bool
+  , dsDamage :: !Damage
+  , dsRequests :: ![DamageRequest]
+  , dsLastWindowSize :: !Size
+  , dsPrevRects :: !(IntMap Rect)
+  , dsPrevClips :: !(IntMap Rect)
+  , dsPrevNodeTexts :: !(IntMap Text)
+  }
+
+initialDamageState :: DamageState
+initialDamageState = DamageState
+  { dsDirty = True
+  , dsDamage = DamageFull
+  , dsRequests = []
+  , dsLastWindowSize = Size 0 0
+  , dsPrevRects = IM.empty
+  , dsPrevClips = IM.empty
+  , dsPrevNodeTexts = IM.empty
+  }
+
+data OverlayState = OverlayState
+  { osModalWasActive :: !Bool
+  , osModalActive :: !Bool
+  , osModalDepth :: !Int
+  , osEscapeConsumed :: !Bool
+  , osPrevFloatingRects :: !(IntMap Rect)
+  , osPrevFloatingOrder :: ![Int]
+  , osTopmostCache :: !(Maybe (V2, Maybe WidgetId))
+  , osCurrentFloatingId :: !(Maybe WidgetId)
+  , osLastPointerBlocked :: !Bool
+  , osFloatingAncestor :: !(Maybe (IntMap (Maybe NodeType)))
+  }
+
+initialOverlayState :: OverlayState
+initialOverlayState = OverlayState
+  { osModalWasActive = False
+  , osModalActive = False
+  , osModalDepth = 0
+  , osEscapeConsumed = False
+  , osPrevFloatingRects = IM.empty
+  , osPrevFloatingOrder = []
+  , osTopmostCache = Nothing
+  , osCurrentFloatingId = Nothing
+  , osLastPointerBlocked = False
+  , osFloatingAncestor = Nothing
+  }
+
+data AnimationState = AnimationState
+  { asAnimations :: !(IntMap Animation)
+  , asAnimRest :: !(IntMap Float)
+  , asAnyAnimating :: !Bool
+  , asAnimSettled :: !Bool
+  }
+
+initialAnimationState :: AnimationState
+initialAnimationState = AnimationState
+  { asAnimations = IM.empty
+  , asAnimRest = IM.empty
+  , asAnyAnimating = False
+  , asAnimSettled = False
+  }
+
+data DrawingCacheState = DrawingCacheState
+  { dcsPopupConfigs :: !(IntMap (PopupAnchor, PopupPlacement, Float))
+  , dcsDrawings :: !(IntMap DrawingBuild)
+  , dcsDrawOpCache :: !(IntMap (Rect, Vector DrawOp))
+  , dcsDrawFitCache :: !(IntMap DrawFitCache)
+  , dcsWidgetNodeTypes :: !(Maybe (IntMap NodeType))
+  }
+
+initialDrawingCacheState :: DrawingCacheState
+initialDrawingCacheState = DrawingCacheState
+  { dcsPopupConfigs = IM.empty
+  , dcsDrawings = IM.empty
+  , dcsDrawOpCache = IM.empty
+  , dcsDrawFitCache = IM.empty
+  , dcsWidgetNodeTypes = Nothing
+  }
 
 data Context = Context
   { ctxNodeArena :: NodeArena
@@ -324,18 +427,11 @@ data Context = Context
   , ctxClickedId :: IORef WidgetId
   , ctxReleaseClickedId :: IORef WidgetId
   , ctxFocusId :: IORef WidgetId
-  , ctxPrevRects :: IORef (IntMap Rect)
-  , ctxPrevClips :: IORef (IntMap Rect)
-  , ctxPrevNodeTexts :: IORef (IntMap Text)
   , ctxStore :: IORef WidgetStore
-  , ctxAnimations :: IORef (IntMap Animation)
-  , ctxAnimRest :: IORef (IntMap Float)
-  , ctxAnyAnimating :: IORef Bool
-  , ctxAnimSettled :: IORef Bool
-  , ctxDirty :: IORef Bool
-  , ctxDamage :: IORef Damage
-  , ctxDamageRequests :: IORef [DamageRequest]
-  , ctxLastWindowSize :: IORef Size
+  , ctxDamageState :: IORef DamageState
+  , ctxOverlayState :: IORef OverlayState
+  , ctxAnimationState :: IORef AnimationState
+  , ctxDrawingCache :: IORef DrawingCacheState
   , ctxIdContext :: IORef IdContext
   , ctxFontMetrics :: FontMetrics
   , ctxMonoFontMetrics :: FontMetrics
@@ -357,26 +453,11 @@ data Context = Context
   , ctxTextInputMenu :: IORef (Maybe TextInputMenu)
   , ctxClipboardGet :: IO (Maybe Text)
   , ctxClipboardSet :: Text -> IO Bool
-  , ctxPopupConfigs :: IORef (IntMap (PopupAnchor, PopupPlacement, Float))
-  , ctxDrawings :: IORef (IntMap DrawingBuild)
-  , ctxDrawOpCache :: IORef (IntMap (Rect, Vector DrawOp))
-  , ctxDrawFitCache :: IORef (IntMap DrawFitCache)
-  , ctxWidgetNodeTypes :: IORef (Maybe (IntMap NodeType))
   , ctxSelectDropPress :: IORef Bool
   , ctxOpenSelectDrop :: IORef (Maybe (WidgetId, Rect))
   , ctxMenuPointerGesture :: IORef Bool
-  , ctxModalWasActive :: IORef Bool
-  , ctxModalActive :: IORef Bool
-  , ctxModalDepth :: IORef Int
-  , ctxEscapeConsumed :: IORef Bool
   , ctxWindowDrag :: IORef (Maybe (WidgetId, Float, Float))
   , ctxWindowResize :: IORef (Maybe WindowResizeDrag)
-  , ctxPrevFloatingRects :: IORef (IntMap Rect)
-  , ctxPrevFloatingOrder :: IORef [Int]
-  , ctxOverlayTopmostCache :: IORef (Maybe (V2, Maybe WidgetId))
-  , ctxCurrentFloatingId :: IORef (Maybe WidgetId)
-  , ctxLastPointerBlocked :: IORef Bool
-  , ctxFloatingAncestor :: IORef (Maybe (IntMap (Maybe NodeType)))
   , ctxImageAtlas :: ImageAtlas
   , ctxWakeLoop :: IORef (Maybe (IO ()))
   , ctxHost :: IORef (Map TypeRep Dynamic)
@@ -389,7 +470,9 @@ intKey = fromIntegral . hashWidgetId
 
 {-# INLINE requestDamage #-}
 requestDamage :: Context -> DamageRequest -> IO ()
-requestDamage ctx req = modifyIORef' (ctxDamageRequests ctx) (req :)
+requestDamage ctx req =
+  modifyIORef' (ctxDamageState ctx) $ \ds ->
+    ds {dsRequests = req : dsRequests ds}
 
 {-# INLINE damageWidget #-}
 damageWidget :: Context -> WidgetId -> DamageBounds -> IO ()
@@ -422,16 +505,18 @@ damageFull ctx = requestDamage ctx ReqFull
 
 {-# INLINE clearDamageRequests #-}
 clearDamageRequests :: Context -> IO ()
-clearDamageRequests ctx = writeIORef (ctxDamageRequests ctx) []
+clearDamageRequests ctx =
+  modifyIORef' (ctxDamageState ctx) $ \ds ->
+    ds {dsRequests = []}
 
 {-# INLINE getDamageRequests #-}
 getDamageRequests :: Context -> IO [DamageRequest]
-getDamageRequests ctx = readIORef (ctxDamageRequests ctx)
+getDamageRequests ctx = dsRequests <$> readIORef (ctxDamageState ctx)
 
 {-# INLINE markDirty #-}
 markDirty :: Context -> IO ()
 markDirty ctx = do
-  writeIORef (ctxDirty ctx) True
+  modifyIORef' (ctxDamageState ctx) $ \ds -> ds {dsDirty = True}
   wake <- readIORef (ctxWakeLoop ctx)
   case wake of
     Just act -> act
@@ -445,11 +530,12 @@ modifyIORefList ref cons val = do
 
 {-# INLINE clearDirty #-}
 clearDirty :: Context -> IO ()
-clearDirty ctx = writeIORef (ctxDirty ctx) False
+clearDirty ctx =
+  modifyIORef' (ctxDamageState ctx) $ \ds -> ds {dsDirty = False}
 
 {-# INLINE isDirty #-}
 isDirty :: Context -> IO Bool
-isDirty ctx = readIORef (ctxDirty ctx)
+isDirty ctx = dsDirty <$> readIORef (ctxDamageState ctx)
 
 {-# INLINE setWakeLoop #-}
 setWakeLoop :: Context -> IO () -> IO ()
@@ -457,23 +543,40 @@ setWakeLoop ctx wake = writeIORef (ctxWakeLoop ctx) (Just wake)
 
 {-# INLINE takeDamage #-}
 takeDamage :: Context -> IO Damage
-takeDamage ctx = readIORef (ctxDamage ctx)
+takeDamage ctx = dsDamage <$> readIORef (ctxDamageState ctx)
+
+{-# INLINE setDamage #-}
+setDamage :: Context -> Damage -> IO ()
+setDamage ctx dmg =
+  modifyIORef' (ctxDamageState ctx) $ \ds -> ds {dsDamage = dmg}
+
+{-# INLINE getLastWindowSize #-}
+getLastWindowSize :: Context -> IO Size
+getLastWindowSize ctx = dsLastWindowSize <$> readIORef (ctxDamageState ctx)
+
+{-# INLINE setDamageAndWindowSize #-}
+setDamageAndWindowSize :: Context -> Damage -> Size -> IO ()
+setDamageAndWindowSize ctx dmg sz =
+  modifyIORef' (ctxDamageState ctx) $ \ds ->
+    ds {dsDamage = dmg, dsLastWindowSize = sz, dsRequests = []}
 
 {-# INLINE registerPopupConfig #-}
 registerPopupConfig :: Context -> WidgetId -> PopupAnchor -> PopupPlacement -> Float -> IO ()
-registerPopupConfig ctx wid anchor placement offset = do
-  let k = intKey wid
-  modifyIORef' (ctxPopupConfigs ctx) (IM.insert k (anchor, placement, offset))
+registerPopupConfig ctx wid anchor placement offset =
+  modifyIORef' (ctxDrawingCache ctx) $ \dc ->
+    dc {dcsPopupConfigs = IM.insert (intKey wid) (anchor, placement, offset) (dcsPopupConfigs dc)}
 
 {-# INLINE lookupPopupConfig #-}
 lookupPopupConfig :: Context -> WidgetId -> IO (Maybe (PopupAnchor, PopupPlacement, Float))
 lookupPopupConfig ctx wid = do
-  m <- readIORef (ctxPopupConfigs ctx)
-  pure (IM.lookup (intKey wid) m)
+  dc <- readIORef (ctxDrawingCache ctx)
+  pure (IM.lookup (intKey wid) (dcsPopupConfigs dc))
 
 {-# INLINE clearPopupConfigs #-}
 clearPopupConfigs :: Context -> IO ()
-clearPopupConfigs ctx = writeIORef (ctxPopupConfigs ctx) IM.empty
+clearPopupConfigs ctx =
+  modifyIORef' (ctxDrawingCache ctx) $ \dc ->
+    dc {dcsPopupConfigs = IM.empty}
 
 data DrawFitCache = DrawFitCache
   { dfcDw :: {-# UNPACK #-} !Double
@@ -487,18 +590,21 @@ data DrawFitCache = DrawFitCache
 {-# INLINE registerDrawing #-}
 registerDrawing :: Context -> WidgetId -> DrawingBuild -> IO ()
 registerDrawing ctx wid build =
-  modifyIORef' (ctxDrawings ctx) (IM.insert (intKey wid) build)
+  modifyIORef' (ctxDrawingCache ctx) $ \dc ->
+    dc {dcsDrawings = IM.insert (intKey wid) build (dcsDrawings dc)}
 
 {-# INLINE lookupDrawing #-}
 lookupDrawing :: Context -> WidgetId -> IO (Maybe DrawingBuild)
-lookupDrawing ctx wid = IM.lookup (intKey wid) <$> readIORef (ctxDrawings ctx)
+lookupDrawing ctx wid = do
+  dc <- readIORef (ctxDrawingCache ctx)
+  pure (IM.lookup (intKey wid) (dcsDrawings dc))
 
 -- | Rebuild draw ops when width or height change. A move only translates.
 cachedDrawingOps :: Context -> WidgetId -> Rect -> DrawingBuild -> IO (Vector DrawOp)
 cachedDrawingOps ctx wid rect build = do
   let k = intKey wid
-  cache <- readIORef (ctxDrawOpCache ctx)
-  case IM.lookup k cache of
+  dc <- readIORef (ctxDrawingCache ctx)
+  case IM.lookup k (dcsDrawOpCache dc) of
     Just (r, ops)
       | rectW r == rectW rect && rectH r == rectH rect ->
           if rectX r == rectX rect && rectY r == rectY rect
@@ -508,11 +614,13 @@ cachedDrawingOps ctx wid rect build = do
                     V.map
                       (shiftDrawOp (rectX rect - rectX r) (rectY rect - rectY r))
                       ops
-              modifyIORef' (ctxDrawOpCache ctx) (IM.insert k (rect, ops'))
+              modifyIORef' (ctxDrawingCache ctx) $ \s ->
+                s {dcsDrawOpCache = IM.insert k (rect, ops') (dcsDrawOpCache s)}
               pure ops'
     _ -> do
       let ops = build rect
-      modifyIORef' (ctxDrawOpCache ctx) (IM.insert k (rect, ops))
+      modifyIORef' (ctxDrawingCache ctx) $ \s ->
+        s {dcsDrawOpCache = IM.insert k (rect, ops) (dcsDrawOpCache s)}
       pure ops
 
 -- | Reuse a derived layout while envelope, font, content key, and caller layout match.
@@ -528,8 +636,8 @@ cachedWidgetLayout ::
   IO Layout
 cachedWidgetLayout ctx wid dw dh lh content incoming compute = do
   let k = intKey wid
-  cache <- readIORef (ctxDrawFitCache ctx)
-  case IM.lookup k cache of
+  dc <- readIORef (ctxDrawingCache ctx)
+  case IM.lookup k (dcsDrawFitCache dc) of
     Just e
       | dfcDw e == dw
           && dfcDh e == dh
@@ -539,21 +647,45 @@ cachedWidgetLayout ctx wid dw dh lh content incoming compute = do
           pure (dfcOut e)
     _ -> do
       out <- compute
-      modifyIORef'
-        (ctxDrawFitCache ctx)
-        (IM.insert k (DrawFitCache dw dh lh content incoming out))
+      modifyIORef' (ctxDrawingCache ctx) $ \s ->
+        s {dcsDrawFitCache = IM.insert k (DrawFitCache dw dh lh content incoming out) (dcsDrawFitCache s)}
       pure out
 
 -- | Drop cached ops for drawings that did not rebuild this frame.
 pruneDrawOpCache :: Context -> IO ()
-pruneDrawOpCache ctx = do
-  live <- readIORef (ctxDrawings ctx)
-  modifyIORef' (ctxDrawOpCache ctx) (`IM.intersection` live)
-  modifyIORef' (ctxDrawFitCache ctx) (`IM.intersection` live)
+pruneDrawOpCache ctx =
+  modifyIORef' (ctxDrawingCache ctx) $ \dc ->
+    let live = dcsDrawings dc
+     in dc
+          { dcsDrawOpCache = dcsDrawOpCache dc `IM.intersection` live
+          , dcsDrawFitCache = dcsDrawFitCache dc `IM.intersection` live
+          }
 
 {-# INLINE clearDrawings #-}
 clearDrawings :: Context -> IO ()
-clearDrawings ctx = writeIORef (ctxDrawings ctx) IM.empty
+clearDrawings ctx =
+  modifyIORef' (ctxDrawingCache ctx) $ \dc ->
+    dc {dcsDrawings = IM.empty}
+
+{-# INLINE getWidgetNodeTypes #-}
+getWidgetNodeTypes :: Context -> IO (Maybe (IntMap NodeType))
+getWidgetNodeTypes ctx = dcsWidgetNodeTypes <$> readIORef (ctxDrawingCache ctx)
+
+{-# INLINE setWidgetNodeTypes #-}
+setWidgetNodeTypes :: Context -> Maybe (IntMap NodeType) -> IO ()
+setWidgetNodeTypes ctx m =
+  modifyIORef' (ctxDrawingCache ctx) $ \dc ->
+    dc {dcsWidgetNodeTypes = m}
+
+{-# INLINE resetDrawingScopeCache #-}
+resetDrawingScopeCache :: Context -> IO ()
+resetDrawingScopeCache ctx =
+  modifyIORef' (ctxDrawingCache ctx) $ \dc ->
+    dc
+      { dcsDrawings = IM.empty
+      , dcsPopupConfigs = IM.empty
+      , dcsWidgetNodeTypes = Nothing
+      }
 
 {-# INLINE getStore #-}
 getStore :: Context -> IO WidgetStore
@@ -566,22 +698,25 @@ setStore ctx store = do
   writeIORef (ctxStore ctx) store
   when (prev /= store) $ do
     let changedKeys =
-          IM.keys (storeChangeKeys (storeInt prev) (storeInt store))
-            ++ IM.keys (storeChangeKeys (storeFloat prev) (storeFloat store))
-            ++ IM.keys (storeChangeKeys (storePoint prev) (storePoint store))
-            ++ IM.keys (storeChangeKeys (storeText prev) (storeText store))
-            ++ IM.keys (storeChangeKeys (storeFloatList prev) (storeFloatList store))
-            ++ IM.keys (storeChangeKeys (storeIntSet prev) (storeIntSet store))
+          diffKeys (storeInt prev) (storeInt store)
+            ++ diffKeys (storeFloat prev) (storeFloat store)
+            ++ diffKeys (storePoint prev) (storePoint store)
+            ++ diffKeys (storeText prev) (storeText store)
+            ++ diffKeys (storeFloatList prev) (storeFloatList store)
+            ++ diffKeys (storeIntSet prev) (storeIntSet store)
     forM_ changedKeys $ \k -> damageKey ctx k (DamageInflated defaultDamageSlop)
     markDirty ctx
 
-storeChangeKeys :: Eq a => IntMap a -> IntMap a -> IntMap ()
-storeChangeKeys old new =
-  IM.fromList
-    [ (k, ())
-    | k <- IM.keys (IM.union old new)
-    , IM.lookup k old /= IM.lookup k new
-    ]
+diffKeys :: Eq a => IntMap a -> IntMap a -> [Int]
+diffKeys old new =
+  IM.keys
+    ( IM.mergeWithKey
+        (\_ a b -> if a == b then Nothing else Just ())
+        (IM.map (const ()))
+        (IM.map (const ()))
+        old
+        new
+    )
 
 {-# INLINE isDisabled #-}
 isDisabled :: Context -> WidgetId -> IO Bool
@@ -726,10 +861,24 @@ setScrollContentExtent ctx wid w h = do
   when (prev /= Just next) $
     setStore ctx (store {storePoint = IM.insert key next (storePoint store)})
 
+{-# INLINE getPrevRects #-}
+getPrevRects :: Context -> IO (IntMap Rect)
+getPrevRects ctx = dsPrevRects <$> readIORef (ctxDamageState ctx)
+
+{-# INLINE getPrevClips #-}
+getPrevClips :: Context -> IO (IntMap Rect)
+getPrevClips ctx = dsPrevClips <$> readIORef (ctxDamageState ctx)
+
+{-# INLINE setPrevRectsAndClips #-}
+setPrevRectsAndClips :: Context -> IntMap Rect -> IntMap Rect -> IO ()
+setPrevRectsAndClips ctx rects clips =
+  modifyIORef' (ctxDamageState ctx) $ \ds ->
+    ds {dsPrevRects = rects, dsPrevClips = clips}
+
 {-# INLINE getPrevRectByKey #-}
 getPrevRectByKey :: Context -> Int -> IO (Maybe Rect)
 getPrevRectByKey ctx k = do
-  m <- readIORef (ctxPrevRects ctx)
+  m <- dsPrevRects <$> readIORef (ctxDamageState ctx)
   pure (IM.lookup k m)
 
 {-# INLINE getPrevRect #-}
@@ -739,7 +888,7 @@ getPrevRect ctx wid = getPrevRectByKey ctx (intKey wid)
 {-# INLINE getPrevClipRectByKey #-}
 getPrevClipRectByKey :: Context -> Int -> IO (Maybe Rect)
 getPrevClipRectByKey ctx k = do
-  m <- readIORef (ctxPrevClips ctx)
+  m <- dsPrevClips <$> readIORef (ctxDamageState ctx)
   pure (IM.lookup k m)
 
 {-# INLINE getPrevClipRect #-}
@@ -748,9 +897,9 @@ getPrevClipRect ctx wid = getPrevClipRectByKey ctx (intKey wid)
 
 {-# INLINE setPrevRect #-}
 setPrevRect :: Context -> WidgetId -> Rect -> IO ()
-setPrevRect ctx wid r = do
-  m <- readIORef (ctxPrevRects ctx)
-  writeIORef (ctxPrevRects ctx) (IM.insert (intKey wid) r m)
+setPrevRect ctx wid r =
+  modifyIORef' (ctxDamageState ctx) $ \ds ->
+    ds {dsPrevRects = IM.insert (intKey wid) r (dsPrevRects ds)}
 
 {-# INLINE registerImage #-}
 registerImage :: Context -> ImageId -> Int -> Int -> ByteString -> IO Bool
@@ -881,18 +1030,11 @@ newContext = do
   ctxClickedId <- newIORef (WidgetId 0)
   ctxReleaseClickedId <- newIORef (WidgetId 0)
   ctxFocusId <- newIORef (WidgetId 0)
-  ctxPrevRects <- newIORef IM.empty
-  ctxPrevClips <- newIORef IM.empty
-  ctxPrevNodeTexts <- newIORef IM.empty
   ctxStore <- newIORef emptyWidgetStore
-  ctxAnimations <- newIORef IM.empty
-  ctxAnimRest <- newIORef IM.empty
-  ctxAnyAnimating <- newIORef False
-  ctxAnimSettled <- newIORef False
-  ctxDirty <- newIORef True
-  ctxDamage <- newIORef DamageFull
-  ctxDamageRequests <- newIORef []
-  ctxLastWindowSize <- newIORef (Size 0 0)
+  ctxDamageState <- newIORef initialDamageState
+  ctxOverlayState <- newIORef initialOverlayState
+  ctxAnimationState <- newIORef initialAnimationState
+  ctxDrawingCache <- newIORef initialDrawingCacheState
   ctxIdContext <- newIORef initialIdContext
   ctxContainerStack <- newIORef []
   ctxMessages <- newIORef []
@@ -906,26 +1048,11 @@ newContext = do
   ctxTextInputDrag <- newIORef Nothing
   ctxTextFieldClickCell <- newIORef Nothing
   ctxTextInputMenu <- newIORef Nothing
-  ctxPopupConfigs <- newIORef IM.empty
-  ctxDrawings <- newIORef IM.empty
-  ctxDrawOpCache <- newIORef IM.empty
-  ctxDrawFitCache <- newIORef IM.empty
-  ctxWidgetNodeTypes <- newIORef Nothing
   ctxSelectDropPress <- newIORef False
   ctxOpenSelectDrop <- newIORef Nothing
   ctxMenuPointerGesture <- newIORef False
-  ctxModalWasActive <- newIORef False
-  ctxModalActive <- newIORef False
-  ctxModalDepth <- newIORef 0
-  ctxEscapeConsumed <- newIORef False
   ctxWindowDrag <- newIORef Nothing
   ctxWindowResize <- newIORef Nothing
-  ctxPrevFloatingRects <- newIORef IM.empty
-  ctxPrevFloatingOrder <- newIORef []
-  ctxOverlayTopmostCache <- newIORef Nothing
-  ctxCurrentFloatingId <- newIORef Nothing
-  ctxLastPointerBlocked <- newIORef False
-  ctxFloatingAncestor <- newIORef Nothing
   ctxImageAtlas <- Atlas.newImageAtlas
   ctxWakeLoop <- newIORef Nothing
   ctxHost <- newIORef Map.empty
@@ -939,18 +1066,11 @@ newContext = do
     , ctxClickedId
     , ctxReleaseClickedId
     , ctxFocusId
-    , ctxPrevRects
-    , ctxPrevClips
-    , ctxPrevNodeTexts
     , ctxStore
-    , ctxAnimations
-    , ctxAnimRest
-    , ctxAnyAnimating
-    , ctxAnimSettled
-    , ctxDirty
-    , ctxDamage
-    , ctxDamageRequests
-    , ctxLastWindowSize
+    , ctxDamageState
+    , ctxOverlayState
+    , ctxAnimationState
+    , ctxDrawingCache
     , ctxIdContext
     , ctxFontMetrics = fm0
     , ctxMonoFontMetrics = fm0
@@ -972,26 +1092,11 @@ newContext = do
     , ctxTextInputMenu
     , ctxClipboardGet = pure Nothing
     , ctxClipboardSet = \_ -> pure False
-    , ctxPopupConfigs
-    , ctxDrawings
-    , ctxDrawOpCache
-    , ctxDrawFitCache
-    , ctxWidgetNodeTypes
     , ctxSelectDropPress
     , ctxOpenSelectDrop
     , ctxMenuPointerGesture
-    , ctxModalWasActive
-    , ctxModalActive
-    , ctxModalDepth
-    , ctxEscapeConsumed
     , ctxWindowDrag
     , ctxWindowResize
-    , ctxPrevFloatingRects
-    , ctxPrevFloatingOrder
-    , ctxOverlayTopmostCache
-    , ctxCurrentFloatingId
-    , ctxLastPointerBlocked
-    , ctxFloatingAncestor
     , ctxImageAtlas
     , ctxWakeLoop
     , ctxHost
@@ -1062,23 +1167,29 @@ textInputEditActive ctx = do
 
 modalActive :: Context -> IO Bool
 modalActive ctx = do
-  was <- readIORef (ctxModalWasActive ctx)
-  now <- readIORef (ctxModalActive ctx)
-  pure (was || now)
+  os <- readIORef (ctxOverlayState ctx)
+  pure (osModalWasActive os || osModalActive os)
 
 overlayConsumesQuit :: Context -> Input -> IO Bool
 overlayConsumesQuit ctx inp = do
-  consumed <- readIORef (ctxEscapeConsumed ctx)
+  os <- readIORef (ctxOverlayState ctx)
   let esc = inputKeysElem KeyEscape (inputKeys inp)
-  pure (esc && consumed)
+  pure (esc && osEscapeConsumed os)
 
 markEscapeConsumed :: Context -> IO ()
-markEscapeConsumed ctx = writeIORef (ctxEscapeConsumed ctx) True
+markEscapeConsumed ctx =
+  modifyIORef' (ctxOverlayState ctx) $ \os ->
+    os {osEscapeConsumed = True}
+
+resetEscapeConsumed :: Context -> IO ()
+resetEscapeConsumed ctx =
+  modifyIORef' (ctxOverlayState ctx) $ \os ->
+    os {osEscapeConsumed = False}
 
 pointerBlockedByModal :: Context -> IO Bool
 pointerBlockedByModal ctx = do
-  depth <- readIORef (ctxModalDepth ctx)
-  if depth > 0 then pure False else modalActive ctx
+  os <- readIORef (ctxOverlayState ctx)
+  if osModalDepth os > 0 then pure False else pure (osModalWasActive os || osModalActive os)
 
 pointerBlockedByOverlay :: Context -> V2 -> IO Bool
 pointerBlockedByOverlay ctx mouse = do
@@ -1099,9 +1210,10 @@ pointerBlockedByOverlay ctx mouse = do
                 case mTop of
                   Nothing -> pure False
                   Just top -> do
-                    mCur <- readIORef (ctxCurrentFloatingId ctx)
+                    mCur <- getCurrentFloatingId ctx
                     pure (mCur /= Just top)
-  writeIORef (ctxLastPointerBlocked ctx) blocked
+  modifyIORef' (ctxOverlayState ctx) $ \os ->
+    os {osLastPointerBlocked = blocked}
   pure blocked
 
 menuPointerGestureActive :: Context -> IO Bool
@@ -1132,18 +1244,20 @@ overlayMenuBlocksPointer ctx mouse = do
 
 cachedTopmost :: Context -> V2 -> IO (Maybe WidgetId)
 cachedTopmost ctx mouse = do
-  cache <- readIORef (ctxOverlayTopmostCache ctx)
+  cache <- osTopmostCache <$> readIORef (ctxOverlayState ctx)
   case cache of
     Just (p, t) | p == mouse -> pure t
     _ -> do
       t <- topmostFloatingAtMouse ctx mouse
-      writeIORef (ctxOverlayTopmostCache ctx) (Just (mouse, t))
+      modifyIORef' (ctxOverlayState ctx) $ \os ->
+        os {osTopmostCache = Just (mouse, t)}
       pure t
 
 topmostFloatingAtMouse :: Context -> V2 -> IO (Maybe WidgetId)
 topmostFloatingAtMouse ctx mouse = do
-  rects <- readIORef (ctxPrevFloatingRects ctx)
-  order <- readIORef (ctxPrevFloatingOrder ctx)
+  os <- readIORef (ctxOverlayState ctx)
+  let rects = osPrevFloatingRects os
+      order = osPrevFloatingOrder os
   if IM.null rects && null order
     then pure Nothing
     else
@@ -1160,51 +1274,104 @@ seedFloatingPanel ctx wid rect
   | rectW rect <= 0 || rectH rect <= 0 = pure ()
   | otherwise = do
       let k = intKey wid
-      rects <- readIORef (ctxPrevFloatingRects ctx)
-      writeIORef (ctxPrevFloatingRects ctx) (IM.insert k rect rects)
-      order <- readIORef (ctxPrevFloatingOrder ctx)
-      writeIORef (ctxPrevFloatingOrder ctx) (filter (/= k) order ++ [k])
-      writeIORef (ctxOverlayTopmostCache ctx) Nothing
+      modifyIORef' (ctxOverlayState ctx) $ \os ->
+        let rects = IM.insert k rect (osPrevFloatingRects os)
+            order = filter (/= k) (osPrevFloatingOrder os) ++ [k]
+         in os
+              { osPrevFloatingRects = rects
+              , osPrevFloatingOrder = order
+              , osTopmostCache = Nothing
+              }
 
 beginModal :: Context -> IO ()
-beginModal ctx = do
-  writeIORef (ctxModalActive ctx) True
-  depth <- readIORef (ctxModalDepth ctx)
-  writeIORef (ctxModalDepth ctx) (depth + 1)
+beginModal ctx =
+  modifyIORef' (ctxOverlayState ctx) $ \os ->
+    os {osModalActive = True, osModalDepth = osModalDepth os + 1}
 
 endModal :: Context -> IO ()
-endModal ctx = do
-  depth <- readIORef (ctxModalDepth ctx)
-  writeIORef (ctxModalDepth ctx) (max 0 (depth - 1))
+endModal ctx =
+  modifyIORef' (ctxOverlayState ctx) $ \os ->
+    os {osModalDepth = max 0 (osModalDepth os - 1)}
 
 beginFrameModal :: Context -> IO ()
-beginFrameModal ctx = do
-  modalNow <- readIORef (ctxModalActive ctx)
-  writeIORef (ctxModalWasActive ctx) modalNow
-  writeIORef (ctxModalActive ctx) False
-  writeIORef (ctxModalDepth ctx) 0
-  writeIORef (ctxOverlayTopmostCache ctx) Nothing
-  writeIORef (ctxCurrentFloatingId ctx) Nothing
-  writeIORef (ctxLastPointerBlocked ctx) False
+beginFrameModal ctx =
+  modifyIORef' (ctxOverlayState ctx) $ \os ->
+    os
+      { osModalWasActive = osModalActive os
+      , osModalActive = False
+      , osModalDepth = 0
+      , osTopmostCache = Nothing
+      , osCurrentFloatingId = Nothing
+      , osLastPointerBlocked = False
+      , osEscapeConsumed = False
+      }
 
 modalDamageFlip :: Context -> IO Bool
 modalDamageFlip ctx = do
-  was <- readIORef (ctxModalWasActive ctx)
-  now <- readIORef (ctxModalActive ctx)
-  pure (was /= now)
+  os <- readIORef (ctxOverlayState ctx)
+  pure (osModalWasActive os /= osModalActive os)
+
+{-# INLINE getCurrentFloatingId #-}
+getCurrentFloatingId :: Context -> IO (Maybe WidgetId)
+getCurrentFloatingId ctx = osCurrentFloatingId <$> readIORef (ctxOverlayState ctx)
+
+{-# INLINE setCurrentFloatingId #-}
+setCurrentFloatingId :: Context -> Maybe WidgetId -> IO ()
+setCurrentFloatingId ctx m =
+  modifyIORef' (ctxOverlayState ctx) $ \os ->
+    os {osCurrentFloatingId = m}
+
+{-# INLINE getLastPointerBlocked #-}
+getLastPointerBlocked :: Context -> IO Bool
+getLastPointerBlocked ctx = osLastPointerBlocked <$> readIORef (ctxOverlayState ctx)
+
+{-# INLINE getPrevFloatingRects #-}
+getPrevFloatingRects :: Context -> IO (IntMap Rect)
+getPrevFloatingRects ctx = osPrevFloatingRects <$> readIORef (ctxOverlayState ctx)
+
+{-# INLINE setPrevFloatingPanels #-}
+setPrevFloatingPanels :: Context -> IntMap Rect -> [Int] -> IO ()
+setPrevFloatingPanels ctx rects order =
+  modifyIORef' (ctxOverlayState ctx) $ \os ->
+    os {osPrevFloatingRects = rects, osPrevFloatingOrder = order}
+
+{-# INLINE getFloatingAncestor #-}
+getFloatingAncestor :: Context -> IO (Maybe (IntMap (Maybe NodeType)))
+getFloatingAncestor ctx = osFloatingAncestor <$> readIORef (ctxOverlayState ctx)
+
+{-# INLINE setFloatingAncestor #-}
+setFloatingAncestor :: Context -> Maybe (IntMap (Maybe NodeType)) -> IO ()
+setFloatingAncestor ctx m =
+  modifyIORef' (ctxOverlayState ctx) $ \os ->
+    os {osFloatingAncestor = m}
 
 -- =============================================================================
 -- Animation
 -- =============================================================================
 
-refreshAnimating :: Context -> IO ()
-refreshAnimating ctx = do
-  anims <- readIORef (ctxAnimations ctx)
-  writeIORef (ctxAnyAnimating ctx) (any animInProgress anims)
-
 {-# INLINE anyAnimating #-}
 anyAnimating :: Context -> IO Bool
-anyAnimating ctx = readIORef (ctxAnyAnimating ctx)
+anyAnimating ctx = asAnyAnimating <$> readIORef (ctxAnimationState ctx)
+
+{-# INLINE getLiveAnimations #-}
+getLiveAnimations :: Context -> IO (IntMap Animation)
+getLiveAnimations ctx = IM.filter animInProgress . asAnimations <$> readIORef (ctxAnimationState ctx)
+
+{-# INLINE takeAnimSettled #-}
+takeAnimSettled :: Context -> IO Bool
+takeAnimSettled ctx = do
+  as <- readIORef (ctxAnimationState ctx)
+  if asAnimSettled as
+    then do
+      writeIORef (ctxAnimationState ctx) (as {asAnimSettled = False})
+      pure True
+    else pure False
+
+{-# INLINE lookupAnimation #-}
+lookupAnimation :: Context -> WidgetId -> IO (Maybe Animation)
+lookupAnimation ctx wid = do
+  as <- readIORef (ctxAnimationState ctx)
+  pure (IM.lookup (intKey wid) (asAnimations as))
 
 {-# INLINE startAnimation #-}
 startAnimation :: Context -> WidgetId -> Float -> Float -> Float -> IO ()
@@ -1218,41 +1385,43 @@ startAnimationEase ctx wid start end dur ease = startAnimationEaseDelay ctx wid 
 startAnimationEaseDelay :: Context -> WidgetId -> Float -> Float -> Float -> Ease -> Float -> IO ()
 startAnimationEaseDelay ctx wid start end dur ease delay = do
   let key = intKey wid
-  anims <- readIORef (ctxAnimations ctx)
+  as <- readIORef (ctxAnimationState ctx)
   if dur <= 0 || approxEq start end
     then settleKey ctx key end
     else do
       let req = max 0 delay
-          (elapsed, delayLeft) = case IM.lookup key anims of
+          (elapsed, delayLeft) = case IM.lookup key (asAnimations as) of
             Just (EaseAnim aStart aEnd aDur aElapsed aEase aDelay aDelayReq)
               | approxEq aStart start && approxEq aEnd end && aEase == ease && approxEq aDur dur && approxEq req aDelayReq ->
                   (aElapsed, aDelay)
             _ -> (0, req)
-      rest <- readIORef (ctxAnimRest ctx)
-      writeIORef (ctxAnimRest ctx) (IM.delete key rest)
-      writeIORef (ctxAnimations ctx) (IM.insert key (EaseAnim start end dur elapsed ease delayLeft req) anims)
-      writeIORef (ctxAnyAnimating ctx) True
+      modifyIORef' (ctxAnimationState ctx) $ \s ->
+        s
+          { asAnimRest = IM.delete key (asAnimRest s)
+          , asAnimations = IM.insert key (EaseAnim start end dur elapsed ease delayLeft req) (asAnimations s)
+          , asAnyAnimating = True
+          }
       markDirtyIfOrphan ctx key
 
 startSpring :: Context -> WidgetId -> SpringParams -> Float -> IO ()
 startSpring ctx wid params target = do
   let key = intKey wid
-  anims <- readIORef (ctxAnimations ctx)
-  cur <- case IM.lookup key anims of
+  as <- readIORef (ctxAnimationState ctx)
+  cur <- case IM.lookup key (asAnimations as) of
     Just a -> pure (animationValue a)
-    Nothing -> do
-      rest <- readIORef (ctxAnimRest ctx)
-      pure (IM.findWithDefault 0 key rest)
-  let (pos, vel) = case IM.lookup key anims of
+    Nothing -> pure (IM.findWithDefault 0 key (asAnimRest as))
+  let (pos, vel) = case IM.lookup key (asAnimations as) of
         Just (SpringAnim p v _ _) -> (p, v)
         _ -> (cur, 0)
   if abs (pos - target) <= springEps && abs vel <= springEps
     then settleKey ctx key target
     else do
-      rest <- readIORef (ctxAnimRest ctx)
-      writeIORef (ctxAnimRest ctx) (IM.delete key rest)
-      writeIORef (ctxAnimations ctx) (IM.insert key (SpringAnim pos vel target params) anims)
-      writeIORef (ctxAnyAnimating ctx) True
+      modifyIORef' (ctxAnimationState ctx) $ \s ->
+        s
+          { asAnimRest = IM.delete key (asAnimRest s)
+          , asAnimations = IM.insert key (SpringAnim pos vel target params) (asAnimations s)
+          , asAnyAnimating = True
+          }
       markDirtyIfOrphan ctx key
 
 {-# INLINE setAnimationValue #-}
@@ -1261,20 +1430,20 @@ setAnimationValue ctx wid val = settleKey ctx (intKey wid) val
 
 {-# INLINE tickAnimations #-}
 tickAnimations :: Context -> Float -> IO ()
-tickAnimations ctx dt = do
-  anims <- readIORef (ctxAnimations ctx)
-  if IM.null anims
-    then do
-      writeIORef (ctxAnyAnimating ctx) False
-      writeIORef (ctxAnimSettled ctx) False
-    else do
-      let stepped = IM.map (stepAnim dt) anims
-          (live, done) = IM.partition animInProgress stepped
-      writeIORef (ctxAnimations ctx) live
-      rest <- readIORef (ctxAnimRest ctx)
-      writeIORef (ctxAnimRest ctx) (IM.foldlWithKey' writeRest rest done)
-      writeIORef (ctxAnyAnimating ctx) (not (IM.null live))
-      writeIORef (ctxAnimSettled ctx) (not (IM.null done))
+tickAnimations ctx dt =
+  modifyIORef' (ctxAnimationState ctx) $ \as ->
+    if IM.null (asAnimations as)
+      then as {asAnyAnimating = False, asAnimSettled = False}
+      else
+        let stepped = IM.map (stepAnim dt) (asAnimations as)
+            (live, done) = IM.partition animInProgress stepped
+            rest' = IM.foldlWithKey' writeRest (asAnimRest as) done
+         in as
+              { asAnimations = live
+              , asAnimRest = rest'
+              , asAnyAnimating = not (IM.null live)
+              , asAnimSettled = not (IM.null done)
+              }
 
 markDirtyIfOrphan :: Context -> Int -> IO ()
 markDirtyIfOrphan ctx key = do
@@ -1293,27 +1462,29 @@ nodeHasKey ctx key = do
 
 settleKey :: Context -> Int -> Float -> IO ()
 settleKey ctx key val = do
-  anims <- readIORef (ctxAnimations ctx)
-  rest <- readIORef (ctxAnimRest ctx)
-  let prevRest = IM.findWithDefault 0 key rest
-      prevLive = fmap animationValue (IM.lookup key anims)
+  as <- readIORef (ctxAnimationState ctx)
+  let prevRest = IM.findWithDefault 0 key (asAnimRest as)
+      prevLive = fmap animationValue (IM.lookup key (asAnimations as))
       changed = case prevLive of
         Just v -> not (approxEq v val)
         Nothing -> not (approxEq prevRest val)
-  writeIORef (ctxAnimations ctx) (IM.delete key anims)
-  writeIORef (ctxAnimRest ctx) (if approxEq val 0 then IM.delete key rest else IM.insert key val rest)
+      anims' = IM.delete key (asAnimations as)
+      rest' = if approxEq val 0 then IM.delete key (asAnimRest as) else IM.insert key val (asAnimRest as)
+  writeIORef (ctxAnimationState ctx) $
+    as
+      { asAnimations = anims'
+      , asAnimRest = rest'
+      , asAnyAnimating = any animInProgress anims'
+      }
   when changed $ do
     damageKey ctx key (DamageInflated defaultDamageSlop)
     markDirty ctx
-  refreshAnimating ctx
 
 {-# INLINE getAnimationValue #-}
 getAnimationValue :: Context -> WidgetId -> IO Float
 getAnimationValue ctx wid = do
   let key = intKey wid
-  anims <- readIORef (ctxAnimations ctx)
-  case IM.lookup key anims of
+  as <- readIORef (ctxAnimationState ctx)
+  case IM.lookup key (asAnimations as) of
     Just a -> pure (animationValue a)
-    Nothing -> do
-      rest <- readIORef (ctxAnimRest ctx)
-      pure (IM.findWithDefault 0 key rest)
+    Nothing -> pure (IM.findWithDefault 0 key (asAnimRest as))

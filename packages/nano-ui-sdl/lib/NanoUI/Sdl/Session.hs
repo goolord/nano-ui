@@ -6,28 +6,25 @@ module NanoUI.Sdl.Session
   ) where
 
 import Control.Exception (bracket)
-import Control.Monad (void, when)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import Data.Primitive.SmallArray (SmallArray, emptySmallArray, sizeofSmallArray)
-import GHC.Clock (getMonotonicTime)
+import Control.Monad (void)
+import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.Primitive.SmallArray (sizeofSmallArray)
 import NanoUI
   ( Input (..)
   , V2 (..)
   , emptyInput
-  , inputInteracted
   , inputMousePressed
   , inputMouseReleased
   , inputMouseRightPressed
   , inputMouseRightReleased
+  , inputScroll
   , inputWindowSize
   )
 import NanoUI.Debug (debugRefreshSec)
 import NanoUI.Runner
-  ( DrawingLock
-  , checkHardQuit
-  , checkSessionQuit
+  ( SessionDriver (..)
   , newDrawingLock
-  , stepDeltaTime
+  , runSessionLoop
   , tryWithDrawingLock
   )
 import NanoUI.Testing
@@ -38,7 +35,6 @@ import NanoUI.Testing
   , isDirty
   , needsRedraw
   , textFieldActive
-  , textInputEditActive
   )
 import NanoUI.Sdl.Debug (isDebugActive, noteLoop, noteSkip, takeDebugLive)
 import NanoUI.Sdl.Cursor (syncPointerCursor)
@@ -46,9 +42,9 @@ import NanoUI.Sdl.Input
   ( SdlEvent (..)
   , applyEvent
   , clearEphemeral
+  , isButtonEdge
   , isHardQuit
   , pollEvents
-  , splitFrame
   , waitEvent
   , waitEventTimeout
   )
@@ -77,14 +73,9 @@ runSdlSession options ctx setup shouldQuit drawFn =
     void $ setRenderDrawBlendModeSafe (sdlRenderer env) (fromIntegral sDL_BLENDMODE_BLEND)
     ctxRef <- newIORef ctx0
     prev <- newIORef emptyInput
-    pendingRedraw <- newIORef False
-    wasAnimating <- newIORef False
     drawing <- newDrawingLock
     startupDone <- newIORef False
     startupCatchup <- newIORef False
-    startupGrace <- newIORef (2 :: Int)
-    startupFull <- newIORef (2 :: Int)
-    firstPointerFull <- newIORef True
     let onResize = do
           void $
             tryWithDrawingLock drawing $ do
@@ -139,177 +130,66 @@ runSdlSession options ctx setup shouldQuit drawFn =
         else pure inp1
     writeIORef startupCatchup False
     writeIORef startupDone True
-    writeIORef pendingRedraw False
     writeIORef prev synced1
-    now <- getMonotonicTime
-    bracket (installResizeWatch onResize) id $ \_ ->
-      loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace startupFull firstPointerFull shouldQuit synced1 emptySmallArray now
-
-loop ::
-  IORef Context ->
-  (Context -> SdlEnv -> Input -> Bool -> IO (Bool, Input)) ->
-  SdlEnv ->
-  IORef Input ->
-  IORef Bool ->
-  IORef Bool ->
-  DrawingLock ->
-  IORef Int ->
-  IORef Int ->
-  IORef Bool ->
-  (Input -> Bool) ->
-  Input ->
-  SmallArray SdlEvent ->
-  Double ->
-  IO ()
-loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace startupFull firstPointerFull shouldQuit inp queued lastT = do
-  ctx <- readIORef ctxRef
-  debugWinOpen <- debugPanelOpen ctx
-  debugActive <- isDebugActive (sdlDebug env) debugWinOpen
-  wantDebug <- takeDebugLive (sdlDebug env) debugActive
-  pending <-
-    if sizeofSmallArray queued == 0
-      then do
-        polled <- pollEvents
-        if sizeofSmallArray polled /= 0
-          then pure polled
-          else do
-            animating <- anyAnimating ctx
-            editing <- textFieldActive ctx
-            wasAnimWait <- readIORef wasAnimating
-            nFullWait <- readIORef startupFull
-            pendingDirtyWait <- readIORef pendingRedraw
-            dirtyWait <- isDirty ctx
-            let continuous = sdlContinuous env
-            if continuous || wantDebug || animating || pendingDirtyWait || dirtyWait
-              then pure emptySmallArray
-              else
-                if wasAnimWait || nFullWait > 0 || editing
-                  then waitEventTimeout animateTimeout
-                  else
-                    if debugActive
-                      then waitEventTimeout debugHudTimeout
-                      else waitEvent
-      else pure queued
-  let (group, rest) = splitFrame pending
-  editActive <- textInputEditActive ctx
-  if any (== EvQuit) group || (any isHardQuit group && not editActive)
-    then pure ()
-    else do
-      (now, dt) <- stepDeltaTime lastT
-      noteLoop (sdlDebug env) dt
-      let inp' =
-            foldl'
-              applyEvent
-              (clearEphemeral inp {inputDeltaTime = dt})
-              group
-      (ctx', inpSynced) <- syncDisplay ctx env inp'
-      writeIORef ctxRef ctx'
-      hardQuit <- checkHardQuit ctx' inpSynced
-      if hardQuit
-        then pure ()
-        else do
-          prevInp <- readIORef prev
-          pendingDirty <- readIORef pendingRedraw
-          wasAnim <- readIORef wasAnimating
-          need <- needsRedraw ctx' prevInp inpSynced
-          dirtyNow <- isDirty ctx'
-          anim <- anyAnimating ctx'
-          editing <- textFieldActive ctx'
-          grace <- readIORef startupGrace
-          nFull <- readIORef startupFull
-          wantFirstFull <- readIORef firstPointerFull
-          let sizeChanged = inputWindowSize prevInp /= inputWindowSize inpSynced
-              interacted = inputInteracted prevInp inpSynced
-              displayScale = any (== EvDisplayScale) group
-              userEvent = any isUserPresentEvent group
-              firstUserFull = wantFirstFull && userEvent
-              pointerEdge =
-                inputMousePressed inpSynced
-                  || inputMouseReleased inpSynced
-                  || inputMouseRightPressed inpSynced
-                  || inputMouseRightReleased inpSynced
-              scrollEdge = inputScroll inpSynced /= V2 0 0
-              graceAllow =
-                grace <= 0 || sizeChanged || interacted || anim || editing || dirtyNow || pendingDirty || need || nFull > 0 || displayScale
-              forceFinal = wasAnim && not anim
-              shouldDraw =
-                sdlContinuous env
-                  || wantDebug
-                  || (graceAllow
-                      && ( need
-                             || anim
-                             || forceFinal
-                             || pendingDirty
-                             || dirtyNow
-                             || editing
-                             || nFull > 0
-                             || displayScale
-                             || firstUserFull
-                             || pointerEdge
-                             || scrollEdge
-                         ))
-          when (grace > 0) $ writeIORef startupGrace (grace - 1)
-          let runDraw = do
-                when firstUserFull $ writeIORef firstPointerFull False
-                (dirtyOut, s) <-
-                  drawFn
-                    ctx'
-                    env
-                    inpSynced
-                    (sdlContinuous env || nFull > 0 || displayScale || firstUserFull)
-                when (nFull > 0) $ writeIORef startupFull (nFull - 1)
-                writeIORef pendingRedraw dirtyOut
-                writeIORef prev s
-                pure s
-          synced <-
-            if shouldDraw
-              then do
-                ms <- tryWithDrawingLock drawing runDraw
+    let drv =
+          SessionDriver
+            { sdPollEvents    = foldr (:) [] <$> pollEvents
+            , sdWaitEvents    = \t ->
+                if t < 0
+                  then foldr (:) [] <$> waitEvent
+                  else foldr (:) [] <$> waitEventTimeout t
+            , sdApplyEvent    = applyEvent
+            , sdIsButtonEdge  = isButtonEdge
+            , sdIsHardQuit    = isHardQuit
+            , sdIsSessionQuit = (== EvQuit)
+            , sdSyncDisplay   = \c inp -> do
+                (c', inp') <- syncDisplay c env inp
+                writeIORef ctxRef c'
+                writeIORef prev inp'
+                pure (c', inp')
+            , sdWaitTimeout   = \c wasAnim -> do
+                debugWinOpen <- debugPanelOpen c
+                debugActive <- isDebugActive (sdlDebug env) debugWinOpen
+                wantDebug <- takeDebugLive (sdlDebug env) debugActive
+                animating <- anyAnimating c
+                editing <- textFieldActive c
+                dirtyWait <- isDirty c
+                if sdlContinuous env || wantDebug || animating || dirtyWait
+                  then pure 0
+                  else if wasAnim || editing
+                    then pure animateTimeout
+                    else if debugActive
+                      then pure debugHudTimeout
+                      else pure (-1)
+            , sdShouldDraw    = \c prevInp inpSynced wasAnim -> do
+                debugWinOpen <- debugPanelOpen c
+                debugActive <- isDebugActive (sdlDebug env) debugWinOpen
+                wantDebug <- takeDebugLive (sdlDebug env) debugActive
+                need <- needsRedraw c prevInp inpSynced
+                dirtyNow <- isDirty c
+                anim <- anyAnimating c
+                editing <- textFieldActive c
+                let forceFinal = wasAnim && not anim
+                    pointerEdge =
+                      inputMousePressed inpSynced
+                        || inputMouseReleased inpSynced
+                        || inputMouseRightPressed inpSynced
+                        || inputMouseRightReleased inpSynced
+                    scrollEdge = inputScroll inpSynced /= V2 0 0
+                pure (sdlContinuous env || wantDebug || need || anim || forceFinal || dirtyNow || editing || pointerEdge || scrollEdge)
+            , sdDraw          = \c inpSynced forceFull -> do
+                ms <- tryWithDrawingLock drawing (drawFn c env inpSynced (forceFull || sdlContinuous env))
                 case ms of
-                  Just s -> pure s
-                  Nothing
-                    | pointerEdge || scrollEdge -> runDraw
-                    | otherwise -> do
-                        syncPointerCursor (sdlCursors env) ctx' inpSynced
-                        pure inpSynced
-              else do
-                noteSkip (sdlDebug env)
-                syncPointerCursor (sdlCursors env) ctx' inpSynced
-                writeIORef prev inpSynced
-                pure inpSynced
-          animAfter <- anyAnimating ctx'
-          writeIORef wasAnimating (anim || animAfter)
-          shouldTerm <- checkSessionQuit ctx' shouldQuit inpSynced
-          if shouldTerm
-            then pure ()
-            else
-              loop
-                ctxRef
-                drawFn
-                env
-                prev
-                pendingRedraw
-                wasAnimating
-                drawing
-                startupGrace
-                startupFull
-                firstPointerFull
-                shouldQuit
-                synced
-                rest
-                now
-
-isUserPresentEvent :: SdlEvent -> Bool
-isUserPresentEvent ev =
-  case ev of
-    EvMouseMotion {} -> True
-    EvMousePress {} -> True
-    EvMouseRelease {} -> True
-    EvMouseRightPress {} -> True
-    EvMouseRightRelease {} -> True
-    EvDisplayScale -> True
-    EvResize {} -> True
-    EvKey {} -> True
-    EvText {} -> True
-    EvScroll {} -> True
-    _ -> False
+                  Just (dirtyOut, s) -> do
+                    writeIORef prev s
+                    pure (dirtyOut, s)
+                  Nothing -> pure (False, inpSynced)
+            , sdSkip          = \_ _ -> noteSkip (sdlDebug env)
+            , sdOnCursor      = \c inpSynced -> syncPointerCursor (sdlCursors env) c inpSynced
+            , sdNoteLoop      = noteLoop (sdlDebug env)
+            , sdShouldQuit    = shouldQuit
+            , sdClickDistance = 5.0
+            , sdClickTime     = 0.4
+            }
+    bracket (installResizeWatch onResize) id $ \_ ->
+      runSessionLoop drv ctx2 synced1

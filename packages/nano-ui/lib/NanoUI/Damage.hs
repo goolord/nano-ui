@@ -7,23 +7,28 @@ module NanoUI.Damage
   ) where
 
 import Control.Monad (forM, when)
-import Data.IORef (readIORef, writeIORef)
+import Data.IORef (readIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Maybe (catMaybes, fromMaybe, isJust, isNothing)
 import NanoUI.Context
   ( Context (..)
   , DamageRequest (..)
   , WidgetStore (..)
-  , animInProgress
-  , clearDamageRequests
   , getDamageRequests
+  , getHotId
+  , getLiveAnimations
   , getPrevRect
   , getPrevRectByKey
+  , getPrevRects
   , getStore
   , intKey
   , markDirty
+  , modalDamageFlip
+  , setDamageAndWindowSize
+  , setPrevFloatingPanels
+  , setPrevRectsAndClips
+  , takeAnimSettled
   )
-import NanoUI.Context (modalDamageFlip)
 import NanoUI.Store (mirrorStoresChanged)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input
@@ -133,14 +138,10 @@ updatePrevRects :: Context -> IO ()
 updatePrevRects ctx = do
   count <- arenaCount (ctxNodeArena ctx)
   if count <= 0
-    then do
-      writeIORef (ctxPrevRects ctx) IM.empty
-      writeIORef (ctxPrevClips ctx) IM.empty
+    then setPrevRectsAndClips ctx IM.empty IM.empty
     else do
       let go !i !m !cm
-            | i >= count = do
-                writeIORef (ctxPrevRects ctx) m
-                writeIORef (ctxPrevClips ctx) cm
+            | i >= count = setPrevRectsAndClips ctx m cm
             | otherwise = do
                 wid <- getWidgetId (ctxNodeArena ctx) i
                 if hashWidgetId wid == 0
@@ -202,11 +203,10 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
   newStore <- getStore ctx
   panels <- floatingPanelsInOrder ctx
   let newFloatingRects = IM.fromList panels
-  newRects <- readIORef (ctxPrevRects ctx)
+  newRects <- getPrevRects ctx
   modalFlip <- modalDamageFlip ctx
-  liveAnims <- IM.filter animInProgress <$> readIORef (ctxAnimations ctx)
-  settled <- readIORef (ctxAnimSettled ctx)
-  writeIORef (ctxAnimSettled ctx) False
+  liveAnims <- getLiveAnimations ctx
+  settled <- takeAnimSettled ctx
   orphanAnim <-
     fmap or $
       forM (IM.keys liveAnims) $ \k ->
@@ -266,7 +266,7 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
     if full
       then pure DamageFull
       else do
-        newHot <- readIORef (ctxHotId ctx)
+        newHot <- getHotId ctx
         newActive <- readIORef (ctxActiveId ctx)
         newFocus <- readIORef (ctxFocusId ctx)
         let ids = [oldHot, oldActive, oldFocus, newHot, newActive, newFocus]
@@ -336,11 +336,8 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
                  || (winArea > 0 && rectArea clip > winArea * 0.5)
               then pure DamageFull
               else pure (DamageClip clip)
-  writeIORef (ctxDamage ctx) dmg
-  writeIORef (ctxLastWindowSize ctx) (Size winW winH)
-  writeIORef (ctxPrevFloatingRects ctx) newFloatingRects
-  writeIORef (ctxPrevFloatingOrder ctx) (map fst panels)
-  clearDamageRequests ctx
+  setDamageAndWindowSize ctx dmg (Size winW winH)
+  setPrevFloatingPanels ctx newFloatingRects (map fst panels)
   when modalFlip (markDirty ctx)
   when (floatingChanged && not (IM.null oldFloatingRects && not (IM.null newFloatingRects))) $
     markDirty ctx

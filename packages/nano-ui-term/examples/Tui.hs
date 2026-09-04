@@ -3,7 +3,7 @@ module Main (main) where
 import Control.Monad (void, when)
 import NanoUI
 import NanoUI.Backend.Term
-import NanoUI.Debug (formatCoreRtsRows)
+import NanoUI.Debug (CoreDebugSnapshot (..), formatCoreRtsRows)
 import Data.Text (Text)
 import Text.Printf (printf)
 import qualified Data.Text as T
@@ -133,35 +133,37 @@ allDebugRows s =
 
 frameRows :: TermDebugSnapshot -> [(Text, Text)]
 frameRows s =
-  [ ("present", T.pack (printf "%.1f fps" (dbgPresentFps s)))
-  , ("loop", T.pack (printf "%.1f fps" (dbgLoopFps s)))
-  , ("frame", T.pack (printf "%.1f ms" (dbgFrameMs s)))
-  , ("ui", T.pack (printf "%.1f ms" (dbgUiMs s)))
-  , ("redraws", T.pack (printf "%d" (dbgRedraws s)))
-  , ("blits", T.pack (printf "%d" (dbgBlits s)))
-  , ("skips", T.pack (printf "%d" (dbgSkips s)))
-  ]
+  let c = dbgCore s
+   in [ ("present", T.pack (printf "%.1f fps" (dbgPresentFps c)))
+      , ("loop", T.pack (printf "%.1f fps" (dbgLoopFps c)))
+      , ("frame", T.pack (printf "%.1f ms" (dbgFrameMs c)))
+      , ("ui", T.pack (printf "%.1f ms" (dbgUiMs c)))
+      , ("redraws", T.pack (printf "%d" (dbgRedraws s)))
+      , ("blits", T.pack (printf "%d" (dbgBlits s)))
+      , ("skips", T.pack (printf "%d" (dbgSkips c)))
+      ]
 
 drawRows :: TermDebugSnapshot -> [(Text, Text)]
 drawRows s =
-  [ ("verts", T.pack (printf "%d" (dbgVerts s)))
-  , ("indices", T.pack (printf "%d" (dbgIndices s)))
-  , ("cmds", T.pack (printf "%d" (dbgCmds s)))
-  , ("nodes", T.pack (printf "%d" (dbgNodes s)))
-  , ("base spans", T.pack (printf "%d" (dbgBaseSpans s)))
-  , ("overlay spans", T.pack (printf "%d" (dbgOverlaySpans s)))
-  ]
+  let c = dbgCore s
+   in [ ("verts", T.pack (printf "%d" (dbgVerts c)))
+      , ("indices", T.pack (printf "%d" (dbgIndices c)))
+      , ("cmds", T.pack (printf "%d" (dbgCmds c)))
+      , ("nodes", T.pack (printf "%d" (dbgNodes s)))
+      , ("base spans", T.pack (printf "%d" (dbgBaseSpans s)))
+      , ("overlay spans", T.pack (printf "%d" (dbgOverlaySpans s)))
+      ]
 
 terminalRows :: TermDebugSnapshot -> [(Text, Text)]
 terminalRows s =
-  let (fr, fg, fb) = dbgThemeFg s
+  let c = dbgCore s
+      (fr, fg, fb) = dbgThemeFg s
       (br, bg, bb) = dbgThemeBg s
-   in
-    [ ("size", T.pack (printf "%.0fx%.0f" (dbgWinW s) (dbgWinH s)))
-    , ("mouse", T.pack (printf "%.0f, %.0f" (dbgMouseX s) (dbgMouseY s)))
-    , ("theme fg", T.pack (printf "%d,%d,%d" fr fg fb))
-    , ("theme bg", T.pack (printf "%d,%d,%d" br bg bb))
-    ]
+   in [ ("size", T.pack (printf "%.0fx%.0f" (dbgWinW c) (dbgWinH c)))
+      , ("mouse", T.pack (printf "%.0f, %.0f" (dbgMouseX c) (dbgMouseY c)))
+      , ("theme fg", T.pack (printf "%d,%d,%d" fr fg fb))
+      , ("theme bg", T.pack (printf "%d,%d,%d" br bg bb))
+      ]
 
 rtsRows :: TermDebugSnapshot -> [(Text, Text)]
 rtsRows s = formatCoreRtsRows (dbgCore s)

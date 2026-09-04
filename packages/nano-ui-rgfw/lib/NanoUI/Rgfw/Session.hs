@@ -7,8 +7,6 @@ module NanoUI.Rgfw.Session
   , runRgfwSession
   , runRgfwSessionReduce
   , runRgfwSessionReduceCustom
-  , detectWindowResizeEdge
-  , cursorIconForResizeEdge
   ) where
 
 import Control.Concurrent (threadDelay)
@@ -17,7 +15,7 @@ import Control.Monad (void, when)
 import Data.Bits ((.&.))
 import Data.Char (chr, isPrint, ord, toLower)
 import Data.IORef
-  ( modifyIORef'
+  ( IORef
   , newIORef
   , readIORef
   , writeIORef
@@ -26,21 +24,19 @@ import qualified Data.Text as T
 import Data.Typeable (Typeable)
 import qualified Data.Vector as V
 import Data.Word (Word8, Word32)
+import Foreign.Ptr (Ptr)
 import GHC.Clock (getMonotonicTime)
 import NanoUI
   ( Input (..)
   , Key (..)
   , Modifiers (..)
   , NanoUI
-  , Rect (..)
   , Size (..)
   , V2 (..)
   , emptyInput
   )
-import NanoUI.Input (clearEphemeral)
 import NanoUI.Context
   ( Context (..)
-  , WindowResizeEdge (..)
   , setHost
   , withClipboard
   , withFontMetrics
@@ -53,11 +49,8 @@ import NanoUI.Testing
   , uiCursorKind
   )
 import NanoUI.Runner
-  ( checkHardQuit
-  , checkSessionQuit
-  , newClickTracker
-  , stampClicks
-  , stepDeltaTime
+  ( SessionDriver (..)
+  , runSessionLoop
   )
 import NanoUI.Layout.Arena (arenaCount)
 import NanoUI.Rgfw.Debug
@@ -98,55 +91,6 @@ defaultRgfwOptions =
     , optCenter = True
     , optScale  = 0.0
     }
-
--- | Determines if a mouse coordinate falls on the resize handles/borders of a window.
-detectWindowResizeEdge :: Rect -> V2 -> Maybe WindowResizeEdge
-detectWindowResizeEdge (Rect wx wy ww wh) (V2 mx my) =
-  if mx >= wx + ww - 26.0 && mx <= wx + ww + 4.0 && my >= wy && my <= wy + 24.0
-    then Nothing
-    else
-      let !s = 8.0
-          !b = 6.0
-          !grip = 18.0
-          !inOuterHalo = mx >= wx - s && mx <= wx + ww + s && my >= wy - s && my <= wy + wh + s
-       in if not inOuterHalo
-            then Nothing
-            else
-              if mx >= wx + ww - grip && mx <= wx + ww + s && my >= wy + wh - grip && my <= wy + wh + s
-                then Just ResizeSE
-              else if mx >= wx - s && mx <= wx + grip && my >= wy + wh - grip && my <= wy + wh + s
-                then Just ResizeSW
-              else if (mx >= wx - s && mx <= wx + grip && my >= wy - s && my < wy)
-                      || (mx >= wx - s && mx < wx && my >= wy - s && my <= wy + grip)
-                then Just ResizeNW
-              else if mx >= wx + ww - grip && mx <= wx + ww + s && my >= wy - s && my < wy
-                then Just ResizeNE
-              else if mx >= wx && mx <= wx + ww && my >= wy + wh - b && my <= wy + wh + s
-                then Just ResizeS
-              else if mx >= wx + ww - b && mx <= wx + ww + s && my >= wy + 24.0 && my <= wy + wh
-                then Just ResizeE
-              else if mx >= wx - s && mx <= wx + b && my >= wy + b && my <= wy + wh
-                then Just ResizeW
-              else if mx >= wx && mx <= wx + ww && my >= wy - s && my < wy
-                then Just ResizeN
-              else if mx > wx + ww && mx <= wx + ww + s && my >= wy && my <= wy + wh
-                then Just ResizeE
-              else if mx >= wx - s && mx < wx && my >= wy && my <= wy + wh
-                then Just ResizeW
-              else if my > wy + wh && my <= wy + wh + s && mx >= wx && mx <= wx + ww
-                then Just ResizeS
-              else Nothing
-
-cursorIconForResizeEdge :: WindowResizeEdge -> Word8
-cursorIconForResizeEdge edge = case edge of
-  ResizeE  -> R.rgfw_mouseResizeEW
-  ResizeW  -> R.rgfw_mouseResizeEW
-  ResizeN  -> R.rgfw_mouseResizeNS
-  ResizeS  -> R.rgfw_mouseResizeNS
-  ResizeNW -> R.rgfw_mouseResizeNWSE
-  ResizeSE -> R.rgfw_mouseResizeNWSE
-  ResizeNE -> R.rgfw_mouseResizeNESW
-  ResizeSW -> R.rgfw_mouseResizeNESW
 
 mapRgfwKey :: Word32 -> Maybe Key
 mapRgfwKey k =
@@ -227,11 +171,9 @@ runRgfwSessionReduceCustom opts getThemeAndScale updateModel initialModel view =
       physSurf0 <- newRgfwSurface win initPhysW initPhysH
       physSurfRef <- newIORef physSurf0
 
-      runningRef <- newIORef True
       modelRef <- newIORef initialModel
       scaleRef <- newIORef initScale
       winSizeRef <- newIORef (initPhysW, initPhysH)
-      clickTracker <- newClickTracker
 
       clipRef <- newIORef ("" :: T.Text)
       let getClip = do
@@ -251,184 +193,67 @@ runRgfwSessionReduceCustom opts getThemeAndScale updateModel initialModel view =
             emptyInput
               { inputWindowSize = Size (fromIntegral initLogW) (fromIntegral initLogH)
               }
-      inpRef <- newIORef initInp
-      lastTRef <- getMonotonicTime >>= newIORef
 
       R.withEventBuffer $ \evPtr -> do
-        let loop = do
-              running <- readIORef runningRef
-              when running $ do
-                curScale <- readIORef scaleRef
-                lastT <- readIORef lastTRef
-                (tNow, dt) <- stepDeltaTime lastT
-                writeIORef lastTRef tNow
-                noteLoop debugSampler
-
-                -- 1. Poll and process RGFW events into Input
-                let pollEvents = do
-                      ev <- R.pollEvent win evPtr
-                      case ev of
-                        R.EventNone -> pure ()
-                        R.EventWindowClose -> do
-                          writeIORef runningRef False
-                          pollEvents
-                        R.EventWindowResize nw nh -> do
-                          writeIORef winSizeRef (nw, nh)
-                          pollEvents
-                        R.EventScaleUpdate sx _sy -> do
-                          let !validScale = if sx > 0.0 then sx else 1.0
-                          writeIORef monScaleRef validScale
-                          pollEvents
-                        R.EventMouseMotion mx my -> do
-                          let !lmx = fromIntegral mx / curScale
-                              !lmy = fromIntegral my / curScale
-                          modifyIORef' inpRef $ \inp ->
-                            inp {inputMousePos = V2 lmx lmy}
-                          pollEvents
-                        R.EventMouseButton btn pressed -> do
-                          let isDown = pressed
-                          if btn == R.rgfw_mouseLeft
-                            then do
-                              modifyIORef' inpRef $ \inp ->
-                                let wasDown = inputMouseDown inp
-                                 in inp
-                                      { inputMouseDown = isDown
-                                      , inputMousePressed = isDown && not wasDown
-                                      , inputMouseReleased = not isDown && wasDown
-                                      }
-                            else if btn == R.rgfw_mouseRight
-                              then do
-                                modifyIORef' inpRef $ \inp ->
-                                  let wasDown = inputMouseRightDown inp
-                                   in inp
-                                        { inputMouseRightDown = isDown
-                                        , inputMouseRightPressed = isDown && not wasDown
-                                        , inputMouseRightReleased = not isDown && wasDown
-                                        }
-                              else pure ()
-                          pollEvents
-                        R.EventMouseScroll dx dy -> do
-                          modifyIORef' inpRef $ \i -> i {inputScroll = V2 dx dy}
-                          pollEvents
-                        R.EventKeyChar ch -> do
-                          let isCtrlChar = ch >= '\x01' && ch <= '\x1a'
-                              effectiveCh =
-                                if isCtrlChar
-                                  then chr (ord ch + 96)
-                                  else ch
-                          when ((isPrint ch || isCtrlChar) && ch /= '\177' && ch /= '\b') $
-                            modifyIORef' inpRef $ \inp ->
-                              let cur = inputChars inp
-                                  alreadyPresent = not (T.null cur) && T.last cur == effectiveCh
-                                  curMods = inputModifiers inp
-                                  mods = if isCtrlChar then curMods {modCtrl = True} else curMods
-                               in if alreadyPresent
-                                    then inp {inputModifiers = mods}
-                                    else inp {inputChars = T.snoc cur effectiveCh, inputModifiers = mods}
-                          pollEvents
-                        R.EventKeyPress k m -> do
-                          let shift = (m .&. 16) /= 0
-                              ctrl  = (m .&. 4) /= 0 || (m .&. 32) /= 0
-                              alt   = (m .&. 8) /= 0
-                              mods  = Modifiers shift ctrl alt
-                          modifyIORef' inpRef $ \inp ->
-                            let curKeys = inputKeys inp
-                                newKeys = case mapRgfwKey k of
-                                  Just mk -> V.snoc curKeys mk
-                                  Nothing -> curKeys
-                                curChars = inputChars inp
-                                newChars =
-                                  if ctrl && ((k >= 65 && k <= 90) || (k >= 97 && k <= 122))
-                                    then
-                                      let !c = toLower (chr (fromIntegral k))
-                                       in if not (T.null curChars) && T.last curChars == c
-                                            then curChars
-                                            else T.snoc curChars c
-                                    else curChars
-                             in inp {inputKeys = newKeys, inputChars = newChars, inputModifiers = mods}
-                          pollEvents
-                        R.EventKeyRelease _k m -> do
-                          let shift = (m .&. 16) /= 0
-                              ctrl  = (m .&. 4) /= 0 || (m .&. 32) /= 0
-                              alt   = (m .&. 8) /= 0
-                              mods  = Modifiers shift ctrl alt
-                          modifyIORef' inpRef $ \inp -> inp {inputModifiers = mods}
-                          pollEvents
-                        _ ->
-                          pollEvents
-                pollEvents
-
-                -- 2. Check resize / scale changes
-                curModel <- readIORef modelRef
-                curMonScale <- readIORef monScaleRef
-                let (curTheme, userScale) = getThemeAndScale curModel
-                    !newScale = resolveScale userScale curMonScale
-
-                (curWinW, curWinH) <- R.windowSize win
-                (pw0, ph0) <- readIORef winSizeRef
-                let (pw, ph) = if curWinW > 0 && curWinH > 0 then (curWinW, curWinH) else (pw0, ph0)
-                writeIORef winSizeRef (pw, ph)
-                writeIORef scaleRef newScale
-                let !lw = max 1 (round (fromIntegral pw / newScale) :: Int)
-                    !lh = max 1 (round (fromIntegral ph / newScale) :: Int)
-
-                physSurf <- readIORef physSurfRef
-                physSurf' <- resizeRgfwSurface win physSurf pw ph
-                writeIORef physSurfRef physSurf'
-
-                rawInp <- readIORef inpRef
-                stampedInp <- stampClicks clickTracker rawInp
-                let curInp =
-                      stampedInp
-                        { inputWindowSize = Size (fromIntegral lw) (fromIntegral lh)
-                        , inputDeltaTime = dt
-                        }
-
-                -- 3. Hard quit & quit check
-                hardQuit <- checkHardQuit ctx curInp
-                shouldTerm <- checkSessionQuit ctx (\_ -> False) curInp
-                if hardQuit || shouldTerm
-                  then writeIORef runningRef False
-                  else do
-                    -- 4. Execute UI Frame using core runFrameReduceEff
+        let drv =
+              SessionDriver
+                { sdPollEvents    = pollRgfwEvents win evPtr scaleRef monScaleRef winSizeRef
+                , sdWaitEvents    = \_ -> pollRgfwEvents win evPtr scaleRef monScaleRef winSizeRef
+                , sdApplyEvent    = applyRgfwEvent
+                , sdIsButtonEdge  = isRgfwButtonEdge
+                , sdIsHardQuit    = \_ -> False
+                , sdIsSessionQuit = isRgfwSessionQuit
+                , sdSyncDisplay   = \c inp -> do
+                    (curWinW, curWinH) <- R.windowSize win
+                    (pw0, ph0) <- readIORef winSizeRef
+                    let (pw, ph) = if curWinW > 0 && curWinH > 0 then (curWinW, curWinH) else (pw0, ph0)
+                    writeIORef winSizeRef (pw, ph)
+                    curMonScale <- readIORef monScaleRef
+                    curModel <- readIORef modelRef
+                    let (_, userScale) = getThemeAndScale curModel
+                        !newScale = resolveScale userScale curMonScale
+                    writeIORef scaleRef newScale
+                    let !lw = max 1 (round (fromIntegral pw / newScale) :: Int)
+                        !lh = max 1 (round (fromIntegral ph / newScale) :: Int)
+                    physSurf <- readIORef physSurfRef
+                    physSurf' <- resizeRgfwSurface win physSurf pw ph
+                    writeIORef physSurfRef physSurf'
+                    pure (c, inp { inputWindowSize = Size (fromIntegral lw) (fromIntegral lh) })
+                , sdWaitTimeout   = \_ _ -> pure 0
+                , sdShouldDraw    = \_ _ _ _ -> pure True
+                , sdDraw          = \c curInp _ -> do
                     tUiStart <- getMonotonicTime
+                    curModel <- readIORef modelRef
                     (_, newModel, _, _, _) <-
-                      runFrameReduceEff runEff updateModel ctx curInp curModel view
+                      runFrameReduceEff runEff updateModel c curInp curModel view
                     writeIORef modelRef newModel
                     tUiEnd <- getMonotonicTime
                     let !uiMs = (tUiEnd - tUiStart) * 1000.0
 
-                    -- 5. Render directly to physical software surface
                     tRenderStart <- getMonotonicTime
+                    curMonScale <- readIORef monScaleRef
+                    curScale <- readIORef scaleRef
+                    (pw, ph) <- readIORef winSizeRef
+                    physSurf' <- readIORef physSurfRef
+                    let (curTheme, _) = getThemeAndScale newModel
                     clearScreen physSurf' (packColor (thBackground curTheme))
-                    hotId <- readIORef (ctxLastHotId ctx)
-                    activeId <- readIORef (ctxActiveId ctx)
-                    focusId <- readIORef (ctxFocusId ctx)
-                    let na = ctxNodeArena ctx
+                    hotId <- readIORef (ctxLastHotId c)
+                    activeId <- readIORef (ctxActiveId c)
+                    focusId <- readIORef (ctxFocusId c)
+                    let na = ctxNodeArena c
                     count <- arenaCount na
-                    renderArena physSurf' font newScale curTheme ctx na hotId activeId focusId
-
-                    -- Topmost context menu overlay
-                    renderTextEditMenuOverlay physSurf' font newScale curTheme ctx (inputMousePos curInp)
-
+                    renderArena physSurf' font curScale curTheme c na hotId activeId focusId
+                    renderTextEditMenuOverlay physSurf' font curScale curTheme c (inputMousePos curInp)
                     tRenderEnd <- getMonotonicTime
                     let !renderMs = (tRenderEnd - tRenderStart) * 1000.0
 
-                    -- 6. Blit to screen
                     tBlitStart <- getMonotonicTime
                     R.blitSurface win (sRgfwSurface physSurf')
                     tBlitEnd <- getMonotonicTime
                     let !blitMs = (tBlitEnd - tBlitStart) * 1000.0
-                        !frameMs = (tBlitEnd - tNow) * 1000.0
+                        !frameMs = (tBlitEnd - tUiStart) * 1000.0
 
-                    -- 7. Cursor update
-                    curKind <- uiCursorKind ctx curInp
-                    let cursorIcon = mapRgfwCursor curKind
-                    if cursorIcon == R.rgfw_mouseArrow
-                      then void (R.setMouseDefault win)
-                      else void (R.setMouseStandard win cursorIcon)
-
-                    -- 8. Note debug stats
+                    let Size lw lh = inputWindowSize curInp
                     notePresent
                       debugSampler
                       uiMs
@@ -436,25 +261,126 @@ runRgfwSessionReduceCustom opts getThemeAndScale updateModel initialModel view =
                       blitMs
                       frameMs
                       count
-                      (fromIntegral lw)
-                      (fromIntegral lh)
+                      lw
+                      lh
                       pw
                       ph
-                      newScale
+                      curScale
                       curMonScale
 
-                    -- 9. Clear ephemeral input
-                    writeIORef inpRef (clearEphemeral curInp)
-
-                    -- 10. Frame pacing (~120 FPS adaptive target)
                     let !targetFrameUs = 8333 :: Int
                         !elapsedUs = round (frameMs * 1000.0)
                         !delayUs = max 0 (targetFrameUs - elapsedUs)
                     when (delayUs > 0) $ threadDelay delayUs
-
-                loop
+                    pure (False, curInp)
+                , sdSkip          = \_ _ -> pure ()
+                , sdOnCursor      = \c curInp -> do
+                    curKind <- uiCursorKind c curInp
+                    let cursorIcon = mapRgfwCursor curKind
+                    if cursorIcon == R.rgfw_mouseArrow
+                      then void (R.setMouseDefault win)
+                      else void (R.setMouseStandard win cursorIcon)
+                , sdNoteLoop      = \_ -> noteLoop debugSampler
+                , sdShouldQuit    = \_ -> False
+                , sdClickDistance = 5.0
+                , sdClickTime     = 0.4
+                }
         let cleanup = do
               finalPhysSurf <- readIORef physSurfRef
               freeRgfwSurface finalPhysSurf
               R.closeWindow win
-        loop `finally` cleanup
+        runSessionLoop drv ctx initInp `finally` cleanup
+
+data RgfwEvent
+  = RgfwEvClose
+  | RgfwEvResize !Int !Int
+  | RgfwEvScale !Float
+  | RgfwEvMotion !Float !Float
+  | RgfwEvButton !Word8 !Bool
+  | RgfwEvScroll !Float !Float
+  | RgfwEvKeyChar !Char
+  | RgfwEvKeyPress !Word32 !Word8
+  | RgfwEvKeyRelease !Word32 !Word8
+
+pollRgfwEvents :: R.Window -> Ptr R.RGFW_event -> IORef Float -> IORef Float -> IORef (Int, Int) -> IO [RgfwEvent]
+pollRgfwEvents win evPtr scaleRef monScaleRef winSizeRef = do
+  s <- readIORef scaleRef
+  go s []
+  where
+    go s acc = do
+      ev <- R.pollEvent win evPtr
+      case ev of
+        R.EventNone -> pure (reverse acc)
+        R.EventWindowClose -> go s (RgfwEvClose : acc)
+        R.EventWindowResize nw nh -> do
+          writeIORef winSizeRef (nw, nh)
+          go s (RgfwEvResize nw nh : acc)
+        R.EventScaleUpdate sx _ -> do
+          let !validScale = if sx > 0 then sx else 1
+          writeIORef monScaleRef validScale
+          go s (RgfwEvScale validScale : acc)
+        R.EventMouseMotion mx my ->
+          go s (RgfwEvMotion (fromIntegral mx / s) (fromIntegral my / s) : acc)
+        R.EventMouseButton btn down -> go s (RgfwEvButton btn down : acc)
+        R.EventMouseScroll dx dy -> go s (RgfwEvScroll dx dy : acc)
+        R.EventKeyChar ch -> go s (RgfwEvKeyChar ch : acc)
+        R.EventKeyPress k m -> go s (RgfwEvKeyPress k m : acc)
+        R.EventKeyRelease k m -> go s (RgfwEvKeyRelease k m : acc)
+        _ -> go s acc
+
+applyRgfwEvent :: Input -> RgfwEvent -> Input
+applyRgfwEvent inp ev = case ev of
+  RgfwEvClose -> inp
+  RgfwEvResize _ _ -> inp
+  RgfwEvScale _ -> inp
+  RgfwEvMotion x y -> inp {inputMousePos = V2 x y}
+  RgfwEvButton btn isDown ->
+    if btn == R.rgfw_mouseLeft
+      then let wasDown = inputMouseDown inp
+            in inp {inputMouseDown = isDown, inputMousePressed = isDown && not wasDown, inputMouseReleased = not isDown && wasDown}
+      else if btn == R.rgfw_mouseRight
+        then let wasDown = inputMouseRightDown inp
+              in inp {inputMouseRightDown = isDown, inputMouseRightPressed = isDown && not wasDown, inputMouseRightReleased = not isDown && wasDown}
+        else inp
+  RgfwEvScroll dx dy -> inp {inputScroll = V2 dx dy}
+  RgfwEvKeyChar ch ->
+    let isCtrl = ch >= '\x01' && ch <= '\x1a'
+        eff = if isCtrl then chr (ord ch + 96) else ch
+     in if (isPrint ch || isCtrl) && ch /= '\177' && ch /= '\b'
+          then let cur = inputChars inp
+                   already = not (T.null cur) && T.last cur == eff
+                   curMods = inputModifiers inp
+                   mods = if isCtrl then curMods {modCtrl = True} else curMods
+                in if already
+                     then inp {inputModifiers = mods}
+                     else inp {inputChars = T.snoc cur eff, inputModifiers = mods}
+          else inp
+  RgfwEvKeyPress k m ->
+    let shift = (m .&. 16) /= 0
+        ctrl  = (m .&. 4) /= 0 || (m .&. 32) /= 0
+        alt   = (m .&. 8) /= 0
+        mods  = Modifiers shift ctrl alt
+        curKeys = inputKeys inp
+        newKeys = case mapRgfwKey k of
+          Just mk -> V.snoc curKeys mk
+          Nothing -> curKeys
+        curChars = inputChars inp
+        newChars =
+          if ctrl && ((k >= 65 && k <= 90) || (k >= 97 && k <= 122))
+            then let !c = toLower (chr (fromIntegral k))
+                  in if not (T.null curChars) && T.last curChars == c then curChars else T.snoc curChars c
+            else curChars
+     in inp {inputKeys = newKeys, inputChars = newChars, inputModifiers = mods}
+  RgfwEvKeyRelease _k m ->
+    let shift = (m .&. 16) /= 0
+        ctrl  = (m .&. 4) /= 0 || (m .&. 32) /= 0
+        alt   = (m .&. 8) /= 0
+     in inp {inputModifiers = Modifiers shift ctrl alt}
+
+isRgfwButtonEdge :: RgfwEvent -> Bool
+isRgfwButtonEdge (RgfwEvButton {}) = True
+isRgfwButtonEdge _ = False
+
+isRgfwSessionQuit :: RgfwEvent -> Bool
+isRgfwSessionQuit RgfwEvClose = True
+isRgfwSessionQuit _ = False

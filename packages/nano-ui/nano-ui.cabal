@@ -64,6 +64,7 @@ library
         NanoUI.Input
         NanoUI.Layout
         NanoUI.Layout.Arena
+        NanoUI.Layout.Solve
         NanoUI.Monad
         NanoUI.State
         NanoUI.Testing
@@ -97,9 +98,7 @@ library
         NanoUI.Frame.Select
         NanoUI.Frame.Spans
         NanoUI.Frame.SpanArena
-        NanoUI.Frame.TextArea
         NanoUI.Icons
-        NanoUI.Layout.Solve
         NanoUI.Render.ASCII
         NanoUI.Style
         NanoUI.Types

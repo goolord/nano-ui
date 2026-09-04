@@ -32,14 +32,33 @@ module NanoUI.Frame.TextEdit
   , drawTextSelectionLine
   , drawTextInputCaret
   , drawTextInputSelection
+  , drawTextAreaSelection
+  , drawTextAreaContent
     -- * Selection & interaction
   , applyTextInputClick
   , applyTextInputDrag
   , updateTextInputSelection
   , collapseTextFieldSelection
   , collapseTextInputSelection
+  , collapseTextAreaSelection
   , applyTextFieldMenuAction
   , textFieldMenuActionEnabled
+    -- * Text area geometry and interaction
+  , TextAreaGeom (..)
+  , TextAreaHit (..)
+  , textAreaGeom
+  , textAreaFieldClip
+  , textAreaFocused
+  , textAreaValue
+  , loadTextAreaStateAt
+  , syncTextAreaViewport
+  , textAreaHitForWidget
+  , textAreaCursorAt
+  , applyTextAreaClick
+  , applyTextAreaDrag
+  , updateTextAreaSelection
+  , finalizeTextAreaMouse
+  , finalizeTextFieldMouse
   ) where
 
 import Control.Monad (forM, forM_, unless, when)
@@ -51,6 +70,7 @@ import qualified Data.Text as T
 import NanoUI.Context
   ( Context (..)
   , TextFieldClickCell (..)
+  , TextInputDrag (..)
   , TextInputMenu (..)
   , WidgetStore (..)
   , getStore
@@ -63,7 +83,7 @@ import NanoUI.Context
   , slotCursor
   , slotKey
   )
-import NanoUI.Draw (DrawArena, pushRect, pushRoundedRect, pushText)
+import NanoUI.Draw (DrawArena, pushRect, pushRoundedRect, pushText, withClip)
 import NanoUI.Font
   ( FontMetrics
   , centeredTextY
@@ -93,8 +113,11 @@ import NanoUI.Input
   , UiCursorKind (..)
   , inputKeys
   , inputKeysElem
+  , inputMouseClicks
+  , inputMouseDown
   , inputMousePos
   , inputMousePressed
+  , inputMouseReleased
   , inputMouseRightPressed
   , inputWindowSize
   )
@@ -108,7 +131,7 @@ import NanoUI.Layout.Arena
   , getText
   , getWidgetId
   )
-import NanoUI.Store (slotTextAreaCol, slotTextAreaRow)
+import NanoUI.Store (slotTextAreaCol, slotTextAreaRow, slotTextAreaViewport)
 import NanoUI.Style (Style (..), Theme (..), styleBg, styleFg, themeAccent, themeSeparator)
 import NanoUI.Types
   ( Color (..)
@@ -136,6 +159,7 @@ import NanoUI.Widgets.TextArea
   , saveTextAreaState
   , textAreaMenuActionEnabled
   )
+import qualified NanoUI.Widgets.TextArea as TA
 import qualified NanoUI.Widgets.TextBuffer as TB
 import NanoUI.Widgets.TextInput (applyTextInputMenuAction, textInputMenuActionEnabled)
 
@@ -779,4 +803,398 @@ collapseTextAreaSelection ctx wid = do
       state = loadTextAreaState store key text
       state' = state {selectionAnchor = TB.Cursor row col}
   setStore ctx (saveTextAreaState key state' store)
+
+data TextAreaGeom = TextAreaGeom
+  { tagFieldRect :: !Rect
+  , tagLineHeight :: !Float
+  }
+  deriving (Eq, Show)
+
+data TextAreaHit = TextAreaHit
+  { tahNodeIdx :: !NodeIdx
+  , tahFieldRect :: !Rect
+  , tahContentX :: !Float
+  , tahLineH :: !Float
+  , tahWidgetX :: !Float
+  , tahWidgetY :: !Float
+  , tahWidgetW :: !Float
+  , tahWidgetH :: !Float
+  }
+
+textAreaGeom :: HostProfile -> FontMetrics -> Float -> Float -> Float -> Float -> TextAreaGeom
+textAreaGeom host fm x y w h =
+  let labelH = layoutLineHeight host fm
+      gap = textInputLabelGap fm
+      fieldY = y + labelH + gap
+      fieldH = max 0 (h - labelH - gap)
+      lineH = fmLineHeight fm
+   in TextAreaGeom {tagFieldRect = Rect x fieldY w fieldH, tagLineHeight = lineH}
+
+textAreaFieldClip :: HostProfile -> TextAreaGeom -> FontMetrics -> Rect
+textAreaFieldClip host geom fm =
+  let field = tagFieldRect geom
+      (ix, iy) = widgetContentInset host fm
+   in Rect
+        (rectX field + ix)
+        (rectY field + iy)
+        (max 0 (rectW field - 2 * ix))
+        (max 0 (rectH field - 2 * iy))
+
+textAreaFocused :: Context -> NodeIdx -> IO Bool
+textAreaFocused = textInputFocused
+
+textAreaValue :: Context -> NodeIdx -> IO Text
+textAreaValue = textInputValue
+
+loadTextAreaStateAt :: Context -> NodeIdx -> Float -> Float -> Float -> Float -> IO TA.TextAreaState
+loadTextAreaStateAt ctx idx x y w h = do
+  wid <- getWidgetId (ctxNodeArena ctx) idx
+  store <- getStore ctx
+  let key = intKey wid
+      initial = IM.findWithDefault "" key (storeText store)
+      fm = ctxFontMetrics ctx
+      geom = textAreaGeom (ctxHostProfile ctx) fm x y w h
+      clip = textAreaFieldClip (ctxHostProfile ctx) geom fm
+      vpW = rectW clip
+      vpH = rectH clip
+      lineH = tagLineHeight geom
+      state0 = TA.loadTextAreaState store key initial
+  pure (TA.setTextAreaViewport (realToFrac vpW, realToFrac vpH) (realToFrac lineH) state0)
+
+syncTextAreaViewport :: Context -> NodeIdx -> Float -> Float -> Float -> Float -> IO ()
+syncTextAreaViewport ctx idx x y w h = do
+  wid <- getWidgetId (ctxNodeArena ctx) idx
+  store <- getStore ctx
+  let key = intKey wid
+      fm = ctxFontMetrics ctx
+      geom = textAreaGeom (ctxHostProfile ctx) fm x y w h
+      clip = textAreaFieldClip (ctxHostProfile ctx) geom fm
+      vp = (rectW clip, rectH clip)
+  setStore ctx (store {storePoint = IM.insert (slotKey slotTextAreaViewport key) vp (storePoint store)})
+
+drawTextAreaSelection ::
+  DrawArena ->
+  Context ->
+  TA.TextAreaState ->
+  TextAreaGeom ->
+  HostProfile ->
+  FontMetrics ->
+  Theme ->
+  Style ->
+  IO ()
+drawTextAreaSelection da _ctx state geom host fm theme style = do
+  let anchor = TA.selectionAnchor state
+      cursor = TB.getCursor (TA.buffer state)
+  when (anchor /= cursor) $ do
+    let (lo, hi) = TB.selectionRange anchor cursor
+        lineTexts = TB.toLines (TA.buffer state)
+        field = tagFieldRect geom
+        lineH = tagLineHeight geom
+        (ix, iy) = widgetContentInset host fm
+        scrollYf = realToFrac (snd (TA.scrollOffset state))
+        contentTop = rectY field + iy
+        accent = themeAccent theme
+        selBg = lerpColor accent (styleBg style) 0.55
+        loRow = TB.cursorRow lo
+        loCol = TB.cursorCol lo
+        hiRow = TB.cursorRow hi
+        hiCol = TB.cursorCol hi
+    forM_ [loRow .. hiRow] $ \row -> do
+      let line =
+            if row >= 0 && row < length lineTexts
+              then lineTexts !! row
+              else ""
+          lineLen = T.length line
+          clampCol c = max 0 (min lineLen c)
+          startCol =
+            clampCol
+              ( if row == loRow
+                  then loCol
+                  else 0
+              )
+          endCol =
+            clampCol
+              ( if row == hiRow
+                  then hiCol
+                  else lineLen
+              )
+      when (startCol < endCol) $ do
+        let wLo = textDisplayWidth host fm (T.take startCol line)
+            wHi = textDisplayWidth host fm (T.take endCol line)
+            selW = wHi - wLo
+            ly = contentTop + fromIntegral row * lineH - scrollYf
+            selX = rectX field + ix + wLo
+            selH = max 4 lineH
+        drawTextSelectionLine da selX ly selW selH selBg
+
+drawTextAreaContent :: DrawArena -> Context -> NodeIdx -> Float -> Float -> Float -> Float -> Style -> IO ()
+drawTextAreaContent da ctx idx x y w h style = do
+  let terminal = isCellHost (ctxHostProfile ctx)
+  if terminal
+    then pure ()
+    else do
+      syncTextAreaViewport ctx idx x y w h
+      focus <- textAreaFocused ctx idx
+      let fm = ctxFontMetrics ctx
+          host = ctxHostProfile ctx
+          theme = ctxTheme ctx
+          geom = textAreaGeom host fm x y w h
+          field = tagFieldRect geom
+          lineH = tagLineHeight geom
+          clip = textAreaFieldClip host geom fm
+          contentX = rectX clip
+          contentTop = rectY clip
+          fg = styleFg style
+      state <- loadTextAreaStateAt ctx idx x y w h
+      let buf = TA.buffer state
+          lineTexts = TB.toLines buf
+          (_, scrollY) = TA.scrollOffset state
+          scrollYf = realToFrac scrollY
+          fieldTop = rectY field
+          fieldBottom = fieldTop + rectH field
+      withClip da clip $ do
+        when focus $
+          drawTextAreaSelection da ctx state geom host fm theme style
+        forM_ (zip [0 :: Int ..] lineTexts) $ \(row, line) -> do
+          let ly = contentTop + fromIntegral row * lineH - scrollYf
+          when (ly + lineH >= fieldTop && ly <= fieldBottom) $
+            unless (T.null line) $ do
+              pushText da fm contentX ly line fg
+        when focus $ do
+          let TB.Cursor row col = TB.getCursor buf
+              currentLine =
+                if row >= 0 && row < length lineTexts
+                  then lineTexts !! row
+                  else ""
+              prefix = T.take col currentLine
+              pw = textDisplayWidth host fm prefix
+          let caretX = contentX + pw
+              caretY = contentTop + fromIntegral row * lineH - scrollYf + 1
+              caretH = max 4 (lineH - 2)
+          drawTextCaret da caretX caretY caretH fg
+
+textAreaHitForWidget :: Context -> WidgetId -> IO (Maybe TextAreaHit)
+textAreaHitForWidget ctx wid = do
+  count <- arenaCount (ctxNodeArena ctx)
+  go 0 count
+  where
+    go idx count
+      | idx >= count = pure Nothing
+      | otherwise = do
+          nt <- getNodeType (ctxNodeArena ctx) idx
+          if nt /= NodeTextArea
+            then go (idx + 1) count
+            else do
+              w' <- getWidgetId (ctxNodeArena ctx) idx
+              if w' /= wid
+                then go (idx + 1) count
+                else do
+                  (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+                  let fm = ctxFontMetrics ctx
+                      geom = textAreaGeom (ctxHostProfile ctx) fm x y w h
+                      field = tagFieldRect geom
+                      clip = textAreaFieldClip (ctxHostProfile ctx) geom fm
+                  pure
+                    ( Just
+                        TextAreaHit
+                          { tahNodeIdx = idx
+                          , tahFieldRect = field
+                          , tahContentX = rectX clip
+                          , tahLineH = tagLineHeight geom
+                          , tahWidgetX = x
+                          , tahWidgetY = y
+                          , tahWidgetW = w
+                          , tahWidgetH = h
+                          }
+                    )
+
+textAreaCursorAt :: Context -> TA.TextAreaState -> TextAreaHit -> V2 -> IO (Int, Int)
+textAreaCursorAt ctx state hit mouse = do
+  let lineTexts = TB.toLines (TA.buffer state)
+      lineCount = max 1 (length lineTexts)
+      scrollYf = realToFrac (snd (TA.scrollOffset state))
+      fm = ctxFontMetrics ctx
+      (_, iy) = widgetContentInset (ctxHostProfile ctx) fm
+      contentTop = rectY (tahFieldRect hit) + iy
+      relY = v2Y mouse - contentTop + scrollYf
+      rawRow = floor (relY / max 1 (tahLineH hit))
+      row = max 0 (min (lineCount - 1) rawRow)
+      line =
+        if row < length lineTexts
+          then lineTexts !! row
+          else ""
+  col <- textCharAtX ctx line (tahContentX hit) (v2X mouse)
+  pure (row, col)
+
+updateTextAreaSelection :: Context -> WidgetId -> TextAreaHit -> TB.Cursor -> TB.Cursor -> IO ()
+updateTextAreaSelection ctx wid hit anchor cursor = do
+  state0 <-
+    loadTextAreaStateAt
+      ctx
+      (tahNodeIdx hit)
+      (tahWidgetX hit)
+      (tahWidgetY hit)
+      (tahWidgetW hit)
+      (tahWidgetH hit)
+  let state1 = TA.setTextAreaSelection anchor cursor state0
+  store <- getStore ctx
+  setStore ctx (TA.saveTextAreaState (intKey wid) state1 store)
+  markDirty ctx
+
+applyTextAreaClick :: Context -> WidgetId -> TextAreaHit -> Int -> Int -> Int -> IO ()
+applyTextAreaClick ctx wid hit row col clicks
+  | clicks >= 3 = do
+      state <-
+        loadTextAreaStateAt
+          ctx
+          (tahNodeIdx hit)
+          (tahWidgetX hit)
+          (tahWidgetY hit)
+          (tahWidgetW hit)
+          (tahWidgetH hit)
+      let end = TB.documentEnd (TA.buffer state)
+      updateTextAreaSelection ctx wid hit (TB.Cursor 0 0) end
+  | clicks == 2 = do
+      state <-
+        loadTextAreaStateAt
+          ctx
+          (tahNodeIdx hit)
+          (tahWidgetX hit)
+          (tahWidgetY hit)
+          (tahWidgetW hit)
+          (tahWidgetH hit)
+      let lineTexts = TB.toLines (TA.buffer state)
+          line =
+            if row >= 0 && row < length lineTexts
+              then lineTexts !! row
+              else ""
+          (lo, hi) = textWordBounds line col
+          anchor = TB.Cursor row lo
+          cursor = TB.Cursor row hi
+      updateTextAreaSelection ctx wid hit anchor cursor
+  | otherwise =
+      updateTextAreaSelection ctx wid hit (TB.Cursor row col) (TB.Cursor row col)
+
+applyTextAreaDrag :: Context -> WidgetId -> TextAreaHit -> Int -> Int -> Int -> Int -> Int -> IO ()
+applyTextAreaDrag ctx wid hit anchorRow anchorCol row col clicks
+  | clicks >= 3 = applyTextAreaClick ctx wid hit row col clicks
+  | clicks == 2 = do
+      state <-
+        loadTextAreaStateAt
+          ctx
+          (tahNodeIdx hit)
+          (tahWidgetX hit)
+          (tahWidgetY hit)
+          (tahWidgetW hit)
+          (tahWidgetH hit)
+      let lineTexts = TB.toLines (TA.buffer state)
+          anchorLine =
+            if anchorRow >= 0 && anchorRow < length lineTexts
+              then lineTexts !! anchorRow
+              else ""
+          cursorLine =
+            if row >= 0 && row < length lineTexts
+              then lineTexts !! row
+              else ""
+          (a0, a1) = textWordBounds anchorLine anchorCol
+          (c0, c1) = textWordBounds cursorLine col
+          anchor = TB.Cursor anchorRow (min a0 c0)
+          cursor = TB.Cursor row (max a1 c1)
+      updateTextAreaSelection ctx wid hit anchor cursor
+  | otherwise =
+      updateTextAreaSelection ctx wid hit (TB.Cursor anchorRow anchorCol) (TB.Cursor row col)
+
+finalizeTextAreaMouse :: Context -> Input -> WidgetId -> IO ()
+finalizeTextAreaMouse ctx inp wid = do
+  mHit <- textAreaHitForWidget ctx wid
+  case mHit of
+    Nothing -> pure ()
+    Just hit -> do
+      let mouse = inputMousePos inp
+          inField = rectContains (tahFieldRect hit) mouse
+      if inputMousePressed inp && inField
+        then do
+          state <-
+            loadTextAreaStateAt
+              ctx
+              (tahNodeIdx hit)
+              (tahWidgetX hit)
+              (tahWidgetY hit)
+              (tahWidgetW hit)
+              (tahWidgetH hit)
+          (row, col) <- textAreaCursorAt ctx state hit mouse
+          clicks <-
+            normalizeTextFieldClicks
+              ctx
+              wid
+              0
+              row
+              col
+              True
+              (max 1 (inputMouseClicks inp))
+          applyTextAreaClick ctx wid hit row col clicks
+          writeIORef (ctxTextInputDrag ctx) (Just (TextInputDrag wid 0 row col True clicks))
+        else do
+          mDrag <- readIORef (ctxTextInputDrag ctx)
+          case mDrag of
+            Just drag
+              | textInputDragWidget drag == wid
+                  , textInputDragMultiline drag
+                  , inputMouseDown inp || inputMouseReleased inp -> do
+                  state <-
+                    loadTextAreaStateAt
+                      ctx
+                      (tahNodeIdx hit)
+                      (tahWidgetX hit)
+                      (tahWidgetY hit)
+                      (tahWidgetW hit)
+                      (tahWidgetH hit)
+                  (row, col) <- textAreaCursorAt ctx state hit mouse
+                  applyTextAreaDrag
+                    ctx
+                    wid
+                    hit
+                    (textInputDragAnchorRow drag)
+                    (textInputDragAnchorCol drag)
+                    row
+                    col
+                    (textInputDragClicks drag)
+            _ -> pure ()
+
+finalizeTextFieldMouse :: Context -> Input -> IO ()
+finalizeTextFieldMouse ctx inp = do
+  focus <- readIORef (ctxFocusId ctx)
+  when (hashWidgetId focus /= 0) $ do
+    mGeom <- textInputGeomForWidget ctx focus
+    case mGeom of
+      Just (fieldRect, contentX, value) -> do
+        let mouse = inputMousePos inp
+            inField = rectContains fieldRect mouse
+        if inputMousePressed inp && inField
+          then do
+            idx <- textCharAtX ctx value contentX (v2X mouse)
+            clicks <-
+              normalizeTextFieldClicks
+                ctx
+                focus
+                idx
+                0
+                0
+                False
+                (max 1 (inputMouseClicks inp))
+            applyTextInputClick ctx focus value idx clicks
+            writeIORef (ctxTextInputDrag ctx) (Just (TextInputDrag focus idx 0 0 False clicks))
+          else do
+            mDrag <- readIORef (ctxTextInputDrag ctx)
+            case mDrag of
+              Just drag
+                | textInputDragWidget drag == focus
+                    , not (textInputDragMultiline drag)
+                    , inputMouseDown inp || inputMouseReleased inp -> do
+                    idx <- textCharAtX ctx value contentX (v2X mouse)
+                    applyTextInputDrag ctx focus value (textInputDragAnchor drag) idx (textInputDragClicks drag)
+              _ -> pure ()
+      Nothing -> finalizeTextAreaMouse ctx inp focus
+  when (inputMouseReleased inp) $
+    writeIORef (ctxTextInputDrag ctx) Nothing
 

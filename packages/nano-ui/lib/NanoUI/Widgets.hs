@@ -147,6 +147,7 @@ import Data.Text qualified as T
 import Effectful (Eff, type (:>))
 import NanoUI.Context
   ( Context (..)
+  , getLastPointerBlocked
   , getStore
   , intKey
   , isDisabled
@@ -520,7 +521,7 @@ sliderEx layout lbl minV maxV initial = do
         else lbl
   resp <- addWidget wid NodeSlider nodeText frac layout
   active <- uiIO (readIORef (ctxActiveId ctx))
-  blocked <- uiIO (readIORef (ctxLastPointerBlocked ctx))
+  blocked <- uiIO (getLastPointerBlocked ctx)
   mrect <- uiIO (scrollHitRect ctx wid)
   let
     isActive = active == wid

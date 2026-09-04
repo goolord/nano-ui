@@ -100,13 +100,15 @@ import NanoUI.Frame.Scroll.Geometry
   )
 import NanoUI.Frame.Spans (collectNodeTextSpans, widgetTextPlacements, widgetTextSpans)
 import NanoUI.Frame.TextEdit
-  ( TextInputGeom (..)
+  ( TextAreaGeom (..)
+  , TextInputGeom (..)
+  , drawTextAreaContent
   , drawTextInputCaret
   , drawTextInputSelection
   , textInputFieldTextClip
   , textInputGeom
+  , textAreaGeom
   )
-import NanoUI.Frame.TextArea (TextAreaGeom (..), drawTextAreaContent, textAreaGeom)
 
 lowerShapes :: Context -> IO ()
 lowerShapes ctx = do
@@ -253,20 +255,7 @@ lowerNodeVisible ctx occluders idx nt x y w h rect fm theme terminal da =
           focus <- textInputFocused ctx idx
           let geom = textInputGeom (ctxHostProfile ctx) fm x y w h
               fieldRect = tigFieldRect geom
-              borderCol =
-                if focus
-                  then themeAccent theme
-                  else styleBorder style
-              fieldStyle = style {styleBorder = borderCol}
-          fillStyledRect da False style fieldRect
-          strokeStyledRect
-            da
-            False
-            fieldStyle
-            (rectX fieldRect)
-            (rectY fieldRect)
-            (rectW fieldRect)
-            (rectH fieldRect)
+          paintTextFieldFrame da theme style focus fieldRect
           spans <- widgetTextSpans ctx nt idx x y w h
           case spans of
             (lblSpan : fieldSpan : _) -> do
@@ -292,20 +281,7 @@ lowerNodeVisible ctx occluders idx nt x y w h rect fm theme terminal da =
           focus <- textInputFocused ctx idx
           let geom = textAreaGeom (ctxHostProfile ctx) fm x y w h
               fieldRect = tagFieldRect geom
-              borderCol =
-                if focus
-                  then themeAccent theme
-                  else styleBorder style
-              fieldStyle = style {styleBorder = borderCol}
-          fillStyledRect da False style fieldRect
-          strokeStyledRect
-            da
-            False
-            fieldStyle
-            (rectX fieldRect)
-            (rectY fieldRect)
-            (rectW fieldRect)
-            (rectH fieldRect)
+          paintTextFieldFrame da theme style focus fieldRect
           lbl <- getText (ctxNodeArena ctx) idx
           unless (T.null lbl) $ do
             let lfg = lerpColor (styleFg style) (themeWindow theme) 0.32
@@ -479,10 +455,48 @@ lowerNodeVisible ctx occluders idx nt x y w h rect fm theme terminal da =
         unless (T.null txt) $ do
           pushText da fm px py txt (styleFg style)
 
+paintTextFieldFrame :: DrawArena -> Theme -> Style -> Bool -> Rect -> IO ()
+paintTextFieldFrame da theme style focus fieldRect = do
+  let borderCol = if focus then themeAccent theme else styleBorder style
+      fieldStyle = style {styleBorder = borderCol}
+  fillStyledRect da False style fieldRect
+  strokeStyledRect da False fieldStyle (rectX fieldRect) (rectY fieldRect) (rectW fieldRect) (rectH fieldRect)
+
 verticallyCenteredBox :: Float -> Float -> Float -> Float
 verticallyCenteredBox y h box =
   let slotH = min h (box + 4)
    in y + max 0 ((slotH - box) / 2)
+
+drawChoiceControl ::
+  HostProfile ->
+  DrawArena ->
+  FontMetrics ->
+  Style ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Color ->
+  Color ->
+  (Float -> Float -> Float -> IO ()) ->
+  IO ()
+drawChoiceControl host da fm style x y h r value accent well postMark = do
+  let (ix, _) =
+        if isCellHost host
+          then widgetContentInset host fm
+          else labelContentInset host fm
+      box = checkboxBoxSize host fm
+      bx = x + ix
+      by = verticallyCenteredBox y h box
+      bw = 2
+      outer = Rect bx by box box
+      inner = Rect (bx + bw) (by + bw) (box - 2 * bw) (box - 2 * bw)
+      innerR = max 0 (r - bw)
+      strokeCol = if value >= 0.5 then accent else styleBorder style
+  pushRoundedRect da inner innerR well
+  pushRoundedStroke da outer r bw strokeCol
+  when (value >= 0.5) $ postMark bx by box
 
 drawCheckbox ::
   HostProfile ->
@@ -496,24 +510,11 @@ drawCheckbox ::
   Color ->
   Color ->
   IO ()
-drawCheckbox host da fm style x y h value accent well = do
-  let (ix, _) =
-        if isCellHost host
-          then widgetContentInset host fm
-          else labelContentInset host fm
-      box = checkboxBoxSize host fm
-      bx = x + ix
-      by = verticallyCenteredBox y h box
+drawCheckbox host da fm style x y h value accent well =
+  let box = checkboxBoxSize host fm
       r = min 6 (box / 3.5)
-      bw = 2
-      outer = Rect bx by box box
-      inner = Rect (bx + bw) (by + bw) (box - 2 * bw) (box - 2 * bw)
-      innerR = max 0 (r - bw)
-      strokeCol = if value >= 0.5 then accent else styleBorder style
-  pushRoundedRect da inner innerR well
-  pushRoundedStroke da outer r bw strokeCol
-  when (value >= 0.5) $
-    drawCheckboxMark da bx by box accent
+   in drawChoiceControl host da fm style x y h r value accent well $ \bx by b ->
+        drawCheckboxMark da bx by b accent
 
 drawCheckboxMark :: DrawArena -> Float -> Float -> Float -> Color -> IO ()
 drawCheckboxMark da bx by box markCol = do
@@ -545,29 +546,14 @@ drawRadio ::
   Color ->
   Color ->
   IO ()
-drawRadio host da fm style x y h value accent well = do
-  let (ix, _) =
-        if isCellHost host
-          then widgetContentInset host fm
-          else labelContentInset host fm
-      box = checkboxBoxSize host fm
-      bx = x + ix
-      by = verticallyCenteredBox y h box
+drawRadio host da fm style x y h value accent well =
+  let box = checkboxBoxSize host fm
       r = box / 2
-      bw = 2
-      outer = Rect bx by box box
-      innerR = max 0 (r - bw)
-  if value >= 0.5
-    then do
-      pushRoundedRect da (Rect (bx + bw) (by + bw) (box - 2 * bw) (box - 2 * bw)) innerR well
-      pushRoundedStroke da outer r bw accent
-      let dot = box * 0.72
-          dx = bx + (box - dot) / 2
-          dy = by + (box - dot) / 2
-      pushRoundedRect da (Rect dx dy dot dot) (dot / 2) accent
-    else do
-      pushRoundedRect da (Rect (bx + bw) (by + bw) (box - 2 * bw) (box - 2 * bw)) innerR well
-      pushRoundedStroke da outer r bw (styleBorder style)
+   in drawChoiceControl host da fm style x y h r value accent well $ \bx by b -> do
+        let dot = b * 0.72
+            dx = bx + (b - dot) / 2
+            dy = by + (b - dot) / 2
+        pushRoundedRect da (Rect dx dy dot dot) (dot / 2) accent
 
 walkChildren :: Context -> NodeIdx -> IO ()
 walkChildren ctx idx =

@@ -30,7 +30,7 @@ module NanoUI.Frame.Chrome
   ) where
 
 import Control.Monad (foldM, when)
-import Data.IORef (readIORef, writeIORef)
+import Data.IORef (readIORef)
 import qualified Data.IntMap.Strict as IM
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -38,9 +38,13 @@ import NanoUI.Context
   ( Context (..)
   , WidgetStore (..)
   , getAnimationValue
+  , getFloatingAncestor
   , getStore
+  , getWidgetNodeTypes
   , intKey
   , isSelectOpen
+  , setFloatingAncestor
+  , setWidgetNodeTypes
   , slotCursor
   , slotKey
   )
@@ -142,12 +146,12 @@ floatingAncestor ctx idx = go idx
 
 buildFloatingAncestorMap :: Context -> IO (IM.IntMap (Maybe NodeType))
 buildFloatingAncestorMap ctx = do
-  cached <- readIORef (ctxFloatingAncestor ctx)
+  cached <- getFloatingAncestor ctx
   case cached of
     Just table -> pure table
     Nothing -> do
       table <- buildFloatingAncestorMapFresh ctx
-      writeIORef (ctxFloatingAncestor ctx) (Just table)
+      setFloatingAncestor ctx (Just table)
       pure table
 
 buildFloatingAncestorMapFresh :: Context -> IO (IM.IntMap (Maybe NodeType))
@@ -262,7 +266,7 @@ textInputFocused ctx idx = do
 
 widgetNodeTypeTable :: Context -> IO (IM.IntMap NodeType)
 widgetNodeTypeTable ctx = do
-  cached <- readIORef (ctxWidgetNodeTypes ctx)
+  cached <- getWidgetNodeTypes ctx
   case cached of
     Just table -> pure table
     Nothing -> do
@@ -283,7 +287,7 @@ widgetNodeTypeTable ctx = do
                           else pure acc
                       go (idx + 1) acc'
             go 0 IM.empty
-      writeIORef (ctxWidgetNodeTypes ctx) (Just table)
+      setWidgetNodeTypes ctx (Just table)
       pure table
 
 closeButtonStyle :: Theme -> Bool -> Float -> Style
@@ -308,70 +312,30 @@ tabHeaderVisualStyle theme styleIdx isActive _isHot _animT =
   let panel = themePanel theme
       btn = themeButton theme
       muted = themeMuted theme
-      window = themeWindow theme
       accent = themeAccent theme
       clear = colorRGBA 0 0 0 0
-      hoverLift = lerpColor window (styleHoverBg btn) 0.55
-   in case styleIdx of
-        1 ->
-          if isActive
-            then panel
-                { styleBg = accent
-                , styleHoverBg = accent
-                , styleFg = colorRGBA 255 255 255 255
-                , styleBorder = accent
-                , styleBorderWidth = 0
-                , styleCornerRadius = 6
-                }
-            else
-              panel
-                { styleBg = clear
-                , styleHoverBg = hoverLift
-                , styleFg = muted
-                , styleBorder = clear
-                , styleBorderWidth = 0
-                , styleCornerRadius = 6
-                }
-        2 ->
-          if isActive
-            then
-              panel
-                { styleBg = styleBg panel
-                , styleHoverBg = styleBg panel
-                , styleFg = styleFg panel
-                , styleBorder = styleBorder panel
-                , styleBorderWidth = 1
-                , styleCornerRadius = 8
-                }
-            else
-              panel
-                { styleBg = clear
-                , styleHoverBg = hoverLift
-                , styleFg = muted
-                , styleBorder = clear
-                , styleBorderWidth = 0
-                , styleCornerRadius = 8
-                }
-        _ ->
-          if isActive
-            then
-              panel
-                { styleBg = styleBg panel
-                , styleHoverBg = styleBg panel
-                , styleFg = styleFg panel
-                , styleBorder = styleBorder panel
-                , styleBorderWidth = 1
-                , styleCornerRadius = 6
-                }
-            else
-              panel
-                { styleBg = clear
-                , styleHoverBg = hoverLift
-                , styleFg = lerpColor muted (styleFg panel) 0.78
-                , styleBorder = clear
-                , styleBorderWidth = 0
-                , styleCornerRadius = 6
-                }
+      hoverLift = lerpColor (themeWindow theme) (styleHoverBg btn) 0.55
+      (cr, activeBg, activeFg, activeBw, inactFg) = case styleIdx of
+        1 -> (6, accent, colorRGBA 255 255 255 255, 0, muted)
+        2 -> (8, styleBg panel, styleFg panel, 1, muted)
+        _ -> (6, styleBg panel, styleFg panel, 1, lerpColor muted (styleFg panel) 0.78)
+   in if isActive
+        then panel
+          { styleBg = activeBg
+          , styleHoverBg = activeBg
+          , styleFg = activeFg
+          , styleBorder = activeBg
+          , styleBorderWidth = activeBw
+          , styleCornerRadius = cr
+          }
+        else panel
+          { styleBg = clear
+          , styleHoverBg = hoverLift
+          , styleFg = inactFg
+          , styleBorder = clear
+          , styleBorderWidth = 0
+          , styleCornerRadius = cr
+          }
 
 tableHeaderVisualStyle :: Theme -> Bool -> Style
 tableHeaderVisualStyle theme isSorted =
@@ -478,44 +442,26 @@ widgetVisualStyle ctx nt idx = do
       isFocus = focus == wid
       widKey = hashWidgetId wid
       isHot = wid == hot
+      clearStyle s =
+        s
+          { styleBg = colorRGBA 0 0 0 0
+          , styleHoverBg = colorRGBA 0 0 0 0
+          , styleActiveBg = colorRGBA 0 0 0 0
+          , styleBorderWidth = 0
+          }
       base =
         case nt of
           NodeTextInput -> themeInput theme
           NodeTextArea -> themeInput theme
           NodeSelect ->
             let sel = themeButton theme
-             in if isFocus
-                  then sel {styleBorder = themeAccent theme}
-                  else sel
+             in if isFocus then sel {styleBorder = themeAccent theme} else sel
           NodeColorPicker ->
             let sel = themeInput theme
-             in if isFocus
-                  then sel {styleBorder = themeAccent theme}
-                  else sel
-          NodeSlider ->
-            if terminal
-              then themeInput theme
-              else
-                (themeInput theme)
-                  { styleBg = colorRGBA 0 0 0 0
-                  , styleHoverBg = colorRGBA 0 0 0 0
-                  , styleActiveBg = colorRGBA 0 0 0 0
-                  , styleBorderWidth = 0
-                  }
-          NodeCheckbox ->
-            (themeButton theme)
-              { styleBg = colorRGBA 0 0 0 0
-              , styleHoverBg = colorRGBA 0 0 0 0
-              , styleActiveBg = colorRGBA 0 0 0 0
-              , styleBorderWidth = 0
-              }
-          NodeRadio ->
-            (themeButton theme)
-              { styleBg = colorRGBA 0 0 0 0
-              , styleHoverBg = colorRGBA 0 0 0 0
-              , styleActiveBg = colorRGBA 0 0 0 0
-              , styleBorderWidth = 0
-              }
+             in if isFocus then sel {styleBorder = themeAccent theme} else sel
+          NodeSlider -> if terminal then themeInput theme else clearStyle (themeInput theme)
+          NodeCheckbox -> clearStyle (themeButton theme)
+          NodeRadio -> clearStyle (themeButton theme)
           NodeTree ->
             let btn = themeButton theme
                 accent = themeAccent theme
@@ -594,9 +540,6 @@ widgetVisualStyle ctx nt idx = do
         | nt == NodeTextArea, isFocus = styleActiveBg widgetBase
         | widKey == hashWidgetId active = styleActiveBg widgetBase
         | nt == NodeCheckbox || nt == NodeRadio || nt == NodeSlider || isClose = styleBg widgetBase
-        | nt == NodeTree = hoverBackground widgetBase animT isHot
-        | isTab = hoverBackground widgetBase animT isHot
-        | isTable = hoverBackground widgetBase animT isHot
         | otherwise = hoverBackground widgetBase animT isHot
   pure widgetBase {styleBg = bg}
 
@@ -611,16 +554,6 @@ fillStyledRect da terminal style rect =
   if terminal || styleCornerRadius style <= 0
     then pushRect da rect (styleBg style)
     else pushRoundedRect da rect (styleCornerRadius style) (styleBg style)
-
-strokeStyledRect :: DrawArena -> Bool -> Style -> Float -> Float -> Float -> Float -> IO ()
-strokeStyledRect da terminal style x y w h =
-  when (not terminal && styleBorderWidth style > 0) $ do
-    let bw = max 1 (styleBorderWidth style)
-        col = styleBorder style
-        r = styleCornerRadius style
-    if r <= 0
-      then strokeRect da x y w h bw col
-      else strokeRoundedBorder da x y w h r bw col
 
 strokeRoundedBorder ::
   DrawArena ->
@@ -638,8 +571,16 @@ strokeRoundedBorder da x y w h r bw col = do
       oy = y + inset
       ow = max 0 (w - 2 * inset)
       oh = max 0 (h - 2 * inset)
-      rr = min r (min (ow / 2) (oh / 2))
-  pushRoundedStroke da (Rect ox oy ow oh) rr bw col
+      rr = max 0 (min r (min (ow / 2) (oh / 2)))
+  pushRoundedStroke da (Rect ox oy ow oh) rr (max 1 bw) col
+
+strokeStyledRect :: DrawArena -> Bool -> Style -> Float -> Float -> Float -> Float -> IO ()
+strokeStyledRect da terminal style x y w h =
+  when (not terminal && styleBorderWidth style > 0) $
+    strokeRoundedBorder da x y w h (styleCornerRadius style) (styleBorderWidth style) (styleBorder style)
+
+strokeRect :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
+strokeRect da x y w h bw col = strokeRoundedBorder da x y w h 0 bw col
 
 textInputMenuOuterPad :: Float
 textInputMenuOuterPad = 6
@@ -669,14 +610,10 @@ overlayMenuStyle theme =
         }
 
 overlayWindowStyle :: Theme -> Style
-overlayWindowStyle theme =
-  let win = themeFloatingWindow theme
-   in win {styleCornerRadius = 2, styleBorderWidth = 1}
+overlayWindowStyle theme = (themeFloatingWindow theme) {styleCornerRadius = 2, styleBorderWidth = 1}
 
 overlayModalStyle :: Theme -> Style
-overlayModalStyle theme =
-  let base = overlayMenuStyle theme
-   in base {styleCornerRadius = 2, styleBorderWidth = 1}
+overlayModalStyle theme = (overlayMenuStyle theme) {styleCornerRadius = 2, styleBorderWidth = 1}
 
 pushMenuShadow :: DrawArena -> Rect -> Float -> IO ()
 pushMenuShadow da menuRect r =
@@ -689,15 +626,6 @@ pushMenuShadow da menuRect r =
           (rectH menuRect)
       shadowCol = colorRGBA 0 0 0 72
    in pushRoundedRect da shadowRect r shadowCol
-
-strokeRect :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
-strokeRect da x y w h bw col =
-  let inset = 0.5
-      ox = x + inset
-      oy = y + inset
-      ow = max 0 (w - 2 * inset)
-      oh = max 0 (h - 2 * inset)
-   in pushRoundedStroke da (Rect ox oy ow oh) 0 (max 1 bw) col
 
 padDropText :: Int -> T.Text -> T.Text
 padDropText n txt =

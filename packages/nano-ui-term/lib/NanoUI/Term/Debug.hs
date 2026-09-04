@@ -10,35 +10,11 @@ module NanoUI.Term.Debug
   , takeDebugLive
   , readTermDebug
   , emptyTermDebug
-  , dbgPresentFps
-  , dbgLoopFps
-  , dbgFrameMs
-  , dbgUiMs
-  , dbgSkips
-  , dbgVerts
-  , dbgIndices
-  , dbgCmds
-  , dbgWinW
-  , dbgWinH
-  , dbgMouseX
-  , dbgMouseY
-  , dbgRtsOn
-  , dbgGcs
-  , dbgMajorGcs
-  , dbgAllocMb
-  , dbgLiveMb
-  , dbgMaxMemMb
-  , dbgCopiedMb
-  , dbgGcPct
-  , dbgLastGcGen
-  , dbgLastGcMs
-  , dbgCaps
-  , dbgCpus
   ) where
 
 import Data.Bits ((.&.), shiftR)
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
-import Data.Word (Word32, Word64, Word8)
+import Data.Word (Word64, Word8)
 import GHC.Clock (getMonotonicTime)
 import NanoUI
   ( Color (..)
@@ -84,78 +60,6 @@ data TermDebugSnapshot = TermDebugSnapshot
   }
   deriving (Eq, Show)
 
--- Accessors for backward compatibility and clean field lookup
-dbgPresentFps :: TermDebugSnapshot -> Double
-dbgPresentFps = D.dbgPresentFps . dbgCore
-
-dbgLoopFps :: TermDebugSnapshot -> Double
-dbgLoopFps = D.dbgLoopFps . dbgCore
-
-dbgFrameMs :: TermDebugSnapshot -> Double
-dbgFrameMs = D.dbgFrameMs . dbgCore
-
-dbgUiMs :: TermDebugSnapshot -> Double
-dbgUiMs = D.dbgUiMs . dbgCore
-
-dbgSkips :: TermDebugSnapshot -> Word64
-dbgSkips = D.dbgSkips . dbgCore
-
-dbgVerts :: TermDebugSnapshot -> Int
-dbgVerts = D.dbgVerts . dbgCore
-
-dbgIndices :: TermDebugSnapshot -> Int
-dbgIndices = D.dbgIndices . dbgCore
-
-dbgCmds :: TermDebugSnapshot -> Int
-dbgCmds = D.dbgCmds . dbgCore
-
-dbgWinW :: TermDebugSnapshot -> Float
-dbgWinW = D.dbgWinW . dbgCore
-
-dbgWinH :: TermDebugSnapshot -> Float
-dbgWinH = D.dbgWinH . dbgCore
-
-dbgMouseX :: TermDebugSnapshot -> Float
-dbgMouseX = D.dbgMouseX . dbgCore
-
-dbgMouseY :: TermDebugSnapshot -> Float
-dbgMouseY = D.dbgMouseY . dbgCore
-
-dbgRtsOn :: TermDebugSnapshot -> Bool
-dbgRtsOn = D.dbgRtsOn . dbgCore
-
-dbgGcs :: TermDebugSnapshot -> Word32
-dbgGcs = D.dbgGcs . dbgCore
-
-dbgMajorGcs :: TermDebugSnapshot -> Word32
-dbgMajorGcs = D.dbgMajorGcs . dbgCore
-
-dbgAllocMb :: TermDebugSnapshot -> Double
-dbgAllocMb = D.dbgAllocMb . dbgCore
-
-dbgLiveMb :: TermDebugSnapshot -> Double
-dbgLiveMb = D.dbgLiveMb . dbgCore
-
-dbgMaxMemMb :: TermDebugSnapshot -> Double
-dbgMaxMemMb = D.dbgMaxMemMb . dbgCore
-
-dbgCopiedMb :: TermDebugSnapshot -> Double
-dbgCopiedMb = D.dbgCopiedMb . dbgCore
-
-dbgGcPct :: TermDebugSnapshot -> Double
-dbgGcPct = D.dbgGcPct . dbgCore
-
-dbgLastGcGen :: TermDebugSnapshot -> Word32
-dbgLastGcGen = D.dbgLastGcGen . dbgCore
-
-dbgLastGcMs :: TermDebugSnapshot -> Double
-dbgLastGcMs = D.dbgLastGcMs . dbgCore
-
-dbgCaps :: TermDebugSnapshot -> Int
-dbgCaps = D.dbgCaps . dbgCore
-
-dbgCpus :: TermDebugSnapshot -> Int
-dbgCpus = D.dbgCpus . dbgCore
 
 data TermDebugSamplerState = TermDebugSamplerState
   { smSampler       :: !(IORef DebugSampler)

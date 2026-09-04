@@ -31,6 +31,7 @@ import NanoUI.Input
   )
 import NanoUI.Style (Layout (..), Sizing (..), defaultLayout)
 import NanoUI.Store (WidgetStore (..), slotAnchor, slotCursor, slotKey)
+import qualified NanoUI.Widgets.TextBuffer as TB
 
 textInputLayout :: Layout
 textInputLayout =
@@ -40,22 +41,18 @@ textInputLayout =
     }
 
 data TextInputState = TextInputState
-  { tisText :: Text
-  , tisCursor :: Int
-  , tisAnchor :: Int
+  { tisText :: !Text
+  , tisCursor :: !Int
+  , tisAnchor :: !Int
   }
   deriving (Eq, Show)
 
-textInputSelRange :: TextInputState -> Maybe (Int, Int)
-textInputSelRange s
-  | tisAnchor s == tisCursor s = Nothing
-  | otherwise = Just (min (tisAnchor s) (tisCursor s), max (tisAnchor s) (tisCursor s))
-
-selectionText :: TextInputState -> Maybe Text
-selectionText s =
-  case textInputSelRange s of
-    Nothing -> Nothing
-    Just (lo, hi) -> Just (T.take (hi - lo) (T.drop lo (tisText s)))
+toBuffer :: TextInputState -> (TB.TextBuffer, TB.Cursor)
+toBuffer s =
+  let buf0 = TB.fromText (tisText s)
+      cur = TB.Cursor 0 (tisCursor s)
+      anc = TB.Cursor 0 (tisAnchor s)
+   in (TB.withCursor cur buf0, anc)
 
 selectAllTextInput :: TextInputState -> TextInputState
 selectAllTextInput s =
@@ -63,42 +60,44 @@ selectAllTextInput s =
 
 textInputCopy :: Context -> TextInputState -> IO ()
 textInputCopy ctx s = do
-  let txt =
-        case selectionText s of
-          Just slice -> slice
-          Nothing -> tisText s
+  let (buf, anc) = toBuffer s
+      cur = TB.getCursor buf
+      txt = if anc /= cur then TB.selectedText anc cur buf else tisText s
   when (not (T.null txt)) $
     void (ctxClipboardSet ctx txt)
 
 textInputCut :: Context -> TextInputState -> IO TextInputState
 textInputCut ctx s = do
-  let (payload, s') = case selectionText s of
-        Just slice -> (slice, deleteBackward s)
-        Nothing ->
-          ( tisText s
-          , s {tisText = T.empty, tisCursor = 0, tisAnchor = 0}
-          )
-      collapsed = s' {tisAnchor = tisCursor s'}
-  when (not (T.null payload)) $
-    void (ctxClipboardSet ctx payload)
-  pure collapsed
+  let (buf, anc) = toBuffer s
+      cur = TB.getCursor buf
+  if anc /= cur
+    then do
+      let txt = TB.selectedText anc cur buf
+      when (not (T.null txt)) $
+        void (ctxClipboardSet ctx txt)
+      let buf' = TB.deleteRange anc cur buf
+          TB.Cursor _ c = TB.getCursor buf'
+      pure (TextInputState (TB.toText buf') c c)
+    else do
+      when (not (T.null (tisText s))) $
+        void (ctxClipboardSet ctx (tisText s))
+      pure (TextInputState T.empty 0 0)
 
 textInputPaste :: Context -> TextInputState -> IO TextInputState
 textInputPaste ctx s = do
   mtxt <- ctxClipboardGet ctx
   case mtxt of
     Nothing -> pure s
-    Just paste ->
-      let pos = case textInputSelRange s of
-            Nothing -> tisCursor s
-            Just (lo, _) -> lo
-          t = tisText s
-          t' =
-            case textInputSelRange s of
-              Nothing -> T.take pos t <> paste <> T.drop pos t
-              Just (lo, hi) -> T.take lo t <> paste <> T.drop hi t
-          end = pos + T.length paste
-       in pure s {tisText = t', tisCursor = end, tisAnchor = end}
+    Just rawPaste -> do
+      let paste = T.filter (/= '\n') rawPaste
+          (buf, anc) = toBuffer s
+          cur = TB.getCursor buf
+          buf' =
+            if anc /= cur
+              then TB.replaceRange paste anc cur buf
+              else TB.insertText paste buf
+          TB.Cursor _ c = TB.getCursor buf'
+      pure (TextInputState (TB.toText buf') c c)
 
 applyTextInputMenuAction :: Context -> WidgetId -> Int -> IO ()
 applyTextInputMenuAction ctx wid item = do
@@ -153,8 +152,8 @@ processTextInput ctx inp s0 = do
     if ctrl
       then T.foldlM' (handleCtrlChar ctx) s0 chars
       else pure s0
-  let filtered = T.filter (\ch -> not (isCtrlCombo ctrl ch) && isPrint ch) chars
-      s2 = T.foldl insertChar s1 filtered
+  let filtered = T.filter (\ch -> not (isCtrlCombo ctrl ch) && isPrint ch && ch /= '\n') chars
+      s2 = T.foldl' insertChar s1 filtered
   pure (foldInputKeys (applyKey shift) s2 keys)
   where
     isCtrlCombo c ch = c && T.elem ch "aAcCxXvV\x01\x03\x16\x18"
@@ -169,54 +168,48 @@ handleCtrlChar ctx s ch
 
 insertChar :: TextInputState -> Char -> TextInputState
 insertChar s ch =
-  case textInputSelRange s of
-    Nothing ->
-      let t = tisText s
-          c = tisCursor s
-          pos = c + 1
-       in s {tisText = T.take c t <> T.singleton ch <> T.drop c t, tisCursor = pos, tisAnchor = pos}
-    Just (lo, hi) ->
-      let t = tisText s
-          pos = lo + 1
-       in s {tisText = T.take lo t <> T.singleton ch <> T.drop hi t, tisCursor = pos, tisAnchor = pos}
+  let (buf, anc) = toBuffer s
+      cur = TB.getCursor buf
+      buf' =
+        if anc /= cur
+          then TB.replaceRange (T.singleton ch) anc cur buf
+          else TB.insertChar ch buf
+      TB.Cursor _ c = TB.getCursor buf'
+   in TextInputState (TB.toText buf') c c
 
 applyKey :: Bool -> TextInputState -> Key -> TextInputState
 applyKey shift s key =
-  case key of
-    KeyBackspace -> deleteBackward s
-    KeyDelete -> deleteForward s
-    KeyLeft -> moveCursor s (max 0 (tisCursor s - 1)) shift
-    KeyRight -> moveCursor s (min (T.length (tisText s)) (tisCursor s + 1)) shift
-    KeyHome -> moveCursor s 0 shift
-    KeyEnd -> moveCursor s (T.length (tisText s)) shift
-    _ -> s
+  let (buf, anc) = toBuffer s
+      cur = TB.getCursor buf
+      hasSel = anc /= cur
+   in case key of
+        KeyBackspace
+          | hasSel ->
+              let buf' = TB.deleteRange anc cur buf
+                  TB.Cursor _ c = TB.getCursor buf'
+               in TextInputState (TB.toText buf') c c
+          | otherwise ->
+              let buf' = TB.deletePrevChar buf
+                  TB.Cursor _ c = TB.getCursor buf'
+               in TextInputState (TB.toText buf') c c
+        KeyDelete
+          | hasSel ->
+              let buf' = TB.deleteRange anc cur buf
+                  TB.Cursor _ c = TB.getCursor buf'
+               in TextInputState (TB.toText buf') c c
+          | otherwise ->
+              let buf' = TB.deleteChar buf
+                  TB.Cursor _ c = TB.getCursor buf'
+               in TextInputState (TB.toText buf') c c
+        KeyLeft -> moveWith shift buf anc TB.moveLeft
+        KeyRight -> moveWith shift buf anc TB.moveRight
+        KeyHome -> moveWith shift buf anc TB.moveToBOL
+        KeyEnd -> moveWith shift buf anc TB.moveToEOL
+        _ -> s
 
-deleteBackward :: TextInputState -> TextInputState
-deleteBackward s =
-  case textInputSelRange s of
-    Just (lo, hi) -> s {tisText = T.take lo (tisText s) <> T.drop hi (tisText s), tisCursor = lo, tisAnchor = lo}
-    Nothing ->
-      let c = tisCursor s
-       in if c > 0
-            then
-              let t = tisText s
-                  pos = c - 1
-               in s {tisText = T.take pos t <> T.drop c t, tisCursor = pos, tisAnchor = pos}
-            else s
-
-deleteForward :: TextInputState -> TextInputState
-deleteForward s =
-  case textInputSelRange s of
-    Just (lo, hi) -> s {tisText = T.take lo (tisText s) <> T.drop hi (tisText s), tisCursor = lo, tisAnchor = lo}
-    Nothing ->
-      let c = tisCursor s
-          t = tisText s
-       in if c < T.length t
-            then s {tisText = T.take c t <> T.drop (c + 1) t}
-            else s
-
-moveCursor :: TextInputState -> Int -> Bool -> TextInputState
-moveCursor s pos shift =
-  if shift
-    then s {tisCursor = pos}
-    else s {tisCursor = pos, tisAnchor = pos}
+moveWith :: Bool -> TB.TextBuffer -> TB.Cursor -> (TB.TextBuffer -> TB.TextBuffer) -> TextInputState
+moveWith shift buf anc f =
+  let buf' = f buf
+      TB.Cursor _ c = TB.getCursor buf'
+      a = if shift then TB.cursorCol anc else c
+   in TextInputState (TB.toText buf') c a

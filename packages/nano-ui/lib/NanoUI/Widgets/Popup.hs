@@ -20,9 +20,11 @@ import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import NanoUI.Context
   ( Context (..)
+  , getCurrentFloatingId
   , getPrevRect
   , registerPopupConfig
   , seedFloatingPanel
+  , setCurrentFloatingId
   )
 import NanoUI.Font (resolveLayoutGap, resolveLayoutPadding)
 import NanoUI.Types (isCellHost)
@@ -149,13 +151,13 @@ popupEx open cfg layout child = do
             let seedRect = maybe (Rect 0 0 0 0) id mPrev
             when (rectW seedRect > 0 && rectH seedRect > 0) $
               seedFloatingPanel ctx wid seedRect
-            prev <- readIORef (ctxCurrentFloatingId ctx)
-            writeIORef (ctxCurrentFloatingId ctx) (Just wid)
+            prev <- getCurrentFloatingId ctx
+            setCurrentFloatingId ctx (Just wid)
             pure prev
           r <- child
           uiIO $ do
             writeIORef (ctxContainerStack ctx) stack
-            writeIORef (ctxCurrentFloatingId ctx) prevFloat
+            setCurrentFloatingId ctx prevFloat
           pure r
         mrect <- uiIO (getPrevRect ctx wid)
         let

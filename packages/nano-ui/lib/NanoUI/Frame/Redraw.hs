@@ -21,6 +21,7 @@ import NanoUI.Context
   , anySelectOpen
   , getStore
   , isDirty
+  , modalActive
   )
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), inputInteracted, inputMousePos, inputPointerHeld)
@@ -120,7 +121,7 @@ textFieldActive ctx = do
 -- decide whether overlay content might need periodic refresh (debug HUD).
 floatingPanelActive :: Context -> IO Bool
 floatingPanelActive ctx = do
-  modal <- readIORef (ctxModalActive ctx)
+  modal <- modalActive ctx
   if modal
     then pure True
     else do

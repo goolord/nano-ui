@@ -120,8 +120,15 @@ import NanoUI.Frame.Scroll.Geometry
   , terminalModalOuterClip
   )
 import NanoUI.Frame.Select (collectSelectDropdownSpans, tagSelectClippedSpans)
-import NanoUI.Frame.TextEdit (TextInputGeom (..), collectTextEditMenuSpans, tagTextInputClippedSpans, textInputGeom)
-import NanoUI.Frame.TextArea (TextAreaGeom (..), textAreaGeom, textAreaValue)
+import NanoUI.Frame.TextEdit
+  ( TextAreaGeom (..)
+  , TextInputGeom (..)
+  , collectTextEditMenuSpans
+  , tagTextInputClippedSpans
+  , textAreaGeom
+  , textAreaValue
+  , textInputGeom
+  )
 import NanoUI.Frame.Scroll (scrollBarLayout, ScrollBarLayout (..))
 import NanoUI.Frame.SpanArena (SpanArena, pushSpan, resetSpanArena, spanArenaToList, spanArenaToListOccluded)
 
@@ -381,19 +388,10 @@ widgetHitRect ctx nt idx x y w h = do
           if isCloseButtonStyle si
             then pure (closeButtonHitRect (ctxHostProfile ctx) fm x y w h)
             else pure (terminalTextHitRect (ctxHostProfile ctx) fm x y h txt True)
-        NodeCheckbox -> do
+        _ | nt == NodeCheckbox || nt == NodeRadio || nt == NodeTree -> do
           txt <- displayText ctx nt idx
           pure (terminalTextHitRect (ctxHostProfile ctx) fm x y h txt True)
-        NodeRadio -> do
-          txt <- displayText ctx nt idx
-          pure (terminalTextHitRect (ctxHostProfile ctx) fm x y h txt True)
-        NodeTree -> do
-          txt <- displayText ctx nt idx
-          pure (terminalTextHitRect (ctxHostProfile ctx) fm x y h txt True)
-        NodeSelect -> do
-          txt <- displayText ctx nt idx
-          pure (terminalTextHitRect (ctxHostProfile ctx) fm x y h txt False)
-        NodeTextInput -> do
+        _ | nt == NodeSelect || nt == NodeTextInput -> do
           txt <- displayText ctx nt idx
           pure (terminalTextHitRect (ctxHostProfile ctx) fm x y h txt False)
         _ -> pure (Rect x y w h)
@@ -550,17 +548,7 @@ widgetTextPlacements ctx nt idx x y w h = do
             , (colorPickerNewLabel, rectX (cpgNew geom), previewY, nw, nh)
             , (hex, x + lx, centeredTextY (ctxHostProfile ctx) fm (cpgHexY geom) (cpgHexH geom) hh, hw, hh)
             ]
-    NodeCheckbox -> do
-      txt <- displayText ctx nt idx
-      (tw, th) <- ctxMeasureText ctx txt
-      let (cx, _) =
-            if terminal
-              then widgetContentInset (ctxHostProfile ctx) fm
-              else labelContentInset (ctxHostProfile ctx) fm
-          tx = x + cx + checkboxLeading (ctxHostProfile ctx) fm
-          ty = centeredTextY (ctxHostProfile ctx) fm y h th
-      pure [(txt, tx, ty, tw, th)]
-    NodeRadio -> do
+    _ | nt == NodeCheckbox || nt == NodeRadio -> do
       txt <- displayText ctx nt idx
       (tw, th) <- ctxMeasureText ctx txt
       let (cx, _) =

@@ -17,34 +17,11 @@ module NanoUI.Rgfw.Debug
   , layoutRows
   , displayRows
   , rtsRows
-  , dbgPresentFps
-  , dbgLoopFps
-  , dbgFrameMs
-  , dbgUiMs
-  , dbgRenderMs
-  , dbgPresents
-  , dbgWinW
-  , dbgWinH
-  , dbgMouseX
-  , dbgMouseY
-  , dbgRtsOn
-  , dbgGcs
-  , dbgMajorGcs
-  , dbgAllocMb
-  , dbgLiveMb
-  , dbgMaxMemMb
-  , dbgCopiedMb
-  , dbgGcPct
-  , dbgLastGcGen
-  , dbgLastGcMs
-  , dbgCaps
-  , dbgCpus
   ) where
 
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Word (Word32, Word64)
 import Effectful (Eff, (:>))
 import GHC.Clock (getMonotonicTime)
 import Text.Printf (printf)
@@ -92,71 +69,6 @@ data RgfwDebugSnapshot = RgfwDebugSnapshot
   }
   deriving (Eq, Show)
 
-dbgPresentFps :: RgfwDebugSnapshot -> Double
-dbgPresentFps = D.dbgPresentFps . dbgCore
-
-dbgLoopFps :: RgfwDebugSnapshot -> Double
-dbgLoopFps = D.dbgLoopFps . dbgCore
-
-dbgFrameMs :: RgfwDebugSnapshot -> Double
-dbgFrameMs = D.dbgFrameMs . dbgCore
-
-dbgUiMs :: RgfwDebugSnapshot -> Double
-dbgUiMs = D.dbgUiMs . dbgCore
-
-dbgRenderMs :: RgfwDebugSnapshot -> Double
-dbgRenderMs = D.dbgRenderMs . dbgCore
-
-dbgPresents :: RgfwDebugSnapshot -> Word64
-dbgPresents = D.dbgPresents . dbgCore
-
-dbgWinW :: RgfwDebugSnapshot -> Float
-dbgWinW = D.dbgWinW . dbgCore
-
-dbgWinH :: RgfwDebugSnapshot -> Float
-dbgWinH = D.dbgWinH . dbgCore
-
-dbgMouseX :: RgfwDebugSnapshot -> Float
-dbgMouseX = D.dbgMouseX . dbgCore
-
-dbgMouseY :: RgfwDebugSnapshot -> Float
-dbgMouseY = D.dbgMouseY . dbgCore
-
-dbgRtsOn :: RgfwDebugSnapshot -> Bool
-dbgRtsOn = D.dbgRtsOn . dbgCore
-
-dbgGcs :: RgfwDebugSnapshot -> Word32
-dbgGcs = D.dbgGcs . dbgCore
-
-dbgMajorGcs :: RgfwDebugSnapshot -> Word32
-dbgMajorGcs = D.dbgMajorGcs . dbgCore
-
-dbgAllocMb :: RgfwDebugSnapshot -> Double
-dbgAllocMb = D.dbgAllocMb . dbgCore
-
-dbgLiveMb :: RgfwDebugSnapshot -> Double
-dbgLiveMb = D.dbgLiveMb . dbgCore
-
-dbgMaxMemMb :: RgfwDebugSnapshot -> Double
-dbgMaxMemMb = D.dbgMaxMemMb . dbgCore
-
-dbgCopiedMb :: RgfwDebugSnapshot -> Double
-dbgCopiedMb = D.dbgCopiedMb . dbgCore
-
-dbgGcPct :: RgfwDebugSnapshot -> Double
-dbgGcPct = D.dbgGcPct . dbgCore
-
-dbgLastGcGen :: RgfwDebugSnapshot -> Word32
-dbgLastGcGen = D.dbgLastGcGen . dbgCore
-
-dbgLastGcMs :: RgfwDebugSnapshot -> Double
-dbgLastGcMs = D.dbgLastGcMs . dbgCore
-
-dbgCaps :: RgfwDebugSnapshot -> Int
-dbgCaps = D.dbgCaps . dbgCore
-
-dbgCpus :: RgfwDebugSnapshot -> Int
-dbgCpus = D.dbgCpus . dbgCore
 
 data RgfwDebugSamplerState = RgfwDebugSamplerState
   { smSampler    :: !(IORef DebugSampler)
@@ -303,15 +215,16 @@ askRgfwDebug = do
 
 frameRows :: RgfwDebugSnapshot -> [(Text, Text)]
 frameRows s =
-  let totalHaskellMs = dbgUiMs s + dbgRenderMs s
-   in [ ("present", T.pack (printf "%.1f fps" (dbgPresentFps s)))
-      , ("loop", T.pack (printf "%.1f fps" (dbgLoopFps s)))
-      , ("frame cpu", T.pack (printf "%.2f ms" (dbgFrameMs s)))
+  let c = dbgCore s
+      totalHaskellMs = D.dbgUiMs c + D.dbgRenderMs c
+   in [ ("present", T.pack (printf "%.1f fps" (D.dbgPresentFps c)))
+      , ("loop", T.pack (printf "%.1f fps" (D.dbgLoopFps c)))
+      , ("frame cpu", T.pack (printf "%.2f ms" (D.dbgFrameMs c)))
       , ("haskell", T.pack (printf "%.2f ms" totalHaskellMs))
-      , ("  ui+layout", T.pack (printf "%.2f ms" (dbgUiMs s)))
-      , ("  render", T.pack (printf "%.2f ms" (dbgRenderMs s)))
+      , ("  ui+layout", T.pack (printf "%.2f ms" (D.dbgUiMs c)))
+      , ("  render", T.pack (printf "%.2f ms" (D.dbgRenderMs c)))
       , ("blit surface", T.pack (printf "%.2f ms" (dbgBlitMs s)))
-      , ("frames", T.pack (printf "%d" (dbgPresents s)))
+      , ("frames", T.pack (printf "%d" (D.dbgPresents c)))
       ]
 
 layoutRows :: RgfwDebugSnapshot -> [(Text, Text)]
@@ -322,13 +235,14 @@ layoutRows s =
 
 displayRows :: RgfwDebugSnapshot -> [(Text, Text)]
 displayRows s =
-  [ ("logical win", T.pack (printf "%.0fx%.0f" (dbgWinW s) (dbgWinH s)))
-  , ("physical win", T.pack (printf "%dx%d" (dbgPhysW s) (dbgPhysH s)))
-  , ("scale active", T.pack (printf "%.2fx" (dbgScale s)))
-  , ("scale monitor", T.pack (printf "%.2fx" (dbgMonScale s)))
-  , ("scale mode", dbgScaleMode s)
-  , ("mouse pos", T.pack (printf "%.0f, %.0f" (dbgMouseX s) (dbgMouseY s)))
-  ]
+  let c = dbgCore s
+   in [ ("logical win", T.pack (printf "%.0fx%.0f" (D.dbgWinW c) (D.dbgWinH c)))
+      , ("physical win", T.pack (printf "%dx%d" (dbgPhysW s) (dbgPhysH s)))
+      , ("scale active", T.pack (printf "%.2fx" (dbgScale s)))
+      , ("scale monitor", T.pack (printf "%.2fx" (dbgMonScale s)))
+      , ("scale mode", dbgScaleMode s)
+      , ("mouse pos", T.pack (printf "%.0f, %.0f" (D.dbgMouseX c) (D.dbgMouseY c)))
+      ]
 
 rtsRows :: RgfwDebugSnapshot -> [(Text, Text)]
 rtsRows = formatCoreRtsRows . dbgCore

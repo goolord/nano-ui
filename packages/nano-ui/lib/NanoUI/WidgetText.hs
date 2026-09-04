@@ -46,20 +46,12 @@ module NanoUI.WidgetText
   , textNodeStripe
   , tableHeaderLabel
   , tableHeaderDisplayText
-  , isCloseButtonText
-  , isTabButtonText
-  , isTableHeaderText
   , isCloseButtonStyle
   , isTabButtonStyle
   , isTableHeaderStyle
   , packButtonStyle
   , buttonVisualStyle
   , buttonFlagsFromStyle
-  , closeButtonDisplayText
-  , tabButtonDisplayText
-  , buttonDisplayText
-  , buttonFlags
-  , buttonDisplayTextFromFlags
   ) where
 
 import Data.Bits (complement, (.&.), (.|.), shiftL, shiftR)
@@ -359,35 +351,3 @@ isTabButtonStyle si = si .&. buttonFlagTab /= 0
 {-# INLINE isTableHeaderStyle #-}
 isTableHeaderStyle :: Int -> Bool
 isTableHeaderStyle si = si .&. buttonFlagTable /= 0
-
-{-# INLINE buttonFlags #-}
-buttonFlags :: Text -> (Bool, Bool, Bool)
-buttonFlags _ = (False, False, False)
-
-{-# INLINE isCloseButtonText #-}
-isCloseButtonText :: Text -> Bool
-isCloseButtonText _ = False
-
-{-# INLINE isTabButtonText #-}
-isTabButtonText :: Text -> Bool
-isTabButtonText _ = False
-
-{-# INLINE isTableHeaderText #-}
-isTableHeaderText :: Text -> Bool
-isTableHeaderText _ = False
-
-{-# INLINE buttonDisplayTextFromFlags #-}
-buttonDisplayTextFromFlags :: (Bool, Bool, Bool) -> Text -> Text
-buttonDisplayTextFromFlags _ txt = txt
-
-{-# INLINE closeButtonDisplayText #-}
-closeButtonDisplayText :: Text -> Text
-closeButtonDisplayText = id
-
-{-# INLINE tabButtonDisplayText #-}
-tabButtonDisplayText :: Text -> Text
-tabButtonDisplayText = id
-
-{-# INLINE buttonDisplayText #-}
-buttonDisplayText :: Text -> Text
-buttonDisplayText = id
