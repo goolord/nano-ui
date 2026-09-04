@@ -112,6 +112,19 @@ demoImages =
 demoAccent :: Color
 demoAccent = colorRGBA 204 102 102 255
 
+-- Spacing scale for demo layout
+gapLayout :: Float
+gapLayout = 16
+
+gapInline :: Float
+gapInline = 12
+
+gapMicro :: Float
+gapMicro = 6
+
+gapText :: Float
+gapText = 4
+
 demoUi :: NanoUI ()
 demoUi = do
   (click, setClick) <- useText ""
@@ -127,10 +140,10 @@ demoUi = do
   (treeSel, setTreeSel) <- useText "0"
   (tableSortVal, setTableSort) <- useTableSort (SortCol 0 SortAsc)
   scroll (tight (grow defaultLayout)) $
-    column (padAll 8 . gap 8 . fillW $ defaultLayout) $ do
-      panel (padXY 14 10 . gap 8 . fillW $ defaultLayout) $
+    column (padAll 16 . gap gapLayout . fillW $ defaultLayout) $ do
+      panel (padXY 14 10 . gap gapInline . fillW $ defaultLayout) $
         toolbar $ do
-          column (tight . gap 4 $ defaultLayout) $ do
+          column (tight . gap gapText $ defaultLayout) $ do
             heading "nano-ui"
             muted "SDL3 demo"
           flex
@@ -138,15 +151,15 @@ demoUi = do
           clickButton "Cancel" (setClick "Cancel")
           clickButton "About" (setAbout True)
           clickButton "Debug" (setDebug (not debugOpen))
-      row (tight . gap 8 . wrap . fillW $ defaultLayout) $ do
-        column (tight . gap 8 . fillW $ defaultLayout) $ do
+      row (tight . gap gapLayout . wrap . fillW $ defaultLayout) $ do
+        column (tight . gap gapLayout . fillW $ defaultLayout) $ do
           card $ do
             heading "State"
             let accent = fromMaybe demoAccent (colorPickerFromHex accentHex)
             kv "Feature" (onOff checked)
             kv "Volume" vol
             kv "Quality" quality
-            row (tight . gap 8 . alignMid . fillW $ defaultLayout) $ do
+            row (tight . gap gapInline . alignMid . fillW $ defaultLayout) $ do
               box (fixedWH 20 20 defaultLayout) accent
               kv "Accent" accentHex
             kv "Theme" themeName
@@ -158,7 +171,7 @@ demoUi = do
             kv "Clicked" (orDash click)
           card $ do
             heading "Gallery"
-            row (tight . gap 10 . wrap $ defaultLayout) $ do
+            row (tight . gap gapInline . wrap $ defaultLayout) $ do
               thumb (ImageId 1) "Swatch"
               thumb (ImageId 2) "Checker"
               thumb (ImageId 3) "Stripe"
@@ -186,7 +199,7 @@ demoUi = do
               setNotes notesVal
               sep
               heading "Popups & Menus"
-              row (tight . gap 8 . fillW $ defaultLayout) $ do
+              row (tight . gap gapInline . fillW $ defaultLayout) $ do
                 btnTip <- button "Hover for Tooltip"
                 tooltip btnTip "This is a floating tooltip widget!"
                 btnMenu <- button "Right-click Menu"
@@ -230,7 +243,7 @@ demoUi = do
               sep
               heading "Items"
               scroll2D (padAll 6 . fixedH 136 . fillW $ defaultLayout) $
-                column (tight . gap 0 . fillW $ defaultLayout) $
+                column (tight . gap gapText . fillW $ defaultLayout) $
                   for_ [1 .. 12 :: Int] $ \i -> do
                     void $ labelEx (tight . fillW $ defaultLayout) $ T.pack ("Item " <> show i)
             Table -> do
@@ -254,20 +267,20 @@ demoUi = do
             Plots -> do
               heading "Plots"
               muted "Auto ticks, shared scales, and decimation."
-              column (tight . gap 14 . fillW $ defaultLayout) $ do
-                column (tight . gap 4 . fillW $ defaultLayout) $ do
+              column (tight . gap gapLayout . fillW $ defaultLayout) $ do
+                column (tight . gap gapMicro . fillW $ defaultLayout) $ do
                   muted "Sine + cosine"
                   void $ plot (fillW defaultLayout) sineCosineChart
-                column (tight . gap 4 . fillW $ defaultLayout) $ do
+                column (tight . gap gapMicro . fillW $ defaultLayout) $ do
                   muted "Weekly counts"
                   void $ barChart (fillW defaultLayout) weeklyBars
-                column (tight . gap 4 . fillW $ defaultLayout) $ do
+                column (tight . gap gapMicro . fillW $ defaultLayout) $ do
                   muted "Sleep vs focus"
                   void $ plot (fillW defaultLayout) sleepFocusChart
-                column (tight . gap 4 . fillW $ defaultLayout) $ do
+                column (tight . gap gapMicro . fillW $ defaultLayout) $ do
                   muted "Area"
                   void $ areaChart (fillW defaultLayout) areaDemo
-                column (tight . gap 4 . fillW $ defaultLayout) $ do
+                column (tight . gap gapMicro . fillW $ defaultLayout) $ do
                   muted "Drawing"
                   ps <- uiPlotStyle
                   void $ diagram (fillW $ defaultLayout {layoutMaxH = 200}) (drawingSample ps)
@@ -285,7 +298,7 @@ demoUi = do
       heading "nano-ui"
       muted "Immediate-mode GUI for Haskell."
       muted "Esc closes this dialog, then the app."
-      row (gap 6 (fillW defaultLayout)) $ do
+      row (gap gapInline (fillW defaultLayout)) $ do
         flex
         clickButton "Close" (setAbout False)
   onClick aboutResp (setAbout False)
@@ -491,7 +504,7 @@ rtsRows s =
 
 thumb :: ImageId -> T.Text -> NanoUI ()
 thumb iid caption =
-  column (tight . gap 6 $ defaultLayout) $ do
+  column (tight . gap gapMicro $ defaultLayout) $ do
     image_ (fixedWH 88 88 defaultLayout) iid
     muted caption
 
