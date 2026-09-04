@@ -1,10 +1,12 @@
+{-# LANGUAGE BangPatterns #-}
+
 module NanoUI.Damage
   ( updatePrevRects
   , floatingPanelRects
   , writeDamage
   ) where
 
-import Control.Monad (foldM, forM, when)
+import Control.Monad (forM, when)
 import Data.IORef (readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Maybe (catMaybes, fromMaybe, isJust, isNothing)
@@ -134,27 +136,26 @@ updatePrevRects ctx = do
       writeIORef (ctxPrevRects ctx) IM.empty
       writeIORef (ctxPrevClips ctx) IM.empty
     else do
-      (rectAcc, clipAcc) <- foldM add (IM.empty, IM.empty) [0 .. count - 1]
-      writeIORef (ctxPrevRects ctx) rectAcc
-      writeIORef (ctxPrevClips ctx) clipAcc
-  where
-    add (m, cm) idx = do
-      wid <- getWidgetId (ctxNodeArena ctx) idx
-      (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-      if hashWidgetId wid == 0
-        then pure (m, cm)
-        else do
-          let r = Rect x y w h
-          (m', cm') <-
-            if nonzeroRect r
-              then do
-                mClip <- getClipRect (ctxNodeArena ctx) idx
-                pure
-                  ( IM.insert (intKey wid) r m
-                  , maybe cm (\c -> IM.insert (intKey wid) c cm) mClip
-                  )
-              else pure (m, cm)
-          pure (m', cm')
+      let go !i !m !cm
+            | i >= count = do
+                writeIORef (ctxPrevRects ctx) m
+                writeIORef (ctxPrevClips ctx) cm
+            | otherwise = do
+                wid <- getWidgetId (ctxNodeArena ctx) i
+                if hashWidgetId wid == 0
+                  then go (i + 1) m cm
+                  else do
+                    (x, y, w, h) <- getRect (ctxNodeArena ctx) i
+                    let r = Rect x y w h
+                    if nonzeroRect r
+                      then do
+                        mClip <- getClipRect (ctxNodeArena ctx) i
+                        let !k = intKey wid
+                            !m' = IM.insert k r m
+                            !cm' = maybe cm (\c -> IM.insert k c cm) mClip
+                        go (i + 1) m' cm'
+                      else go (i + 1) m cm
+      go 0 IM.empty IM.empty
 
 floatingPanelsInOrder :: Context -> IO [(Int, Rect)]
 floatingPanelsInOrder ctx = do

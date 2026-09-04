@@ -117,6 +117,7 @@ tableSplitPanes fillInner tableWid vWid hWid rowMinH frozenIdx unfrozenIdx pinne
           pure (frozenHs ++ unfrozenHs)
  where
   freezeR = length pinned
+  scrollRowsVec = V.fromList scrollRows
   minSum idxs = sum (map (layoutMinW . colBox) idxs) + fromIntegral (max 0 (length idxs - 1))
   vLay fill =
     let base = tight . fillH $ defaultLayout {layoutGap = 0}
@@ -176,7 +177,7 @@ tableSplitPanes fillInner tableWid vWid hWid rowMinH frozenIdx unfrozenIdx pinne
             ( \rowIdx ->
                 withKey rowIdx $ do
                   when (rowIdx > 0) $ void separator
-                  let r = scrollRows !! rowIdx
+                  let r = scrollRowsVec V.! rowIdx
                   renderCell (rowIdx + freezeR) r colIdx
             )
             vis
@@ -302,9 +303,11 @@ sortRows cols sort rows =
   let n = V.length (Encode.getColonnade cols)
       idx = sortColIndex (clampSortCol n sort)
       enc = maybe (const T.empty) Encode.oneColonnadeEncode (Encode.getColonnade cols V.!? idx)
-   in case sortColDir sort of
-        SortAsc -> sortBy (\a b -> compare (enc a) (enc b)) rows
-        SortDesc -> sortBy (\a b -> compare (enc b) (enc a)) rows
+      tagged = [(enc r, r) | r <- rows]
+      sorted = case sortColDir sort of
+        SortAsc -> sortBy (\(ka, _) (kb, _) -> compare ka kb) tagged
+        SortDesc -> sortBy (\(ka, _) (kb, _) -> compare kb ka) tagged
+   in map snd sorted
 
 columnCount :: Colonnade Headed row Text -> Int
 columnCount = V.length . Encode.getColonnade
@@ -324,9 +327,11 @@ isNumericCell txt =
           _ -> False
 
 numericColumns :: Colonnade Headed row Text -> [row] -> [Bool]
+numericColumns _ [] = []
 numericColumns cols rows =
   let n = length (columnHeaders cols)
-   in [let cells = [columnCells cols r !! i | r <- rows] in not (null cells) && all isNumericCell cells | i <- [0 .. n - 1]]
+      rowVecs = [Encode.row id cols r | r <- rows]
+   in [let cells = [v V.! i | v <- rowVecs] in not (null cells) && all isNumericCell cells | i <- [0 .. n - 1]]
 
 columnWidths :: Context -> Colonnade Headed row Text -> [row] -> [Float]
 columnWidths ctx cols rows =
@@ -339,14 +344,20 @@ columnWidths ctx cols rows =
       headerPadX = cellPadX
       measure metrics txt = textDisplayWidth host metrics txt
       hdrs = columnHeaders cols
-      numeric = numericColumns cols rows
+      rowVecs = [Encode.row id cols r | r <- rows]
+      numCols = length hdrs
+      isColNum i = not (null rowVecs) && all (\v -> isNumericCell (v V.! i)) rowVecs
+      numeric = [isColNum i | i <- [0 .. numCols - 1]]
       hdrW hdr = measure fm (hdr <> tableSortReserve terminal) + headerPadX
       cellW i txt =
         if listAt numeric i False
           then measure mono txt + cellPadX
           else measure fm txt + cellPadX
    in zipWith
-        (\hdr i -> maximum (minColW : hdrW hdr : [cellW i (columnCells cols r !! i) | r <- rows]))
+        (\hdr i ->
+           let maxCell = foldl' (\acc v -> max acc (cellW i (v V.! i))) minColW rowVecs
+            in max (hdrW hdr) maxCell
+        )
         hdrs
         [0 ..]
 
