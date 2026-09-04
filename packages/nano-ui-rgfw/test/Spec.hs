@@ -221,7 +221,7 @@ testTextInputContextMenuActions = do
               (\t -> writeIORef clipRef t >> pure True)
       wid = WidgetId 101
       key = intKey wid
-  idx <- addNode (ctxNodeArena ctx) NodeTextInput (-1) Column Fit Fit (Padding 0 0 0 0) 0 0 0 1e9 1e9 0 AlignStart AlignTop False
+  idx <- addNode (ctxNodeArena ctx) NodeTextInput (-1) Column Fit Fit (Padding 0 0 0 0) 0 0 0 1e9 1e9 0 AlignStart AlignTop
   setWidgetId (ctxNodeArena ctx) idx wid
 
   -- Setup text "hello world" with "world" selected (anchor=6, cursor=11)
@@ -267,7 +267,7 @@ testTextAreaContextMenuActions = do
               (\t -> writeIORef clipRef t >> pure True)
       wid = WidgetId 202
       key = intKey wid
-  idx <- addNode (ctxNodeArena ctx) NodeTextArea (-1) Column Fit Fit (Padding 0 0 0 0) 0 0 0 1e9 1e9 0 AlignStart AlignTop False
+  idx <- addNode (ctxNodeArena ctx) NodeTextArea (-1) Column Fit Fit (Padding 0 0 0 0) 0 0 0 1e9 1e9 0 AlignStart AlignTop
   setWidgetId (ctxNodeArena ctx) idx wid
 
   -- Setup text "first line\nsecond line"
@@ -509,22 +509,22 @@ testZIndexRenderArena = do
   ctx <- newPixelContext
 
   na <- newNodeArena
-  root <- addNode na NodeContainer (-1) Column (Fixed 100) (Fixed 100) (Padding 0 0 0 0) 0 0 0 100 100 0 AlignStart AlignTop False
+  root <- addNode na NodeContainer (-1) Column (Fixed 100) (Fixed 100) (Padding 0 0 0 0) 0 0 0 100 100 0 AlignStart AlignTop
 
   -- Insert in reverse layer order to verify topological Z-layering works regardless of insertion order:
-  pop <- addNode na NodePopup root Column (Fixed 40) (Fixed 40) (Padding 0 0 0 0) 0 0 0 100 100 0 AlignStart AlignTop False
+  pop <- addNode na NodePopup root Column (Fixed 40) (Fixed 40) (Padding 0 0 0 0) 0 0 0 100 100 0 AlignStart AlignTop
   setRect na pop 40 40 40 40
-  b3 <- addNode na NodeBox pop Column (Fixed 40) (Fixed 40) (Padding 0 0 0 0) 0 0 0 100 100 0 AlignStart AlignTop False
+  b3 <- addNode na NodeBox pop Column (Fixed 40) (Fixed 40) (Padding 0 0 0 0) 0 0 0 100 100 0 AlignStart AlignTop
   setStyleIdx na b3 (fromIntegral (0x778899FF :: Word32))
   setRect na b3 40 40 40 40
 
-  w <- addNode na NodeWindow root Column (Fixed 60) (Fixed 60) (Padding 0 0 0 0) 0 0 0 100 100 0 AlignStart AlignTop False
+  w <- addNode na NodeWindow root Column (Fixed 60) (Fixed 60) (Padding 0 0 0 0) 0 0 0 100 100 0 AlignStart AlignTop
   setRect na w 20 20 60 60
-  b2 <- addNode na NodeBox w Column (Fixed 60) (Fixed 60) (Padding 0 0 0 0) 0 0 0 100 100 0 AlignStart AlignTop False
+  b2 <- addNode na NodeBox w Column (Fixed 60) (Fixed 60) (Padding 0 0 0 0) 0 0 0 100 100 0 AlignStart AlignTop
   setStyleIdx na b2 (fromIntegral (0x445566FF :: Word32))
   setRect na b2 20 20 60 60
 
-  b1 <- addNode na NodeBox root Column (Fixed 80) (Fixed 80) (Padding 0 0 0 0) 0 0 0 100 100 0 AlignStart AlignTop False
+  b1 <- addNode na NodeBox root Column (Fixed 80) (Fixed 80) (Padding 0 0 0 0) 0 0 0 100 100 0 AlignStart AlignTop
   setStyleIdx na b1 (fromIntegral (0x112233FF :: Word32))
   setRect na b1 0 0 80 80
 

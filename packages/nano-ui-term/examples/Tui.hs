@@ -60,14 +60,14 @@ tuiApp st = do
             muted "Immediate-mode GUI for Haskell."
             sep
             checked <-
-              row (stack {layoutWrap = True, layoutHeight = Fit}) $ do
+              row (stack {layoutHeight = Fit}) $ do
                 ok <- button "OK"
                 when (respClicked ok) $ emit (Clicked "OK")
                 cancel <- button "Cancel"
                 when (respClicked cancel) $ emit (Clicked "Cancel")
                 (_, c) <- checkbox "Feature" False
                 pure c
-            row (stack {layoutWrap = True, layoutHeight = Fit}) $ do
+            row (stack {layoutHeight = Fit}) $ do
               clickButton "About" (setAbout True)
               clickButton "Debug" (setDebug True)
             sep

@@ -33,7 +33,7 @@ import NanoUI.Layout.Arena
   , arenaCount
   , getDirection
   , getFirstChild
-  , getAspect
+  , getScrollContentW
   , getLayoutRect
   , getNextSibling
   , getNodeValue
@@ -117,7 +117,7 @@ transformSubtree ctx idx scrollX scrollY parentClip = do
             if isScrollStyle2D si
               then do
                 contentH <- getNodeValue na idx
-                contentW <- getAspect na idx
+                contentW <- getScrollContentW na idx
                 let cfg = decodeScrollConfig si
                     viewport2d =
                       scrollViewportClip2D
@@ -282,7 +282,7 @@ tryApplyScrollWheelDelta ctx wid scroll = do
           innerH = h - padT pad - padB pad
       if isScrollStyle2D si
         then do
-          contentW <- getAspect (ctxNodeArena ctx) idx
+          contentW <- getScrollContentW (ctxNodeArena ctx) idx
           contentH <- getNodeValue (ctxNodeArena ctx) idx
           V2 curX curY <- getScrollOffset2D ctx wid
           let maxX = max 0 (contentW - innerW)
@@ -392,7 +392,7 @@ scrollHitClip ctx idx nt parentClip = do
         if isScrollStyle2D si
           then do
             contentH <- getNodeValue (ctxNodeArena ctx) idx
-            contentW <- getAspect (ctxNodeArena ctx) idx
+            contentW <- getScrollContentW (ctxNodeArena ctx) idx
             pure $
               scrollViewportClip2D (ctxHostProfile ctx) fm slot cfg x y w h pad contentW contentH
           else do
@@ -606,7 +606,7 @@ drawScrollBar ctx da idx wid x y w h pad theme terminal = do
     then do
       let cfg = decodeScrollConfig si
       contentH <- getNodeValue (ctxNodeArena ctx) idx
-      contentW <- getAspect (ctxNodeArena ctx) idx
+      contentW <- getScrollContentW (ctxNodeArena ctx) idx
       V2 offX offY <- getScrollOffset2D ctx wid
       when (scrollChromeActive cfg True DirColumn contentH innerH) $
         drawAxis DirColumn contentH offY

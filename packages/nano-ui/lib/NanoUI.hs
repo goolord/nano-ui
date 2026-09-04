@@ -75,10 +75,11 @@ module NanoUI
   , alignCenter
   , alignTop
   , alignBottom
-  , wrap
   , tight
   , percent
-  , aspect
+  , gridMinColW
+  , fixedAspectW
+  , fixedAspectH
   , gridCols
   , cols
   , LayoutModifier
@@ -145,6 +146,14 @@ module NanoUI
   , gridPanelWith
   , gridPanel'
   , gridPanelResponse
+  , gridAutoFit
+  , gridAutoFit_
+  , gridAutoFitWith
+  , gridAutoFit'
+  , gridAutoFitResponse
+  , responsive
+  , responsiveRowCol
+  , windowAspect
   , label
   , labelEx
   , label_
@@ -202,6 +211,9 @@ module NanoUI
   , tree
   , modal
   , window
+  , windowSize
+  , windowWidth
+  , windowHeight
   , Tab (..)
   , TabStyle (..)
   , TabOrientation (..)
@@ -415,6 +427,9 @@ import NanoUI.Monad
   , uiFontMetrics
   , uiTheme
   , uiMousePos
+  , windowSize
+  , windowWidth
+  , windowHeight
   , withKey
   )
 import NanoUI.Animation
@@ -440,7 +455,9 @@ import NanoUI.Style
   , alignMid
   , alignStart
   , alignTop
-  , aspect
+  , fixedAspectW
+  , fixedAspectH
+  , gridMinColW
   , cols
   , gridCols
   , defaultLayout
@@ -467,7 +484,9 @@ import NanoUI.Style
   , tight
   , windowMargin
   , windowPad
-  , wrap
+  , gridMinColW
+  , fixedAspectW
+  , fixedAspectH
   )
 import NanoUI.Types
   ( Color (..)
@@ -650,6 +669,14 @@ import NanoUI.Widgets.Layout
   , gridPanelWith
   , gridPanel'
   , gridPanelResponse
+  , gridAutoFit
+  , gridAutoFit_
+  , gridAutoFitWith
+  , gridAutoFit'
+  , gridAutoFitResponse
+  , responsive
+  , responsiveRowCol
+  , windowAspect
   , flexCol
   , flexRow
   , hGroup

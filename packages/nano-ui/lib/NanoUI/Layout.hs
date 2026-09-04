@@ -27,10 +27,11 @@ module NanoUI.Layout
   , alignCenter
   , alignTop
   , alignBottom
-  , wrap
   , tight
   , percent
-  , aspect
+  , gridMinColW
+  , fixedAspectW
+  , fixedAspectH
   , FontVariant (..)
   , fontRegular
   , fontHeading
@@ -47,6 +48,14 @@ module NanoUI.Layout
   , columnWith
   , column'
   , columnResponse
+  , gridAutoFit
+  , gridAutoFit_
+  , gridAutoFitWith
+  , gridAutoFit'
+  , gridAutoFitResponse
+  , responsive
+  , responsiveRowCol
+  , windowAspect
   , panel
   , panel_
   , panelWith
@@ -87,10 +96,11 @@ import NanoUI.Style
   , alignMid
   , alignStart
   , alignTop
-  , aspect
   , defaultLayout
   , fillH
   , fillW
+  , fixedAspectH
+  , fixedAspectW
   , fixedH
   , fixedW
   , fixedWH
@@ -99,13 +109,13 @@ import NanoUI.Style
   , fontMuted
   , fontRegular
   , gap
+  , gridMinColW
   , grow
   , minW
   , padAll
   , padXY
   , percent
   , tight
-  , wrap
   )
 import NanoUI.Widgets.Layout
   ( center
@@ -117,18 +127,26 @@ import NanoUI.Widgets.Layout
   , flex
   , flexCol
   , flexRow
+  , gridAutoFit
+  , gridAutoFit'
+  , gridAutoFitResponse
+  , gridAutoFitWith
+  , gridAutoFit_
   , hGroup
   , panel
   , panel'
   , panelResponse
   , panelWith
   , panel_
+  , responsive
+  , responsiveRowCol
   , row
   , row'
   , rowResponse
   , rowWith
   , row_
   , scroll
+  , windowAspect
   , scroll2D
   , scrollArea
   , scrollArea2D

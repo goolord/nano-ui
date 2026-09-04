@@ -373,12 +373,12 @@ benchLabels = column (tight . gap 2 . fillW $ defaultLayout) $
     label (T.pack ("This is label text number " <> show i))
 
 benchBoxes :: NanoUI ()
-benchBoxes = row (tight . gap 2 . wrap . fillW $ defaultLayout) $
+benchBoxes = grid 10 (tight . gap 2 . fillW $ defaultLayout) $
   forM_ [1 .. 100 :: Int] $ \i ->
     box (fixedWH 20 20 defaultLayout) (colorRGBA (fromIntegral (i * 2)) 120 200 255)
 
 benchImages :: NanoUI ()
-benchImages = row (tight . gap 2 . wrap . fillW $ defaultLayout) $
+benchImages = grid 10 (tight . gap 2 . fillW $ defaultLayout) $
   forM_ [1 .. 100 :: Int] $ \i ->
     image_ (fixedWH 24 24 defaultLayout) (ImageId (1 + i `mod` 3))
 

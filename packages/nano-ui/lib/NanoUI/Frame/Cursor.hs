@@ -28,7 +28,7 @@ import NanoUI.Layout.Arena
   ( DirTag (..)
   , NodeType (..)
   , arenaCount
-  , getAspect
+  , getScrollContentW
   , getDirection
   , getNodeType
   , getNodeValue
@@ -171,7 +171,7 @@ scrollThumbHit ctx mouse = do
                 if isScrollStyle2D si
                   then do
                     contentH <- getNodeValue (ctxNodeArena ctx) idx
-                    contentW <- getAspect (ctxNodeArena ctx) idx
+                    contentW <- getScrollContentW (ctxNodeArena ctx) idx
                     V2 offX offY <- getScrollOffset2D ctx wid
                     let hitY =
                           scrollShowsChrome cfg True DirColumn

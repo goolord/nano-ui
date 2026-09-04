@@ -22,7 +22,7 @@ module Cases
   , runFitSizingTest
   , runFitMutedWidthTest
   , runFlexShrinkTest
-  , runFlexWrapTest
+  , runGridTest
   , runGrowFitsWindowTest
   , runGrowWrapPushesSiblingTest
   , runHostProfileGapTest
@@ -203,7 +203,7 @@ runRowPanelLayoutTest ctx failed = do
 runColumnCardWrapTest :: Context -> IORef Int -> IO ()
 runColumnCardWrapTest ctx failed = do
   let inp = withInput 520 800
-      ui = row (tight . gap 8 . wrap . fillW $ defaultLayout) $ do
+      ui = responsiveRowCol 720 (tight . gap 8 . fillW $ defaultLayout) $ do
         column (tight . gap 8 . fillW $ defaultLayout) (card (void (label "LeftTop")) >> card (void (label "LeftBot")))
         card (void (label "Right"))
   _ <- runFrame ctx inp ui
@@ -215,7 +215,7 @@ runColumnCardWrapTest ctx failed = do
 runTwoCardWrapTest :: Context -> IORef Int -> IO ()
 runTwoCardWrapTest ctx failed = do
   let inp = withInput 520 800
-      ui = row (tight . gap 8 . wrap . fillW $ defaultLayout) (card (void (label "CardA")) >> card (void (label "CardB")))
+      ui = responsiveRowCol 720 (tight . gap 8 . fillW $ defaultLayout) (card (void (label "CardA")) >> card (void (label "CardB")))
   _ <- runFrame ctx inp ui
   spans <- collectTextSpans ctx
   case (spanYOf "CardA" spans, spanYOf "CardB" spans) of
@@ -225,7 +225,7 @@ runTwoCardWrapTest ctx failed = do
 runDemoWrapWideOrderTest :: Context -> IORef Int -> IO ()
 runDemoWrapWideOrderTest ctx failed = do
   let inp = withInput 1200 800
-      ui = row (tight . gap 8 . wrap . fillW $ defaultLayout) $ do
+      ui = responsiveRowCol 720 (tight . gap 8 . fillW $ defaultLayout) $ do
         column (tight . gap 8 . fillW $ defaultLayout) (card (void (label "State")) >> card (void (label "Gallery")))
         card (void (label "Controls"))
   _ <- runFrame ctx inp ui
@@ -494,10 +494,10 @@ runTextMultilineTest _ failed = do
     [a, b, c] -> assert failed (b == a + 1 && c == b + 1)
     _ -> assert failed False
 
-runFlexWrapTest :: Context -> IORef Int -> IO ()
-runFlexWrapTest _ failed = do
+runGridTest :: Context -> IORef Int -> IO ()
+runGridTest _ failed = do
   ctx <- newCellContext
-  let ui = row (defaultLayout {layoutWrap = True, layoutWidth = Fixed 4, layoutGap = 0, layoutPadding = Padding 0 0 0 0})
+  let ui = grid 2 (defaultLayout {layoutWidth = Fixed 4, layoutGap = 0, layoutPadding = Padding 0 0 0 0})
              (label "AA" >> label "BB" >> label "CC" >> label "DD" >> pure ())
   _ <- runFrame ctx (withInput 30 10) ui
   spans <- collectTextSpans ctx
@@ -546,7 +546,7 @@ runLabelAlignEndTest _ failed = do
 runAspectLayoutTest :: Context -> IORef Int -> IO ()
 runAspectLayoutTest ctx failed = do
   let inp = withInput 320 240
-      ui = column (fixedW 160 . tight $ defaultLayout) (labelEx (fillW . aspect 2 . tight $ defaultLayout) "X")
+      ui = column (fixedW 160 . tight $ defaultLayout) (labelEx (fixedAspectW 160 2 . tight $ defaultLayout) "X")
   resp <- warmup2 ctx inp ui
   let Rect _ _ w h = respRect resp
   assert failed (abs (w - 160) <= 1 && abs (h - 80) <= 1)
@@ -556,7 +556,7 @@ runGrowWrapPushesSiblingTest _ failed = do
   ctx <- newCellContext
   let inp = withInput 6 20
       ui = column (defaultLayout {layoutWidth = Grow 1, layoutHeight = Grow 1, layoutPadding = Padding 0 0 0 0, layoutGap = 0}) $ do
-        row (defaultLayout {layoutWidth = Grow 1, layoutWrap = True, layoutPadding = Padding 0 0 0 0, layoutGap = 0})
+        grid 1 (defaultLayout {layoutWidth = Grow 1, layoutPadding = Padding 0 0 0 0, layoutGap = 0})
           (label "AAAA" >> label "BBBB" >> pure ())
         label "BELOW"
   _ <- runFrame ctx inp ui

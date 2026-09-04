@@ -22,7 +22,7 @@ main = do
           (defaultLayout {layoutWidth = Grow 1, layoutHeight = Grow 1, layoutGap = 8})
           ( do
               replicateM_ 12 $
-                row (defaultLayout {layoutGap = 8, layoutWrap = True}) $
+                grid 8 (defaultLayout {layoutGap = 8}) $
                   replicateM_ 8 (void (button "OK"))
               label "nano-ui profile loop"
           )

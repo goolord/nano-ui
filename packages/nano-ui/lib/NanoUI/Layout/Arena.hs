@@ -28,16 +28,17 @@ module NanoUI.Layout.Arena
   , getDirection
   , getGridCols
   , setGridCols
+  , getGridMinColW
+  , setGridMinColW
+  , getScrollContentW
+  , setScrollContentW
   , getWidthSizing
   , getHeightSizing
   , getPadding
   , getGap
   , getMinMax
   , getGrow
-  , getAspect
-  , setAspect
-  , getWrap
-  , parentIsNonWrapRow
+  , parentIsRow
   , getAlignX
   , getAlignY
   , getRect
@@ -196,7 +197,7 @@ initialCapacity = 256
 newNodeArenaArrays :: Int -> IO NodeArenaArrays
 newNodeArenaArrays cap = do
   naArrGeom <- newPrimArray (cap * 10)
-  naArrStyle <- newPrimArray (cap * 14)
+  naArrStyle <- newPrimArray (cap * 16)
   naArrTags <- newPrimArray (cap * 8)
   naArrTree <- newPrimArray (cap * 8)
   naArrTextStore <- newArray cap T.empty
@@ -292,7 +293,7 @@ ensureCapacity na needed = do
       let newCap = cap * 2
       a <- readIORef (naArrays na)
       naArrGeom <- growPrimArrayCopy (naArrGeom a) (cap * 10) (newCap * 10) 0
-      naArrStyle <- growPrimArrayCopy (naArrStyle a) (cap * 14) (newCap * 14) 0
+      naArrStyle <- growPrimArrayCopy (naArrStyle a) (cap * 16) (newCap * 16) 0
       naArrTags <- growPrimArrayCopy (naArrTags a) (cap * 8) (newCap * 8) 0
       naArrTree <- growPrimArrayCopy (naArrTree a) (cap * 8) (newCap * 8) 0
       naArrTextStore <- growTextStoreCopy (naArrTextStore a) cap newCap
@@ -380,9 +381,8 @@ addNode ::
   Float ->
   AlignX ->
   AlignY ->
-  Bool ->
   IO NodeIdx
-addNode na nt parent dir wSiz hSiz pad gap minW minH maxW maxH grow ax ay wrap = do
+addNode na nt parent dir wSiz hSiz pad gap minW minH maxW maxH grow ax ay = do
   idx <- readIORef (naCount na)
   ensureCapacity na (idx + 1)
   let (wTag, wVal) = sizingTag wSiz
@@ -401,7 +401,7 @@ addNode na nt parent dir wSiz hSiz pad gap minW minH maxW maxH grow ax ay wrap =
   writePrimArray (naArrGeom a) (gBase + 8) 0
   writePrimArray (naArrGeom a) (gBase + 9) 0
 
-  let sBase = idx * 14
+  let sBase = idx * 16
   writePrimArray (naArrStyle a) (sBase + 0) wVal
   writePrimArray (naArrStyle a) (sBase + 1) hVal
   writePrimArray (naArrStyle a) (sBase + 2) (padL pad)
@@ -416,13 +416,15 @@ addNode na nt parent dir wSiz hSiz pad gap minW minH maxW maxH grow ax ay wrap =
   writePrimArray (naArrStyle a) (sBase + 11) grow
   writePrimArray (naArrStyle a) (sBase + 12) 0
   writePrimArray (naArrStyle a) (sBase + 13) 0
+  writePrimArray (naArrStyle a) (sBase + 14) 0
+  writePrimArray (naArrStyle a) (sBase + 15) 0
 
   let tagBase = idx * 8
   writePrimArray (naArrTags a) (tagBase + 0) (fromIntegral (fromEnum nt))
   writePrimArray (naArrTags a) (tagBase + 1) (fromIntegral (fromEnum (dirTag dir)))
   writePrimArray (naArrTags a) (tagBase + 2) (fromIntegral (fromEnum wTag))
   writePrimArray (naArrTags a) (tagBase + 3) (fromIntegral (fromEnum hTag))
-  writePrimArray (naArrTags a) (tagBase + 4) (if wrap then 1 else 0)
+  writePrimArray (naArrTags a) (tagBase + 4) 0
   writePrimArray (naArrTags a) (tagBase + 5) (alignXTag ax)
   writePrimArray (naArrTags a) (tagBase + 6) (alignYTag ay)
   writePrimArray (naArrTags a) (tagBase + 7) 0
@@ -469,9 +471,8 @@ addNodeFromLayout na nt parent l = do
       0
       (layoutAlignX l)
       (layoutAlignY l)
-      (layoutWrap l)
-  setAspect na idx (layoutAspect l)
   setGridCols na idx (layoutGridCols l)
+  setGridMinColW na idx (layoutGridMinColW l)
   pure idx
 
 {-# INLINE setNodeText #-}
@@ -518,7 +519,7 @@ getWidthSizing :: NodeArena -> NodeIdx -> IO (SizingTag, Float)
 getWidthSizing na idx = do
   a <- arenaArrays na
   tag <- readPrimArray (naArrTags a) (idx * 8 + 2)
-  val <- readPrimArray (naArrStyle a) (idx * 14)
+  val <- readPrimArray (naArrStyle a) (idx * 16)
   pure (toEnum (fromIntegral tag), val)
 
 {-# INLINE getHeightSizing #-}
@@ -526,14 +527,14 @@ getHeightSizing :: NodeArena -> NodeIdx -> IO (SizingTag, Float)
 getHeightSizing na idx = do
   a <- arenaArrays na
   tag <- readPrimArray (naArrTags a) (idx * 8 + 3)
-  val <- readPrimArray (naArrStyle a) (idx * 14 + 1)
+  val <- readPrimArray (naArrStyle a) (idx * 16 + 1)
   pure (toEnum (fromIntegral tag), val)
 
 {-# INLINE getPadding #-}
 getPadding :: NodeArena -> NodeIdx -> IO Padding
 getPadding na idx = do
   a <- arenaArrays na
-  let base = idx * 14
+  let base = idx * 16
   l <- readPrimArray (naArrStyle a) (base + 2)
   r <- readPrimArray (naArrStyle a) (base + 3)
   t <- readPrimArray (naArrStyle a) (base + 4)
@@ -546,13 +547,13 @@ getNodePadding = getPadding
 
 {-# INLINE getGap #-}
 getGap :: NodeArena -> NodeIdx -> IO Float
-getGap na idx = arenaArrays na >>= \a -> readPrimArray (naArrStyle a) (idx * 14 + 6)
+getGap na idx = arenaArrays na >>= \a -> readPrimArray (naArrStyle a) (idx * 16 + 6)
 
 {-# INLINE getMinMax #-}
 getMinMax :: NodeArena -> NodeIdx -> IO (Float, Float, Float, Float)
 getMinMax na idx = do
   a <- arenaArrays na
-  let base = idx * 14
+  let base = idx * 16
   minW <- readPrimArray (naArrStyle a) (base + 7)
   minH <- readPrimArray (naArrStyle a) (base + 8)
   maxW <- readPrimArray (naArrStyle a) (base + 9)
@@ -565,30 +566,33 @@ getNodeMinMax = getMinMax
 
 {-# INLINE getGrow #-}
 getGrow :: NodeArena -> NodeIdx -> IO Float
-getGrow na idx = arenaArrays na >>= \a -> readPrimArray (naArrStyle a) (idx * 14 + 11)
+getGrow na idx = arenaArrays na >>= \a -> readPrimArray (naArrStyle a) (idx * 16 + 11)
 
-{-# INLINE getAspect #-}
-getAspect :: NodeArena -> NodeIdx -> IO Float
-getAspect na idx = arenaArrays na >>= \a -> readPrimArray (naArrStyle a) (idx * 14 + 12)
+{-# INLINE getScrollContentW #-}
+getScrollContentW :: NodeArena -> NodeIdx -> IO Float
+getScrollContentW na idx = arenaArrays na >>= \a -> readPrimArray (naArrStyle a) (idx * 16 + 12)
 
-{-# INLINE setAspect #-}
-setAspect :: NodeArena -> NodeIdx -> Float -> IO ()
-setAspect na idx v = arenaArrays na >>= \a -> writePrimArray (naArrStyle a) (idx * 14 + 12) v
+{-# INLINE setScrollContentW #-}
+setScrollContentW :: NodeArena -> NodeIdx -> Float -> IO ()
+setScrollContentW na idx v = arenaArrays na >>= \a -> writePrimArray (naArrStyle a) (idx * 16 + 12) v
 
-{-# INLINE getWrap #-}
-getWrap :: NodeArena -> NodeIdx -> IO Bool
-getWrap na idx = arenaArrays na >>= \a -> readPrimArray (naArrTags a) (idx * 8 + 4) >>= pure . (/= 0)
+{-# INLINE getGridMinColW #-}
+getGridMinColW :: NodeArena -> NodeIdx -> IO Float
+getGridMinColW na idx = arenaArrays na >>= \a -> readPrimArray (naArrStyle a) (idx * 16 + 14)
 
-{-# INLINE parentIsNonWrapRow #-}
-parentIsNonWrapRow :: NodeArena -> NodeIdx -> IO Bool
-parentIsNonWrapRow na idx = do
+{-# INLINE setGridMinColW #-}
+setGridMinColW :: NodeArena -> NodeIdx -> Float -> IO ()
+setGridMinColW na idx v = arenaArrays na >>= \a -> writePrimArray (naArrStyle a) (idx * 16 + 14) v
+
+{-# INLINE parentIsRow #-}
+parentIsRow :: NodeArena -> NodeIdx -> IO Bool
+parentIsRow na idx = do
   p <- getParent na idx
   if p < 0
     then pure False
     else do
       dir <- getDirection na p
-      w <- getWrap na p
-      pure (dir == DirRow && not w)
+      pure (dir == DirRow)
 
 {-# INLINE getAlignX #-}
 getAlignX :: NodeArena -> NodeIdx -> IO AlignX
@@ -725,11 +729,11 @@ lookupNodeByKey na key
 
 {-# INLINE getNodeValue #-}
 getNodeValue :: NodeArena -> NodeIdx -> IO Float
-getNodeValue na idx = arenaArrays na >>= \a -> readPrimArray (naArrStyle a) (idx * 14 + 13)
+getNodeValue na idx = arenaArrays na >>= \a -> readPrimArray (naArrStyle a) (idx * 16 + 13)
 
 {-# INLINE setNodeValue #-}
 setNodeValue :: NodeArena -> NodeIdx -> Float -> IO ()
-setNodeValue na idx v = arenaArrays na >>= \a -> writePrimArray (naArrStyle a) (idx * 14 + 13) v
+setNodeValue na idx v = arenaArrays na >>= \a -> writePrimArray (naArrStyle a) (idx * 16 + 13) v
 
 {-# INLINE getStyleIdx #-}
 getStyleIdx :: NodeArena -> NodeIdx -> IO Int

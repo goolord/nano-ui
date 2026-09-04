@@ -144,7 +144,6 @@ popupEx open cfg layout child = do
                 0
                 AlignStart
                 AlignTop
-                False
             setWidgetId (ctxNodeArena ctx) idx wid
             writeIORef (ctxContainerStack ctx) (idx : stack)
             mPrev <- getPrevRect ctx wid

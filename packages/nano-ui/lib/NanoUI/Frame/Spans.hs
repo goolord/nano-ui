@@ -64,7 +64,7 @@ import NanoUI.Layout.Arena
   , SizingTag (..)
   , arenaCount
   , getAlignX
-  , getAspect
+  , getScrollContentW
   , getClipRect
   , getDirection
   , getFirstChild
@@ -78,8 +78,7 @@ import NanoUI.Layout.Arena
   , getText
   , getWidthSizing
   , getWidgetId
-  , getWrap
-  , parentIsNonWrapRow
+  , parentIsRow
   , isFloatingNode
   , isScrollNode
   , isWidgetNode
@@ -206,7 +205,7 @@ collectClippedSpans' ctx floatCache idx nt clip arena = do
               if isScrollStyle2D si
                 then do
                   contentH <- getNodeValue (ctxNodeArena ctx) idx
-                  contentW <- getAspect (ctxNodeArena ctx) idx
+                  contentW <- getScrollContentW (ctxNodeArena ctx) idx
                   pure $
                     scrollViewportClip2D (ctxHostProfile ctx) fm slot cfg x y w h pad contentW contentH
                 else do
@@ -315,14 +314,13 @@ collectNodeTextSpans ctx floatCache idx = do
             if fvar == FontMono
               then pure (measureText (ctxHostProfile ctx) textFm txt0)
               else ctxMeasureText ctx txt0
-          isRowChild <- parentIsNonWrapRow (ctxNodeArena ctx) idx
-          wrapped <- getWrap (ctxNodeArena ctx) idx
+          isRowChild <- parentIsRow (ctxNodeArena ctx) idx
           let hasNewlines = T.any (== '\n') txt0
               wrapCap
                 | maxW < 1e8 = max 0 maxW
                 | wTag == SizingGrow && w > 0 = w
                 | otherwise = maxW
-              canWrap = (wrapped || not isRowChild) && wrapCap < 1e8
+              canWrap = not isRowChild && wrapCap < 1e8
               wrapW = max 0 (wrapCap - 2 * ix)
               lineH = layoutLineHeight (ctxHostProfile ctx) textFm
           textSpans <-
@@ -672,20 +670,18 @@ collectFloatingSpansInto ctx floatCache wanted arena = do
                 clip <-
                   if isCellHost (ctxHostProfile ctx) && nt == NodeModal
                     then pure $ terminalModalOuterClip (ctxHostProfile ctx) fm x y w h pad
-                    else
-                      if isScrollNode nt
-                        then
-                          if isScrollStyle2D si
-                            then do
-                              contentH <- getNodeValue (ctxNodeArena ctx) idx
-                              contentW <- getAspect (ctxNodeArena ctx) idx
-                              pure $
-                                scrollViewportClip2D (ctxHostProfile ctx) fm slot cfg x y w h pad contentW contentH
-                            else do
-                              contentSize <- getNodeValue (ctxNodeArena ctx) idx
-                              pure $
-                                scrollContentClip (ctxHostProfile ctx) fm slot cfg dir x y w h pad contentSize
-                        else pure $ padContentClip (ctxHostProfile ctx) fm x y w h pad
+                    else if not (isScrollNode nt)
+                      then pure $ padContentClip (ctxHostProfile ctx) fm x y w h pad
+                      else if isScrollStyle2D si
+                        then do
+                          contentH <- getNodeValue (ctxNodeArena ctx) idx
+                          contentW <- getScrollContentW (ctxNodeArena ctx) idx
+                          pure $
+                            scrollViewportClip2D (ctxHostProfile ctx) fm slot cfg x y w h pad contentW contentH
+                        else do
+                          contentSize <- getNodeValue (ctxNodeArena ctx) idx
+                          pure $
+                            scrollContentClip (ctxHostProfile ctx) fm slot cfg dir x y w h pad contentSize
                 walkChildSpans ctx floatCache idx clip arena
                 go (idx + 1)
   go 0

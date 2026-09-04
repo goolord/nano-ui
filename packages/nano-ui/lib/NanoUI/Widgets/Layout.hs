@@ -37,6 +37,14 @@ module NanoUI.Widgets.Layout
   , gridPanelWith
   , gridPanel'
   , gridPanelResponse
+  , gridAutoFit
+  , gridAutoFit_
+  , gridAutoFitWith
+  , gridAutoFit'
+  , gridAutoFitResponse
+  , responsive
+  , responsiveRowCol
+  , windowAspect
   , scroll_
   , scrollWith
   , center
@@ -69,11 +77,13 @@ import NanoUI.Layout.Arena
   , setStyleIdx
   , setWidgetId
   )
+import NanoUI.Input (Input (inputWindowSize))
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO)
 import NanoUI.Style
   ( AlignX (..)
   , Direction (..)
   , Layout (..)
+  , LayoutModifier
   , Sizing (..)
   , alignMid
   , defaultLayout
@@ -82,6 +92,7 @@ import NanoUI.Style
   , gap
   , grow
   )
+import NanoUI.Types (Size (..))
 import NanoUI.Widgets.Node
   ( Response
   , addSizingLeafNode
@@ -190,6 +201,52 @@ gridPanel' n mods = gridPanel n (foldr (.) id mods defaultLayout)
 {-# INLINE gridPanelResponse #-}
 gridPanelResponse :: Ui :> es => Int -> Layout -> Eff es a -> Eff es (a, Response)
 gridPanelResponse n layout child = containerResponse NodePanel (layout {layoutGridCols = max 1 n}) child
+
+{-# INLINE gridAutoFit #-}
+gridAutoFit :: Ui :> es => Float -> Layout -> Eff es a -> Eff es a
+gridAutoFit minW layout child = container NodeContainer (layout {layoutGridMinColW = max 1 minW}) child
+
+{-# INLINE gridAutoFit_ #-}
+gridAutoFit_ :: Ui :> es => Float -> Eff es a -> Eff es a
+gridAutoFit_ minW = gridAutoFit minW defaultLayout
+
+{-# INLINE gridAutoFitWith #-}
+gridAutoFitWith :: Ui :> es => Float -> (Layout -> Layout) -> Eff es a -> Eff es a
+gridAutoFitWith minW f = gridAutoFit minW (f defaultLayout)
+
+{-# INLINE gridAutoFit' #-}
+gridAutoFit' :: Ui :> es => Float -> [LayoutModifier] -> Eff es a -> Eff es a
+gridAutoFit' minW mods = gridAutoFit minW (foldr (.) id mods defaultLayout)
+
+{-# INLINE gridAutoFitResponse #-}
+gridAutoFitResponse :: Ui :> es => Float -> Layout -> Eff es a -> Eff es (a, Response)
+gridAutoFitResponse minW layout child = containerResponse NodeContainer (layout {layoutGridMinColW = max 1 minW}) child
+
+-- | Choose between two container builders based on window width.
+{-# INLINE responsive #-}
+responsive :: Ui :> es => Float -> (Eff es a -> Eff es a) -> (Eff es a -> Eff es a) -> Eff es a -> Eff es a
+responsive breakpoint wideContainer narrowContainer child = do
+  inp <- askInput
+  let w = sizeW (inputWindowSize inp)
+  if w >= breakpoint then wideContainer child else narrowContainer child
+
+-- | Row when window width >= breakpoint; Column when narrower.
+-- Direct replacement for flex-wrapping responsive layouts.
+{-# INLINE responsiveRowCol #-}
+responsiveRowCol :: Ui :> es => Float -> Layout -> Eff es a -> Eff es a
+responsiveRowCol breakpoint layout child = do
+  inp <- askInput
+  let w = sizeW (inputWindowSize inp)
+      dir = if w >= breakpoint then Row else Column
+  container NodeContainer (layout {layoutDirection = dir}) child
+
+-- | Width as a fraction of window width, and height locked to aspect ratio (width / height).
+{-# INLINE windowAspect #-}
+windowAspect :: Ui :> es => Float -> Float -> Layout -> Eff es Layout
+windowAspect frac ratio layout = do
+  inp <- askInput
+  let w = frac * sizeW (inputWindowSize inp)
+  pure $ layout { layoutWidth = Fixed w, layoutHeight = Fixed (w / ratio), layoutMinW = w, layoutMaxW = w }
 
 {-# INLINE label #-}
 label :: Ui :> es => Text -> Eff es Response
