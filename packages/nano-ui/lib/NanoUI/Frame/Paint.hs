@@ -50,7 +50,7 @@ import NanoUI.Layout.Arena
   , SizingTag (..)
   , arenaCount
   , forChildNodes_
-  , getAspect
+  , getScrollContentW
   , getDirection
   , getHeightSizing
   , getNodeType
@@ -206,7 +206,7 @@ lowerNodeVisible ctx occluders idx nt x y w h rect fm theme terminal da =
         if native2D
           then do
             contentH <- getNodeValue (ctxNodeArena ctx) idx
-            contentW <- getAspect (ctxNodeArena ctx) idx
+            contentW <- getScrollContentW (ctxNodeArena ctx) idx
             pure
               ( scrollChromeActive cfg True DirColumn contentH innerH
                   || scrollChromeActive cfg True DirRow contentW innerW

@@ -196,7 +196,6 @@ fitLayout fm layout d =
                     else 160
              in (h * ar, h)
       clampSize x = realToFrac (max 8 x) :: Float
-      arF = clampSize (max 0.2 ar)
    in if growW
         then
           let capH = min growPlotCapH (layoutMaxH layout)
@@ -215,7 +214,6 @@ fitLayout fm layout d =
               needH = min capH (max floorH (clampSize (probeH * k)))
            in layout
                 { layoutHeight = Fit
-                , layoutAspect = arF
                 , layoutMinW = max (layoutMinW layout) needW
                 , layoutMinH = needH
                 , layoutMaxH = max needH capH

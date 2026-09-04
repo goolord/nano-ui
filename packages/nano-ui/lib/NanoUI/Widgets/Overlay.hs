@@ -153,7 +153,6 @@ overlay kind open title child
               0
               AlignStart
               AlignTop
-              False
           setWidgetId (ctxNodeArena ctx) idx wid
           writeIORef (ctxContainerStack ctx) (idx : stack)
           when isModal (beginModal ctx)

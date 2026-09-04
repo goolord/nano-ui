@@ -154,7 +154,7 @@ testSpecs =
   , TestSpec "text-wrap" False runTextWrapTest
   , TestSpec "text-wrap-width" False runTextWrapAssignedTest
   , TestSpec "text-multiline" False runTextMultilineTest
-  , TestSpec "flex-wrap" False runFlexWrapTest
+  , TestSpec "grid-layout" False runGridTest
   , TestSpec "flex-shrink" False runFlexShrinkTest
   , TestSpec "grow-fits-window" False runGrowFitsWindowTest
   , TestSpec "percent-layout" False runPercentLayoutTest

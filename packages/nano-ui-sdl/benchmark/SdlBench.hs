@@ -35,7 +35,7 @@ mediumUi =
     (defaultLayout {layoutWidth = Grow 1, layoutHeight = Grow 1, layoutGap = 8})
     ( do
         replicateM_ 12 $
-          row (defaultLayout {layoutGap = 8, layoutWrap = True}) $
+          grid 8 (defaultLayout {layoutGap = 8}) $
             replicateM_ 8 (void (button "OK"))
         void (label "nano-ui SDL bench")
     )
@@ -45,7 +45,7 @@ largeUi =
     (defaultLayout {layoutWidth = Grow 1, layoutHeight = Grow 1, layoutGap = 6})
     ( do
         replicateM_ 20 $
-          row (defaultLayout {layoutGap = 6, layoutWrap = True}) $
+          grid 10 (defaultLayout {layoutGap = 6}) $
             replicateM_ 10 (void (button "Item"))
         replicateM_ 8 (void (label "Status line with a bit of text"))
     )

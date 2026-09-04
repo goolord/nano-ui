@@ -21,6 +21,9 @@ module NanoUI.Monad
   , uiFontMetrics
   , uiTheme
   , uiMousePos
+  , windowSize
+  , windowWidth
+  , windowHeight
   , damageWidgetNow
   , damageKeyNow
   , damageRectNow
@@ -78,8 +81,8 @@ import NanoUI.Id
   , scopeTag
   )
 import NanoUI.Style (Theme)
-import NanoUI.Input (Input, inputMousePos)
-import NanoUI.Types (DamageBounds, Rect, V2)
+import NanoUI.Input (Input, inputMousePos, inputWindowSize)
+import NanoUI.Types (DamageBounds, Rect, Size (..), V2)
 
 type NanoUI = Eff '[Ui, IOE]
 
@@ -209,6 +212,18 @@ askInput :: Ui :> es => Eff es Input
 askInput = do
   UiRep _ inp <- getStaticRep
   pure inp
+
+{-# INLINE windowSize #-}
+windowSize :: Ui :> es => Eff es Size
+windowSize = fmap inputWindowSize askInput
+
+{-# INLINE windowWidth #-}
+windowWidth :: Ui :> es => Eff es Float
+windowWidth = fmap (sizeW . inputWindowSize) askInput
+
+{-# INLINE windowHeight #-}
+windowHeight :: Ui :> es => Eff es Float
+windowHeight = fmap (sizeH . inputWindowSize) askInput
 
 {-# INLINE askHost #-}
 askHost :: (Typeable a, Ui :> es) => Eff es (Maybe a)

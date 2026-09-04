@@ -29,10 +29,11 @@ module NanoUI.Style
   , fixedWH
   , alignMid
   , alignEnd
-  , wrap
   , tight
   , percent
-  , aspect
+  , gridMinColW
+  , fixedAspectW
+  , fixedAspectH
   , gridCols
   , cols
   , FontVariant (..)
@@ -103,16 +104,15 @@ data Layout = Layout
   , layoutHeight :: !Sizing
   , layoutPadding :: !Padding
   , layoutGap :: {-# UNPACK #-} !Float
-  , layoutWrap :: !Bool
   , layoutAlignX :: !AlignX
   , layoutAlignY :: !AlignY
   , layoutMinW :: {-# UNPACK #-} !Float
   , layoutMinH :: {-# UNPACK #-} !Float
   , layoutMaxW :: {-# UNPACK #-} !Float
   , layoutMaxH :: {-# UNPACK #-} !Float
-  , layoutAspect :: {-# UNPACK #-} !Float
   , layoutFontVariant :: !FontVariant
   , layoutGridCols :: {-# UNPACK #-} !Int
+  , layoutGridMinColW :: {-# UNPACK #-} !Float
   }
   deriving (Eq, Show)
 
@@ -124,16 +124,15 @@ defaultLayout =
     , layoutHeight = Fit
     , layoutPadding = Padding 3 3 3 3
     , layoutGap = 8
-    , layoutWrap = False
     , layoutAlignX = AlignStart
     , layoutAlignY = AlignTop
     , layoutMinW = 0
     , layoutMinH = 0
     , layoutMaxW = 1e9
     , layoutMaxH = 1e9
-    , layoutAspect = 0
     , layoutFontVariant = FontRegular
     , layoutGridCols = 0
+    , layoutGridMinColW = 0
     }
 
 {-# INLINE padAll #-}
@@ -184,10 +183,6 @@ alignMid l = l {layoutAlignY = AlignMiddle}
 alignEnd :: Layout -> Layout
 alignEnd l = l {layoutAlignX = AlignEnd}
 
-{-# INLINE wrap #-}
-wrap :: Layout -> Layout
-wrap l = l {layoutWrap = True}
-
 {-# INLINE tight #-}
 tight :: Layout -> Layout
 tight l = l {layoutPadding = Padding 0 0 0 0}
@@ -196,10 +191,17 @@ tight l = l {layoutPadding = Padding 0 0 0 0}
 percent :: Float -> Layout -> Layout
 percent p l = l {layoutWidth = Percent p}
 
--- Width over height. After width is known, height becomes width / ratio.
-{-# INLINE aspect #-}
-aspect :: Float -> Layout -> Layout
-aspect r l = l {layoutAspect = r}
+{-# INLINE gridMinColW #-}
+gridMinColW :: Float -> Layout -> Layout
+gridMinColW w l = l {layoutGridMinColW = max 0 w}
+
+{-# INLINE fixedAspectW #-}
+fixedAspectW :: Float -> Float -> Layout -> Layout
+fixedAspectW w ratio = fixedWH w (w / ratio)
+
+{-# INLINE fixedAspectH #-}
+fixedAspectH :: Float -> Float -> Layout -> Layout
+fixedAspectH h ratio = fixedWH (h * ratio) h
 
 {-# INLINE gridCols #-}
 gridCols :: Int -> Layout -> Layout

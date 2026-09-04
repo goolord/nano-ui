@@ -253,7 +253,6 @@ addSizingLeafNode ctx inp wid nt dir wSiz hSiz = do
       0
       AlignStart
       AlignTop
-      False
   setWidgetId (ctxNodeArena ctx) idx wid
   resolveInteraction ctx inp wid
 

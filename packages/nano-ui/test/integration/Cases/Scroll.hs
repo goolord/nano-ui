@@ -238,7 +238,7 @@ runTableFitScrollColWidthTest _ failed = do
 runTableTabWrapRowTest :: Context -> IORef Int -> IO ()
 runTableTabWrapRowTest ctx failed = do
   let inp0 = withInput 1200 800
-      ui = row (tight . gap 8 . wrap . fillW $ defaultLayout) $ do
+      ui = row (tight . gap 8 . fillW $ defaultLayout) $ do
         card (void (label "State"))
         card $ do
           heading "Table"

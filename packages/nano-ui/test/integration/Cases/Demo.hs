@@ -50,7 +50,7 @@ runControlsTabHeightTest _ failed = do
       (name, setName) <- useText ""
       scroll (tight (grow defaultLayout)) $
         column (padAll 8 . gap 8 . fillW $ defaultLayout) $ do
-          row (tight . gap 8 . wrap . fillW $ defaultLayout) $ do
+          row (tight . gap 8 . fillW $ defaultLayout) $ do
             column (tight . gap 8 . fillW $ defaultLayout) $ do
               card $ do
                 heading "State"

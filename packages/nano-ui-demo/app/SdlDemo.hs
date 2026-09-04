@@ -200,7 +200,7 @@ demoUi = do
           clickButton "Cancel" (setClick "Cancel")
           clickButton "About" (setAbout True)
           clickButton "Debug" (setDebug (not debugOpen))
-      row (tight . gap gapLayout . wrap . fillW $ defaultLayout) $ do
+      responsiveRowCol 720 (tight . gap gapLayout . fillW $ defaultLayout) $ do
         column (tight . gap gapLayout . fillW $ defaultLayout) $ do
           card $ do
             heading "State"
@@ -220,7 +220,7 @@ demoUi = do
             kv "Clicked" (orDash click)
           card $ do
             heading "Gallery"
-            row (tight . gap gapInline . wrap $ defaultLayout) $ do
+            gridAutoFit 88 (tight . gap gapInline $ defaultLayout) $ do
               thumb (ImageId 1) "Swatch"
               thumb (ImageId 2) "Checker"
               thumb (ImageId 3) "Stripe"
