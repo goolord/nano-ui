@@ -114,6 +114,13 @@ import GHC.Word (Word8 (W8#), Word32 (W32#))
 import NanoUI.Font (FontMetrics (..), GlyphQuad (..), lineWidth)
 import NanoUI.Types (Color (..), Rect (..), rectIntersect)
 import qualified Data.Text as T
+import NanoUI.SIMD
+  ( concentricOffsetsSIMD
+  , pokeQuadGradientSIMD
+  , pokeQuadSIMD
+  , pokeVertexSIMD
+  , strokeStripNormalsSIMD
+  )
 
 data Layer = LayerBackground | LayerContent | LayerOverlay | LayerChrome
   deriving (Eq, Show, Enum, Bounded)
@@ -668,15 +675,8 @@ unpackColorF (Color w) =
 
 {-# INLINE pokeVertex #-}
 pokeVertex :: Ptr Word8 -> Int -> Float -> Float -> Float -> Float -> Float -> Float -> Float -> Float -> IO ()
-pokeVertex vp off px py r g b a u v = do
-  pokeByteOff vp off px
-  pokeByteOff vp (off + 4) py
-  pokeByteOff vp (off + 8) r
-  pokeByteOff vp (off + 12) g
-  pokeByteOff vp (off + 16) b
-  pokeByteOff vp (off + 20) a
-  pokeByteOff vp (off + 24) u
-  pokeByteOff vp (off + 28) v
+pokeVertex vp off px py r g b a u v =
+  pokeVertexSIMD vp off px py r g b a u v
 
 {-# INLINE pushQuad #-}
 pushQuad :: DrawArena -> Rect -> Float -> Float -> Float -> Float -> Color -> IO ()
@@ -686,19 +686,7 @@ pushQuad da (Rect x y w h) u0 v0 u1 v1 col = do
       !vOff = base * vertexSize
       !iOff = baseIdx * indexSize
       !baseIdxWord = fromIntegral base :: Word32
-      !x1 = x + w
-      !y1 = y + h
-      poke i px py u v = pokeVertex vp (vOff + i * vertexSize) px py r g b a u v
-  poke 0 x y u0 v0
-  poke 1 x1 y u1 v0
-  poke 2 x1 y1 u1 v1
-  poke 3 x y1 u0 v1
-  pokeByteOff ip iOff baseIdxWord
-  pokeByteOff ip (iOff + 4) (baseIdxWord + 1)
-  pokeByteOff ip (iOff + 8) (baseIdxWord + 2)
-  pokeByteOff ip (iOff + 12) baseIdxWord
-  pokeByteOff ip (iOff + 16) (baseIdxWord + 2)
-  pokeByteOff ip (iOff + 20) (baseIdxWord + 3)
+  pokeQuadSIMD vp vOff ip iOff x y w h u0 v0 u1 v1 r g b a baseIdxWord
   writeIORef (daVertexCount da) (base + 4)
   writeIORef (daIndexCount da) (baseIdx + 6)
 
@@ -711,24 +699,14 @@ pushQuadGradient da (Rect x y w h) tl tr br bl
   | otherwise = do
       setTexture da glyphAtlasTextureId
       (vp, ip, base, baseIdx) <- ensureAndAlloc da 4 6
-      let !vOff = base * vertexSize
+      let !c0 = unpackColorF tl
+          !c1 = unpackColorF tr
+          !c2 = unpackColorF br
+          !c3 = unpackColorF bl
+          !vOff = base * vertexSize
           !iOff = baseIdx * indexSize
           !baseIdxWord = fromIntegral base :: Word32
-          !x1 = x + w
-          !y1 = y + h
-          pokeVert off px py col = do
-            let !(r, g, b, a) = unpackColorF col
-            pokeVertex vp off px py r g b a whitePixelU whitePixelV
-      pokeVert vOff x y tl
-      pokeVert (vOff + 32) x1 y tr
-      pokeVert (vOff + 64) x1 y1 br
-      pokeVert (vOff + 96) x y1 bl
-      pokeByteOff ip iOff baseIdxWord
-      pokeByteOff ip (iOff + 4) (baseIdxWord + 1)
-      pokeByteOff ip (iOff + 8) (baseIdxWord + 2)
-      pokeByteOff ip (iOff + 12) baseIdxWord
-      pokeByteOff ip (iOff + 16) (baseIdxWord + 2)
-      pokeByteOff ip (iOff + 20) (baseIdxWord + 3)
+      pokeQuadGradientSIMD vp vOff ip iOff x y w h whitePixelU whitePixelV c0 c1 c2 c3 baseIdxWord
       writeIORef (daVertexCount da) (base + 4)
       writeIORef (daIndexCount da) (baseIdx + 6)
 
@@ -964,10 +942,13 @@ pushStrokeAA da x0 y0 x1 y1 bw col
               !(cr, cg, cb, ca) = unpackColorF col
           (vp, ip, base, baseIdx) <- ensureAndAlloc da 8 18
           let pokeEnd vi px py = do
-                pokeVertex vp ((base + vi) * vertexSize) (px - nx * half) (py - ny * half) cr cg cb 0 whitePixelU whitePixelV
-                pokeVertex vp ((base + vi + 1) * vertexSize) (px - nx * core) (py - ny * core) cr cg cb ca whitePixelU whitePixelV
-                pokeVertex vp ((base + vi + 2) * vertexSize) (px + nx * core) (py + ny * core) cr cg cb ca whitePixelU whitePixelV
-                pokeVertex vp ((base + vi + 3) * vertexSize) (px + nx * half) (py + ny * half) cr cg cb 0 whitePixelU whitePixelV
+                let ((p0x, p0y), (p1x, p1y), (p2x, p2y), (p3x, p3y)) =
+                      strokeStripNormalsSIMD px py nx ny (-half) (-core) core half
+                    !vBase = (base + vi) * vertexSize
+                pokeVertex vp vBase p0x p0y cr cg cb 0 whitePixelU whitePixelV
+                pokeVertex vp (vBase + 32) p1x p1y cr cg cb ca whitePixelU whitePixelV
+                pokeVertex vp (vBase + 64) p2x p2y cr cg cb ca whitePixelU whitePixelV
+                pokeVertex vp (vBase + 96) p3x p3y cr cg cb 0 whitePixelU whitePixelV
               !a = fromIntegral base :: Word32
               !b = a + 4
           pokeEnd 0 x0 y0
@@ -1006,10 +987,13 @@ pushCornerArcStroke da cx cy radius bw q col
       forM_ [0 .. n] $ \i -> do
         let !(ct, st) = cornerCosSin q i
             !v0 = base + i * 4
-        pokeVertex vp (v0 * vertexSize) (cx + innerAA * ct) (cy + innerAA * st) cr cg cb 0 whitePixelU whitePixelV
-        pokeVertex vp ((v0 + 1) * vertexSize) (cx + inner * ct) (cy + inner * st) cr cg cb ca whitePixelU whitePixelV
-        pokeVertex vp ((v0 + 2) * vertexSize) (cx + outer * ct) (cy + outer * st) cr cg cb ca whitePixelU whitePixelV
-        pokeVertex vp ((v0 + 3) * vertexSize) (cx + outerAA * ct) (cy + outerAA * st) cr cg cb 0 whitePixelU whitePixelV
+            !vBase = v0 * vertexSize
+            ((p0x, p0y), (p1x, p1y), (p2x, p2y), (p3x, p3y)) =
+              concentricOffsetsSIMD cx cy ct st innerAA inner outer outerAA
+        pokeVertex vp vBase p0x p0y cr cg cb 0 whitePixelU whitePixelV
+        pokeVertex vp (vBase + 32) p1x p1y cr cg cb ca whitePixelU whitePixelV
+        pokeVertex vp (vBase + 64) p2x p2y cr cg cb ca whitePixelU whitePixelV
+        pokeVertex vp (vBase + 96) p3x p3y cr cg cb 0 whitePixelU whitePixelV
       forM_ [0 .. n - 1] $ \i -> do
         let !a = fromIntegral (base + i * 4) :: Word32
             !b = a + 4

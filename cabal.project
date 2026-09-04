@@ -15,7 +15,17 @@ package *
   profiling-detail: late
 
 package nano-ui
-  ghc-options: -fspecialise-aggressively
+  ghc-options: -mavx2 -fspecialise-aggressively
 
 package nano-ui-sdl
-  executable-static: True
+  flags: +sdl
+  ghc-options: -mavx2 -optc-mavx2 -optc-O3
+
+package nano-ui-demo
+  flags: +sdl
+  ghc-options: -mavx2 -fspecialise-aggressively
+
+package nano-ui-term
+  ghc-options: -mavx2 -optc-mavx2 -optc-O3
+
+

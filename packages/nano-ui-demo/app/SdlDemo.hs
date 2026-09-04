@@ -53,6 +53,7 @@ import System.Console.GetOpt
   , ArgOrder (Permute)
   , OptDescr (Option)
   , getOpt
+  , usageInfo
   )
 import System.Environment (getArgs)
 import Text.Printf (printf)
@@ -63,17 +64,44 @@ import qualified Data.Text.Read as T.Read
 data DemoConfig = DemoConfig
   { cfgVsync :: !Bool
   , cfgContinuous :: !Bool
+  , cfgFullscreen :: !Bool
+  , cfgBorderless :: !Bool
+  , cfgAlwaysOnTop :: !Bool
+  , cfgWidth :: !(Maybe Float)
+  , cfgHeight :: !(Maybe Float)
+  , cfgHelp :: !Bool
   }
 
 defaultDemoConfig :: DemoConfig
-defaultDemoConfig = DemoConfig { cfgVsync = True, cfgContinuous = False }
+defaultDemoConfig =
+  DemoConfig
+    { cfgVsync = True
+    , cfgContinuous = False
+    , cfgFullscreen = False
+    , cfgBorderless = False
+    , cfgAlwaysOnTop = False
+    , cfgWidth = Nothing
+    , cfgHeight = Nothing
+    , cfgHelp = False
+    }
+
+readMaybeFloat :: String -> Maybe Float
+readMaybeFloat s = case reads s of
+  [(x, "")] -> Just x
+  _ -> Nothing
 
 options :: [OptDescr (DemoConfig -> DemoConfig)]
 options =
-  [ Option [] ["vsync"] (ReqArg (\s cfg -> cfg { cfgVsync = parseBool s }) "BOOL") "Enable or disable vsync (true/false)"
-  , Option [] ["continuous"] (NoArg (\cfg -> cfg { cfgContinuous = True, cfgVsync = False })) "Continuous unthrottled rendering (disables vsync)"
-  , Option [] ["benchmark"] (NoArg (\cfg -> cfg { cfgContinuous = True, cfgVsync = False })) "Benchmark mode: continuous rendering with vsync disabled"
-  , Option [] ["fps"] (NoArg (\cfg -> cfg { cfgContinuous = True, cfgVsync = False })) "Show uncapped FPS (continuous, vsync false)"
+  [ Option ['v'] ["vsync"] (ReqArg (\s cfg -> cfg { cfgVsync = parseBool s }) "BOOL") "Enable or disable vsync (true/false, default: true)"
+  , Option ['c'] ["continuous"] (NoArg (\cfg -> cfg { cfgContinuous = True, cfgVsync = False })) "Continuous unthrottled rendering (disables vsync)"
+  , Option ['b'] ["benchmark"] (NoArg (\cfg -> cfg { cfgContinuous = True, cfgVsync = False })) "Benchmark mode: continuous rendering with vsync disabled"
+  , Option ['f'] ["fps"] (NoArg (\cfg -> cfg { cfgContinuous = True, cfgVsync = False })) "Show uncapped FPS (continuous, vsync false)"
+  , Option ['F'] ["fullscreen"] (NoArg (\cfg -> cfg { cfgFullscreen = True })) "Launch window in fullscreen mode"
+  , Option [] ["borderless"] (NoArg (\cfg -> cfg { cfgBorderless = True })) "Launch borderless window"
+  , Option ['t'] ["always-on-top"] (NoArg (\cfg -> cfg { cfgAlwaysOnTop = True })) "Keep window always on top"
+  , Option ['W'] ["width"] (ReqArg (\s cfg -> cfg { cfgWidth = readMaybeFloat s }) "PX") "Initial window width in pixels (default: 1280)"
+  , Option ['H'] ["height"] (ReqArg (\s cfg -> cfg { cfgHeight = readMaybeFloat s }) "PX") "Initial window height in pixels (default: 800)"
+  , Option ['h', '?'] ["help"] (NoArg (\cfg -> cfg { cfgHelp = True })) "Show help and command-line options"
   ]
 
 parseBool :: String -> Bool
@@ -91,14 +119,26 @@ main = do
     then selftest
     else do
       let cfg = parseArgs args
-      runSdlApp
-        defaultSdlOptions
-          { sdlAppShouldQuit = \inp -> inputKeysElem KeyEscape (inputKeys inp)
-          , sdlAppImages = demoImages
-          , sdlAppVsync = cfgVsync cfg
-          , sdlAppContinuous = cfgContinuous cfg
-          }
-        demoUi
+      if cfgHelp cfg
+        then putStr (usageInfo "Usage: nano-ui-sdl-demo [OPTIONS]" options)
+        else do
+          let winSize = case (cfgWidth cfg, cfgHeight cfg) of
+                (Just w, Just h) -> Size w h
+                (Just w, Nothing) -> Size w 800
+                (Nothing, Just h) -> Size 1280 h
+                (Nothing, Nothing) -> Size 1280 800
+          runSdlApp
+            defaultSdlOptions
+              { sdlAppShouldQuit = \inp -> inputKeysElem KeyEscape (inputKeys inp)
+              , sdlAppImages = demoImages
+              , sdlAppVsync = cfgVsync cfg
+              , sdlAppContinuous = cfgContinuous cfg
+              , sdlWindowFullscreen = cfgFullscreen cfg
+              , sdlWindowBorderless = cfgBorderless cfg
+              , sdlWindowAlwaysOnTop = cfgAlwaysOnTop cfg
+              , sdlWindowSize = winSize
+              }
+            demoUi
 
 ------------------------------------------------------------------
 
