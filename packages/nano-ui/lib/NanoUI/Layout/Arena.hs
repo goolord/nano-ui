@@ -42,6 +42,9 @@ module NanoUI.Layout.Arena
   , getAlignY
   , getRect
   , setRect
+  , getNodeRect
+  , getNodePadding
+  , getNodeMinMax
   , getLayoutRect
   , getClipRect
   , setClipRect
@@ -164,45 +167,10 @@ data DirTag = DirRow | DirColumn
   deriving (Eq, Show, Enum, Bounded)
 
 data NodeArenaArrays = NodeArenaArrays
-  { naArrParent :: !(MutablePrimArray RealWorld Int)
-  , naArrFirstChild :: !(MutablePrimArray RealWorld Int)
-  , naArrNextSibling :: !(MutablePrimArray RealWorld Int)
-  , naArrChildCount :: !(MutablePrimArray RealWorld Int)
-  , naArrNodeType :: !(MutablePrimArray RealWorld Word8)
-  , naArrDirection :: !(MutablePrimArray RealWorld Word8)
-  , naArrWidthSizing :: !(MutablePrimArray RealWorld Word8)
-  , naArrHeightSizing :: !(MutablePrimArray RealWorld Word8)
-  , naArrWidthValue :: !(MutablePrimArray RealWorld Float)
-  , naArrHeightValue :: !(MutablePrimArray RealWorld Float)
-  , naArrPadL :: !(MutablePrimArray RealWorld Float)
-  , naArrPadR :: !(MutablePrimArray RealWorld Float)
-  , naArrPadT :: !(MutablePrimArray RealWorld Float)
-  , naArrPadB :: !(MutablePrimArray RealWorld Float)
-  , naArrGap :: !(MutablePrimArray RealWorld Float)
-  , naArrMinW :: !(MutablePrimArray RealWorld Float)
-  , naArrMinH :: !(MutablePrimArray RealWorld Float)
-  , naArrMaxW :: !(MutablePrimArray RealWorld Float)
-  , naArrMaxH :: !(MutablePrimArray RealWorld Float)
-  , naArrGrow :: !(MutablePrimArray RealWorld Float)
-  , naArrAspect :: !(MutablePrimArray RealWorld Float)
-  , naArrWrap :: !(MutablePrimArray RealWorld Word8)
-  , naArrAlignX :: !(MutablePrimArray RealWorld Word8)
-  , naArrAlignY :: !(MutablePrimArray RealWorld Word8)
-  , naArrX :: !(MutablePrimArray RealWorld Float)
-  , naArrY :: !(MutablePrimArray RealWorld Float)
-  , naArrLayoutX :: !(MutablePrimArray RealWorld Float)
-  , naArrLayoutY :: !(MutablePrimArray RealWorld Float)
-  , naArrClipX :: !(MutablePrimArray RealWorld Float)
-  , naArrClipY :: !(MutablePrimArray RealWorld Float)
-  , naArrClipW :: !(MutablePrimArray RealWorld Float)
-  , naArrClipH :: !(MutablePrimArray RealWorld Float)
-  , naArrW :: !(MutablePrimArray RealWorld Float)
-  , naArrH :: !(MutablePrimArray RealWorld Float)
-  , naArrWidgetId :: !(MutablePrimArray RealWorld WidgetId)
-  , naArrValue :: !(MutablePrimArray RealWorld Float)
-  , naArrStyleIdx :: !(MutablePrimArray RealWorld Int)
-  , naArrTextIdx :: !(MutablePrimArray RealWorld Int)
-  , naArrGridCols :: !(MutablePrimArray RealWorld Int)
+  { naArrGeom :: !(MutablePrimArray RealWorld Float)
+  , naArrStyle :: !(MutablePrimArray RealWorld Float)
+  , naArrTags :: !(MutablePrimArray RealWorld Word8)
+  , naArrTree :: !(MutablePrimArray RealWorld Int)
   , naArrTextStore :: !(MutableArray RealWorld Text)
   }
 
@@ -227,46 +195,10 @@ initialCapacity = 256
 
 newNodeArenaArrays :: Int -> IO NodeArenaArrays
 newNodeArenaArrays cap = do
-  naArrParent <- newPrimArray cap
-  naArrFirstChild <- newPrimArray cap
-  naArrNextSibling <- newPrimArray cap
-  naArrChildCount <- newPrimArray cap
-  naArrNodeType <- newPrimArray cap
-  naArrDirection <- newPrimArray cap
-  naArrWidthSizing <- newPrimArray cap
-  naArrHeightSizing <- newPrimArray cap
-  naArrWidthValue <- newPrimArray cap
-  naArrHeightValue <- newPrimArray cap
-  naArrPadL <- newPrimArray cap
-  naArrPadR <- newPrimArray cap
-  naArrPadT <- newPrimArray cap
-  naArrPadB <- newPrimArray cap
-  naArrGap <- newPrimArray cap
-  naArrMinW <- newPrimArray cap
-  naArrMinH <- newPrimArray cap
-  naArrMaxW <- newPrimArray cap
-  naArrMaxH <- newPrimArray cap
-  naArrGrow <- newPrimArray cap
-  naArrAspect <- newPrimArray cap
-  naArrWrap <- newPrimArray cap
-  naArrAlignX <- newPrimArray cap
-  naArrAlignY <- newPrimArray cap
-  naArrX <- newPrimArray cap
-  naArrY <- newPrimArray cap
-  naArrLayoutX <- newPrimArray cap
-  naArrLayoutY <- newPrimArray cap
-  naArrClipX <- newPrimArray cap
-  naArrClipY <- newPrimArray cap
-  naArrClipW <- newPrimArray cap
-  naArrClipH <- newPrimArray cap
-  naArrW <- newPrimArray cap
-  naArrH <- newPrimArray cap
-  naArrWidgetId <- newPrimArray cap
-  naArrValue <- newPrimArray cap
-  naArrStyleIdx <- newPrimArray cap
-  naArrTextIdx <- newPrimArray cap
-  naArrGridCols <- newPrimArray cap
-  setPrimArray naArrGridCols 0 cap 0
+  naArrGeom <- newPrimArray (cap * 10)
+  naArrStyle <- newPrimArray (cap * 14)
+  naArrTags <- newPrimArray (cap * 8)
+  naArrTree <- newPrimArray (cap * 8)
   naArrTextStore <- newArray cap T.empty
   pure NodeArenaArrays {..}
 
@@ -321,7 +253,8 @@ clearWidgetIndex na table n = do
   let go !i
         | i >= n = pure ()
         | otherwise = do
-            wid <- readPrimArray (naArrWidgetId a) i
+            w <- readPrimArray (naArrTree a) (i * 8 + 4)
+            let wid = WidgetId (fromIntegral w)
             when (hashWidgetId wid /= 0) $ HT.delete table wid
             go (i + 1)
   go 0
@@ -358,45 +291,10 @@ ensureCapacity na needed = do
     else do
       let newCap = cap * 2
       a <- readIORef (naArrays na)
-      naArrParent <- growPrimArrayCopy (naArrParent a) cap newCap (-1)
-      naArrFirstChild <- growPrimArrayCopy (naArrFirstChild a) cap newCap (-1)
-      naArrNextSibling <- growPrimArrayCopy (naArrNextSibling a) cap newCap (-1)
-      naArrChildCount <- growPrimArrayCopy (naArrChildCount a) cap newCap 0
-      naArrNodeType <- growPrimArrayCopy (naArrNodeType a) cap newCap 0
-      naArrDirection <- growPrimArrayCopy (naArrDirection a) cap newCap 0
-      naArrWidthSizing <- growPrimArrayCopy (naArrWidthSizing a) cap newCap 0
-      naArrHeightSizing <- growPrimArrayCopy (naArrHeightSizing a) cap newCap 0
-      naArrWidthValue <- growPrimArrayCopy (naArrWidthValue a) cap newCap 0
-      naArrHeightValue <- growPrimArrayCopy (naArrHeightValue a) cap newCap 0
-      naArrPadL <- growPrimArrayCopy (naArrPadL a) cap newCap 0
-      naArrPadR <- growPrimArrayCopy (naArrPadR a) cap newCap 0
-      naArrPadT <- growPrimArrayCopy (naArrPadT a) cap newCap 0
-      naArrPadB <- growPrimArrayCopy (naArrPadB a) cap newCap 0
-      naArrGap <- growPrimArrayCopy (naArrGap a) cap newCap 0
-      naArrMinW <- growPrimArrayCopy (naArrMinW a) cap newCap 0
-      naArrMinH <- growPrimArrayCopy (naArrMinH a) cap newCap 0
-      naArrMaxW <- growPrimArrayCopy (naArrMaxW a) cap newCap 1e9
-      naArrMaxH <- growPrimArrayCopy (naArrMaxH a) cap newCap 1e9
-      naArrGrow <- growPrimArrayCopy (naArrGrow a) cap newCap 0
-      naArrAspect <- growPrimArrayCopy (naArrAspect a) cap newCap 0
-      naArrWrap <- growPrimArrayCopy (naArrWrap a) cap newCap 0
-      naArrAlignX <- growPrimArrayCopy (naArrAlignX a) cap newCap 0
-      naArrAlignY <- growPrimArrayCopy (naArrAlignY a) cap newCap 0
-      naArrX <- growPrimArrayCopy (naArrX a) cap newCap 0
-      naArrY <- growPrimArrayCopy (naArrY a) cap newCap 0
-      naArrLayoutX <- growPrimArrayCopy (naArrLayoutX a) cap newCap 0
-      naArrLayoutY <- growPrimArrayCopy (naArrLayoutY a) cap newCap 0
-      naArrClipX <- growPrimArrayCopy (naArrClipX a) cap newCap 0
-      naArrClipY <- growPrimArrayCopy (naArrClipY a) cap newCap 0
-      naArrClipW <- growPrimArrayCopy (naArrClipW a) cap newCap 0
-      naArrClipH <- growPrimArrayCopy (naArrClipH a) cap newCap 0
-      naArrW <- growPrimArrayCopy (naArrW a) cap newCap 0
-      naArrH <- growPrimArrayCopy (naArrH a) cap newCap 0
-      naArrWidgetId <- growPrimArrayCopy (naArrWidgetId a) cap newCap (WidgetId 0)
-      naArrValue <- growPrimArrayCopy (naArrValue a) cap newCap 0
-      naArrStyleIdx <- growPrimArrayCopy (naArrStyleIdx a) cap newCap 0
-      naArrTextIdx <- growPrimArrayCopy (naArrTextIdx a) cap newCap (-1)
-      naArrGridCols <- growPrimArrayCopy (naArrGridCols a) cap newCap 0
+      naArrGeom <- growPrimArrayCopy (naArrGeom a) (cap * 10) (newCap * 10) 0
+      naArrStyle <- growPrimArrayCopy (naArrStyle a) (cap * 14) (newCap * 14) 0
+      naArrTags <- growPrimArrayCopy (naArrTags a) (cap * 8) (newCap * 8) 0
+      naArrTree <- growPrimArrayCopy (naArrTree a) (cap * 8) (newCap * 8) 0
       naArrTextStore <- growTextStoreCopy (naArrTextStore a) cap newCap
       let newA = NodeArenaArrays {..}
       writeIORef (naArrays na) newA
@@ -490,52 +388,63 @@ addNode na nt parent dir wSiz hSiz pad gap minW minH maxW maxH grow ax ay wrap =
   let (wTag, wVal) = sizingTag wSiz
       (hTag, hVal) = sizingTag hSiz
   a <- arenaArrays na
-  writePrimArray (naArrParent a) idx parent
-  writePrimArray (naArrNodeType a) idx (fromIntegral (fromEnum nt))
-  writePrimArray (naArrDirection a) idx (fromIntegral (fromEnum (dirTag dir)))
-  writePrimArray (naArrWidthSizing a) idx (fromIntegral (fromEnum wTag))
-  writePrimArray (naArrHeightSizing a) idx (fromIntegral (fromEnum hTag))
-  writePrimArray (naArrWidthValue a) idx wVal
-  writePrimArray (naArrHeightValue a) idx hVal
-  writePrimArray (naArrPadL a) idx (padL pad)
-  writePrimArray (naArrPadR a) idx (padR pad)
-  writePrimArray (naArrPadT a) idx (padT pad)
-  writePrimArray (naArrPadB a) idx (padB pad)
-  writePrimArray (naArrGap a) idx gap
-  writePrimArray (naArrMinW a) idx minW
-  writePrimArray (naArrMinH a) idx minH
-  writePrimArray (naArrMaxW a) idx maxW
-  writePrimArray (naArrMaxH a) idx maxH
-  writePrimArray (naArrGrow a) idx grow
-  writePrimArray (naArrAspect a) idx 0
-  writePrimArray (naArrWrap a) idx (if wrap then 1 else 0)
-  writePrimArray (naArrAlignX a) idx (alignXTag ax)
-  writePrimArray (naArrAlignY a) idx (alignYTag ay)
-  writePrimArray (naArrX a) idx 0
-  writePrimArray (naArrY a) idx 0
-  writePrimArray (naArrLayoutX a) idx 0
-  writePrimArray (naArrLayoutY a) idx 0
-  writePrimArray (naArrClipX a) idx 0
-  writePrimArray (naArrClipY a) idx 0
-  writePrimArray (naArrClipW a) idx 0
-  writePrimArray (naArrClipH a) idx 0
-  writePrimArray (naArrW a) idx 0
-  writePrimArray (naArrH a) idx 0
-  writePrimArray (naArrWidgetId a) idx (WidgetId 0)
-  writePrimArray (naArrValue a) idx 0
-  writePrimArray (naArrStyleIdx a) idx 0
-  writePrimArray (naArrTextIdx a) idx (-1)
-  writePrimArray (naArrGridCols a) idx 0
-  writePrimArray (naArrFirstChild a) idx (-1)
-  writePrimArray (naArrNextSibling a) idx (-1)
-  writePrimArray (naArrChildCount a) idx 0
+
+  let gBase = idx * 10
+  writePrimArray (naArrGeom a) (gBase + 0) 0
+  writePrimArray (naArrGeom a) (gBase + 1) 0
+  writePrimArray (naArrGeom a) (gBase + 2) 0
+  writePrimArray (naArrGeom a) (gBase + 3) 0
+  writePrimArray (naArrGeom a) (gBase + 4) 0
+  writePrimArray (naArrGeom a) (gBase + 5) 0
+  writePrimArray (naArrGeom a) (gBase + 6) 0
+  writePrimArray (naArrGeom a) (gBase + 7) 0
+  writePrimArray (naArrGeom a) (gBase + 8) 0
+  writePrimArray (naArrGeom a) (gBase + 9) 0
+
+  let sBase = idx * 14
+  writePrimArray (naArrStyle a) (sBase + 0) wVal
+  writePrimArray (naArrStyle a) (sBase + 1) hVal
+  writePrimArray (naArrStyle a) (sBase + 2) (padL pad)
+  writePrimArray (naArrStyle a) (sBase + 3) (padR pad)
+  writePrimArray (naArrStyle a) (sBase + 4) (padT pad)
+  writePrimArray (naArrStyle a) (sBase + 5) (padB pad)
+  writePrimArray (naArrStyle a) (sBase + 6) gap
+  writePrimArray (naArrStyle a) (sBase + 7) minW
+  writePrimArray (naArrStyle a) (sBase + 8) minH
+  writePrimArray (naArrStyle a) (sBase + 9) maxW
+  writePrimArray (naArrStyle a) (sBase + 10) maxH
+  writePrimArray (naArrStyle a) (sBase + 11) grow
+  writePrimArray (naArrStyle a) (sBase + 12) 0
+  writePrimArray (naArrStyle a) (sBase + 13) 0
+
+  let tagBase = idx * 8
+  writePrimArray (naArrTags a) (tagBase + 0) (fromIntegral (fromEnum nt))
+  writePrimArray (naArrTags a) (tagBase + 1) (fromIntegral (fromEnum (dirTag dir)))
+  writePrimArray (naArrTags a) (tagBase + 2) (fromIntegral (fromEnum wTag))
+  writePrimArray (naArrTags a) (tagBase + 3) (fromIntegral (fromEnum hTag))
+  writePrimArray (naArrTags a) (tagBase + 4) (if wrap then 1 else 0)
+  writePrimArray (naArrTags a) (tagBase + 5) (alignXTag ax)
+  writePrimArray (naArrTags a) (tagBase + 6) (alignYTag ay)
+  writePrimArray (naArrTags a) (tagBase + 7) 0
+
+  let tBase = idx * 8
+  writePrimArray (naArrTree a) (tBase + 0) parent
+  writePrimArray (naArrTree a) (tBase + 1) (-1)
+  writePrimArray (naArrTree a) (tBase + 2) (-1)
+  writePrimArray (naArrTree a) (tBase + 3) 0
+  writePrimArray (naArrTree a) (tBase + 4) 0
+  writePrimArray (naArrTree a) (tBase + 5) 0
+  writePrimArray (naArrTree a) (tBase + 6) (-1)
+  writePrimArray (naArrTree a) (tBase + 7) 0
+
   if parent >= 0
     then do
-      fc <- readPrimArray (naArrFirstChild a) parent
-      writePrimArray (naArrNextSibling a) idx fc
-      writePrimArray (naArrFirstChild a) parent idx
-      cc <- readPrimArray (naArrChildCount a) parent
-      writePrimArray (naArrChildCount a) parent (cc + 1)
+      let pBase = parent * 8
+      fc <- readPrimArray (naArrTree a) (pBase + 1)
+      writePrimArray (naArrTree a) (tBase + 2) fc
+      writePrimArray (naArrTree a) (pBase + 1) idx
+      cc <- readPrimArray (naArrTree a) (pBase + 3)
+      writePrimArray (naArrTree a) (pBase + 3) (cc + 1)
     else pure ()
   writeIORef (naCount na) (idx + 1)
   pure idx
@@ -570,95 +479,105 @@ setNodeText :: NodeArena -> NodeIdx -> Text -> IO ()
 setNodeText na idx txt = do
   a <- arenaArrays na
   writeArray (naArrTextStore a) idx txt
-  writePrimArray (naArrTextIdx a) idx idx
+  writePrimArray (naArrTree a) (idx * 8 + 6) idx
 
 {-# INLINE getParent #-}
 getParent :: NodeArena -> NodeIdx -> IO NodeIdx
-getParent na idx = arenaArrays na >>= \a -> readPrimArray (naArrParent a) idx
+getParent na idx = arenaArrays na >>= \a -> readPrimArray (naArrTree a) (idx * 8)
 
 {-# INLINE getFirstChild #-}
 getFirstChild :: NodeArena -> NodeIdx -> IO NodeIdx
-getFirstChild na idx = arenaArrays na >>= \a -> readPrimArray (naArrFirstChild a) idx
+getFirstChild na idx = arenaArrays na >>= \a -> readPrimArray (naArrTree a) (idx * 8 + 1)
 
 {-# INLINE getNextSibling #-}
 getNextSibling :: NodeArena -> NodeIdx -> IO NodeIdx
-getNextSibling na idx = arenaArrays na >>= \a -> readPrimArray (naArrNextSibling a) idx
+getNextSibling na idx = arenaArrays na >>= \a -> readPrimArray (naArrTree a) (idx * 8 + 2)
 
 {-# INLINE getChildCount #-}
 getChildCount :: NodeArena -> NodeIdx -> IO Int
-getChildCount na idx = arenaArrays na >>= \a -> readPrimArray (naArrChildCount a) idx
+getChildCount na idx = arenaArrays na >>= \a -> readPrimArray (naArrTree a) (idx * 8 + 3)
 
 {-# INLINE getNodeType #-}
 getNodeType :: NodeArena -> NodeIdx -> IO NodeType
-getNodeType na idx = arenaArrays na >>= \a -> readPrimArray (naArrNodeType a) idx >>= pure . toEnum . fromIntegral
+getNodeType na idx = arenaArrays na >>= \a -> readPrimArray (naArrTags a) (idx * 8) >>= pure . toEnum . fromIntegral
 
 {-# INLINE getDirection #-}
 getDirection :: NodeArena -> NodeIdx -> IO DirTag
-getDirection na idx = arenaArrays na >>= \a -> readPrimArray (naArrDirection a) idx >>= pure . toEnum . fromIntegral
+getDirection na idx = arenaArrays na >>= \a -> readPrimArray (naArrTags a) (idx * 8 + 1) >>= pure . toEnum . fromIntegral
 
 {-# INLINE getGridCols #-}
 getGridCols :: NodeArena -> NodeIdx -> IO Int
-getGridCols na idx = arenaArrays na >>= \a -> readPrimArray (naArrGridCols a) idx
+getGridCols na idx = arenaArrays na >>= \a -> readPrimArray (naArrTree a) (idx * 8 + 7)
 
 {-# INLINE setGridCols #-}
 setGridCols :: NodeArena -> NodeIdx -> Int -> IO ()
-setGridCols na idx c = arenaArrays na >>= \a -> writePrimArray (naArrGridCols a) idx c
+setGridCols na idx c = arenaArrays na >>= \a -> writePrimArray (naArrTree a) (idx * 8 + 7) c
 
 {-# INLINE getWidthSizing #-}
 getWidthSizing :: NodeArena -> NodeIdx -> IO (SizingTag, Float)
 getWidthSizing na idx = do
   a <- arenaArrays na
-  tag <- readPrimArray (naArrWidthSizing a) idx
-  val <- readPrimArray (naArrWidthValue a) idx
+  tag <- readPrimArray (naArrTags a) (idx * 8 + 2)
+  val <- readPrimArray (naArrStyle a) (idx * 14)
   pure (toEnum (fromIntegral tag), val)
 
 {-# INLINE getHeightSizing #-}
 getHeightSizing :: NodeArena -> NodeIdx -> IO (SizingTag, Float)
 getHeightSizing na idx = do
   a <- arenaArrays na
-  tag <- readPrimArray (naArrHeightSizing a) idx
-  val <- readPrimArray (naArrHeightValue a) idx
+  tag <- readPrimArray (naArrTags a) (idx * 8 + 3)
+  val <- readPrimArray (naArrStyle a) (idx * 14 + 1)
   pure (toEnum (fromIntegral tag), val)
 
 {-# INLINE getPadding #-}
 getPadding :: NodeArena -> NodeIdx -> IO Padding
 getPadding na idx = do
   a <- arenaArrays na
-  l <- readPrimArray (naArrPadL a) idx
-  r <- readPrimArray (naArrPadR a) idx
-  t <- readPrimArray (naArrPadT a) idx
-  b <- readPrimArray (naArrPadB a) idx
+  let base = idx * 14
+  l <- readPrimArray (naArrStyle a) (base + 2)
+  r <- readPrimArray (naArrStyle a) (base + 3)
+  t <- readPrimArray (naArrStyle a) (base + 4)
+  b <- readPrimArray (naArrStyle a) (base + 5)
   pure (Padding l r t b)
+
+{-# INLINE getNodePadding #-}
+getNodePadding :: NodeArena -> NodeIdx -> IO Padding
+getNodePadding = getPadding
 
 {-# INLINE getGap #-}
 getGap :: NodeArena -> NodeIdx -> IO Float
-getGap na idx = arenaArrays na >>= \a -> readPrimArray (naArrGap a) idx
+getGap na idx = arenaArrays na >>= \a -> readPrimArray (naArrStyle a) (idx * 14 + 6)
 
 {-# INLINE getMinMax #-}
 getMinMax :: NodeArena -> NodeIdx -> IO (Float, Float, Float, Float)
 getMinMax na idx = do
   a <- arenaArrays na
-  minW <- readPrimArray (naArrMinW a) idx
-  minH <- readPrimArray (naArrMinH a) idx
-  maxW <- readPrimArray (naArrMaxW a) idx
-  maxH <- readPrimArray (naArrMaxH a) idx
+  let base = idx * 14
+  minW <- readPrimArray (naArrStyle a) (base + 7)
+  minH <- readPrimArray (naArrStyle a) (base + 8)
+  maxW <- readPrimArray (naArrStyle a) (base + 9)
+  maxH <- readPrimArray (naArrStyle a) (base + 10)
   pure (minW, minH, maxW, maxH)
+
+{-# INLINE getNodeMinMax #-}
+getNodeMinMax :: NodeArena -> NodeIdx -> IO (Float, Float, Float, Float)
+getNodeMinMax = getMinMax
 
 {-# INLINE getGrow #-}
 getGrow :: NodeArena -> NodeIdx -> IO Float
-getGrow na idx = arenaArrays na >>= \a -> readPrimArray (naArrGrow a) idx
+getGrow na idx = arenaArrays na >>= \a -> readPrimArray (naArrStyle a) (idx * 14 + 11)
 
 {-# INLINE getAspect #-}
 getAspect :: NodeArena -> NodeIdx -> IO Float
-getAspect na idx = arenaArrays na >>= \a -> readPrimArray (naArrAspect a) idx
+getAspect na idx = arenaArrays na >>= \a -> readPrimArray (naArrStyle a) (idx * 14 + 12)
 
 {-# INLINE setAspect #-}
 setAspect :: NodeArena -> NodeIdx -> Float -> IO ()
-setAspect na idx v = arenaArrays na >>= \a -> writePrimArray (naArrAspect a) idx v
+setAspect na idx v = arenaArrays na >>= \a -> writePrimArray (naArrStyle a) (idx * 14 + 12) v
 
 {-# INLINE getWrap #-}
 getWrap :: NodeArena -> NodeIdx -> IO Bool
-getWrap na idx = arenaArrays na >>= \a -> readPrimArray (naArrWrap a) idx >>= pure . (/= 0)
+getWrap na idx = arenaArrays na >>= \a -> readPrimArray (naArrTags a) (idx * 8 + 4) >>= pure . (/= 0)
 
 {-# INLINE parentIsNonWrapRow #-}
 parentIsNonWrapRow :: NodeArena -> NodeIdx -> IO Bool
@@ -675,7 +594,7 @@ parentIsNonWrapRow na idx = do
 getAlignX :: NodeArena -> NodeIdx -> IO AlignX
 getAlignX na idx = do
   a <- arenaArrays na
-  w <- readPrimArray (naArrAlignX a) idx
+  w <- readPrimArray (naArrTags a) (idx * 8 + 5)
   pure $
     case w of
       0 -> AlignStart
@@ -687,7 +606,7 @@ getAlignX na idx = do
 getAlignY :: NodeArena -> NodeIdx -> IO AlignY
 getAlignY na idx = do
   a <- arenaArrays na
-  w <- readPrimArray (naArrAlignY a) idx
+  w <- readPrimArray (naArrTags a) (idx * 8 + 6)
   pure $
     case w of
       0 -> AlignTop
@@ -699,39 +618,47 @@ getAlignY na idx = do
 getRect :: NodeArena -> NodeIdx -> IO (Float, Float, Float, Float)
 getRect na idx = do
   a <- arenaArrays na
-  x <- readPrimArray (naArrX a) idx
-  y <- readPrimArray (naArrY a) idx
-  w <- readPrimArray (naArrW a) idx
-  h <- readPrimArray (naArrH a) idx
+  let base = idx * 10
+  x <- readPrimArray (naArrGeom a) (base + 0)
+  y <- readPrimArray (naArrGeom a) (base + 1)
+  w <- readPrimArray (naArrGeom a) (base + 2)
+  h <- readPrimArray (naArrGeom a) (base + 3)
   pure (x, y, w, h)
+
+{-# INLINE getNodeRect #-}
+getNodeRect :: NodeArena -> NodeIdx -> IO (Float, Float, Float, Float)
+getNodeRect = getRect
 
 {-# INLINE setRect #-}
 setRect :: NodeArena -> NodeIdx -> Float -> Float -> Float -> Float -> IO ()
 setRect na idx x y w h = do
   a <- arenaArrays na
-  writePrimArray (naArrX a) idx x
-  writePrimArray (naArrY a) idx y
-  writePrimArray (naArrW a) idx w
-  writePrimArray (naArrH a) idx h
+  let base = idx * 10
+  writePrimArray (naArrGeom a) (base + 0) x
+  writePrimArray (naArrGeom a) (base + 1) y
+  writePrimArray (naArrGeom a) (base + 2) w
+  writePrimArray (naArrGeom a) (base + 3) h
 
 {-# INLINE getLayoutRect #-}
 getLayoutRect :: NodeArena -> NodeIdx -> IO (Float, Float, Float, Float)
 getLayoutRect na idx = do
   a <- arenaArrays na
-  x <- readPrimArray (naArrLayoutX a) idx
-  y <- readPrimArray (naArrLayoutY a) idx
-  w <- readPrimArray (naArrW a) idx
-  h <- readPrimArray (naArrH a) idx
+  let base = idx * 10
+  x <- readPrimArray (naArrGeom a) (base + 4)
+  y <- readPrimArray (naArrGeom a) (base + 5)
+  w <- readPrimArray (naArrGeom a) (base + 2)
+  h <- readPrimArray (naArrGeom a) (base + 3)
   pure (x, y, w, h)
 
 {-# INLINE getClipRect #-}
 getClipRect :: NodeArena -> NodeIdx -> IO (Maybe Rect)
 getClipRect na idx = do
   a <- arenaArrays na
-  x <- readPrimArray (naArrClipX a) idx
-  y <- readPrimArray (naArrClipY a) idx
-  w <- readPrimArray (naArrClipW a) idx
-  h <- readPrimArray (naArrClipH a) idx
+  let base = idx * 10
+  x <- readPrimArray (naArrGeom a) (base + 6)
+  y <- readPrimArray (naArrGeom a) (base + 7)
+  w <- readPrimArray (naArrGeom a) (base + 8)
+  h <- readPrimArray (naArrGeom a) (base + 9)
   let r = Rect x y w h
   pure (if w > 0 && h > 0 then Just r else Nothing)
 
@@ -739,23 +666,26 @@ getClipRect na idx = do
 setClipRect :: NodeArena -> NodeIdx -> Rect -> IO ()
 setClipRect na idx (Rect x y w h) = do
   a <- arenaArrays na
-  writePrimArray (naArrClipX a) idx x
-  writePrimArray (naArrClipY a) idx y
-  writePrimArray (naArrClipW a) idx w
-  writePrimArray (naArrClipH a) idx h
+  let base = idx * 10
+  writePrimArray (naArrGeom a) (base + 6) x
+  writePrimArray (naArrGeom a) (base + 7) y
+  writePrimArray (naArrGeom a) (base + 8) w
+  writePrimArray (naArrGeom a) (base + 9) h
 
 {-# INLINE snapshotLayoutRects #-}
 snapshotLayoutRects :: NodeArena -> IO ()
 snapshotLayoutRects na = do
   n <- arenaCount na
   a <- arenaArrays na
-  let go !i
+  let geom = naArrGeom a
+      go !i
         | i >= n = pure ()
         | otherwise = do
-            x <- readPrimArray (naArrX a) i
-            y <- readPrimArray (naArrY a) i
-            writePrimArray (naArrLayoutX a) i x
-            writePrimArray (naArrLayoutY a) i y
+            let base = i * 10
+            x <- readPrimArray geom (base + 0)
+            y <- readPrimArray geom (base + 1)
+            writePrimArray geom (base + 4) x
+            writePrimArray geom (base + 5) y
             go (i + 1)
   go 0
 
@@ -763,20 +693,24 @@ snapshotLayoutRects na = do
 getText :: NodeArena -> NodeIdx -> IO Text
 getText na idx = do
   a <- arenaArrays na
-  ti <- readPrimArray (naArrTextIdx a) idx
+  ti <- readPrimArray (naArrTree a) (idx * 8 + 6)
   if ti < 0
     then pure T.empty
     else readArray (naArrTextStore a) ti
 
 {-# INLINE getWidgetId #-}
 getWidgetId :: NodeArena -> NodeIdx -> IO WidgetId
-getWidgetId na idx = arenaArrays na >>= \a -> readPrimArray (naArrWidgetId a) idx
+getWidgetId na idx = do
+  a <- arenaArrays na
+  w <- readPrimArray (naArrTree a) (idx * 8 + 4)
+  pure (WidgetId (fromIntegral w))
 
 {-# INLINE setWidgetId #-}
 setWidgetId :: NodeArena -> NodeIdx -> WidgetId -> IO ()
 setWidgetId na idx wid = do
   a <- arenaArrays na
-  writePrimArray (naArrWidgetId a) idx wid
+  let WidgetId w = wid
+  writePrimArray (naArrTree a) (idx * 8 + 4) (fromIntegral w)
   when (hashWidgetId wid /= 0) $ do
     table <- readIORef (naIndex na)
     HT.insert table wid idx
@@ -791,19 +725,19 @@ lookupNodeByKey na key
 
 {-# INLINE getNodeValue #-}
 getNodeValue :: NodeArena -> NodeIdx -> IO Float
-getNodeValue na idx = arenaArrays na >>= \a -> readPrimArray (naArrValue a) idx
+getNodeValue na idx = arenaArrays na >>= \a -> readPrimArray (naArrStyle a) (idx * 14 + 13)
 
 {-# INLINE setNodeValue #-}
 setNodeValue :: NodeArena -> NodeIdx -> Float -> IO ()
-setNodeValue na idx v = arenaArrays na >>= \a -> writePrimArray (naArrValue a) idx v
+setNodeValue na idx v = arenaArrays na >>= \a -> writePrimArray (naArrStyle a) (idx * 14 + 13) v
 
 {-# INLINE getStyleIdx #-}
 getStyleIdx :: NodeArena -> NodeIdx -> IO Int
-getStyleIdx na idx = arenaArrays na >>= \a -> readPrimArray (naArrStyleIdx a) idx
+getStyleIdx na idx = arenaArrays na >>= \a -> readPrimArray (naArrTree a) (idx * 8 + 5)
 
 {-# INLINE setStyleIdx #-}
 setStyleIdx :: NodeArena -> NodeIdx -> Int -> IO ()
-setStyleIdx na idx v = arenaArrays na >>= \a -> writePrimArray (naArrStyleIdx a) idx v
+setStyleIdx na idx v = arenaArrays na >>= \a -> writePrimArray (naArrTree a) (idx * 8 + 5) v
 
 {-# NOINLINE ensureScratchCapacity #-}
 ensureScratchCapacity :: NodeArena -> Int -> IO ()

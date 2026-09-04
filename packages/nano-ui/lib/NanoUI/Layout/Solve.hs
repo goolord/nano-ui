@@ -136,44 +136,46 @@ solveLayout na host fm monoFm measure rootW rootH =
 
 {-# INLINE nodeTypeA #-}
 nodeTypeA :: NodeArenaArrays -> NodeIdx -> IO NodeType
-nodeTypeA NodeArenaArrays {naArrNodeType} idx =
-  readPrimArray naArrNodeType idx >>= pure . toEnum . fromIntegral
+nodeTypeA NodeArenaArrays {naArrTags} idx =
+  readPrimArray naArrTags (idx * 8) >>= pure . toEnum . fromIntegral
 
 {-# INLINE rectA #-}
 rectA :: NodeArenaArrays -> NodeIdx -> IO (Float, Float, Float, Float)
-rectA NodeArenaArrays {naArrX, naArrY, naArrW, naArrH} idx = do
-  x <- readPrimArray naArrX idx
-  y <- readPrimArray naArrY idx
-  w <- readPrimArray naArrW idx
-  h <- readPrimArray naArrH idx
+rectA NodeArenaArrays {naArrGeom} idx = do
+  let base = idx * 10
+  x <- readPrimArray naArrGeom (base + 0)
+  y <- readPrimArray naArrGeom (base + 1)
+  w <- readPrimArray naArrGeom (base + 2)
+  h <- readPrimArray naArrGeom (base + 3)
   pure (x, y, w, h)
 
 {-# INLINE minMaxA #-}
 minMaxA :: NodeArenaArrays -> NodeIdx -> IO (Float, Float, Float, Float)
-minMaxA NodeArenaArrays {naArrMinW, naArrMinH, naArrMaxW, naArrMaxH} idx = do
-  minW <- readPrimArray naArrMinW idx
-  minH <- readPrimArray naArrMinH idx
-  maxW <- readPrimArray naArrMaxW idx
-  maxH <- readPrimArray naArrMaxH idx
+minMaxA NodeArenaArrays {naArrStyle} idx = do
+  let base = idx * 14
+  minW <- readPrimArray naArrStyle (base + 7)
+  minH <- readPrimArray naArrStyle (base + 8)
+  maxW <- readPrimArray naArrStyle (base + 9)
+  maxH <- readPrimArray naArrStyle (base + 10)
   pure (minW, minH, maxW, maxH)
 
 {-# INLINE widthSizingA #-}
 widthSizingA :: NodeArenaArrays -> NodeIdx -> IO (SizingTag, Float)
-widthSizingA NodeArenaArrays {naArrWidthSizing, naArrWidthValue} idx = do
-  tag <- readPrimArray naArrWidthSizing idx
-  val <- readPrimArray naArrWidthValue idx
+widthSizingA NodeArenaArrays {naArrTags, naArrStyle} idx = do
+  tag <- readPrimArray naArrTags (idx * 8 + 2)
+  val <- readPrimArray naArrStyle (idx * 14)
   pure (toEnum (fromIntegral tag), val)
 
 {-# INLINE heightSizingA #-}
 heightSizingA :: NodeArenaArrays -> NodeIdx -> IO (SizingTag, Float)
-heightSizingA NodeArenaArrays {naArrHeightSizing, naArrHeightValue} idx = do
-  tag <- readPrimArray naArrHeightSizing idx
-  val <- readPrimArray naArrHeightValue idx
+heightSizingA NodeArenaArrays {naArrTags, naArrStyle} idx = do
+  tag <- readPrimArray naArrTags (idx * 8 + 3)
+  val <- readPrimArray naArrStyle (idx * 14 + 1)
   pure (toEnum (fromIntegral tag), val)
 
 {-# INLINE aspectA #-}
 aspectA :: NodeArenaArrays -> NodeIdx -> IO Float
-aspectA NodeArenaArrays {naArrAspect} idx = readPrimArray naArrAspect idx
+aspectA NodeArenaArrays {naArrStyle} idx = readPrimArray naArrStyle (idx * 14 + 12)
 
 measurePass ::
   NodeArena ->

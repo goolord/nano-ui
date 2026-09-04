@@ -5,9 +5,9 @@ module NanoUI.Sdl.Session
   ( runSdlSession
   ) where
 
-import Control.Exception (bracket, finally)
+import Control.Exception (bracket)
 import Control.Monad (void, when)
-import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Primitive.SmallArray (SmallArray, emptySmallArray, sizeofSmallArray)
 import GHC.Clock (getMonotonicTime)
 import NanoUI
@@ -22,6 +22,14 @@ import NanoUI
   , inputWindowSize
   )
 import NanoUI.Debug (debugRefreshSec)
+import NanoUI.Runner
+  ( DrawingLock
+  , checkHardQuit
+  , checkSessionQuit
+  , newDrawingLock
+  , stepDeltaTime
+  , tryWithDrawingLock
+  )
 import NanoUI.Testing
   ( Context
   , anyAnimating
@@ -29,7 +37,6 @@ import NanoUI.Testing
   , debugPanelOpen
   , isDirty
   , needsRedraw
-  , overlayConsumesQuit
   , textFieldActive
   , textInputEditActive
   )
@@ -40,7 +47,6 @@ import NanoUI.Sdl.Input
   , applyEvent
   , clearEphemeral
   , isHardQuit
-  , isHardQuitInput
   , pollEvents
   , splitFrame
   , waitEvent
@@ -57,8 +63,6 @@ animateTimeout = 16
 debugHudTimeout :: Int
 debugHudTimeout = max animateTimeout (round (debugRefreshSec * 1000))
 
-maxFrameDt :: Float
-maxFrameDt = 0.05
 
 runSdlSession ::
   SdlOptions ->
@@ -75,7 +79,7 @@ runSdlSession options ctx setup shouldQuit drawFn =
     prev <- newIORef emptyInput
     pendingRedraw <- newIORef False
     wasAnimating <- newIORef False
-    drawing <- newIORef False
+    drawing <- newDrawingLock
     startupDone <- newIORef False
     startupCatchup <- newIORef False
     startupGrace <- newIORef (2 :: Int)
@@ -148,7 +152,7 @@ loop ::
   IORef Input ->
   IORef Bool ->
   IORef Bool ->
-  IORef Bool ->
+  DrawingLock ->
   IORef Int ->
   IORef Int ->
   IORef Bool ->
@@ -191,8 +195,7 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace star
   if any (== EvQuit) group || (any isHardQuit group && not editActive)
     then pure ()
     else do
-      now <- getMonotonicTime
-      let dt = min maxFrameDt (realToFrac (now - lastT))
+      (now, dt) <- stepDeltaTime lastT
       noteLoop (sdlDebug env) dt
       let inp' =
             foldl'
@@ -201,8 +204,8 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace star
               group
       (ctx', inpSynced) <- syncDisplay ctx env inp'
       writeIORef ctxRef ctx'
-      editActive' <- textInputEditActive ctx'
-      if isHardQuitInput inpSynced && not editActive'
+      hardQuit <- checkHardQuit ctx' inpSynced
+      if hardQuit
         then pure ()
         else do
           prevInp <- readIORef prev
@@ -276,8 +279,8 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace star
                 pure inpSynced
           animAfter <- anyAnimating ctx'
           writeIORef wasAnimating (anim || animAfter)
-          overlayQuit <- overlayConsumesQuit ctx' inpSynced
-          if shouldQuit inpSynced && not overlayQuit
+          shouldTerm <- checkSessionQuit ctx' shouldQuit inpSynced
+          if shouldTerm
             then pure ()
             else
               loop
@@ -310,10 +313,3 @@ isUserPresentEvent ev =
     EvText {} -> True
     EvScroll {} -> True
     _ -> False
-
-tryWithDrawingLock :: IORef Bool -> IO a -> IO (Maybe a)
-tryWithDrawingLock ref act = do
-  ok <- atomicModifyIORef' ref $ \busy -> if busy then (True, False) else (True, True)
-  if ok
-    then Just <$> (act `finally` writeIORef ref False)
-    else pure Nothing
