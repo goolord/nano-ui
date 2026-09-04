@@ -85,6 +85,9 @@ module NanoUI.Widgets
   , useState
   , useFlag
   , useText
+  , useInt
+  , useFloat
+  , useEnum
   , useToggle
   , heading
   , muted
@@ -258,6 +261,9 @@ import NanoUI.Widgets.Animate
   , useState
   , useFlag
   , useText
+  , useInt
+  , useFloat
+  , useEnum
   , useToggle
   )
 import NanoUI.Widgets.ColorPicker (colorPicker)
