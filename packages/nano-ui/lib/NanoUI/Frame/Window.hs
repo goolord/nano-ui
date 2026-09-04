@@ -36,7 +36,7 @@ import NanoUI.Context
   )
 import NanoUI.Draw (pushBackdropDim, pushRect, withClip)
 import NanoUI.Font (ScrollBarSlot (..), resolveLayoutPadding)
-import NanoUI.Types (isCellHost)
+import NanoUI.Types (HostProfile, isCellHost)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), inputMouseDown, inputMousePos, inputMousePressed)
 import NanoUI.Layout.Arena
@@ -97,7 +97,7 @@ topmostWindowAtResizeHalo ctx mouse =
           then pure False
           else do
             let rect = Rect x y w h
-            if rectContains (windowResizeHalo rect) mouse
+            if rectContains (windowResizeHalo (ctxHostProfile ctx) rect) mouse
               then pure True
               else windowInnerEastResizeHit ctx idx rect mouse
 
@@ -180,17 +180,20 @@ updateWindowDrag ctx inp = do
               pure started
           | otherwise -> pure False
 
-windowResizeHandle :: Float
-windowResizeHandle = 12
+windowResizeHandleFor :: HostProfile -> Float
+windowResizeHandleFor host
+  | isCellHost host = 1
+  | otherwise = 12
 
-windowResizeHalo :: Rect -> Rect
-windowResizeHalo (Rect x y w h) =
-  Rect (x - windowResizeHandle) (y - windowResizeHandle) (w + 2 * windowResizeHandle) (h + 2 * windowResizeHandle)
+windowResizeHalo :: HostProfile -> Rect -> Rect
+windowResizeHalo host (Rect x y w h) =
+  let s = windowResizeHandleFor host
+   in Rect (x - s) (y - s) (w + 2 * s) (h + 2 * s)
 
 -- Handles sit outside the window. The right pad strip also resizes beside the bar.
-windowResizeEdgeAt :: Rect -> V2 -> Maybe WindowResizeEdge
-windowResizeEdgeAt (Rect x y w h) (V2 mx my) =
-  let s = windowResizeHandle
+windowResizeEdgeAt :: HostProfile -> Rect -> V2 -> Maybe WindowResizeEdge
+windowResizeEdgeAt host (Rect x y w h) (V2 mx my) =
+  let s = windowResizeHandleFor host
       onL = mx >= x - s && mx < x
       onR = mx > x + w && mx <= x + w + s
       onT = my >= y - s && my < y
@@ -209,10 +212,12 @@ windowResizeEdgeAt (Rect x y w h) (V2 mx my) =
               (_, _, True, _) -> ResizeW
               _ -> ResizeE
 
-innerEastCornerEdge :: Padding -> Rect -> Float -> Maybe WindowResizeEdge
-innerEastCornerEdge pad (Rect _ y _ h) my =
-  let topBand = max 6 (min windowResizeHandle (padT pad))
-      botBand = max 6 (min windowResizeHandle (padB pad))
+innerEastCornerEdge :: HostProfile -> Padding -> Rect -> Float -> Maybe WindowResizeEdge
+innerEastCornerEdge host pad (Rect _ y _ h) my =
+  let s = windowResizeHandleFor host
+      minBand = if isCellHost host then 1 else 6
+      topBand = max minBand (min s (padT pad))
+      botBand = max minBand (min s (padB pad))
    in case (my >= y && my < y + topBand, my > y + h - botBand && my <= y + h) of
         (True, _) -> Just ResizeNE
         (_, True) -> Just ResizeSE
@@ -255,10 +260,15 @@ windowInnerResizeEdgeAt ctx winIdx winRect@(Rect x y w h) mouse@(V2 mx my) = do
   if hit
     then do
       pad <- getPadding (ctxNodeArena ctx) winIdx
-      pure (innerEastCornerEdge pad winRect (v2Y mouse))
+      pure (innerEastCornerEdge (ctxHostProfile ctx) pad winRect (v2Y mouse))
     else do
-      let inBotRightCorner = mx >= x + w - 16 && mx <= x + w && my >= y + h - 16 && my <= y + h
-          inBotEdge = mx >= x && mx <= x + w && my >= y + h - 6 && my <= y + h
+      let host = ctxHostProfile ctx
+          isCell = isCellHost host
+          cornerW = if isCell then 2 else min 16 (w / 3)
+          cornerH = if isCell then 1 else min 16 (h / 3)
+          botH = if isCell then 1 else min 6 (h / 3)
+          inBotRightCorner = mx >= x + w - cornerW && mx <= x + w && my >= y + h - cornerH && my <= y + h
+          inBotEdge = mx >= x && mx <= x + w && my >= y + h - botH && my <= y + h
       if inBotRightCorner
         then pure (Just ResizeSE)
         else if inBotEdge
@@ -267,7 +277,7 @@ windowInnerResizeEdgeAt ctx winIdx winRect@(Rect x y w h) mouse@(V2 mx my) = do
 
 windowResizeEdgeFor :: Context -> NodeIdx -> Rect -> V2 -> IO (Maybe WindowResizeEdge)
 windowResizeEdgeFor ctx winIdx winRect mouse = do
-  case windowResizeEdgeAt winRect mouse of
+  case windowResizeEdgeAt (ctxHostProfile ctx) winRect mouse of
     Just edge -> pure (Just edge)
     Nothing -> windowInnerResizeEdgeAt ctx winIdx winRect mouse
 
@@ -380,8 +390,10 @@ tryStartWindowResize ctx mouse = do
     Just idx -> do
       blocked <- resizeHaloBlocked ctx mouse idx
       overClose <- windowTitleHasInteractive ctx idx mouse
+      mTitle <- windowTitleRect ctx idx
+      let overTitle = maybe False (`rectContains` mouse) mTitle
       (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-      if blocked || overClose
+      if blocked || overClose || overTitle
         then pure False
         else do
           mEdge <- windowResizeEdgeFor ctx idx (Rect x y w h) mouse
@@ -424,8 +436,10 @@ windowResizeCursorKind ctx inp = do
         Just idx -> do
           blocked <- resizeHaloBlocked ctx mouse idx
           overClose <- windowTitleHasInteractive ctx idx mouse
+          mTitle <- windowTitleRect ctx idx
+          let overTitle = maybe False (`rectContains` mouse) mTitle
           (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-          if blocked || overClose
+          if blocked || overClose || overTitle
             then pure Nothing
             else fmap cursorForResizeEdge <$> windowResizeEdgeFor ctx idx (Rect x y w h) mouse
 
