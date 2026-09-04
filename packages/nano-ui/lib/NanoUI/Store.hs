@@ -25,6 +25,7 @@ module NanoUI.Store
   , slotTextAreaViewport
   , slotTextAreaAnchorRow
   , slotTextAreaAnchorCol
+  , slotTextInputScroll
   , boolInt
   , intBool
   , anySelectOpen
@@ -173,6 +174,9 @@ slotTextAreaAnchorRow = 0x5441524100000015
 
 slotTextAreaAnchorCol :: Word64
 slotTextAreaAnchorCol = 0x5441524100000016
+
+slotTextInputScroll :: Word64
+slotTextInputScroll = 0x54494E5000000017
 
 boolInt :: Bool -> Int
 boolInt b = if b then 1 else 0

@@ -27,6 +27,7 @@ module NanoUI.Frame.TextEdit
   , textInputFieldTextClip
   , tagTextInputClippedSpans
   , textInputGeomForWidget
+  , syncTextInputScroll
     -- * Caret and selection drawing primitives
   , drawTextCaret
   , drawTextSelectionLine
@@ -135,7 +136,7 @@ import NanoUI.Layout.Arena
   , getText
   , getWidgetId
   )
-import NanoUI.Store (slotTextAreaCol, slotTextAreaRow, slotTextAreaViewport)
+import NanoUI.Store (slotTextAreaCol, slotTextAreaRow, slotTextAreaViewport, slotTextInputScroll)
 import NanoUI.Style (Style (..), Theme (..), styleBg, styleFg, themeAccent, themeSeparator)
 import NanoUI.Types
   ( Color (..)
@@ -610,6 +611,48 @@ drawTextSelectionLine da selX selY selW selH selBg =
   when (selW > 0) $
     pushRect da (Rect selX selY (max 1 selW) (max 4 selH)) selBg
 
+computeTextInputScroll ::
+  HostProfile ->
+  FontMetrics ->
+  Float ->
+  Text ->
+  Int ->
+  Float ->
+  Bool ->
+  Float
+computeTextInputScroll host fm viewportW value cursor oldScroll isFocused
+  | not isFocused = 0
+  | viewportW <= 0 = 0
+  | otherwise =
+      let prefix = T.take (max 0 (min (T.length value) cursor)) value
+          caretRelX = textDisplayWidth host fm prefix
+          totalTextW = textDisplayWidth host fm value
+          maxScroll = max 0 (totalTextW + 1 - viewportW)
+          s0
+            | caretRelX < oldScroll = caretRelX
+            | caretRelX + 1 > oldScroll + viewportW = caretRelX + 1 - viewportW
+            | otherwise = oldScroll
+       in max 0 (min maxScroll s0)
+
+syncTextInputScroll :: Context -> NodeIdx -> Float -> Float -> Float -> Float -> IO Float
+syncTextInputScroll ctx idx x y w h = do
+  wid <- getWidgetId (ctxNodeArena ctx) idx
+  store <- getStore ctx
+  let key = intKey wid
+  value <- textInputValue ctx idx
+  focus <- textInputFocused ctx idx
+  let cursor = IM.findWithDefault (T.length value) (slotKey slotCursor key) (storeInt store)
+      oldScroll = IM.findWithDefault 0 (slotKey slotTextInputScroll key) (storeFloat store)
+      fm = ctxFontMetrics ctx
+      host = ctxHostProfile ctx
+      geom = textInputGeom host fm x y w h
+      clip = textInputFieldTextClip host geom fm
+      availW = rectW clip
+      newScroll = computeTextInputScroll host fm availW value cursor oldScroll focus
+  when (newScroll /= oldScroll) $ do
+    setStore ctx (store {storeFloat = IM.insert (slotKey slotTextInputScroll key) newScroll (storeFloat store)})
+  pure newScroll
+
 drawTextInputSelection :: DrawArena -> Context -> NodeIdx -> Float -> Float -> Float -> Float -> Style -> IO ()
 drawTextInputSelection da ctx idx x y w h style = do
   let terminal = isCellHost (ctxHostProfile ctx)
@@ -638,7 +681,8 @@ drawTextInputSelection da ctx idx x y w h style = do
               wHi = textDisplayWidth host fm (T.take selHi value)
               lineH = layoutLineHeight host fm
               ty = centeredTextY host fm (rectY fieldRect) (rectH fieldRect) lineH
-              selX = rectX fieldRect + ix + wLo
+          scrollX <- syncTextInputScroll ctx idx x y w h
+          let selX = rectX fieldRect + ix + wLo - scrollX
               selW = wHi - wLo
           drawTextSelectionLine da selX ty selW lineH selBg
 
@@ -666,7 +710,8 @@ drawTextInputCaret da ctx idx x y w h style = do
             pw = textDisplayWidth host fm prefix
             lineH = layoutLineHeight host fm
             ty = centeredTextY host fm (rectY fieldRect) (rectH fieldRect) lineH
-            (caretX, caretY, caretH) = selectionCaretGeom (rectX fieldRect + ix) ty pw lineH
+        scrollX <- syncTextInputScroll ctx idx x y w h
+        let (caretX, caretY, caretH) = selectionCaretGeom (rectX fieldRect + ix - scrollX) ty pw lineH
         drawTextCaret da caretX caretY caretH (styleFg style)
 
 applyTextInputClick :: Context -> WidgetId -> Text -> Int -> Int -> IO ()
@@ -708,9 +753,11 @@ textInputGeomForWidget ctx wid = do
         else do
           (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
           let fm = ctxFontMetrics ctx
-              field = tigFieldRect (textInputGeom (ctxHostProfile ctx) fm x y w h)
+              geom = textInputGeom (ctxHostProfile ctx) fm x y w h
+              field = tigFieldRect geom
               (ix, _) = widgetContentInset (ctxHostProfile ctx) fm
-              contentX = rectX field + ix
+          scrollX <- syncTextInputScroll ctx idx x y w h
+          let contentX = rectX field + ix - scrollX
           value <- textInputValue ctx idx
           pure (Just (field, contentX, value))
 

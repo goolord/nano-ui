@@ -126,6 +126,7 @@ import NanoUI.Frame.TextEdit
   , textAreaGeom
   , textAreaValue
   , textInputGeom
+  , syncTextInputScroll
   )
 import NanoUI.Frame.Scroll (scrollBarLayout, ScrollBarLayout (..))
 import NanoUI.Frame.SpanArena (SpanArena, pushSpan, resetSpanArena, spanArenaToList, spanArenaToListOccluded)
@@ -604,9 +605,10 @@ widgetTextPlacements ctx nt idx x y w h = do
           (lw, lh) <- ctxMeasureText ctx lbl
           (fw, _) <- ctxMeasureText ctx fieldTxt
           let lineH = layoutLineHeight (ctxHostProfile ctx) fm
+          scrollX <- syncTextInputScroll ctx idx x y w h
           pure
             [ (lbl, x, centeredTextY (ctxHostProfile ctx) fm y labelH lh, lw, lh)
-            , (fieldTxt, x + ix, centeredTextY (ctxHostProfile ctx) fm (rectY field) (rectH field) lineH, fw, lineH)
+            , (fieldTxt, x + ix - scrollX, centeredTextY (ctxHostProfile ctx) fm (rectY field) (rectH field) lineH, fw, lineH)
             ]
     NodeTextArea -> do
       lbl <- getText (ctxNodeArena ctx) idx
