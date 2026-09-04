@@ -11,6 +11,11 @@ module NanoUI.Widgets.TextCommon
     -- * Menu actions
   , menuActionEnabled
   , dispatchMenuAction
+    -- * Selection and caret helpers
+  , textSelectionForClick
+  , textSelectionForDrag
+  , selectionBgColor
+  , selectionCaretGeom
     -- * Clipboard operations on TextBuffer
   , copyBufferText
   , cutBufferText
@@ -22,6 +27,7 @@ import Data.Char (isAlphaNum, isSpace)
 import Data.Text (Text)
 import qualified Data.Text as T
 import NanoUI.Context (Context (..))
+import NanoUI.Types (Color, lerpColor)
 import qualified NanoUI.Widgets.TextBuffer as TB
 
 -- | Character classification for double-click word selection.
@@ -54,6 +60,34 @@ textWordBounds text raw
       | i + 1 >= n = i
       | textCharClass (T.index text (i + 1)) == cls = goRight cls n (i + 1)
       | otherwise = i
+
+-- | Calculate selection span for single/double/triple click.
+textSelectionForClick :: Text -> Int -> Int -> (Int, Int)
+textSelectionForClick value idx clicks
+  | clicks >= 3 = (0, T.length value)
+  | clicks == 2 = textWordBounds value idx
+  | otherwise = (idx, idx)
+
+-- | Calculate selection span when dragging mouse across text.
+textSelectionForDrag :: Text -> Int -> Int -> Int -> (Int, Int)
+textSelectionForDrag value anchor idx clicks
+  | clicks >= 3 = (0, T.length value)
+  | clicks == 2 =
+      let (a0, a1) = textWordBounds value anchor
+          (c0, c1) = textWordBounds value idx
+       in (min a0 c0, max a1 c1)
+  | otherwise = (anchor, idx)
+
+-- | Shared selection background color.
+{-# INLINE selectionBgColor #-}
+selectionBgColor :: Color -> Color -> Color
+selectionBgColor accent bg = lerpColor accent bg 0.55
+
+-- | Shared caret geometry (caretX, caretY, caretH).
+{-# INLINE selectionCaretGeom #-}
+selectionCaretGeom :: Float -> Float -> Float -> Float -> (Float, Float, Float)
+selectionCaretGeom originX originY pw lineH =
+  (originX + pw, originY + 1, max 4 (lineH - 2))
 
 -- | Test if a character is part of a standard Ctrl shortcut (Ctrl+A, Ctrl+C, Ctrl+X, Ctrl+V).
 {-# INLINE isCtrlCombo #-}
