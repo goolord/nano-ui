@@ -55,7 +55,7 @@ import NanoUI.Types
   , rectW
   )
 import NanoUI.Widgets.Behavior (useDismissable)
-import NanoUI.Widgets.Layout (columnResponse, label)
+import NanoUI.Widgets.Layout (columnResponseWith, label)
 import NanoUI.Widgets.Node
   ( Responding (..)
   , Response (..)
@@ -198,7 +198,7 @@ withTooltip ::
   Eff es b ->
   Eff es (a, Maybe b)
 withTooltip mainChild tipChild = do
-  (res, contResp) <- columnResponse (tight defaultLayout) mainChild
+  (res, contResp) <- columnResponseWith tight mainChild
   mTip <- tooltipWidget contResp tipChild
   pure (res, mTip)
 

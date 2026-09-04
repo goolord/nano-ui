@@ -48,10 +48,10 @@ runControlsTabHeightTest _ failed = do
       (quality, setQuality) <- useText "Medium"
       (theme, setTheme) <- useText (T.pack (show Dark))
       (name, setName) <- useText ""
-      scroll (tight (grow defaultLayout)) $
-        column (padAll 8 . gap 8 . fillW $ defaultLayout) $ do
-          row (tight . gap 8 . fillW $ defaultLayout) $ do
-            column (tight . gap 8 . fillW $ defaultLayout) $ do
+      scrollWith (tight . grow) $
+        columnWith (padAll 8 . gap 8 . fillW) $ do
+          rowWith (tight . gap 8 . fillW) $ do
+            columnWith (tight . gap 8 . fillW) $ do
               card $ do
                 heading "State"
                 kv "Feature" (if checked then "on" else "off")
@@ -105,7 +105,7 @@ runControlsTabHeightTest _ failed = do
           _ -> maximum (map snd ys) - minimum (map fst ys)
   dumpLone <- newIORef Nothing
   ctxLone <- newPixelContext
-  _ <- runFrame ctxLone inp0 (column (tight . fillW $ defaultLayout) (controlsBody dumpLone))
+  _ <- runFrame ctxLone inp0 (columnWith (tight . fillW) (controlsBody dumpLone))
   mLone <- readIORef dumpLone
   (loneCbH, loneCpH, loneTiH) <-
     case mLone of

@@ -10,6 +10,9 @@ module NanoUI.Widgets.Animate
   , animateToSpringA
   , useState
   , useFlag
+  , useInt
+  , useFloat
+  , useEnum
   , useText
   , useToggle
   ) where
@@ -148,6 +151,25 @@ useFlag initial = do
       (\st k v -> bumpMirror (st {storeInt = IM.insert k v (storeInt st)}))
       (boolInt initial)
   pure (intBool valI, setI . boolInt)
+
+useInt :: (Ui :> es) => Int -> Eff es (Int, Int -> Eff es ())
+useInt initial =
+  useStoreField
+    storeInt
+    (\st k v -> bumpMirror (st {storeInt = IM.insert k v (storeInt st)}))
+    initial
+
+useFloat :: (Ui :> es) => Float -> Eff es (Float, Float -> Eff es ())
+useFloat initial =
+  useStoreField
+    storeFloat
+    (\st k v -> bumpMirror (st {storeFloat = IM.insert k v (storeFloat st)}))
+    initial
+
+useEnum :: (Enum a, Ui :> es) => a -> Eff es (a, a -> Eff es ())
+useEnum initial = do
+  (idx, setIdx) <- useInt (fromEnum initial)
+  pure (toEnum idx, setIdx . fromEnum)
 
 useText :: (Ui :> es) => Text -> Eff es (Text, Text -> Eff es ())
 useText initial =

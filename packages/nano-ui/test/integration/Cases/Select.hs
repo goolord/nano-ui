@@ -31,7 +31,7 @@ import NanoUI.Testing.Harness
 runSelectDropdownCursorTest :: Context -> IORef Int -> IO ()
 runSelectDropdownCursorTest ctx failed = do
   let inp0 = withInput 320 200
-      ui = column defaultLayout (select "Quality" ["Low", "High"] 0)
+      ui = column (select "Quality" ["Low", "High"] 0)
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect sx sy sw sh = respRect resp
       (press, release) = clickPair inp0 (V2 (sx + sw / 2) (sy + sh / 2))
@@ -53,7 +53,7 @@ runSelectDropdownCursorTest ctx failed = do
 runSliderCursorTest :: Context -> IORef Int -> IO ()
 runSliderCursorTest ctx failed = do
   let inp0 = withInput 300 80
-      ui = column defaultLayout (slider "Volume" 0 100 50)
+      ui = column (slider "Volume" 0 100 50)
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect rx ry rw rh = respRect resp
       track = sliderTrackBounds (ctxHostProfile ctx) (ctxFontMetrics ctx) "Volume" rx ry rw rh
@@ -79,7 +79,7 @@ runSliderCursorTest ctx failed = do
 runSelectOverlayDamageTest :: Context -> IORef Int -> IO ()
 runSelectOverlayDamageTest _ failed = do
   ctx <- newContext
-  let ui = column defaultLayout (select "Quality" ["Low", "Medium", "High"] 0)
+  let ui = column (select "Quality" ["Low", "Medium", "High"] 0)
       inp0 = (withInput 320 160) {inputMousePos = V2 20 20}
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect sx sy sw sh = respRect resp
@@ -99,14 +99,14 @@ runSelectOverlayDamageTest _ failed = do
 
 runSelectTest :: Context -> IORef Int -> IO ()
 runSelectTest ctx failed = do
-  _ <- runFrame ctx (withInput 320 80) (column defaultLayout (select "Quality" ["Low", "Medium", "High"] 1))
+  _ <- runFrame ctx (withInput 320 80) (column (select "Quality" ["Low", "Medium", "High"] 1))
   spans <- collectTextSpans ctx
   assertSpansHas failed "Quality: Medium" spans
 
 runSelectDropdownTest :: Context -> IORef Int -> IO ()
 runSelectDropdownTest ctx failed = do
   let inp0 = withInput 320 80
-      ui = column defaultLayout (select "Quality" ["Low", "High"] 0)
+      ui = column (select "Quality" ["Low", "High"] 0)
       (press, release) = clickPair inp0 (V2 10 10)
   _ <- runFrame ctx inp0 ui
   _ <- runFrame ctx press ui
@@ -119,7 +119,7 @@ runTreeInitialTest :: Context -> IORef Int -> IO ()
 runTreeInitialTest _ failed = do
   ctx <- newContext
   let items = [TreeItem "root" [TreeItem "child" []], TreeItem "leaf" []]
-  _ <- runFrame ctx (withInput 40 12) (column defaultLayout (void (tree "t" items 0)))
+  _ <- runFrame ctx (withInput 40 12) (column (void (tree "t" items 0)))
   spans <- collectTextSpans ctx
   let texts = [txt | (_, txt, _, _, _) <- spans]
   assert failed (any ("root" `T.isInfixOf`) texts && any ("child" `T.isInfixOf`) texts && any ("leaf" `T.isInfixOf`) texts)
@@ -129,7 +129,7 @@ runTreeSelectTest _ failed = do
   ctx <- newContext
   let inp0 = withInput 40 12
       items = [TreeItem "alpha" [], TreeItem "beta" []]
-      ui = column defaultLayout (tree "t" items 0)
+      ui = column (tree "t" items 0)
   (resp, sel0) <- warmup2 ctx inp0 ui
   assertEq failed sel0 0
   let Rect rx ry _rh rh = respRect resp
@@ -142,7 +142,7 @@ runTreeExpandDamageTest :: Context -> IORef Int -> IO ()
 runTreeExpandDamageTest _ failed = do
   ctx <- newCellContext
   let items = [TreeItem "root" [TreeItem "child" []], TreeItem "leaf" []]
-      ui = column defaultLayout (void (tree "t" items 0))
+      ui = column (void (tree "t" items 0))
       inp0 = withInputOff 40 12
   _ <- runFrame ctx inp0 ui >> takeDamage ctx
   _ <- runFrame ctx inp0 ui >> takeDamage ctx
@@ -180,7 +180,7 @@ runTreeKeyboardTest :: Context -> IORef Int -> IO ()
 runTreeKeyboardTest _ failed = do
   ctx <- newContext
   let items = [TreeItem "root" [TreeItem "child" []], TreeItem "leaf" []]
-      ui = column defaultLayout (tree "k" items 0)
+      ui = column (tree "k" items 0)
       inp0 = withInput 40 12
   _ <- warmup2 ctx inp0 ui
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
@@ -198,7 +198,7 @@ runSelectDropdownHoverTest _ failed = do
   ctx <- newCellContext
   let layout = defaultLayout {layoutPadding = Padding 0 0 0 0, layoutGap = 0}
       inp0 = withInput 40 6
-      ui = column layout (select "Quality" ["Low", "High"] 0)
+      ui = column' layout (select "Quality" ["Low", "High"] 0)
       (press, release) = clickPair inp0 (V2 1 0.5)
   _ <- runFrame ctx inp0 ui
   _ <- runFrame ctx press ui
@@ -265,7 +265,7 @@ runSelectPickLowTest ctx failed = do
 runSelectKeyboardTest :: Context -> IORef Int -> IO ()
 runSelectKeyboardTest ctx failed = do
   let inp0 = withInput 320 200
-      ui = column defaultLayout (select "Quality" ["Low", "Medium", "High"] 1)
+      ui = column (select "Quality" ["Low", "Medium", "High"] 1)
   (resp, idx0) <- warmup2 ctx inp0 ui
   assertEq failed idx0 1
   let Rect sx sy sw sh = respRect resp

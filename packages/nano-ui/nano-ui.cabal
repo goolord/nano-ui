@@ -113,6 +113,7 @@ library
         NanoUI.Widgets.ColorPicker
         NanoUI.Widgets.Drawing
         NanoUI.Widgets.TextInput
+        NanoUI.Widgets.TextCommon
         NanoUI.Widgets.Animate
         NanoUI.Widgets.Overlay
         NanoUI.Widgets.Popup

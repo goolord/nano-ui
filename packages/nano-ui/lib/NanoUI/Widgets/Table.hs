@@ -65,7 +65,7 @@ import NanoUI.Widgets.Combinators
   , virtualIndices
   , visibleCols
   )
-import NanoUI.Widgets.Layout (column, panel, row, scrollAreaIdConfigured, separator, spacer)
+import NanoUI.Widgets.Layout (column', panel', row', scrollAreaIdConfigured, separator, spacer)
 import NanoUI.Frame.Scroll.Geometry (ScrollConfig (..), ScrollPolicy (..), scrollHorizontalAuto, scrollVerticalAuto, scrollVerticalHidden)
 import NanoUI.Widgets.Node
   ( Clickable (..)
@@ -106,9 +106,9 @@ tableSplitPanes ::
 tableSplitPanes fillInner tableWid vWid hWid rowMinH frozenIdx unfrozenIdx pinned scrollRows colBox renderHeader renderCell =
   let paneRoot =
         (if fillInner then tight . fillW . fillH else tight . fillH) defaultLayout
-   in panel paneRoot $ do
+   in panel' paneRoot $ do
         tagContainer tableWid
-        row (paneRoot {layoutGap = 0}) $ do
+        row' (paneRoot {layoutGap = 0}) $ do
           frozenHs <-
             if null frozenIdx
               then pure []
@@ -131,17 +131,17 @@ tableSplitPanes fillInner tableWid vWid hWid rowMinH frozenIdx unfrozenIdx pinne
   gridRowLay idxs =
     (if fillInner then fillW else id) (tight $ defaultLayout {layoutGap = 0, layoutMinW = minSum idxs})
   renderGridRow rowLay colKeys colLays cells =
-    void $ row rowLay $
+    void $ row' rowLay $
       let go _ [] [] [] = pure ()
           go !first (k : ks) (clay : clays) (c : cs) = do
             when (not first) $ void separator
-            void $ withKey k (column clay c)
+            void $ withKey k (column' clay c)
             go False ks clays cs
           go _ _ _ _ = pure ()
        in go True colKeys colLays cells
   headerLine idxs renderHeader' =
     keyedRowLay (gridRowLay idxs) idxs $ \i ->
-      column (colBox i) (renderHeader' i)
+      column' (colBox i) (renderHeader' i)
   pinnedBlock idxs = do
     let !rowLay = gridRowLay idxs
         !colLays = map colBox idxs
@@ -179,7 +179,7 @@ tableSplitPanes fillInner tableWid vWid hWid rowMinH frozenIdx unfrozenIdx pinne
             pure (vis, topH, botH)
     let !rowLay = gridRowLay idxs
         !colLays = map colBox idxs
-    column ((if fillInner then fillW else id) (tight $ defaultLayout {layoutGap = 0, layoutMinW = minSum idxs})) $ do
+    column' ((if fillInner then fillW else id) (tight $ defaultLayout {layoutGap = 0, layoutMinW = minSum idxs})) $ do
       when (topH > 0) $ void (spacer Fit (Fixed topH))
       mapM_
         ( \rowIdx ->
@@ -192,7 +192,7 @@ tableSplitPanes fillInner tableWid vWid hWid rowMinH frozenIdx unfrozenIdx pinne
         vis
       when (botH > 0) $ void (spacer Fit (Fixed botH))
   pane fill hideVertBar idxs = do
-    column (paneLay fill idxs) $ do
+    column' (paneLay fill idxs) $ do
       hs <- headerLine idxs renderHeader
       void separator
       pinnedBlock idxs
@@ -211,15 +211,15 @@ tableSplitPanes fillInner tableWid vWid hWid rowMinH frozenIdx unfrozenIdx pinne
     mPrevV <- uiIO (getPrevRect ctx vWid)
     let totalH = fromIntegral (length scrollRows) * rowMinH
         hasVertBar = maybe (totalH > 100) (\r -> totalH > rectH r) mPrevV
-    column (paneLay fillInner idxs) $ do
+    column' (paneLay fillInner idxs) $ do
       hs <-
-        row (tight . (if fillInner then fillW else id) $ defaultLayout {layoutGap = 0}) $ do
+        row' (tight . (if fillInner then fillW else id) $ defaultLayout {layoutGap = 0}) $ do
           hs' <-
             scrollAreaIdConfigured
               hWid
               (if fillInner then fillW (hRowLay {layoutMinW = minSum idxs}) else hRowLay)
               scrollHorizontalAuto $
-              column ((if fillInner then fillW else id) (tight $ defaultLayout {layoutGap = 0, layoutMinW = minSum idxs})) $ do
+              column' ((if fillInner then fillW else id) (tight $ defaultLayout {layoutGap = 0, layoutMinW = minSum idxs})) $ do
                 hs'' <- headerLine idxs renderHeader
                 void separator
                 pinnedBlock idxs
@@ -606,7 +606,7 @@ tableCfg cfg outerLayout key cols rows curSort =
            in \i ->
                 let !lay = if i < V.length cellLayouts then cellLayouts V.! i else tight defaultLayout
                  in void (stripedRow ri lay (rowCells V.! i))
-    column outerLayout $ do
+    column' outerLayout $ do
       showAllResp <-
         if IS.null hidden0
           then pure Nothing

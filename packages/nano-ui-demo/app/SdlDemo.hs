@@ -180,11 +180,11 @@ demoUi = do
   (notes, setNotes) <- useText ""
   (treeSel, setTreeSel) <- useText "0"
   (tableSortVal, setTableSort) <- useTableSort (SortCol 0 SortAsc)
-  scroll (tight (grow defaultLayout)) $
-    column (padAll 16 . gap gapLayout . fillW $ defaultLayout) $ do
-      panel (padXY 14 10 . gap gapInline . fillW $ defaultLayout) $
+  scrollWith (tight . grow) $
+    columnWith (padAll 16 . gap gapLayout . fillW) $ do
+      panelWith (padXY 14 10 . gap gapInline . fillW) $
         toolbar $ do
-          column (tight . gap gapText $ defaultLayout) $ do
+          columnWith (tight . gap gapText) $ do
             heading "nano-ui"
             muted "SDL3 demo"
           flex
@@ -201,14 +201,14 @@ demoUi = do
           clickButton "About" (setAbout True)
           clickButton "Debug" (setDebug (not debugOpen))
       responsiveRowCol 720 (tight . gap gapLayout . fillW $ defaultLayout) $ do
-        column (tight . gap gapLayout . fillW $ defaultLayout) $ do
+        columnWith (tight . gap gapLayout . fillW) $ do
           card $ do
             heading "State"
             let accent = fromMaybe demoAccent (colorPickerFromHex accentHex)
             kv "Feature" (onOff checked)
             kv "Volume" vol
             kv "Quality" quality
-            row (tight . gap gapInline . alignMid . fillW $ defaultLayout) $ do
+            rowWith (tight . gap gapInline . alignMid . fillW) $ do
               box (fixedWH 20 20 defaultLayout) accent
               kv "Accent" accentHex
             kv "Theme" themeName
@@ -220,7 +220,7 @@ demoUi = do
             kv "Clicked" (orDash click)
           card $ do
             heading "Gallery"
-            gridAutoFit 88 (tight . gap gapInline $ defaultLayout) $ do
+            rowWith (tight . gap gapInline . fillW) $ do
               thumb (ImageId 1) "Swatch"
               thumb (ImageId 2) "Checker"
               thumb (ImageId 3) "Stripe"
@@ -248,7 +248,7 @@ demoUi = do
               setNotes notesVal
               sep
               heading "Popups & Menus"
-              row (tight . gap gapInline . fillW $ defaultLayout) $ do
+              rowWith (tight . gap gapInline . fillW) $ do
                 btnTip <- button "Hover for Tooltip"
                 tooltip btnTip "This is a floating tooltip widget!"
                 btnMenu <- button "Right-click Menu"
@@ -286,13 +286,13 @@ demoUi = do
                         ]
                     , TreeItem "README.md" []
                     ]
-              scroll2D (fixedH 300 . fillW $ defaultLayout) $ do
+              scroll2DWith (fixedH 300 . fillW) $ do
                 (_, sel) <- tree "demo" demoTree sel0
                 setTreeSel (T.pack (show sel))
               sep
               heading "Items"
-              scroll2D (padAll 6 . fixedH 136 . fillW $ defaultLayout) $
-                column (tight . gap gapText . fillW $ defaultLayout) $
+              scroll2DWith (padAll 6 . fixedH 136 . fillW) $
+                columnWith (tight . gap gapText . fillW) $
                   for_ [1 .. 12 :: Int] $ \i -> do
                     void $ labelEx (tight . fillW $ defaultLayout) $ T.pack ("Item " <> show i)
             Table -> do
@@ -316,20 +316,20 @@ demoUi = do
             Plots -> do
               heading "Plots"
               muted "Auto ticks, shared scales, and decimation."
-              column (tight . gap gapLayout . fillW $ defaultLayout) $ do
-                column (tight . gap gapMicro . fillW $ defaultLayout) $ do
+              columnWith (tight . gap gapLayout . fillW) $ do
+                columnWith (tight . gap gapMicro . fillW) $ do
                   muted "Sine + cosine"
                   void $ plot (fillW defaultLayout) sineCosineChart
-                column (tight . gap gapMicro . fillW $ defaultLayout) $ do
+                columnWith (tight . gap gapMicro . fillW) $ do
                   muted "Weekly counts"
                   void $ barChart (fillW defaultLayout) weeklyBars
-                column (tight . gap gapMicro . fillW $ defaultLayout) $ do
+                columnWith (tight . gap gapMicro . fillW) $ do
                   muted "Sleep vs focus"
                   void $ plot (fillW defaultLayout) sleepFocusChart
-                column (tight . gap gapMicro . fillW $ defaultLayout) $ do
+                columnWith (tight . gap gapMicro . fillW) $ do
                   muted "Area"
                   void $ areaChart (fillW defaultLayout) areaDemo
-                column (tight . gap gapMicro . fillW $ defaultLayout) $ do
+                columnWith (tight . gap gapMicro . fillW) $ do
                   muted "Drawing"
                   ps <- uiPlotStyle
                   void $ diagram (fillW $ defaultLayout {layoutMaxH = 200}) (drawingSample ps)
@@ -357,7 +357,7 @@ demoUi = do
       heading "nano-ui"
       muted "Immediate-mode GUI for Haskell."
       muted "Esc closes this dialog, then the app."
-      row (gap gapInline (fillW defaultLayout)) $ do
+      rowWith (gap gapInline . fillW) $ do
         flex
         clickButton "Close" (setAbout False)
   onClick aboutResp (setAbout False)
@@ -488,7 +488,7 @@ tableSortDirText s =
 
 debugBody :: SdlDebugSnapshot -> NanoUI ()
 debugBody s =
-  column (tight . minW 300 . fillW $ defaultLayout) $ do
+  columnWith (tight . minW 300 . fillW) $ do
     debugSection "Frame" (frameRows s)
     sep
     debugSection "Draw" (drawRows s)
@@ -545,7 +545,7 @@ rtsRows s = smallArrayFromList (formatCoreRtsRows (dbgCore s))
 
 thumb :: ImageId -> T.Text -> NanoUI ()
 thumb iid caption =
-  column (tight . gap gapMicro $ defaultLayout) $ do
+  columnWith (tight . gap gapMicro) $ do
     image_ (fixedWH 88 88 defaultLayout) iid
     muted caption
 
@@ -623,17 +623,9 @@ selftest = do
     (ctx', base) <- syncDisplay ctx env idle
     void (sdlDrawFrame ctx' demoUi env base True)
     spans0 <- collectTextSpans ctx'
-    putStrLn $ "--- Controls tab ---"
-    for_ spans0 $ \(r, txt, _, _, _) ->
-      when (txt `elem` ["State", "Gallery", "Controls", "Feature"]) $
-        putStrLn $ "  " ++ T.unpack txt ++ ": " ++ show r
     unless (hasText "Feature" spans0) $ fail "selftest: Controls body missing"
     clickTab ctx' env base "Table"
     spansTable <- collectTextSpans ctx'
-    putStrLn $ "--- Table tab ---"
-    for_ spansTable $ \(r, txt, _, _, _) ->
-      when (txt `elem` ["State", "Gallery", "Table", "Name", "Dept"]) $
-        putStrLn $ "  " ++ T.unpack txt ++ ": " ++ show r
     unless (hasText "David" spansTable) $ fail "selftest: table body missing after Table tab"
     hdr <- requireSpan "selftest: Name header" (findHeader "Name" spansTable)
     clickPos ctx' env base hdr

@@ -216,7 +216,7 @@ registerDemoImages ctx images =
 --------------------------------------------------------------------------------
 
 tabControlsUi :: NanoUI ()
-tabControlsUi = column (tight . gap 8 . fillW $ defaultLayout) $ do
+tabControlsUi = columnWith (tight . gap 8 . fillW) $ do
   heading "Controls"
   void $ checkbox "Feature" False
   void $ slider "Volume" 0 100 50
@@ -226,7 +226,7 @@ tabControlsUi = column (tight . gap 8 . fillW $ defaultLayout) $ do
   void $ radioFieldset "Theme" ["Light", "Dark", "System"] 1
   void $ textInput "Name" ""
   void $ textArea "Notes" "Edit me.\nSecond line."
-  row (tight . gap 8 . fillW $ defaultLayout) $ do
+  rowWith (tight . gap 8 . fillW) $ do
     btnTip <- button "Hover for Tooltip"
     tooltip btnTip "This is a floating tooltip widget!"
     btnMenu <- button "Right-click Menu"
@@ -237,7 +237,7 @@ tabControlsUi = column (tight . gap 8 . fillW $ defaultLayout) $ do
       void $ menuItemWithShortcut "Paste" "Ctrl+V"
 
 tabListUi :: NanoUI ()
-tabListUi = column (tight . gap 8 . fillW $ defaultLayout) $ do
+tabListUi = columnWith (tight . gap 8 . fillW) $ do
   heading "Tree"
   let demoTree =
         [ TreeItem "src"
@@ -250,11 +250,11 @@ tabListUi = column (tight . gap 8 . fillW $ defaultLayout) $ do
         , TreeItem "test" [TreeItem "Main.hs" []]
         , TreeItem "README.md" []
         ]
-  scroll2D (fixedH 300 . fillW $ defaultLayout) $ do
+  scroll2DWith (fixedH 300 . fillW) $ do
     void $ tree "demo" demoTree 0
   heading "Items"
-  scroll2D (padAll 6 . fixedH 136 . fillW $ defaultLayout) $
-    column (tight . gap 0 . fillW $ defaultLayout) $
+  scroll2DWith (padAll 6 . fixedH 136 . fillW) $
+    columnWith (tight . gap 0 . fillW) $
       forM_ [1 .. 12 :: Int] $ \i ->
         void $ labelEx (tight . fillW $ defaultLayout) (T.pack ("Item " <> show i))
 
@@ -289,7 +289,7 @@ samplePeople =
   ]
 
 tabTableUi :: NanoUI ()
-tabTableUi = column (tight . gap 8 . fillW $ defaultLayout) $ do
+tabTableUi = columnWith (tight . gap 8 . fillW) $ do
   heading "Table"
   void $
     tableCfg
@@ -301,7 +301,7 @@ tabTableUi = column (tight . gap 8 . fillW $ defaultLayout) $ do
       (SortCol 0 SortAsc)
 
 tabPlotsUi :: NanoUI ()
-tabPlotsUi = column (tight . gap 8 . fillW $ defaultLayout) $ do
+tabPlotsUi = columnWith (tight . gap 8 . fillW) $ do
   heading "Plots"
   let sineCos =
         withDecimate True $
@@ -316,7 +316,7 @@ tabPlotsUi = column (tight . gap 8 . fillW $ defaultLayout) $ do
   void $ barChart (fillW . fixedH 120 $ defaultLayout) bars
 
 tabDiagnosticsUi :: NanoUI ()
-tabDiagnosticsUi = column (tight . gap 4 . fillW $ defaultLayout) $ do
+tabDiagnosticsUi = columnWith (tight . gap 4 . fillW) $ do
   heading "Diagnostics"
   kv "Renderer" "SDL3 Pinned Vertex Arena"
   kv "Evaluation" "Zero-Cost Inactive Tabs"
@@ -328,64 +328,64 @@ tabDiagnosticsUi = column (tight . gap 4 . fillW $ defaultLayout) $ do
 --------------------------------------------------------------------------------
 
 benchButtons :: NanoUI ()
-benchButtons = column (tight . gap 2 . fillW $ defaultLayout) $
+benchButtons = columnWith (tight . gap 2 . fillW) $
   forM_ [1 .. 100 :: Int] $ \i ->
     void $ button (T.pack ("Button " <> show i))
 
 benchCheckboxes :: NanoUI ()
-benchCheckboxes = column (tight . gap 2 . fillW $ defaultLayout) $
+benchCheckboxes = columnWith (tight . gap 2 . fillW) $
   forM_ [1 .. 100 :: Int] $ \i ->
     void $ checkbox (T.pack ("Checkbox " <> show i)) (even i)
 
 benchSliders :: NanoUI ()
-benchSliders = column (tight . gap 2 . fillW $ defaultLayout) $
+benchSliders = columnWith (tight . gap 2 . fillW) $
   forM_ [1 .. 100 :: Int] $ \i ->
     void $ slider (T.pack ("Slider " <> show i)) 0 100 (fromIntegral i)
 
 benchRadios :: NanoUI ()
-benchRadios = column (tight . gap 2 . fillW $ defaultLayout) $
+benchRadios = columnWith (tight . gap 2 . fillW) $
   forM_ [1 .. 100 :: Int] $ \i ->
     void $ radioFieldset (T.pack ("Radio " <> show i)) ["A", "B", "C"] (i `mod` 3)
 
 benchSelects :: NanoUI ()
-benchSelects = column (tight . gap 2 . fillW $ defaultLayout) $
+benchSelects = columnWith (tight . gap 2 . fillW) $
   forM_ [1 .. 100 :: Int] $ \i ->
     void $ select (T.pack ("Select " <> show i)) ["Option 1", "Option 2", "Option 3"] (i `mod` 3)
 
 benchTextInputs :: NanoUI ()
-benchTextInputs = column (tight . gap 2 . fillW $ defaultLayout) $
+benchTextInputs = columnWith (tight . gap 2 . fillW) $
   forM_ [1 .. 100 :: Int] $ \i ->
     void $ textInput (T.pack ("Input " <> show i)) "Hello World"
 
 benchTextAreas :: NanoUI ()
-benchTextAreas = column (tight . gap 4 . fillW $ defaultLayout) $
+benchTextAreas = columnWith (tight . gap 4 . fillW) $
   forM_ [1 .. 20 :: Int] $ \i ->
     void $ textArea (T.pack ("Area " <> show i)) "Line 1\nLine 2\nLine 3"
 
 benchColorPickers :: NanoUI ()
-benchColorPickers = column (tight . gap 4 . fillW $ defaultLayout) $
+benchColorPickers = columnWith (tight . gap 4 . fillW) $
   forM_ [1 .. 20 :: Int] $ \_ ->
     void $ colorPicker "Pick" (colorRGBA 100 150 200 255)
 
 benchLabels :: NanoUI ()
-benchLabels = column (tight . gap 2 . fillW $ defaultLayout) $
+benchLabels = columnWith (tight . gap 2 . fillW) $
   forM_ [1 .. 100 :: Int] $ \i ->
     label (T.pack ("This is label text number " <> show i))
 
 benchBoxes :: NanoUI ()
-benchBoxes = grid 10 (tight . gap 2 . fillW $ defaultLayout) $
+benchBoxes = gridWith 10 (tight . gap 2 . fillW) $
   forM_ [1 .. 100 :: Int] $ \i ->
     box (fixedWH 20 20 defaultLayout) (colorRGBA (fromIntegral (i * 2)) 120 200 255)
 
 benchImages :: NanoUI ()
-benchImages = grid 10 (tight . gap 2 . fillW $ defaultLayout) $
+benchImages = gridWith 10 (tight . gap 2 . fillW) $
   forM_ [1 .. 100 :: Int] $ \i ->
     image_ (fixedWH 24 24 defaultLayout) (ImageId (1 + i `mod` 3))
 
 benchContainers :: NanoUI ()
-benchContainers = column (tight . gap 2 . fillW $ defaultLayout) $
+benchContainers = columnWith (tight . gap 2 . fillW) $
   forM_ [1 .. 50 :: Int] $ \_ ->
-    row (tight . gap 2 . fillW $ defaultLayout) $ do
+    rowWith (tight . gap 2 . fillW) $ do
       box (fixedWH 10 10 defaultLayout) (colorRGBA 255 0 0 255)
       box (fixedWH 10 10 defaultLayout) (colorRGBA 0 255 0 255)
       box (fixedWH 10 10 defaultLayout) (colorRGBA 0 0 255 255)

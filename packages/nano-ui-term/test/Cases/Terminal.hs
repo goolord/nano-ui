@@ -54,7 +54,7 @@ runTerminalDefaultGapTest _ failed = do
   let fm = ctxFontMetrics ctx
       expectedStep = fmLineHeight fm + resolveLayoutGap (ctxHostProfile ctx) fm (layoutGap defaultLayout)
       inp = withInput 20 10
-      ui = column defaultLayout (label "A" >> label "B" >> pure ())
+      ui = column (label "A" >> label "B" >> pure ())
   _ <- runFrame ctx inp ui
   spans <- collectTextSpans ctx
   let ys = sort [y | (Rect _ y _ _, txt, _, _, _) <- spans, txt == "A" || txt == "B"]
@@ -66,7 +66,7 @@ runTerminalSliderTrackTest :: Context -> IORef Int -> IO ()
 runTerminalSliderTrackTest _ failed = do
   ctx <- newAdaptiveTerminalContext
   let inp0 = withInput 60 10
-      ui = column (fillW defaultLayout) (slider "Vol" 0 100 0)
+      ui = columnWith fillW (slider "Vol" 0 100 0)
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect rx ry rw rh = respRect resp
       fm = ctxFontMetrics ctx
@@ -80,13 +80,13 @@ runTerminalModalOverlayTest :: Context -> IORef Int -> IO ()
 runTerminalModalOverlayTest _ failed = do
   ctx <- newAdaptiveTerminalContext
   let inp0 = withInput 80 24
-      ui = column defaultLayout $ do
+      ui = column $ do
         _ <- label "Behind"
         (dlg, _) <- modal True "About" $ do
           heading "nano-ui"
           muted "Immediate-mode GUI for Haskell."
           muted "Terminal backend demo."
-          row (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fit}) (flex >> clickButton "Close" (pure ()))
+          row' (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fit}) (flex >> clickButton "Close" (pure ()))
           pure ()
         pure dlg
   (dlg, drawData) <- warmupDraw ctx inp0 ui
@@ -112,7 +112,7 @@ runTerminalModalScrollTest _ failed = do
       line1 = T.pack "line 1"
       title = T.pack "About"
       ui = fmap fst $ modal True "About" $
-             column defaultLayout (mapM_ (\i -> label (T.pack ("line " <> show (i :: Int)))) [1 .. 24])
+             column (mapM_ (\i -> label (T.pack ("line " <> show (i :: Int)))) [1 .. 24])
   dlg <- warmup2 ctx inp0 ui
   let Rect mx _ mw mh = respRect dlg
   assert failed (mw > 0 && mh > 0 && mh <= 16)
@@ -129,7 +129,7 @@ runTerminalModalTightTest _ failed = do
         heading "nano-ui"
         muted "Immediate-mode GUI for Haskell."
         muted "Terminal backend demo."
-        row (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fit}) (flex >> clickButton "Close" (pure ()))
+        row' (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fit}) (flex >> clickButton "Close" (pure ()))
         pure ()
   (dlg, _, _, _) <- runFrame ctx inp0 ui >>= \_ -> runFrame ctx inp0 ui
   overlays <- collectOverlayTextSpans ctx inp0
@@ -238,7 +238,7 @@ runTerminalButtonBracketTest _ failed = do
   let ctx = withIcons term IconsNerd
       inp0 = withInput 50 20
       ui = fmap fst $ modal True "Long modal title for clip" $ do
-        row defaultLayout (void (button "OK") >> void (button "Cancel"))
+        row (void (button "OK") >> void (button "Cancel"))
         label_ "Body"
       Size tw th = inputWindowSize inp0
   _ <- runFrame ctx inp0 ui
@@ -255,7 +255,7 @@ runTerminalButtonBracketTest _ failed = do
       overlays1 <- collectOverlayTextSpans ctx hover
       cells1 <- rasterizeLayered (round tw) (round th) draw1 [] overlays1
       assert failed (terminalBracketsOk cells1 overlays1)
-  let pageUi = column defaultLayout $ row defaultLayout $ do
+  let pageUi = column $ row $ do
         void (button "OK")
         void (button "Cancel")
         void (checkbox "Feature" False)
@@ -272,7 +272,7 @@ runTerminalWideClearBracketTest ctx failed = do
       clip = Rect 0 0 2 1
       fg = colorRGBA 220 220 220 255
       bg = colorRGBA 20 20 24 255
-  (_, _, draw, _) <- runFrame ctx inp (column defaultLayout (pure ()))
+  (_, _, draw, _) <- runFrame ctx inp (column (pure ()))
   cellsA <- rasterize 2 1 draw [(clip, "[O", fg, bg, clip)]
   cellsB <- rasterize 2 1 draw [(clip, iconClose glyphIcons, fg, bg, clip)]
   let bytes = toLazyByteString (frameBytes (Just cellsA) cellsB)
@@ -291,7 +291,7 @@ runTerminalWideCursorCupTest ctx failed = do
       clip = Rect 0 0 4 1
       fg = colorRGBA 220 220 220 255
       bg = colorRGBA 20 20 24 255
-  (_, _, draw, _) <- runFrame ctx inp (column defaultLayout (pure ()))
+  (_, _, draw, _) <- runFrame ctx inp (column (pure ()))
   cells <- rasterize 4 1 draw [(Rect 0 0 2 1, iconClose glyphIcons, fg, bg, clip), (Rect 2 0 2 1, "[O", fg, bg, clip)]
   assert failed (fontAwesomeIcon (cellChar cells 0 0))
   assertEq failed (cellChar cells 1 0) wideTrailChar
@@ -367,7 +367,7 @@ runTerminalCloseButtonTest :: Context -> IORef Int -> IO ()
 runTerminalCloseButtonTest _ failed = do
   ctx <- newAdaptiveTerminalContext
   let inp0 = withInput 80 24
-      modalUi = column defaultLayout (fmap fst (modal True "About" (label_ "Body")))
+      modalUi = column (fmap fst (modal True "About" (label_ "Body")))
       windowUi = fmap fst (window True "Debug" (label_ "Body"))
       testClose ui = do
         _ <- warmup2 ctx inp0 ui
@@ -387,8 +387,8 @@ runTerminalIconChromeTest _ failed = do
   term <- newAdaptiveTerminalContext
   let ctx = withIcons term IconsNerd
       inp = withInput 40 30
-      rows = column (fillW defaultLayout) (forM_ [1 .. 40 :: Int] (label_ . T.pack . show))
-      ui = column (fillW defaultLayout) $ do
+      rows = columnWith fillW (forM_ [1 .. 40 :: Int] (label_ . T.pack . show))
+      ui = columnWith fillW $ do
         _ <- checkbox "Feature" False
         _ <- select "Quality" ["Low", "High"] 0
         scrollArea ((fillW defaultLayout) {layoutHeight = Fixed 20}) rows
@@ -466,7 +466,7 @@ runTerminalTextInputDisplayTest :: Context -> IORef Int -> IO ()
 runTerminalTextInputDisplayTest _ failed = do
   ctx <- newAdaptiveTerminalContext
   let inp = withInput 40 10
-      ui = column defaultLayout (textInput "Name" "hello")
+      ui = column (textInput "Name" "hello")
   _ <- warmup2 ctx inp ui
   spans <- collectTextSpans ctx
   case [txt | (_, txt, _, _, _) <- spans, "Name:" `T.isPrefixOf` txt] of
@@ -479,7 +479,7 @@ runTerminalSeparatorSpanTest :: Context -> IORef Int -> IO ()
 runTerminalSeparatorSpanTest _ failed = do
   ctx <- newAdaptiveTerminalContext
   let inp = withInput 40 8
-      ui = column (fillW defaultLayout) (label_ "A" >> separator >>= \r -> label_ "B" >> pure r)
+      ui = columnWith fillW (label_ "A" >> separator >>= \r -> label_ "B" >> pure r)
   _ <- runFrame ctx inp ui
   (resp, _, drawData, _) <- runFrame ctx inp ui
   spans <- collectTextSpans ctx

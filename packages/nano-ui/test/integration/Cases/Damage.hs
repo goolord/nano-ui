@@ -46,7 +46,7 @@ runExplicitDamageWidgetTest :: Context -> IORef Int -> IO ()
 runExplicitDamageWidgetTest _ failed = do
   ctx <- newContext
   let inp = withInput 400 300
-      ui = column (padAll 20 defaultLayout) $ do
+      ui = columnWith (padAll 20) $ do
         w1 <- button "First"
         w2 <- button "Second"
         pure (w1, w2)
@@ -56,7 +56,7 @@ runExplicitDamageWidgetTest _ failed = do
   _ <- takeDamage ctx
 
   -- Queue explicit widget damage
-  let testUi = column (padAll 20 defaultLayout) $ do
+  let testUi = columnWith (padAll 20) $ do
         w1' <- button "First"
         w2' <- button "Second"
         damageWidgetNow (respId w1') (DamageInflated sliderDamageSlop)
@@ -76,8 +76,8 @@ runExplicitDamageRectTest _ failed = do
   ctx <- newContext
   let inp = withInput 400 300
       customRect = Rect 15 25 80 45
-      ui = column defaultLayout (label "Hello")
-      damagedUi = column defaultLayout $ do
+      ui = column (label "Hello")
+      damagedUi = column $ do
         damageRectNow customRect
         label "Hello"
   _ <- warmup2 ctx inp ui
@@ -93,8 +93,8 @@ runExplicitDamageFullTest :: Context -> IORef Int -> IO ()
 runExplicitDamageFullTest _ failed = do
   ctx <- newContext
   let inp = withInput 400 300
-      ui = column defaultLayout (label "Hello")
-      fullDamagedUi = column defaultLayout $ do
+      ui = column (label "Hello")
+      fullDamagedUi = column $ do
         damageFullNow
         label "Hello"
   _ <- warmup2 ctx inp ui
@@ -108,12 +108,12 @@ runDamageQueueClearedPerFrameTest :: Context -> IORef Int -> IO ()
 runDamageQueueClearedPerFrameTest _ failed = do
   ctx <- newContext
   let inp = withInput 400 300
-      ui = column defaultLayout (label "Static content")
+      ui = column (label "Static content")
   _ <- warmup2 ctx inp ui
   _ <- takeDamage ctx
 
   -- Explicit damage in this frame
-  let damagedUi = column defaultLayout $ do
+  let damagedUi = column $ do
         damageRectNow (Rect 5 5 20 20)
         label "Static content"
   _ <- runFrame ctx inp damagedUi
@@ -133,7 +133,7 @@ runStateChangeDamageTest _ failed = do
   let inp0 = withInput 400 300
       ui = do
         (name, setName) <- useText ""
-        row defaultLayout $ do
+        row $ do
           label_ ("Left pane: " <> name)
           (resp, typed) <- textInput "Name" ""
           when (respChanged resp) (setName typed)

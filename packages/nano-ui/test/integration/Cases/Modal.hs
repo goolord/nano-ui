@@ -24,11 +24,11 @@ runModalOverlayTest :: Context -> IORef Int -> IO ()
 runModalOverlayTest ctx failed = do
   let
     inp0 = withInput 320 200
-    ui = column defaultLayout $ do
+    ui = column $ do
       outside <- button "Outside"
       (dlg, mInside) <- modal True "Title" (button "Inside")
       pure (outside, dlg, mInside)
-    closedUi = column defaultLayout $ do
+    closedUi = column $ do
       _ <- button "Outside"
       (dlg, mInside) <- modal False "Title" (button "Inside")
       pure (dlg, mInside)
@@ -81,7 +81,7 @@ runModalNoPhantomScrollTest ctx failed = do
   let inp0 = withInput 400 300
       ui = modal True "About" $ do
         _ <- label "Immediate-mode GUI for Haskell."
-        row (defaultLayout {layoutWidth = Grow 1}) $ do
+        row' (defaultLayout {layoutWidth = Grow 1}) $ do
           _ <- spacer (Grow 1) Fit
           _ <- button "Close"
           pure ()

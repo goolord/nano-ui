@@ -26,26 +26,26 @@ benchInput =
 
 smallUi, mediumUi, largeUi :: NanoUI ()
 smallUi =
-  column (defaultLayout {layoutGap = 8}) $ do
+  columnWith (gap 8) $ do
     void (button "OK")
     void (label "Hello")
 
 mediumUi =
-  column
+  column'
     (defaultLayout {layoutWidth = Grow 1, layoutHeight = Grow 1, layoutGap = 8})
     ( do
         replicateM_ 12 $
-          grid 8 (defaultLayout {layoutGap = 8}) $
+          grid' 8 (defaultLayout {layoutGap = 8}) $
             replicateM_ 8 (void (button "OK"))
         void (label "nano-ui SDL bench")
     )
 
 largeUi =
-  column
+  column'
     (defaultLayout {layoutWidth = Grow 1, layoutHeight = Grow 1, layoutGap = 6})
     ( do
         replicateM_ 20 $
-          grid 10 (defaultLayout {layoutGap = 6}) $
+          grid' 10 (defaultLayout {layoutGap = 6}) $
             replicateM_ 10 (void (button "Item"))
         replicateM_ 8 (void (label "Status line with a bit of text"))
     )

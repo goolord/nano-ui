@@ -19,7 +19,6 @@ module NanoUI.Frame.Window
 
 
 import Control.Monad (forM_, when)
-import Data.IORef (readIORef, writeIORef)
 import Data.Maybe (isJust)
 import qualified Data.IntMap.Strict as IM
 import NanoUI.Context
@@ -29,9 +28,13 @@ import NanoUI.Context
   , WindowResizeEdge (..)
   , damageWidget
   , getStore
+  , getWindowDrag
+  , getWindowResize
   , intKey
   , markDirty
   , setStore
+  , setWindowDrag
+  , setWindowResize
   , slotKey
   , slotWinSize
   )
@@ -151,11 +154,11 @@ persistWindowPositions ctx = do
 
 updateWindowDrag :: Context -> Input -> IO Bool
 updateWindowDrag ctx inp = do
-  resizing <- isJust <$> readIORef (ctxWindowResize ctx)
+  resizing <- isJust <$> getWindowResize ctx
   if resizing
     then pure False
     else do
-      drag <- readIORef (ctxWindowDrag ctx)
+      drag <- getWindowDrag ctx
       case drag of
         Just (wid, gx, gy)
           | inputMouseDown inp -> do
@@ -173,7 +176,7 @@ updateWindowDrag ctx inp = do
               markDirty ctx
               pure True
           | otherwise -> do
-              writeIORef (ctxWindowDrag ctx) Nothing
+              setWindowDrag ctx Nothing
               pure False
         Nothing
           | inputMousePressed inp -> do
@@ -342,7 +345,7 @@ resizeFromEdge wrd (V2 mx my) winW winH =
 
 updateWindowResize :: Context -> Input -> Float -> Float -> IO Bool
 updateWindowResize ctx inp winW winH = do
-  drag <- readIORef (ctxWindowResize ctx)
+  drag <- getWindowResize ctx
   case drag of
     Just wrd
       | inputMouseDown inp -> do
@@ -361,7 +364,7 @@ updateWindowResize ctx inp winW winH = do
           markDirty ctx
           pure True
       | otherwise -> do
-          writeIORef (ctxWindowResize ctx) Nothing
+          setWindowResize ctx Nothing
           pure False
     Nothing
       | inputMousePressed inp -> tryStartWindowResize ctx (inputMousePos inp)
@@ -404,7 +407,7 @@ tryStartWindowResize ctx mouse = do
               wid <- getWidgetId (ctxNodeArena ctx) idx
               (minW, minH, maxW, maxH) <- getMinMax (ctxNodeArena ctx) idx
               let V2 mx my = mouse
-              writeIORef (ctxWindowResize ctx) $
+              setWindowResize ctx $
                 Just
                   WindowResizeDrag
                     { wrdWidget = wid
@@ -425,7 +428,7 @@ tryStartWindowResize ctx mouse = do
 
 windowResizeCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
 windowResizeCursorKind ctx inp = do
-  mDrag <- readIORef (ctxWindowResize ctx)
+  mDrag <- getWindowResize ctx
   case mDrag of
     Just wrd | inputMouseDown inp -> pure (Just (cursorForResizeEdge (wrdEdge wrd)))
     Just _ -> pure Nothing
@@ -481,7 +484,7 @@ tryStartWindowDrag ctx mouse = do
                   wid <- getWidgetId (ctxNodeArena ctx) idx
                   (wx, wy, _, _) <- getRect (ctxNodeArena ctx) idx
                   let V2 mx my = mouse
-                  writeIORef (ctxWindowDrag ctx) (Just (wid, mx - wx, my - wy))
+                  setWindowDrag ctx (Just (wid, mx - wx, my - wy))
                   markDirty ctx
                   pure True
                 else pure False

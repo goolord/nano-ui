@@ -18,28 +18,17 @@ import Data.Primitive.PrimArray (readPrimArray)
 import qualified Data.IntMap.Strict as IM
 import NanoUI.Context (Context (..), WidgetStore (..), getStore, intBool, intKey)
 import NanoUI.Frame.Hit (modalTreeOpen, widgetIdInModal)
-import NanoUI.Types (isCellHost)
-import NanoUI.Icons (checkboxMark, radioMark)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Layout.Arena
-  ( NodeType (NodeCheckbox, NodeRadio, NodeTree, NodeSlider)
+  ( NodeType (NodeCheckbox, NodeRadio, NodeTree)
   , forNodes_
   , getNodeType
   , getParent
   , getStyleIdx
-  , getText
-  , getNodeValue
   , getWidgetId
-  , setNodeText
   , setNodeValue
   )
-import NanoUI.WidgetText
-  ( checkboxLabelText
-  , radioLabelText
-  , treeDecodeStyle
-  , sliderLabelText
-  , sliderText
-  )
+import NanoUI.WidgetText (treeDecodeStyle)
 
 tabNext :: WidgetId -> [WidgetId] -> Bool -> WidgetId
 tabNext cur ids shift =
@@ -109,33 +98,20 @@ syncWidgetLabels :: Context -> IO ()
 syncWidgetLabels ctx = do
   store <- getStore ctx
   let na = ctxNodeArena ctx
-      terminal = isCellHost (ctxHostProfile ctx)
-      icons = ctxIcons ctx
   forNodes_ na $ \idx -> do
     nt <- getNodeType na idx
     wid <- getWidgetId na idx
     let key = intKey wid
     case nt of
       NodeCheckbox -> do
-        txt <- getText na idx
-        let body = checkboxLabelText txt
-            val = intBool (IM.findWithDefault 0 key (storeInt store))
-            mark = if terminal then checkboxMark icons val else ""
-        setNodeText na idx (mark <> body)
+        let val = intBool (IM.findWithDefault 0 key (storeInt store))
         setNodeValue na idx (if val then 1 else 0)
       NodeRadio -> do
-        txt <- getText na idx
         parent <- getParent na idx
         optIdx <- getStyleIdx na idx
         groupWid <- getWidgetId na parent
         let selected = IM.findWithDefault optIdx (intKey groupWid) (storeInt store)
             val = selected == optIdx
-            label = radioLabelText txt
-            display =
-              if terminal
-                then radioMark icons val <> label
-                else label
-        setNodeText na idx display
         setNodeValue na idx (if val then 1 else 0)
       NodeTree -> do
         parent <- getParent na idx
@@ -144,12 +120,4 @@ syncWidgetLabels ctx = do
         let (nodeIdx, _, _, _) = treeDecodeStyle si
             selected = IM.findWithDefault nodeIdx (intKey groupWid) (storeInt store)
         setNodeValue na idx (if selected == nodeIdx then 1 else 0)
-      NodeSlider -> do
-        let val = IM.findWithDefault 0 key (storeFloat store)
-        txt <- getText na idx
-        frac <- getNodeValue na idx
-        let lbl = sliderLabelText txt
-            shown = if terminal then sliderText lbl frac val else lbl
-        setNodeText na idx shown
-        setNodeValue na idx frac
       _ -> pure ()

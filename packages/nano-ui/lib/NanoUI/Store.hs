@@ -44,7 +44,9 @@ import NanoUI.Id (mix64)
 
 -- | Unified widget state. Same-type fields that share a widget key use 'slotKey'.
 data WidgetStore = WidgetStore
-  { storeInt :: !(IntMap Int)
+  { storeMirrorGen :: {-# UNPACK #-} !Word64
+  , storeOpenSelect :: {-# UNPACK #-} !Int
+  , storeInt :: !(IntMap Int)
   , storeFloat :: !(IntMap Float)
   , storePoint :: !(IntMap (Float, Float))
   , storeText :: !(IntMap Text)
@@ -56,7 +58,9 @@ data WidgetStore = WidgetStore
 
 instance Eq WidgetStore where
   a == b =
-    storeInt a == storeInt b
+    storeMirrorGen a == storeMirrorGen b
+      && storeOpenSelect a == storeOpenSelect b
+      && storeInt a == storeInt b
       && storeFloat a == storeFloat b
       && storePoint a == storePoint b
       && storeText a == storeText b
@@ -67,7 +71,9 @@ instance Eq WidgetStore where
 instance Show WidgetStore where
   show st =
     "WidgetStore { "
-      ++ "storeInt = " ++ show (storeInt st)
+      ++ "storeMirrorGen = " ++ show (storeMirrorGen st)
+      ++ ", storeOpenSelect = " ++ show (storeOpenSelect st)
+      ++ ", storeInt = " ++ show (storeInt st)
       ++ ", storeFloat = " ++ show (storeFloat st)
       ++ ", storePoint = " ++ show (storePoint st)
       ++ ", storeText = " ++ show (storeText st)
@@ -80,7 +86,9 @@ instance Show WidgetStore where
 emptyWidgetStore :: WidgetStore
 emptyWidgetStore =
   WidgetStore
-    { storeInt = IM.empty
+    { storeMirrorGen = 0
+    , storeOpenSelect = 0
+    , storeInt = IM.empty
     , storeFloat = IM.empty
     , storePoint = IM.empty
     , storeText = IM.empty
@@ -91,13 +99,13 @@ emptyWidgetStore =
     }
 
 -- useText/useFlag bump this so Frame can re-run UI without watching every map.
+{-# INLINE mirrorStoresChanged #-}
 mirrorStoresChanged :: WidgetStore -> WidgetStore -> Bool
-mirrorStoresChanged old new =
-  IM.lookup mirrorRoot (storeInt old) /= IM.lookup mirrorRoot (storeInt new)
+mirrorStoresChanged old new = storeMirrorGen old /= storeMirrorGen new
 
+{-# INLINE bumpMirror #-}
 bumpMirror :: WidgetStore -> WidgetStore
-bumpMirror st =
-  st {storeInt = IM.insertWith (+) mirrorRoot 1 (storeInt st)}
+bumpMirror st = st {storeMirrorGen = storeMirrorGen st + 1}
 
 -- Mix a field tag into a widget key so two Ints (cursor vs anchor) do not collide.
 slotKey :: Word64 -> Int -> Int
@@ -172,27 +180,22 @@ boolInt b = if b then 1 else 0
 intBool :: Int -> Bool
 intBool n = n /= 0
 
--- One open select at a time (replaces IM.singleton on the old Bool map).
+-- One open select at a time.
+{-# INLINE anySelectOpen #-}
 anySelectOpen :: WidgetStore -> Bool
-anySelectOpen st = IM.findWithDefault 0 selectOpenRoot (storeInt st) /= 0
+anySelectOpen st = storeOpenSelect st /= 0
 
+{-# INLINE isSelectOpen #-}
 isSelectOpen :: WidgetStore -> Int -> Bool
-isSelectOpen st k =
-  k /= 0 && IM.findWithDefault 0 selectOpenRoot (storeInt st) == k
+isSelectOpen st k = k /= 0 && storeOpenSelect st == k
 
+{-# INLINE setSelectOpen #-}
 setSelectOpen :: WidgetStore -> Int -> Bool -> WidgetStore
-setSelectOpen st k True =
-  st {storeInt = IM.insert selectOpenRoot k (storeInt st)}
+setSelectOpen st k True = st {storeOpenSelect = k}
 setSelectOpen st k False
   | isSelectOpen st k = closeSelects st
   | otherwise = st
 
+{-# INLINE closeSelects #-}
 closeSelects :: WidgetStore -> WidgetStore
-closeSelects st =
-  st {storeInt = IM.insert selectOpenRoot 0 (storeInt st)}
-
-mirrorRoot :: Int
-mirrorRoot = fromIntegral (mix64 0x4E414E4F 0x4D495200)
-
-selectOpenRoot :: Int
-selectOpenRoot = fromIntegral (mix64 0x4E414E4F 0x53454C00)
+closeSelects st = st {storeOpenSelect = 0}

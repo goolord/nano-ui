@@ -21,7 +21,7 @@ import NanoUI.Types (Rect (..), rectContains)
 import NanoUI.WidgetText (treeEncodeStyle)
 import NanoUI.Widgets.Behavior (KeyNav (..), ensureInt, ensureIntSet, putInt, putIntSet, useKeyNav)
 import NanoUI.Widgets.Combinators (selectableItem)
-import NanoUI.Widgets.Layout (column)
+import NanoUI.Widgets.Layout (columnWith)
 import NanoUI.Widgets.Node (Response (..), setChanged, tagContainer)
 
 data TreeItem = TreeItem {treeItemLabel :: !Text, treeItemChildren :: ![TreeItem]}
@@ -139,7 +139,7 @@ tree key items initial =
     expandedSet <- ensureIntSet groupKey defaultExpanded
     let rows = [(i, d, has, treeItemLabel item) | (i, d, has, item) <- visibleForest treeItemChildren expandedSet items]
     ctx <- askContext
-    column (tight . gap 0 . fillW $ defaultLayout) $ do
+    columnWith (tight . gap 0 . fillW) $ do
       tagContainer groupId
       results <- mapM (\(rowIdx, row@(i, _, _, _)) -> withKey i (treeRow rowIdx row selected expandedSet)) (zip [0 :: Int ..] rows)
       let resps = [r | (r, _, _) <- results]

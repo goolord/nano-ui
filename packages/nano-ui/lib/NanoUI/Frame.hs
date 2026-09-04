@@ -50,6 +50,8 @@ import NanoUI.Context
   , pruneDrawOpCache
   , resetDrawingScopeCache
   , setFloatingAncestor
+  , setMenuPointerGesture
+  , setSelectDropPress
   , tickAnimations
   )
 import NanoUI.Context (beginFrameModal)
@@ -222,9 +224,9 @@ runFrameEff unlift ctx inp ui = do
   resetDrawArena (ctxDrawArena ctx)
   resetUiBuildScopes ctx
   unless (inputMouseDown inp) $
-    writeIORef (ctxSelectDropPress ctx) False
+    setSelectDropPress ctx False
   when (not (inputMouseDown inp) && not (inputMouseReleased inp)) $
-    writeIORef (ctxMenuPointerGesture ctx) False
+    setMenuPointerGesture ctx False
   beginFrameModal ctx
   writeIORef (ctxReleaseClickedId ctx) (WidgetId 0)
   armMenuPointerCapture ctx inp

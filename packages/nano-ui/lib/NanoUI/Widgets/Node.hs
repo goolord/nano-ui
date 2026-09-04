@@ -23,6 +23,7 @@ module NanoUI.Widgets.Node
   , addWidget
   , addWidgetResp
   , addWidgetStyled
+  , addWidgetWithOptions
   , addSizingLeafNode
   , resolveInteraction
   , tagContainer
@@ -52,12 +53,13 @@ import NanoUI.Layout.Arena
   , addNode
   , addNodeFromLayout
   , setNodeText
+  , setOptions
   , setNodeValue
   , setStyleIdx
   , setWidgetId
   )
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO)
-import NanoUI.WidgetText (packButtonStyle, packTextNodeStyle)
+import NanoUI.WidgetText (packTextNodeStyle)
 import NanoUI.Style
   ( AlignX (..)
   , AlignY (..)
@@ -299,7 +301,6 @@ addWidgetStyled wid nt txt value layout styleIdx mResp = do
     setNodeText (ctxNodeArena ctx) idx txt
     setNodeValue (ctxNodeArena ctx) idx value
     let effectiveStyle
-          | nt == NodeButton = packButtonStyle styleIdx txt
           | nt == NodeText = packTextNodeStyle (layoutFontVariant layout) styleIdx
           | otherwise = styleIdx
     setStyleIdx (ctxNodeArena ctx) idx effectiveStyle
@@ -307,6 +308,29 @@ addWidgetStyled wid nt txt value layout styleIdx mResp = do
     case mResp of
       Just resp -> pure resp
       Nothing -> resolveInteraction ctx inp wid
+
+addWidgetWithOptions ::
+  Ui :> es =>
+  WidgetId
+  -> NodeType
+  -> Text
+  -> [Text]
+  -> Float
+  -> Layout
+  -> Eff es Response
+addWidgetWithOptions wid nt txt opts value layout = do
+  ctx <- askContext
+  inp <- askInput
+  uiIO $ do
+    stack <- readIORef (ctxContainerStack ctx)
+    let parent = parentIdx stack
+    idx <- addNodeFromLayout (ctxNodeArena ctx) nt parent layout
+    setNodeText (ctxNodeArena ctx) idx txt
+    setOptions (ctxNodeArena ctx) idx opts
+    setNodeValue (ctxNodeArena ctx) idx value
+    setStyleIdx (ctxNodeArena ctx) idx 0
+    setWidgetId (ctxNodeArena ctx) idx wid
+    resolveInteraction ctx inp wid
 
 resolveInteraction :: Context -> Input -> WidgetId -> IO Response
 resolveInteraction ctx inp wid = do

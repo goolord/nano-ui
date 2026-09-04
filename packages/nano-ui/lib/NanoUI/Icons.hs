@@ -20,11 +20,8 @@ module NanoUI.Icons
   , parseIconSet
   , iconSetName
   , checkboxMark
-  , checkboxPrefixes
   , radioMark
-  , radioPrefixes
   , treeExpandMark
-  , treeExpandPrefixes
   , fontAwesomeIcon
   , loneFontAwesome
   , terminalCharColumns
@@ -161,31 +158,6 @@ treeExpandMark icons hasChildren expanded
   | expanded = iconTreeExpanded icons
   | otherwise = iconTreeCollapsed icons
 
--- | Every prefix a checkbox label may carry, so stripping works after a tier
--- change (or a terminal node rendered through the SDL path).
-checkboxPrefixes :: [Text]
-checkboxPrefixes =
-  [ iconChecked asciiIcons
-  , iconUnchecked asciiIcons
-  , iconChecked glyphIcons
-  , iconUnchecked glyphIcons
-  ]
-
-radioPrefixes :: [Text]
-radioPrefixes =
-  [ iconRadioChecked asciiIcons
-  , iconRadioUnchecked asciiIcons
-  , iconRadioChecked glyphIcons
-  , iconRadioUnchecked glyphIcons
-  ]
-
-treeExpandPrefixes :: [Text]
-treeExpandPrefixes =
-  [ iconTreeExpanded asciiIcons
-  , iconTreeCollapsed asciiIcons
-  , iconTreeExpanded glyphIcons
-  , iconTreeCollapsed glyphIcons
-  ]
 
 -- | Font Awesome private-use block. Every Nerd Font maps these.
 fontAwesomeIcon :: Char -> Bool

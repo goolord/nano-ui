@@ -50,6 +50,9 @@ module NanoUI
   , FontVariant (..)
   , Layout (..)
   , defaultLayout
+  , askDefaultLayout
+  , withDefaultLayout
+  , withLayout
   , Style (..)
   , Theme (..)
   , defaultTheme
@@ -155,8 +158,10 @@ module NanoUI
   , responsiveRowCol
   , windowAspect
   , label
-  , labelEx
   , label_
+  , labelWith
+  , labelEx
+  , label'
   , button
   , checkbox
   , slider
@@ -193,7 +198,11 @@ module NanoUI
   , scroll
   , scroll_
   , scrollWith
+  , scroll'
   , scroll2D
+  , scroll2D_
+  , scroll2DWith
+  , scroll2D'
   , scrollArea
   , scrollArea2D
   , scrollAreaId
@@ -292,6 +301,9 @@ module NanoUI
   , vGroup
   , image_
   , useState
+  , useInt
+  , useFloat
+  , useEnum
   , checkboxControlled
   , sliderControlled
   , textInputControlled
@@ -409,6 +421,9 @@ import NanoUI.Input
 import NanoUI.Monad
   ( NanoUI
   , Ui
+  , askDefaultLayout
+  , withDefaultLayout
+  , withLayout
   , currentId
   , damageFullNow
   , damageGroupNow
@@ -552,8 +567,10 @@ import NanoUI.Widgets
   , kvMono
   , kvBlock
   , label
-  , labelEx
   , label_
+  , labelWith
+  , labelEx
+  , label'
   , modal
   , muted
   , mono
@@ -585,7 +602,13 @@ import NanoUI.Widgets
   , menuSeparator
   , menuHeader
   , scroll
+  , scroll_
+  , scrollWith
+  , scroll'
   , scroll2D
+  , scroll2D_
+  , scroll2DWith
+  , scroll2D'
   , scrollArea
   , scrollArea2D
   , scrollAreaIdConfigured
@@ -684,11 +707,9 @@ import NanoUI.Widgets.Layout
   , panelWith
   , panel_
   , row'
-  , rowWith
   , row_
+  , rowWith
   , scrollAreaId
-  , scrollWith
-  , scroll_
   , vGroup
   )
 import NanoUI.State
@@ -700,6 +721,9 @@ import NanoUI.State
   , sliderEmit
   , textInputControlled
   , textInputEmit
+  , useEnum
+  , useFloat
+  , useInt
   , useState
   )
 import NanoUI.Frame

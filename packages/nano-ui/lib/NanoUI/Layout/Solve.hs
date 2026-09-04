@@ -65,6 +65,7 @@ import NanoUI.Layout.Arena
   , getMinMax
   , getNextSibling
   , getNodeType
+  , getOptions
   , getParent
   , getStyleIdx
   , getPadding
@@ -93,15 +94,11 @@ import NanoUI.Style (AlignX (..), AlignY (..), FontVariant (..), Padding (..), w
 import NanoUI.Types (PopupAnchor (..), PopupPlacement (..), Rect (..), V2 (..), clamp)
 import NanoUI.Widgets.ColorPicker (colorPickerMeasureSize)
 import NanoUI.WidgetText
-  ( checkboxLabelText
-  , radioLabelText
-  , textNodeFontVariant
+  ( textNodeFontVariant
   , treeDecodeStyle
   , treeMeasureLabel
   , selectDisplayText
   , selectChevronReserve
-  , selectOptions
-  , sliderLabelText
   , sliderValueText
   , textInputFieldHeight
   , textInputLabelGap
@@ -372,7 +369,7 @@ measureWidget na host fm measure idx = do
   (tw, th, extraW, extraH) <-
     case nt of
       NodeSlider -> do
-        let lbl = if T.null txt then " " else sliderLabelText txt
+        let lbl = if T.null txt then " " else txt
         (lw, lh) <- measure lbl
         (vw, _) <- measure (sliderValueText 100)
         let trackExtra =
@@ -382,10 +379,10 @@ measureWidget na host fm measure idx = do
             contentW = max lw vw
         pure (contentW, lh, 0, trackExtra)
       NodeCheckbox -> do
-        let body = if T.null txt then " " else if isCellHost host then txt else checkboxLabelText txt
+        let body = if T.null txt then " " else txt
         measureMarkedWidget host fm measure body (checkboxLeading host fm)
       NodeRadio -> do
-        let body = if T.null txt then " " else if isCellHost host then txt else radioLabelText txt
+        let body = if T.null txt then " " else txt
         measureMarkedWidget host fm measure body (checkboxLeading host fm)
       NodeTree -> do
         let (_, depth, _, _) = treeDecodeStyle si
@@ -393,7 +390,8 @@ measureWidget na host fm measure idx = do
             body = if isCellHost host then treeMeasureLabel depth lbl else lbl
         measureMarkedWidget host fm measure body (treeRowLeading host fm depth)
       NodeSelect -> do
-        let (lbl, opts) = selectOptions txt
+        opts <- getOptions na idx
+        let lbl = txt
             choices = if null opts then [""] else opts
         dims <- mapM (measure . selectDisplayText lbl) choices
         let (mw, mh) =

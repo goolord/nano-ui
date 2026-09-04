@@ -10,6 +10,9 @@ module NanoUI.Layout
   , Layout (..)
   , defaultLayout
   , LayoutModifier
+  , askDefaultLayout
+  , withDefaultLayout
+  , withLayout
     -- * Layout Modifiers
   , padAll
   , padXY
@@ -64,10 +67,14 @@ module NanoUI.Layout
   , scroll
   , scroll_
   , scrollWith
+  , scroll'
   , scrollArea
   , scrollArea2D
   , scrollConfigured
   , scroll2D
+  , scroll2D_
+  , scroll2DWith
+  , scroll2D'
     -- * Spacers & Separators
   , separator
   , sep
@@ -117,6 +124,7 @@ import NanoUI.Style
   , percent
   , tight
   )
+import NanoUI.Monad (askDefaultLayout, withDefaultLayout, withLayout)
 import NanoUI.Widgets.Layout
   ( center
   , column
@@ -146,15 +154,19 @@ import NanoUI.Widgets.Layout
   , rowWith
   , row_
   , scroll
-  , windowAspect
+  , scroll'
+  , scroll_
+  , scrollWith
   , scroll2D
+  , scroll2D'
+  , scroll2D_
+  , scroll2DWith
   , scrollArea
   , scrollArea2D
   , scrollConfigured
-  , scrollWith
-  , scroll_
   , sep
   , separator
   , spacer
   , vGroup
+  , windowAspect
   )

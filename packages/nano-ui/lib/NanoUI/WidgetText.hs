@@ -1,17 +1,10 @@
 module NanoUI.WidgetText
-  ( sliderDisplayText
-  , sliderLabelText
-  , sliderValueText
-  , sliderText
-  , checkboxLabelText
-  , radioLabelText
+  ( sliderValueText
   , treeEncodeStyle
   , treeDecodeStyle
   , treeDecodeStripe
-  , treeLabelText
   , treeDisplayText
   , treeMeasureLabel
-  , textInputDisplayText
   , textInputTerminalText
   , textInputFieldText
   , textInputPlaceholder
@@ -19,8 +12,6 @@ module NanoUI.WidgetText
   , textInputLabelGap
   , textInputFieldPadY
   , textInputFieldHeight
-  , selectOptions
-  , selectLabelText
   , selectDisplayText
   , selectChevronReserve
   , selectChevronCenterX
@@ -49,51 +40,23 @@ module NanoUI.WidgetText
   , isCloseButtonStyle
   , isTabButtonStyle
   , isTableHeaderStyle
-  , packButtonStyle
   , buttonVisualStyle
   , buttonFlagsFromStyle
   ) where
 
-import Data.Bits (complement, (.&.), (.|.), shiftL, shiftR)
+import Data.Bits ((.&.), (.|.), complement, shiftL, shiftR)
 import Data.Char (chr)
-import Data.List (find)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Word (Word8)
 import NanoUI.Font (FontMetrics (..), fmLineHeight)
-import NanoUI.Icons (Icons, checkboxPrefixes, radioPrefixes, treeExpandMark, treeExpandPrefixes)
+import NanoUI.Icons (Icons, treeExpandMark)
 import NanoUI.Style (FontVariant (..), Theme (..), styleBg, themeButton, themePanel, themeWindow)
-import NanoUI.Types (Color (..), colorB, colorG, colorR, colorRGBA, lerpColor, sliderBarCells)
+import NanoUI.Types (Color (..), colorB, colorG, colorR, colorRGBA, lerpColor)
 import qualified Data.Text as T
-
-sliderDisplayText :: Text -> Float -> Text
-sliderDisplayText lbl value = lbl <> ": " <> T.pack (show (round value :: Int))
-
-sliderLabelText :: Text -> Text
-sliderLabelText txt =
-  let (lbl, rest) = T.breakOn ": " txt
-   in if T.null rest then T.stripEnd (T.takeWhile (/= '[') txt) else lbl
 
 sliderValueText :: Float -> Text
 sliderValueText = T.pack . show . (round :: Float -> Int)
-
-sliderText :: Text -> Float -> Float -> Text
-sliderText lbl frac value =
-  let filled = max 0 (min sliderBarCells (round (frac * fromIntegral sliderBarCells)))
-      bar = T.replicate filled "\x2588" <> T.replicate (sliderBarCells - filled) "\x2591"
-   in lbl <> " [" <> bar <> "] " <> T.pack (show (round value :: Int))
-
-checkboxLabelText :: Text -> Text
-checkboxLabelText txt =
-  case find (`T.isPrefixOf` txt) checkboxPrefixes of
-    Nothing -> txt
-    Just p -> T.drop (T.length p) txt
-
-radioLabelText :: Text -> Text
-radioLabelText txt =
-  case find (`T.isPrefixOf` txt) radioPrefixes of
-    Nothing -> txt
-    Just p -> T.drop (T.length p) txt
 
 -- | styleIdx: nodeIdx in bits 11+, depth in 0-7, hasKids bit 8, expanded bit 9, stripeOdd bit 10.
 treeEncodeStyle :: Int -> Int -> Bool -> Bool -> Bool -> Int
@@ -114,12 +77,6 @@ treeDecodeStyle s =
 
 treeDecodeStripe :: Int -> Int
 treeDecodeStripe s = if s .&. 0x400 /= 0 then tableStripeOdd else tableStripeEven
-
-treeLabelText :: Text -> Text
-treeLabelText txt =
-  case find (`T.isPrefixOf` txt) treeExpandPrefixes of
-    Nothing -> txt
-    Just p -> T.drop (T.length p) txt
 
 -- | Visible terminal row: indent, expand mark, label.
 treeDisplayText :: Icons -> Int -> Bool -> Bool -> Text -> Text
@@ -171,19 +128,6 @@ textInputTerminalText lbl value cursor focused =
              in T.take c body <> "\x2502" <> T.drop c body
           else body
    in lbl <> ": " <> shown
-
-textInputDisplayText :: Text -> Text -> Bool -> Text
-textInputDisplayText lbl value focused =
-  textInputFieldText lbl value focused
-
-selectOptions :: Text -> (Text, [Text])
-selectOptions txt =
-  case T.splitOn "\n" txt of
-    [] -> ("", [])
-    (lbl : rest) -> (lbl, rest)
-
-selectLabelText :: Text -> Text
-selectLabelText txt = fst (selectOptions txt)
 
 selectDisplayText :: Text -> Text -> Text
 selectDisplayText lbl opt = lbl <> ": " <> opt
@@ -327,10 +271,6 @@ buttonFlagMask = buttonFlagClose .|. buttonFlagTab .|. buttonFlagTable
 {-# INLINE buttonVisualStyle #-}
 buttonVisualStyle :: Int -> Int
 buttonVisualStyle si = si .&. complement buttonFlagMask
-
-{-# INLINE packButtonStyle #-}
-packButtonStyle :: Int -> Text -> Int
-packButtonStyle visual _ = visual
 
 {-# INLINE buttonFlagsFromStyle #-}
 buttonFlagsFromStyle :: Int -> (Bool, Bool, Bool)

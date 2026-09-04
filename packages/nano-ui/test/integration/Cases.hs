@@ -118,7 +118,7 @@ runHostProfileMeasureTest _ failed = do
 runIdStabilityTest :: Context -> IORef Int -> IO ()
 runIdStabilityTest ctx failed = do
   let inp = withInput 100 100
-      sample = runFrame ctx inp (column defaultLayout (replicateM 3 nextId))
+      sample = runFrame ctx inp (column (replicateM 3 nextId))
   (ids1, _, _, _) <- sample
   (ids2, _, _, _) <- sample
   assertEq failed ids1 ids2
@@ -128,7 +128,7 @@ runIdStabilityTest ctx failed = do
 
 runIdUniquenessTest :: Context -> IORef Int -> IO ()
 runIdUniquenessTest ctx failed = do
-  (ids, _, _, _) <- runFrame ctx (withInput 100 100) (column defaultLayout (replicateM 3 nextId))
+  (ids, _, _, _) <- runFrame ctx (withInput 100 100) (column (replicateM 3 nextId))
   case ids of
     [a, b, c] -> assert failed (a /= b && b /= c && a /= c)
     _ -> assert failed False
@@ -136,14 +136,14 @@ runIdUniquenessTest ctx failed = do
 runIdZeroAllocTest :: Context -> IORef Int -> IO ()
 runIdZeroAllocTest ctx failed = do
   let inp = withInput 100 100
-  _ <- runFrame ctx inp $ column defaultLayout $ burstNextIds 4096
+  _ <- runFrame ctx inp $ column $ burstNextIds 4096
   assert failed True
 
 runIdKeyedListTest :: Context -> IORef Int -> IO ()
 runIdKeyedListTest ctx failed = do
   let inp = withInput 200 200
       keyedIds :: [String] -> IO ([WidgetId], [FrameMsg], DrawData, Bool)
-      keyedIds keys = runFrame ctx inp (column defaultLayout (mapM (\k -> keyed k nextId) keys))
+      keyedIds keys = runFrame ctx inp (column (mapM (\k -> keyed k nextId) keys))
       idFor :: String -> [String] -> [WidgetId] -> Maybe WidgetId
       idFor key keys ids = lookup key (zip keys ids)
   (idsA, _, _, _) <- keyedIds ["a", "b", "c"]
@@ -157,15 +157,15 @@ runIdKeyedListTest ctx failed = do
 runFitSizingTest :: Context -> IORef Int -> IO ()
 runFitSizingTest ctx failed = do
   let inp = withInput 400 100
-  w1 <- measureRespW ctx inp (column defaultLayout (label "hi"))
-  w2 <- measureRespW ctx inp (column defaultLayout (label "a much longer label"))
+  w1 <- measureRespW ctx inp (column (label "hi"))
+  w2 <- measureRespW ctx inp (column (label "a much longer label"))
   assert failed (w1 > 0 && w1 < 400)
   assertGt failed w2 w1
 
 runFitMutedWidthTest :: Context -> IORef Int -> IO ()
 runFitMutedWidthTest ctx failed = do
   let inp = withInput 400 100
-      ui = column (tight defaultLayout) (muted "HelloFitMuted")
+      ui = columnWith tight (muted "HelloFitMuted")
   _ <- runFrame ctx inp ui
   spans <- collectTextSpans ctx
   case [w | (Rect _ _ w _, t, _, _, _) <- spans, "HelloFitMuted" `T.isInfixOf` t] of
@@ -175,7 +175,7 @@ runFitMutedWidthTest ctx failed = do
 runWithKeyTest :: Context -> IORef Int -> IO ()
 runWithKeyTest ctx failed = do
   let inp = withInput 200 200
-      action = column defaultLayout (do a <- keyed (0 :: Int) nextId; b <- keyed (1 :: Int) nextId; pure [a, b])
+      action = column (do a <- keyed (0 :: Int) nextId; b <- keyed (1 :: Int) nextId; pure [a, b])
   (idsA, _, _, _) <- runFrame ctx inp action
   (idsB, _, _, _) <- runFrame ctx inp action
   case (idsA, idsB) of
@@ -184,8 +184,8 @@ runWithKeyTest ctx failed = do
 
 runLayoutTest :: Context -> IORef Int -> IO ()
 runLayoutTest ctx failed = do
-  let ui = column (defaultLayout {layoutWidth = Grow 1, layoutHeight = Grow 1, layoutGap = 8}) $ do
-        _ <- row (defaultLayout {layoutWidth = Grow 1}) (spacer (Grow 1) Fit >> label "grow test")
+  let ui = column' (defaultLayout {layoutWidth = Grow 1, layoutHeight = Grow 1, layoutGap = 8}) $ do
+        _ <- row' (defaultLayout {layoutWidth = Grow 1}) (spacer (Grow 1) Fit >> label "grow test")
         label "nested"
   (_, _, draw, _) <- runFrame ctx (withInput 400 300) ui
   assertGt failed (drawVertexCount draw) 0
@@ -193,9 +193,9 @@ runLayoutTest ctx failed = do
 runRowPanelLayoutTest :: Context -> IORef Int -> IO ()
 runRowPanelLayoutTest ctx failed = do
   let inp = withInput 800 600
-      ui = row (tight . fillW $ defaultLayout) $ do
-        panel (minW 200 . fillH $ defaultLayout) (void (label "Side"))
-        panel (grow . fillW . fillH $ defaultLayout) (row (tight . gap 8 $ defaultLayout) (button "Left" >> button "Right"))
+      ui = rowWith (tight . fillW) $ do
+        panelWith (minW 200 . fillH) (void (label "Side"))
+        panelWith (grow . fillW . fillH) (rowWith (tight . gap 8) (button "Left" >> button "Right"))
   _ <- runFrame ctx inp ui
   (resp, _, _, _) <- runFrame ctx inp ui
   assert failed (rectX (respRect resp) >= 190)
@@ -204,7 +204,7 @@ runColumnCardWrapTest :: Context -> IORef Int -> IO ()
 runColumnCardWrapTest ctx failed = do
   let inp = withInput 520 800
       ui = responsiveRowCol 720 (tight . gap 8 . fillW $ defaultLayout) $ do
-        column (tight . gap 8 . fillW $ defaultLayout) (card (void (label "LeftTop")) >> card (void (label "LeftBot")))
+        columnWith (tight . gap 8 . fillW) (card (void (label "LeftTop")) >> card (void (label "LeftBot")))
         card (void (label "Right"))
   _ <- runFrame ctx inp ui
   spans <- collectTextSpans ctx
@@ -226,7 +226,7 @@ runDemoWrapWideOrderTest :: Context -> IORef Int -> IO ()
 runDemoWrapWideOrderTest ctx failed = do
   let inp = withInput 1200 800
       ui = responsiveRowCol 720 (tight . gap 8 . fillW $ defaultLayout) $ do
-        column (tight . gap 8 . fillW $ defaultLayout) (card (void (label "State")) >> card (void (label "Gallery")))
+        columnWith (tight . gap 8 . fillW) (card (void (label "State")) >> card (void (label "Gallery")))
         card (void (label "Controls"))
   _ <- runFrame ctx inp ui
   spans <- collectTextSpans ctx
@@ -236,7 +236,7 @@ runDemoWrapWideOrderTest ctx failed = do
 
 runDrawTest :: Context -> IORef Int -> IO ()
 runDrawTest ctx failed = do
-  (_, _, draw, _) <- runFrame ctx (withInput 100 100) (column defaultLayout (label "draw"))
+  (_, _, draw, _) <- runFrame ctx (withInput 100 100) (column (label "draw"))
   assert failed (drawIndexCount draw >= 6 && not (drawCmdNull draw))
 
 runDrawingTest :: Context -> IORef Int -> IO ()
@@ -261,7 +261,7 @@ runDrawingTest ctx failed = do
 runOverlayTest :: Context -> IORef Int -> IO ()
 runOverlayTest ctx failed = do
   let inp0 = withInput 200 80
-      ui = column defaultLayout (button "Hover" >>= \btn -> tooltip btn "tip")
+      ui = column (button "Hover" >>= \btn -> tooltip btn "tip")
   _ <- runFrame ctx inp0 ui
   (_, _, draw, _) <- runFrame ctx (inp0 {inputMousePos = V2 10 10}) ui
   assert failed (any ((== LayerOverlay) . cmdLayer) (drawCmdElems draw))
@@ -269,7 +269,7 @@ runOverlayTest ctx failed = do
 runInteractionTest :: Context -> IORef Int -> IO ()
 runInteractionTest ctx failed = do
   let inp0 = withInput 200 100
-      ui = column defaultLayout (button "Click")
+      ui = column (button "Click")
       (press, release) = clickPair inp0 (V2 10 10)
   _ <- runFrame ctx inp0 ui
   _ <- runFrame ctx press ui
@@ -279,7 +279,7 @@ runInteractionTest ctx failed = do
 runHoverTest :: Context -> IORef Int -> IO ()
 runHoverTest ctx failed = do
   let inp0 = withInput 200 100
-      ui = column defaultLayout (button "Hover")
+      ui = column (button "Hover")
   _ <- runFrame ctx inp0 ui
   _ <- runFrame ctx (inp0 {inputMousePos = V2 10 10}) ui
   hot <- getHotId ctx
@@ -288,7 +288,7 @@ runHoverTest ctx failed = do
 runPointerCursorTest :: Context -> IORef Int -> IO ()
 runPointerCursorTest ctx failed = do
   let inp0 = withInput 200 100
-      ui = column defaultLayout (button "Click")
+      ui = column (button "Click")
   _ <- runFrame ctx inp0 ui
   let inp1 = inp0 {inputMousePos = V2 10 10}
   _ <- runFrame ctx inp1 ui
@@ -302,7 +302,7 @@ runPointerCursorTest ctx failed = do
 runPointerCursorCheckboxTest :: Context -> IORef Int -> IO ()
 runPointerCursorCheckboxTest ctx failed = do
   let inp0 = withInput 200 100
-      ui = column defaultLayout (checkbox "Feature" False)
+      ui = column (checkbox "Feature" False)
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect rx ry rw rh = respRect resp
       hover = inp0 {inputMousePos = V2 (rx + rw / 2) (ry + rh / 2)}
@@ -322,7 +322,7 @@ runImageTest ctx failed = do
   assert failed (ok1 && ok7)
   let inp0 = withInput 320 200
       imgLayout = defaultLayout {layoutWidth = Fixed 40, layoutHeight = Fixed 24}
-      ui = row defaultLayout (image imgLayout (ImageId 1) >> image imgLayout (ImageId 7))
+      ui = row (image imgLayout (ImageId 1) >> image imgLayout (ImageId 7))
   (resp, drawData) <- warmupDraw ctx inp0 ui
   let Rect _ _ w h = respRect resp
   assert failed (abs (w - 40) <= 0.5 && abs (h - 24) <= 0.5)
@@ -348,7 +348,7 @@ runIdleTest _ failed = do
 runHoverSkipTest :: Context -> IORef Int -> IO ()
 runHoverSkipTest _ failed = do
   ctx <- newContext
-  let ui = column defaultLayout (button "OK")
+  let ui = column (button "OK")
       inp0 = withInputOff 240 80
   (resp, _, _, _) <- runFrame ctx inp0 ui >>= \_ -> runFrame ctx inp0 ui
   let Rect rx ry rw rh = respRect resp
@@ -370,7 +370,7 @@ runHoverSkipTest _ failed = do
 runHoverDamageTest :: Context -> IORef Int -> IO ()
 runHoverDamageTest _ failed = do
   ctx <- newContext
-  let ui = column defaultLayout (button "OK")
+  let ui = column (button "OK")
       inp0 = withInputOff 240 80
   _ <- runFrame ctx inp0 ui
   d0 <- takeDamage ctx
@@ -394,7 +394,7 @@ runHoverDamageTest _ failed = do
 
 runAsciiTest :: Context -> IORef Int -> IO ()
 runAsciiTest ctx failed = do
-  (_, _, draw, _) <- runFrame ctx (withInput 40 10) (column (defaultLayout {layoutWidth = Grow 1, layoutHeight = Grow 1}) (label "snap"))
+  (_, _, draw, _) <- runFrame ctx (withInput 40 10) (column' (defaultLayout {layoutWidth = Grow 1, layoutHeight = Grow 1}) (label "snap"))
   let ascii = renderASCII 40 10 draw
   assertEq failed (length ascii) 10
   assert failed (not (all (all (== ' ')) ascii))
@@ -414,7 +414,7 @@ runIconSetTest _ failed = do
 runCheckboxTest :: Context -> IORef Int -> IO ()
 runCheckboxTest ctx failed = do
   let inp0 = withInput 200 100
-      ui = column defaultLayout (checkbox "Opt" False)
+      ui = column (checkbox "Opt" False)
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect rx ry _ _ = respRect resp
       (press, release) = clickPair inp0 (V2 (rx + 1) (ry + 0.5))
@@ -432,7 +432,7 @@ runCheckboxTest ctx failed = do
 runSliderTest :: Context -> IORef Int -> IO ()
 runSliderTest ctx failed = do
   let inp0 = withInput 300 80
-      ui = column defaultLayout (slider "Vol" 0 100 10)
+      ui = column (slider "Vol" 0 100 10)
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect rx ry rw rh = respRect resp
       track = sliderTrackBounds (ctxHostProfile ctx) (ctxFontMetrics ctx) "Vol" rx ry rw rh
@@ -443,7 +443,7 @@ runSliderTest ctx failed = do
 runSliderFillWidthTest :: Context -> IORef Int -> IO ()
 runSliderFillWidthTest ctx failed = do
   let inp0 = withInput 400 120
-      ui = column (fillW defaultLayout) (slider "Vol" 0 100 0)
+      ui = columnWith fillW (slider "Vol" 0 100 0)
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect rx ry rw rh = respRect resp
   assertGt failed rw 300
@@ -455,7 +455,7 @@ runSliderFillWidthTest ctx failed = do
 runTabFocusTest :: Context -> IORef Int -> IO ()
 runTabFocusTest ctx failed = do
   let inp0 = withInput 200 120
-      ui = column defaultLayout (button "One" >> button "Two" >> pure ())
+      ui = column (button "One" >> button "Two" >> pure ())
   _ <- runFrame ctx inp0 ui
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   focus1 <- getFocusId ctx
@@ -477,7 +477,7 @@ runTextWrapAssignedTest _ failed = do
   ctx <- newCellContext
   let inp = withInput 20 12
       long = T.replicate 24 (T.pack "x")
-      ui = column (defaultLayout {layoutWidth = Fixed 8, layoutPadding = Padding 0 0 0 0, layoutGap = 0})
+      ui = column' (defaultLayout {layoutWidth = Fixed 8, layoutPadding = Padding 0 0 0 0, layoutGap = 0})
              (labelEx (defaultLayout {layoutWidth = Grow 1}) long)
   _ <- runFrame ctx inp ui
   spans <- collectTextSpans ctx
@@ -497,7 +497,7 @@ runTextMultilineTest _ failed = do
 runGridTest :: Context -> IORef Int -> IO ()
 runGridTest _ failed = do
   ctx <- newCellContext
-  let ui = grid 2 (defaultLayout {layoutWidth = Fixed 4, layoutGap = 0, layoutPadding = Padding 0 0 0 0})
+  let ui = grid' 2 (defaultLayout {layoutWidth = Fixed 4, layoutGap = 0, layoutPadding = Padding 0 0 0 0})
              (label "AA" >> label "BB" >> label "CC" >> label "DD" >> pure ())
   _ <- runFrame ctx (withInput 30 10) ui
   spans <- collectTextSpans ctx
@@ -507,7 +507,7 @@ runGridTest _ failed = do
 runFlexShrinkTest :: Context -> IORef Int -> IO ()
 runFlexShrinkTest _ failed = do
   ctx <- newCellContext
-  let ui = row (defaultLayout {layoutWidth = Fixed 5, layoutGap = 0, layoutPadding = Padding 0 0 0 0})
+  let ui = row' (defaultLayout {layoutWidth = Fixed 5, layoutGap = 0, layoutPadding = Padding 0 0 0 0})
              (labelEx (defaultLayout {layoutWidth = Shrink 1}) "AA" >> labelEx (defaultLayout {layoutWidth = Shrink 1}) "BB" >> labelEx (defaultLayout {layoutWidth = Shrink 1}) "CC" >> pure ())
   _ <- runFrame ctx (withInput 20 10) ui
   spans <- collectTextSpans ctx
@@ -518,7 +518,7 @@ runFlexShrinkTest _ failed = do
 runGrowFitsWindowTest :: Context -> IORef Int -> IO ()
 runGrowFitsWindowTest ctx failed = do
   let inp = withInput 10 10
-      ui = row (defaultLayout {layoutWidth = Grow 1, layoutHeight = Grow 1, layoutPadding = Padding 0 0 0 0, layoutGap = 0})
+      ui = row' (defaultLayout {layoutWidth = Grow 1, layoutHeight = Grow 1, layoutPadding = Padding 0 0 0 0, layoutGap = 0})
              (do a <- spacer (Grow 1) (Fixed 8); b <- spacer (Grow 1) (Fixed 8); pure (a, b))
   (ra, rb) <- warmup2 ctx inp ui
   let Rect x1 _ w1 _ = respRect ra
@@ -528,7 +528,7 @@ runGrowFitsWindowTest ctx failed = do
 runPercentLayoutTest :: Context -> IORef Int -> IO ()
 runPercentLayoutTest ctx failed = do
   let inp = withInput 200 80
-      ui = row (fixedW 200 . tight . gap 0 $ defaultLayout) $ do
+      ui = rowWith (fixedW 200 . tight . gap 0) $ do
         a <- labelEx (percent 25 . tight $ defaultLayout) "A"
         b <- labelEx (percent 75 . tight $ defaultLayout) "B"
         pure (a, b)
@@ -546,7 +546,7 @@ runLabelAlignEndTest _ failed = do
 runAspectLayoutTest :: Context -> IORef Int -> IO ()
 runAspectLayoutTest ctx failed = do
   let inp = withInput 320 240
-      ui = column (fixedW 160 . tight $ defaultLayout) (labelEx (fixedAspectW 160 2 . tight $ defaultLayout) "X")
+      ui = columnWith (fixedW 160 . tight) (labelEx (fixedAspectW 160 2 . tight $ defaultLayout) "X")
   resp <- warmup2 ctx inp ui
   let Rect _ _ w h = respRect resp
   assert failed (abs (w - 160) <= 1 && abs (h - 80) <= 1)
@@ -555,8 +555,8 @@ runGrowWrapPushesSiblingTest :: Context -> IORef Int -> IO ()
 runGrowWrapPushesSiblingTest _ failed = do
   ctx <- newCellContext
   let inp = withInput 6 20
-      ui = column (defaultLayout {layoutWidth = Grow 1, layoutHeight = Grow 1, layoutPadding = Padding 0 0 0 0, layoutGap = 0}) $ do
-        grid 1 (defaultLayout {layoutWidth = Grow 1, layoutPadding = Padding 0 0 0 0, layoutGap = 0})
+      ui = column' (defaultLayout {layoutWidth = Grow 1, layoutHeight = Grow 1, layoutPadding = Padding 0 0 0 0, layoutGap = 0}) $ do
+        grid' 1 (defaultLayout {layoutWidth = Grow 1, layoutPadding = Padding 0 0 0 0, layoutGap = 0})
           (label "AAAA" >> label "BBBB" >> pure ())
         label "BELOW"
   _ <- runFrame ctx inp ui
@@ -570,10 +570,10 @@ runHostSlotTest :: Context -> IORef Int -> IO ()
 runHostSlotTest ctx failed = do
   let inp = withInput 80 80
       hostUiString = do
-        _ <- column defaultLayout (pure ())
+        _ <- column (pure ())
         askHost @String
       hostUiInt = do
-        _ <- column defaultLayout (pure ())
+        _ <- column (pure ())
         askHost @Int
   (miss, _, _, _) <- runFrame ctx inp hostUiString
   setHost ctx ("ok" :: String)
@@ -586,7 +586,7 @@ runCompactHostTest :: Context -> IORef Int -> IO ()
 runCompactHostTest ctx failed = do
   _ <- compactHost ctx ([0 .. 9999] :: [Int])
   let ui = do
-        _ <- column defaultLayout (pure ())
+        _ <- column (pure ())
         askCompact @[Int]
   (got, _, _, _) <- runFrame ctx (withInput 80 80) ui
   case got of
@@ -597,7 +597,7 @@ runEmbedStateTest :: Context -> IORef Int -> IO ()
 runEmbedStateTest ctx failed = do
   let ui :: Eff '[Ui, State Int, IOE] Int
       ui = do
-        _ <- column defaultLayout (pure ())
+        _ <- column (pure ())
         modify (+ (1 :: Int))
         modify (+ (1 :: Int))
         get
@@ -619,7 +619,7 @@ runReduceMessagesTest ctx failed = do
   let inp = withInput 80 80
       model0 = Counter 0
       view _ =
-        column defaultLayout $
+        column $
           emit Inc >> emit Dec >> emit Inc >> emit ("noise" :: String)
   ((), model1, msgs, _, dirty) <- runFrameReduce updateCounter ctx inp model0 view
   assert failed (msgs == [Inc, Dec, Inc] && model1 == Counter 1 && dirty)
@@ -627,7 +627,7 @@ runReduceMessagesTest ctx failed = do
 runReduceUpdatesTest :: Context -> IORef Int -> IO ()
 runReduceUpdatesTest ctx failed = do
   let ui =
-        column defaultLayout $
+        column $
           emit (updateCounter Inc) >> emit (updateCounter Dec) >> emit (updateCounter Inc)
   (_, msgs, _, _) <- runFrame ctx (withInput 80 80) ui
   let model1 = reduceUpdates (Counter 0) msgs
@@ -652,7 +652,7 @@ runReduceClickTest ctx failed = do
 runReduceIdentityTest :: Context -> IORef Int -> IO ()
 runReduceIdentityTest ctx failed = do
   let inp = withInput 80 80
-      view _ = column defaultLayout (emit Inc >> emit Dec)
+      view _ = column (emit Inc >> emit Dec)
   ((), model1, msgs, _, dirty) <- runFrameReduce updateCounter ctx inp (Counter 0) view
   assert failed (msgs == [Inc, Dec] && model1 == Counter 0 && not dirty)
 
@@ -685,8 +685,8 @@ runPanelPaintsTest :: Context -> IORef Int -> IO ()
 runPanelPaintsTest ctx failed = do
   let inp = withInput 200 200
       fat = padAll 16 (fillW defaultLayout)
-  (_, _, colDraw, _) <- runFrame ctx inp (column fat (label "x"))
-  (_, _, panDraw, _) <- runFrame ctx inp (panel fat (label "x"))
+  (_, _, colDraw, _) <- runFrame ctx inp (column' fat (label "x"))
+  (_, _, panDraw, _) <- runFrame ctx inp (panel' fat (label "x"))
   assertGt failed (drawVertexCount panDraw) (drawVertexCount colDraw)
 
 

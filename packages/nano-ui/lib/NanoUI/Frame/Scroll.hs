@@ -12,12 +12,15 @@ module NanoUI.Frame.Scroll
 
 
 import Control.Monad (void, when)
-import Data.IORef (readIORef, writeIORef)
+import Data.IORef (readIORef)
 import Data.Maybe (fromMaybe)
 import NanoUI.Context
   ( Context (..)
+  , getMenuPointerGesture
+  , getScrollDrag
   , getScrollOffset
   , getScrollOffset2D
+  , setScrollDrag
   , setScrollOffset
   , setScrollOffset2D
   )
@@ -422,13 +425,13 @@ getScrollVisualRect ctx idx = do
 
 updateScrollDrag :: Context -> Input -> IO ()
 updateScrollDrag ctx inp = do
-  gesture <- readIORef (ctxMenuPointerGesture ctx)
+  gesture <- getMenuPointerGesture ctx
   if gesture
-    then when (inputMouseReleased inp) $ writeIORef (ctxScrollDrag ctx) Nothing
+    then when (inputMouseReleased inp) $ setScrollDrag ctx Nothing
     else do
-      mDrag <- readIORef (ctxScrollDrag ctx)
+      mDrag <- getScrollDrag ctx
       if inputMouseReleased inp
-        then writeIORef (ctxScrollDrag ctx) Nothing
+        then setScrollDrag ctx Nothing
         else
           case mDrag of
             Just (wid, grabOff) | inputMouseDown inp -> do
@@ -506,7 +509,7 @@ tryStartScrollDragOn ctx wid mouse = do
                     case dir of
                       DirColumn -> v2Y mouse - rectY thumb
                       DirRow -> v2X mouse - rectX thumb
-              writeIORef (ctxScrollDrag ctx) (Just (wid, grabOff))
+              setScrollDrag ctx (Just (wid, grabOff))
             else
               when (rectContains track mouse) $ do
                 let maxOff = sbMaxOff layout
@@ -533,7 +536,7 @@ tryStartScrollDragOn ctx wid mouse = do
                       case dir of
                         DirColumn -> thumbH / 2
                         DirRow -> thumbW / 2
-                writeIORef (ctxScrollDrag ctx) (Just (wid, grabOff))
+                setScrollDrag ctx (Just (wid, grabOff))
 
 paintScrollChrome ::
   Context ->

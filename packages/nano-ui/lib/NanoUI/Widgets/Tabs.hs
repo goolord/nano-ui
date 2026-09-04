@@ -34,7 +34,7 @@ import NanoUI.Types (isCellHost)
 import NanoUI.WidgetText (buttonFlagClose, buttonFlagTab)
 import NanoUI.Widgets.Combinators (buttonStyled)
 import NanoUI.Widgets.Behavior (useSelection)
-import NanoUI.Widgets.Layout (column, row)
+import NanoUI.Widgets.Layout (column', columnWith, row', rowWith)
 import NanoUI.Widgets.Node
   ( Clickable (..)
   , RightClickable (..)
@@ -132,7 +132,7 @@ tabStrip style orient cur tabList mRenderBody = do
               , layoutPadding = if style == TabContained then Padding 0 0 2 0 else Padding 0 0 0 0
               }
       headerBar =
-        (if vertical then column else row) barLay $ do
+        (if vertical then column' else row') barLay $ do
           tagContainer groupId
           renderHeaders ctx hdrLay styleVal
   case mRenderBody of
@@ -143,8 +143,8 @@ tabStrip style orient cur tabList mRenderBody = do
             bodyRender nextTab
             pure (tabResp, nextTab)
        in if vertical
-            then shell (row (tight . fillW . grow $ defaultLayout))
-            else shell (column (tight . fillW $ defaultLayout))
+            then shell (rowWith (tight . fillW . grow))
+            else shell (columnWith (tight . fillW))
  where
   renderHeaders ctx hdrLay styleVal = do
     resps <- zipWithM (\i t -> withKey i (renderSingleHeader hdrLay (styleVal + 4 * i) t)) [0 :: Int ..] tabList
@@ -172,7 +172,7 @@ tabStrip style orient cur tabList mRenderBody = do
         tabStyle = packedStyle .|. buttonFlagTab
     if tabClosable t
       then do
-        (tabResp, closed) <- row (tight defaultLayout) $ do
+        (tabResp, closed) <- rowWith tight $ do
           resp <- buttonStyled headerText (if isActive then 1 else 0) hdrLay tabStyle
           closeResp <- buttonStyled "\215" 0 (hdrLay {layoutPadding = Padding 2 4 4 4}) buttonFlagClose
           pure (resp, respClicked closeResp)
@@ -224,7 +224,7 @@ boundedTabs initial encodeTab tabf = do
 
 renderBody :: (Eq a, Ui :> es) => [Tab a (Eff es ())] -> a -> Eff es ()
 renderBody ts activeKey =
-  column (tight . fillW $ defaultLayout) $
+  columnWith (tight . fillW) $
     case filter (\t -> tabKey t == activeKey) ts of
       (selected : _) -> tabBody selected
       [] -> case ts of { (firstTab : _) -> tabBody firstTab; [] -> pure () }

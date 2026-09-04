@@ -16,7 +16,7 @@ import NanoUI.Style (Layout, defaultLayout, fillW, fontMuted, gap, tight)
 import NanoUI.Types (isCellHost)
 import NanoUI.Widgets.Behavior (useSelection)
 import NanoUI.Widgets.Combinators (selectableItem)
-import NanoUI.Widgets.Layout (column, labelEx)
+import NanoUI.Widgets.Layout (column', labelEx)
 import NanoUI.Widgets.Node (Response (..), setChanged, tagContainer)
 
 radioLay :: Layout
@@ -43,7 +43,7 @@ radioFieldset legend options initial =
         !sel = case (lastInit, storedSel) of
           (Just li, Just s) | li == c0 -> max 0 (min (length opts - 1) s)
           _                            -> c0
-    column radioGroupLay $ do
+    column' radioGroupLay $ do
       tagContainer gid
       unless (T.null legend) $ void (labelEx legendLay legend)
       let goOpts !_ [] !accResp !accClicked = pure (accResp, accClicked)
