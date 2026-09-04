@@ -15,6 +15,10 @@ module NanoUI.Context
   , DrawFitCache (..)
   , InteractionState (..)
   , initialInteractionState
+  , initialDamageState
+  , initialOverlayState
+  , initialAnimationState
+  , initialDrawingCacheState
   , getScrollDrag
   , setScrollDrag
   , getTextInputDrag
@@ -182,18 +186,16 @@ module NanoUI.Context
 
 import Control.Monad (forM, forM_, when)
 import Data.ByteString (ByteString)
-import Data.Dynamic (Dynamic, fromDynamic, toDyn)
+import Data.Dynamic (fromDynamic, toDyn)
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HashMap
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
-import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
-import Data.Maybe (isNothing, mapMaybe)
+import Data.Maybe (isNothing)
 import Data.Primitive.PrimArray
-  ( MutablePrimArray
-  , PrimArray
+  ( PrimArray
   , copyMutablePrimArray
   , freezePrimArray
   , newPrimArray
@@ -202,10 +204,9 @@ import Data.Primitive.PrimArray
   )
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
-import Data.Typeable (TypeRep, Typeable, cast, typeOf, typeRep)
+import Data.Typeable (Typeable, typeOf, typeRep)
 import Data.Word (Word8)
 import Foreign.ForeignPtr (ForeignPtr)
-import GHC.Exts (RealWorld)
 
 import NanoUI.Animation
   ( Animation (..)
@@ -223,15 +224,41 @@ import NanoUI.Animation
   , stepAnim
   , writeRest
   )
-import NanoUI.Atlas (ImageAtlas, atlasTextureId)
+import NanoUI.Atlas (atlasTextureId)
 import NanoUI.Atlas qualified as Atlas
+import NanoUI.Context.Types
+  ( AnimationState (..)
+  , Context (..)
+  , DamageRequest (..)
+  , DamageState (..)
+  , DrawFitCache (..)
+  , DrawingCacheState (..)
+  , FrameMsg (..)
+  , InteractionState (..)
+  , MeasureCacheKey
+  , OverlayState (..)
+  , TextFieldClickCell (..)
+  , TextInputDrag (..)
+  , TextInputMenu (..)
+  , WindowResizeDrag (..)
+  , WindowResizeEdge (..)
+  , decodeMessages
+  , initialAnimationState
+  , initialDamageState
+  , initialDrawingCacheState
+  , initialInteractionState
+  , initialOverlayState
+  , intKey
+  , reduceMessages
+  , reduceUpdates
+  )
 import Data.Vector (Vector)
 import Data.Vector qualified as V
-import NanoUI.Draw (DrawArena, DrawingBuild, DrawOp, newDrawArena, shiftDrawOp)
+import NanoUI.Draw (DrawingBuild, DrawOp, newDrawArena, shiftDrawOp)
 import NanoUI.Font (FontMetrics, measureText, monospaceMetrics)
-import NanoUI.Frame.SpanArena (SpanArena, newSpanArena)
+import NanoUI.Frame.SpanArena (newSpanArena)
 import NanoUI.Types (HostProfile (..), isCellHost)
-import NanoUI.Icons (IconSet, Icons, asciiIcons, iconsFor)
+import NanoUI.Icons (IconSet, asciiIcons, iconsFor)
 import NanoUI.Frame.Scroll.Geometry
   ( ScrollConfig (..)
   , decodeScrollConfig
@@ -239,9 +266,9 @@ import NanoUI.Frame.Scroll.Geometry
   , encodeScrollConfig
   , scrollConfigNative2D
   )
-import NanoUI.Id (IdContext, WidgetId (..), hashWidgetId, initialIdContext)
+import NanoUI.Id (WidgetId (..), hashWidgetId, initialIdContext)
 import NanoUI.Input (Input (..), Key (KeyEscape), inputKeys, inputKeysElem, inputMousePos, inputMousePressed)
-import NanoUI.Layout.Arena (NodeArena, NodeType, getRect, lookupNodeByKey, newNodeArena)
+import NanoUI.Layout.Arena (NodeType, getRect, lookupNodeByKey, newNodeArena)
 
 
 import NanoUI.Store
@@ -285,230 +312,6 @@ import NanoUI.Types
   , v2X
   , v2Y
   )
-
-data FrameMsg where
-  FrameMsg :: Typeable a => a -> FrameMsg
-
-decodeMessages :: Typeable a => [FrameMsg] -> [a]
-decodeMessages = mapMaybe (\(FrameMsg x) -> cast x)
-
-reduceMessages :: Typeable msg => (msg -> model -> model) -> model -> [FrameMsg] -> model
-reduceMessages update model = foldl' (flip update) model . decodeMessages
-
-reduceUpdates :: Typeable model => model -> [FrameMsg] -> model
-reduceUpdates = reduceMessages ($)
-
-type MeasureCacheKey = (Text, Float)
-
--- | Explicit damage invalidation request queued during frame evaluation.
-data DamageRequest
-  = ReqWidget !WidgetId !DamageBounds      -- ^ Invalidate widget layout bounds (old & new)
-  | ReqKey !Int !DamageBounds              -- ^ Invalidate widget bounds by integer key
-  | ReqRect !Rect                          -- ^ Invalidate an explicit window-space rectangle
-  | ReqPeers ![WidgetId] !DamageBounds     -- ^ Invalidate a collection of widgets
-  | ReqFull                                -- ^ Force full window invalidation
-  deriving (Eq, Show)
-
-data TextInputMenu = TextInputMenu
-  { textInputMenuWidget :: WidgetId
-  , textInputMenuRect :: Rect
-  }
-  deriving (Eq, Show)
-
-data TextInputDrag = TextInputDrag
-  { textInputDragWidget :: WidgetId
-  , textInputDragAnchor :: Int
-  , textInputDragAnchorRow :: Int
-  , textInputDragAnchorCol :: Int
-  , textInputDragMultiline :: Bool
-  , textInputDragClicks :: Int
-  }
-  deriving (Eq, Show)
-
-data TextFieldClickCell = TextFieldClickCell
-  { textFieldClickWidget :: WidgetId
-  , textFieldClickFlat :: Int
-  , textFieldClickRow :: Int
-  , textFieldClickCol :: Int
-  , textFieldClickMultiline :: Bool
-  }
-  deriving (Eq, Show)
-
-data WindowResizeEdge
-  = ResizeN
-  | ResizeS
-  | ResizeE
-  | ResizeW
-  | ResizeNE
-  | ResizeNW
-  | ResizeSE
-  | ResizeSW
-  deriving (Eq, Show)
-
-data WindowResizeDrag = WindowResizeDrag
-  { wrdWidget :: WidgetId
-  , wrdEdge :: WindowResizeEdge
-  , wrdGrabX :: Float
-  , wrdGrabY :: Float
-  , wrdStartX :: Float
-  , wrdStartY :: Float
-  , wrdStartW :: Float
-  , wrdStartH :: Float
-  , wrdMinW :: Float
-  , wrdMinH :: Float
-  , wrdMaxW :: Float
-  , wrdMaxH :: Float
-  }
-  deriving (Eq, Show)
-
-data DamageState = DamageState
-  { dsDirty :: !Bool
-  , dsDamage :: !Damage
-  , dsRequests :: ![DamageRequest]
-  , dsLastWindowSize :: !Size
-  , dsPrevRects :: !(IntMap Rect)
-  , dsPrevClips :: !(IntMap Rect)
-  , dsPrevNodeTexts :: !(IntMap Text)
-  }
-
-initialDamageState :: DamageState
-initialDamageState = DamageState
-  { dsDirty = True
-  , dsDamage = DamageFull
-  , dsRequests = []
-  , dsLastWindowSize = Size 0 0
-  , dsPrevRects = IM.empty
-  , dsPrevClips = IM.empty
-  , dsPrevNodeTexts = IM.empty
-  }
-
-data OverlayState = OverlayState
-  { osModalWasActive :: !Bool
-  , osModalActive :: !Bool
-  , osModalDepth :: !Int
-  , osEscapeConsumed :: !Bool
-  , osPrevFloatingRects :: !(IntMap Rect)
-  , osPrevFloatingOrder :: ![Int]
-  , osTopmostCache :: !(Maybe (V2, Maybe WidgetId))
-  , osCurrentFloatingId :: !(Maybe WidgetId)
-  , osLastPointerBlocked :: !Bool
-  , osFloatingAncestor :: !(Maybe (IntMap (Maybe NodeType)))
-  }
-
-initialOverlayState :: OverlayState
-initialOverlayState = OverlayState
-  { osModalWasActive = False
-  , osModalActive = False
-  , osModalDepth = 0
-  , osEscapeConsumed = False
-  , osPrevFloatingRects = IM.empty
-  , osPrevFloatingOrder = []
-  , osTopmostCache = Nothing
-  , osCurrentFloatingId = Nothing
-  , osLastPointerBlocked = False
-  , osFloatingAncestor = Nothing
-  }
-
-data AnimationState = AnimationState
-  { asAnimations :: !(IntMap Animation)
-  , asAnimRest :: !(IntMap Float)
-  , asAnyAnimating :: !Bool
-  , asAnimSettled :: !Bool
-  }
-
-initialAnimationState :: AnimationState
-initialAnimationState = AnimationState
-  { asAnimations = IM.empty
-  , asAnimRest = IM.empty
-  , asAnyAnimating = False
-  , asAnimSettled = False
-  }
-
-data DrawingCacheState = DrawingCacheState
-  { dcsPopupConfigs :: !(IntMap (PopupAnchor, PopupPlacement, Float))
-  , dcsDrawings :: !(IntMap DrawingBuild)
-  , dcsDrawOpCache :: !(IntMap (Rect, Vector DrawOp))
-  , dcsDrawFitCache :: !(IntMap DrawFitCache)
-  , dcsWidgetNodeTypes :: !(Maybe (IntMap NodeType))
-  }
-
-initialDrawingCacheState :: DrawingCacheState
-initialDrawingCacheState = DrawingCacheState
-  { dcsPopupConfigs = IM.empty
-  , dcsDrawings = IM.empty
-  , dcsDrawOpCache = IM.empty
-  , dcsDrawFitCache = IM.empty
-  , dcsWidgetNodeTypes = Nothing
-  }
-
-data InteractionState = InteractionState
-  { isScrollDrag :: !(Maybe (WidgetId, Float))
-  , isTextInputDrag :: !(Maybe TextInputDrag)
-  , isTextFieldClickCell :: !(Maybe TextFieldClickCell)
-  , isTextInputMenu :: !(Maybe TextInputMenu)
-  , isSelectDropPress :: !Bool
-  , isOpenSelectDrop :: !(Maybe (WidgetId, Rect))
-  , isMenuPointerGesture :: !Bool
-  , isWindowDrag :: !(Maybe (WidgetId, Float, Float))
-  , isWindowResize :: !(Maybe WindowResizeDrag)
-  }
-  deriving (Eq, Show)
-
-initialInteractionState :: InteractionState
-initialInteractionState = InteractionState
-  { isScrollDrag = Nothing
-  , isTextInputDrag = Nothing
-  , isTextFieldClickCell = Nothing
-  , isTextInputMenu = Nothing
-  , isSelectDropPress = False
-  , isOpenSelectDrop = Nothing
-  , isMenuPointerGesture = False
-  , isWindowDrag = Nothing
-  , isWindowResize = Nothing
-  }
-
-data Context = Context
-  { ctxNodeArena :: NodeArena
-  , ctxDrawArena :: DrawArena
-  , ctxHotId :: IORef WidgetId
-  , ctxLastHotId :: IORef WidgetId
-  , ctxActiveId :: IORef WidgetId
-  , ctxClickedId :: IORef WidgetId
-  , ctxReleaseClickedId :: IORef WidgetId
-  , ctxFocusId :: IORef WidgetId
-  , ctxStore :: IORef WidgetStore
-  , ctxDamageState :: IORef DamageState
-  , ctxOverlayState :: IORef OverlayState
-  , ctxAnimationState :: IORef AnimationState
-  , ctxDrawingCache :: IORef DrawingCacheState
-  , ctxIdContext :: IORef IdContext
-  , ctxFontMetrics :: FontMetrics
-  , ctxMonoFontMetrics :: FontMetrics
-  , ctxMeasureText :: Text -> IO (Float, Float)
-  , ctxMeasureCache :: Maybe (IORef (HashMap MeasureCacheKey (Float, Float)))
-  , ctxExternalText :: Bool
-  , ctxTheme :: Theme
-  , ctxIcons :: Icons
-  , ctxContainerStack :: IORef [Int]
-  , ctxMessages :: IORef [FrameMsg]
-  , ctxFocusables :: IORef (MutablePrimArray RealWorld WidgetId)
-  , ctxFocusablesCount :: IORef Int
-  , ctxFocusablesCap :: IORef Int
-  , ctxSpanBase :: SpanArena
-  , ctxSpanOverlay :: SpanArena
-  , ctxInteractionState :: !(IORef InteractionState)
-  , ctxClipboardGet :: IO (Maybe Text)
-  , ctxClipboardSet :: Text -> IO Bool
-  , ctxImageAtlas :: ImageAtlas
-  , ctxWakeLoop :: IORef (Maybe (IO ()))
-  , ctxHost :: IORef (Map TypeRep Dynamic)
-  , ctxHostProfile :: HostProfile
-  , ctxDefaultLayout :: IORef Layout
-  }
-
-{-# INLINE intKey #-}
-intKey :: WidgetId -> Int
-intKey = fromIntegral . hashWidgetId
 
 {-# INLINE getScrollDrag #-}
 getScrollDrag :: Context -> IO (Maybe (WidgetId, Float))
@@ -691,15 +494,6 @@ clearPopupConfigs :: Context -> IO ()
 clearPopupConfigs ctx =
   modifyIORef' (ctxDrawingCache ctx) $ \dc ->
     dc {dcsPopupConfigs = IM.empty}
-
-data DrawFitCache = DrawFitCache
-  { dfcDw :: {-# UNPACK #-} !Double
-  , dfcDh :: {-# UNPACK #-} !Double
-  , dfcLh :: {-# UNPACK #-} !Float
-  , dfcContent :: {-# UNPACK #-} !Int
-  , dfcIn :: !Layout
-  , dfcOut :: !Layout
-  }
 
 {-# INLINE registerDrawing #-}
 registerDrawing :: Context -> WidgetId -> DrawingBuild -> IO ()
