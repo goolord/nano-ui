@@ -8,6 +8,7 @@ module NanoUI.Diagrams.Tessellation
   , bezierTolerance
   ) where
 
+import qualified Data.Vector as V
 import NanoUI (Color, DrawOp (..), Rect (..))
 
 bezierTolerance :: Float
@@ -130,19 +131,6 @@ axisAlignedRect pts =
   where
     near a b = abs (a - b) <= 1e-3
 
-norm :: (Float, Float) -> (Float, Float)
-norm (x, y) =
-  let d = sqrt (x * x + y * y)
-   in if d <= 1e-9 then (0, 0) else (x / d, y / d)
-
-perp :: (Float, Float) -> (Float, Float)
-perp (x, y) = (-y, x)
-
-addV :: (Float, Float) -> (Float, Float) -> (Float, Float)
-addV (x0, y0) (x1, y1) = (x0 + x1, y0 + y1)
-
-scaleV :: Float -> (Float, Float) -> (Float, Float)
-scaleV s (x, y) = (s * x, s * y)
 
 strokePolyline :: Color -> Float -> Bool -> [(Float, Float)] -> [DrawOp]
 strokePolyline _ _ _ [] = []
@@ -150,36 +138,45 @@ strokePolyline _ _ _ [_] = []
 strokePolyline col w closed pts0 =
   let pts = if closed && length pts0 > 2 then stripClosed pts0 else pts0
       hw = w / 2
-      n = length pts
-      segCount = if closed then n else n - 1
-      segNormals =
-        [ norm (perp (diff (pts !! ((i + 1) `mod` n)) (pts !! i))) | i <- [0 .. segCount - 1] ]
-      joinNormal i =
-        if not closed && (i <= 0 || i >= n - 1)
-          then
-            if i <= 0
-              then segNormals !! 0
-              else segNormals !! (segCount - 1)
-          else
-            let a = segNormals !! ((i - 1 + segCount) `mod` segCount)
-                b = segNormals !! (i `mod` segCount)
-             in norm (addV a b)
-      offset i =
-        let (px, py) = pts !! i
-            (nx, ny) = scaleV hw (joinNormal i)
-         in ((px + nx, py + ny), (px - nx, py - ny))
-   in concat
-        [ quadFill col (x0a, y0a) (x1a, y1a) (x1b, y1b) (x0b, y0b)
-        | i <- [0 .. segCount - 1]
-        , let j = if closed then (i + 1) `mod` n else i + 1
-              ((x0a, y0a), (x0b, y0b)) = offset i
-              ((x1a, y1a), (x1b, y1b)) = offset j
-        ]
-  where
-    quadFill c (x0, y0) (x1, y1) (x2, y2) (x3, y3) =
-      [ FillTriangle x0 y0 x1 y1 x2 y2 c
-      , FillTriangle x0 y0 x2 y2 x3 y3 c
-      ]
+      !n = length pts
+   in if n < 2
+        then []
+        else
+          let !vPts = V.fromList pts
+              !segCount = if closed then n else n - 1
+              !segNormals = V.generate segCount $ \i ->
+                let !(p0x, p0y) = vPts V.! i
+                    !(p1x, p1y) = vPts V.! ((i + 1) `mod` n)
+                    dx = p1x - p0x
+                    dy = p1y - p0y
+                    nx = -dy
+                    ny = dx
+                    d = sqrt (nx * nx + ny * ny)
+                 in if d <= 1e-9 then (0, 0) else (nx / d, ny / d)
+              joinNormal !i
+                | not closed && i <= 0 = segNormals V.! 0
+                | not closed && i >= n - 1 = segNormals V.! (segCount - 1)
+                | otherwise =
+                    let (ax, ay) = segNormals V.! ((i - 1 + segCount) `mod` segCount)
+                        (bx, by) = segNormals V.! (i `mod` segCount)
+                        sx = ax + bx
+                        sy = ay + by
+                        d = sqrt (sx * sx + sy * sy)
+                     in if d <= 1e-9 then (0, 0) else (sx / d, sy / d)
+              offset !i =
+                let (!px, !py) = vPts V.! i
+                    (!nx, !ny) = joinNormal i
+                 in ((px + hw * nx, py + hw * ny), (px - hw * nx, py - hw * ny))
+              buildQuads !i
+                | i >= segCount = []
+                | otherwise =
+                    let !j = if closed then (i + 1) `mod` n else i + 1
+                        ((!x0a, !y0a), (!x0b, !y0b)) = offset i
+                        ((!x1a, !y1a), (!x1b, !y1b)) = offset j
+                     in FillTriangle x0a y0a x1a y1a x1b y1b col
+                          : FillTriangle x0a y0a x1b y1b x0b y0b col
+                          : buildQuads (i + 1)
+           in buildQuads 0
 
 flattenCubic ::
   (Float, Float) ->

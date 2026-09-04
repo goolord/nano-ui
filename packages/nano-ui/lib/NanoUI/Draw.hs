@@ -1019,10 +1019,28 @@ pushStroke da x1 y1 x2 y2 thickness col
       case strokeAxes x1 y1 x2 y2 of
         Nothing -> pure ()
         Just (dx, dy, len) -> do
-          let hx = (-dy) / len * (thickness * 0.5)
-              hy = dx / len * (thickness * 0.5)
-          pushFilledTriangle da (x1 + hx) (y1 + hy) (x2 + hx) (y2 + hy) (x2 - hx) (y2 - hy) col
-          pushFilledTriangle da (x1 + hx) (y1 + hy) (x2 - hx) (y2 - hy) (x1 - hx) (y1 - hy) col
+          let !invLen = (thickness * 0.5) / len
+              !hx = (-dy) * invLen
+              !hy = dx * invLen
+          setTexture da 0
+          (vp, ip, base, baseIdx) <- ensureAndAlloc da 4 6
+          let !(r, g, b, a) = unpackColorF col
+              !vOff = base * vertexSize
+              !iOff = baseIdx * indexSize
+              !baseIdxWord = fromIntegral base :: Word32
+              poke off px py = pokeVertex vp off px py r g b a (-3) 0
+          poke vOff (x1 + hx) (y1 + hy)
+          poke (vOff + 32) (x2 + hx) (y2 + hy)
+          poke (vOff + 64) (x2 - hx) (y2 - hy)
+          poke (vOff + 96) (x1 - hx) (y1 - hy)
+          pokeByteOff ip iOff baseIdxWord
+          pokeByteOff ip (iOff + 4) (baseIdxWord + 1)
+          pokeByteOff ip (iOff + 8) (baseIdxWord + 2)
+          pokeByteOff ip (iOff + 12) baseIdxWord
+          pokeByteOff ip (iOff + 16) (baseIdxWord + 2)
+          pokeByteOff ip (iOff + 20) (baseIdxWord + 3)
+          writeIORef (daVertexCount da) (base + 4)
+          writeIORef (daIndexCount da) (baseIdx + 6)
 
 {-# INLINE emitDrawOps #-}
 emitDrawOps :: DrawArena -> FontMetrics -> Vector DrawOp -> IO ()

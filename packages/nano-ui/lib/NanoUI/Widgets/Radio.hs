@@ -2,23 +2,31 @@
 
 module NanoUI.Widgets.Radio (radioFieldset, boundedRadioFieldset, useRadio) where
 
+import Control.Monad (unless, void, when)
 import qualified Data.IntMap.Strict as IM
-import Control.Monad (unless, void, when, zipWithM)
-import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
-import Effectful (Eff, type (:>))
 import qualified Data.Text as T
+import Effectful (Eff, type (:>))
 import NanoUI.Context (Context (..), getStore, intKey, setStore)
-import NanoUI.Store (WidgetStore (..), slotKey)
-import NanoUI.Types (isCellHost)
 import NanoUI.Icons (radioMark)
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, nextId, uiIO, withKey)
-import NanoUI.Style (defaultLayout, fillW, fontMuted, gap, tight)
+import NanoUI.Store (WidgetStore (..), slotKey)
+import NanoUI.Style (Layout, defaultLayout, fillW, fontMuted, gap, tight)
+import NanoUI.Types (isCellHost)
 import NanoUI.Widgets.Behavior (useSelection)
 import NanoUI.Widgets.Combinators (selectableItem)
 import NanoUI.Widgets.Layout (column, labelEx)
 import NanoUI.Widgets.Node (Response (..), setChanged, tagContainer)
+
+radioLay :: Layout
+radioLay = tight (fillW defaultLayout)
+
+radioGroupLay :: Layout
+radioGroupLay = tight (gap 4 (fillW defaultLayout))
+
+legendLay :: Layout
+legendLay = tight (fillW (fontMuted defaultLayout))
 
 radioFieldset :: (Ui :> es) => Text -> [Text] -> Int -> Eff es (Response, Int)
 radioFieldset legend options initial =
@@ -26,21 +34,27 @@ radioFieldset legend options initial =
     gid <- nextId
     ctx <- askContext
     let opts = if null options then [""] else options
-        c0 = max 0 (min (length opts - 1) initial)
-        key = intKey gid
-        keyInit = slotKey 1 key
+        !c0 = max 0 (min (length opts - 1) initial)
+        !key = intKey gid
+        !keyInit = slotKey 1 key
     st0 <- uiIO (getStore ctx)
     let lastInit = IM.lookup keyInit (storeInt st0)
         storedSel = IM.lookup key (storeInt st0)
-        sel = case (lastInit, storedSel) of
+        !sel = case (lastInit, storedSel) of
           (Just li, Just s) | li == c0 -> max 0 (min (length opts - 1) s)
           _                            -> c0
-    column (tight . gap 4 . fillW $ defaultLayout) $ do
+    column radioGroupLay $ do
       tagContainer gid
-      unless (T.null legend) $ void (labelEx (tight . fillW . fontMuted $ defaultLayout) legend)
-      rs <- zipWithM (\i l -> withKey i (bit ctx sel i l)) [0 ..] opts
-      let mClicked = listToMaybe [i | (r, i) <- rs, rawRespClicked r]
-          finalSel = fromMaybe sel mClicked
+      unless (T.null legend) $ void (labelEx legendLay legend)
+      let goOpts !_ [] !accResp !accClicked = pure (accResp, accClicked)
+          goOpts !i (l:ls) !accResp !accClicked = do
+            (r, optIdx) <- withKey i (bit ctx sel i l)
+            let !clicked' = if rawRespClicked r && accClicked < 0 then optIdx else accClicked
+                !resp' = accResp <> r
+            goOpts (i + 1) ls resp' clicked'
+      (combinedResp, clickedIdx) <- goOpts 0 opts mempty (-1)
+      let !finalSel = if clickedIdx >= 0 then clickedIdx else sel
+          !hasClick = clickedIdx >= 0
       uiIO $ do
         when (storedSel /= Just finalSel || lastInit /= Just c0) $ do
           st <- getStore ctx
@@ -49,12 +63,12 @@ radioFieldset legend options initial =
                 IM.insert key finalSel $
                   IM.insert keyInit c0 (storeInt st)
             }
-      pure (setChanged (finalSel /= sel || mClicked /= Nothing) (mconcat (map fst rs)), finalSel)
+      pure (setChanged (finalSel /= sel || hasClick) combinedResp, finalSel)
 
 bit :: (Ui :> es) => Context -> Int -> Int -> Text -> Eff es (Response, Int)
 bit ctx sel i l = do
   let on = sel == i
-  r <- selectableItem NodeRadio (if isCellHost (ctxHostProfile ctx) then radioMark (ctxIcons ctx) on <> l else l) on (tight . fillW $ defaultLayout) i
+  r <- selectableItem NodeRadio (if isCellHost (ctxHostProfile ctx) then radioMark (ctxIcons ctx) on <> l else l) on radioLay i
   pure (setChanged (rawRespClicked r) r, i)
 
 boundedRadioFieldset :: (Bounded a, Enum a, Ui :> es) => Text -> a -> (a -> Text) -> Eff es (Response, a)

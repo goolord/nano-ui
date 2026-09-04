@@ -5,12 +5,13 @@ module NanoUI.Sdl.Debug
   , noteLoop
   , notePresent
   , noteSkip
+  , isDebugActive
   , takeDebugLive
   , readSdlDebug
   , emptySdlDebug
   ) where
 
-import Data.IORef (IORef, atomicModifyIORef', newIORef)
+import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
 import Data.Text (Text)
 import Data.Word (Word32, Word64)
 import GHC.Clock (getMonotonicTime)
@@ -58,6 +59,7 @@ data SdlDebugSampler = SdlDebugSampler
   , smLoopEma :: Double
   , smLastPresentT :: Double
   , smLastDebugT :: Double
+  , smLastQueryT :: Double
   , smPresents :: Word64
   , smSkips :: Word64
   , smUiMs :: Double
@@ -82,6 +84,7 @@ newSdlDebugSampler = do
       , smLoopEma = 0
       , smLastPresentT = now
       , smLastDebugT = 0
+      , smLastQueryT = 0
       , smPresents = 0
       , smSkips = 0
       , smUiMs = 0
@@ -134,12 +137,26 @@ emptySdlDebug =
 noteLoop :: SamplerRef -> Float -> IO ()
 noteLoop ref dt =
   atomicModifyIORef' ref $ \s ->
-    let fps = if dt > 1e-4 then 1 / realToFrac dt else 0
-     in (s {smLoopEma = blend (smLoopEma s) fps}, ())
+    let dtD = realToFrac dt :: Double
+        fps = if dtD > 1e-4 && dtD < 0.25 then 1 / dtD else 0
+        ema' =
+          if fps > 0
+            then if smLoopEma s <= 0 then fps else blend (smLoopEma s) fps
+            else smLoopEma s
+     in (s {smLoopEma = ema'}, ())
 
 noteSkip :: SamplerRef -> IO ()
 noteSkip ref =
   atomicModifyIORef' ref $ \s -> (s {smSkips = smSkips s + 1}, ())
+
+isDebugActive :: SamplerRef -> Bool -> IO Bool
+isDebugActive ref windowOpen =
+  if windowOpen
+    then pure True
+    else do
+      now <- getMonotonicTime
+      s <- readIORef ref
+      pure (now - smLastQueryT s < 1.0)
 
 takeDebugLive :: SamplerRef -> Bool -> IO Bool
 takeDebugLive _ False = pure False
@@ -156,16 +173,31 @@ notePresent ref uiMs renderMs presentMs frameMs dd = do
   now <- getMonotonicTime
   atomicModifyIORef' ref $ \s ->
     let dt = now - smLastPresentT s
-        fps = if dt > 1e-4 then 1 / dt else 0
+        instantFps =
+          if dt > 1e-4 && dt < 0.25
+            then 1 / dt
+            else if frameMs > 0.001
+                   then 1000 / frameMs
+                   else 0
+        ema' =
+          if smPresentEma s <= 0
+            then instantFps
+            else if instantFps > 0
+                   then blend (smPresentEma s) instantFps
+                   else smPresentEma s
+        frameMs' =
+          if smFrameMs s <= 0
+            then frameMs
+            else blend (smFrameMs s) frameMs
      in
       ( s
-          { smPresentEma = blend (smPresentEma s) fps
+          { smPresentEma = ema'
           , smLastPresentT = now
           , smPresents = smPresents s + 1
           , smUiMs = uiMs
           , smRenderMs = renderMs
           , smPresentMs = presentMs
-          , smFrameMs = frameMs
+          , smFrameMs = frameMs'
           , smVerts = drawVertexCount dd
           , smIndices = drawIndexCount dd
           , smCmds = drawCmdCount dd
@@ -180,7 +212,7 @@ readSdlDebug ref (Size ww wh) (V2 mx my) fontPath scale renderer vsync = do
     atomicModifyIORef' ref $ \s ->
       let elapsed = now - smLastDebugT s
           refresh = smLastDebugT s <= 0 || elapsed >= debugRefreshSec
-       in (s {smWantFrame = refresh}, (refresh, s))
+       in (s {smWantFrame = refresh || smWantFrame s, smLastQueryT = now}, (refresh, s))
   if not refresh
     then pure (smSnapshot cur)
     else do
@@ -220,5 +252,5 @@ readSdlDebug ref (Size ww wh) (V2 mx my) fontPath scale renderer vsync = do
               , dbgCpus = rtsCpus rts
               }
       atomicModifyIORef' ref $ \s ->
-        (s {smLastDebugT = now, smSnapshot = snap', smWantFrame = True}, ())
+        (s {smLastDebugT = now, smSnapshot = snap', smWantFrame = False, smLastQueryT = now}, ())
       pure snap'

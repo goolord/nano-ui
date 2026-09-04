@@ -48,6 +48,7 @@ import NanoUI.Sdl.Debug
   ( SdlDebugSnapshot (..)
   , emptySdlDebug
   , notePresent
+  , noteSkip
   , readSdlDebug
   )
 import NanoUI.Sdl.Cursor (syncPointerCursor)
@@ -127,18 +128,17 @@ finishDraw ctx env inp forceFull t0 t1 drawData dirtyAfterUi = do
       ph = max 1 (round (lh * scale))
   (tex, retainNew) <- ensureRetain env pw ph scale
   animating <- anyAnimating ctx
-  let damage0 = if forceFull || retainNew then DamageFull else snapDamage scale dmg0
+  let damage0 =
+        if forceFull || retainNew || sdlContinuous env
+          then DamageFull
+          else snapDamage scale dmg0
       damage =
         if damageIsEmpty damage0 && animating
           then DamageFull
           else damage0
   if damageIsEmpty damage || lw <= 0 || lh <= 0
     then do
-      tEnd <- getMonotonicTime
-      let renderMs = 0
-          presentMs = 0
-          frameMs = (tEnd - t0) * 1000
-      notePresent (sdlDebug env) uiMs renderMs presentMs frameMs drawData
+      noteSkip (sdlDebug env)
       pure (dirtyAfterUi, inp)
     else do
       okBegin <- retainBegin (sdlRenderer env) tex scale

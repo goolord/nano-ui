@@ -49,7 +49,7 @@ import NanoUI.Testing.Harness
   )
 import NanoUI.Testing.Harness qualified as Harness
 import System.Console.GetOpt
-  ( ArgDescr (ReqArg)
+  ( ArgDescr (NoArg, ReqArg)
   , ArgOrder (Permute)
   , OptDescr (Option)
   , getOpt
@@ -60,30 +60,43 @@ import qualified Data.ByteString as BS
 import qualified Data.Text as T
 import qualified Data.Text.Read as T.Read
 
-options :: [OptDescr Bool]
+data DemoConfig = DemoConfig
+  { cfgVsync :: !Bool
+  , cfgContinuous :: !Bool
+  }
+
+defaultDemoConfig :: DemoConfig
+defaultDemoConfig = DemoConfig { cfgVsync = True, cfgContinuous = False }
+
+options :: [OptDescr (DemoConfig -> DemoConfig)]
 options =
-  [ Option [] ["vsync"] (ReqArg parseVsync "BOOL") "Enable or disable vsync (true/false)"
+  [ Option [] ["vsync"] (ReqArg (\s cfg -> cfg { cfgVsync = parseBool s }) "BOOL") "Enable or disable vsync (true/false)"
+  , Option [] ["continuous"] (NoArg (\cfg -> cfg { cfgContinuous = True, cfgVsync = False })) "Continuous unthrottled rendering (disables vsync)"
+  , Option [] ["benchmark"] (NoArg (\cfg -> cfg { cfgContinuous = True, cfgVsync = False })) "Benchmark mode: continuous rendering with vsync disabled"
+  , Option [] ["fps"] (NoArg (\cfg -> cfg { cfgContinuous = True, cfgVsync = False })) "Show uncapped FPS (continuous, vsync false)"
   ]
 
-parseVsync :: String -> Bool
-parseVsync s = s `elem` ["true", "True", "1"]
+parseBool :: String -> Bool
+parseBool s = s `elem` ["true", "True", "1"]
 
-parseArgs :: [String] -> Bool
+parseArgs :: [String] -> DemoConfig
 parseArgs argv =
   case getOpt Permute options argv of
-    (flags, _, _) -> last (True : flags)
+    (fs, _, _) -> foldl' (flip id) defaultDemoConfig fs
 
 main :: IO ()
 main = do
   args <- getArgs
   if "--selftest" `elem` args
     then selftest
-    else
+    else do
+      let cfg = parseArgs args
       runSdlApp
         defaultSdlOptions
           { sdlAppShouldQuit = \inp -> inputKeysElem KeyEscape (inputKeys inp)
           , sdlAppImages = demoImages
-          , sdlAppVsync = parseArgs args
+          , sdlAppVsync = cfgVsync cfg
+          , sdlAppContinuous = cfgContinuous cfg
           }
         demoUi
 
@@ -147,6 +160,13 @@ demoUi = do
             heading "nano-ui"
             muted "SDL3 demo"
           flex
+          snap <- askSdlDebug
+          let fpsText =
+                if dbgPresentFps snap > 0
+                  then T.pack (printf "%4.0f FPS (%5.2f ms)" (dbgPresentFps snap) (dbgFrameMs snap))
+                  else ""
+          unless (T.null fpsText) $
+            void (labelEx (tight . fontMono . fontMuted $ defaultLayout) fpsText)
           clickButton "OK" (setClick "OK")
           clickButton "Cancel" (setClick "Cancel")
           clickButton "About" (setAbout True)
@@ -286,7 +306,16 @@ demoUi = do
                   void $ diagram (fillW $ defaultLayout {layoutMaxH = 200}) (drawingSample ps)
             Diagnostics -> do
               heading "Diagnostics"
-              kv "Renderer" "SDL3 Pinned Vertex Arena"
+              snap <- askSdlDebug
+              let haskellMs = dbgUiMs snap + dbgRenderMs snap
+              kv "Present FPS" (T.pack (printf "%.1f fps" (dbgPresentFps snap)))
+              kv "Loop FPS" (T.pack (printf "%.1f fps" (dbgLoopFps snap)))
+              kv "Frame Time" (T.pack (printf "%.2f ms" (dbgFrameMs snap)))
+              kv "Haskell Time" (T.pack (printf "%.2f ms (UI: %.2f, Render: %.2f)" haskellMs (dbgUiMs snap) (dbgRenderMs snap)))
+              kv "SDL Present" (T.pack (printf "%.2f ms" (dbgPresentMs snap)))
+              kv "Draw Calls" (T.pack (printf "%d" (dbgCmds snap)))
+              kv "Vertices / Indices" (T.pack (printf "%d / %d" (dbgVerts snap) (dbgIndices snap)))
+              kv "Renderer" (dbgRenderer snap <> if dbgVsync snap then " (vsync on)" else " (vsync off)")
               kv "Evaluation" "Zero-Cost Inactive Tabs"
               kv "State" "SrcLoc Preserved"
   when debugOpen $ do

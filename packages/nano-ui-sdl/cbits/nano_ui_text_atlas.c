@@ -99,19 +99,28 @@ static bool slot_for(NanoUiTextAtlas *atlas, int gw, int gh, int *out_x, int *ou
 
 static bool blit_surface(NanoUiTextAtlas *atlas, SDL_Surface *surface, int x, int y)
 {
-    SDL_Surface *converted = SDL_ConvertSurface(surface, SDL_PIXELFORMAT_RGBA32);
-    if (!converted) {
-        return false;
+    SDL_Surface *converted = NULL;
+    SDL_Surface *src_surf = surface;
+    if (surface->format != SDL_PIXELFORMAT_RGBA32) {
+        converted = SDL_ConvertSurface(surface, SDL_PIXELFORMAT_RGBA32);
+        if (!converted) {
+            return false;
+        }
+        src_surf = converted;
     }
-    Uint8 *src = (Uint8 *)converted->pixels;
-    int src_pitch = converted->pitch;
-    for (int row = 0; row < converted->h; row++) {
+    const Uint8 *src = (const Uint8 *)src_surf->pixels;
+    int src_pitch = src_surf->pitch;
+    int w = src_surf->w;
+    int h = src_surf->h;
+    for (int row = 0; row < h; row++) {
         Uint8 *dst = atlas->pixels + ((y + row) * atlas->w + x) * 4;
-        memcpy(dst, src + (size_t)row * (size_t)src_pitch, (size_t)converted->w * 4);
+        memcpy(dst, src + (size_t)row * (size_t)src_pitch, (size_t)w * 4);
     }
-    SDL_Rect rect = {x, y, converted->w, converted->h};
+    SDL_Rect rect = {x, y, w, h};
     bool ok = SDL_UpdateTexture(atlas->tex, &rect, atlas->pixels + (y * atlas->w + x) * 4, atlas->w * 4);
-    SDL_DestroySurface(converted);
+    if (converted) {
+        SDL_DestroySurface(converted);
+    }
     return ok;
 }
 

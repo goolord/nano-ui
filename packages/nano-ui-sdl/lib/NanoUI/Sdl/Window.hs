@@ -101,6 +101,8 @@ data SdlOptions = SdlOptions
   -- ^ Start the window hidden (default: 'False').
   , sdlAppVsync :: !Bool
   -- ^ Enable vertical synchronization (default: 'True').
+  , sdlAppContinuous :: !Bool
+  -- ^ Continuous unthrottled rendering without waiting for events (default: 'False').
   , sdlAppFont :: !NanoUIFont
   -- ^ UI font (default: embedded Inter).
   , sdlAppMonoFont :: !NanoUIFont
@@ -126,6 +128,7 @@ defaultSdlOptions =
     , sdlWindowAlwaysOnTop = False
     , sdlWindowHidden = False
     , sdlAppVsync = True
+    , sdlAppContinuous = False
     , sdlAppFont = defaultFontSearch
     , sdlAppMonoFont = defaultFontSearchMono
     , sdlAppFontSize = defaultFontSize
@@ -168,6 +171,7 @@ data SdlEnv = SdlEnv
   , sdlDebug :: IORef SdlDebugSampler
   , sdlRetain :: IORef (Ptr (), Int, Int, Float)
   , sdlVsync :: !Bool
+  , sdlContinuous :: !Bool
   , sdlCachedFm :: !(IORef FontMetrics)
   , sdlCachedMonoFm :: !(IORef FontMetrics)
   , sdlCachedCtx :: !(IORef Context)
@@ -236,7 +240,7 @@ withSdl opts ctx act =
           (sdlWindowBorderless opts)
           (sdlWindowAlwaysOnTop opts)
           (sdlWindowHidden opts)
-   in withSdlWindow
+    in withSdlWindow
         ctx
         (sdlWindowTitle opts)
         w
@@ -244,6 +248,7 @@ withSdl opts ctx act =
         flags
         False
         (sdlAppVsync opts)
+        (sdlAppContinuous opts)
         (sdlAppFont opts)
         (sdlAppMonoFont opts)
         (sdlAppFontSize opts)
@@ -260,6 +265,7 @@ withSdlBench ctx act =
         sdlWindowHiddenFlag
         True
         False
+        True
         DefaultFont
         DefaultFont
         defaultFontSize
@@ -273,12 +279,13 @@ withSdlWindow ::
   SDL_WindowFlags ->
   Bool ->
   Bool ->
+  Bool ->
   NanoUIFont ->
   NanoUIFont ->
   Float ->
   (Context -> SdlEnv -> IO a) ->
   IO a
-withSdlWindow ctx title w h flags bench vsync uiFont monoFont fontSize act =
+withSdlWindow ctx title w h flags bench vsync continuous uiFont monoFont fontSize act =
   withTtf $ do
     if bench then initBenchHints else initSdlHints vsync
     let run =
@@ -289,7 +296,7 @@ withSdlWindow ctx title w h flags bench vsync uiFont monoFont fontSize act =
       fontSource <- resolveNanoUIFont uiFont
       monoSource <- resolveNanoUIFont monoFont
       bracket
-        (startSdlWindow ctx title w h flags bench vsync fontSource monoSource fontSize)
+        (startSdlWindow ctx title w h flags bench vsync continuous fontSource monoSource fontSize)
         (\(_, env) -> stopSdlWindow bench env)
         $ \(ctx', env) -> act ctx' env
 
@@ -301,11 +308,12 @@ startSdlWindow ::
   SDL_WindowFlags ->
   Bool ->
   Bool ->
+  Bool ->
   FontSource ->
   FontSource ->
   Float ->
   IO (Context, SdlEnv)
-startSdlWindow ctx title w h flags bench vsync fontSource monoSource fontSize = do
+startSdlWindow ctx title w h flags bench vsync continuous fontSource monoSource fontSize = do
   unlessM (initSafe (SDL_InitFlags 32)) $
     fail "SDL_Init(SDL_INIT_VIDEO) failed"
   unlessM initRefreshEvent $
@@ -364,6 +372,7 @@ startSdlWindow ctx title w h flags bench vsync fontSource monoSource fontSize = 
               , sdlDebug = debug
               , sdlRetain = retain
               , sdlVsync = vsync
+              , sdlContinuous = continuous
               , sdlCachedFm = cachedFm
               , sdlCachedMonoFm = cachedMonoFm
               , sdlCachedCtx = cachedCtx
@@ -397,7 +406,7 @@ acquireSdlBench ctx =
     initBenchHints
     fontSource <- resolveNanoUIFont DefaultFont
     let Size w h = benchWindowSize
-    startSdlWindow ctx "nano-ui-bench" w h sdlWindowHiddenFlag True False fontSource fontSource defaultFontSize
+    startSdlWindow ctx "nano-ui-bench" w h sdlWindowHiddenFlag True False True fontSource fontSource defaultFontSize
 
 releaseSdlBench :: SdlEnv -> IO ()
 releaseSdlBench env = withTtf $ stopSdlWindow True env
