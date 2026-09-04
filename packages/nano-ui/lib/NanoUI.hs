@@ -209,11 +209,16 @@ module NanoUI
   , scrollAreaIdConfigured
   , scrollConfigured
   , select
+  , boundedSelect
+  , enumSelect
+  , useEnumSelect
   , colorPicker
   , colorPickerToHex
   , colorPickerFromHex
   , radioFieldset
   , boundedRadioFieldset
+  , enumRadio
+  , useEnumRadio
   , useRadio
   , stripedRow
   , TreeItem (..)
@@ -577,7 +582,13 @@ import NanoUI.Widgets
   , styledLabel
   , onClick
   , panel
+  , boundedSelect
+  , enumSelect
+  , useEnumSelect
   , radioFieldset
+  , boundedRadioFieldset
+  , enumRadio
+  , useEnumRadio
   , row
   , RightClickable (..)
   , onRightClick

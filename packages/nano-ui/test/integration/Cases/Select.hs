@@ -7,6 +7,7 @@ module Cases.Select
   , runSelectOverlayDamageTest
   , runSelectPickLowTest
   , runSelectTest
+  , runEnumSelectTest
   , runSliderCursorTest
   , runTreeExpandDamageTest
   , runTreeInitialTest
@@ -294,3 +295,20 @@ runSelectKeyboardTest ctx failed = do
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyLeft]}) ui
   ((_, idx4), _, _, _) <- runFrame ctx inp0 ui
   assertEq failed idx4 1
+
+data SampleEnum = SampleLow | SampleMed | SampleHigh
+  deriving (Eq, Show, Enum, Bounded)
+
+runEnumSelectTest :: Context -> IORef Int -> IO ()
+runEnumSelectTest ctx failed = do
+  let inp0 = withInput 320 200
+      ui = column $ do
+        (_, s1) <- enumSelect "Quality" SampleMed
+        (_, s2) <- enumRadio "Priority" SampleHigh
+        pure (s1, s2)
+  ((sel, rad), _, _, _) <- runFrame ctx inp0 ui
+  assertEq failed sel SampleMed
+  assertEq failed rad SampleHigh
+  spans <- collectTextSpans ctx
+  assertSpansHas failed "Quality: SampleMed" spans
+  assertSpansHas failed "SampleHigh" spans

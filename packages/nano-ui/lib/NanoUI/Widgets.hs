@@ -70,8 +70,13 @@ module NanoUI.Widgets
   , scrollAreaIdConfigured
   , scrollConfigured
   , select
+  , boundedSelect
+  , enumSelect
+  , useEnumSelect
   , radioFieldset
   , boundedRadioFieldset
+  , enumRadio
+  , useEnumRadio
   , useRadio
   , TreeItem (..)
   , tree
@@ -325,6 +330,7 @@ import NanoUI.Widgets.Node
 import NanoUI.Widgets.Overlay (modal, window)
 import NanoUI.Widgets.Radio
   ( boundedRadioFieldset
+  , enumRadio
   , radioFieldset
   , useRadio
   )
@@ -709,6 +715,29 @@ select lbl options initial = do
   let
     finalIdx = IM.findWithDefault clamped key (storeInt store1)
   pure (setChanged (finalIdx /= initial) resp, finalIdx)
+
+boundedSelect :: (Bounded a, Enum a, Ui :> es) => Text -> a -> (a -> Text) -> Eff es (Response, a)
+boundedSelect lbl initial encode =
+  let vs = [minBound .. maxBound]
+      opts = map encode vs
+   in fmap (\(r, i) -> (r, toEnum (max 0 (min (length vs - 1) i)))) (select lbl opts (fromEnum initial))
+
+enumSelect :: (Bounded a, Enum a, Show a, Ui :> es) => Text -> a -> Eff es (Response, a)
+enumSelect lbl initial = boundedSelect lbl initial (T.pack . show)
+
+useEnumSelect :: (Bounded a, Enum a, Show a, Ui :> es) => Text -> a -> Eff es a
+useEnumSelect lbl initial = do
+  (val, setVal) <- useEnum initial
+  (resp, next) <- enumSelect lbl val
+  when (respChanged resp) (setVal next)
+  pure next
+
+useEnumRadio :: (Bounded a, Enum a, Show a, Ui :> es) => Text -> a -> Eff es a
+useEnumRadio legend initial = do
+  (val, setVal) <- useEnum initial
+  (resp, next) <- enumRadio legend val
+  when (respChanged resp) (setVal next)
+  pure next
 
 textInputText :: Text -> Text -> Int -> Bool -> Text
 textInputText = textInputTerminalText

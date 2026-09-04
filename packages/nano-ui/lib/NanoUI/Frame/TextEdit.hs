@@ -166,6 +166,10 @@ import qualified NanoUI.Widgets.TextArea as TA
 import qualified NanoUI.Widgets.TextBuffer as TB
 import NanoUI.Widgets.TextCommon
   ( menuActionEnabled
+  , selectionBgColor
+  , selectionCaretGeom
+  , textSelectionForClick
+  , textSelectionForDrag
   , textWordBounds
   )
 import NanoUI.Widgets.TextInput (applyTextInputMenuAction)
@@ -628,9 +632,7 @@ drawTextInputSelection da ctx idx x y w h style = do
               geom = textInputGeom (ctxHostProfile ctx) fm x y w h
               fieldRect = tigFieldRect geom
               (ix, _) = widgetContentInset (ctxHostProfile ctx) fm
-              theme = ctxTheme ctx
-              accent = themeAccent theme
-              selBg = lerpColor accent (styleBg style) 0.55
+              selBg = selectionBgColor (themeAccent (ctxTheme ctx)) (styleBg style)
               host = ctxHostProfile ctx
               wLo = textDisplayWidth host fm (T.take selLo value)
               wHi = textDisplayWidth host fm (T.take selHi value)
@@ -664,27 +666,18 @@ drawTextInputCaret da ctx idx x y w h style = do
             pw = textDisplayWidth host fm prefix
             lineH = layoutLineHeight host fm
             ty = centeredTextY host fm (rectY fieldRect) (rectH fieldRect) lineH
-            caretX = rectX fieldRect + ix + pw
-            caretY = ty + 1
-            caretH = max 4 (lineH - 2)
+            (caretX, caretY, caretH) = selectionCaretGeom (rectX fieldRect + ix) ty pw lineH
         drawTextCaret da caretX caretY caretH (styleFg style)
 
 applyTextInputClick :: Context -> WidgetId -> Text -> Int -> Int -> IO ()
-applyTextInputClick ctx wid value idx clicks
-  | clicks >= 3 = updateTextInputSelection ctx wid 0 (T.length value)
-  | clicks == 2 =
-      let (lo, hi) = textWordBounds value idx
-       in updateTextInputSelection ctx wid lo hi
-  | otherwise = updateTextInputSelection ctx wid idx idx
+applyTextInputClick ctx wid value idx clicks =
+  let (lo, hi) = textSelectionForClick value idx clicks
+   in updateTextInputSelection ctx wid lo hi
 
 applyTextInputDrag :: Context -> WidgetId -> Text -> Int -> Int -> Int -> IO ()
-applyTextInputDrag ctx wid value anchor idx clicks
-  | clicks >= 3 = updateTextInputSelection ctx wid 0 (T.length value)
-  | clicks == 2 =
-      let (a0, a1) = textWordBounds value anchor
-          (c0, c1) = textWordBounds value idx
-       in updateTextInputSelection ctx wid (min a0 c0) (max a1 c1)
-  | otherwise = updateTextInputSelection ctx wid anchor idx
+applyTextInputDrag ctx wid value anchor idx clicks =
+  let (lo, hi) = textSelectionForDrag value anchor idx clicks
+   in updateTextInputSelection ctx wid lo hi
 
 updateTextInputSelection :: Context -> WidgetId -> Int -> Int -> IO ()
 updateTextInputSelection ctx wid anchor cursor = do
@@ -861,8 +854,7 @@ drawTextAreaSelection da _ctx state geom host fm theme style = do
         (ix, iy) = widgetContentInset host fm
         scrollYf = realToFrac (snd (TA.scrollOffset state))
         contentTop = rectY field + iy
-        accent = themeAccent theme
-        selBg = lerpColor accent (styleBg style) 0.55
+        selBg = selectionBgColor (themeAccent theme) (styleBg style)
         loRow = TB.cursorRow lo
         loCol = TB.cursorCol lo
         hiRow = TB.cursorRow hi
@@ -936,9 +928,7 @@ drawTextAreaContent da ctx idx x y w h style = do
                   else ""
               prefix = T.take col currentLine
               pw = textDisplayWidth host fm prefix
-          let caretX = contentX + pw
-              caretY = contentTop + fromIntegral row * lineH - scrollYf + 1
-              caretH = max 4 (lineH - 2)
+              (caretX, caretY, caretH) = selectionCaretGeom contentX (contentTop + fromIntegral row * lineH - scrollYf) pw lineH
           drawTextCaret da caretX caretY caretH fg
 
 textAreaHitForWidget :: Context -> WidgetId -> IO (Maybe TextAreaHit)
