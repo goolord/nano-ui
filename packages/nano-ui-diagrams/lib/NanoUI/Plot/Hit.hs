@@ -15,6 +15,7 @@ import NanoUI.Diagrams.Widget (PlotStyle (..))
 import NanoUI.Plot.Chrome (chartDiagram, chartXDomain, chartYDomain, seriesPoints)
 import NanoUI.Plot.Scale (plotToDomain)
 import NanoUI.Plot.Types (Chart (..), PlotHover (..), Range (..))
+import qualified Data.Vector as V
 
 diagramBorder :: Float
 diagramBorder = 1
@@ -90,7 +91,7 @@ nearestPlotHover chart gx gy =
               , (x - dataX) * (x - dataX) + (y - dataY) * (y - dataY)
               )
             | (si, s) <- zip [0 ..] series
-            , (ptIdx, (x, y)) <- zip [0 ..] (seriesPoints chart s)
+            , (ptIdx, (x, y)) <- zip [0 ..] (V.toList (seriesPoints chart s))
             ]
        in case candidates of
             [] -> Nothing

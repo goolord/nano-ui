@@ -33,7 +33,7 @@ import NanoUI.Testing
   , textFieldActive
   , textInputEditActive
   )
-import NanoUI.Sdl.Debug (noteLoop, noteSkip, takeDebugLive)
+import NanoUI.Sdl.Debug (isDebugActive, noteLoop, noteSkip, takeDebugLive)
 import NanoUI.Sdl.Cursor (syncPointerCursor)
 import NanoUI.Sdl.Input
   ( SdlEvent (..)
@@ -159,7 +159,9 @@ loop ::
   IO ()
 loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace startupFull firstPointerFull shouldQuit inp queued lastT = do
   ctx <- readIORef ctxRef
-  debugOpen <- debugPanelOpen ctx
+  debugWinOpen <- debugPanelOpen ctx
+  debugActive <- isDebugActive (sdlDebug env) debugWinOpen
+  wantDebug <- takeDebugLive (sdlDebug env) debugActive
   pending <-
     if sizeofSmallArray queued == 0
       then do
@@ -173,17 +175,17 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace star
             nFullWait <- readIORef startupFull
             pendingDirtyWait <- readIORef pendingRedraw
             dirtyWait <- isDirty ctx
-            if animating || pendingDirtyWait || dirtyWait
+            let continuous = sdlContinuous env
+            if continuous || wantDebug || animating || pendingDirtyWait || dirtyWait
               then pure emptySmallArray
               else
                 if wasAnimWait || nFullWait > 0 || editing
                   then waitEventTimeout animateTimeout
                   else
-                    if debugOpen
+                    if debugActive
                       then waitEventTimeout debugHudTimeout
                       else waitEvent
       else pure queued
-  wantDebug <- takeDebugLive (sdlDebug env) debugOpen
   let (group, rest) = splitFrame pending
   editActive <- textInputEditActive ctx
   if any (== EvQuit) group || (any isHardQuit group && not editActive)
@@ -228,20 +230,21 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace star
                 grace <= 0 || sizeChanged || interacted || anim || editing || dirtyNow || pendingDirty || need || nFull > 0 || displayScale
               forceFinal = wasAnim && not anim
               shouldDraw =
-                graceAllow
-                  && ( need
-                         || anim
-                         || forceFinal
-                         || pendingDirty
-                         || dirtyNow
-                         || wantDebug
-                         || editing
-                         || nFull > 0
-                         || displayScale
-                         || firstUserFull
-                         || pointerEdge
-                         || scrollEdge
-                     )
+                sdlContinuous env
+                  || wantDebug
+                  || (graceAllow
+                      && ( need
+                             || anim
+                             || forceFinal
+                             || pendingDirty
+                             || dirtyNow
+                             || editing
+                             || nFull > 0
+                             || displayScale
+                             || firstUserFull
+                             || pointerEdge
+                             || scrollEdge
+                         ))
           when (grace > 0) $ writeIORef startupGrace (grace - 1)
           let runDraw = do
                 when firstUserFull $ writeIORef firstPointerFull False
@@ -250,7 +253,7 @@ loop ctxRef drawFn env prev pendingRedraw wasAnimating drawing startupGrace star
                     ctx'
                     env
                     inpSynced
-                    (debugOpen || wantDebug || nFull > 0 || displayScale || firstUserFull)
+                    (sdlContinuous env || debugWinOpen || wantDebug || nFull > 0 || displayScale || firstUserFull)
                 when (nFull > 0) $ writeIORef startupFull (nFull - 1)
                 writeIORef pendingRedraw dirtyOut
                 writeIORef prev s

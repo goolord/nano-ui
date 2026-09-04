@@ -105,6 +105,11 @@ main = do
 
       measureBench "Tab: Table (14 rows x 5 cols)" iterations $
         void (runFrame ctx' inp tabTableUi)
+      measureBench "Tab: Table (SDL Present)" iterations $
+        void (sdlDrawFrame ctx' tabTableUi sdlEnv inp False)
+      (_, _, ddTable, _) <- runFrame ctx' inp tabTableUi
+      printf "  -> Table DrawCmds: %d (Vertices: %d, Indices: %d)\n"
+        (drawCmdCount ddTable) (drawVertexCount ddTable) (drawIndexCount ddTable)
 
       measureBench "Tab: Plots (4 Charts + Diagram)" iterations $
         void (runFrame ctx' inp tabPlotsUi)
