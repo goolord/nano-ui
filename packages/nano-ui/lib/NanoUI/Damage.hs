@@ -37,7 +37,7 @@ import NanoUI.Input
   ( Input (..)
   , inputWindowSize
   )
-import NanoUI.Frame.Hit (findNodeByKey, findNodeByWidgetId)
+import NanoUI.Frame.Hit (findNodeByKey)
 import NanoUI.Store (slotKey, slotScrollCross)
 import NanoUI.Layout.Arena
   ( NodeArena
@@ -74,55 +74,31 @@ layoutSettleMinArea = 0.25
 
 -- Partial retain clears with themeWindow. Expand interaction clips to the painted
 -- panel/window backdrop so slop pixels get the correct fill, not window color.
-backdropRectForWidget :: Context -> WidgetId -> IO (Maybe Rect)
-backdropRectForWidget ctx wid
-  | hashWidgetId wid == 0 = pure Nothing
-  | otherwise = nodeBackdrop ctx (findNodeByWidgetId ctx wid)
-
 backdropRectForKey :: Context -> Int -> IO (Maybe Rect)
 backdropRectForKey ctx k
   | k == 0 = pure Nothing
-  | otherwise = nodeBackdrop ctx (findNodeByKey ctx k)
-
-nodeBackdrop :: Context -> IO (Maybe Int) -> IO (Maybe Rect)
-nodeBackdrop ctx mIdxAct = do
-  mIdx <- mIdxAct
-  case mIdx of
-    Nothing -> pure Nothing
-    Just idx -> backdropRectFromNode ctx idx
+  | otherwise = findNodeByKey ctx k >>= maybe (pure Nothing) (backdropRectFromNode ctx)
 
 backdropRectsForInteraction :: Context -> [WidgetId] -> [Int] -> IO [Rect]
-backdropRectsForInteraction ctx wids keys = do
-  ws <- catMaybes <$> forM wids (backdropRectForWidget ctx)
-  ks <- catMaybes <$> forM keys (backdropRectForKey ctx)
-  pure (ws ++ ks)
+backdropRectsForInteraction ctx wids keys =
+  catMaybes <$> mapM (backdropRectForKey ctx) (filter (/= 0) (map intKey wids ++ keys))
 
 backdropRectFromNode :: Context -> Int -> IO (Maybe Rect)
-backdropRectFromNode ctx idx = do
-  let na = ctxNodeArena ctx
-  nt <- getNodeType na idx
-  case nt of
-    NodePanel -> nodeRect na idx
-    NodeWindow -> nodeRect na idx
-    NodeModal -> nodeRect na idx
-    NodePopup -> nodeRect na idx
-    NodeScrollContainer -> do
-      (wTag, _) <- getWidthSizing na idx
-      (hTag, _) <- getHeightSizing na idx
-      if wTag == SizingGrow && hTag == SizingGrow
-        then walkParent na idx
-        else nodeRect na idx
-    _ -> walkParent na idx
+backdropRectFromNode ctx idx = walkAncestors step (ctxNodeArena ctx) idx
   where
-    nodeRect arena i = do
-      (x, y, w, h) <- getRect arena i
-      let r = Rect x y w h
-      pure (if nonzeroRect r then Just r else Nothing)
-    walkParent arena i = do
-      p <- getParent arena i
-      if p < 0
-        then pure Nothing
-        else backdropRectFromNode ctx p
+    step i = do
+      let na = ctxNodeArena ctx
+      nt <- getNodeType na i
+      if nt == NodePanel || isFloatingNode nt
+        then getNonzeroRect na i
+        else case nt of
+          NodeScrollContainer -> do
+            (wTag, _) <- getWidthSizing na i
+            (hTag, _) <- getHeightSizing na i
+            if wTag == SizingGrow && hTag == SizingGrow
+              then pure Nothing
+              else getNonzeroRect na i
+          _ -> pure Nothing
 
 {-# INLINE walkAncestors #-}
 walkAncestors :: (Int -> IO (Maybe a)) -> NodeArena -> Int -> IO (Maybe a)
@@ -136,42 +112,50 @@ walkAncestors step arena idx = loop idx
             Just x -> pure (Just x)
             Nothing -> getParent arena i >>= loop
 
+{-# INLINE getNonzeroRect #-}
+getNonzeroRect :: NodeArena -> Int -> IO (Maybe Rect)
+getNonzeroRect arena i = do
+  (x, y, w, h) <- getRect arena i
+  let r = Rect x y w h
+  pure (if nonzeroRect r then Just r else Nothing)
+
 updatePrevRects :: Context -> IO ()
 updatePrevRects ctx = do
-  count <- arenaCount (ctxNodeArena ctx)
+  let na = ctxNodeArena ctx
+  count <- arenaCount na
   if count <= 0
     then setPrevRectsAndClips ctx IM.empty IM.empty
     else do
       let go !i !m !cm
             | i >= count = setPrevRectsAndClips ctx m cm
             | otherwise = do
-                wid <- getWidgetId (ctxNodeArena ctx) i
+                wid <- getWidgetId na i
                 if hashWidgetId wid == 0
                   then go (i + 1) m cm
                   else do
-                    (x, y, w, h) <- getRect (ctxNodeArena ctx) i
-                    let r = Rect x y w h
-                    if nonzeroRect r
-                      then do
-                        mClip <- getClipRect (ctxNodeArena ctx) i
+                    mRect <- getNonzeroRect na i
+                    case mRect of
+                      Nothing -> go (i + 1) m cm
+                      Just r -> do
+                        mClip <- getClipRect na i
                         let !k = intKey wid
                             !m' = IM.insert k r m
                             !cm' = maybe cm (\c -> IM.insert k c cm) mClip
                         go (i + 1) m' cm'
-                      else go (i + 1) m cm
       go 0 IM.empty IM.empty
 
 floatingPanelsInOrder :: Context -> IO [(Int, Rect)]
 floatingPanelsInOrder ctx = do
-  n <- arenaCount (ctxNodeArena ctx)
+  let na = ctxNodeArena ctx
+  n <- arenaCount na
   let go idx acc
         | idx >= n = pure (reverse acc)
         | otherwise = do
-            nt <- getNodeType (ctxNodeArena ctx) idx
-            if nt == NodeWindow || nt == NodeModal || nt == NodePopup
+            nt <- getNodeType na idx
+            if isFloatingNode nt
               then do
-                wid <- getWidgetId (ctxNodeArena ctx) idx
-                (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+                wid <- getWidgetId na idx
+                (x, y, w, h) <- getRect na idx
                 if hashWidgetId wid == 0
                   then go (idx + 1) acc
                   else go (idx + 1) ((intKey wid, Rect x y w h) : acc)
@@ -292,29 +276,19 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
             reqRs <- resolveDamageRequests ctx oldRects newRects requests
             interactiveRs <-
               fmap concat $
-                forM ids $ \wid ->
-                  if hashWidgetId wid == 0
-                    then pure []
-                    else do
-                      newR <- getPrevRect ctx wid
-                      let rects = catMaybes [oldOf wid, newR]
-                      fmap catMaybes $
-                        forM rects $ \r ->
-                          clipWidgetRect ctx newRects wid (rectInflate defaultDamageSlop r)
+                forM (filter (\w -> hashWidgetId w /= 0) ids) $ \wid -> do
+                  newR <- getPrevRect ctx wid
+                  catMaybes <$> forM (catMaybes [oldOf wid, newR])
+                    (clipWidgetRect ctx newRects wid . rectInflate defaultDamageSlop)
             scrollRs <-
               if scrollChanged
                 then scrollOffsetDamage ctx oldStore newStore
                 else pure []
             animRs <-
               fmap concat $
-                forM clipKeys $ \k ->
-                  if k == 0
-                    then pure []
-                    else
-                      fmap catMaybes $
-                        forM (catMaybes [IM.lookup k oldRects, IM.lookup k newRects]) $ \r ->
-                          clipDeltaToScrollViewport ctx newRects (k, rectInflate defaultDamageSlop r) >>= \c ->
-                            if nonzeroRect c then pure (Just c) else pure Nothing
+                forM (filter (/= 0) clipKeys) $ \k ->
+                  catMaybes <$> forM (catMaybes [IM.lookup k oldRects, IM.lookup k newRects])
+                    (clipKeyRect ctx newRects k . rectInflate defaultDamageSlop)
             backdropRs0 <- backdropRectsForInteraction ctx ids (clipKeys ++ [k | ReqKey k _ <- requests])
             let backdropRs = map (clipRectToWindow winW winH) backdropRs0
             let layoutRs = if onlyScrollFloatsChanged then [] else settledMoved
@@ -331,8 +305,7 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
                         ++ vanishedRs
                         ++ floatingRs
                     )
-                rawClip = base
-                clip = fromMaybe (Rect 0 0 0 0) (rectIntersect rawClip (Rect 0 0 winW winH))
+                clip = clipRectToWindow winW winH base
                 winArea = winW * winH
             if (animLive && not (nonzeroRect clip))
                  || (winArea > 0 && rectArea clip > winArea * 0.5)
@@ -352,15 +325,14 @@ resolveDamageRequests ::
   IO [Rect]
 resolveDamageRequests ctx oldRects newRects reqs =
   fmap concat $
-    forM reqs $ \req ->
-      case req of
-        ReqFull -> pure []
-        ReqRect r -> pure [r]
-        ReqWidget wid bounds -> resolveSingleKey ctx oldRects newRects (intKey wid) bounds
-        ReqKey k bounds -> resolveSingleKey ctx oldRects newRects k bounds
-        ReqPeers wids bounds ->
-          fmap concat $ forM wids $ \wid ->
-            resolveSingleKey ctx oldRects newRects (intKey wid) bounds
+    forM reqs $ \case
+      ReqFull -> pure []
+      ReqRect r -> pure [r]
+      ReqWidget wid bounds -> resolveSingleKey ctx oldRects newRects (intKey wid) bounds
+      ReqKey k bounds -> resolveSingleKey ctx oldRects newRects k bounds
+      ReqPeers wids bounds ->
+        fmap concat $ forM wids $ \wid ->
+          resolveSingleKey ctx oldRects newRects (intKey wid) bounds
 
 resolveSingleKey ::
   Context ->
@@ -416,14 +388,15 @@ clipRectToWindow :: Float -> Float -> Rect -> Rect
 clipRectToWindow winW winH r =
   fromMaybe (Rect 0 0 0 0) (rectIntersect r (Rect 0 0 winW winH))
 
-clipWidgetRect :: Context -> IM.IntMap Rect -> WidgetId -> Rect -> IO (Maybe Rect)
-clipWidgetRect ctx newRects wid r =
-  if hashWidgetId wid == 0
-    then pure (Just r)
-    else do
-      let k = intKey wid
+clipKeyRect :: Context -> IM.IntMap Rect -> Int -> Rect -> IO (Maybe Rect)
+clipKeyRect ctx newRects k r
+  | k == 0 = pure (Just r)
+  | otherwise = do
       clipped <- clipDeltaToScrollViewport ctx newRects (k, r)
-      if nonzeroRect clipped then pure (Just clipped) else pure Nothing
+      pure (if nonzeroRect clipped then Just clipped else Nothing)
+
+clipWidgetRect :: Context -> IM.IntMap Rect -> WidgetId -> Rect -> IO (Maybe Rect)
+clipWidgetRect ctx newRects wid = clipKeyRect ctx newRects (intKey wid)
 
 findScrollNodeByStoreKey :: Context -> Int -> IO (Maybe Int)
 findScrollNodeByStoreKey ctx k = do
@@ -474,10 +447,7 @@ floatingAncestorRect ctx idx =
     check i = do
       nt <- getNodeType (ctxNodeArena ctx) i
       if isFloatingNode nt
-        then do
-          (x, y, w, h) <- getRect (ctxNodeArena ctx) i
-          let r = Rect x y w h
-          pure (if nonzeroRect r then Just r else Nothing)
+        then getNonzeroRect (ctxNodeArena ctx) i
         else pure Nothing
 
 nonzeroRect :: Rect -> Bool
