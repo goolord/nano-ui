@@ -822,6 +822,7 @@ main = do
   testWindowResizing
   testGridLayout
   testZIndexRenderArena
+  testWindowTitleAndCloseButton
   putStrLn "=== All tests passed successfully! ==="
 
 testZIndexRenderArena :: IO ()
@@ -867,5 +868,49 @@ testZIndexRenderArena = do
   assert "Pixel (30, 30) rendered Window overlay node on top of Normal" (c30 == packColor (Color 0x445566FF))
   assert "Pixel (50, 50) rendered Popup overlay node on top of Window and Normal" (c50 == packColor (Color 0x778899FF))
 
+  freeRgfwSurface surf
+
+testWindowTitleAndCloseButton :: IO ()
+testWindowTitleAndCloseButton = do
+  na <- newNodeArena
+  root <- addNode na NodeContainer (-1) Column Fit Fit (Padding 0 0 0 0) 0 0 0 1000 800 0 AlignStart AlignTop False
+  win <- addNode na NodeWindow root Column (Fixed 300) (Fixed 200) (Padding 0 0 0 0) 0 0 0 1000 800 0 AlignStart AlignTop False
+
+  -- Title bar row (fixed 39.0 from host chrome profile, which rgfw layout constrains to 24.0px)
+  titleBar <- addNode na NodeContainer win Row (Grow 1.0) (Fixed 39.0) (Padding 0 0 0 0) 0 0 0 1000 800 0 AlignStart AlignTop False
+  titleTxt <- addNode na NodeText titleBar Column Fit Fit (Padding 0 0 0 0) 0 0 0 1000 800 0 AlignStart AlignTop False
+  setNodeText na titleTxt "Window Title"
+  spacer <- addNode na NodeSpacer titleBar Column (Grow 1.0) Fit (Padding 0 0 0 0) 0 0 0 1000 800 0 AlignStart AlignTop False
+  closeBtn <- addNode na NodeButton titleBar Column Fit Fit (Padding 0 0 0 0) 0 0 0 1000 800 0 AlignStart AlignTop False
+  setNodeText na closeBtn "\x01X"
+
+  -- Body container
+  bodyScroll <- addNode na NodeScrollContainer win Column (Grow 1.0) (Grow 1.0) (Padding 0 0 0 0) 0 0 0 1000 800 0 AlignStart AlignTop False
+  _ <- addNode na NodeBox bodyScroll Column (Fixed 280) (Fixed 500) (Padding 0 0 0 0) 0 0 0 1000 800 0 AlignStart AlignTop False
+
+  solveSinglePassLayout na 1000 800
+
+  (wx, wy, ww, wh) <- getRect na win
+  (tx, ty, tw, th) <- getRect na titleBar
+  (_lx, _ly, _lw, lh) <- getRect na titleTxt
+  (bx, by, bw, bh) <- getRect na closeBtn
+  (_sx, sy, _sw, sh) <- getRect na bodyScroll
+
+  assert "Window width is 300" (ww == 300.0)
+  assert "Window height is 200" (wh == 200.0)
+  assert "Title bar placed at window top" (tx == wx && ty == wy)
+  assert "Title bar height constrained to 24.0px" (th == 24.0)
+  assert "Title label height constrained to 24.0px" (lh == 24.0)
+  assert "Close button placed at right of title bar" (bx == wx + ww - 24.0 && by == wy)
+  assert "Close button is 24x24px" (bw == 24.0 && bh == 24.0)
+  assert "Body container placed below 24px title bar" (sy == wy + 24.0)
+  assert "Body container height is remaining window height (200 - 24 = 176)" (sh == 176.0)
+
+  -- Verify rendering close button and window does not crash and renders cleanly
+  surf <- newOffscreenRgfwSurface 400 300
+  let font = getCozetteFont
+      theme = tomorrowMidnightMinDarkTheme
+  ctx <- newPixelContext
+  renderArena surf font 1.0 theme ctx na (WidgetId 0) (WidgetId 0) (WidgetId 0)
   freeRgfwSurface surf
 

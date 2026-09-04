@@ -391,6 +391,11 @@ solveSinglePassLayoutWith na !viewportW !viewportH lookupPopup lookupWindowPos l
                             then (cCross + padL pad + padR pad, (if cCount > 0 then cTot else 0) + padT pad + padB pad)
                             else ((if cCount > 0 then cTot else 0) + padL pad + padR pad, cCross + padT pad + padB pad)
 
+                    p <- getParent na i
+                    pnt <- if p >= 0 && p < n then getNodeType na p else pure NodePanel
+                    pFirstChild <- if p >= 0 && p < n then readPrimArray headChildArr p else pure (-1)
+                    let !isWinTitleBar = (pnt == NodeWindow || pnt == NodeModal) && i == pFirstChild && nt == NodeContainer && dir == DirRow
+
                     if nt == NodeWindow
                       then do
                         wid <- getWidgetId na i
@@ -400,6 +405,10 @@ solveSinglePassLayoutWith na !viewportW !viewportH lookupPopup lookupWindowPos l
                               _ -> (max 320 contentW, max 200 contentH)
                         writePrimArray reqWArr i (max minW (min maxW rw))
                         writePrimArray reqHArr i (max minH (min maxH rh))
+                      else if isWinTitleBar
+                        then do
+                          writePrimArray reqWArr i (max minW (min maxW contentW))
+                          writePrimArray reqHArr i 24.0
                       else do
                         let !minPopW = 80
                             !rw = if nt == NodePopup
@@ -419,8 +428,15 @@ solveSinglePassLayoutWith na !viewportW !viewportH lookupPopup lookupWindowPos l
                         !(!lineCount, !maxLineLen) = measureTextLines dispTxt
                         !txtLen = maxLineLen
                         !isClose = T.isPrefixOf "\x01" txt || txt == "[X]" || txt == "X" || txt == "\xd7" || txt == "\xf00d"
+                    p <- getParent na i
+                    pp <- if p >= 0 && p < n then getParent na p else pure (-1)
+                    ppnt <- if pp >= 0 && pp < n then getNodeType na pp else pure NodePanel
+                    ppFirstChild <- if pp >= 0 && pp < n then readPrimArray headChildArr pp else pure (-1)
+                    let !isWinTitleChild = (ppnt == NodeWindow || ppnt == NodeModal) && p == ppFirstChild
                     let !leafW =
-                          if wTag == SizingFixed && wVal > 0
+                          if isWinTitleChild && isClose
+                            then 24
+                            else if wTag == SizingFixed && wVal > 0
                             then wVal
                             else case nt of
                               NodeText        -> if isPop == 1 && padL pad == 0
@@ -442,7 +458,9 @@ solveSinglePassLayoutWith na !viewportW !viewportH lookupPopup lookupWindowPos l
                               _               -> 60
 
                         !leafH =
-                          if hTag == SizingFixed && hVal > 0
+                          if isWinTitleChild
+                            then 24
+                            else if hTag == SizingFixed && hVal > 0
                             then hVal
                             else case nt of
                               NodeText        -> if isPop == 1 && padT pad == 0 && padB pad == 0
@@ -612,10 +630,18 @@ solveSinglePassLayoutWith na !viewportW !viewportH lookupPopup lookupWindowPos l
                     setRect na i winX winY winW winH
                     setClipRect na i (Rect winX winY winW winH)
 
-                    let !ix = winX + padL pad
-                        !iy = winY + padT pad
-                        !iw = max 0 (winW - padL pad - padR pad)
-                        !ih = max 0 (winH - padT pad - padB pad)
+                    firstChild <- readPrimArray headChildArr i
+                    hasTitleRow <- if firstChild >= 0
+                      then do
+                        fcNt <- getNodeType na firstChild
+                        fcDir <- getDirection na firstChild
+                        pure (fcNt == NodeContainer && fcDir == DirRow)
+                      else pure False
+
+                    let (!ix, !iy, !iw, !ih) =
+                          if hasTitleRow
+                            then (winX, winY, winW, winH)
+                            else (winX + padL pad, winY + padT pad, max 0 (winW - padL pad - padR pad), max 0 (winH - padT pad - padB pad))
                     writePrimArray innerXArr i ix
                     writePrimArray innerYArr i iy
                     writePrimArray innerWArr i iw
@@ -732,81 +758,138 @@ solveSinglePassLayoutWith na !viewportW !viewportH lookupPopup lookupWindowPos l
                         rawPGap <- getGap na p
                         pIsPop <- readPrimArray isPopupArr p
                         let !pGap = if pIsPop == 1 then 0 else rawPGap
-                        cx <- readPrimArray curXArr p
-                        cy <- readPrimArray curYArr p
-                        pix <- readPrimArray innerXArr p
-                        piy <- readPrimArray innerYArr p
-                        piw <- readPrimArray innerWArr p
-                        pih <- readPrimArray innerHArr p
-                        remAfterW <- readPrimArray remAfterWArr i
-                        remAfterH <- readPrimArray remAfterHArr i
+                        pnt <- getNodeType na p
+                        pFirstChild <- readPrimArray headChildArr p
+                        pp <- if p >= 0 then getParent na p else pure (-1)
+                        ppnt <- if pp >= 0 then getNodeType na pp else pure NodePanel
+                        ppFirstChild <- if pp >= 0 then readPrimArray headChildArr pp else pure (-1)
+                        let !isWinTitleBar = (pnt == NodeWindow || pnt == NodeModal) && i == pFirstChild && nt == NodeContainer && pDir == DirColumn
+                            !isWinTitleChild = (ppnt == NodeWindow || ppnt == NodeModal) && p == ppFirstChild
 
-                        mParentClip <- getClipRect na p
-                        let !parentClip = case mParentClip of
-                              Just r -> r
-                              Nothing -> Rect 0 0 viewportW viewportH
+                        if isWinTitleBar
+                          then do
+                            (winX, winY, winW, winH) <- getRect na p
+                            winPad <- getPadding na p
+                            setRect na i winX winY winW 24.0
+                            setClipRect na i (Rect winX winY winW 24.0)
+                            let !cix = winX + 8.0
+                                !ciy = winY
+                                !ciw = max 0 (winW - 8.0)
+                                !cih = 24.0
+                            writePrimArray innerXArr i cix
+                            writePrimArray innerYArr i ciy
+                            writePrimArray innerWArr i ciw
+                            writePrimArray innerHArr i cih
+                            writePrimArray curXArr i cix
+                            writePrimArray curYArr i ciy
+                            writePrimArray curYArr p (winY + 24.0)
+                            writePrimArray innerYArr p (winY + 24.0)
+                            writePrimArray innerXArr p (winX + padL winPad)
+                            writePrimArray innerWArr p (max 0 (winW - padL winPad - padR winPad))
+                            writePrimArray innerHArr p (max 0 (winH - 24.0 - padB winPad))
+                          else if isWinTitleChild
+                            then do
+                              cx <- readPrimArray curXArr p
+                              cy <- readPrimArray curYArr p
+                              pix <- readPrimArray innerXArr p
+                              piw <- readPrimArray innerWArr p
+                              remAfterW <- readPrimArray remAfterWArr i
+                              case nt of
+                                NodeText -> do
+                                  setRect na i cx cy reqW 24.0
+                                  setClipRect na i (Rect cx cy reqW 24.0)
+                                  writePrimArray curXArr p (cx + reqW)
+                                NodeSpacer -> do
+                                  let !availW = max 0 (pix + piw - cx)
+                                      !w = max 0 (availW - remAfterW)
+                                  setRect na i cx cy w 24.0
+                                  setClipRect na i (Rect cx cy w 24.0)
+                                  writePrimArray curXArr p (cx + w)
+                                NodeButton -> do
+                                  let !btnX = max cx (pix + piw - 24.0)
+                                  setRect na i btnX cy 24.0 24.0
+                                  setClipRect na i (Rect btnX cy 24.0 24.0)
+                                  writePrimArray curXArr p (btnX + 24.0)
+                                _ -> do
+                                  setRect na i cx cy reqW 24.0
+                                  setClipRect na i (Rect cx cy reqW 24.0)
+                                  writePrimArray curXArr p (cx + reqW)
+                          else do
+                            cx <- readPrimArray curXArr p
+                            cy <- readPrimArray curYArr p
+                            pix <- readPrimArray innerXArr p
+                            piy <- readPrimArray innerYArr p
+                            piw <- readPrimArray innerWArr p
+                            pih <- readPrimArray innerHArr p
+                            remAfterW <- readPrimArray remAfterWArr i
+                            remAfterH <- readPrimArray remAfterHArr i
 
-                        -- Compute Width
-                        let !availW = max 0 (pix + piw - cx)
-                            !w =
-                              if wTag == SizingFixed && wVal > 0
-                                then wVal
-                                else if pDir == DirRow
-                                  then if wTag == SizingGrow
-                                    then max 0 (availW - remAfterW)
-                                    else reqW
-                                  else if wTag == SizingGrow
-                                    then piw
-                                    else reqW
+                            mParentClip <- getClipRect na p
+                            let !parentClip = case mParentClip of
+                                  Just r -> r
+                                  Nothing -> Rect 0 0 viewportW viewportH
 
-                        -- Compute Height
-                        let !availH = max 0 (piy + pih - cy)
-                            !h =
-                              if hTag == SizingFixed && hVal > 0
-                                then hVal
-                                else if pDir == DirColumn
-                                  then if hTag == SizingGrow
-                                    then max 0 (availH - remAfterH)
-                                    else reqH
-                                  else if hTag == SizingGrow
-                                    then pih
-                                    else reqH
+                            -- Compute Width
+                            let !availW = max 0 (pix + piw - cx)
+                                !w =
+                                  if wTag == SizingFixed && wVal > 0
+                                    then wVal
+                                    else if pDir == DirRow
+                                      then if wTag == SizingGrow
+                                        then max 0 (availW - remAfterW)
+                                        else reqW
+                                      else if wTag == SizingGrow
+                                        then piw
+                                        else reqW
 
-                        let !finalW = max minW (min maxW w)
-                            !finalH = max minH (min maxH h)
-                            !x = cx
-                            !y = cy
+                            -- Compute Height
+                            let !availH = max 0 (piy + pih - cy)
+                                !h =
+                                  if hTag == SizingFixed && hVal > 0
+                                    then hVal
+                                    else if pDir == DirColumn
+                                      then if hTag == SizingGrow
+                                        then max 0 (availH - remAfterH)
+                                        else reqH
+                                      else if hTag == SizingGrow
+                                        then pih
+                                        else reqH
 
-                        setRect na i x y finalW finalH
+                            let !finalW = max minW (min maxW w)
+                                !finalH = max minH (min maxH h)
+                                !x = cx
+                                !y = cy
 
-                        let !cx0 = max (rectX parentClip) x
-                            !cy0 = max (rectY parentClip) y
-                            !cx1 = min (rectX parentClip + rectW parentClip) (x + finalW)
-                            !cy1 = min (rectY parentClip + rectH parentClip) (y + finalH)
-                            !childClip = Rect cx0 cy0 (max 0 (cx1 - cx0)) (max 0 (cy1 - cy0))
-                        setClipRect na i childClip
+                            setRect na i x y finalW finalH
 
-                        -- Advance parent cursor
-                        if pDir == DirColumn
-                          then writePrimArray curYArr p (cy + finalH + pGap)
-                          else writePrimArray curXArr p (cx + finalW + pGap)
+                            let !cx0 = max (rectX parentClip) x
+                                !cy0 = max (rectY parentClip) y
+                                !cx1 = min (rectX parentClip + rectW parentClip) (x + finalW)
+                                !cy1 = min (rectY parentClip + rectH parentClip) (y + finalH)
+                                !childClip = Rect cx0 cy0 (max 0 (cx1 - cx0)) (max 0 (cy1 - cy0))
+                            setClipRect na i childClip
 
-                        -- If container, initialize its inner bounds and cursor
-                        when (isContainerNode nt) $ do
-                          let !cix = x + padL pad
-                              !ciy = y + padT pad
-                              !ciw = max 0 (finalW - padL pad - padR pad)
-                              !cih = max 0 (finalH - padT pad - padB pad)
-                          writePrimArray innerXArr i cix
-                          writePrimArray innerYArr i ciy
-                          writePrimArray innerWArr i ciw
-                          writePrimArray innerHArr i cih
-                          writePrimArray curXArr i cix
-                          writePrimArray curYArr i ciy
-                          cgCols <- getGridCols na i
-                          when (cgCols > 0) $ do
-                            rawGap <- getGap na i
-                            setupGridChildren i cgCols cix ciy ciw cih rawGap
+                            -- Advance parent cursor
+                            if pDir == DirColumn
+                              then writePrimArray curYArr p (cy + finalH + pGap)
+                              else writePrimArray curXArr p (cx + finalW + pGap)
+
+                            -- If container, initialize its inner bounds and cursor
+                            when (isContainerNode nt) $ do
+                              let !cix = x + padL pad
+                                  !ciy = y + padT pad
+                                  !ciw = max 0 (finalW - padL pad - padR pad)
+                                  !cih = max 0 (finalH - padT pad - padB pad)
+                              writePrimArray innerXArr i cix
+                              writePrimArray innerYArr i ciy
+                              writePrimArray innerWArr i ciw
+                              writePrimArray innerHArr i cih
+                              writePrimArray curXArr i cix
+                              writePrimArray curYArr i ciy
+                              cgCols <- getGridCols na i
+                              when (cgCols > 0) $ do
+                                rawGap <- getGap na i
+                                setupGridChildren i cgCols cix ciy ciw cih rawGap
 
                 pass2 (i + 1)
       pass2 0

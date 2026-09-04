@@ -175,7 +175,7 @@ renderArena surf font !scale theme ctx na hotId activeId focusId = do
               fillRect surf x y w headerH (packColor (thWindowHeader theme))
               drawRectOutline surf x y w headerH (packColor (thBorder theme))
               when (not (T.null txt)) $
-                drawTextScaled surf font scale (rx + 8.0) (ry + 5.0) txt (packColor (thText theme))
+                drawTextScaled surf font scale (rx + 8.0) (ry + 5.5) txt (packColor (thText theme))
 
               -- Bottom-right resize grip (three diagonal hatch marks)
               let !gripColor = packColor (thBorder theme)
@@ -200,24 +200,68 @@ renderArena surf font !scale theme ctx na hotId activeId focusId = do
               drawRectOutline surf x y w h (packColor (thBorder theme))
 
             NodeScrollContainer -> do
-              fillRect surf x y w h (packColor (thPanelBg theme))
-              drawRectOutline surf x y w h (packColor (thBorder theme))
+              isO <- readPrimArray isOverlayArr i
+              when (isO == 0) $ do
+                fillRect surf x y w h (packColor (thPanelBg theme))
+                drawRectOutline surf x y w h (packColor (thBorder theme))
 
             NodeButton -> do
-              isO <- readPrimArray isOverlayArr i
+              isPop <- readPrimArray isPopupArr i
               let !isTab = T.isPrefixOf "tab:" txt || T.isPrefixOf "\x02" txt
                   !isClose = T.isPrefixOf "\x01" txt || txt == "[X]" || txt == "X" || txt == "\xd7" || txt == "\xf00d"
-              if isO == 1 && not isTab
+              if isClose
                 then do
-                  -- Menu item inside popup: full row hover highlight, left-aligned text
-                  when isHot $
-                    fillRect surf x y w h (packColor (thWidgetHover theme))
-                  when isActive $
-                    fillRect surf x y w h (packColor (thPrimaryActive theme))
-                  when isFocus $
+                  -- Window or Tab Close Button
+                  let !bgColor =
+                        if isActive
+                          then colorRGBA 160 36 36 255
+                          else if isHot
+                            then colorRGBA 205 45 45 255
+                            else colorRGBA 0 0 0 0
+                      !iconColor =
+                        if isHot || isActive
+                          then packColor (colorRGBA 255 255 255 255)
+                          else packColor (thText theme)
+                      !borderColor =
+                        if isHot || isActive
+                          then colorRGBA 180 40 40 255
+                          else if isFocus
+                            then thBorderFocused theme
+                            else colorRGBA 0 0 0 0
+                  when (isHot || isActive) $ do
+                    fillRect surf x y w h (packColor bgColor)
+                    drawRectOutline surf x y w h (packColor borderColor)
+                  when (isFocus && not (isHot || isActive)) $
                     drawRectOutline surf x y w h (packColor (thBorderFocused theme))
-                  let !ty = ry + max 0.0 ((rh - 13.0) / 2.0)
-                  drawTextScaled surf font scale (rx + 4.0) ty txt (packColor (thText theme))
+
+                  -- Draw centered crisp diagonal close cross
+                  let !cx = rx + rw / 2.0
+                      !cy = ry + rh / 2.0
+                      !arm = max 2.5 (min 4.5 (min rw rh / 4.0))
+                      drawCross !d
+                        | d > arm = pure ()
+                        | otherwise = do
+                            let (!px1, !py1, !pw, !ph) = toPhysRect scale (cx + d - 0.5) (cy + d - 0.5) 1.0 1.0
+                                (!px2, !py2, _, _)     = toPhysRect scale (cx - d - 0.5) (cy + d - 0.5) 1.0 1.0
+                                (!px3, !py3, _, _)     = toPhysRect scale (cx + d - 0.5) (cy - d - 0.5) 1.0 1.0
+                                (!px4, !py4, _, _)     = toPhysRect scale (cx - d - 0.5) (cy - d - 0.5) 1.0 1.0
+                            fillRect surf px1 py1 pw ph iconColor
+                            fillRect surf px2 py2 pw ph iconColor
+                            fillRect surf px3 py3 pw ph iconColor
+                            fillRect surf px4 py4 pw ph iconColor
+                            drawCross (d + 1.0)
+                  drawCross 0.0
+                else if isPop == 1 && not isTab
+                  then do
+                    -- Menu item inside popup: full row hover highlight, left-aligned text
+                    when isHot $
+                      fillRect surf x y w h (packColor (thWidgetHover theme))
+                    when isActive $
+                      fillRect surf x y w h (packColor (thPrimaryActive theme))
+                    when isFocus $
+                      drawRectOutline surf x y w h (packColor (thBorderFocused theme))
+                    let !ty = ry + max 0.0 ((rh - 13.0) / 2.0)
+                    drawTextScaled surf font scale (rx + 4.0) ty txt (packColor (thText theme))
                 else if isTab
                   then do
                     let (!tabTitle, !isActiveTab) =
@@ -251,48 +295,6 @@ renderArena surf font !scale theme ctx na hotId activeId focusId = do
                         fillRect surf x y w h (packColor bgColor)
                         drawRectOutline surf x y w h (packColor borderColor)
                         drawTextScaled surf font scale tx ty tabTitle (packColor txtColor)
-                  else if isClose
-                    then do
-                      -- Window or Tab Close Button
-                      let !bgColor =
-                            if isActive
-                              then colorRGBA 160 36 36 255
-                              else if isHot
-                                then colorRGBA 205 45 45 255
-                                else colorRGBA 0 0 0 0
-                          !iconColor =
-                            if isHot || isActive
-                              then packColor (colorRGBA 255 255 255 255)
-                              else packColor (thText theme)
-                          !borderColor =
-                            if isHot || isActive
-                              then colorRGBA 180 40 40 255
-                              else if isFocus
-                                then thBorderFocused theme
-                                else colorRGBA 0 0 0 0
-                      when (isHot || isActive) $ do
-                        fillRect surf x y w h (packColor bgColor)
-                        drawRectOutline surf x y w h (packColor borderColor)
-                      when (isFocus && not (isHot || isActive)) $
-                        drawRectOutline surf x y w h (packColor (thBorderFocused theme))
-
-                      -- Draw centered crisp diagonal close cross
-                      let !cx = rx + rw / 2.0
-                          !cy = ry + rh / 2.0
-                          !arm = max 2.5 (min 4.5 (min rw rh / 4.0))
-                          drawCross !d
-                            | d > arm = pure ()
-                            | otherwise = do
-                                let (!px1, !py1, !pw, !ph) = toPhysRect scale (cx + d - 0.5) (cy + d - 0.5) 1.0 1.0
-                                    (!px2, !py2, _, _)     = toPhysRect scale (cx - d - 0.5) (cy + d - 0.5) 1.0 1.0
-                                    (!px3, !py3, _, _)     = toPhysRect scale (cx + d - 0.5) (cy - d - 0.5) 1.0 1.0
-                                    (!px4, !py4, _, _)     = toPhysRect scale (cx - d - 0.5) (cy - d - 0.5) 1.0 1.0
-                                fillRect surf px1 py1 pw ph iconColor
-                                fillRect surf px2 py2 pw ph iconColor
-                                fillRect surf px3 py3 pw ph iconColor
-                                fillRect surf px4 py4 pw ph iconColor
-                                drawCross (d + 1.0)
-                      drawCross 0.0
                   else do
                     -- Standard Push Button
                     let !dispTxt =
@@ -472,6 +474,7 @@ renderArena surf font !scale theme ctx na hotId activeId focusId = do
 
             NodeText -> do
               isO <- readPrimArray isOverlayArr i
+              isPop <- readPrimArray isPopupArr i
               pad <- getPadding na i
               styleIdx <- getStyleIdx na i
               let fvar = textNodeFontVariant styleIdx
@@ -479,7 +482,10 @@ renderArena surf font !scale theme ctx na hotId activeId focusId = do
               when (not (T.null txt)) $ do
                 let (!tx, !ty) =
                       if isO == 1 && padL pad == 0
-                        then (rx + 4.0, ry + max 0.0 ((rh - 13.0) / 2.0))
+                        then
+                          let !offX = if isPop == 1 then 4.0 else 8.0
+                              !offY = max 0.0 ((rh - 13.0) / 2.0)
+                           in (rx + offX, ry + offY)
                         else (rx + padL pad, ry + padT pad)
                 drawTextScaled surf font scale tx ty txt (packColor txtColor)
 
