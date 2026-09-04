@@ -58,21 +58,25 @@ library
     import:           warnings
     exposed-modules:
         NanoUI
+        NanoUI.Context
         NanoUI.Debug
+        NanoUI.Id
         NanoUI.Input
         NanoUI.Layout
+        NanoUI.Layout.Arena
+        NanoUI.Monad
         NanoUI.State
         NanoUI.Testing
         NanoUI.Testing.Assert
         NanoUI.Testing.Harness
         NanoUI.Widgets.TextBuffer
         NanoUI.Widgets.TextArea
+        NanoUI.Store
     other-modules:
         NanoUI.Animatable
         NanoUI.Animation
         NanoUI.Atlas
         NanoUI.Compact
-        NanoUI.Context
         NanoUI.Damage
         NanoUI.Draw
         NanoUI.Font
@@ -94,12 +98,8 @@ library
         NanoUI.Frame.TextArea
         NanoUI.Frame.Window
         NanoUI.Icons
-        NanoUI.Id
-        NanoUI.Layout.Arena
         NanoUI.Layout.Solve
-        NanoUI.Monad
         NanoUI.Render.ASCII
-        NanoUI.Store
         NanoUI.Style
         NanoUI.Types
         NanoUI.WidgetMarkers

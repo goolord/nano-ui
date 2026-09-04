@@ -29,3 +29,6 @@ SDL3.dll
 SDL3_ttf.dll
 libiconv-2.dll
 packages/*/bench.csv
+.zig-cache/
+zig-out/
+*.exe

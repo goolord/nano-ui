@@ -459,8 +459,11 @@ checkbox txt initial = do
       defaultLayout
       Nothing
   let
-    display = if respClicked resp then not current else current
-  pure (resp, display)
+    clicked = respClicked resp
+    display = if clicked then not current else current
+  when clicked $
+    uiIO $ setStore ctx (store {storeInt = IM.insert key (boolInt display) (storeInt store)})
+  pure (setChanged clicked resp, display)
 
 slider ::
   Ui :> es => Text -> Float -> Float -> Float -> Eff es (Response, Float)

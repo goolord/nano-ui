@@ -4,6 +4,8 @@ packages:
   packages/nano-ui-sdl
   packages/nano-ui-diagrams
   packages/nano-ui-demo
+  packages/nano-ui-rgfw-bindings
+  packages/nano-ui-rgfw
 
 tests: True
 benchmarks: True
@@ -17,3 +19,6 @@ package nano-ui
 
 package nano-ui-sdl
   executable-static: True
+
+package nano-ui-rgfw-bindings
+  ghc-options: -pgmc "C:/Users/zach/Dev/nano-ui/scripts/zig-cc.exe"
