@@ -15,6 +15,11 @@ flag sdl
     manual: True
     default: False
 
+flag simd
+    description: Enable AVX2 SIMD vectorization and aggressive specialization
+    manual: True
+    default: True
+
 common extensions
     default-language: GHC2024
     default-extensions:
@@ -29,7 +34,10 @@ common extensions
         UnboxedTuples
 
 common ghc-options
-    ghc-options: -Wall -Widentities
+    ghc-options: -Wall -Widentities -O2
+    if flag(simd)
+        ghc-options: -mavx2 -fspecialise-aggressively
+
 
 common rts-options
     ghc-options:

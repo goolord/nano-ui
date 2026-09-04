@@ -76,6 +76,7 @@ library
         NanoUI.Frame.TextEdit
         NanoUI.Widgets.TextEdit
         NanoUI.Frame.Window
+        NanoUI.SIMD
     other-modules:
         NanoUI.Animatable
         NanoUI.Animation

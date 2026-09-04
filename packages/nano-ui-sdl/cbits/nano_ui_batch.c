@@ -1,5 +1,6 @@
 #include "nano_ui_opt.h"
 #include "nano_ui_batch.h"
+#include "nano_ui_simd.h"
 
 #include <stdlib.h>
 
@@ -76,17 +77,48 @@ void nano_ui_batch_draw_range(
     (void)tex_w;
     (void)tex_h;
     (void)scale;
-    (void)has_damage;
-    (void)dmg_x;
-    (void)dmg_y;
-    (void)dmg_w;
-    (void)dmg_h;
 
     if (!batch || !verts || !indices || vert_count <= 0 || index_n < 3) {
         return;
     }
     if (index_start < 0) {
         index_start = 0;
+    }
+
+    if (has_damage && dmg_w > 0.f && dmg_h > 0.f && index_n >= 6) {
+        const SDL_Vertex *sdl_verts = (const SDL_Vertex *)verts;
+        const int *idx = (const int *)indices + index_start;
+        float dx0 = dmg_x;
+        float dy0 = dmg_y;
+        float dx1 = dmg_x + dmg_w;
+        float dy1 = dmg_y + dmg_h;
+
+        bool any_visible = false;
+        int q = 0;
+        for (; q + 6 <= index_n; q += 6) {
+            int i0 = idx[q];
+            int i2 = idx[q + 2];
+            if (i0 >= 0 && i0 < vert_count && i2 >= 0 && i2 < vert_count) {
+                float x0 = sdl_verts[i0].position.x;
+                float y0 = sdl_verts[i0].position.y;
+                float x1 = sdl_verts[i2].position.x;
+                float y1 = sdl_verts[i2].position.y;
+                float qx0 = x0 < x1 ? x0 : x1;
+                float qx1 = x0 > x1 ? x0 : x1;
+                float qy0 = y0 < y1 ? y0 : y1;
+                float qy1 = y0 > y1 ? y0 : y1;
+                if (nano_ui_aabb_intersects(qx0, qy0, qx1, qy1, dx0, dy0, dx1, dy1)) {
+                    any_visible = true;
+                    break;
+                }
+            } else {
+                any_visible = true;
+                break;
+            }
+        }
+        if (!any_visible && q > 0) {
+            return;
+        }
     }
 
     if (batch->pending_n > 0 &&

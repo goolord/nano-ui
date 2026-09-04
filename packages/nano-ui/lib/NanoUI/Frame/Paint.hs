@@ -76,11 +76,14 @@ import NanoUI.Style
   , themeSeparator
   , themeWindow
   )
-import NanoUI.Types (Color (..), ImageId (..), Rect (..), colorA, colorRGBA, clamp01, lerpColor, rectIntersect, rectH, rectW, rectX, rectY)
+import NanoUI.Types (Color (..), ImageId (..), Rect (..), colorA, colorRGBA, clamp01, lerpColor, rectFullyInside, rectInflate, rectIntersect, rectH, rectW, rectX, rectY)
 import NanoUI.WidgetText (buttonFlagsFromStyle, buttonVisualStyle, selectChevronCenterX, sliderLabelText, tableStripeColor, textNodeFontVariant, treeDecodeStyle)
 import NanoUI.Frame.Chrome
   ( fillStyledRect
   , imageIdFromText
+  , overlayModalStyle
+  , overlayMenuStyle
+  , overlayWindowStyle
   , paintTabHeader
   , paintTableHeader
   , strokeStyledRect
@@ -102,10 +105,44 @@ import NanoUI.Frame.TextArea (TextAreaGeom (..), drawTextAreaContent, textAreaGe
 lowerShapes :: Context -> IO ()
 lowerShapes ctx = do
   count <- arenaCount (ctxNodeArena ctx)
-  when (count > 0) $ lowerNode ctx 0
+  when (count > 0) $ do
+    occluders <- collectFloatingOccluders ctx
+    lowerNodeWithOccluders ctx occluders 0
+
+collectFloatingOccluders :: Context -> IO [Rect]
+collectFloatingOccluders ctx = do
+  n <- arenaCount (ctxNodeArena ctx)
+  let theme = ctxTheme ctx
+      winStyle = overlayWindowStyle theme
+      modalStyle = overlayModalStyle theme
+      menuStyle = overlayMenuStyle theme
+      isOpaque s = colorA (styleBg s) == 255
+      winOpaque = isOpaque winStyle
+      modalOpaque = isOpaque modalStyle
+      menuOpaque = isOpaque menuStyle
+      go idx acc
+        | idx >= n = pure acc
+        | otherwise = do
+            nt <- getNodeType (ctxNodeArena ctx) idx
+            case nt of
+              NodeWindow | winOpaque -> checkPanel idx acc
+              NodeModal  | modalOpaque -> checkPanel idx acc
+              NodePopup  | menuOpaque -> checkPanel idx acc
+              _ -> go (idx + 1) acc
+      checkPanel idx acc = do
+        (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+        if w > 6 && h > 6
+          then do
+            let !r = rectInflate (-3) (Rect x y w h)
+            go (idx + 1) (r : acc)
+          else go (idx + 1) acc
+  go 0 []
 
 lowerNode :: Context -> NodeIdx -> IO ()
-lowerNode ctx idx = do
+lowerNode ctx idx = lowerNodeWithOccluders ctx [] idx
+
+lowerNodeWithOccluders :: Context -> [Rect] -> NodeIdx -> IO ()
+lowerNodeWithOccluders ctx occluders idx = do
   nt <- getNodeType (ctxNodeArena ctx) idx
   (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
   let rect = Rect x y w h
@@ -116,10 +153,13 @@ lowerNode ctx idx = do
   clip <- getCurrentClip da
   case rectIntersect rect clip of
     Nothing -> pure ()
-    Just _ -> lowerNodeVisible ctx idx nt x y w h rect fm theme terminal da
+    Just visible
+      | not (null occluders) && any (rectFullyInside visible) occluders -> pure ()
+      | otherwise -> lowerNodeVisible ctx occluders idx nt x y w h rect fm theme terminal da
 
 lowerNodeVisible ::
   Context ->
+  [Rect] ->
   NodeIdx ->
   NodeType ->
   Float ->
@@ -132,14 +172,14 @@ lowerNodeVisible ::
   Bool ->
   DrawArena ->
   IO ()
-lowerNodeVisible ctx idx nt x y w h rect fm theme terminal da =
+lowerNodeVisible ctx occluders idx nt x y w h rect fm theme terminal da =
   case nt of
-    NodeContainer -> walkChildren ctx idx
+    NodeContainer -> walkChildrenWithOccluders ctx occluders idx
     NodePanel -> do
       let style = themePanel theme
       fillStyledRect da terminal style rect
       strokeStyledRect da terminal style x y w h
-      withClip da (borderContentClip style rect) $ walkChildren ctx idx
+      withClip da (borderContentClip style rect) $ walkChildrenWithOccluders ctx occluders idx
     NodeScrollContainer -> do
       let style = themeInput theme
       pad <- getPadding (ctxNodeArena ctx) idx
@@ -178,7 +218,7 @@ lowerNodeVisible ctx idx nt x y w h rect fm theme terminal da =
       when paintWell $ do
         fillStyledRect da terminal wellStyle rect
         strokeStyledRect da terminal wellStyle x y w h
-      withClip da inner $ walkChildren ctx idx
+      withClip da inner $ walkChildrenWithOccluders ctx occluders idx
       when showChrome $ do
         wid <- getWidgetId (ctxNodeArena ctx) idx
         paintScrollChrome ctx da idx wid x y w h pad theme terminal
@@ -526,6 +566,10 @@ drawRadio host da fm style x y h value accent well = do
 walkChildren :: Context -> NodeIdx -> IO ()
 walkChildren ctx idx =
   forChildNodes_ (ctxNodeArena ctx) idx (lowerNode ctx)
+
+walkChildrenWithOccluders :: Context -> [Rect] -> NodeIdx -> IO ()
+walkChildrenWithOccluders ctx occluders idx =
+  forChildNodes_ (ctxNodeArena ctx) idx (lowerNodeWithOccluders ctx occluders)
 
 drawCloseIcon :: HostProfile -> FontMetrics -> DrawArena -> Float -> Float -> Float -> Float -> Color -> IO ()
 drawCloseIcon _host _fm da x y w h col = do

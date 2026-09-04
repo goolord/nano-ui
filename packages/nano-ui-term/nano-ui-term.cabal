@@ -76,6 +76,9 @@ library
         nano-ui,
         primitive ^>=0.9,
         text ^>=2.1
+    c-sources:        cbits/nano_ui_term_simd.c
+    include-dirs:     cbits
+    cc-options:       -mavx2 -O3
     hs-source-dirs:   lib
     default-language: GHC2024
     if os(windows)

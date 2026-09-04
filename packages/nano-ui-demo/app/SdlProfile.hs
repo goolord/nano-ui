@@ -18,12 +18,14 @@ import NanoUI.Backend.Sdl (RgbaImage (..), newSdlContext, sdlDrawFrame, syncDisp
 import NanoUI.Diagrams
 import NanoUI.Testing
   ( Context
+  , collectTextSpans
   , registerImage
   , runFrame
   , drawVertexCount
   , drawIndexCount
   , drawCmdCount
   )
+import NanoUI.Testing.Harness (findExact)
 import SdlDemo
   ( demoImages
   , demoUi
@@ -95,6 +97,26 @@ main = do
       (_, _, dd, _) <- runFrame ctx' inp demoUi
       printf "  -> Vertices: %d, Indices: %d, DrawCmds: %d\n\n"
         (drawVertexCount dd) (drawIndexCount dd) (drawCmdCount dd)
+
+      putStrLn "--- 1b. DEMO UI WITH DEBUG WINDOW OPEN ---"
+      spansLatest <- collectTextSpans ctx'
+      case findExact "Debug" spansLatest of
+        Nothing -> putStrLn "  Debug button not found\n"
+        Just (V2 dbgX dbgY) -> do
+          let clickDbg = do
+                let dInp = inp { inputMousePos = V2 dbgX dbgY, inputMouseDown = True, inputMousePressed = True }
+                void (sdlDrawFrame ctx' demoUi sdlEnv dInp False)
+                let uInp = inp { inputMousePos = V2 dbgX dbgY, inputMouseDown = False }
+                void (sdlDrawFrame ctx' demoUi sdlEnv uInp False)
+          clickDbg
+          measureBench "Full DemoUi (Debug Open, SDL Present)" iterations $
+            void (sdlDrawFrame ctx' demoUi sdlEnv inp False)
+          measureBench "Full DemoUi (Debug Open, runFrame)" iterations $
+            void (runFrame ctx' inp demoUi)
+          (_, _, ddDbg, _) <- runFrame ctx' inp demoUi
+          printf "  -> Debug Vertices: %d, Indices: %d, DrawCmds: %d\n\n"
+            (drawVertexCount ddDbg) (drawIndexCount ddDbg) (drawCmdCount ddDbg)
+          clickDbg
 
       putStrLn "--- 2. DEMO TABS IN ISOLATION (Full runFrame + draw) ---"
       measureBench "Tab: Controls" iterations $

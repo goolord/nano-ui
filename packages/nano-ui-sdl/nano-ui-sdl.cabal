@@ -16,6 +16,11 @@ flag sdl
     manual: True
     default: False
 
+flag simd
+    description: Enable AVX2 SIMD acceleration for rendering and batch culling
+    manual: True
+    default: True
+
 common extensions
     default-language: GHC2024
     default-extensions:
@@ -30,7 +35,10 @@ common extensions
         UnboxedTuples
 
 common ghc-options
-    ghc-options: -Wall -Widentities
+    ghc-options: -Wall -Widentities -O2
+    if flag(simd)
+        ghc-options: -mavx2 -fspecialise-aggressively
+
 
 common rts-options
     ghc-options:
@@ -104,6 +112,9 @@ library
                           cbits/nano_ui_text_atlas.c
         include-dirs:     cbits
         pkgconfig-depends: sdl3 >= 3.2, sdl3-ttf >= 3.2
+        if flag(simd)
+            cc-options:   -mavx2 -O3
+
     if flag(sdl) && !os(windows)
         build-depends: fontconfig-pure ^>=0.5.1.0
         pkgconfig-depends: fontconfig

@@ -399,27 +399,38 @@ kv k v = do
       void (labelEx (keyLayout defaultLayout) k)
       void (labelEx (tight . fillW . alignEnd $ defaultLayout) (T.stripEnd v))
 
+kvMonoRowLayout, kvMonoRowTerminalLayout :: Layout
+kvMonoRowLayout = tight . gap 12 . alignMid . fillW $ defaultLayout
+kvMonoRowTerminalLayout = tight . gap 1 . alignMid . fillW $ defaultLayout
+
+kvMonoKeyLayout, kvMonoKeyTerminalLayout :: Layout
+kvMonoKeyLayout = tight . minW 88 $ defaultLayout
+kvMonoKeyTerminalLayout = tight defaultLayout
+
+kvMonoValLayout :: Layout
+kvMonoValLayout = tight . fillW . alignEnd . fontMono $ defaultLayout
+
 kvMono :: Ui :> es => Text -> Text -> Eff es ()
 kvMono k v = do
   ctx <- askContext
   let
-    host = ctxHostProfile ctx
-    terminal = isCellHost host
-    rowLayout =
-      tight . gap (if terminal then 1 else 12) . alignMid . fillW $ defaultLayout
-    keyLayout =
-      if terminal then tight else tight . minW 88
+    terminal = isCellHost (ctxHostProfile ctx)
+    rLayout = if terminal then kvMonoRowTerminalLayout else kvMonoRowLayout
+    kLayout = if terminal then kvMonoKeyTerminalLayout else kvMonoKeyLayout
+    val = if T.isSuffixOf " " v then T.stripEnd v else v
   void $
-    row rowLayout $ do
-      void (labelEx (keyLayout defaultLayout) k)
-      void (labelEx (tight . fillW . alignEnd . fontMono $ defaultLayout) (T.stripEnd v))
+    row rLayout $ do
+      void (labelEx kLayout k)
+      void (labelEx kvMonoValLayout val)
 
 kvBlock :: Ui :> es => [(Text, Text)] -> Eff es ()
 kvBlock rows =
-  void $
-    labelEx
-      (tight . gap 0 . fontMono $ defaultLayout)
-      (T.unlines [k <> ": " <> v | (k, v) <- rows])
+  let maxK = foldl' (\acc (k, _) -> max acc (T.length k)) 0 rows
+      padK k = T.justifyLeft maxK ' ' k
+   in void $
+        labelEx
+          (tight . gap 0 . fontMono $ defaultLayout)
+          (T.unlines [padK k <> "  " <> v | (k, v) <- rows])
 
 card :: Ui :> es => Eff es a -> Eff es a
 card = panel (minW 300 . padXY 12 10 . gap 8 . fillW $ defaultLayout)

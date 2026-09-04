@@ -24,22 +24,24 @@ import Data.Primitive.PrimArray
   ( MutablePrimArray
   , PrimArray
   , indexPrimArray
+  , mutablePrimArrayContents
   , newPrimArray
   , readPrimArray
-  , setPrimArray
   , unsafeFreezePrimArray
   , writePrimArray
   )
 import Data.Text (Text)
 import Data.Word (Word32, Word8)
+import Foreign.C.Types (CInt (..))
 import Foreign.ForeignPtr (ForeignPtr, withForeignPtr)
+import Foreign.Ptr (Ptr)
 import Foreign.Storable (peekByteOff)
+
 import NanoUI
   ( Color (..)
   , Rect (..)
   , colorToWord32
   , fontAwesomeIcon
-  , lerpColor
   )
 import NanoUI.Testing
   ( DrawCmd (..)
@@ -55,6 +57,15 @@ import NanoUI.Testing
   , vertexSize
   , wideTrailChar
   )
+
+foreign import ccall unsafe "nano_ui_term_fill_blanks_simd"
+  c_fill_blanks_simd :: Ptr Word32 -> CInt -> IO ()
+
+foreign import ccall unsafe "nano_ui_term_stamp_quad_cells_simd"
+  c_stamp_quad_cells_simd :: Ptr Word32 -> CInt -> CInt -> CInt -> CInt -> CInt -> Word32 -> IO ()
+
+foreign import ccall unsafe "nano_ui_term_blend_dim_simd"
+  c_blend_dim_simd :: Ptr Word32 -> CInt -> CInt -> CInt -> CInt -> CInt -> Word32 -> IO ()
 
 -- | Row-major grid, three 'Word32' per cell: codepoint, foreground RGBA,
 -- background RGBA. An RGBA whose alpha is below 32 means "terminal default".
@@ -96,12 +107,6 @@ packRgba r g b a = (r `shiftL` 24) .|. (g `shiftL` 16) .|. (b `shiftL` 8) .|. a
 isTerminalDefault :: Word32 -> Bool
 isTerminalDefault w = (w .&. 0xff) < 32
 
-{-# INLINE lerpCellOrDim #-}
-lerpCellOrDim :: Color -> Float -> Word32 -> Word32
-lerpCellOrDim dim t w
-  | isTerminalDefault w = colorToWord32 dim
-  | otherwise = colorToWord32 (lerpColor (Color w) dim t)
-
 -- | Character-only view, for snapshot tests.
 cellRows :: Cells -> [String]
 cellRows cs =
@@ -118,8 +123,8 @@ newBlankCellArray width height = do
       h = max 1 height
       len = w * h * 3
   arr <- newPrimArray len
-  setPrimArray arr 0 len 0
-  fillBlanks arr len
+  let !p = mutablePrimArrayContents arr
+  c_fill_blanks_simd p (fromIntegral len)
   pure (arr, w, h)
 
 rasterizeLayered ::
@@ -161,13 +166,6 @@ rasterizeLayeredArena width height drawData baseArena overlayArena = do
   foldSpanArena overlayArena stamp
   frozen <- unsafeFreezePrimArray arr
   pure Cells {cellsW = w, cellsH = h, cellsData = frozen}
-
-fillBlanks :: MutablePrimArray (PrimState IO) Word32 -> Int -> IO ()
-fillBlanks arr len = go 0
-  where
-    go i
-      | i >= len = pure ()
-      | otherwise = writePrimArray arr i 32 >> go (i + 3)
 
 applyCmd ::
   MutablePrimArray (PrimState IO) Word32 ->
@@ -226,17 +224,16 @@ stampQuad arr w h drawData isDim i = do
           else
             case rgba .&. 0xff of
               n
-                | n >= 32 ->
-                    let goY !dy
-                          | dy >= ih = pure ()
-                          | otherwise = goX 0 >> goY (dy + 1)
-                          where
-                            goX !dx
-                              | dx >= iw = pure ()
-                              | otherwise = do
-                                  writeCell arr w h (ix + dx) (iy + dy) 32 rgba rgba
-                                  goX (dx + 1)
-                     in goY 0
+                | n >= 32 -> do
+                    let !p = mutablePrimArrayContents arr
+                    c_stamp_quad_cells_simd
+                      p
+                      (fromIntegral w)
+                      (fromIntegral ix)
+                      (fromIntegral iy)
+                      (fromIntegral iw)
+                      (fromIntegral ih)
+                      rgba
               _ -> pure ()
     _ -> pure ()
 -- | Uniform backdrop dim; keeps glyphs, lerps fg and bg toward dim.
@@ -250,25 +247,16 @@ stampBackdropDim ::
   Int ->
   Word32 ->
   IO ()
-stampBackdropDim arr w _ ix iy iw ih rgba =
-  let dim = Color (rgba .|. 0xff)
-      t = fromIntegral (rgba .&. 0xff) / 255
-      goY !dy
-        | dy >= ih = pure ()
-        | otherwise = goX 0 >> goY (dy + 1)
-        where
-          goX !dx
-            | dx >= iw = pure ()
-            | otherwise = do
-                let cx = ix + dx
-                    cy = iy + dy
-                    off = (cy * w + cx) * 3
-                fgW <- readPrimArray arr (off + 1)
-                bgW <- readPrimArray arr (off + 2)
-                writePrimArray arr (off + 1) (lerpCellOrDim dim t fgW)
-                writePrimArray arr (off + 2) (lerpCellOrDim dim t bgW)
-                goX (dx + 1)
-   in goY 0
+stampBackdropDim arr w _ ix iy iw ih rgba = do
+  let !p = mutablePrimArrayContents arr
+  c_blend_dim_simd
+    p
+    (fromIntegral w)
+    (fromIntegral ix)
+    (fromIntegral iy)
+    (fromIntegral iw)
+    (fromIntegral ih)
+    rgba
 
 stampSpan ::
   MutablePrimArray (PrimState IO) Word32 ->

@@ -72,14 +72,34 @@ minMaxDecimate k pts
           !numChunks = (len + bucket - 1) `div` bucket
           findMinMax !start !end =
             let !firstPt = pts V.! start
-                go !i !lo !hi
-                  | i >= end = (lo, hi)
+                !firstY = snd firstPt
+                go !i !loPt !hiPt !loY !hiY
+                  | i + 4 <= end =
+                      let !p0 = pts V.! i
+                          !p1 = pts V.! (i + 1)
+                          !p2 = pts V.! (i + 2)
+                          !p3 = pts V.! (i + 3)
+                          !y0 = snd p0
+                          !y1 = snd p1
+                          !y2 = snd p2
+                          !y3 = snd p3
+                          (!l0, !ly0) = if y0 < loY then (p0, y0) else (loPt, loY)
+                          (!h0, !hy0) = if y0 > hiY then (p0, y0) else (hiPt, hiY)
+                          (!l1, !ly1) = if y1 < ly0 then (p1, y1) else (l0, ly0)
+                          (!h1, !hy1) = if y1 > hy0 then (p1, y1) else (h0, hy0)
+                          (!l2, !ly2) = if y2 < ly1 then (p2, y2) else (l1, ly1)
+                          (!h2, !hy2) = if y2 > hy1 then (p2, y2) else (h1, hy1)
+                          (!l3, !ly3) = if y3 < ly2 then (p3, y3) else (l2, ly2)
+                          (!h3, !hy3) = if y3 > hy2 then (p3, y3) else (h2, hy2)
+                       in go (i + 4) l3 h3 ly3 hy3
+                  | i >= end = (loPt, hiPt)
                   | otherwise =
                       let !pt = pts V.! i
-                          !lo' = if snd pt <= snd lo then pt else lo
-                          !hi' = if snd pt >= snd hi then pt else hi
-                       in go (i + 1) lo' hi'
-             in go (start + 1) firstPt firstPt
+                          !y = snd pt
+                          (!l', !ly') = if y < loY then (pt, y) else (loPt, loY)
+                          (!h', !hy') = if y > hiY then (pt, y) else (hiPt, hiY)
+                       in go (i + 1) l' h' ly' hy'
+             in go (start + 1) firstPt firstPt firstY firstY
        in V.generate (numChunks * 2) $ \idx ->
             let !chunkIdx = idx `div` 2
                 !isHi = (idx .&. 1) /= 0

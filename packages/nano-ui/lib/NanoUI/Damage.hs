@@ -54,6 +54,7 @@ import NanoUI.Types
   , Size (..)
   , defaultDamageSlop
   , rectArea
+  , rectFullyInside
   , rectInflate
   , rectIntersect
   , rectUnion
@@ -219,20 +220,29 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
       onlyScrollFloatsChanged =
         scrollChanged && stripFloat oldStore == stripFloat newStore
       settledMoved = filter significantLayoutRect moved
+      panelRects = IM.elems newFloatingRects
+      allInPanels rs =
+        not (null panelRects)
+          && not (null rs)
+          && all (\r -> any (rectFullyInside r) panelRects) rs
+      settledMovedInPanels = allInPanels settledMoved
+      diffNew = IM.elems (IM.difference newRects oldRects)
+      diffOld = IM.elems (IM.difference oldRects newRects)
+      keysChangedInPanels = allInPanels (diffNew ++ diffOld)
       floatingChanged = oldFloatingRects /= newFloatingRects
       windowLive = winDragActive || winResizeActive
       animLive = not (IM.null liveAnims) || settled
       keysChanged =
         not onlyScrollFloatsChanged
           && not (IM.null oldRects)
-          && ( not (IM.null (IM.difference newRects oldRects))
-                 || not (IM.null (IM.difference oldRects newRects))
-             )
+          && (not (null diffNew) || not (null diffOld))
+          && not keysChangedInPanels
       layoutSettle =
         not (IM.null oldRects)
           && not (null settledMoved)
           && not animLive
           && not scrollChanged
+          && not settledMovedInPanels
       paintOrphan = orphanAnim && animLive
 
   requests <- getDamageRequests ctx

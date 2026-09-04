@@ -335,7 +335,7 @@ runImageTest ctx failed = do
   let missing = image imgLayout (ImageId 0)
   _ <- runFrame ctx inp0 missing
   (_, _, missingData, _) <- runFrame ctx inp0 missing
-  assert failed (not (any (\c -> cmdTextureId c > 0) (drawCmdElems missingData)))
+  assert failed (not (any (\c -> cmdTextureId c == atlasTextureId) (drawCmdElems missingData)))
 
 runIdleTest :: Context -> IORef Int -> IO ()
 runIdleTest _ failed = do

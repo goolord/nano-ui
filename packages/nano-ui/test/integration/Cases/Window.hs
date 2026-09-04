@@ -506,13 +506,15 @@ runSeparatorSpanTest ctx failed = do
 
 runHeadingMonoTruncateTest :: Context -> IORef Int -> IO ()
 runHeadingMonoTruncateTest ctx failed = do
-  let inp = withInput 640 400
+  let inp = withInput 1600 600
       longPath = T.pack "C:\\Users\\zach\\AppData\\Local\\Microsoft\\Windows\\Fonts\\JetBrainsMono-Regular.ttf"
-      ui = window True "Debug" $ do
+      ui = fst <$> window True "Debug" (do
         heading "Draw"
         _ <- label "NormalLabel"
-        kvMono "font" longPath
-  _ <- warmup2 ctx inp ui
+        kvMono "font" longPath)
+  win <- warmup2 ctx inp ui
+  let Rect wx wy ww wh = respRect win
+      contentRight = wx + ww - padR windowPad
   spans <- collectOverlayTextSpans ctx inp
   let headingSpans = [r | (r, t, _, _, _) <- spans, t == "Draw"]
       labelSpans = [r | (r, t, _, _, _) <- spans, t == "NormalLabel"]
@@ -522,8 +524,23 @@ runHeadingMonoTruncateTest ctx failed = do
       assert failed (abs (hx - lx) < 0.1)
     _ -> assert failed False
   case fontSpans of
-    [(_, t)] -> do
+    [(Rect fx _ fw _, t)] -> do
       assert failed ("..." `T.isSuffixOf` t)
+      assert failed (abs (fx + fw - contentRight) < 2.0)
     _ -> assert failed False
+  mWide <- dragWindowEdge ctx inp ui (V2 (wx - 4) (wy + wh / 2)) (V2 (wx - 1100) (wy + wh / 2))
+  case mWide of
+    Nothing -> assert failed False
+    Just (Rect wxWide _ wwWide _) -> do
+      assertGt failed wwWide (ww + 800)
+      spansWide <- collectOverlayTextSpans ctx inp
+      let fontSpansWide = [(r, t) | (r, t, _, _, _) <- spansWide, "JetBrainsMono" `T.isInfixOf` t || "..." `T.isInfixOf` t]
+      case fontSpansWide of
+        [(Rect fx2 _ fw2 _, t2)] -> do
+          assert failed (t2 == longPath)
+          assert failed (not ("..." `T.isSuffixOf` t2))
+          let contentRightWide = wxWide + wwWide - padR windowPad
+          assert failed (abs (fx2 + fw2 - contentRightWide) < 2.0)
+        _ -> assert failed False
 
 
