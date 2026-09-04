@@ -117,17 +117,9 @@ module NanoUI.Widgets
   , animateToSpring
   , animateToA
   , animateToSpringA
-  , sliderText
-  , sliderDisplayText
-  , sliderLabelText
   , sliderValueText
-  , checkboxLabelText
   , textInputText
-  , textInputDisplayText
   , textInputTerminalText
-  , selectLabelText
-  , selectOptions
-  , radioLabelText
   , colorPickerLabelText
   , colorPickerCurrentLabel
   , colorPickerNewLabel
@@ -244,21 +236,13 @@ import NanoUI.Types
   )
 import NanoUI.Widgets.Behavior (DragAxis (..), useDrag1D)
 import NanoUI.WidgetText
-  ( checkboxLabelText
-  , colorPickerCurrentLabel
+  ( colorPickerCurrentLabel
   , colorPickerDisplayText
   , colorPickerFromHex
   , colorPickerLabelText
   , colorPickerNewLabel
   , colorPickerToHex
-  , radioLabelText
-  , selectLabelText
-  , selectOptions
-  , sliderDisplayText
-  , sliderLabelText
-  , sliderText
   , sliderValueText
-  , textInputDisplayText
   , textInputTerminalText
   )
 import NanoUI.Widgets.Animate

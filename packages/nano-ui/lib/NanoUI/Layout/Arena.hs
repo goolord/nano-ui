@@ -65,7 +65,6 @@ module NanoUI.Layout.Arena
   , forNodes_
   , forChildNodes_
   , findNodeRevM
-  , foldChildNodesM
   , foldNodeRevM
   ) where
 
@@ -830,17 +829,6 @@ findNodeRevM na p = do
             if ok then pure (Just i) else go (i - 1)
   go (n - 1)
 
-{-# INLINE foldChildNodesM #-}
-foldChildNodesM :: NodeArena -> NodeIdx -> (a -> NodeIdx -> IO a) -> a -> IO a
-foldChildNodesM na parentIdx f z = do
-  fc <- getFirstChild na parentIdx
-  let go !ci !acc
-        | ci < 0 = pure acc
-        | otherwise = do
-            acc' <- f acc ci
-            ns <- getNextSibling na ci
-            go ns acc'
-  go fc z
 
 {-# INLINE foldNodeRevM #-}
 foldNodeRevM :: NodeArena -> (a -> NodeIdx -> IO a) -> a -> IO a
