@@ -61,24 +61,24 @@ tomorrowMinLightTheme =
 tomorrowNightMinDarkTheme :: RgfwTheme
 tomorrowNightMinDarkTheme =
   RgfwTheme
-    { thBackground    = colorRGBA 37 150 190 255 -- #2596BE
-    , thPanelBg       = colorRGBA 28 118 150 255 -- #1C7696
-    , thBorder        = colorRGBA 50 180 225 255 -- #32B4E1
-    , thBorderFocused = colorRGBA 255 255 255 255 -- #FFFFFF
-    , thText          = colorRGBA 255 255 255 255 -- #FFFFFF
-    , thTextMuted     = colorRGBA 195 235 248 255 -- #C3EBF8
-    , thPrimary       = colorRGBA 240 198 116 255 -- Tomorrow Gold (#F0C674)
-    , thPrimaryHover  = colorRGBA 248 214 148 255 -- #F8D694
-    , thPrimaryActive = colorRGBA 222 178 92 255  -- #DEB25C
-    , thWidgetBg      = colorRGBA 22 96 122 255   -- #16607A
-    , thWidgetHover   = colorRGBA 33 138 174 255  -- #218AAE
-    , thWidgetActive  = colorRGBA 44 165 208 255  -- #2CA5D0
-    , thThumb         = colorRGBA 50 180 225 255  -- #32B4E1
-    , thThumbHover    = colorRGBA 80 205 245 255  -- #50CDF5
-    , thSelection     = colorRGBA 240 198 116 90
-    , thWindowHeader  = colorRGBA 28 118 150 255
-    , thScrollTrack   = colorRGBA 24 105 133 255
-    , thScrollThumb   = colorRGBA 50 180 225 255
+    { thBackground    = 0x1E1F21FF
+    , thPanelBg       = 0x17181AFF
+    , thBorder        = 0x303446FF
+    , thBorderFocused = 0xED9E56FF
+    , thText          = 0xEEEEEEFF
+    , thTextMuted     = 0xA7A8A7FF
+    , thPrimary       = 0xED9E56FF
+    , thPrimaryHover  = 0xF5AF6EFF
+    , thPrimaryActive = 0xDE8F47FF
+    , thWidgetBg      = 0x282A2EFF
+    , thWidgetHover   = 0x303446FF
+    , thWidgetActive  = 0x373B41FF
+    , thThumb         = 0x373B4180
+    , thThumbHover    = 0x373B41FF
+    , thSelection     = 0x373B41FF
+    , thWindowHeader  = 0x17181AFF
+    , thScrollTrack   = 0x17181AFF
+    , thScrollThumb   = 0x373B4180
     }
 
 -- | Ported from "Tomorrow at Midnight Min" in https://github.com/biaqat/tomorrow-min-theme-zed

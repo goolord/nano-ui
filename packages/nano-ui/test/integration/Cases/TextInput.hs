@@ -7,6 +7,7 @@ module Cases.TextInput
   , runTextInputCursorTest
   , runTextAreaCursorTest
   , runTextAreaCutClearsSelectionTest
+  , runTextAreaCtrlATest
   , runTextFieldHoverBoundaryTest
   , runTextInputCutClearsSelectionTest
   , runTextInputCutMenuTest
@@ -29,7 +30,7 @@ import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, withInput)
 import NanoUI.Testing.Harness (assertSpansHas, clickPair, warmup2, withDelta)
 import NanoUI.Widgets.TextArea (buffer, loadTextAreaState, selectionAnchor)
-import NanoUI.Widgets.TextBuffer (getCursor, toText)
+import NanoUI.Widgets.TextBuffer (Cursor (..), getCursor, toText)
 
 runTextInputCursorTest :: Context -> IORef Int -> IO ()
 runTextInputCursorTest ctx failed = do
@@ -172,6 +173,50 @@ runTextInputCtrlATest ctx failed = do
     _ <- runFrame c (inp0 {inputChars = "\x01", inputModifiers = Modifiers False True False}) ui
     ((_, valClear), _, _, _) <- runFrame c (inp0 {inputKeys = inputKeysFromList [KeyBackspace]}) ui
     assertEq failed valClear ""
+
+runTextAreaCtrlATest :: Context -> IORef Int -> IO ()
+runTextAreaCtrlATest ctx failed = do
+  term <- newCellContext
+  let initial = "line one\nline two\nline three"
+      inp0 = withInput 320 220
+      ui = column defaultLayout (textArea "Notes" initial)
+  forM_ [ctx, term] $ \c -> do
+    (resp, _) <- warmup2 c inp0 ui
+    -- Tab into textarea to gain focus
+    _ <- runFrame c (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
+    -- Ctrl+A with "a"
+    _ <- runFrame c (inp0 {inputChars = "a", inputModifiers = Modifiers False True False}) ui
+    store1 <- getStore c
+    let key = fromIntegral (hashWidgetId (respId resp))
+        st1 = loadTextAreaState store1 key initial
+        Cursor curR curC = getCursor (buffer st1)
+        Cursor ancR ancC = selectionAnchor st1
+    assertEq failed (ancR, ancC) (0, 0)
+    assertEq failed (curR, curC) (2, 10)
+    -- Backspace deletes all selected text
+    ((_, valClear), _, _, _) <- runFrame c (inp0 {inputKeys = inputKeysFromList [KeyBackspace]}) ui
+    assertEq failed valClear ""
+
+  -- Test "\x01" and text replacement on fresh contexts
+  pix2 <- newContext
+  cell2 <- newCellContext
+  let initial2 = "abc\ndef"
+      ui2 = column defaultLayout (textArea "Notes2" initial2)
+  forM_ [pix2, cell2] $ \c -> do
+    (resp2, _) <- warmup2 c inp0 ui2
+    _ <- runFrame c (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui2
+    -- Ctrl+A with "\x01"
+    _ <- runFrame c (inp0 {inputChars = "\x01", inputModifiers = Modifiers False True False}) ui2
+    store2 <- getStore c
+    let key2 = fromIntegral (hashWidgetId (respId resp2))
+        st2 = loadTextAreaState store2 key2 initial2
+        Cursor curR2 curC2 = getCursor (buffer st2)
+        Cursor ancR2 ancC2 = selectionAnchor st2
+    assertEq failed (ancR2, ancC2) (0, 0)
+    assertEq failed (curR2, curC2) (1, 3)
+    -- Typing a character replaces all text
+    ((_, valReplace), _, _, _) <- runFrame c (inp0 {inputChars = "z"}) ui2
+    assertEq failed valReplace "z"
 
 runTextInputMouseSelectionTest :: Context -> IORef Int -> IO ()
 runTextInputMouseSelectionTest ctx failed = do

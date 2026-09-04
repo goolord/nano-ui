@@ -3,10 +3,13 @@
 
 module NanoUI.Rgfw.Render
   ( renderArena
+  , renderTextEditMenuOverlay
   ) where
 
-import Control.Monad (when)
+import Control.Monad (forM_, when)
+import Data.Bits ((.&.))
 import qualified Data.IntMap.Strict as IM
+import Data.IORef (readIORef)
 import Data.Maybe (fromMaybe, isJust)
 import Data.Primitive.PrimArray
   ( newPrimArray
@@ -14,13 +17,24 @@ import Data.Primitive.PrimArray
   , writePrimArray
   )
 import qualified Data.Text as T
-import NanoUI (Color (..), Padding (..), Rect (..), WidgetId (..), colorRGBA)
+import NanoUI (Color (..), FontVariant (..), Padding (..), Rect (..), V2 (..), WidgetId (..), colorRGBA, rectContains)
 import NanoUI.Context
   ( Context
+  , TextInputMenu (..)
   , WidgetStore (..)
+  , ctxFontMetrics
+  , ctxHostProfile
+  , ctxTextInputMenu
   , getStore
   , intKey
   )
+import NanoUI.Frame.Hit (widgetOverlayAllowed)
+import NanoUI.Frame.TextEdit
+  ( TextEditMenuRow (..)
+  , textEditMenuContentRect
+  , textEditMenuLayout
+  )
+import NanoUI.Widgets.TextEdit (textFieldMenuActionEnabled)
 import NanoUI.Store
   ( slotAnchor
   , slotCursor
@@ -33,6 +47,7 @@ import NanoUI.Store
 import NanoUI.Layout.Arena
   ( NodeArena
   , NodeType (..)
+  , isFloatingNode
   , arenaCount
   , getClipRect
   , getNodeType
@@ -49,13 +64,21 @@ import NanoUI.Rgfw.Font.Cozette (CozetteFont)
 import NanoUI.Rgfw.Surface
   ( RgfwSurface
   , drawRectOutline
-  , drawText
+  , drawTextScaled
   , fillRect
   , packColor
   , popClip
   , pushClip
+  , toPhysRect
   )
 import NanoUI.Rgfw.Theme (RgfwTheme (..))
+
+textNodeFontVariant :: Int -> FontVariant
+textNodeFontVariant si =
+  let v = si .&. 0x0F
+   in if v >= fromEnum (minBound :: FontVariant) && v <= fromEnum (maxBound :: FontVariant)
+        then toEnum v
+        else FontRegular
 
 -- | Pure bounding-box painter.
 -- Every widget is strictly drawn as its exact collision / bounding box.
@@ -63,6 +86,7 @@ import NanoUI.Rgfw.Theme (RgfwTheme (..))
 renderArena ::
   RgfwSurface ->
   CozetteFont ->
+  Float -> -- Scale factor
   RgfwTheme ->
   Context ->
   NodeArena ->
@@ -70,30 +94,31 @@ renderArena ::
   WidgetId -> -- Active (pressed) widget ID
   WidgetId -> -- Focused widget ID
   IO ()
-renderArena surf font theme ctx na hotId activeId focusId = do
+renderArena surf font !scale theme ctx na hotId activeId focusId = do
   store <- getStore ctx
   !n <- arenaCount na
   when (n > 0) $ withArenaArraysSnap na $ do
-    -- Precompute overlay status for all nodes in O(N)
+    -- Precompute overlay and popup status for all nodes in O(N)
     isOverlayArr <- newPrimArray n
+    isPopupArr   <- newPrimArray n
     let prepOverlay !i
           | i >= n = pure ()
           | otherwise = do
               nt <- getNodeType na i
               p <- getParent na i
               isPOverlay <- if p >= 0 && p < i then readPrimArray isOverlayArr p else pure (0 :: Int)
-              let !isO = if nt == NodePopup || isPOverlay == 1 then 1 else 0
+              let !isO = if isFloatingNode nt || isPOverlay == 1 then 1 else 0
               writePrimArray isOverlayArr i (isO :: Int)
+              isPPopup <- if p >= 0 && p < i then readPrimArray isPopupArr p else pure (0 :: Int)
+              let !isP = if nt == NodePopup || isPPopup == 1 then 1 else 0
+              writePrimArray isPopupArr i (isP :: Int)
               prepOverlay (i + 1)
     prepOverlay 0
 
     let renderNode !i = do
           nt <- getNodeType na i
           (rx, ry, rw, rh) <- getRect na i
-          let !x = round rx
-              !y = round ry
-              !w = round rw
-              !h = round rh
+          let (!x, !y, !w, !h) = toPhysRect scale rx ry rw rh
           wid <- getWidgetId na i
           val <- getNodeValue na i
           txt <- getText na i
@@ -105,23 +130,48 @@ renderArena surf font theme ctx na hotId activeId focusId = do
 
           case mClip of
             Just (Rect cx cy cw ch) ->
-              pushClip surf (round cx) (round cy) (round cw) (round ch)
+              let (!px, !py, !pw, !ph) = toPhysRect scale cx cy cw ch
+               in pushClip surf px py pw ph
             Nothing -> pure ()
 
           case nt of
             NodePopup -> do
               -- Drop shadow + card background + border outline
-              fillRect surf (x + 2) (y + 2) w h (packColor (colorRGBA 16 16 16 255))
+              let !shadowOff = max 1 (round (2.0 * scale))
+              fillRect surf (x + shadowOff) (y + shadowOff) w h (packColor (colorRGBA 16 16 16 255))
               fillRect surf x y w h (packColor (thPanelBg theme))
               drawRectOutline surf x y w h (packColor (thBorder theme))
 
             NodeWindow -> do
-              let !headerH = 22
+              -- Drop shadow + window panel + header
+              let !shadowOff = max 1 (round (3.0 * scale))
+                  !headerBottom = round ((ry + 24.0) * scale)
+                  !headerH = max 1 (headerBottom - y)
+              fillRect surf (x + shadowOff) (y + shadowOff) w h (packColor (colorRGBA 16 16 16 255))
               fillRect surf x (y + headerH) w (max 0 (h - headerH)) (packColor (thPanelBg theme))
               drawRectOutline surf x (y + headerH) w (max 0 (h - headerH)) (packColor (thBorder theme))
               fillRect surf x y w headerH (packColor (thWindowHeader theme))
               drawRectOutline surf x y w headerH (packColor (thBorder theme))
-              drawText surf font (x + 8) (y + 4) txt (packColor (thText theme))
+              when (not (T.null txt)) $
+                drawTextScaled surf font scale (rx + 8.0) (ry + 5.0) txt (packColor (thText theme))
+
+              -- Bottom-right resize grip (three diagonal hatch marks)
+              let !gripColor = packColor (thBorder theme)
+                  !gx = x + w - max 4 (round (4.0 * scale))
+                  !gy = y + h - max 4 (round (4.0 * scale))
+                  !ps = max 1 (round scale)
+                  !d1 = max 2 (round (3.0 * scale))
+                  !d2 = max 4 (round (6.0 * scale))
+                  !d3 = max 6 (round (9.0 * scale))
+              fillRect surf (gx - d1) gy ps ps gripColor
+              fillRect surf gx (gy - d1) ps ps gripColor
+              fillRect surf (gx - d2) gy ps ps gripColor
+              fillRect surf (gx - d1) (gy - d1) ps ps gripColor
+              fillRect surf gx (gy - d2) ps ps gripColor
+              fillRect surf (gx - d3) gy ps ps gripColor
+              fillRect surf (gx - d2) (gy - d1) ps ps gripColor
+              fillRect surf (gx - d1) (gy - d2) ps ps gripColor
+              fillRect surf gx (gy - d3) ps ps gripColor
 
             NodePanel -> do
               fillRect surf x y w h (packColor (thPanelBg theme))
@@ -134,6 +184,7 @@ renderArena surf font theme ctx na hotId activeId focusId = do
             NodeButton -> do
               isO <- readPrimArray isOverlayArr i
               let !isTab = T.isPrefixOf "tab:" txt || T.isPrefixOf "\x02" txt
+                  !isClose = T.isPrefixOf "\x01" txt || txt == "[X]" || txt == "X" || txt == "\xd7" || txt == "\xf00d"
               if isO == 1 && not isTab
                 then do
                   -- Menu item inside popup: full row hover highlight, left-aligned text
@@ -143,8 +194,8 @@ renderArena surf font theme ctx na hotId activeId focusId = do
                     fillRect surf x y w h (packColor (thPrimaryActive theme))
                   when isFocus $
                     drawRectOutline surf x y w h (packColor (thBorderFocused theme))
-                  let !ty = y + max 0 ((h - 13) `div` 2)
-                  drawText surf font (x + 8) ty txt (packColor (thText theme))
+                  let !ty = ry + max 0.0 ((rh - 13.0) / 2.0)
+                  drawTextScaled surf font scale (rx + 4.0) ty txt (packColor (thText theme))
                 else if isTab
                   then do
                     let (!tabTitle, !isActiveTab) =
@@ -158,28 +209,75 @@ renderArena surf font theme ctx na hotId activeId focusId = do
                     if isActiveTab
                       then do
                         -- Active Tab: Same background as panel body, 2px top primary accent stripe, open bottom!
-                        fillRect surf x (y + 2) w (max 0 (h - 2)) (packColor (thPanelBg theme))
-                        fillRect surf x y w 2 (packColor (thPrimary theme))
-                        fillRect surf x (y + 2) 1 (max 0 (h - 2)) (packColor (thBorder theme))
-                        fillRect surf (x + w - 1) (y + 2) 1 (max 0 (h - 2)) (packColor (thBorder theme))
-                        let !txtW = T.length tabTitle * 6
-                            !tx = x + max 0 ((w - txtW) `div` 2)
-                            !ty = y + max 0 ((h - 13) `div` 2)
-                        drawText surf font tx ty tabTitle (packColor (thText theme))
+                        let !stripeH = max 1 (round (2.0 * scale))
+                        fillRect surf x (y + stripeH) w (max 0 (h - stripeH)) (packColor (thPanelBg theme))
+                        fillRect surf x y w stripeH (packColor (thPrimary theme))
+                        fillRect surf x (y + stripeH) 1 (max 0 (h - stripeH)) (packColor (thBorder theme))
+                        fillRect surf (x + w - 1) (y + stripeH) 1 (max 0 (h - stripeH)) (packColor (thBorder theme))
+                        let !txtW = fromIntegral (T.length tabTitle * 6)
+                            !tx = rx + max 0.0 ((rw - txtW) / 2.0)
+                            !ty = ry + max 0.0 ((rh - 13.0) / 2.0)
+                        drawTextScaled surf font scale tx ty tabTitle (packColor (thText theme))
                       else do
                         -- Inactive Tab: Recessed background, 4-sided border, muted text
                         let !bgColor = if isHot then thWidgetHover theme else thWidgetBg theme
                             !txtColor = if isHot then thText theme else thTextMuted theme
                             !borderColor = if isFocus then thBorderFocused theme else thBorder theme
-                            !txtW = T.length tabTitle * 6
-                            !tx = x + max 0 ((w - txtW) `div` 2)
-                            !ty = y + max 0 ((h - 13) `div` 2)
+                            !txtW = fromIntegral (T.length tabTitle * 6)
+                            !tx = rx + max 0.0 ((rw - txtW) / 2.0)
+                            !ty = ry + max 0.0 ((rh - 13.0) / 2.0)
                         fillRect surf x y w h (packColor bgColor)
                         drawRectOutline surf x y w h (packColor borderColor)
-                        drawText surf font tx ty tabTitle (packColor txtColor)
+                        drawTextScaled surf font scale tx ty tabTitle (packColor txtColor)
+                  else if isClose
+                    then do
+                      -- Window or Tab Close Button
+                      let !bgColor =
+                            if isActive
+                              then colorRGBA 160 36 36 255
+                              else if isHot
+                                then colorRGBA 205 45 45 255
+                                else colorRGBA 0 0 0 0
+                          !iconColor =
+                            if isHot || isActive
+                              then packColor (colorRGBA 255 255 255 255)
+                              else packColor (thText theme)
+                          !borderColor =
+                            if isHot || isActive
+                              then colorRGBA 180 40 40 255
+                              else if isFocus
+                                then thBorderFocused theme
+                                else colorRGBA 0 0 0 0
+                      when (isHot || isActive) $ do
+                        fillRect surf x y w h (packColor bgColor)
+                        drawRectOutline surf x y w h (packColor borderColor)
+                      when (isFocus && not (isHot || isActive)) $
+                        drawRectOutline surf x y w h (packColor (thBorderFocused theme))
+
+                      -- Draw centered crisp diagonal close cross
+                      let !cx = rx + rw / 2.0
+                          !cy = ry + rh / 2.0
+                          !arm = max 2.5 (min 4.5 (min rw rh / 4.0))
+                          drawCross !d
+                            | d > arm = pure ()
+                            | otherwise = do
+                                let (!px1, !py1, !pw, !ph) = toPhysRect scale (cx + d - 0.5) (cy + d - 0.5) 1.0 1.0
+                                    (!px2, !py2, _, _)     = toPhysRect scale (cx - d - 0.5) (cy + d - 0.5) 1.0 1.0
+                                    (!px3, !py3, _, _)     = toPhysRect scale (cx + d - 0.5) (cy - d - 0.5) 1.0 1.0
+                                    (!px4, !py4, _, _)     = toPhysRect scale (cx - d - 0.5) (cy - d - 0.5) 1.0 1.0
+                                fillRect surf px1 py1 pw ph iconColor
+                                fillRect surf px2 py2 pw ph iconColor
+                                fillRect surf px3 py3 pw ph iconColor
+                                fillRect surf px4 py4 pw ph iconColor
+                                drawCross (d + 1.0)
+                      drawCross 0.0
                   else do
                     -- Standard Push Button
-                    let !bgColor =
+                    let !dispTxt =
+                          if T.isPrefixOf "\x01" txt || T.isPrefixOf "\x02" txt || T.isPrefixOf "\x03" txt
+                            then T.drop 1 txt
+                            else txt
+                        !bgColor =
                           if isActive
                             then thPrimaryActive theme
                             else if isHot
@@ -187,52 +285,55 @@ renderArena surf font theme ctx na hotId activeId focusId = do
                               else thPrimary theme
                         !borderColor = if isFocus then thBorderFocused theme else thBorder theme
                         !txtColor = thText theme
-                        !txtW = T.length txt * 6
-                        !tx = x + max 0 ((w - txtW) `div` 2)
-                        !ty = y + max 0 ((h - 13) `div` 2)
+                        !txtW = fromIntegral (T.length dispTxt * 6)
+                        !tx = rx + max 0.0 ((rw - txtW) / 2.0)
+                        !ty = ry + max 0.0 ((rh - 13.0) / 2.0)
                     fillRect surf x y w h (packColor bgColor)
                     drawRectOutline surf x y w h (packColor borderColor)
-                    drawText surf font tx ty txt (packColor txtColor)
+                    drawTextScaled surf font scale tx ty dispTxt (packColor txtColor)
 
             NodeCheckbox -> do
-              let !boxX = x + 2
-                  !boxY = y + max 0 ((h - 14) `div` 2)
-                  !boxS = 14
+              let !boxLogX = rx + 2.0
+                  !boxLogY = ry + max 0.0 ((rh - 14.0) / 2.0)
+                  (!bx, !by, !bw, !bh) = toPhysRect scale boxLogX boxLogY 14.0 14.0
                   !borderColor = if isFocus || isHot then thBorderFocused theme else thBorder theme
-              fillRect surf boxX boxY boxS boxS (packColor (thWidgetBg theme))
-              drawRectOutline surf boxX boxY boxS boxS (packColor borderColor)
+              fillRect surf bx by bw bh (packColor (thWidgetBg theme))
+              drawRectOutline surf bx by bw bh (packColor borderColor)
               when (val > 0.5) $ do
-                fillRect surf (boxX + 3) (boxY + 3) (boxS - 6) (boxS - 6) (packColor (thPrimary theme))
+                let (!cx, !cy, !cw, !ch) = toPhysRect scale (boxLogX + 3.0) (boxLogY + 3.0) 8.0 8.0
+                fillRect surf cx cy cw ch (packColor (thPrimary theme))
               when (not (T.null txt)) $ do
-                drawText surf font (boxX + boxS + 6) (y + max 0 ((h - 13) `div` 2)) txt (packColor (thText theme))
+                drawTextScaled surf font scale (boxLogX + 14.0 + 6.0) (ry + max 0.0 ((rh - 13.0) / 2.0)) txt (packColor (thText theme))
 
             NodeRadio -> do
-              let !boxX = x + 2
-                  !boxY = y + max 0 ((h - 14) `div` 2)
-                  !boxS = 14
+              let !boxLogX = rx + 2.0
+                  !boxLogY = ry + max 0.0 ((rh - 14.0) / 2.0)
+                  (!bx, !by, !bw, !bh) = toPhysRect scale boxLogX boxLogY 14.0 14.0
                   !borderColor = if isFocus || isHot then thBorderFocused theme else thBorder theme
-              fillRect surf boxX boxY boxS boxS (packColor (thWidgetBg theme))
-              drawRectOutline surf boxX boxY boxS boxS (packColor borderColor)
+              fillRect surf bx by bw bh (packColor (thWidgetBg theme))
+              drawRectOutline surf bx by bw bh (packColor borderColor)
               when (val > 0.5) $ do
-                fillRect surf (boxX + 4) (boxY + 4) (boxS - 8) (boxS - 8) (packColor (thPrimary theme))
+                let (!cx, !cy, !cw, !ch) = toPhysRect scale (boxLogX + 4.0) (boxLogY + 4.0) 6.0 6.0
+                fillRect surf cx cy cw ch (packColor (thPrimary theme))
               when (not (T.null txt)) $ do
-                drawText surf font (boxX + boxS + 6) (y + max 0 ((h - 13) `div` 2)) txt (packColor (thText theme))
+                drawTextScaled surf font scale (boxLogX + 14.0 + 6.0) (ry + max 0.0 ((rh - 13.0) / 2.0)) txt (packColor (thText theme))
 
             NodeSlider -> do
-              let !trackY = y + (h - 6) `div` 2
-                  !trackH = 6
-                  !clampedVal = max 0 (min 1 val)
-                  !thumbW = 10
-                  !thumbH = 16
-                  !thumbX = x + round (fromIntegral (w - thumbW) * clampedVal)
-                  !thumbY = y + (h - thumbH) `div` 2
+              let !trackLogY = ry + (rh - 6.0) / 2.0
+                  (!tx, !ty, !tw, !th) = toPhysRect scale rx trackLogY rw 6.0
+                  !clampedVal = max 0.0 (min 1.0 val)
+                  !thumbW = 10.0 :: Float
+                  !thumbH = 16.0 :: Float
+                  !thumbLogX = rx + (rw - thumbW) * clampedVal
+                  !thumbLogY = ry + (rh - thumbH) / 2.0
+                  (!thx, !thy, !thw, !thh) = toPhysRect scale thumbLogX thumbLogY thumbW thumbH
                   !thumbColor = if isActive then thPrimaryActive theme else if isHot then thThumbHover theme else thThumb theme
-              fillRect surf x trackY w trackH (packColor (thScrollTrack theme))
-              drawRectOutline surf x trackY w trackH (packColor (thBorder theme))
-              let !fillW = max 0 (thumbX - x + thumbW `div` 2)
-              fillRect surf x trackY fillW trackH (packColor (thPrimary theme))
-              fillRect surf thumbX thumbY thumbW thumbH (packColor thumbColor)
-              drawRectOutline surf thumbX thumbY thumbW thumbH (packColor (thBorder theme))
+              fillRect surf tx ty tw th (packColor (thScrollTrack theme))
+              drawRectOutline surf tx ty tw th (packColor (thBorder theme))
+              let !fillW = max 0 (thx - tx + thw `div` 2)
+              fillRect surf tx ty fillW th (packColor (thPrimary theme))
+              fillRect surf thx thy thw thh (packColor thumbColor)
+              drawRectOutline surf thx thy thw thh (packColor (thBorder theme))
 
             NodeTextInput -> do
               let !key = intKey wid
@@ -254,17 +355,21 @@ renderArena surf font theme ctx na hotId activeId focusId = do
 
               -- Draw selection highlight
               when (isFocus && not isPlaceholder && selLo < selHi) $ do
-                let !selX = x + 6 + max 0 (min (w - 10) (selLo * 6))
-                    !selX2 = x + 6 + max 0 (min (w - 10) (selHi * 6))
-                    !selW = max 1 (selX2 - selX)
-                fillRect surf selX (y + 3) selW (max 0 (h - 6)) (packColor (thSelection theme))
+                let !selLogX = rx + 6.0 + max 0.0 (min (rw - 10.0) (fromIntegral selLo * 6.0))
+                    !selLogX2 = rx + 6.0 + max 0.0 (min (rw - 10.0) (fromIntegral selHi * 6.0))
+                    (!sx, !sy, !sw, !sh) = toPhysRect scale selLogX (ry + 3.0) (max 1.0 (selLogX2 - selLogX)) (max 0.0 (rh - 6.0))
+                fillRect surf sx sy sw sh (packColor (thSelection theme))
 
               when (not (T.null displayTxt)) $
-                drawText surf font (x + 6) (y + max 0 ((h - 13) `div` 2)) displayTxt (packColor textColor)
+                drawTextScaled surf font scale (rx + 6.0) (ry + max 0.0 ((rh - 13.0) / 2.0)) displayTxt (packColor textColor)
 
               when isFocus $ do
-                let !cursorX = x + 6 + max 0 (min (w - 10) (curPos * 6))
-                fillRect surf cursorX (y + 3) 2 (max 0 (h - 6)) (packColor (thText theme))
+                let !cursorLogX = rx + 6.0 + max 0.0 (min (rw - 10.0) (fromIntegral curPos * 6.0))
+                    !cx = round (cursorLogX * scale)
+                    !cy = round ((ry + 3.0) * scale)
+                    !ch = max 0 (round ((ry + rh - 3.0) * scale) - cy)
+                    !cw = max 1 (round (2.0 * scale))
+                fillRect surf cx cy cw ch (packColor (thText theme))
 
             NodeTextArea -> do
               let !key = intKey wid
@@ -300,35 +405,39 @@ renderArena surf font theme ctx na hotId activeId focusId = do
                                       then (0, c1)
                                       else (0, lineLen)
                           when (ec > sc) $ do
-                            let !sx = x + 6 + max 0 (min (w - 10) (sc * 6))
-                                !sx2 = x + 6 + max 0 (min (w - 10) (ec * 6))
-                                !sw = max 1 (sx2 - sx)
-                                !sy = y + 6 + r * 14
-                            when (sy + 13 <= y + h) $
-                              fillRect surf sx sy sw 13 (packColor (thSelection theme))
+                            let !selLogX = rx + 6.0 + max 0.0 (min (rw - 10.0) (fromIntegral sc * 6.0))
+                                !selLogX2 = rx + 6.0 + max 0.0 (min (rw - 10.0) (fromIntegral ec * 6.0))
+                                !selLogY = ry + 6.0 + fromIntegral r * 14.0
+                                (!sx, !sy, !sw, !sh) = toPhysRect scale selLogX selLogY (max 1.0 (selLogX2 - selLogX)) 13.0
+                            when (selLogY + 13.0 <= ry + rh) $
+                              fillRect surf sx sy sw sh (packColor (thSelection theme))
                           drawSelRow (r + 1)
                 drawSelRow r0
 
               let renderLines !_ [] = pure ()
                   renderLines !ly (l : ls)
-                    | ly + 13 > y + h = pure ()
+                    | ly + 13.0 > ry + rh = pure ()
                     | otherwise = do
-                        drawText surf font (x + 6) ly l (packColor (thText theme))
-                        renderLines (ly + 14) ls
-              renderLines (y + 6) safeLines
+                        drawTextScaled surf font scale (rx + 6.0) ly l (packColor (thText theme))
+                        renderLines (ly + 14.0) ls
+              renderLines (ry + 6.0) safeLines
 
               when isFocus $ do
-                let !cursorX = x + 6 + max 0 (min (w - 10) (curCol * 6))
-                    !cursorY = y + 6 + curRow * 14
-                fillRect surf cursorX cursorY 2 (min 13 (max 0 (y + h - cursorY))) (packColor (thText theme))
+                let !cursorLogX = rx + 6.0 + max 0.0 (min (rw - 10.0) (fromIntegral curCol * 6.0))
+                    !cursorLogY = ry + 6.0 + fromIntegral curRow * 14.0
+                    !cx = round (cursorLogX * scale)
+                    !cy = round (cursorLogY * scale)
+                    !ch = min (round (13.0 * scale)) (max 0 (y + h - cy))
+                    !cw = max 1 (round (2.0 * scale))
+                fillRect surf cx cy cw ch (packColor (thText theme))
 
             NodeSelect -> do
               let !borderColor = if isFocus || isHot then thBorderFocused theme else thBorder theme
               fillRect surf x y w h (packColor (thWidgetBg theme))
               drawRectOutline surf x y w h (packColor borderColor)
-              drawText surf font (x + 6) (y + max 0 ((h - 13) `div` 2)) txt (packColor (thText theme))
-              let !arrowX = x + w - 16
-              drawText surf font arrowX (y + max 0 ((h - 13) `div` 2)) "v" (packColor (thTextMuted theme))
+              drawTextScaled surf font scale (rx + 6.0) (ry + max 0.0 ((rh - 13.0) / 2.0)) txt (packColor (thText theme))
+              let !arrowLogX = rx + rw - 16.0
+              drawTextScaled surf font scale arrowLogX (ry + max 0.0 ((rh - 13.0) / 2.0)) "v" (packColor (thTextMuted theme))
 
             NodeBox -> do
               styleIdx <- getStyleIdx na i
@@ -340,12 +449,28 @@ renderArena surf font theme ctx na hotId activeId focusId = do
               drawRectOutline surf x y w h (packColor (thBorder theme))
 
             NodeText -> do
+              isO <- readPrimArray isOverlayArr i
               pad <- getPadding na i
+              styleIdx <- getStyleIdx na i
+              let fvar = textNodeFontVariant styleIdx
+                  !txtColor = if fvar == FontMuted then thTextMuted theme else thText theme
               when (not (T.null txt)) $ do
-                drawText surf font (x + round (padL pad)) (y + round (padT pad)) txt (packColor (thText theme))
+                let (!tx, !ty) =
+                      if isO == 1 && padL pad == 0
+                        then (rx + 4.0, ry + max 0.0 ((rh - 13.0) / 2.0))
+                        else (rx + padL pad, ry + padT pad)
+                drawTextScaled surf font scale tx ty txt (packColor txtColor)
 
             NodeSeparator -> do
-              fillRect surf x y w h (packColor (thBorder theme))
+              isO <- readPrimArray isOverlayArr i
+              if isO == 1
+                then do
+                  let !lineY = y + max 1 (h `div` 2)
+                      !padX = max 1 (round (2.0 * scale))
+                  fillRect surf (rowX' + padX) lineY (max 0 (w - padX * 2)) 1 (packColor (thBorder theme))
+                else fillRect surf x y w h (packColor (thBorder theme))
+              where
+                !rowX' = x
 
             NodeSpacer ->
               pure ()
@@ -365,11 +490,71 @@ renderArena surf font theme ctx na hotId activeId focusId = do
               loopNormal (i + 1)
     loopNormal 0
 
-    -- Pass 2: Render floating popups and their descendants
-    let loopOverlay !i
+    -- Pass 2: Render floating windows & modals and their contents over the UI
+    let loopWindows !i
           | i >= n = pure ()
           | otherwise = do
               isO <- readPrimArray isOverlayArr i
-              when (isO == 1) $ renderNode i
-              loopOverlay (i + 1)
-    loopOverlay 0
+              isP <- readPrimArray isPopupArr i
+              when (isO == 1 && isP == 0) $ renderNode i
+              loopWindows (i + 1)
+    loopWindows 0
+
+    -- Pass 3: Render floating popups and context menus on top of everything
+    let loopPopups !i
+          | i >= n = pure ()
+          | otherwise = do
+              isP <- readPrimArray isPopupArr i
+              when (isP == 1) $ renderNode i
+              loopPopups (i + 1)
+    loopPopups 0
+
+-- | Render the built-in text input / text area context menu overlay
+renderTextEditMenuOverlay ::
+  RgfwSurface ->
+  CozetteFont ->
+  Float -> -- Scale factor
+  RgfwTheme ->
+  Context ->
+  V2 -> -- Mouse position for hover highlight
+  IO ()
+renderTextEditMenuOverlay surf font !scale theme ctx mousePos = do
+  mMenu <- readIORef (ctxTextInputMenu ctx)
+  case mMenu of
+    Nothing -> pure ()
+    Just menu -> do
+      let wid = textInputMenuWidget menu
+      allow <- widgetOverlayAllowed ctx wid
+      when allow $ do
+        let menuRect = textInputMenuRect menu
+            (!mx, !my, !mw, !mh) = toPhysRect scale (rectX menuRect) (rectY menuRect) (rectW menuRect) (rectH menuRect)
+            content = textEditMenuContentRect (ctxHostProfile ctx) menuRect (ctxFontMetrics ctx)
+            !cx = rectX content
+            !cy = rectY content
+            !cw = rectW content
+            !shadowOff = max 1 (round (2.0 * scale))
+        -- Drop shadow
+        fillRect surf (mx + shadowOff) (my + shadowOff) mw mh (packColor (colorRGBA 16 16 16 255))
+        -- Background & border
+        fillRect surf mx my mw mh (packColor (thPanelBg theme))
+        drawRectOutline surf mx my mw mh (packColor (thBorder theme))
+        -- Render menu rows
+        forM_ (textEditMenuLayout (ctxHostProfile ctx)) $ \(entry, relY, h) -> do
+          let (!rowX, !rowY, !rowW, !rowH) = toPhysRect scale cx (cy + relY) cw h
+              rowRect = Rect cx (cy + relY) cw h
+          case entry of
+            TextEditMenuSep -> do
+              let !lineY = rowY + max 1 (rowH `div` 2)
+                  !padX = max 1 (round (2.0 * scale))
+              fillRect surf (rowX + padX) lineY (max 0 (rowW - padX * 2)) 1 (packColor (thBorder theme))
+            TextEditMenuItem action lbl -> do
+              enabled <- textFieldMenuActionEnabled ctx wid action
+              let !hovered = enabled && rectContains rowRect mousePos
+              when hovered $ do
+                fillRect surf rowX rowY rowW rowH (packColor (thWidgetHover theme))
+                let !barW = max 1 (round (2.0 * scale))
+                fillRect surf rowX (rowY + barW) barW (max 1 (rowH - barW * 2)) (packColor (thPrimary theme))
+              let !textColor = if enabled then thText theme else thTextMuted theme
+                  !textY = cy + relY + max 0.0 ((h - 13.0) / 2.0)
+              drawTextScaled surf font scale (cx + 5.0) textY lbl (packColor textColor)
+

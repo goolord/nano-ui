@@ -28,6 +28,9 @@ module RGFW.Raw
   , c_rgfw_event_size
   , c_rgfw_window_w
   , c_rgfw_window_h
+  , c_rgfw_window_scale
+  , c_rgfw_event_scale_x
+  , c_rgfw_event_scale_y
   -- Event types
   , rgfw_eventNone
   , rgfw_keyPressed
@@ -41,6 +44,7 @@ module RGFW.Raw
   , rgfw_windowResized
   , rgfw_windowFocusIn
   , rgfw_windowFocusOut
+  , rgfw_scaleUpdated
   , rgfw_windowClose
   -- Mouse buttons
   , rgfw_mouseLeft
@@ -58,6 +62,27 @@ module RGFW.Raw
   , rgfw_windowNoResize
   , rgfw_windowAllowDND
   , rgfw_windowCenter
+  -- Mouse cursors
+  , c_rgfw_window_set_mouse_standard
+  , c_rgfw_window_set_mouse_default
+  , rgfw_mouseNormal
+  , rgfw_mouseArrow
+  , rgfw_mouseIbeam
+  , rgfw_mouseCrosshair
+  , rgfw_mousePointingHand
+  , rgfw_mouseResizeEW
+  , rgfw_mouseResizeNS
+  , rgfw_mouseResizeNWSE
+  , rgfw_mouseResizeNESW
+  , rgfw_mouseResizeNW
+  , rgfw_mouseResizeN
+  , rgfw_mouseResizeNE
+  , rgfw_mouseResizeE
+  , rgfw_mouseResizeSE
+  , rgfw_mouseResizeS
+  , rgfw_mouseResizeSW
+  , rgfw_mouseResizeW
+  , rgfw_mouseResizeAll
   ) where
 
 import Data.Word (Word8, Word32)
@@ -143,10 +168,19 @@ foreign import ccall "rgfw_shim.c rgfw_window_w"
 foreign import ccall "rgfw_shim.c rgfw_window_h"
   c_rgfw_window_h :: Ptr RGFW_window -> IO CInt
 
+foreign import ccall "rgfw_shim.c rgfw_window_scale"
+  c_rgfw_window_scale :: Ptr RGFW_window -> IO CFloat
+
+foreign import ccall "rgfw_shim.c rgfw_event_scale_x"
+  c_rgfw_event_scale_x :: Ptr RGFW_event -> IO CFloat
+
+foreign import ccall "rgfw_shim.c rgfw_event_scale_y"
+  c_rgfw_event_scale_y :: Ptr RGFW_event -> IO CFloat
+
 -- Event types
 rgfw_eventNone, rgfw_keyPressed, rgfw_keyReleased, rgfw_keyChar :: Word8
 rgfw_mouseButtonPressed, rgfw_mouseButtonReleased, rgfw_mouseScroll, rgfw_mouseMotion :: Word8
-rgfw_windowMoved, rgfw_windowResized, rgfw_windowFocusIn, rgfw_windowFocusOut, rgfw_windowClose :: Word8
+rgfw_windowMoved, rgfw_windowResized, rgfw_windowFocusIn, rgfw_windowFocusOut, rgfw_scaleUpdated, rgfw_windowClose :: Word8
 
 rgfw_eventNone           = 0
 rgfw_keyPressed          = 1
@@ -160,6 +194,7 @@ rgfw_windowMoved         = 11
 rgfw_windowResized       = 12
 rgfw_windowFocusIn       = 13
 rgfw_windowFocusOut      = 14
+rgfw_scaleUpdated        = 22
 rgfw_windowClose         = 16
 
 -- Mouse buttons
@@ -183,3 +218,34 @@ rgfw_windowNoBorder = 1
 rgfw_windowNoResize = 2
 rgfw_windowAllowDND = 4
 rgfw_windowCenter   = 64
+
+-- Mouse cursors
+foreign import ccall "rgfw_shim.c rgfw_window_set_mouse_standard"
+  c_rgfw_window_set_mouse_standard :: Ptr RGFW_window -> CUChar -> IO CUChar
+
+foreign import ccall "rgfw_shim.c rgfw_window_set_mouse_default"
+  c_rgfw_window_set_mouse_default :: Ptr RGFW_window -> IO CUChar
+
+rgfw_mouseNormal, rgfw_mouseArrow, rgfw_mouseIbeam, rgfw_mouseCrosshair, rgfw_mousePointingHand :: Word8
+rgfw_mouseResizeEW, rgfw_mouseResizeNS, rgfw_mouseResizeNWSE, rgfw_mouseResizeNESW :: Word8
+rgfw_mouseResizeNW, rgfw_mouseResizeN, rgfw_mouseResizeNE, rgfw_mouseResizeE :: Word8
+rgfw_mouseResizeSE, rgfw_mouseResizeS, rgfw_mouseResizeSW, rgfw_mouseResizeW, rgfw_mouseResizeAll :: Word8
+
+rgfw_mouseNormal       = 0
+rgfw_mouseArrow        = 1
+rgfw_mouseIbeam        = 2
+rgfw_mouseCrosshair    = 3
+rgfw_mousePointingHand = 4
+rgfw_mouseResizeEW     = 5
+rgfw_mouseResizeNS     = 6
+rgfw_mouseResizeNWSE   = 7
+rgfw_mouseResizeNESW   = 8
+rgfw_mouseResizeNW     = 9
+rgfw_mouseResizeN      = 10
+rgfw_mouseResizeNE     = 11
+rgfw_mouseResizeE      = 12
+rgfw_mouseResizeSE     = 13
+rgfw_mouseResizeS      = 14
+rgfw_mouseResizeSW     = 15
+rgfw_mouseResizeW      = 16
+rgfw_mouseResizeAll    = 17

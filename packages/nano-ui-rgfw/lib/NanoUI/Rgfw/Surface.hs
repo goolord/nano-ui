@@ -11,6 +11,8 @@ module NanoUI.Rgfw.Surface
   , fillRect
   , drawRectOutline
   , drawText
+  , drawTextScaled
+  , toPhysRect
   , packColor
   , currentClip
   , upscaleSurface
@@ -27,6 +29,7 @@ import Foreign.Storable (peekElemOff, pokeElemOff)
 import NanoUI (Color (..))
 import NanoUI.Rgfw.Font.Cozette
   ( CozetteFont
+  , renderTextScaledToBuffer
   , renderTextToBuffer
   )
 import qualified RGFW
@@ -154,6 +157,15 @@ drawRectOutline surf x y w h color
       fillRect surf x (y + 1) 1 (h - 2) color -- Left
       fillRect surf (x + w - 1) (y + 1) 1 (h - 2) color -- Right
 
+{-# INLINE toPhysRect #-}
+toPhysRect :: Float -> Float -> Float -> Float -> Float -> (Int, Int, Int, Int)
+toPhysRect !scale !rx !ry !rw !rh =
+  let !x0 = round (rx * scale)
+      !y0 = round (ry * scale)
+      !x1 = round ((rx + rw) * scale)
+      !y1 = round ((ry + rh) * scale)
+   in (x0, y0, max 0 (x1 - x0), max 0 (y1 - y0))
+
 {-# INLINE drawText #-}
 drawText :: RgfwSurface -> CozetteFont -> Int -> Int -> Text -> Word32 -> IO ()
 drawText surf font x y txt color = do
@@ -167,6 +179,24 @@ drawText surf font x y txt color = do
     (crY1 clip)
     x
     y
+    color
+    font
+    txt
+
+{-# INLINE drawTextScaled #-}
+drawTextScaled :: RgfwSurface -> CozetteFont -> Float -> Float -> Float -> Text -> Word32 -> IO ()
+drawTextScaled surf font !scale !logX !logY txt color = do
+  clip <- currentClip surf
+  renderTextScaledToBuffer
+    (sBuffer surf)
+    (sWidth surf)
+    (crX0 clip)
+    (crY0 clip)
+    (crX1 clip)
+    (crY1 clip)
+    scale
+    logX
+    logY
     color
     font
     txt

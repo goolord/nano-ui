@@ -25,6 +25,7 @@ import NanoUI
   , menuItemDisabled
   , menuItemWithShortcut
   , menuSeparator
+  , onClick
   , padAll
   , panelWith
   , rowWith
@@ -32,12 +33,15 @@ import NanoUI
   , slider
   , textArea
   , textInput
+  , window
   , respClicked
   , respChanged
   )
 import NanoUI.Backend.Rgfw
   ( RgfwOptions (..)
   , RgfwTheme (..)
+  , askRgfwDebug
+  , debugWindowBody
   , defaultDarkTheme
   , defaultRgfwOptions
   , runRgfwAppReduceCustom
@@ -66,23 +70,29 @@ data ProfileChoice
   deriving (Bounded, Enum, Eq, Show)
 
 data DpiScaleChoice
-  = DpiScale05
+  = DpiScaleAuto
+  | DpiScale05
   | DpiScale1
+  | DpiScale15
   | DpiScale2
   | DpiScale3
   deriving (Bounded, Enum, Eq, Show)
 
 formatDpiScale :: DpiScaleChoice -> Text
-formatDpiScale DpiScale05 = "0.5x"
-formatDpiScale DpiScale1  = "1x"
-formatDpiScale DpiScale2  = "2x"
-formatDpiScale DpiScale3  = "3x"
+formatDpiScale DpiScaleAuto = "Auto (OS)"
+formatDpiScale DpiScale05   = "0.5x"
+formatDpiScale DpiScale1    = "1.0x"
+formatDpiScale DpiScale15   = "1.5x"
+formatDpiScale DpiScale2    = "2.0x"
+formatDpiScale DpiScale3    = "3.0x"
 
-physScaleFor :: DpiScaleChoice -> Int
-physScaleFor DpiScale05 = 1
-physScaleFor DpiScale1  = 2
-physScaleFor DpiScale2  = 4
-physScaleFor DpiScale3  = 6
+physScaleFor :: DpiScaleChoice -> Float
+physScaleFor DpiScaleAuto = 0.0 -- 0.0 means: use the DPI reported by the OS by default
+physScaleFor DpiScale05   = 0.5
+physScaleFor DpiScale1    = 1.0
+physScaleFor DpiScale15   = 1.5
+physScaleFor DpiScale2    = 2.0
+physScaleFor DpiScale3    = 3.0
 
 data Msg
   = SetTab !TabChoice
@@ -98,6 +108,7 @@ data Msg
   | SetNotesText !Text
   | SetProfile !ProfileChoice
   | ClearNotes
+  | ToggleDebug !Bool
   deriving (Eq, Show)
 
 data Model = Model
@@ -112,6 +123,7 @@ data Model = Model
   , notesVal     :: !Text
   , profileOpt   :: !ProfileChoice
   , totalClicks  :: !Int
+  , debugOpen    :: !Bool
   }
   deriving (Eq, Show)
 
@@ -120,7 +132,7 @@ initialModel =
   Model
     { activeTab    = TabControls
     , currentTheme = ThemeNight
-    , dpiScale     = DpiScale1
+    , dpiScale     = DpiScaleAuto
     , counter      = 42
     , turboOn      = True
     , volumeVal    = 0.72
@@ -129,6 +141,7 @@ initialModel =
     , notesVal     = "Lean single-pass backend\nBitmap Cozette typography\nTomorrow Min themes"
     , profileOpt   = ProfileBalanced
     , totalClicks  = 0
+    , debugOpen    = False
     }
 
 themeForChoice :: ThemeChoice -> RgfwTheme
@@ -149,10 +162,12 @@ update msg m =
         CycleTheme       -> m' {currentTheme = nextEnum (currentTheme m)}
         CycleScale       ->
           let nextSc = case dpiScale m of
-                DpiScale05 -> DpiScale1
-                DpiScale1  -> DpiScale2
-                DpiScale2  -> DpiScale3
-                DpiScale3  -> DpiScale05
+                DpiScaleAuto -> DpiScale1
+                DpiScale1    -> DpiScale15
+                DpiScale15   -> DpiScale2
+                DpiScale2    -> DpiScale3
+                DpiScale3    -> DpiScale05
+                DpiScale05   -> DpiScaleAuto
            in m' {dpiScale = nextSc}
         Increment        -> m' {counter = counter m + 1}
         Decrement        -> m' {counter = counter m - 1}
@@ -164,6 +179,7 @@ update msg m =
         SetNotesText t   -> m' {notesVal = t}
         SetProfile p     -> m' {profileOpt = p}
         ClearNotes       -> m' {notesVal = ""}
+        ToggleDebug b    -> m' {debugOpen = b}
 
 appView :: Model -> NanoUI ()
 appView m = do
@@ -181,6 +197,9 @@ appView m = do
 
       scaleBtn <- button ("[" <> formatDpiScale (dpiScale m) <> " DPI Scale]")
       when (respClicked scaleBtn) (emit CycleScale)
+
+      debugBtn <- button (if debugOpen m then "[Debug: ON]" else "[Debug: OFF]")
+      when (respClicked debugBtn) (emit (ToggleDebug (not (debugOpen m))))
 
     -- Tab Bar
     rowWith (gap 4 . fixedH 24) $ do
@@ -202,6 +221,12 @@ appView m = do
       TabGallery       -> viewGalleryTab
       TabArchitecture  -> viewArchitectureTab
       TabDiagnostics   -> viewDiagnosticsTab m
+
+    -- Floating Debug Window
+    when (debugOpen m) $ do
+      snap <- askRgfwDebug
+      (win, _) <- window True "Debug Diagnostics" (debugWindowBody snap)
+      onClick win (emit (ToggleDebug False))
 
 -- | Tab 1: Controls
 viewControlsTab :: Model -> NanoUI ()
@@ -290,7 +315,10 @@ viewControlsTab m = do
 
       columnWith (gap 6) $ do
         void $ label ("Active Theme:    " <> T.pack (show (currentTheme m)))
-        void $ label ("DPI Scale:       " <> formatDpiScale (dpiScale m) <> " (" <> T.pack (show (physScaleFor (dpiScale m))) <> "x physical)")
+        let scText = case dpiScale m of
+              DpiScaleAuto -> "Auto (OS reported)"
+              sc           -> formatDpiScale sc <> " (" <> T.pack (show (physScaleFor sc)) <> "x)"
+        void $ label ("DPI Scale:       " <> scText)
         void $ label ("Counter Value:   " <> T.pack (show (counter m)))
         void $ label ("Turbo Mode:      " <> if turboOn m then "[ENABLED]" else "[DISABLED]")
         void $ label ("Volume Slider:   " <> T.pack (show (round (volumeVal m * 100) :: Int)) <> "%")
@@ -403,12 +431,13 @@ viewDiagnosticsTab m = do
       void $ label "Window & Surface Telemetry:"
       let !sc = dpiScale m
           !physScale = physScaleFor sc
-          !physW = 1680
-          !physH = 1040
-          !logW = physW `div` physScale
-          !logH = physH `div` physScale
+          !physW = 1680 :: Int
+          !physH = 1040 :: Int
+          !effScale = if physScale > 0.0 then physScale else 1.0
+          !logW = round (fromIntegral physW / effScale) :: Int
+          !logH = round (fromIntegral physH / effScale) :: Int
       void $ label ("  Physical Window Size:  " <> T.pack (show physW) <> " x " <> T.pack (show physH) <> " px")
-      void $ label ("  DPI Scale Choice:      " <> formatDpiScale sc <> " (Physical " <> T.pack (show physScale) <> "x DPI)")
+      void $ label ("  DPI Scale Choice:      " <> formatDpiScale sc <> (if physScale <= 0.0 then " (OS Native DPI)" else " (" <> T.pack (show physScale) <> "x DPI)"))
       void $ label ("  Logical Viewport Size: " <> T.pack (show logW) <> " x " <> T.pack (show logH) <> " px")
       void $ label ("  Framebuffer Bit Depth: 32-bit BGRA (Windows DIBSection)")
       void $ label ("  Physical RAM Surface:  " <> T.pack (show (physW * physH * 4 `div` 1024)) <> " KB")
@@ -422,6 +451,12 @@ viewDiagnosticsTab m = do
       void $ label ("  Interaction Clicks:    " <> T.pack (show (totalClicks m)))
       void $ label ("  Compiler Toolchain:    Zig C Compiler (zig cc)")
 
+      void $ separator
+
+      void $ label "Floating Diagnostics Window:"
+      diagBtn <- button (if debugOpen m then "[Close Debug Window]" else "[Open Floating Debug Window (FPS, Timing, Arena, RTS)]")
+      when (respClicked diagBtn) (emit (ToggleDebug (not (debugOpen m))))
+
 main :: IO ()
 main = do
   let opts =
@@ -430,6 +465,6 @@ main = do
           , optWidth  = 1680
           , optHeight = 1040
           , optTheme  = defaultDarkTheme
-          , optScale  = 1
+          , optScale  = 0.0 -- 0.0 uses the DPI reported by the OS by default
           }
   runRgfwAppReduceCustom opts (\m -> (themeForChoice (currentTheme m), physScaleFor (dpiScale m))) update initialModel appView

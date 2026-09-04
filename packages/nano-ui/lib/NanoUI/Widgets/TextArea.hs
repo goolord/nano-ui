@@ -23,7 +23,7 @@ module NanoUI.Widgets.TextArea
   ) where
 
 import Control.Monad (void, when)
-import Data.Char (toLower)
+import Data.Char (isPrint, toLower)
 import Data.IORef (writeIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -167,7 +167,7 @@ insertWithSelection ch state =
 handleTextAreaEvent :: KeyInput -> Modifiers -> TextAreaState -> TextAreaState
 handleTextAreaEvent key mods state =
   let shift = modShift mods
-      ctrl = modCtrl mods
+      ctrl = modCtrl mods || modSuper mods
       alt = modAlt mods
       n = pageLineCount state
       state' = case (key, ctrl, alt) of
@@ -204,10 +204,10 @@ handleTextAreaEvent key mods state =
         (KeyPageUp, False, False) -> moveCursor shift (applyN n TB.moveUp) state
         (KeyPageDown, False, False) -> moveCursor shift (applyN n TB.moveDown) state
         (KeyChar c, True, False)
-          | toLower c == 'k' -> moveCursor shift TB.killToEOL state
-          | toLower c == 'u' -> moveCursor shift TB.killToBOL state
-          | toLower c == 'a' -> selectAllTextArea state
-          | toLower c == 'e' -> moveCursor shift TB.moveToEOL state
+          | toLower c == 'k' || c == '\v' -> moveCursor shift TB.killToEOL state
+          | toLower c == 'u' || c == '\NAK' -> moveCursor shift TB.killToBOL state
+          | toLower c == 'a' || c == '\x01' -> selectAllTextArea state
+          | toLower c == 'e' || c == '\ENQ' -> moveCursor shift TB.moveToEOL state
           | otherwise -> state
         _ -> state
    in ensureCaretVisible state'
@@ -450,7 +450,7 @@ processTextArea ctx inp vpW vpH lineH s0 = do
     if ctrl
       then T.foldlM' (handleCtrlChar ctx) s1 (inputChars inp)
       else pure s1
-  let filtered = T.filter (not . isCtrlCombo ctrl) (inputChars inp)
+  let filtered = T.filter (\ch -> not (isCtrlCombo ctrl ch) && isPrint ch) (inputChars inp)
       s3 = T.foldl' (\s ch -> handleTextAreaEvent (KeyChar ch) mods s) s2 filtered
   pure
     ( foldInputKeys
@@ -460,14 +460,14 @@ processTextArea ctx inp vpW vpH lineH s0 = do
         (inputKeys inp)
     )
   where
-    isCtrlCombo c ch = c && T.elem ch "aAcCxXvV\x01\x18"
+    isCtrlCombo c ch = c && T.elem ch "aAcCxXvV\x01\x03\x16\x18"
 
 handleCtrlChar :: Context -> TextAreaState -> Char -> IO TextAreaState
 handleCtrlChar ctx s ch
   | ch `elem` ('a' : 'A' : '\x01' : []) = pure (selectAllTextArea s)
   | ch `elem` ('c' : 'C' : '\ETX' : []) = textAreaCopy ctx s >> pure s
   | ch `elem` ('x' : 'X' : '\x18' : []) = textAreaCut ctx s
-  | ch `elem` ('v' : 'V' : []) = textAreaPaste ctx s
+  | ch `elem` ('v' : 'V' : '\x16' : []) = textAreaPaste ctx s
   | otherwise = pure s
 
 mapKey :: Key -> Maybe KeyInput
