@@ -22,9 +22,7 @@ module NanoUI.Frame.Hit
   , nodeInteractionHit
   ) where
 
-import Data.IORef (readIORef)
 import Data.Maybe (isJust)
-import qualified Data.HashTable.IO as HT
 import NanoUI.Context (Context (..), getPrevRect, getScrollOffset, getPrevClipRect)
 import NanoUI.Types (HostProfile, isCellHost)
 import NanoUI.Id (WidgetId)
@@ -42,14 +40,12 @@ import NanoUI.Layout.Arena
   , isFloatingNode
   , isScrollNode
   , lookupNodeByKey
-  , naIndex
+  , lookupNodeByWidgetId
   )
 import NanoUI.Types (Rect (..), V2 (..), rectContains, rectH, rectW)
 
 findNodeByWidgetId :: Context -> WidgetId -> IO (Maybe NodeIdx)
-findNodeByWidgetId ctx wid = do
-  table <- readIORef (naIndex (ctxNodeArena ctx))
-  HT.lookup table wid
+findNodeByWidgetId ctx wid = lookupNodeByWidgetId (ctxNodeArena ctx) wid
 
 findNodeByKey :: Context -> Int -> IO (Maybe NodeIdx)
 findNodeByKey ctx k = lookupNodeByKey (ctxNodeArena ctx) k

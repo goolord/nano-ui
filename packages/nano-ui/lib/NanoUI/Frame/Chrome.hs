@@ -59,6 +59,7 @@ import NanoUI.Layout.Arena
   , arenaCount
   , getNodeType
   , getNodeValue
+  , getOptions
   , getParent
   , getStyleIdx
   , getText
@@ -69,17 +70,12 @@ import NanoUI.Layout.Arena
 import NanoUI.WidgetText
   ( buttonFlagsFromStyle
   , buttonVisualStyle
-  , checkboxLabelText
-  , radioLabelText
   , stripeColor
   , treeDecodeStripe
   , treeDecodeStyle
   , treeDisplayText
-  , treeLabelText
   , selectDisplayText
-  , selectOptions
   , colorPickerDisplayText
-  , sliderLabelText
   , textInputFieldText
   , textInputTerminalText
   , tableHeaderDisplayText
@@ -195,7 +191,7 @@ displayTextRest ctx nt idx txt terminal =
       case nt of
         NodeSelect -> do
           store <- getStore ctx
-          let (lbl, opts) = selectOptions txt
+          opts <- getOptions (ctxNodeArena ctx) idx
           wid <- getWidgetId (ctxNodeArena ctx) idx
           let picked = IM.findWithDefault 0 (intKey wid) (storeInt store)
               open = isSelectOpen store (intKey wid)
@@ -205,13 +201,13 @@ displayTextRest ctx nt idx txt terminal =
                   _ -> ""
               icons = ctxIcons ctx
               caret = if open then iconSelectOpen icons else iconSelectClosed icons
-          pure (selectDisplayText lbl opt <> caret)
+          pure (selectDisplayText txt opt <> caret)
         NodeColorPicker -> do
           store <- getStore ctx
           wid <- getWidgetId (ctxNodeArena ctx) idx
           let current = widgetStoreColor store wid colorPickerDefaultColor
           pure (colorPickerDisplayText txt current)
-        NodeSlider -> pure (sliderLabelText txt)
+        NodeSlider -> pure txt
         NodeTree -> do
           si <- getStyleIdx (ctxNodeArena ctx) idx
           let (_, depth, hasKids, expanded) = treeDecodeStyle si
@@ -228,25 +224,25 @@ displayTextRest ctx nt idx txt terminal =
         _ -> pure txt
     else
       case nt of
-        NodeCheckbox -> pure (checkboxLabelText txt)
-        NodeRadio -> pure (radioLabelText txt)
-        NodeTree -> pure (treeLabelText txt)
+        NodeCheckbox -> pure txt
+        NodeRadio -> pure txt
+        NodeTree -> pure txt
         NodeTextInput -> do
           value <- textInputValue ctx idx
           focused <- textInputFocused ctx idx
           pure (textInputFieldText txt value focused)
         NodeTextArea -> textAreaStoredValue ctx idx
-        NodeSlider -> pure (sliderLabelText txt)
+        NodeSlider -> pure txt
         NodeSelect -> do
           store <- getStore ctx
-          let (lbl, opts) = selectOptions txt
+          opts <- getOptions (ctxNodeArena ctx) idx
           wid <- getWidgetId (ctxNodeArena ctx) idx
           let picked = IM.findWithDefault 0 (intKey wid) (storeInt store)
               opt =
                 case drop picked opts of
                   (o : _) -> o
                   _ -> ""
-          pure (selectDisplayText lbl opt)
+          pure (selectDisplayText txt opt)
         NodeColorPicker -> pure txt
         NodeButton -> pure txt
         _ -> pure txt

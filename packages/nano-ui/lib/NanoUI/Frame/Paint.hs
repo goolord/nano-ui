@@ -77,7 +77,7 @@ import NanoUI.Style
   , themeWindow
   )
 import NanoUI.Types (Color (..), ImageId (..), Rect (..), colorA, colorRGBA, clamp01, lerpColor, rectFullyInside, rectInflate, rectIntersect, rectH, rectW, rectX, rectY)
-import NanoUI.WidgetText (buttonFlagsFromStyle, buttonVisualStyle, selectChevronCenterX, sliderLabelText, tableStripeColor, textNodeFontVariant, treeDecodeStyle)
+import NanoUI.WidgetText (buttonFlagsFromStyle, buttonVisualStyle, selectChevronCenterX, tableStripeColor, textNodeFontVariant, treeDecodeStyle)
 import NanoUI.Frame.Chrome
   ( fillStyledRect
   , imageIdFromText
@@ -402,8 +402,7 @@ lowerNodeVisible ctx occluders idx nt x y w h rect fm theme terminal da =
               (styleFg style)
         when (nt == NodeSlider) $ do
           txt <- getText (ctxNodeArena ctx) idx
-          let lbl = sliderLabelText txt
-              track = sliderTrackBounds (ctxHostProfile ctx) fm lbl x y w h
+          let track = sliderTrackBounds (ctxHostProfile ctx) fm txt x y w h
               tx = rectX track
               ty = rectY track
               tw = rectW track

@@ -62,7 +62,6 @@ module NanoUI.Frame.TextEdit
   ) where
 
 import Control.Monad (forM, forM_, unless, when)
-import Data.Char (isAlphaNum, isSpace)
 import Data.IORef (readIORef, writeIORef)
 import qualified Data.IntMap.Strict as IM
 import Data.Text (Text)
@@ -74,11 +73,17 @@ import NanoUI.Context
   , TextInputMenu (..)
   , WidgetStore (..)
   , getStore
+  , getTextFieldClickCell
+  , getTextInputDrag
+  , getTextInputMenu
   , intKey
   , isDisabled
   , markDirty
   , markEscapeConsumed
   , setStore
+  , setTextFieldClickCell
+  , setTextInputDrag
+  , setTextInputMenu
   , slotAnchor
   , slotCursor
   , slotKey
@@ -157,45 +162,19 @@ import NanoUI.Widgets.TextArea
   , applyTextAreaMenuAction
   , loadTextAreaState
   , saveTextAreaState
-  , textAreaMenuActionEnabled
   )
 import qualified NanoUI.Widgets.TextArea as TA
 import qualified NanoUI.Widgets.TextBuffer as TB
-import NanoUI.Widgets.TextInput (applyTextInputMenuAction, textInputMenuActionEnabled)
-
-data TextCharClass = TextWord | TextSpace | TextOther
-  deriving (Eq)
-
-textCharClass :: Char -> TextCharClass
-textCharClass c
-  | isAlphaNum c || c == '_' = TextWord
-  | isSpace c = TextSpace
-  | otherwise = TextOther
+import NanoUI.Widgets.TextCommon
+  ( menuActionEnabled
+  , textWordBounds
+  )
+import NanoUI.Widgets.TextInput (applyTextInputMenuAction)
 
 textCharAtX :: Context -> Text -> Float -> Float -> IO Int
 textCharAtX ctx text startX mouseX =
   let fm = ctxFontMetrics ctx
    in pure (textIndexAtX (ctxHostProfile ctx) fm text (max 0 (mouseX - startX)))
-
-textWordBounds :: Text -> Int -> (Int, Int)
-textWordBounds text raw
-  | T.null text = (0, 0)
-  | otherwise =
-      let n = T.length text
-          i = max 0 (min (n - 1) raw)
-          cls = textCharClass (T.index text i)
-          lo = goLeft cls i
-          hi = goRight cls n i + 1
-       in (lo, hi)
-  where
-    goLeft cls i
-      | i <= 0 = 0
-      | textCharClass (T.index text (i - 1)) == cls = goLeft cls (i - 1)
-      | otherwise = i
-    goRight cls n i
-      | i + 1 >= n = i
-      | textCharClass (T.index text (i + 1)) == cls = goRight cls n (i + 1)
-      | otherwise = i
 
 data TextEditMenuRow
   = TextEditMenuSep
@@ -329,7 +308,7 @@ openTextEditMenu ctx inp =
         fm <- pure (ctxFontMetrics ctx)
         menuW <- textEditMenuWidth ctx
         let menuRect = textEditMenuRectAt (ctxHostProfile ctx) fm (v2X mouse) (v2Y mouse) menuW (inputWindowSize inp)
-        writeIORef (ctxTextInputMenu ctx) (Just (TextInputMenu wid menuRect))
+        setTextInputMenu ctx (Just (TextInputMenu wid menuRect))
         markDirty ctx
 
 textFieldWidgetAtMouse :: Context -> V2 -> IO (Maybe WidgetId)
@@ -357,7 +336,7 @@ textFieldWidgetAtMouse ctx mouse = do
 finalizeTextEditMenuPick :: Context -> Input -> IO ()
 finalizeTextEditMenuPick ctx inp =
   when (inputMousePressed inp) $ do
-    mMenu <- readIORef (ctxTextInputMenu ctx)
+    mMenu <- getTextInputMenu ctx
     case mMenu of
       Nothing -> pure ()
       Just menu ->
@@ -366,39 +345,39 @@ finalizeTextEditMenuPick ctx inp =
          in when (rectContains rect mouse) $ do
               let fm = ctxFontMetrics ctx
               case textEditMenuPickAction (ctxHostProfile ctx) rect fm mouse of
-                Nothing -> writeIORef (ctxTextInputMenu ctx) Nothing
+                Nothing -> setTextInputMenu ctx Nothing
                 Just idx -> do
                   enabled <- textFieldMenuActionEnabled ctx (textInputMenuWidget menu) idx
                   if enabled
                     then applyTextFieldMenuAction ctx (textInputMenuWidget menu) idx
                     else do
-                      writeIORef (ctxTextInputMenu ctx) Nothing
+                      setTextInputMenu ctx Nothing
                       markDirty ctx
 
 closeTextEditMenuOnOutsideClick :: Context -> Input -> IO ()
 closeTextEditMenuOnOutsideClick ctx inp =
   when (inputMousePressed inp || inputMouseRightPressed inp) $ do
-    mMenu <- readIORef (ctxTextInputMenu ctx)
+    mMenu <- getTextInputMenu ctx
     case mMenu of
       Nothing -> pure ()
       Just menu -> do
         let mouse = inputMousePos inp
         unless (rectContains (textEditMenuRect menu) mouse) $
-          writeIORef (ctxTextInputMenu ctx) Nothing
+          setTextInputMenu ctx Nothing
 
 closeTextEditMenuOnEscape :: Context -> Input -> IO ()
 closeTextEditMenuOnEscape ctx inp =
   when (inputKeysElem KeyEscape (inputKeys inp)) $
-    readIORef (ctxTextInputMenu ctx) >>= \case
+    getTextInputMenu ctx >>= \case
       Nothing -> pure ()
       Just _ -> do
-        writeIORef (ctxTextInputMenu ctx) Nothing
+        setTextInputMenu ctx Nothing
         markEscapeConsumed ctx
         markDirty ctx
 
 textEditMenuCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
 textEditMenuCursorKind ctx inp = do
-  mMenu <- readIORef (ctxTextInputMenu ctx)
+  mMenu <- getTextInputMenu ctx
   case mMenu of
     Nothing -> pure Nothing
     Just menu -> do
@@ -416,7 +395,7 @@ textEditMenuCursorKind ctx inp = do
 
 drawTextEditMenuOverlays :: Context -> Input -> IO ()
 drawTextEditMenuOverlays ctx inp = do
-  mMenu <- readIORef (ctxTextInputMenu ctx)
+  mMenu <- getTextInputMenu ctx
   case mMenu of
     Nothing -> pure ()
     Just menu -> do
@@ -470,7 +449,7 @@ drawTextEditMenuOverlays ctx inp = do
 
 collectTextEditMenuSpans :: Context -> Input -> IO [(Rect, T.Text, Color, Color, Rect)]
 collectTextEditMenuSpans ctx inp = do
-  mMenu <- readIORef (ctxTextInputMenu ctx)
+  mMenu <- getTextInputMenu ctx
   case mMenu of
     Nothing -> pure []
     Just menu -> do
@@ -571,12 +550,12 @@ normalizeTextFieldClicks ctx wid flat row col multiline rawClicks = do
           , textFieldClickMultiline = multiline
           }
   if rawClicks <= 1
-    then writeIORef (ctxTextFieldClickCell ctx) (Just cell) >> pure rawClicks
+    then setTextFieldClickCell ctx (Just cell) >> pure rawClicks
     else do
-      mPrev <- readIORef (ctxTextFieldClickCell ctx)
+      mPrev <- getTextFieldClickCell ctx
       if maybe False (textFieldClickSameCell cell) mPrev
         then pure rawClicks
-        else writeIORef (ctxTextFieldClickCell ctx) (Just cell) >> pure 1
+        else setTextFieldClickCell ctx (Just cell) >> pure 1
 
 data TextInputGeom = TextInputGeom
   { tigFieldRect :: Rect
@@ -763,15 +742,11 @@ applyTextFieldMenuAction ctx wid item = do
 
 textFieldMenuActionEnabled :: Context -> WidgetId -> Int -> IO Bool
 textFieldMenuActionEnabled ctx wid item = do
-  mIdx <- findNodeByWidgetId ctx wid
-  case mIdx of
-    Nothing -> pure False
-    Just idx -> do
-      nt <- getNodeType (ctxNodeArena ctx) idx
-      case nt of
-        NodeTextInput -> textInputMenuActionEnabled ctx wid item
-        NodeTextArea -> textAreaMenuActionEnabled ctx wid item
-        _ -> pure False
+  store <- getStore ctx
+  let key = intKey wid
+      text = IM.findWithDefault "" key (storeText store)
+  mclip <- ctxClipboardGet ctx
+  pure (menuActionEnabled (not (T.null text)) mclip item)
 
 collapseTextFieldSelection :: Context -> WidgetId -> IO ()
 collapseTextFieldSelection ctx wid =
@@ -1133,9 +1108,9 @@ finalizeTextAreaMouse ctx inp wid = do
               True
               (max 1 (inputMouseClicks inp))
           applyTextAreaClick ctx wid hit row col clicks
-          writeIORef (ctxTextInputDrag ctx) (Just (TextInputDrag wid 0 row col True clicks))
+          setTextInputDrag ctx (Just (TextInputDrag wid 0 row col True clicks))
         else do
-          mDrag <- readIORef (ctxTextInputDrag ctx)
+          mDrag <- getTextInputDrag ctx
           case mDrag of
             Just drag
               | textInputDragWidget drag == wid
@@ -1183,9 +1158,9 @@ finalizeTextFieldMouse ctx inp = do
                 False
                 (max 1 (inputMouseClicks inp))
             applyTextInputClick ctx focus value idx clicks
-            writeIORef (ctxTextInputDrag ctx) (Just (TextInputDrag focus idx 0 0 False clicks))
+            setTextInputDrag ctx (Just (TextInputDrag focus idx 0 0 False clicks))
           else do
-            mDrag <- readIORef (ctxTextInputDrag ctx)
+            mDrag <- getTextInputDrag ctx
             case mDrag of
               Just drag
                 | textInputDragWidget drag == focus
@@ -1196,5 +1171,5 @@ finalizeTextFieldMouse ctx inp = do
               _ -> pure ()
       Nothing -> finalizeTextAreaMouse ctx inp focus
   when (inputMouseReleased inp) $
-    writeIORef (ctxTextInputDrag ctx) Nothing
+    setTextInputDrag ctx Nothing
 

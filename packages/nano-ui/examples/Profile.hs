@@ -18,11 +18,11 @@ main = do
           , inputMouseDown = True
           }
       ui =
-        column
+        column'
           (defaultLayout {layoutWidth = Grow 1, layoutHeight = Grow 1, layoutGap = 8})
           ( do
               replicateM_ 12 $
-                grid 8 (defaultLayout {layoutGap = 8}) $
+                grid' 8 (defaultLayout {layoutGap = 8}) $
                   replicateM_ 8 (void (button "OK"))
               label "nano-ui profile loop"
           )

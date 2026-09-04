@@ -5,8 +5,17 @@ module NanoUI.Widgets
   , RightClickable (..)
   , onRightClick
   , panel
+  , panel_
+  , panelWith
+  , panel'
   , row
+  , row_
+  , rowWith
+  , row'
   , column
+  , column_
+  , columnWith
+  , column'
   , grid
   , grid_
   , gridWith
@@ -16,7 +25,9 @@ module NanoUI.Widgets
   , gridPanelWith
   , gridPanel'
   , label
+  , labelWith
   , labelEx
+  , label'
   , button
   , checkbox
   , slider
@@ -47,7 +58,13 @@ module NanoUI.Widgets
   , menuSeparator
   , menuHeader
   , scroll
+  , scroll_
+  , scrollWith
+  , scroll'
   , scroll2D
+  , scroll2D_
+  , scroll2DWith
+  , scroll2D'
   , scrollArea
   , scrollArea2D
   , scrollAreaIdConfigured
@@ -263,6 +280,10 @@ import NanoUI.Widgets.ColorPicker (colorPicker)
 import NanoUI.Widgets.Drawing (DrawOp (..), DrawingBuild, drawing, drawingCached)
 import NanoUI.Widgets.Layout
   ( column
+  , column_
+  , columnWith
+  , column'
+  , flex
   , grid
   , grid_
   , gridWith
@@ -271,13 +292,26 @@ import NanoUI.Widgets.Layout
   , gridPanel_
   , gridPanelWith
   , gridPanel'
-  , flex
   , label
+  , labelWith
   , labelEx
+  , label'
   , panel
+  , panel_
+  , panelWith
+  , panel'
   , row
+  , row_
+  , rowWith
+  , row'
   , scroll
+  , scroll_
+  , scrollWith
+  , scroll'
   , scroll2D
+  , scroll2D_
+  , scroll2DWith
+  , scroll2D'
   , scrollArea
   , scrollArea2D
   , scrollAreaIdConfigured
@@ -293,6 +327,7 @@ import NanoUI.Widgets.Node
   , addWidget
   , addWidgetResp
   , addWidgetStyled
+  , addWidgetWithOptions
   , setChanged
   , setClicked
   , setHovered
@@ -374,13 +409,13 @@ box layout col = do
     )
 
 heading :: Ui :> es => Text -> Eff es ()
-heading txt = void (labelEx (tight . padXY 0 3 . fontHeading $ defaultLayout) txt)
+heading txt = void (labelWith (tight . padXY 0 3 . fontHeading) txt)
 
 muted :: Ui :> es => Text -> Eff es ()
-muted txt = void (labelEx (fillW . fontMuted $ defaultLayout) txt)
+muted txt = void (labelWith (fillW . fontMuted) txt)
 
 mono :: Ui :> es => Text -> Eff es ()
-mono txt = void (labelEx (fontMono defaultLayout) txt)
+mono txt = void (labelWith fontMono txt)
 
 styledLabel :: Ui :> es => FontVariant -> Layout -> Text -> Eff es Response
 styledLabel fvar l txt = labelEx (l {layoutFontVariant = fvar}) txt
@@ -396,7 +431,7 @@ kv k v = do
     keyLayout =
       if terminal then tight else tight . minW 88
   void $
-    row rowLayout $ do
+    row' rowLayout $ do
       void (labelEx (keyLayout defaultLayout) k)
       void (labelEx (tight . fillW . alignEnd $ defaultLayout) (T.stripEnd v))
 
@@ -420,7 +455,7 @@ kvMono k v = do
     kLayout = if terminal then kvMonoKeyTerminalLayout else kvMonoKeyLayout
     val = if T.isSuffixOf " " v then T.stripEnd v else v
   void $
-    row rLayout $ do
+    row' rLayout $ do
       void (labelEx kLayout k)
       void (labelEx kvMonoValLayout val)
 
@@ -434,10 +469,10 @@ kvBlock rows =
           (T.unlines [padK k <> "  " <> v | (k, v) <- rows])
 
 card :: Ui :> es => Eff es a -> Eff es a
-card = panel (minW 300 . padXY 12 10 . gap 8 . fillW $ defaultLayout)
+card = panelWith (minW 300 . padXY 12 10 . gap 8 . fillW)
 
 toolbar :: Ui :> es => Eff es a -> Eff es a
-toolbar = row (tight . gap 8 . alignMid . fillW $ defaultLayout)
+toolbar = rowWith (tight . gap 8 . alignMid . fillW)
 
 image :: Ui :> es => Layout -> ImageId -> Eff es Response
 image layout (ImageId tid) = do
@@ -515,10 +550,7 @@ sliderEx layout lbl minV maxV initial = do
     frac = if maxV > minV then (current - minV) / (maxV - minV) else 0
     host = ctxHostProfile ctx
     fm = ctxFontMetrics ctx
-    nodeText =
-      if isCellHost host
-        then sliderText lbl frac current
-        else lbl
+    nodeText = lbl
   resp <- addWidget wid NodeSlider nodeText frac layout
   active <- uiIO (readIORef (ctxActiveId ctx))
   blocked <- uiIO (getLastPointerBlocked ctx)
@@ -667,11 +699,10 @@ select lbl options initial = do
   let
     current = IM.findWithDefault initial key (storeInt store0)
     clamped = max 0 (min (length opts - 1) current)
-    nodeText = T.intercalate "\n" (lbl : opts)
   when (not (IM.member key (storeInt store0)))
     $ uiIO
     $ setStore ctx (store0 {storeInt = IM.insert key clamped (storeInt store0)})
-  resp <- addWidget wid NodeSelect nodeText 0 defaultLayout
+  resp <- addWidgetWithOptions wid NodeSelect lbl opts 0 defaultLayout
   inp <- askInput
   open <- uiIO $ do
     st <- getStore ctx

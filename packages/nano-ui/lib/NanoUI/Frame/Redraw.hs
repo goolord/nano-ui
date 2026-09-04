@@ -19,7 +19,12 @@ import NanoUI.Context
   ( Context (..)
   , anyAnimating
   , anySelectOpen
+  , getMenuPointerGesture
+  , getScrollDrag
   , getStore
+  , getTextInputMenu
+  , getWindowDrag
+  , getWindowResize
   , isDirty
   , modalActive
   )
@@ -50,9 +55,9 @@ needsRedrawIdle = needsRedrawBody
 -- Color picker and slider hold ctxActiveId without extra window/scroll refs.
 pointerDragActive :: Context -> IO Bool
 pointerDragActive ctx = do
-  winDrag <- isJust <$> readIORef (ctxWindowDrag ctx)
-  scrollDrag <- isJust <$> readIORef (ctxScrollDrag ctx)
-  winResize <- isJust <$> readIORef (ctxWindowResize ctx)
+  winDrag <- isJust <$> getWindowDrag ctx
+  scrollDrag <- isJust <$> getScrollDrag ctx
+  winResize <- isJust <$> getWindowResize ctx
   sliderOrPicker <- widgetDragActive ctx
   pure (winDrag || scrollDrag || winResize || sliderOrPicker)
 
@@ -74,8 +79,8 @@ needsRedrawBody ctx prev inp = do
   dirty <- isDirty ctx
   anim <- anyAnimating ctx
   hover <- hoverWouldChange ctx inp
-  mDrag <- readIORef (ctxScrollDrag ctx)
-  mWinDrag <- readIORef (ctxWindowDrag ctx)
+  mDrag <- getScrollDrag ctx
+  mWinDrag <- getWindowDrag ctx
   overlay <- overlayMenuOpen ctx
   edit <- textFieldActive ctx
   let overlayMove = overlay && inputMousePos prev /= inputMousePos inp
@@ -95,14 +100,14 @@ needsRedrawBody ctx prev inp = do
 overlayMenuOpen :: Context -> IO Bool
 overlayMenuOpen ctx = do
   store <- getStore ctx
-  menu <- readIORef (ctxTextInputMenu ctx)
+  menu <- getTextInputMenu ctx
   pure (anySelectOpen store || isJust menu)
 
 -- Focused text field or its context menu. Keep the loop live so typed bytes
 -- are not stuck behind SDL_WaitEvent.
 textFieldActive :: Context -> IO Bool
 textFieldActive ctx = do
-  menu <- readIORef (ctxTextInputMenu ctx)
+  menu <- getTextInputMenu ctx
   if isJust menu
     then pure True
     else do
@@ -156,7 +161,7 @@ hoverWouldChange ctx inp = do
 
 probeHotId :: Context -> V2 -> IO WidgetId
 probeHotId ctx mouse = do
-  gesture <- readIORef (ctxMenuPointerGesture ctx)
+  gesture <- getMenuPointerGesture ctx
   if gesture
     then pure (WidgetId 0)
     else do

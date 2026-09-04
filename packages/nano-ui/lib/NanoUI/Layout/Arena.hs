@@ -51,8 +51,11 @@ module NanoUI.Layout.Arena
   , setClipRect
   , snapshotLayoutRects
   , getText
+  , getOptions
+  , setOptions
   , getWidgetId
   , setWidgetId
+  , lookupNodeByWidgetId
   , lookupNodeByKey
   , getStyleIdx
   , setStyleIdx
@@ -68,6 +71,7 @@ module NanoUI.Layout.Arena
 
 import Control.Exception (bracket)
 import Control.Monad (forM_, when)
+import Data.Bits (shiftL, shiftR, (.&.), (.|.))
 import Data.HashTable.IO (BasicHashTable)
 import qualified Data.HashTable.IO as HT
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
@@ -83,7 +87,7 @@ import Data.Primitive.PrimArray
 import Data.Primitive.Types (Prim)
 import GHC.Exts (RealWorld)
 import Data.Text (Text)
-import Data.Word (Word8)
+import Data.Word (Word8, Word32, Word64)
 import qualified Data.Text as T
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Style (AlignX (..), AlignY (..), Direction (..), Layout (..), Padding (..), Sizing (..))
@@ -173,6 +177,7 @@ data NodeArenaArrays = NodeArenaArrays
   , naArrTags :: !(MutablePrimArray RealWorld Word8)
   , naArrTree :: !(MutablePrimArray RealWorld Int)
   , naArrTextStore :: !(MutableArray RealWorld Text)
+  , naArrOptionsStore :: !(MutableArray RealWorld [Text])
   }
 
 data NodeArena = NodeArena
@@ -188,7 +193,8 @@ data NodeArena = NodeArena
   , naScratchCross :: IORef (MutablePrimArray RealWorld Float)
   , naScratchOutMain :: IORef (MutablePrimArray RealWorld Float)
   , naScratchOutCross :: IORef (MutablePrimArray RealWorld Float)
-  , naIndex :: IORef (BasicHashTable WidgetId NodeIdx)
+  , naEpoch :: IORef Word32
+  , naIndex :: IORef (BasicHashTable WidgetId Word64)
   }
 
 initialCapacity :: Int
@@ -201,6 +207,7 @@ newNodeArenaArrays cap = do
   naArrTags <- newPrimArray (cap * 8)
   naArrTree <- newPrimArray (cap * 8)
   naArrTextStore <- newArray cap T.empty
+  naArrOptionsStore <- newArray cap []
   pure NodeArenaArrays {..}
 
 {-# INLINE newNodeArena #-}
@@ -219,6 +226,7 @@ newNodeArena = do
   naScratchCross <- newIORef =<< newPrimArray scratchCap
   naScratchOutMain <- newIORef =<< newPrimArray scratchCap
   naScratchOutCross <- newIORef =<< newPrimArray scratchCap
+  naEpoch <- newIORef 1
   naIndex <- newIORef =<< HT.new
   pure
     NodeArena
@@ -233,32 +241,21 @@ newNodeArena = do
       , naScratchCross
       , naScratchOutMain
       , naScratchOutCross
+      , naEpoch
       , naIndex
       }
 
 {-# INLINE resetNodeArena #-}
 resetNodeArena :: NodeArena -> IO ()
 resetNodeArena na = do
-  n <- readIORef (naCount na)
   writeIORef (naCount na) 0
-  when (n > 0) $ do
-    if n > 64
-      then writeIORef (naIndex na) =<< HT.new
-      else do
-        table <- readIORef (naIndex na)
-        clearWidgetIndex na table n
-
-clearWidgetIndex :: NodeArena -> BasicHashTable WidgetId NodeIdx -> Int -> IO ()
-clearWidgetIndex na table n = do
-  a <- arenaArrays na
-  let go !i
-        | i >= n = pure ()
-        | otherwise = do
-            w <- readPrimArray (naArrTree a) (i * 8 + 4)
-            let wid = WidgetId (fromIntegral w)
-            when (hashWidgetId wid /= 0) $ HT.delete table wid
-            go (i + 1)
-  go 0
+  !ep <- readIORef (naEpoch na)
+  let !ep' = ep + 1
+  if ep' == 0
+    then do
+      writeIORef (naEpoch na) 1
+      writeIORef (naIndex na) =<< HT.new
+    else writeIORef (naEpoch na) ep'
 
 {-# INLINE arenaCount #-}
 arenaCount :: NodeArena -> IO Int
@@ -297,6 +294,7 @@ ensureCapacity na needed = do
       naArrTags <- growPrimArrayCopy (naArrTags a) (cap * 8) (newCap * 8) 0
       naArrTree <- growPrimArrayCopy (naArrTree a) (cap * 8) (newCap * 8) 0
       naArrTextStore <- growTextStoreCopy (naArrTextStore a) cap newCap
+      naArrOptionsStore <- growOptionsStoreCopy (naArrOptionsStore a) cap newCap
       let newA = NodeArenaArrays {..}
       writeIORef (naArrays na) newA
       m <- readIORef (naArraysSnap na)
@@ -328,6 +326,16 @@ growTextStoreCopy arr oldCap newCap = do
     readArray arr i >>= writeArray newArr i
   forM_ [oldCap .. newCap - 1] $ \i ->
     writeArray newArr i T.empty
+  pure newArr
+
+{-# NOINLINE growOptionsStoreCopy #-}
+growOptionsStoreCopy :: MutableArray RealWorld [Text] -> Int -> Int -> IO (MutableArray RealWorld [Text])
+growOptionsStoreCopy arr oldCap newCap = do
+  newArr <- newArray newCap []
+  forM_ [0 .. oldCap - 1] $ \i ->
+    readArray arr i >>= writeArray newArr i
+  forM_ [oldCap .. newCap - 1] $ \i ->
+    writeArray newArr i []
   pure newArr
 
 {-# INLINE sizingTag #-}
@@ -438,6 +446,7 @@ addNode na nt parent dir wSiz hSiz pad gap minW minH maxW maxH grow ax ay = do
   writePrimArray (naArrTree a) (tBase + 5) 0
   writePrimArray (naArrTree a) (tBase + 6) (-1)
   writePrimArray (naArrTree a) (tBase + 7) 0
+  writeArray (naArrOptionsStore a) idx []
 
   if parent >= 0
     then do
@@ -702,12 +711,32 @@ getText na idx = do
     then pure T.empty
     else readArray (naArrTextStore a) ti
 
+{-# INLINE getOptions #-}
+getOptions :: NodeArena -> NodeIdx -> IO [Text]
+getOptions na idx = do
+  a <- arenaArrays na
+  readArray (naArrOptionsStore a) idx
+
+{-# INLINE setOptions #-}
+setOptions :: NodeArena -> NodeIdx -> [Text] -> IO ()
+setOptions na idx opts = do
+  a <- arenaArrays na
+  writeArray (naArrOptionsStore a) idx opts
+
 {-# INLINE getWidgetId #-}
 getWidgetId :: NodeArena -> NodeIdx -> IO WidgetId
 getWidgetId na idx = do
   a <- arenaArrays na
   w <- readPrimArray (naArrTree a) (idx * 8 + 4)
   pure (WidgetId (fromIntegral w))
+
+{-# INLINE packEpochNode #-}
+packEpochNode :: Word32 -> NodeIdx -> Word64
+packEpochNode !epoch !idx = (fromIntegral epoch `shiftL` 32) .|. (fromIntegral idx .&. 0xFFFFFFFF)
+
+{-# INLINE unpackEpochNode #-}
+unpackEpochNode :: Word64 -> (Word32, NodeIdx)
+unpackEpochNode !w = (fromIntegral (w `shiftR` 32), fromIntegral (w .&. 0xFFFFFFFF))
 
 {-# INLINE setWidgetId #-}
 setWidgetId :: NodeArena -> NodeIdx -> WidgetId -> IO ()
@@ -716,16 +745,27 @@ setWidgetId na idx wid = do
   let WidgetId w = wid
   writePrimArray (naArrTree a) (idx * 8 + 4) (fromIntegral w)
   when (hashWidgetId wid /= 0) $ do
+    !ep <- readIORef (naEpoch na)
     table <- readIORef (naIndex na)
-    HT.insert table wid idx
+    HT.insert table wid (packEpochNode ep idx)
+
+{-# INLINE lookupNodeByWidgetId #-}
+lookupNodeByWidgetId :: NodeArena -> WidgetId -> IO (Maybe NodeIdx)
+lookupNodeByWidgetId na wid
+  | hashWidgetId wid == 0 = pure Nothing
+  | otherwise = do
+      table <- readIORef (naIndex na)
+      mVal <- HT.lookup table wid
+      case mVal of
+        Nothing -> pure Nothing
+        Just val -> do
+          !ep <- readIORef (naEpoch na)
+          let (!entryEp, !idx) = unpackEpochNode val
+          pure (if entryEp == ep then Just idx else Nothing)
 
 {-# INLINE lookupNodeByKey #-}
 lookupNodeByKey :: NodeArena -> Int -> IO (Maybe NodeIdx)
-lookupNodeByKey na key
-  | key == 0 = pure Nothing
-  | otherwise = do
-      table <- readIORef (naIndex na)
-      HT.lookup table (WidgetId (fromIntegral key))
+lookupNodeByKey na key = lookupNodeByWidgetId na (WidgetId (fromIntegral key))
 
 {-# INLINE getNodeValue #-}
 getNodeValue :: NodeArena -> NodeIdx -> IO Float

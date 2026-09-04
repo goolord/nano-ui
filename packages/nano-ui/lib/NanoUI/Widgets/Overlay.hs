@@ -47,7 +47,6 @@ import NanoUI.Style
   , Direction (..)
   , Padding (..)
   , Sizing (..)
-  , defaultLayout
   , grow
   , padB
   , padL
@@ -72,8 +71,8 @@ import NanoUI.Widgets.Behavior (useDismissable)
 import NanoUI.Widgets.Layout
   ( flex
   , labelEx
-  , row
-  , scroll
+  , row'
+  , scrollWith
   , sep
   )
 import NanoUI.Widgets.Node
@@ -163,7 +162,7 @@ overlay kind open title child
           pure prev
         (closeResp, r) <- do
           close <-
-            row (titleBarLayoutFor host barH) $ do
+            row' (titleBarLayoutFor host barH) $ do
               when (not (T.null title)) $
                 case kind of
                   ModalOverlay ->
@@ -187,7 +186,7 @@ overlay kind open title child
           r <-
             if isModal && not (isCellHost host)
               then child
-              else scroll (tight . grow $ defaultLayout) child
+              else scrollWith (tight . grow) child
           pure (close, r)
         uiIO $ do
           when isModal (endModal ctx)

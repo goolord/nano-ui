@@ -4,6 +4,9 @@ module NanoUI.State
   ( -- * Local State Hooks
     useState
   , useFlag
+  , useInt
+  , useFloat
+  , useEnum
   , useText
   , useToggle
   , useTableSort
@@ -36,7 +39,7 @@ import NanoUI.Widgets
   , slider
   , textInput
   )
-import NanoUI.Widgets.Animate (useFlag, useState, useText, useToggle)
+import NanoUI.Widgets.Animate (useEnum, useFlag, useFloat, useInt, useState, useText, useToggle)
 import NanoUI.Widgets.Node (Response)
 import NanoUI.Widgets.Table (useTableSort)
 

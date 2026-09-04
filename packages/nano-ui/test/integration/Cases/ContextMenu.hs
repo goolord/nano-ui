@@ -17,7 +17,7 @@ import NanoUI.Testing.Assert (assert, eval2Ui, evalUi, withInput)
 import NanoUI.Testing.Harness (centerOf, clickPair, rightClickPair, runRightClick, warmup2)
 
 menuUi :: NanoUI (Response, Maybe (Response, Response))
-menuUi = column defaultLayout $ do
+menuUi = column $ do
   btn <- button "Target Button"
   mInside <- contextMenu btn $ do
     cut <- menuItem "Cut"
@@ -99,7 +99,7 @@ runContextMenuAreaTest ctx failed = do
 runContextMenuSpansTest :: Context -> IORef Int -> IO ()
 runContextMenuSpansTest ctx failed = do
   let inp0 = withInput 640 480
-      ui = column defaultLayout $ do
+      ui = column $ do
         btn <- button "Target Button"
         void $ contextMenu btn $ do
           void $ menuItem "Special Action"
@@ -117,7 +117,7 @@ runContextMenuScrollPosTest ctx failed = do
   let inp0 = withInput 200 200
       ui =
         scrollArea (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 80}) $
-          column defaultLayout $ do
+          column $ do
             mapM_ (\_ -> void (label "pad line")) [(1 :: Int) .. 40]
             btn <- button "Menu Target"
             void $ contextMenu btn $ void (menuItem "Scroll Cut")

@@ -17,7 +17,7 @@ import NanoUI.Testing.Harness (centerOf, warmup2)
 runTooltipHoverTest :: Context -> IORef Int -> IO ()
 runTooltipHoverTest ctx failed = do
   let inp0 = withInput 640 480
-      ui = column defaultLayout $ do
+      ui = column $ do
         btn <- button "Help Target"
         tooltip btn "Helpful advice here"
 
@@ -37,10 +37,10 @@ runTooltipHoverTest ctx failed = do
 runTooltipWidgetTest :: Context -> IORef Int -> IO ()
 runTooltipWidgetTest ctx failed = do
   let inp0 = withInput 640 480
-      ui = column defaultLayout $ do
+      ui = column $ do
         btn <- button "Rich Info"
         tooltipWidget btn $ do
-          row defaultLayout $ do
+          row $ do
             void (label "[Icon]")
             label "Rich tooltip body text"
 
@@ -70,7 +70,7 @@ runTooltipSpansTest ctx failed = do
 runTooltipIdStableTest :: Context -> IORef Int -> IO ()
 runTooltipIdStableTest ctx failed = do
   let inp0 = withInput 640 480
-      ui = column defaultLayout $ do
+      ui = column $ do
         a <- button "Help Target"
         tooltip a "tip"
         b <- button "After"
@@ -86,7 +86,7 @@ runTooltipScrollPosTest ctx failed = do
   let inp0 = withInput 200 200
       ui =
         scrollArea (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 80}) $
-          column defaultLayout $ do
+          column $ do
             mapM_ (\_ -> void (label "pad line")) [(1 :: Int) .. 40]
             btn <- button "Tip Target"
             tooltip btn "Scrolled tip text"

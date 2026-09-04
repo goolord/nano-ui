@@ -56,7 +56,7 @@ runVtTest _ failed = do
 runCellsTest :: Context -> IORef Int -> IO ()
 runCellsTest ctx failed = do
   let inp = withInput 200 80
-      ui = column (defaultLayout {layoutWidth = Grow 1, layoutHeight = Grow 1}) (label "hello")
+      ui = columnWith grow (label "hello")
   (_, _, draw, _) <- runFrame ctx inp ui
   spans <- collectTextSpans ctx
   cells <- rasterize 40 10 draw spans

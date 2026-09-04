@@ -512,22 +512,42 @@ charLinesIO lineW maxW txt acc =
         then pure acc
         else charLinesIO lineW maxW rest (line : acc)
 
+{-# INLINE lineWidth #-}
 lineWidth :: FontMetrics -> Text -> Float
-lineWidth fm line =
-  T.foldl' (\w c -> w + fmAdvance fm c) 0 line
+lineWidth fm line
+  | T.null line = 0
+  | otherwise =
+      let !spaceAdv = fmAdvance fm ' '
+          !xAdv = fmAdvance fm 'x'
+          !mAdv = fmAdvance fm 'M'
+       in if spaceAdv == xAdv && xAdv == mAdv
+            then fromIntegral (T.length line) * spaceAdv
+            else T.foldl' (\ !w c -> w + fmAdvance fm c) 0 line
 
 takeWidthAdvance :: (Char -> Float) -> Float -> Text -> (Text, Text)
-takeWidthAdvance advance maxW txt =
-  let (!len, _) = T.foldl' step (0, 0.0 :: Float) txt
-   in if len <= 0
-        then
-          if T.null txt
-            then (txt, T.empty)
-            else (T.take 1 txt, T.drop 1 txt)
-        else
-          if len >= T.length txt
-            then (txt, T.empty)
-            else (T.take len txt, T.drop len txt)
+takeWidthAdvance advance maxW txt
+  | T.null txt = (txt, T.empty)
+  | maxW <= 0 = (T.empty, txt)
+  | otherwise =
+      let !adv = advance ' '
+          !xAdv = advance 'x'
+          !mAdv = advance 'M'
+       in if adv == xAdv && xAdv == mAdv && adv > 0
+            then
+              let !count = floor (maxW / adv)
+                  !n = T.length txt
+               in if count >= n
+                    then (txt, T.empty)
+                    else if count <= 0
+                      then (T.take 1 txt, T.drop 1 txt)
+                      else (T.take count txt, T.drop count txt)
+            else
+              let (!len, _) = T.foldl' step (0, 0.0 :: Float) txt
+               in if len <= 0
+                    then (T.take 1 txt, T.drop 1 txt)
+                    else if len >= T.length txt
+                      then (txt, T.empty)
+                      else (T.take len txt, T.drop len txt)
   where
     step (!len, !w) c =
       let w' = w + advance c

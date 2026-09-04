@@ -475,7 +475,7 @@ checkLabelAlignEnd failed ctx = do
     boxW = tw + 2 * ix + 4
     inp = emptyInput {inputWindowSize = Size (boxW + 8) 8}
     ui =
-      row (fixedW boxW . tight . gap 0 $ defaultLayout) $
+      rowWith (fixedW boxW . tight . gap 0) $
         labelEx (fillW . alignEnd . tight $ defaultLayout) "ab"
   _ <- runFrame ctx inp ui
   (lab, _, _, _) <- runFrame ctx inp ui

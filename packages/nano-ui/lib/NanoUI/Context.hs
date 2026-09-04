@@ -13,6 +13,26 @@ module NanoUI.Context
   , AnimationState (..)
   , DrawingCacheState (..)
   , DrawFitCache (..)
+  , InteractionState (..)
+  , initialInteractionState
+  , getScrollDrag
+  , setScrollDrag
+  , getTextInputDrag
+  , setTextInputDrag
+  , getTextFieldClickCell
+  , setTextFieldClickCell
+  , getTextInputMenu
+  , setTextInputMenu
+  , getSelectDropPress
+  , setSelectDropPress
+  , getOpenSelectDrop
+  , setOpenSelectDrop
+  , getMenuPointerGesture
+  , setMenuPointerGesture
+  , getWindowDrag
+  , setWindowDrag
+  , getWindowResize
+  , setWindowResize
   , intKey
   , markDirty
   , modifyIORefList
@@ -77,6 +97,7 @@ module NanoUI.Context
   , clearMeasureCache
   , withExternalText
   , withTheme
+  , withDefaultLayoutIO
   , withIcons
   , withHostProfile
   , withClipboard
@@ -247,7 +268,7 @@ import NanoUI.Store
   , slotScrollLinkY
   , slotWinSize
   )
-import NanoUI.Style (Layout, Theme, defaultTheme)
+import NanoUI.Style (Layout, Theme, defaultLayout, defaultTheme)
 import NanoUI.Types
   ( Damage (..)
   , DamageBounds (..)
@@ -338,6 +359,8 @@ data WindowResizeDrag = WindowResizeDrag
   , wrdMaxW :: Float
   , wrdMaxH :: Float
   }
+  deriving (Eq, Show)
+
 data DamageState = DamageState
   { dsDirty :: !Bool
   , dsDamage :: !Damage
@@ -418,6 +441,32 @@ initialDrawingCacheState = DrawingCacheState
   , dcsWidgetNodeTypes = Nothing
   }
 
+data InteractionState = InteractionState
+  { isScrollDrag :: !(Maybe (WidgetId, Float))
+  , isTextInputDrag :: !(Maybe TextInputDrag)
+  , isTextFieldClickCell :: !(Maybe TextFieldClickCell)
+  , isTextInputMenu :: !(Maybe TextInputMenu)
+  , isSelectDropPress :: !Bool
+  , isOpenSelectDrop :: !(Maybe (WidgetId, Rect))
+  , isMenuPointerGesture :: !Bool
+  , isWindowDrag :: !(Maybe (WidgetId, Float, Float))
+  , isWindowResize :: !(Maybe WindowResizeDrag)
+  }
+  deriving (Eq, Show)
+
+initialInteractionState :: InteractionState
+initialInteractionState = InteractionState
+  { isScrollDrag = Nothing
+  , isTextInputDrag = Nothing
+  , isTextFieldClickCell = Nothing
+  , isTextInputMenu = Nothing
+  , isSelectDropPress = False
+  , isOpenSelectDrop = Nothing
+  , isMenuPointerGesture = False
+  , isWindowDrag = Nothing
+  , isWindowResize = Nothing
+  }
+
 data Context = Context
   { ctxNodeArena :: NodeArena
   , ctxDrawArena :: DrawArena
@@ -447,26 +496,91 @@ data Context = Context
   , ctxFocusablesCap :: IORef Int
   , ctxSpanBase :: SpanArena
   , ctxSpanOverlay :: SpanArena
-  , ctxScrollDrag :: IORef (Maybe (WidgetId, Float))
-  , ctxTextInputDrag :: IORef (Maybe TextInputDrag)
-  , ctxTextFieldClickCell :: IORef (Maybe TextFieldClickCell)
-  , ctxTextInputMenu :: IORef (Maybe TextInputMenu)
+  , ctxInteractionState :: !(IORef InteractionState)
   , ctxClipboardGet :: IO (Maybe Text)
   , ctxClipboardSet :: Text -> IO Bool
-  , ctxSelectDropPress :: IORef Bool
-  , ctxOpenSelectDrop :: IORef (Maybe (WidgetId, Rect))
-  , ctxMenuPointerGesture :: IORef Bool
-  , ctxWindowDrag :: IORef (Maybe (WidgetId, Float, Float))
-  , ctxWindowResize :: IORef (Maybe WindowResizeDrag)
   , ctxImageAtlas :: ImageAtlas
   , ctxWakeLoop :: IORef (Maybe (IO ()))
   , ctxHost :: IORef (Map TypeRep Dynamic)
   , ctxHostProfile :: HostProfile
+  , ctxDefaultLayout :: IORef Layout
   }
 
 {-# INLINE intKey #-}
 intKey :: WidgetId -> Int
 intKey = fromIntegral . hashWidgetId
+
+{-# INLINE getScrollDrag #-}
+getScrollDrag :: Context -> IO (Maybe (WidgetId, Float))
+getScrollDrag ctx = isScrollDrag <$> readIORef (ctxInteractionState ctx)
+
+{-# INLINE setScrollDrag #-}
+setScrollDrag :: Context -> Maybe (WidgetId, Float) -> IO ()
+setScrollDrag ctx v = modifyIORef' (ctxInteractionState ctx) (\s -> s {isScrollDrag = v})
+
+{-# INLINE getTextInputDrag #-}
+getTextInputDrag :: Context -> IO (Maybe TextInputDrag)
+getTextInputDrag ctx = isTextInputDrag <$> readIORef (ctxInteractionState ctx)
+
+{-# INLINE setTextInputDrag #-}
+setTextInputDrag :: Context -> Maybe TextInputDrag -> IO ()
+setTextInputDrag ctx v = modifyIORef' (ctxInteractionState ctx) (\s -> s {isTextInputDrag = v})
+
+{-# INLINE getTextFieldClickCell #-}
+getTextFieldClickCell :: Context -> IO (Maybe TextFieldClickCell)
+getTextFieldClickCell ctx = isTextFieldClickCell <$> readIORef (ctxInteractionState ctx)
+
+{-# INLINE setTextFieldClickCell #-}
+setTextFieldClickCell :: Context -> Maybe TextFieldClickCell -> IO ()
+setTextFieldClickCell ctx v = modifyIORef' (ctxInteractionState ctx) (\s -> s {isTextFieldClickCell = v})
+
+{-# INLINE getTextInputMenu #-}
+getTextInputMenu :: Context -> IO (Maybe TextInputMenu)
+getTextInputMenu ctx = isTextInputMenu <$> readIORef (ctxInteractionState ctx)
+
+{-# INLINE setTextInputMenu #-}
+setTextInputMenu :: Context -> Maybe TextInputMenu -> IO ()
+setTextInputMenu ctx v = modifyIORef' (ctxInteractionState ctx) (\s -> s {isTextInputMenu = v})
+
+{-# INLINE getSelectDropPress #-}
+getSelectDropPress :: Context -> IO Bool
+getSelectDropPress ctx = isSelectDropPress <$> readIORef (ctxInteractionState ctx)
+
+{-# INLINE setSelectDropPress #-}
+setSelectDropPress :: Context -> Bool -> IO ()
+setSelectDropPress ctx v = modifyIORef' (ctxInteractionState ctx) (\s -> s {isSelectDropPress = v})
+
+{-# INLINE getOpenSelectDrop #-}
+getOpenSelectDrop :: Context -> IO (Maybe (WidgetId, Rect))
+getOpenSelectDrop ctx = isOpenSelectDrop <$> readIORef (ctxInteractionState ctx)
+
+{-# INLINE setOpenSelectDrop #-}
+setOpenSelectDrop :: Context -> Maybe (WidgetId, Rect) -> IO ()
+setOpenSelectDrop ctx v = modifyIORef' (ctxInteractionState ctx) (\s -> s {isOpenSelectDrop = v})
+
+{-# INLINE getMenuPointerGesture #-}
+getMenuPointerGesture :: Context -> IO Bool
+getMenuPointerGesture ctx = isMenuPointerGesture <$> readIORef (ctxInteractionState ctx)
+
+{-# INLINE setMenuPointerGesture #-}
+setMenuPointerGesture :: Context -> Bool -> IO ()
+setMenuPointerGesture ctx v = modifyIORef' (ctxInteractionState ctx) (\s -> s {isMenuPointerGesture = v})
+
+{-# INLINE getWindowDrag #-}
+getWindowDrag :: Context -> IO (Maybe (WidgetId, Float, Float))
+getWindowDrag ctx = isWindowDrag <$> readIORef (ctxInteractionState ctx)
+
+{-# INLINE setWindowDrag #-}
+setWindowDrag :: Context -> Maybe (WidgetId, Float, Float) -> IO ()
+setWindowDrag ctx v = modifyIORef' (ctxInteractionState ctx) (\s -> s {isWindowDrag = v})
+
+{-# INLINE getWindowResize #-}
+getWindowResize :: Context -> IO (Maybe WindowResizeDrag)
+getWindowResize ctx = isWindowResize <$> readIORef (ctxInteractionState ctx)
+
+{-# INLINE setWindowResize #-}
+setWindowResize :: Context -> Maybe WindowResizeDrag -> IO ()
+setWindowResize ctx v = modifyIORef' (ctxInteractionState ctx) (\s -> s {isWindowResize = v})
 
 {-# INLINE requestDamage #-}
 requestDamage :: Context -> DamageRequest -> IO ()
@@ -973,6 +1087,11 @@ withExternalText ctx ext = ctx {ctxExternalText = ext}
 withTheme :: Context -> Theme -> Context
 withTheme ctx theme = ctx {ctxTheme = theme}
 
+withDefaultLayoutIO :: Context -> Layout -> IO Context
+withDefaultLayoutIO ctx lay = do
+  writeIORef (ctxDefaultLayout ctx) lay
+  pure ctx
+
 withIcons :: Context -> IconSet -> Context
 withIcons ctx iset = ctx {ctxIcons = iconsFor iset}
 
@@ -1044,18 +1163,11 @@ newContext = do
   ctxFocusablesCap <- newIORef initCap
   ctxSpanBase <- newSpanArena 64
   ctxSpanOverlay <- newSpanArena 64
-  ctxScrollDrag <- newIORef Nothing
-  ctxTextInputDrag <- newIORef Nothing
-  ctxTextFieldClickCell <- newIORef Nothing
-  ctxTextInputMenu <- newIORef Nothing
-  ctxSelectDropPress <- newIORef False
-  ctxOpenSelectDrop <- newIORef Nothing
-  ctxMenuPointerGesture <- newIORef False
-  ctxWindowDrag <- newIORef Nothing
-  ctxWindowResize <- newIORef Nothing
+  ctxInteractionState <- newIORef initialInteractionState
   ctxImageAtlas <- Atlas.newImageAtlas
   ctxWakeLoop <- newIORef Nothing
   ctxHost <- newIORef Map.empty
+  ctxDefaultLayout <- newIORef defaultLayout
   let fm0 = monospaceMetrics 12
   pure Context
     { ctxNodeArena = nodeArena
@@ -1086,21 +1198,14 @@ newContext = do
     , ctxFocusablesCap
     , ctxSpanBase
     , ctxSpanOverlay
-    , ctxScrollDrag
-    , ctxTextInputDrag
-    , ctxTextFieldClickCell
-    , ctxTextInputMenu
+    , ctxInteractionState
     , ctxClipboardGet = pure Nothing
     , ctxClipboardSet = \_ -> pure False
-    , ctxSelectDropPress
-    , ctxOpenSelectDrop
-    , ctxMenuPointerGesture
-    , ctxWindowDrag
-    , ctxWindowResize
     , ctxImageAtlas
     , ctxWakeLoop
     , ctxHost
     , ctxHostProfile = PixelHost
+    , ctxDefaultLayout
     }
 
 {-# INLINE newPixelHostContext #-}
@@ -1162,7 +1267,7 @@ getFocusablesPrim ctx = do
 textInputEditActive :: Context -> IO Bool
 textInputEditActive ctx = do
   focus <- readIORef (ctxFocusId ctx)
-  menu <- readIORef (ctxTextInputMenu ctx)
+  menu <- getTextInputMenu ctx
   pure (hashWidgetId focus /= 0 || menu /= Nothing)
 
 modalActive :: Context -> IO Bool
@@ -1193,7 +1298,7 @@ pointerBlockedByModal ctx = do
 
 pointerBlockedByOverlay :: Context -> V2 -> IO Bool
 pointerBlockedByOverlay ctx mouse = do
-  gesture <- readIORef (ctxMenuPointerGesture ctx)
+  gesture <- getMenuPointerGesture ctx
   blocked <-
     if gesture
       then pure True
@@ -1217,17 +1322,17 @@ pointerBlockedByOverlay ctx mouse = do
   pure blocked
 
 menuPointerGestureActive :: Context -> IO Bool
-menuPointerGestureActive ctx = readIORef (ctxMenuPointerGesture ctx)
+menuPointerGestureActive ctx = getMenuPointerGesture ctx
 
 armMenuPointerCapture :: Context -> Input -> IO ()
 armMenuPointerCapture ctx inp =
   when (inputMousePressed inp) $ do
     blocked <- overlayMenuBlocksPointer ctx (inputMousePos inp)
-    writeIORef (ctxMenuPointerGesture ctx) blocked
+    setMenuPointerGesture ctx blocked
 
 overlayMenuBlocksPointer :: Context -> V2 -> IO Bool
 overlayMenuBlocksPointer ctx mouse = do
-  mMenu <- readIORef (ctxTextInputMenu ctx)
+  mMenu <- getTextInputMenu ctx
   let textMenu =
         case mMenu of
           Just m | rectContains (textInputMenuRect m) mouse -> True
@@ -1235,7 +1340,7 @@ overlayMenuBlocksPointer ctx mouse = do
   if textMenu
     then pure True
     else do
-      mDrop <- readIORef (ctxOpenSelectDrop ctx)
+      mDrop <- getOpenSelectDrop ctx
       pure
         ( case mDrop of
             Just (_, r) -> rectContains r mouse

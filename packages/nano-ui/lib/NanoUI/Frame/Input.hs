@@ -22,12 +22,16 @@ import NanoUI.Context
   ( Context (..)
   , WidgetStore (..)
   , getFocusables
+  , getMenuPointerGesture
   , getStore
+  , getTextInputMenu
   , intKey
   , isDisabled
   , markDirty
   , pointerBlockedByOverlay
   , setAnimationValue
+  , setMenuPointerGesture
+  , setTextInputMenu
   , setStore
   , startAnimation
   )
@@ -117,7 +121,7 @@ refreshHover ctx inp = do
 finalizePointerPress :: Context -> Input -> IO ()
 finalizePointerPress ctx inp =
   when (inputMousePressed inp) $ do
-    gesture <- readIORef (ctxMenuPointerGesture ctx)
+    gesture <- getMenuPointerGesture ctx
     if gesture
       then writeIORef (ctxActiveId ctx) (WidgetId 0)
       else do
@@ -125,7 +129,7 @@ finalizePointerPress ctx inp =
         mMenu <- overlayMenuOwnerAt ctx mouse
         case mMenu of
           Just _ -> do
-            writeIORef (ctxMenuPointerGesture ctx) True
+            setMenuPointerGesture ctx True
             writeIORef (ctxActiveId ctx) (WidgetId 0)
           Nothing -> do
             mWid <- findTopWidgetUnderMouse ctx mouse isInteractiveNode
@@ -176,12 +180,12 @@ finalizePointerRelease ctx inp =
     then pure ()
     else do
       let mouse = inputMousePos inp
-      gesture <- readIORef (ctxMenuPointerGesture ctx)
+      gesture <- getMenuPointerGesture ctx
       mMenu <- overlayMenuOwnerAt ctx mouse
       if gesture || isJust mMenu
         then do
           writeIORef (ctxActiveId ctx) (WidgetId 0)
-          writeIORef (ctxMenuPointerGesture ctx) False
+          setMenuPointerGesture ctx False
         else do
           active <- readIORef (ctxActiveId ctx)
           when (hashWidgetId active /= 0) $ do
@@ -278,7 +282,7 @@ checkReleasedOver ctx count active mouse = go 0
 finalizeTextInputFocus :: Context -> Input -> IO ()
 finalizeTextInputFocus ctx inp =
   when (inputMousePressed inp) $ do
-    mMenu <- readIORef (ctxTextInputMenu ctx)
+    mMenu <- getTextInputMenu ctx
     let mouse = inputMousePos inp
     when (case mMenu of
             Just menu -> not (rectContains (textEditMenuRect menu) mouse)
@@ -291,7 +295,7 @@ finalizeTextInputFocus ctx inp =
           when (prevFocus /= WidgetId 0) $ markDirty ctx
           collapseTextFieldSelection ctx prevFocus
           writeIORef (ctxFocusId ctx) (WidgetId 0)
-          writeIORef (ctxTextInputMenu ctx) Nothing
+          setTextInputMenu ctx Nothing
         Just wid -> do
           writeIORef (ctxFocusId ctx) wid
           when (prevFocus /= wid) $ markDirty ctx

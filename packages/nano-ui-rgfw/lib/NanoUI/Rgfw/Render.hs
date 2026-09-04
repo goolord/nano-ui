@@ -10,7 +10,7 @@ import Control.Exception (finally)
 import Control.Monad (forM_, when)
 import Data.Bits ((.&.))
 import qualified Data.IntMap.Strict as IM
-import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
+import Data.IORef (IORef, atomicModifyIORef', newIORef)
 import Data.Maybe (fromMaybe, isJust)
 import Data.Primitive.PrimArray
   ( MutablePrimArray
@@ -28,8 +28,8 @@ import NanoUI.Context
   , WidgetStore (..)
   , ctxFontMetrics
   , ctxHostProfile
-  , ctxTextInputMenu
   , getStore
+  , getTextInputMenu
   , intKey
   )
 import NanoUI.Frame.Hit (widgetOverlayAllowed)
@@ -566,7 +566,7 @@ renderTextEditMenuOverlay ::
   V2 -> -- Mouse position for hover highlight
   IO ()
 renderTextEditMenuOverlay surf font !scale theme ctx mousePos = do
-  mMenu <- readIORef (ctxTextInputMenu ctx)
+  mMenu <- getTextInputMenu ctx
   case mMenu of
     Nothing -> pure ()
     Just menu -> do

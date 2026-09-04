@@ -21,6 +21,8 @@ import NanoUI.Context
   , getPrevRectByKey
   , getPrevRects
   , getStore
+  , getWindowDrag
+  , getWindowResize
   , intKey
   , markDirty
   , modalDamageFlip
@@ -211,8 +213,8 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
     fmap or $
       forM (IM.keys liveAnims) $ \k ->
         isNothing <$> getPrevRectByKey ctx k
-  winDragActive <- isJust <$> readIORef (ctxWindowDrag ctx)
-  winResizeActive <- isJust <$> readIORef (ctxWindowResize ctx)
+  winDragActive <- isJust <$> getWindowDrag ctx
+  winResizeActive <- isJust <$> getWindowResize ctx
   let keyedMoved = keyedRectDeltas oldRects newRects
   moved <- mapM (clipDeltaToScrollViewport ctx newRects) keyedMoved
   let stripFloat s = s {storeFloat = IM.empty}
@@ -316,7 +318,7 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
             backdropRs0 <- backdropRectsForInteraction ctx ids (clipKeys ++ [k | ReqKey k _ <- requests])
             let backdropRs = map (clipRectToWindow winW winH) backdropRs0
             let layoutRs = if onlyScrollFloatsChanged then [] else settledMoved
-                vanishedRs = IM.elems (IM.difference oldRects newRects)
+                vanishedRs = diffOld
                 floatingRs = floatingRectDamage oldFloatingRects newFloatingRects
                 base =
                   unionRects
@@ -377,15 +379,13 @@ resolveSingleKey ctx oldRects newRects k bounds = do
 
 floatingRectDamage :: IM.IntMap Rect -> IM.IntMap Rect -> [Rect]
 floatingRectDamage old new =
-  concat
-    [ case (IM.lookup k old, IM.lookup k new) of
-        (Nothing, Just r) -> [r]
-        (Just r, Nothing) -> [r]
-        (Just r1, Just r2)
-          | r1 /= r2 -> [r1, r2]
-        _ -> []
-    | k <- IM.keys (IM.union old new)
-    ]
+  concat $ IM.elems $
+    IM.mergeWithKey
+      (\_ r1 r2 -> if r1 /= r2 then Just [r1, r2] else Nothing)
+      (fmap (: []))
+      (fmap (: []))
+      old
+      new
 
 unionRects :: [Rect] -> Rect
 unionRects [] = Rect 0 0 0 0
@@ -393,16 +393,13 @@ unionRects (r : rs) = foldl' rectUnion r rs
 
 keyedRectDeltas :: IM.IntMap Rect -> IM.IntMap Rect -> [(Int, Rect)]
 keyedRectDeltas old new =
-  filter (nonzeroRect . snd) $
-    concat
-      [ [ (k, r) | (k, r) <- IM.toList (IM.difference old new) ]
-      , [ (k, r) | (k, r) <- IM.toList (IM.difference new old) ]
-      , [ (k, rectUnion a b)
-        | (k, a) <- IM.toList old
-        , Just b <- [IM.lookup k new]
-        , a /= b
-        ]
-      ]
+  filter (nonzeroRect . snd) $ IM.toList $
+    IM.mergeWithKey
+      (\_ a b -> if a /= b then Just (rectUnion a b) else Nothing)
+      id
+      id
+      old
+      new
 
 clipDeltaToScrollViewport :: Context -> IM.IntMap Rect -> (Int, Rect) -> IO Rect
 clipDeltaToScrollViewport ctx _newRects (k, r) = do
@@ -450,11 +447,13 @@ scrollOffsetDamage :: Context -> WidgetStore -> WidgetStore -> IO [Rect]
 scrollOffsetDamage ctx oldStore newStore = do
   let oldF = storeFloat oldStore
       newF = storeFloat newStore
-      changed =
-        [ k
-        | k <- IM.keys (IM.union oldF newF)
-        , IM.findWithDefault 0 k oldF /= IM.findWithDefault 0 k newF
-        ]
+      changed = IM.keys $
+        IM.mergeWithKey
+          (\_ a b -> if a /= b then Just () else Nothing)
+          (fmap (const ()) . IM.filter (/= 0))
+          (fmap (const ()) . IM.filter (/= 0))
+          oldF
+          newF
   fmap concat $
     forM changed $ \k ->
       findScrollNodeByStoreKey ctx k >>= \case

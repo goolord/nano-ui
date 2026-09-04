@@ -22,9 +22,8 @@ module NanoUI.Widgets.TextArea
   , textAreaMenuActionEnabled
   ) where
 
-import Control.Monad (void, when)
+import Control.Monad (when)
 import Data.Char (isPrint, toLower)
-import Data.IORef (writeIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.IntMap.Strict as IM
@@ -34,6 +33,8 @@ import NanoUI.Context
   , intKey
   , markDirty
   , setStore
+  , setTextInputDrag
+  , setTextInputMenu
   )
 import NanoUI.Id (WidgetId)
 import NanoUI.Input
@@ -59,6 +60,15 @@ import NanoUI.Store
   )
 import NanoUI.Style (Layout (..), Sizing (..), defaultLayout)
 import NanoUI.Widgets.TextBuffer as TB
+import NanoUI.Widgets.TextCommon
+  ( copyBufferText
+  , cutBufferText
+  , dispatchCtrlChar
+  , dispatchMenuAction
+  , isCtrlCombo
+  , menuActionEnabled
+  , pasteBufferText
+  )
 
 data Modifiers = Modifiers
   { modShift :: !Bool
@@ -354,67 +364,30 @@ saveTextAreaState key state store =
     (vw, vh) = viewportSize state
 
 textAreaCopy :: Context -> TextAreaState -> IO ()
-textAreaCopy ctx state = do
-  let txt =
-        case selectionRangeOf state of
-          Just (lo, hi) -> TB.selectedText lo hi (buffer state)
-          Nothing -> TB.toText (buffer state)
-  when (not (T.null txt)) $
-    void (ctxClipboardSet ctx txt)
+textAreaCopy ctx state = copyBufferText ctx (selectionAnchor state) (buffer state)
 
 textAreaCut :: Context -> TextAreaState -> IO TextAreaState
-textAreaCut ctx state =
-  case selectionRangeOf state of
-    Just (lo, hi) -> do
-      let slice = TB.selectedText lo hi (buffer state)
-      when (not (T.null slice)) $
-        void (ctxClipboardSet ctx slice)
-      pure (clearSelection (deleteSelection state))
-    Nothing -> do
-      let txt = TB.toText (buffer state)
-      if T.null txt
-        then pure state
-        else do
-          void (ctxClipboardSet ctx txt)
-          pure
-            ( clearSelection (initTextAreaState T.empty)
-                { viewportSize = viewportSize state
-                , lineHeight = lineHeight state
-                }
-            )
+textAreaCut ctx state = do
+  buf' <- cutBufferText ctx (selectionAnchor state) (buffer state)
+  let cur = TB.getCursor buf'
+  pure (ensureCaretVisible (clearSelection state {buffer = buf', selectionAnchor = cur}))
 
 textAreaPaste :: Context -> TextAreaState -> IO TextAreaState
 textAreaPaste ctx state = do
-  mtxt <- ctxClipboardGet ctx
-  case mtxt of
+  mbuf' <- pasteBufferText ctx True (selectionAnchor state) (buffer state)
+  case mbuf' of
     Nothing -> pure state
-    Just paste ->
-      case selectionRangeOf state of
-        Nothing ->
-          let buf' = TB.insertText paste (buffer state)
-              cur = TB.getCursor buf'
-           in pure (ensureCaretVisible state {buffer = buf', selectionAnchor = cur})
-        Just (lo, hi) ->
-          let buf' = TB.replaceRange paste lo hi (buffer state)
-              cur = TB.getCursor buf'
-           in pure (ensureCaretVisible state {buffer = buf', selectionAnchor = cur})
+    Just buf' -> do
+      let cur = TB.getCursor buf'
+      pure (ensureCaretVisible state {buffer = buf', selectionAnchor = cur})
 
 textAreaMenuActionEnabled :: Context -> WidgetId -> Int -> IO Bool
 textAreaMenuActionEnabled ctx wid item = do
   store <- getStore ctx
   let key = intKey wid
       text = IM.findWithDefault "" key (storeText store)
-      state = loadTextAreaState store key text
-      fullText = TB.toText (buffer state)
   mclip <- ctxClipboardGet ctx
-  let clipTxt = maybe "" id mclip
-  pure $
-    case item of
-      0 -> not (T.null fullText)
-      1 -> not (T.null fullText)
-      2 -> not (T.null clipTxt)
-      3 -> not (T.null fullText)
-      _ -> False
+  pure (menuActionEnabled (not (T.null text)) mclip item)
 
 applyTextAreaMenuAction :: Context -> WidgetId -> Int -> IO ()
 applyTextAreaMenuAction ctx wid item = do
@@ -422,15 +395,9 @@ applyTextAreaMenuAction ctx wid item = do
   let key = intKey wid
       text = IM.findWithDefault "" key (storeText store)
       s0 = loadTextAreaState store key text
-  s1 <-
-    case item of
-      0 -> textAreaCut ctx s0
-      1 -> textAreaCopy ctx s0 >> pure s0
-      2 -> textAreaPaste ctx s0
-      3 -> pure (selectAllTextArea s0)
-      _ -> pure s0
+  s1 <- dispatchMenuAction (textAreaCut ctx) (textAreaCopy ctx) (textAreaPaste ctx) selectAllTextArea item s0
   setStore ctx (saveTextAreaState key s1 store)
-  writeIORef (ctxTextInputMenu ctx) Nothing
+  setTextInputMenu ctx Nothing
   markDirty ctx
 
 processTextArea :: Context -> Input -> Double -> Double -> Double -> TextAreaState -> IO TextAreaState
@@ -445,7 +412,7 @@ processTextArea ctx inp vpW vpH lineH s0 = do
       s1 = setTextAreaViewport (vpW, vpH) lineH s0
       ctrl = Inp.modCtrl (inputModifiers inp)
   when (not (T.null (inputChars inp)) || not (inputKeysNull (inputKeys inp))) $
-    writeIORef (ctxTextInputDrag ctx) Nothing
+    setTextInputDrag ctx Nothing
   s2 <-
     if ctrl
       then T.foldlM' (handleCtrlChar ctx) s1 (inputChars inp)
@@ -459,16 +426,14 @@ processTextArea ctx inp vpW vpH lineH s0 = do
         s3
         (inputKeys inp)
     )
-  where
-    isCtrlCombo c ch = c && T.elem ch "aAcCxXvV\x01\x03\x16\x18"
 
 handleCtrlChar :: Context -> TextAreaState -> Char -> IO TextAreaState
-handleCtrlChar ctx s ch
-  | ch `elem` ('a' : 'A' : '\x01' : []) = pure (selectAllTextArea s)
-  | ch `elem` ('c' : 'C' : '\ETX' : []) = textAreaCopy ctx s >> pure s
-  | ch `elem` ('x' : 'X' : '\x18' : []) = textAreaCut ctx s
-  | ch `elem` ('v' : 'V' : '\x16' : []) = textAreaPaste ctx s
-  | otherwise = pure s
+handleCtrlChar ctx =
+  dispatchCtrlChar
+    (pure . selectAllTextArea)
+    (textAreaCopy ctx)
+    (textAreaCut ctx)
+    (textAreaPaste ctx)
 
 mapKey :: Key -> Maybe KeyInput
 mapKey = \case

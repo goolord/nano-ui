@@ -35,7 +35,7 @@ import NanoUI.Widgets.TextBuffer (Cursor (..), getCursor, toText)
 runTextInputCursorTest :: Context -> IORef Int -> IO ()
 runTextInputCursorTest ctx failed = do
   let inp0 = withInput 320 120
-      ui = column defaultLayout (textInput "Name" "")
+      ui = column (textInput "Name" "")
   _ <- warmup2 ctx inp0 ui
   spans <- collectTextSpans ctx
   let labelPos = [(rectX r + rectW r / 2, rectY r + 0.5) | (r, txt, _, _, _) <- spans, txt == "Name"]
@@ -59,7 +59,7 @@ runTextInputCursorTest ctx failed = do
 runTextAreaCursorTest :: Context -> IORef Int -> IO ()
 runTextAreaCursorTest ctx failed = do
   let inp0 = withInput 320 220
-      ui = column defaultLayout (textArea "Notes" "Edit me.\nSecond line.")
+      ui = column (textArea "Notes" "Edit me.\nSecond line.")
   (resp, _) <- warmup2 ctx inp0 ui
   spans <- collectTextSpans ctx
   let labelPos = [(rectX r + rectW r / 2, rectY r + 0.5) | (r, txt, _, _, _) <- spans, txt == "Notes"]
@@ -84,7 +84,7 @@ runTextAreaCursorTest ctx failed = do
 runTextFieldHoverBoundaryTest :: Context -> IORef Int -> IO ()
 runTextFieldHoverBoundaryTest ctx failed = do
   let inp0 = withInput 320 220
-      ui = column defaultLayout (textArea "Notes" "Edit me.\nSecond line.")
+      ui = column (textArea "Notes" "Edit me.\nSecond line.")
   (resp, _) <- warmup2 ctx inp0 ui
   spans <- collectTextSpans ctx
   let labelPos = [(rectX r + rectW r / 2, rectY r + 0.5) | (r, txt, _, _, _) <- spans, txt == "Notes"]
@@ -110,7 +110,7 @@ runTextInputCutClearsSelectionTest ctx failed = do
   clipRef <- newIORef (Nothing :: Maybe T.Text)
   let ctx' = withClipboard ctx (readIORef clipRef) (\s -> writeIORef clipRef (Just s) >> pure True)
       inp0 = withInput 320 120
-      ui = column defaultLayout (textInput "Name" "hello")
+      ui = column (textInput "Name" "hello")
   _ <- warmup2 ctx' inp0 ui
   _ <- runFrame ctx' (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   let shiftLeft =
@@ -130,7 +130,7 @@ runTextAreaCutClearsSelectionTest ctx failed = do
   clipRef <- newIORef (Nothing :: Maybe T.Text)
   let ctx' = withClipboard ctx (readIORef clipRef) (\s -> writeIORef clipRef (Just s) >> pure True)
       inp0 = withInput 320 220
-      ui = column defaultLayout (textArea "Notes" "hello")
+      ui = column (textArea "Notes" "hello")
   (resp, _) <- warmup2 ctx' inp0 ui
   _ <- runFrame ctx' (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   _ <- runFrame ctx' (inp0 {inputChars = "\x01", inputModifiers = Modifiers False True False}) ui
@@ -150,7 +150,7 @@ runTextAreaCutClearsSelectionTest ctx failed = do
 runTextInputSelectionTest :: Context -> IORef Int -> IO ()
 runTextInputSelectionTest ctx failed = do
   let inp0 = withInput 320 120
-      ui = column defaultLayout (button "Other" >> textInput "Name" "hello")
+      ui = column (button "Other" >> textInput "Name" "hello")
   _ <- warmup2 ctx inp0 ui
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
@@ -166,7 +166,7 @@ runTextInputCtrlATest :: Context -> IORef Int -> IO ()
 runTextInputCtrlATest ctx failed = do
   term <- newCellContext
   let inp0 = withInput 320 120
-      ui = column defaultLayout (textInput "Name" "hello")
+      ui = column (textInput "Name" "hello")
   forM_ [ctx, term] $ \c -> do
     _ <- runFrame c inp0 ui
     _ <- runFrame c (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
@@ -179,7 +179,7 @@ runTextAreaCtrlATest ctx failed = do
   term <- newCellContext
   let initial = "line one\nline two\nline three"
       inp0 = withInput 320 220
-      ui = column defaultLayout (textArea "Notes" initial)
+      ui = column (textArea "Notes" initial)
   forM_ [ctx, term] $ \c -> do
     (resp, _) <- warmup2 c inp0 ui
     -- Tab into textarea to gain focus
@@ -201,7 +201,7 @@ runTextAreaCtrlATest ctx failed = do
   pix2 <- newContext
   cell2 <- newCellContext
   let initial2 = "abc\ndef"
-      ui2 = column defaultLayout (textArea "Notes2" initial2)
+      ui2 = column (textArea "Notes2" initial2)
   forM_ [pix2, cell2] $ \c -> do
     (resp2, _) <- warmup2 c inp0 ui2
     _ <- runFrame c (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui2
@@ -221,7 +221,7 @@ runTextAreaCtrlATest ctx failed = do
 runTextInputMouseSelectionTest :: Context -> IORef Int -> IO ()
 runTextInputMouseSelectionTest ctx failed = do
   let inp0 = withInput 320 120
-      ui = column defaultLayout (textInput "Name" "hello")
+      ui = column (textInput "Name" "hello")
   _ <- warmup2 ctx inp0 ui
   spans <- collectTextSpans ctx
   case [r | (r, txt, _, _, _) <- spans, txt == "hello"] of
@@ -239,8 +239,8 @@ runTextInputClickSelectTest _ failed = do
   wordCtx <- newContext
   allCtx <- newContext
   let inp0 = withInput 320 120
-      uiWord = column defaultLayout (textInput "Name" "hello world")
-      uiAll = column defaultLayout (textInput "Name" "hello")
+      uiWord = column (textInput "Name" "hello world")
+      uiAll = column (textInput "Name" "hello")
   _ <- warmup2 wordCtx inp0 uiWord
   spans <- collectTextSpans wordCtx
   case [r | (r, txt, _, _, _) <- spans, txt == "hello world"] of
@@ -273,7 +273,7 @@ runTextInputClipboardTest ctx failed = do
   clipRef <- newIORef (Nothing :: Maybe T.Text)
   let ctx' = withClipboard ctx (readIORef clipRef) (\s -> writeIORef clipRef (Just s) >> pure True)
       inp0 = withInput 320 120
-      ui = column defaultLayout (textInput "Name" "hello")
+      ui = column (textInput "Name" "hello")
   _ <- warmup2 ctx' inp0 ui
   _ <- runFrame ctx' (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   let selectAll = inp0 {inputChars = "a", inputModifiers = Modifiers False True False}
@@ -293,7 +293,7 @@ runTextInputCutMenuTest ctx failed = do
   clipRef <- newIORef (Nothing :: Maybe T.Text)
   let ctx' = withClipboard ctx (readIORef clipRef) (\s -> writeIORef clipRef (Just s) >> pure True)
       inp0 = withInput 320 160
-      ui = column defaultLayout (textInput "Name" "hello")
+      ui = column (textInput "Name" "hello")
   _ <- warmup2 ctx' inp0 ui
   _ <- runFrame ctx' (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   spans <- collectTextSpans ctx'
@@ -325,7 +325,7 @@ runTextInputMenuTest ctx failed = do
   clipRef <- newIORef (Just "pasted")
   let ctx' = withClipboard ctx (readIORef clipRef) (\s -> writeIORef clipRef (Just s) >> pure True)
       inp0 = withInput 320 160
-      ui = column defaultLayout (textInput "Name" "hello")
+      ui = column (textInput "Name" "hello")
   _ <- warmup2 ctx' inp0 ui
   _ <- runFrame ctx' (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   spans <- collectTextSpans ctx'
@@ -348,7 +348,7 @@ runTextInputMenuUnfocusedTest ctx failed = do
   clipRef <- newIORef (Just "pasted")
   let ctx' = withClipboard ctx (readIORef clipRef) (\s -> writeIORef clipRef (Just s) >> pure True)
       inp0 = withInput 320 160
-      ui = column defaultLayout (textInput "Name" "hello")
+      ui = column (textInput "Name" "hello")
   _ <- warmup2 ctx' inp0 ui
   spans <- collectTextSpans ctx'
   case [r | (r, txt, _, _, _) <- spans, txt == "hello"] of
@@ -361,14 +361,14 @@ runTextInputMenuUnfocusedTest ctx failed = do
 
 runTextInputSpanTest :: Context -> IORef Int -> IO ()
 runTextInputSpanTest ctx failed = do
-  _ <- runFrame ctx (withInput 320 120) (column defaultLayout (textInput "Name" "hello"))
+  _ <- runFrame ctx (withInput 320 120) (column (textInput "Name" "hello"))
   spans <- collectTextSpans ctx
   assertSpansHas failed "hello" spans
 
 runTextInputFocusSdlTest :: Context -> IORef Int -> IO ()
 runTextInputFocusSdlTest ctx failed = do
   let inp0 = withInput 320 120
-      ui = column defaultLayout (textInput "Name" "")
+      ui = column (textInput "Name" "")
   (resp, _) <- warmup2 ctx inp0 ui
   spans <- collectTextSpans ctx
   case [(rectX r + rectW r / 2, rectY r + 0.5) | (r, txt, _, _, _) <- spans, "Enter" `T.isInfixOf` txt] of
@@ -396,7 +396,7 @@ runTextInputFocusSdlTest ctx failed = do
 runButtonHoverAnimTest :: Context -> IORef Int -> IO ()
 runButtonHoverAnimTest ctx failed = do
   let inp0 = withDelta 200 100 0.016
-      ui = column defaultLayout (button "Hover")
+      ui = column (button "Hover")
   _ <- runFrame ctx inp0 ui
   let inp1 = inp0 {inputMousePos = V2 10 10}
   vals <- replicateM 5 (runFrame ctx inp1 ui >> getHotId ctx >>= getAnimationValue ctx)
@@ -409,7 +409,7 @@ runButtonHoverAnimTest ctx failed = do
 runButtonPressReleaseHoverTest :: Context -> IORef Int -> IO ()
 runButtonPressReleaseHoverTest ctx failed = do
   let inp0 = withDelta 200 100 0.016
-      ui = column defaultLayout (button "Hover")
+      ui = column (button "Hover")
       (press, release) = clickPair inp0 (V2 10 10)
   _ <- runFrame ctx inp0 ui
   _ <- runFrame ctx press ui
@@ -423,7 +423,7 @@ runTextInputFocusTest :: Context -> IORef Int -> IO ()
 runTextInputFocusTest _ failed = do
   ctx <- newCellContext
   let inp0 = withInput 200 100
-      ui = column defaultLayout (textInput "Name" "")
+      ui = column (textInput "Name" "")
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect rx ry _ _ = respRect resp
       inp1 = inp0 {inputMousePos = V2 (rx + 1) (ry + 0.5), inputMouseDown = True, inputMousePressed = True}
@@ -434,7 +434,7 @@ runTextInputFocusTest _ failed = do
 runTextInputDirtyTest :: Context -> IORef Int -> IO ()
 runTextInputDirtyTest _ failed = do
   ctx <- newCellContext
-  let ui = column defaultLayout (textInput "Name" "")
+  let ui = column (textInput "Name" "")
       inp0 = (withInput 200 100) {inputMousePos = V2 20 20}
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect rx ry _ _ = respRect resp
@@ -459,7 +459,7 @@ runTextInputFfCaretTest ctx failed = do
   assertEq failed (textIndexAtX host fm fs (lineWidth fm fs)) 6
   assertEq failed (textIndexAtX host fm fs (lineWidth fm (T.take 3 fs))) 3
   let inp0 = withInput 320 120
-      ui = column defaultLayout (textInput "Name" fs)
+      ui = column (textInput "Name" fs)
   _ <- warmup2 ctx inp0 ui
   spans <- collectTextSpans ctx
   assertSpansHas failed fs spans

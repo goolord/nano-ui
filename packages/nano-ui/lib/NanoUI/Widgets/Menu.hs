@@ -25,7 +25,7 @@ import NanoUI.Store (WidgetStore (..), slotKey, slotMenuOpen, slotMenuPos)
 import NanoUI.Style (Layout (..), defaultLayout, fillW, fontMuted, padXY, tight)
 import NanoUI.Types (PopupAnchor (..), PopupPlacement (..), V2 (..))
 import NanoUI.Widgets.Combinators (buttonStyled)
-import NanoUI.Widgets.Layout (column, columnResponse, labelEx, sep)
+import NanoUI.Widgets.Layout (columnResponse', columnWith, labelEx, sep)
 import NanoUI.Widgets.Node (Responding (..), Response (..))
 import NanoUI.Widgets.Popup (PopupConfig (..), popup)
 
@@ -60,7 +60,7 @@ contextMenuArea ::
   Eff es (a, Maybe b)
 contextMenuArea layout areaContent menuContent = do
   (isOpen0, pos0, openAt, close) <- useContextMenu
-  (areaRes, areaResp) <- columnResponse layout areaContent
+  (areaRes, areaResp) <- columnResponse' layout areaContent
   inp <- askInput
   let rightClick = respRightClicked areaResp
       mouse = inputMousePos inp
@@ -88,7 +88,7 @@ openMenuPopup isOpen pos child close = do
           , cfgDismissable = True
           , cfgOffset = 0
           }
-  (popupResp, mBody) <- popup isOpen cfg (column (tight defaultLayout) child)
+  (popupResp, mBody) <- popup isOpen cfg (columnWith tight child)
   inp <- askInput
   let picked = respHovered popupResp && inputMouseReleased inp
   when (respClicked popupResp || picked) close

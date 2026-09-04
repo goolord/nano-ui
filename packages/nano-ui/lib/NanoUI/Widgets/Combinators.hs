@@ -46,8 +46,8 @@ import NanoUI.Style
   )
 import NanoUI.Types (Rect (..), V2 (..), rectContains, v2X, v2Y)
 import NanoUI.Widgets.Layout
-  ( column
-  , row
+  ( column'
+  , row'
   , separator
   , spacer
   )
@@ -65,11 +65,11 @@ gridColumns = gridColumnsLay (tight $ defaultLayout {layoutGap = 0})
 gridColumnsLay :: (Ui :> es) => Layout -> [Int] -> [Layout] -> [Eff es ()] -> Eff es ()
 gridColumnsLay lay keys layouts cells =
   void $
-    row lay $
+    row' lay $
       mapM_
         ( \(n, (k, colLay, cell)) -> do
             when (n > 0) $ void separator
-            withKey k (column colLay cell)
+            withKey k (column' colLay cell)
         )
         (zip [0 :: Int ..] (zip3 keys layouts cells))
 
@@ -82,11 +82,11 @@ syncScroll master slave = do
     setScrollOffset ctx slave off
 
 headerRow :: (Ui :> es) => Layout -> Eff es a -> Eff es a
-headerRow = row
+headerRow = row'
 
 indentedRow :: (Ui :> es) => Int -> Layout -> Eff es a -> Eff es a
 indentedRow depth layout child =
-  row layout $ do
+  row' layout $ do
     when (depth > 0) $
       void (spacer (Fixed (fromIntegral depth * 12)) Fit)
     child
@@ -120,7 +120,7 @@ keyedRow = keyedRowLay (tight . fillW $ defaultLayout {layoutGap = 0})
 
 keyedRowLay :: (Ui :> es) => Layout -> [Int] -> (Int -> Eff es a) -> Eff es [a]
 keyedRowLay lay keys act =
-  row lay $
+  row' lay $
     mapM
       ( \(n, k) -> do
           when (n > 0) $ void separator

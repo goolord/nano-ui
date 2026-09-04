@@ -111,20 +111,20 @@ runOverlayPanelLiveTest _ failed = do
 runHeaderTopPadTest :: Context -> IORef Int -> IO ()
 runHeaderTopPadTest ctx failed = do
   let inp = withInput 800 600
-      ui = column (padAll 12 . gap 8 . grow $ defaultLayout) $
-             panel (padXY 16 12 . fillW $ defaultLayout) (label "nano-ui SDL3 demo")
+      ui = columnWith (padAll 12 . gap 8 . grow) $
+             panelWith (padXY 16 12 . fillW) (label "nano-ui SDL3 demo")
   _ <- runFrame ctx inp ui
   (resp, _, _, _) <- runFrame ctx inp ui
   assert failed (rectY (respRect resp) >= 24)
 
 runFitHeaderNoShrinkTest :: Context -> IORef Int -> IO ()
 runFitHeaderNoShrinkTest ctx failed = do
-  let header = panel (padXY 16 12 . fillW $ defaultLayout) (label "nano-ui SDL3 demo")
-      only = column (padAll 12 . grow $ defaultLayout) header
-      withBody = column (padAll 12 . gap 8 . grow $ defaultLayout) $ do
+  let header = panelWith (padXY 16 12 . fillW) (label "nano-ui SDL3 demo")
+      only = columnWith (padAll 12 . grow) header
+      withBody = columnWith (padAll 12 . gap 8 . grow) $ do
         h <- header
-        scroll (tight (grow defaultLayout)) $
-          column (fillW defaultLayout) (mapM_ (label_ . T.pack . show) [1 .. 40 :: Int])
+        scrollWith (tight . grow) $
+          columnWith fillW (mapM_ (label_ . T.pack . show) [1 .. 40 :: Int])
         pure h
       tall = withInput 400 800
       short = withInput 400 200
@@ -210,13 +210,13 @@ runOverlayClickThroughTest _ failed = do
   let
     inp0 = withInput 300 220
     windowUi = do
-      outsides <- column defaultLayout (replicateM 10 (button "Outside"))
+      outsides <- column (replicateM 10 (button "Outside"))
       (win, mInside) <-
         window True "Cover" $ do
           button "Inside"
       pure (outsides, win, mInside)
     modalUi = do
-      outsides <- column defaultLayout (replicateM 10 (button "Outside"))
+      outsides <- column (replicateM 10 (button "Outside"))
       (dlg, mInside) <-
         modal True "Cover" $ do
           button "Inside"
@@ -315,7 +315,7 @@ runPageWindowScrollTest ctx failed = do
           void (button "OK")
           w <- fmap fst $
             window True "Debug" $
-              column defaultLayout $
+              column $
                 mapM_ (\i -> label (T.pack ("line " <> show (i :: Int)))) [1 .. 30]
           pure w
         pure win
@@ -334,10 +334,10 @@ runSiblingWindowScrollTest ctx failed = do
       line1 = T.pack "line 1"
       title = T.pack "Debug"
       ui = do
-        scroll (tight (grow defaultLayout)) $ void (label "page")
+        scrollWith (tight . grow) $ void (label "page")
         fmap fst $
           window True "Debug" $
-            column defaultLayout $
+            column $
               mapM_ (\i -> label (T.pack ("line " <> show (i :: Int)))) [1 .. 30]
   win <- warmup2 ctx inp0 ui
   let Rect wx _ ww _ = respRect win
@@ -354,7 +354,7 @@ runWindowScrollOnlyDamageTest ctx failed = do
       ui =
         fmap fst $
           window True "Debug" $
-            column defaultLayout $
+            column $
               mapM_ (\i -> label (T.pack ("line " <> show (i :: Int)))) [1 .. 30]
   win <- warmup2 ctx inp0 ui
   let Rect wx wy ww wh = respRect win
@@ -401,7 +401,7 @@ runWindowScrollWheelTest ctx failed = do
       line1 = T.pack "line 1"
       title = T.pack "Scroll"
       ui = fmap fst $ window True "Scroll" $
-             column defaultLayout (mapM_ (\i -> label (T.pack ("line " <> show (i :: Int)))) [1 .. 24])
+             column (mapM_ (\i -> label (T.pack ("line " <> show (i :: Int)))) [1 .. 24])
   win <- warmup2 ctx inp0 ui
   let Rect wx _ ww wh = respRect win
   assert failed (ww > 0 && wh > 0)
@@ -493,7 +493,7 @@ runWindowResizeHaloHitTest ctx failed = do
 runSeparatorSpanTest :: Context -> IORef Int -> IO ()
 runSeparatorSpanTest ctx failed = do
   let inp = withInput 200 120
-      ui = column (fillW defaultLayout) $ do
+      ui = columnWith fillW $ do
         label_ "A"
         resp <- separator
         label_ "B"

@@ -40,7 +40,7 @@ main = do
     runFrame
       ctx
       inp
-      ( column
+      ( column'
           (defaultLayout {layoutWidth = Grow 1, layoutHeight = Grow 1})
           ( do
               (sort, setSort) <- useTableSort (SortCol 0 SortAsc)

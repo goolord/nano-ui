@@ -92,7 +92,6 @@ import NanoUI.WidgetText
   , colorPickerNewLabel
   , colorPickerToHex
   , selectChevronReserve
-  , sliderLabelText
   , sliderValueText
   , textInputFieldText
   , textInputTerminalText
@@ -378,8 +377,7 @@ widgetHitRect ctx nt idx x y w h = do
       case nt of
         NodeSlider -> do
           txt <- getText (ctxNodeArena ctx) idx
-          let lbl = sliderLabelText txt
-          pure (sliderTrackBounds (ctxHostProfile ctx) fm lbl x y w h)
+          pure (sliderTrackBounds (ctxHostProfile ctx) fm txt x y w h)
         NodeButton -> do
           si <- getStyleIdx (ctxNodeArena ctx) idx
           txt <- displayText ctx nt idx

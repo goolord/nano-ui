@@ -189,7 +189,7 @@ runTabsContentDamageTest _ failed = do
   let inp0 = withInputOff 320 200
       ui = do
         (click, setClick) <- useText ""
-        row defaultLayout $ do
+        row $ do
           btn <- button "OK"
           onClick btn (setClick "OK")
           _ <- tabs ("Controls" :: T.Text)

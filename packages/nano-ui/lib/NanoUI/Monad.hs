@@ -17,6 +17,9 @@ module NanoUI.Monad
   , currentId
   , askContext
   , askInput
+  , askDefaultLayout
+  , withDefaultLayout
+  , withLayout
   , askHost
   , uiFontMetrics
   , uiTheme
@@ -55,6 +58,7 @@ import Effectful.Dispatch.Static
   , StaticRep
   , evalStaticRep
   , getStaticRep
+  , localStaticRep
   , unsafeEff_
   )
 import NanoUI.Context
@@ -80,7 +84,7 @@ import NanoUI.Id
   , mix64
   , scopeTag
   )
-import NanoUI.Style (Theme)
+import NanoUI.Style (Layout, Theme)
 import NanoUI.Input (Input, inputMousePos, inputWindowSize)
 import NanoUI.Types (DamageBounds, Rect, Size (..), V2)
 
@@ -90,11 +94,13 @@ data Ui :: Effect
 
 type instance DispatchOf Ui = Static WithSideEffects
 
-data instance StaticRep Ui = UiRep !Context !Input
+data instance StaticRep Ui = UiRep !Context !Input !Layout
 
 {-# INLINE runUi #-}
 runUi :: IOE :> es => Context -> Input -> Eff (Ui : es) a -> Eff es a
-runUi ctx inp = evalStaticRep (UiRep ctx inp)
+runUi ctx inp ui = do
+  lay <- unsafeEff_ (readIORef (ctxDefaultLayout ctx))
+  evalStaticRep (UiRep ctx inp lay) ui
 
 {-# INLINE runNanoUI #-}
 runNanoUI :: Context -> Input -> NanoUI a -> IO a
@@ -192,8 +198,22 @@ withKey = keyed
 {-# INLINE askContext #-}
 askContext :: Ui :> es => Eff es Context
 askContext = do
-  UiRep ctx _ <- getStaticRep
+  UiRep ctx _ _ <- getStaticRep
   pure ctx
+
+{-# INLINE askDefaultLayout #-}
+askDefaultLayout :: Ui :> es => Eff es Layout
+askDefaultLayout = do
+  UiRep _ _ l <- getStaticRep
+  pure l
+
+{-# INLINE withDefaultLayout #-}
+withDefaultLayout :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es a
+withDefaultLayout f = localStaticRep (\(UiRep ctx inp l) -> UiRep ctx inp (f l))
+
+{-# INLINE withLayout #-}
+withLayout :: Ui :> es => Layout -> Eff es a -> Eff es a
+withLayout l = localStaticRep (\(UiRep ctx inp _) -> UiRep ctx inp l)
 
 {-# INLINE uiFontMetrics #-}
 uiFontMetrics :: Ui :> es => Eff es FontMetrics
@@ -210,7 +230,7 @@ uiMousePos = fmap inputMousePos askInput
 {-# INLINE askInput #-}
 askInput :: Ui :> es => Eff es Input
 askInput = do
-  UiRep _ inp <- getStaticRep
+  UiRep _ inp _ <- getStaticRep
   pure inp
 
 {-# INLINE windowSize #-}

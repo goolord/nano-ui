@@ -98,13 +98,13 @@ animUi = do
   let frames = floor (clock * 128) :: Int
       footage = T.pack (printf "%d+%02d" (frames `div` 16) (frames `mod` 16))
       lampGlow = sin (lampT * pi)
-  scroll (tight (grow defaultLayout)) $
-    column (padAll 28 . gap 18 . fillW $ defaultLayout) $ do
-      row (tight . gap 10 . alignMid . fillW $ defaultLayout) $ do
+  scrollWith (tight . grow) $
+    columnWith (padAll 28 . gap 18 . fillW) $ do
+      rowWith (tight . gap 10 . alignMid . fillW) $ do
         heading "16mm"
         flex
         withKey ("footage" :: String) (muted footage)
-      row (tight . gap 8 . alignMid . fillW $ defaultLayout) $ do
+      rowWith (tight . gap 8 . alignMid . fillW) $ do
         clickButton "Expose" (setExposed True >> setRewinding False)
         clickButton "Rewind" (setExposed False >> setRewinding True)
         clickButton (if lampOn then "Lamp off" else "Lamp on") (setLamp (not lampOn))
@@ -126,8 +126,8 @@ animUi = do
       when
         (rewinding && not exposed && abs clock < 0.001 && all settled laneTs)
         (setRewinding False)
-      panel (padXY 12 10 . gap 8 . fixedW (220 + 180 * bellowsT) $ defaultLayout) $ do
-        row (tight . gap 10 . alignMid . fillW $ defaultLayout) $ do
+      panelWith (padXY 12 10 . gap 8 . fixedW (220 + 180 * bellowsT)) $ do
+        rowWith (tight . gap 10 . alignMid . fillW) $ do
           clickButton
             (if bellowsOpen then "Collapse" else "Extend")
             (setBellows (not bellowsOpen))
@@ -149,11 +149,11 @@ lockThrow exposed throwSec =
 transport :: Bool -> Bool -> Float -> Float -> Float -> Float -> NanoUI [Float]
 transport exposed rewinding throwSec time wash glow = do
   let washCol = lerpColor film lamp (wash * (0.45 + 0.55 * glow))
-  column (tight . gap 0 . fillW $ defaultLayout) $ do
+  columnWith (tight . gap 0 . fillW) $ do
     perfs
     withKey ("washTop" :: String) (void (box (fixedH 10 . fillW $ defaultLayout) washCol))
     ts <-
-      column (padXY 0 10 . gap 10 . fillW $ defaultLayout) $
+      columnWith (padXY 0 10 . gap 10 . fillW) $
         sequence
           [ lane exposed rewinding throwSec time "Leader" EaseLinear
           , lane exposed rewinding throwSec time "Gate" EaseInCubic
@@ -168,7 +168,7 @@ transport exposed rewinding throwSec time wash glow = do
 
 perfs :: NanoUI ()
 perfs =
-  row (tight . gap 0 . alignMid . fillW $ defaultLayout) $ do
+  rowWith (tight . gap 0 . alignMid . fillW) $ do
     withKey ("perfL" :: String) (void (box (fixedWH 12 18 defaultLayout) film))
     forM_ [0 .. 16 :: Int] $ \i ->
       withKey i $ do
@@ -219,11 +219,11 @@ lane exposed rewinding throwSec time name ease = do
 trackRow :: T.Text -> Float -> Color -> NanoUI ()
 trackRow name t shuttle =
   withKey name $
-    row (tight . gap 12 . alignMid . fillW $ defaultLayout) $ do
+    rowWith (tight . gap 12 . alignMid . fillW) $ do
       void (labelEx (tight . fixedW 72 $ defaultLayout) name)
-      column (tight . gap 0 . fillW $ defaultLayout) $ do
+      columnWith (tight . gap 0 . fillW) $ do
         let travel = 394.0 :: Float
-        row (tight . alignMid . fillW $ defaultLayout) $ do
+        rowWith (tight . alignMid . fillW) $ do
           void (box (fixedWH 4 22 defaultLayout) film)
           void (spacer (Fixed (max 0 (t * travel))) Fit)
           void (box (fixedWH 16 16 defaultLayout) shuttle)

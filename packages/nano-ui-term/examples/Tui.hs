@@ -51,23 +51,23 @@ tuiApp :: TuiClick -> NanoUI ()
 tuiApp st = do
   (aboutOpen, setAbout) <- useFlag False
   (debugOpen, setDebug) <- useFlag False
-  column page $ do
+  column' page $ do
     void $
-      panel inset $
+      panel' inset $
         scrollArea page $
-          column stack $ do
+          column' stack $ do
             heading "nano-ui"
             muted "Immediate-mode GUI for Haskell."
             sep
             checked <-
-              row (stack {layoutHeight = Fit}) $ do
+              row' (stack {layoutHeight = Fit}) $ do
                 ok <- button "OK"
                 when (respClicked ok) $ emit (Clicked "OK")
                 cancel <- button "Cancel"
                 when (respClicked cancel) $ emit (Clicked "Cancel")
                 (_, c) <- checkbox "Feature" False
                 pure c
-            row (stack {layoutHeight = Fit}) $ do
+            row' (stack {layoutHeight = Fit}) $ do
               clickButton "About" (setAbout True)
               clickButton "Debug" (setDebug True)
             sep
@@ -87,7 +87,7 @@ tuiApp st = do
               , tab 1 "Logs" $ do
                   muted "Log Stream"
                   (_, _) <-
-                    scrollArea (page {layoutHeight = Fixed 4}) $ column stack $ do
+                    scrollArea (page {layoutHeight = Fixed 4}) $ column' stack $ do
                       _ <- label "Log line 1: system online"
                       _ <- label "Log line 2: arena reset"
                       _ <- label "Log line 3: ready"
@@ -119,7 +119,7 @@ tuiApp st = do
         heading "nano-ui"
         muted "Immediate-mode GUI for Haskell."
         muted "Terminal backend demo."
-        row (stack {layoutWidth = Grow 1, layoutHeight = Fit}) $ do
+        row' (stack {layoutWidth = Grow 1, layoutHeight = Fit}) $ do
           flex
           clickButton "Close" (setAbout False)
     onClick aboutResp (setAbout False)

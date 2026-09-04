@@ -13,7 +13,19 @@ import Data.IORef (readIORef)
 import Data.Maybe (isJust)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Text as T
-import NanoUI.Context (Context (..), WidgetStore (..), getHotId, getScrollOffset, getScrollOffset2D, getStore, intKey, isDisabled, isSelectOpen)
+import NanoUI.Context
+  ( Context (..)
+  , WidgetStore (..)
+  , getHotId
+  , getScrollDrag
+  , getScrollOffset
+  , getScrollOffset2D
+  , getSelectDropPress
+  , getStore
+  , intKey
+  , isDisabled
+  , isSelectOpen
+  )
 import NanoUI.Font (FontMetrics, sliderTrackBounds)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input
@@ -32,6 +44,7 @@ import NanoUI.Layout.Arena
   , getDirection
   , getNodeType
   , getNodeValue
+  , getOptions
   , getPadding
   , getRect
   , getStyleIdx
@@ -41,7 +54,7 @@ import NanoUI.Layout.Arena
   )
 import NanoUI.Layout.Solve (scrollBarSlotOf)
 import NanoUI.Types (HostProfile, Rect (..), V2 (..), rectContains, v2X, v2Y)
-import NanoUI.WidgetText (isTableHeaderStyle, selectOptions, sliderLabelText)
+import NanoUI.WidgetText (isTableHeaderStyle)
 import NanoUI.Frame.Chrome (widgetNodeTypeTable)
 import NanoUI.Frame.Hit (findNodeByWidgetId, scrollHitRect, nodePointVisible)
 import NanoUI.Frame.Scroll (scrollBarLayout, ScrollBarLayout (..))
@@ -101,7 +114,7 @@ uiCursorKind ctx inp = do
 selectDropdownCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
 selectDropdownCursorKind ctx inp = do
   let mouse = inputMousePos inp
-  dropPress <- readIORef (ctxSelectDropPress ctx)
+  dropPress <- getSelectDropPress ctx
   store <- getStore ctx
   count <- arenaCount (ctxNodeArena ctx)
   let go idx
@@ -114,8 +127,7 @@ selectDropdownCursorKind ctx inp = do
                 wid <- getWidgetId (ctxNodeArena ctx) idx
                 let key = intKey wid
                     open = isSelectOpen store key
-                txt <- getText (ctxNodeArena ctx) idx
-                let (_, opts) = selectOptions txt
+                opts <- getOptions (ctxNodeArena ctx) idx
                 (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
                 let fm = ctxFontMetrics ctx
                     dropRect = selectDropRect (ctxHostProfile ctx) fm x y w h (length opts)
@@ -127,7 +139,7 @@ selectDropdownCursorKind ctx inp = do
 
 scrollThumbCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
 scrollThumbCursorKind ctx inp = do
-  mDrag <- readIORef (ctxScrollDrag ctx)
+  mDrag <- getScrollDrag ctx
   let clicking = inputMouseDown inp
   if clicking && isJust mDrag
     then pure (Just UiCursorGrabbing)
@@ -251,9 +263,7 @@ sliderCursorKind ctx wid mouse inp = do
       lbl <-
         findNodeByWidgetId ctx wid >>= \case
           Nothing -> pure T.empty
-          Just idx -> do
-            txt <- getText (ctxNodeArena ctx) idx
-            pure (sliderLabelText txt)
+          Just idx -> getText (ctxNodeArena ctx) idx
       pure $
         case mrect of
           Nothing -> UiCursorDefault
