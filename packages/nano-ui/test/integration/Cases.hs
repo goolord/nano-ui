@@ -421,6 +421,13 @@ runCheckboxTest ctx failed = do
   _ <- runFrame ctx press ui
   ((_, checked), _, _, _) <- runFrame ctx release ui
   assert failed checked
+  ((_, checked2), _, _, _) <- runFrame ctx inp0 ui
+  assert failed checked2
+  _ <- runFrame ctx press ui
+  ((_, checked3), _, _, _) <- runFrame ctx release ui
+  assert failed (not checked3)
+  ((_, checked4), _, _, _) <- runFrame ctx inp0 ui
+  assert failed (not checked4)
 
 runSliderTest :: Context -> IORef Int -> IO ()
 runSliderTest ctx failed = do

@@ -22,10 +22,8 @@ import NanoUI.Context
   ( Context (..)
   , TextInputDrag (..)
   , WidgetStore (..)
-  , boolInt
   , getFocusables
   , getStore
-  , intBool
   , intKey
   , isDisabled
   , markDirty
@@ -208,18 +206,6 @@ finalizePointerRelease ctx inp =
                 visible <- nodeClippedHit ctx idx rect mouse
                 when visible $
                   case nt of
-                    NodeCheckbox -> do
-                      store <- getStore ctx
-                      let key = intKey wid
-                          current =
-                            intBool (IM.findWithDefault 0 key (storeInt store))
-                          newVal = not current
-                      setStore
-                        ctx
-                        ( store
-                            { storeInt = IM.insert key (boolInt newVal) (storeInt store)
-                            }
-                        )
                     NodeRadio -> do
                       parent <- getParent (ctxNodeArena ctx) idx
                       when (parent >= 0) $ do
@@ -263,7 +249,7 @@ finalizePointerRelease ctx inp =
 
 postsLayoutClick :: NodeType -> Bool
 postsLayoutClick nt =
-  nt == NodeTree || nt == NodeSelect
+  nt == NodeTree || nt == NodeSelect || nt == NodeCheckbox
 
 inUiClickHit :: Context -> WidgetId -> V2 -> IO Bool
 inUiClickHit ctx wid mouse = do
