@@ -603,6 +603,12 @@ selftest = do
     clickPos ctx' env base feat0
     spansOn <- collectTextSpans ctx'
     unless (hasText "on" spansOn) $ fail "selftest: checkbox did not turn Feature on"
+    clickPos ctx' env base feat0
+    spansOff <- collectTextSpans ctx'
+    unless (hasText "off" spansOff) $ fail "selftest: checkbox did not turn Feature off"
+    clickPos ctx' env base feat0
+    spansOn2 <- collectTextSpans ctx'
+    unless (hasText "on" spansOn2) $ fail "selftest: checkbox did not turn Feature on again"
     light <- requireSpan "selftest: Light radio" (findExact "Light" spansOn)
     clickPos ctx' env base light
     spansTheme <- collectTextSpans ctx'

@@ -150,6 +150,7 @@ import NanoUI.Context
   , getStore
   , intKey
   , isDisabled
+  , markDirty
   , pointerBlockedByModal
   , registerFocusable
   , setStore
@@ -478,7 +479,10 @@ checkbox txt initial = do
     clicked = respClicked resp
     display = if clicked then not current else current
   when clicked $
-    uiIO $ setStore ctx (store {storeInt = IM.insert key (boolInt display) (storeInt store)})
+    uiIO $ do
+      st <- getStore ctx
+      setStore ctx (st {storeInt = IM.insert key (boolInt display) (storeInt st)})
+      markDirty ctx
   pure (setChanged clicked resp, display)
 
 slider ::
