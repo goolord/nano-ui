@@ -142,6 +142,7 @@ testSpecs =
   , TestSpec "table-2d-scroll-sync" False runTable2DScrollSyncTest
   , TestSpec "tab-focus" False runTabFocusTest
   , TestSpec "select-initial" False runSelectTest
+  , TestSpec "select-enum" False runEnumSelectTest
   , TestSpec "select-dropdown" False runSelectDropdownTest
   , TestSpec "select-dropdown-hover" False runSelectDropdownHoverTest
   , TestSpec "select-drop-flush" True runSelectDropFlushTest

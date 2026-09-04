@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module NanoUI.Widgets.Radio (radioFieldset, boundedRadioFieldset, useRadio) where
+module NanoUI.Widgets.Radio (radioFieldset, boundedRadioFieldset, enumRadio, useRadio) where
 
 import Control.Monad (unless, void, when)
 import qualified Data.IntMap.Strict as IM
@@ -75,6 +75,9 @@ boundedRadioFieldset :: (Bounded a, Enum a, Ui :> es) => Text -> a -> (a -> Text
 boundedRadioFieldset legend initial encode =
   let vs = take 256 [minBound .. maxBound]
    in fmap (\(r, i) -> (r, toEnum (max 0 (min (length vs - 1) i)))) (radioFieldset legend (map encode vs) (fromEnum initial))
+
+enumRadio :: (Bounded a, Enum a, Show a, Ui :> es) => Text -> a -> Eff es (Response, a)
+enumRadio legend initial = boundedRadioFieldset legend initial (T.pack . show)
 
 useRadio :: (Enum a, Ui :> es) => a -> Eff es (a, a -> Eff es ())
 useRadio initial = fmap (\(c, s) -> (toEnum c, s . fromEnum)) (useSelection (fromEnum initial))
