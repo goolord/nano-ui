@@ -102,7 +102,7 @@ import NanoUI.Rgfw.Theme
   , tomorrowMinLightTheme
   , tomorrowNightMinDarkTheme
   )
-import NanoUI.Widgets.TextEdit (applyTextFieldMenuAction)
+import NanoUI.Frame.TextEdit (applyTextFieldMenuAction)
 import qualified RGFW.Raw as R
 
 assert :: String -> Bool -> IO ()

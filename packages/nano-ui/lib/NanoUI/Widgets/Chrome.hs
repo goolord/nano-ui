@@ -18,7 +18,7 @@ module NanoUI.Widgets.Chrome
 import Effectful (Eff, type (:>))
 import Data.Text (Text)
 import NanoUI.Font (layoutUnitScale)
-import NanoUI.WidgetText (closeButtonMarker)
+import NanoUI.WidgetText (buttonFlagClose)
 import NanoUI.Types (HostProfile, isCellHost)
 import NanoUI.Context (Context (..), isDisabled, registerFocusable)
 import NanoUI.Icons (Icons (..))
@@ -36,7 +36,7 @@ import NanoUI.Style
   , gap
   , tight
   )
-import NanoUI.Widgets.Node (Responding (..), Response, addWidget, setClicked, setHovered)
+import NanoUI.Widgets.Node (Responding (..), Response, addWidgetStyled, setClicked, setHovered)
 
 titleBarH :: Float
 titleBarH = 28
@@ -97,14 +97,14 @@ closeButton = do
   ctx <- askContext
   uiIO $ registerFocusable ctx wid
   let host = ctxHostProfile ctx
-      stored = closeButtonMarker <> iconClose (ctxIcons ctx)
+      stored = iconClose (ctxIcons ctx)
       layout =
         if isCellHost host
           then
             let slotW = 3
              in tight . fixedW slotW . alignMid $ defaultLayout
           else tight . fixedWH closeButtonSize closeButtonSize . alignMid $ defaultLayout
-  resp <- addWidget wid NodeButton stored 0 layout
+  resp <- addWidgetStyled wid NodeButton stored 0 layout buttonFlagClose Nothing
   disabled <- uiIO (isDisabled ctx wid)
   pure $
     setClicked (not disabled && respClicked resp) $

@@ -1,7 +1,9 @@
 {-# LANGUAGE DataKinds #-}
 
 module NanoUI.Frame.TextEdit
-  ( TextEditMenuRow (..)
+  ( -- * Menu types and layout
+    TextEditMenuRow (..)
+  , textEditMenuRows
   , textCharAtX
   , textWordBounds
   , textEditMenuRect
@@ -19,39 +21,76 @@ module NanoUI.Frame.TextEdit
   , collectTextEditMenuSpans
   , textEditMenuCursorKind
   , normalizeTextFieldClicks
+    -- * Text geometry and char lookup
+  , TextInputGeom (..)
+  , textInputGeom
+  , textInputFieldTextClip
+  , tagTextInputClippedSpans
+  , textInputGeomForWidget
+    -- * Caret and selection drawing primitives
+  , drawTextCaret
+  , drawTextSelectionLine
+  , drawTextInputCaret
+  , drawTextInputSelection
+    -- * Selection & interaction
+  , applyTextInputClick
+  , applyTextInputDrag
+  , updateTextInputSelection
+  , collapseTextFieldSelection
+  , collapseTextInputSelection
+  , applyTextFieldMenuAction
+  , textFieldMenuActionEnabled
   ) where
 
 import Control.Monad (forM, forM_, unless, when)
 import Data.Char (isAlphaNum, isSpace)
 import Data.IORef (readIORef, writeIORef)
+import qualified Data.IntMap.Strict as IM
 import Data.Text (Text)
 import qualified Data.Text as T
 import NanoUI.Context
   ( Context (..)
   , TextFieldClickCell (..)
   , TextInputMenu (..)
+  , WidgetStore (..)
+  , getStore
+  , intKey
   , isDisabled
   , markDirty
   , markEscapeConsumed
+  , setStore
+  , slotAnchor
+  , slotCursor
+  , slotKey
   )
-import NanoUI.Draw (pushRect, pushRoundedRect, pushText)
-import NanoUI.Font (FontMetrics, centeredTextY, layoutLineHeight, textIndexAtX, widgetContentInset)
+import NanoUI.Draw (DrawArena, pushRect, pushRoundedRect, pushText)
+import NanoUI.Font
+  ( FontMetrics
+  , centeredTextY
+  , fmLineHeight
+  , layoutLineHeight
+  , textDisplayWidth
+  , textIndexAtX
+  , widgetContentInset
+  )
 import NanoUI.Frame.Chrome
   ( fillStyledRect
   , overlayMenuStyle
   , padDropText
   , pushMenuShadow
   , strokeStyledRect
+  , textInputFocused
   , textInputMenuItemPadX
   , textInputMenuOuterPad
+  , textInputValue
   )
-import NanoUI.Input (UiCursorKind (..))
 import NanoUI.Frame.Hit (findNodeByWidgetId, nodeClippedHit, overlayHitAllowed, widgetOverlayAllowed)
-import NanoUI.Types (HostProfile, isCellHost)
-import NanoUI.Id (WidgetId (..))
+import NanoUI.Frame.Scroll.Geometry (padTextClipRect)
+import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input
   ( Input (..)
   , Key (..)
+  , UiCursorKind (..)
   , inputKeys
   , inputKeysElem
   , inputMousePos
@@ -59,11 +98,46 @@ import NanoUI.Input
   , inputMouseRightPressed
   , inputWindowSize
   )
-import NanoUI.Layout.Arena (NodeIdx, NodeType (NodeTextArea, NodeTextInput), findNodeRevM, getNodeType, getRect, getWidgetId)
-import NanoUI.WidgetText (textInputFieldHeight, textInputLabelGap)
-import NanoUI.Style (Style (..), Theme (..), themeAccent, themeSeparator)
-import NanoUI.Types (Color (..), Rect (..), Size (..), V2 (..), lerpColor, rectContains, rectH, rectW, rectX, rectY, v2X, v2Y)
-import NanoUI.Widgets.TextEdit (applyTextFieldMenuAction, textFieldMenuActionEnabled)
+import NanoUI.Layout.Arena
+  ( NodeIdx
+  , NodeType (NodeTextArea, NodeTextInput)
+  , arenaCount
+  , findNodeRevM
+  , getNodeType
+  , getRect
+  , getText
+  , getWidgetId
+  )
+import NanoUI.Store (slotTextAreaCol, slotTextAreaRow)
+import NanoUI.Style (Style (..), Theme (..), styleBg, styleFg, themeAccent, themeSeparator)
+import NanoUI.Types
+  ( Color (..)
+  , HostProfile
+  , Rect (..)
+  , Size (..)
+  , V2 (..)
+  , isCellHost
+  , lerpColor
+  , rectContains
+  , rectH
+  , rectIntersect
+  , rectOverlapArea
+  , rectW
+  , rectX
+  , rectY
+  , v2X
+  , v2Y
+  )
+import NanoUI.WidgetText (textInputFieldHeight, textInputFieldText, textInputLabelGap)
+import NanoUI.Widgets.TextArea
+  ( TextAreaState (..)
+  , applyTextAreaMenuAction
+  , loadTextAreaState
+  , saveTextAreaState
+  , textAreaMenuActionEnabled
+  )
+import qualified NanoUI.Widgets.TextBuffer as TB
+import NanoUI.Widgets.TextInput (applyTextInputMenuAction, textInputMenuActionEnabled)
 
 data TextCharClass = TextWord | TextSpace | TextOther
   deriving (Eq)
@@ -479,3 +553,230 @@ normalizeTextFieldClicks ctx wid flat row col multiline rawClicks = do
       if maybe False (textFieldClickSameCell cell) mPrev
         then pure rawClicks
         else writeIORef (ctxTextFieldClickCell ctx) (Just cell) >> pure 1
+
+data TextInputGeom = TextInputGeom
+  { tigFieldRect :: Rect
+  }
+  deriving (Eq, Show)
+
+textInputGeom :: HostProfile -> FontMetrics -> Float -> Float -> Float -> Float -> TextInputGeom
+textInputGeom host fm x y w _h =
+  let labelH = layoutLineHeight host fm
+      gap = textInputLabelGap fm
+      fieldH = textInputFieldHeight fm
+      fieldY = y + labelH + gap
+   in TextInputGeom {tigFieldRect = Rect x fieldY w fieldH}
+
+textInputFieldTextClip :: HostProfile -> TextInputGeom -> FontMetrics -> Rect
+textInputFieldTextClip host geom fm =
+  let field = tigFieldRect geom
+      (ix, iy) = widgetContentInset host fm
+   in Rect
+        (rectX field + ix)
+        (rectY field + iy)
+        (max 0 (rectW field - 2 * ix))
+        (max 0 (rectH field - 2 * iy))
+
+tagTextInputClippedSpans ::
+  HostProfile -> Rect -> Float -> Float -> Float -> Float -> FontMetrics -> [(Rect, T.Text, Color, Color)] -> [(Rect, T.Text, Color, Color, Rect)]
+tagTextInputClippedSpans host parentClip x y w h fm spans =
+  let geom = textInputGeom host fm x y w h
+      fieldClip = textInputFieldTextClip host geom fm
+      labelClip = Rect x y w (fmLineHeight fm)
+      tagOne (rect, txt, fg, bg) =
+        let clipRect = padTextClipRect rect
+            isField = rectOverlapArea fieldClip clipRect > rectOverlapArea labelClip clipRect
+            area = if isField then fieldClip else labelClip
+         in case rectIntersect area clipRect of
+              Nothing -> []
+              Just local ->
+                case rectIntersect parentClip local of
+                  Nothing -> []
+                  Just clip -> [(rect, txt, fg, bg, clip)]
+   in concatMap tagOne spans
+
+drawTextCaret :: DrawArena -> Float -> Float -> Float -> Color -> IO ()
+drawTextCaret da caretX caretY caretH fg =
+  pushRect da (Rect caretX caretY 1 caretH) fg
+
+drawTextSelectionLine :: DrawArena -> Float -> Float -> Float -> Float -> Color -> IO ()
+drawTextSelectionLine da selX selY selW selH selBg =
+  when (selW > 0) $
+    pushRect da (Rect selX selY (max 1 selW) (max 4 selH)) selBg
+
+drawTextInputSelection :: DrawArena -> Context -> NodeIdx -> Float -> Float -> Float -> Float -> Style -> IO ()
+drawTextInputSelection da ctx idx x y w h style = do
+  let terminal = isCellHost (ctxHostProfile ctx)
+  if terminal
+    then pure ()
+    else do
+      focus <- textInputFocused ctx idx
+      when focus $ do
+        value <- textInputValue ctx idx
+        wid <- getWidgetId (ctxNodeArena ctx) idx
+        store <- getStore ctx
+        let key = intKey wid
+            cursor = IM.findWithDefault (T.length value) (slotKey slotCursor key) (storeInt store)
+            anchor = IM.findWithDefault cursor (slotKey slotAnchor key) (storeInt store)
+            selLo = min anchor cursor
+            selHi = max anchor cursor
+            hasSel = selLo < selHi
+        when hasSel $ do
+          let fm = ctxFontMetrics ctx
+              geom = textInputGeom (ctxHostProfile ctx) fm x y w h
+              fieldRect = tigFieldRect geom
+              (ix, _) = widgetContentInset (ctxHostProfile ctx) fm
+              theme = ctxTheme ctx
+              accent = themeAccent theme
+              selBg = lerpColor accent (styleBg style) 0.55
+              host = ctxHostProfile ctx
+              wLo = textDisplayWidth host fm (T.take selLo value)
+              wHi = textDisplayWidth host fm (T.take selHi value)
+              lineH = layoutLineHeight host fm
+              ty = centeredTextY host fm (rectY fieldRect) (rectH fieldRect) lineH
+              selX = rectX fieldRect + ix + wLo
+              selW = wHi - wLo
+          drawTextSelectionLine da selX ty selW lineH selBg
+
+drawTextInputCaret :: DrawArena -> Context -> NodeIdx -> Float -> Float -> Float -> Float -> Style -> IO ()
+drawTextInputCaret da ctx idx x y w h style = do
+  let terminal = isCellHost (ctxHostProfile ctx)
+  if terminal
+    then pure ()
+    else do
+      focus <- textInputFocused ctx idx
+      when focus $ do
+        value <- textInputValue ctx idx
+        wid <- getWidgetId (ctxNodeArena ctx) idx
+        store <- getStore ctx
+        let key = intKey wid
+            cursor = IM.findWithDefault (T.length value) (slotKey slotCursor key) (storeInt store)
+        lbl <- getText (ctxNodeArena ctx) idx
+        let fm = ctxFontMetrics ctx
+            geom = textInputGeom (ctxHostProfile ctx) fm x y w h
+            fieldRect = tigFieldRect geom
+            (ix, _) = widgetContentInset (ctxHostProfile ctx) fm
+            fieldTxt = textInputFieldText lbl value focus
+            prefix = T.take (max 0 (min (T.length fieldTxt) cursor)) fieldTxt
+            host = ctxHostProfile ctx
+            pw = textDisplayWidth host fm prefix
+            lineH = layoutLineHeight host fm
+            ty = centeredTextY host fm (rectY fieldRect) (rectH fieldRect) lineH
+            caretX = rectX fieldRect + ix + pw
+            caretY = ty + 1
+            caretH = max 4 (lineH - 2)
+        drawTextCaret da caretX caretY caretH (styleFg style)
+
+applyTextInputClick :: Context -> WidgetId -> Text -> Int -> Int -> IO ()
+applyTextInputClick ctx wid value idx clicks
+  | clicks >= 3 = updateTextInputSelection ctx wid 0 (T.length value)
+  | clicks == 2 =
+      let (lo, hi) = textWordBounds value idx
+       in updateTextInputSelection ctx wid lo hi
+  | otherwise = updateTextInputSelection ctx wid idx idx
+
+applyTextInputDrag :: Context -> WidgetId -> Text -> Int -> Int -> Int -> IO ()
+applyTextInputDrag ctx wid value anchor idx clicks
+  | clicks >= 3 = updateTextInputSelection ctx wid 0 (T.length value)
+  | clicks == 2 =
+      let (a0, a1) = textWordBounds value anchor
+          (c0, c1) = textWordBounds value idx
+       in updateTextInputSelection ctx wid (min a0 c0) (max a1 c1)
+  | otherwise = updateTextInputSelection ctx wid anchor idx
+
+updateTextInputSelection :: Context -> WidgetId -> Int -> Int -> IO ()
+updateTextInputSelection ctx wid anchor cursor = do
+  store <- getStore ctx
+  let key = intKey wid
+      oldAnchor = IM.findWithDefault cursor (slotKey slotAnchor key) (storeInt store)
+      oldCursor = IM.findWithDefault 0 (slotKey slotCursor key) (storeInt store)
+  when (oldAnchor /= anchor || oldCursor /= cursor) $ do
+    setStore
+      ctx
+      ( store
+          { storeInt =
+              IM.insert (slotKey slotAnchor key) anchor $
+                IM.insert (slotKey slotCursor key) cursor (storeInt store)
+          }
+      )
+    markDirty ctx
+
+textInputGeomForWidget :: Context -> WidgetId -> IO (Maybe (Rect, Float, Text))
+textInputGeomForWidget ctx wid = do
+  count <- arenaCount (ctxNodeArena ctx)
+  go 0 count
+  where
+    go idx count
+      | idx >= count = pure Nothing
+      | otherwise = do
+          nt <- getNodeType (ctxNodeArena ctx) idx
+          if nt /= NodeTextInput
+            then go (idx + 1) count
+            else do
+              w' <- getWidgetId (ctxNodeArena ctx) idx
+              if w' /= wid
+                then go (idx + 1) count
+                else do
+                  (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+                  let fm = ctxFontMetrics ctx
+                      field = tigFieldRect (textInputGeom (ctxHostProfile ctx) fm x y w h)
+                      (ix, _) = widgetContentInset (ctxHostProfile ctx) fm
+                      contentX = rectX field + ix
+                  value <- textInputValue ctx idx
+                  pure (Just (field, contentX, value))
+
+applyTextFieldMenuAction :: Context -> WidgetId -> Int -> IO ()
+applyTextFieldMenuAction ctx wid item = do
+  mIdx <- findNodeByWidgetId ctx wid
+  case mIdx of
+    Nothing -> pure ()
+    Just idx -> do
+      nt <- getNodeType (ctxNodeArena ctx) idx
+      case nt of
+        NodeTextInput -> applyTextInputMenuAction ctx wid item
+        NodeTextArea -> applyTextAreaMenuAction ctx wid item
+        _ -> pure ()
+
+textFieldMenuActionEnabled :: Context -> WidgetId -> Int -> IO Bool
+textFieldMenuActionEnabled ctx wid item = do
+  mIdx <- findNodeByWidgetId ctx wid
+  case mIdx of
+    Nothing -> pure False
+    Just idx -> do
+      nt <- getNodeType (ctxNodeArena ctx) idx
+      case nt of
+        NodeTextInput -> textInputMenuActionEnabled ctx wid item
+        NodeTextArea -> textAreaMenuActionEnabled ctx wid item
+        _ -> pure False
+
+collapseTextFieldSelection :: Context -> WidgetId -> IO ()
+collapseTextFieldSelection ctx wid =
+  when (hashWidgetId wid /= 0) $ do
+    mIdx <- findNodeByWidgetId ctx wid
+    case mIdx of
+      Nothing -> pure ()
+      Just idx -> do
+        nt <- getNodeType (ctxNodeArena ctx) idx
+        case nt of
+          NodeTextInput -> collapseTextInputSelection ctx wid
+          NodeTextArea -> collapseTextAreaSelection ctx wid
+          _ -> pure ()
+
+collapseTextInputSelection :: Context -> WidgetId -> IO ()
+collapseTextInputSelection ctx wid = do
+  store <- getStore ctx
+  let key = intKey wid
+      cur = IM.findWithDefault 0 (slotKey slotCursor key) (storeInt store)
+  setStore ctx (store {storeInt = IM.insert (slotKey slotAnchor key) cur (storeInt store)})
+
+collapseTextAreaSelection :: Context -> WidgetId -> IO ()
+collapseTextAreaSelection ctx wid = do
+  store <- getStore ctx
+  let key = intKey wid
+      text = IM.findWithDefault "" key (storeText store)
+      row = IM.findWithDefault 0 (slotKey slotTextAreaRow key) (storeInt store)
+      col = IM.findWithDefault 0 (slotKey slotTextAreaCol key) (storeInt store)
+      state = loadTextAreaState store key text
+      state' = state {selectionAnchor = TB.Cursor row col}
+  setStore ctx (saveTextAreaState key state' store)
+

@@ -12,6 +12,8 @@ module NanoUI.Frame.Select
   , findSelectUnderMouse
   , overlayMenuOwnerAt
   , cacheOpenSelectDrop
+  , selectTextClip
+  , tagSelectClippedSpans
   ) where
 
 
@@ -40,8 +42,9 @@ import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), Key (..), foldInputKeys, inputKeys, inputMouseDown, inputMousePos, inputMousePressed)
 import NanoUI.Layout.Arena (NodeType (NodeSelect), arenaCount, findNodeRevM, getNodeType, getRect, getText, getWidgetId)
 import NanoUI.Style (Style (..), Theme (..), themeAccent)
-import NanoUI.Types (Color (..), Rect (..), V2 (..), rectContains, rectH, rectW, rectX, rectY, v2Y)
-import NanoUI.WidgetText (selectOptions)
+import NanoUI.Types (Color (..), Rect (..), V2 (..), rectContains, rectH, rectIntersect, rectW, rectX, rectY, v2Y)
+import NanoUI.Frame.Scroll.Geometry (padTextClipRect)
+import NanoUI.WidgetText (selectChevronReserve, selectOptions)
 import NanoUI.Frame.Chrome
   ( fillStyledRect
   , pushMenuShadow
@@ -538,4 +541,20 @@ collectSelectDropdownSpans ctx inp = do
                             rest <- go (idx + 1)
                             pure (concat itemSpans ++ rest)
   go 0
+
+selectTextClip :: HostProfile -> Float -> Float -> Float -> Float -> FontMetrics -> Rect
+selectTextClip host x y w h fm =
+  let (ix, _) = widgetContentInset host fm
+   in Rect (x + ix) y (max 0 (w - ix - selectChevronReserve)) (max 0 h)
+
+tagSelectClippedSpans ::
+  HostProfile -> Rect -> Float -> Float -> Float -> Float -> FontMetrics -> [(Rect, T.Text, Color, Color)] -> [(Rect, T.Text, Color, Color, Rect)]
+tagSelectClippedSpans host parentClip x y w h fm =
+  let textClip = padTextClipRect (selectTextClip host x y w h fm)
+   in concatMap
+        ( \(rect, txt, fg, bg) ->
+            case rectIntersect parentClip textClip of
+              Nothing -> []
+              Just clip -> [(rect, txt, fg, bg, clip)]
+        )
 

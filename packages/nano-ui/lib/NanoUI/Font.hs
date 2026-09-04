@@ -55,9 +55,11 @@ module NanoUI.Font
 import Data.Text (Text)
 import qualified Data.Text as T
 import NanoUI.Types (HostProfile, Rect (..), isCellHost, sliderBarCells)
-import NanoUI.WidgetMarkers (tabSentinelChar)
 import NanoUI.Style (AlignX (..), Padding (..), defaultLayout, layoutGap)
 import NanoUI.Icons (terminalPaintColumns)
+
+tabSentinelChar :: Char
+tabSentinelChar = '\x2409'
 
 data GlyphQuad = GlyphQuad
   { gqX :: {-# UNPACK #-} !Float

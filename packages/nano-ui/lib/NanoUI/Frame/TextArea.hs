@@ -29,7 +29,7 @@ import NanoUI.Context
   , markDirty
   , setStore
   )
-import NanoUI.Draw (DrawArena, pushRect, pushText, withClip)
+import NanoUI.Draw (DrawArena, pushText, withClip)
 import NanoUI.Font
   ( FontMetrics
   , fmLineHeight
@@ -37,8 +37,13 @@ import NanoUI.Font
   , textDisplayWidth
   , widgetContentInset
   )
-import NanoUI.Frame.TextEdit (normalizeTextFieldClicks)
-import NanoUI.Frame.TextInput (textInputCharAtX, textWordBounds)
+import NanoUI.Frame.TextEdit
+  ( drawTextCaret
+  , drawTextSelectionLine
+  , normalizeTextFieldClicks
+  , textCharAtX
+  , textWordBounds
+  )
 import NanoUI.Types (HostProfile, isCellHost)
 import NanoUI.Id (WidgetId (..))
 import NanoUI.Input
@@ -183,8 +188,7 @@ drawTextAreaSelection da _ctx state geom host fm theme style = do
             ly = contentTop + fromIntegral row * lineH - scrollYf
             selX = rectX field + ix + wLo
             selH = max 4 lineH
-        when (selW > 0) $
-          pushRect da (Rect selX ly selW selH) selBg
+        drawTextSelectionLine da selX ly selW selH selBg
 
 drawTextAreaContent :: DrawArena -> Context -> NodeIdx -> Float -> Float -> Float -> Float -> Style -> IO ()
 drawTextAreaContent da ctx idx x y w h style = do
@@ -230,7 +234,7 @@ drawTextAreaContent da ctx idx x y w h style = do
           let caretX = contentX + pw
               caretY = contentTop + fromIntegral row * lineH - scrollYf + 1
               caretH = max 4 (lineH - 2)
-          pushRect da (Rect caretX caretY 1 caretH) fg
+          drawTextCaret da caretX caretY caretH fg
 
 textAreaHitForWidget :: Context -> WidgetId -> IO (Maybe TextAreaHit)
 textAreaHitForWidget ctx wid = do
@@ -282,7 +286,7 @@ textAreaCursorAt ctx state hit mouse = do
         if row < length lineTexts
           then lineTexts !! row
           else ""
-  col <- textInputCharAtX ctx line (tahContentX hit) (v2X mouse)
+  col <- textCharAtX ctx line (tahContentX hit) (v2X mouse)
   pure (row, col)
 
 updateTextAreaSelection :: Context -> WidgetId -> TextAreaHit -> TB.Cursor -> TB.Cursor -> IO ()

@@ -364,9 +364,6 @@ charToGlyphId font c =
           0xf0d7 -> 87 -- FontAwesome caret-down (\xf0d7) -> 'v'
           0xf046 -> 89 -- FontAwesome check-square (\xf046) -> 'x'
           0xf096 -> 1  -- FontAwesome square (\xf096) -> ' '
-          1      -> 0  -- Control marker \x01 (closeButtonMarker) -> empty
-          2      -> 0  -- Control marker \x02 (tabButtonMarker) -> empty
-          3      -> 0  -- Control marker \x03 (tableHeaderMarker) -> empty
           _      -> binarySearch (cfGroups font) cp
   where
     binarySearch grps cp = go 0 (V.length grps - 1)

@@ -108,8 +108,6 @@ import NanoUI.WidgetText
   , textInputPlaceholder
   , isTableHeaderStyle
   , tableHeaderDisplayText
-  , buttonDisplayTextFromFlags
-  , buttonFlagsFromStyle
   )
 import NanoUI.Frame.Scroll.Geometry
   ( decodeScrollConfig
@@ -501,9 +499,7 @@ measureWidget na host fm measure idx = do
             else
               if isTableHeaderStyle si
                 then pure (tableHeaderDisplayText (isCellHost host) si txt)
-                else if nt == NodeButton
-                  then pure (buttonDisplayTextFromFlags (buttonFlagsFromStyle si) txt)
-                  else pure txt
+                else pure txt
         (mw, mh) <- measure body
         pure (mw, mh, 0, 0)
   let rawW = tw + padX + extraW

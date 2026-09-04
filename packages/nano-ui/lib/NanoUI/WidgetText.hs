@@ -30,9 +30,10 @@ module NanoUI.WidgetText
   , colorPickerDisplayText
   , colorPickerToHex
   , colorPickerFromHex
-  , closeButtonMarker
-  , tabButtonMarker
-  , tableHeaderMarker
+  , buttonFlagClose
+  , buttonFlagTab
+  , buttonFlagTable
+  , buttonFlagMask
   , tableStripeEven
   , tableStripeOdd
   , tableScrollSlaveStyle
@@ -71,7 +72,6 @@ import NanoUI.Font (FontMetrics (..), fmLineHeight)
 import NanoUI.Icons (Icons, checkboxPrefixes, radioPrefixes, treeExpandMark, treeExpandPrefixes)
 import NanoUI.Style (FontVariant (..), Theme (..), styleBg, themeButton, themePanel, themeWindow)
 import NanoUI.Types (Color (..), colorB, colorG, colorR, colorRGBA, lerpColor, sliderBarCells)
-import NanoUI.WidgetMarkers (closeButtonMarker, tabButtonMarker, tableHeaderMarker)
 import qualified Data.Text as T
 
 sliderDisplayText :: Text -> Float -> Text
@@ -306,11 +306,11 @@ tableSortMark False True = "  ▼"
 tableSortMark False False = "  ▲"
 
 tableHeaderLabel :: Bool -> Text -> Text
-tableHeaderLabel terminal hdr = tableHeaderMarker <> hdr <> tableSortReserve terminal
+tableHeaderLabel terminal hdr = hdr <> tableSortReserve terminal
 
 tableHeaderDisplayText :: Bool -> Int -> Text -> Text
 tableHeaderDisplayText terminal styleIdx txt =
-  let full = T.drop 1 txt
+  let full = txt
       reserve = tableSortReserve terminal
       title = fromMaybe full (T.stripSuffix reserve full)
       blank = T.map (const ' ') reserve
@@ -338,15 +338,7 @@ buttonVisualStyle si = si .&. complement buttonFlagMask
 
 {-# INLINE packButtonStyle #-}
 packButtonStyle :: Int -> Text -> Int
-packButtonStyle visual txt = visual .|. buttonStyleFlags txt
-
-{-# INLINE buttonStyleFlags #-}
-buttonStyleFlags :: Text -> Int
-buttonStyleFlags txt =
-  let (c, t, h) = buttonFlags txt
-   in (if c then buttonFlagClose else 0)
-        .|. (if t then buttonFlagTab else 0)
-        .|. (if h then buttonFlagTable else 0)
+packButtonStyle visual _ = visual
 
 {-# INLINE buttonFlagsFromStyle #-}
 buttonFlagsFromStyle :: Int -> (Bool, Bool, Bool)
@@ -370,44 +362,32 @@ isTableHeaderStyle si = si .&. buttonFlagTable /= 0
 
 {-# INLINE buttonFlags #-}
 buttonFlags :: Text -> (Bool, Bool, Bool)
-buttonFlags txt =
-  ( closeButtonMarker `T.isPrefixOf` txt
-  , tabButtonMarker `T.isPrefixOf` txt
-  , tableHeaderMarker `T.isPrefixOf` txt
-  )
+buttonFlags _ = (False, False, False)
 
 {-# INLINE isCloseButtonText #-}
 isCloseButtonText :: Text -> Bool
-isCloseButtonText txt =
-  let (c, _, _) = buttonFlags txt
-   in c
+isCloseButtonText _ = False
 
 {-# INLINE isTabButtonText #-}
 isTabButtonText :: Text -> Bool
-isTabButtonText txt =
-  let (_, t, _) = buttonFlags txt
-   in t
+isTabButtonText _ = False
 
 {-# INLINE isTableHeaderText #-}
 isTableHeaderText :: Text -> Bool
-isTableHeaderText txt =
-  let (_, _, h) = buttonFlags txt
-   in h
+isTableHeaderText _ = False
 
 {-# INLINE buttonDisplayTextFromFlags #-}
 buttonDisplayTextFromFlags :: (Bool, Bool, Bool) -> Text -> Text
-buttonDisplayTextFromFlags (isClose, isTab, isTable) txt
-  | isClose || isTab || isTable = T.drop 1 txt
-  | otherwise = txt
+buttonDisplayTextFromFlags _ txt = txt
 
 {-# INLINE closeButtonDisplayText #-}
 closeButtonDisplayText :: Text -> Text
-closeButtonDisplayText txt = buttonDisplayTextFromFlags (True, False, False) txt
+closeButtonDisplayText = id
 
 {-# INLINE tabButtonDisplayText #-}
 tabButtonDisplayText :: Text -> Text
-tabButtonDisplayText txt = buttonDisplayTextFromFlags (False, True, False) txt
+tabButtonDisplayText = id
 
 {-# INLINE buttonDisplayText #-}
 buttonDisplayText :: Text -> Text
-buttonDisplayText txt = buttonDisplayTextFromFlags (buttonFlags txt) txt
+buttonDisplayText = id

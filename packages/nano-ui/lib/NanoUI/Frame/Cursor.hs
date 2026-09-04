@@ -53,8 +53,12 @@ import NanoUI.Frame.Scroll.Geometry
   )
 import NanoUI.Frame.Select (selectDropRect)
 import NanoUI.Frame.TextArea (TextAreaGeom (..), textAreaGeom)
-import NanoUI.Frame.TextEdit (textEditMenuCursorKind, textFieldWidgetAtMouse)
-import NanoUI.Frame.TextInput (TextInputGeom (..), textInputGeom)
+import NanoUI.Frame.TextEdit
+  ( TextInputGeom (..)
+  , textEditMenuCursorKind
+  , textFieldWidgetAtMouse
+  , textInputGeom
+  )
 import NanoUI.Frame.Window (windowResizeCursorKind)
 
 uiCursorKind :: Context -> Input -> IO UiCursorKind

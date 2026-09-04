@@ -29,8 +29,9 @@ import NanoUI.Style
   , grow
   , tight
   )
+import Data.Bits ((.|.))
 import NanoUI.Types (isCellHost)
-import NanoUI.WidgetText (closeButtonMarker, tabButtonMarker)
+import NanoUI.WidgetText (buttonFlagClose, buttonFlagTab)
 import NanoUI.Widgets.Combinators (buttonStyled)
 import NanoUI.Widgets.Behavior (useSelection)
 import NanoUI.Widgets.Layout (column, row)
@@ -167,16 +168,17 @@ tabStrip style orient cur tabList mRenderBody = do
   renderSingleHeader hdrLay packedStyle t = do
     let isActive = tabKey t == cur
         badge = maybe "" (\b -> " (" <> b <> ")") (tabBadge t)
-        headerText = tabButtonMarker <> tabTitle t <> badge
+        headerText = tabTitle t <> badge
+        tabStyle = packedStyle .|. buttonFlagTab
     if tabClosable t
       then do
         (tabResp, closed) <- row (tight defaultLayout) $ do
-          resp <- buttonStyled headerText (if isActive then 1 else 0) hdrLay packedStyle
-          closeResp <- buttonStyled (closeButtonMarker <> "\215") 0 (hdrLay {layoutPadding = Padding 2 4 4 4}) 0
+          resp <- buttonStyled headerText (if isActive then 1 else 0) hdrLay tabStyle
+          closeResp <- buttonStyled "\215" 0 (hdrLay {layoutPadding = Padding 2 4 4 4}) buttonFlagClose
           pure (resp, respClicked closeResp)
         pure (tabKey t, respClicked tabResp && not closed, if closed then Just (tabKey t) else Nothing, tabResp)
       else do
-        resp <- buttonStyled headerText (if isActive then 1 else 0) hdrLay packedStyle
+        resp <- buttonStyled headerText (if isActive then 1 else 0) hdrLay tabStyle
         pure (tabKey t, respClicked resp, Nothing, resp)
 
 syncTabHeaderActive :: Eq a => Context -> a -> [(a, Bool, Maybe a, Response)] -> IO ()
