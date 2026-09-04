@@ -5,6 +5,13 @@
 
 struct NanoUiBatch {
     SDL_Renderer *renderer;
+    const uint8_t *verts;
+    int vert_count;
+    const uint8_t *indices;
+    int index_count;
+    SDL_Texture *pending_texture;
+    int pending_start;
+    int pending_n;
 };
 
 NanoUiBatch *nano_ui_batch_create(SDL_Renderer *renderer)
@@ -22,12 +29,28 @@ NanoUiBatch *nano_ui_batch_create(SDL_Renderer *renderer)
 
 void nano_ui_batch_destroy(NanoUiBatch *batch)
 {
-    free(batch);
+    if (batch) {
+        nano_ui_batch_flush(batch);
+        free(batch);
+    }
 }
 
 void nano_ui_batch_flush(NanoUiBatch *batch)
 {
-    (void)batch;
+    if (!batch || !batch->renderer || batch->pending_n < 3) {
+        if (batch) {
+            batch->pending_n = 0;
+            batch->pending_start = 0;
+            batch->pending_texture = NULL;
+        }
+        return;
+    }
+    const SDL_Vertex *sdl_verts = (const SDL_Vertex *)batch->verts;
+    const int *idx = (const int *)batch->indices + batch->pending_start;
+    SDL_RenderGeometry(batch->renderer, batch->pending_texture, sdl_verts, batch->vert_count, idx, batch->pending_n);
+    batch->pending_n = 0;
+    batch->pending_start = 0;
+    batch->pending_texture = NULL;
 }
 
 void nano_ui_batch_draw_range(
@@ -49,7 +72,6 @@ void nano_ui_batch_draw_range(
     float dmg_w,
     float dmg_h)
 {
-    (void)index_count;
     (void)tex_id;
     (void)tex_w;
     (void)tex_h;
@@ -66,10 +88,29 @@ void nano_ui_batch_draw_range(
     if (index_start < 0) {
         index_start = 0;
     }
+
+    if (batch->pending_n > 0 &&
+        batch->verts == verts &&
+        batch->indices == indices &&
+        batch->pending_texture == texture &&
+        batch->pending_start + batch->pending_n == index_start)
+    {
+        batch->pending_n += index_n;
+        if (vert_count > batch->vert_count) {
+            batch->vert_count = vert_count;
+        }
+        return;
+    }
+
     nano_ui_batch_flush(batch);
-    const SDL_Vertex *sdl_verts = (const SDL_Vertex *)verts;
-    const int *idx = (const int *)indices + index_start;
-    SDL_RenderGeometry(batch->renderer, texture, sdl_verts, vert_count, idx, index_n);
+
+    batch->verts = verts;
+    batch->vert_count = vert_count;
+    batch->indices = indices;
+    batch->index_count = index_count;
+    batch->pending_texture = texture;
+    batch->pending_start = index_start;
+    batch->pending_n = index_n;
 }
 
 void nano_ui_set_clip_rect(SDL_Renderer *renderer, int x, int y, int w, int h)
