@@ -11,10 +11,10 @@ main :: IO ()
 main = hspec spec
 
 noMods :: TA.Modifiers
-noMods = TA.Modifiers False False False False
+noMods = TA.Modifiers False False False
 
 ctrlMods :: TA.Modifiers
-ctrlMods = TA.Modifiers False True False False
+ctrlMods = TA.Modifiers False True False
 
 spec :: Spec
 spec = do

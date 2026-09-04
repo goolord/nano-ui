@@ -1073,18 +1073,19 @@ finalizeTextAreaMouse ctx inp wid = do
     Nothing -> pure ()
     Just hit -> do
       let mouse = inputMousePos inp
-          inField = rectContains (tahFieldRect hit) mouse
-      if inputMousePressed inp && inField
+          getCursor = do
+            state <-
+              loadTextAreaStateAt
+                ctx
+                (tahNodeIdx hit)
+                (tahWidgetX hit)
+                (tahWidgetY hit)
+                (tahWidgetW hit)
+                (tahWidgetH hit)
+            textAreaCursorAt ctx state hit mouse
+      if inputMousePressed inp && rectContains (tahFieldRect hit) mouse
         then do
-          state <-
-            loadTextAreaStateAt
-              ctx
-              (tahNodeIdx hit)
-              (tahWidgetX hit)
-              (tahWidgetY hit)
-              (tahWidgetW hit)
-              (tahWidgetH hit)
-          (row, col) <- textAreaCursorAt ctx state hit mouse
+          (row, col) <- getCursor
           clicks <-
             normalizeTextFieldClicks
               ctx
@@ -1103,15 +1104,7 @@ finalizeTextAreaMouse ctx inp wid = do
               | textInputDragWidget drag == wid
                   , textInputDragMultiline drag
                   , inputMouseDown inp || inputMouseReleased inp -> do
-                  state <-
-                    loadTextAreaStateAt
-                      ctx
-                      (tahNodeIdx hit)
-                      (tahWidgetX hit)
-                      (tahWidgetY hit)
-                      (tahWidgetW hit)
-                      (tahWidgetH hit)
-                  (row, col) <- textAreaCursorAt ctx state hit mouse
+                  (row, col) <- getCursor
                   applyTextAreaDrag
                     ctx
                     wid

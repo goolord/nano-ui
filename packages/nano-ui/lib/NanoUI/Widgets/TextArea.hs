@@ -40,6 +40,7 @@ import NanoUI.Id (WidgetId)
 import NanoUI.Input
   ( Input (..)
   , Key
+  , Modifiers (..)
   , foldInputKeys
   , inputChars
   , inputKeys
@@ -69,14 +70,6 @@ import NanoUI.Widgets.TextCommon
   , menuActionEnabled
   , pasteBufferText
   )
-
-data Modifiers = Modifiers
-  { modShift :: !Bool
-  , modCtrl :: !Bool
-  , modAlt :: !Bool
-  , modSuper :: !Bool
-  }
-  deriving (Eq, Show)
 
 data KeyInput
   = KeyChar !Char
@@ -177,7 +170,7 @@ insertWithSelection ch state =
 handleTextAreaEvent :: KeyInput -> Modifiers -> TextAreaState -> TextAreaState
 handleTextAreaEvent key mods state =
   let shift = modShift mods
-      ctrl = modCtrl mods || modSuper mods
+      ctrl = modCtrl mods
       alt = modAlt mods
       n = pageLineCount state
       state' = case (key, ctrl, alt) of
@@ -402,15 +395,9 @@ applyTextAreaMenuAction ctx wid item = do
 
 processTextArea :: Context -> Input -> Double -> Double -> Double -> TextAreaState -> IO TextAreaState
 processTextArea ctx inp vpW vpH lineH s0 = do
-  let mods =
-        Modifiers
-          { modShift = Inp.modShift (inputModifiers inp)
-          , modCtrl = Inp.modCtrl (inputModifiers inp)
-          , modAlt = Inp.modAlt (inputModifiers inp)
-          , modSuper = False
-          }
+  let mods = inputModifiers inp
       s1 = setTextAreaViewport (vpW, vpH) lineH s0
-      ctrl = Inp.modCtrl (inputModifiers inp)
+      ctrl = modCtrl mods
   when (not (T.null (inputChars inp)) || not (inputKeysNull (inputKeys inp))) $
     setTextInputDrag ctx Nothing
   s2 <-
