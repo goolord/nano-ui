@@ -319,7 +319,11 @@ measureTextNode na host fm monoFm measure useAssignedWidth idx = do
               then pure (measureTextWrapped host textFm plain wrapW)
               else measureTextWrappedIO (\t -> fmap fst (measure t)) textFm plain wrapW
           else pure (tw0, th0)
-      setRect na idx 0 0 (clamp minW maxW tw) $
+      let reportedW =
+            if wTag == SizingGrow && parentAssigns
+              then clamp minW maxW 0
+              else clamp minW maxW tw
+      setRect na idx 0 0 reportedW $
         case hTag of
           SizingFixed -> clamp minH maxH hVal
           _ -> clamp minH maxH (max (layoutLineHeight host textFm) th)

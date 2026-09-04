@@ -109,17 +109,17 @@ formatRtsRows :: RtsStatsSnapshot -> [(Text, Text)]
 formatRtsRows s
   | not (rtsEnabled s) =
       [ ("rts", "stats off (need +RTS -T)")
-      , ("haskell", T.pack (printf "%d cap / %d cpu" (rtsCaps s) (rtsCpus s)))
+      , ("haskell", T.pack (printf "%2d cap / %2d cpu" (rtsCaps s) (rtsCpus s)))
       ]
   | otherwise =
-      [ ("haskell", T.pack (printf "%d cap / %d cpu" (rtsCaps s) (rtsCpus s)))
-      , ("gc total", T.pack (printf "%d" (rtsGcs s)))
-      , ("gc major", T.pack (printf "%d" (rtsMajorGcs s)))
-      , ("last gen", T.pack (printf "%d" (rtsLastGcGen s)))
-      , ("last gc", T.pack (printf "%.2f ms" (rtsLastGcMs s)))
-      , ("heap live", T.pack (printf "%.1f MiB" (rtsLiveMb s)))
-      , ("heap alloc", T.pack (printf "%.1f MiB" (rtsAllocMb s)))
-      , ("copied", T.pack (printf "%.1f MiB" (rtsCopiedMb s)))
-      , ("rss max", T.pack (printf "%.1f MiB" (rtsMaxMemMb s)))
-      , ("gc time", T.pack (printf "%.1f%%" (rtsGcPct s)))
+      [ ("haskell", T.pack (printf "%2d cap / %2d cpu" (rtsCaps s) (rtsCpus s)))
+      , ("gc total", T.pack (printf "%10d" (rtsGcs s)))
+      , ("gc major", T.pack (printf "%10d" (rtsMajorGcs s)))
+      , ("last gen", T.pack (printf "%10d" (rtsLastGcGen s)))
+      , ("last gc", T.pack (printf "%7.2f ms" (rtsLastGcMs s)))
+      , ("heap live", T.pack (printf "%6.1f MiB" (rtsLiveMb s)))
+      , ("heap alloc", T.pack (printf "%6.1f MiB" (rtsAllocMb s)))
+      , ("copied", T.pack (printf "%6.1f MiB" (rtsCopiedMb s)))
+      , ("rss max", T.pack (printf "%6.1f MiB" (rtsMaxMemMb s)))
+      , ("gc time", T.pack (printf "%9.1f%%" (rtsGcPct s)))
       ]

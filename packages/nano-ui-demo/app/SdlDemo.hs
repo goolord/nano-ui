@@ -457,14 +457,15 @@ tableSortDirText s =
     SortDesc -> "descending"
 
 debugBody :: SdlDebugSnapshot -> NanoUI ()
-debugBody s = do
-  debugSection "Frame" (frameRows s)
-  sep
-  debugSection "Draw" (drawRows s)
-  sep
-  debugSection "Display" (displayRows s)
-  sep
-  debugSection "Runtime" (rtsRows s)
+debugBody s =
+  column (tight . minW 300 . fillW $ defaultLayout) $ do
+    debugSection "Frame" (frameRows s)
+    sep
+    debugSection "Draw" (drawRows s)
+    sep
+    debugSection "Display" (displayRows s)
+    sep
+    debugSection "Runtime" (rtsRows s)
 
 debugSection :: T.Text -> SmallArray (T.Text, T.Text) -> NanoUI ()
 debugSection title rows = do
@@ -481,35 +482,35 @@ frameRows :: SdlDebugSnapshot -> SmallArray (T.Text, T.Text)
 frameRows s =
   let haskellMs = dbgUiMs s + dbgRenderMs s
    in smallArrayFromList
-        [ ("present", T.pack (printf "%.1f fps" (dbgPresentFps s)))
-        , ("loop", T.pack (printf "%.1f fps" (dbgLoopFps s)))
-        , ("frame cpu", T.pack (printf "%.2f ms" (dbgFrameMs s)))
-        , ("haskell", T.pack (printf "%.2f ms" haskellMs))
-        , ("  ui", T.pack (printf "%.2f ms" (dbgUiMs s)))
-        , ("  render", T.pack (printf "%.2f ms" (dbgRenderMs s)))
-        , ("sdl present", T.pack (printf "%.2f ms" (dbgPresentMs s)))
-        , ("draws", T.pack (printf "%d" (dbgPresents s)))
-        , ("skips", T.pack (printf "%d" (dbgSkips s)))
+        [ ("present", T.pack (printf "%6.1f fps" (dbgPresentFps s)))
+        , ("loop", T.pack (printf "%6.1f fps" (dbgLoopFps s)))
+        , ("frame cpu", T.pack (printf "%7.2f ms" (dbgFrameMs s)))
+        , ("haskell", T.pack (printf "%7.2f ms" haskellMs))
+        , ("  ui", T.pack (printf "%7.2f ms" (dbgUiMs s)))
+        , ("  render", T.pack (printf "%7.2f ms" (dbgRenderMs s)))
+        , ("sdl present", T.pack (printf "%7.2f ms" (dbgPresentMs s)))
+        , ("draws", T.pack (printf "%10d" (dbgPresents s)))
+        , ("skips", T.pack (printf "%10d" (dbgSkips s)))
         ]
 
 drawRows :: SdlDebugSnapshot -> SmallArray (T.Text, T.Text)
 drawRows s =
   smallArrayFromList
-    [ ("verts", T.pack (printf "%d" (dbgVerts s)))
-    , ("indices", T.pack (printf "%d" (dbgIndices s)))
-    , ("cmds", T.pack (printf "%d" (dbgCmds s)))
+    [ ("verts", T.pack (printf "%10d" (dbgVerts s)))
+    , ("indices", T.pack (printf "%10d" (dbgIndices s)))
+    , ("cmds", T.pack (printf "%10d" (dbgCmds s)))
     ]
 
 displayRows :: SdlDebugSnapshot -> SmallArray (T.Text, T.Text)
 displayRows s =
   smallArrayFromList
-    [ ("window", T.pack (printf "%.0fx%.0f" (dbgWinW s) (dbgWinH s)))
-    , ("scale", T.pack (printf "%.2f" (dbgScale s)))
-    , ("mouse", T.pack (printf "%.0f, %.0f" (dbgMouseX s) (dbgMouseY s)))
+    [ ("window", T.pack (printf "%4.0fx%-5.0f" (dbgWinW s) (dbgWinH s)))
+    , ("scale", T.pack (printf "%10.2f" (dbgScale s)))
+    , ("mouse", T.pack (printf "%4.0f, %-4.0f" (dbgMouseX s) (dbgMouseY s)))
     , ( "renderer"
-      , clipField 36 (dbgRenderer s <> if dbgVsync s then "  vsync on" else "  vsync off")
+      , clipField 32 (dbgRenderer s <> if dbgVsync s then "  vsync on" else "  vsync off")
       )
-    , ("font", clipField 36 (T.pack (dbgFontPath s)))
+    , ("font", clipField 32 (T.pack (dbgFontPath s)))
     ]
 
 rtsRows :: SdlDebugSnapshot -> SmallArray (T.Text, T.Text)
