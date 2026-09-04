@@ -1253,8 +1253,11 @@ runRgfwSessionReduceCustom opts getThemeAndScale updateModel initialModel view =
                       newModel = foldl' (flip updateModel) curModel typedMsgs
                   writeIORef modelRef newModel
 
-                  -- 6. Frame pacing (~120 FPS max)
-                  threadDelay 8000
+                  -- 6. Frame pacing (~120 FPS target, adaptive)
+                  let !targetFrameUs = 8333 :: Int
+                      !elapsedUs = round (frameMs * 1000.0)
+                      !delayUs = max 0 (targetFrameUs - elapsedUs)
+                  when (delayUs > 0) $ threadDelay delayUs
 
                 loop
         let cleanup = do

@@ -8,14 +8,20 @@ module NanoUI.Rgfw.Layout
   , getContentWidth
   ) where
 
+import Control.Exception (finally)
 import Control.Monad (forM, forM_, when)
+import Data.IORef (IORef, atomicModifyIORef', newIORef)
 import Data.Primitive.PrimArray
-  ( newPrimArray
+  ( MutablePrimArray
+  , newPrimArray
   , readPrimArray
   , setPrimArray
   , writePrimArray
   )
+import Data.Text (Text)
 import qualified Data.Text as T
+import GHC.Exts (RealWorld)
+import GHC.IO (unsafePerformIO)
 import NanoUI
   ( Padding (..)
   , PopupAnchor (..)
@@ -50,6 +56,77 @@ import NanoUI.Layout.Arena
   , snapshotLayoutRects
   , withArenaArraysSnap
   )
+
+-- | Preallocated unboxed scratch buffers for single-pass layout (zero allocation per frame).
+data LayoutScratch = LayoutScratch
+  { lsCap          :: {-# UNPACK #-} !Int
+  , lsHeadChild    :: !(MutablePrimArray RealWorld Int)
+  , lsNextSib      :: !(MutablePrimArray RealWorld Int)
+  , lsIsOverlay    :: !(MutablePrimArray RealWorld Int)
+  , lsIsPopup      :: !(MutablePrimArray RealWorld Int)
+  , lsReqW         :: !(MutablePrimArray RealWorld Float)
+  , lsReqH         :: !(MutablePrimArray RealWorld Float)
+  , lsRemAfterW    :: !(MutablePrimArray RealWorld Float)
+  , lsRemAfterH    :: !(MutablePrimArray RealWorld Float)
+  , lsGridCellX    :: !(MutablePrimArray RealWorld Float)
+  , lsGridCellY    :: !(MutablePrimArray RealWorld Float)
+  , lsGridCellW    :: !(MutablePrimArray RealWorld Float)
+  , lsGridCellH    :: !(MutablePrimArray RealWorld Float)
+  , lsCurX         :: !(MutablePrimArray RealWorld Float)
+  , lsCurY         :: !(MutablePrimArray RealWorld Float)
+  , lsInnerX       :: !(MutablePrimArray RealWorld Float)
+  , lsInnerY       :: !(MutablePrimArray RealWorld Float)
+  , lsInnerW       :: !(MutablePrimArray RealWorld Float)
+  , lsInnerH       :: !(MutablePrimArray RealWorld Float)
+  }
+
+{-# NOINLINE globalScratchPool #-}
+globalScratchPool :: IORef (Maybe LayoutScratch)
+globalScratchPool = unsafePerformIO (newIORef Nothing)
+
+allocLayoutScratch :: Int -> IO LayoutScratch
+allocLayoutScratch !cap = do
+  hChild <- newPrimArray cap
+  nSib   <- newPrimArray cap
+  isOver <- newPrimArray cap
+  isPop  <- newPrimArray cap
+  rW     <- newPrimArray cap
+  rH     <- newPrimArray cap
+  remW   <- newPrimArray cap
+  remH   <- newPrimArray cap
+  gcX    <- newPrimArray cap
+  gcY    <- newPrimArray cap
+  gcW    <- newPrimArray cap
+  gcH    <- newPrimArray cap
+  cX     <- newPrimArray cap
+  cY     <- newPrimArray cap
+  iX     <- newPrimArray cap
+  iY     <- newPrimArray cap
+  iW     <- newPrimArray cap
+  iH     <- newPrimArray cap
+  pure $ LayoutScratch cap hChild nSib isOver isPop rW rH remW remH gcX gcY gcW gcH cX cY iX iY iW iH
+
+withLayoutScratch :: Int -> (LayoutScratch -> IO a) -> IO a
+withLayoutScratch !reqN act = do
+  mSc <- atomicModifyIORef' globalScratchPool (\m -> (Nothing, m))
+  sc <- case mSc of
+    Just s | lsCap s >= reqN -> pure s
+    _ -> do
+      let !cap = max 256 (max reqN (maybe 0 ((* 2) . lsCap) mSc))
+      allocLayoutScratch cap
+  act sc `finally` atomicModifyIORef' globalScratchPool (\_ -> (Just sc, ()))
+
+-- | Zero-allocation text line and length measurement
+measureTextLines :: Text -> (Int, Float)
+measureTextLines !txt
+  | T.null txt = (1, 0)
+  | otherwise =
+      let go !n !curLen !maxLen t = case T.uncons t of
+            Nothing -> (n, fromIntegral (max maxLen curLen))
+            Just ('\n', rest) -> go (n + 1) 0 (max maxLen curLen) rest
+            Just ('\r', rest) -> go n curLen maxLen rest
+            Just (_, rest) -> go n (curLen + 1) maxLen rest
+       in go 1 (0 :: Int) (0 :: Int) txt
 
 -- | Compute popup floating position clamped to screen bounds
 computePopupPosition ::
@@ -140,12 +217,36 @@ solveSinglePassLayoutWith ::
   IO ()
 solveSinglePassLayoutWith na !viewportW !viewportH lookupPopup lookupWindowPos lookupWindowSize = do
   !n <- arenaCount na
-  when (n > 0) $ do
-    -- 1. Build child linked lists in unboxed arrays: headChildArr and nextSibArr
-    headChildArr <- newPrimArray n
-    nextSibArr   <- newPrimArray n
+  when (n > 0) $ withLayoutScratch n $ \scratch -> do
+    let headChildArr = lsHeadChild scratch
+        nextSibArr   = lsNextSib scratch
+        isOverlayArr = lsIsOverlay scratch
+        isPopupArr   = lsIsPopup scratch
+        reqWArr      = lsReqW scratch
+        reqHArr      = lsReqH scratch
+        remAfterWArr = lsRemAfterW scratch
+        remAfterHArr = lsRemAfterH scratch
+        gridCellXArr = lsGridCellX scratch
+        gridCellYArr = lsGridCellY scratch
+        gridCellWArr = lsGridCellW scratch
+        gridCellHArr = lsGridCellH scratch
+        curXArr      = lsCurX scratch
+        curYArr      = lsCurY scratch
+        innerXArr    = lsInnerX scratch
+        innerYArr    = lsInnerY scratch
+        innerWArr    = lsInnerW scratch
+        innerHArr    = lsInnerH scratch
+
     setPrimArray headChildArr 0 n (-1)
     setPrimArray nextSibArr 0 n (-1)
+    setPrimArray isOverlayArr 0 n (0 :: Int)
+    setPrimArray isPopupArr 0 n (0 :: Int)
+    setPrimArray remAfterWArr 0 n 0
+    setPrimArray remAfterHArr 0 n 0
+    setPrimArray gridCellXArr 0 n 0
+    setPrimArray gridCellYArr 0 n 0
+    setPrimArray gridCellWArr 0 n 0
+    setPrimArray gridCellHArr 0 n 0
 
     withArenaArraysSnap na $ do
       let buildLists !i
@@ -161,10 +262,6 @@ solveSinglePassLayoutWith na !viewportW !viewportH lookupPopup lookupWindowPos l
       buildLists (n - 1)
 
       -- Precompute overlay hierarchy (floating windows, modals, popups and their descendants)
-      isOverlayArr <- newPrimArray n
-      setPrimArray isOverlayArr 0 n (0 :: Int)
-      isPopupArr <- newPrimArray n
-      setPrimArray isPopupArr 0 n (0 :: Int)
       let prepOverlay !i
             | i >= n = pure ()
             | otherwise = do
@@ -180,21 +277,6 @@ solveSinglePassLayoutWith na !viewportW !viewportH lookupPopup lookupWindowPos l
       prepOverlay 0
 
       -- 2. Pass 1: Bottom-up intrinsic / content size computation (i = n-1 down to 0)
-      reqWArr <- newPrimArray n
-      reqHArr <- newPrimArray n
-      remAfterWArr <- newPrimArray n
-      remAfterHArr <- newPrimArray n
-      setPrimArray remAfterWArr 0 n 0
-      setPrimArray remAfterHArr 0 n 0
-      gridCellXArr <- newPrimArray n
-      gridCellYArr <- newPrimArray n
-      gridCellWArr <- newPrimArray n
-      gridCellHArr <- newPrimArray n
-      setPrimArray gridCellXArr 0 n 0
-      setPrimArray gridCellYArr 0 n 0
-      setPrimArray gridCellWArr 0 n 0
-      setPrimArray gridCellHArr 0 n 0
-
       let pass1 !i
             | i < 0 = pure ()
             | otherwise = do
@@ -206,16 +288,6 @@ solveSinglePassLayoutWith na !viewportW !viewportH lookupPopup lookupWindowPos l
                 dir <- getDirection na i
                 gCols <- getGridCols na i
                 (minW, minH, maxW, maxH) <- getMinMax na i
-                txt <- getText na i
-                let !dispTxt =
-                      if T.isPrefixOf "\x01" txt || T.isPrefixOf "\x02" txt || T.isPrefixOf "\x03" txt
-                        then T.drop 1 txt
-                        else txt
-                    !txtLines = T.splitOn "\n" dispTxt
-                    !lineCount = max 1 (length txtLines)
-                    !maxLineLen = fromIntegral (maximum (0 : map T.length txtLines))
-                    !txtLen = maxLineLen
-                    !isClose = T.isPrefixOf "\x01" txt || txt == "[X]" || txt == "X" || txt == "\xd7" || txt == "\xf00d"
                 isPop <- readPrimArray isPopupArr i
 
                 -- For context menus / popups: compact 2px padding and zero gap between items
@@ -268,8 +340,8 @@ solveSinglePassLayoutWith na !viewportW !viewportH lookupPopup lookupWindowPos l
                           pure (cw, ch)
                         else do
                           -- Container content size from direct children
-                          let loopChildren !c (!count :: Int) !totMain !maxCross
-                                | c < 0 = pure (count, totMain, maxCross)
+                          let loopChildren !c (!count :: Int) !totMain !maxCross !totAdd
+                                | c < 0 = pure (count, totMain, maxCross, totAdd)
                                 | otherwise = do
                                     cw <- readPrimArray reqWArr c
                                     ch <- readPrimArray reqHArr c
@@ -279,45 +351,41 @@ solveSinglePassLayoutWith na !viewportW !viewportH lookupPopup lookupWindowPos l
                                     if dir == DirColumn
                                       then do
                                         let !mSize = if cHTag == SizingGrow then max 0 ch else ch
+                                            !add = mSize + gap
                                             !tot = totMain + mSize + (if count > 0 then gap else 0)
                                             !cross = max maxCross cw
-                                        loopChildren next (count + 1) tot cross
+                                        loopChildren next (count + 1) tot cross (totAdd + add)
                                       else do
                                         let !mSize = if cWTag == SizingGrow then max 0 cw else cw
+                                            !add = mSize + gap
                                             !tot = totMain + mSize + (if count > 0 then gap else 0)
                                             !cross = max maxCross ch
-                                        loopChildren next (count + 1) tot cross
+                                        loopChildren next (count + 1) tot cross (totAdd + add)
 
-                          (!cCount, !cTot, !cCross) <- loopChildren firstChild 0 0 0
+                          (!cCount, !cTot, !cCross, !cTotAdd) <- loopChildren firstChild 0 0 0 0
 
-                          -- Precalculate remAfter for children of this container
-                          let calcRemAfter !c
+                          -- Precalculate remAfter for children in a single O(K) pass
+                          let fillRemAfter !c !remAcc
                                 | c < 0 = pure ()
                                 | otherwise = do
+                                    (sWTag, _) <- getWidthSizing na c
+                                    (sHTag, _) <- getHeightSizing na c
+                                    sw <- readPrimArray reqWArr c
+                                    sh <- readPrimArray reqHArr c
                                     next <- readPrimArray nextSibArr c
-                                    let sumAfter !s !acc
-                                          | s < 0 = pure acc
-                                          | otherwise = do
-                                              (sWTag, _) <- getWidthSizing na s
-                                              (sHTag, _) <- getHeightSizing na s
-                                              sw <- readPrimArray reqWArr s
-                                              sh <- readPrimArray reqHArr s
-                                              sNext <- readPrimArray nextSibArr s
-                                              if dir == DirRow
-                                                then do
-                                                  let !add = if sWTag == SizingGrow then max 0 sw + gap else sw + gap
-                                                  sumAfter sNext (acc + add)
-                                                else do
-                                                  let !add = if sHTag == SizingGrow then max 0 sh + gap else sh + gap
-                                                  sumAfter sNext (acc + add)
-
-                                    !remAfter <- sumAfter next 0
                                     if dir == DirRow
-                                      then writePrimArray remAfterWArr c remAfter
-                                      else writePrimArray remAfterHArr c remAfter
-                                    calcRemAfter next
+                                      then do
+                                        let !add = if sWTag == SizingGrow then max 0 sw + gap else sw + gap
+                                            !remAfter = max 0 (remAcc - add)
+                                        writePrimArray remAfterWArr c remAfter
+                                        fillRemAfter next remAfter
+                                      else do
+                                        let !add = if sHTag == SizingGrow then max 0 sh + gap else sh + gap
+                                            !remAfter = max 0 (remAcc - add)
+                                        writePrimArray remAfterHArr c remAfter
+                                        fillRemAfter next remAfter
 
-                          calcRemAfter firstChild
+                          fillRemAfter firstChild cTotAdd
 
                           pure $ if dir == DirColumn
                             then (cCross + padL pad + padR pad, (if cCount > 0 then cTot else 0) + padT pad + padB pad)
@@ -343,6 +411,14 @@ solveSinglePassLayoutWith na !viewportW !viewportH lookupPopup lookupWindowPos l
 
                   else do
                     -- Leaf node
+                    txt <- getText na i
+                    let !dispTxt =
+                          if T.isPrefixOf "\x01" txt || T.isPrefixOf "\x02" txt || T.isPrefixOf "\x03" txt
+                            then T.drop 1 txt
+                            else txt
+                        !(!lineCount, !maxLineLen) = measureTextLines dispTxt
+                        !txtLen = maxLineLen
+                        !isClose = T.isPrefixOf "\x01" txt || txt == "[X]" || txt == "X" || txt == "\xd7" || txt == "\xf00d"
                     let !leafW =
                           if wTag == SizingFixed && wVal > 0
                             then wVal
@@ -392,13 +468,6 @@ solveSinglePassLayoutWith na !viewportW !viewportH lookupPopup lookupWindowPos l
       pass1 (n - 1)
 
       -- 3. Pass 2: Top-down positioning and Grow distribution (i = 0 to n-1)
-      curXArr   <- newPrimArray n
-      curYArr   <- newPrimArray n
-      innerXArr <- newPrimArray n
-      innerYArr <- newPrimArray n
-      innerWArr <- newPrimArray n
-      innerHArr <- newPrimArray n
-
       let setupGridChildren !parentIdx !gCols !pix !piy !piw !pih !pGap = do
             let getKids !c !acc
                   | c < 0 = pure (reverse acc)

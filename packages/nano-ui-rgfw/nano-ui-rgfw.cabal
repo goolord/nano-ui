@@ -61,10 +61,28 @@ executable nano-ui-rgfw-demo
     import:           extensions
     import:           warnings
     main-is:          RgfwDemo.hs
+    other-modules:    RgfwDemoCommon
     build-depends:
         base ^>=4.22.0.0,
         nano-ui,
         nano-ui-rgfw,
+        text ^>=2.1
+    hs-source-dirs:   examples
+    default-language: GHC2024
+
+executable nano-ui-rgfw-profile
+    import:           extensions
+    import:           warnings
+    main-is:          RgfwProfile.hs
+    other-modules:    RgfwDemoCommon
+    build-depends:
+        base ^>=4.22.0.0,
+        containers,
+        effectful ^>=2.6,
+        nano-ui,
+        nano-ui-rgfw,
+        nano-ui-rgfw-bindings,
+        primitive ^>=0.9,
         text ^>=2.1
     hs-source-dirs:   examples
     default-language: GHC2024
