@@ -2,8 +2,8 @@ module Main (main) where
 
 import Control.Monad (void, when)
 import NanoUI
-import NanoUI.Backend.Term (TermDebugSnapshot (..), TermOptions (..), askTermDebug, defaultTermOptions, runTermAppReduce)
-import NanoUI.Debug (RtsStatsSnapshot (..), formatRtsRows)
+import NanoUI.Backend.Term
+import NanoUI.Debug (formatCoreRtsRows)
 import Data.Text (Text)
 import Text.Printf (printf)
 import qualified Data.Text as T
@@ -164,19 +164,4 @@ terminalRows s =
     ]
 
 rtsRows :: TermDebugSnapshot -> [(Text, Text)]
-rtsRows s =
-  formatRtsRows
-    RtsStatsSnapshot
-      { rtsEnabled = dbgRtsOn s
-      , rtsGcs = dbgGcs s
-      , rtsMajorGcs = dbgMajorGcs s
-      , rtsAllocMb = dbgAllocMb s
-      , rtsLiveMb = dbgLiveMb s
-      , rtsMaxMemMb = dbgMaxMemMb s
-      , rtsCopiedMb = dbgCopiedMb s
-      , rtsGcPct = dbgGcPct s
-      , rtsLastGcGen = dbgLastGcGen s
-      , rtsLastGcMs = dbgLastGcMs s
-      , rtsCaps = dbgCaps s
-      , rtsCpus = dbgCpus s
-      }
+rtsRows s = formatCoreRtsRows (dbgCore s)

@@ -10,10 +10,34 @@ module NanoUI.Term.Debug
   , takeDebugLive
   , readTermDebug
   , emptyTermDebug
+  , dbgPresentFps
+  , dbgLoopFps
+  , dbgFrameMs
+  , dbgUiMs
+  , dbgSkips
+  , dbgVerts
+  , dbgIndices
+  , dbgCmds
+  , dbgWinW
+  , dbgWinH
+  , dbgMouseX
+  , dbgMouseY
+  , dbgRtsOn
+  , dbgGcs
+  , dbgMajorGcs
+  , dbgAllocMb
+  , dbgLiveMb
+  , dbgMaxMemMb
+  , dbgCopiedMb
+  , dbgGcPct
+  , dbgLastGcGen
+  , dbgLastGcMs
+  , dbgCaps
+  , dbgCpus
   ) where
 
 import Data.Bits ((.&.), shiftR)
-import Data.IORef (IORef, atomicModifyIORef', newIORef)
+import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
 import Data.Word (Word32, Word64, Word8)
 import GHC.Clock (getMonotonicTime)
 import NanoUI
@@ -26,232 +50,238 @@ import NanoUI
   , themePanel
   , themeWindow
   )
-import NanoUI.Debug (RtsStatsSnapshot (..), blend, debugRefreshSec, readRtsSnapshot)
+import NanoUI.Debug
+  ( CoreDebugSnapshot
+  , DebugSampler (..)
+  , blend
+  , debugRefreshSec
+  , emptyCoreDebugSnapshot
+  , makeCoreDebugSnapshot
+  , newDebugSampler
+  , noteDebugLoop
+  , noteDebugSkip
+  , readRtsSnapshot
+  )
+import qualified NanoUI.Debug as D
 import NanoUI.Testing (Context, DrawData (..), ctxTheme, drawCmdCount)
 
 data TermDrawStats = TermDrawStats
-  { tdsNodes :: Int
-  , tdsBaseSpans :: Int
-  , tdsOverlaySpans :: Int
+  { tdsNodes        :: !Int
+  , tdsBaseSpans    :: !Int
+  , tdsOverlaySpans :: !Int
   }
   deriving (Eq, Show)
 
 data TermDebugSnapshot = TermDebugSnapshot
-  { dbgPresentFps :: Double
-  , dbgLoopFps :: Double
-  , dbgFrameMs :: Double
-  , dbgUiMs :: Double
-  , dbgRedraws :: Word64
-  , dbgBlits :: Word64
-  , dbgSkips :: Word64
-  , dbgVerts :: Int
-  , dbgIndices :: Int
-  , dbgCmds :: Int
-  , dbgNodes :: Int
-  , dbgBaseSpans :: Int
-  , dbgOverlaySpans :: Int
-  , dbgWinW :: Float
-  , dbgWinH :: Float
-  , dbgMouseX :: Float
-  , dbgMouseY :: Float
-  , dbgThemeFg :: (Word8, Word8, Word8)
-  , dbgThemeBg :: (Word8, Word8, Word8)
-  , dbgRtsOn :: Bool
-  , dbgGcs :: Word32
-  , dbgMajorGcs :: Word32
-  , dbgAllocMb :: Double
-  , dbgLiveMb :: Double
-  , dbgMaxMemMb :: Double
-  , dbgCopiedMb :: Double
-  , dbgGcPct :: Double
-  , dbgLastGcGen :: Word32
-  , dbgLastGcMs :: Double
-  , dbgCaps :: Int
-  , dbgCpus :: Int
+  { dbgCore         :: !CoreDebugSnapshot
+  , dbgRedraws      :: !Word64
+  , dbgBlits        :: !Word64
+  , dbgNodes        :: !Int
+  , dbgBaseSpans    :: !Int
+  , dbgOverlaySpans :: !Int
+  , dbgThemeFg      :: !(Word8, Word8, Word8)
+  , dbgThemeBg      :: !(Word8, Word8, Word8)
   }
   deriving (Eq, Show)
 
-data TermDebugSampler = TermDebugSampler
-  { smPresentEma :: Double
-  , smLoopEma :: Double
-  , smLastPresentT :: Double
-  , smLastDebugT :: Double
-  , smRedraws :: Word64
-  , smBlits :: Word64
-  , smSkips :: Word64
-  , smUiMs :: Double
-  , smFrameMs :: Double
-  , smVerts :: Int
-  , smIndices :: Int
-  , smCmds :: Int
-  , smNodes :: Int
-  , smBaseSpans :: Int
-  , smOverlaySpans :: Int
-  , smWantFrame :: Bool
-  , smSnapshot :: TermDebugSnapshot
+-- Accessors for backward compatibility and clean field lookup
+dbgPresentFps :: TermDebugSnapshot -> Double
+dbgPresentFps = D.dbgPresentFps . dbgCore
+
+dbgLoopFps :: TermDebugSnapshot -> Double
+dbgLoopFps = D.dbgLoopFps . dbgCore
+
+dbgFrameMs :: TermDebugSnapshot -> Double
+dbgFrameMs = D.dbgFrameMs . dbgCore
+
+dbgUiMs :: TermDebugSnapshot -> Double
+dbgUiMs = D.dbgUiMs . dbgCore
+
+dbgSkips :: TermDebugSnapshot -> Word64
+dbgSkips = D.dbgSkips . dbgCore
+
+dbgVerts :: TermDebugSnapshot -> Int
+dbgVerts = D.dbgVerts . dbgCore
+
+dbgIndices :: TermDebugSnapshot -> Int
+dbgIndices = D.dbgIndices . dbgCore
+
+dbgCmds :: TermDebugSnapshot -> Int
+dbgCmds = D.dbgCmds . dbgCore
+
+dbgWinW :: TermDebugSnapshot -> Float
+dbgWinW = D.dbgWinW . dbgCore
+
+dbgWinH :: TermDebugSnapshot -> Float
+dbgWinH = D.dbgWinH . dbgCore
+
+dbgMouseX :: TermDebugSnapshot -> Float
+dbgMouseX = D.dbgMouseX . dbgCore
+
+dbgMouseY :: TermDebugSnapshot -> Float
+dbgMouseY = D.dbgMouseY . dbgCore
+
+dbgRtsOn :: TermDebugSnapshot -> Bool
+dbgRtsOn = D.dbgRtsOn . dbgCore
+
+dbgGcs :: TermDebugSnapshot -> Word32
+dbgGcs = D.dbgGcs . dbgCore
+
+dbgMajorGcs :: TermDebugSnapshot -> Word32
+dbgMajorGcs = D.dbgMajorGcs . dbgCore
+
+dbgAllocMb :: TermDebugSnapshot -> Double
+dbgAllocMb = D.dbgAllocMb . dbgCore
+
+dbgLiveMb :: TermDebugSnapshot -> Double
+dbgLiveMb = D.dbgLiveMb . dbgCore
+
+dbgMaxMemMb :: TermDebugSnapshot -> Double
+dbgMaxMemMb = D.dbgMaxMemMb . dbgCore
+
+dbgCopiedMb :: TermDebugSnapshot -> Double
+dbgCopiedMb = D.dbgCopiedMb . dbgCore
+
+dbgGcPct :: TermDebugSnapshot -> Double
+dbgGcPct = D.dbgGcPct . dbgCore
+
+dbgLastGcGen :: TermDebugSnapshot -> Word32
+dbgLastGcGen = D.dbgLastGcGen . dbgCore
+
+dbgLastGcMs :: TermDebugSnapshot -> Double
+dbgLastGcMs = D.dbgLastGcMs . dbgCore
+
+dbgCaps :: TermDebugSnapshot -> Int
+dbgCaps = D.dbgCaps . dbgCore
+
+dbgCpus :: TermDebugSnapshot -> Int
+dbgCpus = D.dbgCpus . dbgCore
+
+data TermDebugSamplerState = TermDebugSamplerState
+  { smSampler       :: !(IORef DebugSampler)
+  , smSnapshot      :: !(IORef TermDebugSnapshot)
+  , smRedraws       :: !Word64
+  , smBlits         :: !Word64
+  , smNodes         :: !Int
+  , smBaseSpans     :: !Int
+  , smOverlaySpans  :: !Int
   }
 
-newtype TermDebugHost = TermDebugHost {termDebugSampler :: IORef TermDebugSampler}
+type TermDebugSampler = IORef TermDebugSamplerState
 
-type SamplerRef = IORef TermDebugSampler
+newtype TermDebugHost = TermDebugHost TermDebugSampler
 
-newTermDebugSampler :: IO SamplerRef
+newTermDebugSampler :: IO TermDebugSampler
 newTermDebugSampler = do
-  now <- getMonotonicTime
+  sRef <- newDebugSampler
+  snapRef <- newIORef emptyTermDebug
   newIORef
-    TermDebugSampler
-      { smPresentEma = 0
-      , smLoopEma = 0
-      , smLastPresentT = now
-      , smLastDebugT = 0
-      , smRedraws = 0
-      , smBlits = 0
-      , smSkips = 0
-      , smUiMs = 0
-      , smFrameMs = 0
-      , smVerts = 0
-      , smIndices = 0
-      , smCmds = 0
-      , smNodes = 0
-      , smBaseSpans = 0
-      , smOverlaySpans = 0
-      , smWantFrame = False
-      , smSnapshot = emptyTermDebug
+    TermDebugSamplerState
+      { smSampler       = sRef
+      , smSnapshot      = snapRef
+      , smRedraws       = 0
+      , smBlits         = 0
+      , smNodes         = 0
+      , smBaseSpans     = 0
+      , smOverlaySpans  = 0
       }
 
 emptyTermDebug :: TermDebugSnapshot
 emptyTermDebug =
   TermDebugSnapshot
-    { dbgPresentFps = 0
-    , dbgLoopFps = 0
-    , dbgFrameMs = 0
-    , dbgUiMs = 0
-    , dbgRedraws = 0
-    , dbgBlits = 0
-    , dbgSkips = 0
-    , dbgVerts = 0
-    , dbgIndices = 0
-    , dbgCmds = 0
-    , dbgNodes = 0
-    , dbgBaseSpans = 0
+    { dbgCore         = emptyCoreDebugSnapshot
+    , dbgRedraws      = 0
+    , dbgBlits        = 0
+    , dbgNodes        = 0
+    , dbgBaseSpans    = 0
     , dbgOverlaySpans = 0
-    , dbgWinW = 0
-    , dbgWinH = 0
-    , dbgMouseX = 0
-    , dbgMouseY = 0
-    , dbgThemeFg = (0, 0, 0)
-    , dbgThemeBg = (0, 0, 0)
-    , dbgRtsOn = False
-    , dbgGcs = 0
-    , dbgMajorGcs = 0
-    , dbgAllocMb = 0
-    , dbgLiveMb = 0
-    , dbgMaxMemMb = 0
-    , dbgCopiedMb = 0
-    , dbgGcPct = 0
-    , dbgLastGcGen = 0
-    , dbgLastGcMs = 0
-    , dbgCaps = 0
-    , dbgCpus = 0
+    , dbgThemeFg      = (0, 0, 0)
+    , dbgThemeBg      = (0, 0, 0)
     }
 
-noteLoop :: SamplerRef -> Float -> IO ()
-noteLoop ref dt =
-  atomicModifyIORef' ref $ \s ->
-    let fps = if dt > 1e-4 then 1 / realToFrac dt else 0
-     in (s {smLoopEma = blend (smLoopEma s) fps}, ())
+noteLoop :: TermDebugSampler -> Float -> IO ()
+noteLoop ref dt = do
+  s <- readIORef ref
+  noteDebugLoop (smSampler s) dt
 
-noteSkip :: SamplerRef -> IO ()
-noteSkip ref =
-  atomicModifyIORef' ref $ \s -> (s {smSkips = smSkips s + 1}, ())
+noteSkip :: TermDebugSampler -> IO ()
+noteSkip ref = do
+  s <- readIORef ref
+  noteDebugSkip (smSampler s)
 
-takeDebugLive :: SamplerRef -> Bool -> IO Bool
-takeDebugLive _ False = pure False
-takeDebugLive ref True = do
-  now <- getMonotonicTime
-  atomicModifyIORef' ref $ \s ->
-    let elapsed = now - smLastDebugT s
-        due = smLastDebugT s <= 0 || elapsed >= debugRefreshSec
-        want = smWantFrame s || due
-     in (s {smWantFrame = False}, want)
+takeDebugLive :: TermDebugSampler -> Bool -> IO Bool
+takeDebugLive ref windowOpen = do
+  s <- readIORef ref
+  D.takeDebugLive (smSampler s) windowOpen
 
-notePresent :: SamplerRef -> Double -> DrawData -> TermDrawStats -> Bool -> IO ()
+notePresent :: TermDebugSampler -> Double -> DrawData -> TermDrawStats -> Bool -> IO ()
 notePresent ref uiMs dd stats blitted = do
   now <- getMonotonicTime
-  atomicModifyIORef' ref $ \s ->
-    let dt = now - smLastPresentT s
+  s <- readIORef ref
+  let innerRef = smSampler s
+  atomicModifyIORef' innerRef $ \cur ->
+    let dt = now - smLastPresentT cur
         fps = if dt > 1e-4 then 1 / dt else 0
         frameMs = dt * 1000
-     in
-      ( s
-          { smPresentEma = blend (smPresentEma s) fps
-          , smLastPresentT = now
-          , smRedraws = smRedraws s + 1
-          , smBlits = smBlits s + if blitted then 1 else 0
-          , smUiMs = uiMs
-          , smFrameMs = frameMs
-          , smVerts = drawVertexCount dd
-          , smIndices = drawIndexCount dd
-          , smCmds = drawCmdCount dd
-          , smNodes = tdsNodes stats
-          , smBaseSpans = tdsBaseSpans stats
-          , smOverlaySpans = tdsOverlaySpans stats
-          , smWantFrame = True
-          }
-      , ()
-      )
+        ema' =
+          if fps > 0
+            then if smPresentEma cur <= 0 then fps else blend (smPresentEma cur) fps
+            else smPresentEma cur
+     in ( cur
+            { smPresentEma   = ema'
+            , smLastPresentT = now
+            , smPresents     = smPresents cur + 1
+            , smUiMs         = uiMs
+            , smFrameMs      = frameMs
+            , smVerts        = drawVertexCount dd
+            , smIndices      = drawIndexCount dd
+            , smCmds         = drawCmdCount dd
+            , smWantFrame    = True
+            }
+        , ()
+        )
+  atomicModifyIORef' ref $ \st ->
+    ( st
+        { smRedraws       = smRedraws st + 1
+        , smBlits         = smBlits st + if blitted then 1 else 0
+        , smNodes         = tdsNodes stats
+        , smBaseSpans     = tdsBaseSpans stats
+        , smOverlaySpans  = tdsOverlaySpans stats
+        }
+    , ()
+    )
 
-readTermDebug :: SamplerRef -> Size -> V2 -> Context -> IO TermDebugSnapshot
+readTermDebug :: TermDebugSampler -> Size -> V2 -> Context -> IO TermDebugSnapshot
 readTermDebug ref (Size ww wh) (V2 mx my) ctx = do
   now <- getMonotonicTime
+  st <- readIORef ref
   (refresh, cur) <-
-    atomicModifyIORef' ref $ \s ->
+    atomicModifyIORef' (smSampler st) $ \s ->
       let elapsed = now - smLastDebugT s
           refresh = smLastDebugT s <= 0 || elapsed >= debugRefreshSec
        in (s {smWantFrame = refresh}, (refresh, s))
   if not refresh
-    then pure (smSnapshot cur)
+    then readIORef (smSnapshot st)
     else do
       rts <- readRtsSnapshot
       let theme = ctxTheme ctx
           fgCol = styleFg (themePanel theme)
           bgCol = themeWindow theme
+          core = makeCoreDebugSnapshot cur ww wh mx my rts
           snap' =
             TermDebugSnapshot
-              { dbgPresentFps = smPresentEma cur
-              , dbgLoopFps = smLoopEma cur
-              , dbgFrameMs = smFrameMs cur
-              , dbgUiMs = smUiMs cur
-              , dbgRedraws = smRedraws cur
-              , dbgBlits = smBlits cur
-              , dbgSkips = smSkips cur
-              , dbgVerts = smVerts cur
-              , dbgIndices = smIndices cur
-              , dbgCmds = smCmds cur
-              , dbgNodes = smNodes cur
-              , dbgBaseSpans = smBaseSpans cur
-              , dbgOverlaySpans = smOverlaySpans cur
-              , dbgWinW = ww
-              , dbgWinH = wh
-              , dbgMouseX = mx
-              , dbgMouseY = my
-              , dbgThemeFg = colorRgb fgCol
-              , dbgThemeBg = colorRgb bgCol
-              , dbgRtsOn = rtsEnabled rts
-              , dbgGcs = rtsGcs rts
-              , dbgMajorGcs = rtsMajorGcs rts
-              , dbgAllocMb = rtsAllocMb rts
-              , dbgLiveMb = rtsLiveMb rts
-              , dbgMaxMemMb = rtsMaxMemMb rts
-              , dbgCopiedMb = rtsCopiedMb rts
-              , dbgGcPct = rtsGcPct rts
-              , dbgLastGcGen = rtsLastGcGen rts
-              , dbgLastGcMs = rtsLastGcMs rts
-              , dbgCaps = rtsCaps rts
-              , dbgCpus = rtsCpus rts
+              { dbgCore         = core
+              , dbgRedraws      = smRedraws st
+              , dbgBlits        = smBlits st
+              , dbgNodes        = smNodes st
+              , dbgBaseSpans    = smBaseSpans st
+              , dbgOverlaySpans = smOverlaySpans st
+              , dbgThemeFg      = colorRgb fgCol
+              , dbgThemeBg      = colorRgb bgCol
               }
-      atomicModifyIORef' ref $ \s ->
-        (s {smLastDebugT = now, smSnapshot = snap', smWantFrame = True}, ())
+      atomicModifyIORef' (smSampler st) $ \s ->
+        (s {smLastDebugT = now, smWantFrame = True}, ())
+      writeIORef (smSnapshot st) snap'
       pure snap'
 
 colorRgb :: Color -> (Word8, Word8, Word8)

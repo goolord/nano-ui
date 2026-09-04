@@ -16,6 +16,33 @@ module NanoUI.Backend.Sdl
   , syncDisplay
   , withSdl
   , withSdlBench
+  , dbgPresentFps
+  , dbgLoopFps
+  , dbgFrameMs
+  , dbgUiMs
+  , dbgRenderMs
+  , dbgPresentMs
+  , dbgPresents
+  , dbgSkips
+  , dbgVerts
+  , dbgIndices
+  , dbgCmds
+  , dbgWinW
+  , dbgWinH
+  , dbgMouseX
+  , dbgMouseY
+  , dbgRtsOn
+  , dbgGcs
+  , dbgMajorGcs
+  , dbgAllocMb
+  , dbgLiveMb
+  , dbgMaxMemMb
+  , dbgCopiedMb
+  , dbgGcPct
+  , dbgLastGcGen
+  , dbgLastGcMs
+  , dbgCaps
+  , dbgCpus
   ) where
 
 import Control.Monad (unless)
@@ -30,7 +57,36 @@ import NanoUI
   , Ui
   )
 import NanoUI.Sdl.Runner (askSdlDebug, drawEff, drawReduceEff, newSdlContext, runSdlSession, sdlDrawFrame)
-import NanoUI.Sdl.Debug (SdlDebugSnapshot (..))
+import NanoUI.Sdl.Debug
+  ( SdlDebugSnapshot (..)
+  , dbgPresentFps
+  , dbgLoopFps
+  , dbgFrameMs
+  , dbgUiMs
+  , dbgRenderMs
+  , dbgPresentMs
+  , dbgPresents
+  , dbgSkips
+  , dbgVerts
+  , dbgIndices
+  , dbgCmds
+  , dbgWinW
+  , dbgWinH
+  , dbgMouseX
+  , dbgMouseY
+  , dbgRtsOn
+  , dbgGcs
+  , dbgMajorGcs
+  , dbgAllocMb
+  , dbgLiveMb
+  , dbgMaxMemMb
+  , dbgCopiedMb
+  , dbgGcPct
+  , dbgLastGcGen
+  , dbgLastGcMs
+  , dbgCaps
+  , dbgCpus
+  )
 import NanoUI.Sdl.Window (RgbaImage (..), SdlEnv (..), SdlOptions (..), defaultSdlOptions, syncDisplay, withSdl, withSdlBench)
 import NanoUI.Sdl.NanoUIFont (NanoUIFont (..))
 import NanoUI.Testing (Context, registerImage, runEff, withTheme)
