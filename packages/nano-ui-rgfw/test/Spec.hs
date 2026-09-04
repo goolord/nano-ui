@@ -2,13 +2,16 @@
 
 module Main (main) where
 
-import Control.Monad (forM_)
+import Control.Monad (forM_, when)
 import Data.Bits (shiftR, (.&.))
 import System.Exit (exitFailure)
 
 import qualified Data.IntMap.Strict as IM
 import Data.IORef (newIORef, readIORef, writeIORef)
 import qualified Data.Text as T
+import NanoUI.Rgfw.Debug (RgfwDebugSnapshot (..), debugWindowBody, emptyRgfwDebug)
+import NanoUI.Layout.Arena (DirTag (..), arenaCount, getClipRect, getDirection, getFirstChild, getNodeType, getParent, getText, setClipRect)
+import NanoUI (runNanoUI, window)
 
 import NanoUI
   ( colorRGBA
@@ -823,6 +826,7 @@ main = do
   testGridLayout
   testZIndexRenderArena
   testWindowTitleAndCloseButton
+  testDebugWindow
   putStrLn "=== All tests passed successfully! ==="
 
 testZIndexRenderArena :: IO ()
@@ -912,5 +916,112 @@ testWindowTitleAndCloseButton = do
       theme = tomorrowMidnightMinDarkTheme
   ctx <- newPixelContext
   renderArena surf font 1.0 theme ctx na (WidgetId 0) (WidgetId 0) (WidgetId 0)
+  freeRgfwSurface surf
+
+testDebugWindow :: IO ()
+testDebugWindow = do
+  ctx <- newPixelContext
+  let inp = emptyInput { inputWindowSize = Size 800 600 }
+      snap = emptyRgfwDebug { dbgRtsOn = True }
+  _ <- runNanoUI ctx inp (window True "Debug Diagnostics" (debugWindowBody snap))
+  let na = ctxNodeArena ctx
+  solveSinglePassLayout na 800 600
+  n <- arenaCount na
+  putStrLn $ "=== Debug Window Nodes (count = " ++ show n ++ ") ==="
+  fc <- getFirstChild na 0
+  fcNt <- getNodeType na fc
+  putStrLn $ "getFirstChild na 0 = " ++ show fc ++ ", fcNt = " ++ show fcNt
+  forM_ [0 .. n - 1] $ \i -> do
+    nt <- getNodeType na i
+    p <- getParent na i
+    (x, y, w, h) <- getRect na i
+    mClip <- getClipRect na i
+    txt <- getText na i
+    putStrLn $ "Node " ++ show i ++ " [parent " ++ show p ++ "] " ++ show nt ++ " rect=(" ++ show x ++ "," ++ show y ++ "," ++ show w ++ "," ++ show h ++ ") clip=" ++ show mClip ++ " txt=" ++ show (T.take 20 txt)
+
+  -- Now replicate Session.hs processWindows
+  firstChild <- getFirstChild na 0
+  fcNt <- getNodeType na firstChild
+  fcDir <- getDirection na firstChild
+  let hasTitleRow = fcNt == NodeContainer && fcDir == DirRow
+      titleBarH = if hasTitleRow then 24.0 else 0.0
+      (wx, wy, ww, wh) = (464.0, 32.0, 320.0, 480.0)
+      bodyTop = wy + titleBarH
+      bodyH = max 0.0 (wh - titleBarH)
+      bodyRect = Rect wx bodyTop ww bodyH
+  putStrLn $ "Session hasTitleRow=" ++ show hasTitleRow ++ ", bodyRect=" ++ show bodyRect
+
+  let belongsToWin !curr
+        | curr < 0 = pure False
+        | curr == 0 = pure True
+        | otherwise = do
+            cnt <- getNodeType na curr
+            if (cnt == NodeWindow || cnt == NodeModal) && curr /= 0
+              then pure False
+              else do
+                p <- getParent na curr
+                belongsToWin p
+
+      inTitleBar !curr
+        | not hasTitleRow = pure False
+        | curr < 0 = pure False
+        | curr == firstChild = pure True
+        | curr == 0 = pure False
+        | otherwise = do
+            p <- getParent na curr
+            inTitleBar p
+
+  let clampedSX = 0.0 :: Float
+      clampedSY = 60.0 :: Float -- scrolled down by 60px
+
+  let applyScrollClip !j
+        | j >= n = pure ()
+        | otherwise = do
+            belongs <- belongsToWin j
+            if not belongs || j == 0
+              then applyScrollClip (j + 1)
+              else do
+                inTitle <- inTitleBar j
+                if inTitle
+                  then applyScrollClip (j + 1)
+                  else do
+                    (jx, jy, jw, jh) <- getRect na j
+                    let !newX = jx - clampedSX
+                        !newY = jy - clampedSY
+                    setRect na j newX newY jw jh
+                    mClip <- getClipRect na j
+                    let (Rect cx cy cw ch) = case mClip of
+                          Just c  -> Rect (rectX c - clampedSX) (rectY c - clampedSY) (rectW c) (rectH c)
+                          Nothing -> Rect newX newY jw jh
+                        !cx0 = max (rectX bodyRect) cx
+                        !cy0 = max (rectY bodyRect) cy
+                        !cx1 = min (rectX bodyRect + rectW bodyRect) (cx + cw)
+                        !cy1 = min (rectY bodyRect + rectH bodyRect) (cy + ch)
+                        !finalClip = Rect cx0 cy0 (max 0 (cx1 - cx0)) (max 0 (cy1 - cy0))
+                    setClipRect na j finalClip
+                    applyScrollClip (j + 1)
+
+  applyScrollClip 0
+
+  putStrLn "=== After applyScrollClip (scrolled by 60px) ==="
+  forM_ [0 .. n - 1] $ \i -> do
+    nt <- getNodeType na i
+    (x, y, w, h) <- getRect na i
+    mClip <- getClipRect na i
+    txt <- getText na i
+    putStrLn $ "Node " ++ show i ++ " " ++ show nt ++ " rect=(" ++ show x ++ "," ++ show y ++ "," ++ show w ++ "," ++ show h ++ ") clip=" ++ show mClip ++ " txt=" ++ show (T.take 20 txt)
+
+  surf <- newOffscreenRgfwSurface 800 600
+  let font = getCozetteFont
+      theme = tomorrowMidnightMinDarkTheme
+  renderArena surf font 1.0 theme ctx na (WidgetId 0) (WidgetId 0) (WidgetId 0)
+
+  -- Check if text is drawn in title bar (y = 32 to 55, x = 472)
+  forM_ [32 .. 55] $ \y -> do
+    let pIdx = y * 800 + 472
+    c <- peekElemOff (sBuffer surf) pIdx
+    when (c /= 0 && c /= packColor (thWindowHeader theme) && c /= packColor (thBorder theme)) $
+      putStrLn $ "PIXEL IN TITLE BAR at y=" ++ show y ++ ": " ++ show c
+
   freeRgfwSurface surf
 
