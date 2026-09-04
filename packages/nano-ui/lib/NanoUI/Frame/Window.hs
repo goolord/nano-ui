@@ -295,48 +295,48 @@ cursorForResizeEdge edge =
 
 resizeFromEdge :: WindowResizeDrag -> V2 -> Float -> Float -> (Float, Float, Float, Float)
 resizeFromEdge wrd (V2 mx my) winW winH =
-  let dx = mx - wrdGrabX wrd
-      dy = my - wrdGrabY wrd
-      minW = wrdMinW wrd
-      minH = wrdMinH wrd
-      maxW = min (wrdMaxW wrd) winW
-      maxH = min (wrdMaxH wrd) winH
-      right0 = wrdStartX wrd + wrdStartW wrd
-      bottom0 = wrdStartY wrd + wrdStartH wrd
-      fromE = case wrdEdge wrd of
+  let !dx = mx - wrdGrabX wrd
+      !dy = my - wrdGrabY wrd
+      !minW = max (wrdMinW wrd) 1.0
+      !minH = max (wrdMinH wrd) 1.0
+      !maxW = min (wrdMaxW wrd) winW
+      !maxH = min (wrdMaxH wrd) winH
+      !right0 = wrdStartX wrd + wrdStartW wrd
+      !bottom0 = wrdStartY wrd + wrdStartH wrd
+      !fromE = case wrdEdge wrd of
         ResizeE -> True
         ResizeNE -> True
         ResizeSE -> True
         _ -> False
-      fromW = case wrdEdge wrd of
+      !fromW = case wrdEdge wrd of
         ResizeW -> True
         ResizeNW -> True
         ResizeSW -> True
         _ -> False
-      fromS = case wrdEdge wrd of
+      !fromS = case wrdEdge wrd of
         ResizeS -> True
         ResizeSE -> True
         ResizeSW -> True
         _ -> False
-      fromN = case wrdEdge wrd of
+      !fromN = case wrdEdge wrd of
         ResizeN -> True
         ResizeNE -> True
         ResizeNW -> True
         _ -> False
-      w0
+      !w0
         | fromE = wrdStartW wrd + dx
         | fromW = wrdStartW wrd - dx
         | otherwise = wrdStartW wrd
-      h0
+      !h0
         | fromS = wrdStartH wrd + dy
         | fromN = wrdStartH wrd - dy
         | otherwise = wrdStartH wrd
-      w = max minW (min maxW w0)
-      h = max minH (min maxH h0)
-      x0 = if fromW then right0 - w else wrdStartX wrd
-      y0 = if fromN then bottom0 - h else wrdStartY wrd
-      x = max 0 (min x0 (max 0 (winW - w)))
-      y = max 0 (min y0 (max 0 (winH - h)))
+      !w = max minW (min maxW w0)
+      !h = max minH (min maxH h0)
+      !x0 = if fromW then right0 - w else wrdStartX wrd
+      !y0 = if fromN then bottom0 - h else wrdStartY wrd
+      !x = max 0 (min x0 (max 0 (winW - w)))
+      !y = max 0 (min y0 (max 0 (winH - h)))
    in (w, h, x, y)
 
 updateWindowResize :: Context -> Input -> Float -> Float -> IO Bool
