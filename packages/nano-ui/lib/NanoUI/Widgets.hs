@@ -7,6 +7,14 @@ module NanoUI.Widgets
   , panel
   , row
   , column
+  , grid
+  , grid_
+  , gridWith
+  , grid'
+  , gridPanel
+  , gridPanel_
+  , gridPanelWith
+  , gridPanel'
   , label
   , labelEx
   , button
@@ -253,6 +261,14 @@ import NanoUI.Widgets.ColorPicker (colorPicker)
 import NanoUI.Widgets.Drawing (DrawOp (..), DrawingBuild, drawing, drawingCached)
 import NanoUI.Widgets.Layout
   ( column
+  , grid
+  , grid_
+  , gridWith
+  , grid'
+  , gridPanel
+  , gridPanel_
+  , gridPanelWith
+  , gridPanel'
   , flex
   , label
   , labelEx

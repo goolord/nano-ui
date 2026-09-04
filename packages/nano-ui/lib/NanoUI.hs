@@ -79,6 +79,8 @@ module NanoUI
   , tight
   , percent
   , aspect
+  , gridCols
+  , cols
   , LayoutModifier
   , fontRegular
   , fontHeading
@@ -133,6 +135,16 @@ module NanoUI
   , column_
   , columnWith
   , column'
+  , grid
+  , grid_
+  , gridWith
+  , grid'
+  , gridResponse
+  , gridPanel
+  , gridPanel_
+  , gridPanelWith
+  , gridPanel'
+  , gridPanelResponse
   , label
   , labelEx
   , label_
@@ -429,6 +441,8 @@ import NanoUI.Style
   , alignStart
   , alignTop
   , aspect
+  , cols
+  , gridCols
   , defaultLayout
   , defaultTheme
   , fontHeading
@@ -626,6 +640,16 @@ import NanoUI.Widgets.Layout
   , column'
   , columnWith
   , column_
+  , grid
+  , grid_
+  , gridWith
+  , grid'
+  , gridResponse
+  , gridPanel
+  , gridPanel_
+  , gridPanelWith
+  , gridPanel'
+  , gridPanelResponse
   , flexCol
   , flexRow
   , hGroup

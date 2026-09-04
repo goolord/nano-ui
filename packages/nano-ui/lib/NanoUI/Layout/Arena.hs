@@ -26,6 +26,8 @@ module NanoUI.Layout.Arena
   , getChildCount
   , getNodeType
   , getDirection
+  , getGridCols
+  , setGridCols
   , getWidthSizing
   , getHeightSizing
   , getPadding
@@ -200,6 +202,7 @@ data NodeArenaArrays = NodeArenaArrays
   , naArrValue :: !(MutablePrimArray RealWorld Float)
   , naArrStyleIdx :: !(MutablePrimArray RealWorld Int)
   , naArrTextIdx :: !(MutablePrimArray RealWorld Int)
+  , naArrGridCols :: !(MutablePrimArray RealWorld Int)
   , naArrTextStore :: !(MutableArray RealWorld Text)
   }
 
@@ -262,6 +265,8 @@ newNodeArenaArrays cap = do
   naArrValue <- newPrimArray cap
   naArrStyleIdx <- newPrimArray cap
   naArrTextIdx <- newPrimArray cap
+  naArrGridCols <- newPrimArray cap
+  setPrimArray naArrGridCols 0 cap 0
   naArrTextStore <- newArray cap T.empty
   pure NodeArenaArrays {..}
 
@@ -387,6 +392,7 @@ ensureCapacity na needed = do
       naArrValue <- growPrimArrayCopy (naArrValue a) cap newCap 0
       naArrStyleIdx <- growPrimArrayCopy (naArrStyleIdx a) cap newCap 0
       naArrTextIdx <- growPrimArrayCopy (naArrTextIdx a) cap newCap (-1)
+      naArrGridCols <- growPrimArrayCopy (naArrGridCols a) cap newCap 0
       naArrTextStore <- growTextStoreCopy (naArrTextStore a) cap newCap
       let newA = NodeArenaArrays {..}
       writeIORef (naArrays na) newA
@@ -515,6 +521,7 @@ addNode na nt parent dir wSiz hSiz pad gap minW minH maxW maxH grow ax ay wrap =
   writePrimArray (naArrValue a) idx 0
   writePrimArray (naArrStyleIdx a) idx 0
   writePrimArray (naArrTextIdx a) idx (-1)
+  writePrimArray (naArrGridCols a) idx 0
   writePrimArray (naArrFirstChild a) idx (-1)
   writePrimArray (naArrNextSibling a) idx (-1)
   writePrimArray (naArrChildCount a) idx 0
@@ -551,6 +558,7 @@ addNodeFromLayout na nt parent l = do
       (layoutAlignY l)
       (layoutWrap l)
   setAspect na idx (layoutAspect l)
+  setGridCols na idx (layoutGridCols l)
   pure idx
 
 {-# INLINE setNodeText #-}
@@ -583,6 +591,14 @@ getNodeType na idx = arenaArrays na >>= \a -> readPrimArray (naArrNodeType a) id
 {-# INLINE getDirection #-}
 getDirection :: NodeArena -> NodeIdx -> IO DirTag
 getDirection na idx = arenaArrays na >>= \a -> readPrimArray (naArrDirection a) idx >>= pure . toEnum . fromIntegral
+
+{-# INLINE getGridCols #-}
+getGridCols :: NodeArena -> NodeIdx -> IO Int
+getGridCols na idx = arenaArrays na >>= \a -> readPrimArray (naArrGridCols a) idx
+
+{-# INLINE setGridCols #-}
+setGridCols :: NodeArena -> NodeIdx -> Int -> IO ()
+setGridCols na idx c = arenaArrays na >>= \a -> writePrimArray (naArrGridCols a) idx c
 
 {-# INLINE getWidthSizing #-}
 getWidthSizing :: NodeArena -> NodeIdx -> IO (SizingTag, Float)

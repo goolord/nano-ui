@@ -59,6 +59,7 @@ import NanoUI.Layout.Arena
   , newNodeArena
   , addNode
   , getRect
+  , setGridCols
   , setNodeText
   , setWidgetId
   )
@@ -653,6 +654,95 @@ testWindowResizing = do
   assert "Resized floating window placed at stored X 80" (rx == 80.0)
   assert "Resized floating window placed at stored Y 120" (ry == 120.0)
 
+testGridLayout :: IO ()
+testGridLayout = do
+  -- 1. Uniform 2-column Grid
+  na1 <- newNodeArena
+  grid1 <- addNode na1 NodeContainer (-1) Row (Fixed 600) (Fixed 400) (Padding 10 10 10 10) 10 0 0 1e9 1e9 0 AlignStart AlignTop False
+  setGridCols na1 grid1 2
+  c0 <- addNode na1 NodeButton grid1 Column (Fixed 285) (Fixed 40) (Padding 0 0 0 0) 0 0 0 1e9 1e9 0 AlignStart AlignTop False
+  c1 <- addNode na1 NodeButton grid1 Column (Fixed 285) (Fixed 50) (Padding 0 0 0 0) 0 0 0 1e9 1e9 0 AlignStart AlignTop False
+  c2 <- addNode na1 NodeButton grid1 Column (Fixed 285) (Fixed 30) (Padding 0 0 0 0) 0 0 0 1e9 1e9 0 AlignStart AlignTop False
+  c3 <- addNode na1 NodeButton grid1 Column (Fixed 285) (Fixed 60) (Padding 0 0 0 0) 0 0 0 1e9 1e9 0 AlignStart AlignTop False
+
+  solveSinglePassLayout na1 600 400
+
+  r0 <- getRect na1 c0
+  r1 <- getRect na1 c1
+  r2 <- getRect na1 c2
+  r3 <- getRect na1 c3
+
+  assert "Grid 2-col child 0 at (10, 10, 285, 40)" (r0 == (10, 10, 285, 40))
+  assert "Grid 2-col child 1 at (305, 10, 285, 50)" (r1 == (305, 10, 285, 50))
+  assert "Grid 2-col child 2 at (10, 70, 285, 30)" (r2 == (10, 70, 285, 30))
+  assert "Grid 2-col child 3 at (305, 70, 285, 60)" (r3 == (305, 70, 285, 60))
+
+  -- 2. Mixed Fixed + Grow columns (2-column layout)
+  na2 <- newNodeArena
+  grid2 <- addNode na2 NodeContainer (-1) Row (Fixed 600) (Fixed 400) (Padding 0 0 0 0) 16 0 0 1e9 1e9 0 AlignStart AlignTop False
+  setGridCols na2 grid2 2
+  leftP <- addNode na2 NodePanel grid2 Column (Fixed 200) (Grow 1.0) (Padding 0 0 0 0) 0 0 0 1e9 1e9 0 AlignStart AlignTop False
+  rightP <- addNode na2 NodePanel grid2 Column (Grow 1.0) (Grow 1.0) (Padding 0 0 0 0) 0 0 0 1e9 1e9 0 AlignStart AlignTop False
+
+  solveSinglePassLayout na2 600 400
+
+  (gx0, _, gw0, gh0) <- getRect na2 leftP
+  (gx1, _, gw1, gh1) <- getRect na2 rightP
+  assert "Grid left panel starts at x=0, w=200, h=400" (gx0 == 0 && gw0 == 200 && gh0 == 400)
+  assert "Grid right panel starts at x=216, w=384, h=400" (gx1 == 216 && gw1 == 384 && gh1 == 400)
+  assert "Grid panels span parent width (216 + 384 == 600)" (gx1 + gw1 == 600)
+
+  -- 3. 3-column multi-row grid (3x3 items)
+  na3 <- newNodeArena
+  grid3 <- addNode na3 NodeContainer (-1) Row (Fixed 320) (Fixed 200) (Padding 10 10 10 10) 10 0 0 1e9 1e9 0 AlignStart AlignTop False
+  setGridCols na3 grid3 3
+  k0 <- addNode na3 NodeButton grid3 Column (Fixed 80) (Fixed 30) (Padding 0 0 0 0) 0 0 0 1e9 1e9 0 AlignStart AlignTop False
+  k1 <- addNode na3 NodeButton grid3 Column (Fixed 100) (Fixed 30) (Padding 0 0 0 0) 0 0 0 1e9 1e9 0 AlignStart AlignTop False
+  k2 <- addNode na3 NodeButton grid3 Column (Fixed 100) (Fixed 30) (Padding 0 0 0 0) 0 0 0 1e9 1e9 0 AlignStart AlignTop False
+  k3 <- addNode na3 NodeButton grid3 Column (Fixed 80) (Fixed 30) (Padding 0 0 0 0) 0 0 0 1e9 1e9 0 AlignStart AlignTop False
+  k4 <- addNode na3 NodeButton grid3 Column (Fixed 100) (Fixed 30) (Padding 0 0 0 0) 0 0 0 1e9 1e9 0 AlignStart AlignTop False
+  k5 <- addNode na3 NodeButton grid3 Column (Fixed 100) (Fixed 30) (Padding 0 0 0 0) 0 0 0 1e9 1e9 0 AlignStart AlignTop False
+  k6 <- addNode na3 NodeButton grid3 Column (Fixed 80) (Fixed 30) (Padding 0 0 0 0) 0 0 0 1e9 1e9 0 AlignStart AlignTop False
+  k7 <- addNode na3 NodeButton grid3 Column (Fixed 100) (Fixed 30) (Padding 0 0 0 0) 0 0 0 1e9 1e9 0 AlignStart AlignTop False
+  k8 <- addNode na3 NodeButton grid3 Column (Fixed 100) (Fixed 30) (Padding 0 0 0 0) 0 0 0 1e9 1e9 0 AlignStart AlignTop False
+
+  solveSinglePassLayout na3 320 200
+
+  rk0 <- getRect na3 k0
+  rk1 <- getRect na3 k1
+  rk2 <- getRect na3 k2
+  rk3 <- getRect na3 k3
+  rk4 <- getRect na3 k4
+  rk5 <- getRect na3 k5
+  rk6 <- getRect na3 k6
+  rk7 <- getRect na3 k7
+  rk8 <- getRect na3 k8
+
+  assert "Grid 3x3 item (0,0) at (10, 10, 80, 30)" (rk0 == (10, 10, 80, 30))
+  assert "Grid 3x3 item (1,0) at (100, 10, 100, 30)" (rk1 == (100, 10, 100, 30))
+  assert "Grid 3x3 item (2,0) at (210, 10, 100, 30)" (rk2 == (210, 10, 100, 30))
+  assert "Grid 3x3 item (0,1) at (10, 50, 80, 30)" (rk3 == (10, 50, 80, 30))
+  assert "Grid 3x3 item (1,1) at (100, 50, 100, 30)" (rk4 == (100, 50, 100, 30))
+  assert "Grid 3x3 item (2,1) at (210, 50, 100, 30)" (rk5 == (210, 50, 100, 30))
+  assert "Grid 3x3 item (0,2) at (10, 90, 80, 30)" (rk6 == (10, 90, 80, 30))
+  assert "Grid 3x3 item (1,2) at (100, 90, 100, 30)" (rk7 == (100, 90, 100, 30))
+  assert "Grid 3x3 item (2,2) at (210, 90, 100, 30)" (rk8 == (210, 90, 100, 30))
+
+  -- 4. Grid Pass 1 intrinsic size calculation (nested in column)
+  na4 <- newNodeArena
+  root4 <- addNode na4 NodeContainer (-1) Column (Fixed 800) (Fixed 600) (Padding 0 0 0 0) 0 0 0 1e9 1e9 0 AlignStart AlignTop False
+  grid4 <- addNode na4 NodeContainer root4 Row Fit Fit (Padding 5 5 5 5) 6 0 0 1e9 1e9 0 AlignStart AlignTop False
+  setGridCols na4 grid4 2
+  _ <- addNode na4 NodeButton grid4 Column (Fixed 70) (Fixed 20) (Padding 0 0 0 0) 0 0 0 1e9 1e9 0 AlignStart AlignTop False
+  _ <- addNode na4 NodeButton grid4 Column (Fixed 90) (Fixed 40) (Padding 0 0 0 0) 0 0 0 1e9 1e9 0 AlignStart AlignTop False
+  _ <- addNode na4 NodeButton grid4 Column (Fixed 60) (Fixed 30) (Padding 0 0 0 0) 0 0 0 1e9 1e9 0 AlignStart AlignTop False
+  _ <- addNode na4 NodeButton grid4 Column (Fixed 80) (Fixed 25) (Padding 0 0 0 0) 0 0 0 1e9 1e9 0 AlignStart AlignTop False
+
+  solveSinglePassLayout na4 800 600
+
+  rGrid4 <- getRect na4 grid4
+  assert "Grid intrinsic content rect is (0, 0, 176, 86)" (rGrid4 == (0, 0, 176, 86))
+
 main :: IO ()
 main = do
   putStrLn "=== Running nano-ui-rgfw Unit Tests ==="
@@ -679,4 +769,5 @@ main = do
   testFloatingWindowLayout
   testCompactContextMenuLayout
   testWindowResizing
+  testGridLayout
   putStrLn "=== All tests passed successfully! ==="

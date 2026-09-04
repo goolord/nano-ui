@@ -10,7 +10,6 @@ import NanoUI
   , boundedRadioFieldset
   , button
   , checkbox
-  , columnWith
   , contextMenu
   , emit
   , fillH
@@ -19,6 +18,7 @@ import NanoUI
   , fixedW
   , flex
   , gap
+  , gridWith
   , label
   , menuHeader
   , menuItem
@@ -202,7 +202,7 @@ appView m = do
       when (respClicked debugBtn) (emit (ToggleDebug (not (debugOpen m))))
 
     -- Tab Bar
-    rowWith (gap 4 . fixedH 24) $ do
+    gridWith 4 (gap 4 . fixedH 24) $ do
       let mkTab tab title = do
             let isActive = activeTab m == tab
                 tag = if isActive then "tab:active:" else "tab:"
@@ -231,14 +231,14 @@ appView m = do
 -- | Tab 1: Controls
 viewControlsTab :: Model -> NanoUI ()
 viewControlsTab m = do
-  rowWith (gap 12 . fillW . fillH) $ do
+  gridWith 2 (gap 12 . fillW . fillH) $ do
     -- Left Column: Interactive Form Controls
     panelWith (padAll 10 . gap 6 . fixedW 380 . fillH) $ do
       void $ label "WIDGET CONTROLS"
       void $ separator
 
       -- Counter
-      rowWith (gap 6 . fixedH 22) $ do
+      gridWith 4 (gap 6 . fixedH 22) $ do
         void $ label ("Counter: " <> T.pack (show (counter m)))
         incBtn <- button " +1 "
         when (respClicked incBtn) (emit Increment)
@@ -248,12 +248,12 @@ viewControlsTab m = do
         when (respClicked rstBtn) (emit Reset)
 
       -- Checkbox
-      rowWith (gap 6 . fixedH 20) $ do
+      gridWith 1 (gap 6 . fixedH 20) $ do
         (cbResp, cbVal) <- checkbox "Enable turbo execution mode" (turboOn m)
         when (respClicked cbResp || respChanged cbResp) (emit (ToggleTurbo cbVal))
 
       -- Context Menu
-      rowWith (gap 6 . fixedH 22) $ do
+      gridWith 2 (gap 6 . fixedH 22) $ do
         void $ label "Context Menu:"
         menuBtn <- button "Right-click Me"
         void $ contextMenu menuBtn $ do
@@ -272,36 +272,35 @@ viewControlsTab m = do
           menuItemDisabled "Disabled Command"
 
       -- Sliders
-      columnWith (gap 2) $ do
+      gridWith 1 (gap 2) $ do
         let volPct = round (volumeVal m * 100) :: Int
         void $ label ("Master Volume: " <> T.pack (show volPct) <> "%")
         (slResp, slVal) <- slider "Vol" 0 1 (volumeVal m)
         when (respChanged slResp) (emit (SetVolume slVal))
 
-      columnWith (gap 2) $ do
+      gridWith 1 (gap 2) $ do
         let opPct = round (opacityVal m * 100) :: Int
         void $ label ("Surface Opacity: " <> T.pack (show opPct) <> "%")
         (opResp, opVal) <- slider "Opacity" 0 1 (opacityVal m)
         when (respChanged opResp) (emit (SetOpacity opVal))
 
       -- Text Input
-      columnWith (gap 2) $ do
+      gridWith 1 (gap 2) $ do
         void $ label "Single-line Text Input:"
         (tiResp, tiVal) <- textInput "Input" (textVal m)
         when (respChanged tiResp) (emit (SetInputText tiVal))
 
       -- Text Area
-      columnWith (gap 2) $ do
-        rowWith (gap 4 . fixedH 18) $ do
+      gridWith 1 (gap 2) $ do
+        gridWith 2 (gap 4 . fixedH 18) $ do
           void $ label "Multi-line Notes Field:"
-          void $ flex
           clrBtn <- button "Clear"
           when (respClicked clrBtn) (emit ClearNotes)
         (taResp, taVal) <- textArea "Notes" (notesVal m)
         when (respChanged taResp) (emit (SetNotesText taVal))
 
       -- Radio Buttons
-      columnWith (gap 2) $ do
+      gridWith 1 (gap 2) $ do
         (radResp, radVal) <- boundedRadioFieldset "Preset" (profileOpt m) $ \case
           ProfileFast     -> "Fast (Low Latency)"
           ProfileBalanced -> "Balanced (Standard)"
@@ -313,32 +312,43 @@ viewControlsTab m = do
       void $ label "STATE INSPECTOR & METERS"
       void $ separator
 
-      columnWith (gap 6) $ do
-        void $ label ("Active Theme:    " <> T.pack (show (currentTheme m)))
+      gridWith 2 (gap 6) $ do
+        void $ label "Active Theme:"
+        void $ label (T.pack (show (currentTheme m)))
         let scText = case dpiScale m of
               DpiScaleAuto -> "Auto (OS reported)"
               sc           -> formatDpiScale sc <> " (" <> T.pack (show (physScaleFor sc)) <> "x)"
-        void $ label ("DPI Scale:       " <> scText)
-        void $ label ("Counter Value:   " <> T.pack (show (counter m)))
-        void $ label ("Turbo Mode:      " <> if turboOn m then "[ENABLED]" else "[DISABLED]")
-        void $ label ("Volume Slider:   " <> T.pack (show (round (volumeVal m * 100) :: Int)) <> "%")
-        void $ label ("Opacity Slider:  " <> T.pack (show (round (opacityVal m * 100) :: Int)) <> "%")
-        void $ label ("Profile Selected:" <> T.pack (show (profileOpt m)))
-        void $ label ("Text Input:      " <> textVal m)
-        void $ label ("Total Clicks:    " <> T.pack (show (totalClicks m)))
+        void $ label "DPI Scale:"
+        void $ label scText
+        void $ label "Counter Value:"
+        void $ label (T.pack (show (counter m)))
+        void $ label "Turbo Mode:"
+        void $ label (if turboOn m then "[ENABLED]" else "[DISABLED]")
+        void $ label "Volume Slider:"
+        void $ label (T.pack (show (round (volumeVal m * 100) :: Int)) <> "%")
+        void $ label "Opacity Slider:"
+        void $ label (T.pack (show (round (opacityVal m * 100) :: Int)) <> "%")
+        void $ label "Profile Selected:"
+        void $ label (T.pack (show (profileOpt m)))
+        void $ label "Text Input:"
+        void $ label (textVal m)
+        void $ label "Total Clicks:"
+        void $ label (T.pack (show (totalClicks m)))
 
       void $ separator
 
       void $ label "Live Unicode Progress Bars:"
-      columnWith (gap 4) $ do
+      gridWith 2 (gap 4) $ do
         let makeBar pct =
               let filled = max 0 (min 20 (pct `div` 5))
                   empty  = 20 - filled
                in T.replicate filled "█" <> T.replicate empty "░"
             volPct = round (volumeVal m * 100) :: Int
             opPct  = round (opacityVal m * 100) :: Int
-        void $ label ("Vol: [" <> makeBar volPct <> "] " <> T.pack (show volPct) <> "%")
-        void $ label ("Opa: [" <> makeBar opPct  <> "] " <> T.pack (show opPct) <> "%")
+        void $ label "Master Volume:"
+        void $ label ("[" <> makeBar volPct <> "] " <> T.pack (show volPct) <> "%")
+        void $ label "Surface Opacity:"
+        void $ label ("[" <> makeBar opPct  <> "] " <> T.pack (show opPct) <> "%")
 
 -- | Tab 2: Unicode & Icon Gallery
 viewGalleryTab :: NanoUI ()
@@ -347,8 +357,8 @@ viewGalleryTab = do
     void $ label "COZETTE EMBEDDED BITMAP FONT // UNICODE SHOWCASE"
     void $ separator
 
-    columnWith (gap 8) $ do
-      columnWith (gap 2) $ do
+    gridWith 1 (gap 8) $ do
+      gridWith 1 (gap 2) $ do
         void $ label "ASCII Printable Characters:"
         void $ label "!\"#$%&'()*+,-./0123456789:;<=>?"
         void $ label "@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_"
@@ -356,15 +366,15 @@ viewGalleryTab = do
 
       void $ separator
 
-      columnWith (gap 2) $ do
+      gridWith 1 (gap 2) $ do
         void $ label "Greek Letters & Physics Variables:"
         void $ label "Δ Ω Σ α β γ δ ε θ λ μ π ρ τ ω"
 
-      columnWith (gap 2) $ do
+      gridWith 1 (gap 2) $ do
         void $ label "Mathematical & Logic Operators:"
         void $ label "± × ÷ √ ∞ ≤ ≥ ≠ ≈ ≡ ∀ ∃ ∈ ∉ ∧ ∨ ∂ ∇"
 
-      columnWith (gap 2) $ do
+      gridWith 1 (gap 2) $ do
         void $ label "Box Drawing & Frame Elements:"
         void $ label "┌───┬───┐  ╔═══╦═══╗  ┏━━━┳━━━┓"
         void $ label "│ A │ B │  ║ X ║ Y ║  ┃ 1 ┃ 2 ┃"
@@ -372,18 +382,35 @@ viewGalleryTab = do
         void $ label "│ C │ D │  ║ Z ║ W ║  ┃ 3 ┃ 4 ┃"
         void $ label "└───┴───┘  ╚═══╩═══╝  ┗━━━┻━━━┛"
 
-      columnWith (gap 2) $ do
+      gridWith 1 (gap 2) $ do
         void $ label "Block Elements & Shading Meters:"
         void $ label "█ ▓ ▒ ░ ▀ ▄ ▌ ▐ ▖ ▗ ▘ ▙ ▚ ▛ ▜ ▝ ▞ ▟"
 
-      columnWith (gap 2) $ do
+      gridWith 1 (gap 2) $ do
         void $ label "Keycaps & Modifiers:"
         void $ label "⏎ Enter  ⇥ Tab  ⌃ Ctrl  ⌥ Alt  ⌘ Cmd  ⌫ Bksp  ⎋ Esc"
 
-      columnWith (gap 2) $ do
-        void $ label "Nerd Font & UI Icons:"
-        void $ label "\xF002 Search  \xF004 Health  \xF005 Star  \xF00C Check  \xF00D Close  \xF013 Settings  \xF01E Reload"
-        void $ label "\xF026 Mute    \xF028 Sound   \xF04B Play   \xF04C Pause  \xF04D Stop   \xF188 Debug     \xF11B Gamepad"
+      void $ separator
+
+      gridWith 1 (gap 4) $ do
+        void $ label "Nerd Font & UI Icon Buttons (4-Column Native Grid):"
+        gridWith 4 (gap 4 . fixedH 24) $ do
+          void $ button "\xF002 Search"
+          void $ button "\xF004 Health"
+          void $ button "\xF005 Star"
+          void $ button "\xF00C Check"
+          void $ button "\xF00D Close"
+          void $ button "\xF013 Settings"
+          void $ button "\xF01E Reload"
+          void $ button "\xF026 Mute"
+          void $ button "\xF028 Sound"
+          void $ button "\xF04B Play"
+          void $ button "\xF04C Pause"
+          void $ button "\xF04D Stop"
+          void $ button "\xF188 Debug"
+          void $ button "\xF11B Gamepad"
+          void $ button "⏎ Enter"
+          void $ button "⎋ Esc"
 
 -- | Tab 3: Architecture
 viewArchitectureTab :: NanoUI ()
@@ -392,9 +419,10 @@ viewArchitectureTab = do
     void $ label "LEAN BACKEND ARCHITECTURE & DESIGN PRINCIPLES"
     void $ separator
 
-    columnWith (gap 6) $ do
-      void $ label "1. Single-Pass O(N) Linear Preorder Layout Engine:"
-      void $ label "   - Zero flex equations, zero backtracking, zero quadratic passes."
+    gridWith 1 (gap 6) $ do
+      void $ label "1. Single-Pass O(N) Linear Grid & Flex Layout Engine:"
+      void $ label "   - Native multi-column 2D grids (gridWith N) with automatic column & row distribution."
+      void $ label "   - Zero backtracking, zero flex equations, zero quadratic passes."
       void $ label "   - Direct contiguous allocation in unboxed PrimArray."
       void $ label "   - Strictly clamps child nodes to parent remaining bounds."
 
@@ -427,8 +455,8 @@ viewDiagnosticsTab m = do
     void $ label "SYSTEM DIAGNOSTICS & TELEMETRY"
     void $ separator
 
-    columnWith (gap 6) $ do
-      void $ label "Window & Surface Telemetry:"
+    gridWith 1 (gap 6) $ do
+      void $ label "Window & Surface Telemetry (2-Column Property Grid):"
       let !sc = dpiScale m
           !physScale = physScaleFor sc
           !physW = 1680 :: Int
@@ -436,20 +464,34 @@ viewDiagnosticsTab m = do
           !effScale = if physScale > 0.0 then physScale else 1.0
           !logW = round (fromIntegral physW / effScale) :: Int
           !logH = round (fromIntegral physH / effScale) :: Int
-      void $ label ("  Physical Window Size:  " <> T.pack (show physW) <> " x " <> T.pack (show physH) <> " px")
-      void $ label ("  DPI Scale Choice:      " <> formatDpiScale sc <> (if physScale <= 0.0 then " (OS Native DPI)" else " (" <> T.pack (show physScale) <> "x DPI)"))
-      void $ label ("  Logical Viewport Size: " <> T.pack (show logW) <> " x " <> T.pack (show logH) <> " px")
-      void $ label ("  Framebuffer Bit Depth: 32-bit BGRA (Windows DIBSection)")
-      void $ label ("  Physical RAM Surface:  " <> T.pack (show (physW * physH * 4 `div` 1024)) <> " KB")
-      void $ label ("  Target Frame Rate:     120 FPS max pacing")
+
+      gridWith 2 (gap 4) $ do
+        void $ label "Physical Window Size:"
+        void $ label (T.pack (show physW) <> " x " <> T.pack (show physH) <> " px")
+        void $ label "DPI Scale Choice:"
+        void $ label (formatDpiScale sc <> (if physScale <= 0.0 then " (OS Native DPI)" else " (" <> T.pack (show physScale) <> "x DPI)"))
+        void $ label "Logical Viewport Size:"
+        void $ label (T.pack (show logW) <> " x " <> T.pack (show logH) <> " px")
+        void $ label "Framebuffer Bit Depth:"
+        void $ label "32-bit BGRA (Software DIBSection)"
+        void $ label "Physical RAM Surface:"
+        void $ label (T.pack (show (physW * physH * 4 `div` 1024)) <> " KB")
+        void $ label "Target Frame Rate:"
+        void $ label "120 FPS max pacing"
 
       void $ separator
 
-      void $ label "Runtime State:"
-      void $ label ("  Active Tab:            " <> T.pack (show (activeTab m)))
-      void $ label ("  Current Theme:         " <> T.pack (show (currentTheme m)))
-      void $ label ("  Interaction Clicks:    " <> T.pack (show (totalClicks m)))
-      void $ label ("  Compiler Toolchain:    Zig C Compiler (zig cc)")
+      gridWith 2 (gap 4) $ do
+        void $ label "Active Tab:"
+        void $ label (T.pack (show (activeTab m)))
+        void $ label "Current Theme:"
+        void $ label (T.pack (show (currentTheme m)))
+        void $ label "Interaction Clicks:"
+        void $ label (T.pack (show (totalClicks m)))
+        void $ label "Compiler Toolchain:"
+        void $ label "Zig C Compiler (zig cc)"
+        void $ label "Layout Paradigm:"
+        void $ label "Native Multi-Column 2D Grid"
 
       void $ separator
 
