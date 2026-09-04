@@ -3,7 +3,7 @@
 module NanoUI.Widgets.Radio (radioFieldset, boundedRadioFieldset, useRadio) where
 
 import qualified Data.IntMap.Strict as IM
-import Control.Monad (unless, void, zipWithM)
+import Control.Monad (unless, void, when, zipWithM)
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
@@ -42,12 +42,13 @@ radioFieldset legend options initial =
       let mClicked = listToMaybe [i | (r, i) <- rs, rawRespClicked r]
           finalSel = fromMaybe sel mClicked
       uiIO $ do
-        st <- getStore ctx
-        setStore ctx st
-          { storeInt =
-              IM.insert key finalSel $
-                IM.insert keyInit c0 (storeInt st)
-          }
+        when (storedSel /= Just finalSel || lastInit /= Just c0) $ do
+          st <- getStore ctx
+          setStore ctx st
+            { storeInt =
+                IM.insert key finalSel $
+                  IM.insert keyInit c0 (storeInt st)
+            }
       pure (setChanged (finalSel /= sel || mClicked /= Nothing) (mconcat (map fst rs)), finalSel)
 
 bit :: (Ui :> es) => Context -> Int -> Int -> Text -> Eff es (Response, Int)
@@ -58,7 +59,7 @@ bit ctx sel i l = do
 
 boundedRadioFieldset :: (Bounded a, Enum a, Ui :> es) => Text -> a -> (a -> Text) -> Eff es (Response, a)
 boundedRadioFieldset legend initial encode =
-  let vs = [minBound .. maxBound]
+  let vs = take 256 [minBound .. maxBound]
    in fmap (\(r, i) -> (r, toEnum (max 0 (min (length vs - 1) i)))) (radioFieldset legend (map encode vs) (fromEnum initial))
 
 useRadio :: (Enum a, Ui :> es) => a -> Eff es (a, a -> Eff es ())
