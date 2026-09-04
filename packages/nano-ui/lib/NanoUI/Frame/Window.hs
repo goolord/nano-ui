@@ -8,6 +8,7 @@ module NanoUI.Frame.Window
   , updateWindowResize
   , resizeFromEdge
   , cursorForResizeEdge
+  , windowResizeEdgeAt
   , WindowResizeEdge (..)
   , drawWindowOverlays
   , drawModalOverlays

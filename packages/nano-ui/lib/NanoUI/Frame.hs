@@ -35,17 +35,21 @@ import NanoUI.Context
   ( Context (..)
   , armMenuPointerCapture
   , FrameMsg (..)
-  , animInProgress
-  , clearPopupConfigs
-  , clearDrawings
+  , clearDirty
   , decodeMessages
   , drainMessages
+  , getLastWindowSize
+  , getLiveAnimations
+  , getPrevFloatingRects
   , getPrevRect
+  , getPrevRects
   , getStore
   , isDirty
   , lookupPopupConfig
   , markDirty
   , pruneDrawOpCache
+  , resetDrawingScopeCache
+  , setFloatingAncestor
   , tickAnimations
   )
 import NanoUI.Context (beginFrameModal)
@@ -207,13 +211,13 @@ runFrameEff unlift ctx inp ui = do
   oldHotRect <- getPrevRect ctx oldHot
   oldActiveRect <- getPrevRect ctx oldActive
   oldFocusRect <- getPrevRect ctx oldFocus
-  oldFloatingRects <- readIORef (ctxPrevFloatingRects ctx)
-  oldRects <- readIORef (ctxPrevRects ctx)
-  oldSize <- readIORef (ctxLastWindowSize ctx)
+  oldFloatingRects <- getPrevFloatingRects ctx
+  oldRects <- getPrevRects ctx
+  oldSize <- getLastWindowSize ctx
   oldStore <- getStore ctx
   wasDirty <- isDirty ctx
-  writeIORef (ctxDirty ctx) False
-  animKeys <- IM.keys . IM.filter animInProgress <$> readIORef (ctxAnimations ctx)
+  clearDirty ctx
+  animKeys <- IM.keys <$> getLiveAnimations ctx
   resetNodeArena (ctxNodeArena ctx)
   resetDrawArena (ctxDrawArena ctx)
   resetUiBuildScopes ctx
@@ -222,7 +226,6 @@ runFrameEff unlift ctx inp ui = do
   when (not (inputMouseDown inp) && not (inputMouseReleased inp)) $
     writeIORef (ctxMenuPointerGesture ctx) False
   beginFrameModal ctx
-  writeIORef (ctxEscapeConsumed ctx) False
   writeIORef (ctxReleaseClickedId ctx) (WidgetId 0)
   armMenuPointerCapture ctx inp
   result0 <- unlift (runUi ctx inp ui)
@@ -310,7 +313,6 @@ runFrameEff unlift ctx inp ui = do
     animKeys
   msgs <- drainMessages ctx
   dirtyAfterUi <- isDirty ctx
-  writeIORef (ctxDirty ctx) dirtyAfterUi
   pure (result, msgs, drawData, dirtyAfterUi)
 
 -- Second UI pass after mirror store write. Keeps ctxStore, animations, and
@@ -326,10 +328,8 @@ resetUiBuildScopes ctx = do
   writeIORef (ctxIdContext ctx) initialIdContext
   writeIORef (ctxFocusablesCount ctx) 0
   writeIORef (ctxHotId ctx) (WidgetId 0)
-  writeIORef (ctxWidgetNodeTypes ctx) Nothing
-  writeIORef (ctxFloatingAncestor ctx) Nothing
-  clearPopupConfigs ctx
-  clearDrawings ctx
+  resetDrawingScopeCache ctx
+  setFloatingAncestor ctx Nothing
 
 solvePlaceWindows :: Context -> Float -> Float -> IO ()
 solvePlaceWindows ctx w h = do

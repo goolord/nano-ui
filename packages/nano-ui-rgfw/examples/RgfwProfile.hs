@@ -3,9 +3,7 @@
 
 module Main (main) where
 
-import Control.Monad (replicateM_)
-import Data.IORef (writeIORef)
-import qualified Data.IntMap.Strict as IM
+import Control.Monad (replicateM_, void)
 import Effectful (runEff)
 import NanoUI
   ( Input (..)
@@ -13,23 +11,13 @@ import NanoUI
   , V2 (..)
   , WidgetId (..)
   , emptyInput
-  , runUi
   )
 import NanoUI.Context
   ( Context (..)
-  , WidgetStore (..)
-  , clearPopupConfigs
-  , getStore
-  , intKey
-  , lookupPopupConfig
-  , slotKey
-  , slotWinSize
   , withFontMetrics
   )
-import NanoUI.Id (initialIdContext)
-import NanoUI.Testing (newPixelContext)
+import NanoUI.Testing (newPixelContext, runFrameEff)
 import NanoUI.Rgfw.Font.Cozette (cozetteMetrics, getCozetteFont)
-import NanoUI.Rgfw.Layout (getContentHeight, getContentWidth, solveSinglePassLayoutWith)
 import NanoUI.Rgfw.Render (renderArena)
 import NanoUI.Rgfw.Surface (clearScreen, freeRgfwSurface, newOffscreenRgfwSurface, packColor)
 import NanoUI.Rgfw.Theme (RgfwTheme (..))
@@ -59,17 +47,9 @@ main = do
           , inputMousePos = V2 400 300
           }
       na = ctxNodeArena ctx
-      lookupWinPos wid = getStore ctx >>= \s -> pure (IM.lookup (intKey wid) (storePoint s))
-      lookupWinSz wid = getStore ctx >>= \s -> pure (IM.lookup (slotKey slotWinSize (intKey wid)) (storePoint s))
 
   let runSingleFrame = do
-        writeIORef (ctxContainerStack ctx) []
-        writeIORef (ctxIdContext ctx) initialIdContext
-        clearPopupConfigs ctx
-        runEff (runUi ctx inp (appView m))
-        solveSinglePassLayoutWith na (fromIntegral logW) (fromIntegral logH) (lookupPopupConfig ctx) lookupWinPos lookupWinSz
-        _ <- getContentHeight na
-        _ <- getContentWidth na
+        void $ runFrameEff runEff ctx inp (appView m)
         clearScreen surf (packColor (thBackground theme))
         renderArena surf font scale theme ctx na (WidgetId 0) (WidgetId 0) (WidgetId 0)
 

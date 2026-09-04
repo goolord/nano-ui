@@ -206,18 +206,33 @@ anyNeedsRemeasure na count = go 0
       | idx >= count = pure False
       | otherwise = do
           wrapped <- getWrap na idx
-          nt <- getNodeType na idx
-          ratio <- getAspect na idx
-          (wTag, _) <- getWidthSizing na idx
-          (hTag, _) <- getHeightSizing na idx
-          (_, _, maxW, _) <- getMinMax na idx
-          isRowChild <- parentIsNonWrapRow na idx
-          let textNeedsRemeasure = nt == NodeText && (wrapped || not isRowChild) && (wTag == SizingGrow || maxW < 1e8)
-              scrollGrow =
-                isScrollNode nt && (hTag == SizingGrow || wTag == SizingGrow)
-          if wrapped || textNeedsRemeasure || scrollGrow || (ratio > 0 && not (isScrollNode nt))
+          if wrapped
             then pure True
-            else go (idx + 1)
+            else do
+              nt <- getNodeType na idx
+              if isScrollNode nt
+                then do
+                  (wTag, _) <- getWidthSizing na idx
+                  (hTag, _) <- getHeightSizing na idx
+                  if wTag == SizingGrow || hTag == SizingGrow
+                    then pure True
+                    else go (idx + 1)
+                else do
+                  ratio <- getAspect na idx
+                  if ratio > 0
+                    then pure True
+                    else if nt == NodeText
+                      then do
+                        (wTag, _) <- getWidthSizing na idx
+                        (_, _, maxW, _) <- getMinMax na idx
+                        if wTag == SizingGrow || maxW < 1e8
+                          then do
+                            isRowChild <- parentIsNonWrapRow na idx
+                            if not isRowChild
+                              then pure True
+                              else go (idx + 1)
+                          else go (idx + 1)
+                      else go (idx + 1)
 
 measureNode ::
   NodeArenaArrays ->
@@ -390,6 +405,27 @@ measureMarkedWidget host fm measure body leading = do
     then pure (mw, mh, 0, 0)
     else pure (mw, max mh (checkboxBoxSize host fm), leading, 0)
 
+measureTextField ::
+  HostProfile ->
+  FontMetrics ->
+  (Text -> IO (Float, Float)) ->
+  Text ->
+  Bool ->
+  IO (Float, Float, Float, Float)
+measureTextField host fm measure txt multiline = do
+  let lbl = if T.null txt then " " else txt
+  (lw, lh) <- measure lbl
+  if isCellHost host
+    then do
+      (vw, vh) <- measure (if multiline then " " else textInputPlaceholder lbl)
+      pure (max lw vw, max lh vh, 0, 0)
+    else do
+      pw <- if multiline then pure 0 else fst <$> measure (textInputPlaceholder lbl)
+      let gap = textInputLabelGap fm
+          fieldH = if multiline then max 96 (textInputFieldHeight fm * 4) else textInputFieldHeight fm
+          contentW = max textInputMinWidth (if multiline then lw else max lw pw)
+      pure (contentW, lh + gap + fieldH, 0, 0)
+
 measureWidget :: NodeArena -> HostProfile -> FontMetrics -> (Text -> IO (Float, Float)) -> NodeIdx -> IO ()
 measureWidget na host fm measure idx = do
   nt <- getNodeType na idx
@@ -404,29 +440,15 @@ measureWidget na host fm measure idx = do
             | isTableHeaderStyle si ->
                 let (cx, cy) = tableCellInset host fm
                  in (2 * cx, 2 * cy)
-          NodeButton -> buttonPadding host fm
+            | otherwise -> buttonPadding host fm
           NodeSelect -> buttonPadding host fm
-          NodeColorPicker
-            | isCellHost host -> widgetPadding host fm
-            | otherwise ->
+          NodeCheckbox | isCellHost host -> (0, 0)
+          NodeRadio | isCellHost host -> (0, 0)
+          _ | isCellHost host -> widgetPadding host fm
+            | nt == NodeColorPicker || nt == NodeSlider || nt == NodeCheckbox || nt == NodeRadio ->
                 let (cx, cy) = labelContentInset host fm
                  in (2 * cx, cy)
-          NodeSlider
-            | isCellHost host -> widgetPadding host fm
-            | otherwise ->
-                let (cx, cy) = labelContentInset host fm
-                 in (2 * cx, cy)
-          NodeCheckbox
-            | isCellHost host -> (0, 0)
-            | otherwise ->
-                let (cx, cy) = labelContentInset host fm
-                 in (2 * cx, cy)
-          NodeRadio
-            | isCellHost host -> (0, 0)
-            | otherwise ->
-                let (cx, cy) = labelContentInset host fm
-                 in (2 * cx, cy)
-          _ -> widgetPadding host fm
+            | otherwise -> widgetPadding host fm
   (tw, th, extraW, extraH) <-
     case nt of
       NodeSlider -> do
@@ -440,16 +462,10 @@ measureWidget na host fm measure idx = do
             contentW = max lw vw
         pure (contentW, lh, 0, trackExtra)
       NodeCheckbox -> do
-        let body =
-              if T.null txt
-                then " "
-                else if isCellHost host then txt else checkboxLabelText txt
+        let body = if T.null txt then " " else if isCellHost host then txt else checkboxLabelText txt
         measureMarkedWidget host fm measure body (checkboxLeading host fm)
       NodeRadio -> do
-        let body =
-              if T.null txt
-                then " "
-                else if isCellHost host then txt else radioLabelText txt
+        let body = if T.null txt then " " else if isCellHost host then txt else radioLabelText txt
         measureMarkedWidget host fm measure body (checkboxLeading host fm)
       NodeTree -> do
         let (_, depth, _, _) = treeDecodeStyle si
@@ -469,31 +485,8 @@ measureWidget na host fm measure idx = do
         let lbl = if T.null txt then " " else txt
         (mw, mh, extraH) <- colorPickerMeasureSize host fm measure lbl
         pure (mw, mh, 0, extraH)
-      NodeTextInput -> do
-        let lbl = if T.null txt then " " else txt
-        (lw, lh) <- measure lbl
-        if isCellHost host
-          then do
-            (vw, vh) <- measure (textInputPlaceholder lbl)
-            pure (max lw vw, max lh vh, 0, 0)
-          else do
-            (pw, _) <- measure (textInputPlaceholder lbl)
-            let fieldH = textInputFieldHeight fm
-                gap = textInputLabelGap fm
-                contentW = max textInputMinWidth (max lw pw)
-            pure (contentW, lh + gap + fieldH, 0, 0)
-      NodeTextArea -> do
-        let lbl = if T.null txt then " " else txt
-        (lw, lh) <- measure lbl
-        if isCellHost host
-          then do
-            (vw, vh) <- measure " "
-            pure (max lw vw, max lh vh, 0, 0)
-          else do
-            let gap = textInputLabelGap fm
-                fieldH = max 96 (textInputFieldHeight fm * 4)
-                contentW = max textInputMinWidth lw
-            pure (contentW, lh + gap + fieldH, 0, 0)
+      NodeTextInput -> measureTextField host fm measure txt False
+      NodeTextArea -> measureTextField host fm measure txt True
       _ -> do
         body <-
           if T.null txt

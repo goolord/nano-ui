@@ -13,14 +13,7 @@ import Control.Monad (when)
 import Data.IORef (newIORef, readIORef, writeIORef)
 import qualified Data.Text as T
 import GHC.Clock (getMonotonicTime)
-import NanoUI.Input (clearEphemeral, splitFrame)
-import NanoUI.Runner
-  ( checkHardQuit
-  , checkSessionQuit
-  , newClickTracker
-  , stampClicksWith
-  , stepDeltaTime
-  )
+import NanoUI.Runner (SessionDriver (..), runSessionLoop)
 import NanoUI
   ( Input (..)
   , Modifiers (..)
@@ -50,7 +43,6 @@ import NanoUI.Testing
   , debugPanelOpen
   , needsRedrawIdle
   , pointerDragActive
-  , textInputEditActive
   , widgetNodeCount
   )
 import NanoUI.Term.Debug
@@ -167,87 +159,70 @@ termMainLoop ctx shouldQuit runOnce getSize readEvents present = do
   setHost ctx (TermDebugHost debugRef)
   (w0, h0) <- getSize
   cellsRef <- newIORef Nothing
-  startTime <- getMonotonicTime
   let inp0 =
         emptyInput
           { inputWindowSize = Size (fromIntegral w0) (fromIntegral h0)
           }
-  prevInpRef <- newIORef inp0
-  clickTracker <- newClickTracker
-  let
-    loop cellsRef' prevInpRef' inp queued lastT = do
-      pending <-
-        if null queued
-          then do
-            dirty <- isDirty ctx
-            dragging <- pointerDragActive ctx
-            if dirty && not dragging
-              then pure []
-              else do
-                animating <- anyAnimating ctx
-                readEvents (if animating then animateTimeout else idleBlock)
-          else pure []
-      let (group, rest) = splitFrame isButtonEdge (queued ++ pending)
-      editActive <- textInputEditActive ctx
-      if any isHardQuit group && not editActive
-        then pure ()
-        else do
-          (nowT, dt) <- stepDeltaTime lastT
-          noteLoop debugRef dt
-          let inpRaw =
-                foldl'
-                  applyEvent
-                  (clearEphemeral inp {inputDeltaTime = dt})
-                  group
-          inp' <- stampClicksWith 1.5 0.4 clickTracker inpRaw
-          hardQuit <- checkHardQuit ctx inp'
-          if hardQuit
-            then pure ()
-            else do
-              draw cellsRef' prevInpRef' inp'
-              writeIORef prevInpRef' inp'
-              shouldTerm <- checkSessionQuit ctx shouldQuit inp'
-              if shouldTerm
-                then pure ()
-                else loop cellsRef' prevInpRef' inp' rest nowT
-
-    draw prevCells prevInpCell inp = do
-      prevI <- readIORef prevInpCell
-      debugLive <- debugPanelOpen ctx
-      wantDebug <- takeDebugLive debugRef debugLive
-      need <- needsRedrawIdle ctx prevI inp
-      if need || wantDebug
-        then do
-          t0 <- getMonotonicTime
-          drawData <- runOnce ctx inp
-          _ <- collectRasterSpans ctx inp
-          nodes <- widgetNodeCount ctx
-          nBase <- spanArenaCount (ctxSpanBase ctx)
-          nOver <- spanArenaCount (ctxSpanOverlay ctx)
-          let Size w h = inputWindowSize inp
-              stats =
-                TermDrawStats
-                  { tdsNodes = nodes
-                  , tdsBaseSpans = nBase
-                  , tdsOverlaySpans = nOver
-                  }
-          cells <-
-            rasterizeLayeredArena
-              (round w)
-              (round h)
-              drawData
-              (ctxSpanBase ctx)
-              (ctxSpanOverlay ctx)
-          before <- readIORef prevCells
-          let blitted = before /= Just cells
-          when blitted $ do
-            present before cells
-            writeIORef prevCells (Just cells)
-          t1 <- getMonotonicTime
-          notePresent debugRef ((t1 - t0) * 1000) drawData stats blitted
-        else noteSkip debugRef
-  draw cellsRef prevInpRef inp0
-  loop cellsRef prevInpRef inp0 [] startTime
+      drv =
+        SessionDriver
+          { sdPollEvents    = pure []
+          , sdWaitEvents    = readEvents
+          , sdApplyEvent    = applyEvent
+          , sdIsButtonEdge  = isButtonEdge
+          , sdIsHardQuit    = isHardQuit
+          , sdIsSessionQuit = const False
+          , sdSyncDisplay   = \c i -> pure (c, i)
+          , sdWaitTimeout   = \c wasAnim -> do
+              anim <- anyAnimating c
+              dirty <- isDirty c
+              dragging <- pointerDragActive c
+              if dirty && not dragging
+                then pure 0
+                else if anim || wasAnim
+                  then pure animateTimeout
+                  else pure idleBlock
+          , sdShouldDraw    = \c prevI curI _ -> do
+              debugLive <- debugPanelOpen c
+              wantDebug <- takeDebugLive debugRef debugLive
+              need <- needsRedrawIdle c prevI curI
+              pure (need || wantDebug)
+          , sdDraw          = \c curI _ -> do
+              t0 <- getMonotonicTime
+              drawData <- runOnce c curI
+              _ <- collectRasterSpans c curI
+              nodes <- widgetNodeCount c
+              nBase <- spanArenaCount (ctxSpanBase c)
+              nOver <- spanArenaCount (ctxSpanOverlay c)
+              let Size w h = inputWindowSize curI
+                  stats =
+                    TermDrawStats
+                      { tdsNodes = nodes
+                      , tdsBaseSpans = nBase
+                      , tdsOverlaySpans = nOver
+                      }
+              cells <-
+                rasterizeLayeredArena
+                  (round w)
+                  (round h)
+                  drawData
+                  (ctxSpanBase c)
+                  (ctxSpanOverlay c)
+              before <- readIORef cellsRef
+              let blitted = before /= Just cells
+              when blitted $ do
+                present before cells
+                writeIORef cellsRef (Just cells)
+              t1 <- getMonotonicTime
+              notePresent debugRef ((t1 - t0) * 1000) drawData stats blitted
+              pure (False, curI)
+          , sdSkip          = \_ _ -> noteSkip debugRef
+          , sdOnCursor      = \_ _ -> pure ()
+          , sdNoteLoop      = noteLoop debugRef
+          , sdShouldQuit    = shouldQuit
+          , sdClickDistance = 1.5
+          , sdClickTime     = 0.4
+          }
+  runSessionLoop drv ctx inp0
 
 isButtonEdge :: TermEvent -> Bool
 isButtonEdge ev =

@@ -38,7 +38,6 @@ library
         NanoUI.Backend.Rgfw
         NanoUI.Rgfw.Debug
         NanoUI.Rgfw.Font.Cozette
-        NanoUI.Rgfw.Layout
         NanoUI.Rgfw.Render
         NanoUI.Rgfw.Session
         NanoUI.Rgfw.Surface

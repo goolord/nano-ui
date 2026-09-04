@@ -20,7 +20,6 @@ import Data.Maybe (isJust)
 import qualified Data.IntMap.Strict as IM
 import NanoUI.Context
   ( Context (..)
-  , TextInputDrag (..)
   , WidgetStore (..)
   , getFocusables
   , getStore
@@ -38,8 +37,6 @@ import NanoUI.Input
   ( Input (..)
   , Key (..)
   , inputKeysElem
-  , inputMouseClicks
-  , inputMouseDown
   , inputMousePos
   , inputMousePressed
   , inputMouseReleased
@@ -56,7 +53,7 @@ import NanoUI.Layout.Arena
   , getStyleIdx
   , getWidgetId
   )
-import NanoUI.Types (Rect (..), V2 (..), rectContains, rectH, rectW, v2X)
+import NanoUI.Types (Rect (..), V2 (..), rectContains, rectH, rectW)
 import NanoUI.Frame.Focus (filterModalFocusables, tabNext, tabNextFocusables)
 import NanoUI.Frame.Hit
   ( findNodeByWidgetId
@@ -71,15 +68,10 @@ import NanoUI.Frame.Select (findSelectUnderMouse, overlayMenuOwnerAt)
 import NanoUI.Frame.Spans (widgetHitRect)
 import NanoUI.WidgetText (buttonVisualStyle, isTabButtonStyle)
 import NanoUI.Frame.TextEdit
-  ( applyTextInputClick
-  , applyTextInputDrag
-  , collapseTextFieldSelection
-  , normalizeTextFieldClicks
-  , textCharAtX
+  ( collapseTextFieldSelection
+  , finalizeTextFieldMouse
   , textEditMenuRect
-  , textInputGeomForWidget
   )
-import NanoUI.Frame.TextArea (finalizeTextAreaMouse)
 
 whenM :: Monad m => m Bool -> m () -> m ()
 whenM mb ma = mb >>= \b -> when b ma
@@ -317,39 +309,7 @@ finalizeSelectFocus ctx inp =
           when (prev /= wid) $ markDirty ctx
 
 finalizeTextInputMouse :: Context -> Input -> IO ()
-finalizeTextInputMouse ctx inp = do
-  focus <- readIORef (ctxFocusId ctx)
-  when (hashWidgetId focus /= 0) $ do
-    mGeom <- textInputGeomForWidget ctx focus
-    case mGeom of
-      Just (fieldRect, contentX, value) -> do
-        let mouse = inputMousePos inp
-            inField = rectContains fieldRect mouse
-        if inputMousePressed inp && inField
-          then do
-            idx <- textCharAtX ctx value contentX (v2X mouse)
-            clicks <-
-              normalizeTextFieldClicks
-                ctx
-                focus
-                idx
-                0
-                0
-                False
-                (max 1 (inputMouseClicks inp))
-            applyTextInputClick ctx focus value idx clicks
-            writeIORef (ctxTextInputDrag ctx) (Just (TextInputDrag focus idx 0 0 False clicks))
-          else do
-            mDrag <- readIORef (ctxTextInputDrag ctx)
-            case mDrag of
-              Just drag
-                | textInputDragWidget drag == focus && (inputMouseDown inp || inputMouseReleased inp) -> do
-                    idx <- textCharAtX ctx value contentX (v2X mouse)
-                    applyTextInputDrag ctx focus value (textInputDragAnchor drag) idx (textInputDragClicks drag)
-              _ -> pure ()
-      Nothing -> finalizeTextAreaMouse ctx inp focus
-  when (inputMouseReleased inp) $
-    writeIORef (ctxTextInputDrag ctx) Nothing
+finalizeTextInputMouse = finalizeTextFieldMouse
 
 findTextInputUnderMouse :: Context -> Int -> V2 -> IO (Maybe WidgetId)
 findTextInputUnderMouse ctx count mouse = go 0

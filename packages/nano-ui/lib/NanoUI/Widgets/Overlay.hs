@@ -16,10 +16,12 @@ import NanoUI.Context
   ( Context (..)
   , beginModal
   , endModal
+  , getCurrentFloatingId
   , getPrevRect
   , getStore
   , intKey
   , seedFloatingPanel
+  , setCurrentFloatingId
   )
 import NanoUI.Font (resolveLayoutGap, resolveLayoutPadding)
 import NanoUI.Types (isCellHost)
@@ -157,8 +159,8 @@ overlay kind open title child
           when isModal (beginModal ctx)
           seedRect <- floatingSeedRect ctx wid isModal minWidth minHeight margin winW winH
           seedFloatingPanel ctx wid seedRect
-          prev <- readIORef (ctxCurrentFloatingId ctx)
-          writeIORef (ctxCurrentFloatingId ctx) (Just wid)
+          prev <- getCurrentFloatingId ctx
+          setCurrentFloatingId ctx (Just wid)
           pure prev
         (closeResp, r) <- do
           close <-
@@ -191,7 +193,7 @@ overlay kind open title child
         uiIO $ do
           when isModal (endModal ctx)
           writeIORef (ctxContainerStack ctx) stack
-          writeIORef (ctxCurrentFloatingId ctx) prevFloat
+          setCurrentFloatingId ctx prevFloat
         pure (closeResp, r)
       mrect <- uiIO (getPrevRect ctx wid)
       let

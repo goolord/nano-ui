@@ -52,9 +52,10 @@ import NanoUI.Frame.Scroll.Geometry
   , scrollShowsChrome
   )
 import NanoUI.Frame.Select (selectDropRect)
-import NanoUI.Frame.TextArea (TextAreaGeom (..), textAreaGeom)
 import NanoUI.Frame.TextEdit
-  ( TextInputGeom (..)
+  ( TextAreaGeom (..)
+  , TextInputGeom (..)
+  , textAreaGeom
   , textEditMenuCursorKind
   , textFieldWidgetAtMouse
   , textInputGeom

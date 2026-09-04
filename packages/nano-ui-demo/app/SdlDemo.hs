@@ -25,7 +25,7 @@ import Diagrams.Prelude
   )
 import NanoUI
 import NanoUI.Backend.Sdl
-import NanoUI.Debug (formatCoreRtsRows)
+import NanoUI.Debug (CoreDebugSnapshot (..), formatCoreRtsRows)
 import NanoUI.Diagrams
 import NanoUI.Testing (Context, collectOverlayTextSpans, collectTextSpans, registerImage)
 import NanoUI.Testing.Harness
@@ -189,9 +189,10 @@ demoUi = do
             muted "SDL3 demo"
           flex
           snap <- askSdlDebug
-          let fpsText =
-                if dbgPresentFps snap > 0
-                  then T.pack (printf "%4.0f FPS (%5.2f ms)" (dbgPresentFps snap) (dbgFrameMs snap))
+          let c = dbgCore snap
+              fpsText =
+                if dbgPresentFps c > 0
+                  then T.pack (printf "%4.0f FPS (%5.2f ms)" (dbgPresentFps c) (dbgFrameMs c))
                   else ""
           unless (T.null fpsText) $
             void (labelEx (tight . fontMono . fontMuted $ defaultLayout) fpsText)
@@ -335,14 +336,15 @@ demoUi = do
             Diagnostics -> do
               heading "Diagnostics"
               snap <- askSdlDebug
-              let haskellMs = dbgUiMs snap + dbgRenderMs snap
-              kv "Present FPS" (T.pack (printf "%.1f fps" (dbgPresentFps snap)))
-              kv "Loop FPS" (T.pack (printf "%.1f fps" (dbgLoopFps snap)))
-              kv "Frame Time" (T.pack (printf "%.2f ms" (dbgFrameMs snap)))
-              kv "Haskell Time" (T.pack (printf "%.2f ms (UI: %.2f, Render: %.2f)" haskellMs (dbgUiMs snap) (dbgRenderMs snap)))
-              kv "SDL Present" (T.pack (printf "%.2f ms" (dbgPresentMs snap)))
-              kv "Draw Calls" (T.pack (printf "%d" (dbgCmds snap)))
-              kv "Vertices / Indices" (T.pack (printf "%d / %d" (dbgVerts snap) (dbgIndices snap)))
+              let c = dbgCore snap
+                  haskellMs = dbgUiMs c + dbgRenderMs c
+              kv "Present FPS" (T.pack (printf "%.1f fps" (dbgPresentFps c)))
+              kv "Loop FPS" (T.pack (printf "%.1f fps" (dbgLoopFps c)))
+              kv "Frame Time" (T.pack (printf "%.2f ms" (dbgFrameMs c)))
+              kv "Haskell Time" (T.pack (printf "%.2f ms (UI: %.2f, Render: %.2f)" haskellMs (dbgUiMs c) (dbgRenderMs c)))
+              kv "SDL Present" (T.pack (printf "%.2f ms" (dbgPresentMs c)))
+              kv "Draw Calls" (T.pack (printf "%d" (dbgCmds c)))
+              kv "Vertices / Indices" (T.pack (printf "%d / %d" (dbgVerts c) (dbgIndices c)))
               kv "Renderer" (dbgRenderer snap <> if dbgVsync snap then " (vsync on)" else " (vsync off)")
               kv "Evaluation" "Zero-Cost Inactive Tabs"
               kv "State" "SrcLoc Preserved"
@@ -502,38 +504,41 @@ debugSection title rows = do
 
 frameRows :: SdlDebugSnapshot -> SmallArray (T.Text, T.Text)
 frameRows s =
-  let haskellMs = dbgUiMs s + dbgRenderMs s
+  let c = dbgCore s
+      haskellMs = dbgUiMs c + dbgRenderMs c
    in smallArrayFromList
-        [ ("present", T.pack (printf "%6.1f fps" (dbgPresentFps s)))
-        , ("loop", T.pack (printf "%6.1f fps" (dbgLoopFps s)))
-        , ("frame cpu", T.pack (printf "%7.2f ms" (dbgFrameMs s)))
+        [ ("present", T.pack (printf "%6.1f fps" (dbgPresentFps c)))
+        , ("loop", T.pack (printf "%6.1f fps" (dbgLoopFps c)))
+        , ("frame cpu", T.pack (printf "%7.2f ms" (dbgFrameMs c)))
         , ("haskell", T.pack (printf "%7.2f ms" haskellMs))
-        , ("  ui", T.pack (printf "%7.2f ms" (dbgUiMs s)))
-        , ("  render", T.pack (printf "%7.2f ms" (dbgRenderMs s)))
-        , ("sdl present", T.pack (printf "%7.2f ms" (dbgPresentMs s)))
-        , ("draws", T.pack (printf "%10d" (dbgPresents s)))
-        , ("skips", T.pack (printf "%10d" (dbgSkips s)))
+        , ("  ui", T.pack (printf "%7.2f ms" (dbgUiMs c)))
+        , ("  render", T.pack (printf "%7.2f ms" (dbgRenderMs c)))
+        , ("sdl present", T.pack (printf "%7.2f ms" (dbgPresentMs c)))
+        , ("draws", T.pack (printf "%10d" (dbgPresents c)))
+        , ("skips", T.pack (printf "%10d" (dbgSkips c)))
         ]
 
 drawRows :: SdlDebugSnapshot -> SmallArray (T.Text, T.Text)
 drawRows s =
-  smallArrayFromList
-    [ ("verts", T.pack (printf "%10d" (dbgVerts s)))
-    , ("indices", T.pack (printf "%10d" (dbgIndices s)))
-    , ("cmds", T.pack (printf "%10d" (dbgCmds s)))
-    ]
+  let c = dbgCore s
+   in smallArrayFromList
+        [ ("verts", T.pack (printf "%10d" (dbgVerts c)))
+        , ("indices", T.pack (printf "%10d" (dbgIndices c)))
+        , ("cmds", T.pack (printf "%10d" (dbgCmds c)))
+        ]
 
 displayRows :: SdlDebugSnapshot -> SmallArray (T.Text, T.Text)
 displayRows s =
-  smallArrayFromList
-    [ ("window", T.pack (printf "%4.0fx%-5.0f" (dbgWinW s) (dbgWinH s)))
-    , ("scale", T.pack (printf "%10.2f" (dbgScale s)))
-    , ("mouse", T.pack (printf "%4.0f, %-4.0f" (dbgMouseX s) (dbgMouseY s)))
-    , ( "renderer"
-      , dbgRenderer s <> if dbgVsync s then "  vsync on" else "  vsync off"
-      )
-    , ("font", T.pack (dbgFontPath s))
-    ]
+  let c = dbgCore s
+   in smallArrayFromList
+        [ ("window", T.pack (printf "%4.0fx%-5.0f" (dbgWinW c) (dbgWinH c)))
+        , ("scale", T.pack (printf "%10.2f" (dbgScale s)))
+        , ("mouse", T.pack (printf "%4.0f, %-4.0f" (dbgMouseX c) (dbgMouseY c)))
+        , ( "renderer"
+          , dbgRenderer s <> if dbgVsync s then "  vsync on" else "  vsync off"
+          )
+        , ("font", T.pack (dbgFontPath s))
+        ]
 
 rtsRows :: SdlDebugSnapshot -> SmallArray (T.Text, T.Text)
 rtsRows s = smallArrayFromList (formatCoreRtsRows (dbgCore s))

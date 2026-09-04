@@ -33,6 +33,7 @@ import qualified Data.IntMap.Strict as IM
 import NanoUI.Context
   ( Context (..)
   , WidgetStore (..)
+  , getLastPointerBlocked
   , getStore
   , intKey
   , menuPointerGestureActive
@@ -339,7 +340,7 @@ colorPicker lbl initial = do
       fm = ctxFontMetrics ctx
   active <- uiIO (readIORef (ctxActiveId ctx))
   mrect <- uiIO (scrollHitRect ctx wid)
-  blocked <- uiIO (readIORef (ctxLastPointerBlocked ctx))
+  blocked <- uiIO (getLastPointerBlocked ctx)
   gesture <- uiIO (menuPointerGestureActive ctx)
   hueHeld0 <- keyedDragHeld ("hue" :: Text)
   svHeld0 <- do

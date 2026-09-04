@@ -10,6 +10,7 @@ module NanoUI.Sdl.Input
   , clearEphemeral
   , isHardQuit
   , isHardQuitInput
+  , isButtonEdge
   , splitFrame
   ) where
 

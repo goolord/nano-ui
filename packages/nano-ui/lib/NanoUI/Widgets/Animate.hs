@@ -16,20 +16,19 @@ module NanoUI.Widgets.Animate
 
 import Control.Monad (when)
 import Data.Dynamic (fromDynamic, toDyn)
-import Data.IORef (readIORef)
 import Data.Text (Text)
 import Data.Typeable (Typeable)
 import Effectful (Eff, type (:>))
 import qualified Data.IntMap.Strict as IM
 import NanoUI.Animatable (Animatable (..))
 import NanoUI.Context
-  ( Context (..)
-  , Ease (..)
+  ( Ease (..)
   , approxEq
   , easeSameSpec
   , getAnimationValue
   , getStore
   , intKey
+  , lookupAnimation
   , markDirty
   , setStore
   , startAnimationEaseDelay
@@ -65,8 +64,7 @@ animateToEaseDelay ease target dur delay = do
   ctx <- askContext
   uiIO $ do
     cur <- getAnimationValue ctx wid
-    anims <- readIORef (ctxAnimations ctx)
-    let manim = IM.lookup (intKey wid) anims
+    manim <- lookupAnimation ctx wid
     case manim of
       Just a
         | easeSameSpec a ease dur delay target -> pure cur
