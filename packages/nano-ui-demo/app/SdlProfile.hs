@@ -8,6 +8,7 @@ import Data.Foldable (foldlM)
 import Data.Primitive.SmallArray (SmallArray)
 import GHC.Clock (getMonotonicTimeNSec)
 import GHC.Stats (RTSStats (..), getRTSStats)
+import System.IO (hSetBuffering, stdout, BufferMode(LineBuffering), hFlush)
 import System.Mem (performGC)
 import Text.Printf (printf)
 import qualified Data.Text as T
@@ -29,7 +30,7 @@ import SdlDemo
   )
 
 iterations :: Int
-iterations = 200
+iterations = 40
 
 profileInput :: Input
 profileInput =
@@ -62,9 +63,11 @@ measureBench name iters action = do
       totalAlloc = fromIntegral (allocated_bytes s1 - allocated_bytes s0) :: Double
       avgAllocKb = (totalAlloc / fromIntegral iters) / 1024.0
   printf "%-32s : %8.3f ms/frame  |  %8.1f KB alloc/frame\n" name avgMs avgAllocKb
+  hFlush stdout
 
 main :: IO ()
 main = do
+  hSetBuffering stdout LineBuffering
   putStrLn "================================================================================"
   putStrLn "              NANO-UI SDL DEMO PROFILING & PERFORMANCE AUDIT                    "
   putStrLn "================================================================================"
@@ -192,7 +195,7 @@ tabControlsUi = column (tight . gap 8 . fillW $ defaultLayout) $ do
   let qualities = ["Low", "Medium", "High"]
   void $ select "Quality" qualities 1
   void $ colorPicker "Accent" (colorRGBA 204 102 102 255)
-  void $ boundedRadioFieldset "Theme" (1 :: Int) (T.pack . show)
+  void $ radioFieldset "Theme" ["Light", "Dark", "System"] 1
   void $ textInput "Name" ""
   void $ textArea "Notes" "Edit me.\nSecond line."
   row (tight . gap 8 . fillW $ defaultLayout) $ do
