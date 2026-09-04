@@ -63,8 +63,7 @@ import NanoUI.Layout.Arena
   , isWidgetNode
   )
 import NanoUI.WidgetText
-  ( buttonDisplayTextFromFlags
-  , buttonFlagsFromStyle
+  ( buttonFlagsFromStyle
   , buttonVisualStyle
   , checkboxLabelText
   , radioLabelText
@@ -213,9 +212,7 @@ displayTextRest ctx nt idx txt terminal =
           si <- getStyleIdx (ctxNodeArena ctx) idx
           let (_, depth, hasKids, expanded) = treeDecodeStyle si
           pure (treeDisplayText (ctxIcons ctx) depth hasKids expanded txt)
-        NodeButton -> do
-          si <- getStyleIdx (ctxNodeArena ctx) idx
-          pure (buttonDisplayTextFromFlags (buttonFlagsFromStyle si) txt)
+        NodeButton -> pure txt
         NodeTextInput -> do
           value <- textInputValue ctx idx
           focused <- textInputFocused ctx idx
@@ -247,9 +244,7 @@ displayTextRest ctx nt idx txt terminal =
                   _ -> ""
           pure (selectDisplayText lbl opt)
         NodeColorPicker -> pure txt
-        NodeButton -> do
-          si <- getStyleIdx (ctxNodeArena ctx) idx
-          pure (buttonDisplayTextFromFlags (buttonFlagsFromStyle si) txt)
+        NodeButton -> pure txt
         _ -> pure txt
 
 textInputValue :: Context -> NodeIdx -> IO Text

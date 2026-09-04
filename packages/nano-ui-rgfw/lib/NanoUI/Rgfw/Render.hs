@@ -35,10 +35,10 @@ import NanoUI.Context
 import NanoUI.Frame.Hit (widgetOverlayAllowed)
 import NanoUI.Frame.TextEdit
   ( TextEditMenuRow (..)
+  , textFieldMenuActionEnabled
   , textEditMenuContentRect
   , textEditMenuLayout
   )
-import NanoUI.Widgets.TextEdit (textFieldMenuActionEnabled)
 import NanoUI.Store
   ( slotAnchor
   , slotCursor

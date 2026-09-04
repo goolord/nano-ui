@@ -70,13 +70,15 @@ import NanoUI.Frame.Redraw (probeHotId)
 import NanoUI.Frame.Select (findSelectUnderMouse, overlayMenuOwnerAt)
 import NanoUI.Frame.Spans (widgetHitRect)
 import NanoUI.WidgetText (buttonVisualStyle, isTabButtonStyle)
-import NanoUI.Frame.TextEdit (normalizeTextFieldClicks, textCharAtX, textEditMenuRect)
-import NanoUI.Frame.TextInput
+import NanoUI.Frame.TextEdit
   ( applyTextInputClick
   , applyTextInputDrag
+  , collapseTextFieldSelection
+  , normalizeTextFieldClicks
+  , textCharAtX
+  , textEditMenuRect
   , textInputGeomForWidget
   )
-import NanoUI.Widgets.TextEdit (collapseTextFieldSelection)
 import NanoUI.Frame.TextArea (finalizeTextAreaMouse)
 
 whenM :: Monad m => m Bool -> m () -> m ()

@@ -46,8 +46,9 @@ import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
 import NanoUI.Store (WidgetStore (..), slotDrag, slotDragW, slotKey)
 import NanoUI.Style (AlignX (..), AlignY (..), Direction (..), FontVariant (..), Layout (..), Padding (..), Sizing (..), defaultLayout, fillH, fillW, tight)
+import Data.Bits ((.|.))
 import NanoUI.Types (isCellHost, rectH, rectW, v2X, V2 (..))
-import NanoUI.WidgetText (tableHeaderLabel, tableSortReserve)
+import NanoUI.WidgetText (buttonFlagTable, tableHeaderLabel, tableSortReserve)
 import NanoUI.Widgets.Behavior (useReorder)
 import NanoUI.Widgets.Combinators
   ( buttonStyled
@@ -599,7 +600,7 @@ tableCfg cfg outerLayout key cols rows curSort =
           ]
         renderHeader i =
           let !lay = if i < V.length cellLayouts then cellLayouts V.! i else tight defaultLayout
-           in buttonStyled (tableHeaderLabel terminal (listAt hdrs i T.empty)) (if sortColIndex sort0 == i then 1 else 0) lay (sortMarkStyle sort0 i)
+           in buttonStyled (tableHeaderLabel terminal (listAt hdrs i T.empty)) (if sortColIndex sort0 == i then 1 else 0) lay (sortMarkStyle sort0 i .|. buttonFlagTable)
         renderCell ri r =
           let !rowCells = Encode.row id cols r
            in \i ->

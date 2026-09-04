@@ -102,12 +102,12 @@ import NanoUI.Frame.Spans
   , collectTextSpans
   , widgetNodeCount
   )
-import NanoUI.Frame.TextInput
-  ( closeTextInputMenuOnEscape
-  , closeTextInputMenuOnOutsideClick
-  , drawTextInputMenuOverlays
-  , finalizeTextInputMenuPick
-  , openTextInputMenu
+import NanoUI.Frame.TextEdit
+  ( closeTextEditMenuOnEscape
+  , closeTextEditMenuOnOutsideClick
+  , drawTextEditMenuOverlays
+  , finalizeTextEditMenuPick
+  , openTextEditMenu
   )
 import NanoUI.Frame.Window
   ( drawModalOverlays
@@ -260,10 +260,10 @@ runFrameEff unlift ctx inp ui = do
   finalizeTextInputFocus ctx inp
   finalizeSelectFocus ctx inp
   finalizeTextInputMouse ctx inp
-  closeTextInputMenuOnOutsideClick ctx inp
-  openTextInputMenu ctx inp
-  finalizeTextInputMenuPick ctx inp
-  closeTextInputMenuOnEscape ctx inp
+  closeTextEditMenuOnOutsideClick ctx inp
+  openTextEditMenu ctx inp
+  finalizeTextEditMenuPick ctx inp
+  closeTextEditMenuOnEscape ctx inp
   constrainFocusToModal ctx
   finalizeTabFocus ctx inp
   finalizeSelectKeyboard ctx inp
@@ -289,7 +289,7 @@ runFrameEff unlift ctx inp ui = do
   drawModalOverlays ctx (inputWindowSize inp)
   drawPopupOverlays ctx
   drawSelectOverlays ctx inp
-  drawTextInputMenuOverlays ctx inp
+  drawTextEditMenuOverlays ctx inp
   drawData <- finishDraw (ctxDrawArena ctx)
   overlayOpen <- overlayMenuOpen ctx
   writeDamage

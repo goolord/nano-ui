@@ -99,7 +99,13 @@ import NanoUI.Frame.Scroll.Geometry
   , scrollViewportClip2D
   )
 import NanoUI.Frame.Spans (collectNodeTextSpans, widgetTextPlacements, widgetTextSpans)
-import NanoUI.Frame.TextInput (TextInputGeom (..), drawTextInputCaret, drawTextInputSelection, textInputFieldTextClip, textInputGeom)
+import NanoUI.Frame.TextEdit
+  ( TextInputGeom (..)
+  , drawTextInputCaret
+  , drawTextInputSelection
+  , textInputFieldTextClip
+  , textInputGeom
+  )
 import NanoUI.Frame.TextArea (TextAreaGeom (..), drawTextAreaContent, textAreaGeom)
 
 lowerShapes :: Context -> IO ()

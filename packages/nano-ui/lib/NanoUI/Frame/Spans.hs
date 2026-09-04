@@ -119,8 +119,8 @@ import NanoUI.Frame.Scroll.Geometry
   , tagClippedSpans
   , terminalModalOuterClip
   )
-import NanoUI.Frame.Select (collectSelectDropdownSpans)
-import NanoUI.Frame.TextInput (TextInputGeom (..), collectTextInputMenuSpans, tagSelectClippedSpans, tagTextInputClippedSpans, textInputGeom)
+import NanoUI.Frame.Select (collectSelectDropdownSpans, tagSelectClippedSpans)
+import NanoUI.Frame.TextEdit (TextInputGeom (..), collectTextEditMenuSpans, tagTextInputClippedSpans, textInputGeom)
 import NanoUI.Frame.TextArea (TextAreaGeom (..), textAreaGeom, textAreaValue)
 import NanoUI.Frame.Scroll (scrollBarLayout, ScrollBarLayout (..))
 import NanoUI.Frame.SpanArena (SpanArena, pushSpan, resetSpanArena, spanArenaToList, spanArenaToListOccluded)
@@ -160,7 +160,7 @@ collectOverlayTextSpansCached ctx inp floatCache = do
   collectFloatingSpansInto ctx floatCache NodeModal arena
   collectFloatingSpansInto ctx floatCache NodePopup arena
   drops <- collectSelectDropdownSpans ctx inp
-  menu <- collectTextInputMenuSpans ctx inp
+  menu <- collectTextEditMenuSpans ctx inp
   mapM_ (pushSpan5 arena) drops
   mapM_ (pushSpan5 arena) menu
   spanArenaToList arena

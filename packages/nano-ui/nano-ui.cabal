@@ -74,7 +74,6 @@ library
         NanoUI.Store
         NanoUI.Frame.Hit
         NanoUI.Frame.TextEdit
-        NanoUI.Widgets.TextEdit
         NanoUI.Frame.Window
         NanoUI.SIMD
     other-modules:
@@ -97,14 +96,12 @@ library
         NanoUI.Frame.Select
         NanoUI.Frame.Spans
         NanoUI.Frame.SpanArena
-        NanoUI.Frame.TextInput
         NanoUI.Frame.TextArea
         NanoUI.Icons
         NanoUI.Layout.Solve
         NanoUI.Render.ASCII
         NanoUI.Style
         NanoUI.Types
-        NanoUI.WidgetMarkers
         NanoUI.WidgetText
         NanoUI.Widgets
         NanoUI.Widgets.Node
