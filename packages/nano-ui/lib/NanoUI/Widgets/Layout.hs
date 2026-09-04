@@ -119,14 +119,28 @@ import NanoUI.Widgets.Node
   )
 
 -- =============================================================================
+-- Internal Ambient Helpers
+-- =============================================================================
+
+{-# INLINE withDefault #-}
+withDefault :: Ui :> es => (Layout -> Eff es a -> Eff es r) -> Eff es a -> Eff es r
+withDefault c child = do
+  base <- askDefaultLayout
+  c base child
+
+{-# INLINE withDefaultWith #-}
+withDefaultWith :: Ui :> es => (Layout -> Layout) -> (Layout -> Eff es a -> Eff es r) -> Eff es a -> Eff es r
+withDefaultWith f c child = do
+  base <- askDefaultLayout
+  c (f base) child
+
+-- =============================================================================
 -- Panel
 -- =============================================================================
 
 {-# INLINE panel #-}
 panel :: Ui :> es => Eff es a -> Eff es a
-panel child = do
-  base <- askDefaultLayout
-  panel' base child
+panel = withDefault panel'
 
 {-# INLINE panel_ #-}
 panel_ :: Ui :> es => Eff es a -> Eff es a
@@ -134,9 +148,7 @@ panel_ = panel
 
 {-# INLINE panelWith #-}
 panelWith :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es a
-panelWith f child = do
-  base <- askDefaultLayout
-  panel' (f base) child
+panelWith = (`withDefaultWith` panel')
 
 {-# INLINE panel' #-}
 panel' :: Ui :> es => Layout -> Eff es a -> Eff es a
@@ -144,15 +156,11 @@ panel' = container NodePanel
 
 {-# INLINE panelResponse #-}
 panelResponse :: Ui :> es => Eff es a -> Eff es (a, Response)
-panelResponse child = do
-  base <- askDefaultLayout
-  panelResponse' base child
+panelResponse = withDefault panelResponse'
 
 {-# INLINE panelResponseWith #-}
 panelResponseWith :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es (a, Response)
-panelResponseWith f child = do
-  base <- askDefaultLayout
-  panelResponse' (f base) child
+panelResponseWith = (`withDefaultWith` panelResponse')
 
 {-# INLINE panelResponse' #-}
 panelResponse' :: Ui :> es => Layout -> Eff es a -> Eff es (a, Response)
@@ -164,9 +172,7 @@ panelResponse' = containerResponse NodePanel
 
 {-# INLINE row #-}
 row :: Ui :> es => Eff es a -> Eff es a
-row child = do
-  base <- askDefaultLayout
-  row' base child
+row = withDefault row'
 
 {-# INLINE row_ #-}
 row_ :: Ui :> es => Eff es a -> Eff es a
@@ -174,29 +180,23 @@ row_ = row
 
 {-# INLINE rowWith #-}
 rowWith :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es a
-rowWith f child = do
-  base <- askDefaultLayout
-  row' (f base) child
+rowWith = (`withDefaultWith` row')
 
 {-# INLINE row' #-}
 row' :: Ui :> es => Layout -> Eff es a -> Eff es a
-row' layout child = container NodeContainer (layout {layoutDirection = Row}) child
+row' layout = container NodeContainer (layout {layoutDirection = Row})
 
 {-# INLINE rowResponse #-}
 rowResponse :: Ui :> es => Eff es a -> Eff es (a, Response)
-rowResponse child = do
-  base <- askDefaultLayout
-  rowResponse' base child
+rowResponse = withDefault rowResponse'
 
 {-# INLINE rowResponseWith #-}
 rowResponseWith :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es (a, Response)
-rowResponseWith f child = do
-  base <- askDefaultLayout
-  rowResponse' (f base) child
+rowResponseWith = (`withDefaultWith` rowResponse')
 
 {-# INLINE rowResponse' #-}
 rowResponse' :: Ui :> es => Layout -> Eff es a -> Eff es (a, Response)
-rowResponse' layout child = containerResponse NodeContainer (layout {layoutDirection = Row}) child
+rowResponse' layout = containerResponse NodeContainer (layout {layoutDirection = Row})
 
 -- =============================================================================
 -- Column
@@ -204,9 +204,7 @@ rowResponse' layout child = containerResponse NodeContainer (layout {layoutDirec
 
 {-# INLINE column #-}
 column :: Ui :> es => Eff es a -> Eff es a
-column child = do
-  base <- askDefaultLayout
-  column' base child
+column = withDefault column'
 
 {-# INLINE column_ #-}
 column_ :: Ui :> es => Eff es a -> Eff es a
@@ -214,29 +212,23 @@ column_ = column
 
 {-# INLINE columnWith #-}
 columnWith :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es a
-columnWith f child = do
-  base <- askDefaultLayout
-  column' (f base) child
+columnWith = (`withDefaultWith` column')
 
 {-# INLINE column' #-}
 column' :: Ui :> es => Layout -> Eff es a -> Eff es a
-column' layout child = container NodeContainer (layout {layoutDirection = Column}) child
+column' layout = container NodeContainer (layout {layoutDirection = Column})
 
 {-# INLINE columnResponse #-}
 columnResponse :: Ui :> es => Eff es a -> Eff es (a, Response)
-columnResponse child = do
-  base <- askDefaultLayout
-  columnResponse' base child
+columnResponse = withDefault columnResponse'
 
 {-# INLINE columnResponseWith #-}
 columnResponseWith :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es (a, Response)
-columnResponseWith f child = do
-  base <- askDefaultLayout
-  columnResponse' (f base) child
+columnResponseWith = (`withDefaultWith` columnResponse')
 
 {-# INLINE columnResponse' #-}
 columnResponse' :: Ui :> es => Layout -> Eff es a -> Eff es (a, Response)
-columnResponse' layout child = containerResponse NodeContainer (layout {layoutDirection = Column}) child
+columnResponse' layout = containerResponse NodeContainer (layout {layoutDirection = Column})
 
 -- =============================================================================
 -- Grid
@@ -244,9 +236,7 @@ columnResponse' layout child = containerResponse NodeContainer (layout {layoutDi
 
 {-# INLINE grid #-}
 grid :: Ui :> es => Int -> Eff es a -> Eff es a
-grid n child = do
-  base <- askDefaultLayout
-  grid' n base child
+grid n = withDefault (grid' n)
 
 {-# INLINE grid_ #-}
 grid_ :: Ui :> es => Int -> Eff es a -> Eff es a
@@ -254,29 +244,23 @@ grid_ = grid
 
 {-# INLINE gridWith #-}
 gridWith :: Ui :> es => Int -> (Layout -> Layout) -> Eff es a -> Eff es a
-gridWith n f child = do
-  base <- askDefaultLayout
-  grid' n (f base) child
+gridWith n f = withDefaultWith f (grid' n)
 
 {-# INLINE grid' #-}
 grid' :: Ui :> es => Int -> Layout -> Eff es a -> Eff es a
-grid' n layout child = container NodeContainer (layout {layoutGridCols = max 1 n}) child
+grid' n layout = container NodeContainer (layout {layoutGridCols = max 1 n})
 
 {-# INLINE gridResponse #-}
 gridResponse :: Ui :> es => Int -> Eff es a -> Eff es (a, Response)
-gridResponse n child = do
-  base <- askDefaultLayout
-  gridResponse' n base child
+gridResponse n = withDefault (gridResponse' n)
 
 {-# INLINE gridResponseWith #-}
 gridResponseWith :: Ui :> es => Int -> (Layout -> Layout) -> Eff es a -> Eff es (a, Response)
-gridResponseWith n f child = do
-  base <- askDefaultLayout
-  gridResponse' n (f base) child
+gridResponseWith n f = withDefaultWith f (gridResponse' n)
 
 {-# INLINE gridResponse' #-}
 gridResponse' :: Ui :> es => Int -> Layout -> Eff es a -> Eff es (a, Response)
-gridResponse' n layout child = containerResponse NodeContainer (layout {layoutGridCols = max 1 n}) child
+gridResponse' n layout = containerResponse NodeContainer (layout {layoutGridCols = max 1 n})
 
 -- =============================================================================
 -- Grid Panel
@@ -284,9 +268,7 @@ gridResponse' n layout child = containerResponse NodeContainer (layout {layoutGr
 
 {-# INLINE gridPanel #-}
 gridPanel :: Ui :> es => Int -> Eff es a -> Eff es a
-gridPanel n child = do
-  base <- askDefaultLayout
-  gridPanel' n base child
+gridPanel n = withDefault (gridPanel' n)
 
 {-# INLINE gridPanel_ #-}
 gridPanel_ :: Ui :> es => Int -> Eff es a -> Eff es a
@@ -294,29 +276,23 @@ gridPanel_ = gridPanel
 
 {-# INLINE gridPanelWith #-}
 gridPanelWith :: Ui :> es => Int -> (Layout -> Layout) -> Eff es a -> Eff es a
-gridPanelWith n f child = do
-  base <- askDefaultLayout
-  gridPanel' n (f base) child
+gridPanelWith n f = withDefaultWith f (gridPanel' n)
 
 {-# INLINE gridPanel' #-}
 gridPanel' :: Ui :> es => Int -> Layout -> Eff es a -> Eff es a
-gridPanel' n layout child = container NodePanel (layout {layoutGridCols = max 1 n}) child
+gridPanel' n layout = container NodePanel (layout {layoutGridCols = max 1 n})
 
 {-# INLINE gridPanelResponse #-}
 gridPanelResponse :: Ui :> es => Int -> Eff es a -> Eff es (a, Response)
-gridPanelResponse n child = do
-  base <- askDefaultLayout
-  gridPanelResponse' n base child
+gridPanelResponse n = withDefault (gridPanelResponse' n)
 
 {-# INLINE gridPanelResponseWith #-}
 gridPanelResponseWith :: Ui :> es => Int -> (Layout -> Layout) -> Eff es a -> Eff es (a, Response)
-gridPanelResponseWith n f child = do
-  base <- askDefaultLayout
-  gridPanelResponse' n (f base) child
+gridPanelResponseWith n f = withDefaultWith f (gridPanelResponse' n)
 
 {-# INLINE gridPanelResponse' #-}
 gridPanelResponse' :: Ui :> es => Int -> Layout -> Eff es a -> Eff es (a, Response)
-gridPanelResponse' n layout child = containerResponse NodePanel (layout {layoutGridCols = max 1 n}) child
+gridPanelResponse' n layout = containerResponse NodePanel (layout {layoutGridCols = max 1 n})
 
 -- =============================================================================
 -- Grid AutoFit
@@ -324,9 +300,7 @@ gridPanelResponse' n layout child = containerResponse NodePanel (layout {layoutG
 
 {-# INLINE gridAutoFit #-}
 gridAutoFit :: Ui :> es => Float -> Eff es a -> Eff es a
-gridAutoFit minW child = do
-  base <- askDefaultLayout
-  gridAutoFit' minW base child
+gridAutoFit minW = withDefault (gridAutoFit' minW)
 
 {-# INLINE gridAutoFit_ #-}
 gridAutoFit_ :: Ui :> es => Float -> Eff es a -> Eff es a
@@ -334,29 +308,23 @@ gridAutoFit_ = gridAutoFit
 
 {-# INLINE gridAutoFitWith #-}
 gridAutoFitWith :: Ui :> es => Float -> (Layout -> Layout) -> Eff es a -> Eff es a
-gridAutoFitWith minW f child = do
-  base <- askDefaultLayout
-  gridAutoFit' minW (f base) child
+gridAutoFitWith minW f = withDefaultWith f (gridAutoFit' minW)
 
 {-# INLINE gridAutoFit' #-}
 gridAutoFit' :: Ui :> es => Float -> Layout -> Eff es a -> Eff es a
-gridAutoFit' minW layout child = container NodeContainer (layout {layoutGridMinColW = max 1 minW}) child
+gridAutoFit' minW layout = container NodeContainer (layout {layoutGridMinColW = max 1 minW})
 
 {-# INLINE gridAutoFitResponse #-}
 gridAutoFitResponse :: Ui :> es => Float -> Eff es a -> Eff es (a, Response)
-gridAutoFitResponse minW child = do
-  base <- askDefaultLayout
-  gridAutoFitResponse' minW base child
+gridAutoFitResponse minW = withDefault (gridAutoFitResponse' minW)
 
 {-# INLINE gridAutoFitResponseWith #-}
 gridAutoFitResponseWith :: Ui :> es => Float -> (Layout -> Layout) -> Eff es a -> Eff es (a, Response)
-gridAutoFitResponseWith minW f child = do
-  base <- askDefaultLayout
-  gridAutoFitResponse' minW (f base) child
+gridAutoFitResponseWith minW f = withDefaultWith f (gridAutoFitResponse' minW)
 
 {-# INLINE gridAutoFitResponse' #-}
 gridAutoFitResponse' :: Ui :> es => Float -> Layout -> Eff es a -> Eff es (a, Response)
-gridAutoFitResponse' minW layout child = containerResponse NodeContainer (layout {layoutGridMinColW = max 1 minW}) child
+gridAutoFitResponse' minW layout = containerResponse NodeContainer (layout {layoutGridMinColW = max 1 minW})
 
 -- | Choose between two container builders based on window width.
 {-# INLINE responsive #-}
@@ -445,9 +413,7 @@ spacer w h = do
 
 {-# INLINE scroll #-}
 scroll :: Ui :> es => Eff es a -> Eff es a
-scroll child = do
-  base <- askDefaultLayout
-  scroll' base child
+scroll = withDefault scroll'
 
 {-# INLINE scroll_ #-}
 scroll_ :: Ui :> es => Eff es a -> Eff es a
@@ -455,9 +421,7 @@ scroll_ = scroll
 
 {-# INLINE scrollWith #-}
 scrollWith :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es a
-scrollWith f child = do
-  base <- askDefaultLayout
-  scroll' (f base) child
+scrollWith = (`withDefaultWith` scroll')
 
 {-# INLINE scroll' #-}
 scroll' :: Ui :> es => Layout -> Eff es a -> Eff es a
@@ -541,9 +505,7 @@ scrollAreaIdConfigured wid layout cfg child = do
 
 {-# INLINE scroll2D #-}
 scroll2D :: Ui :> es => Eff es a -> Eff es a
-scroll2D child = do
-  base <- askDefaultLayout
-  scroll2D' base child
+scroll2D = withDefault scroll2D'
 
 {-# INLINE scroll2D_ #-}
 scroll2D_ :: Ui :> es => Eff es a -> Eff es a
@@ -551,9 +513,7 @@ scroll2D_ = scroll2D
 
 {-# INLINE scroll2DWith #-}
 scroll2DWith :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es a
-scroll2DWith f child = do
-  base <- askDefaultLayout
-  scroll2D' (f base) child
+scroll2DWith = (`withDefaultWith` scroll2D')
 
 {-# INLINE scroll2D' #-}
 scroll2D' :: Ui :> es => Layout -> Eff es a -> Eff es a
