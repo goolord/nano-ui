@@ -16,16 +16,25 @@ module NanoUI.Backend.Sdl
   , syncDisplay
   , withSdl
   , withSdlBench
+  , saveScreenshot
+  , saveFontRenderText
+  , queryFontKerning
   ) where
 
 import Control.Monad (unless)
+import Data.Char (ord)
 import Data.Foldable (foldlM)
 import Data.IORef (newIORef)
 import Data.Primitive.SmallArray (SmallArray)
+import Data.Text (Text)
 import Data.Typeable (Typeable)
 import Effectful (Eff, IOE, type (:>))
+import Foreign.C.String (withCString)
 import NanoUI
-  ( Input (..)
+  ( FontStyle (..)
+  , FontVariant (..)
+  , FontWeight (..)
+  , Input (..)
   , NanoUI
   , Ui
   )
@@ -33,7 +42,15 @@ import NanoUI.Sdl.Runner (askSdlDebug, drawEff, drawReduceEff, newSdlContext, ru
 import NanoUI.Sdl.Debug
   ( SdlDebugSnapshot (..)
   )
-import NanoUI.Sdl.Window (RgbaImage (..), SdlEnv (..), SdlOptions (..), defaultSdlOptions, syncDisplay, withSdl, withSdlBench)
+import NanoUI.Sdl.Font
+  ( CachedFontEntry (..)
+  , SdlFont (..)
+  , getOrLoadCachedFont
+  , ttfGetKerning
+  , ttfSaveRenderText
+  , withUtf8
+  )
+import NanoUI.Sdl.Window (RgbaImage (..), SdlEnv (..), SdlOptions (..), defaultSdlOptions, saveScreenshot, syncDisplay, withSdl, withSdlBench)
 import NanoUI.Sdl.NanoUIFont (NanoUIFont (..))
 import NanoUI.Testing (Context, registerImage, runEff, withTheme)
 
@@ -114,3 +131,17 @@ runSdlAppWithQuitReduceEff options unlift update ctx model0 shouldQuit view = do
   modelRef <- newIORef model0
   runSdlSession options ctx (const (pure ())) shouldQuit $ \c env i force ->
     drawReduceEff unlift update modelRef view c env i force
+
+saveFontRenderText :: SdlEnv -> Float -> FontWeight -> FontStyle -> FontVariant -> Text -> FilePath -> IO Bool
+saveFontRenderText env sz weight style var txt path = do
+  entry <- getOrLoadCachedFont (sdlFontCache env) sz weight style var
+  withUtf8 txt $ \ctext _ ->
+    withCString path $ \cpath ->
+      ttfSaveRenderText (sfFont (cfeFont entry)) ctext cpath
+
+queryFontKerning :: SdlEnv -> Float -> FontWeight -> FontStyle -> FontVariant -> Char -> Char -> IO Int
+queryFontKerning env sz weight style var c1 c2 = do
+  entry <- getOrLoadCachedFont (sdlFontCache env) sz weight style var
+  let cp1 = fromIntegral (ord c1)
+      cp2 = fromIntegral (ord c2)
+  fromIntegral <$> ttfGetKerning (sfFont (cfeFont entry)) cp1 cp2

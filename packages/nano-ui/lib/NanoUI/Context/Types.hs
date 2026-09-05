@@ -53,7 +53,7 @@ import NanoUI.Id (IdContext, WidgetId, hashWidgetId)
 import NanoUI.Input (UiCursorKind)
 import NanoUI.Layout.Arena (DirTag, NodeArena, NodeType)
 import NanoUI.Store (WidgetStore)
-import NanoUI.Style (Layout, Theme)
+import NanoUI.Style (FontStyle, FontVariant, FontWeight, Layout, Theme)
 import NanoUI.Types
   ( Damage (..)
   , DamageBounds
@@ -298,6 +298,8 @@ data Context = Context
   , ctxFontMetrics :: FontMetrics
   , ctxMonoFontMetrics :: FontMetrics
   , ctxMeasureText :: Text -> IO (Float, Float)
+  , ctxResolveFont :: !(Float -> FontWeight -> FontStyle -> FontVariant -> IO (FontMetrics, Bool))
+  , ctxResolveMeasure :: !(Float -> FontWeight -> FontStyle -> FontVariant -> Text -> IO (Float, Float))
   , ctxMeasureCache :: Maybe (IORef (HashMap MeasureCacheKey (Float, Float)))
   , ctxExternalText :: Bool
   , ctxTheme :: !(IORef Theme)

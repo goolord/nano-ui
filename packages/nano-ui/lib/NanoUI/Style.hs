@@ -63,12 +63,33 @@ module NanoUI.Style
   , gridCols
   , cols
   , FontVariant (..)
+  , FontWeight (..)
+  , FontStyle (..)
+  , TextDecoration (..)
   , LayoutModifier
   , fontRegular
   , fontHeading
   , fontMuted
   , fontMono
   , fontDanger
+  , fontSize
+  , fontSizeScale
+  , fontColor
+  , textColor
+  , fontWeight
+  , fontBold
+  , fontLight
+  , fontMedium
+  , fontSemiBold
+  , fontExtraBold
+  , fontBlack
+  , fontStyle
+  , fontItalic
+  , fontOblique
+  , textDecoration
+  , fontUnderline
+  , fontStrike
+  , fontStrikethrough
   , alignStart
   , alignCenter
   , alignTop
@@ -124,6 +145,29 @@ data FontVariant
   | FontDanger
   deriving (Eq, Show, Enum, Bounded, Ord)
 
+data FontWeight
+  = WeightNormal
+  | WeightBold
+  | WeightLight
+  | WeightMedium
+  | WeightSemiBold
+  | WeightExtraBold
+  | WeightBlack
+  deriving (Eq, Show, Enum, Bounded, Ord)
+
+data FontStyle
+  = FontStyleNormal
+  | FontStyleItalic
+  | FontStyleOblique
+  deriving (Eq, Show, Enum, Bounded, Ord)
+
+data TextDecoration
+  = DecorationNone
+  | DecorationUnderline
+  | DecorationStrikethrough
+  | DecorationUnderlineStrike
+  deriving (Eq, Show, Enum, Bounded, Ord)
+
 type LayoutModifier = Layout -> Layout
 
 data Layout = Layout
@@ -141,6 +185,11 @@ data Layout = Layout
   , layoutFontVariant :: !FontVariant
   , layoutGridCols :: {-# UNPACK #-} !Int
   , layoutGridMinColW :: {-# UNPACK #-} !Float
+  , layoutFontSize :: {-# UNPACK #-} !Float
+  , layoutFontColor :: !(Maybe Color)
+  , layoutFontWeight :: !FontWeight
+  , layoutFontStyle :: !FontStyle
+  , layoutTextDecoration :: !TextDecoration
   }
   deriving (Eq, Show)
 
@@ -161,6 +210,11 @@ defaultLayout =
     , layoutFontVariant = FontRegular
     , layoutGridCols = 0
     , layoutGridMinColW = 0
+    , layoutFontSize = 0
+    , layoutFontColor = Nothing
+    , layoutFontWeight = WeightNormal
+    , layoutFontStyle = FontStyleNormal
+    , layoutTextDecoration = DecorationNone
     }
 
 {-# INLINE padAll #-}
@@ -270,6 +324,91 @@ fontMono l = l {layoutFontVariant = FontMono}
 {-# INLINE fontDanger #-}
 fontDanger :: Layout -> Layout
 fontDanger l = l {layoutFontVariant = FontDanger}
+
+{-# INLINE fontSize #-}
+fontSize :: Float -> Layout -> Layout
+fontSize sz l = l {layoutFontSize = max 0 sz}
+
+{-# INLINE fontSizeScale #-}
+fontSizeScale :: Float -> Layout -> Layout
+fontSizeScale s l =
+  let cur = layoutFontSize l
+      sz = if cur > 0 then cur * s else 16 * s
+   in l {layoutFontSize = max 0 sz}
+
+{-# INLINE fontColor #-}
+fontColor :: Color -> Layout -> Layout
+fontColor col l = l {layoutFontColor = Just col}
+
+{-# INLINE textColor #-}
+textColor :: Color -> Layout -> Layout
+textColor = fontColor
+
+{-# INLINE fontWeight #-}
+fontWeight :: FontWeight -> Layout -> Layout
+fontWeight w l = l {layoutFontWeight = w}
+
+{-# INLINE fontBold #-}
+fontBold :: Layout -> Layout
+fontBold = fontWeight WeightBold
+
+{-# INLINE fontLight #-}
+fontLight :: Layout -> Layout
+fontLight = fontWeight WeightLight
+
+{-# INLINE fontMedium #-}
+fontMedium :: Layout -> Layout
+fontMedium = fontWeight WeightMedium
+
+{-# INLINE fontSemiBold #-}
+fontSemiBold :: Layout -> Layout
+fontSemiBold = fontWeight WeightSemiBold
+
+{-# INLINE fontExtraBold #-}
+fontExtraBold :: Layout -> Layout
+fontExtraBold = fontWeight WeightExtraBold
+
+{-# INLINE fontBlack #-}
+fontBlack :: Layout -> Layout
+fontBlack = fontWeight WeightBlack
+
+{-# INLINE fontStyle #-}
+fontStyle :: FontStyle -> Layout -> Layout
+fontStyle s l = l {layoutFontStyle = s}
+
+{-# INLINE fontItalic #-}
+fontItalic :: Layout -> Layout
+fontItalic = fontStyle FontStyleItalic
+
+{-# INLINE fontOblique #-}
+fontOblique :: Layout -> Layout
+fontOblique = fontStyle FontStyleOblique
+
+{-# INLINE textDecoration #-}
+textDecoration :: TextDecoration -> Layout -> Layout
+textDecoration d l = l {layoutTextDecoration = d}
+
+{-# INLINE fontUnderline #-}
+fontUnderline :: Layout -> Layout
+fontUnderline l =
+  let newDeco = case layoutTextDecoration l of
+        DecorationStrikethrough -> DecorationUnderlineStrike
+        DecorationUnderlineStrike -> DecorationUnderlineStrike
+        _ -> DecorationUnderline
+   in l {layoutTextDecoration = newDeco}
+
+{-# INLINE fontStrike #-}
+fontStrike :: Layout -> Layout
+fontStrike l =
+  let newDeco = case layoutTextDecoration l of
+        DecorationUnderline -> DecorationUnderlineStrike
+        DecorationUnderlineStrike -> DecorationUnderlineStrike
+        _ -> DecorationStrikethrough
+   in l {layoutTextDecoration = newDeco}
+
+{-# INLINE fontStrikethrough #-}
+fontStrikethrough :: Layout -> Layout
+fontStrikethrough = fontStrike
 
 {-# INLINE alignStart #-}
 alignStart :: Layout -> Layout

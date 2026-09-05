@@ -27,6 +27,7 @@ import Diagrams.Prelude
 import NanoUI
 import NanoUI.Backend.Sdl
 import NanoUI.Debug (CoreDebugSnapshot (..), formatCoreRtsRows)
+import NanoUI.Context (ctxResolveFont, ctxResolveMeasure)
 import NanoUI.Diagrams
 import NanoUI.Testing (Context, collectOverlayTextSpans, collectTextSpans, registerImage)
 import NanoUI.Testing.Harness
@@ -134,6 +135,7 @@ main = do
 
 data DemoTab
   = Controls
+  | Typography
   | List
   | Table
   | Plots
@@ -199,6 +201,12 @@ demoUi = do
   (notes, setNotes) <- useText ""
   (treeSel, setTreeSel) <- useText "0"
   (tableSortVal, setTableSort) <- useTableSort (SortCol 0 SortAsc)
+  (sampleText, setSampleText) <- useText "The quick brown fox jumps over the lazy dog"
+  (typeSize, setTypeSize) <- useFloat 20.0
+  (typeBold, setTypeBold) <- useFlag False
+  (typeItalic, setTypeItalic) <- useFlag True
+  (typeUnderline, setTypeUnderline) <- useFlag False
+  (typeStrike, setTypeStrike) <- useFlag False
   scrollWith (tight . grow) $
     columnWith (padAll 6 . gap gapLayout . fillW) $ do
       panelWith (padXY 14 10 . gap gapInline . fillW) $
@@ -283,6 +291,107 @@ demoUi = do
                   when (respClicked cut) (setClick "Cut")
                   when (respClicked copy) (setClick "Copy")
                   when (respClicked paste) (setClick "Paste")
+              sep
+            Typography -> do
+              heading "Typography & Font Styling"
+              muted "Font sizing, variable weights, synthetic slant, and text decorations."
+              sep
+              heading "Live Playground"
+              rowWith (tight . gap gapInline . fillW) $ do
+                (_, tVal) <- textInput "Preview text" sampleText
+                setSampleText tVal
+              rowWith (tight . gap gapInline . fillW . alignMid) $ do
+                (_, bVal) <- checkbox "Bold" typeBold
+                setTypeBold bVal
+                (_, iVal) <- checkbox "Italic" typeItalic
+                setTypeItalic iVal
+                (_, uVal) <- checkbox "Underline" typeUnderline
+                setTypeUnderline uVal
+                (_, sVal) <- checkbox "Strike" typeStrike
+                setTypeStrike sVal
+              rowWith (tight . gap gapInline . fillW . alignMid) $ do
+                (_, szVal) <- slider "Size" 12 40 typeSize
+                setTypeSize szVal
+                void $ labelEx (tight . fontMono . fontMuted $ defaultLayout) (T.pack (printf "%.0f px" szVal))
+              let applyWeight = if typeBold then fontBold else id
+                  applyItalic = if typeItalic then fontItalic else id
+                  applyDeco
+                    | typeUnderline && typeStrike = fontUnderline . fontStrike
+                    | typeUnderline = fontUnderline
+                    | typeStrike = fontStrike
+                    | otherwise = id
+                  customStyle = fontSize typeSize . applyWeight . applyItalic . applyDeco . fillW
+                  previewTxt = if T.null sampleText then "Type specimen preview..." else sampleText
+              panelWith (padAll 10 . fillW) $
+                void $ labelWith customStyle previewTxt
+              sep
+              heading "Type Scale"
+              columnWith (tight . gap gapMicro . fillW) $ do
+                rowWith (tight . gap gapInline . alignMid . fillW) $ do
+                  void $ labelEx (tight . fixedW 60 . fontMono . fontMuted $ defaultLayout) "32px"
+                  void $ labelWith (fontSize 32 . fontBold) "Display Headline"
+                rowWith (tight . gap gapInline . alignMid . fillW) $ do
+                  void $ labelEx (tight . fixedW 60 . fontMono . fontMuted $ defaultLayout) "24px"
+                  void $ labelWith (fontSize 24 . fontSemiBold) "Page Section Title"
+                rowWith (tight . gap gapInline . alignMid . fillW) $ do
+                  void $ labelEx (tight . fixedW 60 . fontMono . fontMuted $ defaultLayout) "18px"
+                  void $ labelWith (fontSize 18 . fontMedium) "Card Subtitle & Highlights"
+                rowWith (tight . gap gapInline . alignMid . fillW) $ do
+                  void $ labelEx (tight . fixedW 60 . fontMono . fontMuted $ defaultLayout) "16px"
+                  void $ labelWith (fontSize 16) "Standard body text (16px base line height)"
+                rowWith (tight . gap gapInline . alignMid . fillW) $ do
+                  void $ labelEx (tight . fixedW 60 . fontMono . fontMuted $ defaultLayout) "12px"
+                  void $ labelWith (fontSize 12 . fontMuted) "Auxiliary caption, footnote, or timestamp"
+              sep
+              heading "Weights & Styles"
+              columnWith (tight . gap gapMicro . fillW) $ do
+                rowWith (tight . gap gapInline . fillW) $ do
+                  void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "Light"
+                  void $ labelWith fontLight "Sphinx of black quartz, judge my vow."
+                rowWith (tight . gap gapInline . fillW) $ do
+                  void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "Normal"
+                  void $ label "Sphinx of black quartz, judge my vow."
+                rowWith (tight . gap gapInline . fillW) $ do
+                  void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "Medium"
+                  void $ labelWith fontMedium "Sphinx of black quartz, judge my vow."
+                rowWith (tight . gap gapInline . fillW) $ do
+                  void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "SemiBold"
+                  void $ labelWith fontSemiBold "Sphinx of black quartz, judge my vow."
+                rowWith (tight . gap gapInline . fillW) $ do
+                  void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "Bold"
+                  void $ labelWith fontBold "Sphinx of black quartz, judge my vow."
+                rowWith (tight . gap gapInline . fillW) $ do
+                  void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "ExtraBold"
+                  void $ labelWith fontExtraBold "Sphinx of black quartz, judge my vow."
+                rowWith (tight . gap gapInline . fillW) $ do
+                  void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "Black"
+                  void $ labelWith fontBlack "Sphinx of black quartz, judge my vow."
+                rowWith (tight . gap gapInline . fillW) $ do
+                  void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "Italic"
+                  void $ labelWith fontItalic "Slanted synthetic italic font style."
+                rowWith (tight . gap gapInline . fillW) $ do
+                  void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "Underline"
+                  void $ labelWith fontUnderline "Underlined emphasis and interactive links."
+                rowWith (tight . gap gapInline . fillW) $ do
+                  void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "Strike"
+                  void $ labelWith fontStrike "Completed tasks and deprecated pricing."
+                rowWith (tight . gap gapInline . fillW) $ do
+                  void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "Both"
+                  void $ labelWith (fontUnderline . fontStrike) "Both underline and strikethrough lines."
+              sep
+              heading "Color & Highlights"
+              columnWith (tight . gap gapMicro . fillW) $ do
+                rowWith (tight . gap gapInline . fillW) $ do
+                  void $ labelWith (fontBold . fontColor (colorRGBA 224 108 117 255)) "Crimson Red"
+                  void $ labelWith (fontBold . fontColor (colorRGBA 152 195 121 255)) "Emerald Green"
+                  void $ labelWith (fontBold . fontColor (colorRGBA 229 192 123 255)) "Amber Gold"
+                  void $ labelWith (fontBold . fontColor (colorRGBA 86 182 194 255)) "Glacier Cyan"
+                  void $ labelWith (fontBold . fontColor (colorRGBA 198 120 221 255)) "Orchid Violet"
+                rowWith (tight . gap gapInline . fillW . alignMid) $ do
+                  muted "Sale example:"
+                  void $ labelWith (fontStrike . fontMuted) "$129.00"
+                  void $ labelWith (fontSize 18 . fontBold . fontColor (colorRGBA 152 195 121 255)) "$79.00"
+                  void $ labelWith (fontSize 12 . fontItalic . fontColor (colorRGBA 229 192 123 255)) "(Save 38%)"
               sep
             List -> do
               heading "Tree"
@@ -635,6 +744,21 @@ selftest = do
       }
     ctx0
     $ \ctx env -> do
+    (_fmNorm, _) <- ctxResolveFont ctx 16.0 WeightNormal FontStyleNormal FontRegular
+    (_fmItal, _) <- ctxResolveFont ctx 16.0 WeightNormal FontStyleItalic FontRegular
+    (wNorm, _) <- ctxResolveMeasure ctx 16.0 WeightNormal FontStyleNormal FontRegular "Slanted synthetic italic font style."
+    (wItal, _) <- ctxResolveMeasure ctx 16.0 WeightNormal FontStyleItalic FontRegular "Slanted synthetic italic font style."
+    putStrLn $ printf "MEASURE string: norm=%.1f, ital=%.1f" wNorm wItal
+    let sentence = "The quick brown fox jumps over the lazy dog"
+    putStrLn "--- Kerning queries (Normal vs Italic) ---"
+    let pairs = zip (T.unpack sentence) (drop 1 (T.unpack sentence))
+    for_ pairs $ \(c1, c2) -> do
+      kN <- queryFontKerning env 20.0 WeightNormal FontStyleNormal FontRegular c1 c2
+      kI <- queryFontKerning env 20.0 WeightNormal FontStyleItalic FontRegular c1 c2
+      when (kN /= 0 || kI /= 0) $
+        putStrLn $ printf "Kerning '%c''%c': norm=%d, ital=%d" c1 c2 kN kI
+    void $ saveFontRenderText env 20.0 WeightNormal FontStyleItalic FontRegular sentence
+      "C:\\Users\\zach\\.gemini\\antigravity\\brain\\72382fd0-e1b2-4a85-8ac3-abd001b9f58d\\sdl_native_italic.bmp"
     let idle =
           emptyInput
             { inputWindowSize = Size 1280 800
@@ -662,6 +786,17 @@ selftest = do
     clickPos ctx' env base readme
     spansSel <- collectTextSpans ctx'
     unless (hasText "7" spansSel) $ fail "selftest: tree click did not select README.md"
+    clickTab ctx' env base "Typography"
+    spansType <- collectTextSpans ctx'
+    unless (hasText "Live Playground" spansType) $ fail "selftest: typography missing after Typography tab"
+    drawOnce ctx' env (base {inputScroll = V2 0 (-350)})
+    drawOnce ctx' env base
+    void $ saveScreenshot env "C:\\Users\\zach\\.gemini\\antigravity\\brain\\72382fd0-e1b2-4a85-8ac3-abd001b9f58d\\typography_styles.bmp"
+    sizeSpan <- requireSpan "selftest: Size slider" (findRightmost "Size" spansType)
+    for_ [20, 60, 100, 140, 180, 50, 120, -60, -100, 0 :: Float] $ \dx -> do
+      dragPos ctx' env base sizeSpan (V2 (v2X sizeSpan + dx) (v2Y sizeSpan))
+    spansTypeAfter <- collectTextSpans ctx'
+    unless (hasText "Live Playground" spansTypeAfter) $ fail "selftest: typography missing after size changes"
     clickTab ctx' env base "Controls"
     spansCtl <- collectTextSpans ctx'
     unless (hasText "Feature" spansCtl) $ fail "selftest: Controls missing after tab back"

@@ -33,7 +33,11 @@ module NanoUI.WidgetText
   , tableStripeColor
   , stripeColor
   , packTextNodeStyle
+  , packTextNodeStyleFull
   , textNodeFontVariant
+  , textNodeFontWeight
+  , textNodeFontStyle
+  , textNodeTextDecoration
   , textNodeStripe
   , tableHeaderLabel
   , tableHeaderDisplayText
@@ -51,7 +55,7 @@ import Data.Text (Text)
 import Data.Word (Word8)
 import NanoUI.Font (FontMetrics (..), fmLineHeight)
 import NanoUI.Icons (Icons, treeExpandMark)
-import NanoUI.Style (FontVariant (..), Theme (..), styleBg, themeButton, themePanel, themeWindow)
+import NanoUI.Style (FontStyle (..), FontVariant (..), FontWeight (..), TextDecoration (..), Theme (..), styleBg, themeButton, themePanel, themeWindow)
 import NanoUI.Types (Color (..), colorB, colorG, colorR, colorRGBA, lerpColor)
 import qualified Data.Text as T
 
@@ -195,10 +199,18 @@ tableStripeEven = 1
 tableStripeOdd :: Int
 tableStripeOdd = 2
 
+{-# INLINE packTextNodeStyleFull #-}
+packTextNodeStyleFull :: FontVariant -> FontWeight -> FontStyle -> TextDecoration -> Int -> Int
+packTextNodeStyleFull fvar weight fstyle deco stripe =
+  (stripe `shiftL` 4)
+    .|. (fromEnum fvar .&. 0x0F)
+    .|. ((fromEnum weight .&. 0x0F) `shiftL` 8)
+    .|. ((fromEnum fstyle .&. 0x03) `shiftL` 12)
+    .|. ((fromEnum deco .&. 0x03) `shiftL` 14)
+
 {-# INLINE packTextNodeStyle #-}
 packTextNodeStyle :: FontVariant -> Int -> Int
-packTextNodeStyle fvar stripe =
-  (stripe `shiftL` 4) .|. (fromEnum fvar .&. 0x0F)
+packTextNodeStyle fvar stripe = packTextNodeStyleFull fvar WeightNormal FontStyleNormal DecorationNone stripe
 
 {-# INLINE textNodeFontVariant #-}
 textNodeFontVariant :: Int -> FontVariant
@@ -207,6 +219,30 @@ textNodeFontVariant si =
    in if v >= fromEnum (minBound :: FontVariant) && v <= fromEnum (maxBound :: FontVariant)
         then toEnum v
         else FontRegular
+
+{-# INLINE textNodeFontWeight #-}
+textNodeFontWeight :: Int -> FontWeight
+textNodeFontWeight si =
+  let w = (si `shiftR` 8) .&. 0x0F
+   in if w >= fromEnum (minBound :: FontWeight) && w <= fromEnum (maxBound :: FontWeight)
+        then toEnum w
+        else WeightNormal
+
+{-# INLINE textNodeFontStyle #-}
+textNodeFontStyle :: Int -> FontStyle
+textNodeFontStyle si =
+  let s = (si `shiftR` 12) .&. 0x03
+   in if s >= fromEnum (minBound :: FontStyle) && s <= fromEnum (maxBound :: FontStyle)
+        then toEnum s
+        else FontStyleNormal
+
+{-# INLINE textNodeTextDecoration #-}
+textNodeTextDecoration :: Int -> TextDecoration
+textNodeTextDecoration si =
+  let d = (si `shiftR` 14) .&. 0x03
+   in if d >= fromEnum (minBound :: TextDecoration) && d <= fromEnum (maxBound :: TextDecoration)
+        then toEnum d
+        else DecorationNone
 
 {-# INLINE textNodeStripe #-}
 textNodeStripe :: Int -> Int

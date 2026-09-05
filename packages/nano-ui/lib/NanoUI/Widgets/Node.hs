@@ -61,7 +61,7 @@ import NanoUI.Layout.Arena
   , setWidgetId
   )
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO)
-import NanoUI.WidgetText (packTextNodeStyle)
+import NanoUI.WidgetText (packTextNodeStyleFull)
 import NanoUI.Style
   ( AlignX (..)
   , AlignY (..)
@@ -314,7 +314,7 @@ addWidgetStyled wid nt txt value layout styleIdx mResp = do
     setNodeText (ctxNodeArena ctx) idx txt
     setNodeValue (ctxNodeArena ctx) idx value
     let effectiveStyle
-          | nt == NodeText = packTextNodeStyle (layoutFontVariant layout) styleIdx
+          | nt == NodeText = packTextNodeStyleFull (layoutFontVariant layout) (layoutFontWeight layout) (layoutFontStyle layout) (layoutTextDecoration layout) styleIdx
           | otherwise = styleIdx
     setStyleIdx (ctxNodeArena ctx) idx effectiveStyle
     setWidgetId (ctxNodeArena ctx) idx wid

@@ -6,7 +6,7 @@
 #include <string.h>
 
 enum {
-    NANO_UI_TEXT_ATLAS_SIZE = 1024,
+    NANO_UI_TEXT_ATLAS_SIZE = 2048,
     NANO_UI_TEXT_ATLAS_PAD = 1,
     NANO_UI_WHITE_PATCH_SIZE = 4
 };

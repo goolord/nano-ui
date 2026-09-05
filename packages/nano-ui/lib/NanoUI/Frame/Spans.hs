@@ -19,6 +19,7 @@ module NanoUI.Frame.Spans
 
 import Control.Monad (unless, when)
 import Data.IORef (readIORef)
+import Data.Maybe (fromMaybe)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Text as T
 import NanoUI.Widgets.ColorPicker
@@ -45,7 +46,6 @@ import NanoUI.Font
   , labelContentInset
   , tableCellInset
   , layoutLineHeight
-  , measureText
   , sliderTrackBounds
   , textDisplayWidth
   , treeRowLeading
@@ -54,6 +54,7 @@ import NanoUI.Font
   , widgetContentInset
   , wrapTextLines
   , wrapTextLinesIO
+  , measureText
   )
 import NanoUI.Types (HostProfile, isCellHost)
 import NanoUI.Icons (iconScrollDown, iconScrollUp, terminalPaintColumns)
@@ -81,13 +82,15 @@ import NanoUI.Layout.Arena
   , getText
   , getWidthSizing
   , getWidgetId
+  , getNodeFontSize
+  , getNodeFontColor
   , parentIsRow
   , isFloatingNode
   , isScrollNode
   , isWidgetNode
   )
 import NanoUI.Layout.Solve (scrollBarSlotOf)
-import NanoUI.Style (AlignX (..), FontVariant (..), Padding (..), Style (..), Theme (..), styleBg, styleFg, themeSeparator, themeWindow)
+import NanoUI.Style (AlignX (..), FontStyle (..), FontVariant (..), FontWeight (..), Padding (..), Style (..), Theme (..), styleBg, styleFg, themeSeparator, themeWindow)
 import NanoUI.Types (Color (..), Rect (..), colorRGBA, lerpColor, rectH, rectIntersect, rectW, rectX, rectY)
 import NanoUI.WidgetText (isCloseButtonStyle, isTableHeaderStyle)
 import NanoUI.WidgetText
@@ -100,7 +103,9 @@ import NanoUI.WidgetText
   , textInputTerminalText
   , treeDecodeStyle
   , tableStripeColor
+  , textNodeFontStyle
   , textNodeFontVariant
+  , textNodeFontWeight
   )
 import NanoUI.Frame.Chrome
   ( buildFloatingAncestorMap
@@ -294,12 +299,19 @@ collectNodeTextSpans ctx floatCache idx = do
   nt <- getNodeType (ctxNodeArena ctx) idx
   (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
   theme <- readIORef (ctxTheme ctx)
-  let fm = ctxFontMetrics ctx
   if nt == NodeText
     then do
       raw <- getText (ctxNodeArena ctx) idx
       si <- getStyleIdx (ctxNodeArena ctx) idx
-      let mStripe = tableStripeColor theme si
+      mCustomCol <- getNodeFontColor (ctxNodeArena ctx) idx
+      let fvar = textNodeFontVariant si
+          (txt0, defaultFg, defaultBg) = floatingLabelPaint floatCache ctx idx theme fvar raw
+          fg = fromMaybe defaultFg mCustomCol
+          fgFill = fg
+          mStripe = tableStripeColor theme si
+          paintBg = case mStripe of
+            Just bg -> bg
+            Nothing -> defaultBg
           stripeSpans =
             case mStripe of
               Just bg | isCellHost (ctxHostProfile ctx) ->
@@ -316,27 +328,39 @@ collectNodeTextSpans ctx floatCache idx = do
                   | r <- [0 .. hi - 1]
                   ]
               _ -> []
-          fvar = textNodeFontVariant si
-          (txt0, fg, defaultBg) = floatingLabelPaint floatCache ctx idx theme fvar raw
-          fgFill = fg
-          paintBg = case mStripe of
-            Just bg -> bg
-            Nothing -> defaultBg
       if T.null raw
         then pure stripeSpans
         else do
-          let textFm = if fvar == FontMono then ctxMonoFontMetrics ctx else fm
-              (ix, _) =
+          fontSizeVal <- getNodeFontSize (ctxNodeArena ctx) idx
+          let fweight = textNodeFontWeight si
+              fstyle  = textNodeFontStyle si
+              isBaseSans = fontSizeVal <= 0 && fweight == WeightNormal && fstyle == FontStyleNormal && fvar == FontRegular
+              isBaseMono = fontSizeVal <= 0 && fweight == WeightNormal && fstyle == FontStyleNormal && fvar == FontMono
+          textFm <-
+            if isBaseSans
+              then pure (ctxFontMetrics ctx)
+              else if isBaseMono
+                then pure (ctxMonoFontMetrics ctx)
+                else fst <$> ctxResolveFont ctx fontSizeVal fweight fstyle fvar
+          let (ix, _) =
                 case mStripe of
                   Just _ -> tableCellInset (ctxHostProfile ctx) textFm
                   Nothing -> labelContentInset (ctxHostProfile ctx) textFm
+              measureWord =
+                if isBaseSans
+                  then \t -> fmap fst (ctxMeasureText ctx t)
+                  else if isBaseMono
+                    then \t -> pure (fst (measureText (ctxHostProfile ctx) (ctxMonoFontMetrics ctx) t))
+                    else \t -> fmap fst (ctxResolveMeasure ctx fontSizeVal fweight fstyle fvar t)
           ax <- getAlignX (ctxNodeArena ctx) idx
           (_, _, maxW, _) <- getMinMax (ctxNodeArena ctx) idx
           (wTag, _) <- getWidthSizing (ctxNodeArena ctx) idx
-          (tw0, _) <-
-            if fvar == FontMono
-              then pure (measureText (ctxHostProfile ctx) textFm txt0)
-              else ctxMeasureText ctx txt0
+          tw0 <-
+            if isBaseSans
+              then fst <$> ctxMeasureText ctx txt0
+              else if isBaseMono
+                then pure (fst (measureText (ctxHostProfile ctx) (ctxMonoFontMetrics ctx) txt0))
+                else fst <$> ctxResolveMeasure ctx fontSizeVal fweight fstyle fvar txt0
           isRowChild <- parentIsRow (ctxNodeArena ctx) idx
           effMaxW <-
             if maxW < 1e8
@@ -356,7 +380,7 @@ collectNodeTextSpans ctx floatCache idx = do
                 textLines <-
                   if isCellHost (ctxHostProfile ctx)
                     then pure (wrapTextLines (ctxHostProfile ctx) textFm txt0 wrapW)
-                    else wrapTextLinesIO (\t -> if fvar == FontMono then pure (fst (measureText (ctxHostProfile ctx) textFm t)) else fmap fst (ctxMeasureText ctx t)) textFm txt0 wrapW
+                    else wrapTextLinesIO measureWord textFm txt0 wrapW
                 pure
                   [ ( Rect
                         tx
@@ -377,7 +401,7 @@ collectNodeTextSpans ctx floatCache idx = do
                     then
                       if isCellHost (ctxHostProfile ctx) || fvar == FontMono
                         then pure (truncateTextAdvance (fmAdvance textFm) contentW txt0)
-                        else truncateTextIO (\t -> fmap fst (ctxMeasureText ctx t)) contentW txt0
+                        else truncateTextIO measureWord contentW txt0
                     else pure txt0
                 let (tx, used) = alignedTextPen ax x w ix textFm dispTxt
                 pure [(Rect tx (centeredTextY (ctxHostProfile ctx) textFm y h lineH) used lineH, dispTxt, fg, paintBg)]
@@ -456,7 +480,8 @@ widgetTextSpans ctx nt idx x y w h = do
   fm <- pure (ctxFontMetrics ctx)
   terminal <- pure (isCellHost (ctxHostProfile ctx))
   style <- widgetVisualStyle ctx nt idx
-  let fg = styleFg style
+  mFontColor <- getNodeFontColor (ctxNodeArena ctx) idx
+  let fg = fromMaybe (styleFg style) mFontColor
       bg = styleBg style
   if terminal
     then do
@@ -523,17 +548,34 @@ widgetTextSpans ctx nt idx x y w h = do
 widgetTextPlacements ::
   Context -> NodeType -> NodeIdx -> Float -> Float -> Float -> Float -> IO [(T.Text, Float, Float, Float, Float)]
 widgetTextPlacements ctx nt idx x y w h = do
-  let fm = ctxFontMetrics ctx
-      terminal = isCellHost (ctxHostProfile ctx)
-      (ix, iy) = widgetContentInset (ctxHostProfile ctx) fm
+  terminal <- pure (isCellHost (ctxHostProfile ctx))
+  fontSizeVal <- getNodeFontSize (ctxNodeArena ctx) idx
+  si <- getStyleIdx (ctxNodeArena ctx) idx
+  let fweight = textNodeFontWeight si
+      fstyle  = textNodeFontStyle si
+      fvar    = textNodeFontVariant si
+      isBaseSans = fontSizeVal <= 0 && fweight == WeightNormal && fstyle == FontStyleNormal && fvar == FontRegular
+      isBaseMono = fontSizeVal <= 0 && fweight == WeightNormal && fstyle == FontStyleNormal && fvar == FontMono
+  fm <-
+    if isBaseSans
+      then pure (ctxFontMetrics ctx)
+      else if isBaseMono
+        then pure (ctxMonoFontMetrics ctx)
+        else fst <$> ctxResolveFont ctx fontSizeVal fweight fstyle fvar
+  let (ix, iy) = widgetContentInset (ctxHostProfile ctx) fm
+      measureTxt t =
+        if isBaseSans
+          then ctxMeasureText ctx t
+          else if isBaseMono
+            then pure (measureText (ctxHostProfile ctx) (ctxMonoFontMetrics ctx) t)
+            else ctxResolveMeasure ctx fontSizeVal fweight fstyle fvar t
   case nt of
     NodeButton -> do
-      si <- getStyleIdx (ctxNodeArena ctx) idx
       if not terminal && isCloseButtonStyle si
         then pure []
         else do
           txt <- displayText ctx nt idx
-          (_tw, th) <- ctxMeasureText ctx txt
+          (_tw, th) <- measureTxt txt
           if isTableHeaderStyle si
             then do
               ax <- getAlignX (ctxNodeArena ctx) idx
@@ -545,13 +587,13 @@ widgetTextPlacements ctx nt idx x y w h = do
               pure [(txt, tx, centeredTextY (ctxHostProfile ctx) fm y h th, used, th)]
     NodeSelect -> do
       txt <- displayText ctx nt idx
-      (tw, th) <- ctxMeasureText ctx txt
+      (tw, th) <- measureTxt txt
       pure [(txt, x + ix, centeredTextY (ctxHostProfile ctx) fm y h th, min tw (w - ix - selectChevronReserve), th)]
     NodeColorPicker -> do
       if terminal
         then do
           txt <- displayText ctx nt idx
-          (tw, th) <- ctxMeasureText ctx txt
+          (tw, th) <- measureTxt txt
           pure [(txt, x + ix, centeredTextY (ctxHostProfile ctx) fm y h th, tw, th)]
         else do
           lbl <- getText (ctxNodeArena ctx) idx
@@ -560,10 +602,10 @@ widgetTextPlacements ctx nt idx x y w h = do
           let geom = colorPickerGeom (ctxHostProfile ctx) fm x y w h
               hex = colorPickerToHex (widgetStoreColor store wid colorPickerDefaultColor)
               (lx, ly) = labelContentInset (ctxHostProfile ctx) fm
-          (lw, lh) <- ctxMeasureText ctx lbl
-          (hw, hh) <- ctxMeasureText ctx hex
-          (cw, ch) <- ctxMeasureText ctx colorPickerCurrentLabel
-          (nw, nh) <- ctxMeasureText ctx colorPickerNewLabel
+          (lw, lh) <- measureTxt lbl
+          (hw, hh) <- measureTxt hex
+          (cw, ch) <- measureTxt colorPickerCurrentLabel
+          (nw, nh) <- measureTxt colorPickerNewLabel
           let previewY =
                 centeredTextY (ctxHostProfile ctx) fm (cpgPreviewLabelY geom) (cpgHexH geom) lh
           pure
@@ -574,7 +616,7 @@ widgetTextPlacements ctx nt idx x y w h = do
             ]
     _ | nt == NodeCheckbox || nt == NodeRadio -> do
       txt <- displayText ctx nt idx
-      (tw, th) <- ctxMeasureText ctx txt
+      (tw, th) <- measureTxt txt
       let (cx, _) =
             if terminal
               then widgetContentInset (ctxHostProfile ctx) fm
@@ -584,8 +626,7 @@ widgetTextPlacements ctx nt idx x y w h = do
       pure [(txt, tx, ty, tw, th)]
     NodeTree -> do
       txt <- displayText ctx nt idx
-      (tw, th) <- ctxMeasureText ctx txt
-      si <- getStyleIdx (ctxNodeArena ctx) idx
+      (tw, th) <- measureTxt txt
       let (_, depth, _, _) = treeDecodeStyle si
           (cx, _) =
             if terminal
@@ -598,15 +639,15 @@ widgetTextPlacements ctx nt idx x y w h = do
       lbl <- displayText ctx nt idx
       if terminal
         then do
-          (lw, lh) <- ctxMeasureText ctx lbl
+          (lw, lh) <- measureTxt lbl
           let ty = centeredTextY (ctxHostProfile ctx) fm y lh lh
           pure [(lbl, x + ix, ty, lw, lh)]
         else do
           val <- sliderValue ctx idx
           let valTxt = sliderValueText val
               (lx, _) = labelContentInset (ctxHostProfile ctx) fm
-          (lw, lh) <- ctxMeasureText ctx lbl
-          (vw, vh) <- ctxMeasureText ctx valTxt
+          (lw, lh) <- measureTxt lbl
+          (vw, vh) <- measureTxt valTxt
           let ty = centeredTextY (ctxHostProfile ctx) fm y lh lh
           pure
             [ (lbl, x + lx, ty, lw, lh)
@@ -622,15 +663,15 @@ widgetTextPlacements ctx nt idx x y w h = do
           store <- getStore ctx
           let cursor = IM.findWithDefault (T.length value) (slotKey slotCursor (intKey wid)) (storeInt store)
               shown = textInputTerminalText lbl value cursor focus
-          (tw, th) <- ctxMeasureText ctx shown
+          (tw, th) <- measureTxt shown
           pure [(shown, x + ix, centeredTextY (ctxHostProfile ctx) fm y h th, tw, th)]
         else do
           let geom = textInputGeom (ctxHostProfile ctx) fm x y w h
               field = tigFieldRect geom
               fieldTxt = textInputFieldText lbl value focus
               labelH = layoutLineHeight (ctxHostProfile ctx) fm
-          (lw, lh) <- ctxMeasureText ctx lbl
-          (fw, _) <- ctxMeasureText ctx fieldTxt
+          (lw, lh) <- measureTxt lbl
+          (fw, _) <- measureTxt fieldTxt
           let lineH = layoutLineHeight (ctxHostProfile ctx) fm
           scrollX <- syncTextInputScroll ctx idx x y w h
           pure
@@ -642,14 +683,14 @@ widgetTextPlacements ctx nt idx x y w h = do
       value <- textAreaValue ctx idx
       if terminal
         then do
-          (tw, th) <- ctxMeasureText ctx value
+          (tw, th) <- measureTxt value
           pure [(value, x + ix, centeredTextY (ctxHostProfile ctx) fm y h th, tw, th)]
         else do
           let geom = textAreaGeom (ctxHostProfile ctx) fm x y w h
               field = tagFieldRect geom
               labelH = layoutLineHeight (ctxHostProfile ctx) fm
-          (lw, lh) <- ctxMeasureText ctx lbl
-          (fw, _) <- ctxMeasureText ctx (if T.null value then " " else value)
+          (lw, lh) <- measureTxt lbl
+          (fw, _) <- measureTxt (if T.null value then " " else value)
           pure
             [ (lbl, x, centeredTextY (ctxHostProfile ctx) fm y labelH lh, lw, lh)
             , (value, x + ix, rectY field + iy, fw, rectH field)
@@ -658,7 +699,7 @@ widgetTextPlacements ctx nt idx x y w h = do
     _ -> do
       txt <- displayText ctx nt idx
       ax <- getAlignX (ctxNodeArena ctx) idx
-      (_tw, th) <- ctxMeasureText ctx txt
+      (_tw, th) <- measureTxt txt
       let (tx, used) = alignedTextPen ax x w ix fm txt
       pure [(txt, tx, centeredTextY (ctxHostProfile ctx) fm y h th, used, th)]
 

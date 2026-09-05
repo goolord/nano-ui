@@ -11,6 +11,7 @@ module Cases
   , module Cases.TextInput
   , module Cases.Tooltip
   , module Cases.Window
+  , module Cases.Font
   , runAsciiTest
   , runAspectLayoutTest
   , runBase16ThemeTest
@@ -77,6 +78,7 @@ import Cases.Tabs
 import Cases.TextInput
 import Cases.Tooltip
 import Cases.Window
+import Cases.Font
 import Control.Monad (replicateM, void)
 import Data.ByteString qualified as BS
 import Data.IORef (IORef)

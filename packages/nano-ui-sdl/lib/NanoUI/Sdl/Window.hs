@@ -9,6 +9,7 @@ module NanoUI.Sdl.Window
   , acquireSdlBench
   , releaseSdlBench
   , syncDisplay
+  , saveScreenshot
   ) where
 
 import Control.Exception (bracket)
@@ -19,6 +20,7 @@ import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Primitive.SmallArray (SmallArray)
 import Data.Text (Text)
 import Data.Text.Foreign qualified as TextForeign
+import Foreign.C.String (CString, withCString)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (peek)
@@ -54,6 +56,11 @@ import NanoUI.Sdl.Font
   , withTtf
   , buildGlyphFontMetrics
   , withTtfMeasureGlyph
+  , SdlFontCache
+  , newSdlFontCache
+  , destroySdlFontCache
+  , resetSdlFontCache
+  , withTtfFontCache
   )
 import NanoUI.Sdl.Font.Resolve
   ( embeddedFontSource
@@ -175,6 +182,7 @@ data SdlEnv = SdlEnv
   , sdlCachedFm :: !(IORef FontMetrics)
   , sdlCachedMonoFm :: !(IORef FontMetrics)
   , sdlCachedCtx :: !(IORef Context)
+  , sdlFontCache :: !SdlFontCache
   }
 
 defaultWindowSize :: Size
@@ -203,7 +211,8 @@ syncDisplay ctx env inp = do
     let ga = sdlGlyphAtlas env
         fm = buildGlyphFontMetrics ga newFont scale
         monoFm = buildGlyphFontMetrics ga newMono scale
-        ctx' = withTtfMeasureGlyph ctx newFont newMono fm monoFm scale
+        ctx' = withTtfFontCache (sdlFontCache env) (withTtfMeasureGlyph ctx newFont newMono fm monoFm scale)
+    resetSdlFontCache (sdlFontCache env) scale newFont fm newMono monoFm
     writeIORef (sdlCachedFm env) fm
     writeIORef (sdlCachedMonoFm env) monoFm
     writeIORef (sdlCachedCtx env) ctx'
@@ -349,9 +358,23 @@ startSdlWindow ctx title w h flags bench vsync continuous fontSource monoSource 
           let ga = glyphAtlas
               fm = buildGlyphFontMetrics ga font scale
               monoFm = buildGlyphFontMetrics ga monoFont scale
+          fontCache <-
+            newSdlFontCache
+              fontSource
+              embeddedFontSource
+              monoSource
+              embeddedFontSource
+              ga
+              fontSize
+              scale
+              font
+              fm
+              monoFont
+              monoFm
           cachedFm <- newIORef fm
           cachedMonoFm <- newIORef monoFm
-          cachedCtx <- newIORef (withTtfMeasureGlyph ctx font monoFont fm monoFm scale)
+          let baseCtx = withTtfFontCache fontCache (withTtfMeasureGlyph ctx font monoFont fm monoFm scale)
+          cachedCtx <- newIORef baseCtx
           unlessM (setRenderScale ren defaultUiScale) $
             fail "SDL_SetRenderScale failed"
           unless bench $ void $ setRenderVSync ren vsync
@@ -376,6 +399,7 @@ startSdlWindow ctx title w h flags bench vsync continuous fontSource monoSource 
               , sdlCachedFm = cachedFm
               , sdlCachedMonoFm = cachedMonoFm
               , sdlCachedCtx = cachedCtx
+              , sdlFontCache = fontCache
               }
   ctxMeasured <- readIORef (sdlCachedCtx env)
   let ctx' = withSdlClipboard ctxMeasured
@@ -389,6 +413,7 @@ stopSdlWindow bench env = do
   retainDestroy tex
   destroyCursors (sdlCursors env)
   destroyImageAtlas (sdlImages env)
+  destroySdlFontCache (sdlFontCache env)
   destroyGlyphAtlas (sdlGlyphAtlas env)
   font <- readIORef (sdlFontRef env)
   closeFont font
@@ -415,3 +440,11 @@ unlessM :: IO Bool -> IO () -> IO ()
 unlessM p act = do
   ok <- p
   unless ok act
+
+foreign import ccall unsafe "nano_ui_save_screenshot"
+  c_nano_ui_save_screenshot :: Ptr SDL_Renderer -> CString -> IO Bool
+
+saveScreenshot :: SdlEnv -> FilePath -> IO Bool
+saveScreenshot env path =
+  withCString path $ \cpath ->
+    c_nano_ui_save_screenshot (sdlRenderer env) cpath

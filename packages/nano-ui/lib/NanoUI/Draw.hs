@@ -21,6 +21,7 @@ module NanoUI.Draw
   , pushRoundedRect
   , pushRoundedStroke
   , pushText
+  , pushTextStyled
   , pushLine
   , pushStrokeAA
   , pushStroke
@@ -112,6 +113,11 @@ import GHC.Exts
   )
 import GHC.Word (Word8 (W8#), Word32 (W32#))
 import NanoUI.Font (FontMetrics (..), GlyphQuad (..), lineWidth)
+import NanoUI.Style
+  ( FontStyle (..)
+  , FontWeight (..)
+  , TextDecoration (..)
+  )
 import NanoUI.Types (Color (..), Rect (..), rectIntersect)
 import qualified Data.Text as T
 import NanoUI.SIMD
@@ -1132,6 +1138,129 @@ pushText da fm x y txt col = go x txt
               setTexture da glyphAtlasTextureId
               pushQuad da (Rect gx gy gw gh) (gqU0 gq) (gqV0 gq) (gqU1 gq) (gqV1 gq) col
               go (ox + adv) rest
+
+{-# INLINE pushTextStyled #-}
+pushTextStyled ::
+  DrawArena ->
+  FontMetrics ->
+  FontWeight ->
+  FontStyle ->
+  TextDecoration ->
+  Float ->
+  Float ->
+  T.Text ->
+  Color ->
+  IO ()
+pushTextStyled da fm weight fstyle deco x y txt col
+  | weight == WeightNormal && fstyle == FontStyleNormal && deco == DecorationNone =
+      pushText da fm x y txt col
+  | otherwise = do
+      let !lh = fmLineHeight fm
+          !bOff = max 1.0 (0.05 * lh)
+          !slantMult = case fstyle of
+            FontStyleNormal  -> 0.0
+            FontStyleItalic  -> 0.18
+            FontStyleOblique -> 0.18
+
+      case weight of
+        WeightNormal -> go x txt slantMult
+        WeightLight  -> go x txt slantMult
+        WeightMedium -> do
+          go x txt slantMult
+          go (x + 0.5 * bOff) txt slantMult
+        WeightSemiBold -> do
+          go x txt slantMult
+          go (x + 0.75 * bOff) txt slantMult
+        WeightBold -> do
+          go x txt slantMult
+          go (x + bOff) txt slantMult
+        WeightExtraBold -> do
+          go x txt slantMult
+          go (x + bOff) txt slantMult
+          go (x + 1.5 * bOff) txt slantMult
+        WeightBlack -> do
+          go x txt slantMult
+          go (x + bOff) txt slantMult
+          go (x + 1.5 * bOff) txt slantMult
+          go (x + 2.0 * bOff) txt slantMult
+
+      case deco of
+        DecorationNone -> pure ()
+        _ -> do
+          let !textW = lineWidth fm txt
+              !thick = max 1.0 (0.06 * lh)
+          case deco of
+            DecorationUnderline -> do
+              let !uY = y + fmAscent fm + max 1.0 (0.1 * lh)
+              pushRect da (Rect x uY textW thick) col
+            DecorationStrikethrough -> do
+              let !sY = y + fmAscent fm * 0.65
+              pushRect da (Rect x sY textW thick) col
+            DecorationUnderlineStrike -> do
+              let !uY = y + fmAscent fm + max 1.0 (0.1 * lh)
+                  !sY = y + fmAscent fm * 0.65
+              pushRect da (Rect x uY textW thick) col
+              pushRect da (Rect x sY textW thick) col
+  where
+    go !ox !t !slantMult
+      | slantMult == 0.0 = goNormal ox t
+      | otherwise = goSlanted ox t slantMult
+
+    goNormal !ox !t =
+      case T.uncons t of
+        Nothing -> pure ()
+        Just (c, rest) -> do
+          let !adv = fmAdvance fm c
+          case fmGlyph fm c of
+            Nothing -> do
+              when (adv > 0 && c /= ' ') $
+                pushRect da (Rect ox y adv (fmLineHeight fm)) col
+              goNormal (ox + adv) rest
+            Just gq -> do
+              let !gx = ox + gqX gq
+                  !gy = y + gqY gq
+                  !gw = gqW gq
+                  !gh = gqH gq
+              setTexture da glyphAtlasTextureId
+              pushQuad da (Rect gx gy gw gh) (gqU0 gq) (gqV0 gq) (gqU1 gq) (gqV1 gq) col
+              goNormal (ox + adv) rest
+
+    goSlanted !ox !t !slantMult =
+      case T.uncons t of
+        Nothing -> pure ()
+        Just (c, rest) -> do
+          let !adv = fmAdvance fm c
+          case fmGlyph fm c of
+            Nothing -> do
+              when (adv > 0 && c /= ' ') $
+                pushRect da (Rect ox y adv (fmLineHeight fm)) col
+              goSlanted (ox + adv) rest slantMult
+            Just gq -> do
+              let !gx = ox + gqX gq
+                  !gy = y + gqY gq
+                  !gw = gqW gq
+                  !gh = gqH gq
+              setTexture da glyphAtlasTextureId
+              let !slant = gh * slantMult
+              (vp, ip, base, baseIdx) <- ensureAndAlloc da 4 6
+              let !(r, g, b, a) = unpackColorF col
+                  !vOff = base * vertexSize
+                  !iOff = baseIdx * indexSize
+                  !baseIdxWord = fromIntegral base :: Word32
+                  !x0 = gx + slant
+                  !x1 = gx + gw + slant
+                  !x2 = gx + gw
+                  !x3 = gx
+                  !y0 = gy
+                  !y1 = gy + gh
+              pokeVertex vp vOff x0 y0 r g b a (gqU0 gq) (gqV0 gq)
+              pokeVertex vp (vOff + 32) x1 y0 r g b a (gqU1 gq) (gqV0 gq)
+              pokeVertex vp (vOff + 64) x2 y1 r g b a (gqU1 gq) (gqV1 gq)
+              pokeVertex vp (vOff + 96) x3 y1 r g b a (gqU0 gq) (gqV1 gq)
+              pokeQuadIndices ip iOff baseIdxWord (baseIdxWord + 1) (baseIdxWord + 2) (baseIdxWord + 3)
+              writeIORef (daVertexCount da) (base + 4)
+              writeIORef (daIndexCount da) (baseIdx + 6)
+              goSlanted (ox + adv) rest slantMult
 
 {-# INLINE drawCmdCount #-}
 drawCmdCount :: DrawData -> Int
