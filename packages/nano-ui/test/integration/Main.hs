@@ -62,6 +62,16 @@ testSpecs =
   , TestSpec "text-area-cursor" True runTextAreaCursorTest
   , TestSpec "text-area-cut-clears-selection" False runTextAreaCutClearsSelectionTest
   , TestSpec "text-area-ctrl-a" False runTextAreaCtrlATest
+  , TestSpec "text-area-scrollbar-visibility" True runTextAreaScrollbarVisibilityTest
+  , TestSpec "text-area-scroll-wheel" True runTextAreaScrollWheelTest
+  , TestSpec "text-area-scroll-drag" True runTextAreaScrollDragTest
+  , TestSpec "text-area-cursor-on-scrollbar" True runTextAreaCursorOnScrollBarTest
+  , TestSpec "text-area-hscrollbar-visibility" True runTextAreaHScrollbarVisibilityTest
+  , TestSpec "text-area-hscroll-wheel" True runTextAreaHScrollWheelTest
+  , TestSpec "text-area-hscroll-drag" True runTextAreaHScrollDragTest
+  , TestSpec "text-area-2d-scroll" True runTextArea2DScrollTest
+  , TestSpec "text-area-hscroll-cursor-click" True runTextAreaHScrollCursorClickTest
+  , TestSpec "text-area-scroll-cursor-leaves-viewport" True runTextAreaScrollCursorLeavesViewportTest
   , TestSpec "text-field-hover-boundary" True runTextFieldHoverBoundaryTest
   , TestSpec "text-input-cut-clears-selection" False runTextInputCutClearsSelectionTest
   , TestSpec "text-input-selection" False runTextInputSelectionTest

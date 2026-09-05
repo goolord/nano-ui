@@ -38,7 +38,7 @@ import NanoUI.Font
   , measureTextWrappedIO
   , labelContentInset
   , tableCellInset
-  , ScrollBarSlot
+  , ScrollBarSlot (..)
   , widgetPadding
   , buttonPadding
   , selectPadding
@@ -972,18 +972,22 @@ positionScrollChildren a na host fm monoFm measure idx dir gap pad px py pw ph =
 
 scrollBarSlotOf :: NodeArena -> NodeIdx -> IO ScrollBarSlot
 scrollBarSlotOf na idx = do
-  parent <- getParent na idx
-  isWin <-
-    if parent < 0
-      then pure False
-      else do
-        pnt <- getNodeType na parent
-        pure (pnt == NodeWindow)
-  (wTag, _) <- getWidthSizing na idx
-  (hTag, _) <- getHeightSizing na idx
-  inPanel <- hasPanelAncestor na parent
-  let isPage = wTag == SizingGrow && hTag == SizingGrow && not inPanel
-  pure (classifyScrollBar isWin isPage)
+  nt <- getNodeType na idx
+  if nt == NodeTextArea
+    then pure ScrollBarList
+    else do
+      parent <- getParent na idx
+      isWin <-
+        if parent < 0
+          then pure False
+          else do
+            pnt <- getNodeType na parent
+            pure (pnt == NodeWindow)
+      (wTag, _) <- getWidthSizing na idx
+      (hTag, _) <- getHeightSizing na idx
+      inPanel <- hasPanelAncestor na parent
+      let isPage = wTag == SizingGrow && hTag == SizingGrow && not inPanel
+      pure (classifyScrollBar isWin isPage)
 
 hasPanelAncestor :: NodeArena -> NodeIdx -> IO Bool
 hasPanelAncestor na = go

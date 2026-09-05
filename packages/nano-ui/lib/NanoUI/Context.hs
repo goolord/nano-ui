@@ -271,7 +271,7 @@ import NanoUI.Frame.Scroll.Geometry
   )
 import NanoUI.Id (WidgetId (..), hashWidgetId, initialIdContext)
 import NanoUI.Input (Input (..), Key (KeyEscape), inputKeys, inputKeysElem, inputMousePos, inputMousePressed)
-import NanoUI.Layout.Arena (NodeType, getRect, lookupNodeByKey, newNodeArena)
+import NanoUI.Layout.Arena (DirTag, NodeType, getRect, lookupNodeByKey, newNodeArena)
 
 
 import NanoUI.Store
@@ -293,6 +293,7 @@ import NanoUI.Store
   , slotScrollCfg
   , slotScrollContent
   , slotScrollOff
+  , slotTextAreaScroll
   , slotScrollCross
   , slotScrollLinkX
   , slotScrollLinkY
@@ -317,11 +318,11 @@ import NanoUI.Types
   )
 
 {-# INLINE getScrollDrag #-}
-getScrollDrag :: Context -> IO (Maybe (WidgetId, Float))
+getScrollDrag :: Context -> IO (Maybe (WidgetId, DirTag, Float))
 getScrollDrag ctx = isScrollDrag <$> readIORef (ctxInteractionState ctx)
 
 {-# INLINE setScrollDrag #-}
-setScrollDrag :: Context -> Maybe (WidgetId, Float) -> IO ()
+setScrollDrag :: Context -> Maybe (WidgetId, DirTag, Float) -> IO ()
 setScrollDrag ctx v = modifyIORef' (ctxInteractionState ctx) (\s -> s {isScrollDrag = v})
 
 {-# INLINE getTextInputDrag #-}
@@ -665,78 +666,108 @@ setDisabled ctx wid dis = do
 {-# INLINE getScrollOffset #-}
 getScrollOffset :: Context -> WidgetId -> IO Float
 getScrollOffset ctx wid = do
-  cfg <- getScrollConfig ctx wid
-  if scrollConfigNative2D cfg
-    then v2Y <$> getScrollOffset2D ctx wid
+  s <- getStore ctx
+  let key = intKey wid
+      sKey = slotKey slotTextAreaScroll key
+  if IM.member sKey (storePoint s)
+    then pure (snd (IM.findWithDefault (0, 0) sKey (storePoint s)))
     else do
-      s <- getStore ctx
-      pure (IM.findWithDefault 0 (intKey wid) (storeFloat s))
+      cfg <- getScrollConfig ctx wid
+      if scrollConfigNative2D cfg
+        then v2Y <$> getScrollOffset2D ctx wid
+        else pure (IM.findWithDefault 0 key (storeFloat s))
 
 {-# INLINE setScrollOffset #-}
 setScrollOffset :: Context -> WidgetId -> Float -> IO ()
 setScrollOffset ctx wid off = do
-  cfg <- getScrollConfig ctx wid
-  if scrollConfigNative2D cfg
+  store <- getStore ctx
+  let key = intKey wid
+      sKey = slotKey slotTextAreaScroll key
+  if IM.member sKey (storePoint store)
     then do
-      cur <- getScrollOffset2D ctx wid
-      setScrollOffset2D ctx wid (V2 (v2X cur) off)
+      let (sx, sy) = IM.findWithDefault (0, 0) sKey (storePoint store)
+      when (sy /= off) $ do
+        setStore ctx (store {storePoint = IM.insert sKey (sx, off) (storePoint store)})
+        damageWidget ctx wid DamageSelf
+        markDirty ctx
     else do
-      store <- getStore ctx
-      let key = intKey wid
-          prev = IM.findWithDefault 0 key (storeFloat store)
-      when (prev /= off) $ do
-        let floats0 = IM.insert key off (storeFloat store)
-            yKey = IM.findWithDefault 0 (slotKey slotScrollLinkY key) (storeInt store)
-        if yKey == 0
-          then setStore ctx (store {storeFloat = floats0})
-          else do
-            let offKey = slotKey slotScrollOff yKey
-                crossKey = slotKey slotScrollCross yKey
-                prevY = IM.findWithDefault 0 yKey floats0
-                floats1 = IM.insert yKey prevY $ IM.insert crossKey off floats0
-                points = IM.insert offKey (off, prevY) (storePoint store)
-            setStore ctx (store {storeFloat = floats1, storePoint = points})
+      cfg <- getScrollConfig ctx wid
+      if scrollConfigNative2D cfg
+        then do
+          cur <- getScrollOffset2D ctx wid
+          setScrollOffset2D ctx wid (V2 (v2X cur) off)
+        else do
+          let prev = IM.findWithDefault 0 key (storeFloat store)
+          when (prev /= off) $ do
+            let floats0 = IM.insert key off (storeFloat store)
+                yKey = IM.findWithDefault 0 (slotKey slotScrollLinkY key) (storeInt store)
+            if yKey == 0
+              then setStore ctx (store {storeFloat = floats0})
+              else do
+                let offKey = slotKey slotScrollOff yKey
+                    crossKey = slotKey slotScrollCross yKey
+                    prevY = IM.findWithDefault 0 yKey floats0
+                    floats1 = IM.insert yKey prevY $ IM.insert crossKey off floats0
+                    points = IM.insert offKey (off, prevY) (storePoint store)
+                setStore ctx (store {storeFloat = floats1, storePoint = points})
 
 {-# INLINE getScrollOffset2D #-}
 getScrollOffset2D :: Context -> WidgetId -> IO V2
 getScrollOffset2D ctx wid = do
   s <- getStore ctx
   let widKey = intKey wid
-      offKey = slotKey slotScrollOff widKey
-      crossKey = slotKey slotScrollCross widKey
-  case IM.lookup offKey (storePoint s) of
-    Just (x, y) -> pure (V2 x y)
-    Nothing ->
-      pure
-        ( V2
-            (IM.findWithDefault 0 crossKey (storeFloat s))
-            (IM.findWithDefault 0 widKey (storeFloat s))
-        )
+      sKey = slotKey slotTextAreaScroll widKey
+  if IM.member sKey (storePoint s)
+    then do
+      let (sx, sy) = IM.findWithDefault (0, 0) sKey (storePoint s)
+      pure (V2 sx sy)
+    else do
+      let offKey = slotKey slotScrollOff widKey
+          crossKey = slotKey slotScrollCross widKey
+      case IM.lookup offKey (storePoint s) of
+        Just (x, y) -> pure (V2 x y)
+        Nothing ->
+          pure
+            ( V2
+                (IM.findWithDefault 0 crossKey (storeFloat s))
+                (IM.findWithDefault 0 widKey (storeFloat s))
+            )
 
 {-# INLINE setScrollOffset2D #-}
 setScrollOffset2D :: Context -> WidgetId -> V2 -> IO ()
 setScrollOffset2D ctx wid off = do
   store <- getStore ctx
   let widKey = intKey wid
-      offKey = slotKey slotScrollOff widKey
-      crossKey = slotKey slotScrollCross widKey
-      prev = IM.lookup offKey (storePoint store)
-      next = (v2X off, v2Y off)
-      prevY = IM.findWithDefault 0 widKey (storeFloat store)
-      prevX = IM.findWithDefault 0 crossKey (storeFloat store)
-      xLink = IM.findWithDefault 0 (slotKey slotScrollLinkX widKey) (storeInt store)
-  when (prev /= Just next || prevY /= v2Y off || prevX /= v2X off) $ do
-    let floats0 =
-          IM.insert widKey (v2Y off) $
-            IM.insert crossKey (v2X off) (storeFloat store)
-        floats1 =
-          if xLink == 0 then floats0 else IM.insert xLink (v2X off) floats0
-    setStore ctx
-      ( store
-          { storePoint = IM.insert offKey next (storePoint store)
-          , storeFloat = floats1
-          }
-      )
+      sKey = slotKey slotTextAreaScroll widKey
+  if IM.member sKey (storePoint store)
+    then do
+      let (sx, sy) = IM.findWithDefault (0, 0) sKey (storePoint store)
+          sx' = v2X off
+          sy' = v2Y off
+      when (sx /= sx' || sy /= sy') $ do
+        setStore ctx (store {storePoint = IM.insert sKey (sx', sy') (storePoint store)})
+        damageWidget ctx wid DamageSelf
+        markDirty ctx
+    else do
+      let offKey = slotKey slotScrollOff widKey
+          crossKey = slotKey slotScrollCross widKey
+          prev = IM.lookup offKey (storePoint store)
+          next = (v2X off, v2Y off)
+          prevY = IM.findWithDefault 0 widKey (storeFloat store)
+          prevX = IM.findWithDefault 0 crossKey (storeFloat store)
+          xLink = IM.findWithDefault 0 (slotKey slotScrollLinkX widKey) (storeInt store)
+      when (prev /= Just next || prevY /= v2Y off || prevX /= v2X off) $ do
+        let floats0 =
+              IM.insert widKey (v2Y off) $
+                IM.insert crossKey (v2X off) (storeFloat store)
+            floats1 =
+              if xLink == 0 then floats0 else IM.insert xLink (v2X off) floats0
+        setStore ctx
+          ( store
+              { storePoint = IM.insert offKey next (storePoint store)
+              , storeFloat = floats1
+              }
+          )
 
 {-# INLINE linkScrollAxes #-}
 linkScrollAxes :: Context -> WidgetId -> WidgetId -> IO ()

@@ -57,7 +57,13 @@ module NanoUI.Frame.TextEdit
   , textAreaCursorAt
   , applyTextAreaClick
   , applyTextAreaDrag
-  , updateTextAreaSelection
+  , TextAreaScrollBarLayouts (..)
+  , textAreaScrollBarLayouts
+  , textAreaScrollBarLayout
+  , textAreaHScrollBarLayout
+  , textAreaBarLanes
+  , isMouseOnTextAreaScrollBar
+  , isMouseOnTextAreaScrollBarAt
   , finalizeTextAreaMouse
   , finalizeTextFieldMouse
   ) where
@@ -65,6 +71,7 @@ module NanoUI.Frame.TextEdit
 import Control.Monad (forM, forM_, unless, when)
 import Data.IORef (readIORef, writeIORef)
 import qualified Data.IntMap.Strict as IM
+import Data.Maybe (isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
 import NanoUI.Context
@@ -92,9 +99,12 @@ import NanoUI.Context
 import NanoUI.Draw (DrawArena, pushRect, pushRoundedRect, pushText, withClip)
 import NanoUI.Font
   ( FontMetrics
+  , ScrollBarSlot (..)
   , centeredTextY
   , fmLineHeight
   , layoutLineHeight
+  , scrollBarGeomFor
+  , scrollBarOuterGap
   , textDisplayWidth
   , textIndexAtX
   , widgetContentInset
@@ -111,7 +121,12 @@ import NanoUI.Frame.Chrome
   , textInputValue
   )
 import NanoUI.Frame.Hit (findNodeByWidgetId, nodeClippedHit, overlayHitAllowed, widgetOverlayAllowed)
-import NanoUI.Frame.Scroll.Geometry (padTextClipRect)
+import NanoUI.Frame.Scroll.Geometry
+  ( ScrollBarLayout (..)
+  , padTextClipRect
+  , scrollBarLayout
+  , scrollChromeLane
+  )
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input
   ( Input (..)
@@ -128,7 +143,8 @@ import NanoUI.Input
   , inputWindowSize
   )
 import NanoUI.Layout.Arena
-  ( NodeIdx
+  ( DirTag (..)
+  , NodeIdx
   , NodeType (NodeTextArea, NodeTextInput)
   , findNodeRevM
   , getNodeType
@@ -136,8 +152,19 @@ import NanoUI.Layout.Arena
   , getText
   , getWidgetId
   )
-import NanoUI.Store (slotTextAreaCol, slotTextAreaRow, slotTextAreaViewport, slotTextInputScroll)
-import NanoUI.Style (Style (..), Theme (..), styleBg, styleFg, themeAccent, themeSeparator)
+import NanoUI.Store (slotTextAreaCol, slotTextAreaRow, slotTextAreaScroll, slotTextAreaViewport, slotTextInputScroll)
+import NanoUI.Style
+  ( Padding (..)
+  , Style (..)
+  , Theme (..)
+  , scrollBarThumbColor
+  , scrollBarTrackColor
+  , styleBg
+  , styleFg
+  , themeAccent
+  , themePanel
+  , themeSeparator
+  )
 import NanoUI.Types
   ( Color (..)
   , HostProfile
@@ -332,7 +359,14 @@ textFieldWidgetAtMouse ctx mouse = do
               hit <- nodeClippedHit ctx idx field mouse
               if not hit
                 then pure False
-                else overlayHitAllowed ctx idx mouse
+                else do
+                  allowed <- overlayHitAllowed ctx idx mouse
+                  if not allowed
+                    then pure False
+                    else
+                      if nt == NodeTextArea
+                        then not <$> isMouseOnTextAreaScrollBarAt ctx idx mouse
+                        else pure True
   case mIdx of
     Nothing -> pure Nothing
     Just idx -> Just <$> getWidgetId (ctxNodeArena ctx) idx
@@ -871,16 +905,129 @@ loadTextAreaStateAt ctx idx x y w h = do
       state0 = TA.loadTextAreaState store key initial
   pure (TA.setTextAreaViewport (realToFrac vpW, realToFrac vpH) (realToFrac lineH) state0)
 
+data TextAreaScrollBarLayouts = TextAreaScrollBarLayouts
+  { tasbVertical :: !(Maybe ScrollBarLayout)
+  , tasbHorizontal :: !(Maybe ScrollBarLayout)
+  }
+  deriving (Eq, Show)
+
+textAreaBarLanes :: HostProfile -> FontMetrics -> (Float, Float)
+textAreaBarLanes host fm =
+  let (barW, _) = scrollBarGeomFor host fm ScrollBarList
+      outer = scrollBarOuterGap host fm ScrollBarList
+   in (barW + outer, barW + outer)
+
+textAreaScrollBarLayouts ::
+  HostProfile ->
+  FontMetrics ->
+  Rect ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  TextAreaScrollBarLayouts
+textAreaScrollBarLayouts host fm field contentW contentH scrollX scrollY =
+  let (ix, iy) = widgetContentInset host fm
+      baseW = max 0 (rectW field - 2 * ix)
+      baseH = max 0 (rectH field - 2 * iy)
+      (barLaneW, barLaneH) = textAreaBarLanes host fm
+      hasV0 = contentH > baseH
+      hasH0 = contentW > baseW
+      hasV = contentH > (if hasH0 then max 0 (baseH - barLaneH) else baseH)
+      hasH = contentW > (if hasV0 then max 0 (baseW - barLaneW) else baseW)
+      padV = Padding 0 0 iy (if hasH then iy + barLaneH else iy)
+      padH = Padding ix (if hasV then ix + barLaneW else ix) 0 0
+      vLayout =
+        if hasV
+          then scrollBarLayout host fm ScrollBarList DirColumn (rectX field) (rectY field) (rectW field) (rectH field) padV contentH scrollY
+          else Nothing
+      hLayout =
+        if hasH
+          then scrollBarLayout host fm ScrollBarList DirRow (rectX field) (rectY field) (rectW field) (rectH field) padH contentW scrollX
+          else Nothing
+   in TextAreaScrollBarLayouts {tasbVertical = vLayout, tasbHorizontal = hLayout}
+
+textAreaScrollBarLayout :: HostProfile -> FontMetrics -> Rect -> Float -> Float -> Maybe ScrollBarLayout
+textAreaScrollBarLayout host fm field contentH scrollY =
+  tasbVertical (textAreaScrollBarLayouts host fm field 0 contentH 0 scrollY)
+
+textAreaHScrollBarLayout :: HostProfile -> FontMetrics -> Rect -> Float -> Float -> Maybe ScrollBarLayout
+textAreaHScrollBarLayout host fm field contentW scrollX =
+  tasbHorizontal (textAreaScrollBarLayouts host fm field contentW 0 scrollX 0)
+
+isMouseOnTextAreaScrollBar :: HostProfile -> FontMetrics -> Rect -> Float -> Float -> Float -> Float -> V2 -> Bool
+isMouseOnTextAreaScrollBar host fm field contentW contentH scrollX scrollY mouse =
+  let layouts = textAreaScrollBarLayouts host fm field contentW contentH scrollX scrollY
+      (ix, iy) = widgetContentInset host fm
+      (barLaneW, barLaneH) = textAreaBarLanes host fm
+      hasV = isJust (tasbVertical layouts)
+      hasH = isJust (tasbHorizontal layouts)
+      padV = Padding 0 0 iy (if hasH then iy + barLaneH else iy)
+      padH = Padding ix (if hasV then ix + barLaneW else ix) 0 0
+      onV = case tasbVertical layouts of
+        Nothing -> False
+        Just layout ->
+          let lane = scrollChromeLane host fm ScrollBarList DirColumn (rectX field) (rectY field) (rectW field) (rectH field) padV
+           in rectContains lane mouse || rectContains (sbTrack layout) mouse
+      onH = case tasbHorizontal layouts of
+        Nothing -> False
+        Just layout ->
+          let lane = scrollChromeLane host fm ScrollBarList DirRow (rectX field) (rectY field) (rectW field) (rectH field) padH
+           in rectContains lane mouse || rectContains (sbTrack layout) mouse
+   in onV || onH
+
+isMouseOnTextAreaScrollBarAt :: Context -> NodeIdx -> V2 -> IO Bool
+isMouseOnTextAreaScrollBarAt ctx idx mouse = do
+  wid <- getWidgetId (ctxNodeArena ctx) idx
+  (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+  let host = ctxHostProfile ctx
+      fm = ctxFontMetrics ctx
+      geom = textAreaGeom host fm x y w h
+      field = tagFieldRect geom
+  store <- getStore ctx
+  let key = intKey wid
+      text = IM.findWithDefault "" key (storeText store)
+      buf = TB.fromText text
+      lineTexts = TB.toLines buf
+      lineCount = max 1 (length lineTexts)
+      lineH = tagLineHeight geom
+      contentH = fromIntegral lineCount * lineH
+      contentW = maximum (0 : [textDisplayWidth host fm l | l <- lineTexts])
+      (sx, sy) = IM.findWithDefault (0, 0) (slotKey slotTextAreaScroll key) (storePoint store)
+  pure (isMouseOnTextAreaScrollBar host fm field contentW contentH sx sy mouse)
+
 syncTextAreaViewport :: Context -> NodeIdx -> Float -> Float -> Float -> Float -> IO ()
 syncTextAreaViewport ctx idx x y w h = do
   wid <- getWidgetId (ctxNodeArena ctx) idx
   store <- getStore ctx
   let key = intKey wid
       fm = ctxFontMetrics ctx
-      geom = textAreaGeom (ctxHostProfile ctx) fm x y w h
-      clip = textAreaFieldClip (ctxHostProfile ctx) geom fm
+      host = ctxHostProfile ctx
+      geom = textAreaGeom host fm x y w h
+      clip = textAreaFieldClip host geom fm
       vp = (rectW clip, rectH clip)
-  setStore ctx (store {storePoint = IM.insert (slotKey slotTextAreaViewport key) vp (storePoint store)})
+      text = IM.findWithDefault "" key (storeText store)
+      buf = TB.fromText text
+      lineTexts = TB.toLines buf
+      lineCount = max 1 (length lineTexts)
+      lineH = tagLineHeight geom
+      contentH = fromIntegral lineCount * lineH
+      contentW = maximum (0 : [textDisplayWidth host fm l | l <- lineTexts])
+      (barLaneW, barLaneH) = textAreaBarLanes host fm
+      hasV0 = contentH > rectH clip
+      hasH0 = contentW > rectW clip
+      hasV = contentH > (if hasH0 then max 0 (rectH clip - barLaneH) else rectH clip)
+      hasH = contentW > (if hasV0 then max 0 (rectW clip - barLaneW) else rectW clip)
+      availW = if hasV then max 0 (rectW clip - barLaneW) else rectW clip
+      availH = if hasH then max 0 (rectH clip - barLaneH) else rectH clip
+      maxSx = max 0 (contentW - availW)
+      maxSy = max 0 (contentH - availH)
+      (sx, sy) = IM.findWithDefault (0, 0) (slotKey slotTextAreaScroll key) (storePoint store)
+      sx' = max 0 (min maxSx sx)
+      sy' = max 0 (min maxSy sy)
+      pts0 = IM.insert (slotKey slotTextAreaViewport key) vp (storePoint store)
+      pts1 = if sx' /= sx || sy' /= sy then IM.insert (slotKey slotTextAreaScroll key) (sx', sy') pts0 else pts0
+  setStore ctx (store {storePoint = pts1})
 
 drawTextAreaSelection ::
   DrawArena ->
@@ -901,7 +1048,9 @@ drawTextAreaSelection da _ctx state geom host fm theme style = do
         field = tagFieldRect geom
         lineH = tagLineHeight geom
         (ix, iy) = widgetContentInset host fm
-        scrollYf = realToFrac (snd (TA.scrollOffset state))
+        (scrollX, scrollY) = TA.scrollOffset state
+        scrollXf = realToFrac scrollX
+        scrollYf = realToFrac scrollY
         contentTop = rectY field + iy
         selBg = selectionBgColor (themeAccent theme) (styleBg style)
         loRow = TB.cursorRow lo
@@ -932,7 +1081,7 @@ drawTextAreaSelection da _ctx state geom host fm theme style = do
             wHi = textDisplayWidth host fm (T.take endCol line)
             selW = wHi - wLo
             ly = contentTop + fromIntegral row * lineH - scrollYf
-            selX = rectX field + ix + wLo
+            selX = rectX field + ix + wLo - scrollXf
             selH = max 4 lineH
         drawTextSelectionLine da selX ly selW selH selBg
 
@@ -951,17 +1100,31 @@ drawTextAreaContent da ctx idx x y w h style = do
           field = tagFieldRect geom
           lineH = tagLineHeight geom
           clip = textAreaFieldClip host geom fm
-          contentX = rectX clip
           contentTop = rectY clip
           fg = styleFg style
       state <- loadTextAreaStateAt ctx idx x y w h
       let buf = TA.buffer state
           lineTexts = TB.toLines buf
-          (_, scrollY) = TA.scrollOffset state
+          (scrollX, scrollY) = TA.scrollOffset state
+          scrollXf = realToFrac scrollX
           scrollYf = realToFrac scrollY
+          contentX = rectX clip - scrollXf
           fieldTop = rectY field
           fieldBottom = fieldTop + rectH field
-      withClip da clip $ do
+          lineCount = max 1 (length lineTexts)
+          contentH = fromIntegral lineCount * lineH
+          contentW = maximum (0 : [textDisplayWidth host fm l | l <- lineTexts])
+          layouts = textAreaScrollBarLayouts host fm field contentW contentH scrollXf scrollYf
+          mVLayout = tasbVertical layouts
+          mHLayout = tasbHorizontal layouts
+          (barLaneW, barLaneH) = textAreaBarLanes host fm
+          textClip =
+            Rect
+              (rectX clip)
+              (rectY clip)
+              (if isJust mVLayout then max 0 (rectW clip - barLaneW) else rectW clip)
+              (if isJust mHLayout then max 0 (rectH clip - barLaneH) else rectH clip)
+      withClip da textClip $ do
         when focus $
           drawTextAreaSelection da ctx state geom host fm theme style
         forM_ (zip [0 :: Int ..] lineTexts) $ \(row, line) -> do
@@ -979,6 +1142,22 @@ drawTextAreaContent da ctx idx x y w h style = do
               pw = textDisplayWidth host fm prefix
               (caretX, caretY, caretH) = selectionCaretGeom contentX (contentTop + fromIntegral row * lineH - scrollYf) pw lineH
           drawTextCaret da caretX caretY caretH fg
+      let base = themePanel theme
+          trackBg = scrollBarTrackColor base theme terminal
+          thumbCol = scrollBarThumbColor base theme terminal
+          drawBar layout = do
+            let track = sbTrack layout
+                thumb = sbThumb layout
+                trackR = min 4 (min (rectW track) (rectH track) / 2)
+                thumbR = min 4 (min (rectW thumb) (rectH thumb) / 2)
+            pushRoundedRect da track trackR trackBg
+            pushRoundedRect da thumb thumbR thumbCol
+      case mVLayout of
+        Nothing -> pure ()
+        Just layout -> drawBar layout
+      case mHLayout of
+        Nothing -> pure ()
+        Just layout -> drawBar layout
 
 textAreaHitForWidget :: Context -> WidgetId -> IO (Maybe TextAreaHit)
 textAreaHitForWidget ctx wid = do
@@ -1013,7 +1192,9 @@ textAreaCursorAt :: Context -> TA.TextAreaState -> TextAreaHit -> V2 -> IO (Int,
 textAreaCursorAt ctx state hit mouse = do
   let lineTexts = TB.toLines (TA.buffer state)
       lineCount = max 1 (length lineTexts)
-      scrollYf = realToFrac (snd (TA.scrollOffset state))
+      (scrollX, scrollY) = TA.scrollOffset state
+      scrollXf = realToFrac scrollX
+      scrollYf = realToFrac scrollY
       fm = ctxFontMetrics ctx
       (_, iy) = widgetContentInset (ctxHostProfile ctx) fm
       contentTop = rectY (tahFieldRect hit) + iy
@@ -1024,7 +1205,7 @@ textAreaCursorAt ctx state hit mouse = do
         if row < length lineTexts
           then lineTexts !! row
           else ""
-  col <- textCharAtX ctx line (tahContentX hit) (v2X mouse)
+  col <- textCharAtX ctx line (tahContentX hit - scrollXf) (v2X mouse)
   pure (row, col)
 
 updateTextAreaSelection :: Context -> WidgetId -> TextAreaHit -> TB.Cursor -> TB.Cursor -> IO ()
@@ -1112,7 +1293,8 @@ finalizeTextAreaMouse ctx inp wid = do
     Nothing -> pure ()
     Just hit -> do
       let mouse = inputMousePos inp
-          getCursor = do
+      onScroll <- isMouseOnTextAreaScrollBarAt ctx (tahNodeIdx hit) mouse
+      let getCursor = do
             state <-
               loadTextAreaStateAt
                 ctx
@@ -1122,7 +1304,7 @@ finalizeTextAreaMouse ctx inp wid = do
                 (tahWidgetW hit)
                 (tahWidgetH hit)
             textAreaCursorAt ctx state hit mouse
-      if inputMousePressed inp && rectContains (tahFieldRect hit) mouse
+      if inputMousePressed inp && rectContains (tahFieldRect hit) mouse && not onScroll
         then do
           (row, col) <- getCursor
           clicks <-
