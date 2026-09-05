@@ -9,6 +9,7 @@ module NanoUI.Frame.Paint
 
 import Control.Monad (forM_, unless, when)
 import Data.IORef (readIORef)
+import Data.Maybe (fromMaybe)
 import Data.Word (Word32)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Text as T
@@ -39,10 +40,11 @@ import NanoUI.Draw
   , pushRoundedStroke
   , pushStrokeAA
   , pushText
+  , pushTextStyled
   , withClip
   )
 import NanoUI.Font
-  ( FontMetrics
+  ( FontMetrics (..)
   , checkboxBoxSize
   , labelContentInset
   , sliderTrackBounds
@@ -69,10 +71,15 @@ import NanoUI.Layout.Arena
   , getText
   , getWidthSizing
   , getWidgetId
+  , getNodeFontSize
+  , getNodeFontColor
   )
 import NanoUI.Layout.Solve (scrollBarSlotOf)
 import NanoUI.Style
-  ( FontVariant (..)
+  ( FontStyle (..)
+  , FontVariant (..)
+  , FontWeight (..)
+  , TextDecoration (..)
   , Style (..)
   , Theme (..)
   , styleBg
@@ -86,7 +93,17 @@ import NanoUI.Style
   , themeWindow
   )
 import NanoUI.Types (Color (..), ImageId (..), Rect (..), colorA, colorRGBA, clamp01, lerpColor, rectFullyInside, rectInflate, rectIntersect, rectH, rectW, rectX, rectY)
-import NanoUI.WidgetText (buttonFlagsFromStyle, buttonVisualStyle, selectChevronCenterX, tableStripeColor, textNodeFontVariant, treeDecodeStyle)
+import NanoUI.WidgetText
+  ( buttonFlagsFromStyle
+  , buttonVisualStyle
+  , selectChevronCenterX
+  , tableStripeColor
+  , textNodeFontVariant
+  , textNodeFontWeight
+  , textNodeFontStyle
+  , textNodeTextDecoration
+  , treeDecodeStyle
+  )
 import NanoUI.Frame.Chrome
   ( fillStyledRect
   , imageIdFromText
@@ -250,11 +267,37 @@ lowerNodeVisible ctx occluders idx nt x y w h rect fm theme terminal da =
       raw <- getText (ctxNodeArena ctx) idx
       unless (T.null raw) $ do
         spans <- collectNodeTextSpans ctx IM.empty idx
+        fontSizeVal <- getNodeFontSize (ctxNodeArena ctx) idx
         let fvar = textNodeFontVariant si
-            fm' = if fvar == FontMono then ctxMonoFontMetrics ctx else fm
-        forM_ spans $ \(Rect tx ty _ _, line, spanFg, _) ->
-          unless (T.null line) $
-            pushText da fm' tx ty line spanFg
+            fweight = textNodeFontWeight si
+            fstyle  = textNodeFontStyle si
+            fdeco   = textNodeTextDecoration si
+            isBaseSans = fontSizeVal <= 0 && fweight == WeightNormal && fstyle == FontStyleNormal && fvar == FontRegular
+            isBaseMono = fontSizeVal <= 0 && fweight == WeightNormal && fstyle == FontStyleNormal && fvar == FontMono
+        if isBaseSans && fdeco == DecorationNone
+          then do
+            let fm' = ctxFontMetrics ctx
+            forM_ spans $ \(Rect tx ty _ _, line, spanFg, _) ->
+              unless (T.null line) $
+                pushText da fm' tx ty line spanFg
+          else if isBaseMono && fdeco == DecorationNone
+            then do
+              let fm' = ctxMonoFontMetrics ctx
+              forM_ spans $ \(Rect tx ty _ _, line, spanFg, _) ->
+                unless (T.null line) $
+                  pushText da fm' tx ty line spanFg
+            else do
+              (fm', isNative) <-
+                if isBaseSans
+                  then pure (ctxFontMetrics ctx, False)
+                  else if isBaseMono
+                    then pure (ctxMonoFontMetrics ctx, False)
+                    else ctxResolveFont ctx fontSizeVal fweight fstyle fvar
+              let effWeight = if isNative then WeightNormal else fweight
+                  effStyle  = if isNative then FontStyleNormal else fstyle
+              forM_ spans $ \(Rect tx ty _ _, line, spanFg, _) ->
+                unless (T.null line) $
+                  pushTextStyled da fm' effWeight effStyle fdeco tx ty line spanFg
     NodeSeparator -> do
       let hair = 1
       when (not terminal) $
@@ -486,9 +529,23 @@ lowerNodeVisible ctx occluders idx nt x y w h rect fm theme terminal da =
           wid <- getWidgetId (ctxNodeArena ctx) idx
           drawColorPickerPanel (ctxHostProfile ctx) fm da store wid style x y w h
       placements <- widgetTextPlacements ctx nt idx x y w h
+      mFontColor <- getNodeFontColor (ctxNodeArena ctx) idx
+      fontSizeVal <- getNodeFontSize (ctxNodeArena ctx) idx
+      let widgetFg = fromMaybe (styleFg style) mFontColor
+          fvar = textNodeFontVariant si
+          fweight = textNodeFontWeight si
+          fstyle  = textNodeFontStyle si
+          isBaseSans = fontSizeVal <= 0 && fweight == WeightNormal && fstyle == FontStyleNormal && fvar == FontRegular
+          isBaseMono = fontSizeVal <= 0 && fweight == WeightNormal && fstyle == FontStyleNormal && fvar == FontMono
+      fm' <-
+        if isBaseSans
+          then pure (ctxFontMetrics ctx)
+          else if isBaseMono
+            then pure (ctxMonoFontMetrics ctx)
+            else fst <$> ctxResolveFont ctx fontSizeVal fweight fstyle fvar
       forM_ placements $ \(txt, px, py, _, _) ->
         unless (T.null txt) $ do
-          pushText da fm px py txt (styleFg style)
+          pushText da fm' px py txt widgetFg
 
 paintTextFieldFrame :: DrawArena -> Theme -> Style -> Bool -> Rect -> IO ()
 paintTextFieldFrame da theme style focus fieldRect = do

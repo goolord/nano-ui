@@ -267,3 +267,17 @@ bool nano_ui_render_coords_from_window(
     }
     return SDL_RenderCoordinatesFromWindow(renderer, window_x, window_y, out_x, out_y);
 }
+
+bool nano_ui_save_screenshot(SDL_Renderer *renderer, const char *path)
+{
+    if (!renderer || !path) {
+        return false;
+    }
+    SDL_Surface *surface = SDL_RenderReadPixels(renderer, NULL);
+    if (!surface) {
+        return false;
+    }
+    bool ok = SDL_SaveBMP(surface, path);
+    SDL_DestroySurface(surface);
+    return ok;
+}

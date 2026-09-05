@@ -48,6 +48,9 @@ module NanoUI
   , AlignY (..)
   , Padding (..)
   , FontVariant (..)
+  , FontWeight (..)
+  , FontStyle (..)
+  , TextDecoration (..)
   , Layout (..)
   , defaultLayout
   , askDefaultLayout
@@ -118,6 +121,24 @@ module NanoUI
   , fontMuted
   , fontMono
   , fontDanger
+  , fontSize
+  , fontSizeScale
+  , fontColor
+  , textColor
+  , fontWeight
+  , fontBold
+  , fontLight
+  , fontMedium
+  , fontSemiBold
+  , fontExtraBold
+  , fontBlack
+  , fontStyle
+  , fontItalic
+  , fontOblique
+  , textDecoration
+  , fontUnderline
+  , fontStrike
+  , fontStrikethrough
   -- ID
   , WidgetId (..)
   , IdContext
@@ -369,6 +390,9 @@ module NanoUI
   , muted
   , mono
   , danger
+  , bold
+  , italic
+  , underline
   , styledLabel
   , kv
   , kvMono
@@ -422,6 +446,7 @@ module NanoUI
   -- Font
   , FontMetrics (..)
   , GlyphQuad (..)
+  , scaleFontMetrics
   , monospaceMetrics
   , lineWidth
   , labelContentInset
@@ -451,6 +476,7 @@ import NanoUI.Draw (drawTextBox, shiftDrawOp)
 import NanoUI.Font
   ( FontMetrics (..)
   , GlyphQuad (..)
+  , scaleFontMetrics
   , labelContentInset
   , tableCellInset
   , lineWidth
@@ -544,6 +570,9 @@ import NanoUI.Style
   , AlignY (..)
   , Direction (..)
   , FontVariant (..)
+  , FontWeight (..)
+  , FontStyle (..)
+  , TextDecoration (..)
   , Layout (..)
   , LayoutModifier
   , Padding (..)
@@ -589,6 +618,24 @@ import NanoUI.Style
   , fontMono
   , fontDanger
   , fontRegular
+  , fontSize
+  , fontSizeScale
+  , fontColor
+  , textColor
+  , fontWeight
+  , fontBold
+  , fontLight
+  , fontMedium
+  , fontSemiBold
+  , fontExtraBold
+  , fontBlack
+  , fontStyle
+  , fontItalic
+  , fontOblique
+  , textDecoration
+  , fontUnderline
+  , fontStrike
+  , fontStrikethrough
   , themeSeries
   , fillH
   , fillW
@@ -723,6 +770,9 @@ import NanoUI.Widgets
   , modal
   , muted
   , mono
+  , bold
+  , italic
+  , underline
   , styledLabel
   , onClick
   , panel

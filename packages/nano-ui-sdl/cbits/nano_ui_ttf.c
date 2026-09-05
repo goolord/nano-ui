@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 
 bool nano_ui_ttf_init(void)
 {
@@ -43,6 +44,13 @@ void nano_ui_ttf_close_font(TTF_Font *font)
 {
     if (font) {
         TTF_CloseFont(font);
+    }
+}
+
+void nano_ui_ttf_set_font_style(TTF_Font *font, int style)
+{
+    if (font) {
+        TTF_SetFontStyle(font, (TTF_FontStyleFlags)style);
     }
 }
 
@@ -241,4 +249,54 @@ void nano_ui_destroy_texture(SDL_Texture *texture)
     if (texture) {
         SDL_DestroyTexture(texture);
     }
+}
+
+bool nano_ui_ttf_save_render_text(
+    TTF_Font *font,
+    const char *text,
+    const char *bmp_path)
+{
+    if (!font || !text || !bmp_path) {
+        return false;
+    }
+    SDL_Color white = {255, 255, 255, 255};
+    SDL_Surface *surf = TTF_RenderText_Blended(font, text, 0, white);
+    if (!surf) {
+        return false;
+    }
+    bool ok = SDL_SaveBMP(surf, bmp_path);
+    SDL_DestroySurface(surf);
+
+    TTF_TextEngine *engine = TTF_CreateSurfaceTextEngine();
+    if (engine) {
+        TTF_Text *t = TTF_CreateText(engine, font, text, 0);
+        if (t) {
+            int len = (int)strlen(text);
+            printf("SDL3_ttf character layout for \"%s\":\n", text);
+            for (int i = 0; i < len; i++) {
+                TTF_SubString sub;
+                if (TTF_GetTextSubString(t, i, &sub)) {
+                    printf("  [%d] '%c': x=%d, y=%d, w=%d, h=%d\n",
+                           i, text[i], sub.rect.x, sub.rect.y, sub.rect.w, sub.rect.h);
+                }
+            }
+            int w = 0, h = 0;
+            TTF_GetTextSize(t, &w, &h);
+            printf("Total text size: w=%d, h=%d\n", w, h);
+            TTF_DestroyText(t);
+        }
+        TTF_DestroySurfaceTextEngine(engine);
+    }
+
+    return ok;
+}
+
+int nano_ui_ttf_get_kerning(TTF_Font *font, Uint32 prev_cp, Uint32 cp)
+{
+    if (!font) {
+        return 0;
+    }
+    int k = 0;
+    TTF_GetGlyphKerning(font, prev_cp, cp, &k);
+    return k;
 }

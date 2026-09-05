@@ -49,6 +49,7 @@ module NanoUI.Testing
   , withFontMetrics
   , withMonoFontMetrics
   , withMeasureText
+  , withFontResolver
   , wrapMeasureCache
   , withExternalText
   , enableMeasureCache
@@ -153,6 +154,9 @@ module NanoUI.Testing
   , iconScrollDown
   , iconScrollUp
   , iconSelectOpen
+  , textNodeFontWeight
+  , textNodeFontStyle
+  , textNodeTextDecoration
   ) where
 
 import NanoUI.Compact (Compact, askCompact, compactHost)
@@ -205,6 +209,7 @@ import NanoUI.Context
   , withHostProfile
   , withIcons
   , withMeasureText
+  , withFontResolver
   , withMonoFontMetrics
   , withTheme
   , setTheme
@@ -283,6 +288,7 @@ import NanoUI.Icons
   , wideTrailChar
   )
 import NanoUI.Monad (Ui, askContext, askHost, askInput, uiIO)
+import NanoUI.WidgetText (textNodeFontStyle, textNodeFontWeight, textNodeTextDecoration)
 import NanoUI.Types (Damage (..), damageIsEmpty)
 import Effectful (Eff, IOE, runEff, type (:>))
 

@@ -129,7 +129,7 @@ import NanoUI.Frame.Window
 import NanoUI.Id (WidgetId (..), initialIdContext)
 import NanoUI.Input (Input (..), inputMouseDown, stripInteractionInput)
 import NanoUI.Layout.Arena (resetNodeArena)
-import NanoUI.Layout.Solve (placeModals, placePopups, placeWindows, solveLayoutWith)
+import NanoUI.Layout.Solve (placeModals, placePopups, placeWindows, solveLayoutWithResolver)
 import NanoUI.Monad (NanoUI, Ui, runUi)
 import NanoUI.Store (mirrorStoresChanged)
 import NanoUI.Types (Size (..))
@@ -336,12 +336,16 @@ resetUiBuildScopes ctx = do
 
 solvePlaceWindows :: Context -> Float -> Float -> IO ()
 solvePlaceWindows ctx w h = do
-  solveLayoutWith
+  let fontResolver sz weight style var = do
+        (fm, _) <- ctxResolveFont ctx sz weight style var
+        pure (fm, ctxResolveMeasure ctx sz weight style var)
+  solveLayoutWithResolver
     (ctxNodeArena ctx)
     (ctxHostProfile ctx)
     (ctxFontMetrics ctx)
     (ctxMonoFontMetrics ctx)
     (ctxMeasureText ctx)
+    fontResolver
     (lookupCustomMeasure ctx)
     w
     h

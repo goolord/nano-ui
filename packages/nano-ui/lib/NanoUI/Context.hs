@@ -110,6 +110,11 @@ module NanoUI.Context
   , withFontMetrics
   , withMonoFontMetrics
   , withMeasureText
+  , withFontResolver
+  , resolveFontMetrics
+  , resolveMeasureText
+  , defaultResolveFont
+  , defaultResolveMeasure
   , wrapMeasureCache
   , clearMeasureCache
   , withExternalText
@@ -273,7 +278,7 @@ import NanoUI.Context.Types
 import Data.Vector (Vector)
 import Data.Vector qualified as V
 import NanoUI.Draw (DrawingBuild, DrawOp, newDrawArena, shiftDrawOp)
-import NanoUI.Font (FontMetrics, measureText, monospaceMetrics)
+import NanoUI.Font (FontMetrics, fmLineHeight, measureText, monospaceMetrics, scaleFontMetrics)
 import NanoUI.Frame.SpanArena (newSpanArena)
 import NanoUI.Types (HostProfile (..), isCellHost)
 import NanoUI.Icons (IconSet, asciiIcons, iconsFor)
@@ -314,7 +319,7 @@ import NanoUI.Store
   , slotScrollLinkY
   , slotWinSize
   )
-import NanoUI.Style (Layout, Theme, defaultLayout, defaultTheme)
+import NanoUI.Style (FontStyle, FontVariant (..), FontWeight, Layout, Theme, defaultLayout, defaultTheme)
 import NanoUI.Types
   ( Damage (..)
   , DamageBounds (..)
@@ -993,21 +998,76 @@ lookupImageUv ctx = Atlas.lookupImageUv (ctxImageAtlas ctx)
 atlasSnapshot :: Context -> IO (Maybe (Int, Int, ForeignPtr Word8, Int))
 atlasSnapshot ctx = Atlas.atlasSnapshot (ctxImageAtlas ctx)
 
+defaultResolveFont :: Context -> Float -> FontWeight -> FontStyle -> FontVariant -> IO (FontMetrics, Bool)
+defaultResolveFont ctx sz _w _st var =
+  let baseFm = if var == FontMono then ctxMonoFontMetrics ctx else ctxFontMetrics ctx
+      scale =
+        if not (isCellHost (ctxHostProfile ctx)) && sz > 0 && fmLineHeight baseFm > 0
+          then sz / fmLineHeight baseFm
+          else 1.0
+   in pure (if scale /= 1.0 then scaleFontMetrics scale baseFm else baseFm, False)
+
+defaultResolveMeasure :: Context -> Float -> FontWeight -> FontStyle -> FontVariant -> Text -> IO (Float, Float)
+defaultResolveMeasure ctx sz _w _st var txt =
+  let baseFm = if var == FontMono then ctxMonoFontMetrics ctx else ctxFontMetrics ctx
+      scale =
+        if not (isCellHost (ctxHostProfile ctx)) && sz > 0 && fmLineHeight baseFm > 0
+          then sz / fmLineHeight baseFm
+          else 1.0
+   in if var == FontMono
+        then do
+          let textFm = if scale /= 1.0 then scaleFontMetrics scale baseFm else baseFm
+          pure (measureText (ctxHostProfile ctx) textFm txt)
+        else if scale /= 1.0
+          then do
+            (w, h) <- ctxMeasureText ctx txt
+            pure (w * scale, h * scale)
+          else ctxMeasureText ctx txt
+
+{-# INLINE withFontResolver #-}
+withFontResolver ::
+  Context ->
+  (Float -> FontWeight -> FontStyle -> FontVariant -> IO (FontMetrics, Bool)) ->
+  (Float -> FontWeight -> FontStyle -> FontVariant -> Text -> IO (Float, Float)) ->
+  Context
+withFontResolver ctx rf rm = ctx {ctxResolveFont = rf, ctxResolveMeasure = rm}
+
+{-# INLINE resolveFontMetrics #-}
+resolveFontMetrics :: Context -> Float -> FontWeight -> FontStyle -> FontVariant -> IO FontMetrics
+resolveFontMetrics ctx sz w st var = fst <$> ctxResolveFont ctx sz w st var
+
+{-# INLINE resolveMeasureText #-}
+resolveMeasureText :: Context -> Float -> FontWeight -> FontStyle -> FontVariant -> Text -> IO (Float, Float)
+resolveMeasureText ctx sz w st var txt = ctxResolveMeasure ctx sz w st var txt
+
 withFontMetrics :: Context -> FontMetrics -> Context
 withFontMetrics ctx fm =
-  ctx
-    { ctxFontMetrics = fm
-    , ctxMonoFontMetrics = if isCellHost (ctxHostProfile ctx) then fm else ctxMonoFontMetrics ctx
-    , ctxMeasureText = \txt ->
-        pure (measureText (ctxHostProfile ctx) fm txt)
-    }
+  let ctx' =
+        ctx
+          { ctxFontMetrics = fm
+          , ctxMonoFontMetrics = if isCellHost (ctxHostProfile ctx) then fm else ctxMonoFontMetrics ctx
+          , ctxMeasureText = \txt ->
+              pure (measureText (ctxHostProfile ctx) fm txt)
+          }
+   in ctx'
+        { ctxResolveFont = defaultResolveFont ctx'
+        , ctxResolveMeasure = defaultResolveMeasure ctx'
+        }
 
 withMonoFontMetrics :: Context -> FontMetrics -> Context
 withMonoFontMetrics ctx mono =
-  ctx {ctxMonoFontMetrics = mono}
+  let ctx' = ctx {ctxMonoFontMetrics = mono}
+   in ctx'
+        { ctxResolveFont = defaultResolveFont ctx'
+        , ctxResolveMeasure = defaultResolveMeasure ctx'
+        }
 
 withMeasureText :: Context -> (Text -> IO (Float, Float)) -> Context
-withMeasureText ctx fn = ctx {ctxMeasureText = fn}
+withMeasureText ctx fn =
+  let ctx' = ctx {ctxMeasureText = fn}
+   in ctx'
+        { ctxResolveMeasure = defaultResolveMeasure ctx'
+        }
 
 cacheMeasureText ::
   IORef (HashMap MeasureCacheKey (Float, Float)) ->
@@ -1066,7 +1126,12 @@ withIcons :: Context -> IconSet -> Context
 withIcons ctx iset = ctx {ctxIcons = iconsFor iset}
 
 withHostProfile :: Context -> HostProfile -> Context
-withHostProfile ctx prof = ctx {ctxHostProfile = prof}
+withHostProfile ctx prof =
+  let ctx' = ctx {ctxHostProfile = prof}
+   in ctx'
+        { ctxResolveFont = defaultResolveFont ctx'
+        , ctxResolveMeasure = defaultResolveMeasure ctx'
+        }
 
 withClipboard :: Context -> IO (Maybe Text) -> (Text -> IO Bool) -> Context
 withClipboard ctx getter setter = ctx {ctxClipboardGet = getter, ctxClipboardSet = setter}
@@ -1140,44 +1205,47 @@ newContext = do
   ctxDefaultLayout <- newIORef defaultLayout
   ctxTheme <- newIORef defaultTheme
   let fm0 = monospaceMetrics 12
-  pure Context
-    { ctxNodeArena = nodeArena
-    , ctxDrawArena = drawArena
-    , ctxHotId
-    , ctxLastHotId
-    , ctxActiveId
-    , ctxClickedId
-    , ctxReleaseClickedId
-    , ctxFocusId
-    , ctxStore
-    , ctxDamageState
-    , ctxOverlayState
-    , ctxAnimationState
-    , ctxDrawingCache
-    , ctxIdContext
-    , ctxFontMetrics = fm0
-    , ctxMonoFontMetrics = fm0
-    , ctxMeasureText = \txt -> pure (measureText PixelHost fm0 txt)
-    , ctxMeasureCache = Nothing
-    , ctxExternalText = False
-    , ctxTheme
-    , ctxIcons = asciiIcons
-    , ctxContainerStack
-    , ctxMessages
-    , ctxFocusables
-    , ctxFocusablesCount
-    , ctxFocusablesCap
-    , ctxSpanBase
-    , ctxSpanOverlay
-    , ctxInteractionState
-    , ctxClipboardGet = pure Nothing
-    , ctxClipboardSet = \_ -> pure False
-    , ctxImageAtlas
-    , ctxWakeLoop
-    , ctxHost
-    , ctxHostProfile = PixelHost
-    , ctxDefaultLayout
-    }
+      ctx = Context
+        { ctxNodeArena = nodeArena
+        , ctxDrawArena = drawArena
+        , ctxHotId
+        , ctxLastHotId
+        , ctxActiveId
+        , ctxClickedId
+        , ctxReleaseClickedId
+        , ctxFocusId
+        , ctxStore
+        , ctxDamageState
+        , ctxOverlayState
+        , ctxAnimationState
+        , ctxDrawingCache
+        , ctxIdContext
+        , ctxFontMetrics = fm0
+        , ctxMonoFontMetrics = fm0
+        , ctxMeasureText = \txt -> pure (measureText PixelHost fm0 txt)
+        , ctxResolveFont = defaultResolveFont ctx
+        , ctxResolveMeasure = defaultResolveMeasure ctx
+        , ctxMeasureCache = Nothing
+        , ctxExternalText = False
+        , ctxTheme
+        , ctxIcons = asciiIcons
+        , ctxContainerStack
+        , ctxMessages
+        , ctxFocusables
+        , ctxFocusablesCount
+        , ctxFocusablesCap
+        , ctxSpanBase
+        , ctxSpanOverlay
+        , ctxInteractionState
+        , ctxClipboardGet = pure Nothing
+        , ctxClipboardSet = \_ -> pure False
+        , ctxImageAtlas
+        , ctxWakeLoop
+        , ctxHost
+        , ctxHostProfile = PixelHost
+        , ctxDefaultLayout
+        }
+  pure ctx
 
 {-# INLINE newPixelHostContext #-}
 newPixelHostContext :: IO Context

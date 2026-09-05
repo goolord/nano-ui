@@ -61,6 +61,10 @@ module NanoUI.Layout.Arena
   , setStyleIdx
   , getNodeValue
   , setNodeValue
+  , getNodeFontSize
+  , setNodeFontSize
+  , getNodeFontColor
+  , setNodeFontColor
   , ensureScratchCapacity
   , forNodes_
   , forChildNodes_
@@ -90,7 +94,7 @@ import Data.Word (Word8, Word32, Word64)
 import qualified Data.Text as T
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Style (AlignX (..), AlignY (..), Direction (..), Layout (..), Padding (..), Sizing (..))
-import NanoUI.Types (Rect (..))
+import NanoUI.Types (Color (..), Rect (..))
 
 type NodeIdx = Int
 
@@ -477,6 +481,8 @@ addNodeFromLayout na nt parent l = do
       (layoutAlignY l)
   setGridCols na idx (layoutGridCols l)
   setGridMinColW na idx (layoutGridMinColW l)
+  setNodeFontSize na idx (layoutFontSize l)
+  setNodeFontColor na idx (layoutFontColor l)
   pure idx
 
 {-# INLINE setNodeText #-}
@@ -769,6 +775,32 @@ getNodeValue na idx = arenaArrays na >>= \a -> readPrimArray (naArrStyle a) (idx
 {-# INLINE setNodeValue #-}
 setNodeValue :: NodeArena -> NodeIdx -> Float -> IO ()
 setNodeValue na idx v = arenaArrays na >>= \a -> writePrimArray (naArrStyle a) (idx * 16 + 13) v
+
+{-# INLINE getNodeFontSize #-}
+getNodeFontSize :: NodeArena -> NodeIdx -> IO Float
+getNodeFontSize na idx = arenaArrays na >>= \a -> readPrimArray (naArrStyle a) (idx * 16 + 15)
+
+{-# INLINE setNodeFontSize #-}
+setNodeFontSize :: NodeArena -> NodeIdx -> Float -> IO ()
+setNodeFontSize na idx v = arenaArrays na >>= \a -> writePrimArray (naArrStyle a) (idx * 16 + 15) v
+
+{-# INLINE getNodeFontColor #-}
+getNodeFontColor :: NodeArena -> NodeIdx -> IO (Maybe Color)
+getNodeFontColor na idx = do
+  a <- arenaArrays na
+  val <- readPrimArray (naArrTree a) (idx * 8 + 7)
+  if (val .&. 0x100000000) /= 0
+    then pure (Just (Color (fromIntegral (val .&. 0xFFFFFFFF))))
+    else pure Nothing
+
+{-# INLINE setNodeFontColor #-}
+setNodeFontColor :: NodeArena -> NodeIdx -> Maybe Color -> IO ()
+setNodeFontColor na idx mCol = do
+  a <- arenaArrays na
+  let val = case mCol of
+        Nothing -> 0
+        Just (Color w) -> 0x100000000 .|. fromIntegral w
+  writePrimArray (naArrTree a) (idx * 8 + 7) val
 
 {-# INLINE getStyleIdx #-}
 getStyleIdx :: NodeArena -> NodeIdx -> IO Int

@@ -4,6 +4,7 @@ module NanoUI.Font
   ( GlyphQuad (..)
   , FontMetrics (..)
   , monospaceMetrics
+  , scaleFontMetrics
   , measureText
   , measureTextWrapped
   , measureTextWrappedIO
@@ -94,6 +95,27 @@ monospaceMetrics cell =
     , fmAdvance = \_ -> cell
     , fmGlyph = \_ -> Nothing
     }
+
+{-# INLINE scaleFontMetrics #-}
+scaleFontMetrics :: Float -> FontMetrics -> FontMetrics
+scaleFontMetrics s fm
+  | s == 1.0 = fm
+  | otherwise =
+      FontMetrics
+        { fmLineHeight = fmLineHeight fm * s
+        , fmAscent = fmAscent fm * s
+        , fmAdvance = \c -> fmAdvance fm c * s
+        , fmGlyph = \c -> case fmGlyph fm c of
+            Nothing -> Nothing
+            Just gq ->
+              Just
+                gq
+                  { gqX = gqX gq * s
+                  , gqY = gqY gq * s
+                  , gqW = gqW gq * s
+                  , gqH = gqH gq * s
+                  }
+        }
 
 -- Layout gap/pad are authored in pixel steps (see defaultLayout). Cell hosts map one cell per step.
 {-# INLINE layoutUnitScale #-}

@@ -108,6 +108,9 @@ module NanoUI.Widgets
   , muted
   , mono
   , danger
+  , bold
+  , italic
+  , underline
   , styledLabel
   , kv
   , kvMono
@@ -282,6 +285,9 @@ import NanoUI.Style
   , fontMono
   , fontMuted
   , fontDanger
+  , fontBold
+  , fontItalic
+  , fontUnderline
   , gap
   , minW
   , padXY
@@ -478,6 +484,15 @@ mono txt = void (labelWith fontMono txt)
 
 danger :: Ui :> es => Text -> Eff es ()
 danger txt = void (labelWith (fillW . fontDanger) txt)
+
+bold :: Ui :> es => Text -> Eff es ()
+bold txt = void (labelWith fontBold txt)
+
+italic :: Ui :> es => Text -> Eff es ()
+italic txt = void (labelWith fontItalic txt)
+
+underline :: Ui :> es => Text -> Eff es ()
+underline txt = void (labelWith fontUnderline txt)
 
 styledLabel :: Ui :> es => FontVariant -> Layout -> Text -> Eff es Response
 styledLabel fvar l txt = labelEx (l {layoutFontVariant = fvar}) txt
