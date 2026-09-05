@@ -2,6 +2,8 @@
 
 module NanoUI.Frame.Select
   ( selectDropRect
+  , selectItemH
+  , selectDropPickIndex
   , closeSelectOnOutsideClick
   , finalizeSelectKeyboard
   , finalizeSelectPick
@@ -133,7 +135,7 @@ markSelectDropPress ctx inp =
 
 closeSelectOnOutsideClick :: Context -> Input -> IO ()
 closeSelectOnOutsideClick ctx inp =
-  when (inputMousePressed inp) $ do
+  when (inputMousePressed inp || inputMouseReleased inp) $ do
     store <- getStore ctx
     when (anySelectOpen store) $ do
       let mouse = inputMousePos inp
@@ -242,7 +244,7 @@ findOpenSelectWidget ctx = do
 
 finalizeSelectPick :: Context -> Input -> IO ()
 finalizeSelectPick ctx inp =
-  when (inputMousePressed inp) $ do
+  when (inputMousePressed inp || inputMouseReleased inp) $ do
     let mouse = inputMousePos inp
     count <- arenaCount (ctxNodeArena ctx)
     let go idx

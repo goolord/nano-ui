@@ -1,5 +1,6 @@
 module Cases.Select
-  ( runSelectDropdownCursorTest
+  ( runSelectDragToSelectTest
+  , runSelectDropdownCursorTest
   , runSelectDropdownHoverTest
   , runSelectDropdownTest
   , runSelectDropFlushTest
@@ -259,6 +260,39 @@ runSelectPickLowTest ctx failed = do
       assert failed (hashWidgetId focusAfterPick /= 0)
       ((_, idx1), _, _, _) <- runFrame ctx pickRelease ui
       assertEq failed idx1 0
+      spans <- collectTextSpans ctx
+      assertSpansHas failed "Quality: Low" spans
+    _ -> assert failed False
+
+runSelectDragToSelectTest :: Context -> IORef Int -> IO ()
+runSelectDragToSelectTest ctx failed = do
+  let inp0 = withInput 320 200
+      ui = select "Quality" ["Low", "Medium", "High"] 1
+  (resp, idx0) <- warmup2 ctx inp0 ui
+  assertEq failed idx0 1
+  let Rect sx sy sw _ = respRect resp
+      btnMid = V2 (sx + sw / 2) (sy + 10)
+      press = inp0 {inputMousePos = btnMid, inputMouseDown = True, inputMousePressed = True}
+  -- 1. On mousedown, the menu should show up immediately
+  _ <- runFrame ctx press ui
+  overlaysPress <- collectOverlayTextSpans ctx press
+  assert failed (any (\(_, txt, _, _, _) -> "Low" `T.isInfixOf` txt) overlaysPress)
+  assert failed (any (\(_, txt, _, _, _) -> "High" `T.isInfixOf` txt) overlaysPress)
+  case [rectY r | (r, txt, _, _, _) <- overlaysPress, "Low" `T.isInfixOf` txt] of
+    (lowY : _) -> do
+      -- 2. Move mouse over an item while still pressed
+      let drag = inp0 {inputMousePos = V2 (sx + sw / 2) (lowY + 0.5), inputMouseDown = True}
+      _ <- runFrame ctx drag ui
+      overlaysDrag <- collectOverlayTextSpans ctx drag
+      assert failed (any (\(_, txt, _, _, _) -> "Low" `T.isInfixOf` txt) overlaysDrag)
+      kind <- uiCursorKind ctx drag
+      assertEq failed kind UiCursorPointer
+      -- 3. Mouseup over the item selects it and closes the menu
+      let release = drag {inputMouseDown = False, inputMouseReleased = True}
+      ((_, idx1), _, _, _) <- runFrame ctx release ui
+      assertEq failed idx1 0
+      overlaysClosed <- collectOverlayTextSpans ctx release
+      assert failed (not (any (\(_, txt, _, _, _) -> "Low" `T.isInfixOf` txt) overlaysClosed))
       spans <- collectTextSpans ctx
       assertSpansHas failed "Quality: Low" spans
     _ -> assert failed False
