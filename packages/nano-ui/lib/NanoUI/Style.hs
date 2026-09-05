@@ -11,6 +11,8 @@ module NanoUI.Style
   , Style (..)
   , Theme (..)
   , defaultTheme
+  , packPanelStyle
+  , unpackPanelStyle
   , themeSeries
   , scrollBarTrackColor
   , scrollBarThumbColor
@@ -24,7 +26,10 @@ module NanoUI.Style
   , fillH
   , grow
   , minW
+  , maxW
   , fixedW
+  , minH
+  , maxH
   , fixedH
   , fixedWH
   , alignMid
@@ -42,14 +47,15 @@ module NanoUI.Style
   , fontHeading
   , fontMuted
   , fontMono
+  , fontDanger
   , alignStart
   , alignCenter
   , alignTop
   , alignBottom
   ) where
 
-import Data.Bits ((.&.), (.|.))
-import Data.Word (Word8)
+import Data.Bits ((.&.), (.|.), shiftL, shiftR)
+import Data.Word (Word8, Word32, Word64)
 import NanoUI.Types (Color (..), colorRGBA, lerpColor)
 
 data Sizing
@@ -94,6 +100,7 @@ data FontVariant
   | FontHeading
   | FontMuted
   | FontMono
+  | FontDanger
   deriving (Eq, Show, Enum, Bounded, Ord)
 
 type LayoutModifier = Layout -> Layout
@@ -163,9 +170,21 @@ grow = fillW . fillH
 minW :: Float -> Layout -> Layout
 minW n l = l {layoutMinW = n}
 
+{-# INLINE maxW #-}
+maxW :: Float -> Layout -> Layout
+maxW n l = l {layoutMaxW = n}
+
 {-# INLINE fixedW #-}
 fixedW :: Float -> Layout -> Layout
 fixedW n l = l {layoutWidth = Fixed n, layoutMinW = n, layoutMaxW = n}
+
+{-# INLINE minH #-}
+minH :: Float -> Layout -> Layout
+minH n l = l {layoutMinH = n}
+
+{-# INLINE maxH #-}
+maxH :: Float -> Layout -> Layout
+maxH n l = l {layoutMaxH = n}
 
 {-# INLINE fixedH #-}
 fixedH :: Float -> Layout -> Layout
@@ -227,6 +246,10 @@ fontMuted l = l {layoutFontVariant = FontMuted}
 fontMono :: Layout -> Layout
 fontMono l = l {layoutFontVariant = FontMono}
 
+{-# INLINE fontDanger #-}
+fontDanger :: Layout -> Layout
+fontDanger l = l {layoutFontVariant = FontDanger}
+
 {-# INLINE alignStart #-}
 alignStart :: Layout -> Layout
 alignStart l = l {layoutAlignX = AlignStart}
@@ -253,6 +276,23 @@ data Style = Style
   , styleActiveBg :: !Color
   }
   deriving (Eq, Show)
+
+{-# INLINE packPanelStyle #-}
+packPanelStyle :: Color -> Color -> Int
+packPanelStyle (Color bg) (Color border) =
+  let bg64 = fromIntegral bg :: Word64
+      br64 = fromIntegral border :: Word64
+   in fromIntegral ((br64 `shiftL` 32) .|. (bg64 .&. 0xFFFFFFFF))
+
+{-# INLINE unpackPanelStyle #-}
+unpackPanelStyle :: Style -> Int -> Style
+unpackPanelStyle baseStyle si =
+  let raw = fromIntegral si :: Word64
+      bg = fromIntegral (raw .&. 0xFFFFFFFF) :: Word32
+      border = fromIntegral ((raw `shiftR` 32) .&. 0xFFFFFFFF) :: Word32
+      s1 = if bg /= 0 then baseStyle { styleBg = Color bg } else baseStyle
+      s2 = if border /= 0 then s1 { styleBorder = Color border } else s1
+   in s2
 
 data Theme = Theme
   { themeWindow :: Color
@@ -312,7 +352,7 @@ defaultTheme =
         , themeSeparator = colorRGBA 78 80 88 255
         , themeAccent = colorRGBA 88 156 246 255
         , themeMuted = colorRGBA 176 172 164 255
-        , themeRed = colorRGBA 204 102 102 255
+        , themeRed = colorRGBA 252 165 165 255
         , themeOrange = colorRGBA 216 140 72 255
         , themeYellow = colorRGBA 212 176 88 255
         , themeGreen = colorRGBA 104 168 124 255

@@ -19,7 +19,9 @@ module NanoUI.Widgets.Node
   , setRightPressed
   , parentIdx
   , container
+  , containerStyled
   , containerResponse
+  , containerResponseStyled
   , addWidget
   , addWidgetResp
   , addWidgetStyled
@@ -193,23 +195,34 @@ emptyModalResp wid = mkResponse wid (Rect 0 0 0 0) False False False False
 container :: Ui :> es => NodeType -> Layout -> Eff es a -> Eff es a
 container nt layout child = runContainer nt layout Nothing child
 
+containerStyled :: Ui :> es => NodeType -> Layout -> Int -> Eff es a -> Eff es a
+containerStyled nt layout si child = runContainerStyled nt layout Nothing si child
+
 containerResponse :: Ui :> es => NodeType -> Layout -> Eff es a -> Eff es (a, Response)
-containerResponse nt layout child = do
+containerResponse nt layout child = containerResponseStyled nt layout 0 child
+
+containerResponseStyled :: Ui :> es => NodeType -> Layout -> Int -> Eff es a -> Eff es (a, Response)
+containerResponseStyled nt layout si child = do
   wid <- nextId
   ctx <- askContext
   inp <- askInput
-  r <- runContainer nt layout (Just wid) child
+  r <- runContainerStyled nt layout (Just wid) si child
   resp <- uiIO (resolveInteraction ctx inp wid)
   pure (r, resp)
 
 runContainer :: Ui :> es => NodeType -> Layout -> Maybe WidgetId -> Eff es a -> Eff es a
-runContainer nt layout mWid child = do
+runContainer nt layout mWid child = runContainerStyled nt layout mWid 0 child
+
+runContainerStyled :: Ui :> es => NodeType -> Layout -> Maybe WidgetId -> Int -> Eff es a -> Eff es a
+runContainerStyled nt layout mWid si child = do
   ctx <- askContext
   (stack, parent') <- uiIO $ do
     stack0 <- readIORef (ctxContainerStack ctx)
     let
       parent = parentIdx stack0
     idx <- addNodeFromLayout (ctxNodeArena ctx) nt parent layout
+    when (si /= 0) $
+      setStyleIdx (ctxNodeArena ctx) idx si
     case mWid of
       Just wid -> setWidgetId (ctxNodeArena ctx) idx wid
       Nothing -> pure ()

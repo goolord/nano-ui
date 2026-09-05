@@ -135,13 +135,13 @@ runTerminalModalTightTest _ failed = do
   overlays <- collectOverlayTextSpans ctx inp0
   let fm = ctxFontMetrics ctx
       Rect _ my _ mh = respRect dlg
-      maxH = terminalAboutModalMaxH (ctxHostProfile ctx) fm
+      expectedMaxH = terminalAboutModalMaxH (ctxHostProfile ctx) fm
       maxFooter = terminalAboutModalMaxFooter (ctxHostProfile ctx) fm
   case closeSpanBottom overlays of
     Nothing -> assert failed False
     Just bottom -> do
       let footer = my + mh - bottom
-      assert failed (mh <= maxH && footer <= maxFooter)
+      assert failed (mh <= expectedMaxH && footer <= maxFooter)
 
 runTerminalModalOpenRedrawTest :: Context -> IORef Int -> IO ()
 runTerminalModalOpenRedrawTest _ failed = do

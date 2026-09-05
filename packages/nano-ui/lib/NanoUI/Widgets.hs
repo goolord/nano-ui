@@ -8,6 +8,15 @@ module NanoUI.Widgets
   , panel_
   , panelWith
   , panel'
+  , panelBg
+  , panelBgWith
+  , panelBg'
+  , panelStyled
+  , panelStyledWith
+  , panelStyled'
+  , boxWith
+  , callout
+  , calloutWith
   , row
   , row_
   , rowWith
@@ -97,6 +106,7 @@ module NanoUI.Widgets
   , heading
   , muted
   , mono
+  , danger
   , styledLabel
   , kv
   , kvMono
@@ -231,6 +241,7 @@ import NanoUI.Style
   , fontHeading
   , fontMono
   , fontMuted
+  , fontDanger
   , gap
   , minW
   , padXY
@@ -297,6 +308,15 @@ import NanoUI.Widgets.Layout
   , panel_
   , panelWith
   , panel'
+  , panelBg
+  , panelBgWith
+  , panelBg'
+  , panelStyled
+  , panelStyledWith
+  , panelStyled'
+  , boxWith
+  , callout
+  , calloutWith
   , row
   , row_
   , rowWith
@@ -414,6 +434,9 @@ muted txt = void (labelWith (fillW . fontMuted) txt)
 
 mono :: Ui :> es => Text -> Eff es ()
 mono txt = void (labelWith fontMono txt)
+
+danger :: Ui :> es => Text -> Eff es ()
+danger txt = void (labelWith (fillW . fontDanger) txt)
 
 styledLabel :: Ui :> es => FontVariant -> Layout -> Text -> Eff es Response
 styledLabel fvar l txt = labelEx (l {layoutFontVariant = fvar}) txt

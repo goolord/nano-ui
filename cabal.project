@@ -6,6 +6,8 @@ packages:
   packages/nano-ui-demo
   packages/nano-ui-rgfw-bindings
   packages/nano-ui-rgfw
+  packages/nano-ui-form
+  ../ditto
 
 tests: True
 benchmarks: True
@@ -27,5 +29,9 @@ package nano-ui-demo
 
 package nano-ui-term
   ghc-options: -mavx2 -optc-mavx2 -optc-O3
+
+package nano-ui-form
+  flags: +sdl
+
 
 

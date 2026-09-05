@@ -69,7 +69,10 @@ module NanoUI
   , fillH
   , grow
   , minW
+  , maxW
   , fixedW
+  , minH
+  , maxH
   , fixedH
   , fixedWH
   , alignMid
@@ -90,6 +93,7 @@ module NanoUI
   , fontHeading
   , fontMuted
   , fontMono
+  , fontDanger
   -- ID
   , WidgetId (..)
   , IdContext
@@ -131,6 +135,15 @@ module NanoUI
   , panel_
   , panelWith
   , panel'
+  , panelBg
+  , panelBgWith
+  , panelBg'
+  , panelStyled
+  , panelStyledWith
+  , panelStyled'
+  , boxWith
+  , callout
+  , calloutWith
   , row
   , row_
   , rowWith
@@ -291,6 +304,7 @@ module NanoUI
   , heading
   , muted
   , mono
+  , danger
   , styledLabel
   , kv
   , kvMono
@@ -483,8 +497,9 @@ import NanoUI.Style
   , defaultLayout
   , defaultTheme
   , fontHeading
-  , fontMono
   , fontMuted
+  , fontMono
+  , fontDanger
   , fontRegular
   , themeSeries
   , fillH
@@ -495,6 +510,9 @@ import NanoUI.Style
   , gap
   , grow
   , minW
+  , maxW
+  , minH
+  , maxH
   , padAll
   , padXY
   , panelPaintPad
@@ -582,6 +600,16 @@ import NanoUI.Widgets
   , styledLabel
   , onClick
   , panel
+  , panelBg
+  , panelBgWith
+  , panelBg'
+  , panelStyled
+  , panelStyledWith
+  , panelStyled'
+  , boxWith
+  , callout
+  , calloutWith
+  , danger
   , boundedSelect
   , enumSelect
   , useEnumSelect

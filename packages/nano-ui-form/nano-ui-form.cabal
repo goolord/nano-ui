@@ -1,0 +1,104 @@
+cabal-version:      3.4
+name:               nano-ui-form
+version:            0.1.0.0
+synopsis:           Ditto formlet library for nano-ui
+description:        Type-safe, composable immediate-mode GUI forms for nano-ui powered by ditto.
+license:            MIT
+license-file:       LICENSE
+author:             goolord
+maintainer:         zacharyachurchill@gmail.com
+category:           Graphics
+build-type:         Simple
+
+common extensions
+    default-language: GHC2024
+    default-extensions:
+        BangPatterns
+        DeriveGeneric
+        DuplicateRecordFields
+        FlexibleContexts
+        GeneralizedNewtypeDeriving
+        OverloadedStrings
+        ScopedTypeVariables
+        TypeFamilies
+
+common warnings
+  ghc-options:
+    -Wall
+    -Wextra
+    -Wcompat
+    -Widentities
+    -Wincomplete-record-updates
+    -Wincomplete-uni-patterns
+    -Wmissing-export-lists
+    -Wmissing-home-modules
+    -Wpartial-fields
+    -Wredundant-constraints
+
+library
+    import:           extensions
+    import:           warnings
+    exposed-modules:
+        NanoUI.Form
+        NanoUI.Form.Backend
+        NanoUI.Form.Named
+        NanoUI.Form.Runner
+        NanoUI.Form.Types
+        NanoUI.Form.Unnamed
+        NanoUI.Form.Validation
+        NanoUI.Form.Widgets
+    build-depends:
+        base ^>=4.22.0.0,
+        containers ^>=0.8,
+        ditto ^>=0.5.0,
+        effectful ^>=2.6,
+        effectful-core ^>=2.6,
+        hashable ^>=1.5,
+        nano-ui,
+        text ^>=2.1
+    hs-source-dirs:   lib
+    default-language: GHC2024
+
+flag sdl
+    description: Build the SDL3 window example
+    manual: True
+    default: True
+
+executable nano-ui-form-example
+    import:           extensions
+    import:           warnings
+    main-is:          Main.hs
+    ghc-options:      -rtsopts -threaded "-with-rtsopts=-N1 -A64m -T -I0"
+    build-depends:
+        base ^>=4.22.0.0,
+        containers ^>=0.8,
+        ditto ^>=0.5.0,
+        nano-ui,
+        nano-ui-form,
+        text ^>=2.1
+    if flag(sdl)
+        build-depends:
+            nano-ui-sdl
+    if os(windows)
+        ghc-options: -optl-mconsole
+    if !flag(sdl)
+        buildable: False
+    hs-source-dirs:   examples
+    default-language: GHC2024
+
+test-suite nano-ui-form-test
+    import:           extensions
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    main-is:          Main.hs
+    ghc-options:      -rtsopts -threaded "-with-rtsopts=-M256m -N1"
+    build-depends:
+        base ^>=4.22.0.0,
+        containers ^>=0.8,
+        ditto ^>=0.5.0,
+        effectful ^>=2.6,
+        nano-ui,
+        nano-ui-form,
+        text ^>=2.1
+    hs-source-dirs:   test
+    default-language: GHC2024

@@ -113,6 +113,7 @@ labelPaintWithBg style bg theme fvar raw =
   let fg = case fvar of
         FontHeading -> themeAccent theme
         FontMuted -> themeMuted theme
+        FontDanger -> themeRed theme
         _ -> styleFg style
    in (raw, fg, bg)
 
