@@ -79,6 +79,10 @@ module NanoUI.Widgets.Layout
   , flexCol
   , hGroup
   , vGroup
+  , hstack
+  , hstackWith
+  , vstack
+  , vstackWith
   , flex
   , sep
   )
@@ -281,6 +285,26 @@ columnResponseWith = (`withDefaultWith` columnResponse')
 {-# INLINE columnResponse' #-}
 columnResponse' :: Ui :> es => Layout -> Eff es a -> Eff es (a, Response)
 columnResponse' layout = containerResponse NodeContainer (layout {layoutDirection = Column})
+
+-- =============================================================================
+-- List stacks
+-- =============================================================================
+
+{-# INLINE hstack #-}
+hstack :: Ui :> es => [Eff es ()] -> Eff es ()
+hstack = row . sequence_
+
+{-# INLINE hstackWith #-}
+hstackWith :: Ui :> es => (Layout -> Layout) -> [Eff es ()] -> Eff es ()
+hstackWith f = rowWith f . sequence_
+
+{-# INLINE vstack #-}
+vstack :: Ui :> es => [Eff es ()] -> Eff es ()
+vstack = column . sequence_
+
+{-# INLINE vstackWith #-}
+vstackWith :: Ui :> es => (Layout -> Layout) -> [Eff es ()] -> Eff es ()
+vstackWith f = columnWith f . sequence_
 
 -- =============================================================================
 -- Grid

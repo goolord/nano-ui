@@ -216,6 +216,10 @@ module NanoUI
   , responsive
   , responsiveRowCol
   , windowAspect
+  , hstack
+  , hstackWith
+  , vstack
+  , vstackWith
   , label
   , label_
   , labelWith
@@ -919,6 +923,8 @@ import NanoUI.Widgets.Layout
   , flexCol
   , flexRow
   , hGroup
+  , hstack
+  , hstackWith
   , panel'
   , panelWith
   , panel_
@@ -927,6 +933,8 @@ import NanoUI.Widgets.Layout
   , rowWith
   , scrollAreaId
   , vGroup
+  , vstack
+  , vstackWith
   )
 import NanoUI.State
   ( buttonEmit
