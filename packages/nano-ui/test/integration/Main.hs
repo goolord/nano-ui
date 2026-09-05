@@ -149,6 +149,7 @@ testSpecs =
   , TestSpec "select-dropdown-hover" False runSelectDropdownHoverTest
   , TestSpec "select-drop-flush" True runSelectDropFlushTest
   , TestSpec "select-pick-low" False runSelectPickLowTest
+  , TestSpec "select-drag-to-select" False runSelectDragToSelectTest
   , TestSpec "select-keyboard" False runSelectKeyboardTest
   , TestSpec "tree-initial" False runTreeInitialTest
   , TestSpec "tree-select" False runTreeSelectTest

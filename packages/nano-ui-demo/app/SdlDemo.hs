@@ -155,7 +155,7 @@ demoAccent = colorRGBA 204 102 102 255
 
 -- Spacing scale for demo layout
 gapLayout :: Float
-gapLayout = 16
+gapLayout = 8
 
 gapInline :: Float
 gapInline = 12

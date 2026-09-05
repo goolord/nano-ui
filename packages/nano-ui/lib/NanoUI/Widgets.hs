@@ -206,9 +206,10 @@ import NanoUI.Frame.Hit (scrollHitRect)
 import NanoUI.Types (isCellHost)
 import NanoUI.Icons (checkboxMark)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
-import NanoUI.Input (Key (..), inputKeys, inputMouseDown, inputMousePos, inputMousePressed)
+import NanoUI.Input (Key (..), inputKeys, inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased)
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
+import NanoUI.Frame.Select (selectDropPickIndex, selectDropRect, selectItemH)
 import NanoUI.Store
   ( WidgetStore (..)
   , boolInt
@@ -241,6 +242,7 @@ import NanoUI.Types
   , Rect (..)
   , colorToWord32
   , rectContains
+  , v2Y
   )
 import NanoUI.Widgets.Behavior (DragAxis (..), useDrag1D)
 import NanoUI.WidgetText
@@ -703,14 +705,34 @@ select lbl options initial = do
   open <- uiIO $ do
     st <- getStore ctx
     pure (isSelectOpen st key)
-  when (respClicked resp) $
+  let
+    Rect rx ry rw rh = respRect resp
+    mouse = inputMousePos inp
+    onButton = rw > 0 && rh > 0 && rectContains (Rect rx ry rw rh) mouse
+    dropRect = selectDropRect (ctxHostProfile ctx) (ctxFontMetrics ctx) rx ry rw rh (length opts)
+    itemH = selectItemH (ctxHostProfile ctx) rh
+    onDrop = rw > 0 && rh > 0 && rectContains dropRect mouse
+  when (onButton && inputMousePressed inp) $
     uiIO $ do
       st <- getStore ctx
-      let
-        Rect rx ry rw rh = respRect resp
-        onButton = rw > 0 && rh > 0 && rectContains (Rect rx ry rw rh) (inputMousePos inp)
-      when onButton $
-        setStore ctx (setSelectOpen st key (not open))
+      setStore ctx (setSelectOpen st key (not open))
+      writeIORef (ctxFocusId ctx) wid
+      markDirty ctx
+  when (open && onDrop && inputMouseReleased inp) $
+    uiIO $ do
+      case selectDropPickIndex dropRect itemH (length opts) (v2Y mouse) of
+        Nothing -> pure ()
+        Just picked -> do
+          st <- getStore ctx
+          setStore
+            ctx
+            ( setSelectOpen
+                (st {storeInt = IM.insert key picked (storeInt st)})
+                key
+                False
+            )
+          writeIORef (ctxFocusId ctx) wid
+          markDirty ctx
   store1 <- uiIO (getStore ctx)
   let
     finalIdx = IM.findWithDefault clamped key (storeInt store1)
