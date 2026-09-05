@@ -1,5 +1,6 @@
 module NanoUI.Layout.Solve
   ( solveLayout
+  , solveLayoutWith
   , placeModals
   , placeWindows
   , placePopups
@@ -94,6 +95,7 @@ import NanoUI.Layout.Arena
   , naScratchOutMain
   , naScratchOutCross
   )
+import NanoUI.Context.Types (CustomMeasureFn)
 import NanoUI.Id (WidgetId)
 import NanoUI.Style (AlignX (..), AlignY (..), FontVariant (..), Padding (..), windowMargin)
 import NanoUI.Types (PopupAnchor (..), PopupPlacement (..), Rect (..), V2 (..), clamp)
@@ -123,11 +125,24 @@ import NanoUI.Frame.Scroll.Geometry
 
 solveLayout :: NodeArena -> HostProfile -> FontMetrics -> FontMetrics -> (Text -> IO (Float, Float)) -> Float -> Float -> IO ()
 solveLayout na host fm monoFm measure rootW rootH =
+  solveLayoutWith na host fm monoFm measure (const (pure Nothing)) rootW rootH
+
+solveLayoutWith ::
+  NodeArena ->
+  HostProfile ->
+  FontMetrics ->
+  FontMetrics ->
+  (Text -> IO (Float, Float)) ->
+  (WidgetId -> IO (Maybe CustomMeasureFn)) ->
+  Float ->
+  Float ->
+  IO ()
+solveLayoutWith na host fm monoFm measure lookupMeasure rootW rootH =
   withArenaArraysSnap na $ do
     a <- arenaArrays na
     count <- arenaCount na
     whenPositive count $ do
-      measurePass na host fm monoFm measure
+      measurePass na host fm monoFm measure lookupMeasure
       positionNodeA a na host fm monoFm measure 0 0 0 rootW rootH
 
 {-# INLINE nodeTypeA #-}
@@ -175,14 +190,15 @@ measurePass ::
   FontMetrics ->
   FontMetrics ->
   (Text -> IO (Float, Float)) ->
+  (WidgetId -> IO (Maybe CustomMeasureFn)) ->
   IO ()
-measurePass na host fm monoFm measure = do
+measurePass na host fm monoFm measure lookupMeasure = do
   a <- arenaArrays na
   count <- arenaCount na
   let go !idx
         | idx < 0 = pure ()
         | otherwise = do
-            measureNode a na host fm monoFm measure idx
+            measureNode a na host fm monoFm measure lookupMeasure idx
             go (idx - 1)
   go (count - 1)
 
@@ -196,9 +212,10 @@ measureNode ::
   FontMetrics ->
   FontMetrics ->
   (Text -> IO (Float, Float)) ->
+  (WidgetId -> IO (Maybe CustomMeasureFn)) ->
   NodeIdx ->
   IO ()
-measureNode a na host fm monoFm measure idx = do
+measureNode a na host fm monoFm measure lookupMeasure idx = do
   nt <- nodeTypeA a idx
   case nt of
     NodeText -> measureTextNode na host fm monoFm measure idx
@@ -214,8 +231,31 @@ measureNode a na host fm monoFm measure idx = do
     NodePopup -> measureContainer na host fm idx
     NodeImage -> measureImage na idx
     NodeBox -> measureImage na idx
-    NodeDrawing -> measureImage na idx
+    NodeDrawing -> do
+      wid <- getWidgetId na idx
+      mFn <- lookupMeasure wid
+      case mFn of
+        Just fn -> measureCustomNode na host fm fn idx
+        Nothing -> measureImage na idx
     _ -> measureWidget na host fm measure idx
+
+measureCustomNode ::
+  NodeArena ->
+  HostProfile ->
+  FontMetrics ->
+  CustomMeasureFn ->
+  NodeIdx ->
+  IO ()
+measureCustomNode na host fm measureFn idx = do
+  (minW, minH, maxW, maxH) <- getMinMax na idx
+  (wTag, wVal) <- getWidthSizing na idx
+  (hTag, hVal) <- getHeightSizing na idx
+  let availW = case wTag of SizingFixed -> wVal; _ -> if maxW < 1e8 then maxW else 1e9
+      availH = case hTag of SizingFixed -> hVal; _ -> if maxH < 1e8 then maxH else 1e9
+      (mw, mh) = measureFn host fm (availW, availH)
+      w = case wTag of SizingFixed -> wVal; _ -> clamp minW maxW mw
+      h = case hTag of SizingFixed -> hVal; _ -> clamp minH maxH mh
+  setRect na idx 0 0 w h
 
 findAncestorMaxW :: NodeArena -> NodeIdx -> IO Float
 findAncestorMaxW na idx = go idx 0

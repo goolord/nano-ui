@@ -15,11 +15,17 @@ import qualified Data.Text as T
 import NanoUI.Widgets.ColorPicker (drawColorPickerPanel)
 import NanoUI.Context
   ( Context (..)
+  , CustomDrawContext (..)
   , atlasTextureId
-  , getStore
-  , lookupImageUv
-  , lookupDrawing
+  , cachedCustomDrawingOps
   , cachedDrawingOps
+  , getFocusId
+  , getHotId
+  , getStore
+  , isDisabled
+  , lookupCustomDrawing
+  , lookupDrawing
+  , lookupImageUv
   )
 import NanoUI.Draw
   ( DrawArena
@@ -312,12 +318,35 @@ lowerNodeVisible ctx occluders idx nt x y w h rect fm theme terminal da =
         _ -> pushRect da rect (themeAccent theme)
     NodeDrawing -> do
       wid <- getWidgetId (ctxNodeArena ctx) idx
-      mBuild <- lookupDrawing ctx wid
-      case mBuild of
-        Nothing -> pure ()
-        Just build -> do
-          ops <- cachedDrawingOps ctx wid rect build
+      mCustomBuild <- lookupCustomDrawing ctx wid
+      case mCustomBuild of
+        Just customBuild -> do
+          disabled <- isDisabled ctx wid
+          focused <- (== wid) <$> getFocusId ctx
+          hot <- getHotId ctx
+          active <- readIORef (ctxActiveId ctx)
+          let hovered = hot == wid && not disabled
+              pressed = active == wid && not disabled
+              cdc =
+                CustomDrawContext
+                  { cdcHovered = hovered
+                  , cdcPressed = pressed
+                  , cdcFocused = focused
+                  , cdcActive = active == wid
+                  , cdcDisabled = disabled
+                  , cdcTheme = theme
+                  , cdcHost = ctxHostProfile ctx
+                  , cdcFont = fm
+                  }
+          ops <- cachedCustomDrawingOps ctx wid rect cdc customBuild
           withClip da rect (emitDrawOps da fm ops)
+        Nothing -> do
+          mBuild <- lookupDrawing ctx wid
+          case mBuild of
+            Nothing -> pure ()
+            Just build -> do
+              ops <- cachedDrawingOps ctx wid rect build
+              withClip da rect (emitDrawOps da fm ops)
     _ -> do
       style <- widgetVisualStyle ctx nt idx
       value <- getNodeValue (ctxNodeArena ctx) idx

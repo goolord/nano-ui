@@ -127,6 +127,44 @@ module NanoUI.Widgets
   , drawingCached
   , DrawOp (..)
   , DrawingBuild
+  , CustomWidgetSpec (..)
+  , defaultCustomWidgetSpec
+  , customWidget
+  , customWidget_
+  , customWidgetWithId
+  , CustomDrawContext (..)
+  , CustomMeasureFn
+  , CustomDrawBuild
+  , CanvasM
+  , runCanvas
+  , canvas
+  , canvasWith
+  , drawRect
+  , drawRoundedRect
+  , drawCircle
+  , drawStroke
+  , drawStrokeRoundedRect
+  , drawStrokeCircle
+  , drawStrokeAA
+  , drawQuadGradient
+  , drawLinearGradientH
+  , drawLinearGradientV
+  , drawImage
+  , drawImageUV
+  , drawText
+  , useDrag2D
+  , Drag2D (..)
+  , useWheelDelta
+  , useClickGesture
+  , ClickGesture (..)
+  , knob
+  , knobWith
+  , toggleSwitch
+  , toggleSwitchWith
+  , circularProgress
+  , circularProgressWith
+  , sparkline
+  , sparklineWith
   , animate
   , animateEase
   , animateEaseDelay
@@ -288,6 +326,7 @@ import NanoUI.Widgets.Animate
   )
 import NanoUI.Widgets.ColorPicker (colorPicker)
 import NanoUI.Widgets.Drawing (DrawOp (..), DrawingBuild, drawing, drawingCached)
+import NanoUI.Widgets.Custom
 import NanoUI.Widgets.Layout
   ( column
   , column_

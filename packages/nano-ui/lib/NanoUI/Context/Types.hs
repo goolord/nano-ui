@@ -20,6 +20,9 @@ module NanoUI.Context.Types
   , initialDrawingCacheState
   , InteractionState (..)
   , initialInteractionState
+  , CustomMeasureFn
+  , CustomDrawContext (..)
+  , CustomDrawBuild
   , FrameMsg (..)
   , decodeMessages
   , reduceMessages
@@ -47,6 +50,7 @@ import NanoUI.Font (FontMetrics)
 import NanoUI.Frame.SpanArena (SpanArena)
 import NanoUI.Icons (Icons)
 import NanoUI.Id (IdContext, WidgetId, hashWidgetId)
+import NanoUI.Input (UiCursorKind)
 import NanoUI.Layout.Arena (DirTag, NodeArena, NodeType)
 import NanoUI.Store (WidgetStore)
 import NanoUI.Style (Layout, Theme)
@@ -208,10 +212,30 @@ data DrawFitCache = DrawFitCache
   , dfcOut :: !Layout
   }
 
+type CustomMeasureFn = HostProfile -> FontMetrics -> (Float, Float) -> (Float, Float)
+
+data CustomDrawContext = CustomDrawContext
+  { cdcHovered  :: !Bool
+  , cdcPressed  :: !Bool
+  , cdcFocused  :: !Bool
+  , cdcActive   :: !Bool
+  , cdcDisabled :: !Bool
+  , cdcTheme    :: !Theme
+  , cdcHost     :: !HostProfile
+  , cdcFont     :: !FontMetrics
+  }
+
+type CustomDrawBuild = CustomDrawContext -> Rect -> Vector DrawOp
+
 data DrawingCacheState = DrawingCacheState
   { dcsPopupConfigs :: !(IntMap (PopupAnchor, PopupPlacement, Float))
   , dcsDrawings :: !(IntMap DrawingBuild)
+  , dcsCustomDrawings :: !(IntMap CustomDrawBuild)
+  , dcsCustomMeasures :: !(IntMap CustomMeasureFn)
+  , dcsCustomCursors :: !(IntMap (CustomDrawContext -> UiCursorKind))
+  , dcsCustomDamageSlop :: !(IntMap Float)
   , dcsDrawOpCache :: !(IntMap (Rect, Vector DrawOp))
+  , dcsCustomDrawOpCache :: !(IntMap (Rect, Bool, Bool, Bool, Vector DrawOp))
   , dcsDrawFitCache :: !(IntMap DrawFitCache)
   , dcsWidgetNodeTypes :: !(Maybe (IntMap NodeType))
   }
@@ -220,7 +244,12 @@ initialDrawingCacheState :: DrawingCacheState
 initialDrawingCacheState = DrawingCacheState
   { dcsPopupConfigs = IM.empty
   , dcsDrawings = IM.empty
+  , dcsCustomDrawings = IM.empty
+  , dcsCustomMeasures = IM.empty
+  , dcsCustomCursors = IM.empty
+  , dcsCustomDamageSlop = IM.empty
   , dcsDrawOpCache = IM.empty
+  , dcsCustomDrawOpCache = IM.empty
   , dcsDrawFitCache = IM.empty
   , dcsWidgetNodeTypes = Nothing
   }

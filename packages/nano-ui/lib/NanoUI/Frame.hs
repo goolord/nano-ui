@@ -53,6 +53,7 @@ import NanoUI.Context
   , setMenuPointerGesture
   , setSelectDropPress
   , tickAnimations
+  , lookupCustomMeasure
   )
 import NanoUI.Context (beginFrameModal)
 import NanoUI.Damage (updatePrevRects, writeDamage)
@@ -128,7 +129,7 @@ import NanoUI.Frame.Window
 import NanoUI.Id (WidgetId (..), initialIdContext)
 import NanoUI.Input (Input (..), inputMouseDown, stripInteractionInput)
 import NanoUI.Layout.Arena (resetNodeArena)
-import NanoUI.Layout.Solve (placeModals, placePopups, placeWindows, solveLayout)
+import NanoUI.Layout.Solve (placeModals, placePopups, placeWindows, solveLayoutWith)
 import NanoUI.Monad (NanoUI, Ui, runUi)
 import NanoUI.Store (mirrorStoresChanged)
 import NanoUI.Types (Size (..))
@@ -335,12 +336,13 @@ resetUiBuildScopes ctx = do
 
 solvePlaceWindows :: Context -> Float -> Float -> IO ()
 solvePlaceWindows ctx w h = do
-  solveLayout
+  solveLayoutWith
     (ctxNodeArena ctx)
     (ctxHostProfile ctx)
     (ctxFontMetrics ctx)
     (ctxMonoFontMetrics ctx)
     (ctxMeasureText ctx)
+    (lookupCustomMeasure ctx)
     w
     h
   placeModals (ctxNodeArena ctx) (ctxHostProfile ctx) (ctxFontMetrics ctx) w h

@@ -141,6 +141,7 @@ data Vertex = Vertex
 -- flatten into this list; paint emits them after layout.
 data DrawOp
   = FillRect !Rect !Color
+  | FillRoundedRect !Rect {-# UNPACK #-} !Float !Color
   | FillTriangle
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
@@ -149,8 +150,36 @@ data DrawOp
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
       !Color
+  | FillCircle
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      !Color
   | Stroke
       {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      !Color
+  | StrokeRoundedRect !Rect {-# UNPACK #-} !Float {-# UNPACK #-} !Float !Color
+  | StrokeCircle
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      !Color
+  | StrokeLineAA
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      !Color
+  | FillQuadGradient !Rect !Color !Color !Color !Color
+  | DrawImageRect
+      !Rect
+      {-# UNPACK #-} !Int
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
@@ -180,9 +209,16 @@ shiftDrawOp :: Float -> Float -> DrawOp -> DrawOp
 shiftDrawOp dx dy op =
   case op of
     FillRect (Rect x y w h) c -> FillRect (Rect (x + dx) (y + dy) w h) c
+    FillRoundedRect (Rect x y w h) r c -> FillRoundedRect (Rect (x + dx) (y + dy) w h) r c
     FillTriangle x0 y0 x1 y1 x2 y2 c ->
       FillTriangle (x0 + dx) (y0 + dy) (x1 + dx) (y1 + dy) (x2 + dx) (y2 + dy) c
+    FillCircle cx cy r c -> FillCircle (cx + dx) (cy + dy) r c
     Stroke x0 y0 x1 y1 t c -> Stroke (x0 + dx) (y0 + dy) (x1 + dx) (y1 + dy) t c
+    StrokeRoundedRect (Rect x y w h) r bw c -> StrokeRoundedRect (Rect (x + dx) (y + dy) w h) r bw c
+    StrokeCircle cx cy r bw c -> StrokeCircle (cx + dx) (cy + dy) r bw c
+    StrokeLineAA x0 y0 x1 y1 bw c -> StrokeLineAA (x0 + dx) (y0 + dy) (x1 + dx) (y1 + dy) bw c
+    FillQuadGradient (Rect x y w h) c0 c1 c2 c3 -> FillQuadGradient (Rect (x + dx) (y + dy) w h) c0 c1 c2 c3
+    DrawImageRect (Rect x y w h) tex u0 v0 u1 v1 c -> DrawImageRect (Rect (x + dx) (y + dy) w h) tex u0 v0 u1 v1 c
     DrawText x y ax ay t c -> DrawText (x + dx) (y + dy) ax ay t c
 
 type DrawingBuild = Rect -> Vector DrawOp
@@ -1041,8 +1077,17 @@ emitDrawOps :: DrawArena -> FontMetrics -> Vector DrawOp -> IO ()
 emitDrawOps da fm ops = V.mapM_ emitOne ops
   where
     emitOne (FillRect r c) = pushRect da r c
+    emitOne (FillRoundedRect r radius c) = pushRoundedRect da r radius c
     emitOne (FillTriangle x0 y0 x1 y1 x2 y2 c) = pushFilledTriangle da x0 y0 x1 y1 x2 y2 c
+    emitOne (FillCircle cx cy radius c) =
+      pushRoundedRect da (Rect (cx - radius) (cy - radius) (2 * radius) (2 * radius)) radius c
     emitOne (Stroke x0 y0 x1 y1 t c) = pushStroke da x0 y0 x1 y1 t c
+    emitOne (StrokeRoundedRect r radius bw c) = pushRoundedStroke da r radius bw c
+    emitOne (StrokeCircle cx cy radius bw c) =
+      pushRoundedStroke da (Rect (cx - radius) (cy - radius) (2 * radius) (2 * radius)) radius bw c
+    emitOne (StrokeLineAA x0 y0 x1 y1 bw c) = pushStrokeAA da x0 y0 x1 y1 bw c
+    emitOne (FillQuadGradient r c0 c1 c2 c3) = pushQuadGradient da r c0 c1 c2 c3
+    emitOne (DrawImageRect r tex u0 v0 u1 v1 c) = pushImage da r tex u0 v0 u1 v1 c
     emitOne (DrawText x y ax ay t c) = do
       let Rect px py _ _ = drawTextBox fm x y ax ay t
       pushText da fm px py t c

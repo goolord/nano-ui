@@ -170,6 +170,7 @@ isInteractiveNode nt =
     || nt == NodeColorPicker
     || nt == NodeTextInput
     || nt == NodeTextArea
+    || nt == NodeDrawing
 
 -- Clicks are finalized against solved layout rects; widgets only track press state.
 -- Checkbox/radio write the store here. Buttons, tree rows, and select use the same

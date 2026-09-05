@@ -312,6 +312,44 @@ module NanoUI
   , DrawingBuild
   , drawTextBox
   , shiftDrawOp
+  , CustomWidgetSpec (..)
+  , defaultCustomWidgetSpec
+  , customWidget
+  , customWidget_
+  , customWidgetWithId
+  , CustomDrawContext (..)
+  , CustomMeasureFn
+  , CustomDrawBuild
+  , CanvasM
+  , runCanvas
+  , canvas
+  , canvasWith
+  , drawRect
+  , drawRoundedRect
+  , drawCircle
+  , drawStroke
+  , drawStrokeRoundedRect
+  , drawStrokeCircle
+  , drawStrokeAA
+  , drawQuadGradient
+  , drawLinearGradientH
+  , drawLinearGradientV
+  , drawImage
+  , drawImageUV
+  , drawText
+  , useDrag2D
+  , Drag2D (..)
+  , useWheelDelta
+  , useClickGesture
+  , ClickGesture (..)
+  , knob
+  , knobWith
+  , toggleSwitch
+  , toggleSwitchWith
+  , circularProgress
+  , circularProgressWith
+  , sparkline
+  , sparklineWith
   , onClick
   , clickButton
   , useFlag
@@ -624,6 +662,44 @@ import NanoUI.Widgets
   , drawingCached
   , DrawOp (..)
   , DrawingBuild
+  , CustomWidgetSpec (..)
+  , defaultCustomWidgetSpec
+  , customWidget
+  , customWidget_
+  , customWidgetWithId
+  , CustomDrawContext (..)
+  , CustomMeasureFn
+  , CustomDrawBuild
+  , CanvasM
+  , runCanvas
+  , canvas
+  , canvasWith
+  , drawRect
+  , drawRoundedRect
+  , drawCircle
+  , drawStroke
+  , drawStrokeRoundedRect
+  , drawStrokeCircle
+  , drawStrokeAA
+  , drawQuadGradient
+  , drawLinearGradientH
+  , drawLinearGradientV
+  , drawImage
+  , drawImageUV
+  , drawText
+  , useDrag2D
+  , Drag2D (..)
+  , useWheelDelta
+  , useClickGesture
+  , ClickGesture (..)
+  , knob
+  , knobWith
+  , toggleSwitch
+  , toggleSwitchWith
+  , circularProgress
+  , circularProgressWith
+  , sparkline
+  , sparklineWith
   , button
   , card
   , checkbox

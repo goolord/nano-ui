@@ -15,7 +15,9 @@ import qualified Data.IntMap.Strict as IM
 import qualified Data.Text as T
 import NanoUI.Context
   ( Context (..)
+  , CustomDrawContext (..)
   , WidgetStore (..)
+  , getFocusId
   , getHotId
   , getScrollDrag
   , getScrollOffset
@@ -25,6 +27,7 @@ import NanoUI.Context
   , intKey
   , isDisabled
   , isSelectOpen
+  , lookupCustomCursor
   )
 import NanoUI.Font (FontMetrics, sliderHandleSlack, sliderTrackBounds, textDisplayWidth)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
@@ -242,18 +245,42 @@ cursorKindAt table ctx wid mouse inp
       disabled <- isDisabled ctx wid
       if disabled
         then pure UiCursorDefault
-        else
-          case IM.lookup (intKey wid) table of
-            Just NodeButton -> widgetPointerCursor ctx wid mouse
-            Just NodeCheckbox -> widgetPointerCursor ctx wid mouse
-            Just NodeRadio -> widgetPointerCursor ctx wid mouse
-            Just NodeTree -> widgetPointerCursor ctx wid mouse
-            Just NodeSelect -> selectCursorKind ctx wid mouse
-            Just NodeColorPicker -> pure UiCursorPointer
-            Just NodeTextInput -> textInputCursorKind ctx wid mouse
-            Just NodeTextArea -> textAreaCursorKind ctx wid mouse
-            Just NodeSlider -> sliderCursorKind ctx wid mouse inp
-            _ -> pure UiCursorDefault
+        else do
+          mCursorFn <- lookupCustomCursor ctx wid
+          case mCursorFn of
+            Just cursorFn -> do
+              visible <- widgetVisibleAt ctx wid mouse
+              if not visible
+                then pure UiCursorDefault
+                else do
+                  active <- readIORef (ctxActiveId ctx)
+                  hot <- getHotId ctx
+                  focused <- (== wid) <$> getFocusId ctx
+                  theme <- readIORef (ctxTheme ctx)
+                  let cdc =
+                        CustomDrawContext
+                          { cdcHovered = hot == wid
+                          , cdcPressed = active == wid
+                          , cdcFocused = focused
+                          , cdcActive = active == wid
+                          , cdcDisabled = disabled
+                          , cdcTheme = theme
+                          , cdcHost = ctxHostProfile ctx
+                          , cdcFont = ctxFontMetrics ctx
+                          }
+                  pure (cursorFn cdc)
+            Nothing ->
+              case IM.lookup (intKey wid) table of
+                Just NodeButton -> widgetPointerCursor ctx wid mouse
+                Just NodeCheckbox -> widgetPointerCursor ctx wid mouse
+                Just NodeRadio -> widgetPointerCursor ctx wid mouse
+                Just NodeTree -> widgetPointerCursor ctx wid mouse
+                Just NodeSelect -> selectCursorKind ctx wid mouse
+                Just NodeColorPicker -> pure UiCursorPointer
+                Just NodeTextInput -> textInputCursorKind ctx wid mouse
+                Just NodeTextArea -> textAreaCursorKind ctx wid mouse
+                Just NodeSlider -> sliderCursorKind ctx wid mouse inp
+                _ -> pure UiCursorDefault
 
 selectCursorKind :: Context -> WidgetId -> V2 -> IO UiCursorKind
 selectCursorKind ctx wid mouse = do
