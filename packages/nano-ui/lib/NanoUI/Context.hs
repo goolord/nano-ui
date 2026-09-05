@@ -63,6 +63,7 @@ module NanoUI.Context
   , lookupDrawing
   , cachedDrawingOps
   , cachedWidgetLayout
+  , lookupDrawFitEnvelope
   , pruneDrawOpCache
   , clearDrawings
   , getWidgetNodeTypes
@@ -556,8 +557,29 @@ cachedWidgetLayout ctx wid dw dh lh content incoming compute = do
     _ -> do
       out <- compute
       modifyIORef' (ctxDrawingCache ctx) $ \s ->
-        s {dcsDrawFitCache = IM.insert k (DrawFitCache dw dh lh content incoming out) (dcsDrawFitCache s)}
+        s { dcsDrawFitCache = IM.insert k (DrawFitCache dw dh lh content incoming out) (dcsDrawFitCache s)
+          , dcsDrawOpCache = IM.delete k (dcsDrawOpCache s)
+          }
       pure out
+
+{-# INLINE lookupDrawFitEnvelope #-}
+lookupDrawFitEnvelope ::
+  Context ->
+  WidgetId ->
+  Float ->
+  Int ->
+  Layout ->
+  IO (Maybe (Double, Double))
+lookupDrawFitEnvelope ctx wid lh content incoming = do
+  let k = intKey wid
+  dc <- readIORef (ctxDrawingCache ctx)
+  case IM.lookup k (dcsDrawFitCache dc) of
+    Just e
+      | dfcLh e == lh
+          && dfcContent e == content
+          && dfcIn e == incoming ->
+          pure (Just (dfcDw e, dfcDh e))
+    _ -> pure Nothing
 
 -- | Drop cached ops for drawings that did not rebuild this frame.
 pruneDrawOpCache :: Context -> IO ()

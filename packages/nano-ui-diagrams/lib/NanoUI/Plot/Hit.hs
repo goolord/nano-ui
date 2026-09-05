@@ -2,7 +2,9 @@
 
 module NanoUI.Plot.Hit
   ( hitTestChart
+  , hitTestChartCached
   , diagramPointAt
+  , diagramPointAtWithExtents
   , nearestPlotHover
   ) where
 
@@ -29,6 +31,23 @@ hitTestChart ::
   V2 ->
   Maybe PlotHover
 hitTestChart fm theme ps chart widgetRect mouse =
+  let d = chartDiagram fm theme ps chart
+      Dia.V2 dw dh = Dia.size d
+      extX = fromMaybe (0, dw) (Dia.extentX d)
+      extY = fromMaybe (0, dh) (Dia.extentY d)
+   in hitTestChartCached d dw dh extX extY chart widgetRect mouse
+
+hitTestChartCached ::
+  QDiagram NanoUIBackend Dia.V2 Double Dia.Any ->
+  Double ->
+  Double ->
+  (Double, Double) ->
+  (Double, Double) ->
+  Chart ->
+  Rect ->
+  V2 ->
+  Maybe PlotHover
+hitTestChartCached d dw dh extX extY chart widgetRect mouse =
   let inner =
         Rect
           (rectX widgetRect + diagramBorder)
@@ -40,10 +59,9 @@ hitTestChart fm theme ps chart widgetRect mouse =
         else
           let lx = v2X mouse - rectX inner
               ly = v2Y mouse - rectY inner
-              d = chartDiagram fm theme ps chart
               w = realToFrac (rectW inner) :: Double
               h = realToFrac (rectH inner)
-           in case diagramPointAt w h d lx ly of
+           in case diagramPointAtWithExtents dw dh extX extY w h d lx ly of
                 Nothing -> Nothing
                 Just (gx, gy) -> nearestPlotHover chart gx gy
 
@@ -54,11 +72,27 @@ diagramPointAt ::
   Float ->
   Float ->
   Maybe (Double, Double)
-diagramPointAt w h d px py
+diagramPointAt w h d px py =
+  let Dia.V2 dw dh = Dia.size d
+      extX = fromMaybe (0, dw) (Dia.extentX d)
+      extY = fromMaybe (0, dh) (Dia.extentY d)
+   in diagramPointAtWithExtents dw dh extX extY w h d px py
+
+diagramPointAtWithExtents ::
+  Double ->
+  Double ->
+  (Double, Double) ->
+  (Double, Double) ->
+  Double ->
+  Double ->
+  QDiagram NanoUIBackend Dia.V2 Double Dia.Any ->
+  Float ->
+  Float ->
+  Maybe (Double, Double)
+diagramPointAtWithExtents dw dh (x0, x1) (y0, y1) w h d px py
   | w <= 0 || h <= 0 = Nothing
   | otherwise =
-      let Dia.V2 dw dh = Dia.size d
-          outH = uniformHeight w h d
+      let outH = uniformHeight w h d
           outW = if dh <= 1e-9 then w else outH * dw / dh
           offX = (w - outW) / 2
           offY = (h - outH) / 2
@@ -67,9 +101,7 @@ diagramPointAt w h d px py
        in if lx < offX || ly < offY || lx > offX + outW || ly > offY + outH
             then Nothing
             else
-              let (x0, x1) = fromMaybe (0, dw) (Dia.extentX d)
-                  (y0, y1) = fromMaybe (0, dh) (Dia.extentY d)
-                  gx = x0 + (lx - offX) / outW * (x1 - x0)
+              let gx = x0 + (lx - offX) / outW * (x1 - x0)
                   gy = y1 - (ly - offY) / outH * (y1 - y0)
                in Just (gx, gy)
 
