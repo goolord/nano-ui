@@ -20,12 +20,14 @@ module NanoUI.Font
   , widgetContentInset
   , widgetPadding
   , buttonPadding
+  , selectPadding
   , centeredTextY
   , alignedTextPen
   , textInkEnd
   , layoutLineHeight
   , checkboxBoxSize
   , checkboxLeading
+  , treeItemPadding
   , treeIndentStep
   , treeChevronLeading
   , treeRowLeading
@@ -49,6 +51,9 @@ module NanoUI.Font
   , scrollBarWindowGutter
   , sliderTrackBounds
   , sliderTrackHeight
+  , sliderTrackMargin
+  , sliderHandleDiameter
+  , sliderHandleSlack
   ) where
 
 
@@ -136,6 +141,15 @@ buttonPadding host fm
           lh = layoutLineHeight host fm
        in (adv * 2.0, lh * 0.30)
 
+{-# INLINE selectPadding #-}
+selectPadding :: HostProfile -> FontMetrics -> (Float, Float)
+selectPadding host fm
+  | isCellHost host = (0, 0)
+  | otherwise =
+      let adv = fmAdvance fm ' '
+          lh = layoutLineHeight host fm
+       in (adv * 2.0, lh * 0.50)
+
 {-# INLINE layoutLineHeight #-}
 layoutLineHeight :: HostProfile -> FontMetrics -> Float
 layoutLineHeight _host fm = fmLineHeight fm
@@ -211,6 +225,14 @@ checkboxLeading host fm
   | isCellHost host = 0
   | otherwise = checkboxBoxSize host fm + 8
 
+{-# INLINE treeItemPadding #-}
+treeItemPadding :: HostProfile -> FontMetrics -> (Float, Float)
+treeItemPadding host fm
+  | isCellHost host = (0, 0)
+  | otherwise =
+      let lh = layoutLineHeight host fm
+       in (0, max 8 (fromIntegral (round (lh * 0.40) :: Int)))
+
 {-# INLINE treeIndentStep #-}
 treeIndentStep :: HostProfile -> FontMetrics -> Float
 treeIndentStep host fm
@@ -244,8 +266,15 @@ treeChevronRect host fm x y _w h depth =
 sliderTrackHeight :: Float
 sliderTrackHeight = 10
 
+sliderHandleDiameter :: Float
+sliderHandleDiameter = 18
+
+sliderHandleSlack :: Float
+sliderHandleSlack = (sliderHandleDiameter - sliderTrackHeight) / 2
+
+-- Distance from label baseline to track: 4px gap to handle + handle overhang
 sliderTrackMargin :: Float
-sliderTrackMargin = 3
+sliderTrackMargin = 4 + sliderHandleSlack
 
 -- Pixel hosts: track spans the label row. Cell hosts: inline [bar] cells.
 {-# INLINE sliderTrackBounds #-}
@@ -261,8 +290,8 @@ sliderTrackBounds host fm lbl x y w h
       let (lx, ly) = labelContentInset host fm
           labelH = layoutLineHeight host fm
           packedY = y + ly + labelH + sliderTrackMargin
-          maxY = y + h - sliderTrackHeight - sliderTrackMargin
-          trackY = if maxY >= packedY then packedY else max (y + ly) maxY
+          maxY = y + h - sliderTrackHeight - sliderHandleSlack
+          trackY = if maxY >= packedY then packedY else max (y + ly + sliderHandleSlack) maxY
           trackX = x + lx
           trackW = max 0 (w - 2 * lx)
        in Rect trackX trackY trackW sliderTrackHeight

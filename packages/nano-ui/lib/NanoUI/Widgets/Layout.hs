@@ -216,7 +216,7 @@ callout borderCol = calloutWith borderCol id
 calloutWith :: Ui :> es => Color -> (Layout -> Layout) -> Eff es a -> Eff es a
 calloutWith borderCol f =
   let bgCol = lerpColor borderCol (colorRGBA 30 30 35 255) 0.88
-   in panelStyledWith bgCol borderCol (f . padXY 10 6 . gap 4 . fillW)
+   in panelStyledWith bgCol borderCol (f . padXY 10 6 . gap 8 . fillW)
 
 -- =============================================================================
 -- Row

@@ -79,6 +79,7 @@ module NanoUI.Widgets
   , scrollAreaIdConfigured
   , scrollConfigured
   , select
+  , selectWith
   , boundedSelect
   , enumSelect
   , useEnumSelect
@@ -211,6 +212,7 @@ import NanoUI.Widgets.Node (RightClickable (..), onRightClick, setSubmitted)
 import NanoUI.Font
   ( fmLineHeight
   , sliderTrackBounds
+  , sliderHandleSlack
   )
 import NanoUI.Frame.Hit (scrollHitRect)
 import NanoUI.Types (isCellHost)
@@ -427,7 +429,7 @@ box layout col = do
     )
 
 heading :: Ui :> es => Text -> Eff es ()
-heading txt = void (labelWith (tight . padXY 0 3 . fontHeading) txt)
+heading txt = void (labelWith (tight . fontHeading) txt)
 
 muted :: Ui :> es => Text -> Eff es ()
 muted txt = void (labelWith (fillW . fontMuted) txt)
@@ -585,7 +587,11 @@ sliderEx layout lbl minV maxV initial = do
         && not isActive
     track0 =
       case mrect of
-        Just (Rect x y w h) -> sliderTrackBounds host fm lbl x y w h
+        Just (Rect x y w h) ->
+          let tr = sliderTrackBounds host fm lbl x y w h
+           in if isCellHost host
+                then tr
+                else Rect (rectX tr) (rectY tr - sliderHandleSlack) (rectW tr) (rectH tr + 2 * sliderHandleSlack)
         Nothing -> Rect 0 0 0 0
     track = if blocked || heldByOther then Rect 0 0 0 0 else track0
   (dragged, dragging) <- withKey ("drag" :: Text) (useDrag1D DragAxisX minV maxV current track)
@@ -709,7 +715,16 @@ textArea lbl initial = do
   pure (setChanged (newText /= current) resp, newText)
 
 select :: Ui :> es => Text -> [Text] -> Int -> Eff es (Response, Int)
-select lbl options initial = do
+select = selectWith id
+
+selectWith ::
+  Ui :> es =>
+  (Layout -> Layout) ->
+  Text ->
+  [Text] ->
+  Int ->
+  Eff es (Response, Int)
+selectWith modLayout lbl options initial = do
   wid <- nextId
   ctx <- askContext
   uiIO $ registerFocusable ctx wid
@@ -723,7 +738,7 @@ select lbl options initial = do
   when (not (IM.member key (storeInt store0)))
     $ uiIO
     $ setStore ctx (store0 {storeInt = IM.insert key clamped (storeInt store0)})
-  resp <- addWidgetWithOptions wid NodeSelect lbl opts 0 defaultLayout
+  resp <- addWidgetWithOptions wid NodeSelect lbl opts 0 (modLayout defaultLayout)
   inp <- askInput
   open <- uiIO $ do
     st <- getStore ctx

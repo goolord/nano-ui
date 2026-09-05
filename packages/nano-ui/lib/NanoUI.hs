@@ -56,6 +56,30 @@ module NanoUI
   , Style (..)
   , Theme (..)
   , defaultTheme
+  , tomorrowNightMinTheme
+  , tomorrowNightMinDarkTheme
+  , tomorrowLightTheme
+  , tomorrowMinLightTheme
+  , tomorrowMidnightMinTheme
+  , tomorrowMidnightMinDarkTheme
+  , Base16 (..)
+  , Base16ColorScheme
+  , base0a
+  , base0b
+  , base0c
+  , base0d
+  , base0e
+  , base0f
+  , themeFromBase16
+  , themeFromBase16Dark
+  , themeFromBase16Light
+  , base16Theme
+  , base16ToTheme
+  , base16TomorrowNight
+  , base16TomorrowLight
+  , withTheme
+  , setTheme
+  , getTheme
   , themeSeries
   , scrollBarTrackColor
   , scrollBarThumbColor
@@ -118,6 +142,7 @@ module NanoUI
   , withKey
   , uiFontMetrics
   , uiTheme
+  , setUiTheme
   , uiMousePos
   , damageWidgetNow
   , damageKeyNow
@@ -222,6 +247,7 @@ module NanoUI
   , scrollAreaIdConfigured
   , scrollConfigured
   , select
+  , selectWith
   , boundedSelect
   , enumSelect
   , useEnumSelect
@@ -364,6 +390,7 @@ module NanoUI
   , tableCellInset
   , widgetContentInset
   , widgetPadding
+  , treeItemPadding
   , resolveLayoutGap
   , resolveLayoutPadding
   , scrollBarGutter
@@ -381,7 +408,7 @@ where
 
 import NanoUI.Animatable (Animatable (..))
 import NanoUI.Compact (Compact, askCompact, compactHost)
-import NanoUI.Context (Ease (..), applyEase)
+import NanoUI.Context (Ease (..), applyEase, getTheme, setTheme, withTheme)
 import NanoUI.Draw (drawTextBox, shiftDrawOp)
 import NanoUI.Font
   ( FontMetrics (..)
@@ -399,6 +426,7 @@ import NanoUI.Font
   , scrollBarWindowGutter
   , widgetContentInset
   , widgetPadding
+  , treeItemPadding
   )
 import NanoUI.Icons
   ( IconSet (..)
@@ -460,6 +488,7 @@ import NanoUI.Monad
   , uiIO
   , uiFontMetrics
   , uiTheme
+  , setUiTheme
   , uiMousePos
   , windowSize
   , windowWidth
@@ -496,6 +525,27 @@ import NanoUI.Style
   , gridCols
   , defaultLayout
   , defaultTheme
+  , tomorrowNightMinTheme
+  , tomorrowNightMinDarkTheme
+  , tomorrowLightTheme
+  , tomorrowMinLightTheme
+  , tomorrowMidnightMinTheme
+  , tomorrowMidnightMinDarkTheme
+  , Base16 (..)
+  , Base16ColorScheme
+  , base0a
+  , base0b
+  , base0c
+  , base0d
+  , base0e
+  , base0f
+  , themeFromBase16
+  , themeFromBase16Dark
+  , themeFromBase16Light
+  , base16Theme
+  , base16ToTheme
+  , base16TomorrowNight
+  , base16TomorrowLight
   , fontHeading
   , fontMuted
   , fontMono
@@ -653,6 +703,7 @@ import NanoUI.Widgets
   , scrollAreaIdConfigured
   , scrollConfigured
   , select
+  , selectWith
   , sep
   , separator
   , slider

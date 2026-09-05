@@ -3,6 +3,8 @@
 -- | Floating overlay chrome: title bars, close buttons, cell-host scaling.
 module NanoUI.Widgets.Chrome
   ( titleBarHFor
+  , modalTitleBarHFor
+  , modalTitleBarH
   , titleBarChromeHFor
   , titleBarLayoutFor
   , titleLabelLayoutFor
@@ -51,6 +53,14 @@ titleBarHFor :: HostProfile -> Float
 titleBarHFor host
   | isCellHost host = 1
   | otherwise = titleBarH
+
+modalTitleBarH :: Float
+modalTitleBarH = 40
+
+modalTitleBarHFor :: HostProfile -> Float
+modalTitleBarHFor host
+  | isCellHost host = 1
+  | otherwise = modalTitleBarH
 
 windowChromeSepH :: Float
 windowChromeSepH = 1

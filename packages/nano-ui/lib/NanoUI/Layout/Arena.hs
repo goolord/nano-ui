@@ -150,11 +150,7 @@ isContainerNode nt =
     _ -> False
 
 isScrollNode :: NodeType -> Bool
-isScrollNode nt =
-  case nt of
-    NodeScrollContainer -> True
-    NodeModal -> True
-    _ -> False
+isScrollNode nt = nt == NodeScrollContainer
 
 isFloatingNode :: NodeType -> Bool
 isFloatingNode nt = nt == NodeModal || nt == NodeWindow || nt == NodePopup

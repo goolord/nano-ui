@@ -18,6 +18,7 @@ module NanoUI.Frame.Spans
 
 
 import Control.Monad (unless, when)
+import Data.IORef (readIORef)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Text as T
 import NanoUI.Widgets.ColorPicker
@@ -232,17 +233,18 @@ collectClippedSpans' ctx floatCache idx nt clip arena = do
                 spans <- collectNodeTextSpans ctx floatCache idx
                 pure (tagTextInputClippedSpans (ctxHostProfile ctx) clipHere x y w h fm spans)
           NodeSeparator
-            | isCellHost (ctxHostProfile ctx) ->
+            | isCellHost (ctxHostProfile ctx) -> do
+                theme <- readIORef (ctxTheme ctx)
                 pure
                   ( tagClippedSpans
                       (Rect x y w h)
-                      (terminalSeparatorSpans (ctxTheme ctx) x y w h)
+                      (terminalSeparatorSpans theme x y w h)
                   )
           _ -> tagClippedSpans clipHere <$> collectNodeTextSpans ctx floatCache idx
       mapM_ (\(r, t, fg, bg, c) -> pushSpan arena r t fg bg c) here
       -- TUI modal chrome does not scroll (the inner body scroller does), so it
       -- has no track to cap.
-      when (isCellHost (ctxHostProfile ctx) && isScrollNode nt && nt /= NodeModal) $ do
+      when (isCellHost (ctxHostProfile ctx) && isScrollNode nt) $ do
         si <- getStyleIdx (ctxNodeArena ctx) idx
         let cfg = decodeScrollConfig si
             padClip = padContentClip (ctxHostProfile ctx) fm x y w h pad
@@ -291,8 +293,8 @@ collectNodeTextSpans :: Context -> IM.IntMap (Maybe NodeType) -> NodeIdx -> IO [
 collectNodeTextSpans ctx floatCache idx = do
   nt <- getNodeType (ctxNodeArena ctx) idx
   (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+  theme <- readIORef (ctxTheme ctx)
   let fm = ctxFontMetrics ctx
-      theme = ctxTheme ctx
   if nt == NodeText
     then do
       raw <- getText (ctxNodeArena ctx) idx
@@ -491,8 +493,8 @@ widgetTextSpans ctx nt idx x y w h = do
           placements <- widgetTextPlacements ctx nt idx x y w h
           value <- textInputValue ctx idx
           focus <- textInputFocused ctx idx
-          let theme = ctxTheme ctx
-              windowBg = themeWindow theme
+          theme <- readIORef (ctxTheme ctx)
+          let windowBg = themeWindow theme
               labelFg = lerpColor fg windowBg 0.32
               placeholder = T.null value && not focus
               fieldFg
@@ -776,8 +778,9 @@ terminalScrollCapSpans ctx idx x y w h pad clip
               , let trackW = rectW (sbTrack layout)
               , all (\t -> T.null t || fromIntegral (terminalPaintColumns t) <= trackW) [up, down] ->
                   do
+              theme <- readIORef (ctxTheme ctx)
               let track = sbTrack layout
-                  fg = themeSeparator (ctxTheme ctx)
+                  fg = themeSeparator theme
                   bg = colorRGBA 0 0 0 0
                   cell ty txt =
                     let pw = fromIntegral (terminalPaintColumns txt)

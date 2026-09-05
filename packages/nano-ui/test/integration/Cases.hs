@@ -12,6 +12,7 @@ module Cases
   , module Cases.Window
   , runAsciiTest
   , runAspectLayoutTest
+  , runBase16ThemeTest
   , runCheckboxTest
   , runColumnCardWrapTest
   , runCompactHostTest
@@ -688,6 +689,50 @@ runPanelPaintsTest ctx failed = do
   (_, _, colDraw, _) <- runFrame ctx inp (column' fat (label "x"))
   (_, _, panDraw, _) <- runFrame ctx inp (panel' fat (label "x"))
   assertGt failed (drawVertexCount panDraw) (drawVertexCount colDraw)
+
+runBase16ThemeTest :: Context -> IORef Int -> IO ()
+runBase16ThemeTest ctx failed = do
+  let dark = themeFromBase16 base16TomorrowNight
+      light = themeFromBase16 base16TomorrowLight
+  -- Window background matches base00
+  assertEq failed (themeWindow dark) (base00 base16TomorrowNight)
+  assertEq failed (themeWindow light) (base00 base16TomorrowLight)
+  -- Accent matches base0D
+  assertEq failed (themeAccent dark) (base0D base16TomorrowNight)
+  assertEq failed (themeAccent light) (base0D base16TomorrowLight)
+  -- Series colors match base08-base0E
+  assertEq failed (themeRed dark) (base08 base16TomorrowNight)
+  assertEq failed (themeOrange dark) (base09 base16TomorrowNight)
+  assertEq failed (themeYellow dark) (base0A base16TomorrowNight)
+  assertEq failed (themeGreen dark) (base0B base16TomorrowNight)
+  assertEq failed (themePurple dark) (base0E base16TomorrowNight)
+  -- Lowercase aliases match uppercase record fields
+  assertEq failed (base0a base16TomorrowNight) (base0A base16TomorrowNight)
+  assertEq failed (base0b base16TomorrowNight) (base0B base16TomorrowNight)
+  assertEq failed (base0c base16TomorrowNight) (base0C base16TomorrowNight)
+  assertEq failed (base0d base16TomorrowNight) (base0D base16TomorrowNight)
+  assertEq failed (base0e base16TomorrowNight) (base0E base16TomorrowNight)
+  assertEq failed (base0f base16TomorrowNight) (base0F base16TomorrowNight)
+  -- Function aliases produce identical themes
+  assertEq failed dark (base16Theme base16TomorrowNight)
+  assertEq failed dark (base16ToTheme base16TomorrowNight)
+  -- Dark theme styling checks
+  assertEq failed (styleBg (themeInput dark)) (base00 base16TomorrowNight)
+  assertEq failed (styleBg (themeButton dark)) (base02 base16TomorrowNight)
+  assertEq failed (styleFg (themeButton dark)) (base07 base16TomorrowNight)
+  assertEq failed (themeOverlayDim dark) (colorRGBA 0 0 0 160)
+  -- Light theme styling checks
+  assertEq failed (styleBg (themeInput light)) (base00 base16TomorrowLight)
+  assertEq failed (styleBg (themeButton light)) (base01 base16TomorrowLight)
+  assertEq failed (styleFg (themeButton light)) (base05 base16TomorrowLight)
+  assertEq failed (themeOverlayDim light) (colorRGBA 0 0 0 100)
+  -- Integration: Context theme update and UI frame renders with base16 theme
+  ctx' <- withTheme ctx dark
+  th <- getTheme ctx'
+  assertEq failed th dark
+  let inp = withInput 200 100
+  (_, _, draw, _) <- runFrame ctx' inp (button "Base16 Button")
+  assertGt failed (drawVertexCount draw) 0
 
 
 

@@ -21,7 +21,7 @@ stack :: Layout
 stack =
   page
     { layoutHeight = Fit
-    , layoutGap = 4
+    , layoutGap = 8
     }
 
 -- The framing panel, so it fills the terminal rather than fitting its content.

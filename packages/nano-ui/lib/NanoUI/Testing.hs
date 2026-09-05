@@ -53,6 +53,8 @@ module NanoUI.Testing
   , withExternalText
   , enableMeasureCache
   , withTheme
+  , setTheme
+  , getTheme
   , withIcons
   , withHostProfile
   , HostProfile (..)
@@ -205,6 +207,8 @@ import NanoUI.Context
   , withMeasureText
   , withMonoFontMetrics
   , withTheme
+  , setTheme
+  , getTheme
   , wrapMeasureCache
   )
 import NanoUI.Context (newContext, newPixelHostContext)

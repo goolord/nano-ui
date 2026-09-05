@@ -56,7 +56,7 @@ runSdlAppReduce options update model view = do
 sdlContext :: SdlOptions -> IO Context
 sdlContext options = do
   ctx0 <- newSdlContext
-  let themed = maybe ctx0 (withTheme ctx0) (sdlAppTheme options)
+  themed <- maybe (pure ctx0) (withTheme ctx0) (sdlAppTheme options)
   ok <- registerImages themed (sdlAppImages options)
   unless ok $ fail "registerImage failed"
   pure themed

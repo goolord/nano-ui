@@ -8,6 +8,7 @@ module NanoUI.Frame.Paint
 
 
 import Control.Monad (forM_, unless, when)
+import Data.IORef (readIORef)
 import Data.Word (Word32)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Text as T
@@ -39,6 +40,7 @@ import NanoUI.Font
   , checkboxBoxSize
   , labelContentInset
   , sliderTrackBounds
+  , sliderHandleDiameter
   , treeChevronRect
   , widgetContentInset
   )
@@ -121,8 +123,8 @@ lowerShapes ctx = do
 collectFloatingOccluders :: Context -> IO [Rect]
 collectFloatingOccluders ctx = do
   n <- arenaCount (ctxNodeArena ctx)
-  let theme = ctxTheme ctx
-      winStyle = overlayWindowStyle theme
+  theme <- readIORef (ctxTheme ctx)
+  let winStyle = overlayWindowStyle theme
       modalStyle = overlayModalStyle theme
       menuStyle = overlayMenuStyle theme
       isOpaque s = colorA (styleBg s) == 255
@@ -154,9 +156,9 @@ lowerNodeWithOccluders :: Context -> [Rect] -> NodeIdx -> IO ()
 lowerNodeWithOccluders ctx occluders idx = do
   nt <- getNodeType (ctxNodeArena ctx) idx
   (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+  theme <- readIORef (ctxTheme ctx)
   let rect = Rect x y w h
       fm = ctxFontMetrics ctx
-      theme = ctxTheme ctx
       terminal = isCellHost (ctxHostProfile ctx)
       da = ctxDrawArena ctx
   clip <- getCurrentClip da
@@ -415,8 +417,8 @@ lowerNodeVisible ctx occluders idx nt x y w h rect fm theme terminal da =
               trackR = 3
               fillW = max 0 (tw * clamp01 value)
               outline = styleBorder (themeInput theme)
-              well = colorRGBA 72 48 48 255
-              fill = colorRGBA 204 102 102 255
+              well = lerpColor (styleBg (themeInput theme)) (styleBorder (themeInput theme)) 0.35
+              fill = themeAccent theme
               bw = 1
               innerR = max 0 (trackR - bw)
               innerX = tx + bw
@@ -433,7 +435,7 @@ lowerNodeVisible ctx occluders idx nt x y w h rect fm theme terminal da =
                     then innerR
                     else min innerR (innerFillW / 2)
             pushRoundedRect da (Rect innerX innerY innerFillW innerH) fillR fill
-          let handleD = 18
+          let handleD = sliderHandleDiameter
               handleCx = tx + max (handleD / 2) (min (tw - handleD / 2) fillW)
               handleHy = ty + (th - handleD) / 2
               handle = Rect (handleCx - handleD / 2) handleHy handleD handleD

@@ -424,8 +424,8 @@ widgetVisualStyle ctx nt idx = do
         if nt == NodeButton
           then buttonFlagsFromStyle styleIdx
           else (False, False, False)
-  let theme = ctxTheme ctx
-      terminal = isCellHost (ctxHostProfile ctx)
+  theme <- readIORef (ctxTheme ctx)
+  let terminal = isCellHost (ctxHostProfile ctx)
       isFocus = focus == wid
       widKey = hashWidgetId wid
       isHot = wid == hot

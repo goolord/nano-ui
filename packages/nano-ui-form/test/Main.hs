@@ -2,6 +2,7 @@
 
 module Main (main) where
 
+import Control.Monad (forM_, when)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Ditto.Types as Ditto
@@ -10,19 +11,34 @@ import NanoUI
   , Rect (..)
   , Size (..)
   , Theme (..)
+  , V2 (..)
+  , button
   , card
   , colorRGBA
   , columnWith
   , contrastRatio
   , danger
   , emptyInput
+  , fillW
+  , flex
+  , gap
+  , grow
   , heading
   , maxW
   , minW
+  , monospaceMetrics
+  , muted
+  , padAll
+  , rowWith
   , runNanoUI
+  , scrollWith
+  , sep
   , tight
+  , toolbar
   )
-import NanoUI.Testing (collectTextSpans, ctxTheme, newContext, runFrame)
+import NanoUI.Testing (collectTextSpans, getTheme, newContext, runFrame, withFontMetrics)
+import NanoUI.Context (ctxNodeArena)
+import NanoUI.Layout.Arena (arenaCount, getNodeType, getParent, getRect, getText, getNodeValue, getWidthSizing, getHeightSizing)
 import NanoUI.Form
 import NanoUI.Form.Backend (updateFieldInput)
 import System.IO (BufferMode (NoBuffering), hSetBuffering, stdout)
@@ -32,6 +48,9 @@ data Person = Person
   , personAge  :: !Float
   , personOk   :: !Bool
   } deriving (Eq, Show)
+
+data AccountTier = Starter | Developer | Professional | Enterprise
+  deriving (Eq, Show, Bounded, Enum)
 
 personForm :: Form Text Person
 personForm =
@@ -155,7 +174,8 @@ main = do
     Ditto.Error errs -> error $ "Expected valid form after fix, got: " ++ show errs
 
   putStrLn "\n--- Test 7: Long error text wrapping & contrast ratio ---"
-  let red = themeRed (ctxTheme ctx)
+  th <- getTheme ctx
+  let red = themeRed th
       errBg = colorRGBA 48 20 22 255
       ratio = contrastRatio red errBg
   putStrLn $ "  Contrast ratio of error text vs background: " ++ show ratio ++ ":1"
@@ -194,5 +214,86 @@ main = do
       assert "Email error wrapped into 2 lines" True
       assert "Password error is placed below the 2nd line of email error (no overlap)" (y3 > y2)
     _ -> error $ "Unexpected spans layout: email=" ++ show emailSpans8 ++ ", pw=" ++ show pwSpans8
+
+
+  putStrLn "\n--- Test 9: Form Demo Scroll Layout & Bottom Visibility ---"
+  let demoForm =
+        (,,,,,,,)
+          <$> withFieldErrors (inputTextWithPlaceholder "e.g. adalovelace" "Username" "Ada" `prove` notEmpty "Username required")
+          <*> withFieldErrors (inputTextWithPlaceholder "e.g. ada@example.com" "Email" "ada@exampl" `prove` validEmail (const "Invalid email address format (e.g. name@domain.com)"))
+          <*> withFieldErrors (inputPassword "Password" "correcthorse" `prove` notEmpty "Password required")
+          <*> withFieldErrors (inputSlider "Age" 13 100 28 `prove` inRange 18 100 (const "Must be 18+"))
+          <*> inputEnumSelect "Account Tier" Developer
+          <*> inputColor "Accent Color" (colorRGBA 99 102 241 255)
+          <*> inputCheckbox "Subscribe to release announcements and updates" True
+          <*> withFieldErrors (inputTextArea "Developer Bio" "Building high-performance GUI applications in Haskell with nano-ui and ditto." `prove` maxLength 160 (const "Max 160"))
+
+  let demoUi = do
+        (view', res) <- runNanoForm "user_reg" demoForm
+        let renderedView = case res of
+              Ditto.Error errs -> Ditto.unView view' errs
+              Ditto.Ok _       -> Ditto.unView view' []
+        scrollWith (tight . grow) $
+          columnWith (padAll 20 . gap 16 . fillW) $ do
+            toolbar $ do
+              columnWith (tight . gap 2) $ do
+                heading "nano-ui-form"
+                muted "Type-safe, composable immediate-mode forms powered by ditto & rendered via SDL3"
+              flex
+              muted "Press ESC to exit"
+            sep
+            rowWith (tight . gap 20 . fillW) $ do
+              columnWith (tight . gap 12 . fillW) $ do
+                card $ do
+                  heading "User Profile & Registration"
+                  muted "All inputs validate live using composable applicative proofs."
+                  sep
+                  runFormView renderedView
+                  sep
+                  rowWith (tight . gap 10 . fillW) $ do
+                    _ <- button "Submit Registration"
+                    _ <- button "Reset Form"
+                    pure ()
+              columnWith (tight . gap 12 . minW 340 . maxW 380) $ do
+                card $ do
+                  heading "Live Form Inspector"
+                  muted "Real-time decode and proof telemetry:"
+                  sep
+                  danger "Status: INVALID / INCOMPLETE"
+                  sep
+                  heading "Active Validation Errors:"
+                  danger "• Invalid email address format (e.g. name@domain.com)"
+                card $ do
+                  heading "Submission Activity"
+                  muted "Record of last form submission:"
+                  sep
+                  muted "Successfully registered: User @Ada (ada@example.com), Age: 28, Tier: Developer, Color: #6366f1, Subscribed: No"
+
+  let ctx20 = withFontMetrics ctx (monospaceMetrics 20)
+  let inp9 = emptyInput { inputWindowSize = Size 1100 800 }
+  (_, _, _, _) <- runFrame ctx20 inp9 demoUi
+  let na = ctxNodeArena ctx20
+  c <- arenaCount na
+  putStrLn $ "  Total nodes in arena: " ++ show c
+  forM_ [0 .. c - 1] $ \i -> do
+    nt <- getNodeType na i
+    (x, y, w, h) <- getRect na i
+    txt <- getText na i
+    val <- getNodeValue na i
+    _ <- getWidthSizing na i
+    (hTag, _) <- getHeightSizing na i
+    p <- NanoUI.Layout.Arena.getParent na i
+    putStrLn $ "  Node " ++ show i ++ " (parent=" ++ show p ++ "): " ++ show nt ++ " rect=(" ++ show x ++ "," ++ show y ++ "," ++ show w ++ "," ++ show h ++ ") val=" ++ show val ++ " hTag=" ++ show hTag ++ " txt=" ++ show (T.take 25 txt)
+
+  let inp9Scroll = inp9 { inputMousePos = V2 400 400, inputScroll = V2 0 25 }
+  (_, _, _, _) <- runFrame ctx20 inp9Scroll demoUi
+  spans9After <- collectTextSpans ctx20
+  putStrLn $ "  Total spans after scroll: " ++ show (length spans9After)
+  let submitSpans = [(r, t) | (r, t, _, _, _) <- spans9After, "Submit" `T.isInfixOf` t]
+  putStrLn $ "  Submit button spans: " ++ show submitSpans
+  case submitSpans of
+    ((Rect _ sy _ sh, _):_) -> do
+      assert "Submit button is visible on screen when scrolled to bottom" (sy >= 0 && sy + sh <= 800)
+    [] -> error "Submit button span not found after scrolling to bottom"
 
   putStrLn "\n=== All nano-ui-form Tests Passed! ==="

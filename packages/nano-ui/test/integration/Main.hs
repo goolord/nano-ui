@@ -224,4 +224,5 @@ testSpecs =
   , TestSpec "tooltip-id-stable" False runTooltipIdStableTest
   , TestSpec "tooltip-scroll-pos" False runTooltipScrollPosTest
   , TestSpec "heading-mono-truncate" False runHeadingMonoTruncateTest
+  , TestSpec "base16-theme" False runBase16ThemeTest
   ]

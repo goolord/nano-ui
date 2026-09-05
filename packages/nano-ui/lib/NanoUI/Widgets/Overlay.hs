@@ -49,7 +49,6 @@ import NanoUI.Style
   , Sizing (..)
   , grow
   , padB
-  , padL
   , padT
   , tight
   , windowMargin
@@ -61,8 +60,8 @@ import NanoUI.Widgets.Chrome
   , floatGapFor
   , floatMinFor
   , floatPadFor
+  , modalTitleBarHFor
   , titleBarChromeHFor
-  , titleBarHFor
   , titleBarLayoutFor
   , titleLabelLayoutFor
   , titleMark
@@ -116,8 +115,8 @@ overlay kind open title child
           availW = max 1 (winW - 2 * margin)
           availH = max 1 (winH - 2 * margin)
           isModal = kind == ModalOverlay
-          padding = floatPadFor host (if isModal then Padding 14 14 12 12 else windowPad)
-          barH = if isModal then titleBarHFor host else titleBarChromeHFor host
+          padding = floatPadFor host (if isModal then Padding 14 14 0 12 else windowPad)
+          barH = if isModal then modalTitleBarHFor host else titleBarChromeHFor host
           minWidth =
             floatMinFor
               host
@@ -144,7 +143,7 @@ overlay kind open title child
               Fit
               Fit
               padding
-              (floatGapFor host (if isModal then 8 else padL padding))
+              (floatGapFor host (if isModal then 8 else 0))
               minWidth
               minHeight
               maxW
@@ -184,8 +183,11 @@ overlay kind open title child
               withKey ("close" :: Text) closeButton
           when (kind == ModalOverlay && not (T.null title)) sep
           r <-
-            if isModal && not (isCellHost host)
-              then child
+            if isModal
+              then
+                if isCellHost host
+                  then scrollWith (tight . grow) child
+                  else child
               else scrollWith (tight . grow) child
           pure (close, r)
         uiIO $ do

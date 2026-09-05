@@ -168,8 +168,8 @@ readTermDebug ref (Size ww wh) (V2 mx my) ctx = do
     then readIORef (smSnapshot st)
     else do
       rts <- readRtsSnapshot
-      let theme = ctxTheme ctx
-          fgCol = styleFg (themePanel theme)
+      theme <- readIORef (ctxTheme ctx)
+      let fgCol = styleFg (themePanel theme)
           bgCol = themeWindow theme
           core = makeCoreDebugSnapshot cur ww wh mx my rts
           snap' =

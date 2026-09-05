@@ -20,7 +20,6 @@ import GHC.Clock (getMonotonicTime)
 import NanoUI
   ( Input (..)
   , NanoUI
-  , Rect (..)
   , Size (..)
   , V2 (..)
   , themeWindow
@@ -58,7 +57,6 @@ import NanoUI.Sdl.Display
   , queryWindowLogicalSize
   , retainBegin
   , retainBlit
-  , retainBlitRect
   , retainCreate
   , retainDestroy
   , windowToLogicalCoords
@@ -143,7 +141,8 @@ finishDraw ctx env inp forceFull t0 t1 drawData dirtyAfterUi = do
     else do
       okBegin <- retainBegin (sdlRenderer env) tex scale
       unless okBegin $ fail "SDL_SetRenderTarget(retain) failed"
-      let clear = themeWindow (ctxTheme ctx)
+      theme <- readIORef (ctxTheme ctx)
+      let clear = themeWindow theme
       glyphTex <- glyphAtlasTexture (sdlGlyphAtlas env)
       withRenderBatch (sdlRenderer env) $ \batch ->
         renderDrawDataPass batch (sdlRenderer env) scale (Just clear) drawData allLayersArr (sdlImages env) glyphTex damage
@@ -175,18 +174,7 @@ ensureRetain env w h scale = do
       pure (tex', True)
 
 blitRetain :: Ptr SDL_Renderer -> Float -> Ptr () -> Damage -> IO Bool
-blitRetain ren scale tex damage =
-  case damage of
-    DamageClip (Rect x y w h) -> do
-      let !s = if scale > 0 then scale else 1
-          !px = fromIntegral (floor (x * s) :: Int)
-          !py = fromIntegral (floor (y * s) :: Int)
-          !pw = fromIntegral (ceiling ((x + w) * s) :: Int) - px
-          !ph = fromIntegral (ceiling ((y + h) * s) :: Int) - py
-      if pw > 0 && ph > 0
-        then retainBlitRect ren tex px py pw ph px py
-        else retainBlit ren tex
-    _ -> retainBlit ren tex
+blitRetain ren _scale tex _damage = retainBlit ren tex
 
 askSdlEnv :: Ui :> es => Eff es (Maybe SdlEnv)
 askSdlEnv = askHost

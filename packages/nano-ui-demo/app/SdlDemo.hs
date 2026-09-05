@@ -5,6 +5,7 @@ module SdlDemo
     , demoImages
     , demoUi
     , DemoTab (..)
+    , DemoTheme (..)
     ) where
 
 import Control.Monad (unless, void, when)
@@ -119,6 +120,7 @@ main = do
             defaultSdlOptions
               { sdlAppShouldQuit = \inp -> inputKeysElem KeyEscape (inputKeys inp)
               , sdlAppImages = demoImages
+              , sdlAppTheme = Just tomorrowNightMinDarkTheme
               , sdlAppVsync = cfgVsync cfg
               , sdlAppContinuous = cfgContinuous cfg
               , sdlWindowFullscreen = cfgFullscreen cfg
@@ -138,7 +140,24 @@ data DemoTab
   | Diagnostics
   deriving (Bounded, Enum, Eq, Ord, Read, Show)
 
-data Theme = Light | Dark | System deriving (Bounded, Enum, Eq, Ord, Read, Show)
+data DemoTheme
+  = ThemeDefault
+  | TomorrowNightMin
+  | TomorrowLight
+  | TomorrowMidnightMin
+  deriving (Bounded, Enum, Eq, Ord, Read, Show)
+
+themeDisplayName :: DemoTheme -> T.Text
+themeDisplayName ThemeDefault = "Default"
+themeDisplayName TomorrowNightMin = "Tomorrow Night Min"
+themeDisplayName TomorrowLight = "Tomorrow Light"
+themeDisplayName TomorrowMidnightMin = "Tomorrow at Midnight Min"
+
+themeForChoice :: DemoTheme -> Theme
+themeForChoice ThemeDefault = defaultTheme
+themeForChoice TomorrowNightMin = tomorrowNightMinDarkTheme
+themeForChoice TomorrowLight = tomorrowMinLightTheme
+themeForChoice TomorrowMidnightMin = tomorrowMidnightMinDarkTheme
 
 ------------------------------------------------------------------
 
@@ -155,7 +174,7 @@ demoAccent = colorRGBA 204 102 102 255
 
 -- Spacing scale for demo layout
 gapLayout :: Float
-gapLayout = 8
+gapLayout = 6
 
 gapInline :: Float
 gapInline = 12
@@ -175,13 +194,13 @@ demoUi = do
   (vol, setVol) <- useText "50"
   (quality, setQuality) <- useText "Medium"
   (accentHex, setAccent) <- useText (colorPickerToHex demoAccent)
-  (themeName, setTheme) <- useText (T.pack (show Dark))
+  (themeName, setThemeName) <- useText (themeDisplayName TomorrowNightMin)
   (name, setName) <- useText ""
   (notes, setNotes) <- useText ""
   (treeSel, setTreeSel) <- useText "0"
   (tableSortVal, setTableSort) <- useTableSort (SortCol 0 SortAsc)
   scrollWith (tight . grow) $
-    columnWith (padAll 16 . gap gapLayout . fillW) $ do
+    columnWith (padAll 6 . gap gapLayout . fillW) $ do
       panelWith (padXY 14 10 . gap gapInline . fillW) $
         toolbar $ do
           columnWith (tight . gap gapText) $ do
@@ -240,8 +259,9 @@ demoUi = do
               setQuality (qualities !! qualityIdx)
               (_, aVal) <- colorPicker "Accent" demoAccent
               setAccent (colorPickerToHex aVal)
-              (_, tVal) <- boundedRadioFieldset "Theme" Dark (T.pack . show)
-              setTheme (T.pack (show tVal))
+              (_, tVal) <- boundedSelect "Theme" TomorrowNightMin themeDisplayName
+              setThemeName (themeDisplayName tVal)
+              setUiTheme (themeForChoice tVal)
               (_, nVal) <- textInput "Name" ""
               setName nVal
               (_, notesVal) <- textArea "Notes" "Edit me.\nSecond line."
@@ -488,7 +508,7 @@ tableSortDirText s =
 
 debugBody :: SdlDebugSnapshot -> NanoUI ()
 debugBody s =
-  columnWith (tight . minW 300 . fillW) $ do
+  columnWith (tight . gap 4 . minW 300 . fillW) $ do
     debugSection "Frame" (frameRows s)
     sep
     debugSection "Draw" (drawRows s)
@@ -655,16 +675,22 @@ selftest = do
     clickPos ctx' env base feat0
     spansOn2 <- collectTextSpans ctx'
     unless (hasText "on" spansOn2) $ fail "selftest: checkbox did not turn Feature on again"
-    light <- requireSpan "selftest: Light radio" (findExact "Light" spansOn)
-    clickPos ctx' env base light
+    themeBtn <- requireSpan "selftest: Theme select" (findRightmost "Theme" spansOn2)
+    clickPos ctx' env base themeBtn
+    spansOverlay <- collectOverlayTextSpans ctx' base
+    lightOpt <- requireSpan "selftest: Tomorrow Light option" (findExact "Tomorrow Light" spansOverlay)
+    clickPos ctx' env base lightOpt
     spansTheme <- collectTextSpans ctx'
-    unless (hasText "Light" spansTheme) $ fail "selftest: radio did not select Light"
+    unless (hasText "Tomorrow Light" spansTheme) $ fail "selftest: select did not pick Tomorrow Light"
+    th <- getTheme ctx'
+    unless (th == tomorrowMinLightTheme) $ fail "selftest: context theme was not updated to Tomorrow Light"
     vol <- requireSpan "selftest: Volume slider" (findRightmost "Volume" spansTheme)
     clickPos ctx' env base (V2 (v2X vol + 80) (v2Y vol))
     about <- requireSpan "selftest: About button" (findExact "About" spansTheme)
     clickPos ctx' env base about
     spansModal <- collectOverlayTextSpans ctx' base
     unless (hasText "Immediate-mode" spansModal) $ fail "selftest: About modal missing"
+    unless (hasText "Close" spansModal) $ fail "selftest: About Close button missing"
     drawOnce ctx' env (base {inputKeys = inputKeysFromList [KeyEscape]})
     drawOnce ctx' env base
     spansClosed <- collectOverlayTextSpans ctx' base
@@ -674,6 +700,7 @@ selftest = do
     clickPos ctx' env base debugBtn
     spansDebug <- collectOverlayTextSpans ctx' base
     unless (hasText "Frame" spansDebug) $ fail "selftest: Debug window missing"
+    unless (hasText "Runtime" spansDebug) $ fail "selftest: Debug Runtime section missing"
   putStrLn "selftest: ok"
 
 

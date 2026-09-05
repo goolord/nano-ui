@@ -238,7 +238,7 @@ runSelectDropFlushTest ctx failed = do
   _ <- runFrame ctx release ui
   overlays <- collectOverlayTextSpans ctx release
   case [rectY r | (r, txt, _, _, _) <- overlays, "Low" `T.isInfixOf` txt] of
-    (lowY : _) -> assert failed (lowY - (sy + sh) <= 12)
+    (lowY : _) -> assert failed (lowY - (sy + sh) <= 18)
     [] -> assert failed False
 
 runSelectPickLowTest :: Context -> IORef Int -> IO ()
