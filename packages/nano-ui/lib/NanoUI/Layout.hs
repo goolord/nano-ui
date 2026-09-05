@@ -86,6 +86,10 @@ module NanoUI.Layout
   , flexCol
   , hGroup
   , vGroup
+  , hstack
+  , hstackWith
+  , vstack
+  , vstackWith
   ) where
 
 import NanoUI.Style
@@ -141,6 +145,8 @@ import NanoUI.Widgets.Layout
   , gridAutoFitWith
   , gridAutoFit_
   , hGroup
+  , hstack
+  , hstackWith
   , panel
   , panel'
   , panelResponse
@@ -168,5 +174,7 @@ import NanoUI.Widgets.Layout
   , separator
   , spacer
   , vGroup
+  , vstack
+  , vstackWith
   , windowAspect
   )
