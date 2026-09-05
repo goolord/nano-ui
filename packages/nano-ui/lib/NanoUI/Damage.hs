@@ -30,6 +30,7 @@ import NanoUI.Context
   , setPrevFloatingPanels
   , setPrevRectsAndClips
   , takeAnimSettled
+  , lookupCustomDamageSlop
   )
 import NanoUI.Store (mirrorStoresChanged)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
@@ -278,8 +279,10 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
               fmap concat $
                 forM (filter (\w -> hashWidgetId w /= 0) ids) $ \wid -> do
                   newR <- getPrevRect ctx wid
+                  mSlop <- lookupCustomDamageSlop ctx wid
+                  let slop = fromMaybe defaultDamageSlop mSlop
                   catMaybes <$> forM (catMaybes [oldOf wid, newR])
-                    (clipWidgetRect ctx newRects wid . rectInflate defaultDamageSlop)
+                    (clipWidgetRect ctx newRects wid . rectInflate slop)
             scrollRs <-
               if scrollChanged
                 then scrollOffsetDamage ctx oldStore newStore

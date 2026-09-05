@@ -135,7 +135,7 @@ isWidgetNode nt =
     NodeColorPicker -> True
     NodeTree -> True
     NodeImage -> False
-    NodeDrawing -> False
+    NodeDrawing -> True
     _ -> False
 
 isContainerNode :: NodeType -> Bool

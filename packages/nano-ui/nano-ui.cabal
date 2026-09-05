@@ -73,6 +73,7 @@ library
         NanoUI.Testing.Harness
         NanoUI.Widgets.TextBuffer
         NanoUI.Widgets.TextArea
+        NanoUI.Widgets.Custom
         NanoUI.Store
         NanoUI.Frame.Hit
         NanoUI.Frame.TextEdit
@@ -199,6 +200,7 @@ test-suite nano-ui-test
         Cases.Tabs
         Cases.TextInput
         Cases.ContextMenu
+        Cases.CustomWidget
         Cases.Tooltip
         Cases.Window
     build-depends:

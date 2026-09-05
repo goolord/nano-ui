@@ -1,6 +1,7 @@
 module Cases
   ( module Cases.Animation
   , module Cases.ContextMenu
+  , module Cases.CustomWidget
   , module Cases.Damage
   , module Cases.Demo
   , module Cases.Modal
@@ -66,6 +67,7 @@ module Cases
 
 import Cases.Animation
 import Cases.ContextMenu
+import Cases.CustomWidget
 import Cases.Damage
 import Cases.Demo
 import Cases.Modal

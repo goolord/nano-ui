@@ -66,6 +66,18 @@ module NanoUI.Context
   , lookupDrawFitEnvelope
   , pruneDrawOpCache
   , clearDrawings
+  , CustomMeasureFn
+  , CustomDrawContext (..)
+  , CustomDrawBuild
+  , registerCustomDrawing
+  , lookupCustomDrawing
+  , cachedCustomDrawingOps
+  , registerCustomMeasure
+  , lookupCustomMeasure
+  , registerCustomCursor
+  , lookupCustomCursor
+  , registerCustomDamageSlop
+  , lookupCustomDamageSlop
   , getWidgetNodeTypes
   , setWidgetNodeTypes
   , resetDrawingScopeCache
@@ -254,6 +266,9 @@ import NanoUI.Context.Types
   , intKey
   , reduceMessages
   , reduceUpdates
+  , CustomDrawBuild
+  , CustomDrawContext (..)
+  , CustomMeasureFn
   )
 import Data.Vector (Vector)
 import Data.Vector qualified as V
@@ -270,7 +285,7 @@ import NanoUI.Frame.Scroll.Geometry
   , scrollConfigNative2D
   )
 import NanoUI.Id (WidgetId (..), hashWidgetId, initialIdContext)
-import NanoUI.Input (Input (..), Key (KeyEscape), inputKeys, inputKeysElem, inputMousePos, inputMousePressed)
+import NanoUI.Input (Input (..), Key (KeyEscape), UiCursorKind, inputKeys, inputKeysElem, inputMousePos, inputMousePressed)
 import NanoUI.Layout.Arena (DirTag, NodeType, getRect, lookupNodeByKey, newNodeArena)
 
 
@@ -589,8 +604,10 @@ pruneDrawOpCache :: Context -> IO ()
 pruneDrawOpCache ctx =
   modifyIORef' (ctxDrawingCache ctx) $ \dc ->
     let live = dcsDrawings dc
+        customLive = dcsCustomDrawings dc
      in dc
           { dcsDrawOpCache = dcsDrawOpCache dc `IM.intersection` live
+          , dcsCustomDrawOpCache = dcsCustomDrawOpCache dc `IM.intersection` customLive
           , dcsDrawFitCache = dcsDrawFitCache dc `IM.intersection` live
           }
 
@@ -598,7 +615,94 @@ pruneDrawOpCache ctx =
 clearDrawings :: Context -> IO ()
 clearDrawings ctx =
   modifyIORef' (ctxDrawingCache ctx) $ \dc ->
-    dc {dcsDrawings = IM.empty}
+    dc
+      { dcsDrawings = IM.empty
+      , dcsCustomDrawings = IM.empty
+      , dcsCustomMeasures = IM.empty
+      , dcsCustomCursors = IM.empty
+      , dcsCustomDamageSlop = IM.empty
+      }
+
+{-# INLINE registerCustomDrawing #-}
+registerCustomDrawing :: Context -> WidgetId -> CustomDrawBuild -> IO ()
+registerCustomDrawing ctx wid build =
+  modifyIORef' (ctxDrawingCache ctx) $ \dc ->
+    dc {dcsCustomDrawings = IM.insert (intKey wid) build (dcsCustomDrawings dc)}
+
+{-# INLINE lookupCustomDrawing #-}
+lookupCustomDrawing :: Context -> WidgetId -> IO (Maybe CustomDrawBuild)
+lookupCustomDrawing ctx wid = do
+  dc <- readIORef (ctxDrawingCache ctx)
+  pure (IM.lookup (intKey wid) (dcsCustomDrawings dc))
+
+-- | Cached draw ops for custom widgets with interaction state awareness.
+cachedCustomDrawingOps ::
+  Context ->
+  WidgetId ->
+  Rect ->
+  CustomDrawContext ->
+  CustomDrawBuild ->
+  IO (Vector DrawOp)
+cachedCustomDrawingOps ctx wid rect cdc build = do
+  let k = intKey wid
+      hov = cdcHovered cdc
+      prs = cdcPressed cdc
+      foc = cdcFocused cdc
+  dc <- readIORef (ctxDrawingCache ctx)
+  case IM.lookup k (dcsCustomDrawOpCache dc) of
+    Just (r, h, p, f, ops)
+      | h == hov && p == prs && f == foc && rectW r == rectW rect && rectH r == rectH rect ->
+          if rectX r == rectX rect && rectY r == rectY rect
+            then pure ops
+            else do
+              let ops' =
+                    V.map
+                      (shiftDrawOp (rectX rect - rectX r) (rectY rect - rectY r))
+                      ops
+              modifyIORef' (ctxDrawingCache ctx) $ \s ->
+                s {dcsCustomDrawOpCache = IM.insert k (rect, hov, prs, foc, ops') (dcsCustomDrawOpCache s)}
+              pure ops'
+    _ -> do
+      let ops = build cdc rect
+      modifyIORef' (ctxDrawingCache ctx) $ \s ->
+        s {dcsCustomDrawOpCache = IM.insert k (rect, hov, prs, foc, ops) (dcsCustomDrawOpCache s)}
+      pure ops
+
+{-# INLINE registerCustomMeasure #-}
+registerCustomMeasure :: Context -> WidgetId -> CustomMeasureFn -> IO ()
+registerCustomMeasure ctx wid fn =
+  modifyIORef' (ctxDrawingCache ctx) $ \dc ->
+    dc {dcsCustomMeasures = IM.insert (intKey wid) fn (dcsCustomMeasures dc)}
+
+{-# INLINE lookupCustomMeasure #-}
+lookupCustomMeasure :: Context -> WidgetId -> IO (Maybe CustomMeasureFn)
+lookupCustomMeasure ctx wid = do
+  dc <- readIORef (ctxDrawingCache ctx)
+  pure (IM.lookup (intKey wid) (dcsCustomMeasures dc))
+
+{-# INLINE registerCustomCursor #-}
+registerCustomCursor :: Context -> WidgetId -> (CustomDrawContext -> UiCursorKind) -> IO ()
+registerCustomCursor ctx wid fn =
+  modifyIORef' (ctxDrawingCache ctx) $ \dc ->
+    dc {dcsCustomCursors = IM.insert (intKey wid) fn (dcsCustomCursors dc)}
+
+{-# INLINE lookupCustomCursor #-}
+lookupCustomCursor :: Context -> WidgetId -> IO (Maybe (CustomDrawContext -> UiCursorKind))
+lookupCustomCursor ctx wid = do
+  dc <- readIORef (ctxDrawingCache ctx)
+  pure (IM.lookup (intKey wid) (dcsCustomCursors dc))
+
+{-# INLINE registerCustomDamageSlop #-}
+registerCustomDamageSlop :: Context -> WidgetId -> Float -> IO ()
+registerCustomDamageSlop ctx wid slop =
+  modifyIORef' (ctxDrawingCache ctx) $ \dc ->
+    dc {dcsCustomDamageSlop = IM.insert (intKey wid) slop (dcsCustomDamageSlop dc)}
+
+{-# INLINE lookupCustomDamageSlop #-}
+lookupCustomDamageSlop :: Context -> WidgetId -> IO (Maybe Float)
+lookupCustomDamageSlop ctx wid = do
+  dc <- readIORef (ctxDrawingCache ctx)
+  pure (IM.lookup (intKey wid) (dcsCustomDamageSlop dc))
 
 {-# INLINE getWidgetNodeTypes #-}
 getWidgetNodeTypes :: Context -> IO (Maybe (IntMap NodeType))
@@ -618,6 +722,10 @@ resetDrawingScopeCache ctx =
       { dcsDrawings = IM.empty
       , dcsPopupConfigs = IM.empty
       , dcsWidgetNodeTypes = Nothing
+      , dcsCustomMeasures = IM.empty
+      , dcsCustomCursors = IM.empty
+      , dcsCustomDrawings = IM.empty
+      , dcsCustomDamageSlop = IM.empty
       }
 
 {-# INLINE getStore #-}

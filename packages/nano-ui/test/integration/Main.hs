@@ -235,4 +235,11 @@ testSpecs =
   , TestSpec "tooltip-scroll-pos" False runTooltipScrollPosTest
   , TestSpec "heading-mono-truncate" False runHeadingMonoTruncateTest
   , TestSpec "base16-theme" False runBase16ThemeTest
+  , TestSpec "custom-widget-canvas" True runCustomWidgetCanvasTest
+  , TestSpec "custom-widget-measure" False runCustomWidgetMeasureTest
+  , TestSpec "custom-widget-cursor" False runCustomWidgetCursorTest
+  , TestSpec "custom-widget-interaction" False runCustomWidgetInteractionTest
+  , TestSpec "custom-widget-knob" False runReferenceKnobTest
+  , TestSpec "custom-widget-toggle" False runReferenceToggleSwitchTest
+  , TestSpec "custom-widget-sparkline" True runReferenceProgressAndSparklineTest
   ]
