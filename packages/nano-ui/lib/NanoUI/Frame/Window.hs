@@ -19,6 +19,7 @@ module NanoUI.Frame.Window
 
 
 import Control.Monad (forM_, when)
+import Data.IORef (readIORef)
 import Data.Maybe (isJust)
 import qualified Data.IntMap.Strict as IM
 import NanoUI.Context
@@ -56,7 +57,6 @@ import NanoUI.Layout.Arena
   , getNodeValue
   , getPadding
   , getRect
-  , getStyleIdx
   , getWidgetId
   )
 import NanoUI.Layout.Solve (positionWindowNode, scrollBarSlotOf)
@@ -80,14 +80,12 @@ import NanoUI.Frame.Chrome
   , pushMenuShadow
   , strokeStyledRect
   )
-import NanoUI.Frame.Scroll.Geometry (scrollChromeLane, scrollContentClip, terminalModalOuterClip)
+import NanoUI.Frame.Scroll.Geometry (scrollChromeLane, terminalModalOuterClip)
 import NanoUI.Frame.Hit (findNodeByWidgetId, modalTreeOpen, nodeInSubtree, topmostOverlayAtMouse)
 import NanoUI.Frame.Input (findTopWidgetUnderMouse, isInteractiveNode)
 import NanoUI.Frame.Paint (walkChildren)
 import NanoUI.Frame.Redraw (probeHotId)
-import NanoUI.Frame.Scroll (paintScrollChrome)
 import NanoUI.Widgets.Chrome (titleBarChromeHFor, windowChromeSepH)
-import NanoUI.Frame.Scroll.Geometry (decodeScrollConfig)
 
 topmostWindowAtResizeHalo :: Context -> V2 -> IO (Maybe NodeIdx)
 topmostWindowAtResizeHalo ctx mouse =
@@ -526,8 +524,8 @@ windowTitleHasInteractive ctx idx mouse = do
 
 drawWindowOverlays :: Context -> IO ()
 drawWindowOverlays ctx = do
-  let theme = ctxTheme ctx
-      style = overlayWindowStyle theme
+  theme <- readIORef (ctxTheme ctx)
+  let style = overlayWindowStyle theme
       da = ctxDrawArena ctx
       host = ctxHostProfile ctx
       fm = ctxFontMetrics ctx
@@ -545,15 +543,15 @@ drawWindowOverlays ctx = do
 
 drawPopupOverlays :: Context -> IO ()
 drawPopupOverlays ctx = do
-  let theme = ctxTheme ctx
-      style = overlayMenuStyle theme
+  theme <- readIORef (ctxTheme ctx)
+  let style = overlayMenuStyle theme
   forFloatingNode ctx NodePopup $ \idx rect ->
     drawFloatingPanel ctx idx style rect rect
 
 drawModalOverlays :: Context -> Size -> IO ()
 drawModalOverlays ctx (Size ww wh) = do
+  theme <- readIORef (ctxTheme ctx)
   let da = ctxDrawArena ctx
-      theme = ctxTheme ctx
       fm = ctxFontMetrics ctx
       terminal = isCellHost (ctxHostProfile ctx)
   found <- modalTreeOpen ctx
@@ -564,20 +562,12 @@ drawModalOverlays ctx (Size ww wh) = do
       pushRect da (Rect 0 0 ww wh) (themeOverlayDim theme)
     forFloatingNode ctx NodeModal $ \idx rect@(Rect x y w h) -> do
       pad <- getPadding (ctxNodeArena ctx) idx
-      wid <- getWidgetId (ctxNodeArena ctx) idx
-      dir <- getDirection (ctxNodeArena ctx) idx
-      contentSize <- getNodeValue (ctxNodeArena ctx) idx
-      slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
-      si <- getStyleIdx (ctxNodeArena ctx) idx
       let style = if terminal then overlayWindowStyle theme else overlayModalStyle theme
-          cfg = decodeScrollConfig si
           clip =
             if terminal
               then terminalModalOuterClip (ctxHostProfile ctx) fm x y w h pad
-              else scrollContentClip (ctxHostProfile ctx) fm slot cfg dir x y w h pad contentSize
+              else rect
       drawFloatingPanel ctx idx style rect clip
-      when (not terminal) $
-        paintScrollChrome ctx da idx wid x y w h pad theme terminal
 
 forFloatingNode :: Context -> NodeType -> (NodeIdx -> Rect -> IO ()) -> IO ()
 forFloatingNode ctx nodeType draw = do

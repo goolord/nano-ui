@@ -23,6 +23,7 @@ module NanoUI.Monad
   , askHost
   , uiFontMetrics
   , uiTheme
+  , setUiTheme
   , uiMousePos
   , windowSize
   , windowWidth
@@ -72,6 +73,7 @@ import NanoUI.Context
   , damageWidget
   , decodeMessages
   , pushMessage
+  , setTheme
   , reduceMessages
   , reduceUpdates
   )
@@ -221,7 +223,15 @@ uiFontMetrics = fmap ctxFontMetrics askContext
 
 {-# INLINE uiTheme #-}
 uiTheme :: Ui :> es => Eff es Theme
-uiTheme = fmap ctxTheme askContext
+uiTheme = do
+  ctx <- askContext
+  uiIO (readIORef (ctxTheme ctx))
+
+{-# INLINE setUiTheme #-}
+setUiTheme :: Ui :> es => Theme -> Eff es ()
+setUiTheme th = do
+  ctx <- askContext
+  uiIO (setTheme ctx th)
 
 {-# INLINE uiMousePos #-}
 uiMousePos :: Ui :> es => Eff es V2

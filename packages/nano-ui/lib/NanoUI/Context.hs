@@ -102,6 +102,8 @@ module NanoUI.Context
   , clearMeasureCache
   , withExternalText
   , withTheme
+  , setTheme
+  , getTheme
   , withDefaultLayoutIO
   , withIcons
   , withHostProfile
@@ -900,8 +902,21 @@ clearMeasureCache ctx =
 withExternalText :: Context -> Bool -> Context
 withExternalText ctx ext = ctx {ctxExternalText = ext}
 
-withTheme :: Context -> Theme -> Context
-withTheme ctx theme = ctx {ctxTheme = theme}
+withTheme :: Context -> Theme -> IO Context
+withTheme ctx theme = do
+  writeIORef (ctxTheme ctx) theme
+  pure ctx
+
+setTheme :: Context -> Theme -> IO ()
+setTheme ctx th = do
+  cur <- readIORef (ctxTheme ctx)
+  when (cur /= th) $ do
+    writeIORef (ctxTheme ctx) th
+    damageFull ctx
+    markDirty ctx
+
+getTheme :: Context -> IO Theme
+getTheme ctx = readIORef (ctxTheme ctx)
 
 withDefaultLayoutIO :: Context -> Layout -> IO Context
 withDefaultLayoutIO ctx lay = do
@@ -984,6 +999,7 @@ newContext = do
   ctxWakeLoop <- newIORef Nothing
   ctxHost <- newIORef Map.empty
   ctxDefaultLayout <- newIORef defaultLayout
+  ctxTheme <- newIORef defaultTheme
   let fm0 = monospaceMetrics 12
   pure Context
     { ctxNodeArena = nodeArena
@@ -1005,7 +1021,7 @@ newContext = do
     , ctxMeasureText = \txt -> pure (measureText PixelHost fm0 txt)
     , ctxMeasureCache = Nothing
     , ctxExternalText = False
-    , ctxTheme = defaultTheme
+    , ctxTheme
     , ctxIcons = asciiIcons
     , ctxContainerStack
     , ctxMessages
@@ -1029,7 +1045,7 @@ newPixelHostContext :: IO Context
 newPixelHostContext = do
   ctx0 <- newContext
   ctx <- enableMeasureCache ctx0
-  pure (withExternalText (withTheme (withFontMetrics ctx (monospaceMetrics 16)) defaultTheme) True)
+  withTheme (withExternalText (withFontMetrics ctx (monospaceMetrics 16)) True) defaultTheme
 
 -- =============================================================================
 -- Focus

@@ -93,7 +93,7 @@ colorPickerMinWidth :: Float
 colorPickerMinWidth = 220
 
 colorPickerGap :: Float
-colorPickerGap = 6
+colorPickerGap = 4
 
 colorPickerHexGap :: Float
 colorPickerHexGap = 4

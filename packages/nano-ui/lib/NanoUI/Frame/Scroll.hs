@@ -155,7 +155,8 @@ transformSubtree ctx idx scrollX scrollY parentClip = do
       else do
         case nt of
           NodePanel -> do
-            let style = themePanel (ctxTheme ctx)
+            theme <- readIORef (ctxTheme ctx)
+            let style = themePanel theme
                 inner = borderContentClip style nodeRect
                 clipHere = fromMaybe parentClip (rectIntersect parentClip inner)
             setClipRect na idx clipHere
@@ -370,9 +371,7 @@ walkScrollSiblings ctx parent mouse clip = do
 scrollHitSelf :: Context -> NodeIdx -> V2 -> Rect -> IO (Maybe NodeIdx)
 scrollHitSelf ctx idx mouse clip = do
   nt <- getNodeType (ctxNodeArena ctx) idx
-  let
-    cellModalShell = isCellHost (ctxHostProfile ctx) && nt == NodeModal
-  if not (isScrollNode nt) || cellModalShell
+  if not (isScrollNode nt)
     then pure Nothing
     else
       if rectW clip > 0 && rectH clip > 0 && rectContains clip mouse

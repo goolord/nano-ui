@@ -39,11 +39,23 @@ runModalOverlayTest ctx failed = do
   closedSpans <- collectOverlayTextSpans ctx inp0
   assert failed (not (any (\(_, txt, _, _, _) -> "Title" `T.isInfixOf` txt) closedSpans))
 
-  (outside0, _, mInside0) <- warmup2 ctx inp0 ui
+  (outside0, dlg0, mInside0) <- warmup2 ctx inp0 ui
   overlays <- collectOverlayTextSpans ctx inp0
   assert failed (any (\(_, txt, _, _, _) -> "Title" `T.isInfixOf` txt) overlays)
   assert failed (any (\(_, txt, _, _, _) -> "Inside" `T.isInfixOf` txt) overlays)
   assert failed (not (any (\(_, txt, _, _, _) -> T.strip txt == "X") overlays))
+  let Rect _ dy _ _ = respRect dlg0
+      modalChromeMid = dy + 40 / 2
+  case [r | (r, txt, _, _, _) <- overlays, "Title" `T.isInfixOf` txt] of
+    (Rect _ ty _ th : _) -> do
+      let fm = ctxFontMetrics ctx
+          capMid =
+            case fmGlyph fm 'H' of
+              Nothing -> th / 2
+              Just gq -> gqY gq + gqH gq / 2
+          textInkMid = ty + capMid
+      assert failed (abs (textInkMid - modalChromeMid) <= 4)
+    _ -> assert failed False
 
   case mInside0 of
     Nothing -> assert failed False

@@ -28,6 +28,7 @@ import NanoUI.Font
   , checkboxBoxSize
   , checkboxLeading
   , treeRowLeading
+  , treeItemPadding
   , classifyScrollBar
   , fmLineHeight
   , resolveLayoutGap
@@ -40,7 +41,11 @@ import NanoUI.Font
   , ScrollBarSlot
   , widgetPadding
   , buttonPadding
+  , selectPadding
   , layoutLineHeight
+  , sliderTrackHeight
+  , sliderTrackMargin
+  , sliderHandleSlack
   )
 import NanoUI.Types (HostProfile, isCellHost)
 import NanoUI.Layout.Arena
@@ -202,12 +207,9 @@ measureNode a na host fm monoFm measure idx = do
     NodeContainer -> measureContainer na host fm idx
     NodePanel -> measureContainer na host fm idx
     NodeScrollContainer -> measureScrollContainer na host fm idx
-    NodeModal
-      | isCellHost host -> do
-          measureContainer na host fm idx
-          -- Body scroll owns overflow. Stale value would paint a phantom gutter.
-          setNodeValue na idx 0
-      | otherwise -> measureScrollContainer na host fm idx
+    NodeModal -> do
+      measureContainer na host fm idx
+      setNodeValue na idx 0
     NodeWindow -> measureContainer na host fm idx
     NodePopup -> measureContainer na host fm idx
     NodeImage -> measureImage na idx
@@ -377,11 +379,17 @@ measureWidget na host fm measure idx = do
                 let (cx, cy) = tableCellInset host fm
                  in (2 * cx, 2 * cy)
             | otherwise -> buttonPadding host fm
-          NodeSelect -> buttonPadding host fm
+          NodeSelect -> selectPadding host fm
+          NodeTree -> treeItemPadding host fm
           NodeCheckbox | isCellHost host -> (0, 0)
           NodeRadio | isCellHost host -> (0, 0)
           _ | isCellHost host -> widgetPadding host fm
-            | nt == NodeColorPicker || nt == NodeSlider || nt == NodeCheckbox || nt == NodeRadio ->
+            | nt == NodeColorPicker
+                || nt == NodeSlider
+                || nt == NodeCheckbox
+                || nt == NodeRadio
+                || nt == NodeTextInput
+                || nt == NodeTextArea ->
                 let (cx, cy) = labelContentInset host fm
                  in (2 * cx, cy)
             | otherwise -> widgetPadding host fm
@@ -394,7 +402,7 @@ measureWidget na host fm measure idx = do
         let trackExtra =
               if isCellHost host
                 then fmLineHeight fm * 0.35
-                else 18
+                else sliderTrackMargin + sliderTrackHeight + sliderHandleSlack
             contentW = max lw vw
         pure (contentW, lh, 0, trackExtra)
       NodeCheckbox -> do
@@ -564,10 +572,9 @@ isChromeColumn nt dir =
 
 pairColumnGap :: NodeArena -> Bool -> NodeIdx -> NodeIdx -> Float -> IO Float
 pairColumnGap _ False _ _ gap = pure gap
-pairColumnGap na True a b gap = do
-  ntA <- getNodeType na a
+pairColumnGap na True _ b gap = do
   ntB <- getNodeType na b
-  pure (if ntA == NodeSeparator || ntB == NodeSeparator then 0 else gap)
+  pure (if ntB == NodeSeparator then 0 else gap)
 
 foldChromeColumnScratch :: NodeArena -> Int -> Float -> IO (Float, Float)
 foldChromeColumnScratch na n gap = do
@@ -674,7 +681,7 @@ recomputeFitHeightAtWidth na host fm monoFm measure idx availW = do
                   then pure (measureText host monoFm txt)
                   else measure txt
               let hasNewlines = T.any (== '\n') txt
-                  canWrap = not isRowChild && wrapW < tw0 && wrapW > 0
+                  canWrap = wTag /= SizingFit && not isRowChild && wrapW + 0.5 < tw0 && wrapW > 0
               if hasNewlines || canWrap
                 then do
                   (_, th) <-
@@ -835,7 +842,8 @@ positionNodeA a na host fm monoFm measure idx x y availW availH = do
                 then pure (measureText host monoFm txt)
                 else measure txt
             let hasNewlines = T.any (== '\n') txt
-            if hasNewlines || (wrapW < tw0 && wrapW > 0)
+                canWrap = wTag /= SizingFit && not isRowChild
+            if hasNewlines || (canWrap && wrapW + 0.5 < tw0 && wrapW > 0)
               then do
                 (_, th) <-
                   if isCellHost host || fvar == FontMono
@@ -857,12 +865,35 @@ positionNodeA a na host fm monoFm measure idx x y availW availH = do
     NodeContainer -> positionChildren a na host fm monoFm measure idx dir gap pad x y w h
     NodePanel -> positionChildren a na host fm monoFm measure idx dir gap pad x y w h
     NodeScrollContainer -> positionScrollChildren a na host fm monoFm measure idx dir gap pad x y w h
-    NodeModal
-      | isCellHost host -> positionChildren a na host fm monoFm measure idx dir gap pad x y w h
-      | otherwise -> positionScrollChildren a na host fm monoFm measure idx dir gap pad x y w h
+    NodeModal -> positionChildren a na host fm monoFm measure idx dir gap pad x y w h
     NodeWindow -> positionChildren a na host fm monoFm measure idx dir gap pad x y w h
     NodePopup -> positionChildren a na host fm monoFm measure idx dir gap pad x y w h
     _ -> pure ()
+  when (hTag == SizingFit && (nt == NodeContainer || nt == NodePanel || nt == NodeWindow || nt == NodeModal || nt == NodePopup)) $
+    adjustFitHeight na host fm idx minH maxH x y w
+
+adjustFitHeight :: NodeArena -> HostProfile -> FontMetrics -> NodeIdx -> Float -> Float -> Float -> Float -> Float -> IO ()
+adjustFitHeight na host fm idx minH maxH x y w = do
+  fc <- getFirstChild na idx
+  when (fc >= 0) $ do
+    pad0 <- getPadding na idx
+    let pad = resolveLayoutPadding host fm pad0
+        go ci !maxB = do
+          if ci < 0
+            then pure maxB
+            else do
+              subNt <- getNodeType na ci
+              ns <- getNextSibling na ci
+              if isFloatingNode subNt
+                then go ns maxB
+                else do
+                  (_, subY, _, subH) <- getRect na ci
+                  go ns (max maxB (subY + subH))
+    maxB <- go fc y
+    let fitH = clamp minH maxH (maxB + padB pad - y)
+    (_, _, _, curH) <- getRect na idx
+    when (fitH > curH) $
+      setRect na idx x y w fitH
 
 positionScrollChildren ::
   NodeArenaArrays ->
@@ -912,6 +943,32 @@ positionScrollChildren a na host fm monoFm measure idx dir gap pad px py pw ph =
                   else contentSize
           positionRowFromParent a na host fm monoFm measure idx gap cx cy rowMain (innerH - gutterRow)
         DirColumn -> positionColumnScroll a na host fm monoFm measure idx gap cx cy (innerW - gutterCol) innerH contentSize
+  fc <- getFirstChild na idx
+  when (fc >= 0) $ do
+    let go ci !maxB !maxR = do
+          if ci < 0
+            then pure (maxB, maxR)
+            else do
+              subNt <- getNodeType na ci
+              ns <- getNextSibling na ci
+              if isFloatingNode subNt
+                then go ns maxB maxR
+                else do
+                  (subX, subY, subW, subH) <- getRect na ci
+                  go ns (max maxB (subY + subH)) (max maxR (subX + subW))
+    (maxB, maxR) <- go fc cy cx
+    let actualContentH = maxB + padB pad - py
+        actualContentW = maxR + padR pad - px
+    if isScrollStyle2D si
+      then do
+        oldH <- getNodeValue na idx
+        oldW <- getScrollContentW na idx
+        setNodeValue na idx (max oldH actualContentH)
+        setScrollContentW na idx (max oldW actualContentW)
+      else do
+        oldVal <- getNodeValue na idx
+        let actual = case dir of DirColumn -> actualContentH; DirRow -> actualContentW
+        setNodeValue na idx (max oldVal actual)
 
 scrollBarSlotOf :: NodeArena -> NodeIdx -> IO ScrollBarSlot
 scrollBarSlotOf na idx = do

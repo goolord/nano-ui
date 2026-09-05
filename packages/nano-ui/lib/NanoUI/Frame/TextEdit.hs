@@ -285,7 +285,7 @@ textFieldRectAt ctx idx = do
         if nt == NodeTextInput
           then textInputFieldHeight fm
           else max 0 (h - labelH - gap)
-  if h < labelH + gap + (if nt == NodeTextInput then fieldH else 1)
+  if h + 0.5 < labelH + gap + (if nt == NodeTextInput then fieldH else 1)
     then pure (Rect x y w h)
     else pure (Rect x (y + labelH + gap) w fieldH)
 
@@ -407,8 +407,8 @@ drawTextEditMenuOverlays ctx inp = do
       when allow $ do
         let fm = ctxFontMetrics ctx
         when (not (isCellHost (ctxHostProfile ctx))) $ do
+          theme <- readIORef (ctxTheme ctx)
           let da = ctxDrawArena ctx
-              theme = ctxTheme ctx
               mouse = inputMousePos inp
               menuRect = textEditMenuRect menu
               menuStyle = textEditMenuStyle theme
@@ -457,8 +457,8 @@ collectTextEditMenuSpans ctx inp = do
   case mMenu of
     Nothing -> pure []
     Just menu -> do
+      theme <- readIORef (ctxTheme ctx)
       let fm = ctxFontMetrics ctx
-          theme = ctxTheme ctx
           mouse = inputMousePos inp
           menuRect = textEditMenuRect menu
           menuStyle = textEditMenuStyle theme
@@ -501,6 +501,7 @@ terminalTextEditMenuSpans ::
   WidgetId ->
   IO [(Rect, T.Text, Color, Color, Rect)]
 terminalTextEditMenuSpans ctx menuRect content _fm menuStyle mouse wid = do
+  theme <- readIORef (ctxTheme ctx)
   let rx :: Int
       rx = round (rectX menuRect)
       wi :: Int
@@ -508,7 +509,7 @@ terminalTextEditMenuSpans ctx menuRect content _fm menuStyle mouse wid = do
       innerW = max 0 (wi - 1)
       dropBg = styleBg menuStyle
       dropHoverBg = styleHoverBg menuStyle
-      sepFg = themeSeparator (ctxTheme ctx)
+      sepFg = themeSeparator theme
   rows <-
     forM (textEditMenuLayout (ctxHostProfile ctx)) $ \(entry, relY, _h) -> do
       let rowY :: Int
@@ -671,11 +672,12 @@ drawTextInputSelection da ctx idx x y w h style = do
             selHi = max anchor cursor
             hasSel = selLo < selHi
         when hasSel $ do
+          theme <- readIORef (ctxTheme ctx)
           let fm = ctxFontMetrics ctx
               geom = textInputGeom (ctxHostProfile ctx) fm x y w h
               fieldRect = tigFieldRect geom
               (ix, _) = widgetContentInset (ctxHostProfile ctx) fm
-              selBg = selectionBgColor (themeAccent (ctxTheme ctx)) (styleBg style)
+              selBg = selectionBgColor (themeAccent theme) (styleBg style)
               host = ctxHostProfile ctx
               wLo = textDisplayWidth host fm (T.take selLo value)
               wHi = textDisplayWidth host fm (T.take selHi value)
@@ -942,9 +944,9 @@ drawTextAreaContent da ctx idx x y w h style = do
     else do
       syncTextAreaViewport ctx idx x y w h
       focus <- textAreaFocused ctx idx
+      theme <- readIORef (ctxTheme ctx)
       let fm = ctxFontMetrics ctx
           host = ctxHostProfile ctx
-          theme = ctxTheme ctx
           geom = textAreaGeom host fm x y w h
           field = tagFieldRect geom
           lineH = tagLineHeight geom

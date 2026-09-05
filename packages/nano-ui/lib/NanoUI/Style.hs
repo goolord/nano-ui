@@ -11,6 +11,27 @@ module NanoUI.Style
   , Style (..)
   , Theme (..)
   , defaultTheme
+  , tomorrowNightMinTheme
+  , tomorrowNightMinDarkTheme
+  , tomorrowLightTheme
+  , tomorrowMinLightTheme
+  , tomorrowMidnightMinTheme
+  , tomorrowMidnightMinDarkTheme
+  , Base16 (..)
+  , Base16ColorScheme
+  , base0a
+  , base0b
+  , base0c
+  , base0d
+  , base0e
+  , base0f
+  , themeFromBase16
+  , themeFromBase16Dark
+  , themeFromBase16Light
+  , base16Theme
+  , base16ToTheme
+  , base16TomorrowNight
+  , base16TomorrowLight
   , packPanelStyle
   , unpackPanelStyle
   , themeSeries
@@ -56,7 +77,7 @@ module NanoUI.Style
 
 import Data.Bits ((.&.), (.|.), shiftL, shiftR)
 import Data.Word (Word8, Word32, Word64)
-import NanoUI.Types (Color (..), colorRGBA, lerpColor)
+import NanoUI.Types (Color (..), colorLuminance, colorRGBA, lerpColor)
 
 data Sizing
   = Fixed Float
@@ -89,7 +110,7 @@ panelPaintPad = 8
 
 -- Floating window chrome.
 windowPad :: Padding
-windowPad = Padding 10 10 0 10
+windowPad = Padding 10 10 0 2
 
 -- Screen inset for floating window/modal max size and default placement.
 windowMargin :: Float
@@ -130,7 +151,7 @@ defaultLayout =
     , layoutWidth = Fit
     , layoutHeight = Fit
     , layoutPadding = Padding 3 3 3 3
-    , layoutGap = 4
+    , layoutGap = 8
     , layoutAlignX = AlignStart
     , layoutAlignY = AlignTop
     , layoutMinW = 0
@@ -385,3 +406,363 @@ scrollBarThumbColor base theme terminal =
 
 fadeAlpha :: Color -> Word8 -> Color
 fadeAlpha (Color w) a = Color ((w .&. 0xFFFFFF00) .|. fromIntegral a)
+
+-- | Ported from "Tomorrow Night Min" in https://github.com/biaqat/tomorrow-min-theme-zed
+tomorrowNightMinTheme :: Theme
+tomorrowNightMinTheme =
+  let panelStyle =
+        Style
+          { styleBg = colorRGBA 30 31 33 255          -- base.bg #1E1F21 (elevated panel canvas)
+          , styleFg = colorRGBA 234 234 234 255       -- bright.fg #EAEAEA
+          , styleBorder = borderColor
+          , styleBorderWidth = 1
+          , styleCornerRadius = 2
+          , styleHoverBg = colorRGBA 36 38 41 255     -- #242629
+          , styleActiveBg = colorRGBA 26 27 29 255    -- #1A1B1D
+          }
+   in Theme
+        { themeWindow = colorRGBA 23 24 26 255         -- #17181A (dark root window backdrop)
+        , themePanel = panelStyle
+        , themeFloatingWindow = panelStyle
+        , themeButton =
+            Style
+              { styleBg = colorRGBA 44 46 51 255       -- elevated button surface
+              , styleFg = colorRGBA 245 245 245 255    -- bright.fg / white
+              , styleBorder = borderColor
+              , styleBorderWidth = 1
+              , styleCornerRadius = 2
+              , styleHoverBg = colorRGBA 55 59 65 255  -- base.selection #373B41
+              , styleActiveBg = colorRGBA 28 29 32 255 -- depressed on click
+              }
+        , themeInput =
+            Style
+              { styleBg = colorRGBA 23 24 26 255       -- #17181A (recessed into #1E1F21 panel)
+              , styleFg = colorRGBA 234 234 234 255    -- bright.fg #EAEAEA
+              , styleBorder = borderColor
+              , styleBorderWidth = 1
+              , styleCornerRadius = 2
+              , styleHoverBg = colorRGBA 28 29 32 255
+              , styleActiveBg = colorRGBA 19 20 22 255
+              }
+        , themeSeparator = separatorColor
+        , themeAccent = activeColor
+        , themeMuted = colorRGBA 150 152 150 255       -- comment #969896
+        , themeRed = colorRGBA 204 102 102 255         -- base.red #CC6666
+        , themeOrange = colorRGBA 222 147 95 255       -- base.orange #DE935F
+        , themeYellow = colorRGBA 240 198 116 255      -- base.yellow #F0C674
+        , themeGreen = colorRGBA 181 189 104 255       -- base.green #B5BD68
+        , themePurple = colorRGBA 178 148 187 255      -- base.purple #B294BB
+        , themeOverlayDim = colorRGBA 0 0 0 160
+        }
+  where
+  borderColor    = colorRGBA 77 80 87 255              -- window #4D5057 (touch brighter crisp border)
+  separatorColor = colorRGBA 55 59 65 255              -- base.selection #373B41 (subtle divider)
+  activeColor    = colorRGBA 103 150 230 255           -- vscode.cornflower_blue #6796E6
+
+
+tomorrowNightMinDarkTheme :: Theme
+tomorrowNightMinDarkTheme = tomorrowNightMinTheme
+
+-- | Ported from "Tomorrow Min" in https://github.com/biaqat/tomorrow-min-theme-zed
+tomorrowLightTheme :: Theme
+tomorrowLightTheme =
+  let panelStyle =
+        Style
+          { styleBg = colorRGBA 242 242 242 255       -- #F2F2F2
+          , styleFg = colorRGBA 55 59 65 255          -- #373B41
+          , styleBorder = colorRGBA 222 222 222 255   -- #DEDEDE
+          , styleBorderWidth = 1
+          , styleCornerRadius = 2
+          , styleHoverBg = colorRGBA 247 247 247 255
+          , styleActiveBg = colorRGBA 235 235 235 255
+          }
+   in Theme
+        { themeWindow = colorRGBA 255 255 255 255     -- #FFFFFF
+        , themePanel = panelStyle
+        , themeFloatingWindow = panelStyle
+        , themeButton =
+            Style
+              { styleBg = colorRGBA 234 234 234 255   -- #EAEAEA
+              , styleFg = colorRGBA 55 59 65 255      -- #373B41
+              , styleBorder = colorRGBA 215 215 215 255
+              , styleBorderWidth = 1
+              , styleCornerRadius = 2
+              , styleHoverBg = colorRGBA 223 223 223 255 -- #DFDFDF
+              , styleActiveBg = colorRGBA 208 208 208 255 -- #D0D0D0
+              }
+        , themeInput =
+            Style
+              { styleBg = colorRGBA 255 255 255 255   -- #FFFFFF
+              , styleFg = colorRGBA 55 59 65 255
+              , styleBorder = colorRGBA 210 210 210 255
+              , styleBorderWidth = 1
+              , styleCornerRadius = 2
+              , styleHoverBg = colorRGBA 250 250 250 255
+              , styleActiveBg = colorRGBA 240 240 240 255
+              }
+        , themeSeparator = colorRGBA 222 222 222 255  -- #DEDEDE
+        , themeAccent = colorRGBA 82 134 188 255      -- #5286BC (Tomorrow Blue)
+        , themeMuted = colorRGBA 140 140 140 255      -- #8C8C8C
+        , themeRed = colorRGBA 197 78 82 255          -- Tomorrow Red #C54E52
+        , themeOrange = colorRGBA 231 140 69 255      -- Tomorrow Orange #E78C45
+        , themeYellow = colorRGBA 231 197 71 255      -- Tomorrow Yellow #E7C547
+        , themeGreen = colorRGBA 113 140 0 255        -- Tomorrow Green #718C00
+        , themePurple = colorRGBA 137 91 144 255      -- Tomorrow Purple #895B90
+        , themeOverlayDim = colorRGBA 0 0 0 100
+        }
+
+tomorrowMinLightTheme :: Theme
+tomorrowMinLightTheme = tomorrowLightTheme
+
+-- | Ported from "Tomorrow at Midnight Min" in https://github.com/biaqat/tomorrow-min-theme-zed
+tomorrowMidnightMinTheme :: Theme
+tomorrowMidnightMinTheme =
+  let panelStyle =
+        Style
+          { styleBg = colorRGBA 16 17 20 255          -- #101114 (elevated panel canvas)
+          , styleFg = colorRGBA 238 238 238 255       -- #EEEEEE
+          , styleBorder = borderColor
+          , styleBorderWidth = 1
+          , styleCornerRadius = 2
+          , styleHoverBg = colorRGBA 24 25 30 255     -- #18191E
+          , styleActiveBg = colorRGBA 12 13 15 255    -- #0C0D0F
+          }
+   in Theme
+        { themeWindow = colorRGBA 0 0 0 255           -- #000000 (pitch black root window backdrop)
+        , themePanel = panelStyle
+        , themeFloatingWindow = panelStyle
+        , themeButton =
+            Style
+              { styleBg = colorRGBA 26 27 34 255       -- #1A1B22
+              , styleFg = colorRGBA 238 238 238 255    -- #EEEEEE
+              , styleBorder = borderColor
+              , styleBorderWidth = 1
+              , styleCornerRadius = 2
+              , styleHoverBg = colorRGBA 40 42 54 255  -- #282A36
+              , styleActiveBg = colorRGBA 56 60 81 255 -- #383C51
+              }
+        , themeInput =
+            Style
+              { styleBg = colorRGBA 13 14 18 255       -- #0D0E12 (recessed into panel)
+              , styleFg = colorRGBA 238 238 238 255
+              , styleBorder = borderColor
+              , styleBorderWidth = 1
+              , styleCornerRadius = 2
+              , styleHoverBg = colorRGBA 20 21 27 255
+              , styleActiveBg = colorRGBA 8 9 11 255
+              }
+        , themeSeparator = separatorColor
+        , themeAccent = activeColor
+        , themeMuted = colorRGBA 128 132 150 255       -- #808496
+        , themeRed = colorRGBA 213 78 83 255           -- bright.red #D54E53
+        , themeOrange = colorRGBA 231 140 69 255       -- bright.orange #E78C45
+        , themeYellow = colorRGBA 231 197 71 255       -- bright.yellow #E7C547
+        , themeGreen = colorRGBA 185 202 74 255        -- bright.green #B9CA4A
+        , themePurple = colorRGBA 195 151 216 255      -- bright.purple #C397D8
+        , themeOverlayDim = colorRGBA 0 0 0 160
+        }
+  where
+  borderColor    = colorRGBA 48 52 70 255              -- #303446
+  separatorColor = colorRGBA 48 52 70 255              -- #303446
+  activeColor    = colorRGBA 140 182 226 255           -- #8CB6E2
+
+tomorrowMidnightMinDarkTheme :: Theme
+tomorrowMidnightMinDarkTheme = tomorrowMidnightMinTheme
+
+-- -----------------------------------------------------------------------------
+-- Base16 Colorschemes
+-- -----------------------------------------------------------------------------
+
+-- | Standard Base16 palette containing 16 styling tones and syntax colours
+-- following Chris Kempson's Base16 specification.
+data Base16 = Base16
+  { base00 :: Color -- ^ Default Background
+  , base01 :: Color -- ^ Lighter Background (status bars, line numbers, panel backgrounds)
+  , base02 :: Color -- ^ Selection Background (active elements, subtle highlights)
+  , base03 :: Color -- ^ Comments, Invisibles, Line Highlighting (muted text, borders)
+  , base04 :: Color -- ^ Dark Foreground (status bar foreground, secondary text)
+  , base05 :: Color -- ^ Default Foreground, Caret, Delimiters, Operators
+  , base06 :: Color -- ^ Light Foreground
+  , base07 :: Color -- ^ Light Background / Highest contrast foreground
+  , base08 :: Color -- ^ Variables, XML Tags, Markup Link Text, Markup Lists, Diff Deleted (Red)
+  , base09 :: Color -- ^ Integers, Boolean, Constants, XML Attributes, Markup Link Url (Orange)
+  , base0A :: Color -- ^ Classes, Markup Bold, Search Text Background (Yellow)
+  , base0B :: Color -- ^ Strings, Inherited Class, Markup Code, Diff Inserted (Green)
+  , base0C :: Color -- ^ Support, Regular Expressions, Escape Characters, Markup Quotes (Cyan)
+  , base0D :: Color -- ^ Functions, Methods, Attribute IDs, Headings (Blue / Primary Accent)
+  , base0E :: Color -- ^ Keywords, Storage, Selector, Markup Italic, Diff Changed (Purple / Magenta)
+  , base0F :: Color -- ^ Deprecated, Opening/Closing Embedded Language Tags (Brown)
+  }
+  deriving (Eq, Show)
+
+type Base16ColorScheme = Base16
+
+-- | Lowercase field aliases for the hex letter tones in Base16.
+base0a, base0b, base0c, base0d, base0e, base0f :: Base16 -> Color
+base0a = base0A
+base0b = base0B
+base0c = base0C
+base0d = base0D
+base0e = base0E
+base0f = base0F
+
+-- | Calculate a 'Theme' from a 'Base16' colorscheme, automatically selecting
+-- dark or light styling based on background vs foreground luminance.
+themeFromBase16 :: Base16 -> Theme
+themeFromBase16 b
+  | isDark = themeFromBase16Dark b
+  | otherwise = themeFromBase16Light b
+  where
+    isDark = colorLuminance (base00 b) < colorLuminance (base05 b)
+
+-- | Alias for 'themeFromBase16'.
+base16Theme :: Base16 -> Theme
+base16Theme = themeFromBase16
+
+-- | Alias for 'themeFromBase16'.
+base16ToTheme :: Base16 -> Theme
+base16ToTheme = themeFromBase16
+
+-- | Calculate a dark 'Theme' from a 'Base16' colorscheme.
+themeFromBase16Dark :: Base16 -> Theme
+themeFromBase16Dark b =
+  let borderColor = lerpColor (base02 b) (base03 b) 0.35
+      panelBg = lerpColor (base01 b) (base02 b) 0.3
+      panelStyle =
+        Style
+          { styleBg = panelBg
+          , styleFg = base05 b
+          , styleBorder = borderColor
+          , styleBorderWidth = 1
+          , styleCornerRadius = 2
+          , styleHoverBg = lerpColor panelBg (base02 b) 0.5
+          , styleActiveBg = lerpColor panelBg (base00 b) 0.4
+          }
+   in Theme
+        { themeWindow = base00 b
+        , themePanel = panelStyle
+        , themeFloatingWindow = panelStyle
+        , themeButton =
+            Style
+              { styleBg = base02 b
+              , styleFg = base07 b
+              , styleBorder = borderColor
+              , styleBorderWidth = 1
+              , styleCornerRadius = 2
+              , styleHoverBg = lerpColor (base02 b) (base03 b) 0.4
+              , styleActiveBg = base01 b
+              }
+        , themeInput =
+            Style
+              { styleBg = base00 b
+              , styleFg = base05 b
+              , styleBorder = borderColor
+              , styleBorderWidth = 1
+              , styleCornerRadius = 2
+              , styleHoverBg = base01 b
+              , styleActiveBg = base00 b
+              }
+        , themeSeparator = borderColor
+        , themeAccent = base0D b
+        , themeMuted = base03 b
+        , themeRed = base08 b
+        , themeOrange = base09 b
+        , themeYellow = base0A b
+        , themeGreen = base0B b
+        , themePurple = base0E b
+        , themeOverlayDim = colorRGBA 0 0 0 160
+        }
+
+-- | Calculate a light 'Theme' from a 'Base16' colorscheme.
+themeFromBase16Light :: Base16 -> Theme
+themeFromBase16Light b =
+  let borderColor = base02 b
+      panelBg = lerpColor (base00 b) (base01 b) 0.5
+      panelStyle =
+        Style
+          { styleBg = panelBg
+          , styleFg = base05 b
+          , styleBorder = borderColor
+          , styleBorderWidth = 1
+          , styleCornerRadius = 2
+          , styleHoverBg = lerpColor panelBg (base00 b) 0.4
+          , styleActiveBg = lerpColor panelBg (base02 b) 0.4
+          }
+   in Theme
+        { themeWindow = base00 b
+        , themePanel = panelStyle
+        , themeFloatingWindow = panelStyle
+        , themeButton =
+            Style
+              { styleBg = base01 b
+              , styleFg = base05 b
+              , styleBorder = borderColor
+              , styleBorderWidth = 1
+              , styleCornerRadius = 2
+              , styleHoverBg = base02 b
+              , styleActiveBg = lerpColor (base02 b) (base03 b) 0.35
+              }
+        , themeInput =
+            Style
+              { styleBg = base00 b
+              , styleFg = base05 b
+              , styleBorder = borderColor
+              , styleBorderWidth = 1
+              , styleCornerRadius = 2
+              , styleHoverBg = lerpColor (base00 b) (base01 b) 0.3
+              , styleActiveBg = lerpColor (base00 b) (base01 b) 0.6
+              }
+        , themeSeparator = borderColor
+        , themeAccent = base0D b
+        , themeMuted = base03 b
+        , themeRed = base08 b
+        , themeOrange = base09 b
+        , themeYellow = base0A b
+        , themeGreen = base0B b
+        , themePurple = base0E b
+        , themeOverlayDim = colorRGBA 0 0 0 100
+        }
+
+-- | Tomorrow Night Base16 reference palette.
+base16TomorrowNight :: Base16
+base16TomorrowNight =
+  Base16
+    { base00 = colorRGBA 29 31 33 255     -- #1D1F21
+    , base01 = colorRGBA 40 42 46 255     -- #282A2E
+    , base02 = colorRGBA 55 59 65 255     -- #373B41
+    , base03 = colorRGBA 150 152 150 255 -- #969896
+    , base04 = colorRGBA 180 183 180 255 -- #B4B7B4
+    , base05 = colorRGBA 197 200 198 255 -- #C5C8C6
+    , base06 = colorRGBA 224 224 224 255 -- #E0E0E0
+    , base07 = colorRGBA 255 255 255 255 -- #FFFFFF
+    , base08 = colorRGBA 213 78 83 255   -- #D54E53
+    , base09 = colorRGBA 231 140 69 255  -- #E78C45
+    , base0A = colorRGBA 231 197 71 255  -- #E7C547
+    , base0B = colorRGBA 185 202 74 255  -- #B9CA4A
+    , base0C = colorRGBA 112 192 186 255 -- #70C0BA
+    , base0D = colorRGBA 103 150 230 255 -- #6796E6
+    , base0E = colorRGBA 195 151 216 255 -- #C397D8
+    , base0F = colorRGBA 163 104 90 255  -- #A3685A
+    }
+
+-- | Tomorrow Light Base16 reference palette.
+base16TomorrowLight :: Base16
+base16TomorrowLight =
+  Base16
+    { base00 = colorRGBA 255 255 255 255 -- #FFFFFF
+    , base01 = colorRGBA 242 242 242 255 -- #F2F2F2
+    , base02 = colorRGBA 222 222 222 255 -- #DEDEDE
+    , base03 = colorRGBA 140 140 140 255 -- #8C8C8C
+    , base04 = colorRGBA 150 152 150 255 -- #969896
+    , base05 = colorRGBA 55 59 65 255    -- #373B41
+    , base06 = colorRGBA 40 42 46 255    -- #282A2E
+    , base07 = colorRGBA 29 31 33 255    -- #1D1F21
+    , base08 = colorRGBA 197 78 82 255   -- #C54E52
+    , base09 = colorRGBA 231 140 69 255  -- #E78C45
+    , base0A = colorRGBA 231 197 71 255  -- #E7C547
+    , base0B = colorRGBA 113 140 0 255   -- #718C00
+    , base0C = colorRGBA 62 153 159 255  -- #3E999F
+    , base0D = colorRGBA 82 134 188 255  -- #5286BC
+    , base0E = colorRGBA 137 91 144 255  -- #895B90
+    , base0F = colorRGBA 163 104 90 255  -- #A3685A
+    }

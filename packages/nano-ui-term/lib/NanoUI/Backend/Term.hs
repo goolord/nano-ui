@@ -83,7 +83,7 @@ runTermAppReduce options update model view = do
 termContext :: TermOptions -> IO Context
 termContext options = do
   ctx0 <- newTerminalContext
-  let themed = maybe ctx0 (withTheme ctx0) (termAppTheme options)
+  themed <- maybe (pure ctx0) (withTheme ctx0) (termAppTheme options)
   pure $ maybe themed (withIcons themed) (termAppIcons options)
 
 runTermAppWithQuitReduce ::

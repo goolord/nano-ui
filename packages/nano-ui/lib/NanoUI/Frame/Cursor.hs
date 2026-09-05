@@ -26,7 +26,7 @@ import NanoUI.Context
   , isDisabled
   , isSelectOpen
   )
-import NanoUI.Font (FontMetrics, sliderTrackBounds)
+import NanoUI.Font (FontMetrics, sliderHandleSlack, sliderTrackBounds)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input
   ( Input (..)
@@ -53,7 +53,7 @@ import NanoUI.Layout.Arena
   , isScrollNode
   )
 import NanoUI.Layout.Solve (scrollBarSlotOf)
-import NanoUI.Types (HostProfile, Rect (..), V2 (..), rectContains, v2X, v2Y)
+import NanoUI.Types (HostProfile, Rect (..), V2 (..), isCellHost, rectContains, v2X, v2Y)
 import NanoUI.WidgetText (isTableHeaderStyle)
 import NanoUI.Frame.Chrome (widgetNodeTypeTable)
 import NanoUI.Frame.Hit (findNodeByWidgetId, scrollHitRect, nodePointVisible)
@@ -268,7 +268,12 @@ sliderCursorKind ctx wid mouse inp = do
         case mrect of
           Nothing -> UiCursorDefault
           Just (Rect x y w h) ->
-            grabDragKind (rectContains (sliderTrackBounds (ctxHostProfile ctx) fm lbl x y w h) mouse) dragging inp
+            let tr = sliderTrackBounds (ctxHostProfile ctx) fm lbl x y w h
+                hitRect =
+                  if isCellHost (ctxHostProfile ctx)
+                    then tr
+                    else Rect (rectX tr) (rectY tr - sliderHandleSlack) (rectW tr) (rectH tr + 2 * sliderHandleSlack)
+             in grabDragKind (rectContains hitRect mouse) dragging inp
 
 textInputCursorKind :: Context -> WidgetId -> V2 -> IO UiCursorKind
 textInputCursorKind ctx wid mouse =

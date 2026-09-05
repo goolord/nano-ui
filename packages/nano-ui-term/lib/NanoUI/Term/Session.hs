@@ -82,11 +82,12 @@ idleBlock = -1
 termContextIO :: Context -> IO Context
 termContextIO ctx0 = do
   let ctxHost = withHostProfile ctx0 CellHost
+  th <- readIORef (ctxTheme ctxHost)
   ctx <-
-    if ctxTheme ctxHost == defaultTheme || ctxTheme ctxHost == terminalTheme
+    if th == defaultTheme || th == terminalTheme
       then do
         (fg, bg) <- queryTerminalColors
-        pure (withTheme ctxHost (terminalThemeFromColors fg bg))
+        withTheme ctxHost (terminalThemeFromColors fg bg)
       else pure ctxHost
   if ctxIcons ctx == asciiIcons
     then do

@@ -46,7 +46,7 @@ runControlsTabHeightTest _ failed = do
       (checked, setChecked) <- useFlag False
       (vol, setVol) <- useText "50"
       (quality, setQuality) <- useText "Medium"
-      (theme, setTheme) <- useText (T.pack (show Dark))
+      (theme, setThemeVal) <- useText (T.pack (show Dark))
       (name, setName) <- useText ""
       scrollWith (tight . grow) $
         columnWith (padAll 8 . gap 8 . fillW) $ do
@@ -81,7 +81,7 @@ runControlsTabHeightTest _ failed = do
                             pure (cb, cb, cb, False, 50, 1, Dark, T.empty)
                     setVol (T.pack (show (round vVal :: Int)))
                     setQuality (["Low", "Medium", "High"] !! qualityIdx)
-                    setTheme (T.pack (show tVal))
+                    setThemeVal (T.pack (show tVal))
                     setName nVal
                   List -> heading "Tree"
                   Diagnostics -> heading "Diagnostics"

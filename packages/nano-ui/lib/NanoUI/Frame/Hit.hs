@@ -220,7 +220,7 @@ scrollViewportGate host nt =
 parentScrollShift :: Context -> NodeIdx -> (Float, Float) -> IO (Float, Float)
 parentScrollShift ctx p (sx, sy) = do
   nt <- getNodeType (ctxNodeArena ctx) p
-  if isScrollNode nt && not (isCellHost (ctxHostProfile ctx) && nt == NodeModal)
+  if isScrollNode nt
     then do
       wid <- getWidgetId (ctxNodeArena ctx) p
       off <- getScrollOffset ctx wid

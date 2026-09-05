@@ -199,14 +199,11 @@ terminalTheme = terminalThemeFromColors terminalDefaultFg terminalDefaultBg
 newTerminalContext :: IO Context
 newTerminalContext = do
   ctx <- newContext
-  pure
-    ( withExternalText
-        ( withTheme
-            (withFontMetrics (withHostProfile ctx CellHost) (monospaceMetrics 1))
-            terminalTheme
-        )
-        True
-    )
+  themed <-
+    withTheme
+      (withFontMetrics (withHostProfile ctx CellHost) (monospaceMetrics 1))
+      terminalTheme
+  pure (withExternalText themed True)
 
 -- | Default fg/bg from the connected terminal, or 'terminalDefaultFg' /
 -- 'terminalDefaultBg' when the palette cannot be read.
@@ -225,14 +222,11 @@ newAdaptiveTerminalContext :: IO Context
 newAdaptiveTerminalContext = do
   (fg, bg) <- queryTerminalColors
   ctx <- newContext
-  pure
-    ( withExternalText
-        ( withTheme
-            (withFontMetrics (withHostProfile ctx CellHost) (monospaceMetrics 1))
-            (terminalThemeFromColors fg bg)
-        )
-        True
-    )
+  themed <-
+    withTheme
+      (withFontMetrics (withHostProfile ctx CellHost) (monospaceMetrics 1))
+      (terminalThemeFromColors fg bg)
+  pure (withExternalText themed True)
 
 queryPlatformColors :: IO (Maybe (Color, Color))
 queryPlatformColors =

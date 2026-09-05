@@ -2,6 +2,7 @@
 
 module NanoUI.Frame.Select
   ( selectDropRect
+  , selectDropGap
   , selectItemH
   , selectDropPickIndex
   , closeSelectOnOutsideClick
@@ -350,12 +351,16 @@ selectDropActiveBg st = styleActiveBg st
 selectDropHoverBg :: Style -> Color
 selectDropHoverBg st = styleHoverBg st
 
--- The list hangs directly off the select, with no gap on any backend.
+-- | Vertical gap/margin between the select widget and its dropdown menu.
+selectDropGap :: HostProfile -> Float
+selectDropGap host = if isCellHost host then 0 else 4
+
 selectDropRect :: HostProfile -> FontMetrics -> Float -> Float -> Float -> Float -> Int -> Rect
 selectDropRect host _fm x y w h nOpts =
   let itemH = selectItemH host h
       pad = selectDropOuterPad host
-   in Rect x (y + h) w (itemH * fromIntegral nOpts + 2 * pad)
+      gap = selectDropGap host
+   in Rect x (y + h + gap) w (itemH * fromIntegral nOpts + 2 * pad)
 
 selectDropItemY :: HostProfile -> FontMetrics -> Rect -> Float -> Int -> Float
 selectDropItemY host _fm dropRect itemH i =
@@ -406,9 +411,9 @@ terminalSelectDropdownSpans rx ry wi opts picked hoverIdx fg dropBg dropActiveBg
 
 drawSelectOverlays :: Context -> Input -> IO ()
 drawSelectOverlays ctx inp = do
+  theme <- readIORef (ctxTheme ctx)
   let mouse = inputMousePos inp
       da = ctxDrawArena ctx
-      theme = ctxTheme ctx
       fm = ctxFontMetrics ctx
       terminal = isCellHost (ctxHostProfile ctx)
   count <- arenaCount (ctxNodeArena ctx)
@@ -473,8 +478,8 @@ drawSelectOverlays ctx inp = do
 
 collectSelectDropdownSpans :: Context -> Input -> IO [(Rect, T.Text, Color, Color, Rect)]
 collectSelectDropdownSpans ctx inp = do
+  theme <- readIORef (ctxTheme ctx)
   let fm = ctxFontMetrics ctx
-      theme = ctxTheme ctx
       mouse = inputMousePos inp
   count <- arenaCount (ctxNodeArena ctx)
   let go idx

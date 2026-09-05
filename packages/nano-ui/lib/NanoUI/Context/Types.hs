@@ -271,7 +271,7 @@ data Context = Context
   , ctxMeasureText :: Text -> IO (Float, Float)
   , ctxMeasureCache :: Maybe (IORef (HashMap MeasureCacheKey (Float, Float)))
   , ctxExternalText :: Bool
-  , ctxTheme :: Theme
+  , ctxTheme :: !(IORef Theme)
   , ctxIcons :: Icons
   , ctxContainerStack :: IORef [Int]
   , ctxMessages :: IORef [FrameMsg]
