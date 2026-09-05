@@ -8,6 +8,15 @@ module NanoUI.Widgets.Layout
   , panelResponse
   , panelResponseWith
   , panelResponse'
+  , panelBg
+  , panelBgWith
+  , panelBg'
+  , panelStyled
+  , panelStyledWith
+  , panelStyled'
+  , boxWith
+  , callout
+  , calloutWith
   , row
   , row_
   , rowWith
@@ -107,14 +116,17 @@ import NanoUI.Style
   , fillW
   , gap
   , grow
+  , packPanelStyle
+  , padXY
   )
-import NanoUI.Types (Size (..))
+import NanoUI.Types (Color (..), Size (..), colorRGBA, lerpColor)
 import NanoUI.Widgets.Node
   ( Response
   , addSizingLeafNode
   , addWidget
   , container
   , containerResponse
+  , containerStyled
   , parentIdx
   )
 
@@ -165,6 +177,46 @@ panelResponseWith = (`withDefaultWith` panelResponse')
 {-# INLINE panelResponse' #-}
 panelResponse' :: Ui :> es => Layout -> Eff es a -> Eff es (a, Response)
 panelResponse' = containerResponse NodePanel
+
+{-# INLINE panelBg #-}
+panelBg :: Ui :> es => Color -> Eff es a -> Eff es a
+panelBg col = withDefault (panelBg' col)
+
+{-# INLINE panelBgWith #-}
+panelBgWith :: Ui :> es => Color -> (Layout -> Layout) -> Eff es a -> Eff es a
+panelBgWith col f = withDefaultWith f (panelBg' col)
+
+{-# INLINE panelBg' #-}
+panelBg' :: Ui :> es => Color -> Layout -> Eff es a -> Eff es a
+panelBg' col layout child =
+  containerStyled NodePanel layout (packPanelStyle col (Color 0)) child
+
+{-# INLINE panelStyled #-}
+panelStyled :: Ui :> es => Color -> Color -> Eff es a -> Eff es a
+panelStyled bgCol borderCol = withDefault (panelStyled' bgCol borderCol)
+
+{-# INLINE panelStyledWith #-}
+panelStyledWith :: Ui :> es => Color -> Color -> (Layout -> Layout) -> Eff es a -> Eff es a
+panelStyledWith bgCol borderCol f = withDefaultWith f (panelStyled' bgCol borderCol)
+
+{-# INLINE panelStyled' #-}
+panelStyled' :: Ui :> es => Color -> Color -> Layout -> Eff es a -> Eff es a
+panelStyled' bgCol borderCol layout child =
+  containerStyled NodePanel layout (packPanelStyle bgCol borderCol) child
+
+{-# INLINE boxWith #-}
+boxWith :: Ui :> es => Color -> (Layout -> Layout) -> Eff es a -> Eff es a
+boxWith = panelBgWith
+
+{-# INLINE callout #-}
+callout :: Ui :> es => Color -> Eff es a -> Eff es a
+callout borderCol = calloutWith borderCol id
+
+{-# INLINE calloutWith #-}
+calloutWith :: Ui :> es => Color -> (Layout -> Layout) -> Eff es a -> Eff es a
+calloutWith borderCol f =
+  let bgCol = lerpColor borderCol (colorRGBA 30 30 35 255) 0.88
+   in panelStyledWith bgCol borderCol (f . padXY 10 6 . gap 4 . fillW)
 
 -- =============================================================================
 -- Row

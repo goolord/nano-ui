@@ -59,6 +59,7 @@ import NanoUI.Icons (iconScrollDown, iconScrollUp, terminalPaintColumns)
 import NanoUI.Input (Input)
 import NanoUI.Layout.Arena
   ( DirTag (..)
+  , NodeArena
   , NodeIdx
   , NodeType (..)
   , SizingTag (..)
@@ -70,6 +71,7 @@ import NanoUI.Layout.Arena
   , getFirstChild
   , getMinMax
   , getNextSibling
+  , getParent
   , getNodeType
   , getNodeValue
   , getPadding
@@ -264,6 +266,25 @@ walkChildSpans ctx floatCache idx clip arena = do
           go ns
           collectClippedSpans ctx floatCache ci clip arena
 
+findAncestorMaxW :: NodeArena -> NodeIdx -> IO Float
+findAncestorMaxW na idx = go idx 0
+  where
+    go cur !padAccum = do
+      p <- getParent na cur
+      if p < 0
+        then pure 1e9
+        else do
+          pad <- getPadding na p
+          let padW = padL pad + padR pad
+              padAccum' = padAccum + padW
+          (_, _, pMaxW, _) <- getMinMax na p
+          (pwTag, pwVal) <- getWidthSizing na p
+          if pwTag == SizingFixed
+            then pure (max 0 (pwVal - padAccum'))
+            else if pMaxW < 1e8
+              then pure (max 0 (pMaxW - padAccum'))
+              else go p padAccum'
+
 -- Placement uses glyph ink (alignedTextPen), not TTF_GetStringSize. Wrap
 -- still measures with the host so line breaks stay on the TTF width.
 collectNodeTextSpans :: Context -> IM.IntMap (Maybe NodeType) -> NodeIdx -> IO [(Rect, T.Text, Color, Color)]
@@ -315,11 +336,15 @@ collectNodeTextSpans ctx floatCache idx = do
               then pure (measureText (ctxHostProfile ctx) textFm txt0)
               else ctxMeasureText ctx txt0
           isRowChild <- parentIsRow (ctxNodeArena ctx) idx
+          effMaxW <-
+            if maxW < 1e8
+              then pure maxW
+              else findAncestorMaxW (ctxNodeArena ctx) idx
           let hasNewlines = T.any (== '\n') txt0
               wrapCap
-                | maxW < 1e8 = max 0 maxW
+                | effMaxW < 1e8 = max 0 effMaxW
                 | wTag == SizingGrow && w > 0 = w
-                | otherwise = maxW
+                | otherwise = effMaxW
               canWrap = not isRowChild && wrapCap < 1e8
               wrapW = max 0 (wrapCap - 2 * ix)
               lineH = layoutLineHeight (ctxHostProfile ctx) textFm

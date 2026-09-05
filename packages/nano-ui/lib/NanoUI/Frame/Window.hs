@@ -491,8 +491,15 @@ tryStartWindowDrag ctx mouse = do
 
 windowTitleRect :: Context -> NodeIdx -> IO (Maybe Rect)
 windowTitleRect ctx idx = do
+  (_, wy, _, _) <- getRect (ctxNodeArena ctx) idx
   fc <- getFirstChild (ctxNodeArena ctx) idx
-  go fc Nothing
+  mBest <- go fc Nothing
+  pure $ case mBest of
+    Nothing -> Nothing
+    Just (Rect cx cy cw ch) ->
+      let topY = min wy cy
+          totalH = (cy - topY) + ch
+       in Just (Rect cx topY cw totalH)
   where
     go ci best
       | ci < 0 = pure best

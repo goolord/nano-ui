@@ -73,6 +73,7 @@ import NanoUI.Style
   , themeAccent
   , themeInput
   , themePanel
+  , unpackPanelStyle
   , themeSeparator
   , themeWindow
   )
@@ -184,7 +185,10 @@ lowerNodeVisible ctx occluders idx nt x y w h rect fm theme terminal da =
   case nt of
     NodeContainer -> walkChildrenWithOccluders ctx occluders idx
     NodePanel -> do
-      let style = themePanel theme
+      si <- getStyleIdx (ctxNodeArena ctx) idx
+      let style = if si /= 0
+                    then unpackPanelStyle (themePanel theme) si
+                    else themePanel theme
       fillStyledRect da terminal style rect
       strokeStyledRect da terminal style x y w h
       withClip da (borderContentClip style rect) $ walkChildrenWithOccluders ctx occluders idx
