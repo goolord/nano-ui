@@ -31,12 +31,16 @@ module NanoUI.Sdl.Font
   , ttfSetFontStyle
   , ttfSaveRenderText
   , ttfGetKerning
+  , ttfGetPairKerning
+  , ttfDebugPair
+  , ttfDumpLayout
   , withUtf8
   ) where
 
 import Control.Exception (SomeException, bracket, catch, throwIO)
 import Control.Monad (when)
 import Data.Bits ((.|.))
+import Foreign.Marshal.Alloc (alloca)
 import Data.Char (ord)
 import Data.ByteString (ByteString)
 import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
@@ -67,6 +71,7 @@ import NanoUI
   , FontVariant (..)
   , FontWeight (..)
   , GlyphQuad (..)
+  , RunQuad (..)
   , monospaceMetrics
   )
 import NanoUI.Testing
@@ -280,103 +285,198 @@ data CachedQuad
 -- Standard ASCII (0..127) lookups are backed by a high-performance 'SmallMutableArray'
 -- fast path for branchless O(1) in-memory indexing, with automatic cache invalidation
 -- whenever the underlying glyph atlas is reset.
-buildGlyphFontMetrics :: GlyphAtlas -> SdlFont -> Float -> FontMetrics
-buildGlyphFontMetrics ga sf scale =
+{-# NOINLINE buildGlyphFontMetrics #-}
+buildGlyphFontMetrics :: GlyphAtlas -> SdlFont -> Float -> IO FontMetrics
+buildGlyphFontMetrics ga sf scale = do
   let !inv = if scale > 0 then scale else 1
       baseFm = ttfFontMetricsScaled sf scale
 
-      -- Precompute ASCII 0..127 advances once directly from FreeType without atlas rasterization
-      !asciiAdvances = unsafePerformIO $ do
-        advs <- mapM (getGlyphAdvance sf) [0 .. 127 :: CUInt]
-        pure $ smallArrayFromList
+  -- Precompute ASCII 0..127 advances once directly from FreeType without atlas rasterization
+  advs <- mapM (getGlyphAdvance sf) [0 .. 127 :: CUInt]
+  let !asciiAdvances =
+        smallArrayFromList
           [ case mAdv of
               Nothing  -> sfSpaceAdvance sf / inv
               Just adv -> adv / inv
           | mAdv <- advs
           ]
 
-      -- Cache of ASCII 0..127 glyph quads with epoch-based invalidation
-      (!asciiCache, !epochRef) = unsafePerformIO $ do
-        arr <- newSmallArray 128 UncachedQuad
-        curEpoch <- readIORef (gaEpoch ga)
-        ref <- newIORef curEpoch
-        pure (arr, ref)
+  -- Cache of ASCII 0..127 glyph quads with epoch-based invalidation
+  asciiCacheArr <- newSmallArray 128 UncachedQuad
+  initEpoch <- readIORef (gaEpoch ga)
+  asciiEpochRef <- newIORef initEpoch
 
-      lookupAsciiQuad !cp = do
-        curEpoch <- readIORef (gaEpoch ga)
-        lastEpoch <- readIORef epochRef
-        when (curEpoch /= lastEpoch) $ do
-          writeIORef epochRef curEpoch
-          mapM_ (\i -> writeSmallArray asciiCache i UncachedQuad) [0 .. 127 :: Int]
-        cached <- readSmallArray asciiCache cp
-        case cached of
-          ValidQuad q -> pure (Just q)
-          EmptyQuad   -> pure Nothing
-          UncachedQuad -> do
-            mSlot <- lookupOrInsertGlyph ga sf (toEnum cp)
-            case mSlot of
-              Nothing -> do
-                newEpoch <- readIORef (gaEpoch ga)
-                when (newEpoch /= curEpoch) $ do
-                  writeIORef epochRef newEpoch
-                  mapM_ (\i -> writeSmallArray asciiCache i UncachedQuad) [0 .. 127 :: Int]
-                writeSmallArray asciiCache cp EmptyQuad
-                pure Nothing
-              Just gs -> do
-                newEpoch <- readIORef (gaEpoch ga)
-                when (newEpoch /= curEpoch) $ do
-                  writeIORef epochRef newEpoch
-                  mapM_ (\i -> writeSmallArray asciiCache i UncachedQuad) [0 .. 127 :: Int]
-                let !q = GlyphQuad
-                           { gqX  = gsOffX gs / inv
-                           , gqY  = gsOffY gs / inv
-                           , gqW  = gsW    gs / inv
-                           , gqH  = gsH    gs / inv
-                           , gqU0 = gsU0   gs
-                           , gqV0 = gsV0   gs
-                           , gqU1 = gsU1   gs
-                           , gqV1 = gsV1   gs
-                           }
-                writeSmallArray asciiCache cp (ValidQuad q)
-                pure (Just q)
+  -- Kerning pairs are sparse and each miss costs a shaped 2-glyph
+  -- layout, so a pair cache keeps the hot pen loops off the FFI
+  -- boundary after first contact.
+  kernCacheRef <- newIORef Map.empty
 
-      {-# INLINE glyphLookup #-}
-      glyphLookup !c =
-        let !cp = ord c
-         in if (fromIntegral cp :: Word) < 128
-              then unsafePerformIO (lookupAsciiQuad cp)
-              else unsafePerformIO $ do
-                mSlot <- lookupOrInsertGlyph ga sf c
-                case mSlot of
-                  Nothing -> pure Nothing
-                  Just gs ->
-                    pure $
-                      Just
-                        GlyphQuad
-                          { gqX  = gsOffX gs / inv
-                          , gqY  = gsOffY gs / inv
-                          , gqW  = gsW    gs / inv
-                          , gqH  = gsH    gs / inv
-                          , gqU0 = gsU0   gs
-                          , gqV0 = gsV0   gs
-                          , gqU1 = gsU1   gs
-                          , gqV1 = gsV1   gs
-                          }
+  -- Shaped text runs: whole strings rendered through SDL3_ttf so GPOS
+  -- kerning, ligatures, and contextual positioning are preserved.  The
+  -- run quad is cached per atlas epoch; measurement fields are strict so
+  -- layout queries do not force a render, while uv/rqY stay lazy until
+  -- 'pushText' draws the run.
+  runCacheRef <- newIORef Map.empty
 
-      {-# INLINE advanceLookup #-}
-      advanceLookup !c =
-        let !cp = ord c
-         in if (fromIntegral cp :: Word) < 128
-              then indexSmallArray asciiAdvances cp
-              else unsafePerformIO $ do
-                mAdv <- getGlyphAdvance sf (fromIntegral cp)
-                pure $! case mAdv of
-                  Nothing  -> sfSpaceAdvance sf / inv
-                  Just adv -> adv / inv
-   in baseFm
-        { fmGlyph   = glyphLookup
-        , fmAdvance = advanceLookup
-        }
+  let
+    lookupAsciiQuad !cp = do
+      curEpoch <- readIORef (gaEpoch ga)
+      lastEpoch <- readIORef asciiEpochRef
+      when (curEpoch /= lastEpoch) $ do
+        writeIORef asciiEpochRef curEpoch
+        mapM_ (\i -> writeSmallArray asciiCacheArr i UncachedQuad) [0 .. 127 :: Int]
+      cached <- readSmallArray asciiCacheArr cp
+      case cached of
+        ValidQuad q -> pure (Just q)
+        EmptyQuad   -> pure Nothing
+        UncachedQuad -> do
+          mSlot <- lookupOrInsertGlyph ga sf (toEnum cp)
+          case mSlot of
+            Nothing -> do
+              newEpoch <- readIORef (gaEpoch ga)
+              when (newEpoch /= curEpoch) $ do
+                writeIORef asciiEpochRef newEpoch
+                mapM_ (\i -> writeSmallArray asciiCacheArr i UncachedQuad) [0 .. 127 :: Int]
+              writeSmallArray asciiCacheArr cp EmptyQuad
+              pure Nothing
+            Just gs -> do
+              newEpoch <- readIORef (gaEpoch ga)
+              when (newEpoch /= curEpoch) $ do
+                writeIORef asciiEpochRef newEpoch
+                mapM_ (\i -> writeSmallArray asciiCacheArr i UncachedQuad) [0 .. 127 :: Int]
+              let !q =
+                    GlyphQuad
+                      { gqX  = gsOffX gs / inv
+                      , gqY  = gsOffY gs / inv
+                      , gqW  = gsW    gs / inv
+                      , gqH  = gsH    gs / inv
+                      , gqU0 = gsU0   gs
+                      , gqV0 = gsV0   gs
+                      , gqU1 = gsU1   gs
+                      , gqV1 = gsV1   gs
+                      }
+              writeSmallArray asciiCacheArr cp (ValidQuad q)
+              pure (Just q)
+
+    {-# NOINLINE glyphLookup #-}
+    glyphLookup !c =
+      let !cp = ord c
+       in if (fromIntegral cp :: Word) < 128
+            then unsafePerformIO (lookupAsciiQuad cp)
+            else unsafePerformIO $ do
+              mSlot <- lookupOrInsertGlyph ga sf c
+              case mSlot of
+                Nothing -> pure Nothing
+                Just gs ->
+                  pure $
+                    Just
+                      GlyphQuad
+                        { gqX  = gsOffX gs / inv
+                        , gqY  = gsOffY gs / inv
+                        , gqW  = gsW    gs / inv
+                        , gqH  = gsH    gs / inv
+                        , gqU0 = gsU0   gs
+                        , gqV0 = gsV0   gs
+                        , gqU1 = gsU1   gs
+                        , gqV1 = gsV1   gs
+                        }
+
+    {-# NOINLINE advanceLookup #-}
+    advanceLookup !c =
+      let !cp = ord c
+       in if (fromIntegral cp :: Word) < 128
+            then indexSmallArray asciiAdvances cp
+            else unsafePerformIO $ do
+              mAdv <- getGlyphAdvance sf (fromIntegral cp)
+              pure $! case mAdv of
+                Nothing  -> sfSpaceAdvance sf / inv
+                Just adv -> adv / inv
+
+    {-# NOINLINE kernLookup #-}
+    kernLookup !prev !c =
+      let !pk = (sfId sf, ord prev, ord c)
+          cached = unsafePerformIO $ do
+            m <- readIORef kernCacheRef
+            pure (Map.lookup pk m)
+       in case cached of
+            Just k -> k
+            Nothing -> unsafePerformIO $ do
+              raw <- ttfGetKerning (sfFont sf) (fromIntegral (ord prev) :: CUInt) (fromIntegral (ord c) :: CUInt)
+              let !k = fromIntegral raw / inv
+              modifyIORef' kernCacheRef (Map.insert pk k)
+              pure k
+
+    {-# NOINLINE runLookup #-}
+    runLookup !txt = unsafePerformIO $ do
+      ep <- readIORef (gaEpoch ga)
+      let !key = (txt, sfId sf, ep)
+      m <- readIORef runCacheRef
+      case Map.lookup key m of
+        Just rq -> pure (Just rq)
+        Nothing -> makeRunQuad key txt
+
+    {-# NOINLINE makeRunQuad #-}
+    makeRunQuad !key !txt
+      | T.null txt = pure Nothing
+      | otherwise = do
+          (w, h) <- withUtf8 txt $ \cstr len ->
+            withForeignPtr measureScratch $ \wp -> do
+              let hp = plusPtr wp (sizeOf (0 :: CFloat))
+              ok <- ttfStringSize (sfFont sf) cstr len wp hp
+              if not ok
+                then pure (0, 0)
+                else (,) <$> (realToFrac <$> peek wp) <*> (realToFrac <$> peek hp)
+          if w <= 0 && h <= 0
+            then pure Nothing
+            else do
+              let uv = unsafePerformIO (renderRun txt)
+                  rq =
+                    RunQuad
+                      { rqX = 0
+                      , rqY = 0
+                      , rqW = w / inv
+                      , rqH = h / inv
+                      , rqU0 = case uv of (u, _, _, _) -> u
+                      , rqV0 = case uv of (_, v, _, _) -> v
+                      , rqU1 = case uv of (_, _, u, _) -> u
+                      , rqV1 = case uv of (_, _, _, v) -> v
+                      , rqAdvance = w / inv
+                      }
+              modifyIORef' runCacheRef (Map.insert key rq)
+              pure (Just rq)
+      where
+        renderRun t =
+          withUtf8 t $ \cstr len -> do
+            mPos <- alloca $ \sp -> do
+              poke sp nullPtr
+              ok <- ttfRenderTextSurface (sfFont sf) cstr len sp
+              if not ok
+                then pure Nothing
+                else do
+                  surf <- peek sp
+                  mPos0 <- tryInsert (gaAtlas ga) surf
+                  mPos1 <- case mPos0 of
+                    Just p  -> pure (Just p)
+                    Nothing -> do
+                      modifyIORef' (gaEpoch ga) (+1)
+                      writeIORef (gaEntries ga) Map.empty
+                      textAtlasReset (gaAtlas ga)
+                      tryInsert (gaAtlas ga) surf
+                  freeSurface surf
+                  pure mPos1
+            case mPos of
+              Nothing -> pure (0, 0, 0, 0)
+              Just (px, py, tw, th) -> do
+                (atW, atH) <- atlasSize (gaAtlas ga)
+                pure (px / atW, py / atH, (px + tw) / atW, (py + th) / atH)
+
+  pure $
+    baseFm
+      { fmGlyph   = glyphLookup
+      , fmAdvance = advanceLookup
+      , fmKerning = kernLookup
+      , fmRun     = runLookup
+      }
 
 -- | Return the SDL_Texture backing the glyph atlas, for passing to the renderer.
 glyphAtlasTexture :: GlyphAtlas -> IO (Ptr ())
@@ -534,7 +634,9 @@ measureTtfText sf txt
             then do
               w <- peek wp
               h <- peek hp
-              pure (realToFrac w, realToFrac h)
+              let ww = realToFrac w
+                  hh = realToFrac h
+              pure (ww, hh)
             else pure (0, sfLineSkip sf)
 
 tryInsert :: Ptr () -> Ptr () -> IO (Maybe (Float, Float, Float, Float))
@@ -639,6 +741,14 @@ foreign import ccall unsafe "nano_ui_ttf_render_glyph_surface"
     Ptr (Ptr ()) ->  -- out_surface
     IO Bool
 
+foreign import ccall unsafe "nano_ui_ttf_render_text_surface"
+  ttfRenderTextSurface ::
+    Ptr () ->        -- font
+    CString ->       -- text
+    CSize ->         -- length
+    Ptr (Ptr ()) ->  -- out_surface
+    IO Bool
+
 foreign import ccall unsafe "nano_ui_ttf_set_font_style"
   ttfSetFontStyle :: Ptr () -> CInt -> IO ()
 
@@ -647,6 +757,15 @@ foreign import ccall unsafe "nano_ui_ttf_save_render_text"
 
 foreign import ccall unsafe "nano_ui_ttf_get_kerning"
   ttfGetKerning :: Ptr () -> CUInt -> CUInt -> IO CInt
+
+foreign import ccall unsafe "nano_ui_ttf_get_pair_kerning"
+  ttfGetPairKerning :: Ptr () -> CUInt -> CUInt -> IO CInt
+
+foreign import ccall unsafe "nano_ui_ttf_dump_layout"
+  ttfDumpLayout :: Ptr () -> CString -> IO ()
+
+foreign import ccall unsafe "nano_ui_ttf_debug_pair"
+  ttfDebugPair :: Ptr () -> CUInt -> CUInt -> IO ()
 
 -- ---------------------------------------------------------------------------
 -- Dynamic font cache for crisp text rendering at arbitrary sizes and styles
@@ -828,7 +947,7 @@ getOrLoadCachedFont cache sz weight style var = do
           when (flags /= 0) $ ttfSetFontStyle (sfFont font) flags
           -- Note: We intentionally do NOT call warmGlyphAtlas here.
           -- Dynamic fonts insert only glyphs actually drawn on screen.
-          let fm = buildGlyphFontMetrics (sfcGlyphAtlas cache) font scale
+          fm <- buildGlyphFontMetrics (sfcGlyphAtlas cache) font scale
           entry <- makeCachedFontEntry font fm scale
           let newDc = DynamicCache
                 { dcEntries = Map.insert key entry (dcEntries dcClean)

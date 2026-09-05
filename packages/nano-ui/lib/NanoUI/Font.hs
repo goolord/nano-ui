@@ -2,6 +2,7 @@
 
 module NanoUI.Font
   ( GlyphQuad (..)
+  , RunQuad (..)
   , FontMetrics (..)
   , monospaceMetrics
   , scaleFontMetrics
@@ -79,10 +80,25 @@ data GlyphQuad = GlyphQuad
   }
   deriving (Eq, Show)
 
+data RunQuad = RunQuad
+  { rqX :: {-# UNPACK #-} !Float
+  , rqY :: ~Float
+  , rqW :: {-# UNPACK #-} !Float
+  , rqH :: {-# UNPACK #-} !Float
+  , rqU0 :: ~Float
+  , rqV0 :: ~Float
+  , rqU1 :: ~Float
+  , rqV1 :: ~Float
+  , rqAdvance :: {-# UNPACK #-} !Float
+  }
+  deriving (Eq, Show)
+
 data FontMetrics = FontMetrics
   { fmLineHeight :: {-# UNPACK #-} !Float
   , fmAscent :: {-# UNPACK #-} !Float
   , fmAdvance :: Char -> Float
+  , fmKerning :: Char -> Char -> Float
+  , fmRun :: Text -> Maybe RunQuad
   , fmGlyph :: Char -> Maybe GlyphQuad
   }
 
@@ -93,6 +109,8 @@ monospaceMetrics cell =
     { fmLineHeight = cell
     , fmAscent = cell * 0.8
     , fmAdvance = \_ -> cell
+    , fmKerning = \_ _ -> 0
+    , fmRun = \_ -> Nothing
     , fmGlyph = \_ -> Nothing
     }
 
@@ -105,6 +123,8 @@ scaleFontMetrics s fm
         { fmLineHeight = fmLineHeight fm * s
         , fmAscent = fmAscent fm * s
         , fmAdvance = \c -> fmAdvance fm c * s
+        , fmKerning = \a b -> fmKerning fm a b * s
+        , fmRun = \t -> fmap scaleRun (fmRun fm t)
         , fmGlyph = \c -> case fmGlyph fm c of
             Nothing -> Nothing
             Just gq ->
@@ -115,6 +135,16 @@ scaleFontMetrics s fm
                   , gqW = gqW gq * s
                   , gqH = gqH gq * s
                   }
+        }
+  where
+    scaleRun rq =
+      rq
+        { rqX = rqX rq * s
+        , rqY = rqY rq * s
+        , rqW = rqW rq * s
+        , rqH = rqH rq * s
+        , rqAdvance = rqAdvance rq * s
+        -- UVs stay in normalised atlas space; do not scale them.
         }
 
 -- Layout gap/pad are authored in pixel steps (see defaultLayout). Cell hosts map one cell per step.
@@ -205,10 +235,13 @@ textInkEnd fm txt =
   case T.unsnoc txt of
     Nothing -> 0
     Just (prefix, c) ->
-      let pen = lineWidth fm prefix
-       in case fmGlyph fm c of
-            Just gq -> pen + gqX gq + gqW gq
-            Nothing -> pen + fmAdvance fm c
+      case fmRun fm txt of
+        Just rq -> rqX rq + rqW rq
+        Nothing ->
+          let pen = lineWidth fm prefix
+           in case fmGlyph fm c of
+                Just gq -> pen + gqX gq + gqW gq
+                Nothing -> pen + fmAdvance fm c
 
 -- Align using per-glyph advances (same as 'pushText'), not TTF_GetStringSize.
 -- When the line fits, AlignEnd/Center shift by ink so the visual right edge
@@ -415,25 +448,26 @@ textDisplayWidth host fm txt =
     then fromIntegral (terminalPaintColumns txt)
     else lineWidth fm txt
 
--- Caret and click index using the same advances as pushText.
--- TTF_GetStringSize applies kerning and ff ligatures, so a caret measured
--- that way sits left of glyphs drawn with fmAdvance.
+-- Caret and click index using the same advances and kerning as pushText,
+-- so the caret lands exactly where the glyph to its left was drawn.
 textIndexAtX :: HostProfile -> FontMetrics -> Text -> Float -> Int
 textIndexAtX host fm txt x
   | T.null txt || x <= 0 = 0
-  | otherwise = go 0 0.0 txt
+  | otherwise = go 0 0.0 Nothing txt
   where
-    go !i !acc t =
+    go !i !acc prev t =
       case T.uncons t of
         Nothing -> i
         Just (c, rest) ->
-          let adv = charW c
+          let adv = charW prev c
               mid = acc + adv * 0.5
-           in if x < mid then i else go (i + 1) (acc + adv) rest
-    charW c =
+           in if x < mid then i else go (i + 1) (acc + adv) (Just c) rest
+    charW prev c =
       if isCellHost host
         then fromIntegral (terminalPaintColumns (T.singleton c))
-        else fmAdvance fm c
+        else case prev of
+          Nothing -> fmAdvance fm c
+          Just p -> fmAdvance fm c + fmKerning fm p c
 
 measureTextWrapped :: HostProfile -> FontMetrics -> Text -> Float -> (Float, Float)
 measureTextWrapped host fm txt maxW
@@ -469,7 +503,7 @@ wrapTextLines host fm txt maxW =
     then wrapTextLinesWith (textDisplayWidth host fm) txt maxW
     else
       wrapTextLinesFit
-        (takeWidthAdvance (fmAdvance fm))
+        (takeWidthAdvance fm)
         (lineWidth fm)
         txt
         maxW
@@ -578,22 +612,30 @@ lineWidth :: FontMetrics -> Text -> Float
 lineWidth fm line
   | T.null line = 0
   | otherwise =
-      let !spaceAdv = fmAdvance fm ' '
-          !xAdv = fmAdvance fm 'x'
-          !mAdv = fmAdvance fm 'M'
-       in if spaceAdv == xAdv && xAdv == mAdv
-            then fromIntegral (T.length line) * spaceAdv
-            else T.foldl' (\ !w c -> w + fmAdvance fm c) 0 line
+      case fmRun fm line of
+        Just rq -> rqAdvance rq
+        Nothing ->
+          let !spaceAdv = fmAdvance fm ' '
+              !xAdv = fmAdvance fm 'x'
+              !mAdv = fmAdvance fm 'M'
+           in if spaceAdv == xAdv && xAdv == mAdv && fmKerning fm 'x' 'M' == 0
+                then fromIntegral (T.length line) * spaceAdv
+                else case T.uncons line of
+                  Just (c0, rest) ->
+                    fst (T.foldl' step (fmAdvance fm c0, c0) rest)
+                  Nothing -> 0
+  where
+    step (!w, !prev) c = (w + fmAdvance fm c + fmKerning fm prev c, c)
 
-takeWidthAdvance :: (Char -> Float) -> Float -> Text -> (Text, Text)
-takeWidthAdvance advance maxW txt
+takeWidthAdvance :: FontMetrics -> Float -> Text -> (Text, Text)
+takeWidthAdvance fm maxW txt
   | T.null txt = (txt, T.empty)
   | maxW <= 0 = (T.empty, txt)
   | otherwise =
-      let !adv = advance ' '
-          !xAdv = advance 'x'
-          !mAdv = advance 'M'
-       in if adv == xAdv && xAdv == mAdv && adv > 0
+      let !adv = fmAdvance fm ' '
+          !xAdv = fmAdvance fm 'x'
+          !mAdv = fmAdvance fm 'M'
+       in if adv == xAdv && xAdv == mAdv && adv > 0 && fmKerning fm 'x' 'M' == 0
             then
               let !count = floor (maxW / adv)
                   !n = T.length txt
@@ -603,18 +645,18 @@ takeWidthAdvance advance maxW txt
                       then (T.take 1 txt, T.drop 1 txt)
                       else (T.take count txt, T.drop count txt)
             else
-              let (!len, _) = T.foldl' step (0, 0.0 :: Float) txt
+              let (!len, _, _) = T.foldl' step (0, 0.0 :: Float, ' ') txt
                in if len <= 0
                     then (T.take 1 txt, T.drop 1 txt)
                     else if len >= T.length txt
                       then (txt, T.empty)
                       else (T.take len txt, T.drop len txt)
   where
-    step (!len, !w) c =
-      let w' = w + advance c
+    step (!len, !w, !prev) c =
+      let w' = w + fmAdvance fm c + (if len == 0 then 0 else fmKerning fm prev c)
        in if w' > maxW
-            then if len == 0 then (1, w') else (len, w)
-            else (len + 1, w')
+            then if len == 0 then (1, w', c) else (len, w, c)
+            else (len + 1, w', c)
 
 takeWidthWith :: (Text -> Float) -> Float -> Text -> (Text, Text)
 takeWidthWith lineW maxW txt =
@@ -660,19 +702,19 @@ takeWidthIO lineW maxW txt = do
           ok <- (<= maxW) <$> lineW (T.take mid txt)
           if ok then maxFit mid hi else maxFit lo (mid - 1)
 
-truncateTextAdvance :: (Char -> Float) -> Float -> Text -> Text
-truncateTextAdvance advance maxW txt
+truncateTextAdvance :: FontMetrics -> Float -> Text -> Text
+truncateTextAdvance fm maxW txt
   | maxW <= 0 = ""
   | otherwise =
-      let !totalW = T.foldl' (\ !w c -> w + advance c) (0.0 :: Float) txt
+      let !totalW = lineWidth fm txt
        in if totalW <= maxW
             then txt
             else
-              let ellW = advance '.' * 3
+              let ellW = lineWidth fm "..."
                in if maxW <= ellW
-                    then fst (takeWidthAdvance advance maxW txt)
+                    then fst (takeWidthAdvance fm maxW txt)
                     else
-                      let (fit, _) = takeWidthAdvance advance (maxW - ellW) txt
+                      let (fit, _) = takeWidthAdvance fm (maxW - ellW) txt
                        in T.dropWhileEnd (== '.') fit <> "..."
 
 truncateTextWith :: (Text -> Float) -> Float -> Text -> Text

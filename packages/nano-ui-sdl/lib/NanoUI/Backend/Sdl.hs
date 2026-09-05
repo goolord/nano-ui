@@ -19,6 +19,9 @@ module NanoUI.Backend.Sdl
   , saveScreenshot
   , saveFontRenderText
   , queryFontKerning
+  , queryFontPairKerning
+  , debugFontPair
+  , dumpFontLayout
   ) where
 
 import Control.Monad (unless)
@@ -46,7 +49,10 @@ import NanoUI.Sdl.Font
   ( CachedFontEntry (..)
   , SdlFont (..)
   , getOrLoadCachedFont
+  , ttfDumpLayout
   , ttfGetKerning
+  , ttfGetPairKerning
+  , ttfDebugPair
   , ttfSaveRenderText
   , withUtf8
   )
@@ -145,3 +151,22 @@ queryFontKerning env sz weight style var c1 c2 = do
   let cp1 = fromIntegral (ord c1)
       cp2 = fromIntegral (ord c2)
   fromIntegral <$> ttfGetKerning (sfFont (cfeFont entry)) cp1 cp2
+
+queryFontPairKerning :: SdlEnv -> Float -> FontWeight -> FontStyle -> FontVariant -> Char -> Char -> IO Int
+queryFontPairKerning env sz weight style var c1 c2 = do
+  entry <- getOrLoadCachedFont (sdlFontCache env) sz weight style var
+  let cp1 = fromIntegral (ord c1)
+      cp2 = fromIntegral (ord c2)
+  fromIntegral <$> ttfGetPairKerning (sfFont (cfeFont entry)) cp1 cp2
+
+debugFontPair :: SdlEnv -> Float -> FontWeight -> FontStyle -> FontVariant -> Char -> Char -> IO ()
+debugFontPair env sz weight style var c1 c2 = do
+  entry <- getOrLoadCachedFont (sdlFontCache env) sz weight style var
+  let cp1 = fromIntegral (ord c1)
+      cp2 = fromIntegral (ord c2)
+  ttfDebugPair (sfFont (cfeFont entry)) cp1 cp2
+
+dumpFontLayout :: SdlEnv -> Float -> FontWeight -> FontStyle -> FontVariant -> Text -> IO ()
+dumpFontLayout env sz weight style var txt = do
+  entry <- getOrLoadCachedFont (sdlFontCache env) sz weight style var
+  withUtf8 txt $ \ctext _ -> ttfDumpLayout (sfFont (cfeFont entry)) ctext

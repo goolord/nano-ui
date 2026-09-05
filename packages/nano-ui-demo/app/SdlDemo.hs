@@ -744,11 +744,39 @@ selftest = do
       }
     ctx0
     $ \ctx env -> do
-    (_fmNorm, _) <- ctxResolveFont ctx 16.0 WeightNormal FontStyleNormal FontRegular
-    (_fmItal, _) <- ctxResolveFont ctx 16.0 WeightNormal FontStyleItalic FontRegular
+    (fmNorm16, _) <- ctxResolveFont ctx 16.0 WeightNormal FontStyleNormal FontRegular
+    (fmItal16, _) <- ctxResolveFont ctx 16.0 WeightNormal FontStyleItalic FontRegular
     (wNorm, _) <- ctxResolveMeasure ctx 16.0 WeightNormal FontStyleNormal FontRegular "Slanted synthetic italic font style."
     (wItal, _) <- ctxResolveMeasure ctx 16.0 WeightNormal FontStyleItalic FontRegular "Slanted synthetic italic font style."
+    let runNorm = lineWidth fmNorm16 "Slanted synthetic italic font style."
+        runItal = lineWidth fmItal16 "Slanted synthetic italic font style."
+    when (abs (runNorm - wNorm) > 0.01) $
+      fail $ printf "selftest: shaped width mismatch for normal sentence: measure=%.2f, fmRun=%.2f" wNorm runNorm
+    when (abs (runItal - wItal) > 0.01) $
+      fail $ printf "selftest: shaped width mismatch for italic sentence: measure=%.2f, fmRun=%.2f" wItal runItal
     putStrLn $ printf "MEASURE string: norm=%.1f, ital=%.1f" wNorm wItal
+    let bracketTo :: String -> IO ()
+        bracketTo tag = do
+          (w, _) <- ctxResolveMeasure ctx 20.0 WeightNormal FontStyleNormal FontRegular "To"
+          putStrLn $ printf "  [bracket %s] width(To)@20 = %.1f" tag w
+    bracketTo "start"
+    -- Verify the shaped run path (fmRun / pushText) matches SDL3_ttf string
+    -- measurement.  This catches regressions where per-glyph fallback would
+    -- ignore GPOS kerning for pairs like To, AV, and fi.
+    (fmNorm20, _) <- ctxResolveFont ctx 20.0 WeightNormal FontStyleNormal FontRegular
+    (fmItal20, _) <- ctxResolveFont ctx 20.0 WeightNormal FontStyleItalic FontRegular
+    let checkRun :: String -> FontMetrics -> FontStyle -> String -> IO ()
+        checkRun tag fm st pair = do
+          (wab, _) <- ctxResolveMeasure ctx 20.0 WeightNormal st FontRegular (T.pack pair)
+          let runW = lineWidth fm (T.pack pair)
+          when (abs (runW - wab) > 0.01) $
+            fail $ printf "selftest: %s shaped width mismatch for '%s': measure=%.2f, fmRun=%.2f" tag pair wab runW
+    checkRun "norm" fmNorm20 FontStyleNormal "To"
+    checkRun "ital" fmItal20 FontStyleItalic "To"
+    checkRun "norm" fmNorm20 FontStyleNormal "AV"
+    checkRun "ital" fmItal20 FontStyleItalic "AV"
+    checkRun "norm" fmNorm20 FontStyleNormal "fi"
+    checkRun "ital" fmItal20 FontStyleItalic "fi"
     let sentence = "The quick brown fox jumps over the lazy dog"
     putStrLn "--- Kerning queries (Normal vs Italic) ---"
     let pairs = zip (T.unpack sentence) (drop 1 (T.unpack sentence))
@@ -757,6 +785,28 @@ selftest = do
       kI <- queryFontKerning env 20.0 WeightNormal FontStyleItalic FontRegular c1 c2
       when (kN /= 0 || kI /= 0) $
         putStrLn $ printf "Kerning '%c''%c': norm=%d, ital=%d" c1 c2 kN kI
+    putStrLn "--- Pair width probes (string-level GPOS kerning) ---"
+    let kernPairs = [('T', 'o'), ('W', 'e'), ('A', 'V'), ('T', 'a'), ('f', 'i'), ('r', 'y'), ('l', 'y'), ('F', 'o')]
+    for_ kernPairs $ \(a, b) ->
+      for_ [(FontStyleNormal, "norm" :: String), (FontStyleItalic, "ital")] $ \(st, tag) -> do
+        (wa, _) <- ctxResolveMeasure ctx 20.0 WeightNormal st FontRegular (T.singleton a)
+        (wb, _) <- ctxResolveMeasure ctx 20.0 WeightNormal st FontRegular (T.singleton b)
+        (wab, _) <- ctxResolveMeasure ctx 20.0 WeightNormal st FontRegular (T.pack [a, b])
+        putStrLn $ printf "width(%c)=%5.1f width(%c)=%5.1f width(%c%c)=%5.1f kern=%+5.1f [%s]"
+          a wa b wb a b wab (wab - wa - wb) tag
+    bracketTo "after width probes"
+    putStrLn "--- Shaped pair kerning (40pt raw px) ---"
+    let probePairs = [('r', ' '), (' ', 't'), ('e', ' '), (' ', 'l'), ('o', 'v'), ('v', 'e'), ('r', 't'), ('T', 'o'), ('A', 'V'), ('W', 'e'), ('P', 'a'), (' ', 'T'), ('y', ' '), ('f', 'i')]
+    for_ probePairs $ \(a, b) -> do
+      k <- queryFontPairKerning env 40.0 WeightNormal FontStyleNormal FontRegular a b
+      putStrLn $ printf "  pairKern('%c',''%c') = %d" a b k
+    bracketTo "after pairKern"
+    putStrLn "--- Debug pair internals ---"
+    for_ [16.0, 20.0, 24.0, 32.0, 40.0, 64.0] $ \sz -> do
+      putStrLn $ printf "size %.0f:" sz
+      debugFontPair env sz WeightNormal FontStyleNormal FontRegular 'T' 'o'
+    putStrLn "--- Shaped layout dump ---"
+    dumpFontLayout env 40.0 WeightNormal FontStyleNormal FontRegular "r the ovt"
     void $ saveFontRenderText env 20.0 WeightNormal FontStyleItalic FontRegular sentence
       "C:\\Users\\zach\\.gemini\\antigravity\\brain\\72382fd0-e1b2-4a85-8ac3-abd001b9f58d\\sdl_native_italic.bmp"
     let idle =

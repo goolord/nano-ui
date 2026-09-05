@@ -209,9 +209,9 @@ syncDisplay ctx env inp = do
     warmGlyphAtlas (sdlGlyphAtlas env) newFont
     warmGlyphAtlas (sdlGlyphAtlas env) newMono
     let ga = sdlGlyphAtlas env
-        fm = buildGlyphFontMetrics ga newFont scale
-        monoFm = buildGlyphFontMetrics ga newMono scale
-        ctx' = withTtfFontCache (sdlFontCache env) (withTtfMeasureGlyph ctx newFont newMono fm monoFm scale)
+    fm <- buildGlyphFontMetrics ga newFont scale
+    monoFm <- buildGlyphFontMetrics ga newMono scale
+    let ctx' = withTtfFontCache (sdlFontCache env) (withTtfMeasureGlyph ctx newFont newMono fm monoFm scale)
     resetSdlFontCache (sdlFontCache env) scale newFont fm newMono monoFm
     writeIORef (sdlCachedFm env) fm
     writeIORef (sdlCachedMonoFm env) monoFm
@@ -356,8 +356,8 @@ startSdlWindow ctx title w h flags bench vsync continuous fontSource monoSource 
           debug <- newSdlDebugSampler
           retain <- newIORef (nullPtr, 0, 0, 0)
           let ga = glyphAtlas
-              fm = buildGlyphFontMetrics ga font scale
-              monoFm = buildGlyphFontMetrics ga monoFont scale
+          fm <- buildGlyphFontMetrics ga font scale
+          monoFm <- buildGlyphFontMetrics ga monoFont scale
           fontCache <-
             newSdlFontCache
               fontSource
