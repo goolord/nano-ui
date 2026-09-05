@@ -105,7 +105,7 @@ initTextAreaState initial =
 
 setTextAreaViewport :: (Double, Double) -> Double -> TextAreaState -> TextAreaState
 setTextAreaViewport vp lh state =
-  ensureCaretVisible state {viewportSize = vp, lineHeight = lh}
+  state {viewportSize = vp, lineHeight = lh}
 
 cursorOf :: TextAreaState -> TB.Cursor
 cursorOf state = TB.getCursor (buffer state)

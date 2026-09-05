@@ -26,7 +26,7 @@ import NanoUI.Context
   , isDisabled
   , isSelectOpen
   )
-import NanoUI.Font (FontMetrics, sliderHandleSlack, sliderTrackBounds)
+import NanoUI.Font (FontMetrics, sliderHandleSlack, sliderTrackBounds, textDisplayWidth)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input
   ( Input (..)
@@ -67,12 +67,16 @@ import NanoUI.Frame.Scroll.Geometry
 import NanoUI.Frame.Select (selectDropRect)
 import NanoUI.Frame.TextEdit
   ( TextAreaGeom (..)
+  , TextAreaScrollBarLayouts (..)
   , TextInputGeom (..)
+  , isMouseOnTextAreaScrollBarAt
   , textAreaGeom
+  , textAreaScrollBarLayouts
   , textEditMenuCursorKind
   , textFieldWidgetAtMouse
   , textInputGeom
   )
+import qualified NanoUI.Widgets.TextBuffer as TB
 import NanoUI.Frame.Window (windowResizeCursorKind)
 
 uiCursorKind :: Context -> Input -> IO UiCursorKind
@@ -164,9 +168,37 @@ scrollThumbHit ctx mouse = do
       | idx >= count = pure False
       | otherwise = do
           nt <- getNodeType (ctxNodeArena ctx) idx
-          if not (isScrollNode nt)
-            then go (idx + 1) count
-            else do
+          if nt == NodeTextArea
+            then do
+              wid <- getWidgetId (ctxNodeArena ctx) idx
+              (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+              let fm = ctxFontMetrics ctx
+                  host = ctxHostProfile ctx
+                  geom = textAreaGeom host fm x y w h
+                  field = tagFieldRect geom
+              store <- getStore ctx
+              let key = intKey wid
+                  text = IM.findWithDefault "" key (storeText store)
+                  buf = TB.fromText text
+                  lineTexts = TB.toLines buf
+                  lineCount = max 1 (length lineTexts)
+                  lineH = tagLineHeight geom
+                  contentH = fromIntegral lineCount * lineH
+                  contentW = maximum (0 : [textDisplayWidth host fm l | l <- lineTexts])
+              V2 curX curY <- getScrollOffset2D ctx wid
+              let layouts = textAreaScrollBarLayouts host fm field contentW contentH curX curY
+                  hitV = case tasbVertical layouts of
+                    Just layout -> rectContains (sbThumb layout) mouse
+                    Nothing -> False
+                  hitH = case tasbHorizontal layouts of
+                    Just layout -> rectContains (sbThumb layout) mouse
+                    Nothing -> False
+              if hitV || hitH
+                then pure True
+                else go (idx + 1) count
+            else if not (isScrollNode nt)
+              then go (idx + 1) count
+              else do
               si <- getStyleIdx (ctxNodeArena ctx) idx
               let cfg = decodeScrollConfig si
               wid <- getWidgetId (ctxNodeArena ctx) idx
@@ -281,9 +313,17 @@ textInputCursorKind ctx wid mouse =
     tigFieldRect (textInputGeom host fm x y w h)
 
 textAreaCursorKind :: Context -> WidgetId -> V2 -> IO UiCursorKind
-textAreaCursorKind ctx wid mouse =
-  textFieldCursorKind ctx wid mouse $ \host fm x y w h ->
-    tagFieldRect (textAreaGeom host fm x y w h)
+textAreaCursorKind ctx wid mouse = do
+  mIdx <- findNodeByWidgetId ctx wid
+  case mIdx of
+    Nothing -> pure UiCursorDefault
+    Just idx -> do
+      onScroll <- isMouseOnTextAreaScrollBarAt ctx idx mouse
+      if onScroll
+        then pure UiCursorDefault
+        else
+          textFieldCursorKind ctx wid mouse $ \host fm x y w h ->
+            tagFieldRect (textAreaGeom host fm x y w h)
 
 textFieldCursorKind ::
   Context ->

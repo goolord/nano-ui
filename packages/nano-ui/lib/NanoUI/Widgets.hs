@@ -709,8 +709,10 @@ textArea lbl initial = do
           || newCol /= oldCol
           || newAnchorRow /= oldAnchorRow
           || newAnchorCol /= oldAnchorCol
-  when stateChanged $
-    uiIO $ setStore ctx (saveTextAreaState key newState store)
+          || TA.scrollOffset newState /= TA.scrollOffset oldState
+  when stateChanged $ do
+    curStore <- uiIO (getStore ctx)
+    uiIO $ setStore ctx (saveTextAreaState key newState curStore)
   resp <- addWidget wid NodeTextArea lbl 0 textAreaLayout
   pure (setChanged (newText /= current) resp, newText)
 

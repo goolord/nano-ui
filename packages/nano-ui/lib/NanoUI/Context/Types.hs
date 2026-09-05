@@ -47,7 +47,7 @@ import NanoUI.Font (FontMetrics)
 import NanoUI.Frame.SpanArena (SpanArena)
 import NanoUI.Icons (Icons)
 import NanoUI.Id (IdContext, WidgetId, hashWidgetId)
-import NanoUI.Layout.Arena (NodeArena, NodeType)
+import NanoUI.Layout.Arena (DirTag, NodeArena, NodeType)
 import NanoUI.Store (WidgetStore)
 import NanoUI.Style (Layout, Theme)
 import NanoUI.Types
@@ -226,7 +226,7 @@ initialDrawingCacheState = DrawingCacheState
   }
 
 data InteractionState = InteractionState
-  { isScrollDrag :: !(Maybe (WidgetId, Float))
+  { isScrollDrag :: !(Maybe (WidgetId, DirTag, Float))
   , isTextInputDrag :: !(Maybe TextInputDrag)
   , isTextFieldClickCell :: !(Maybe TextFieldClickCell)
   , isTextInputMenu :: !(Maybe TextInputMenu)

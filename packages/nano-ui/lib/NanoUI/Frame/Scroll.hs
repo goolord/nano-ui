@@ -13,6 +13,7 @@ module NanoUI.Frame.Scroll
 
 import Control.Monad (void, when)
 import Data.IORef (readIORef)
+import qualified Data.IntMap.Strict as IM
 import Data.Maybe (fromMaybe)
 import NanoUI.Context
   ( Context (..)
@@ -20,13 +21,24 @@ import NanoUI.Context
   , getScrollDrag
   , getScrollOffset
   , getScrollOffset2D
+  , getStore
+  , intKey
   , setScrollDrag
   , setScrollOffset
   , setScrollOffset2D
   )
 import NanoUI.Draw (DrawArena, Layer (..), beginLayer, currentLayer, pushRect, pushRoundedRect)
-import NanoUI.Font (ScrollBarSlot (..))
+import NanoUI.Font (ScrollBarSlot (..), textDisplayWidth, widgetContentInset)
+import NanoUI.Frame.TextEdit
+  ( TextAreaGeom (..)
+  , TextAreaScrollBarLayouts (..)
+  , textAreaBarLanes
+  , textAreaGeom
+  , textAreaScrollBarLayouts
+  )
+import NanoUI.Store (storeText)
 import NanoUI.Types (HostProfile, isCellHost)
+import qualified NanoUI.Widgets.TextBuffer as TB
 import NanoUI.Id (WidgetId, hashWidgetId)
 import NanoUI.Input (Input (..), inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased, inputScroll)
 import NanoUI.Layout.Arena
@@ -268,7 +280,7 @@ findScrollOwningWidget ctx wid = do
       | i < 0 = pure Nothing
       | otherwise = do
           nt <- getNodeType (ctxNodeArena ctx) i
-          if isScrollNode nt
+          if isScrollNode nt || nt == NodeTextArea
             then Just <$> getWidgetId (ctxNodeArena ctx) i
             else do
               p <- getParent (ctxNodeArena ctx) i
@@ -280,17 +292,31 @@ tryApplyScrollWheelDelta ctx wid scroll = do
   case mGeom of
     Nothing -> pure False
     Just (idx, dir, _x, _y, w, h, pad, contentSize) -> do
-      si <- getStyleIdx (ctxNodeArena ctx) idx
+      nt <- getNodeType (ctxNodeArena ctx) idx
       let step = scrollLineFor (ctxHostProfile ctx)
           innerW = w - padL pad - padR pad
           innerH = h - padT pad - padB pad
-      if isScrollStyle2D si
+      if nt == NodeTextArea
         then do
-          contentW <- getScrollContentW (ctxNodeArena ctx) idx
-          contentH <- getNodeValue (ctxNodeArena ctx) idx
+          store <- getStore ctx
+          let key = intKey wid
+              text = IM.findWithDefault "" key (storeText store)
+              buf = TB.fromText text
+              lineTexts = TB.toLines buf
+              host = ctxHostProfile ctx
+              fm = ctxFontMetrics ctx
+              contentW = maximum (0 : [textDisplayWidth host fm l | l <- lineTexts])
+              contentH = contentSize
+              (barLaneW, barLaneH) = textAreaBarLanes host fm
+              hasV0 = contentH > innerH
+              hasH0 = contentW > innerW
+              hasV = contentH > (if hasH0 then max 0 (innerH - barLaneH) else innerH)
+              hasH = contentW > (if hasV0 then max 0 (innerW - barLaneW) else innerW)
+              availW = if hasV then max 0 (innerW - barLaneW) else innerW
+              availH = if hasH then max 0 (innerH - barLaneH) else innerH
           V2 curX curY <- getScrollOffset2D ctx wid
-          let maxX = max 0 (contentW - innerW)
-              maxY = max 0 (contentH - innerH)
+          let maxX = max 0 (contentW - availW)
+              maxY = max 0 (contentH - availH)
               newX = max 0 (min maxX (curX + v2X scroll * step))
               newY = max 0 (min maxY (curY + v2Y scroll * step))
           if newX == curX && newY == curY
@@ -299,15 +325,31 @@ tryApplyScrollWheelDelta ctx wid scroll = do
               setScrollOffset2D ctx wid (V2 newX newY)
               pure True
         else do
-          cur <- getScrollOffset ctx wid
-          let cfg = decodeScrollConfig si
-          case dir of
-            DirColumn
-              | scrollPolicyY cfg == ScrollNone -> pure False
-              | otherwise -> applyAxis cur innerH contentSize (v2Y scroll * step)
-            DirRow
-              | scrollPolicyX cfg == ScrollNone -> pure False
-              | otherwise -> applyAxis cur innerW contentSize (v2X scroll * step)
+          si <- getStyleIdx (ctxNodeArena ctx) idx
+          if isScrollStyle2D si
+            then do
+              contentW <- getScrollContentW (ctxNodeArena ctx) idx
+              contentH <- getNodeValue (ctxNodeArena ctx) idx
+              V2 curX curY <- getScrollOffset2D ctx wid
+              let maxX = max 0 (contentW - innerW)
+                  maxY = max 0 (contentH - innerH)
+                  newX = max 0 (min maxX (curX + v2X scroll * step))
+                  newY = max 0 (min maxY (curY + v2Y scroll * step))
+              if newX == curX && newY == curY
+                then pure False
+                else do
+                  setScrollOffset2D ctx wid (V2 newX newY)
+                  pure True
+            else do
+              cur <- getScrollOffset ctx wid
+              let cfg = decodeScrollConfig si
+              case dir of
+                DirColumn
+                  | scrollPolicyY cfg == ScrollNone -> pure False
+                  | otherwise -> applyAxis cur innerH contentSize (v2Y scroll * step)
+                DirRow
+                  | scrollPolicyX cfg == ScrollNone -> pure False
+                  | otherwise -> applyAxis cur innerW contentSize (v2X scroll * step)
   where
     applyAxis cur inner contentSize delta = do
       let maxOff = max 0 (contentSize - inner)
@@ -371,12 +413,41 @@ walkScrollSiblings ctx parent mouse clip = do
 scrollHitSelf :: Context -> NodeIdx -> V2 -> Rect -> IO (Maybe NodeIdx)
 scrollHitSelf ctx idx mouse clip = do
   nt <- getNodeType (ctxNodeArena ctx) idx
-  if not (isScrollNode nt)
-    then pure Nothing
-    else
-      if rectW clip > 0 && rectH clip > 0 && rectContains clip mouse
-        then pure (Just idx)
-        else pure Nothing
+  if nt == NodeTextArea
+    then do
+      (x, y, w, h) <- getScrollVisualRect ctx idx
+      let fm = ctxFontMetrics ctx
+          geom = textAreaGeom (ctxHostProfile ctx) fm x y w h
+          field = tagFieldRect geom
+      case rectIntersect clip field of
+        Nothing -> pure Nothing
+        Just fclip ->
+          if rectW fclip > 0 && rectH fclip > 0 && rectContains fclip mouse
+            then do
+              wid <- getWidgetId (ctxNodeArena ctx) idx
+              store <- getStore ctx
+              let key = intKey wid
+                  text = IM.findWithDefault "" key (storeText store)
+                  buf = TB.fromText text
+                  lineTexts = TB.toLines buf
+                  lineCount = max 1 (length lineTexts)
+                  lineH = tagLineHeight geom
+                  contentH = fromIntegral lineCount * lineH
+                  host = ctxHostProfile ctx
+                  contentW = maximum (0 : [textDisplayWidth host fm l | l <- lineTexts])
+                  (ix, iy) = widgetContentInset host fm
+                  innerW = rectW field - 2 * ix
+                  innerH = rectH field - 2 * iy
+              if contentH > innerH || contentW > innerW
+                then pure (Just idx)
+                else pure Nothing
+            else pure Nothing
+    else if not (isScrollNode nt)
+      then pure Nothing
+      else
+        if rectW clip > 0 && rectH clip > 0 && rectContains clip mouse
+          then pure (Just idx)
+          else pure Nothing
 
 -- Same clip stack as collectClippedSpans': scroll viewport, then panel bounds.
 scrollHitClip :: Context -> NodeIdx -> NodeType -> Rect -> IO (Maybe Rect)
@@ -433,19 +504,56 @@ updateScrollDrag ctx inp = do
         then setScrollDrag ctx Nothing
         else
           case mDrag of
-            Just (wid, grabOff) | inputMouseDown inp -> do
-              mGeom <- scrollContainerGeom ctx wid
-              case mGeom of
+            Just (wid, dragDir, grabOff) | inputMouseDown inp -> do
+              mIdx <- findNodeByWidgetId ctx wid
+              case mIdx of
                 Nothing -> pure ()
-                Just (idx, dir, x, y, w, h, pad, contentSize) -> do
-                  off <- getScrollOffset ctx wid
-                  let fm = ctxFontMetrics ctx
-                  slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
-                  case scrollBarLayout (ctxHostProfile ctx) fm slot dir x y w h pad contentSize off of
-                    Nothing -> pure ()
-                    Just layout -> do
-                      let newOff = scrollOffsetFromThumb dir layout grabOff (inputMousePos inp)
-                      when (newOff /= off) $ setScrollOffset ctx wid newOff
+                Just idx -> do
+                  nt <- getNodeType (ctxNodeArena ctx) idx
+                  if nt == NodeTextArea
+                    then do
+                      (x, y, w, h) <- getScrollVisualRect ctx idx
+                      let host = ctxHostProfile ctx
+                          fm = ctxFontMetrics ctx
+                          geom = textAreaGeom host fm x y w h
+                          field = tagFieldRect geom
+                      store <- getStore ctx
+                      let key = intKey wid
+                          text = IM.findWithDefault "" key (storeText store)
+                          buf = TB.fromText text
+                          lineTexts = TB.toLines buf
+                          lineCount = max 1 (length lineTexts)
+                          lineH = tagLineHeight geom
+                          contentH = fromIntegral lineCount * lineH
+                          contentW = maximum (0 : [textDisplayWidth host fm l | l <- lineTexts])
+                      V2 curX curY <- getScrollOffset2D ctx wid
+                      let layouts = textAreaScrollBarLayouts host fm field contentW contentH curX curY
+                      case dragDir of
+                        DirColumn ->
+                          case tasbVertical layouts of
+                            Nothing -> pure ()
+                            Just layout -> do
+                              let newY = scrollOffsetFromThumb DirColumn layout grabOff (inputMousePos inp)
+                              when (newY /= curY) $ setScrollOffset2D ctx wid (V2 curX newY)
+                        DirRow ->
+                          case tasbHorizontal layouts of
+                            Nothing -> pure ()
+                            Just layout -> do
+                              let newX = scrollOffsetFromThumb DirRow layout grabOff (inputMousePos inp)
+                              when (newX /= curX) $ setScrollOffset2D ctx wid (V2 newX curY)
+                    else do
+                      mGeom <- scrollContainerGeom ctx wid
+                      case mGeom of
+                        Nothing -> pure ()
+                        Just (idx', dir, x, y, w, h, pad, contentSize) -> do
+                          off <- getScrollOffset ctx wid
+                          let fm = ctxFontMetrics ctx
+                          slot <- scrollBarSlotOf (ctxNodeArena ctx) idx'
+                          case scrollBarLayout (ctxHostProfile ctx) fm slot dir x y w h pad contentSize off of
+                            Nothing -> pure ()
+                            Just layout -> do
+                              let newOff = scrollOffsetFromThumb dir layout grabOff (inputMousePos inp)
+                              when (newOff /= off) $ setScrollOffset ctx wid newOff
             Nothing | inputMousePressed inp -> tryStartScrollDrag ctx inp
             _ -> pure ()
 
@@ -457,26 +565,47 @@ scrollContainerGeom ctx wid = do
         | idx >= count = pure Nothing
         | otherwise = do
             nt <- getNodeType (ctxNodeArena ctx) idx
-            if not (isScrollNode nt)
-              then go (idx + 1)
-              else do
+            if nt == NodeTextArea
+              then do
                 w' <- getWidgetId (ctxNodeArena ctx) idx
                 if w' /= wid
                   then go (idx + 1)
-                  else
-                    if isCellHost (ctxHostProfile ctx) && nt == NodeModal
-                      then go (idx + 1)
-                      else do
-                        dir <- getDirection (ctxNodeArena ctx) idx
-                        si <- getStyleIdx (ctxNodeArena ctx) idx
-                        let cfg = decodeScrollConfig si
-                        if scrollChromeSuppressed cfg (isScrollStyle2D si) dir
-                          then go (idx + 1)
-                          else do
-                            pad <- getPadding (ctxNodeArena ctx) idx
-                            contentSize <- getNodeValue (ctxNodeArena ctx) idx
-                            (x, y, w, h) <- getScrollVisualRect ctx idx
-                            pure (Just (idx, dir, x, y, w, h, pad, contentSize))
+                  else do
+                    (x, y, w, h) <- getScrollVisualRect ctx idx
+                    let fm = ctxFontMetrics ctx
+                        host = ctxHostProfile ctx
+                        geom = textAreaGeom host fm x y w h
+                        field = tagFieldRect geom
+                        (ix, iy) = widgetContentInset host fm
+                        pad = Padding ix ix iy iy
+                    store <- getStore ctx
+                    let key = intKey wid
+                        text = IM.findWithDefault "" key (storeText store)
+                        buf = TB.fromText text
+                        lineCount = max 1 (TB.getLineCount buf)
+                        lineH = tagLineHeight geom
+                        contentSize = fromIntegral lineCount * lineH
+                    pure (Just (idx, DirColumn, rectX field, rectY field, rectW field, rectH field, pad, contentSize))
+              else if not (isScrollNode nt)
+                then go (idx + 1)
+                else do
+                  w' <- getWidgetId (ctxNodeArena ctx) idx
+                  if w' /= wid
+                    then go (idx + 1)
+                    else
+                      if isCellHost (ctxHostProfile ctx) && nt == NodeModal
+                        then go (idx + 1)
+                        else do
+                          dir <- getDirection (ctxNodeArena ctx) idx
+                          si <- getStyleIdx (ctxNodeArena ctx) idx
+                          let cfg = decodeScrollConfig si
+                          if scrollChromeSuppressed cfg (isScrollStyle2D si) dir
+                            then go (idx + 1)
+                            else do
+                              pad <- getPadding (ctxNodeArena ctx) idx
+                              contentSize <- getNodeValue (ctxNodeArena ctx) idx
+                              (x, y, w, h) <- getScrollVisualRect ctx idx
+                              pure (Just (idx, dir, x, y, w, h, pad, contentSize))
   go 0
 
 tryStartScrollDrag :: Context -> Input -> IO ()
@@ -490,52 +619,108 @@ tryStartScrollDrag ctx inp =
 
 tryStartScrollDragOn :: Context -> WidgetId -> V2 -> IO ()
 tryStartScrollDragOn ctx wid mouse = do
-  mGeom <- scrollContainerGeom ctx wid
-  case mGeom of
+  mIdx <- findNodeByWidgetId ctx wid
+  case mIdx of
     Nothing -> pure ()
-    Just (idx, dir, x, y, w, h, pad, contentSize) -> do
-      off <- getScrollOffset ctx wid
-      let fm = ctxFontMetrics ctx
-      slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
-      case scrollBarLayout (ctxHostProfile ctx) fm slot dir x y w h pad contentSize off of
-        Nothing -> pure ()
-        Just layout -> do
-          let thumb = sbThumb layout
-              track = sbTrack layout
-          if rectContains thumb mouse
-            then do
-              let grabOff =
-                    case dir of
-                      DirColumn -> v2Y mouse - rectY thumb
-                      DirRow -> v2X mouse - rectX thumb
-              setScrollDrag ctx (Just (wid, grabOff))
-            else
-              when (rectContains track mouse) $ do
-                let maxOff = sbMaxOff layout
-                    thumbH = rectH thumb
-                    thumbW = rectW thumb
-                    newOff =
-                      case dir of
-                        DirColumn ->
-                          let trackY = rectY track
-                              trackH = rectH track
-                              ratio =
-                                (v2Y mouse - trackY - thumbH / 2)
-                                  / max 1 (trackH - thumbH)
-                           in max 0 (min maxOff (ratio * maxOff))
-                        DirRow ->
-                          let trackX = rectX track
-                              trackW = rectW track
-                              ratio =
-                                (v2X mouse - trackX - thumbW / 2)
-                                  / max 1 (trackW - thumbW)
-                           in max 0 (min maxOff (ratio * maxOff))
-                setScrollOffset ctx wid newOff
-                let grabOff =
-                      case dir of
-                        DirColumn -> thumbH / 2
-                        DirRow -> thumbW / 2
-                setScrollDrag ctx (Just (wid, grabOff))
+    Just idx -> do
+      nt <- getNodeType (ctxNodeArena ctx) idx
+      if nt == NodeTextArea
+        then do
+          (x, y, w, h) <- getScrollVisualRect ctx idx
+          let host = ctxHostProfile ctx
+              fm = ctxFontMetrics ctx
+              geom = textAreaGeom host fm x y w h
+              field = tagFieldRect geom
+          store <- getStore ctx
+          let key = intKey wid
+              text = IM.findWithDefault "" key (storeText store)
+              buf = TB.fromText text
+              lineTexts = TB.toLines buf
+              lineCount = max 1 (length lineTexts)
+              lineH = tagLineHeight geom
+              contentH = fromIntegral lineCount * lineH
+              contentW = maximum (0 : [textDisplayWidth host fm l | l <- lineTexts])
+          V2 curX curY <- getScrollOffset2D ctx wid
+          let layouts = textAreaScrollBarLayouts host fm field contentW contentH curX curY
+          case tasbVertical layouts of
+            Just layout | rectContains (sbThumb layout) mouse -> do
+              let grabOff = v2Y mouse - rectY (sbThumb layout)
+              setScrollDrag ctx (Just (wid, DirColumn, grabOff))
+            Just layout | rectContains (sbTrack layout) mouse -> do
+              let maxOff = sbMaxOff layout
+                  thumb = sbThumb layout
+                  track = sbTrack layout
+                  thumbH = rectH thumb
+                  trackY = rectY track
+                  trackH = rectH track
+                  ratio = (v2Y mouse - trackY - thumbH / 2) / max 1 (trackH - thumbH)
+                  newOff = max 0 (min maxOff (ratio * maxOff))
+              setScrollOffset2D ctx wid (V2 curX newOff)
+              setScrollDrag ctx (Just (wid, DirColumn, thumbH / 2))
+            _ ->
+              case tasbHorizontal layouts of
+                Just layout | rectContains (sbThumb layout) mouse -> do
+                  let grabOff = v2X mouse - rectX (sbThumb layout)
+                  setScrollDrag ctx (Just (wid, DirRow, grabOff))
+                Just layout | rectContains (sbTrack layout) mouse -> do
+                  let maxOff = sbMaxOff layout
+                      thumb = sbThumb layout
+                      track = sbTrack layout
+                      thumbW = rectW thumb
+                      trackX = rectX track
+                      trackW = rectW track
+                      ratio = (v2X mouse - trackX - thumbW / 2) / max 1 (trackW - thumbW)
+                      newOff = max 0 (min maxOff (ratio * maxOff))
+                  setScrollOffset2D ctx wid (V2 newOff curY)
+                  setScrollDrag ctx (Just (wid, DirRow, thumbW / 2))
+                _ -> pure ()
+        else do
+          mGeom <- scrollContainerGeom ctx wid
+          case mGeom of
+            Nothing -> pure ()
+            Just (idx', dir, x, y, w, h, pad, contentSize) -> do
+              off <- getScrollOffset ctx wid
+              let fm = ctxFontMetrics ctx
+              slot <- scrollBarSlotOf (ctxNodeArena ctx) idx'
+              case scrollBarLayout (ctxHostProfile ctx) fm slot dir x y w h pad contentSize off of
+                Nothing -> pure ()
+                Just layout -> do
+                  let thumb = sbThumb layout
+                      track = sbTrack layout
+                  if rectContains thumb mouse
+                    then do
+                      let grabOff =
+                            case dir of
+                              DirColumn -> v2Y mouse - rectY thumb
+                              DirRow -> v2X mouse - rectX thumb
+                      setScrollDrag ctx (Just (wid, dir, grabOff))
+                    else
+                      when (rectContains track mouse) $ do
+                        let maxOff = sbMaxOff layout
+                            thumbH = rectH thumb
+                            thumbW = rectW thumb
+                            newOff =
+                              case dir of
+                                DirColumn ->
+                                  let trackY = rectY track
+                                      trackH = rectH track
+                                      ratio =
+                                        (v2Y mouse - trackY - thumbH / 2)
+                                          / max 1 (trackH - thumbH)
+                                   in max 0 (min maxOff (ratio * maxOff))
+                                DirRow ->
+                                  let trackX = rectX track
+                                      trackW = rectW track
+                                      ratio =
+                                        (v2X mouse - trackX - thumbW / 2)
+                                          / max 1 (trackW - thumbW)
+                                   in max 0 (min maxOff (ratio * maxOff))
+                        setScrollOffset ctx wid newOff
+                        let grabOff =
+                              case dir of
+                                DirColumn -> thumbH / 2
+                                DirRow -> thumbW / 2
+                        setScrollDrag ctx (Just (wid, dir, grabOff))
 
 paintScrollChrome ::
   Context ->
