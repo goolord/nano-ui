@@ -231,36 +231,32 @@ measureTextNode na host fm monoFm measure idx = do
   si <- getStyleIdx na idx
   let fvar = textNodeFontVariant si
       textFm = if fvar == FontMono then monoFm else fm
-  if wTag == SizingGrow && parentAssigns
-    then
-      setRect na idx 0 0 (clamp minW maxW 0) (clamp minH maxH (layoutLineHeight host textFm))
-    else do
-      txt <- getText na idx
-      (tw0, th0) <-
-        if fvar == FontMono
-          then pure (measureText host monoFm txt)
-          else measure txt
-      isRowChild <- parentIsRow na idx
-      let plain = txt
-          (ix, _) = labelContentInset host textFm
-          hasNewlines = T.any (== '\n') plain
-          canWrap = not isRowChild && maxW < 1e8
-          wrapW = max 0 (maxW - 2 * ix)
-      (tw, th) <-
-        if hasNewlines || (canWrap && maxW + 0.5 < tw0)
-          then
-            if isCellHost host || fvar == FontMono
-              then pure (measureTextWrapped host textFm plain wrapW)
-              else measureTextWrappedIO (\t -> fmap fst (measure t)) textFm plain wrapW
-          else pure (tw0, th0)
-      let reportedW =
-            if wTag == SizingGrow && parentAssigns
-              then clamp minW maxW 0
-              else clamp minW maxW tw
-      setRect na idx 0 0 reportedW $
-        case hTag of
-          SizingFixed -> clamp minH maxH hVal
-          _ -> clamp minH maxH (max (layoutLineHeight host textFm) th)
+  txt <- getText na idx
+  (tw0, th0) <-
+    if fvar == FontMono
+      then pure (measureText host monoFm txt)
+      else measure txt
+  isRowChild <- parentIsRow na idx
+  let plain = txt
+      (ix, _) = labelContentInset host textFm
+      hasNewlines = T.any (== '\n') plain
+      canWrap = not isRowChild && maxW < 1e8
+      wrapW = max 0 (maxW - 2 * ix)
+  (tw, th) <-
+    if hasNewlines || (canWrap && maxW + 0.5 < tw0)
+      then
+        if isCellHost host || fvar == FontMono
+          then pure (measureTextWrapped host textFm plain wrapW)
+          else measureTextWrappedIO (\t -> fmap fst (measure t)) textFm plain wrapW
+      else pure (tw0, th0)
+  let reportedW =
+        if wTag == SizingGrow && parentAssigns
+          then clamp minW maxW 0
+          else clamp minW maxW tw
+  setRect na idx 0 0 reportedW $
+    case hTag of
+      SizingFixed -> clamp minH maxH hVal
+      _ -> clamp minH maxH (max (layoutLineHeight host textFm) th)
 
 growParent :: NodeArena -> NodeIdx -> IO Bool
 growParent na idx = do

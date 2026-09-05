@@ -81,6 +81,8 @@ testSpecs =
   , TestSpec "text-input-span" True runTextInputSpanTest
   , TestSpec "text-input-ff-caret" False runTextInputFfCaretTest
   , TestSpec "text-input-focus-sdl" True runTextInputFocusSdlTest
+  , TestSpec "text-input-scroll" True runTextInputScrollTest
+  , TestSpec "kv-multiline-height" True runKvMultilineHeightTest
   , TestSpec "button-hover-anim" False runButtonHoverAnimTest
   , TestSpec "button-press-release-hover" False runButtonPressReleaseHoverTest
   , TestSpec "text-input-focus" False runTextInputFocusTest

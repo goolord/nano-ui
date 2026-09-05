@@ -10,8 +10,9 @@ module NanoUI.Plot.Widget
 
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import qualified Data.IntMap.Strict as IM
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
-import Diagrams.Prelude (Diagram)
+import Diagrams.Prelude (Diagram, V2 (..), extentX, extentY, size)
 import Effectful (Eff, type (:>))
 import NanoUI
   ( FontMetrics
@@ -27,9 +28,9 @@ import NanoUI
 import NanoUI.Context (intKey)
 import NanoUI.Monad (nextId, uiIO)
 import NanoUI.Diagrams.Backend (B)
-import NanoUI.Diagrams.Widget (PlotStyle, diagram, uiPlotStyle)
+import NanoUI.Diagrams.Widget (PlotStyle, diagramWithEnvelope, uiPlotStyle)
 import NanoUI.Plot.Chrome (chartDiagram)
-import NanoUI.Plot.Hit (hitTestChart)
+import NanoUI.Plot.Hit (hitTestChartCached)
 import NanoUI.Plot.Series (area, bar, line, scatter)
 import NanoUI.Plot.Types
   ( Chart (..)
@@ -39,20 +40,34 @@ import NanoUI.Plot.Types
   )
 import System.IO.Unsafe (unsafePerformIO)
 
+data CachedChart = CachedChart
+  { ccChart :: !Chart
+  , ccTheme :: !Theme
+  , ccDiagram :: !(Diagram B)
+  , ccWidth :: {-# UNPACK #-} !Double
+  , ccHeight :: {-# UNPACK #-} !Double
+  , ccExtX :: !(Double, Double)
+  , ccExtY :: !(Double, Double)
+  }
+
 {-# NOINLINE chartCacheRef #-}
-chartCacheRef :: IORef (IM.IntMap (Chart, Theme, Diagram B))
+chartCacheRef :: IORef (IM.IntMap CachedChart)
 chartCacheRef = unsafePerformIO (newIORef IM.empty)
 
-cachedChartDiagram :: WidgetId -> FontMetrics -> Theme -> PlotStyle -> Chart -> IO (Diagram B)
+cachedChartDiagram :: WidgetId -> FontMetrics -> Theme -> PlotStyle -> Chart -> IO CachedChart
 cachedChartDiagram wid fm theme ps chart = do
   let k = intKey wid
   cache <- readIORef chartCacheRef
   case IM.lookup k cache of
-    Just (c, t, d) | c == chart && t == theme -> pure d
+    Just cc | ccChart cc == chart && ccTheme cc == theme -> pure cc
     _ -> do
       let !d = chartDiagram fm theme ps chart
-      writeIORef chartCacheRef (IM.insert k (chart, theme, d) cache)
-      pure d
+          !(V2 dw dh) = size d
+          extX = fromMaybe (0, dw) (extentX d)
+          extY = fromMaybe (0, dh) (extentY d)
+          !cc = CachedChart chart theme d dw dh extX extY
+      writeIORef chartCacheRef (IM.insert k cc cache)
+      pure cc
 
 plot :: Ui :> es => Layout -> Chart -> Eff es PlotResponse
 plot layout chart = do
@@ -60,10 +75,10 @@ plot layout chart = do
   fm <- uiFontMetrics
   theme <- uiTheme
   ps <- uiPlotStyle
-  d <- uiIO (cachedChartDiagram wid fm theme ps chart)
-  resp <- diagram layout d
+  cc <- uiIO (cachedChartDiagram wid fm theme ps chart)
+  resp <- diagramWithEnvelope (ccWidth cc) (ccHeight cc) layout (ccDiagram cc)
   mouse <- uiMousePos
-  let hover = hitTestChart fm theme ps chart (respRect resp) mouse
+  let hover = hitTestChartCached (ccDiagram cc) (ccWidth cc) (ccHeight cc) (ccExtX cc) (ccExtY cc) chart (respRect resp) mouse
   pure PlotResponse {plotResponse = resp, plotHover = hover}
 
 lineChart :: Ui :> es => Layout -> [(Double, Double)] -> Eff es PlotResponse

@@ -20,15 +20,20 @@ module Cases.TextInput
   , runTextInputSelectionTest
   , runTextInputSpanTest
   , runTextInputFfCaretTest
+  , runTextInputScrollTest
+  , runKvMultilineHeightTest
   ) where
 
 import Control.Monad (forM_, replicateM)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.IntMap.Strict qualified as IM
 import Data.Text qualified as T
 import NanoUI
+import NanoUI.Context (intKey)
+import NanoUI.Store (WidgetStore (..), slotKey, slotTextInputScroll)
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, withInput)
-import NanoUI.Testing.Harness (assertSpansHas, clickPair, warmup2, withDelta)
+import NanoUI.Testing.Harness (assertSpansHas, clickPair, spanYOf, warmup2, withDelta)
 import NanoUI.Widgets.TextArea (buffer, loadTextAreaState, selectionAnchor)
 import NanoUI.Widgets.TextBuffer (Cursor (..), getCursor, toText)
 
@@ -471,6 +476,46 @@ runTextInputFfCaretTest ctx failed = do
       _ <- runFrame ctx release ui
       ((_, val), _, _, _) <- runFrame ctx (inp0 {inputMousePos = pos, inputChars = "x"}) ui
       assertEq failed val "fffxfff"
+    _ -> assert failed False
+
+runTextInputScrollTest :: Context -> IORef Int -> IO ()
+runTextInputScrollTest ctx failed = do
+  let longText = "VeryLongTextEnteredIntoTheFieldThatExceedsTheWidth"
+      inp0 = withInput 200 120
+      ui = column (textInput "Name" longText)
+  (resp, _) <- warmup2 ctx inp0 ui
+  spans0 <- collectTextSpans ctx
+  case [r | (r, txt, _, _, _) <- spans0, txt == longText] of
+    (Rect fx fy _ fh : _) -> do
+      let pos = V2 (fx + 50) (fy + fh / 2)
+          (press, release) = clickPair inp0 pos
+      _ <- runFrame ctx press ui
+      _ <- runFrame ctx release ui
+      let atEnd = inp0 {inputKeys = inputKeysFromList [KeyEnd]}
+      _ <- runFrame ctx atEnd ui
+      store <- getStore ctx
+      let key = intKey (respId resp)
+          scrollEnd = IM.findWithDefault 0 (slotKey slotTextInputScroll key) (storeFloat store)
+      assert failed (scrollEnd > 0)
+      let atHome = inp0 {inputKeys = inputKeysFromList [KeyHome]}
+      _ <- runFrame ctx atHome ui
+      storeHome <- getStore ctx
+      let scrollHome = IM.findWithDefault 0 (slotKey slotTextInputScroll key) (storeFloat storeHome)
+      assertEq failed scrollHome 0
+    _ -> assert failed False
+
+runKvMultilineHeightTest :: Context -> IORef Int -> IO ()
+runKvMultilineHeightTest ctx failed = do
+  let inp0 = withInput 320 400
+      ui = column $ do
+        card $ do
+          kv "Notes" "Line 1\nLine 2\nLine 3\nLine 4\nLine 5"
+          kv "Tree" "0"
+  _ <- warmup2 ctx inp0 ui
+  spans <- collectTextSpans ctx
+  case (spanYOf "Line 5" spans, spanYOf "Tree" spans) of
+    ([line5Y], [treeY]) ->
+      assert failed (treeY > line5Y)
     _ -> assert failed False
 
 

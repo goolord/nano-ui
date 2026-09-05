@@ -59,6 +59,7 @@ library
     exposed-modules:
         NanoUI
         NanoUI.Context
+        NanoUI.Context.Types
         NanoUI.Debug
         NanoUI.Id
         NanoUI.Input

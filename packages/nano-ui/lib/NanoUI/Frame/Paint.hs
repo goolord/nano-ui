@@ -255,13 +255,13 @@ lowerNodeVisible ctx occluders idx nt x y w h rect fm theme terminal da =
           focus <- textInputFocused ctx idx
           let geom = textInputGeom (ctxHostProfile ctx) fm x y w h
               fieldRect = tigFieldRect geom
+              clip = textInputFieldTextClip (ctxHostProfile ctx) geom fm
           paintTextFieldFrame da theme style focus fieldRect
           spans <- widgetTextSpans ctx nt idx x y w h
           case spans of
             (lblSpan : fieldSpan : _) -> do
               let (Rect lx ly _ _, lbl, lfg, _) = lblSpan
                   (Rect fx fy _ _, field, ffg, _) = fieldSpan
-                  clip = textInputFieldTextClip (ctxHostProfile ctx) geom fm
               unless (T.null lbl) $ do
                 pushText da fm lx ly lbl lfg
               withClip da clip $ do
@@ -273,7 +273,8 @@ lowerNodeVisible ctx occluders idx nt x y w h rect fm theme terminal da =
               let (Rect lx ly _ _, lbl, lfg, _) = lblSpan
               unless (T.null lbl) $ do
                 pushText da fm lx ly lbl lfg
-              drawTextInputCaret da ctx idx x y w h style
+              withClip da clip $ do
+                drawTextInputCaret da ctx idx x y w h style
             _ -> pure ()
     NodeTextArea
       | not terminal -> do

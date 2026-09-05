@@ -2,6 +2,8 @@
 
 module NanoUI.Diagrams.Widget
   ( diagram
+  , diagramWithEnvelope
+  , diagramWithKeyAndEnvelope
   , fitLayout
   , labelFitScale
   , diagramFrame
@@ -56,6 +58,8 @@ import NanoUI
   , uiFontMetrics
   , uiTheme
   )
+import NanoUI.Context (lookupDrawFitEnvelope)
+import NanoUI.Monad (askContext, currentId, uiIO)
 import NanoUI.Diagrams.Backend
   ( B
   , NanoUIBackend
@@ -231,12 +235,18 @@ fitLayout fm layout d =
                 , layoutMaxH = hF
                 }
 
-diagram :: Ui :> es => Layout -> QDiagram NanoUIBackend V2 Double Any -> Eff es Response
-diagram layout d = do
+diagramWithKeyAndEnvelope ::
+  Ui :> es =>
+  Int ->
+  Double ->
+  Double ->
+  Layout ->
+  QDiagram NanoUIBackend V2 Double Any ->
+  Eff es Response
+diagramWithKeyAndEnvelope userKey dw dh layout d = do
   fm <- uiFontMetrics
   theme <- uiTheme
-  let V2 dw dh = size d
-      content = themePlotKey theme
+  let content = hash (userKey, themePlotKey theme)
       ps = themePlotStyle theme
   drawingCached dw dh (fmLineHeight fm) content layout (pure (fitLayout fm layout d)) $ \rectBox ->
     let borderW = 1
@@ -254,3 +264,46 @@ diagram layout d = do
             then V.empty
             else V.map (shiftDrawOp (rectX inner) (rectY inner)) (diagramOps w h d)
      in diagramFrame ps borderW rectBox <> plot
+
+diagramWithEnvelope ::
+  Ui :> es =>
+  Double ->
+  Double ->
+  Layout ->
+  QDiagram NanoUIBackend V2 Double Any ->
+  Eff es Response
+diagramWithEnvelope dw dh layout d = do
+  fm <- uiFontMetrics
+  theme <- uiTheme
+  let content = themePlotKey theme
+      ps = themePlotStyle theme
+  drawingCached dw dh (fmLineHeight fm) content layout (pure (fitLayout fm layout d)) $ \rectBox ->
+    let borderW = 1
+        inset = borderW
+        inner =
+          Rect
+            (rectX rectBox + inset)
+            (rectY rectBox + inset)
+            (max 0 (rectW rectBox - 2 * inset))
+            (max 0 (rectH rectBox - 2 * inset))
+        w = realToFrac (rectW inner) :: Double
+        h = realToFrac (rectH inner)
+        plot =
+          if w <= 0 || h <= 0
+            then V.empty
+            else V.map (shiftDrawOp (rectX inner) (rectY inner)) (diagramOps w h d)
+     in diagramFrame ps borderW rectBox <> plot
+
+diagram :: Ui :> es => Layout -> QDiagram NanoUIBackend V2 Double Any -> Eff es Response
+diagram layout d = do
+  ctx <- askContext
+  wid <- currentId
+  fm <- uiFontMetrics
+  theme <- uiTheme
+  let content = themePlotKey theme
+  mEnv <- uiIO (lookupDrawFitEnvelope ctx wid (fmLineHeight fm) content layout)
+  case mEnv of
+    Just (dw, dh) -> diagramWithEnvelope dw dh layout d
+    Nothing ->
+      let V2 dw dh = size d
+       in diagramWithEnvelope dw dh layout d
