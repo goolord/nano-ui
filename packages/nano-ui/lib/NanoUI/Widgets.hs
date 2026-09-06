@@ -210,6 +210,7 @@ where
 
 import Control.Monad (void, when)
 import Data.IORef (readIORef, writeIORef)
+import Data.Maybe (fromMaybe)
 import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -692,13 +693,14 @@ textInputConfigured cfg lbl initial = do
   store <- uiIO (getStore ctx)
   let
     key = intKey wid
-  when (not (IM.member key (storeText store)))
-    $ uiIO
-    $ setStore ctx (store {storeText = IM.insert key initial (storeText store)})
+  current <- case IM.lookup key (storeText store) of
+    Nothing -> do
+      uiIO $ setStore ctx (store {storeText = IM.insert key initial (storeText store)})
+      pure initial
+    Just t -> pure t
   let
-    current = IM.findWithDefault initial key (storeText store)
-    cursor = IM.findWithDefault (T.length current) (slotKey slotCursor key) (storeInt store)
-    anchor = IM.findWithDefault cursor (slotKey slotAnchor key) (storeInt store)
+    cursor = fromMaybe (T.length current) (IM.lookup (slotKey slotCursor key) (storeInt store))
+    anchor = fromMaybe cursor (IM.lookup (slotKey slotAnchor key) (storeInt store))
   focus <- uiIO (readIORef (ctxFocusId ctx))
   blocked <- uiIO (pointerBlockedByModal ctx)
   let
