@@ -210,6 +210,7 @@ where
 
 import Control.Monad (void, when)
 import Data.IORef (readIORef, writeIORef)
+import Data.Maybe (fromMaybe)
 import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -692,13 +693,14 @@ textInputConfigured cfg lbl initial = do
   store <- uiIO (getStore ctx)
   let
     key = intKey wid
-  when (not (IM.member key (storeText store)))
-    $ uiIO
-    $ setStore ctx (store {storeText = IM.insert key initial (storeText store)})
+  current <- case IM.lookup key (storeText store) of
+    Nothing -> do
+      uiIO $ setStore ctx (store {storeText = IM.insert key initial (storeText store)})
+      pure initial
+    Just t -> pure t
   let
-    current = IM.findWithDefault initial key (storeText store)
-    cursor = IM.findWithDefault (T.length current) (slotKey slotCursor key) (storeInt store)
-    anchor = IM.findWithDefault cursor (slotKey slotAnchor key) (storeInt store)
+    cursor = fromMaybe (T.length current) (IM.lookup (slotKey slotCursor key) (storeInt store))
+    anchor = fromMaybe cursor (IM.lookup (slotKey slotAnchor key) (storeInt store))
   focus <- uiIO (readIORef (ctxFocusId ctx))
   blocked <- uiIO (pointerBlockedByModal ctx)
   let
@@ -739,36 +741,37 @@ textArea lbl initial = do
     $ uiIO
     $ setStore ctx (store {storeText = IM.insert key initial (storeText store)})
   let current = IM.findWithDefault initial key (storeText store)
-      oldState = loadTextAreaState store key initial
-      TB.Cursor oldRow oldCol = TB.getCursor (TA.buffer oldState)
-      TB.Cursor oldAnchorRow oldAnchorCol = TA.selectionAnchor oldState
   focus <- uiIO (readIORef (ctxFocusId ctx))
   blocked <- uiIO (pointerBlockedByModal ctx)
   let isFocus = focus == wid && not blocked
-      (vpW, vpH) =
-        let (vw, vh) =
-              IM.findWithDefault (200, 96) (slotKey slotTextAreaViewport key) (storePoint store)
-         in (realToFrac vw, realToFrac vh)
-      lineH = realToFrac (fmLineHeight (ctxFontMetrics ctx))
-  newState <-
+  (newText, stateChanged) <-
     if isFocus
-      then uiIO (processTextArea ctx inp vpW vpH lineH oldState)
-      else pure oldState
-  let newText = TB.toText (TA.buffer newState)
-      TB.Cursor newRow newCol = TB.getCursor (TA.buffer newState)
-      TB.Cursor newAnchorRow newAnchorCol = TA.selectionAnchor newState
-      stateChanged =
-        newText /= current
-          || newRow /= oldRow
-          || newCol /= oldCol
-          || newAnchorRow /= oldAnchorRow
-          || newAnchorCol /= oldAnchorCol
-          || TA.scrollOffset newState /= TA.scrollOffset oldState
-  when stateChanged $ do
-    curStore <- uiIO (getStore ctx)
-    uiIO $ setStore ctx (saveTextAreaState key newState curStore)
+      then do
+        let oldState = loadTextAreaState store key initial
+            TB.Cursor oldRow oldCol = TB.getCursor (TA.buffer oldState)
+            TB.Cursor oldAnchorRow oldAnchorCol = TA.selectionAnchor oldState
+            (vw, vh) = IM.findWithDefault (200, 96) (slotKey slotTextAreaViewport key) (storePoint store)
+            vpW = realToFrac vw
+            vpH = realToFrac vh
+            lineH = realToFrac (fmLineHeight (ctxFontMetrics ctx))
+        newState <- uiIO (processTextArea ctx inp vpW vpH lineH oldState)
+        let newText = TB.toText (TA.buffer newState)
+            TB.Cursor newRow newCol = TB.getCursor (TA.buffer newState)
+            TB.Cursor newAnchorRow newAnchorCol = TA.selectionAnchor newState
+            changed =
+              newText /= current
+                || newRow /= oldRow
+                || newCol /= oldCol
+                || newAnchorRow /= oldAnchorRow
+                || newAnchorCol /= oldAnchorCol
+                || TA.scrollOffset newState /= TA.scrollOffset oldState
+        when changed $ do
+          curStore <- uiIO (getStore ctx)
+          uiIO $ setStore ctx (saveTextAreaState key newState curStore)
+        pure (newText, changed)
+      else pure (current, False)
   resp <- addWidget wid NodeTextArea lbl 0 textAreaLayout
-  pure (setChanged (newText /= current) resp, newText)
+  pure (setChanged stateChanged resp, newText)
 
 select :: Ui :> es => Text -> [Text] -> Int -> Eff es (Response, Int)
 select = selectWith id

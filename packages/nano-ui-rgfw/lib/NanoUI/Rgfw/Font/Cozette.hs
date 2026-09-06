@@ -830,6 +830,8 @@ cozetteMetrics =
     { fmLineHeight = cozetteLineHeight
     , fmAscent = cozetteAscent
     , fmAdvance = \_ -> cozetteCharAdvance
+    , fmKerning = \_ _ -> 0
+    , fmRun = \_ -> Nothing
     , fmGlyph = \_ -> Nothing
     }
 

@@ -450,6 +450,7 @@ module NanoUI
   -- Font
   , FontMetrics (..)
   , GlyphQuad (..)
+  , RunQuad (..)
   , scaleFontMetrics
   , monospaceMetrics
   , lineWidth
@@ -480,6 +481,7 @@ import NanoUI.Draw (drawTextBox, shiftDrawOp)
 import NanoUI.Font
   ( FontMetrics (..)
   , GlyphQuad (..)
+  , RunQuad (..)
   , scaleFontMetrics
   , labelContentInset
   , tableCellInset

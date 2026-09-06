@@ -400,7 +400,7 @@ collectNodeTextSpans ctx floatCache idx = do
                   if tw0 > contentW && contentW > 0 && (wTag == SizingGrow || maxW < 1e8)
                     then
                       if isCellHost (ctxHostProfile ctx) || fvar == FontMono
-                        then pure (truncateTextAdvance (fmAdvance textFm) contentW txt0)
+                        then pure (truncateTextAdvance textFm contentW txt0)
                         else truncateTextIO measureWord contentW txt0
                     else pure txt0
                 let (tx, used) = alignedTextPen ax x w ix textFm dispTxt

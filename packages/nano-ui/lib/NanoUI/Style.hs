@@ -556,7 +556,7 @@ tomorrowNightMinTheme =
           , styleBorder = borderColor
           , styleBorderWidth = 1
           , styleCornerRadius = 2
-          , styleHoverBg = colorRGBA 36 38 41 255     -- #242629
+          , styleHoverBg = colorRGBA 52 54 62 255     -- #34363E
           , styleActiveBg = colorRGBA 26 27 29 255    -- #1A1B1D
           }
    in Theme
@@ -570,7 +570,7 @@ tomorrowNightMinTheme =
               , styleBorder = borderColor
               , styleBorderWidth = 1
               , styleCornerRadius = 2
-              , styleHoverBg = colorRGBA 55 59 65 255  -- base.selection #373B41
+              , styleHoverBg = colorRGBA 69 74 83 255  -- #454A53
               , styleActiveBg = colorRGBA 28 29 32 255 -- depressed on click
               }
         , themeInput =
@@ -580,7 +580,7 @@ tomorrowNightMinTheme =
               , styleBorder = borderColor
               , styleBorderWidth = 1
               , styleCornerRadius = 2
-              , styleHoverBg = colorRGBA 28 29 32 255
+              , styleHoverBg = colorRGBA 29 30 33 255
               , styleActiveBg = colorRGBA 19 20 22 255
               }
         , themeSeparator = separatorColor
@@ -612,7 +612,7 @@ tomorrowLightTheme =
           , styleBorder = colorRGBA 222 222 222 255   -- #DEDEDE
           , styleBorderWidth = 1
           , styleCornerRadius = 2
-          , styleHoverBg = colorRGBA 247 247 247 255
+          , styleHoverBg = colorRGBA 251 251 251 255
           , styleActiveBg = colorRGBA 235 235 235 255
           }
    in Theme
@@ -626,7 +626,7 @@ tomorrowLightTheme =
               , styleBorder = colorRGBA 215 215 215 255
               , styleBorderWidth = 1
               , styleCornerRadius = 2
-              , styleHoverBg = colorRGBA 223 223 223 255 -- #DFDFDF
+              , styleHoverBg = colorRGBA 229 229 229 255 -- #E5E5E5
               , styleActiveBg = colorRGBA 208 208 208 255 -- #D0D0D0
               }
         , themeInput =
@@ -636,7 +636,7 @@ tomorrowLightTheme =
               , styleBorder = colorRGBA 210 210 210 255
               , styleBorderWidth = 1
               , styleCornerRadius = 2
-              , styleHoverBg = colorRGBA 250 250 250 255
+              , styleHoverBg = colorRGBA 251 251 251 255
               , styleActiveBg = colorRGBA 240 240 240 255
               }
         , themeSeparator = colorRGBA 222 222 222 255  -- #DEDEDE
@@ -663,7 +663,7 @@ tomorrowMidnightMinTheme =
           , styleBorder = borderColor
           , styleBorderWidth = 1
           , styleCornerRadius = 2
-          , styleHoverBg = colorRGBA 24 25 30 255     -- #18191E
+          , styleHoverBg = colorRGBA 46 48 56 255     -- #2E3038
           , styleActiveBg = colorRGBA 12 13 15 255    -- #0C0D0F
           }
    in Theme
@@ -677,7 +677,7 @@ tomorrowMidnightMinTheme =
               , styleBorder = borderColor
               , styleBorderWidth = 1
               , styleCornerRadius = 2
-              , styleHoverBg = colorRGBA 40 42 54 255  -- #282A36
+              , styleHoverBg = colorRGBA 54 58 72 255     -- #363A48
               , styleActiveBg = colorRGBA 56 60 81 255 -- #383C51
               }
         , themeInput =
@@ -687,7 +687,7 @@ tomorrowMidnightMinTheme =
               , styleBorder = borderColor
               , styleBorderWidth = 1
               , styleCornerRadius = 2
-              , styleHoverBg = colorRGBA 20 21 27 255
+              , styleHoverBg = colorRGBA 21 22 28 255
               , styleActiveBg = colorRGBA 8 9 11 255
               }
         , themeSeparator = separatorColor
