@@ -91,7 +91,9 @@ library
         bytestring ^>=0.12,
         containers ^>=0.8,
         directory ^>=1.3,
+        dir-traverse ^>=0.2.3.0,
         effectful ^>=2.6,
+        filepath ^>=1.5,
         file-embed ^>=0.0.16,
         nano-ui,
         primitive ^>=0.9,
@@ -114,11 +116,6 @@ library
         pkgconfig-depends: sdl3 >= 3.2, sdl3-ttf >= 3.2
         if flag(simd)
             cc-options:   -mavx2 -O3
-
-    if flag(sdl) && !os(windows)
-        build-depends: fontconfig-pure ^>=0.5.1.0
-        pkgconfig-depends: fontconfig
-        cpp-options: -DHAVE_FONTCONFIG
 
 executable nano-ui-sdl-anim
     import:           extensions
