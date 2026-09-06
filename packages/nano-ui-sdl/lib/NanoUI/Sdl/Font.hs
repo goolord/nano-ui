@@ -476,6 +476,7 @@ buildGlyphFontMetrics ga sf scale = do
       , fmAdvance = advanceLookup
       , fmKerning = kernLookup
       , fmRun     = runLookup
+      , fmSnapScale = inv
       }
 
 -- | Return the SDL_Texture backing the glyph atlas, for passing to the renderer.

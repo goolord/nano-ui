@@ -1116,15 +1116,29 @@ pushFilledTriangle da x0 y0 x1 y1 x2 y2 col = do
   writeIORef (daVertexCount da) (base + 3)
   writeIORef (daIndexCount da) (baseIdx + 3)
 
+{-# INLINE snapTextPen #-}
+snapTextPen :: Float -> Float -> Float
+snapTextPen s v
+  | s > 0 = fromIntegral (round (v * s) :: Int) / s
+  | otherwise = v
+
 {-# INLINE pushText #-}
 pushText :: DrawArena -> FontMetrics -> Float -> Float -> T.Text -> Color -> IO ()
 pushText _da _fm _x _y txt _col | T.null txt = pure ()
 pushText da fm x y txt col =
-  case fmRun fm txt of
-    Just rq -> drawRunQuad da x y rq col
-    Nothing -> go x Nothing txt
+  -- Snapping the pen to the device pixel grid keeps every glyph quad on a
+  -- whole pixel. Advances, bearings, and ink sizes are all integer pixel
+  -- counts divided by the snap scale, so snapping the origin alone aligns the
+  -- whole line: otherwise fractional layout positions leave glyphs straddling
+  -- pixel boundaries, which makes nearest-sampled atlas text blurry and jitter
+  -- as scroll position changes.
+  let !px = snapTextPen (fmSnapScale fm) x
+      !py = snapTextPen (fmSnapScale fm) y
+   in case fmRun fm txt of
+        Just rq -> drawRunQuad da px py rq col
+        Nothing -> go px py Nothing txt
   where
-    go !ox !prev !t =
+    go !ox !oy !prev !t =
       case T.uncons t of
         Nothing -> pure ()
         Just (c, rest) -> do
@@ -1132,16 +1146,16 @@ pushText da fm x y txt col =
           case fmGlyph fm c of
             Nothing -> do
               when (adv > 0 && c /= ' ') $
-                pushRect da (Rect ox y adv (fmLineHeight fm)) col
-              go (ox + adv) (Just c) rest
+                pushRect da (Rect ox oy adv (fmLineHeight fm)) col
+              go (ox + adv) oy (Just c) rest
             Just gq -> do
               let !gx = ox + gqX gq
-                  !gy = y + gqY gq
+                  !gy = oy + gqY gq
                   !gw = gqW gq
                   !gh = gqH gq
               setTexture da glyphAtlasTextureId
               pushQuad da (Rect gx gy gw gh) (gqU0 gq) (gqV0 gq) (gqU1 gq) (gqV1 gq) col
-              go (ox + adv) (Just c) rest
+              go (ox + adv) oy (Just c) rest
     advanceAfter prev c = fmAdvance fm c + maybe 0 (\p -> fmKerning fm p c) prev
 
 drawRunQuad :: DrawArena -> Float -> Float -> RunQuad -> Color -> IO ()
@@ -1169,7 +1183,9 @@ pushTextStyled da fm weight fstyle deco x y txt col
   | weight == WeightNormal && fstyle == FontStyleNormal && deco == DecorationNone =
       pushText da fm x y txt col
   | otherwise = do
-      let !lh = fmLineHeight fm
+      let !px = snapTextPen (fmSnapScale fm) x
+          !py = snapTextPen (fmSnapScale fm) y
+          !lh = fmLineHeight fm
           !bOff = max 1.0 (0.05 * lh)
           !slantMult = case fstyle of
             FontStyleNormal  -> 0.0
@@ -1177,26 +1193,26 @@ pushTextStyled da fm weight fstyle deco x y txt col
             FontStyleOblique -> 0.18
 
       case weight of
-        WeightNormal -> go x txt slantMult
-        WeightLight  -> go x txt slantMult
+        WeightNormal -> go px py txt slantMult
+        WeightLight  -> go px py txt slantMult
         WeightMedium -> do
-          go x txt slantMult
-          go (x + 0.5 * bOff) txt slantMult
+          go px py txt slantMult
+          go (px + 0.5 * bOff) py txt slantMult
         WeightSemiBold -> do
-          go x txt slantMult
-          go (x + 0.75 * bOff) txt slantMult
+          go px py txt slantMult
+          go (px + 0.75 * bOff) py txt slantMult
         WeightBold -> do
-          go x txt slantMult
-          go (x + bOff) txt slantMult
+          go px py txt slantMult
+          go (px + bOff) py txt slantMult
         WeightExtraBold -> do
-          go x txt slantMult
-          go (x + bOff) txt slantMult
-          go (x + 1.5 * bOff) txt slantMult
+          go px py txt slantMult
+          go (px + bOff) py txt slantMult
+          go (px + 1.5 * bOff) py txt slantMult
         WeightBlack -> do
-          go x txt slantMult
-          go (x + bOff) txt slantMult
-          go (x + 1.5 * bOff) txt slantMult
-          go (x + 2.0 * bOff) txt slantMult
+          go px py txt slantMult
+          go (px + bOff) py txt slantMult
+          go (px + 1.5 * bOff) py txt slantMult
+          go (px + 2.0 * bOff) py txt slantMult
 
       case deco of
         DecorationNone -> pure ()
@@ -1205,25 +1221,25 @@ pushTextStyled da fm weight fstyle deco x y txt col
               !thick = max 1.0 (0.06 * lh)
           case deco of
             DecorationUnderline -> do
-              let !uY = y + fmAscent fm + max 1.0 (0.1 * lh)
-              pushRect da (Rect x uY textW thick) col
+              let !uY = py + fmAscent fm + max 1.0 (0.1 * lh)
+              pushRect da (Rect px uY textW thick) col
             DecorationStrikethrough -> do
-              let !sY = y + fmAscent fm * 0.65
-              pushRect da (Rect x sY textW thick) col
+              let !sY = py + fmAscent fm * 0.65
+              pushRect da (Rect px sY textW thick) col
             DecorationUnderlineStrike -> do
-              let !uY = y + fmAscent fm + max 1.0 (0.1 * lh)
-                  !sY = y + fmAscent fm * 0.65
-              pushRect da (Rect x uY textW thick) col
-              pushRect da (Rect x sY textW thick) col
+              let !uY = py + fmAscent fm + max 1.0 (0.1 * lh)
+                  !sY = py + fmAscent fm * 0.65
+              pushRect da (Rect px uY textW thick) col
+              pushRect da (Rect px sY textW thick) col
   where
-    go !ox !t !slantMult
-      | slantMult == 0.0 && weight == WeightNormal = pushText da fm ox y t col
-      | slantMult == 0.0 = goNormal ox Nothing t
-      | otherwise = goSlantedPrev ox Nothing t slantMult
+    go !ox !oy !t !slantMult
+      | slantMult == 0.0 && weight == WeightNormal = pushText da fm ox oy t col
+      | slantMult == 0.0 = goNormal ox oy Nothing t
+      | otherwise = goSlantedPrev ox oy Nothing t slantMult
 
     advanceAfter prev c = fmAdvance fm c + maybe 0 (\p -> fmKerning fm p c) prev
 
-    goNormal !ox !prev !t =
+    goNormal !ox !oy !prev !t =
       case T.uncons t of
         Nothing -> pure ()
         Just (c, rest) -> do
@@ -1231,18 +1247,18 @@ pushTextStyled da fm weight fstyle deco x y txt col
           case fmGlyph fm c of
             Nothing -> do
               when (adv > 0 && c /= ' ') $
-                pushRect da (Rect ox y adv (fmLineHeight fm)) col
-              goNormal (ox + adv) (Just c) rest
+                pushRect da (Rect ox oy adv (fmLineHeight fm)) col
+              goNormal (ox + adv) oy (Just c) rest
             Just gq -> do
               let !gx = ox + gqX gq
-                  !gy = y + gqY gq
+                  !gy = oy + gqY gq
                   !gw = gqW gq
                   !gh = gqH gq
               setTexture da glyphAtlasTextureId
               pushQuad da (Rect gx gy gw gh) (gqU0 gq) (gqV0 gq) (gqU1 gq) (gqV1 gq) col
-              goNormal (ox + adv) (Just c) rest
+              goNormal (ox + adv) oy (Just c) rest
 
-    goSlantedPrev !ox !prev !t !slantMult =
+    goSlantedPrev !ox !oy !prev !t !slantMult =
       case T.uncons t of
         Nothing -> pure ()
         Just (c, rest) -> do
@@ -1250,11 +1266,11 @@ pushTextStyled da fm weight fstyle deco x y txt col
           case fmGlyph fm c of
             Nothing -> do
               when (adv > 0 && c /= ' ') $
-                pushRect da (Rect ox y adv (fmLineHeight fm)) col
-              goSlantedPrev (ox + adv) (Just c) rest slantMult
+                pushRect da (Rect ox oy adv (fmLineHeight fm)) col
+              goSlantedPrev (ox + adv) oy (Just c) rest slantMult
             Just gq -> do
               let !gx = ox + gqX gq
-                  !gy = y + gqY gq
+                  !gy = oy + gqY gq
                   !gw = gqW gq
                   !gh = gqH gq
               setTexture da glyphAtlasTextureId
@@ -1266,7 +1282,7 @@ pushTextStyled da fm weight fstyle deco x y txt col
                   -- Synthetic oblique shears around the shared baseline, not
                   -- each glyph's ink box: every glyph gets the same slant so
                   -- stems stay parallel, and descenders lean left below it.
-                  !baselineY = y + fmAscent fm
+                  !baselineY = oy + fmAscent fm
                   !topDx = slantMult * (baselineY - gy)
                   !botDx = slantMult * (baselineY - (gy + gh))
                   !x0 = gx + topDx
@@ -1282,7 +1298,7 @@ pushTextStyled da fm weight fstyle deco x y txt col
               pokeQuadIndices ip iOff baseIdxWord (baseIdxWord + 1) (baseIdxWord + 2) (baseIdxWord + 3)
               writeIORef (daVertexCount da) (base + 4)
               writeIORef (daIndexCount da) (baseIdx + 6)
-              goSlantedPrev (ox + adv) (Just c) rest slantMult
+              goSlantedPrev (ox + adv) oy (Just c) rest slantMult
 
 {-# INLINE drawCmdCount #-}
 drawCmdCount :: DrawData -> Int
