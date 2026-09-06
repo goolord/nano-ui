@@ -18,8 +18,8 @@ import NanoUI.Style (Layout, defaultLayout, fillW, fontMuted, gap, tight)
 import NanoUI.Types (Rect (..), isCellHost, rectUnion)
 import NanoUI.Widgets.Behavior (useSelection)
 import NanoUI.Widgets.Combinators (selectableItem)
-import NanoUI.Widgets.Layout (column', labelEx)
-import NanoUI.Widgets.Node (Response (..), setChanged, tagContainer)
+import NanoUI.Widgets.Layout (column')
+import NanoUI.Widgets.Node (Response (..), addWidgetStyled, mkResponse, setChanged, tagContainer)
 
 radioLay :: Layout
 radioLay = tight (fillW defaultLayout)
@@ -47,7 +47,7 @@ radioFieldset legend options initial =
           _                            -> c0
     column' radioGroupLay $ do
       tagContainer gid
-      unless (T.null legend) $ void (labelEx legendLay legend)
+      unless (T.null legend) $ void (legendLabel legendLay legend)
       let unionRect a@(Rect _ _ w1 h1) b@(Rect _ _ w2 h2)
             | w1 <= 0 || h1 <= 0 = b
             | w2 <= 0 || h2 <= 0 = a
@@ -55,7 +55,7 @@ radioFieldset legend options initial =
           goOpts !_ [] !rid !rect !hov !press !click !submit !rightPress !rightClick !clickedIdx =
             pure (Response rid rect hov press click False submit rightPress rightClick, clickedIdx)
           goOpts !i (l:ls) _rid !rect !hov !press !click !submit !rightPress !rightClick !clickedIdx = do
-            r <- withKey i (bit ctx sel i l)
+            r <- bit ctx sel i l
             let !rect' = unionRect rect (rawRespRect r)
                 !hov' = hov || rawRespHovered r
                 !press' = press || rawRespPressed r
@@ -82,6 +82,18 @@ bit :: (Ui :> es) => Context -> Int -> Int -> Text -> Eff es Response
 bit ctx sel i l = do
   let on = sel == i
   selectableItem NodeRadio (if isCellHost (ctxHostProfile ctx) then radioMark (ctxIcons ctx) on <> l else l) on radioLay i
+
+legendLabel :: (Ui :> es) => Layout -> Text -> Eff es Response
+legendLabel layout txt = do
+  wid <- nextId
+  addWidgetStyled
+    wid
+    NodeText
+    txt
+    0
+    layout
+    0
+    (Just (mkResponse wid (Rect 0 0 0 0) False False False False))
 
 boundedRadioFieldset :: (Bounded a, Enum a, Ui :> es) => Text -> a -> (a -> Text) -> Eff es (Response, a)
 boundedRadioFieldset legend initial encode =

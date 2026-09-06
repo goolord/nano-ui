@@ -347,48 +347,68 @@ addWidgetWithOptions wid nt txt opts value layout = do
 
 resolveInteraction :: Context -> Input -> WidgetId -> IO Response
 resolveInteraction ctx inp wid = do
-  disabled <- isDisabled ctx wid
   mrect <- scrollHitRect ctx wid
-  blocked <- pointerBlockedByOverlay ctx (inputMousePos inp)
   active <- readIORef (ctxActiveId ctx)
-  let mouse = inputMousePos inp
-      captured =
-        hashWidgetId active /= 0 && active /= wid && inputMouseDown inp
-  hovered <-
-    if disabled || blocked || captured
-      then pure False
-      else
-        case mrect of
-          Nothing -> pure False
-          Just r ->
-            findNodeByWidgetId ctx wid >>= \case
-              Nothing ->
-                pure (rectContains r mouse)
-              Just idx -> nodeInteractionHit ctx idx r mouse
+  pending <- readIORef (ctxClickedId ctx)
   let
+    mouse = inputMousePos inp
     rect = case mrect of
       Just r -> r
       Nothing -> Rect 0 0 0 0
-    pressed = hovered && inputMouseDown inp
-    rightPressed = hovered && inputMouseRightDown inp
-  pending <- readIORef (ctxClickedId ctx)
-  when (hovered && inputMouseReleased inp && wid == active) $
-    writeIORef (ctxReleaseClickedId ctx) wid
-  let
-    clicked = (hovered && inputMouseReleased inp) || pending == wid
-    rightClicked = hovered && inputMouseRightReleased inp
-  pure $
-    Response
-      { rawRespId = wid
-      , rawRespRect = rect
-      , rawRespHovered = hovered
-      , rawRespPressed = pressed
-      , rawRespClicked = clicked
-      , rawRespChanged = False
-      , rawRespSubmitted = False
-      , rawRespRightPressed = rightPressed
-      , rawRespRightClicked = rightClicked
-      }
+    underMouse =
+      rectW rect > 0
+        && rectH rect > 0
+        && rectContains rect mouse
+    canHit = underMouse || pending == wid
+  if not canHit
+    then
+      pure
+        ( Response
+            { rawRespId = wid
+            , rawRespRect = rect
+            , rawRespHovered = False
+            , rawRespPressed = False
+            , rawRespClicked = False
+            , rawRespChanged = False
+            , rawRespSubmitted = False
+            , rawRespRightPressed = False
+            , rawRespRightClicked = False
+            }
+        )
+    else do
+      disabled <- isDisabled ctx wid
+      blocked <- pointerBlockedByOverlay ctx mouse
+      let
+        captured =
+          hashWidgetId active /= 0 && active /= wid && inputMouseDown inp
+      hovered <-
+        if disabled || blocked || captured
+          then pure False
+          else
+            findNodeByWidgetId ctx wid >>= \case
+              Nothing ->
+                pure (rectContains rect mouse)
+              Just idx -> nodeInteractionHit ctx idx rect mouse
+      let
+        pressed = hovered && inputMouseDown inp
+        rightPressed = hovered && inputMouseRightDown inp
+      when (hovered && inputMouseReleased inp && wid == active) $
+        writeIORef (ctxReleaseClickedId ctx) wid
+      let
+        clicked = (hovered && inputMouseReleased inp) || pending == wid
+        rightClicked = hovered && inputMouseRightReleased inp
+      pure $
+        Response
+          { rawRespId = wid
+          , rawRespRect = rect
+          , rawRespHovered = hovered
+          , rawRespPressed = pressed
+          , rawRespClicked = clicked
+          , rawRespChanged = False
+          , rawRespSubmitted = False
+          , rawRespRightPressed = rightPressed
+          , rawRespRightClicked = rightClicked
+          }
 
 -- | Stamp the current container with a widget id (radio/tree group key).
 tagContainer :: Ui :> es => WidgetId -> Eff es ()
