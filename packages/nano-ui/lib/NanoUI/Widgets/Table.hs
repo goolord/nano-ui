@@ -25,7 +25,7 @@ where
 
 import Colonnade (Colonnade, Headed (..), headed, headless)
 import Colonnade.Encode qualified as Encode
-import Control.Monad (forM_, void, when)
+import Control.Monad (void, when)
 import Control.Monad.ST (runST)
 import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
@@ -80,6 +80,16 @@ import NanoUI.Widgets.Node
   )
 tableStretchAny :: TableCfg -> Bool
 tableStretchAny cfg = any (== ColStretch) (tableColSizes cfg)
+
+-- | True if the first n column sizes contain ColStretch.
+{-# INLINE tableStretchN #-}
+tableStretchN :: Int -> [ColSize] -> Bool
+tableStretchN n = go 0
+ where
+  go !i _ | i >= n = False
+  go !_ (ColStretch : _) = True
+  go !i (_ : xs) = go (i + 1) xs
+  go !_ [] = False
 
 tableFillInner :: TableCfg -> Layout -> Bool
 tableFillInner cfg outer =
@@ -346,22 +356,28 @@ columnMetrics ctx cols rows = runST $ do
       let widths = [textDisplayWidth host fm (h <> tableSortReserve terminal) + headerPadX | h <- hdrs]
       pure (widths, replicate numCols False)
     else do
-      let !encodedRows = [Encode.row id cols r | r <- rows]
+      let !encodedRows = V.fromList [Encode.row id cols r | r <- rows]
       numMut <- MV.new numCols
-      forM_ [0 .. numCols - 1] $ \c -> do
-        let !isNum = all (\v -> isNumericCell (v V.! c)) encodedRows
+      V.forM_ (V.enumFromN 0 numCols) $ \c -> do
+        let !isNum = V.all (\v -> isNumericCell (v V.! c)) encodedRows
         MV.write numMut c isNum
       wMut <- MV.new numCols
-      forM_ (zip [0 .. numCols - 1] hdrs) $ \(c, hdr) -> do
-        isNum <- MV.read numMut c
-        let !fontM = if isNum then mono else fm
-            !hdrW = textDisplayWidth host fm (hdr <> tableSortReserve terminal) + headerPadX
-            calcMax !acc [] = acc
-            calcMax !acc (v : vs) =
-              let !w = textDisplayWidth host fontM (v V.! c) + cellPadX
-               in calcMax (if w > acc then w else acc) vs
-            !maxCell = calcMax minColW encodedRows
-        MV.write wMut c (if hdrW > maxCell then hdrW else maxCell)
+      let !hdrsVec = V.fromList hdrs
+      V.imapM_
+        ( \c hdr -> do
+            isNum <- MV.read numMut c
+            let !fontM = if isNum then mono else fm
+                !hdrW = textDisplayWidth host fm (hdr <> tableSortReserve terminal) + headerPadX
+                !maxCell =
+                  V.foldl'
+                    ( \acc v ->
+                        max acc (textDisplayWidth host fontM (v V.! c) + cellPadX)
+                    )
+                    minColW
+                    encodedRows
+            MV.write wMut c (if hdrW > maxCell then hdrW else maxCell)
+        )
+        hdrsVec
       widths <- V.toList <$> V.freeze wMut
       numeric <- V.toList <$> V.freeze numMut
       pure (widths, numeric)
@@ -416,11 +432,10 @@ resolvedWidth sizes contentWs stored i =
            in if saved > 0 then max base saved else base
         ColContent -> if saved > 0 then max contentW saved else contentW
 
-colSizing :: Bool -> [ColSize] -> [Float] -> [Float] -> Int -> Sizing
-colSizing fillInner sizes contentWs stored i =
+colSizing :: Bool -> Bool -> [ColSize] -> [Float] -> [Float] -> Int -> Sizing
+colSizing fillInner hasStretch sizes contentWs stored i =
   let saved = listAt stored i 0
       contentW = max minColW (listAt contentWs i minColW)
-      hasStretch = any (\s -> case s of ColStretch -> True; _ -> False) (take (length contentWs) (sizes ++ repeat ColContent))
    in if saved > 0
         then Fixed (max minColW saved)
         else case listAt sizes i ColContent of
@@ -572,7 +587,8 @@ tableCfg cfg outerLayout key cols rows curSort =
         resizing = isResizeDrag drag0 && inputMouseDown inp
         widths1 = if resizing then setAt (dragCol drag0) (max minColW (dragW0 + mx - dragX0)) widths0 else widths0
     when (widths1 /= widths0) $ uiIO $ writeColW ctx stateKey widths1
-    let vis = visibleCols order0 hidden0
+    let hasStretch = tableStretchN n sizes
+        vis = visibleCols order0 hidden0
         freezeN = min (max 0 (tableFreezeCols cfg)) (length vis)
         freezeR = min (max 0 (tableFreezeRows cfg)) (length rows)
         frozenIdx = take freezeN vis
@@ -584,7 +600,7 @@ tableCfg cfg outerLayout key cols rows curSort =
         rowMinH = if terminal then 1 else 28
         fillInner = tableFillInner cfg outerLayout
         mins = [resolvedWidth sizes contentWs widths1 i | i <- [0 .. n - 1]]
-        colBoxes = V.fromList [colBoxLayout (colSizing fillInner sizes contentWs widths1 i) (listAt mins i minColW) | i <- [0 .. n - 1]]
+        colBoxes = V.fromList [colBoxLayout (colSizing fillInner hasStretch sizes contentWs widths1 i) (listAt mins i minColW) | i <- [0 .. n - 1]]
         colBox i = if i < V.length colBoxes then colBoxes V.! i else tight defaultLayout
         resolvedW i = listAt mins i minColW
         cellLayouts = V.fromList

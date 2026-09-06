@@ -129,12 +129,19 @@ keyedRowLay lay keys act =
       (zip [0 :: Int ..] keys)
 
 listAt :: [a] -> Int -> a -> a
-listAt xs i d = case drop i xs of
-  (x : _) -> x
-  _ -> d
+listAt xs i d = go i xs
+ where
+  go !n (x : xs')
+    | n <= 0 = x
+    | otherwise = go (n - 1) xs'
+  go !_ [] = d
 
 fitList :: Int -> a -> [a] -> [a]
-fitList n d xs = take n (xs ++ repeat d)
+fitList n d xs = go n xs
+ where
+  go !k _ | k <= 0 = []
+  go !k (x : xs') = x : go (k - 1) xs'
+  go !k [] = d : go (k - 1) []
 
 {-# INLINE listClipper #-}
 listClipper :: Int -> Float -> Float -> Float -> (Int, Int)
