@@ -10,6 +10,7 @@ module NanoUI.Draw
   , Vertex (..)
   , newDrawArena
   , resetDrawArena
+  , setDrawSnapScale
   , beginLayer
   , setClip
   , pushRect
@@ -310,6 +311,7 @@ data DrawArena = DrawArena
   , daCurrentClip :: !(IORef (Float, Float, Float, Float))
   , daCurrentTexture :: !(IORef Int)
   , daCmdStartIndex :: !(IORef Int)
+  , daSnapScale :: !(IORef Float)
   }
 
 {-# INLINE layerToWord8 #-}
@@ -490,6 +492,7 @@ newDrawArena = do
   daCurrentClip <- newIORef (0, 0, 1e9, 1e9)
   daCurrentTexture <- newIORef glyphAtlasTextureId
   daCmdStartIndex <- newIORef 0
+  daSnapScale <- newIORef 0.0
   pure
     DrawArena
       { daVertexFPtr
@@ -509,6 +512,7 @@ newDrawArena = do
       , daCurrentClip
       , daCurrentTexture
       , daCmdStartIndex
+      , daSnapScale
       }
 
 {-# INLINE resetDrawArena #-}
@@ -521,6 +525,14 @@ resetDrawArena da = do
   writeIORef (daCurrentClip da) (0, 0, 1e9, 1e9)
   writeIORef (daCurrentTexture da) glyphAtlasTextureId
   writeIORef (daCmdStartIndex da) 0
+
+-- | Device pixel scale used to snap primitive origins/endpoints to whole
+-- device pixels. A non-positive value disables snapping. The SDL backend keeps
+-- this in sync with the display scale; cell and headless hosts leave it
+-- disabled so their grid/ASCII rasterizers keep their original coordinates.
+{-# INLINE setDrawSnapScale #-}
+setDrawSnapScale :: DrawArena -> Float -> IO ()
+setDrawSnapScale da s = writeIORef (daSnapScale da) (if s > 0 then s else 0)
 
 {-# NOINLINE poolTake #-}
 poolTake :: BufferPool -> Int -> Int -> IO (ForeignPtr Word8)
@@ -739,16 +751,19 @@ pushQuadGradient :: DrawArena -> Rect -> Color -> Color -> Color -> Color -> IO 
 pushQuadGradient da (Rect x y w h) tl tr br bl
   | w <= 0 || h <= 0 = pure ()
   | otherwise = do
+      s <- readIORef (daSnapScale da)
       setTexture da glyphAtlasTextureId
       (vp, ip, base, baseIdx) <- ensureAndAlloc da 4 6
-      let !c0 = unpackColorF tl
+      let !px = snapToPixel s x
+          !py = snapToPixel s y
+          !c0 = unpackColorF tl
           !c1 = unpackColorF tr
           !c2 = unpackColorF br
           !c3 = unpackColorF bl
           !vOff = base * vertexSize
           !iOff = baseIdx * indexSize
           !baseIdxWord = fromIntegral base :: Word32
-      pokeQuadGradientSIMD vp vOff ip iOff x y w h whitePixelU whitePixelV c0 c1 c2 c3 baseIdxWord
+      pokeQuadGradientSIMD vp vOff ip iOff px py w h whitePixelU whitePixelV c0 c1 c2 c3 baseIdxWord
       writeIORef (daVertexCount da) (base + 4)
       writeIORef (daIndexCount da) (baseIdx + 6)
 
@@ -770,25 +785,34 @@ whitePixelU = 1.5 / 1024.0
 whitePixelV :: Float
 whitePixelV = 1.5 / 1024.0
 
+{-# INLINE snapRectOrigin #-}
+snapRectOrigin :: DrawArena -> Rect -> IO Rect
+snapRectOrigin da (Rect x y w h) = do
+  s <- readIORef (daSnapScale da)
+  pure (Rect (snapToPixel s x) (snapToPixel s y) w h)
+
 {-# INLINE pushRect #-}
 pushRect :: DrawArena -> Rect -> Color -> IO ()
 pushRect da rect col = do
+  r <- snapRectOrigin da rect
   setTexture da glyphAtlasTextureId
-  pushQuad da rect whitePixelU whitePixelV whitePixelU whitePixelV col
+  pushQuad da r whitePixelU whitePixelV whitePixelU whitePixelV col
 
 {-# INLINE pushBackdropDim #-}
 pushBackdropDim :: DrawArena -> Rect -> Color -> IO ()
 pushBackdropDim da rect col = do
+  r <- snapRectOrigin da rect
   setTexture da backdropDimTextureId
-  pushQuad da rect 0 0 1 1 col
+  pushQuad da r 0 0 1 1 col
 
 {-# INLINE pushImage #-}
 pushImage :: DrawArena -> Rect -> Int -> Float -> Float -> Float -> Float -> Color -> IO ()
 pushImage da rect tex u0 v0 u1 v1 col
   | tex <= 0 = pushRect da rect col
   | otherwise = do
+      r <- snapRectOrigin da rect
       setTexture da tex
-      pushQuad da rect u0 v0 u1 v1 col
+      pushQuad da r u0 v0 u1 v1 col
 
 -- 4 segments per 90° arc. Lookup table in cornerCosSin has 5 points per quadrant.
 cornerSegments :: Int
@@ -889,66 +913,72 @@ pushRoundedRect da rect@(Rect x y w h) radius col
   | w <= 0 || h <= 0 = pure ()
   | radius <= 0.5 = pushRect da rect col
   | otherwise = do
-      let !rad = min radius (min (w * 0.5) (h * 0.5))
+      s <- readIORef (daSnapScale da)
+      let !px = snapToPixel s x
+          !py = snapToPixel s y
+          !rad = min radius (min (w * 0.5) (h * 0.5))
       if rad <= 0.5
-        then pushRect da rect col
+        then pushRect da (Rect px py w h) col
         else do
           setTexture da glyphAtlasTextureId
           let !midW = max 0 (w - 2 * rad)
               !midH = max 0 (h - 2 * rad)
           when (midW > 0 && midH > 0) $
-            pushQuad da (Rect (x + rad) (y + rad) midW midH) whitePixelU whitePixelV whitePixelU whitePixelV col
+            pushQuad da (Rect (px + rad) (py + rad) midW midH) whitePixelU whitePixelV whitePixelU whitePixelV col
           when (midW > 0) $ do
-            pushQuad da (Rect (x + rad) y midW rad) whitePixelU whitePixelV whitePixelU whitePixelV col
-            pushQuad da (Rect (x + rad) (y + h - rad) midW rad) whitePixelU whitePixelV whitePixelU whitePixelV col
+            pushQuad da (Rect (px + rad) py midW rad) whitePixelU whitePixelV whitePixelU whitePixelV col
+            pushQuad da (Rect (px + rad) (py + h - rad) midW rad) whitePixelU whitePixelV whitePixelU whitePixelV col
           when (midH > 0) $ do
-            pushQuad da (Rect x (y + rad) rad midH) whitePixelU whitePixelV whitePixelU whitePixelV col
-            pushQuad da (Rect (x + w - rad) (y + rad) rad midH) whitePixelU whitePixelV whitePixelU whitePixelV col
-          pushCornerFan da (x + rad) (y + rad) rad pi (pi * 1.5) col
-          pushCornerFan da (x + w - rad) (y + rad) rad (pi * 1.5) (pi * 2) col
-          pushCornerFan da (x + w - rad) (y + h - rad) rad 0 (pi * 0.5) col
-          pushCornerFan da (x + rad) (y + h - rad) rad (pi * 0.5) pi col
+            pushQuad da (Rect px (py + rad) rad midH) whitePixelU whitePixelV whitePixelU whitePixelV col
+            pushQuad da (Rect (px + w - rad) (py + rad) rad midH) whitePixelU whitePixelV whitePixelU whitePixelV col
+          pushCornerFan da (px + rad) (py + rad) rad pi (pi * 1.5) col
+          pushCornerFan da (px + w - rad) (py + rad) rad (pi * 1.5) (pi * 2) col
+          pushCornerFan da (px + w - rad) (py + h - rad) rad 0 (pi * 0.5) col
+          pushCornerFan da (px + rad) (py + h - rad) rad (pi * 0.5) pi col
 
 {-# INLINE pushRoundedStroke #-}
 pushRoundedStroke :: DrawArena -> Rect -> Float -> Float -> Color -> IO ()
 pushRoundedStroke da (Rect x y w h) radius bw col
   | w <= 0 || h <= 0 || bw <= 0 = pure ()
   | otherwise = do
+      s <- readIORef (daSnapScale da)
+      let !px = snapToPixel s x
+          !py = snapToPixel s y
       setTexture da glyphAtlasTextureId
       let !rad = min (max 0 radius) (min (w * 0.5) (h * 0.5))
           !ibw = min bw (min (w * 0.5) (h * 0.5))
       if rad <= 0.5
         then do
           let !t = ibw
-              !ox = x + t / 2
-              !oy = y + t / 2
+              !ox = px + t / 2
+              !oy = py + t / 2
               !ow = max 0 (w - t)
               !oh = max 0 (h - t)
-          pushStrokeAA da ox oy (ox + ow) oy t col
-          pushStrokeAA da ox (oy + oh) (ox + ow) (oy + oh) t col
-          when (oh > 0) $ pushStrokeAA da ox oy ox (oy + oh) t col
-          when (oh > 0) $ pushStrokeAA da (ox + ow) oy (ox + ow) (oy + oh) t col
+          pushStrokeAARaw da ox oy (ox + ow) oy t col
+          pushStrokeAARaw da ox (oy + oh) (ox + ow) (oy + oh) t col
+          when (oh > 0) $ pushStrokeAARaw da ox oy ox (oy + oh) t col
+          when (oh > 0) $ pushStrokeAARaw da (ox + ow) oy (ox + ow) (oy + oh) t col
         else do
           let !midW = max 0 (w - 2 * rad)
               !midH = max 0 (h - 2 * rad)
-              !topY = y + ibw / 2
-              !botY = y + h - ibw / 2
-              !leftX = x + ibw / 2
-              !rightX = x + w - ibw / 2
+              !topY = py + ibw / 2
+              !botY = py + h - ibw / 2
+              !leftX = px + ibw / 2
+              !rightX = px + w - ibw / 2
           when (midW > 0) $ do
-            pushStrokeAA da (x + rad) topY (x + rad + midW) topY ibw col
-            pushStrokeAA da (x + rad) botY (x + rad + midW) botY ibw col
+            pushStrokeAARaw da (px + rad) topY (px + rad + midW) topY ibw col
+            pushStrokeAARaw da (px + rad) botY (px + rad + midW) botY ibw col
           when (midH > 0) $ do
-            pushStrokeAA da leftX (y + rad) leftX (y + rad + midH) ibw col
-            pushStrokeAA da rightX (y + rad) rightX (y + rad + midH) ibw col
+            pushStrokeAARaw da leftX (py + rad) leftX (py + rad + midH) ibw col
+            pushStrokeAARaw da rightX (py + rad) rightX (py + rad + midH) ibw col
           let !cr = max 0.25 (rad - ibw / 2)
           if midW <= 0 && midH <= 0
-            then forM_ [0 .. 3] $ \q -> pushCornerArcStroke da (x + w * 0.5) (y + h * 0.5) cr ibw q col
+            then forM_ [0 .. 3] $ \q -> pushCornerArcStroke da (px + w * 0.5) (py + h * 0.5) cr ibw q col
             else do
-              pushCornerArcStroke da (x + rad) (y + rad) cr ibw 0 col
-              pushCornerArcStroke da (x + w - rad) (y + rad) cr ibw 1 col
-              pushCornerArcStroke da (x + w - rad) (y + h - rad) cr ibw 2 col
-              pushCornerArcStroke da (x + rad) (y + h - rad) cr ibw 3 col
+              pushCornerArcStroke da (px + rad) (py + rad) cr ibw 0 col
+              pushCornerArcStroke da (px + w - rad) (py + rad) cr ibw 1 col
+              pushCornerArcStroke da (px + w - rad) (py + h - rad) cr ibw 2 col
+              pushCornerArcStroke da (px + rad) (py + h - rad) cr ibw 3 col
 
 {-# INLINE pushLine #-}
 pushLine :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
@@ -968,8 +998,20 @@ pushLine da x1 y1 x2 y2 thickness col =
 
 -- Coverage-AA strip for a straight segment. Same weight as pushCornerArcStroke,
 -- without round caps that blob at rounded-rect corners.
+{-# INLINE pushStrokeAA #-}
 pushStrokeAA :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
 pushStrokeAA da x0 y0 x1 y1 bw col
+  | bw <= 0 = pure ()
+  | otherwise = do
+      s <- readIORef (daSnapScale da)
+      pushStrokeAARaw da (snapToPixel s x0) (snapToPixel s y0) (snapToPixel s x1) (snapToPixel s y1) bw col
+
+-- | Unsnapped variant used by 'pushRoundedStroke', which already snapped the
+-- border rect origin and computes a deliberate half-pixel inset for crisp
+-- hairlines. Re-snapping here would round that inset away and make the border
+-- drift between the card edge and its neighbour as the card scrolls.
+pushStrokeAARaw :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
+pushStrokeAARaw da x0 y0 x1 y1 bw col
   | bw <= 0 = pure ()
   | otherwise =
       case strokeAxes x0 y0 x1 y1 of
@@ -1051,8 +1093,13 @@ pushCornerArcStroke da cx cy radius bw q col
 pushStroke :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
 pushStroke da x1 y1 x2 y2 thickness col
   | thickness <= 0 = pure ()
-  | otherwise =
-      case strokeAxes x1 y1 x2 y2 of
+  | otherwise = do
+      s <- readIORef (daSnapScale da)
+      let !px1 = snapToPixel s x1
+          !py1 = snapToPixel s y1
+          !px2 = snapToPixel s x2
+          !py2 = snapToPixel s y2
+      case strokeAxes px1 py1 px2 py2 of
         Nothing -> pure ()
         Just (dx, dy, len) -> do
           let !invLen = (thickness * 0.5) / len
@@ -1065,10 +1112,10 @@ pushStroke da x1 y1 x2 y2 thickness col
               !iOff = baseIdx * indexSize
               !baseIdxWord = fromIntegral base :: Word32
               poke off px py = pokeVertex vp off px py r g b a whitePixelU whitePixelV
-          poke vOff (x1 + hx) (y1 + hy)
-          poke (vOff + 32) (x2 + hx) (y2 + hy)
-          poke (vOff + 64) (x2 - hx) (y2 - hy)
-          poke (vOff + 96) (x1 - hx) (y1 - hy)
+          poke vOff (px1 + hx) (py1 + hy)
+          poke (vOff + 32) (px2 + hx) (py2 + hy)
+          poke (vOff + 64) (px2 - hx) (py2 - hy)
+          poke (vOff + 96) (px1 - hx) (py1 - hy)
           pokeByteOff ip iOff baseIdxWord
           pokeByteOff ip (iOff + 4) (baseIdxWord + 1)
           pokeByteOff ip (iOff + 8) (baseIdxWord + 2)
@@ -1101,24 +1148,31 @@ emitDrawOps da fm ops = V.mapM_ emitOne ops
 {-# INLINE pushFilledTriangle #-}
 pushFilledTriangle :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
 pushFilledTriangle da x0 y0 x1 y1 x2 y2 col = do
+  s <- readIORef (daSnapScale da)
   setTexture da glyphAtlasTextureId
   (vp, ip, base, baseIdx) <- ensureAndAlloc da 3 3
-  let !(r, g, b, a) = unpackColorF col
+  let !px0 = snapToPixel s x0
+      !py0 = snapToPixel s y0
+      !px1 = snapToPixel s x1
+      !py1 = snapToPixel s y1
+      !px2 = snapToPixel s x2
+      !py2 = snapToPixel s y2
+      !(r, g, b, a) = unpackColorF col
       !vOff = base * vertexSize
       !iOff = baseIdx * indexSize
       !baseIdxWord = fromIntegral base :: Word32
-  pokeVertex vp vOff x0 y0 r g b a whitePixelU whitePixelV
-  pokeVertex vp (vOff + 32) x1 y1 r g b a whitePixelU whitePixelV
-  pokeVertex vp (vOff + 64) x2 y2 r g b a whitePixelU whitePixelV
+  pokeVertex vp vOff px0 py0 r g b a whitePixelU whitePixelV
+  pokeVertex vp (vOff + 32) px1 py1 r g b a whitePixelU whitePixelV
+  pokeVertex vp (vOff + 64) px2 py2 r g b a whitePixelU whitePixelV
   pokeByteOff ip iOff baseIdxWord
   pokeByteOff ip (iOff + 4) (baseIdxWord + 1)
   pokeByteOff ip (iOff + 8) (baseIdxWord + 2)
   writeIORef (daVertexCount da) (base + 3)
   writeIORef (daIndexCount da) (baseIdx + 3)
 
-{-# INLINE snapTextPen #-}
-snapTextPen :: Float -> Float -> Float
-snapTextPen s v
+{-# INLINE snapToPixel #-}
+snapToPixel :: Float -> Float -> Float
+snapToPixel s v
   | s > 0 = fromIntegral (round (v * s) :: Int) / s
   | otherwise = v
 
@@ -1132,8 +1186,8 @@ pushText da fm x y txt col =
   -- whole line: otherwise fractional layout positions leave glyphs straddling
   -- pixel boundaries, which makes nearest-sampled atlas text blurry and jitter
   -- as scroll position changes.
-  let !px = snapTextPen (fmSnapScale fm) x
-      !py = snapTextPen (fmSnapScale fm) y
+  let !px = snapToPixel (fmSnapScale fm) x
+      !py = snapToPixel (fmSnapScale fm) y
    in case fmRun fm txt of
         Just rq -> drawRunQuad da px py rq col
         Nothing -> go px py Nothing txt
@@ -1183,8 +1237,8 @@ pushTextStyled da fm weight fstyle deco x y txt col
   | weight == WeightNormal && fstyle == FontStyleNormal && deco == DecorationNone =
       pushText da fm x y txt col
   | otherwise = do
-      let !px = snapTextPen (fmSnapScale fm) x
-          !py = snapTextPen (fmSnapScale fm) y
+      let !px = snapToPixel (fmSnapScale fm) x
+          !py = snapToPixel (fmSnapScale fm) y
           !lh = fmLineHeight fm
           !bOff = max 1.0 (0.05 * lh)
           !slantMult = case fstyle of

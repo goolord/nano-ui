@@ -127,6 +127,7 @@ module NanoUI.Context
   , withClipboard
   , enableMeasureCache
   , setHost
+  , setDrawSnapScale
   , askHostIO
   , pushMessage
   , drainMessages
@@ -278,6 +279,7 @@ import NanoUI.Context.Types
 import Data.Vector (Vector)
 import Data.Vector qualified as V
 import NanoUI.Draw (DrawingBuild, DrawOp, newDrawArena, shiftDrawOp)
+import NanoUI.Draw qualified as Draw
 import NanoUI.Font (FontMetrics, fmLineHeight, measureText, monospaceMetrics, scaleFontMetrics)
 import NanoUI.Frame.SpanArena (newSpanArena)
 import NanoUI.Types (HostProfile (..), isCellHost)
@@ -1150,6 +1152,12 @@ setHost ctx val = do
   m <- readIORef (ctxHost ctx)
   let k = typeOf val
   writeIORef (ctxHost ctx) (Map.insert k (toDyn val) m)
+
+-- | Set the device pixel scale used to snap geometry origins/endpoints to
+-- whole pixels. The SDL backend calls this when the display scale is synced.
+{-# INLINE setDrawSnapScale #-}
+setDrawSnapScale :: Context -> Float -> IO ()
+setDrawSnapScale ctx s = Draw.setDrawSnapScale (ctxDrawArena ctx) s
 
 {-# INLINE askHostIO #-}
 askHostIO :: forall a. (Typeable a) => Context -> IO (Maybe a)
