@@ -30,20 +30,24 @@ radioGroupLay = tight (gap 4 (fillW defaultLayout))
 legendLay :: Layout
 legendLay = tight (fillW (fontMuted defaultLayout))
 
+radioSalt :: Int
+radioSalt = hash ("radio" :: Text)
+
 radioFieldset :: (Ui :> es) => Text -> [Text] -> Int -> Eff es (Response, Int)
 radioFieldset legend options initial =
-  withKey (hashWithSalt (hash ("radio" :: Text)) legend) $ do
+  withKey (hashWithSalt radioSalt legend) $ do
     gid <- nextId
     ctx <- askContext
     let opts = if null options then [""] else options
-        !c0 = max 0 (min (length opts - 1) initial)
+        !len = length opts
+        !c0 = max 0 (min (len - 1) initial)
         !key = intKey gid
         !keyInit = slotKey 1 key
     st0 <- uiIO (getStore ctx)
     let lastInit = IM.lookup keyInit (storeInt st0)
         storedSel = IM.lookup key (storeInt st0)
         !sel = case (lastInit, storedSel) of
-          (Just li, Just s) | li == c0 -> max 0 (min (length opts - 1) s)
+          (Just li, Just s) | li == c0 -> max 0 (min (len - 1) s)
           _                            -> c0
     column' radioGroupLay $ do
       tagContainer gid
