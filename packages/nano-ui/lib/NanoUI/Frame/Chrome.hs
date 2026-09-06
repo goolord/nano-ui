@@ -399,13 +399,8 @@ strokeTabHeaderSides ::
   DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
 strokeTabHeaderSides da x y w h r col =
   let bw = 1
-      inset = 0.5
-      ox = x + inset
-      oy = y + inset
-      ow = max 0 (w - 2 * inset)
-      oh = max 0 (h - 2 * inset)
-      rr = min r (min (ow / 2) (oh / 2))
-   in pushRoundedStroke da (Rect ox oy ow (oh + 1)) rr bw col
+      rr = min r (min (w / 2) (h / 2))
+   in pushRoundedStroke da (Rect x y w (h + 1)) rr bw col
 
 widgetVisualStyle :: Context -> NodeType -> NodeIdx -> IO Style
 widgetVisualStyle ctx nt idx = do
@@ -553,13 +548,8 @@ strokeRoundedBorder ::
   Color ->
   IO ()
 strokeRoundedBorder da x y w h r bw col = do
-  let inset = 0.5
-      ox = x + inset
-      oy = y + inset
-      ow = max 0 (w - 2 * inset)
-      oh = max 0 (h - 2 * inset)
-      rr = max 0 (min r (min (ow / 2) (oh / 2)))
-  pushRoundedStroke da (Rect ox oy ow oh) rr (max 1 bw) col
+  let rr = max 0 (min r (min (w / 2) (h / 2)))
+  pushRoundedStroke da (Rect x y w h) rr (max 1 bw) col
 
 strokeStyledRect :: DrawArena -> Bool -> Style -> Float -> Float -> Float -> Float -> IO ()
 strokeStyledRect da terminal style x y w h =

@@ -979,13 +979,13 @@ pushStrokeAA da x0 y0 x1 y1 bw col
           let !nx = (-dy) / len
               !ny = dx / len
               !half = bw * 0.5
-              !aa = min 1 half
-              !core = half - aa
+              !core = max 0 (half - 0.5)
+              !outer = half + 0.5
               !(cr, cg, cb, ca) = unpackColorF col
           (vp, ip, base, baseIdx) <- ensureAndAlloc da 8 18
           let pokeEnd vi px py = do
                 let ((p0x, p0y), (p1x, p1y), (p2x, p2y), (p3x, p3y)) =
-                      strokeStripNormalsSIMD px py nx ny (-half) (-core) core half
+                      strokeStripNormalsSIMD px py nx ny (-outer) (-core) core outer
                     !vBase = (base + vi) * vertexSize
                 pokeVertex vp vBase p0x p0y cr cg cb 0 whitePixelU whitePixelV
                 pokeVertex vp (vBase + 32) p1x p1y cr cg cb ca whitePixelU whitePixelV
@@ -1017,11 +1017,11 @@ pushCornerArcStroke da cx cy radius bw q col
       let !r = max 0.25 radius
           !n = cornerSegments
           !half = bw * 0.5
-          !aa = min 1 half
-          !innerAA = max 0 (r - half)
-          !outerAA = r + half
-          !inner = r - half + aa
-          !outer = r + half - aa
+          !core = max 0 (half - 0.5)
+          !inner = max 0 (r - core)
+          !outer = r + core
+          !innerAA = max 0 (inner - 1.0)
+          !outerAA = outer + 1.0
           !needV = (n + 1) * 4
           !needI = n * 18
       (vp, ip, base, baseIdx) <- ensureAndAlloc da needV needI
