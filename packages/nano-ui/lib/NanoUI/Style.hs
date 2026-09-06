@@ -612,8 +612,8 @@ tomorrowLightTheme =
           , styleBorder = colorRGBA 222 222 222 255   -- #DEDEDE
           , styleBorderWidth = 1
           , styleCornerRadius = 2
-          , styleHoverBg = colorRGBA 251 251 251 255
-          , styleActiveBg = colorRGBA 235 235 235 255
+          , styleHoverBg = colorRGBA 231 231 231 255 -- #E7E7E7 (darker than #F2F2F2 so hover reads)
+          , styleActiveBg = colorRGBA 219 219 219 255 -- #DBDBDB
           }
    in Theme
         { themeWindow = colorRGBA 255 255 255 255     -- #FFFFFF
@@ -621,13 +621,13 @@ tomorrowLightTheme =
         , themeFloatingWindow = panelStyle
         , themeButton =
             Style
-              { styleBg = colorRGBA 234 234 234 255   -- #EAEAEA
+              { styleBg = colorRGBA 232 232 232 255   -- #E8E8E8 (step down from panel for zebra rows)
               , styleFg = colorRGBA 55 59 65 255      -- #373B41
-              , styleBorder = colorRGBA 215 215 215 255
+              , styleBorder = colorRGBA 214 214 214 255 -- #D6D6D6
               , styleBorderWidth = 1
               , styleCornerRadius = 2
-              , styleHoverBg = colorRGBA 229 229 229 255 -- #E5E5E5
-              , styleActiveBg = colorRGBA 208 208 208 255 -- #D0D0D0
+              , styleHoverBg = colorRGBA 214 214 214 255 -- #D6D6D6
+              , styleActiveBg = colorRGBA 196 196 196 255 -- #C4C4C4
               }
         , themeInput =
             Style
@@ -636,8 +636,8 @@ tomorrowLightTheme =
               , styleBorder = colorRGBA 210 210 210 255
               , styleBorderWidth = 1
               , styleCornerRadius = 2
-              , styleHoverBg = colorRGBA 251 251 251 255
-              , styleActiveBg = colorRGBA 240 240 240 255
+              , styleHoverBg = colorRGBA 243 243 243 255 -- #F3F3F3 (darker than white so hover reads)
+              , styleActiveBg = colorRGBA 255 255 255 255 -- focus keeps the normal white bg; accent border signals focus
               }
         , themeSeparator = colorRGBA 222 222 222 255  -- #DEDEDE
         , themeAccent = colorRGBA 82 134 188 255      -- #5286BC (Tomorrow Blue)

@@ -433,8 +433,12 @@ widgetVisualStyle ctx nt idx = do
           }
       base =
         case nt of
-          NodeTextInput -> themeInput theme
-          NodeTextArea -> themeInput theme
+          NodeTextInput ->
+            let sel = themeInput theme
+             in if isFocus then sel {styleBorder = themeAccent theme} else sel
+          NodeTextArea ->
+            let sel = themeInput theme
+             in if isFocus then sel {styleBorder = themeAccent theme} else sel
           NodeSelect ->
             let sel = themeButton theme
              in if isFocus then sel {styleBorder = themeAccent theme} else sel
