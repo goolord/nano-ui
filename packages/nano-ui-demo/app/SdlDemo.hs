@@ -10,7 +10,7 @@ module SdlDemo
 
 import Control.Monad (unless, void, when)
 import Data.Foldable (foldlM, for_)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Primitive.SmallArray (SmallArray, smallArrayFromList)
 import Diagrams.Prelude
   ( Diagram
@@ -208,6 +208,18 @@ demoUi = do
   (typeItalic, setTypeItalic) <- useFlag True
   (typeUnderline, setTypeUnderline) <- useFlag False
   (typeStrike, setTypeStrike) <- useFlag False
+  (openPath, setOpenPath) <- useText ""
+  (savePath, setSavePath) <- useText ""
+  (folderPath, setFolderPath) <- useText ""
+  (openDlg, setOpenDlg) <- useState (Nothing :: Maybe FileDialogId)
+  (saveDlg, setSaveDlg) <- useState (Nothing :: Maybe FileDialogId)
+  (folderDlg, setFolderDlg) <- useState (Nothing :: Maybe FileDialogId)
+  useFileDialog openDlg setOpenDlg $ \paths ->
+    setOpenPath (T.intercalate ", " (map T.pack paths))
+  useFileDialog saveDlg setSaveDlg $ \paths ->
+    setSavePath (maybe "" T.pack (listToMaybe paths))
+  useFileDialog folderDlg setFolderDlg $ \paths ->
+    setFolderPath (maybe "" T.pack (listToMaybe paths))
   scrollWith (tight . grow) $
     columnWith (padAll 6 . gap gapLayout . fillW) $ do
       panelWith (padXY 14 10 . gap gapInline . fillW) $
@@ -247,6 +259,9 @@ demoUi = do
             kv "Table sort" (tableColumnLabel tableSortVal)
             kv "Table order" (tableSortDirText tableSortVal)
             kv "Clicked" (orDash click)
+            kv "Open file" (orDash openPath)
+            kv "Save file" (orDash savePath)
+            kv "Folder" (orDash folderPath)
           card $ do
             heading "Gallery"
             rowWith (tight . gap gapInline . fillW) $ do
@@ -296,6 +311,20 @@ demoUi = do
                   when (respClicked copy) (setClick "Copy")
                   when (respClicked paste) (setClick "Paste")
               sep
+              heading "File Dialogs"
+              rowWith (tight . gap gapInline . fillW) $ do
+                openBtn <- button "Open File…"
+                saveBtn <- button "Save File…"
+                folderBtn <- button "Browse Folder…"
+                when (respClicked openBtn) $ do
+                  mdid <- askOpenFileDialog defaultFileDialogOptions { dialogAllowMany = True }
+                  setOpenDlg mdid
+                when (respClicked saveBtn) $ do
+                  mdid <- askSaveFileDialog defaultFileDialogOptions
+                  setSaveDlg mdid
+                when (respClicked folderBtn) $ do
+                  mdid <- askOpenFolderDialog defaultFileDialogOptions
+                  setFolderDlg mdid
             Typography -> do
               heading "Typography & Font Styling"
               muted "Font sizing, variable weights, synthetic slant, and text decorations."
@@ -549,6 +578,21 @@ drawingSample ps =
 onOff :: Bool -> T.Text
 onOff True = "on"
 onOff False = "off"
+
+-- | Poll a pending dialog handle; on completion clear it and hand the chosen
+-- paths to the caller. Anything other than 'FileDialogPending' dismisses the
+-- handle, so each result is consumed exactly once.
+useFileDialog ::
+  Maybe FileDialogId ->
+  (Maybe FileDialogId -> NanoUI ()) ->
+  ([FilePath] -> NanoUI ()) ->
+  NanoUI ()
+useFileDialog mdid clear onPaths =
+  for_ mdid $ \did ->
+    pollFileDialogUi did >>= \case
+      FileDialogPending -> pure ()
+      FileDialogSelected paths -> onPaths paths >> clear Nothing
+      _done -> clear Nothing
 
 orDash :: T.Text -> T.Text
 orDash s = if T.null s then "-" else s

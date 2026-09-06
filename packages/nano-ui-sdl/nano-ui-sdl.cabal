@@ -77,6 +77,8 @@ library
         NanoUI.Sdl.Clipboard
         NanoUI.Sdl.Cursor
         NanoUI.Sdl.Debug
+        NanoUI.Sdl.Dialog
+        NanoUI.Sdl.Dialog.Types
         NanoUI.Sdl.Display
         NanoUI.Sdl.Font
         NanoUI.Sdl.Font.Inter
