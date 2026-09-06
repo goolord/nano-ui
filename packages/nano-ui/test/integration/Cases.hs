@@ -16,6 +16,7 @@ module Cases
   , runAspectLayoutTest
   , runBase16ThemeTest
   , runCheckboxTest
+  , runCheckboxInitialTest
   , runColumnCardWrapTest
   , runCompactHostTest
   , runDemoWrapWideOrderTest
@@ -79,7 +80,7 @@ import Cases.TextInput
 import Cases.Tooltip
 import Cases.Window
 import Cases.Font
-import Control.Monad (replicateM, void)
+import Control.Monad (forM, replicateM, void)
 import Data.ByteString qualified as BS
 import Data.IORef (IORef)
 import Data.List (nub, sort)
@@ -87,6 +88,8 @@ import Data.Text qualified as T
 import Data.Vector qualified as V
 import Effectful.State.Static.Local (State, evalState, get, modify)
 import NanoUI
+import NanoUI.Context (Context (..))
+import NanoUI.Layout.Arena (NodeType (..), arenaCount, getNodeValue, getNodeType)
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertGt, measureRespW, runClickReduce, withInput)
 import NanoUI.Testing.Harness
@@ -433,6 +436,40 @@ runCheckboxTest ctx failed = do
   assert failed (not checked3)
   ((_, checked4), _, _, _) <- runFrame ctx inp0 ui
   assert failed (not checked4)
+
+-- | An unclicked checkbox must keep rendering its initial value; the frame's
+-- post-UI value sync must not reset it to unchecked when no state is stored.
+runCheckboxInitialTest :: Context -> IORef Int -> IO ()
+runCheckboxInitialTest ctx failed = do
+  let inp0 = withInput 200 100
+      ui = column (checkbox "Opt" True)
+  (resp, _) <- warmup2 ctx inp0 ui
+  assertCheckboxNodeValue failed ctx 1
+  let Rect rx ry _ _ = respRect resp
+      (press, release) = clickPair inp0 (V2 (rx + 1) (ry + 0.5))
+  _ <- runFrame ctx press ui
+  ((_, checked), _, _, _) <- runFrame ctx release ui
+  assert failed (not checked)
+  assertCheckboxNodeValue failed ctx 0
+  _ <- runFrame ctx press ui
+  ((_, checked2), _, _, _) <- runFrame ctx release ui
+  assert failed checked2
+  assertCheckboxNodeValue failed ctx 1
+
+assertCheckboxNodeValue :: IORef Int -> Context -> Float -> IO ()
+assertCheckboxNodeValue failed ctx expected = do
+  let na = ctxNodeArena ctx
+  n <- arenaCount na
+  vals <- forM [0 .. n - 1] $ \i -> do
+    nt <- getNodeType na i
+    case nt of
+      NodeCheckbox -> do
+        v <- getNodeValue na i
+        pure [v]
+      _ -> pure []
+  case concat vals of
+    [v] -> assertEq failed v expected
+    vs -> assert failed (vs == [expected])
 
 runSliderTest :: Context -> IORef Int -> IO ()
 runSliderTest ctx failed = do
