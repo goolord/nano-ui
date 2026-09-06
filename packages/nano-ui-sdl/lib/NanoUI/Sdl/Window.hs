@@ -25,7 +25,8 @@ import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (peek)
 import NanoUI (FontMetrics (..), ImageId, Input (..), Size (..), Theme)
-import NanoUI.Testing (Context, clearMeasureCache, markDirty, setHost, setWakeLoop)
+import NanoUI.Context (Context (..), setDrawSnapScale)
+import NanoUI.Testing (clearMeasureCache, markDirty, setHost, setWakeLoop)
 import NanoUI.Sdl.Display
   ( defaultFontSize
   , defaultUiScale
@@ -64,12 +65,10 @@ import NanoUI.Sdl.Font
   )
 import NanoUI.Sdl.Font.Resolve
   ( embeddedFontSource
-  , needsFontconfig
   , resolveNanoUIFont
   , defaultFontSearch
   , defaultFontSearchMono
   )
-import NanoUI.Sdl.Font.Search (bracketFontconfig)
 import NanoUI.Sdl.NanoUIFont (NanoUIFont (..))
 import NanoUI.Sdl.Debug (SdlDebugSampler, newSdlDebugSampler)
 import NanoUI.Sdl.Image (ImageAtlas, destroyImageAtlas, newImageAtlas)
@@ -197,6 +196,7 @@ syncDisplay ctx env inp = do
   oldScale <- readIORef (sdlScaleRef env)
   when (abs (scale - oldScale) > scaleEpsilon) $ do
     writeIORef (sdlScaleRef env) scale
+    setDrawSnapScale ctx scale
     oldFont <- readIORef (sdlFontRef env)
     closeFont oldFont
     newFont <- openFontSourceWithFallback (sdlFontSource env) embeddedFontSource (sdlFontSize env * scale)
@@ -297,17 +297,12 @@ withSdlWindow ::
 withSdlWindow ctx title w h flags bench vsync continuous uiFont monoFont fontSize act =
   withTtf $ do
     if bench then initBenchHints else initSdlHints vsync
-    let run =
-          if needsFontconfig uiFont || needsFontconfig monoFont
-            then bracketFontconfig
-            else id
-    run $ do
-      fontSource <- resolveNanoUIFont uiFont
-      monoSource <- resolveNanoUIFont monoFont
-      bracket
-        (startSdlWindow ctx title w h flags bench vsync continuous fontSource monoSource fontSize)
-        (\(_, env) -> stopSdlWindow bench env)
-        $ \(ctx', env) -> act ctx' env
+    fontSource <- resolveNanoUIFont uiFont
+    monoSource <- resolveNanoUIFont monoFont
+    bracket
+      (startSdlWindow ctx title w h flags bench vsync continuous fontSource monoSource fontSize)
+      (\(_, env) -> stopSdlWindow bench env)
+      $ \(ctx', env) -> act ctx' env
 
 startSdlWindow ::
   Context ->
@@ -343,6 +338,7 @@ startSdlWindow ctx title w h flags bench vsync continuous fontSource monoSource 
           win <- peek winPtr
           ren <- peek renPtr
           scale <- queryWindowDisplayScale win
+          setDrawSnapScale ctx scale
           font <- openFontSourceWithFallback fontSource embeddedFontSource (fontSize * scale)
           monoFont <- openFontSourceWithFallback monoSource embeddedFontSource (fontSize * scale)
           scaleRef <- newIORef scale

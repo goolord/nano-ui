@@ -251,8 +251,8 @@ textNodeStripe si = (si `shiftR` 4) .&. 0x0F
 {-# INLINE stripeColor #-}
 stripeColor :: Theme -> Int -> Maybe Color
 stripeColor theme s
-  | s == tableStripeEven = Just (lerpColor (styleBg (themePanel theme)) (themeWindow theme) 0.18)
-  | s == tableStripeOdd = Just (lerpColor (styleBg (themePanel theme)) (styleBg (themeButton theme)) 0.42)
+  | s == tableStripeEven = Just (lerpColor (styleBg (themePanel theme)) (themeWindow theme) 0.26)
+  | s == tableStripeOdd = Just (lerpColor (styleBg (themePanel theme)) (styleBg (themeButton theme)) 0.55)
   | otherwise = Nothing
 
 tableStripeColor :: Theme -> Int -> Maybe Color

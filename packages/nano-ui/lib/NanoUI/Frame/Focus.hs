@@ -103,9 +103,12 @@ syncWidgetLabels ctx = do
     wid <- getWidgetId na idx
     let key = intKey wid
     case nt of
-      NodeCheckbox -> do
-        let val = intBool (IM.findWithDefault 0 key (storeInt store))
-        setNodeValue na idx (if val then 1 else 0)
+      NodeCheckbox ->
+        -- Only sync when the widget owns stored state; otherwise keep the
+        -- value set from the initial argument during the UI pass.
+        case IM.lookup key (storeInt store) of
+          Just v -> setNodeValue na idx (if intBool v then 1 else 0)
+          Nothing -> pure ()
       NodeRadio -> do
         parent <- getParent na idx
         optIdx <- getStyleIdx na idx

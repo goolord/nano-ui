@@ -1,9 +1,6 @@
-{-# LANGUAGE CPP #-}
-
 module NanoUI.Sdl.Font.Resolve
   ( embeddedFontSource
   , resolveNanoUIFont
-  , needsFontconfig
   , defaultFontSearch
   , defaultFontSearchMono
   ) where
@@ -36,16 +33,6 @@ defaultFontSearchMono =
     , "DejaVu Sans Mono"
     , "monospace"
     ]
-
-needsFontconfig :: NanoUIFont -> Bool
-needsFontconfig DefaultFont = False
-needsFontconfig (FontFilePath _) = False
-needsFontconfig (FontSearch _) =
-#if HAVE_FONTCONFIG
-  True
-#else
-  False
-#endif
 
 resolveNanoUIFont :: NanoUIFont -> IO FontSource
 resolveNanoUIFont DefaultFont = pure embeddedFontSource

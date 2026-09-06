@@ -96,6 +96,10 @@ data RunQuad = RunQuad
 data FontMetrics = FontMetrics
   { fmLineHeight :: {-# UNPACK #-} !Float
   , fmAscent :: {-# UNPACK #-} !Float
+  -- | Device pixels per logical unit used to snap glyph quads to the pixel
+  -- grid. Cell hosts use 1.0 (glyphs are cell-aligned); the SDL backend sets
+  -- this to the display scale so text lands on whole device pixels.
+  , fmSnapScale :: {-# UNPACK #-} !Float
   , fmAdvance :: Char -> Float
   , fmKerning :: Char -> Char -> Float
   , fmRun :: Text -> Maybe RunQuad
@@ -108,6 +112,7 @@ monospaceMetrics cell =
   FontMetrics
     { fmLineHeight = cell
     , fmAscent = cell * 0.8
+    , fmSnapScale = 1.0
     , fmAdvance = \_ -> cell
     , fmKerning = \_ _ -> 0
     , fmRun = \_ -> Nothing
@@ -122,6 +127,8 @@ scaleFontMetrics s fm
       FontMetrics
         { fmLineHeight = fmLineHeight fm * s
         , fmAscent = fmAscent fm * s
+        -- Snap scale is a display property, not a font-size property.
+        , fmSnapScale = fmSnapScale fm
         , fmAdvance = \c -> fmAdvance fm c * s
         , fmKerning = \a b -> fmKerning fm a b * s
         , fmRun = \t -> fmap scaleRun (fmRun fm t)

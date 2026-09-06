@@ -89,9 +89,7 @@ queryRendererName ren =
     if ok then T.pack <$> peekCString buf else pure "unknown"
 
 windowToLogicalCoords :: Float -> V2 -> V2
-windowToLogicalCoords scale (V2 wx wy) =
-  let s = if scale > 0 then scale else defaultUiScale
-   in V2 (wx / s) (wy / s)
+windowToLogicalCoords _scale (V2 wx wy) = V2 wx wy
 
 -- Windows runs a modal loop while the user drags the border, so the app
 -- event watch does not run. SDL still delivers resize events to this watch.

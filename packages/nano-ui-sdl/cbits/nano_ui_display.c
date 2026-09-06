@@ -48,14 +48,16 @@ bool nano_ui_window_logical_size(
     if (!SDL_GetWindowSize(window, &w, &h)) {
         return false;
     }
-    if (scale <= 0.f) {
-        scale = 1.f;
-    }
+    /* SDL_GetWindowSize already returns the window-coordinate (logical) size,
+     * not pixels. Dividing by the display scale would shrink the logical size
+     * by `scale` on DPI-scaled displays (fullscreen), which made the retained
+     * framebuffer too small and sheared NEAREST-sampled text during the blit. */
+    (void)scale;
     if (out_w) {
-        *out_w = (float)w / scale;
+        *out_w = (float)w;
     }
     if (out_h) {
-        *out_h = (float)h / scale;
+        *out_h = (float)h;
     }
     return true;
 }

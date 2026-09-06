@@ -197,6 +197,7 @@ demoUi = do
   (quality, setQuality) <- useText "Medium"
   (accentHex, setAccent) <- useText (colorPickerToHex demoAccent)
   (themeName, setThemeName) <- useText (themeDisplayName TomorrowNightMin)
+  (themeRadio, setThemeRadio) <- useText (themeDisplayName ThemeDefault)
   (name, setName) <- useText ""
   (notes, setNotes) <- useText ""
   (treeSel, setTreeSel) <- useText "0"
@@ -239,6 +240,7 @@ demoUi = do
               box (fixedWH 20 20 defaultLayout) accent
               kv "Accent" accentHex
             kv "Theme" themeName
+            kv "Theme radio" themeRadio
             kv "Name" (orDash name)
             kv "Notes" (orDash notes)
             kv "Tree" treeSel
@@ -270,6 +272,8 @@ demoUi = do
               (_, tVal) <- boundedSelect "Theme" TomorrowNightMin themeDisplayName
               setThemeName (themeDisplayName tVal)
               setUiTheme (themeForChoice tVal)
+              (_, trVal) <- boundedRadioFieldset "Theme (radio)" ThemeDefault themeDisplayName
+              setThemeRadio (themeDisplayName trVal)
               (_, nVal) <- textInput "Name" ""
               setName nVal
               (_, notesVal) <- textArea "Notes" "Edit me.\nSecond line."

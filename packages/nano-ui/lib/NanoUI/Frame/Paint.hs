@@ -569,11 +569,12 @@ drawChoiceControl ::
   Float ->
   Float ->
   Float ->
+  Float ->
   Color ->
   Color ->
   (Float -> Float -> Float -> IO ()) ->
   IO ()
-drawChoiceControl host da fm style x y h r value accent well postMark = do
+drawChoiceControl host da fm style x y h r bw value accent well postMark = do
   let (ix, _) =
         if isCellHost host
           then widgetContentInset host fm
@@ -581,7 +582,6 @@ drawChoiceControl host da fm style x y h r value accent well postMark = do
       box = checkboxBoxSize host fm
       bx = x + ix
       by = verticallyCenteredBox y h box
-      bw = 2
       outer = Rect bx by box box
       inner = Rect (bx + bw) (by + bw) (box - 2 * bw) (box - 2 * bw)
       innerR = max 0 (r - bw)
@@ -605,12 +605,13 @@ drawCheckbox ::
 drawCheckbox host da fm style x y h value accent well =
   let box = checkboxBoxSize host fm
       r = min 6 (box / 3.5)
-   in drawChoiceControl host da fm style x y h r value accent well $ \bx by b ->
+      bw = 1.5
+   in drawChoiceControl host da fm style x y h r bw value accent well $ \bx by b ->
         drawCheckboxMark da bx by b accent
 
 drawCheckboxMark :: DrawArena -> Float -> Float -> Float -> Color -> IO ()
 drawCheckboxMark da bx by box markCol = do
-  let t = max 1.9 (box * 0.135)
+  let t = max 1.6 (box * 0.11)
       x0 = bx + box * 0.22
       y0 = by + box * 0.52
       x1 = bx + box * 0.42
@@ -641,7 +642,8 @@ drawRadio ::
 drawRadio host da fm style x y h value accent well =
   let box = checkboxBoxSize host fm
       r = box / 2
-   in drawChoiceControl host da fm style x y h r value accent well $ \bx by b -> do
+      bw = 2
+   in drawChoiceControl host da fm style x y h r bw value accent well $ \bx by b -> do
         let dot = b * 0.72
             dx = bx + (b - dot) / 2
             dy = by + (b - dot) / 2

@@ -138,6 +138,7 @@ testSpecs =
   , TestSpec "animation-spring-a" False runAnimationSpringATest
   , TestSpec "ascii" False runAsciiTest
   , TestSpec "checkbox-toggle" False runCheckboxTest
+  , TestSpec "checkbox-initial" False runCheckboxInitialTest
   , TestSpec "slider-store" True runSliderTest
   , TestSpec "slider-fill-width" True runSliderFillWidthTest
   , TestSpec "scroll-wheel" False runScrollTest
