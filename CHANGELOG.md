@@ -28,6 +28,7 @@ Breaking API: prefer `Text` and `Vector` over `String` and `[ ]` in core types.
 * Color picker copies New Color onto Current Color when the SV or hue drag is released, and after arrow-key edits.
 * Checked checkbox uses the same well and rounded stroke as unchecked. The mark is coverage-AA, not capsule stamps.
 * Text field caret, selection, and click use glyph advances, not TTF string size, so runs of `f` do not shift the caret left.
+* SDL3 native file dialogs: non-blocking `openFileDialog` / `askOpenFileDialog`, `saveFileDialog` / `askSaveFileDialog`, and `openFolderDialog` / `askOpenFolderDialog` wrap `SDL_ShowOpenFileDialog`, `SDL_ShowSaveFileDialog`, and `SDL_ShowOpenFolderDialog`. Poll results with `pollFileDialog` / `pollFileDialogUi` (each result delivered once; a stale handle polls as `FileDialogUnknown`), abandon a handle with `cancelFileDialog`, and clear state at teardown with `clearDialogState`. The SDL dialog callback only records the outcome and wakes the loop, so completion is safe on SDL's background thread.
 
 ## 0.1.0.0 -- YYYY-mm-dd
 

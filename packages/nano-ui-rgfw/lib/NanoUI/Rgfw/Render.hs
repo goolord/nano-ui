@@ -324,8 +324,10 @@ renderArena surf font !scale theme ctx na hotId activeId focusId = do
               fillRect surf bx by bw bh (packColor (thWidgetBg theme))
               drawRectOutline surf bx by bw bh (packColor borderColor)
               when (val > 0.5) $ do
-                let (!cx, !cy, !cw, !ch) = toPhysRect scale (boxLogX + 3.0) (boxLogY + 3.0) 8.0 8.0
-                fillRect surf cx cy cw ch (packColor (thPrimary theme))
+                let !cs = max 1 (round (8.0 * scale))
+                    !cx = bx + max 0 ((bw - cs) `div` 2)
+                    !cy = by + max 0 ((bh - cs) `div` 2)
+                fillRect surf cx cy cs cs (packColor (thPrimary theme))
               when (not (T.null txt)) $ do
                 drawTextScaled surf font scale (boxLogX + 14.0 + 6.0) (ry + max 0.0 ((rh - 13.0) / 2.0)) txt (packColor (thText theme))
 
@@ -337,8 +339,10 @@ renderArena surf font !scale theme ctx na hotId activeId focusId = do
               fillRect surf bx by bw bh (packColor (thWidgetBg theme))
               drawRectOutline surf bx by bw bh (packColor borderColor)
               when (val > 0.5) $ do
-                let (!cx, !cy, !cw, !ch) = toPhysRect scale (boxLogX + 4.0) (boxLogY + 4.0) 6.0 6.0
-                fillRect surf cx cy cw ch (packColor (thPrimary theme))
+                let !cs = max 1 (round (6.0 * scale))
+                    !cx = bx + max 0 ((bw - cs) `div` 2)
+                    !cy = by + max 0 ((bh - cs) `div` 2)
+                fillRect surf cx cy cs cs (packColor (thPrimary theme))
               when (not (T.null txt)) $ do
                 drawTextScaled surf font scale (boxLogX + 14.0 + 6.0) (ry + max 0.0 ((rh - 13.0) / 2.0)) txt (packColor (thText theme))
 

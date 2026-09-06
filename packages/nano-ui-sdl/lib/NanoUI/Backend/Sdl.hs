@@ -8,6 +8,20 @@ module NanoUI.Backend.Sdl
   , SdlOptions (..)
   , askSdlDebug
   , defaultSdlOptions
+  , FileFilter (..)
+  , FileDialogOptions (..)
+  , FileDialogId (..)
+  , FileDialogResult (..)
+  , defaultFileDialogOptions
+  , openFileDialog
+  , saveFileDialog
+  , openFolderDialog
+  , pollFileDialog
+  , cancelFileDialog
+  , askOpenFileDialog
+  , askSaveFileDialog
+  , askOpenFolderDialog
+  , pollFileDialogUi
   , newSdlContext
   , NanoUIFont (..)
   , runSdlApp
@@ -57,6 +71,22 @@ import NanoUI.Sdl.Font
   , withUtf8
   )
 import NanoUI.Sdl.Window (RgbaImage (..), SdlEnv (..), SdlOptions (..), defaultSdlOptions, saveScreenshot, syncDisplay, withSdl, withSdlBench)
+import NanoUI.Sdl.Dialog
+  ( FileDialogId (..)
+  , FileDialogOptions (..)
+  , FileDialogResult (..)
+  , FileFilter (..)
+  , askOpenFileDialog
+  , askOpenFolderDialog
+  , askSaveFileDialog
+  , defaultFileDialogOptions
+  , openFileDialog
+  , openFolderDialog
+  , pollFileDialog
+  , cancelFileDialog
+  , pollFileDialogUi
+  , saveFileDialog
+  )
 import NanoUI.Sdl.NanoUIFont (NanoUIFont (..))
 import NanoUI.Testing (Context, registerImage, runEff, withTheme)
 

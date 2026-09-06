@@ -71,6 +71,7 @@ import NanoUI.Sdl.Font.Resolve
   )
 import NanoUI.Sdl.NanoUIFont (NanoUIFont (..))
 import NanoUI.Sdl.Debug (SdlDebugSampler, newSdlDebugSampler)
+import NanoUI.Sdl.Dialog.Types (DialogState (..), clearDialogState, newDialogState)
 import NanoUI.Sdl.Image (ImageAtlas, destroyImageAtlas, newImageAtlas)
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
@@ -182,6 +183,7 @@ data SdlEnv = SdlEnv
   , sdlCachedMonoFm :: !(IORef FontMetrics)
   , sdlCachedCtx :: !(IORef Context)
   , sdlFontCache :: !SdlFontCache
+  , sdlDialogState :: !DialogState
   }
 
 defaultWindowSize :: Size
@@ -375,6 +377,7 @@ startSdlWindow ctx title w h flags bench vsync continuous fontSource monoSource 
             fail "SDL_SetRenderScale failed"
           unless bench $ void $ setRenderVSync ren vsync
           when (not bench) $ void $ startTextInputSafe win
+          dialogState <- newDialogState
           pure
             SdlEnv
               { sdlWindow = win
@@ -396,6 +399,7 @@ startSdlWindow ctx title w h flags bench vsync continuous fontSource monoSource 
               , sdlCachedMonoFm = cachedMonoFm
               , sdlCachedCtx = cachedCtx
               , sdlFontCache = fontCache
+              , sdlDialogState = dialogState
               }
   ctxMeasured <- readIORef (sdlCachedCtx env)
   let ctx' = withSdlClipboard ctxMeasured
@@ -405,6 +409,7 @@ startSdlWindow ctx title w h flags bench vsync continuous fontSource monoSource 
 
 stopSdlWindow :: Bool -> SdlEnv -> IO ()
 stopSdlWindow bench env = do
+  clearDialogState (sdlDialogState env)
   (tex, _, _, _) <- readIORef (sdlRetain env)
   retainDestroy tex
   destroyCursors (sdlCursors env)
