@@ -1,19 +1,51 @@
-{-# LANGUAGE OverloadedStrings #-}
+-- | nano-ui widget cookbook.
+--
+-- The whole showcase is one function, 'demoUi'. Every tab is a different
+-- widget family; jump to the family you care about.
+--
+-- Every interactive widget follows the same immediate-mode shape:
+--
+-- @
+--   (resp, newVal) <- widget label currentVal   -- draw it, get what changed
+--   when (respClicked resp) (doSomething)       -- react to gestures
+--   setX newVal                                 -- write it back to state
+-- @
+--
+-- The widget's value outlives the frame only because you persist it. State
+-- lives in hooks created by the @use*@ functions. Hooks must be called in the
+-- same order every frame, so all of them sit together at the top of 'demoUi'
+-- — even for tabs that are currently hidden.
+--
+-- Style is expressed as layout-style functions threaded through the container
+-- widget: columnWith (padAll 6 . gap 8 . fillW) $...  Text widgets compose
+-- font styles the same way (fontBold, fontSize n, fontMuted, ...).
+--
+-- Families, by tab:
+--
+--   * Controls     — clickButton, checkbox, slider, select, boundedSelect,
+--                    boundedRadioFieldset, colorPicker, textInput, textArea,
+--                    button + tooltip, contextMenu, file dialogs, dropZone,
+--                    progressBar
+--   * Typography   — label / labelEx + the @font*@ style combinators
+--   * List         — tree, searchField
+--   * Table        — tableCfg (needs useTableSort)
+--   * Panes        — paneGrid
+--   * Plots        — plot, barChart, areaChart, diagram (data at the bottom)
+--   * Diagnostics  — debug readouts from the SDL backend
+--
+-- The entry point is 'main' (§1) with a small CLI; the argument plumbing is the
+-- last section of this file. The automated UI test lives in its own module,
+-- "SdlSelftest".
 
 module SdlDemo
     ( main
     , demoImages
     , demoUi
-    , DemoTab (..)
-    , DemoTheme (..)
     ) where
 
 import Control.Monad (unless, void, when)
-import Data.Char (isDigit)
-import Data.Foldable (foldlM, for_)
-import Data.List (maximumBy, minimumBy)
+import Data.Foldable (for_)
 import Data.Maybe (fromMaybe, listToMaybe)
-import Data.Ord (comparing)
 import Data.Primitive.SmallArray (SmallArray, smallArrayFromList)
 import Data.Word (Word64)
 import Effectful (Eff, type (:>))
@@ -32,20 +64,10 @@ import Diagrams.Prelude
   )
 import NanoUI
 import NanoUI.Backend.Sdl
+import NanoUI.Context (startAnimation)
 import NanoUI.Debug (CoreDebugSnapshot (..), formatCoreRtsRows)
-import NanoUI.Context (ctxResolveFont, ctxResolveMeasure, startAnimation)
-import NanoUI.Monad (askContext, askInput)
 import NanoUI.Diagrams
-import NanoUI.Testing (Context, collectOverlayTextSpans, collectTextSpans, registerImage)
-import NanoUI.Testing.Harness
-  ( findExact
-  , findHeader
-  , findRightmost
-  , hasText
-  , requireSpan
-  , spanLabel
-  )
-import NanoUI.Testing.Harness qualified as Harness
+import NanoUI.Monad (askContext, askInput)
 import System.Console.GetOpt
   ( ArgDescr (NoArg, ReqArg)
   , ArgOrder (Permute)
@@ -59,63 +81,20 @@ import qualified Data.ByteString as BS
 import qualified Data.Text as T
 import qualified Data.Text.Read as T.Read
 import qualified Data.Vector as V
+import qualified SdlSelftest
 
-data DemoConfig = DemoConfig
-  { cfgVsync :: !Bool
-  , cfgContinuous :: !Bool
-  , cfgFullscreen :: !Bool
-  , cfgBorderless :: !Bool
-  , cfgAlwaysOnTop :: !Bool
-  , cfgWidth :: !(Maybe Float)
-  , cfgHeight :: !(Maybe Float)
-  , cfgHelp :: !Bool
-  }
+------------------------------------------------------------------------------
+-- §1  App entry (main)
+------------------------------------------------------------------------------
 
-defaultDemoConfig :: DemoConfig
-defaultDemoConfig =
-  DemoConfig
-    { cfgVsync = True
-    , cfgContinuous = False
-    , cfgFullscreen = False
-    , cfgBorderless = False
-    , cfgAlwaysOnTop = False
-    , cfgWidth = Nothing
-    , cfgHeight = Nothing
-    , cfgHelp = False
-    }
-
-readMaybeFloat :: String -> Maybe Float
-readMaybeFloat s = case reads s of
-  [(x, "")] -> Just x
-  _ -> Nothing
-
-options :: [OptDescr (DemoConfig -> DemoConfig)]
-options =
-  [ Option ['v'] ["vsync"] (ReqArg (\s cfg -> cfg { cfgVsync = parseBool s }) "BOOL") "Enable or disable vsync (true/false, default: true)"
-  , Option ['c'] ["continuous"] (NoArg (\cfg -> cfg { cfgContinuous = True, cfgVsync = False })) "Continuous unthrottled rendering (disables vsync)"
-  , Option ['b'] ["benchmark"] (NoArg (\cfg -> cfg { cfgContinuous = True, cfgVsync = False })) "Benchmark mode: continuous rendering with vsync disabled"
-  , Option ['f'] ["fps"] (NoArg (\cfg -> cfg { cfgContinuous = True, cfgVsync = False })) "Show uncapped FPS (continuous, vsync false)"
-  , Option ['F'] ["fullscreen"] (NoArg (\cfg -> cfg { cfgFullscreen = True })) "Launch window in fullscreen mode"
-  , Option [] ["borderless"] (NoArg (\cfg -> cfg { cfgBorderless = True })) "Launch borderless window"
-  , Option ['t'] ["always-on-top"] (NoArg (\cfg -> cfg { cfgAlwaysOnTop = True })) "Keep window always on top"
-  , Option ['W'] ["width"] (ReqArg (\s cfg -> cfg { cfgWidth = readMaybeFloat s }) "PX") "Initial window width in pixels (default: 1280)"
-  , Option ['H'] ["height"] (ReqArg (\s cfg -> cfg { cfgHeight = readMaybeFloat s }) "PX") "Initial window height in pixels (default: 800)"
-  , Option ['h', '?'] ["help"] (NoArg (\cfg -> cfg { cfgHelp = True })) "Show help and command-line options"
-  ]
-
-parseBool :: String -> Bool
-parseBool s = s `elem` ["true", "True", "1"]
-
-parseArgs :: [String] -> DemoConfig
-parseArgs argv =
-  case getOpt Permute options argv of
-    (fs, _, _) -> foldl' (flip id) defaultDemoConfig fs
-
+-- | Run @cabal run -fsdl nano-ui-sdl-demo@ for the windowed app, or
+-- @cabal run -fsdl nano-ui-sdl-demo -- --selftest@ for the headless UI test
+-- (defined in "SdlSelftest").
 main :: IO ()
 main = do
   args <- getArgs
   if "--selftest" `elem` args
-    then selftest
+    then SdlSelftest.selftest demoImages demoUi
     else do
       let cfg = parseArgs args
       if cfgHelp cfg
@@ -140,8 +119,32 @@ main = do
               }
             demoUi
 
-------------------------------------------------------------------
+------------------------------------------------------------------------------
+-- §2  Assets & shared look
+------------------------------------------------------------------------------
 
+-- | Three 32x32 images registered with the SDL context (see the Gallery card
+-- and the SdlSelftest image check). Pixel data is at the very bottom.
+demoImages :: SmallArray RgbaImage
+demoImages =
+  smallArrayFromList
+    [ RgbaImage (ImageId 1) 32 32 swatchPixels
+    , RgbaImage (ImageId 2) 32 32 checkerPixels
+    , RgbaImage (ImageId 3) 32 32 stripePixels
+    ]
+
+-- | Demo accent used across the state readout and pane headers.
+demoAccent :: Color
+demoAccent = colorRGBA 204 102 102 255
+
+-- Spacing rhythm for the demo cards and columns.
+gapLayout, gapInline, gapMicro, gapText :: Float
+gapLayout = 6
+gapInline = 12
+gapMicro = 6
+gapText = 4
+
+-- | The tabbed card in the right column; each tab is a widget family.
 data DemoTab
   = Controls
   | Typography
@@ -152,6 +155,7 @@ data DemoTab
   | Diagnostics
   deriving (Bounded, Enum, Eq, Ord, Read, Show)
 
+-- | Theme choices for the Controls-tab theme pickers.
 data DemoTheme
   = ThemeDefault
   | TomorrowNightMin
@@ -171,74 +175,68 @@ themeForChoice TomorrowNightMin = tomorrowNightMinDarkTheme
 themeForChoice TomorrowLight = tomorrowMinLightTheme
 themeForChoice TomorrowMidnightMin = tomorrowMidnightMinDarkTheme
 
-------------------------------------------------------------------
+------------------------------------------------------------------------------
+-- §3  The showcase UI
+------------------------------------------------------------------------------
 
-demoImages :: SmallArray RgbaImage
-demoImages =
-  smallArrayFromList
-    [ RgbaImage (ImageId 1) 32 32 swatchPixels
-    , RgbaImage (ImageId 2) 32 32 checkerPixels
-    , RgbaImage (ImageId 3) 32 32 stripePixels
-    ]
-
-demoAccent :: Color
-demoAccent = colorRGBA 204 102 102 255
-
--- Spacing scale for demo layout
-gapLayout :: Float
-gapLayout = 6
-
-gapInline :: Float
-gapInline = 12
-
-gapMicro :: Float
-gapMicro = 6
-
-gapText :: Float
-gapText = 4
-
+-- | The whole app. Composition, top to bottom:
+--   1. state hooks          every frame, fixed order (see module header)
+--   2. toolbar              brand, live FPS, OK / Cancel / About / Debug
+--   3. two-column body      left: live state + gallery; right: tabbed demos
+--   4. overlays             Debug window + About modal
 demoUi :: NanoUI ()
 demoUi = do
-  (click, setClick) <- useText ""
+  ---------------------------------------------------------------- hooks ---
+  -- Toolbar / overlays.
+  (click, setClick) <- useText "" -- label of the last button / menu item clicked
   (aboutOpen, setAbout) <- useFlag False
   (debugOpen, setDebug) <- useFlag False
-  (checked, setChecked) <- useFlag False
-  (vol, setVol) <- useText "50"
-  (quality, setQuality) <- useText "Medium"
-  (accentHex, setAccent) <- useText (colorPickerToHex demoAccent)
-  (themeName, setThemeName) <- useText (themeDisplayName TomorrowNightMin)
-  (themeRadio, setThemeRadio) <- useText (themeDisplayName ThemeDefault)
-  (name, setName) <- useText ""
-  (notes, setNotes) <- useText ""
-  (searchQuery, setSearchQuery) <- useText ""
-  (peopleMatches, setPeopleMatches) <- useState demoPeople
-  (treeSel, setTreeSel) <- useText "0"
-  (tableSortVal, setTableSort) <- useTableSort (SortCol 0 SortAsc)
-  (sampleText, setSampleText) <- useText "The quick brown fox jumps over the lazy dog"
-  (typeSize, setTypeSize) <- useFloat 20.0
-  (typeBold, setTypeBold) <- useFlag False
-  (typeItalic, setTypeItalic) <- useFlag True
-  (typeUnderline, setTypeUnderline) <- useFlag False
-  (typeStrike, setTypeStrike) <- useFlag False
-  (openPath, setOpenPath) <- useText ""
-  (savePath, setSavePath) <- useText ""
-  (folderPath, setFolderPath) <- useText ""
+  -- Controls tab.
+  (checked, setChecked) <- useFlag False -- checkbox
+  (vol, setVol) <- useText "50" -- slider, as text
+  (quality, setQuality) <- useText "Medium" -- select
+  (accentHex, setAccent) <- useText (colorPickerToHex demoAccent) -- colorPicker
+  (themeName, setThemeName) <- useText (themeDisplayName TomorrowNightMin) -- boundedSelect
+  (themeRadio, setThemeRadio) <- useText (themeDisplayName ThemeDefault) -- boundedRadioFieldset
+  (name, setName) <- useText "" -- textInput
+  (notes, setNotes) <- useText "" -- textArea
+  (dropLog, setDropLog) <- useText "" -- dropZone result, multi-line
+  (dropHovering, setDropHovering) <- useFlag False -- drag-over state
+  -- File dialog handles; results land in the paths below via useFileDialog.
   (openDlg, setOpenDlg) <- useState (Nothing :: Maybe FileDialogId)
   (saveDlg, setSaveDlg) <- useState (Nothing :: Maybe FileDialogId)
   (folderDlg, setFolderDlg) <- useState (Nothing :: Maybe FileDialogId)
+  (openPath, setOpenPath) <- useText ""
+  (savePath, setSavePath) <- useText ""
+  (folderPath, setFolderPath) <- useText ""
   useFileDialog openDlg setOpenDlg $ \paths ->
     setOpenPath (T.intercalate ", " (map T.pack paths))
   useFileDialog saveDlg setSaveDlg $ \paths ->
     setSavePath (maybe "" T.pack (listToMaybe paths))
   useFileDialog folderDlg setFolderDlg $ \paths ->
     setFolderPath (maybe "" T.pack (listToMaybe paths))
-  (dropLog, setDropLog) <- useText ""
-  (dropHovering, setDropHovering) <- useFlag False
-  (showPaneHeaders, setShowPaneHeaders) <- useFlag True
+  -- List tab.
+  (searchQuery, setSearchQuery) <- useText "" -- committed searchField value
+  (peopleMatches, setPeopleMatches) <- useState demoPeople -- filtered rows
+  (treeSel, setTreeSel) <- useText "0" -- tree selection index
+  -- Table tab.
+  (tableSortVal, setTableSort) <- useTableSort (SortCol 0 SortAsc)
+  -- Panes tab.
+  (showPaneHeaders, setShowPaneHeaders) <- useFlag True -- pane headers on/off
+  -- Typography tab.
+  (sampleText, setSampleText) <- useText "The quick brown fox jumps over the lazy dog"
+  (typeSize, setTypeSize) <- useFloat 20.0
+  (typeBold, setTypeBold) <- useFlag False
+  (typeItalic, setTypeItalic) <- useFlag True
+  (typeUnderline, setTypeUnderline) <- useFlag False
+  (typeStrike, setTypeStrike) <- useFlag False
+  -- Diagnostics tab: last raw drop event (files/text/paths).
   (dropRaw, setDropRaw) <- useText ""
   rawInp <- askInput
   let rawDrop = T.intercalate " | " [T.pack (show (dropEventType ev)) <> " " <> dropEventData ev | ev <- V.toList (inputDrops rawInp)]
   when (not (T.null rawDrop)) (setDropRaw rawDrop)
+
+  -------------------------------------------------------------- toolbar ---
   scrollWith (tight . grow) $
     columnWith (padAll 6 . gap gapLayout . fillW) $ do
       panelWith (padXY 14 10 . gap gapInline . fillW) $
@@ -247,6 +245,7 @@ demoUi = do
             heading "nano-ui"
             muted "SDL3 demo"
           flex
+          -- Live frame stats + the shared header buttons.
           snap <- askSdlDebug
           let c = dbgCore snap
               fpsText =
@@ -259,7 +258,12 @@ demoUi = do
           clickButton "Cancel" (setClick "Cancel")
           clickButton "About" (setAbout True)
           clickButton "Debug" (setDebug (not debugOpen))
+
+      ----------------------------------------------------------- body ----
       responsiveRowCol 720 (tight . gap gapLayout . fillW $ defaultLayout) $ do
+        -- Left: a live readout of every hook value above. Tweak a widget on the
+        -- right and watch its line update — instant confirmation the write-back
+        -- idiom worked.
         columnWith (tight . gap gapLayout . fillW) $ do
           card $ do
             heading "State"
@@ -284,6 +288,7 @@ demoUi = do
             kv "Dropped" (orDash (T.take 80 (firstDropLine dropLog)))
           card $ do
             heading "Gallery"
+            -- Images registered from demoImages.
             rowWith (tight . gap gapInline . fillW) $ do
               thumb (ImageId 1) "Swatch"
               thumb (ImageId 2) "Checker"
@@ -291,8 +296,14 @@ demoUi = do
             sep
             muted "Click widgets or type in Name or Notes."
             muted "Esc closes About, then quits."
+
+        -- Right: the tabbed widget demos. Each tab body below is one widget
+        -- family; its state hooks all live at the top of demoUi.
         card $ do
           boundedTabs Controls (T.pack . show) $ \case
+            ----------------------------------------------- Controls ---------
+            -- Form widgets. The returned value is stored back through the hook;
+            -- the State card on the left then shows it.
             Controls -> do
               heading "Controls"
               (_, cVal) <- checkbox "Feature" False
@@ -304,7 +315,7 @@ demoUi = do
               setQuality (qualities !! qualityIdx)
               (_, aVal) <- colorPicker "Accent" demoAccent
               setAccent (colorPickerToHex aVal)
-              (_, tVal) <- boundedSelect "Theme" TomorrowNightMin themeDisplayName
+              (_, tVal) <- boundedSelect "Theme" ThemeDefault themeDisplayName
               setThemeName (themeDisplayName tVal)
               setUiTheme (themeForChoice tVal)
               (_, trVal) <- boundedRadioFieldset "Theme (radio)" ThemeDefault themeDisplayName
@@ -314,6 +325,7 @@ demoUi = do
               (_, notesVal) <- textArea "Notes" "Edit me.\nSecond line."
               setNotes notesVal
               sep
+              -- Popups & menus: act on respClicked of the item you want.
               heading "Popups & Menus"
               rowWith (tight . gap gapInline . fillW) $ do
                 btnTip <- button "Hover for Tooltip"
@@ -331,6 +343,8 @@ demoUi = do
                   when (respClicked copy) (setClick "Copy")
                   when (respClicked paste) (setClick "Paste")
               sep
+              -- File dialogs: ask for a modal dialog handle, store it, and poll
+              -- it every frame via useFileDialog (defined below).
               heading "File Dialogs"
               rowWith (tight . gap gapInline . fillW) $ do
                 openBtn <- button "Open File…"
@@ -346,6 +360,8 @@ demoUi = do
                   mdid <- askOpenFolderDialog defaultFileDialogOptions
                   setFolderDlg mdid
               sep
+              -- Drag & drop: dropZone returns a target; onDrop reads its files
+              -- and texts. dropHovering mirrors the hover state for styling.
               heading "Drag & Drop"
               muted "Drag a file or highlighted text from another app onto the zone."
               (_, _, dropTgt) <-
@@ -372,16 +388,22 @@ demoUi = do
               when (dropHovered dropTgt && not dropHovering) (setDropHovering True)
               when (not (dropHovered dropTgt) && dropHovering) (setDropHovering False)
               sep
+              -- Progress: a plain response-driven bar. startAnimation drives
+              -- the value between 0 and 1 over 1s for a smooth loop.
               heading "Progress"
               muted "A single rounded bar, smoothly oscillating 0–100%."
               ctx <- askContext
               now <- uiIO (realToFrac <$> getMonotonicTime)
               progResp <- progressBar (0.5 + 0.5 * sin (2 * pi * now / 6))
               uiIO $ startAnimation ctx (respId progResp) 0 1 1e9
+
+            --------------------------------------------- Typography ---------
             Typography -> do
               heading "Typography & Font Styling"
               muted "Font sizing, variable weights, synthetic slant, and text decorations."
               sep
+              -- Live playground: type in the box, flip toggles, drag the size
+              -- slider and watch the composed font style update the preview.
               heading "Live Playground"
               rowWith (tight . gap gapInline . fillW) $ do
                 (_, tVal) <- textInput "Preview text" sampleText
@@ -399,6 +421,7 @@ demoUi = do
                 (_, szVal) <- slider "Size" 12 40 typeSize
                 setTypeSize szVal
                 void $ labelEx (tight . fontMono . fontMuted $ defaultLayout) (T.pack (printf "%.0f px" szVal))
+              -- Font styles are ordinary style combinators; fold the toggles in.
               let applyWeight = if typeBold then fontBold else id
                   applyItalic = if typeItalic then fontItalic else id
                   applyDeco
@@ -412,75 +435,18 @@ demoUi = do
                 void $ labelWith customStyle previewTxt
               sep
               heading "Type Scale"
-              columnWith (tight . gap gapMicro . fillW) $ do
-                rowWith (tight . gap gapInline . alignMid . fillW) $ do
-                  void $ labelEx (tight . fixedW 60 . fontMono . fontMuted $ defaultLayout) "32px"
-                  void $ labelWith (fontSize 32 . fontBold) "Display Headline"
-                rowWith (tight . gap gapInline . alignMid . fillW) $ do
-                  void $ labelEx (tight . fixedW 60 . fontMono . fontMuted $ defaultLayout) "24px"
-                  void $ labelWith (fontSize 24 . fontSemiBold) "Page Section Title"
-                rowWith (tight . gap gapInline . alignMid . fillW) $ do
-                  void $ labelEx (tight . fixedW 60 . fontMono . fontMuted $ defaultLayout) "18px"
-                  void $ labelWith (fontSize 18 . fontMedium) "Card Subtitle & Highlights"
-                rowWith (tight . gap gapInline . alignMid . fillW) $ do
-                  void $ labelEx (tight . fixedW 60 . fontMono . fontMuted $ defaultLayout) "16px"
-                  void $ labelWith (fontSize 16) "Standard body text (16px base line height)"
-                rowWith (tight . gap gapInline . alignMid . fillW) $ do
-                  void $ labelEx (tight . fixedW 60 . fontMono . fontMuted $ defaultLayout) "12px"
-                  void $ labelWith (fontSize 12 . fontMuted) "Auxiliary caption, footnote, or timestamp"
+              typeScale
               sep
               heading "Weights & Styles"
-              columnWith (tight . gap gapMicro . fillW) $ do
-                rowWith (tight . gap gapInline . fillW) $ do
-                  void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "Light"
-                  void $ labelWith fontLight "Sphinx of black quartz, judge my vow."
-                rowWith (tight . gap gapInline . fillW) $ do
-                  void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "Normal"
-                  void $ label "Sphinx of black quartz, judge my vow."
-                rowWith (tight . gap gapInline . fillW) $ do
-                  void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "Medium"
-                  void $ labelWith fontMedium "Sphinx of black quartz, judge my vow."
-                rowWith (tight . gap gapInline . fillW) $ do
-                  void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "SemiBold"
-                  void $ labelWith fontSemiBold "Sphinx of black quartz, judge my vow."
-                rowWith (tight . gap gapInline . fillW) $ do
-                  void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "Bold"
-                  void $ labelWith fontBold "Sphinx of black quartz, judge my vow."
-                rowWith (tight . gap gapInline . fillW) $ do
-                  void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "ExtraBold"
-                  void $ labelWith fontExtraBold "Sphinx of black quartz, judge my vow."
-                rowWith (tight . gap gapInline . fillW) $ do
-                  void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "Black"
-                  void $ labelWith fontBlack "Sphinx of black quartz, judge my vow."
-                rowWith (tight . gap gapInline . fillW) $ do
-                  void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "Italic"
-                  void $ labelWith fontItalic "Slanted synthetic italic font style."
-                rowWith (tight . gap gapInline . fillW) $ do
-                  void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "Underline"
-                  void $ labelWith fontUnderline "Underlined emphasis and interactive links."
-                rowWith (tight . gap gapInline . fillW) $ do
-                  void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "Strike"
-                  void $ labelWith fontStrike "Completed tasks and deprecated pricing."
-                rowWith (tight . gap gapInline . fillW) $ do
-                  void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "Both"
-                  void $ labelWith (fontUnderline . fontStrike) "Both underline and strikethrough lines."
+              weightsStyles
               sep
               heading "Color & Highlights"
-              columnWith (tight . gap gapMicro . fillW) $ do
-                rowWith (tight . gap gapInline . fillW) $ do
-                  void $ labelWith (fontBold . fontColor (colorRGBA 224 108 117 255)) "Crimson Red"
-                  void $ labelWith (fontBold . fontColor (colorRGBA 152 195 121 255)) "Emerald Green"
-                  void $ labelWith (fontBold . fontColor (colorRGBA 229 192 123 255)) "Amber Gold"
-                  void $ labelWith (fontBold . fontColor (colorRGBA 86 182 194 255)) "Glacier Cyan"
-                  void $ labelWith (fontBold . fontColor (colorRGBA 198 120 221 255)) "Orchid Violet"
-                rowWith (tight . gap gapInline . fillW . alignMid) $ do
-                  muted "Sale example:"
-                  void $ labelWith (fontStrike . fontMuted) "$129.00"
-                  void $ labelWith (fontSize 18 . fontBold . fontColor (colorRGBA 152 195 121 255)) "$79.00"
-                  void $ labelWith (fontSize 12 . fontItalic . fontColor (colorRGBA 229 192 123 255)) "(Save 38%)"
-              sep
+              colorHighlights
+
+            ----------------------------------------------------- List ---------
             List -> do
               heading "Tree"
+              -- tree: pass a selection index, get the clicked one back.
               let sel0 =
                     case T.Read.decimal treeSel of
                       Right (n, _) -> n
@@ -525,10 +491,14 @@ demoUi = do
                     else
                       for_ peopleMatches $ \p ->
                         void $ labelEx (tight . fillW $ defaultLayout) (personRowLabel p)
+
+            ---------------------------------------------------- Table ---------
             Table -> do
               heading "Table"
               muted "Click a header to sort. Drag a header to reorder."
               muted "Drag a header edge to resize. Right-click a header to hide."
+              -- tableCfg re-renders every frame; keep the sort state in a hook
+              -- (useTableSort) and mirror changes back into it.
               tableResp <-
                 tableCfg
                   demoTableCfg
@@ -543,6 +513,8 @@ demoUi = do
               kv "Sorted by" (tableColumnLabel nextSort)
               kv "Order" (tableSortDirText nextSort)
               kv "Hidden" (tableHiddenLabel (tableHiddenIndices tableResp))
+
+            ---------------------------------------------------- Panes ---------
             Panes -> do
               heading "Pane Grid"
               muted "Drag a divider to resize. Drag a pane onto another pane to reorder:"
@@ -557,9 +529,13 @@ demoUi = do
               kv "Panes" (T.pack (show (pgrPaneCount pgr)))
               kv "Focused" (T.pack (show (pgrFocusedPane pgr)))
               kv "Maximized" (T.pack (show (pgrMaximizedPane pgr)))
+
+            ------------------------------------------------ Plots ---------
             Plots -> do
               heading "Plots"
               muted "Auto ticks, shared scales, and decimation."
+              -- chart data / axis configs are defined in the §Plots section
+              -- near the bottom of this file.
               columnWith (tight . gap gapLayout . fillW) $ do
                 columnWith (tight . gap gapMicro . fillW) $ do
                   muted "Sine + cosine"
@@ -577,6 +553,8 @@ demoUi = do
                   muted "Drawing"
                   ps <- uiPlotStyle
                   void $ diagram (fillW $ defaultLayout {layoutMaxH = 200}) (drawingSample ps)
+
+            ------------------------------------------- Diagnostics ---------
             Diagnostics -> do
               heading "Diagnostics"
               snap <- askSdlDebug
@@ -593,10 +571,15 @@ demoUi = do
               kv "Last drop event" (orDash dropRaw)
               kv "Evaluation" "Zero-Cost Inactive Tabs"
               kv "State" "SrcLoc Preserved"
+
+  -------------------------------------------------------------- overlays ---
+  -- Debug window: a plain draggable window opened by the toolbar toggle.
   when debugOpen $ do
     snap <- askSdlDebug
     (win, _) <- window True "Debug" (debugBody snap)
     onClick win (setDebug False)
+  -- About modal: modal gives (response, _); clicking anywhere or pressing Esc
+  -- fires onClick on the response, which closes it.
   (aboutResp, _) <-
     modal aboutOpen "About" $ do
       heading "nano-ui"
@@ -606,6 +589,282 @@ demoUi = do
         flex
         clickButton "Close" (setAbout False)
   onClick aboutResp (setAbout False)
+
+------------------------------------------------------------------------------
+-- §4  Controls-tab helpers
+------------------------------------------------------------------------------
+
+-- | Poll a pending dialog handle; on completion clear it and hand the chosen
+-- paths to the caller. Anything other than 'FileDialogPending' dismisses the
+-- handle, so each result is consumed exactly once.
+useFileDialog ::
+  Maybe FileDialogId ->
+  (Maybe FileDialogId -> NanoUI ()) ->
+  ([FilePath] -> NanoUI ()) ->
+  NanoUI ()
+useFileDialog mdid clear onPaths =
+  for_ mdid $ \did ->
+    pollFileDialogUi did >>= \case
+      FileDialogPending -> pure ()
+      FileDialogSelected paths -> onPaths paths >> clear Nothing
+      _done -> clear Nothing
+
+onOff :: Bool -> T.Text
+onOff True = "on"
+onOff False = "off"
+
+-- | Dashed-out empty values in the State readout.
+orDash :: T.Text -> T.Text
+orDash s = if T.null s then "-" else s
+
+-- | First line of a multi-line log, for compact summary rows.
+firstDropLine :: T.Text -> T.Text
+firstDropLine = maybe "" id . listToMaybe . T.lines
+
+-- | Image card in the Gallery: the caption is muted under the sprite.
+thumb :: ImageId -> T.Text -> NanoUI ()
+thumb iid caption =
+  columnWith (tight . gap gapMicro) $ do
+    image_ (fixedWH 88 88 defaultLayout) iid
+    muted caption
+
+------------------------------------------------------------------------------
+-- §5  Typography demo data
+------------------------------------------------------------------------------
+
+-- | Static gallery rows; used by the Typography tab. Demonstrates the @font*@
+-- style combinators on plain labels.
+typeScale :: NanoUI ()
+typeScale =
+  columnWith (tight . gap gapMicro . fillW) $ do
+    rowWith (tight . gap gapInline . alignMid . fillW) $ do
+      void $ labelEx (tight . fixedW 60 . fontMono . fontMuted $ defaultLayout) "32px"
+      void $ labelWith (fontSize 32 . fontBold) "Display Headline"
+    rowWith (tight . gap gapInline . alignMid . fillW) $ do
+      void $ labelEx (tight . fixedW 60 . fontMono . fontMuted $ defaultLayout) "24px"
+      void $ labelWith (fontSize 24 . fontSemiBold) "Page Section Title"
+    rowWith (tight . gap gapInline . alignMid . fillW) $ do
+      void $ labelEx (tight . fixedW 60 . fontMono . fontMuted $ defaultLayout) "18px"
+      void $ labelWith (fontSize 18 . fontMedium) "Card Subtitle & Highlights"
+    rowWith (tight . gap gapInline . alignMid . fillW) $ do
+      void $ labelEx (tight . fixedW 60 . fontMono . fontMuted $ defaultLayout) "16px"
+      void $ labelWith (fontSize 16) "Standard body text (16px base line height)"
+    rowWith (tight . gap gapInline . alignMid . fillW) $ do
+      void $ labelEx (tight . fixedW 60 . fontMono . fontMuted $ defaultLayout) "12px"
+      void $ labelWith (fontSize 12 . fontMuted) "Auxiliary caption, footnote, or timestamp"
+
+weightsStyles :: NanoUI ()
+weightsStyles =
+  columnWith (tight . gap gapMicro . fillW) $ do
+    rowWith (tight . gap gapInline . fillW) $ do
+      void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "Light"
+      void $ labelWith fontLight "Sphinx of black quartz, judge my vow."
+    rowWith (tight . gap gapInline . fillW) $ do
+      void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "Normal"
+      void $ label "Sphinx of black quartz, judge my vow."
+    rowWith (tight . gap gapInline . fillW) $ do
+      void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "Medium"
+      void $ labelWith fontMedium "Sphinx of black quartz, judge my vow."
+    rowWith (tight . gap gapInline . fillW) $ do
+      void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "SemiBold"
+      void $ labelWith fontSemiBold "Sphinx of black quartz, judge my vow."
+    rowWith (tight . gap gapInline . fillW) $ do
+      void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "Bold"
+      void $ labelWith fontBold "Sphinx of black quartz, judge my vow."
+    rowWith (tight . gap gapInline . fillW) $ do
+      void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "ExtraBold"
+      void $ labelWith fontExtraBold "Sphinx of black quartz, judge my vow."
+    rowWith (tight . gap gapInline . fillW) $ do
+      void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "Black"
+      void $ labelWith fontBlack "Sphinx of black quartz, judge my vow."
+    rowWith (tight . gap gapInline . fillW) $ do
+      void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "Italic"
+      void $ labelWith fontItalic "Slanted synthetic italic font style."
+    rowWith (tight . gap gapInline . fillW) $ do
+      void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "Underline"
+      void $ labelWith fontUnderline "Underlined emphasis and interactive links."
+    rowWith (tight . gap gapInline . fillW) $ do
+      void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "Strike"
+      void $ labelWith fontStrike "Completed tasks and deprecated pricing."
+    rowWith (tight . gap gapInline . fillW) $ do
+      void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "Both"
+      void $ labelWith (fontUnderline . fontStrike) "Both underline and strikethrough lines."
+
+colorHighlights :: NanoUI ()
+colorHighlights =
+  columnWith (tight . gap gapMicro . fillW) $ do
+    rowWith (tight . gap gapInline . fillW) $ do
+      void $ labelWith (fontBold . fontColor (colorRGBA 224 108 117 255)) "Crimson Red"
+      void $ labelWith (fontBold . fontColor (colorRGBA 152 195 121 255)) "Emerald Green"
+      void $ labelWith (fontBold . fontColor (colorRGBA 229 192 123 255)) "Amber Gold"
+      void $ labelWith (fontBold . fontColor (colorRGBA 86 182 194 255)) "Glacier Cyan"
+      void $ labelWith (fontBold . fontColor (colorRGBA 198 120 221 255)) "Orchid Violet"
+    rowWith (tight . gap gapInline . fillW . alignMid) $ do
+      muted "Sale example:"
+      void $ labelWith (fontStrike . fontMuted) "$129.00"
+      void $ labelWith (fontSize 18 . fontBold . fontColor (colorRGBA 152 195 121 255)) "$79.00"
+      void $ labelWith (fontSize 12 . fontItalic . fontColor (colorRGBA 229 192 123 255)) "(Save 38%)"
+
+------------------------------------------------------------------------------
+-- §6  List & Table demo data
+------------------------------------------------------------------------------
+
+data DemoPerson = DemoPerson
+  { demoPersonName :: !T.Text
+  , demoPersonDept :: !T.Text
+  , demoPersonAge :: !Int
+  , demoPersonCity :: !T.Text
+  , demoPersonRole :: !T.Text
+  }
+  deriving (Eq, Show)
+
+demoPeople :: [DemoPerson]
+demoPeople =
+  [ DemoPerson "David" "Eng" 63 "Austin" "Staff"
+  , DemoPerson "Ava" "Design" 34 "Berlin" "Lead"
+  , DemoPerson "Sonia" "Eng" 12 "Lisbon" "Intern"
+  , DemoPerson "Maya" "Ops" 41 "Tokyo" "Manager"
+  , DemoPerson "Leo" "Design" 28 "Paris" "IC"
+  , DemoPerson "Noah" "Eng" 37 "Seoul" "Staff"
+  , DemoPerson "Iris" "Ops" 19 "Austin" "IC"
+  , DemoPerson "Jules" "Sales" 45 "London" "Manager"
+  , DemoPerson "Priya" "Eng" 31 "Bengaluru" "Lead"
+  , DemoPerson "Chen" "Design" 26 "Shanghai" "IC"
+  , DemoPerson "Omar" "Ops" 52 "Cairo" "Lead"
+  , DemoPerson "Elena" "Sales" 39 "Madrid" "Staff"
+  , DemoPerson "Kai" "Eng" 23 "Oslo" "IC"
+  , DemoPerson "Ruth" "Ops" 47 "Boston" "Staff"
+  ]
+
+-- | Table columns: one headed cell per field.
+colPeople :: Colonnade Headed DemoPerson T.Text
+colPeople =
+  mconcat
+    [ headed "Name" demoPersonName
+    , headed "Dept" demoPersonDept
+    , headed "Age" (T.pack . show . demoPersonAge)
+    , headed "City" demoPersonCity
+    , headed "Role" demoPersonRole
+    ]
+
+demoTableCfg :: TableCfg
+demoTableCfg = defaultTableCfg
+
+-- | Case-folded haystack used to filter 'demoPeople'.
+personSearchText :: DemoPerson -> T.Text
+personSearchText p =
+  T.toCaseFold $
+    T.intercalate
+      " "
+      [ demoPersonName p
+      , demoPersonDept p
+      , demoPersonCity p
+      , demoPersonRole p
+      ]
+
+-- | Filter the people list on a committed search query. Callers memoize the
+-- result (see the Searchable list demo) so the fold is not re-run every frame.
+peopleMatching :: T.Text -> [DemoPerson]
+peopleMatching raw
+  | T.null raw = demoPeople
+  | otherwise =
+      let q = T.toCaseFold raw
+       in filter (\p -> q `T.isInfixOf` personSearchText p) demoPeople
+
+personRowLabel :: DemoPerson -> T.Text
+personRowLabel p =
+  demoPersonName p
+    <> " — "
+    <> demoPersonRole p
+    <> ", "
+    <> demoPersonCity p
+    <> " ("
+    <> T.pack (show (demoPersonAge p))
+    <> ")"
+
+-- | Column names for human-readable sort / hidden readouts.
+demoTableColumnLabels :: [T.Text]
+demoTableColumnLabels = ["Name", "Dept", "Age", "City", "Role"]
+
+tableHiddenLabel :: [Int] -> T.Text
+tableHiddenLabel [] = "none"
+tableHiddenLabel hidden =
+  T.intercalate
+    ", "
+    [ demoTableColumnLabels !! i
+    | i <- hidden
+    , i >= 0 && i < length demoTableColumnLabels
+    ]
+
+tableColumnLabel :: SortCol -> T.Text
+tableColumnLabel s =
+  let idx = sortColIndex s
+   in if idx >= 0 && idx < length demoTableColumnLabels
+        then demoTableColumnLabels !! idx
+        else "-"
+
+tableSortDirText :: SortCol -> T.Text
+tableSortDirText s =
+  case sortColDir s of
+    SortAsc -> "ascending"
+    SortDesc -> "descending"
+
+------------------------------------------------------------------------------
+-- §7  Pane grid demo
+------------------------------------------------------------------------------
+
+demoPaneGridCfg :: (Ui :> es) => Bool -> PaneGridConfig es
+demoPaneGridCfg showHeader =
+  defaultPaneGridConfig
+    { pgLayout = fillW . fixedH 380
+    , pgSpacing = 4
+    , pgMinSize = 60
+    , pgLeeway = 6
+    , pgViewPane = demoPaneView showHeader
+    }
+
+demoPaneTitle :: Word64 -> Bool -> T.Text
+demoPaneTitle pid maximized =
+  "Pane "
+    <> T.pack (show pid)
+    <> if maximized then "  (maximized)" else ""
+
+demoPaneBlurb :: Word64 -> T.Text
+demoPaneBlurb pid = "Contents of " <> T.pack (show pid) <> ". Drag the pane to move or split it."
+
+-- | The header is just the pane's own content, so it is entirely optional:
+-- 'showHeader' 'False' drops it and the pane becomes a bare canvas body. The
+-- whole pane is still a drag handle either way ('pvDraggable'), so a headerless
+-- pane can be grabbed anywhere to reorder it.
+demoPaneHeader :: (Ui :> es) => Word64 -> Bool -> PaneGridCtx es -> Eff es ()
+demoPaneHeader pid maximized pctx =
+  panelWith (padXY 8 5 . fillW) $
+    rowWith (tight . gap 8 . alignMid . fillW) $ do
+      box (fixedWH 3 16 defaultLayout) demoAccent
+      void $ labelWith (tight . fontBold . fontMuted) (demoPaneTitle pid maximized)
+      flex
+      void $ clickButton "+" (void (pgcSplit pctx AxisV))
+      void $ clickButton "=" (void (pgcSplit pctx AxisH))
+      void $ clickButton (if maximized then "R" else "M") (if maximized then pgcRestore pctx else pgcMaximize pctx)
+      void $ clickButton "x" (pgcClose pctx)
+
+demoPaneView :: (Ui :> es) => Bool -> Word64 -> PaneGridCtx es -> Eff es PaneView
+demoPaneView showHeader pid pctx = do
+  let maximized = pgcMaximized pctx
+  columnWith (tight . gap 6 . fillW) $ do
+    when showHeader (demoPaneHeader pid maximized pctx)
+    box (fillW defaultLayout) demoAccent
+    void $ muted (demoPaneBlurb pid)
+  pure
+    PaneView
+      { pvTitle = demoPaneTitle pid maximized
+      , pvDraggable = True
+      , pvDragPick = Nothing
+      }
+
+------------------------------------------------------------------------------
+-- §8  Plots demo data
+------------------------------------------------------------------------------
 
 sineCosineChart :: Chart
 sineCosineChart =
@@ -658,178 +917,9 @@ drawingSample ps =
     <> (circle 0.28 # fc (plotInk ps) # lw none)
     <> (fromVertices [p2 (-0.5, -0.5), p2 (0.5, 0.5)] # lc (plotGrid ps) # lwO 1.5)
 
-onOff :: Bool -> T.Text
-onOff True = "on"
-onOff False = "off"
-
--- | Poll a pending dialog handle; on completion clear it and hand the chosen
--- paths to the caller. Anything other than 'FileDialogPending' dismisses the
--- handle, so each result is consumed exactly once.
-useFileDialog ::
-  Maybe FileDialogId ->
-  (Maybe FileDialogId -> NanoUI ()) ->
-  ([FilePath] -> NanoUI ()) ->
-  NanoUI ()
-useFileDialog mdid clear onPaths =
-  for_ mdid $ \did ->
-    pollFileDialogUi did >>= \case
-      FileDialogPending -> pure ()
-      FileDialogSelected paths -> onPaths paths >> clear Nothing
-      _done -> clear Nothing
-
-orDash :: T.Text -> T.Text
-orDash s = if T.null s then "-" else s
-
--- | First line of a multi-line log, for compact summary rows.
-firstDropLine :: T.Text -> T.Text
-firstDropLine = maybe "" id . listToMaybe . T.lines
-
-data DemoPerson = DemoPerson
-  { demoPersonName :: !T.Text
-  , demoPersonDept :: !T.Text
-  , demoPersonAge :: !Int
-  , demoPersonCity :: !T.Text
-  , demoPersonRole :: !T.Text
-  }
-  deriving (Eq, Show)
-
-colPeople :: Colonnade Headed DemoPerson T.Text
-colPeople =
-  mconcat
-    [ headed "Name" demoPersonName
-    , headed "Dept" demoPersonDept
-    , headed "Age" (T.pack . show . demoPersonAge)
-    , headed "City" demoPersonCity
-    , headed "Role" demoPersonRole
-    ]
-
-demoTableCfg :: TableCfg
-demoTableCfg = defaultTableCfg
-
-demoPaneGridCfg :: (Ui :> es) => Bool -> PaneGridConfig es
-demoPaneGridCfg showHeader =
-  defaultPaneGridConfig
-    { pgLayout = fillW . fixedH 380
-    , pgSpacing = 4
-    , pgMinSize = 60
-    , pgLeeway = 6
-    , pgViewPane = demoPaneView showHeader
-    }
-
-demoPaneTitle :: Word64 -> Bool -> T.Text
-demoPaneTitle pid maximized =
-  "Pane "
-    <> T.pack (show pid)
-    <> if maximized then "  (maximized)" else ""
-
-demoPaneBlurb :: Word64 -> T.Text
-demoPaneBlurb pid = "Contents of " <> T.pack (show pid) <> ". Drag the pane to move or split it."
-
--- | The header is just the pane's own content, so it is entirely optional:
--- 'showHeader' 'False' drops it and the pane becomes a bare canvas body. The
--- whole pane is still a drag handle either way ('pvDraggable'), so a headerless
--- pane can be grabbed anywhere to reorder it.
-demoPaneHeader :: (Ui :> es) => Word64 -> Bool -> PaneGridCtx es -> Eff es ()
-demoPaneHeader pid maximized pctx =
-  panelWith (padXY 8 5 . fillW) $
-    rowWith (tight . gap 8 . alignMid . fillW) $ do
-      box (fixedWH 3 16 defaultLayout) demoAccent
-      void $ labelWith (tight . fontBold . fontMuted) (demoPaneTitle pid maximized)
-      flex
-      void $ clickButton "+" (void (pgcSplit pctx AxisV))
-      void $ clickButton "=" (void (pgcSplit pctx AxisH))
-      void $ clickButton (if maximized then "R" else "M") (if maximized then pgcRestore pctx else pgcMaximize pctx)
-      void $ clickButton "x" (pgcClose pctx)
-
-demoPaneView :: (Ui :> es) => Bool -> Word64 -> PaneGridCtx es -> Eff es PaneView
-demoPaneView showHeader pid pctx = do
-  let maximized = pgcMaximized pctx
-  columnWith (tight . gap 6 . fillW) $ do
-    when showHeader (demoPaneHeader pid maximized pctx)
-    box (fillW defaultLayout) demoAccent
-    void $ muted (demoPaneBlurb pid)
-  pure
-    PaneView
-      { pvTitle = demoPaneTitle pid maximized
-      , pvDraggable = True
-      , pvDragPick = Nothing
-      }
-
-demoPeople :: [DemoPerson]
-demoPeople =
-  [ DemoPerson "David" "Eng" 63 "Austin" "Staff"
-  , DemoPerson "Ava" "Design" 34 "Berlin" "Lead"
-  , DemoPerson "Sonia" "Eng" 12 "Lisbon" "Intern"
-  , DemoPerson "Maya" "Ops" 41 "Tokyo" "Manager"
-  , DemoPerson "Leo" "Design" 28 "Paris" "IC"
-  , DemoPerson "Noah" "Eng" 37 "Seoul" "Staff"
-  , DemoPerson "Iris" "Ops" 19 "Austin" "IC"
-  , DemoPerson "Jules" "Sales" 45 "London" "Manager"
-  , DemoPerson "Priya" "Eng" 31 "Bengaluru" "Lead"
-  , DemoPerson "Chen" "Design" 26 "Shanghai" "IC"
-  , DemoPerson "Omar" "Ops" 52 "Cairo" "Lead"
-  , DemoPerson "Elena" "Sales" 39 "Madrid" "Staff"
-  , DemoPerson "Kai" "Eng" 23 "Oslo" "IC"
-  , DemoPerson "Ruth" "Ops" 47 "Boston" "Staff"
-  ]
-
--- | Case-folded haystack used to filter 'demoPeople'.
-personSearchText :: DemoPerson -> T.Text
-personSearchText p =
-  T.toCaseFold $
-    T.intercalate
-      " "
-      [ demoPersonName p
-      , demoPersonDept p
-      , demoPersonCity p
-      , demoPersonRole p
-      ]
-
--- | Filter the people list on a committed search query. Callers memoize the
--- result (see the Searchable list demo) so the fold is not re-run every frame.
-peopleMatching :: T.Text -> [DemoPerson]
-peopleMatching raw
-  | T.null raw = demoPeople
-  | otherwise =
-      let q = T.toCaseFold raw
-       in filter (\p -> q `T.isInfixOf` personSearchText p) demoPeople
-
-personRowLabel :: DemoPerson -> T.Text
-personRowLabel p =
-  demoPersonName p
-    <> " — "
-    <> demoPersonRole p
-    <> ", "
-    <> demoPersonCity p
-    <> " ("
-    <> T.pack (show (demoPersonAge p))
-    <> ")"
-
-demoTableColumnLabels :: [T.Text]
-demoTableColumnLabels = ["Name", "Dept", "Age", "City", "Role"]
-
-tableHiddenLabel :: [Int] -> T.Text
-tableHiddenLabel [] = "none"
-tableHiddenLabel hidden =
-  T.intercalate
-    ", "
-    [ demoTableColumnLabels !! i
-    | i <- hidden
-    , i >= 0 && i < length demoTableColumnLabels
-    ]
-
-tableColumnLabel :: SortCol -> T.Text
-tableColumnLabel s =
-  let idx = sortColIndex s
-   in if idx >= 0 && idx < length demoTableColumnLabels
-        then demoTableColumnLabels !! idx
-        else "-"
-
-tableSortDirText :: SortCol -> T.Text
-tableSortDirText s =
-  case sortColDir s of
-    SortAsc -> "ascending"
-    SortDesc -> "descending"
+------------------------------------------------------------------------------
+-- §9  Debug window content
+------------------------------------------------------------------------------
 
 debugBody :: SdlDebugSnapshot -> NanoUI ()
 debugBody s =
@@ -888,11 +978,9 @@ displayRows s =
 rtsRows :: SdlDebugSnapshot -> SmallArray (T.Text, T.Text)
 rtsRows s = smallArrayFromList (formatCoreRtsRows (dbgCore s))
 
-thumb :: ImageId -> T.Text -> NanoUI ()
-thumb iid caption =
-  columnWith (tight . gap gapMicro) $ do
-    image_ (fixedWH 88 88 defaultLayout) iid
-    muted caption
+------------------------------------------------------------------------------
+-- §10  Image pixels (RGBA, row-major, 32x32)
+------------------------------------------------------------------------------
 
 swatchPixels, checkerPixels, stripePixels :: BS.ByteString
 swatchPixels =
@@ -932,295 +1020,57 @@ stripePixels =
           else [30, 40, 60, 255]
     ]
 
--- Hidden SDL window: click through demoUi the same path as the interactive demo.
-selftest :: IO ()
-selftest = do
-  ctx0 <- newSdlContext
-  ok <-
-    foldlM
-      ( \acc img ->
-          if acc
-            then
-              registerImage
-                ctx0
-                (rgbaImageId img)
-                (rgbaImageWidth img)
-                (rgbaImageHeight img)
-                (rgbaImagePixels img)
-            else pure False
-      )
-      True
-      demoImages
-  unless ok $ fail "selftest: registerImage failed"
-  withSdl
-    defaultSdlOptions
-      { sdlWindowHidden = True
-      , sdlWindowSize = Size 1280 800
-      , sdlWindowResizable = False
-      }
-    ctx0
-    $ \ctx env -> do
-    (fmNorm16, _) <- ctxResolveFont ctx 16.0 WeightNormal FontStyleNormal FontRegular
-    (fmItal16, _) <- ctxResolveFont ctx 16.0 WeightNormal FontStyleItalic FontRegular
-    (wNorm, _) <- ctxResolveMeasure ctx 16.0 WeightNormal FontStyleNormal FontRegular "Slanted synthetic italic font style."
-    (wItal, _) <- ctxResolveMeasure ctx 16.0 WeightNormal FontStyleItalic FontRegular "Slanted synthetic italic font style."
-    let runNorm = lineWidth fmNorm16 "Slanted synthetic italic font style."
-        runItal = lineWidth fmItal16 "Slanted synthetic italic font style."
-    when (abs (runNorm - wNorm) > 0.01) $
-      fail $ printf "selftest: shaped width mismatch for normal sentence: measure=%.2f, fmRun=%.2f" wNorm runNorm
-    when (abs (runItal - wItal) > 0.01) $
-      fail $ printf "selftest: shaped width mismatch for italic sentence: measure=%.2f, fmRun=%.2f" wItal runItal
-    putStrLn $ printf "MEASURE string: norm=%.1f, ital=%.1f" wNorm wItal
-    let bracketTo :: String -> IO ()
-        bracketTo tag = do
-          (w, _) <- ctxResolveMeasure ctx 20.0 WeightNormal FontStyleNormal FontRegular "To"
-          putStrLn $ printf "  [bracket %s] width(To)@20 = %.1f" tag w
-    bracketTo "start"
-    -- Verify the shaped run path (fmRun / pushText) matches SDL3_ttf string
-    -- measurement.  This catches regressions where per-glyph fallback would
-    -- ignore GPOS kerning for pairs like To, AV, and fi.
-    (fmNorm20, _) <- ctxResolveFont ctx 20.0 WeightNormal FontStyleNormal FontRegular
-    (fmItal20, _) <- ctxResolveFont ctx 20.0 WeightNormal FontStyleItalic FontRegular
-    let checkRun :: String -> FontMetrics -> FontStyle -> String -> IO ()
-        checkRun tag fm st pair = do
-          (wab, _) <- ctxResolveMeasure ctx 20.0 WeightNormal st FontRegular (T.pack pair)
-          let runW = lineWidth fm (T.pack pair)
-          when (abs (runW - wab) > 0.01) $
-            fail $ printf "selftest: %s shaped width mismatch for '%s': measure=%.2f, fmRun=%.2f" tag pair wab runW
-    checkRun "norm" fmNorm20 FontStyleNormal "To"
-    checkRun "ital" fmItal20 FontStyleItalic "To"
-    checkRun "norm" fmNorm20 FontStyleNormal "AV"
-    checkRun "ital" fmItal20 FontStyleItalic "AV"
-    checkRun "norm" fmNorm20 FontStyleNormal "fi"
-    checkRun "ital" fmItal20 FontStyleItalic "fi"
-    let sentence = "The quick brown fox jumps over the lazy dog"
-    putStrLn "--- Kerning queries (Normal vs Italic) ---"
-    let pairs = zip (T.unpack sentence) (drop 1 (T.unpack sentence))
-    for_ pairs $ \(c1, c2) -> do
-      kN <- queryFontKerning env 20.0 WeightNormal FontStyleNormal FontRegular c1 c2
-      kI <- queryFontKerning env 20.0 WeightNormal FontStyleItalic FontRegular c1 c2
-      when (kN /= 0 || kI /= 0) $
-        putStrLn $ printf "Kerning '%c''%c': norm=%d, ital=%d" c1 c2 kN kI
-    putStrLn "--- Pair width probes (string-level GPOS kerning) ---"
-    let kernPairs = [('T', 'o'), ('W', 'e'), ('A', 'V'), ('T', 'a'), ('f', 'i'), ('r', 'y'), ('l', 'y'), ('F', 'o')]
-    for_ kernPairs $ \(a, b) ->
-      for_ [(FontStyleNormal, "norm" :: String), (FontStyleItalic, "ital")] $ \(st, tag) -> do
-        (wa, _) <- ctxResolveMeasure ctx 20.0 WeightNormal st FontRegular (T.singleton a)
-        (wb, _) <- ctxResolveMeasure ctx 20.0 WeightNormal st FontRegular (T.singleton b)
-        (wab, _) <- ctxResolveMeasure ctx 20.0 WeightNormal st FontRegular (T.pack [a, b])
-        putStrLn $ printf "width(%c)=%5.1f width(%c)=%5.1f width(%c%c)=%5.1f kern=%+5.1f [%s]"
-          a wa b wb a b wab (wab - wa - wb) tag
-    bracketTo "after width probes"
-    putStrLn "--- Shaped pair kerning (40pt raw px) ---"
-    let probePairs = [('r', ' '), (' ', 't'), ('e', ' '), (' ', 'l'), ('o', 'v'), ('v', 'e'), ('r', 't'), ('T', 'o'), ('A', 'V'), ('W', 'e'), ('P', 'a'), (' ', 'T'), ('y', ' '), ('f', 'i')]
-    for_ probePairs $ \(a, b) -> do
-      k <- queryFontPairKerning env 40.0 WeightNormal FontStyleNormal FontRegular a b
-      putStrLn $ printf "  pairKern('%c',''%c') = %d" a b k
-    bracketTo "after pairKern"
-    putStrLn "--- Debug pair internals ---"
-    for_ [16.0, 20.0, 24.0, 32.0, 40.0, 64.0] $ \sz -> do
-      putStrLn $ printf "size %.0f:" sz
-      debugFontPair env sz WeightNormal FontStyleNormal FontRegular 'T' 'o'
-    putStrLn "--- Shaped layout dump ---"
-    dumpFontLayout env 40.0 WeightNormal FontStyleNormal FontRegular "r the ovt"
-    void $ saveFontRenderText env 20.0 WeightNormal FontStyleItalic FontRegular sentence
-      "C:\\Users\\zach\\.gemini\\antigravity\\brain\\72382fd0-e1b2-4a85-8ac3-abd001b9f58d\\sdl_native_italic.bmp"
-    let idle =
-          emptyInput
-            { inputWindowSize = Size 1280 800
-            , inputMousePos = V2 640 400
-            }
-    (ctx', base) <- syncDisplay ctx env idle
-    void (sdlDrawFrame ctx' demoUi env base True)
-    spans0 <- collectTextSpans ctx'
-    unless (hasText "Feature" spans0) $ fail "selftest: Controls body missing"
-    clickTab ctx' env base "Table"
-    spansTable <- collectTextSpans ctx'
-    unless (hasText "David" spansTable) $ fail "selftest: table body missing after Table tab"
-    hdr <- requireSpan "selftest: Name header" (findHeader "Name" spansTable)
-    clickPos ctx' env base hdr
-    spansSorted <- collectTextSpans ctx'
-    unless (hasText "descending" spansSorted) $ fail "selftest: header click did not toggle sort"
-    dept <- requireSpan "selftest: Dept header" (findHeader "Dept" spansSorted)
-    dragPos ctx' env base dept (V2 (v2X dept + 180) (v2Y dept))
-    spansDrag <- collectTextSpans ctx'
-    unless (hasText "Sonia" spansDrag) $ fail "selftest: table missing after header drag"
-    clickTab ctx' env base "List"
-    spansTree <- collectTextSpans ctx'
-    unless (hasText "src" spansTree) $ fail "selftest: tree missing after List tab"
-    readme <- requireSpan "selftest: README.md" (findExact "README.md" spansTree)
-    clickPos ctx' env base readme
-    spansSel <- collectTextSpans ctx'
-    unless (hasText "7" spansSel) $ fail "selftest: tree click did not select README.md"
-    clickTab ctx' env base "Typography"
-    spansType <- collectTextSpans ctx'
-    unless (hasText "Live Playground" spansType) $ fail "selftest: typography missing after Typography tab"
-    drawOnce ctx' env (base {inputScroll = V2 0 (-350)})
-    drawOnce ctx' env base
-    void $ saveScreenshot env "C:\\Users\\zach\\.gemini\\antigravity\\brain\\72382fd0-e1b2-4a85-8ac3-abd001b9f58d\\typography_styles.bmp"
-    sizeSpan <- requireSpan "selftest: Size slider" (findRightmost "Size" spansType)
-    for_ [20, 60, 100, 140, 180, 50, 120, -60, -100, 0 :: Float] $ \dx -> do
-      dragPos ctx' env base sizeSpan (V2 (v2X sizeSpan + dx) (v2Y sizeSpan))
-    spansTypeAfter <- collectTextSpans ctx'
-    unless (hasText "Live Playground" spansTypeAfter) $ fail "selftest: typography missing after size changes"
-    clickTab ctx' env base "Panes"
-    spansPane0 <- collectTextSpans ctx'
-    unless (hasText "Pane 1" spansPane0) $ fail "selftest: pane grid missing after Panes tab"
-    let paneCount ss =
-          length
-            [ ()
-            | (_, txt, _, _, _) <- ss
-            , let l = spanLabel txt
-            , "Pane " `T.isPrefixOf` l
-            , let rest = T.drop 5 l
-            , not (T.null rest)
-            , T.all isDigit (T.takeWhile (/= ' ') rest)
-            ]
-    unless (paneCount spansPane0 == 1) $ fail "selftest: expected exactly one pane initially"
-    plus <- requireSpan "selftest: split button" (findExact "+" spansPane0)
-    clickPos ctx' env base plus
-    spansPane1 <- collectTextSpans ctx'
-    unless (paneCount spansPane1 == 2) $ fail "selftest: split did not create a second pane"
-    maxBtn <- requireSpan "selftest: maximize button" (findExact "M" spansPane1)
-    clickPos ctx' env base maxBtn
-    spansPaneMax <- collectTextSpans ctx'
-    unless (hasText "maximized" spansPaneMax) $ fail "selftest: maximize did not fill the grid"
-    restoreBtn <- requireSpan "selftest: restore button" (findExact "R" spansPaneMax)
-    clickPos ctx' env base restoreBtn
-    spansPane2 <- collectTextSpans ctx'
-    unless (paneCount spansPane2 == 2) $ fail "selftest: restore lost a pane"
-    closeBtn <- requireSpan "selftest: close button" (findExact "x" spansPane2)
-    clickPos ctx' env base closeBtn
-    spansPane3 <- collectTextSpans ctx'
-    unless (paneCount spansPane3 == 1) $ fail "selftest: close did not remove a pane"
-    -- Whole-pane drag-and-drop: re-split into two side-by-side panes, then grab
-    -- the left pane anywhere and drop it on the center of the right pane. The
-    -- two panes swap, so the pane whose title was leftmost must change.
-    plus2 <- requireSpan "selftest: split button after close" (findExact "+" spansPane3)
-    clickPos ctx' env base plus2
-    spansPane4 <- collectTextSpans ctx'
-    unless (paneCount spansPane4 == 2) $ fail "selftest: re-split did not yield two panes"
-    let titles ss =
-          [ (r, l)
-          | (r, txt, _, _, _) <- ss
-          , let l = spanLabel txt
-          , "Pane " `T.isPrefixOf` l
-          , let rest = T.drop 5 l
-          , not (T.null rest)
-          , T.all isDigit (T.takeWhile (/= ' ') rest)
-          ]
-        titleCenter (r, _) = V2 (rectX r + rectW r / 2) (rectY r + rectH r / 2)
-        leftTitle4 = minimumBy (comparing (rectX . fst)) (titles spansPane4)
-        rightTitle4 = maximumBy (comparing (rectX . fst)) (titles spansPane4)
-    -- Edge drop: grab the right pane and drop it on the left pane's LEFT edge.
-    -- The dragged pane must land on the left side of the new split, becoming
-    -- the new leftmost pane.
-    let edgeFrom = titleCenter rightTitle4
-        edgeTo = V2 (rectX (fst leftTitle4) - 10) (rectY (fst leftTitle4) + 150)
-    dragPos ctx' env base edgeFrom edgeTo
-    spansEdge <- collectTextSpans ctx'
-    unless (paneCount spansEdge == 2) $ fail "selftest: edge drop lost a pane"
-    let leftAfterEdge = snd (minimumBy (comparing (rectX . fst)) (titles spansEdge))
-    unless (leftAfterEdge /= snd leftTitle4) $ fail "selftest: edge drop did not land on the left side"
-    -- Center drop: grab the left pane and drop it on the center of the right
-    -- pane. The two panes swap, so the leftmost title must change again.
-    let leftTitle5 = minimumBy (comparing (rectX . fst)) (titles spansEdge)
-        rightTitle5 = maximumBy (comparing (rectX . fst)) (titles spansEdge)
-        halfGap = (rectX (fst rightTitle5) - rectX (fst leftTitle5)) / 2
-        fromSwap = titleCenter leftTitle5
-        toSwap = V2 (rectX (fst rightTitle5) + halfGap) (rectY (fst rightTitle5) + 160)
-    dragPos ctx' env base fromSwap toSwap
-    spansPane5 <- collectTextSpans ctx'
-    unless (paneCount spansPane5 == 2) $ fail "selftest: pane drag lost a pane"
-    let afterSwap = snd (minimumBy (comparing (rectX . fst)) (titles spansPane5))
-    unless (afterSwap /= snd leftTitle5) $ fail "selftest: pane drag did not swap the panes"
-    -- Top-level drop: build three side-by-side panes, then drag the middle one
-    -- to the grid's outer left edge. The grid must restructure at the top level
-    -- into one pane on the left and the other two side-by-side on the right
-    -- half, rather than a flat third column.
-    plus3 <- requireSpan "selftest: split button for three panes" (findExact "+" spansPane5)
-    clickPos ctx' env base plus3
-    spansPane3c <- collectTextSpans ctx'
-    unless (paneCount spansPane3c == 3) $ fail "selftest: third split did not yield three panes"
-    let ts3 = titles spansPane3c
-        leftT3 = minimumBy (comparing (rectX . fst)) ts3
-        rightT3 = maximumBy (comparing (rectX . fst)) ts3
-        -- Exactly three panes: the middle is the one that is neither extreme.
-        midT3 = fromMaybe leftT3 (listToMaybe (filter (\t -> t /= leftT3 && t /= rightT3) ts3))
-        fromTop = titleCenter midT3
-        toTop = V2 (rectX (fst leftT3) - 10) (rectY (fst leftT3) + 150)
-    dragPos ctx' env base fromTop toTop
-    spansTop <- collectTextSpans ctx'
-    unless (paneCount spansTop == 3) $ fail "selftest: top-level drop lost a pane"
-    let tsTop = titles spansTop
-        leftAfterTop = minimumBy (comparing (rectX . fst)) tsTop
-        rightPanesTop = filter ((/= snd leftAfterTop) . snd) tsTop
-        rightLeftTop = minimumBy (comparing (rectX . fst)) rightPanesTop
-        rightRightTop = maximumBy (comparing (rectX . fst)) rightPanesTop
-        -- A top-level wrap gives the left pane the whole left half, so the gap
-        -- to the first right pane (~half the width) exceeds the gap between the
-        -- two right panes (~a quarter); a flat third column keeps them equal.
-        gapLeft = rectX (fst rightLeftTop) - rectX (fst leftAfterTop)
-        gapRight = rectX (fst rightRightTop) - rectX (fst rightLeftTop)
-    unless (snd leftAfterTop == snd midT3) $ fail "selftest: top-level drop did not move the middle pane left"
-    unless (gapLeft > gapRight + 10) $ fail "selftest: top-level drop did not collapse the remaining panes onto one side"
-    -- Pane headers are optional: turn them off and the titles vanish but the
-    -- panes (and their content) remain.
-    hdrBtn <- requireSpan "selftest: headers checkbox" (findExact "Pane headers" spansTop)
-    clickPos ctx' env base hdrBtn
-    spansPane6 <- collectTextSpans ctx'
-    unless (paneCount spansPane6 == 0) $ fail "selftest: disabling pane headers did not hide them"
-    unless (hasText "Contents of" spansPane6) $ fail "selftest: headerless panes lost their content"
-    clickTab ctx' env base "Controls"
-    spansCtl <- collectTextSpans ctx'
-    unless (hasText "Feature" spansCtl) $ fail "selftest: Controls missing after tab back"
-    feat0 <- requireSpan "selftest: Feature checkbox" (findRightmost "Feature" spansCtl)
-    clickPos ctx' env base feat0
-    spansOn <- collectTextSpans ctx'
-    unless (hasText "on" spansOn) $ fail "selftest: checkbox did not turn Feature on"
-    clickPos ctx' env base feat0
-    spansOff <- collectTextSpans ctx'
-    unless (hasText "off" spansOff) $ fail "selftest: checkbox did not turn Feature off"
-    clickPos ctx' env base feat0
-    spansOn2 <- collectTextSpans ctx'
-    unless (hasText "on" spansOn2) $ fail "selftest: checkbox did not turn Feature on again"
-    themeBtn <- requireSpan "selftest: Theme select" (findRightmost "Theme" spansOn2)
-    clickPos ctx' env base themeBtn
-    spansOverlay <- collectOverlayTextSpans ctx' base
-    lightOpt <- requireSpan "selftest: Tomorrow Light option" (findExact "Tomorrow Light" spansOverlay)
-    clickPos ctx' env base lightOpt
-    spansTheme <- collectTextSpans ctx'
-    unless (hasText "Tomorrow Light" spansTheme) $ fail "selftest: select did not pick Tomorrow Light"
-    th <- getTheme ctx'
-    unless (th == tomorrowMinLightTheme) $ fail "selftest: context theme was not updated to Tomorrow Light"
-    vol <- requireSpan "selftest: Volume slider" (findRightmost "Volume" spansTheme)
-    clickPos ctx' env base (V2 (v2X vol + 80) (v2Y vol))
-    about <- requireSpan "selftest: About button" (findExact "About" spansTheme)
-    clickPos ctx' env base about
-    spansModal <- collectOverlayTextSpans ctx' base
-    unless (hasText "Immediate-mode" spansModal) $ fail "selftest: About modal missing"
-    unless (hasText "Close" spansModal) $ fail "selftest: About Close button missing"
-    drawOnce ctx' env (base {inputKeys = inputKeysFromList [KeyEscape]})
-    drawOnce ctx' env base
-    spansClosed <- collectOverlayTextSpans ctx' base
-    when (hasText "Immediate-mode" spansClosed) $ fail "selftest: Escape did not dismiss About"
-    spansLatest <- collectTextSpans ctx'
-    debugBtn <- requireSpan "selftest: Debug button" (findExact "Debug" spansLatest)
-    clickPos ctx' env base debugBtn
-    spansDebug <- collectOverlayTextSpans ctx' base
-    unless (hasText "Frame" spansDebug) $ fail "selftest: Debug window missing"
-    unless (hasText "Runtime" spansDebug) $ fail "selftest: Debug Runtime section missing"
-  putStrLn "selftest: ok"
+------------------------------------------------------------------------------
+-- §11  CLI plumbing
+------------------------------------------------------------------------------
 
+data DemoConfig = DemoConfig
+  { cfgVsync :: !Bool
+  , cfgContinuous :: !Bool
+  , cfgFullscreen :: !Bool
+  , cfgBorderless :: !Bool
+  , cfgAlwaysOnTop :: !Bool
+  , cfgWidth :: !(Maybe Float)
+  , cfgHeight :: !(Maybe Float)
+  , cfgHelp :: !Bool
+  }
 
-drawOnce :: Context -> SdlEnv -> Input -> IO ()
-drawOnce ctx env inp = void (sdlDrawFrame ctx demoUi env inp False)
+defaultDemoConfig :: DemoConfig
+defaultDemoConfig =
+  DemoConfig
+    { cfgVsync = True
+    , cfgContinuous = False
+    , cfgFullscreen = False
+    , cfgBorderless = False
+    , cfgAlwaysOnTop = False
+    , cfgWidth = Nothing
+    , cfgHeight = Nothing
+    , cfgHelp = False
+    }
 
-clickPos :: Context -> SdlEnv -> Input -> V2 -> IO ()
-clickPos ctx env = Harness.clickPos (drawOnce ctx env)
+readMaybeFloat :: String -> Maybe Float
+readMaybeFloat s = case reads s of
+  [(x, "")] -> Just x
+  _ -> Nothing
 
-clickTab :: Context -> SdlEnv -> Input -> T.Text -> IO ()
-clickTab ctx env = Harness.clickTab collectTextSpans (drawOnce ctx env) ctx
+parseBool :: String -> Bool
+parseBool s = s `elem` ["true", "True", "1"]
 
-dragPos :: Context -> SdlEnv -> Input -> V2 -> V2 -> IO ()
-dragPos ctx env = Harness.dragPos (drawOnce ctx env)
+options :: [OptDescr (DemoConfig -> DemoConfig)]
+options =
+  [ Option ['v'] ["vsync"] (ReqArg (\s cfg -> cfg { cfgVsync = parseBool s }) "BOOL") "Enable or disable vsync (true/false, default: true)"
+  , Option ['c'] ["continuous"] (NoArg (\cfg -> cfg { cfgContinuous = True, cfgVsync = False })) "Continuous unthrottled rendering (disables vsync)"
+  , Option ['b'] ["benchmark"] (NoArg (\cfg -> cfg { cfgContinuous = True, cfgVsync = False })) "Benchmark mode: continuous rendering with vsync disabled"
+  , Option ['f'] ["fps"] (NoArg (\cfg -> cfg { cfgContinuous = True, cfgVsync = False })) "Show uncapped FPS (continuous, vsync false)"
+  , Option ['F'] ["fullscreen"] (NoArg (\cfg -> cfg { cfgFullscreen = True })) "Launch window in fullscreen mode"
+  , Option [] ["borderless"] (NoArg (\cfg -> cfg { cfgBorderless = True })) "Launch borderless window"
+  , Option ['t'] ["always-on-top"] (NoArg (\cfg -> cfg { cfgAlwaysOnTop = True })) "Keep window always on top"
+  , Option ['W'] ["width"] (ReqArg (\s cfg -> cfg { cfgWidth = readMaybeFloat s }) "PX") "Initial window width in pixels (default: 1280)"
+  , Option ['H'] ["height"] (ReqArg (\s cfg -> cfg { cfgHeight = readMaybeFloat s }) "PX") "Initial window height in pixels (default: 800)"
+  , Option ['h', '?'] ["help"] (NoArg (\cfg -> cfg { cfgHelp = True })) "Show help and command-line options"
+  ]
+
+parseArgs :: [String] -> DemoConfig
+parseArgs argv =
+  case getOpt Permute options argv of
+    (fs, _, _) -> foldl' (flip id) defaultDemoConfig fs
