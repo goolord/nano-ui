@@ -123,6 +123,7 @@ library
         NanoUI.Widgets.Table
         NanoUI.Widgets.Behavior
         NanoUI.Widgets.Combinators
+        NanoUI.Widgets.Drop
     build-depends:
         base ^>=4.22.0.0,
         bytestring ^>=0.12,

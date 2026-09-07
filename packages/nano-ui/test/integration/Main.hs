@@ -243,6 +243,7 @@ testSpecs =
   , TestSpec "custom-widget-knob" False runReferenceKnobTest
   , TestSpec "custom-widget-toggle" False runReferenceToggleSwitchTest
   , TestSpec "custom-widget-sparkline" True runReferenceProgressAndSparklineTest
+  , TestSpec "drop-target" False runDropTargetTest
   , TestSpec "font-size" True runFontSizeTest
   , TestSpec "font-color" True runFontColorTest
   , TestSpec "font-weight-style-deco" False runFontWeightStyleDecoTest

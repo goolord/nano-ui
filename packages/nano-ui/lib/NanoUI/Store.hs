@@ -9,6 +9,8 @@ module NanoUI.Store
   , slotAnchor
   , slotDrag
   , slotDragW
+  , slotDrop
+  , slotDropPos
   , slotWinSize
   , slotMenuOpen
   , slotMenuPos
@@ -126,6 +128,12 @@ slotDrag = 0xD2A6000400000004
 
 slotDragW :: Word64
 slotDragW = 0xD2A6000500000005
+
+slotDrop :: Word64
+slotDrop = 0xD20D000000000018
+
+slotDropPos :: Word64
+slotDropPos = 0xD20D000000000019
 
 slotWinSize :: Word64
 slotWinSize = 0x5712E00600000006

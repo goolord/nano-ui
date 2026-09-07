@@ -4,6 +4,9 @@ module NanoUI.Input
   ( Key (..)
   , Modifiers (..)
   , Input (..)
+  , DropType (..)
+  , DropEvent (..)
+  , emptyDropEvents
   , emptyInput
   , inputInteracted
   , inputPointerHeld
@@ -49,6 +52,23 @@ data Modifiers = Modifiers
   }
   deriving (Eq, Show)
 
+-- | OS-level drag-and-drop event kind, mirroring @SDL_EventType@ drop codes.
+data DropType
+  = DropBegin     -- ^ A drag enters the window; no position or payload yet.
+  | DropPosition  -- ^ The drag pointer moved over the window; position available.
+  | DropFile      -- ^ A file path was dropped; 'dropEventData' holds the path.
+  | DropText      -- ^ Text was dropped; 'dropEventData' holds the text.
+  | DropComplete  -- ^ The OS drag operation finished.
+  deriving (Eq, Show)
+
+-- | A single normalized drop payload surfaced to widgets.
+data DropEvent = DropEvent
+  { dropEventType :: !DropType
+  , dropEventPos :: !(Maybe V2)
+  , dropEventData :: !Text
+  }
+  deriving (Eq, Show)
+
 data Input = Input
   { inputMousePos :: !V2
   , inputMouseDown :: !Bool
@@ -64,6 +84,7 @@ data Input = Input
   , inputModifiers :: !Modifiers
   , inputWindowSize :: !Size
   , inputDeltaTime :: {-# UNPACK #-} !Float
+  , inputDrops :: Vector DropEvent
   }
   deriving (Eq, Show)
 
@@ -84,6 +105,7 @@ emptyInput =
     , inputModifiers = Modifiers False False False
     , inputWindowSize = Size 800 600
     , inputDeltaTime = 0
+    , inputDrops = emptyDropEvents
     }
 
 data UiCursorKind
@@ -119,6 +141,7 @@ clearEphemeral inp =
     , inputMouseRightReleased = False
     , inputMouseClicks = 1
     , inputScroll = V2 0 0
+    , inputDrops = emptyDropEvents
     }
 
 isHardQuitInput :: Input -> Bool
@@ -142,6 +165,9 @@ inputKeysFromList = V.fromList
 
 emptyInputKeys :: Vector Key
 emptyInputKeys = V.empty
+
+emptyDropEvents :: Vector DropEvent
+emptyDropEvents = V.empty
 
 {-# INLINE inputKeysNull #-}
 inputKeysNull :: Vector Key -> Bool
@@ -171,6 +197,7 @@ inputInteracted a b =
     || inputChars a /= inputChars b
     || inputModifiers a /= inputModifiers b
     || inputWindowSize a /= inputWindowSize b
+    || inputDrops a /= inputDrops b
 
 {-# INLINE inputPointerHeld #-}
 inputPointerHeld :: Input -> Bool
@@ -188,4 +215,5 @@ stripInteractionInput inp =
     , inputMouseRightReleased = False
     , inputKeys = emptyInputKeys
     , inputChars = ""
+    , inputDrops = emptyDropEvents
     }
