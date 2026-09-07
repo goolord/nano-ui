@@ -29,6 +29,8 @@ Breaking API: prefer `Text` and `Vector` over `String` and `[ ]` in core types.
 * Checked checkbox uses the same well and rounded stroke as unchecked. The mark is coverage-AA, not capsule stamps.
 * Text field caret, selection, and click use glyph advances, not TTF string size, so runs of `f` do not shift the caret left.
 * SDL3 native file dialogs: non-blocking `openFileDialog` / `askOpenFileDialog`, `saveFileDialog` / `askSaveFileDialog`, and `openFolderDialog` / `askOpenFolderDialog` wrap `SDL_ShowOpenFileDialog`, `SDL_ShowSaveFileDialog`, and `SDL_ShowOpenFolderDialog`. Poll results with `pollFileDialog` / `pollFileDialogUi` (each result delivered once; a stale handle polls as `FileDialogUnknown`), abandon a handle with `cancelFileDialog`, and clear state at teardown with `clearDialogState`. The SDL dialog callback only records the outcome and wakes the loop, so completion is safe on SDL's background thread.
+* `searchField` / `searchFieldConfigured` and `SearchFieldConfig`: a caption-less search box built on the existing `NodeTextInput`. It reuses the whole text-edit stack (caret, selection, context menu, scroll) and adds an embedded magnifier on the left and a clear (×) button on the right that empties the field and keeps focus. Change pulses are debounced (default 300 ms trailing edge; `searchFieldEmit` delivers the settled query); clearing fires immediately. The placeholder is the caption-less label. Config exposes `sfcPlaceholder`, `sfcDebounceMs`, and `sfcLayout`.
+* Search-mode is a style bit on the text-input node, so text inputs keep their old caption layout unless the flag is set; a search box measures to field height only (no caption row).
 
 ## 0.1.0.0 -- YYYY-mm-dd
 

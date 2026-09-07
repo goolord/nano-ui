@@ -202,6 +202,8 @@ demoUi = do
   (themeRadio, setThemeRadio) <- useText (themeDisplayName ThemeDefault)
   (name, setName) <- useText ""
   (notes, setNotes) <- useText ""
+  (searchQuery, setSearchQuery) <- useText ""
+  (peopleMatches, setPeopleMatches) <- useState demoPeople
   (treeSel, setTreeSel) <- useText "0"
   (tableSortVal, setTableSort) <- useTableSort (SortCol 0 SortAsc)
   (sampleText, setSampleText) <- useText "The quick brown fox jumps over the lazy dog"
@@ -487,11 +489,26 @@ demoUi = do
                 (_, sel) <- tree "demo" demoTree sel0
                 setTreeSel (T.pack (show sel))
               sep
-              heading "Items"
-              scroll2DWith (padAll 6 . fixedH 136 . fillW) $
-                columnWith (tight . gap gapText . fillW) $
-                  for_ [1 .. 12 :: Int] $ \i -> do
-                    void $ labelEx (tight . fillW $ defaultLayout) $ T.pack ("Item " <> show i)
+              heading "Searchable list"
+              muted "Type to filter. The debounced search commits on a pause; the filtered list is cached and only recomputed when the committed query changes."
+              (qResp, qVal) <- searchField "Filter people (name, role, city…)" ""
+              when (respChanged qResp) $ do
+                setSearchQuery qVal
+                setPeopleMatches (peopleMatching qVal)
+              rowWith (tight . gap gapInline . fillW . alignMid) $ do
+                muted ("Committed: " <> (if T.null searchQuery then "—" else searchQuery))
+                flex
+                muted
+                  ( "Matches: "
+                      <> T.pack (show (length peopleMatches))
+                  )
+              scroll2DWith (padAll 6 . fixedH 168 . fillW) $
+                columnWith (tight . gap gapMicro . fillW) $
+                  if null peopleMatches
+                    then void (muted "No matches.")
+                    else
+                      for_ peopleMatches $ \p ->
+                        void $ labelEx (tight . fillW $ defaultLayout) (personRowLabel p)
             Table -> do
               heading "Table"
               muted "Click a header to sort. Drag a header to reorder."
@@ -676,6 +693,38 @@ demoPeople =
   , DemoPerson "Kai" "Eng" 23 "Oslo" "IC"
   , DemoPerson "Ruth" "Ops" 47 "Boston" "Staff"
   ]
+
+-- | Case-folded haystack used to filter 'demoPeople'.
+personSearchText :: DemoPerson -> T.Text
+personSearchText p =
+  T.toCaseFold $
+    T.intercalate
+      " "
+      [ demoPersonName p
+      , demoPersonDept p
+      , demoPersonCity p
+      , demoPersonRole p
+      ]
+
+-- | Filter the people list on a committed search query. Callers memoize the
+-- result (see the Searchable list demo) so the fold is not re-run every frame.
+peopleMatching :: T.Text -> [DemoPerson]
+peopleMatching raw
+  | T.null raw = demoPeople
+  | otherwise =
+      let q = T.toCaseFold raw
+       in filter (\p -> q `T.isInfixOf` personSearchText p) demoPeople
+
+personRowLabel :: DemoPerson -> T.Text
+personRowLabel p =
+  demoPersonName p
+    <> " — "
+    <> demoPersonRole p
+    <> ", "
+    <> demoPersonCity p
+    <> " ("
+    <> T.pack (show (demoPersonAge p))
+    <> ")"
 
 demoTableColumnLabels :: [T.Text]
 demoTableColumnLabels = ["Name", "Dept", "Age", "City", "Role"]

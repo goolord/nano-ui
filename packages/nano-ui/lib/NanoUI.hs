@@ -238,6 +238,10 @@ module NanoUI
   , textInputConfigured
   , textInputWithPlaceholder
   , textInputPassword
+  , SearchFieldConfig (..)
+  , defaultSearchFieldConfig
+  , searchField
+  , searchFieldConfigured
   , textArea
   , separator
   , spacer
@@ -431,6 +435,7 @@ module NanoUI
   , sliderEmit
   , selectEmit
   , textInputEmit
+  , searchFieldEmit
   -- Animation
   , Ease (..)
   , applyEase
@@ -858,6 +863,10 @@ import NanoUI.Widgets
   , textInputConfigured
   , textInputWithPlaceholder
   , textInputPassword
+  , SearchFieldConfig (..)
+  , defaultSearchFieldConfig
+  , searchField
+  , searchFieldConfigured
   , textArea
   , toolbar
   , tree
@@ -965,6 +974,7 @@ import NanoUI.State
   , sliderEmit
   , textInputControlled
   , textInputEmit
+  , searchFieldEmit
   , useEnum
   , useFloat
   , useInt

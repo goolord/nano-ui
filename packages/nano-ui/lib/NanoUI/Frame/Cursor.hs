@@ -73,6 +73,7 @@ import NanoUI.Frame.TextEdit
   , TextAreaScrollBarLayouts (..)
   , TextInputGeom (..)
   , isMouseOnTextAreaScrollBarAt
+  , searchClearHit
   , textAreaGeom
   , textAreaScrollBarLayouts
   , textEditMenuCursorKind
@@ -156,11 +157,17 @@ scrollThumbCursorKind ctx inp = do
         then pure (Just (grabHoverKind True inp))
         else pure Nothing
 
--- Field well, not the label. Independent of focus and hot.
+-- Field well, not the label. Independent of focus and hot. A search field's
+-- clear button raises the pointer cursor; everywhere else over a field is text.
 textFieldHoverCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
 textFieldHoverCursorKind ctx inp = do
-  mWid <- textFieldWidgetAtMouse ctx (inputMousePos inp)
-  pure (UiCursorText <$ mWid)
+  let mouse = inputMousePos inp
+  mWid <- textFieldWidgetAtMouse ctx mouse
+  case mWid of
+    Nothing -> pure Nothing
+    Just wid -> do
+      onClear <- searchClearHit ctx wid mouse
+      pure (Just (if onClear then UiCursorPointer else UiCursorText))
 
 scrollThumbHit :: Context -> V2 -> IO Bool
 scrollThumbHit ctx mouse = do

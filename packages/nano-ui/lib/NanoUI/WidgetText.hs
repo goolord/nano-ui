@@ -12,6 +12,13 @@ module NanoUI.WidgetText
   , textInputLabelGap
   , textInputFieldPadY
   , textInputFieldHeight
+  , textInputFlagSearch
+  , textInputSearchMode
+  , textInputSearchBody
+  , textInputSearchTerminalText
+  , searchFieldReserveW
+  , searchFieldTextClip
+  , searchFieldIconRects
   , selectDisplayText
   , selectChevronReserve
   , selectChevronCenterX
@@ -53,10 +60,10 @@ import Data.Char (chr)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Word (Word8)
-import NanoUI.Font (FontMetrics (..), fmLineHeight)
+import NanoUI.Font (FontMetrics (..), fmLineHeight, widgetContentInset)
 import NanoUI.Icons (Icons, treeExpandMark)
 import NanoUI.Style (FontStyle (..), FontVariant (..), FontWeight (..), TextDecoration (..), Theme (..), styleBg, themeButton, themePanel, themeWindow)
-import NanoUI.Types (Color (..), colorB, colorG, colorR, colorRGBA, lerpColor)
+import NanoUI.Types (Color (..), HostProfile, Rect (..), colorB, colorG, colorR, colorRGBA, isCellHost, lerpColor)
 import qualified Data.Text as T
 
 sliderValueText :: Float -> Text
@@ -109,6 +116,42 @@ textInputFieldPadY fm = max 3 (fmAdvance fm ' ' * 1.25)
 textInputFieldHeight :: FontMetrics -> Float
 textInputFieldHeight fm = fmLineHeight fm + 2 * textInputFieldPadY fm
 
+-- | Search-field icon geometry on GUI hosts (zero on cell hosts). Returns
+-- (icon diameter, outer pad, left chrome lead, right chrome tail). The lead/tail
+-- are the horizontal space the magnifier / clear buttons reserve either side of
+-- the editable text.
+searchFieldChrome :: HostProfile -> FontMetrics -> (Float, Float, Float, Float)
+searchFieldChrome host fm
+  | isCellHost host = (0, 0, 0, 0)
+  | otherwise =
+      let (ix, _) = widgetContentInset host fm
+          s = max 12 (min 15 (fmLineHeight fm * 0.8))
+          pad = fmAdvance fm ' ' * 0.6
+       in (s, ix, ix + s + pad, pad + s + ix)
+
+-- | Total horizontal chrome a caption-less search box reserves for its icons.
+searchFieldReserveW :: HostProfile -> FontMetrics -> Float
+searchFieldReserveW host fm =
+  let (_, _, lead, tailw) = searchFieldChrome host fm
+   in lead + tailw
+
+-- | Region a caption-less search field's editable text may occupy. Excludes the
+-- magnifier on the left and the clear slot on the right.
+searchFieldTextClip :: HostProfile -> FontMetrics -> Float -> Float -> Float -> Float -> Rect
+searchFieldTextClip host fm x y w h =
+  let (_, _, lead, tailw) = searchFieldChrome host fm
+      (_, iy) = widgetContentInset host fm
+   in Rect (x + lead) (y + iy) (max 0 (w - lead - tailw)) (max 0 (h - 2 * iy))
+
+-- | Square slots (magnifier left, clear right) the search icons are drawn in.
+searchFieldIconRects :: HostProfile -> FontMetrics -> Float -> Float -> Float -> Float -> (Rect, Rect)
+searchFieldIconRects host fm x y w h =
+  let (s, ix, _, _) = searchFieldChrome host fm
+      cy = y + h / 2
+      mag = Rect (x + ix) (cy - s / 2) s s
+      clear = Rect (x + w - ix - s) (cy - s / 2) s s
+   in (mag, clear)
+
 textInputPlaceholder :: Text -> Text
 textInputPlaceholder lbl =
   if T.null lbl
@@ -132,6 +175,36 @@ textInputTerminalText lbl value cursor focused =
              in T.take c body <> "\x2502" <> T.drop c body
           else body
    in lbl <> ": " <> shown
+
+-- | Marks a @NodeTextInput@ as a caption-less search field. Lives in the high
+-- style bits (like the button flags) so it survives the arena's int storage.
+textInputFlagSearch :: Int
+textInputFlagSearch = 0x04000000
+
+{-# INLINE textInputSearchMode #-}
+textInputSearchMode :: Int -> Bool
+textInputSearchMode si = si .&. textInputFlagSearch /= 0
+
+-- | Body of a search field: the live value, or the placeholder while empty and
+-- unfocused. @ph@ is the caller-supplied placeholder, not the derived one used
+-- by captioned 'textInputFieldText'.
+textInputSearchBody :: Text -> Text -> Bool -> Text
+textInputSearchBody ph value focused =
+  if T.null value && not focused
+    then ph
+    else value
+
+-- | Terminal representation of a search field: value (or placeholder), with the
+-- caret inserted when focused. No caption prefix.
+textInputSearchTerminalText :: Text -> Text -> Int -> Bool -> Text
+textInputSearchTerminalText ph value cursor focused
+  | focused && T.null value = "\x2502" <> ph
+  | focused =
+      let v = value
+          c = max 0 (min (T.length v) cursor)
+       in T.take c v <> "\x2502" <> T.drop c v
+  | T.null value = ph
+  | otherwise = value
 
 selectDisplayText :: Text -> Text -> Text
 selectDisplayText lbl opt = lbl <> ": " <> opt

@@ -65,6 +65,8 @@ module Cases
   , runUseFlagClickTest
   , runWidgetNoStringEmitTest
   , runWithKeyTest
+  , runSearchFieldClearTest
+  , runSearchFieldDebounceTest
   ) where
 
 import Cases.Animation
@@ -81,6 +83,7 @@ import Cases.Tooltip
 import Cases.Window
 import Cases.Font
 import Control.Monad (forM, replicateM, void)
+import Control.Concurrent (threadDelay)
 import Data.ByteString qualified as BS
 import Data.IORef (IORef)
 import Data.List (nub, sort)
@@ -89,7 +92,7 @@ import Data.Vector qualified as V
 import Effectful.State.Static.Local (State, evalState, get, modify)
 import NanoUI
 import NanoUI.Context (Context (..))
-import NanoUI.Layout.Arena (NodeType (..), arenaCount, getNodeValue, getNodeType)
+import NanoUI.Layout.Arena (NodeType (..), arenaCount, getNodeType, getNodeValue)
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertGt, measureRespW, runClickReduce, withInput)
 import NanoUI.Testing.Harness
@@ -774,6 +777,56 @@ runBase16ThemeTest ctx failed = do
   let inp = withInput 200 100
   (_, _, draw, _) <- runFrame ctx' inp (button "Base16 Button")
   assertGt failed (drawVertexCount draw) 0
+
+-- Clicking the embedded clear (×) must empty the field, keep focus, and fire an
+-- immediate (non-debounced) change pulse.
+runSearchFieldClearTest :: Context -> IORef Int -> IO ()
+runSearchFieldClearTest ctx failed = do
+  let inp0 = withInput 320 100
+      ui = column (searchField "Search…" "hello world")
+  (resp, _) <- warmup2 ctx inp0 ui
+  let Rect bx by bw bh = respRect resp
+      cy = by + bh / 2
+      scanClear x
+        | x < bx = pure Nothing
+        | otherwise = do
+            let probe = inp0 {inputMousePos = V2 x cy}
+            _ <- runFrame ctx probe ui
+            kind <- uiCursorKind ctx probe
+            if kind == UiCursorPointer then pure (Just x) else scanClear (x - 2)
+  mcx <- scanClear (bx + bw - 6)
+  case mcx of
+    Nothing -> assert failed False
+    Just cx -> do
+      let press = inp0 {inputMousePos = V2 cx cy, inputMouseDown = True, inputMousePressed = True, inputMouseReleased = False}
+      _ <- runFrame ctx press ui
+      ((r1, t1), _, _, _) <- runFrame ctx inp0 ui
+      assertEq failed t1 ""
+      assert failed (respChanged r1)
+      ((r2, _), _, _, _) <- runFrame ctx inp0 ui
+      assert failed (not (respChanged r2))
+
+-- Typing is echoed immediately but the change pulse only fires after the text
+-- has been idle for the configured debounce window.
+runSearchFieldDebounceTest :: Context -> IORef Int -> IO ()
+runSearchFieldDebounceTest ctx failed = do
+  let inp0 = withInput 320 100
+      ui = column (searchFieldConfigured (defaultSearchFieldConfig {sfcDebounceMs = 40}) "")
+  _ <- warmup2 ctx inp0 ui
+  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
+  ((rA, tA), _, _, _) <- runFrame ctx (inp0 {inputChars = "a"}) ui
+  assertEq failed tA "a"
+  assert failed (not (respChanged rA))
+  ((rB, tB), _, _, _) <- runFrame ctx (inp0 {inputChars = "b"}) ui
+  assertEq failed tB "ab"
+  assert failed (not (respChanged rB))
+  threadDelay 80000
+  ((rC, tC), _, _, _) <- runFrame ctx inp0 ui
+  assertEq failed tC "ab"
+  assert failed (respChanged rC)
+  threadDelay 50000
+  ((rD, _), _, _, _) <- runFrame ctx inp0 ui
+  assert failed (not (respChanged rD))
 
 
 

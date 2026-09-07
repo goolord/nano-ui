@@ -77,6 +77,9 @@ import NanoUI.WidgetText
   , selectDisplayText
   , colorPickerDisplayText
   , textInputFieldText
+  , textInputSearchBody
+  , textInputSearchMode
+  , textInputSearchTerminalText
   , textInputTerminalText
   , tableHeaderDisplayText
   , isTableHeaderStyle
@@ -223,7 +226,10 @@ displayTextRest ctx nt idx txt terminal =
           wid <- getWidgetId (ctxNodeArena ctx) idx
           store <- getStore ctx
           let cursor = IM.findWithDefault (T.length value) (slotKey slotCursor (intKey wid)) (storeInt store)
-          pure (textInputTerminalText txt value cursor focused)
+          si <- getStyleIdx (ctxNodeArena ctx) idx
+          if textInputSearchMode si
+            then pure (textInputSearchTerminalText txt value cursor focused)
+            else pure (textInputTerminalText txt value cursor focused)
         NodeTextArea -> textAreaStoredValue ctx idx
         _ -> pure txt
     else
@@ -231,7 +237,10 @@ displayTextRest ctx nt idx txt terminal =
         NodeTextInput -> do
           value <- textInputValue ctx idx
           focused <- textInputFocused ctx idx
-          pure (textInputFieldText txt value focused)
+          si <- getStyleIdx (ctxNodeArena ctx) idx
+          if textInputSearchMode si
+            then pure (textInputSearchBody txt value focused)
+            else pure (textInputFieldText txt value focused)
         NodeTextArea -> textAreaStoredValue ctx idx
         NodeSelect -> do
           opt <- selectCurrentOption ctx idx

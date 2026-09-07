@@ -42,6 +42,10 @@ module NanoUI.Widgets
   , slider
   , sliderEx
   , textInput
+  , SearchFieldConfig (..)
+  , defaultSearchFieldConfig
+  , searchField
+  , searchFieldConfigured
   , textArea
   , applyTextInputMenuAction
   , separator
@@ -215,6 +219,7 @@ import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
 import Data.Text qualified as T
 import Effectful (Eff, type (:>))
+import GHC.Clock (getMonotonicTime)
 import NanoUI.Context
   ( Context (..)
   , getLastPointerBlocked
@@ -273,6 +278,8 @@ import NanoUI.Store
   , slotAnchor
   , slotCursor
   , slotKey
+  , slotSearchAge
+  , slotSearchCommitted
   , slotTextAreaViewport
   )
 import NanoUI.Style
@@ -311,6 +318,7 @@ import NanoUI.WidgetText
   , colorPickerNewLabel
   , colorPickerToHex
   , sliderValueText
+  , textInputFlagSearch
   , textInputTerminalText
   )
 import NanoUI.Widgets.Animate
@@ -408,6 +416,7 @@ import NanoUI.Widgets.TextInput
   ( TextInputState (..)
   , applyTextInputMenuAction
   , processTextInput
+  , searchFieldLayout
   , textInputLayout
   )
 import NanoUI.Widgets.TextArea
@@ -685,14 +694,32 @@ textInputPassword lbl initial =
   textInputConfigured (defaultTextInputConfig {ticPassword = True}) lbl initial
 
 textInputConfigured :: Ui :> es => TextInputConfig -> Text -> Text -> Eff es (Response, Text)
-textInputConfigured cfg lbl initial = do
+textInputConfigured cfg lbl initial =
+  buildTextInput
+    0
+    (ticLayout cfg)
+    lbl
+    initial
+    Nothing
+
+-- | Shared single-line field builder. @styleIdx@ may carry the search flag on a
+-- @NodeTextInput@; when @mDebounceMs@ is present the returned change pulse is
+-- delayed until the text has been idle for that long (immediate for clear clicks).
+buildTextInput ::
+  Ui :> es =>
+  Int ->
+  Layout ->
+  Text ->
+  Text ->
+  Maybe Float ->
+  Eff es (Response, Text)
+buildTextInput styleIdx layout lbl initial mDebounceMs = do
   wid <- nextId
   ctx <- askContext
   uiIO $ registerFocusable ctx wid
   inp <- askInput
   store <- uiIO (getStore ctx)
-  let
-    key = intKey wid
+  let key = intKey wid
   current <- case IM.lookup key (storeText store) of
     Nothing -> do
       uiIO $ setStore ctx (store {storeText = IM.insert key initial (storeText store)})
@@ -725,9 +752,80 @@ textInputConfigured cfg lbl initial = do
           }
       )
   let submitted = isFocus && KeyEnter `elem` inputKeys inp
-  resp <-
-    addWidget wid NodeTextInput lbl 0 (ticLayout cfg)
-  pure (setSubmitted submitted (setChanged (newText /= current) resp), newText)
+  changed <- case mDebounceMs of
+    Nothing -> pure (newText /= current)
+    Just ms -> uiIO (debounceSearchChanged ctx key isFocus (newText /= current) ms)
+  resp <- addWidgetStyled wid NodeTextInput lbl 0 layout styleIdx Nothing
+  pure (setSubmitted submitted (setChanged changed resp), newText)
+
+-- | Debounced change pulse for a search field. Fires when the text differs from
+-- the last committed query and either the field is empty, lost focus, or has
+-- been idle for @ms@ (trailing edge). Field text lives under @key@; the last
+-- committed query under 'slotSearchCommitted'.
+debounceSearchChanged :: Context -> Int -> Bool -> Bool -> Float -> IO Bool
+debounceSearchChanged ctx key focused rawChanged ms = do
+  store <- getStore ctx
+  let
+    committedKey = slotKey slotSearchCommitted key
+    ageKey = slotKey slotSearchAge key
+    fieldText = IM.findWithDefault "" key (storeText store)
+    committedMissing = not (IM.member committedKey (storeText store))
+    committed = IM.findWithDefault fieldText committedKey (storeText store)
+    dirty = fieldText /= committed
+    needClock = rawChanged || dirty
+  now <- if needClock then realToFrac <$> getMonotonicTime else pure 0
+  let
+    lastEdit = IM.findWithDefault now ageKey (storeFloat store)
+    idleMs = (now - lastEdit) * 1000
+    commit =
+      not rawChanged
+        && dirty
+        && (T.null fieldText || not focused || idleMs >= ms)
+  when (rawChanged || commit || committedMissing) $ do
+    st <- getStore ctx
+    let
+      texts =
+        if commit || committedMissing
+          then IM.insert committedKey fieldText (storeText st)
+          else storeText st
+      floats =
+        if rawChanged || commit
+          then IM.insert ageKey now (storeFloat st)
+          else storeFloat st
+    setStore ctx (st {storeText = texts, storeFloat = floats})
+  pure commit
+
+-- | Search field: a caption-less 'NodeTextInput' with an embedded magnifier and
+-- clear button. The label acts as the placeholder. Change pulses are debounced
+-- (trailing edge); clearing with the embedded button fires immediately.
+data SearchFieldConfig = SearchFieldConfig
+  { sfcPlaceholder :: !Text
+  , sfcDebounceMs :: !Float
+  , sfcLayout :: !Layout
+  }
+  deriving (Eq, Show)
+
+defaultSearchFieldConfig :: SearchFieldConfig
+defaultSearchFieldConfig =
+  SearchFieldConfig
+    { sfcPlaceholder = "Search…"
+    , sfcDebounceMs = 300
+    , sfcLayout = searchFieldLayout
+    }
+
+searchField :: Ui :> es => Text -> Text -> Eff es (Response, Text)
+searchField placeholder initial =
+  searchFieldConfigured (defaultSearchFieldConfig {sfcPlaceholder = placeholder}) initial
+
+searchFieldConfigured ::
+  Ui :> es => SearchFieldConfig -> Text -> Eff es (Response, Text)
+searchFieldConfigured cfg initial =
+  buildTextInput
+    textInputFlagSearch
+    (sfcLayout cfg)
+    (sfcPlaceholder cfg)
+    initial
+    (Just (sfcDebounceMs cfg))
 
 textArea :: Ui :> es => Text -> Text -> Eff es (Response, Text)
 textArea lbl initial = do

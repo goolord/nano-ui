@@ -28,6 +28,8 @@ module NanoUI.Store
   , slotTextAreaAnchorRow
   , slotTextAreaAnchorCol
   , slotTextInputScroll
+  , slotSearchCommitted
+  , slotSearchAge
   , boolInt
   , intBool
   , anySelectOpen
@@ -185,6 +187,14 @@ slotTextAreaAnchorCol = 0x5441524100000016
 
 slotTextInputScroll :: Word64
 slotTextInputScroll = 0x54494E5000000017
+
+-- Search-field debounce bookkeeping. Text slots on the text widget id: the last
+-- committed query and the monotonic timestamp of the last edit.
+slotSearchCommitted :: Word64
+slotSearchCommitted = 0x534541524300001D
+
+slotSearchAge :: Word64
+slotSearchAge = 0x534541524700001B
 
 boolInt :: Bool -> Int
 boolInt b = if b then 1 else 0

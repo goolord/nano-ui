@@ -1,6 +1,7 @@
 module NanoUI.Widgets.TextInput
   ( TextInputState (..)
   , textInputLayout
+  , searchFieldLayout
   , processTextInput
   , applyTextInputMenuAction
   ) where
@@ -44,6 +45,15 @@ textInputLayout =
   defaultLayout
     { layoutWidth = Grow 1
     , layoutMinW = 160
+    }
+
+-- | Layout for a caption-less search field. Grows to fill, keeps a little more
+-- room for the embedded magnifier / clear chrome than a plain text input.
+searchFieldLayout :: Layout
+searchFieldLayout =
+  defaultLayout
+    { layoutWidth = Grow 1
+    , layoutMinW = 180
     }
 
 data TextInputState = TextInputState
