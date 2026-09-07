@@ -30,6 +30,7 @@ module NanoUI.Widgets.SplitPane
   , treeMovePane
   , clampTreeRatio
   , dropPreview
+  , topLevelDrop
   ) where
 
 import Control.Applicative ((<|>))
@@ -70,6 +71,11 @@ data DropTarget
       -- ^ Drop near an edge: the target pane splits along the axis and the
       -- dragged pane moves into the new child. 'True' puts the dragged pane on
       -- the A (left/top) side, 'False' on the B (right/bottom) side.
+  | DropTop GridAxis Bool
+      -- ^ Drop on the outer edge of the whole grid: the entire tree is wrapped
+      -- in a new top-level split and the dragged pane takes one side, so the
+      -- rest of the grid collapses onto the other. 'True' puts the dragged
+      -- pane on the A (left/top) side, 'False' on the B (right/bottom) side.
   deriving (Eq, Show)
 
 -- | Pane ids in the tree (depth-first, A then B).
@@ -220,7 +226,8 @@ treeSwapPanes a b = go
 
 -- | Move a pane onto a drop target. Center drops swap the two panes; edge
 -- drops split the target pane with the given fresh split id and move the
--- dragged pane into the new child.
+-- dragged pane into the new child; top-level drops wrap the whole tree in a
+-- new root split with the dragged pane on one side.
 treeMovePane :: Word64 -> Word64 -> DropTarget -> GridNode -> Maybe GridNode
 treeMovePane moved splitId dt tree
   | not (paneExist tree moved) = Nothing
@@ -236,6 +243,15 @@ treeMovePane moved splitId dt tree
           | otherwise -> do
               t' <- treeRemovePane moved tree
               Just (treeSplit tgt splitId axis onA moved t')
+        DropTop axis onA
+          | treeSize tree <= 1 -> Nothing
+          | otherwise -> do
+              t' <- treeRemovePane moved tree
+              Just
+                ( if onA
+                    then Split splitId axis 0.5 (Pane moved) t'
+                    else Split splitId axis 0.5 t' (Pane moved)
+                )
 
 -- | Find the split node with a given id (or 'Nothing').
 findSplitNode :: GridNode -> Word64 -> Maybe GridNode
@@ -296,3 +312,35 @@ dropPreview r mouse tgt =
     ZoneRight -> (r {rectX = rectX r + rectW r * 0.5, rectW = rectW r * 0.5}, DropSplit tgt AxisV False)
     ZoneTop -> (r {rectH = rectH r * 0.5}, DropSplit tgt AxisH True)
     ZoneBottom -> (r {rectY = rectY r + rectH r * 0.5, rectH = rectH r * 0.5}, DropSplit tgt AxisH False)
+
+-- | Top-level drop preview for a grid edge: the half of the whole grid the
+-- dragged pane will occupy, plus the 'DropTop' target that performs it.
+dropTopPreview :: Rect -> GridAxis -> Bool -> (Rect, DropTarget)
+dropTopPreview r AxisV True = (r {rectW = rectW r * 0.5}, DropTop AxisV True)
+dropTopPreview r AxisV False = (r {rectX = rectX r + rectW r * 0.5, rectW = rectW r * 0.5}, DropTop AxisV False)
+dropTopPreview r AxisH True = (r {rectH = rectH r * 0.5}, DropTop AxisH True)
+dropTopPreview r AxisH False = (r {rectY = rectY r + rectH r * 0.5, rectH = rectH r * 0.5}, DropTop AxisH False)
+
+-- | Classify a drop point against the grid's outer boundary. If the pointer
+-- sits within @band@ px of a grid edge, return the 'DropTop' preview + target
+-- for that edge; otherwise 'Nothing'. Checked before pane-level drops so the
+-- outermost edge always restructures the whole grid.
+topLevelDrop :: Float -> Rect -> V2 -> Maybe (Rect, DropTarget)
+topLevelDrop band r mouse
+  | rectW r <= 0 || rectH r <= 0 = Nothing
+  | otherwise =
+      let x = v2X mouse
+          y = v2Y mouse
+          l = rectX r
+          t = rectY r
+          w = rectW r
+          h = rectH r
+       in if x <= l + band
+            then Just (dropTopPreview r AxisV True)
+            else if x >= l + w - band
+              then Just (dropTopPreview r AxisV False)
+              else if y <= t + band
+                then Just (dropTopPreview r AxisH True)
+                else if y >= t + h - band
+                  then Just (dropTopPreview r AxisH False)
+                  else Nothing
