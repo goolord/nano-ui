@@ -74,6 +74,8 @@ library
         NanoUI.Widgets.TextBuffer
         NanoUI.Widgets.TextArea
         NanoUI.Widgets.Custom
+        NanoUI.Widgets.PaneGrid
+        NanoUI.Widgets.SplitPane
         NanoUI.Store
         NanoUI.Frame.Hit
         NanoUI.Frame.TextEdit

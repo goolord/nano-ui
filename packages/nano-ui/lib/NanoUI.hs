@@ -336,6 +336,13 @@ module NanoUI
   , headless
   , Colonnade
   , Headed (..)
+  , PaneGridConfig (..)
+  , defaultPaneGridConfig
+  , PaneGridCtx (..)
+  , PaneView (..)
+  , PaneGridResponse (..)
+  , GridAxis (..)
+  , paneGrid
   , image
   , box
   , drawing
@@ -879,6 +886,13 @@ import NanoUI.Widgets
   , useText
   , useToggle
   , window
+  , PaneGridConfig (..)
+  , defaultPaneGridConfig
+  , PaneGridCtx (..)
+  , PaneView (..)
+  , PaneGridResponse (..)
+  , GridAxis (..)
+  , paneGrid
   )
 import NanoUI.Widgets.Node (setSubmitted)
 import NanoUI.Widgets.Combinators (stripedRow)

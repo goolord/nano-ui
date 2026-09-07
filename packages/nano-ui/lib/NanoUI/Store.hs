@@ -30,6 +30,12 @@ module NanoUI.Store
   , slotTextInputScroll
   , slotSearchCommitted
   , slotSearchAge
+  , slotPaneGest
+  , slotPaneGrab
+  , slotPaneFocus
+  , slotPaneMax
+  , slotPaneResize
+  , slotPaneNext
   , boolInt
   , intBool
   , anySelectOpen
@@ -195,6 +201,35 @@ slotSearchCommitted = 0x534541524300001D
 
 slotSearchAge :: Word64
 slotSearchAge = 0x534541524700001B
+
+-- PaneGrid gesture slot (storeInt): 0 none, positive = dragged pane id,
+-- negative = split id being resized. Mirrors slotDrag's press-held-release
+-- lifecycle but keyed by the grid widget instead of a per-pane leaf.
+slotPaneGest :: Word64
+slotPaneGest = 0x50414E450000001C
+
+-- PaneGrid drag grab offset (storePoint): (mouse - pane origin) at grab start.
+slotPaneGrab :: Word64
+slotPaneGrab = 0x50414E450000001D
+
+-- PaneGrid keyboard-navigation focus: focused pane id (0 = none, auto-first).
+slotPaneFocus :: Word64
+slotPaneFocus = 0x50414E450000001E
+
+-- PaneGrid maximize state: maximized pane id (0 = none).
+slotPaneMax :: Word64
+slotPaneMax = 0x50414E450000001F
+
+-- PaneGrid resize start (storePoint): (ratio, main-axis mouse) captured when a
+-- divider is first grabbed, so dragging moves it by delta rather than snapping.
+slotPaneResize :: Word64
+slotPaneResize = 0x50414E4500000020
+
+-- PaneGrid id seed (storeInt): next split / pane id to allocate. Strictly
+-- monotonic per grid — ids are never reused, so per-pane state keyed by pane
+-- id cannot collide with a closed pane's state.
+slotPaneNext :: Word64
+slotPaneNext = 0x50414E4500000021
 
 boolInt :: Bool -> Int
 boolInt b = if b then 1 else 0

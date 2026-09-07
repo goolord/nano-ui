@@ -35,8 +35,10 @@ module NanoUI.Style
   , packPanelStyle
   , unpackPanelStyle
   , themeSeries
+  , separatorTrackColor
   , scrollBarTrackColor
   , scrollBarThumbColor
+  , fadeAlpha
   , panelPaintPad
   , windowPad
   , windowMargin
@@ -531,18 +533,24 @@ themeSeries t =
   , themePurple t
   ]
 
+-- | Opaque tint of a base surface toward the separator color: the track color
+-- for scrollbar tracks, divider strips, and similar hairline chrome.
+separatorTrackColor :: Style -> Theme -> Color
+separatorTrackColor base theme =
+  lerpColor (styleBg base) (themeSeparator theme) 0.28
+
 -- Scroll track/thumb tints. Cell hosts use opaque theme mixes so light palettes
 -- stay visible on floating windows; SDL keeps the old translucent overlay.
 scrollBarTrackColor :: Style -> Theme -> Bool -> Color
 scrollBarTrackColor base theme terminal =
-  let solid = lerpColor (styleBg base) (themeSeparator theme) 0.28
-   in if terminal then solid else fadeAlpha solid 20
+  if terminal then separatorTrackColor base theme else fadeAlpha (separatorTrackColor base theme) 20
 
 scrollBarThumbColor :: Style -> Theme -> Bool -> Color
 scrollBarThumbColor base theme terminal =
   let solid = lerpColor (themeSeparator theme) (styleFg base) 0.58
    in if terminal then solid else fadeAlpha solid 130
 
+-- | Replaces the alpha channel of a color.
 fadeAlpha :: Color -> Word8 -> Color
 fadeAlpha (Color w) a = Color ((w .&. 0xFFFFFF00) .|. fromIntegral a)
 

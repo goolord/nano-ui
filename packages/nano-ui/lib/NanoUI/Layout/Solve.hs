@@ -876,7 +876,7 @@ writeScratchEntrySolving na host fm monoFm measure resolveFont ci i idxArr mainA
           SizingPercent -> clamp minW maxW (availW * wVal / 100)
           _ -> w
   h' <-
-    if hTag /= SizingFixed && (wTag == SizingGrow || wTag == SizingPercent || availW < w)
+    if hTag /= SizingFixed && hTag /= SizingPercent && (wTag == SizingGrow || wTag == SizingPercent || availW < w)
       then recomputeFitHeightAtWidth na host fm monoFm measure resolveFont ci (if wTag == SizingPercent then w' else availW)
       else pure $
         case hTag of
