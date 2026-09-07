@@ -117,6 +117,8 @@ testSpecs =
   , TestSpec "scroll-top-clip" True runScrollTopClipTest
   , TestSpec "select-overlay-damage" False runSelectOverlayDamageTest
   , TestSpec "text-input-dirty" False runTextInputDirtyTest
+  , TestSpec "search-field-clear" False runSearchFieldClearTest
+  , TestSpec "search-field-debounce" False runSearchFieldDebounceTest
   , TestSpec "modal-close-damage" False runModalCloseDamageTest
   , TestSpec "modal-open-damage" False runModalOpenDamageTest
   , TestSpec "window-close-damage" False runWindowCloseDamageTest

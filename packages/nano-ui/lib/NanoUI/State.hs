@@ -20,6 +20,7 @@ module NanoUI.State
   , sliderEmit
   , selectEmit
   , textInputEmit
+  , searchFieldEmit
   ) where
 
 import Control.Monad (when)
@@ -35,6 +36,7 @@ import NanoUI.Widgets
   , checkbox
   , respChanged
   , respClicked
+  , searchField
   , select
   , slider
   , textInput
@@ -114,5 +116,13 @@ selectEmit lbl opts initial toMsg = do
 textInputEmit :: (Typeable msg, Ui :> es) => Text -> Text -> (Text -> msg) -> Eff es Response
 textInputEmit lbl initial toMsg = do
   (resp, newVal) <- textInput lbl initial
+  when (respChanged resp) (emit (toMsg newVal))
+  pure resp
+
+-- | Debounced search field that emits a reducer message with the query once the
+-- text has settled (or immediately when cleared).
+searchFieldEmit :: (Typeable msg, Ui :> es) => Text -> Text -> (Text -> msg) -> Eff es Response
+searchFieldEmit lbl initial toMsg = do
+  (resp, newVal) <- searchField lbl initial
   when (respChanged resp) (emit (toMsg newVal))
   pure resp

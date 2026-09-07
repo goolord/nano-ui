@@ -45,6 +45,7 @@ import NanoUI.Draw
   )
 import NanoUI.Font
   ( FontMetrics (..)
+  , centeredTextY
   , checkboxBoxSize
   , labelContentInset
   , sliderTrackBounds
@@ -96,8 +97,12 @@ import NanoUI.Types (Color (..), ImageId (..), Rect (..), colorA, colorRGBA, cla
 import NanoUI.WidgetText
   ( buttonFlagsFromStyle
   , buttonVisualStyle
+  , searchFieldIconRects
+  , searchFieldTextClip
   , selectChevronCenterX
   , tableStripeColor
+  , textInputSearchBody
+  , textInputSearchMode
   , textNodeFontVariant
   , textNodeFontWeight
   , textNodeFontStyle
@@ -114,6 +119,7 @@ import NanoUI.Frame.Chrome
   , paintTableHeader
   , strokeStyledRect
   , textInputFocused
+  , textInputValue
   , widgetVisualStyle
   )
 import NanoUI.Frame.Scroll.Geometry (borderContentClip, padContentClip, scrollContentClip)
@@ -131,6 +137,7 @@ import NanoUI.Frame.TextEdit
   , drawTextAreaContent
   , drawTextInputCaret
   , drawTextInputSelection
+  , syncTextInputScroll
   , textInputFieldTextClip
   , textInputGeom
   , textAreaGeom
@@ -308,29 +315,28 @@ lowerNodeVisible ctx occluders idx nt x y w h rect fm theme terminal da =
       | not terminal -> do
           style <- widgetVisualStyle ctx nt idx
           focus <- textInputFocused ctx idx
-          let geom = textInputGeom (ctxHostProfile ctx) fm x y w h
-              fieldRect = tigFieldRect geom
-              clip = textInputFieldTextClip (ctxHostProfile ctx) geom fm
-          paintTextFieldFrame da theme style focus fieldRect
-          spans <- widgetTextSpans ctx nt idx x y w h
-          case spans of
-            (lblSpan : fieldSpan : _) -> do
-              let (Rect lx ly _ _, lbl, lfg, _) = lblSpan
-                  (Rect fx fy _ _, field, ffg, _) = fieldSpan
-              unless (T.null lbl) $ do
-                pushText da fm lx ly lbl lfg
-              withClip da clip $ do
-                drawTextInputSelection da ctx idx x y w h style
-                unless (T.null field) $ do
-                  pushText da fm fx fy field ffg
-                drawTextInputCaret da ctx idx x y w h style
-            [lblSpan] -> do
-              let (Rect lx ly _ _, lbl, lfg, _) = lblSpan
-              unless (T.null lbl) $ do
-                pushText da fm lx ly lbl lfg
-              withClip da clip $ do
-                drawTextInputCaret da ctx idx x y w h style
-            _ -> pure ()
+          si <- getStyleIdx (ctxNodeArena ctx) idx
+          if textInputSearchMode si
+            then paintSearchField ctx da fm theme style idx focus x y w h
+            else do
+              let geom = textInputGeom (ctxHostProfile ctx) fm x y w h
+                  fieldRect = tigFieldRect geom
+                  clip = textInputFieldTextClip (ctxHostProfile ctx) geom fm
+              paintTextFieldFrame da theme style focus fieldRect
+              spans <- widgetTextSpans ctx nt idx x y w h
+              case spans of
+                (lblSpan : fieldSpan : _) -> do
+                  let (Rect lx ly _ _, lbl, lfg, _) = lblSpan
+                      (Rect fx fy _ _, field, ffg, _) = fieldSpan
+                  unless (T.null lbl) $ do
+                    pushText da fm lx ly lbl lfg
+                  paintClippedFieldText ctx da fm style idx x y w h clip fx fy field ffg
+                [lblSpan] -> do
+                  let (Rect lx ly _ _, lbl, lfg, _) = lblSpan
+                  unless (T.null lbl) $ do
+                    pushText da fm lx ly lbl lfg
+                  paintClippedFieldText ctx da fm style idx x y w h clip lx ly T.empty lfg
+                _ -> pure ()
     NodeTextArea
       | not terminal -> do
           style <- widgetVisualStyle ctx nt idx
@@ -553,6 +559,76 @@ paintTextFieldFrame da theme style focus fieldRect = do
       fieldStyle = style {styleBorder = borderCol}
   fillStyledRect da False style fieldRect
   strokeStyledRect da False fieldStyle (rectX fieldRect) (rectY fieldRect) (rectW fieldRect) (rectH fieldRect)
+
+-- | Draw a single-line field's text, selection, and caret inside @clip@.
+-- @penX/penY@ locate @txt@ (absolute); the node rect @x y w h@ positions the
+-- field box that selection / caret geometry is resolved against.
+paintClippedFieldText ::
+  Context ->
+  DrawArena ->
+  FontMetrics ->
+  Style ->
+  NodeIdx ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Rect ->
+  Float ->
+  Float ->
+  T.Text ->
+  Color ->
+  IO ()
+paintClippedFieldText ctx da fm style idx x y w h clip penX penY txt fg = do
+  withClip da clip $ do
+    drawTextInputSelection da ctx idx x y w h style
+    unless (T.null txt) $ do
+      pushText da fm penX penY txt fg
+    drawTextInputCaret da ctx idx x y w h style
+
+-- | Caption-less search field: box fills the node rect, magnifier on the left,
+-- clear (×) on the right when there is text, and the editable value / caret /
+-- selection confined to the space between them.
+paintSearchField :: Context -> DrawArena -> FontMetrics -> Theme -> Style -> NodeIdx -> Bool -> Float -> Float -> Float -> Float -> IO ()
+paintSearchField ctx da fm theme style idx focus x y w h = do
+  let host = ctxHostProfile ctx
+      box = Rect x y w h
+      clip = searchFieldTextClip host fm x y w h
+      (magRect, clearRect) = searchFieldIconRects host fm x y w h
+  paintTextFieldFrame da theme style focus box
+  value <- textInputValue ctx idx
+  lbl <- getText (ctxNodeArena ctx) idx
+  let bg = styleBg style
+      baseFg = styleFg style
+      iconCol = lerpColor baseFg bg 0.45
+  drawSearchMagnifier da magRect iconCol
+  let display = textInputSearchBody lbl value focus
+      isEmpty = T.null value
+  scrollX <- syncTextInputScroll ctx idx x y w h
+  (ty, fg) <-
+    if T.null display
+      then pure (0, baseFg)
+      else do
+        (_tw, th) <- ctxMeasureText ctx display
+        pure
+          ( centeredTextY host fm y h th
+          , if isEmpty && not focus then lerpColor baseFg bg 0.5 else baseFg
+          )
+  paintClippedFieldText ctx da fm style idx x y w h clip (rectX clip - scrollX) ty display fg
+  when (not isEmpty) $
+    drawCloseIcon host fm da (rectX clearRect) (rectY clearRect) (rectW clearRect) (rectH clearRect) iconCol
+
+drawSearchMagnifier :: DrawArena -> Rect -> Color -> IO ()
+drawSearchMagnifier da (Rect x y w h) col = do
+  let cx = x + w / 2
+      cy = y + h / 2
+      s = min w h
+      r0 = s * 0.36
+      t = max 1.4 (s * 0.15)
+      startOff = r0 * 0.7071
+      endOff = r0 * 0.7071 + s * 0.22
+  pushRoundedStroke da (Rect (cx - r0) (cy - r0) (2 * r0) (2 * r0)) r0 t col
+  pushLine da (cx + startOff) (cy + startOff) (cx + endOff) (cy + endOff) t col
 
 verticallyCenteredBox :: Float -> Float -> Float -> Float
 verticallyCenteredBox y h box =

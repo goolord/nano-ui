@@ -92,7 +92,7 @@ import NanoUI.Layout.Arena
 import NanoUI.Layout.Solve (scrollBarSlotOf)
 import NanoUI.Style (AlignX (..), FontStyle (..), FontVariant (..), FontWeight (..), Padding (..), Style (..), Theme (..), styleBg, styleFg, themeSeparator, themeWindow)
 import NanoUI.Types (Color (..), Rect (..), colorRGBA, lerpColor, rectH, rectIntersect, rectW, rectX, rectY)
-import NanoUI.WidgetText (isCloseButtonStyle, isTableHeaderStyle)
+import NanoUI.WidgetText (isCloseButtonStyle, isTableHeaderStyle, textInputSearchMode, textInputSearchTerminalText)
 import NanoUI.WidgetText
   ( colorPickerCurrentLabel
   , colorPickerNewLabel
@@ -417,7 +417,11 @@ widgetHitRect ctx nt idx x y w h = do
   if not (isCellHost (ctxHostProfile ctx))
     then
       case nt of
-        NodeTextInput -> pure (tigFieldRect (textInputGeom (ctxHostProfile ctx) fm x y w h))
+        NodeTextInput -> do
+          si <- getStyleIdx (ctxNodeArena ctx) idx
+          if textInputSearchMode si
+            then pure (Rect x y w h)
+            else pure (tigFieldRect (textInputGeom (ctxHostProfile ctx) fm x y w h))
         NodeTextArea -> pure (tagFieldRect (textAreaGeom (ctxHostProfile ctx) fm x y w h))
         NodeButton -> do
           si <- getStyleIdx (ctxNodeArena ctx) idx
@@ -661,8 +665,12 @@ widgetTextPlacements ctx nt idx x y w h = do
         then do
           wid <- getWidgetId (ctxNodeArena ctx) idx
           store <- getStore ctx
+          styleBits <- getStyleIdx (ctxNodeArena ctx) idx
           let cursor = IM.findWithDefault (T.length value) (slotKey slotCursor (intKey wid)) (storeInt store)
-              shown = textInputTerminalText lbl value cursor focus
+              shown =
+                if textInputSearchMode styleBits
+                  then textInputSearchTerminalText lbl value cursor focus
+                  else textInputTerminalText lbl value cursor focus
           (tw, th) <- measureTxt shown
           pure [(shown, x + ix, centeredTextY (ctxHostProfile ctx) fm y h th, tw, th)]
         else do

@@ -44,6 +44,7 @@ module NanoUI.Frame.TextEdit
   , collapseTextAreaSelection
   , applyTextFieldMenuAction
   , textFieldMenuActionEnabled
+  , searchClearHit
     -- * Text area geometry and interaction
   , TextAreaGeom (..)
   , TextAreaHit (..)
@@ -149,6 +150,7 @@ import NanoUI.Layout.Arena
   , findNodeRevM
   , getNodeType
   , getRect
+  , getStyleIdx
   , getText
   , getWidgetId
   )
@@ -183,7 +185,14 @@ import NanoUI.Types
   , v2X
   , v2Y
   )
-import NanoUI.WidgetText (textInputFieldHeight, textInputFieldText, textInputLabelGap)
+import NanoUI.WidgetText
+  ( textInputFieldHeight
+  , textInputFieldText
+  , textInputLabelGap
+  , textInputSearchMode
+  , searchFieldIconRects
+  , searchFieldTextClip
+  )
 import NanoUI.Widgets.TextArea
   ( TextAreaState (..)
   , applyTextAreaMenuAction
@@ -308,13 +317,18 @@ textFieldRectAt ctx idx = do
       fm = ctxFontMetrics ctx
       labelH = layoutLineHeight host fm
       gap = textInputLabelGap fm
-      fieldH =
-        if nt == NodeTextInput
-          then textInputFieldHeight fm
-          else max 0 (h - labelH - gap)
+      fieldH = if nt == NodeTextInput then textInputFieldHeight fm else max 0 (h - labelH - gap)
   if h + 0.5 < labelH + gap + (if nt == NodeTextInput then fieldH else 1)
     then pure (Rect x y w h)
-    else pure (Rect x (y + labelH + gap) w fieldH)
+    else
+      case nt of
+        NodeTextInput -> do
+          si <- getStyleIdx (ctxNodeArena ctx) idx
+          if textInputSearchMode si && not (isCellHost host)
+            then pure (Rect x y w h)
+            else pure (Rect x (y + labelH + gap) w fieldH)
+        NodeTextArea -> pure (Rect x (y + labelH + gap) w fieldH)
+        _ -> pure (Rect x y w h)
 
 textFieldMenuRect :: Context -> WidgetId -> IO (Maybe Rect)
 textFieldMenuRect ctx wid = do
@@ -619,6 +633,55 @@ textInputFieldTextClip host geom fm =
         (max 0 (rectW field - 2 * ix))
         (max 0 (rectH field - 2 * iy))
 
+-- | Resolve the box a field paints/hits and the clip its text is confined to.
+-- Search fields are caption-less: the whole node rect is the box and text is
+-- clipped around the magnifier / clear chrome.
+nodeTextFieldGeom :: Context -> NodeIdx -> Float -> Float -> Float -> Float -> IO (Rect, Rect)
+nodeTextFieldGeom ctx idx x y w h = do
+  si <- getStyleIdx (ctxNodeArena ctx) idx
+  let host = ctxHostProfile ctx
+      fm = ctxFontMetrics ctx
+  if textInputSearchMode si && not (isCellHost host)
+    then pure (Rect x y w h, searchFieldTextClip host fm x y w h)
+    else
+      let geom = textInputGeom host fm x y w h
+       in pure (tigFieldRect geom, textInputFieldTextClip host geom fm)
+
+-- | Whether the pointer is over the clear (×) button of a non-empty search
+-- field. Search fields reserve that slot even when empty, but the button is
+-- only active when there is text to clear.
+searchClearHit :: Context -> WidgetId -> V2 -> IO Bool
+searchClearHit ctx wid mouse = do
+  mIdx <- findNodeByWidgetId ctx wid
+  case mIdx of
+    Nothing -> pure False
+    Just idx -> do
+      si <- getStyleIdx (ctxNodeArena ctx) idx
+      let terminal = isCellHost (ctxHostProfile ctx)
+      if not (textInputSearchMode si) || terminal
+        then pure False
+        else do
+          value <- textInputValue ctx idx
+          if T.null value
+            then pure False
+            else do
+              (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+              let (_, clearRect) = searchFieldIconRects (ctxHostProfile ctx) (ctxFontMetrics ctx) x y w h
+              pure (rectContains clearRect mouse)
+
+-- | Clear a search field. The debounced pulse picks the empty text up as an
+-- immediate (empty) commit on the next frame.
+clearSearchField :: Context -> WidgetId -> IO ()
+clearSearchField ctx wid = do
+  store <- getStore ctx
+  let key = intKey wid
+      storeInt' =
+        IM.insert (slotKey slotAnchor key) 0 $
+          IM.insert (slotKey slotCursor key) 0 (storeInt store)
+      store' = store {storeText = IM.insert key "" (storeText store), storeInt = storeInt'}
+  setStore ctx store'
+  markDirty ctx
+
 tagTextInputClippedSpans ::
   HostProfile -> Rect -> Float -> Float -> Float -> Float -> FontMetrics -> [(Rect, T.Text, Color, Color)] -> [(Rect, T.Text, Color, Color, Rect)]
 tagTextInputClippedSpans host parentClip x y w h fm spans =
@@ -676,12 +739,11 @@ syncTextInputScroll ctx idx x y w h = do
   let key = intKey wid
   value <- textInputValue ctx idx
   focus <- textInputFocused ctx idx
+  (_, clip) <- nodeTextFieldGeom ctx idx x y w h
   let cursor = IM.findWithDefault (T.length value) (slotKey slotCursor key) (storeInt store)
       oldScroll = IM.findWithDefault 0 (slotKey slotTextInputScroll key) (storeFloat store)
       fm = ctxFontMetrics ctx
       host = ctxHostProfile ctx
-      geom = textInputGeom host fm x y w h
-      clip = textInputFieldTextClip host geom fm
       availW = rectW clip
       newScroll = computeTextInputScroll host fm availW value cursor oldScroll focus
   when (newScroll /= oldScroll) $ do
@@ -707,18 +769,16 @@ drawTextInputSelection da ctx idx x y w h style = do
             hasSel = selLo < selHi
         when hasSel $ do
           theme <- readIORef (ctxTheme ctx)
+          (box, clip) <- nodeTextFieldGeom ctx idx x y w h
           let fm = ctxFontMetrics ctx
-              geom = textInputGeom (ctxHostProfile ctx) fm x y w h
-              fieldRect = tigFieldRect geom
-              (ix, _) = widgetContentInset (ctxHostProfile ctx) fm
               selBg = selectionBgColor (themeAccent theme) (styleBg style)
               host = ctxHostProfile ctx
               wLo = textDisplayWidth host fm (T.take selLo value)
               wHi = textDisplayWidth host fm (T.take selHi value)
               lineH = layoutLineHeight host fm
-              ty = centeredTextY host fm (rectY fieldRect) (rectH fieldRect) lineH
+              ty = centeredTextY host fm (rectY box) (rectH box) lineH
           scrollX <- syncTextInputScroll ctx idx x y w h
-          let selX = rectX fieldRect + ix + wLo - scrollX
+          let selX = rectX clip + wLo - scrollX
               selW = wHi - wLo
           drawTextSelectionLine da selX ty selW lineH selBg
 
@@ -737,17 +797,15 @@ drawTextInputCaret da ctx idx x y w h style = do
             cursor = IM.findWithDefault (T.length value) (slotKey slotCursor key) (storeInt store)
         lbl <- getText (ctxNodeArena ctx) idx
         let fm = ctxFontMetrics ctx
-            geom = textInputGeom (ctxHostProfile ctx) fm x y w h
-            fieldRect = tigFieldRect geom
-            (ix, _) = widgetContentInset (ctxHostProfile ctx) fm
+            host = ctxHostProfile ctx
             fieldTxt = textInputFieldText lbl value focus
             prefix = T.take (max 0 (min (T.length fieldTxt) cursor)) fieldTxt
-            host = ctxHostProfile ctx
             pw = textDisplayWidth host fm prefix
             lineH = layoutLineHeight host fm
-            ty = centeredTextY host fm (rectY fieldRect) (rectH fieldRect) lineH
+        (box, clip) <- nodeTextFieldGeom ctx idx x y w h
+        let ty = centeredTextY host fm (rectY box) (rectH box) lineH
         scrollX <- syncTextInputScroll ctx idx x y w h
-        let (caretX, caretY, caretH) = selectionCaretGeom (rectX fieldRect + ix - scrollX) ty pw lineH
+        let (caretX, caretY, caretH) = selectionCaretGeom (rectX clip - scrollX) ty pw lineH
         drawTextCaret da caretX caretY caretH (styleFg style)
 
 applyTextInputClick :: Context -> WidgetId -> Text -> Int -> Int -> IO ()
@@ -788,12 +846,9 @@ textInputGeomForWidget ctx wid = do
         then pure Nothing
         else do
           (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-          let fm = ctxFontMetrics ctx
-              geom = textInputGeom (ctxHostProfile ctx) fm x y w h
-              field = tigFieldRect geom
-              (ix, _) = widgetContentInset (ctxHostProfile ctx) fm
+          (field, clip) <- nodeTextFieldGeom ctx idx x y w h
           scrollX <- syncTextInputScroll ctx idx x y w h
-          let contentX = rectX field + ix - scrollX
+          let contentX = rectX clip - scrollX
           value <- textInputValue ctx idx
           pure (Just (field, contentX, value))
 
@@ -1348,18 +1403,22 @@ finalizeTextFieldMouse ctx inp = do
             inField = rectContains fieldRect mouse
         if inputMousePressed inp && inField
           then do
-            idx <- textCharAtX ctx value contentX (v2X mouse)
-            clicks <-
-              normalizeTextFieldClicks
-                ctx
-                focus
-                idx
-                0
-                0
-                False
-                (max 1 (inputMouseClicks inp))
-            applyTextInputClick ctx focus value idx clicks
-            setTextInputDrag ctx (Just (TextInputDrag focus idx 0 0 False clicks))
+            cleared <- searchClearHit ctx focus mouse
+            if cleared
+              then clearSearchField ctx focus
+              else do
+                idx <- textCharAtX ctx value contentX (v2X mouse)
+                clicks <-
+                  normalizeTextFieldClicks
+                    ctx
+                    focus
+                    idx
+                    0
+                    0
+                    False
+                    (max 1 (inputMouseClicks inp))
+                applyTextInputClick ctx focus value idx clicks
+                setTextInputDrag ctx (Just (TextInputDrag focus idx 0 0 False clicks))
           else do
             mDrag <- getTextInputDrag ctx
             case mDrag of

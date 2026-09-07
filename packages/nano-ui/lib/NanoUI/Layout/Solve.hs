@@ -117,6 +117,8 @@ import NanoUI.WidgetText
   , textInputLabelGap
   , textInputMinWidth
   , textInputPlaceholder
+  , textInputSearchMode
+  , searchFieldReserveW
   , isTableHeaderStyle
   , tableHeaderDisplayText
   )
@@ -455,6 +457,19 @@ measureTextField host fm measure txt multiline = do
           contentW = max textInputMinWidth (if multiline then lw else max lw pw)
       pure (contentW, lh + gap + fieldH, 0, 0)
 
+-- Caption-less search box: single row tall, icons counted in the width budget.
+measureSearchField ::
+  HostProfile ->
+  FontMetrics ->
+  (Text -> IO (Float, Float)) ->
+  Text ->
+  IO (Float, Float, Float, Float)
+measureSearchField host fm measure txt = do
+  let lbl = if T.null txt then " " else txt
+  (lw, _) <- measure lbl
+  let contentW = max textInputMinWidth lw + searchFieldReserveW host fm
+  pure (contentW, textInputFieldHeight fm, 0, 0)
+
 measureWidget :: NodeArena -> HostProfile -> FontMetrics -> (Text -> IO (Float, Float)) -> NodeIdx -> IO ()
 measureWidget na host fm measure idx = do
   nt <- getNodeType na idx
@@ -521,7 +536,10 @@ measureWidget na host fm measure idx = do
         let lbl = if T.null txt then " " else txt
         (mw, mh, extraH) <- colorPickerMeasureSize host fm measure lbl
         pure (mw, mh, 0, extraH)
-      NodeTextInput -> measureTextField host fm measure txt False
+      NodeTextInput
+        | textInputSearchMode si && not (isCellHost host) ->
+            measureSearchField host fm measure txt
+        | otherwise -> measureTextField host fm measure txt False
       NodeTextArea -> measureTextField host fm measure txt True
       _ -> do
         body <-
