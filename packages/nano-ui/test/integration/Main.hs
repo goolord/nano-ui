@@ -244,6 +244,7 @@ testSpecs =
   , TestSpec "custom-widget-interaction" False runCustomWidgetInteractionTest
   , TestSpec "custom-widget-knob" False runReferenceKnobTest
   , TestSpec "custom-widget-toggle" False runReferenceToggleSwitchTest
+  , TestSpec "custom-widget-progress-bar" False runReferenceProgressBarTest
   , TestSpec "custom-widget-sparkline" True runReferenceProgressAndSparklineTest
   , TestSpec "drop-target" False runDropTargetTest
   , TestSpec "font-size" True runFontSizeTest

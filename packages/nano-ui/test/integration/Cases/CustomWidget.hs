@@ -5,6 +5,7 @@ module Cases.CustomWidget
   , runCustomWidgetInteractionTest
   , runReferenceKnobTest
   , runReferenceToggleSwitchTest
+  , runReferenceProgressBarTest
   , runReferenceProgressAndSparklineTest
   , runDropTargetTest
   ) where
@@ -140,6 +141,19 @@ runReferenceToggleSwitchTest ctx failed = do
   ((respToggled2, val2), _, _, _) <- runFrame ctx release ui
   assert failed (not val2)
   assert failed (respClicked respToggled2)
+
+-- | Verifies the horizontal linear progress bar widget draws a track and fill.
+runReferenceProgressBarTest :: Context -> IORef Int -> IO ()
+runReferenceProgressBarTest ctx failed = do
+  let inp0 = withInput 300 300
+      ui = column $ progressBar 0.4
+  resp <- warmup2 ctx inp0 ui
+  let r = respRect resp
+  assert failed (rectH r == 12)
+  assert failed (rectW r >= 120)
+  (_, _, draw, _) <- runFrame ctx inp0 ui
+  assert failed (drawCmdCount draw > 0)
+  assert failed (drawIndexCount draw >= 3)
 
 -- | Verifies circular progress ring and sparkline widgets render properly.
 runReferenceProgressAndSparklineTest :: Context -> IORef Int -> IO ()

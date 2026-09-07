@@ -537,10 +537,11 @@ lookupDrawing ctx wid = do
 cachedDrawingOps :: Context -> WidgetId -> Rect -> DrawingBuild -> IO (Vector DrawOp)
 cachedDrawingOps ctx wid rect build = do
   let k = intKey wid
+  animated <- IM.member k <$> getLiveAnimations ctx
   dc <- readIORef (ctxDrawingCache ctx)
   case IM.lookup k (dcsDrawOpCache dc) of
     Just (r, ops)
-      | rectW r == rectW rect && rectH r == rectH rect ->
+      | not animated && rectW r == rectW rect && rectH r == rectH rect ->
           if rectX r == rectX rect && rectY r == rectY rect
             then pure ops
             else do
@@ -655,10 +656,12 @@ cachedCustomDrawingOps ctx wid rect cdc build = do
       hov = cdcHovered cdc
       prs = cdcPressed cdc
       foc = cdcFocused cdc
+  animated <- IM.member k <$> getLiveAnimations ctx
   dc <- readIORef (ctxDrawingCache ctx)
   case IM.lookup k (dcsCustomDrawOpCache dc) of
     Just (r, h, p, f, ops)
-      | h == hov && p == prs && f == foc && rectW r == rectW rect && rectH r == rectH rect ->
+      | not animated
+          && h == hov && p == prs && f == foc && rectW r == rectW rect && rectH r == rectH rect ->
           if rectX r == rectX rect && rectY r == rectY rect
             then pure ops
             else do

@@ -170,6 +170,8 @@ module NanoUI.Widgets
   , toggleSwitchWith
   , circularProgress
   , circularProgressWith
+  , progressBar
+  , progressBarWith
   , sparkline
   , sparklineWith
   , animate

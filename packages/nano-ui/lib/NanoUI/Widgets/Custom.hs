@@ -50,6 +50,8 @@ module NanoUI.Widgets.Custom
   , toggleSwitchWith
   , circularProgress
   , circularProgressWith
+  , progressBar
+  , progressBarWith
   , sparkline
   , sparklineWith
   ) where
@@ -98,6 +100,8 @@ import NanoUI.Style
   , AlignY (..)
   , Layout
   , defaultLayout
+  , fillW
+  , fixedH
   , fixedWH
   , styleActiveBg
   , styleBg
@@ -565,6 +569,48 @@ circularProgressWith layout diameter frac = do
         when (clampedFrac > 0) $
           drawCircle (V2 cx cy) (r * clampedFrac) accent
     }
+
+-- | Horizontal linear progress bar. The fraction is clamped to 0..1; the bar
+-- fills the available width at a fixed height (like a slider track).
+progressBar
+  :: (Ui :> es)
+  => Float                -- ^ Progress fraction (0.0 to 1.0)
+  -> Eff es Response
+progressBar = progressBarWith defaultLayout progressBarDefaultHeight
+
+-- | Horizontal linear progress bar with a custom layout and bar height.
+progressBarWith
+  :: (Ui :> es)
+  => Layout
+  -> Float                -- ^ Bar height in pixels
+  -> Float                -- ^ Progress fraction (0.0 to 1.0)
+  -> Eff es Response
+progressBarWith layout height frac =
+  let !barH = max 0 height
+   in customWidget_ defaultCustomWidgetSpec
+        { widgetLayout = fillW (fixedH barH layout)
+        , widgetMeasure = Just $ \_ _ _ -> (progressBarDefaultWidth, barH)
+        , widgetDraw = \cdc (Rect x y w h) -> runCanvas $ do
+            let theme = cdcTheme cdc
+                trackCol = styleBg (themeButton theme)
+                borderCol = styleBorder (themeButton theme)
+                fillCol = themeAccent theme
+                barW = max 0 w
+                barH' = max 0 h
+                rad = barH' / 2
+                clamped = max 0 (min 1 frac)
+                fillWpx = barW * clamped
+                fillRad = if barH' <= 0 then 0 else min rad (fillWpx / 2)
+            drawRoundedRect (Rect x y barW barH') rad trackCol
+            when (clamped > 0 && fillWpx > 0) $
+              drawRoundedRect (Rect x y fillWpx barH') fillRad fillCol
+            drawStrokeRoundedRect (Rect x y barW barH') rad 1 borderCol
+        }
+
+-- | Default height and minimum content width for 'progressBar'.
+progressBarDefaultHeight, progressBarDefaultWidth :: Float
+progressBarDefaultHeight = 12.0
+progressBarDefaultWidth = 120.0
 
 -- | Compact inline data chart drawing smooth anti-aliased polyline segments.
 sparkline
