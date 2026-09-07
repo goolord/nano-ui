@@ -9,7 +9,8 @@
 -- Panes are rendered through the user-provided 'pgViewPane', which receives a
 -- 'PaneGridCtx' with immediate-mode actions to split, close, maximize, or
 -- restore the pane. Dividers can be dragged to resize; panes can be grabbed by
--- their pick rect and dropped onto another pane (center = swap, edge = split);
+-- their pick rect and dropped onto another pane (center = swap, edge = split)
+-- or onto the grid's outer edge to restructure the whole grid at top level;
 -- arrow keys navigate between panes; @m@/@x@ maximize/close and @Escape@
 -- restores while the grid is focused.
 module NanoUI.Widgets.PaneGrid
@@ -136,6 +137,7 @@ import NanoUI.Widgets.SplitPane
   , paneExist
   , splitLength
   , subtreeMin
+  , topLevelDrop
   , treeMovePane
   , treePanes
   , treeRemovePane
@@ -163,6 +165,11 @@ data PaneGridConfig es = PaneGridConfig
     -- form the divider's real layout gutter. The resize cursor and grab work
     -- anywhere in that gutter while only 'pgSpacing' is drawn crisp, so the
     -- interaction space is far wider than the visible line (default 6).
+  , pgEdgeBand :: !Float
+    -- ^ Thickness of the grid's outer edge that acts as a top-level drop zone
+    -- (default 20). Dragging a pane into this band restructures the whole grid
+    -- instead of a single pane: the tree is wrapped in a new top-level split
+    -- with the dragged pane on that side.
   , pgViewPane :: !(Word64 -> PaneGridCtx es -> Eff es PaneView)
     -- ^ Renders the content of one pane.
   }
@@ -174,6 +181,7 @@ defaultPaneGridConfig =
     , pgSpacing = 4
     , pgMinSize = 40
     , pgLeeway = 6
+    , pgEdgeBand = 20
     , pgViewPane = \_ _ -> pure (PaneView "" False Nothing)
     }
 
@@ -322,6 +330,7 @@ paneGrid cfg = do
       spacing = max 0 (pgSpacing cfg)
       minSize = max 0 (pgMinSize cfg)
       leeway = max 0 (pgLeeway cfg)
+      edgeBand = max 0 (pgEdgeBand cfg)
       gutter = spacing + 2 * leeway
   st <- uiIO (getStore ctx)
   (tree0, seed1) <- case lookupTree key st of
@@ -354,7 +363,7 @@ paneGrid cfg = do
       divMap = M.fromList [(diSplitId d, d) | d <- dividers]
   changedRef <- uiIO (newIORef False)
   let mGrab = IM.lookup grabK (storePoint st)
-      dgi = computeDragInfo drag0 regions mGrab mouse
+      dgi = computeDragInfo drag0 baseRect edgeBand regions mGrab mouse
       dgiShown = dgiActive dgi && (isJust (dgiGhost dgi) || isJust (dgiZone dgi))
       env =
         GridEnv
@@ -644,8 +653,11 @@ drawOverlay theme title ghost zone =
 -- | Pure drag-and-drop geometry for the current frame. Geometry is computed
 -- for as long as the gesture id is armed (not just while the button is held),
 -- so the drop zone is still resolvable on the frame the button is released.
-computeDragInfo :: Int -> Map Word64 Rect -> Maybe (Float, Float) -> V2 -> DragInfo
-computeDragInfo drag0 regions mGrab mouse
+-- 'baseRect' is the grid's own rect: its outer band (thickness 'band') is a
+-- top-level drop zone, and the pointer there restructures the whole grid;
+-- otherwise the pane under the pointer is the target.
+computeDragInfo :: Int -> Rect -> Float -> Map Word64 Rect -> Maybe (Float, Float) -> V2 -> DragInfo
+computeDragInfo drag0 baseRect band regions mGrab mouse
   | drag0 <= 0 = DragInfo False False Nothing Nothing
   | otherwise =
       let pid = fromIntegral drag0
@@ -667,9 +679,11 @@ computeDragInfo drag0 regions mGrab mouse
             , q /= pid
             , rectHit r mouse
             ]
-          zone = case under of
-            (q, r) : _ -> Just (dropPreview r mouse q)
-            [] -> Nothing
+          zone = case topLevelDrop band baseRect mouse of
+            Just z -> Just z
+            Nothing -> case under of
+              (q, r) : _ -> Just (dropPreview r mouse q)
+              [] -> Nothing
        in DragInfo True moved ghost zone
 
 -- | Apply resize / drag transitions, writing to the widget store.

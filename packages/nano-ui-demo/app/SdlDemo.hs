@@ -547,6 +547,7 @@ demoUi = do
               heading "Pane Grid"
               muted "Drag a divider to resize. Drag a pane onto another pane to reorder:"
               muted "drop on its center to swap, on its edge to split it."
+              muted "Drag a pane to the grid's outer edge to restructure at the top level."
               muted "+ splits vertically, = splits horizontally, x closes, M maximizes, R restores."
               muted "Arrow keys jump between panes while the grid is focused."
               (hdrResp, headersOn) <- checkbox "Pane headers" showPaneHeaders
@@ -1133,9 +1134,39 @@ selftest = do
     unless (paneCount spansPane5 == 2) $ fail "selftest: pane drag lost a pane"
     let afterSwap = snd (minimumBy (comparing (rectX . fst)) (titles spansPane5))
     unless (afterSwap /= snd leftTitle5) $ fail "selftest: pane drag did not swap the panes"
+    -- Top-level drop: build three side-by-side panes, then drag the middle one
+    -- to the grid's outer left edge. The grid must restructure at the top level
+    -- into one pane on the left and the other two side-by-side on the right
+    -- half, rather than a flat third column.
+    plus3 <- requireSpan "selftest: split button for three panes" (findExact "+" spansPane5)
+    clickPos ctx' env base plus3
+    spansPane3c <- collectTextSpans ctx'
+    unless (paneCount spansPane3c == 3) $ fail "selftest: third split did not yield three panes"
+    let ts3 = titles spansPane3c
+        leftT3 = minimumBy (comparing (rectX . fst)) ts3
+        rightT3 = maximumBy (comparing (rectX . fst)) ts3
+        -- Exactly three panes: the middle is the one that is neither extreme.
+        midT3 = fromMaybe leftT3 (listToMaybe (filter (\t -> t /= leftT3 && t /= rightT3) ts3))
+        fromTop = titleCenter midT3
+        toTop = V2 (rectX (fst leftT3) - 10) (rectY (fst leftT3) + 150)
+    dragPos ctx' env base fromTop toTop
+    spansTop <- collectTextSpans ctx'
+    unless (paneCount spansTop == 3) $ fail "selftest: top-level drop lost a pane"
+    let tsTop = titles spansTop
+        leftAfterTop = minimumBy (comparing (rectX . fst)) tsTop
+        rightPanesTop = filter ((/= snd leftAfterTop) . snd) tsTop
+        rightLeftTop = minimumBy (comparing (rectX . fst)) rightPanesTop
+        rightRightTop = maximumBy (comparing (rectX . fst)) rightPanesTop
+        -- A top-level wrap gives the left pane the whole left half, so the gap
+        -- to the first right pane (~half the width) exceeds the gap between the
+        -- two right panes (~a quarter); a flat third column keeps them equal.
+        gapLeft = rectX (fst rightLeftTop) - rectX (fst leftAfterTop)
+        gapRight = rectX (fst rightRightTop) - rectX (fst rightLeftTop)
+    unless (snd leftAfterTop == snd midT3) $ fail "selftest: top-level drop did not move the middle pane left"
+    unless (gapLeft > gapRight + 10) $ fail "selftest: top-level drop did not collapse the remaining panes onto one side"
     -- Pane headers are optional: turn them off and the titles vanish but the
     -- panes (and their content) remain.
-    hdrBtn <- requireSpan "selftest: headers checkbox" (findExact "Pane headers" spansPane5)
+    hdrBtn <- requireSpan "selftest: headers checkbox" (findExact "Pane headers" spansTop)
     clickPos ctx' env base hdrBtn
     spansPane6 <- collectTextSpans ctx'
     unless (paneCount spansPane6 == 0) $ fail "selftest: disabling pane headers did not hide them"
