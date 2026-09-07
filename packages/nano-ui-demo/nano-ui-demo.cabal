@@ -70,6 +70,8 @@ executable nano-ui-sdl-demo
         base ^>=4.22.0.0,
         bytestring ^>=0.12,
         diagrams-lib >=1.6 && <1.7,
+        effectful ^>=2.6,
+        effectful-core ^>=2.6,
         nano-ui,
         nano-ui-diagrams,
         nano-ui-sdl,

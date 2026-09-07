@@ -215,7 +215,31 @@ lowerNodeVisible ::
   IO ()
 lowerNodeVisible ctx occluders idx nt x y w h rect fm theme terminal da =
   case nt of
-    NodeContainer -> walkChildrenWithOccluders ctx occluders idx
+    NodeContainer -> do
+      walkChildrenWithOccluders ctx occluders idx
+      wid <- getWidgetId (ctxNodeArena ctx) idx
+      mBuild <- lookupCustomDrawing ctx wid
+      case mBuild of
+        Nothing -> pure ()
+        Just build -> do
+          disabled <- isDisabled ctx wid
+          focused <- (== wid) <$> getFocusId ctx
+          hot <- getHotId ctx
+          active <- readIORef (ctxActiveId ctx)
+          let hovered = hot == wid && not disabled
+              pressed = active == wid && not disabled
+              cdc =
+                CustomDrawContext
+                  { cdcHovered = hovered
+                  , cdcPressed = pressed
+                  , cdcFocused = focused
+                  , cdcActive = active == wid
+                  , cdcDisabled = disabled
+                  , cdcTheme = theme
+                  , cdcHost = ctxHostProfile ctx
+                  , cdcFont = fm
+                  }
+          withClip da rect (emitDrawOps da fm (build cdc rect))
     NodePanel -> do
       si <- getStyleIdx (ctxNodeArena ctx) idx
       let style = if si /= 0

@@ -21,6 +21,8 @@ module NanoUI.Types
   , contrastRatio
   , ImageId (..)
   , rectContains
+  , rectNonEmpty
+  , rectHit
   , rectUnion
   , rectIntersect
   , rectFullyInside
@@ -201,6 +203,16 @@ word32Of = fromIntegral
 rectContains :: Rect -> V2 -> Bool
 rectContains (Rect x y w h) (V2 px py) =
   px >= x && px < x + w && py >= y && py < y + h
+
+-- | A rect that has actually been laid out (nonzero extent).
+{-# INLINE rectNonEmpty #-}
+rectNonEmpty :: Rect -> Bool
+rectNonEmpty r = rectW r > 0 && rectH r > 0
+
+-- | Hit test that ignores rects that have not been laid out yet.
+{-# INLINE rectHit #-}
+rectHit :: Rect -> V2 -> Bool
+rectHit r p = rectNonEmpty r && rectContains r p
 
 {-# INLINE rectUnion #-}
 rectUnion :: Rect -> Rect -> Rect

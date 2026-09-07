@@ -211,6 +211,13 @@ module NanoUI.Widgets
   , headless
   , Colonnade
   , Headed (..)
+  , PaneGridConfig (..)
+  , defaultPaneGridConfig
+  , PaneGridCtx (..)
+  , PaneView (..)
+  , PaneGridResponse (..)
+  , GridAxis (..)
+  , paneGrid
   )
 where
 
@@ -258,6 +265,15 @@ import NanoUI.Widgets.Menu
   , menuHeader
   )
 import NanoUI.Widgets.Node (RightClickable (..), onRightClick, setSubmitted)
+import NanoUI.Widgets.PaneGrid
+  ( GridAxis (..)
+  , PaneGridConfig (..)
+  , PaneGridCtx (..)
+  , PaneGridResponse (..)
+  , PaneView (..)
+  , defaultPaneGridConfig
+  , paneGrid
+  )
 import NanoUI.Font
   ( fmLineHeight
   , sliderTrackBounds

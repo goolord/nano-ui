@@ -9,9 +9,14 @@ module SdlDemo
     ) where
 
 import Control.Monad (unless, void, when)
+import Data.Char (isDigit)
 import Data.Foldable (foldlM, for_)
+import Data.List (maximumBy, minimumBy)
 import Data.Maybe (fromMaybe, listToMaybe)
+import Data.Ord (comparing)
 import Data.Primitive.SmallArray (SmallArray, smallArrayFromList)
+import Data.Word (Word64)
+import Effectful (Eff, type (:>))
 import GHC.Clock (getMonotonicTime)
 import Diagrams.Prelude
   ( Diagram
@@ -38,6 +43,7 @@ import NanoUI.Testing.Harness
   , findRightmost
   , hasText
   , requireSpan
+  , spanLabel
   )
 import NanoUI.Testing.Harness qualified as Harness
 import System.Console.GetOpt
@@ -141,6 +147,7 @@ data DemoTab
   | Typography
   | List
   | Table
+  | Panes
   | Plots
   | Diagnostics
   deriving (Bounded, Enum, Eq, Ord, Read, Show)
@@ -227,6 +234,7 @@ demoUi = do
     setFolderPath (maybe "" T.pack (listToMaybe paths))
   (dropLog, setDropLog) <- useText ""
   (dropHovering, setDropHovering) <- useFlag False
+  (showPaneHeaders, setShowPaneHeaders) <- useFlag True
   (dropRaw, setDropRaw) <- useText ""
   rawInp <- askInput
   let rawDrop = T.intercalate " | " [T.pack (show (dropEventType ev)) <> " " <> dropEventData ev | ev <- V.toList (inputDrops rawInp)]
@@ -535,6 +543,19 @@ demoUi = do
               kv "Sorted by" (tableColumnLabel nextSort)
               kv "Order" (tableSortDirText nextSort)
               kv "Hidden" (tableHiddenLabel (tableHiddenIndices tableResp))
+            Panes -> do
+              heading "Pane Grid"
+              muted "Drag a divider to resize. Drag a pane onto another pane to reorder:"
+              muted "drop on its center to swap, on its edge to split it."
+              muted "+ splits vertically, = splits horizontally, x closes, M maximizes, R restores."
+              muted "Arrow keys jump between panes while the grid is focused."
+              (hdrResp, headersOn) <- checkbox "Pane headers" showPaneHeaders
+              when (respChanged hdrResp) (setShowPaneHeaders headersOn)
+              pgr <- paneGrid (demoPaneGridCfg headersOn)
+              sep
+              kv "Panes" (T.pack (show (pgrPaneCount pgr)))
+              kv "Focused" (T.pack (show (pgrFocusedPane pgr)))
+              kv "Maximized" (T.pack (show (pgrMaximizedPane pgr)))
             Plots -> do
               heading "Plots"
               muted "Auto ticks, shared scales, and decimation."
@@ -683,6 +704,55 @@ colPeople =
 
 demoTableCfg :: TableCfg
 demoTableCfg = defaultTableCfg
+
+demoPaneGridCfg :: (Ui :> es) => Bool -> PaneGridConfig es
+demoPaneGridCfg showHeader =
+  defaultPaneGridConfig
+    { pgLayout = fillW . fixedH 380
+    , pgSpacing = 4
+    , pgMinSize = 60
+    , pgLeeway = 6
+    , pgViewPane = demoPaneView showHeader
+    }
+
+demoPaneTitle :: Word64 -> Bool -> T.Text
+demoPaneTitle pid maximized =
+  "Pane "
+    <> T.pack (show pid)
+    <> if maximized then "  (maximized)" else ""
+
+demoPaneBlurb :: Word64 -> T.Text
+demoPaneBlurb pid = "Contents of " <> T.pack (show pid) <> ". Drag the pane to move or split it."
+
+-- | The header is just the pane's own content, so it is entirely optional:
+-- 'showHeader' 'False' drops it and the pane becomes a bare canvas body. The
+-- whole pane is still a drag handle either way ('pvDraggable'), so a headerless
+-- pane can be grabbed anywhere to reorder it.
+demoPaneHeader :: (Ui :> es) => Word64 -> Bool -> PaneGridCtx es -> Eff es ()
+demoPaneHeader pid maximized pctx =
+  panelWith (padXY 8 5 . fillW) $
+    rowWith (tight . gap 8 . alignMid . fillW) $ do
+      box (fixedWH 3 16 defaultLayout) demoAccent
+      void $ labelWith (tight . fontBold . fontMuted) (demoPaneTitle pid maximized)
+      flex
+      void $ clickButton "+" (void (pgcSplit pctx AxisV))
+      void $ clickButton "=" (void (pgcSplit pctx AxisH))
+      void $ clickButton (if maximized then "R" else "M") (if maximized then pgcRestore pctx else pgcMaximize pctx)
+      void $ clickButton "x" (pgcClose pctx)
+
+demoPaneView :: (Ui :> es) => Bool -> Word64 -> PaneGridCtx es -> Eff es PaneView
+demoPaneView showHeader pid pctx = do
+  let maximized = pgcMaximized pctx
+  columnWith (tight . gap 6 . fillW) $ do
+    when showHeader (demoPaneHeader pid maximized pctx)
+    box (fillW defaultLayout) demoAccent
+    void $ muted (demoPaneBlurb pid)
+  pure
+    PaneView
+      { pvTitle = demoPaneTitle pid maximized
+      , pvDraggable = True
+      , pvDragPick = Nothing
+      }
 
 demoPeople :: [DemoPerson]
 demoPeople =
@@ -992,6 +1062,84 @@ selftest = do
       dragPos ctx' env base sizeSpan (V2 (v2X sizeSpan + dx) (v2Y sizeSpan))
     spansTypeAfter <- collectTextSpans ctx'
     unless (hasText "Live Playground" spansTypeAfter) $ fail "selftest: typography missing after size changes"
+    clickTab ctx' env base "Panes"
+    spansPane0 <- collectTextSpans ctx'
+    unless (hasText "Pane 1" spansPane0) $ fail "selftest: pane grid missing after Panes tab"
+    let paneCount ss =
+          length
+            [ ()
+            | (_, txt, _, _, _) <- ss
+            , let l = spanLabel txt
+            , "Pane " `T.isPrefixOf` l
+            , let rest = T.drop 5 l
+            , not (T.null rest)
+            , T.all isDigit (T.takeWhile (/= ' ') rest)
+            ]
+    unless (paneCount spansPane0 == 1) $ fail "selftest: expected exactly one pane initially"
+    plus <- requireSpan "selftest: split button" (findExact "+" spansPane0)
+    clickPos ctx' env base plus
+    spansPane1 <- collectTextSpans ctx'
+    unless (paneCount spansPane1 == 2) $ fail "selftest: split did not create a second pane"
+    maxBtn <- requireSpan "selftest: maximize button" (findExact "M" spansPane1)
+    clickPos ctx' env base maxBtn
+    spansPaneMax <- collectTextSpans ctx'
+    unless (hasText "maximized" spansPaneMax) $ fail "selftest: maximize did not fill the grid"
+    restoreBtn <- requireSpan "selftest: restore button" (findExact "R" spansPaneMax)
+    clickPos ctx' env base restoreBtn
+    spansPane2 <- collectTextSpans ctx'
+    unless (paneCount spansPane2 == 2) $ fail "selftest: restore lost a pane"
+    closeBtn <- requireSpan "selftest: close button" (findExact "x" spansPane2)
+    clickPos ctx' env base closeBtn
+    spansPane3 <- collectTextSpans ctx'
+    unless (paneCount spansPane3 == 1) $ fail "selftest: close did not remove a pane"
+    -- Whole-pane drag-and-drop: re-split into two side-by-side panes, then grab
+    -- the left pane anywhere and drop it on the center of the right pane. The
+    -- two panes swap, so the pane whose title was leftmost must change.
+    plus2 <- requireSpan "selftest: split button after close" (findExact "+" spansPane3)
+    clickPos ctx' env base plus2
+    spansPane4 <- collectTextSpans ctx'
+    unless (paneCount spansPane4 == 2) $ fail "selftest: re-split did not yield two panes"
+    let titles ss =
+          [ (r, l)
+          | (r, txt, _, _, _) <- ss
+          , let l = spanLabel txt
+          , "Pane " `T.isPrefixOf` l
+          , let rest = T.drop 5 l
+          , not (T.null rest)
+          , T.all isDigit (T.takeWhile (/= ' ') rest)
+          ]
+        titleCenter (r, _) = V2 (rectX r + rectW r / 2) (rectY r + rectH r / 2)
+        leftTitle4 = minimumBy (comparing (rectX . fst)) (titles spansPane4)
+        rightTitle4 = maximumBy (comparing (rectX . fst)) (titles spansPane4)
+    -- Edge drop: grab the right pane and drop it on the left pane's LEFT edge.
+    -- The dragged pane must land on the left side of the new split, becoming
+    -- the new leftmost pane.
+    let edgeFrom = titleCenter rightTitle4
+        edgeTo = V2 (rectX (fst leftTitle4) - 10) (rectY (fst leftTitle4) + 150)
+    dragPos ctx' env base edgeFrom edgeTo
+    spansEdge <- collectTextSpans ctx'
+    unless (paneCount spansEdge == 2) $ fail "selftest: edge drop lost a pane"
+    let leftAfterEdge = snd (minimumBy (comparing (rectX . fst)) (titles spansEdge))
+    unless (leftAfterEdge /= snd leftTitle4) $ fail "selftest: edge drop did not land on the left side"
+    -- Center drop: grab the left pane and drop it on the center of the right
+    -- pane. The two panes swap, so the leftmost title must change again.
+    let leftTitle5 = minimumBy (comparing (rectX . fst)) (titles spansEdge)
+        rightTitle5 = maximumBy (comparing (rectX . fst)) (titles spansEdge)
+        halfGap = (rectX (fst rightTitle5) - rectX (fst leftTitle5)) / 2
+        fromSwap = titleCenter leftTitle5
+        toSwap = V2 (rectX (fst rightTitle5) + halfGap) (rectY (fst rightTitle5) + 160)
+    dragPos ctx' env base fromSwap toSwap
+    spansPane5 <- collectTextSpans ctx'
+    unless (paneCount spansPane5 == 2) $ fail "selftest: pane drag lost a pane"
+    let afterSwap = snd (minimumBy (comparing (rectX . fst)) (titles spansPane5))
+    unless (afterSwap /= snd leftTitle5) $ fail "selftest: pane drag did not swap the panes"
+    -- Pane headers are optional: turn them off and the titles vanish but the
+    -- panes (and their content) remain.
+    hdrBtn <- requireSpan "selftest: headers checkbox" (findExact "Pane headers" spansPane5)
+    clickPos ctx' env base hdrBtn
+    spansPane6 <- collectTextSpans ctx'
+    unless (paneCount spansPane6 == 0) $ fail "selftest: disabling pane headers did not hide them"
+    unless (hasText "Contents of" spansPane6) $ fail "selftest: headerless panes lost their content"
     clickTab ctx' env base "Controls"
     spansCtl <- collectTextSpans ctx'
     unless (hasText "Feature" spansCtl) $ fail "selftest: Controls missing after tab back"

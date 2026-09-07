@@ -8,6 +8,7 @@ module NanoUI.Widgets.Behavior
   , useKeyNav
   , KeyNav (..)
   , useDismissable
+  , dragThresholdPx
   , ensureInt
   , ensureIntSet
   , putInt
@@ -51,8 +52,12 @@ import NanoUI.Input
   )
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO)
 import NanoUI.Store (WidgetStore (..))
-import NanoUI.Types (Rect (..), rectContains, v2X, v2Y)
+import NanoUI.Types (Rect (..), rectHit, v2X, v2Y)
 import qualified Data.Text as T
+
+-- | Pointer slop in pixels before a held press counts as a drag.
+dragThresholdPx :: Float
+dragThresholdPx = 8
 
 data DragAxis = DragAxisX | DragAxisY
   deriving (Eq, Show)
@@ -100,7 +105,7 @@ useDrag1D axis lo hi current track = do
   store <- uiIO (getStore ctx)
   gesture <- uiIO (menuPointerGestureActive ctx)
   let active0 = IM.findWithDefault 0 dragK (storeInt store) /= 0
-      hit = rectW track > 0 && rectH track > 0 && rectContains track (inputMousePos inp) && not gesture
+      hit = rectHit track (inputMousePos inp) && not gesture
       active = down && not gesture && (active0 || hit)
       frac =
         if trackLen <= 0
@@ -142,7 +147,7 @@ useReorder order items = do
       release = inputMouseReleased inp
       hit =
         find
-          (\(_, r) -> rectW r > 0 && rectH r > 0 && rectContains r mouse)
+          (\(_, r) -> rectHit r mouse)
           items
   store <- uiIO (getStore ctx)
   let from0 = IM.findWithDefault (-1) dragK (storeInt store)
@@ -152,7 +157,7 @@ useReorder order items = do
         if release || not down
           then -1
           else fromPress
-      moved = dragging >= 0 && abs (v2X mouse - startX) > 8
+      moved = dragging >= 0 && abs (v2X mouse - startX) > dragThresholdPx
       dropTo = if moved then fmap fst hit else Nothing
       nextOrder =
         case (release, moved, dropTo) of
@@ -240,8 +245,7 @@ useDismissable panel = do
   ctx <- askContext
   inp <- askInput
   let mouse = inputMousePos inp
-      inside =
-        rectW panel > 0 && rectH panel > 0 && rectContains panel mouse
+      inside = rectHit panel mouse
       esc = inputKeysElem KeyEscape (inputKeys inp)
       backdrop = (inputMousePressed inp || inputMouseRightPressed inp) && not inside
       dismissed = esc || backdrop
