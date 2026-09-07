@@ -385,6 +385,8 @@ module NanoUI
   , toggleSwitchWith
   , circularProgress
   , circularProgressWith
+  , progressBar
+  , progressBarWith
   , sparkline
   , sparklineWith
   , onClick
@@ -767,6 +769,8 @@ import NanoUI.Widgets
   , toggleSwitchWith
   , circularProgress
   , circularProgressWith
+  , progressBar
+  , progressBarWith
   , sparkline
   , sparklineWith
   , button

@@ -12,6 +12,7 @@ import Control.Monad (unless, void, when)
 import Data.Foldable (foldlM, for_)
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Primitive.SmallArray (SmallArray, smallArrayFromList)
+import GHC.Clock (getMonotonicTime)
 import Diagrams.Prelude
   ( Diagram
   , circle
@@ -27,8 +28,8 @@ import Diagrams.Prelude
 import NanoUI
 import NanoUI.Backend.Sdl
 import NanoUI.Debug (CoreDebugSnapshot (..), formatCoreRtsRows)
-import NanoUI.Context (ctxResolveFont, ctxResolveMeasure)
-import NanoUI.Monad (askInput)
+import NanoUI.Context (ctxResolveFont, ctxResolveMeasure, startAnimation)
+import NanoUI.Monad (askContext, askInput)
 import NanoUI.Diagrams
 import NanoUI.Testing (Context, collectOverlayTextSpans, collectTextSpans, registerImage)
 import NanoUI.Testing.Harness
@@ -362,6 +363,13 @@ demoUi = do
                 setDropLog (if null droppedLines then dropLog else T.intercalate "\n" droppedLines)
               when (dropHovered dropTgt && not dropHovering) (setDropHovering True)
               when (not (dropHovered dropTgt) && dropHovering) (setDropHovering False)
+              sep
+              heading "Progress"
+              muted "A single rounded bar, smoothly oscillating 0–100%."
+              ctx <- askContext
+              now <- uiIO (realToFrac <$> getMonotonicTime)
+              progResp <- progressBar (0.5 + 0.5 * sin (2 * pi * now / 6))
+              uiIO $ startAnimation ctx (respId progResp) 0 1 1e9
             Typography -> do
               heading "Typography & Font Styling"
               muted "Font sizing, variable weights, synthetic slant, and text decorations."
