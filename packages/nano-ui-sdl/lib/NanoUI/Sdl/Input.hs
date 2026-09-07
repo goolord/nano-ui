@@ -24,6 +24,7 @@ import Data.Primitive.SmallArray
   )
 import qualified Data.Text as T
 import Data.Text (Text)
+import qualified Data.Vector as V
 import Data.Word (Word32)
 import Foreign.C.String (peekCString)
 import Foreign.C.Types (CFloat)
@@ -37,6 +38,8 @@ import NanoUI
   ( Input (..)
   , Key (..)
   , Modifiers (..)
+  , DropEvent (..)
+  , DropType (..)
   , V2 (..)
   , appendInputKey
   , v2Add
@@ -83,6 +86,7 @@ data SdlEvent
   | EvMouseRightPress V2 Modifiers
   | EvMouseRightRelease V2 Modifiers
   | EvScroll V2
+  | EvDrop DropEvent
   | EvRefresh
   deriving (Eq, Show)
 
@@ -140,6 +144,11 @@ decodeEvent p = do
         1025 -> mouseButton p' True
         1026 -> mouseButton p' False
         1027 -> mouseWheel p'
+        4096 -> dropEvent p' DropFile
+        4097 -> dropEvent p' DropText
+        4098 -> dropEvent p' DropBegin
+        4099 -> dropEvent p' DropComplete
+        4100 -> dropEvent p' DropPosition
         _ -> pure emptySmallArray
 
 keyDown :: Ptr SDL_Event -> IO (SmallArray SdlEvent)
@@ -209,6 +218,24 @@ windowResized p = do
   let Sint32 w = getField @"data1" we
       Sint32 h = getField @"data2" we
   pure (singletonEv (EvResize (fromIntegral w) (fromIntegral h)))
+
+dropEvent :: Ptr SDL_Event -> DropType -> IO (SmallArray SdlEvent)
+dropEvent p ty = do
+  de <- peek p.drop
+  let x = getField @"x" de :: CFloat
+      y = getField @"y" de :: CFloat
+      pos =
+        case ty of
+          DropPosition -> Just (mousePos (realToFrac x) (realToFrac y))
+          DropFile -> Just (mousePos (realToFrac x) (realToFrac y))
+          DropText -> Just (mousePos (realToFrac x) (realToFrac y))
+          _ -> Nothing
+      dataPtr = PtrConst.unsafeToPtr (getField @"data'" de)
+  payload <-
+    if dataPtr == nullPtr
+      then pure ""
+      else T.pack <$> peekCString dataPtr
+  pure (singletonEv (EvDrop (DropEvent ty pos payload)))
 
 peekModifiers :: IO Modifiers
 peekModifiers = modFromKeymod <$> getModStateSafe
@@ -304,6 +331,7 @@ applyEvent inp ev =
         , inputMouseRightReleased = True
         }
     EvScroll delta -> inp {inputScroll = v2Add (inputScroll inp) delta}
+    EvDrop dropEv -> inp {inputDrops = V.snoc (inputDrops inp) dropEv}
     EvRefresh -> inp
 
 isButtonEdge :: SdlEvent -> Bool

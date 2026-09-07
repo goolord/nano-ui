@@ -28,6 +28,7 @@ import NanoUI
 import NanoUI.Backend.Sdl
 import NanoUI.Debug (CoreDebugSnapshot (..), formatCoreRtsRows)
 import NanoUI.Context (ctxResolveFont, ctxResolveMeasure)
+import NanoUI.Monad (askInput)
 import NanoUI.Diagrams
 import NanoUI.Testing (Context, collectOverlayTextSpans, collectTextSpans, registerImage)
 import NanoUI.Testing.Harness
@@ -50,6 +51,7 @@ import Text.Printf (printf)
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
 import qualified Data.Text.Read as T.Read
+import qualified Data.Vector as V
 
 data DemoConfig = DemoConfig
   { cfgVsync :: !Bool
@@ -220,6 +222,12 @@ demoUi = do
     setSavePath (maybe "" T.pack (listToMaybe paths))
   useFileDialog folderDlg setFolderDlg $ \paths ->
     setFolderPath (maybe "" T.pack (listToMaybe paths))
+  (dropLog, setDropLog) <- useText ""
+  (dropHovering, setDropHovering) <- useFlag False
+  (dropRaw, setDropRaw) <- useText ""
+  rawInp <- askInput
+  let rawDrop = T.intercalate " | " [T.pack (show (dropEventType ev)) <> " " <> dropEventData ev | ev <- V.toList (inputDrops rawInp)]
+  when (not (T.null rawDrop)) (setDropRaw rawDrop)
   scrollWith (tight . grow) $
     columnWith (padAll 6 . gap gapLayout . fillW) $ do
       panelWith (padXY 14 10 . gap gapInline . fillW) $
@@ -262,6 +270,7 @@ demoUi = do
             kv "Open file" (orDash openPath)
             kv "Save file" (orDash savePath)
             kv "Folder" (orDash folderPath)
+            kv "Dropped" (orDash (T.take 80 (firstDropLine dropLog)))
           card $ do
             heading "Gallery"
             rowWith (tight . gap gapInline . fillW) $ do
@@ -325,6 +334,32 @@ demoUi = do
                 when (respClicked folderBtn) $ do
                   mdid <- askOpenFolderDialog defaultFileDialogOptions
                   setFolderDlg mdid
+              sep
+              heading "Drag & Drop"
+              muted "Drag a file or highlighted text from another app onto the zone."
+              (_, _, dropTgt) <-
+                dropZone (padXY 16 12 . gap gapText . fillW $ defaultLayout) $ do
+                  columnWith (tight . gap gapText . fillW) $ do
+                    rowWith (tight . gap gapInline . alignMid . fillW) $ do
+                      void $ labelWith fontBold "Drop Zone"
+                      flex
+                      void $ labelEx (tight . fontMono . fontMuted $ defaultLayout) (if dropHovering then "hovering" else "idle")
+                    void $ labelEx (tight . fontMuted . fillW $ defaultLayout) $
+                      if dropHovering
+                        then "Release to accept dropped files or text."
+                        else "Files land here; text lands here too."
+                    when (not (T.null dropLog)) $ do
+                      sep
+                      void $ labelEx (tight . fontMono . fillW $ defaultLayout) dropLog
+              onDrop dropTgt $ do
+                let keepFront n t = if T.length t <= n then t else T.take (n - 1) t <> "…"
+                    keepEnd n t = if T.length t <= n then t else "…" <> T.takeEnd (n - 1) t
+                    droppedLines =
+                      [ "file:  " <> keepEnd 60 f | f <- dropFiles dropTgt ]
+                        ++ [ "text:  " <> keepFront 60 t | t <- dropTexts dropTgt ]
+                setDropLog (if null droppedLines then dropLog else T.intercalate "\n" droppedLines)
+              when (dropHovered dropTgt && not dropHovering) (setDropHovering True)
+              when (not (dropHovered dropTgt) && dropHovering) (setDropHovering False)
             Typography -> do
               heading "Typography & Font Styling"
               muted "Font sizing, variable weights, synthetic slant, and text decorations."
@@ -508,6 +543,7 @@ demoUi = do
               kv "Draw Calls" (T.pack (printf "%d" (dbgCmds c)))
               kv "Vertices / Indices" (T.pack (printf "%d / %d" (dbgVerts c) (dbgIndices c)))
               kv "Renderer" (dbgRenderer snap <> if dbgVsync snap then " (vsync on)" else " (vsync off)")
+              kv "Last drop event" (orDash dropRaw)
               kv "Evaluation" "Zero-Cost Inactive Tabs"
               kv "State" "SrcLoc Preserved"
   when debugOpen $ do
@@ -596,6 +632,10 @@ useFileDialog mdid clear onPaths =
 
 orDash :: T.Text -> T.Text
 orDash s = if T.null s then "-" else s
+
+-- | First line of a multi-line log, for compact summary rows.
+firstDropLine :: T.Text -> T.Text
+firstDropLine = maybe "" id . listToMaybe . T.lines
 
 data DemoPerson = DemoPerson
   { demoPersonName :: !T.Text

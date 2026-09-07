@@ -32,6 +32,9 @@ module NanoUI
   , Input (..)
   , Key (..)
   , Modifiers (..)
+  , DropType (..)
+  , DropEvent (..)
+  , emptyDropEvents
   , emptyInput
   , inputInteracted
   , inputPointerHeld
@@ -367,6 +370,11 @@ module NanoUI
   , useWheelDelta
   , useClickGesture
   , ClickGesture (..)
+  , DropTarget (..)
+  , useDrop
+  , onDrop
+  , onDropHover
+  , dropZone
   , knob
   , knobWith
   , toggleSwitch
@@ -525,7 +533,10 @@ import NanoUI.Input
   ( Input (..)
   , Key (..)
   , Modifiers (..)
+  , DropEvent (..)
+  , DropType (..)
   , appendInputKey
+  , emptyDropEvents
   , emptyInput
   , emptyInputKeys
   , foldInputKeys
@@ -858,6 +869,13 @@ import NanoUI.Widgets
   )
 import NanoUI.Widgets.Node (setSubmitted)
 import NanoUI.Widgets.Combinators (stripedRow)
+import NanoUI.Widgets.Drop
+  ( DropTarget (..)
+  , dropZone
+  , onDrop
+  , onDropHover
+  , useDrop
+  )
 import NanoUI.Widgets.Tabs
   ( Tab (..)
   , TabOrientation (..)

@@ -6,10 +6,12 @@ module Cases.CustomWidget
   , runReferenceKnobTest
   , runReferenceToggleSwitchTest
   , runReferenceProgressAndSparklineTest
+  , runDropTargetTest
   ) where
 
 import Control.Monad (void)
 import Data.IORef (IORef)
+import Data.Vector qualified as V
 import NanoUI
 import NanoUI.Testing
   ( Context
@@ -149,3 +151,59 @@ runReferenceProgressAndSparklineTest ctx failed = do
   (_, _, draw, _) <- runFrame ctx inp0 ui
   assert failed (drawCmdCount draw > 0)
   assert failed (drawIndexCount draw >= 12)
+
+-- | Verifies the composable drag-and-drop hook: hover, file, text, and bounds.
+runDropTargetTest :: Context -> IORef Int -> IO ()
+runDropTargetTest ctx failed = do
+  let inp0 = withInput 300 300
+      bounds = Rect 10 10 100 100
+      dropPoint = V2 60 60
+      ui = column (useDrop bounds)
+      dropsInp ds = inp0 {inputDrops = V.fromList ds}
+  _ <- warmup2 ctx inp0 ui
+
+  let beginInp = dropsInp [DropEvent DropBegin Nothing ""]
+  (tgtBegin, _, _, _) <- runFrame ctx beginInp ui
+  assert failed (not (dropHovered tgtBegin))
+
+  let hoverInp = dropsInp [DropEvent DropPosition (Just dropPoint) ""]
+  (tgtHover, _, _, _) <- runFrame ctx hoverInp ui
+  assert failed (dropHovered tgtHover)
+  assert failed (dropPosition tgtHover == Just dropPoint)
+
+  -- Payload coordinates are ignored; attribution follows the last drag position.
+  let dropInp =
+        dropsInp
+          [ DropEvent DropFile (Just dropPoint) "/tmp/a.txt"
+          , DropEvent DropText (Just dropPoint) "hello"
+          ]
+  (tgtDrop, _, _, _) <- runFrame ctx dropInp ui
+  assert failed (dropReceived tgtDrop)
+  assert failed (dropFiles tgtDrop == ["/tmp/a.txt"])
+  assert failed (dropTexts tgtDrop == ["hello"])
+
+  -- A drop whose coordinates SDL reports as (0,0) (no final position seen)
+  -- still lands on the target the pointer was hovering.
+  let originDrop =
+        dropsInp
+          [ DropEvent DropFile (Just (V2 0 0)) "/tmp/origin.txt"
+          , DropEvent DropComplete Nothing ""
+          ]
+  (tgtOrigin, _, _, _) <- runFrame ctx originDrop ui
+  assert failed (dropFiles tgtOrigin == ["/tmp/origin.txt"])
+
+  -- The completing drop clears hover state.
+  (tgtDone, _, _, _) <- runFrame ctx inp0 ui
+  assert failed (not (dropHovered tgtDone))
+
+  -- A fresh drag that moves outside the target no longer delivers to it.
+  _ <- runFrame ctx (dropsInp [DropEvent DropBegin Nothing ""]) ui
+  _ <- runFrame ctx (dropsInp [DropEvent DropPosition (Just (V2 250 250)) ""]) ui
+  let outInp =
+        dropsInp
+          [ DropEvent DropFile (Just (V2 250 250)) "/tmp/out.txt"
+          , DropEvent DropComplete Nothing ""
+          ]
+  (tgtOut, _, _, _) <- runFrame ctx outInp ui
+  assert failed (not (dropReceived tgtOut))
+  assert failed (null (dropFiles tgtOut))
