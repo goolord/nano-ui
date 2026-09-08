@@ -30,7 +30,9 @@ import NanoUI.Widgets.ColorPicker
   )
 import NanoUI.Context
   ( Context (..)
+  , TextOpKey (..)
   , WidgetStore (..)
+  , cachedTextSpans
   , getScrollOffset
   , getStore
   , intKey
@@ -294,6 +296,10 @@ findAncestorMaxW na idx = go idx 0
 
 -- Placement uses glyph ink (alignedTextPen), not TTF_GetStringSize. Wrap
 -- still measures with the host so line breaks stay on the TTF width.
+--
+-- A static label's placed spans go through 'cachedTextSpans': while content,
+-- font, colors, alignment, and wrap width are unchanged, the previous list is
+-- reused instead of re-measuring, re-wrapping, and re-truncating every frame.
 collectNodeTextSpans :: Context -> IM.IntMap (Maybe NodeType) -> NodeIdx -> IO [(Rect, T.Text, Color, Color)]
 collectNodeTextSpans ctx floatCache idx = do
   nt <- getNodeType (ctxNodeArena ctx) idx
@@ -304,33 +310,16 @@ collectNodeTextSpans ctx floatCache idx = do
       raw <- getText (ctxNodeArena ctx) idx
       si <- getStyleIdx (ctxNodeArena ctx) idx
       mCustomCol <- getNodeFontColor (ctxNodeArena ctx) idx
-      let fvar = textNodeFontVariant si
+      wid <- getWidgetId (ctxNodeArena ctx) idx
+      let host = ctxHostProfile ctx
+          fvar = textNodeFontVariant si
           (txt0, defaultFg, defaultBg) = floatingLabelPaint floatCache ctx idx theme fvar raw
           fg = fromMaybe defaultFg mCustomCol
-          fgFill = fg
           mStripe = tableStripeColor theme si
-          paintBg = case mStripe of
-            Just bg -> bg
-            Nothing -> defaultBg
-          stripeSpans =
-            case mStripe of
-              Just bg | isCellHost (ctxHostProfile ctx) ->
-                let wi = max 1 (round w :: Int)
-                    hi = max 1 (round h :: Int)
-                    ox = fromIntegral (round x :: Int)
-                    oy = fromIntegral (round y :: Int)
-                 in
-                  [ ( Rect ox (oy + fromIntegral r) (fromIntegral wi) 1
-                    , T.replicate wi " "
-                    , fgFill
-                    , bg
-                    )
-                  | r <- [0 .. hi - 1]
-                  ]
-              _ -> []
       if T.null raw
-        then pure stripeSpans
+        then pure (stripeRowSpans host mStripe fg x y w h)
         else do
+          let paintBg = fromMaybe defaultBg mStripe
           fontSizeVal <- getNodeFontSize (ctxNodeArena ctx) idx
           let fweight = textNodeFontWeight si
               fstyle  = textNodeFontStyle si
@@ -344,73 +333,113 @@ collectNodeTextSpans ctx floatCache idx = do
                 else fst <$> ctxResolveFont ctx fontSizeVal fweight fstyle fvar
           let (ix, _) =
                 case mStripe of
-                  Just _ -> tableCellInset (ctxHostProfile ctx) textFm
-                  Nothing -> labelContentInset (ctxHostProfile ctx) textFm
-              measureWord =
-                if isBaseSans
-                  then \t -> fmap fst (ctxMeasureText ctx t)
-                  else if isBaseMono
-                    then \t -> pure (fst (measureText (ctxHostProfile ctx) (ctxMonoFontMetrics ctx) t))
-                    else \t -> fmap fst (ctxResolveMeasure ctx fontSizeVal fweight fstyle fvar t)
+                  Just _ -> tableCellInset host textFm
+                  Nothing -> labelContentInset host textFm
           ax <- getAlignX (ctxNodeArena ctx) idx
           (_, _, maxW, _) <- getMinMax (ctxNodeArena ctx) idx
           (wTag, _) <- getWidthSizing (ctxNodeArena ctx) idx
-          tw0 <-
-            if isBaseSans
-              then fst <$> ctxMeasureText ctx txt0
-              else if isBaseMono
-                then pure (fst (measureText (ctxHostProfile ctx) (ctxMonoFontMetrics ctx) txt0))
-                else fst <$> ctxResolveMeasure ctx fontSizeVal fweight fstyle fvar txt0
           isRowChild <- parentIsRow (ctxNodeArena ctx) idx
           effMaxW <-
             if maxW < 1e8
               then pure maxW
               else findAncestorMaxW (ctxNodeArena ctx) idx
-          let hasNewlines = T.any (== '\n') txt0
-              wrapCap
+          let wrapCap
                 | effMaxW < 1e8 = max 0 effMaxW
                 | wTag == SizingGrow && w > 0 = w
                 | otherwise = effMaxW
               canWrap = not isRowChild && wrapCap < 1e8
               wrapW = max 0 (wrapCap - 2 * ix)
-              lineH = layoutLineHeight (ctxHostProfile ctx) textFm
-          textSpans <-
-            if hasNewlines || (canWrap && wrapCap + 0.5 < tw0)
-              then do
-                textLines <-
-                  if isCellHost (ctxHostProfile ctx)
-                    then pure (wrapTextLines (ctxHostProfile ctx) textFm txt0 wrapW)
-                    else wrapTextLinesIO measureWord textFm txt0 wrapW
-                pure
-                  [ ( Rect
-                        tx
-                        (centeredTextY (ctxHostProfile ctx) textFm (y + onGrid (fmSnapScale textFm) (fromIntegral i * lineH)) lineH lineH)
-                        used
-                        lineH
-                    , line
-                    , fg
-                    , paintBg
-                    )
-                  | (i, line) <- zip [(0 :: Int) ..] textLines
-                  , let (tx, used) = alignedTextPen ax x w ix textFm line
-                  ]
-              else do
-                let contentW = max 0 (w - 2 * ix)
-                dispTxt <-
-                  if tw0 > contentW && contentW > 0 && (wTag == SizingGrow || maxW < 1e8)
-                    then
-                      if isCellHost (ctxHostProfile ctx) || fvar == FontMono
-                        then pure (truncateTextAdvance textFm contentW txt0)
-                        else truncateTextIO measureWord contentW txt0
-                    else pure txt0
-                let (tx, used) = alignedTextPen ax x w ix textFm dispTxt
-                    py = centeredTextY (ctxHostProfile ctx) textFm y h lineH
-                pure [(Rect tx py used lineH, dispTxt, fg, paintBg)]
-          pure (stripeSpans ++ textSpans)
+              lineH = layoutLineHeight host textFm
+              cacheKey =
+                TextOpKey
+                  { tokRect = Rect x y w h
+                  , tokContent = txt0
+                  , tokStyle = si
+                  , tokStripe = mStripe
+                  , tokFg = fg
+                  , tokBg = paintBg
+                  , tokFontSize = fontSizeVal
+                  , tokWeight = fweight
+                  , tokSlant = fstyle
+                  , tokVariant = fvar
+                  , tokAlign = ax
+                  , tokWrapW = wrapW
+                  , tokCanWrap = canWrap
+                  , tokLineH = fmLineHeight textFm
+                  , tokSnap = fmSnapScale textFm
+                  }
+          cachedTextSpans ctx wid cacheKey $ do
+            let stripeSpans = stripeRowSpans host mStripe fg x y w h
+                measureWord =
+                  if isBaseSans
+                    then \t -> fmap fst (ctxMeasureText ctx t)
+                    else if isBaseMono
+                      then \t -> pure (fst (measureText host (ctxMonoFontMetrics ctx) t))
+                      else \t -> fmap fst (ctxResolveMeasure ctx fontSizeVal fweight fstyle fvar t)
+            tw0 <-
+              if isBaseSans
+                then fst <$> ctxMeasureText ctx txt0
+                else if isBaseMono
+                  then pure (fst (measureText host (ctxMonoFontMetrics ctx) txt0))
+                  else fst <$> ctxResolveMeasure ctx fontSizeVal fweight fstyle fvar txt0
+            let hasNewlines = T.any (== '\n') txt0
+            textSpans <-
+              if hasNewlines || (canWrap && wrapCap + 0.5 < tw0)
+                then do
+                  textLines <-
+                    if isCellHost host
+                      then pure (wrapTextLines host textFm txt0 wrapW)
+                      else wrapTextLinesIO measureWord textFm txt0 wrapW
+                  pure
+                    [ ( Rect
+                          tx
+                          (centeredTextY host textFm (y + onGrid (fmSnapScale textFm) (fromIntegral i * lineH)) lineH lineH)
+                          used
+                          lineH
+                      , line
+                      , fg
+                      , paintBg
+                      )
+                    | (i, line) <- zip [(0 :: Int) ..] textLines
+                    , let (tx, used) = alignedTextPen ax x w ix textFm line
+                    ]
+                else do
+                  let contentW = max 0 (w - 2 * ix)
+                  dispTxt <-
+                    if tw0 > contentW && contentW > 0 && (wTag == SizingGrow || maxW < 1e8)
+                      then
+                        if isCellHost host || fvar == FontMono
+                          then pure (truncateTextAdvance textFm contentW txt0)
+                          else truncateTextIO measureWord contentW txt0
+                      else pure txt0
+                  let (tx, used) = alignedTextPen ax x w ix textFm dispTxt
+                      py = centeredTextY host textFm y h lineH
+                  pure [(Rect tx py used lineH, dispTxt, fg, paintBg)]
+            pure (stripeSpans ++ textSpans)
     else
       if isWidgetNode nt
         then widgetTextSpans ctx nt idx x y w h
         else pure []
+
+-- Terminal table-stripe rows behind striped text cells. Pure in its inputs,
+-- so the text span cache can hold the (allocation-heavy) result too.
+stripeRowSpans :: HostProfile -> Maybe Color -> Color -> Float -> Float -> Float -> Float -> [(Rect, T.Text, Color, Color)]
+stripeRowSpans host mStripe fg x y w h =
+  case mStripe of
+    Just bg | isCellHost host ->
+      let wi = max 1 (round w :: Int)
+          hi = max 1 (round h :: Int)
+          ox = fromIntegral (round x :: Int)
+          oy = fromIntegral (round y :: Int)
+       in
+        [ ( Rect ox (oy + fromIntegral r) (fromIntegral wi) 1
+          , T.replicate wi " "
+          , fg
+          , bg
+          )
+        | r <- [0 .. hi - 1]
+        ]
+    _ -> []
 
 widgetHitRect :: Context -> NodeType -> NodeIdx -> Float -> Float -> Float -> Float -> IO Rect
 widgetHitRect ctx nt idx x y w h = do

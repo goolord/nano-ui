@@ -59,6 +59,7 @@ module Cases
   , runSliderTest
   , runTabFocusTest
   , runTextMultilineTest
+  , runTextOpCacheTest
   , runTextWrapAssignedTest
   , runTextWrapTest
   , runTwoCardWrapTest
@@ -82,16 +83,16 @@ import Cases.TextInput
 import Cases.Tooltip
 import Cases.Window
 import Cases.Font
-import Control.Monad (forM, replicateM, void)
+import Control.Monad (forM, forM_, replicateM, void)
 import Control.Concurrent (threadDelay)
 import Data.ByteString qualified as BS
-import Data.IORef (IORef)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
 import Data.List (nub, sort)
 import Data.Text qualified as T
 import Data.Vector qualified as V
 import Effectful.State.Static.Local (State, evalState, get, modify)
 import NanoUI
-import NanoUI.Context (Context (..))
+import NanoUI.Context (Context (..), TextOpKey (..), cachedTextSpans, pruneDrawOpCache)
 import NanoUI.Layout.Arena (NodeType (..), arenaCount, getNodeType, getNodeValue)
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertGt, measureRespW, runClickReduce, withInput)
@@ -516,6 +517,79 @@ runTextWrapTest _ failed = do
   _ <- runFrame ctx inp (labelEx (defaultLayout {layoutMaxW = 8}) long)
   spans <- collectTextSpans ctx
   assert failed (length spans >= 3)
+
+-- The text op cache must hit while (content, font, colors, alignment, wrap
+-- width) are unchanged, translate on move, rebuild on change, and get pruned
+-- once its label stops painting.
+runTextOpCacheTest :: Context -> IORef Int -> IO ()
+runTextOpCacheTest _ failed = do
+  ctx <- newContext
+  let wid = WidgetId 4242
+      fg = colorRGBA 255 255 255 255
+      key0 =
+        TextOpKey
+          { tokRect = Rect 10 20 100 16
+          , tokContent = T.pack "cached"
+          , tokStyle = 0
+          , tokStripe = Nothing
+          , tokFg = fg
+          , tokBg = colorRGBA 0 0 0 255
+          , tokFontSize = 0
+          , tokWeight = WeightNormal
+          , tokSlant = FontStyleNormal
+          , tokVariant = FontRegular
+          , tokAlign = AlignStart
+          , tokWrapW = 100
+          , tokCanWrap = False
+          , tokLineH = 16
+          , tokSnap = 1
+          }
+  builds <- newIORef (0 :: Int)
+  let build = do
+        modifyIORef' builds (+ 1)
+        pure [(Rect 12 22 30 16, T.pack "cached", fg, colorRGBA 0 0 0 255)]
+      buildsSoFar = readIORef builds
+      probe = do
+        modifyIORef' builds (+ 1)
+        pure []
+  -- Miss: builds once and returns the built spans.
+  spans1 <- cachedTextSpans ctx wid key0 build
+  n1 <- buildsSoFar
+  assertEq failed n1 1
+  assertEq failed (fmap (\(r, _, _, _) -> r) spans1) [Rect 12 22 30 16]
+  -- Same key: pure hit, no rebuild.
+  spans2 <- cachedTextSpans ctx wid key0 probe
+  n2 <- buildsSoFar
+  assertEq failed n2 1
+  assertEq failed spans2 spans1
+  -- Move (same size): spans translate, no rebuild.
+  spans3 <- cachedTextSpans ctx wid key0 {tokRect = Rect 15 26 100 16} probe
+  n3 <- buildsSoFar
+  assertEq failed n3 1
+  assertEq failed (fmap (\(r, _, _, _) -> r) spans3) [Rect 17 28 30 16]
+  -- Content change: rebuild.
+  spans4 <- cachedTextSpans ctx wid key0 {tokContent = T.pack "changed"} build
+  n4 <- buildsSoFar
+  assertEq failed n4 2
+  assertEq failed spans4 spans1
+  -- Prune drops entries that stop painting after the two-frame grace.
+  forM_ [1 .. 3 :: Int] (\_ -> pruneDrawOpCache ctx)
+  spans5 <- cachedTextSpans ctx wid key0 {tokContent = T.pack "changed"} probe
+  n5 <- buildsSoFar
+  assertEq failed n5 3
+  assertEq failed spans5 []
+  -- End-to-end: repeated frames reuse the cache; spans stay identical.
+  ctx2 <- newCellContext
+  let ui = label (T.pack "stable")
+      inp = withInput 80 24
+  _ <- runFrame ctx2 inp ui
+  a <- collectTextSpans ctx2
+  _ <- runFrame ctx2 inp ui
+  b <- collectTextSpans ctx2
+  _ <- runFrame ctx2 inp ui
+  c <- collectTextSpans ctx2
+  assertEq failed b a
+  assertEq failed c b
 
 runTextWrapAssignedTest :: Context -> IORef Int -> IO ()
 runTextWrapAssignedTest _ failed = do
