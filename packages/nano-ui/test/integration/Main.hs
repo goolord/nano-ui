@@ -108,6 +108,9 @@ testSpecs =
   , TestSpec "damage-queue-cleared" False runDamageQueueClearedPerFrameTest
   , TestSpec "damage-state-change" False runStateChangeDamageTest
   , TestSpec "table-scroll" False runTableScrollTest
+  , TestSpec "table-scroll-reveal" False runTableScrollRevealTest
+  , TestSpec "page-wheel-above-table" False runPageWheelAboveTableTest
+  , TestSpec "table-wrap-row-stretch" False runTableWrapRowStretchTest
   , TestSpec "table-first-col" False runTableFirstColWidthTest
   , TestSpec "table-fill-width" False runTableFillWidthTest
   , TestSpec "table-content-slack" False runTableContentSlackTest

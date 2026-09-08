@@ -221,6 +221,13 @@ runFrameEff unlift ctx inp ui = do
   wasDirty <- isDirty ctx
   clearDirty ctx
   animKeys <- IM.keys <$> getLiveAnimations ctx
+  -- Wheel and thumb-drag input targets the previous frame's layout, so apply
+  -- it while that arena is still intact — before it is reset for the new
+  -- build. Settling offsets before the UI pass keeps build-time
+  -- virtualization (table body rows) materialized for the range that will
+  -- actually be visible, without a second build pass.
+  updateScrollWheel ctx inp
+  updateScrollDrag ctx inp
   resetNodeArena (ctxNodeArena ctx)
   resetDrawArena (ctxDrawArena ctx)
   resetUiBuildScopes ctx
@@ -258,8 +265,6 @@ runFrameEff unlift ctx inp ui = do
       (lookupWindowPos ctx)
       (lookupWindowSize ctx)
   persistWindowPositions ctx
-  updateScrollWheel ctx inp
-  updateScrollDrag ctx inp
   applyScrollOffsets ctx
   finalizePointerPress ctx inp
   finalizePointerRelease ctx inp

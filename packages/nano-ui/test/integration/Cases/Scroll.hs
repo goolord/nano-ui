@@ -13,6 +13,9 @@ module Cases.Scroll
   , runScrollThumbCursorTest
   , runScrollTopClipTest
   , runTableScrollTest
+  , runTableScrollRevealTest
+  , runPageWheelAboveTableTest
+  , runTableWrapRowStretchTest
   , runTableFirstColWidthTest
   , runTableFillWidthTest
   , runTableContentSlackTest
@@ -30,14 +33,22 @@ module Cases.Scroll
 
 import Control.Monad (forM, forM_, replicateM, unless, void)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import Data.List (sort)
+import Data.IntMap.Strict qualified as IM
+import Data.List (sort, sortBy)
 import Data.Maybe (listToMaybe)
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Ptr (Ptr, castPtr)
 import Foreign.Storable (peekElemOff)
 import Data.Text qualified as T
+import Text.Read (readMaybe)
 import NanoUI
-import NanoUI.Context (setDrawSnapScale)
+import NanoUI.Context (ctxNodeArena, setDrawSnapScale)
+import NanoUI.Layout.Arena
+  ( NodeType (..)
+  , arenaCount
+  , getNodeType
+  , getRect
+  )
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertGt, bump, withInput)
 import NanoUI.Testing.Harness
@@ -148,6 +159,147 @@ runTableScrollTest _ failed = do
   _ <- runFrame ctx scrollInp ui
   spans1 <- collectTextSpans ctx
   assert failed (length spans1 >= length spans0 `div` 2)
+
+-- Row label nearest the bottom edge of the body viewport.
+rowLabelIndex :: T.Text -> Maybe Int
+rowLabelIndex t = readMaybe (T.unpack (T.takeWhile (/= ' ') (T.drop 4 t)))
+
+-- Wheeling with the mouse parked well above a nested table must scroll the
+-- page scroller only. Hit rects that drift by the page's scroll offset made
+-- the wheel grab the table's phantom rect and scroll the table instead.
+runPageWheelAboveTableTest :: Context -> IORef Int -> IO ()
+runPageWheelAboveTableTest _ failed = do
+  ctx <- newPixelContext
+  let inp0 = withInput 320 220
+      wheelAt = inp0 {inputMousePos = V2 160 80, inputScroll = V2 0 5}
+      ui = scrollArea (fillW . fixedH 200 $ defaultLayout {layoutGap = 0}) $ do
+        mapM_ (\i -> label (T.pack ("head " <> show (i :: Int)))) [1 .. 10]
+        (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
+        tableCfg
+          defaultTableCfg
+          (tight . fillW . fixedH 120 $ defaultLayout {layoutGap = 0})
+          "people"
+          tableScrollCols
+          tableScrollRows
+          tableSort
+  (pageWid, _) <- warmup2 ctx inp0 ui
+  _ <- runFrame ctx wheelAt ui
+  _ <- runFrame ctx wheelAt ui
+  pageOff <- getScrollOffset ctx pageWid
+  assertGt failed pageOff 0
+  spans <- collectTextSpans ctx
+  let firstRowVisible = any ((== Just 1) . rowLabelIndex . sndOfSpan) spans
+  assert failed firstRowVisible
+  where
+    sndOfSpan (_, t, _, _, _) = t
+
+bottomRowIndex :: [(Rect, T.Text, a, b, c)] -> Maybe Int
+bottomRowIndex spans =
+  listToMaybe
+    [ n
+    | (_, t, _, _, _) <-
+        sortBy
+          ( \(ra, _, _, _, _) (rb, _, _, _, _) ->
+              compare (rectY rb) (rectY ra)
+          )
+          spans
+    , "row-" `T.isPrefixOf` t
+    , Just n <- [rowLabelIndex t]
+    ]
+
+-- Scrolling must materialize the newly revealed row in the same frame the
+-- offset lands. The scroll offset is applied after the UI pass, so a frame
+-- that only translated the pre-scroll rows left the revealed strip without
+-- geometry (stale pixels under the damage clip).
+runTableScrollRevealTest :: Context -> IORef Int -> IO ()
+runTableScrollRevealTest _ failed = do
+  ctx <- newPixelContext
+  let inp0 = (withInput 320 220) {inputMousePos = V2 40 80}
+      ui = do
+        (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
+        void
+          ( tableCfg
+              defaultTableCfg
+              (tight . fillW . fixedH 150 $ defaultLayout {layoutGap = 0})
+              "people"
+              tableScrollCols
+              tableScrollRows
+              tableSort
+          )
+  -- Three warmups so virtualization settles on the real viewport height.
+  _ <- runFrame ctx inp0 ui
+  _ <- runFrame ctx inp0 ui
+  _ <- runFrame ctx inp0 ui
+  spans0 <- collectTextSpans ctx
+  -- Scroll six wheel lines (120px, several rows): the bottom visible row must
+  -- advance because the revealed rows are materialized in the same frame.
+  let scrollInp = inp0 {inputScroll = V2 0 6}
+  _ <- runFrame ctx scrollInp ui
+  spans1 <- collectTextSpans ctx
+  case (bottomRowIndex spans0, bottomRowIndex spans1) of
+    (Just lo, Just hi) -> do
+      assert failed (hi > lo)
+      -- The revealed band must be filled with real rows, not one clipped sliver
+      -- of a stale row scrolling past the top edge.
+      let
+        visibleRows = [r | (r, t, _, _, _) <- spans1, "row-" `T.isPrefixOf` t]
+      assert failed (length visibleRows >= 3)
+    _ -> assert failed False
+
+-- When one cell wraps to several lines the whole row grows; every other
+-- cell in the row must stretch to the same height so stripe backgrounds and
+-- row borders span the full row instead of leaving a gap.
+runTableWrapRowStretchTest :: Context -> IORef Int -> IO ()
+runTableWrapRowStretchTest _ failed = do
+  ctx <- newPixelContext
+  let inp0 = (withInput 700 400) {inputMousePos = V2 (-40) (-40)}
+      cfg = defaultTableCfg {tableColSizes = [ColFixed 280, ColFixed 90]}
+      wrapCols = headed "Name" fst <> headed "Notes" snd
+      rows =
+        [ ("row-" <> T.pack (show (i :: Int)), T.unwords (replicate 24 "lorem"))
+        | i <- [1 .. 8]
+        ]
+      ui = do
+        (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
+        void
+          ( tableCfg
+              cfg
+              (tight . fillW $ defaultLayout {layoutGap = 0})
+              "wrap-stretch"
+              wrapCols
+              rows
+              tableSort
+          )
+  _ <- runFrame ctx inp0 ui
+  _ <- runFrame ctx inp0 ui
+  let na = ctxNodeArena ctx
+  n <- arenaCount na
+  cells <-
+    fmap
+      concat
+      ( forM [0 .. n - 1] $ \i -> do
+          nt <- getNodeType na i
+          if nt == NodeText
+            then do
+              (_, y, w, h) <- getRect na i
+              -- Body cells sit below the header band and have real width
+              -- (both columns are wider than 50px; the 90px Notes column
+              -- wraps its long text and drives the row height).
+              pure [(y, [h]) | y > 25 && w > 50]
+            else pure []
+      )
+  -- Cells of one row share the same top y; every row group must be uniform
+  -- (all cells stretch to the row height).
+  let rowBands = IM.toAscList (IM.fromListWith (++) [(round y, hs) | (y, hs) <- cells])
+  forM_ rowBands $ \(_, hs) -> assert failed (length (dedup hs) == 1)
+  -- And at least one row is actually wrapped (taller than the 28px minimum),
+  -- otherwise the test asserts nothing.
+  assert failed (any (\hs -> maximum hs > 40) (map snd rowBands))
+  -- The body must start right below the header: an unconditional scrollbar
+  -- lane reserve (shown even with no horizontal overflow) opens a dead gap.
+  assert failed (minimum (map fst rowBands) < 40)
+  where
+    dedup = foldr (\x acc -> if x `elem` acc then acc else x : acc) []
 
 tableScrollCols :: Colonnade Headed TableScrollRow T.Text
 tableScrollCols =
@@ -570,10 +722,12 @@ runNestedScrollFocusTest ctx failed = do
   focus <- getFocusId ctx
   assert failed (focus /= WidgetId 0)
   offI0 <- getScrollOffset ctx inner
+  -- Wheel events scroll only the scroller under the mouse; owning focus is not
+  -- enough, so scrolling away from the inner scroller must not move it.
   let away = inp0 {inputMousePos = V2 230 210, inputScroll = V2 0 1}
   _ <- runFrame ctx away ui
   offI1 <- getScrollOffset ctx inner
-  assertGt failed offI1 offI0
+  assertEq failed offI1 offI0
 
 runScrolledOutClickImmunityTest :: Context -> IORef Int -> IO ()
 runScrolledOutClickImmunityTest ctx failed = do
