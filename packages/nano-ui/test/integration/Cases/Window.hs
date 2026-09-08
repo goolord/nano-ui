@@ -16,12 +16,13 @@ module Cases.Window
   , runPageWindowScrollTest
   , runSiblingWindowScrollTest
   , runWindowScrollOnlyDamageTest
+  , runWindowContentChurnTest
   , runScrolledDebugToggleTest
   , runHeadingMonoTruncateTest
   ) where
 
 import Control.Monad (replicateM, void, when)
-import Data.IORef (IORef)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Text qualified as T
 import NanoUI
@@ -370,6 +371,28 @@ runWindowScrollOnlyDamageTest ctx failed = do
     DamageClip r ->
       assert failed (maybe False (\i -> rectW i > 0 && rectH i > 0) (rectIntersect r winPanel))
     _ -> assert failed False
+
+runWindowContentChurnTest :: Context -> IORef Int -> IO ()
+runWindowContentChurnTest _ failed = do
+  ctx' <- newContext
+  let inp0 = withInput 640 400
+      ui k = do
+        _ <- button "Outside"
+        fst <$> window True "Debug" (columnWith (tight . gap 4 . minW 300 . fillW) $ do
+          void $ label (T.pack (replicate (1 + (k `mod` 9)) 'M'))
+          void $ label "static row"
+          )
+  _ <- warmup2 ctx' inp0 (ui 0)
+  counter <- newIORef (1 :: Int)
+  allClip <- replicateM 30 $ do
+    k <- readIORef counter
+    writeIORef counter (k + 1)
+    _ <- runFrame ctx' inp0 (ui k)
+    dmg <- takeDamage ctx'
+    case dmg of
+      DamageClip _ -> pure True
+      _ -> pure False
+  assert failed (and allClip)
 
 runScrolledDebugToggleTest :: Context -> IORef Int -> IO ()
 runScrolledDebugToggleTest ctx failed = do

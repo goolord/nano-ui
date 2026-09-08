@@ -5,6 +5,7 @@ module Main (main) where
 
 import Control.Monad (replicateM_, void, forM_)
 import Data.Foldable (foldlM)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
 import Data.Primitive.SmallArray (SmallArray)
 import GHC.Clock (getMonotonicTimeNSec)
 import GHC.Stats (RTSStats (..), getRTSStats)
@@ -14,13 +15,14 @@ import Text.Printf (printf)
 import qualified Data.Text as T
 
 import NanoUI
-import NanoUI.Backend.Sdl (RgbaImage (..), newSdlContext, sdlDrawFrame, syncDisplay, withSdlBench)
+import NanoUI.Backend.Sdl (RgbaImage (..), SdlEnv (..), newSdlContext, sdlDrawFrame, syncDisplay, withSdlBench)
 import NanoUI.Diagrams
 import NanoUI.Testing
   ( Context
   , collectTextSpans
   , registerImage
   , runFrame
+  , takeDamage
   , drawVertexCount
   , drawIndexCount
   , drawCmdCount
@@ -116,6 +118,21 @@ main = do
           (_, _, ddDbg, _) <- runFrame ctx' inp demoUi
           printf "  -> Debug Vertices: %d, Indices: %d, DrawCmds: %d\n\n"
             (drawVertexCount ddDbg) (drawIndexCount ddDbg) (drawCmdCount ddDbg)
+
+          putStrLn "--- 5. FLOATING WINDOW STEADY-STATE ---"
+          measureBench "Debug Open, ForceFull replay" iterations $
+            void (sdlDrawFrame ctx' demoUi sdlEnv inp True)
+          churnCtx <- newSdlContext
+          churnCounter <- newIORef (0 :: Int)
+          void (runFrame churnCtx inp (churnWindowUi 0))
+          (f0, c0, e0) <- countDamageKinds churnCtx iterations (churnFrame churnCtx inp churnCounter)
+          printf "  -> Churn damage over %d frames: Full=%d Clip=%d Empty=%d\n"
+            iterations f0 c0 e0
+          measureBench "Win content churn (text 1..9ch)" iterations $
+            churnFrame churnCtx inp churnCounter
+          sweepCounter <- newIORef (0 :: Int)
+          measureBench "Debug Open, hover sweep" iterations $
+            hoverSweepFrame ctx' demoUi sdlEnv inp sweepCounter
           clickDbg
 
       putStrLn "--- 2. DEMO TABS IN ISOLATION (Full runFrame + draw) ---"
@@ -193,6 +210,40 @@ main = do
       putStrLn ""
       putStrLn "================================================================================"
       putStrLn "Profiling complete."
+
+churnWindowUi :: Int -> NanoUI ()
+churnWindowUi k = do
+  _ <- button "Outside"
+  void $ fst <$> window True "Churn" (columnWith (tight . gap 4 . minW 300 . fillW) $ do
+    void $ kvMono "value" (T.pack (replicate (1 + (k `mod` 9)) 'M'))
+    void $ label "static row"
+    )
+
+churnFrame :: Context -> Input -> IORef Int -> IO ()
+churnFrame ctx ninp counter = do
+  k <- readIORef counter
+  modifyIORef' counter (+1)
+  void (runFrame ctx ninp (churnWindowUi k))
+
+hoverSweepFrame :: Context -> NanoUI () -> SdlEnv -> Input -> IORef Int -> IO ()
+hoverSweepFrame ctx ui env ninp counter = do
+  i <- readIORef counter
+  modifyIORef' counter (+1)
+  let m = V2 1130 (110 + fromIntegral (i `mod` 300))
+  _ <- sdlDrawFrame ctx ui env ninp { inputMousePos = m } False
+  pure ()
+
+countDamageKinds :: Context -> Int -> IO () -> IO (Int, Int, Int)
+countDamageKinds ctx n act = go n (0, 0, 0)
+  where
+    go k (f, c, empty)
+      | k <= 0 = pure (f, c, empty)
+      | otherwise = do
+          act
+          dmg <- takeDamage ctx
+          case dmg of
+            DamageFull -> go (k - 1) (f + 1, c, empty)
+            DamageClip _ -> go (k - 1) (f, c + 1, empty)
 
 registerDemoImages :: Context -> SmallArray RgbaImage -> IO Bool
 registerDemoImages ctx images =
