@@ -173,7 +173,6 @@ testSpecs =
   , TestSpec "tree-expand-damage" False runTreeExpandDamageTest
   , TestSpec "tree-keyboard" False runTreeKeyboardTest
   , TestSpec "text-wrap" False runTextWrapTest
-  , TestSpec "text-op-cache" False runTextOpCacheTest
   , TestSpec "text-wrap-width" False runTextWrapAssignedTest
   , TestSpec "text-multiline" False runTextMultilineTest
   , TestSpec "grid-layout" False runGridTest

@@ -16,8 +16,6 @@ module NanoUI.Context.Types
   , AnimationState (..)
   , initialAnimationState
   , DrawFitCache (..)
-  , TextOpKey (..)
-  , TextOpCache (..)
   , DrawingCacheState (..)
   , initialDrawingCacheState
   , InteractionState (..)
@@ -43,7 +41,6 @@ import Data.Primitive.PrimArray (MutablePrimArray)
 import Data.Text (Text)
 import Data.Typeable (TypeRep, Typeable, cast)
 import Data.Vector (Vector)
-import Data.Word (Word64)
 import GHC.Exts (RealWorld)
 
 import NanoUI.Animation (Animation)
@@ -56,10 +53,9 @@ import NanoUI.Id (IdContext, WidgetId, hashWidgetId)
 import NanoUI.Input (UiCursorKind)
 import NanoUI.Layout.Arena (DirTag, NodeArena, NodeType)
 import NanoUI.Store (WidgetStore)
-import NanoUI.Style (AlignX, FontStyle, FontVariant, FontWeight, Layout, Theme)
+import NanoUI.Style (FontStyle, FontVariant, FontWeight, Layout, Theme)
 import NanoUI.Types
-  ( Color
-  , Damage (..)
+  ( Damage (..)
   , DamageBounds
   , HostProfile
   , PopupAnchor
@@ -216,38 +212,6 @@ data DrawFitCache = DrawFitCache
   , dfcOut :: !Layout
   }
 
--- | Everything that shapes a static label's placed spans: content, font
--- selection, resolved-font identity (line height + snap scale), colors,
--- alignment, and the effective wrap width. Keys that are equal except for the
--- rect origin mean the label only moved; the cached spans translate.
-data TextOpKey = TextOpKey
-  { tokRect :: {-# UNPACK #-} !Rect
-  , tokContent :: !Text
-  , tokStyle :: {-# UNPACK #-} !Int
-  , tokStripe :: !(Maybe Color)
-  , tokFg :: {-# UNPACK #-} !Color
-  , tokBg :: {-# UNPACK #-} !Color
-  , tokFontSize :: {-# UNPACK #-} !Float
-  , tokWeight :: !FontWeight
-  , tokSlant :: !FontStyle
-  , tokVariant :: !FontVariant
-  , tokAlign :: !AlignX
-  , tokWrapW :: {-# UNPACK #-} !Float
-  , tokCanWrap :: !Bool
-  , tokLineH :: {-# UNPACK #-} !Float
-  , tokSnap :: {-# UNPACK #-} !Float
-  }
-  deriving (Eq, Show)
-
--- | Cached placed spans for one text node, stamped with the frame counter so
--- 'pruneDrawOpCache' can drop entries for labels that stopped painting.
-data TextOpCache = TextOpCache
-  { tocStamp :: {-# UNPACK #-} !Word64
-  , tocKey :: !TextOpKey
-  , tocSpans :: ![(Rect, Text, Color, Color)]
-  }
-  deriving (Show)
-
 type CustomMeasureFn = HostProfile -> FontMetrics -> (Float, Float) -> (Float, Float)
 
 data CustomDrawContext = CustomDrawContext
@@ -273,8 +237,6 @@ data DrawingCacheState = DrawingCacheState
   , dcsDrawOpCache :: !(IntMap (Rect, Vector DrawOp))
   , dcsCustomDrawOpCache :: !(IntMap (Rect, Bool, Bool, Bool, Vector DrawOp))
   , dcsDrawFitCache :: !(IntMap DrawFitCache)
-  , dcsTextOpCache :: !(IntMap TextOpCache)
-  , dcsFrame :: {-# UNPACK #-} !Word64
   , dcsWidgetNodeTypes :: !(Maybe (IntMap NodeType))
   }
 
@@ -289,8 +251,6 @@ initialDrawingCacheState = DrawingCacheState
   , dcsDrawOpCache = IM.empty
   , dcsCustomDrawOpCache = IM.empty
   , dcsDrawFitCache = IM.empty
-  , dcsTextOpCache = IM.empty
-  , dcsFrame = 0
   , dcsWidgetNodeTypes = Nothing
   }
 

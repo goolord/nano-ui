@@ -13,8 +13,6 @@ module NanoUI.Context
   , AnimationState (..)
   , DrawingCacheState (..)
   , DrawFitCache (..)
-  , TextOpKey (..)
-  , TextOpCache (..)
   , InteractionState (..)
   , initialInteractionState
   , initialDamageState
@@ -66,7 +64,6 @@ module NanoUI.Context
   , cachedDrawingOps
   , cachedWidgetLayout
   , lookupDrawFitEnvelope
-  , cachedTextSpans
   , pruneDrawOpCache
   , clearDrawings
   , CustomMeasureFn
@@ -229,7 +226,7 @@ import Data.Primitive.PrimArray
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
 import Data.Typeable (Typeable, typeOf, typeRep)
-import Data.Word (Word64, Word8)
+import Data.Word (Word8)
 import Foreign.ForeignPtr (ForeignPtr)
 
 import NanoUI.Animation
@@ -256,8 +253,6 @@ import NanoUI.Context.Types
   , DamageRequest (..)
   , DamageState (..)
   , DrawFitCache (..)
-  , TextOpCache (..)
-  , TextOpKey (..)
   , DrawingCacheState (..)
   , FrameMsg (..)
   , InteractionState (..)
@@ -328,8 +323,7 @@ import NanoUI.Store
   )
 import NanoUI.Style (FontStyle, FontVariant (..), FontWeight, Layout, Theme, defaultLayout, defaultTheme)
 import NanoUI.Types
-  ( Color
-  , Damage (..)
+  ( Damage (..)
   , DamageBounds (..)
   , ImageId (..)
   , onGrid
@@ -614,79 +608,16 @@ lookupDrawFitEnvelope ctx wid lh content incoming = do
           pure (Just (dfcDw e, dfcDh e))
     _ -> pure Nothing
 
--- | Reuse a static label's placed spans while everything that shapes them
--- (content, font, colors, alignment, wrap width) is unchanged. A move only
--- translates. Entries not repainted are pruned by 'pruneDrawOpCache'.
-cachedTextSpans ::
-  Context ->
-  WidgetId ->
-  TextOpKey ->
-  IO [(Rect, Text, Color, Color)] ->
-  IO [(Rect, Text, Color, Color)]
-cachedTextSpans ctx wid key build = do
-  let k = intKey wid
-  dc <- readIORef (ctxDrawingCache ctx)
-  let frame = dcsFrame dc
-  case IM.lookup k (dcsTextOpCache dc) of
-    Just (TextOpCache stamp key' spans)
-      -- Position-normalized compare: same content and size hits; only the
-      -- origin may differ (translated below), any other change rebuilds.
-      | rectW (tokRect key) == rectW (tokRect key')
-      , rectH (tokRect key) == rectH (tokRect key')
-      , key {tokRect = tokRect key'} == key' -> do
-        -- Keep the entry alive for 'pruneDrawOpCache'; one write per frame.
-        when (stamp /= frame) $ touchTextSpans ctx k frame
-        let r = tokRect key
-            r' = tokRect key'
-        if rectX r == rectX r' && rectY r == rectY r'
-          then pure spans
-          else do
-            let dx = rectX r - rectX r'
-                dy = rectY r - rectY r'
-                !spans' =
-                  [ (Rect (rectX sp + dx) (rectY sp + dy) (rectW sp) (rectH sp), t, f, b)
-                  | (sp, t, f, b) <- spans
-                  ]
-            storeTextSpans ctx k key spans'
-            pure spans'
-    _ -> do
-      spans <- build
-      storeTextSpans ctx k key spans
-      pure spans
-
-{-# INLINE touchTextSpans #-}
-touchTextSpans :: Context -> Int -> Word64 -> IO ()
-touchTextSpans ctx k frame =
-  modifyIORef' (ctxDrawingCache ctx) $ \s ->
-    s
-      { dcsTextOpCache = IM.adjust (\e -> e {tocStamp = frame}) k (dcsTextOpCache s)
-      }
-
-{-# INLINE storeTextSpans #-}
-storeTextSpans :: Context -> Int -> TextOpKey -> [(Rect, Text, Color, Color)] -> IO ()
-storeTextSpans ctx k key spans =
-  modifyIORef' (ctxDrawingCache ctx) $ \s ->
-    s
-      { dcsTextOpCache = IM.insert k (TextOpCache (dcsFrame s) key spans) (dcsTextOpCache s)
-      }
-
--- | Drop cached ops for drawings that did not rebuild this frame. Also bumps
--- the frame counter and prunes text span entries that paint did not touch
--- during this frame or the previous one.
+-- | Drop cached ops for drawings that did not rebuild this frame.
 pruneDrawOpCache :: Context -> IO ()
 pruneDrawOpCache ctx =
   modifyIORef' (ctxDrawingCache ctx) $ \dc ->
     let live = dcsDrawings dc
         customLive = dcsCustomDrawings dc
-        frame = dcsFrame dc + 1
-        floorStamp = frame - 2
-        textLive = IM.filter ((>= floorStamp) . tocStamp) (dcsTextOpCache dc)
      in dc
           { dcsDrawOpCache = dcsDrawOpCache dc `IM.intersection` live
           , dcsCustomDrawOpCache = dcsCustomDrawOpCache dc `IM.intersection` customLive
           , dcsDrawFitCache = dcsDrawFitCache dc `IM.intersection` live
-          , dcsTextOpCache = textLive
-          , dcsFrame = frame
           }
 
 {-# INLINE clearDrawings #-}
