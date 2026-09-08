@@ -176,6 +176,7 @@ import NanoUI.Types
   , V2 (..)
   , isCellHost
   , lerpColor
+  , onGrid
   , rectContains
   , rectH
   , rectIntersect
@@ -924,23 +925,21 @@ data TextAreaHit = TextAreaHit
 textAreaGeom :: HostProfile -> FontMetrics -> Float -> Float -> Float -> Float -> TextAreaGeom
 textAreaGeom host fm x y w h =
   let s = fmSnapScale fm
-      snapV v = fromIntegral (round (v * s) :: Int) / s
       labelH = layoutLineHeight host fm
       gap = textInputLabelGap fm
-      fieldY = y + snapV (labelH + gap)
+      fieldY = y + onGrid s (labelH + gap)
       fieldH = max 0 (h - labelH - gap)
-      lineH = snapV (fmLineHeight fm)
+      lineH = onGrid s (fmLineHeight fm)
    in TextAreaGeom {tagFieldRect = Rect x fieldY w fieldH, tagLineHeight = lineH}
 
 textAreaFieldClip :: HostProfile -> TextAreaGeom -> FontMetrics -> Rect
 textAreaFieldClip host geom fm =
   let s = fmSnapScale fm
-      snapV v = fromIntegral (round (v * s) :: Int) / s
       field = tagFieldRect geom
       (ix, iy) = widgetContentInset host fm
    in Rect
-        (rectX field + snapV ix)
-        (rectY field + snapV iy)
+        (rectX field + onGrid s ix)
+        (rectY field + onGrid s iy)
         (max 0 (rectW field - 2 * ix))
         (max 0 (rectH field - 2 * iy))
 

@@ -91,7 +91,7 @@ import NanoUI.Layout.Arena
   )
 import NanoUI.Layout.Solve (scrollBarSlotOf)
 import NanoUI.Style (AlignX (..), FontStyle (..), FontVariant (..), FontWeight (..), Padding (..), Style (..), Theme (..), styleBg, styleFg, themeSeparator, themeWindow)
-import NanoUI.Types (Color (..), Rect (..), colorRGBA, lerpColor, rectH, rectIntersect, rectW, rectX, rectY)
+import NanoUI.Types (Color (..), Rect (..), colorRGBA, lerpColor, onGrid, rectH, rectIntersect, rectW, rectX, rectY)
 import NanoUI.WidgetText (isCloseButtonStyle, isTableHeaderStyle, textInputSearchMode, textInputSearchTerminalText)
 import NanoUI.WidgetText
   ( colorPickerCurrentLabel
@@ -374,9 +374,6 @@ collectNodeTextSpans ctx floatCache idx = do
               canWrap = not isRowChild && wrapCap < 1e8
               wrapW = max 0 (wrapCap - 2 * ix)
               lineH = layoutLineHeight (ctxHostProfile ctx) textFm
-              snapGrid v =
-                let s = fmSnapScale textFm
-                 in fromIntegral (round (v * s) :: Int) / s
           textSpans <-
             if hasNewlines || (canWrap && wrapCap + 0.5 < tw0)
               then do
@@ -387,7 +384,7 @@ collectNodeTextSpans ctx floatCache idx = do
                 pure
                   [ ( Rect
                         tx
-                        (centeredTextY (ctxHostProfile ctx) textFm (y + snapGrid (fromIntegral i * lineH)) lineH lineH)
+                        (centeredTextY (ctxHostProfile ctx) textFm (y + onGrid (fmSnapScale textFm) (fromIntegral i * lineH)) lineH lineH)
                         used
                         lineH
                     , line

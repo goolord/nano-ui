@@ -326,6 +326,7 @@ import NanoUI.Types
   ( Damage (..)
   , DamageBounds (..)
   , ImageId (..)
+  , onGrid
   , PopupAnchor (..)
   , PopupPlacement (..)
   , Rect (..)
@@ -793,7 +794,7 @@ setDisabled ctx wid dis = do
 snapScrollOffset :: Context -> Float -> IO Float
 snapScrollOffset ctx v = do
   s <- Draw.getDrawSnapScale (ctxDrawArena ctx)
-  pure (Draw.snapToPixel s v)
+  pure (onGrid s v)
 
 {-# INLINE getScrollOffset #-}
 getScrollOffset :: Context -> WidgetId -> IO Float

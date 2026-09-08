@@ -122,7 +122,7 @@ import NanoUI.Style
   , FontWeight (..)
   , TextDecoration (..)
   )
-import NanoUI.Types (Color (..), Rect (..), rectIntersect)
+import NanoUI.Types (Color (..), Rect (..), onGrid, rectIntersect)
 import qualified Data.Text as T
 import NanoUI.SIMD
   ( concentricOffsetsSIMD
@@ -1191,9 +1191,7 @@ pushFilledTriangle da x0 y0 x1 y1 x2 y2 col = do
 
 {-# INLINE snapToPixel #-}
 snapToPixel :: Float -> Float -> Float
-snapToPixel s v
-  | s > 0 = fromIntegral (round (v * s) :: Int) / s
-  | otherwise = v
+snapToPixel s v = onGrid s v
 
 {-# INLINE pushText #-}
 pushText :: DrawArena -> FontMetrics -> Float -> Float -> T.Text -> Color -> IO ()

@@ -102,7 +102,7 @@ import NanoUI.Layout.Arena
 import NanoUI.Context.Types (CustomMeasureFn)
 import NanoUI.Id (WidgetId)
 import NanoUI.Style (AlignX (..), AlignY (..), FontStyle (..), FontVariant (..), FontWeight (..), Padding (..), windowMargin)
-import NanoUI.Types (PopupAnchor (..), PopupPlacement (..), Rect (..), V2 (..), clamp)
+import NanoUI.Types (PopupAnchor (..), PopupPlacement (..), Rect (..), V2 (..), clamp, onGrid)
 import NanoUI.Widgets.ColorPicker (colorPickerMeasureSize)
 import NanoUI.WidgetText
   ( textNodeFontVariant
@@ -194,7 +194,6 @@ quantizeResultsA NodeArenaArrays {naArrGeom = arr} count s
   | s <= 0 = pure ()
   | otherwise = go 0
   where
-    g2 v = fromIntegral (round (v * s) :: Int) / s
     go i
       | i >= count = pure ()
       | otherwise = do
@@ -203,10 +202,10 @@ quantizeResultsA NodeArenaArrays {naArrGeom = arr} count s
           y <- readPrimArray arr (base + 1)
           w <- readPrimArray arr (base + 2)
           h <- readPrimArray arr (base + 3)
-          writePrimArray arr (base + 0) (g2 x)
-          writePrimArray arr (base + 1) (g2 y)
-          writePrimArray arr (base + 2) (max 0 (g2 w))
-          writePrimArray arr (base + 3) (max 0 (g2 h))
+          writePrimArray arr (base + 0) (onGrid s x)
+          writePrimArray arr (base + 1) (onGrid s y)
+          writePrimArray arr (base + 2) (max 0 (onGrid s w))
+          writePrimArray arr (base + 3) (max 0 (onGrid s h))
           go (i + 1)
 
 {-# INLINE nodeTypeA #-}

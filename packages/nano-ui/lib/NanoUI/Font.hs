@@ -61,7 +61,7 @@ module NanoUI.Font
 
 import Data.Text (Text)
 import qualified Data.Text as T
-import NanoUI.Types (HostProfile, Rect (..), isCellHost, sliderBarCells)
+import NanoUI.Types (HostProfile, Rect (..), isCellHost, onGrid, sliderBarCells)
 import NanoUI.Style (AlignX (..), Padding (..), defaultLayout, layoutGap)
 import NanoUI.Icons (terminalPaintColumns)
 
@@ -220,7 +220,7 @@ centeredTextY host fm y h th =
     then y + (h - th) / 2
     else case fmGlyph fm 'H' of
       Nothing -> y + (h - th) / 2
-      Just gq -> y + snapToDevice (fmSnapScale fm) (h / 2 - (gqY gq + gqH gq / 2))
+      Just gq -> y + onGrid (fmSnapScale fm) (h / 2 - (gqY gq + gqH gq / 2))
   where
     -- Snap the (constant) baseline offset to the device grid rather than the
     -- whole pen: pen = snap(y + offset) rounds a fractional offset with ties
@@ -228,9 +228,6 @@ centeredTextY host fm y h th =
     -- land on alternating device pixels while the geometry beside them stays
     -- rigid. Snapping only the constant offset keeps every row fixed on the
     -- grid no matter where y falls.
-    snapToDevice s v
-      | s > 0 = fromIntegral (round (v * s) :: Int) / s
-      | otherwise = v
 
 -- Origin and used width inside the node box, inset on all AlignX sides.
 {-# INLINE alignedTextBox #-}
