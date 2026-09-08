@@ -17,7 +17,7 @@ import Data.Text (Text)
 import GHC.Clock (getMonotonicTime)
 import NanoUI (Size (..), V2 (..))
 import NanoUI.Debug
-  ( CoreDebugSnapshot
+  ( CoreDebugSnapshot (..)
   , DebugSampler (..)
   , debugRefreshSec
   , emptyCoreDebugSnapshot
@@ -30,6 +30,8 @@ import NanoUI.Debug
   )
 import qualified NanoUI.Debug as D
 import NanoUI.Testing (DrawData (..), drawCmdCount)
+import System.Environment (lookupEnv)
+import Text.Printf (printf)
 
 data SdlDebugSnapshot = SdlDebugSnapshot
   { dbgCore     :: !CoreDebugSnapshot
@@ -122,4 +124,26 @@ readSdlDebug ref (Size ww wh) (V2 mx my) fontPath scale renderer vsync = do
       atomicModifyIORef' (sdsSampler s) $ \curSampler ->
         (curSampler {smLastDebugT = now, smWantFrame = False, smLastQueryT = now}, ())
       writeIORef (sdsSnapshot s) snap
+      traceFrame (dbgCore snap)
       pure snap
+
+-- | Env-gated per-refresh timing trace (NANO_FRAME_TRACE=1). Prints the
+-- snapshot's phase EMAs so live-loop costs can be compared across builds.
+traceFrame :: CoreDebugSnapshot -> IO ()
+traceFrame c = do
+  on <- lookupEnv "NANO_FRAME_TRACE"
+  case on of
+    Nothing -> pure ()
+    Just _ ->
+      Text.Printf.printf
+        "TRACE presentFps=%6.0f loopFps=%6.0f frameMs=%6.3f uiMs=%6.3f renderMs=%6.3f presentMs=%6.3f verts=%5d cmds=%2d presents=%d skips=%d\n"
+        (dbgPresentFps c)
+        (dbgLoopFps c)
+        (dbgFrameMs c)
+        (dbgUiMs c)
+        (dbgRenderMs c)
+        (dbgPresentMs c)
+        (dbgVerts c)
+        (dbgCmds c)
+        (dbgPresents c)
+        (dbgSkips c)

@@ -45,7 +45,7 @@ module SdlDemo
 
 import Control.Monad (unless, void, when)
 import Data.Foldable (for_)
-import Data.Maybe (fromMaybe, listToMaybe)
+import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Primitive.SmallArray (SmallArray, smallArrayFromList)
 import Data.Word (Word64)
 import Effectful (Eff, type (:>))
@@ -75,7 +75,8 @@ import System.Console.GetOpt
   , getOpt
   , usageInfo
   )
-import System.Environment (getArgs)
+import System.Environment (getArgs, lookupEnv)
+import System.IO.Unsafe (unsafePerformIO)
 import Text.Printf (printf)
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
@@ -184,13 +185,17 @@ themeForChoice TomorrowMidnightMin = tomorrowMidnightMinDarkTheme
 --   2. toolbar              brand, live FPS, OK / Cancel / About / Debug
 --   3. two-column body      left: live state + gallery; right: tabbed demos
 --   4. overlays             Debug window + About modal
+debugOpenFromEnv :: Bool
+debugOpenFromEnv = unsafePerformIO (isJust <$> lookupEnv "NANO_DEBUG_OPEN")
+{-# NOINLINE debugOpenFromEnv #-}
+
 demoUi :: NanoUI ()
 demoUi = do
   ---------------------------------------------------------------- hooks ---
   -- Toolbar / overlays.
   (click, setClick) <- useText "" -- label of the last button / menu item clicked
   (aboutOpen, setAbout) <- useFlag False
-  (debugOpen, setDebug) <- useFlag False
+  (debugOpen, setDebug) <- useFlag debugOpenFromEnv
   -- Controls tab.
   (checked, setChecked) <- useFlag False -- checkbox
   (vol, setVol) <- useText "50" -- slider, as text
