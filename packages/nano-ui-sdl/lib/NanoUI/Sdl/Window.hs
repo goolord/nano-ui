@@ -17,6 +17,8 @@ import Control.Monad (unless, void, when)
 import Data.Bits ((.|.))
 import Data.ByteString (ByteString)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import System.Environment (lookupEnv)
+import Text.Read (readMaybe)
 import Data.Primitive.SmallArray (SmallArray)
 import Data.Text (Text)
 import Data.Text.Foreign qualified as TextForeign
@@ -192,7 +194,11 @@ defaultWindowSize = Size 1280 800
 -- Layout in logical coordinates; draw/text rasterize at native pixel density.
 syncDisplay :: Context -> SdlEnv -> Input -> IO (Context, Input)
 syncDisplay ctx env inp = do
-  scale <- queryWindowDisplayScale (sdlWindow env)
+  real <- queryWindowDisplayScale (sdlWindow env)
+  forced <- lookupEnv "NANO_FORCE_SCALE"
+  let scale = case forced >>= readMaybe of
+        Just s | s > 0 -> s
+        _ -> real
   unlessM (setRenderScale (sdlRenderer env) defaultUiScale) $
     fail "SDL_SetRenderScale failed"
   oldScale <- readIORef (sdlScaleRef env)

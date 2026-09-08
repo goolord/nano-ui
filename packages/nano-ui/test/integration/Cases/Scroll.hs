@@ -25,15 +25,21 @@ module Cases.Scroll
   , runScrollChildDamageOffsetTest
   , run2DScrollWheelTest
   , runTable2DScrollSyncTest
+  , runScrollLockstepProbeTest
   ) where
 
-import Control.Monad (forM_, replicateM, void)
+import Control.Monad (forM, forM_, replicateM, unless, void)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.List (sort)
 import Data.Maybe (listToMaybe)
+import Foreign.ForeignPtr (withForeignPtr)
+import Foreign.Ptr (Ptr, castPtr)
+import Foreign.Storable (peekElemOff)
 import Data.Text qualified as T
 import NanoUI
+import NanoUI.Context (setDrawSnapScale)
 import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertEq, assertGt, withInput)
+import NanoUI.Testing.Assert (assert, assertEq, assertGt, bump, withInput)
 import NanoUI.Testing.Harness
   ( assertScrollGutter
   , assertScrollGutterPad
@@ -41,6 +47,7 @@ import NanoUI.Testing.Harness
   , runClickPair
   , spanXOf
   , spanYOf
+  , spanLabelYs
   , warmup2
   , withInputOff
   )
@@ -719,5 +726,140 @@ runTable2DScrollSyncTest _ failed = do
           assert failed (length spans1 >= 4)
         _ -> assert failed False
     _ -> assert failed False
+
+-- | Diagnostic probe for the reported scroll stair-stepping artifact.
+-- Steps a scroll container through fractional offsets at a simulated display
+-- scale of 2 and decodes the final (snapped) vertex buffer, comparing the
+-- per-row motion of text (glyph quads) against geometry (fill quads such as
+-- separators). Asserts every row's text and the adjacent geometry moved by the
+-- exact same delta on every transition (text/geometry lockstep).
+runScrollLockstepProbeTest :: Context -> IORef Int -> IO ()
+runScrollLockstepProbeTest ctx failed = do
+  setDrawSnapScale ctx 2
+  let inp0 = withInput 300 220
+      rows =
+        [ ("Feature", "Enabled")
+        , ("Volume", "50")
+        , ("Quality", "High")
+        , ("Accent", "#3D7EFF")
+        , ("Theme", "Tomorrow at Midnight Min")
+        , ("Theme radio", "Theme radio value")
+        , ("Name", "Ada Lovelace")
+        , ("Notes", "short note")
+        , ("Tree", "1 visible item")
+        , ("Table sort", "Name")
+        ]
+      kvRow k v =
+        row' (tight . gap 12 . alignMid . fillW $ defaultLayout) $ do
+          void (labelEx (minW 88 (tight defaultLayout)) (T.pack k))
+          void (labelEx (tight . fillW . alignEnd $ defaultLayout) (T.pack v))
+      keys = map (T.pack . fst) rows
+      ui =
+        scrollArea
+          (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 200})
+          (column (mapM_ (\(k, v) -> kvRow k v >> separator) rows))
+  _ <- runFrame ctx inp0 ui
+  ((sid, ()), _, _, _) <- runFrame ctx inp0 ui
+  let steps = [0.0, 0.3, 0.6, 1.0, 1.3, 1.7, 2.0, 2.4, 2.7, 3.1, 3.4, 3.8]
+  yss <- forM steps $ \off -> do
+    setScrollOffset ctx sid off
+    _ <- runFrame ctx inp0 ui
+    (_, _, draw, _) <- runFrame ctx inp0 ui
+    snapped <- getScrollOffset ctx sid
+    spans <- collectTextSpans ctx
+    let keyYs = [listToMaybe (spanLabelYs k spans) | k <- keys]
+    quads <- decodeQuads draw
+    let fillTops =
+          [ qy1
+          | (qx1, qy1, qx2, _, u, v) <- quads
+          , abs (u - whitePixelU) < 1.0e-6
+          , abs (v - whitePixelV) < 1.0e-6
+          , qx2 - qx1 > 60.0
+          ]
+    pure (off, snapped, keyYs, fillTops)
+  putStrLn "=== scroll lockstep probe (scale=2, logical; device = 2x) ==="
+  forM_ yss $ \(off, snapped, keyYs, fillTops) ->
+    putStrLn $
+      "off="
+        ++ show off
+        ++ " gsoff="
+        ++ show snapped
+        ++ " keyYs="
+        ++ show keyYs
+        ++ " fillTops="
+        ++ show fillTops
+  putStrLn "=== text-vs-geometry deltas per transition (logical) ==="
+  forM_ (zip yss (drop 1 yss)) $ \((offA, _, keyA, fillA), (offB, _, keyB, fillB)) -> do
+    let sKeyA = sort [y | Just y <- keyA]
+        sKeyB = sort [y | Just y <- keyB]
+        sFillA = sort (filter (> 1.0) fillA)
+        sFillB = sort (filter (> 1.0) fillB)
+        textDs = [x2 - x1 | (x1, x2) <- zip sKeyA sKeyB]
+        fillDs = [x2 - x1 | (x1, x2) <- zip sFillA sFillB]
+        n = min (length textDs) (length fillDs)
+        t0 = case textDs of
+          d : _ -> d
+          [] -> 0
+        f0 = case fillDs of
+          d : _ -> d
+          [] -> 0
+        badText = take n [i | i <- textDs, abs (i - t0) > 1.0e-3]
+        badFill = take n [i | i <- fillDs, abs (i - f0) > 1.0e-3]
+        textUniform = null badText
+        fillUniform = null badFill
+        sync = length textDs == 0 || length fillDs == 0 || abs (t0 - f0) <= 1.0e-3
+    putStrLn ("sKeyA=" ++ show sKeyA ++ " sFillA=" ++ show sFillA)
+    putStrLn $
+      "d("
+        ++ show offA
+        ++ " -> "
+        ++ show offB
+        ++ ") text="
+        ++ show t0
+        ++ " fill="
+        ++ show f0
+        ++ " textUniform="
+        ++ show textUniform
+        ++ " fillUniform="
+        ++ show fillUniform
+        ++ " sync="
+        ++ show sync
+    unless (textUniform && fillUniform && sync) $ do
+      bump failed
+      putStrLn ("  >>> NON-LOCKSTEP on transition " ++ show offA ++ " -> " ++ show offB ++ ": text=" ++ show badText ++ " fill=" ++ show badFill)
+  return ()
+
+-- | Decode the final (post-snap) quad list from a DrawData vertex buffer.
+-- The harness emits each Quad as 4 consecutive vertices of 8 floats:
+-- x, y, r, g, b, a, u, v at a 32 byte stride (vertexSize).
+decodeQuads :: DrawData -> IO [(Float, Float, Float, Float, Float, Float)]
+decodeQuads dd =
+  withForeignPtr (drawVertices dd) $ \vp -> do
+    let n = drawVertexCount dd `div` 4
+        fptr = castPtr vp :: Ptr Float
+    forM [0 .. n - 1] $ \q -> do
+      let vBase = q * 8 * 4
+      xs <- forM [0 .. 3] $ \k -> do
+        let o = vBase + k * 8
+        x <- peekElemOff fptr o
+        y <- peekElemOff fptr (o + 1)
+        u <- peekElemOff fptr (o + 6)
+        v <- peekElemOff fptr (o + 7)
+        pure (x, y, u, v)
+      let x1 = minimum [x | (x, _, _, _) <- xs]
+          y1 = minimum [y | (_, y, _, _) <- xs]
+          x2 = maximum [x | (x, _, _, _) <- xs]
+          y2 = maximum [y | (_, y, _, _) <- xs]
+          (_u, _v) =
+            case xs of
+              (_, _, u, v) : _ -> (u, v)
+              [] -> (0, 0)
+      pure (x1, y1, x2, y2, _u, _v)
+
+whitePixelU :: Float
+whitePixelU = 1.5 / 1024.0
+
+whitePixelV :: Float
+whitePixelV = 1.5 / 1024.0
 
 

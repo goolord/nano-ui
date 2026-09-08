@@ -16,6 +16,7 @@ module NanoUI.Types
   , hsvToRgb
   , clamp
   , clamp01
+  , onGrid
   , lerpColor
   , colorLuminance
   , contrastRatio
@@ -116,6 +117,18 @@ clamp lo hi x = max lo (min hi x)
 {-# INLINE clamp01 #-}
 clamp01 :: Float -> Float
 clamp01 x = clamp 0 1 x
+
+-- | Round a logical coordinate onto the device-pixel grid implied by draw
+-- scale @s@ (device px = logical * s). Every layer that positions pixels --
+-- the layout solve, text pens, scroll offsets, paint and glyph rasterization --
+-- must route its coordinates through this single function, with ties rounding
+-- to even (@round@), so geometry can never dephase from text. An identity when
+-- @s <= 0@ (no scaling).
+{-# INLINE onGrid #-}
+onGrid :: Float -> Float -> Float
+onGrid s v
+  | s > 0 = fromIntegral (round (v * s) :: Int) / s
+  | otherwise = v
 
 {-# INLINE rgbToHsv #-}
 rgbToHsv :: Color -> (Float, Float, Float)

@@ -91,7 +91,7 @@ import NanoUI.Layout.Arena
   )
 import NanoUI.Layout.Solve (scrollBarSlotOf)
 import NanoUI.Style (AlignX (..), FontStyle (..), FontVariant (..), FontWeight (..), Padding (..), Style (..), Theme (..), styleBg, styleFg, themeSeparator, themeWindow)
-import NanoUI.Types (Color (..), Rect (..), colorRGBA, lerpColor, rectH, rectIntersect, rectW, rectX, rectY)
+import NanoUI.Types (Color (..), Rect (..), colorRGBA, lerpColor, onGrid, rectH, rectIntersect, rectW, rectX, rectY)
 import NanoUI.WidgetText (isCloseButtonStyle, isTableHeaderStyle, textInputSearchMode, textInputSearchTerminalText)
 import NanoUI.WidgetText
   ( colorPickerCurrentLabel
@@ -384,7 +384,7 @@ collectNodeTextSpans ctx floatCache idx = do
                 pure
                   [ ( Rect
                         tx
-                        (centeredTextY (ctxHostProfile ctx) textFm (y + fromIntegral i * lineH) lineH lineH)
+                        (centeredTextY (ctxHostProfile ctx) textFm (y + onGrid (fmSnapScale textFm) (fromIntegral i * lineH)) lineH lineH)
                         used
                         lineH
                     , line
@@ -404,7 +404,8 @@ collectNodeTextSpans ctx floatCache idx = do
                         else truncateTextIO measureWord contentW txt0
                     else pure txt0
                 let (tx, used) = alignedTextPen ax x w ix textFm dispTxt
-                pure [(Rect tx (centeredTextY (ctxHostProfile ctx) textFm y h lineH) used lineH, dispTxt, fg, paintBg)]
+                    py = centeredTextY (ctxHostProfile ctx) textFm y h lineH
+                pure [(Rect tx py used lineH, dispTxt, fg, paintBg)]
           pure (stripeSpans ++ textSpans)
     else
       if isWidgetNode nt
