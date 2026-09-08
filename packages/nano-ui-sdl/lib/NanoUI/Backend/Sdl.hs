@@ -7,6 +7,10 @@ module NanoUI.Backend.Sdl
   , SdlEnv (..)
   , SdlOptions (..)
   , askSdlDebug
+  , isDebugActive
+  , newSdlDebugSampler
+  , readSdlDebug
+  , takeDebugLive
   , defaultSdlOptions
   , FileFilter (..)
   , FileDialogOptions (..)
@@ -58,6 +62,10 @@ import NanoUI
 import NanoUI.Sdl.Runner (askSdlDebug, drawEff, drawReduceEff, newSdlContext, runSdlSession, sdlDrawFrame)
 import NanoUI.Sdl.Debug
   ( SdlDebugSnapshot (..)
+  , isDebugActive
+  , newSdlDebugSampler
+  , readSdlDebug
+  , takeDebugLive
   )
 import NanoUI.Sdl.Font
   ( CachedFontEntry (..)

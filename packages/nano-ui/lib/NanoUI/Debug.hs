@@ -260,14 +260,16 @@ noteDebugSkip :: DebugSamplerRef -> IO ()
 noteDebugSkip ref =
   atomicModifyIORef' ref $ \s -> (s {smSkips = smSkips s + 1}, ())
 
-isDebugActive :: DebugSamplerRef -> Bool -> IO Bool
-isDebugActive ref windowOpen =
-  if windowOpen
-    then pure True
-    else do
-      now <- getMonotonicTime
-      s <- readIORef ref
-      pure (now - smLastQueryT s < 1.0)
+-- | Debug HUD cadence is driven by actual snapshot consumption: a snapshot
+-- query (readSdlDebug) refreshes 'smLastQueryT', so the 4 Hz refresh loop only
+-- sustains while a stats window is being built.  Mere window presence must NOT
+-- count as activity, or the event loop wakes every 'debugHudTimeout' even when
+-- only a plain floating window is open.
+isDebugActive :: DebugSamplerRef -> IO Bool
+isDebugActive ref = do
+  now <- getMonotonicTime
+  s <- readIORef ref
+  pure (now - smLastQueryT s < 1.0)
 
 takeDebugLive :: DebugSamplerRef -> Bool -> IO Bool
 takeDebugLive _ False = pure False
