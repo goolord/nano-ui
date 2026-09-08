@@ -31,7 +31,6 @@ import NanoUI.Testing
   ( Context
   , anyAnimating
   , clearDirty
-  , debugPanelOpen
   , isDirty
   , needsRedraw
   , textFieldActive
@@ -148,8 +147,7 @@ runSdlSession options ctx setup shouldQuit drawFn =
                 writeIORef prev inp'
                 pure (c', inp')
             , sdWaitTimeout   = \c wasAnim -> do
-                debugWinOpen <- debugPanelOpen c
-                debugActive <- isDebugActive (sdlDebug env) debugWinOpen
+                debugActive <- isDebugActive (sdlDebug env)
                 wantDebug <- takeDebugLive (sdlDebug env) debugActive
                 animating <- anyAnimating c
                 editing <- textFieldActive c
@@ -162,8 +160,7 @@ runSdlSession options ctx setup shouldQuit drawFn =
                       then pure debugHudTimeout
                       else pure (-1)
             , sdShouldDraw    = \c prevInp inpSynced wasAnim -> do
-                debugWinOpen <- debugPanelOpen c
-                debugActive <- isDebugActive (sdlDebug env) debugWinOpen
+                debugActive <- isDebugActive (sdlDebug env)
                 wantDebug <- takeDebugLive (sdlDebug env) debugActive
                 need <- needsRedraw c prevInp inpSynced
                 dirtyNow <- isDirty c

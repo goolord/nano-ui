@@ -222,6 +222,7 @@ testSpecs =
   , TestSpec "page-window-scroll" False runPageWindowScrollTest
   , TestSpec "sibling-window-scroll" False runSiblingWindowScrollTest
   , TestSpec "window-scroll-only-damage" False runWindowScrollOnlyDamageTest
+  , TestSpec "window-content-churn" False runWindowContentChurnTest
   , TestSpec "scrolled-debug-toggle" False runScrolledDebugToggleTest
   , TestSpec "window-resize" False runWindowResizeTest
   , TestSpec "window-resize-halo-hit" False runWindowResizeHaloHitTest

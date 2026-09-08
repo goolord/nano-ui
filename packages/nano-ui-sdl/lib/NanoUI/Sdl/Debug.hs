@@ -74,10 +74,10 @@ noteSkip ref = do
   s <- readIORef ref
   noteDebugSkip (sdsSampler s)
 
-isDebugActive :: SamplerRef -> Bool -> IO Bool
-isDebugActive ref windowOpen = do
+isDebugActive :: SamplerRef -> IO Bool
+isDebugActive ref = do
   s <- readIORef ref
-  D.isDebugActive (sdsSampler s) windowOpen
+  D.isDebugActive (sdsSampler s)
 
 takeDebugLive :: SamplerRef -> Bool -> IO Bool
 takeDebugLive ref windowOpen = do
