@@ -103,16 +103,9 @@ initCursors = do
   grab <- grabCursorOrFallback moveFallback supported
   grabbing <- grabbingCursorOrFallback moveFallback supported
   current <- newIORef UiCursorDefault
-  when (def == nullPtr) $ fail "SDL_GetDefaultCursor failed"
-  when (ptr == nullPtr) $ fail "SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_POINTER) failed"
-  when (text == nullPtr) $ fail "SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_TEXT) failed"
-  when (moveFallback == nullPtr) $ fail "SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_MOVE) failed"
-  when (ns == nullPtr) $ fail "SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_NS_RESIZE) failed"
-  when (ew == nullPtr) $ fail "SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_EW_RESIZE) failed"
-  when (nwse == nullPtr) $ fail "SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_NWSE_RESIZE) failed"
-  when (nesw == nullPtr) $ fail "SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_NESW_RESIZE) failed"
-  when (grab == nullPtr) $ fail "SDL_CreateSystemCursor(grab) failed"
-  when (grabbing == nullPtr) $ fail "SDL_CreateSystemCursor(grabbing) failed"
+  -- NULL cursors are tolerated: SDL_SetCursor(NULL) selects the platform
+  -- default arrow, which keeps us running on headless/dummy video drivers
+  -- where system cursor shapes are unavailable.
   pure
     SdlCursors
       { scDefault = def

@@ -158,6 +158,45 @@ main = do
           putStrLn ""
           clickDbg
 
+      putStrLn "--- 6. DEBUG HUD ROW STRUCTURE ---"
+      let hudRows :: [[(T.Text, T.Text)]]
+          hudRows =
+            [ [("present", " 119.9 fps"), ("loop", "2201.3 fps"), ("frame cpu", "0.45 ms"), ("haskell", "0.23 ms"), ("  ui", "0.12 ms"), ("  render", "0.11 ms"), ("sdl present", "0.20 ms"), ("draws", "1234"), ("skips", "7")]
+            , [("verts", "4706"), ("indices", "8123"), ("cmds", "19")]
+            , [("window", "1280x800"), ("scale", "1.00"), ("mouse", "640, 400"), ("renderer", "opengl")]
+            , [("heap", "12.3 MB"), ("threads", "120"), ("uptime", "00:12:34")]
+            ]
+          hudTitles = ["Frame", "Draw", "Display", "Runtime"] :: [T.Text]
+          hudKvUi =
+            void $ fst <$> window True "Debug" (columnWith (tight . gap 4 . minW 300 . fillW) $
+              foldr (\(t, rows) rest -> do
+                  void $ label t
+                  mapM_ (\(k, v) -> void (kvMono k v)) rows
+                  rest)
+                (pure ()) (zip hudTitles hudRows))
+          hudLabelUi =
+            void $ fst <$> window True "Debug" (columnWith (tight . gap 4 . minW 300 . fillW) $
+              foldr (\(t, rows) rest -> do
+                  void $ label t
+                  mapM_ (\(k, v) -> void (labelEx (tight . fontMono $ defaultLayout) (k <> "  " <> v))) rows
+                  rest)
+                (pure ()) (zip hudTitles hudRows))
+          hudBlockUi =
+            void $ fst <$> window True "Debug" (columnWith (tight . gap 4 . minW 300 . fillW) $
+              foldr (\(t, rows) rest -> do
+                  void $ label t
+                  let maxK = foldl (\acc (k, _) -> max acc (T.length k)) 0 rows
+                  void $ labelEx (tight . gap 0 . fontMono $ defaultLayout)
+                    (T.unlines [T.justifyLeft maxK ' ' k <> "  " <> v | (k, v) <- rows])
+                  rest)
+                (pure ()) (zip hudTitles hudRows))
+      forM_ [("kvMono rows (current)" :: String, hudKvUi), ("one mono label/row", hudLabelUi), ("one block label/section", hudBlockUi)] $ \(name, ui) -> do
+        _ <- runFrame ctx' inp ui
+        (_, _, ddHud, _) <- runFrame ctx' inp ui
+        printf "  %-26s : verts=%5d cmds=%2d  " name (drawVertexCount ddHud) (drawCmdCount ddHud)
+        measureBench "frame" iterations $ void (runFrame ctx' inp ui)
+      putStrLn ""
+
       putStrLn "--- 2. DEMO TABS IN ISOLATION (Full runFrame + draw) ---"
       measureBench "Tab: Controls" iterations $
         void (runFrame ctx' inp tabControlsUi)
