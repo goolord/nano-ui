@@ -78,23 +78,30 @@ needsRedrawBody :: Context -> Input -> Input -> IO Bool
 needsRedrawBody ctx prev inp = do
   dirty <- isDirty ctx
   anim <- anyAnimating ctx
-  hover <- hoverWouldChange ctx inp
   mDrag <- getScrollDrag ctx
   mWinDrag <- getWindowDrag ctx
   overlay <- overlayMenuOpen ctx
   edit <- textFieldActive ctx
   let overlayMove = overlay && inputMousePos prev /= inputMousePos inp
-  pure
-    ( dirty
-        || anim
-        || inputInteracted prev inp
-        || inputPointerHeld inp
-        || hover
-        || isJust mDrag
-        || isJust mWinDrag
-        || overlayMove
-        || edit
-    )
+  early <-
+    pure
+      ( dirty
+          || anim
+          || inputInteracted prev inp
+          || inputPointerHeld inp
+          || isJust mDrag
+          || isJust mWinDrag
+          || overlayMove
+          || edit
+      )
+  if early
+    then pure True
+    else
+      -- Idle: hover can only change when the pointer moved since the frame
+      -- whose hover state we still hold. Skip the O(n) hot probe otherwise.
+      if inputMousePos prev == inputMousePos inp
+        then pure False
+        else hoverWouldChange ctx inp
 
 -- Select dropdown or text-input menu is open. Overlay hover is not a widget id.
 overlayMenuOpen :: Context -> IO Bool
