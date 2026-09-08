@@ -29,7 +29,7 @@ import NanoUI.Context
   , lookupImageUv
   )
 import NanoUI.Draw
-  ( DrawArena
+  ( DrawArena (..)
   , emitDrawOps
   , getCurrentClip
   , pushFilledTriangle
@@ -37,10 +37,12 @@ import NanoUI.Draw
   , pushLine
   , pushRect
   , pushRoundedRect
+  , pushRoundedRectRaw
   , pushRoundedStroke
   , pushStrokeAA
   , pushText
   , pushTextStyled
+  , snapToPixel
   , withClip
   )
 import NanoUI.Font
@@ -744,10 +746,13 @@ drawRadio host da fm style x y h value accent well =
       r = box / 2
       bw = 2
    in drawChoiceControl host da fm style x y h r bw value accent well $ \bx by b -> do
-        let dot = b * 0.72
-            dx = bx + (b - dot) / 2
-            dy = by + (b - dot) / 2
-        pushRoundedRect da (Rect dx dy dot dot) (dot / 2) accent
+        s <- readIORef (daSnapScale da)
+        let !sx = snapToPixel s bx
+            !sy = snapToPixel s by
+            !dot = b * 0.72
+            !dx = sx + (b - dot) / 2
+            !dy = sy + (b - dot) / 2
+        pushRoundedRectRaw da (Rect dx dy dot dot) (dot / 2) accent
 
 walkChildren :: Context -> NodeIdx -> IO ()
 walkChildren ctx idx =

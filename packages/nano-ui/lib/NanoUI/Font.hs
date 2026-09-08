@@ -220,7 +220,17 @@ centeredTextY host fm y h th =
     then y + (h - th) / 2
     else case fmGlyph fm 'H' of
       Nothing -> y + (h - th) / 2
-      Just gq -> y + h / 2 - (gqY gq + gqH gq / 2)
+      Just gq -> y + snapToDevice (fmSnapScale fm) (h / 2 - (gqY gq + gqH gq / 2))
+  where
+    -- Snap the (constant) baseline offset to the device grid rather than the
+    -- whole pen: pen = snap(y + offset) rounds a fractional offset with ties
+    -- to even, so adjacent rows (and the same row across a sub-pixel scroll)
+    -- land on alternating device pixels while the geometry beside them stays
+    -- rigid. Snapping only the constant offset keeps every row fixed on the
+    -- grid no matter where y falls.
+    snapToDevice s v
+      | s > 0 = fromIntegral (round (v * s) :: Int) / s
+      | otherwise = v
 
 -- Origin and used width inside the node box, inset on all AlignX sides.
 {-# INLINE alignedTextBox #-}

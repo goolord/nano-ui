@@ -781,19 +781,35 @@ setDisabled ctx wid dis = do
   s <- getStore ctx
   setStore ctx (s {storeInt = IM.insert (slotKey slotDisabled (intKey wid)) (boolInt dis) (storeInt s)})
 
+-- | Snap a scroll offset to the device pixel grid, the same grid 'pushText' and
+-- 'pushRect' snap to. Per-element snapping is not translation-invariant with
+-- respect to a fractional scroll offset, so without this the distance between a
+-- row and its text can toggle by a device pixel frame-to-frame while content
+-- scrolls, which shows up as shimmering/jittery scrolling text. Publishing the
+-- offset on the device grid keeps every consumer (paint, hit-testing, cursor,
+-- scrollbar thumb) in lockstep, and the raw offset keeps sub-pixel trackpad
+-- deltas so they accumulate until a device pixel is crossed.
+{-# INLINE snapScrollOffset #-}
+snapScrollOffset :: Context -> Float -> IO Float
+snapScrollOffset ctx v = do
+  s <- Draw.getDrawSnapScale (ctxDrawArena ctx)
+  pure (Draw.snapToPixel s v)
+
 {-# INLINE getScrollOffset #-}
 getScrollOffset :: Context -> WidgetId -> IO Float
 getScrollOffset ctx wid = do
   s <- getStore ctx
   let key = intKey wid
       sKey = slotKey slotTextAreaScroll key
-  if IM.member sKey (storePoint s)
-    then pure (snd (IM.findWithDefault (0, 0) sKey (storePoint s)))
-    else do
-      cfg <- getScrollConfig ctx wid
-      if scrollConfigNative2D cfg
-        then v2Y <$> getScrollOffset2D ctx wid
-        else pure (IM.findWithDefault 0 key (storeFloat s))
+  off <-
+    if IM.member sKey (storePoint s)
+      then pure (snd (IM.findWithDefault (0, 0) sKey (storePoint s)))
+      else do
+        cfg <- getScrollConfig ctx wid
+        if scrollConfigNative2D cfg
+          then v2Y <$> getScrollOffset2D ctx wid
+          else pure (IM.findWithDefault 0 key (storeFloat s))
+  snapScrollOffset ctx off
 
 {-# INLINE setScrollOffset #-}
 setScrollOffset :: Context -> WidgetId -> Float -> IO ()
@@ -835,21 +851,25 @@ getScrollOffset2D ctx wid = do
   s <- getStore ctx
   let widKey = intKey wid
       sKey = slotKey slotTextAreaScroll widKey
-  if IM.member sKey (storePoint s)
-    then do
-      let (sx, sy) = IM.findWithDefault (0, 0) sKey (storePoint s)
-      pure (V2 sx sy)
-    else do
-      let offKey = slotKey slotScrollOff widKey
-          crossKey = slotKey slotScrollCross widKey
-      case IM.lookup offKey (storePoint s) of
-        Just (x, y) -> pure (V2 x y)
-        Nothing ->
-          pure
-            ( V2
-                (IM.findWithDefault 0 crossKey (storeFloat s))
-                (IM.findWithDefault 0 widKey (storeFloat s))
-            )
+  v <-
+    if IM.member sKey (storePoint s)
+      then do
+        let (sx, sy) = IM.findWithDefault (0, 0) sKey (storePoint s)
+        pure (V2 sx sy)
+      else do
+        let offKey = slotKey slotScrollOff widKey
+            crossKey = slotKey slotScrollCross widKey
+        case IM.lookup offKey (storePoint s) of
+          Just (x, y) -> pure (V2 x y)
+          Nothing ->
+            pure
+              ( V2
+                  (IM.findWithDefault 0 crossKey (storeFloat s))
+                  (IM.findWithDefault 0 widKey (storeFloat s))
+              )
+  sx <- snapScrollOffset ctx (v2X v)
+  sy <- snapScrollOffset ctx (v2Y v)
+  pure (V2 sx sy)
 
 {-# INLINE setScrollOffset2D #-}
 setScrollOffset2D :: Context -> WidgetId -> V2 -> IO ()

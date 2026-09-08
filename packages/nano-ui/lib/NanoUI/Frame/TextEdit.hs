@@ -97,12 +97,13 @@ import NanoUI.Context
   , slotCursor
   , slotKey
   )
-import NanoUI.Draw (DrawArena, pushRect, pushRoundedRect, pushText, withClip)
+import NanoUI.Draw (DrawArena, getDrawSnapScale, pushRect, pushRoundedRect, pushText, snapToPixel, withClip)
 import NanoUI.Font
   ( FontMetrics
   , ScrollBarSlot (..)
   , centeredTextY
   , fmLineHeight
+  , fmSnapScale
   , layoutLineHeight
   , scrollBarGeomFor
   , scrollBarOuterGap
@@ -922,20 +923,24 @@ data TextAreaHit = TextAreaHit
 
 textAreaGeom :: HostProfile -> FontMetrics -> Float -> Float -> Float -> Float -> TextAreaGeom
 textAreaGeom host fm x y w h =
-  let labelH = layoutLineHeight host fm
+  let s = fmSnapScale fm
+      snapV v = fromIntegral (round (v * s) :: Int) / s
+      labelH = layoutLineHeight host fm
       gap = textInputLabelGap fm
-      fieldY = y + labelH + gap
+      fieldY = y + snapV (labelH + gap)
       fieldH = max 0 (h - labelH - gap)
-      lineH = fmLineHeight fm
+      lineH = snapV (fmLineHeight fm)
    in TextAreaGeom {tagFieldRect = Rect x fieldY w fieldH, tagLineHeight = lineH}
 
 textAreaFieldClip :: HostProfile -> TextAreaGeom -> FontMetrics -> Rect
 textAreaFieldClip host geom fm =
-  let field = tagFieldRect geom
+  let s = fmSnapScale fm
+      snapV v = fromIntegral (round (v * s) :: Int) / s
+      field = tagFieldRect geom
       (ix, iy) = widgetContentInset host fm
    in Rect
-        (rectX field + ix)
-        (rectY field + iy)
+        (rectX field + snapV ix)
+        (rectY field + snapV iy)
         (max 0 (rectW field - 2 * ix))
         (max 0 (rectH field - 2 * iy))
 
@@ -1084,6 +1089,16 @@ syncTextAreaViewport ctx idx x y w h = do
       pts1 = if sx' /= sx || sy' /= sy then IM.insert (slotKey slotTextAreaScroll key) (sx', sy') pts0 else pts0
   setStore ctx (store {storePoint = pts1})
 
+-- | Snap a text-area scroll offset to the device pixel grid, the same grid
+-- 'pushText' snaps to, so line pens and hit-testing stay in lockstep (and in
+-- agreement with each other) while the text area scrolls. The raw 'Double'
+-- offset keeps sub-pixel wheel deltas; only the applied value is quantized.
+{-# INLINE textAreaSnap #-}
+textAreaSnap :: DrawArena -> IO (Float -> Float)
+textAreaSnap da = do
+  s <- getDrawSnapScale da
+  pure (snapToPixel s)
+
 drawTextAreaSelection ::
   DrawArena ->
   Context ->
@@ -1095,6 +1110,7 @@ drawTextAreaSelection ::
   Style ->
   IO ()
 drawTextAreaSelection da _ctx state geom host fm theme style = do
+  snap <- textAreaSnap da
   let anchor = TA.selectionAnchor state
       cursor = TB.getCursor (TA.buffer state)
   when (anchor /= cursor) $ do
@@ -1104,8 +1120,8 @@ drawTextAreaSelection da _ctx state geom host fm theme style = do
         lineH = tagLineHeight geom
         (ix, iy) = widgetContentInset host fm
         (scrollX, scrollY) = TA.scrollOffset state
-        scrollXf = realToFrac scrollX
-        scrollYf = realToFrac scrollY
+        scrollXf = snap (realToFrac scrollX)
+        scrollYf = snap (realToFrac scrollY)
         contentTop = rectY field + iy
         selBg = selectionBgColor (themeAccent theme) (styleBg style)
         loRow = TB.cursorRow lo
@@ -1142,6 +1158,7 @@ drawTextAreaSelection da _ctx state geom host fm theme style = do
 
 drawTextAreaContent :: DrawArena -> Context -> NodeIdx -> Float -> Float -> Float -> Float -> Style -> IO ()
 drawTextAreaContent da ctx idx x y w h style = do
+  snap <- textAreaSnap da
   let terminal = isCellHost (ctxHostProfile ctx)
   if terminal
     then pure ()
@@ -1161,8 +1178,8 @@ drawTextAreaContent da ctx idx x y w h style = do
       let buf = TA.buffer state
           lineTexts = TB.toLines buf
           (scrollX, scrollY) = TA.scrollOffset state
-          scrollXf = realToFrac scrollX
-          scrollYf = realToFrac scrollY
+          scrollXf = snap (realToFrac scrollX)
+          scrollYf = snap (realToFrac scrollY)
           contentX = rectX clip - scrollXf
           fieldTop = rectY field
           fieldBottom = fieldTop + rectH field
@@ -1245,11 +1262,12 @@ textAreaHitForWidget ctx wid = do
 
 textAreaCursorAt :: Context -> TA.TextAreaState -> TextAreaHit -> V2 -> IO (Int, Int)
 textAreaCursorAt ctx state hit mouse = do
+  snap <- textAreaSnap (ctxDrawArena ctx)
   let lineTexts = TB.toLines (TA.buffer state)
       lineCount = max 1 (length lineTexts)
       (scrollX, scrollY) = TA.scrollOffset state
-      scrollXf = realToFrac scrollX
-      scrollYf = realToFrac scrollY
+      scrollXf = snap (realToFrac scrollX)
+      scrollYf = snap (realToFrac scrollY)
       fm = ctxFontMetrics ctx
       (_, iy) = widgetContentInset (ctxHostProfile ctx) fm
       contentTop = rectY (tahFieldRect hit) + iy

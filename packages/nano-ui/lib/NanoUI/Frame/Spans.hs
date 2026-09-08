@@ -374,6 +374,9 @@ collectNodeTextSpans ctx floatCache idx = do
               canWrap = not isRowChild && wrapCap < 1e8
               wrapW = max 0 (wrapCap - 2 * ix)
               lineH = layoutLineHeight (ctxHostProfile ctx) textFm
+              snapGrid v =
+                let s = fmSnapScale textFm
+                 in fromIntegral (round (v * s) :: Int) / s
           textSpans <-
             if hasNewlines || (canWrap && wrapCap + 0.5 < tw0)
               then do
@@ -384,7 +387,7 @@ collectNodeTextSpans ctx floatCache idx = do
                 pure
                   [ ( Rect
                         tx
-                        (centeredTextY (ctxHostProfile ctx) textFm (y + fromIntegral i * lineH) lineH lineH)
+                        (centeredTextY (ctxHostProfile ctx) textFm (y + snapGrid (fromIntegral i * lineH)) lineH lineH)
                         used
                         lineH
                     , line
@@ -404,7 +407,8 @@ collectNodeTextSpans ctx floatCache idx = do
                         else truncateTextIO measureWord contentW txt0
                     else pure txt0
                 let (tx, used) = alignedTextPen ax x w ix textFm dispTxt
-                pure [(Rect tx (centeredTextY (ctxHostProfile ctx) textFm y h lineH) used lineH, dispTxt, fg, paintBg)]
+                    py = centeredTextY (ctxHostProfile ctx) textFm y h lineH
+                pure [(Rect tx py used lineH, dispTxt, fg, paintBg)]
           pure (stripeSpans ++ textSpans)
     else
       if isWidgetNode nt

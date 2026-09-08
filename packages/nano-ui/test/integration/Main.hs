@@ -155,6 +155,7 @@ testSpecs =
   , TestSpec "scroll-child-damage-offset" False runScrollChildDamageOffsetTest
   , TestSpec "scroll-2d-wheel" False run2DScrollWheelTest
   , TestSpec "table-2d-scroll-sync" False runTable2DScrollSyncTest
+  , TestSpec "scroll-lockstep-probe" False runScrollLockstepProbeTest
   , TestSpec "tab-focus" False runTabFocusTest
   , TestSpec "select-initial" False runSelectTest
   , TestSpec "select-enum" False runEnumSelectTest

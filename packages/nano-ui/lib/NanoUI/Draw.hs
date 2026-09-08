@@ -11,6 +11,7 @@ module NanoUI.Draw
   , newDrawArena
   , resetDrawArena
   , setDrawSnapScale
+  , getDrawSnapScale
   , beginLayer
   , setClip
   , pushRect
@@ -20,6 +21,7 @@ module NanoUI.Draw
   , glyphAtlasTextureId
   , pushImage
   , pushRoundedRect
+  , pushRoundedRectRaw
   , pushRoundedStroke
   , pushText
   , pushTextStyled
@@ -27,6 +29,7 @@ module NanoUI.Draw
   , pushStrokeAA
   , pushStroke
   , pushFilledTriangle
+  , snapToPixel
   , DrawOp (..)
   , DrawingBuild
   , emitDrawOps
@@ -534,6 +537,10 @@ resetDrawArena da = do
 setDrawSnapScale :: DrawArena -> Float -> IO ()
 setDrawSnapScale da s = writeIORef (daSnapScale da) (if s > 0 then s else 0)
 
+{-# INLINE getDrawSnapScale #-}
+getDrawSnapScale :: DrawArena -> IO Float
+getDrawSnapScale da = readIORef (daSnapScale da)
+
 {-# NOINLINE poolTake #-}
 poolTake :: BufferPool -> Int -> Int -> IO (ForeignPtr Word8)
 poolTake pool bytes minCap = do
@@ -914,27 +921,39 @@ pushRoundedRect da rect@(Rect x y w h) radius col
   | radius <= 0.5 = pushRect da rect col
   | otherwise = do
       s <- readIORef (daSnapScale da)
-      let !px = snapToPixel s x
-          !py = snapToPixel s y
-          !rad = min radius (min (w * 0.5) (h * 0.5))
+      pushRoundedRectRaw da (Rect (snapToPixel s x) (snapToPixel s y) w h) radius col
+
+-- | Unsnapped variant used when the rect is already anchored to the snapped
+-- device pixel grid, e.g. a mark that must stay concentric with a border that
+-- has already snapped its own origin. Re-snapping here would round the
+-- off-origin inset (delta = (box - mark)/2) away, and since absolute snapping
+-- rides on the fractional part of the widget position the mark would drift
+-- off-center by up to a pixel as the widget scrolls.
+{-# INLINE pushRoundedRectRaw #-}
+pushRoundedRectRaw :: DrawArena -> Rect -> Float -> Color -> IO ()
+pushRoundedRectRaw da (Rect x y w h) radius col
+  | w <= 0 || h <= 0 = pure ()
+  | radius <= 0.5 = pushRect da (Rect x y w h) col
+  | otherwise = do
+      let !rad = min radius (min (w * 0.5) (h * 0.5))
       if rad <= 0.5
-        then pushRect da (Rect px py w h) col
+        then pushRect da (Rect x y w h) col
         else do
           setTexture da glyphAtlasTextureId
           let !midW = max 0 (w - 2 * rad)
               !midH = max 0 (h - 2 * rad)
           when (midW > 0 && midH > 0) $
-            pushQuad da (Rect (px + rad) (py + rad) midW midH) whitePixelU whitePixelV whitePixelU whitePixelV col
+            pushQuad da (Rect (x + rad) (y + rad) midW midH) whitePixelU whitePixelV whitePixelU whitePixelV col
           when (midW > 0) $ do
-            pushQuad da (Rect (px + rad) py midW rad) whitePixelU whitePixelV whitePixelU whitePixelV col
-            pushQuad da (Rect (px + rad) (py + h - rad) midW rad) whitePixelU whitePixelV whitePixelU whitePixelV col
+            pushQuad da (Rect (x + rad) y midW rad) whitePixelU whitePixelV whitePixelU whitePixelV col
+            pushQuad da (Rect (x + rad) (y + h - rad) midW rad) whitePixelU whitePixelV whitePixelU whitePixelV col
           when (midH > 0) $ do
-            pushQuad da (Rect px (py + rad) rad midH) whitePixelU whitePixelV whitePixelU whitePixelV col
-            pushQuad da (Rect (px + w - rad) (py + rad) rad midH) whitePixelU whitePixelV whitePixelU whitePixelV col
-          pushCornerFan da (px + rad) (py + rad) rad pi (pi * 1.5) col
-          pushCornerFan da (px + w - rad) (py + rad) rad (pi * 1.5) (pi * 2) col
-          pushCornerFan da (px + w - rad) (py + h - rad) rad 0 (pi * 0.5) col
-          pushCornerFan da (px + rad) (py + h - rad) rad (pi * 0.5) pi col
+            pushQuad da (Rect x (y + rad) rad midH) whitePixelU whitePixelV whitePixelU whitePixelV col
+            pushQuad da (Rect (x + w - rad) (y + rad) rad midH) whitePixelU whitePixelV whitePixelU whitePixelV col
+          pushCornerFan da (x + rad) (y + rad) rad pi (pi * 1.5) col
+          pushCornerFan da (x + w - rad) (y + rad) rad (pi * 1.5) (pi * 2) col
+          pushCornerFan da (x + w - rad) (y + h - rad) rad 0 (pi * 0.5) col
+          pushCornerFan da (x + rad) (y + h - rad) rad (pi * 0.5) pi col
 
 {-# INLINE pushRoundedStroke #-}
 pushRoundedStroke :: DrawArena -> Rect -> Float -> Float -> Color -> IO ()

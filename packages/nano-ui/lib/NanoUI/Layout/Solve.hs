@@ -186,6 +186,28 @@ solveLayoutWithResolver na host fm monoFm measure resolveFont lookupMeasure root
     whenPositive count $ do
       measurePass na host fm monoFm measure resolveFont lookupMeasure
       positionNodeA a na host fm monoFm measure resolveFont 0 0 0 rootW rootH
+      quantizeResultsA a count (fmSnapScale fm)
+
+{-# INLINE quantizeResultsA #-}
+quantizeResultsA :: NodeArenaArrays -> Int -> Float -> IO ()
+quantizeResultsA NodeArenaArrays {naArrGeom = arr} count s
+  | s <= 0 = pure ()
+  | otherwise = go 0
+  where
+    g2 v = fromIntegral (round (v * s) :: Int) / s
+    go i
+      | i >= count = pure ()
+      | otherwise = do
+          let base = i * 10
+          x <- readPrimArray arr (base + 0)
+          y <- readPrimArray arr (base + 1)
+          w <- readPrimArray arr (base + 2)
+          h <- readPrimArray arr (base + 3)
+          writePrimArray arr (base + 0) (g2 x)
+          writePrimArray arr (base + 1) (g2 y)
+          writePrimArray arr (base + 2) (max 0 (g2 w))
+          writePrimArray arr (base + 3) (max 0 (g2 h))
+          go (i + 1)
 
 {-# INLINE nodeTypeA #-}
 nodeTypeA :: NodeArenaArrays -> NodeIdx -> IO NodeType
