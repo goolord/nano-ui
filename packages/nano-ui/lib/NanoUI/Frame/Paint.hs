@@ -712,9 +712,10 @@ drawChoiceControl ::
   Float ->
   Color ->
   Color ->
+  Bool ->
   (Float -> Float -> Float -> IO ()) ->
   IO ()
-drawChoiceControl host da fm style x y h r bw value accent well postMark = do
+drawChoiceControl host da fm style x y h r bw value accent well solidChecked postMark = do
   let (ix, _) =
         if isCellHost host
           then widgetContentInset host fm
@@ -723,12 +724,19 @@ drawChoiceControl host da fm style x y h r bw value accent well postMark = do
       bx = x + ix
       by = verticallyCenteredBox y h box
       outer = Rect bx by box box
-      inner = Rect (bx + bw) (by + bw) (box - 2 * bw) (box - 2 * bw)
-      innerR = max 0 (r - bw)
-      strokeCol = if value >= 0.5 then accent else styleBorder style
-  pushRoundedRect da inner innerR well
-  pushRoundedStroke da outer r bw strokeCol
-  when (value >= 0.5) $ postMark bx by box
+      checked = value >= 0.5
+  if checked && solidChecked
+    then do
+      pushRoundedRect da outer r accent
+      pushRoundedStroke da outer r bw accent
+      postMark bx by box
+    else do
+      let inner = Rect (bx + bw) (by + bw) (box - 2 * bw) (box - 2 * bw)
+          innerR = max 0 (r - bw)
+          strokeCol = if checked then accent else styleBorder style
+      pushRoundedRect da inner innerR well
+      pushRoundedStroke da outer r bw strokeCol
+      when checked $ postMark bx by box
 
 drawCheckbox ::
   HostProfile ->
@@ -746,8 +754,8 @@ drawCheckbox host da fm style x y h value accent well =
   let box = checkboxBoxSize host fm
       r = min 6 (box / 3.5)
       bw = 1.5
-   in drawChoiceControl host da fm style x y h r bw value accent well $ \bx by b ->
-        drawCheckboxMark da bx by b accent
+   in drawChoiceControl host da fm style x y h r bw value accent well True $ \bx by b ->
+        drawCheckboxMark da bx by b (colorRGBA 255 255 255 255)
 
 drawCheckboxMark :: DrawArena -> Float -> Float -> Float -> Color -> IO ()
 drawCheckboxMark da bx by box markCol = do
@@ -783,7 +791,7 @@ drawRadio host da fm style x y h value accent well =
   let box = checkboxBoxSize host fm
       r = box / 2
       bw = 2
-   in drawChoiceControl host da fm style x y h r bw value accent well $ \bx by b -> do
+   in drawChoiceControl host da fm style x y h r bw value accent well False $ \bx by b -> do
         s <- readIORef (daSnapScale da)
         let !sx = snapToPixel s bx
             !sy = snapToPixel s by
