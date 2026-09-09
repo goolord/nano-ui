@@ -147,10 +147,17 @@ defaultSdlOptions =
     , sdlAppImages = mempty
     }
 
+-- | SDL_WINDOW_HIGH_PIXEL_DENSITY (0x2000): without it the window's surface
+-- gets scale 1.0 even on a 2x / HiDPI output, so the compositor upscales the
+-- whole window (blurry "looks upscaled"). With it, SDL_GetWindowDisplayScale
+-- returns the real output scale, the window keeps its logical size, and the
+-- pixel buffer (and therefore the retain texture, glyph atlas, and fonts)
+-- rasterizes at the native pixel density.
 computeWindowFlags :: Bool -> Bool -> Bool -> Bool -> Bool -> SDL_WindowFlags
 computeWindowFlags resizable fullscreen borderless alwaysOnTop hidden =
   SDL_WindowFlags $
-    (if resizable then 0x0000000000000020 else 0)
+    0x0000000000002000
+      .|. (if resizable then 0x0000000000000020 else 0)
       .|. (if fullscreen then 0x0000000000000001 else 0)
       .|. (if borderless then 0x0000000000000010 else 0)
       .|. (if alwaysOnTop then 0x0000000000010000 else 0)

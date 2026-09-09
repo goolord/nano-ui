@@ -26,6 +26,10 @@ TTF_Font *nano_ui_ttf_open_font(const char *path, float ptsize)
         TTF_SetFontKerning(font, true);
         TTF_SetFontDirection(font, TTF_DIRECTION_LTR);
         TTF_SetFontScript(font, TTF_StringToTag("Latn"));
+        /* Light grid-fitting snaps stems to whole pixels the way terminals
+         * (alacritty/kitty) rasterize, giving crisp edges instead of soft,
+         * grey antialiased outlines. NORMAL keeps fractional outlines. */
+        TTF_SetFontHinting(font, TTF_HINTING_LIGHT);
     }
     return font;
 }
@@ -50,6 +54,7 @@ TTF_Font *nano_ui_ttf_open_font_memory(const void *data, size_t size, float ptsi
         TTF_SetFontKerning(font, true);
         TTF_SetFontDirection(font, TTF_DIRECTION_LTR);
         TTF_SetFontScript(font, TTF_StringToTag("Latn"));
+        TTF_SetFontHinting(font, TTF_HINTING_LIGHT);
     }
     return font;
 }

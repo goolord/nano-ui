@@ -54,7 +54,11 @@ static bool create_texture(NanoUiTextAtlas *atlas, int w, int h)
         return false;
     }
     SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
-    SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_NEAREST);
+    /* Bilinear filtering keeps glyph quads smooth when a quad lands off a
+     * whole texel boundary (fractional display scale, sub-pixel pen nudge,
+     * shaped-run placement). NEAREST snaps to the closest texel and makes
+     * scaled/slightly-misaligned text look blocky and pixelated. */
+    SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_LINEAR);
     size_t bytes = (size_t)w * (size_t)h * 4;
     Uint8 *px = (Uint8 *)malloc(bytes);
     if (!px) {
