@@ -43,9 +43,14 @@ import NanoUI.Context
   )
 import NanoUI.Testing
   ( UiCursorKind (..)
+  , anyAnimating
+  , clearDirty
+  , isDirty
+  , needsRedraw
   , newPixelContext
   , runEff
   , runFrameReduceEff
+  , textFieldActive
   , uiCursorKind
   )
 import NanoUI.Runner
@@ -79,6 +84,7 @@ data RgfwOptions = RgfwOptions
   , optTheme  :: !RgfwTheme
   , optCenter :: !Bool
   , optScale  :: !Float
+  , optRefreshHz :: !Int
   }
 
 defaultRgfwOptions :: RgfwOptions
@@ -90,6 +96,7 @@ defaultRgfwOptions =
     , optTheme  = defaultDarkTheme
     , optCenter = True
     , optScale  = 0.0
+    , optRefreshHz = 0
     }
 
 mapRgfwKey :: Word32 -> Maybe Key
@@ -148,6 +155,8 @@ runRgfwSessionReduceCustom opts getThemeAndScale updateModel initialModel view =
   case mWin of
     Nothing -> putStrLn "Failed to create RGFW window."
     Just win -> do
+      let !refreshHz = if optRefreshHz opts > 0 then optRefreshHz opts else 60
+          !refreshSec = 1.0 / fromIntegral refreshHz :: Double
       monScaleInit <- R.windowScale win
       let !initMonScale = if monScaleInit > 0.0 then monScaleInit else 1.0
       monScaleRef <- newIORef initMonScale
@@ -195,10 +204,71 @@ runRgfwSessionReduceCustom opts getThemeAndScale updateModel initialModel view =
               }
 
       R.withEventBuffer $ \evPtr -> do
+        let !animateTimeout = max 1 (floor (refreshSec * 1000) - 2) :: Int
+
+        let drawOne c curInp = do
+              tUiStart <- getMonotonicTime
+              curModel <- readIORef modelRef
+              (_, newModel, _, _, dirtyAfterUi) <-
+                runFrameReduceEff runEff updateModel c curInp curModel view
+              writeIORef modelRef newModel
+              tUiEnd <- getMonotonicTime
+              let !uiMs = (tUiEnd - tUiStart) * 1000.0
+
+              tRenderStart <- getMonotonicTime
+              curMonScale <- readIORef monScaleRef
+              curScale <- readIORef scaleRef
+              (pw, ph) <- readIORef winSizeRef
+              physSurf' <- readIORef physSurfRef
+              let (curTheme, _) = getThemeAndScale newModel
+              clearScreen physSurf' (packColor (thBackground curTheme))
+              hotId <- readIORef (ctxLastHotId c)
+              activeId <- readIORef (ctxActiveId c)
+              focusId <- readIORef (ctxFocusId c)
+              let na = ctxNodeArena c
+              count <- arenaCount na
+              renderArena physSurf' font curScale curTheme c na hotId activeId focusId
+              renderTextEditMenuOverlay physSurf' font curScale curTheme c (inputMousePos curInp)
+              tRenderEnd <- getMonotonicTime
+              let !renderMs = (tRenderEnd - tRenderStart) * 1000.0
+
+              tBlitStart <- getMonotonicTime
+              R.blitSurface win (sRgfwSurface physSurf')
+              tBlitEnd <- getMonotonicTime
+              let !blitMs = (tBlitEnd - tBlitStart) * 1000.0
+                  !frameMs = (tBlitEnd - tUiStart) * 1000.0
+
+              let Size lw lh = inputWindowSize curInp
+              notePresent
+                debugSampler
+                uiMs
+                renderMs
+                blitMs
+                frameMs
+                count
+                lw
+                lh
+                pw
+                ph
+                curScale
+                curMonScale
+
+              -- Single-pass full redraws with no vsync: pace frames onto the
+              -- refresh period rather than a fixed 8.3 ms spin. The waiter
+              -- gates idle frames, so this only runs when something actually
+              -- needs presenting.
+              let !targetFrameUs = max 1 (round (refreshSec * 1e6) :: Int)
+                  !elapsedUs = round (frameMs * 1000.0)
+                  !delayUs = max 0 (targetFrameUs - elapsedUs)
+              when (delayUs > 0) $ threadDelay delayUs
+              pure (dirtyAfterUi, curInp)
+
         let drv =
               SessionDriver
                 { sdPollEvents    = pollRgfwEvents win evPtr scaleRef monScaleRef winSizeRef
-                , sdWaitEvents    = \_ -> pollRgfwEvents win evPtr scaleRef monScaleRef winSizeRef
+                , sdWaitEvents    = \t -> do
+                    R.waitForEvent t
+                    pollRgfwEvents win evPtr scaleRef monScaleRef winSizeRef
                 , sdApplyEvent    = applyRgfwEvent
                 , sdIsButtonEdge  = isRgfwButtonEdge
                 , sdIsHardQuit    = \_ -> False
@@ -219,60 +289,34 @@ runRgfwSessionReduceCustom opts getThemeAndScale updateModel initialModel view =
                     physSurf' <- resizeRgfwSurface win physSurf pw ph
                     writeIORef physSurfRef physSurf'
                     pure (c, inp { inputWindowSize = Size (fromIntegral lw) (fromIntegral lh) })
-                , sdWaitTimeout   = \_ _ -> pure 0
-                , sdShouldDraw    = \_ _ _ _ -> pure True
-                , sdDraw          = \c curInp _ -> do
-                    tUiStart <- getMonotonicTime
-                    curModel <- readIORef modelRef
-                    (_, newModel, _, _, _) <-
-                      runFrameReduceEff runEff updateModel c curInp curModel view
-                    writeIORef modelRef newModel
-                    tUiEnd <- getMonotonicTime
-                    let !uiMs = (tUiEnd - tUiStart) * 1000.0
-
-                    tRenderStart <- getMonotonicTime
-                    curMonScale <- readIORef monScaleRef
-                    curScale <- readIORef scaleRef
-                    (pw, ph) <- readIORef winSizeRef
-                    physSurf' <- readIORef physSurfRef
-                    let (curTheme, _) = getThemeAndScale newModel
-                    clearScreen physSurf' (packColor (thBackground curTheme))
-                    hotId <- readIORef (ctxLastHotId c)
-                    activeId <- readIORef (ctxActiveId c)
-                    focusId <- readIORef (ctxFocusId c)
-                    let na = ctxNodeArena c
-                    count <- arenaCount na
-                    renderArena physSurf' font curScale curTheme c na hotId activeId focusId
-                    renderTextEditMenuOverlay physSurf' font curScale curTheme c (inputMousePos curInp)
-                    tRenderEnd <- getMonotonicTime
-                    let !renderMs = (tRenderEnd - tRenderStart) * 1000.0
-
-                    tBlitStart <- getMonotonicTime
-                    R.blitSurface win (sRgfwSurface physSurf')
-                    tBlitEnd <- getMonotonicTime
-                    let !blitMs = (tBlitEnd - tBlitStart) * 1000.0
-                        !frameMs = (tBlitEnd - tUiStart) * 1000.0
-
-                    let Size lw lh = inputWindowSize curInp
-                    notePresent
-                      debugSampler
-                      uiMs
-                      renderMs
-                      blitMs
-                      frameMs
-                      count
-                      lw
-                      lh
-                      pw
-                      ph
-                      curScale
-                      curMonScale
-
-                    let !targetFrameUs = 8333 :: Int
-                        !elapsedUs = round (frameMs * 1000.0)
-                        !delayUs = max 0 (targetFrameUs - elapsedUs)
-                    when (delayUs > 0) $ threadDelay delayUs
-                    pure (False, curInp)
+                , sdWaitTimeout   = \c wasAnim -> do
+                    animating <- anyAnimating c
+                    editing <- textFieldActive c
+                    dirtyWait <- isDirty c
+                    -- Presents are unthrottled (single-pass blit, no vsync), so
+                    -- a live in-view animation is paced at the refresh period
+                    -- instead of spinning at 0 ms; idle blocks until the first
+                    -- event so the loop goes fully quiet.
+                    pure $
+                      if dirtyWait
+                        then 0
+                        else if wasAnim || animating || editing
+                          then animateTimeout
+                          else (-1)
+                , sdShouldDraw    = \c prevInp inpSynced wasAnim -> do
+                    need <- needsRedraw c prevInp inpSynced
+                    dirtyNow <- isDirty c
+                    anim <- anyAnimating c
+                    editing <- textFieldActive c
+                    let forceFinal = wasAnim && not anim
+                        pointerEdge =
+                          inputMousePressed inpSynced
+                            || inputMouseReleased inpSynced
+                            || inputMouseRightPressed inpSynced
+                            || inputMouseRightReleased inpSynced
+                        scrollEdge = inputScroll inpSynced /= V2 0 0
+                    pure (need || anim || forceFinal || dirtyNow || editing || pointerEdge || scrollEdge)
+                , sdDraw          = \c curInp _ -> drawOne c curInp
                 , sdSkip          = \_ _ -> pure ()
                 , sdOnCursor      = \c curInp -> do
                     curKind <- uiCursorKind c curInp
@@ -284,12 +328,17 @@ runRgfwSessionReduceCustom opts getThemeAndScale updateModel initialModel view =
                 , sdShouldQuit    = \_ -> False
                 , sdClickDistance = 5.0
                 , sdClickTime     = 0.4
+                , sdAlignSec      = refreshSec
                 }
         let cleanup = do
               finalPhysSurf <- readIORef physSurfRef
               freeRgfwSurface finalPhysSurf
               R.closeWindow win
-        runSessionLoop drv ctx initInp `finally` cleanup
+        -- Present the opening frame before entering the loop so the window has
+        -- content immediately; once idle the loop blocks with no redraws.
+        (_, inpStart) <- drawOne ctx initInp
+        clearDirty ctx
+        runSessionLoop drv ctx inpStart `finally` cleanup
 
 data RgfwEvent
   = RgfwEvClose
