@@ -152,10 +152,13 @@ runSdlSession options ctx setup shouldQuit drawFn =
                 animating <- anyAnimating c
                 editing <- textFieldActive c
                 dirtyWait <- isDirty c
-                -- Animations pace at animateTimeout, not 0: empty-damage
-                -- anim frames skip the present, and a 0 timeout would
-                -- busy-spin the loop without vsync to throttle it.
-                if sdlContinuous env || wantDebug || dirtyWait
+                -- When the last frame presented, a 0 timeout is safe and
+                -- smooth: the vsync present throttles the loop, keeping
+                -- animations frame-locked. When frames skip (empty damage,
+                -- e.g. an animation that scrolled out of view), a 0 timeout
+                -- would busy-spin, so pace those at animateTimeout instead.
+                lastPresented <- readIORef (sdlLastPresented env)
+                if sdlContinuous env || wantDebug || dirtyWait || (animating && lastPresented)
                   then pure 0
                   else if wasAnim || animating || editing
                     then pure animateTimeout

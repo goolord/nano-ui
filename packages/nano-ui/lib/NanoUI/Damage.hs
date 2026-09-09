@@ -42,7 +42,7 @@ import NanoUI.Input
   , inputWindowSize
   )
 import NanoUI.Frame.Hit (findNodeByKey)
-import NanoUI.Store (slotKey, slotScrollCross)
+import NanoUI.Store (slotKey, slotScrollCross, slotTextAreaScroll)
 import NanoUI.Layout.Arena
   ( NodeArena
   , NodeType (..)
@@ -222,8 +222,12 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
   moved <- mapM (clipDeltaToScrollViewport ctx newRects) keyedMoved
   let stripFloat s = s {storeFloat = IM.empty}
       scrollChanged = storeFloat oldStore /= storeFloat newStore
+      scrollPointsChanged = storePoint oldStore /= storePoint newStore
+      onlyScrollChanged =
+        stripFloat oldStore == stripFloat newStore
+          && storePoint oldStore == storePoint newStore
       onlyScrollFloatsChanged =
-        scrollChanged && stripFloat oldStore == stripFloat newStore
+        scrollChanged && onlyScrollChanged
       settledMoved = filter significantLayoutRect moved
       panelRects = IM.elems newFloatingRects
       allInPanels rs =
@@ -318,7 +322,7 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
                    catMaybes <$> forM (catMaybes [oldOf wid, newR])
                      (clipWidgetRect ctx newRects wid . rectInflate slop)
              scrollRs <-
-               if scrollChanged
+               if scrollChanged || scrollPointsChanged
                  then scrollOffsetDamage ctx oldStore newStore
                  else pure []
              animRs <-
@@ -336,9 +340,6 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
              -- remain.
              backdropRs0 <- backdropRectsForInteraction ctx (concat [ [oldW, newW] | (oldW, _, newW) <- changedRoles]) [k | ReqKey k _ <- requests]
              let backdropRs = map (clipRectToWindow winW winH) backdropRs0
-             let layoutRs = if onlyScrollFloatsChanged then [] else settledMoved
-                 vanishedRs = diffOld
-                 floatingRs = floatingRectDamage oldFloatingRects newFloatingRects
                  -- Same-key text changes that keep the rect (monospace
                  -- counters, refreshed readouts) still repaint: rect-delta
                  -- damage alone would leave them stale. New text keys inside
@@ -349,11 +350,21 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
                    | (k, t) <- IM.toList newTexts
                    , IM.lookup k oldTexts /= Just t
                    ]
-                 textRs =
-                   [ r
-                   | k <- textChangedKeys
-                   , Just r <- [IM.lookup k newRects]
-                   ]
+             textRs <-
+                fmap concat $
+                 forM textChangedKeys $ \k ->
+                   case IM.lookup k newRects of
+                     Nothing -> pure []
+                     Just r -> do
+                       -- A text change can reflow the enclosing scroller's
+                       -- content and reactivate/resize its chrome (thumb,
+                       -- caps) outside the text rect; damage the scroll
+                       -- node's full rect so the lane repaints.
+                       mScroll <- scrollAncestorRect ctx k
+                       pure (r : maybe [] pure mScroll)
+             let layoutRs = if onlyScrollFloatsChanged then [] else settledMoved
+                 vanishedRs = diffOld
+                 floatingRs = floatingRectDamage oldFloatingRects newFloatingRects
                  base =
                    unionRects
                      ( reqRs
@@ -475,24 +486,56 @@ findScrollNodeByStoreKey ctx k = do
                 wid <- getWidgetId (ctxNodeArena ctx) idx
                 let widKey = intKey wid
                     crossKey = slotKey slotScrollCross widKey
-                if k == widKey || k == crossKey
+                    scrollKey = slotKey slotTextAreaScroll widKey
+                if k == widKey || k == crossKey || k == scrollKey
                   then pure (Just idx)
                   else go (idx + 1)
   go 0
+
+-- | Rect of the nearest scroll-container ancestor of a keyed node, covering
+-- the content viewport and the scrollbar lane its chrome paints in.
+scrollAncestorRect :: Context -> Int -> IO (Maybe Rect)
+scrollAncestorRect ctx k =
+  findNodeByKey ctx k >>= maybe (pure Nothing) go
+  where
+    na = ctxNodeArena ctx
+    go i = do
+      nt <- getNodeType na i
+      if isScrollNode nt
+        then getNonzeroRect na i
+        else do
+          p <- getParent na i
+          if p < 0 then pure Nothing else go p
 
 scrollOffsetDamage :: Context -> WidgetStore -> WidgetStore -> IO [Rect]
 scrollOffsetDamage ctx oldStore newStore = do
   let oldF = storeFloat oldStore
       newF = storeFloat newStore
-      changed = IM.keys $
+      oldP = storePoint oldStore
+      newP = storePoint newStore
+      -- Floating-pane offsets live in storeFloat; wheel/keyboard offsets
+      -- live under the slotTextAreaScroll slot in storePoint. Both move the
+      -- scroller's content and its chrome.
+      changedF = IM.keys $
         IM.mergeWithKey
           (\_ a b -> if a /= b then Just () else Nothing)
           (fmap (const ()) . IM.filter (/= 0))
           (fmap (const ()) . IM.filter (/= 0))
           oldF
           newF
+      changedP =
+        [ k
+        | (k, ()) <-
+            IM.toList $
+              IM.mergeWithKey
+                (\_ a b -> if a /= b then Just () else Nothing)
+                (fmap (const ()))
+                (fmap (const ()))
+                oldP
+                newP
+        ]
   fmap concat $
-    forM changed $ \k ->
+    forM (changedF ++ changedP) $ \k ->
       findScrollNodeByStoreKey ctx k >>= \case
         Nothing -> pure []
         Just idx -> do
@@ -500,9 +543,12 @@ scrollOffsetDamage ctx oldStore newStore = do
           if not (isScrollNode nt)
             then pure []
             else do
-              mClip <- getClipRect (ctxNodeArena ctx) idx
+              -- The scroll node's rect covers the content viewport AND the
+              -- scrollbar lane: offset changes move the thumb, which paints
+              -- outside the content clip.
+              mNode <- getNonzeroRect (ctxNodeArena ctx) idx
               mFloat <- floatingAncestorRect ctx idx
-              pure (catMaybes [mClip, mFloat])
+              pure (catMaybes [mNode, mFloat])
 
 floatingAncestorRect :: Context -> Int -> IO (Maybe Rect)
 floatingAncestorRect ctx idx =

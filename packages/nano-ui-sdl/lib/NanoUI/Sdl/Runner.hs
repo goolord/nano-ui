@@ -132,12 +132,15 @@ finishDraw ctx env inp forceFull t0 t1 drawData dirtyAfterUi = do
   (tex, retainNew) <- ensureRetain env pw ph scale
   -- Frame damage from writeDamage is authoritative: a live animation whose
   -- key is out of view or scroll-clipped produces empty damage, and forcing
-  -- DamageFull here would turn every skip frame into a full present.
+  -- DamageFull here would turn every skip frame into a full present. A
+  -- window redraw event (expose/restore) is the exception: the backbuffer
+  -- is gone, so the next present must be full.
   let damage0 =
-        if forceFull || retainNew || sdlContinuous env
+        if forceFull || retainNew || sdlContinuous env || inputWindowRedraw inp
           then DamageFull
           else snapDamage scale dmg0
       damage = damage0
+  writeIORef (sdlLastPresented env) False
   if damageIsEmpty damage || lw <= 0 || lh <= 0
     then do
       noteSkip (sdlDebug env)
@@ -159,6 +162,7 @@ finishDraw ctx env inp forceFull t0 t1 drawData dirtyAfterUi = do
           presentMs = (t3 - t2) * 1000
           frameMs = (t3 - t0) * 1000
       notePresent (sdlDebug env) uiMs renderMs presentMs frameMs drawData
+      writeIORef (sdlLastPresented env) True
       pure (dirtyAfterUi, inp)
 
 ensureRetain :: SdlEnv -> Int -> Int -> Float -> IO (Ptr (), Bool)

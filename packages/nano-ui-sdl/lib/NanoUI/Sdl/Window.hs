@@ -179,6 +179,7 @@ data SdlEnv = SdlEnv
   , sdlCursors :: SdlCursors
   , sdlDebug :: IORef SdlDebugSampler
   , sdlRetain :: IORef (Ptr (), Int, Int, Float)
+  , sdlLastPresented :: IORef Bool
   , sdlVsync :: !Bool
   , sdlContinuous :: !Bool
   , sdlCachedFm :: !(IORef FontMetrics)
@@ -384,22 +385,24 @@ startSdlWindow ctx title w h flags bench vsync continuous fontSource monoSource 
           unless bench $ void $ setRenderVSync ren vsync
           when (not bench) $ void $ startTextInputSafe win
           dialogState <- newDialogState
+          lastPresented <- newIORef False
           pure
             SdlEnv
-              { sdlWindow = win
-              , sdlRenderer = ren
-              , sdlFontSource = fontSource
-              , sdlMonoFontSource = monoSource
-              , sdlFontSize = fontSize
-              , sdlScaleRef = scaleRef
-              , sdlFontRef = fontRef
-              , sdlMonoFontRef = monoFontRef
-              , sdlGlyphAtlas = glyphAtlas
-              , sdlImages = images
-              , sdlCursors = cursors
-              , sdlDebug = debug
-              , sdlRetain = retain
-              , sdlVsync = vsync
+               { sdlWindow = win
+               , sdlRenderer = ren
+               , sdlFontSource = fontSource
+               , sdlMonoFontSource = monoSource
+               , sdlFontSize = fontSize
+               , sdlScaleRef = scaleRef
+               , sdlFontRef = fontRef
+               , sdlMonoFontRef = monoFontRef
+               , sdlGlyphAtlas = glyphAtlas
+               , sdlImages = images
+               , sdlCursors = cursors
+               , sdlDebug = debug
+               , sdlRetain = retain
+               , sdlLastPresented = lastPresented
+               , sdlVsync = vsync
               , sdlContinuous = continuous
               , sdlCachedFm = cachedFm
               , sdlCachedMonoFm = cachedMonoFm

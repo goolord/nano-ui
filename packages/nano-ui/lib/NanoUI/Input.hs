@@ -85,6 +85,7 @@ data Input = Input
   , inputWindowSize :: !Size
   , inputDeltaTime :: {-# UNPACK #-} !Float
   , inputDrops :: Vector DropEvent
+  , inputWindowRedraw :: !Bool
   }
   deriving (Eq, Show)
 
@@ -106,6 +107,7 @@ emptyInput =
     , inputWindowSize = Size 800 600
     , inputDeltaTime = 0
     , inputDrops = emptyDropEvents
+    , inputWindowRedraw = False
     }
 
 data UiCursorKind
@@ -142,6 +144,7 @@ clearEphemeral inp =
     , inputMouseClicks = 1
     , inputScroll = V2 0 0
     , inputDrops = emptyDropEvents
+    , inputWindowRedraw = False
     }
 
 isHardQuitInput :: Input -> Bool
