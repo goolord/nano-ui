@@ -795,14 +795,18 @@ debounceSearchChanged ctx key focused rawChanged ms = do
     committed = IM.findWithDefault fieldText committedKey (storeText store)
     dirty = fieldText /= committed
     needClock = rawChanged || dirty
-  now <- if needClock then realToFrac <$> getMonotonicTime else pure 0
+  now <- if needClock then getMonotonicTime else pure 0
   let
-    lastEdit = IM.findWithDefault now ageKey (storeFloat store)
+    -- Debounce timing stays in Double: wall-clock seconds as Float lose
+    -- resolution at long uptimes (~125 ms at 12 days), which would shift
+    -- (or skip) the trailing-edge window.
+    lastEdit = IM.findWithDefault now ageKey (storeDouble store)
+    deadline = realToFrac ms :: Double
     idleMs = (now - lastEdit) * 1000
     commit =
       not rawChanged
         && dirty
-        && (T.null fieldText || not focused || idleMs >= ms)
+        && (T.null fieldText || not focused || idleMs >= deadline)
   when (rawChanged || commit || committedMissing) $ do
     st <- getStore ctx
     let
@@ -810,11 +814,11 @@ debounceSearchChanged ctx key focused rawChanged ms = do
         if commit || committedMissing
           then IM.insert committedKey fieldText (storeText st)
           else storeText st
-      floats =
+      doubles =
         if rawChanged || commit
-          then IM.insert ageKey now (storeFloat st)
-          else storeFloat st
-    setStore ctx (st {storeText = texts, storeFloat = floats})
+          then IM.insert ageKey now (storeDouble st)
+          else storeDouble st
+    setStore ctx (st {storeText = texts, storeDouble = doubles})
   pure commit
 
 -- | Search field: a caption-less 'NodeTextInput' with an embedded magnifier and

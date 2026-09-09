@@ -42,6 +42,7 @@ Breaking API: prefer `Text` and `Vector` over `String` and `[ ]` in core types.
 * Event-wait overrun: the paced wait now sleeps ~2 ms short of the frame period so the frame-boundary spin absorbs SDL's event-waiter overrun; without it the loop cadence settled ~1 ms late and vsync-less animation looked uneven.
 * Float-clock precision: the demo's progress sweep used `realToFrac <$> getMonotonicTime`, which quantizes wall-clock seconds to 'Float' (~3 ms lost at 8 h uptime, coarser than an 8.3 ms frame at 120 Hz) and made the bar edge step. Clock math now stays in 'Double'.
 * Time/clock API: `NanoUI.Monad.uiTime` is the monotonic seconds clock as a 'Double', for time-based animation math (never funnel it through 'Float'). `pulse` / `keepAnimating` in `Widgets.Animate` (re-exported through `nanoui`): `pulse period` yields a smooth clock-driven `[0,1]` sine sweep and `keepAnimating resp` holds a wall-clock widget live forever so the frame loop keeps it repainting; `progressBar =<< pulse 6` + `keepAnimating resp` replaces the old manual `getMonotonicTime` + eternal `startAnimation` demo pattern. `stopAnimation` (from `NanoUI.Context` and `NanoUI.Testing`) freezes a running animation in place at its current value and keeps the context from reporting as animating.
+* Search debounce timing moved to a new `storeDouble` store slot: the trailing-edge window is measured in 'Double' wall-clock seconds, so it stops shifting (or skipping) at long uptimes where Float loses resolution (~125 ms at 12 days).
 
 ## 0.1.0.0 -- YYYY-mm-dd
 

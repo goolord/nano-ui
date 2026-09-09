@@ -755,6 +755,7 @@ setStore ctx store = do
     let changedKeys =
           diffKeys (storeInt prev) (storeInt store)
             ++ diffKeys (storeFloat prev) (storeFloat store)
+            ++ diffKeys (storeDouble prev) (storeDouble store)
             ++ diffKeys (storePoint prev) (storePoint store)
             ++ diffKeys (storeText prev) (storeText store)
             ++ diffKeys (storeFloatList prev) (storeFloatList store)
