@@ -182,7 +182,12 @@ testSpecs =
   , TestSpec "grid-layout" False runGridTest
   , TestSpec "flex-shrink" False runFlexShrinkTest
   , TestSpec "grow-fits-window" False runGrowFitsWindowTest
+  , TestSpec "grow-equal-split" False runGrowEqualSplitTest
+  , TestSpec "grow-content-floor" False runGrowContentFloorTest
+  , TestSpec "grow-lock-cascade" False runGrowLockCascadeTest
+  , TestSpec "grow-equal-split-height" False runGrowEqualSplitHeightTest
   , TestSpec "percent-layout" False runPercentLayoutTest
+  , TestSpec "percent-gap-shrink" False runPercentGapShrinkTest
   , TestSpec "aspect-layout" False runAspectLayoutTest
   , TestSpec "label-align-end" False runLabelAlignEndTest
   , TestSpec "grow-wrap-sibling" False runGrowWrapPushesSiblingTest

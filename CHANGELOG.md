@@ -22,6 +22,7 @@ Breaking API: prefer `Text` and `Vector` over `String` and `[ ]` in core types.
 * Table cell text is inset. Zebra and header fills use the full column box.
 * Table tab help is two lines, and the table is fillW, so columns use the card width.
 * Grow labels skip unwrapped width when the parent will assign a slot (wrap/Grow). A Fit parent measures content so a lone `muted` does not collapse.
+* Layout: `Grow` (`fillW` / `fillH`) siblings now split the free space by grow factor with a min-content floor, instead of `content + share of leftover`. Two `fillW` columns come out equal unless one column's content needs more than its share, in which case it takes exactly its content width and the rest re-share what is left (like CSS flex with `min-width: auto`). `Percent` children also give overflow back when siblings plus gaps exceed the axis, so two `percent 50` columns plus a gap land exactly on the row width.
 * Color picker shows Current Color and New Color swatches side by side.
 * Plot y-axis labels keep a left phantom so host-font glyphs are not clipped.
 * Plot widgets grow until host-font tick labels do not overlap. `DrawText` boxes use host metrics (`drawTextBox`).

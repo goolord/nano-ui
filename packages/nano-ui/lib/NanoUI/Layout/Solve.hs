@@ -1568,17 +1568,84 @@ distributeScratch na off n avail gapSum horizontal = do
       if growTotal <= 0
         then copyOut
         else do
-          let go !i
+          -- Grow children share the free space by factor, but no child is
+          -- squeezed below its content size (a min-content floor, like CSS
+          -- flex with min-width:auto): two fillW columns come out equal unless
+          -- one column's content needs more, and that one then takes exactly
+          -- what it needs while the rest re-share what is left.
+          --
+          -- Grow flags live in the cross output: withAxisSnaps only consumes
+          -- the main-axis array, so it is free scratch here and is restored to
+          -- real cross sizes before returning. mainArr keeps the exact content
+          -- size throughout; no arithmetic on markers.
+          let mainArr = if horizontal then outW else outH
+              crossArr = if horizontal then outH else outW
+              mark !i
                 | i >= end = pure ()
                 | otherwise = do
                     ci <- readPrimArray idxArr i
                     iw <- readPrimArray wArr i
                     ih <- readPrimArray hArr i
                     gf <- getGrowFactor na ci horizontal
-                    let extra = slack * gf / growTotal
-                    if horizontal
-                      then writePrimArray outW i (iw + extra) >> writePrimArray outH i ih
-                      else writePrimArray outW i iw >> writePrimArray outH i (ih + extra)
+                    writePrimArray mainArr i (if horizontal then iw else ih)
+                    writePrimArray crossArr i (if gf > 0 then 1 else 0)
+                    mark (i + 1)
+              -- One sweep: sum content of non-grow + already-locked children
+              -- (flag 0) and grow factors of the still-unlocked (flag 1).
+              scan !i !occupied !gfSum
+                | i >= end = pure (occupied, gfSum)
+                | otherwise = do
+                    grow <- readPrimArray crossArr i
+                    if grow > 0
+                      then do
+                        ci <- readPrimArray idxArr i
+                        gf <- getGrowFactor na ci horizontal
+                        scan (i + 1) occupied (gfSum + gf)
+                      else do
+                        main <- readPrimArray mainArr i
+                        scan (i + 1) (occupied + main) gfSum
+              -- Pin every grow child whose content exceeds its would-be share
+              -- by clearing its flag; its content stays in mainArr.
+              lock !i !free !gfSum !acc
+                | i >= end = pure acc
+                | otherwise = do
+                    grow <- readPrimArray crossArr i
+                    if grow > 0
+                      then do
+                        ci <- readPrimArray idxArr i
+                        gf <- getGrowFactor na ci horizontal
+                        need <- readPrimArray mainArr i
+                        if need * gfSum > gf * free
+                          then do
+                            writePrimArray crossArr i 0
+                            lock (i + 1) free gfSum (acc + 1 :: Int)
+                          else lock (i + 1) free gfSum acc
+                      else lock (i + 1) free gfSum acc
+              -- Each lock shrinks the share pool, possibly locking more
+              -- children; the locked set only grows, so this fixpoints within
+              -- n sweeps.
+              settle !passes = do
+                (occupied, gfSum) <- scan off 0 0
+                let free = avail - gapSum - occupied
+                locked <- lock off free gfSum 0
+                if locked == 0 || passes <= 1
+                  then pure (free, gfSum)
+                  else settle (passes - 1)
+          mark off
+          (free, gfSum) <- settle (n + 1)
+          -- Hand shares to unlocked grow children and restore real cross sizes
+          -- where the flags clobbered them.
+          let go !i
+                | i >= end = pure ()
+                | otherwise = do
+                    ci <- readPrimArray idxArr i
+                    gf <- getGrowFactor na ci horizontal
+                    iw <- readPrimArray wArr i
+                    ih <- readPrimArray hArr i
+                    grow <- readPrimArray crossArr i
+                    when (grow > 0) $
+                      writePrimArray mainArr i (max 0 (free * gf / gfSum))
+                    writePrimArray crossArr i (if horizontal then ih else iw)
                     go (i + 1)
           go off
     else
@@ -1625,6 +1692,11 @@ getShrinkFactor na idx horizontal = do
     SizingShrink -> pure val
     -- Grow also gives space back when the window is smaller than content.
     SizingGrow -> pure (if val > 0 then val else 1)
+    -- Percent flexes like CSS: when siblings plus gaps overflow the axis,
+    -- percent children give the overflow back so e.g. two 50% columns and a
+    -- gap land exactly on the row width. Covers percent on either axis,
+    -- should height percent ever be sized that way.
+    SizingPercent -> pure 1
     -- Fit stays content-sized. A pinned header must not squash when a Grow
     -- sibling (page scroll) is taller than the window.
     SizingFit -> pure 0
