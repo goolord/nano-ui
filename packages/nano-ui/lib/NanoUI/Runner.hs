@@ -25,7 +25,9 @@ module NanoUI.Runner
   , runSessionLoop
   ) where
 
+import Control.Concurrent (threadDelay)
 import Control.Exception (finally)
+import Control.Monad (when)
 import Data.IORef
   ( IORef
   , atomicModifyIORef'
@@ -64,6 +66,27 @@ stepDeltaTime lastT = do
   now <- getMonotonicTime
   let !dt = min maxFrameDt (realToFrac (now - lastT))
   pure (now, dt)
+
+-- | Wind forward to the next frame boundary after a timed-out event wait.
+-- The backends pace animation frames with a coarse one-shot sleep; without an
+-- extra nudge the frame start times drift by the scheduler's timer granularity
+-- (and land late whenever SDL overruns), which reads as choppy animation on
+-- uneven frame times. Sleep the bulk, then busy-wind the ≤1ms tail so frame
+-- starts fall on uniform time slices. The spin only runs when an animation is
+-- actively presenting without vsync, and is bounded to about a millisecond.
+alignFrameStart :: Int -> Double -> IO ()
+alignFrameStart timeoutMs lastT = do
+  t0 <- getMonotonicTime
+  let target = lastT + fromIntegral timeoutMs / 1000
+      remain = target - t0
+      bulkUs = max 0 (round ((remain - tailSlack) * 1e6))
+  when (bulkUs > 0) (threadDelay bulkUs)
+  fullSpin target
+  where
+    tailSlack = 1e-3
+    fullSpin target = do
+      now <- getMonotonicTime
+      when (now < target) (fullSpin target)
 
 -- | State for multi-click detection (double/triple click).
 newtype ClickTracker = ClickTracker (IORef (Double, V2, Int))
@@ -223,7 +246,18 @@ runSessionLoop drv ctx0 inp0 = do
                   polled <- sdPollEvents drv
                   if not (null polled)
                     then pure polled
-                    else sdWaitEvents drv timeout
+                    else do
+                      evs <- sdWaitEvents drv timeout
+                      if not (null evs)
+                        then pure evs
+                        else do
+                          -- No events woke us: the timer fired, so wind onto
+                          -- the frame boundary before stamping this frame's
+                          -- start time. Keeps frame starts on uniform slices
+                          -- (their delta-time) instead of drifting with the
+                          -- event waiter's own granularity.
+                          alignFrameStart timeout lastT
+                          pure []
                 else sdWaitEvents drv (-1)
           else pure queued
 

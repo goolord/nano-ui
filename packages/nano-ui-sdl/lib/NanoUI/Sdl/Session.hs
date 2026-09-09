@@ -152,13 +152,16 @@ runSdlSession options ctx setup shouldQuit drawFn =
                 animating <- anyAnimating c
                 editing <- textFieldActive c
                 dirtyWait <- isDirty c
-                -- When the last frame presented, a 0 timeout is safe and
-                -- smooth: the vsync present throttles the loop, keeping
-                -- animations frame-locked. When frames skip (empty damage,
+                -- When the last frame presented with vsync on, a 0 timeout is
+                -- safe and smooth: the vsync present throttles the loop,
+                -- keeping animations frame-locked. With vsync off the present
+                -- returns immediately, so a live in-view animation would spin
+                -- at max speed (whole-screen flicker); pace those at
+                -- animateTimeout instead. When frames skip (empty damage,
                 -- e.g. an animation that scrolled out of view), a 0 timeout
-                -- would busy-spin, so pace those at animateTimeout instead.
+                -- would busy-spin, so pace those at animateTimeout too.
                 lastPresented <- readIORef (sdlLastPresented env)
-                if sdlContinuous env || wantDebug || dirtyWait || (animating && lastPresented)
+                if sdlContinuous env || wantDebug || dirtyWait || (animating && lastPresented && sdlVsync env)
                   then pure 0
                   else if wasAnim || animating || editing
                     then pure animateTimeout
