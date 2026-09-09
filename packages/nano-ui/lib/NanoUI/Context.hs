@@ -169,9 +169,12 @@ module NanoUI.Context
   , getLiveAnimations
   , takeAnimSettled
   , lookupAnimation
+  , getAnimRectless
+  , setAnimRectless
   , startAnimation
   , startAnimationEase
   , startAnimationEaseDelay
+  , stopAnimation
   , startSpring
   , setAnimationValue
   , tickAnimations
@@ -754,6 +757,7 @@ setStore ctx store = do
     let changedKeys =
           diffKeys (storeInt prev) (storeInt store)
             ++ diffKeys (storeFloat prev) (storeFloat store)
+            ++ diffKeys (storeDouble prev) (storeDouble store)
             ++ diffKeys (storePoint prev) (storePoint store)
             ++ diffKeys (storeText prev) (storeText store)
             ++ diffKeys (storeFloatList prev) (storeFloatList store)
@@ -1545,6 +1549,21 @@ anyAnimating ctx = asAnyAnimating <$> readIORef (ctxAnimationState ctx)
 getLiveAnimations :: Context -> IO (IntMap Animation)
 getLiveAnimations ctx = IM.filter animInProgress . asAnimations <$> readIORef (ctxAnimationState ctx)
 
+-- Consecutive frames each live animation has had no nonzero widget rect in the
+-- arena. Maintained by 'NanoUI.Damage.updatePrevRects'; used by 'writeDamage'
+-- to bound the DamageFull escalation for rect-less animations so a perpetual
+-- animation whose widget left the arena (e.g. `keepAnimating` on a widget
+-- hidden by a tab switch) stops repainting the whole window after a frame or
+-- two, instead of forever.
+{-# INLINE getAnimRectless #-}
+getAnimRectless :: Context -> IO (IntMap Int)
+getAnimRectless ctx = asRectless <$> readIORef (ctxAnimationState ctx)
+
+{-# INLINE setAnimRectless #-}
+setAnimRectless :: Context -> IntMap Int -> IO ()
+setAnimRectless ctx m =
+  modifyIORef' (ctxAnimationState ctx) $ \as -> as {asRectless = m}
+
 {-# INLINE takeAnimSettled #-}
 takeAnimSettled :: Context -> IO Bool
 takeAnimSettled ctx = do
@@ -1676,3 +1695,17 @@ getAnimationValue ctx wid = do
   case IM.lookup key (asAnimations as) of
     Just a -> pure (animationValue a)
     Nothing -> pure (IM.findWithDefault 0 key (asAnimRest as))
+
+{-# INLINE stopAnimation #-}
+-- | Stop the animation on @wid@ in place, freezing it at its current value.
+-- The frozen value stays readable via 'getAnimationValue'; the widget stops
+-- driving redraws and the context stops reporting as animating (unless other
+-- animations are still running). Stopping is idempotent.
+stopAnimation :: Context -> WidgetId -> IO ()
+stopAnimation ctx wid = do
+  val <- getAnimationValue ctx wid
+  let key = intKey wid
+  as <- readIORef (ctxAnimationState ctx)
+  if IM.member key (asAnimations as)
+    then settleKey ctx key val
+    else pure ()

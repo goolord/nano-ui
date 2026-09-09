@@ -8,6 +8,8 @@ module NanoUI.Widgets.Animate
   , animateToSpring
   , animateToA
   , animateToSpringA
+  , pulse
+  , keepAnimating
   , useState
   , useFlag
   , useInt
@@ -34,12 +36,14 @@ import NanoUI.Context
   , lookupAnimation
   , markDirty
   , setStore
+  , startAnimation
   , startAnimationEaseDelay
   , startSpring
   )
 import NanoUI.Animation (SpringParams)
-import NanoUI.Monad (Ui, askContext, nextId, uiIO, withKey)
+import NanoUI.Monad (Ui, askContext, nextId, uiIO, uiTime, withKey)
 import NanoUI.Store (WidgetStore (..), boolInt, bumpMirror, intBool)
+import NanoUI.Widgets.Node (Response (..), respId)
 
 animate :: (Ui :> es) => Float -> Float -> Float -> Eff es Float
 animate = animateEase EaseLinear
@@ -103,6 +107,31 @@ animateToSpringA params target = do
       (\(i, c) -> withKey (i :: Int) (animateToSpring params c))
       (zip [0 ..] (toComponents target))
   pure (fromComponents comps)
+
+-- | A smoothly oscillating value in @[0,1]@ driven by the real-time clock, with
+-- the given period in seconds (e.g. @pulse 6@ sweeps once every six seconds).
+-- The time is captured in 'Double' (see 'NanoUI.Monad.uiTime'), so the sweep
+-- stays sub-frame smooth even on long-running processes. The value is
+-- re-evaluated each frame, like 'animate'.
+pulse :: (Ui :> es) => Float -> Eff es Float
+pulse periodSec = do
+  t <- uiTime
+  let period = max 0.001 (realToFrac periodSec :: Double)
+  pure (realToFrac (0.5 + 0.5 * sin (2 * pi * t / period)) :: Float)
+
+-- | Keep a widget's response animating indefinitely so the frame loop never
+-- idles. Some widgets are driven by the wall clock (see 'pulse', or draw from
+-- 'NanoUI.Monad.uiTime' directly) rather than by a frame-counted animation; a
+-- page containing only those would otherwise go idle after animating settles
+-- and stop repainting. Returns the response unchanged for composition, e.g.
+--
+-- > progResp <- progressBar =<< pulse 6
+-- > keepAnimating progResp
+keepAnimating :: (Ui :> es) => Response -> Eff es Response
+keepAnimating resp = do
+  ctx <- askContext
+  uiIO (startAnimation ctx (respId resp) 0 1 1e9)
+  pure resp
 
 useState :: (Typeable a, Eq a, Ui :> es) => a -> Eff es (a, a -> Eff es ())
 useState initial = do

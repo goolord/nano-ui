@@ -59,6 +59,7 @@ data WidgetStore = WidgetStore
   , storeOpenSelect :: {-# UNPACK #-} !Int
   , storeInt :: !(IntMap Int)
   , storeFloat :: !(IntMap Float)
+  , storeDouble :: !(IntMap Double)
   , storePoint :: !(IntMap (Float, Float))
   , storeText :: !(IntMap Text)
   , storeIntSet :: !(IntMap IntSet)
@@ -73,6 +74,7 @@ instance Eq WidgetStore where
       && storeOpenSelect a == storeOpenSelect b
       && storeInt a == storeInt b
       && storeFloat a == storeFloat b
+      && storeDouble a == storeDouble b
       && storePoint a == storePoint b
       && storeText a == storeText b
       && storeIntSet a == storeIntSet b
@@ -86,6 +88,7 @@ instance Show WidgetStore where
       ++ ", storeOpenSelect = " ++ show (storeOpenSelect st)
       ++ ", storeInt = " ++ show (storeInt st)
       ++ ", storeFloat = " ++ show (storeFloat st)
+      ++ ", storeDouble = " ++ show (storeDouble st)
       ++ ", storePoint = " ++ show (storePoint st)
       ++ ", storeText = " ++ show (storeText st)
       ++ ", storeIntSet = " ++ show (storeIntSet st)
@@ -101,6 +104,7 @@ emptyWidgetStore =
     , storeOpenSelect = 0
     , storeInt = IM.empty
     , storeFloat = IM.empty
+    , storeDouble = IM.empty
     , storePoint = IM.empty
     , storeText = IM.empty
     , storeIntSet = IM.empty

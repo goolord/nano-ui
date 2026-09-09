@@ -18,8 +18,8 @@ import NanoUI.Context
   , getDamageRequests
   , getHotId
   , getLiveAnimations
+  , getAnimRectless
   , getPrevRect
-  , getPrevRectByKey
   , getPrevNodeTexts
   , getPrevRects
   , getStore
@@ -28,6 +28,7 @@ import NanoUI.Context
   , intKey
   , markDirty
   , modalDamageFlip
+  , setAnimRectless
   , setDamageAndWindowSize
   , setPrevFloatingPanels
   , setPrevNodeTexts
@@ -76,6 +77,14 @@ import NanoUI.Types
 
 layoutSettleMinArea :: Float
 layoutSettleMinArea = 0.25
+
+-- | Bound on how many consecutive rect-less frames a live animation may force a
+-- full-window repaint. An animation whose widget is about to be laid out for the
+-- first time gets a couple of frames of DamageFull cover; a perpetual animation
+-- whose widget has left the arena (e.g. `keepAnimating` behind a tab switch)
+-- must stop repainting the whole window once it is clearly gone.
+orphanEscalateFrames :: Int
+orphanEscalateFrames = 2
 
 -- Partial retain clears with themeWindow. Expand interaction clips to the painted
 -- panel/window backdrop so slop pixels get the correct fill, not window color.
@@ -126,17 +135,28 @@ getNonzeroRect arena i = do
 
 updatePrevRects :: Context -> IO ()
 updatePrevRects ctx = do
+  liveKeys <- IM.keys <$> getLiveAnimations ctx
+  prevRectless <- getAnimRectless ctx
   let na = ctxNodeArena ctx
+      bump rects = do
+        let rectless' =
+              IM.fromList
+                [ (k, if IM.member k rects then 0 else IM.findWithDefault 0 k prevRectless + 1)
+                | k <- liveKeys
+                ]
+        setAnimRectless ctx rectless'
   count <- arenaCount na
   if count <= 0
     then do
       setPrevRectsAndClips ctx IM.empty IM.empty
       setPrevNodeTexts ctx IM.empty
+      bump IM.empty
     else do
       let go !i !m !cm !tm
             | i >= count = do
                 setPrevRectsAndClips ctx m cm
                 setPrevNodeTexts ctx tm
+                bump m
             | otherwise = do
                 wid <- getWidgetId na i
                 if hashWidgetId wid == 0
@@ -212,10 +232,10 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
   modalFlip <- modalDamageFlip ctx
   liveAnims <- getLiveAnimations ctx
   settled <- takeAnimSettled ctx
+  rectless <- getAnimRectless ctx
   orphanAnim <-
-    fmap or $
-      forM (IM.keys liveAnims) $ \k ->
-        isNothing <$> getPrevRectByKey ctx k
+    or <$> forM (IM.keys liveAnims) (\k ->
+      pure (IM.notMember k newRects && IM.findWithDefault 0 k rectless < orphanEscalateFrames))
   winDragActive <- isJust <$> getWindowDrag ctx
   winResizeActive <- isJust <$> getWindowResize ctx
   let keyedMoved = keyedRectDeltas oldRects newRects
@@ -300,6 +320,7 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
                      k /= 0
                        && isNothing (IM.lookup k oldRects)
                        && isNothing (IM.lookup k newRects)
+                       && IM.findWithDefault 0 k rectless < orphanEscalateFrames
                  )
                  clipKeys
          if missingAnim && animLive

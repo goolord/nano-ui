@@ -193,6 +193,7 @@ data AnimationState = AnimationState
   , asAnimRest :: !(IntMap Float)
   , asAnyAnimating :: !Bool
   , asAnimSettled :: !Bool
+  , asRectless :: !(IntMap Int)
   }
 
 initialAnimationState :: AnimationState
@@ -201,6 +202,7 @@ initialAnimationState = AnimationState
   , asAnimRest = IM.empty
   , asAnyAnimating = False
   , asAnimSettled = False
+  , asRectless = IM.empty
   }
 
 data DrawFitCache = DrawFitCache

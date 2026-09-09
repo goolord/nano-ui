@@ -22,6 +22,7 @@ module NanoUI.Monad
   , withLayout
   , askHost
   , uiFontMetrics
+  , uiTime
   , uiTheme
   , setUiTheme
   , uiMousePos
@@ -62,6 +63,7 @@ import Effectful.Dispatch.Static
   , localStaticRep
   , unsafeEff_
   )
+import GHC.Clock (getMonotonicTime)
 import NanoUI.Context
   ( Context (..)
   , FrameMsg (..)
@@ -219,6 +221,15 @@ withLayout l = localStaticRep (\(UiRep ctx inp _) -> UiRep ctx inp l)
 {-# INLINE uiFontMetrics #-}
 uiFontMetrics :: Ui :> es => Eff es FontMetrics
 uiFontMetrics = fmap ctxFontMetrics askContext
+
+{-# INLINE uiTime #-}
+-- | Monotonic seconds since some fixed epoch (process boot), as a 'Double'.
+-- Use it for time-based animation math inside the UI effect. It stays in
+-- 'Double' on purpose: converting wall-clock seconds to 'Float' loses ~3 ms
+-- of resolution at 8 h uptime (worse longer), which is coarser than a frame
+-- and quantizes animation sweeps into visible steps.
+uiTime :: Ui :> es => Eff es Double
+uiTime = uiIO getMonotonicTime
 
 {-# INLINE uiTheme #-}
 uiTheme :: Ui :> es => Eff es Theme

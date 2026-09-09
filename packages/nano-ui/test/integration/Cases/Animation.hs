@@ -13,6 +13,7 @@ module Cases.Animation
   , runAnimationSpringRetargetTest
   , runAnimationSpringTest
   , runAnimationStaggerTest
+  , runAnimationStopTest
   ) where
 
 import Control.Monad (replicateM_, void)
@@ -247,6 +248,28 @@ runAnimationSpringATest _ failed = do
           _ -> False
         _ -> False
   assert failed (any ok shown)
+
+runAnimationStopTest :: Context -> IORef Int -> IO ()
+runAnimationStopTest _ failed =
+  withAnimCtx 100 100 0.05
+    (\ctx inp fl -> do
+      let wid = WidgetId 500
+      startAnimation ctx wid 0 1 1
+      replicateM_ 6 (runFrame ctx inp (label "run"))
+      v1 <- getAnimationValue ctx wid
+      assert fl (v1 >= 0.1 && v1 <= 0.9)
+      stopAnimation ctx wid
+      v2 <- getAnimationValue ctx wid
+      assert fl (abs (v2 - v1) <= 0.01)
+      live <- anyAnimating ctx
+      assert fl (not live)
+      replicateM_ 3 (runFrame ctx inp (label "idle"))
+      v3 <- getAnimationValue ctx wid
+      assert fl (abs (v3 - v1) <= 0.01)
+      need <- needsRedraw ctx inp inp
+      assert fl (not need)
+    )
+    failed
 
 runAnimationSharedCtxTest :: Context -> IORef Int -> IO ()
 runAnimationSharedCtxTest ctx failed = do

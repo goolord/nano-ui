@@ -410,6 +410,8 @@ module NanoUI
   , animateToSpring
   , animateToA
   , animateToSpringA
+  , pulse
+  , keepAnimating
   , Animatable (..)
   , heading
   , muted
@@ -734,6 +736,8 @@ import NanoUI.Widgets
   , animateToEaseDelay
   , animateToSpring
   , animateToSpringA
+  , pulse
+  , keepAnimating
   , boundedRadioFieldset
   , box
   , drawing

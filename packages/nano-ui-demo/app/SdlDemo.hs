@@ -49,7 +49,11 @@ import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Primitive.SmallArray (SmallArray, smallArrayFromList)
 import Data.Word (Word64)
 import Effectful (Eff, type (:>))
-import GHC.Clock (getMonotonicTime)
+import NanoUI
+import NanoUI.Backend.Sdl
+import NanoUI.Debug (CoreDebugSnapshot (..), formatCoreRtsRows)
+import NanoUI.Diagrams
+import NanoUI.Monad (askInput)
 import Diagrams.Prelude
   ( Diagram
   , circle
@@ -62,12 +66,6 @@ import Diagrams.Prelude
   , p2
   , ( # )
   )
-import NanoUI
-import NanoUI.Backend.Sdl
-import NanoUI.Context (startAnimation)
-import NanoUI.Debug (CoreDebugSnapshot (..), formatCoreRtsRows)
-import NanoUI.Diagrams
-import NanoUI.Monad (askContext, askInput)
 import System.Console.GetOpt
   ( ArgDescr (NoArg, ReqArg)
   , ArgOrder (Permute)
@@ -393,18 +391,12 @@ demoUi = do
               when (dropHovered dropTgt && not dropHovering) (setDropHovering True)
               when (not (dropHovered dropTgt) && dropHovering) (setDropHovering False)
               sep
-              -- Progress: a plain response-driven bar. startAnimation drives
-              -- the value between 0 and 1 over 1s for a smooth loop.
+              -- Progress: a plain response-driven bar. pulse provides a smooth
+              -- clock-driven 0-1 sweep and keepAnimating holds it live.
               heading "Progress"
               muted "A single rounded bar, smoothly oscillating 0–100%."
-              ctx <- askContext
-              -- Keep the sweep clock in Double: a Float seconds-since-boot
-              -- loses ~3 ms of resolution at 8 h uptime (worse with longer
-              -- uptime), coarser than the 8.3 ms frame, so the sine input
-              -- quantizes and the bar edge steps instead of gliding.
-              now <- uiIO getMonotonicTime
-              progResp <- progressBar (realToFrac (0.5 + 0.5 * sin (2 * pi * now / 6)))
-              uiIO $ startAnimation ctx (respId progResp) 0 1 1e9
+              progResp <- progressBar =<< pulse 6
+              void (keepAnimating progResp)
 
             --------------------------------------------- Typography ---------
             Typography -> do

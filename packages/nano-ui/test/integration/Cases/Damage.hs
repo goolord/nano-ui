@@ -6,6 +6,7 @@ module Cases.Damage
   , runExplicitDamageFullTest
   , runDamageQueueClearedPerFrameTest
   , runStateChangeDamageTest
+  , runOrphanAnimationDamageSettlesTest
   ) where
 
 import Control.Monad (when)
@@ -147,3 +148,47 @@ runStateChangeDamageTest _ failed = do
   _ <- runFrame ctx (inp0 {inputChars = "a"}) ui
   dmg <- takeDamage ctx
   assertEq failed dmg DamageFull
+
+runOrphanAnimationDamageSettlesTest :: Context -> IORef Int -> IO ()
+runOrphanAnimationDamageSettlesTest _ failed = do
+  let winInp = withInput 400 300
+      inp = winInp {inputDeltaTime = 0.05}
+      withBar = columnWith (padAll 20) $ do
+        barResp <- spacer (Fixed 40) (Fixed 20)
+        pure barResp
+      withoutBar = columnWith (padAll 20) (pure ())
+  ctx <- newContext
+  -- Warm up: the bar widget occupies a nonzero 40x20 rect in the arena.
+  (barResp, _, _, _) <- runFrame ctx inp withBar
+  _ <- takeDamage ctx
+  let wid = respId barResp
+  -- keepAnimating-style perpetual animation on an established widget.
+  startAnimation ctx wid 0 1 1e9
+  -- Widget present and animating => damage is a clip over it, not a
+  -- whole-window repaint.
+  _ <- runFrame ctx inp withBar
+  dmgAnimated <- takeDamage ctx
+  case dmgAnimated of
+    DamageFull -> assert failed False
+    DamageClip r -> assert failed (rectW r > 0 && rectH r > 0)
+  -- Widget leaves the arena (tab switch). The first absent frame may repaint
+  -- its old region.
+  _ <- runFrame ctx inp withoutBar
+  _ <- takeDamage ctx
+  -- The perpetual animation is still live, but it must not force the whole
+  -- window to repaint forever after its widget is gone.
+  _ <- runFrame ctx inp withoutBar
+  live <- anyAnimating ctx
+  assert failed live
+  dmgAbsent <- takeDamage ctx
+  assert failed (damageIsEmpty dmgAbsent)
+  -- Guard: a freshly started animation on a widget that has never been laid
+  -- out still escalates to a full repaint for its first rect-less frame.
+  ctx2 <- newContext
+  startAnimation ctx2 (WidgetId 777) 0 1 0.3
+  _ <- runFrame ctx2 winInp (label "bare")
+  dmgFresh <- takeDamage ctx2
+  assertEq failed dmgFresh DamageFull
+  _ <- runFrame ctx2 winInp (label "bare")
+  dmgFresh2 <- takeDamage ctx2
+  assert failed (dmgFresh2 /= DamageFull)
