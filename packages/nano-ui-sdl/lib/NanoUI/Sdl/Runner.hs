@@ -22,6 +22,10 @@ import NanoUI
   , NanoUI
   , Size (..)
   , V2 (..)
+  , rectH
+  , rectW
+  , rectX
+  , rectY
   , themeWindow
   )
 import Effectful (Eff, IOE, type (:>))
@@ -51,11 +55,13 @@ import NanoUI.Sdl.Debug
   )
 import NanoUI.Sdl.Cursor (syncPointerCursor)
 import NanoUI.Sdl.Display
-  ( queryMouseWindowPos
+  ( backbufferPersists
+  , queryMouseWindowPos
   , queryRendererName
   , queryWindowLogicalSize
   , retainBegin
   , retainBlit
+  , retainBlitRect
   , retainCreate
   , retainDestroy
   , windowToLogicalCoords
@@ -172,7 +178,23 @@ ensureRetain env w h scale = do
       pure (tex', True)
 
 blitRetain :: Ptr SDL_Renderer -> Float -> Ptr () -> Damage -> IO Bool
-blitRetain ren _scale tex _damage = retainBlit ren tex
+blitRetain ren scale tex damage = do
+  persists <- backbufferPersists ren
+  if not persists
+    then retainBlit ren tex
+    else case damage of
+      DamageFull -> retainBlit ren tex
+      -- Blit only the damaged region: the retain texture and the
+      -- backbuffer are both device-pixel sized, so the snapped clip
+      -- (outward, in device pixels) maps 1:1 from src to dst. Safe only
+      -- because the software backbuffer persists across presents.
+      DamageClip r ->
+        let s = if scale > 0 then scale else 1
+            x0 = fromIntegral (floor (rectX r * s) :: Int) :: Float
+            y0 = fromIntegral (floor (rectY r * s) :: Int) :: Float
+            x1 = fromIntegral (ceiling ((rectX r + rectW r) * s) :: Int) :: Float
+            y1 = fromIntegral (ceiling ((rectY r + rectH r) * s) :: Int) :: Float
+         in retainBlitRect ren tex x0 y0 (x1 - x0) (y1 - y0) x0 y0
 
 askSdlEnv :: Ui :> es => Eff es (Maybe SdlEnv)
 askSdlEnv = askHost
