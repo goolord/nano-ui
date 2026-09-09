@@ -43,11 +43,31 @@ int nano_ui_window_refresh_rate(SDL_Window *window)
     if (!id) {
         return 0;
     }
-    const SDL_DisplayMode *mode = SDL_GetCurrentDisplayMode(id);
-    if (!mode) {
-        return 0;
+    const SDL_DisplayMode *current = SDL_GetCurrentDisplayMode(id);
+    if (current && current->refresh_rate > 0) {
+        return current->refresh_rate;
     }
-    return mode->refresh_rate > 0 ? mode->refresh_rate : 0;
+    /* Some drivers leave the current mode's refresh at 0 (variable-refresh
+     * panels, compositors that report a base rate). Fall back to the highest
+     * refresh among display modes at the current size so pacing still
+     * targets the panel's real cadence instead of the 60 Hz default. */
+    int best = 0;
+    int cw = current ? current->w : 0;
+    int ch = current ? current->h : 0;
+    if (cw <= 0 || ch <= 0) {
+        SDL_GetWindowSize(window, &cw, &ch);
+    }
+    int count = 0;
+    SDL_DisplayMode **modes = SDL_GetFullscreenDisplayModes(id, &count);
+    for (int i = 0; i < count && modes; i++) {
+        if (modes[i] && modes[i]->w == cw && modes[i]->h == ch && modes[i]->refresh_rate > best) {
+            best = modes[i]->refresh_rate;
+        }
+    }
+    if (modes) {
+        SDL_free(modes);
+    }
+    return best;
 }
 
 bool nano_ui_window_logical_size(

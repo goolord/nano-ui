@@ -13,7 +13,7 @@ module NanoUI.Sdl.Debug
   ) where
 
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
-import Data.Text (Text)
+import Data.Text (Text, unpack)
 import GHC.Clock (getMonotonicTime)
 import NanoUI (Size (..), V2 (..))
 import NanoUI.Debug
@@ -34,11 +34,12 @@ import System.Environment (lookupEnv)
 import Text.Printf (printf)
 
 data SdlDebugSnapshot = SdlDebugSnapshot
-  { dbgCore     :: !CoreDebugSnapshot
-  , dbgScale    :: !Float
-  , dbgFontPath :: !FilePath
-  , dbgRenderer :: !Text
-  , dbgVsync    :: !Bool
+  { dbgCore      :: !CoreDebugSnapshot
+  , dbgScale     :: !Float
+  , dbgFontPath  :: !FilePath
+  , dbgRenderer  :: !Text
+  , dbgVsync     :: !Bool
+  , dbgRefreshHz :: !Int
   }
   deriving (Eq, Show)
 
@@ -64,6 +65,7 @@ emptySdlDebug =
     , dbgFontPath = ""
     , dbgRenderer = ""
     , dbgVsync    = True
+    , dbgRefreshHz = 0
     }
 
 noteLoop :: SamplerRef -> Float -> IO ()
@@ -99,8 +101,8 @@ notePresent ref uiMs renderMs presentMs frameMs dd = do
     (drawIndexCount dd)
     (drawCmdCount dd)
 
-readSdlDebug :: SamplerRef -> Size -> V2 -> FilePath -> Float -> Text -> Bool -> IO SdlDebugSnapshot
-readSdlDebug ref (Size ww wh) (V2 mx my) fontPath scale renderer vsync = do
+readSdlDebug :: SamplerRef -> Size -> V2 -> FilePath -> Float -> Text -> Bool -> Int -> IO SdlDebugSnapshot
+readSdlDebug ref (Size ww wh) (V2 mx my) fontPath scale renderer vsync refreshHz = do
   s <- readIORef ref
   now <- getMonotonicTime
   (refresh, _cur) <-
@@ -130,21 +132,26 @@ readSdlDebug ref (Size ww wh) (V2 mx my) fontPath scale renderer vsync = do
               , dbgFontPath = fontPath
               , dbgRenderer = renderer
               , dbgVsync    = vsync
+              , dbgRefreshHz = refreshHz
               }
       writeIORef (sdsSnapshot s) snap
-      traceFrame (dbgCore snap)
+      traceFrame snap
       pure snap
 
 -- | Env-gated per-refresh timing trace (NANO_FRAME_TRACE=1). Prints the
 -- snapshot's phase EMAs so live-loop costs can be compared across builds.
-traceFrame :: CoreDebugSnapshot -> IO ()
-traceFrame c = do
+traceFrame :: SdlDebugSnapshot -> IO ()
+traceFrame s = do
+  let c = dbgCore s
   on <- lookupEnv "NANO_FRAME_TRACE"
   case on of
     Nothing -> pure ()
     Just _ ->
       Text.Printf.printf
-        "TRACE presentFps=%6.0f loopFps=%6.0f frameMs=%6.3f uiMs=%6.3f renderMs=%6.3f presentMs=%6.3f verts=%5d cmds=%2d presents=%d skips=%d\n"
+        "TRACE refreshHz=%3d rend=%s vsync=%d presentFps=%6.0f loopFps=%6.0f frameMs=%6.3f uiMs=%6.3f renderMs=%6.3f presentMs=%6.3f verts=%5d cmds=%2d presents=%d skips=%d\n"
+        (dbgRefreshHz s)
+        (unpack (dbgRenderer s))
+        (dbgBoolInt (dbgVsync s))
         (dbgPresentFps c)
         (dbgLoopFps c)
         (dbgFrameMs c)
@@ -155,3 +162,5 @@ traceFrame c = do
         (dbgCmds c)
         (dbgPresents c)
         (dbgSkips c)
+  where
+    dbgBoolInt b = if b then (1 :: Int) else 0
