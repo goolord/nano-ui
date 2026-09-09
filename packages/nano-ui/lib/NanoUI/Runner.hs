@@ -250,9 +250,14 @@ runSessionLoop drv ctx0 inp0 = do
                 shouldDraw <- if pendingDirty
                   then pure True
                   else sdShouldDraw drv ctx' prevInp inpSynced wasAnim
+                -- Force a full present only on the settle frame where an
+                -- animation just finished (wasAnim && not animNow). Passing
+                -- wasAnim alone kept every frame of a running animation at
+                -- DamageFull, defeating clip damage for animated widgets.
+                animNow <- anyAnimating ctx'
                 synced <- if shouldDraw
                   then do
-                    (dirtyOut, s) <- sdDraw drv ctx' inpSynced wasAnim
+                    (dirtyOut, s) <- sdDraw drv ctx' inpSynced (wasAnim && not animNow)
                     writeIORef pendingDirtyRef dirtyOut
                     writeIORef prevInpRef s
                     pure s

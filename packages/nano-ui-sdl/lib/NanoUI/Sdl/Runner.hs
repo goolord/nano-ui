@@ -31,7 +31,6 @@ import NanoUI.Testing
   , DrawData
   , Layer (..)
   , Ui
-  , anyAnimating
   , ctxTheme
   , damageIsEmpty
   , runEff
@@ -125,15 +124,14 @@ finishDraw ctx env inp forceFull t0 t1 drawData dirtyAfterUi = do
       pw = max 1 (round (lw * scale))
       ph = max 1 (round (lh * scale))
   (tex, retainNew) <- ensureRetain env pw ph scale
-  animating <- anyAnimating ctx
+  -- Frame damage from writeDamage is authoritative: a live animation whose
+  -- key is out of view or scroll-clipped produces empty damage, and forcing
+  -- DamageFull here would turn every skip frame into a full present.
   let damage0 =
         if forceFull || retainNew || sdlContinuous env
           then DamageFull
           else snapDamage scale dmg0
-      damage =
-        if damageIsEmpty damage0 && animating
-          then DamageFull
-          else damage0
+      damage = damage0
   if damageIsEmpty damage || lw <= 0 || lh <= 0
     then do
       noteSkip (sdlDebug env)

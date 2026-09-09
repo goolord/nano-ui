@@ -152,9 +152,12 @@ runSdlSession options ctx setup shouldQuit drawFn =
                 animating <- anyAnimating c
                 editing <- textFieldActive c
                 dirtyWait <- isDirty c
-                if sdlContinuous env || wantDebug || animating || dirtyWait
+                -- Animations pace at animateTimeout, not 0: empty-damage
+                -- anim frames skip the present, and a 0 timeout would
+                -- busy-spin the loop without vsync to throttle it.
+                if sdlContinuous env || wantDebug || dirtyWait
                   then pure 0
-                  else if wasAnim || editing
+                  else if wasAnim || animating || editing
                     then pure animateTimeout
                     else if debugActive
                       then pure debugHudTimeout

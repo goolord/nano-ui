@@ -41,6 +41,7 @@ import NanoUI.Context
   , getLastWindowSize
   , getLiveAnimations
   , getPrevFloatingRects
+  , getPrevNodeTexts
   , getPrevRect
   , getPrevRects
   , getStore
@@ -216,6 +217,7 @@ runFrameEff unlift ctx inp ui = do
   oldFocusRect <- getPrevRect ctx oldFocus
   oldFloatingRects <- getPrevFloatingRects ctx
   oldRects <- getPrevRects ctx
+  oldTexts <- getPrevNodeTexts ctx
   oldSize <- getLastWindowSize ctx
   oldStore <- getStore ctx
   wasDirty <- isDirty ctx
@@ -318,6 +320,7 @@ runFrameEff unlift ctx inp ui = do
     oldFocusRect
     oldFloatingRects
     oldRects
+    oldTexts
     animKeys
   msgs <- drainMessages ctx
   dirtyAfterUi <- isDirty ctx

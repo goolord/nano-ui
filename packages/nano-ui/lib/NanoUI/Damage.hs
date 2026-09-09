@@ -6,9 +6,10 @@ module NanoUI.Damage
   , writeDamage
   ) where
 
-import Control.Monad (forM, when)
+import Control.Monad (filterM, forM, when)
 import Data.IORef (readIORef)
 import Data.IntMap.Strict qualified as IM
+import Data.Text (Text)
 import Data.Maybe (catMaybes, fromMaybe, isJust, isNothing)
 import NanoUI.Context
   ( Context (..)
@@ -19,6 +20,7 @@ import NanoUI.Context
   , getLiveAnimations
   , getPrevRect
   , getPrevRectByKey
+  , getPrevNodeTexts
   , getPrevRects
   , getStore
   , getWindowDrag
@@ -28,6 +30,7 @@ import NanoUI.Context
   , modalDamageFlip
   , setDamageAndWindowSize
   , setPrevFloatingPanels
+  , setPrevNodeTexts
   , setPrevRectsAndClips
   , takeAnimSettled
   , lookupCustomDamageSlop
@@ -50,6 +53,7 @@ import NanoUI.Layout.Arena
   , getNodeType
   , getParent
   , getRect
+  , getText
   , getWidgetId
   , getWidthSizing
   , isFloatingNode
@@ -125,25 +129,37 @@ updatePrevRects ctx = do
   let na = ctxNodeArena ctx
   count <- arenaCount na
   if count <= 0
-    then setPrevRectsAndClips ctx IM.empty IM.empty
+    then do
+      setPrevRectsAndClips ctx IM.empty IM.empty
+      setPrevNodeTexts ctx IM.empty
     else do
-      let go !i !m !cm
-            | i >= count = setPrevRectsAndClips ctx m cm
+      let go !i !m !cm !tm
+            | i >= count = do
+                setPrevRectsAndClips ctx m cm
+                setPrevNodeTexts ctx tm
             | otherwise = do
                 wid <- getWidgetId na i
                 if hashWidgetId wid == 0
-                  then go (i + 1) m cm
+                  then go (i + 1) m cm tm
                   else do
                     mRect <- getNonzeroRect na i
                     case mRect of
-                      Nothing -> go (i + 1) m cm
+                      Nothing -> go (i + 1) m cm tm
                       Just r -> do
                         mClip <- getClipRect na i
                         let !k = intKey wid
                             !m' = IM.insert k r m
                             !cm' = maybe cm (\c -> IM.insert k c cm) mClip
-                        go (i + 1) m' cm'
-      go 0 IM.empty IM.empty
+                        nt <- getNodeType na i
+                        tm' <-
+                          if nt == NodeText
+                            then do
+                              txt <- getText na i
+                              let !tmNew = IM.insert k txt tm
+                              pure tmNew
+                            else pure tm
+                        go (i + 1) m' cm' tm'
+      go 0 IM.empty IM.empty IM.empty
 
 floatingPanelsInOrder :: Context -> IO [(Int, Rect)]
 floatingPanelsInOrder ctx = do
@@ -181,9 +197,10 @@ writeDamage ::
   Maybe Rect ->
   IM.IntMap Rect ->
   IM.IntMap Rect ->
+  IM.IntMap Text ->
   [Int] ->
   IO ()
-writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFocus oldHotR oldActiveR oldFocusR oldFloatingRects oldRects animKeys = do
+writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFocus oldHotR oldActiveR oldFocusR oldFloatingRects oldRects oldTexts animKeys = do
   let Size winW winH = inputWindowSize inp
       sizeChanged =
         oldSize /= Size 0 0 && oldSize /= Size winW winH
@@ -191,6 +208,7 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
   panels <- floatingPanelsInOrder ctx
   let newFloatingRects = IM.fromList panels
   newRects <- getPrevRects ctx
+  newTexts <- getPrevNodeTexts ctx
   modalFlip <- modalDamageFlip ctx
   liveAnims <- getLiveAnimations ctx
   settled <- takeAnimSettled ctx
@@ -253,67 +271,110 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
     if full
       then pure DamageFull
       else do
-        newHot <- getHotId ctx
-        newActive <- readIORef (ctxActiveId ctx)
-        newFocus <- readIORef (ctxFocusId ctx)
-        let ids = [oldHot, oldActive, oldFocus, newHot, newActive, newFocus]
-            oldOf wid
-              | wid == oldHot = oldHotR
-              | wid == oldActive = oldActiveR
-              | wid == oldFocus = oldFocusR
-              | otherwise = Nothing
-            clipKeys = animKeys ++ IM.keys liveAnims
-            missingAnim =
-              any
-                ( \k ->
-                    k /= 0
-                      && isNothing (IM.lookup k oldRects)
-                      && isNothing (IM.lookup k newRects)
-                )
-                clipKeys
-        if missingAnim && animLive
-          then pure DamageFull
-          else do
-            reqRs <- resolveDamageRequests ctx oldRects newRects requests
-            interactiveRs <-
-              fmap concat $
-                forM (filter (\w -> hashWidgetId w /= 0) ids) $ \wid -> do
-                  newR <- getPrevRect ctx wid
-                  mSlop <- lookupCustomDamageSlop ctx wid
-                  let slop = fromMaybe defaultDamageSlop mSlop
-                  catMaybes <$> forM (catMaybes [oldOf wid, newR])
-                    (clipWidgetRect ctx newRects wid . rectInflate slop)
-            scrollRs <-
-              if scrollChanged
-                then scrollOffsetDamage ctx oldStore newStore
-                else pure []
-            animRs <-
-              fmap concat $
-                forM (filter (/= 0) clipKeys) $ \k ->
-                  catMaybes <$> forM (catMaybes [IM.lookup k oldRects, IM.lookup k newRects])
-                    (clipKeyRect ctx newRects k . rectInflate defaultDamageSlop)
-            backdropRs0 <- backdropRectsForInteraction ctx ids (clipKeys ++ [k | ReqKey k _ <- requests])
-            let backdropRs = map (clipRectToWindow winW winH) backdropRs0
-            let layoutRs = if onlyScrollFloatsChanged then [] else settledMoved
-                vanishedRs = diffOld
-                floatingRs = floatingRectDamage oldFloatingRects newFloatingRects
-                base =
-                  unionRects
-                    ( reqRs
-                        ++ interactiveRs
-                        ++ scrollRs
-                        ++ animRs
-                        ++ backdropRs
-                        ++ layoutRs
-                        ++ vanishedRs
-                        ++ floatingRs
-                    )
-                clip = clipRectToWindow winW winH base
-                winArea = winW * winH
-            if (animLive && not (nonzeroRect clip))
-                 || (winArea > 0 && rectArea clip > winArea * 0.5)
-              then pure DamageFull
-              else pure (DamageClip clip)
+         newHot <- getHotId ctx
+         newActive <- readIORef (ctxActiveId ctx)
+         newFocus <- readIORef (ctxFocusId ctx)
+         -- A parked pointer must not re-damage its hot widget every frame:
+         -- only an id change (hover in/out, press, focus move) or a rect
+         -- move repaints. Unchanged interaction rects kept the steady state
+         -- at DamageFull whenever the hot widget sat inside a panel whose
+         -- backdrop covered over half the window.
+         let roles =
+               [ (oldHot, oldHotR, newHot)
+               , (oldActive, oldActiveR, newActive)
+               , (oldFocus, oldFocusR, newFocus)
+               ]
+             oldOf wid
+               | wid == oldHot = oldHotR
+               | wid == oldActive = oldActiveR
+               | wid == oldFocus = oldFocusR
+               | otherwise = Nothing
+             clipKeys = animKeys ++ IM.keys liveAnims
+             missingAnim =
+               any
+                 ( \k ->
+                     k /= 0
+                       && isNothing (IM.lookup k oldRects)
+                       && isNothing (IM.lookup k newRects)
+                 )
+                 clipKeys
+         if missingAnim && animLive
+           then pure DamageFull
+           else do
+             reqRs <- resolveDamageRequests ctx oldRects newRects requests
+             changedRoles <-
+               filterM
+                 ( \(_, oldR, newW) -> do
+                     newR <- getPrevRect ctx newW
+                     pure (oldR /= newR)
+                 )
+                 roles
+             interactiveRs <-
+               fmap concat $
+                 forM (filter (\w -> hashWidgetId w /= 0) (concat [[oldW, newW] | (oldW, _, newW) <- changedRoles])) $ \wid -> do
+                   newR <- getPrevRect ctx wid
+                   mSlop <- lookupCustomDamageSlop ctx wid
+                   let slop = fromMaybe defaultDamageSlop mSlop
+                   catMaybes <$> forM (catMaybes [oldOf wid, newR])
+                     (clipWidgetRect ctx newRects wid . rectInflate slop)
+             scrollRs <-
+               if scrollChanged
+                 then scrollOffsetDamage ctx oldStore newStore
+                 else pure []
+             animRs <-
+               fmap concat $
+                 forM (filter (/= 0) clipKeys) $ \k ->
+                   catMaybes <$> forM (catMaybes [IM.lookup k oldRects, IM.lookup k newRects])
+                     (clipKeyRect ctx newRects k . rectInflate defaultDamageSlop)
+             -- Backdrop expansion covers interaction slop (hover/press
+             -- halos) and explicit damage requests. Animation keys must not
+             -- expand to their panel backdrop: an animated widget inside a
+             -- large panel would damage the whole panel every frame, and
+             -- once that union crosses half the window the frame degrades
+             -- to DamageFull. The scissored replay redraws the backdrop
+             -- fill inside the anim's own rect+slop, so no stale pixels
+             -- remain.
+             backdropRs0 <- backdropRectsForInteraction ctx (concat [ [oldW, newW] | (oldW, _, newW) <- changedRoles]) [k | ReqKey k _ <- requests]
+             let backdropRs = map (clipRectToWindow winW winH) backdropRs0
+             let layoutRs = if onlyScrollFloatsChanged then [] else settledMoved
+                 vanishedRs = diffOld
+                 floatingRs = floatingRectDamage oldFloatingRects newFloatingRects
+                 -- Same-key text changes that keep the rect (monospace
+                 -- counters, refreshed readouts) still repaint: rect-delta
+                 -- damage alone would leave them stale. New text keys inside
+                 -- floating panels also land here; outside panels the
+                 -- keysChanged predicate already forces full damage.
+                 textChangedKeys =
+                   [ k
+                   | (k, t) <- IM.toList newTexts
+                   , IM.lookup k oldTexts /= Just t
+                   ]
+                 textRs =
+                   [ r
+                   | k <- textChangedKeys
+                   , Just r <- [IM.lookup k newRects]
+                   ]
+                 base =
+                   unionRects
+                     ( reqRs
+                         ++ interactiveRs
+                         ++ scrollRs
+                         ++ animRs
+                         ++ backdropRs
+                         ++ layoutRs
+                         ++ vanishedRs
+                         ++ floatingRs
+                         ++ textRs
+                     )
+                 clip = clipRectToWindow winW winH base
+                 winArea = winW * winH
+             -- A live animation with an empty clip is not DamageFull: its
+             -- key was either scroll-clipped out of view (nothing visible
+             -- changes; scrolling back in damages via the scroll delta) or
+             -- rect-less, which missingAnim already promoted above.
+             if winArea > 0 && rectArea clip > winArea * 0.5
+               then pure DamageFull
+               else pure (DamageClip clip)
   setDamageAndWindowSize ctx dmg (Size winW winH)
   setPrevFloatingPanels ctx newFloatingRects (map fst panels)
   when modalFlip (markDirty ctx)
