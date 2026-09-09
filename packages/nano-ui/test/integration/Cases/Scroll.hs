@@ -22,6 +22,7 @@ module Cases.Scroll
   , runTableCellPadTest
   , runTableFitScrollColWidthTest
   , runTableTabWrapRowTest
+  , runTableResizeHeaderLaneTest
   , runScrolledOutClickImmunityTest
   , runScrolledOutHoverImmunityTest
   , runScrolledOutCursorImmunityTest
@@ -33,10 +34,11 @@ module Cases.Scroll
   ) where
 
 import Control.Monad (forM, forM_, replicateM, unless, void)
+import Data.Bits ((.&.))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
-import Data.List (sort, sortBy)
-import Data.Maybe (listToMaybe)
+import Data.List (sort, sortBy, sortOn)
+import Data.Maybe (catMaybes, listToMaybe)
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Ptr (Ptr, castPtr)
 import Foreign.Storable (peekElemOff)
@@ -45,10 +47,14 @@ import Text.Read (readMaybe)
 import NanoUI
 import NanoUI.Context (ctxNodeArena, setDrawSnapScale)
 import NanoUI.Layout.Arena
-  ( NodeType (..)
+  ( DirTag (..)
+  , NodeType (..)
   , arenaCount
+  , getClipRect
+  , getDirection
   , getNodeType
   , getRect
+  , getStyleIdx
   )
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertGt, bump, withInput)
@@ -333,6 +339,120 @@ runTableWrapRowStretchTest _ failed = do
   assert failed (minimum (map fst rowBands) < 40)
   where
     dedup = foldr (\x acc -> if x `elem` acc then acc else x : acc) []
+
+-- Resizing a column across the pane's right edge must never let the
+-- horizontal scrollbar lane cover the bottom of the header row. The lane
+-- spacer and the scroller policy come from the same previous-frame overflow
+-- flag, so the scroller's clip can't activate the lane on a frame where the
+-- spacer hasn't landed (that used to cover the header's bottom half under the
+-- bar track for a frame, flickering it mid-drag). Asserts, on every drag
+-- frame, that the header row stays inside the row scroller's clip and that
+-- the scroller reserves the lane exactly when the spacer is present.
+runTableResizeHeaderLaneTest :: Context -> IORef Int -> IO ()
+runTableResizeHeaderLaneTest _ failed = do
+  ctx <- newPixelContext
+  let inp0 = (withInput 400 300) {inputMousePos = V2 30 30}
+      -- Five rows put the body just inside the vertical bar's toggle band:
+      -- the bar appears exactly when the header lane spacer appears, which is
+      -- the sequence that used to clip the header.
+      rows = take 5 tableScrollRows
+      ui = do
+        (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
+        void
+          ( tableCfg
+              defaultTableCfg
+              (tight . fillW . fixedH 180 $ defaultLayout {layoutGap = 0})
+              "resize-lane"
+              tableScrollCols
+              rows
+              tableSort
+          )
+  _ <- runFrame ctx inp0 ui
+  _ <- runFrame ctx inp0 ui
+  hdr <- headerButtonRect ctx
+  case hdr of
+    Nothing -> assert failed False
+    Just (Rect hx hy hw hh) -> do
+      let edgeX = hx + hw
+          headerY = hy + hh / 2
+          pressInp = inp0 {inputMousePos = V2 (edgeX - 2) headerY, inputMouseDown = True, inputMousePressed = True}
+          dragInp x = inp0 {inputMousePos = V2 x headerY, inputMouseDown = True}
+          -- First drag well past the pane's right edge (lane + v-bar appear),
+          -- then settle back inside the vertical-bar gutter band so the
+          -- scroller viewport and the stale lane flag disagree across frames.
+          steps = [edgeX + 160, edgeX + 320, edgeX + 300, edgeX + 290, edgeX + 310, edgeX + 300]
+      _ <- runFrame ctx pressInp ui
+      forM_ steps $ \x -> do
+        _ <- runFrame ctx (dragInp x) ui
+        (mClip, hasLaneSpacer, reserved) <- laneState ctx
+        mHdr <- headerButtonRect ctx
+        case (mClip, mHdr) of
+          (Just clip, Just (Rect _ hy' _ hh')) -> do
+            let Rect cy _ _ ch = clip
+            -- The whole header row (all cells share its band) must stay
+            -- inside the scroller's content clip on every drag frame.
+            assert failed (hy' + hh' <= cy + ch + 0.5)
+            -- And the lane reservation must track the spacer: while the
+            -- spacer is in the content the policy reserves the lane, and
+            -- while it is absent the policy must not (a live ScrollAuto
+            -- gutter is what used to clip the header for a frame).
+            assert failed (reserved == hasLaneSpacer)
+          _ -> assert failed False
+
+-- | Leftmost table-header button rect.
+headerButtonRect :: Context -> IO (Maybe Rect)
+headerButtonRect ctx = do
+  let na = ctxNodeArena ctx
+  n <- arenaCount na
+  rects <-
+    fmap
+      catMaybes
+      ( forM [0 .. n - 1] $ \i -> do
+          nt <- getNodeType na i
+          if nt /= NodeButton
+            then pure Nothing
+            else do
+              si <- getStyleIdx na i
+              if not (isTableHeaderStyleIdx si)
+                then pure Nothing
+                else do
+                  (x, y, w, h) <- getRect na i
+                  pure (Just (Rect x y w h))
+      )
+  pure (listToMaybe (sortOn rectX rects))
+
+-- | Row scroller state: its content clip, whether the lane spacer is in the
+-- content (the scroller is taller than the header line), and whether its
+-- policy reserves the lane.
+laneState :: Context -> IO (Maybe Rect, Bool, Bool)
+laneState ctx = do
+  let na = ctxNodeArena ctx
+  n <- arenaCount na
+  found <-
+    fmap
+      catMaybes
+      ( forM [0 .. n - 1] $ \i -> do
+          nt <- getNodeType na i
+          if nt /= NodeScrollContainer
+            then pure Nothing
+            else do
+              d <- getDirection na i
+              if d /= DirRow
+                then pure Nothing
+                else do
+                  mC <- getClipRect na i
+                  (_, _, _, sh) <- getRect na i
+                  si <- getStyleIdx na i
+                  -- Lane reserved: policyX = ScrollAlways (bits 0-1 = 1).
+                  let reserved = si .&. 3 == 1
+                  pure (Just (mC, sh > 35, reserved))
+      )
+  pure $ case found of
+    (c, hasLaneSpacer, reserved) : _ -> (c, hasLaneSpacer, reserved)
+    [] -> (Nothing, False, False)
+
+isTableHeaderStyleIdx :: Int -> Bool
+isTableHeaderStyleIdx si = si .&. 0x80000000 /= 0
 
 tableScrollCols :: Colonnade Headed TableScrollRow T.Text
 tableScrollCols =

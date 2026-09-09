@@ -118,6 +118,7 @@ testSpecs =
   , TestSpec "table-cell-pad" True runTableCellPadTest
   , TestSpec "table-fit-scroll-col" False runTableFitScrollColWidthTest
   , TestSpec "table-tab-wrap-row" True runTableTabWrapRowTest
+  , TestSpec "table-resize-header-lane" False runTableResizeHeaderLaneTest
   , TestSpec "scroll-top-clip" True runScrollTopClipTest
   , TestSpec "select-overlay-damage" False runSelectOverlayDamageTest
   , TestSpec "text-input-dirty" False runTextInputDirtyTest
