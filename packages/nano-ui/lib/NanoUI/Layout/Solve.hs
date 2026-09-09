@@ -1316,7 +1316,7 @@ positionRowFromParent a na host fm monoFm measure resolveFont parent gap cx cy c
               ay <- getAlignY na ci
               let fy = alignY ay cy ch crossH
               positionNodeA a na host fm monoFm measure resolveFont ci curX fy fw crossH
-              goRow (i + 1) (curX + fw + gap)
+              goRow (i + 1) (onGrid (fmSnapScale fm) (curX + fw + gap))
     goRow 0 cx
 
 positionGrid ::
@@ -1433,7 +1433,7 @@ positionColumnFromParent a na host fm monoFm measure resolveFont parent gap chro
                 if i + 1 >= n
                   then pure 0
                   else pairColumnGap na chrome ci (indexPrimArray idxSnap (i + 1)) gap
-              go (i + 1) (curY + placedH + gapAfter)
+              go (i + 1) (onGrid (fmSnapScale fm) (curY + placedH + gapAfter))
     go 0 cy
 
 
