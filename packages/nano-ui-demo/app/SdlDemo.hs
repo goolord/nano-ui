@@ -398,8 +398,12 @@ demoUi = do
               heading "Progress"
               muted "A single rounded bar, smoothly oscillating 0–100%."
               ctx <- askContext
-              now <- uiIO (realToFrac <$> getMonotonicTime)
-              progResp <- progressBar (0.5 + 0.5 * sin (2 * pi * now / 6))
+              -- Keep the sweep clock in Double: a Float seconds-since-boot
+              -- loses ~3 ms of resolution at 8 h uptime (worse with longer
+              -- uptime), coarser than the 8.3 ms frame, so the sine input
+              -- quantizes and the bar edge steps instead of gliding.
+              now <- uiIO getMonotonicTime
+              progResp <- progressBar (realToFrac (0.5 + 0.5 * sin (2 * pi * now / 6)))
               uiIO $ startAnimation ctx (respId progResp) 0 1 1e9
 
             --------------------------------------------- Typography ---------
