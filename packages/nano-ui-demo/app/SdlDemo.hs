@@ -566,13 +566,14 @@ demoUi = do
               let c = dbgCore snap
                   haskellMs = dbgUiMs c + dbgRenderMs c
               kv "Present FPS" (T.pack (printf "%.1f fps" (dbgPresentFps c)))
+              kv "Display" (T.pack (printf "%d Hz" (dbgRefreshHz snap)))
               kv "Loop FPS" (T.pack (printf "%.1f fps" (dbgLoopFps c)))
               kv "Frame Time" (T.pack (printf "%.2f ms" (dbgFrameMs c)))
               kv "Haskell Time" (T.pack (printf "%.2f ms (UI: %.2f, Render: %.2f)" haskellMs (dbgUiMs c) (dbgRenderMs c)))
               kv "SDL Present" (T.pack (printf "%.2f ms" (dbgPresentMs c)))
               kv "Draw Calls" (T.pack (printf "%d" (dbgCmds c)))
               kv "Vertices / Indices" (T.pack (printf "%d / %d" (dbgVerts c) (dbgIndices c)))
-              kv "Renderer" (dbgRenderer snap <> if dbgVsync snap then " (vsync on)" else " (vsync off)")
+              kv "Renderer" (dbgRenderer snap <> if dbgVsync snap then " (vsync on)" else " (vsync off)" <> T.pack (printf ", refresh %d Hz" (dbgRefreshHz snap)))
               kv "Last drop event" (orDash dropRaw)
               kv "Evaluation" "Zero-Cost Inactive Tabs"
               kv "State" "SrcLoc Preserved"

@@ -150,7 +150,7 @@ main = do
           want0 <- takeDebugLive cadRef active0
           let wait0 = if want0 then 0 :: Int else if active0 then 250 else -1
           printf "  plain window, no stats query : active=%-5s waitTimeout=%-3d (block; was 250 ms wake + 4 Hz full redraws)\n" (show active0) wait0
-          _ <- readSdlDebug cadRef (Size 1280 800) (V2 640 400) "profile" 1 "sdl" True
+          _ <- readSdlDebug cadRef (Size 1280 800) (V2 640 400) "profile" 1 "sdl" True 0
           active1 <- isDebugActive cadRef
           want1 <- takeDebugLive cadRef active1
           let wait1 = if want1 then 0 :: Int else if active1 then 250 else -1
