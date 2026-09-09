@@ -34,6 +34,22 @@ float nano_ui_window_display_scale(SDL_Window *window)
     return scale;
 }
 
+int nano_ui_window_refresh_rate(SDL_Window *window)
+{
+    if (!window) {
+        return 0;
+    }
+    SDL_DisplayID id = SDL_GetDisplayForWindow(window);
+    if (!id) {
+        return 0;
+    }
+    const SDL_DisplayMode *mode = SDL_GetCurrentDisplayMode(id);
+    if (!mode) {
+        return 0;
+    }
+    return mode->refresh_rate > 0 ? mode->refresh_rate : 0;
+}
+
 bool nano_ui_window_logical_size(
     SDL_Window *window,
     float scale,

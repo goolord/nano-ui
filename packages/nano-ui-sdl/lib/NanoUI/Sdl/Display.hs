@@ -4,6 +4,7 @@ module NanoUI.Sdl.Display
   , initSdlHints
   , initBenchHints
   , queryWindowDisplayScale
+  , queryWindowRefreshHz
   , queryWindowLogicalSize
   , queryMouseWindowPos
   , setRenderScale
@@ -51,6 +52,13 @@ queryWindowDisplayScale :: Ptr SDL_Window -> IO Float
 queryWindowDisplayScale win = do
   s <- windowDisplayScaleC win
   pure (if s > 0 then realToFrac s else defaultUiScale)
+
+-- | Vertical refresh rate of the window's current display mode, in Hz
+-- (0 when unavailable).
+queryWindowRefreshHz :: Ptr SDL_Window -> IO Int
+queryWindowRefreshHz win = do
+  hz <- windowRefreshRateC win
+  pure (max 0 (fromIntegral hz))
 
 queryWindowLogicalSize :: Ptr SDL_Window -> Float -> IO Size
 queryWindowLogicalSize win scale =
@@ -114,6 +122,9 @@ foreign import ccall unsafe "nano_ui_set_render_vsync"
 
 foreign import ccall unsafe "nano_ui_window_display_scale"
   windowDisplayScaleC :: Ptr SDL_Window -> IO CFloat
+
+foreign import ccall unsafe "nano_ui_window_refresh_rate"
+  windowRefreshRateC :: Ptr SDL_Window -> IO CInt
 
 foreign import ccall unsafe "nano_ui_window_logical_size"
   windowLogicalSizeC ::

@@ -39,6 +39,7 @@ import NanoUI.Sdl.Display
   , queryMouseWindowPos
   , queryWindowDisplayScale
   , queryWindowLogicalSize
+  , queryWindowRefreshHz
   , retainDestroy
   , setRenderScale
   , setRenderVSync
@@ -181,6 +182,7 @@ data SdlEnv = SdlEnv
   , sdlRetain :: IORef (Ptr (), Int, Int, Float)
   , sdlLastPresented :: IORef Bool
   , sdlVsync :: !Bool
+  , sdlRefreshPeriod :: !Double
   , sdlContinuous :: !Bool
   , sdlCachedFm :: !(IORef FontMetrics)
   , sdlCachedMonoFm :: !(IORef FontMetrics)
@@ -348,6 +350,7 @@ startSdlWindow ctx title w h flags bench vsync continuous fontSource monoSource 
           ren <- peek renPtr
           scale <- queryWindowDisplayScale win
           setDrawSnapScale ctx scale
+          refreshHz <- queryWindowRefreshHz win
           font <- openFontSourceWithFallback fontSource embeddedFontSource (fontSize * scale)
           monoFont <- openFontSourceWithFallback monoSource embeddedFontSource (fontSize * scale)
           scaleRef <- newIORef scale
@@ -380,6 +383,10 @@ startSdlWindow ctx title w h flags bench vsync continuous fontSource monoSource 
           cachedMonoFm <- newIORef monoFm
           let baseCtx = withTtfFontCache fontCache (withTtfMeasureGlyph ctx font monoFont fm monoFm scale)
           cachedCtx <- newIORef baseCtx
+          let refreshPeriod =
+                if refreshHz > 0
+                  then 1 / fromIntegral refreshHz
+                  else 1 / 60
           unlessM (setRenderScale ren defaultUiScale) $
             fail "SDL_SetRenderScale failed"
           unless bench $ void $ setRenderVSync ren vsync
@@ -403,6 +410,7 @@ startSdlWindow ctx title w h flags bench vsync continuous fontSource monoSource 
                , sdlRetain = retain
                , sdlLastPresented = lastPresented
                , sdlVsync = vsync
+               , sdlRefreshPeriod = refreshPeriod
               , sdlContinuous = continuous
               , sdlCachedFm = cachedFm
               , sdlCachedMonoFm = cachedMonoFm

@@ -161,10 +161,11 @@ runSdlSession options ctx setup shouldQuit drawFn =
                 -- e.g. an animation that scrolled out of view), a 0 timeout
                 -- would busy-spin, so pace those at animateTimeout too.
                 lastPresented <- readIORef (sdlLastPresented env)
+                let refreshMs = max 1 (floor (sdlRefreshPeriod env * 1000))
                 if sdlContinuous env || wantDebug || dirtyWait || (animating && lastPresented && sdlVsync env)
                   then pure 0
                   else if wasAnim || animating || editing
-                    then pure animateTimeout
+                    then pure (if sdlVsync env then animateTimeout else refreshMs)
                     else if debugActive
                       then pure debugHudTimeout
                       else pure (-1)
@@ -193,6 +194,7 @@ runSdlSession options ctx setup shouldQuit drawFn =
             , sdSkip          = \_ _ -> noteSkip (sdlDebug env)
             , sdOnCursor      = \c inpSynced -> syncPointerCursor (sdlCursors env) c inpSynced
             , sdNoteLoop      = noteLoop (sdlDebug env)
+            , sdAlignSec      = sdlRefreshPeriod env
             , sdShouldQuit    = shouldQuit
             , sdClickDistance = 5.0
             , sdClickTime     = 0.4

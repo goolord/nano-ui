@@ -68,16 +68,17 @@ stepDeltaTime lastT = do
   pure (now, dt)
 
 -- | Wind forward to the next frame boundary after a timed-out event wait.
--- The backends pace animation frames with a coarse one-shot sleep; without an
--- extra nudge the frame start times drift by the scheduler's timer granularity
--- (and land late whenever SDL overruns), which reads as choppy animation on
+-- When pacing is active the backend requests a wait of ~period, but a one-shot
+-- sleep lets frame starts drift by the scheduler's timer granularity (and land
+-- late whenever the event waiter overruns), which reads as choppy animation on
 -- uneven frame times. Sleep the bulk, then busy-wind the ≤1ms tail so frame
--- starts fall on uniform time slices. The spin only runs when an animation is
--- actively presenting without vsync, and is bounded to about a millisecond.
-alignFrameStart :: Int -> Double -> IO ()
-alignFrameStart timeoutMs lastT = do
+-- starts fall on uniform slices of the pacing period. The spin only runs when
+-- an animation is actively presenting without vsync, and is bounded to about a
+-- millisecond.
+alignFrameStart :: Double -> Double -> IO ()
+alignFrameStart periodSec lastT = do
   t0 <- getMonotonicTime
-  let target = lastT + fromIntegral timeoutMs / 1000
+  let target = lastT + periodSec
       remain = target - t0
       bulkUs = max 0 (round ((remain - tailSlack) * 1e6))
   when (bulkUs > 0) (threadDelay bulkUs)
@@ -182,6 +183,11 @@ data SessionDriver ev = SessionDriver
     -- ^ Backend-specific display synchronization (window dimensions, DPI scale).
   , sdWaitTimeout   :: Context -> Bool -> IO Int
     -- ^ Compute event wait timeout in milliseconds (-1 = block, 0 = immediate/non-blocking, >0 = tick timeout).
+  , sdAlignSec      :: Double
+    -- ^ Frame pacing period in seconds for the timed-out wait path. Frame
+    -- starts are wound onto a uniform grid of this period so animation
+    -- cadence matches the host, instead of drifting with the event waiter's
+    -- timer granularity.
   , sdShouldDraw    :: Context -> Input -> Input -> Bool -> IO Bool
     -- ^ Decision predicate: (ctx, prevInp, curInp, wasAnimating) -> should this frame be rendered?
   , sdDraw          :: Context -> Input -> Bool -> IO (Bool, Input)
@@ -254,9 +260,10 @@ runSessionLoop drv ctx0 inp0 = do
                           -- No events woke us: the timer fired, so wind onto
                           -- the frame boundary before stamping this frame's
                           -- start time. Keeps frame starts on uniform slices
-                          -- (their delta-time) instead of drifting with the
-                          -- event waiter's own granularity.
-                          alignFrameStart timeout lastT
+                          -- of the pacing period (their display-cadence)
+                          -- instead of drifting with the event waiter's own
+                          -- granularity.
+                          alignFrameStart (sdAlignSec drv) lastT
                           pure []
                 else sdWaitEvents drv (-1)
           else pure queued
