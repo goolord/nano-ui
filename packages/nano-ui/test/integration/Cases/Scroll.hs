@@ -29,6 +29,7 @@ module Cases.Scroll
   , run2DScrollWheelTest
   , runTable2DScrollSyncTest
   , runScrollLockstepProbeTest
+  , runPageScrollBackdropCoverageTest
   ) where
 
 import Control.Monad (forM, forM_, replicateM, unless, void)
@@ -137,6 +138,38 @@ runScrollDamageTest _ failed = do
   case dScroll of
     DamageFull -> assert failed False
     DamageClip r -> assert failed (rectW r > 0 && rectH r > 0 && rectH r <= 60 + defaultDamageSlop * 2 && not (damageIsEmpty dScroll))
+
+-- Ghosting guard: a grow×grow (page-level) scroll container paints no well,
+-- so on clip frames the strip vacated by scrolled content has no covering
+-- command and the retained texture would show stale pixels — a ghost of a
+-- previous scroll position. Every frame must emit a full-viewport fill (the
+-- window-color backdrop) so clip replay repaints the whole viewport.
+runPageScrollBackdropCoverageTest :: Context -> IORef Int -> IO ()
+runPageScrollBackdropCoverageTest _ failed = do
+  ctx <- newContext
+  let inp0 = withInputOff 300 220
+      ui = fmap fst $
+        scrollArea
+          (defaultLayout {layoutWidth = Grow 1, layoutHeight = Grow 1})
+          (column (replicateM 20 (label "scroll backdrop line") >> pure ()))
+  sid <- warmup2 ctx inp0 ui
+  setScrollOffset ctx sid 120
+  _ <- runFrame ctx inp0 ui
+  (_, _, draw, _) <- runFrame ctx inp0 ui
+  mRect <- getPrevRect ctx sid
+  case mRect of
+    Nothing -> pure ()
+    Just (Rect rx ry rw rh) -> do
+      quads <- decodeQuads draw
+      let covered =
+            any
+              (\(qx1, qy1, qx2, qy2, _, _) ->
+                abs (qx1 - rx) <= 0.6
+                  && abs (qy1 - ry) <= 0.6
+                  && abs (qx2 - (rx + rw)) <= 0.6
+                  && abs (qy2 - (ry + rh)) <= 0.6)
+              quads
+      assert failed covered
 
 runTableScrollTest :: Context -> IORef Int -> IO ()
 runTableScrollTest _ failed = do

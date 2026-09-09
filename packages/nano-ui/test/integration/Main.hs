@@ -161,6 +161,7 @@ testSpecs =
   , TestSpec "scroll-2d-wheel" False run2DScrollWheelTest
   , TestSpec "table-2d-scroll-sync" False runTable2DScrollSyncTest
   , TestSpec "scroll-lockstep-probe" False runScrollLockstepProbeTest
+  , TestSpec "page-scroll-backdrop-coverage" False runPageScrollBackdropCoverageTest
   , TestSpec "tab-focus" False runTabFocusTest
   , TestSpec "select-initial" False runSelectTest
   , TestSpec "select-enum" False runEnumSelectTest

@@ -286,10 +286,19 @@ lowerNodeVisible ctx occluders idx nt x y w h rect fm theme terminal da =
               ( scrollChromeActive cfg False dir contentSize innerMain
               , scrollContentClip (ctxHostProfile ctx) fm slot cfg dir x y w h pad contentSize
               )
-      let paintWell = not (wTag == SizingGrow && hTag == SizingGrow)
-      when paintWell $ do
-        fillStyledRect da terminal wellStyle rect
-        strokeStyledRect da terminal wellStyle x y w h
+-- Grow×grow scrollers (page-level) keep no well so they blend into
+      -- the window backdrop. That backdrop only exists while the runner
+      -- clears it on DamageFull frames; on clip frames (scrolling, resize)
+      -- the strip vacated by scrolled content has no covering command and
+      -- the retained texture would show stale pixels — a ghost of a previous
+      -- scroll position. Paint the full rect with the window color instead:
+      -- invisible on a cleared backdrop, and clip replay then always
+      -- repaints the whole viewport.
+      if wTag == SizingGrow && hTag == SizingGrow
+        then pushRect da rect (themeWindow theme)
+        else do
+          fillStyledRect da terminal wellStyle rect
+          strokeStyledRect da terminal wellStyle x y w h
       withClip da inner $ walkChildrenWithOccluders ctx occluders idx
       when showChrome $ do
         wid <- getWidgetId (ctxNodeArena ctx) idx
