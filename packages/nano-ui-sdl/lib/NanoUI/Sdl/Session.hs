@@ -161,7 +161,13 @@ runSdlSession options ctx setup shouldQuit drawFn =
                 -- e.g. an animation that scrolled out of view), a 0 timeout
                 -- would busy-spin, so pace those at animateTimeout too.
                 lastPresented <- readIORef (sdlLastPresented env)
-                let refreshMs = max 1 (floor (sdlRefreshPeriod env * 1000))
+                -- Wait ~2 ms short of the frame period, leaving the slack for
+                -- alignFrameStart: SDL_WaitEventTimeout overruns by ~1 ms, and
+                -- if it returns past the boundary the frame is simply late
+                -- (the spin can only wind forward), costing fps. Waiting short
+                -- keeps the stamp on the exact display-cadence grid.
+                let periodMs = sdlRefreshPeriod env * 1000
+                    refreshMs = max 1 (floor periodMs - 2)
                 if sdlContinuous env || wantDebug || dirtyWait || (animating && lastPresented && sdlVsync env)
                   then pure 0
                   else if wasAnim || animating || editing
