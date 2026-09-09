@@ -39,14 +39,14 @@ import Data.Vector.Mutable qualified as MV
 import Effectful (Eff, type (:>))
 import qualified Data.IntMap.Strict as IM
 import NanoUI.Context (Context (..), bumpMirror, getPrevRect, getScrollOffset2D, getStore, intKey, linkScrollAxes, markDirty, setStore)
-import NanoUI.Font (scrollBarGutter, tableCellInset, textDisplayWidth)
+import NanoUI.Font (scrollBarGutter, scrollBarListExtra, tableCellInset, textDisplayWidth)
 import NanoUI.Id (WidgetId (..))
 import NanoUI.Input (Input (..), inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased, inputMouseRightReleased)
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
 import NanoUI.Store (WidgetStore (..), slotDrag, slotDragW, slotKey)
 import NanoUI.Style (AlignX (..), AlignY (..), Direction (..), FontVariant (..), Layout (..), Padding (..), Sizing (..), defaultLayout, fillH, fillW, tight)
-import Data.Bits ((.|.))
+import Data.Bits ((.|.), shiftL)
 import NanoUI.Types (isCellHost, rectH, rectW, v2X, V2 (..))
 import NanoUI.WidgetText (buttonFlagTable, tableHeaderLabel, tableSortReserve)
 import NanoUI.Widgets.Behavior (useReorder)
@@ -113,21 +113,21 @@ tableSplitPanes ::
   (Int -> Eff es Response) ->
   (Int -> row -> Int -> Eff es ()) ->
   Eff es [(Int, Response)]
-tableSplitPanes fillInner tableWid vWid hWid rowMinH frozenIdx unfrozenIdx pinned scrollRows colBox renderHeader renderCell =
+tableSplitPanes fillInner tableWid vWid hWid rowMinH frozenIdx unfrozenIdx pinned scrollRows colBox renderHeader renderCell = do
   let paneRoot =
         (if fillInner then tight . fillW . fillH else tight . fillH) defaultLayout
-   in panel' paneRoot $ do
-        tagContainer tableWid
-        row' (paneRoot {layoutGap = 0}) $ do
-          frozenHs <-
-            if null frozenIdx
-              then pure []
-              else zip frozenIdx <$> pane False (not (null unfrozenIdx)) frozenIdx
-          when (not (null frozenIdx) && not (null unfrozenIdx)) $ void separator
-          unfrozenHs <-
-            if null unfrozenIdx then pure [] else zip unfrozenIdx <$> unfrozenPane unfrozenIdx
-          pure (frozenHs ++ unfrozenHs)
- where
+  panel' paneRoot $ do
+    tagContainer tableWid
+    row' (paneRoot {layoutGap = 0}) $ do
+      frozenHs <-
+        if null frozenIdx
+          then pure []
+          else zip frozenIdx <$> pane False (not (null unfrozenIdx)) frozenIdx
+      when (not (null frozenIdx) && not (null unfrozenIdx)) $ void separator
+      unfrozenHs <-
+        if null unfrozenIdx then pure [] else zip unfrozenIdx <$> unfrozenPane unfrozenIdx
+      pure (frozenHs ++ unfrozenHs)
+  where
   freezeR = length pinned
   scrollRowsVec = V.fromList scrollRows
   minSum idxs = sum (map (layoutMinW . colBox) idxs) + fromIntegral (max 0 (length idxs - 1))
@@ -152,6 +152,20 @@ tableSplitPanes fillInner tableWid vWid hWid rowMinH frozenIdx unfrozenIdx pinne
   headerLine idxs renderHeader' =
     keyedRowLay (gridRowLay idxs) idxs $ \i ->
       column' (colBox i) (renderHeader' i)
+  headerGutter :: (Ui :> es) => Eff es Float
+  headerGutter = do
+    ctx <- askContext
+    let host = ctxHostProfile ctx
+        fm = ctxFontMetrics ctx
+    pure (if isCellHost host then 1 else scrollBarGutter host fm + scrollBarListExtra)
+  -- True once the unfrozen columns overflow the h-scroller (so the horizontal
+  -- scrollbar lane must be reserved). Uses the previous frame's scroller width;
+  -- reads False on the first frame, like hasVertBar below.
+  hasHBar :: (Ui :> es) => Eff es Bool
+  hasHBar = do
+    ctx <- askContext
+    mPrev <- uiIO (getPrevRect ctx hWid)
+    pure (maybe False (\r -> minSum unfrozenIdx > rectW r) mPrev)
   pinnedBlock idxs = do
     let !rowLay = gridRowLay idxs
         !colLays = map colBox idxs
@@ -202,11 +216,16 @@ tableSplitPanes fillInner tableWid vWid hWid rowMinH frozenIdx unfrozenIdx pinne
         vis
       when (botH > 0) $ void (spacer Fit (Fixed botH))
   pane fill hideVertBar idxs = do
+    g <- headerGutter
+    hBar <- hasHBar
     column' (paneLay fill idxs) $ do
       hs <- headerLine idxs renderHeader
       void separator
       pinnedBlock idxs
       when (not (null pinned) && not (null scrollRows)) $ void separator
+      -- Mirror the h-scroller's reserved lane so header and body rows stay
+      -- aligned with the unfrozen pane whenever its bar is showing.
+      when (hideVertBar && hBar) $ void (spacer Fit (Fixed g))
       scrollAreaIdConfigured
         vWid
         (vLay fill)
@@ -217,7 +236,9 @@ tableSplitPanes fillInner tableWid vWid hWid rowMinH frozenIdx unfrozenIdx pinne
     ctx <- askContext
     let host = ctxHostProfile ctx
         fm = ctxFontMetrics ctx
-        vGutter = if isCellHost host then 1 else scrollBarGutter host fm + 2
+        vGutter = if isCellHost host then 1 else scrollBarGutter host fm + scrollBarListExtra
+    hGutter <- headerGutter
+    hBar <- hasHBar
     mPrevV <- uiIO (getPrevRect ctx vWid)
     let totalH = fromIntegral (length scrollRows) * rowMinH
         hasVertBar = maybe (totalH > 100) (\r -> totalH > rectH r) mPrevV
@@ -227,13 +248,19 @@ tableSplitPanes fillInner tableWid vWid hWid rowMinH frozenIdx unfrozenIdx pinne
           hs' <-
             scrollAreaIdConfigured
               hWid
-              (if fillInner then fillW (hRowLay {layoutMinW = minSum idxs}) else hRowLay)
+              ((if fillInner then fillW else id) (hRowLay {layoutMinW = minSum idxs}))
               scrollHorizontalAuto $
               column' ((if fillInner then fillW else id) (tight $ defaultLayout {layoutGap = 0, layoutMinW = minSum idxs})) $ do
                 hs'' <- headerLine idxs renderHeader
                 void separator
                 pinnedBlock idxs
                 when (not (null pinned) && not (null scrollRows)) $ void separator
+                -- Reserve the h-scrollbar lane at the bottom of the scroller
+                -- content, but only while the bar is actually showing: when
+                -- it is active the lane covers this spacer and the header and
+                -- pinned rows keep their full height; when it is inactive no
+                -- space is reserved, so no dead gap shows under the header.
+                when hBar $ void (spacer Fit (Fixed hGutter))
                 pure hs''
           when hasVertBar $ void (spacer (Fixed vGutter) Fit)
           pure hs'
@@ -308,11 +335,14 @@ unpackSort n = SortCol (n `div` 2) (if odd n then SortDesc else SortAsc)
 clampSortCol :: Int -> SortCol -> SortCol
 clampSortCol n (SortCol idx dir) = SortCol (max 0 (min (max 0 (n - 1)) idx)) dir
 
+-- Sort mark in bits 16-17 (see tableSortMarkOf): the low nibbles are the
+-- font fields and a mark of 1 or 2 in bit 0-1 flips the header's font
+-- variant, which blanks the arrow glyph.
 sortMarkStyle :: SortCol -> Int -> Int
 sortMarkStyle sort idx
   | sortColIndex sort /= idx = 0
-  | sortColDir sort == SortDesc = 2
-  | otherwise = 1
+  | sortColDir sort == SortDesc = 2 `shiftL` 16
+  | otherwise = 1 `shiftL` 16
 
 sortRows :: Colonnade Headed row Text -> SortCol -> [row] -> [row]
 sortRows _ _ [] = []
@@ -432,24 +462,41 @@ resolvedWidth sizes contentWs stored i =
            in if saved > 0 then max base saved else base
         ColContent -> if saved > 0 then max contentW saved else contentW
 
+-- Width floor a column cannot shrink under: its declared fixed width, else
+-- its content minimum. Shared by colSizing and the resize-drag clamp so a
+-- dragged or stored width never wraps the cell text.
+colFloor :: [ColSize] -> [Float] -> Int -> Float
+colFloor sizes contentWs i = case listAt sizes i ColContent of
+  ColFixed f -> max minColW f
+  _ -> max minColW (listAt contentWs i minColW)
+
 colSizing :: Bool -> Bool -> [ColSize] -> [Float] -> [Float] -> Int -> Sizing
 colSizing fillInner hasStretch sizes contentWs stored i =
   let saved = listAt stored i 0
-      contentW = max minColW (listAt contentWs i minColW)
-   in if saved > 0
-        then Fixed (max minColW saved)
-        else case listAt sizes i ColContent of
-          ColFixed f -> Fixed (max minColW f)
-          ColStretch -> if fillInner then Grow 1 else Fixed contentW
-          ColContent ->
-            if fillInner && not hasStretch
-              then Grow 1
-              else Fixed contentW
+      floorW = colFloor sizes contentWs i
+   in case listAt sizes i ColContent of
+        ColFixed _ -> Fixed (max floorW saved)
+        ColStretch
+          | saved > 0 -> Fixed (max floorW saved)
+          | fillInner -> Grow 1
+          | otherwise -> Fixed floorW
+        ColContent
+          | saved > 0 -> Fixed (max floorW saved)
+          | fillInner && not hasStretch -> Grow 1
+          | otherwise -> Fixed floorW
 
 colBoxLayout :: Sizing -> Float -> Layout
 colBoxLayout sizing minCol =
-  let base = tight $ defaultLayout {layoutGap = 0, layoutMinW = minCol}
-   in case sizing of
+  let base =
+        tight $
+          defaultLayout
+            { layoutGap = 0
+            , layoutMinW = minCol
+            , -- Columns stretch to the row height so every cell's background
+              -- and borders span the full row even when one cell wraps.
+              layoutHeight = Grow 1
+            }
+    in case sizing of
         Fixed w -> base {layoutWidth = Fixed w, layoutMaxW = w}
         Grow g -> base {layoutWidth = Grow g}
         _ -> base {layoutWidth = Fit}
@@ -585,7 +632,14 @@ tableCfg cfg outerLayout key cols rows curSort =
         dragW0 = IM.findWithDefault 0 (slotKey slotDragW stateKey) (storeFloat st0)
         mx = v2X (inputMousePos inp)
         resizing = isResizeDrag drag0 && inputMouseDown inp
-        widths1 = if resizing then setAt (dragCol drag0) (max minColW (dragW0 + mx - dragX0)) widths0 else widths0
+        -- A drag cannot push a column under its colFloor: the column reserved
+        -- that much space for its text, and going under it wraps the cell and
+        -- drags the whole row taller.
+        dragMinCol = colFloor sizes contentWs
+        widths1 =
+          if resizing
+            then setAt (dragCol drag0) (max (dragMinCol (dragCol drag0)) (dragW0 + mx - dragX0)) widths0
+            else widths0
     when (widths1 /= widths0) $ uiIO $ writeColW ctx stateKey widths1
     let hasStretch = tableStretchN n sizes
         vis = visibleCols order0 hidden0

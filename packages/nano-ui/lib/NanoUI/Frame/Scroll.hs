@@ -39,7 +39,7 @@ import NanoUI.Frame.TextEdit
 import NanoUI.Store (storeText)
 import NanoUI.Types (HostProfile, isCellHost)
 import qualified NanoUI.Widgets.TextBuffer as TB
-import NanoUI.Id (WidgetId, hashWidgetId)
+import NanoUI.Id (WidgetId)
 import NanoUI.Input (Input (..), inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased, inputScroll)
 import NanoUI.Layout.Arena
   ( DirTag (..)
@@ -83,7 +83,7 @@ import NanoUI.Frame.Scroll.Geometry
   , ScrollConfig (..)
   , ScrollPolicy (..)
   )
-import NanoUI.Frame.Hit (ancestorScrollShift, findNodeByWidgetId, topmostModalAtMouse, topmostOverlayAtMouse)
+import NanoUI.Frame.Hit (findNodeByWidgetId, topmostModalAtMouse, topmostOverlayAtMouse)
 
 scrollLineFor :: HostProfile -> Float
 scrollLineFor host = if isCellHost host then 1 else scrollLine
@@ -196,15 +196,7 @@ updateScrollWheel ctx inp = do
         wid <- getWidgetId (ctxNodeArena ctx) idx
         void (tryApplyScrollWheelDelta ctx wid scroll)
         applyCrossAxisScroll ctx idx scroll
-      Nothing -> do
-        focus <- readIORef (ctxFocusId ctx)
-        if hashWidgetId focus == 0
-          then pure ()
-          else do
-            mWid <- findScrollOwningWidget ctx focus
-            case mWid of
-              Just wid -> void (tryApplyScrollWheelDelta ctx wid scroll)
-              Nothing -> pure ()
+      Nothing -> pure ()
 
 -- Nested 2D: apply the unused axis to a paired scroller in the same panel.
 -- Do not walk past panel/window/modal into the page scroller.
@@ -266,25 +258,6 @@ findOppositeScrollDescendant ctx idx childDir = goChildren idx
             Nothing -> do
               ns <- getNextSibling (ctxNodeArena ctx) ci
               go ns
-
--- Nested scrollers take the wheel only while hovered or while they own focus.
--- No leftover chain to the parent at a limit.
-findScrollOwningWidget :: Context -> WidgetId -> IO (Maybe WidgetId)
-findScrollOwningWidget ctx wid = do
-  mIdx <- findNodeByWidgetId ctx wid
-  case mIdx of
-    Nothing -> pure Nothing
-    Just idx -> walkUp idx
-  where
-    walkUp i
-      | i < 0 = pure Nothing
-      | otherwise = do
-          nt <- getNodeType (ctxNodeArena ctx) i
-          if isScrollNode nt || nt == NodeTextArea
-            then Just <$> getWidgetId (ctxNodeArena ctx) i
-            else do
-              p <- getParent (ctxNodeArena ctx) i
-              walkUp p
 
 tryApplyScrollWheelDelta :: Context -> WidgetId -> V2 -> IO Bool
 tryApplyScrollWheelDelta ctx wid scroll = do
@@ -486,12 +459,12 @@ scrollHitClip ctx idx nt parentClip = do
           pure (rectIntersect parentClip (Rect x y w h))
         else pure (Just parentClip)
 
--- Layout position plus ancestor scroll shifts (before applyScrollOffsets runs).
+-- | Node rect in screen space, for wheel / thumb / drag hit-testing. Arena
+-- rects are already baked to visual coordinates by applyScrollOffsets at the
+-- end of every frame; re-applying ancestor scroll shifts here double-counts
+-- them and makes hit-testing drift by the scroll offset after any scroll.
 getScrollVisualRect :: Context -> NodeIdx -> IO (Float, Float, Float, Float)
-getScrollVisualRect ctx idx = do
-  (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-  (dx, dy) <- ancestorScrollShift ctx idx
-  pure (x + dx, y + dy, w, h)
+getScrollVisualRect ctx idx = getRect (ctxNodeArena ctx) idx
 
 updateScrollDrag :: Context -> Input -> IO ()
 updateScrollDrag ctx inp = do

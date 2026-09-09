@@ -34,6 +34,22 @@ float nano_ui_window_display_scale(SDL_Window *window)
     return scale;
 }
 
+int nano_ui_window_refresh_rate(SDL_Window *window)
+{
+    if (!window) {
+        return 0;
+    }
+    SDL_DisplayID id = SDL_GetDisplayForWindow(window);
+    if (!id) {
+        return 0;
+    }
+    const SDL_DisplayMode *mode = SDL_GetCurrentDisplayMode(id);
+    if (!mode) {
+        return 0;
+    }
+    return mode->refresh_rate > 0 ? mode->refresh_rate : 0;
+}
+
 bool nano_ui_window_logical_size(
     SDL_Window *window,
     float scale,
@@ -282,4 +298,21 @@ bool nano_ui_save_screenshot(SDL_Renderer *renderer, const char *path)
     bool ok = SDL_SaveBMP(surface, path);
     SDL_DestroySurface(surface);
     return ok;
+}
+
+bool nano_ui_backbuffer_persists(SDL_Renderer *renderer)
+{
+    if (!renderer) {
+        return false;
+    }
+    /* A clip-scoped final blit relies on the backbuffer keeping the last
+     * presented frame outside the damaged rect. SDL only guarantees that
+     * for the software renderer, whose "backbuffer" is a plain surface
+     * that present copies from. GPU swapchains are free to discard. */
+    SDL_PropertiesID props = SDL_GetRendererProperties(renderer);
+    if (!props) {
+        return false;
+    }
+    const char *name = SDL_GetRendererName(renderer);
+    return name && SDL_strcasecmp(name, "software") == 0;
 }

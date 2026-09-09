@@ -152,10 +152,20 @@ runSdlSession options ctx setup shouldQuit drawFn =
                 animating <- anyAnimating c
                 editing <- textFieldActive c
                 dirtyWait <- isDirty c
-                if sdlContinuous env || wantDebug || animating || dirtyWait
+                -- When the last frame presented with vsync on, a 0 timeout is
+                -- safe and smooth: the vsync present throttles the loop,
+                -- keeping animations frame-locked. With vsync off the present
+                -- returns immediately, so a live in-view animation would spin
+                -- at max speed (whole-screen flicker); pace those at
+                -- animateTimeout instead. When frames skip (empty damage,
+                -- e.g. an animation that scrolled out of view), a 0 timeout
+                -- would busy-spin, so pace those at animateTimeout too.
+                lastPresented <- readIORef (sdlLastPresented env)
+                let refreshMs = max 1 (floor (sdlRefreshPeriod env * 1000))
+                if sdlContinuous env || wantDebug || dirtyWait || (animating && lastPresented && sdlVsync env)
                   then pure 0
-                  else if wasAnim || editing
-                    then pure animateTimeout
+                  else if wasAnim || animating || editing
+                    then pure (if sdlVsync env then animateTimeout else refreshMs)
                     else if debugActive
                       then pure debugHudTimeout
                       else pure (-1)
@@ -184,6 +194,7 @@ runSdlSession options ctx setup shouldQuit drawFn =
             , sdSkip          = \_ _ -> noteSkip (sdlDebug env)
             , sdOnCursor      = \c inpSynced -> syncPointerCursor (sdlCursors env) c inpSynced
             , sdNoteLoop      = noteLoop (sdlDebug env)
+            , sdAlignSec      = sdlRefreshPeriod env
             , sdShouldQuit    = shouldQuit
             , sdClickDistance = 5.0
             , sdClickTime     = 0.4

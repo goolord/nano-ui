@@ -76,6 +76,9 @@ import NanoUI.Term.Notcurses (ncBlitCells, ncRead, ncSize, withNotcurses)
 animateTimeout :: Int
 animateTimeout = 16
 
+animateTimeoutSec :: Double
+animateTimeoutSec = fromIntegral animateTimeout / 1000
+
 idleBlock :: Int
 idleBlock = -1
 
@@ -219,6 +222,7 @@ termMainLoop ctx shouldQuit runOnce getSize readEvents present = do
           , sdSkip          = \_ _ -> noteSkip debugRef
           , sdOnCursor      = \_ _ -> pure ()
           , sdNoteLoop      = noteLoop debugRef
+          , sdAlignSec      = animateTimeoutSec
           , sdShouldQuit    = shouldQuit
           , sdClickDistance = 1.5
           , sdClickTime     = 0.4

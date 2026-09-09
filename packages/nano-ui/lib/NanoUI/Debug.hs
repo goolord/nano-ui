@@ -17,6 +17,7 @@ module NanoUI.Debug
   , isDebugActive
   , takeDebugLive
   , noteDebugPresent
+  , presentRate
   , makeCoreDebugSnapshot
   , formatFpsRows
   , formatDrawRows
@@ -219,6 +220,8 @@ data DebugSampler = DebugSampler
   , smIndices      :: !Int
   , smCmds         :: !Int
   , smWantFrame    :: !Bool
+  , smRatePresents :: !Word64
+  , smRateT        :: !Double
   }
 
 type DebugSamplerRef = IORef DebugSampler
@@ -243,6 +246,8 @@ newDebugSampler = do
       , smIndices = 0
       , smCmds = 0
       , smWantFrame = False
+      , smRatePresents = 0
+      , smRateT = now
       }
 
 noteDebugLoop :: DebugSamplerRef -> Float -> IO ()
@@ -289,27 +294,37 @@ noteDebugPresent ref uiMs renderMs presentMs frameMs verts indices cmds = do
         instantFps =
           if dt > 1e-4 && dt < 0.25
             then 1 / dt
-            else if frameMs > 0.001
-                   then 1000 / frameMs
-                   else 0
+            else 0
         ema' =
           if instantFps > 0
             then if smPresentEma s <= 0 then instantFps else blend (smPresentEma s) instantFps
             else smPresentEma s
      in ( s
-            { smPresentEma = ema'
-            , smLastPresentT = now
-            , smPresents = smPresents s + 1
-            , smUiMs = uiMs
-            , smRenderMs = renderMs
-            , smPresentMs = presentMs
-            , smFrameMs = frameMs
-            , smVerts = verts
-            , smIndices = indices
-            , smCmds = cmds
-            }
+             { smPresentEma = ema'
+             , smLastPresentT = now
+             , smPresents = smPresents s + 1
+             , smUiMs = uiMs
+             , smRenderMs = renderMs
+             , smPresentMs = presentMs
+             , smFrameMs = frameMs
+             , smVerts = verts
+             , smIndices = indices
+             , smCmds = cmds
+             }
         , ()
         )
+
+-- | Actual presents per second over the window since the previous snapshot
+-- refresh. Unlike the per-present EMA this stays truthful when presents are
+-- sparse (idle app: ~4/s with the HUD open, not the theoretical fps of one
+-- fast frame).
+presentRate :: Double -> DebugSampler -> (DebugSampler, Double)
+presentRate now s =
+  let elapsed = now - smRateT s
+      rate
+        | elapsed > 1e-3 = fromIntegral (smPresents s - smRatePresents s) / elapsed
+        | otherwise = 0
+   in (s {smRatePresents = smPresents s, smRateT = now}, rate)
 
 makeCoreDebugSnapshot :: DebugSampler -> Float -> Float -> Float -> Float -> RtsStatsSnapshot -> CoreDebugSnapshot
 makeCoreDebugSnapshot s winW winH mouseX mouseY rts =

@@ -48,6 +48,8 @@ module NanoUI.WidgetText
   , textNodeStripe
   , tableHeaderLabel
   , tableHeaderDisplayText
+  , tableSortMarkOf
+  , tableSortBlank
   , isCloseButtonStyle
   , isTabButtonStyle
   , isTableHeaderStyle
@@ -353,16 +355,28 @@ tableSortMark False False = "  ▲"
 tableHeaderLabel :: Bool -> Text -> Text
 tableHeaderLabel terminal hdr = hdr <> tableSortReserve terminal
 
+-- | Sort direction encoded for a table-header style. Lives in bits 16-17: the
+-- low nibbles are the font fields, and a mark value of 1 or 2 in bit 0-1 used
+-- to flip the header's font variant (heading / muted), which blanked the
+-- arrow glyph.
+tableSortMarkOf :: Int -> Int
+tableSortMarkOf styleIdx = (styleIdx `shiftR` 16) .&. 0x03
+
+-- | Blank reserve slot (spaces only). Non-terminal hosts draw the sort mark
+-- as a triangle over this slot, so the ▲/▼ codepoint never enters measured
+-- or laid-out text (the pruned UI font does not carry it).
+tableSortBlank :: Bool -> Text
+tableSortBlank = T.map (const ' ') . tableSortReserve
+
 tableHeaderDisplayText :: Bool -> Int -> Text -> Text
 tableHeaderDisplayText terminal styleIdx txt =
   let full = txt
       reserve = tableSortReserve terminal
       title = fromMaybe full (T.stripSuffix reserve full)
-      blank = T.map (const ' ') reserve
-   in case buttonVisualStyle styleIdx of
-        1 -> title <> tableSortMark terminal False
-        2 -> title <> tableSortMark terminal True
-        _ -> title <> blank
+   in case tableSortMarkOf styleIdx of
+        1 | terminal -> title <> tableSortMark terminal False
+        2 | terminal -> title <> tableSortMark terminal True
+        _ -> title <> tableSortBlank terminal
 
 -- Type flags live in bits 29-31 so visual style and tab index stay in the low bits.
 buttonFlagClose :: Int

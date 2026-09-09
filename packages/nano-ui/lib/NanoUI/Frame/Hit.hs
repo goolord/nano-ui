@@ -15,7 +15,6 @@ module NanoUI.Frame.Hit
   , topmostWindowAtMouse
   , widgetOverlayAllowed
   , widgetIdInModal
-  , ancestorScrollShift
   , scrollHitRect
   , nodePointVisible
   , nodeClippedHit
@@ -23,22 +22,18 @@ module NanoUI.Frame.Hit
   ) where
 
 import Data.Maybe (isJust)
-import NanoUI.Context (Context (..), getPrevRect, getScrollOffset, getPrevClipRect)
+import NanoUI.Context (Context (..), getPrevRect, getPrevClipRect)
 import NanoUI.Types (HostProfile, isCellHost)
 import NanoUI.Id (WidgetId)
 import NanoUI.Layout.Arena
-  ( DirTag (..)
-  , NodeIdx
+  ( NodeIdx
   , NodeType (NodeModal, NodePopup, NodeScrollContainer, NodeWindow)
   , findNodeRevM
-  , getDirection
   , getClipRect
   , getNodeType
   , getParent
   , getRect
   , getWidgetId
-  , isFloatingNode
-  , isScrollNode
   , lookupNodeByKey
   , lookupNodeByWidgetId
   )
@@ -129,24 +124,6 @@ widgetIdInModal ctx wid = do
     Nothing -> pure False
     Just idx -> nodeInTopmostModal ctx idx
 
--- Prev rects are layout space. Floating nodes are window space after placePopups.
-ancestorScrollShift :: Context -> NodeIdx -> IO (Float, Float)
-ancestorScrollShift ctx idx = go idx (0, 0)
-  where
-    go i (sx, sy)
-      | i <= 0 = pure (sx, sy)
-      | otherwise = do
-          nt <- getNodeType (ctxNodeArena ctx) i
-          if isFloatingNode nt
-            then pure (sx, sy)
-            else do
-              p <- getParent (ctxNodeArena ctx) i
-              if p < 0
-                then pure (sx, sy)
-                else do
-                  (sx', sy') <- parentScrollShift ctx p (sx, sy)
-                  go p (sx', sy')
-
 -- Prev rects are visual space (snapshot after applyScrollOffsets).
 scrollHitRect :: Context -> WidgetId -> IO (Maybe Rect)
 scrollHitRect = getPrevRect
@@ -216,17 +193,3 @@ scrollViewportGate host nt =
     NodeScrollContainer -> True
     NodeModal -> isCellHost host
     _ -> False
-
-parentScrollShift :: Context -> NodeIdx -> (Float, Float) -> IO (Float, Float)
-parentScrollShift ctx p (sx, sy) = do
-  nt <- getNodeType (ctxNodeArena ctx) p
-  if isScrollNode nt
-    then do
-      wid <- getWidgetId (ctxNodeArena ctx) p
-      off <- getScrollOffset ctx wid
-      dir <- getDirection (ctxNodeArena ctx) p
-      pure $
-        case dir of
-          DirColumn -> (sx, sy - off)
-          DirRow -> (sx - off, sy)
-    else pure (sx, sy)

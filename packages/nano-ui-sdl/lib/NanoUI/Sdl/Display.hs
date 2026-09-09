@@ -4,6 +4,7 @@ module NanoUI.Sdl.Display
   , initSdlHints
   , initBenchHints
   , queryWindowDisplayScale
+  , queryWindowRefreshHz
   , queryWindowLogicalSize
   , queryMouseWindowPos
   , setRenderScale
@@ -14,6 +15,7 @@ module NanoUI.Sdl.Display
   , initRefreshEvent
   , pushRefreshEvent
   , readRefreshEventType
+  , backbufferPersists
   , retainCreate
   , retainBegin
   , retainBlit
@@ -50,6 +52,13 @@ queryWindowDisplayScale :: Ptr SDL_Window -> IO Float
 queryWindowDisplayScale win = do
   s <- windowDisplayScaleC win
   pure (if s > 0 then realToFrac s else defaultUiScale)
+
+-- | Vertical refresh rate of the window's current display mode, in Hz
+-- (0 when unavailable).
+queryWindowRefreshHz :: Ptr SDL_Window -> IO Int
+queryWindowRefreshHz win = do
+  hz <- windowRefreshRateC win
+  pure (max 0 (fromIntegral hz))
 
 queryWindowLogicalSize :: Ptr SDL_Window -> Float -> IO Size
 queryWindowLogicalSize win scale =
@@ -113,6 +122,9 @@ foreign import ccall unsafe "nano_ui_set_render_vsync"
 
 foreign import ccall unsafe "nano_ui_window_display_scale"
   windowDisplayScaleC :: Ptr SDL_Window -> IO CFloat
+
+foreign import ccall unsafe "nano_ui_window_refresh_rate"
+  windowRefreshRateC :: Ptr SDL_Window -> IO CInt
 
 foreign import ccall unsafe "nano_ui_window_logical_size"
   windowLogicalSizeC ::
@@ -182,6 +194,9 @@ foreign import ccall unsafe "nano_ui_retain_blit_rect"
 foreign import ccall unsafe "nano_ui_destroy_texture"
   retainDestroyC :: Ptr () -> IO ()
 
+foreign import ccall unsafe "nano_ui_backbuffer_persists"
+  backbufferPersistsC :: Ptr SDL_Renderer -> IO Bool
+
 retainDestroy :: Ptr () -> IO ()
 retainDestroy = retainDestroyC
 
@@ -199,3 +214,9 @@ retainBlitRect ren tex sx sy sw sh dx dy =
   retainBlitRectC ren tex (cf sx) (cf sy) (cf sw) (cf sh) (cf dx) (cf dy)
   where
     cf = realToFrac :: Float -> CFloat
+
+-- | True when the renderer's backbuffer keeps its contents across
+-- 'SDL_RenderPresent' (the SDL software renderer). Only then may the final
+-- blit skip undamaged regions; GPU swapchains are free to discard.
+backbufferPersists :: Ptr SDL_Renderer -> IO Bool
+backbufferPersists = backbufferPersistsC

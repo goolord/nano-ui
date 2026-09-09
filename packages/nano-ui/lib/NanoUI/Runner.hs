@@ -25,7 +25,9 @@ module NanoUI.Runner
   , runSessionLoop
   ) where
 
+import Control.Concurrent (threadDelay)
 import Control.Exception (finally)
+import Control.Monad (when)
 import Data.IORef
   ( IORef
   , atomicModifyIORef'
@@ -64,6 +66,28 @@ stepDeltaTime lastT = do
   now <- getMonotonicTime
   let !dt = min maxFrameDt (realToFrac (now - lastT))
   pure (now, dt)
+
+-- | Wind forward to the next frame boundary after a timed-out event wait.
+-- When pacing is active the backend requests a wait of ~period, but a one-shot
+-- sleep lets frame starts drift by the scheduler's timer granularity (and land
+-- late whenever the event waiter overruns), which reads as choppy animation on
+-- uneven frame times. Sleep the bulk, then busy-wind the ≤1ms tail so frame
+-- starts fall on uniform slices of the pacing period. The spin only runs when
+-- an animation is actively presenting without vsync, and is bounded to about a
+-- millisecond.
+alignFrameStart :: Double -> Double -> IO ()
+alignFrameStart periodSec lastT = do
+  t0 <- getMonotonicTime
+  let target = lastT + periodSec
+      remain = target - t0
+      bulkUs = max 0 (round ((remain - tailSlack) * 1e6))
+  when (bulkUs > 0) (threadDelay bulkUs)
+  fullSpin target
+  where
+    tailSlack = 1e-3
+    fullSpin target = do
+      now <- getMonotonicTime
+      when (now < target) (fullSpin target)
 
 -- | State for multi-click detection (double/triple click).
 newtype ClickTracker = ClickTracker (IORef (Double, V2, Int))
@@ -159,6 +183,11 @@ data SessionDriver ev = SessionDriver
     -- ^ Backend-specific display synchronization (window dimensions, DPI scale).
   , sdWaitTimeout   :: Context -> Bool -> IO Int
     -- ^ Compute event wait timeout in milliseconds (-1 = block, 0 = immediate/non-blocking, >0 = tick timeout).
+  , sdAlignSec      :: Double
+    -- ^ Frame pacing period in seconds for the timed-out wait path. Frame
+    -- starts are wound onto a uniform grid of this period so animation
+    -- cadence matches the host, instead of drifting with the event waiter's
+    -- timer granularity.
   , sdShouldDraw    :: Context -> Input -> Input -> Bool -> IO Bool
     -- ^ Decision predicate: (ctx, prevInp, curInp, wasAnimating) -> should this frame be rendered?
   , sdDraw          :: Context -> Input -> Bool -> IO (Bool, Input)
@@ -223,7 +252,19 @@ runSessionLoop drv ctx0 inp0 = do
                   polled <- sdPollEvents drv
                   if not (null polled)
                     then pure polled
-                    else sdWaitEvents drv timeout
+                    else do
+                      evs <- sdWaitEvents drv timeout
+                      if not (null evs)
+                        then pure evs
+                        else do
+                          -- No events woke us: the timer fired, so wind onto
+                          -- the frame boundary before stamping this frame's
+                          -- start time. Keeps frame starts on uniform slices
+                          -- of the pacing period (their display-cadence)
+                          -- instead of drifting with the event waiter's own
+                          -- granularity.
+                          alignFrameStart (sdAlignSec drv) lastT
+                          pure []
                 else sdWaitEvents drv (-1)
           else pure queued
 
@@ -250,9 +291,14 @@ runSessionLoop drv ctx0 inp0 = do
                 shouldDraw <- if pendingDirty
                   then pure True
                   else sdShouldDraw drv ctx' prevInp inpSynced wasAnim
+                -- Force a full present only on the settle frame where an
+                -- animation just finished (wasAnim && not animNow). Passing
+                -- wasAnim alone kept every frame of a running animation at
+                -- DamageFull, defeating clip damage for animated widgets.
+                animNow <- anyAnimating ctx'
                 synced <- if shouldDraw
                   then do
-                    (dirtyOut, s) <- sdDraw drv ctx' inpSynced wasAnim
+                    (dirtyOut, s) <- sdDraw drv ctx' inpSynced (wasAnim && not animNow)
                     writeIORef pendingDirtyRef dirtyOut
                     writeIORef prevInpRef s
                     pure s

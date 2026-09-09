@@ -88,6 +88,7 @@ data SdlEvent
   | EvScroll V2
   | EvDrop DropEvent
   | EvRefresh
+  | EvWindowRedraw
   deriving (Eq, Show)
 
 singletonEv :: SdlEvent -> SmallArray SdlEvent
@@ -138,6 +139,12 @@ decodeEvent p = do
         -- Pixel size changes are ignored here; syncDisplay re-queries logical size.
         519 -> pure (singletonEv EvDisplayScale)
         532 -> pure (singletonEv EvDisplayScale)
+        -- SDL_EVENT_WINDOW_EXPOSED (0x204) / RESTORED (0x20B): the window
+        -- manager damaged our window surface (occlusion, compositor effects,
+        -- restore). The backbuffer contents are gone; the next present must
+        -- be full or stale regions flash.
+        516 -> pure (singletonEv EvWindowRedraw)
+        523 -> pure (singletonEv EvWindowRedraw)
         768 -> keyDown p'
         771 -> textInput p'
         1024 -> mouseMotion p'
@@ -333,6 +340,7 @@ applyEvent inp ev =
     EvScroll delta -> inp {inputScroll = v2Add (inputScroll inp) delta}
     EvDrop dropEv -> inp {inputDrops = V.snoc (inputDrops inp) dropEv}
     EvRefresh -> inp
+    EvWindowRedraw -> inp {inputWindowRedraw = True}
 
 isButtonEdge :: SdlEvent -> Bool
 isButtonEdge ev =

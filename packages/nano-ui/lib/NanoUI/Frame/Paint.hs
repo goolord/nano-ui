@@ -100,6 +100,8 @@ import NanoUI.WidgetText
   ( buttonFlagsFromStyle
   , buttonVisualStyle
   , searchFieldIconRects
+  , tableSortBlank
+  , tableSortMarkOf
   , searchFieldTextClip
   , selectChevronCenterX
   , tableStripeColor
@@ -569,15 +571,35 @@ lowerNodeVisible ctx occluders idx nt x y w h rect fm theme terminal da =
           fstyle  = textNodeFontStyle si
           isBaseSans = fontSizeVal <= 0 && fweight == WeightNormal && fstyle == FontStyleNormal && fvar == FontRegular
           isBaseMono = fontSizeVal <= 0 && fweight == WeightNormal && fstyle == FontStyleNormal && fvar == FontMono
+          sortMark = if isTable then tableSortMarkOf si else 0
       fm' <-
         if isBaseSans
           then pure (ctxFontMetrics ctx)
           else if isBaseMono
             then pure (ctxMonoFontMetrics ctx)
             else fst <$> ctxResolveFont ctx fontSizeVal fweight fstyle fvar
-      forM_ placements $ \(txt, px, py, _, _) ->
+      sortSlotW <-
+        if isTable && sortMark /= 0 && not terminal
+          then fst <$> ctxMeasureText ctx (tableSortBlank False)
+          else pure 0
+      let lastLine = length placements - 1
+      forM_ (zip [0 :: Int ..] placements) $ \(i, (txt, px, py, tw, th)) ->
         unless (T.null txt) $ do
           pushText da fm' px py txt widgetFg
+          -- Table sort arrow: the label text ends in the blank reserve slot
+          -- (the ▲/▼ codepoint is not in the pruned UI font), so paint the
+          -- mark as a triangle centered in that slot — once, on the line
+          -- that carries the slot.
+          when (isTable && sortMark /= 0 && not terminal && i == lastLine) $
+            drawSortTriangle da (px + tw - sortSlotW / 2) (py + th / 2) (sortMark == 2) widgetFg
+
+-- | Sort direction triangle for a table header: up when ascending, down when
+-- descending, centered on the label line in the header's reserved slot.
+drawSortTriangle :: DrawArena -> Float -> Float -> Bool -> Color -> IO ()
+drawSortTriangle da cx cy down col =
+  if down
+    then pushFilledTriangle da (cx - 5) (cy - 3.5) (cx + 5) (cy - 3.5) cx (cy + 3.5) col
+    else pushFilledTriangle da (cx - 5) (cy + 3.5) (cx + 5) (cy + 3.5) cx (cy - 3.5) col
 
 paintTextFieldFrame :: DrawArena -> Theme -> Style -> Bool -> Rect -> IO ()
 paintTextFieldFrame da theme style focus fieldRect = do

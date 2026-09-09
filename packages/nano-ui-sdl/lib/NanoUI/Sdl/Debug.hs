@@ -103,7 +103,7 @@ readSdlDebug :: SamplerRef -> Size -> V2 -> FilePath -> Float -> Text -> Bool ->
 readSdlDebug ref (Size ww wh) (V2 mx my) fontPath scale renderer vsync = do
   s <- readIORef ref
   now <- getMonotonicTime
-  (refresh, cur) <-
+  (refresh, _cur) <-
     atomicModifyIORef' (sdsSampler s) $ \curSampler ->
       let elapsed = now - smLastDebugT curSampler
           refresh = smLastDebugT curSampler <= 0 || elapsed >= debugRefreshSec
@@ -112,7 +112,17 @@ readSdlDebug ref (Size ww wh) (V2 mx my) fontPath scale renderer vsync = do
     then readIORef (sdsSnapshot s)
     else do
       rts <- readRtsSnapshot
-      let core = makeCoreDebugSnapshot cur ww wh mx my rts
+      (rate, cur2) <-
+        atomicModifyIORef' (sdsSampler s) $ \curSampler ->
+          let (rated, rate) = D.presentRate now curSampler
+              s' =
+                rated
+                  { smLastDebugT = now
+                  , smWantFrame = False
+                  , smLastQueryT = now
+                  }
+           in (s', (rate, s'))
+      let core = (makeCoreDebugSnapshot cur2 ww wh mx my rts) {dbgPresentFps = rate}
           snap =
             SdlDebugSnapshot
               { dbgCore     = core
@@ -121,8 +131,6 @@ readSdlDebug ref (Size ww wh) (V2 mx my) fontPath scale renderer vsync = do
               , dbgRenderer = renderer
               , dbgVsync    = vsync
               }
-      atomicModifyIORef' (sdsSampler s) $ \curSampler ->
-        (curSampler {smLastDebugT = now, smWantFrame = False, smLastQueryT = now}, ())
       writeIORef (sdsSnapshot s) snap
       traceFrame (dbgCore snap)
       pure snap

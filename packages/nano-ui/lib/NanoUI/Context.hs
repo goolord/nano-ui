@@ -102,6 +102,8 @@ module NanoUI.Context
   , getPrevRects
   , getPrevClips
   , setPrevRectsAndClips
+  , getPrevNodeTexts
+  , setPrevNodeTexts
   , atlasTextureId
   , registerImage
   , registerImages
@@ -976,6 +978,16 @@ setPrevRectsAndClips :: Context -> IntMap Rect -> IntMap Rect -> IO ()
 setPrevRectsAndClips ctx rects clips =
   modifyIORef' (ctxDamageState ctx) $ \ds ->
     ds {dsPrevRects = rects, dsPrevClips = clips}
+
+{-# INLINE getPrevNodeTexts #-}
+getPrevNodeTexts :: Context -> IO (IntMap Text)
+getPrevNodeTexts ctx = dsPrevNodeTexts <$> readIORef (ctxDamageState ctx)
+
+{-# INLINE setPrevNodeTexts #-}
+setPrevNodeTexts :: Context -> IntMap Text -> IO ()
+setPrevNodeTexts ctx texts =
+  modifyIORef' (ctxDamageState ctx) $ \ds ->
+    ds {dsPrevNodeTexts = texts}
 
 {-# INLINE getPrevRectByKey #-}
 getPrevRectByKey :: Context -> Int -> IO (Maybe Rect)

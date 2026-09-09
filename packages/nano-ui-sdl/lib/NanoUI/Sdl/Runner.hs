@@ -22,6 +22,10 @@ import NanoUI
   , NanoUI
   , Size (..)
   , V2 (..)
+  , rectH
+  , rectW
+  , rectX
+  , rectY
   , themeWindow
   )
 import Effectful (Eff, IOE, type (:>))
@@ -31,7 +35,6 @@ import NanoUI.Testing
   , DrawData
   , Layer (..)
   , Ui
-  , anyAnimating
   , ctxTheme
   , damageIsEmpty
   , runEff
@@ -52,11 +55,13 @@ import NanoUI.Sdl.Debug
   )
 import NanoUI.Sdl.Cursor (syncPointerCursor)
 import NanoUI.Sdl.Display
-  ( queryMouseWindowPos
+  ( backbufferPersists
+  , queryMouseWindowPos
   , queryRendererName
   , queryWindowLogicalSize
   , retainBegin
   , retainBlit
+  , retainBlitRect
   , retainCreate
   , retainDestroy
   , windowToLogicalCoords
@@ -125,15 +130,17 @@ finishDraw ctx env inp forceFull t0 t1 drawData dirtyAfterUi = do
       pw = max 1 (round (lw * scale))
       ph = max 1 (round (lh * scale))
   (tex, retainNew) <- ensureRetain env pw ph scale
-  animating <- anyAnimating ctx
+  -- Frame damage from writeDamage is authoritative: a live animation whose
+  -- key is out of view or scroll-clipped produces empty damage, and forcing
+  -- DamageFull here would turn every skip frame into a full present. A
+  -- window redraw event (expose/restore) is the exception: the backbuffer
+  -- is gone, so the next present must be full.
   let damage0 =
-        if forceFull || retainNew || sdlContinuous env
+        if forceFull || retainNew || sdlContinuous env || inputWindowRedraw inp
           then DamageFull
           else snapDamage scale dmg0
-      damage =
-        if damageIsEmpty damage0 && animating
-          then DamageFull
-          else damage0
+      damage = damage0
+  writeIORef (sdlLastPresented env) False
   if damageIsEmpty damage || lw <= 0 || lh <= 0
     then do
       noteSkip (sdlDebug env)
@@ -155,6 +162,7 @@ finishDraw ctx env inp forceFull t0 t1 drawData dirtyAfterUi = do
           presentMs = (t3 - t2) * 1000
           frameMs = (t3 - t0) * 1000
       notePresent (sdlDebug env) uiMs renderMs presentMs frameMs drawData
+      writeIORef (sdlLastPresented env) True
       pure (dirtyAfterUi, inp)
 
 ensureRetain :: SdlEnv -> Int -> Int -> Float -> IO (Ptr (), Bool)
@@ -174,7 +182,23 @@ ensureRetain env w h scale = do
       pure (tex', True)
 
 blitRetain :: Ptr SDL_Renderer -> Float -> Ptr () -> Damage -> IO Bool
-blitRetain ren _scale tex _damage = retainBlit ren tex
+blitRetain ren scale tex damage = do
+  persists <- backbufferPersists ren
+  if not persists
+    then retainBlit ren tex
+    else case damage of
+      DamageFull -> retainBlit ren tex
+      -- Blit only the damaged region: the retain texture and the
+      -- backbuffer are both device-pixel sized, so the snapped clip
+      -- (outward, in device pixels) maps 1:1 from src to dst. Safe only
+      -- because the software backbuffer persists across presents.
+      DamageClip r ->
+        let s = if scale > 0 then scale else 1
+            x0 = fromIntegral (floor (rectX r * s) :: Int) :: Float
+            y0 = fromIntegral (floor (rectY r * s) :: Int) :: Float
+            x1 = fromIntegral (ceiling ((rectX r + rectW r) * s) :: Int) :: Float
+            y1 = fromIntegral (ceiling ((rectY r + rectH r) * s) :: Int) :: Float
+         in retainBlitRect ren tex x0 y0 (x1 - x0) (y1 - y0) x0 y0
 
 askSdlEnv :: Ui :> es => Eff es (Maybe SdlEnv)
 askSdlEnv = askHost
