@@ -205,6 +205,9 @@ testSpecs =
   , TestSpec "tabs-state-persistence" False runTabsStatePersistenceTest
   , TestSpec "tabs-damage" False runTabsDamageTest
   , TestSpec "tabs-content-damage" False runTabsContentDamageTest
+  , TestSpec "tabs-in-panel-damage" False runTabsInPanelDamageTest
+  , TestSpec "panel-body-swap-damage" False runPanelBodySwapDamageTest
+    
   , TestSpec "host-slot" False runHostSlotTest
   , TestSpec "host-profile-gap" False runHostProfileGapTest
   , TestSpec "host-profile-measure" False runHostProfileMeasureTest
