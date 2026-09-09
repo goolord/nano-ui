@@ -172,6 +172,7 @@ module NanoUI.Context
   , startAnimation
   , startAnimationEase
   , startAnimationEaseDelay
+  , stopAnimation
   , startSpring
   , setAnimationValue
   , tickAnimations
@@ -1676,3 +1677,17 @@ getAnimationValue ctx wid = do
   case IM.lookup key (asAnimations as) of
     Just a -> pure (animationValue a)
     Nothing -> pure (IM.findWithDefault 0 key (asAnimRest as))
+
+{-# INLINE stopAnimation #-}
+-- | Stop the animation on @wid@ in place, freezing it at its current value.
+-- The frozen value stays readable via 'getAnimationValue'; the widget stops
+-- driving redraws and the context stops reporting as animating (unless other
+-- animations are still running). Stopping is idempotent.
+stopAnimation :: Context -> WidgetId -> IO ()
+stopAnimation ctx wid = do
+  val <- getAnimationValue ctx wid
+  let key = intKey wid
+  as <- readIORef (ctxAnimationState ctx)
+  if IM.member key (asAnimations as)
+    then settleKey ctx key val
+    else pure ()

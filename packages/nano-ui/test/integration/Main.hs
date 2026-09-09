@@ -134,6 +134,7 @@ testSpecs =
   , TestSpec "animation-damage" False runAnimationDamageTest
   , TestSpec "animation-delay" False runAnimationDelayTest
   , TestSpec "animation-stagger" False runAnimationStaggerTest
+  , TestSpec "animation-stop" False runAnimationStopTest
   , TestSpec "animation-shared-ctx" False runAnimationSharedCtxTest
   , TestSpec "animation-bezier" False runAnimationBezierTest
   , TestSpec "animation-spring" False runAnimationSpringTest

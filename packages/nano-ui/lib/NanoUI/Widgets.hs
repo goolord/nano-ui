@@ -183,6 +183,8 @@ module NanoUI.Widgets
   , animateToSpring
   , animateToA
   , animateToSpringA
+  , pulse
+  , keepAnimating
   , sliderValueText
   , textInputText
   , textInputTerminalText
@@ -349,6 +351,8 @@ import NanoUI.Widgets.Animate
   , animateToEaseDelay
   , animateToSpring
   , animateToSpringA
+  , pulse
+  , keepAnimating
   , useState
   , useFlag
   , useText
