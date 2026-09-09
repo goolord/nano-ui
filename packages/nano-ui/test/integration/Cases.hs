@@ -28,6 +28,10 @@ module Cases
   , runFlexShrinkTest
   , runGridTest
   , runGrowFitsWindowTest
+  , runGrowEqualSplitTest
+  , runGrowContentFloorTest
+  , runGrowLockCascadeTest
+  , runGrowEqualSplitHeightTest
   , runGrowWrapPushesSiblingTest
   , runHostProfileGapTest
   , runHostProfileMeasureTest
@@ -48,6 +52,7 @@ module Cases
   , runOverlayTest
   , runPanelPaintsTest
   , runPercentLayoutTest
+  , runPercentGapShrinkTest
   , runPointerCursorCheckboxTest
   , runPointerCursorTest
   , runReduceClickTest
@@ -581,6 +586,90 @@ runPercentLayoutTest ctx failed = do
   let Rect _ _ wa _ = respRect a
       Rect _ _ wb _ = respRect b
   assert failed (abs (wa - 50) <= 1 && abs (wb - 150) <= 1)
+
+-- | Percent children flex like CSS: two 50% columns plus a gap must give back
+-- the overflow so the pair lands exactly on the row width (equal halves, no
+-- spill past the row's right edge).
+runPercentGapShrinkTest :: Context -> IORef Int -> IO ()
+runPercentGapShrinkTest ctx failed = do
+  let inp = withInput 300 80
+      ui = rowWith (fixedW 206 . tight . gap 6) $ do
+        a <- labelEx (percent 50 . tight $ defaultLayout) "A"
+        b <- labelEx (percent 50 . tight $ defaultLayout) "B"
+        pure (a, b)
+  (a, b) <- warmup2 ctx inp ui
+  let Rect xa _ wa _ = respRect a
+      Rect xb _ wb _ = respRect b
+  assert failed (abs (wa - 100) <= 0.5 && abs (wb - 100) <= 0.5)
+  assert failed (abs (xb - (xa + wa + 6)) <= 0.5)
+
+-- | Grow children split the free space by factor with a min-content floor:
+-- two fillW labels with unequal text come out equal when both fit their share
+-- (instead of the old content + share-of-slack split). The row is fixed-width,
+-- so grow labels measure their full text (12px per char in this context).
+runGrowEqualSplitTest :: Context -> IORef Int -> IO ()
+runGrowEqualSplitTest ctx failed = do
+  let inp = withInput 210 40
+      ui = rowWith (fixedW 210 . tight . gap 0) $ do
+        a <- labelEx (fillW . tight $ defaultLayout) "A"
+        b <- labelEx (fillW . tight $ defaultLayout) "AAAAA"
+        pure (a, b)
+  (a, b) <- warmup2 ctx inp ui
+  let Rect _ _ wa _ = respRect a
+      Rect _ _ wb _ = respRect b
+  assert failed (abs (wa - 105) <= 0.5 && abs (wb - 105) <= 0.5)
+
+-- | The floor in action: a grow child whose content needs more than its share
+-- takes exactly its content width, and the sibling re-shares what is left.
+runGrowContentFloorTest :: Context -> IORef Int -> IO ()
+runGrowContentFloorTest ctx failed = do
+  let inp = withInput 200 40
+      ui = rowWith (fixedW 200 . tight . gap 0) $ do
+        a <- labelEx (fillW . tight $ defaultLayout) "A"
+        b <- labelEx (fillW . tight $ defaultLayout) (T.replicate 15 "A")
+        pure (a, b)
+  (a, b) <- warmup2 ctx inp ui
+  let Rect _ _ wa _ = respRect a
+      Rect _ _ wb _ = respRect b
+  assert failed (abs (wb - 180) <= 0.5)
+  assert failed (abs (wa - 20) <= 0.5)
+  assert failed (abs (wa + wb - 200) <= 0.5)
+
+-- | Multi-sweep cascade: locking the largest child shrinks the share pool,
+-- which must lock the middle child on a later sweep and re-share to the
+-- smallest. If the solver stopped after one sweep, the middle child would get
+-- 55 (half the remainder) instead of its 60 content size.
+runGrowLockCascadeTest :: Context -> IORef Int -> IO ()
+runGrowLockCascadeTest ctx failed = do
+  let inp = withInput 240 40
+      ui = rowWith (fixedW 240 . tight . gap 0) $ do
+        a <- labelEx (fillW . minW 12 . tight $ defaultLayout) "A"
+        b <- labelEx (fillW . minW 60 . tight $ defaultLayout) "A"
+        c <- labelEx (fillW . minW 130 . tight $ defaultLayout) "A"
+        pure (a, b, c)
+  (a, b, c) <- warmup2 ctx inp ui
+  let Rect _ _ wa _ = respRect a
+      Rect _ _ wb _ = respRect b
+      Rect _ _ wc _ = respRect c
+  assert failed (abs (wa - 50) <= 0.5)
+  assert failed (abs (wb - 60) <= 0.5)
+  assert failed (abs (wc - 130) <= 0.5)
+  assert failed (abs (wa + wb + wc - 240) <= 0.5)
+
+-- | The same min-content-floored equal split runs for the vertical axis:
+-- two fillH children of a fixed-height column come out equal. The spacers
+-- keep a non-zero width because prev-rect tracking skips zero-area rects.
+runGrowEqualSplitHeightTest :: Context -> IORef Int -> IO ()
+runGrowEqualSplitHeightTest ctx failed = do
+  let inp = withInput 60 200
+      ui = columnWith (fixedH 200 . tight . gap 0) $ do
+        a <- spacer (Fixed 10) (Grow 1)
+        b <- spacer (Fixed 10) (Grow 1)
+        pure (a, b)
+  (a, b) <- warmup2 ctx inp ui
+  let Rect _ _ _ ha = respRect a
+      Rect _ _ _ hb = respRect b
+  assert failed (abs (ha - 100) <= 0.5 && abs (hb - 100) <= 0.5)
 
 runLabelAlignEndTest :: Context -> IORef Int -> IO ()
 runLabelAlignEndTest _ failed = do

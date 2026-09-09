@@ -18,6 +18,7 @@ module NanoUI.Frame.Scroll.Geometry
   , scrollDefault1D
   , scrollVerticalAuto
   , scrollHorizontalAuto
+  , scrollHorizontalAlways
   , scrollVerticalHidden
   , scrollHorizontalHidden
   , scrollAxisGutter
@@ -116,6 +117,12 @@ scrollVerticalAuto = ScrollConfig ScrollNone ScrollAuto True
 
 scrollHorizontalAuto :: ScrollConfig
 scrollHorizontalAuto = ScrollConfig ScrollAuto ScrollNone True
+
+-- | Horizontal bar always shown and reserved (1D, no vertical bar). Used
+-- when the caller reserves the lane itself and needs the scroller's clip to
+-- agree with that reservation on every frame.
+scrollHorizontalAlways :: ScrollConfig
+scrollHorizontalAlways = ScrollConfig ScrollAlways ScrollNone True
 
 scrollVerticalHidden :: ScrollConfig
 scrollVerticalHidden = ScrollConfig ScrollNone ScrollHidden True

@@ -313,9 +313,10 @@ buildGlyphFontMetrics ga sf scale = do
 
   -- Shaped text runs: whole strings rendered through SDL3_ttf so GPOS
   -- kerning, ligatures, and contextual positioning are preserved.  The
-  -- run quad is cached per atlas epoch; measurement fields are strict so
-  -- layout queries do not force a render, while uv/rqY stay lazy until
-  -- 'pushText' draws the run.
+  -- run quad is cached per atlas epoch (Nothing for runs too large for
+  -- the atlas, which draw per-glyph instead); measurement fields are
+  -- strict so layout queries do not force a render, while uv/rqY stay
+  -- lazy until 'pushText' draws the run.
   runCacheRef <- newIORef Map.empty
 
   let
@@ -412,9 +413,19 @@ buildGlyphFontMetrics ga sf scale = do
       let !key = (txt, sfId sf, ep)
       m <- readIORef runCacheRef
       case Map.lookup key m of
-        Just rq -> pure (Just rq)
+        Just rq -> pure rq
         Nothing -> makeRunQuad key txt
 
+    -- Mirrors NANO_UI_TEXT_ATLAS_PAD in nano_ui_text_atlas.c.
+    runAtlasPad :: Float
+    runAtlasPad = 1
+
+    -- A shaped run is rasterised as one whole-run atlas surface. A run larger
+    -- than the atlas can never be inserted: resetting the atlas would not help
+    -- and would wipe every live glyph mid-frame, so already-recorded quads
+    -- would sample blank pixels and vanish. Oversized runs stay uncached and
+    -- fall back to the per-glyph path in pushText / lineWidth, which measures
+    -- and draws with the same advances and kerning.
     {-# NOINLINE makeRunQuad #-}
     makeRunQuad !key !txt
       | T.null txt = pure Nothing
@@ -429,21 +440,28 @@ buildGlyphFontMetrics ga sf scale = do
           if w <= 0 && h <= 0
             then pure Nothing
             else do
-              let uv = unsafePerformIO (renderRun txt)
-                  rq =
-                    RunQuad
-                      { rqX = 0
-                      , rqY = 0
-                      , rqW = w / inv
-                      , rqH = h / inv
-                      , rqU0 = case uv of (u, _, _, _) -> u
-                      , rqV0 = case uv of (_, v, _, _) -> v
-                      , rqU1 = case uv of (_, _, u, _) -> u
-                      , rqV1 = case uv of (_, _, _, v) -> v
-                      , rqAdvance = w / inv
-                      }
-              modifyIORef' runCacheRef (Map.insert key rq)
-              pure (Just rq)
+              (atW, atH) <- atlasSize (gaAtlas ga)
+              let tooBig = w + 2 * runAtlasPad > atW || h + 2 * runAtlasPad > atH
+              if tooBig
+                then do
+                  modifyIORef' runCacheRef (Map.insert key Nothing)
+                  pure Nothing
+                else do
+                  let uv = unsafePerformIO (renderRun txt)
+                      rq =
+                        RunQuad
+                          { rqX = 0
+                          , rqY = 0
+                          , rqW = w / inv
+                          , rqH = h / inv
+                          , rqU0 = case uv of (u, _, _, _) -> u
+                          , rqV0 = case uv of (_, v, _, _) -> v
+                          , rqU1 = case uv of (_, _, u, _) -> u
+                          , rqV1 = case uv of (_, _, _, v) -> v
+                          , rqAdvance = w / inv
+                          }
+                  modifyIORef' runCacheRef (Map.insert key (Just rq))
+                  pure (Just rq)
       where
         renderRun t =
           withUtf8 t $ \cstr len -> do

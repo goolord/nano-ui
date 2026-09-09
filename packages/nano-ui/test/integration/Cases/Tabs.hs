@@ -3,11 +3,14 @@ module Cases.Tabs
   , runTabsContentDamageTest
   , runTabsDamageTest
   , runTabsEmitTest
+  , runTabsInPanelDamageTest
   , runTabsInteractionTest
   , runTabsLazinessTest
   , runTabsStatePersistenceTest
+  , runPanelBodySwapDamageTest
   ) where
 
+import Control.Monad (forM_, replicateM)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
 import Data.Text qualified as T
 import NanoUI
@@ -21,12 +24,90 @@ import NanoUI.Testing.Harness
   , runClickPair
   , spansHas
   , withInputOff
+  , warmup2
   )
 import NanoUI.Context (Context (..))
 import NanoUI.Layout.Arena (arenaCount, getRect, getText)
 
 data DummyTab = TabA | TabB | TabC
   deriving (Eq, Show)
+
+-- Ghosting guard: switching tabs inside a floating window must leave no
+-- stale pixel behind. The mirror store write escalates the switch frame to
+-- DamageFull today; if a refactor ever narrows it to a clip (layout-driven
+-- churn inside panels suppresses keysChanged), diffNew renders the new
+-- body's rects, so the clip still covers every row of the new tab.
+runTabsInPanelDamageTest :: Context -> IORef Int -> IO ()
+runTabsInPanelDamageTest _ failed = do
+  ctx <- newContext
+  let inp0 = withInput 400 300
+      ui cur = window True "TabWin" (columnWith (fixedH 300) (tabs cur
+        [ tab TabA "Alpha" (label_ "WIDE BODY ROW ONE")
+        , tab TabB "Beta" (column (replicateM 5 (label "row line") >> pure ()))
+        ]))
+  _ <- warmup2 ctx inp0 (ui TabA)
+  _ <- runFrame ctx inp0 (ui TabA)
+  _ <- takeDamage ctx
+  let spansBody txt = do
+        allSpans <- collectOverlayTextSpans ctx inp0
+        pure [(r, t) | (r, t, _, _, _) <- allSpans, txt `T.isInfixOf` t]
+  spansA <- spansBody "WIDE BODY"
+  assert failed (length spansA == 1)
+  betaSpans <- collectOverlayTextSpans ctx inp0
+  case [r | (r, t, _, _, _) <- betaSpans, "Beta" `T.isInfixOf` t] of
+    (Rect bx by bw bh : _) -> do
+      let (press, release) = clickPair inp0 (V2 (bx + bw / 2) (by + bh / 2))
+      _ <- runFrame ctx press (ui TabA)
+      ((_, mtab), _, _, _) <- runFrame ctx release (ui TabA)
+      case mtab of
+        Nothing -> assert failed False
+        Just (_, nTab) -> do
+          assert failed (nTab == TabB)
+          dmg <- takeDamage ctx
+          assert failed (not (damageIsEmpty dmg))
+          let dmgR = case dmg of
+                DamageFull -> fullWindowRect inp0
+                DamageClip r -> r
+          spansB <- spansBody "row line"
+          assert failed (length spansB == 5)
+          let Rect ddx ddy ddw ddh = dmgR
+          forM_ spansB $ \(Rect rx ry rw rh, _) -> do
+            assert failed (rx >= ddx && ry >= ddy && rx + rw <= ddx + ddw && ry + rh <= ddy + ddh)
+          spansA2 <- spansBody "WIDE BODY"
+          assert failed (null spansA2)
+    _ -> assert failed False
+
+fullWindowRect :: Input -> Rect
+fullWindowRect inp =
+  let Size w h = inputWindowSize inp
+   in Rect 0 0 w h
+
+-- Content replacement inside a floating window must repaint every pixel of
+-- the new body: a clip that skipped any incoming row would leave the pane
+-- rendering stale pixels from the previous body ("ghosting"). The stable
+-- content slot and the incoming key rects (diffNew) must together cover all
+-- five rows.
+runPanelBodySwapDamageTest :: Context -> IORef Int -> IO ()
+runPanelBodySwapDamageTest _ failed = do
+  ctx <- newContext
+  let inp0 = withInput 400 300
+      uiA = window True "TabWin" (columnWith (fixedH 300) (label "WIDE BODY ROW ONE"))
+      uiB = window True "TabWin" (columnWith (fixedH 300) (column (replicateM 5 (label "row line") >> pure ())))
+  _ <- warmup2 ctx inp0 uiA
+  _ <- runFrame ctx inp0 uiA
+  _ <- takeDamage ctx
+  _ <- runFrame ctx inp0 uiB
+  dmg <- takeDamage ctx
+  assert failed (not (damageIsEmpty dmg))
+  let dmgR = case dmg of
+        DamageFull -> fullWindowRect inp0
+        DamageClip r -> r
+      Rect ddx ddy ddw ddh = dmgR
+  spans <- collectOverlayTextSpans ctx inp0
+  let rows = [(r, t) | (r, t, _, _, _) <- spans, "row line" `T.isInfixOf` t]
+  assert failed (length rows == 5)
+  forM_ rows $ \(Rect rx ry rw rh, _) -> do
+    assert failed (rx >= ddx && ry >= ddy && rx + rw <= ddx + ddw && ry + rh <= ddy + ddh)
 
 runTabsLazinessTest :: Context -> IORef Int -> IO ()
 runTabsLazinessTest ctx failed = do

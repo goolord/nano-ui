@@ -118,6 +118,7 @@ testSpecs =
   , TestSpec "table-cell-pad" True runTableCellPadTest
   , TestSpec "table-fit-scroll-col" False runTableFitScrollColWidthTest
   , TestSpec "table-tab-wrap-row" True runTableTabWrapRowTest
+  , TestSpec "table-resize-header-lane" False runTableResizeHeaderLaneTest
   , TestSpec "scroll-top-clip" True runScrollTopClipTest
   , TestSpec "select-overlay-damage" False runSelectOverlayDamageTest
   , TestSpec "text-input-dirty" False runTextInputDirtyTest
@@ -161,6 +162,7 @@ testSpecs =
   , TestSpec "scroll-2d-wheel" False run2DScrollWheelTest
   , TestSpec "table-2d-scroll-sync" False runTable2DScrollSyncTest
   , TestSpec "scroll-lockstep-probe" False runScrollLockstepProbeTest
+  , TestSpec "page-scroll-backdrop-coverage" False runPageScrollBackdropCoverageTest
   , TestSpec "tab-focus" False runTabFocusTest
   , TestSpec "select-initial" False runSelectTest
   , TestSpec "select-enum" False runEnumSelectTest
@@ -180,7 +182,12 @@ testSpecs =
   , TestSpec "grid-layout" False runGridTest
   , TestSpec "flex-shrink" False runFlexShrinkTest
   , TestSpec "grow-fits-window" False runGrowFitsWindowTest
+  , TestSpec "grow-equal-split" False runGrowEqualSplitTest
+  , TestSpec "grow-content-floor" False runGrowContentFloorTest
+  , TestSpec "grow-lock-cascade" False runGrowLockCascadeTest
+  , TestSpec "grow-equal-split-height" False runGrowEqualSplitHeightTest
   , TestSpec "percent-layout" False runPercentLayoutTest
+  , TestSpec "percent-gap-shrink" False runPercentGapShrinkTest
   , TestSpec "aspect-layout" False runAspectLayoutTest
   , TestSpec "label-align-end" False runLabelAlignEndTest
   , TestSpec "grow-wrap-sibling" False runGrowWrapPushesSiblingTest
@@ -205,6 +212,9 @@ testSpecs =
   , TestSpec "tabs-state-persistence" False runTabsStatePersistenceTest
   , TestSpec "tabs-damage" False runTabsDamageTest
   , TestSpec "tabs-content-damage" False runTabsContentDamageTest
+  , TestSpec "tabs-in-panel-damage" False runTabsInPanelDamageTest
+  , TestSpec "panel-body-swap-damage" False runPanelBodySwapDamageTest
+    
   , TestSpec "host-slot" False runHostSlotTest
   , TestSpec "host-profile-gap" False runHostProfileGapTest
   , TestSpec "host-profile-measure" False runHostProfileMeasureTest

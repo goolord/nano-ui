@@ -76,6 +76,7 @@ import NanoUI.Layout.Arena
   , getWidgetId
   , getNodeFontSize
   , getNodeFontColor
+  , isFloatingNode
   )
 import NanoUI.Layout.Solve (scrollBarSlotOf)
 import NanoUI.Style
@@ -89,6 +90,7 @@ import NanoUI.Style
   , styleBorder
   , styleFg
   , themeAccent
+  , themeFloatingWindow
   , themeInput
   , themePanel
   , unpackPanelStyle
@@ -115,6 +117,7 @@ import NanoUI.WidgetText
   )
 import NanoUI.Frame.Chrome
   ( fillStyledRect
+  , floatingAncestor
   , imageIdFromText
   , overlayModalStyle
   , overlayMenuStyle
@@ -253,7 +256,11 @@ lowerNodeVisible ctx occluders idx nt x y w h rect fm theme terminal da =
       strokeStyledRect da terminal style x y w h
       withClip da (borderContentClip style rect) $ walkChildrenWithOccluders ctx occluders idx
     NodeScrollContainer -> do
-      let style = themeInput theme
+      mFloat <- floatingAncestor ctx idx
+      let inFloating = maybe False isFloatingNode mFloat
+          baseStyle
+            | inFloating = themeFloatingWindow theme
+            | otherwise  = themeInput theme
       pad <- getPadding (ctxNodeArena ctx) idx
       (wTag, _) <- getWidthSizing (ctxNodeArena ctx) idx
       (hTag, _) <- getHeightSizing (ctxNodeArena ctx) idx
@@ -265,7 +272,7 @@ lowerNodeVisible ctx occluders idx nt x y w h rect fm theme terminal da =
           padClip = padContentClip (ctxHostProfile ctx) fm x y w h pad
           innerW = rectW padClip
           innerH = rectH padClip
-          wellStyle = style {styleCornerRadius = 0}
+          wellStyle = baseStyle {styleCornerRadius = 0}
       (showChrome, inner) <-
         if native2D
           then do
@@ -286,10 +293,19 @@ lowerNodeVisible ctx occluders idx nt x y w h rect fm theme terminal da =
               ( scrollChromeActive cfg False dir contentSize innerMain
               , scrollContentClip (ctxHostProfile ctx) fm slot cfg dir x y w h pad contentSize
               )
-      let paintWell = not (wTag == SizingGrow && hTag == SizingGrow)
-      when paintWell $ do
-        fillStyledRect da terminal wellStyle rect
-        strokeStyledRect da terminal wellStyle x y w h
+-- Grow×grow scrollers (page-level) keep no well so they blend into
+      -- the window backdrop. That backdrop only exists while the runner
+      -- clears it on DamageFull frames; on clip frames (scrolling, resize)
+      -- the strip vacated by scrolled content has no covering command and
+      -- the retained texture would show stale pixels — a ghost of a previous
+      -- scroll position. Paint the full rect with the window color instead:
+      -- invisible on a cleared backdrop, and clip replay then always
+      -- repaints the whole viewport.
+      if wTag == SizingGrow && hTag == SizingGrow
+        then pushRect da rect (if inFloating then styleBg (themeFloatingWindow theme) else themeWindow theme)
+        else do
+          fillStyledRect da terminal wellStyle rect
+          strokeStyledRect da terminal wellStyle x y w h
       withClip da inner $ walkChildrenWithOccluders ctx occluders idx
       when showChrome $ do
         wid <- getWidgetId (ctxNodeArena ctx) idx

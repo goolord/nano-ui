@@ -7,6 +7,7 @@ module RGFW
   , createWindow
   , closeWindow
   , pollEvent
+  , waitForEvent
   , withEventBuffer
   , createSurface
   , blitSurface
@@ -57,6 +58,12 @@ createWindow title x y w h flags =
 
 closeWindow :: Window -> IO ()
 closeWindow (Window ptr) = c_RGFW_window_close ptr
+
+-- | Wait for pending events. A negative timeout blocks indefinitely, 0 returns
+-- immediately, and a positive timeout polls the display connection for up to
+-- that many milliseconds before returning.
+waitForEvent :: Int -> IO ()
+waitForEvent t = c_RGFW_waitForEvent (fromIntegral t)
 
 withEventBuffer :: (Ptr RGFW_event -> IO a) -> IO a
 withEventBuffer f = do

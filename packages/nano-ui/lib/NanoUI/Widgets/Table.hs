@@ -66,7 +66,7 @@ import NanoUI.Widgets.Combinators
   , visibleCols
   )
 import NanoUI.Widgets.Layout (column', panel', row', scrollAreaIdConfigured, separator, spacer)
-import NanoUI.Frame.Scroll.Geometry (ScrollConfig (..), ScrollPolicy (..), scrollHorizontalAuto, scrollVerticalAuto, scrollVerticalHidden)
+import NanoUI.Frame.Scroll.Geometry (ScrollConfig (..), ScrollPolicy (..), scrollHorizontalAlways, scrollHorizontalAuto, scrollHorizontalHidden, scrollVerticalAuto, scrollVerticalHidden)
 import NanoUI.Widgets.Node
   ( Clickable (..)
   , Responding (..)
@@ -166,6 +166,25 @@ tableSplitPanes fillInner tableWid vWid hWid rowMinH frozenIdx unfrozenIdx pinne
     ctx <- askContext
     mPrev <- uiIO (getPrevRect ctx hWid)
     pure (maybe False (\r -> minSum unfrozenIdx > rectW r) mPrev)
+  -- Scroller policy for the header row, chosen from the same (previous-frame)
+  -- hBar decision that adds the lane spacer. The scroller's clip must agree
+  -- with the spacer every frame: the scroller's live ScrollAuto gutter can
+  -- activate on a frame where the spacer decision still reads the bar as
+  -- hidden (the vertical-bar lane appears, or the window narrows, between
+  -- two build frames), and that frame the lane covers the bottom hGutter of
+  -- the header row, flickering it during a resize drag. Driving the policy
+  -- from the same hBar flag keeps the lane reserved exactly while the spacer
+  -- is present, so the header can never be clipped and no dead gap appears.
+  -- Only fillInner panes get the locked policy: their Grow-width scroller is
+  -- constrained by the pane and actually scrolls. Fit-width scrollers grow
+  -- with their content (the live gutter stays 0), and on cell hosts the
+  -- bar/geometry differs, so both keep the live Auto policy.
+  hBarPolicy :: Bool -> Bool -> ScrollConfig
+  hBarPolicy terminal hBar
+    | terminal = scrollHorizontalAuto
+    | not fillInner = scrollHorizontalAuto
+    | hBar = scrollHorizontalAlways
+    | otherwise = scrollHorizontalHidden
   pinnedBlock idxs = do
     let !rowLay = gridRowLay idxs
         !colLays = map colBox idxs
@@ -236,7 +255,8 @@ tableSplitPanes fillInner tableWid vWid hWid rowMinH frozenIdx unfrozenIdx pinne
     ctx <- askContext
     let host = ctxHostProfile ctx
         fm = ctxFontMetrics ctx
-        vGutter = if isCellHost host then 1 else scrollBarGutter host fm + scrollBarListExtra
+        terminal = isCellHost host
+        vGutter = if terminal then 1 else scrollBarGutter host fm + scrollBarListExtra
     hGutter <- headerGutter
     hBar <- hasHBar
     mPrevV <- uiIO (getPrevRect ctx vWid)
@@ -249,7 +269,7 @@ tableSplitPanes fillInner tableWid vWid hWid rowMinH frozenIdx unfrozenIdx pinne
             scrollAreaIdConfigured
               hWid
               ((if fillInner then fillW else id) (hRowLay {layoutMinW = minSum idxs}))
-              scrollHorizontalAuto $
+              (hBarPolicy terminal hBar) $
               column' ((if fillInner then fillW else id) (tight $ defaultLayout {layoutGap = 0, layoutMinW = minSum idxs})) $ do
                 hs'' <- headerLine idxs renderHeader
                 void separator
@@ -260,6 +280,11 @@ tableSplitPanes fillInner tableWid vWid hWid rowMinH frozenIdx unfrozenIdx pinne
                 -- it is active the lane covers this spacer and the header and
                 -- pinned rows keep their full height; when it is inactive no
                 -- space is reserved, so no dead gap shows under the header.
+                -- The scroller policy must follow the same (previous-frame)
+                -- hBar decision as this spacer: a live ScrollAuto gutter
+                -- would clip the bottom of the header row for the frame the
+                -- bar appears before the spacer lands, flickering the header
+                -- during column resize drags.
                 when hBar $ void (spacer Fit (Fixed hGutter))
                 pure hs''
           when hasVertBar $ void (spacer (Fixed vGutter) Fit)

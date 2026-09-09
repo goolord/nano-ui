@@ -149,10 +149,16 @@ finishDraw ctx env inp forceFull t0 t1 drawData dirtyAfterUi = do
       okBegin <- retainBegin (sdlRenderer env) tex scale
       unless okBegin $ fail "SDL_SetRenderTarget(retain) failed"
       theme <- readIORef (ctxTheme ctx)
-      let clear = themeWindow theme
       glyphTex <- glyphAtlasTexture (sdlGlyphAtlas env)
       withRenderBatch (sdlRenderer env) $ \batch ->
-        renderDrawDataPass batch (sdlRenderer env) scale (Just clear) drawData allLayersArr (sdlImages env) glyphTex damage
+        -- Skip the render clear when the retain texture already holds valid
+        -- content from a previous present (retainNew == False).  The draw
+        -- commands overwrite every pixel of the DamageFull clip, and for
+        -- DamageClip the undamaged region keeps its old content.  Clearing
+        -- to themeWindow before drawing caused a visible dark flash on the
+        -- software renderer because the cleared texture could briefly reach
+        -- the display before the draw commands completed.
+        renderDrawDataPass batch (sdlRenderer env) scale (if retainNew then Just (themeWindow theme) else Nothing) drawData allLayersArr (sdlImages env) glyphTex damage
       t2 <- getMonotonicTime
       okBlit <- blitRetain (sdlRenderer env) scale tex damage
       unless okBlit $ fail "SDL_RenderTexture(retain) failed"

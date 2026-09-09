@@ -14,7 +14,7 @@ import Control.Monad (unless, void, when)
 import Data.Char (isDigit)
 import Data.Foldable (foldlM, for_)
 import Data.List (maximumBy, minimumBy)
-import Data.Maybe (fromMaybe, listToMaybe)
+import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe)
 import Data.Ord (comparing)
 import Data.Primitive.SmallArray (SmallArray)
 import NanoUI
@@ -138,6 +138,21 @@ selftest imgs ui = do
     dumpFontLayout env 40.0 WeightNormal FontStyleNormal FontRegular "r the ovt"
     void $ saveFontRenderText env 20.0 WeightNormal FontStyleItalic FontRegular sentence
       (cacheDir </> "sdl_native_italic.bmp")
+    -- Regression (oversized shaped runs): a run wider than the 2048px glyph
+    -- atlas can never be inserted as a whole-run surface. The old fallback
+    -- reset the atlas mid-frame (quads already recorded sampled the wiped
+    -- texture, so earlier text vanished) and drew the run from the
+    -- atlas-origin UVs, which hit the white patch. Oversized runs must fall
+    -- back to per-glyph drawing (fmRun = Nothing); short runs keep their
+    -- shaped run quad.
+    (fmBig, _) <- ctxResolveFont ctx 64.0 WeightNormal FontStyleNormal FontRegular
+    let bigTxt = T.replicate 400 "f"
+    when (isJust (fmRun fmBig bigTxt)) $
+      fail "selftest: oversized shaped run got a whole-run atlas quad"
+    when (lineWidth fmBig bigTxt <= 0) $
+      fail "selftest: per-glyph fallback lost the oversized run width"
+    when (isNothing (fmRun fmBig "fits")) $
+      fail "selftest: short shaped run lost its whole-run atlas quad"
     let idle =
           emptyInput
             { inputWindowSize = Size 1280 800
@@ -147,6 +162,24 @@ selftest imgs ui = do
     void (sdlDrawFrame ctx' ui env base True)
     spans0 <- collectTextSpans ctx'
     unless (hasText "Feature" spans0) $ fail "selftest: Controls body missing"
+    -- Regression (long field text): typing a value wider than the glyph atlas
+    -- must render per-glyph. The old whole-run path reset the atlas
+    -- mid-frame, so every quad already recorded in the frame sampled the
+    -- wiped texture (text below vanished) and the run itself drew from the
+    -- atlas-origin UVs (the white patch). Exercise the full paint pipeline
+    -- with an oversized field value; span collection must survive it and
+    -- the screenshots (before / after) are diffed for wiped chrome in the
+    -- long-field regression check.
+    nameLbl <- requireSpan "selftest: Name label" (findRightmost "Name" spans0)
+    void $ saveScreenshot env (cacheDir </> "long_field_before.bmp")
+    clickPos ui ctx' env base (V2 (v2X nameLbl + 80) (v2Y nameLbl))
+    drawOnce ui ctx' env (base {inputChars = T.replicate 400 "f"})
+    drawOnce ui ctx' env base
+    spansLong <- collectTextSpans ctx'
+    unless (hasText "Feature" spansLong) $ fail "selftest: long field text lost the tab content"
+    unless (length spansLong >= length spans0 - 1) $
+      fail "selftest: long field text collapsed the span set"
+    void $ saveScreenshot env (cacheDir </> "long_field_after.bmp")
     clickTab ui ctx' env base "Table"
     spansTable <- collectTextSpans ctx'
     unless (hasText "David" spansTable) $ fail "selftest: table body missing after Table tab"

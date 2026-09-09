@@ -384,7 +384,13 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
                        mScroll <- scrollAncestorRect ctx k
                        pure (r : maybe [] pure mScroll)
              let layoutRs = if onlyScrollFloatsChanged then [] else settledMoved
-                 vanishedRs = diffOld
+                 -- Keys that left repaint as the current backdrop over their
+                 -- old rects. Keys that arrived must repaint inside their new
+                 -- rects too: the retain texture has never shown that content,
+                 -- and nothing else covers it (mirror writes escalate these
+                 -- frames to DamageFull, but layout-driven churn inside
+                 -- floating panels does not).
+                 vanishedRs = diffOld ++ diffNew
                  floatingRs = floatingRectDamage oldFloatingRects newFloatingRects
                  base =
                    unionRects

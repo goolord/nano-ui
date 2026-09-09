@@ -829,6 +829,7 @@ cozetteMetrics =
   FontMetrics
     { fmLineHeight = cozetteLineHeight
     , fmAscent = cozetteAscent
+    , fmSnapScale = 1.0
     , fmAdvance = \_ -> cozetteCharAdvance
     , fmKerning = \_ _ -> 0
     , fmRun = \_ -> Nothing

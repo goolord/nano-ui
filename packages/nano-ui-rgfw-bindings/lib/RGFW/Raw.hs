@@ -9,6 +9,7 @@ module RGFW.Raw
   , c_RGFW_createWindow
   , c_RGFW_window_close
   , c_RGFW_window_checkEvent
+  , c_RGFW_waitForEvent
   , c_RGFW_createSurface
   , c_RGFW_window_blitSurface
   , c_RGFW_surface_free
@@ -109,6 +110,9 @@ foreign import ccall "RGFW_window_close"
 
 foreign import ccall "RGFW_window_checkEvent"
   c_RGFW_window_checkEvent :: Ptr RGFW_window -> Ptr RGFW_event -> IO CUChar
+
+foreign import ccall "RGFW_waitForEvent"
+  c_RGFW_waitForEvent :: CInt -> IO ()
 
 foreign import ccall "rgfw_create_surface"
   c_RGFW_createSurface :: Ptr RGFW_window -> Ptr CUChar -> CInt -> CInt -> CUChar -> IO (Ptr RGFW_surface)

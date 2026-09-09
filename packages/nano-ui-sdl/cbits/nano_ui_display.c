@@ -6,6 +6,17 @@
 void nano_ui_sdl_init_hints(bool vsync)
 {
     SDL_SetHint(SDL_HINT_RENDER_VSYNC, vsync ? "1" : "0");
+    /* SDL3 only auto-picks Wayland when the compositor has the fifo-v1 /
+     * commit-timing-v1 protocols. Without them (sway, wlroots, many others
+     * today) it silently selects X11/XWayland, giving a scale-1 window on a
+     * scale-2 (or fractional) output: the compositor upscales the whole
+     * window and text looks blurred, "like it's upscaled". Native Wayland
+     * + SDL_WINDOW_HIGH_PIXEL_DENSITY makes the window rasterize at the real
+     * output scale, which is what alacritty/kitty do. Honour an explicit
+     * SDL_VIDEO_DRIVER override, and keep pure-X11 sessions untouched. */
+    if (SDL_getenv("WAYLAND_DISPLAY") && !SDL_getenv("SDL_VIDEO_DRIVER")) {
+        SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "wayland");
+    }
 }
 
 void nano_ui_sdl_init_bench_hints(void)
