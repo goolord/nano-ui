@@ -99,6 +99,11 @@ testSpecs =
   , TestSpec "table-fit-scroll-col" False runTableFitScrollColWidthTest
   , TestSpec "table-tab-wrap-row" True runTableTabWrapRowTest
   , TestSpec "table-resize-header-lane" False runTableResizeHeaderLaneTest
+  , TestSpec "scroll-2d-pad-fill-overflow" False run2DPadFillOverflowTest
+  , TestSpec "scroll-2d-pad-overflow-scrolls" False run2DPadOverflowScrollsTest
+  , TestSpec "table-col-resize-cursor" False runTableColResizeCursorTest
+  , TestSpec "table-col-resize-body" False runTableColResizeDemoReproTest
+  , TestSpec "table-hbar-stable" False runTableHBarStableTest
   , TestSpec "scroll-top-clip" True runScrollTopClipTest
   , TestSpec "select-overlay-damage" False runSelectOverlayDamageTest
   , TestSpec "text-input-dirty" False runTextInputDirtyTest

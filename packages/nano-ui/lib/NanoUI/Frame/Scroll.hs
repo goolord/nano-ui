@@ -71,6 +71,7 @@ import NanoUI.Frame.Scroll.Geometry
   ( ScrollBarLayout (..)
   , borderContentClip
   , scrollBarLayout
+  , scrollAxisRange
   , scrollChromeLane
   , scrollContentClip
   , scrollOffsetFromThumb
@@ -304,8 +305,8 @@ tryApplyScrollWheelDelta ctx wid scroll = do
               contentW <- getScrollContentW (ctxNodeArena ctx) idx
               contentH <- getNodeValue (ctxNodeArena ctx) idx
               V2 curX curY <- getScrollOffset2D ctx wid
-              let maxX = max 0 (contentW - innerW)
-                  maxY = max 0 (contentH - innerH)
+              let maxX = scrollAxisRange contentW innerW (padR pad)
+                  maxY = scrollAxisRange contentH innerH (padB pad)
                   newX = max 0 (min maxX (curX + v2X scroll * step))
                   newY = max 0 (min maxY (curY + v2Y scroll * step))
               if newX == curX && newY == curY
@@ -319,13 +320,13 @@ tryApplyScrollWheelDelta ctx wid scroll = do
               case dir of
                 DirColumn
                   | scrollPolicyY cfg == ScrollNone -> pure False
-                  | otherwise -> applyAxis cur innerH contentSize (v2Y scroll * step)
+                  | otherwise -> applyAxis cur innerH contentSize (padB pad) (v2Y scroll * step)
                 DirRow
                   | scrollPolicyX cfg == ScrollNone -> pure False
-                  | otherwise -> applyAxis cur innerW contentSize (v2X scroll * step)
+                  | otherwise -> applyAxis cur innerW contentSize (padR pad) (v2X scroll * step)
   where
-    applyAxis cur inner contentSize delta = do
-      let maxOff = max 0 (contentSize - inner)
+    applyAxis cur inner contentSize trailingPad delta = do
+      let maxOff = scrollAxisRange contentSize inner trailingPad
           newOff = max 0 (min maxOff (cur + delta))
       if newOff == cur
         then pure False
@@ -514,21 +515,81 @@ updateScrollDrag ctx inp = do
                             Just layout -> do
                               let newX = scrollOffsetFromThumb DirRow layout grabOff (inputMousePos inp)
                               when (newX /= curX) $ setScrollOffset2D ctx wid (V2 newX curY)
-                    else do
-                      mGeom <- scrollContainerGeom ctx wid
-                      case mGeom of
-                        Nothing -> pure ()
-                        Just (idx', dir, x, y, w, h, pad, contentSize) -> do
-                          off <- getScrollOffset ctx wid
-                          let fm = ctxFontMetrics ctx
-                          slot <- scrollBarSlotOf (ctxNodeArena ctx) idx'
-                          case scrollBarLayout (ctxHostProfile ctx) fm slot dir x y w h pad contentSize off of
-                            Nothing -> pure ()
-                            Just layout -> do
-                              let newOff = scrollOffsetFromThumb dir layout grabOff (inputMousePos inp)
-                              when (newOff /= off) $ setScrollOffset ctx wid newOff
+                     else do
+                       mGeom <- scrollContainerGeom ctx wid
+                       case mGeom of
+                         Nothing -> pure ()
+                         Just (idx', dir, x, y, w, h, pad, contentSize) -> do
+                           si <- getStyleIdx (ctxNodeArena ctx) idx'
+                           if isScrollStyle2D si
+                             then do
+                               contentW <- getScrollContentW (ctxNodeArena ctx) idx'
+                               V2 offX offY <- getScrollOffset2D ctx wid
+                               (mV, mH) <-
+                                 scrollBarLayouts2D
+                                   ctx
+                                   idx'
+                                   ScrollBars2DGeom
+                                     { sb2X = x
+                                     , sb2Y = y
+                                     , sb2W = w
+                                     , sb2H = h
+                                     , sb2Pad = pad
+                                     , sb2ContentW = contentW
+                                     , sb2ContentH = contentSize
+                                     , sb2OffX = offX
+                                     , sb2OffY = offY
+                                     }
+                               case dragDir of
+                                 DirColumn ->
+                                   case mV of
+                                     Nothing -> pure ()
+                                     Just layout -> do
+                                       let newY = scrollOffsetFromThumb DirColumn layout grabOff (inputMousePos inp)
+                                       when (newY /= offY) $ setScrollOffset2D ctx wid (V2 offX newY)
+                                 DirRow ->
+                                   case mH of
+                                     Nothing -> pure ()
+                                     Just layout -> do
+                                       let newX = scrollOffsetFromThumb DirRow layout grabOff (inputMousePos inp)
+                                       when (newX /= offX) $ setScrollOffset2D ctx wid (V2 newX offY)
+                             else do
+                               off <- getScrollOffset ctx wid
+                               let fm = ctxFontMetrics ctx
+                               slot <- scrollBarSlotOf (ctxNodeArena ctx) idx'
+                               case scrollBarLayout (ctxHostProfile ctx) fm slot dir x y w h pad contentSize off of
+                                 Nothing -> pure ()
+                                 Just layout -> do
+                                   let newOff = scrollOffsetFromThumb dir layout grabOff (inputMousePos inp)
+                                   when (newOff /= off) $ setScrollOffset ctx wid newOff
             Nothing | inputMousePressed inp -> tryStartScrollDrag ctx inp
             _ -> pure ()
+
+-- | Named geometry for a native 2D scroll container's two scrollbar layouts.
+-- The four trailing Floats of the positional form (content and offset per
+-- axis) transpose silently, so keep them named.
+data ScrollBars2DGeom = ScrollBars2DGeom
+  { sb2X :: !Float
+  , sb2Y :: !Float
+  , sb2W :: !Float
+  , sb2H :: !Float
+  , sb2Pad :: Padding
+  , sb2ContentW :: !Float
+  , sb2ContentH :: !Float
+  , sb2OffX :: !Float
+  , sb2OffY :: !Float
+  }
+
+-- | Both-axis scrollbar layouts for a native 2D scroll container: (vertical,
+-- horizontal). Nothing per axis when that axis does not overflow.
+scrollBarLayouts2D :: Context -> NodeIdx -> ScrollBars2DGeom -> IO (Maybe ScrollBarLayout, Maybe ScrollBarLayout)
+scrollBarLayouts2D ctx idx g = do
+  let host = ctxHostProfile ctx
+      fm = ctxFontMetrics ctx
+  slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
+  let v = scrollBarLayout host fm slot DirColumn (sb2X g) (sb2Y g) (sb2W g) (sb2H g) (sb2Pad g) (sb2ContentH g) (sb2OffY g)
+      hr = scrollBarLayout host fm slot DirRow (sb2X g) (sb2Y g) (sb2W g) (sb2H g) (sb2Pad g) (sb2ContentW g) (sb2OffX g)
+  pure (v, hr)
 
 scrollContainerGeom ::
   Context -> WidgetId -> IO (Maybe (NodeIdx, DirTag, Float, Float, Float, Float, Padding, Float))
@@ -652,48 +713,114 @@ tryStartScrollDragOn ctx wid mouse = do
           case mGeom of
             Nothing -> pure ()
             Just (idx', dir, x, y, w, h, pad, contentSize) -> do
-              off <- getScrollOffset ctx wid
-              let fm = ctxFontMetrics ctx
-              slot <- scrollBarSlotOf (ctxNodeArena ctx) idx'
-              case scrollBarLayout (ctxHostProfile ctx) fm slot dir x y w h pad contentSize off of
-                Nothing -> pure ()
-                Just layout -> do
-                  let thumb = sbThumb layout
-                      track = sbTrack layout
-                  if rectContains thumb mouse
-                    then do
-                      let grabOff =
-                            case dir of
-                              DirColumn -> v2Y mouse - rectY thumb
-                              DirRow -> v2X mouse - rectX thumb
-                      setScrollDrag ctx (Just (wid, dir, grabOff))
-                    else
-                      when (rectContains track mouse) $ do
-                        let maxOff = sbMaxOff layout
-                            thumbH = rectH thumb
-                            thumbW = rectW thumb
-                            newOff =
-                              case dir of
-                                DirColumn ->
-                                  let trackY = rectY track
-                                      trackH = rectH track
-                                      ratio =
-                                        (v2Y mouse - trackY - thumbH / 2)
-                                          / max 1 (trackH - thumbH)
-                                   in max 0 (min maxOff (ratio * maxOff))
-                                DirRow ->
-                                  let trackX = rectX track
-                                      trackW = rectW track
-                                      ratio =
-                                        (v2X mouse - trackX - thumbW / 2)
-                                          / max 1 (trackW - thumbW)
-                                   in max 0 (min maxOff (ratio * maxOff))
-                        setScrollOffset ctx wid newOff
-                        let grabOff =
-                              case dir of
-                                DirColumn -> thumbH / 2
-                                DirRow -> thumbW / 2
-                        setScrollDrag ctx (Just (wid, dir, grabOff))
+              si <- getStyleIdx (ctxNodeArena ctx) idx'
+              if isScrollStyle2D si
+                then do
+                  contentW <- getScrollContentW (ctxNodeArena ctx) idx'
+                  V2 curX curY <- getScrollOffset2D ctx wid
+                  (mV, mH) <-
+                    scrollBarLayouts2D
+                      ctx
+                      idx'
+                      ScrollBars2DGeom
+                        { sb2X = x
+                        , sb2Y = y
+                        , sb2W = w
+                        , sb2H = h
+                        , sb2Pad = pad
+                        , sb2ContentW = contentW
+                        , sb2ContentH = contentSize
+                        , sb2OffX = curX
+                        , sb2OffY = curY
+                        }
+                  case tryAxis DirColumn mV (curX, curY) of
+                    Just start -> start
+                    Nothing ->
+                      case tryAxis DirRow mH (curX, curY) of
+                        Just start -> start
+                        Nothing -> pure ()
+                else do
+                  off <- getScrollOffset ctx wid
+                  let fm = ctxFontMetrics ctx
+                  slot <- scrollBarSlotOf (ctxNodeArena ctx) idx'
+                  case scrollBarLayout (ctxHostProfile ctx) fm slot dir x y w h pad contentSize off of
+                    Nothing -> pure ()
+                    Just layout -> do
+                      let thumb = sbThumb layout
+                          track = sbTrack layout
+                      if rectContains thumb mouse
+                        then do
+                          let grabOff =
+                                case dir of
+                                  DirColumn -> v2Y mouse - rectY thumb
+                                  DirRow -> v2X mouse - rectX thumb
+                          setScrollDrag ctx (Just (wid, dir, grabOff))
+                        else
+                          when (rectContains track mouse) $ do
+                            let maxOff = sbMaxOff layout
+                                thumbH = rectH thumb
+                                thumbW = rectW thumb
+                                newOff =
+                                  case dir of
+                                    DirColumn ->
+                                      let trackY = rectY track
+                                          trackH = rectH track
+                                          ratio =
+                                            (v2Y mouse - trackY - thumbH / 2)
+                                              / max 1 (trackH - thumbH)
+                                       in max 0 (min maxOff (ratio * maxOff))
+                                    DirRow ->
+                                      let trackX = rectX track
+                                          trackW = rectW track
+                                          ratio =
+                                            (v2X mouse - trackX - thumbW / 2)
+                                              / max 1 (trackW - thumbW)
+                                       in max 0 (min maxOff (ratio * maxOff))
+                            setScrollOffset ctx wid newOff
+                            let grabOff =
+                                  case dir of
+                                    DirColumn -> thumbH / 2
+                                    DirRow -> thumbW / 2
+                            setScrollDrag ctx (Just (wid, dir, grabOff))
+   where
+    -- Thumb grab, else track jump-and-drag, for one axis of a 2D scroller.
+    -- The other axis component of the shared 2D offset is preserved.
+    tryAxis axis mLayout (curX, curY) = case mLayout of
+      Nothing -> Nothing
+      Just layout
+        | rectContains (sbThumb layout) mouse ->
+            Just
+              ( setScrollDrag
+                  ctx
+                  ( Just
+                      ( wid
+                      , axis
+                      , case axis of
+                          DirColumn -> v2Y mouse - rectY (sbThumb layout)
+                          DirRow -> v2X mouse - rectX (sbThumb layout)
+                      )
+                  )
+              )
+        | rectContains (sbTrack layout) mouse ->
+            let maxOff = sbMaxOff layout
+                thumb = sbThumb layout
+                track = sbTrack layout
+                thumbMain = case axis of DirColumn -> rectH thumb; DirRow -> rectW thumb
+                trackPos = case axis of DirColumn -> rectY track; DirRow -> rectX track
+                trackMain = case axis of DirColumn -> rectH track; DirRow -> rectW track
+                mouseMain = case axis of DirColumn -> v2Y mouse; DirRow -> v2X mouse
+                ratio = (mouseMain - trackPos - thumbMain / 2) / max 1 (trackMain - thumbMain)
+                newOff = max 0 (min maxOff (ratio * maxOff))
+                jump =
+                  case axis of
+                    DirColumn -> setScrollOffset2D ctx wid (V2 curX newOff)
+                    DirRow -> setScrollOffset2D ctx wid (V2 newOff curY)
+             in Just
+                  ( do
+                      jump
+                      setScrollDrag ctx (Just (wid, axis, thumbMain / 2))
+                  )
+        | otherwise -> Nothing
 
 paintScrollChrome ::
   Context ->

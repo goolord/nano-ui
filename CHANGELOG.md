@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+* Table horizontal scrollbar moved to the bottom of the full table: the body scroller is now a real 2D scroller (Auto/Auto) that owns both bars, while the header scroller is chrome-less and just follows the linked horizontal offset. The bar no longer sits directly under the header row, spans the table width at the table's bottom edge, and its live 2D gutter logic reserves the lane exactly while the columns overflow (replacing the previous-frame lane flag, the header lane spacer, and the frozen-pane lane mirror). 2D scrollers gained horizontal (and per-axis) thumb drag: pressing a thumb or track and dragging updates that axis of the shared 2D offset.
+* Padded scrollers no longer surface a phantom scrollbar for content that exactly fits: scroll content size is measured from the content origin (after the leading padding), so a fill-width child no longer reads `padX` wider than the viewport on 2D scrollers (and `padY` taller on 1D ones), and the trailing padding cannot surface a bar by itself either. When an axis genuinely overflows, its scroll range now extends past the last child by the trailing padding, so scrolling to the end still reveals it. Fixes the stray horizontal bar under the demo's searchable list.
+* Table column resize grab zones span the whole column height (header band plus body cells down to the table pane's bottom edge), and the `UiCursorEwResize` cursor follows the same span, so a column boundary can be found, hovered, and dragged anywhere down the table instead of only on a 4 px strip of the header cell.
+* Table header horizontal-scrollbar lane no longer flickers on/off during column resize drags: the `hBar` overflow flag compares the columns' min-width sum against the stable pane viewport (the body scroller's fill width) instead of the header h-scroller's own rect, which is floored at the content width and could never read as overflowing at rest.
+* Self-test harness: `findHeader` matches the raw (untrimmed) header text, so a column header with its sort-reserve padding wins over right-aligned kv values that repeat the column name (the table header click self-test clicked "Sorted by: Name"'s value instead of the header).
+* SDL host: set `NANO_CURSOR_TRACE=1` to log cursor changes to stderr (debug aid for cursor hit-testing).
+
 Breaking API: prefer `Text` and `Vector` over `String` and `[ ]` in core types.
 
 * `inputKeys`: `[Key]` -> `Vector Key`. Use `inputKeysElem`, `foldInputKeys`, `inputKeysFromList` instead of list `elem`/`++`.
