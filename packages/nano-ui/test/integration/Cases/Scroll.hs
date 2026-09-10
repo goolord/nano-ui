@@ -23,6 +23,11 @@ module Cases.Scroll
   , runTableFitScrollColWidthTest
   , runTableTabWrapRowTest
   , runTableResizeHeaderLaneTest
+  , run2DPadFillOverflowTest
+  , run2DPadOverflowScrollsTest
+  , runTableColResizeCursorTest
+  , runTableColResizeDemoReproTest
+  , runTableHBarStableTest
   , runScrolledOutClickImmunityTest
   , runScrolledOutHoverImmunityTest
   , runScrolledOutCursorImmunityTest
@@ -33,7 +38,7 @@ module Cases.Scroll
   , runPageScrollBackdropCoverageTest
   ) where
 
-import Control.Monad (forM, forM_, replicateM, unless, void)
+import Control.Monad (forM, forM_, replicateM, replicateM_, unless, void)
 import Data.Bits ((.&.))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
@@ -45,16 +50,21 @@ import Foreign.Storable (peekElemOff)
 import Data.Text qualified as T
 import Text.Read (readMaybe)
 import NanoUI
-import NanoUI.Context (ctxNodeArena, setDrawSnapScale)
+import NanoUI.Context (ctxNodeArena, getScrollOffset2D, setDrawSnapScale)
 import NanoUI.Layout.Arena
   ( DirTag (..)
+  , NodeIdx
   , NodeType (..)
   , arenaCount
   , getClipRect
   , getDirection
+  , getNodeValue
   , getNodeType
+  , getParent
   , getRect
+  , getScrollContentW
   , getStyleIdx
+  , getWidgetId
   )
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertGt, bump, withInput)
@@ -1168,5 +1178,448 @@ whitePixelU = 1.5 / 1024.0
 
 whitePixelV :: Float
 whitePixelV = 1.5 / 1024.0
+
+-- A padded 2D scroller whose fill-width child fits the viewport must not
+-- report horizontal overflow: content size is measured from the content
+-- origin (after the leading padding), not from the padding-box origin,
+-- which double-counts the padding and makes a fitting child look padX
+-- wider than the viewport every frame. Same for the main axis of a padded
+-- 1D vertical scroller. Fitting content must not wheel-scroll either: the
+-- trailing padding extends the scroll range only once an axis genuinely
+-- overflows.
+run2DPadFillOverflowTest :: Context -> IORef Int -> IO ()
+run2DPadFillOverflowTest _ failed = do
+  ctx <- newPixelContext
+  let inp0 = withInput 320 240
+      ui =
+        scrollArea2D (padAll 6 . fixedH 168 . fillW $ defaultLayout) $
+          columnWith (tight . fillW) $
+            mapM_ (void . label) (map T.pack ["alpha", "beta", "gamma"])
+  (wid, ()) <- warmup2 ctx inp0 ui
+  mState <- scrollNodeState ctx wid True
+  case mState of
+    Nothing -> assert failed False
+    Just (contentW, innerW) -> assert failed (contentW <= innerW + overflowEps)
+  -- No phantom scroll range: wheeling must not move either axis.
+  let wheel = inp0 {inputScroll = V2 5 5}
+  _ <- runFrame ctx wheel ui
+  V2 offX offY <- getScrollOffset2D ctx wid
+  assert failed (offX == 0 && offY == 0)
+  let ui1 = scrollArea (padAll 6 . fixedH 80 . fillW $ defaultLayout) (void (labelEx (tight defaultLayout) (T.pack "fits")))
+  (wid1, ()) <- warmup2 ctx inp0 ui1
+  mState1 <- scrollNodeState ctx wid1 False
+  case mState1 of
+    Nothing -> assert failed False
+    Just (contentH, innerH) -> assert failed (contentH <= innerH + overflowEps)
+
+-- Padding (padAll 6) used by the 2D pad tests, and the resulting reduction
+-- of the scroller rect to the padded inner size.
+padTestPx, padTestBoth :: Float
+padTestPx = 6
+padTestBoth = padTestPx * 2
+
+-- Same overflow epsilon as scrollAxisOverflows / scrollAxisRange.
+overflowEps :: Float
+overflowEps = 0.5
+
+scrollNodeState :: Context -> WidgetId -> Bool -> IO (Maybe (Float, Float))
+scrollNodeState ctx wid is2D = do
+  let na = ctxNodeArena ctx
+  n <- arenaCount na
+  finds <-
+    fmap
+      (concat @[])
+      ( forM [0 .. n - 1] $ \i -> do
+          nt <- getNodeType na i
+          if nt /= NodeScrollContainer
+            then pure []
+            else do
+              w' <- getWidgetId na i
+              if w' /= wid
+                then pure []
+                else do
+                  contentMain <-
+                    if is2D
+                      then getScrollContentW na i
+                      else getNodeValue na i
+                  (_, _, rw, rh) <- getRect na i
+                  let inner = if is2D then rw - padTestBoth else rh - padTestBoth
+                  pure [(contentMain, inner)]
+      )
+  pure (listToMaybe finds)
+
+-- The other side of the pad fix: a padded 2D scroller whose child really is
+-- wider and taller than the viewport must still report overflow on both
+-- axes, wheel-scroll vertically, and let scrolling reach the trailing
+-- padding at the end (the range extends past the last child by padB).
+run2DPadOverflowScrollsTest :: Context -> IORef Int -> IO ()
+run2DPadOverflowScrollsTest _ failed = do
+  ctx <- newPixelContext
+  let inp0 = (withInput 320 240) {inputMousePos = V2 100 100}
+      ui =
+        scrollArea2D (padAll 6 . fixedH 168 . fillW $ defaultLayout) $
+          columnWith (tight . fillW) $ do
+            void (labelEx (tight . fixedW 500 $ defaultLayout) (T.pack "wide child"))
+            mapM_ (void . label) (map T.pack (replicate 30 "scroll line"))
+  (wid, ()) <- warmup2 ctx inp0 ui
+  mState <- scrollNodeState ctx wid True
+  case mState of
+    Nothing -> assert failed False
+    Just (contentW, innerW) -> do
+      -- The 500px child genuinely overflows the ~308px inner width.
+      assertGt failed contentW (innerW + 40)
+  mStateH <- scrollNodeState ctx wid False
+  case mStateH of
+    Nothing -> assert failed False
+    Just (contentH, innerH) -> do
+      assertGt failed contentH (innerH + 100)
+      -- Scroll far past the end: the clamp must land on the trailing-pad
+      -- extended range (content + padB - inner), not the flush content -
+      -- inner, so the bottom padding is reachable.
+      let wheelDown = inp0 {inputScroll = V2 0 50}
+      replicateM_ 40 (runFrame ctx wheelDown ui)
+      V2 _ offEnd <- getScrollOffset2D ctx wid
+      assert failed (abs (offEnd - (contentH + padTestPx - innerH)) < 1.5)
+
+-- Hovering the right edge of a table header button must raise the
+-- horizontal-resize cursor, and pressing + dragging from there must actually
+-- widen the column.
+runTableColResizeCursorTest :: Context -> IORef Int -> IO ()
+runTableColResizeCursorTest _ failed = do
+  ctx <- newPixelContext
+  let inp0 = (withInput 400 240) {inputMousePos = V2 30 30}
+      ui = do
+        (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
+        void
+          ( tableCfg
+              defaultTableCfg
+              (tight . fillW . fixedH 180 $ defaultLayout {layoutGap = 0})
+              "people"
+              tableScrollCols
+              (take 5 tableScrollRows)
+              tableSort
+          )
+  _ <- runFrame ctx inp0 ui
+  _ <- runFrame ctx inp0 ui
+  mhdr <- headerButtonRect ctx
+  case mhdr of
+    Nothing -> assert failed False
+    Just (Rect hx hy hw hh) -> do
+      let edgeX = hx + hw - 2
+          hoverInp = inp0 {inputMousePos = V2 edgeX (hy + hh / 2)}
+      _ <- runFrame ctx hoverInp ui
+      kind <- uiCursorKind ctx hoverInp
+      assertEq failed kind UiCursorEwResize
+      let pressInp = hoverInp {inputMouseDown = True, inputMousePressed = True}
+          dragInp x = inp0 {inputMousePos = V2 x (hy + hh / 2), inputMouseDown = True}
+      _ <- runFrame ctx pressInp ui
+      _ <- runFrame ctx (dragInp (edgeX + 60)) ui
+      _ <- runFrame ctx (dragInp (edgeX + 60)) ui
+      mhdr2 <- headerButtonRect ctx
+      case mhdr2 of
+        Nothing -> assert failed False
+        Just (Rect _ _ hw2 _) -> assertGt failed hw2 (hw + 30)
+
+-- The demo's page structure (page scroller, card panel, five columns). Every
+-- column boundary must raise the resize cursor and resize when grabbed down
+-- in the column BODY, not only on the header cell.
+runTableColResizeDemoReproTest :: Context -> IORef Int -> IO ()
+runTableColResizeDemoReproTest _ failed = do
+  ctx <- newPixelContext
+  let inp0 = (withInput 700 500) {inputMousePos = V2 400 100}
+      ui =
+        scrollWith (tight . grow) $
+          columnWith (padAll 6 . gap 6 . fillW) $
+            card $ do
+              (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
+              void
+                ( tableCfg
+                    defaultTableCfg
+                    (tight . fillW . fixedH 280 $ defaultLayout {layoutGap = 0})
+                    "people"
+                    demoPeopleCols
+                    demoPeopleRows
+                    tableSort
+                )
+  _ <- runFrame ctx inp0 ui
+  _ <- runFrame ctx inp0 ui
+  bodyBot <- tableBodyBottom ctx
+  hdrs0 <- headerButtonRects ctx
+  forM_ (zip [0 ..] hdrs0) $ \(k, _) -> do
+    hdrs <- headerButtonRects ctx
+    case drop k hdrs of
+      Rect hx hy hw hh : _ | bodyBot > hy + hh + 20 -> do
+        let edgeX = hx + hw - 2
+            bodyY = (hy + hh + bodyBot) / 2
+            hoverInp = inp0 {inputMousePos = V2 edgeX bodyY}
+        _ <- runFrame ctx hoverInp ui
+        kind <- uiCursorKind ctx hoverInp
+        assertEq failed kind UiCursorEwResize
+        let pressInp = hoverInp {inputMouseDown = True, inputMousePressed = True}
+            dragInp x = inp0 {inputMousePos = V2 x bodyY, inputMouseDown = True}
+        before <- headerButtonRects ctx
+        _ <- runFrame ctx pressInp ui
+        _ <- runFrame ctx (dragInp (edgeX + 60)) ui
+        _ <- runFrame ctx (dragInp (edgeX + 60)) ui
+        _ <- runFrame ctx (dragInp (edgeX + 60)) ui
+        after <- headerButtonRects ctx
+        case (drop k before, drop k after) of
+          (Rect _ _ wb _ : _, Rect _ _ wa _ : _) -> assertGt failed wa (wb + 30)
+          _ -> assert failed False
+      _ -> assert failed False
+
+demoPeopleCols :: Colonnade Headed (T.Text, T.Text, T.Text, T.Text, T.Text) T.Text
+demoPeopleCols =
+  mconcat
+    [ headed "Name" (\(a, _, _, _, _) -> a)
+    , headed "Dept" (\(_, b, _, _, _) -> b)
+    , headed "Age" (\(_, _, c, _, _) -> c)
+    , headed "City" (\(_, _, _, d, _) -> d)
+    , headed "Role" (\(_, _, _, _, e) -> e)
+    ]
+
+demoPeopleRows :: [(T.Text, T.Text, T.Text, T.Text, T.Text)]
+demoPeopleRows =
+  [ (T.pack n, T.pack d, T.pack (show a), T.pack c, T.pack r)
+  | (n, d, a, c, r) <-
+      [ ("David", "Eng", 63 :: Int, "Austin", "Staff")
+      , ("Ava", "Design", 34, "Berlin", "Lead")
+      , ("Sonia", "Eng", 12, "Lisbon", "Intern")
+      , ("Maya", "Ops", 41, "Tokyo", "Manager")
+      , ("Leo", "Design", 28, "Paris", "IC")
+      , ("Noah", "Eng", 37, "Seoul", "Staff")
+      , ("Iris", "Ops", 19, "Austin", "IC")
+      , ("Jules", "Sales", 45, "London", "Manager")
+      , ("Priya", "Eng", 31, "Bengaluru", "Lead")
+      , ("Chen", "Design", 26, "Shanghai", "IC")
+      , ("Omar", "Ops", 52, "Cairo", "Lead")
+      , ("Elena", "Sales", 39, "Madrid", "Staff")
+      , ("Kai", "Eng", 23, "Oslo", "IC")
+      , ("Ruth", "Ops", 47, "Boston", "Staff")
+      ]
+  ]
+
+-- All table-header button rects, left to right.
+headerButtonRects :: Context -> IO [Rect]
+headerButtonRects ctx = do
+  let na = ctxNodeArena ctx
+  n <- arenaCount na
+  rects <-
+    fmap
+      catMaybes
+      ( forM [0 .. n - 1] $ \i -> do
+          nt <- getNodeType na i
+          if nt /= NodeButton
+            then pure Nothing
+            else do
+              si <- getStyleIdx na i
+              if not (isTableHeaderStyleIdx si)
+                then pure Nothing
+                else do
+                  (x, y, w, h) <- getRect na i
+                  pure (Just (Rect x y w h))
+      )
+  pure (sortOn rectX rects)
+
+-- | Bottom edge of the table pane: from the first header button, walk up to
+-- the enclosing panel and return its bottom Y.
+tableBodyBottom :: Context -> IO Float
+tableBodyBottom ctx = do
+  let na = ctxNodeArena ctx
+  n <- arenaCount na
+  let findBtn i
+        | i >= n = pure Nothing
+        | otherwise = do
+            nt <- getNodeType na i
+            if nt /= NodeButton
+              then findBtn (i + 1)
+              else do
+                si <- getStyleIdx na i
+                if not (isTableHeaderStyleIdx si)
+                  then findBtn (i + 1)
+                  else pure (Just i)
+      walkUp i
+        | i < 0 = pure 0
+        | otherwise = do
+            nt <- getNodeType na i
+            if nt /= NodePanel
+              then getParent na i >>= walkUp
+              else do
+                (_, py, _, ph) <- getRect na i
+                pure (py + ph)
+  findBtn 0 >>= maybe (pure 0) walkUp
+
+-- The table's horizontal scrollbar belongs to the body scroller: it spans
+-- the table's bottom edge, appears stably while the columns overflow (no
+-- appear/disappear flicker mid-drag or at rest), and is draggable (2D thumb
+-- drag). The header scroller stays chrome-less (policyX Hidden) so no bar
+-- ever sits under the header row.
+runTableHBarStableTest :: Context -> IORef Int -> IO ()
+runTableHBarStableTest _ failed = do
+  ctx <- newPixelContext
+  let inp0 = (withInput 400 240) {inputMousePos = V2 30 30}
+      ui = do
+        (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
+        void
+          ( tableCfg
+              defaultTableCfg
+              (tight . fillW . fixedH 180 $ defaultLayout {layoutGap = 0})
+              "people"
+              tableScrollCols
+              (take 5 tableScrollRows)
+              tableSort
+          )
+  _ <- runFrame ctx inp0 ui
+  _ <- runFrame ctx inp0 ui
+  mhdr <- headerButtonRect ctx
+  case mhdr of
+    Nothing -> assert failed False
+    Just (Rect hx hy hw hh) -> do
+      let edgeX = hx + hw - 2
+          headerY = hy + hh / 2
+          pressInp = inp0 {inputMousePos = V2 edgeX headerY, inputMouseDown = True, inputMousePressed = True}
+          dragInp x = inp0 {inputMousePos = V2 x headerY, inputMouseDown = True}
+      _ <- runFrame ctx pressInp ui
+      -- Drag outward past the pane edge, then hold still.
+      let steps = [edgeX + 40, edgeX + 80, edgeX + 120, edgeX + 160, edgeX + 200, edgeX + 200, edgeX + 200, edgeX + 200]
+      states <- forM steps $ \x -> do
+        _ <- runFrame ctx (dragInp x) ui
+        bodyHBarActive ctx
+      -- While the columns overflow, the bar must be active on every frame,
+      -- including the held-still tail (the old header lane vanished at rest
+      -- because its flag compared the content against a content-floored
+      -- rect).
+      let tail4 = drop 4 states
+      case tail4 of
+        (lastFlag : _) -> assert failed (all (== lastFlag) tail4 && lastFlag)
+        [] -> assert failed False
+      -- Release the resize drag and let the layout settle.
+      _ <- runFrame ctx inp0 ui
+      _ <- runFrame ctx inp0 ui
+      -- The header scroller must never reserve or show a horizontal bar.
+      hdrSi <- headerScrollerStyle ctx
+      case hdrSi of
+        Nothing -> assert failed False
+        Just si -> assert failed (si .&. 3 == 3)
+      -- The bar lives at the bottom of the body scroller: pressing its track
+      -- there jumps the shared horizontal offset, and dragging moves it.
+      mBody <- bodyScrollerRect ctx
+      case mBody of
+        Nothing -> assert failed False
+        Just (Rect bx by bw bh) -> do
+          let barY = by + bh - scrollBarWidth / 2
+              barPress = inp0 {inputMousePos = V2 (bx + bw * 0.3) barY, inputMouseDown = True, inputMousePressed = True}
+              barDrag x = inp0 {inputMousePos = V2 x barY, inputMouseDown = True}
+          _ <- runFrame ctx barPress ui
+          V2 off1 _ <- bodyOffset ctx
+          _ <- runFrame ctx (barDrag (bx + bw * 0.95)) ui
+          V2 off2 _ <- bodyOffset ctx
+          assertGt failed off2 off1
+          _ <- runFrame ctx (barDrag (bx + bw * 0.2)) ui
+          V2 off3 _ <- bodyOffset ctx
+          assert failed (off3 < off2)
+
+-- | The body (unfrozen) v-scroller: a Column-direction 2D scroller with
+-- style bits "both policies Auto, clamp set" (shared predicate for the
+-- rect / h-bar / offset helpers below).
+isBodyScroller :: Context -> NodeIdx -> IO Bool
+isBodyScroller ctx i = do
+  let na = ctxNodeArena ctx
+  nt <- getNodeType na i
+  if nt /= NodeScrollContainer
+    then pure False
+    else do
+      d <- getDirection na i
+      if d /= DirColumn
+        then pure False
+        else do
+          si <- getStyleIdx na i
+          pure (si .&. 3 == 0 && (si `div` 4) .&. 3 == 0 && si .&. 16 /= 0)
+
+-- Width of the vertical-bar lane (bar + outer gap) reserved inside the body
+-- scroller while the columns overflow; the h-bar overflow check compares
+-- content width against the lane-shrunk view.
+bodyVBarLaneW :: Float
+bodyVBarLaneW = 6
+
+bodyScrollerRect :: Context -> IO (Maybe Rect)
+bodyScrollerRect ctx = do
+  let na = ctxNodeArena ctx
+  n <- arenaCount na
+  finds <-
+    fmap
+      (concat @[])
+      ( forM [0 .. n - 1] $ \i -> do
+          hit <- isBodyScroller ctx i
+          if not hit
+            then pure []
+            else do
+              (x, y, w, h) <- getRect na i
+              pure [Rect x y w h]
+      )
+  pure (listToMaybe finds)
+
+-- | True when the body scroller's horizontal axis overflows (bar active).
+bodyHBarActive :: Context -> IO Bool
+bodyHBarActive ctx = do
+  let na = ctxNodeArena ctx
+  n <- arenaCount na
+  finds <-
+    fmap
+      (concat @[])
+      ( forM [0 .. n - 1] $ \i -> do
+          hit <- isBodyScroller ctx i
+          if not hit
+            then pure []
+            else do
+              contentW <- getScrollContentW na i
+              (_, _, w, _) <- getRect na i
+              pure [contentW > w - bodyVBarLaneW + overflowEps]
+      )
+  pure (case finds of
+    (b : _) -> b
+    [] -> False)
+
+-- | The body scroller's 2D offset.
+bodyOffset :: Context -> IO V2
+bodyOffset ctx = do
+  let na = ctxNodeArena ctx
+  n <- arenaCount na
+  found <-
+    fmap
+      (concat @[])
+      ( forM [0 .. n - 1] $ \i -> do
+          hit <- isBodyScroller ctx i
+          if not hit
+            then pure []
+            else do
+              wid <- getWidgetId na i
+              pure [wid]
+      )
+  case found of
+    (wid : _) -> getScrollOffset2D ctx wid
+    [] -> pure (V2 0 0)
+
+-- | Style index of the header row scroller (the Row-direction one).
+headerScrollerStyle :: Context -> IO (Maybe Int)
+headerScrollerStyle ctx = do
+  let na = ctxNodeArena ctx
+  n <- arenaCount na
+  finds <-
+    fmap
+      (concat @[])
+      ( forM [0 .. n - 1] $ \i -> do
+          nt <- getNodeType na i
+          if nt /= NodeScrollContainer
+            then pure []
+            else do
+              d <- getDirection na i
+              if d /= DirRow
+                then pure []
+                else do
+                  si <- getStyleIdx na i
+                  pure [si]
+      )
+  pure (listToMaybe finds)
 
 

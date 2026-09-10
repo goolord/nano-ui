@@ -73,8 +73,13 @@ spanCenter (Rect x y w h) = V2 (x + w / 2) (y + h / 2)
 hasText :: T.Text -> [DemoSpan] -> Bool
 hasText needle = any (\(_, txt, _, _, _) -> needle `T.isInfixOf` txt)
 
+-- Blank-glyph markers some span labels carry in front of their text (blanked
+-- sort arrows, flags, sort-reserve padding).
+dropSpanMarkers :: T.Text -> T.Text
+dropSpanMarkers = T.dropWhile (`elem` ['\x01', '\x02', '\x05'])
+
 spanLabel :: T.Text -> T.Text
-spanLabel txt = T.dropWhile (`elem` ['\x01', '\x02', '\x05']) (T.strip txt)
+spanLabel txt = dropSpanMarkers (T.strip txt)
 
 findExact :: T.Text -> [DemoSpan] -> Maybe V2
 findExact needle spans =
@@ -87,11 +92,15 @@ findExact needle spans =
 
 findHeader :: T.Text -> [DemoSpan] -> Maybe V2
 findHeader needle spans =
+  -- Header spans keep their sort-reserve padding ("Name   " with the arrow
+  -- glyph blanked when unsorted), while every other "Name" label is trimmed.
+  -- Match the raw, untrimmed text so the header wins over right-aligned kv
+  -- values that happen to repeat the column name.
   let marked =
         [ (x, spanCenter r)
         | (r@(Rect x _ w h), txt, _, _, _) <- spans
         , w > 1 && h > 1
-        , T.isPrefixOf (needle <> " ") (spanLabel txt)
+        , T.isPrefixOf (needle <> " ") (dropSpanMarkers txt)
         ]
       exact =
         [ (x, spanCenter r)

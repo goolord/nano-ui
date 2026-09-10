@@ -185,8 +185,11 @@ rebuildOrder hidden newVis old =
 minColW :: Float
 minColW = 40
 
-headerEdgeHit :: Float -> [(Int, Response)] -> V2 -> Maybe Int
-headerEdgeHit pad cols mouse =
+-- | Hit-test a column resize edge. The grab zone spans the whole column
+-- height (header top to body bottom), so a column can be resized by its
+-- boundary line anywhere down the table, not just on the header cell.
+headerEdgeHit :: Float -> Float -> Float -> [(Int, Response)] -> V2 -> Maybe Int
+headerEdgeHit pad yTop yBot cols mouse =
   listToMaybe
     [ i
     | (i, r) <- cols
@@ -194,7 +197,7 @@ headerEdgeHit pad cols mouse =
     , w > 0 && h > 0
     , let mx = v2X mouse
           my = v2Y mouse
-    , my >= y && my <= y + h
+    , my >= min y yTop && my <= max (y + h) yBot
     , abs (mx - (x + w)) <= pad
     ]
 

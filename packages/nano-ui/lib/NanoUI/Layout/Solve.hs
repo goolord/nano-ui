@@ -1139,8 +1139,17 @@ positionScrollChildren a na host fm monoFm measure resolveFont depth idx dir gap
                   (subX, subY, subW, subH) <- getRect na ci
                   go ns (max maxB (subY + subH)) (max maxR (subX + subW))
     (maxB, maxR) <- go fc cy cx
-    let actualContentH = maxB + padB pad - py
-        actualContentW = maxR + padR pad - px
+    -- Content size is measured from the content origin (px+padL, py+padT) so
+    -- it compares against the padded viewport (innerW/innerH) on the same
+    -- scale. Measuring from the padding-box origin double-counts the leading
+    -- padding and makes a child that exactly fills the viewport look
+    -- padX/padY bigger, surfacing a phantom scrollbar on padded scrollers.
+    -- The trailing padding is deliberately excluded here too (so it cannot
+    -- surface a bar by itself); scrollAxisRange adds it back into the
+    -- reachable range once an axis genuinely overflows, so scrolling to the
+    -- end still reveals it.
+    let actualContentH = maxB - py - padT pad
+        actualContentW = maxR - px - padL pad
     if isScrollStyle2D si
       then do
         oldH <- getNodeValue na idx

@@ -47,7 +47,7 @@ import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
 import NanoUI.Store (WidgetStore (..), slotDrag, slotDragW, slotKey)
 import NanoUI.Style (AlignX (..), AlignY (..), Direction (..), FontVariant (..), Layout (..), Padding (..), Sizing (..), defaultLayout, fillH, fillW, tight)
 import Data.Bits ((.|.), shiftL)
-import NanoUI.Types (isCellHost, rectH, rectW, v2X, V2 (..))
+import NanoUI.Types (Rect (..), isCellHost, rectH, rectW, rectY, v2X, V2 (..))
 import NanoUI.WidgetText (buttonFlagTable, tableHeaderLabel, tableSortReserve)
 import NanoUI.Widgets.Behavior (useReorder)
 import NanoUI.Widgets.Combinators
@@ -66,7 +66,7 @@ import NanoUI.Widgets.Combinators
   , visibleCols
   )
 import NanoUI.Widgets.Layout (column', panel', row', scrollAreaIdConfigured, separator, spacer)
-import NanoUI.Frame.Scroll.Geometry (ScrollConfig (..), ScrollPolicy (..), scrollHorizontalAlways, scrollHorizontalAuto, scrollHorizontalHidden, scrollVerticalAuto, scrollVerticalHidden)
+import NanoUI.Frame.Scroll.Geometry (ScrollConfig (..), ScrollPolicy (..), scrollHorizontalHidden, scrollVerticalAuto, scrollVerticalHidden)
 import NanoUI.Widgets.Node
   ( Clickable (..)
   , Responding (..)
@@ -152,39 +152,6 @@ tableSplitPanes fillInner tableWid vWid hWid rowMinH frozenIdx unfrozenIdx pinne
   headerLine idxs renderHeader' =
     keyedRowLay (gridRowLay idxs) idxs $ \i ->
       column' (colBox i) (renderHeader' i)
-  headerGutter :: (Ui :> es) => Eff es Float
-  headerGutter = do
-    ctx <- askContext
-    let host = ctxHostProfile ctx
-        fm = ctxFontMetrics ctx
-    pure (if isCellHost host then 1 else scrollBarGutter host fm + scrollBarListExtra)
-  -- True once the unfrozen columns overflow the h-scroller (so the horizontal
-  -- scrollbar lane must be reserved). Uses the previous frame's scroller width;
-  -- reads False on the first frame, like hasVertBar below.
-  hasHBar :: (Ui :> es) => Eff es Bool
-  hasHBar = do
-    ctx <- askContext
-    mPrev <- uiIO (getPrevRect ctx hWid)
-    pure (maybe False (\r -> minSum unfrozenIdx > rectW r) mPrev)
-  -- Scroller policy for the header row, chosen from the same (previous-frame)
-  -- hBar decision that adds the lane spacer. The scroller's clip must agree
-  -- with the spacer every frame: the scroller's live ScrollAuto gutter can
-  -- activate on a frame where the spacer decision still reads the bar as
-  -- hidden (the vertical-bar lane appears, or the window narrows, between
-  -- two build frames), and that frame the lane covers the bottom hGutter of
-  -- the header row, flickering it during a resize drag. Driving the policy
-  -- from the same hBar flag keeps the lane reserved exactly while the spacer
-  -- is present, so the header can never be clipped and no dead gap appears.
-  -- Only fillInner panes get the locked policy: their Grow-width scroller is
-  -- constrained by the pane and actually scrolls. Fit-width scrollers grow
-  -- with their content (the live gutter stays 0), and on cell hosts the
-  -- bar/geometry differs, so both keep the live Auto policy.
-  hBarPolicy :: Bool -> Bool -> ScrollConfig
-  hBarPolicy terminal hBar
-    | terminal = scrollHorizontalAuto
-    | not fillInner = scrollHorizontalAuto
-    | hBar = scrollHorizontalAlways
-    | otherwise = scrollHorizontalHidden
   pinnedBlock idxs = do
     let !rowLay = gridRowLay idxs
         !colLays = map colBox idxs
@@ -234,17 +201,12 @@ tableSplitPanes fillInner tableWid vWid hWid rowMinH frozenIdx unfrozenIdx pinne
         )
         vis
       when (botH > 0) $ void (spacer Fit (Fixed botH))
-  pane fill hideVertBar idxs = do
-    g <- headerGutter
-    hBar <- hasHBar
+  pane fill hideVertBar idxs =
     column' (paneLay fill idxs) $ do
       hs <- headerLine idxs renderHeader
       void separator
       pinnedBlock idxs
       when (not (null pinned) && not (null scrollRows)) $ void separator
-      -- Mirror the h-scroller's reserved lane so header and body rows stay
-      -- aligned with the unfrozen pane whenever its bar is showing.
-      when (hideVertBar && hBar) $ void (spacer Fit (Fixed g))
       scrollAreaIdConfigured
         vWid
         (vLay fill)
@@ -257,10 +219,16 @@ tableSplitPanes fillInner tableWid vWid hWid rowMinH frozenIdx unfrozenIdx pinne
         fm = ctxFontMetrics ctx
         terminal = isCellHost host
         vGutter = if terminal then 1 else scrollBarGutter host fm + scrollBarListExtra
-    hGutter <- headerGutter
-    hBar <- hasHBar
     mPrevV <- uiIO (getPrevRect ctx vWid)
     let totalH = fromIntegral (length scrollRows) * rowMinH
+        -- Prev-frame decision, one frame behind the body scroller's live 2D
+        -- gutter: on the frame the vertical bar first appears (or vanishes)
+        -- the header spacer disagrees with the body's reserved lane for one
+        -- frame. The horizontal side dodges this class of lag by owning its
+        -- bar inside the body scroller; the vertical lane cannot do that
+        -- because the header must narrow by exactly the lane width at build
+        -- time, and the body's live v-gutter is only known after this
+        -- frame's solve. Known, accepted one-frame misalignment.
         hasVertBar = maybe (totalH > 100) (\r -> totalH > rectH r) mPrevV
     column' (paneLay fillInner idxs) $ do
       hs <-
@@ -268,32 +236,33 @@ tableSplitPanes fillInner tableWid vWid hWid rowMinH frozenIdx unfrozenIdx pinne
           hs' <-
             scrollAreaIdConfigured
               hWid
-              ((if fillInner then fillW else id) (hRowLay {layoutMinW = minSum idxs}))
-              (hBarPolicy terminal hBar) $
+              ( if fillInner
+                  then fillW hRowLay
+                  else hRowLay {layoutMinW = minSum idxs}
+              )
+              -- The header scroller is chrome-less: it follows the body's
+              -- horizontal offset (linkScrollAxes below) and clips the header
+              -- row at the pane edge. The horizontal scrollbar itself belongs
+              -- to the body scroller so it spans the full table width at the
+              -- table's bottom edge instead of sitting under the header.
+              scrollHorizontalHidden $
               column' ((if fillInner then fillW else id) (tight $ defaultLayout {layoutGap = 0, layoutMinW = minSum idxs})) $ do
                 hs'' <- headerLine idxs renderHeader
                 void separator
                 pinnedBlock idxs
                 when (not (null pinned) && not (null scrollRows)) $ void separator
-                -- Reserve the h-scrollbar lane at the bottom of the scroller
-                -- content, but only while the bar is actually showing: when
-                -- it is active the lane covers this spacer and the header and
-                -- pinned rows keep their full height; when it is inactive no
-                -- space is reserved, so no dead gap shows under the header.
-                -- The scroller policy must follow the same (previous-frame)
-                -- hBar decision as this spacer: a live ScrollAuto gutter
-                -- would clip the bottom of the header row for the frame the
-                -- bar appears before the spacer lands, flickering the header
-                -- during column resize drags.
-                when hBar $ void (spacer Fit (Fixed hGutter))
                 pure hs''
           when hasVertBar $ void (spacer (Fixed vGutter) Fit)
           pure hs'
       uiIO (linkScrollAxes ctx vWid hWid)
+      -- The body owns both bars: the vertical one on the right, and the
+      -- horizontal one at the bottom of the table. Its live 2D gutter logic
+      -- reserves the lane exactly while the columns overflow, so the bar
+      -- cannot flicker the way the prev-frame header lane did.
       scrollAreaIdConfigured
         vWid
         (vLay fillInner)
-        (ScrollConfig ScrollHidden ScrollAuto True)
+        (ScrollConfig ScrollAuto ScrollAuto True)
         (bodyBlock vWid True idxs)
       pure hs
 
@@ -532,31 +501,55 @@ writeColW ctx key ws = do
   setStore ctx (st {storeFloatList = IM.insert key ws (storeFloatList st)})
   markDirty ctx
 
-finishTable ::
-  (Ui :> es) =>
-  Int ->
-  Int ->
-  Bool ->
-  [Int] ->
-  [Int] ->
-  IS.IntSet ->
-  Int ->
-  Float ->
-  Float ->
-  [Float] ->
-  [Float] ->
-  SortCol ->
-  [(Int, Response)] ->
-  Maybe Response ->
-  (Int -> Float) ->
-  Eff es TableResponse
-finishTable n stateKey terminal vis order0 hidden0 drag0 dragX0 dragW0 widths0 widths1 sort0 headerPairs showAllResp resolvedW = do
+-- | Inputs tableCfg collects for finishTable. Positional args invite silent
+-- transposition (two [Float]s, several plain Floats), so keep them named.
+data TableFinish = TableFinish
+  { tfN :: Int
+  , tfStateKey :: Int
+  , tfTerminal :: Bool
+  , tfVis :: [Int]
+  , tfOrder0 :: [Int]
+  , tfHidden0 :: IS.IntSet
+  , tfDrag0 :: Int
+  , tfDragX0 :: Float
+  , tfDragW0 :: Float
+  , tfWidths0 :: [Float]
+  , tfWidths1 :: [Float]
+  , tfSort0 :: SortCol
+  , tfHeaderPairs :: [(Int, Response)]
+  , tfShowAllResp :: Maybe Response
+  , tfResolvedW :: Int -> Float
+  , tfBodyWid :: WidgetId
+  }
+
+finishTable :: (Ui :> es) => TableFinish -> Eff es TableResponse
+finishTable TableFinish{tfN = n, tfStateKey = stateKey, tfTerminal = terminal, tfVis = vis, tfOrder0 = order0, tfHidden0 = hidden0, tfDrag0 = drag0, tfDragX0 = dragX0, tfDragW0 = dragW0, tfWidths0 = widths0, tfWidths1 = widths1, tfSort0 = sort0, tfHeaderPairs = headerPairs, tfShowAllResp = showAllResp, tfResolvedW = resolvedW, tfBodyWid = bodyWid} = do
   ctx <- askContext
   inp <- askInput
+  mBodyRect <- uiIO (getPrevRect ctx bodyWid)
   let mouse = inputMousePos inp
       mx = v2X mouse
       edgePad = if terminal then 1 else 4
-      edgeCol = headerEdgeHit edgePad headerPairs mouse
+      -- Resize grab zone spans the header band plus the body scroller: a
+      -- column boundary is resizable anywhere down the table, not just on
+      -- the header cell. The bottom anchor is the body scroller's rect
+      -- (prev frame: readable at build time). The resize cursor
+      -- (Frame.Cursor.tableColResizeCursorKind) locates the same scroller
+      -- structurally and uses its current-frame rect, so the grab zone and
+      -- the cursor zone are the same rect and cannot drift apart. First
+      -- frame (no prev rect yet): header band only.
+      hdrSpans =
+        [ (rectY rr, rectY rr + rectH rr)
+        | (_, r) <- headerPairs
+        , let rr = rawRespRect r
+        ]
+      (edgeTop, edgeBot) = case hdrSpans of
+        [] -> (0, 0)
+        _ ->
+          ( minimum (map fst hdrSpans)
+          , maybe (maximum (map snd hdrSpans)) (\(Rect _ by _ bh) -> by + bh) mBodyRect
+          )
+      edgeCol = headerEdgeHit edgePad edgeTop edgeBot headerPairs mouse
       hoverCol = headerAtPoint headerPairs mouse
       headerRects = [(i, rawRespRect r) | (i, r) <- headerPairs]
       resizing = isResizeDrag drag0 && inputMouseDown inp
@@ -710,4 +703,22 @@ tableCfg cfg outerLayout key cols rows curSort =
             addWidgetStyled wid NodeButton "Show all columns" 0 (tight . fillW $ defaultLayout) 0 Nothing
       headerPairs <-
         tableSplitPanes (tableFillInner cfg outerLayout) tableWid vWid hWid rowMinH frozenIdx unfrozenIdx pinned scrollRows colBox renderHeader renderCell
-      finishTable n stateKey terminal vis order0 hidden0 drag0 dragX0 dragW0 widths0 widths1 sort0 headerPairs showAllResp resolvedW
+      finishTable
+        TableFinish
+          { tfN = n
+          , tfStateKey = stateKey
+          , tfTerminal = terminal
+          , tfVis = vis
+          , tfOrder0 = order0
+          , tfHidden0 = hidden0
+          , tfDrag0 = drag0
+          , tfDragX0 = dragX0
+          , tfDragW0 = dragW0
+          , tfWidths0 = widths0
+          , tfWidths1 = widths1
+          , tfSort0 = sort0
+          , tfHeaderPairs = headerPairs
+          , tfShowAllResp = showAllResp
+          , tfResolvedW = resolvedW
+          , tfBodyWid = vWid
+          }

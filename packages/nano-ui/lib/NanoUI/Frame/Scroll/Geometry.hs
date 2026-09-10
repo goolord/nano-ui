@@ -10,6 +10,7 @@ module NanoUI.Frame.Scroll.Geometry
   , scrollViewportClip2D
   , scrollChromeLane
   , scrollBarLayout
+  , scrollAxisRange
   , scrollOffsetFromThumb
   , padContentClip
   , encodeScrollConfig
@@ -195,6 +196,17 @@ scrollAxisOverflows policy contentSize innerMain =
     ScrollAlways -> True
     ScrollAuto -> contentSize > innerMain + 0.5
 
+-- | Scroll range along one axis. Content that fits (modulo the trailing
+-- padding, which must not surface a bar by itself) does not scroll; genuine
+-- overflow extends the range past the last child by the trailing padding so
+-- scrolling to the end still reveals it. Stored content sizes exclude the
+-- trailing padding (see positionScrollChildren); this is where it is added
+-- back into the reachable range.
+scrollAxisRange :: Float -> Float -> Float -> Float
+scrollAxisRange contentSize innerMain trailingPad
+  | contentSize > innerMain + 0.5 = max 0 (contentSize + trailingPad - innerMain)
+  | otherwise = 0
+
 scrollChromeActive ::
   ScrollConfig ->
   Bool ->
@@ -314,7 +326,9 @@ scrollBarLayout host fm slot dir x y w h pad contentSize off =
    in case dir of
         DirColumn ->
           let innerH = h - padT pad - padB pad
-              maxOff = max 0 (contentSize - innerH)
+              trailH = padB pad
+              extentH = contentSize + trailH
+              maxOff = scrollAxisRange contentSize innerH trailH
            in if maxOff <= 0
                 then Nothing
                 else
@@ -322,7 +336,7 @@ scrollBarLayout host fm slot dir x y w h pad contentSize off =
                       trackX = rectX lane
                       trackY = y + padT pad + barMargin
                       trackH = max 0 (innerH - 2 * barMargin)
-                      thumbH = max minThumb (trackH * innerH / contentSize)
+                      thumbH = max minThumb (trackH * innerH / extentH)
                       ratio = off / maxOff
                       thumbY = trackY + ratio * (trackH - thumbH)
                    in
@@ -334,7 +348,9 @@ scrollBarLayout host fm slot dir x y w h pad contentSize off =
                         }
         DirRow ->
           let innerW = w - padL pad - padR pad
-              maxOff = max 0 (contentSize - innerW)
+              trailW = padR pad
+              extentW = contentSize + trailW
+              maxOff = scrollAxisRange contentSize innerW trailW
            in if maxOff <= 0
                 then Nothing
                 else
@@ -342,7 +358,7 @@ scrollBarLayout host fm slot dir x y w h pad contentSize off =
                       trackY = rectY lane
                       trackX = x + padL pad + barMargin
                       trackW = max 0 (innerW - 2 * barMargin)
-                      thumbW = max minThumb (trackW * innerW / contentSize)
+                      thumbW = max minThumb (trackW * innerW / extentW)
                       ratio = off / maxOff
                       thumbX = trackX + ratio * (trackW - thumbW)
                    in

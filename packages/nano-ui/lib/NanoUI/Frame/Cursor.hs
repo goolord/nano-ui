@@ -10,7 +10,7 @@ module NanoUI.Frame.Cursor
   , textFieldHoverCursorKind
   ) where
 import Data.IORef (readIORef)
-import Data.Maybe (isJust)
+import Data.Maybe (fromMaybe, isJust)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Text as T
 import NanoUI.Context
@@ -41,14 +41,18 @@ import NanoUI.Input
   )
 import NanoUI.Layout.Arena
   ( DirTag (..)
+  , NodeIdx
   , NodeType (..)
   , arenaCount
   , getScrollContentW
   , getDirection
+  , getFirstChild
+  , getNextSibling
   , getNodeType
   , getNodeValue
   , getOptions
   , getPadding
+  , getParent
   , getRect
   , getStyleIdx
   , getText
@@ -401,12 +405,59 @@ tableColResizeCursorKind ctx inp = do
                       then go (idx + 1)
                       else do
                         (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-                        let hitY = v2Y mouse >= y && v2Y mouse <= y + h
+                        -- The resize cursor spans the whole column height
+                        -- (header plus body cells down to the body
+                        -- scroller's bottom edge), matching the drag grab
+                        -- zone: tableBodyScrollerBottom locates the same
+                        -- body scroller whose rect the grab zone anchors
+                        -- on (its prev-frame value, readable at build
+                        -- time), so the two zones cannot disagree.
+                        mBot <- tableBodyScrollerBottom ctx idx
+                        let yBot = fromMaybe (y + h) mBot
+                            hitY = v2Y mouse >= y && v2Y mouse <= yBot
                             hitEdge = abs (v2X mouse - (x + w)) <= 4
                         if hitY && hitEdge && w > 0 && h > 0
                           then pure (Just UiCursorEwResize)
                           else go (idx + 1)
       go 0
+
+-- | Bottom edge of a table's body scroller, located structurally from one
+-- of its header buttons: walk up to the first ancestor that has a direct
+-- Column-direction scroll-container child (the pane column built by
+-- tableSplitPanes) and take that child's rect bottom. Runs post-solve, so
+-- the rect is current-frame. Nothing when no such scroller exists (the
+-- caller falls back to the header button's own bottom).
+tableBodyScrollerBottom :: Context -> NodeIdx -> IO (Maybe Float)
+tableBodyScrollerBottom ctx = goUp
+  where
+    na = ctxNodeArena ctx
+    goUp i = do
+      p <- getParent na i
+      if p < 0
+        then pure Nothing
+        else do
+          mScroller <- firstColumnScrollChild p
+          case mScroller of
+            Just sc -> do
+              (_, sy, _, sh) <- getRect na sc
+              pure (Just (sy + sh))
+            Nothing -> goUp p
+    firstColumnScrollChild p = do
+      fc <- getFirstChild na p
+      let go c
+            | c < 0 = pure Nothing
+            | otherwise = do
+                nt <- getNodeType na c
+                hit <-
+                  if not (isScrollNode nt)
+                    then pure False
+                    else do
+                      d <- getDirection na c
+                      pure (d == DirColumn)
+                if hit
+                  then pure (Just c)
+                  else getNextSibling na c >>= go
+      go fc
 
 pointerCursorWanted :: Context -> Input -> IO Bool
 pointerCursorWanted ctx inp = cursorKindIs ctx inp UiCursorPointer

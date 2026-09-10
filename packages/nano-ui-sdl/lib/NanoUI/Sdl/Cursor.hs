@@ -14,6 +14,8 @@ import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (peekByteOff)
 import NanoUI (Input (..))
 import NanoUI.Testing (Context, UiCursorKind (..), uiCursorKind)
+import System.Environment (lookupEnv)
+import System.IO (hPutStrLn, stderr)
 import qualified SDL3.Sys.Bindgen.Mouse as Mouse
 import SDL3.Sys.Mouse
   ( createSystemCursorSafe
@@ -87,6 +89,7 @@ data SdlCursors = SdlCursors
   , scNwseResize :: Ptr Mouse.SDL_Cursor
   , scNeswResize :: Ptr Mouse.SDL_Cursor
   , scCurrent :: IORef UiCursorKind
+  , scTrace :: Bool
   }
 
 initCursors :: IO SdlCursors
@@ -103,6 +106,9 @@ initCursors = do
   grab <- grabCursorOrFallback moveFallback supported
   grabbing <- grabbingCursorOrFallback moveFallback supported
   current <- newIORef UiCursorDefault
+  -- Debug aid, read once here so cursor changes stay allocation-free:
+  -- NANO_CURSOR_TRACE=1 logs every cursor change to stderr.
+  trace <- (== Just "1") <$> lookupEnv "NANO_CURSOR_TRACE"
   -- NULL cursors are tolerated: SDL_SetCursor(NULL) selects the platform
   -- default arrow, which keeps us running on headless/dummy video drivers
   -- where system cursor shapes are unavailable.
@@ -119,6 +125,7 @@ initCursors = do
       , scNwseResize = nwse
       , scNeswResize = nesw
       , scCurrent = current
+      , scTrace = trace
       }
 
 destroyOwnedCursor :: Ptr Mouse.SDL_Cursor -> Ptr Mouse.SDL_Cursor -> IO ()
@@ -156,5 +163,7 @@ syncPointerCursor cursors ctx inp = do
   want <- uiCursorKind ctx inp
   cur <- readIORef (scCurrent cursors)
   when (want /= cur) $ do
+    when (scTrace cursors) $
+      hPutStrLn stderr ("cursor: " ++ show want ++ " at " ++ show (inputMousePos inp))
     void $ setCursorSafe (cursorPtr cursors want)
     writeIORef (scCurrent cursors) want
