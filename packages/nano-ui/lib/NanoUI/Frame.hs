@@ -3,14 +3,11 @@
 module NanoUI.Frame
   ( FrameResult (..)
   , FrameReduceResult (..)
-  , runFrameResult
-  , runFrameReduceResult
   , runFrame
   , runFrameEff
   , runFrameReduce
   , runFrameReduceEff
   , needsRedraw
-  , needsRedrawIdle
   , pointerDragActive
   , textFieldActive
   , floatingPanelActive
@@ -86,7 +83,6 @@ import NanoUI.Frame.Redraw
   ( debugPanelOpen
   , floatingPanelActive
   , needsRedraw
-  , needsRedrawIdle
   , overlayMenuOpen
   , pointerDragActive
   , textFieldActive
@@ -149,23 +145,6 @@ data FrameReduceResult a model msg = FrameReduceResult
   , frDrawData :: !DrawData
   , frNeedsRedraw :: !Bool
   }
-
-runFrameResult :: Context -> Input -> NanoUI a -> IO (FrameResult a)
-runFrameResult ctx inp ui = do
-  (a, msgs, draw, dirty) <- runFrame ctx inp ui
-  pure (FrameResult a msgs draw dirty)
-
-runFrameReduceResult ::
-  (Typeable msg, Eq model) =>
-  (msg -> model -> model)
-  -> Context
-  -> Input
-  -> model
-  -> (model -> NanoUI a)
-  -> IO (FrameReduceResult a model msg)
-runFrameReduceResult update ctx inp model view = do
-  (a, model', typed, draw, dirty) <- runFrameReduce update ctx inp model view
-  pure (FrameReduceResult a model' typed draw dirty)
 
 runFrame :: Context -> Input -> NanoUI a -> IO (a, [FrameMsg], DrawData, Bool)
 runFrame = runFrameEff runEff

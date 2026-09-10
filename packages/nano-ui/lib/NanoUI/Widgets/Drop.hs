@@ -49,8 +49,8 @@ import NanoUI.Store
   )
 import NanoUI.Style (Layout)
 import NanoUI.Types (Rect, V2 (..), rectContains)
-import NanoUI.Widgets.Layout (panelResponse')
-import NanoUI.Widgets.Node (Responding (respRect), Response)
+import NanoUI.Layout.Arena (NodeType (..))
+import NanoUI.Widgets.Node (Responding (respRect), Response, containerResponse)
 
 -- | Per-frame drop state for a single rectangular drop target.
 data DropTarget = DropTarget
@@ -155,6 +155,6 @@ onDropHover target act = when (dropHovered target) act
 -- to react to the drop without hand-rolling the rect plumbing.
 dropZone :: Ui :> es => Layout -> Eff es a -> Eff es (a, Response, DropTarget)
 dropZone layout child = do
-  (a, resp) <- panelResponse' layout child
+  (a, resp) <- containerResponse NodePanel layout child
   target <- useDrop (respRect resp)
   pure (a, resp, target)

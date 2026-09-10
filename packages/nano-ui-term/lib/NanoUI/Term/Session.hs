@@ -41,7 +41,7 @@ import NanoUI.Testing
   , spanArenaCount
   , isDirty
   , debugPanelOpen
-  , needsRedrawIdle
+  , needsRedraw
   , pointerDragActive
   , widgetNodeCount
   )
@@ -188,7 +188,7 @@ termMainLoop ctx shouldQuit runOnce getSize readEvents present = do
           , sdShouldDraw    = \c prevI curI _ -> do
               debugLive <- debugPanelOpen c
               wantDebug <- takeDebugLive debugRef debugLive
-              need <- needsRedrawIdle c prevI curI
+              need <- needsRedraw c prevI curI
               pure (need || wantDebug)
           , sdDraw          = \c curI _ -> do
               t0 <- getMonotonicTime

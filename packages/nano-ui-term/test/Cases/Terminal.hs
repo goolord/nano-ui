@@ -159,7 +159,7 @@ runTerminalModalOpenRedrawTest _ failed = do
   _ <- runFrame ctx press ui
   _ <- runFrame ctx release ui
   let idle = inp0 {inputDeltaTime = 0}
-  need <- needsRedrawIdle ctx release idle
+  need <- needsRedraw ctx release idle
   assert failed need
   _ <- runFrame ctx idle ui
   overlays <- collectOverlayTextSpans ctx idle

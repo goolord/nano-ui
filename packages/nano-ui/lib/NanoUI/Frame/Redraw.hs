@@ -2,7 +2,6 @@
 
 module NanoUI.Frame.Redraw
   ( needsRedraw
-  , needsRedrawIdle
   , pointerDragActive
   , textFieldActive
   , floatingPanelActive
@@ -45,11 +44,6 @@ import NanoUI.Frame.Select (overlayMenuOwnerAt)
 
 needsRedraw :: Context -> Input -> Input -> IO Bool
 needsRedraw = needsRedrawBody
-
--- Terminal keeps the last blit while idle. SDL debug HUD refresh is
--- rate-limited in the session (`takeDebugLive`), not by this predicate.
-needsRedrawIdle :: Context -> Input -> Input -> IO Bool
-needsRedrawIdle = needsRedrawBody
 
 -- Window/scroll/resize drag marks dirty every frame. TUI must still poll input then.
 -- Color picker and slider hold ctxActiveId without extra window/scroll refs.

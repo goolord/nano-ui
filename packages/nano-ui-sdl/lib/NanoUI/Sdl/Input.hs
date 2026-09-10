@@ -11,14 +11,12 @@ module NanoUI.Sdl.Input
   , isHardQuit
   , isHardQuitInput
   , isButtonEdge
-  , splitFrame
   ) where
 
 import Data.Bits ((.&.))
 import Data.Primitive.SmallArray
   ( SmallArray
   , emptySmallArray
-  , indexSmallArray
   , sizeofSmallArray
   , smallArrayFromListN
   )
@@ -45,7 +43,6 @@ import NanoUI
   , v2Add
   )
 import NanoUI.Input (clearEphemeral, isHardQuitInput)
-import qualified NanoUI.Input as Inp
 import NanoUI.Sdl.Display (readRefreshEventType)
 import SDL3.Sys.Bindgen.Events
   ( SDL_Event (..)
@@ -350,15 +347,6 @@ isButtonEdge ev =
     EvMouseRightPress _ _ -> True
     EvMouseRightRelease _ _ -> True
     _ -> False
-
-splitFrame :: SmallArray SdlEvent -> (SmallArray SdlEvent, SmallArray SdlEvent)
-splitFrame events =
-  let len = sizeofSmallArray events
-      lst = [indexSmallArray events i | i <- [0 .. len - 1]]
-      (group, rest) = Inp.splitFrame isButtonEdge lst
-   in ( smallArrayFromListN (length group) group
-      , smallArrayFromListN (length rest) rest
-      )
 
 isHardQuit :: SdlEvent -> Bool
 isHardQuit ev =

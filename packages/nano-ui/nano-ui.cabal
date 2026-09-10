@@ -63,7 +63,6 @@ library
         NanoUI.Debug
         NanoUI.Id
         NanoUI.Input
-        NanoUI.Layout
         NanoUI.Layout.Arena
         NanoUI.Layout.Solve
         NanoUI.Monad

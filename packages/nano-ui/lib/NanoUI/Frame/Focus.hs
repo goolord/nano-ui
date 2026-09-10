@@ -8,7 +8,6 @@ module NanoUI.Frame.Focus
   , syncWidgetLabels
   , tabNext
   , tabNextFocusables
-  , unlessHit
   ) where
 
 import Control.Monad (filterM, unless, when)
@@ -74,9 +73,6 @@ tabNextFocusables ctx cur shift = do
       case found of
         Nothing -> firstLive 0
         Just i -> step i n
-
-unlessHit :: Bool -> IO () -> IO ()
-unlessHit b act = when (not b) act
 
 filterModalFocusables :: Context -> [WidgetId] -> IO [WidgetId]
 filterModalFocusables ctx ids = do

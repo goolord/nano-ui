@@ -8,7 +8,6 @@ module NanoUI.Runner
     -- * Click Tracking
   , ClickTracker (..)
   , newClickTracker
-  , stampClicks
   , stampClicksWith
     -- * Drawing Lock
   , DrawingLock (..)
@@ -95,10 +94,6 @@ newtype ClickTracker = ClickTracker (IORef (Double, V2, Int))
 -- | Create a new click tracker initialized to no previous clicks.
 newClickTracker :: IO ClickTracker
 newClickTracker = ClickTracker <$> newIORef (0, V2 (-999) (-999), 0)
-
--- | Stamp multi-click counts into an 'Input' record using standard pixel thresholds.
-stampClicks :: ClickTracker -> Input -> IO Input
-stampClicks = stampClicksWith 5.0 0.4
 
 -- | Stamp multi-click counts into an 'Input' record with custom distance and time thresholds.
 stampClicksWith :: Float -> Double -> ClickTracker -> Input -> IO Input

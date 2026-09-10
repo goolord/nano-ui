@@ -8,7 +8,6 @@ module NanoUI.Testing
   , runFrameReduce
   , runFrameReduceEff
   , needsRedraw
-  , needsRedrawIdle
   , pointerDragActive
   , textFieldActive
   , floatingPanelActive
@@ -109,11 +108,7 @@ module NanoUI.Testing
   , LayerSlice (..)
   , drawCmdNull
   , drawCmdElems
-  , drawCmdFilter
-  , drawCmdForLayer
   , forDrawCmdsInLayer_
-  , drawCmdElemsForLayer
-  , drawCmdPartitionByLayer
   , drawCmdCount
   , vertexSize
   , indexSize
@@ -229,11 +224,7 @@ import NanoUI.Draw
   , backdropDimTextureId
   , glyphAtlasTextureId
   , drawCmdElems
-  , drawCmdFilter
-  , drawCmdForLayer
   , forDrawCmdsInLayer_
-  , drawCmdElemsForLayer
-  , drawCmdPartitionByLayer
   , drawCmdNull
   , drawCmdCount
   , drawTextBox
@@ -259,7 +250,6 @@ import NanoUI.Frame
   , debugPanelOpen
   , floatingPanelActive
   , needsRedraw
-  , needsRedrawIdle
   , pointerCursorWanted
   , pointerDragActive
   , runFrame

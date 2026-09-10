@@ -29,7 +29,6 @@ module NanoUI.Context
   , setTextInputMenu
   , getSelectDropPress
   , setSelectDropPress
-  , getOpenSelectDrop
   , setOpenSelectDrop
   , getMenuPointerGesture
   , setMenuPointerGesture
@@ -39,12 +38,10 @@ module NanoUI.Context
   , setWindowResize
   , intKey
   , markDirty
-  , modifyIORefList
   , clearDirty
   , isDirty
   , setWakeLoop
   , takeDamage
-  , setDamage
   , getLastWindowSize
   , setDamageAndWindowSize
   , DamageRequest (..)
@@ -54,18 +51,15 @@ module NanoUI.Context
   , damageRect
   , damagePeers
   , damageFull
-  , clearDamageRequests
   , getDamageRequests
   , registerPopupConfig
   , lookupPopupConfig
-  , clearPopupConfigs
   , registerDrawing
   , lookupDrawing
   , cachedDrawingOps
   , cachedWidgetLayout
   , lookupDrawFitEnvelope
   , pruneDrawOpCache
-  , clearDrawings
   , CustomMeasureFn
   , CustomDrawContext (..)
   , CustomDrawBuild
@@ -84,23 +78,15 @@ module NanoUI.Context
   , getStore
   , setStore
   , isDisabled
-  , setDisabled
   , getScrollOffset
   , setScrollOffset
   , getScrollOffset2D
   , setScrollOffset2D
-  , getScrollConfig
   , setScrollConfig
-  , getScrollContentExtent
-  , setScrollContentExtent
   , linkScrollAxes
-  , getPrevRectByKey
   , getPrevRect
-  , getPrevClipRectByKey
   , getPrevClipRect
-  , setPrevRect
   , getPrevRects
-  , getPrevClips
   , setPrevRectsAndClips
   , getPrevNodeTexts
   , setPrevNodeTexts
@@ -113,17 +99,12 @@ module NanoUI.Context
   , withMonoFontMetrics
   , withMeasureText
   , withFontResolver
-  , resolveFontMetrics
-  , resolveMeasureText
-  , defaultResolveFont
-  , defaultResolveMeasure
   , wrapMeasureCache
   , clearMeasureCache
   , withExternalText
   , withTheme
   , setTheme
   , getTheme
-  , withDefaultLayoutIO
   , withIcons
   , withHostProfile
   , withClipboard
@@ -141,13 +122,11 @@ module NanoUI.Context
   , getHotId
   , registerFocusable
   , getFocusables
-  , getFocusablesPrim
   -- Modal & Overlay
   , textInputEditActive
   , modalActive
   , overlayConsumesQuit
   , markEscapeConsumed
-  , resetEscapeConsumed
   , pointerBlockedByModal
   , pointerBlockedByOverlay
   , menuPointerGestureActive
@@ -221,9 +200,7 @@ import Data.IntMap.Strict qualified as IM
 import Data.Map.Strict qualified as Map
 import Data.Maybe (isNothing)
 import Data.Primitive.PrimArray
-  ( PrimArray
-  , copyMutablePrimArray
-  , freezePrimArray
+  ( copyMutablePrimArray
   , newPrimArray
   , readPrimArray
   , writePrimArray
@@ -318,7 +295,6 @@ import NanoUI.Store
   , slotDragW
   , slotKey
   , slotScrollCfg
-  , slotScrollContent
   , slotScrollOff
   , slotTextAreaScroll
   , slotScrollCross
@@ -452,12 +428,6 @@ damagePeers ctx wids bounds =
 damageFull :: Context -> IO ()
 damageFull ctx = requestDamage ctx ReqFull
 
-{-# INLINE clearDamageRequests #-}
-clearDamageRequests :: Context -> IO ()
-clearDamageRequests ctx =
-  modifyIORef' (ctxDamageState ctx) $ \ds ->
-    ds {dsRequests = []}
-
 {-# INLINE getDamageRequests #-}
 getDamageRequests :: Context -> IO [DamageRequest]
 getDamageRequests ctx = dsRequests <$> readIORef (ctxDamageState ctx)
@@ -494,11 +464,6 @@ setWakeLoop ctx wake = writeIORef (ctxWakeLoop ctx) (Just wake)
 takeDamage :: Context -> IO Damage
 takeDamage ctx = dsDamage <$> readIORef (ctxDamageState ctx)
 
-{-# INLINE setDamage #-}
-setDamage :: Context -> Damage -> IO ()
-setDamage ctx dmg =
-  modifyIORef' (ctxDamageState ctx) $ \ds -> ds {dsDamage = dmg}
-
 {-# INLINE getLastWindowSize #-}
 getLastWindowSize :: Context -> IO Size
 getLastWindowSize ctx = dsLastWindowSize <$> readIORef (ctxDamageState ctx)
@@ -520,12 +485,6 @@ lookupPopupConfig :: Context -> WidgetId -> IO (Maybe (PopupAnchor, PopupPlaceme
 lookupPopupConfig ctx wid = do
   dc <- readIORef (ctxDrawingCache ctx)
   pure (IM.lookup (intKey wid) (dcsPopupConfigs dc))
-
-{-# INLINE clearPopupConfigs #-}
-clearPopupConfigs :: Context -> IO ()
-clearPopupConfigs ctx =
-  modifyIORef' (ctxDrawingCache ctx) $ \dc ->
-    dc {dcsPopupConfigs = IM.empty}
 
 {-# INLINE registerDrawing #-}
 registerDrawing :: Context -> WidgetId -> DrawingBuild -> IO ()
@@ -624,18 +583,6 @@ pruneDrawOpCache ctx =
           , dcsCustomDrawOpCache = dcsCustomDrawOpCache dc `IM.intersection` customLive
           , dcsDrawFitCache = dcsDrawFitCache dc `IM.intersection` live
           }
-
-{-# INLINE clearDrawings #-}
-clearDrawings :: Context -> IO ()
-clearDrawings ctx =
-  modifyIORef' (ctxDrawingCache ctx) $ \dc ->
-    dc
-      { dcsDrawings = IM.empty
-      , dcsCustomDrawings = IM.empty
-      , dcsCustomMeasures = IM.empty
-      , dcsCustomCursors = IM.empty
-      , dcsCustomDamageSlop = IM.empty
-      }
 
 {-# INLINE registerCustomDrawing #-}
 registerCustomDrawing :: Context -> WidgetId -> CustomDrawBuild -> IO ()
@@ -782,20 +729,6 @@ isDisabled ctx wid = do
   s <- getStore ctx
   pure (intBool (IM.findWithDefault 0 (slotKey slotDisabled (intKey wid)) (storeInt s)))
 
-{-# INLINE setDisabled #-}
-setDisabled :: Context -> WidgetId -> Bool -> IO ()
-setDisabled ctx wid dis = do
-  s <- getStore ctx
-  setStore ctx (s {storeInt = IM.insert (slotKey slotDisabled (intKey wid)) (boolInt dis) (storeInt s)})
-
--- | Snap a scroll offset to the device pixel grid, the same grid 'pushText' and
--- 'pushRect' snap to. Per-element snapping is not translation-invariant with
--- respect to a fractional scroll offset, so without this the distance between a
--- row and its text can toggle by a device pixel frame-to-frame while content
--- scrolls, which shows up as shimmering/jittery scrolling text. Publishing the
--- offset on the device grid keeps every consumer (paint, hit-testing, cursor,
--- scrollbar thumb) in lockstep, and the raw offset keeps sub-pixel trackpad
--- deltas so they accumulate until a device pixel is crossed.
 {-# INLINE snapScrollOffset #-}
 snapScrollOffset :: Context -> Float -> IO Float
 snapScrollOffset ctx v = do
@@ -950,32 +883,9 @@ setScrollConfig ctx wid cfg = do
   when (prev /= bits) $
     setStore ctx (store {storeInt = IM.insert cfgKey bits (storeInt store)})
 
-{-# INLINE getScrollContentExtent #-}
-getScrollContentExtent :: Context -> WidgetId -> IO (Float, Float)
-getScrollContentExtent ctx wid = do
-  s <- getStore ctx
-  let key = slotKey slotScrollContent (intKey wid)
-  case IM.lookup key (storePoint s) of
-    Just (w, h) -> pure (w, h)
-    Nothing -> pure (0, 0)
-
-{-# INLINE setScrollContentExtent #-}
-setScrollContentExtent :: Context -> WidgetId -> Float -> Float -> IO ()
-setScrollContentExtent ctx wid w h = do
-  store <- getStore ctx
-  let key = slotKey slotScrollContent (intKey wid)
-      next = (w, h)
-      prev = IM.lookup key (storePoint store)
-  when (prev /= Just next) $
-    setStore ctx (store {storePoint = IM.insert key next (storePoint store)})
-
 {-# INLINE getPrevRects #-}
 getPrevRects :: Context -> IO (IntMap Rect)
 getPrevRects ctx = dsPrevRects <$> readIORef (ctxDamageState ctx)
-
-{-# INLINE getPrevClips #-}
-getPrevClips :: Context -> IO (IntMap Rect)
-getPrevClips ctx = dsPrevClips <$> readIORef (ctxDamageState ctx)
 
 {-# INLINE setPrevRectsAndClips #-}
 setPrevRectsAndClips :: Context -> IntMap Rect -> IntMap Rect -> IO ()
@@ -1012,12 +922,6 @@ getPrevClipRectByKey ctx k = do
 {-# INLINE getPrevClipRect #-}
 getPrevClipRect :: Context -> WidgetId -> IO (Maybe Rect)
 getPrevClipRect ctx wid = getPrevClipRectByKey ctx (intKey wid)
-
-{-# INLINE setPrevRect #-}
-setPrevRect :: Context -> WidgetId -> Rect -> IO ()
-setPrevRect ctx wid r =
-  modifyIORef' (ctxDamageState ctx) $ \ds ->
-    ds {dsPrevRects = IM.insert (intKey wid) r (dsPrevRects ds)}
 
 {-# INLINE registerImage #-}
 registerImage :: Context -> ImageId -> Int -> Int -> ByteString -> IO Bool
@@ -1073,14 +977,6 @@ withFontResolver ::
   (Float -> FontWeight -> FontStyle -> FontVariant -> Text -> IO (Float, Float)) ->
   Context
 withFontResolver ctx rf rm = ctx {ctxResolveFont = rf, ctxResolveMeasure = rm}
-
-{-# INLINE resolveFontMetrics #-}
-resolveFontMetrics :: Context -> Float -> FontWeight -> FontStyle -> FontVariant -> IO FontMetrics
-resolveFontMetrics ctx sz w st var = fst <$> ctxResolveFont ctx sz w st var
-
-{-# INLINE resolveMeasureText #-}
-resolveMeasureText :: Context -> Float -> FontWeight -> FontStyle -> FontVariant -> Text -> IO (Float, Float)
-resolveMeasureText ctx sz w st var txt = ctxResolveMeasure ctx sz w st var txt
 
 withFontMetrics :: Context -> FontMetrics -> Context
 withFontMetrics ctx fm =
@@ -1158,11 +1054,6 @@ setTheme ctx th = do
 
 getTheme :: Context -> IO Theme
 getTheme ctx = readIORef (ctxTheme ctx)
-
-withDefaultLayoutIO :: Context -> Layout -> IO Context
-withDefaultLayoutIO ctx lay = do
-  writeIORef (ctxDefaultLayout ctx) lay
-  pure ctx
 
 withIcons :: Context -> IconSet -> Context
 withIcons ctx iset = ctx {ctxIcons = iconsFor iset}
@@ -1340,17 +1231,6 @@ getFocusables ctx = do
   arr <- readIORef (ctxFocusables ctx)
   forM [0 .. count - 1] (readPrimArray arr)
 
-{-# INLINE getFocusablesPrim #-}
-getFocusablesPrim :: Context -> IO (PrimArray WidgetId)
-getFocusablesPrim ctx = do
-  count <- readIORef (ctxFocusablesCount ctx)
-  arr <- readIORef (ctxFocusables ctx)
-  freezePrimArray arr 0 count
-
--- =============================================================================
--- Modal & Overlay
--- =============================================================================
-
 textInputEditActive :: Context -> IO Bool
 textInputEditActive ctx = do
   focus <- readIORef (ctxFocusId ctx)
@@ -1372,11 +1252,6 @@ markEscapeConsumed :: Context -> IO ()
 markEscapeConsumed ctx =
   modifyIORef' (ctxOverlayState ctx) $ \os ->
     os {osEscapeConsumed = True}
-
-resetEscapeConsumed :: Context -> IO ()
-resetEscapeConsumed ctx =
-  modifyIORef' (ctxOverlayState ctx) $ \os ->
-    os {osEscapeConsumed = False}
 
 pointerBlockedByModal :: Context -> IO Bool
 pointerBlockedByModal ctx = do
