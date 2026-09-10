@@ -16,6 +16,7 @@ module NanoUI.Frame.SpanArena
 import Control.Monad (unless, when)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import qualified Data.IntMap.Strict as IM
+import Data.Primitive (Prim)
 import Data.Primitive.Array (MutableArray, copyMutableArray, newArray, readArray, writeArray)
 import Data.Primitive.PrimArray
   ( MutablePrimArray
@@ -75,28 +76,21 @@ ensureSpanCap sa needed = do
   cap <- readIORef (saCap sa)
   when (needed > cap) $ do
     let newCap = max needed (cap * 2)
-    growF (saX sa) cap newCap
-    growF (saY sa) cap newCap
-    growF (saW sa) cap newCap
-    growF (saH sa) cap newCap
-    growF (saClipX sa) cap newCap
-    growF (saClipY sa) cap newCap
-    growF (saClipW sa) cap newCap
-    growF (saClipH sa) cap newCap
-    growW (saFg sa) cap newCap
-    growW (saBg sa) cap newCap
+    growP (saX sa) cap newCap
+    growP (saY sa) cap newCap
+    growP (saW sa) cap newCap
+    growP (saH sa) cap newCap
+    growP (saClipX sa) cap newCap
+    growP (saClipY sa) cap newCap
+    growP (saClipW sa) cap newCap
+    growP (saClipH sa) cap newCap
+    growP (saFg sa) cap newCap
+    growP (saBg sa) cap newCap
     growT (saText sa) cap newCap
     writeIORef (saCap sa) newCap
 
-growF :: IORef (MutablePrimArray RealWorld Float) -> Int -> Int -> IO ()
-growF ref oldCap newCap = do
-  arr <- readIORef ref
-  newArr <- newPrimArray newCap
-  copyMutablePrimArray newArr 0 arr 0 oldCap
-  writeIORef ref newArr
-
-growW :: IORef (MutablePrimArray RealWorld Word32) -> Int -> Int -> IO ()
-growW ref oldCap newCap = do
+growP :: Prim a => IORef (MutablePrimArray RealWorld a) -> Int -> Int -> IO ()
+growP ref oldCap newCap = do
   arr <- readIORef ref
   newArr <- newPrimArray newCap
   copyMutablePrimArray newArr 0 arr 0 oldCap

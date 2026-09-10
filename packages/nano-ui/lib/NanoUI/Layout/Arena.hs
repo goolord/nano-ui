@@ -289,8 +289,8 @@ ensureCapacity na needed = do
       naArrStyle <- growPrimArrayCopy (naArrStyle a) (cap * 16) (newCap * 16) 0
       naArrTags <- growPrimArrayCopy (naArrTags a) (cap * 8) (newCap * 8) 0
       naArrTree <- growPrimArrayCopy (naArrTree a) (cap * 8) (newCap * 8) 0
-      naArrTextStore <- growTextStoreCopy (naArrTextStore a) cap newCap
-      naArrOptionsStore <- growOptionsStoreCopy (naArrOptionsStore a) cap newCap
+      naArrTextStore <- growBoxedStoreCopy T.empty (naArrTextStore a) cap newCap
+      naArrOptionsStore <- growBoxedStoreCopy [] (naArrOptionsStore a) cap newCap
       let newA = NodeArenaArrays {..}
       writeIORef (naArrays na) newA
       m <- readIORef (naArraysSnap na)
@@ -314,24 +314,14 @@ growPrimArray ref cap newCap defVal = do
   newArr <- growPrimArrayCopy oldArr cap newCap defVal
   writeIORef ref newArr
 
-{-# NOINLINE growTextStoreCopy #-}
-growTextStoreCopy :: MutableArray RealWorld Text -> Int -> Int -> IO (MutableArray RealWorld Text)
-growTextStoreCopy arr oldCap newCap = do
-  newArr <- newArray newCap T.empty
+{-# NOINLINE growBoxedStoreCopy #-}
+growBoxedStoreCopy :: a -> MutableArray RealWorld a -> Int -> Int -> IO (MutableArray RealWorld a)
+growBoxedStoreCopy emptyVal arr oldCap newCap = do
+  newArr <- newArray newCap emptyVal
   forM_ [0 .. oldCap - 1] $ \i ->
     readArray arr i >>= writeArray newArr i
   forM_ [oldCap .. newCap - 1] $ \i ->
-    writeArray newArr i T.empty
-  pure newArr
-
-{-# NOINLINE growOptionsStoreCopy #-}
-growOptionsStoreCopy :: MutableArray RealWorld [Text] -> Int -> Int -> IO (MutableArray RealWorld [Text])
-growOptionsStoreCopy arr oldCap newCap = do
-  newArr <- newArray newCap []
-  forM_ [0 .. oldCap - 1] $ \i ->
-    readArray arr i >>= writeArray newArr i
-  forM_ [oldCap .. newCap - 1] $ \i ->
-    writeArray newArr i []
+    writeArray newArr i emptyVal
   pure newArr
 
 {-# INLINE sizingTag #-}
