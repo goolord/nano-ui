@@ -4,9 +4,7 @@
 module Main (main) where
 
 import Control.Monad (replicateM_, void, forM_)
-import Data.Foldable (foldlM)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
-import Data.Primitive.SmallArray (SmallArray)
 import GHC.Clock (getMonotonicTimeNSec)
 import GHC.Stats (RTSStats (..), getRTSStats)
 import System.IO (hSetBuffering, stdout, BufferMode(LineBuffering), hFlush)
@@ -16,8 +14,7 @@ import qualified Data.Text as T
 
 import NanoUI
 import NanoUI.Backend.Sdl
-  ( RgbaImage (..)
-  , SdlEnv (..)
+  ( SdlEnv (..)
   , isDebugActive
   , newSdlContext
   , newSdlDebugSampler
@@ -31,7 +28,6 @@ import NanoUI.Diagrams
 import NanoUI.Testing
   ( Context
   , collectTextSpans
-  , registerImage
   , runFrame
   , takeDamage
   , drawVertexCount
@@ -39,6 +35,15 @@ import NanoUI.Testing
   , drawCmdCount
   )
 import NanoUI.Testing.Harness (findExact)
+import DemoData
+  ( DemoPerson (..)
+  , colPeople
+  , demoPeople
+  , demoTree
+  , registerDemoImages
+  , sineCosineChart
+  , weeklyBars
+  )
 import SdlDemo
   ( demoImages
   , demoUi
@@ -307,23 +312,6 @@ countDamageKinds ctx n act = go n (0, 0, 0)
             DamageFull -> go (k - 1) (f + 1, c, empty)
             DamageClip _ -> go (k - 1) (f, c + 1, empty)
 
-registerDemoImages :: Context -> SmallArray RgbaImage -> IO Bool
-registerDemoImages ctx images =
-  foldlM
-    ( \ok img ->
-        if ok
-          then
-            registerImage
-              ctx
-              (rgbaImageId img)
-              (rgbaImageWidth img)
-              (rgbaImageHeight img)
-              (rgbaImagePixels img)
-          else pure False
-    )
-    True
-    images
-
 --------------------------------------------------------------------------------
 -- Isolated Tab UIs
 --------------------------------------------------------------------------------
@@ -352,17 +340,6 @@ tabControlsUi = columnWith (tight . gap 8 . fillW) $ do
 tabListUi :: NanoUI ()
 tabListUi = columnWith (tight . gap 8 . fillW) $ do
   heading "Tree"
-  let demoTree =
-        [ TreeItem "src"
-            [ TreeItem "Main.hs" []
-            , TreeItem "NanoUI"
-                [ TreeItem "Widgets.hs" []
-                , TreeItem "Frame.hs" []
-                ]
-            ]
-        , TreeItem "test" [TreeItem "Main.hs" []]
-        , TreeItem "README.md" []
-        ]
   scroll2DWith (fixedH 300 . fillW) $ do
     void $ tree "demo" demoTree 0
   heading "Items"
@@ -370,36 +347,6 @@ tabListUi = columnWith (tight . gap 8 . fillW) $ do
     columnWith (tight . gap 0 . fillW) $
       forM_ [1 .. 12 :: Int] $ \i ->
         void $ labelEx (tight . fillW $ defaultLayout) (T.pack ("Item " <> show i))
-
-data Person = Person !T.Text !T.Text !Int !T.Text !T.Text deriving (Eq, Show)
-
-peopleCols :: Colonnade Headed Person T.Text
-peopleCols =
-  mconcat
-    [ headed "Name" (\(Person n _ _ _ _) -> n)
-    , headed "Dept" (\(Person _ d _ _ _) -> d)
-    , headed "Age" (\(Person _ _ a _ _) -> T.pack (show a))
-    , headed "City" (\(Person _ _ _ c _) -> c)
-    , headed "Role" (\(Person _ _ _ _ r) -> r)
-    ]
-
-samplePeople :: [Person]
-samplePeople =
-  [ Person "David" "Eng" 63 "Austin" "Staff"
-  , Person "Ava" "Design" 34 "Berlin" "Lead"
-  , Person "Sonia" "Eng" 12 "Lisbon" "Intern"
-  , Person "Maya" "Ops" 41 "Tokyo" "Manager"
-  , Person "Leo" "Design" 28 "Paris" "IC"
-  , Person "Noah" "Eng" 37 "Seoul" "Staff"
-  , Person "Iris" "Ops" 19 "Austin" "IC"
-  , Person "Jules" "Sales" 45 "London" "Manager"
-  , Person "Priya" "Eng" 31 "Bengaluru" "Lead"
-  , Person "Chen" "Design" 26 "Shanghai" "IC"
-  , Person "Omar" "Ops" 52 "Cairo" "Lead"
-  , Person "Elena" "Sales" 39 "Madrid" "Staff"
-  , Person "Kai" "Eng" 23 "Oslo" "IC"
-  , Person "Ruth" "Ops" 47 "Boston" "Staff"
-  ]
 
 tabTableUi :: NanoUI ()
 tabTableUi = columnWith (tight . gap 8 . fillW) $ do
@@ -409,24 +356,15 @@ tabTableUi = columnWith (tight . gap 8 . fillW) $ do
       defaultTableCfg
       (tight . fillW . fixedH 280 $ defaultLayout {layoutGap = 0})
       "people"
-      peopleCols
-      samplePeople
+      colPeople
+      demoPeople
       (SortCol 0 SortAsc)
 
 tabPlotsUi :: NanoUI ()
 tabPlotsUi = columnWith (tight . gap 8 . fillW) $ do
   heading "Plots"
-  let sineCos =
-        withDecimate True $
-          withGrid GridBoth $
-            withLegend LegendRight $
-              chart
-                [ line "sin(x)" [(x, sin x) | x <- [0, 0.05 .. (2 * pi)]]
-                , line "cos(x)" [(x, cos x) | x <- [0, 0.05 .. (2 * pi)]]
-                ]
-  void $ plot (fillW . fixedH 120 $ defaultLayout) sineCos
-  let bars = [("Mon", 2), ("Tue", 5), ("Wed", 4), ("Thu", 7), ("Fri", 3)]
-  void $ barChart (fillW . fixedH 120 $ defaultLayout) bars
+  void $ plot (fillW . fixedH 120 $ defaultLayout) sineCosineChart
+  void $ barChart (fillW . fixedH 120 $ defaultLayout) weeklyBars
 
 tabDiagnosticsUi :: NanoUI ()
 tabDiagnosticsUi = columnWith (tight . gap 4 . fillW) $ do
@@ -509,13 +447,13 @@ benchContainers = columnWith (tight . gap 2 . fillW) $
 
 benchLargeTable :: NanoUI ()
 benchLargeTable =
-  let rows = [Person (T.pack ("Name " <> show i)) (T.pack ("Dept " <> show (i `mod` 5))) (20 + i) "City" "Role" | i <- [1 .. 50 :: Int]]
-   in void $ tableCfg defaultTableCfg (tight . fillW . fixedH 400 $ defaultLayout) "bigTable" peopleCols rows (SortCol 0 SortAsc)
+  let rows = [DemoPerson (T.pack ("Name " <> show i)) (T.pack ("Dept " <> show (i `mod` 5))) (20 + i) "City" "Role" | i <- [1 .. 50 :: Int]]
+   in void $ tableCfg defaultTableCfg (tight . fillW . fixedH 400 $ defaultLayout) "bigTable" colPeople rows (SortCol 0 SortAsc)
 
 benchHugeTable :: NanoUI ()
 benchHugeTable =
-  let rows = [Person (T.pack ("Name " <> show i)) (T.pack ("Dept " <> show (i `mod` 5))) (20 + i) "City" "Role" | i <- [1 .. 200 :: Int]]
-   in void $ tableCfg defaultTableCfg (tight . fillW . fixedH 400 $ defaultLayout) "hugeTable" peopleCols rows (SortCol 0 SortAsc)
+  let rows = [DemoPerson (T.pack ("Name " <> show i)) (T.pack ("Dept " <> show (i `mod` 5))) (20 + i) "City" "Role" | i <- [1 .. 200 :: Int]]
+   in void $ tableCfg defaultTableCfg (tight . fillW . fixedH 400 $ defaultLayout) "hugeTable" colPeople rows (SortCol 0 SortAsc)
 
 benchLargeTree :: NanoUI ()
 benchLargeTree =

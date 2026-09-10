@@ -1,0 +1,28 @@
+nano-ui perf after Phase 5 (layout: per-depth axis snapshots)
+date: 2026-09-10 (Linux x86_64, GHC 9.14.1, -O2 -mavx2, RTS -N1 -A64m -T -I0)
+vs Phase 1 (profiles/results/04-phase1/bench.txt)
+
+changes:
+  withAxisSnaps no longer freezePrimArray's the child index / distributed
+  main-size scratch twice per container per frame. The position pass now
+  copies them into a per-depth snapshot pool (AxisSnapshot, reused across
+  frames) before recursing, so the working scratch can be clobbered by
+  children safely. Depth is threaded explicitly through the position
+  functions instead of stored in an IORef.
+
+cabal test all: PASS (ditto, text-buffer, diagrams, form, rgfw, nano-ui)
+cabal run nano-ui-id-bench: PASS
+
+nano-ui-sdl-profile:
+  Full DemoUi runFrame alloc   423.1 KB -> 417.7 KB per frame
+  100x Radio Button            1.237 ms -> 1.209 ms
+  100x Button                  0.247 ms -> 0.211 ms
+  100x Slider                  0.348 ms -> 0.338 ms
+  Table 50x5                   0.298 ms -> 0.292 ms
+  Table 200x5                  0.387 ms -> 0.372 ms
+  Plot 500pt                   0.029 ms -> 0.030 ms (unchanged)
+
+notes:
+  freeze elimination removes the only steady-state PrimArray allocation in
+  the solver; per-depth snapshots are allocated once and reused. Layout time
+  itself was not the dominant demo cost, so wall-clock gains are modest.

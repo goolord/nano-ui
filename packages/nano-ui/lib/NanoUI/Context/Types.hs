@@ -16,7 +16,9 @@ module NanoUI.Context.Types
   , AnimationState (..)
   , initialAnimationState
   , DrawFitCache (..)
+  , DrawingEntry (..)
   , DrawingCacheState (..)
+  , SpanCacheEntry (..)
   , initialDrawingCacheState
   , InteractionState (..)
   , initialInteractionState
@@ -55,7 +57,8 @@ import NanoUI.Layout.Arena (DirTag, NodeArena, NodeType)
 import NanoUI.Store (WidgetStore)
 import NanoUI.Style (FontStyle, FontVariant, FontWeight, Layout, Theme)
 import NanoUI.Types
-  ( Damage (..)
+  ( Color
+  , Damage (..)
   , DamageBounds
   , HostProfile
   , PopupAnchor
@@ -214,6 +217,24 @@ data DrawFitCache = DrawFitCache
   , dfcOut :: !Layout
   }
 
+-- | Cached text-span layout for one arena node. Key fields are every input
+-- that changes the produced spans; 'sceSpans' is the shared result. The whole
+-- cache is dropped on theme or font-scale changes.
+data SpanCacheEntry = SpanCacheEntry
+  { sceText :: !Text
+  , sceFg :: !Color
+  , sceBg :: !Color
+  , sceStyle :: {-# UNPACK #-} !Int
+  , sceFontSize :: {-# UNPACK #-} !Float
+  , sceAlign :: {-# UNPACK #-} !Int
+  , sceWidthTag :: {-# UNPACK #-} !Int
+  , sceRect :: !Rect
+  , sceEffMaxW :: {-# UNPACK #-} !Float
+  , sceRowChild :: !Bool
+  , sceCellHost :: !Bool
+  , sceSpans :: ![(Rect, Text, Color, Color)]
+  }
+
 type CustomMeasureFn = HostProfile -> FontMetrics -> (Float, Float) -> (Float, Float)
 
 data CustomDrawContext = CustomDrawContext
@@ -229,14 +250,22 @@ data CustomDrawContext = CustomDrawContext
 
 type CustomDrawBuild = CustomDrawContext -> Rect -> Vector DrawOp
 
+-- | A registered drawing: content version plus the op builder. The version
+-- participates in the draw-op cache key, so a builder whose output changes
+-- without its size changing must bump the version to invalidate.
+data DrawingEntry = DrawingEntry
+  { deContent :: {-# UNPACK #-} !Int
+  , deBuild :: !DrawingBuild
+  }
+
 data DrawingCacheState = DrawingCacheState
   { dcsPopupConfigs :: !(IntMap (PopupAnchor, PopupPlacement, Float))
-  , dcsDrawings :: !(IntMap DrawingBuild)
+  , dcsDrawings :: !(IntMap DrawingEntry)
   , dcsCustomDrawings :: !(IntMap CustomDrawBuild)
   , dcsCustomMeasures :: !(IntMap CustomMeasureFn)
   , dcsCustomCursors :: !(IntMap (CustomDrawContext -> UiCursorKind))
   , dcsCustomDamageSlop :: !(IntMap Float)
-  , dcsDrawOpCache :: !(IntMap (Rect, Vector DrawOp))
+  , dcsDrawOpCache :: !(IntMap (Int, Rect, Vector DrawOp))
   , dcsCustomDrawOpCache :: !(IntMap (Rect, Bool, Bool, Bool, Vector DrawOp))
   , dcsDrawFitCache :: !(IntMap DrawFitCache)
   , dcsWidgetNodeTypes :: !(Maybe (IntMap NodeType))
@@ -303,6 +332,7 @@ data Context = Context
   , ctxResolveFont :: !(Float -> FontWeight -> FontStyle -> FontVariant -> IO (FontMetrics, Bool))
   , ctxResolveMeasure :: !(Float -> FontWeight -> FontStyle -> FontVariant -> Text -> IO (Float, Float))
   , ctxMeasureCache :: Maybe (IORef (HashMap MeasureCacheKey (Float, Float)))
+  , ctxSpanCache :: !(IORef (IntMap SpanCacheEntry))
   , ctxExternalText :: Bool
   , ctxTheme :: !(IORef Theme)
   , ctxIcons :: Icons

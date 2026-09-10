@@ -1,0 +1,30 @@
+nano-ui perf after Phase 6 (damage: incremental prev maps)
+date: 2026-09-10 (Linux x86_64, GHC 9.14.1, -O2 -mavx2, RTS -N1 -A64m -T -I0)
+vs Phase 4 (profiles/results/06-phase4-text/bench.txt)
+
+changes:
+  updatePrevRects rebuilt dsPrevRects / dsPrevClips / dsPrevNodeTexts from
+  IM.empty every frame: one IntMap insert per keyed node per map (the single
+  largest allocator at ~11% of frame alloc). It now starts from the previous
+  maps and touches only entries whose value changed, deleting keys whose node
+  lost its rect or text. If any key vanished (foundOld /= size, or a rect
+  dropped) it falls back to the from-scratch rebuild, preserving exact
+  damage semantics for appeared/vanished widgets.
+
+cabal test all: PASS (ditto, text-buffer, diagrams, form, rgfw, nano-ui;
+  includes hover-damage, scroll-damage, text-input-dirty, select-overlay)
+cabal run nano-ui-id-bench: PASS
+churn damage unchanged: Full=1 Clip=39 over 40 frames
+
+nano-ui-sdl-profile:
+  Full DemoUi runFrame alloc   389.2 KB -> 341.5 KB per frame (-12.2%)
+  Full DemoUi runFrame         0.236 ms -> 0.227 ms
+  100x Radio alloc             1937.3 KB -> 1645.7 KB
+  100x Label alloc             436.8 KB -> 377.8 KB
+  Table 50x5 alloc             646.1 KB -> 565.6 KB
+  Table 200x5 alloc            815.8 KB -> 736.2 KB
+  Plot 500pt                   0.029 ms / 32.6 KB (unchanged)
+
+cumulative vs pre-plan baseline (profiles/results/04-phase1/bench-before.txt):
+  Full DemoUi runFrame alloc   423.1 KB -> 341.5 KB (-19.3%)
+  Plot 500pt                   1.761 ms / 7622.8 KB -> 0.030 ms / 32.6 KB

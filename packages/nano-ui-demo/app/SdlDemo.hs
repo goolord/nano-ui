@@ -82,6 +82,15 @@ import qualified Data.Text.Read as T.Read
 import qualified Data.Vector as V
 import qualified SdlSelftest
 
+import DemoData
+  ( DemoPerson (..)
+  , colPeople
+  , demoPeople
+  , demoTree
+  , sineCosineChart
+  , weeklyBars
+  )
+
 ------------------------------------------------------------------------------
 -- §1  App entry (main)
 ------------------------------------------------------------------------------
@@ -452,22 +461,6 @@ demoUi = do
                     case T.Read.decimal treeSel of
                       Right (n, _) -> n
                       Left _ -> 0
-                  demoTree =
-                    [ TreeItem
-                        "src"
-                        [ TreeItem "Main.hs" []
-                        , TreeItem
-                            "NanoUI"
-                            [ TreeItem "Widgets.hs" []
-                            , TreeItem "Frame.hs" []
-                            ]
-                        ]
-                    , TreeItem
-                        "test"
-                        [ TreeItem "Main.hs" []
-                        ]
-                    , TreeItem "README.md" []
-                    ]
               scroll2DWith (fixedH 300 . fillW) $ do
                 (_, sel) <- tree "demo" demoTree sel0
                 setTreeSel (T.pack (show sel))
@@ -535,8 +528,7 @@ demoUi = do
             Plots -> do
               heading "Plots"
               muted "Auto ticks, shared scales, and decimation."
-              -- chart data / axis configs are defined in the §Plots section
-              -- near the bottom of this file.
+              -- chart data lives in "DemoData" (plus the §Plots section below).
               columnWith (tight . gap gapLayout . fillW) $ do
                 columnWith (tight . gap gapMicro . fillW) $ do
                   muted "Sine + cosine"
@@ -711,44 +703,6 @@ colorHighlights =
 -- §6  List & Table demo data
 ------------------------------------------------------------------------------
 
-data DemoPerson = DemoPerson
-  { demoPersonName :: !T.Text
-  , demoPersonDept :: !T.Text
-  , demoPersonAge :: !Int
-  , demoPersonCity :: !T.Text
-  , demoPersonRole :: !T.Text
-  }
-  deriving (Eq, Show)
-
-demoPeople :: [DemoPerson]
-demoPeople =
-  [ DemoPerson "David" "Eng" 63 "Austin" "Staff"
-  , DemoPerson "Ava" "Design" 34 "Berlin" "Lead"
-  , DemoPerson "Sonia" "Eng" 12 "Lisbon" "Intern"
-  , DemoPerson "Maya" "Ops" 41 "Tokyo" "Manager"
-  , DemoPerson "Leo" "Design" 28 "Paris" "IC"
-  , DemoPerson "Noah" "Eng" 37 "Seoul" "Staff"
-  , DemoPerson "Iris" "Ops" 19 "Austin" "IC"
-  , DemoPerson "Jules" "Sales" 45 "London" "Manager"
-  , DemoPerson "Priya" "Eng" 31 "Bengaluru" "Lead"
-  , DemoPerson "Chen" "Design" 26 "Shanghai" "IC"
-  , DemoPerson "Omar" "Ops" 52 "Cairo" "Lead"
-  , DemoPerson "Elena" "Sales" 39 "Madrid" "Staff"
-  , DemoPerson "Kai" "Eng" 23 "Oslo" "IC"
-  , DemoPerson "Ruth" "Ops" 47 "Boston" "Staff"
-  ]
-
--- | Table columns: one headed cell per field.
-colPeople :: Colonnade Headed DemoPerson T.Text
-colPeople =
-  mconcat
-    [ headed "Name" demoPersonName
-    , headed "Dept" demoPersonDept
-    , headed "Age" (T.pack . show . demoPersonAge)
-    , headed "City" demoPersonCity
-    , headed "Role" demoPersonRole
-    ]
-
 demoTableCfg :: TableCfg
 demoTableCfg = defaultTableCfg
 
@@ -867,27 +821,6 @@ demoPaneView showHeader pid pctx = do
 ------------------------------------------------------------------------------
 -- §8  Plots demo data
 ------------------------------------------------------------------------------
-
-sineCosineChart :: Chart
-sineCosineChart =
-  withDecimate True $
-    withGrid GridBoth $
-      withLegend LegendRight $
-        withYAxis "y" $
-          withXAxis "x" $
-            chart
-              [ line "sin(x)" [(x, sin x) | x <- [0, 0.05 .. (2 * pi)]]
-              , line "cos(x)" [(x, cos x) | x <- [0, 0.05 .. (2 * pi)]]
-              ]
-
-weeklyBars :: [(T.Text, Double)]
-weeklyBars =
-  [ ("Mon", 2)
-  , ("Tue", 5)
-  , ("Wed", 4)
-  , ("Thu", 7)
-  , ("Fri", 3)
-  ]
 
 -- Hours slept (X) vs focus score (Y).
 sleepFocus :: [(Double, Double)]

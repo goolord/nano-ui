@@ -70,6 +70,7 @@ library
         NanoUI.Testing
         NanoUI.Testing.Assert
         NanoUI.Testing.Harness
+        NanoUI.Testing.Runner
         NanoUI.Widgets.TextBuffer
         NanoUI.Widgets.TextArea
         NanoUI.Widgets.Custom
