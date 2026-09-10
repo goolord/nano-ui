@@ -1,0 +1,39 @@
+nano-ui plan phases 2, 7, 8: attempted / measured findings
+date: 2026-09-10 (Linux x86_64, GHC 9.14.1, -O2 -mavx2, RTS -N1 -A64m -T -I0)
+
+Phase 2 (retained vertex meshes, Paint-only):
+  attempted: a retained corner-mesh cache for the rounded-rect fan and
+  arc-stroke primitives (the two most expensive tessellators in the paint
+  profile). Entries stored relative vertices + 0-based indices keyed by exact
+  float bits of (radius, border, colour, quadrant), capped at 512 entries,
+  and blitted into the draw arena with an added corner offset.
+
+  measured: regression. 100x Button 0.196 -> 0.340 ms/frame; demo runFrame
+  alloc 315 -> 341 KB/frame; checkbox/slider/radio all +35-50%. Cause: the
+  existing vertex writers already emit with SIMD stores (pokeVertexSIMD /
+  pokeQuadSIMD), so a blit that peeks/pokes floats through scalar FFI
+  is slower than recomputing the geometry. Reverted; no code change kept.
+
+  what the plan's retained-drawing intent is covered by instead:
+    - content-versioned draw-op cache (commit 83d3194) keeps expensive
+      vector content (charts, custom drawings) tessellated once per content
+      change rather than per frame;
+    - drawingVersioned (commit 74b18e1) is the explicit user-facing
+      version/pointer cache scope requested in the plan.
+
+Phase 7 (SIMD):
+  GHC's vector primops have no rounding/conversion (no roundFloatX4#), so
+  quantizeResultsA and transformSubtree snapping cannot be vectorized in
+  Haskell without an FFI helper; the measured share of those passes is below
+  the profile noise floor. The C AVX2 quad-cull helper needs a gather rewrite
+  and is moot on the SDL path now that damage-clipped paint never emits
+  off-damage commands (Phase 3). The effective data-locality wins were the
+  per-frame wrap and fit-height memos (commits c905541, 2288cc3), the
+  closure-free distribute scratch (69b0420), and the withAxisSnaps INLINE
+  (4abc53a).
+
+Phase 8 (present batching):
+  the demo emits 8 draw commands; flushCmd already merges adjacent commands
+  with identical clip/texture/contiguous indices, so there is no measurable
+  flush pressure to remove. Reordering commands to merge non-adjacent ones
+  would break painter's order.
