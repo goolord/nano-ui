@@ -35,6 +35,7 @@ testSpecs =
   , TestSpec "overlay" False runOverlayTest
   , TestSpec "interaction" False runInteractionTest
   , TestSpec "hover" False runHoverTest
+  , TestSpec "no-thunks" False runNoThunksTest
   , TestSpec "pointer-cursor" False runPointerCursorTest
   , TestSpec "pointer-cursor-checkbox" False runPointerCursorCheckboxTest
   , TestSpec "text-input-cursor" False runTextInputCursorTest

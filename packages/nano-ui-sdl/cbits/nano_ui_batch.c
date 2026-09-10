@@ -95,6 +95,49 @@ void nano_ui_batch_draw_range(
 
         bool any_visible = false;
         int q = 0;
+#if defined(NANO_UI_HAS_AVX2)
+        // 8 quads per iteration: the 8-wide AABB test amortizes the
+        // gather + compares, which matters on partial-redraw frames where
+        // long runs of quads fall entirely outside the damage rect.
+        {
+            const __m256 vdx0 = _mm256_set1_ps(dx0);
+            const __m256 vdy0 = _mm256_set1_ps(dy0);
+            const __m256 vdx1 = _mm256_set1_ps(dx1);
+            const __m256 vdy1 = _mm256_set1_ps(dy1);
+            float qx0[8], qy0[8], qx1[8], qy1[8];
+            for (; q + 48 <= index_n; q += 48) {
+                bool all_valid = true;
+                for (int k = 0; k < 8; k++) {
+                    int i0 = idx[q + k * 6];
+                    int i2 = idx[q + k * 6 + 2];
+                    if (i0 < 0 || i0 >= vert_count || i2 < 0 || i2 >= vert_count) {
+                        all_valid = false;
+                        break;
+                    }
+                    float x0 = sdl_verts[i0].position.x;
+                    float y0 = sdl_verts[i0].position.y;
+                    float x1 = sdl_verts[i2].position.x;
+                    float y1 = sdl_verts[i2].position.y;
+                    qx0[k] = x0 < x1 ? x0 : x1;
+                    qx1[k] = x0 > x1 ? x0 : x1;
+                    qy0[k] = y0 < y1 ? y0 : y1;
+                    qy1[k] = y0 > y1 ? y0 : y1;
+                }
+                if (!all_valid) {
+                    any_visible = true;
+                    break;
+                }
+                uint32_t mask = nano_ui_cull_8_quads_avx2(
+                    _mm256_loadu_ps(qx0), _mm256_loadu_ps(qy0),
+                    _mm256_loadu_ps(qx1), _mm256_loadu_ps(qy1),
+                    vdx0, vdy0, vdx1, vdy1);
+                if (mask != 0) {
+                    any_visible = true;
+                    break;
+                }
+            }
+        }
+#endif
         for (; q + 6 <= index_n; q += 6) {
             int i0 = idx[q];
             int i2 = idx[q + 2];

@@ -127,12 +127,16 @@ pokeVertexSIMD ::
   Float ->
   IO ()
 pokeVertexSIMD (Ptr addr#) (I# byteOff#) (F# px#) (F# py#) (F# r#) (F# g#) (F# b#) (F# a#) (F# u#) (F# v#) = IO $ \s0 ->
-  let !target# = addr# `plusAddr#` byteOff#
-      !v0# = packFloatX4# (# px#, py#, r#, g# #)
-      !v1# = packFloatX4# (# b#, a#, u#, v# #)
-   in case writeFloatOffAddrAsFloatX4# target# 0# v0# s0 of
-        s1 -> case writeFloatOffAddrAsFloatX4# (target# `plusAddr#` 16#) 0# v1# s1 of
-          s2 -> (# s2, () #)
+  -- Offsets are recomputed inline (the address add is a single lea) so the
+  -- simplified body stays free of let bindings; the inspection test guards
+  -- this with a NoAllocation obligation.
+  case packFloatX4# (# px#, py#, r#, g# #) of
+    v0# ->
+      case packFloatX4# (# b#, a#, u#, v# #) of
+        v1# ->
+          case writeFloatOffAddrAsFloatX4# (plusAddr# addr# byteOff#) 0# v0# s0 of
+            s1 -> case writeFloatOffAddrAsFloatX4# (plusAddr# (plusAddr# addr# byteOff#) 16#) 0# v1# s1 of
+              s2 -> (# s2, () #)
 
 -- | Vectorized Quad Poking: writes 4 vertices (128 bytes total) and 6 indices (24 bytes total)
 -- with SIMD vector stores.

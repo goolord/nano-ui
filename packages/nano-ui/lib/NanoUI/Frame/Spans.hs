@@ -137,7 +137,7 @@ import NanoUI.Frame.TextEdit
   , syncTextInputScroll
   )
 import NanoUI.Frame.Scroll (scrollBarLayout, ScrollBarLayout (..))
-import NanoUI.Frame.SpanArena (SpanArena, pushSpan, resetSpanArena, spanArenaToList, spanArenaToListOccluded)
+import NanoUI.Frame.SpanArena (SpanArena, pushSpan, resetSpanArena, spanArenaToList, spanArenaToListOccluded, withSpanArenaSnap)
 
 collectTextSpans :: Context -> IO [(Rect, T.Text, Color, Color, Rect)]
 collectTextSpans ctx = do
@@ -161,8 +161,9 @@ collectTextSpansCached ctx floatCache = do
   count <- arenaCount (ctxNodeArena ctx)
   let arena = ctxSpanBase ctx
   resetSpanArena arena
-  when (count > 0) $
-    collectClippedSpans ctx floatCache 0 (Rect 0 0 1e9 1e9) arena
+  withSpanArenaSnap arena $
+    when (count > 0) $
+      collectClippedSpans ctx floatCache 0 (Rect 0 0 1e9 1e9) arena
   panels <- floatingPanelRects ctx
   spanArenaToListOccluded panels arena
 
@@ -170,13 +171,14 @@ collectOverlayTextSpansCached :: Context -> Input -> IM.IntMap (Maybe NodeType) 
 collectOverlayTextSpansCached ctx inp floatCache = do
   let arena = ctxSpanOverlay ctx
   resetSpanArena arena
-  collectFloatingSpansInto ctx floatCache NodeWindow arena
-  collectFloatingSpansInto ctx floatCache NodeModal arena
-  collectFloatingSpansInto ctx floatCache NodePopup arena
-  drops <- collectSelectDropdownSpans ctx inp
-  menu <- collectTextEditMenuSpans ctx inp
-  mapM_ (pushSpan5 arena) drops
-  mapM_ (pushSpan5 arena) menu
+  withSpanArenaSnap arena $ do
+    collectFloatingSpansInto ctx floatCache NodeWindow arena
+    collectFloatingSpansInto ctx floatCache NodeModal arena
+    collectFloatingSpansInto ctx floatCache NodePopup arena
+    drops <- collectSelectDropdownSpans ctx inp
+    menu <- collectTextEditMenuSpans ctx inp
+    mapM_ (pushSpan5 arena) drops
+    mapM_ (pushSpan5 arena) menu
   spanArenaToList arena
 
 pushSpan5 :: SpanArena -> (Rect, T.Text, Color, Color, Rect) -> IO ()
@@ -185,6 +187,7 @@ pushSpan5 arena (r, t, fg, bg, c) = pushSpan arena r t fg bg c
 widgetNodeCount :: Context -> IO Int
 widgetNodeCount ctx = arenaCount (ctxNodeArena ctx)
 
+{-# INLINE collectClippedSpans #-}
 collectClippedSpans :: Context -> IM.IntMap (Maybe NodeType) -> NodeIdx -> Rect -> SpanArena -> IO ()
 collectClippedSpans ctx floatCache idx clip arena = do
   nt <- getNodeType (ctxNodeArena ctx) idx
@@ -260,6 +263,7 @@ collectClippedSpans' ctx floatCache idx nt clip arena = do
           mapM_ (\(r, t, fg, bg, c) -> pushSpan arena r t fg bg c) caps
       walkChildSpans ctx floatCache idx clipHere arena
 
+{-# INLINE walkChildSpans #-}
 walkChildSpans :: Context -> IM.IntMap (Maybe NodeType) -> NodeIdx -> Rect -> SpanArena -> IO ()
 walkChildSpans ctx floatCache idx clip arena = do
   fc <- getFirstChild (ctxNodeArena ctx) idx
@@ -273,6 +277,7 @@ walkChildSpans ctx floatCache idx clip arena = do
           go ns
           collectClippedSpans ctx floatCache ci clip arena
 
+{-# INLINE findAncestorMaxW #-}
 findAncestorMaxW :: NodeArena -> NodeIdx -> IO Float
 findAncestorMaxW na idx = go idx 0
   where

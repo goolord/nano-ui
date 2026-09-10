@@ -45,20 +45,6 @@ static inline uint32_t nano_ui_cull_8_quads_avx2(
     return (~out_mask) & 0xFF;
 }
 
-// SIMD vector scale for float coordinates: out = in * scale
-static inline void nano_ui_scale_floats_avx2(float *dst, const float *src, int count, float scale)
-{
-    __m256 s = _mm256_set1_ps(scale);
-    int i = 0;
-    for (; i + 8 <= count; i += 8) {
-        __m256 v = _mm256_loadu_ps(src + i);
-        _mm256_storeu_ps(dst + i, _mm256_mul_ps(v, s));
-    }
-    for (; i < count; i++) {
-        dst[i] = src[i] * scale;
-    }
-}
-
 #endif
 
 #endif // NANO_UI_SIMD_H

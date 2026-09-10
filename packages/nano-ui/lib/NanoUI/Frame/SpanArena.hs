@@ -3,10 +3,13 @@
 -- | Flat span buffer: parallel prim arrays for geometry/colors, boxed texts.
 module NanoUI.Frame.SpanArena
   ( SpanArena (..)
+  , SpanArenaArrays (..)
   , newSpanArena
   , resetSpanArena
   , pushSpan
   , spanArenaCount
+  , spanArenaArrays
+  , withSpanArenaSnap
   , spanArenaToList
   , spanArenaToListOccluded
   , foldSpanArena
@@ -30,6 +33,7 @@ import qualified Data.Text as T
 import Data.Word (Word32)
 import GHC.Exts (RealWorld)
 import NanoUI.Types (Color (..), Rect (..), colorToWord32, rectFullyInside, rectIntersect)
+import Control.Exception (bracket_)
 
 data SpanArena = SpanArena
   { saCount :: IORef Int
@@ -45,6 +49,23 @@ data SpanArena = SpanArena
   , saFg :: IORef (MutablePrimArray RealWorld Word32)
   , saBg :: IORef (MutablePrimArray RealWorld Word32)
   , saText :: IORef (MutableArray RealWorld Text)
+  , saSnap :: IORef (Maybe SpanArenaArrays)
+  }
+
+-- | Snapshot of the column arrays so batch pushes/reads skip one IORef
+-- dereference per column access.
+data SpanArenaArrays = SpanArenaArrays
+  { saaX :: MutablePrimArray RealWorld Float
+  , saaY :: MutablePrimArray RealWorld Float
+  , saaW :: MutablePrimArray RealWorld Float
+  , saaH :: MutablePrimArray RealWorld Float
+  , saaClipX :: MutablePrimArray RealWorld Float
+  , saaClipY :: MutablePrimArray RealWorld Float
+  , saaClipW :: MutablePrimArray RealWorld Float
+  , saaClipH :: MutablePrimArray RealWorld Float
+  , saaFg :: MutablePrimArray RealWorld Word32
+  , saaBg :: MutablePrimArray RealWorld Word32
+  , saaText :: MutableArray RealWorld Text
   }
 
 newSpanArena :: Int -> IO SpanArena
@@ -63,6 +84,7 @@ newSpanArena cap0 = do
   saFg <- newIORef =<< newPrimArray cap
   saBg <- newIORef =<< newPrimArray cap
   saText <- newIORef =<< newArray cap T.empty
+  saSnap <- newIORef Nothing
   pure SpanArena {..}
 
 resetSpanArena :: SpanArena -> IO ()
@@ -70,6 +92,40 @@ resetSpanArena sa = writeIORef (saCount sa) 0
 
 spanArenaCount :: SpanArena -> IO Int
 spanArenaCount sa = readIORef (saCount sa)
+
+-- | Current column arrays, preferring the active snapshot (see
+-- 'withSpanArenaSnap').
+{-# INLINE spanArenaArrays #-}
+spanArenaArrays :: SpanArena -> IO SpanArenaArrays
+spanArenaArrays sa = do
+  m <- readIORef (saSnap sa)
+  case m of
+    Just a -> pure a
+    Nothing -> readSpanArenaArrays sa
+
+readSpanArenaArrays :: SpanArena -> IO SpanArenaArrays
+readSpanArenaArrays SpanArena {..} =
+  SpanArenaArrays
+    <$> readIORef saX
+    <*> readIORef saY
+    <*> readIORef saW
+    <*> readIORef saH
+    <*> readIORef saClipX
+    <*> readIORef saClipY
+    <*> readIORef saClipW
+    <*> readIORef saClipH
+    <*> readIORef saFg
+    <*> readIORef saBg
+    <*> readIORef saText
+
+-- | Pin the column arrays for a batch of pushes/reads so per-span access
+-- skips the column IORefs. Growth during the snapshot refreshes it.
+withSpanArenaSnap :: SpanArena -> IO a -> IO a
+withSpanArenaSnap sa act =
+  bracket_
+    (readSpanArenaArrays sa >>= writeIORef (saSnap sa) . Just)
+    (writeIORef (saSnap sa) Nothing)
+    act
 
 ensureSpanCap :: SpanArena -> Int -> IO ()
 ensureSpanCap sa needed = do
@@ -88,6 +144,11 @@ ensureSpanCap sa needed = do
     growP (saBg sa) cap newCap
     growT (saText sa) cap newCap
     writeIORef (saCap sa) newCap
+    -- Keep an active snapshot pointing at the fresh columns.
+    m <- readIORef (saSnap sa)
+    case m of
+      Just _ -> readSpanArenaArrays sa >>= writeIORef (saSnap sa) . Just
+      Nothing -> pure ()
 
 growP :: Prim a => IORef (MutablePrimArray RealWorld a) -> Int -> Int -> IO ()
 growP ref oldCap newCap = do
@@ -95,6 +156,8 @@ growP ref oldCap newCap = do
   newArr <- newPrimArray newCap
   copyMutablePrimArray newArr 0 arr 0 oldCap
   writeIORef ref newArr
+{-# SPECIALIZE growP :: IORef (MutablePrimArray RealWorld Float) -> Int -> Int -> IO () #-}
+{-# SPECIALIZE growP :: IORef (MutablePrimArray RealWorld Word32) -> Int -> Int -> IO () #-}
 
 growT :: IORef (MutableArray RealWorld Text) -> Int -> Int -> IO ()
 growT ref oldCap newCap = do
@@ -108,17 +171,18 @@ pushSpan :: SpanArena -> Rect -> Text -> Color -> Color -> Rect -> IO ()
 pushSpan sa (Rect x y w h) txt fg bg (Rect cx cy cw ch) = do
   i <- readIORef (saCount sa)
   ensureSpanCap sa (i + 1)
-  readIORef (saX sa) >>= \a -> writePrimArray a i x
-  readIORef (saY sa) >>= \a -> writePrimArray a i y
-  readIORef (saW sa) >>= \a -> writePrimArray a i w
-  readIORef (saH sa) >>= \a -> writePrimArray a i h
-  readIORef (saClipX sa) >>= \a -> writePrimArray a i cx
-  readIORef (saClipY sa) >>= \a -> writePrimArray a i cy
-  readIORef (saClipW sa) >>= \a -> writePrimArray a i cw
-  readIORef (saClipH sa) >>= \a -> writePrimArray a i ch
-  readIORef (saFg sa) >>= \a -> writePrimArray a i (colorToWord32 fg)
-  readIORef (saBg sa) >>= \a -> writePrimArray a i (colorToWord32 bg)
-  readIORef (saText sa) >>= \a -> writeArray a i txt
+  SpanArenaArrays {..} <- spanArenaArrays sa
+  writePrimArray saaX i x
+  writePrimArray saaY i y
+  writePrimArray saaW i w
+  writePrimArray saaH i h
+  writePrimArray saaClipX i cx
+  writePrimArray saaClipY i cy
+  writePrimArray saaClipW i cw
+  writePrimArray saaClipH i ch
+  writePrimArray saaFg i (colorToWord32 fg)
+  writePrimArray saaBg i (colorToWord32 bg)
+  writeArray saaText i txt
   writeIORef (saCount sa) (i + 1)
 
 spanArenaToList :: SpanArena -> IO [(Rect, Text, Color, Color, Rect)]
@@ -142,33 +206,30 @@ foldSpanArenaOccluded ::
   IO ()
 foldSpanArenaOccluded panels sa f = do
   n <- readIORef (saCount sa)
+  SpanArenaArrays {..} <- spanArenaArrays sa
   let panelRects
         | IM.null panels = []
         | otherwise = IM.elems panels
-  let go !i
+      go !i
         | i >= n = pure ()
         | otherwise = do
-            (Rect x y w h, txt, fg, bg, clip) <- readSpanAt sa i
+            x <- readPrimArray saaX i
+            y <- readPrimArray saaY i
+            w <- readPrimArray saaW i
+            h <- readPrimArray saaH i
+            cx <- readPrimArray saaClipX i
+            cy <- readPrimArray saaClipY i
+            cw <- readPrimArray saaClipW i
+            ch <- readPrimArray saaClipH i
+            fg <- readPrimArray saaFg i
+            bg <- readPrimArray saaBg i
+            txt <- readArray saaText i
             let rect = Rect x y w h
+                clip = Rect cx cy cw ch
             unless (not (null panelRects) && spanOccluded panelRects rect clip) $
-              f rect txt fg bg clip
+              f rect txt (Color fg) (Color bg) clip
             go (i + 1)
   go 0
-
-readSpanAt :: SpanArena -> Int -> IO (Rect, Text, Color, Color, Rect)
-readSpanAt sa i = do
-  x <- readIORef (saX sa) >>= \a -> readPrimArray a i
-  y <- readIORef (saY sa) >>= \a -> readPrimArray a i
-  w <- readIORef (saW sa) >>= \a -> readPrimArray a i
-  h <- readIORef (saH sa) >>= \a -> readPrimArray a i
-  cx <- readIORef (saClipX sa) >>= \a -> readPrimArray a i
-  cy <- readIORef (saClipY sa) >>= \a -> readPrimArray a i
-  cw <- readIORef (saClipW sa) >>= \a -> readPrimArray a i
-  ch <- readIORef (saClipH sa) >>= \a -> readPrimArray a i
-  fg <- readIORef (saFg sa) >>= \a -> readPrimArray a i
-  bg <- readIORef (saBg sa) >>= \a -> readPrimArray a i
-  txt <- readIORef (saText sa) >>= \a -> readArray a i
-  pure (Rect x y w h, txt, Color fg, Color bg, Rect cx cy cw ch)
 
 spanOccluded :: [Rect] -> Rect -> Rect -> Bool
 spanOccluded panelRects rect clip =

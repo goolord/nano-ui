@@ -70,22 +70,22 @@ data DropEvent = DropEvent
   deriving (Eq, Show)
 
 data Input = Input
-  { inputMousePos :: !V2
-  , inputMouseDown :: !Bool
-  , inputMousePressed :: !Bool
-  , inputMouseReleased :: !Bool
-  , inputMouseRightDown :: !Bool
-  , inputMouseRightPressed :: !Bool
-  , inputMouseRightReleased :: !Bool
-  , inputMouseClicks :: !Int
-  , inputScroll :: !V2
+  { inputMousePos :: {-# UNPACK #-} !V2
+  , inputMouseDown :: {-# UNPACK #-} !Bool
+  , inputMousePressed :: {-# UNPACK #-} !Bool
+  , inputMouseReleased :: {-# UNPACK #-} !Bool
+  , inputMouseRightDown :: {-# UNPACK #-} !Bool
+  , inputMouseRightPressed :: {-# UNPACK #-} !Bool
+  , inputMouseRightReleased :: {-# UNPACK #-} !Bool
+  , inputMouseClicks :: {-# UNPACK #-} !Int
+  , inputScroll :: {-# UNPACK #-} !V2
   , inputKeys :: Vector Key
   , inputChars :: !Text
   , inputModifiers :: !Modifiers
-  , inputWindowSize :: !Size
+  , inputWindowSize :: {-# UNPACK #-} !Size
   , inputDeltaTime :: {-# UNPACK #-} !Float
   , inputDrops :: Vector DropEvent
-  , inputWindowRedraw :: !Bool
+  , inputWindowRedraw :: {-# UNPACK #-} !Bool
   }
   deriving (Eq, Show)
 
@@ -182,7 +182,7 @@ inputKeysElem = V.elem
 
 {-# INLINE foldInputKeys #-}
 foldInputKeys :: (a -> Key -> a) -> a -> Vector Key -> a
-foldInputKeys = V.foldl
+foldInputKeys = V.foldl'
 
 -- Buttons, keys, scroll, resize. Mouse motion alone does not count.
 {-# INLINE inputInteracted #-}

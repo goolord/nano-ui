@@ -18,6 +18,9 @@ module NanoUI.Context.Types
   , DrawFitCache (..)
   , DrawingEntry (..)
   , DrawingCacheState (..)
+  , PopupConfig (..)
+  , DrawOpCacheEntry (..)
+  , CustomDrawOpCacheEntry (..)
   , SpanCacheEntry (..)
   , initialDrawingCacheState
   , InteractionState (..)
@@ -99,20 +102,20 @@ data TextInputMenu = TextInputMenu
 
 data TextInputDrag = TextInputDrag
   { textInputDragWidget :: WidgetId
-  , textInputDragAnchor :: Int
-  , textInputDragAnchorRow :: Int
-  , textInputDragAnchorCol :: Int
-  , textInputDragMultiline :: Bool
-  , textInputDragClicks :: Int
+  , textInputDragAnchor :: {-# UNPACK #-} !Int
+  , textInputDragAnchorRow :: {-# UNPACK #-} !Int
+  , textInputDragAnchorCol :: {-# UNPACK #-} !Int
+  , textInputDragMultiline :: {-# UNPACK #-} !Bool
+  , textInputDragClicks :: {-# UNPACK #-} !Int
   }
   deriving (Eq, Show)
 
 data TextFieldClickCell = TextFieldClickCell
   { textFieldClickWidget :: WidgetId
-  , textFieldClickFlat :: Int
-  , textFieldClickRow :: Int
-  , textFieldClickCol :: Int
-  , textFieldClickMultiline :: Bool
+  , textFieldClickFlat :: {-# UNPACK #-} !Int
+  , textFieldClickRow :: {-# UNPACK #-} !Int
+  , textFieldClickCol :: {-# UNPACK #-} !Int
+  , textFieldClickMultiline :: {-# UNPACK #-} !Bool
   }
   deriving (Eq, Show)
 
@@ -130,16 +133,16 @@ data WindowResizeEdge
 data WindowResizeDrag = WindowResizeDrag
   { wrdWidget :: WidgetId
   , wrdEdge :: WindowResizeEdge
-  , wrdGrabX :: Float
-  , wrdGrabY :: Float
-  , wrdStartX :: Float
-  , wrdStartY :: Float
-  , wrdStartW :: Float
-  , wrdStartH :: Float
-  , wrdMinW :: Float
-  , wrdMinH :: Float
-  , wrdMaxW :: Float
-  , wrdMaxH :: Float
+  , wrdGrabX :: {-# UNPACK #-} !Float
+  , wrdGrabY :: {-# UNPACK #-} !Float
+  , wrdStartX :: {-# UNPACK #-} !Float
+  , wrdStartY :: {-# UNPACK #-} !Float
+  , wrdStartW :: {-# UNPACK #-} !Float
+  , wrdStartH :: {-# UNPACK #-} !Float
+  , wrdMinW :: {-# UNPACK #-} !Float
+  , wrdMinH :: {-# UNPACK #-} !Float
+  , wrdMaxW :: {-# UNPACK #-} !Float
+  , wrdMaxH :: {-# UNPACK #-} !Float
   }
   deriving (Eq, Show)
 
@@ -165,15 +168,15 @@ initialDamageState = DamageState
   }
 
 data OverlayState = OverlayState
-  { osModalWasActive :: !Bool
-  , osModalActive :: !Bool
-  , osModalDepth :: !Int
-  , osEscapeConsumed :: !Bool
+  { osModalWasActive :: {-# UNPACK #-} !Bool
+  , osModalActive :: {-# UNPACK #-} !Bool
+  , osModalDepth :: {-# UNPACK #-} !Int
+  , osEscapeConsumed :: {-# UNPACK #-} !Bool
   , osPrevFloatingRects :: !(IntMap Rect)
   , osPrevFloatingOrder :: ![Int]
   , osTopmostCache :: !(Maybe (V2, Maybe WidgetId))
   , osCurrentFloatingId :: !(Maybe WidgetId)
-  , osLastPointerBlocked :: !Bool
+  , osLastPointerBlocked :: {-# UNPACK #-} !Bool
   , osFloatingAncestor :: !(Maybe (IntMap (Maybe NodeType)))
   }
 
@@ -194,8 +197,8 @@ initialOverlayState = OverlayState
 data AnimationState = AnimationState
   { asAnimations :: !(IntMap Animation)
   , asAnimRest :: !(IntMap Float)
-  , asAnyAnimating :: !Bool
-  , asAnimSettled :: !Bool
+  , asAnyAnimating :: {-# UNPACK #-} !Bool
+  , asAnimSettled :: {-# UNPACK #-} !Bool
   , asRectless :: !(IntMap Int)
   }
 
@@ -222,27 +225,27 @@ data DrawFitCache = DrawFitCache
 -- cache is dropped on theme or font-scale changes.
 data SpanCacheEntry = SpanCacheEntry
   { sceText :: !Text
-  , sceFg :: !Color
-  , sceBg :: !Color
+  , sceFg :: {-# UNPACK #-} !Color
+  , sceBg :: {-# UNPACK #-} !Color
   , sceStyle :: {-# UNPACK #-} !Int
   , sceFontSize :: {-# UNPACK #-} !Float
   , sceAlign :: {-# UNPACK #-} !Int
   , sceWidthTag :: {-# UNPACK #-} !Int
   , sceRect :: !Rect
   , sceEffMaxW :: {-# UNPACK #-} !Float
-  , sceRowChild :: !Bool
-  , sceCellHost :: !Bool
+  , sceRowChild :: {-# UNPACK #-} !Bool
+  , sceCellHost :: {-# UNPACK #-} !Bool
   , sceSpans :: ![(Rect, Text, Color, Color)]
   }
 
 type CustomMeasureFn = HostProfile -> FontMetrics -> (Float, Float) -> (Float, Float)
 
 data CustomDrawContext = CustomDrawContext
-  { cdcHovered  :: !Bool
-  , cdcPressed  :: !Bool
-  , cdcFocused  :: !Bool
-  , cdcActive   :: !Bool
-  , cdcDisabled :: !Bool
+  { cdcHovered  :: {-# UNPACK #-} !Bool
+  , cdcPressed  :: {-# UNPACK #-} !Bool
+  , cdcFocused  :: {-# UNPACK #-} !Bool
+  , cdcActive   :: {-# UNPACK #-} !Bool
+  , cdcDisabled :: {-# UNPACK #-} !Bool
   , cdcTheme    :: !Theme
   , cdcHost     :: !HostProfile
   , cdcFont     :: !FontMetrics
@@ -259,16 +262,39 @@ data DrawingEntry = DrawingEntry
   }
 
 data DrawingCacheState = DrawingCacheState
-  { dcsPopupConfigs :: !(IntMap (PopupAnchor, PopupPlacement, Float))
+  { dcsPopupConfigs :: !(IntMap PopupConfig)
   , dcsDrawings :: !(IntMap DrawingEntry)
   , dcsCustomDrawings :: !(IntMap CustomDrawBuild)
   , dcsCustomMeasures :: !(IntMap CustomMeasureFn)
   , dcsCustomCursors :: !(IntMap (CustomDrawContext -> UiCursorKind))
   , dcsCustomDamageSlop :: !(IntMap Float)
-  , dcsDrawOpCache :: !(IntMap (Int, Rect, Vector DrawOp))
-  , dcsCustomDrawOpCache :: !(IntMap (Rect, Bool, Bool, Bool, Vector DrawOp))
+  , dcsDrawOpCache :: !(IntMap DrawOpCacheEntry)
+  , dcsCustomDrawOpCache :: !(IntMap CustomDrawOpCacheEntry)
   , dcsDrawFitCache :: !(IntMap DrawFitCache)
   , dcsWidgetNodeTypes :: !(Maybe (IntMap NodeType))
+  }
+
+-- | Strict cache entry for a popup's anchor configuration.
+data PopupConfig = PopupConfig
+  { pcAnchor :: !PopupAnchor
+  , pcPlacement :: !PopupPlacement
+  , pcOffset :: {-# UNPACK #-} !Float
+  }
+
+-- | Strict cache entry for a drawing's compiled draw ops.
+data DrawOpCacheEntry = DrawOpCacheEntry
+  { doeContent :: {-# UNPACK #-} !Int
+  , doeBounds :: !Rect
+  , doeOps :: !(Vector DrawOp)
+  }
+
+-- | Strict cache entry for a custom drawing's compiled draw ops.
+data CustomDrawOpCacheEntry = CustomDrawOpCacheEntry
+  { cdeBounds :: !Rect
+  , cdeHovered :: {-# UNPACK #-} !Bool
+  , cdePressed :: {-# UNPACK #-} !Bool
+  , cdeFocused :: {-# UNPACK #-} !Bool
+  , cdeOps :: !(Vector DrawOp)
   }
 
 initialDrawingCacheState :: DrawingCacheState
@@ -290,9 +316,9 @@ data InteractionState = InteractionState
   , isTextInputDrag :: !(Maybe TextInputDrag)
   , isTextFieldClickCell :: !(Maybe TextFieldClickCell)
   , isTextInputMenu :: !(Maybe TextInputMenu)
-  , isSelectDropPress :: !Bool
+  , isSelectDropPress :: {-# UNPACK #-} !Bool
   , isOpenSelectDrop :: !(Maybe (WidgetId, Rect))
-  , isMenuPointerGesture :: !Bool
+  , isMenuPointerGesture :: {-# UNPACK #-} !Bool
   , isWindowDrag :: !(Maybe (WidgetId, Float, Float))
   , isWindowResize :: !(Maybe WindowResizeDrag)
   }

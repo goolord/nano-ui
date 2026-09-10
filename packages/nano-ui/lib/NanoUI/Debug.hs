@@ -205,23 +205,23 @@ emptyCoreDebugSnapshot =
     }
 
 data DebugSampler = DebugSampler
-  { smPresentEma   :: !Double
-  , smLoopEma      :: !Double
-  , smLastPresentT :: !Double
-  , smLastDebugT   :: !Double
-  , smLastQueryT   :: !Double
-  , smPresents     :: !Word64
-  , smSkips        :: !Word64
-  , smUiMs         :: !Double
-  , smRenderMs     :: !Double
-  , smPresentMs    :: !Double
-  , smFrameMs      :: !Double
-  , smVerts        :: !Int
-  , smIndices      :: !Int
-  , smCmds         :: !Int
-  , smWantFrame    :: !Bool
-  , smRatePresents :: !Word64
-  , smRateT        :: !Double
+  { smPresentEma   :: {-# UNPACK #-} !Double
+  , smLoopEma      :: {-# UNPACK #-} !Double
+  , smLastPresentT :: {-# UNPACK #-} !Double
+  , smLastDebugT   :: {-# UNPACK #-} !Double
+  , smLastQueryT   :: {-# UNPACK #-} !Double
+  , smPresents     :: {-# UNPACK #-} !Word64
+  , smSkips        :: {-# UNPACK #-} !Word64
+  , smUiMs         :: {-# UNPACK #-} !Double
+  , smRenderMs     :: {-# UNPACK #-} !Double
+  , smPresentMs    :: {-# UNPACK #-} !Double
+  , smFrameMs      :: {-# UNPACK #-} !Double
+  , smVerts        :: {-# UNPACK #-} !Int
+  , smIndices      :: {-# UNPACK #-} !Int
+  , smCmds         :: {-# UNPACK #-} !Int
+  , smWantFrame    :: {-# UNPACK #-} !Bool
+  , smRatePresents :: {-# UNPACK #-} !Word64
+  , smRateT        :: {-# UNPACK #-} !Double
   }
 
 type DebugSamplerRef = IORef DebugSampler

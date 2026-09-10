@@ -1,0 +1,16 @@
+Build profile: -w ghc-9.14.1 -O2
+In order, the following will be built (use -v for more details):
+ - nano-ui-0.1.0.0 (bench:nano-ui-id-bench) (ephemeral targets)
+Preprocessing benchmark 'nano-ui-id-bench' for nano-ui-0.1.0.0...
+Building benchmark 'nano-ui-id-bench' for nano-ui-0.1.0.0...
+Running 1 benchmarks...
+Benchmark nano-ui-id-bench: RUNNING...
+All
+  id/nextId
+    burst4096:     OK
+      10.4 μs ± 316 ns, 590 KB allocated, 1.6 KB copied,  80 MB peak memory
+    scopedWidgets: OK
+      24.7 μs ± 1.4 μs, 574 KB allocated, 1.6 KB copied,  80 MB peak memory
+
+All 2 tests passed (0.96s)
+Benchmark nano-ui-id-bench: FINISH

@@ -214,8 +214,9 @@ quantizeResultsA NodeArenaArrays {naArrGeom = arr} count s
 
 {-# INLINE nodeTypeA #-}
 nodeTypeA :: NodeArenaArrays -> NodeIdx -> IO NodeType
-nodeTypeA NodeArenaArrays {naArrTags} idx =
-  readPrimArray naArrTags (idx * 8) >>= pure . toEnum . fromIntegral
+nodeTypeA NodeArenaArrays {naArrTags} idx = do
+  t <- readPrimArray naArrTags (idx * 8)
+  pure (toEnum (fromIntegral t))
 
 {-# INLINE rectA #-}
 rectA :: NodeArenaArrays -> NodeIdx -> IO (Float, Float, Float, Float)
@@ -1241,6 +1242,7 @@ memoWrapped na idx wrapW act = do
       storeWrapMemo na idx wrapW w h
       pure sz
 
+{-# INLINE resolveSize #-}
 resolveSize :: SizingTag -> Float -> Float -> Float -> Float -> Float -> Float
 resolveSize SizingFixed v _ _ _ _ = v
 resolveSize SizingFit _ intrinsic avail minS maxS = clamp minS maxS (min intrinsic avail)
@@ -1532,6 +1534,7 @@ loadChildrenScratchFromParent na parent availW availH = do
                 go ns (i + 1)
   go fc 0
 
+{-# INLINE reverseScratchTriple #-}
 reverseScratchTriple ::
   MutablePrimArray RealWorld Int ->
   MutablePrimArray RealWorld Float ->
@@ -1556,6 +1559,8 @@ swapPrim arr a b = do
   y <- readPrimArray arr b
   writePrimArray arr a y
   writePrimArray arr b x
+{-# SPECIALIZE swapPrim :: MutablePrimArray RealWorld Int -> Int -> Int -> IO () #-}
+{-# SPECIALIZE swapPrim :: MutablePrimArray RealWorld Float -> Int -> Int -> IO () #-}
 
 writeScratchEntry ::
   NodeArena ->
@@ -1641,6 +1646,7 @@ distributeScratch na off n avail gapSum horizontal = do
 
 -- | @out[i] = (w[i], h[i])@ for the range.
 copyScratchRange :: MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> Int -> Int -> IO ()
+{-# INLINE copyScratchRange #-}
 copyScratchRange wArr hArr outW outH !i !end
   | i >= end = pure ()
   | otherwise = do
@@ -1650,6 +1656,7 @@ copyScratchRange wArr hArr outW outH !i !end
       writePrimArray outH i h
       copyScratchRange wArr hArr outW outH (i + 1) end
 
+{-# INLINE sumScratchAxis #-}
 sumScratchAxis :: MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> Bool -> Int -> Int -> Float -> IO Float
 sumScratchAxis wArr hArr horizontal !i !end !acc
   | i >= end = pure acc
@@ -1657,6 +1664,7 @@ sumScratchAxis wArr hArr horizontal !i !end !acc
       v <- if horizontal then readPrimArray wArr i else readPrimArray hArr i
       sumScratchAxis wArr hArr horizontal (i + 1) end (acc + v)
 
+{-# INLINE sumGrowFactors #-}
 sumGrowFactors :: NodeArena -> MutablePrimArray RealWorld Int -> Bool -> Int -> Int -> Float -> IO Float
 sumGrowFactors na idxArr horizontal !i !end !acc
   | i >= end = pure acc
@@ -1665,6 +1673,7 @@ sumGrowFactors na idxArr horizontal !i !end !acc
       f <- getGrowFactor na ci horizontal
       sumGrowFactors na idxArr horizontal (i + 1) end (acc + f)
 
+{-# INLINE sumShrinkFactors #-}
 sumShrinkFactors :: NodeArena -> MutablePrimArray RealWorld Int -> Bool -> Int -> Int -> Float -> IO Float
 sumShrinkFactors na idxArr horizontal !i !end !acc
   | i >= end = pure acc
@@ -1673,6 +1682,7 @@ sumShrinkFactors na idxArr horizontal !i !end !acc
       f <- getShrinkFactor na ci horizontal
       sumShrinkFactors na idxArr horizontal (i + 1) end (acc + f)
 
+{-# INLINE markGrowFlags #-}
 markGrowFlags :: NodeArena -> MutablePrimArray RealWorld Int -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> Bool -> Int -> Int -> IO ()
 markGrowFlags na idxArr wArr hArr mainArr crossArr horizontal !i !end
   | i >= end = pure ()
@@ -1687,6 +1697,7 @@ markGrowFlags na idxArr wArr hArr mainArr crossArr horizontal !i !end
 
 -- One sweep: sum content of non-grow + already-locked children (flag 0) and
 -- grow factors of the still-unlocked (flag 1).
+{-# INLINE scanGrow #-}
 scanGrow :: NodeArena -> MutablePrimArray RealWorld Int -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> Bool -> Int -> Int -> Float -> Float -> IO (Float, Float)
 scanGrow na idxArr mainArr crossArr horizontal !i !end !occupied !gfSum
   | i >= end = pure (occupied, gfSum)
@@ -1703,6 +1714,7 @@ scanGrow na idxArr mainArr crossArr horizontal !i !end !occupied !gfSum
 
 -- Pin every grow child whose content exceeds its would-be share by clearing
 -- its flag; its content stays in mainArr.
+{-# INLINE lockGrow #-}
 lockGrow :: NodeArena -> MutablePrimArray RealWorld Int -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> Bool -> Float -> Float -> Int -> Int -> Int -> IO Int
 lockGrow na idxArr mainArr crossArr horizontal !free !gfSum !i !end !acc
   | i >= end = pure acc
@@ -1733,6 +1745,7 @@ settleGrow na idxArr mainArr crossArr horizontal avail gapSum off end !passes = 
 
 -- Hand shares to unlocked grow children and restore real cross sizes where
 -- the flags clobbered them.
+{-# INLINE applyGrowShares #-}
 applyGrowShares :: NodeArena -> MutablePrimArray RealWorld Int -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> Bool -> Float -> Float -> Int -> Int -> IO ()
 applyGrowShares na idxArr wArr hArr mainArr crossArr horizontal !free !gfSum !i !end
   | i >= end = pure ()
@@ -1747,6 +1760,7 @@ applyGrowShares na idxArr wArr hArr mainArr crossArr horizontal !free !gfSum !i 
       writePrimArray crossArr i (if horizontal then ih else iw)
       applyGrowShares na idxArr wArr hArr mainArr crossArr horizontal free gfSum (i + 1) end
 
+{-# INLINE applyShrink #-}
 applyShrink :: NodeArena -> MutablePrimArray RealWorld Int -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> Bool -> Float -> Float -> Int -> Int -> IO ()
 applyShrink na idxArr wArr hArr outW outH horizontal !overflow !shrinkTotal !i !end
   | i >= end = pure ()

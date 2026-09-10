@@ -5,6 +5,7 @@ module Cases
   , module Cases.Damage
   , module Cases.Demo
   , module Cases.Modal
+  , module Cases.NoThunks
   , module Cases.Scroll
   , module Cases.Select
   , module Cases.Tabs
@@ -80,6 +81,7 @@ import Cases.CustomWidget
 import Cases.Damage
 import Cases.Demo
 import Cases.Modal
+import Cases.NoThunks
 import Cases.Scroll
 import Cases.Select
 import Cases.Tabs

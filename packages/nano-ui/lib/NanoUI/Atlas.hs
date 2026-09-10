@@ -34,21 +34,21 @@ maxImageDim :: Int
 maxImageDim = 8192
 
 data AtlasSlot = AtlasSlot
-  { slotX :: Int
-  , slotY :: Int
-  , slotW :: Int
-  , slotH :: Int
+  { slotX :: {-# UNPACK #-} !Int
+  , slotY :: {-# UNPACK #-} !Int
+  , slotW :: {-# UNPACK #-} !Int
+  , slotH :: {-# UNPACK #-} !Int
   }
 
 data AtlasState = AtlasState
-  { asW :: Int
-  , asH :: Int
+  { asW :: {-# UNPACK #-} !Int
+  , asH :: {-# UNPACK #-} !Int
   , asPtr :: ForeignPtr Word8
   , asSlots :: IM.IntMap AtlasSlot
-  , asX :: Int
-  , asY :: Int
-  , asRowH :: Int
-  , asGen :: Int
+  , asX :: {-# UNPACK #-} !Int
+  , asY :: {-# UNPACK #-} !Int
+  , asRowH :: {-# UNPACK #-} !Int
+  , asGen :: {-# UNPACK #-} !Int
   }
 
 newtype ImageAtlas = ImageAtlas (IORef AtlasState)

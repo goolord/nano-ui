@@ -307,10 +307,10 @@ data ColSize = ColContent | ColStretch | ColFixed Float
   deriving (Eq, Show)
 
 data TableCfg = TableCfg
-  { tableFreezeCols :: !Int
-  , tableFreezeRows :: !Int
-  , tableColSizes :: [ColSize]
-  , tableHidden :: IntSet
+  { tableFreezeCols :: {-# UNPACK #-} !Int
+  , tableFreezeRows :: {-# UNPACK #-} !Int
+  , tableColSizes :: ![ColSize]
+  , tableHidden :: !IntSet
   }
   deriving (Eq, Show)
 
@@ -320,8 +320,8 @@ defaultTableCfg = TableCfg 0 0 [] IS.empty
 data TableResponse = TableResponse
   { tableWidgetResponse :: !Response
   , tableSort :: !SortCol
-  , tableColOrder :: [Int]
-  , tableHiddenCols :: IntSet
+  , tableColOrder :: ![Int]
+  , tableHiddenCols :: !IntSet
   }
   deriving (Eq, Show)
 

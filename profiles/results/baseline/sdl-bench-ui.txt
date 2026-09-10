@@ -1,0 +1,18 @@
+Build profile: -w ghc-9.14.1 -O2
+In order, the following will be built (use -v for more details):
+ - nano-ui-sdl-0.1.0.0 (bench:nano-ui-sdl-bench) (ephemeral targets)
+Preprocessing benchmark 'nano-ui-sdl-bench' for nano-ui-sdl-0.1.0.0...
+Building benchmark 'nano-ui-sdl-bench' for nano-ui-sdl-0.1.0.0...
+Running 1 benchmarks...
+Benchmark nano-ui-sdl-bench: RUNNING...
+All
+  ui/runFrame
+    small:  OK
+      4.20 μs ± 341 ns,  13 KB allocated,   4 B  copied,  10 MB peak memory
+    medium: OK
+      163  μs ±  13 μs, 367 KB allocated, 434 B  copied,  10 MB peak memory
+    large:  OK
+      348  μs ±  32 μs, 758 KB allocated, 1.6 KB copied,  14 MB peak memory
+
+All 3 tests passed (0.50s)
+Benchmark nano-ui-sdl-bench: FINISH
