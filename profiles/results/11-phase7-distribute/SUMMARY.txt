@@ -1,0 +1,22 @@
+nano-ui perf after Phase 7b (closure-free distribute)
+date: 2026-09-10 (Linux x86_64, GHC 9.14.1, -O2 -mavx2, RTS -N1 -A64m -T -I0)
+vs Phase 5b (profiles/results/10-phase5-fitmemo/bench.txt)
+
+changes:
+  distributeScratch allocated a closure environment per container per frame
+  for copyOut / sumAxis / sumFact and the grow/shrink loops. All of those
+  are now top-level recursive workers with explicit accumulators
+  (copyScratchRange, sumScratchAxis, sumGrow/ShrinkFactors, markGrowFlags,
+  scanGrow, lockGrow, settleGrow, applyGrowShares, applyShrink).
+
+cabal test all: PASS (ditto, text-buffer, diagrams, form, rgfw, nano-ui)
+cabal run nano-ui-id-bench: PASS
+
+nano-ui-sdl-profile:
+  Full DemoUi runFrame alloc   315.1 KB -> 313.0 KB per frame
+  100x Radio                   1.157 ms -> 1.144 ms
+  runFrame wall clock unchanged within noise (0.218-0.253 ms range)
+
+note: withAxisSnaps remains the top allocator in the full-paint profile;
+  the remainder is the per-container action closures in the position
+  functions (not addressed here).

@@ -1606,38 +1606,13 @@ distributeScratch na off n avail gapSum horizontal = do
   outW <- readIORef (naScratchOutMain na)
   outH <- readIORef (naScratchOutCross na)
   let end = off + n
-      copyOut = do
-        let go !i
-              | i >= end = pure ()
-              | otherwise = do
-                  w <- readPrimArray wArr i
-                  h <- readPrimArray hArr i
-                  writePrimArray outW i w
-                  writePrimArray outH i h
-                  go (i + 1)
-        go off
-      sumAxis = do
-        let go !i !acc
-              | i >= end = pure acc
-              | otherwise = do
-                  v <- if horizontal then readPrimArray wArr i else readPrimArray hArr i
-                  go (i + 1) (acc + v)
-        go off 0
-      sumFact k = do
-        let go !i !acc
-              | i >= end = pure acc
-              | otherwise = do
-                  ci <- readPrimArray idxArr i
-                  f <- k na ci horizontal
-                  go (i + 1) (acc + f)
-        go off 0
-  total <- sumAxis
+  total <- sumScratchAxis wArr hArr horizontal off end 0
   let slack = avail - (total + gapSum)
   if slack > 0.001
     then do
-      growTotal <- sumFact getGrowFactor
+      growTotal <- sumGrowFactors na idxArr horizontal off end 0
       if growTotal <= 0
-        then copyOut
+        then copyScratchRange wArr hArr outW outH off end
         else do
           -- Grow children share the free space by factor, but no child is
           -- squeezed below its content size (a min-content floor, like CSS
@@ -1651,100 +1626,143 @@ distributeScratch na off n avail gapSum horizontal = do
           -- size throughout; no arithmetic on markers.
           let mainArr = if horizontal then outW else outH
               crossArr = if horizontal then outH else outW
-              mark !i
-                | i >= end = pure ()
-                | otherwise = do
-                    ci <- readPrimArray idxArr i
-                    iw <- readPrimArray wArr i
-                    ih <- readPrimArray hArr i
-                    gf <- getGrowFactor na ci horizontal
-                    writePrimArray mainArr i (if horizontal then iw else ih)
-                    writePrimArray crossArr i (if gf > 0 then 1 else 0)
-                    mark (i + 1)
-              -- One sweep: sum content of non-grow + already-locked children
-              -- (flag 0) and grow factors of the still-unlocked (flag 1).
-              scan !i !occupied !gfSum
-                | i >= end = pure (occupied, gfSum)
-                | otherwise = do
-                    grow <- readPrimArray crossArr i
-                    if grow > 0
-                      then do
-                        ci <- readPrimArray idxArr i
-                        gf <- getGrowFactor na ci horizontal
-                        scan (i + 1) occupied (gfSum + gf)
-                      else do
-                        main <- readPrimArray mainArr i
-                        scan (i + 1) (occupied + main) gfSum
-              -- Pin every grow child whose content exceeds its would-be share
-              -- by clearing its flag; its content stays in mainArr.
-              lock !i !free !gfSum !acc
-                | i >= end = pure acc
-                | otherwise = do
-                    grow <- readPrimArray crossArr i
-                    if grow > 0
-                      then do
-                        ci <- readPrimArray idxArr i
-                        gf <- getGrowFactor na ci horizontal
-                        need <- readPrimArray mainArr i
-                        if need * gfSum > gf * free
-                          then do
-                            writePrimArray crossArr i 0
-                            lock (i + 1) free gfSum (acc + 1 :: Int)
-                          else lock (i + 1) free gfSum acc
-                      else lock (i + 1) free gfSum acc
-              -- Each lock shrinks the share pool, possibly locking more
-              -- children; the locked set only grows, so this fixpoints within
-              -- n sweeps.
-              settle !passes = do
-                (occupied, gfSum) <- scan off 0 0
-                let free = avail - gapSum - occupied
-                locked <- lock off free gfSum 0
-                if locked == 0 || passes <= 1
-                  then pure (free, gfSum)
-                  else settle (passes - 1)
-          mark off
-          (free, gfSum) <- settle (n + 1)
-          -- Hand shares to unlocked grow children and restore real cross sizes
-          -- where the flags clobbered them.
-          let go !i
-                | i >= end = pure ()
-                | otherwise = do
-                    ci <- readPrimArray idxArr i
-                    gf <- getGrowFactor na ci horizontal
-                    iw <- readPrimArray wArr i
-                    ih <- readPrimArray hArr i
-                    grow <- readPrimArray crossArr i
-                    when (grow > 0) $
-                      writePrimArray mainArr i (max 0 (free * gf / gfSum))
-                    writePrimArray crossArr i (if horizontal then ih else iw)
-                    go (i + 1)
-          go off
+          markGrowFlags na idxArr wArr hArr mainArr crossArr horizontal off end
+          (free, gfSum) <- settleGrow na idxArr mainArr crossArr horizontal avail gapSum off end (n + 1)
+          applyGrowShares na idxArr wArr hArr mainArr crossArr horizontal free gfSum off end
     else
       if slack < -0.001
         then do
-          shrinkTotal <- sumFact getShrinkFactor
+          shrinkTotal <- sumShrinkFactors na idxArr horizontal off end 0
           if shrinkTotal <= 0
-            then copyOut
-            else do
-              let overflow = negate slack
-                  go !i
-                    | i >= end = pure ()
-                    | otherwise = do
-                        ci <- readPrimArray idxArr i
-                        iw <- readPrimArray wArr i
-                        ih <- readPrimArray hArr i
-                        (minW, minH, _, _) <- getMinMax na ci
-                        sf <- getShrinkFactor na ci horizontal
-                        let main = if horizontal then iw else ih
-                            minMain = if horizontal then minW else minH
-                            delta = overflow * sf / shrinkTotal
-                            shrunk = max minMain (main - delta)
-                        if horizontal
-                          then writePrimArray outW i shrunk >> writePrimArray outH i ih
-                          else writePrimArray outW i iw >> writePrimArray outH i shrunk
-                        go (i + 1)
-              go off
-        else copyOut
+            then copyScratchRange wArr hArr outW outH off end
+            else applyShrink na idxArr wArr hArr outW outH horizontal (negate slack) shrinkTotal off end
+        else copyScratchRange wArr hArr outW outH off end
+
+-- | @out[i] = (w[i], h[i])@ for the range.
+copyScratchRange :: MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> Int -> Int -> IO ()
+copyScratchRange wArr hArr outW outH !i !end
+  | i >= end = pure ()
+  | otherwise = do
+      w <- readPrimArray wArr i
+      h <- readPrimArray hArr i
+      writePrimArray outW i w
+      writePrimArray outH i h
+      copyScratchRange wArr hArr outW outH (i + 1) end
+
+sumScratchAxis :: MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> Bool -> Int -> Int -> Float -> IO Float
+sumScratchAxis wArr hArr horizontal !i !end !acc
+  | i >= end = pure acc
+  | otherwise = do
+      v <- if horizontal then readPrimArray wArr i else readPrimArray hArr i
+      sumScratchAxis wArr hArr horizontal (i + 1) end (acc + v)
+
+sumGrowFactors :: NodeArena -> MutablePrimArray RealWorld Int -> Bool -> Int -> Int -> Float -> IO Float
+sumGrowFactors na idxArr horizontal !i !end !acc
+  | i >= end = pure acc
+  | otherwise = do
+      ci <- readPrimArray idxArr i
+      f <- getGrowFactor na ci horizontal
+      sumGrowFactors na idxArr horizontal (i + 1) end (acc + f)
+
+sumShrinkFactors :: NodeArena -> MutablePrimArray RealWorld Int -> Bool -> Int -> Int -> Float -> IO Float
+sumShrinkFactors na idxArr horizontal !i !end !acc
+  | i >= end = pure acc
+  | otherwise = do
+      ci <- readPrimArray idxArr i
+      f <- getShrinkFactor na ci horizontal
+      sumShrinkFactors na idxArr horizontal (i + 1) end (acc + f)
+
+markGrowFlags :: NodeArena -> MutablePrimArray RealWorld Int -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> Bool -> Int -> Int -> IO ()
+markGrowFlags na idxArr wArr hArr mainArr crossArr horizontal !i !end
+  | i >= end = pure ()
+  | otherwise = do
+      ci <- readPrimArray idxArr i
+      iw <- readPrimArray wArr i
+      ih <- readPrimArray hArr i
+      gf <- getGrowFactor na ci horizontal
+      writePrimArray mainArr i (if horizontal then iw else ih)
+      writePrimArray crossArr i (if gf > 0 then 1 else 0)
+      markGrowFlags na idxArr wArr hArr mainArr crossArr horizontal (i + 1) end
+
+-- One sweep: sum content of non-grow + already-locked children (flag 0) and
+-- grow factors of the still-unlocked (flag 1).
+scanGrow :: NodeArena -> MutablePrimArray RealWorld Int -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> Bool -> Int -> Int -> Float -> Float -> IO (Float, Float)
+scanGrow na idxArr mainArr crossArr horizontal !i !end !occupied !gfSum
+  | i >= end = pure (occupied, gfSum)
+  | otherwise = do
+      grow <- readPrimArray crossArr i
+      if grow > 0
+        then do
+          ci <- readPrimArray idxArr i
+          gf <- getGrowFactor na ci horizontal
+          scanGrow na idxArr mainArr crossArr horizontal (i + 1) end occupied (gfSum + gf)
+        else do
+          main <- readPrimArray mainArr i
+          scanGrow na idxArr mainArr crossArr horizontal (i + 1) end (occupied + main) gfSum
+
+-- Pin every grow child whose content exceeds its would-be share by clearing
+-- its flag; its content stays in mainArr.
+lockGrow :: NodeArena -> MutablePrimArray RealWorld Int -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> Bool -> Float -> Float -> Int -> Int -> Int -> IO Int
+lockGrow na idxArr mainArr crossArr horizontal !free !gfSum !i !end !acc
+  | i >= end = pure acc
+  | otherwise = do
+      grow <- readPrimArray crossArr i
+      if grow > 0
+        then do
+          ci <- readPrimArray idxArr i
+          gf <- getGrowFactor na ci horizontal
+          need <- readPrimArray mainArr i
+          if need * gfSum > gf * free
+            then do
+              writePrimArray crossArr i 0
+              lockGrow na idxArr mainArr crossArr horizontal free gfSum (i + 1) end (acc + 1)
+            else lockGrow na idxArr mainArr crossArr horizontal free gfSum (i + 1) end acc
+        else lockGrow na idxArr mainArr crossArr horizontal free gfSum (i + 1) end acc
+
+-- Each lock shrinks the share pool, possibly locking more children; the
+-- locked set only grows, so this fixpoints within n sweeps.
+settleGrow :: NodeArena -> MutablePrimArray RealWorld Int -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> Bool -> Float -> Float -> Int -> Int -> Int -> IO (Float, Float)
+settleGrow na idxArr mainArr crossArr horizontal avail gapSum off end !passes = do
+  (occupied, gfSum) <- scanGrow na idxArr mainArr crossArr horizontal off end 0 0
+  let free = avail - gapSum - occupied
+  locked <- lockGrow na idxArr mainArr crossArr horizontal free gfSum off end 0
+  if locked == 0 || passes <= 1
+    then pure (free, gfSum)
+    else settleGrow na idxArr mainArr crossArr horizontal avail gapSum off end (passes - 1)
+
+-- Hand shares to unlocked grow children and restore real cross sizes where
+-- the flags clobbered them.
+applyGrowShares :: NodeArena -> MutablePrimArray RealWorld Int -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> Bool -> Float -> Float -> Int -> Int -> IO ()
+applyGrowShares na idxArr wArr hArr mainArr crossArr horizontal !free !gfSum !i !end
+  | i >= end = pure ()
+  | otherwise = do
+      ci <- readPrimArray idxArr i
+      gf <- getGrowFactor na ci horizontal
+      iw <- readPrimArray wArr i
+      ih <- readPrimArray hArr i
+      grow <- readPrimArray crossArr i
+      when (grow > 0) $
+        writePrimArray mainArr i (max 0 (free * gf / gfSum))
+      writePrimArray crossArr i (if horizontal then ih else iw)
+      applyGrowShares na idxArr wArr hArr mainArr crossArr horizontal free gfSum (i + 1) end
+
+applyShrink :: NodeArena -> MutablePrimArray RealWorld Int -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> Bool -> Float -> Float -> Int -> Int -> IO ()
+applyShrink na idxArr wArr hArr outW outH horizontal !overflow !shrinkTotal !i !end
+  | i >= end = pure ()
+  | otherwise = do
+      ci <- readPrimArray idxArr i
+      iw <- readPrimArray wArr i
+      ih <- readPrimArray hArr i
+      (minW, minH, _, _) <- getMinMax na ci
+      sf <- getShrinkFactor na ci horizontal
+      let main = if horizontal then iw else ih
+          minMain = if horizontal then minW else minH
+          delta = overflow * sf / shrinkTotal
+          shrunk = max minMain (main - delta)
+      if horizontal
+        then writePrimArray outW i shrunk >> writePrimArray outH i ih
+        else writePrimArray outW i iw >> writePrimArray outH i shrunk
+      applyShrink na idxArr wArr hArr outW outH horizontal overflow shrinkTotal (i + 1) end
 
 getGrowFactor :: NodeArena -> NodeIdx -> Bool -> IO Float
 getGrowFactor na idx horizontal = do
