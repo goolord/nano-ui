@@ -89,6 +89,7 @@ module NanoUI.Context
   , getPrevRect
   , getPrevClipRect
   , getPrevRects
+  , getPrevClips
   , setPrevRectsAndClips
   , getPrevNodeTexts
   , setPrevNodeTexts
@@ -896,6 +897,10 @@ setScrollConfig ctx wid cfg = do
 {-# INLINE getPrevRects #-}
 getPrevRects :: Context -> IO (IntMap Rect)
 getPrevRects ctx = dsPrevRects <$> readIORef (ctxDamageState ctx)
+
+{-# INLINE getPrevClips #-}
+getPrevClips :: Context -> IO (IntMap Rect)
+getPrevClips ctx = dsPrevClips <$> readIORef (ctxDamageState ctx)
 
 {-# INLINE setPrevRectsAndClips #-}
 setPrevRectsAndClips :: Context -> IntMap Rect -> IntMap Rect -> IO ()

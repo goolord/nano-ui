@@ -20,6 +20,7 @@ import NanoUI.Context
   , getLiveAnimations
   , getAnimRectless
   , getPrevRect
+  , getPrevClips
   , getPrevNodeTexts
   , getPrevRects
   , getStore
@@ -137,6 +138,9 @@ updatePrevRects :: Context -> IO ()
 updatePrevRects ctx = do
   liveKeys <- IM.keys <$> getLiveAnimations ctx
   prevRectless <- getAnimRectless ctx
+  oldRects <- getPrevRects ctx
+  oldClips <- getPrevClips ctx
+  oldTexts <- getPrevNodeTexts ctx
   let na = ctxNodeArena ctx
       bump rects = do
         let rectless' =
@@ -152,34 +156,78 @@ updatePrevRects ctx = do
       setPrevNodeTexts ctx IM.empty
       bump IM.empty
     else do
-      let go !i !m !cm !tm
-            | i >= count = do
-                setPrevRectsAndClips ctx m cm
-                setPrevNodeTexts ctx tm
-                bump m
+      -- Rebuild every map from scratch. Used when the key set changes; the
+      -- incremental path below cannot delete vanished keys by itself.
+      let rebuild = do
+            let rebuildGo !i !m !cm !tm
+                  | i >= count = do
+                      setPrevRectsAndClips ctx m cm
+                      setPrevNodeTexts ctx tm
+                      bump m
+                  | otherwise = do
+                      wid <- getWidgetId na i
+                      if hashWidgetId wid == 0
+                        then rebuildGo (i + 1) m cm tm
+                        else do
+                          mRect <- getNonzeroRect na i
+                          case mRect of
+                            Nothing -> rebuildGo (i + 1) m cm tm
+                            Just r -> do
+                              mClip <- getClipRect na i
+                              let !k = intKey wid
+                                  !m' = IM.insert k r m
+                                  !cm' = maybe cm (\c -> IM.insert k c cm) mClip
+                              nt <- getNodeType na i
+                              tm' <-
+                                if nt == NodeText
+                                  then do
+                                    txt <- getText na i
+                                    let !tmNew = IM.insert k txt tm
+                                    pure tmNew
+                                  else pure tm
+                              rebuildGo (i + 1) m' cm' tm'
+            rebuildGo 0 IM.empty IM.empty IM.empty
+          -- Incremental update: start from the previous maps and touch only
+          -- entries whose value changed. On frames with stable rects (hover,
+          -- text churn, animations) this allocates nothing.
+          go !i !m !cm !tm !foundOld !dropped
+            | i >= count =
+                if dropped || foundOld /= IM.size oldRects
+                  then rebuild
+                  else do
+                    setPrevRectsAndClips ctx m cm
+                    setPrevNodeTexts ctx tm
+                    bump m
             | otherwise = do
                 wid <- getWidgetId na i
                 if hashWidgetId wid == 0
-                  then go (i + 1) m cm tm
+                  then go (i + 1) m cm tm foundOld dropped
                   else do
+                    let !k = intKey wid
+                        isOld = IM.member k oldRects
                     mRect <- getNonzeroRect na i
                     case mRect of
-                      Nothing -> go (i + 1) m cm tm
+                      Nothing ->
+                        let dropped' = dropped || isOld
+                            m' = if isOld then IM.delete k m else m
+                            cm' = if IM.member k cm then IM.delete k cm else cm
+                            tm' = if IM.member k tm then IM.delete k tm else tm
+                         in go (i + 1) m' cm' tm' foundOld dropped'
                       Just r -> do
                         mClip <- getClipRect na i
-                        let !k = intKey wid
-                            !m' = IM.insert k r m
-                            !cm' = maybe cm (\c -> IM.insert k c cm) mClip
                         nt <- getNodeType na i
+                        let !m' = if IM.lookup k m == Just r then m else IM.insert k r m
+                            !cm' = case mClip of
+                              Just c -> if IM.lookup k cm == Just c then cm else IM.insert k c cm
+                              Nothing -> if IM.member k cm then IM.delete k cm else cm
                         tm' <-
                           if nt == NodeText
                             then do
                               txt <- getText na i
-                              let !tmNew = IM.insert k txt tm
-                              pure tmNew
-                            else pure tm
-                        go (i + 1) m' cm' tm'
-      go 0 IM.empty IM.empty IM.empty
+                              pure (if IM.lookup k tm == Just txt then tm else IM.insert k txt tm)
+                            else pure (if IM.member k tm then IM.delete k tm else tm)
+                        go (i + 1) m' cm' tm' (foundOld + if isOld then 1 else 0) dropped
+      go 0 oldRects oldClips oldTexts 0 False
 
 floatingPanelsInOrder :: Context -> IO [(Int, Rect)]
 floatingPanelsInOrder ctx = do
