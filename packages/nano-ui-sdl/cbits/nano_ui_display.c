@@ -274,31 +274,6 @@ bool nano_ui_retain_blit(SDL_Renderer *renderer, SDL_Texture *tex)
     return SDL_RenderTexture(renderer, tex, NULL, NULL);
 }
 
-bool nano_ui_retain_blit_rect(
-    SDL_Renderer *renderer,
-    SDL_Texture *tex,
-    float src_x,
-    float src_y,
-    float src_w,
-    float src_h,
-    float dst_x,
-    float dst_y)
-{
-    if (!renderer || !tex || src_w <= 0.f || src_h <= 0.f) {
-        return false;
-    }
-    if (!SDL_SetRenderTarget(renderer, NULL)) {
-        return false;
-    }
-    if (!SDL_SetRenderClipRect(renderer, NULL)) {
-        return false;
-    }
-    (void)SDL_SetRenderScale(renderer, 1.f, 1.f);
-    SDL_FRect src = {src_x, src_y, src_w, src_h};
-    SDL_FRect dst = {dst_x, dst_y, src_w, src_h};
-    return SDL_RenderTexture(renderer, tex, &src, &dst);
-}
-
 void nano_ui_free_surface(void *surface)
 {
     SDL_DestroySurface((SDL_Surface *)surface);
@@ -329,21 +304,4 @@ bool nano_ui_save_screenshot(SDL_Renderer *renderer, const char *path)
     bool ok = SDL_SaveBMP(surface, path);
     SDL_DestroySurface(surface);
     return ok;
-}
-
-bool nano_ui_backbuffer_persists(SDL_Renderer *renderer)
-{
-    if (!renderer) {
-        return false;
-    }
-    /* A clip-scoped final blit relies on the backbuffer keeping the last
-     * presented frame outside the damaged rect. SDL only guarantees that
-     * for the software renderer, whose "backbuffer" is a plain surface
-     * that present copies from. GPU swapchains are free to discard. */
-    SDL_PropertiesID props = SDL_GetRendererProperties(renderer);
-    if (!props) {
-        return false;
-    }
-    const char *name = SDL_GetRendererName(renderer);
-    return name && SDL_strcasecmp(name, "software") == 0;
 }

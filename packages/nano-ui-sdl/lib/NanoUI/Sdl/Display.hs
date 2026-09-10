@@ -15,11 +15,9 @@ module NanoUI.Sdl.Display
   , initRefreshEvent
   , pushRefreshEvent
   , readRefreshEventType
-  , backbufferPersists
   , retainCreate
   , retainBegin
   , retainBlit
-  , retainBlitRect
   , retainDestroy
 ) where
 
@@ -179,23 +177,8 @@ foreign import ccall unsafe "nano_ui_retain_begin"
 foreign import ccall unsafe "nano_ui_retain_blit"
   retainBlitC :: Ptr SDL_Renderer -> Ptr () -> IO Bool
 
-foreign import ccall unsafe "nano_ui_retain_blit_rect"
-  retainBlitRectC ::
-    Ptr SDL_Renderer ->
-    Ptr () ->
-    CFloat ->
-    CFloat ->
-    CFloat ->
-    CFloat ->
-    CFloat ->
-    CFloat ->
-    IO Bool
-
 foreign import ccall unsafe "nano_ui_destroy_texture"
   retainDestroyC :: Ptr () -> IO ()
-
-foreign import ccall unsafe "nano_ui_backbuffer_persists"
-  backbufferPersistsC :: Ptr SDL_Renderer -> IO Bool
 
 retainDestroy :: Ptr () -> IO ()
 retainDestroy = retainDestroyC
@@ -208,15 +191,3 @@ retainBegin ren tex scale = retainBeginC ren tex (realToFrac scale)
 
 retainBlit :: Ptr SDL_Renderer -> Ptr () -> IO Bool
 retainBlit = retainBlitC
-
-retainBlitRect :: Ptr SDL_Renderer -> Ptr () -> Float -> Float -> Float -> Float -> Float -> Float -> IO Bool
-retainBlitRect ren tex sx sy sw sh dx dy =
-  retainBlitRectC ren tex (cf sx) (cf sy) (cf sw) (cf sh) (cf dx) (cf dy)
-  where
-    cf = realToFrac :: Float -> CFloat
-
--- | True when the renderer's backbuffer keeps its contents across
--- 'SDL_RenderPresent' (the SDL software renderer). Only then may the final
--- blit skip undamaged regions; GPU swapchains are free to discard.
-backbufferPersists :: Ptr SDL_Renderer -> IO Bool
-backbufferPersists = backbufferPersistsC
