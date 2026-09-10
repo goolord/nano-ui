@@ -94,6 +94,8 @@ import NanoUI.Layout.Arena
   , ensureAxisSnapshot
   , lookupWrapMemo
   , storeWrapMemo
+  , lookupFitMemo
+  , storeFitMemo
   , naScratchCount
   , naScratchIdx
   , naScratchMain
@@ -787,6 +789,25 @@ recomputeFitHeightAtWidth ::
   Float ->
   IO Float
 recomputeFitHeightAtWidth na host fm monoFm measure resolveFont idx availW = do
+  m <- lookupFitMemo na idx availW
+  case m of
+    Just h -> pure h
+    Nothing -> do
+      h <- recomputeFitHeightAtWidthGo na host fm monoFm measure resolveFont idx availW
+      storeFitMemo na idx availW h
+      pure h
+
+recomputeFitHeightAtWidthGo ::
+  NodeArena ->
+  HostProfile ->
+  FontMetrics ->
+  FontMetrics ->
+  (Text -> IO (Float, Float)) ->
+  FontResolver ->
+  NodeIdx ->
+  Float ->
+  IO Float
+recomputeFitHeightAtWidthGo na host fm monoFm measure resolveFont idx availW = do
   nt <- getNodeType na idx
   (minW, minH, maxW, maxH) <- getMinMax na idx
   (wTag, wVal) <- getWidthSizing na idx
