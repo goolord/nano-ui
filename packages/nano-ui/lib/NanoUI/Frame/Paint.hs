@@ -184,6 +184,7 @@ collectFloatingOccluders ctx = do
           else go (idx + 1) acc
   go 0 []
 
+{-# INLINE lowerNode #-}
 lowerNode :: Context -> NodeIdx -> IO ()
 lowerNode ctx idx = lowerNodeWithOccluders ctx [] idx
 
@@ -766,10 +767,12 @@ drawRadio host da fm style x y h value accent well =
             !dy = sy + (b - dot) / 2
         pushRoundedRectRaw da (Rect dx dy dot dot) (dot / 2) accent
 
+{-# INLINE walkChildren #-}
 walkChildren :: Context -> NodeIdx -> IO ()
 walkChildren ctx idx =
   forChildNodes_ (ctxNodeArena ctx) idx (lowerNode ctx)
 
+{-# INLINE walkChildrenWithOccluders #-}
 walkChildrenWithOccluders :: Context -> [Rect] -> NodeIdx -> IO ()
 walkChildrenWithOccluders ctx occluders idx =
   forChildNodes_ (ctxNodeArena ctx) idx (lowerNodeWithOccluders ctx occluders)

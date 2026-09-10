@@ -12,6 +12,7 @@ module NanoUI.Sdl.Runner
   , readSdlDebugEnv
   ) where
 
+import Control.Exception (finally)
 import Control.Monad (unless, void, when)
 import Data.IORef (IORef, readIORef, writeIORef)
 import Data.Primitive.SmallArray (SmallArray, smallArrayFromListN)
@@ -61,7 +62,7 @@ import NanoUI.Sdl.Display
   , retainDestroy
   , windowToLogicalCoords
   )
-import NanoUI.Sdl.Render (withRenderBatch)
+import NanoUI.Sdl.Render (flushRenderBatch)
 import NanoUI.Sdl.Font (fontSourceLabel, glyphAtlasTexture)
 import NanoUI.Sdl.Window (SdlEnv (..))
 import Foreign.Ptr (Ptr, nullPtr)
@@ -157,15 +158,29 @@ finishDraw ctx env inp tex retainNew presentFull t0 t1 drawData dirtyAfterUi = d
       unless okBegin $ fail "SDL_SetRenderTarget(retain) failed"
       theme <- readIORef (ctxTheme ctx)
       glyphTex <- glyphAtlasTexture (sdlGlyphAtlas env)
-      withRenderBatch (sdlRenderer env) $ \batch ->
-        -- Skip the render clear when the retain texture already holds valid
-        -- content from a previous present (retainNew == False).  The draw
-        -- commands overwrite every pixel of the DamageFull clip, and for
-        -- DamageClip the undamaged region keeps its old content.  Clearing
-        -- to themeWindow before drawing caused a visible dark flash on the
-        -- software renderer because the cleared texture could briefly reach
-        -- the display before the draw commands completed.
-        renderDrawDataPass batch (sdlRenderer env) scale (if retainNew then Just (themeWindow theme) else Nothing) drawData allLayersArr (sdlImages env) glyphTex damage
+      -- Persistent batch created once per session (sdlBatch): no C
+      -- calloc/free pair per presented frame. Flush unconditionally so an
+      -- aborted pass cannot leak pending geometry into the next frame.
+      --
+      -- Skip the render clear when the retain texture already holds valid
+      -- content from a previous present (retainNew == False). The draw
+      -- commands overwrite every pixel of the DamageFull clip, and for
+      -- DamageClip the undamaged region keeps its old content. Clearing
+      -- to themeWindow before drawing caused a visible dark flash on the
+      -- software renderer because the cleared texture could briefly reach
+      -- the display before the draw commands completed.
+      let batch = sdlBatch env
+      renderDrawDataPass
+        batch
+        (sdlRenderer env)
+        scale
+        (if retainNew then Just (themeWindow theme) else Nothing)
+        drawData
+        allLayersArr
+        (sdlImages env)
+        glyphTex
+        damage
+        `finally` flushRenderBatch batch
       t2 <- getMonotonicTime
       -- Damage limits updates to the retained texture, not the final copy:
       -- SDL leaves the window backbuffer undefined after each present.

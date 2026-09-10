@@ -1,0 +1,30 @@
+      
+      Use -p '/sdl3\/draw.small/' to rerun this test only.
+    medium: FAIL
+      Exception: ghc-internal:GHC.Internal.IO.Exception.IOException:
+      
+      user error (SDL_SetRenderTarget(retain) failed)
+      
+      HasCallStack backtrace:
+        throwIO, called at libraries/ghc-internal/src/GHC/Internal/Control/Monad/Fail.hs:66:12 in ghc-internal:GHC.Internal.Control.Monad.Fail
+        a type signature in an instance, called at libraries/ghc-internal/src/GHC/Internal/Control/Monad/Fail.hs:65:13 in ghc-internal:GHC.Internal.Control.Monad.Fail
+        fail, called at lib/NanoUI/Sdl/Runner.hs:157:24 in nano-ui-sdl-0.1.0.0-inplace:NanoUI.Sdl.Runner
+      
+      Use -p '/sdl3\/draw.medium/' to rerun this test only.
+    large:  FAIL
+      Exception: ghc-internal:GHC.Internal.IO.Exception.IOException:
+      
+      user error (SDL_SetRenderTarget(retain) failed)
+      
+      HasCallStack backtrace:
+        throwIO, called at libraries/ghc-internal/src/GHC/Internal/Control/Monad/Fail.hs:66:12 in ghc-internal:GHC.Internal.Control.Monad.Fail
+        a type signature in an instance, called at libraries/ghc-internal/src/GHC/Internal/Control/Monad/Fail.hs:65:13 in ghc-internal:GHC.Internal.Control.Monad.Fail
+        fail, called at lib/NanoUI/Sdl/Runner.hs:157:24 in nano-ui-sdl-0.1.0.0-inplace:NanoUI.Sdl.Runner
+      
+      Use -p '/sdl3\/draw.large/' to rerun this test only.
+
+3 out of 6 tests failed (1.21s)
+Benchmark nano-ui-sdl-bench: ERROR
+Error: [Cabal-7125]
+Benchmarks failed for bench:nano-ui-sdl-bench from nano-ui-sdl-0.1.0.0.
+

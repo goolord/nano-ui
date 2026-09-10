@@ -1,6 +1,8 @@
 module NanoUI.Sdl.Render
   ( ClipState (..)
   , RenderBatch
+  , newRenderBatch
+  , destroyRenderBatch
   , withRenderBatch
   , batchDrawRange
   , flushRenderBatch
@@ -239,11 +241,23 @@ unpackColor (Color w) =
 
 newtype RenderBatch = RenderBatch (Ptr ())
 
+-- | Create a persistent render batch. Reusing one batch across frames avoids
+-- a C calloc/free pair per presented frame; flush after each render pass.
+newRenderBatch :: Ptr SDL_Renderer -> IO RenderBatch
+newRenderBatch ren = do
+  p <- batchCreate ren
+  if p == nullPtr
+    then fail "nano_ui_batch_create failed"
+    else pure (RenderBatch p)
+
+destroyRenderBatch :: RenderBatch -> IO ()
+destroyRenderBatch (RenderBatch p) = batchDestroy p
+
 withRenderBatch :: Ptr SDL_Renderer -> (RenderBatch -> IO a) -> IO a
 withRenderBatch ren act =
   bracket
-    (batchCreate ren >>= \p -> if p == nullPtr then fail "nano_ui_batch_create failed" else pure (RenderBatch p))
-    (\(RenderBatch p) -> batchDestroy p)
+    (newRenderBatch ren)
+    destroyRenderBatch
     $ \rb -> do
       result <- act rb
       batchFlush (batchPtr rb)

@@ -557,11 +557,15 @@ getChildCount na idx = arenaArrays na >>= \a -> readPrimArray (naArrTree a) (idx
 
 {-# INLINE getNodeType #-}
 getNodeType :: NodeArena -> NodeIdx -> IO NodeType
-getNodeType na idx = arenaArrays na >>= \a -> readPrimArray (naArrTags a) (idx * 8) >>= pure . toEnum . fromIntegral
+getNodeType na idx = arenaArrays na >>= \a -> do
+  t <- readPrimArray (naArrTags a) (idx * 8)
+  pure (toEnum (fromIntegral t))
 
 {-# INLINE getDirection #-}
 getDirection :: NodeArena -> NodeIdx -> IO DirTag
-getDirection na idx = arenaArrays na >>= \a -> readPrimArray (naArrTags a) (idx * 8 + 1) >>= pure . toEnum . fromIntegral
+getDirection na idx = arenaArrays na >>= \a -> do
+  t <- readPrimArray (naArrTags a) (idx * 8 + 1)
+  pure (toEnum (fromIntegral t))
 
 {-# INLINE getGridCols #-}
 getGridCols :: NodeArena -> NodeIdx -> IO Int

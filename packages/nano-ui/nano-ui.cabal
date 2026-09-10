@@ -56,6 +56,7 @@ common warnings
 library
     import:           extensions
     import:           warnings
+    ghc-options:      -O2
     exposed-modules:
         NanoUI
         NanoUI.Context
@@ -165,6 +166,7 @@ executable nano-ui-demo
     import:           extensions
     import:           rts-options
     import:           warnings
+    ghc-options:      -O2
     main-is:          Demo.hs
     build-depends:
         base ^>=4.22.0.0,
@@ -198,6 +200,7 @@ test-suite nano-ui-test
         Cases.Damage
         Cases.Demo
         Cases.Modal
+        Cases.NoThunks
         Cases.Scroll
         Cases.Select
         Cases.Tabs
@@ -213,6 +216,7 @@ test-suite nano-ui-test
         containers,
         effectful ^>=2.6,
         nano-ui,
+        nothunks,
         text ^>=2.1,
         vector ^>=0.13
     hs-source-dirs:   test/integration
@@ -222,6 +226,7 @@ executable nano-ui-profile
     import:           extensions
     import:           rts-options
     import:           warnings
+    ghc-options:      -O2
     main-is:          Profile.hs
     hs-source-dirs:   examples
     build-depends:
@@ -232,4 +237,21 @@ executable nano-ui-profile
         nano-ui,
         text ^>=2.1,
         vector ^>=0.13
+    default-language: GHC2024
+
+-- Compile-time verification of optimization invariants (inspection-testing).
+-- Assertions fail the build if GHC stops inlining or starts allocating in the
+-- checked bindings, converting silent performance regressions into errors.
+test-suite nano-ui-inspection
+    import:           extensions
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    main-is:          Inspection.hs
+    ghc-options:      -fplugin=Test.Inspection.Plugin
+    build-depends:
+        base ^>=4.22.0.0,
+        hashable,
+        inspection-testing,
+        nano-ui
+    hs-source-dirs:   test/inspection
     default-language: GHC2024

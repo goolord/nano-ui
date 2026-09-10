@@ -235,11 +235,14 @@ import NanoUI.Atlas qualified as Atlas
 import NanoUI.Context.Types
   ( AnimationState (..)
   , Context (..)
+  , CustomDrawOpCacheEntry (..)
   , DamageRequest (..)
   , DamageState (..)
   , DrawFitCache (..)
+  , DrawOpCacheEntry (..)
   , DrawingCacheState (..)
   , DrawingEntry (..)
+  , PopupConfig (..)
   , SpanCacheEntry (..)
   , FrameMsg (..)
   , InteractionState (..)
@@ -483,13 +486,15 @@ setDamageAndWindowSize ctx dmg sz =
 registerPopupConfig :: Context -> WidgetId -> PopupAnchor -> PopupPlacement -> Float -> IO ()
 registerPopupConfig ctx wid anchor placement offset =
   modifyIORef' (ctxDrawingCache ctx) $ \dc ->
-    dc {dcsPopupConfigs = IM.insert (intKey wid) (anchor, placement, offset) (dcsPopupConfigs dc)}
+    dc {dcsPopupConfigs = IM.insert (intKey wid) (PopupConfig anchor placement offset) (dcsPopupConfigs dc)}
 
 {-# INLINE lookupPopupConfig #-}
 lookupPopupConfig :: Context -> WidgetId -> IO (Maybe (PopupAnchor, PopupPlacement, Float))
 lookupPopupConfig ctx wid = do
   dc <- readIORef (ctxDrawingCache ctx)
-  pure (IM.lookup (intKey wid) (dcsPopupConfigs dc))
+  pure $ case IM.lookup (intKey wid) (dcsPopupConfigs dc) of
+    Just (PopupConfig anchor placement offset) -> Just (anchor, placement, offset)
+    Nothing -> Nothing
 
 {-# INLINE registerDrawing #-}
 registerDrawing :: Context -> WidgetId -> Int -> DrawingBuild -> IO ()
@@ -516,7 +521,7 @@ cachedDrawingOps ctx wid content rect build = do
       else pure False
   dc <- readIORef (ctxDrawingCache ctx)
   case IM.lookup k (dcsDrawOpCache dc) of
-    Just (c, r, ops)
+    Just DrawOpCacheEntry {doeContent = c, doeBounds = r, doeOps = ops}
       | c == content && not animated && rectW r == rectW rect && rectH r == rectH rect ->
           if rectX r == rectX rect && rectY r == rectY rect
             then pure ops
@@ -526,12 +531,12 @@ cachedDrawingOps ctx wid content rect build = do
                       (shiftDrawOp (rectX rect - rectX r) (rectY rect - rectY r))
                       ops
               modifyIORef' (ctxDrawingCache ctx) $ \s ->
-                s {dcsDrawOpCache = IM.insert k (content, rect, ops') (dcsDrawOpCache s)}
+                s {dcsDrawOpCache = IM.insert k (DrawOpCacheEntry content rect ops') (dcsDrawOpCache s)}
               pure ops'
     _ -> do
       let ops = build rect
       modifyIORef' (ctxDrawingCache ctx) $ \s ->
-        s {dcsDrawOpCache = IM.insert k (content, rect, ops) (dcsDrawOpCache s)}
+        s {dcsDrawOpCache = IM.insert k (DrawOpCacheEntry content rect ops) (dcsDrawOpCache s)}
       pure ops
 
 -- | Reuse a derived layout while envelope, font, content key, and caller layout match.
@@ -623,7 +628,7 @@ cachedCustomDrawingOps ctx wid rect cdc build = do
   animated <- IM.member k <$> getLiveAnimations ctx
   dc <- readIORef (ctxDrawingCache ctx)
   case IM.lookup k (dcsCustomDrawOpCache dc) of
-    Just (r, h, p, f, ops)
+    Just CustomDrawOpCacheEntry {cdeBounds = r, cdeHovered = h, cdePressed = p, cdeFocused = f, cdeOps = ops}
       | not animated
           && h == hov && p == prs && f == foc && rectW r == rectW rect && rectH r == rectH rect ->
           if rectX r == rectX rect && rectY r == rectY rect
@@ -634,12 +639,12 @@ cachedCustomDrawingOps ctx wid rect cdc build = do
                       (shiftDrawOp (rectX rect - rectX r) (rectY rect - rectY r))
                       ops
               modifyIORef' (ctxDrawingCache ctx) $ \s ->
-                s {dcsCustomDrawOpCache = IM.insert k (rect, hov, prs, foc, ops') (dcsCustomDrawOpCache s)}
+                s {dcsCustomDrawOpCache = IM.insert k (CustomDrawOpCacheEntry rect hov prs foc ops') (dcsCustomDrawOpCache s)}
               pure ops'
     _ -> do
       let ops = build cdc rect
       modifyIORef' (ctxDrawingCache ctx) $ \s ->
-        s {dcsCustomDrawOpCache = IM.insert k (rect, hov, prs, foc, ops) (dcsCustomDrawOpCache s)}
+        s {dcsCustomDrawOpCache = IM.insert k (CustomDrawOpCacheEntry rect hov prs foc ops) (dcsCustomDrawOpCache s)}
       pure ops
 
 {-# INLINE registerCustomMeasure #-}
@@ -710,7 +715,10 @@ getStore ctx = readIORef (ctxStore ctx)
 setStore :: Context -> WidgetStore -> IO ()
 setStore ctx store = do
   prev <- readIORef (ctxStore ctx)
-  writeIORef (ctxStore ctx) store
+  -- WHNF-force the incoming record: record-update arguments are unevaluated
+  -- thunks, and writeIORef would otherwise park one in the long-lived store
+  -- every frame.
+  writeIORef (ctxStore ctx) $! store
   when (prev /= store) $ do
     let changedKeys =
           diffKeys (storeInt prev) (storeInt store)
@@ -1352,7 +1360,7 @@ topmostFloatingAtMouse ctx mouse = do
       let hit k = case IM.lookup k rects of
             Just r | rectW r > 0 && rectH r > 0 && rectContains r mouse -> True
             _ -> False
-          picked = foldl (\acc k -> if hit k then Just k else acc) Nothing order
+          picked = foldl' (\acc k -> if hit k then Just k else acc) Nothing order
        in case picked of
             Just k -> pure (Just (WidgetId (fromIntegral k)))
             Nothing -> pure Nothing

@@ -76,6 +76,7 @@ import NanoUI.Sdl.NanoUIFont (NanoUIFont (..))
 import NanoUI.Sdl.Debug (SdlDebugSampler, newSdlDebugSampler)
 import NanoUI.Sdl.Dialog.Types (DialogState (..), clearDialogState, newDialogState)
 import NanoUI.Sdl.Image (ImageAtlas, destroyImageAtlas, newImageAtlas)
+import NanoUI.Sdl.Render (RenderBatch, destroyRenderBatch, newRenderBatch)
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
 import SDL3.Sys.Bindgen.Runtime.PtrConst qualified as PtrConst
 import SDL3.Sys.Bindgen.Video (SDL_Window, SDL_WindowFlags (..))
@@ -176,6 +177,7 @@ scaleEpsilon = 0.001
 data SdlEnv = SdlEnv
   { sdlWindow :: Ptr SDL_Window
   , sdlRenderer :: Ptr SDL_Renderer
+  , sdlBatch :: RenderBatch
   , sdlFontSource :: !FontSource
   , sdlMonoFontSource :: !FontSource
   , sdlFontSize :: !Float
@@ -400,10 +402,12 @@ startSdlWindow ctx title w h flags bench vsync continuous fontSource monoSource 
           when (not bench) $ void $ startTextInputSafe win
           dialogState <- newDialogState
           lastPresented <- newIORef False
+          batch <- newRenderBatch ren
           pure
             SdlEnv
                { sdlWindow = win
                , sdlRenderer = ren
+               , sdlBatch = batch
                , sdlFontSource = fontSource
                , sdlMonoFontSource = monoSource
                , sdlFontSize = fontSize
@@ -436,6 +440,7 @@ stopSdlWindow bench env = do
   clearDialogState (sdlDialogState env)
   (tex, _, _, _) <- readIORef (sdlRetain env)
   retainDestroy tex
+  destroyRenderBatch (sdlBatch env)
   destroyCursors (sdlCursors env)
   destroyImageAtlas (sdlImages env)
   destroySdlFontCache (sdlFontCache env)

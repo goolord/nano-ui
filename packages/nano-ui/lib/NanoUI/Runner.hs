@@ -88,11 +88,17 @@ alignFrameStart periodSec lastT = do
       when (now < target) (fullSpin target)
 
 -- | State for multi-click detection (double/triple click).
-newtype ClickTracker = ClickTracker (IORef (Double, V2, Int))
+data ClickTrack = ClickTrack
+  { ctTime :: !Double
+  , ctPos :: !V2
+  , ctCount :: !Int
+  }
+
+newtype ClickTracker = ClickTracker (IORef ClickTrack)
 
 -- | Create a new click tracker initialized to no previous clicks.
 newClickTracker :: IO ClickTracker
-newClickTracker = ClickTracker <$> newIORef (0, V2 (-999) (-999), 0)
+newClickTracker = ClickTracker <$> newIORef ClickTrack {ctTime = 0, ctPos = V2 (-999) (-999), ctCount = 0}
 
 -- | Stamp multi-click counts into an 'Input' record with custom distance and time thresholds.
 stampClicksWith :: Float -> Double -> ClickTracker -> Input -> IO Input
@@ -100,16 +106,18 @@ stampClicksWith !distLimit !timeLimit (ClickTracker ref) inp
   | not (inputMousePressed inp) = pure inp
   | otherwise = do
       now <- getMonotonicTime
-      (t, pos, n) <- readIORef ref
-      let V2 x y = inputMousePos inp
-          V2 px py = pos
+      prev <- readIORef ref
+      let t = ctTime prev
+          n = ctCount prev
+          V2 x y = inputMousePos inp
+          V2 px py = ctPos prev
           dx = x - px
           dy = y - py
           distSq = dx * dx + dy * dy
           close = distSq <= distLimit * distLimit
           quick = (now - t) <= timeLimit
           n' = if close && quick then min 3 (n + 1) else 1
-      writeIORef ref (now, inputMousePos inp, n')
+      writeIORef ref ClickTrack {ctTime = now, ctPos = inputMousePos inp, ctCount = n'}
       pure (inp {inputMouseClicks = n'})
 
 -- | Concurrency lock for drawing vs async callbacks (e.g. resize watchers).

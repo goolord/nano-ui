@@ -190,7 +190,13 @@ data DrawOp
       {-# UNPACK #-} !Float
       {-# UNPACK #-} !Float
       !Color
-  | DrawText !Float !Float !Float !Float !T.Text !Color
+  | DrawText
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      !T.Text
+      !Color
   -- ^ Pen at (x, y) is the alignment point. ax 0..1 is left..right. ay 0..1 is
   -- bottom..top. ay < 0 means baseline (x is left, y is the baseline). Glyph size
   -- is the host font (`drawTextBox`).
@@ -834,7 +840,7 @@ cornerSegments :: Int
 cornerSegments = 4
 
 -- Precomputed unit-circle cos/sin for rounded-rect corners (4 segments per 90° arc).
-{-# NOINLINE cornerQuadrant #-}
+{-# INLINE cornerQuadrant #-}
 cornerQuadrant :: Float -> Int
 cornerQuadrant a0 =
   if a0 >= pi && a0 < pi * 1.5
@@ -844,7 +850,7 @@ cornerQuadrant a0 =
         then 1
         else if a0 < pi * 0.5 then 2 else 3
 
-{-# NOINLINE cornerCosSin #-}
+{-# INLINE cornerCosSin #-}
 cornerCosSin :: Int -> Int -> (Float, Float)
 cornerCosSin q seg =
   case q * 5 + seg of
@@ -1218,7 +1224,9 @@ pushText da fm x y txt col =
               setTexture da glyphAtlasTextureId
               pushQuad da (Rect gx gy gw gh) (gqU0 gq) (gqV0 gq) (gqU1 gq) (gqV1 gq) col
               go (ox + adv) oy (Just c) rest
-    advanceAfter prev c = fmAdvance fm c + maybe 0 (\p -> fmKerning fm p c) prev
+    advanceAfter prev c = case prev of
+      Nothing -> fmAdvance fm c
+      Just p -> fmAdvance fm c + fmKerning fm p c
 
 drawRunQuad :: DrawArena -> Float -> Float -> RunQuad -> Color -> IO ()
 drawRunQuad da x y rq col = do
@@ -1299,7 +1307,9 @@ pushTextStyled da fm weight fstyle deco x y txt col
       | slantMult == 0.0 = goNormal ox oy Nothing t
       | otherwise = goSlantedPrev ox oy Nothing t slantMult
 
-    advanceAfter prev c = fmAdvance fm c + maybe 0 (\p -> fmKerning fm p c) prev
+    advanceAfter prev c = case prev of
+      Nothing -> fmAdvance fm c
+      Just p -> fmAdvance fm c + fmKerning fm p c
 
     goNormal !ox !oy !prev !t =
       case T.uncons t of
@@ -1427,20 +1437,21 @@ groupCmdsByLayer src n = do
       offOv = offCt + nCt
       offCh = offOv + nOv
   dest <- newPrimArray n
-  cBg <- newIORef offBg
-  cCt <- newIORef offCt
-  cOv <- newIORef offOv
-  cCh <- newIORef offCh
-  let writeSlot ly cmd = do
-        slotRef <-
-          case ly of
-            LayerBackground -> pure cBg
-            LayerContent -> pure cCt
-            LayerOverlay -> pure cOv
-            LayerChrome -> pure cCh
-        i <- readIORef slotRef
+  cursors <- newPrimArray 4
+  writePrimArray cursors 0 offBg
+  writePrimArray cursors 1 offCt
+  writePrimArray cursors 2 offOv
+  writePrimArray cursors 3 offCh
+  let layerIdx ly = case ly of
+        LayerBackground -> 0
+        LayerContent -> 1
+        LayerOverlay -> 2
+        LayerChrome -> 3
+      writeSlot ly cmd = do
+        let !lyI = layerIdx ly
+        i <- readPrimArray cursors lyI
         writePrimArray dest i cmd
-        writeIORef slotRef (i + 1)
+        writePrimArray cursors lyI (i + 1)
       scatter !i
         | i >= n = pure ()
         | otherwise = do

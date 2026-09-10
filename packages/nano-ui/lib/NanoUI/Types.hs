@@ -113,6 +113,9 @@ colorFromWord32 = Color
 {-# INLINE clamp #-}
 clamp :: Ord a => a -> a -> a -> a
 clamp lo hi x = max lo (min hi x)
+{-# SPECIALIZE clamp :: Float -> Float -> Float -> Float #-}
+{-# SPECIALIZE clamp :: Int -> Int -> Int -> Int #-}
+{-# SPECIALIZE clamp :: Double -> Double -> Double -> Double #-}
 
 {-# INLINE clamp01 #-}
 clamp01 :: Float -> Float
@@ -287,7 +290,7 @@ damageIsEmpty dmg =
 -- | Invalidation bounding strategy for a widget and its interaction events.
 data DamageBounds
   = DamageSelf                              -- ^ Exact layout bounding box Rect
-  | DamageInflated !Float                   -- ^ Layout bounding box inflated by margin (focus rings, shadows, text slop)
+  | DamageInflated {-# UNPACK #-} !Float    -- ^ Layout bounding box inflated by margin (focus rings, shadows, text slop)
   | DamageExact !Rect                       -- ^ Explicit rectangle in window space
   | DamageCustom (Rect -> Rect)             -- ^ Custom transformation on layout bounding box
   | DamageUnion !DamageBounds !DamageBounds -- ^ Combined invalidation bounds

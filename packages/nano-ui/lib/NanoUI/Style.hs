@@ -429,13 +429,13 @@ alignBottom :: Layout -> Layout
 alignBottom l = l {layoutAlignY = AlignBottom}
 
 data Style = Style
-  { styleBg :: !Color
-  , styleFg :: !Color
-  , styleBorder :: !Color
+  { styleBg :: {-# UNPACK #-} !Color
+  , styleFg :: {-# UNPACK #-} !Color
+  , styleBorder :: {-# UNPACK #-} !Color
   , styleBorderWidth :: {-# UNPACK #-} !Float
   , styleCornerRadius :: {-# UNPACK #-} !Float
-  , styleHoverBg :: !Color
-  , styleActiveBg :: !Color
+  , styleHoverBg :: {-# UNPACK #-} !Color
+  , styleActiveBg :: {-# UNPACK #-} !Color
   }
   deriving (Eq, Show)
 
@@ -457,20 +457,20 @@ unpackPanelStyle baseStyle si =
    in s2
 
 data Theme = Theme
-  { themeWindow :: Color
-  , themePanel :: Style
-  , themeFloatingWindow :: Style
-  , themeButton :: Style
-  , themeInput :: Style
-  , themeSeparator :: Color
-  , themeAccent :: Color
-  , themeMuted :: Color
-  , themeRed :: Color
-  , themeOrange :: Color
-  , themeYellow :: Color
-  , themeGreen :: Color
-  , themePurple :: Color
-  , themeOverlayDim :: Color
+  { themeWindow :: {-# UNPACK #-} !Color
+  , themePanel :: !Style
+  , themeFloatingWindow :: !Style
+  , themeButton :: !Style
+  , themeInput :: !Style
+  , themeSeparator :: {-# UNPACK #-} !Color
+  , themeAccent :: {-# UNPACK #-} !Color
+  , themeMuted :: {-# UNPACK #-} !Color
+  , themeRed :: {-# UNPACK #-} !Color
+  , themeOrange :: {-# UNPACK #-} !Color
+  , themeYellow :: {-# UNPACK #-} !Color
+  , themeGreen :: {-# UNPACK #-} !Color
+  , themePurple :: {-# UNPACK #-} !Color
+  , themeOverlayDim :: {-# UNPACK #-} !Color
   }
   deriving (Eq, Show)
 
@@ -701,22 +701,22 @@ tomorrowMidnightMinDarkTheme = tomorrowMidnightMinTheme
 -- | Standard Base16 palette containing 16 styling tones and syntax colours
 -- following Chris Kempson's Base16 specification.
 data Base16 = Base16
-  { base00 :: Color -- ^ Default Background
-  , base01 :: Color -- ^ Lighter Background (status bars, line numbers, panel backgrounds)
-  , base02 :: Color -- ^ Selection Background (active elements, subtle highlights)
-  , base03 :: Color -- ^ Comments, Invisibles, Line Highlighting (muted text, borders)
-  , base04 :: Color -- ^ Dark Foreground (status bar foreground, secondary text)
-  , base05 :: Color -- ^ Default Foreground, Caret, Delimiters, Operators
-  , base06 :: Color -- ^ Light Foreground
-  , base07 :: Color -- ^ Light Background / Highest contrast foreground
-  , base08 :: Color -- ^ Variables, XML Tags, Markup Link Text, Markup Lists, Diff Deleted (Red)
-  , base09 :: Color -- ^ Integers, Boolean, Constants, XML Attributes, Markup Link Url (Orange)
-  , base0A :: Color -- ^ Classes, Markup Bold, Search Text Background (Yellow)
-  , base0B :: Color -- ^ Strings, Inherited Class, Markup Code, Diff Inserted (Green)
-  , base0C :: Color -- ^ Support, Regular Expressions, Escape Characters, Markup Quotes (Cyan)
-  , base0D :: Color -- ^ Functions, Methods, Attribute IDs, Headings (Blue / Primary Accent)
-  , base0E :: Color -- ^ Keywords, Storage, Selector, Markup Italic, Diff Changed (Purple / Magenta)
-  , base0F :: Color -- ^ Deprecated, Opening/Closing Embedded Language Tags (Brown)
+  { base00 :: {-# UNPACK #-} !Color -- ^ Default Background
+  , base01 :: {-# UNPACK #-} !Color -- ^ Lighter Background (status bars, line numbers, panel backgrounds)
+  , base02 :: {-# UNPACK #-} !Color -- ^ Selection Background (active elements, subtle highlights)
+  , base03 :: {-# UNPACK #-} !Color -- ^ Comments, Invisibles, Line Highlighting (muted text, borders)
+  , base04 :: {-# UNPACK #-} !Color -- ^ Dark Foreground (status bar foreground, secondary text)
+  , base05 :: {-# UNPACK #-} !Color -- ^ Default Foreground, Caret, Delimiters, Operators
+  , base06 :: {-# UNPACK #-} !Color -- ^ Light Foreground
+  , base07 :: {-# UNPACK #-} !Color -- ^ Light Background / Highest contrast foreground
+  , base08 :: {-# UNPACK #-} !Color -- ^ Variables, XML Tags, Markup Link Text, Markup Lists, Diff Deleted (Red)
+  , base09 :: {-# UNPACK #-} !Color -- ^ Integers, Boolean, Constants, XML Attributes, Markup Link Url (Orange)
+  , base0A :: {-# UNPACK #-} !Color -- ^ Classes, Markup Bold, Search Text Background (Yellow)
+  , base0B :: {-# UNPACK #-} !Color -- ^ Strings, Inherited Class, Markup Code, Diff Inserted (Green)
+  , base0C :: {-# UNPACK #-} !Color -- ^ Support, Regular Expressions, Escape Characters, Markup Quotes (Cyan)
+  , base0D :: {-# UNPACK #-} !Color -- ^ Functions, Methods, Attribute IDs, Headings (Blue / Primary Accent)
+  , base0E :: {-# UNPACK #-} !Color -- ^ Keywords, Storage, Selector, Markup Italic, Diff Changed (Purple / Magenta)
+  , base0F :: {-# UNPACK #-} !Color -- ^ Deprecated, Opening/Closing Embedded Language Tags (Brown)
   }
   deriving (Eq, Show)
 

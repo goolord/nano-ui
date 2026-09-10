@@ -1,0 +1,6 @@
+    small:  OK
+      4.28 μs ± 352 ns,  13 KB allocated,   4 B  copied,  10 MB peak memory
+    medium: OK
+      163  μs ±  14 μs, 367 KB allocated, 436 B  copied,  10 MB peak memory
+    large:  OK
+      344  μs ±  27 μs, 758 KB allocated, 1.6 KB copied,  14 MB peak memory
