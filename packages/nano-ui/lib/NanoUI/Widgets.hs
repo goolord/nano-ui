@@ -5,38 +5,25 @@ module NanoUI.Widgets
   , RightClickable (..)
   , onRightClick
   , panel
-  , panel_
   , panelWith
   , panel'
-  , panelBg
-  , panelBgWith
-  , panelBg'
   , panelStyled
   , panelStyledWith
   , panelStyled'
-  , boxWith
   , callout
   , calloutWith
   , row
-  , row_
   , rowWith
   , row'
   , column
-  , column_
   , columnWith
   , column'
   , grid
-  , grid_
   , gridWith
   , grid'
-  , gridPanel
-  , gridPanel_
-  , gridPanelWith
-  , gridPanel'
   , label
   , labelWith
   , labelEx
-  , label'
   , button
   , checkbox
   , slider
@@ -71,11 +58,8 @@ module NanoUI.Widgets
   , menuSeparator
   , menuHeader
   , scroll
-  , scroll_
   , scrollWith
   , scroll'
-  , scroll2D
-  , scroll2D_
   , scroll2DWith
   , scroll2D'
   , scrollArea
@@ -115,7 +99,6 @@ module NanoUI.Widgets
   , bold
   , italic
   , underline
-  , styledLabel
   , kv
   , kvMono
   , kvBlock
@@ -186,7 +169,6 @@ module NanoUI.Widgets
   , pulse
   , keepAnimating
   , sliderValueText
-  , textInputText
   , textInputTerminalText
   , colorPickerLabelText
   , colorPickerCurrentLabel
@@ -303,8 +285,7 @@ import NanoUI.Store
   , slotTextAreaViewport
   )
 import NanoUI.Style
-  ( FontVariant (..)
-  , Layout (..)
+  ( Layout (..)
   , alignEnd
   , alignMid
   , defaultLayout
@@ -366,45 +347,29 @@ import NanoUI.Widgets.Drawing (DrawOp (..), DrawingBuild, drawing, drawingCached
 import NanoUI.Widgets.Custom
 import NanoUI.Widgets.Layout
   ( column
-  , column_
   , columnWith
   , column'
   , flex
   , grid
-  , grid_
   , gridWith
   , grid'
-  , gridPanel
-  , gridPanel_
-  , gridPanelWith
-  , gridPanel'
   , label
   , labelWith
   , labelEx
-  , label'
   , panel
-  , panel_
   , panelWith
   , panel'
-  , panelBg
-  , panelBgWith
-  , panelBg'
   , panelStyled
   , panelStyledWith
   , panelStyled'
-  , boxWith
   , callout
   , calloutWith
   , row
-  , row_
   , rowWith
   , row'
   , scroll
-  , scroll_
   , scrollWith
   , scroll'
-  , scroll2D
-  , scroll2D_
   , scroll2DWith
   , scroll2D'
   , scrollArea
@@ -525,9 +490,6 @@ italic txt = void (labelWith fontItalic txt)
 
 underline :: Ui :> es => Text -> Eff es ()
 underline txt = void (labelWith fontUnderline txt)
-
-styledLabel :: Ui :> es => FontVariant -> Layout -> Text -> Eff es Response
-styledLabel fvar l txt = labelEx (l {layoutFontVariant = fvar}) txt
 
 kv :: Ui :> es => Text -> Text -> Eff es ()
 kv k v = do
@@ -981,6 +943,3 @@ useEnumRadio legend initial = do
   (resp, next) <- enumRadio legend val
   when (respChanged resp) (setVal next)
   pure next
-
-textInputText :: Text -> Text -> Int -> Bool -> Text
-textInputText = textInputTerminalText

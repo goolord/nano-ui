@@ -60,7 +60,6 @@ import NanoUI.Frame.Chrome
   , textInputMenuItemPadX
   , textInputMenuOuterPad
   )
-import NanoUI.Frame.Focus (unlessHit)
 import NanoUI.Frame.Hit (findNodeByWidgetId, widgetOverlayAllowed)
 
 overlayMenuOwnerAt :: Context -> V2 -> IO (Maybe WidgetId)
@@ -142,7 +141,7 @@ closeSelectOnOutsideClick ctx inp =
       let mouse = inputMousePos inp
       count <- arenaCount (ctxNodeArena ctx)
       hit <- openSelectHit ctx count mouse store
-      unlessHit hit $
+      unless hit $
         setStore ctx (closeSelects store)
 
 finalizeSelectKeyboard :: Context -> Input -> IO ()

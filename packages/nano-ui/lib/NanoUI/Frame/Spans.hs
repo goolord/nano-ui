@@ -10,7 +10,6 @@ module NanoUI.Frame.Spans
   , widgetTextPlacements
   , collectNodeTextSpans
   , sliderValue
-  , collectFloatingSpans
   , terminalSeparatorSpans
   , walkChildSpans
   , terminalScrollCapSpans
@@ -720,13 +719,6 @@ sliderValue ctx idx = do
 
 -- Returns a style whose background already reflects hover/active state, so the
 -- rect fill and the text cells agree on one color.
-collectFloatingSpans :: Context -> IM.IntMap (Maybe NodeType) -> NodeType -> IO [(Rect, T.Text, Color, Color, Rect)]
-collectFloatingSpans ctx floatCache wanted = do
-  let arena = ctxSpanOverlay ctx
-  resetSpanArena arena
-  collectFloatingSpansInto ctx floatCache wanted arena
-  spanArenaToList arena
-
 collectFloatingSpansInto :: Context -> IM.IntMap (Maybe NodeType) -> NodeType -> SpanArena -> IO ()
 collectFloatingSpansInto ctx floatCache wanted arena = do
   count <- arenaCount (ctxNodeArena ctx)

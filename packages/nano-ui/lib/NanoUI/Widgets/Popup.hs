@@ -34,6 +34,7 @@ import NanoUI.Id (enterScope, scopeTag)
 import NanoUI.Monad
   ( Ui
   , askContext
+  , askDefaultLayout
   , askInput
   , nextId
   , uiIO
@@ -55,10 +56,11 @@ import NanoUI.Types
   , rectW
   )
 import NanoUI.Widgets.Behavior (useDismissable)
-import NanoUI.Widgets.Layout (columnResponseWith, label)
+import NanoUI.Widgets.Layout (label)
 import NanoUI.Widgets.Node
   ( Responding (..)
   , Response (..)
+  , containerResponse
   , emptyModalResp
   , mkResponse
   , parentIdx
@@ -198,7 +200,8 @@ withTooltip ::
   Eff es b ->
   Eff es (a, Maybe b)
 withTooltip mainChild tipChild = do
-  (res, contResp) <- columnResponseWith tight mainChild
+  base <- askDefaultLayout
+  (res, contResp) <- containerResponse NodeContainer (tight base) mainChild
   mTip <- tooltipWidget contResp tipChild
   pure (res, mTip)
 

@@ -43,9 +43,6 @@ module NanoUI.Layout.Arena
   , getAlignY
   , getRect
   , setRect
-  , getNodeRect
-  , getNodePadding
-  , getNodeMinMax
   , getLayoutRect
   , getClipRect
   , setClipRect
@@ -551,10 +548,6 @@ getPadding na idx = do
   b <- readPrimArray (naArrStyle a) (base + 5)
   pure (Padding l r t b)
 
-{-# INLINE getNodePadding #-}
-getNodePadding :: NodeArena -> NodeIdx -> IO Padding
-getNodePadding = getPadding
-
 {-# INLINE getGap #-}
 getGap :: NodeArena -> NodeIdx -> IO Float
 getGap na idx = arenaArrays na >>= \a -> readPrimArray (naArrStyle a) (idx * 16 + 6)
@@ -569,10 +562,6 @@ getMinMax na idx = do
   maxW <- readPrimArray (naArrStyle a) (base + 9)
   maxH <- readPrimArray (naArrStyle a) (base + 10)
   pure (minW, minH, maxW, maxH)
-
-{-# INLINE getNodeMinMax #-}
-getNodeMinMax :: NodeArena -> NodeIdx -> IO (Float, Float, Float, Float)
-getNodeMinMax = getMinMax
 
 {-# INLINE getGrow #-}
 getGrow :: NodeArena -> NodeIdx -> IO Float
@@ -638,10 +627,6 @@ getRect na idx = do
   w <- readPrimArray (naArrGeom a) (base + 2)
   h <- readPrimArray (naArrGeom a) (base + 3)
   pure (x, y, w, h)
-
-{-# INLINE getNodeRect #-}
-getNodeRect :: NodeArena -> NodeIdx -> IO (Float, Float, Float, Float)
-getNodeRect = getRect
 
 {-# INLINE setRect #-}
 setRect :: NodeArena -> NodeIdx -> Float -> Float -> Float -> Float -> IO ()

@@ -25,8 +25,9 @@ import NanoUI.Store (WidgetStore (..), slotKey, slotMenuOpen, slotMenuPos)
 import NanoUI.Style (Layout (..), defaultLayout, fillW, fontMuted, padXY, tight)
 import NanoUI.Types (PopupAnchor (..), PopupPlacement (..), V2 (..))
 import NanoUI.Widgets.Combinators (buttonStyled)
-import NanoUI.Widgets.Layout (columnResponse', columnWith, labelEx, sep)
-import NanoUI.Widgets.Node (Responding (..), Response (..))
+import NanoUI.Widgets.Layout (columnWith, labelEx, sep)
+import NanoUI.Layout.Arena (NodeType (..))
+import NanoUI.Widgets.Node (Responding (..), Response (..), containerResponse)
 import NanoUI.Widgets.Popup (PopupConfig (..), popup)
 
 -- | Attach a context menu to any target response, opened on right-click.
@@ -60,7 +61,7 @@ contextMenuArea ::
   Eff es (a, Maybe b)
 contextMenuArea layout areaContent menuContent = do
   (isOpen0, pos0, openAt, close) <- useContextMenu
-  (areaRes, areaResp) <- columnResponse' layout areaContent
+  (areaRes, areaResp) <- containerResponse NodeContainer layout areaContent
   inp <- askInput
   let rightClick = respRightClicked areaResp
       mouse = inputMousePos inp

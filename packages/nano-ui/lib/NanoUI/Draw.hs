@@ -38,13 +38,8 @@ module NanoUI.Draw
   , finishDraw
   , drawCmdCount
   , drawCmdNull
-  , drawCmdAt
   , foldDrawCmds
-  , drawCmdFilter
-  , drawCmdForLayer
   , forDrawCmdsInLayer_
-  , drawCmdElemsForLayer
-  , drawCmdPartitionByLayer
   , drawCmdElems
   , vertexSize
   , indexSize
@@ -1379,10 +1374,6 @@ drawCmdCount dd = sizeofPrimArray (drawCommands dd)
 drawCmdNull :: DrawData -> Bool
 drawCmdNull dd = sizeofPrimArray (drawCommands dd) == 0
 
-{-# INLINE drawCmdAt #-}
-drawCmdAt :: DrawData -> Int -> DrawCmd
-drawCmdAt dd i = indexPrimArray (drawCommands dd) i
-
 {-# INLINE foldDrawCmds #-}
 foldDrawCmds :: (a -> DrawCmd -> a) -> a -> DrawData -> a
 foldDrawCmds f z dd =
@@ -1392,20 +1383,6 @@ foldDrawCmds f z dd =
         | i >= n = acc
         | otherwise = go (i + 1) (f acc (indexPrimArray cmds i))
    in go 0 z
-
-{-# INLINE drawCmdFilter #-}
-drawCmdFilter :: (DrawCmd -> Bool) -> DrawData -> Vector DrawCmd
-drawCmdFilter p dd =
-  let cmds = drawCommands dd
-      n = sizeofPrimArray cmds
-   in V.fromList [indexPrimArray cmds i | i <- [0 .. n - 1], p (indexPrimArray cmds i)]
-
-{-# INLINE drawCmdForLayer #-}
-drawCmdForLayer :: Layer -> DrawData -> Vector DrawCmd
-drawCmdForLayer ly dd =
-  let LayerSlice off cnt = layerSliceOf dd ly
-      cmds = drawCommands dd
-   in V.generate cnt (\i -> indexPrimArray cmds (off + i))
 
 {-# INLINE forDrawCmdsInLayer_ #-}
 forDrawCmdsInLayer_ :: Layer -> DrawData -> (DrawCmd -> IO ()) -> IO ()
@@ -1420,21 +1397,6 @@ forDrawCmdsInLayer_ ly dd f =
 {-# INLINE layerSliceOf #-}
 layerSliceOf :: DrawData -> Layer -> LayerSlice
 layerSliceOf dd ly = indexPrimArray (drawLayerSlices dd) (fromEnum ly)
-
-drawCmdElemsForLayer :: Layer -> DrawData -> [DrawCmd]
-drawCmdElemsForLayer ly dd =
-  let LayerSlice off cnt = layerSliceOf dd ly
-      cmds = drawCommands dd
-   in [indexPrimArray cmds (off + i) | i <- [0 .. cnt - 1]]
-
--- | Layer buckets as contiguous slices. No per-frame list partition.
-drawCmdPartitionByLayer :: DrawData -> ([DrawCmd], [DrawCmd], [DrawCmd], [DrawCmd])
-drawCmdPartitionByLayer dd =
-  ( drawCmdElemsForLayer LayerBackground dd
-  , drawCmdElemsForLayer LayerContent dd
-  , drawCmdElemsForLayer LayerOverlay dd
-  , drawCmdElemsForLayer LayerChrome dd
-  )
 
 drawCmdElems :: DrawData -> [DrawCmd]
 drawCmdElems dd =
