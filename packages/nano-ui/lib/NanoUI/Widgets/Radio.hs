@@ -24,7 +24,7 @@ import NanoUI.Layout.Arena
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
 import NanoUI.Store (WidgetStore (..), slotKey)
 import NanoUI.Style (Layout, defaultLayout, fillW, fontMuted, gap, tight)
-import NanoUI.Types (Rect (..), isCellHost, rectContains, rectH, rectUnion, rectW)
+import NanoUI.Types (Rect (..), isCellHost, rectContains, rectH, rectW)
 import NanoUI.Widgets.Behavior (useSelection)
 import NanoUI.Widgets.Combinators (selectableItem)
 import NanoUI.Widgets.Layout (column')
@@ -49,12 +49,6 @@ legendLay = tight (fillW (fontMuted defaultLayout))
 
 radioSalt :: Int
 radioSalt = hash ("radio" :: Text)
-
-unionRadioRect :: Rect -> Rect -> Rect
-unionRadioRect a@(Rect _ _ w1 h1) b@(Rect _ _ w2 h2)
-  | w1 <= 0 || h1 <= 0 = b
-  | w2 <= 0 || h2 <= 0 = a
-  | otherwise = rectUnion a b
 
 radioFieldset :: (Ui :> es) => Text -> [Text] -> Int -> Eff es (Response, Int)
 radioFieldset legend options initial =
@@ -109,12 +103,9 @@ addRadioOptions ctx inp sel opts =
     let parent = parentIdx stack
         terminal = isCellHost (ctxHostProfile ctx)
         icons = ctxIcons ctx
-        go !_ !_ [] !rid !rect !hov !press !click !submit !rightPress !rightClick !clickedIdx =
-          pure
-            ( (Response rid rect hov press click False submit rightPress rightClick, clickedIdx)
-            , sid
-            )
-        go !i !s (l : ls) _rid !rect !hov !press !click !submit !rightPress !rightClick !clickedIdx = do
+        go !_ !_ [] !acc !clickedIdx =
+          pure ((acc, clickedIdx), sid)
+        go !i !s (l : ls) !acc !clickedIdx = do
           let raw = mix64 cid s
               wid = if raw == 0 then WidgetId 1 else WidgetId raw
           idx <- addNodeFromLayout (ctxNodeArena ctx) NodeRadio parent radioLay
@@ -125,16 +116,9 @@ addRadioOptions ctx inp sel opts =
           setStyleIdx (ctxNodeArena ctx) idx i
           setWidgetId (ctxNodeArena ctx) idx wid
           r <- radioResponse ctx inp pending wid
-          let !rect' = unionRadioRect rect (rawRespRect r)
-              !hov' = hov || rawRespHovered r
-              !press' = press || rawRespPressed r
-              !click' = click || rawRespClicked r
-              !submit' = submit || rawRespSubmitted r
-              !rightPress' = rightPress || rawRespRightPressed r
-              !rightClick' = rightClick || rawRespRightClicked r
-              !clickedIdx' = if rawRespClicked r && clickedIdx < 0 then i else clickedIdx
-          go (i + 1) (s + 1) ls (rawRespId r) rect' hov' press' click' submit' rightPress' rightClick' clickedIdx'
-    (result, sid') <- go 0 sid opts (WidgetId 0) (Rect 0 0 0 0) False False False False False False (-1)
+          let !clickedIdx' = if rawRespClicked r && clickedIdx < 0 then i else clickedIdx
+          go (i + 1) (s + 1) ls (acc <> r) clickedIdx'
+    (result, sid') <- go 0 sid opts mempty (-1)
     writeIORef (ctxIdContext ctx) (ic {siblingId = sid'})
     pure result
 

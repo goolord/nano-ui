@@ -474,43 +474,48 @@ data Theme = Theme
   }
   deriving (Eq, Show)
 
+-- | Flat widget style: bg/fg/border plus hover and active fills.
+-- Border width 1, corner radius 2 -- the house look for built-in themes.
+flatStyle :: Color -> Color -> Color -> Color -> Color -> Style
+flatStyle bg fg border hoverBg activeBg =
+  Style
+    { styleBg = bg
+    , styleFg = fg
+    , styleBorder = border
+    , styleBorderWidth = 1
+    , styleCornerRadius = 2
+    , styleHoverBg = hoverBg
+    , styleActiveBg = activeBg
+    }
+
 -- Charcoal tiling surfaces (Untitled.png) with Adwaita-dark widget chrome.
 defaultTheme :: Theme
 defaultTheme =
   let panelStyle =
-        Style
-          { styleBg = colorRGBA 34 34 38 255
-          , styleFg = colorRGBA 236 234 230 255
-          , styleBorder = colorRGBA 62 64 72 255
-          , styleBorderWidth = 1
-          , styleCornerRadius = 2
-          , styleHoverBg = colorRGBA 34 34 38 255
-          , styleActiveBg = colorRGBA 30 30 34 255
-          }
+        flatStyle
+          (colorRGBA 34 34 38 255)
+          (colorRGBA 236 234 230 255)
+          (colorRGBA 62 64 72 255)
+          (colorRGBA 34 34 38 255)
+          (colorRGBA 30 30 34 255)
    in Theme
         { themeWindow = colorRGBA 24 24 27 255
         , themePanel = panelStyle
         , themeFloatingWindow = panelStyle
         , themeButton =
-            Style
-              { styleBg = colorRGBA 52 52 58 255
-              , styleFg = colorRGBA 248 247 245 255
-              , styleBorder = colorRGBA 74 76 84 255
-              , styleBorderWidth = 1
-              , styleCornerRadius = 2
-              , styleHoverBg = colorRGBA 68 70 78 255
-              , styleActiveBg = colorRGBA 42 42 48 255
-              }
+            flatStyle
+              (colorRGBA 52 52 58 255)
+              (colorRGBA 248 247 245 255)
+              (colorRGBA 74 76 84 255)
+              (colorRGBA 68 70 78 255)
+              (colorRGBA 42 42 48 255)
         , themeInput =
-            Style
-              { styleBg = colorRGBA 18 18 21 255
-              , styleFg = colorRGBA 236 234 230 255
-              , styleBorder = colorRGBA 70 72 80 255
-              , styleBorderWidth = 1
-              , styleCornerRadius = 2
-              , styleHoverBg = colorRGBA 24 24 28 255
-              , styleActiveBg = colorRGBA 14 14 17 255
-              }
+            flatStyle
+              (colorRGBA 18 18 21 255)
+              (colorRGBA 236 234 230 255)
+              (colorRGBA 70 72 80 255)
+              (colorRGBA 24 24 28 255)
+              (colorRGBA 14 14 17 255)
         , themeSeparator = colorRGBA 78 80 88 255
         , themeAccent = colorRGBA 88 156 246 255
         , themeMuted = colorRGBA 176 172 164 255
@@ -558,39 +563,30 @@ fadeAlpha (Color w) a = Color ((w .&. 0xFFFFFF00) .|. fromIntegral a)
 tomorrowNightMinTheme :: Theme
 tomorrowNightMinTheme =
   let panelStyle =
-        Style
-          { styleBg = colorRGBA 30 31 33 255          -- base.bg #1E1F21 (elevated panel canvas)
-          , styleFg = colorRGBA 234 234 234 255       -- bright.fg #EAEAEA
-          , styleBorder = borderColor
-          , styleBorderWidth = 1
-          , styleCornerRadius = 2
-          , styleHoverBg = colorRGBA 52 54 62 255     -- #34363E
-          , styleActiveBg = colorRGBA 26 27 29 255    -- #1A1B1D
-          }
+        flatStyle
+          (colorRGBA 30 31 33 255)  -- base.bg #1E1F21 (elevated panel canvas)
+          (colorRGBA 234 234 234 255)  -- bright.fg #EAEAEA
+          borderColor
+          (colorRGBA 52 54 62 255)  -- #34363E
+          (colorRGBA 26 27 29 255)  -- #1A1B1D
    in Theme
         { themeWindow = colorRGBA 23 24 26 255         -- #17181A (dark root window backdrop)
         , themePanel = panelStyle
         , themeFloatingWindow = panelStyle
         , themeButton =
-            Style
-              { styleBg = colorRGBA 44 46 51 255       -- elevated button surface
-              , styleFg = colorRGBA 245 245 245 255    -- bright.fg / white
-              , styleBorder = borderColor
-              , styleBorderWidth = 1
-              , styleCornerRadius = 2
-              , styleHoverBg = colorRGBA 69 74 83 255  -- #454A53
-              , styleActiveBg = colorRGBA 28 29 32 255 -- depressed on click
-              }
+            flatStyle
+              (colorRGBA 44 46 51 255)  -- elevated button surface
+              (colorRGBA 245 245 245 255)  -- bright.fg / white
+              borderColor
+              (colorRGBA 69 74 83 255)  -- #454A53
+              (colorRGBA 28 29 32 255)  -- depressed on click
         , themeInput =
-            Style
-              { styleBg = colorRGBA 23 24 26 255       -- #17181A (recessed into #1E1F21 panel)
-              , styleFg = colorRGBA 234 234 234 255    -- bright.fg #EAEAEA
-              , styleBorder = borderColor
-              , styleBorderWidth = 1
-              , styleCornerRadius = 2
-              , styleHoverBg = colorRGBA 29 30 33 255
-              , styleActiveBg = colorRGBA 19 20 22 255
-              }
+            flatStyle
+              (colorRGBA 23 24 26 255)  -- #17181A (recessed into #1E1F21 panel)
+              (colorRGBA 234 234 234 255)  -- bright.fg #EAEAEA
+              borderColor
+              (colorRGBA 29 30 33 255)
+              (colorRGBA 19 20 22 255)
         , themeSeparator = separatorColor
         , themeAccent = activeColor
         , themeMuted = colorRGBA 150 152 150 255       -- comment #969896
@@ -614,39 +610,30 @@ tomorrowNightMinDarkTheme = tomorrowNightMinTheme
 tomorrowLightTheme :: Theme
 tomorrowLightTheme =
   let panelStyle =
-        Style
-          { styleBg = colorRGBA 242 242 242 255       -- #F2F2F2
-          , styleFg = colorRGBA 55 59 65 255          -- #373B41
-          , styleBorder = colorRGBA 222 222 222 255   -- #DEDEDE
-          , styleBorderWidth = 1
-          , styleCornerRadius = 2
-          , styleHoverBg = colorRGBA 231 231 231 255 -- #E7E7E7 (darker than #F2F2F2 so hover reads)
-          , styleActiveBg = colorRGBA 219 219 219 255 -- #DBDBDB
-          }
+        flatStyle
+          (colorRGBA 242 242 242 255)  -- #F2F2F2
+          (colorRGBA 55 59 65 255)  -- #373B41
+          (colorRGBA 222 222 222 255)  -- #DEDEDE
+          (colorRGBA 231 231 231 255)  -- #E7E7E7 (darker than #F2F2F2 so hover reads)
+          (colorRGBA 219 219 219 255)  -- #DBDBDB
    in Theme
         { themeWindow = colorRGBA 255 255 255 255     -- #FFFFFF
         , themePanel = panelStyle
         , themeFloatingWindow = panelStyle
         , themeButton =
-            Style
-              { styleBg = colorRGBA 232 232 232 255   -- #E8E8E8 (step down from panel for zebra rows)
-              , styleFg = colorRGBA 55 59 65 255      -- #373B41
-              , styleBorder = colorRGBA 214 214 214 255 -- #D6D6D6
-              , styleBorderWidth = 1
-              , styleCornerRadius = 2
-              , styleHoverBg = colorRGBA 214 214 214 255 -- #D6D6D6
-              , styleActiveBg = colorRGBA 196 196 196 255 -- #C4C4C4
-              }
+            flatStyle
+              (colorRGBA 232 232 232 255)  -- #E8E8E8 (step down from panel for zebra rows)
+              (colorRGBA 55 59 65 255)  -- #373B41
+              (colorRGBA 214 214 214 255)  -- #D6D6D6
+              (colorRGBA 214 214 214 255)  -- #D6D6D6
+              (colorRGBA 196 196 196 255)  -- #C4C4C4
         , themeInput =
-            Style
-              { styleBg = colorRGBA 255 255 255 255   -- #FFFFFF
-              , styleFg = colorRGBA 55 59 65 255
-              , styleBorder = colorRGBA 210 210 210 255
-              , styleBorderWidth = 1
-              , styleCornerRadius = 2
-              , styleHoverBg = colorRGBA 243 243 243 255 -- #F3F3F3 (darker than white so hover reads)
-              , styleActiveBg = colorRGBA 255 255 255 255 -- focus keeps the normal white bg; accent border signals focus
-              }
+            flatStyle
+              (colorRGBA 255 255 255 255)  -- #FFFFFF
+              (colorRGBA 55 59 65 255)
+              (colorRGBA 210 210 210 255)
+              (colorRGBA 243 243 243 255)  -- #F3F3F3 (darker than white so hover reads)
+              (colorRGBA 255 255 255 255)  -- focus keeps the normal white bg; accent border signals focus
         , themeSeparator = colorRGBA 222 222 222 255  -- #DEDEDE
         , themeAccent = colorRGBA 82 134 188 255      -- #5286BC (Tomorrow Blue)
         , themeMuted = colorRGBA 140 140 140 255      -- #8C8C8C
@@ -665,39 +652,30 @@ tomorrowMinLightTheme = tomorrowLightTheme
 tomorrowMidnightMinTheme :: Theme
 tomorrowMidnightMinTheme =
   let panelStyle =
-        Style
-          { styleBg = colorRGBA 16 17 20 255          -- #101114 (elevated panel canvas)
-          , styleFg = colorRGBA 238 238 238 255       -- #EEEEEE
-          , styleBorder = borderColor
-          , styleBorderWidth = 1
-          , styleCornerRadius = 2
-          , styleHoverBg = colorRGBA 46 48 56 255     -- #2E3038
-          , styleActiveBg = colorRGBA 12 13 15 255    -- #0C0D0F
-          }
+        flatStyle
+          (colorRGBA 16 17 20 255)  -- #101114 (elevated panel canvas)
+          (colorRGBA 238 238 238 255)  -- #EEEEEE
+          borderColor
+          (colorRGBA 46 48 56 255)  -- #2E3038
+          (colorRGBA 12 13 15 255)  -- #0C0D0F
    in Theme
         { themeWindow = colorRGBA 0 0 0 255           -- #000000 (pitch black root window backdrop)
         , themePanel = panelStyle
         , themeFloatingWindow = panelStyle
         , themeButton =
-            Style
-              { styleBg = colorRGBA 26 27 34 255       -- #1A1B22
-              , styleFg = colorRGBA 238 238 238 255    -- #EEEEEE
-              , styleBorder = borderColor
-              , styleBorderWidth = 1
-              , styleCornerRadius = 2
-              , styleHoverBg = colorRGBA 54 58 72 255     -- #363A48
-              , styleActiveBg = colorRGBA 56 60 81 255 -- #383C51
-              }
+            flatStyle
+              (colorRGBA 26 27 34 255)  -- #1A1B22
+              (colorRGBA 238 238 238 255)  -- #EEEEEE
+              borderColor
+              (colorRGBA 54 58 72 255)  -- #363A48
+              (colorRGBA 56 60 81 255)  -- #383C51
         , themeInput =
-            Style
-              { styleBg = colorRGBA 13 14 18 255       -- #0D0E12 (recessed into panel)
-              , styleFg = colorRGBA 238 238 238 255
-              , styleBorder = borderColor
-              , styleBorderWidth = 1
-              , styleCornerRadius = 2
-              , styleHoverBg = colorRGBA 21 22 28 255
-              , styleActiveBg = colorRGBA 8 9 11 255
-              }
+            flatStyle
+              (colorRGBA 13 14 18 255)  -- #0D0E12 (recessed into panel)
+              (colorRGBA 238 238 238 255)
+              borderColor
+              (colorRGBA 21 22 28 255)
+              (colorRGBA 8 9 11 255)
         , themeSeparator = separatorColor
         , themeAccent = activeColor
         , themeMuted = colorRGBA 128 132 150 255       -- #808496
@@ -776,39 +754,30 @@ themeFromBase16Dark b =
   let borderColor = lerpColor (base02 b) (base03 b) 0.35
       panelBg = lerpColor (base01 b) (base02 b) 0.3
       panelStyle =
-        Style
-          { styleBg = panelBg
-          , styleFg = base05 b
-          , styleBorder = borderColor
-          , styleBorderWidth = 1
-          , styleCornerRadius = 2
-          , styleHoverBg = lerpColor panelBg (base02 b) 0.5
-          , styleActiveBg = lerpColor panelBg (base00 b) 0.4
-          }
+        flatStyle
+          panelBg
+          (base05 b)
+          borderColor
+          (lerpColor panelBg (base02 b) 0.5)
+          (lerpColor panelBg (base00 b) 0.4)
    in Theme
         { themeWindow = base00 b
         , themePanel = panelStyle
         , themeFloatingWindow = panelStyle
         , themeButton =
-            Style
-              { styleBg = base02 b
-              , styleFg = base07 b
-              , styleBorder = borderColor
-              , styleBorderWidth = 1
-              , styleCornerRadius = 2
-              , styleHoverBg = lerpColor (base02 b) (base03 b) 0.4
-              , styleActiveBg = base01 b
-              }
+            flatStyle
+              (base02 b)
+              (base07 b)
+              borderColor
+              (lerpColor (base02 b) (base03 b) 0.4)
+              (base01 b)
         , themeInput =
-            Style
-              { styleBg = base00 b
-              , styleFg = base05 b
-              , styleBorder = borderColor
-              , styleBorderWidth = 1
-              , styleCornerRadius = 2
-              , styleHoverBg = base01 b
-              , styleActiveBg = base00 b
-              }
+            flatStyle
+              (base00 b)
+              (base05 b)
+              borderColor
+              (base01 b)
+              (base00 b)
         , themeSeparator = borderColor
         , themeAccent = base0D b
         , themeMuted = base03 b
@@ -826,39 +795,30 @@ themeFromBase16Light b =
   let borderColor = base02 b
       panelBg = lerpColor (base00 b) (base01 b) 0.5
       panelStyle =
-        Style
-          { styleBg = panelBg
-          , styleFg = base05 b
-          , styleBorder = borderColor
-          , styleBorderWidth = 1
-          , styleCornerRadius = 2
-          , styleHoverBg = lerpColor panelBg (base00 b) 0.4
-          , styleActiveBg = lerpColor panelBg (base02 b) 0.4
-          }
+        flatStyle
+          panelBg
+          (base05 b)
+          borderColor
+          (lerpColor panelBg (base00 b) 0.4)
+          (lerpColor panelBg (base02 b) 0.4)
    in Theme
         { themeWindow = base00 b
         , themePanel = panelStyle
         , themeFloatingWindow = panelStyle
         , themeButton =
-            Style
-              { styleBg = base01 b
-              , styleFg = base05 b
-              , styleBorder = borderColor
-              , styleBorderWidth = 1
-              , styleCornerRadius = 2
-              , styleHoverBg = base02 b
-              , styleActiveBg = lerpColor (base02 b) (base03 b) 0.35
-              }
+            flatStyle
+              (base01 b)
+              (base05 b)
+              borderColor
+              (base02 b)
+              (lerpColor (base02 b) (base03 b) 0.35)
         , themeInput =
-            Style
-              { styleBg = base00 b
-              , styleFg = base05 b
-              , styleBorder = borderColor
-              , styleBorderWidth = 1
-              , styleCornerRadius = 2
-              , styleHoverBg = lerpColor (base00 b) (base01 b) 0.3
-              , styleActiveBg = lerpColor (base00 b) (base01 b) 0.6
-              }
+            flatStyle
+              (base00 b)
+              (base05 b)
+              borderColor
+              (lerpColor (base00 b) (base01 b) 0.3)
+              (lerpColor (base00 b) (base01 b) 0.6)
         , themeSeparator = borderColor
         , themeAccent = base0D b
         , themeMuted = base03 b

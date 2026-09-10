@@ -361,20 +361,7 @@ resolveInteraction ctx inp wid = do
         && rectContains rect mouse
     canHit = underMouse || pending == wid
   if not canHit
-    then
-      pure
-        ( Response
-            { rawRespId = wid
-            , rawRespRect = rect
-            , rawRespHovered = False
-            , rawRespPressed = False
-            , rawRespClicked = False
-            , rawRespChanged = False
-            , rawRespSubmitted = False
-            , rawRespRightPressed = False
-            , rawRespRightClicked = False
-            }
-        )
+    then pure (mkResponse wid rect False False False False)
     else do
       disabled <- isDisabled ctx wid
       blocked <- pointerBlockedByOverlay ctx mouse
