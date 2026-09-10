@@ -104,6 +104,7 @@ testSpecs =
   , TestSpec "table-col-resize-cursor" False runTableColResizeCursorTest
   , TestSpec "table-col-resize-body" False runTableColResizeDemoReproTest
   , TestSpec "table-hbar-stable" False runTableHBarStableTest
+  , TestSpec "table-hbar-reach" False runTableHBarReachTest
   , TestSpec "scroll-top-clip" True runScrollTopClipTest
   , TestSpec "select-overlay-damage" False runSelectOverlayDamageTest
   , TestSpec "text-input-dirty" False runTextInputDirtyTest

@@ -64,6 +64,7 @@ import NanoUI.Sdl.Font
   , newSdlFontCache
   , destroySdlFontCache
   , resetSdlFontCache
+  , setSdlFontCacheSource
   , withTtfFontCache
   )
 import NanoUI.Sdl.Font.Resolve
@@ -178,8 +179,10 @@ data SdlEnv = SdlEnv
   { sdlWindow :: Ptr SDL_Window
   , sdlRenderer :: Ptr SDL_Renderer
   , sdlBatch :: RenderBatch
-  , sdlFontSource :: !FontSource
+  , sdlFontSourceRef :: !(IORef FontSource)
   , sdlMonoFontSource :: !FontSource
+  , sdlFontRequestRef :: !(IORef NanoUIFont)
+  , sdlFontAppliedRef :: !(IORef NanoUIFont)
   , sdlFontSize :: !Float
   , sdlScaleRef :: IORef Float
   , sdlFontRef :: IORef SdlFont
@@ -214,30 +217,22 @@ syncDisplay ctx env inp = do
   unlessM (setRenderScale (sdlRenderer env) defaultUiScale) $
     fail "SDL_SetRenderScale failed"
   oldScale <- readIORef (sdlScaleRef env)
-  when (abs (scale - oldScale) > scaleEpsilon) $ do
+  let scaleChanged = abs (scale - oldScale) > scaleEpsilon
+  when scaleChanged $ do
     writeIORef (sdlScaleRef env) scale
     setDrawSnapScale ctx scale
-    oldFont <- readIORef (sdlFontRef env)
-    closeFont oldFont
-    newFont <- openFontSourceWithFallback (sdlFontSource env) embeddedFontSource (sdlFontSize env * scale)
-    writeIORef (sdlFontRef env) newFont
-    oldMono <- readIORef (sdlMonoFontRef env)
-    closeFont oldMono
-    newMono <- openFontSourceWithFallback (sdlMonoFontSource env) embeddedFontSource (sdlFontSize env * scale)
-    writeIORef (sdlMonoFontRef env) newMono
-    resetGlyphAtlas (sdlGlyphAtlas env)
-    warmGlyphAtlas (sdlGlyphAtlas env) newFont
-    warmGlyphAtlas (sdlGlyphAtlas env) newMono
-    let ga = sdlGlyphAtlas env
-    fm <- buildGlyphFontMetrics ga newFont scale
-    monoFm <- buildGlyphFontMetrics ga newMono scale
-    let ctx' = withTtfFontCache (sdlFontCache env) (withTtfMeasureGlyph ctx newFont newMono fm monoFm scale)
-    resetSdlFontCache (sdlFontCache env) scale newFont fm newMono monoFm
-    writeIORef (sdlCachedFm env) fm
-    writeIORef (sdlCachedMonoFm env) monoFm
-    writeIORef (sdlCachedCtx env) ctx'
-    clearMeasureCache ctx
-    markDirty ctx
+  -- Runtime font-family switch: the app publishes its requested family through
+  -- 'setSdlUiFont'; resolve and apply it here, on the display thread, before
+  -- the next frame so the atlas, metrics, and text resolver agree.
+  requested <- readIORef (sdlFontRequestRef env)
+  applied <- readIORef (sdlFontAppliedRef env)
+  let fontChanged = requested /= applied
+  when fontChanged $ do
+    newSource <- resolveNanoUIFont requested
+    writeIORef (sdlFontSourceRef env) newSource
+    setSdlFontCacheSource (sdlFontCache env) newSource
+    writeIORef (sdlFontAppliedRef env) requested
+  when (scaleChanged || fontChanged) (rebuildScaledFonts ctx env scale)
   queried <- queryWindowLogicalSize (sdlWindow env) scale
   let winSize =
         case queried of
@@ -250,6 +245,34 @@ syncDisplay ctx env inp = do
   ctxMeasured <- readIORef (sdlCachedCtx env)
   let ctx' = withSdlClipboard ctxMeasured
   pure (ctx', inpSized)
+
+-- | Reopen the base sans/mono fonts at @scale@, rebuild metrics and the text
+-- resolver, and invalidate cached measurements. Shared by the DPI-change and
+-- runtime font-family-switch paths in 'syncDisplay'.
+rebuildScaledFonts :: Context -> SdlEnv -> Float -> IO ()
+rebuildScaledFonts ctx env scale = do
+  uiSource <- readIORef (sdlFontSourceRef env)
+  oldFont <- readIORef (sdlFontRef env)
+  closeFont oldFont
+  newFont <- openFontSourceWithFallback uiSource embeddedFontSource (sdlFontSize env * scale)
+  writeIORef (sdlFontRef env) newFont
+  oldMono <- readIORef (sdlMonoFontRef env)
+  closeFont oldMono
+  newMono <- openFontSourceWithFallback (sdlMonoFontSource env) embeddedFontSource (sdlFontSize env * scale)
+  writeIORef (sdlMonoFontRef env) newMono
+  resetGlyphAtlas (sdlGlyphAtlas env)
+  warmGlyphAtlas (sdlGlyphAtlas env) newFont
+  warmGlyphAtlas (sdlGlyphAtlas env) newMono
+  let ga = sdlGlyphAtlas env
+  fm <- buildGlyphFontMetrics ga newFont scale
+  monoFm <- buildGlyphFontMetrics ga newMono scale
+  let ctx' = withTtfFontCache (sdlFontCache env) (withTtfMeasureGlyph ctx newFont newMono fm monoFm scale)
+  resetSdlFontCache (sdlFontCache env) scale newFont fm newMono monoFm
+  writeIORef (sdlCachedFm env) fm
+  writeIORef (sdlCachedMonoFm env) monoFm
+  writeIORef (sdlCachedCtx env) ctx'
+  clearMeasureCache ctx
+  markDirty ctx
 
 syncInput :: SdlEnv -> Float -> Input -> IO Input
 syncInput _env scale inp = do
@@ -320,7 +343,7 @@ withSdlWindow ctx title w h flags bench vsync continuous uiFont monoFont fontSiz
     fontSource <- resolveNanoUIFont uiFont
     monoSource <- resolveNanoUIFont monoFont
     bracket
-      (startSdlWindow ctx title w h flags bench vsync continuous fontSource monoSource fontSize)
+      (startSdlWindow ctx title w h flags bench vsync continuous uiFont fontSource monoSource fontSize)
       (\(_, env) -> stopSdlWindow bench env)
       $ \(ctx', env) -> act ctx' env
 
@@ -333,11 +356,12 @@ startSdlWindow ::
   Bool ->
   Bool ->
   Bool ->
+  NanoUIFont ->
   FontSource ->
   FontSource ->
   Float ->
   IO (Context, SdlEnv)
-startSdlWindow ctx title w h flags bench vsync continuous fontSource monoSource fontSize = do
+startSdlWindow ctx title w h flags bench vsync continuous uiFont fontSource monoSource fontSize = do
   unlessM (initSafe (SDL_InitFlags 32)) $
     fail "SDL_Init(SDL_INIT_VIDEO) failed"
   unlessM initRefreshEvent $
@@ -365,6 +389,9 @@ startSdlWindow ctx title w h flags bench vsync continuous fontSource monoSource 
           scaleRef <- newIORef scale
           fontRef <- newIORef font
           monoFontRef <- newIORef monoFont
+          fontSourceRef <- newIORef fontSource
+          fontRequestRef <- newIORef uiFont
+          fontAppliedRef <- newIORef uiFont
           glyphAtlas <- newGlyphAtlas ren
           warmGlyphAtlas glyphAtlas font
           warmGlyphAtlas glyphAtlas monoFont
@@ -408,8 +435,10 @@ startSdlWindow ctx title w h flags bench vsync continuous fontSource monoSource 
                { sdlWindow = win
                , sdlRenderer = ren
                , sdlBatch = batch
-               , sdlFontSource = fontSource
+               , sdlFontSourceRef = fontSourceRef
                , sdlMonoFontSource = monoSource
+               , sdlFontRequestRef = fontRequestRef
+               , sdlFontAppliedRef = fontAppliedRef
                , sdlFontSize = fontSize
                , sdlScaleRef = scaleRef
                , sdlFontRef = fontRef
@@ -461,7 +490,7 @@ acquireSdlBench ctx =
     initBenchHints
     fontSource <- resolveNanoUIFont DefaultFont
     let Size w h = benchWindowSize
-    startSdlWindow ctx "nano-ui-bench" w h sdlWindowHiddenFlag True False True fontSource fontSource defaultFontSize
+    startSdlWindow ctx "nano-ui-bench" w h sdlWindowHiddenFlag True False True DefaultFont fontSource fontSource defaultFontSize
 
 releaseSdlBench :: SdlEnv -> IO ()
 releaseSdlBench env = withTtf $ stopSdlWindow True env

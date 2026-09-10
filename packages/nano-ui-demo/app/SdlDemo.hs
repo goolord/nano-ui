@@ -24,8 +24,8 @@
 --
 --   * Controls     — clickButton, checkbox, slider, select, boundedSelect,
 --                    boundedRadioFieldset, colorPicker, textInput, textArea,
---                    button + tooltip, contextMenu, file dialogs, dropZone,
---                    progressBar
+--                    button + tooltip, contextMenu, file dialogs, dropZone
+--   * Progress     — progressBar driven by a pulsing value
 --   * Typography   — label / labelEx + the @font*@ style combinators
 --   * List         — tree, searchField
 --   * Table        — tableCfg (needs useTableSort)
@@ -155,6 +155,7 @@ gapText = 4
 -- | The tabbed card in the right column; each tab is a widget family.
 data DemoTab
   = Controls
+  | Progress
   | Typography
   | List
   | Table
@@ -183,6 +184,37 @@ themeForChoice TomorrowNightMin = tomorrowNightMinDarkTheme
 themeForChoice TomorrowLight = tomorrowMinLightTheme
 themeForChoice TomorrowMidnightMin = tomorrowMidnightMinDarkTheme
 
+-- | Font families offered by the Controls-tab font selector. Each maps to a
+-- system-font search with cross-platform fallbacks; the chosen family is
+-- pushed to the SDL backend through 'setSdlUiFont' and re-rendered on the next
+-- frame. The first family is the default and is present on most systems, so
+-- the selector visibly switches the demo's typeface instead of silently
+-- falling back to the embedded font.
+data DemoFont
+  = FontInter
+  | FontNoto
+  | FontAdwaita
+  | FontCantarell
+  | FontLiberation
+  | FontFreeSans
+  deriving (Bounded, Enum, Eq, Ord, Read, Show)
+
+fontDisplayName :: DemoFont -> T.Text
+fontDisplayName FontInter = "Inter"
+fontDisplayName FontNoto = "Noto Sans"
+fontDisplayName FontAdwaita = "Adwaita Sans"
+fontDisplayName FontCantarell = "Cantarell"
+fontDisplayName FontLiberation = "Liberation Sans"
+fontDisplayName FontFreeSans = "FreeSans"
+
+fontForChoice :: DemoFont -> NanoUIFont
+fontForChoice FontInter = FontSearch ["Inter", "Segoe UI", "Helvetica Neue", "Arial"]
+fontForChoice FontNoto = FontSearch ["Noto Sans", "Segoe UI", "Arial"]
+fontForChoice FontAdwaita = FontSearch ["Adwaita Sans", "Cantarell", "Ubuntu", "Segoe UI", "Arial"]
+fontForChoice FontCantarell = FontSearch ["Cantarell", "Ubuntu", "Adwaita Sans", "Arial"]
+fontForChoice FontLiberation = FontSearch ["Liberation Sans", "Arimo", "Arial", "Helvetica"]
+fontForChoice FontFreeSans = FontSearch ["FreeSans", "Nimbus Sans", "Arial", "Helvetica"]
+
 ------------------------------------------------------------------------------
 -- §3  The showcase UI
 ------------------------------------------------------------------------------
@@ -209,7 +241,7 @@ demoUi = do
   (quality, setQuality) <- useText "Medium" -- select
   (accentHex, setAccent) <- useText (colorPickerToHex demoAccent) -- colorPicker
   (themeName, setThemeName) <- useText (themeDisplayName TomorrowNightMin) -- boundedSelect
-  (themeRadio, setThemeRadio) <- useText (themeDisplayName ThemeDefault) -- boundedRadioFieldset
+  (fontChoice, setFontChoice) <- useText (fontDisplayName FontInter) -- boundedRadioFieldset
   (name, setName) <- useText "" -- textInput
   (notes, setNotes) <- useText "" -- textArea
   (dropLog, setDropLog) <- useText "" -- dropZone result, multi-line
@@ -287,7 +319,7 @@ demoUi = do
               box (fixedWH 20 20 defaultLayout) accent
               kv "Accent" accentHex
             kv "Theme" themeName
-            kv "Theme radio" themeRadio
+            kv "Font" fontChoice
             kv "Name" (orDash name)
             kv "Notes" (orDash notes)
             kv "Tree" treeSel
@@ -330,8 +362,9 @@ demoUi = do
               (_, tVal) <- boundedSelect "Theme" ThemeDefault themeDisplayName
               setThemeName (themeDisplayName tVal)
               setUiTheme (themeForChoice tVal)
-              (_, trVal) <- boundedRadioFieldset "Theme (radio)" ThemeDefault themeDisplayName
-              setThemeRadio (themeDisplayName trVal)
+              (_, fVal) <- boundedRadioFieldset "Font" FontInter fontDisplayName
+              setFontChoice (fontDisplayName fVal)
+              setSdlUiFont (fontForChoice fVal)
               (_, nVal) <- textInput "Name" ""
               setName nVal
               (_, notesVal) <- textArea "Notes" "Edit me.\nSecond line."
@@ -399,11 +432,14 @@ demoUi = do
                 setDropLog (if null droppedLines then dropLog else T.intercalate "\n" droppedLines)
               when (dropHovered dropTgt && not dropHovering) (setDropHovering True)
               when (not (dropHovered dropTgt) && dropHovering) (setDropHovering False)
-              sep
-              -- Progress: a plain response-driven bar. pulse provides a smooth
-              -- clock-driven 0-1 sweep and keepAnimating holds it live.
+
+            ------------------------------------------------ Progress --------
+            Progress -> do
               heading "Progress"
               muted "A single rounded bar, smoothly oscillating 0–100%."
+              sep
+              -- A plain response-driven bar. pulse provides a smooth
+              -- clock-driven 0-1 sweep and keepAnimating holds it live.
               progResp <- progressBar =<< pulse 6
               void (keepAnimating progResp)
 

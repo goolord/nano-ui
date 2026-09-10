@@ -78,12 +78,14 @@ import NanoUI.Frame.Scroll.Geometry
   , scrollViewportClip2D
   , scrollChromeActive
   , scrollChromeSuppressed
+  , scrollGutters2D
   , decodeScrollConfig
   , padContentClip
   , isScrollStyle2D
   , ScrollConfig (..)
   , ScrollPolicy (..)
   )
+import NanoUI.Frame.Scroll.Geometry qualified as ScrollGeom (scrollBarLayouts2D)
 import NanoUI.Frame.Hit (findNodeByWidgetId, topmostModalAtMouse, topmostOverlayAtMouse)
 
 scrollLineFor :: HostProfile -> Float
@@ -304,9 +306,17 @@ tryApplyScrollWheelDelta ctx wid scroll = do
             then do
               contentW <- getScrollContentW (ctxNodeArena ctx) idx
               contentH <- getNodeValue (ctxNodeArena ctx) idx
+              slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
               V2 curX curY <- getScrollOffset2D ctx wid
-              let maxX = scrollAxisRange contentW innerW (padR pad)
-                  maxY = scrollAxisRange contentH innerH (padB pad)
+              let host = ctxHostProfile ctx
+                  fm = ctxFontMetrics ctx
+                  cfg = decodeScrollConfig si
+                  (gutterW, gutterH) =
+                    scrollGutters2D host fm slot cfg contentW contentH innerW innerH
+                  viewW = max 0 (innerW - gutterW)
+                  viewH = max 0 (innerH - gutterH)
+                  maxX = scrollAxisRange contentW viewW (padR pad)
+                  maxY = scrollAxisRange contentH viewH (padB pad)
                   newX = max 0 (min maxX (curX + v2X scroll * step))
                   newY = max 0 (min maxY (curY + v2Y scroll * step))
               if newX == curX && newY == curY
@@ -581,15 +591,29 @@ data ScrollBars2DGeom = ScrollBars2DGeom
   }
 
 -- | Both-axis scrollbar layouts for a native 2D scroll container: (vertical,
--- horizontal). Nothing per axis when that axis does not overflow.
+-- horizontal). Nothing per axis when that axis does not overflow. Each axis
+-- is computed against the viewport minus the opposite axis's lane.
 scrollBarLayouts2D :: Context -> NodeIdx -> ScrollBars2DGeom -> IO (Maybe ScrollBarLayout, Maybe ScrollBarLayout)
 scrollBarLayouts2D ctx idx g = do
   let host = ctxHostProfile ctx
       fm = ctxFontMetrics ctx
   slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
-  let v = scrollBarLayout host fm slot DirColumn (sb2X g) (sb2Y g) (sb2W g) (sb2H g) (sb2Pad g) (sb2ContentH g) (sb2OffY g)
-      hr = scrollBarLayout host fm slot DirRow (sb2X g) (sb2Y g) (sb2W g) (sb2H g) (sb2Pad g) (sb2ContentW g) (sb2OffX g)
-  pure (v, hr)
+  si <- getStyleIdx (ctxNodeArena ctx) idx
+  pure $
+    ScrollGeom.scrollBarLayouts2D
+      host
+      fm
+      slot
+      (decodeScrollConfig si)
+      (sb2X g)
+      (sb2Y g)
+      (sb2W g)
+      (sb2H g)
+      (sb2Pad g)
+      (sb2ContentW g)
+      (sb2ContentH g)
+      (sb2OffX g)
+      (sb2OffY g)
 
 scrollContainerGeom ::
   Context -> WidgetId -> IO (Maybe (NodeIdx, DirTag, Float, Float, Float, Float, Padding, Float))
@@ -867,10 +891,10 @@ drawScrollBar ctx da idx wid x y w h pad theme terminal = do
   let padClip = padContentClip (ctxHostProfile ctx) fm x y w h pad
       innerW = rectW padClip
       innerH = rectH padClip
-  let base =
+      base =
         case slot of
           ScrollBarWindow -> themeFloatingWindow theme
-          _ -> themePanel theme
+          _ -> themeInput theme
       trackBg = scrollBarTrackColor base theme terminal
       thumbCol = scrollBarThumbColor base theme terminal
       drawLayout layout =
@@ -895,10 +919,23 @@ drawScrollBar ctx da idx wid x y w h pad theme terminal = do
       contentH <- getNodeValue (ctxNodeArena ctx) idx
       contentW <- getScrollContentW (ctxNodeArena ctx) idx
       V2 offX offY <- getScrollOffset2D ctx wid
-      when (scrollChromeActive cfg True DirColumn contentH innerH) $
-        drawAxis DirColumn contentH offY
-      when (scrollChromeActive cfg True DirRow contentW innerW) $
-        drawAxis DirRow contentW offX
+      let (mV, mH) =
+            ScrollGeom.scrollBarLayouts2D
+              (ctxHostProfile ctx)
+              fm
+              slot
+              cfg
+              x
+              y
+              w
+              h
+              pad
+              contentW
+              contentH
+              offX
+              offY
+      maybe (pure ()) drawLayout mV
+      maybe (pure ()) drawLayout mH
     else do
       let cfg = decodeScrollConfig si
       contentSize <- getNodeValue (ctxNodeArena ctx) idx

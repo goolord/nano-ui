@@ -10,6 +10,8 @@ module NanoUI.Frame.Scroll.Geometry
   , scrollViewportClip2D
   , scrollChromeLane
   , scrollBarLayout
+  , scrollBarLayoutIn
+  , scrollBarLayouts2D
   , scrollAxisRange
   , scrollOffsetFromThumb
   , padContentClip
@@ -321,22 +323,48 @@ scrollBarLayout ::
   Float ->
   Maybe ScrollBarLayout
 scrollBarLayout host fm slot dir x y w h pad contentSize off =
+  let innerW = w - padL pad - padR pad
+      innerH = h - padT pad - padB pad
+      viewMain = case dir of
+        DirColumn -> innerH
+        DirRow -> innerW
+   in scrollBarLayoutIn host fm slot dir x y w h pad viewMain contentSize off
+
+-- | 'scrollBarLayout' with an explicit visible main extent. A native 2D
+-- scroller passes the padding box minus the cross-axis lane (see
+-- 'scrollGutters2D'), so its reachable range and thumb reflect the viewport
+-- that is actually visible rather than the lane-underlapped padding box. On a
+-- one-dimensional scroller @viewMain@ is just the padding box on that axis.
+scrollBarLayoutIn ::
+  HostProfile ->
+  FontMetrics ->
+  ScrollBarSlot ->
+  DirTag ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Padding ->
+  Float ->
+  Float ->
+  Float ->
+  Maybe ScrollBarLayout
+scrollBarLayoutIn host fm slot dir x y w h pad viewMain contentSize off =
   let (barW, barMargin) = scrollBarGeomFor host fm slot
       minThumb = if isCellHost host then barW else 16
    in case dir of
         DirColumn ->
-          let innerH = h - padT pad - padB pad
-              trailH = padB pad
+          let trailH = padB pad
               extentH = contentSize + trailH
-              maxOff = scrollAxisRange contentSize innerH trailH
+              maxOff = scrollAxisRange contentSize viewMain trailH
            in if maxOff <= 0
                 then Nothing
                 else
                   let lane = scrollChromeLane host fm slot DirColumn x y w h pad
                       trackX = rectX lane
                       trackY = y + padT pad + barMargin
-                      trackH = max 0 (innerH - 2 * barMargin)
-                      thumbH = max minThumb (trackH * innerH / extentH)
+                      trackH = max 0 (viewMain - 2 * barMargin)
+                      thumbH = max minThumb (trackH * viewMain / extentH)
                       ratio = off / maxOff
                       thumbY = trackY + ratio * (trackH - thumbH)
                    in
@@ -347,18 +375,17 @@ scrollBarLayout host fm slot dir x y w h pad contentSize off =
                         , sbMaxOff = maxOff
                         }
         DirRow ->
-          let innerW = w - padL pad - padR pad
-              trailW = padR pad
+          let trailW = padR pad
               extentW = contentSize + trailW
-              maxOff = scrollAxisRange contentSize innerW trailW
+              maxOff = scrollAxisRange contentSize viewMain trailW
            in if maxOff <= 0
                 then Nothing
                 else
                   let lane = scrollChromeLane host fm slot DirRow x y w h pad
                       trackY = rectY lane
                       trackX = x + padL pad + barMargin
-                      trackW = max 0 (innerW - 2 * barMargin)
-                      thumbW = max minThumb (trackW * innerW / extentW)
+                      trackW = max 0 (viewMain - 2 * barMargin)
+                      thumbW = max minThumb (trackW * viewMain / extentW)
                       ratio = off / maxOff
                       thumbX = trackX + ratio * (trackW - thumbW)
                    in
@@ -368,6 +395,35 @@ scrollBarLayout host fm slot dir x y w h pad contentSize off =
                         , sbThumb = Rect thumbX trackY thumbW barW
                         , sbMaxOff = maxOff
                         }
+
+-- | Both-axis layouts for a native 2D scroller: (vertical, horizontal). Each
+-- axis's visible main extent is reduced by the other axis's live gutter, so
+-- the range and thumb are computed against the viewport minus the opposite
+-- scrollbar lane.
+scrollBarLayouts2D ::
+  HostProfile ->
+  FontMetrics ->
+  ScrollBarSlot ->
+  ScrollConfig ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Padding ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  (Maybe ScrollBarLayout, Maybe ScrollBarLayout)
+scrollBarLayouts2D host fm slot cfg x y w h pad contentW contentH offX offY =
+  let innerW = w - padL pad - padR pad
+      innerH = h - padT pad - padB pad
+      (gutterW, gutterH) = scrollGutters2D host fm slot cfg contentW contentH innerW innerH
+      viewW = max 0 (innerW - gutterW)
+      viewH = max 0 (innerH - gutterH)
+      v = scrollBarLayoutIn host fm slot DirColumn x y w h pad viewH contentH offY
+      hr = scrollBarLayoutIn host fm slot DirRow x y w h pad viewW contentW offX
+   in (v, hr)
 
 scrollOffsetFromThumb :: DirTag -> ScrollBarLayout -> Float -> V2 -> Float
 scrollOffsetFromThumb dir layout grabOff mouse =

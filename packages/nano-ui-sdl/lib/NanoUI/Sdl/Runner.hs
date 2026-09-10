@@ -9,6 +9,7 @@ module NanoUI.Sdl.Runner
   , drawReduceEff
   , askSdlEnv
   , askSdlDebug
+  , setSdlUiFont
   , readSdlDebugEnv
   ) where
 
@@ -64,6 +65,7 @@ import NanoUI.Sdl.Display
   )
 import NanoUI.Sdl.Render (flushRenderBatch)
 import NanoUI.Sdl.Font (fontSourceLabel, glyphAtlasTexture)
+import NanoUI.Sdl.NanoUIFont (NanoUIFont (..))
 import NanoUI.Sdl.Window (SdlEnv (..))
 import Foreign.Ptr (Ptr, nullPtr)
 import qualified NanoUI.Sdl.Image as SdlImage
@@ -221,12 +223,25 @@ askSdlDebug = do
     Nothing -> pure emptySdlDebug
     Just env -> uiIO (readSdlDebugEnv env)
 
+-- | Request a UI font family. The SDL display thread resolves and applies it
+-- before the next frame (see 'NanoUI.Sdl.Window.syncDisplay'), rebuilding the
+-- glyph atlas and text resolver. A no-op on non-SDL hosts.
+setSdlUiFont :: Ui :> es => NanoUIFont -> Eff es ()
+setSdlUiFont font = do
+  menv <- askSdlEnv
+  case menv of
+    Nothing -> pure ()
+    Just env -> uiIO $ do
+      cur <- readIORef (sdlFontRequestRef env)
+      when (cur /= font) $ writeIORef (sdlFontRequestRef env) font
+
 readSdlDebugEnv :: SdlEnv -> IO SdlDebugSnapshot
 readSdlDebugEnv env = do
   scale <- readIORef (sdlScaleRef env)
+  fontSource <- readIORef (sdlFontSourceRef env)
   name <- queryRendererName (sdlRenderer env)
   size <- queryWindowLogicalSize (sdlWindow env) scale
   mouse <- queryMouseWindowPos
   let pos = maybe (V2 0 0) (windowToLogicalCoords scale) mouse
       refreshHz = round (1 / sdlRefreshPeriod env)
-  readSdlDebug (sdlDebug env) size pos (fontSourceLabel (sdlFontSource env)) scale name (sdlVsync env) refreshHz
+  readSdlDebug (sdlDebug env) size pos (fontSourceLabel fontSource) scale name (sdlVsync env) refreshHz

@@ -117,6 +117,10 @@ overlay kind open title child
           isModal = kind == ModalOverlay
           padding = floatPadFor host (if isModal then Padding 14 14 0 12 else windowPad)
           barH = if isModal then modalTitleBarHFor host else titleBarChromeHFor host
+          -- Window body breathing room: one side-pad between the chrome and
+          -- the body, matching the window's left/right padding. Modals keep
+          -- their own larger gap.
+          bodyGap = floatGapFor host (if isModal then 8 else 10)
           minWidth =
             floatMinFor
               host
@@ -129,7 +133,7 @@ overlay kind open title child
                 let
                   pad = resolveLayoutPadding host fm padding
                  in
-                  min availH (padT pad + titleBarChromeHFor host + padB pad)
+                  min availH (padT pad + titleBarChromeHFor host + bodyGap + padB pad)
           maxW = availW
           maxH = availH
         prevFloat <- uiIO $ do
@@ -143,7 +147,7 @@ overlay kind open title child
               Fit
               Fit
               padding
-              (floatGapFor host (if isModal then 8 else 0))
+              bodyGap
               minWidth
               minHeight
               maxW

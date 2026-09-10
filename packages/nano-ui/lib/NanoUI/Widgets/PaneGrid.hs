@@ -741,6 +741,11 @@ runGestures env dividers rendered dgi = do
           r' = clampTreeRatio (geTree env) sid (diRegion d) (geGutter env) (geMinSize env) r0
        in writeTree env (treeSetRatio sid r' (geTree env))
   when (drag0 < 0 && not down) $ writeGest env 0
+  -- Keep the loop at the display cadence while a pane is being dragged: the
+  -- ghost follows the pointer, and without a dirty flag the debug HUD's slow
+  -- refresh paces the whole frame (4 fps). Window / scroll / resize drags mark
+  -- dirty every frame for the same reason.
+  when (drag0 > 0 && down) $ uiIO (markDirty ctx)
   when (drag0 > 0 && not down) $ do
     let moved = fromIntegral drag0
     when (dgiMoved dgi) $
