@@ -8,7 +8,7 @@ module NanoUI.Plot.Widget
   , areaChart
   ) where
 
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
 import qualified Data.IntMap.Strict as IM
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
@@ -28,7 +28,7 @@ import NanoUI
 import NanoUI.Context (intKey)
 import NanoUI.Monad (nextId, uiIO)
 import NanoUI.Diagrams.Backend (B)
-import NanoUI.Diagrams.Widget (PlotStyle, diagramWithEnvelope, uiPlotStyle)
+import NanoUI.Diagrams.Widget (PlotStyle, diagramWithKeyAndEnvelope, uiPlotStyle)
 import NanoUI.Plot.Chrome (chartDiagram)
 import NanoUI.Plot.Hit (hitTestChartCached)
 import NanoUI.Plot.Series (area, bar, line, scatter)
@@ -43,6 +43,7 @@ import System.IO.Unsafe (unsafePerformIO)
 data CachedChart = CachedChart
   { ccChart :: !Chart
   , ccTheme :: !Theme
+  , ccVersion :: {-# UNPACK #-} !Int
   , ccDiagram :: !(Diagram B)
   , ccWidth :: {-# UNPACK #-} !Double
   , ccHeight :: {-# UNPACK #-} !Double
@@ -53,6 +54,13 @@ data CachedChart = CachedChart
 {-# NOINLINE chartCacheRef #-}
 chartCacheRef :: IORef (IM.IntMap CachedChart)
 chartCacheRef = unsafePerformIO (newIORef IM.empty)
+
+-- Monotonic version source for the draw-op / fit caches. Bumped only when a
+-- chart diagram is rebuilt, so cached ops survive hover animations and other
+-- per-frame state that does not change chart content.
+{-# NOINLINE chartVersionRef #-}
+chartVersionRef :: IORef Int
+chartVersionRef = unsafePerformIO (newIORef 0)
 
 cachedChartDiagram :: WidgetId -> FontMetrics -> Theme -> PlotStyle -> Chart -> IO CachedChart
 cachedChartDiagram wid fm theme ps chart = do
@@ -65,7 +73,8 @@ cachedChartDiagram wid fm theme ps chart = do
           !(V2 dw dh) = size d
           extX = fromMaybe (0, dw) (extentX d)
           extY = fromMaybe (0, dh) (extentY d)
-          !cc = CachedChart chart theme d dw dh extX extY
+      v <- atomicModifyIORef' chartVersionRef (\n -> (n + 1, n + 1))
+      let !cc = CachedChart chart theme v d dw dh extX extY
       writeIORef chartCacheRef (IM.insert k cc cache)
       pure cc
 
@@ -76,7 +85,7 @@ plot layout chart = do
   theme <- uiTheme
   ps <- uiPlotStyle
   cc <- uiIO (cachedChartDiagram wid fm theme ps chart)
-  resp <- diagramWithEnvelope (ccWidth cc) (ccHeight cc) layout (ccDiagram cc)
+  resp <- diagramWithKeyAndEnvelope (ccVersion cc) (ccWidth cc) (ccHeight cc) layout (ccDiagram cc)
   mouse <- uiMousePos
   let hover = hitTestChartCached (ccDiagram cc) (ccWidth cc) (ccHeight cc) (ccExtX cc) (ccExtY cc) chart (respRect resp) mouse
   pure PlotResponse {plotResponse = resp, plotHover = hover}

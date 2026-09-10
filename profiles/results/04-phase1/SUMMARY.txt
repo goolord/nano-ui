@@ -1,0 +1,34 @@
+nano-ui perf after Phase 1 (chart cache correctness)
+date: 2026-09-10 (Linux x86_64, GHC 9.14.1, -O2 -mavx2, RTS -N1 -A64m -T -I0)
+vs commit 3108d82 (profiles/results/04-phase1/bench-before.txt)
+
+root cause:
+  cachedDrawingOps dropped the draw-op cache whenever the widget had any
+  live animation (Context.hs), and the chart's diagram was keyed only by
+  (widget id, theme) while the op cache had no content key. refreshHover
+  starts a 0..1 ease on the hot widget (Frame/Input.hs:118); with a static
+  pointer the animation is refreshed every frame, so an animated (e.g.
+  hovered) chart rebuilt its whole QDiagram every frame: ~7.6 MB alloc.
+
+changes:
+  DrawingEntry (content version + builder) registered per drawing
+  dcsDrawOpCache keyed by (content, rect); versioned drawings skip the
+  animation invalidation and rely on their content key instead
+  unversioned `drawing` keeps the old animation invalidation
+  CachedChart carries a monotonic ccVersion; plot uses
+  diagramWithKeyAndEnvelope so fit + op caches invalidate on content change
+
+cabal test all: PASS (ditto, text-buffer, form, rgfw, diagrams, nano-ui)
+cabal run nano-ui-id-bench: PASS
+
+nano-ui-sdl-profile (40 iters each):
+  Plot: Line chart (500 pts)     1.761 ms -> 0.029 ms   (60x)
+                                 7622.8 KB -> 32.7 KB  (233x)
+  Full DemoUi (Idle, present)    0.669 ms -> 0.619 ms
+  Full DemoUi (runFrame only)    0.243 ms -> 0.246 ms
+  100x Button                    0.247 ms -> 0.206 ms
+  everything else unchanged within noise
+
+remaining (next phases):
+  radio 100x 1.22 ms / 2075 KB, table 200x5 0.37 ms / 877 KB,
+  lowerNode per-frame re-tessellation, layout solver freezes

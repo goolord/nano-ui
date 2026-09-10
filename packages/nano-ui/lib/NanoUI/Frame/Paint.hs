@@ -17,6 +17,7 @@ import NanoUI.Widgets.ColorPicker (drawColorPickerPanel)
 import NanoUI.Widgets.Custom (mkCustomDrawContext)
 import NanoUI.Context
   ( Context (..)
+  , DrawingEntry (..)
   , atlasTextureId
   , cachedCustomDrawingOps
   , cachedDrawingOps
@@ -402,8 +403,8 @@ lowerNodeVisible ctx occluders idx nt x y w h rect fm theme terminal da =
           mBuild <- lookupDrawing ctx wid
           case mBuild of
             Nothing -> pure ()
-            Just build -> do
-              ops <- cachedDrawingOps ctx wid rect build
+            Just (DrawingEntry content build) -> do
+              ops <- cachedDrawingOps ctx wid content rect build
               withClip da rect (emitDrawOps da fm ops)
     _ -> do
       style <- widgetVisualStyle ctx nt idx

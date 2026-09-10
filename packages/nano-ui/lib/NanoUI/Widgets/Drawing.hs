@@ -20,12 +20,13 @@ import NanoUI.Types (Rect)
 import NanoUI.Widgets.Node (Response, addWidget)
 
 -- | Vector ops for a laid-out widget. Paint caches ops while width and height
--- stay the same, then translates when the widget moves.
+-- stay the same, then translates when the widget moves. Unversioned: the cache
+-- drops while the widget animates because the builder has no content key.
 drawing :: Ui :> es => Layout -> (Rect -> Vector DrawOp) -> Eff es Response
 drawing layout build = do
   wid <- nextId
   ctx <- askContext
-  uiIO (registerDrawing ctx wid build)
+  uiIO (registerDrawing ctx wid 0 build)
   addWidget wid NodeDrawing T.empty 0 layout
 
 -- | Same as 'drawing', but skip a layout rebuild while envelope, font, content
@@ -44,5 +45,5 @@ drawingCached dw dh lh content incoming compute build = do
   wid <- nextId
   ctx <- askContext
   layout <- uiIO (cachedWidgetLayout ctx wid dw dh lh content incoming compute)
-  uiIO (registerDrawing ctx wid build)
+  uiIO (registerDrawing ctx wid content build)
   addWidget wid NodeDrawing T.empty 0 layout

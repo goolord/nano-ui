@@ -12,6 +12,7 @@ module NanoUI.Context
   , OverlayState (..)
   , AnimationState (..)
   , DrawingCacheState (..)
+  , DrawingEntry (..)
   , DrawFitCache (..)
   , InteractionState (..)
   , initialInteractionState
@@ -236,6 +237,7 @@ import NanoUI.Context.Types
   , DamageState (..)
   , DrawFitCache (..)
   , DrawingCacheState (..)
+  , DrawingEntry (..)
   , FrameMsg (..)
   , InteractionState (..)
   , MeasureCacheKey
@@ -487,26 +489,32 @@ lookupPopupConfig ctx wid = do
   pure (IM.lookup (intKey wid) (dcsPopupConfigs dc))
 
 {-# INLINE registerDrawing #-}
-registerDrawing :: Context -> WidgetId -> DrawingBuild -> IO ()
-registerDrawing ctx wid build =
+registerDrawing :: Context -> WidgetId -> Int -> DrawingBuild -> IO ()
+registerDrawing ctx wid content build =
   modifyIORef' (ctxDrawingCache ctx) $ \dc ->
-    dc {dcsDrawings = IM.insert (intKey wid) build (dcsDrawings dc)}
+    dc {dcsDrawings = IM.insert (intKey wid) (DrawingEntry content build) (dcsDrawings dc)}
 
 {-# INLINE lookupDrawing #-}
-lookupDrawing :: Context -> WidgetId -> IO (Maybe DrawingBuild)
+lookupDrawing :: Context -> WidgetId -> IO (Maybe DrawingEntry)
 lookupDrawing ctx wid = do
   dc <- readIORef (ctxDrawingCache ctx)
   pure (IM.lookup (intKey wid) (dcsDrawings dc))
 
--- | Rebuild draw ops when width or height change. A move only translates.
-cachedDrawingOps :: Context -> WidgetId -> Rect -> DrawingBuild -> IO (Vector DrawOp)
-cachedDrawingOps ctx wid rect build = do
+-- | Rebuild draw ops when the content version or width/height change. A move
+-- only translates. An unversioned drawing (content 0) additionally drops its
+-- cache while the widget is animating, since it has no other invalidation
+-- signal; versioned drawings are invalidated by their content key alone.
+cachedDrawingOps :: Context -> WidgetId -> Int -> Rect -> DrawingBuild -> IO (Vector DrawOp)
+cachedDrawingOps ctx wid content rect build = do
   let k = intKey wid
-  animated <- IM.member k <$> getLiveAnimations ctx
+  animated <-
+    if content == 0
+      then IM.member k <$> getLiveAnimations ctx
+      else pure False
   dc <- readIORef (ctxDrawingCache ctx)
   case IM.lookup k (dcsDrawOpCache dc) of
-    Just (r, ops)
-      | not animated && rectW r == rectW rect && rectH r == rectH rect ->
+    Just (c, r, ops)
+      | c == content && not animated && rectW r == rectW rect && rectH r == rectH rect ->
           if rectX r == rectX rect && rectY r == rectY rect
             then pure ops
             else do
@@ -515,12 +523,12 @@ cachedDrawingOps ctx wid rect build = do
                       (shiftDrawOp (rectX rect - rectX r) (rectY rect - rectY r))
                       ops
               modifyIORef' (ctxDrawingCache ctx) $ \s ->
-                s {dcsDrawOpCache = IM.insert k (rect, ops') (dcsDrawOpCache s)}
+                s {dcsDrawOpCache = IM.insert k (content, rect, ops') (dcsDrawOpCache s)}
               pure ops'
     _ -> do
       let ops = build rect
       modifyIORef' (ctxDrawingCache ctx) $ \s ->
-        s {dcsDrawOpCache = IM.insert k (rect, ops) (dcsDrawOpCache s)}
+        s {dcsDrawOpCache = IM.insert k (content, rect, ops) (dcsDrawOpCache s)}
       pure ops
 
 -- | Reuse a derived layout while envelope, font, content key, and caller layout match.
