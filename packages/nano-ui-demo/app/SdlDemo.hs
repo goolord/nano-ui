@@ -25,7 +25,7 @@
 --   * Controls     — clickButton, checkbox, slider, select, boundedSelect,
 --                    boundedRadioFieldset, colorPicker, textInput, textArea,
 --                    button + tooltip, contextMenu, file dialogs, dropZone
---   * Progress     — progressBar driven by a pulsing value
+--   * Graphics     — image gallery + progressBar driven by a pulsing value
 --   * Typography   — label / labelEx + the @font*@ style combinators
 --   * List         — tree, searchField
 --   * Table        — tableCfg (needs useTableSort)
@@ -131,7 +131,7 @@ main = do
 -- §2  Assets & shared look
 ------------------------------------------------------------------------------
 
--- | Three 32x32 images registered with the SDL context (see the Gallery card
+-- | Three 32x32 images registered with the SDL context (see the Graphics tab
 -- and the SdlSelftest image check). Pixel data is at the very bottom.
 demoImages :: SmallArray RgbaImage
 demoImages =
@@ -155,7 +155,7 @@ gapText = 4
 -- | The tabbed card in the right column; each tab is a widget family.
 data DemoTab
   = Controls
-  | Progress
+  | Graphics
   | Typography
   | List
   | Table
@@ -222,7 +222,7 @@ fontForChoice FontFreeSans = FontSearch ["FreeSans", "Nimbus Sans", "Arial", "He
 -- | The whole app. Composition, top to bottom:
 --   1. state hooks          every frame, fixed order (see module header)
 --   2. toolbar              brand, live FPS, OK / Cancel / About / Debug
---   3. two-column body      left: live state + gallery; right: tabbed demos
+--   3. two-column body      left: live state; right: tabbed demos
 --   4. overlays             Debug window + About modal
 debugOpenFromEnv :: Bool
 debugOpenFromEnv = unsafePerformIO (isJust <$> lookupEnv "NANO_DEBUG_OPEN")
@@ -330,14 +330,6 @@ demoUi = do
             kv "Save file" (orDash savePath)
             kv "Folder" (orDash folderPath)
             kv "Dropped" (orDash (T.take 80 (firstDropLine dropLog)))
-          card $ do
-            heading "Gallery"
-            -- Images registered from demoImages.
-            rowWith (tight . gap gapInline . fillW) $ do
-              thumb (ImageId 1) "Swatch"
-              thumb (ImageId 2) "Checker"
-              thumb (ImageId 3) "Stripe"
-            sep
             muted "Click widgets or type in Name or Notes."
             muted "Esc closes About, then quits."
 
@@ -433,13 +425,19 @@ demoUi = do
               when (dropHovered dropTgt && not dropHovering) (setDropHovering True)
               when (not (dropHovered dropTgt) && dropHovering) (setDropHovering False)
 
-            ------------------------------------------------ Progress --------
-            Progress -> do
-              heading "Progress"
-              muted "A single rounded bar, smoothly oscillating 0–100%."
+            ----------------------------------------------- Graphics ---------
+            Graphics -> do
+              heading "Graphics"
+              sep
+              -- Images registered from demoImages.
+              rowWith (tight . gap gapInline . fillW) $ do
+                thumb (ImageId 1) "Swatch"
+                thumb (ImageId 2) "Checker"
+                thumb (ImageId 3) "Stripe"
               sep
               -- A plain response-driven bar. pulse provides a smooth
               -- clock-driven 0-1 sweep and keepAnimating holds it live.
+              muted "A single rounded bar, smoothly oscillating 0–100%."
               progResp <- progressBar =<< pulse 6
               void (keepAnimating progResp)
 
@@ -651,7 +649,7 @@ orDash s = if T.null s then "-" else s
 firstDropLine :: T.Text -> T.Text
 firstDropLine = maybe "" id . listToMaybe . T.lines
 
--- | Image card in the Gallery: the caption is muted under the sprite.
+-- | Image tile in the Graphics tab: the caption is muted under the sprite.
 thumb :: ImageId -> T.Text -> NanoUI ()
 thumb iid caption =
   columnWith (tight . gap gapMicro) $ do
