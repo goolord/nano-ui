@@ -14,6 +14,7 @@ module NanoUI.Context
   , DrawingCacheState (..)
   , DrawingEntry (..)
   , DrawFitCache (..)
+  , SpanCacheEntry (..)
   , InteractionState (..)
   , initialInteractionState
   , initialDamageState
@@ -238,6 +239,7 @@ import NanoUI.Context.Types
   , DrawFitCache (..)
   , DrawingCacheState (..)
   , DrawingEntry (..)
+  , SpanCacheEntry (..)
   , FrameMsg (..)
   , InteractionState (..)
   , MeasureCacheKey
@@ -1039,7 +1041,8 @@ wrapMeasureCache scale ctx measure =
     Just ref -> ctx {ctxMeasureText = cacheMeasureText ref scale measure}
 
 clearMeasureCache :: Context -> IO ()
-clearMeasureCache ctx =
+clearMeasureCache ctx = do
+  writeIORef (ctxSpanCache ctx) IM.empty
   case ctxMeasureCache ctx of
     Just ref -> writeIORef ref HashMap.empty
     Nothing -> pure ()
@@ -1057,6 +1060,7 @@ setTheme ctx th = do
   cur <- readIORef (ctxTheme ctx)
   when (cur /= th) $ do
     writeIORef (ctxTheme ctx) th
+    writeIORef (ctxSpanCache ctx) IM.empty
     damageFull ctx
     markDirty ctx
 
@@ -1151,6 +1155,7 @@ newContext = do
   ctxHost <- newIORef Map.empty
   ctxDefaultLayout <- newIORef defaultLayout
   ctxTheme <- newIORef defaultTheme
+  ctxSpanCache <- newIORef IM.empty
   let fm0 = monospaceMetrics 12
       ctx = Context
         { ctxNodeArena = nodeArena
@@ -1173,6 +1178,7 @@ newContext = do
         , ctxResolveFont = defaultResolveFont ctx
         , ctxResolveMeasure = defaultResolveMeasure ctx
         , ctxMeasureCache = Nothing
+        , ctxSpanCache
         , ctxExternalText = False
         , ctxTheme
         , ctxIcons = asciiIcons

@@ -1,0 +1,24 @@
+nano-ui perf after Phase 4 (text: cached node spans)
+date: 2026-09-10 (Linux x86_64, GHC 9.14.1, -O2 -mavx2, RTS -N1 -A64m -T -I0)
+vs Phase 5 (profiles/results/05-phase5-layout/bench.txt)
+
+changes:
+  collectNodeTextSpans now returns a cached span list keyed by every input
+  that shapes it: text after floating-label substitution, fg/bg, packed
+  style, font size, align, width sizing, rect, effective max width, row
+  child, cell host. spanKeyMatch compares those fields; hits return the
+  shared list without re-measuring, wrapping, truncating, or allocating.
+  The cache (ctxSpanCache) is cleared on theme change and on font-scale
+  changes (clearMeasureCache).
+
+cabal test all: PASS (ditto, text-buffer, diagrams, form, rgfw, nano-ui)
+
+nano-ui-sdl-profile:
+  Full DemoUi runFrame alloc   417.7 KB -> 389.2 KB per frame (-6.8%)
+  Full DemoUi runFrame         0.242 ms -> 0.236 ms
+  100x Label alloc             502.3 KB -> 436.8 KB (-13%)
+  100x Label                   0.138 ms -> 0.131 ms
+  Table 50x5 alloc             696.0 KB -> 646.1 KB
+  Table 200x5 alloc            866.2 KB -> 815.8 KB
+  Radio 100x alloc             2049.7 KB -> 1937.3 KB
+  Plot 500pt                   0.029 ms -> 0.029 ms
