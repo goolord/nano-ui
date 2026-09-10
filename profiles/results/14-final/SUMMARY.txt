@@ -1,0 +1,56 @@
+nano-ui SDL demo performance plan: final cumulative result
+date: 2026-09-10 (Linux x86_64, GHC 9.14.1, -O2 -mavx2, RTS -N1 -A64m -T -I0)
+baseline: commit 3108d82, profiles/results/04-phase1/bench-before.txt
+final:    profiles/results/14-final/bench.txt
+
+commits (each verified with cabal test all + nano-ui-id-bench):
+  83d3194 perf(paint): version-key the draw-op cache          (Phase 1)
+  31ace93 perf(layout): reuse per-depth axis snapshots        (Phase 5)
+  6d63dce perf(text): cache per-node span layout              (Phase 4)
+  8286bca perf(damage): update prev rect maps incrementally   (Phase 6)
+  c905541 perf(layout): memoize wrapped text per frame        (Phase 4/7)
+  74b18e1 feat(drawing): add versioned drawing cache scope    (Phase 2 API)
+  f22672a perf(paint): cull off-damage subtrees on clip frames(Phase 3)
+  2288cc3 perf(layout): memoize fit-height recompute per frame(Phase 5)
+  69b0420 refactor(layout): closure-free distribute scratch   (Phase 7)
+  4abc53a perf(layout): inline withAxisSnaps                  (Phase 7)
+  e8f2151 docs(perf): record phase 2/7/8 findings             (Phases 2/7/8)
+
+headline numbers (nano-ui-sdl-profile, 40 iterations):
+  Plot: Line chart (500 pts)   1.761 ms / 7622.8 KB -> 0.030 ms / 32.7 KB
+                               (59x time, 233x alloc)
+  Full DemoUi runFrame alloc   423.1 KB -> 306.2 KB per frame (-27.6%)
+  Full DemoUi (Idle, present)  0.669 ms -> ~0.60 ms (run-to-run range)
+  100x Radio                   1.237 ms / 2074.5 KB -> 1.181 ms / 1575.9 KB
+  Table 200x5                  0.387 ms / 877.0 KB -> 0.370 ms / 708.4 KB
+  100x Button                  0.247 ms / 485.3 KB -> 0.209 ms / 440.3 KB
+  100x Label                   0.138 ms / 507.5 KB -> 0.119 ms / 377.6 KB
+  hover sweep                  0.446 ms -> 0.415 ms
+  churn damage                 Full=1 Clip=39 unchanged
+
+verification:
+  cabal test all: PASS (ditto, text-buffer, form, rgfw, diagrams, nano-ui)
+  nano-ui-id-bench: PASS
+  Phase 3 pixel differential: culled paint + damage scissor is byte-identical
+    to full paint + damage scissor over a 120-frame text/hover/scroll
+    sequence; the 219-pixel delta vs a fully repainted frame is pre-existing
+    retained-mode behavior (present with full paint + scissor too).
+  selftest: same pre-existing header-click failure as baseline 3108d82;
+    all earlier SDL interactions pass with culling active.
+
+phase outcomes:
+  1 charts cache        implemented (bypass-QDiagram dropped: static demo
+                        charts are CAFs and the versioned cache already makes
+                        them 0.03 ms; dynamic content still rebuilds)
+  2 retained meshes     attempted, measured regression, reverted; versioned
+                        op cache + drawingVersioned cover the intent
+  3 clip culling        implemented and pixel-verified
+  4 text pipeline       span cache + wrap memo implemented; pushText already
+                        hits the whole-run cache for normal text
+  5 layout              per-depth snapshots, wrap/fit memos, closure-free
+                        distribute implemented
+  6 store/data structs  incremental prev-rect maps implemented; radio/table
+                        micro-optimizations not needed for the measured frame
+  7 SIMD                no vector rounding primops; memos/INLINE were the
+                        effective wins
+  8 present batching    no flush pressure at 8 draw commands
