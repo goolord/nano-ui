@@ -1,0 +1,31 @@
+nano-ui perf after Phase 7 (solver: per-frame wrapped-text memo)
+date: 2026-09-10 (Linux x86_64, GHC 9.14.1, -O2 -mavx2, RTS -N1 -A64m -T -I0)
+vs Phase 6 (profiles/results/07-phase6-store/bench.txt)
+
+profile finding (demo-only, -P):
+  positionNodeA inherited 25.3% time / 41.8% alloc, dominated by
+  loadChildrenScratchSolving -> recomputeFitHeightAtWidth -> wrapped text
+  measurement (measureTextWrappedIO / wrapTextLinesIO). The same text was
+  wrapped at the same width in the measure pass, the fit-height recompute,
+  and the position pass.
+
+changes:
+  NodeArena gains a per-frame wrapped-size memo keyed by (node, quantized
+  wrap width) with a frame tag bumped by resetNodeArena. measureTextNode,
+  recomputeFitHeightAtWidth, and positionNodeA all route wrapped measures
+  through memoWrapped; a hit returns the previous (w, h) without wrapping.
+
+cabal test all: PASS (ditto, text-buffer, diagrams, form, rgfw, nano-ui)
+cabal run nano-ui-id-bench: PASS
+churn damage unchanged: Full=1 Clip=39
+
+nano-ui-sdl-profile:
+  Full DemoUi runFrame alloc   341.5 KB -> 326.9 KB per frame (-4.3%)
+  Full DemoUi runFrame         0.227 ms -> 0.215-0.221 ms
+  100x Label alloc             377.8 KB -> 377.9 KB (no wrapping)
+  tables / radio               unchanged within noise
+
+cumulative vs pre-plan baseline:
+  Full DemoUi runFrame alloc   423.1 KB -> 326.9 KB (-22.7%)
+  Full DemoUi runFrame         0.246 ms -> ~0.218 ms
+  Plot 500pt                   1.761 ms / 7622.8 KB -> 0.030 ms / 32.6 KB

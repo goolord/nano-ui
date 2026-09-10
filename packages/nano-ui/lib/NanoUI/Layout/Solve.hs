@@ -92,6 +92,8 @@ import NanoUI.Layout.Arena
   , ensureScratchCapacity
   , AxisSnapshot (..)
   , ensureAxisSnapshot
+  , lookupWrapMemo
+  , storeWrapMemo
   , naScratchCount
   , naScratchIdx
   , naScratchMain
@@ -384,9 +386,10 @@ measureTextNode na host fm monoFm measure resolveFont idx = do
   (tw, th) <-
     if hasNewlines || (canWrap && effMaxW + 0.5 < tw0)
       then
-        if isCellHost host || fvar == FontMono
-          then pure (measureTextWrapped host textFm plain wrapW)
-          else measureTextWrappedIO (\t -> fst <$> measureFn t) textFm plain wrapW
+        memoWrapped na idx wrapW $
+          if isCellHost host || fvar == FontMono
+            then pure (measureTextWrapped host textFm plain wrapW)
+            else measureTextWrappedIO (\t -> fst <$> measureFn t) textFm plain wrapW
       else pure (tw0, th0)
   let reportedW =
         if wTag == SizingGrow && parentAssigns
@@ -824,9 +827,10 @@ recomputeFitHeightAtWidth na host fm monoFm measure resolveFont idx availW = do
               if hasNewlines || canWrap
                 then do
                   (_, th) <-
-                    if isCellHost host || fvar == FontMono
-                      then pure (measureTextWrapped host textFm txt wrapW)
-                      else measureTextWrappedIO (\t -> fst <$> measureFn t) textFm txt wrapW
+                    memoWrapped na idx wrapW $
+                      if isCellHost host || fvar == FontMono
+                        then pure (measureTextWrapped host textFm txt wrapW)
+                        else measureTextWrappedIO (\t -> fst <$> measureFn t) textFm txt wrapW
                   pure (clamp minH maxH (max (layoutLineHeight host textFm) th))
                 else pure oldH
       | otherwise -> pure oldH
@@ -999,9 +1003,10 @@ positionNodeA a na host fm monoFm measure resolveFont depth idx x y availW avail
             if hasNewlines || (canWrap && wrapW + 0.5 < tw0 && wrapW > 0)
               then do
                 (_, th) <-
-                  if isCellHost host || fvar == FontMono
-                    then pure (measureTextWrapped host textFm txt wrapW)
-                    else measureTextWrappedIO (\t -> fst <$> measureFn t) textFm txt wrapW
+                  memoWrapped na idx wrapW $
+                    if isCellHost host || fvar == FontMono
+                      then pure (measureTextWrapped host textFm txt wrapW)
+                      else measureTextWrappedIO (\t -> fst <$> measureFn t) textFm txt wrapW
                 pure (clamp minH maxH (max (layoutLineHeight host textFm) th))
               else pure (clamp minH maxH (resolveSize hTag hVal intrinsicH availH minH maxH))
       else
@@ -1203,6 +1208,17 @@ positionColumnScroll a na host fm monoFm measure resolveFont depth parent gap cx
               (_, _, _, placedH) <- getRect na ci
               go (i + 1) (curY + placedH + gap)
     go 0 cy
+
+-- | Memoize a wrapped text size for this frame at (node, wrap width).
+memoWrapped :: NodeArena -> NodeIdx -> Float -> IO (Float, Float) -> IO (Float, Float)
+memoWrapped na idx wrapW act = do
+  m <- lookupWrapMemo na idx wrapW
+  case m of
+    Just sz -> pure sz
+    Nothing -> do
+      sz@(w, h) <- act
+      storeWrapMemo na idx wrapW w h
+      pure sz
 
 resolveSize :: SizingTag -> Float -> Float -> Float -> Float -> Float -> Float
 resolveSize SizingFixed v _ _ _ _ = v

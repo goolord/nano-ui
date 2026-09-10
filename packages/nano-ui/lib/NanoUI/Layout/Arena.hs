@@ -65,6 +65,8 @@ module NanoUI.Layout.Arena
   , ensureScratchCapacity
   , AxisSnapshot (..)
   , ensureAxisSnapshot
+  , lookupWrapMemo
+  , storeWrapMemo
   , forNodes_
   , forChildNodes_
   , findNodeRevM
@@ -197,6 +199,14 @@ data NodeArena = NodeArena
   -- snapshotted at its own depth to survive recursive positioning.
   , naSnapCap :: IORef Int
   , naSnapLevels :: IORef (IM.IntMap AxisSnapshot)
+  -- Per-frame memo of wrapped text sizes keyed by (node, quantized wrap
+  -- width). Text and style are fixed per node within a frame, so the frame
+  -- tag is all that is needed to invalidate across frames.
+  , naFrameTag :: IORef Word32
+  , naWrapTag :: IORef (MutablePrimArray RealWorld Word32)
+  , naWrapKey :: IORef (MutablePrimArray RealWorld Float)
+  , naWrapW :: IORef (MutablePrimArray RealWorld Float)
+  , naWrapH :: IORef (MutablePrimArray RealWorld Float)
   , naEpoch :: IORef Word32
   , naIndex :: IORef (BasicHashTable WidgetId Word64)
   }
@@ -238,6 +248,11 @@ newNodeArena = do
   naScratchOutCross <- newIORef =<< newPrimArray scratchCap
   naSnapCap <- newIORef scratchCap
   naSnapLevels <- newIORef IM.empty
+  naFrameTag <- newIORef 1
+  naWrapTag <- newIORef =<< newPrimArray cap
+  naWrapKey <- newIORef =<< newPrimArray cap
+  naWrapW <- newIORef =<< newPrimArray cap
+  naWrapH <- newIORef =<< newPrimArray cap
   naEpoch <- newIORef 1
   naIndex <- newIORef =<< HT.new
   pure
@@ -255,6 +270,11 @@ newNodeArena = do
       , naScratchOutCross
       , naSnapCap
       , naSnapLevels
+      , naFrameTag
+      , naWrapTag
+      , naWrapKey
+      , naWrapW
+      , naWrapH
       , naEpoch
       , naIndex
       }
@@ -263,6 +283,8 @@ newNodeArena = do
 resetNodeArena :: NodeArena -> IO ()
 resetNodeArena na = do
   writeIORef (naCount na) 0
+  !ft <- readIORef (naFrameTag na)
+  writeIORef (naFrameTag na) (if ft == maxBound then 1 else ft + 1)
   !ep <- readIORef (naEpoch na)
   let !ep' = ep + 1
   if ep' == 0
@@ -309,6 +331,10 @@ ensureCapacity na needed = do
       naArrTree <- growPrimArrayCopy (naArrTree a) (cap * 8) (newCap * 8) 0
       naArrTextStore <- growBoxedStoreCopy T.empty (naArrTextStore a) cap newCap
       naArrOptionsStore <- growBoxedStoreCopy [] (naArrOptionsStore a) cap newCap
+      growPrimArray (naWrapTag na) cap newCap 0
+      growPrimArray (naWrapKey na) cap newCap 0
+      growPrimArray (naWrapW na) cap newCap 0
+      growPrimArray (naWrapH na) cap newCap 0
       let newA = NodeArenaArrays {..}
       writeIORef (naArrays na) newA
       m <- readIORef (naArraysSnap na)
@@ -836,6 +862,41 @@ ensureAxisSnapshot na depth needed = do
       idx' <- growPrimArrayCopy idx cap newCap 0
       out' <- growPrimArrayCopy out cap newCap 0
       pure AxisSnapshot {asIdx = idx', asOut = out'}
+
+-- | Look up a wrapped text size memoized for this frame at @(node, wrapW)@.
+-- Wrap widths are quantized to 0.25 px so near-identical reflows still hit.
+{-# INLINE lookupWrapMemo #-}
+lookupWrapMemo :: NodeArena -> NodeIdx -> Float -> IO (Maybe (Float, Float))
+lookupWrapMemo na idx wrapW = do
+  ft <- readIORef (naFrameTag na)
+  tagArr <- readIORef (naWrapTag na)
+  tag <- readPrimArray tagArr idx
+  if tag /= ft
+    then pure Nothing
+    else do
+      keyArr <- readIORef (naWrapKey na)
+      key <- readPrimArray keyArr idx
+      if abs (key - wrapW) <= 0.25
+        then do
+          wArr <- readIORef (naWrapW na)
+          hArr <- readIORef (naWrapH na)
+          w <- readPrimArray wArr idx
+          h <- readPrimArray hArr idx
+          pure (Just (w, h))
+        else pure Nothing
+
+{-# INLINE storeWrapMemo #-}
+storeWrapMemo :: NodeArena -> NodeIdx -> Float -> Float -> Float -> IO ()
+storeWrapMemo na idx wrapW w h = do
+  ft <- readIORef (naFrameTag na)
+  tagArr <- readIORef (naWrapTag na)
+  keyArr <- readIORef (naWrapKey na)
+  wArr <- readIORef (naWrapW na)
+  hArr <- readIORef (naWrapH na)
+  writePrimArray tagArr idx ft
+  writePrimArray keyArr idx wrapW
+  writePrimArray wArr idx w
+  writePrimArray hArr idx h
 
 {-# NOINLINE ensureScratchCapacity #-}
 ensureScratchCapacity :: NodeArena -> Int -> IO ()
