@@ -1,43 +1,18 @@
 module Main (main) where
 
 import Cases
-import Control.Monad (forM_, when)
-import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
+import Data.IORef (IORef)
 import NanoUI.Testing (Context, newContext)
-import System.Environment (getArgs)
-import System.IO (hFlush, stdout)
+import NanoUI.Testing.Runner (runTests)
+
+main :: IO ()
+main = runTests [(specName, newContext, specRun) | TestSpec{specName, specRun} <- testSpecs]
 
 data TestSpec
   = TestSpec
       { specName :: String
       , specRun :: Context -> IORef Int -> IO ()
       }
-
-main :: IO ()
-main = do
-  args <- getArgs
-  let
-    wantAll = null args
-    want name = wantAll || name `elem` args
-  failed <- newIORef (0 :: Int)
-  failedTests <- newIORef (0 :: Int)
-  forM_ testSpecs $ \TestSpec{specName = name, specRun} ->
-    when (want name) $ do
-      putStrLn ("RUN: " ++ name)
-      hFlush stdout
-      before <- readIORef failed
-      ctx <- newContext
-      specRun ctx failed
-      after <- readIORef failed
-      when (after > before) $ do
-        modifyIORef' failedTests (+ 1)
-        putStrLn ("FAIL: " ++ name)
-  n <- readIORef failedTests
-  if n == 0
-    then putStrLn "All tests passed."
-    else do
-      putStrLn $ show n ++ " test(s) failed."
-      fail "tests failed"
 
 testSpecs :: [TestSpec]
 testSpecs =

@@ -12,7 +12,7 @@ module SdlSelftest
 
 import Control.Monad (unless, void, when)
 import Data.Char (isDigit)
-import Data.Foldable (foldlM, for_)
+import Data.Foldable (for_)
 import Data.List (maximumBy, minimumBy)
 import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe)
 import Data.Ord (comparing)
@@ -24,7 +24,6 @@ import NanoUI.Testing
   ( Context
   , collectOverlayTextSpans
   , collectTextSpans
-  , registerImage
   )
 import NanoUI.Testing.Harness
   ( findExact
@@ -35,6 +34,7 @@ import NanoUI.Testing.Harness
   , spanLabel
   )
 import NanoUI.Testing.Harness qualified as Harness
+import DemoData (registerDemoImages)
 import System.Directory (XdgDirectory (XdgCache), createDirectoryIfMissing, getXdgDirectory)
 import System.FilePath ((</>))
 import Text.Printf (printf)
@@ -45,21 +45,7 @@ import qualified Data.Text as T
 selftest :: SmallArray RgbaImage -> NanoUI () -> IO ()
 selftest imgs ui = do
   ctx0 <- newSdlContext
-  ok <-
-    foldlM
-      ( \acc img ->
-          if acc
-            then
-              registerImage
-                ctx0
-                (rgbaImageId img)
-                (rgbaImageWidth img)
-                (rgbaImageHeight img)
-                (rgbaImagePixels img)
-            else pure False
-      )
-      True
-      imgs
+  ok <- registerDemoImages ctx0 imgs
   unless ok $ fail "selftest: registerImage failed"
   -- Artifacts (font renders, screenshots) land in $XDG_CACHE_HOME/nano-ui-demo.
   cacheDir <- getXdgDirectory XdgCache "nano-ui-demo"
