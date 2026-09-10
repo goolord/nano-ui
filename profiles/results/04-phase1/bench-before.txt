@@ -1,149 +1,60 @@
-nano-ui-sdl-profile: the flag -P requires the program to be built with -prof
-nano-ui-sdl-profile: 
-nano-ui-sdl-profile: Usage: <prog> <args> [+RTS <rtsopts> | -RTS <args>] ... --RTS <args>
-nano-ui-sdl-profile: 
-nano-ui-sdl-profile:    +RTS     Indicates run time system options follow
-nano-ui-sdl-profile:    -RTS     Indicates program arguments follow
-nano-ui-sdl-profile:   --RTS     Indicates that ALL subsequent arguments will be given to the
-nano-ui-sdl-profile:             program (including any of these RTS flags)
-nano-ui-sdl-profile: 
-nano-ui-sdl-profile: The following run time system options may be available (note that some
-nano-ui-sdl-profile: of these may not be usable unless this program was linked with the -rtsopts
-nano-ui-sdl-profile: flag):
-nano-ui-sdl-profile: 
-nano-ui-sdl-profile:   -?        Prints this message and exits; the program is not executed
-nano-ui-sdl-profile:   --info    Print information about the RTS used by this program
-nano-ui-sdl-profile: 
-nano-ui-sdl-profile:   --nonmoving-gc
-nano-ui-sdl-profile:             Selects the non-moving mark-and-sweep garbage collector to
-nano-ui-sdl-profile:             manage the oldest generation.
-nano-ui-sdl-profile:   --copying-gc
-nano-ui-sdl-profile:             Selects the copying garbage collector to manage all generations.
-nano-ui-sdl-profile: 
-nano-ui-sdl-profile:   -K<size>  Sets the maximum stack size (default: 80% of the heap)
-nano-ui-sdl-profile:             e.g.: -K32k -K512k -K8M
-nano-ui-sdl-profile:   -ki<size> Sets the initial thread stack size (default 1k)  e.g.: -ki4k -ki2m
-nano-ui-sdl-profile:   -kc<size> Sets the stack chunk size (default 32k)
-nano-ui-sdl-profile:   -kb<size> Sets the stack chunk buffer size (default 1k)
-nano-ui-sdl-profile: 
-nano-ui-sdl-profile:   -A<size>  Sets the minimum allocation area size (default 4m) e.g.: -A20m -A10k
-nano-ui-sdl-profile:   -AL<size> Sets the amount of large-object memory that can be allocated
-nano-ui-sdl-profile:             before a GC is triggered (default: the value of -A)
-nano-ui-sdl-profile:   -F<n>     Sets the collecting threshold for old generations as a factor of
-nano-ui-sdl-profile:             the live data in that generation the last time it was collected
-nano-ui-sdl-profile:             (default: 2.0)
-nano-ui-sdl-profile:   -Fd<n>    Sets the inverse rate which memory is returned to the OS after being
-nano-ui-sdl-profile:             optimistically retained after being allocated. Subsequent major
-nano-ui-sdl-profile:             collections not caused by heap overflow will return an amount of
-nano-ui-sdl-profile:             memory controlled by this factor (higher is slower). Setting the factor
-nano-ui-sdl-profile:             to 0 means memory is not returned.
-nano-ui-sdl-profile:             (default 4.0)
-nano-ui-sdl-profile:   -n<size>  Allocation area chunk size (0 = disabled, default: 0)
-nano-ui-sdl-profile:   -O<size>  Sets the minimum size of the old generation (default 1M)
-nano-ui-sdl-profile:   -M<size>  Sets the maximum heap size (default unlimited)  e.g.: -M256k -M1G
-nano-ui-sdl-profile:   -H<size>  Sets the minimum heap size (default 0M)   e.g.: -H24m  -H1G
-nano-ui-sdl-profile:   -xb<addr> Sets the address from which a suitable start for the heap memory
-nano-ui-sdl-profile:             will be searched from. This is useful if the default address
-nano-ui-sdl-profile:             clashes with some third-party library.
-nano-ui-sdl-profile:   -xn       Use the non-moving collector for the old generation.
-nano-ui-sdl-profile:   -m<n>     Minimum % of heap which must be available (default 3%)
-nano-ui-sdl-profile:   -G<n>     Number of generations (default: 2)
-nano-ui-sdl-profile:   -c<n>     Use in-place compaction instead of copying in the oldest generation
-nano-ui-sdl-profile:             when live data is at least <n>% of the maximum heap size set with
-nano-ui-sdl-profile:             -M (default: 30%)
-nano-ui-sdl-profile:   -c        Use in-place compaction for all oldest generation collections
-nano-ui-sdl-profile:             (the default is to use copying)
-nano-ui-sdl-profile:   -w        Use mark-region for the oldest generation (experimental)
-nano-ui-sdl-profile:   -I<sec>   Perform full GC after <sec> idle time (default: 0.3, 0 == off)
-nano-ui-sdl-profile:   -Iw<sec>  Minimum wait time between idle GC runs (default: 0, 0 == no min wait time)
-nano-ui-sdl-profile: 
-nano-ui-sdl-profile:   -T         Collect GC statistics (useful for in-program statistics access)
-nano-ui-sdl-profile:   -t[<file>] One-line GC statistics (if <file> omitted, uses stderr)
-nano-ui-sdl-profile:   -s[<file>] Summary  GC statistics (if <file> omitted, uses stderr)
-nano-ui-sdl-profile:   -S[<file>] Detailed GC statistics (if <file> omitted, uses stderr)
-nano-ui-sdl-profile: 
-nano-ui-sdl-profile: 
-nano-ui-sdl-profile:   -Z         Don't squeeze out update frames on context switch
-nano-ui-sdl-profile:   -B         Sound the bell at the start of each garbage collection
-nano-ui-sdl-profile:   -h       Heap residency profile (output file <program>.hp)
-nano-ui-sdl-profile:   -hT      Produce a heap profile grouped by closure type
-nano-ui-sdl-profile:   -hi      Produce a heap profile grouped by info table address
-nano-ui-sdl-profile:   -po<file>  Override profiling output file name prefix (program name by default)
-nano-ui-sdl-profile:   -i<sec>  Time between heap profile samples (seconds, default: 0.1)
-nano-ui-sdl-profile:   --no-automatic-heap-samples
-nano-ui-sdl-profile:            Do not start the heap profile interval timer on start-up,
-nano-ui-sdl-profile:            Rather, the application will be responsible for triggering
-nano-ui-sdl-profile:            heap profiler samples.
-nano-ui-sdl-profile:   -ol<file>  Send binary eventlog to <file> (default: <program>.eventlog)
-nano-ui-sdl-profile:   -l[flags]  Log events to a file
-nano-ui-sdl-profile:              where [flags] can contain:
-nano-ui-sdl-profile:                 s    scheduler events
-nano-ui-sdl-profile:                 g    GC and heap events
-nano-ui-sdl-profile:                 n    non-moving GC heap census events
-nano-ui-sdl-profile:                 p    par spark events (sampled)
-nano-ui-sdl-profile:                 f    par spark events (full detail)
-nano-ui-sdl-profile:                 u    user events (emitted from Haskell code)
-nano-ui-sdl-profile:                 a    all event classes above
-nano-ui-sdl-profile:                -x    disable an event class, for any flag above
-nano-ui-sdl-profile:              the initial enabled event classes are 'sgpu'
-nano-ui-sdl-profile:  --eventlog-flush-interval=<secs>
-nano-ui-sdl-profile:              Periodically flush the eventlog at the specified interval.
-nano-ui-sdl-profile: 
-nano-ui-sdl-profile:   -C<secs>  Context-switch interval in seconds.
-nano-ui-sdl-profile:             0 or no argument means switch as often as possible.
-nano-ui-sdl-profile:             Default: 0.02 sec.
-nano-ui-sdl-profile:   -V<secs>  Master tick interval in seconds (0 == disable timer).
-nano-ui-sdl-profile:             This sets the resolution for -C and the heap profile timer -i,
-nano-ui-sdl-profile:             and is the frequency of time profile samples.
-nano-ui-sdl-profile:             Default: 0.01 sec.
-nano-ui-sdl-profile: 
-nano-ui-sdl-profile:   -N[<n>]    Use <n> processors (default: 1, -N alone determines
-nano-ui-sdl-profile:              the number of processors to use automatically)
-nano-ui-sdl-profile:   -maxN[<n>] Use up to <n> processors automatically
-nano-ui-sdl-profile:   -qg[<n>]   Use parallel GC only for generations >= <n>
-nano-ui-sdl-profile:              (default: 0, -qg alone turns off parallel GC)
-nano-ui-sdl-profile:   -qb[<n>]   Use load-balancing in the parallel GC only for generations >= <n>
-nano-ui-sdl-profile:              (default: 1 for -A < 32M, 0 otherwise;
-nano-ui-sdl-profile:               -qb alone turns off load-balancing)
-nano-ui-sdl-profile:   -qn<n>     Use <n> threads for parallel GC (defaults to value of -N)
-nano-ui-sdl-profile:   -qa        Use the OS to set thread affinity (experimental)
-nano-ui-sdl-profile:   -qm        Don't automatically migrate threads between CPUs
-nano-ui-sdl-profile:   -qi<n>     If a processor has been idle for the last <n> GCs, do not
-nano-ui-sdl-profile:              wake it up for a non-load-balancing parallel GC.
-nano-ui-sdl-profile:              (0 disables,  default: 0)
-nano-ui-sdl-profile:   --numa[=<node_mask>]
-nano-ui-sdl-profile:              Use NUMA, nodes given by <node_mask> (default: off)
-nano-ui-sdl-profile:   --install-signal-handlers=<yes|no>
-nano-ui-sdl-profile:              Install signal handlers (default: yes)
-nano-ui-sdl-profile:   --io-manager=<name>
-nano-ui-sdl-profile:              The I/O manager to use.
-nano-ui-sdl-profile:              Options available: auto mio (default: mio)
-nano-ui-sdl-profile:   -e<n>      Maximum number of outstanding local sparks (default: 4096)
-nano-ui-sdl-profile:   -xp        Assume that all object files were compiled with -fPIC
-nano-ui-sdl-profile:              -fexternal-dynamic-refs and load them anywhere in the address
-nano-ui-sdl-profile:              space
-nano-ui-sdl-profile:   -xm        Base address to mmap memory in the GHCi linker
-nano-ui-sdl-profile:              (hex; must be <80000000)
-nano-ui-sdl-profile:   -xq        The allocation limit given to a thread after it receives
-nano-ui-sdl-profile:              an AllocationLimitExceeded exception. (default: 100k)
-nano-ui-sdl-profile: 
-nano-ui-sdl-profile:   -xr        The size of virtual memory address space reserved by the
-nano-ui-sdl-profile:              two step allocator (default: 1T)
-nano-ui-sdl-profile: 
-nano-ui-sdl-profile:   -Mgrace=<n>
-nano-ui-sdl-profile:              The amount of allocation after the program receives a
-nano-ui-sdl-profile:              HeapOverflow exception before the exception is thrown again, if
-nano-ui-sdl-profile:              the program is still exceeding the heap limit.
-nano-ui-sdl-profile: 
-nano-ui-sdl-profile:   --read-tix-file=<yes|no>
-nano-ui-sdl-profile:              Whether to initialize HPC datastructures from  <program>.tix              at the start of execution. (default: yes)
-nano-ui-sdl-profile: 
-nano-ui-sdl-profile:   --write-tix-file=<yes|no>
-nano-ui-sdl-profile:              Whether to write <program>.tix at the end of execution.
-nano-ui-sdl-profile:              (default: yes)
-nano-ui-sdl-profile: 
-nano-ui-sdl-profile: RTS options may also be specified using the GHCRTS environment variable.
-nano-ui-sdl-profile: 
-nano-ui-sdl-profile: Other RTS options may be available for programs compiled a different way.
-nano-ui-sdl-profile: The GHC User's Guide has full details.
-nano-ui-sdl-profile: 
+================================================================================
+              NANO-UI SDL DEMO PROFILING & PERFORMANCE AUDIT                    
+================================================================================
+
+--- 1. FULL DEMO UI (Controls Tab, Idle vs Active Mouse) ---
+Full DemoUi (Idle, SDL Present)  :    0.669 ms/frame  |     435.3 KB alloc/frame
+Full DemoUi (Active, SDL Present) :    0.441 ms/frame  |     435.2 KB alloc/frame
+Full DemoUi (runFrame only, No SDL) :    0.243 ms/frame  |     423.1 KB alloc/frame
+  -> Vertices: 3910, Indices: 11616, DrawCmds: 8
+
+--- 1b. DEMO UI WITH DEBUG WINDOW OPEN ---
+Full DemoUi (Debug Open, SDL Present) :    0.497 ms/frame  |     441.7 KB alloc/frame
+Full DemoUi (Debug Open, runFrame) :    0.249 ms/frame  |     425.3 KB alloc/frame
+  -> Debug Vertices: 3910, Indices: 11616, DrawCmds: 8
+
+--- 5. FLOATING WINDOW STEADY-STATE ---
+Debug Open, ForceFull replay     :    0.482 ms/frame  |     441.7 KB alloc/frame
+  -> Churn damage over 40 frames: Full=1 Clip=39 Empty=0
+Win content churn (text 1..9ch)  :    0.049 ms/frame  |      64.7 KB alloc/frame
+Debug Open, hover sweep          :    0.446 ms/frame  |     441.9 KB alloc/frame
+--- 5b. IDLE CADENCE (debug gating) ---
+  plain window, no stats query : active=False waitTimeout=-1  (block; was 250 ms wake + 4 Hz full redraws)
+  stats window queried         : active=True  waitTimeout=250 (4 Hz HUD refresh sustained)
+
+--- 6. DEBUG HUD ROW STRUCTURE ---
+  kvMono rows (current)      : verts= 3684 cmds= 6  frame                            :    0.104 ms/frame  |     284.8 KB alloc/frame
+  one mono label/row         : verts= 3612 cmds= 6  frame                            :    0.068 ms/frame  |     160.4 KB alloc/frame
+  one block label/section    : verts= 3512 cmds= 5  frame                            :    0.073 ms/frame  |     137.7 KB alloc/frame
+
+--- 2. DEMO TABS IN ISOLATION (Full runFrame + draw) ---
+Tab: Controls                    :    0.074 ms/frame  |     112.4 KB alloc/frame
+Tab: List (Tree + Items)         :    0.081 ms/frame  |     139.3 KB alloc/frame
+Tab: Table (14 rows x 5 cols)    :    0.208 ms/frame  |     474.8 KB alloc/frame
+Tab: Table (SDL Present)         :    0.338 ms/frame  |     478.3 KB alloc/frame
+  -> Table DrawCmds: 7 (Vertices: 947, Indices: 1869)
+Tab: Plots (4 Charts + Diagram)  :    0.023 ms/frame  |      31.8 KB alloc/frame
+Tab: Diagnostics                 :    0.014 ms/frame  |      44.0 KB alloc/frame
+
+--- 3. WIDGET MICROBENCHMARKS (100 widgets in container, runFrame) ---
+100x Button                      :    0.247 ms/frame  |     485.3 KB alloc/frame
+100x Checkbox                    :    0.318 ms/frame  |     597.9 KB alloc/frame
+100x Slider                      :    0.348 ms/frame  |     666.5 KB alloc/frame
+100x Radio Button                :    1.237 ms/frame  |    2074.5 KB alloc/frame
+100x Select (Dropdown)           :    0.255 ms/frame  |     628.4 KB alloc/frame
+100x TextInput                   :    0.298 ms/frame  |     652.5 KB alloc/frame
+20x TextArea                     :    0.182 ms/frame  |     533.9 KB alloc/frame
+20x ColorPicker                  :    0.147 ms/frame  |     233.9 KB alloc/frame
+100x Label (Plain Text)          :    0.138 ms/frame  |     507.5 KB alloc/frame
+100x Box (Solid Rects)           :    0.048 ms/frame  |     160.0 KB alloc/frame
+100x Images (Atlas Quads)        :    0.118 ms/frame  |     542.5 KB alloc/frame
+50x Nested Rows & Cols           :    0.103 ms/frame  |     361.7 KB alloc/frame
+
+--- 4. SCALING BENCHMARKS ---
+Table: 50 rows x 5 cols          :    0.298 ms/frame  |     707.0 KB alloc/frame
+Table: 200 rows x 5 cols         :    0.387 ms/frame  |     877.0 KB alloc/frame
+Tree: 50 items (unfolded)        :    0.214 ms/frame  |     369.1 KB alloc/frame
+Plot: Line chart (500 pts)       :    1.761 ms/frame  |    7622.8 KB alloc/frame
+
+================================================================================
+Profiling complete.

@@ -1,0 +1,41 @@
+nano-ui perf after Phase 3 (damage-clipped paint pass)
+date: 2026-09-10 (Linux x86_64, GHC 9.14.1, -O2 -mavx2, RTS -N1 -A64m -T -I0)
+vs Phase 7 (profiles/results/08-phase7-wrap/bench.txt)
+
+changes:
+  writeDamage now runs before paint (it had no paint dependency), so the
+  frame knows its damage before emitting geometry. When the SDL present will
+  be partial, runFrame sets the draw arena's current clip to the damage rect
+  inflated by one logical pixel (to cover the runner's outward pixel snap);
+  lowerNode's existing rect/clip early-out then culls off-damage subtrees and
+  no vertices are emitted for them. Full-present frames (fresh retain,
+  forced full, continuous present, window expose) keep painting everything.
+  The SDL runner now calls ensureRetain before the frame and passes the
+  full/partial decision through ctxPaintFull; finishDraw receives
+  presentFull explicitly.
+
+correctness (differential pixel test, temporary harness, removed after):
+  120-frame interaction sequence (counter text changes, hover sweep, scroll,
+  checkbox toggles) rendered two ways:
+    - culled paint + damage scissor
+    - full paint + damage scissor (forced via NANO_UI_FORCE_PAINT_FULL=1)
+  screenshots are byte-identical -> culling emits exactly what the retained
+  scissor path would have drawn. A 219-pixel delta vs a fully-repainted
+  frame is pre-existing retained-mode behavior (the same delta appears with
+  full paint + scissor), not introduced by culling.
+  Both variants are deterministic across runs.
+
+cabal test all: PASS (ditto, text-buffer, diagrams, form, rgfw, nano-ui)
+cabal run nano-ui-id-bench: PASS
+churn damage unchanged: Full=1 Clip=39
+selftest: same pre-existing header-click failure, all earlier interactions pass
+
+nano-ui-sdl-profile:
+  Full DemoUi (Idle, SDL Present)   0.611 ms -> 0.575 ms
+  Full DemoUi (Active, SDL Present) 0.440 ms -> 0.431 ms
+  Debug Open (SDL Present)          0.455 ms -> 0.452 ms
+  runFrame-only benches unchanged (paint full by default)
+
+note: the SDL present path (~0.36 ms/frame: retain blit + present) dominates
+the remaining frame time, so the paint saving shows up mainly on clip-heavy
+interaction frames.

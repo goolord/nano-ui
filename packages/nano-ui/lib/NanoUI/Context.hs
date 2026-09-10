@@ -1161,6 +1161,7 @@ newContext = do
   ctxDefaultLayout <- newIORef defaultLayout
   ctxTheme <- newIORef defaultTheme
   ctxSpanCache <- newIORef IM.empty
+  ctxPaintFull <- newIORef True
   let fm0 = monospaceMetrics 12
       ctx = Context
         { ctxNodeArena = nodeArena
@@ -1184,6 +1185,7 @@ newContext = do
         , ctxResolveMeasure = defaultResolveMeasure ctx
         , ctxMeasureCache = Nothing
         , ctxSpanCache
+        , ctxPaintFull
         , ctxExternalText = False
         , ctxTheme
         , ctxIcons = asciiIcons

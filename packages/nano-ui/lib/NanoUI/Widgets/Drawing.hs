@@ -4,6 +4,7 @@ module NanoUI.Widgets.Drawing
   ( DrawOp (..)
   , DrawingBuild
   , drawing
+  , drawingVersioned
   , drawingCached
   )
 where
@@ -27,6 +28,18 @@ drawing layout build = do
   wid <- nextId
   ctx <- askContext
   uiIO (registerDrawing ctx wid 0 build)
+  addWidget wid NodeDrawing T.empty 0 layout
+
+-- | Like 'drawing', but the tessellated op cache is keyed by an explicit
+-- content version. Bump the version whenever the builder output changes (a
+-- model pointer, dirty counter, or content hash); unchanged frames — including
+-- frames where the widget is animating — replay cached ops without rebuilding.
+-- Version 0 is treated as unversioned and falls back to 'drawing' semantics.
+drawingVersioned :: Ui :> es => Int -> Layout -> (Rect -> Vector DrawOp) -> Eff es Response
+drawingVersioned version layout build = do
+  wid <- nextId
+  ctx <- askContext
+  uiIO (registerDrawing ctx wid (if version == 0 then 1 else version) build)
   addWidget wid NodeDrawing T.empty 0 layout
 
 -- | Same as 'drawing', but skip a layout rebuild while envelope, font, content

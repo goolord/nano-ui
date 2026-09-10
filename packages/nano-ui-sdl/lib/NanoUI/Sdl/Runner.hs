@@ -31,6 +31,7 @@ import NanoUI.Testing
   , DrawData
   , Layer (..)
   , Ui
+  , ctxPaintFull
   , ctxTheme
   , damageIsEmpty
   , runEff
@@ -88,10 +89,25 @@ drawEff ::
   IO (Bool, Input)
 drawEff unlift ctx ui env inp forceFull = do
   SdlImage.syncImageAtlas (sdlRenderer env) (sdlImages env) ctx
+  (tex, retainNew, presentFull) <- prepareRetain ctx env inp forceFull
   t0 <- getMonotonicTime
   (_, _, drawData, dirtyAfterUi) <- runFrameEff unlift ctx inp ui
   t1 <- getMonotonicTime
-  finishDraw ctx env inp forceFull t0 t1 drawData dirtyAfterUi
+  finishDraw ctx env inp tex retainNew presentFull t0 t1 drawData dirtyAfterUi
+
+-- | Decide whether this present repaints everything, then make sure the
+-- retain texture exists. Must run before the frame so the paint pass can cull
+-- to the damage clip when the present will be partial.
+prepareRetain :: Context -> SdlEnv -> Input -> Bool -> IO (Ptr (), Bool, Bool)
+prepareRetain ctx env inp forceFull = do
+  scale <- readIORef (sdlScaleRef env)
+  let Size lw lh = inputWindowSize inp
+      pw = max 1 (round (lw * scale))
+      ph = max 1 (round (lh * scale))
+  (tex, retainNew) <- ensureRetain env pw ph scale
+  let presentFull = forceFull || retainNew || sdlContinuous env || inputWindowRedraw inp
+  writeIORef (ctxPaintFull ctx) presentFull
+  pure (tex, retainNew, presentFull)
 
 drawReduceEff ::
   (IOE :> es, Typeable msg, Eq model) =>
@@ -106,30 +122,28 @@ drawReduceEff ::
   IO (Bool, Input)
 drawReduceEff unlift update modelRef view ctx env inp forceFull = do
   SdlImage.syncImageAtlas (sdlRenderer env) (sdlImages env) ctx
+  (tex, retainNew, presentFull) <- prepareRetain ctx env inp forceFull
   t0 <- getMonotonicTime
   m <- readIORef modelRef
   (_, m', _, drawData, dirtyAfterUi) <- runFrameReduceEff unlift update ctx inp m view
   writeIORef modelRef m'
   t1 <- getMonotonicTime
-  finishDraw ctx env inp forceFull t0 t1 drawData dirtyAfterUi
+  finishDraw ctx env inp tex retainNew presentFull t0 t1 drawData dirtyAfterUi
 
-finishDraw :: Context -> SdlEnv -> Input -> Bool -> Double -> Double -> DrawData -> Bool -> IO (Bool, Input)
-finishDraw ctx env inp forceFull t0 t1 drawData dirtyAfterUi = do
+finishDraw :: Context -> SdlEnv -> Input -> Ptr () -> Bool -> Bool -> Double -> Double -> DrawData -> Bool -> IO (Bool, Input)
+finishDraw ctx env inp tex retainNew presentFull t0 t1 drawData dirtyAfterUi = do
   let uiMs = (t1 - t0) * 1000
   scale <- readIORef (sdlScaleRef env)
   syncPointerCursor (sdlCursors env) ctx inp
   dmg0 <- takeDamage ctx
   let Size lw lh = inputWindowSize inp
-      pw = max 1 (round (lw * scale))
-      ph = max 1 (round (lh * scale))
-  (tex, retainNew) <- ensureRetain env pw ph scale
   -- Frame damage from writeDamage is authoritative: a live animation whose
   -- key is out of view or scroll-clipped produces empty damage, and forcing
   -- DamageFull here would turn every skip frame into a full present. A
   -- window redraw event (expose/restore) is the exception: the backbuffer
   -- is gone, so the next present must be full.
   let damage0 =
-        if forceFull || retainNew || sdlContinuous env || inputWindowRedraw inp
+        if presentFull
           then DamageFull
           else snapDamage scale dmg0
       damage = damage0

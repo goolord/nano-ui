@@ -67,6 +67,8 @@ module NanoUI.Layout.Arena
   , ensureAxisSnapshot
   , lookupWrapMemo
   , storeWrapMemo
+  , lookupFitMemo
+  , storeFitMemo
   , forNodes_
   , forChildNodes_
   , findNodeRevM
@@ -207,6 +209,11 @@ data NodeArena = NodeArena
   , naWrapKey :: IORef (MutablePrimArray RealWorld Float)
   , naWrapW :: IORef (MutablePrimArray RealWorld Float)
   , naWrapH :: IORef (MutablePrimArray RealWorld Float)
+  -- Per-frame memo of recomputeFitHeightAtWidth results keyed by (node,
+  -- quantized available width).
+  , naFitTag :: IORef (MutablePrimArray RealWorld Word32)
+  , naFitKey :: IORef (MutablePrimArray RealWorld Float)
+  , naFitVal :: IORef (MutablePrimArray RealWorld Float)
   , naEpoch :: IORef Word32
   , naIndex :: IORef (BasicHashTable WidgetId Word64)
   }
@@ -253,6 +260,9 @@ newNodeArena = do
   naWrapKey <- newIORef =<< newPrimArray cap
   naWrapW <- newIORef =<< newPrimArray cap
   naWrapH <- newIORef =<< newPrimArray cap
+  naFitTag <- newIORef =<< newPrimArray cap
+  naFitKey <- newIORef =<< newPrimArray cap
+  naFitVal <- newIORef =<< newPrimArray cap
   naEpoch <- newIORef 1
   naIndex <- newIORef =<< HT.new
   pure
@@ -275,6 +285,9 @@ newNodeArena = do
       , naWrapKey
       , naWrapW
       , naWrapH
+      , naFitTag
+      , naFitKey
+      , naFitVal
       , naEpoch
       , naIndex
       }
@@ -335,6 +348,9 @@ ensureCapacity na needed = do
       growPrimArray (naWrapKey na) cap newCap 0
       growPrimArray (naWrapW na) cap newCap 0
       growPrimArray (naWrapH na) cap newCap 0
+      growPrimArray (naFitTag na) cap newCap 0
+      growPrimArray (naFitKey na) cap newCap 0
+      growPrimArray (naFitVal na) cap newCap 0
       let newA = NodeArenaArrays {..}
       writeIORef (naArrays na) newA
       m <- readIORef (naArraysSnap na)
@@ -897,6 +913,35 @@ storeWrapMemo na idx wrapW w h = do
   writePrimArray keyArr idx wrapW
   writePrimArray wArr idx w
   writePrimArray hArr idx h
+
+-- | Look up a fit height memoized for this frame at @(node, availW)@.
+{-# INLINE lookupFitMemo #-}
+lookupFitMemo :: NodeArena -> NodeIdx -> Float -> IO (Maybe Float)
+lookupFitMemo na idx availW = do
+  ft <- readIORef (naFrameTag na)
+  tagArr <- readIORef (naFitTag na)
+  tag <- readPrimArray tagArr idx
+  if tag /= ft
+    then pure Nothing
+    else do
+      keyArr <- readIORef (naFitKey na)
+      key <- readPrimArray keyArr idx
+      if abs (key - availW) <= 0.25
+        then do
+          valArr <- readIORef (naFitVal na)
+          Just <$> readPrimArray valArr idx
+        else pure Nothing
+
+{-# INLINE storeFitMemo #-}
+storeFitMemo :: NodeArena -> NodeIdx -> Float -> Float -> IO ()
+storeFitMemo na idx availW h = do
+  ft <- readIORef (naFrameTag na)
+  tagArr <- readIORef (naFitTag na)
+  keyArr <- readIORef (naFitKey na)
+  valArr <- readIORef (naFitVal na)
+  writePrimArray tagArr idx ft
+  writePrimArray keyArr idx availW
+  writePrimArray valArr idx h
 
 {-# NOINLINE ensureScratchCapacity #-}
 ensureScratchCapacity :: NodeArena -> Int -> IO ()

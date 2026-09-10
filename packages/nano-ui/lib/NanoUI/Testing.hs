@@ -40,6 +40,7 @@ module NanoUI.Testing
   , newCellContext
   , newPixelContext
   , ctxTheme
+  , ctxPaintFull
   , ctxFontMetrics
   , ctxHostProfile
   , ctxIcons

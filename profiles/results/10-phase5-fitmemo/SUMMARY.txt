@@ -1,0 +1,26 @@
+nano-ui perf after Phase 5b (fit-height memo)
+date: 2026-09-10 (Linux x86_64, GHC 9.14.1, -O2 -mavx2, RTS -N1 -A64m -T -I0)
+vs Phase 3 (profiles/results/09-phase3-cull/bench.txt)
+
+profile finding (full-paint demo, -P):
+  positionNodeA inherited 23.9% time / 39.2% alloc; recomputeFitHeightAtWidth
+  was 6.7% time / 8.6% alloc because the same subtree can be re-walked at
+  several levels (a parent's fit recompute walks it, then positioning
+  recomputes its children).
+
+changes:
+  NodeArena gains a per-frame fit-height memo keyed by (node, quantized
+  available width), reusing the frame tag from the wrap memo.
+  recomputeFitHeightAtWidth is a thin memo wrapper around the previous body
+  (renamed recomputeFitHeightAtWidthGo); within a frame the result depends
+  only on (node, availW) because style/text/fonts are fixed.
+
+cabal test all: PASS (ditto, text-buffer, diagrams, form, rgfw, nano-ui)
+cabal run nano-ui-id-bench: PASS
+
+nano-ui-sdl-profile:
+  Full DemoUi runFrame alloc   326.9 KB -> 315.1 KB per frame
+  Full DemoUi (Idle, present)  0.575 ms -> 0.563 ms
+  Table 200x5                  0.379 ms -> 0.352 ms
+  100x Radio                   1.198 ms -> 1.157 ms
+  Plot 500pt                   0.030 ms unchanged
