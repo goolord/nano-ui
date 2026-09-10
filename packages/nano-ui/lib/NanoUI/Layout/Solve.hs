@@ -16,9 +16,7 @@ import Control.Monad (when)
 import Data.IORef (readIORef, writeIORef)
 import Data.Primitive.PrimArray
   ( MutablePrimArray
-  , PrimArray
-  , freezePrimArray
-  , indexPrimArray
+  , copyMutablePrimArray
   , readPrimArray
   , writePrimArray
   )
@@ -92,6 +90,8 @@ import NanoUI.Layout.Arena
   , getScrollContentW
   , setScrollContentW
   , ensureScratchCapacity
+  , AxisSnapshot (..)
+  , ensureAxisSnapshot
   , naScratchCount
   , naScratchIdx
   , naScratchMain
@@ -185,7 +185,7 @@ solveLayoutWithResolver na host fm monoFm measure resolveFont lookupMeasure root
     count <- arenaCount na
     whenPositive count $ do
       measurePass na host fm monoFm measure resolveFont lookupMeasure
-      positionNodeA a na host fm monoFm measure resolveFont 0 0 0 rootW rootH
+      positionNodeA a na host fm monoFm measure resolveFont 0 0 0 0 rootW rootH
       quantizeResultsA a count (fmSnapScale fm)
 
 {-# INLINE quantizeResultsA #-}
@@ -943,7 +943,7 @@ loadChildrenScratchSolving na host fm monoFm measure resolveFont parent availW a
 positionNode :: NodeArena -> HostProfile -> FontMetrics -> NodeIdx -> Float -> Float -> Float -> Float -> IO ()
 positionNode na host fm idx x y availW availH = do
   a <- arenaArrays na
-  positionNodeA a na host fm fm (\t -> pure (measureText host fm t)) defaultResolve idx x y availW availH
+  positionNodeA a na host fm fm (\t -> pure (measureText host fm t)) defaultResolve 0 idx x y availW availH
   where
     defaultResolve _ _ _ _ = pure (fm, \t -> pure (measureText host fm t))
 
@@ -955,13 +955,14 @@ positionNodeA ::
   FontMetrics ->
   (Text -> IO (Float, Float)) ->
   FontResolver ->
+  Int ->
   NodeIdx ->
   Float ->
   Float ->
   Float ->
   Float ->
   IO ()
-positionNodeA a na host fm monoFm measure resolveFont idx x y availW availH = do
+positionNodeA a na host fm monoFm measure resolveFont depth idx x y availW availH = do
   (minW, minH, maxW, maxH) <- minMaxA a idx
   (wTag, wVal) <- widthSizingA a idx
   (hTag, hVal) <- heightSizingA a idx
@@ -1014,12 +1015,12 @@ positionNodeA a na host fm monoFm measure resolveFont idx x y availW availH = do
       gap = resolveLayoutGap host fm gap0
   dir <- getDirection na idx
   case nt of
-    NodeContainer -> positionChildren a na host fm monoFm measure resolveFont idx dir gap pad x y w h
-    NodePanel -> positionChildren a na host fm monoFm measure resolveFont idx dir gap pad x y w h
-    NodeScrollContainer -> positionScrollChildren a na host fm monoFm measure resolveFont idx dir gap pad x y w h
-    NodeModal -> positionChildren a na host fm monoFm measure resolveFont idx dir gap pad x y w h
-    NodeWindow -> positionChildren a na host fm monoFm measure resolveFont idx dir gap pad x y w h
-    NodePopup -> positionChildren a na host fm monoFm measure resolveFont idx dir gap pad x y w h
+    NodeContainer -> positionChildren a na host fm monoFm measure resolveFont depth idx dir gap pad x y w h
+    NodePanel -> positionChildren a na host fm monoFm measure resolveFont depth idx dir gap pad x y w h
+    NodeScrollContainer -> positionScrollChildren a na host fm monoFm measure resolveFont depth idx dir gap pad x y w h
+    NodeModal -> positionChildren a na host fm monoFm measure resolveFont depth idx dir gap pad x y w h
+    NodeWindow -> positionChildren a na host fm monoFm measure resolveFont depth idx dir gap pad x y w h
+    NodePopup -> positionChildren a na host fm monoFm measure resolveFont depth idx dir gap pad x y w h
     _ -> pure ()
   when (hTag == SizingFit && (nt == NodeContainer || nt == NodePanel || nt == NodeWindow || nt == NodeModal || nt == NodePopup)) $
     adjustFitHeight na host fm idx minH maxH x y w
@@ -1055,6 +1056,7 @@ positionScrollChildren ::
   FontMetrics ->
   (Text -> IO (Float, Float)) ->
   FontResolver ->
+  Int ->
   NodeIdx ->
   DirTag ->
   Float ->
@@ -1064,7 +1066,7 @@ positionScrollChildren ::
   Float ->
   Float ->
   IO ()
-positionScrollChildren a na host fm monoFm measure resolveFont idx dir gap pad px py pw ph = do
+positionScrollChildren a na host fm monoFm measure resolveFont depth idx dir gap pad px py pw ph = do
   si <- getStyleIdx na idx
   contentSize <- getNodeValue na idx
   slot <- scrollBarSlotOf na idx
@@ -1082,7 +1084,7 @@ positionScrollChildren a na host fm monoFm measure resolveFont idx dir gap pad p
           -- Keep measured content. Shrinking to the clip wraps table columns.
           layoutW = max contentW viewW
           layoutH = max contentSize viewH
-      positionChildren a na host fm monoFm measure resolveFont idx DirColumn gap pad cx cy layoutW layoutH
+      positionChildren a na host fm monoFm measure resolveFont depth idx DirColumn gap pad cx cy layoutW layoutH
     else do
       let cfg = decodeScrollConfig si
           gutterCol = scrollAxisGutter (scrollPolicyY cfg) host fm slot contentSize innerH
@@ -1094,8 +1096,8 @@ positionScrollChildren a na host fm monoFm measure resolveFont idx dir gap pad p
                 if wTag == SizingGrow
                   then max contentSize (innerW - gutterRow)
                   else contentSize
-          positionRowFromParent a na host fm monoFm measure resolveFont idx gap cx cy rowMain (innerH - gutterRow)
-        DirColumn -> positionColumnScroll a na host fm monoFm measure resolveFont idx gap cx cy (innerW - gutterCol) innerH contentSize
+          positionRowFromParent a na host fm monoFm measure resolveFont depth idx gap cx cy rowMain (innerH - gutterRow)
+        DirColumn -> positionColumnScroll a na host fm monoFm measure resolveFont depth idx gap cx cy (innerW - gutterCol) innerH contentSize
   fc <- getFirstChild na idx
   when (fc >= 0) $ do
     let go ci !maxB !maxR = do
@@ -1164,6 +1166,7 @@ positionColumnScroll ::
   FontMetrics ->
   (Text -> IO (Float, Float)) ->
   FontResolver ->
+  Int ->
   NodeIdx ->
   Float ->
   Float ->
@@ -1172,14 +1175,14 @@ positionColumnScroll ::
   Float ->
   Float ->
   IO ()
-positionColumnScroll a na host fm monoFm measure resolveFont parent gap cx cy innerW innerH contentSize = do
+positionColumnScroll a na host fm monoFm measure resolveFont depth parent gap cx cy innerW innerH contentSize = do
   n <- loadChildrenScratchSolving na host fm monoFm measure resolveFont parent innerW innerH
-  withAxisSnaps na n contentSize (gap * fromIntegral (max 0 (n - 1))) False $ \idxSnap outSnap -> do
+  withAxisSnaps na depth n contentSize (gap * fromIntegral (max 0 (n - 1))) False $ \idxSnap outSnap -> do
     let go !i !curY
           | i >= n = pure ()
           | otherwise = do
-              let ci = indexPrimArray idxSnap i
-                  fh = indexPrimArray outSnap i
+              ci <- readPrimArray idxSnap i
+              fh <- readPrimArray outSnap i
               nt <- getNodeType na ci
               (_, _, iw, _) <- getRect na ci
               ax <- getAlignX na ci
@@ -1196,7 +1199,7 @@ positionColumnScroll a na host fm monoFm measure resolveFont parent gap cx cy in
                     if isScrollNode nt
                       then min fh visibleSlice
                       else fh
-              positionNodeA a na host fm monoFm measure resolveFont ci fx curY cw nodeH
+              positionNodeA a na host fm monoFm measure resolveFont (depth + 1) ci fx curY cw nodeH
               (_, _, _, placedH) <- getRect na ci
               go (i + 1) (curY + placedH + gap)
     go 0 cy
@@ -1216,6 +1219,7 @@ positionChildren ::
   FontMetrics ->
   (Text -> IO (Float, Float)) ->
   FontResolver ->
+  Int ->
   NodeIdx ->
   DirTag ->
   Float ->
@@ -1225,7 +1229,7 @@ positionChildren ::
   Float ->
   Float ->
   IO ()
-positionChildren a na host fm monoFm measure resolveFont idx dir gap pad px py pw ph = do
+positionChildren a na host fm monoFm measure resolveFont depth idx dir gap pad px py pw ph = do
   nt <- getNodeType na idx
   gCols <- getGridCols na idx
   minColW <- getGridMinColW na idx
@@ -1235,10 +1239,10 @@ positionChildren a na host fm monoFm measure resolveFont idx dir gap pad px py p
       cw = pw - padL pad - padR pad
       ch = ph - padT pad - padB pad
   if gCols > 0 || minColW > 0
-    then positionGrid a na host fm monoFm measure resolveFont idx gCols minColW gap cx cy cw ch
+    then positionGrid a na host fm monoFm measure resolveFont depth idx gCols minColW gap cx cy cw ch
     else case dir of
-      DirRow -> positionRowFromParent a na host fm monoFm measure resolveFont idx gap cx cy cw ch
-      DirColumn -> positionColumnFromParent a na host fm monoFm measure resolveFont idx gap chrome px py pw cx cy cw ch
+      DirRow -> positionRowFromParent a na host fm monoFm measure resolveFont depth idx gap cx cy cw ch
+      DirColumn -> positionColumnFromParent a na host fm monoFm measure resolveFont depth idx gap chrome px py pw cx cy cw ch
 
 childRowCrossSize :: NodeArena -> NodeIdx -> Float -> IO Float
 childRowCrossSize na ci availCross = do
@@ -1272,20 +1276,22 @@ columnChildHeight na ci scratchH = do
 withAxisSnaps ::
   NodeArena ->
   Int ->
+  Int ->
   Float ->
   Float ->
   Bool ->
-  (PrimArray Int -> PrimArray Float -> IO a) ->
+  (MutablePrimArray RealWorld Int -> MutablePrimArray RealWorld Float -> IO a) ->
   IO a
-withAxisSnaps na n availMain gapSum horizontal act = do
+withAxisSnaps na depth n availMain gapSum horizontal act = do
   distributeScratch na 0 n availMain gapSum horizontal
   idxArr <- readIORef (naScratchIdx na)
   outArr <-
     if horizontal
       then readIORef (naScratchOutMain na)
       else readIORef (naScratchOutCross na)
-  idxSnap <- freezePrimArray idxArr 0 n
-  outSnap <- freezePrimArray outArr 0 n
+  AxisSnapshot idxSnap outSnap <- ensureAxisSnapshot na depth n
+  copyMutablePrimArray idxSnap 0 idxArr 0 n
+  copyMutablePrimArray outSnap 0 outArr 0 n
   act idxSnap outSnap
 
 positionRowFromParent ::
@@ -1296,6 +1302,7 @@ positionRowFromParent ::
   FontMetrics ->
   (Text -> IO (Float, Float)) ->
   FontResolver ->
+  Int ->
   NodeIdx ->
   Float ->
   Float ->
@@ -1303,9 +1310,9 @@ positionRowFromParent ::
   Float ->
   Float ->
   IO ()
-positionRowFromParent a na host fm monoFm measure resolveFont parent gap cx cy cw ch = do
+positionRowFromParent a na host fm monoFm measure resolveFont depth parent gap cx cy cw ch = do
   n <- loadChildrenScratchFromParent na parent cw ch
-  withAxisSnaps na n cw (gap * fromIntegral (max 0 (n - 1))) True $ \idxSnap outSnap -> do
+  withAxisSnaps na depth n cw (gap * fromIntegral (max 0 (n - 1))) True $ \idxSnap outSnap -> do
     let s = fmSnapScale fm
         step = if s > 0 then 1 / s else 0
         originOf cur prev =
@@ -1321,14 +1328,14 @@ positionRowFromParent a na host fm monoFm measure resolveFont parent gap cx cy c
         goRow !i !cur !prev
           | i >= n = pure ()
           | otherwise = do
-              let ci = indexPrimArray idxSnap i
-                  fw = indexPrimArray outSnap i
-                  x = originOf cur prev
+              ci <- readPrimArray idxSnap i
+              fw <- readPrimArray outSnap i
+              let x = originOf cur prev
               -- Fit/fixed children keep content height. Only Grow/Percent eat `ch`.
               crossH <- childRowCrossSize na ci ch
               ay <- getAlignY na ci
               let fy = alignY ay cy ch crossH
-              positionNodeA a na host fm monoFm measure resolveFont ci x fy fw crossH
+              positionNodeA a na host fm monoFm measure resolveFont (depth + 1) ci x fy fw crossH
               goRow (i + 1) (cur + fw + gap) x
     goRow 0 cx (if s > 0 then onGrid s cx - step else cx)
 
@@ -1340,6 +1347,7 @@ positionGrid ::
   FontMetrics ->
   (Text -> IO (Float, Float)) ->
   FontResolver ->
+  Int ->
   NodeIdx ->
   Int ->
   Float ->
@@ -1349,7 +1357,7 @@ positionGrid ::
   Float ->
   Float ->
   IO ()
-positionGrid a na host fm monoFm measure resolveFont parent gCols minColW gap cx cy cw ch = do
+positionGrid a na host fm monoFm measure resolveFont depth parent gCols minColW gap cx cy cw ch = do
   n <- loadChildrenScratchFromParent na parent cw ch
   whenPositive n $ do
     idxArr <- readIORef (naScratchIdx na)
@@ -1394,7 +1402,7 @@ positionGrid a na host fm monoFm measure resolveFont parent gCols minColW gap cx
                             ay <- getAlignY na ci
                             let fx = alignX ax itemX colW childW
                                 fy = alignY ay curY rowH childH
-                            positionNodeA a na host fm monoFm measure resolveFont ci fx fy colW rowH
+                            positionNodeA a na host fm monoFm measure resolveFont (depth + 1) ci fx fy colW rowH
                             goCols (j + 1)
               goCols 0
               goRows (r + 1) (curY + rowH + gap)
@@ -1408,6 +1416,7 @@ positionColumnFromParent ::
   FontMetrics ->
   (Text -> IO (Float, Float)) ->
   FontResolver ->
+  Int ->
   NodeIdx ->
   Float ->
   Bool ->
@@ -1419,10 +1428,10 @@ positionColumnFromParent ::
   Float ->
   Float ->
   IO ()
-positionColumnFromParent a na host fm monoFm measure resolveFont parent gap chrome px _ pw cx cy cw ch = do
+positionColumnFromParent a na host fm monoFm measure resolveFont depth parent gap chrome px _ pw cx cy cw ch = do
   n <- loadChildrenScratchSolving na host fm monoFm measure resolveFont parent cw ch
   gapSum <- columnGapSumScratch na chrome n gap
-  withAxisSnaps na n ch gapSum False $ \idxSnap outSnap -> do
+  withAxisSnaps na depth n ch gapSum False $ \idxSnap outSnap -> do
     let s = fmSnapScale fm
         step = if s > 0 then 1 / s else 0
         originOf cur prev =
@@ -1435,9 +1444,9 @@ positionColumnFromParent a na host fm monoFm measure resolveFont parent gap chro
         go !i !cur !prev
           | i >= n = pure ()
           | otherwise = do
-              let ci = indexPrimArray idxSnap i
-                  fh = indexPrimArray outSnap i
-                  y = originOf cur prev
+              ci <- readPrimArray idxSnap i
+              fh <- readPrimArray outSnap i
+              let y = originOf cur prev
               nt <- getNodeType na ci
               (fx, nodeW) <-
                 if chrome && nt == NodeSeparator
@@ -1450,12 +1459,14 @@ positionColumnFromParent a na host fm monoFm measure resolveFont parent gap chro
                       then pure (cx, cw)
                       else pure (alignX ax cx cw iw, cw)
               childH <- columnChildHeight na ci fh
-              positionNodeA a na host fm monoFm measure resolveFont ci fx y nodeW childH
+              positionNodeA a na host fm monoFm measure resolveFont (depth + 1) ci fx y nodeW childH
               (_, _, _, placedH) <- getRect na ci
               gapAfter <-
                 if i + 1 >= n
                   then pure 0
-                  else pairColumnGap na chrome ci (indexPrimArray idxSnap (i + 1)) gap
+                  else do
+                    nextCi <- readPrimArray idxSnap (i + 1)
+                    pairColumnGap na chrome ci nextCi gap
               go (i + 1) (cur + placedH + gapAfter) y
     go 0 cy (if s > 0 then onGrid s cy - step else cy)
 
@@ -1805,7 +1816,7 @@ positionWindowNode na host fm idx x y w h = do
   dir <- getDirection na idx
   a <- arenaArrays na
   let defResolve _ _ _ _ = pure (fm, \t -> pure (measureText host fm t))
-  positionChildren a na host fm fm (\t -> pure (measureText host fm t)) defResolve idx dir gap pad x y w h
+  positionChildren a na host fm fm (\t -> pure (measureText host fm t)) defResolve 0 idx dir gap pad x y w h
 
 computePopupPosition ::
   Float ->

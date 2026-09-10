@@ -63,6 +63,8 @@ module NanoUI.Layout.Arena
   , getNodeFontColor
   , setNodeFontColor
   , ensureScratchCapacity
+  , AxisSnapshot (..)
+  , ensureAxisSnapshot
   , forNodes_
   , forChildNodes_
   , findNodeRevM
@@ -75,6 +77,7 @@ import Data.Bits (shiftL, shiftR, (.&.), (.|.))
 import Data.HashTable.IO (BasicHashTable)
 import qualified Data.HashTable.IO as HT
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.IntMap.Strict qualified as IM
 import Data.Primitive.Array (MutableArray, newArray, readArray, writeArray)
 import Data.Primitive.PrimArray
   ( MutablePrimArray
@@ -189,8 +192,19 @@ data NodeArena = NodeArena
   , naScratchCross :: IORef (MutablePrimArray RealWorld Float)
   , naScratchOutMain :: IORef (MutablePrimArray RealWorld Float)
   , naScratchOutCross :: IORef (MutablePrimArray RealWorld Float)
+  -- Per-depth copies of the axis scratch while the position pass recurses.
+  -- Children reuse the working scratch, so a container's child list must be
+  -- snapshotted at its own depth to survive recursive positioning.
+  , naSnapCap :: IORef Int
+  , naSnapLevels :: IORef (IM.IntMap AxisSnapshot)
   , naEpoch :: IORef Word32
   , naIndex :: IORef (BasicHashTable WidgetId Word64)
+  }
+
+-- | One depth level's frozen child indices and distributed main-axis sizes.
+data AxisSnapshot = AxisSnapshot
+  { asIdx :: !(MutablePrimArray RealWorld Int)
+  , asOut :: !(MutablePrimArray RealWorld Float)
   }
 
 initialCapacity :: Int
@@ -222,6 +236,8 @@ newNodeArena = do
   naScratchCross <- newIORef =<< newPrimArray scratchCap
   naScratchOutMain <- newIORef =<< newPrimArray scratchCap
   naScratchOutCross <- newIORef =<< newPrimArray scratchCap
+  naSnapCap <- newIORef scratchCap
+  naSnapLevels <- newIORef IM.empty
   naEpoch <- newIORef 1
   naIndex <- newIORef =<< HT.new
   pure
@@ -237,6 +253,8 @@ newNodeArena = do
       , naScratchCross
       , naScratchOutMain
       , naScratchOutCross
+      , naSnapCap
+      , naSnapLevels
       , naEpoch
       , naIndex
       }
@@ -784,6 +802,40 @@ getStyleIdx na idx = arenaArrays na >>= \a -> readPrimArray (naArrTree a) (idx *
 {-# INLINE setStyleIdx #-}
 setStyleIdx :: NodeArena -> NodeIdx -> Int -> IO ()
 setStyleIdx na idx v = arenaArrays na >>= \a -> writePrimArray (naArrTree a) (idx * 8 + 5) v
+
+-- | Get the snapshot buffers for a recursion depth, grown to hold at least
+-- @needed@ entries. Buffers are reused across frames; nothing is allocated in
+-- steady state once capacity is warm.
+{-# NOINLINE ensureAxisSnapshot #-}
+ensureAxisSnapshot :: NodeArena -> Int -> Int -> IO AxisSnapshot
+ensureAxisSnapshot na depth needed = do
+  cap <- readIORef (naSnapCap na)
+  if needed <= cap
+    then getLevel depth
+    else do
+      let newCap = max needed (cap * 2)
+      levels <- readIORef (naSnapLevels na)
+      levels' <- traverse (growSnap cap newCap) levels
+      writeIORef (naSnapLevels na) levels'
+      writeIORef (naSnapCap na) newCap
+      getLevel depth
+  where
+    getLevel d = do
+      levels <- readIORef (naSnapLevels na)
+      case IM.lookup d levels of
+        Just s -> pure s
+        Nothing -> do
+          cap' <- readIORef (naSnapCap na)
+          asIdx <- newPrimArray cap'
+          asOut <- newPrimArray cap'
+          let s = AxisSnapshot {..}
+          writeIORef (naSnapLevels na) (IM.insert d s levels)
+          pure s
+
+    growSnap cap newCap (AxisSnapshot idx out) = do
+      idx' <- growPrimArrayCopy idx cap newCap 0
+      out' <- growPrimArrayCopy out cap newCap 0
+      pure AxisSnapshot {asIdx = idx', asOut = out'}
 
 {-# NOINLINE ensureScratchCapacity #-}
 ensureScratchCapacity :: NodeArena -> Int -> IO ()
