@@ -19,6 +19,7 @@ module NanoUI.Widgets.Custom
   , CustomDrawContext (..)
   , CustomMeasureFn
   , CustomDrawBuild
+  , mkCustomDrawContext
     -- * Canvas Monad & Drawing
   , CanvasM
   , runCanvas
@@ -70,6 +71,7 @@ import NanoUI.Context
   , CustomDrawContext (..)
   , CustomMeasureFn
   , getFocusId
+  , getHotId
   , getStore
   , intKey
   , isDisabled
@@ -82,6 +84,7 @@ import NanoUI.Context
   , setStore
   )
 import NanoUI.Draw (DrawOp (..))
+import NanoUI.Font (FontMetrics)
 import NanoUI.Id (WidgetId)
 import NanoUI.Input
   ( Input (..)
@@ -257,6 +260,27 @@ defaultCustomWidgetSpec = CustomWidgetSpec
           clicked = hovered && inputMouseReleased inp
        in (mkResponse wid r hovered pressed clicked False, ())
   }
+
+-- | Build the draw context a custom widget sees, resolving hover/press/focus
+-- state for @wid@ from the ambient context. One policy for state masking.
+mkCustomDrawContext :: Context -> FontMetrics -> WidgetId -> IO CustomDrawContext
+mkCustomDrawContext ctx fm wid = do
+  disabled <- isDisabled ctx wid
+  focused <- (== wid) <$> getFocusId ctx
+  hot <- getHotId ctx
+  active <- readIORef (ctxActiveId ctx)
+  theme <- readIORef (ctxTheme ctx)
+  pure
+    CustomDrawContext
+      { cdcHovered = hot == wid && not disabled
+      , cdcPressed = active == wid && not disabled
+      , cdcFocused = focused
+      , cdcActive = active == wid
+      , cdcDisabled = disabled
+      , cdcTheme = theme
+      , cdcHost = ctxHostProfile ctx
+      , cdcFont = fm
+      }
 
 -- | Instantiates a custom widget using an existing 'WidgetId'.
 customWidgetWithId :: (Ui :> es) => WidgetId -> CustomWidgetSpec a -> Eff es (Response, a)

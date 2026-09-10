@@ -11,13 +11,7 @@ import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Primitive.SmallArray (sizeofSmallArray)
 import NanoUI
   ( Input (..)
-  , V2 (..)
   , emptyInput
-  , inputMousePressed
-  , inputMouseReleased
-  , inputMouseRightPressed
-  , inputMouseRightReleased
-  , inputScroll
   , inputWindowSize
   )
 import NanoUI.Debug (debugRefreshSec)
@@ -25,6 +19,7 @@ import NanoUI.Runner
   ( SessionDriver (..)
   , newDrawingLock
   , runSessionLoop
+  , shouldRedrawFrame
   , tryWithDrawingLock
   )
 import NanoUI.Testing
@@ -32,7 +27,6 @@ import NanoUI.Testing
   , anyAnimating
   , clearDirty
   , isDirty
-  , needsRedraw
   , textFieldActive
   )
 import NanoUI.Sdl.Debug (isDebugActive, noteLoop, noteSkip, takeDebugLive)
@@ -178,18 +172,7 @@ runSdlSession options ctx setup shouldQuit drawFn =
             , sdShouldDraw    = \c prevInp inpSynced wasAnim -> do
                 debugActive <- isDebugActive (sdlDebug env)
                 wantDebug <- takeDebugLive (sdlDebug env) debugActive
-                need <- needsRedraw c prevInp inpSynced
-                dirtyNow <- isDirty c
-                anim <- anyAnimating c
-                editing <- textFieldActive c
-                let forceFinal = wasAnim && not anim
-                    pointerEdge =
-                      inputMousePressed inpSynced
-                        || inputMouseReleased inpSynced
-                        || inputMouseRightPressed inpSynced
-                        || inputMouseRightReleased inpSynced
-                    scrollEdge = inputScroll inpSynced /= V2 0 0
-                pure (sdlContinuous env || wantDebug || need || anim || forceFinal || dirtyNow || editing || pointerEdge || scrollEdge)
+                shouldRedrawFrame c prevInp inpSynced wasAnim (sdlContinuous env) wantDebug
             , sdDraw          = \c inpSynced forceFull -> do
                 ms <- tryWithDrawingLock drawing (drawFn c env inpSynced (forceFull || sdlContinuous env))
                 case ms of

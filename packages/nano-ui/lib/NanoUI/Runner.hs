@@ -20,7 +20,6 @@ module NanoUI.Runner
   , checkHardQuit
     -- * Universal Session Runner
   , SessionDriver (..)
-  , defaultWaitTimeout
   , runSessionLoop
   ) where
 
@@ -146,7 +145,13 @@ shouldRedrawFrame ctx prevInp curInp wasAnim continuous wantDebug = do
       anim <- anyAnimating ctx
       editing <- textFieldActive ctx
       let forceFinal = wasAnim && not anim
-      pure (need || anim || forceFinal || dirty || editing)
+          pointerEdge =
+            inputMousePressed curInp
+              || inputMouseReleased curInp
+              || inputMouseRightPressed curInp
+              || inputMouseRightReleased curInp
+          scrollEdge = inputScroll curInp /= V2 0 0
+      pure (need || anim || forceFinal || dirty || editing || pointerEdge || scrollEdge)
 
 -- | Check if the session should terminate, respecting modals/overlays consuming Escape/Quit.
 checkSessionQuit :: Context -> (Input -> Bool) -> Input -> IO Bool
@@ -200,18 +205,6 @@ data SessionDriver ev = SessionDriver
   , sdClickTime     :: !Double
     -- ^ Time threshold for multi-click detection in seconds.
   }
-
--- | Standard heuristic timeout: 0ms if actively dirty or animating, 16ms if settling animations or editing text, -1ms (block) when idle.
-defaultWaitTimeout :: Context -> Bool -> IO Int
-defaultWaitTimeout ctx wasAnim = do
-  anim <- anyAnimating ctx
-  dirty <- isDirty ctx
-  editing <- textFieldActive ctx
-  if anim || dirty
-    then pure 0
-    else if wasAnim || editing
-      then pure 16
-      else pure (-1)
 
 -- | Run an event-driven session loop until a termination event or user quit condition.
 runSessionLoop ::

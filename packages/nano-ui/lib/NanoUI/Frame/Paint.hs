@@ -14,16 +14,13 @@ import Data.Word (Word32)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Text as T
 import NanoUI.Widgets.ColorPicker (drawColorPickerPanel)
+import NanoUI.Widgets.Custom (mkCustomDrawContext)
 import NanoUI.Context
   ( Context (..)
-  , CustomDrawContext (..)
   , atlasTextureId
   , cachedCustomDrawingOps
   , cachedDrawingOps
-  , getFocusId
-  , getHotId
   , getStore
-  , isDisabled
   , lookupCustomDrawing
   , lookupDrawing
   , lookupImageUv
@@ -229,23 +226,7 @@ lowerNodeVisible ctx occluders idx nt x y w h rect fm theme terminal da =
       case mBuild of
         Nothing -> pure ()
         Just build -> do
-          disabled <- isDisabled ctx wid
-          focused <- (== wid) <$> getFocusId ctx
-          hot <- getHotId ctx
-          active <- readIORef (ctxActiveId ctx)
-          let hovered = hot == wid && not disabled
-              pressed = active == wid && not disabled
-              cdc =
-                CustomDrawContext
-                  { cdcHovered = hovered
-                  , cdcPressed = pressed
-                  , cdcFocused = focused
-                  , cdcActive = active == wid
-                  , cdcDisabled = disabled
-                  , cdcTheme = theme
-                  , cdcHost = ctxHostProfile ctx
-                  , cdcFont = fm
-                  }
+          cdc <- mkCustomDrawContext ctx fm wid
           withClip da rect (emitDrawOps da fm (build cdc rect))
     NodePanel -> do
       si <- getStyleIdx (ctxNodeArena ctx) idx
@@ -414,23 +395,7 @@ lowerNodeVisible ctx occluders idx nt x y w h rect fm theme terminal da =
       mCustomBuild <- lookupCustomDrawing ctx wid
       case mCustomBuild of
         Just customBuild -> do
-          disabled <- isDisabled ctx wid
-          focused <- (== wid) <$> getFocusId ctx
-          hot <- getHotId ctx
-          active <- readIORef (ctxActiveId ctx)
-          let hovered = hot == wid && not disabled
-              pressed = active == wid && not disabled
-              cdc =
-                CustomDrawContext
-                  { cdcHovered = hovered
-                  , cdcPressed = pressed
-                  , cdcFocused = focused
-                  , cdcActive = active == wid
-                  , cdcDisabled = disabled
-                  , cdcTheme = theme
-                  , cdcHost = ctxHostProfile ctx
-                  , cdcFont = fm
-                  }
+          cdc <- mkCustomDrawContext ctx fm wid
           ops <- cachedCustomDrawingOps ctx wid rect cdc customBuild
           withClip da rect (emitDrawOps da fm ops)
         Nothing -> do

@@ -56,6 +56,7 @@ import NanoUI.Testing
 import NanoUI.Runner
   ( SessionDriver (..)
   , runSessionLoop
+  , shouldRedrawFrame
   )
 import NanoUI.Layout.Arena (arenaCount)
 import NanoUI.Rgfw.Debug
@@ -303,19 +304,8 @@ runRgfwSessionReduceCustom opts getThemeAndScale updateModel initialModel view =
                         else if wasAnim || animating || editing
                           then animateTimeout
                           else (-1)
-                , sdShouldDraw    = \c prevInp inpSynced wasAnim -> do
-                    need <- needsRedraw c prevInp inpSynced
-                    dirtyNow <- isDirty c
-                    anim <- anyAnimating c
-                    editing <- textFieldActive c
-                    let forceFinal = wasAnim && not anim
-                        pointerEdge =
-                          inputMousePressed inpSynced
-                            || inputMouseReleased inpSynced
-                            || inputMouseRightPressed inpSynced
-                            || inputMouseRightReleased inpSynced
-                        scrollEdge = inputScroll inpSynced /= V2 0 0
-                    pure (need || anim || forceFinal || dirtyNow || editing || pointerEdge || scrollEdge)
+                , sdShouldDraw    = \c prevInp inpSynced wasAnim ->
+                    shouldRedrawFrame c prevInp inpSynced wasAnim False False
                 , sdDraw          = \c curInp _ -> drawOne c curInp
                 , sdSkip          = \_ _ -> pure ()
                 , sdOnCursor      = \c curInp -> do

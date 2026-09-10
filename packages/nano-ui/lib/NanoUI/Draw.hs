@@ -734,17 +734,35 @@ pokeVertex :: Ptr Word8 -> Int -> Float -> Float -> Float -> Float -> Float -> F
 pokeVertex vp off px py r g b a u v =
   pokeVertexSIMD vp off px py r g b a u v
 
+-- Allocate room for a primitive, hand the derived offsets to the body, and
+-- commit the vertex/index counts afterwards. INLINE: erased at -O.
+{-# INLINE withVerts #-}
+withVerts :: DrawArena -> Int -> Int -> (Ptr Word8 -> Ptr Word8 -> Int -> Int -> Word32 -> IO ()) -> IO ()
+withVerts da needV needI f = do
+  (vp, ip, base, baseIdx) <- ensureAndAlloc da needV needI
+  let !vOff = base * vertexSize
+      !iOff = baseIdx * indexSize
+      !baseIdxWord = fromIntegral base :: Word32
+  f vp ip vOff iOff baseIdxWord
+  writeIORef (daVertexCount da) (base + needV)
+  writeIORef (daIndexCount da) (baseIdx + needI)
+
+-- Like 'withVerts' but for primitives that index vertices relative to 'base'
+-- themselves instead of using one contiguous offset.
+{-# INLINE withVertsRaw #-}
+withVertsRaw :: DrawArena -> Int -> Int -> (Ptr Word8 -> Ptr Word8 -> Int -> Int -> IO ()) -> IO ()
+withVertsRaw da needV needI f = do
+  (vp, ip, base, baseIdx) <- ensureAndAlloc da needV needI
+  f vp ip base baseIdx
+  writeIORef (daVertexCount da) (base + needV)
+  writeIORef (daIndexCount da) (baseIdx + needI)
+
 {-# INLINE pushQuad #-}
 pushQuad :: DrawArena -> Rect -> Float -> Float -> Float -> Float -> Color -> IO ()
 pushQuad da (Rect x y w h) u0 v0 u1 v1 col = do
-  (vp, ip, base, baseIdx) <- ensureAndAlloc da 4 6
   let !(r, g, b, a) = unpackColorF col
-      !vOff = base * vertexSize
-      !iOff = baseIdx * indexSize
-      !baseIdxWord = fromIntegral base :: Word32
-  pokeQuadSIMD vp vOff ip iOff x y w h u0 v0 u1 v1 r g b a baseIdxWord
-  writeIORef (daVertexCount da) (base + 4)
-  writeIORef (daIndexCount da) (baseIdx + 6)
+  withVerts da 4 6 $ \vp ip vOff iOff baseIdxWord ->
+    pokeQuadSIMD vp vOff ip iOff x y w h u0 v0 u1 v1 r g b a baseIdxWord
 
 -- Quad with a color per corner. GPU interpolates across the two triangles.
 -- Corners: top-left, top-right, bottom-right, bottom-left.
@@ -755,19 +773,14 @@ pushQuadGradient da (Rect x y w h) tl tr br bl
   | otherwise = do
       s <- readIORef (daSnapScale da)
       setTexture da glyphAtlasTextureId
-      (vp, ip, base, baseIdx) <- ensureAndAlloc da 4 6
       let !px = snapToPixel s x
           !py = snapToPixel s y
           !c0 = unpackColorF tl
           !c1 = unpackColorF tr
           !c2 = unpackColorF br
           !c3 = unpackColorF bl
-          !vOff = base * vertexSize
-          !iOff = baseIdx * indexSize
-          !baseIdxWord = fromIntegral base :: Word32
-      pokeQuadGradientSIMD vp vOff ip iOff px py w h whitePixelU whitePixelV c0 c1 c2 c3 baseIdxWord
-      writeIORef (daVertexCount da) (base + 4)
-      writeIORef (daIndexCount da) (baseIdx + 6)
+      withVerts da 4 6 $ \vp ip vOff iOff baseIdxWord ->
+        pokeQuadGradientSIMD vp vOff ip iOff px py w h whitePixelU whitePixelV c0 c1 c2 c3 baseIdxWord
 
 -- Reserved texture id. Terminal raster treats these quads as backdrop dim,
 -- not a solid fill. Mix comes from the vertex color alpha.
@@ -872,32 +885,29 @@ pushCornerFan da cx cy rad a0 _a1 col = do
       !needV = 1 + 2 * ring
       !needI = segs * 9
       !q = cornerQuadrant a0
-  (vp, ip, base, baseIdx) <- ensureAndAlloc da needV needI
-  let !(cr, cg, cb, ca) = unpackColorF col
-      !centerIdx = fromIntegral base :: Word32
-  pokeVertex vp (base * vertexSize) cx cy cr cg cb ca whitePixelU whitePixelV
-  forM_ [0 .. segs] $ \i -> do
-    let !(ct, st) = cornerCosSin q i
-        !rimI = base + 1 + i
-        !outI = base + 1 + ring + i
-        !inRad = max 0 (rad - aa)
-    pokeVertex vp (rimI * vertexSize) (cx + inRad * ct) (cy + inRad * st) cr cg cb ca whitePixelU whitePixelV
-    pokeVertex vp (outI * vertexSize) (cx + rad * ct) (cy + rad * st) cr cg cb 0 whitePixelU whitePixelV
-    when (i > 0) $ do
-      let !k = i - 1
-          !rim0 = fromIntegral (base + i) :: Word32
-          !rim1 = fromIntegral (base + 1 + i) :: Word32
-          !out0 = fromIntegral (base + 1 + ring + k) :: Word32
-          !out1 = fromIntegral (base + 1 + ring + i) :: Word32
-          !fillOff = (baseIdx + k * 3) * indexSize
-          !fringeOff = (baseIdx + segs * 3 + k * 6) * indexSize
-      pokeByteOff ip fillOff centerIdx
-      pokeByteOff ip (fillOff + 4) rim0
-      pokeByteOff ip (fillOff + 8) rim1
-      pokeQuadIndices ip fringeOff rim0 out0 out1 rim1
-
-  writeIORef (daVertexCount da) (base + needV)
-  writeIORef (daIndexCount da) (baseIdx + needI)
+  withVertsRaw da needV needI $ \vp ip base baseIdx -> do
+    let !(cr, cg, cb, ca) = unpackColorF col
+        !centerIdx = fromIntegral base :: Word32
+    pokeVertex vp (base * vertexSize) cx cy cr cg cb ca whitePixelU whitePixelV
+    forM_ [0 .. segs] $ \i -> do
+      let !(ct, st) = cornerCosSin q i
+          !rimI = base + 1 + i
+          !outI = base + 1 + ring + i
+          !inRad = max 0 (rad - aa)
+      pokeVertex vp (rimI * vertexSize) (cx + inRad * ct) (cy + inRad * st) cr cg cb ca whitePixelU whitePixelV
+      pokeVertex vp (outI * vertexSize) (cx + rad * ct) (cy + rad * st) cr cg cb 0 whitePixelU whitePixelV
+      when (i > 0) $ do
+        let !k = i - 1
+            !rim0 = fromIntegral (base + i) :: Word32
+            !rim1 = fromIntegral (base + 1 + i) :: Word32
+            !out0 = fromIntegral (base + 1 + ring + k) :: Word32
+            !out1 = fromIntegral (base + 1 + ring + i) :: Word32
+            !fillOff = (baseIdx + k * 3) * indexSize
+            !fringeOff = (baseIdx + segs * 3 + k * 6) * indexSize
+        pokeByteOff ip fillOff centerIdx
+        pokeByteOff ip (fillOff + 4) rim0
+        pokeByteOff ip (fillOff + 8) rim1
+        pokeQuadIndices ip fringeOff rim0 out0 out1 rim1
 
 {-# INLINE pokeQuadIndices #-}
 pokeQuadIndices :: Ptr Word8 -> Int -> Word32 -> Word32 -> Word32 -> Word32 -> IO ()
@@ -1038,24 +1048,22 @@ pushStrokeAARaw da x0 y0 x1 y1 bw col
               !core = max 0 (half - 0.5)
               !outer = half + 0.5
               !(cr, cg, cb, ca) = unpackColorF col
-          (vp, ip, base, baseIdx) <- ensureAndAlloc da 8 18
-          let pokeEnd vi px py = do
-                let ((p0x, p0y), (p1x, p1y), (p2x, p2y), (p3x, p3y)) =
-                      strokeStripNormalsSIMD px py nx ny (-outer) (-core) core outer
-                    !vBase = (base + vi) * vertexSize
-                pokeVertex vp vBase p0x p0y cr cg cb 0 whitePixelU whitePixelV
-                pokeVertex vp (vBase + 32) p1x p1y cr cg cb ca whitePixelU whitePixelV
-                pokeVertex vp (vBase + 64) p2x p2y cr cg cb ca whitePixelU whitePixelV
-                pokeVertex vp (vBase + 96) p3x p3y cr cg cb 0 whitePixelU whitePixelV
-              !a = fromIntegral base :: Word32
-              !b = a + 4
-          pokeEnd 0 x0 y0
-          pokeEnd 4 x1 y1
-          pokeQuadIndices ip (baseIdx * indexSize) a (a + 1) (b + 1) b
-          pokeQuadIndices ip ((baseIdx + 6) * indexSize) (a + 1) (a + 2) (b + 2) (b + 1)
-          pokeQuadIndices ip ((baseIdx + 12) * indexSize) (a + 2) (a + 3) (b + 3) (b + 2)
-          writeIORef (daVertexCount da) (base + 8)
-          writeIORef (daIndexCount da) (baseIdx + 18)
+          withVertsRaw da 8 18 $ \vp ip base baseIdx -> do
+            let pokeEnd vi px py = do
+                  let ((p0x, p0y), (p1x, p1y), (p2x, p2y), (p3x, p3y)) =
+                        strokeStripNormalsSIMD px py nx ny (-outer) (-core) core outer
+                      !vBase = (base + vi) * vertexSize
+                  pokeVertex vp vBase p0x p0y cr cg cb 0 whitePixelU whitePixelV
+                  pokeVertex vp (vBase + 32) p1x p1y cr cg cb ca whitePixelU whitePixelV
+                  pokeVertex vp (vBase + 64) p2x p2y cr cg cb ca whitePixelU whitePixelV
+                  pokeVertex vp (vBase + 96) p3x p3y cr cg cb 0 whitePixelU whitePixelV
+                !a = fromIntegral base :: Word32
+                !b = a + 4
+            pokeEnd 0 x0 y0
+            pokeEnd 4 x1 y1
+            pokeQuadIndices ip (baseIdx * indexSize) a (a + 1) (b + 1) b
+            pokeQuadIndices ip ((baseIdx + 6) * indexSize) (a + 1) (a + 2) (b + 2) (b + 1)
+            pokeQuadIndices ip ((baseIdx + 12) * indexSize) (a + 2) (a + 3) (b + 3) (b + 2)
 
 strokeAxes :: Float -> Float -> Float -> Float -> Maybe (Float, Float, Float)
 strokeAxes x0 y0 x1 y1 =
@@ -1080,27 +1088,25 @@ pushCornerArcStroke da cx cy radius bw q col
           !outerAA = outer + 1.0
           !needV = (n + 1) * 4
           !needI = n * 18
-      (vp, ip, base, baseIdx) <- ensureAndAlloc da needV needI
-      let !(cr, cg, cb, ca) = unpackColorF col
-      forM_ [0 .. n] $ \i -> do
-        let !(ct, st) = cornerCosSin q i
-            !v0 = base + i * 4
-            !vBase = v0 * vertexSize
-            ((p0x, p0y), (p1x, p1y), (p2x, p2y), (p3x, p3y)) =
-              concentricOffsetsSIMD cx cy ct st innerAA inner outer outerAA
-        pokeVertex vp vBase p0x p0y cr cg cb 0 whitePixelU whitePixelV
-        pokeVertex vp (vBase + 32) p1x p1y cr cg cb ca whitePixelU whitePixelV
-        pokeVertex vp (vBase + 64) p2x p2y cr cg cb ca whitePixelU whitePixelV
-        pokeVertex vp (vBase + 96) p3x p3y cr cg cb 0 whitePixelU whitePixelV
-      forM_ [0 .. n - 1] $ \i -> do
-        let !a = fromIntegral (base + i * 4) :: Word32
-            !b = a + 4
-            !iOff = (baseIdx + i * 18) * indexSize
-        pokeQuadIndices ip iOff a (a + 1) (b + 1) b
-        pokeQuadIndices ip (iOff + 24) (a + 1) (a + 2) (b + 2) (b + 1)
-        pokeQuadIndices ip (iOff + 48) (a + 2) (a + 3) (b + 3) (b + 2)
-      writeIORef (daVertexCount da) (base + needV)
-      writeIORef (daIndexCount da) (baseIdx + needI)
+      withVertsRaw da needV needI $ \vp ip base baseIdx -> do
+        let !(cr, cg, cb, ca) = unpackColorF col
+        forM_ [0 .. n] $ \i -> do
+          let !(ct, st) = cornerCosSin q i
+              !v0 = base + i * 4
+              !vBase = v0 * vertexSize
+              ((p0x, p0y), (p1x, p1y), (p2x, p2y), (p3x, p3y)) =
+                concentricOffsetsSIMD cx cy ct st innerAA inner outer outerAA
+          pokeVertex vp vBase p0x p0y cr cg cb 0 whitePixelU whitePixelV
+          pokeVertex vp (vBase + 32) p1x p1y cr cg cb ca whitePixelU whitePixelV
+          pokeVertex vp (vBase + 64) p2x p2y cr cg cb ca whitePixelU whitePixelV
+          pokeVertex vp (vBase + 96) p3x p3y cr cg cb 0 whitePixelU whitePixelV
+        forM_ [0 .. n - 1] $ \i -> do
+          let !a = fromIntegral (base + i * 4) :: Word32
+              !b = a + 4
+              !iOff = (baseIdx + i * 18) * indexSize
+          pokeQuadIndices ip iOff a (a + 1) (b + 1) b
+          pokeQuadIndices ip (iOff + 24) (a + 1) (a + 2) (b + 2) (b + 1)
+          pokeQuadIndices ip (iOff + 48) (a + 2) (a + 3) (b + 3) (b + 2)
 
 -- One quad per segment. Plots and diagrams use this; pushLine stamps capsules.
 {-# INLINE pushStroke #-}
@@ -1116,28 +1122,23 @@ pushStroke da x1 y1 x2 y2 thickness col
       case strokeAxes px1 py1 px2 py2 of
         Nothing -> pure ()
         Just (dx, dy, len) -> do
+          setTexture da glyphAtlasTextureId
           let !invLen = (thickness * 0.5) / len
               !hx = (-dy) * invLen
               !hy = dx * invLen
-          setTexture da glyphAtlasTextureId
-          (vp, ip, base, baseIdx) <- ensureAndAlloc da 4 6
-          let !(r, g, b, a) = unpackColorF col
-              !vOff = base * vertexSize
-              !iOff = baseIdx * indexSize
-              !baseIdxWord = fromIntegral base :: Word32
-              poke off px py = pokeVertex vp off px py r g b a whitePixelU whitePixelV
-          poke vOff (px1 + hx) (py1 + hy)
-          poke (vOff + 32) (px2 + hx) (py2 + hy)
-          poke (vOff + 64) (px2 - hx) (py2 - hy)
-          poke (vOff + 96) (px1 - hx) (py1 - hy)
-          pokeByteOff ip iOff baseIdxWord
-          pokeByteOff ip (iOff + 4) (baseIdxWord + 1)
-          pokeByteOff ip (iOff + 8) (baseIdxWord + 2)
-          pokeByteOff ip (iOff + 12) baseIdxWord
-          pokeByteOff ip (iOff + 16) (baseIdxWord + 2)
-          pokeByteOff ip (iOff + 20) (baseIdxWord + 3)
-          writeIORef (daVertexCount da) (base + 4)
-          writeIORef (daIndexCount da) (baseIdx + 6)
+          withVerts da 4 6 $ \vp ip vOff iOff baseIdxWord -> do
+            let !(r, g, b, a) = unpackColorF col
+                poke off px py = pokeVertex vp off px py r g b a whitePixelU whitePixelV
+            poke vOff (px1 + hx) (py1 + hy)
+            poke (vOff + 32) (px2 + hx) (py2 + hy)
+            poke (vOff + 64) (px2 - hx) (py2 - hy)
+            poke (vOff + 96) (px1 - hx) (py1 - hy)
+            pokeByteOff ip iOff baseIdxWord
+            pokeByteOff ip (iOff + 4) (baseIdxWord + 1)
+            pokeByteOff ip (iOff + 8) (baseIdxWord + 2)
+            pokeByteOff ip (iOff + 12) baseIdxWord
+            pokeByteOff ip (iOff + 16) (baseIdxWord + 2)
+            pokeByteOff ip (iOff + 20) (baseIdxWord + 3)
 
 {-# INLINE emitDrawOps #-}
 emitDrawOps :: DrawArena -> FontMetrics -> Vector DrawOp -> IO ()
@@ -1164,7 +1165,6 @@ pushFilledTriangle :: DrawArena -> Float -> Float -> Float -> Float -> Float -> 
 pushFilledTriangle da x0 y0 x1 y1 x2 y2 col = do
   s <- readIORef (daSnapScale da)
   setTexture da glyphAtlasTextureId
-  (vp, ip, base, baseIdx) <- ensureAndAlloc da 3 3
   let !px0 = snapToPixel s x0
       !py0 = snapToPixel s y0
       !px1 = snapToPixel s x1
@@ -1172,17 +1172,13 @@ pushFilledTriangle da x0 y0 x1 y1 x2 y2 col = do
       !px2 = snapToPixel s x2
       !py2 = snapToPixel s y2
       !(r, g, b, a) = unpackColorF col
-      !vOff = base * vertexSize
-      !iOff = baseIdx * indexSize
-      !baseIdxWord = fromIntegral base :: Word32
-  pokeVertex vp vOff px0 py0 r g b a whitePixelU whitePixelV
-  pokeVertex vp (vOff + 32) px1 py1 r g b a whitePixelU whitePixelV
-  pokeVertex vp (vOff + 64) px2 py2 r g b a whitePixelU whitePixelV
-  pokeByteOff ip iOff baseIdxWord
-  pokeByteOff ip (iOff + 4) (baseIdxWord + 1)
-  pokeByteOff ip (iOff + 8) (baseIdxWord + 2)
-  writeIORef (daVertexCount da) (base + 3)
-  writeIORef (daIndexCount da) (baseIdx + 3)
+  withVerts da 3 3 $ \vp ip vOff iOff baseIdxWord -> do
+    pokeVertex vp vOff px0 py0 r g b a whitePixelU whitePixelV
+    pokeVertex vp (vOff + 32) px1 py1 r g b a whitePixelU whitePixelV
+    pokeVertex vp (vOff + 64) px2 py2 r g b a whitePixelU whitePixelV
+    pokeByteOff ip iOff baseIdxWord
+    pokeByteOff ip (iOff + 4) (baseIdxWord + 1)
+    pokeByteOff ip (iOff + 8) (baseIdxWord + 2)
 
 {-# INLINE snapToPixel #-}
 snapToPixel :: Float -> Float -> Float
@@ -1340,11 +1336,7 @@ pushTextStyled da fm weight fstyle deco x y txt col
                   !gw = gqW gq
                   !gh = gqH gq
               setTexture da glyphAtlasTextureId
-              (vp, ip, base, baseIdx) <- ensureAndAlloc da 4 6
               let !(r, g, b, a) = unpackColorF col
-                  !vOff = base * vertexSize
-                  !iOff = baseIdx * indexSize
-                  !baseIdxWord = fromIntegral base :: Word32
                   -- Synthetic oblique shears around the shared baseline, not
                   -- each glyph's ink box: every glyph gets the same slant so
                   -- stems stay parallel, and descenders lean left below it.
@@ -1357,13 +1349,12 @@ pushTextStyled da fm weight fstyle deco x y txt col
                   !x3 = gx + botDx
                   !y0 = gy
                   !y1 = gy + gh
-              pokeVertex vp vOff x0 y0 r g b a (gqU0 gq) (gqV0 gq)
-              pokeVertex vp (vOff + 32) x1 y0 r g b a (gqU1 gq) (gqV0 gq)
-              pokeVertex vp (vOff + 64) x2 y1 r g b a (gqU1 gq) (gqV1 gq)
-              pokeVertex vp (vOff + 96) x3 y1 r g b a (gqU0 gq) (gqV1 gq)
-              pokeQuadIndices ip iOff baseIdxWord (baseIdxWord + 1) (baseIdxWord + 2) (baseIdxWord + 3)
-              writeIORef (daVertexCount da) (base + 4)
-              writeIORef (daIndexCount da) (baseIdx + 6)
+              withVerts da 4 6 $ \vp ip vOff iOff baseIdxWord -> do
+                pokeVertex vp vOff x0 y0 r g b a (gqU0 gq) (gqV0 gq)
+                pokeVertex vp (vOff + 32) x1 y0 r g b a (gqU1 gq) (gqV0 gq)
+                pokeVertex vp (vOff + 64) x2 y1 r g b a (gqU1 gq) (gqV1 gq)
+                pokeVertex vp (vOff + 96) x3 y1 r g b a (gqU0 gq) (gqV1 gq)
+                pokeQuadIndices ip iOff baseIdxWord (baseIdxWord + 1) (baseIdxWord + 2) (baseIdxWord + 3)
               goSlantedPrev (ox + adv) oy (Just c) rest slantMult
 
 {-# INLINE drawCmdCount #-}
