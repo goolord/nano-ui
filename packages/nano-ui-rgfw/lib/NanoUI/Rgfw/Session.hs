@@ -45,8 +45,8 @@ import NanoUI.Testing
   ( UiCursorKind (..)
   , anyAnimating
   , clearDirty
+  , collectRasterSpans
   , isDirty
-  , needsRedraw
   , newPixelContext
   , runEff
   , runFrameReduceEff
@@ -210,7 +210,7 @@ runRgfwSessionReduceCustom opts getThemeAndScale updateModel initialModel view =
         let drawOne c curInp = do
               tUiStart <- getMonotonicTime
               curModel <- readIORef modelRef
-              (_, newModel, _, _, dirtyAfterUi) <-
+              (_, newModel, _, drawData, dirtyAfterUi) <-
                 runFrameReduceEff runEff updateModel c curInp curModel view
               writeIORef modelRef newModel
               tUiEnd <- getMonotonicTime
@@ -223,12 +223,8 @@ runRgfwSessionReduceCustom opts getThemeAndScale updateModel initialModel view =
               physSurf' <- readIORef physSurfRef
               let (curTheme, _) = getThemeAndScale newModel
               clearScreen physSurf' (packColor (thBackground curTheme))
-              hotId <- readIORef (ctxLastHotId c)
-              activeId <- readIORef (ctxActiveId c)
-              focusId <- readIORef (ctxFocusId c)
-              let na = ctxNodeArena c
-              count <- arenaCount na
-              renderArena physSurf' font curScale curTheme c na hotId activeId focusId
+              (baseSpans, overlaySpans) <- collectRasterSpans c curInp
+              renderArena physSurf' font curScale drawData baseSpans overlaySpans
               renderTextEditMenuOverlay physSurf' font curScale curTheme c (inputMousePos curInp)
               tRenderEnd <- getMonotonicTime
               let !renderMs = (tRenderEnd - tRenderStart) * 1000.0
@@ -240,6 +236,8 @@ runRgfwSessionReduceCustom opts getThemeAndScale updateModel initialModel view =
                   !frameMs = (tBlitEnd - tUiStart) * 1000.0
 
               let Size lw lh = inputWindowSize curInp
+                  !na = ctxNodeArena c
+              count <- arenaCount na
               notePresent
                 debugSampler
                 uiMs
