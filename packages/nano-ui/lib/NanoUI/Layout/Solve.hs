@@ -1306,18 +1306,31 @@ positionRowFromParent ::
 positionRowFromParent a na host fm monoFm measure resolveFont parent gap cx cy cw ch = do
   n <- loadChildrenScratchFromParent na parent cw ch
   withAxisSnaps na n cw (gap * fromIntegral (max 0 (n - 1))) True $ \idxSnap outSnap -> do
-    let goRow !i !curX
+    let s = fmSnapScale fm
+        step = if s > 0 then 1 / s else 0
+        originOf cur prev =
+          -- Preserve the exact flex positions: accumulate the cursor in raw
+          -- floats and snap only the placed origin, never the running sum.
+          -- Rounding the cumulative cursor re-compounds error every child
+          -- (1.667 -> 2.0 -> ...) so a shrink row overruns its fixed width.
+          -- The max/step floor keeps two siblings from quantizing to the same
+          -- pixel origin while resisting that drift.
+          if s > 0
+            then max (onGrid s cur) (prev + step)
+            else cur
+        goRow !i !cur !prev
           | i >= n = pure ()
           | otherwise = do
               let ci = indexPrimArray idxSnap i
                   fw = indexPrimArray outSnap i
+                  x = originOf cur prev
               -- Fit/fixed children keep content height. Only Grow/Percent eat `ch`.
               crossH <- childRowCrossSize na ci ch
               ay <- getAlignY na ci
               let fy = alignY ay cy ch crossH
-              positionNodeA a na host fm monoFm measure resolveFont ci curX fy fw crossH
-              goRow (i + 1) (onGrid (fmSnapScale fm) (curX + fw + gap))
-    goRow 0 cx
+              positionNodeA a na host fm monoFm measure resolveFont ci x fy fw crossH
+              goRow (i + 1) (cur + fw + gap) x
+    goRow 0 cx (if s > 0 then onGrid s cx - step else cx)
 
 positionGrid ::
   NodeArenaArrays ->
@@ -1410,11 +1423,21 @@ positionColumnFromParent a na host fm monoFm measure resolveFont parent gap chro
   n <- loadChildrenScratchSolving na host fm monoFm measure resolveFont parent cw ch
   gapSum <- columnGapSumScratch na chrome n gap
   withAxisSnaps na n ch gapSum False $ \idxSnap outSnap -> do
-    let go !i !curY
+    let s = fmSnapScale fm
+        step = if s > 0 then 1 / s else 0
+        originOf cur prev =
+          -- Mirror the row pass: accumulate the raw cursor, snap only at
+          -- placement, and floor-progress on the grid so flex sizes hold and
+          -- no two siblings quantize to the same pixel origin.
+          if s > 0
+            then max (onGrid s cur) (prev + step)
+            else cur
+        go !i !cur !prev
           | i >= n = pure ()
           | otherwise = do
               let ci = indexPrimArray idxSnap i
                   fh = indexPrimArray outSnap i
+                  y = originOf cur prev
               nt <- getNodeType na ci
               (fx, nodeW) <-
                 if chrome && nt == NodeSeparator
@@ -1427,14 +1450,14 @@ positionColumnFromParent a na host fm monoFm measure resolveFont parent gap chro
                       then pure (cx, cw)
                       else pure (alignX ax cx cw iw, cw)
               childH <- columnChildHeight na ci fh
-              positionNodeA a na host fm monoFm measure resolveFont ci fx curY nodeW childH
+              positionNodeA a na host fm monoFm measure resolveFont ci fx y nodeW childH
               (_, _, _, placedH) <- getRect na ci
               gapAfter <-
                 if i + 1 >= n
                   then pure 0
                   else pairColumnGap na chrome ci (indexPrimArray idxSnap (i + 1)) gap
-              go (i + 1) (onGrid (fmSnapScale fm) (curY + placedH + gapAfter))
-    go 0 cy
+              go (i + 1) (cur + placedH + gapAfter) y
+    go 0 cy (if s > 0 then onGrid s cy - step else cy)
 
 
 loadChildrenScratchFromParent :: NodeArena -> NodeIdx -> Float -> Float -> IO Int
