@@ -114,6 +114,7 @@ module NanoUI.Widgets
   , image_
   , box
   , drawing
+  , drawingVersioned
   , drawingCached
   , DrawOp (..)
   , DrawingBuild
@@ -343,7 +344,7 @@ import NanoUI.Widgets.Animate
   , useToggle
   )
 import NanoUI.Widgets.ColorPicker (colorPicker)
-import NanoUI.Widgets.Drawing (DrawOp (..), DrawingBuild, drawing, drawingCached)
+import NanoUI.Widgets.Drawing (DrawOp (..), DrawingBuild, drawing, drawingVersioned, drawingCached)
 import NanoUI.Widgets.Custom
 import NanoUI.Widgets.Layout
   ( column

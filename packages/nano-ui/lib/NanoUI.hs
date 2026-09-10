@@ -320,6 +320,7 @@ module NanoUI
   , image
   , box
   , drawing
+  , drawingVersioned
   , drawingCached
   , DrawOp (..)
   , DrawingBuild
@@ -708,6 +709,7 @@ import NanoUI.Widgets
   , boundedRadioFieldset
   , box
   , drawing
+  , drawingVersioned
   , drawingCached
   , DrawOp (..)
   , DrawingBuild
