@@ -50,17 +50,20 @@ import NanoUI.Context
   , setFloatingAncestor
   , setMenuPointerGesture
   , setSelectDropPress
+  , takeDamage
   , tickAnimations
   , lookupCustomMeasure
   )
 import NanoUI.Context (beginFrameModal)
 import NanoUI.Damage (updatePrevRects, writeDamage)
 import NanoUI.Draw
-  ( DrawData
+  ( DrawArena
+  , DrawData
   , Layer (..)
   , beginLayer
   , finishDraw
   , resetDrawArena
+  , setClip
   )
 import NanoUI.Frame.Cursor
   ( UiCursorKind (..)
@@ -129,7 +132,7 @@ import NanoUI.Layout.Arena (resetNodeArena)
 import NanoUI.Layout.Solve (placeModals, placePopups, placeWindows, solveLayoutWithResolver)
 import NanoUI.Monad (NanoUI, Ui, runUi)
 import NanoUI.Store (mirrorStoresChanged)
-import NanoUI.Types (Size (..))
+import NanoUI.Types (Damage (..), Size (..), rectInflate)
 
 data FrameResult a = FrameResult
   { frameValue :: !a
@@ -274,15 +277,6 @@ runFrameEff unlift ctx inp ui = do
   refreshHover ctx inp
   tickAnimations ctx (inputDeltaTime inp)
   pruneDrawOpCache ctx
-  beginLayer (ctxDrawArena ctx) LayerBackground
-  lowerShapes ctx
-  beginLayer (ctxDrawArena ctx) LayerOverlay
-  drawWindowOverlays ctx
-  drawModalOverlays ctx (inputWindowSize inp)
-  drawPopupOverlays ctx
-  drawSelectOverlays ctx inp
-  drawTextEditMenuOverlays ctx inp
-  drawData <- finishDraw (ctxDrawArena ctx)
   overlayOpen <- overlayMenuOpen ctx
   writeDamage
     ctx
@@ -301,6 +295,23 @@ runFrameEff unlift ctx inp ui = do
     oldRects
     oldTexts
     animKeys
+  -- Clip frames only repaint the damaged region: the retain texture already
+  -- holds every other pixel, and the runner scissors the present to the same
+  -- damage. Inflate by one logical pixel to cover the runner's outward pixel
+  -- snap. Full-present frames (fresh retain, forced full, continuous) paint
+  -- everything.
+  paintFull <- readIORef (ctxPaintFull ctx)
+  unless paintFull $
+    caseDamage (ctxDrawArena ctx) =<< takeDamage ctx
+  beginLayer (ctxDrawArena ctx) LayerBackground
+  lowerShapes ctx
+  beginLayer (ctxDrawArena ctx) LayerOverlay
+  drawWindowOverlays ctx
+  drawModalOverlays ctx (inputWindowSize inp)
+  drawPopupOverlays ctx
+  drawSelectOverlays ctx inp
+  drawTextEditMenuOverlays ctx inp
+  drawData <- finishDraw (ctxDrawArena ctx)
   msgs <- drainMessages ctx
   dirtyAfterUi <- isDirty ctx
   pure (result, msgs, drawData, dirtyAfterUi)
@@ -311,6 +322,10 @@ resetUiBuild :: Context -> IO ()
 resetUiBuild ctx = do
   resetNodeArena (ctxNodeArena ctx)
   resetUiBuildScopes ctx
+
+caseDamage :: DrawArena -> Damage -> IO ()
+caseDamage _ DamageFull = pure ()
+caseDamage da (DamageClip r) = setClip da (rectInflate 1 r)
 
 resetUiBuildScopes :: Context -> IO ()
 resetUiBuildScopes ctx = do

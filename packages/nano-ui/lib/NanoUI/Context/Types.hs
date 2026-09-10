@@ -333,6 +333,10 @@ data Context = Context
   , ctxResolveMeasure :: !(Float -> FontWeight -> FontStyle -> FontVariant -> Text -> IO (Float, Float))
   , ctxMeasureCache :: Maybe (IORef (HashMap MeasureCacheKey (Float, Float)))
   , ctxSpanCache :: !(IORef (IntMap SpanCacheEntry))
+  -- True when the next present must repaint the whole window (fresh retain
+  -- texture, forced full, continuous present, or window expose). When False,
+  -- a DamageClip frame culls the paint pass to the damaged region.
+  , ctxPaintFull :: !(IORef Bool)
   , ctxExternalText :: Bool
   , ctxTheme :: !(IORef Theme)
   , ctxIcons :: Icons
