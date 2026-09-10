@@ -1,0 +1,20 @@
+nano-ui perf after Phase 7c (inline withAxisSnaps)
+date: 2026-09-10 (Linux x86_64, GHC 9.14.1, -O2 -mavx2, RTS -N1 -A64m -T -I0)
+vs Phase 7b (profiles/results/11-phase7-distribute/SUMMARY.txt)
+
+changes:
+  withAxisSnaps is marked INLINE. The per-container action lambda passed to
+  it is now specialized at each of the three call sites, removing part of the
+  closure environment the profile attributed to withAxisSnaps.
+
+  Also attempted and reverted on measurement: a 22-argument top-level
+  positionRowLoop plus a pair-returning withAxisSnapsPair allocated a tuple
+  per container and measured worse (308.4 KB vs 306.2 KB/frame), so the
+  callback + INLINE form is kept.
+
+cabal test all: PASS (ditto, text-buffer, diagrams, form, rgfw, nano-ui)
+
+nano-ui-sdl-profile:
+  Full DemoUi runFrame alloc   313.0 KB -> 306.2 KB per frame
+  100x Button                  0.219 ms -> ~0.196 ms
+  runFrame wall clock within noise

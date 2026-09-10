@@ -1310,6 +1310,7 @@ columnChildHeight na ci scratchH = do
       (_, minH, _, maxH) <- getMinMax na ci
       pure (clamp minH maxH scratchH)
 
+{-# INLINE withAxisSnaps #-}
 withAxisSnaps ::
   NodeArena ->
   Int ->
