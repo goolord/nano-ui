@@ -3,20 +3,18 @@
 
 module Main (main) where
 
-import Control.Monad (replicateM_, void)
+import Control.Monad (replicateM_)
 import Effectful (runEff)
 import NanoUI
   ( Input (..)
   , Size (..)
   , V2 (..)
-  , WidgetId (..)
   , emptyInput
   )
 import NanoUI.Context
-  ( Context (..)
-  , withFontMetrics
+  ( withFontMetrics
   )
-import NanoUI.Testing (newPixelContext, runFrameEff)
+import NanoUI.Testing (collectRasterSpans, newPixelContext, runFrameEff)
 import NanoUI.Rgfw.Font.Cozette (cozetteMetrics, getCozetteFont)
 import NanoUI.Rgfw.Render (renderArena)
 import NanoUI.Rgfw.Surface (clearScreen, freeRgfwSurface, newOffscreenRgfwSurface, packColor)
@@ -46,12 +44,12 @@ main = do
           { inputWindowSize = Size (fromIntegral logW) (fromIntegral logH)
           , inputMousePos = V2 400 300
           }
-      na = ctxNodeArena ctx
 
   let runSingleFrame = do
-        void $ runFrameEff runEff ctx inp (appView m)
+        (_, _, draw, _) <- runFrameEff runEff ctx inp (appView m)
+        (baseSpans, overlaySpans) <- collectRasterSpans ctx inp
         clearScreen surf (packColor (thBackground theme))
-        renderArena surf font scale theme ctx na (WidgetId 0) (WidgetId 0) (WidgetId 0)
+        renderArena surf font scale draw baseSpans overlaySpans
 
   -- Warmup
   runSingleFrame

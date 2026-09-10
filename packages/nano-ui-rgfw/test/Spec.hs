@@ -24,34 +24,32 @@ import NanoUI.Layout.Arena
   , getNodeType
   , getParent
   , getRect
-  , newNodeArena
   , setClipRect
   , setRect
-  , setStyleIdx
   , setWidgetId
   )
 import NanoUI
   ( AlignX (..)
   , AlignY (..)
-  , Color (..)
   , Direction (..)
   , Padding (..)
   , Rect (..)
   , Size (..)
   , Sizing (..)
   , V2 (..)
+  , box
   , colorRGBA
+  , defaultLayout
+  , grow
   , label
+  , label_
   , rectContains
   , rectH
   , rectW
   , rectX
   , rectY
-  , runNanoUI
   , window
   )
-import NanoUI.Layout.Solve (solveLayout)
-import Data.Word (Word32)
 import Foreign.Storable (peekElemOff)
 import NanoUI.Input (Input (..), Modifiers (..), emptyInput)
 import NanoUI.Widgets.TextArea (buffer, initTextAreaState, processTextArea, selectionAnchor)
@@ -78,7 +76,12 @@ import NanoUI.Store
   , slotTextAreaCol
   , slotTextAreaRow
   )
-import NanoUI.Testing (HostProfile (PixelHost), newPixelContext, runFrame)
+import NanoUI.Testing
+  ( HostProfile (PixelHost)
+  , collectRasterSpans
+  , newPixelContext
+  , runFrame
+  )
 import NanoUI.Frame.TextEdit
   ( applyTextFieldMenuAction
   , normalizeTextFieldClicks
@@ -103,7 +106,8 @@ import NanoUI.Rgfw.Font.Cozette
 import NanoUI.Rgfw.Render (renderArena)
 import NanoUI.Rgfw.Session (defaultRgfwOptions, optScale)
 import NanoUI.Rgfw.Surface
-  ( freeRgfwSurface
+  ( clearScreen
+  , freeRgfwSurface
   , newOffscreenRgfwSurface
   , packColor
   , sBuffer
@@ -501,45 +505,45 @@ testWindowResizing = do
   assert "Drag S edge preserves width at 300" (nwS == 300.0)
   assert "Drag S edge preserves origin X at 100" (nxS == 100.0)
 
-testZIndexRenderArena :: IO ()
-testZIndexRenderArena = do
-  surf <- newOffscreenRgfwSurface 100 100
-  let font = getCozetteFont
-      theme = tomorrowMidnightMinDarkTheme
+testZOrderRenderArena :: IO ()
+testZOrderRenderArena = do
   ctx <- newPixelContext
+  let inp = emptyInput {inputWindowSize = Size 100 100}
+      boxCol = colorRGBA 0x11 0x22 0x33 255
+      ui = do
+        box (grow defaultLayout) boxCol
+        window True "Z" (label_ "hi")
+  (_, _, draw, _) <- runFrame ctx inp ui
+  (baseSpans, overlaySpans) <- collectRasterSpans ctx inp
 
-  na <- newNodeArena
-  root <- addNode na NodeContainer (-1) Column (Fixed 100) (Fixed 100) (Padding 0 0 0 0) 0 0 0 100 100 0 AlignStart AlignTop
+  surf <- newOffscreenRgfwSurface 100 100
+  clearScreen surf 0
+  renderArena surf (getCozetteFont) 1.0 draw baseSpans overlaySpans
 
-  -- Insert in reverse layer order to verify topological Z-layering works regardless of insertion order:
-  pop <- addNode na NodePopup root Column (Fixed 40) (Fixed 40) (Padding 0 0 0 0) 0 0 0 100 100 0 AlignStart AlignTop
-  setRect na pop 40 40 40 40
-  b3 <- addNode na NodeBox pop Column (Fixed 40) (Fixed 40) (Padding 0 0 0 0) 0 0 0 100 100 0 AlignStart AlignTop
-  setStyleIdx na b3 (fromIntegral (0x778899FF :: Word32))
-  setRect na b3 40 40 40 40
-
-  w <- addNode na NodeWindow root Column (Fixed 60) (Fixed 60) (Padding 0 0 0 0) 0 0 0 100 100 0 AlignStart AlignTop
-  setRect na w 20 20 60 60
-  b2 <- addNode na NodeBox w Column (Fixed 60) (Fixed 60) (Padding 0 0 0 0) 0 0 0 100 100 0 AlignStart AlignTop
-  setStyleIdx na b2 (fromIntegral (0x445566FF :: Word32))
-  setRect na b2 20 20 60 60
-
-  b1 <- addNode na NodeBox root Column (Fixed 80) (Fixed 80) (Padding 0 0 0 0) 0 0 0 100 100 0 AlignStart AlignTop
-  setStyleIdx na b1 (fromIntegral (0x112233FF :: Word32))
-  setRect na b1 0 0 80 80
-
-  renderArena surf font 1.0 theme ctx na (WidgetId 0) (WidgetId 0) (WidgetId 0)
-
-  let p10 = 10 * 100 + 10
-      p30 = 30 * 100 + 30
-      p50 = 50 * 100 + 50
-  c10 <- peekElemOff (sBuffer surf) p10
-  c30 <- peekElemOff (sBuffer surf) p30
-  c50 <- peekElemOff (sBuffer surf) p50
-
-  assert "Pixel (10, 10) rendered Normal node color" (c10 == packColor (Color 0x112233FF))
-  assert "Pixel (30, 30) rendered Window overlay node on top of Normal" (c30 == packColor (Color 0x445566FF))
-  assert "Pixel (50, 50) rendered Popup overlay node on top of Window and Normal" (c50 == packColor (Color 0x778899FF))
+  -- placeWindows pins floating windows to the top-right corner; probe its
+  -- title bar center and a bottom-left box pixel far from the window.
+  let na = ctxNodeArena ctx
+  nNodes <- arenaCount na
+  let findWindow !i
+        | i >= nNodes = pure Nothing
+        | otherwise = do
+            nt <- getNodeType na i
+            if nt == NodeWindow
+              then do
+                (x, y, w, h) <- getRect na i
+                pure (Just (x, y, w, h))
+              else findWindow (i + 1)
+  mWin <- findWindow 0
+  assert "Overlay text spans collected for floating window chrome" (not (null overlaySpans))
+  case mWin of
+    Nothing -> assert "Floating window node present in arena" False
+    Just (wx, wy, ww, _wh) -> do
+      let !winProbeX = round (wx + ww / 2)
+          !winProbeY = round wy + 4
+      cWin <- peekElemOff (sBuffer surf) (winProbeY * 100 + winProbeX)
+      assert "Window paints above in-flow content" (cWin /= 0 && cWin /= packColor boxCol)
+      cBox <- peekElemOff (sBuffer surf) (95 * 100 + 5)
+      assert "In-flow box painted beneath the window layer" (cBox == packColor boxCol)
 
   freeRgfwSurface surf
 
@@ -548,13 +552,12 @@ testWindowTitleAndCloseButton = do
   ctx <- newPixelContext
   let inp = emptyInput { inputWindowSize = Size 1000 800 }
       winUi = window True "Window Title" (label "Window Content")
-  (_, _, _, _) <- runFrame ctx inp winUi
-  let na = ctxNodeArena ctx
+  (_, _, draw, _) <- runFrame ctx inp winUi
+  (baseSpans, overlaySpans) <- collectRasterSpans ctx inp
 
   surf <- newOffscreenRgfwSurface 400 300
-  let font = getCozetteFont
-      theme = tomorrowMidnightMinDarkTheme
-  renderArena surf font 1.0 theme ctx na (WidgetId 0) (WidgetId 0) (WidgetId 0)
+  clearScreen surf 0
+  renderArena surf (getCozetteFont) 1.0 draw baseSpans overlaySpans
   freeRgfwSurface surf
   assert "Window title and close button rendered cleanly" True
 
@@ -563,9 +566,10 @@ testDebugWindow = do
   ctx <- newPixelContext
   let inp = emptyInput { inputWindowSize = Size 800 600 }
       snap = emptyRgfwDebug { dbgCore = (dbgCore emptyRgfwDebug) { dbgRtsOn = True } }
-  _ <- runNanoUI ctx inp (window True "Debug Diagnostics" (debugWindowBody snap))
+  (_, _, draw, _) <- runFrame ctx inp (window True "Debug Diagnostics" (debugWindowBody snap))
   let na = ctxNodeArena ctx
-  solveLayout na (ctxHostProfile ctx) (ctxFontMetrics ctx) (ctxMonoFontMetrics ctx) (ctxMeasureText ctx) 800 600
+  -- runFrame already solved layout and placed the floating window; do not
+  -- re-solve here, that would reset node rects away from the painted frame.
   n <- arenaCount na
 
   let findTitleChild !ci
@@ -667,9 +671,9 @@ testDebugWindow = do
       Nothing -> pure ()
 
   surf <- newOffscreenRgfwSurface 800 600
-  let font = getCozetteFont
-      theme = tomorrowMidnightMinDarkTheme
-  renderArena surf font 1.0 theme ctx na (WidgetId 0) (WidgetId 0) (WidgetId 0)
+  clearScreen surf 0
+  (baseSpans, overlaySpans) <- collectRasterSpans ctx inp
+  renderArena surf (getCozetteFont) 1.0 draw baseSpans overlaySpans
 
   closeCenterPixel <- peekElemOff (sBuffer surf) (round (by + 12.0) * 800 + round (bx + 12.0))
   assert "Close button area is rendered cleanly" (closeCenterPixel /= 0)
@@ -694,7 +698,7 @@ main = do
   testFractionalDpiCalculations
   testBoxAreaAveraging
   testWindowResizing
-  testZIndexRenderArena
+  testZOrderRenderArena
   testWindowTitleAndCloseButton
   testDebugWindow
   putStrLn "=== All tests passed successfully! ==="
