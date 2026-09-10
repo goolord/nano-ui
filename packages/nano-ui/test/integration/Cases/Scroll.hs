@@ -36,6 +36,7 @@ module Cases.Scroll
   , runTable2DScrollSyncTest
   , runScrollLockstepProbeTest
   , runPageScrollBackdropCoverageTest
+  , runTableHBarReachTest
   ) where
 
 import Control.Monad (forM, forM_, replicateM, replicateM_, unless, void)
@@ -1274,12 +1275,17 @@ run2DPadOverflowScrollsTest _ failed = do
     Just (contentH, innerH) -> do
       assertGt failed contentH (innerH + 100)
       -- Scroll far past the end: the clamp must land on the trailing-pad
-      -- extended range (content + padB - inner), not the flush content -
-      -- inner, so the bottom padding is reachable.
-      let wheelDown = inp0 {inputScroll = V2 0 50}
+      -- extended range (content + padB - view), not the flush content - view,
+      -- so the bottom padding is reachable. The horizontal bar is active
+      -- (the 500px child overflows), so it takes its lane out of the vertical
+      -- viewport: view = innerH - laneH.
+      let laneH =
+            scrollBarGutter (ctxHostProfile ctx) (ctxFontMetrics ctx)
+              + scrollBarListExtra
+          wheelDown = inp0 {inputScroll = V2 0 50}
       replicateM_ 40 (runFrame ctx wheelDown ui)
       V2 _ offEnd <- getScrollOffset2D ctx wid
-      assert failed (abs (offEnd - (contentH + padTestPx - innerH)) < 1.5)
+      assert failed (abs (offEnd - (contentH + padTestPx - (innerH - laneH))) < 1.5)
 
 -- Hovering the right edge of a table header button must raise the
 -- horizontal-resize cursor, and pressing + dragging from there must actually
@@ -1623,3 +1629,56 @@ headerScrollerStyle ctx = do
   pure (listToMaybe finds)
 
 
+
+-- | Horizontal reach: at the end of the horizontal scroll the last column must
+-- clear the vertical scrollbar lane, not stop with its right edge under the
+-- lane. The body scroller's own vertical bar shrinks the horizontal viewport,
+-- so the reachable range must subtract that lane (regression: the range used
+-- the full padding box, leaving the last column partly hidden).
+runTableHBarReachTest :: Context -> IORef Int -> IO ()
+runTableHBarReachTest _ failed = do
+  ctx <- newPixelContext
+  let inp0 = (withInput 700 320) {inputMousePos = V2 300 160}
+      cfg = defaultTableCfg {tableColSizes = [ColFixed 500, ColFixed 500]}
+      ui = do
+        (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
+        void
+          ( tableCfg
+              cfg
+              (tight . fillW . fixedH 200 $ defaultLayout {layoutGap = 0})
+              "people"
+              tableScrollCols
+              tableScrollRows
+              tableSort
+          )
+  _ <- runFrame ctx inp0 ui
+  _ <- runFrame ctx inp0 ui
+  mBody <- bodyScrollerRect ctx
+  case mBody of
+    Nothing -> assert failed False
+    Just (Rect bx by bw bh) -> do
+      let na = ctxNodeArena ctx
+      n <- arenaCount na
+      contentWs <-
+        fmap concat $
+          forM [0 .. n - 1] $ \i -> do
+            hit <- isBodyScroller ctx i
+            if hit then (: []) <$> getScrollContentW na i else pure []
+      case contentWs of
+        [] -> assert failed False
+        (contentW : _) -> do
+          assertGt failed contentW bw
+          let wheel = inp0 {inputMousePos = V2 (bx + bw / 2) (by + bh / 2), inputScroll = V2 50 0}
+          replicateM_ 20 (runFrame ctx wheel ui)
+          V2 offX _ <- bodyOffset ctx
+          -- Reached past the naive content - viewport range: the lane's width
+          -- is now part of the reachable range.
+          assertGt failed offX (contentW - bw)
+          -- The rightmost header cell sits fully inside the body, left of the
+          -- vertical lane.
+          hdrs <- headerButtonRects ctx
+          case reverse hdrs of
+            (Rect hx _ hw _ : _) -> do
+              assert failed (hx + hw <= bx + bw + 0.5)
+              assertGt failed (hx + hw) (bx + bw - 24)
+            [] -> assert failed False

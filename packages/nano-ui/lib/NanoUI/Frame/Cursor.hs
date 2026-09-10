@@ -69,8 +69,8 @@ import NanoUI.Frame.Scroll.Geometry
   ( decodeScrollConfig
   , isScrollStyle2D
   , scrollChromeSuppressed
-  , scrollShowsChrome
   )
+import NanoUI.Frame.Scroll.Geometry qualified as ScrollGeom (scrollBarLayouts2D)
 import NanoUI.Frame.Select (selectDropRect)
 import NanoUI.Frame.TextEdit
   ( TextAreaGeom (..)
@@ -231,13 +231,26 @@ scrollThumbHit ctx mouse = do
                     contentH <- getNodeValue (ctxNodeArena ctx) idx
                     contentW <- getScrollContentW (ctxNodeArena ctx) idx
                     V2 offX offY <- getScrollOffset2D ctx wid
-                    let hitY =
-                          scrollShowsChrome cfg True DirColumn
-                            && thumbHit DirColumn contentH offY
-                        hitX =
-                          scrollShowsChrome cfg True DirRow
-                            && thumbHit DirRow contentW offX
-                    pure (hitY || hitX)
+                    let (mV, mH) =
+                          ScrollGeom.scrollBarLayouts2D
+                            (ctxHostProfile ctx)
+                            fm
+                            slot
+                            cfg
+                            x
+                            y
+                            w
+                            h
+                            pad
+                            contentW
+                            contentH
+                            offX
+                            offY
+                        hitLayout mLayout =
+                          case mLayout of
+                            Just layout -> rectContains (sbThumb layout) mouse
+                            Nothing -> False
+                    pure (hitLayout mV || hitLayout mH)
                   else
                     if scrollChromeSuppressed cfg False dir
                       then pure False

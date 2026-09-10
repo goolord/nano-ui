@@ -4,10 +4,11 @@
 -- normalised-filename heuristic.
 module NanoUI.Sdl.Font.Search
   ( searchFonts
+  , listFontFamilies
   ) where
 
 import Control.Exception (IOException, catch)
-import Data.Char (isSpace, toLower)
+import Data.Char (isDigit, isLower, isSpace, isUpper, toLower)
 import Data.List (isInfixOf, maximumBy, sort, stripPrefix)
 import Data.Maybe (fromMaybe)
 import Data.Ord (comparing)
@@ -28,6 +29,42 @@ searchFonts names = go names
       searchFamily family >>= \case
         Just path -> pure (Just path)
         Nothing -> go rest
+
+-- | Human-readable names for every installed font family, deduped and sorted.
+-- Each name is a usable 'searchFonts' token: the same normalization is applied
+-- to both the requested family and the file stem, so a listed name always
+-- resolves back to (at least) the file it came from. Non-text faces (icons,
+-- colour emoji) are included; callers that need sans families can filter the
+-- result themselves.
+listFontFamilies :: IO [String]
+listFontFamilies = do
+  files <- allFontFiles
+  pure (dedupe (sort (map (prettyFamily . takeBaseName) files)))
+
+-- | Filename stem -> display family. Everything from the first @-@ is treated
+-- as style (\"Regular\", \"Bold Italic\", ...); camel case is split so
+-- @NotoSansArabic@ reads as @Noto Sans Arabic@. Kept case-insensitively
+-- compatible with 'normalize'.
+prettyFamily :: String -> String
+prettyFamily = separateCamel . stripStyle
+  where
+    stripStyle s = case break (== '-') s of
+      (base, _) -> base
+    separateCamel = go
+      where
+        go [] = []
+        go (c : cs) = c : goTail c cs
+        goTail _ [] = []
+        goTail prev (c : cs)
+          | isUpper c && (isLower prev || isDigit prev) = ' ' : c : goTail c cs
+          | otherwise = c : goTail c cs
+
+-- | Drop adjacent duplicates from a sorted list.
+dedupe :: Eq a => [a] -> [a]
+dedupe (x : y : rest)
+  | x == y = dedupe (y : rest)
+  | otherwise = x : dedupe (y : rest)
+dedupe xs = xs
 
 searchFamily :: String -> IO (Maybe FilePath)
 searchFamily family =

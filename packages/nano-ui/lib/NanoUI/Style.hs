@@ -131,9 +131,11 @@ data Padding = Padding
 panelPaintPad :: Float
 panelPaintPad = 8
 
--- Floating window chrome.
+-- Floating window chrome. The body sits one side-pad below the chrome and one
+-- side-pad above the window's bottom edge (the window's own column gap fills
+-- the top; see 'NanoUI.Widgets.Overlay').
 windowPad :: Padding
-windowPad = Padding 10 10 0 2
+windowPad = Padding 10 10 0 10
 
 -- Screen inset for floating window/modal max size and default placement.
 windowMargin :: Float
@@ -544,11 +546,13 @@ separatorTrackColor :: Style -> Theme -> Color
 separatorTrackColor base theme =
   lerpColor (styleBg base) (themeSeparator theme) 0.28
 
--- Scroll track/thumb tints. Cell hosts use opaque theme mixes so light palettes
--- stay visible on floating windows; SDL keeps the old translucent overlay.
+-- Scroll track/thumb tints. The track is an opaque mix of the surface it sits
+-- on (the scroller well / floating window body) toward the separator colour, so
+-- the lane reads against that surface on every theme. The thumb stays a
+-- translucent foreground mix so the track shows through it.
 scrollBarTrackColor :: Style -> Theme -> Bool -> Color
-scrollBarTrackColor base theme terminal =
-  if terminal then separatorTrackColor base theme else fadeAlpha (separatorTrackColor base theme) 20
+scrollBarTrackColor base theme _terminal =
+  separatorTrackColor base theme
 
 scrollBarThumbColor :: Style -> Theme -> Bool -> Color
 scrollBarThumbColor base theme terminal =

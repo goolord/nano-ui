@@ -7,6 +7,7 @@ module NanoUI.Backend.Sdl
   , SdlEnv (..)
   , SdlOptions (..)
   , askSdlDebug
+  , setSdlUiFont
   , isDebugActive
   , newSdlDebugSampler
   , readSdlDebug
@@ -28,6 +29,7 @@ module NanoUI.Backend.Sdl
   , pollFileDialogUi
   , newSdlContext
   , NanoUIFont (..)
+  , listFontFamilies
   , runSdlApp
   , runSdlAppReduce
   , sdlDrawFrame
@@ -59,7 +61,7 @@ import NanoUI
   , NanoUI
   , Ui
   )
-import NanoUI.Sdl.Runner (askSdlDebug, drawEff, drawReduceEff, newSdlContext, runSdlSession, sdlDrawFrame)
+import NanoUI.Sdl.Runner (askSdlDebug, drawEff, drawReduceEff, newSdlContext, runSdlSession, sdlDrawFrame, setSdlUiFont)
 import NanoUI.Sdl.Debug
   ( SdlDebugSnapshot (..)
   , isDebugActive
@@ -96,6 +98,7 @@ import NanoUI.Sdl.Dialog
   , saveFileDialog
   )
 import NanoUI.Sdl.NanoUIFont (NanoUIFont (..))
+import NanoUI.Sdl.Font.Search (listFontFamilies)
 import NanoUI.Testing (Context, registerImage, runEff, withTheme)
 
 runSdlApp :: SdlOptions -> NanoUI () -> IO ()

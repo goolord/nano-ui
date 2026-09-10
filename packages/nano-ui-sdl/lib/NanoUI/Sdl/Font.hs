@@ -26,6 +26,7 @@ module NanoUI.Sdl.Font
   , newSdlFontCache
   , destroySdlFontCache
   , resetSdlFontCache
+  , setSdlFontCacheSource
   , withTtfFontCache
   , getOrLoadCachedFont
   , ttfSetFontStyle
@@ -826,7 +827,7 @@ makeCachedFontEntry font fm scale = do
     }
 
 data SdlFontCache = SdlFontCache
-  { sfcPrimarySource  :: !FontSource
+  { sfcPrimarySourceRef :: !(IORef FontSource)
   , sfcFallbackSource :: !FontSource
   , sfcMonoSource     :: !FontSource
   , sfcMonoFallback   :: !FontSource
@@ -852,13 +853,14 @@ newSdlFontCache ::
   IO SdlFontCache
 newSdlFontCache primary fallback mono monoFb ga basePt scale baseFont baseFm monoFont monoFm = do
   scaleRef <- newIORef scale
+  primaryRef <- newIORef primary
   sansEntry <- makeCachedFontEntry baseFont baseFm scale
   monoEntry <- makeCachedFontEntry monoFont monoFm scale
   baseEntriesRef <- newIORef (sansEntry, monoEntry)
   cacheRef <- newIORef (DynamicCache Map.empty [])
   pure
     SdlFontCache
-      { sfcPrimarySource  = primary
+      { sfcPrimarySourceRef = primaryRef
       , sfcFallbackSource = fallback
       , sfcMonoSource     = mono
       , sfcMonoFallback   = monoFb
@@ -868,6 +870,12 @@ newSdlFontCache primary fallback mono monoFb ga basePt scale baseFont baseFm mon
       , sfcBaseEntries    = baseEntriesRef
       , sfcDynamicCache   = cacheRef
       }
+
+-- | Point the cache's primary (sans) family at a new source. Dynamic-size
+-- entries created afterwards resolve against it; call 'resetSdlFontCache'
+-- with a freshly opened base font to rebuild the base entry too.
+setSdlFontCacheSource :: SdlFontCache -> FontSource -> IO ()
+setSdlFontCacheSource cache src = writeIORef (sfcPrimarySourceRef cache) src
 
 destroySdlFontCache :: SdlFontCache -> IO ()
 destroySdlFontCache cache = do
@@ -954,10 +962,11 @@ getOrLoadCachedFont cache sz weight style var = do
         Nothing -> do
           dcClean <- evictOldestIfNeeded (sfcGlyphAtlas cache) dc
           scale <- readIORef (sfcScaleRef cache)
+          primarySans <- readIORef (sfcPrimarySourceRef cache)
           let (primary, fallback) =
                 if var == FontMono
                   then (sfcMonoSource cache, sfcMonoFallback cache)
-                  else (sfcPrimarySource cache, sfcFallbackSource cache)
+                  else (primarySans, sfcFallbackSource cache)
               rasterPt = targetPt * (if scale > 0 then scale else 1.0)
           font <- openFontSourceWithFallback primary fallback rasterPt
           let boldBit = if isBold then 0x01 else 0
