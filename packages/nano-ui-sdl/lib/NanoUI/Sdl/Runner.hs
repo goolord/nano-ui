@@ -22,10 +22,6 @@ import NanoUI
   , NanoUI
   , Size (..)
   , V2 (..)
-  , rectH
-  , rectW
-  , rectX
-  , rectY
   , themeWindow
   )
 import Effectful (Eff, IOE, type (:>))
@@ -55,13 +51,11 @@ import NanoUI.Sdl.Debug
   )
 import NanoUI.Sdl.Cursor (syncPointerCursor)
 import NanoUI.Sdl.Display
-  ( backbufferPersists
-  , queryMouseWindowPos
+  ( queryMouseWindowPos
   , queryRendererName
   , queryWindowLogicalSize
   , retainBegin
   , retainBlit
-  , retainBlitRect
   , retainCreate
   , retainDestroy
   , windowToLogicalCoords
@@ -70,7 +64,6 @@ import NanoUI.Sdl.Render (withRenderBatch)
 import NanoUI.Sdl.Font (fontSourceLabel, glyphAtlasTexture)
 import NanoUI.Sdl.Window (SdlEnv (..))
 import Foreign.Ptr (Ptr, nullPtr)
-import SDL3.Sys.Bindgen.Render (SDL_Renderer)
 import qualified NanoUI.Sdl.Image as SdlImage
 import NanoUI.Sdl.Render (renderDrawDataPass, snapDamage)
 import SDL3.Sys.Render (renderPresentSafe)
@@ -160,7 +153,9 @@ finishDraw ctx env inp forceFull t0 t1 drawData dirtyAfterUi = do
         -- the display before the draw commands completed.
         renderDrawDataPass batch (sdlRenderer env) scale (if retainNew then Just (themeWindow theme) else Nothing) drawData allLayersArr (sdlImages env) glyphTex damage
       t2 <- getMonotonicTime
-      okBlit <- blitRetain (sdlRenderer env) scale tex damage
+      -- Damage limits updates to the retained texture, not the final copy:
+      -- SDL leaves the window backbuffer undefined after each present.
+      okBlit <- retainBlit (sdlRenderer env) tex
       unless okBlit $ fail "SDL_RenderTexture(retain) failed"
       void $ renderPresentSafe (sdlRenderer env)
       t3 <- getMonotonicTime
@@ -186,25 +181,6 @@ ensureRetain env w h scale = do
       when (tex' == nullPtr) $ fail "SDL_CreateTexture(retain) failed"
       writeIORef (sdlRetain env) (tex', w, h, scale)
       pure (tex', True)
-
-blitRetain :: Ptr SDL_Renderer -> Float -> Ptr () -> Damage -> IO Bool
-blitRetain ren scale tex damage = do
-  persists <- backbufferPersists ren
-  if not persists
-    then retainBlit ren tex
-    else case damage of
-      DamageFull -> retainBlit ren tex
-      -- Blit only the damaged region: the retain texture and the
-      -- backbuffer are both device-pixel sized, so the snapped clip
-      -- (outward, in device pixels) maps 1:1 from src to dst. Safe only
-      -- because the software backbuffer persists across presents.
-      DamageClip r ->
-        let s = if scale > 0 then scale else 1
-            x0 = fromIntegral (floor (rectX r * s) :: Int) :: Float
-            y0 = fromIntegral (floor (rectY r * s) :: Int) :: Float
-            x1 = fromIntegral (ceiling ((rectX r + rectW r) * s) :: Int) :: Float
-            y1 = fromIntegral (ceiling ((rectY r + rectH r) * s) :: Int) :: Float
-         in retainBlitRect ren tex x0 y0 (x1 - x0) (y1 - y0) x0 y0
 
 askSdlEnv :: Ui :> es => Eff es (Maybe SdlEnv)
 askSdlEnv = askHost
