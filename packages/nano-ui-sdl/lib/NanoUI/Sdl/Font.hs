@@ -12,6 +12,9 @@ module NanoUI.Sdl.Font
   , newGlyphAtlas
   , destroyGlyphAtlas
   , resetGlyphAtlas
+  , registerGlyphAtlasRewarm
+  , prepareGlyphAtlasForFrame
+  , takeGlyphAtlasResetFlag
   , warmGlyphAtlas
   , withTtfMeasure
   , withTtfMeasureScaled
@@ -127,6 +130,18 @@ data GlyphAtlas = GlyphAtlas
   { gaAtlas :: !(Ptr ())
   , gaEntries :: !(IORef (Map.Map GlyphKey (Maybe GlyphSlot)))
   , gaEpoch :: !(IORef Word64)
+  , -- | An insertion failed (atlas out of space) during the last frame; the
+    -- atlas must be reset at the next frame start, before any quad is
+    -- recorded, so the reset can never wipe the texture underneath
+    -- already-recorded text.
+    gaNeedsReset :: !(IORef Bool)
+  , -- | The atlas was reset (or ran out of space) since the flag was last
+    -- cleared at frame start. Observed by the runner after the UI pass: a
+    -- set flag means the frame being built holds stale-UV or unplaceable
+    -- text quads and must not be presented.
+    gaResetFlag :: !(IORef Bool)
+  , -- | Actions to run after every reset (re-warming the base fonts).
+    gaRewarmHooks :: !(IORef [IO ()])
   }
 
 {-# NOINLINE fontIdCounter #-}
@@ -135,6 +150,17 @@ fontIdCounter = unsafePerformIO (newIORef 1)
 
 newFontId :: IO Word64
 newFontId = atomicModifyIORef' fontIdCounter (\n -> let !n' = n + 1 in (n', n))
+
+-- | Maximum number of shaped-run cache entries per 'FontMetrics'. Dynamic,
+-- ever-changing text (FPS counters, timers, percentages, mouse positions)
+-- generates unique strings over time; without a bound the run cache (and
+-- the atlas rectangles its renders occupy) would grow without limit. The
+-- cap sits well above a realistic frame's string working set so steady
+-- static text is never evicted (re-rendering an evicted run leaks its old
+-- atlas rectangle); atlas exhaustion itself is recovered by the deferred
+-- reset in 'prepareGlyphAtlasForFrame', which also clears the whole cache.
+runCacheCap :: Int
+runCacheCap = 1024
 
 {-# NOINLINE measureScratch #-}
 measureScratch :: ForeignPtr CFloat
@@ -173,16 +199,65 @@ newGlyphAtlas ren = do
   when (atlas == nullPtr) $ fail "nano_ui_text_atlas_create failed (glyph)"
   entries <- newIORef Map.empty
   epoch <- newIORef 0
-  pure GlyphAtlas {gaAtlas = atlas, gaEntries = entries, gaEpoch = epoch}
+  needsReset <- newIORef False
+  resetFlag <- newIORef False
+  rewarms <- newIORef []
+  pure
+    GlyphAtlas
+      { gaAtlas = atlas
+      , gaEntries = entries
+      , gaEpoch = epoch
+      , gaNeedsReset = needsReset
+      , gaResetFlag = resetFlag
+      , gaRewarmHooks = rewarms
+      }
 
 destroyGlyphAtlas :: GlyphAtlas -> IO ()
 destroyGlyphAtlas ga = textAtlasDestroy (gaAtlas ga)
+
+-- | Register an action to run after every atlas reset. The SDL backend
+-- registers a hook that re-warms the base fonts' ASCII glyphs
+-- ('warmGlyphAtlas'); the hook reads the current base fonts from their
+-- 'IORef's lazily, so a reset always warms the live fonts and never one
+-- that has since been closed.
+registerGlyphAtlasRewarm :: GlyphAtlas -> IO () -> IO ()
+registerGlyphAtlasRewarm ga hook = modifyIORef' (gaRewarmHooks ga) (hook :)
 
 resetGlyphAtlas :: GlyphAtlas -> IO ()
 resetGlyphAtlas ga = do
   modifyIORef' (gaEpoch ga) (+1)
   writeIORef (gaEntries ga) Map.empty
+  writeIORef (gaNeedsReset ga) False
   textAtlasReset (gaAtlas ga)
+  hooks <- readIORef (gaRewarmHooks ga)
+  mapM_ id hooks
+  writeIORef (gaResetFlag ga) True
+
+-- | An atlas insertion failed: the atlas is out of space. The reset is
+-- deferred to the next frame start ('prepareGlyphAtlasForFrame') so quads
+-- already recorded this frame keep sampling valid pixels, and the frame
+-- itself is marked invalid so the runner drops it instead of presenting
+-- text that could not be placed.
+markAtlasExhausted :: GlyphAtlas -> IO ()
+markAtlasExhausted ga = do
+  writeIORef (gaNeedsReset ga) True
+  writeIORef (gaResetFlag ga) True
+
+-- | Frame-start atlas maintenance: reset the atlas if an insertion failed
+-- during the previous frame, then clear the mid-frame reset flag. Must run
+-- before the frame's UI pass records any quads.
+prepareGlyphAtlasForFrame :: GlyphAtlas -> IO ()
+prepareGlyphAtlasForFrame ga = do
+  needs <- readIORef (gaNeedsReset ga)
+  when needs $ resetGlyphAtlas ga
+  writeIORef (gaResetFlag ga) False
+
+-- | Test-and-clear the mid-frame reset flag. 'True' means the atlas was
+-- reset (or ran out of space) while the frame was being built, so quads
+-- recorded before that point may hold stale UVs; the caller must not
+-- present that frame.
+takeGlyphAtlasResetFlag :: GlyphAtlas -> IO Bool
+takeGlyphAtlasResetFlag ga = atomicModifyIORef' (gaResetFlag ga) (\v -> (False, v))
 
 -- | Pre-rasterise printable ASCII into the glyph atlas to avoid cold misses
 -- on the first rendered frame.
@@ -237,17 +312,16 @@ insertGlyph ga sf key c = do
           modifyIORef' (gaEntries ga) (Map.insert key Nothing)
           pure Nothing
         Just surf -> do
-          -- Try to insert; if atlas is full, evict all entries and retry.
-          mPos <- tryInsert (gaAtlas ga) surf >>= \case
-            Just p  -> pure (Just p)
-            Nothing -> do
-              modifyIORef' (gaEpoch ga) (+1)
-              writeIORef (gaEntries ga) Map.empty
-              textAtlasReset (gaAtlas ga)
-              tryInsert (gaAtlas ga) surf
+          -- If the atlas is full, defer the reset to the next frame start
+          -- (see 'markAtlasExhausted'): wiping the texture here would leave
+          -- quads already recorded this frame sampling blank pixels, making
+          -- all earlier text vanish for one frame. The glyph is unavailable
+          -- for the rest of the current frame, which is dropped.
+          mPos <- tryInsert (gaAtlas ga) surf
           freeSurface surf
           case mPos of
             Nothing -> do
+              markAtlasExhausted ga
               modifyIORef' (gaEntries ga) (Map.insert key Nothing)
               pure Nothing
             Just (px, py, tw, th) -> do
@@ -313,12 +387,17 @@ buildGlyphFontMetrics ga sf scale = do
   kernCacheRef <- newIORef Map.empty
 
   -- Shaped text runs: whole strings rendered through SDL3_ttf so GPOS
-  -- kerning, ligatures, and contextual positioning are preserved.  The
-  -- run quad is cached per atlas epoch (Nothing for runs too large for
-  -- the atlas, which draw per-glyph instead); measurement fields are
-  -- strict so layout queries do not force a render, while uv/rqY stay
-  -- lazy until 'pushText' draws the run.
+  -- kerning, ligatures, and contextual positioning are preserved.  Run
+  -- quads are cached per font keyed by text; the cache is validated
+  -- against the atlas epoch so a reset drops every stale entry on the
+  -- next lookup (Nothing entries are for runs too large for the atlas,
+  -- which draw per-glyph instead).  The cache is bounded by 'runCacheCap'.
+  -- Measurement fields are strict so layout queries do not force a render,
+  -- while uv/rqY stay lazy until 'pushText' draws the run.
   runCacheRef <- newIORef Map.empty
+  runLruRef <- newIORef [] -- newest first; the last entry is evicted
+  initRunEpoch <- readIORef (gaEpoch ga)
+  runEpochRef <- newIORef initRunEpoch
 
   let
     lookupAsciiQuad !cp = do
@@ -411,22 +490,57 @@ buildGlyphFontMetrics ga sf scale = do
     {-# NOINLINE runLookup #-}
     runLookup !txt = unsafePerformIO $ do
       ep <- readIORef (gaEpoch ga)
-      let !key = (txt, sfId sf, ep)
+      runEp <- readIORef runEpochRef
+      when (runEp /= ep) $ do
+        -- The atlas was reset: every cached run quad is stale.
+        writeIORef runEpochRef ep
+        writeIORef runCacheRef Map.empty
+        writeIORef runLruRef []
+      let !key = (txt, sfId sf)
       m <- readIORef runCacheRef
       case Map.lookup key m of
         Just rq -> pure rq
         Nothing -> makeRunQuad key txt
 
+    -- Bounded insert into the run cache: at 'runCacheCap' entries the
+    -- oldest entry (last in the LRU list) is dropped, so ever-changing
+    -- text cannot grow the cache without limit.
+    cacheRun !key !rq = do
+      m <- readIORef runCacheRef
+      lru <- readIORef runLruRef
+      let (mEvict, lruEvict)
+            | Map.size m >= runCacheCap
+            , (victim : rest) <- reverse lru =
+                (Map.delete victim m, reverse rest)
+            | otherwise = (m, lru)
+      writeIORef runCacheRef (Map.insert key rq mEvict)
+      writeIORef runLruRef (key : lruEvict)
+
     -- Mirrors NANO_UI_TEXT_ATLAS_PAD in nano_ui_text_atlas.c.
     runAtlasPad :: Float
     runAtlasPad = 1
 
+    -- Mirrors NANO_UI_TEXT_ATLAS_SIZE in nano_ui_text_atlas.c.
+    runAtlasTexSize :: Float
+    runAtlasTexSize = 2048
+
+    -- A UV rect that always samples transparent pixels: column 4 sits
+    -- right of the 4px white patch (columns 0..3) and left of the first
+    -- slot (allocations start at x = 5), and the final row is never
+    -- written because every slot keeps 1px of padding. A run that could
+    -- not be placed draws nothing instead of garbage.
+    deadRunUv :: (Float, Float, Float, Float)
+    deadRunUv =
+      let !u = 4.5 / runAtlasTexSize
+          !v = (runAtlasTexSize - 0.5) / runAtlasTexSize
+       in (u, v, u, v)
+
     -- A shaped run is rasterised as one whole-run atlas surface. A run larger
-    -- than the atlas can never be inserted: resetting the atlas would not help
-    -- and would wipe every live glyph mid-frame, so already-recorded quads
-    -- would sample blank pixels and vanish. Oversized runs stay uncached and
-    -- fall back to the per-glyph path in pushText / lineWidth, which measures
-    -- and draws with the same advances and kerning.
+    -- than the atlas can never be inserted: resetting the atlas would not
+    -- help and a mid-frame reset would wipe every live glyph, so
+    -- already-recorded quads would sample blank pixels and vanish. Oversized
+    -- runs stay uncached and fall back to the per-glyph path in pushText /
+    -- lineWidth, which measures and draws with the same advances and kerning.
     {-# NOINLINE makeRunQuad #-}
     makeRunQuad !key !txt
       | T.null txt = pure Nothing
@@ -445,7 +559,7 @@ buildGlyphFontMetrics ga sf scale = do
               let tooBig = w + 2 * runAtlasPad > atW || h + 2 * runAtlasPad > atH
               if tooBig
                 then do
-                  modifyIORef' runCacheRef (Map.insert key Nothing)
+                  cacheRun key Nothing
                   pure Nothing
                 else do
                   let uv = unsafePerformIO (renderRun txt)
@@ -461,7 +575,7 @@ buildGlyphFontMetrics ga sf scale = do
                           , rqV1 = case uv of (_, _, _, v) -> v
                           , rqAdvance = w / inv
                           }
-                  modifyIORef' runCacheRef (Map.insert key (Just rq))
+                  cacheRun key (Just rq)
                   pure (Just rq)
       where
         renderRun t =
@@ -473,18 +587,18 @@ buildGlyphFontMetrics ga sf scale = do
                 then pure Nothing
                 else do
                   surf <- peek sp
-                  mPos0 <- tryInsert (gaAtlas ga) surf
-                  mPos1 <- case mPos0 of
-                    Just p  -> pure (Just p)
-                    Nothing -> do
-                      modifyIORef' (gaEpoch ga) (+1)
-                      writeIORef (gaEntries ga) Map.empty
-                      textAtlasReset (gaAtlas ga)
-                      tryInsert (gaAtlas ga) surf
+                  mPos <- tryInsert (gaAtlas ga) surf
                   freeSurface surf
-                  pure mPos1
+                  pure mPos
             case mPos of
-              Nothing -> pure (0, 0, 0, 0)
+              Nothing -> do
+                -- Atlas exhausted mid-frame: never wipe the texture here
+                -- (quads already recorded this frame sample it). Flag the
+                -- exhaustion so the runner drops this frame and the atlas
+                -- resets at the next frame start; the failing run draws
+                -- nothing in the meantime.
+                markAtlasExhausted ga
+                pure deadRunUv
               Just (px, py, tw, th) -> do
                 (atW, atH) <- atlasSize (gaAtlas ga)
                 pure (px / atW, py / atH, (px + tw) / atW, (py + th) / atH)

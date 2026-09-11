@@ -33,6 +33,7 @@ module NanoUI.Widgets
   , defaultSearchFieldConfig
   , searchField
   , searchFieldConfigured
+  , comboBox
   , textArea
   , applyTextInputMenuAction
   , separator
@@ -221,6 +222,7 @@ import NanoUI.Context
   , intKey
   , isDisabled
   , markDirty
+  , markEscapeConsumed
   , pointerBlockedByModal
   , registerFocusable
   , setStore
@@ -264,14 +266,14 @@ import NanoUI.Font
   , sliderTrackBounds
   , sliderHandleSlack
   )
-import NanoUI.Frame.Hit (scrollHitRect)
+import NanoUI.Frame.Hit (findNodeByWidgetId, scrollHitRect)
 import NanoUI.Types (isCellHost)
 import NanoUI.Icons (checkboxMark)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
-import NanoUI.Input (Key (..), inputKeys, inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased)
-import NanoUI.Layout.Arena (NodeType (..))
+import NanoUI.Input (Key (..), inputKeys, inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased, inputScroll)
+import NanoUI.Layout.Arena (NodeType (..), setOptions)
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
-import NanoUI.Frame.Select (selectDropPickIndex, selectDropRect, selectItemH)
+import NanoUI.Frame.Select (comboDropPickIndex, comboDropRect, comboScrollGeom, selectDropPickIndex, selectDropRect, selectItemH)
 import NanoUI.Store
   ( WidgetStore (..)
   , boolInt
@@ -279,6 +281,16 @@ import NanoUI.Store
   , isSelectOpen
   , setSelectOpen
   , slotAnchor
+  , slotComboContentW
+  , slotComboCount
+  , slotComboCommitted
+  , slotComboDrag
+  , slotComboDragOff
+  , slotComboFocus
+  , slotComboHighlight
+  , slotComboLive
+  , slotComboScroll
+  , slotComboScrollX
   , slotCursor
   , slotKey
   , slotSearchAge
@@ -309,6 +321,7 @@ import NanoUI.Types
   , Rect (..)
   , colorToWord32
   , rectContains
+  , v2X
   , v2Y
   )
 import NanoUI.Widgets.Behavior (DragAxis (..), useDrag1D)
@@ -815,6 +828,211 @@ searchFieldConfigured cfg initial =
     (sfcPlaceholder cfg)
     initial
     (Just (sfcDebounceMs cfg))
+
+-- | Maximum suggestion rows the combo dropdown shows at once; Up/Down walk
+-- the highlight and the wheel scrolls the list through a sliding window.
+comboBoxMaxVisible :: Int
+comboBoxMaxVisible = 8
+
+-- | Rows scrolled per wheel notch.
+comboBoxRowsPerNotch :: Float
+comboBoxRowsPerNotch = 3
+
+-- | Case-insensitive substring filter behind the combo's suggestion list.
+comboFiltered :: [Text] -> Text -> [Text]
+comboFiltered opts q
+  | T.null q = opts
+  | otherwise =
+      let needle = T.toLower q
+       in filter (T.isInfixOf needle . T.toLower) opts
+
+-- | Combo box: the 'searchField' with a select-style dropdown of options.
+-- While the field holds focus, the shared select dropdown overlay lists the
+-- options filtered by the field text (all of them while it is empty).
+-- Typing edits the live field text but never commits it: the committed value
+-- (and the 'respChanged' pulse) only changes on Enter, on clicking a row, or
+-- when the field loses focus; Escape reverts the live text to the last
+-- committed value. Hovering a row highlights it (and makes it the Enter
+-- target); Enter commits the highlighted row only. Up/Down move the
+-- highlight, the wheel scrolls the list (vertically over the rows,
+-- horizontally over the widest rows; the scrollbar thumbs drag too). The
+-- value is free text: options are suggestions, not a closed set.
+comboBox :: Ui :> es => Text -> [Text] -> Text -> Eff es (Response, Text)
+comboBox placeholder options initial = do
+  (resp, text) <-
+    buildTextInput textInputFlagSearch searchFieldLayout placeholder initial Nothing
+  ctx <- askContext
+  inp <- askInput
+  let wid = rawRespId resp
+      key = intKey wid
+      hiKey = slotKey slotComboHighlight key
+      winKey = slotKey slotComboScroll key
+      xKey = slotKey slotComboScrollX key
+      cntKey = slotKey slotComboCount key
+      cwKey = slotKey slotComboContentW key
+      dragKey = slotKey slotComboDrag key
+      offKey = slotKey slotComboDragOff key
+      committedKey = slotKey slotComboCommitted key
+      focusKey = slotKey slotComboFocus key
+      liveKey = slotKey slotComboLive key
+      keys = inputKeys inp
+  focus <- uiIO (readIORef (ctxFocusId ctx))
+  blocked <- uiIO (pointerBlockedByModal ctx)
+  store <- uiIO (getStore ctx)
+  let
+    isFocus = focus == wid && not blocked
+    displayed = comboFiltered options text
+    n = length displayed
+    vis = max 1 comboBoxMaxVisible
+    storedHi = IM.findWithDefault (-1) hiKey (storeInt store)
+    -- Typing clears the highlight (-1): it never pre-selects a row.
+    hi0 = if respChanged resp then -1 else storedHi
+    storedWin = IM.findWithDefault 0 winKey (storeInt store)
+    win0 = if respChanged resp then 0 else storedWin
+    storedX = IM.findWithDefault 0 xKey (storeFloat store)
+    storedContentW = IM.findWithDefault 0 cwKey (storeFloat store)
+    drag0 = IM.findWithDefault 0 dragKey (storeInt store)
+    dragOff0 = IM.findWithDefault 0 offKey (storeFloat store)
+    committed0 = IM.findWithDefault initial committedKey (storeText store)
+    live0 = IM.findWithDefault text liveKey (storeText store)
+    hadFocus = IM.findWithDefault 0 focusKey (storeInt store) /= 0
+    nav
+      | not isFocus || n <= 0 = 0 :: Int
+      | KeyDown `elem` keys = 1
+      | KeyUp `elem` keys = -1
+      | otherwise = 0
+    hi
+      | nav == 0 = hi0
+      | hi0 < 0 = if nav > 0 then 0 else n - 1
+      | otherwise = max 0 (min (n - 1) (hi0 + nav))
+    clampWin v = max 0 (min v (max 0 (n - vis)))
+    -- Keep the highlighted row inside the window after keyboard navigation.
+    alignWin v
+      | n <= vis = 0
+      | hi < v = hi
+      | hi >= v + vis = hi - vis + 1
+      | otherwise = clampWin v
+  contentW <- uiIO $
+    if isFocus && not (null displayed)
+      then maximum . (0 :) <$> mapM (fmap fst . ctxMeasureText ctx) displayed
+      else pure storedContentW
+  let
+    Rect rx ry rw rh = respRect resp
+    mouse = inputMousePos inp
+    dropRect = comboDropRect (ctxHostProfile ctx) (ctxFontMetrics ctx) rx ry rw rh (min vis n) n contentW
+    overDrop = isFocus && rw > 0 && rh > 0 && rectContains dropRect mouse
+    itemH = selectItemH (ctxHostProfile ctx) rh
+    -- Hover highlights the row under the pointer (and makes it the Enter
+    -- target); it never commits by itself. Rows on screen belong to the
+    -- previous frame's window, so the hit test maps through storedWin.
+    hoverIdx
+      | overDrop = (storedWin +) <$> comboDropPickIndex dropRect itemH (min vis n) (v2Y mouse)
+      | otherwise = Nothing
+    hiRaw = fromMaybe hi hoverIdx
+    -- A hover mapped through a stale window can point past a shrunken list:
+    -- highlight nothing then (the raw index must never reach `!!`).
+    hi' = if hiRaw < n then hiRaw else -1
+    -- Scrollbar geometry from the pre-frame scroll state (the thumb the user
+    -- is looking at when a drag starts).
+    (_, vSb, hSb, usableW) = comboScrollGeom dropRect n vis storedWin storedX contentW
+    maxOffX = max 0 (contentW - usableW)
+    onVThumb = maybe False (\(_, th) -> rectContains th mouse) vSb
+    onVTrack = maybe False (\(t, _) -> rectContains t mouse) vSb
+    onHThumb = maybe False (\(_, th) -> rectContains th mouse) hSb
+    onHTrack = maybe False (\(t, _) -> rectContains t mouse) hSb
+    pressed = not blocked && inputMousePressed inp
+    down = not blocked && inputMouseDown inp
+    startV = pressed && overDrop && onVTrack
+    startH = pressed && overDrop && not startV && onHTrack
+    vThumbR = maybe (Rect 0 0 0 0) snd vSb
+    vTrackR = maybe (Rect 0 0 0 0) fst vSb
+    hThumbR = maybe (Rect 0 0 0 0) snd hSb
+    hTrackR = maybe (Rect 0 0 0 0) fst hSb
+    vGrab = if onVThumb then v2Y mouse - rectY vThumbR else rectH vThumbR / 2
+    hGrab = if onHThumb then v2X mouse - rectX hThumbR else rectW hThumbR / 2
+    drag1
+      | startV = 1
+      | startH = 2
+      | down && drag0 /= 0 = drag0
+      | otherwise = 0
+    -- Thumb-anchored drags move from the next frame on; track presses jump
+    -- the window to the click immediately.
+    draggingV = down && drag1 == 1 && ((drag0 == 1 && not startV) || (startV && not onVThumb))
+    draggingH = down && drag1 == 2 && ((drag0 == 2 && not startH) || (startH && not onHThumb))
+    dragWin = clampWin (round ((v2Y mouse - rectY vTrackR - dragOff0) / max 1 (rectH vTrackR - rectH vThumbR) * fromIntegral (n - vis)))
+    dragX = max 0 (min maxOffX ((v2X mouse - rectX hTrackR - dragOff0) / max 1 (rectW hTrackR - rectW hThumbR) * maxOffX))
+    wheelRows = round (v2Y (inputScroll inp) * comboBoxRowsPerNotch) :: Int
+    wheelDelta = if overDrop then wheelRows else 0
+    xWheel = if overDrop then v2X (inputScroll inp) * 20 else 0
+    win
+      | draggingV = dragWin
+      | nav /= 0 = alignWin (win0 + wheelDelta)
+      | otherwise = clampWin (win0 + wheelDelta)
+    xOff
+      | draggingH = dragX
+      | otherwise = max 0 (min maxOffX (storedX + xWheel))
+    dragKind' = if down then drag1 else 0
+    dragOff' | startV = vGrab | startH = hGrab | otherwise = dragOff0
+    -- Enter commits only an explicitly highlighted row (hover or Up/Down).
+    picked = isFocus && n > 0 && hi' >= 0 && KeyEnter `elem` keys
+    pickedText = displayed !! hi'
+    escDismiss = isFocus && KeyEscape `elem` keys
+    -- Commit points: Enter, a row click (the frame-side pick lands as a
+    -- frame-start text the widget did not produce), and losing focus (which
+    -- the blur frame after the focus clear detects). Escape is a cancel: it
+    -- reverts the live text to the last committed value without committing.
+    externalText = not (respChanged resp) && text /= live0
+    commitText
+      | picked = Just pickedText
+      | externalText = Just text
+      | hadFocus && not isFocus = Just text
+      | otherwise = Nothing
+    commitPulse = maybe False (/= committed0) commitText
+    finalText
+      | picked = pickedText
+      | escDismiss = committed0
+      | otherwise = text
+    stateChanged =
+      picked || nav /= 0 || escDismiss || wheelDelta /= 0 || xWheel /= 0
+        || win /= storedWin || xOff /= storedX || hi' /= storedHi
+        || dragKind' /= drag0 || commitPulse || hadFocus /= isFocus
+  when (isFocus || stateChanged) $
+    uiIO $ do
+      st <- getStore ctx
+      let len = T.length finalText
+          int0 =
+            IM.insert hiKey hi' $
+              IM.insert winKey win $
+                IM.insert cntKey n $
+                  IM.insert focusKey (boolInt isFocus) $
+                    IM.insert dragKey dragKind' (storeInt st)
+          flt0 =
+            IM.insert xKey xOff $
+              IM.insert cwKey contentW $
+                IM.insert offKey dragOff' (storeFloat st)
+          intMap =
+            if picked
+              then
+                IM.insert (slotKey slotCursor key) len $
+                  IM.insert (slotKey slotAnchor key) len int0
+              else int0
+          texts =
+            IM.insert liveKey finalText $
+              IM.insert committedKey (fromMaybe committed0 commitText) $
+                IM.insert key finalText (storeText st)
+      setStore ctx st {storeText = texts, storeInt = intMap, storeFloat = flt0}
+      when escDismiss $ do
+        writeIORef (ctxFocusId ctx) (WidgetId 0)
+        markEscapeConsumed ctx
+      when stateChanged $ markDirty ctx
+  -- The dropdown overlay reads its rows from the node's option list: the
+  -- visible window of the filtered list.
+  uiIO $
+    findNodeByWidgetId ctx wid >>= \case
+      Nothing -> pure ()
+      Just idx -> setOptions (ctxNodeArena ctx) idx (take vis (drop win displayed))
+  pure (setChanged commitPulse resp, finalText)
+
 
 textArea :: Ui :> es => Text -> Text -> Eff es (Response, Text)
 textArea lbl initial = do

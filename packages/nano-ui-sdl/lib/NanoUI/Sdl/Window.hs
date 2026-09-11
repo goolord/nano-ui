@@ -55,6 +55,7 @@ import NanoUI.Sdl.Font
   , destroyGlyphAtlas
   , newGlyphAtlas
   , openFontSourceWithFallback
+  , registerGlyphAtlasRewarm
   , resetGlyphAtlas
   , warmGlyphAtlas
   , withTtf
@@ -260,9 +261,9 @@ rebuildScaledFonts ctx env scale = do
   closeFont oldMono
   newMono <- openFontSourceWithFallback (sdlMonoFontSource env) embeddedFontSource (sdlFontSize env * scale)
   writeIORef (sdlMonoFontRef env) newMono
+  -- resetGlyphAtlas re-warms the (already updated) base fonts through the
+  -- registered hook and bumps the epoch so run caches self-clear.
   resetGlyphAtlas (sdlGlyphAtlas env)
-  warmGlyphAtlas (sdlGlyphAtlas env) newFont
-  warmGlyphAtlas (sdlGlyphAtlas env) newMono
   let ga = sdlGlyphAtlas env
   fm <- buildGlyphFontMetrics ga newFont scale
   monoFm <- buildGlyphFontMetrics ga newMono scale
@@ -393,6 +394,15 @@ startSdlWindow ctx title w h flags bench vsync continuous uiFont fontSource mono
           fontRequestRef <- newIORef uiFont
           fontAppliedRef <- newIORef uiFont
           glyphAtlas <- newGlyphAtlas ren
+          -- Re-warm the base fonts after every atlas reset (DPI change,
+          -- font switch, exhaustion recovery) so the next frame does not
+          -- pay cold glyph misses. The hook reads the font refs lazily, so
+          -- it always warms the live fonts, never one already closed.
+          registerGlyphAtlasRewarm glyphAtlas $ do
+            warmSans <- readIORef fontRef
+            warmGlyphAtlas glyphAtlas warmSans
+            warmMono <- readIORef monoFontRef
+            warmGlyphAtlas glyphAtlas warmMono
           warmGlyphAtlas glyphAtlas font
           warmGlyphAtlas glyphAtlas monoFont
           images <- newImageAtlas

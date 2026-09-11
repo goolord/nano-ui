@@ -131,13 +131,14 @@ import NanoUI.Widgets.SplitPane
   , GridNode (..)
   , clampTreeRatio
   , dropPreview
+  , dropTargetForPane
   , layoutNode
   , mainLen
   , mainMins
   , paneExist
   , splitLength
   , subtreeMin
-  , topLevelDrop
+  , topLevelDropTarget
   , treeMovePane
   , treePanes
   , treeRemovePane
@@ -363,7 +364,19 @@ paneGrid cfg = do
       divMap = M.fromList [(diSplitId d, d) | d <- dividers]
   changedRef <- uiIO (newIORef False)
   let mGrab = IM.lookup grabK (storePoint st)
-      dgi = computeDragInfo drag0 baseRect edgeBand regions mGrab mouse
+      dgi =
+        computeDragInfo
+          drag0
+          DragGeom
+            { dgMinSize = minSize
+            , dgGutter = gutter
+            , dgTree = tree0
+            , dgBaseRect = baseRect
+            , dgBand = edgeBand
+            , dgRegions = regions
+            }
+          mGrab
+          mouse
       dgiShown = dgiActive dgi && (isJust (dgiGhost dgi) || isJust (dgiZone dgi))
       env =
         GridEnv
@@ -650,17 +663,38 @@ drawOverlay theme title ghost zone =
 -- Gestures
 -- -----------------------------------------------------------------------------
 
+-- | Grid geometry 'computeDragInfo' needs for the current frame.
+data DragGeom = DragGeom
+  { dgMinSize :: !Float
+    -- ^ Per-pane size floor used by the preview layout.
+  , dgGutter :: !Float
+    -- ^ Layout gutter between panes ('pgSpacing' + 2 * 'pgLeeway').
+  , dgTree :: !GridNode
+    -- ^ Current split tree.
+  , dgBaseRect :: !Rect
+    -- ^ Prev-frame rect of the grid's root container.
+  , dgBand :: !Float
+    -- ^ Thickness of the grid's outer top-level drop band.
+  , dgRegions :: !(Map Word64 Rect)
+    -- ^ Prev-frame pane regions.
+  }
+
 -- | Pure drag-and-drop geometry for the current frame. Geometry is computed
 -- for as long as the gesture id is armed (not just while the button is held),
 -- so the drop zone is still resolvable on the frame the button is released.
--- 'baseRect' is the grid's own rect: its outer band (thickness 'band') is a
--- top-level drop zone, and the pointer there restructures the whole grid;
--- otherwise the pane under the pointer is the target.
-computeDragInfo :: Int -> Rect -> Float -> Map Word64 Rect -> Maybe (Float, Float) -> V2 -> DragInfo
-computeDragInfo drag0 baseRect band regions mGrab mouse
+-- 'dgBaseRect' is the grid's own rect: its outer band (thickness 'dgBand') is
+-- a top-level drop zone, and the pointer there restructures the whole grid;
+-- otherwise the pane under the pointer is the target. Every candidate is
+-- resolved through 'dropPreview', which simulates the drop and lays the tree
+-- back out with the grid's real 'dgGutter' and 'dgMinSize', so the
+-- highlighted rect is the exact region the pane lands in even when removing
+-- it reshapes the rest of a mixed-split grid.
+computeDragInfo :: Int -> DragGeom -> Maybe (Float, Float) -> V2 -> DragInfo
+computeDragInfo drag0 geom mGrab mouse
   | drag0 <= 0 = DragInfo False False Nothing Nothing
   | otherwise =
-      let pid = fromIntegral drag0
+      let DragGeom{dgMinSize = minSize, dgGutter = gutter, dgTree = tree, dgBaseRect = baseRect, dgBand = band, dgRegions = regions} = geom
+          pid = fromIntegral drag0
           mFrom = M.lookup pid regions
           (gx, gy) = fromMaybe (0, 0) mGrab
           moved = case mFrom of
@@ -679,10 +713,12 @@ computeDragInfo drag0 baseRect band regions mGrab mouse
             , q /= pid
             , rectHit r mouse
             ]
-          zone = case topLevelDrop band baseRect mouse of
-            Just z -> Just z
+          zone = case topLevelDropTarget band baseRect mouse of
+            Just dt -> dropPreview minSize gutter tree pid baseRect dt
             Nothing -> case under of
-              (q, r) : _ -> Just (dropPreview r mouse q)
+              (q, r) : _ ->
+                let dt = dropTargetForPane r mouse q
+                 in dropPreview minSize gutter tree pid baseRect dt
               [] -> Nothing
        in DragInfo True moved ghost zone
 

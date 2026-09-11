@@ -71,7 +71,7 @@ import NanoUI.Frame.Scroll.Geometry
   , scrollChromeSuppressed
   )
 import NanoUI.Frame.Scroll.Geometry qualified as ScrollGeom (scrollBarLayouts2D)
-import NanoUI.Frame.Select (selectDropRect)
+import NanoUI.Frame.Select (overlayMenuOwnerAt, selectDropRect)
 import NanoUI.Frame.TextEdit
   ( TextAreaGeom (..)
   , TextAreaScrollBarLayouts (..)
@@ -147,7 +147,16 @@ selectDropdownCursorKind ctx inp = do
                 if inDrop && (open || dropPress)
                   then pure (Just UiCursorPointer)
                   else go (idx + 1)
-  go 0
+  mSel <- go 0
+  case mSel of
+    Just k -> pure (Just k)
+    -- A focused combo's dropdown (visible while its field holds focus) is not
+    -- a select: pointer over its menu like the select's. The text-input menu
+    -- case inside overlayMenuOwnerAt is unreachable here —
+    -- textEditMenuCursorKind runs first in uiCursorKind.
+    Nothing -> do
+      mOwner <- overlayMenuOwnerAt ctx mouse
+      pure (if isJust mOwner then Just UiCursorPointer else Nothing)
 
 scrollThumbCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
 scrollThumbCursorKind ctx inp = do

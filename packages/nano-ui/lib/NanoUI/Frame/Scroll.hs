@@ -11,13 +11,14 @@ module NanoUI.Frame.Scroll
   ) where
 
 
-import Control.Monad (void, when)
+import Control.Monad (unless, void, when)
 import Data.IORef (readIORef)
 import qualified Data.IntMap.Strict as IM
 import Data.Maybe (fromMaybe)
 import NanoUI.Context
   ( Context (..)
   , getMenuPointerGesture
+  , getOpenSelectDrop
   , getScrollDrag
   , getScrollOffset
   , getScrollOffset2D
@@ -193,13 +194,21 @@ updateScrollWheel :: Context -> Input -> IO ()
 updateScrollWheel ctx inp = do
   let scroll = inputScroll inp
   when (v2Y scroll /= 0 || v2X scroll /= 0) $ do
-    mNode <- findScrollNodeUnderMouse ctx (inputMousePos inp)
-    case mNode of
-      Just idx -> do
-        wid <- getWidgetId (ctxNodeArena ctx) idx
-        void (tryApplyScrollWheelDelta ctx wid scroll)
-        applyCrossAxisScroll ctx idx scroll
-      Nothing -> pure ()
+    -- An open dropdown (select menu or combo suggestions) owns the wheel:
+    -- the combo widget scrolls its own window, and the scroller underneath
+    -- the floating list must not move with it.
+    mDrop <- getOpenSelectDrop ctx
+    let overDrop = case mDrop of
+          Just (_, r) -> rectContains r (inputMousePos inp)
+          Nothing -> False
+    unless overDrop $ do
+      mNode <- findScrollNodeUnderMouse ctx (inputMousePos inp)
+      case mNode of
+        Just idx -> do
+          wid <- getWidgetId (ctxNodeArena ctx) idx
+          void (tryApplyScrollWheelDelta ctx wid scroll)
+          applyCrossAxisScroll ctx idx scroll
+        Nothing -> pure ()
 
 -- Nested 2D: apply the unused axis to a paired scroller in the same panel.
 -- Do not walk past panel/window/modal into the page scroller.

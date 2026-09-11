@@ -35,7 +35,9 @@ import NanoUI.Testing
   , Ui
   , ctxPaintFull
   , ctxTheme
+  , damageFull
   , damageIsEmpty
+  , markDirty
   , runEff
   , runFrameEff
   , runFrameReduceEff
@@ -64,7 +66,12 @@ import NanoUI.Sdl.Display
   , windowToLogicalCoords
   )
 import NanoUI.Sdl.Render (flushRenderBatch)
-import NanoUI.Sdl.Font (fontSourceLabel, glyphAtlasTexture)
+import NanoUI.Sdl.Font
+  ( fontSourceLabel
+  , glyphAtlasTexture
+  , prepareGlyphAtlasForFrame
+  , takeGlyphAtlasResetFlag
+  )
 import NanoUI.Sdl.NanoUIFont (NanoUIFont (..))
 import NanoUI.Sdl.Window (SdlEnv (..))
 import Foreign.Ptr (Ptr, nullPtr)
@@ -103,6 +110,11 @@ drawEff unlift ctx ui env inp forceFull = do
 -- to the damage clip when the present will be partial.
 prepareRetain :: Context -> SdlEnv -> Input -> Bool -> IO (Ptr (), Bool, Bool)
 prepareRetain ctx env inp forceFull = do
+  -- Glyph-atlas maintenance before any quad is recorded: if the atlas ran
+  -- out of space during the previous frame, reset it now (re-warming the
+  -- base fonts) so a reset can never wipe the texture underneath
+  -- already-recorded text mid-frame.
+  prepareGlyphAtlasForFrame (sdlGlyphAtlas env)
   scale <- readIORef (sdlScaleRef env)
   let Size lw lh = inputWindowSize inp
       pw = max 1 (round (lw * scale))
@@ -151,10 +163,20 @@ finishDraw ctx env inp tex retainNew presentFull t0 t1 drawData dirtyAfterUi = d
           else snapDamage scale dmg0
       damage = damage0
   writeIORef (sdlLastPresented env) False
-  if damageIsEmpty damage || lw <= 0 || lh <= 0
+  -- A glyph-atlas reset or exhaustion during the UI pass means quads
+  -- recorded before that point hold stale (or unplaceable) UVs. Drop the
+  -- frame instead of presenting it: the screen keeps the previous valid
+  -- frame, 'damageFull' forces a full repaint, and
+  -- 'prepareGlyphAtlasForFrame' resets the atlas before the next frame
+  -- records any quads, so text never flickers or vanishes for a frame.
+  atlasReset <- takeGlyphAtlasResetFlag (sdlGlyphAtlas env)
+  if atlasReset || damageIsEmpty damage || lw <= 0 || lh <= 0
     then do
+      when atlasReset $ do
+        damageFull ctx
+        markDirty ctx
       noteSkip (sdlDebug env)
-      pure (dirtyAfterUi, inp)
+      pure (atlasReset || dirtyAfterUi, inp)
     else do
       okBegin <- retainBegin (sdlRenderer env) tex scale
       unless okBegin $ fail "SDL_SetRenderTarget(retain) failed"

@@ -66,6 +66,7 @@ import NanoUI.Layout.Arena
   , getHeightSizing
   , getNodeType
   , getNodeValue
+  , getOptions
   , getPadding
   , getRect
   , getStyleIdx
@@ -99,11 +100,13 @@ import NanoUI.Types (Color (..), ImageId (..), Rect (..), colorA, colorRGBA, cla
 import NanoUI.WidgetText
   ( buttonFlagsFromStyle
   , buttonVisualStyle
+  , comboTextClip
   , searchFieldIconRects
   , tableSortBlank
   , tableSortMarkOf
   , searchFieldTextClip
   , selectChevronCenterX
+  , selectChevronReserve
   , tableStripeColor
   , textInputSearchBody
   , textInputSearchMode
@@ -344,7 +347,11 @@ lowerNodeVisible ctx occluders idx nt x y w h rect fm theme terminal da =
           focus <- textInputFocused ctx idx
           si <- getStyleIdx (ctxNodeArena ctx) idx
           if textInputSearchMode si
-            then paintSearchField ctx da fm theme style idx focus x y w h
+            then do
+              opts <- getOptions (ctxNodeArena ctx) idx
+              if null opts
+                then paintSearchField ctx da fm theme style idx focus x y w h
+                else paintComboField ctx da fm theme style idx focus x y w h
             else do
               let geom = textInputGeom (ctxHostProfile ctx) fm x y w h
                   fieldRect = tigFieldRect geom
@@ -660,6 +667,43 @@ drawSearchMagnifier da (Rect x y w h) col = do
       endOff = r0 * 0.7071 + s * 0.22
   pushRoundedStroke da (Rect (cx - r0) (cy - r0) (2 * r0) (2 * r0)) r0 t col
   pushLine da (cx + startOff) (cy + startOff) (cx + endOff) (cy + endOff) t col
+
+-- | Combo box field: the search field's full-rect editable box, but styled
+-- like a dropdown — no magnifier or clear chrome, and a select chevron in the
+-- right reserve that flips up while the dropdown is open (i.e. focused).
+paintComboField :: Context -> DrawArena -> FontMetrics -> Theme -> Style -> NodeIdx -> Bool -> Float -> Float -> Float -> Float -> IO ()
+paintComboField ctx da fm theme style idx focus x y w h = do
+  let host = ctxHostProfile ctx
+      box = Rect x y w h
+      clip = comboTextClip host fm x y w h
+      chevW = selectChevronReserve
+  paintTextFieldFrame da theme style focus box
+  value <- textInputValue ctx idx
+  lbl <- getText (ctxNodeArena ctx) idx
+  let bg = styleBg style
+      baseFg = styleFg style
+      iconCol = lerpColor baseFg bg 0.45
+      cx = selectChevronCenterX x w
+      cy = y + h / 2
+      hw = 4.2
+      hh = 2.6
+  -- Chevron points down while closed, up while the dropdown is open.
+  if focus
+    then pushFilledTriangle da (cx - hw) (cy + hh * 0.35) (cx + hw) (cy + hh * 0.35) cx (cy - hh) iconCol
+    else drawSelectChevron da (x + w - chevW) y chevW h iconCol
+  let display = textInputSearchBody lbl value focus
+      isEmpty = T.null value
+  scrollX <- syncTextInputScroll ctx idx x y w h
+  (ty, fg) <-
+    if T.null display
+      then pure (0, baseFg)
+      else do
+        (_tw, th) <- ctxMeasureText ctx display
+        pure
+          ( centeredTextY host fm y h th
+          , if isEmpty && not focus then lerpColor baseFg bg 0.5 else baseFg
+          )
+  paintClippedFieldText ctx da fm style idx x y w h clip (rectX clip - scrollX) ty display fg
 
 verticallyCenteredBox :: Float -> Float -> Float -> Float
 verticallyCenteredBox y h box =

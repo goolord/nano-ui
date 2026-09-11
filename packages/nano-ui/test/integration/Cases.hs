@@ -1,5 +1,6 @@
 module Cases
   ( module Cases.Animation
+  , module Cases.Combo
   , module Cases.ContextMenu
   , module Cases.CustomWidget
   , module Cases.Damage
@@ -52,6 +53,7 @@ module Cases
   , runLayoutTest
   , runOverlayTest
   , runPanelPaintsTest
+  , runPaneGridMixedDragTest
   , runPercentLayoutTest
   , runPercentGapShrinkTest
   , runPointerCursorCheckboxTest
@@ -76,6 +78,7 @@ module Cases
   ) where
 
 import Cases.Animation
+import Cases.Combo
 import Cases.ContextMenu
 import Cases.CustomWidget
 import Cases.Damage
@@ -89,13 +92,17 @@ import Cases.TextInput
 import Cases.Tooltip
 import Cases.Window
 import Cases.Font
-import Control.Monad (forM, replicateM, void)
+import Control.Monad (forM, replicateM, void, when)
 import Control.Concurrent (threadDelay)
 import Data.ByteString qualified as BS
-import Data.IORef (IORef)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
+import Data.IntMap.Strict qualified as IM
 import Data.List (nub, sort)
+import Data.Map.Strict qualified as M
 import Data.Text qualified as T
 import Data.Vector qualified as V
+import Data.Word (Word64)
+import Effectful (liftIO)
 import Effectful.State.Static.Local (State, evalState, get, modify)
 import NanoUI
 import NanoUI.Context (Context (..))
@@ -113,6 +120,14 @@ import NanoUI.Testing.Harness
   , warmup2
   , warmupDraw
   , withInputOff
+  )
+import NanoUI.Widgets.SplitPane
+  ( DropTarget (..)
+  , GridNode (..)
+  , dropPreview
+  , dropTargetForPane
+  , layoutNode
+  , topLevelDropTarget
   )
 
 runHostProfileGapTest :: Context -> IORef Int -> IO ()
@@ -824,6 +839,119 @@ runPanelPaintsTest ctx failed = do
   (_, _, colDraw, _) <- runFrame ctx inp (column' fat (label "x"))
   (_, _, panDraw, _) <- runFrame ctx inp (panel' fat (label "x"))
   assertGt failed (drawVertexCount panDraw) (drawVertexCount colDraw)
+
+-- | Drag-drop previews must come from simulating the post-drop layout, not
+-- from halving the target's pre-drop rect: in a grid mixing 'AxisV' and
+-- 'AxisH' splits, dropping first removes the dragged pane, which collapses
+-- its parent split and re-flows the sibling subtrees, so the naive highlight
+-- lands at the wrong position and size.
+runPaneGridMixedDragTest :: Context -> IORef Int -> IO ()
+runPaneGridMixedDragTest ctx failed = do
+  -- Model level: vertical root split with a horizontal split inside the right
+  -- branch — pane 1 left, panes 2 (top right) and 3 (bottom right).
+  let minSize = 40
+      gutter = 4
+      base = Rect 0 0 600 400
+      tree0 = Split 100 AxisV 0.5 (Pane 1) (Split 101 AxisH 0.5 (Pane 2) (Pane 3))
+      regions0 = fst (layoutNode minSize gutter tree0 base)
+      r2 = regions0 M.! 2
+      r3 = regions0 M.! 3
+      preview dt = dropPreview minSize gutter tree0 1 base dt
+  assertEq failed regions0 $
+    M.fromList
+      [ (1, Rect 0 0 300 400)
+      , (2, Rect 304 0 296 200)
+      , (3, Rect 304 204 296 196)
+      ]
+  -- Cross-axis edge drop on the bottom-right pane: removing pane 1 collapses
+  -- the root split, so the right branch re-flows to the whole grid and pane 1
+  -- lands in its bottom-right corner — not in a half of the target's old rect
+  -- (which would be Rect 304 302 296 98).
+  let dtA = dropTargetForPane r3 (V2 (rectX r3 + rectW r3 / 2) (rectY r3 + rectH r3 * 0.9)) 3
+  assertEq failed dtA (DropSplit 3 AxisH False)
+  assertEq failed (preview dtA) (Just (Rect 0 306 600 94, DropSplit 3 AxisH False))
+  -- Edge drop on the top-right pane.
+  let dtB = dropTargetForPane r2 (V2 (rectX r2 + rectW r2 * 0.9) (rectY r2 + rectH r2 / 2)) 2
+  assertEq failed dtB (DropSplit 2 AxisV False)
+  assertEq failed (preview dtB) (Just (Rect 304 0 296 200, DropSplit 2 AxisV False))
+  -- Center drop swaps; the preview is the target's exact region.
+  let dtC = dropTargetForPane r2 (V2 (rectX r2 + rectW r2 / 2) (rectY r2 + rectH r2 / 2)) 2
+  assertEq failed dtC (DropSwap 2)
+  assertEq failed (preview dtC) (Just (Rect 304 0 296 200, DropSwap 2))
+  -- Top-level edge drops restructure the whole grid.
+  assertEq failed (topLevelDropTarget 20 base (V2 5 200)) (Just (DropTop AxisV True))
+  assertEq failed (topLevelDropTarget 20 base (V2 300 200)) Nothing
+  let dtD = DropTop AxisV True
+  assertEq failed (preview dtD) (Just (Rect 0 0 300 400, DropTop AxisV True))
+
+  -- Widget level: build the same mixed grid through a live paneGrid, drag the
+  -- left pane onto the bottom-right pane's lower edge, and check the drop
+  -- lands it below that pane (tree order of the restructured grid).
+  rects <- newIORef IM.empty
+  step <- newIORef (0 :: Int)
+  nbRef <- newIORef (0 :: Word64)
+  let inp0 = withInput 600 400
+      cfg =
+        defaultPaneGridConfig
+          { pgLayout = fillW . fillH
+          , pgMinSize = 40
+          , pgSpacing = 4
+          , pgViewPane = \pid pctx -> do
+              liftIO (modifyIORef' rects (IM.insert (fromIntegral pid) (pgcRect pctx)))
+              s <- liftIO (readIORef step)
+              case s of
+                0 -> do
+                  nb <- pgcSplit pctx AxisV
+                  liftIO $ do
+                    writeIORef nbRef nb
+                    writeIORef step 1
+                1 -> do
+                  nb <- liftIO (readIORef nbRef)
+                  when (pid == nb) $ do
+                    _ <- pgcSplit pctx AxisH
+                    liftIO (writeIORef step 2)
+                _ -> pure ()
+              pure (PaneView "P" True Nothing)
+          }
+      ui = paneGrid cfg
+  _ <- warmup2 ctx inp0 ui
+  _ <- runFrame ctx inp0 ui
+  _ <- runFrame ctx inp0 ui
+  (pgr0, _, _, _) <- runFrame ctx inp0 ui
+  case pgrPanes pgr0 of
+    [pa, pb, pc] -> do
+      rs <- readIORef rects
+      case (IM.lookup (fromIntegral pa) rs, IM.lookup (fromIntegral pc) rs) of
+        (Just ra, Just rc) -> do
+          let grab = V2 (rectX ra + rectW ra / 2) (rectY ra + rectH ra / 2)
+              -- 30px above the grid's bottom edge: inside the pane's bottom
+              -- drop zone but clear of the 20px top-level band.
+              dest = V2 (rectX rc + rectW rc / 2) (rectY rc + rectH rc - 30)
+              ps = IM.elems rs
+              gx = minimum (map rectX ps)
+              gy = minimum (map rectY ps)
+              gw = maximum (map (\r -> rectX r + rectW r) ps) - gx
+              gh = maximum (map (\r -> rectY r + rectH r) ps) - gy
+          -- The order assert below cannot tell a pane-level split from a
+          -- top-level band drop ([pb, pc, pa] either way), so pin the pointer
+          -- to the pane-split path first.
+          assert failed (topLevelDropTarget 20 (Rect gx gy gw gh) dest == Nothing)
+          let press =
+                inp0
+                  { inputMousePos = grab
+                  , inputMouseDown = True
+                  , inputMousePressed = True
+                  , inputMouseReleased = False
+                  }
+              hold = press {inputMousePos = dest, inputMousePressed = False}
+              release = hold {inputMouseDown = False, inputMouseReleased = True}
+          _ <- runFrame ctx press ui
+          _ <- runFrame ctx hold ui
+          (pgr1, _, _, _) <- runFrame ctx release ui
+          assertEq failed (pgrPanes pgr1) [pb, pc, pa]
+        _ -> assert failed False
+    _ -> assert failed False
+
 
 runBase16ThemeTest :: Context -> IORef Int -> IO ()
 runBase16ThemeTest ctx failed = do
