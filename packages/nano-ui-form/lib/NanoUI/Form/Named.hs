@@ -23,7 +23,7 @@ module NanoUI.Form.Named
   , withFieldErrors
   ) where
 
-import Control.Monad (when)
+import Control.Monad (void, when)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Ditto.Backend (FormError)
@@ -134,7 +134,8 @@ inputTextArea name initial =
       ctx <- askContext
       prefix <- uiIO (getActiveFormPrefix ctx)
       let fieldKey = encodeFormId formId
-      (resp, newVal) <- textArea name val
+      void $ NUI.label name
+      (resp, newVal) <- textArea val
       when (respChanged resp || newVal /= val) $
         uiIO (updateFieldInput ctx prefix fieldKey (FormInputText newVal))
     )

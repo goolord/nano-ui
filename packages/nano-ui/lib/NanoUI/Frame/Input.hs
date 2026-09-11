@@ -70,7 +70,7 @@ import NanoUI.Frame.Hit
 import NanoUI.Frame.Redraw (probeHotId)
 import NanoUI.Frame.Select (findSelectUnderMouse, overlayMenuOwnerAt)
 import NanoUI.Frame.Spans (widgetHitRect)
-import NanoUI.WidgetText (buttonVisualStyle, isTabButtonStyle)
+import NanoUI.WidgetText (buttonVisualStyle, isMenuBarStyle, isMenuItemStyle, isTabButtonStyle)
 import NanoUI.Frame.TextEdit
   ( collapseTextFieldSelection
   , finalizeTextFieldMouse
@@ -105,6 +105,21 @@ finalizeTabFocus ctx inp =
             markDirty ctx
 
 
+-- Flat menu buttons never animate: their hover highlight snaps on and off.
+isMenuButtonWidget :: Context -> WidgetId -> IO Bool
+isMenuButtonWidget ctx wid
+  | hashWidgetId wid == 0 = pure False
+  | otherwise =
+      findNodeByWidgetId ctx wid >>= \case
+        Nothing -> pure False
+        Just idx -> do
+          nt <- getNodeType (ctxNodeArena ctx) idx
+          if nt /= NodeButton
+            then pure False
+            else do
+              si <- getStyleIdx (ctxNodeArena ctx) idx
+              pure (isMenuItemStyle si || isMenuBarStyle si)
+
 refreshHover :: Context -> Input -> IO ()
 refreshHover ctx inp = do
   prevHot <- readIORef (ctxLastHotId ctx)
@@ -114,8 +129,10 @@ refreshHover ctx inp = do
   let terminal = isCellHost (ctxHostProfile ctx)
   when (prevHot /= newHot) $ do
     unless terminal $ do
-      when (hashWidgetId prevHot /= 0) $ startAnimation ctx prevHot 1 0 0.12
-      when (hashWidgetId newHot /= 0) $ startAnimation ctx newHot 0 1 0.12
+      prevMenu <- isMenuButtonWidget ctx prevHot
+      newMenu <- isMenuButtonWidget ctx newHot
+      when (hashWidgetId prevHot /= 0 && not prevMenu) $ startAnimation ctx prevHot 1 0 0.12
+      when (hashWidgetId newHot /= 0 && not newMenu) $ startAnimation ctx newHot 0 1 0.12
 
 -- Same walk as refreshHover: later nodes paint first, earlier widget hits win.
 finalizePointerPress :: Context -> Input -> IO ()

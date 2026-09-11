@@ -23,7 +23,7 @@ import NanoUI.Context (getStore, intKey, markDirty, setStore)
 import NanoUI.Input (inputMousePos, inputMouseReleased)
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO)
 import NanoUI.Store (WidgetStore (..), slotKey, slotMenuOpen, slotMenuPos)
-import NanoUI.Style (Layout (..), defaultLayout, fillW, fontMuted, padXY, tight)
+import NanoUI.Style (Layout (..), defaultLayout, fillW, fontMuted, gap, padXY, tight)
 import NanoUI.Types (PopupAnchor (..), PopupPlacement (..), V2 (..))
 import NanoUI.WidgetText (buttonFlagMenu, buttonFlagMenuBar)
 import NanoUI.Widgets.Combinators (buttonStyled)
@@ -91,7 +91,7 @@ openMenuPopup isOpen pos child close = do
           , cfgDismissable = True
           , cfgOffset = 0
           }
-  (popupResp, mBody) <- popup isOpen cfg (columnWith tight child)
+  (popupResp, mBody) <- popup isOpen cfg (columnWith (tight . gap 0) child)
   inp <- askInput
   let picked = respHovered popupResp && inputMouseReleased inp
   when (respClicked popupResp || picked) close

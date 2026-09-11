@@ -58,7 +58,8 @@ scrollProbeUi =
         void (colorPicker "Accent" (NanoUI.colorRGBA 204 102 102 255))
         void (radioFieldset "Theme" ["Light", "Dark", "System"] 1)
         void (textInput "Name" "")
-        void (textArea "Notes" "Edit me.\nSecond line.")
+        void (label "Notes")
+        void (textArea "Edit me.\nSecond line.")
         rowWith (tight . gap 8 . fillW) $ do
           void (button "Hover for Tooltip")
           void (button "Right-click Menu")
@@ -78,7 +79,8 @@ scrollProbeUi =
         sep
       panelWith (padXY 14 10 . gap 6 . fillW) $ do
         heading "Fifth"
-        void (textArea "Notes" "Edit me.\nLine2\nLine3\nLine4\nLine5\nLine6\nLine7\nLine8\nLine9\nLine10")
+        void (label "Notes")
+        void (textArea "Edit me.\nLine2\nLine3\nLine4\nLine5\nLine6\nLine7\nLine8\nLine9\nLine10")
         void (boundedSelect "Theme" () (const "Tomorrow at Midnight Min"))
         sep
       panelWith (padXY 14 10 . gap 6 . fillW) $ do

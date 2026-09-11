@@ -450,7 +450,9 @@ measureTextField host fm measure txt multiline = do
       let gap = textInputLabelGap fm
           fieldH = if multiline then max 96 (textInputFieldHeight fm * 4) else textInputFieldHeight fm
           contentW = max textInputMinWidth (if multiline then lw else max lw pw)
-      pure (contentW, lh + gap + fieldH, 0, 0)
+          -- A text area is caption-less: no label row.
+          contentH = if multiline then fieldH else lh + gap + fieldH
+      pure (contentW, contentH, 0, 0)
 
 -- Caption-less search box: single row tall, icons counted in the width budget.
 measureSearchField ::
@@ -1884,6 +1886,15 @@ positionWindowNode na host fm idx x y w h = do
   let defResolve _ _ _ _ = pure (fm, \t -> pure (measureText host fm t))
   positionChildren a na host fm fm (\t -> pure (measureText host fm t)) defResolve 0 idx dir gap pad x y w h
 
+-- | Horizontal placement for a widget-anchored popup. Aligns the popup's left
+-- edge with the anchor even when the anchor sits inside the window margin (a
+-- menu bar flush to the left, say); the margin is only there to keep the popup
+-- clear of the right edge.
+clampPopupX :: Float -> Float -> Float -> Float -> Float
+clampPopupX margin winW iw x0
+  | x0 < margin && x0 + iw <= winW = max 0 x0
+  | otherwise = max margin (min (winW - iw - margin) x0)
+
 computePopupPosition ::
   Float ->
   Float ->
@@ -1920,7 +1931,7 @@ computePopupPosition winW winH margin iw ih anchor placement offset =
               y = if y0 + ih > winH - margin && ry - ih - offset >= margin
                     then ry - ih - offset
                     else y0
-              x = max margin (min (winW - iw - margin) x0)
+              x = clampPopupX margin winW iw x0
            in (x, max margin (min (winH - ih - margin) y))
         PlacementAbove ->
           let x0 = rx
@@ -1928,7 +1939,7 @@ computePopupPosition winW winH margin iw ih anchor placement offset =
               y = if y0 < margin && ry + rh + offset + ih <= winH - margin
                     then ry + rh + offset
                     else y0
-              x = max margin (min (winW - iw - margin) x0)
+              x = clampPopupX margin winW iw x0
            in (x, max margin (min (winH - ih - margin) y))
         PlacementRight ->
           let x0 = rx + rw + offset
@@ -1937,7 +1948,7 @@ computePopupPosition winW winH margin iw ih anchor placement offset =
                     then rx - iw - offset
                     else x0
               y = max margin (min (winH - ih - margin) y0)
-           in (max margin (min (winW - iw - margin) x), y)
+           in (clampPopupX margin winW iw x, y)
         PlacementLeft ->
           let x0 = rx - iw - offset
               y0 = ry
@@ -1945,17 +1956,17 @@ computePopupPosition winW winH margin iw ih anchor placement offset =
                     then rx + rw + offset
                     else x0
               y = max margin (min (winH - ih - margin) y0)
-           in (max margin (min (winW - iw - margin) x), y)
+           in (clampPopupX margin winW iw x, y)
         PlacementAuto ->
           let spaceBelow = winH - margin - (ry + rh + offset)
               spaceAbove = ry - offset - margin
               y = if spaceBelow >= ih || spaceBelow >= spaceAbove
                     then ry + rh + offset
                     else ry - ih - offset
-              x = max margin (min (winW - iw - margin) rx)
+              x = clampPopupX margin winW iw rx
            in (x, max margin (min (winH - ih - margin) y))
         PlacementAtCursor ->
-          (max margin (min (winW - iw - margin) rx), max margin (min (winH - ih - margin) (ry + rh + offset)))
+          (clampPopupX margin winW iw rx, max margin (min (winH - ih - margin) (ry + rh + offset)))
 
 placePopups ::
   NodeArena ->

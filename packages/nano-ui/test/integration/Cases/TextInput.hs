@@ -25,6 +25,7 @@ module Cases.TextInput
   , runKvMultilineHeightTest
   , runTextAreaScrollbarVisibilityTest
   , runTextAreaScrollWheelTest
+  , runTextAreaZoomScrollTest
   , runTextAreaScrollDragTest
   , runTextAreaCursorOnScrollBarTest
   , runTextAreaHScrollbarVisibilityTest
@@ -35,7 +36,7 @@ module Cases.TextInput
   , runTextAreaScrollCursorLeavesViewportTest
   ) where
 
-import Control.Monad (forM_, replicateM)
+import Control.Monad (forM_, replicateM, void)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Text qualified as T
@@ -43,10 +44,13 @@ import NanoUI
 import NanoUI.Context (getScrollOffset2D, intKey)
 import NanoUI.Frame.TextEdit
   ( TextAreaGeom (..)
+  , TextAreaHit (..)
   , TextAreaScrollBarLayouts (..)
+  , resolveTextAreaFont
   , textAreaBarLanes
   , textAreaGeom
   , textAreaHScrollBarLayout
+  , textAreaHitForWidget
   , textAreaScrollBarLayout
   , textAreaScrollBarLayouts
   )
@@ -55,7 +59,14 @@ import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertGt, withInput)
 import NanoUI.Testing.Harness (assertSpansHas, clickPair, spanYOf, warmup2, withDelta)
 import NanoUI.Widgets.TextArea (buffer, loadTextAreaState, selectionAnchor)
-import NanoUI.Widgets.TextBuffer (Cursor (..), getCursor, toText)
+import NanoUI.Widgets.TextBuffer (Cursor (..), fromText, getCursor, toLines, toText)
+
+-- | Caption-less text area with a separate label above it (the old labelled
+-- field kept the label span and geometry the tests assert against).
+labeledArea :: T.Text -> T.Text -> NanoUI (Response, T.Text)
+labeledArea lbl initial = do
+  void (label lbl)
+  textArea initial
 
 runTextInputCursorTest :: Context -> IORef Int -> IO ()
 runTextInputCursorTest ctx failed = do
@@ -84,7 +95,7 @@ runTextInputCursorTest ctx failed = do
 runTextAreaCursorTest :: Context -> IORef Int -> IO ()
 runTextAreaCursorTest ctx failed = do
   let inp0 = withInput 320 220
-      ui = column (textArea "Notes" "Edit me.\nSecond line.")
+      ui = column (labeledArea "Notes" "Edit me.\nSecond line.")
   (resp, _) <- warmup2 ctx inp0 ui
   spans <- collectTextSpans ctx
   let labelPos = [(rectX r + rectW r / 2, rectY r + 0.5) | (r, txt, _, _, _) <- spans, txt == "Notes"]
@@ -109,7 +120,7 @@ runTextAreaCursorTest ctx failed = do
 runTextFieldHoverBoundaryTest :: Context -> IORef Int -> IO ()
 runTextFieldHoverBoundaryTest ctx failed = do
   let inp0 = withInput 320 220
-      ui = column (textArea "Notes" "Edit me.\nSecond line.")
+      ui = column (labeledArea "Notes" "Edit me.\nSecond line.")
   (resp, _) <- warmup2 ctx inp0 ui
   spans <- collectTextSpans ctx
   let labelPos = [(rectX r + rectW r / 2, rectY r + 0.5) | (r, txt, _, _, _) <- spans, txt == "Notes"]
@@ -181,7 +192,7 @@ runTextAreaCutClearsSelectionTest ctx failed = do
   clipRef <- newIORef (Nothing :: Maybe T.Text)
   let ctx' = withClipboard ctx (readIORef clipRef) (\s -> writeIORef clipRef (Just s) >> pure True)
       inp0 = withInput 320 220
-      ui = column (textArea "Notes" "hello")
+      ui = column (labeledArea "Notes" "hello")
   (resp, _) <- warmup2 ctx' inp0 ui
   _ <- runFrame ctx' (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   _ <- runFrame ctx' (inp0 {inputChars = "\x01", inputModifiers = Modifiers False True False}) ui
@@ -230,7 +241,7 @@ runTextAreaCtrlATest ctx failed = do
   term <- newCellContext
   let initial = "line one\nline two\nline three"
       inp0 = withInput 320 220
-      ui = column (textArea "Notes" initial)
+      ui = column (labeledArea "Notes" initial)
   forM_ [ctx, term] $ \c -> do
     (resp, _) <- warmup2 c inp0 ui
     -- Tab into textarea to gain focus
@@ -252,7 +263,7 @@ runTextAreaCtrlATest ctx failed = do
   pix2 <- newContext
   cell2 <- newCellContext
   let initial2 = "abc\ndef"
-      ui2 = column (textArea "Notes2" initial2)
+      ui2 = column (labeledArea "Notes2" initial2)
   forM_ [pix2, cell2] $ \c -> do
     (resp2, _) <- warmup2 c inp0 ui2
     _ <- runFrame c (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui2
@@ -569,7 +580,7 @@ runTextAreaScrollbarVisibilityTest ctx failed = do
   -- Short text fits within viewport: no scrollbar
   let shortText = "Line 1\nLine 2"
       inp0 = withInput 320 220
-      uiShort = column (textArea "NotesShort" shortText)
+      uiShort = column (labeledArea "NotesShort" shortText)
   (respShort, _) <- warmup2 ctx inp0 uiShort
   offShort0 <- getScrollOffset ctx (respId respShort)
   assertEq failed offShort0 0
@@ -592,7 +603,7 @@ runTextAreaScrollbarVisibilityTest ctx failed = do
   -- Long text overflowing viewport: scrollbar layout exists and wheel scrolls
   ctxLong <- newPixelContext
   let longText = T.unlines ["Line " <> T.pack (show (i :: Int)) | i <- [1 .. 30]]
-      uiLong = column (textArea "NotesLong" longText)
+      uiLong = column (labeledArea "NotesLong" longText)
   (respLong, _) <- warmup2 ctxLong inp0 uiLong
   mRectLong <- getPrevRect ctxLong (respId respLong)
   case mRectLong of
@@ -620,7 +631,7 @@ runTextAreaScrollWheelTest :: Context -> IORef Int -> IO ()
 runTextAreaScrollWheelTest ctx failed = do
   let longText = T.unlines ["Line " <> T.pack (show (i :: Int)) | i <- [1 .. 40]]
       inp0 = withInput 320 220
-      ui = column (textArea "Notes" longText)
+      ui = column (labeledArea "Notes" longText)
   (resp, _) <- warmup2 ctx inp0 ui
   mRect <- getPrevRect ctx (respId resp)
   case mRect of
@@ -654,11 +665,42 @@ runTextAreaScrollWheelTest ctx failed = do
       assertEq failed (toText (buffer st)) longText
     _ -> assert failed False
 
+runTextAreaZoomScrollTest :: Context -> IORef Int -> IO ()
+runTextAreaZoomScrollTest ctx failed = do
+  let longText = T.unlines ["Line " <> T.pack (show (i :: Int)) | i <- [1 .. 40]]
+      inp0 = withInput 320 220
+      ui = column $ textAreaWith (fontSize 32 $ defaultLayout) longText
+  (resp, _) <- warmup2 ctx inp0 ui
+  mHit <- textAreaHitForWidget ctx (respId resp)
+  case mHit of
+    Nothing -> assert failed False
+    Just hit -> do
+      fm <- resolveTextAreaFont ctx (tahNodeIdx hit)
+      let host = ctxHostProfile ctx
+          field = tahFieldRect hit
+          lineH = tahLineH hit
+          lineCount = max 1 (length (toLines (fromText longText)))
+          contentH = fromIntegral lineCount * lineH
+          contentW = maximum (0 : [textDisplayWidth host fm l | l <- T.lines longText])
+          (ix, iy) = widgetContentInset host fm
+          innerW = rectW field - 2 * ix
+          innerH = rectH field - 2 * iy
+          (barLaneW, barLaneH) = textAreaBarLanes host fm
+          hasV0 = contentH > innerH
+          hasH = contentW > (if hasV0 then max 0 (innerW - barLaneW) else innerW)
+          availH = if hasH then max 0 (innerH - barLaneH) else innerH
+          expectedMaxY = max 0 (contentH - availH)
+          pos = V2 (rectX field + rectW field / 2) (rectY field + rectH field / 2)
+          wheelDown = inp0 {inputMousePos = pos, inputScroll = V2 0 100}
+      _ <- runFrame ctx wheelDown ui
+      off <- getScrollOffset ctx (respId resp)
+      assert failed (abs (off - expectedMaxY) < 0.5)
+
 runTextAreaScrollDragTest :: Context -> IORef Int -> IO ()
 runTextAreaScrollDragTest ctx failed = do
   let longText = T.unlines ["Line " <> T.pack (show (i :: Int)) | i <- [1 .. 40]]
       inp0 = withInput 320 220
-      ui = column (textArea "Notes" longText)
+      ui = column (labeledArea "Notes" longText)
   (resp, _) <- warmup2 ctx inp0 ui
   mRect <- getPrevRect ctx (respId resp)
   case mRect of
@@ -697,7 +739,7 @@ runTextAreaCursorOnScrollBarTest :: Context -> IORef Int -> IO ()
 runTextAreaCursorOnScrollBarTest ctx failed = do
   let longText = T.unlines ["Line " <> T.pack (show (i :: Int)) | i <- [1 .. 40]]
       inp0 = withInput 320 220
-      ui = column (textArea "Notes" longText)
+      ui = column (labeledArea "Notes" longText)
   (resp, _) <- warmup2 ctx inp0 ui
   spans <- collectTextSpans ctx
   let labelPos = [(rectX r + rectW r / 2, rectY r + 0.5) | (r, txt, _, _, _) <- spans, txt == "Notes"]
@@ -744,8 +786,8 @@ runTextAreaHScrollbarVisibilityTest ctx failed = do
   let shortText = "Short"
       longText = T.replicate 10 "0123456789"
       inp0 = withInput 320 220
-      uiShort = column (textArea "Notes" shortText)
-      uiLong = column (textArea "Notes" longText)
+      uiShort = column (labeledArea "Notes" shortText)
+      uiLong = column (labeledArea "Notes" longText)
   (respS, _) <- warmup2 ctx inp0 uiShort
   mRectS <- getPrevRect ctx (respId respS)
   case mRectS of
@@ -783,7 +825,7 @@ runTextAreaHScrollWheelTest :: Context -> IORef Int -> IO ()
 runTextAreaHScrollWheelTest ctx failed = do
   let longLine = T.replicate 15 "0123456789"
       inp0 = withInput 320 220
-      ui = column (textArea "Notes" longLine)
+      ui = column (labeledArea "Notes" longLine)
   (resp, _) <- warmup2 ctx inp0 ui
   mRect <- getPrevRect ctx (respId resp)
   case mRect of
@@ -815,7 +857,7 @@ runTextAreaHScrollDragTest :: Context -> IORef Int -> IO ()
 runTextAreaHScrollDragTest ctx failed = do
   let longLine = T.replicate 15 "0123456789"
       inp0 = withInput 320 220
-      ui = column (textArea "Notes" longLine)
+      ui = column (labeledArea "Notes" longLine)
   (resp, _) <- warmup2 ctx inp0 ui
   mRect <- getPrevRect ctx (respId resp)
   case mRect of
@@ -852,7 +894,7 @@ runTextArea2DScrollTest ctx failed = do
   let lines2D = [T.pack (show (i :: Int)) <> " - " <> T.replicate 10 "abcdefghij" | i <- [1 .. 40]]
       text2D = T.unlines lines2D
       inp0 = withInput 320 220
-      ui = column (textArea "Notes" text2D)
+      ui = column (labeledArea "Notes" text2D)
   (resp, _) <- warmup2 ctx inp0 ui
   mRect <- getPrevRect ctx (respId resp)
   case mRect of
@@ -884,7 +926,7 @@ runTextAreaHScrollCursorClickTest :: Context -> IORef Int -> IO ()
 runTextAreaHScrollCursorClickTest ctx failed = do
   let longLine = T.replicate 15 "0123456789"
       inp0 = withInput 320 220
-      ui = column (textArea "Notes" longLine)
+      ui = column (labeledArea "Notes" longLine)
   (resp, _) <- warmup2 ctx inp0 ui
   mRect <- getPrevRect ctx (respId resp)
   case mRect of
@@ -936,7 +978,7 @@ runTextAreaScrollCursorLeavesViewportTest :: Context -> IORef Int -> IO ()
 runTextAreaScrollCursorLeavesViewportTest ctx failed = do
   let longText = T.unlines ["Line " <> T.pack (show (i :: Int)) | i <- [1 .. 40]]
       inp0 = withInput 320 220
-      ui = column (textArea "Notes" longText)
+      ui = column (labeledArea "Notes" longText)
   (resp, _) <- warmup2 ctx inp0 ui
   -- Focus the textarea via Tab
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui

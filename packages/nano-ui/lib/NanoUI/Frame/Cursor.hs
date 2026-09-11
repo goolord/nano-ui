@@ -29,7 +29,7 @@ import NanoUI.Context
   , isSelectOpen
   , lookupCustomCursor
   )
-import NanoUI.Font (FontMetrics, sliderHandleSlack, sliderTrackBounds, textDisplayWidth)
+import NanoUI.Font (FontMetrics, sliderHandleSlack, sliderTrackBounds)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input
   ( Input (..)
@@ -64,7 +64,7 @@ import NanoUI.Types (HostProfile, Rect (..), V2 (..), isCellHost, rectContains, 
 import NanoUI.WidgetText (isTableHeaderStyle)
 import NanoUI.Frame.Chrome (widgetNodeTypeTable)
 import NanoUI.Frame.Hit (findNodeByWidgetId, scrollHitRect, nodePointVisible)
-import NanoUI.Frame.Scroll (scrollBarLayout, ScrollBarLayout (..))
+import NanoUI.Frame.Scroll (ScrollBarLayout (..), scrollBarLayout, textAreaContentGeom)
 import NanoUI.Frame.Scroll.Geometry
   ( decodeScrollConfig
   , isScrollStyle2D
@@ -83,7 +83,6 @@ import NanoUI.Frame.TextEdit
   , textFieldWidgetAtMouse
   , nodeTextFieldGeom
   )
-import qualified NanoUI.Widgets.TextBuffer as TB
 import NanoUI.Frame.Window (windowResizeCursorKind)
 
 uiCursorKind :: Context -> Input -> IO UiCursorKind
@@ -193,20 +192,8 @@ scrollThumbHit ctx mouse = do
           if nt == NodeTextArea
             then do
               wid <- getWidgetId (ctxNodeArena ctx) idx
-              (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-              let fm = ctxFontMetrics ctx
-                  host = ctxHostProfile ctx
-                  geom = textAreaGeom host fm x y w h
-                  field = tagFieldRect geom
-              store <- getStore ctx
-              let key = intKey wid
-                  text = IM.findWithDefault "" key (storeText store)
-                  buf = TB.fromText text
-                  lineTexts = TB.toLines buf
-                  lineCount = max 1 (length lineTexts)
-                  lineH = tagLineHeight geom
-                  contentH = fromIntegral lineCount * lineH
-                  contentW = maximum (0 : [textDisplayWidth host fm l | l <- lineTexts])
+              (fm, field, _lineH, contentW, contentH, _lanes) <- textAreaContentGeom ctx idx
+              let host = ctxHostProfile ctx
               V2 curX curY <- getScrollOffset2D ctx wid
               let layouts = textAreaScrollBarLayouts host fm field contentW contentH curX curY
                   hitV = case tasbVertical layouts of

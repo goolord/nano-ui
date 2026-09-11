@@ -326,7 +326,8 @@ tabControlsUi = columnWith (tight . gap 8 . fillW) $ do
   void $ colorPicker "Accent" (colorRGBA 204 102 102 255)
   void $ radioFieldset "Theme" ["Light", "Dark", "System"] 1
   void $ textInput "Name" ""
-  void $ textArea "Notes" "Edit me.\nSecond line."
+  void $ label "Notes"
+  void $ textArea "Edit me.\nSecond line."
   rowWith (tight . gap 8 . fillW) $ do
     btnTip <- button "Hover for Tooltip"
     tooltip btnTip "This is a floating tooltip widget!"
@@ -410,8 +411,8 @@ benchTextInputs = columnWith (tight . gap 2 . fillW) $
 
 benchTextAreas :: NanoUI ()
 benchTextAreas = columnWith (tight . gap 4 . fillW) $
-  forM_ [1 .. 20 :: Int] $ \i ->
-    void $ textArea (T.pack ("Area " <> show i)) "Line 1\nLine 2\nLine 3"
+  forM_ [1 .. 20 :: Int] $ \_ ->
+    void $ textArea "Line 1\nLine 2\nLine 3"
 
 benchColorPickers :: NanoUI ()
 benchColorPickers = columnWith (tight . gap 4 . fillW) $

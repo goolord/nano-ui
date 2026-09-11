@@ -98,7 +98,7 @@ inputTextArea initial =
       ctx <- askContext
       prefix <- uiIO (getActiveFormPrefix ctx)
       let fieldKey = encodeFormId formId
-      (resp, newVal) <- textArea "" val
+      (resp, newVal) <- textArea val
       when (respChanged resp || newVal /= val) $
         uiIO (updateFieldInput ctx prefix fieldKey (FormInputText newVal))
     )

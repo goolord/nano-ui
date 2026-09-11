@@ -285,7 +285,7 @@ main = do
     p <- NanoUI.Layout.Arena.getParent na i
     putStrLn $ "  Node " ++ show i ++ " (parent=" ++ show p ++ "): " ++ show nt ++ " rect=(" ++ show x ++ "," ++ show y ++ "," ++ show w ++ "," ++ show h ++ ") val=" ++ show val ++ " hTag=" ++ show hTag ++ " txt=" ++ show (T.take 25 txt)
 
-  let inp9Scroll = inp9 { inputMousePos = V2 400 400, inputScroll = V2 0 25 }
+  let inp9Scroll = inp9 { inputMousePos = V2 400 400, inputScroll = V2 0 10000 }
   (_, _, _, _) <- runFrame ctx20 inp9Scroll demoUi
   spans9After <- collectTextSpans ctx20
   putStrLn $ "  Total spans after scroll: " ++ show (length spans9After)

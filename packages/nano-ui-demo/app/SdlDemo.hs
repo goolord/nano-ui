@@ -343,7 +343,8 @@ demoUi = do
                 setSdlUiFont (FontSearch [T.unpack fVal])
               (_, nVal) <- textInput "Name" ""
               setName nVal
-              (_, notesVal) <- textArea "Notes" "Edit me.\nSecond line."
+              void $ label "Notes"
+              (_, notesVal) <- textArea "Edit me.\nSecond line."
               setNotes notesVal
               sep
               -- Popups & menus: act on respClicked of the item you want.

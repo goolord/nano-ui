@@ -90,9 +90,12 @@ selectionCaretGeom originX originY pw lineH =
   (originX + pw, originY + 1, max 4 (lineH - 2))
 
 -- | Test if a character is part of a standard Ctrl shortcut (Ctrl+A, Ctrl+C, Ctrl+X, Ctrl+V).
+-- | Ctrl combinations that are editor/app shortcuts, never literal text. Beyond
+-- the clipboard combos this lists the zoom keys the SDL backend forwards as
+-- ctrl text (`=`, `+`, `-`, `0`), so focused fields do not insert them.
 {-# INLINE isCtrlCombo #-}
 isCtrlCombo :: Bool -> Char -> Bool
-isCtrlCombo c ch = c && T.elem ch "aAcCxXvV\x01\x03\x16\x18"
+isCtrlCombo c ch = c && T.elem ch "aAcCxXvV=+-0\x01\x03\x16\x18"
 
 -- | Dispatch standard Ctrl keystrokes (A=selectAll, C=copy, X=cut, V=paste).
 dispatchCtrlChar :: Monad m => (a -> m a) -> (a -> m ()) -> (a -> m a) -> (a -> m a) -> a -> Char -> m a
