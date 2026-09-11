@@ -70,6 +70,8 @@ import NanoUI.Layout.Arena
 import NanoUI.WidgetText
   ( buttonFlagsFromStyle
   , buttonVisualStyle
+  , isMenuItemStyle
+  , isMenuBarStyle
   , stripeColor
   , treeDecodeStripe
   , treeDecodeStyle
@@ -333,6 +335,31 @@ tabHeaderVisualStyle theme styleIdx isActive _isHot _animT =
           , styleCornerRadius = cr
           }
 
+-- | Flat menu row / menu-bar entry. Transparent at rest, a rounded hover
+-- highlight (matching the text-field context menu), and an accent-tinted fill
+-- while it owns an open drop-down (@val > 0.5@, menu-bar titles only).
+menuItemVisualStyle :: Theme -> Float -> Bool -> Style
+menuItemVisualStyle theme val _isHot =
+  let menu = overlayMenuStyle theme
+      accent = themeAccent theme
+      clear = colorRGBA 0 0 0 0
+      hover = styleHoverBg menu
+      openBg = lerpColor (styleBg menu) accent 0.3
+      base
+        | val > 0.5 = openBg
+        | otherwise = clear
+      hoverBg
+        | val > 0.5 = openBg
+        | otherwise = hover
+   in menu
+        { styleBg = base
+        , styleHoverBg = hoverBg
+        , styleActiveBg = lerpColor (styleBg menu) accent 0.4
+        , styleBorder = clear
+        , styleBorderWidth = 0
+        , styleCornerRadius = textInputMenuCornerR
+        }
+
 tableHeaderVisualStyle :: Theme -> Bool -> Style
 tableHeaderVisualStyle theme isSorted =
   let panel = themePanel theme
@@ -428,6 +455,7 @@ widgetVisualStyle ctx nt idx = do
         if nt == NodeButton
           then buttonFlagsFromStyle styleIdx
           else (False, False, False)
+      isMenu = nt == NodeButton && (isMenuItemStyle styleIdx || isMenuBarStyle styleIdx)
   theme <- readIORef (ctxTheme ctx)
   let terminal = isCellHost (ctxHostProfile ctx)
       isFocus = focus == wid
@@ -486,6 +514,7 @@ widgetVisualStyle ctx nt idx = do
                       , styleCornerRadius = 0
                       }
           NodeButton
+            | isMenu -> menuItemVisualStyle theme val isHot
             | isClose -> closeButtonStyle theme isHot animT
             | isTab, terminal ->
                 let btn = themeButton theme

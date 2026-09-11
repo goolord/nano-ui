@@ -5,6 +5,7 @@ module NanoUI.Widgets.Menu
   , withContextMenu
   , contextMenuArea
   , useContextMenu
+  , menuButton
   , menuItem
   , menuItemWithShortcut
   , menuItemWithIcon
@@ -24,6 +25,7 @@ import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO)
 import NanoUI.Store (WidgetStore (..), slotKey, slotMenuOpen, slotMenuPos)
 import NanoUI.Style (Layout (..), defaultLayout, fillW, fontMuted, padXY, tight)
 import NanoUI.Types (PopupAnchor (..), PopupPlacement (..), V2 (..))
+import NanoUI.WidgetText (buttonFlagMenu, buttonFlagMenuBar)
 import NanoUI.Widgets.Combinators (buttonStyled)
 import NanoUI.Widgets.Layout (columnWith, labelEx, sep)
 import NanoUI.Layout.Arena (NodeType (..))
@@ -126,17 +128,32 @@ useContextMenu = do
 
 -- | Standard context menu item.
 menuItem :: Ui :> es => Text -> Eff es Response
-menuItem txt = buttonStyled txt 0 (tight . fillW $ defaultLayout) 0
+menuItem txt = buttonStyled txt 0 menuItemLayout buttonFlagMenu
 
 -- | Menu item with keyboard shortcut hint. Whole row is the button.
 menuItemWithShortcut :: Ui :> es => Text -> Text -> Eff es Response
 menuItemWithShortcut txt shortcut =
-  buttonStyled (txt <> "  " <> shortcut) 0 (tight . fillW $ defaultLayout) 0
+  buttonStyled (txt <> "  " <> shortcut) 0 menuItemLayout buttonFlagMenu
 
 -- | Menu item with leading icon name. Whole row is the button.
 menuItemWithIcon :: Ui :> es => Text -> Text -> Eff es Response
 menuItemWithIcon iconName txt =
-  buttonStyled (iconName <> " " <> txt) 0 (tight . fillW $ defaultLayout) 0
+  buttonStyled (iconName <> " " <> txt) 0 menuItemLayout buttonFlagMenu
+
+-- | Row layout shared by menu items. The button's own content padding supplies
+-- the symmetric text margins; no extra layout padding is added (a button's
+-- measured width ignores layout padding anyway).
+menuItemLayout :: Layout
+menuItemLayout = tight . fillW $ defaultLayout
+
+-- | Menu-bar title: a flat, label-sized button. @open@ tints the title while
+-- its drop-down is showing, so the active menu reads at a glance.
+menuButton :: Ui :> es => Text -> Bool -> Eff es Response
+menuButton txt open =
+  buttonStyled txt (if open then 1 else 0) menuBarTitleLayout buttonFlagMenuBar
+
+menuBarTitleLayout :: Layout
+menuBarTitleLayout = tight $ defaultLayout
 
 -- | Disabled menu item (dimmed, non-interactive).
 menuItemDisabled :: Ui :> es => Text -> Eff es ()

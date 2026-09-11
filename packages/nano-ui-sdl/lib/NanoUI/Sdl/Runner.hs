@@ -186,19 +186,20 @@ finishDraw ctx env inp tex retainNew presentFull t0 t1 drawData dirtyAfterUi = d
       -- calloc/free pair per presented frame. Flush unconditionally so an
       -- aborted pass cannot leak pending geometry into the next frame.
       --
-      -- Skip the render clear when the retain texture already holds valid
-      -- content from a previous present (retainNew == False). The draw
-      -- commands overwrite every pixel of the DamageFull clip, and for
-      -- DamageClip the undamaged region keeps its old content. Clearing
-      -- to themeWindow before drawing caused a visible dark flash on the
-      -- software renderer because the cleared texture could briefly reach
-      -- the display before the draw commands completed.
+      -- A full repaint must start from a clean retain texture: the frame only
+      -- records draw commands for what the app paints, and a bare window
+      -- background (no full-window panel node) leaves the rest of the texture
+      -- untouched. Without the clear, text that moved or shrank on a bare
+      -- backdrop ghosts against the previous frame's pixels. Partial clips
+      -- keep the undamaged region and never clear. The clear targets the
+      -- retain texture, which is only blitted to the window afterwards, so it
+      -- cannot flash on screen mid-frame.
       let batch = sdlBatch env
       renderDrawDataPass
         batch
         (sdlRenderer env)
         scale
-        (if retainNew then Just (themeWindow theme) else Nothing)
+        (if retainNew || damage == DamageFull then Just (themeWindow theme) else Nothing)
         drawData
         allLayersArr
         (sdlImages env)

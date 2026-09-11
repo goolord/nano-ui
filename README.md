@@ -191,6 +191,9 @@ cabal test all
 # Launch lightweight RGFW window demo
 cabal run nano-ui-rgfw-demo
 
+# Launch the SDL3 notepad example (menu bar, file open/save, multi-line editor)
+cabal run nano-ui-sdl-notepad
+
 # Launch hardware-accelerated SDL3 demo (requires -fsdl flag)
 cabal run -fsdl nano-ui-sdl-demo
 

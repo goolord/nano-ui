@@ -35,6 +35,7 @@ module NanoUI.Widgets
   , searchFieldConfigured
   , comboBox
   , textArea
+  , textAreaWith
   , applyTextInputMenuAction
   , separator
   , spacer
@@ -52,6 +53,7 @@ module NanoUI.Widgets
   , withContextMenu
   , contextMenuArea
   , useContextMenu
+  , menuButton
   , menuItem
   , menuItemWithShortcut
   , menuItemWithIcon
@@ -246,6 +248,7 @@ import NanoUI.Widgets.Menu
   , withContextMenu
   , contextMenuArea
   , useContextMenu
+  , menuButton
   , menuItem
   , menuItemWithShortcut
   , menuItemWithIcon
@@ -1037,8 +1040,15 @@ comboBox placeholder options initial = do
   pure (setChanged commitPulse resp, finalText)
 
 
+-- | Multi-line text editor using the default 'textAreaLayout'.
 textArea :: Ui :> es => Text -> Text -> Eff es (Response, Text)
-textArea lbl initial = do
+textArea = textAreaWith textAreaLayout
+
+-- | Multi-line text editor with a caller-supplied layout. Use this to make the
+-- editor grow before it is solved (for example @grow defaultLayout@ to fill its
+-- parent).
+textAreaWith :: Ui :> es => Layout -> Text -> Text -> Eff es (Response, Text)
+textAreaWith layout lbl initial = do
   wid <- nextId
   ctx <- askContext
   uiIO $ registerFocusable ctx wid
@@ -1078,7 +1088,7 @@ textArea lbl initial = do
           uiIO $ setStore ctx (saveTextAreaState key newState curStore)
         pure (newText, changed)
       else pure (current, False)
-  resp <- addWidget wid NodeTextArea lbl 0 textAreaLayout
+  resp <- addWidget wid NodeTextArea lbl 0 layout
   pure (setChanged stateChanged resp, newText)
 
 select :: Ui :> es => Text -> [Text] -> Int -> Eff es (Response, Int)

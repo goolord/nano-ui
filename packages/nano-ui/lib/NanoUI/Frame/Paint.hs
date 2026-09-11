@@ -99,6 +99,8 @@ import NanoUI.Types (Color (..), ImageId (..), Rect (..), colorA, colorRGBA, cla
 import NanoUI.WidgetText
   ( buttonFlagsFromStyle
   , buttonVisualStyle
+  , isMenuItemStyle
+  , isMenuBarStyle
   , comboTextClip
   , searchFieldIconRects
   , tableSortBlank
@@ -438,7 +440,10 @@ lowerNodeVisible ctx occluders idx nt x y w h rect fm theme terminal da =
             if nt == NodeButton
               then buttonFlagsFromStyle si
               else (False, False, False)
+          isMenuItem = nt == NodeButton && isMenuItemStyle si
+          isMenu = nt == NodeButton && (isMenuItemStyle si || isMenuBarStyle si)
       let opaqueBg
+            | isMenu = colorA (styleBg style) > 0
             | isClose = False
             | isTab = False
             | isTable = colorA (styleBg style) > 0
@@ -457,7 +462,14 @@ lowerNodeVisible ctx occluders idx nt x y w h rect fm theme terminal da =
                 nt /= NodeCheckbox && nt /= NodeRadio && nt /= NodeSlider && nt /= NodeTextInput && nt /= NodeTextArea && nt /= NodeColorPicker
       when opaqueBg $ fillStyledRect da terminal style rect
       when (not terminal) $ do
-        when (opaqueBg && not isTab && not isTable && nt /= NodeTree) $ strokeStyledRect da terminal style x y w h
+        when (opaqueBg && not isTab && not isTable && not isMenu && nt /= NodeTree) $ strokeStyledRect da terminal style x y w h
+        when isMenu $ do
+          wid <- getWidgetId (ctxNodeArena ctx) idx
+          hot <- readIORef (ctxHotId ctx)
+          when isMenuItem $
+            when (wid == hot) $ do
+              let barRect = Rect x (y + 4) 2 (max 0 (h - 8))
+              pushRoundedRect da barRect 1 (themeAccent theme)
         when isTab $
           paintTabHeader
             da
