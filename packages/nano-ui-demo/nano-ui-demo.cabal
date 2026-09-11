@@ -118,3 +118,24 @@ executable nano-ui-sdl-profile
         ghc-options: -optl-mconsole
     if !flag(sdl)
         buildable: False
+
+executable nano-ui-sdl-notepad
+    import:           extensions
+    import:           ghc-options
+    import:           rts-options
+    import:           warnings
+    main-is:          SdlNotepad.hs
+    ghc-options:      -main-is SdlNotepad
+    build-depends:
+        base ^>=4.22.0.0,
+        bytestring ^>=0.12,
+        nano-ui,
+        nano-ui-sdl,
+        text ^>=2.1
+    hs-source-dirs:   app
+    default-language: GHC2024
+    if os(windows)
+        ghc-options: -optl-mconsole
+    if !flag(sdl)
+        buildable: False
+

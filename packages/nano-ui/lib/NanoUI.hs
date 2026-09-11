@@ -221,6 +221,7 @@ module NanoUI
   , searchFieldConfigured
   , comboBox
   , textArea
+  , textAreaWith
   , separator
   , spacer
   , tooltip
@@ -237,6 +238,7 @@ module NanoUI
   , withContextMenu
   , contextMenuArea
   , useContextMenu
+  , menuButton
   , menuItem
   , menuItemWithShortcut
   , menuItemWithIcon
@@ -815,6 +817,7 @@ import NanoUI.Widgets
   , withContextMenu
   , contextMenuArea
   , useContextMenu
+  , menuButton
   , menuItem
   , menuItemWithShortcut
   , menuItemWithIcon
@@ -849,6 +852,7 @@ import NanoUI.Widgets
   , searchFieldConfigured
   , comboBox
   , textArea
+  , textAreaWith
   , toolbar
   , tree
   , useFlag

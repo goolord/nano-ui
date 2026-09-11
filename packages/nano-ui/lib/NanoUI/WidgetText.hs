@@ -36,6 +36,8 @@ module NanoUI.WidgetText
   , buttonFlagClose
   , buttonFlagTab
   , buttonFlagTable
+  , buttonFlagMenu
+  , buttonFlagMenuBar
   , buttonFlagMask
   , tableStripeEven
   , tableStripeOdd
@@ -58,6 +60,8 @@ module NanoUI.WidgetText
   , isCloseButtonStyle
   , isTabButtonStyle
   , isTableHeaderStyle
+  , isMenuItemStyle
+  , isMenuBarStyle
   , buttonVisualStyle
   , buttonFlagsFromStyle
   ) where
@@ -418,7 +422,7 @@ tableHeaderDisplayText terminal styleIdx txt =
         2 | terminal -> title <> tableSortMark terminal True
         _ -> title <> tableSortBlank terminal
 
--- Type flags live in bits 29-31 so visual style and tab index stay in the low bits.
+-- Type flags live in bits 28-31 so visual style and tab index stay in the low bits.
 buttonFlagClose :: Int
 buttonFlagClose = 0x20000000
 
@@ -428,8 +432,18 @@ buttonFlagTab = 0x40000000
 buttonFlagTable :: Int
 buttonFlagTable = 0x80000000
 
+-- Flat menu row / menu-bar entry: transparent at rest, hover highlight, and an
+-- accent marker on hover. Rendered by 'menuItemVisualStyle'.
+buttonFlagMenu :: Int
+buttonFlagMenu = 0x10000000
+
+-- Flat menu-bar title: same flat/hover/open fill as a menu row, but centered
+-- text and no hover accent marker (that marker belongs to drop-down rows).
+buttonFlagMenuBar :: Int
+buttonFlagMenuBar = 0x08000000
+
 buttonFlagMask :: Int
-buttonFlagMask = buttonFlagClose .|. buttonFlagTab .|. buttonFlagTable
+buttonFlagMask = buttonFlagClose .|. buttonFlagTab .|. buttonFlagTable .|. buttonFlagMenu .|. buttonFlagMenuBar
 
 {-# INLINE buttonVisualStyle #-}
 buttonVisualStyle :: Int -> Int
@@ -454,3 +468,11 @@ isTabButtonStyle si = si .&. buttonFlagTab /= 0
 {-# INLINE isTableHeaderStyle #-}
 isTableHeaderStyle :: Int -> Bool
 isTableHeaderStyle si = si .&. buttonFlagTable /= 0
+
+{-# INLINE isMenuItemStyle #-}
+isMenuItemStyle :: Int -> Bool
+isMenuItemStyle si = si .&. buttonFlagMenu /= 0
+
+{-# INLINE isMenuBarStyle #-}
+isMenuBarStyle :: Int -> Bool
+isMenuBarStyle si = si .&. buttonFlagMenuBar /= 0

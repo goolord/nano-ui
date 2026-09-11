@@ -7,6 +7,7 @@ module NanoUI.Widgets.TextInput
   ) where
 
 import Data.Char (isPrint)
+import Data.IORef (writeIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.IntMap.Strict as IM
@@ -114,6 +115,9 @@ applyTextInputMenuAction ctx wid item = do
               IM.insert (slotKey slotAnchor key) (tisAnchor s1) (storeInt store)
         }
     )
+  -- Menu actions edit a field that may not be under the pointer; focus it so
+  -- the selection highlight and caret become visible.
+  writeIORef (ctxFocusId ctx) wid
   setTextInputMenu ctx Nothing
   markDirty ctx
 

@@ -91,7 +91,7 @@ import NanoUI.Layout.Arena
 import NanoUI.Layout.Solve (scrollBarSlotOf)
 import NanoUI.Style (AlignX (..), FontStyle (..), FontVariant (..), FontWeight (..), Padding (..), Style (..), Theme (..), styleBg, styleFg, themeSeparator, themeWindow)
 import NanoUI.Types (Color (..), Rect (..), colorRGBA, lerpColor, onGrid, rectH, rectIntersect, rectW, rectX, rectY)
-import NanoUI.WidgetText (isCloseButtonStyle, isTableHeaderStyle, textInputBareMode, textInputSearchMode, textInputSearchTerminalText)
+import NanoUI.WidgetText (isCloseButtonStyle, isMenuItemStyle, isTableHeaderStyle, textInputBareMode, textInputSearchMode, textInputSearchTerminalText)
 import NanoUI.WidgetText
   ( colorPickerCurrentLabel
   , colorPickerNewLabel
@@ -629,16 +629,26 @@ widgetTextPlacements ctx nt idx x y w h = do
         then pure []
         else do
           txt <- displayText ctx nt idx
-          (_tw, th) <- measureTxt txt
+          (tw, th) <- measureTxt txt
           if isTableHeaderStyle si
             then do
               ax <- getAlignX (ctxNodeArena ctx) idx
               let (labelIx, _) = tableCellInset (ctxHostProfile ctx) fm
                   (tx, used) = alignedTextPen ax x w labelIx fm txt
               pure [(txt, tx, centeredTextY (ctxHostProfile ctx) fm y h th, used, th)]
-            else do
-              let (tx, used) = alignedTextPen AlignCenter x w 0 fm txt
-              pure [(txt, tx, centeredTextY (ctxHostProfile ctx) fm y h th, used, th)]
+            else
+              if isMenuItemStyle si
+                then do
+                  -- Buttons reserve their own symmetric horizontal padding
+                  -- (buttonPadding); match it so left and right text margins
+                  -- are equal, with no extra gutter for the hover accent.
+                  let inset = fmAdvance fm ' '
+                      tx = x + inset
+                      avail = max 0 (w - 2 * inset)
+                  pure [(txt, tx, centeredTextY (ctxHostProfile ctx) fm y h th, min tw avail, th)]
+                else do
+                  let (tx, used) = alignedTextPen AlignCenter x w 0 fm txt
+                  pure [(txt, tx, centeredTextY (ctxHostProfile ctx) fm y h th, used, th)]
     NodeSelect -> do
       txt <- displayText ctx nt idx
       (tw, th) <- measureTxt txt

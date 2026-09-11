@@ -23,6 +23,7 @@ module NanoUI.Widgets.TextArea
 
 import Control.Monad (when)
 import Data.Char (isPrint, toLower)
+import Data.IORef (writeIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.IntMap.Strict as IM
@@ -380,6 +381,9 @@ applyTextAreaMenuAction ctx wid item = do
       s0 = loadTextAreaState store key text
   s1 <- dispatchMenuAction (textAreaCut ctx) (textAreaCopy ctx) (textAreaPaste ctx) selectAllTextArea item s0
   setStore ctx (saveTextAreaState key s1 store)
+  -- Menu actions are how a caller edits a field that may not be under the
+  -- pointer; focus it so the selection highlight and caret become visible.
+  writeIORef (ctxFocusId ctx) wid
   setTextInputMenu ctx Nothing
   markDirty ctx
 
