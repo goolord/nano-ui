@@ -38,7 +38,7 @@ import NanoUI.Frame.TextEdit
   , textAreaScrollBarLayouts
   )
 import NanoUI.Store (storeText)
-import NanoUI.Types (HostProfile, isCellHost)
+import NanoUI.Types (isCellHost)
 import qualified NanoUI.Widgets.TextBuffer as TB
 import NanoUI.Id (WidgetId)
 import NanoUI.Input (Input (..), inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased, inputScroll)
@@ -79,6 +79,8 @@ import NanoUI.Frame.Scroll.Geometry
   , scrollViewportClip2D
   , scrollChromeActive
   , scrollChromeSuppressed
+  , scrollWheelSuppressed
+  , scrollLineFor
   , scrollGutters2D
   , decodeScrollConfig
   , padContentClip
@@ -88,12 +90,6 @@ import NanoUI.Frame.Scroll.Geometry
   )
 import NanoUI.Frame.Scroll.Geometry qualified as ScrollGeom (scrollBarLayouts2D)
 import NanoUI.Frame.Hit (findNodeByWidgetId, topmostModalAtMouse, topmostOverlayAtMouse)
-
-scrollLineFor :: HostProfile -> Float
-scrollLineFor host = if isCellHost host then 1 else scrollLine
-
-scrollLine :: Float
-scrollLine = 20
 
 applyScrollOffsets :: Context -> IO ()
 applyScrollOffsets ctx = do
@@ -273,7 +269,7 @@ findOppositeScrollDescendant ctx idx childDir = goChildren idx
 
 tryApplyScrollWheelDelta :: Context -> WidgetId -> V2 -> IO Bool
 tryApplyScrollWheelDelta ctx wid scroll = do
-  mGeom <- scrollContainerGeom ctx wid
+  mGeom <- scrollContainerGeomWith scrollWheelSuppressed ctx wid
   case mGeom of
     Nothing -> pure False
     Just (idx, dir, _x, _y, w, h, pad, contentSize) -> do
@@ -626,7 +622,18 @@ scrollBarLayouts2D ctx idx g = do
 
 scrollContainerGeom ::
   Context -> WidgetId -> IO (Maybe (NodeIdx, DirTag, Float, Float, Float, Float, Padding, Float))
-scrollContainerGeom ctx wid = do
+scrollContainerGeom = scrollContainerGeomWith scrollChromeSuppressed
+
+-- | Geometry lookup for the scroller that owns a widget id, skipping
+-- scrollers the given predicate rules out. Thumb dragging uses the chrome
+-- predicate (a hidden bar has no lane to grab); the wheel uses the wider
+-- one (a hidden bar still scrolls).
+scrollContainerGeomWith ::
+  (ScrollConfig -> Bool -> DirTag -> Bool) ->
+  Context ->
+  WidgetId ->
+  IO (Maybe (NodeIdx, DirTag, Float, Float, Float, Float, Padding, Float))
+scrollContainerGeomWith suppressed ctx wid = do
   count <- arenaCount (ctxNodeArena ctx)
   let go idx
         | idx >= count = pure Nothing
@@ -666,7 +673,7 @@ scrollContainerGeom ctx wid = do
                           dir <- getDirection (ctxNodeArena ctx) idx
                           si <- getStyleIdx (ctxNodeArena ctx) idx
                           let cfg = decodeScrollConfig si
-                          if scrollChromeSuppressed cfg (isScrollStyle2D si) dir
+                          if suppressed cfg (isScrollStyle2D si) dir
                             then go (idx + 1)
                             else do
                               pad <- getPadding (ctxNodeArena ctx) idx

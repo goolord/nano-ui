@@ -29,7 +29,6 @@ import NanoUI.Context
 import NanoUI.Draw
   ( DrawArena (..)
   , emitDrawOps
-  , getCurrentClip
   , pushFilledTriangle
   , pushImage
   , pushLine
@@ -96,7 +95,7 @@ import NanoUI.Style
   , themeSeparator
   , themeWindow
   )
-import NanoUI.Types (Color (..), ImageId (..), Rect (..), colorA, colorRGBA, clamp01, lerpColor, rectFullyInside, rectInflate, rectIntersect, rectH, rectW, rectX, rectY)
+import NanoUI.Types (Color (..), ImageId (..), Rect (..), colorA, colorRGBA, clamp01, lerpColor, rectFullyInside, rectInflate, rectH, rectW, rectX, rectY)
 import NanoUI.WidgetText
   ( buttonFlagsFromStyle
   , buttonVisualStyle
@@ -137,6 +136,7 @@ import NanoUI.Frame.Scroll (paintScrollChrome)
 import NanoUI.Frame.Scroll.Geometry
   ( decodeScrollConfig
   , isScrollStyle2D
+  , scrollBare
   , scrollChromeActive
   , scrollViewportClip2D
   )
@@ -195,19 +195,25 @@ lowerNode ctx idx = lowerNodeWithOccluders ctx [] idx
 
 lowerNodeWithOccluders :: Context -> [Rect] -> NodeIdx -> IO ()
 lowerNodeWithOccluders ctx occluders idx = do
-  nt <- getNodeType (ctxNodeArena ctx) idx
   (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-  theme <- readIORef (ctxTheme ctx)
-  let rect = Rect x y w h
-      fm = ctxFontMetrics ctx
-      terminal = isCellHost (ctxHostProfile ctx)
-      da = ctxDrawArena ctx
-  clip <- getCurrentClip da
-  case rectIntersect rect clip of
-    Nothing -> pure ()
-    Just visible
-      | not (null occluders) && any (rectFullyInside visible) occluders -> pure ()
-      | otherwise -> lowerNodeVisible ctx occluders idx nt x y w h rect fm theme terminal da
+  let da = ctxDrawArena ctx
+  (cx, cy, cw, ch) <- readIORef (daCurrentClip da)
+  let !l = max x cx
+      !t = max y cy
+      !r = min (x + w) (cx + cw)
+      !b = min (y + h) (cy + ch)
+  if r <= l || b <= t
+    then pure ()
+    else do
+      if not (null occluders) && any (rectFullyInside (Rect l t (r - l) (b - t))) occluders
+        then pure ()
+        else do
+          nt <- getNodeType (ctxNodeArena ctx) idx
+          theme <- readIORef (ctxTheme ctx)
+          let !rect = Rect x y w h
+              !fm = ctxFontMetrics ctx
+              !terminal = isCellHost (ctxHostProfile ctx)
+          lowerNodeVisible ctx occluders idx nt x y w h rect fm theme terminal da
 
 lowerNodeVisible ::
   Context ->
@@ -281,19 +287,24 @@ lowerNodeVisible ctx occluders idx nt x y w h rect fm theme terminal da =
               ( scrollChromeActive cfg False dir contentSize innerMain
               , scrollContentClip (ctxHostProfile ctx) fm slot cfg dir x y w h pad contentSize
               )
--- Grow×grow scrollers (page-level) keep no well so they blend into
-      -- the window backdrop. That backdrop only exists while the runner
+      -- A bare scroller paints nothing at all: it only lends its clip and
+      -- offset, so whatever sits behind it (window, panel) keeps showing
+      -- through. Grow×grow scrollers (page-level) keep no well so they blend
+      -- into the window backdrop. That backdrop only exists while the runner
       -- clears it on DamageFull frames; on clip frames (scrolling, resize)
       -- the strip vacated by scrolled content has no covering command and
       -- the retained texture would show stale pixels — a ghost of a previous
       -- scroll position. Paint the full rect with the window color instead:
       -- invisible on a cleared backdrop, and clip replay then always
       -- repaints the whole viewport.
-      if wTag == SizingGrow && hTag == SizingGrow
-        then pushRect da rect (if inFloating then styleBg (themeFloatingWindow theme) else themeWindow theme)
-        else do
-          fillStyledRect da terminal wellStyle rect
-          strokeStyledRect da terminal wellStyle x y w h
+      if scrollBare cfg
+        then pure ()
+        else
+          if wTag == SizingGrow && hTag == SizingGrow
+            then pushRect da rect (if inFloating then styleBg (themeFloatingWindow theme) else themeWindow theme)
+            else do
+              fillStyledRect da terminal wellStyle rect
+              strokeStyledRect da terminal wellStyle x y w h
       withClip da inner $ walkChildrenWithOccluders ctx occluders idx
       when showChrome $ do
         wid <- getWidgetId (ctxNodeArena ctx) idx

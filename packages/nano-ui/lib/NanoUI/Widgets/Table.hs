@@ -262,7 +262,7 @@ tableSplitPanes fillInner tableWid vWid hWid rowMinH frozenIdx unfrozenIdx pinne
       scrollAreaIdConfigured
         vWid
         (vLay fillInner)
-        (ScrollConfig ScrollAuto ScrollAuto True)
+        (ScrollConfig ScrollAuto ScrollAuto True False)
         (bodyBlock vWid True idxs)
       pure hs
 

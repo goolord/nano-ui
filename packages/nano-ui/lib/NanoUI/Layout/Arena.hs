@@ -81,7 +81,6 @@ import Data.Bits (shiftL, shiftR, (.&.), (.|.))
 import Data.HashTable.IO (BasicHashTable)
 import qualified Data.HashTable.IO as HT
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import Data.IntMap.Strict qualified as IM
 import Data.Primitive.Array (MutableArray, newArray, readArray, writeArray)
 import Data.Primitive.PrimArray
   ( MutablePrimArray
@@ -200,7 +199,7 @@ data NodeArena = NodeArena
   -- Children reuse the working scratch, so a container's child list must be
   -- snapshotted at its own depth to survive recursive positioning.
   , naSnapCap :: IORef Int
-  , naSnapLevels :: IORef (IM.IntMap AxisSnapshot)
+  , naSnapLevels :: IORef (MutableArray RealWorld (Maybe AxisSnapshot))
   -- Per-frame memo of wrapped text sizes keyed by (node, quantized wrap
   -- width). Text and style are fixed per node within a frame, so the frame
   -- tag is all that is needed to invalidate across frames.
@@ -217,6 +216,11 @@ data NodeArena = NodeArena
   , naEpoch :: IORef Word32
   , naIndex :: IORef (BasicHashTable WidgetId Word64)
   }
+
+-- | Maximum recursion depth for layout snapshot buffers. Levels deeper than
+-- this share the last buffer, so it must exceed any plausible nesting depth.
+maxSnapDepth :: Int
+maxSnapDepth = 256
 
 -- | One depth level's frozen child indices and distributed main-axis sizes.
 data AxisSnapshot = AxisSnapshot
@@ -254,7 +258,7 @@ newNodeArena = do
   naScratchOutMain <- newIORef =<< newPrimArray scratchCap
   naScratchOutCross <- newIORef =<< newPrimArray scratchCap
   naSnapCap <- newIORef scratchCap
-  naSnapLevels <- newIORef IM.empty
+  naSnapLevels <- newIORef =<< newArray maxSnapDepth Nothing
   naFrameTag <- newIORef 1
   naWrapTag <- newIORef =<< newPrimArray cap
   naWrapKey <- newIORef =<< newPrimArray cap
@@ -855,33 +859,34 @@ setStyleIdx na idx v = arenaArrays na >>= \a -> writePrimArray (naArrTree a) (id
 {-# NOINLINE ensureAxisSnapshot #-}
 ensureAxisSnapshot :: NodeArena -> Int -> Int -> IO AxisSnapshot
 ensureAxisSnapshot na depth needed = do
+  arr <- readIORef (naSnapLevels na)
+  let !d = max 0 (min (maxSnapDepth - 1) depth)
   cap <- readIORef (naSnapCap na)
   if needed <= cap
-    then getLevel depth
+    then getLevel arr d cap
     else do
-      let newCap = max needed (cap * 2)
-      levels <- readIORef (naSnapLevels na)
-      levels' <- traverse (growSnap cap newCap) levels
-      writeIORef (naSnapLevels na) levels'
+      let !newCap = max needed (cap * 2)
+      forM_ [0 .. maxSnapDepth - 1] $ \i -> do
+        m <- readArray arr i
+        case m of
+          Nothing -> pure ()
+          Just (AxisSnapshot idx out) -> do
+            idx' <- growPrimArrayCopy idx cap newCap 0
+            out' <- growPrimArrayCopy out cap newCap 0
+            writeArray arr i (Just (AxisSnapshot idx' out'))
       writeIORef (naSnapCap na) newCap
-      getLevel depth
+      getLevel arr d newCap
   where
-    getLevel d = do
-      levels <- readIORef (naSnapLevels na)
-      case IM.lookup d levels of
+    getLevel arr d currentCap = do
+      m <- readArray arr d
+      case m of
         Just s -> pure s
         Nothing -> do
-          cap' <- readIORef (naSnapCap na)
-          asIdx <- newPrimArray cap'
-          asOut <- newPrimArray cap'
-          let s = AxisSnapshot {..}
-          writeIORef (naSnapLevels na) (IM.insert d s levels)
+          asIdx <- newPrimArray currentCap
+          asOut <- newPrimArray currentCap
+          let s = AxisSnapshot asIdx asOut
+          writeArray arr d (Just s)
           pure s
-
-    growSnap cap newCap (AxisSnapshot idx out) = do
-      idx' <- growPrimArrayCopy idx cap newCap 0
-      out' <- growPrimArrayCopy out cap newCap 0
-      pure AxisSnapshot {asIdx = idx', asOut = out'}
 
 -- | Look up a wrapped text size memoized for this frame at @(node, wrapW)@.
 -- Wrap widths are quantized to 0.25 px so near-identical reflows still hit.
