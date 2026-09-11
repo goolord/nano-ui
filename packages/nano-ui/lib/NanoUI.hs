@@ -259,7 +259,9 @@ module NanoUI
   , enumSelect
   , useEnumSelect
   , colorPicker
+  , colorPickerRGBA
   , colorPickerToHex
+  , colorPickerToHexA
   , colorPickerFromHex
   , radioFieldset
   , boundedRadioFieldset
@@ -760,7 +762,9 @@ import NanoUI.Widgets
   , clickButton
   , colorPicker
   , colorPickerFromHex
+  , colorPickerRGBA
   , colorPickerToHex
+  , colorPickerToHexA
   , column
   , flex
   , heading

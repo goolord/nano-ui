@@ -75,14 +75,13 @@ import NanoUI.Frame.Select (overlayMenuOwnerAt, selectDropRect)
 import NanoUI.Frame.TextEdit
   ( TextAreaGeom (..)
   , TextAreaScrollBarLayouts (..)
-  , TextInputGeom (..)
   , isMouseOnTextAreaScrollBarAt
   , searchClearHit
   , textAreaGeom
   , textAreaScrollBarLayouts
   , textEditMenuCursorKind
   , textFieldWidgetAtMouse
-  , textInputGeom
+  , nodeTextFieldGeom
   )
 import qualified NanoUI.Widgets.TextBuffer as TB
 import NanoUI.Frame.Window (windowResizeCursorKind)
@@ -368,9 +367,18 @@ sliderCursorKind ctx wid mouse inp = do
              in grabDragKind (rectContains hitRect mouse) dragging inp
 
 textInputCursorKind :: Context -> WidgetId -> V2 -> IO UiCursorKind
-textInputCursorKind ctx wid mouse =
-  textFieldCursorKind ctx wid mouse $ \host fm x y w h ->
-    tigFieldRect (textInputGeom host fm x y w h)
+textInputCursorKind ctx wid mouse = do
+  visible <- widgetVisibleAt ctx wid mouse
+  if not visible
+    then pure UiCursorDefault
+    else do
+      mIdx <- findNodeByWidgetId ctx wid
+      mrect <- scrollHitRect ctx wid
+      case (mIdx, mrect) of
+        (Just idx, Just (Rect x y w h)) -> do
+          (field, _) <- nodeTextFieldGeom ctx idx x y w h
+          pure (if rectContains field mouse then UiCursorText else UiCursorDefault)
+        _ -> pure UiCursorDefault
 
 textAreaCursorKind :: Context -> WidgetId -> V2 -> IO UiCursorKind
 textAreaCursorKind ctx wid mouse = do

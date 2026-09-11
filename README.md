@@ -1,45 +1,54 @@
 # nano-ui
 
-Purely functional immediate-mode GUI core for Haskell. Backend-agnostic: emits batched vertex/index draw lists in pinned off-heap memory.
+A purely functional immediate-mode GUI toolkit for Haskell. You describe your
+interface as a plain function of application state, and nano-ui handles layout,
+input, focus, animation, and rendering. The core is backend-agnostic, so the
+same app can run in a terminal or in a native window.
+
+There is no retained widget tree and no callback soup: the whole UI is a
+function that runs every frame, and the host receives a batched draw list to
+present.
+
+## Motivation
+
+Immediate-mode GUIs fit Haskell unusually well. The interface is just a
+function of state, side effects stay in one place, and there are no widget
+objects to keep in sync with your data. nano-ui tries to take that idea as far
+as it goes:
+
+- **The UI is a value.** Running the frame is the only thing that touches the
+  outside world; everything else is expressible, composable code.
+- **Backends are interchangeable.** The core emits a draw list; terminal and
+  windowing hosts are replaceable packages rather than parts of your app.
+- **State is explicit.** Local state lives in hooks, app state lives in your
+  model, and changes are delivered as typed messages.
+- **Performance is a feature.** Rendering is allocation-light and idle frames
+  are skipped when nothing changed, so a UI that is quiet is also cheap.
 
 ## Features
 
-- **Topological path IDs**: zero-allocation `Word64` widget IDs from `nextId`/`scope`/`keyed` (no `HasCallStack` or manual ID stacks)
-- **Typed reducers**: `emit` collects messages; backend `run*AppReduce` applies them to app state at frame end
-- **Two-pass flex layout**: measure/position over struct-of-arrays node arena. `percent` and `aspect` (width / height) are first-class constraints
-- **Compact regions**: `compactHost` / `askCompact` keep large read-heavy app state off the GC walk
-- **Zero-allocation draw path**: pinned `ForeignPtr` vertex/index arenas reused each frame
-- **Damage tracking**: idle rendering skips work until input, hover, scroll drag, focused text field, `markDirty`, or animation demands a redraw
-- **Headless verification**: `NanoUI.Testing` provides deterministic frames and ASCII render checks
-
-## Build
-
-```bash
-cabal build
-cabal test
-cabal run nano-ui-demo
-```
-
-On Linux/macOS, pass `-fnotcurses` for `nano-ui-term` tests (`cabal test -fnotcurses`). SDL and Windows do not need notcurses.
-
-## Nix
-
-Linux and macOS only (Nix does not replace the Windows MSYS2/Zig workflow).
-
-```bash
-nix develop          # GHC 9.14, cabal, HLS, SDL3, SDL3_ttf, pkg-config; sdl flag on
-nix build            # build all wired packages
-nix run .#nano-ui-sdl-demo
-nix run .#nano-ui-sdl-anim
-nix run .#nano-ui-tui
-nix flake check      # run the test suite
-```
+- **Immediate-mode core** with a familiar widget set: buttons, labels, text
+  fields, sliders, checkboxes, selects, tabs, tables, trees, menus, popups,
+  floating windows, panes, and more.
+- **Expressive flex layout** with grow, fit, percent, and aspect sizing.
+- **Typed messages** via emitters and frame-end reducers, an Elm-style update
+  loop that stays type-safe.
+- **Local state hooks** (`useInt`, `useState`, `useFlag`, ...) for UI-only
+  state that does not belong in your model.
+- **Animation** with easing, springs, and tweened values.
+- **Damage-tracked rendering** so idle apps stop redrawing until something
+  actually changes.
+- **Headless testing** with deterministic frames and ASCII render inspection.
+- **Plots and vector graphics** through an optional diagrams-lib backend.
 
 ## Quickstart
 
-Application UI lives in `NanoUI`. Runtime loops live in backend packages.
+The app DSL lives in `NanoUI`; the runtime loop lives in a backend package.
+Here is a small counter in a terminal:
 
 ```haskell
+import Control.Monad (when)
+import qualified Data.Text as T
 import NanoUI
 import NanoUI.Backend.Term (TermOptions (..), defaultTermOptions, runTermApp)
 
@@ -47,18 +56,60 @@ main :: IO ()
 main =
   runTermApp
     defaultTermOptions
-      { termAppShouldQuit = \inp -> inputKeysElem KeyEscape (inputKeys inp)
+      { termAppShouldQuit = inputKeysElem KeyEscape . inputKeys
       }
-    app
+    counter
 
-app :: NanoUI ()
-app =
-  column (grow defaultLayout) $ do
-    void (button "OK")
-    label "Hello"
+counter :: NanoUI ()
+counter = do
+  (count, setCount) <- useInt 0
+  column' (grow defaultLayout) $ do
+    heading "Counter"
+    row' defaultLayout $ do
+      minus <- button "-"
+      when (respClicked minus) (setCount (count - 1))
+      label (T.pack (show count))
+      plus <- button "+"
+      when (respClicked plus) (setCount (count + 1))
 ```
 
-Headless frame checks use `NanoUI.Testing`:
+The same `counter` runs in a window by swapping the backend:
+
+```haskell
+import NanoUI.Backend.Sdl (SdlOptions (..), defaultSdlOptions, runSdlApp)
+
+main :: IO ()
+main =
+  runSdlApp
+    defaultSdlOptions
+      { sdlAppShouldQuit = inputKeysElem KeyEscape . inputKeys
+      }
+    counter
+```
+
+For larger apps, keep state in a model and let widgets emit typed messages.
+The backend applies them at the end of the frame:
+
+```haskell
+data Msg = Increment | Decrement deriving (Eq)
+
+update :: Msg -> Int -> Int
+update Increment n = n + 1
+update Decrement n = n - 1
+
+view :: Int -> NanoUI ()
+view n = do
+  column' (grow defaultLayout) $ do
+    buttonEmit "-" Decrement
+    label (T.pack (show n))
+    buttonEmit "+" Increment
+
+main :: IO ()
+main =
+  runTermAppReduce defaultTermOptions update 0 view
+```
+
+Headless tests render frames without a host:
 
 ```haskell
 import NanoUI
@@ -67,114 +118,62 @@ import NanoUI.Testing (newContext, renderASCII, runFrame)
 main :: IO ()
 main = do
   ctx <- newContext
-  let inp = emptyInput { inputWindowSize = Size 80 24 }
-  (_, _, drawData, _) <- runFrame ctx inp app
+  let inp = emptyInput {inputWindowSize = Size 80 24}
+  (_, _, drawData, _) <- runFrame ctx inp counter
   mapM_ putStrLn (renderASCII 80 24 drawData)
 ```
 
-## RTS flags
+## Backends
 
-For interactive 60fps apps, use the non-moving GC and latency-tuned flags:
+| Package | Host | Entry points |
+|---------|------|--------------|
+| `nano-ui-term` | Terminal (Win32 console / notcurses) | `runTermApp`, `runTermAppReduce` |
+| `nano-ui-sdl` | SDL3 window | `runSdlApp`, `runSdlAppReduce` |
+| `nano-ui-rgfw` | RGFW window | `runRgfwApp`, `runRgfwAppReduce` |
 
-```bash
-+RTS -N --nonmoving-gc -qb0
-```
+Each backend exposes options for quitting, assets, fonts, and icons. See the
+package of interest for what it requires.
 
-The demo and TUI set these via cabal `-with-rtsopts`.
-
-### Terminal backend
-
-Uses `nano-ui-term` (`runTermApp`, `runTermAppReduce`, `TermOptions` from `NanoUI.Backend.Term`) with `CellHost` metrics.
-
-**Linux / macOS / Nix** uses [notcurses](https://github.com/dankamongmen/notcurses). **`notcurses-core` is required** (pkg-config).
+## Building
 
 ```bash
-cabal run nano-ui-tui
+cabal build
+cabal test
+cabal run nano-ui-demo
 ```
 
-**Windows** uses the native Win32 console API in CMD, PowerShell, and Windows Terminal.
+Some components need host libraries and flags:
 
-```bash
-cabal run nano-ui-tui
-```
-
-#### Nerd Font and Font Awesome icons
-
-With a Nerd Font (or Font Awesome) the TUI draws its chrome with glyphs instead of brackets. Override detection with `TermOptions`:
-
-```haskell
-defaultTermOptions { termAppIcons = Just IconsNerd }
-```
-
-Or set `NANOUI_ICONS=nerd` in the environment.
-
-### SDL3 backend
-
-Requires SDL3, SDL3_ttf, and `pkg-config`.
+- Terminal backend on Linux/macOS needs `notcurses-core` (`-fnotcurses`);
+  Windows and SDL do not.
+- SDL3 backend needs SDL3, SDL3_ttf, and `pkg-config` (`-fsdl`).
+- RGFW backend is self-contained.
 
 ```bash
 cabal run -fsdl nano-ui-sdl-demo
-cabal run -fsdl nano-ui-sdl-anim
 ```
 
-Register initial RGBA assets through `SdlOptions`:
-
-```haskell
-import NanoUI.Backend.Sdl (RgbaImage (..), SdlOptions (..), defaultSdlOptions, runSdlApp)
-
-main =
-  runSdlApp
-    defaultSdlOptions
-      { sdlAppImages = [RgbaImage (ImageId 1) 32 32 pixels]
-      , sdlAppShouldQuit = \inp -> inputKeysElem KeyEscape (inputKeys inp)
-      }
-    app
-```
-
-On Windows, install the UCRT64 packages and keep `<msys2>\ucrt64\bin` on PATH.
+On Linux/macOS a Nix flake provides the full toolchain:
 
 ```bash
-pacman -S mingw-w64-ucrt-x86_64-sdl3 mingw-w64-ucrt-x86_64-sdl3-ttf
+nix develop
+nix run .#nano-ui-sdl-demo
+nix flake check
 ```
 
-Text uses a system TrueType font (Adwaita, Liberation, or Noto on Linux; Segoe UI on Windows). Override with `NANO_UI_FONT=/path/to/font.ttf`.
+## Workspace
 
-## Architecture
+The repository is a multi-package workspace:
 
-```
-NanoUI (app DSL) -> backend runners -> frame loop -> DrawData -> host render
-```
+- `nano-ui` — the core DSL, layout engine, and testing harness
+- `nano-ui-term` — terminal backend
+- `nano-ui-sdl` — SDL3 backend
+- `nano-ui-rgfw` — lightweight RGFW backend
+- `nano-ui-diagrams` — diagrams-lib bridge for plots and vector graphics
+- `nano-ui-form` — composable formlets built on ditto
+- `nano-ui-demo` — showcase demos and profiling apps
 
-Workspace packages in `packages/`:
-- `packages/nano-ui`: Core DSL, two-pass flex layout, arenas, damage tracking, and testing harness (`NanoUI`, `NanoUI.Testing`)
-- `packages/nano-ui-term`: Terminal backend for Win32 console and notcurses (`NanoUI.Backend.Term`)
-- `packages/nano-ui-sdl`: Pure SDL3 backend for pixel-host windowing (`NanoUI.Backend.Sdl`)
-- `packages/nano-ui-diagrams`: diagrams-lib vector graphics and plot engine (`NanoUI.Diagrams`, `NanoUI.Plot`)
-- `packages/nano-ui-demo`: Showcase interactive demos and profiling apps (`nano-ui-sdl-demo`, `nano-ui-sdl-profile`)
-
-## Modules
-
-| Module | Package | Role |
-|--------|---------|------|
-| `NanoUI` | `nano-ui` | App-facing DSL: widgets, layout, style, animation, input types |
-| `NanoUI.Debug` | `nano-ui` | Shared RTS metrics sampling, formatting, and frame timing utilities |
-| `NanoUI.Testing` | `nano-ui` | Deterministic frames, context setup, ASCII render inspection |
-| `NanoUI.Testing.Harness` | `nano-ui` | Test harness gestures and text span query inspection |
-| `NanoUI.Backend.Term` | `nano-ui-term` | `TermOptions`, `runTermApp`, `runTermAppReduce` |
-| `NanoUI.Testing.Term` | `nano-ui-term` | Terminal test helpers (palette, Ansi, Cells, Event, Vt) |
-| `NanoUI.Backend.Sdl` | `nano-ui-sdl` | `SdlOptions`, `RgbaImage`, `runSdlApp`, `runSdlAppReduce`, SDL testing context |
-| `NanoUI.Diagrams` | `nano-ui-diagrams` | diagrams-lib vector graphics canvas and bridge |
-| `NanoUI.Plot` | `nano-ui-diagrams` | High-performance interactive timeseries plotting widgets |
-
-Internal ownership (not exported from packages):
-
-| Area | Modules |
-|------|---------|
-| Context state | `NanoUI.Context`, `NanoUI.Context.Internal` |
-| Frame loop | `NanoUI.Frame.{Hit,Focus,Clip,Chrome,CursorKind,...}` |
-| Widget build | `NanoUI.Widgets.{Node,Chrome,Layout,...}` |
-| Term session | `NanoUI.Term.Session` (loop inside `NanoUI.Backend.Term`) |
-| SDL session | `NanoUI.Sdl.{Context,Session,Runner}` (draw inside `Runner`) |
+Architecture and rendering-pipeline diagrams live in `docs/`.
 
 ## License
 

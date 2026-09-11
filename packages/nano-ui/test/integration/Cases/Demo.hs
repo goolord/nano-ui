@@ -3,6 +3,9 @@ module Cases.Demo
   , runColorPickerPreviewTest
   , runColorPickerCommitTest
   , runColorPickerKeyCommitTest
+  , runColorPickerRgbaTest
+  , runColorPickerEditTest
+  , runColorPickerHoldTest
   ) where
 
 import Control.Monad (void)
@@ -176,10 +179,16 @@ runColorPickerPreviewTest _ failed = do
   spans <- collectTextSpans ctx
   let findLabel needle =
         listToMaybe [(r, t) | (r, t, _, _, _) <- spans, needle `T.isInfixOf` t]
-  case (findLabel "Current Color", findLabel "New Color") of
+  case (findLabel "Current", findLabel "New") of
     (Just (Rect cx cy _ _, _), Just (Rect nx ny _ _, _)) -> do
-      assert failed (nx > cx + 20)
-      assert failed (abs (cy - ny) < 4)
+      assert failed (abs (cx - nx) < 4)
+      assert failed (ny > cy + 5)
+    _ -> assert failed False
+  -- Channel labels sit inline to the left of their value.
+  case (findLabel "R", findLabel "204") of
+    (Just (Rect rx ry _ _, _), Just (Rect vx vy _ _, _)) -> do
+      assert failed (rx < vx)
+      assert failed (abs (ry - vy) < 6)
     _ -> assert failed False
 
 runColorPickerCommitTest :: Context -> IORef Int -> IO ()
@@ -191,7 +200,7 @@ runColorPickerCommitTest ctx failed = do
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect x y w h = respRect resp
       wid = respId resp
-      geom = colorPickerGeom (ctxHostProfile ctx) (ctxFontMetrics ctx) x y w h
+      geom = colorPickerGeom False (ctxHostProfile ctx) (ctxFontMetrics ctx) x y w h
       sv = cpgSv geom
       pt = V2 (rectX sv + rectW sv * 0.9) (rectY sv + 2)
       press = pressAt inp0 pt
@@ -206,6 +215,73 @@ runColorPickerCommitTest ctx failed = do
     failed
     (packed (widgetStoreBaseColor storeDone wid initial))
     (packed (widgetStoreColor storeDone wid initial))
+
+runColorPickerRgbaTest :: Context -> IORef Int -> IO ()
+runColorPickerRgbaTest _ failed = do
+  ctx <- newPixelContext
+  let inp0 = withInputOff 400 460
+      ui = void (colorPickerRGBA "Accent" (colorRGBA 204 102 102 128))
+  _ <- runFrame ctx inp0 ui
+  _ <- runFrame ctx inp0 ui
+  spans <- collectTextSpans ctx
+  let has needle = any (\(_, t, _, _, _) -> needle `T.isInfixOf` t) spans
+  assert failed (has "#cc666680")
+  assert failed (has "128")
+  assert failed (has "Current")
+  assert failed (has "New")
+  -- R/G/B(/A) and H/S/V share grid columns.
+  let rectOf t = listToMaybe [r | (r, s, _, _, _) <- spans, s == t]
+  case (rectOf "204", rectOf "0", rectOf "102", rectOf "50") of
+    (Just (Rect rx ry _ _), Just (Rect hx hy _ _), Just (Rect gx _ _ _), Just (Rect sx _ _ _)) -> do
+      assert failed (abs (rx - hx) < 0.6)
+      assert failed (abs (gx - sx) < 0.6)
+      assert failed (abs (rx - gx) > 5)
+      assert failed (abs (ry - hy) > 5)
+    _ -> assert failed False
+
+-- Typing in a channel field must recolour on the same frame (live edits).
+runColorPickerEditTest :: Context -> IORef Int -> IO ()
+runColorPickerEditTest ctx failed = do
+  let inp0 = withInput 400 460
+      initial = colorRGBA 204 102 102 255
+      ui = colorPicker "Accent" initial
+  _ <- warmup2 ctx inp0 ui
+  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
+  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
+  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyBackspace, KeyBackspace, KeyBackspace]}) ui
+  ((_, col), _, _, _) <- runFrame ctx (inp0 {inputChars = "10"}) ui
+  assertEq failed (colorR col) 10
+  assertEq failed (colorG col) 102
+
+-- The SV field is square, and a held press keeps sampling it (the drag key
+-- recorded on the press frame used to blank the field and reset to white).
+runColorPickerHoldTest :: Context -> IORef Int -> IO ()
+runColorPickerHoldTest ctx failed = do
+  let inp0 = withInput 400 460
+      initial = colorRGBA 204 102 102 255
+      ui = colorPicker "Accent" initial
+  (resp, _) <- warmup2 ctx inp0 ui
+  let wid = respId resp
+      Rect x y w h = respRect resp
+      geom = colorPickerGeom False (ctxHostProfile ctx) (ctxFontMetrics ctx) x y w h
+      sv = cpgSv geom
+      pt = V2 (rectX sv + rectW sv * 0.5) (rectY sv + rectH sv * 0.5)
+      press =
+        inp0
+          { inputMousePos = pt
+          , inputMouseDown = True
+          , inputMousePressed = True
+          , inputMouseReleased = False
+          }
+      hold = press {inputMousePressed = False}
+  assertEq failed (rectW sv) (rectH sv)
+  _ <- runFrame ctx press ui
+  stP <- getStore ctx
+  let colP = colorToWord32 (widgetStoreColor stP wid initial)
+  _ <- runFrame ctx hold ui
+  stH <- getStore ctx
+  assert failed (colP /= colorToWord32 initial)
+  assertEq failed (colorToWord32 (widgetStoreColor stH wid initial)) colP
 
 runColorPickerKeyCommitTest :: Context -> IORef Int -> IO ()
 runColorPickerKeyCommitTest ctx failed = do

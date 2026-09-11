@@ -14,6 +14,8 @@ module NanoUI.WidgetText
   , textInputFieldHeight
   , textInputFlagSearch
   , textInputSearchMode
+  , textInputFlagBare
+  , textInputBareMode
   , textInputSearchBody
   , comboTextClip
   , textInputSearchTerminalText
@@ -28,7 +30,9 @@ module NanoUI.WidgetText
   , colorPickerNewLabel
   , colorPickerDisplayText
   , colorPickerToHex
+  , colorPickerToHexA
   , colorPickerFromHex
+  , colorPickerParseHex
   , buttonFlagClose
   , buttonFlagTab
   , buttonFlagTable
@@ -66,7 +70,7 @@ import Data.Word (Word8)
 import NanoUI.Font (FontMetrics (..), fmLineHeight, widgetContentInset)
 import NanoUI.Icons (Icons, treeExpandMark)
 import NanoUI.Style (FontStyle (..), FontVariant (..), FontWeight (..), TextDecoration (..), Theme (..), styleBg, themeButton, themePanel, themeWindow)
-import NanoUI.Types (Color (..), HostProfile, Rect (..), colorB, colorG, colorR, colorRGBA, isCellHost, lerpColor)
+import NanoUI.Types (Color (..), HostProfile, Rect (..), colorA, colorB, colorG, colorR, colorRGBA, isCellHost, lerpColor)
 import qualified Data.Text as T
 
 sliderValueText :: Float -> Text
@@ -188,6 +192,15 @@ textInputFlagSearch = 0x04000000
 textInputSearchMode :: Int -> Bool
 textInputSearchMode si = si .&. textInputFlagSearch /= 0
 
+-- | Marks a @NodeTextInput@ as a bare field: caption-less and chrome-less,
+-- so callers can render their own label beside it. The node rect is the box.
+textInputFlagBare :: Int
+textInputFlagBare = 0x08000000
+
+{-# INLINE textInputBareMode #-}
+textInputBareMode :: Int -> Bool
+textInputBareMode si = si .&. textInputFlagBare /= 0
+
 -- | Body of a search field: the live value, or the placeholder while empty and
 -- unfocused. @ph@ is the caller-supplied placeholder, not the derived one used
 -- by captioned 'textInputFieldText'.
@@ -231,14 +244,18 @@ colorPickerLabelText :: Text -> Text
 colorPickerLabelText = T.strip
 
 colorPickerCurrentLabel :: Text
-colorPickerCurrentLabel = "Current Color"
+colorPickerCurrentLabel = "Current"
 
 colorPickerNewLabel :: Text
-colorPickerNewLabel = "New Color"
+colorPickerNewLabel = "New"
 
 colorPickerToHex :: Color -> Text
 colorPickerToHex c =
   "#" <> hexByte (colorR c) <> hexByte (colorG c) <> hexByte (colorB c)
+
+-- | Eight-digit form for the alpha-aware picker: @#RRGGBBAA@.
+colorPickerToHexA :: Color -> Text
+colorPickerToHexA c = colorPickerToHex c <> hexByte (colorA c)
 
 hexByte :: Word8 -> Text
 hexByte n = T.pack (showHexWord8 n)
@@ -250,16 +267,30 @@ showHexWord8 n =
       ch i = if i < 10 then chr (48 + fromIntegral i) else chr (87 + fromIntegral i)
    in [ch hi, ch lo]
 
-colorPickerFromHex :: Text -> Maybe Color
-colorPickerFromHex txt =
+-- | Parse a hex colour, accepting an optional leading @#@ and either 6 or 8
+-- digits. The fourth component is 'Nothing' for the six-digit form.
+colorPickerParseHex :: Text -> Maybe (Word8, Word8, Word8, Maybe Word8)
+colorPickerParseHex txt =
   let bare = T.dropWhile (== '#') (T.strip txt)
-   in if T.length bare /= 6
-        then Nothing
-        else do
-          r <- parseHexPair (T.take 2 bare)
-          g <- parseHexPair (T.take 2 (T.drop 2 bare))
-          b <- parseHexPair (T.take 2 (T.drop 4 bare))
-          pure (colorRGBA r g b 255)
+      pair i = parseHexPair (T.take 2 (T.drop i bare))
+   in case T.length bare of
+        6 -> do
+          r <- pair 0
+          g <- pair 2
+          b <- pair 4
+          pure (r, g, b, Nothing)
+        8 -> do
+          r <- pair 0
+          g <- pair 2
+          b <- pair 4
+          a <- pair 6
+          pure (r, g, b, Just a)
+        _ -> Nothing
+
+colorPickerFromHex :: Text -> Maybe Color
+colorPickerFromHex txt = do
+  (r, g, b, ma) <- colorPickerParseHex txt
+  pure (colorRGBA r g b (fromMaybe 255 ma))
 
 parseHexPair :: Text -> Maybe Word8
 parseHexPair t =

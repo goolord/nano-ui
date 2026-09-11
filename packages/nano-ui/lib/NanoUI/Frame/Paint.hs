@@ -13,7 +13,7 @@ import Data.Maybe (fromMaybe)
 import Data.Word (Word32)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Text as T
-import NanoUI.Widgets.ColorPicker (drawColorPickerPanel)
+import NanoUI.Widgets.ColorPicker (colorPickerAlphaMode, drawColorPickerPanel)
 import NanoUI.Widgets.Custom (mkCustomDrawContext)
 import NanoUI.Context
   ( Context (..)
@@ -108,6 +108,8 @@ import NanoUI.WidgetText
   , selectChevronCenterX
   , selectChevronReserve
   , tableStripeColor
+  , textInputBareMode
+  , textInputFieldText
   , textInputSearchBody
   , textInputSearchMode
   , textNodeFontVariant
@@ -346,13 +348,16 @@ lowerNodeVisible ctx occluders idx nt x y w h rect fm theme terminal da =
           style <- widgetVisualStyle ctx nt idx
           focus <- textInputFocused ctx idx
           si <- getStyleIdx (ctxNodeArena ctx) idx
-          if textInputSearchMode si
-            then do
-              opts <- getOptions (ctxNodeArena ctx) idx
-              if null opts
-                then paintSearchField ctx da fm theme style idx focus x y w h
-                else paintComboField ctx da fm theme style idx focus x y w h
-            else do
+          if textInputBareMode si
+            then paintBareField ctx da fm theme style idx focus x y w h
+            else
+              if textInputSearchMode si
+                then do
+                  opts <- getOptions (ctxNodeArena ctx) idx
+                  if null opts
+                    then paintSearchField ctx da fm theme style idx focus x y w h
+                    else paintComboField ctx da fm theme style idx focus x y w h
+                else do
               let geom = textInputGeom (ctxHostProfile ctx) fm x y w h
                   fieldRect = tigFieldRect geom
                   clip = textInputFieldTextClip (ctxHostProfile ctx) geom fm
@@ -551,7 +556,7 @@ lowerNodeVisible ctx occluders idx nt x y w h rect fm theme terminal da =
         when (nt == NodeColorPicker) $ do
           store <- getStore ctx
           wid <- getWidgetId (ctxNodeArena ctx) idx
-          drawColorPickerPanel (ctxHostProfile ctx) fm da store wid style x y w h
+          drawColorPickerPanel (colorPickerAlphaMode si) (ctxHostProfile ctx) fm da store wid style x y w h
       placements <- widgetTextPlacements ctx nt idx x y w h
       mFontColor <- getNodeFontColor (ctxNodeArena ctx) idx
       fontSizeVal <- getNodeFontSize (ctxNodeArena ctx) idx
@@ -655,6 +660,32 @@ paintSearchField ctx da fm theme style idx focus x y w h = do
   paintClippedFieldText ctx da fm style idx x y w h clip (rectX clip - scrollX) ty display fg
   when (not isEmpty) $
     drawCloseIcon host fm da (rectX clearRect) (rectY clearRect) (rectW clearRect) (rectH clearRect) iconCol
+
+-- | Bare field: the box fills the node rect with no caption or icon chrome.
+-- Callers place their own label beside it.
+paintBareField :: Context -> DrawArena -> FontMetrics -> Theme -> Style -> NodeIdx -> Bool -> Float -> Float -> Float -> Float -> IO ()
+paintBareField ctx da fm theme style idx focus x y w h = do
+  let host = ctxHostProfile ctx
+      box = Rect x y w h
+      (ix, iy) = widgetContentInset host fm
+      clip = Rect (x + ix) (y + iy) (max 0 (w - 2 * ix)) (max 0 (h - 2 * iy))
+  paintTextFieldFrame da theme style focus box
+  value <- textInputValue ctx idx
+  let bg = styleBg style
+      baseFg = styleFg style
+      display = textInputFieldText "" value focus
+      isEmpty = T.null value
+  scrollX <- syncTextInputScroll ctx idx x y w h
+  (ty, fg) <-
+    if T.null display
+      then pure (0, baseFg)
+      else do
+        (_tw, th) <- ctxMeasureText ctx display
+        pure
+          ( centeredTextY host fm y h th
+          , if isEmpty && not focus then lerpColor baseFg bg 0.5 else baseFg
+          )
+  paintClippedFieldText ctx da fm style idx x y w h clip (rectX clip - scrollX) ty display fg
 
 drawSearchMagnifier :: DrawArena -> Rect -> Color -> IO ()
 drawSearchMagnifier da (Rect x y w h) col = do
