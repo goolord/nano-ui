@@ -221,7 +221,7 @@ demoUi = do
   (checked, setChecked) <- useFlag False -- checkbox
   (vol, setVol) <- useText "50" -- slider, as text
   (quality, setQuality) <- useText "Medium" -- select
-  (accentHex, setAccent) <- useText (colorPickerToHex demoAccent) -- colorPicker
+  (accentHex, setAccent) <- useText (colorPickerToHexA demoAccent) -- colorPickerRGBA
   (themeName, setThemeName) <- useText (themeDisplayName ThemeDefault) -- boundedRadioFieldset
   (fontChoice, setFontChoice) <- useText "Inter" -- comboBox
   (name, setName) <- useText "" -- textInput
@@ -331,9 +331,9 @@ demoUi = do
               let qualities = ["Low", "Medium", "High"]
               (_, qualityIdx) <- select "Quality" qualities 1
               setQuality (qualities !! qualityIdx)
-              (_, aVal) <- colorPicker "Accent" demoAccent
-              setAccent (colorPickerToHex aVal)
-              (_, tVal) <- boundedRadioFieldset "Theme" TomorrowNightMin themeDisplayName
+              (_, aVal) <- colorPickerRGBA "Accent" demoAccent
+              setAccent (colorPickerToHexA aVal)
+              (_, tVal) <- boundedRadioFieldset "Theme" ThemeDefault themeDisplayName
               setThemeName (themeDisplayName tVal)
               setUiTheme (themeForChoice tVal)
               muted "Font: a combo box — type to filter (applies on Enter, a click, or losing focus; Esc reverts), scroll the list, hover or arrow to highlight."

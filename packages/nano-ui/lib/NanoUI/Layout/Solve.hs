@@ -122,6 +122,7 @@ import NanoUI.WidgetText
   , textInputMinWidth
   , textInputPlaceholder
   , textInputSearchMode
+  , textInputBareMode
   , searchFieldReserveW
   , isTableHeaderStyle
   , tableHeaderDisplayText
@@ -497,6 +498,11 @@ measureSearchField host fm measure txt = do
   let contentW = max textInputMinWidth lw + searchFieldReserveW host fm
   pure (contentW, textInputFieldHeight fm, 0, 0)
 
+-- Bare field: just the editable box (no caption, no icon chrome).
+measureBareField :: FontMetrics -> (Float, Float, Float, Float)
+measureBareField fm =
+  (24, textInputFieldHeight fm, 0, 0)
+
 measureWidget :: NodeArena -> HostProfile -> FontMetrics -> (Text -> IO (Float, Float)) -> NodeIdx -> IO ()
 measureWidget na host fm measure idx = do
   nt <- getNodeType na idx
@@ -564,6 +570,8 @@ measureWidget na host fm measure idx = do
         (mw, mh, extraH) <- colorPickerMeasureSize host fm measure lbl
         pure (mw, mh, 0, extraH)
       NodeTextInput
+        | textInputBareMode si && not (isCellHost host) ->
+            pure (measureBareField fm)
         | textInputSearchMode si && not (isCellHost host) ->
             measureSearchField host fm measure txt
         | otherwise -> measureTextField host fm measure txt False

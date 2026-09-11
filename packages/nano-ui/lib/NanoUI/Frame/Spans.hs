@@ -23,9 +23,8 @@ import qualified Data.IntMap.Strict as IM
 import qualified Data.Text as T
 import NanoUI.Widgets.ColorPicker
   ( ColorPickerGeom (..)
-  , colorPickerDefaultColor
+  , colorPickerAlphaMode
   , colorPickerGeom
-  , widgetStoreColor
   )
 import NanoUI.Context
   ( Context (..)
@@ -92,11 +91,10 @@ import NanoUI.Layout.Arena
 import NanoUI.Layout.Solve (scrollBarSlotOf)
 import NanoUI.Style (AlignX (..), FontStyle (..), FontVariant (..), FontWeight (..), Padding (..), Style (..), Theme (..), styleBg, styleFg, themeSeparator, themeWindow)
 import NanoUI.Types (Color (..), Rect (..), colorRGBA, lerpColor, onGrid, rectH, rectIntersect, rectW, rectX, rectY)
-import NanoUI.WidgetText (isCloseButtonStyle, isTableHeaderStyle, textInputSearchMode, textInputSearchTerminalText)
+import NanoUI.WidgetText (isCloseButtonStyle, isTableHeaderStyle, textInputBareMode, textInputSearchMode, textInputSearchTerminalText)
 import NanoUI.WidgetText
   ( colorPickerCurrentLabel
   , colorPickerNewLabel
-  , colorPickerToHex
   , selectChevronReserve
   , sliderValueText
   , textInputFieldText
@@ -238,8 +236,11 @@ collectClippedSpans' ctx floatCache idx nt clip arena = do
             pure (tagSelectClippedSpans (ctxHostProfile ctx) clipHere x y w h fm spans)
           NodeTextInput
             | not (isCellHost (ctxHostProfile ctx)) -> do
+                si' <- getStyleIdx (ctxNodeArena ctx) idx
                 spans <- collectNodeTextSpans ctx floatCache idx
-                pure (tagTextInputClippedSpans (ctxHostProfile ctx) clipHere x y w h fm spans)
+                if textInputBareMode si'
+                  then pure (tagClippedSpans clipHere spans)
+                  else pure (tagTextInputClippedSpans (ctxHostProfile ctx) clipHere x y w h fm spans)
           NodeSeparator
             | isCellHost (ctxHostProfile ctx) -> do
                 theme <- readIORef (ctxTheme ctx)
@@ -464,7 +465,7 @@ widgetHitRect ctx nt idx x y w h = do
       case nt of
         NodeTextInput -> do
           si <- getStyleIdx (ctxNodeArena ctx) idx
-          if textInputSearchMode si
+          if textInputSearchMode si || textInputBareMode si
             then pure (Rect x y w h)
             else pure (tigFieldRect (textInputGeom (ctxHostProfile ctx) fm x y w h))
         NodeTextArea -> pure (tagFieldRect (textAreaGeom (ctxHostProfile ctx) fm x y w h))
@@ -564,6 +565,7 @@ widgetTextSpans ctx nt idx x y w h = do
     else do
       case nt of
         NodeTextInput -> do
+          si <- getStyleIdx (ctxNodeArena ctx) idx
           placements <- widgetTextPlacements ctx nt idx x y w h
           value <- textInputValue ctx idx
           focus <- textInputFocused ctx idx
@@ -574,18 +576,25 @@ widgetTextSpans ctx nt idx x y w h = do
               fieldFg
                 | placeholder = lerpColor fg bg 0.40
                 | otherwise = fg
-          case placements of
-            (lblPl : fieldPl : _) -> do
-              let (lbl, lx, ly, lw, lh) = lblPl
-                  (field, fx, fy, fw, fh) = fieldPl
+          if textInputBareMode si
+            then
               pure
-                [ (Rect lx ly lw lh, lbl, labelFg, windowBg)
-                , (Rect fx fy fw fh, field, fieldFg, bg)
+                [ (Rect px py tw th, txt, fieldFg, bg)
+                | (txt, px, py, tw, th) <- placements
                 ]
-            [lblPl] -> do
-              let (lbl, lx, ly, lw, lh) = lblPl
-              pure [(Rect lx ly lw lh, lbl, labelFg, windowBg)]
-            _ -> pure []
+            else
+              case placements of
+                (lblPl : fieldPl : _) -> do
+                  let (lbl, lx, ly, lw, lh) = lblPl
+                      (field, fx, fy, fw, fh) = fieldPl
+                  pure
+                    [ (Rect lx ly lw lh, lbl, labelFg, windowBg)
+                    , (Rect fx fy fw fh, field, fieldFg, bg)
+                    ]
+                [lblPl] -> do
+                  let (lbl, lx, ly, lw, lh) = lblPl
+                  pure [(Rect lx ly lw lh, lbl, labelFg, windowBg)]
+                _ -> pure []
         _ -> do
           placements <- widgetTextPlacements ctx nt idx x y w h
           pure
@@ -646,22 +655,19 @@ widgetTextPlacements ctx nt idx x y w h = do
           pure [(txt, x + ix, centeredTextY (ctxHostProfile ctx) fm y h th, tw, th)]
         else do
           lbl <- getText (ctxNodeArena ctx) idx
-          store <- getStore ctx
-          wid <- getWidgetId (ctxNodeArena ctx) idx
-          let geom = colorPickerGeom (ctxHostProfile ctx) fm x y w h
-              hex = colorPickerToHex (widgetStoreColor store wid colorPickerDefaultColor)
+          let showAlpha = colorPickerAlphaMode si
+              geom = colorPickerGeom showAlpha (ctxHostProfile ctx) fm x y w h
               (lx, ly) = labelContentInset (ctxHostProfile ctx) fm
+              host = ctxHostProfile ctx
           (lw, lh) <- measureTxt lbl
-          (hw, hh) <- measureTxt hex
           (cw, ch) <- measureTxt colorPickerCurrentLabel
           (nw, nh) <- measureTxt colorPickerNewLabel
-          let previewY =
-                centeredTextY (ctxHostProfile ctx) fm (cpgPreviewLabelY geom) (cpgHexH geom) lh
+          let currentLabelY = centeredTextY host fm (cpgCurrentLabelY geom) (cpgLabelH geom) ch
+              newLabelY = centeredTextY host fm (cpgNewLabelY geom) (cpgLabelH geom) nh
           pure
             [ (lbl, x + lx, y + ly, lw, lh)
-            , (colorPickerCurrentLabel, rectX (cpgCurrent geom), previewY, cw, ch)
-            , (colorPickerNewLabel, rectX (cpgNew geom), previewY, nw, nh)
-            , (hex, x + lx, centeredTextY (ctxHostProfile ctx) fm (cpgHexY geom) (cpgHexH geom) hh, hw, hh)
+            , (colorPickerCurrentLabel, cpgPreviewX geom, currentLabelY, cw, ch)
+            , (colorPickerNewLabel, cpgPreviewX geom, newLabelY, nw, nh)
             ]
     _ | nt == NodeCheckbox || nt == NodeRadio -> do
       txt <- displayText ctx nt idx
@@ -701,6 +707,22 @@ widgetTextPlacements ctx nt idx x y w h = do
           pure
             [ (lbl, x + lx, ty, lw, lh)
             , (valTxt, x + w - lx - vw, centeredTextY (ctxHostProfile ctx) fm y vh vh, vw, vh)
+            ]
+    NodeTextInput
+      | not terminal, textInputBareMode si -> do
+          value <- textInputValue ctx idx
+          focus <- textInputFocused ctx idx
+          let fieldTxt = textInputFieldText "" value focus
+              lineH = layoutLineHeight (ctxHostProfile ctx) fm
+          (fw, _) <- measureTxt fieldTxt
+          scrollX <- syncTextInputScroll ctx idx x y w h
+          pure
+            [ ( fieldTxt
+              , x + ix - scrollX
+              , centeredTextY (ctxHostProfile ctx) fm y h lineH
+              , fw
+              , lineH
+              )
             ]
     NodeTextInput -> do
       lbl <- getText (ctxNodeArena ctx) idx

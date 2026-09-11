@@ -25,6 +25,7 @@ module NanoUI.Frame.TextEdit
   , TextInputGeom (..)
   , textInputGeom
   , textInputFieldTextClip
+  , nodeTextFieldGeom
   , tagTextInputClippedSpans
   , textInputGeomForWidget
   , syncTextInputScroll
@@ -194,6 +195,7 @@ import NanoUI.WidgetText
   , textInputFieldText
   , textInputLabelGap
   , textInputSearchMode
+  , textInputBareMode
   , searchFieldIconRects
   , searchFieldTextClip
   )
@@ -647,14 +649,22 @@ nodeTextFieldGeom ctx idx x y w h = do
   opts <- getOptions (ctxNodeArena ctx) idx
   let host = ctxHostProfile ctx
       fm = ctxFontMetrics ctx
-  if textInputSearchMode si && not (isCellHost host)
+  if textInputBareMode si && not (isCellHost host)
     then
-      if null opts
-        then pure (Rect x y w h, searchFieldTextClip host fm x y w h)
-        else pure (Rect x y w h, comboTextClip host fm x y w h)
+      let (ix, iy) = widgetContentInset host fm
+       in pure
+            ( Rect x y w h
+            , Rect (x + ix) (y + iy) (max 0 (w - 2 * ix)) (max 0 (h - 2 * iy))
+            )
     else
-      let geom = textInputGeom host fm x y w h
-       in pure (tigFieldRect geom, textInputFieldTextClip host geom fm)
+      if textInputSearchMode si && not (isCellHost host)
+        then
+          if null opts
+            then pure (Rect x y w h, searchFieldTextClip host fm x y w h)
+            else pure (Rect x y w h, comboTextClip host fm x y w h)
+        else
+          let geom = textInputGeom host fm x y w h
+           in pure (tigFieldRect geom, textInputFieldTextClip host geom fm)
 
 -- | Whether the pointer is over the clear (×) button of a non-empty search
 -- field. Search fields reserve that slot even when empty, but the button is

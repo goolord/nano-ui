@@ -194,6 +194,9 @@ testSpecs =
   , TestSpec "color-picker-preview" True runColorPickerPreviewTest
   , TestSpec "color-picker-commit" True runColorPickerCommitTest
   , TestSpec "color-picker-key-commit" True runColorPickerKeyCommitTest
+  , TestSpec "color-picker-hold" True runColorPickerHoldTest
+  , TestSpec "color-picker-rgba" True runColorPickerRgbaTest
+  , TestSpec "color-picker-edit" True runColorPickerEditTest
   , TestSpec "scroll-grow-click" True runScrollButtonClickSdlTest
   , TestSpec "icon-set" False runIconSetTest
   , TestSpec "scroll-bar-gutter" False runScrollBarGutterTest

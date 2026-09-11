@@ -80,6 +80,7 @@ module NanoUI.Widgets
   , TreeItem (..)
   , tree
   , colorPicker
+  , colorPickerRGBA
   , modal
   , window
   , image
@@ -177,6 +178,7 @@ module NanoUI.Widgets
   , colorPickerNewLabel
   , colorPickerDisplayText
   , colorPickerToHex
+  , colorPickerToHexA
   , colorPickerFromHex
   , SortDir (..)
   , SortCol (..)
@@ -332,6 +334,7 @@ import NanoUI.WidgetText
   , colorPickerLabelText
   , colorPickerNewLabel
   , colorPickerToHex
+  , colorPickerToHexA
   , sliderValueText
   , textInputFlagSearch
   , textInputTerminalText
@@ -356,7 +359,7 @@ import NanoUI.Widgets.Animate
   , useEnum
   , useToggle
   )
-import NanoUI.Widgets.ColorPicker (colorPicker)
+import NanoUI.Widgets.ColorPicker (colorPicker, colorPickerRGBA)
 import NanoUI.Widgets.Drawing (DrawOp (..), DrawingBuild, drawing, drawingVersioned, drawingCached)
 import NanoUI.Widgets.Custom
 import NanoUI.Widgets.Layout
