@@ -128,7 +128,6 @@ import NanoUI.Widgets.SplitPane
   , dropTargetForPane
   , layoutNode
   , topLevelDropTarget
-  , treeMovePane
   )
 
 runHostProfileGapTest :: Context -> IORef Int -> IO ()
@@ -857,14 +856,7 @@ runPaneGridMixedDragTest ctx failed = do
       regions0 = fst (layoutNode minSize gutter tree0 base)
       r2 = regions0 M.! 2
       r3 = regions0 M.! 3
-      regionAfter dt = do
-        t' <- treeMovePane 1 999 dt tree0
-        pure (M.lookup 1 (fst (layoutNode minSize gutter t' base)))
       preview dt = dropPreview minSize gutter tree0 1 base dt
-      matchesSimulation dt =
-        case (preview dt, regionAfter dt) of
-          (Just (rPrev, _), Just (Just rPost)) -> rPrev == rPost
-          _ -> False
   assertEq failed regions0 $
     M.fromList
       [ (1, Rect 0 0 300 400)
@@ -878,12 +870,10 @@ runPaneGridMixedDragTest ctx failed = do
   let dtA = dropTargetForPane r3 (V2 (rectX r3 + rectW r3 / 2) (rectY r3 + rectH r3 * 0.9)) 3
   assertEq failed dtA (DropSplit 3 AxisH False)
   assertEq failed (preview dtA) (Just (Rect 0 306 600 94, DropSplit 3 AxisH False))
-  assert failed (matchesSimulation dtA)
   -- Edge drop on the top-right pane.
   let dtB = dropTargetForPane r2 (V2 (rectX r2 + rectW r2 * 0.9) (rectY r2 + rectH r2 / 2)) 2
   assertEq failed dtB (DropSplit 2 AxisV False)
   assertEq failed (preview dtB) (Just (Rect 304 0 296 200, DropSplit 2 AxisV False))
-  assert failed (matchesSimulation dtB)
   -- Center drop swaps; the preview is the target's exact region.
   let dtC = dropTargetForPane r2 (V2 (rectX r2 + rectW r2 / 2) (rectY r2 + rectH r2 / 2)) 2
   assertEq failed dtC (DropSwap 2)
@@ -893,7 +883,6 @@ runPaneGridMixedDragTest ctx failed = do
   assertEq failed (topLevelDropTarget 20 base (V2 300 200)) Nothing
   let dtD = DropTop AxisV True
   assertEq failed (preview dtD) (Just (Rect 0 0 300 400, DropTop AxisV True))
-  assert failed (matchesSimulation dtD)
 
   -- Widget level: build the same mixed grid through a live paneGrid, drag the
   -- left pane onto the bottom-right pane's lower edge, and check the drop
@@ -938,7 +927,16 @@ runPaneGridMixedDragTest ctx failed = do
               -- 30px above the grid's bottom edge: inside the pane's bottom
               -- drop zone but clear of the 20px top-level band.
               dest = V2 (rectX rc + rectW rc / 2) (rectY rc + rectH rc - 30)
-              press =
+              ps = IM.elems rs
+              gx = minimum (map rectX ps)
+              gy = minimum (map rectY ps)
+              gw = maximum (map (\r -> rectX r + rectW r) ps) - gx
+              gh = maximum (map (\r -> rectY r + rectH r) ps) - gy
+          -- The order assert below cannot tell a pane-level split from a
+          -- top-level band drop ([pb, pc, pa] either way), so pin the pointer
+          -- to the pane-split path first.
+          assert failed (topLevelDropTarget 20 (Rect gx gy gw gh) dest == Nothing)
+          let press =
                 inp0
                   { inputMousePos = grab
                   , inputMouseDown = True

@@ -345,8 +345,11 @@ topLevelDropTarget band r mouse
 -- that removing the pane causes (its parent split collapses and sibling
 -- subtrees expand) and for 'spacing' and min-size floors. Estimating the rect
 -- from the target's pre-drop bounds goes wrong wherever mixed 'AxisV' /
--- 'AxisH' splits make those two layouts diverge. 'Nothing' when the drop
--- cannot be performed (unknown pane ids, 'DropTop' on a single-pane grid).
+-- 'AxisH' splits make those two layouts diverge. @spacing@ must be the gutter
+-- actually laid out between panes — 'NanoUI.Widgets.PaneGrid' passes
+-- @pgSpacing + 2 * pgLeeway@, not @pgSpacing@ — or the preview regions drift
+-- from the on-screen layout. 'Nothing' when the drop cannot be performed
+-- (unknown pane ids, 'DropTop' on a single-pane grid).
 dropPreview :: Float -> Float -> GridNode -> Word64 -> Rect -> DropTarget -> Maybe (Rect, DropTarget)
 dropPreview minSize spacing tree moved baseRect dt = do
   t' <- treeMovePane moved 0 dt tree
