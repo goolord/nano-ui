@@ -211,6 +211,7 @@ testSpecs =
   , TestSpec "tabs-interaction" False runTabsInteractionTest
   , TestSpec "tabs-emit" False runTabsEmitTest
   , TestSpec "tabs-closable" False runTabsClosableTest
+  , TestSpec "tabs-scroll" False runTabsScrollTest
   , TestSpec "tabs-state-persistence" False runTabsStatePersistenceTest
   , TestSpec "tabs-damage" False runTabsDamageTest
   , TestSpec "tabs-content-damage" False runTabsContentDamageTest

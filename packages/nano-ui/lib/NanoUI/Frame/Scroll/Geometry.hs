@@ -28,6 +28,8 @@ module NanoUI.Frame.Scroll.Geometry
   , scrollGutters2D
   , scrollShowsChrome
   , scrollChromeSuppressed
+  , scrollWheelSuppressed
+  , scrollLineFor
   , scrollAxisOverflows
   , scrollChromeActive
   , isScrollStyle2D
@@ -67,6 +69,12 @@ data ScrollConfig = ScrollConfig
   { scrollPolicyX :: !ScrollPolicy
   , scrollPolicyY :: !ScrollPolicy
   , scrollClamp :: !Bool
+  -- | A bare scroller paints no well of its own: no input background, no
+  -- border, no window fill. Only the clipped children render, so a strip that
+  -- borrows the scroller for its offset and clip (tab headers) looks exactly
+  -- like it did before it started scrolling. Chrome policies still apply on
+  -- top: 'ScrollHidden' plus bare is the fully chrome-less scroller.
+  , scrollBare :: !Bool
   }
   deriving (Eq, Show)
 
@@ -76,6 +84,7 @@ defaultScrollConfig =
     { scrollPolicyX = ScrollAuto
     , scrollPolicyY = ScrollAuto
     , scrollClamp = True
+    , scrollBare = False
     }
 
 scrollConfigNative2D :: ScrollConfig -> Bool
@@ -90,7 +99,8 @@ encodeScrollConfig :: ScrollConfig -> Int
 encodeScrollConfig cfg =
   policyBits (scrollPolicyX cfg)
     + shiftL (policyBits (scrollPolicyY cfg)) 2
-    + if scrollClamp cfg then 16 else 0
+    + (if scrollClamp cfg then 16 else 0)
+    + (if scrollBare cfg then 32 else 0)
   where
     policyBits = \case
       ScrollAuto -> 0
@@ -104,6 +114,7 @@ decodeScrollConfig bits =
     { scrollPolicyX = decodePolicy (bits .&. 3)
     , scrollPolicyY = decodePolicy (shiftR bits 2 .&. 3)
     , scrollClamp = bits .&. 16 /= 0
+    , scrollBare = bits .&. 32 /= 0
     }
   where
     decodePolicy 1 = ScrollAlways
@@ -116,22 +127,22 @@ scrollDefault1D Column = scrollVerticalAuto
 scrollDefault1D Row = scrollHorizontalAuto
 
 scrollVerticalAuto :: ScrollConfig
-scrollVerticalAuto = ScrollConfig ScrollNone ScrollAuto True
+scrollVerticalAuto = ScrollConfig ScrollNone ScrollAuto True False
 
 scrollHorizontalAuto :: ScrollConfig
-scrollHorizontalAuto = ScrollConfig ScrollAuto ScrollNone True
+scrollHorizontalAuto = ScrollConfig ScrollAuto ScrollNone True False
 
 -- | Horizontal bar always shown and reserved (1D, no vertical bar). Used
 -- when the caller reserves the lane itself and needs the scroller's clip to
 -- agree with that reservation on every frame.
 scrollHorizontalAlways :: ScrollConfig
-scrollHorizontalAlways = ScrollConfig ScrollAlways ScrollNone True
+scrollHorizontalAlways = ScrollConfig ScrollAlways ScrollNone True False
 
 scrollVerticalHidden :: ScrollConfig
-scrollVerticalHidden = ScrollConfig ScrollNone ScrollHidden True
+scrollVerticalHidden = ScrollConfig ScrollNone ScrollHidden True False
 
 scrollHorizontalHidden :: ScrollConfig
-scrollHorizontalHidden = ScrollConfig ScrollHidden ScrollNone True
+scrollHorizontalHidden = ScrollConfig ScrollHidden ScrollNone True False
 
 scrollAxisGutter ::
   ScrollPolicy ->
@@ -189,6 +200,27 @@ scrollShowsChrome cfg _native2D dir =
 
 scrollChromeSuppressed :: ScrollConfig -> Bool -> DirTag -> Bool
 scrollChromeSuppressed cfg native2D dir = not (scrollShowsChrome cfg native2D dir)
+
+-- | Distance one wheel notch scrolls along a live axis. Cell hosts step a
+-- single cell; window hosts step a text line. Widgets that map wheel notches
+-- onto a scroller's offset share this so the step cannot drift per caller.
+scrollLineFor :: HostProfile -> Float
+scrollLineFor host = if isCellHost host then 1 else scrollLine
+
+scrollLine :: Float
+scrollLine = 20
+
+-- | Wheel eligibility is wider than chrome eligibility: a hidden bar never
+-- paints or drags, but it still scrolls. Only a dead axis ('ScrollNone')
+-- ignores the wheel outright. Native 2D scrollers always keep both axes
+-- live by construction.
+scrollWheelSuppressed :: ScrollConfig -> Bool -> DirTag -> Bool
+scrollWheelSuppressed cfg native2D dir =
+  not native2D
+    && ( case dir of
+           DirColumn -> scrollPolicyY cfg == ScrollNone
+           DirRow -> scrollPolicyX cfg == ScrollNone
+       )
 
 scrollAxisOverflows :: ScrollPolicy -> Float -> Float -> Bool
 scrollAxisOverflows policy contentSize innerMain =

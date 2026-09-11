@@ -53,12 +53,17 @@ module NanoUI.Testing.Harness
   , clickPos
   , clickTab
   , dragPos
+  , drawQuads
   ) where
 
-import Control.Monad (void, when)
+import Control.Monad (forM, void, when)
 import Data.IORef (IORef, readIORef, writeIORef)
 import Data.Text qualified as T
+import Data.Word (Word32, Word8)
+import Foreign.C.Types (CSize (..))
 import Foreign.ForeignPtr (withForeignPtr)
+import Foreign.Marshal.Alloc (allocaBytes)
+import Foreign.Ptr (Ptr, plusPtr)
 import Foreign.Storable (peekByteOff)
 import NanoUI
 import NanoUI.Font (alignedTextPen, textInkEnd)
@@ -66,6 +71,61 @@ import NanoUI.Testing
 import NanoUI.Testing.Assert (bump, failWhen, withInput)
 
 type DemoSpan = (Rect, T.Text, Color, Color, Rect)
+
+foreign import ccall unsafe "string.h memcpy" c_memcpy :: Ptr Word8 -> Ptr Word8 -> CSize -> IO ()
+
+-- | Decode the quads a frame actually rasterised: one @(rect, color)@ per
+-- six-index quad, in draw order. Span and arena queries cannot see chrome
+-- (scroller wells, scrollbar lanes); this can. Every rasterised op in the
+-- draw arena is emitted as 4 vertices / 6 indices — a command that breaks
+-- that packing fails loudly here instead of decoding garbage.
+drawQuads :: DrawData -> IO [(Rect, Color)]
+drawQuads dd =
+  fmap concat $
+    forM (drawCmdElems dd) $ \c -> do
+      let ioff = fromIntegral (cmdIndexOffset c)
+          icnt = fromIntegral (cmdIndexCount c)
+      when (icnt `rem` 6 /= 0) $
+        error ("drawQuads: draw command packs " ++ show icnt ++ " indices; not quad-packed")
+      sequence
+        [ decodeQuad (ioff + q)
+        | q <- [0, 6 .. icnt - 1]
+        ]
+  where
+    verts = drawVertices dd
+    idxs = drawIndices dd
+    peekWord32 :: Ptr Word8 -> IO Word32
+    peekWord32 off = allocaBytes 4 $ \tmp -> do
+      c_memcpy tmp off 4
+      peekByteOff tmp 0
+    peekVertex :: Ptr Word8 -> Int -> IO (Float, Float, Float, Float, Float, Float)
+    peekVertex vp vi =
+      allocaBytes vertexSize $ \tmp -> do
+        c_memcpy tmp (vp `plusPtr` (vi * vertexSize)) (fromIntegral vertexSize)
+        x <- peekByteOff tmp 0
+        y <- peekByteOff tmp 4
+        r <- peekByteOff tmp 8
+        g <- peekByteOff tmp 12
+        b <- peekByteOff tmp 16
+        a <- peekByteOff tmp 20
+        pure (x, y, r, g, b, a)
+    decodeQuad iStart =
+      withForeignPtr verts $ \vp ->
+        withForeignPtr idxs $ \ip -> do
+          vis <-
+            forM [iStart .. iStart + 3] $ \ii -> do
+              vi <- fromIntegral <$> peekWord32 (ip `plusPtr` (ii * indexSize))
+              peekVertex vp vi
+          case vis of
+            [] -> pure (Rect 0 0 0 0, colorRGBA 0 0 0 0)
+            (x0, y0, r0, g0, b0, a0) : rest -> do
+              let xs = x0 : map (\(x, _, _, _, _, _) -> x) rest
+                  ys = y0 : map (\(_, y, _, _, _, _) -> y) rest
+                  toW8 f = max 0 (min 255 (round (f * 255)))
+              pure
+                ( Rect (minimum xs) (minimum ys) (maximum xs - minimum xs) (maximum ys - minimum ys)
+                , colorRGBA (toW8 r0) (toW8 g0) (toW8 b0) (toW8 a0)
+                )
 
 spanCenter :: Rect -> V2
 spanCenter (Rect x y w h) = V2 (x + w / 2) (y + h / 2)
