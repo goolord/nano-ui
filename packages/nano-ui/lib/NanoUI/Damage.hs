@@ -290,15 +290,15 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
   winDragActive <- isJust <$> getWindowDrag ctx
   winResizeActive <- isJust <$> getWindowResize ctx
   let keyedMoved = keyedRectDeltas oldRects newRects
-  moved <- mapM (clipDeltaToScrollViewport ctx newRects) keyedMoved
-  let stripFloat s = s {storeFloat = IM.empty}
-      scrollChanged = storeFloat oldStore /= storeFloat newStore
+  moved <-
+    if null keyedMoved
+      then pure []
+      else mapM (clipDeltaToScrollViewport ctx newRects) keyedMoved
+  let scrollChanged = storeFloat oldStore /= storeFloat newStore
       scrollPointsChanged = storePoint oldStore /= storePoint newStore
-      onlyScrollChanged =
-        stripFloat oldStore == stripFloat newStore
-          && storePoint oldStore == storePoint newStore
       onlyScrollFloatsChanged =
-        scrollChanged && onlyScrollChanged
+        scrollChanged
+          && storesEqualExceptFloat oldStore newStore
       settledMoved = filter significantLayoutRect moved
       panelRects = IM.elems newFloatingRects
       allInPanels rs =
@@ -306,8 +306,9 @@ writeDamage ctx inp wasDirty overlayOpen oldSize oldStore oldHot oldActive oldFo
           && not (null rs)
           && all (\r -> any (rectFullyInside r) panelRects) rs
       settledMovedInPanels = allInPanels settledMoved
-      diffNew = IM.elems (IM.difference newRects oldRects)
-      diffOld = IM.elems (IM.difference oldRects newRects)
+      (diffOld, diffNew)
+        | null keyedMoved = ([], [])
+        | otherwise = partitionDiffs oldRects newRects keyedMoved
       keysChangedInPanels = allInPanels (diffNew ++ diffOld)
       floatingChanged = oldFloatingRects /= newFloatingRects
       windowLive = winDragActive || winResizeActive
@@ -515,6 +516,28 @@ floatingRectDamage old new =
 unionRects :: [Rect] -> Rect
 unionRects [] = Rect 0 0 0 0
 unionRects (r : rs) = foldl' rectUnion r rs
+
+{-# INLINE storesEqualExceptFloat #-}
+storesEqualExceptFloat :: WidgetStore -> WidgetStore -> Bool
+storesEqualExceptFloat a b =
+  storeMirrorGen a == storeMirrorGen b
+    && storeOpenSelect a == storeOpenSelect b
+    && storeInt a == storeInt b
+    && storeDouble a == storeDouble b
+    && storePoint a == storePoint b
+    && storeText a == storeText b
+    && storeIntSet a == storeIntSet b
+    && storeFloatList a == storeFloatList b
+    && storeIntList a == storeIntList b
+
+partitionDiffs :: IM.IntMap Rect -> IM.IntMap Rect -> [(Int, Rect)] -> ([Rect], [Rect])
+partitionDiffs old new kMoved = go kMoved [] []
+  where
+    go [] dOld dNew = (dOld, dNew)
+    go ((k, r) : rest) dOld dNew
+      | IM.notMember k new = go rest (r : dOld) dNew
+      | IM.notMember k old = go rest dOld (r : dNew)
+      | otherwise = go rest dOld dNew
 
 keyedRectDeltas :: IM.IntMap Rect -> IM.IntMap Rect -> [(Int, Rect)]
 keyedRectDeltas old new =

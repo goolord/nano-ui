@@ -17,7 +17,7 @@ module NanoUI.Frame.Spans
 
 
 import Control.Monad (unless, when)
-import Data.IORef (modifyIORef', readIORef)
+import Data.IORef (readIORef, writeIORef)
 import Data.Maybe (fromMaybe)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Text as T
@@ -345,25 +345,20 @@ collectNodeTextSpans ctx floatCache idx = do
         if maxW < 1e8
           then pure maxW
           else findAncestorMaxW arena idx
-      let key =
-            SpanCacheEntry
-              { sceText = txt0
-              , sceFg = fg
-              , sceBg = paintBg
-              , sceStyle = si
-              , sceFontSize = fontSizeVal
-              , sceAlign = fromEnum ax
-              , sceWidthTag = fromEnum wTag
-              , sceRect = Rect x y w h
-              , sceEffMaxW = effMaxW
-              , sceRowChild = isRowChild
-              , sceCellHost = cellHost
-              , sceSpans = []
-              }
       cache <- readIORef (ctxSpanCache ctx)
       case IM.lookup idx cache of
         Just e
-          | spanKeyMatch e key -> pure (sceSpans e)
+          | sceText e == txt0
+              && sceFg e == fg
+              && sceBg e == paintBg
+              && sceStyle e == si
+              && sceFontSize e == fontSizeVal
+              && sceAlign e == fromEnum ax
+              && sceWidthTag e == fromEnum wTag
+              && (let r = sceRect e in rectX r == x && rectY r == y && rectW r == w && rectH r == h)
+              && sceEffMaxW e == effMaxW
+              && sceRowChild e == isRowChild
+              && sceCellHost e == cellHost -> pure (sceSpans e)
         _ -> do
           textSpans <-
             if T.null raw
@@ -435,27 +430,28 @@ collectNodeTextSpans ctx floatCache idx = do
                         py = centeredTextY (ctxHostProfile ctx) textFm y h lineH
                     pure [(Rect tx py used lineH, dispTxt, fg, paintBg)]
           let spans = stripeSpans ++ textSpans
-          modifyIORef' (ctxSpanCache ctx) (IM.insert idx key {sceSpans = spans})
+              key =
+                SpanCacheEntry
+                  { sceText = txt0
+                  , sceFg = fg
+                  , sceBg = paintBg
+                  , sceStyle = si
+                  , sceFontSize = fontSizeVal
+                  , sceAlign = fromEnum ax
+                  , sceWidthTag = fromEnum wTag
+                  , sceRect = Rect x y w h
+                  , sceEffMaxW = effMaxW
+                  , sceRowChild = isRowChild
+                  , sceCellHost = cellHost
+                  , sceSpans = spans
+                  }
+          writeIORef (ctxSpanCache ctx) (IM.insert idx key cache)
           pure spans
     else
       if isWidgetNode nt
         then widgetTextSpans ctx nt idx x y w h
         else pure []
 
--- | Compare every cached input. 'sceSpans' is deliberately ignored.
-spanKeyMatch :: SpanCacheEntry -> SpanCacheEntry -> Bool
-spanKeyMatch a b =
-  sceText a == sceText b
-    && sceFg a == sceFg b
-    && sceBg a == sceBg b
-    && sceStyle a == sceStyle b
-    && sceFontSize a == sceFontSize b
-    && sceAlign a == sceAlign b
-    && sceWidthTag a == sceWidthTag b
-    && sceRect a == sceRect b
-    && sceEffMaxW a == sceEffMaxW b
-    && sceRowChild a == sceRowChild b
-    && sceCellHost a == sceCellHost b
 
 widgetHitRect :: Context -> NodeType -> NodeIdx -> Float -> Float -> Float -> Float -> IO Rect
 widgetHitRect ctx nt idx x y w h = do

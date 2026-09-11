@@ -219,39 +219,6 @@ nodeTypeA NodeArenaArrays {naArrTags} idx = do
   t <- readPrimArray naArrTags (idx * 8)
   pure (toEnum (fromIntegral t))
 
-{-# INLINE rectA #-}
-rectA :: NodeArenaArrays -> NodeIdx -> IO (Float, Float, Float, Float)
-rectA NodeArenaArrays {naArrGeom} idx = do
-  let base = idx * 10
-  x <- readPrimArray naArrGeom (base + 0)
-  y <- readPrimArray naArrGeom (base + 1)
-  w <- readPrimArray naArrGeom (base + 2)
-  h <- readPrimArray naArrGeom (base + 3)
-  pure (x, y, w, h)
-
-{-# INLINE minMaxA #-}
-minMaxA :: NodeArenaArrays -> NodeIdx -> IO (Float, Float, Float, Float)
-minMaxA NodeArenaArrays {naArrStyle} idx = do
-  let base = idx * 16
-  minW <- readPrimArray naArrStyle (base + 7)
-  minH <- readPrimArray naArrStyle (base + 8)
-  maxW <- readPrimArray naArrStyle (base + 9)
-  maxH <- readPrimArray naArrStyle (base + 10)
-  pure (minW, minH, maxW, maxH)
-
-{-# INLINE widthSizingA #-}
-widthSizingA :: NodeArenaArrays -> NodeIdx -> IO (SizingTag, Float)
-widthSizingA NodeArenaArrays {naArrTags, naArrStyle} idx = do
-  tag <- readPrimArray naArrTags (idx * 8 + 2)
-  val <- readPrimArray naArrStyle (idx * 16)
-  pure (toEnum (fromIntegral tag), val)
-
-{-# INLINE heightSizingA #-}
-heightSizingA :: NodeArenaArrays -> NodeIdx -> IO (SizingTag, Float)
-heightSizingA NodeArenaArrays {naArrTags, naArrStyle} idx = do
-  tag <- readPrimArray naArrTags (idx * 8 + 3)
-  val <- readPrimArray naArrStyle (idx * 16 + 1)
-  pure (toEnum (fromIntegral tag), val)
 
 measurePass ::
   NodeArena ->
@@ -997,11 +964,23 @@ positionNodeA ::
   Float ->
   IO ()
 positionNodeA a na host fm monoFm measure resolveFont depth idx x y availW availH = do
-  (minW, minH, maxW, maxH) <- minMaxA a idx
-  (wTag, wVal) <- widthSizingA a idx
-  (hTag, hVal) <- heightSizingA a idx
-  (_, _, intrinsicW, intrinsicH) <- rectA a idx
-  nt <- nodeTypeA a idx
+  let !base16 = idx * 16
+      !base8 = idx * 8
+      !base10 = idx * 10
+  minW <- readPrimArray (naArrStyle a) (base16 + 7)
+  minH <- readPrimArray (naArrStyle a) (base16 + 8)
+  maxW <- readPrimArray (naArrStyle a) (base16 + 9)
+  maxH <- readPrimArray (naArrStyle a) (base16 + 10)
+  wTagRaw <- readPrimArray (naArrTags a) (base8 + 2)
+  let !wTag = toEnum (fromIntegral wTagRaw)
+  wVal <- readPrimArray (naArrStyle a) base16
+  hTagRaw <- readPrimArray (naArrTags a) (base8 + 3)
+  let !hTag = toEnum (fromIntegral hTagRaw)
+  hVal <- readPrimArray (naArrStyle a) (base16 + 1)
+  intrinsicW <- readPrimArray (naArrGeom a) (base10 + 2)
+  intrinsicH <- readPrimArray (naArrGeom a) (base10 + 3)
+  ntRaw <- readPrimArray (naArrTags a) base8
+  let !nt = toEnum (fromIntegral ntRaw)
   let w = clamp minW maxW (resolveSize wTag wVal intrinsicW availW minW maxW)
   isRowChild <- parentIsRow na idx
   h <-

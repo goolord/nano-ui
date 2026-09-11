@@ -29,7 +29,6 @@ import NanoUI.Context
 import NanoUI.Draw
   ( DrawArena (..)
   , emitDrawOps
-  , getCurrentClip
   , pushFilledTriangle
   , pushImage
   , pushLine
@@ -96,7 +95,7 @@ import NanoUI.Style
   , themeSeparator
   , themeWindow
   )
-import NanoUI.Types (Color (..), ImageId (..), Rect (..), colorA, colorRGBA, clamp01, lerpColor, rectFullyInside, rectInflate, rectIntersect, rectH, rectW, rectX, rectY)
+import NanoUI.Types (Color (..), ImageId (..), Rect (..), colorA, colorRGBA, clamp01, lerpColor, rectFullyInside, rectInflate, rectH, rectW, rectX, rectY)
 import NanoUI.WidgetText
   ( buttonFlagsFromStyle
   , buttonVisualStyle
@@ -196,19 +195,25 @@ lowerNode ctx idx = lowerNodeWithOccluders ctx [] idx
 
 lowerNodeWithOccluders :: Context -> [Rect] -> NodeIdx -> IO ()
 lowerNodeWithOccluders ctx occluders idx = do
-  nt <- getNodeType (ctxNodeArena ctx) idx
   (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-  theme <- readIORef (ctxTheme ctx)
-  let rect = Rect x y w h
-      fm = ctxFontMetrics ctx
-      terminal = isCellHost (ctxHostProfile ctx)
-      da = ctxDrawArena ctx
-  clip <- getCurrentClip da
-  case rectIntersect rect clip of
-    Nothing -> pure ()
-    Just visible
-      | not (null occluders) && any (rectFullyInside visible) occluders -> pure ()
-      | otherwise -> lowerNodeVisible ctx occluders idx nt x y w h rect fm theme terminal da
+  let da = ctxDrawArena ctx
+  (cx, cy, cw, ch) <- readIORef (daCurrentClip da)
+  let !l = max x cx
+      !t = max y cy
+      !r = min (x + w) (cx + cw)
+      !b = min (y + h) (cy + ch)
+  if r <= l || b <= t
+    then pure ()
+    else do
+      if not (null occluders) && any (rectFullyInside (Rect l t (r - l) (b - t))) occluders
+        then pure ()
+        else do
+          nt <- getNodeType (ctxNodeArena ctx) idx
+          theme <- readIORef (ctxTheme ctx)
+          let !rect = Rect x y w h
+              !fm = ctxFontMetrics ctx
+              !terminal = isCellHost (ctxHostProfile ctx)
+          lowerNodeVisible ctx occluders idx nt x y w h rect fm theme terminal da
 
 lowerNodeVisible ::
   Context ->
