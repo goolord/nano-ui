@@ -22,7 +22,7 @@
 --
 -- Families, by tab:
 --
---   * Controls     — clickButton, checkbox, slider, select, boundedSelect,
+--   * Controls     — clickButton, checkbox, slider, select, comboBox,
 --                    boundedRadioFieldset, colorPicker, textInput, textArea,
 --                    button + tooltip, contextMenu, file dialogs, dropZone
 --   * Graphics     — image gallery + progressBar driven by a pulsing value
@@ -184,36 +184,18 @@ themeForChoice TomorrowNightMin = tomorrowNightMinDarkTheme
 themeForChoice TomorrowLight = tomorrowMinLightTheme
 themeForChoice TomorrowMidnightMin = tomorrowMidnightMinDarkTheme
 
--- | Font families offered by the Controls-tab font selector. Each maps to a
--- system-font search with cross-platform fallbacks; the chosen family is
--- pushed to the SDL backend through 'setSdlUiFont' and re-rendered on the next
--- frame. The first family is the default and is present on most systems, so
--- the selector visibly switches the demo's typeface instead of silently
--- falling back to the embedded font.
-data DemoFont
-  = FontInter
-  | FontNoto
-  | FontAdwaita
-  | FontCantarell
-  | FontLiberation
-  | FontFreeSans
-  deriving (Bounded, Enum, Eq, Ord, Read, Show)
-
-fontDisplayName :: DemoFont -> T.Text
-fontDisplayName FontInter = "Inter"
-fontDisplayName FontNoto = "Noto Sans"
-fontDisplayName FontAdwaita = "Adwaita Sans"
-fontDisplayName FontCantarell = "Cantarell"
-fontDisplayName FontLiberation = "Liberation Sans"
-fontDisplayName FontFreeSans = "FreeSans"
-
-fontForChoice :: DemoFont -> NanoUIFont
-fontForChoice FontInter = FontSearch ["Inter", "Segoe UI", "Helvetica Neue", "Arial"]
-fontForChoice FontNoto = FontSearch ["Noto Sans", "Segoe UI", "Arial"]
-fontForChoice FontAdwaita = FontSearch ["Adwaita Sans", "Cantarell", "Ubuntu", "Segoe UI", "Arial"]
-fontForChoice FontCantarell = FontSearch ["Cantarell", "Ubuntu", "Adwaita Sans", "Arial"]
-fontForChoice FontLiberation = FontSearch ["Liberation Sans", "Arimo", "Arial", "Helvetica"]
-fontForChoice FontFreeSans = FontSearch ["FreeSans", "Nimbus Sans", "Arial", "Helvetica"]
+-- | Font families offered by the Controls-tab font combo box, straight from
+-- the SDL backend's system font-directory scan ('listFontFamilies'; cached
+-- once per process). The chosen family is pushed to the backend through
+-- 'setSdlUiFont' and re-rendered on the next frame. The fallback list only
+-- kicks in on systems where the scan finds no font files.
+demoFontFamilies :: [T.Text]
+demoFontFamilies =
+  let families = map T.pack (unsafePerformIO listFontFamilies)
+   in if null families
+        then ["Inter", "Noto Sans", "Adwaita Sans", "Cantarell", "Liberation Sans", "FreeSans"]
+        else families
+{-# NOINLINE demoFontFamilies #-}
 
 ------------------------------------------------------------------------------
 -- §3  The showcase UI
@@ -240,8 +222,8 @@ demoUi = do
   (vol, setVol) <- useText "50" -- slider, as text
   (quality, setQuality) <- useText "Medium" -- select
   (accentHex, setAccent) <- useText (colorPickerToHex demoAccent) -- colorPicker
-  (themeName, setThemeName) <- useText (themeDisplayName TomorrowNightMin) -- boundedSelect
-  (fontChoice, setFontChoice) <- useText (fontDisplayName FontInter) -- boundedRadioFieldset
+  (themeName, setThemeName) <- useText (themeDisplayName ThemeDefault) -- boundedRadioFieldset
+  (fontChoice, setFontChoice) <- useText "Inter" -- comboBox
   (name, setName) <- useText "" -- textInput
   (notes, setNotes) <- useText "" -- textArea
   (dropLog, setDropLog) <- useText "" -- dropZone result, multi-line
@@ -351,12 +333,14 @@ demoUi = do
               setQuality (qualities !! qualityIdx)
               (_, aVal) <- colorPicker "Accent" demoAccent
               setAccent (colorPickerToHex aVal)
-              (_, tVal) <- boundedSelect "Theme" ThemeDefault themeDisplayName
+              (_, tVal) <- boundedRadioFieldset "Theme" TomorrowNightMin themeDisplayName
               setThemeName (themeDisplayName tVal)
               setUiTheme (themeForChoice tVal)
-              (_, fVal) <- boundedRadioFieldset "Font" FontInter fontDisplayName
-              setFontChoice (fontDisplayName fVal)
-              setSdlUiFont (fontForChoice fVal)
+              muted "Font: a combo box — type to filter (applies on Enter, a click, or losing focus; Esc reverts), scroll the list, hover or arrow to highlight."
+              (fResp, fVal) <- comboBox "Font" demoFontFamilies fontChoice
+              setFontChoice fVal
+              when (respChanged fResp && not (T.null fVal)) $
+                setSdlUiFont (FontSearch [T.unpack fVal])
               (_, nVal) <- textInput "Name" ""
               setName nVal
               (_, notesVal) <- textArea "Notes" "Edit me.\nSecond line."

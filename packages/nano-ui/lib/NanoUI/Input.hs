@@ -218,5 +218,6 @@ stripInteractionInput inp =
     , inputMouseRightReleased = False
     , inputKeys = emptyInputKeys
     , inputChars = ""
+    , inputScroll = V2 0 0
     , inputDrops = emptyDropEvents
     }

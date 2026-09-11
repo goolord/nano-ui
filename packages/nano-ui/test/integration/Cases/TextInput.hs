@@ -21,6 +21,7 @@ module Cases.TextInput
   , runTextInputSpanTest
   , runTextInputFfCaretTest
   , runTextInputScrollTest
+  , runTextInputWordKeysTest
   , runKvMultilineHeightTest
   , runTextAreaScrollbarVisibilityTest
   , runTextAreaScrollWheelTest
@@ -148,6 +149,32 @@ runTextInputCutClearsSelectionTest ctx failed = do
   assertEq failed clip (Just "o")
   ((_, val), _, _, _) <- runFrame ctx' (inp0 {inputChars = "z"}) ui
   assertEq failed val "hellz"
+
+-- Word-wise editing keys (Ctrl or Alt + Backspace/Delete/Left/Right) work in
+-- the single-line text input like they do in the text area.
+runTextInputWordKeysTest :: Context -> IORef Int -> IO ()
+runTextInputWordKeysTest ctx failed = do
+  let inp0 = withInput 320 120
+      ui = column (textInput "Name" "hello world")
+      ctrlMods = Modifiers False True False
+  _ <- warmup2 ctx inp0 ui
+  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
+  -- Ctrl+Backspace deletes the word before the cursor ("world").
+  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyBackspace], inputModifiers = ctrlMods}) ui
+  ((_, v1), _, _, _) <- runFrame ctx inp0 ui
+  assertEq failed v1 "hello "
+  -- Nothing right of the cursor at end of text: Ctrl+Delete is a no-op.
+  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyDelete], inputModifiers = ctrlMods}) ui
+  ((_, v2), _, _, _) <- runFrame ctx inp0 ui
+  assertEq failed v2 "hello "
+  -- Ctrl+Left jumps to the start; typing there proves the cursor moved.
+  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyLeft], inputModifiers = ctrlMods}) ui
+  ((_, v3), _, _, _) <- runFrame ctx (inp0 {inputChars = "X"}) ui
+  assertEq failed v3 "Xhello "
+  -- Ctrl+Delete removes the word after the cursor ("hello").
+  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyDelete], inputModifiers = ctrlMods}) ui
+  ((_, v4), _, _, _) <- runFrame ctx inp0 ui
+  assertEq failed v4 "X "
 
 runTextAreaCutClearsSelectionTest :: Context -> IORef Int -> IO ()
 runTextAreaCutClearsSelectionTest ctx failed = do

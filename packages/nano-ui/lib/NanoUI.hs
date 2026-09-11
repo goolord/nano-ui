@@ -219,6 +219,7 @@ module NanoUI
   , defaultSearchFieldConfig
   , searchField
   , searchFieldConfigured
+  , comboBox
   , textArea
   , separator
   , spacer
@@ -842,6 +843,7 @@ import NanoUI.Widgets
   , defaultSearchFieldConfig
   , searchField
   , searchFieldConfigured
+  , comboBox
   , textArea
   , toolbar
   , tree

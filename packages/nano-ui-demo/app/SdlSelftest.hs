@@ -316,13 +316,12 @@ selftest imgs ui = do
     clickPos ui ctx' env base feat0
     spansOn2 <- collectTextSpans ctx'
     unless (hasText "on" spansOn2) $ fail "selftest: checkbox did not turn Feature on again"
-    themeBtn <- requireSpan "selftest: Theme select" (findRightmost "Theme" spansOn2)
-    clickPos ui ctx' env base themeBtn
-    spansOverlay <- collectOverlayTextSpans ctx' base
-    lightOpt <- requireSpan "selftest: Tomorrow Light option" (findExact "Tomorrow Light" spansOverlay)
+    -- Theme is a radio fieldset: all options stay visible in the plain spans;
+    -- click "Tomorrow Light" directly (the state card shows the old value).
+    lightOpt <- requireSpan "selftest: Tomorrow Light option" (findExact "Tomorrow Light" spansOn2)
     clickPos ui ctx' env base lightOpt
     spansTheme <- collectTextSpans ctx'
-    unless (hasText "Tomorrow Light" spansTheme) $ fail "selftest: select did not pick Tomorrow Light"
+    unless (hasText "Tomorrow Light" spansTheme) $ fail "selftest: radio did not pick Tomorrow Light"
     th <- getTheme ctx'
     unless (th == tomorrowMinLightTheme) $ fail "selftest: context theme was not updated to Tomorrow Light"
     vol <- requireSpan "selftest: Volume slider" (findRightmost "Volume" spansTheme)

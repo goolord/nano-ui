@@ -16,7 +16,7 @@ module NanoUI.Frame.Input
 
 import Control.Monad (forM_, unless, when)
 import Data.IORef (readIORef, writeIORef)
-import Data.Maybe (isJust)
+import Data.Maybe (isJust, isNothing)
 import qualified Data.IntMap.Strict as IM
 import NanoUI.Context
   ( Context (..)
@@ -280,26 +280,32 @@ checkReleasedOver ctx count active mouse = go 0
               nodeClippedHit ctx idx rect mouse
 
 -- Focus text inputs using solved layout rects so the caret appears on first press.
+-- A press on an open dropdown overlay (select menu or a focused combo's
+-- suggestions) must not clear focus first: the combo's dropdown is visible
+-- exactly while its field holds focus, and the select finalizers below need
+-- the owner still resolvable to route the pick.
 finalizeTextInputFocus :: Context -> Input -> IO ()
 finalizeTextInputFocus ctx inp =
   when (inputMousePressed inp) $ do
     mMenu <- getTextInputMenu ctx
     let mouse = inputMousePos inp
+    mDrop <- overlayMenuOwnerAt ctx mouse
     when (case mMenu of
             Just menu -> not (rectContains (textEditMenuRect menu) mouse)
-            Nothing -> True) $ do
-      prevFocus <- readIORef (ctxFocusId ctx)
-      count <- arenaCount (ctxNodeArena ctx)
-      mFocused <- findTextInputUnderMouse ctx count mouse
-      case mFocused of
-        Nothing -> do
-          when (prevFocus /= WidgetId 0) $ markDirty ctx
-          collapseTextFieldSelection ctx prevFocus
-          writeIORef (ctxFocusId ctx) (WidgetId 0)
-          setTextInputMenu ctx Nothing
-        Just wid -> do
-          writeIORef (ctxFocusId ctx) wid
-          when (prevFocus /= wid) $ markDirty ctx
+            Nothing -> True) $
+      when (isNothing mDrop) $ do
+        prevFocus <- readIORef (ctxFocusId ctx)
+        count <- arenaCount (ctxNodeArena ctx)
+        mFocused <- findTextInputUnderMouse ctx count mouse
+        case mFocused of
+          Nothing -> do
+            when (prevFocus /= WidgetId 0) $ markDirty ctx
+            collapseTextFieldSelection ctx prevFocus
+            writeIORef (ctxFocusId ctx) (WidgetId 0)
+            setTextInputMenu ctx Nothing
+          Just wid -> do
+            writeIORef (ctxFocusId ctx) wid
+            when (prevFocus /= wid) $ markDirty ctx
 
 finalizeSelectFocus :: Context -> Input -> IO ()
 finalizeSelectFocus ctx inp =

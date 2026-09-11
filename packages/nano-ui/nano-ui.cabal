@@ -197,6 +197,7 @@ test-suite nano-ui-test
     other-modules:
         Cases
         Cases.Animation
+        Cases.Combo
         Cases.Damage
         Cases.Demo
         Cases.Modal

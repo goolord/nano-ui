@@ -121,6 +121,7 @@ processTextInput :: Context -> Input -> TextInputState -> IO TextInputState
 processTextInput ctx inp s0 = do
   let mods = inputModifiers inp
       ctrl = modCtrl mods
+      alt = modAlt mods
       shift = modShift mods
       keys = inputKeys inp
       chars = inputChars inp
@@ -130,7 +131,10 @@ processTextInput ctx inp s0 = do
       else pure s0
   let filtered = T.filter (\ch -> not (isCtrlCombo ctrl ch) && isPrint ch && ch /= '\n') chars
       s2 = T.foldl' insertChar s1 filtered
-  pure (foldInputKeys (applyKey shift) s2 keys)
+      -- Word-wise editing keys, matching the text area: Ctrl or Alt plus
+      -- Backspace/Delete/Left/Right works on words instead of characters.
+      word = ctrl || alt
+  pure (foldInputKeys (applyKey word shift) s2 keys)
 
 handleCtrlChar :: Context -> TextInputState -> Char -> IO TextInputState
 handleCtrlChar ctx =
@@ -151,13 +155,14 @@ insertChar s ch =
       TB.Cursor _ c = TB.getCursor buf'
    in TextInputState (TB.toText buf') c c
 
-applyKey :: Bool -> TextInputState -> Key -> TextInputState
-applyKey shift s key =
+applyKey :: Bool -> Bool -> TextInputState -> Key -> TextInputState
+applyKey word shift s key =
   let (buf, anc) = toBuffer s
       cur = TB.getCursor buf
       hasSel = anc /= cur
    in case key of
         KeyBackspace
+          | word -> moveWith shift buf anc TB.deletePrevWord
           | hasSel ->
               let buf' = TB.deleteRange anc cur buf
                   TB.Cursor _ c = TB.getCursor buf'
@@ -167,6 +172,7 @@ applyKey shift s key =
                   TB.Cursor _ c = TB.getCursor buf'
                in TextInputState (TB.toText buf') c c
         KeyDelete
+          | word -> moveWith shift buf anc TB.deleteNextWord
           | hasSel ->
               let buf' = TB.deleteRange anc cur buf
                   TB.Cursor _ c = TB.getCursor buf'
@@ -175,8 +181,12 @@ applyKey shift s key =
               let buf' = TB.deleteChar buf
                   TB.Cursor _ c = TB.getCursor buf'
                in TextInputState (TB.toText buf') c c
-        KeyLeft -> moveWith shift buf anc TB.moveLeft
-        KeyRight -> moveWith shift buf anc TB.moveRight
+        KeyLeft
+          | word -> moveWith shift buf anc TB.moveWordLeft
+          | otherwise -> moveWith shift buf anc TB.moveLeft
+        KeyRight
+          | word -> moveWith shift buf anc TB.moveWordRight
+          | otherwise -> moveWith shift buf anc TB.moveRight
         KeyHome -> moveWith shift buf anc TB.moveToBOL
         KeyEnd -> moveWith shift buf anc TB.moveToEOL
         _ -> s

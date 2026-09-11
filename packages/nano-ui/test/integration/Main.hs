@@ -108,8 +108,21 @@ testSpecs =
   , TestSpec "scroll-top-clip" True runScrollTopClipTest
   , TestSpec "select-overlay-damage" False runSelectOverlayDamageTest
   , TestSpec "text-input-dirty" False runTextInputDirtyTest
+  , TestSpec "text-input-word-keys" False runTextInputWordKeysTest
   , TestSpec "search-field-clear" False runSearchFieldClearTest
   , TestSpec "search-field-debounce" False runSearchFieldDebounceTest
+  , TestSpec "combo-initial" False runComboInitialTest
+  , TestSpec "combo-focused-dropdown" False runComboFocusedDropdownTest
+  , TestSpec "combo-filter" False runComboFilterTest
+  , TestSpec "combo-keyboard-pick" False runComboKeyboardPickTest
+  , TestSpec "combo-mouse-pick" False runComboMousePickTest
+  , TestSpec "combo-blur-commit" False runComboBlurCommitTest
+  , TestSpec "combo-escape-revert" False runComboEscapeRevertTest
+  , TestSpec "combo-hover-highlight" False runComboHoverHighlightTest
+  , TestSpec "combo-scrollbar-drag" False runComboScrollbarDragTest
+  , TestSpec "combo-wheel-x" False runComboWheelXTest
+  , TestSpec "combo-wheel-scroll" False runComboWheelScrollTest
+  , TestSpec "combo-word-keys" False runComboWordKeysTest
   , TestSpec "modal-close-damage" False runModalCloseDamageTest
   , TestSpec "modal-open-damage" False runModalOpenDamageTest
   , TestSpec "window-close-damage" False runWindowCloseDamageTest

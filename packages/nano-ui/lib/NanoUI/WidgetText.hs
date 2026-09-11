@@ -15,6 +15,7 @@ module NanoUI.WidgetText
   , textInputFlagSearch
   , textInputSearchMode
   , textInputSearchBody
+  , comboTextClip
   , textInputSearchTerminalText
   , searchFieldReserveW
   , searchFieldTextClip
@@ -195,6 +196,14 @@ textInputSearchBody ph value focused =
   if T.null value && not focused
     then ph
     else value
+
+-- | Region a combo box's editable text may occupy: from the left content inset
+-- to the select chevron reserve on the right. Only used on GUI hosts; callers
+-- gate on that themselves.
+comboTextClip :: HostProfile -> FontMetrics -> Float -> Float -> Float -> Float -> Rect
+comboTextClip host fm x y w h =
+  let (ix, iy) = widgetContentInset host fm
+   in Rect (x + ix) (y + iy) (max 0 (w - ix - selectChevronReserve)) (max 0 (h - 2 * iy))
 
 -- | Terminal representation of a search field: value (or placeholder), with the
 -- caret inserted when focused. No caption prefix.

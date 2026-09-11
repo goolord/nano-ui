@@ -1,5 +1,6 @@
 module Cases
   ( module Cases.Animation
+  , module Cases.Combo
   , module Cases.ContextMenu
   , module Cases.CustomWidget
   , module Cases.Damage
@@ -76,6 +77,7 @@ module Cases
   ) where
 
 import Cases.Animation
+import Cases.Combo
 import Cases.ContextMenu
 import Cases.CustomWidget
 import Cases.Damage

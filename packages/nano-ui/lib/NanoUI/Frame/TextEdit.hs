@@ -150,6 +150,7 @@ import NanoUI.Layout.Arena
   , NodeType (NodeTextArea, NodeTextInput)
   , findNodeRevM
   , getNodeType
+  , getOptions
   , getRect
   , getStyleIdx
   , getText
@@ -188,7 +189,8 @@ import NanoUI.Types
   , v2Y
   )
 import NanoUI.WidgetText
-  ( textInputFieldHeight
+  ( comboTextClip
+  , textInputFieldHeight
   , textInputFieldText
   , textInputLabelGap
   , textInputSearchMode
@@ -637,14 +639,19 @@ textInputFieldTextClip host geom fm =
 
 -- | Resolve the box a field paints/hits and the clip its text is confined to.
 -- Search fields are caption-less: the whole node rect is the box and text is
--- clipped around the magnifier / clear chrome.
+-- clipped around the magnifier / clear chrome. Combo boxes (search fields
+-- carrying dropdown options) clip to the left of the chevron instead.
 nodeTextFieldGeom :: Context -> NodeIdx -> Float -> Float -> Float -> Float -> IO (Rect, Rect)
 nodeTextFieldGeom ctx idx x y w h = do
   si <- getStyleIdx (ctxNodeArena ctx) idx
+  opts <- getOptions (ctxNodeArena ctx) idx
   let host = ctxHostProfile ctx
       fm = ctxFontMetrics ctx
   if textInputSearchMode si && not (isCellHost host)
-    then pure (Rect x y w h, searchFieldTextClip host fm x y w h)
+    then
+      if null opts
+        then pure (Rect x y w h, searchFieldTextClip host fm x y w h)
+        else pure (Rect x y w h, comboTextClip host fm x y w h)
     else
       let geom = textInputGeom host fm x y w h
        in pure (tigFieldRect geom, textInputFieldTextClip host geom fm)
@@ -659,8 +666,9 @@ searchClearHit ctx wid mouse = do
     Nothing -> pure False
     Just idx -> do
       si <- getStyleIdx (ctxNodeArena ctx) idx
+      opts <- getOptions (ctxNodeArena ctx) idx
       let terminal = isCellHost (ctxHostProfile ctx)
-      if not (textInputSearchMode si) || terminal
+      if not (textInputSearchMode si) || terminal || not (null opts)
         then pure False
         else do
           value <- textInputValue ctx idx

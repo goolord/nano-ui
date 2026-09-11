@@ -34,6 +34,7 @@ import NanoUI.Layout.Arena
   , arenaCount
   , foldNodeRevM
   , getNodeType
+  , getOptions
   , getWidgetId
   , isFloatingNode
   , isWidgetNode
@@ -98,11 +99,34 @@ needsRedrawBody ctx prev inp = do
         else hoverWouldChange ctx inp
 
 -- Select dropdown or text-input menu is open. Overlay hover is not a widget id.
+-- A focused combo (a search-style field carrying options) also owns an open
+-- dropdown: report it so every frame while it is up redraws with full damage —
+-- the floating list is painted by an overlay, so clip-damage frames would
+-- leave stale rows in the retained texture.
 overlayMenuOpen :: Context -> IO Bool
 overlayMenuOpen ctx = do
   store <- getStore ctx
   menu <- getTextInputMenu ctx
-  pure (anySelectOpen store || isJust menu)
+  if anySelectOpen store || isJust menu
+    then pure True
+    else comboDropdownOpen ctx
+
+comboDropdownOpen :: Context -> IO Bool
+comboDropdownOpen ctx = do
+  focus <- readIORef (ctxFocusId ctx)
+  if hashWidgetId focus == 0
+    then pure False
+    else do
+      mIdx <- findNodeByWidgetId ctx focus
+      case mIdx of
+        Nothing -> pure False
+        Just idx -> do
+          nt <- getNodeType (ctxNodeArena ctx) idx
+          if nt /= NodeTextInput
+            then pure False
+            else do
+              opts <- getOptions (ctxNodeArena ctx) idx
+              pure (not (null opts))
 
 -- Focused text field or its context menu. Keep the loop live so typed bytes
 -- are not stuck behind SDL_WaitEvent.

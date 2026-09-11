@@ -30,6 +30,16 @@ module NanoUI.Store
   , slotTextInputScroll
   , slotSearchCommitted
   , slotSearchAge
+  , slotComboHighlight
+  , slotComboScroll
+  , slotComboCount
+  , slotComboScrollX
+  , slotComboContentW
+  , slotComboDrag
+  , slotComboDragOff
+  , slotComboCommitted
+  , slotComboFocus
+  , slotComboLive
   , slotPaneGest
   , slotPaneGrab
   , slotPaneFocus
@@ -205,6 +215,49 @@ slotSearchCommitted = 0x534541524300001D
 
 slotSearchAge :: Word64
 slotSearchAge = 0x534541524700001B
+
+-- Combo box suggestion state (storeInt/storeFloat, keyed by the field
+-- widget): the highlighted option index (absolute into the filtered list),
+-- the start of the visible window slice (keyboard / wheel / scrollbar
+-- scrolling), and the scrollbar bookkeeping the overlay painter and the
+-- widget's thumb-drag gesture share (total filtered count, widest row, x
+-- offset, drag axis + grab offset).
+slotComboHighlight :: Word64
+slotComboHighlight = 0x434F4D424F000030
+
+slotComboScroll :: Word64
+slotComboScroll = 0x434F4D424F000031
+
+slotComboCount :: Word64
+slotComboCount = 0x434F4D424F000032
+
+slotComboScrollX :: Word64
+slotComboScrollX = 0x434F4D424F000033
+
+slotComboContentW :: Word64
+slotComboContentW = 0x434F4D424F000034
+
+slotComboDrag :: Word64
+slotComboDrag = 0x434F4D424F000035
+
+slotComboDragOff :: Word64
+slotComboDragOff = 0x434F4D424F000036
+
+-- The last committed value (storeText): typing edits the live field text but
+-- only Enter, a row click, or losing focus commits it (Escape reverts).
+slotComboCommitted :: Word64
+slotComboCommitted = 0x434F4D424F000037
+
+-- Had-focus flag (storeInt) so the widget can see the focus-lost transition
+-- on the frame after blur and commit then.
+slotComboFocus :: Word64
+slotComboFocus = 0x434F4D424F000038
+
+-- The field text as the widget last produced it (storeText): a frame-start
+-- value that differs from it changed externally (a frame-side row pick or a
+-- clipboard menu action), not by typing.
+slotComboLive :: Word64
+slotComboLive = 0x434F4D424F000039
 
 -- PaneGrid gesture slot (storeInt): 0 none, positive = dragged pane id,
 -- negative = split id being resized. Mirrors slotDrag's press-held-release

@@ -32,6 +32,7 @@ module NanoUI.Context
   , getSelectDropPress
   , setSelectDropPress
   , setOpenSelectDrop
+  , getOpenSelectDrop
   , getMenuPointerGesture
   , setMenuPointerGesture
   , getWindowDrag
