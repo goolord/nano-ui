@@ -146,13 +146,14 @@ import NanoUI.Frame.Spans (collectNodeTextSpans, widgetTextPlacements, widgetTex
 import NanoUI.Frame.TextEdit
   ( TextAreaGeom (..)
   , TextInputGeom (..)
-  , drawTextAreaContent
+  , drawTextAreaContentWith
   , drawTextInputCaret
   , drawTextInputSelection
   , syncTextInputScroll
   , textInputFieldTextClip
   , textInputGeom
   , textAreaGeom
+  , resolveTextAreaFont
   )
 
 lowerShapes :: Context -> IO ()
@@ -393,14 +394,10 @@ lowerNodeVisible ctx occluders idx nt x y w h rect fm theme terminal da =
       | not terminal -> do
           style <- widgetVisualStyle ctx nt idx
           focus <- textInputFocused ctx idx
-          let geom = textAreaGeom (ctxHostProfile ctx) fm x y w h
-              fieldRect = tagFieldRect geom
+          areaFm <- resolveTextAreaFont ctx idx
+          let fieldRect = tagFieldRect (textAreaGeom (ctxHostProfile ctx) areaFm x y w h)
           paintTextFieldFrame da theme style focus fieldRect
-          lbl <- getText (ctxNodeArena ctx) idx
-          unless (T.null lbl) $ do
-            let lfg = lerpColor (styleFg style) (themeWindow theme) 0.32
-            pushText da fm x y lbl lfg
-          drawTextAreaContent da ctx idx x y w h style
+          drawTextAreaContentWith da ctx areaFm idx x y w h style
     NodeSpacer -> pure ()
     NodeModal -> pure ()
     NodeWindow -> pure ()

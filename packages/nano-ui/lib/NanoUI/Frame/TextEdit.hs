@@ -36,6 +36,7 @@ module NanoUI.Frame.TextEdit
   , drawTextInputSelection
   , drawTextAreaSelection
   , drawTextAreaContent
+  , drawTextAreaContentWith
     -- * Selection & interaction
   , applyTextInputClick
   , applyTextInputDrag
@@ -53,6 +54,8 @@ module NanoUI.Frame.TextEdit
   , textAreaFieldClip
   , textAreaFocused
   , textAreaValue
+  , resolveTextAreaFont
+  , textAreaContentMetrics
   , loadTextAreaStateAt
   , syncTextAreaViewport
   , textAreaHitForWidget
@@ -150,6 +153,7 @@ import NanoUI.Layout.Arena
   , NodeIdx
   , NodeType (NodeTextArea, NodeTextInput)
   , findNodeRevM
+  , getNodeFontSize
   , getNodeType
   , getOptions
   , getRect
@@ -157,9 +161,12 @@ import NanoUI.Layout.Arena
   , getText
   , getWidgetId
   )
-import NanoUI.Store (slotTextAreaCol, slotTextAreaRow, slotTextAreaScroll, slotTextAreaViewport, slotTextInputScroll)
+import NanoUI.Store (slotTextAreaCol, slotTextAreaContentFont, slotTextAreaContentH, slotTextAreaContentW, slotTextAreaRow, slotTextAreaScroll, slotTextAreaViewport, slotTextInputScroll)
 import NanoUI.Style
-  ( Padding (..)
+  ( FontStyle (..)
+  , FontVariant (..)
+  , FontWeight (..)
+  , Padding (..)
   , Style (..)
   , Theme (..)
   , scrollBarThumbColor
@@ -940,15 +947,12 @@ data TextAreaHit = TextAreaHit
   , tahWidgetH :: !Float
   }
 
+-- | A caption-less text area fills its whole node rect.
 textAreaGeom :: HostProfile -> FontMetrics -> Float -> Float -> Float -> Float -> TextAreaGeom
-textAreaGeom host fm x y w h =
+textAreaGeom _host fm x y w h =
   let s = fmSnapScale fm
-      labelH = layoutLineHeight host fm
-      gap = textInputLabelGap fm
-      fieldY = y + onGrid s (labelH + gap)
-      fieldH = max 0 (h - labelH - gap)
       lineH = onGrid s (fmLineHeight fm)
-   in TextAreaGeom {tagFieldRect = Rect x fieldY w fieldH, tagLineHeight = lineH}
+   in TextAreaGeom {tagFieldRect = Rect x y w h, tagLineHeight = lineH}
 
 textAreaFieldClip :: HostProfile -> TextAreaGeom -> FontMetrics -> Rect
 textAreaFieldClip host geom fm =
@@ -967,13 +971,66 @@ textAreaFocused = textInputFocused
 textAreaValue :: Context -> NodeIdx -> IO Text
 textAreaValue = textInputValue
 
+-- | Font the text-area content is laid out and painted in. Honors the node's
+-- @layoutFontSize@ (set via 'fontSize' on the editor layout) so a single text
+-- area can zoom without changing the rest of the UI. A size of 0 means the
+-- base UI font.
+resolveTextAreaFont :: Context -> NodeIdx -> IO FontMetrics
+resolveTextAreaFont ctx idx = do
+  size <- getNodeFontSize (ctxNodeArena ctx) idx
+  if size <= 0
+    then pure (ctxFontMetrics ctx)
+    else fst <$> ctxResolveFont ctx size WeightNormal FontStyleNormal FontRegular
+
+-- | Content extent of a text area, @(contentWidth, contentHeight)@. Measuring
+-- the width scans every character of the document, so the result is cached per
+-- widget and only refreshed when the text changes (the editor clears
+-- 'slotTextAreaContentFont') or the node font changes.
+textAreaContentMetrics :: Context -> NodeIdx -> IO (Float, Float)
+textAreaContentMetrics ctx idx = do
+  wid <- getWidgetId (ctxNodeArena ctx) idx
+  size <- getNodeFontSize (ctxNodeArena ctx) idx
+  store <- getStore ctx
+  let key = intKey wid
+      cacheKeyF = slotKey slotTextAreaContentFont key
+      cacheKeyW = slotKey slotTextAreaContentW key
+      cacheKeyH = slotKey slotTextAreaContentH key
+      cachedFont = IM.findWithDefault (-1) cacheKeyF (storeFloat store)
+      cachedW = IM.findWithDefault (-1) cacheKeyW (storeFloat store)
+  if cachedFont == size && cachedW >= 0
+    then pure (cachedW, IM.findWithDefault 0 cacheKeyH (storeFloat store))
+    else do
+      fm <- resolveTextAreaFont ctx idx
+      let host = ctxHostProfile ctx
+          text = IM.findWithDefault "" key (storeText store)
+          lineTexts = TB.toLines (TB.fromText text)
+          lineCount = max 1 (length lineTexts)
+          lineH = onGrid (fmSnapScale fm) (fmLineHeight fm)
+          contentH = fromIntegral lineCount * lineH
+          contentW = maximum (0 : [textDisplayWidth host fm l | l <- lineTexts])
+      store' <- getStore ctx
+      setStore
+        ctx
+        ( store'
+            { storeFloat =
+                IM.insert cacheKeyF size $
+                  IM.insert cacheKeyH contentH $
+                    IM.insert cacheKeyW contentW (storeFloat store')
+            }
+        )
+      pure (contentW, contentH)
+
 loadTextAreaStateAt :: Context -> NodeIdx -> Float -> Float -> Float -> Float -> IO TA.TextAreaState
 loadTextAreaStateAt ctx idx x y w h = do
+  fm <- resolveTextAreaFont ctx idx
+  loadTextAreaStateAtFm ctx idx fm x y w h
+
+loadTextAreaStateAtFm :: Context -> NodeIdx -> FontMetrics -> Float -> Float -> Float -> Float -> IO TA.TextAreaState
+loadTextAreaStateAtFm ctx idx fm x y w h = do
   wid <- getWidgetId (ctxNodeArena ctx) idx
   store <- getStore ctx
   let key = intKey wid
       initial = IM.findWithDefault "" key (storeText store)
-      fm = ctxFontMetrics ctx
       geom = textAreaGeom (ctxHostProfile ctx) fm x y w h
       clip = textAreaFieldClip (ctxHostProfile ctx) geom fm
       vpW = rectW clip
@@ -1057,8 +1114,8 @@ isMouseOnTextAreaScrollBarAt :: Context -> NodeIdx -> V2 -> IO Bool
 isMouseOnTextAreaScrollBarAt ctx idx mouse = do
   wid <- getWidgetId (ctxNodeArena ctx) idx
   (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+  fm <- resolveTextAreaFont ctx idx
   let host = ctxHostProfile ctx
-      fm = ctxFontMetrics ctx
       geom = textAreaGeom host fm x y w h
       field = tagFieldRect geom
   store <- getStore ctx
@@ -1075,21 +1132,19 @@ isMouseOnTextAreaScrollBarAt ctx idx mouse = do
 
 syncTextAreaViewport :: Context -> NodeIdx -> Float -> Float -> Float -> Float -> IO ()
 syncTextAreaViewport ctx idx x y w h = do
+  fm <- resolveTextAreaFont ctx idx
+  syncTextAreaViewportFm ctx idx fm x y w h
+
+syncTextAreaViewportFm :: Context -> NodeIdx -> FontMetrics -> Float -> Float -> Float -> Float -> IO ()
+syncTextAreaViewportFm ctx idx fm x y w h = do
   wid <- getWidgetId (ctxNodeArena ctx) idx
   store <- getStore ctx
+  (contentW, contentH) <- textAreaContentMetrics ctx idx
   let key = intKey wid
-      fm = ctxFontMetrics ctx
       host = ctxHostProfile ctx
       geom = textAreaGeom host fm x y w h
       clip = textAreaFieldClip host geom fm
       vp = (rectW clip, rectH clip)
-      text = IM.findWithDefault "" key (storeText store)
-      buf = TB.fromText text
-      lineTexts = TB.toLines buf
-      lineCount = max 1 (length lineTexts)
-      lineH = tagLineHeight geom
-      contentH = fromIntegral lineCount * lineH
-      contentW = maximum (0 : [textDisplayWidth host fm l | l <- lineTexts])
       (barLaneW, barLaneH) = textAreaBarLanes host fm
       hasV0 = contentH > rectH clip
       hasH0 = contentW > rectW clip
@@ -1175,23 +1230,30 @@ drawTextAreaSelection da _ctx state geom host fm theme style = do
 
 drawTextAreaContent :: DrawArena -> Context -> NodeIdx -> Float -> Float -> Float -> Float -> Style -> IO ()
 drawTextAreaContent da ctx idx x y w h style = do
+  fm <- resolveTextAreaFont ctx idx
+  drawTextAreaContentWith da ctx fm idx x y w h style
+
+-- | 'drawTextAreaContent' with the node font already resolved, so a paint pass
+-- that also needs it (for the field frame) resolves it once.
+drawTextAreaContentWith :: DrawArena -> Context -> FontMetrics -> NodeIdx -> Float -> Float -> Float -> Float -> Style -> IO ()
+drawTextAreaContentWith da ctx fm idx x y w h style = do
   snap <- textAreaSnap da
   let terminal = isCellHost (ctxHostProfile ctx)
   if terminal
     then pure ()
     else do
-      syncTextAreaViewport ctx idx x y w h
+      syncTextAreaViewportFm ctx idx fm x y w h
       focus <- textAreaFocused ctx idx
       theme <- readIORef (ctxTheme ctx)
-      let fm = ctxFontMetrics ctx
-          host = ctxHostProfile ctx
+      let host = ctxHostProfile ctx
           geom = textAreaGeom host fm x y w h
           field = tagFieldRect geom
           lineH = tagLineHeight geom
           clip = textAreaFieldClip host geom fm
           contentTop = rectY clip
           fg = styleFg style
-      state <- loadTextAreaStateAt ctx idx x y w h
+      state <- loadTextAreaStateAtFm ctx idx fm x y w h
+      (contentW, contentH) <- textAreaContentMetrics ctx idx
       let buf = TA.buffer state
           lineTexts = TB.toLines buf
           (scrollX, scrollY) = TA.scrollOffset state
@@ -1200,9 +1262,6 @@ drawTextAreaContent da ctx idx x y w h style = do
           contentX = rectX clip - scrollXf
           fieldTop = rectY field
           fieldBottom = fieldTop + rectH field
-          lineCount = max 1 (length lineTexts)
-          contentH = fromIntegral lineCount * lineH
-          contentW = maximum (0 : [textDisplayWidth host fm l | l <- lineTexts])
           layouts = textAreaScrollBarLayouts host fm field contentW contentH scrollXf scrollYf
           mVLayout = tasbVertical layouts
           mHLayout = tasbHorizontal layouts
@@ -1259,8 +1318,8 @@ textAreaHitForWidget ctx wid = do
         then pure Nothing
         else do
           (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-          let fm = ctxFontMetrics ctx
-              geom = textAreaGeom (ctxHostProfile ctx) fm x y w h
+          fm <- resolveTextAreaFont ctx idx
+          let geom = textAreaGeom (ctxHostProfile ctx) fm x y w h
               field = tagFieldRect geom
               clip = textAreaFieldClip (ctxHostProfile ctx) geom fm
           pure
@@ -1280,12 +1339,12 @@ textAreaHitForWidget ctx wid = do
 textAreaCursorAt :: Context -> TA.TextAreaState -> TextAreaHit -> V2 -> IO (Int, Int)
 textAreaCursorAt ctx state hit mouse = do
   snap <- textAreaSnap (ctxDrawArena ctx)
+  fm <- resolveTextAreaFont ctx (tahNodeIdx hit)
   let lineTexts = TB.toLines (TA.buffer state)
       lineCount = max 1 (length lineTexts)
       (scrollX, scrollY) = TA.scrollOffset state
       scrollXf = snap (realToFrac scrollX)
       scrollYf = snap (realToFrac scrollY)
-      fm = ctxFontMetrics ctx
       (_, iy) = widgetContentInset (ctxHostProfile ctx) fm
       contentTop = rectY (tahFieldRect hit) + iy
       relY = v2Y mouse - contentTop + scrollYf
@@ -1295,7 +1354,7 @@ textAreaCursorAt ctx state hit mouse = do
         if row < length lineTexts
           then lineTexts !! row
           else ""
-  col <- textCharAtX ctx line (tahContentX hit - scrollXf) (v2X mouse)
+      col = textIndexAtX (ctxHostProfile ctx) fm line (max 0 (v2X mouse - (tahContentX hit - scrollXf)))
   pure (row, col)
 
 updateTextAreaSelection :: Context -> WidgetId -> TextAreaHit -> TB.Cursor -> TB.Cursor -> IO ()

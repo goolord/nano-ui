@@ -300,10 +300,14 @@ import NanoUI.Store
   , slotKey
   , slotSearchAge
   , slotSearchCommitted
+  , slotTextAreaContentFont
   , slotTextAreaViewport
   )
 import NanoUI.Style
-  ( Layout (..)
+  ( FontStyle (..)
+  , FontVariant (..)
+  , FontWeight (..)
+  , Layout (..)
   , alignEnd
   , alignMid
   , defaultLayout
@@ -1040,24 +1044,27 @@ comboBox placeholder options initial = do
   pure (setChanged commitPulse resp, finalText)
 
 
--- | Multi-line text editor using the default 'textAreaLayout'.
-textArea :: Ui :> es => Text -> Text -> Eff es (Response, Text)
+-- | Caption-less multi-line text editor using the default 'textAreaLayout'.
+-- Pair it with a 'label' when a caption is wanted.
+textArea :: Ui :> es => Text -> Eff es (Response, Text)
 textArea = textAreaWith textAreaLayout
 
--- | Multi-line text editor with a caller-supplied layout. Use this to make the
--- editor grow before it is solved (for example @grow defaultLayout@ to fill its
--- parent).
-textAreaWith :: Ui :> es => Layout -> Text -> Text -> Eff es (Response, Text)
-textAreaWith layout lbl initial = do
+-- | Caption-less multi-line text editor with a caller-supplied layout. Use this
+-- to make the editor grow before it is solved (for example @grow defaultLayout@
+-- to fill its parent).
+textAreaWith :: Ui :> es => Layout -> Text -> Eff es (Response, Text)
+textAreaWith layout initial = do
   wid <- nextId
   ctx <- askContext
   uiIO $ registerFocusable ctx wid
   inp <- askInput
   store <- uiIO (getStore ctx)
   let key = intKey wid
+      contentCacheKey = slotKey slotTextAreaContentFont key
+      dropContentCache st = st {storeFloat = IM.delete contentCacheKey (storeFloat st)}
   when (not (IM.member key (storeText store)))
     $ uiIO
-    $ setStore ctx (store {storeText = IM.insert key initial (storeText store)})
+    $ setStore ctx (dropContentCache store {storeText = IM.insert key initial (storeText store)})
   let current = IM.findWithDefault initial key (storeText store)
   focus <- uiIO (readIORef (ctxFocusId ctx))
   blocked <- uiIO (pointerBlockedByModal ctx)
@@ -1065,13 +1072,17 @@ textAreaWith layout lbl initial = do
   (newText, stateChanged) <-
     if isFocus
       then do
+        editFm <-
+          if layoutFontSize layout <= 0
+            then pure (ctxFontMetrics ctx)
+            else fst <$> uiIO (ctxResolveFont ctx (layoutFontSize layout) WeightNormal FontStyleNormal FontRegular)
         let oldState = loadTextAreaState store key initial
             TB.Cursor oldRow oldCol = TB.getCursor (TA.buffer oldState)
             TB.Cursor oldAnchorRow oldAnchorCol = TA.selectionAnchor oldState
             (vw, vh) = IM.findWithDefault (200, 96) (slotKey slotTextAreaViewport key) (storePoint store)
             vpW = realToFrac vw
             vpH = realToFrac vh
-            lineH = realToFrac (fmLineHeight (ctxFontMetrics ctx))
+            lineH = realToFrac (fmLineHeight editFm)
         newState <- uiIO (processTextArea ctx inp vpW vpH lineH oldState)
         let newText = TB.toText (TA.buffer newState)
             TB.Cursor newRow newCol = TB.getCursor (TA.buffer newState)
@@ -1085,10 +1096,10 @@ textAreaWith layout lbl initial = do
                 || TA.scrollOffset newState /= TA.scrollOffset oldState
         when changed $ do
           curStore <- uiIO (getStore ctx)
-          uiIO $ setStore ctx (saveTextAreaState key newState curStore)
+          uiIO $ setStore ctx (dropContentCache (saveTextAreaState key newState curStore))
         pure (newText, changed)
       else pure (current, False)
-  resp <- addWidget wid NodeTextArea lbl 0 layout
+  resp <- addWidget wid NodeTextArea "" 0 layout
   pure (setChanged stateChanged resp, newText)
 
 select :: Ui :> es => Text -> [Text] -> Int -> Eff es (Response, Int)

@@ -8,12 +8,12 @@ module NanoUI.Frame.Scroll
   , scrollBarLayout
   , ScrollBarLayout (..)
   , paintScrollChrome
+  , textAreaContentGeom
   ) where
 
 
 import Control.Monad (unless, void, when)
 import Data.IORef (readIORef)
-import qualified Data.IntMap.Strict as IM
 import Data.Maybe (fromMaybe)
 import NanoUI.Context
   ( Context (..)
@@ -22,24 +22,22 @@ import NanoUI.Context
   , getScrollDrag
   , getScrollOffset
   , getScrollOffset2D
-  , getStore
-  , intKey
   , setScrollDrag
   , setScrollOffset
   , setScrollOffset2D
   )
 import NanoUI.Draw (DrawArena, Layer (..), beginLayer, currentLayer, pushRect, pushRoundedRect)
-import NanoUI.Font (ScrollBarSlot (..), textDisplayWidth, widgetContentInset)
+import NanoUI.Font (FontMetrics, ScrollBarSlot (..), widgetContentInset)
 import NanoUI.Frame.TextEdit
   ( TextAreaGeom (..)
   , TextAreaScrollBarLayouts (..)
+  , resolveTextAreaFont
   , textAreaBarLanes
+  , textAreaContentMetrics
   , textAreaGeom
   , textAreaScrollBarLayouts
   )
-import NanoUI.Store (storeText)
 import NanoUI.Types (isCellHost)
-import qualified NanoUI.Widgets.TextBuffer as TB
 import NanoUI.Id (WidgetId)
 import NanoUI.Input (Input (..), inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased, inputScroll)
 import NanoUI.Layout.Arena
@@ -275,20 +273,13 @@ tryApplyScrollWheelDelta ctx wid scroll = do
     Just (idx, dir, _x, _y, w, h, pad, contentSize) -> do
       nt <- getNodeType (ctxNodeArena ctx) idx
       let step = scrollLineFor (ctxHostProfile ctx)
-          innerW = w - padL pad - padR pad
-          innerH = h - padT pad - padB pad
       if nt == NodeTextArea
         then do
-          store <- getStore ctx
-          let key = intKey wid
-              text = IM.findWithDefault "" key (storeText store)
-              buf = TB.fromText text
-              lineTexts = TB.toLines buf
-              host = ctxHostProfile ctx
-              fm = ctxFontMetrics ctx
-              contentW = maximum (0 : [textDisplayWidth host fm l | l <- lineTexts])
-              contentH = contentSize
-              (barLaneW, barLaneH) = textAreaBarLanes host fm
+          (fm, field, _lineH, contentW, contentH, (barLaneW, barLaneH)) <- textAreaContentGeom ctx idx
+          let host = ctxHostProfile ctx
+              (ix, iy) = widgetContentInset host fm
+              innerW = rectW field - 2 * ix
+              innerH = rectH field - 2 * iy
               hasV0 = contentH > innerH
               hasH0 = contentW > innerW
               hasV = contentH > (if hasH0 then max 0 (innerH - barLaneH) else innerH)
@@ -306,6 +297,8 @@ tryApplyScrollWheelDelta ctx wid scroll = do
               setScrollOffset2D ctx wid (V2 newX newY)
               pure True
         else do
+          let innerW = w - padL pad - padR pad
+              innerH = h - padT pad - padB pad
           si <- getStyleIdx (ctxNodeArena ctx) idx
           if isScrollStyle2D si
             then do
@@ -404,26 +397,13 @@ scrollHitSelf ctx idx mouse clip = do
   nt <- getNodeType (ctxNodeArena ctx) idx
   if nt == NodeTextArea
     then do
-      (x, y, w, h) <- getScrollVisualRect ctx idx
-      let fm = ctxFontMetrics ctx
-          geom = textAreaGeom (ctxHostProfile ctx) fm x y w h
-          field = tagFieldRect geom
+      (fm, field, _lineH, contentW, contentH, _lanes) <- textAreaContentGeom ctx idx
       case rectIntersect clip field of
         Nothing -> pure Nothing
         Just fclip ->
           if rectW fclip > 0 && rectH fclip > 0 && rectContains fclip mouse
             then do
-              wid <- getWidgetId (ctxNodeArena ctx) idx
-              store <- getStore ctx
-              let key = intKey wid
-                  text = IM.findWithDefault "" key (storeText store)
-                  buf = TB.fromText text
-                  lineTexts = TB.toLines buf
-                  lineCount = max 1 (length lineTexts)
-                  lineH = tagLineHeight geom
-                  contentH = fromIntegral lineCount * lineH
-                  host = ctxHostProfile ctx
-                  contentW = maximum (0 : [textDisplayWidth host fm l | l <- lineTexts])
+              let host = ctxHostProfile ctx
                   (ix, iy) = widgetContentInset host fm
                   innerW = rectW field - 2 * ix
                   innerH = rectH field - 2 * iy
@@ -482,6 +462,20 @@ scrollHitClip ctx idx nt parentClip = do
 getScrollVisualRect :: Context -> NodeIdx -> IO (Float, Float, Float, Float)
 getScrollVisualRect ctx idx = getRect (ctxNodeArena ctx) idx
 
+-- | Font-resolved field rect and content extent of a caption-less text area.
+-- Zoom changes the node font, so scroll and hit math must resolve it here and
+-- not fall back to the base 'ctxFontMetrics', or the scroll range clamps short.
+textAreaContentGeom :: Context -> NodeIdx -> IO (FontMetrics, Rect, Float, Float, Float, (Float, Float))
+textAreaContentGeom ctx idx = do
+  fm <- resolveTextAreaFont ctx idx
+  (x, y, w, h) <- getScrollVisualRect ctx idx
+  (contentW, contentH) <- textAreaContentMetrics ctx idx
+  let host = ctxHostProfile ctx
+      geom = textAreaGeom host fm x y w h
+      field = tagFieldRect geom
+      lineH = tagLineHeight geom
+  pure (fm, field, lineH, contentW, contentH, textAreaBarLanes host fm)
+
 updateScrollDrag :: Context -> Input -> IO ()
 updateScrollDrag ctx inp = do
   gesture <- getMenuPointerGesture ctx
@@ -501,20 +495,8 @@ updateScrollDrag ctx inp = do
                   nt <- getNodeType (ctxNodeArena ctx) idx
                   if nt == NodeTextArea
                     then do
-                      (x, y, w, h) <- getScrollVisualRect ctx idx
+                      (fm, field, _lineH, contentW, contentH, _lanes) <- textAreaContentGeom ctx idx
                       let host = ctxHostProfile ctx
-                          fm = ctxFontMetrics ctx
-                          geom = textAreaGeom host fm x y w h
-                          field = tagFieldRect geom
-                      store <- getStore ctx
-                      let key = intKey wid
-                          text = IM.findWithDefault "" key (storeText store)
-                          buf = TB.fromText text
-                          lineTexts = TB.toLines buf
-                          lineCount = max 1 (length lineTexts)
-                          lineH = tagLineHeight geom
-                          contentH = fromIntegral lineCount * lineH
-                          contentW = maximum (0 : [textDisplayWidth host fm l | l <- lineTexts])
                       V2 curX curY <- getScrollOffset2D ctx wid
                       let layouts = textAreaScrollBarLayouts host fm field contentW contentH curX curY
                       case dragDir of
@@ -645,21 +627,11 @@ scrollContainerGeomWith suppressed ctx wid = do
                 if w' /= wid
                   then go (idx + 1)
                   else do
-                    (x, y, w, h) <- getScrollVisualRect ctx idx
-                    let fm = ctxFontMetrics ctx
-                        host = ctxHostProfile ctx
-                        geom = textAreaGeom host fm x y w h
-                        field = tagFieldRect geom
+                    (fm, field, _lineH, _contentW, contentH, _lanes) <- textAreaContentGeom ctx idx
+                    let host = ctxHostProfile ctx
                         (ix, iy) = widgetContentInset host fm
                         pad = Padding ix ix iy iy
-                    store <- getStore ctx
-                    let key = intKey wid
-                        text = IM.findWithDefault "" key (storeText store)
-                        buf = TB.fromText text
-                        lineCount = max 1 (TB.getLineCount buf)
-                        lineH = tagLineHeight geom
-                        contentSize = fromIntegral lineCount * lineH
-                    pure (Just (idx, DirColumn, rectX field, rectY field, rectW field, rectH field, pad, contentSize))
+                    pure (Just (idx, DirColumn, rectX field, rectY field, rectW field, rectH field, pad, contentH))
               else if not (isScrollNode nt)
                 then go (idx + 1)
                 else do
@@ -700,20 +672,8 @@ tryStartScrollDragOn ctx wid mouse = do
       nt <- getNodeType (ctxNodeArena ctx) idx
       if nt == NodeTextArea
         then do
-          (x, y, w, h) <- getScrollVisualRect ctx idx
+          (fm, field, _lineH, contentW, contentH, _lanes) <- textAreaContentGeom ctx idx
           let host = ctxHostProfile ctx
-              fm = ctxFontMetrics ctx
-              geom = textAreaGeom host fm x y w h
-              field = tagFieldRect geom
-          store <- getStore ctx
-          let key = intKey wid
-              text = IM.findWithDefault "" key (storeText store)
-              buf = TB.fromText text
-              lineTexts = TB.toLines buf
-              lineCount = max 1 (length lineTexts)
-              lineH = tagLineHeight geom
-              contentH = fromIntegral lineCount * lineH
-              contentW = maximum (0 : [textDisplayWidth host fm l | l <- lineTexts])
           V2 curX curY <- getScrollOffset2D ctx wid
           let layouts = textAreaScrollBarLayouts host fm field contentW contentH curX curY
           case tasbVertical layouts of

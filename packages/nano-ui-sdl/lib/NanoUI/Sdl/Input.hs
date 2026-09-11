@@ -172,6 +172,10 @@ keyDown p = do
         | modCtrl mods && code == sdlCtrlCKeycode -> singletonEv (EvText "c" mods)
         | modCtrl mods && code == sdlCtrlVKeycode -> singletonEv (EvText "v" mods)
         | modCtrl mods && code == sdlCtrlXKeycode -> singletonEv (EvText "x" mods)
+        | modCtrl mods && code == sdlEqualsKeycode -> singletonEv (EvText "=" mods)
+        | modCtrl mods && code == sdlPlusKeycode -> singletonEv (EvText "+" mods)
+        | modCtrl mods && code == sdlMinusKeycode -> singletonEv (EvText "-" mods)
+        | modCtrl mods && code == sdlZeroKeycode -> singletonEv (EvText "0" mods)
         | otherwise -> emptySmallArray
 
 textInput :: Ptr SDL_Event -> IO (SmallArray SdlEvent)
@@ -264,6 +268,14 @@ sdlCtrlAKeycode = 97
 sdlCtrlCKeycode = 99
 sdlCtrlVKeycode = 118
 sdlCtrlXKeycode = 120
+
+-- Zoom / editor shortcut keys (ASCII key symbols; SDL folds Shift into the
+-- symbol, so '=' becomes '+' when shifted).
+sdlEqualsKeycode, sdlPlusKeycode, sdlMinusKeycode, sdlZeroKeycode :: Word32
+sdlEqualsKeycode = 61
+sdlPlusKeycode = 43
+sdlMinusKeycode = 45
+sdlZeroKeycode = 48
 
 mapSpecialKey :: Word32 -> Maybe Key
 mapSpecialKey k

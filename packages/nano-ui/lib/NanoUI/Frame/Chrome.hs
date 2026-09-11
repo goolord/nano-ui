@@ -564,6 +564,7 @@ widgetVisualStyle ctx nt idx = do
         | nt == NodeTextArea, isFocus = styleActiveBg widgetBase
         | widKey == hashWidgetId active = styleActiveBg widgetBase
         | nt == NodeCheckbox || nt == NodeRadio || nt == NodeSlider || isClose = styleBg widgetBase
+        | isMenu = if isHot then styleHoverBg widgetBase else styleBg widgetBase
         | otherwise = hoverBackground widgetBase animT isHot
   pure widgetBase {styleBg = bg}
 

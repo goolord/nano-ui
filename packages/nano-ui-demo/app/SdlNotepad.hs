@@ -7,11 +7,10 @@
 -- Run with @cabal run nano-ui-sdl-notepad@.
 module SdlNotepad (main, notepadUi) where
 
-import Control.Exception (SomeException, try)
+import Control.Exception (SomeException, catch, try)
 import Control.Monad (unless, void, when)
 import Data.ByteString qualified as BS
 import Data.Foldable (for_)
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Maybe (listToMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -19,7 +18,7 @@ import Data.Text.Encoding qualified as TE
 import Data.Text.IO qualified as TIO
 import NanoUI
 import NanoUI.Backend.Sdl
-import NanoUI.Monad (askContext)
+import NanoUI.Monad (askContext, askInput)
 import NanoUI.Testing (collectOverlayTextSpans, collectTextSpans)
 import NanoUI.Testing.Harness
   ( clickPos
@@ -29,24 +28,14 @@ import NanoUI.Testing.Harness
   , requireSpan
   )
 import NanoUI.Widgets.TextArea (applyTextAreaMenuAction)
+import System.Directory (getFileSize, getTemporaryDirectory, removeFile)
 import System.Environment (getArgs)
-import System.IO.Unsafe (unsafePerformIO)
+import System.Exit (exitSuccess)
+import System.IO.MMap (mmapFileByteString)
 
 --------------------------------------------------------------------------------
 -- Application entry point
 --------------------------------------------------------------------------------
-
--- | @sdlAppShouldQuit@ is a pure predicate over 'Input', so the File > Exit
--- menu item records its request in a process-global flag that the predicate
--- samples on every iteration. The dummy 'Input' argument plus @NOINLINE@ stops
--- GHC from floating the read out of the loop and caching the initial value.
-{-# NOINLINE quitRef #-}
-quitRef :: IORef Bool
-quitRef = unsafePerformIO (newIORef False)
-
-{-# NOINLINE quitRequested #-}
-quitRequested :: Input -> Bool
-quitRequested _ = unsafePerformIO (readIORef quitRef)
 
 main :: IO ()
 main = do
@@ -59,8 +48,7 @@ main = do
           { sdlWindowTitle = "nano-ui Notepad"
           , sdlWindowSize = Size 1000 720
           , sdlAppTheme = Just tomorrowNightMinDarkTheme
-          , sdlAppShouldQuit = \inp ->
-              inputKeysElem KeyEscape (inputKeys inp) || quitRequested inp
+          , sdlAppShouldQuit = \inp -> inputKeysElem KeyEscape (inputKeys inp)
           }
         notepadUi
 
@@ -86,6 +74,22 @@ selftest = do
         base = emptyInput {inputWindowSize = Size 1000 720, inputMousePos = V2 500 400}
         drawFrame inp = void (sdlDrawFrame ctx notepadUi env inp False)
         clickAt2 pos = clickPos drawFrame base pos
+
+      -- openInstant mmaps (or handles empty files); round-trip a temp file.
+      tmpDir <- getTemporaryDirectory
+      let
+        tmpPath = tmpDir <> "/nano-ui-notepad-mmap.txt"
+      writeFile tmpPath "hello mmap\nsecond line"
+      raw <- openInstant tmpPath
+      let
+        decoded = TE.decodeUtf8 raw
+      unless (decoded == "hello mmap\nsecond line") $
+        fail "selftest: openInstant round-trip failed"
+      writeFile tmpPath ""
+      rawEmpty <- openInstant tmpPath
+      unless (BS.null rawEmpty) $ fail "selftest: openInstant empty file failed"
+      removeFile tmpPath
+
       mapM_ drawFrame [base, base]
 
       spans0 <- collectTextSpans ctx
@@ -125,6 +129,30 @@ selftest = do
       when (hasText "abc" spansReplaced) $
         fail "selftest: typed text was not replaced"
 
+      -- Ctrl+= / Ctrl+- zoom the editor font only; the status bar tracks it.
+      drawFrame base {inputChars = "=", inputModifiers = Modifiers False True False}
+      drawFrame base
+      spansZoomIn <- collectTextSpans ctx
+      unless (hasText "Zoom: 110%" spansZoomIn) $
+        fail "selftest: Ctrl+= did not zoom in"
+      drawFrame base {inputChars = "-", inputModifiers = Modifiers False True False}
+      drawFrame base
+      spansZoomOut <- collectTextSpans ctx
+      unless (hasText "Zoom: 100%" spansZoomOut) $
+        fail "selftest: Ctrl+- did not zoom out"
+
+      -- The File menu offers Exit; activating it terminates the process (via
+      -- 'exitSuccess'), so the selftest only checks the item is present and
+      -- closes the menu again.
+      filePos2 <-
+        requireSpan "selftest: File menu (exit)" . findExact "File"
+          =<< collectTextSpans ctx
+      clickAt2 filePos2
+      spansFile2 <- collectOverlayTextSpans ctx base
+      unless (hasText "Exit" spansFile2) $
+        fail "selftest: File menu missing Exit item"
+      clickAt2 (V2 500 300) -- dismiss the menu without activating Exit
+
       helpPos <- requireSpan "selftest: Help menu" (findExact "Help" baseSpansNew)
       clickAt2 helpPos
       spansHelp <- collectOverlayTextSpans ctx base
@@ -156,17 +184,33 @@ notepadUi = do
   (editorId, setEditorId) <- useState (WidgetId 0)
   (openDlg, setOpenDlg) <- useState (Nothing :: Maybe FileDialogId)
   (saveDlg, setSaveDlg) <- useState (Nothing :: Maybe FileDialogId)
+  (zoom, setZoom) <- useFloat 1.0
+
+  ---------------------------------------------------------------- zoom ---
+  inp <- askInput
+  let
+    ctrlDown = modCtrl (inputModifiers inp)
+    typed = inputChars inp
+  when
+    (ctrlDown && (T.any (== '+') typed || T.any (== '=') typed))
+    (setZoom (min 4.0 (zoom * 1.1)))
+  when
+    (ctrlDown && (T.any (== '-') typed || T.any (== '_') typed))
+    (setZoom (max 0.5 (zoom / 1.1)))
+  when (ctrlDown && T.any (== '0') typed) (setZoom 1.0)
 
   ----------------------------------------------------------- file dialogs ---
   useFileDialog openDlg setOpenDlg $ \chosenPaths ->
     for_ (listToMaybe chosenPaths) $ \filePath -> do
       setOpenMenu ""
       setDocGen (docGen + 1)
-      loaded <- uiIO (try (readFileFast filePath) :: IO (Either SomeException Text))
+      loaded <-
+        uiIO (try (openInstant filePath) :: IO (Either SomeException BS.ByteString))
       case loaded of
         Left _ -> setStatusMsg ("Could not open " <> T.pack filePath)
-        Right contents -> do
-          setDocText contents
+        Right raw -> do
+          -- Lenient decode: malformed bytes become U+FFFD instead of throwing.
+          setDocText (TE.decodeUtf8With (\_ _ -> Just '\xFFFD') raw)
           setDocPath (T.pack filePath)
           setDocDirty False
           setStatusMsg ("Opened " <> T.pack filePath)
@@ -220,7 +264,7 @@ notepadUi = do
       item "Save" (closeThen (saveDocument False))
       itemShortcut "Save As..." "Ctrl+Shift+S" (closeThen (saveDocument True))
       menuSeparator
-      itemShortcut "Exit" "Esc" (closeThen (uiIO (writeIORef quitRef True)))
+      itemShortcut "Exit" "Esc" (closeThen (uiIO exitSuccess))
 
     editMenu = do
       itemShortcut "Cut" "Ctrl+X" (editAction 0)
@@ -233,6 +277,10 @@ notepadUi = do
       item
         (if showStatus then "Hide Status Bar" else "Show Status Bar")
         (closeThen (setShowStatus (not showStatus)))
+      menuSeparator
+      itemShortcut "Zoom In" "Ctrl++" (closeThen (setZoom (min 4.0 (zoom * 1.1))))
+      itemShortcut "Zoom Out" "Ctrl+-" (closeThen (setZoom (max 0.5 (zoom / 1.1))))
+      itemShortcut "Reset Zoom" "Ctrl+0" (closeThen (setZoom 1.0))
       menuSeparator
       item "Document Statistics" (closeThen (setStatusMsg (documentStats docText)))
 
@@ -255,8 +303,9 @@ notepadUi = do
     (editorResp, editorText) <-
       keyed docGen $
         textAreaWith
-          (grow . minW 240 . minH 160 $ defaultLayout)
-          "document"
+          ( grow . minW 240 . minH 160 . fontSizeScale zoom $
+              defaultLayout
+          )
           docText
     when (editorText /= docText) $ do
       setDocText editorText
@@ -265,7 +314,7 @@ notepadUi = do
 
     when showStatus $ do
       void $ separator
-      statusBar docPath docDirty docText statusMsg
+      statusBar docPath docDirty docText statusMsg zoom
 
   --------------------------------------------------------------- overlays ---
   (aboutResp, _) <-
@@ -302,7 +351,7 @@ menuBar openMenu setOpen entries = do
       when
         (not isOpen && not (T.null openMenu) && respHovered btn)
         (setOpen menuLabel)
-      (popupResp, _) <- popup isOpen cfg (columnWith tight body)
+      (popupResp, _) <- popup isOpen cfg (columnWith (tight . gap 0) body)
       when (respClicked popupResp) (setOpen "")
     flex
 
@@ -341,18 +390,33 @@ writeDocument filePath contents = do
     uiIO (try (TIO.writeFile filePath contents) :: IO (Either SomeException ()))
   pure (either (const False) (const True) result)
 
--- | Much faster than 'TIO.readFile', but throws an impure exception on invalid
--- UTF-8 (caught by the caller).
-readFileFast :: FilePath -> IO Text
-readFileFast filePath = TE.decodeUtf8 <$> BS.readFile filePath
+-- | Open a file without reading it: mmap it and hand back a strict
+-- 'BS.ByteString' backed by the mapping, so pages only fault in as they are
+-- touched. Empty files are special-cased (mmap of zero bytes is invalid).
+openInstant :: FilePath -> IO BS.ByteString
+openInstant filePath = do
+  size <- getFileSize filePath
+  if size == 0
+    then pure BS.empty
+    else mmapFileByteString filePath Nothing `catch` fallbackRead
+ where
+  -- The file may be truncated between the size probe and the mmap; fall back
+  -- to a plain read for that (and any other) mmap failure.
+  fallbackRead :: SomeException -> IO BS.ByteString
+  fallbackRead _ = BS.readFile filePath
 
-statusBar :: Text -> Bool -> Text -> Text -> NanoUI ()
-statusBar path dirty contents message =
+statusBar :: Text -> Bool -> Text -> Text -> Float -> NanoUI ()
+statusBar path dirty contents message zoomVal =
   rowWith (tight . gap 12 . fillW . padXY 8 4) $ do
     void $ labelEx (tight . fontMuted $ defaultLayout) message
     flex
     void $ labelEx (tight . fontMuted $ defaultLayout) (documentLabel path dirty)
     void $ labelEx (tight . fontMuted $ defaultLayout) (documentStats contents)
+    void $ labelEx (tight . fontMuted $ defaultLayout) (zoomLabel zoomVal)
+
+zoomLabel :: Float -> Text
+zoomLabel zoomVal =
+  "Zoom: " <> T.pack (show (round (zoomVal * 100) :: Int)) <> "%"
 
 documentLabel :: Text -> Bool -> Text
 documentLabel path dirty =

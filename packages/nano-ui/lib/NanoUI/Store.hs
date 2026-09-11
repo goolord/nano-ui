@@ -27,6 +27,9 @@ module NanoUI.Store
   , slotTextAreaViewport
   , slotTextAreaAnchorRow
   , slotTextAreaAnchorCol
+  , slotTextAreaContentW
+  , slotTextAreaContentH
+  , slotTextAreaContentFont
   , slotTextInputScroll
   , slotSearchCommitted
   , slotSearchAge
@@ -204,6 +207,19 @@ slotTextAreaAnchorRow = 0x5441524100000015
 
 slotTextAreaAnchorCol :: Word64
 slotTextAreaAnchorCol = 0x5441524100000016
+
+-- | Cached text-area content extent (max line width, line count * line
+-- height) and the node font size they were measured at. Recomputing the width
+-- scans every character of the document, so it is cached and only refreshed
+-- when the text or font changes.
+slotTextAreaContentW :: Word64
+slotTextAreaContentW = 0x5441524100000018
+
+slotTextAreaContentH :: Word64
+slotTextAreaContentH = 0x5441524100000019
+
+slotTextAreaContentFont :: Word64
+slotTextAreaContentFont = 0x544152410000001A
 
 slotTextInputScroll :: Word64
 slotTextInputScroll = 0x54494E5000000017

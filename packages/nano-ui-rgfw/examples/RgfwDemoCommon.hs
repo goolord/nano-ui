@@ -296,7 +296,7 @@ viewControlsTab m = do
           void $ label "Multi-line Notes Field:"
           clrBtn <- button "Clear"
           when (respClicked clrBtn) (emit ClearNotes)
-        (taResp, taVal) <- textArea "Notes" (notesVal m)
+        (taResp, taVal) <- textArea (notesVal m)
         when (respChanged taResp) (emit (SetNotesText taVal))
 
       -- Radio Buttons

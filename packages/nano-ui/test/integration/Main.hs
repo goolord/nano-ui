@@ -44,6 +44,7 @@ testSpecs =
   , TestSpec "text-area-ctrl-a" False runTextAreaCtrlATest
   , TestSpec "text-area-scrollbar-visibility" True runTextAreaScrollbarVisibilityTest
   , TestSpec "text-area-scroll-wheel" True runTextAreaScrollWheelTest
+  , TestSpec "text-area-zoom-scroll" True runTextAreaZoomScrollTest
   , TestSpec "text-area-scroll-drag" True runTextAreaScrollDragTest
   , TestSpec "text-area-cursor-on-scrollbar" True runTextAreaCursorOnScrollBarTest
   , TestSpec "text-area-hscrollbar-visibility" True runTextAreaHScrollbarVisibilityTest
