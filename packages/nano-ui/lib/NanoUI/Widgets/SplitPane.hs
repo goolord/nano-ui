@@ -30,7 +30,8 @@ module NanoUI.Widgets.SplitPane
   , treeMovePane
   , clampTreeRatio
   , dropPreview
-  , topLevelDrop
+  , dropTargetForPane
+  , topLevelDropTarget
   ) where
 
 import Control.Applicative ((<|>))
@@ -300,33 +301,24 @@ edgeZone r mouse =
                       then ZoneBottom
                       else ZoneCenter
 
--- | Drop preview for a target pane: the rect to highlight and the
--- 'DropTarget' the drop performs. The highlighted rect is exactly the region
--- the dragged pane will occupy — the whole pane for a center swap, the half
--- where the dragged pane lands for an edge split.
-dropPreview :: Rect -> V2 -> Word64 -> (Rect, DropTarget)
-dropPreview r mouse tgt =
+-- | Classify a drop point on a target pane into the 'DropTarget' the drop
+-- performs: the pane's center swaps the two panes, an edge zone splits the
+-- target along that edge's axis with the dragged pane on the near side.
+dropTargetForPane :: Rect -> V2 -> Word64 -> DropTarget
+dropTargetForPane r mouse tgt =
   case edgeZone r mouse of
-    ZoneCenter -> (r, DropSwap tgt)
-    ZoneLeft -> (r {rectW = rectW r * 0.5}, DropSplit tgt AxisV True)
-    ZoneRight -> (r {rectX = rectX r + rectW r * 0.5, rectW = rectW r * 0.5}, DropSplit tgt AxisV False)
-    ZoneTop -> (r {rectH = rectH r * 0.5}, DropSplit tgt AxisH True)
-    ZoneBottom -> (r {rectY = rectY r + rectH r * 0.5, rectH = rectH r * 0.5}, DropSplit tgt AxisH False)
-
--- | Top-level drop preview for a grid edge: the half of the whole grid the
--- dragged pane will occupy, plus the 'DropTop' target that performs it.
-dropTopPreview :: Rect -> GridAxis -> Bool -> (Rect, DropTarget)
-dropTopPreview r AxisV True = (r {rectW = rectW r * 0.5}, DropTop AxisV True)
-dropTopPreview r AxisV False = (r {rectX = rectX r + rectW r * 0.5, rectW = rectW r * 0.5}, DropTop AxisV False)
-dropTopPreview r AxisH True = (r {rectH = rectH r * 0.5}, DropTop AxisH True)
-dropTopPreview r AxisH False = (r {rectY = rectY r + rectH r * 0.5, rectH = rectH r * 0.5}, DropTop AxisH False)
+    ZoneCenter -> DropSwap tgt
+    ZoneLeft -> DropSplit tgt AxisV True
+    ZoneRight -> DropSplit tgt AxisV False
+    ZoneTop -> DropSplit tgt AxisH True
+    ZoneBottom -> DropSplit tgt AxisH False
 
 -- | Classify a drop point against the grid's outer boundary. If the pointer
--- sits within @band@ px of a grid edge, return the 'DropTop' preview + target
--- for that edge; otherwise 'Nothing'. Checked before pane-level drops so the
--- outermost edge always restructures the whole grid.
-topLevelDrop :: Float -> Rect -> V2 -> Maybe (Rect, DropTarget)
-topLevelDrop band r mouse
+-- sits within @band@ px of a grid edge, return the 'DropTop' target for that
+-- edge; otherwise 'Nothing'. Checked before pane-level drops so the outermost
+-- edge always restructures the whole grid.
+topLevelDropTarget :: Float -> Rect -> V2 -> Maybe DropTarget
+topLevelDropTarget band r mouse
   | rectW r <= 0 || rectH r <= 0 = Nothing
   | otherwise =
       let x = v2X mouse
@@ -336,11 +328,28 @@ topLevelDrop band r mouse
           w = rectW r
           h = rectH r
        in if x <= l + band
-            then Just (dropTopPreview r AxisV True)
+            then Just (DropTop AxisV True)
             else if x >= l + w - band
-              then Just (dropTopPreview r AxisV False)
+              then Just (DropTop AxisV False)
               else if y <= t + band
-                then Just (dropTopPreview r AxisH True)
+                then Just (DropTop AxisH True)
                 else if y >= t + h - band
-                  then Just (dropTopPreview r AxisH False)
+                  then Just (DropTop AxisH False)
                   else Nothing
+
+-- | Drop preview for a drop target: the rect to highlight and the
+-- 'DropTarget' the drop performs. The highlight is found by simulating the
+-- drop ('treeMovePane' with a throwaway split id) and laying the resulting
+-- tree out ('layoutNode') into the grid rect, so it is exactly the region the
+-- dragged pane will occupy after the drop — accounting for the restructuring
+-- that removing the pane causes (its parent split collapses and sibling
+-- subtrees expand) and for 'spacing' and min-size floors. Estimating the rect
+-- from the target's pre-drop bounds goes wrong wherever mixed 'AxisV' /
+-- 'AxisH' splits make those two layouts diverge. 'Nothing' when the drop
+-- cannot be performed (unknown pane ids, 'DropTop' on a single-pane grid).
+dropPreview :: Float -> Float -> GridNode -> Word64 -> Rect -> DropTarget -> Maybe (Rect, DropTarget)
+dropPreview minSize spacing tree moved baseRect dt = do
+  t' <- treeMovePane moved 0 dt tree
+  let (regions, _) = layoutNode minSize spacing t' baseRect
+  r <- M.lookup moved regions
+  pure (r, dt)

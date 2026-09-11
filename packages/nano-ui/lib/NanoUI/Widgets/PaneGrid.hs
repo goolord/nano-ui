@@ -131,13 +131,14 @@ import NanoUI.Widgets.SplitPane
   , GridNode (..)
   , clampTreeRatio
   , dropPreview
+  , dropTargetForPane
   , layoutNode
   , mainLen
   , mainMins
   , paneExist
   , splitLength
   , subtreeMin
-  , topLevelDrop
+  , topLevelDropTarget
   , treeMovePane
   , treePanes
   , treeRemovePane
@@ -363,7 +364,7 @@ paneGrid cfg = do
       divMap = M.fromList [(diSplitId d, d) | d <- dividers]
   changedRef <- uiIO (newIORef False)
   let mGrab = IM.lookup grabK (storePoint st)
-      dgi = computeDragInfo drag0 baseRect edgeBand regions mGrab mouse
+      dgi = computeDragInfo drag0 minSize gutter tree0 baseRect edgeBand regions mGrab mouse
       dgiShown = dgiActive dgi && (isJust (dgiGhost dgi) || isJust (dgiZone dgi))
       env =
         GridEnv
@@ -655,9 +656,23 @@ drawOverlay theme title ghost zone =
 -- so the drop zone is still resolvable on the frame the button is released.
 -- 'baseRect' is the grid's own rect: its outer band (thickness 'band') is a
 -- top-level drop zone, and the pointer there restructures the whole grid;
--- otherwise the pane under the pointer is the target.
-computeDragInfo :: Int -> Rect -> Float -> Map Word64 Rect -> Maybe (Float, Float) -> V2 -> DragInfo
-computeDragInfo drag0 baseRect band regions mGrab mouse
+-- otherwise the pane under the pointer is the target. Every candidate is
+-- resolved through 'dropPreview', which simulates the drop and lays the tree
+-- back out with the grid's real 'gutter' and 'minSize', so the highlighted
+-- rect is the exact region the pane lands in even when removing it reshapes
+-- the rest of a mixed-split grid.
+computeDragInfo ::
+  Int ->
+  Float ->
+  Float ->
+  GridNode ->
+  Rect ->
+  Float ->
+  Map Word64 Rect ->
+  Maybe (Float, Float) ->
+  V2 ->
+  DragInfo
+computeDragInfo drag0 minSize gutter tree baseRect band regions mGrab mouse
   | drag0 <= 0 = DragInfo False False Nothing Nothing
   | otherwise =
       let pid = fromIntegral drag0
@@ -679,10 +694,12 @@ computeDragInfo drag0 baseRect band regions mGrab mouse
             , q /= pid
             , rectHit r mouse
             ]
-          zone = case topLevelDrop band baseRect mouse of
-            Just z -> Just z
+          zone = case topLevelDropTarget band baseRect mouse of
+            Just dt -> dropPreview minSize gutter tree pid baseRect dt
             Nothing -> case under of
-              (q, r) : _ -> Just (dropPreview r mouse q)
+              (q, r) : _ ->
+                let dt = dropTargetForPane r mouse q
+                 in dropPreview minSize gutter tree pid baseRect dt
               [] -> Nothing
        in DragInfo True moved ghost zone
 

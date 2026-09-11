@@ -225,6 +225,7 @@ testSpecs =
   , TestSpec "reduce-identity" False runReduceIdentityTest
   , TestSpec "widget-no-string-emit" False runWidgetNoStringEmitTest
   , TestSpec "panel-paints" False runPanelPaintsTest
+  , TestSpec "pane-grid-mixed-drag" False runPaneGridMixedDragTest
   , TestSpec "separator-span" False runSeparatorSpanTest
   , TestSpec "header-top-pad" False runHeaderTopPadTest
   , TestSpec "fit-header-no-shrink" False runFitHeaderNoShrinkTest
