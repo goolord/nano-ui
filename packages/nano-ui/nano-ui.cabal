@@ -97,6 +97,8 @@ library
         NanoUI.Frame.Chrome
         NanoUI.Frame.Focus
         NanoUI.Frame.Paint
+        NanoUI.Frame.Paint.Types
+        NanoUI.Frame.Paint.Widgets
         NanoUI.Frame.Redraw
         NanoUI.Frame.Scroll
         NanoUI.Frame.Scroll.Geometry
