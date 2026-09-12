@@ -18,10 +18,10 @@ import NanoUI.Testing.Harness (centerOf, clickPair, rightClickPair, runRightClic
 
 menuUi :: NanoUI (Response, Maybe (Response, Response))
 menuUi = column $ do
-  btn <- button "Target Button"
+  btn <- button' "Target Button"
   mInside <- contextMenu btn $ do
-    cut <- menuItem "Cut"
-    copy <- menuItem "Copy"
+    cut <- menuItem' "Cut"
+    copy <- menuItem' "Copy"
     pure (cut, copy)
   pure (btn, mInside)
 
@@ -100,12 +100,12 @@ runContextMenuSpansTest :: Context -> IORef Int -> IO ()
 runContextMenuSpansTest ctx failed = do
   let inp0 = withInput 640 480
       ui = column $ do
-        btn <- button "Target Button"
+        btn <- button' "Target Button"
         void $ contextMenu btn $ do
           void $ menuItem "Special Action"
           void $ menuItemWithShortcut "Find" "Ctrl+F"
 
-  (btnWarm) <- eval2Ui ctx inp0 (button "Target Button")
+  (btnWarm) <- eval2Ui ctx inp0 (button' "Target Button")
   runRightClick ctx inp0 ui (centerOf btnWarm)
 
   spans <- collectOverlayTextSpans ctx inp0
@@ -119,7 +119,7 @@ runContextMenuScrollPosTest ctx failed = do
         scrollArea (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 80}) $
           column $ do
             mapM_ (\_ -> void (label "pad line")) [(1 :: Int) .. 40]
-            btn <- button "Menu Target"
+            btn <- button' "Menu Target"
             void $ contextMenu btn $ void (menuItem "Scroll Cut")
             mapM_ (\_ -> void (label "tail line")) [(1 :: Int) .. 12]
             pure btn

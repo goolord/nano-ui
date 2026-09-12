@@ -139,7 +139,7 @@ runWindowOverlayTest :: Context -> IORef Int -> IO ()
 runWindowOverlayTest ctx failed = do
   let inp0 = withInput 640 400
       ui = do
-        outside <- button "Outside"
+        outside <- button' "Outside"
         (win, mBody) <- window True "Debug" (label "Body")
         pure (outside, win, mBody)
       closedUi = do
@@ -211,20 +211,20 @@ runOverlayClickThroughTest _ failed = do
   let
     inp0 = withInput 300 220
     windowUi = do
-      outsides <- column (replicateM 10 (button "Outside"))
+      outsides <- column (replicateM 10 (button' "Outside"))
       (win, mInside) <-
         window True "Cover" $ do
-          button "Inside"
+          button' "Inside"
       pure (outsides, win, mInside)
     modalUi = do
-      outsides <- column (replicateM 10 (button "Outside"))
+      outsides <- column (replicateM 10 (button' "Outside"))
       (dlg, mInside) <-
         modal True "Cover" $ do
-          button "Inside"
+          button' "Inside"
       pure (outsides, dlg, mInside)
     stackedUi = do
-      (lo, mLo) <- window True "Low" (button "LowBtn")
-      (hi, mHi) <- window True "High" (button "HighBtn")
+      (lo, mLo) <- window True "Low" (button' "LowBtn")
+      (hi, mHi) <- window True "High" (button' "HighBtn")
       pure (lo, mLo, hi, mHi)
     childSafePoint cover childRects =
       let
@@ -401,7 +401,7 @@ runScrolledDebugToggleTest ctx failed = do
       ui = do
         (open, setOpen) <- useFlag False
         (_, dbgBtn) <- scrollArea (tight (grow defaultLayout)) $ do
-          b <- button "Debug"
+          b <- button' "Debug"
           onClick b (setOpen (not open))
           pure b
         when open $ void (window True "Debug" (label "fps"))
@@ -488,7 +488,7 @@ runWindowResizeHaloHitTest :: Context -> IORef Int -> IO ()
 runWindowResizeHaloHitTest ctx failed = do
   let inp0 = withInput 640 400
       ui = do
-        btn <- button "Hit"
+        btn <- button' "Hit"
         (win, _) <- window True "Resize" (label "Body")
         pure (btn, win)
   (btn0, win0) <- warmup2 ctx inp0 ui

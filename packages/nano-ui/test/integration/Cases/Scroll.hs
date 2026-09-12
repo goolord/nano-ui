@@ -796,7 +796,7 @@ runScrollButtonClickTest ctx failed = do
         (sid, resp) <- scrollArea (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 80}) $
                          column $ do
                            mapM_ (\_ -> void (label "pad")) [(1 :: Int) .. 6]
-                           b <- button "Target"
+                           b <- button' "Target"
                            onClick b (setHit "yes")
                            pure b
         pure (sid, hit, resp)
@@ -823,7 +823,7 @@ runScrollButtonClickSdlTest ctx failed = do
         (sid, resp) <- scrollArea (tight (grow defaultLayout)) $
                          column $ do
                            mapM_ (\_ -> void (label "pad")) [(1 :: Int) .. 6]
-                           b <- button "Target"
+                           b <- button' "Target"
                            onClick b (setHit "yes")
                            pure b
         pure (sid, hit, resp)
@@ -876,7 +876,7 @@ runNestedScrollFocusTest ctx failed = do
              column $ do
                pair <- scrollArea (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 50}) $
                          column $ do
-                           b <- button "In"
+                           b <- button' "In"
                            mapM_ (\i -> label (T.pack ("in " <> show (i :: Int)))) [1 .. 10]
                            pure b
                mapM_ (\i -> label (T.pack ("out " <> show (i :: Int)))) [1 .. 10]
@@ -901,7 +901,7 @@ runScrolledOutClickImmunityTest ctx failed = do
         (sid, b) <- scrollArea (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 8}) $
                       column $ do
                         mapM_ (\_ -> void (label "pad")) [(1 :: Int) .. 40]
-                        btn <- button "Target"
+                        btn <- button' "Target"
                         onClick btn (setHit "yes")
                         pure btn
         pure (sid, b, hit)
@@ -928,7 +928,7 @@ runScrolledOutHoverImmunityTest ctx failed = do
         (sid, b) <- scrollArea (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 8}) $
                       column $ do
                         mapM_ (\_ -> void (label "pad")) [(1 :: Int) .. 40]
-                        btn <- button "Target"
+                        btn <- button' "Target"
                         pure btn
         pure (sid, b)
   (sid, b) <- warmup2 ctx inp0 ui
@@ -955,7 +955,7 @@ runScrolledOutCursorImmunityTest ctx failed = do
         (sid, b) <- scrollArea (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 8}) $
                       column $ do
                         mapM_ (\_ -> void (label "pad")) [(1 :: Int) .. 40]
-                        btn <- button "Target"
+                        btn <- button' "Target"
                         pure btn
         pure (sid, b)
   (sid, b) <- warmup2 ctx inp0 ui

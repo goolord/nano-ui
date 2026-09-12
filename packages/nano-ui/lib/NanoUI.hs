@@ -1,5 +1,66 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+-- |
+-- Module      : NanoUI
+-- Description : Purely functional immediate-mode GUI toolkit for Haskell
+-- Copyright   : (c) 2026 Zachary Churchill
+-- License     : MIT
+-- Maintainer  : zacharyachurchill@gmail.com
+--
+-- @nano-ui@ is an immediate-mode graphical user interface (IMGUI) toolkit for Haskell.
+--
+-- = Immediate-Mode Mental Model
+--
+-- Unlike traditional retained-mode frameworks (such as the HTML DOM, Qt, or GTK),
+-- @nano-ui@ has:
+--
+-- * __Zero retained widget objects__: You do not instantiate or store widget handles.
+-- * __Zero mutable synchronization__: Widget state is not synchronized through getters and setters.
+-- * __Zero callback chains__: Widgets do not register event listeners.
+--
+-- Instead, your application describes the entire user interface /every single frame/ as a pure
+-- function of state. Widgets evaluate on the spot and return what the user did during that frame.
+--
+-- = Two State Paradigms
+--
+-- @nano-ui@ supports two complementary state management architectures:
+--
+-- == 1. Local Component Hooks
+--
+-- Best suited for transient UI state (dialog visibility, tab selection, form field drafts).
+--
+-- @
+-- counterApp :: NanoUI ()
+-- counterApp = do
+--   (count, setCount) <- useInt 0
+--   column $ do
+--     heading "Counter"
+--     rowWith (gap 8) $ do
+--       whenM (button "-") (setCount (count - 1))
+--       label (T.pack (show count))
+--       whenM (button "+") (setCount (count + 1))
+-- @
+--
+-- == 2. Pure Elm Architecture (Reducers & Emitters)
+--
+-- Best suited for deterministic, replayable, application-wide domain state.
+--
+-- @
+-- data Msg = Increment | Decrement
+--
+-- update :: Msg -> Int -> Int
+-- update Increment n = n + 1
+-- update Decrement n = n - 1
+--
+-- view :: Int -> NanoUI ()
+-- view count = column $ do
+--   heading "Elm-Style Counter"
+--   rowWith (gap 8) $ do
+--     buttonEmit "-" Decrement
+--     label (T.pack (show count))
+--     buttonEmit "+" Increment
+-- @
+--
 module NanoUI
   ( -- Types
     V2 (..)
@@ -206,8 +267,14 @@ module NanoUI
   , labelWith
   , labelEx
   , button
+  , button'
+  , buttonWith
+  , buttonWith'
+  , button_
+  , buttonEx
   , checkbox
   , slider
+  , sliderWith
   , sliderEx
   , textInput
   , TextInputConfig (..)
@@ -240,8 +307,11 @@ module NanoUI
   , useContextMenu
   , menuButton
   , menuItem
+  , menuItem'
   , menuItemWithShortcut
+  , menuItemWithShortcut'
   , menuItemWithIcon
+  , menuItemWithIcon'
   , menuItemDisabled
   , menuSeparator
   , menuHeader
@@ -377,7 +447,9 @@ module NanoUI
   , sparkline
   , sparklineWith
   , onClick
-  , clickButton
+  , whenM
+  , unlessM
+  , ifM
   , useFlag
   , useText
   , useToggle
@@ -564,6 +636,9 @@ import NanoUI.Monad
   , windowWidth
   , windowHeight
   , withKey
+  , whenM
+  , unlessM
+  , ifM
   )
 import NanoUI.Animation
   ( SpringParams (..)
@@ -759,9 +834,13 @@ import NanoUI.Widgets
   , sparkline
   , sparklineWith
   , button
+  , button'
+  , buttonWith
+  , buttonWith'
+  , button_
+  , buttonEx
   , card
   , checkbox
-  , clickButton
   , colorPicker
   , colorPickerFromHex
   , colorPickerRGBA
@@ -819,8 +898,11 @@ import NanoUI.Widgets
   , useContextMenu
   , menuButton
   , menuItem
+  , menuItem'
   , menuItemWithShortcut
+  , menuItemWithShortcut'
   , menuItemWithIcon
+  , menuItemWithIcon'
   , menuItemDisabled
   , menuSeparator
   , menuHeader
@@ -838,6 +920,7 @@ import NanoUI.Widgets
   , sep
   , separator
   , slider
+  , sliderWith
   , sliderEx
   , spacer
   , textInput

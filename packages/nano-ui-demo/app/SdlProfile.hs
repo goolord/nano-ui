@@ -329,9 +329,9 @@ tabControlsUi = columnWith (tight . gap 8 . fillW) $ do
   void $ label "Notes"
   void $ textArea "Edit me.\nSecond line."
   rowWith (tight . gap 8 . fillW) $ do
-    btnTip <- button "Hover for Tooltip"
+    btnTip <- button' "Hover for Tooltip"
     tooltip btnTip "This is a floating tooltip widget!"
-    btnMenu <- button "Right-click Menu"
+    btnMenu <- button' "Right-click Menu"
     void $ contextMenu btnMenu $ do
       menuHeader "Context Menu"
       void $ menuItemWithShortcut "Cut" "Ctrl+X"

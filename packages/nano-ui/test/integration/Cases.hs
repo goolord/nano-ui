@@ -228,7 +228,7 @@ runRowPanelLayoutTest ctx failed = do
   let inp = withInput 800 600
       ui = rowWith (tight . fillW) $ do
         panelWith (minW 200 . fillH) (void (label "Side"))
-        panelWith (grow . fillW . fillH) (rowWith (tight . gap 8) (button "Left" >> button "Right"))
+        panelWith (grow . fillW . fillH) (rowWith (tight . gap 8) (button_ "Left" >> button' "Right"))
   _ <- runFrame ctx inp ui
   (resp, _, _, _) <- runFrame ctx inp ui
   assert failed (rectX (respRect resp) >= 190)
@@ -294,7 +294,7 @@ runDrawingTest ctx failed = do
 runOverlayTest :: Context -> IORef Int -> IO ()
 runOverlayTest ctx failed = do
   let inp0 = withInput 200 80
-      ui = column (button "Hover" >>= \btn -> tooltip btn "tip")
+      ui = column (button' "Hover" >>= \btn -> tooltip btn "tip")
   _ <- runFrame ctx inp0 ui
   (_, _, draw, _) <- runFrame ctx (inp0 {inputMousePos = V2 10 10}) ui
   assert failed (any ((== LayerOverlay) . cmdLayer) (drawCmdElems draw))
@@ -302,7 +302,7 @@ runOverlayTest ctx failed = do
 runInteractionTest :: Context -> IORef Int -> IO ()
 runInteractionTest ctx failed = do
   let inp0 = withInput 200 100
-      ui = column (button "Click")
+      ui = column (button' "Click")
       (press, release) = clickPair inp0 (V2 10 10)
   _ <- runFrame ctx inp0 ui
   _ <- runFrame ctx press ui
@@ -381,7 +381,7 @@ runIdleTest _ failed = do
 runHoverSkipTest :: Context -> IORef Int -> IO ()
 runHoverSkipTest _ failed = do
   ctx <- newContext
-  let ui = column (button "OK")
+  let ui = column (button' "OK")
       inp0 = withInputOff 240 80
   (resp, _, _, _) <- runFrame ctx inp0 ui >>= \_ -> runFrame ctx inp0 ui
   let Rect rx ry rw rh = respRect resp
@@ -403,7 +403,7 @@ runHoverSkipTest _ failed = do
 runHoverDamageTest :: Context -> IORef Int -> IO ()
 runHoverDamageTest _ failed = do
   ctx <- newContext
-  let ui = column (button "OK")
+  let ui = column (button' "OK")
       inp0 = withInputOff 240 80
   _ <- runFrame ctx inp0 ui
   d0 <- takeDamage ctx
@@ -788,7 +788,7 @@ runReduceClickTest :: Context -> IORef Int -> IO ()
 runReduceClickTest ctx failed = do
   let inp0 = withInput 240 120
       view m = do
-        resp <- button "Go"
+        resp <- button' "Go"
         onClick resp (emit Inc)
         label_ (T.pack (show (counterN m)))
         pure resp
@@ -810,7 +810,7 @@ runReduceIdentityTest ctx failed = do
 runWidgetNoStringEmitTest :: Context -> IORef Int -> IO ()
 runWidgetNoStringEmitTest ctx failed = do
   let inp0 = withInput 240 120
-  (resp, _, _, _) <- runFrame ctx inp0 (button "Go")
+  (resp, _, _, _) <- runFrame ctx inp0 (button' "Go")
   let (press, release) = clickPair inp0 (centerOf resp)
   _ <- runFrame ctx press (button "Go")
   (_, msgs, _, _) <- runFrame ctx release (button "Go")
@@ -822,7 +822,7 @@ runUseFlagClickTest ctx failed = do
       ui = do
         (open, setOpen) <- useFlag False
         (note, setNote) <- useText ""
-        resp <- button "Go"
+        resp <- button' "Go"
         onClick resp (setOpen True >> setNote "hi")
         pure (open, note, resp)
   (open0, note0, resp) <- warmup2 ctx inp0 ui

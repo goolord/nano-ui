@@ -32,7 +32,7 @@ import NanoUI.Context (getStore, intKey, setStore)
 import NanoUI.Monad (Ui, askContext, emit, nextId, uiIO)
 import NanoUI.Store (WidgetStore (..), boolInt)
 import NanoUI.Widgets
-  ( button
+  ( button'
   , checkbox
   , respChanged
   , respClicked
@@ -87,7 +87,7 @@ sliderControlled lbl minV maxV currentVal onChange = do
 -- | Button that emits a reducer message on click.
 buttonEmit :: (Typeable msg, Ui :> es) => Text -> msg -> Eff es Response
 buttonEmit txt msg = do
-  resp <- button txt
+  resp <- button' txt
   when (respClicked resp) (emit msg)
   pure resp
 

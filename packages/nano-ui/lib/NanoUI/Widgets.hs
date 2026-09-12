@@ -25,8 +25,14 @@ module NanoUI.Widgets
   , labelWith
   , labelEx
   , button
+  , button'
+  , buttonWith
+  , buttonWith'
+  , button_
+  , buttonEx
   , checkbox
   , slider
+  , sliderWith
   , sliderEx
   , textInput
   , SearchFieldConfig (..)
@@ -55,8 +61,11 @@ module NanoUI.Widgets
   , useContextMenu
   , menuButton
   , menuItem
+  , menuItem'
   , menuItemWithShortcut
+  , menuItemWithShortcut'
   , menuItemWithIcon
+  , menuItemWithIcon'
   , menuItemDisabled
   , menuSeparator
   , menuHeader
@@ -88,7 +97,6 @@ module NanoUI.Widgets
   , image
   , label_
   , onClick
-  , clickButton
   , useState
   , useFlag
   , useText
@@ -250,8 +258,11 @@ import NanoUI.Widgets.Menu
   , useContextMenu
   , menuButton
   , menuItem
+  , menuItem'
   , menuItemWithShortcut
+  , menuItemWithShortcut'
   , menuItemWithIcon
+  , menuItemWithIcon'
   , menuItemDisabled
   , menuSeparator
   , menuHeader
@@ -471,10 +482,6 @@ import NanoUI.Widgets.Table
 onClick :: Clickable r => r -> Eff es () -> Eff es ()
 onClick resp act = when (respIsClicked resp) act
 
-{-# INLINE clickButton #-}
-clickButton :: Ui :> es => Text -> Eff es () -> Eff es ()
-clickButton txt act = button txt >>= \resp -> onClick resp act
-
 {-# INLINE label_ #-}
 label_ :: Ui :> es => Text -> Eff es ()
 label_ txt = void (label txt)
@@ -579,11 +586,55 @@ image layout (ImageId tid) = do
     stored = if tid <= 0 then T.empty else T.pack (show tid)
   addWidget wid NodeImage stored 0 layout
 
-button :: Ui :> es => Text -> Eff es Response
-button = buttonEx True
+-- | Immediate-mode button with default layout. Returns 'True' if clicked this frame.
+--
+-- Example:
+--
+-- @
+-- whenM (button "Save") saveDocument
+-- @
+{-# INLINE button #-}
+button :: Ui :> es => Text -> Eff es Bool
+button txt = respClicked <$> button' txt
 
-buttonEx :: (Ui :> es) => Bool -> Text -> Eff es Response
-buttonEx enabled txt = do
+-- | Button returning the full 'Response' record (for tooltips, context menus,
+-- hover tracking, or testing assertions).
+--
+-- Example:
+--
+-- @
+-- btn <- button' "Help"
+-- tooltip btn "Click for documentation"
+-- when (respClicked btn) openDocs
+-- @
+{-# INLINE button' #-}
+button' :: Ui :> es => Text -> Eff es Response
+button' = buttonEx True
+
+-- | Immediate-mode button with a layout modifier. Returns 'True' if clicked this frame.
+--
+-- Example:
+--
+-- @
+-- whenM (buttonWith (fixedW 120 . fontBold) "Submit") submitForm
+-- @
+{-# INLINE buttonWith #-}
+buttonWith :: Ui :> es => (Layout -> Layout) -> Text -> Eff es Bool
+buttonWith f txt = respClicked <$> buttonWith' f txt
+
+-- | Button with a layout modifier returning the full 'Response'.
+{-# INLINE buttonWith' #-}
+buttonWith' :: Ui :> es => (Layout -> Layout) -> Text -> Eff es Response
+buttonWith' f txt = buttonLayoutEx (f defaultLayout) True txt
+
+-- | Button that ignores the click result (useful for static or decorative buttons).
+{-# INLINE button_ #-}
+button_ :: Ui :> es => Text -> Eff es ()
+button_ txt = void (button' txt)
+
+-- | Button with custom layout and enabled state.
+buttonLayoutEx :: (Ui :> es) => Layout -> Bool -> Text -> Eff es Response
+buttonLayoutEx layout enabled txt = do
   wid <- nextId
   ctx <- askContext
   uiIO $ registerFocusable ctx wid
@@ -591,7 +642,7 @@ buttonEx enabled txt = do
         if isCellHost (ctxHostProfile ctx)
           then "[ " <> txt <> " ]"
           else txt
-  resp <- addWidget wid NodeButton stored 0 defaultLayout
+  resp <- addWidget wid NodeButton stored 0 layout
   disabled <- uiIO (isDisabled ctx wid)
   let
     active = enabled && not disabled
@@ -599,6 +650,12 @@ buttonEx enabled txt = do
     $ setClicked (active && respClicked resp)
     $ setHovered (active && respHovered resp) resp
 
+-- | Button with enabled/disabled flag and default layout.
+{-# INLINE buttonEx #-}
+buttonEx :: (Ui :> es) => Bool -> Text -> Eff es Response
+buttonEx = buttonLayoutEx defaultLayout
+
+-- | Controlled checkbox. Returns @(response, currentValue)@.
 checkbox :: Ui :> es => Text -> Bool -> Eff es (Response, Bool)
 checkbox txt initial = do
   wid <- nextId
@@ -630,9 +687,23 @@ checkbox txt initial = do
       markDirty ctx
   pure (setChanged clicked resp, display)
 
+-- | Slider control with default layout ('fillW'). Returns @(response, currentValue)@.
 slider ::
   Ui :> es => Text -> Float -> Float -> Float -> Eff es (Response, Float)
 slider = sliderEx (fillW defaultLayout)
+
+-- | Slider with a custom layout modifier function.
+--
+-- Example:
+--
+-- @
+-- (resp, val) <- sliderWith (fixedW 200) "Volume" 0 100 currentVol
+-- @
+{-# INLINE sliderWith #-}
+sliderWith ::
+  Ui :> es =>
+  (Layout -> Layout) -> Text -> Float -> Float -> Float -> Eff es (Response, Float)
+sliderWith f = sliderEx (f defaultLayout)
 
 sliderEx ::
   Ui :> es =>

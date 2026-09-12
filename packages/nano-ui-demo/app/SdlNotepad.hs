@@ -258,33 +258,33 @@ notepadUi = do
       uiIO (applyTextAreaMenuAction ctx editorId itemIndex)
 
     fileMenu = do
-      item "New" (closeThen newDocument)
-      item "Open..." (closeThen openDocument)
-      item "Save" (closeThen (saveDocument False))
-      itemShortcut "Save As..." "Ctrl+Shift+S" (closeThen (saveDocument True))
+      whenM (menuItem "New") (closeThen newDocument)
+      whenM (menuItem "Open...") (closeThen openDocument)
+      whenM (menuItem "Save") (closeThen (saveDocument False))
+      whenM (menuItemWithShortcut "Save As..." "Ctrl+Shift+S") (closeThen (saveDocument True))
       menuSeparator
-      itemShortcut "Exit" "Esc" (closeThen (uiIO exitSuccess))
+      whenM (menuItemWithShortcut "Exit" "Esc") (closeThen (uiIO exitSuccess))
 
     editMenu = do
-      itemShortcut "Cut" "Ctrl+X" (editAction 0)
-      itemShortcut "Copy" "Ctrl+C" (editAction 1)
-      itemShortcut "Paste" "Ctrl+V" (editAction 2)
+      whenM (menuItemWithShortcut "Cut" "Ctrl+X") (editAction 0)
+      whenM (menuItemWithShortcut "Copy" "Ctrl+C") (editAction 1)
+      whenM (menuItemWithShortcut "Paste" "Ctrl+V") (editAction 2)
       menuSeparator
-      itemShortcut "Select All" "Ctrl+A" (editAction 3)
+      whenM (menuItemWithShortcut "Select All" "Ctrl+A") (editAction 3)
 
     viewMenu = do
-      item
-        (if showStatus then "Hide Status Bar" else "Show Status Bar")
+      whenM
+        (menuItem (if showStatus then "Hide Status Bar" else "Show Status Bar"))
         (closeThen (setShowStatus (not showStatus)))
       menuSeparator
-      itemShortcut "Zoom In" "Ctrl++" (closeThen (setZoom (min 4.0 (zoom * 1.1))))
-      itemShortcut "Zoom Out" "Ctrl+-" (closeThen (setZoom (max 0.5 (zoom / 1.1))))
-      itemShortcut "Reset Zoom" "Ctrl+0" (closeThen (setZoom 1.0))
+      whenM (menuItemWithShortcut "Zoom In" "Ctrl++") (closeThen (setZoom (min 4.0 (zoom * 1.1))))
+      whenM (menuItemWithShortcut "Zoom Out" "Ctrl+-") (closeThen (setZoom (max 0.5 (zoom / 1.1))))
+      whenM (menuItemWithShortcut "Reset Zoom" "Ctrl+0") (closeThen (setZoom 1.0))
       menuSeparator
-      item "Document Statistics" (closeThen (setStatusMsg (documentStats docText)))
+      whenM (menuItem "Document Statistics") (closeThen (setStatusMsg (documentStats docText)))
 
     helpMenu = do
-      item "About nano-ui Notepad" (closeThen (setAboutOpen True))
+      whenM (menuItem "About nano-ui Notepad") (closeThen (setAboutOpen True))
       menuItemDisabled "nano-ui on GitHub"
 
   --------------------------------------------------------------- layout ---
@@ -323,7 +323,7 @@ notepadUi = do
       muted "File, Edit, View and Help are wired to real actions."
       rowWith fillW $ do
         flex
-        clickButton "Close" (setAboutOpen False)
+        whenM (button "Close") (setAboutOpen False)
   onClick aboutResp (setAboutOpen False)
 
 --------------------------------------------------------------------------------
@@ -353,18 +353,6 @@ menuBar openMenu setOpen entries = do
       (popupResp, _) <- popup isOpen cfg (columnWith (tight . gap 0) body)
       when (respClicked popupResp) (setOpen "")
     flex
-
--- | Drop-down item; runs @action@ on click.
-item :: Text -> NanoUI () -> NanoUI ()
-item title action = do
-  resp <- menuItem title
-  when (respClicked resp) action
-
--- | Drop-down item with a shortcut hint; runs @action@ on click.
-itemShortcut :: Text -> Text -> NanoUI () -> NanoUI ()
-itemShortcut title shortcut action = do
-  resp <- menuItemWithShortcut title shortcut
-  when (respClicked resp) action
 
 --------------------------------------------------------------------------------
 -- Helpers

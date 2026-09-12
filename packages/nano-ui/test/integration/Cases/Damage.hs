@@ -48,8 +48,8 @@ runExplicitDamageWidgetTest _ failed = do
   ctx <- newContext
   let inp = withInput 400 300
       ui = columnWith (padAll 20) $ do
-        w1 <- button "First"
-        w2 <- button "Second"
+        w1 <- button' "First"
+        w2 <- button' "Second"
         pure (w1, w2)
   -- Warmup to establish solved layout rects
   _ <- runFrame ctx inp ui
@@ -58,8 +58,8 @@ runExplicitDamageWidgetTest _ failed = do
 
   -- Queue explicit widget damage
   let testUi = columnWith (padAll 20) $ do
-        w1' <- button "First"
-        w2' <- button "Second"
+        w1' <- button' "First"
+        w2' <- button' "Second"
         damageWidgetNow (respId w1') (DamageInflated sliderDamageSlop)
         pure (w1', w2')
   _ <- runFrame ctx inp testUi

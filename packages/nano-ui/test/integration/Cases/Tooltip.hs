@@ -18,7 +18,7 @@ runTooltipHoverTest :: Context -> IORef Int -> IO ()
 runTooltipHoverTest ctx failed = do
   let inp0 = withInput 640 480
       ui = column $ do
-        btn <- button "Help Target"
+        btn <- button' "Help Target"
         tooltip btn "Helpful advice here"
 
   -- Unhovered: no tooltip overlay
@@ -27,7 +27,7 @@ runTooltipHoverTest ctx failed = do
   assert failed (not (any (\(_, txt, _, _, _) -> "Helpful advice" `T.isInfixOf` txt) spans0))
 
   -- Hovered: tooltip overlay present
-  btnWarm <- eval2Ui ctx inp0 (button "Help Target")
+  btnWarm <- eval2Ui ctx inp0 (button' "Help Target")
   let hoverInp = inp0 {inputMousePos = centerOf btnWarm}
   _ <- runFrame ctx hoverInp ui
   _ <- runFrame ctx hoverInp ui
@@ -38,7 +38,7 @@ runTooltipWidgetTest :: Context -> IORef Int -> IO ()
 runTooltipWidgetTest ctx failed = do
   let inp0 = withInput 640 480
       ui = column $ do
-        btn <- button "Rich Info"
+        btn <- button' "Rich Info"
         tooltipWidget btn $ do
           row $ do
             void (label "[Icon]")
@@ -49,7 +49,7 @@ runTooltipWidgetTest ctx failed = do
   assert failed (case mBody0 of Nothing -> True; _ -> False)
 
   -- When hovered, child is evaluated / rendered
-  btnWarm <- eval2Ui ctx inp0 (button "Rich Info")
+  btnWarm <- eval2Ui ctx inp0 (button' "Rich Info")
   let hoverInp = inp0 {inputMousePos = centerOf btnWarm}
   _ <- runFrame ctx hoverInp ui
   (mBody1, _, _, _) <- runFrame ctx hoverInp ui
@@ -58,9 +58,9 @@ runTooltipWidgetTest ctx failed = do
 runTooltipSpansTest :: Context -> IORef Int -> IO ()
 runTooltipSpansTest ctx failed = do
   let inp0 = withInput 640 480
-      ui = withTooltip (button "Action Button") (label "Detailed description")
+      ui = withTooltip (button' "Action Button") (label "Detailed description")
 
-  btnWarm <- eval2Ui ctx inp0 (button "Action Button")
+  btnWarm <- eval2Ui ctx inp0 (button' "Action Button")
   let hoverInp = inp0 {inputMousePos = centerOf btnWarm}
   _ <- runFrame ctx hoverInp ui
   _ <- runFrame ctx hoverInp ui
@@ -71,9 +71,9 @@ runTooltipIdStableTest :: Context -> IORef Int -> IO ()
 runTooltipIdStableTest ctx failed = do
   let inp0 = withInput 640 480
       ui = column $ do
-        a <- button "Help Target"
+        a <- button' "Help Target"
         tooltip a "tip"
-        b <- button "After"
+        b <- button' "After"
         pure (a, b)
   (a0, b0) <- evalUi ctx inp0 ui
   let hoverInp = inp0 {inputMousePos = centerOf a0}
@@ -88,7 +88,7 @@ runTooltipScrollPosTest ctx failed = do
         scrollArea (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 80}) $
           column $ do
             mapM_ (\_ -> void (label "pad line")) [(1 :: Int) .. 40]
-            btn <- button "Tip Target"
+            btn <- button' "Tip Target"
             tooltip btn "Scrolled tip text"
             mapM_ (\_ -> void (label "tail line")) [(1 :: Int) .. 12]
             pure btn

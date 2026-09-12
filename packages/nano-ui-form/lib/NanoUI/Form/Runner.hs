@@ -21,8 +21,8 @@ import NanoUI
   , defaultLayout
   , inputKeys
   , inputKeysElem
-  , respClicked
   , uiIO
+  , whenM
   )
 import NanoUI.Monad (askContext, askInput)
 import NanoUI.Form.Backend
@@ -78,11 +78,11 @@ nanoFormSubmit prefix submitLabel form = do
           Ditto.Error errs -> Ditto.unView view' errs
           Ditto.Ok _       -> Ditto.unView view' []
         else Ditto.unView view' []
-  btnResp <- column' defaultLayout $ do
+  btnClicked <- column' defaultLayout $ do
     runFormView renderedView
     button submitLabel
   let enterPressed = inputKeysElem KeyEnter (inputKeys inp)
-      clickedSubmit = respClicked btnResp || enterPressed
+      clickedSubmit = btnClicked || enterPressed
   when clickedSubmit $
     uiIO (markFormSubmitted ctx prefix True)
   pure $ case (clickedSubmit || submittedBefore, res) of
@@ -106,9 +106,8 @@ nanoFormEx cfg prefix form = do
   column' defaultLayout $ do
     runFormView renderedView
     case fcSubmitButton cfg of
-      Just lbl -> do
-        resp <- button lbl
-        when (respClicked resp) $
+      Just lbl ->
+        whenM (button lbl) $
           uiIO (markFormSubmitted ctx prefix True)
       Nothing -> pure ()
   pure $ case res of

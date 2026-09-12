@@ -105,12 +105,12 @@ animUi = do
         flex
         withKey ("footage" :: String) (muted footage)
       rowWith (tight . gap 8 . alignMid . fillW) $ do
-        clickButton "Expose" (setExposed True >> setRewinding False)
-        clickButton "Rewind" (setExposed False >> setRewinding True)
-        clickButton (if lampOn then "Lamp off" else "Lamp on") (setLamp (not lampOn))
+        whenM (button "Expose") (setExposed True >> setRewinding False)
+        whenM (button "Rewind") (setExposed False >> setRewinding True)
+        whenM (button (if lampOn then "Lamp off" else "Lamp on")) (setLamp (not lampOn))
         flex
-        clickButton (if tossed then "Catch" else "Toss") (setTossed (not tossed))
-        clickButton (if stiffSpring then "Stiff" else "Bouncy") (setStiffSpring (not stiffSpring))
+        whenM (button (if tossed then "Catch" else "Toss")) (setTossed (not tossed))
+        whenM (button (if stiffSpring then "Stiff" else "Bouncy")) (setStiffSpring (not stiffSpring))
       throwSec <- do
         (_, throwRaw) <- slider "Throw" 35 140 75
         pure (throwRaw / 100)
@@ -128,8 +128,8 @@ animUi = do
         (setRewinding False)
       panelWith (padXY 12 10 . gap 8 . fixedW (220 + 180 * bellowsT)) $ do
         rowWith (tight . gap 10 . alignMid . fillW) $ do
-          clickButton
-            (if bellowsOpen then "Collapse" else "Extend")
+          whenM
+            (button (if bellowsOpen then "Collapse" else "Extend"))
             (setBellows (not bellowsOpen))
           flex
           let iris = 12 + 22 * bellowsT

@@ -11,6 +11,9 @@ module NanoUI.Frame.Input
   , findTopWidgetUnderMouse
   , isInteractiveNode
   , findTextInputUnderMouse
+  , whenM
+  , unlessM
+  , ifM
   ) where
 
 
@@ -77,8 +80,20 @@ import NanoUI.Frame.TextEdit
   , textEditMenuRect
   )
 
+-- | Monadic variant of 'when'.
+{-# INLINE whenM #-}
 whenM :: Monad m => m Bool -> m () -> m ()
 whenM mb ma = mb >>= \b -> when b ma
+
+-- | Monadic variant of 'unless'.
+{-# INLINE unlessM #-}
+unlessM :: Monad m => m Bool -> m () -> m ()
+unlessM mb ma = mb >>= \b -> unless b ma
+
+-- | Monadic conditional selection.
+{-# INLINE ifM #-}
+ifM :: Monad m => m Bool -> m a -> m a -> m a
+ifM mb t f = mb >>= \b -> if b then t else f
 
 finalizeTabFocus :: Context -> Input -> IO ()
 finalizeTabFocus ctx inp =

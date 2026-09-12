@@ -7,8 +7,11 @@ module NanoUI.Widgets.Menu
   , useContextMenu
   , menuButton
   , menuItem
+  , menuItem'
   , menuItemWithShortcut
+  , menuItemWithShortcut'
   , menuItemWithIcon
+  , menuItemWithIcon'
   , menuItemDisabled
   , menuSeparator
   , menuHeader
@@ -127,18 +130,50 @@ useContextMenu = do
         markDirty ctx
   pure (isOpen, V2 px py, openAt, close)
 
--- | Standard context menu item.
-menuItem :: Ui :> es => Text -> Eff es Response
-menuItem txt = menuRowLayout >>= \lay -> buttonStyled txt 0 lay buttonFlagMenu
+-- | Standard context menu item. Returns 'True' if clicked this frame.
+--
+-- Example:
+--
+-- @
+-- whenM (menuItem "Open...") openFile
+-- @
+{-# INLINE menuItem #-}
+menuItem :: Ui :> es => Text -> Eff es Bool
+menuItem txt = respClicked <$> menuItem' txt
+
+-- | Menu item returning the full 'Response' (e.g. for geometry or hover inspection).
+{-# INLINE menuItem' #-}
+menuItem' :: Ui :> es => Text -> Eff es Response
+menuItem' txt = menuRowLayout >>= \lay -> buttonStyled txt 0 lay buttonFlagMenu
 
 -- | Menu item with keyboard shortcut hint. Whole row is the button.
-menuItemWithShortcut :: Ui :> es => Text -> Text -> Eff es Response
-menuItemWithShortcut txt shortcut =
+-- Returns 'True' if clicked this frame.
+--
+-- Example:
+--
+-- @
+-- whenM (menuItemWithShortcut "Save" "Ctrl+S") saveFile
+-- @
+{-# INLINE menuItemWithShortcut #-}
+menuItemWithShortcut :: Ui :> es => Text -> Text -> Eff es Bool
+menuItemWithShortcut txt shortcut = respClicked <$> menuItemWithShortcut' txt shortcut
+
+-- | Menu item with shortcut hint returning the full 'Response'.
+{-# INLINE menuItemWithShortcut' #-}
+menuItemWithShortcut' :: Ui :> es => Text -> Text -> Eff es Response
+menuItemWithShortcut' txt shortcut =
   menuRowLayout >>= \lay -> buttonStyled (txt <> "  " <> shortcut) 0 lay buttonFlagMenu
 
 -- | Menu item with leading icon name. Whole row is the button.
-menuItemWithIcon :: Ui :> es => Text -> Text -> Eff es Response
-menuItemWithIcon iconName txt =
+-- Returns 'True' if clicked this frame.
+{-# INLINE menuItemWithIcon #-}
+menuItemWithIcon :: Ui :> es => Text -> Text -> Eff es Bool
+menuItemWithIcon iconName txt = respClicked <$> menuItemWithIcon' iconName txt
+
+-- | Menu item with leading icon returning the full 'Response'.
+{-# INLINE menuItemWithIcon' #-}
+menuItemWithIcon' :: Ui :> es => Text -> Text -> Eff es Response
+menuItemWithIcon' iconName txt =
   menuRowLayout >>= \lay -> buttonStyled (iconName <> " " <> txt) 0 lay buttonFlagMenu
 
 -- | Row layout shared by menu items, matching the text-field context menu
