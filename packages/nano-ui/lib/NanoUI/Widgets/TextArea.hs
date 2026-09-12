@@ -17,12 +17,14 @@ module NanoUI.Widgets.TextArea
   , textAreaLayout
   , processTextArea
   , loadTextAreaState
+  , loadTextAreaStateWithBuffer
   , saveTextAreaState
   , applyTextAreaMenuAction
   ) where
 
 import Control.Monad (when)
 import Data.Char (isPrint, toLower)
+import Data.Dynamic (fromDynamic, toDyn)
 import Data.IORef (writeIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -53,6 +55,8 @@ import NanoUI.Store
   , slotKey
   , slotTextAreaAnchorCol
   , slotTextAreaAnchorRow
+  , slotTextAreaBuffer
+  , slotTextAreaChanged
   , slotTextAreaCol
   , slotTextAreaPrefCol
   , slotTextAreaRow
@@ -310,7 +314,22 @@ textAreaLayout =
 loadTextAreaState :: WidgetStore -> Int -> Text -> TextAreaState
 loadTextAreaState store key initial =
   let text = IM.findWithDefault initial key (storeText store)
-      row = IM.findWithDefault 0 (slotKey slotTextAreaRow key) (storeInt store)
+      -- The buffer cache is written together with storeText by
+      -- saveTextAreaState, so a present entry is always the buffer for the
+      -- stored text; no (O(document)) re-comparison is needed.
+      cachedBuffer :: Maybe (T.Text, TB.TextBuffer) =
+        IM.lookup (slotKey slotTextAreaBuffer key) (storeDyn store) >>= fromDynamic
+      buf0 = case cachedBuffer of
+        Just (_, cached) -> cached
+        Nothing -> TB.fromText text
+   in loadTextAreaStateWithBuffer store key text buf0
+
+-- | 'loadTextAreaState' with the buffer already resolved (the paint path
+-- ensures the buffer cache and hands it straight through, avoiding a second
+-- store lookup).
+loadTextAreaStateWithBuffer :: WidgetStore -> Int -> Text -> TB.TextBuffer -> TextAreaState
+loadTextAreaStateWithBuffer store key text buf0 =
+  let row = IM.findWithDefault 0 (slotKey slotTextAreaRow key) (storeInt store)
       col = IM.findWithDefault 0 (slotKey slotTextAreaCol key) (storeInt store)
       anchorRow = IM.findWithDefault row (slotKey slotTextAreaAnchorRow key) (storeInt store)
       anchorCol = IM.findWithDefault col (slotKey slotTextAreaAnchorCol key) (storeInt store)
@@ -323,7 +342,6 @@ loadTextAreaState store key initial =
         let (vw, vh) =
               IM.findWithDefault (200, 96) (slotKey slotTextAreaViewport key) (storePoint store)
          in (realToFrac vw, realToFrac vh)
-      buf0 = TB.fromText text
       buf =
         let b = TB.withCursor (TB.Cursor row col) buf0
          in b {TB.preferredCol = pref}
@@ -339,8 +357,11 @@ saveTextAreaState :: Int -> TextAreaState -> WidgetStore -> WidgetStore
 saveTextAreaState key state store =
   let TB.Cursor row col = TB.getCursor (buffer state)
       TB.Cursor anchorRow anchorCol = selectionAnchor state
+      flat = TB.toText (buffer state)
    in store
-        { storeText = IM.insert key (TB.toText (buffer state)) (storeText store)
+        { storeText = IM.insert key flat (storeText store)
+        , storeDyn =
+            IM.insert (slotKey slotTextAreaBuffer key) (toDyn (flat, buffer state)) (storeDyn store)
         , storeInt =
             IM.insert (slotKey slotTextAreaRow key) row $
               IM.insert (slotKey slotTextAreaCol key) col $
@@ -380,7 +401,15 @@ applyTextAreaMenuAction ctx wid item = do
       text = IM.findWithDefault "" key (storeText store)
       s0 = loadTextAreaState store key text
   s1 <- dispatchMenuAction (textAreaCut ctx) (textAreaCopy ctx) (textAreaPaste ctx) selectAllTextArea item s0
-  setStore ctx (saveTextAreaState key s1 store)
+  -- The pulse flag signals the next text-area frame that its text changed
+  -- outside Input, so the caller still gets a respChanged pulse. Gated on an
+  -- actual text delta: selection-only actions (Select All, Copy) must not
+  -- pulse.
+  let setChangedFlag =
+        if TB.toText (buffer s0) == TB.toText (buffer s1)
+          then saveTextAreaState key s1 store
+          else saveTextAreaState key s1 store {storeInt = IM.insert (slotKey slotTextAreaChanged key) 1 (storeInt store)}
+  setStore ctx setChangedFlag
   -- Menu actions are how a caller edits a field that may not be under the
   -- pointer; focus it so the selection highlight and caret become visible.
   writeIORef (ctxFocusId ctx) wid

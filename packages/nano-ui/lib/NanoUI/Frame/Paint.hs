@@ -1,3 +1,10 @@
+-- Bypass the heavy optimization pipeline for this module: under
+-- -fspecialise-aggressively + LLVM (-optlo-O3) this file's unboxed/effectful
+-- Core triggers a specializer/opt blowup that hangs compilation after a
+-- clean. Native codegen and default specialization build it in seconds; the
+-- rest of the package keeps whatever flags cabal.project selects.
+{-# OPTIONS_GHC -fasm -fno-specialise-aggressively #-}
+
 {-# LANGUAGE DataKinds #-}
 
 module NanoUI.Frame.Paint
@@ -47,6 +54,8 @@ import NanoUI.Font
   , centeredTextY
   , checkboxBoxSize
   , labelContentInset
+  , menuAccentInset
+  , menuAccentW
   , sliderTrackBounds
   , sliderHandleDiameter
   , treeChevronRect
@@ -67,6 +76,7 @@ import NanoUI.Layout.Arena
   , getNodeValue
   , getOptions
   , getPadding
+  , getParent
   , getRect
   , getStyleIdx
   , getText
@@ -191,6 +201,23 @@ collectFloatingOccluders ctx = do
             go (idx + 1) (r : acc)
           else go (idx + 1) acc
   go 0 []
+
+-- | Rect of the nearest popup-panel ancestor of @idx@, if any. Menu rows use
+-- it to paint hover fills edge-to-edge across the panel.
+popupPanelRect :: Context -> NodeIdx -> IO (Maybe Rect)
+popupPanelRect ctx = go
+  where
+    go i = do
+      p <- getParent (ctxNodeArena ctx) i
+      if p < 0
+        then pure Nothing
+        else do
+          nt <- getNodeType (ctxNodeArena ctx) p
+          if nt == NodePopup
+            then do
+              (px, py, pw, ph) <- getRect (ctxNodeArena ctx) p
+              pure (Just (Rect px py pw ph))
+            else go p
 
 {-# INLINE lowerNode #-}
 lowerNode :: Context -> NodeIdx -> IO ()
@@ -457,7 +484,15 @@ lowerNodeVisible ctx occluders idx nt x y w h rect fm theme terminal da =
             | terminal = True
             | otherwise =
                 nt /= NodeCheckbox && nt /= NodeRadio && nt /= NodeSlider && nt /= NodeTextInput && nt /= NodeTextArea && nt /= NodeColorPicker
-      when opaqueBg $ fillStyledRect da terminal style rect
+      -- Menu rows paint edge-to-edge across the popup panel, exactly like the
+      -- text-field context menu painter: the hover fill and the accent marker
+      -- span the panel width instead of the (padded) node rect.
+      menuRowRect <- if not isMenuItem then pure rect else do
+        mPanel <- popupPanelRect ctx idx
+        pure $ case mPanel of
+          Nothing -> rect
+          Just panel -> Rect (rectX panel) (rectY rect) (rectW panel) (rectH rect)
+      when opaqueBg $ fillStyledRect da terminal style menuRowRect
       when (not terminal) $ do
         when (opaqueBg && not isTab && not isTable && not isMenu && nt /= NodeTree) $ strokeStyledRect da terminal style x y w h
         when isMenu $ do
@@ -465,7 +500,14 @@ lowerNodeVisible ctx occluders idx nt x y w h rect fm theme terminal da =
           hot <- readIORef (ctxHotId ctx)
           when isMenuItem $
             when (wid == hot) $ do
-              let barRect = Rect x (y + 4) 2 (max 0 (h - 8))
+              -- Same marker geometry as the text-field context menu; derived
+              -- from the shared menu metrics so the two painters cannot drift.
+              let barRect =
+                    Rect
+                      (rectX menuRowRect)
+                      (y + menuAccentInset)
+                      menuAccentW
+                      (max 0 (h - 2 * menuAccentInset))
               pushRoundedRect da barRect 1 (themeAccent theme)
         when isTab $
           paintTabHeader

@@ -34,9 +34,12 @@ module Cases.TextInput
   , runTextArea2DScrollTest
   , runTextAreaHScrollCursorClickTest
   , runTextAreaScrollCursorLeavesViewportTest
+  , runRefreshRedrawTest
+  , runTextAreaMenuPulseTest
+  , runTextAreaRemountScrollTest
   ) where
 
-import Control.Monad (forM_, replicateM, void)
+import Control.Monad (forM_, replicateM, replicateM_, void)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Text qualified as T
@@ -58,7 +61,7 @@ import NanoUI.Store (WidgetStore (..), slotKey, slotTextInputScroll)
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertGt, withInput)
 import NanoUI.Testing.Harness (assertSpansHas, clickPair, spanYOf, warmup2, withDelta)
-import NanoUI.Widgets.TextArea (buffer, loadTextAreaState, selectionAnchor)
+import NanoUI.Widgets.TextArea (applyTextAreaMenuAction, buffer, loadTextAreaState, selectionAnchor)
 import NanoUI.Widgets.TextBuffer (Cursor (..), fromText, getCursor, toLines, toText)
 
 -- | Caption-less text area with a separate label above it (the old labelled
@@ -1033,7 +1036,91 @@ runTextAreaScrollCursorLeavesViewportTest ctx failed = do
       assertEq failed (r2, c2) (0, 1)
     _ -> assert failed False
 
+-- | A backend-requested redraw (expose/restore, dialog-completion wake) must
+-- request a frame even though no user input changed. Regression: the file
+-- dialog's completion wake was skipped, so the result waited for the next
+-- unrelated event before it painted.
+runRefreshRedrawTest :: Context -> IORef Int -> IO ()
+runRefreshRedrawTest ctx failed = do
+  let idle = emptyInput {inputWindowSize = Size 320 200}
+      refreshed = idle {inputWindowRedraw = True}
+  need <- needsRedraw ctx idle refreshed
+  assert failed need
 
+-- | A context-menu Cut/Paste edits the document without any keys or chars on
+-- the frame, so the change must surface as a 'respChanged' pulse through the
+-- text-area store flag -- otherwise callers (the notepad's dirty tracking)
+-- never learn the document changed. Regression for the hadInput guard in
+-- 'textAreaWith'.
+runTextAreaMenuPulseTest :: Context -> IORef Int -> IO ()
+runTextAreaMenuPulseTest ctx failed = do
+  let inp0 = withInput 320 220
+      ui = column (textAreaWith (grow $ defaultLayout) "abc")
+  (resp0, initial) <- warmup2 ctx inp0 ui
+  assertEq failed initial "abc"
+  mHit <- textAreaHitForWidget ctx (respId resp0)
+  case mHit of
+    Nothing -> assert failed False
+    Just hit -> do
+      let field = tahFieldRect hit
+          mid = V2 (rectX field + rectW field / 2) (rectY field + rectH field / 2)
+      -- Focus the editor so applyTextAreaMenuAction's focus write leaves it there.
+      let (focusPress, focusRelease) = clickPair inp0 mid
+      _ <- runFrame ctx focusPress ui >> runFrame ctx focusRelease ui
+      -- Selection-only actions must NOT pulse: no text delta.
+      applyTextAreaMenuAction ctx (respId resp0) 3
+      ((respSel, valSel), _, _, _) <- runFrame ctx inp0 ui
+      assert failed (not (respChanged respSel))
+      assertEq failed valSel "abc"
+      let menuOpen =
+            inp0 {inputMousePos = mid, inputMouseRightDown = True, inputMouseRightPressed = True}
+      _ <- runFrame ctx menuOpen ui
+      overlays <- collectOverlayTextSpans ctx menuOpen
+      case [r | (r, txt, _, _, _) <- overlays, txt == "Cut"] of
+        (Rect px py pw ph : _) -> do
+          -- The Cut dispatches through applyTextAreaMenuAction on the press
+          -- frame; the very next frame (release) must deliver the pulse and
+          -- the emptied text, then go quiet again.
+          let (pickPress, pickRelease) = clickPair inp0 (V2 (px + pw / 2) (py + ph / 2))
+          _ <- runFrame ctx pickPress ui
+          ((resp, val), _, _, _) <- runFrame ctx pickRelease ui
+          assert failed (respChanged resp)
+          assertEq failed val ""
+          ((respIdle, _), _, _, _) <- runFrame ctx inp0 ui
+          assert failed (not (respChanged respIdle))
+        _ -> assert failed False
 
-
-
+-- | After the editor is remounted under a new key (the notepad remounts on file
+-- load), wheel-on-hover with no focus must still scroll. Regression: the
+-- remounted editor could not be scrolled until it was focused.
+runTextAreaRemountScrollTest :: Context -> IORef Int -> IO ()
+runTextAreaRemountScrollTest ctx failed = do
+  let longText = T.unlines ["Line " <> T.pack (show (i :: Int)) | i <- [1 .. 40]]
+      inp0 = withInput 320 220
+      mkUi k = column $ keyed k $ textAreaWith (grow $ defaultLayout) longText
+  _ <- warmup2 ctx inp0 (mkUi (1 :: Int))
+  (resp, _) <- warmup2 ctx inp0 (mkUi (2 :: Int))
+  mHit <- textAreaHitForWidget ctx (respId resp)
+  case mHit of
+    Nothing -> assert failed False
+    Just hit -> do
+      let field = tahFieldRect hit
+          pos = V2 (rectX field + rectW field / 2) (rectY field + rectH field / 2)
+          -- Large delta so hover animations settle within the warm-up frames
+          -- and the idle frame below reports no damage of its own.
+          settleDt = 1.0
+          hover = inp0 {inputMousePos = pos, inputDeltaTime = settleDt}
+          warmupFrames = 4 :: Int
+      -- Park the pointer over the editor first, so the wheel frame does not
+      -- also change the hot widget (whose damage would mask a missing scroll
+      -- repaint).
+      replicateM_ warmupFrames (runFrame ctx hover (mkUi (2 :: Int)))
+      dmgIdle <- takeDamage ctx
+      assert failed (damageIsEmpty dmgIdle)
+      off0 <- getScrollOffset ctx (respId resp)
+      _ <- runFrame ctx hover {inputScroll = V2 0 1} (mkUi (2 :: Int))
+      off1 <- getScrollOffset ctx (respId resp)
+      assertGt failed off1 off0
+      -- The scroll offset must also damage the editor, or nothing repaints.
+      dmg <- takeDamage ctx
+      assert failed (not (damageIsEmpty dmg))

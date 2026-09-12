@@ -7,7 +7,7 @@
 -- Run with @cabal run nano-ui-sdl-notepad@.
 module SdlNotepad (main, notepadUi) where
 
-import Control.Exception (SomeException, catch, try)
+import Control.Exception (SomeException, try)
 import Control.Monad (unless, void, when)
 import Data.ByteString qualified as BS
 import Data.Foldable (for_)
@@ -28,10 +28,9 @@ import NanoUI.Testing.Harness
   , requireSpan
   )
 import NanoUI.Widgets.TextArea (applyTextAreaMenuAction)
-import System.Directory (getFileSize, getTemporaryDirectory, removeFile)
+import System.Directory (getTemporaryDirectory, removeFile)
 import System.Environment (getArgs)
 import System.Exit (exitSuccess)
-import System.IO.MMap (mmapFileByteString)
 
 --------------------------------------------------------------------------------
 -- Application entry point
@@ -75,19 +74,19 @@ selftest = do
         drawFrame inp = void (sdlDrawFrame ctx notepadUi env inp False)
         clickAt2 pos = clickPos drawFrame base pos
 
-      -- openInstant mmaps (or handles empty files); round-trip a temp file.
+      -- readFileFast round-trips a temp file.
       tmpDir <- getTemporaryDirectory
       let
-        tmpPath = tmpDir <> "/nano-ui-notepad-mmap.txt"
-      writeFile tmpPath "hello mmap\nsecond line"
-      raw <- openInstant tmpPath
+        tmpPath = tmpDir <> "/nano-ui-notepad-read.txt"
+      writeFile tmpPath "hello read\nsecond line"
+      raw <- readFileFast tmpPath
       let
         decoded = TE.decodeUtf8 raw
-      unless (decoded == "hello mmap\nsecond line") $
-        fail "selftest: openInstant round-trip failed"
+      unless (decoded == "hello read\nsecond line") $
+        fail "selftest: readFileFast round-trip failed"
       writeFile tmpPath ""
-      rawEmpty <- openInstant tmpPath
-      unless (BS.null rawEmpty) $ fail "selftest: openInstant empty file failed"
+      rawEmpty <- readFileFast tmpPath
+      unless (BS.null rawEmpty) $ fail "selftest: readFileFast empty file failed"
       removeFile tmpPath
 
       mapM_ drawFrame [base, base]
@@ -205,7 +204,7 @@ notepadUi = do
       setOpenMenu ""
       setDocGen (docGen + 1)
       loaded <-
-        uiIO (try (openInstant filePath) :: IO (Either SomeException BS.ByteString))
+        uiIO (try (readFileFast filePath) :: IO (Either SomeException BS.ByteString))
       case loaded of
         Left _ -> setStatusMsg ("Could not open " <> T.pack filePath)
         Right raw -> do
@@ -307,7 +306,7 @@ notepadUi = do
               defaultLayout
           )
           docText
-    when (editorText /= docText) $ do
+    when (respChanged editorResp) $ do
       setDocText editorText
       setDocDirty True
     when (respId editorResp /= editorId) (setEditorId (respId editorResp))
@@ -390,20 +389,10 @@ writeDocument filePath contents = do
     uiIO (try (TIO.writeFile filePath contents) :: IO (Either SomeException ()))
   pure (either (const False) (const True) result)
 
--- | Open a file without reading it: mmap it and hand back a strict
--- 'BS.ByteString' backed by the mapping, so pages only fault in as they are
--- touched. Empty files are special-cased (mmap of zero bytes is invalid).
-openInstant :: FilePath -> IO BS.ByteString
-openInstant filePath = do
-  size <- getFileSize filePath
-  if size == 0
-    then pure BS.empty
-    else mmapFileByteString filePath Nothing `catch` fallbackRead
- where
-  -- The file may be truncated between the size probe and the mmap; fall back
-  -- to a plain read for that (and any other) mmap failure.
-  fallbackRead :: SomeException -> IO BS.ByteString
-  fallbackRead _ = BS.readFile filePath
+-- | Open a file with a single strict read; the caller lenient-decodes the
+-- bytes into 'Text'.
+readFileFast :: FilePath -> IO BS.ByteString
+readFileFast = BS.readFile
 
 statusBar :: Text -> Bool -> Text -> Text -> Float -> NanoUI ()
 statusBar path dirty contents message zoomVal =

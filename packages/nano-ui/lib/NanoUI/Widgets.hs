@@ -275,7 +275,7 @@ import NanoUI.Frame.Hit (findNodeByWidgetId, scrollHitRect)
 import NanoUI.Types (isCellHost)
 import NanoUI.Icons (checkboxMark)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
-import NanoUI.Input (Key (..), inputKeys, inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased, inputScroll)
+import NanoUI.Input (Key (..), inputChars, inputKeys, inputKeysNull, inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased, inputScroll)
 import NanoUI.Layout.Arena (NodeType (..), setOptions)
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
 import NanoUI.Frame.Select (comboDropPickIndex, comboDropRect, comboScrollGeom, selectDropPickIndex, selectDropRect, selectItemH)
@@ -300,7 +300,10 @@ import NanoUI.Store
   , slotKey
   , slotSearchAge
   , slotSearchCommitted
+  , slotTextAreaBuffer
+  , slotTextAreaChanged
   , slotTextAreaContentFont
+  , slotTextAreaScroll
   , slotTextAreaViewport
   )
 import NanoUI.Style
@@ -1061,11 +1064,33 @@ textAreaWith layout initial = do
   store <- uiIO (getStore ctx)
   let key = intKey wid
       contentCacheKey = slotKey slotTextAreaContentFont key
-      dropContentCache st = st {storeFloat = IM.delete contentCacheKey (storeFloat st)}
+      changedSlotKey = slotKey slotTextAreaChanged key
+      dropContentCache st =
+        st
+          { storeFloat = IM.delete contentCacheKey (storeFloat st)
+          -- A text write also orphans any cached pair for the document's
+          -- buffer, so a stale buffer can never outlive its 'storeText'.
+          , storeDyn =
+              IM.delete (slotKey slotTextAreaBuffer key) (storeDyn st)
+          }
+      clearChangedPulse st =
+        st {storeInt = IM.delete changedSlotKey (storeInt st)}
   when (not (IM.member key (storeText store)))
     $ uiIO
-    $ setStore ctx (dropContentCache store {storeText = IM.insert key initial (storeText store)})
+    -- Seed the scroll slot too: the wheel/drag paths write offsets through
+    -- setScrollOffset2D, which only updates the text area's slot once it
+    -- exists (otherwise the offset lands in legacy storage and is never read).
+    $ setStore ctx
+    $ dropContentCache
+    $ store
+        { storeText = IM.insert key initial (storeText store)
+        , storePoint = IM.insert (slotKey slotTextAreaScroll key) (0, 0) (storePoint store)
+        }
   let current = IM.findWithDefault initial key (storeText store)
+      -- Set by menu actions (cut/paste through applyTextAreaMenuAction) whose
+      -- edits carry no keys or chars; folded into 'changed' so the caller
+      -- gets its respChanged pulse, then cleared in the state write below.
+      menuPulse = IM.member changedSlotKey (storeInt store)
   focus <- uiIO (readIORef (ctxFocusId ctx))
   blocked <- uiIO (pointerBlockedByModal ctx)
   let isFocus = focus == wid && not blocked
@@ -1087,16 +1112,23 @@ textAreaWith layout initial = do
         let newText = TB.toText (TA.buffer newState)
             TB.Cursor newRow newCol = TB.getCursor (TA.buffer newState)
             TB.Cursor newAnchorRow newAnchorCol = TA.selectionAnchor newState
+            -- 'processTextArea' only edits text when this frame carried keys or
+            -- chars, so the O(document) 'TB.toText' compare is guarded by
+            -- that; idle focused frames stop at the cheap cursor/scroll checks.
+            hadInput = not (T.null (inputChars inp)) || not (inputKeysNull (inputKeys inp))
             changed =
-              newText /= current
-                || newRow /= oldRow
+              newRow /= oldRow
                 || newCol /= oldCol
                 || newAnchorRow /= oldAnchorRow
                 || newAnchorCol /= oldAnchorCol
                 || TA.scrollOffset newState /= TA.scrollOffset oldState
+                || menuPulse
+                || (hadInput && newText /= current)
         when changed $ do
           curStore <- uiIO (getStore ctx)
-          uiIO $ setStore ctx (dropContentCache (saveTextAreaState key newState curStore))
+          uiIO $
+            setStore ctx $
+              clearChangedPulse (dropContentCache (saveTextAreaState key newState curStore))
         pure (newText, changed)
       else pure (current, False)
   resp <- addWidget wid NodeTextArea "" 0 layout

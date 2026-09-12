@@ -48,6 +48,7 @@ import NanoUI.Context
   , slotCursor
   , slotKey
   )
+import NanoUI.Font (menuItemPadX, menuOuterPad)
 import NanoUI.Draw (DrawArena, pushRect, pushRoundedRect, pushRoundedStroke)
 import NanoUI.Style (FontVariant (..))
 import NanoUI.Types (HostProfile, isCellHost)
@@ -357,7 +358,9 @@ menuItemVisualStyle theme val _isHot =
         , styleActiveBg = lerpColor (styleBg menu) accent 0.4
         , styleBorder = clear
         , styleBorderWidth = 0
-        , styleCornerRadius = textInputMenuCornerR
+        -- The text-field context menu fills hovered rows with a square
+        -- pushRect; keep the generic menu identical.
+        , styleCornerRadius = 0
         }
 
 tableHeaderVisualStyle :: Theme -> Bool -> Style
@@ -602,11 +605,13 @@ strokeStyledRect da terminal style x y w h =
 strokeRect :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
 strokeRect da x y w h bw col = strokeRoundedBorder da x y w h 0 bw col
 
+-- Menu metrics live in "NanoUI.Font" so the layout/paint passes share them
+-- with the text-field context-menu painter; these names are kept for callers.
 textInputMenuOuterPad :: Float
-textInputMenuOuterPad = 6
+textInputMenuOuterPad = menuOuterPad
 
 textInputMenuItemPadX :: Float
-textInputMenuItemPadX = 10
+textInputMenuItemPadX = menuItemPadX
 
 textInputMenuCornerR :: Float
 textInputMenuCornerR = 2
