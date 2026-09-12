@@ -42,17 +42,12 @@ import NanoUI.Context
   , getStore
   , getWidgetNodeTypes
   , intKey
-  , isSelectOpen
   , setFloatingAncestor
   , setWidgetNodeTypes
-  , slotCursor
-  , slotKey
   )
 import NanoUI.Font (menuItemPadX, menuOuterPad)
 import NanoUI.Draw (DrawArena, pushRect, pushRoundedRect, pushRoundedStroke)
 import NanoUI.Style (FontVariant (..))
-import NanoUI.Types (HostProfile, isCellHost)
-import NanoUI.Icons (iconSelectClosed, iconSelectOpen)
 import NanoUI.Id (hashWidgetId)
 import NanoUI.Layout.Arena
   ( NodeIdx
@@ -75,15 +70,10 @@ import NanoUI.WidgetText
   , isMenuBarStyle
   , stripeColor
   , treeDecodeStripe
-  , treeDecodeStyle
-  , treeDisplayText
   , selectDisplayText
-  , colorPickerDisplayText
   , textInputFieldText
   , textInputSearchBody
   , textInputSearchMode
-  , textInputSearchTerminalText
-  , textInputTerminalText
   , tableHeaderDisplayText
   , isTableHeaderStyle
   )
@@ -98,7 +88,6 @@ import NanoUI.Style
   , themePanel
   , themeWindow
   )
-import NanoUI.Widgets.ColorPicker (colorPickerDefaultColor, widgetStoreColor)
 import NanoUI.Types (Color (..), Rect (..), colorRGBA, clamp01, lerpColor, rectH, rectW, rectX, rectY)
 
 textAreaStoredValue :: Context -> NodeIdx -> IO Text
@@ -125,14 +114,8 @@ labelPaintWithBg style bg theme fvar raw =
 
 floatingLabelPaint ::
   IM.IntMap (Maybe NodeType) -> Context -> NodeIdx -> Theme -> FontVariant -> T.Text -> (T.Text, Color, Color)
-floatingLabelPaint floatCache ctx idx theme fvar raw =
-  let terminal = isCellHost (ctxHostProfile ctx)
-   in case IM.lookup idx floatCache of
-        Just (Just NodeWindow)
-          | terminal -> labelPaintWith (themeFloatingWindow theme) theme fvar raw
-        Just (Just NodeModal)
-          | terminal -> labelPaintWith (themeFloatingWindow theme) theme fvar raw
-        _ -> nodeLabelPaint theme fvar raw
+floatingLabelPaint _floatCache _ctx _idx theme fvar raw =
+  nodeLabelPaint theme fvar raw
 
 floatingAncestor :: Context -> NodeIdx -> IO (Maybe NodeType)
 floatingAncestor ctx idx = go idx
@@ -182,14 +165,13 @@ buildFloatingAncestorMapFresh ctx = do
 displayText :: Context -> NodeType -> NodeIdx -> IO T.Text
 displayText ctx nt idx = do
   txt <- getText (ctxNodeArena ctx) idx
-  let terminal = isCellHost (ctxHostProfile ctx)
   if nt == NodeButton
     then do
       si <- getStyleIdx (ctxNodeArena ctx) idx
       if isTableHeaderStyle si
-        then pure (tableHeaderDisplayText terminal si txt)
+        then pure (tableHeaderDisplayText si txt)
         else pure txt
-    else displayTextRest ctx nt idx txt terminal
+    else displayTextRest ctx nt idx txt
 
 selectCurrentOption :: Context -> NodeIdx -> IO T.Text
 selectCurrentOption ctx idx = do
@@ -201,54 +183,21 @@ selectCurrentOption ctx idx = do
     (o : _) -> o
     _ -> ""
 
-displayTextRest :: Context -> NodeType -> NodeIdx -> T.Text -> Bool -> IO T.Text
-displayTextRest ctx nt idx txt terminal =
-  if terminal
-    then
-      case nt of
-        NodeSelect -> do
-          opt <- selectCurrentOption ctx idx
-          store <- getStore ctx
-          wid <- getWidgetId (ctxNodeArena ctx) idx
-          let open = isSelectOpen store (intKey wid)
-              icons = ctxIcons ctx
-              caret = if open then iconSelectOpen icons else iconSelectClosed icons
-          pure (selectDisplayText txt opt <> caret)
-        NodeColorPicker -> do
-          store <- getStore ctx
-          wid <- getWidgetId (ctxNodeArena ctx) idx
-          let current = widgetStoreColor store wid colorPickerDefaultColor
-          pure (colorPickerDisplayText current)
-        NodeTree -> do
-          si <- getStyleIdx (ctxNodeArena ctx) idx
-          let (_, depth, hasKids, expanded) = treeDecodeStyle si
-          pure (treeDisplayText (ctxIcons ctx) depth hasKids expanded txt)
-        NodeTextInput -> do
-          value <- textInputValue ctx idx
-          focused <- textInputFocused ctx idx
-          wid <- getWidgetId (ctxNodeArena ctx) idx
-          store <- getStore ctx
-          let cursor = IM.findWithDefault (T.length value) (slotKey slotCursor (intKey wid)) (storeInt store)
-          si <- getStyleIdx (ctxNodeArena ctx) idx
-          if textInputSearchMode si
-            then pure (textInputSearchTerminalText txt value cursor focused)
-            else pure (textInputTerminalText txt value cursor focused)
-        NodeTextArea -> textAreaStoredValue ctx idx
-        _ -> pure txt
-    else
-      case nt of
-        NodeTextInput -> do
-          value <- textInputValue ctx idx
-          focused <- textInputFocused ctx idx
-          si <- getStyleIdx (ctxNodeArena ctx) idx
-          if textInputSearchMode si
-            then pure (textInputSearchBody txt value focused)
-            else pure (textInputFieldText txt value focused)
-        NodeTextArea -> textAreaStoredValue ctx idx
-        NodeSelect -> do
-          opt <- selectCurrentOption ctx idx
-          pure (selectDisplayText txt opt)
-        _ -> pure txt
+displayTextRest :: Context -> NodeType -> NodeIdx -> T.Text -> IO T.Text
+displayTextRest ctx nt idx txt =
+  case nt of
+    NodeTextInput -> do
+      value <- textInputValue ctx idx
+      focused <- textInputFocused ctx idx
+      si <- getStyleIdx (ctxNodeArena ctx) idx
+      if textInputSearchMode si
+        then pure (textInputSearchBody txt value focused)
+        else pure (textInputFieldText txt value focused)
+    NodeTextArea -> textAreaStoredValue ctx idx
+    NodeSelect -> do
+      opt <- selectCurrentOption ctx idx
+      pure (selectDisplayText txt opt)
+    _ -> pure txt
 
 textInputValue :: Context -> NodeIdx -> IO Text
 textInputValue ctx idx = do
@@ -382,7 +331,6 @@ tableHeaderVisualStyle theme isSorted =
 
 paintTabHeader ::
   DrawArena ->
-  HostProfile ->
   Theme ->
   Int ->
   Bool ->
@@ -392,31 +340,29 @@ paintTabHeader ::
   Float ->
   Float ->
   IO ()
-paintTabHeader da host theme styleIdx isActive style x y w h =
-  when (not (isCellHost host)) $ do
-    let rect = Rect x y w h
-        r = max 0 (styleCornerRadius style)
-        accent = themeAccent theme
-        panel = themePanel theme
-        border = styleBorder panel
-        bg = styleBg style
-        clear = colorRGBA 0 0 0 0
-        hasFill = bg /= clear
-    if isActive
-      then case styleIdx `mod` 4 of
-        1 -> pushRoundedRect da rect r bg
-        2 -> do
-          pushRoundedRect da rect r bg
-          strokeStyledRect da False style x y w h
-        _ -> do
-          pushRoundedRect da rect r bg
-          strokeTabHeaderSides da x y w h r border
-          pushRect da (Rect x (y + h - 2) w 2) accent
-      else when hasFill $ pushRoundedRect da rect r bg
+paintTabHeader da theme styleIdx isActive style x y w h = do
+  let rect = Rect x y w h
+      r = max 0 (styleCornerRadius style)
+      accent = themeAccent theme
+      panel = themePanel theme
+      border = styleBorder panel
+      bg = styleBg style
+      clear = colorRGBA 0 0 0 0
+      hasFill = bg /= clear
+  if isActive
+    then case styleIdx `mod` 4 of
+      1 -> pushRoundedRect da rect r bg
+      2 -> do
+        pushRoundedRect da rect r bg
+        strokeStyledRect da style x y w h
+      _ -> do
+        pushRoundedRect da rect r bg
+        strokeTabHeaderSides da x y w h r border
+        pushRect da (Rect x (y + h - 2) w 2) accent
+    else when hasFill $ pushRoundedRect da rect r bg
 
 paintTableHeader ::
   DrawArena ->
-  HostProfile ->
   Theme ->
   Bool ->
   Style ->
@@ -425,14 +371,13 @@ paintTableHeader ::
   Float ->
   Float ->
   IO ()
-paintTableHeader da host theme isSorted style x y w h =
-  when (not (isCellHost host)) $ do
-    let rect = Rect x y w h
-        bg = styleBg style
-        accent = themeAccent theme
-    pushRect da rect bg
-    when isSorted $
-      pushRect da (Rect x (y + h - 2) w 2) accent
+paintTableHeader da theme isSorted style x y w h = do
+  let rect = Rect x y w h
+      bg = styleBg style
+      accent = themeAccent theme
+  pushRect da rect bg
+  when isSorted $
+    pushRect da (Rect x (y + h - 2) w 2) accent
 
 strokeTabHeaderSides ::
   DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
@@ -449,7 +394,12 @@ widgetVisualStyle ctx nt idx = do
   active <- readIORef (ctxActiveId ctx)
   focus <- readIORef (ctxFocusId ctx)
   animT <- getAnimationValue ctx wid
-  mFloat <- floatingAncestor ctx idx
+  -- Only these node types consult the floating ancestor; skip the parent
+  -- walk for the common panel/text/button path.
+  mFloat <-
+    if nt == NodeCheckbox || nt == NodeRadio || nt == NodeTree || nt == NodeSlider
+      then floatingAncestor ctx idx
+      else pure Nothing
   styleIdx <-
     if nt == NodeButton || nt == NodeTree
       then getStyleIdx (ctxNodeArena ctx) idx
@@ -460,8 +410,7 @@ widgetVisualStyle ctx nt idx = do
           else (False, False, False)
       isMenu = nt == NodeButton && (isMenuItemStyle styleIdx || isMenuBarStyle styleIdx)
   theme <- readIORef (ctxTheme ctx)
-  let terminal = isCellHost (ctxHostProfile ctx)
-      isFocus = focus == wid
+  let isFocus = focus == wid
       widKey = hashWidgetId wid
       isHot = wid == hot
       clearStyle s =
@@ -485,7 +434,7 @@ widgetVisualStyle ctx nt idx = do
           NodeColorPicker ->
             let sel = themeInput theme
              in if isFocus then sel {styleBorder = themeAccent theme} else sel
-          NodeSlider -> if terminal then themeInput theme else clearStyle (themeInput theme)
+          NodeSlider -> clearStyle (themeInput theme)
           NodeCheckbox -> clearStyle (themeButton theme)
           NodeRadio -> clearStyle (themeButton theme)
           NodeTree ->
@@ -519,29 +468,11 @@ widgetVisualStyle ctx nt idx = do
           NodeButton
             | isMenu -> menuItemVisualStyle theme val isHot
             | isClose -> closeButtonStyle theme isHot animT
-            | isTab, terminal ->
-                let btn = themeButton theme
-                    accent = themeAccent theme
-                    muted = themeMuted theme
-                 in if val > 0.5
-                      then btn
-                        { styleBg = accent
-                        , styleHoverBg = accent
-                        , styleFg = colorRGBA 255 255 255 255
-                        , styleBorder = accent
-                        , styleBorderWidth = 0
-                        }
-                      else btn
-                        { styleBg = colorRGBA 0 0 0 0
-                        , styleHoverBg = colorRGBA 0 0 0 0
-                        , styleFg = muted
-                        , styleBorderWidth = 0
-                        }
             | isTab ->
                 tabHeaderVisualStyle theme (buttonVisualStyle styleIdx `mod` 4) (val > 0.5) isHot animT
             | isTable ->
                 tableHeaderVisualStyle theme (val > 0.5)
-            | not terminal && val > 0.5 ->
+            | val > 0.5 ->
                 let btn = themeButton theme
                  in btn
                       { styleBg = themeAccent theme
@@ -549,27 +480,23 @@ widgetVisualStyle ctx nt idx = do
                       , styleFg = colorRGBA 255 255 255 255
                       , styleBorder = themeAccent theme
                       }
-            | Just NodeWindow <- mFloat, terminal -> themeFloatingWindow theme
-            | Just NodeModal <- mFloat, terminal -> themeFloatingWindow theme
           _ -> themeButton theme
       widgetBase =
         case mFloat of
           Just NodeModal
-            | terminal -> base
             | nt == NodeCheckbox || nt == NodeRadio || nt == NodeTree || nt == NodeSlider -> overlayModalStyle theme
             | otherwise -> base
           _ -> base
       bg
-        | terminal, widKey == hashWidgetId active = styleActiveBg widgetBase
-        | terminal, isHot = styleHoverBg widgetBase
-        | terminal = styleBg widgetBase
         | nt == NodeTextInput, isFocus = styleActiveBg widgetBase
         | nt == NodeTextArea, isFocus = styleActiveBg widgetBase
         | widKey == hashWidgetId active = styleActiveBg widgetBase
         | nt == NodeCheckbox || nt == NodeRadio || nt == NodeSlider || isClose = styleBg widgetBase
         | isMenu = if isHot then styleHoverBg widgetBase else styleBg widgetBase
         | otherwise = hoverBackground widgetBase animT isHot
-  pure widgetBase {styleBg = bg}
+  -- Idle widgets (no hover/active tint change) reuse the base style record
+  -- rather than allocating a fresh Style through a record update.
+  pure (if bg == styleBg widgetBase then widgetBase else widgetBase {styleBg = bg})
 
 hoverBackground :: Style -> Float -> Bool -> Color
 hoverBackground base val isHot
@@ -577,12 +504,14 @@ hoverBackground base val isHot
   | isHot = lerpColor (styleBg base) (styleHoverBg base) (if val > 0 then val else 1)
   | otherwise = lerpColor (styleBg base) (styleHoverBg base) val
 
-fillStyledRect :: DrawArena -> Bool -> Style -> Rect -> IO ()
-fillStyledRect da terminal style rect =
-  if terminal || styleCornerRadius style <= 0
+{-# INLINE fillStyledRect #-}
+fillStyledRect :: DrawArena -> Style -> Rect -> IO ()
+fillStyledRect da style rect =
+  if styleCornerRadius style <= 0
     then pushRect da rect (styleBg style)
     else pushRoundedRect da rect (styleCornerRadius style) (styleBg style)
 
+{-# INLINE strokeRoundedBorder #-}
 strokeRoundedBorder ::
   DrawArena ->
   Float ->
@@ -597,9 +526,10 @@ strokeRoundedBorder da x y w h r bw col = do
   let rr = max 0 (min r (min (w / 2) (h / 2)))
   pushRoundedStroke da (Rect x y w h) rr (max 1 bw) col
 
-strokeStyledRect :: DrawArena -> Bool -> Style -> Float -> Float -> Float -> Float -> IO ()
-strokeStyledRect da terminal style x y w h =
-  when (not terminal && styleBorderWidth style > 0) $
+{-# INLINE strokeStyledRect #-}
+strokeStyledRect :: DrawArena -> Style -> Float -> Float -> Float -> Float -> IO ()
+strokeStyledRect da style x y w h =
+  when (styleBorderWidth style > 0) $
     strokeRoundedBorder da x y w h (styleCornerRadius style) (styleBorderWidth style) (styleBorder style)
 
 strokeRect :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()

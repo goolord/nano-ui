@@ -15,7 +15,6 @@ module Cases
   , module Cases.Window
   , module Cases.Font
   , module Cases.Keyboard
-  , runAsciiTest
   , runAspectLayoutTest
   , runBase16ThemeTest
   , runCheckboxTest
@@ -28,21 +27,15 @@ module Cases
   , runEmbedStateTest
   , runFitSizingTest
   , runFitMutedWidthTest
-  , runFlexShrinkTest
-  , runGridTest
   , runGrowFitsWindowTest
   , runGrowEqualSplitTest
   , runGrowContentFloorTest
   , runGrowLockCascadeTest
   , runGrowEqualSplitHeightTest
-  , runGrowWrapPushesSiblingTest
-  , runHostProfileGapTest
-  , runHostProfileMeasureTest
   , runHostSlotTest
   , runHoverDamageTest
   , runHoverSkipTest
   , runHoverTest
-  , runIconSetTest
   , runIdKeyedListTest
   , runIdleTest
   , runIdStabilityTest
@@ -52,6 +45,8 @@ module Cases
   , runInteractionTest
   , runLabelAlignEndTest
   , runLayoutTest
+  , runLayoutReuseTest
+  , runDeepNestingTest
   , runOverlayTest
   , runPanelPaintsTest
   , runPaneGridMixedDragTest
@@ -67,9 +62,6 @@ module Cases
   , runSliderFillWidthTest
   , runSliderTest
   , runTabFocusTest
-  , runTextMultilineTest
-  , runTextWrapAssignedTest
-  , runTextWrapTest
   , runTwoCardWrapTest
   , runUseFlagClickTest
   , runWidgetNoStringEmitTest
@@ -99,7 +91,6 @@ import Control.Concurrent (threadDelay)
 import Data.ByteString qualified as BS
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
-import Data.List (nub, sort)
 import Data.Map.Strict qualified as M
 import Data.Text qualified as T
 import Data.Vector qualified as V
@@ -131,24 +122,6 @@ import NanoUI.Widgets.SplitPane
   , layoutNode
   , topLevelDropTarget
   )
-
-runHostProfileGapTest :: Context -> IORef Int -> IO ()
-runHostProfileGapTest _ failed = do
-  let defaultGap = layoutGap defaultLayout
-      cellGap = resolveLayoutGap CellHost (monospaceMetrics 1) defaultGap
-      pixelGap = resolveLayoutGap PixelHost (monospaceMetrics 16) defaultGap
-  assertEq failed cellGap 1
-  assertEq failed pixelGap defaultGap
-
-runHostProfileMeasureTest :: Context -> IORef Int -> IO ()
-runHostProfileMeasureTest _ failed = do
-  let txt = "abcde"
-      fmCell = monospaceMetrics 1
-      fmPixel = monospaceMetrics 16
-      cellW = textDisplayWidth CellHost fmCell txt
-      pixelW = textDisplayWidth PixelHost fmPixel txt
-  assertEq failed cellW (fromIntegral (terminalPaintColumns txt))
-  assertEq failed pixelW (fromIntegral (T.length txt) * fmAdvance fmPixel ' ')
 
 runIdStabilityTest :: Context -> IORef Int -> IO ()
 runIdStabilityTest ctx failed = do
@@ -224,6 +197,67 @@ runLayoutTest ctx failed = do
         label "nested"
   (_, _, draw, _) <- runFrame ctx (withInput 400 300) ui
   assertGt failed (drawVertexCount draw) 0
+
+-- | Phase 5A: the cached-layout path must produce exactly the same spans and
+-- draw counts as a full solve, and descriptor/resize/text changes must
+-- invalidate it.
+runLayoutReuseTest :: Context -> IORef Int -> IO ()
+runLayoutReuseTest ctx failed = do
+  let inp = withInput 400 300
+      ui1 =
+        columnWith (tight . gap 4 . fillW) $ do
+          void (label "alpha")
+          void (button "beta")
+          void (label "gamma delta epsilon")
+  (_, _, d0, _) <- runFrame ctx inp ui1
+  s0 <- collectTextSpans ctx
+  -- Frame 2 takes the cached-layout path (same descriptor).
+  (_, _, d1, _) <- runFrame ctx inp ui1
+  s1 <- collectTextSpans ctx
+  assertEq failed s1 s0
+  assertEq failed (drawVertexCount d1) (drawVertexCount d0)
+  assertEq failed (drawIndexCount d1) (drawIndexCount d0)
+  -- Text change invalidates the cached descriptor.
+  let ui2 =
+        columnWith (tight . gap 4 . fillW) $ do
+          void (label "alpha changed")
+          void (button "beta")
+          void (label "gamma delta epsilon")
+  _ <- runFrame ctx inp ui2
+  s2 <- collectTextSpans ctx
+  assert failed (s2 /= s1)
+  -- Width change must not serve the cached placement for width-dependent
+  -- (wrapping) layout.
+  let wrapUi =
+        columnWith (tight . fillW) $
+          label "the quick brown fox jumps over the lazy dog repeatedly"
+  _ <- runFrame ctx (withInput 600 200) wrapUi
+  sw0 <- collectTextSpans ctx
+  _ <- runFrame ctx (withInput 180 200) wrapUi
+  sw1 <- collectTextSpans ctx
+  assert failed (sw1 /= sw0)
+  -- Scroll containers are eligible for reuse too; a static scroll view must
+  -- produce identical spans on the cached path.
+  let scrollUi =
+        scroll2DWith (fixedH 120 . fillW) $
+          columnWith (tight . gap 0 . fillW) $
+            mapM_ (\i -> void (label (T.pack ("row " <> show i)))) [1 .. 10 :: Int]
+  _ <- runFrame ctx (withInput 300 200) scrollUi
+  ss0 <- collectTextSpans ctx
+  _ <- runFrame ctx (withInput 300 200) scrollUi
+  ss1 <- collectTextSpans ctx
+  assertEq failed ss1 ss0
+
+-- | Nesting deeper than the initial snapshot-level capacity must still lay
+-- out correctly (the level array grows on demand).
+runDeepNestingTest :: Context -> IORef Int -> IO ()
+runDeepNestingTest ctx failed = do
+  let nest :: Int -> NanoUI ()
+      nest 0 = void (label "deep")
+      nest k = column (nest (k - 1))
+  _ <- runFrame ctx (withInput 300 300) (nest 320)
+  spans <- collectTextSpans ctx
+  assert failed (any (\(_, t, _, _, _) -> t == "deep") spans)
 
 runRowPanelLayoutTest :: Context -> IORef Int -> IO ()
 runRowPanelLayoutTest ctx failed = do
@@ -427,25 +461,6 @@ runHoverDamageTest _ failed = do
     DamageClip (Rect _ _ w h) -> assert failed (w * h < 240 * 80 * 0.5)
 
 
-runAsciiTest :: Context -> IORef Int -> IO ()
-runAsciiTest ctx failed = do
-  (_, _, draw, _) <- runFrame ctx (withInput 40 10) (column' (defaultLayout {layoutWidth = Grow 1, layoutHeight = Grow 1}) (label "snap"))
-  let ascii = renderASCII 40 10 draw
-  assertEq failed (length ascii) 10
-  assert failed (not (all (all (== ' ')) ascii))
-
-runIconSetTest :: Context -> IORef Int -> IO ()
-runIconSetTest _ failed = do
-  assertEq failed (parseIconSet "nerd") (Just IconsNerd)
-  assertEq failed (parseIconSet "FontAwesome") (Just IconsFontAwesome)
-  assertEq failed (parseIconSet " ascii ") (Just IconsAscii)
-  assertEq failed (parseIconSet "auto") Nothing
-  assertEq failed (iconsFor IconsAscii) asciiIcons
-  assertEq failed (iconsFor IconsNerd) glyphIcons
-  assertEq failed (iconsFor IconsFontAwesome) glyphIcons
-  assertEq failed (checkboxMark glyphIcons True) (iconChecked glyphIcons)
-  assertEq failed (terminalTextColumns (iconChecked glyphIcons)) (terminalTextColumns (iconUnchecked glyphIcons))
-
 runCheckboxTest :: Context -> IORef Int -> IO ()
 runCheckboxTest ctx failed = do
   let inp0 = withInput 200 100
@@ -504,7 +519,7 @@ runSliderTest ctx failed = do
       ui = column (slider 0 100 10)
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect rx ry rw rh = respRect resp
-      track = sliderTrackBounds (ctxHostProfile ctx) (ctxFontMetrics ctx) rx ry rw rh
+      track = sliderTrackBounds (ctxFontMetrics ctx) rx ry rw rh
       drag = V2 (rectX track + rectW track * 0.75) (rectY track + rectH track / 2)
   ((_, val), _, _, _) <- runFrame ctx (inp0 {inputMousePos = drag, inputMouseDown = True, inputMousePressed = True}) ui
   assertGt failed val 10
@@ -516,7 +531,7 @@ runSliderFillWidthTest ctx failed = do
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect rx ry rw rh = respRect resp
   assertGt failed rw 300
-  let track = sliderTrackBounds (ctxHostProfile ctx) (ctxFontMetrics ctx) rx ry rw rh
+  let track = sliderTrackBounds (ctxFontMetrics ctx) rx ry rw rh
       endDrag = V2 (rectX track + rectW track - 2) (rectY track + rectH track / 2)
   ((_, val), _, _, _) <- runFrame ctx (inp0 {inputMousePos = endDrag, inputMouseDown = True, inputMousePressed = True}) ui
   assertGt failed val 90
@@ -531,58 +546,6 @@ runTabFocusTest ctx failed = do
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   focus2 <- getFocusId ctx
   assert failed (focus1 /= WidgetId 0 && focus2 /= WidgetId 0 && focus1 /= focus2)
-
-runTextWrapTest :: Context -> IORef Int -> IO ()
-runTextWrapTest _ failed = do
-  ctx <- newCellContext
-  let inp = withInput 40 10
-      long = T.replicate 24 (T.pack "x")
-  _ <- runFrame ctx inp (labelEx (defaultLayout {layoutMaxW = 8}) long)
-  spans <- collectTextSpans ctx
-  assert failed (length spans >= 3)
-
-runTextWrapAssignedTest :: Context -> IORef Int -> IO ()
-runTextWrapAssignedTest _ failed = do
-  ctx <- newCellContext
-  let inp = withInput 20 12
-      long = T.replicate 24 (T.pack "x")
-      ui = column' (defaultLayout {layoutWidth = Fixed 8, layoutPadding = Padding 0 0 0 0, layoutGap = 0})
-             (labelEx (defaultLayout {layoutWidth = Grow 1}) long)
-  _ <- runFrame ctx inp ui
-  spans <- collectTextSpans ctx
-  assert failed (length spans >= 3)
-
-runTextMultilineTest :: Context -> IORef Int -> IO ()
-runTextMultilineTest _ failed = do
-  ctx <- newCellContext
-  _ <- runFrame ctx (withInput 40 10) (labelEx (tight . fontMono $ defaultLayout) "aa\nbb\ncc")
-  spans <- collectTextSpans ctx
-  let rows = sort [(round y :: Int, txt) | (Rect _ y _ _, txt, _, _, _) <- spans]
-  assertEq failed (map snd rows) ["aa", "bb", "cc"]
-  case map fst rows of
-    [a, b, c] -> assert failed (b == a + 1 && c == b + 1)
-    _ -> assert failed False
-
-runGridTest :: Context -> IORef Int -> IO ()
-runGridTest _ failed = do
-  ctx <- newCellContext
-  let ui = grid' 2 (defaultLayout {layoutWidth = Fixed 4, layoutGap = 0, layoutPadding = Padding 0 0 0 0})
-             (label "AA" >> label "BB" >> label "CC" >> label "DD" >> pure ())
-  _ <- runFrame ctx (withInput 30 10) ui
-  spans <- collectTextSpans ctx
-  let ys = nub [round y :: Int | (Rect _ y _ _, _, _, _, _) <- spans]
-  assert failed (length ys >= 2)
-
-runFlexShrinkTest :: Context -> IORef Int -> IO ()
-runFlexShrinkTest _ failed = do
-  ctx <- newCellContext
-  let ui = row' (defaultLayout {layoutWidth = Fixed 5, layoutGap = 0, layoutPadding = Padding 0 0 0 0})
-             (labelEx (defaultLayout {layoutWidth = Shrink 1}) "AA" >> labelEx (defaultLayout {layoutWidth = Shrink 1}) "BB" >> labelEx (defaultLayout {layoutWidth = Shrink 1}) "CC" >> pure ())
-  _ <- runFrame ctx (withInput 20 10) ui
-  spans <- collectTextSpans ctx
-  assertEq failed (length spans) 3
-  let lastX = maximum [x | (Rect x _ _ _, _, _, _, _) <- spans]
-  assert failed (lastX <= 3.5)
 
 runGrowFitsWindowTest :: Context -> IORef Int -> IO ()
 runGrowFitsWindowTest ctx failed = do
@@ -692,7 +655,6 @@ runGrowEqualSplitHeightTest ctx failed = do
 
 runLabelAlignEndTest :: Context -> IORef Int -> IO ()
 runLabelAlignEndTest _ failed = do
-  checkLabelAlignEnd failed =<< newCellContext
   checkLabelAlignEnd failed =<< newPixelContext
   checkLabelAlignEndInk failed
 
@@ -703,21 +665,6 @@ runAspectLayoutTest ctx failed = do
   resp <- warmup2 ctx inp ui
   let Rect _ _ w h = respRect resp
   assert failed (abs (w - 160) <= 1 && abs (h - 80) <= 1)
-
-runGrowWrapPushesSiblingTest :: Context -> IORef Int -> IO ()
-runGrowWrapPushesSiblingTest _ failed = do
-  ctx <- newCellContext
-  let inp = withInput 6 20
-      ui = column' (defaultLayout {layoutWidth = Grow 1, layoutHeight = Grow 1, layoutPadding = Padding 0 0 0 0, layoutGap = 0}) $ do
-        grid' 1 (defaultLayout {layoutWidth = Grow 1, layoutPadding = Padding 0 0 0 0, layoutGap = 0})
-          (label "AAAA" >> label "BBBB" >> pure ())
-        label "BELOW"
-  _ <- runFrame ctx inp ui
-  spans <- collectTextSpans ctx
-  let ysFor t = [y | (Rect _ y _ _, txt, _, _, _) <- spans, txt == t]
-  case (ysFor "BBBB", ysFor "BELOW") of
-    ([by], [sy]) -> assert failed (sy >= by + 0.5)
-    _ -> assert failed False
 
 runHostSlotTest :: Context -> IORef Int -> IO ()
 runHostSlotTest ctx failed = do

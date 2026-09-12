@@ -200,7 +200,7 @@ runColorPickerCommitTest ctx failed = do
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect x y w h = respRect resp
       wid = respId resp
-      geom = colorPickerGeom False (ctxHostProfile ctx) (ctxFontMetrics ctx) x y w h
+      geom = colorPickerGeom False (ctxFontMetrics ctx) x y w h
       sv = cpgSv geom
       pt = V2 (rectX sv + rectW sv * 0.9) (rectY sv + 2)
       press = pressAt inp0 pt
@@ -263,7 +263,7 @@ runColorPickerHoldTest ctx failed = do
   (resp, _) <- warmup2 ctx inp0 ui
   let wid = respId resp
       Rect x y w h = respRect resp
-      geom = colorPickerGeom False (ctxHostProfile ctx) (ctxFontMetrics ctx) x y w h
+      geom = colorPickerGeom False (ctxFontMetrics ctx) x y w h
       sv = cpgSv geom
       pt = V2 (rectX sv + rectW sv * 0.5) (rectY sv + rectH sv * 0.5)
       press =

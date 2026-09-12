@@ -53,6 +53,7 @@ import NanoUI.Context
   , takeDamage
   , tickAnimations
   , lookupCustomMeasure
+  , hasCustomLayoutInputs
   )
 import NanoUI.Context (beginFrameModal)
 import NanoUI.Damage (updatePrevRects, writeDamage)
@@ -128,7 +129,13 @@ import NanoUI.Frame.Window
   )
 import NanoUI.Id (WidgetId (..), initialIdContext)
 import NanoUI.Input (Input (..), inputMouseDown, stripInteractionInput)
-import NanoUI.Layout.Arena (resetNodeArena)
+import NanoUI.Layout.Arena
+  ( captureLayoutCache
+  , layoutInputsMatch
+  , newLayoutCache
+  , resetNodeArena
+  , restoreLayoutCache
+  )
 import NanoUI.Layout.Solve (placeModals, placePopups, placeWindows, solveLayoutWithResolver)
 import NanoUI.Monad (NanoUI, Ui, runUi)
 import NanoUI.Store (mirrorStoresChanged)
@@ -232,17 +239,20 @@ runFrameEff unlift ctx inp ui = do
         resetUiBuild ctx
         unlift (runUi ctx (stripInteractionInput inp) ui)
       else pure result0
-  -- Terminal sliders embed the bar in node text; sync before measure so width is correct.
+  -- Sync widget node values (checkbox/radio/tree) from the store before measure
+  -- so labels and layout reflect the current state.
   syncWidgetLabels ctx
   let
     Size w h = inputWindowSize inp
-  solvePlaceWindows ctx w h
+  reused <- tryReuseLayout ctx (Size w h)
+  unless reused $ do
+    solvePlaceWindows ctx w h
+    captureLayout ctx (Size w h)
   movedResize <- updateWindowResize ctx inp w h
   movedWindow <- updateWindowDrag ctx inp
   when (movedResize || movedWindow) $
     placeWindows
       (ctxNodeArena ctx)
-      (ctxHostProfile ctx)
       (ctxFontMetrics ctx)
       w
       h
@@ -271,6 +281,7 @@ runFrameEff unlift ctx inp ui = do
   let layoutDirty = storeChanged || movedResize || movedWindow
   when layoutDirty $ do
     solvePlaceWindows ctx w h
+    captureLayout ctx (Size w h)
     applyScrollOffsets ctx
   cacheOpenSelectDrop ctx
   updatePrevRects ctx
@@ -343,7 +354,6 @@ solvePlaceWindows ctx w h = do
         pure (fm, ctxResolveMeasure ctx sz weight style var)
   solveLayoutWithResolver
     (ctxNodeArena ctx)
-    (ctxHostProfile ctx)
     (ctxFontMetrics ctx)
     (ctxMonoFontMetrics ctx)
     (ctxMeasureText ctx)
@@ -351,10 +361,9 @@ solvePlaceWindows ctx w h = do
     (lookupCustomMeasure ctx)
     w
     h
-  placeModals (ctxNodeArena ctx) (ctxHostProfile ctx) (ctxFontMetrics ctx) w h
+  placeModals (ctxNodeArena ctx) (ctxFontMetrics ctx) w h
   placeWindows
     (ctxNodeArena ctx)
-    (ctxHostProfile ctx)
     (ctxFontMetrics ctx)
     w
     h
@@ -362,8 +371,39 @@ solvePlaceWindows ctx w h = do
     (lookupWindowSize ctx)
   placePopups
     (ctxNodeArena ctx)
-    (ctxHostProfile ctx)
     (ctxFontMetrics ctx)
     w
     h
     (lookupPopupConfig ctx)
+
+-- | Phase 5A: if this frame's built tree exactly matches the previous solved
+-- layout (same window, same font/theme generation, same node descriptors and
+-- no floating/scroll/custom-measure nodes), restore the solved rects and skip
+-- the solve. Falls back to a full solve on any mismatch.
+tryReuseLayout :: Context -> Size -> IO Bool
+tryReuseLayout ctx size = do
+  custom <- hasCustomLayoutInputs ctx
+  if custom
+    then pure False
+    else do
+      gen <- readIORef (ctxMetricGen ctx)
+      mc <- readIORef (ctxLayoutCache ctx)
+      case mc of
+        Just (c, cachedSize, cachedGen)
+          | cachedSize == size && cachedGen == gen -> do
+              ok <- layoutInputsMatch (ctxNodeArena ctx) c
+              if ok
+                then restoreLayoutCache (ctxNodeArena ctx) c >> pure True
+                else pure False
+        _ -> pure False
+
+-- | Snapshot the solved layout so the next frame can reuse it.
+captureLayout :: Context -> Size -> IO ()
+captureLayout ctx size = do
+  gen <- readIORef (ctxMetricGen ctx)
+  mc <- readIORef (ctxLayoutCache ctx)
+  c0 <- case mc of
+    Just (c, _, _) -> pure c
+    Nothing -> newLayoutCache 64
+  c <- captureLayoutCache (ctxNodeArena ctx) c0
+  writeIORef (ctxLayoutCache ctx) (Just (c, size, gen))

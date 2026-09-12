@@ -24,8 +24,6 @@ import NanoUI.Context
   , setCurrentFloatingId
   )
 import NanoUI.Font (resolveLayoutGap, resolveLayoutPadding)
-import NanoUI.Types (isCellHost)
-import NanoUI.Icons (Icons (..))
 import NanoUI.Id (WidgetId)
 import NanoUI.Input
   ( inputMousePos
@@ -64,7 +62,6 @@ import NanoUI.Widgets.Chrome
   , titleBarChromeHFor
   , titleBarLayoutFor
   , titleLabelLayoutFor
-  , titleMark
   )
 import NanoUI.Widgets.Behavior (useDismissable)
 import NanoUI.Widgets.Layout
@@ -108,32 +105,30 @@ overlay kind open title child
         stack <- uiIO (readIORef (ctxContainerStack ctx))
         let
           fm = ctxFontMetrics ctx
-          host = ctxHostProfile ctx
           parent0 = parentIdx stack
           Size winW winH = inputWindowSize inp
-          margin = resolveLayoutGap host fm windowMargin
+          margin = resolveLayoutGap fm windowMargin
           availW = max 1 (winW - 2 * margin)
           availH = max 1 (winH - 2 * margin)
           isModal = kind == ModalOverlay
-          padding = floatPadFor host (if isModal then Padding 14 14 0 12 else windowPad)
-          barH = if isModal then modalTitleBarHFor host else titleBarChromeHFor host
+          padding = floatPadFor (if isModal then Padding 14 14 0 12 else windowPad)
+          barH = if isModal then modalTitleBarHFor else titleBarChromeHFor
           -- Window body breathing room: one side-pad between the chrome and
           -- the body, matching the window's left/right padding. Modals keep
           -- their own larger gap.
-          bodyGap = floatGapFor host (if isModal then 8 else 10)
+          bodyGap = floatGapFor (if isModal then 8 else 10)
           minWidth =
             floatMinFor
-              host
-              (if isModal then 260 else if isCellHost host then 160 else 280)
+              (if isModal then 260 else 280)
               availW
           minHeight =
             if isModal
               then 0
               else
                 let
-                  pad = resolveLayoutPadding host fm padding
+                  pad = resolveLayoutPadding fm padding
                  in
-                  min availH (padT pad + titleBarChromeHFor host + bodyGap + padB pad)
+                  min availH (padT pad + titleBarChromeHFor + bodyGap + padB pad)
           maxW = availW
           maxH = availH
         prevFloat <- uiIO $ do
@@ -165,34 +160,28 @@ overlay kind open title child
           pure prev
         (closeResp, r) <- do
           close <-
-            row' (titleBarLayoutFor host barH) $ do
+            row' (titleBarLayoutFor barH) $ do
               when (not (T.null title)) $
                 case kind of
                   ModalOverlay ->
                     void
                       ( labelEx
-                          (titleLabelLayoutFor host barH)
-                          (titleMark host (iconModalTitle (ctxIcons ctx)) <> title)
+                          (titleLabelLayoutFor barH)
+                          title
                       )
                   WindowOverlay ->
                     withKey
                       title
                       ( void
                           ( labelEx
-                              (titleLabelLayoutFor host barH)
-                              (titleMark host (iconWindowTitle (ctxIcons ctx)) <> title)
+                              (titleLabelLayoutFor barH)
+                              title
                           )
                       )
               flex
               withKey ("close" :: Text) closeButton
           when (kind == ModalOverlay && not (T.null title)) sep
-          r <-
-            if isModal
-              then
-                if isCellHost host
-                  then scrollWith (tight . grow) child
-                  else child
-              else scrollWith (tight . grow) child
+          r <- scrollWith (tight . grow) child
           pure (close, r)
         uiIO $ do
           when isModal (endModal ctx)

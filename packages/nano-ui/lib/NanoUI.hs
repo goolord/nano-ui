@@ -510,19 +510,6 @@ module NanoUI
   , Compact
   , compactHost
   , askCompact
-  -- Icons
-  , IconSet (..)
-  , Icons (..)
-  , asciiIcons
-  , glyphIcons
-  , iconsFor
-  , iconSetName
-  , parseIconSet
-  , checkboxMark
-  , radioMark
-  , treeExpandMark
-  , fontAwesomeIcon
-  , loneFontAwesome
   -- Font
   , FontMetrics (..)
   , GlyphQuad (..)
@@ -571,20 +558,6 @@ import NanoUI.Font
   , widgetContentInset
   , widgetPadding
   , treeItemPadding
-  )
-import NanoUI.Icons
-  ( IconSet (..)
-  , Icons (..)
-  , asciiIcons
-  , checkboxMark
-  , fontAwesomeIcon
-  , glyphIcons
-  , iconSetName
-  , iconsFor
-  , loneFontAwesome
-  , parseIconSet
-  , radioMark
-  , treeExpandMark
   )
 import NanoUI.Id
   ( IdContext

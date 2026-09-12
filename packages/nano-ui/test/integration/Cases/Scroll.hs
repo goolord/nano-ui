@@ -114,7 +114,7 @@ runScrollBarGutterTest ctx failed = do
              pure r
   (sid, child) <- warmup2 ctx inp0 ui
   let endPad = padR (layoutPadding defaultLayout)
-      gutter = scrollBarGutter (ctxHostProfile ctx) (ctxFontMetrics ctx) + scrollBarListExtra
+      gutter = scrollBarGutter (ctxFontMetrics ctx) + scrollBarListExtra
   assertScrollGutterPad failed ctx sid child gutter endPad
 
 runGrowScrollGutterTest :: Context -> IORef Int -> IO ()
@@ -125,7 +125,7 @@ runGrowScrollGutterTest ctx failed = do
              _ <- replicateM 20 (label "scroll line")
              pure r
   (sid, child) <- warmup2 ctx inp0 ui
-  let gutter = scrollBarGutter (ctxHostProfile ctx) (ctxFontMetrics ctx) + scrollBarPageExtra
+  let gutter = scrollBarGutter (ctxFontMetrics ctx) + scrollBarPageExtra
   assertScrollGutter failed ctx sid child gutter
 
 runPanelGrowScrollGutterTest :: Context -> IORef Int -> IO ()
@@ -137,7 +137,7 @@ runPanelGrowScrollGutterTest ctx failed = do
                 _ <- replicateM 20 (label "scroll line")
                 pure r
   (sid, child) <- warmup2 ctx inp0 ui
-  let gutter = scrollBarGutter (ctxHostProfile ctx) (ctxFontMetrics ctx) + scrollBarListExtra
+  let gutter = scrollBarGutter (ctxFontMetrics ctx) + scrollBarListExtra
   assertScrollGutter failed ctx sid child gutter
 
 runScrollDamageTest :: Context -> IORef Int -> IO ()
@@ -1280,7 +1280,7 @@ run2DPadOverflowScrollsTest _ failed = do
       -- (the 500px child overflows), so it takes its lane out of the vertical
       -- viewport: view = innerH - laneH.
       let laneH =
-            scrollBarGutter (ctxHostProfile ctx) (ctxFontMetrics ctx)
+            scrollBarGutter (ctxFontMetrics ctx)
               + scrollBarListExtra
           wheelDown = inp0 {inputScroll = V2 0 50}
       replicateM_ 40 (runFrame ctx wheelDown ui)

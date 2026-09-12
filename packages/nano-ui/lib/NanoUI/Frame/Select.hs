@@ -46,7 +46,6 @@ import NanoUI.Context
   )
 import NanoUI.Draw (pushRect, pushRoundedRect, pushText, withClip)
 import NanoUI.Font (FontMetrics, centeredTextY, widgetContentInset)
-import NanoUI.Types (HostProfile, isCellHost)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), Key (..), foldInputKeys, inputKeys, inputMouseDown, inputMousePos, inputMousePressed)
 import NanoUI.Layout.Arena (NodeIdx, NodeType (NodeSelect, NodeTextInput), arenaCount, findNodeRevM, getNodeType, getOptions, getRect, getWidgetId)
@@ -60,7 +59,6 @@ import NanoUI.Frame.Chrome
   , pushMenuShadow
   , strokeStyledRect
   , overlayMenuStyle
-  , padDropText
   , textInputMenuItemPadX
   , textInputMenuOuterPad
   )
@@ -276,7 +274,7 @@ finalizeSelectPick ctx inp =
                       (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
                       st <- getStore ctx
                       let dropRect = ownerDropRect ctx nt wid st opts x y w h
-                          itemH = selectItemH (ctxHostProfile ctx) h
+                          itemH = selectItemH h
                       when (rectContains dropRect mouse) $ do
                         let key = intKey wid
                         case nt of
@@ -373,35 +371,26 @@ findSelectUnderMouse ctx mouse = do
     Nothing -> pure Nothing
     Just idx -> Just <$> getWidgetId (ctxNodeArena ctx) idx
 
-selectItemH :: HostProfile -> Float -> Float
-selectItemH host rh = if isCellHost host then max 1 rh else 28
+selectItemH :: Float -> Float
+selectItemH _rh = 28
 
-selectDropOuterPad :: HostProfile -> Float
-selectDropOuterPad host = if isCellHost host then 0 else textInputMenuOuterPad
-
-selectDropBg :: Style -> Color
-selectDropBg st = styleBg st
-
-selectDropActiveBg :: Style -> Color
-selectDropActiveBg st = styleActiveBg st
-
-selectDropHoverBg :: Style -> Color
-selectDropHoverBg st = styleHoverBg st
+selectDropOuterPad :: Float
+selectDropOuterPad = textInputMenuOuterPad
 
 -- | Vertical gap/margin between the select widget and its dropdown menu.
-selectDropGap :: HostProfile -> Float
-selectDropGap host = if isCellHost host then 0 else 4
+selectDropGap :: Float
+selectDropGap = 4
 
-selectDropRect :: HostProfile -> FontMetrics -> Float -> Float -> Float -> Float -> Int -> Rect
-selectDropRect host _fm x y w h nOpts =
-  let itemH = selectItemH host h
-      pad = selectDropOuterPad host
-      gap = selectDropGap host
+selectDropRect :: FontMetrics -> Float -> Float -> Float -> Float -> Int -> Rect
+selectDropRect _fm x y w h nOpts =
+  let itemH = selectItemH h
+      pad = selectDropOuterPad
+      gap = selectDropGap
    in Rect x (y + h + gap) w (itemH * fromIntegral nOpts + 2 * pad)
 
-selectDropItemY :: HostProfile -> FontMetrics -> Rect -> Float -> Int -> Float
-selectDropItemY host _fm dropRect itemH i =
-  rectY dropRect + selectDropOuterPad host + itemH * fromIntegral i
+selectDropItemY :: FontMetrics -> Rect -> Float -> Int -> Float
+selectDropItemY _fm dropRect itemH i =
+  rectY dropRect + selectDropOuterPad + itemH * fromIntegral i
 
 selectDropPickIndex :: Rect -> Float -> Int -> Float -> Maybe Int
 selectDropPickIndex dropRect itemH nOpts mouseY =
@@ -486,15 +475,14 @@ comboScrollGeom dropRect n vis win xOff contentW =
 -- covers the bottommost row. Must agree with 'comboScrollGeom' on when lanes
 -- appear (same inputs, same formulas).
 comboDropRect ::
-  HostProfile -> FontMetrics -> Float -> Float -> Float -> Float -> Int -> Int -> Float -> Rect
-comboDropRect host _fm x y w h nRows nTotal contentW =
-  let itemH = selectItemH host h
-      gap = selectDropGap host
-      gui = not (isCellHost host)
-      vScroll = gui && nTotal > nRows
+  FontMetrics -> Float -> Float -> Float -> Float -> Int -> Int -> Float -> Rect
+comboDropRect _fm x y w h nRows nTotal contentW =
+  let itemH = selectItemH h
+      gap = selectDropGap
+      vScroll = nTotal > nRows
       vLaneW = if vScroll then comboSbW else 0
       usableW = max 0 (w - vLaneW)
-      hScroll = gui && contentW > usableW && contentW > 0
+      hScroll = contentW > usableW && contentW > 0
    in Rect x (y + h + gap) w (fromIntegral nRows * itemH + (if hScroll then comboSbW else 0))
 
 -- | Row index at @mouseY@ for a combo dropdown, whose rows start flush at the
@@ -514,66 +502,31 @@ ownerDropRect ctx nt wid store opts x y w h = case nt of
     let key = intKey wid
         cN = IM.findWithDefault (length opts) (slotKey slotComboCount key) (storeInt store)
         cCW = IM.findWithDefault 0 (slotKey slotComboContentW key) (storeFloat store)
-     in comboDropRect (ctxHostProfile ctx) (ctxFontMetrics ctx) x y w h (length opts) cN cCW
-  _ -> selectDropRect (ctxHostProfile ctx) (ctxFontMetrics ctx) x y w h (length opts)
-
-terminalDropRow :: Int -> Int -> Int -> T.Text -> Color -> Color -> Rect -> (Rect, T.Text, Color, Color, Rect)
-terminalDropRow x y w txt fg bg clip =
-  (Rect (fromIntegral x) (fromIntegral y) (fromIntegral w) 1, txt, fg, bg, clip)
-
--- Title-bar rule and other column separators: glyphs, not a filled hairline.
-terminalSelectDropdownSpans ::
-  Int ->
-  Int ->
-  Int ->
-  [T.Text] ->
-  Int ->
-  Maybe Int ->
-  Color ->
-  Color ->
-  Color ->
-  Color ->
-  Rect ->
-  [(Rect, T.Text, Color, Color, Rect)]
-terminalSelectDropdownSpans rx ry wi opts picked hoverIdx fg dropBg dropActiveBg dropHoverBg clip =
-  let innerW = max 0 (wi - 1)
-      itemRow opt = T.singleton ' ' <> padDropText innerW opt
-      rowBg i =
-        if Just i == hoverIdx
-          then dropHoverBg
-          else
-            if i == picked
-              then dropActiveBg
-              else dropBg
-   in [ terminalDropRow rx (ry + i) wi rowText fg (rowBg i) clip
-      | (i, opt) <- zip [0 ..] opts
-      , let rowText = if T.null opt then T.replicate wi (T.singleton ' ') else itemRow opt
-      ]
+     in comboDropRect (ctxFontMetrics ctx) x y w h (length opts) cN cCW
+  _ -> selectDropRect (ctxFontMetrics ctx) x y w h (length opts)
 
 drawSelectOverlays :: Context -> Input -> IO ()
 drawSelectOverlays ctx inp = do
   theme <- readIORef (ctxTheme ctx)
-  let terminal = isCellHost (ctxHostProfile ctx)
   count <- arenaCount (ctxNodeArena ctx)
-  when (not terminal) $ do
-    let go idx
-          | idx >= count = pure ()
-          | otherwise = do
-              nt <- getNodeType (ctxNodeArena ctx) idx
-              mOwner <- openDropdownOwner ctx idx nt
-              case mOwner of
-                Nothing -> go (idx + 1)
-                Just wid -> do
-                  store <- getStore ctx
-                  allow <- widgetOverlayAllowed ctx wid
-                  if allow
-                    then do
-                      opts <- getOptions (ctxNodeArena ctx) idx
-                      (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-                      drawDropdownMenu ctx inp theme nt wid store opts x y w h
-                    else pure ()
-                  go (idx + 1)
-    go 0
+  let go idx
+        | idx >= count = pure ()
+        | otherwise = do
+            nt <- getNodeType (ctxNodeArena ctx) idx
+            mOwner <- openDropdownOwner ctx idx nt
+            case mOwner of
+              Nothing -> go (idx + 1)
+              Just wid -> do
+                store <- getStore ctx
+                allow <- widgetOverlayAllowed ctx wid
+                if allow
+                  then do
+                    opts <- getOptions (ctxNodeArena ctx) idx
+                    (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+                    drawDropdownMenu ctx inp theme nt wid store opts x y w h
+                  else pure ()
+                go (idx + 1)
+  go 0
 
 -- | Paint one owner's dropdown menu (select or combo). Selects keep the
 -- historical full-width rows; the combo list has no outer margin (rows start
@@ -585,7 +538,6 @@ drawDropdownMenu ::
 drawDropdownMenu ctx inp theme nt wid store opts x y w h = do
   let da = ctxDrawArena ctx
       fm = ctxFontMetrics ctx
-      host = ctxHostProfile ctx
       mouse = inputMousePos inp
       key = intKey wid
       isCombo = nt == NodeTextInput
@@ -599,7 +551,7 @@ drawDropdownMenu ctx inp theme nt wid store opts x y w h = do
       picked = case nt of
         NodeTextInput -> comboHi - comboWin
         _ -> IM.findWithDefault 0 key (storeInt store)
-      itemH = selectItemH host h
+      itemH = selectItemH h
       dropRect = ownerDropRect ctx nt wid store opts x y w h
       (inner, vSb, hSb, _) =
         if isCombo
@@ -608,12 +560,12 @@ drawDropdownMenu ctx inp theme nt wid store opts x y w h = do
       dropStyle = overlayMenuStyle theme
       r = styleCornerRadius dropStyle
   pushMenuShadow da dropRect r
-  fillStyledRect da False dropStyle dropRect
-  strokeStyledRect da False dropStyle (rectX dropRect) (rectY dropRect) (rectW dropRect) (rectH dropRect)
-  let (ix, _) = widgetContentInset host fm
+  fillStyledRect da dropStyle dropRect
+  strokeStyledRect da dropStyle (rectX dropRect) (rectY dropRect) (rectW dropRect) (rectH dropRect)
+  let (ix, _) = widgetContentInset fm
       -- Combo rows sit flush at the drop rect's top edge (no outer margin);
       -- select rows keep their padded layout.
-      rowY i = if isCombo then rectY dropRect + itemH * fromIntegral i else selectDropItemY host fm dropRect itemH i
+      rowY i = if isCombo then rectY dropRect + itemH * fromIntegral i else selectDropItemY fm dropRect itemH i
       paintRows =
         forM_ (zip ([0 ..] :: [Int]) opts) $ \(i, opt) -> do
           let iy = rowY i
@@ -630,15 +582,15 @@ drawDropdownMenu ctx inp theme nt wid store opts x y w h = do
             (_tw, th) <- ctxMeasureText ctx opt
             let tx0 = rectX dropRect + textInputMenuItemPadX + ix
                 tx = if isCombo then tx0 - comboX else tx0
-                ty = centeredTextY host fm iy itemH th
+                ty = centeredTextY fm iy itemH th
                 itemFg = if i == picked then themeAccent theme else styleFg dropStyle
             pushText da fm tx ty opt itemFg
   if isCombo
     then do
       withClip da inner paintRows
       let base = themeInput theme
-          trackCol = scrollBarTrackColor base theme False
-          thumbCol = scrollBarThumbColor base theme False
+          trackCol = scrollBarTrackColor base theme
+          thumbCol = scrollBarThumbColor base theme
           drawBar (track, thumb) = do
             pushRect da track trackCol
             pushRoundedRect da thumb 3 thumbCol
@@ -668,7 +620,7 @@ collectSelectDropdownSpans ctx inp = do
                     opts <- getOptions (ctxNodeArena ctx) idx
                     (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
                     let key = intKey wid
-                        itemH = selectItemH (ctxHostProfile ctx) h
+                        itemH = selectItemH h
                         dropRect = ownerDropRect ctx nt wid store opts x y w h
                         comboHi =
                           IM.findWithDefault (-1) (slotKey slotComboHighlight key) (storeInt store)
@@ -679,62 +631,48 @@ collectSelectDropdownSpans ctx inp = do
                           _ -> IM.findWithDefault 0 key (storeInt store)
                         dropStyle = overlayMenuStyle theme
                         fg = styleFg dropStyle
-                    if isCellHost (ctxHostProfile ctx)
-                      then do
-                        let wi = max 1 (round w)
-                            rx = round (rectX dropRect)
-                            ry = round (rectY dropRect)
-                            dropBg = selectDropBg dropStyle
-                            dropActiveBg = selectDropActiveBg dropStyle
-                            dropHoverBg = selectDropHoverBg dropStyle
-                            hoverIdx = selectDropPickIndex dropRect itemH (length opts) (v2Y mouse)
-                        rest <- go (idx + 1)
-                        pure
-                          ( terminalSelectDropdownSpans rx ry wi opts picked hoverIdx fg dropBg dropActiveBg dropHoverBg dropRect
-                              ++ rest
-                          )
-                      else do
-                        let (ix, _) = widgetContentInset (ctxHostProfile ctx) fm
-                            dropBg = styleBg dropStyle
-                            -- Combo rows sit flush at the drop rect's top
-                            -- edge (no outer margin); select rows keep
-                            -- their padded layout.
-                            rowY i = case nt of
-                              NodeTextInput -> rectY dropRect + itemH * fromIntegral i
-                              _ -> selectDropItemY (ctxHostProfile ctx) fm dropRect itemH i
-                        itemSpans <-
-                          forM (zip ([0 ..] :: [Int]) opts) $ \(i, opt) ->
-                            if T.null opt
-                              then pure []
-                              else do
-                                (tw, th) <- ctxMeasureText ctx opt
-                                let itemY = rowY i
-                                    itemRect = Rect (rectX dropRect) itemY (rectW dropRect) itemH
-                                    hovered = rectContains itemRect mouse
-                                    rowBg
-                                      | hovered = styleHoverBg dropStyle
-                                      | i == picked = styleActiveBg dropStyle
-                                      | otherwise = dropBg
-                                    ty = centeredTextY (ctxHostProfile ctx) fm itemY itemH th
-                                    tx0 = rectX dropRect + textInputMenuItemPadX + ix
-                                    tx = case nt of
-                                      NodeTextInput -> tx0 - comboX
-                                      _ -> tx0
-                                pure [(Rect tx ty tw th, opt, fg, rowBg, dropRect)]
-                        rest <- go (idx + 1)
-                        pure (concat itemSpans ++ rest)
+                    do
+                      let (ix, _) = widgetContentInset fm
+                          dropBg = styleBg dropStyle
+                          -- Combo rows sit flush at the drop rect's top
+                          -- edge (no outer margin); select rows keep
+                          -- their padded layout.
+                          rowY i = case nt of
+                            NodeTextInput -> rectY dropRect + itemH * fromIntegral i
+                            _ -> selectDropItemY fm dropRect itemH i
+                      itemSpans <-
+                        forM (zip ([0 ..] :: [Int]) opts) $ \(i, opt) ->
+                          if T.null opt
+                            then pure []
+                            else do
+                              (tw, th) <- ctxMeasureText ctx opt
+                              let itemY = rowY i
+                                  itemRect = Rect (rectX dropRect) itemY (rectW dropRect) itemH
+                                  hovered = rectContains itemRect mouse
+                                  rowBg
+                                    | hovered = styleHoverBg dropStyle
+                                    | i == picked = styleActiveBg dropStyle
+                                    | otherwise = dropBg
+                                  ty = centeredTextY fm itemY itemH th
+                                  tx0 = rectX dropRect + textInputMenuItemPadX + ix
+                                  tx = case nt of
+                                    NodeTextInput -> tx0 - comboX
+                                    _ -> tx0
+                              pure [(Rect tx ty tw th, opt, fg, rowBg, dropRect)]
+                      rest <- go (idx + 1)
+                      pure (concat itemSpans ++ rest)
   go 0
 
 
-selectTextClip :: HostProfile -> Float -> Float -> Float -> Float -> FontMetrics -> Rect
-selectTextClip host x y w h fm =
-  let (ix, _) = widgetContentInset host fm
+selectTextClip :: Float -> Float -> Float -> Float -> FontMetrics -> Rect
+selectTextClip x y w h fm =
+  let (ix, _) = widgetContentInset fm
    in Rect (x + ix) y (max 0 (w - ix - selectChevronReserve)) (max 0 h)
 
 tagSelectClippedSpans ::
-  HostProfile -> Rect -> Float -> Float -> Float -> Float -> FontMetrics -> [(Rect, T.Text, Color, Color)] -> [(Rect, T.Text, Color, Color, Rect)]
-tagSelectClippedSpans host parentClip x y w h fm spans =
-  let textClip = padTextClipRect (selectTextClip host x y w h fm)
+  Rect -> Float -> Float -> Float -> Float -> FontMetrics -> [(Rect, T.Text, Color, Color)] -> [(Rect, T.Text, Color, Color, Rect)]
+tagSelectClippedSpans parentClip x y w h fm spans =
+  let textClip = padTextClipRect (selectTextClip x y w h fm)
    in case rectIntersect parentClip textClip of
         Nothing -> []
         Just clip -> map (\(rect, txt, fg, bg) -> (rect, txt, fg, bg, clip)) spans

@@ -183,7 +183,6 @@ module NanoUI.Widgets
   , pulse
   , keepAnimating
   , sliderValueText
-  , textInputTerminalText
   , colorPickerLabelText
   , colorPickerCurrentLabel
   , colorPickerNewLabel
@@ -239,6 +238,8 @@ import NanoUI.Context
   , pointerBlockedByModal
   , registerFocusable
   , setStore
+  , writeStoreFloat
+  , writeStoreInt
   )
 import NanoUI.Widgets.Popup
   ( PopupAnchor (..)
@@ -284,8 +285,6 @@ import NanoUI.Font
   , sliderHandleSlack
   )
 import NanoUI.Frame.Hit (findNodeByWidgetId, scrollHitRect)
-import NanoUI.Types (isCellHost)
-import NanoUI.Icons (checkboxMark)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Key (..), inputChars, inputKeys, inputKeysNull, inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased, inputScroll)
 import NanoUI.Layout.Arena (NodeType (..), setOptions)
@@ -359,7 +358,6 @@ import NanoUI.WidgetText
   , colorPickerToHexA
   , sliderValueText
   , textInputFlagSearch
-  , textInputTerminalText
   )
 import NanoUI.Widgets.Animate
   ( animate
@@ -428,8 +426,6 @@ import NanoUI.Widgets.Node
   , addWidgetStyled
   , addWidgetWithOptions
   , setChanged
-  , setClicked
-  , setHovered
   )
 import NanoUI.Widgets.Overlay (modal, window)
 import NanoUI.Widgets.Radio
@@ -528,37 +524,28 @@ underline txt = void (labelWith fontUnderline txt)
 
 kv :: Ui :> es => Text -> Text -> Eff es ()
 kv k v = do
-  ctx <- askContext
   let
-    host = ctxHostProfile ctx
-    terminal = isCellHost host
-    rowLayout =
-      tight . gap (if terminal then 1 else 12) . alignMid . fillW $ defaultLayout
-    keyLayout =
-      if terminal then tight else tight . minW 88
+    rowLayout = tight . gap 12 . alignMid . fillW $ defaultLayout
+    keyLayout = tight . minW 88
   void $
     row' rowLayout $ do
       void (labelEx (keyLayout defaultLayout) k)
       void (labelEx (tight . fillW . alignEnd $ defaultLayout) (T.stripEnd v))
 
-kvMonoRowLayout, kvMonoRowTerminalLayout :: Layout
+kvMonoRowLayout :: Layout
 kvMonoRowLayout = tight . gap 12 . alignMid . fillW $ defaultLayout
-kvMonoRowTerminalLayout = tight . gap 1 . alignMid . fillW $ defaultLayout
 
-kvMonoKeyLayout, kvMonoKeyTerminalLayout :: Layout
+kvMonoKeyLayout :: Layout
 kvMonoKeyLayout = tight . minW 88 $ defaultLayout
-kvMonoKeyTerminalLayout = tight defaultLayout
 
 kvMonoValLayout :: Layout
 kvMonoValLayout = tight . fillW . alignEnd . fontMono $ defaultLayout
 
 kvMono :: Ui :> es => Text -> Text -> Eff es ()
 kvMono k v = do
-  ctx <- askContext
   let
-    terminal = isCellHost (ctxHostProfile ctx)
-    rLayout = if terminal then kvMonoRowTerminalLayout else kvMonoRowLayout
-    kLayout = if terminal then kvMonoKeyTerminalLayout else kvMonoKeyLayout
+    rLayout = kvMonoRowLayout
+    kLayout = kvMonoKeyLayout
     val = if T.isSuffixOf " " v then T.stripEnd v else v
   void $
     row' rLayout $ do
@@ -634,23 +621,27 @@ button_ :: Ui :> es => Text -> Eff es ()
 button_ txt = void (button' txt)
 
 -- | Button with custom layout and enabled state.
+{-# INLINE buttonLayoutEx #-}
 buttonLayoutEx :: (Ui :> es) => Layout -> Bool -> Text -> Eff es Response
 buttonLayoutEx layout enabled txt = do
   wid <- nextId
   ctx <- askContext
   uiIO $ registerFocusable ctx wid
-  let stored =
-        if isCellHost (ctxHostProfile ctx)
-          then "[ " <> txt <> " ]"
-          else txt
+  let stored = txt
   resp <- addWidget wid NodeButton stored 0 layout
   disabled <- uiIO (isDisabled ctx wid)
   keyClick <- keyActivated wid
   let
     active = enabled && not disabled
+    hovered' = active && respHovered resp
+    clicked' = active && (respClicked resp || keyClick)
+  -- Stateless idle buttons: when neither flag changes, return the response
+  -- unchanged instead of allocating a fresh record via setClicked/setHovered.
   pure
-    $ setClicked (active && (respClicked resp || keyClick))
-    $ setHovered (active && respHovered resp) resp
+    ( if rawRespHovered resp == hovered' && rawRespClicked resp == clicked'
+        then resp
+        else resp {rawRespHovered = hovered', rawRespClicked = clicked'}
+    )
 
 -- | Button with enabled/disabled flag and default layout.
 {-# INLINE buttonEx #-}
@@ -667,11 +658,7 @@ checkbox txt initial = do
   let
     key = intKey wid
     current = intBool (IM.findWithDefault (boolInt initial) key (storeInt store))
-    host = ctxHostProfile ctx
-    nodeText =
-      if isCellHost host
-        then checkboxMark (ctxIcons ctx) current <> txt
-        else txt
+    nodeText = txt
   resp <-
     addWidgetResp
       wid
@@ -685,10 +672,7 @@ checkbox txt initial = do
     clicked = respClicked resp || keyClick
     display = if clicked then not current else current
   when clicked $
-    uiIO $ do
-      st <- getStore ctx
-      setStore ctx (st {storeInt = IM.insert key (boolInt display) (storeInt st)})
-      markDirty ctx
+    uiIO $ writeStoreInt ctx wid key (boolInt display)
   pure (setChanged clicked resp, display)
 
 -- | Slider control with default layout ('fillW'). Returns @(response, currentValue)@.
@@ -722,7 +706,6 @@ sliderEx layout minV maxV initial = do
     key = intKey wid
     current = IM.findWithDefault initial key (storeFloat store)
     frac = if maxV > minV then (current - minV) / (maxV - minV) else 0
-    host = ctxHostProfile ctx
     fm = ctxFontMetrics ctx
     nodeText = ""
   resp <- addWidget wid NodeSlider nodeText frac layout
@@ -739,10 +722,8 @@ sliderEx layout minV maxV initial = do
     track0 =
       case mrect of
         Just (Rect x y w h) ->
-          let tr = sliderTrackBounds host fm x y w h
-           in if isCellHost host
-                then tr
-                else Rect (rectX tr) (rectY tr - sliderHandleSlack) (rectW tr) (rectH tr + 2 * sliderHandleSlack)
+          let tr = sliderTrackBounds fm x y w h
+           in Rect (rectX tr) (rectY tr - sliderHandleSlack) (rectW tr) (rectH tr + 2 * sliderHandleSlack)
         Nothing -> Rect 0 0 0 0
     track = if blocked || heldByOther then Rect 0 0 0 0 else track0
   (dragged, dragging) <- withKey ("drag" :: Text) (useDrag1D DragAxisX minV maxV current track)
@@ -759,7 +740,7 @@ sliderEx layout minV maxV initial = do
     baseVal = if dragging then dragged else current
     finalVal = max minV (min maxV (baseVal + fromIntegral navStep * step))
   when (finalVal /= current) $
-    uiIO $ setStore ctx (store {storeFloat = IM.insert key finalVal (storeFloat store)})
+    uiIO $ writeStoreFloat ctx wid key finalVal
   pure (setChanged (finalVal /= current) resp, finalVal)
 
 data TextInputConfig = TextInputConfig
@@ -1016,9 +997,9 @@ comboBox placeholder options initial = do
   let
     Rect rx ry rw rh = respRect resp
     mouse = inputMousePos inp
-    dropRect = comboDropRect (ctxHostProfile ctx) (ctxFontMetrics ctx) rx ry rw rh (min vis n) n contentW
+    dropRect = comboDropRect (ctxFontMetrics ctx) rx ry rw rh (min vis n) n contentW
     overDrop = isFocus && rw > 0 && rh > 0 && rectContains dropRect mouse
-    itemH = selectItemH (ctxHostProfile ctx) rh
+    itemH = selectItemH rh
     -- Hover highlights the row under the pointer (and makes it the Enter
     -- target); it never commits by itself. Rows on screen belong to the
     -- previous frame's window, so the hit test maps through storedWin.
@@ -1265,8 +1246,8 @@ selectEx modLayout caption options initial = do
     Rect rx ry rw rh = respRect resp
     mouse = inputMousePos inp
     onButton = rw > 0 && rh > 0 && rectContains (Rect rx ry rw rh) mouse
-    dropRect = selectDropRect (ctxHostProfile ctx) (ctxFontMetrics ctx) rx ry rw rh (length opts)
-    itemH = selectItemH (ctxHostProfile ctx) rh
+    dropRect = selectDropRect (ctxFontMetrics ctx) rx ry rw rh (length opts)
+    itemH = selectItemH rh
     onDrop = rw > 0 && rh > 0 && rectContains dropRect mouse
   when (onButton && inputMousePressed inp) $
     uiIO $ do

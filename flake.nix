@@ -33,7 +33,6 @@
           defaults.settings = {
             imports = [ haskell-flake.modules.haskellProjects.default ];
             nano-ui-sdl.flags.sdl = lib.mkDefault true;
-            nano-ui-term.flags.notcurses = lib.mkDefault true;
           };
 
           devShell = {
@@ -48,7 +47,6 @@
               extraPackages = _hpkgs: with pkgs; [
                 SDL3
                 SDL3_ttf
-                notcurses # provides notcurses-core.pc for cabal pkg-config
               ];
             };
           };

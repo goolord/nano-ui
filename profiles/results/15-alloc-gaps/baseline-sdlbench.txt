@@ -1,0 +1,10 @@
+All
+  ui/runFrame
+    small:  OK
+      5.15 μs ± 269 ns,  17 KB allocated,   7 B  copied,  10 MB peak memory
+    medium: OK
+      209  μs ±  20 μs, 471 KB allocated, 650 B  copied,  10 MB peak memory
+    large:  OK
+      440  μs ±  33 μs, 980 KB allocated, 2.2 KB copied,  14 MB peak memory
+
+All 3 tests passed (0.81s)

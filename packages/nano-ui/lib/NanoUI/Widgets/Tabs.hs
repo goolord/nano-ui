@@ -47,7 +47,7 @@ import NanoUI.Style
   , themeMuted
   , tight
   )
-import NanoUI.Types (Rect (..), isCellHost, rectContains, rectW, v2Y)
+import NanoUI.Types (Rect (..), rectContains, rectW, v2Y)
 import NanoUI.WidgetText (buttonFlagClose, buttonFlagTab)
 import NanoUI.Widgets.Behavior (useSelection)
 import NanoUI.Widgets.Combinators (buttonStyled)
@@ -118,7 +118,7 @@ mkTab = Tab
 -- | Header chrome height: one source for the strip bar, the scroller, and
 -- the paging arrows so they cannot drift apart.
 tabHeaderH :: Context -> Float
-tabHeaderH ctx = if isCellHost (ctxHostProfile ctx) then 1 else 28
+tabHeaderH _ctx = 28
 
 tabStrip ::
   (Eq a, Ui :> es) =>
@@ -197,15 +197,13 @@ renderScrollableHeaders ::
   Eff es (TabResponse a, a)
 renderScrollableHeaders ctx style hdrLay barLay groupId cur tabList = do
   scrollWid <- withKey ("tab-scroller" :: Text) nextId
-  let host = ctxHostProfile ctx
-      fm = ctxFontMetrics ctx
-      cell = isCellHost host
+  let fm = ctxFontMetrics ctx
       h = tabHeaderH ctx
       styleVal = fromEnum style
-      barPad = resolveLayoutPadding host fm (layoutPadding barLay)
-      arrowW = if cell then 1 else 26
-      leftGlyph = if cell then "<" else "\8249"
-      rightGlyph = if cell then ">" else "\8250"
+      barPad = resolveLayoutPadding fm (layoutPadding barLay)
+      arrowW = 26
+      leftGlyph = "\8249"
+      rightGlyph = "\8250"
       innerLay =
         defaultLayout
           { layoutDirection = Row
@@ -285,7 +283,7 @@ renderScrollableHeaders ctx style hdrLay barLay groupId cur tabList = do
         | maybe False respClicked leftResp, canLeft = max 0 (off - page)
         | maybe False respClicked rightResp, canRight = min maxOff (off + page)
         | overflow, notches /= 0, maxOff > 0 =
-            max 0 (min maxOff (off + fromIntegral notches * scrollLineFor host))
+            max 0 (min maxOff (off + fromIntegral notches * scrollLineFor))
         | overflow, off > maxOff + 0.5 = maxOff
         | otherwise = off
       finalOff

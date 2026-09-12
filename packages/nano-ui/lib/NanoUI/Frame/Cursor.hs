@@ -58,7 +58,7 @@ import NanoUI.Layout.Arena
   , isScrollNode
   )
 import NanoUI.Layout.Solve (scrollBarSlotOf)
-import NanoUI.Types (HostProfile, Rect (..), V2 (..), isCellHost, rectContains, v2X, v2Y)
+import NanoUI.Types (Rect (..), V2 (..), rectContains, v2X, v2Y)
 import NanoUI.WidgetText (isTableHeaderStyle)
 import NanoUI.Frame.Chrome (widgetNodeTypeTable)
 import NanoUI.Frame.Hit (findNodeByWidgetId, scrollHitRect, nodePointVisible)
@@ -138,7 +138,7 @@ selectDropdownCursorKind ctx inp = do
                 opts <- getOptions (ctxNodeArena ctx) idx
                 (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
                 let fm = ctxFontMetrics ctx
-                    dropRect = selectDropRect (ctxHostProfile ctx) fm x y w h (length opts)
+                    dropRect = selectDropRect fm x y w h (length opts)
                     inDrop = rectContains dropRect mouse
                 if inDrop && (open || dropPress)
                   then pure (Just UiCursorPointer)
@@ -191,9 +191,8 @@ scrollThumbHit ctx mouse = do
             then do
               wid <- getWidgetId (ctxNodeArena ctx) idx
               (fm, field, _lineH, contentW, contentH, _lanes) <- textAreaContentGeom ctx idx
-              let host = ctxHostProfile ctx
               V2 curX curY <- getScrollOffset2D ctx wid
-              let layouts = textAreaScrollBarLayouts host fm field contentW contentH curX curY
+              let layouts = textAreaScrollBarLayouts fm field contentW contentH curX curY
                   hitV = case tasbVertical layouts of
                     Just layout -> rectContains (sbThumb layout) mouse
                     Nothing -> False
@@ -215,7 +214,7 @@ scrollThumbHit ctx mouse = do
               slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
               let fm = ctxFontMetrics ctx
                   thumbHit axis contentSize axisOff =
-                    case scrollBarLayout (ctxHostProfile ctx) fm slot axis x y w h pad contentSize axisOff of
+                    case scrollBarLayout fm slot axis x y w h pad contentSize axisOff of
                       Just layout -> rectContains (sbThumb layout) mouse
                       Nothing -> False
               onThumb <-
@@ -226,7 +225,6 @@ scrollThumbHit ctx mouse = do
                     V2 offX offY <- getScrollOffset2D ctx wid
                     let (mV, mH) =
                           ScrollGeom.scrollBarLayouts2D
-                            (ctxHostProfile ctx)
                             fm
                             slot
                             cfg
@@ -282,7 +280,6 @@ cursorKindAt table ctx wid mouse inp
                           , cdcActive = active == wid
                           , cdcDisabled = disabled
                           , cdcTheme = theme
-                          , cdcHost = ctxHostProfile ctx
                           , cdcFont = ctxFontMetrics ctx
                           }
                   pure (cursorFn cdc)
@@ -343,11 +340,8 @@ sliderCursorKind ctx wid mouse inp = do
             case mrect of
               Nothing -> UiCursorDefault
               Just (Rect x y w h) ->
-                let tr = sliderTrackBounds (ctxHostProfile ctx) fm x y w h
-                    hitRect =
-                      if isCellHost (ctxHostProfile ctx)
-                        then tr
-                        else Rect (rectX tr) (rectY tr - sliderHandleSlack) (rectW tr) (rectH tr + 2 * sliderHandleSlack)
+                let tr = sliderTrackBounds fm x y w h
+                    hitRect = Rect (rectX tr) (rectY tr - sliderHandleSlack) (rectW tr) (rectH tr + 2 * sliderHandleSlack)
                  in grabDragKind (rectContains hitRect mouse) False inp
 
 textInputCursorKind :: Context -> WidgetId -> V2 -> IO UiCursorKind
@@ -374,14 +368,14 @@ textAreaCursorKind ctx wid mouse = do
       if onScroll
         then pure UiCursorDefault
         else
-          textFieldCursorKind ctx wid mouse $ \host fm x y w h ->
-            tagFieldRect (textAreaGeom host fm x y w h)
+          textFieldCursorKind ctx wid mouse $ \fm x y w h ->
+            tagFieldRect (textAreaGeom fm x y w h)
 
 textFieldCursorKind ::
   Context ->
   WidgetId ->
   V2 ->
-  (HostProfile -> FontMetrics -> Float -> Float -> Float -> Float -> Rect) ->
+  (FontMetrics -> Float -> Float -> Float -> Float -> Rect) ->
   IO UiCursorKind
 textFieldCursorKind ctx wid mouse fieldAt = do
   visible <- widgetVisibleAt ctx wid mouse
@@ -392,7 +386,7 @@ textFieldCursorKind ctx wid mouse fieldAt = do
       case mrect of
         Nothing -> pure UiCursorDefault
         Just (Rect x y w h) ->
-          let field = fieldAt (ctxHostProfile ctx) (ctxFontMetrics ctx) x y w h
+          let field = fieldAt (ctxFontMetrics ctx) x y w h
            in pure $
                 if rectContains field mouse
                   then UiCursorText

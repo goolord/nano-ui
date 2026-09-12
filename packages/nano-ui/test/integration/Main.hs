@@ -29,6 +29,8 @@ testSpecs =
   , TestSpec "fit-muted-width" False runFitMutedWidthTest
   , TestSpec "with-key" False runWithKeyTest
   , TestSpec "layout" False runLayoutTest
+  , TestSpec "layout-reuse" False runLayoutReuseTest
+  , TestSpec "deep-nesting" False runDeepNestingTest
   , TestSpec "row-panel-layout" False runRowPanelLayoutTest
   , TestSpec "draw" False runDrawTest
   , TestSpec "drawing" False runDrawingTest
@@ -79,7 +81,6 @@ testSpecs =
   , TestSpec "kv-multiline-height" True runKvMultilineHeightTest
   , TestSpec "button-hover-anim" False runButtonHoverAnimTest
   , TestSpec "button-press-release-hover" False runButtonPressReleaseHoverTest
-  , TestSpec "text-input-focus" False runTextInputFocusTest
   , TestSpec "idle" False runIdleTest
   , TestSpec "hover-skip" False runHoverSkipTest
   , TestSpec "hover-damage" False runHoverDamageTest
@@ -147,7 +148,6 @@ testSpecs =
   , TestSpec "animation-spring-dt" False runAnimationSpringDtTest
   , TestSpec "animation-spring-hold" False runAnimationSpringHoldTest
   , TestSpec "animation-spring-a" False runAnimationSpringATest
-  , TestSpec "ascii" False runAsciiTest
   , TestSpec "checkbox-toggle" False runCheckboxTest
   , TestSpec "checkbox-initial" False runCheckboxInitialTest
   , TestSpec "slider-store" True runSliderTest
@@ -173,24 +173,16 @@ testSpecs =
   , TestSpec "keyboard-radio" False runKeyboardRadioTest
   , TestSpec "keyboard-toggle" False runKeyboardToggleTest
   , TestSpec "keyboard-tab-header" False runKeyboardTabHeaderTest
-  , TestSpec "keyboard-color-picker-cell" False runKeyboardColorPickerCellTest
   , TestSpec "select-initial" False runSelectTest
   , TestSpec "select-enum" False runEnumSelectTest
   , TestSpec "select-dropdown" False runSelectDropdownTest
-  , TestSpec "select-dropdown-hover" False runSelectDropdownHoverTest
   , TestSpec "select-drop-flush" True runSelectDropFlushTest
   , TestSpec "select-pick-low" False runSelectPickLowTest
   , TestSpec "select-drag-to-select" False runSelectDragToSelectTest
   , TestSpec "select-keyboard" False runSelectKeyboardTest
   , TestSpec "tree-initial" False runTreeInitialTest
   , TestSpec "tree-select" False runTreeSelectTest
-  , TestSpec "tree-expand-damage" False runTreeExpandDamageTest
   , TestSpec "tree-keyboard" False runTreeKeyboardTest
-  , TestSpec "text-wrap" False runTextWrapTest
-  , TestSpec "text-wrap-width" False runTextWrapAssignedTest
-  , TestSpec "text-multiline" False runTextMultilineTest
-  , TestSpec "grid-layout" False runGridTest
-  , TestSpec "flex-shrink" False runFlexShrinkTest
   , TestSpec "grow-fits-window" False runGrowFitsWindowTest
   , TestSpec "grow-equal-split" False runGrowEqualSplitTest
   , TestSpec "grow-content-floor" False runGrowContentFloorTest
@@ -200,7 +192,6 @@ testSpecs =
   , TestSpec "percent-gap-shrink" False runPercentGapShrinkTest
   , TestSpec "aspect-layout" False runAspectLayoutTest
   , TestSpec "label-align-end" False runLabelAlignEndTest
-  , TestSpec "grow-wrap-sibling" False runGrowWrapPushesSiblingTest
   , TestSpec "controls-tab-height" True runControlsTabHeightTest
   , TestSpec "color-picker-preview" True runColorPickerPreviewTest
   , TestSpec "color-picker-commit" True runColorPickerCommitTest
@@ -209,7 +200,6 @@ testSpecs =
   , TestSpec "color-picker-rgba" True runColorPickerRgbaTest
   , TestSpec "color-picker-edit" True runColorPickerEditTest
   , TestSpec "scroll-grow-click" True runScrollButtonClickSdlTest
-  , TestSpec "icon-set" False runIconSetTest
   , TestSpec "scroll-bar-gutter" False runScrollBarGutterTest
   , TestSpec "scroll-bar-gutter-grow" True runGrowScrollGutterTest
   , TestSpec "column-card-wrap" True runColumnCardWrapTest
@@ -230,8 +220,6 @@ testSpecs =
   , TestSpec "panel-body-swap-damage" False runPanelBodySwapDamageTest
     
   , TestSpec "host-slot" False runHostSlotTest
-  , TestSpec "host-profile-gap" False runHostProfileGapTest
-  , TestSpec "host-profile-measure" False runHostProfileMeasureTest
   , TestSpec "compact-host" False runCompactHostTest
   , TestSpec "embed-state" False runEmbedStateTest
   , TestSpec "reduce-messages" False runReduceMessagesTest

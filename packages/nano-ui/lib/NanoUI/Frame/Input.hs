@@ -38,7 +38,6 @@ import NanoUI.Context
   , setStore
   , startAnimation
   )
-import NanoUI.Types (isCellHost)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input
   ( Input (..)
@@ -141,13 +140,11 @@ refreshHover ctx inp = do
   newHot <- probeHotId ctx (inputMousePos inp)
   writeIORef (ctxHotId ctx) newHot
   writeIORef (ctxLastHotId ctx) newHot
-  let terminal = isCellHost (ctxHostProfile ctx)
   when (prevHot /= newHot) $ do
-    unless terminal $ do
-      prevMenu <- isMenuButtonWidget ctx prevHot
-      newMenu <- isMenuButtonWidget ctx newHot
-      when (hashWidgetId prevHot /= 0 && not prevMenu) $ startAnimation ctx prevHot 1 0 0.12
-      when (hashWidgetId newHot /= 0 && not newMenu) $ startAnimation ctx newHot 0 1 0.12
+    prevMenu <- isMenuButtonWidget ctx prevHot
+    newMenu <- isMenuButtonWidget ctx newHot
+    when (hashWidgetId prevHot /= 0 && not prevMenu) $ startAnimation ctx prevHot 1 0 0.12
+    when (hashWidgetId newHot /= 0 && not newMenu) $ startAnimation ctx newHot 0 1 0.12
 
 -- Same walk as refreshHover: later nodes paint first, earlier widget hits win.
 finalizePointerPress :: Context -> Input -> IO ()
@@ -275,8 +272,7 @@ finalizePointerRelease ctx inp =
                     _ -> pure ()
             writeIORef (ctxActiveId ctx) (WidgetId 0)
             when releasedOver $
-              unless (isCellHost (ctxHostProfile ctx)) $
-                setAnimationValue ctx active 1
+              setAnimationValue ctx active 1
 
 postsLayoutClick :: NodeType -> Bool
 postsLayoutClick nt =

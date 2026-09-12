@@ -46,7 +46,7 @@ import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
 import NanoUI.Store (WidgetStore (..), slotDrag, slotDragW, slotKey)
 import NanoUI.Style (AlignX (..), AlignY (..), Direction (..), FontVariant (..), Layout (..), Padding (..), Sizing (..), defaultLayout, fillH, fillW, tight)
 import Data.Bits ((.|.), shiftL)
-import NanoUI.Types (Rect (..), isCellHost, rectH, rectW, rectY, v2X, V2 (..))
+import NanoUI.Types (Rect (..), rectH, rectW, rectY, v2X, V2 (..))
 import NanoUI.WidgetText (buttonFlagTable, tableHeaderLabel, tableSortReserve)
 import NanoUI.Widgets.Behavior (useReorder)
 import NanoUI.Widgets.Combinators
@@ -213,10 +213,8 @@ tableSplitPanes fillInner tableWid vWid hWid rowMinH frozenIdx unfrozenIdx pinne
       pure hs
   unfrozenPane idxs = do
     ctx <- askContext
-    let host = ctxHostProfile ctx
-        fm = ctxFontMetrics ctx
-        terminal = isCellHost host
-        vGutter = if terminal then 1 else scrollBarGutter host fm + scrollBarListExtra
+    let fm = ctxFontMetrics ctx
+        vGutter = scrollBarGutter fm + scrollBarListExtra
     mPrevV <- uiIO (getPrevRect ctx vWid)
     let totalH = fromIntegral (length scrollRows) * rowMinH
         -- Prev-frame decision, one frame behind the body scroller's live 2D
@@ -364,18 +362,16 @@ isNumericCell txt =
 
 columnMetrics :: Context -> Colonnade Headed row Text -> [row] -> ([Float], [Bool])
 columnMetrics ctx cols rows = runST $ do
-  let host = ctxHostProfile ctx
-      fm = ctxFontMetrics ctx
+  let fm = ctxFontMetrics ctx
       mono = ctxMonoFontMetrics ctx
-      terminal = isCellHost host
-      (ix, _) = tableCellInset host fm
+      (ix, _) = tableCellInset fm
       cellPadX = 2 * ix
       headerPadX = cellPadX
       hdrs = columnHeaders cols
       numCols = length hdrs
   if null rows || numCols == 0
     then do
-      let widths = [textDisplayWidth host fm (h <> tableSortReserve terminal) + headerPadX | h <- hdrs]
+      let widths = [textDisplayWidth fm (h <> tableSortReserve) + headerPadX | h <- hdrs]
       pure (widths, replicate numCols False)
     else do
       let !encodedRows = V.fromList [Encode.row id cols r | r <- rows]
@@ -389,11 +385,11 @@ columnMetrics ctx cols rows = runST $ do
         ( \c hdr -> do
             isNum <- MV.read numMut c
             let !fontM = if isNum then mono else fm
-                !hdrW = textDisplayWidth host fm (hdr <> tableSortReserve terminal) + headerPadX
+                !hdrW = textDisplayWidth fm (hdr <> tableSortReserve) + headerPadX
                 !maxCell =
                   V.foldl'
                     ( \acc v ->
-                        max acc (textDisplayWidth host fontM (v V.! c) + cellPadX)
+                        max acc (textDisplayWidth fontM (v V.! c) + cellPadX)
                     )
                     minColW
                     encodedRows
@@ -504,7 +500,6 @@ writeColW ctx key ws = do
 data TableFinish = TableFinish
   { tfN :: Int
   , tfStateKey :: Int
-  , tfTerminal :: Bool
   , tfVis :: [Int]
   , tfOrder0 :: [Int]
   , tfHidden0 :: IS.IntSet
@@ -521,13 +516,13 @@ data TableFinish = TableFinish
   }
 
 finishTable :: (Ui :> es) => TableFinish -> Eff es TableResponse
-finishTable TableFinish{tfN = n, tfStateKey = stateKey, tfTerminal = terminal, tfVis = vis, tfOrder0 = order0, tfHidden0 = hidden0, tfDrag0 = drag0, tfDragX0 = dragX0, tfDragW0 = dragW0, tfWidths0 = widths0, tfWidths1 = widths1, tfSort0 = sort0, tfHeaderPairs = headerPairs, tfShowAllResp = showAllResp, tfResolvedW = resolvedW, tfBodyWid = bodyWid} = do
+finishTable TableFinish{tfN = n, tfStateKey = stateKey, tfVis = vis, tfOrder0 = order0, tfHidden0 = hidden0, tfDrag0 = drag0, tfDragX0 = dragX0, tfDragW0 = dragW0, tfWidths0 = widths0, tfWidths1 = widths1, tfSort0 = sort0, tfHeaderPairs = headerPairs, tfShowAllResp = showAllResp, tfResolvedW = resolvedW, tfBodyWid = bodyWid} = do
   ctx <- askContext
   inp <- askInput
   mBodyRect <- uiIO (getPrevRect ctx bodyWid)
   let mouse = inputMousePos inp
       mx = v2X mouse
-      edgePad = if terminal then 1 else 4
+      edgePad = 4
       -- Resize grab zone spans the header band plus the body scroller: a
       -- column boundary is resizable anywhere down the table, not just on
       -- the header cell. The bottom anchor is the body scroller's rect
@@ -636,9 +631,7 @@ tableCfg cfg outerLayout key cols rows curSort =
     ctx <- askContext
     inp <- askInput
     st0 <- uiIO (getStore ctx)
-    let host = ctxHostProfile ctx
-        terminal = isCellHost host
-        (!contentWs, !numeric) = columnMetrics ctx cols rows
+    let (!contentWs, !numeric) = columnMetrics ctx cols rows
         sizes = tableColSizes cfg
         order0 = normalizeOrder n (IM.findWithDefault [0 .. n - 1] stateKey (storeIntList st0))
         hidden0 = IM.findWithDefault (tableHidden cfg) stateKey (storeIntSet st0)
@@ -667,7 +660,7 @@ tableCfg cfg outerLayout key cols rows curSort =
         pinned = take freezeR sorted
         scrollRows = drop freezeR sorted
         hdrs = columnHeaders cols
-        rowMinH = if terminal then 1 else 28
+        rowMinH = 28
         fillInner = tableFillInner cfg outerLayout
         mins = [resolvedWidth sizes contentWs widths1 i | i <- [0 .. n - 1]]
         colBoxes = V.fromList [colBoxLayout (colSizing fillInner hasStretch sizes contentWs widths1 i) (listAt mins i minColW) | i <- [0 .. n - 1]]
@@ -686,7 +679,7 @@ tableCfg cfg outerLayout key cols rows curSort =
           ]
         renderHeader i =
           let !lay = if i < V.length cellLayouts then cellLayouts V.! i else tight defaultLayout
-           in buttonStyled (tableHeaderLabel terminal (listAt hdrs i T.empty)) (if sortColIndex sort0 == i then 1 else 0) lay (sortMarkStyle sort0 i .|. buttonFlagTable)
+           in buttonStyled (tableHeaderLabel (listAt hdrs i T.empty)) (if sortColIndex sort0 == i then 1 else 0) lay (sortMarkStyle sort0 i .|. buttonFlagTable)
         renderCell ri r =
           let !rowCells = Encode.row id cols r
            in \i ->
@@ -704,7 +697,6 @@ tableCfg cfg outerLayout key cols rows curSort =
         TableFinish
           { tfN = n
           , tfStateKey = stateKey
-          , tfTerminal = terminal
           , tfVis = vis
           , tfOrder0 = order0
           , tfHidden0 = hidden0

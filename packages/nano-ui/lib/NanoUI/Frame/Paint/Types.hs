@@ -17,7 +17,6 @@ import NanoUI.Context
   )
 import NanoUI.Draw (DrawArena)
 import NanoUI.Font (FontMetrics)
-import NanoUI.Types (HostProfile, isCellHost)
 import NanoUI.Layout.Arena
   ( NodeArena
   , NodeIdx
@@ -48,8 +47,6 @@ data PaintEnv = PaintEnv
   , peTheme :: Theme
   , peFontMetrics :: FontMetrics
   , peMonoMetrics :: FontMetrics
-  , peHost :: HostProfile
-  , peTerminal :: Bool
   , peOccluders :: [Rect]
   , peHasOccluders :: Bool
   }
@@ -67,8 +64,6 @@ buildPaintEnv ctx occluders = do
     , peTheme = theme
     , peFontMetrics = ctxFontMetrics ctx
     , peMonoMetrics = ctxMonoFontMetrics ctx
-    , peHost = ctxHostProfile ctx
-    , peTerminal = isCellHost (ctxHostProfile ctx)
     , peOccluders = occluders
     , peHasOccluders = not (null occluders)
     }
@@ -95,6 +90,7 @@ popupPanelRect ctx = go
 -- to the host font resolver. The second component says whether the resolver
 -- returned a native style-driven face (which suppresses weight/style tweaks
 -- that the renderer applies itself).
+{-# INLINE resolveNodeFont #-}
 resolveNodeFont :: PaintEnv -> Float -> FontWeight -> FontStyle -> FontVariant -> IO (FontMetrics, Bool)
 resolveNodeFont env fontSizeVal fweight fstyle fvar
   | isBaseSans = pure (peFontMetrics env, False)

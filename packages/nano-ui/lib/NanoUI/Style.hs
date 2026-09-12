@@ -550,14 +550,14 @@ separatorTrackColor base theme =
 -- on (the scroller well / floating window body) toward the separator colour, so
 -- the lane reads against that surface on every theme. The thumb stays a
 -- translucent foreground mix so the track shows through it.
-scrollBarTrackColor :: Style -> Theme -> Bool -> Color
-scrollBarTrackColor base theme _terminal =
+scrollBarTrackColor :: Style -> Theme -> Color
+scrollBarTrackColor base theme =
   separatorTrackColor base theme
 
-scrollBarThumbColor :: Style -> Theme -> Bool -> Color
-scrollBarThumbColor base theme terminal =
+scrollBarThumbColor :: Style -> Theme -> Color
+scrollBarThumbColor base theme =
   let solid = lerpColor (themeSeparator theme) (styleFg base) 0.58
-   in if terminal then solid else fadeAlpha solid 130
+   in fadeAlpha solid 130
 
 -- | Replaces the alpha channel of a color.
 fadeAlpha :: Color -> Word8 -> Color

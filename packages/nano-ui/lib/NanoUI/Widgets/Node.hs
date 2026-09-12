@@ -271,6 +271,7 @@ addSizingLeafNode ctx inp wid nt dir wSiz hSiz = do
   setWidgetId (ctxNodeArena ctx) idx wid
   resolveInteraction ctx inp wid
 
+{-# INLINE addWidget #-}
 addWidget ::
   Ui :> es =>
   WidgetId
@@ -281,6 +282,7 @@ addWidget ::
   -> Eff es Response
 addWidget wid nt txt value layout = addWidgetResp wid nt txt value layout Nothing
 
+{-# INLINE addWidgetResp #-}
 addWidgetResp ::
   Ui :> es =>
   WidgetId
@@ -293,6 +295,7 @@ addWidgetResp ::
 addWidgetResp wid nt txt value layout mResp =
   addWidgetStyled wid nt txt value layout 0 mResp
 
+{-# INLINE addWidgetStyled #-}
 addWidgetStyled ::
   Ui :> es =>
   WidgetId
@@ -345,6 +348,7 @@ addWidgetWithOptions wid nt txt opts value layout = do
     setWidgetId (ctxNodeArena ctx) idx wid
     resolveInteraction ctx inp wid
 
+{-# INLINE resolveInteraction #-}
 resolveInteraction :: Context -> Input -> WidgetId -> IO Response
 resolveInteraction ctx inp wid = do
   mrect <- scrollHitRect ctx wid

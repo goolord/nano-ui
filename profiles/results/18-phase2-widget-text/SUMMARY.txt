@@ -1,0 +1,31 @@
+Phase 2 (part 1): cache widget-label placement across frames
+date: 2026-09-12 (Linux x86_64, GHC 9.14.1, -O2 -mavx2, RTS -N1 -A64m -T -I0)
+
+Problem: paintWidgetForeground called widgetTextPlacements every frame for
+every button/checkbox/radio/select/tree row, building a fresh
+[(Text,Float,Float,Float,Float)] list even when text, style, font and rect
+were unchanged. Profiling attributed ~12% of frame allocation to this site.
+
+Changes:
+- New WidgetTextCacheEntry + Context.ctxWidgetTextCache (IntMap keyed by node
+  slot). Key: node type, style idx, font size, display text, rect.
+- widgetTextPlacements now serves cacheable labels (button/select/tree/
+  checkbox/radio) from the cache; data-dependent nodes (text input/area,
+  colour picker, slider) still compute.
+- Cache cleared by clearMeasureCache and setTheme, alongside the span cache,
+  so font/DPI/theme changes cannot serve stale geometry.
+
+Measured:
+  ui/runFrame  medium 455 -> 406 KB (-10.8%)
+               large  945 -> 844 KB (-10.7%)
+  SDL demo 100x Button   534.9 -> 484.3 KB (-9.5%)
+           100x Checkbox 636.8 -> 607.1 KB (-4.7%)
+           100x Radio    2090.3 -> 1964.7 KB (-6.0%)
+           100x Select    682.0 -> 646.9 KB (-5.1%)
+           Tree 50 items  401.6 -> 373.5 KB (-7.0%)
+           Full DemoUi runFrame 509.7 -> 502.4 KB (-1.4%)
+
+Verification: cabal test all PASS; glyph-lookup gate PASS.
+
+Still open in Phase 2: direct-to-SpanArena producers, RGFW direct traversal,
+demo FPS formatting cache.

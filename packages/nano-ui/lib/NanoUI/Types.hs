@@ -37,13 +37,10 @@ module NanoUI.Types
   , haloDamageSlop
   , resolveDamageRect
   , damageIsEmpty
-  , sliderBarCells
   , v2Add
   , v2Sub
   , PopupAnchor (..)
   , PopupPlacement (..)
-  , HostProfile (..)
-  , isCellHost
   ) where
 
 import Data.Bits (shiftL, shiftR, (.&.), (.|.))
@@ -342,10 +339,6 @@ resolveDamageRect bounds r =
     DamageUnion a b -> rectUnion (resolveDamageRect a r) (resolveDamageRect b r)
     DamageNone -> Rect 0 0 0 0
 
--- Terminal inline slider bar width in cells (matches WidgetText.sliderText).
-sliderBarCells :: Int
-sliderBarCells = 12
-
 {-# INLINE v2Add #-}
 v2Add :: V2 -> V2 -> V2
 v2Add (V2 x1 y1) (V2 x2 y2) = V2 (x1 + x2) (y1 + y2)
@@ -367,14 +360,3 @@ data PopupPlacement
   | PlacementAtCursor
   | PlacementAuto
   deriving (Eq, Show)
-
--- Pixel hosts (SDL, headless). Cell hosts (terminal).
-data HostProfile
-  = PixelHost
-  | CellHost
-  deriving (Eq, Show)
-
-{-# INLINE isCellHost #-}
-isCellHost :: HostProfile -> Bool
-isCellHost CellHost = True
-isCellHost PixelHost = False

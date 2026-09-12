@@ -15,6 +15,7 @@ module NanoUI.Context
   , DrawingEntry (..)
   , DrawFitCache (..)
   , SpanCacheEntry (..)
+  , WidgetTextCacheEntry (..)
   , InteractionState (..)
   , initialInteractionState
   , initialDamageState
@@ -82,6 +83,13 @@ module NanoUI.Context
   , setStore
   , getStoreBool
   , setStoreBool
+  , writeStoreInt
+  , writeStoreIntFlag
+  , writeStoreFloat
+  , writeStoreFloatFlag
+  , writeStoreText
+  , writeStoreTextFlag
+  , writeStoreBool
   , isDisabled
   , getScrollOffset
   , setScrollOffset
@@ -107,12 +115,11 @@ module NanoUI.Context
   , withFontResolver
   , wrapMeasureCache
   , clearMeasureCache
+  , hasCustomLayoutInputs
   , withExternalText
   , withTheme
   , setTheme
   , getTheme
-  , withIcons
-  , withHostProfile
   , withClipboard
   , enableMeasureCache
   , setHost
@@ -247,6 +254,7 @@ import NanoUI.Context.Types
   , DrawingEntry (..)
   , PopupConfig (..)
   , SpanCacheEntry (..)
+  , WidgetTextCacheEntry (..)
   , FrameMsg (..)
   , InteractionState (..)
   , MeasureCacheKey
@@ -275,8 +283,6 @@ import NanoUI.Draw (DrawingBuild, DrawOp, newDrawArena, shiftDrawOp)
 import NanoUI.Draw qualified as Draw
 import NanoUI.Font (FontMetrics, fmLineHeight, measureText, monospaceMetrics, scaleFontMetrics)
 import NanoUI.Frame.SpanArena (newSpanArena)
-import NanoUI.Types (HostProfile (..), isCellHost)
-import NanoUI.Icons (IconSet, asciiIcons, iconsFor)
 import NanoUI.Frame.Scroll.Geometry
   ( ScrollConfig (..)
   , decodeScrollConfig
@@ -298,6 +304,7 @@ import NanoUI.Store
   , emptyWidgetStore
   , intBool
   , isSelectOpen
+  , ptrEq
   , setSelectOpen
   , slotAnchor
   , slotCursor
@@ -735,15 +742,75 @@ setStore ctx store = do
     markDirty ctx
 
 diffKeys :: Eq a => IntMap a -> IntMap a -> [Int]
-diffKeys old new =
-  IM.keys
-    ( IM.mergeWithKey
-        (\_ a b -> if a == b then Nothing else Just ())
-        (IM.map (const ()))
-        (IM.map (const ()))
-        old
-        new
-    )
+diffKeys old new
+  -- Unchanged maps keep their identity through a record update; skip the
+  -- whole merge when the caller only rebuilt a different field.
+  | ptrEq old new = []
+  | otherwise =
+      IM.keys
+        ( IM.mergeWithKey
+            (\_ a b -> if a == b then Nothing else Just ())
+            (IM.map (const ()))
+            (IM.map (const ()))
+            old
+            new
+        )
+
+-- | Targeted single-slot write: compares only the target slot, updates one map
+-- field, damages the owning widget and wakes the loop. Unlike 'setStore' it
+-- never diffs the whole store, and an equal write is a no-op. The 'Bool'
+-- variant bumps the mirror generation for hooks whose write must re-run the UI.
+{-# INLINE writeStoreInt #-}
+writeStoreInt :: Context -> WidgetId -> Int -> Int -> IO ()
+writeStoreInt = writeStoreIntFlag False
+
+{-# INLINE writeStoreIntFlag #-}
+writeStoreIntFlag :: Bool -> Context -> WidgetId -> Int -> Int -> IO ()
+writeStoreIntFlag bump ctx owner k v = do
+  st <- readIORef (ctxStore ctx)
+  case IM.lookup k (storeInt st) of
+    Just old | old == v -> pure ()
+    _ -> do
+      let st' = st {storeInt = IM.insert k v (storeInt st)}
+      writeIORef (ctxStore ctx) $! if bump then bumpMirror st' else st'
+      damageWidget ctx owner DamageSelf
+      markDirty ctx
+
+{-# INLINE writeStoreFloat #-}
+writeStoreFloat :: Context -> WidgetId -> Int -> Float -> IO ()
+writeStoreFloat = writeStoreFloatFlag False
+
+{-# INLINE writeStoreFloatFlag #-}
+writeStoreFloatFlag :: Bool -> Context -> WidgetId -> Int -> Float -> IO ()
+writeStoreFloatFlag bump ctx owner k v = do
+  st <- readIORef (ctxStore ctx)
+  case IM.lookup k (storeFloat st) of
+    Just old | old == v -> pure ()
+    _ -> do
+      let st' = st {storeFloat = IM.insert k v (storeFloat st)}
+      writeIORef (ctxStore ctx) $! if bump then bumpMirror st' else st'
+      damageWidget ctx owner DamageSelf
+      markDirty ctx
+
+{-# INLINE writeStoreText #-}
+writeStoreText :: Context -> WidgetId -> Int -> Text -> IO ()
+writeStoreText = writeStoreTextFlag False
+
+{-# INLINE writeStoreTextFlag #-}
+writeStoreTextFlag :: Bool -> Context -> WidgetId -> Int -> Text -> IO ()
+writeStoreTextFlag bump ctx owner k v = do
+  st <- readIORef (ctxStore ctx)
+  case IM.lookup k (storeText st) of
+    Just old | old == v -> pure ()
+    _ -> do
+      let st' = st {storeText = IM.insert k v (storeText st)}
+      writeIORef (ctxStore ctx) $! if bump then bumpMirror st' else st'
+      damageWidget ctx owner DamageSelf
+      markDirty ctx
+
+{-# INLINE writeStoreBool #-}
+writeStoreBool :: Context -> WidgetId -> Bool -> IO ()
+writeStoreBool ctx owner v = writeStoreInt ctx owner (intKey owner) (boolInt v)
 
 {-# INLINE getStoreBool #-}
 getStoreBool :: Context -> WidgetId -> Bool -> IO Bool
@@ -754,8 +821,7 @@ getStoreBool ctx wid def = do
 {-# INLINE setStoreBool #-}
 setStoreBool :: Context -> WidgetId -> Bool -> IO ()
 setStoreBool ctx wid val = do
-  st <- getStore ctx
-  setStore ctx (st {storeInt = IM.insert (intKey wid) (boolInt val) (storeInt st)})
+  writeStoreBool ctx wid val
   markDirty ctx
 
 {-# INLINE isDisabled #-}
@@ -990,7 +1056,7 @@ defaultResolveFont :: Context -> Float -> FontWeight -> FontStyle -> FontVariant
 defaultResolveFont ctx sz _w _st var =
   let baseFm = if var == FontMono then ctxMonoFontMetrics ctx else ctxFontMetrics ctx
       scale =
-        if not (isCellHost (ctxHostProfile ctx)) && sz > 0 && fmLineHeight baseFm > 0
+        if sz > 0 && fmLineHeight baseFm > 0
           then sz / fmLineHeight baseFm
           else 1.0
    in pure (if scale /= 1.0 then scaleFontMetrics scale baseFm else baseFm, False)
@@ -999,13 +1065,13 @@ defaultResolveMeasure :: Context -> Float -> FontWeight -> FontStyle -> FontVari
 defaultResolveMeasure ctx sz _w _st var txt =
   let baseFm = if var == FontMono then ctxMonoFontMetrics ctx else ctxFontMetrics ctx
       scale =
-        if not (isCellHost (ctxHostProfile ctx)) && sz > 0 && fmLineHeight baseFm > 0
+        if sz > 0 && fmLineHeight baseFm > 0
           then sz / fmLineHeight baseFm
           else 1.0
    in if var == FontMono
         then do
           let textFm = if scale /= 1.0 then scaleFontMetrics scale baseFm else baseFm
-          pure (measureText (ctxHostProfile ctx) textFm txt)
+          pure (measureText textFm txt)
         else if scale /= 1.0
           then do
             (w, h) <- ctxMeasureText ctx txt
@@ -1025,9 +1091,7 @@ withFontMetrics ctx fm =
   let ctx' =
         ctx
           { ctxFontMetrics = fm
-          , ctxMonoFontMetrics = if isCellHost (ctxHostProfile ctx) then fm else ctxMonoFontMetrics ctx
-          , ctxMeasureText = \txt ->
-              pure (measureText (ctxHostProfile ctx) fm txt)
+          , ctxMeasureText = \txt -> pure (measureText fm txt)
           }
    in ctx'
         { ctxResolveFont = defaultResolveFont ctx'
@@ -1075,9 +1139,19 @@ wrapMeasureCache scale ctx measure =
 clearMeasureCache :: Context -> IO ()
 clearMeasureCache ctx = do
   writeIORef (ctxSpanCache ctx) IM.empty
+  writeIORef (ctxWidgetTextCache ctx) IM.empty
+  writeIORef (ctxLayoutCache ctx) Nothing
+  modifyIORef' (ctxMetricGen ctx) (+ 1)
   case ctxMeasureCache ctx of
     Just ref -> writeIORef ref HashMap.empty
     Nothing -> pure ()
+
+-- | True when any node has a custom measure function, whose output is not
+-- captured by the arena descriptor comparison, so whole-layout reuse must be
+-- disabled for the frame.
+hasCustomLayoutInputs :: Context -> IO Bool
+hasCustomLayoutInputs ctx =
+  not . IM.null . dcsCustomMeasures <$> readIORef (ctxDrawingCache ctx)
 
 withExternalText :: Context -> Bool -> Context
 withExternalText ctx ext = ctx {ctxExternalText = ext}
@@ -1093,22 +1167,14 @@ setTheme ctx th = do
   when (cur /= th) $ do
     writeIORef (ctxTheme ctx) th
     writeIORef (ctxSpanCache ctx) IM.empty
+    writeIORef (ctxWidgetTextCache ctx) IM.empty
+    writeIORef (ctxLayoutCache ctx) Nothing
+    modifyIORef' (ctxMetricGen ctx) (+ 1)
     damageFull ctx
     markDirty ctx
 
 getTheme :: Context -> IO Theme
 getTheme ctx = readIORef (ctxTheme ctx)
-
-withIcons :: Context -> IconSet -> Context
-withIcons ctx iset = ctx {ctxIcons = iconsFor iset}
-
-withHostProfile :: Context -> HostProfile -> Context
-withHostProfile ctx prof =
-  let ctx' = ctx {ctxHostProfile = prof}
-   in ctx'
-        { ctxResolveFont = defaultResolveFont ctx'
-        , ctxResolveMeasure = defaultResolveMeasure ctx'
-        }
 
 withClipboard :: Context -> IO (Maybe Text) -> (Text -> IO Bool) -> Context
 withClipboard ctx getter setter = ctx {ctxClipboardGet = getter, ctxClipboardSet = setter}
@@ -1188,6 +1254,9 @@ newContext = do
   ctxDefaultLayout <- newIORef defaultLayout
   ctxTheme <- newIORef defaultTheme
   ctxSpanCache <- newIORef IM.empty
+  ctxWidgetTextCache <- newIORef IM.empty
+  ctxLayoutCache <- newIORef Nothing
+  ctxMetricGen <- newIORef 0
   ctxPaintFull <- newIORef True
   let fm0 = monospaceMetrics 12
       ctx = Context
@@ -1207,15 +1276,17 @@ newContext = do
         , ctxIdContext
         , ctxFontMetrics = fm0
         , ctxMonoFontMetrics = fm0
-        , ctxMeasureText = \txt -> pure (measureText PixelHost fm0 txt)
+        , ctxMeasureText = \txt -> pure (measureText fm0 txt)
         , ctxResolveFont = defaultResolveFont ctx
         , ctxResolveMeasure = defaultResolveMeasure ctx
         , ctxMeasureCache = Nothing
         , ctxSpanCache
+        , ctxWidgetTextCache
+        , ctxLayoutCache
+        , ctxMetricGen
         , ctxPaintFull
         , ctxExternalText = False
         , ctxTheme
-        , ctxIcons = asciiIcons
         , ctxContainerStack
         , ctxMessages
         , ctxFocusables
@@ -1229,7 +1300,6 @@ newContext = do
         , ctxImageAtlas
         , ctxWakeLoop
         , ctxHost
-        , ctxHostProfile = PixelHost
         , ctxDefaultLayout
         }
   pure ctx

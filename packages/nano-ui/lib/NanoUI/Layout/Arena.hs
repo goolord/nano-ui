@@ -73,15 +73,20 @@ module NanoUI.Layout.Arena
   , forChildNodes_
   , findNodeRevM
   , foldNodeRevM
+  , LayoutCache (..)
+  , newLayoutCache
+  , captureLayoutCache
+  , layoutInputsMatch
+  , restoreLayoutCache
   ) where
 
-import Control.Exception (bracket)
+import Control.Exception (bracket_)
 import Control.Monad (forM_, when)
 import Data.Bits (shiftL, shiftR, (.&.), (.|.))
 import Data.HashTable.IO (BasicHashTable)
 import qualified Data.HashTable.IO as HT
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import Data.Primitive.Array (MutableArray, newArray, readArray, writeArray)
+import Data.Primitive.Array (MutableArray, copyMutableArray, newArray, readArray, sizeofMutableArray, writeArray)
 import Data.Primitive.PrimArray
   ( MutablePrimArray
   , copyMutablePrimArray
@@ -217,8 +222,8 @@ data NodeArena = NodeArena
   , naIndex :: IORef (BasicHashTable WidgetId Word64)
   }
 
--- | Maximum recursion depth for layout snapshot buffers. Levels deeper than
--- this share the last buffer, so it must exceed any plausible nesting depth.
+-- | Initial number of per-depth layout snapshot levels. The level array grows
+-- on demand (see 'ensureSnapLevelsArr'), so this is not a depth limit.
 maxSnapDepth :: Int
 maxSnapDepth = 256
 
@@ -325,13 +330,10 @@ arenaArrays na = do
 -- | Pin arena column arrays for a layout pass so field reads skip naArrays IORef.
 withArenaArraysSnap :: NodeArena -> IO a -> IO a
 withArenaArraysSnap na act =
-  bracket
-    ( do
-        a <- readIORef (naArrays na)
-        writeIORef (naArraysSnap na) (Just a)
-    )
-    (\_ -> writeIORef (naArraysSnap na) Nothing)
-    (\_ -> act)
+  bracket_
+    (readIORef (naArrays na) >>= writeIORef (naArraysSnap na) . Just)
+    (writeIORef (naArraysSnap na) Nothing)
+    act
 
 {-# NOINLINE ensureCapacity #-}
 ensureCapacity :: NodeArena -> Int -> IO ()
@@ -746,6 +748,149 @@ snapshotLayoutRects na = do
             go (i + 1)
   go 0
 
+-- | Cached layout signature and solved geometry for whole-layout reuse. The
+-- arrays are preallocated and copied into, so capturing a steady frame costs
+-- a memcpy and no GC allocation.
+data LayoutCache = LayoutCache
+  { lcCap :: !Int
+  , lcCount :: !Int
+  , lcGeom :: !(MutablePrimArray RealWorld Float)
+  , lcStyle :: !(MutablePrimArray RealWorld Float)
+  , lcTags :: !(MutablePrimArray RealWorld Word8)
+  , lcTree :: !(MutablePrimArray RealWorld Int)
+  , lcText :: !(MutableArray RealWorld Text)
+  , lcOptions :: !(MutableArray RealWorld [Text])
+  }
+
+newLayoutCache :: Int -> IO LayoutCache
+newLayoutCache cap0 = do
+  let !cap = max 16 cap0
+  lcGeom <- newPrimArray (cap * 10)
+  lcStyle <- newPrimArray (cap * 16)
+  lcTags <- newPrimArray (cap * 8)
+  lcTree <- newPrimArray (cap * 8)
+  lcText <- newArray cap T.empty
+  lcOptions <- newArray cap []
+  pure LayoutCache {lcCap = cap, lcCount = 0, ..}
+
+growLayoutCache :: LayoutCache -> Int -> IO LayoutCache
+growLayoutCache lc needed
+  | needed <= lcCap lc = pure lc
+  | otherwise = do
+      let !oldCap = lcCap lc
+          !newCap = max needed (oldCap * 2)
+      lcGeom <- growPrimArrayCopy (lcGeom lc) (oldCap * 10) (newCap * 10) 0
+      lcStyle <- growPrimArrayCopy (lcStyle lc) (oldCap * 16) (newCap * 16) 0
+      lcTags <- growPrimArrayCopy (lcTags lc) (oldCap * 8) (newCap * 8) 0
+      lcTree <- growPrimArrayCopy (lcTree lc) (oldCap * 8) (newCap * 8) 0
+      lcText <- growBoxedStoreCopy T.empty (lcText lc) oldCap newCap
+      lcOptions <- growBoxedStoreCopy [] (lcOptions lc) oldCap newCap
+      pure LayoutCache {lcCap = newCap, lcCount = lcCount lc, ..}
+
+-- | Snapshot the current (post-solve) arena form, constraints and rects.
+captureLayoutCache :: NodeArena -> LayoutCache -> IO LayoutCache
+captureLayoutCache na lc0 = do
+  n <- arenaCount na
+  lc <- growLayoutCache lc0 n
+  a <- arenaArrays na
+  copyMutablePrimArray (lcGeom lc) 0 (naArrGeom a) 0 (n * 10)
+  copyMutablePrimArray (lcStyle lc) 0 (naArrStyle a) 0 (n * 16)
+  copyMutablePrimArray (lcTags lc) 0 (naArrTags a) 0 (n * 8)
+  copyMutablePrimArray (lcTree lc) 0 (naArrTree a) 0 (n * 8)
+  copyMutableArray (lcText lc) 0 (naArrTextStore a) 0 n
+  copyMutableArray (lcOptions lc) 0 (naArrOptionsStore a) 0 n
+  pure lc {lcCount = n}
+
+-- | Exact descriptor comparison. Only trees with no floating nodes and no
+-- scroll containers are eligible: their solve writes only the geometry
+-- columns, so the form arrays can be compared and the rects restored. Scroll
+-- containers are allowed too: the solver overwrites only their value/content
+-- width columns, which are excluded from the comparison and restored.
+layoutInputsMatch :: NodeArena -> LayoutCache -> IO Bool
+layoutInputsMatch na lc = do
+  n <- arenaCount na
+  if n <= 0 || n /= lcCount lc
+    then pure False
+    else do
+      a <- arenaArrays na
+      eligible <- goEligible (naArrTags a) 0 n
+      if not eligible
+        then pure False
+        else do
+          styleEq <- styleMatch (naArrStyle a) (naArrTags a) (lcStyle lc) 0 n
+          tagsEq <- primEqWord8 (naArrTags a) (lcTags lc) 0 (n * 8)
+          treeEq <- primEqInt (naArrTree a) (lcTree lc) 0 (n * 8)
+          textEq <- boxedEq (naArrTextStore a) (lcText lc) 0 n
+          optsEq <- boxedEq (naArrOptionsStore a) (lcOptions lc) 0 n
+          pure (styleEq && tagsEq && treeEq && textEq && optsEq)
+  where
+    goEligible _ i n | i >= n = pure True
+    goEligible tags i n = do
+      raw <- readPrimArray tags (i * 8)
+      let !nt = toEnum (fromIntegral raw)
+      if isFloatingNode nt
+        then pure False
+        else goEligible tags (i + 1) n
+
+-- | Compare the style columns that feed layout. Scroll containers have their
+-- value/content-width columns (12, 13) written by the solver, so those are
+-- skipped and restored from the cache.
+styleMatch :: MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Word8 -> MutablePrimArray RealWorld Float -> Int -> Int -> IO Bool
+styleMatch x tags y i n
+  | i >= n = pure True
+  | otherwise = do
+      raw <- readPrimArray tags (i * 8)
+      let !nt = toEnum (fromIntegral raw)
+          !base = i * 16
+      ok <-
+        if isScrollNode nt
+          then (&&) <$> floatsEq x y base 0 11 <*> floatsEq x y base 14 15
+          else floatsEq x y base 0 15
+      if ok then styleMatch x tags y (i + 1) n else pure False
+
+-- | Compare style columns @[lo .. hi]@ of one node (offsets from @base@).
+floatsEq :: MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> Int -> Int -> Int -> IO Bool
+floatsEq x y base lo hi = go lo
+  where
+    go j
+      | j > hi = pure True
+      | otherwise = do
+          a <- readPrimArray x (base + j)
+          b <- readPrimArray y (base + j)
+          if a == b then go (j + 1) else pure False
+
+primEqWord8 :: MutablePrimArray RealWorld Word8 -> MutablePrimArray RealWorld Word8 -> Int -> Int -> IO Bool
+primEqWord8 x y i n
+  | i >= n = pure True
+  | otherwise = do
+      a <- readPrimArray x i
+      b <- readPrimArray y i
+      if a == b then primEqWord8 x y (i + 1) n else pure False
+
+primEqInt :: MutablePrimArray RealWorld Int -> MutablePrimArray RealWorld Int -> Int -> Int -> IO Bool
+primEqInt x y i n
+  | i >= n = pure True
+  | otherwise = do
+      a <- readPrimArray x i
+      b <- readPrimArray y i
+      if a == b then primEqInt x y (i + 1) n else pure False
+
+boxedEq :: Eq a => MutableArray RealWorld a -> MutableArray RealWorld a -> Int -> Int -> IO Bool
+boxedEq x y i n
+  | i >= n = pure True
+  | otherwise = do
+      a <- readArray x i
+      b <- readArray y i
+      if a == b then boxedEq x y (i + 1) n else pure False
+
+-- | Restore the solved rects/clips and the solver-written style columns.
+restoreLayoutCache :: NodeArena -> LayoutCache -> IO ()
+restoreLayoutCache na lc = do
+  a <- arenaArrays na
+  let !n = lcCount lc
+  copyMutablePrimArray (naArrGeom a) 0 (lcGeom lc) 0 (n * 10)
+  copyMutablePrimArray (naArrStyle a) 0 (lcStyle lc) 0 (n * 16)
+
 {-# INLINE getText #-}
 getText :: NodeArena -> NodeIdx -> IO Text
 getText na idx = do
@@ -859,14 +1004,16 @@ setStyleIdx na idx v = arenaArrays na >>= \a -> writePrimArray (naArrTree a) (id
 {-# NOINLINE ensureAxisSnapshot #-}
 ensureAxisSnapshot :: NodeArena -> Int -> Int -> IO AxisSnapshot
 ensureAxisSnapshot na depth needed = do
-  arr <- readIORef (naSnapLevels na)
-  let !d = max 0 (min (maxSnapDepth - 1) depth)
+  arr0 <- readIORef (naSnapLevels na)
+  let !d = max 0 depth
+  arr <- ensureSnapLevelsArr na arr0 (d + 1)
   cap <- readIORef (naSnapCap na)
   if needed <= cap
     then getLevel arr d cap
     else do
       let !newCap = max needed (cap * 2)
-      forM_ [0 .. maxSnapDepth - 1] $ \i -> do
+          !levels = sizeofMutableArray arr
+      forM_ [0 .. levels - 1] $ \i -> do
         m <- readArray arr i
         case m of
           Nothing -> pure ()
@@ -887,6 +1034,20 @@ ensureAxisSnapshot na depth needed = do
           let s = AxisSnapshot asIdx asOut
           writeArray arr d (Just s)
           pure s
+
+-- | Grow the per-depth snapshot-level array to hold at least @need@ levels.
+-- Replaces the old fixed depth clamp so arbitrarily deep nesting is safe.
+ensureSnapLevelsArr :: NodeArena -> MutableArray RealWorld (Maybe AxisSnapshot) -> Int -> IO (MutableArray RealWorld (Maybe AxisSnapshot))
+ensureSnapLevelsArr na arr need = do
+  let !sz = sizeofMutableArray arr
+  if need <= sz
+    then pure arr
+    else do
+      let !newSz = max need (sz * 2)
+      arr' <- newArray newSz Nothing
+      copyMutableArray arr' 0 arr 0 sz
+      writeIORef (naSnapLevels na) arr'
+      pure arr'
 
 -- | Look up a wrapped text size memoized for this frame at @(node, wrapW)@.
 -- Wrap widths are quantized to 0.25 px so near-identical reflows still hit.

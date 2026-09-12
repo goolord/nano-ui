@@ -192,8 +192,8 @@ lowerNodeVisible env idx nt rect =
     NodeScrollContainer -> paintScrollContainerNode env idx rect
     NodeText -> paintTextNode env idx rect
     NodeSeparator -> paintSeparatorNode env rect
-    NodeTextInput | not (peTerminal env) -> paintTextInputNode env idx rect
-    NodeTextArea | not (peTerminal env) -> paintTextAreaNode env idx rect
+    NodeTextInput -> paintTextInputNode env idx rect
+    NodeTextArea -> paintTextAreaNode env idx rect
     NodeSpacer -> pure ()
     NodeModal -> pure ()
     NodeWindow -> pure ()
@@ -228,8 +228,8 @@ paintPanelNode env idx rect = do
   let style = if si /= 0
                 then unpackPanelStyle (themePanel tm) si
                 else themePanel tm
-  fillStyledRect da (peTerminal env) style rect
-  strokeStyledRect da (peTerminal env) style (rectX rect) (rectY rect) (rectW rect) (rectH rect)
+  fillStyledRect da style rect
+  strokeStyledRect da style (rectX rect) (rectY rect) (rectW rect) (rectH rect)
   withClip da (borderContentClip style rect) $ walkChildrenWithOccluders env idx
 
 {-# INLINE paintScrollContainerNode #-}
@@ -239,9 +239,7 @@ paintScrollContainerNode env idx rect = do
       arena = peNodeArena env
       da = peDrawArena env
       tm = peTheme env
-      host = peHost env
       fm = peFontMetrics env
-      terminal = peTerminal env
       Rect x y w h = rect
   mFloat <- floatingAncestor ctx idx
   let inFloating = maybe False isFloatingNode mFloat
@@ -256,7 +254,7 @@ paintScrollContainerNode env idx rect = do
   slot <- scrollBarSlotOf arena idx
   let cfg = decodeScrollConfig si
       native2D = isScrollStyle2D si
-      padClip = padContentClip host fm x y w h pad
+      padClip = padContentClip fm x y w h pad
       innerW = rectW padClip
       innerH = rectH padClip
       wellStyle = baseStyle {styleCornerRadius = 0}
@@ -268,7 +266,7 @@ paintScrollContainerNode env idx rect = do
         pure
           ( scrollChromeActive cfg True DirColumn contentH innerH
               || scrollChromeActive cfg True DirRow contentW innerW
-          , scrollViewportClip2D host fm slot cfg x y w h pad contentW contentH
+          , scrollViewportClip2D fm slot cfg x y w h pad contentW contentH
           )
       else do
         contentSize <- getNodeValue arena idx
@@ -278,7 +276,7 @@ paintScrollContainerNode env idx rect = do
                 DirRow -> innerW
         pure
           ( scrollChromeActive cfg False dir contentSize innerMain
-          , scrollContentClip host fm slot cfg dir x y w h pad contentSize
+          , scrollContentClip fm slot cfg dir x y w h pad contentSize
           )
   -- A bare scroller paints nothing at all: it only lends its clip and
   -- offset, so whatever sits behind it (window, panel) keeps showing
@@ -296,12 +294,12 @@ paintScrollContainerNode env idx rect = do
       if wTag == SizingGrow && hTag == SizingGrow
         then pushRect da rect (if inFloating then styleBg (themeFloatingWindow tm) else themeWindow tm)
         else do
-          fillStyledRect da terminal wellStyle rect
-          strokeStyledRect da terminal wellStyle x y w h
+          fillStyledRect da wellStyle rect
+          strokeStyledRect da wellStyle x y w h
   withClip da inner $ walkChildrenWithOccluders env idx
   when showChrome $ do
     wid <- getWidgetId arena idx
-    paintScrollChrome ctx da idx wid x y w h pad tm terminal
+    paintScrollChrome ctx da idx wid x y w h pad tm
 
 {-# INLINE paintTextNode #-}
 paintTextNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
@@ -310,10 +308,9 @@ paintTextNode env idx rect = do
       arena = peNodeArena env
       da = peDrawArena env
       tm = peTheme env
-      terminal = peTerminal env
   si <- getStyleIdx arena idx
   case tableStripeColor tm si of
-    Just stripe | not terminal -> pushRect da rect stripe
+    Just stripe -> pushRect da rect stripe
     _ -> pure ()
   raw <- getText arena idx
   unless (T.null raw) $ do
@@ -340,13 +337,11 @@ paintSeparatorNode :: PaintEnv -> Rect -> IO ()
 paintSeparatorNode env rect = do
   let da = peDrawArena env
       tm = peTheme env
-      terminal = peTerminal env
       Rect x y w h = rect
       hair = 1
-  when (not terminal) $
-    if w >= h
-      then pushRect da (Rect x (y + (h - hair) / 2) w hair) (themeSeparator tm)
-      else pushRect da (Rect (x + (w - hair) / 2) y hair h) (themeSeparator tm)
+  if w >= h
+    then pushRect da (Rect x (y + (h - hair) / 2) w hair) (themeSeparator tm)
+    else pushRect da (Rect (x + (w - hair) / 2) y hair h) (themeSeparator tm)
 
 {-# INLINE paintBoxNode #-}
 paintBoxNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
@@ -363,9 +358,8 @@ paintImageNode env idx rect = do
   tex <- imageIdFromText <$> getText (peNodeArena env) idx
   mUv <- lookupImageUv ctx (ImageId tex)
   case mUv of
-    Just (u0, v0, u1, v1)
-      | not (peTerminal env) ->
-          pushImage da rect atlasTextureId u0 v0 u1 v1 (colorRGBA 255 255 255 255)
+    Just (u0, v0, u1, v1) ->
+      pushImage da rect atlasTextureId u0 v0 u1 v1 (colorRGBA 255 255 255 255)
     _ -> pushRect da rect (themeAccent (peTheme env))
 
 {-# INLINE paintDrawingNode #-}

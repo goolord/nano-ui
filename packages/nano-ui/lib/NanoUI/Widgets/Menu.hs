@@ -22,13 +22,13 @@ import Control.Monad (void, when)
 import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
-import NanoUI.Context (Context (..), getStore, intKey, markDirty, setStore)
+import NanoUI.Context (getStore, intKey, markDirty, setStore)
 import NanoUI.Font (menuItemPadX, menuItemRowH, menuMinW, menuOuterPad, menuSepH)
 import NanoUI.Input (inputMousePos, inputMouseReleased)
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO)
 import NanoUI.Store (WidgetStore (..), slotKey, slotMenuOpen, slotMenuPos)
 import NanoUI.Style (Layout (..), defaultLayout, fillW, fixedH, fontMuted, gap, minW, padXY, tight)
-import NanoUI.Types (PopupAnchor (..), PopupPlacement (..), V2 (..), isCellHost)
+import NanoUI.Types (PopupAnchor (..), PopupPlacement (..), V2 (..))
 import NanoUI.WidgetText (buttonFlagMenu, buttonFlagMenuBar)
 import NanoUI.Widgets.Combinators (buttonStyled)
 import NanoUI.Widgets.Layout (columnWith, labelEx, rowWith, sep)
@@ -180,14 +180,10 @@ menuItemWithIcon' iconName txt =
 -- exactly: 28px rows and the same 148px minimum menu width on pixel hosts
 -- (@textEditMenuItemH@ / @textEditMenuMinW@ in "NanoUI.Frame.TextEdit"); cell
 -- hosts keep tight auto-sizing.
-menuRowLayout :: Ui :> es => Eff es Layout
+menuRowLayout :: Eff es Layout
 menuRowLayout = do
-  ctx <- askContext
-  let host = ctxHostProfile ctx
   pure $
-    if isCellHost host
-      then tight . fillW $ defaultLayout
-      else minW menuMinW . fixedH (menuItemRowH host) . tight . fillW $ defaultLayout
+    minW menuMinW . fixedH menuItemRowH . tight . fillW $ defaultLayout
 
 -- | Menu-bar title: a flat, label-sized button. @open@ tints the title while
 -- its drop-down is showing, so the active menu reads at a glance.
@@ -213,13 +209,8 @@ menuItemDisabled txt =
 -- default 3px container padding does not inset or stretch it.
 menuSeparator :: Ui :> es => Eff es ()
 menuSeparator = do
-  ctx <- askContext
-  let host = ctxHostProfile ctx
-  if isCellHost host
-    then void sep
-    else
-      rowWith (fixedH (menuSepH host) . padXY (menuItemPadX - menuOuterPad) 4.5 . fillW) $
-        columnWith (tight . fillW) (void sep)
+  rowWith (fixedH menuSepH . padXY (menuItemPadX - menuOuterPad) 4.5 . fillW) $
+    columnWith (tight . fillW) (void sep)
 
 -- | Header / category title inside a context menu.
 menuHeader :: Ui :> es => Text -> Eff es ()

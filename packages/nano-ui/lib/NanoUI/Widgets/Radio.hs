@@ -10,7 +10,6 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Effectful (Eff, type (:>))
 import NanoUI.Context (Context (..), getPrevRect, getStore, intKey, registerFocusable, setStore)
-import NanoUI.Icons (radioMark)
 import NanoUI.Id (IdContext (..), WidgetId (..), mix64)
 import NanoUI.Input (Input, inputMousePos)
 import NanoUI.Layout.Arena
@@ -24,7 +23,7 @@ import NanoUI.Layout.Arena
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
 import NanoUI.Store (WidgetStore (..), slotKey)
 import NanoUI.Style (Layout, defaultLayout, fillW, gap, tight)
-import NanoUI.Types (Rect (..), isCellHost, rectContains, rectH, rectW)
+import NanoUI.Types (Rect (..), rectContains, rectH, rectW)
 import NanoUI.Widgets.Behavior (KeyNav (..), useKeyNav, useSelection)
 import NanoUI.Widgets.Combinators (selectableItem)
 import NanoUI.Widgets.Layout (column')
@@ -92,9 +91,9 @@ radioFieldset options initial =
       pure (setChanged (finalSel /= sel || hasClick) combinedResp, finalSel)
 
 bit :: Ui :> es => Context -> Int -> Int -> Text -> Eff es Response
-bit ctx sel i l = do
+bit _ctx sel i l = do
   let on = sel == i
-  selectableItem NodeRadio (if isCellHost (ctxHostProfile ctx) then radioMark (ctxIcons ctx) on <> l else l) on radioLay i
+  selectableItem NodeRadio l on radioLay i
 
 addRadioOptions :: Ui :> es => Context -> Input -> Int -> [Text] -> Eff es (Response, Int)
 addRadioOptions ctx inp sel opts =
@@ -103,8 +102,6 @@ addRadioOptions ctx inp sel opts =
     ic@(IdContext cid sid) <- readIORef (ctxIdContext ctx)
     pending <- readIORef (ctxClickedId ctx)
     let parent = parentIdx stack
-        terminal = isCellHost (ctxHostProfile ctx)
-        icons = ctxIcons ctx
         go !_ !_ [] !acc !clickedIdx =
           pure ((acc, clickedIdx), sid)
         go !i !s (l : ls) !acc !clickedIdx = do
@@ -112,7 +109,7 @@ addRadioOptions ctx inp sel opts =
               wid = if raw == 0 then WidgetId 1 else WidgetId raw
           idx <- addNodeFromLayout (ctxNodeArena ctx) NodeRadio parent radioLay
           let on = sel == i
-              txt = if terminal then radioMark icons on <> l else l
+              txt = l
           setNodeText (ctxNodeArena ctx) idx txt
           setNodeValue (ctxNodeArena ctx) idx (if on then 1 else 0)
           setStyleIdx (ctxNodeArena ctx) idx i

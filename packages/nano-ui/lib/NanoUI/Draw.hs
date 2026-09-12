@@ -48,7 +48,7 @@ module NanoUI.Draw
   , currentLayer
   ) where
 
-import Control.Monad (forM_, unless, when)
+import Control.Monad (unless, when)
 import Data.Bits (shiftR, (.&.))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Primitive.PrimArray
@@ -763,6 +763,36 @@ withVertsRaw da needV needI f = do
   writeIORef (daVertexCount da) (base + needV)
   writeIORef (daIndexCount da) (baseIdx + needI)
 
+-- | Strict numeric loop. Replaces @forM_ [lo .. hi]@ on the rounded-geometry
+-- hot path, where the intermediate range list was a measurable allocation and
+-- prevented the body from fusing into a straight-line loop.
+{-# INLINE loopIO #-}
+loopIO :: Int -> Int -> (Int -> IO ()) -> IO ()
+loopIO !lo !hi f = go lo
+  where
+    go !i
+      | i > hi = pure ()
+      | otherwise = f i >> go (i + 1)
+
+-- | Reserve room for up to @maxV@ vertices / @maxI@ indices, hand the body a
+-- commit action, then record only the counts the body reports. Batches many
+-- small quads (text glyphs) into one arena reservation instead of one
+-- @withVerts@ closure + capacity check per quad.
+{-# INLINE withVertsReserve #-}
+withVertsReserve ::
+  DrawArena ->
+  Int ->
+  Int ->
+  (Ptr Word8 -> Ptr Word8 -> Int -> Int -> (Int -> Int -> IO ()) -> IO ()) ->
+  IO ()
+withVertsReserve da maxV maxI f = do
+  (vp, ip, base, baseIdx) <- ensureAndAlloc da maxV maxI
+  f vp ip base baseIdx $ \nv ni -> do
+    writeIORef (daVertexCount da) (base + nv)
+    writeIORef (daIndexCount da) (baseIdx + ni)
+
+
+
 {-# INLINE pushQuad #-}
 pushQuad :: DrawArena -> Rect -> Float -> Float -> Float -> Float -> Color -> IO ()
 pushQuad da (Rect x y w h) u0 v0 u1 v1 col = do
@@ -788,8 +818,8 @@ pushQuadGradient da (Rect x y w h) tl tr br bl
       withVerts da 4 6 $ \vp ip vOff iOff baseIdxWord ->
         pokeQuadGradientSIMD vp vOff ip iOff px py w h whitePixelU whitePixelV c0 c1 c2 c3 baseIdxWord
 
--- Reserved texture id. Terminal raster treats these quads as backdrop dim,
--- not a solid fill. Mix comes from the vertex color alpha.
+-- Reserved texture id. These quads act as a backdrop dim, not a solid fill.
+-- Mix comes from the vertex color alpha.
 backdropDimTextureId :: Int
 backdropDimTextureId = 0x7ffffffe
 
@@ -882,39 +912,6 @@ getCurrentClip da = do
   (x, y, w, h) <- readIORef (daCurrentClip da)
   pure (Rect x y w h)
 
-pushCornerFan :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
-pushCornerFan da cx cy rad a0 _a1 col = do
-  setTexture da glyphAtlasTextureId
-  let !segs = cornerSegments
-      !ring = segs + 1
-      !aa = 1.0
-      !needV = 1 + 2 * ring
-      !needI = segs * 9
-      !q = cornerQuadrant a0
-  withVertsRaw da needV needI $ \vp ip base baseIdx -> do
-    let !(cr, cg, cb, ca) = unpackColorF col
-        !centerIdx = fromIntegral base :: Word32
-    pokeVertex vp (base * vertexSize) cx cy cr cg cb ca whitePixelU whitePixelV
-    forM_ [0 .. segs] $ \i -> do
-      let !(ct, st) = cornerCosSin q i
-          !rimI = base + 1 + i
-          !outI = base + 1 + ring + i
-          !inRad = max 0 (rad - aa)
-      pokeVertex vp (rimI * vertexSize) (cx + inRad * ct) (cy + inRad * st) cr cg cb ca whitePixelU whitePixelV
-      pokeVertex vp (outI * vertexSize) (cx + rad * ct) (cy + rad * st) cr cg cb 0 whitePixelU whitePixelV
-      when (i > 0) $ do
-        let !k = i - 1
-            !rim0 = fromIntegral (base + i) :: Word32
-            !rim1 = fromIntegral (base + 1 + i) :: Word32
-            !out0 = fromIntegral (base + 1 + ring + k) :: Word32
-            !out1 = fromIntegral (base + 1 + ring + i) :: Word32
-            !fillOff = (baseIdx + k * 3) * indexSize
-            !fringeOff = (baseIdx + segs * 3 + k * 6) * indexSize
-        pokeByteOff ip fillOff centerIdx
-        pokeByteOff ip (fillOff + 4) rim0
-        pokeByteOff ip (fillOff + 8) rim1
-        pokeQuadIndices ip fringeOff rim0 out0 out1 rim1
-
 {-# INLINE pokeQuadIndices #-}
 pokeQuadIndices :: Ptr Word8 -> Int -> Word32 -> Word32 -> Word32 -> Word32 -> IO ()
 pokeQuadIndices ip off a b c d = do
@@ -924,6 +921,53 @@ pokeQuadIndices ip off a b c d = do
   pokeByteOff ip (off + 12) a
   pokeByteOff ip (off + 16) c
   pokeByteOff ip (off + 20) d
+
+-- | Poke one coverage-AA strip into a reservation at vertex offset @vi@ and
+-- index offset @ii@ (both relative to @base@/@baseIdx@). Callers guarantee
+-- @(x0,y0) /= (x1,y1)@. Used by the fused rounded-stroke paths so a whole
+-- border shares one arena reservation.
+{-# INLINE pokeStripAt #-}
+pokeStripAt ::
+  Ptr Word8 ->
+  Ptr Word8 ->
+  Int ->
+  Int ->
+  Int ->
+  Int ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
+  IO ()
+pokeStripAt vp ip base baseIdx vi ii x0 y0 x1 y1 bw r g b a = do
+  let !dx = x1 - x0
+      !dy = y1 - y0
+      !len = sqrt (dx * dx + dy * dy)
+      !nx = (-dy) / len
+      !ny = dx / len
+      !half = bw * 0.5
+      !core = max 0 (half - 0.5)
+      !outer = half + 0.5
+      pokeEnd !ev !ex !ey = do
+        let ((p0x, p0y), (p1x, p1y), (p2x, p2y), (p3x, p3y)) =
+              strokeStripNormalsSIMD ex ey nx ny (-outer) (-core) core outer
+            !vBase = (base + vi + ev) * vertexSize
+        pokeVertex vp vBase p0x p0y r g b 0 whitePixelU whitePixelV
+        pokeVertex vp (vBase + 32) p1x p1y r g b a whitePixelU whitePixelV
+        pokeVertex vp (vBase + 64) p2x p2y r g b a whitePixelU whitePixelV
+        pokeVertex vp (vBase + 96) p3x p3y r g b 0 whitePixelU whitePixelV
+  pokeEnd 0 x0 y0
+  pokeEnd 4 x1 y1
+  let !va = fromIntegral (base + vi) :: Word32
+      !vb = va + 4
+  pokeQuadIndices ip ((baseIdx + ii) * indexSize) va (va + 1) (vb + 1) vb
+  pokeQuadIndices ip ((baseIdx + ii + 6) * indexSize) (va + 1) (va + 2) (vb + 2) (vb + 1)
+  pokeQuadIndices ip ((baseIdx + ii + 12) * indexSize) (va + 2) (va + 3) (vb + 3) (vb + 2)
 
 {-# INLINE pushRoundedRect #-}
 pushRoundedRect :: DrawArena -> Rect -> Float -> Color -> IO ()
@@ -951,20 +995,76 @@ pushRoundedRectRaw da (Rect x y w h) radius col
         then pushRect da (Rect x y w h) col
         else do
           setTexture da glyphAtlasTextureId
-          let !midW = max 0 (w - 2 * rad)
+          let !segs = cornerSegments
+              !ring = segs + 1
+              !midW = max 0 (w - 2 * rad)
               !midH = max 0 (h - 2 * rad)
-          when (midW > 0 && midH > 0) $
-            pushQuad da (Rect (x + rad) (y + rad) midW midH) whitePixelU whitePixelV whitePixelU whitePixelV col
-          when (midW > 0) $ do
-            pushQuad da (Rect (x + rad) y midW rad) whitePixelU whitePixelV whitePixelU whitePixelV col
-            pushQuad da (Rect (x + rad) (y + h - rad) midW rad) whitePixelU whitePixelV whitePixelU whitePixelV col
-          when (midH > 0) $ do
-            pushQuad da (Rect x (y + rad) rad midH) whitePixelU whitePixelV whitePixelU whitePixelV col
-            pushQuad da (Rect (x + w - rad) (y + rad) rad midH) whitePixelU whitePixelV whitePixelU whitePixelV col
-          pushCornerFan da (x + rad) (y + rad) rad pi (pi * 1.5) col
-          pushCornerFan da (x + w - rad) (y + rad) rad (pi * 1.5) (pi * 2) col
-          pushCornerFan da (x + w - rad) (y + h - rad) rad 0 (pi * 0.5) col
-          pushCornerFan da (x + rad) (y + h - rad) rad (pi * 0.5) pi col
+              !hasCenter = midW > 0 && midH > 0
+              !hasTB = midW > 0
+              !hasLR = midH > 0
+              !quadCount =
+                (if hasCenter then 1 else 0)
+                  + (if hasTB then 2 else 0)
+                  + (if hasLR then 2 else 0)
+              !cornerV = 1 + 2 * ring
+              !cornerI = segs * 9
+              !needV = quadCount * 4 + 4 * cornerV
+              !needI = quadCount * 6 + 4 * cornerI
+          withVertsRaw da needV needI $ \vp ip base baseIdx -> do
+            let !(cr, cg, cb, ca) = unpackColorF col
+                !u = whitePixelU
+                !v = whitePixelV
+                pokeQuadAt !vi !ii !qx !qy !qw !qh = do
+                  let !vBase = (base + vi) * vertexSize
+                      !qx2 = qx + qw
+                      !qy2 = qy + qh
+                  pokeVertex vp vBase qx qy cr cg cb ca u v
+                  pokeVertex vp (vBase + 32) qx2 qy cr cg cb ca u v
+                  pokeVertex vp (vBase + 64) qx2 qy2 cr cg cb ca u v
+                  pokeVertex vp (vBase + 96) qx qy2 cr cg cb ca u v
+                  let !a = fromIntegral (base + vi) :: Word32
+                  pokeQuadIndices ip ((baseIdx + ii) * indexSize) a (a + 1) (a + 2) (a + 3)
+                pokeCorner !vi !ii !ccx !ccy !a0 = do
+                  let !vBase = (base + vi) * vertexSize
+                      !centerIdx = fromIntegral (base + vi) :: Word32
+                      !inRad = max 0 (rad - 1.0)
+                      !q = cornerQuadrant a0
+                  pokeVertex vp vBase ccx ccy cr cg cb ca u v
+                  loopIO 0 segs $ \i -> do
+                    let !(ct, st) = cornerCosSin q i
+                        !rimI = base + vi + 1 + i
+                        !outI = base + vi + 1 + ring + i
+                    pokeVertex vp (rimI * vertexSize) (ccx + inRad * ct) (ccy + inRad * st) cr cg cb ca u v
+                    pokeVertex vp (outI * vertexSize) (ccx + rad * ct) (ccy + rad * st) cr cg cb 0 u v
+                    when (i > 0) $ do
+                      let !k = i - 1
+                          !rim0 = fromIntegral (base + vi + i) :: Word32
+                          !rim1 = fromIntegral (base + vi + 1 + i) :: Word32
+                          !out0 = fromIntegral (base + vi + 1 + ring + k) :: Word32
+                          !out1 = fromIntegral (base + vi + 1 + ring + i) :: Word32
+                          !fillOff = (baseIdx + ii + k * 3) * indexSize
+                          !fringeOff = (baseIdx + ii + segs * 3 + k * 6) * indexSize
+                      pokeByteOff ip fillOff centerIdx
+                      pokeByteOff ip (fillOff + 4) rim0
+                      pokeByteOff ip (fillOff + 8) rim1
+                      pokeQuadIndices ip fringeOff rim0 out0 out1 rim1
+                !vi1 = if hasCenter then 4 else 0
+                !ii1 = if hasCenter then 6 else 0
+                !vi2 = vi1 + (if hasTB then 8 else 0)
+                !ii2 = ii1 + (if hasTB then 12 else 0)
+                !vi3 = vi2 + (if hasLR then 8 else 0)
+                !ii3 = ii2 + (if hasLR then 12 else 0)
+            when hasCenter $ pokeQuadAt 0 0 (x + rad) (y + rad) midW midH
+            when hasTB $ do
+              pokeQuadAt vi1 ii1 (x + rad) y midW rad
+              pokeQuadAt (vi1 + 4) (ii1 + 6) (x + rad) (y + h - rad) midW rad
+            when hasLR $ do
+              pokeQuadAt vi2 ii2 x (y + rad) rad midH
+              pokeQuadAt (vi2 + 4) (ii2 + 6) (x + w - rad) (y + rad) rad midH
+            pokeCorner vi3 ii3 (x + rad) (y + rad) pi
+            pokeCorner (vi3 + cornerV) (ii3 + cornerI) (x + w - rad) (y + rad) (pi * 1.5)
+            pokeCorner (vi3 + 2 * cornerV) (ii3 + 2 * cornerI) (x + w - rad) (y + h - rad) 0
+            pokeCorner (vi3 + 3 * cornerV) (ii3 + 3 * cornerI) (x + rad) (y + h - rad) (pi * 0.5)
 
 {-# INLINE pushRoundedStroke #-}
 pushRoundedStroke :: DrawArena -> Rect -> Float -> Float -> Color -> IO ()
@@ -984,31 +1084,81 @@ pushRoundedStroke da (Rect x y w h) radius bw col
               !oy = py + t / 2
               !ow = max 0 (w - t)
               !oh = max 0 (h - t)
-          pushStrokeAARaw da ox oy (ox + ow) oy t col
-          pushStrokeAARaw da ox (oy + oh) (ox + ow) (oy + oh) t col
-          when (oh > 0) $ pushStrokeAARaw da ox oy ox (oy + oh) t col
-          when (oh > 0) $ pushStrokeAARaw da (ox + ow) oy (ox + ow) (oy + oh) t col
+              !doTB = ow >= 0.001
+              !doLR = oh >= 0.001
+              !stripCount = (if doTB then 2 else 0) + (if doLR then 2 else 0)
+          withVertsRaw da (stripCount * 8) (stripCount * 18) $ \vp ip base baseIdx -> do
+            let !(r, g, b, a) = unpackColorF col
+                !viLR = if doTB then 16 else 0
+                !iiLR = if doTB then 36 else 0
+            when doTB $ do
+              pokeStripAt vp ip base baseIdx 0 0 ox oy (ox + ow) oy t r g b a
+              pokeStripAt vp ip base baseIdx 8 18 ox (oy + oh) (ox + ow) (oy + oh) t r g b a
+            when doLR $ do
+              pokeStripAt vp ip base baseIdx viLR iiLR ox oy ox (oy + oh) t r g b a
+              pokeStripAt vp ip base baseIdx (viLR + 8) (iiLR + 18) (ox + ow) oy (ox + ow) (oy + oh) t r g b a
         else do
+          let !n = cornerSegments
           let !midW = max 0 (w - 2 * rad)
               !midH = max 0 (h - 2 * rad)
               !topY = py + ibw / 2
               !botY = py + h - ibw / 2
               !leftX = px + ibw / 2
               !rightX = px + w - ibw / 2
-          when (midW > 0) $ do
-            pushStrokeAARaw da (px + rad) topY (px + rad + midW) topY ibw col
-            pushStrokeAARaw da (px + rad) botY (px + rad + midW) botY ibw col
-          when (midH > 0) $ do
-            pushStrokeAARaw da leftX (py + rad) leftX (py + rad + midH) ibw col
-            pushStrokeAARaw da rightX (py + rad) rightX (py + rad + midH) ibw col
-          let !cr = max 0.25 (rad - ibw / 2)
-          if midW <= 0 && midH <= 0
-            then forM_ [0 .. 3] $ \q -> pushCornerArcStroke da (px + w * 0.5) (py + h * 0.5) cr ibw q col
-            else do
-              pushCornerArcStroke da (px + rad) (py + rad) cr ibw 0 col
-              pushCornerArcStroke da (px + w - rad) (py + rad) cr ibw 1 col
-              pushCornerArcStroke da (px + w - rad) (py + h - rad) cr ibw 2 col
-              pushCornerArcStroke da (px + rad) (py + h - rad) cr ibw 3 col
+              !cr = max 0.25 (rad - ibw / 2)
+              !doTB = midW >= 0.001
+              !doLR = midH >= 0.001
+              !stripCount = (if doTB then 2 else 0) + (if doLR then 2 else 0)
+              !arcV = (n + 1) * 4
+              !arcI = n * 18
+              !needV = stripCount * 8 + 4 * arcV
+              !needI = stripCount * 18 + 4 * arcI
+          withVertsRaw da needV needI $ \vp ip base baseIdx -> do
+            let !(r, g, b, a) = unpackColorF col
+                !core = max 0 (ibw * 0.5 - 0.5)
+                pokeArc !vi !ii !ccx !ccy !q = do
+                  let !inner = max 0 (cr - core)
+                      !outerR = cr + core
+                      !innerAA = max 0 (inner - 1.0)
+                      !outerAA = outerR + 1.0
+                  loopIO 0 n $ \i -> do
+                    let !(ct, st) = cornerCosSin q i
+                        !v0 = base + vi + i * 4
+                        !vBase = v0 * vertexSize
+                        ((p0x, p0y), (p1x, p1y), (p2x, p2y), (p3x, p3y)) =
+                          concentricOffsetsSIMD ccx ccy ct st innerAA inner outerR outerAA
+                    pokeVertex vp vBase p0x p0y r g b 0 whitePixelU whitePixelV
+                    pokeVertex vp (vBase + 32) p1x p1y r g b a whitePixelU whitePixelV
+                    pokeVertex vp (vBase + 64) p2x p2y r g b a whitePixelU whitePixelV
+                    pokeVertex vp (vBase + 96) p3x p3y r g b 0 whitePixelU whitePixelV
+                  loopIO 0 (n - 1) $ \i -> do
+                    let !va = fromIntegral (base + vi + i * 4) :: Word32
+                        !vb = va + 4
+                        !iOff = (baseIdx + ii + i * 18) * indexSize
+                    pokeQuadIndices ip iOff va (va + 1) (vb + 1) vb
+                    pokeQuadIndices ip (iOff + 24) (va + 1) (va + 2) (vb + 2) (vb + 1)
+                    pokeQuadIndices ip (iOff + 48) (va + 2) (va + 3) (vb + 3) (vb + 2)
+                !viLR = if doTB then 16 else 0
+                !iiLR = if doTB then 36 else 0
+                !viC = stripCount * 8
+                !iiC = stripCount * 18
+            when doTB $ do
+              pokeStripAt vp ip base baseIdx 0 0 (px + rad) topY (px + rad + midW) topY ibw r g b a
+              pokeStripAt vp ip base baseIdx 8 18 (px + rad) botY (px + rad + midW) botY ibw r g b a
+            when doLR $ do
+              pokeStripAt vp ip base baseIdx viLR iiLR leftX (py + rad) leftX (py + rad + midH) ibw r g b a
+              pokeStripAt vp ip base baseIdx (viLR + 8) (iiLR + 18) rightX (py + rad) rightX (py + rad + midH) ibw r g b a
+            if midW <= 0 && midH <= 0
+              then do
+                pokeArc viC iiC (px + w * 0.5) (py + h * 0.5) 0
+                pokeArc (viC + arcV) (iiC + arcI) (px + w * 0.5) (py + h * 0.5) 1
+                pokeArc (viC + 2 * arcV) (iiC + 2 * arcI) (px + w * 0.5) (py + h * 0.5) 2
+                pokeArc (viC + 3 * arcV) (iiC + 3 * arcI) (px + w * 0.5) (py + h * 0.5) 3
+              else do
+                pokeArc viC iiC (px + rad) (py + rad) 0
+                pokeArc (viC + arcV) (iiC + arcI) (px + w - rad) (py + rad) 1
+                pokeArc (viC + 2 * arcV) (iiC + 2 * arcI) (px + w - rad) (py + h - rad) 2
+                pokeArc (viC + 3 * arcV) (iiC + 3 * arcI) (px + rad) (py + h - rad) 3
 
 {-# INLINE pushLine #-}
 pushLine :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
@@ -1020,7 +1170,7 @@ pushLine da x1 y1 x2 y2 thickness col =
       let r = thickness / 2
           step = max 0.3 (r * 0.4)
           n = max (1 :: Int) (ceiling (len / step))
-      forM_ [0 .. n] $ \i -> do
+      loopIO 0 n $ \i -> do
         let u = fromIntegral i / fromIntegral n
             cx = x1 + dx * u
             cy = y1 + dy * u
@@ -1077,42 +1227,6 @@ strokeAxes x0 y0 x1 y1 =
       dy = y1 - y0
       len = sqrt (dx * dx + dy * dy)
    in if len < 0.001 then Nothing else Just (dx, dy, len)
-
--- Coverage fringe on inner and outer edges. Quarter-arcs use `cornerCosSin`.
-pushCornerArcStroke :: DrawArena -> Float -> Float -> Float -> Float -> Int -> Color -> IO ()
-pushCornerArcStroke da cx cy radius bw q col
-  | bw <= 0 || radius <= 0 = pure ()
-  | otherwise = do
-      setTexture da glyphAtlasTextureId
-      let !r = max 0.25 radius
-          !n = cornerSegments
-          !half = bw * 0.5
-          !core = max 0 (half - 0.5)
-          !inner = max 0 (r - core)
-          !outer = r + core
-          !innerAA = max 0 (inner - 1.0)
-          !outerAA = outer + 1.0
-          !needV = (n + 1) * 4
-          !needI = n * 18
-      withVertsRaw da needV needI $ \vp ip base baseIdx -> do
-        let !(cr, cg, cb, ca) = unpackColorF col
-        forM_ [0 .. n] $ \i -> do
-          let !(ct, st) = cornerCosSin q i
-              !v0 = base + i * 4
-              !vBase = v0 * vertexSize
-              ((p0x, p0y), (p1x, p1y), (p2x, p2y), (p3x, p3y)) =
-                concentricOffsetsSIMD cx cy ct st innerAA inner outer outerAA
-          pokeVertex vp vBase p0x p0y cr cg cb 0 whitePixelU whitePixelV
-          pokeVertex vp (vBase + 32) p1x p1y cr cg cb ca whitePixelU whitePixelV
-          pokeVertex vp (vBase + 64) p2x p2y cr cg cb ca whitePixelU whitePixelV
-          pokeVertex vp (vBase + 96) p3x p3y cr cg cb 0 whitePixelU whitePixelV
-        forM_ [0 .. n - 1] $ \i -> do
-          let !a = fromIntegral (base + i * 4) :: Word32
-              !b = a + 4
-              !iOff = (baseIdx + i * 18) * indexSize
-          pokeQuadIndices ip iOff a (a + 1) (b + 1) b
-          pokeQuadIndices ip (iOff + 24) (a + 1) (a + 2) (b + 2) (b + 1)
-          pokeQuadIndices ip (iOff + 48) (a + 2) (a + 3) (b + 3) (b + 2)
 
 -- One quad per segment. Plots and diagrams use this; pushLine stamps capsules.
 {-# INLINE pushStroke #-}
@@ -1204,26 +1318,47 @@ pushText da fm x y txt col =
       !py = snapToPixel (fmSnapScale fm) y
    in case fmRun fm txt of
         Just rq -> drawRunQuad da px py rq col
-        Nothing -> go px py Nothing txt
+        Nothing -> do
+          -- Batch every glyph of the run into one arena reservation instead of
+          -- one withVerts closure + capacity check per character.
+          let !cap = T.length txt
+          when (cap > 0) $ do
+            scale <- readIORef (daSnapScale da)
+            setTexture da glyphAtlasTextureId
+            withVertsReserve da (cap * 4) (cap * 6) $ \vp ip base baseIdx commit -> do
+              let !(r, g, b, a) = unpackColorF col
+                  !u = whitePixelU
+                  !v = whitePixelV
+                  pokeGlyphQuad !q !gx !gy !gw !gh !u0 !v0 !u1 !v1 = do
+                    let !vb = (base + q * 4) * vertexSize
+                        !gx1 = gx + gw
+                        !gy1 = gy + gh
+                    pokeVertex vp vb gx gy r g b a u0 v0
+                    pokeVertex vp (vb + 32) gx1 gy r g b a u1 v0
+                    pokeVertex vp (vb + 64) gx1 gy1 r g b a u1 v1
+                    pokeVertex vp (vb + 96) gx gy1 r g b a u0 v1
+                    let !a0 = fromIntegral (base + q * 4) :: Word32
+                    pokeQuadIndices ip ((baseIdx + q * 6) * indexSize) a0 (a0 + 1) (a0 + 2) (a0 + 3)
+                  walk !q !ox !oy !prev !t =
+                    case T.uncons t of
+                      Nothing -> pure q
+                      Just (c, rest) -> do
+                        let !adv = advanceAfter prev c
+                        case fmGlyph fm c of
+                          Nothing -> do
+                            q' <-
+                              if adv > 0 && c /= ' '
+                                then do
+                                  pokeGlyphQuad q (snapToPixel scale ox) (snapToPixel scale oy) adv (fmLineHeight fm) u v u v
+                                  pure (q + 1)
+                                else pure q
+                            walk q' (ox + adv) oy (Just c) rest
+                          Just gq -> do
+                            pokeGlyphQuad q (ox + gqX gq) (oy + gqY gq) (gqW gq) (gqH gq) (gqU0 gq) (gqV0 gq) (gqU1 gq) (gqV1 gq)
+                            walk (q + 1) (ox + adv) oy (Just c) rest
+              !k <- walk 0 px py Nothing txt
+              commit (k * 4) (k * 6)
   where
-    go !ox !oy !prev !t =
-      case T.uncons t of
-        Nothing -> pure ()
-        Just (c, rest) -> do
-          let !adv = advanceAfter prev c
-          case fmGlyph fm c of
-            Nothing -> do
-              when (adv > 0 && c /= ' ') $
-                pushRect da (Rect ox oy adv (fmLineHeight fm)) col
-              go (ox + adv) oy (Just c) rest
-            Just gq -> do
-              let !gx = ox + gqX gq
-                  !gy = oy + gqY gq
-                  !gw = gqW gq
-                  !gh = gqH gq
-              setTexture da glyphAtlasTextureId
-              pushQuad da (Rect gx gy gw gh) (gqU0 gq) (gqV0 gq) (gqU1 gq) (gqV1 gq) col
-              go (ox + adv) oy (Just c) rest
     advanceAfter prev c = case prev of
       Nothing -> fmAdvance fm c
       Just p -> fmAdvance fm c + fmKerning fm p c

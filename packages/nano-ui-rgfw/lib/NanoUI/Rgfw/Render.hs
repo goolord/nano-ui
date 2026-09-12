@@ -19,7 +19,6 @@ import NanoUI.Context
   ( Context
   , TextInputMenu (..)
   , ctxFontMetrics
-  , ctxHostProfile
   , getTextInputMenu
   )
 import NanoUI.Frame.Hit (widgetOverlayAllowed)
@@ -54,20 +53,18 @@ import NanoUI.Testing
 -- | One vertex colour, straight out of the shared draw buffer.
 type RGBA = (Float, Float, Float, Float)
 
--- | Rasterize a frame the way the terminal backend does, but into pixels:
--- walk the core's 'DrawData' in canonical layer order filling every quad,
--- then stamp the core's collected text spans with the embedded Cozette
--- bitmap font. Widget drawing (windows, popups, buttons, fields, scroll
--- chrome, ...) comes from the core draw path, so RGFW gets theme parity and
--- core drawing behavior for free.
+-- | Rasterize a frame into pixels: walk the core's 'DrawData' in canonical
+-- layer order filling every quad, then stamp the core's collected text spans
+-- with the embedded Cozette bitmap font. Widget drawing (windows, popups,
+-- buttons, fields, scroll chrome, ...) comes from the core draw path, so RGFW
+-- gets theme parity and core drawing behavior for free.
 --
--- Layer and span order matches the terminal rasterizer: background quads,
--- content quads, base spans, overlay quads, chrome quads, overlay spans.
--- Quads whose texture id is 'glyphAtlasTextureId' are always plain colored
--- quads on this host (the Cozette metrics expose no glyph atlas, so core
--- text lowers to per-character advance rects, exactly like the terminal's
--- @applyCmd@ assumption), which is why every quad is filled rather than
--- sampled; glyphs themselves are stamped afterwards from the span lists.
+-- Layer and span order: background quads, content quads, base spans, overlay
+-- quads, chrome quads, overlay spans. Quads whose texture id is
+-- 'glyphAtlasTextureId' are always plain colored quads on this host (the
+-- Cozette metrics expose no glyph atlas, so core text lowers to per-character
+-- advance rects), which is why every quad is filled rather than sampled;
+-- glyphs themselves are stamped afterwards from the span lists.
 renderArena ::
   RgfwSurface ->
   CozetteFont ->
@@ -82,7 +79,7 @@ renderArena surf font !scale drawData baseSpans overlaySpans = do
   -- Spans after content quads so scroll tracks do not erase box rules.
   mapM_ (stampSpan surf font scale) baseSpans
   forDrawCmdsInLayer_ LayerOverlay drawData (applyCmd surf scale drawData)
-  -- Floating chrome (window scrollbars) before overlay text, like Term.
+  -- Floating chrome (window scrollbars) before overlay text.
   forDrawCmdsInLayer_ LayerChrome drawData (applyCmd surf scale drawData)
   mapM_ (stampSpan surf font scale) overlaySpans
 
@@ -137,20 +134,20 @@ walkPrims surf scale dd vp ip isDim clip !i !end
           stampTriangle surf scale dd vp clip ia ib ic
           walkPrims surf scale dd vp ip isDim clip (i + 3) end
 
--- | Fill a quad's bounding box with its colour, like the terminal
--- rasterizer's @stampQuad@. Two flat-fill approximations apply:
+-- | Fill a quad's bounding box with its colour. Two flat-fill approximations
+-- apply:
 --
 --  * 4-corner gradient quads (no gradient support on the software surface)
---    are filled with the average of their corner colours; the terminal
---    flattens them to the top-left corner instead. For the equal-corner
---    quads the core emits for plain rects this is the exact colour.
+--    are filled with the average of their corner colours. For the
+--    equal-corner quads the core emits for plain rects this is the exact
+--    colour.
 --  * Quads with any corner alpha < 32 are coverage-AA fringes of strokes and
 --    rounded corners and are skipped, so those edges lose their 1px soft
 --    gradient but never smear a half-transparent flat colour.
 --
 -- Translucent fills (drop shadows, modal backdrop dims) alpha-blend instead
--- of overwriting; 'backdropDimTextureId' cmds blend uniformly like the
--- terminal's @stampBackdropDim@ (mix amount taken from the vertex alpha).
+-- of overwriting; 'backdropDimTextureId' cmds blend uniformly (mix amount
+-- taken from the vertex alpha).
 stampQuad ::
   RgfwSurface ->
   Float ->
@@ -409,7 +406,7 @@ renderTextEditMenuOverlay surf font !scale theme ctx mousePos = do
       when allow $ do
         let menuRect = textInputMenuRect menu
             (!mx, !my, !mw, !mh) = toPhysRect scale (rectX menuRect) (rectY menuRect) (rectW menuRect) (rectH menuRect)
-            content = textEditMenuContentRect (ctxHostProfile ctx) menuRect (ctxFontMetrics ctx)
+            content = textEditMenuContentRect menuRect (ctxFontMetrics ctx)
             !cx = rectX content
             !cy = rectY content
             !cw = rectW content
@@ -420,7 +417,7 @@ renderTextEditMenuOverlay surf font !scale theme ctx mousePos = do
         fillRect surf mx my mw mh (packColor (thPanelBg theme))
         drawRectOutline surf mx my mw mh (packColor (thBorder theme))
         -- Render menu rows
-        forM_ (textEditMenuLayout (ctxHostProfile ctx)) $ \(entry, relY, h) -> do
+        forM_ textEditMenuLayout $ \(entry, relY, h) -> do
           let (!rowX, !rowY, !rowW, !rowH) = toPhysRect scale cx (cy + relY) cw h
               rowRect = Rect cx (cy + relY) cw h
           case entry of

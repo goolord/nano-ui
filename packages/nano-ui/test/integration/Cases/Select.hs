@@ -1,7 +1,6 @@
 module Cases.Select
   ( runSelectDragToSelectTest
   , runSelectDropdownCursorTest
-  , runSelectDropdownHoverTest
   , runSelectDropdownTest
   , runSelectDropFlushTest
   , runSelectKeyboardTest
@@ -10,7 +9,6 @@ module Cases.Select
   , runSelectTest
   , runEnumSelectTest
   , runSliderCursorTest
-  , runTreeExpandDamageTest
   , runTreeInitialTest
   , runTreeKeyboardTest
   , runTreeSelectTest
@@ -27,7 +25,6 @@ import NanoUI.Testing.Harness
   , clickPair
   , runClickRelease
   , warmup2
-  , withInputOff
   )
 
 runSelectDropdownCursorTest :: Context -> IORef Int -> IO ()
@@ -58,7 +55,7 @@ runSliderCursorTest ctx failed = do
       ui = column (slider 0 100 50)
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect rx ry rw rh = respRect resp
-      track = sliderTrackBounds (ctxHostProfile ctx) (ctxFontMetrics ctx) rx ry rw rh
+      track = sliderTrackBounds (ctxFontMetrics ctx) rx ry rw rh
       trackMid = V2 (rectX track + rectW track / 2) (rectY track + rectH track / 2)
       offPos = V2 (rx + rw + 20) (ry + rh + 20)
       hoverTrack = inp0 {inputMousePos = trackMid}
@@ -140,44 +137,6 @@ runTreeSelectTest _ failed = do
   ((_, sel), _, _, _) <- runFrame ctx release ui
   assertEq failed sel 1
 
-runTreeExpandDamageTest :: Context -> IORef Int -> IO ()
-runTreeExpandDamageTest _ failed = do
-  ctx <- newCellContext
-  let items = [TreeItem "root" [TreeItem "child" []], TreeItem "leaf" []]
-      ui = column (void (tree "t" items 0))
-      inp0 = withInputOff 40 12
-  _ <- runFrame ctx inp0 ui >> takeDamage ctx
-  _ <- runFrame ctx inp0 ui >> takeDamage ctx
-  _ <- runFrame ctx inp0 ui
-  dIdle <- takeDamage ctx
-  assert failed (dIdle /= DamageFull)
-  spans <- collectTextSpans ctx
-  case [r | (r, txt, _, _, _) <- spans, "root" `T.isInfixOf` txt] of
-    (Rect x y _w h : _) -> do
-      let (press, release) = clickPair inp0 (V2 (x + 0.5) (y + h / 2))
-      _ <- runFrame ctx press ui
-      _ <- runFrame ctx release ui
-      spansClick <- collectTextSpans ctx
-      assert failed (any (\(_, t, _, _, _) -> "child" `T.isInfixOf` t) spansClick)
-      dClick <- takeDamage ctx
-      case dClick of
-        DamageFull -> assert failed False
-        DamageClip r -> assert failed (not (damageIsEmpty dClick) && rectW r < 40 && rectH r < 12)
-      _ <- runFrame ctx press ui
-      _ <- runFrame ctx release ui
-      spansNext <- collectTextSpans ctx
-      assert failed (not (any (\(_, t, _, _, _) -> "child" `T.isInfixOf` t) spansNext))
-      assert failed (any (\(_, t, _, _, _) -> "root" `T.isInfixOf` t) spansNext)
-      dNext <- takeDamage ctx
-      case dNext of
-        DamageFull -> assert failed False
-        DamageClip r -> assert failed (not (damageIsEmpty dNext) && rectW r < 40 && rectH r < 12)
-      _ <- runFrame ctx inp0 ui
-      _ <- runFrame ctx inp0 ui
-      dSettled <- takeDamage ctx
-      assert failed (dSettled /= DamageFull)
-    _ -> assert failed False
-
 runTreeKeyboardTest :: Context -> IORef Int -> IO ()
 runTreeKeyboardTest _ failed = do
   ctx <- newContext
@@ -194,38 +153,6 @@ runTreeKeyboardTest _ failed = do
   _ <- runFrame ctx inp0 ui
   spans <- collectTextSpans ctx
   assert failed (not (any (\(_, t, _, _, _) -> "child" `T.isInfixOf` t) spans))
-
-runSelectDropdownHoverTest :: Context -> IORef Int -> IO ()
-runSelectDropdownHoverTest _ failed = do
-  ctx <- newCellContext
-  let layout = defaultLayout {layoutPadding = Padding 0 0 0 0, layoutGap = 0}
-      inp0 = withInput 40 6
-      ui = column' layout (select ["Low", "High"] 0)
-      (press, release) = clickPair inp0 (V2 1 0.5)
-  _ <- runFrame ctx inp0 ui
-  _ <- runFrame ctx press ui
-  _ <- runFrame ctx release ui
-  let hoverBase = release {inputMouseReleased = False, inputMousePressed = False, inputMouseDown = False}
-  overlaysOpen <- collectOverlayTextSpans ctx hoverBase
-  case [rectY r | (r, txt, _, _, _) <- overlaysOpen, "High" `T.isInfixOf` txt] of
-    (highY : _) -> do
-      let hoverHigh = hoverBase {inputMousePos = V2 1 (highY + 0.5)}
-      _ <- runFrame ctx hoverHigh ui
-      overlaysHigh <- collectOverlayTextSpans ctx hoverHigh
-      let bgFor needle spans = [bg | (_, txt, _, bg, _) <- spans, needle `T.isInfixOf` txt]
-      case (bgFor "Low" overlaysHigh, bgFor "High" overlaysHigh) of
-        ([lowBg], [highBg]) -> assert failed (lowBg /= highBg)
-        _ -> assert failed False
-      case ([rectY r | (r, txt, _, _, _) <- overlaysOpen, "Low" `T.isInfixOf` txt], bgFor "High" overlaysHigh) of
-        ((lowY : _), [highHoverBg]) -> do
-          let hoverLow = hoverBase {inputMousePos = V2 1 (lowY + 0.5)}
-          _ <- runFrame ctx hoverLow ui
-          overlaysLow <- collectOverlayTextSpans ctx hoverLow
-          case bgFor "Low" overlaysLow of
-            [lowHoverBg] -> assertEq failed lowHoverBg highHoverBg
-            _ -> assert failed False
-        _ -> assert failed False
-    _ -> assert failed False
 
 runSelectDropFlushTest :: Context -> IORef Int -> IO ()
 runSelectDropFlushTest ctx failed = do

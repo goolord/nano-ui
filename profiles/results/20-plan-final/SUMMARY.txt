@@ -1,0 +1,75 @@
+nano-ui frame-allocation reduction plan: session report (final)
+date: 2026-09-12 (Linux x86_64, GHC 9.14.1, -O2 -mavx2, RTS -N1 -A64m -T -I0)
+
+Goal: >=70% fewer allocated bytes/frame on a fixed workload.
+
+Outcome: 70% NOT met. Delivered 29.1% on the deterministic ui/runFrame
+benchmark (455 -> 323 KB medium, 945 -> 670 KB large) and large widget
+microbenchmark wins, with no test regressions and byte-identical draw
+geometry. Phases 4 (dense storage) and 5 (layout reuse) were not
+implemented; the remaining allocation is diffuse per-widget structural
+overhead, which those rewrites must address.
+
+Commits this session:
+  79dfc5c perf(store): physical-equality diff shortcuts + targeted write helpers
+  864998a perf(text): cache widget-label placement across frames
+  dca6eea perf(geometry): strict loops and cheaper arena snapshot bracket
+  9b15058 docs(perf): record plan session results and remaining allocation map
+  77503c1 perf(draw): fuse rounded fill and stroke into one arena reservation
+  199fcc8 docs(perf): update plan session report to the fused-geometry result
+  3126c7b perf(draw): batch per-character text glyphs into one reservation
+
+Allocation (tasty-bench, ui/runFrame; allocated per iteration):
+  workload   baseline   final    delta
+  small       17 KB     16 KB    -5.9%
+  medium     455 KB    323 KB   -29.0%
+  large      945 KB    670 KB   -29.1%
+
+SDL demo alloc/frame (baseline -> final):
+  Full DemoUi runFrame      509.7 -> 480.2 KB   (-5.8%)
+  100x Button               534.9 -> 397.5 KB  (-25.7%)
+  100x Checkbox             636.8 -> 493.5 KB  (-22.5%)
+  100x Slider               857.3 -> 700.9 KB  (-18.2%)
+  100x Radio Button        2090.3 ->1829.6 KB  (-12.5%)
+  100x Select (Dropdown)    682.0 -> 560.2 KB  (-17.9%)
+  100x TextInput            885.3 -> 803.2 KB  (-9.3%)
+  20x TextArea              162.8 -> 138.7 KB  (-14.8%)
+  20x ColorPicker          1626.5 ->1463.9 KB  (-10.0%)
+  Tree: 50 items            401.6 -> 296.2 KB  (-26.2%)
+
+Baseline reproduction (see 16-plan-baseline/SUMMARY.txt):
+  cabal build all
+  BENCH=$(find dist-newstyle -type f -name nano-ui-sdl-bench | head -1)
+  "$BENCH" -p '$0 ~ /runFrame/' +RTS -N1 -T -RTS
+  PROF=$(find dist-newstyle -type f -name nano-ui-sdl-profile | head -1)
+  "$PROF" +RTS -N1 -A64m -T -I0 -RTS
+  cabal test all
+
+Correctness:
+  cabal test all PASS. nano-ui-id-bench zero-alloc gate PASS. SDL
+  warm-glyph-lookup gate PASS (0.000 B/lookup). Draw geometry
+  byte-identical to baseline at every phase: DemoUi 6047 verts / 16335 idx
+  / 24 cmds; HUD 3684/3612/3512; Table 947/1869/7.
+
+Remaining bottleneck (measured this session):
+  A standalone harness (see notes) measured the marginal per-widget
+  allocation: ~2.4 KB (box), ~2.7 KB (label), ~3.3 KB (button), of which
+  `addWidgetStyled` is ~1.2 KB. Module-scoped -fprof-auto splits that 1.2 KB
+  across the do-block glue (Eff binds, captured closures, Response, Maybe)
+  with no single allocation site -- i.e. it is diffuse structural overhead.
+  An empty frame costs ~11 KB, ~20% of it Effectful runEff/env handling,
+  ~17% writeDamage. The fixed cost and the ~60 small allocations/widget are
+  exactly what Phase 4 (dense persistent slots) targets.
+
+Attempted and rejected (measured no gain, reverted):
+  - float-argument pushQuadF (GHC already elides the boxed Rect)
+  - NOINLINE resolveInteraction diagnostic (allocation unchanged)
+  - INLINE addWidget/addWidgetResp/addWidgetStyled (unchanged; 10x compile)
+  - addWidgetIO top-level worker to keep the block out of the Eff closure
+    (allocation unchanged)
+  - manual set/clear replacing bracket_ in withArenaArraysSnap (no gain)
+
+Deferred with rationale:
+  - Phase 4 dense storage and Phase 5 layout reuse: architectural; the
+    measured diffuse per-widget/frame overhead is their target.
+  - Demo FPS-string formatting cache: affects only the debug HUD.

@@ -27,8 +27,6 @@ module NanoUI.Testing.Harness
   , assertScrollGutter
   , assertScrollGutterPad
   , assertWheelTitlePinned
-  , terminalAboutModalMaxH
-  , terminalAboutModalMaxFooter
   , findGrabHover
   , dragWindowEdge
   , vertUv
@@ -36,9 +34,6 @@ module NanoUI.Testing.Harness
   , checkLabelAlignEnd
   , checkLabelAlignEndInk
   , checkIdleFullDamage
-  , oneColFaOrigins
-  , closeSpanPos
-  , closeSpanStart
   , windowTitleGrab
   , runDragFrom
   , DemoSpan
@@ -433,30 +428,6 @@ assertWheelTitlePinned failed ctx inp0 ui title line1 wheelAt mClipMax = do
         Just maxY ->
           failWhen failed (any (\(Rect _ y _ h, _, _, _, _) -> y < 0 || y + h > maxY) spans1)
 
-terminalAboutModalMaxH :: HostProfile -> FontMetrics -> Float
-terminalAboutModalMaxH host fm =
-  let
-    pad = resolveLayoutPadding host fm (Padding 4 4 4 4)
-    modalGap = resolveLayoutGap host fm 8
-    bodyGap = resolveLayoutGap host fm (layoutGap defaultLayout)
-    line = fmLineHeight fm
-    titleH = if host == CellHost then 1 else 28
-    sepH = 1
-    bodyRows = (4 :: Int)
-    bodyH =
-      fromIntegral bodyRows * line
-        + bodyGap * fromIntegral (pred bodyRows)
-    chromeH = titleH + sepH + bodyH + modalGap * 2
-   in
-    padT pad + padB pad + chromeH + 0.5
-
-terminalAboutModalMaxFooter :: HostProfile -> FontMetrics -> Float
-terminalAboutModalMaxFooter host fm =
-  let
-    pad = resolveLayoutPadding host fm (Padding 4 4 4 4)
-   in
-    padB pad + fmLineHeight fm
-
 findGrabHover ::
   Context -> NanoUI a -> Input -> Float -> [Float] -> IO (Maybe Input)
 findGrabHover ctx ui inp0 thumbX = go
@@ -514,32 +485,11 @@ checkIdleFullDamage failed ctx inpAfter inpIdle ui = do
   dmg <- takeDamage ctx
   failWhen failed (dmg /= DamageFull)
 
-oneColFaOrigins :: [(Rect, T.Text, a, b, c)] -> [(Int, Int)]
-oneColFaOrigins spans =
-  [ (round (rectX r), round (rectY r))
-  | (r, txt, _, _, _) <- spans
-  , rectW r < 2
-  , loneFontAwesome (T.strip txt)
-  ]
-
-closeSpanPos :: [(Rect, T.Text, a, b, c)] -> Maybe (Int, Int)
-closeSpanPos spans =
-  case
-    [ (round (rectX r), round (rectY r))
-    | (r, txt, _, _, _) <- spans
-    , T.strip txt == iconClose glyphIcons
-    ] of
-    (p : _) -> Just p
-    [] -> Nothing
-
-closeSpanStart :: [(Rect, T.Text, a, b, c)] -> Maybe Int
-closeSpanStart spans = fmap fst (closeSpanPos spans)
-
 checkLabelAlignEnd :: IORef Int -> Context -> IO ()
 checkLabelAlignEnd failed ctx = do
   let
     fm = ctxFontMetrics ctx
-    (ix, _) = labelContentInset (ctxHostProfile ctx) fm
+    (ix, _) = labelContentInset fm
     tw = fmAdvance fm ' ' * 2
     boxW = tw + 2 * ix + 4
     inp = emptyInput {inputWindowSize = Size (boxW + 8) 8}

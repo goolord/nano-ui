@@ -120,12 +120,7 @@ hosts: Hosts {
   style.stroke: "#2d6a4f"
   direction: right
 
-  sdl: "SDL  PixelHost\nsnapDamage, renderDrawDataPass, present" {
-    class: box
-    style.fill: "#eef7f2"
-    style.stroke: "#2d6a4f"
-  }
-  term: "Term  CellHost\nrasterizeLayeredArena, blit cells" {
+  sdl: "SDL\nsnapDamage, renderDrawDataPass, present" {
     class: box
     style.fill: "#eef7f2"
     style.stroke: "#2d6a4f"
@@ -135,4 +130,3 @@ hosts: Hosts {
 idle.present -> frame.reset: run frame
 frame.damage -> drawdata
 drawdata -> hosts.sdl
-drawdata -> hosts.term

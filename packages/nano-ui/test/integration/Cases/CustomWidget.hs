@@ -52,7 +52,7 @@ runCustomWidgetMeasureTest ctx failed = do
   let inp = withInput 400 400
       ui = column $ do
         customWidget_ defaultCustomWidgetSpec
-          { widgetMeasure = Just $ \_ _ _ -> (160, 48)
+          { widgetMeasure = Just $ \_ _ -> (160, 48)
           , widgetLayout = defaultLayout
           }
   resp <- warmup2 ctx inp ui

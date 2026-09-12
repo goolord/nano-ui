@@ -219,6 +219,7 @@ data KeyNav = KeyNav
   deriving (Eq, Show)
 
 -- | Arrow / Enter / Space while 'wid' is focused.
+{-# INLINE useKeyNav #-}
 useKeyNav :: (Ui :> es) => WidgetId -> Eff es KeyNav
 useKeyNav wid = do
   ctx <- askContext
@@ -242,6 +243,7 @@ useKeyNav wid = do
 
 -- | True when Enter or Space was pressed while @wid@ holds focus. Buttons,
 -- checkboxes, and toggle switches treat this as a click.
+{-# INLINE keyActivated #-}
 keyActivated :: (Ui :> es) => WidgetId -> Eff es Bool
 keyActivated wid = do
   nav <- useKeyNav wid

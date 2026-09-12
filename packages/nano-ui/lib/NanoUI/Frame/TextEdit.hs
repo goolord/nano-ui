@@ -124,7 +124,6 @@ import NanoUI.Font
 import NanoUI.Frame.Chrome
   ( fillStyledRect
   , overlayMenuStyle
-  , padDropText
   , pushMenuShadow
   , strokeStyledRect
   , textInputFocused
@@ -185,11 +184,9 @@ import NanoUI.Style
   )
 import NanoUI.Types
   ( Color (..)
-  , HostProfile
   , Rect (..)
   , Size (..)
   , V2 (..)
-  , isCellHost
   , lerpColor
   , onGrid
   , rectContains
@@ -232,7 +229,7 @@ import NanoUI.Widgets.TextInput (applyTextInputMenuAction)
 textCharAtX :: Context -> Text -> Float -> Float -> IO Int
 textCharAtX ctx text startX mouseX =
   let fm = ctxFontMetrics ctx
-   in pure (textIndexAtX (ctxHostProfile ctx) fm text (max 0 (mouseX - startX)))
+   in pure (textIndexAtX fm text (max 0 (mouseX - startX)))
 
 data TextEditMenuRow
   = TextEditMenuSep
@@ -251,22 +248,22 @@ textEditMenuRows =
 
 -- Row geometry delegates to the shared menu metrics in "NanoUI.Font" so the
 -- bespoke text-field context menu and the generic popup menu stay identical.
-textEditMenuSepH :: HostProfile -> Float
+textEditMenuSepH :: Float
 textEditMenuSepH = menuSepH
 
 textEditMenuMinW :: Float
 textEditMenuMinW = menuMinW
 
-textEditMenuItemH :: HostProfile -> Float
+textEditMenuItemH :: Float
 textEditMenuItemH = menuItemRowH
 
-textEditMenuRowH :: HostProfile -> TextEditMenuRow -> Float
-textEditMenuRowH host = \case
-  TextEditMenuSep -> textEditMenuSepH host
-  TextEditMenuItem {} -> textEditMenuItemH host
+textEditMenuRowH :: TextEditMenuRow -> Float
+textEditMenuRowH = \case
+  TextEditMenuSep -> textEditMenuSepH
+  TextEditMenuItem {} -> textEditMenuItemH
 
-textEditMenuContentH :: HostProfile -> Float
-textEditMenuContentH host = sum (map (textEditMenuRowH host) textEditMenuRows)
+textEditMenuContentH :: Float
+textEditMenuContentH = sum (map textEditMenuRowH textEditMenuRows)
 
 textEditMenuStyle :: Theme -> Style
 textEditMenuStyle = overlayMenuStyle
@@ -278,9 +275,9 @@ textEditMenuWidth ctx = do
   let maxTw = maximum (map fst ws)
   pure (max textEditMenuMinW (maxTw + 2 * textInputMenuItemPadX + 2 * textInputMenuOuterPad))
 
-textEditMenuRectAt :: HostProfile -> FontMetrics -> Float -> Float -> Float -> Size -> Rect
-textEditMenuRectAt host _fm x y menuW win =
-  let h = 2 * textInputMenuOuterPad + textEditMenuContentH host
+textEditMenuRectAt :: FontMetrics -> Float -> Float -> Float -> Size -> Rect
+textEditMenuRectAt _fm x y menuW win =
+  let h = 2 * textInputMenuOuterPad + textEditMenuContentH
       Size ww wh = win
       rx = max 0 (min x (ww - menuW))
       ry = max 0 (min y (wh - h))
@@ -289,30 +286,29 @@ textEditMenuRectAt host _fm x y menuW win =
 textEditMenuRect :: TextInputMenu -> Rect
 textEditMenuRect = textInputMenuRect
 
-textEditMenuContentRect :: HostProfile -> Rect -> FontMetrics -> Rect
-textEditMenuContentRect host menuRect _fm =
+textEditMenuContentRect :: Rect -> FontMetrics -> Rect
+textEditMenuContentRect menuRect _fm =
   let pad = textInputMenuOuterPad
    in Rect
         (rectX menuRect + pad)
         (rectY menuRect + pad)
         (rectW menuRect - 2 * pad)
-        (textEditMenuContentH host)
+        textEditMenuContentH
 
-textEditMenuLayout :: HostProfile -> [(TextEditMenuRow, Float, Float)]
-textEditMenuLayout host = go 0 textEditMenuRows
+textEditMenuLayout :: [(TextEditMenuRow, Float, Float)]
+textEditMenuLayout = go 0 textEditMenuRows
   where
     go _ [] = []
     go y (entry : rest) =
-      let h = textEditMenuRowH host entry
+      let h = textEditMenuRowH entry
        in (entry, y, h) : go (y + h) rest
 
-textEditMenuPickAction :: HostProfile -> Rect -> FontMetrics -> V2 -> Maybe Int
-textEditMenuPickAction host menuRect fm mouse =
-  let content = textEditMenuContentRect host menuRect fm
+textEditMenuPickAction :: Rect -> FontMetrics -> V2 -> Maybe Int
+textEditMenuPickAction menuRect fm mouse =
+  let content = textEditMenuContentRect menuRect fm
       relY = v2Y mouse - rectY content
-   in if relY < 0 || relY >= textEditMenuContentH host
-        then Nothing
-        else pick relY (textEditMenuLayout host)
+   in if relY < 0 || relY >= textEditMenuContentH then Nothing
+        else pick relY textEditMenuLayout
   where
     pick _ [] = Nothing
     pick y ((TextEditMenuSep, _, h) : rest)
@@ -356,7 +352,7 @@ openTextEditMenu ctx inp =
         writeIORef (ctxFocusId ctx) wid
         fm <- pure (ctxFontMetrics ctx)
         menuW <- textEditMenuWidth ctx
-        let menuRect = textEditMenuRectAt (ctxHostProfile ctx) fm (v2X mouse) (v2Y mouse) menuW (inputWindowSize inp)
+        let menuRect = textEditMenuRectAt fm (v2X mouse) (v2Y mouse) menuW (inputWindowSize inp)
         setTextInputMenu ctx (Just (TextInputMenu wid menuRect))
         markDirty ctx
 
@@ -400,7 +396,7 @@ finalizeTextEditMenuPick ctx inp =
             rect = textEditMenuRect menu
          in when (rectContains rect mouse) $ do
               let fm = ctxFontMetrics ctx
-              case textEditMenuPickAction (ctxHostProfile ctx) rect fm mouse of
+              case textEditMenuPickAction rect fm mouse of
                 Nothing -> setTextInputMenu ctx Nothing
                 Just idx -> do
                   enabled <- textFieldMenuActionEnabled ctx (textInputMenuWidget menu) idx
@@ -443,7 +439,7 @@ textEditMenuCursorKind ctx inp = do
       if not (rectContains rect mouse)
         then pure Nothing
         else
-          case textEditMenuPickAction (ctxHostProfile ctx) rect fm mouse of
+          case textEditMenuPickAction rect fm mouse of
             Nothing -> pure Nothing
             Just idx -> do
               enabled <- textFieldMenuActionEnabled ctx (textInputMenuWidget menu) idx
@@ -458,55 +454,53 @@ drawTextEditMenuOverlays ctx inp = do
       allow <- widgetOverlayAllowed ctx (textInputMenuWidget menu)
       when allow $ do
         let fm = ctxFontMetrics ctx
-        when (not (isCellHost (ctxHostProfile ctx))) $ do
-          theme <- readIORef (ctxTheme ctx)
-          let da = ctxDrawArena ctx
-              mouse = inputMousePos inp
-              menuRect = textEditMenuRect menu
-              menuStyle = textEditMenuStyle theme
-              content = textEditMenuContentRect (ctxHostProfile ctx) menuRect fm
-              wid = textInputMenuWidget menu
-          pushMenuShadow da menuRect (styleCornerRadius menuStyle)
-          fillStyledRect da False menuStyle menuRect
-          strokeStyledRect
-            da
-            False
-            menuStyle
-            (rectX menuRect)
-            (rectY menuRect)
-            (rectW menuRect)
-            (rectH menuRect)
-          forM_ (textEditMenuLayout (ctxHostProfile ctx)) $ \(entry, relY, h) -> do
-            let rowRect = Rect (rectX menuRect) (rectY content + relY) (rectW menuRect) h
-            case entry of
-              TextEditMenuSep -> do
-                let sepCol = themeSeparator theme
-                    margin = textInputMenuItemPadX
-                    lineY = rectY rowRect + h / 2
-                pushRect
-                  da
-                  (Rect (rectX rowRect + margin) lineY (rectW rowRect - 2 * margin) 1)
-                  sepCol
-              TextEditMenuItem action lbl -> do
-                enabled <- textFieldMenuActionEnabled ctx wid action
-                let hovered = enabled && rectContains rowRect mouse
-                when hovered $ do
-                  pushRect da rowRect (styleHoverBg menuStyle)
-                  let accent = themeAccent theme
-                      barRect =
-                        Rect
-                          (rectX rowRect)
-                          (rectY rowRect + menuAccentInset)
-                          menuAccentW
-                          (rectH rowRect - 2 * menuAccentInset)
-                  pushRoundedRect da barRect 1 accent
-                unless (T.null lbl) $ do
-                  (_tw, th) <- ctxMeasureText ctx lbl
-                  let (ix, _) = widgetContentInset (ctxHostProfile ctx) fm
-                      tx = rectX content + textInputMenuItemPadX + ix
-                      ty = centeredTextY (ctxHostProfile ctx) fm (rectY content + relY) h th
-                      fg = textEditMenuItemFg menuStyle enabled
-                  pushText da fm tx ty lbl fg
+        theme <- readIORef (ctxTheme ctx)
+        let da = ctxDrawArena ctx
+            mouse = inputMousePos inp
+            menuRect = textEditMenuRect menu
+            menuStyle = textEditMenuStyle theme
+            content = textEditMenuContentRect menuRect fm
+            wid = textInputMenuWidget menu
+        pushMenuShadow da menuRect (styleCornerRadius menuStyle)
+        fillStyledRect da menuStyle menuRect
+        strokeStyledRect
+          da
+          menuStyle
+          (rectX menuRect)
+          (rectY menuRect)
+          (rectW menuRect)
+          (rectH menuRect)
+        forM_ (textEditMenuLayout) $ \(entry, relY, h) -> do
+          let rowRect = Rect (rectX menuRect) (rectY content + relY) (rectW menuRect) h
+          case entry of
+            TextEditMenuSep -> do
+              let sepCol = themeSeparator theme
+                  margin = textInputMenuItemPadX
+                  lineY = rectY rowRect + h / 2
+              pushRect
+                da
+                (Rect (rectX rowRect + margin) lineY (rectW rowRect - 2 * margin) 1)
+                sepCol
+            TextEditMenuItem action lbl -> do
+              enabled <- textFieldMenuActionEnabled ctx wid action
+              let hovered = enabled && rectContains rowRect mouse
+              when hovered $ do
+                pushRect da rowRect (styleHoverBg menuStyle)
+                let accent = themeAccent theme
+                    barRect =
+                      Rect
+                        (rectX rowRect)
+                        (rectY rowRect + menuAccentInset)
+                        menuAccentW
+                        (rectH rowRect - 2 * menuAccentInset)
+                pushRoundedRect da barRect 1 accent
+              unless (T.null lbl) $ do
+                (_tw, th) <- ctxMeasureText ctx lbl
+                let (ix, _) = widgetContentInset fm
+                    tx = rectX content + textInputMenuItemPadX + ix
+                    ty = centeredTextY fm (rectY content + relY) h th
+                    fg = textEditMenuItemFg menuStyle enabled
+                pushText da fm tx ty lbl fg
 
 collectTextEditMenuSpans :: Context -> Input -> IO [(Rect, T.Text, Color, Color, Rect)]
 collectTextEditMenuSpans ctx inp = do
@@ -519,18 +513,16 @@ collectTextEditMenuSpans ctx inp = do
           mouse = inputMousePos inp
           menuRect = textEditMenuRect menu
           menuStyle = textEditMenuStyle theme
-          content = textEditMenuContentRect (ctxHostProfile ctx) menuRect fm
+          content = textEditMenuContentRect menuRect fm
           wid = textInputMenuWidget menu
       allow <- widgetOverlayAllowed ctx wid
       if not allow
         then pure []
-        else if isCellHost (ctxHostProfile ctx)
-        then terminalTextEditMenuSpans ctx menuRect content fm menuStyle mouse wid
         else do
-          let (ix, _) = widgetContentInset (ctxHostProfile ctx) fm
+          let (ix, _) = widgetContentInset fm
               bg = styleBg menuStyle
           spans <-
-            forM (textEditMenuLayout (ctxHostProfile ctx)) $ \(entry, relY, h) -> do
+            forM (textEditMenuLayout) $ \(entry, relY, h) -> do
               let rowRect = Rect (rectX menuRect) (rectY content + relY) (rectW menuRect) h
               case entry of
                 TextEditMenuSep -> pure []
@@ -544,52 +536,9 @@ collectTextEditMenuSpans ctx inp = do
                           else bg
                   (tw, th) <- ctxMeasureText ctx lbl
                   let tx = rectX content + textInputMenuItemPadX + ix
-                      ty = centeredTextY (ctxHostProfile ctx) fm (rectY content + relY) h th
+                      ty = centeredTextY fm (rectY content + relY) h th
                   pure [(Rect tx ty tw th, lbl, fg, rowBg, menuRect)]
           pure (concat spans)
-
-terminalTextEditMenuSpans ::
-  Context ->
-  Rect ->
-  Rect ->
-  FontMetrics ->
-  Style ->
-  V2 ->
-  WidgetId ->
-  IO [(Rect, T.Text, Color, Color, Rect)]
-terminalTextEditMenuSpans ctx menuRect content _fm menuStyle mouse wid = do
-  theme <- readIORef (ctxTheme ctx)
-  let rx :: Int
-      rx = round (rectX menuRect)
-      wi :: Int
-      wi = max 1 (round (rectW menuRect))
-      innerW = max 0 (wi - 1)
-      dropBg = styleBg menuStyle
-      dropHoverBg = styleHoverBg menuStyle
-      sepFg = themeSeparator theme
-  rows <-
-    forM (textEditMenuLayout (ctxHostProfile ctx)) $ \(entry, relY, _h) -> do
-      let rowY :: Int
-          rowY = round (rectY content + relY)
-      case entry of
-        TextEditMenuSep ->
-          pure
-            [ ( Rect (fromIntegral rx) (fromIntegral rowY) (fromIntegral wi) 1
-              , T.replicate innerW (T.singleton '\x2500')
-              , sepFg
-              , dropBg
-              , menuRect
-              )
-            ]
-        TextEditMenuItem action lbl -> do
-          enabled <- textFieldMenuActionEnabled ctx wid action
-          let fg = textEditMenuItemFg menuStyle enabled
-              rowRect = Rect (rectX menuRect) (rectY content + relY) (rectW menuRect) (textEditMenuItemH (ctxHostProfile ctx))
-              hovered = enabled && rectContains rowRect mouse
-              rowBg = if hovered then dropHoverBg else dropBg
-              rowText = T.singleton ' ' <> padDropText innerW lbl
-          pure [(Rect (fromIntegral rx) (fromIntegral rowY) (fromIntegral wi) 1, rowText, fg, rowBg, menuRect)]
-  pure (concat rows)
 
 textFieldClickSameCell :: TextFieldClickCell -> TextFieldClickCell -> Bool
 textFieldClickSameCell a b =
@@ -624,15 +573,15 @@ data TextInputGeom = TextInputGeom
   }
   deriving (Eq, Show)
 
-textInputGeom :: HostProfile -> FontMetrics -> Float -> Float -> Float -> Float -> TextInputGeom
-textInputGeom _host fm x y w h =
+textInputGeom :: FontMetrics -> Float -> Float -> Float -> Float -> TextInputGeom
+textInputGeom fm x y w h =
   let fieldH = if h > 0 then h else textInputFieldHeight fm
    in TextInputGeom {tigFieldRect = Rect x y w fieldH}
 
-textInputFieldTextClip :: HostProfile -> TextInputGeom -> FontMetrics -> Rect
-textInputFieldTextClip host geom fm =
+textInputFieldTextClip :: TextInputGeom -> FontMetrics -> Rect
+textInputFieldTextClip geom fm =
   let field = tigFieldRect geom
-      (ix, iy) = widgetContentInset host fm
+      (ix, iy) = widgetContentInset fm
    in Rect
         (rectX field + ix)
         (rectY field + iy)
@@ -647,24 +596,23 @@ nodeTextFieldGeom :: Context -> NodeIdx -> Float -> Float -> Float -> Float -> I
 nodeTextFieldGeom ctx idx x y w h = do
   si <- getStyleIdx (ctxNodeArena ctx) idx
   opts <- getOptions (ctxNodeArena ctx) idx
-  let host = ctxHostProfile ctx
-      fm = ctxFontMetrics ctx
-  if textInputBareMode si && not (isCellHost host)
+  let fm = ctxFontMetrics ctx
+  if textInputBareMode si
     then
-      let (ix, iy) = widgetContentInset host fm
+      let (ix, iy) = widgetContentInset fm
        in pure
             ( Rect x y w h
             , Rect (x + ix) (y + iy) (max 0 (w - 2 * ix)) (max 0 (h - 2 * iy))
             )
     else
-      if textInputSearchMode si && not (isCellHost host)
+      if textInputSearchMode si
         then
           if null opts
-            then pure (Rect x y w h, searchFieldTextClip host fm x y w h)
-            else pure (Rect x y w h, comboTextClip host fm x y w h)
+            then pure (Rect x y w h, searchFieldTextClip fm x y w h)
+            else pure (Rect x y w h, comboTextClip fm x y w h)
         else
-          let geom = textInputGeom host fm x y w h
-           in pure (tigFieldRect geom, textInputFieldTextClip host geom fm)
+          let geom = textInputGeom fm x y w h
+           in pure (tigFieldRect geom, textInputFieldTextClip geom fm)
 
 -- | Whether the pointer is over the clear (×) button of a non-empty search
 -- field. Search fields reserve that slot even when empty, but the button is
@@ -677,8 +625,7 @@ searchClearHit ctx wid mouse = do
     Just idx -> do
       si <- getStyleIdx (ctxNodeArena ctx) idx
       opts <- getOptions (ctxNodeArena ctx) idx
-      let terminal = isCellHost (ctxHostProfile ctx)
-      if not (textInputSearchMode si) || terminal || not (null opts)
+      if not (textInputSearchMode si) || not (null opts)
         then pure False
         else do
           value <- textInputValue ctx idx
@@ -686,7 +633,7 @@ searchClearHit ctx wid mouse = do
             then pure False
             else do
               (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-              let (_, clearRect) = searchFieldIconRects (ctxHostProfile ctx) (ctxFontMetrics ctx) x y w h
+              let (_, clearRect) = searchFieldIconRects (ctxFontMetrics ctx) x y w h
               pure (rectContains clearRect mouse)
 
 -- | Clear a search field. The debounced pulse picks the empty text up as an
@@ -703,10 +650,10 @@ clearSearchField ctx wid = do
   markDirty ctx
 
 tagTextInputClippedSpans ::
-  HostProfile -> Rect -> Float -> Float -> Float -> Float -> FontMetrics -> [(Rect, T.Text, Color, Color)] -> [(Rect, T.Text, Color, Color, Rect)]
-tagTextInputClippedSpans host parentClip x y w h fm spans =
-  let geom = textInputGeom host fm x y w h
-      fieldClip = textInputFieldTextClip host geom fm
+  Rect -> Float -> Float -> Float -> Float -> FontMetrics -> [(Rect, T.Text, Color, Color)] -> [(Rect, T.Text, Color, Color, Rect)]
+tagTextInputClippedSpans parentClip x y w h fm spans =
+  let geom = textInputGeom fm x y w h
+      fieldClip = textInputFieldTextClip geom fm
       labelClip = Rect x y w (fmLineHeight fm)
       tagOne (rect, txt, fg, bg) =
         let clipRect = padTextClipRect rect
@@ -730,7 +677,6 @@ drawTextSelectionLine da selX selY selW selH selBg =
     pushRect da (Rect selX selY (max 1 selW) (max 4 selH)) selBg
 
 computeTextInputScroll ::
-  HostProfile ->
   FontMetrics ->
   Float ->
   Text ->
@@ -738,13 +684,13 @@ computeTextInputScroll ::
   Float ->
   Bool ->
   Float
-computeTextInputScroll host fm viewportW value cursor oldScroll isFocused
+computeTextInputScroll fm viewportW value cursor oldScroll isFocused
   | not isFocused = 0
   | viewportW <= 0 = 0
   | otherwise =
       let prefix = T.take (max 0 (min (T.length value) cursor)) value
-          caretRelX = textDisplayWidth host fm prefix
-          totalTextW = textDisplayWidth host fm value
+          caretRelX = textDisplayWidth fm prefix
+          totalTextW = textDisplayWidth fm value
           maxScroll = max 0 (totalTextW + 1 - viewportW)
           s0
             | caretRelX < oldScroll = caretRelX
@@ -763,70 +709,59 @@ syncTextInputScroll ctx idx x y w h = do
   let cursor = IM.findWithDefault (T.length value) (slotKey slotCursor key) (storeInt store)
       oldScroll = IM.findWithDefault 0 (slotKey slotTextInputScroll key) (storeFloat store)
       fm = ctxFontMetrics ctx
-      host = ctxHostProfile ctx
       availW = rectW clip
-      newScroll = computeTextInputScroll host fm availW value cursor oldScroll focus
+      newScroll = computeTextInputScroll fm availW value cursor oldScroll focus
   when (newScroll /= oldScroll) $ do
     setStore ctx (store {storeFloat = IM.insert (slotKey slotTextInputScroll key) newScroll (storeFloat store)})
   pure newScroll
 
 drawTextInputSelection :: DrawArena -> Context -> NodeIdx -> Float -> Float -> Float -> Float -> Style -> IO ()
 drawTextInputSelection da ctx idx x y w h style = do
-  let terminal = isCellHost (ctxHostProfile ctx)
-  if terminal
-    then pure ()
-    else do
-      focus <- textInputFocused ctx idx
-      when focus $ do
-        value <- textInputValue ctx idx
-        wid <- getWidgetId (ctxNodeArena ctx) idx
-        store <- getStore ctx
-        let key = intKey wid
-            cursor = IM.findWithDefault (T.length value) (slotKey slotCursor key) (storeInt store)
-            anchor = IM.findWithDefault cursor (slotKey slotAnchor key) (storeInt store)
-            selLo = min anchor cursor
-            selHi = max anchor cursor
-            hasSel = selLo < selHi
-        when hasSel $ do
-          theme <- readIORef (ctxTheme ctx)
-          (box, clip) <- nodeTextFieldGeom ctx idx x y w h
-          let fm = ctxFontMetrics ctx
-              selBg = selectionBgColor (themeAccent theme) (styleBg style)
-              host = ctxHostProfile ctx
-              wLo = textDisplayWidth host fm (T.take selLo value)
-              wHi = textDisplayWidth host fm (T.take selHi value)
-              lineH = layoutLineHeight host fm
-              ty = centeredTextY host fm (rectY box) (rectH box) lineH
-          scrollX <- syncTextInputScroll ctx idx x y w h
-          let selX = rectX clip + wLo - scrollX
-              selW = wHi - wLo
-          drawTextSelectionLine da selX ty selW lineH selBg
+  focus <- textInputFocused ctx idx
+  when focus $ do
+    value <- textInputValue ctx idx
+    wid <- getWidgetId (ctxNodeArena ctx) idx
+    store <- getStore ctx
+    let key = intKey wid
+        cursor = IM.findWithDefault (T.length value) (slotKey slotCursor key) (storeInt store)
+        anchor = IM.findWithDefault cursor (slotKey slotAnchor key) (storeInt store)
+        selLo = min anchor cursor
+        selHi = max anchor cursor
+        hasSel = selLo < selHi
+    when hasSel $ do
+      theme <- readIORef (ctxTheme ctx)
+      (box, clip) <- nodeTextFieldGeom ctx idx x y w h
+      let fm = ctxFontMetrics ctx
+          selBg = selectionBgColor (themeAccent theme) (styleBg style)
+          wLo = textDisplayWidth fm (T.take selLo value)
+          wHi = textDisplayWidth fm (T.take selHi value)
+          lineH = layoutLineHeight fm
+          ty = centeredTextY fm (rectY box) (rectH box) lineH
+      scrollX <- syncTextInputScroll ctx idx x y w h
+      let selX = rectX clip + wLo - scrollX
+          selW = wHi - wLo
+      drawTextSelectionLine da selX ty selW lineH selBg
 
 drawTextInputCaret :: DrawArena -> Context -> NodeIdx -> Float -> Float -> Float -> Float -> Style -> IO ()
 drawTextInputCaret da ctx idx x y w h style = do
-  let terminal = isCellHost (ctxHostProfile ctx)
-  if terminal
-    then pure ()
-    else do
-      focus <- textInputFocused ctx idx
-      when focus $ do
-        value <- textInputValue ctx idx
-        wid <- getWidgetId (ctxNodeArena ctx) idx
-        store <- getStore ctx
-        let key = intKey wid
-            cursor = IM.findWithDefault (T.length value) (slotKey slotCursor key) (storeInt store)
-        lbl <- getText (ctxNodeArena ctx) idx
-        let fm = ctxFontMetrics ctx
-            host = ctxHostProfile ctx
-            fieldTxt = textInputFieldText lbl value focus
-            prefix = T.take (max 0 (min (T.length fieldTxt) cursor)) fieldTxt
-            pw = textDisplayWidth host fm prefix
-            lineH = layoutLineHeight host fm
-        (box, clip) <- nodeTextFieldGeom ctx idx x y w h
-        let ty = centeredTextY host fm (rectY box) (rectH box) lineH
-        scrollX <- syncTextInputScroll ctx idx x y w h
-        let (caretX, caretY, caretH) = selectionCaretGeom (rectX clip - scrollX) ty pw lineH
-        drawTextCaret da caretX caretY caretH (styleFg style)
+  focus <- textInputFocused ctx idx
+  when focus $ do
+    value <- textInputValue ctx idx
+    wid <- getWidgetId (ctxNodeArena ctx) idx
+    store <- getStore ctx
+    let key = intKey wid
+        cursor = IM.findWithDefault (T.length value) (slotKey slotCursor key) (storeInt store)
+    lbl <- getText (ctxNodeArena ctx) idx
+    let fm = ctxFontMetrics ctx
+        fieldTxt = textInputFieldText lbl value focus
+        prefix = T.take (max 0 (min (T.length fieldTxt) cursor)) fieldTxt
+        pw = textDisplayWidth fm prefix
+        lineH = layoutLineHeight fm
+    (box, clip) <- nodeTextFieldGeom ctx idx x y w h
+    let ty = centeredTextY fm (rectY box) (rectH box) lineH
+    scrollX <- syncTextInputScroll ctx idx x y w h
+    let (caretX, caretY, caretH) = selectionCaretGeom (rectX clip - scrollX) ty pw lineH
+    drawTextCaret da caretX caretY caretH (styleFg style)
 
 applyTextInputClick :: Context -> WidgetId -> Text -> Int -> Int -> IO ()
 applyTextInputClick ctx wid value idx clicks =
@@ -941,17 +876,17 @@ data TextAreaHit = TextAreaHit
   }
 
 -- | A caption-less text area fills its whole node rect.
-textAreaGeom :: HostProfile -> FontMetrics -> Float -> Float -> Float -> Float -> TextAreaGeom
-textAreaGeom _host fm x y w h =
+textAreaGeom :: FontMetrics -> Float -> Float -> Float -> Float -> TextAreaGeom
+textAreaGeom fm x y w h =
   let s = fmSnapScale fm
       lineH = onGrid s (fmLineHeight fm)
    in TextAreaGeom {tagFieldRect = Rect x y w h, tagLineHeight = lineH}
 
-textAreaFieldClip :: HostProfile -> TextAreaGeom -> FontMetrics -> Rect
-textAreaFieldClip host geom fm =
+textAreaFieldClip :: TextAreaGeom -> FontMetrics -> Rect
+textAreaFieldClip geom fm =
   let s = fmSnapScale fm
       field = tagFieldRect geom
-      (ix, iy) = widgetContentInset host fm
+      (ix, iy) = widgetContentInset fm
    in Rect
         (rectX field + onGrid s ix)
         (rectY field + onGrid s iy)
@@ -995,12 +930,11 @@ textAreaContentMetrics ctx idx = do
     else do
       fm <- resolveTextAreaFont ctx idx
       buf <- ensureTextAreaBuffer ctx key (IM.findWithDefault "" key (storeText store))
-      let host = ctxHostProfile ctx
-          lineTexts = TB.toLines buf
+      let lineTexts = TB.toLines buf
           lineCount = max 1 (length lineTexts)
           lineH = onGrid (fmSnapScale fm) (fmLineHeight fm)
           contentH = fromIntegral lineCount * lineH
-          contentW = maximum (0 : [textDisplayWidth host fm l | l <- lineTexts])
+          contentW = maximum (0 : [textDisplayWidth fm l | l <- lineTexts])
       store' <- getStore ctx
       setStore
         ctx
@@ -1044,8 +978,8 @@ loadTextAreaStateAtFm ctx idx fm x y w h = do
   store <- getStore ctx
   let initial = IM.findWithDefault "" key (storeText store)
   buf <- ensureTextAreaBuffer ctx key initial
-  let geom = textAreaGeom (ctxHostProfile ctx) fm x y w h
-      clip = textAreaFieldClip (ctxHostProfile ctx) geom fm
+  let geom = textAreaGeom fm x y w h
+      clip = textAreaFieldClip geom fm
       vpW = rectW clip
       vpH = rectH clip
       lineH = tagLineHeight geom
@@ -1058,14 +992,13 @@ data TextAreaScrollBarLayouts = TextAreaScrollBarLayouts
   }
   deriving (Eq, Show)
 
-textAreaBarLanes :: HostProfile -> FontMetrics -> (Float, Float)
-textAreaBarLanes host fm =
-  let (barW, _) = scrollBarGeomFor host fm ScrollBarList
-      outer = scrollBarOuterGap host fm ScrollBarList
+textAreaBarLanes :: FontMetrics -> (Float, Float)
+textAreaBarLanes fm =
+  let (barW, _) = scrollBarGeomFor fm ScrollBarList
+      outer = scrollBarOuterGap ScrollBarList
    in (barW + outer, barW + outer)
 
 textAreaScrollBarLayouts ::
-  HostProfile ->
   FontMetrics ->
   Rect ->
   Float ->
@@ -1073,11 +1006,11 @@ textAreaScrollBarLayouts ::
   Float ->
   Float ->
   TextAreaScrollBarLayouts
-textAreaScrollBarLayouts host fm field contentW contentH scrollX scrollY =
-  let (ix, iy) = widgetContentInset host fm
+textAreaScrollBarLayouts fm field contentW contentH scrollX scrollY =
+  let (ix, iy) = widgetContentInset fm
       baseW = max 0 (rectW field - 2 * ix)
       baseH = max 0 (rectH field - 2 * iy)
-      (barLaneW, barLaneH) = textAreaBarLanes host fm
+      (barLaneW, barLaneH) = textAreaBarLanes fm
       hasV0 = contentH > baseH
       hasH0 = contentW > baseW
       hasV = contentH > (if hasH0 then max 0 (baseH - barLaneH) else baseH)
@@ -1086,27 +1019,27 @@ textAreaScrollBarLayouts host fm field contentW contentH scrollX scrollY =
       padH = Padding ix (if hasV then ix + barLaneW else ix) 0 0
       vLayout =
         if hasV
-          then scrollBarLayout host fm ScrollBarList DirColumn (rectX field) (rectY field) (rectW field) (rectH field) padV contentH scrollY
+          then scrollBarLayout fm ScrollBarList DirColumn (rectX field) (rectY field) (rectW field) (rectH field) padV contentH scrollY
           else Nothing
       hLayout =
         if hasH
-          then scrollBarLayout host fm ScrollBarList DirRow (rectX field) (rectY field) (rectW field) (rectH field) padH contentW scrollX
+          then scrollBarLayout fm ScrollBarList DirRow (rectX field) (rectY field) (rectW field) (rectH field) padH contentW scrollX
           else Nothing
    in TextAreaScrollBarLayouts {tasbVertical = vLayout, tasbHorizontal = hLayout}
 
-textAreaScrollBarLayout :: HostProfile -> FontMetrics -> Rect -> Float -> Float -> Maybe ScrollBarLayout
-textAreaScrollBarLayout host fm field contentH scrollY =
-  tasbVertical (textAreaScrollBarLayouts host fm field 0 contentH 0 scrollY)
+textAreaScrollBarLayout :: FontMetrics -> Rect -> Float -> Float -> Maybe ScrollBarLayout
+textAreaScrollBarLayout fm field contentH scrollY =
+  tasbVertical (textAreaScrollBarLayouts fm field 0 contentH 0 scrollY)
 
-textAreaHScrollBarLayout :: HostProfile -> FontMetrics -> Rect -> Float -> Float -> Maybe ScrollBarLayout
-textAreaHScrollBarLayout host fm field contentW scrollX =
-  tasbHorizontal (textAreaScrollBarLayouts host fm field contentW 0 scrollX 0)
+textAreaHScrollBarLayout :: FontMetrics -> Rect -> Float -> Float -> Maybe ScrollBarLayout
+textAreaHScrollBarLayout fm field contentW scrollX =
+  tasbHorizontal (textAreaScrollBarLayouts fm field contentW 0 scrollX 0)
 
-isMouseOnTextAreaScrollBar :: HostProfile -> FontMetrics -> Rect -> Float -> Float -> Float -> Float -> V2 -> Bool
-isMouseOnTextAreaScrollBar host fm field contentW contentH scrollX scrollY mouse =
-  let layouts = textAreaScrollBarLayouts host fm field contentW contentH scrollX scrollY
-      (ix, iy) = widgetContentInset host fm
-      (barLaneW, barLaneH) = textAreaBarLanes host fm
+isMouseOnTextAreaScrollBar :: FontMetrics -> Rect -> Float -> Float -> Float -> Float -> V2 -> Bool
+isMouseOnTextAreaScrollBar fm field contentW contentH scrollX scrollY mouse =
+  let layouts = textAreaScrollBarLayouts fm field contentW contentH scrollX scrollY
+      (ix, iy) = widgetContentInset fm
+      (barLaneW, barLaneH) = textAreaBarLanes fm
       hasV = isJust (tasbVertical layouts)
       hasH = isJust (tasbHorizontal layouts)
       padV = Padding 0 0 iy (if hasH then iy + barLaneH else iy)
@@ -1114,12 +1047,12 @@ isMouseOnTextAreaScrollBar host fm field contentW contentH scrollX scrollY mouse
       onV = case tasbVertical layouts of
         Nothing -> False
         Just layout ->
-          let lane = scrollChromeLane host fm ScrollBarList DirColumn (rectX field) (rectY field) (rectW field) (rectH field) padV
+          let lane = scrollChromeLane fm ScrollBarList DirColumn (rectX field) (rectY field) (rectW field) (rectH field) padV
            in rectContains lane mouse || rectContains (sbTrack layout) mouse
       onH = case tasbHorizontal layouts of
         Nothing -> False
         Just layout ->
-          let lane = scrollChromeLane host fm ScrollBarList DirRow (rectX field) (rectY field) (rectW field) (rectH field) padH
+          let lane = scrollChromeLane fm ScrollBarList DirRow (rectX field) (rectY field) (rectW field) (rectH field) padH
            in rectContains lane mouse || rectContains (sbTrack layout) mouse
    in onV || onH
 
@@ -1128,8 +1061,7 @@ isMouseOnTextAreaScrollBarAt ctx idx mouse = do
   wid <- getWidgetId (ctxNodeArena ctx) idx
   (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
   fm <- resolveTextAreaFont ctx idx
-  let host = ctxHostProfile ctx
-      geom = textAreaGeom host fm x y w h
+  let geom = textAreaGeom fm x y w h
       field = tagFieldRect geom
   store <- getStore ctx
   let key = intKey wid
@@ -1139,9 +1071,9 @@ isMouseOnTextAreaScrollBarAt ctx idx mouse = do
       lineCount = max 1 (length lineTexts)
       lineH = tagLineHeight geom
       contentH = fromIntegral lineCount * lineH
-      contentW = maximum (0 : [textDisplayWidth host fm l | l <- lineTexts])
+      contentW = maximum (0 : [textDisplayWidth fm l | l <- lineTexts])
       (sx, sy) = IM.findWithDefault (0, 0) (slotKey slotTextAreaScroll key) (storePoint store)
-  pure (isMouseOnTextAreaScrollBar host fm field contentW contentH sx sy mouse)
+  pure (isMouseOnTextAreaScrollBar fm field contentW contentH sx sy mouse)
 
 syncTextAreaViewport :: Context -> NodeIdx -> Float -> Float -> Float -> Float -> IO ()
 syncTextAreaViewport ctx idx x y w h = do
@@ -1154,11 +1086,10 @@ syncTextAreaViewportFm ctx idx fm x y w h = do
   store <- getStore ctx
   (contentW, contentH) <- textAreaContentMetrics ctx idx
   let key = intKey wid
-      host = ctxHostProfile ctx
-      geom = textAreaGeom host fm x y w h
-      clip = textAreaFieldClip host geom fm
+      geom = textAreaGeom fm x y w h
+      clip = textAreaFieldClip geom fm
       vp = (rectW clip, rectH clip)
-      (barLaneW, barLaneH) = textAreaBarLanes host fm
+      (barLaneW, barLaneH) = textAreaBarLanes fm
       hasV0 = contentH > rectH clip
       hasH0 = contentW > rectW clip
       hasV = contentH > (if hasH0 then max 0 (rectH clip - barLaneH) else rectH clip)
@@ -1189,12 +1120,11 @@ drawTextAreaSelection ::
   Context ->
   TA.TextAreaState ->
   TextAreaGeom ->
-  HostProfile ->
   FontMetrics ->
   Theme ->
   Style ->
   IO ()
-drawTextAreaSelection da _ctx state geom host fm theme style = do
+drawTextAreaSelection da _ctx state geom fm theme style = do
   snap <- textAreaSnap da
   let anchor = TA.selectionAnchor state
       cursor = TB.getCursor (TA.buffer state)
@@ -1203,7 +1133,7 @@ drawTextAreaSelection da _ctx state geom host fm theme style = do
         lineTexts = TB.toLines (TA.buffer state)
         field = tagFieldRect geom
         lineH = tagLineHeight geom
-        (ix, iy) = widgetContentInset host fm
+        (ix, iy) = widgetContentInset fm
         (scrollX, scrollY) = TA.scrollOffset state
         scrollXf = snap (realToFrac scrollX)
         scrollYf = snap (realToFrac scrollY)
@@ -1233,8 +1163,8 @@ drawTextAreaSelection da _ctx state geom host fm theme style = do
                   else lineLen
               )
       when (startCol < endCol) $ do
-        let wLo = textDisplayWidth host fm (T.take startCol line)
-            wHi = textDisplayWidth host fm (T.take endCol line)
+        let wLo = textDisplayWidth fm (T.take startCol line)
+            wHi = textDisplayWidth fm (T.take endCol line)
             selW = wHi - wLo
             ly = contentTop + fromIntegral row * lineH - scrollYf
             selX = rectX field + ix + wLo - scrollXf
@@ -1251,74 +1181,69 @@ drawTextAreaContent da ctx idx x y w h style = do
 drawTextAreaContentWith :: DrawArena -> Context -> FontMetrics -> NodeIdx -> Float -> Float -> Float -> Float -> Style -> IO ()
 drawTextAreaContentWith da ctx fm idx x y w h style = do
   snap <- textAreaSnap da
-  let terminal = isCellHost (ctxHostProfile ctx)
-  if terminal
-    then pure ()
-    else do
-      syncTextAreaViewportFm ctx idx fm x y w h
-      focus <- textAreaFocused ctx idx
-      theme <- readIORef (ctxTheme ctx)
-      let host = ctxHostProfile ctx
-          geom = textAreaGeom host fm x y w h
-          field = tagFieldRect geom
-          lineH = tagLineHeight geom
-          clip = textAreaFieldClip host geom fm
-          contentTop = rectY clip
-          fg = styleFg style
-      state <- loadTextAreaStateAtFm ctx idx fm x y w h
-      (contentW, contentH) <- textAreaContentMetrics ctx idx
-      let buf = TA.buffer state
-          lineTexts = TB.toLines buf
-          (scrollX, scrollY) = TA.scrollOffset state
-          scrollXf = snap (realToFrac scrollX)
-          scrollYf = snap (realToFrac scrollY)
-          contentX = rectX clip - scrollXf
-          fieldTop = rectY field
-          fieldBottom = fieldTop + rectH field
-          layouts = textAreaScrollBarLayouts host fm field contentW contentH scrollXf scrollYf
-          mVLayout = tasbVertical layouts
-          mHLayout = tasbHorizontal layouts
-          (barLaneW, barLaneH) = textAreaBarLanes host fm
-          textClip =
-            Rect
-              (rectX clip)
-              (rectY clip)
-              (if isJust mVLayout then max 0 (rectW clip - barLaneW) else rectW clip)
-              (if isJust mHLayout then max 0 (rectH clip - barLaneH) else rectH clip)
-      withClip da textClip $ do
-        when focus $
-          drawTextAreaSelection da ctx state geom host fm theme style
-        forM_ (zip [0 :: Int ..] lineTexts) $ \(row, line) -> do
-          let ly = contentTop + fromIntegral row * lineH - scrollYf
-          when (ly + lineH >= fieldTop && ly <= fieldBottom) $
-            unless (T.null line) $ do
-              pushText da fm contentX ly line fg
-        when focus $ do
-          let TB.Cursor row col = TB.getCursor buf
-              currentLine =
-                if row >= 0 && row < length lineTexts
-                  then lineTexts !! row
-                  else ""
-              prefix = T.take col currentLine
-              pw = textDisplayWidth host fm prefix
-              (caretX, caretY, caretH) = selectionCaretGeom contentX (contentTop + fromIntegral row * lineH - scrollYf) pw lineH
-          drawTextCaret da caretX caretY caretH fg
-      let base = themePanel theme
-          trackBg = scrollBarTrackColor base theme terminal
-          thumbCol = scrollBarThumbColor base theme terminal
-          drawBar layout = do
-            let track = sbTrack layout
-                thumb = sbThumb layout
-                trackR = min 4 (min (rectW track) (rectH track) / 2)
-                thumbR = min 4 (min (rectW thumb) (rectH thumb) / 2)
-            pushRoundedRect da track trackR trackBg
-            pushRoundedRect da thumb thumbR thumbCol
-      case mVLayout of
-        Nothing -> pure ()
-        Just layout -> drawBar layout
-      case mHLayout of
-        Nothing -> pure ()
-        Just layout -> drawBar layout
+  syncTextAreaViewportFm ctx idx fm x y w h
+  focus <- textAreaFocused ctx idx
+  theme <- readIORef (ctxTheme ctx)
+  let geom = textAreaGeom fm x y w h
+      field = tagFieldRect geom
+      lineH = tagLineHeight geom
+      clip = textAreaFieldClip geom fm
+      contentTop = rectY clip
+      fg = styleFg style
+  state <- loadTextAreaStateAtFm ctx idx fm x y w h
+  (contentW, contentH) <- textAreaContentMetrics ctx idx
+  let buf = TA.buffer state
+      lineTexts = TB.toLines buf
+      (scrollX, scrollY) = TA.scrollOffset state
+      scrollXf = snap (realToFrac scrollX)
+      scrollYf = snap (realToFrac scrollY)
+      contentX = rectX clip - scrollXf
+      fieldTop = rectY field
+      fieldBottom = fieldTop + rectH field
+      layouts = textAreaScrollBarLayouts fm field contentW contentH scrollXf scrollYf
+      mVLayout = tasbVertical layouts
+      mHLayout = tasbHorizontal layouts
+      (barLaneW, barLaneH) = textAreaBarLanes fm
+      textClip =
+        Rect
+          (rectX clip)
+          (rectY clip)
+          (if isJust mVLayout then max 0 (rectW clip - barLaneW) else rectW clip)
+          (if isJust mHLayout then max 0 (rectH clip - barLaneH) else rectH clip)
+  withClip da textClip $ do
+    when focus $
+      drawTextAreaSelection da ctx state geom fm theme style
+    forM_ (zip [0 :: Int ..] lineTexts) $ \(row, line) -> do
+      let ly = contentTop + fromIntegral row * lineH - scrollYf
+      when (ly + lineH >= fieldTop && ly <= fieldBottom) $
+        unless (T.null line) $ do
+          pushText da fm contentX ly line fg
+    when focus $ do
+      let TB.Cursor row col = TB.getCursor buf
+          currentLine =
+            if row >= 0 && row < length lineTexts
+              then lineTexts !! row
+              else ""
+          prefix = T.take col currentLine
+          pw = textDisplayWidth fm prefix
+          (caretX, caretY, caretH) = selectionCaretGeom contentX (contentTop + fromIntegral row * lineH - scrollYf) pw lineH
+      drawTextCaret da caretX caretY caretH fg
+  let base = themePanel theme
+      trackBg = scrollBarTrackColor base theme
+      thumbCol = scrollBarThumbColor base theme
+      drawBar layout = do
+        let track = sbTrack layout
+            thumb = sbThumb layout
+            trackR = min 4 (min (rectW track) (rectH track) / 2)
+            thumbR = min 4 (min (rectW thumb) (rectH thumb) / 2)
+        pushRoundedRect da track trackR trackBg
+        pushRoundedRect da thumb thumbR thumbCol
+  case mVLayout of
+    Nothing -> pure ()
+    Just layout -> drawBar layout
+  case mHLayout of
+    Nothing -> pure ()
+    Just layout -> drawBar layout
 
 textAreaHitForWidget :: Context -> WidgetId -> IO (Maybe TextAreaHit)
 textAreaHitForWidget ctx wid = do
@@ -1332,9 +1257,9 @@ textAreaHitForWidget ctx wid = do
         else do
           (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
           fm <- resolveTextAreaFont ctx idx
-          let geom = textAreaGeom (ctxHostProfile ctx) fm x y w h
+          let geom = textAreaGeom fm x y w h
               field = tagFieldRect geom
-              clip = textAreaFieldClip (ctxHostProfile ctx) geom fm
+              clip = textAreaFieldClip geom fm
           pure
             ( Just
                 TextAreaHit
@@ -1358,7 +1283,7 @@ textAreaCursorAt ctx state hit mouse = do
       (scrollX, scrollY) = TA.scrollOffset state
       scrollXf = snap (realToFrac scrollX)
       scrollYf = snap (realToFrac scrollY)
-      (_, iy) = widgetContentInset (ctxHostProfile ctx) fm
+      (_, iy) = widgetContentInset fm
       contentTop = rectY (tahFieldRect hit) + iy
       relY = v2Y mouse - contentTop + scrollYf
       rawRow = floor (relY / max 1 (tahLineH hit))
@@ -1367,7 +1292,7 @@ textAreaCursorAt ctx state hit mouse = do
         if row < length lineTexts
           then lineTexts !! row
           else ""
-      col = textIndexAtX (ctxHostProfile ctx) fm line (max 0 (v2X mouse - (tahContentX hit - scrollXf)))
+      col = textIndexAtX fm line (max 0 (v2X mouse - (tahContentX hit - scrollXf)))
   pure (row, col)
 
 updateTextAreaSelection :: Context -> WidgetId -> TextAreaHit -> TB.Cursor -> TB.Cursor -> IO ()

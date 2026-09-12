@@ -1,0 +1,11 @@
+option -p: Could not parse: ui/runFrame is not a valid pattern
+
+Usage: nano-ui-sdl-bench [(-p|--pattern PATTERN)] [-t|--timeout DURATION] 
+                         [--hide-progress] [-l|--list-tests] 
+                         [-j|--num-threads NUMBER] [-q|--quiet] 
+                         [--hide-successes] [--min-duration-to-report DURATION] 
+                         [--color never|always|auto] [--ansi-tricks ARG] 
+                         [--baseline ARG] [--csv ARG] [--svg ARG] [--stdev ARG] 
+                         [--fail-if-slower ARG] [--fail-if-faster ARG] 
+                         [--time-mode ARG]
+glyph-lookup: 0.000 B/lookup (budget 1.0)

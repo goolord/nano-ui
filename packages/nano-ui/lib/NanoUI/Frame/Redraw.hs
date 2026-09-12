@@ -46,7 +46,8 @@ import NanoUI.Frame.Select (overlayMenuOwnerAt)
 needsRedraw :: Context -> Input -> Input -> IO Bool
 needsRedraw = needsRedrawBody
 
--- Window/scroll/resize drag marks dirty every frame. TUI must still poll input then.
+-- Window/scroll/resize drag marks dirty every frame, so input must still be
+-- polled on those frames.
 -- Color picker and slider hold ctxActiveId without extra window/scroll refs.
 pointerDragActive :: Context -> IO Bool
 pointerDragActive ctx = do

@@ -344,8 +344,8 @@ runTabsScrollTest _ failed = do
       forbidden =
         [ styleBg inputStyle
         , styleBorder inputStyle
-        , scrollBarTrackColor inputStyle theme False
-        , scrollBarThumbColor inputStyle theme False
+        , scrollBarTrackColor inputStyle theme
+        , scrollBarThumbColor inputStyle theme
         ]
       inBar = [(r, c) | (r, c) <- quads, isJust (rectIntersect r bar), c `elem` forbidden]
   assert failed (null inBar)

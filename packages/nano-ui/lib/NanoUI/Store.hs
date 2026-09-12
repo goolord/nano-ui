@@ -57,6 +57,8 @@ module NanoUI.Store
   , isSelectOpen
   , setSelectOpen
   , closeSelects
+  , ptrEq
+  , eqByPtr
   )
 where
 
@@ -66,7 +68,22 @@ import Data.IntSet (IntSet)
 import Data.Text (Text)
 import Data.Word (Word64)
 import qualified Data.IntMap.Strict as IM
+import GHC.Exts (isTrue#, reallyUnsafePtrEquality#)
 import NanoUI.Id (mix64)
+
+-- | Physical-equality shortcut. Pointer equality implies value equality for
+-- immutable values, so callers may use 'True' to skip a structural comparison
+-- of a field the caller never rebuilt. 'False' only means \"compare properly\".
+{-# INLINE ptrEq #-}
+ptrEq :: a -> a -> Bool
+ptrEq a b = isTrue# (reallyUnsafePtrEquality# a b)
+
+-- | '==' with a physical-equality fast path. Unchanged fields of a
+-- record-updated store keep their identity, so whole-store comparisons become
+-- cheap when only one map was rebuilt.
+{-# INLINE eqByPtr #-}
+eqByPtr :: Eq a => a -> a -> Bool
+eqByPtr a b = ptrEq a b || a == b
 
 -- | Unified widget state. Same-type fields that share a widget key use 'slotKey'.
 data WidgetStore = WidgetStore
@@ -87,14 +104,14 @@ instance Eq WidgetStore where
   a == b =
     storeMirrorGen a == storeMirrorGen b
       && storeOpenSelect a == storeOpenSelect b
-      && storeInt a == storeInt b
-      && storeFloat a == storeFloat b
-      && storeDouble a == storeDouble b
-      && storePoint a == storePoint b
-      && storeText a == storeText b
-      && storeIntSet a == storeIntSet b
-      && storeFloatList a == storeFloatList b
-      && storeIntList a == storeIntList b
+      && eqByPtr (storeInt a) (storeInt b)
+      && eqByPtr (storeFloat a) (storeFloat b)
+      && eqByPtr (storeDouble a) (storeDouble b)
+      && eqByPtr (storePoint a) (storePoint b)
+      && eqByPtr (storeText a) (storeText b)
+      && eqByPtr (storeIntSet a) (storeIntSet b)
+      && eqByPtr (storeFloatList a) (storeFloatList b)
+      && eqByPtr (storeIntList a) (storeIntList b)
 
 instance Show WidgetStore where
   show st =

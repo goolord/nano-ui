@@ -25,7 +25,7 @@ module NanoUI.Widgets.ColorPicker
   )
 where
 
-import Control.Monad (forM_, unless, void, when)
+import Control.Monad (forM_, void, when)
 import Data.Bits ((.&.))
 import Data.IORef (readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
@@ -74,7 +74,6 @@ import NanoUI.Style
   )
 import NanoUI.Types
   ( Color (..)
-  , HostProfile
   , Rect (..)
   , V2 (..)
   , clamp
@@ -87,7 +86,6 @@ import NanoUI.Types
   , colorRGBA
   , colorToWord32
   , hsvToRgb
-  , isCellHost
   , rectH
   , rectW
   , rectX
@@ -219,16 +217,15 @@ colorPickerExtraH _ = colorPickerSvH + colorPickerGap
 
 colorPickerGeom ::
   Bool
-  -> HostProfile
   -> FontMetrics
   -> Float
   -> Float
   -> Float
   -> Float
   -> ColorPickerGeom
-colorPickerGeom showAlpha host fm x y w h =
+colorPickerGeom showAlpha fm x y w h =
   let
-    labelH = layoutLineHeight host fm
+    labelH = layoutLineHeight fm
     contentTop = y
     contentAvailH = h
     barW = colorPickerBarW
@@ -270,19 +267,12 @@ colorPickerGeom showAlpha host fm x y w h =
       }
 
 colorPickerMeasureSize ::
-  HostProfile
-  -> FontMetrics
+  FontMetrics
   -> (Text -> IO (Float, Float))
   -> IO (Float, Float, Float)
-colorPickerMeasureSize host fm measure =
-  if isCellHost host
-    then do
-      (mw, mh) <- measure "#000000"
-      pure (mw, mh, 0)
-    else do
-      let
-        contentW = colorPickerMinWidth
-      pure (contentW, 0, colorPickerExtraH (layoutLineHeight host fm))
+colorPickerMeasureSize fm _measure =
+  let contentW = colorPickerMinWidth
+   in pure (contentW, 0, colorPickerExtraH (layoutLineHeight fm))
 
 -- Clamp each axis on its own so a corner is S/V 0 or 1, not a frozen mid value.
 svFromMouse :: Rect -> V2 -> (Float, Float)
@@ -381,7 +371,6 @@ drawBarHandle da bar cy col = do
 
 drawColorPickerPanel ::
   Bool
-  -> HostProfile
   -> FontMetrics
   -> DrawArena
   -> WidgetStore
@@ -392,10 +381,10 @@ drawColorPickerPanel ::
   -> Float
   -> Float
   -> IO ()
-drawColorPickerPanel showAlpha host fm da store wid style x y w h = do
-  unless (isCellHost host) $ do
+drawColorPickerPanel showAlpha fm da store wid style x y w h = do
+  do
     let
-      geom = colorPickerGeom showAlpha host fm x y w h
+      geom = colorPickerGeom showAlpha fm x y w h
       hue = widgetStoreHue store wid colorPickerDefaultColor
       (sat, val) = widgetStoreSv store wid colorPickerDefaultColor
       newCol = widgetStoreColor store wid colorPickerDefaultColor
@@ -483,31 +472,7 @@ colorPickerRGBA = colorPickerWith True
 colorPickerWith ::
   Ui :> es => Bool -> Color -> Eff es (Response, Color)
 colorPickerWith showAlpha initial = do
-  ctx <- askContext
-  if isCellHost (ctxHostProfile ctx)
-    then colorPickerCell initial
-    else colorPickerRich showAlpha initial
-
--- Terminal hosts keep the single-line @#RRGGBB@ representation.
-colorPickerCell :: Ui :> es => Color -> Eff es (Response, Color)
-colorPickerCell initial = do
-  ctx <- askContext
-  wid <- nextId
-  uiIO $ registerFocusable ctx wid
-  uiIO $ initColorPickerStore ctx wid initial
-  nav <- useKeyNav wid
-  let keyMoved = knLeft nav || knRight nav || knUp nav || knDown nav
-  when keyMoved $ do
-    st <- uiIO (getStore ctx)
-    uiIO $ applyColorPickerKeys ctx wid (widgetStoreColor st wid initial) nav
-    st2 <- uiIO (getStore ctx)
-    uiIO $ commitColorPickerCurrent ctx wid (widgetStoreColor st2 wid initial)
-  resp <-
-    addWidget wid NodeColorPicker "" 0 (fillW defaultLayout)
-  store <- uiIO (getStore ctx)
-  let
-    final = widgetStoreColor store wid initial
-  pure (setChanged (final /= initial) resp, final)
+  colorPickerRich showAlpha initial
 
 colorPickerRich ::
   Ui :> es => Bool -> Color -> Eff es (Response, Color)
@@ -518,7 +483,6 @@ colorPickerRich showAlpha initial = do
   uiIO $ registerFocusable ctx wid
   uiIO $ initColorPickerStore ctx wid initial
   let
-    host = ctxHostProfile ctx
     fm = ctxFontMetrics ctx
     key = intKey wid
     readColor = do
@@ -615,7 +579,7 @@ colorPickerRich showAlpha initial = do
       pure (s || v)
     let
       Rect cx cy cw ch = respRect cResp
-      geom = colorPickerGeom showAlpha host fm cx cy cw ch
+      geom = colorPickerGeom showAlpha fm cx cy cw ch
       empty = Rect 0 0 0 0
       isActive = active == wid
       heldByOther =

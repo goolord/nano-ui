@@ -120,7 +120,7 @@ treeRow rowIdx (nodeIdx, depth, hasKids, lbl) selectedIdx expandedSet = do
       let mouse = inputMousePos inp
           onChevron = case mrect of
             Just rect@(Rect x y w h) ->
-              rectContains (treeChevronRect (ctxHostProfile ctx) (ctxFontMetrics ctx) x y w h depth) mouse
+              rectContains (treeChevronRect (ctxFontMetrics ctx) x y w h depth) mouse
                 && rectContains rect mouse
             _ -> False
       if hasKids && onChevron

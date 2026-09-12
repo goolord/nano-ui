@@ -14,7 +14,7 @@ module NanoUI.Frame.Paint.Widgets
   ) where
 
 
-import Control.Monad (forM_, unless, when)
+import Control.Monad (unless, when)
 import Data.IORef (readIORef)
 import Data.Maybe (fromMaybe)
 import qualified Data.Text as T
@@ -47,7 +47,6 @@ import NanoUI.Font
   , treeChevronRect
   , widgetContentInset
   )
-import NanoUI.Types (HostProfile, isCellHost)
 import NanoUI.Layout.Arena
   ( NodeIdx
   , NodeType (..)
@@ -123,33 +122,29 @@ paintTextInputNode env idx (Rect x y w h) = do
       da = peDrawArena env
       fm = peFontMetrics env
       theme = peTheme env
-      terminal = peTerminal env
-  if terminal
-    then pure ()
-    else do
-      style <- widgetVisualStyle ctx NodeTextInput idx
-      focus <- textInputFocused ctx idx
-      si <- getStyleIdx (peNodeArena env) idx
-      if textInputBareMode si
-        then paintBareField ctx da fm theme style idx focus x y w h
-        else
-          if textInputSearchMode si
-            then do
-              opts <- getOptions (peNodeArena env) idx
-              if null opts
-                then paintSearchField ctx da fm theme style idx focus x y w h
-                else paintComboField ctx da fm theme style idx focus x y w h
-            else do
-              let geom = textInputGeom (peHost env) fm x y w h
-                  fieldRect = tigFieldRect geom
-                  clip = textInputFieldTextClip (peHost env) geom fm
-              paintTextFieldFrame da theme style focus fieldRect
-              spans <- widgetTextSpans ctx NodeTextInput idx x y w h
-              case spans of
-                (fieldSpan : _) -> do
-                  let (Rect fx fy _ _, field, ffg, _) = fieldSpan
-                  paintClippedFieldText ctx da fm style idx x y w h clip fx fy field ffg
-                _ -> pure ()
+  style <- widgetVisualStyle ctx NodeTextInput idx
+  focus <- textInputFocused ctx idx
+  si <- getStyleIdx (peNodeArena env) idx
+  if textInputBareMode si
+    then paintBareField ctx da fm theme style idx focus x y w h
+    else
+      if textInputSearchMode si
+        then do
+          opts <- getOptions (peNodeArena env) idx
+          if null opts
+            then paintSearchField ctx da fm theme style idx focus x y w h
+            else paintComboField ctx da fm theme style idx focus x y w h
+        else do
+          let geom = textInputGeom fm x y w h
+              fieldRect = tigFieldRect geom
+              clip = textInputFieldTextClip geom fm
+          paintTextFieldFrame da theme style focus fieldRect
+          spans <- widgetTextSpans ctx NodeTextInput idx x y w h
+          case spans of
+            (fieldSpan : _) -> do
+              let (Rect fx fy _ _, field, ffg, _) = fieldSpan
+              paintClippedFieldText ctx da fm style idx x y w h clip fx fy field ffg
+            _ -> pure ()
 
 -- | Multi-line text area.
 {-# NOINLINE paintTextAreaNode #-}
@@ -157,18 +152,13 @@ paintTextAreaNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
 paintTextAreaNode env idx (Rect x y w h) = do
   let ctx = peContext env
       da = peDrawArena env
-      host = peHost env
       theme = peTheme env
-      terminal = peTerminal env
-  if terminal
-    then pure ()
-    else do
-      style <- widgetVisualStyle ctx NodeTextArea idx
-      focus <- textInputFocused ctx idx
-      areaFm <- resolveTextAreaFont ctx idx
-      let fieldRect = tagFieldRect (textAreaGeom host areaFm x y w h)
-      paintTextFieldFrame da theme style focus fieldRect
-      drawTextAreaContentWith da ctx areaFm idx x y w h style
+  style <- widgetVisualStyle ctx NodeTextArea idx
+  focus <- textInputFocused ctx idx
+  areaFm <- resolveTextAreaFont ctx idx
+  let fieldRect = tagFieldRect (textAreaGeom areaFm x y w h)
+  paintTextFieldFrame da theme style focus fieldRect
+  drawTextAreaContentWith da ctx areaFm idx x y w h style
 
 -- | Generic foreground / chrome widget (button, checkbox, radio, slider,
 -- select, tree row, color swatch, table / tab header, ...). Splits into a
@@ -186,7 +176,7 @@ paintWidget env idx nt rect@(Rect x y w h) = do
           else (False, False, False)
       isMenuItem = nt == NodeButton && isMenuItemStyle si
       isMenu = nt == NodeButton && (isMenuItemStyle si || isMenuBarStyle si)
-      opaqueBg = opaqueWidgetBg (peTerminal env) style nt isMenu isClose isTab isTable
+      opaqueBg = opaqueWidgetBg style nt isMenu isClose isTab isTable
   -- Menu rows paint edge-to-edge across the popup panel, exactly like the
   -- text-field context menu painter: the hover fill and the accent marker
   -- span the panel width instead of the (padded) node rect.
@@ -202,125 +192,106 @@ paintWidget env idx nt rect@(Rect x y w h) = do
   paintWidgetForeground env idx nt style si isTable x y w h
 
 -- | Opaque-background decision matching the original walker guard, clause
--- order preserved (NodeTree sits between the checkable/radio rules and the
--- remaining cell-aware rules).
-opaqueWidgetBg :: Bool -> Style -> NodeType -> Bool -> Bool -> Bool -> Bool -> Bool
-opaqueWidgetBg terminal style nt isMenu isClose isTab isTable
+-- order preserved.
+opaqueWidgetBg :: Style -> NodeType -> Bool -> Bool -> Bool -> Bool -> Bool
+opaqueWidgetBg style nt isMenu isClose isTab isTable
   | isMenu = colorA (styleBg style) > 0
   | isClose = False
   | isTab = False
   | isTable = colorA (styleBg style) > 0
-  | terminal, nt == NodeButton = False
-  | terminal, nt == NodeCheckbox = False
-  | terminal, nt == NodeRadio = False
   | nt == NodeTree = colorA (styleBg style) > 0
-  | terminal, nt == NodeSlider = False
-  | terminal, nt == NodeSelect = False
-  | terminal, nt == NodeColorPicker = False
-  | terminal, nt == NodeTextInput = False
-  | terminal, nt == NodeTextArea = False
-  | terminal, nt == NodeText = False
-  | terminal = True
   | otherwise =
       nt /= NodeCheckbox && nt /= NodeRadio && nt /= NodeSlider && nt /= NodeTextInput && nt /= NodeTextArea && nt /= NodeColorPicker
 
-{-# NOINLINE paintWidgetBackground #-}
+{-# INLINE paintWidgetBackground #-}
 paintWidgetBackground :: PaintEnv -> NodeIdx -> NodeType -> Style -> Int -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Rect -> Float -> Float -> Float -> Float -> Float -> IO ()
 paintWidgetBackground env idx nt style si isClose isTab isTable isMenu isMenuItem opaqueBg menuRowRect value x y w h = do
   let ctx = peContext env
       da = peDrawArena env
       fm = peFontMetrics env
-      host = peHost env
       theme = peTheme env
-      terminal = peTerminal env
-  when opaqueBg $ fillStyledRect da terminal style menuRowRect
-  when (not terminal) $ do
-    when (opaqueBg && not isTab && not isTable && not isMenu && nt /= NodeTree) $
-      strokeStyledRect da terminal style x y w h
-    when isMenu $
-      when isMenuItem $ do
-        wid <- getWidgetId (peNodeArena env) idx
-        hot <- readIORef (ctxHotId ctx)
-        when (wid == hot) $ do
-          -- Same marker geometry as the text-field context menu; derived
-          -- from the shared menu metrics so the two painters cannot drift.
-          let barRect =
-                Rect
-                  (rectX menuRowRect)
-                  (y + menuAccentInset)
-                  menuAccentW
-                  (max 0 (h - 2 * menuAccentInset))
-          pushRoundedRect da barRect 1 (themeAccent theme)
-    when isTab $
-      paintTabHeader
+  when opaqueBg $ fillStyledRect da style menuRowRect
+  when (opaqueBg && not isTab && not isTable && not isMenu && nt /= NodeTree) $
+    strokeStyledRect da style x y w h
+  when isMenu $
+    when isMenuItem $ do
+      wid <- getWidgetId (peNodeArena env) idx
+      hot <- readIORef (ctxHotId ctx)
+      when (wid == hot) $ do
+        -- Same marker geometry as the text-field context menu; derived
+        -- from the shared menu metrics so the two painters cannot drift.
+        let barRect =
+              Rect
+                (rectX menuRowRect)
+                (y + menuAccentInset)
+                menuAccentW
+                (max 0 (h - 2 * menuAccentInset))
+        pushRoundedRect da barRect 1 (themeAccent theme)
+  when isTab $
+    paintTabHeader
+      da
+      theme
+      (buttonVisualStyle si `mod` 4)
+      (value > 0.5)
+      style
+      x
+      y
+      w
+      h
+  when isTable $
+    paintTableHeader
+      da
+      theme
+      (value > 0.5)
+      style
+      x
+      y
+      w
+      h
+  case nt of
+    NodeCheckbox ->
+      drawCheckbox
         da
-        host
-        theme
-        (buttonVisualStyle si `mod` 4)
-        (value > 0.5)
+        fm
         style
         x
         y
-        w
         h
-    when isTable $
-      paintTableHeader
+        value
+        (themeAccent theme)
+        (styleBg (themeInput theme))
+    NodeRadio ->
+      drawRadio
         da
-        host
-        theme
-        (value > 0.5)
+        fm
         style
         x
         y
-        w
         h
-    case nt of
-      NodeCheckbox ->
-        drawCheckbox
-          host
+        value
+        (themeAccent theme)
+        (styleBg (themeInput theme))
+    NodeTree -> do
+      let (_, depth, hasKids, expanded) = treeDecodeStyle si
+      when hasKids $
+        drawTreeChevron
           da
           fm
-          style
           x
           y
+          w
           h
-          value
-          (themeAccent theme)
-          (styleBg (themeInput theme))
-      NodeRadio ->
-        drawRadio
-          host
-          da
-          fm
-          style
-          x
-          y
-          h
-          value
-          (themeAccent theme)
-          (styleBg (themeInput theme))
-      NodeTree -> do
-        let (_, depth, hasKids, expanded) = treeDecodeStyle si
-        when hasKids $
-          drawTreeChevron
-            da
-            host
-            fm
-            x
-            y
-            w
-            h
-            depth
-            expanded
-            (styleFg style)
-      NodeSlider -> paintSliderBody env idx x y w h value
-      NodeButton -> when isClose $ drawCloseIcon host fm da x y w h (styleFg style)
-      NodeSelect -> drawSelectChevron da x y w h (styleFg style)
-      NodeColorPicker -> do
-        store <- getStore ctx
-        wid <- getWidgetId (peNodeArena env) idx
-        drawColorPickerPanel (colorPickerAlphaMode si) host fm da store wid style x y w h
-      _ -> pure ()
+          depth
+          expanded
+          (styleFg style)
+    NodeSlider -> paintSliderBody env idx x y w h value
+    NodeButton -> when isClose $ drawCloseIcon fm da x y w h (styleFg style)
+    NodeSelect -> drawSelectChevron da x y w h (styleFg style)
+    NodeColorPicker -> do
+      store <- getStore ctx
+      wid <- getWidgetId (peNodeArena env) idx
+      drawColorPickerPanel (colorPickerAlphaMode si) fm da store wid style x y w h
+    _ -> pure ()
 
 {-# NOINLINE paintSliderBody #-}
 paintSliderBody :: PaintEnv -> NodeIdx -> Float -> Float -> Float -> Float -> Float -> IO ()
@@ -328,7 +299,7 @@ paintSliderBody env _ x y w h value = do
   let da = peDrawArena env
       fm = peFontMetrics env
       theme = peTheme env
-  let track = sliderTrackBounds (peHost env) fm x y w h
+  let track = sliderTrackBounds fm x y w h
       tx = rectX track
       ty = rectY track
       tw = rectW track
@@ -373,7 +344,6 @@ paintWidgetForeground :: PaintEnv -> NodeIdx -> NodeType -> Style -> Int -> Bool
 paintWidgetForeground env idx nt style si isTable x y w h = do
   let ctx = peContext env
       da = peDrawArena env
-      terminal = peTerminal env
   placements <- widgetTextPlacements ctx nt idx x y w h
   mFontColor <- getNodeFontColor (peNodeArena env) idx
   fontSizeVal <- getNodeFontSize (peNodeArena env) idx
@@ -384,19 +354,22 @@ paintWidgetForeground env idx nt style si isTable x y w h = do
       sortMark = if isTable then tableSortMarkOf si else 0
   (fm', _) <- resolveNodeFont env fontSizeVal fweight fstyle fvar
   sortSlotW <-
-    if isTable && sortMark /= 0 && not terminal
-      then fst <$> ctxMeasureText ctx (tableSortBlank False)
+    if isTable && sortMark /= 0
+      then fst <$> ctxMeasureText ctx tableSortBlank
       else pure 0
   let lastLine = length placements - 1
-  forM_ (zip [0 :: Int ..] placements) $ \(i, (txt, px, py, tw, th)) ->
-    unless (T.null txt) $ do
-      pushText da fm' px py txt widgetFg
-      -- Table sort arrow: the label text ends in the blank reserve slot
-      -- (the ▲/▼ codepoint is not in the pruned UI font), so paint the
-      -- mark as a triangle centered in that slot — once, on the line
-      -- that carries the slot.
-      when (isTable && sortMark /= 0 && not terminal && i == lastLine) $
-        drawSortTriangle da (px + tw - sortSlotW / 2) (py + th / 2) (sortMark == 2) widgetFg
+      drawPlacement !i (txt, px, py, tw, th) =
+        unless (T.null txt) $ do
+          pushText da fm' px py txt widgetFg
+          -- Table sort arrow: the label text ends in the blank reserve slot
+          -- (the ▲/▼ codepoint is not in the pruned UI font), so paint the
+          -- mark as a triangle centered in that slot — once, on the line
+          -- that carries the slot.
+          when (isTable && sortMark /= 0 && i == lastLine) $
+            drawSortTriangle da (px + tw - sortSlotW / 2) (py + th / 2) (sortMark == 2) widgetFg
+      go !_ [] = pure ()
+      go !i (p : ps) = drawPlacement i p >> go (i + 1) ps
+  go (0 :: Int) placements
 
 -- | Sort direction triangle for a table header: up when ascending, down when
 -- descending, centered on the label line in the header's reserved slot.
@@ -410,8 +383,8 @@ paintTextFieldFrame :: DrawArena -> Theme -> Style -> Bool -> Rect -> IO ()
 paintTextFieldFrame da theme style focus fieldRect = do
   let borderCol = if focus then themeAccent theme else styleBorder style
       fieldStyle = style {styleBorder = borderCol}
-  fillStyledRect da False style fieldRect
-  strokeStyledRect da False fieldStyle (rectX fieldRect) (rectY fieldRect) (rectW fieldRect) (rectH fieldRect)
+  fillStyledRect da style fieldRect
+  strokeStyledRect da fieldStyle (rectX fieldRect) (rectY fieldRect) (rectW fieldRect) (rectH fieldRect)
 
 -- | Draw a single-line field's text, selection, and caret inside @clip@.
 -- @penX/penY@ locate @txt@ (absolute); the node rect @x y w h@ positions the
@@ -444,10 +417,9 @@ paintClippedFieldText ctx da fm style idx x y w h clip penX penY txt fg = do
 -- selection confined to the space between them.
 paintSearchField :: Context -> DrawArena -> FontMetrics -> Theme -> Style -> NodeIdx -> Bool -> Float -> Float -> Float -> Float -> IO ()
 paintSearchField ctx da fm theme style idx focus x y w h = do
-  let host = ctxHostProfile ctx
-      box = Rect x y w h
-      clip = searchFieldTextClip host fm x y w h
-      (magRect, clearRect) = searchFieldIconRects host fm x y w h
+  let box = Rect x y w h
+      clip = searchFieldTextClip fm x y w h
+      (magRect, clearRect) = searchFieldIconRects fm x y w h
   paintTextFieldFrame da theme style focus box
   value <- textInputValue ctx idx
   lbl <- getText (ctxNodeArena ctx) idx
@@ -464,20 +436,19 @@ paintSearchField ctx da fm theme style idx focus x y w h = do
       else do
         (_tw, th) <- ctxMeasureText ctx display
         pure
-          ( centeredTextY host fm y h th
+          ( centeredTextY fm y h th
           , if isEmpty && not focus then lerpColor baseFg bg 0.5 else baseFg
           )
   paintClippedFieldText ctx da fm style idx x y w h clip (rectX clip - scrollX) ty display fg
   when (not isEmpty) $
-    drawCloseIcon host fm da (rectX clearRect) (rectY clearRect) (rectW clearRect) (rectH clearRect) iconCol
+    drawCloseIcon fm da (rectX clearRect) (rectY clearRect) (rectW clearRect) (rectH clearRect) iconCol
 
 -- | Bare field: the box fills the node rect with no caption or icon chrome.
 -- Callers place their own label beside it.
 paintBareField :: Context -> DrawArena -> FontMetrics -> Theme -> Style -> NodeIdx -> Bool -> Float -> Float -> Float -> Float -> IO ()
 paintBareField ctx da fm theme style idx focus x y w h = do
-  let host = ctxHostProfile ctx
-      box = Rect x y w h
-      (ix, iy) = widgetContentInset host fm
+  let box = Rect x y w h
+      (ix, iy) = widgetContentInset fm
       clip = Rect (x + ix) (y + iy) (max 0 (w - 2 * ix)) (max 0 (h - 2 * iy))
   paintTextFieldFrame da theme style focus box
   value <- textInputValue ctx idx
@@ -492,7 +463,7 @@ paintBareField ctx da fm theme style idx focus x y w h = do
       else do
         (_tw, th) <- ctxMeasureText ctx display
         pure
-          ( centeredTextY host fm y h th
+          ( centeredTextY fm y h th
           , if isEmpty && not focus then lerpColor baseFg bg 0.5 else baseFg
           )
   paintClippedFieldText ctx da fm style idx x y w h clip (rectX clip - scrollX) ty display fg
@@ -514,9 +485,8 @@ drawSearchMagnifier da (Rect x y w h) col = do
 -- right reserve that flips up while the dropdown is open (i.e. focused).
 paintComboField :: Context -> DrawArena -> FontMetrics -> Theme -> Style -> NodeIdx -> Bool -> Float -> Float -> Float -> Float -> IO ()
 paintComboField ctx da fm theme style idx focus x y w h = do
-  let host = ctxHostProfile ctx
-      box = Rect x y w h
-      clip = comboTextClip host fm x y w h
+  let box = Rect x y w h
+      clip = comboTextClip fm x y w h
       chevW = selectChevronReserve
   paintTextFieldFrame da theme style focus box
   value <- textInputValue ctx idx
@@ -541,7 +511,7 @@ paintComboField ctx da fm theme style idx focus x y w h = do
       else do
         (_tw, th) <- ctxMeasureText ctx display
         pure
-          ( centeredTextY host fm y h th
+          ( centeredTextY fm y h th
           , if isEmpty && not focus then lerpColor baseFg bg 0.5 else baseFg
           )
   paintClippedFieldText ctx da fm style idx x y w h clip (rectX clip - scrollX) ty display fg
@@ -552,7 +522,6 @@ verticallyCenteredBox y h box =
    in y + max 0 ((slotH - box) / 2)
 
 drawChoiceControl ::
-  HostProfile ->
   DrawArena ->
   FontMetrics ->
   Style ->
@@ -567,12 +536,9 @@ drawChoiceControl ::
   Bool ->
   (Float -> Float -> Float -> IO ()) ->
   IO ()
-drawChoiceControl host da fm style x y h r bw value accent well solidChecked postMark = do
-  let (ix, _) =
-        if isCellHost host
-          then widgetContentInset host fm
-          else labelContentInset host fm
-      box = checkboxBoxSize host fm
+drawChoiceControl da fm style x y h r bw value accent well solidChecked postMark = do
+  let (ix, _) = labelContentInset fm
+      box = checkboxBoxSize fm
       bx = x + ix
       by = verticallyCenteredBox y h box
       outer = Rect bx by box box
@@ -591,7 +557,6 @@ drawChoiceControl host da fm style x y h r bw value accent well solidChecked pos
       when checked $ postMark bx by box
 
 drawCheckbox ::
-  HostProfile ->
   DrawArena ->
   FontMetrics ->
   Style ->
@@ -602,11 +567,11 @@ drawCheckbox ::
   Color ->
   Color ->
   IO ()
-drawCheckbox host da fm style x y h value accent well =
-  let box = checkboxBoxSize host fm
+drawCheckbox da fm style x y h value accent well =
+  let box = checkboxBoxSize fm
       r = min 6 (box / 3.5)
       bw = 1.5
-   in drawChoiceControl host da fm style x y h r bw value accent well True $ \bx by b ->
+   in drawChoiceControl da fm style x y h r bw value accent well True $ \bx by b ->
         drawCheckboxMark da bx by b (colorRGBA 255 255 255 255)
 
 drawCheckboxMark :: DrawArena -> Float -> Float -> Float -> Color -> IO ()
@@ -628,7 +593,6 @@ drawCheckboxMark da bx by box markCol = do
   cap x2 y2
 
 drawRadio ::
-  HostProfile ->
   DrawArena ->
   FontMetrics ->
   Style ->
@@ -639,11 +603,11 @@ drawRadio ::
   Color ->
   Color ->
   IO ()
-drawRadio host da fm style x y h value accent well =
-  let box = checkboxBoxSize host fm
+drawRadio da fm style x y h value accent well =
+  let box = checkboxBoxSize fm
       r = box / 2
       bw = 2
-   in drawChoiceControl host da fm style x y h r bw value accent well False $ \bx by b -> do
+   in drawChoiceControl da fm style x y h r bw value accent well False $ \bx by b -> do
         s <- readIORef (daSnapScale da)
         let !sx = snapToPixel s bx
             !sy = snapToPixel s by
@@ -652,8 +616,8 @@ drawRadio host da fm style x y h value accent well =
             !dy = sy + (b - dot) / 2
         pushRoundedRectRaw da (Rect dx dy dot dot) (dot / 2) accent
 
-drawCloseIcon :: HostProfile -> FontMetrics -> DrawArena -> Float -> Float -> Float -> Float -> Color -> IO ()
-drawCloseIcon _host _fm da x y w h col = do
+drawCloseIcon :: FontMetrics -> DrawArena -> Float -> Float -> Float -> Float -> Color -> IO ()
+drawCloseIcon _fm da x y w h col = do
   let cx = x + w / 2
       cy = y + h / 2
       arm = min w h * 0.21
@@ -671,7 +635,6 @@ drawSelectChevron da x y w h col = do
 
 drawTreeChevron ::
   DrawArena ->
-  HostProfile ->
   FontMetrics ->
   Float ->
   Float ->
@@ -681,8 +644,8 @@ drawTreeChevron ::
   Bool ->
   Color ->
   IO ()
-drawTreeChevron da host fm x y w h depth expanded col = do
-  let Rect cx cy cw ch = treeChevronRect host fm x y w h depth
+drawTreeChevron da fm x y w h depth expanded col = do
+  let Rect cx cy cw ch = treeChevronRect fm x y w h depth
       mx = cx + cw / 2
       my = cy + ch / 2
       s = min 4.5 (min cw ch * 0.28)

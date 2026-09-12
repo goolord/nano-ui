@@ -55,20 +55,8 @@ packages: Packages {
   class: box
   style.fill: "#ece7dc"
   style.stroke: "#8a8174"
-  grid-columns: 3
+  grid-columns: 2
   grid-gap: 40
-
-  term: "nano-ui-term\nrunTermApp, CellHost\nrunFrame + DrawData" {
-    class: box
-    style.fill: "#dceee6"
-    style.stroke: "#2d6a4f"
-    direction: down
-
-    t_session: Session { class: leaf; style.fill: "#fffdf8"; style.stroke: "#2d6a4f" }
-    t_cells: Cells { class: leaf; style.fill: "#fffdf8"; style.stroke: "#2d6a4f" }
-    t_driver: "Win32 / notcurses" { class: leaf; style.fill: "#fffdf8"; style.stroke: "#2d6a4f" }
-    t_session -> t_cells -> t_driver
-  }
 
   core: "nano-ui core" {
     class: box
@@ -107,7 +95,7 @@ packages: Packages {
       style.fill: "#adc2dc"
       style.stroke: "#3d5a80"
     }
-    test: "NanoUI.Testing\nheadless frames, ASCII" {
+    test: "NanoUI.Testing\nheadless frames, testing" {
       class: leaf
       style.fill: "#f3ead8"
       style.stroke: "#9a6b2f"
@@ -120,7 +108,7 @@ packages: Packages {
     state -> frame
   }
 
-  sdl: "nano-ui-sdl\nrunSdlApp, PixelHost\nrunFrame + DrawData" {
+  sdl: "nano-ui-sdl\nrunSdlApp\nrunFrame + DrawData" {
     class: box
     style.fill: "#dceee6"
     style.stroke: "#2d6a4f"

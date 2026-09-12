@@ -279,7 +279,6 @@ mkCustomDrawContext ctx fm wid = do
       , cdcActive = active == wid
       , cdcDisabled = disabled
       , cdcTheme = theme
-      , cdcHost = ctxHostProfile ctx
       , cdcFont = fm
       }
 
@@ -313,7 +312,6 @@ customWidgetWithId wid spec = do
             , cdcActive   = active == wid
             , cdcDisabled = disabled
             , cdcTheme    = theme
-            , cdcHost     = ctxHostProfile ctx
             , cdcFont     = ctxFontMetrics ctx
             }
     pure (widgetInteract spec wid (respRect resp0) cdc inp)
@@ -474,7 +472,7 @@ knobWith layout diameter minV maxV initial = do
       frac = if range > 0 then max 0 (min 1 ((current - minV) / range)) else 0
   (resp, ()) <- customWidgetWithId wid defaultCustomWidgetSpec
     { widgetLayout = fixedWH diameter diameter layout
-    , widgetMeasure = Just $ \_ _ _ -> (diameter, diameter)
+    , widgetMeasure = Just $ \_ _ -> (diameter, diameter)
     , widgetCursor = Just (\_ -> UiCursorNsResize)
     , widgetFocusable = True
     , widgetDraw = \cdc (Rect x y w h) -> runCanvas $ do
@@ -547,7 +545,7 @@ toggleSwitchWith layout initial = do
       pillH = 24.0
   (resp, ()) <- customWidgetWithId wid defaultCustomWidgetSpec
     { widgetLayout = fixedWH pillW pillH layout
-    , widgetMeasure = Just $ \_ _ _ -> (pillW, pillH)
+    , widgetMeasure = Just $ \_ _ -> (pillW, pillH)
     , widgetCursor = Just (\_ -> UiCursorPointer)
     , widgetFocusable = True
     , widgetDraw = \cdc (Rect x y w h) -> runCanvas $ do
@@ -591,7 +589,7 @@ circularProgressWith
 circularProgressWith layout diameter frac = do
   customWidget_ defaultCustomWidgetSpec
     { widgetLayout = fixedWH diameter diameter layout
-    , widgetMeasure = Just $ \_ _ _ -> (diameter, diameter)
+    , widgetMeasure = Just $ \_ _ -> (diameter, diameter)
     , widgetDraw = \cdc (Rect x y w h) -> runCanvas $ do
         let cx = x + w / 2
             cy = y + h / 2
@@ -624,7 +622,7 @@ progressBarWith layout height frac =
   let !barH = max 0 height
    in customWidget_ defaultCustomWidgetSpec
         { widgetLayout = fillW (fixedH barH layout)
-        , widgetMeasure = Just $ \_ _ _ -> (progressBarDefaultWidth, barH)
+        , widgetMeasure = Just $ \_ _ -> (progressBarDefaultWidth, barH)
         , widgetDraw = \cdc (Rect x y w h) -> runCanvas $ do
             let theme = cdcTheme cdc
                 trackCol = styleBg (themeButton theme)
@@ -665,7 +663,7 @@ sparklineWith
 sparklineWith layout prefW prefH values = do
   customWidget_ defaultCustomWidgetSpec
     { widgetLayout = fixedWH prefW prefH layout
-    , widgetMeasure = Just $ \_ _ _ -> (prefW, prefH)
+    , widgetMeasure = Just $ \_ _ -> (prefW, prefH)
     , widgetDraw = \cdc (Rect x y rw rh) -> runCanvas $ do
         let theme = cdcTheme cdc
             accent = themeAccent theme

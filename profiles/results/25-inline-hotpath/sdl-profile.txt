@@ -1,0 +1,60 @@
+================================================================================
+              NANO-UI SDL DEMO PROFILING & PERFORMANCE AUDIT                    
+================================================================================
+
+--- 1. FULL DEMO UI (Controls Tab, Idle vs Active Mouse) ---
+Full DemoUi (Idle, SDL Present)  :    8.539 ms/frame  |     390.2 KB alloc/frame
+Full DemoUi (Active, SDL Present) :    8.684 ms/frame  |     396.8 KB alloc/frame
+Full DemoUi (runFrame only, No SDL) :    0.332 ms/frame  |     389.4 KB alloc/frame
+  -> Vertices: 6051, Indices: 16341, DrawCmds: 24
+
+--- 1b. DEMO UI WITH DEBUG WINDOW OPEN ---
+Full DemoUi (Debug Open, SDL Present) :    8.337 ms/frame  |     405.0 KB alloc/frame
+Full DemoUi (Debug Open, runFrame) :    0.354 ms/frame  |     391.4 KB alloc/frame
+  -> Debug Vertices: 6051, Indices: 16341, DrawCmds: 24
+
+--- 5. FLOATING WINDOW STEADY-STATE ---
+Debug Open, ForceFull replay     :    8.561 ms/frame  |     404.6 KB alloc/frame
+  -> Churn damage over 40 frames: Full=1 Clip=39 Empty=0
+Win content churn (text 1..9ch)  :    0.044 ms/frame  |      45.4 KB alloc/frame
+Debug Open, hover sweep          :    8.357 ms/frame  |     405.2 KB alloc/frame
+--- 5b. IDLE CADENCE (debug gating) ---
+  plain window, no stats query : active=False waitTimeout=-1  (block; was 250 ms wake + 4 Hz full redraws)
+  stats window queried         : active=True  waitTimeout=250 (4 Hz HUD refresh sustained)
+
+--- 6. DEBUG HUD ROW STRUCTURE ---
+  kvMono rows (current)      : verts= 3684 cmds= 6  frame                            :    0.093 ms/frame  |     149.2 KB alloc/frame
+  one mono label/row         : verts= 3612 cmds= 6  frame                            :    0.056 ms/frame  |      84.5 KB alloc/frame
+  one block label/section    : verts= 3512 cmds= 5  frame                            :    0.052 ms/frame  |      78.2 KB alloc/frame
+
+--- 2. DEMO TABS IN ISOLATION (Full runFrame + draw) ---
+Tab: Controls                    :    0.126 ms/frame  |     104.3 KB alloc/frame
+Tab: List (Tree + Items)         :    0.065 ms/frame  |      85.9 KB alloc/frame
+Tab: Table (14 rows x 5 cols)    :    0.191 ms/frame  |     354.5 KB alloc/frame
+Tab: Table (SDL Present)         :    2.986 ms/frame  |     363.1 KB alloc/frame
+  -> Table DrawCmds: 7 (Vertices: 947, Indices: 1869)
+Tab: Plots (4 Charts + Diagram)  :    0.025 ms/frame  |      32.6 KB alloc/frame
+Tab: Diagnostics                 :    0.012 ms/frame  |      28.9 KB alloc/frame
+
+--- 3. WIDGET MICROBENCHMARKS (100 widgets in container, runFrame) ---
+100x Button                      :    0.215 ms/frame  |     255.0 KB alloc/frame
+100x Checkbox                    :    0.271 ms/frame  |     361.7 KB alloc/frame
+100x Slider                      :    0.443 ms/frame  |     428.4 KB alloc/frame
+100x Radio Button                :    1.041 ms/frame  |    1648.1 KB alloc/frame
+100x Select (Dropdown)           :    0.284 ms/frame  |     432.3 KB alloc/frame
+100x TextInput                   :    0.386 ms/frame  |     555.0 KB alloc/frame
+20x TextArea                     :    0.070 ms/frame  |     115.1 KB alloc/frame
+20x ColorPicker                  :    0.890 ms/frame  |    1101.0 KB alloc/frame
+100x Label (Plain Text)          :    0.114 ms/frame  |     326.2 KB alloc/frame
+100x Box (Solid Rects)           :    0.042 ms/frame  |      85.8 KB alloc/frame
+100x Images (Atlas Quads)        :    0.112 ms/frame  |     471.3 KB alloc/frame
+50x Nested Rows & Cols           :    0.093 ms/frame  |     208.6 KB alloc/frame
+
+--- 4. SCALING BENCHMARKS ---
+Table: 50 rows x 5 cols          :    0.275 ms/frame  |     537.3 KB alloc/frame
+Table: 200 rows x 5 cols         :    0.339 ms/frame  |     731.4 KB alloc/frame
+Tree: 50 items (unfolded)        :    0.178 ms/frame  |     238.0 KB alloc/frame
+Plot: Line chart (500 pts)       :    0.027 ms/frame  |      35.8 KB alloc/frame
+
+================================================================================
+Profiling complete.

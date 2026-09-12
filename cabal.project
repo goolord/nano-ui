@@ -1,6 +1,5 @@
 packages:
   packages/nano-ui
-  packages/nano-ui-term
   packages/nano-ui-sdl
   packages/nano-ui-diagrams
   packages/nano-ui-demo
@@ -35,9 +34,6 @@ package nano-ui-sdl
 package nano-ui-demo
   flags: +sdl
   ghc-options: -mavx2 -funbox-strict-fields -fmax-worker-args=32 -fspecialise-aggressively -flate-specialise -optc-ffast-math
-
-package nano-ui-term
-  ghc-options: -mavx2 -optc-mavx2 -optc-O3 -optc-ffast-math
 
 package nano-ui-form
   flags: +sdl

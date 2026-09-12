@@ -77,8 +77,7 @@ import NanoUI.Store
   , slotTextAreaRow
   )
 import NanoUI.Testing
-  ( HostProfile (PixelHost)
-  , collectRasterSpans
+  ( collectRasterSpans
   , newPixelContext
   , runFrame
   )
@@ -209,9 +208,9 @@ testContextMenuGeometry = do
   ctx <- newPixelContext
   let fm = cozetteMetrics
   menuW <- textEditMenuWidth ctx
-  let rNorm = textEditMenuRectAt (ctxHostProfile ctx) fm 100 100 menuW (Size 800 600)
+  let rNorm = textEditMenuRectAt fm 100 100 menuW (Size 800 600)
   assert "Menu rect at (100, 100) placed at mouse" (rectX rNorm == 100 && rectY rNorm == 100)
-  let rClamp = textEditMenuRectAt (ctxHostProfile ctx) fm 790 595 menuW (Size 800 600)
+  let rClamp = textEditMenuRectAt fm 790 595 menuW (Size 800 600)
   assert "Menu rect clamped within window width" (rectX rClamp + rectW rClamp <= 800)
   assert "Menu rect clamped within window height" (rectY rClamp + rectH rClamp <= 600)
 
@@ -431,23 +430,23 @@ testWindowResizing = do
   let winRect = Rect 100 100 300 200
   -- 1. Test windowResizeEdgeAt
   assert "Bottom-right outer halo detects ResizeSE"
-    (windowResizeEdgeAt PixelHost winRect (V2 404 304) == Just ResizeSE)
+    (windowResizeEdgeAt winRect (V2 404 304) == Just ResizeSE)
   assert "Bottom edge halo detects ResizeS"
-    (windowResizeEdgeAt PixelHost winRect (V2 250 304) == Just ResizeS)
+    (windowResizeEdgeAt winRect (V2 250 304) == Just ResizeS)
   assert "Right edge halo detects ResizeE"
-    (windowResizeEdgeAt PixelHost winRect (V2 404 200) == Just ResizeE)
+    (windowResizeEdgeAt winRect (V2 404 200) == Just ResizeE)
   assert "Left edge halo detects ResizeW"
-    (windowResizeEdgeAt PixelHost winRect (V2 96 200) == Just ResizeW)
+    (windowResizeEdgeAt winRect (V2 96 200) == Just ResizeW)
   assert "Top edge outer halo detects ResizeN"
-    (windowResizeEdgeAt PixelHost winRect (V2 250 95) == Just ResizeN)
+    (windowResizeEdgeAt winRect (V2 250 95) == Just ResizeN)
   assert "Top-left corner detects ResizeNW"
-    (windowResizeEdgeAt PixelHost winRect (V2 96 96) == Just ResizeNW)
+    (windowResizeEdgeAt winRect (V2 96 96) == Just ResizeNW)
   assert "Top-right corner detects ResizeNE"
-    (windowResizeEdgeAt PixelHost winRect (V2 404 96) == Just ResizeNE)
+    (windowResizeEdgeAt winRect (V2 404 96) == Just ResizeNE)
   assert "Window interior does NOT trigger resize"
-    (windowResizeEdgeAt PixelHost winRect (V2 200 200) == Nothing)
+    (windowResizeEdgeAt winRect (V2 200 200) == Nothing)
   assert "Far outside halo does NOT trigger resize"
-    (windowResizeEdgeAt PixelHost winRect (V2 500 500) == Nothing)
+    (windowResizeEdgeAt winRect (V2 500 500) == Nothing)
 
   -- 2. Test resizeFromEdge math
   let wrd = WindowResizeDrag

@@ -27,7 +27,6 @@ import NanoUI.Context
   , setCurrentFloatingId
   )
 import NanoUI.Font (resolveLayoutGap, resolveLayoutPadding)
-import NanoUI.Types (isCellHost)
 import NanoUI.Input (inputMousePos)
 import NanoUI.Layout.Arena (NodeType (..), addNode, rootAttachParent, setWidgetId)
 import NanoUI.Id (enterScope, scopeTag)
@@ -116,13 +115,11 @@ popupEx open cfg layout child = do
           stack <- uiIO (readIORef (ctxContainerStack ctx))
           let
             fm = ctxFontMetrics ctx
-            host = ctxHostProfile ctx
             parent0 = parentIdx stack
-            terminal = isCellHost host
-            pad = if terminal then Padding 0 0 0 0 else Padding 6 6 6 6
-            gap = if terminal then 0 else 4
-            resolvedPad = resolveLayoutPadding host fm pad
-            resolvedGap = resolveLayoutGap host fm gap
+            pad = Padding 6 6 6 6
+            gap = 4
+            resolvedPad = resolveLayoutPadding fm pad
+            resolvedGap = resolveLayoutGap fm gap
             dir = layoutDirection layout
             wSiz = layoutWidth layout
             hSiz = layoutHeight layout

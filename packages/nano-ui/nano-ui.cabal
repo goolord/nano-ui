@@ -105,8 +105,6 @@ library
         NanoUI.Frame.Select
         NanoUI.Frame.Spans
         NanoUI.Frame.SpanArena
-        NanoUI.Icons
-        NanoUI.Render.ASCII
         NanoUI.Style
         NanoUI.Types
         NanoUI.WidgetText

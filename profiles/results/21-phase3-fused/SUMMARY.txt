@@ -1,0 +1,38 @@
+Phase 3 (part 2): fused single-reservation rounded shapes
+date: 2026-09-12 (Linux x86_64, GHC 9.14.1, -O2 -mavx2, RTS -N1 -A64m -T -I0)
+
+Problem: every rounded fill made 9 separate arena reservations (1 centre +
+4 side quads + 4 corner fans) and every rounded border made 8 (4 strips +
+4 corner arcs). Each reservation re-read the arena caps/counts, re-created
+a closure and re-checked capacity. Profiling put the corner fan/arc at
+~9% of frame allocation and ~27% of paint CPU.
+
+Changes (NanoUI.Draw):
+- pushRoundedRectRaw now reserves once for the straight quads plus all four
+  corner fans, writes them at running vertex/index offsets and commits the
+  counts once. pushCornerFan removed.
+- pushRoundedStroke now reserves once for the side strips plus the four
+  corner arcs, in both the zero-radius and rounded branches.
+  pushCornerArcStroke removed; shared pokeStripAt helper.
+- Vertex order, index order and counts are byte-identical to the previous
+  per-shape reservations (verified below).
+
+Measured ui/runFrame alloc:
+  small  17 -> 16 KB
+  medium 455 -> 326 KB (-28.4% vs baseline, -19.8% vs end of Phase 2)
+  large  945 -> 677 KB (-28.4% vs baseline, -19.8% vs end of Phase 2)
+
+SDL demo alloc/frame (baseline -> fused):
+  100x Button      534.9 -> 400.6 KB  (-25.1%)
+  100x Checkbox    636.8 -> 496.7 KB  (-22.0%)
+  100x Slider      857.3 -> 704.0 KB  (-17.9%)
+  100x Radio      2090.3 ->1839.0 KB  (-12.0%)
+  100x Select      682.0 -> 563.3 KB  (-17.4%)
+  100x TextInput   885.3 -> 803.2 KB  (-9.3%)
+  20x ColorPicker 1626.5 ->1464.5 KB  (-10.0%)
+  Tree 50 items    401.6 -> 298.1 KB  (-25.8%)
+  Full DemoUi runFrame 509.7 -> 480.7 KB (-5.7%)
+
+Correctness: geometry counts identical to baseline -- DemoUi
+6047 verts / 16335 idx / 24 cmds; HUD 3684/3612/3512; Table 947/1869/7.
+cabal test all PASS. Warm-glyph-lookup gate PASS.

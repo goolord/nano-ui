@@ -6,7 +6,7 @@
 
 ![Haskell](https://img.shields.io/badge/Haskell-GHC_9.14-5e5086?style=flat-square&logo=haskell)
 ![License](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)
-![Backends](https://img.shields.io/badge/Backends-SDL3_%7C_RGFW_%7C_TUI-informational?style=flat-square)
+![Backends](https://img.shields.io/badge/Backends-SDL3_%7C_RGFW-informational?style=flat-square)
 ![SIMD](https://img.shields.io/badge/SIMD-AVX2-success?style=flat-square)
 
 Applications describe their user interface as a pure function of state.<br/>
@@ -21,11 +21,11 @@ The engine evaluates layout, focus, input handling, animations, and damage track
 ## Features
 
 - **Pure Declarative UI**: State drives the interface. Zero retained DOM nodes, zero mutable widget handles, and zero callback chains.
-- **Backend Agnostic**: Swap host packages to render inside hardware-accelerated SDL3 windows, lightweight RGFW windows, or terminal cells without touching your UI code.
-- **Dual State Architecture**: Choose local component hooks (`useInt`, `useState`) or pure Elm-style reducers (`buttonEmit`, `runTermAppReduce`) for app-wide state.
+- **Backend Agnostic**: Swap host packages to render inside hardware-accelerated SDL3 windows or lightweight RGFW windows without touching your UI code.
+- **Dual State Architecture**: Choose local component hooks (`useInt`, `useState`) or pure Elm-style reducers (`buttonEmit`, `runSdlAppReduce`) for app-wide state.
 - **Damage-Tracked Rendering**: Skips redrawing idle frames when state remains unchanged, minimizing CPU usage.
 - **AVX2 SIMD Acceleration**: Low-level C kernels (`-mavx2`) accelerate tree layout solving, damage union math, and vertex buffer generation.
-- **Headless Testing**: Test component behavior deterministically frame-by-frame and inspect layout output using ASCII renderers.
+- **Headless Testing**: Test component behavior deterministically frame-by-frame and inspect layout output headlessly.
 
 ---
 
@@ -86,7 +86,7 @@ For global application state, widgets emit typed messages processed by a pure up
 ```haskell
 import qualified Data.Text as T
 import NanoUI
-import NanoUI.Backend.Term (TermOptions (..), defaultTermOptions, runTermAppReduce)
+import NanoUI.Backend.Sdl (SdlOptions (..), defaultSdlOptions, runSdlAppReduce)
 
 data Msg = Increment | Decrement deriving (Eq)
 
@@ -103,25 +103,25 @@ view n = columnWith (grow defaultLayout) $ do
     buttonEmit "+" Increment
 
 main :: IO ()
-main = runTermAppReduce defaultTermOptions { termAppShouldQuit = inputKeysElem KeyEscape . inputKeys } update 0 view
+main = runSdlAppReduce defaultSdlOptions { sdlAppShouldQuit = inputKeysElem KeyEscape . inputKeys } update 0 view
 ```
 
-### Headless ASCII Testing
+### Headless Testing
 
 Run UI code headlessly in unit tests without initializing display servers or windowing backends:
 
 ```haskell
 import NanoUI
-import NanoUI.Testing (newContext, renderASCII, runFrame)
+import NanoUI.Testing (newContext, drawCmdCount, runFrame)
 
 testCounter :: IO ()
 testCounter = do
   ctx <- newContext
   let input = emptyInput { inputWindowSize = Size 80 24 }
   (_, _, drawData, _) <- runFrame ctx input counterApp
-  
-  -- Output visual ASCII tree for assertions
-  mapM_ putStrLn (renderASCII 80 24 drawData)
+
+  -- Inspect the batched draw list directly
+  print (drawCmdCount drawData)
 ```
 
 > [!TIP]
@@ -136,7 +136,6 @@ The repository is organized as a Cabal multi-package workspace:
 | Package | Role | Target Host | Key Modules |
 | :--- | :--- | :--- | :--- |
 | **`nano-ui`** | Core Engine | Core DSL, flex layout, damage tracker, test harness | `NanoUI`, `NanoUI.Testing` |
-| **`nano-ui-term`** | TUI Backend | Win32 Console (Windows) or Notcurses (POSIX) | `NanoUI.Backend.Term` |
 | **`nano-ui-sdl`** | Desktop Window | Hardware-accelerated SDL3 & SDL3_ttf host | `NanoUI.Backend.Sdl` |
 | **`nano-ui-rgfw`** | Standalone Window | Self-contained RGFW host with Cozette bitmap font | `NanoUI.Backend.Rgfw` |
 | **`nano-ui-rgfw-bindings`** | C Bindings | Low-level C FFI bindings for RGFW | `NanoUI.Rgfw.Native` |
@@ -155,7 +154,7 @@ The repository is organized as a Cabal multi-package workspace:
 1. **State & Layout Pass**: Resolves layout trees and computes element bounding boxes.
 2. **Damage Culling Pass**: Compares element bounds against damage regions to prune redrawing.
 3. **Command Batching**: Assembles vector geometry and text quads into pinned vertex buffers.
-4. **Host Presentation**: Transfers draw lists to SDL3, RGFW, or Notcurses render targets.
+4. **Host Presentation**: Transfers draw lists to SDL3 or RGFW render targets.
 
 ![Rendering Pipeline](docs/rendering-pipeline.svg)
 
@@ -192,13 +191,9 @@ The repository is organized as a Cabal multi-package workspace:
 
 | Backend | Cabal Flag | System Dependencies | Supported OS |
 | :--- | :--- | :--- | :--- |
-| **Terminal** (`nano-ui-term`) | `-fnotcurses` | `notcurses-core >= 3.0` | Linux, macOS (Win32 natively on Windows) |
 | **SDL3 Window** (`nano-ui-sdl`) | `-fsdl` | `sdl3 >= 3.2`, `sdl3-ttf >= 3.2`, `pkg-config` | Linux, macOS, Windows |
 | **RGFW Window** (`nano-ui-rgfw`) | None (Default) | C compiler (Bundled RGFW) | Linux, macOS, Windows |
 | **SIMD Acceleration** | `-fsimd` | x86-64 CPU with AVX2 support | x86-64 |
-
-> [!NOTE]
-> Windows builds for terminal applications use the native Win32 Console API directly and do not require `notcurses`.
 
 ### Cabal Commands
 
@@ -218,16 +213,13 @@ cabal run nano-ui-sdl-notepad
 # Launch hardware-accelerated SDL3 demo (requires -fsdl flag)
 cabal run -fsdl nano-ui-sdl-demo
 
-# Launch terminal TUI demo (requires -fnotcurses flag on Linux/macOS)
-cabal run -fnotcurses nano-ui-tui
-
 # Launch performance profiling suite
 cabal run nano-ui-profile
 ```
 
 ### Reproducible Nix Flake
 
-A Nix Flake is provided to configure GHC 9.14, Cabal, HLS, SDL3, and Notcurses automatically:
+A Nix Flake is provided to configure GHC 9.14, Cabal, HLS, and SDL3 automatically:
 
 ```bash
 # Enter development shell with all native dependencies configured

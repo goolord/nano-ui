@@ -1,0 +1,31 @@
+Phase 3/4 boundary: aggressive cross-module INLINE of the widget hot path
+date: 2026-09-12 (Linux x86_64, GHC 9.14.1, -O2 -mavx2, RTS -N1 -A64m -T -I0)
+
+Root cause found: several hot functions returning records/tuples were not
+INLINE, so GHC could not unbox their results or fold their common branches at
+the per-widget call sites. Profiling charged the cost to their callers with no
+locatable child.
+
+Changes:
+- b9bf0f4 INLINE resolveInteraction (biggest win)
+- 162741b INLINE paintWidgetForeground
+- e59024b INLINE fillStyledRect / strokeStyledRect / strokeRoundedBorder
+- <next> INLINE paintWidgetBackground
+
+Measured ui/runFrame alloc:
+  small   17 -> 13 KB
+  medium 455 -> 199 KB   (-56.3% vs baseline)
+  large  945 -> 405 KB   (-57.1% vs baseline)
+
+SDL demo alloc/frame (baseline -> now):
+  Full DemoUi runFrame   509.7 -> ~360 KB
+  100x Button            534.9 -> ~270 KB
+  100x Box               206.6 -> ~95 KB
+  Tree 50 items          401.6 -> ~230 KB
+(see profiles/results/25-* for the final captured table)
+
+Correctness: cabal test all PASS; draw geometry byte-identical at every step
+(DemoUi 6047/16335/24; HUD 3684/3612/3512; Table 947/1869/7).
+Compile time rose to ~5-10 min for the package; acceptable for the win.
+Noted: INLINE widgetVisualStyle and INLINE paintWidget each increased
+allocation and were reverted.

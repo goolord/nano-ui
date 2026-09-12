@@ -37,13 +37,10 @@ module NanoUI.Testing
     -- * Context
   , Context
   , newContext
-  , newCellContext
   , newPixelContext
   , ctxTheme
   , ctxPaintFull
   , ctxFontMetrics
-  , ctxHostProfile
-  , ctxIcons
   , setHost
   , askHost
   , withFontMetrics
@@ -56,9 +53,6 @@ module NanoUI.Testing
   , withTheme
   , setTheme
   , getTheme
-  , withIcons
-  , withHostProfile
-  , HostProfile (..)
   , markDirty
   , clearDirty
   , clearMeasureCache
@@ -118,8 +112,6 @@ module NanoUI.Testing
   , Damage (..)
   , takeDamage
   , damageIsEmpty
-    -- * ASCII
-  , renderASCII
     -- * Effectful
   , Eff
   , runEff
@@ -133,24 +125,10 @@ module NanoUI.Testing
   , Compact
   , compactHost
   , askCompact
-    -- * Icons (terminal metric helpers)
-  , terminalCharColumns
-  , terminalTextColumns
-  , terminalPaintColumns
-  , terminalTextPositions
-  , wideTrailChar
+    -- * Text measurement
   , textDisplayWidth
   , lineWidth
   , textIndexAtX
-  , iconClose
-  , iconChecked
-  , iconUnchecked
-  , iconSelectClosed
-  , iconWindowTitle
-  , iconModalTitle
-  , iconScrollDown
-  , iconScrollUp
-  , iconSelectOpen
   , textNodeFontWeight
   , textNodeFontStyle
   , textNodeTextDecoration
@@ -204,8 +182,6 @@ import NanoUI.Context
   , withClipboard
   , withExternalText
   , withFontMetrics
-  , withHostProfile
-  , withIcons
   , withMeasureText
   , withFontResolver
   , withMonoFontMetrics
@@ -233,9 +209,8 @@ import NanoUI.Draw
   , indexSize
   , vertexSize
   )
-import NanoUI.Render.ASCII (renderASCII)
 import NanoUI.Damage (floatingPanelRects)
-import NanoUI.Font (lineWidth, monospaceMetrics, sliderTrackBounds, textDisplayWidth, textIndexAtX)
+import NanoUI.Font (lineWidth, sliderTrackBounds, textDisplayWidth, textIndexAtX)
 import NanoUI.Widgets.ColorPicker
   ( ColorPickerGeom (..)
   , colorPickerGeom
@@ -263,23 +238,6 @@ import NanoUI.Frame
   )
 import NanoUI.Frame.Scroll (ScrollBarLayout (..), scrollBarLayout)
 import NanoUI.Layout.Solve (computePopupPosition)
-import NanoUI.Types (HostProfile (..))
-import NanoUI.Icons
-  ( iconChecked
-  , iconClose
-  , iconModalTitle
-  , iconScrollDown
-  , iconScrollUp
-  , iconSelectOpen
-  , iconSelectClosed
-  , iconUnchecked
-  , iconWindowTitle
-  , terminalCharColumns
-  , terminalPaintColumns
-  , terminalTextColumns
-  , terminalTextPositions
-  , wideTrailChar
-  )
 import NanoUI.Monad (Ui, askContext, askHost, askInput, uiIO)
 import NanoUI.WidgetText (textNodeFontStyle, textNodeFontWeight, textNodeTextDecoration)
 import NanoUI.Types (Damage (..), damageIsEmpty)
@@ -288,10 +246,3 @@ import Effectful (Eff, IOE, runEff, type (:>))
 -- | Pixel-host context with SDL-like defaults for headless tests.
 newPixelContext :: IO Context
 newPixelContext = newPixelHostContext
-
--- | Cell-host context (1x1 metrics) for layout tests that assume a terminal grid.
-newCellContext :: IO Context
-newCellContext = do
-  ctx <- newContext
-  let fm = monospaceMetrics 1
-  pure (withExternalText (withMonoFontMetrics (withFontMetrics (withHostProfile ctx CellHost) fm) fm) True)

@@ -39,9 +39,8 @@ import NanoUI.Context
   , slotKey
   , slotWinSize
   )
-import NanoUI.Draw (pushBackdropDim, pushRect, withClip)
+import NanoUI.Draw (pushRect, withClip)
 import NanoUI.Font (ScrollBarSlot (..), resolveLayoutPadding)
-import NanoUI.Types (HostProfile, isCellHost)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), inputMouseDown, inputMousePos, inputMousePressed)
 import NanoUI.Layout.Arena
@@ -80,7 +79,7 @@ import NanoUI.Frame.Chrome
   , pushMenuShadow
   , strokeStyledRect
   )
-import NanoUI.Frame.Scroll.Geometry (scrollChromeLane, terminalModalOuterClip)
+import NanoUI.Frame.Scroll.Geometry (scrollChromeLane)
 import NanoUI.Frame.Hit (findNodeByWidgetId, modalTreeOpen, nodeInSubtree, topmostOverlayAtMouse)
 import NanoUI.Frame.Input (findTopWidgetUnderMouse, isInteractiveNode)
 import NanoUI.Frame.Paint (walkChildren)
@@ -99,7 +98,7 @@ topmostWindowAtResizeHalo ctx mouse =
           then pure False
           else do
             let rect = Rect x y w h
-            if rectContains (windowResizeHalo (ctxHostProfile ctx) rect) mouse
+            if rectContains (windowResizeHalo rect) mouse
               then pure True
               else windowInnerEastResizeHit ctx idx rect mouse
 
@@ -182,20 +181,18 @@ updateWindowDrag ctx inp = do
               pure started
           | otherwise -> pure False
 
-windowResizeHandleFor :: HostProfile -> Float
-windowResizeHandleFor host
-  | isCellHost host = 1
-  | otherwise = 12
+windowResizeHandleFor :: Float
+windowResizeHandleFor = 12
 
-windowResizeHalo :: HostProfile -> Rect -> Rect
-windowResizeHalo host (Rect x y w h) =
-  let s = windowResizeHandleFor host
+windowResizeHalo :: Rect -> Rect
+windowResizeHalo (Rect x y w h) =
+  let s = windowResizeHandleFor
    in Rect (x - s) (y - s) (w + 2 * s) (h + 2 * s)
 
 -- Handles sit outside the window. The right pad strip also resizes beside the bar.
-windowResizeEdgeAt :: HostProfile -> Rect -> V2 -> Maybe WindowResizeEdge
-windowResizeEdgeAt host (Rect x y w h) (V2 mx my) =
-  let s = windowResizeHandleFor host
+windowResizeEdgeAt :: Rect -> V2 -> Maybe WindowResizeEdge
+windowResizeEdgeAt (Rect x y w h) (V2 mx my) =
+  let s = windowResizeHandleFor
       onL = mx >= x - s && mx < x
       onR = mx > x + w && mx <= x + w + s
       onT = my >= y - s && my < y
@@ -214,10 +211,10 @@ windowResizeEdgeAt host (Rect x y w h) (V2 mx my) =
               (_, _, True, _) -> ResizeW
               _ -> ResizeE
 
-innerEastCornerEdge :: HostProfile -> Padding -> Rect -> Float -> Maybe WindowResizeEdge
-innerEastCornerEdge host pad (Rect _ y _ h) my =
-  let s = windowResizeHandleFor host
-      minBand = if isCellHost host then 1 else 6
+innerEastCornerEdge :: Padding -> Rect -> Float -> Maybe WindowResizeEdge
+innerEastCornerEdge pad (Rect _ y _ h) my =
+  let s = windowResizeHandleFor
+      minBand = 6
       topBand = max minBand (min s (padT pad))
       botBand = max minBand (min s (padB pad))
    in case (my >= y && my < y + topBand, my > y + h - botBand && my <= y + h) of
@@ -252,7 +249,7 @@ windowBodyScrollLane ctx winIdx = do
                     else
                       pure
                         ( Just
-                            (scrollChromeLane (ctxHostProfile ctx) fm slot dir x y w h pad)
+                            (scrollChromeLane fm slot dir x y w h pad)
                         )
             _ -> go ns
 
@@ -262,13 +259,11 @@ windowInnerResizeEdgeAt ctx winIdx winRect@(Rect x y w h) mouse@(V2 mx my) = do
   if hit
     then do
       pad <- getPadding (ctxNodeArena ctx) winIdx
-      pure (innerEastCornerEdge (ctxHostProfile ctx) pad winRect (v2Y mouse))
+      pure (innerEastCornerEdge pad winRect (v2Y mouse))
     else do
-      let host = ctxHostProfile ctx
-          isCell = isCellHost host
-          cornerW = if isCell then 2 else min 16 (w / 3)
-          cornerH = if isCell then 1 else min 16 (h / 3)
-          botH = if isCell then 1 else min 6 (h / 3)
+      let cornerW = min 16 (w / 3)
+          cornerH = min 16 (h / 3)
+          botH = min 6 (h / 3)
           inBotRightCorner = mx >= x + w - cornerW && mx <= x + w && my >= y + h - cornerH && my <= y + h
           inBotEdge = mx >= x && mx <= x + w && my >= y + h - botH && my <= y + h
       if inBotRightCorner
@@ -279,7 +274,7 @@ windowInnerResizeEdgeAt ctx winIdx winRect@(Rect x y w h) mouse@(V2 mx my) = do
 
 windowResizeEdgeFor :: Context -> NodeIdx -> Rect -> V2 -> IO (Maybe WindowResizeEdge)
 windowResizeEdgeFor ctx winIdx winRect mouse = do
-  case windowResizeEdgeAt (ctxHostProfile ctx) winRect mouse of
+  case windowResizeEdgeAt winRect mouse of
     Just edge -> pure (Just edge)
     Nothing -> windowInnerResizeEdgeAt ctx winIdx winRect mouse
 
@@ -382,7 +377,7 @@ relayoutWindow ctx winW winH wid nw nh = do
       let (x0, y0) = maybe (x, y) id mpos
           x' = max 0 (min x0 (max 0 (winW - w)))
           y' = max 0 (min y0 (max 0 (winH - h)))
-      positionWindowNode (ctxNodeArena ctx) (ctxHostProfile ctx) (ctxFontMetrics ctx) idx x' y' w h
+      positionWindowNode (ctxNodeArena ctx) (ctxFontMetrics ctx) idx x' y' w h
 
 tryStartWindowResize :: Context -> V2 -> IO Bool
 tryStartWindowResize ctx mouse = do
@@ -527,19 +522,16 @@ drawWindowOverlays ctx = do
   theme <- readIORef (ctxTheme ctx)
   let style = overlayWindowStyle theme
       da = ctxDrawArena ctx
-      host = ctxHostProfile ctx
       fm = ctxFontMetrics ctx
-      terminal = isCellHost host
   forFloatingNode ctx NodeWindow $ \idx rect@(Rect x y w _) -> do
     drawFloatingPanel ctx idx style rect rect
-    when (not terminal) $ do
-      pad0 <- getPadding (ctxNodeArena ctx) idx
-      let pad = resolveLayoutPadding host fm pad0
-          chromeH = titleBarChromeHFor host
-          sepY = y + padT pad + chromeH - windowChromeSepH
-          sepX = x + padL pad
-          sepW = max 0 (w - padL pad - padR pad)
-      pushRect da (Rect sepX sepY sepW windowChromeSepH) (themeSeparator theme)
+    pad0 <- getPadding (ctxNodeArena ctx) idx
+    let pad = resolveLayoutPadding fm pad0
+        chromeH = titleBarChromeHFor
+        sepY = y + padT pad + chromeH - windowChromeSepH
+        sepX = x + padL pad
+        sepW = max 0 (w - padL pad - padR pad)
+    pushRect da (Rect sepX sepY sepW windowChromeSepH) (themeSeparator theme)
 
 drawPopupOverlays :: Context -> IO ()
 drawPopupOverlays ctx = do
@@ -552,21 +544,12 @@ drawModalOverlays :: Context -> Size -> IO ()
 drawModalOverlays ctx (Size ww wh) = do
   theme <- readIORef (ctxTheme ctx)
   let da = ctxDrawArena ctx
-      fm = ctxFontMetrics ctx
-      terminal = isCellHost (ctxHostProfile ctx)
   found <- modalTreeOpen ctx
   when found $ do
-    when terminal $
-      pushBackdropDim da (Rect 0 0 ww wh) (themeOverlayDim theme)
-    when (not terminal) $
-      pushRect da (Rect 0 0 ww wh) (themeOverlayDim theme)
-    forFloatingNode ctx NodeModal $ \idx rect@(Rect x y w h) -> do
-      pad <- getPadding (ctxNodeArena ctx) idx
-      let style = if terminal then overlayWindowStyle theme else overlayModalStyle theme
-          clip =
-            if terminal
-              then terminalModalOuterClip (ctxHostProfile ctx) fm x y w h pad
-              else rect
+    pushRect da (Rect 0 0 ww wh) (themeOverlayDim theme)
+    forFloatingNode ctx NodeModal $ \idx rect -> do
+      let style = overlayModalStyle theme
+          clip = rect
       drawFloatingPanel ctx idx style rect clip
 
 forFloatingNode :: Context -> NodeType -> (NodeIdx -> Rect -> IO ()) -> IO ()
@@ -581,9 +564,8 @@ forFloatingNode ctx nodeType draw = do
 drawFloatingPanel :: Context -> NodeIdx -> Style -> Rect -> Rect -> IO ()
 drawFloatingPanel ctx idx style rect@(Rect x y w h) clip = do
   let da = ctxDrawArena ctx
-      terminal = isCellHost (ctxHostProfile ctx)
-  when (not terminal) $ pushMenuShadow da rect (styleCornerRadius style)
-  fillStyledRect da terminal style rect
-  strokeStyledRect da terminal style x y w h
+  pushMenuShadow da rect (styleCornerRadius style)
+  fillStyledRect da style rect
+  strokeStyledRect da style x y w h
   withClip da clip $ walkChildren ctx idx
 

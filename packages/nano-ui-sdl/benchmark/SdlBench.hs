@@ -2,13 +2,19 @@
 
 module Main (main) where
 
-import Control.Monad (replicateM_, void)
+import Control.Exception (evaluate)
+import Control.Monad (replicateM_, void, when)
 import GHC.IO.Encoding (setLocaleEncoding, utf8)
+import GHC.Stats (RTSStats (..), getRTSStats)
 import NanoUI
-import NanoUI.Testing (Context, runFrame)
+import NanoUI.Context (Context (..))
+import NanoUI.Testing (runFrame)
 import NanoUI.Backend.Sdl (SdlEnv (..), newSdlContext, sdlDrawFrame, syncDisplay, withSdlBench)
+import System.Exit (exitFailure)
 import System.IO (hSetEncoding, stderr, stdout)
+import System.Mem (performGC)
 import Test.Tasty.Bench
+import Text.Printf (printf)
 #if defined(mingw32_HOST_OS)
 import System.Win32 (setConsoleCP, setConsoleOutputCP)
 #endif
@@ -60,6 +66,50 @@ configureBenchIO = do
   void $ setConsoleOutputCP 65001
 #endif
 
+-- | Warm ASCII glyph lookups must not allocate: the atlas UV/bearing record
+-- is cached and shared per font, so a steady-state 'fmGlyph' hit is array
+-- reads and a pointer return. This gate catches reintroducing a
+-- per-character 'GlyphQuad' / 'Just' allocation on the text hot path.
+--
+-- The probe walks a shared 'Char' list rather than 'T.index', because
+-- 'T.index' allocates in this context and would mask the lookup cost.
+glyphLookupAlloc :: Context -> IO Integer
+glyphLookupAlloc ctx = do
+  (fm, _) <- ctxResolveFont ctx 16 WeightNormal FontStyleNormal FontRegular
+  let sample = "The quick brown fox jumps over the lazy dog 0123456789!?.,;:"
+      chars = sample
+      len = length chars
+      lookups = 20000 :: Int
+      step :: Int -> Float -> Float
+      step !n !acc =
+        if n <= 0
+          then acc
+          else case fmGlyph fm (chars !! (n `mod` len)) of
+            Just gq -> step (n - 1) (acc + gqW gq)
+            Nothing -> step (n - 1) acc
+  -- Warm every character so every lookup shares a cached 'Maybe'.
+  _ <- evaluate (foldl' (\a c -> maybe a (\gq -> a + gqW gq) (fmGlyph fm c)) 0 chars)
+  performGC
+  before <- getRTSStats
+  _ <- evaluate (step lookups 0)
+  after <- getRTSStats
+  pure (fromIntegral (allocated_bytes after - allocated_bytes before))
+
+-- | Bytes per warm lookup tolerated before the gate trips. The cached path
+-- should be zero; a reintroduced per-hit record would cost tens of bytes.
+glyphLookupAllocBudget :: Double
+glyphLookupAllocBudget = 1.0
+
+glyphLookupGate :: Context -> IO ()
+glyphLookupGate ctx = do
+  bytes <- glyphLookupAlloc ctx
+  let lookups = 20000 :: Int
+      perLookup = fromIntegral bytes / fromIntegral lookups :: Double
+  printf "glyph-lookup: %.3f B/lookup (budget %.1f)\n" perLookup glyphLookupAllocBudget
+  when (perLookup > glyphLookupAllocBudget) $ do
+    putStrLn "FAIL: warm glyph lookups allocate; expected the cached quad to be shared"
+    exitFailure
+
 main :: IO ()
 main = do
   configureBenchIO
@@ -67,6 +117,7 @@ main = do
   withSdlBench ctx0 $ \ctx sdlEnv -> do
     (ctx', inp) <- syncDisplay ctx sdlEnv benchInput
     warmup ctx' sdlEnv inp
+    glyphLookupGate ctx'
     configureBenchIO
     defaultMain
       [ bgroup

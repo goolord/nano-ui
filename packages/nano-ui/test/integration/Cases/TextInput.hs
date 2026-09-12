@@ -13,7 +13,6 @@ module Cases.TextInput
   , runTextInputCutMenuTest
   , runTextInputDirtyTest
   , runTextInputFocusSdlTest
-  , runTextInputFocusTest
   , runTextInputMenuTest
   , runTextInputMenuUnfocusedTest
   , runTextInputMouseSelectionTest
@@ -234,10 +233,9 @@ runTextInputSelectionTest ctx failed = do
 
 runTextInputCtrlATest :: Context -> IORef Int -> IO ()
 runTextInputCtrlATest ctx failed = do
-  term <- newCellContext
   let inp0 = withInput 320 120
       ui = column (textInput "hello")
-  forM_ [ctx, term] $ \c -> do
+  forM_ [ctx] $ \c -> do
     _ <- runFrame c inp0 ui
     _ <- runFrame c (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
     _ <- runFrame c (inp0 {inputChars = "\x01", inputModifiers = Modifiers False True False}) ui
@@ -246,11 +244,10 @@ runTextInputCtrlATest ctx failed = do
 
 runTextAreaCtrlATest :: Context -> IORef Int -> IO ()
 runTextAreaCtrlATest ctx failed = do
-  term <- newCellContext
   let initial = "line one\nline two\nline three"
       inp0 = withInput 320 220
       ui = column (labeledArea "Notes" initial)
-  forM_ [ctx, term] $ \c -> do
+  forM_ [ctx] $ \c -> do
     (resp, _) <- warmup2 c inp0 ui
     -- Tab into textarea to gain focus
     _ <- runFrame c (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
@@ -269,10 +266,9 @@ runTextAreaCtrlATest ctx failed = do
 
   -- Test "\x01" and text replacement on fresh contexts
   pix2 <- newContext
-  cell2 <- newCellContext
   let initial2 = "abc\ndef"
       ui2 = column (labeledArea "Notes2" initial2)
-  forM_ [pix2, cell2] $ \c -> do
+  forM_ [pix2] $ \c -> do
     (resp2, _) <- warmup2 c inp0 ui2
     _ <- runFrame c (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui2
     -- Ctrl+A with "\x01"
@@ -489,21 +485,8 @@ runButtonPressReleaseHoverTest ctx failed = do
   assert failed (hashWidgetId hot /= 0)
   assert failed (val >= 0.99)
 
-runTextInputFocusTest :: Context -> IORef Int -> IO ()
-runTextInputFocusTest _ failed = do
-  ctx <- newCellContext
-  let inp0 = withInput 200 100
-      ui = column (textInput "")
-  (resp, _) <- warmup2 ctx inp0 ui
-  let Rect rx ry _ _ = respRect resp
-      inp1 = inp0 {inputMousePos = V2 (rx + 1) (ry + 0.5), inputMouseDown = True, inputMousePressed = True}
-  _ <- runFrame ctx inp1 ui
-  spans <- collectTextSpans ctx
-  assert failed (any (\(_, txt, _, _, _) -> T.isInfixOf "\x2502" txt) spans)
-
 runTextInputDirtyTest :: Context -> IORef Int -> IO ()
-runTextInputDirtyTest _ failed = do
-  ctx <- newCellContext
+runTextInputDirtyTest ctx failed = do
   let ui = column (textInput "")
       inp0 = (withInput 200 100) {inputMousePos = V2 20 20}
   (resp, _) <- warmup2 ctx inp0 ui
@@ -522,12 +505,11 @@ runTextInputDirtyTest _ failed = do
 runTextInputFfCaretTest :: Context -> IORef Int -> IO ()
 runTextInputFfCaretTest ctx failed = do
   let fm = ctxFontMetrics ctx
-      host = ctxHostProfile ctx
       fs = T.replicate 6 "f"
       adv = fmAdvance fm 'f'
   assertEq failed (lineWidth fm fs) (6 * adv)
-  assertEq failed (textIndexAtX host fm fs (lineWidth fm fs)) 6
-  assertEq failed (textIndexAtX host fm fs (lineWidth fm (T.take 3 fs))) 3
+  assertEq failed (textIndexAtX fm fs (lineWidth fm fs)) 6
+  assertEq failed (textIndexAtX fm fs (lineWidth fm (T.take 3 fs))) 3
   let inp0 = withInput 320 120
       ui = column (textInput fs)
   _ <- warmup2 ctx inp0 ui
@@ -596,8 +578,7 @@ runTextAreaScrollbarVisibilityTest ctx failed = do
   case mRectShort of
     Just (Rect rx ry rw rh) -> do
       let fm = ctxFontMetrics ctx
-          host = ctxHostProfile ctx
-          geom = textAreaGeom host fm rx ry rw rh
+          geom = textAreaGeom fm rx ry rw rh
           field = tagFieldRect geom
           fieldCenter = V2 (rectX field + rectW field / 2) (rectY field + rectH field / 2)
           wheelShort = inp0 {inputMousePos = fieldCenter, inputScroll = V2 0 1}
@@ -605,7 +586,7 @@ runTextAreaScrollbarVisibilityTest ctx failed = do
       offShort1 <- getScrollOffset ctx (respId respShort)
       assertEq failed offShort1 0
       let contentH = 2 * tagLineHeight geom
-      assertEq failed (textAreaScrollBarLayout host fm field contentH 0) Nothing
+      assertEq failed (textAreaScrollBarLayout fm field contentH 0) Nothing
     _ -> assert failed False
 
   -- Long text overflowing viewport: scrollbar layout exists and wheel scrolls
@@ -617,11 +598,10 @@ runTextAreaScrollbarVisibilityTest ctx failed = do
   case mRectLong of
     Just (Rect rx ry rw rh) -> do
       let fm = ctxFontMetrics ctxLong
-          host = ctxHostProfile ctxLong
-          geom = textAreaGeom host fm rx ry rw rh
+          geom = textAreaGeom fm rx ry rw rh
           field = tagFieldRect geom
           contentH = 30 * tagLineHeight geom
-          mLayout = textAreaScrollBarLayout host fm field contentH 0
+          mLayout = textAreaScrollBarLayout fm field contentH 0
       case mLayout of
         Nothing -> assert failed False
         Just layout -> do
@@ -645,8 +625,7 @@ runTextAreaScrollWheelTest ctx failed = do
   case mRect of
     Just (Rect rx ry rw rh) -> do
       let fm = ctxFontMetrics ctx
-          host = ctxHostProfile ctx
-          geom = textAreaGeom host fm rx ry rw rh
+          geom = textAreaGeom fm rx ry rw rh
           field = tagFieldRect geom
           pos = V2 (rectX field + rectW field / 2) (rectY field + rectH field / 2)
           wheelDown = inp0 {inputMousePos = pos, inputScroll = V2 0 1}
@@ -684,16 +663,15 @@ runTextAreaZoomScrollTest ctx failed = do
     Nothing -> assert failed False
     Just hit -> do
       fm <- resolveTextAreaFont ctx (tahNodeIdx hit)
-      let host = ctxHostProfile ctx
-          field = tahFieldRect hit
+      let field = tahFieldRect hit
           lineH = tahLineH hit
           lineCount = max 1 (length (toLines (fromText longText)))
           contentH = fromIntegral lineCount * lineH
-          contentW = maximum (0 : [textDisplayWidth host fm l | l <- T.lines longText])
-          (ix, iy) = widgetContentInset host fm
+          contentW = maximum (0 : [textDisplayWidth fm l | l <- T.lines longText])
+          (ix, iy) = widgetContentInset fm
           innerW = rectW field - 2 * ix
           innerH = rectH field - 2 * iy
-          (barLaneW, barLaneH) = textAreaBarLanes host fm
+          (barLaneW, barLaneH) = textAreaBarLanes fm
           hasV0 = contentH > innerH
           hasH = contentW > (if hasV0 then max 0 (innerW - barLaneW) else innerW)
           availH = if hasH then max 0 (innerH - barLaneH) else innerH
@@ -714,13 +692,12 @@ runTextAreaScrollDragTest ctx failed = do
   case mRect of
     Just (Rect rx ry rw rh) -> do
       let fm = ctxFontMetrics ctx
-          host = ctxHostProfile ctx
-          geom = textAreaGeom host fm rx ry rw rh
+          geom = textAreaGeom fm rx ry rw rh
           field = tagFieldRect geom
           contentH = 40 * tagLineHeight geom
       off0 <- getScrollOffset ctx (respId resp)
       assertEq failed off0 0
-      case textAreaScrollBarLayout host fm field contentH off0 of
+      case textAreaScrollBarLayout fm field contentH off0 of
         Nothing -> assert failed False
         Just layout -> do
           let thumb = sbThumb layout
@@ -755,8 +732,7 @@ runTextAreaCursorOnScrollBarTest ctx failed = do
   case (labelPos, mRect) of
     ([(lx, ly)], Just (Rect rx ry rw rh)) -> do
       let fm = ctxFontMetrics ctx
-          host = ctxHostProfile ctx
-          geom = textAreaGeom host fm rx ry rw rh
+          geom = textAreaGeom fm rx ry rw rh
           field = tagFieldRect geom
           contentH = 40 * tagLineHeight geom
       -- Hover over label -> UiCursorDefault
@@ -772,7 +748,7 @@ runTextAreaCursorOnScrollBarTest ctx failed = do
       assertEq failed textKind UiCursorText
 
       -- Hover over scrollbar thumb -> UiCursorGrab
-      case textAreaScrollBarLayout host fm field contentH 0 of
+      case textAreaScrollBarLayout fm field contentH 0 of
         Nothing -> assert failed False
         Just layout -> do
           let thumb = sbThumb layout
@@ -801,11 +777,10 @@ runTextAreaHScrollbarVisibilityTest ctx failed = do
   case mRectS of
     Just (Rect rx ry rw rh) -> do
       let fm = ctxFontMetrics ctx
-          host = ctxHostProfile ctx
-          geom = textAreaGeom host fm rx ry rw rh
+          geom = textAreaGeom fm rx ry rw rh
           field = tagFieldRect geom
-          contentW = textDisplayWidth host fm shortText
-          mLayout = textAreaHScrollBarLayout host fm field contentW 0
+          contentW = textDisplayWidth fm shortText
+          mLayout = textAreaHScrollBarLayout fm field contentW 0
       assertEq failed mLayout Nothing
     _ -> assert failed False
 
@@ -814,11 +789,10 @@ runTextAreaHScrollbarVisibilityTest ctx failed = do
   case mRectL of
     Just (Rect rx ry rw rh) -> do
       let fm = ctxFontMetrics ctx
-          host = ctxHostProfile ctx
-          geom = textAreaGeom host fm rx ry rw rh
+          geom = textAreaGeom fm rx ry rw rh
           field = tagFieldRect geom
-          contentW = textDisplayWidth host fm longText
-          mLayout = textAreaHScrollBarLayout host fm field contentW 0
+          contentW = textDisplayWidth fm longText
+          mLayout = textAreaHScrollBarLayout fm field contentW 0
       case mLayout of
         Nothing -> assert failed False
         Just layout -> do
@@ -839,8 +813,7 @@ runTextAreaHScrollWheelTest ctx failed = do
   case mRect of
     Just (Rect rx ry rw rh) -> do
       let fm = ctxFontMetrics ctx
-          host = ctxHostProfile ctx
-          geom = textAreaGeom host fm rx ry rw rh
+          geom = textAreaGeom fm rx ry rw rh
           field = tagFieldRect geom
           pos = V2 (rectX field + rectW field / 2) (rectY field + rectH field / 2)
           wheelRight = inp0 {inputMousePos = pos, inputScroll = V2 1 0}
@@ -871,13 +844,12 @@ runTextAreaHScrollDragTest ctx failed = do
   case mRect of
     Just (Rect rx ry rw rh) -> do
       let fm = ctxFontMetrics ctx
-          host = ctxHostProfile ctx
-          geom = textAreaGeom host fm rx ry rw rh
+          geom = textAreaGeom fm rx ry rw rh
           field = tagFieldRect geom
-          contentW = textDisplayWidth host fm longLine
+          contentW = textDisplayWidth fm longLine
       V2 offX0 _ <- getScrollOffset2D ctx (respId resp)
       assertEq failed offX0 0
-      case textAreaHScrollBarLayout host fm field contentW offX0 of
+      case textAreaHScrollBarLayout fm field contentW offX0 of
         Nothing -> assert failed False
         Just layout -> do
           let thumb = sbThumb layout
@@ -908,13 +880,12 @@ runTextArea2DScrollTest ctx failed = do
   case mRect of
     Just (Rect rx ry rw rh) -> do
       let fm = ctxFontMetrics ctx
-          host = ctxHostProfile ctx
-          geom = textAreaGeom host fm rx ry rw rh
+          geom = textAreaGeom fm rx ry rw rh
           field = tagFieldRect geom
           contentH = 40 * tagLineHeight geom
-          contentW = maximum (0 : [textDisplayWidth host fm l | l <- lines2D])
-          (barLaneW, barLaneH) = textAreaBarLanes host fm
-          layouts = textAreaScrollBarLayouts host fm field contentW contentH 0 0
+          contentW = maximum (0 : [textDisplayWidth fm l | l <- lines2D])
+          (barLaneW, barLaneH) = textAreaBarLanes fm
+          layouts = textAreaScrollBarLayouts fm field contentW contentH 0 0
       case (tasbVertical layouts, tasbHorizontal layouts) of
         (Just vLayout, Just hLayout) -> do
           let vTrack = sbTrack vLayout
@@ -940,11 +911,10 @@ runTextAreaHScrollCursorClickTest ctx failed = do
   case mRect of
     Just (Rect rx ry rw rh) -> do
       let fm = ctxFontMetrics ctx
-          host = ctxHostProfile ctx
-          geom = textAreaGeom host fm rx ry rw rh
+          geom = textAreaGeom fm rx ry rw rh
           field = tagFieldRect geom
-          contentW = textDisplayWidth host fm longLine
-      case textAreaHScrollBarLayout host fm field contentW 0 of
+          contentW = textDisplayWidth fm longLine
+      case textAreaHScrollBarLayout fm field contentW 0 of
         Nothing -> assert failed False
         Just layout -> do
           let thumb = sbThumb layout
@@ -968,7 +938,7 @@ runTextAreaHScrollCursorClickTest ctx failed = do
           V2 offX _ <- getScrollOffset2D ctx (respId resp)
           assertGt failed offX 0
 
-          let (ix, iy) = widgetContentInset host fm
+          let (ix, iy) = widgetContentInset fm
               clickPos = V2 (rectX field + ix + 30) (rectY field + iy + 5)
               textClick = inp0 {inputMousePos = clickPos, inputMouseDown = True, inputMousePressed = True}
           _ <- runFrame ctx textClick ui
@@ -994,8 +964,7 @@ runTextAreaScrollCursorLeavesViewportTest ctx failed = do
   case mRect of
     Just (Rect rx ry rw rh) -> do
       let fm = ctxFontMetrics ctx
-          host = ctxHostProfile ctx
-          geom = textAreaGeom host fm rx ry rw rh
+          geom = textAreaGeom fm rx ry rw rh
           field = tagFieldRect geom
           pos = V2 (rectX field + rectW field / 2) (rectY field + rectH field / 2)
           key = intKey (respId resp)

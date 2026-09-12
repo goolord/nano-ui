@@ -3,9 +3,6 @@ module NanoUI.WidgetText
   , treeEncodeStyle
   , treeDecodeStyle
   , treeDecodeStripe
-  , treeDisplayText
-  , treeMeasureLabel
-  , textInputTerminalText
   , textInputFieldText
   , textInputPlaceholder
   , textInputMinWidth
@@ -18,7 +15,6 @@ module NanoUI.WidgetText
   , textInputBareMode
   , textInputSearchBody
   , comboTextClip
-  , textInputSearchTerminalText
   , searchFieldReserveW
   , searchFieldTextClip
   , searchFieldIconRects
@@ -72,9 +68,8 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Word (Word8)
 import NanoUI.Font (FontMetrics (..), fmLineHeight, widgetContentInset)
-import NanoUI.Icons (Icons, treeExpandMark)
 import NanoUI.Style (FontStyle (..), FontVariant (..), FontWeight (..), TextDecoration (..), Theme (..), styleBg, themeButton, themePanel, themeWindow)
-import NanoUI.Types (Color (..), HostProfile, Rect (..), colorA, colorB, colorG, colorR, colorRGBA, isCellHost, lerpColor)
+import NanoUI.Types (Color (..), Rect (..), colorA, colorB, colorG, colorR, colorRGBA, lerpColor)
 import qualified Data.Text as T
 
 sliderValueText :: Float -> Text
@@ -100,20 +95,6 @@ treeDecodeStyle s =
 treeDecodeStripe :: Int -> Int
 treeDecodeStripe s = if s .&. 0x400 /= 0 then tableStripeOdd else tableStripeEven
 
--- | Visible terminal row: indent, expand mark, label.
-treeDisplayText :: Icons -> Int -> Bool -> Bool -> Text -> Text
-treeDisplayText icons depth hasKids expanded label =
-  T.replicate (max 0 depth) "  "
-    <> treeExpandMark icons hasKids expanded
-    <> label
-
--- | Cell-host measure stand-in. Mark width matches ASCII "v " / "> ".
-treeMeasureLabel :: Int -> Text -> Text
-treeMeasureLabel depth label =
-  T.replicate (max 0 depth) "  "
-    <> "  "
-    <> if T.null label then " " else label
-
 textInputMinWidth :: Float
 textInputMinWidth = 160
 
@@ -127,37 +108,35 @@ textInputFieldPadY fm = max 3 (fmAdvance fm ' ' * 1.25)
 textInputFieldHeight :: FontMetrics -> Float
 textInputFieldHeight fm = fmLineHeight fm + 2 * textInputFieldPadY fm
 
--- | Search-field icon geometry on GUI hosts (zero on cell hosts). Returns
+-- | Search-field icon geometry. Returns
 -- (icon diameter, outer pad, left chrome lead, right chrome tail). The lead/tail
 -- are the horizontal space the magnifier / clear buttons reserve either side of
 -- the editable text.
-searchFieldChrome :: HostProfile -> FontMetrics -> (Float, Float, Float, Float)
-searchFieldChrome host fm
-  | isCellHost host = (0, 0, 0, 0)
-  | otherwise =
-      let (ix, _) = widgetContentInset host fm
-          s = max 12 (min 15 (fmLineHeight fm * 0.8))
-          pad = fmAdvance fm ' ' * 0.6
-       in (s, ix, ix + s + pad, pad + s + ix)
+searchFieldChrome :: FontMetrics -> (Float, Float, Float, Float)
+searchFieldChrome fm =
+  let (ix, _) = widgetContentInset fm
+      s = max 12 (min 15 (fmLineHeight fm * 0.8))
+      pad = fmAdvance fm ' ' * 0.6
+   in (s, ix, ix + s + pad, pad + s + ix)
 
 -- | Total horizontal chrome a caption-less search box reserves for its icons.
-searchFieldReserveW :: HostProfile -> FontMetrics -> Float
-searchFieldReserveW host fm =
-  let (_, _, lead, tailw) = searchFieldChrome host fm
+searchFieldReserveW :: FontMetrics -> Float
+searchFieldReserveW fm =
+  let (_, _, lead, tailw) = searchFieldChrome fm
    in lead + tailw
 
 -- | Region a caption-less search field's editable text may occupy. Excludes the
 -- magnifier on the left and the clear slot on the right.
-searchFieldTextClip :: HostProfile -> FontMetrics -> Float -> Float -> Float -> Float -> Rect
-searchFieldTextClip host fm x y w h =
-  let (_, _, lead, tailw) = searchFieldChrome host fm
-      (_, iy) = widgetContentInset host fm
+searchFieldTextClip :: FontMetrics -> Float -> Float -> Float -> Float -> Rect
+searchFieldTextClip fm x y w h =
+  let (_, _, lead, tailw) = searchFieldChrome fm
+      (_, iy) = widgetContentInset fm
    in Rect (x + lead) (y + iy) (max 0 (w - lead - tailw)) (max 0 (h - 2 * iy))
 
 -- | Square slots (magnifier left, clear right) the search icons are drawn in.
-searchFieldIconRects :: HostProfile -> FontMetrics -> Float -> Float -> Float -> Float -> (Rect, Rect)
-searchFieldIconRects host fm x y w h =
-  let (s, ix, _, _) = searchFieldChrome host fm
+searchFieldIconRects :: FontMetrics -> Float -> Float -> Float -> Float -> (Rect, Rect)
+searchFieldIconRects fm x y w h =
+  let (s, ix, _, _) = searchFieldChrome fm
       cy = y + h / 2
       mag = Rect (x + ix) (cy - s / 2) s s
       clear = Rect (x + w - ix - s) (cy - s / 2) s s
@@ -172,17 +151,6 @@ textInputFieldText ph value focused =
    in if T.null body && not focused
         then ph
         else body
-
-textInputTerminalText :: Text -> Text -> Int -> Bool -> Text
-textInputTerminalText ph value cursor focused =
-  let body = value
-      shown =
-        if focused
-          then
-            let c = max 0 (min (T.length body) cursor)
-             in T.take c body <> "\x2502" <> T.drop c body
-          else if T.null body then ph else body
-   in shown
 
 -- | Marks a @NodeTextInput@ as a caption-less search field. Lives in the high
 -- style bits (like the button flags) so it survives the arena's int storage.
@@ -212,24 +180,11 @@ textInputSearchBody ph value focused =
     else value
 
 -- | Region a combo box's editable text may occupy: from the left content inset
--- to the select chevron reserve on the right. Only used on GUI hosts; callers
--- gate on that themselves.
-comboTextClip :: HostProfile -> FontMetrics -> Float -> Float -> Float -> Float -> Rect
-comboTextClip host fm x y w h =
-  let (ix, iy) = widgetContentInset host fm
+-- to the select chevron reserve on the right.
+comboTextClip :: FontMetrics -> Float -> Float -> Float -> Float -> Rect
+comboTextClip fm x y w h =
+  let (ix, iy) = widgetContentInset fm
    in Rect (x + ix) (y + iy) (max 0 (w - ix - selectChevronReserve)) (max 0 (h - 2 * iy))
-
--- | Terminal representation of a search field: value (or placeholder), with the
--- caret inserted when focused. No caption prefix.
-textInputSearchTerminalText :: Text -> Text -> Int -> Bool -> Text
-textInputSearchTerminalText ph value cursor focused
-  | focused && T.null value = "\x2502" <> ph
-  | focused =
-      let v = value
-          c = max 0 (min (T.length v) cursor)
-       in T.take c v <> "\x2502" <> T.drop c v
-  | T.null value = ph
-  | otherwise = value
 
 selectDisplayText :: Text -> Text -> Text
 selectDisplayText lbl opt
@@ -385,18 +340,11 @@ scrollNative2DStyle :: Int
 scrollNative2DStyle = 2
 
 -- | Trailing slot reserved in every header so the sort mark never changes column width.
-tableSortReserve :: Bool -> Text
-tableSortReserve True = " ^"
-tableSortReserve False = "  ▲"
+tableSortReserve :: Text
+tableSortReserve = "  ▲"
 
-tableSortMark :: Bool -> Bool -> Text
-tableSortMark True True = " v"
-tableSortMark True False = " ^"
-tableSortMark False True = "  ▼"
-tableSortMark False False = "  ▲"
-
-tableHeaderLabel :: Bool -> Text -> Text
-tableHeaderLabel terminal hdr = hdr <> tableSortReserve terminal
+tableHeaderLabel :: Text -> Text
+tableHeaderLabel hdr = hdr <> tableSortReserve
 
 -- | Sort direction encoded for a table-header style. Lives in bits 16-17: the
 -- low nibbles are the font fields, and a mark value of 1 or 2 in bit 0-1 used
@@ -405,21 +353,18 @@ tableHeaderLabel terminal hdr = hdr <> tableSortReserve terminal
 tableSortMarkOf :: Int -> Int
 tableSortMarkOf styleIdx = (styleIdx `shiftR` 16) .&. 0x03
 
--- | Blank reserve slot (spaces only). Non-terminal hosts draw the sort mark
--- as a triangle over this slot, so the ▲/▼ codepoint never enters measured
--- or laid-out text (the pruned UI font does not carry it).
-tableSortBlank :: Bool -> Text
-tableSortBlank = T.map (const ' ') . tableSortReserve
+-- | Blank reserve slot (spaces only). The sort mark is drawn as a triangle
+-- over this slot, so the ▲/▼ codepoint never enters measured or laid-out text
+-- (the pruned UI font does not carry it).
+tableSortBlank :: Text
+tableSortBlank = T.map (const ' ') tableSortReserve
 
-tableHeaderDisplayText :: Bool -> Int -> Text -> Text
-tableHeaderDisplayText terminal styleIdx txt =
+tableHeaderDisplayText :: Int -> Text -> Text
+tableHeaderDisplayText _styleIdx txt =
   let full = txt
-      reserve = tableSortReserve terminal
+      reserve = tableSortReserve
       title = fromMaybe full (T.stripSuffix reserve full)
-   in case tableSortMarkOf styleIdx of
-        1 | terminal -> title <> tableSortMark terminal False
-        2 | terminal -> title <> tableSortMark terminal True
-        _ -> title <> tableSortBlank terminal
+   in title <> tableSortBlank
 
 -- Type flags live in bits 28-31 so visual style and tab index stay in the low bits.
 buttonFlagClose :: Int

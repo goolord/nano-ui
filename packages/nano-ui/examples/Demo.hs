@@ -4,7 +4,7 @@ import Control.Monad (when)
 import Data.Text (Text)
 import Data.Text qualified as T
 import NanoUI
-import NanoUI.Testing (newContext, renderASCII, runFrame)
+import NanoUI.Testing (newContext, runFrame)
 
 data Person = Person
   { personName :: !Text
@@ -36,7 +36,7 @@ main = do
           , inputMousePressed = True
           , inputMouseDown = True
           }
-  (_, msgs, drawData, _) <-
+  (_, msgs, _drawData, _) <-
     runFrame
       ctx
       inp
@@ -49,7 +49,6 @@ main = do
               label "nano-ui demo"
           )
       )
-  putStrLn "=== nano-ui ASCII demo ==="
-  mapM_ putStrLn (renderASCII 60 24 drawData)
+  putStrLn "=== nano-ui demo ==="
   putStrLn "--- messages ---"
   print (length msgs)

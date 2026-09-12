@@ -43,7 +43,7 @@ module NanoUI.Sdl.Font
 
 import Control.Exception (SomeException, bracket, catch, throwIO)
 import Control.Monad (when)
-import Data.Bits ((.|.))
+import Data.Bits ((.|.), shiftL)
 import Foreign.Marshal.Alloc (alloca)
 import Data.Char (ord)
 import Data.ByteString (ByteString)
@@ -89,6 +89,7 @@ import NanoUI.Testing
   )
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
 import qualified Data.Map.Strict as Map
+import qualified Data.IntMap.Strict as IM
 import qualified Data.Text.Foreign as TF
 
 data SdlFont = SdlFont
@@ -346,10 +347,12 @@ insertGlyph ga sf key c = do
               modifyIORef' (gaEntries ga) (Map.insert key (Just slot))
               pure (Just slot)
 
+-- | ASCII glyph-cache slot. The cached 'Maybe' is shared on every hit, so a
+-- warm lookup returns the same heap object instead of rebuilding
+-- @Just GlyphQuad@ on each character.
 data CachedQuad
   = UncachedQuad
-  | EmptyQuad
-  | ValidQuad {-# UNPACK #-} !GlyphQuad
+  | Cached {-# UNPACK #-} !(Maybe GlyphQuad)
 
 -- | Build a 'FontMetrics' that populates 'fmGlyph' from the glyph atlas,
 -- so 'pushText' can emit real textured quads.  This must be called after
@@ -381,10 +384,17 @@ buildGlyphFontMetrics ga sf scale = do
   initEpoch <- readIORef (gaEpoch ga)
   asciiEpochRef <- newIORef initEpoch
 
+  -- Non-ASCII glyph quads are memoised per font here (keyed by codepoint) so
+  -- repeated text still hits a shared value instead of rebuilding the record
+  -- on every character. Invalidated with the atlas epoch.
+  nonAsciiCacheRef <- newIORef IM.empty
+  nonAsciiEpochRef <- newIORef initEpoch
+
   -- Kerning pairs are sparse and each miss costs a shaped 2-glyph
   -- layout, so a pair cache keeps the hot pen loops off the FFI
-  -- boundary after first contact.
-  kernCacheRef <- newIORef Map.empty
+  -- boundary after first contact. Keyed by packed codepoint pair on this
+  -- 'FontMetrics' (the font id is implicit).
+  kernCacheRef <- newIORef IM.empty
 
   -- Shaped text runs: whole strings rendered through SDL3_ttf so GPOS
   -- kerning, ligatures, and contextual positioning are preserved.  Run
@@ -400,67 +410,68 @@ buildGlyphFontMetrics ga sf scale = do
   runEpochRef <- newIORef initRunEpoch
 
   let
+    slotToQuad !gs =
+      GlyphQuad
+        { gqX  = gsOffX gs / inv
+        , gqY  = gsOffY gs / inv
+        , gqW  = gsW    gs / inv
+        , gqH  = gsH    gs / inv
+        , gqU0 = gsU0   gs
+        , gqV0 = gsV0   gs
+        , gqU1 = gsU1   gs
+        , gqV1 = gsV1   gs
+        }
+
+    resetAsciiCache !epoch = do
+      writeIORef asciiEpochRef epoch
+      mapM_ (\i -> writeSmallArray asciiCacheArr i UncachedQuad) [0 .. 127 :: Int]
+
     lookupAsciiQuad !cp = do
       curEpoch <- readIORef (gaEpoch ga)
       lastEpoch <- readIORef asciiEpochRef
-      when (curEpoch /= lastEpoch) $ do
-        writeIORef asciiEpochRef curEpoch
-        mapM_ (\i -> writeSmallArray asciiCacheArr i UncachedQuad) [0 .. 127 :: Int]
+      when (curEpoch /= lastEpoch) $ resetAsciiCache curEpoch
       cached <- readSmallArray asciiCacheArr cp
       case cached of
-        ValidQuad q -> pure (Just q)
-        EmptyQuad   -> pure Nothing
+        Cached mq -> pure mq
         UncachedQuad -> do
           mSlot <- lookupOrInsertGlyph ga sf (toEnum cp)
-          case mSlot of
-            Nothing -> do
-              newEpoch <- readIORef (gaEpoch ga)
-              when (newEpoch /= curEpoch) $ do
-                writeIORef asciiEpochRef newEpoch
-                mapM_ (\i -> writeSmallArray asciiCacheArr i UncachedQuad) [0 .. 127 :: Int]
-              writeSmallArray asciiCacheArr cp EmptyQuad
-              pure Nothing
-            Just gs -> do
-              newEpoch <- readIORef (gaEpoch ga)
-              when (newEpoch /= curEpoch) $ do
-                writeIORef asciiEpochRef newEpoch
-                mapM_ (\i -> writeSmallArray asciiCacheArr i UncachedQuad) [0 .. 127 :: Int]
-              let !q =
-                    GlyphQuad
-                      { gqX  = gsOffX gs / inv
-                      , gqY  = gsOffY gs / inv
-                      , gqW  = gsW    gs / inv
-                      , gqH  = gsH    gs / inv
-                      , gqU0 = gsU0   gs
-                      , gqV0 = gsV0   gs
-                      , gqU1 = gsU1   gs
-                      , gqV1 = gsV1   gs
-                      }
-              writeSmallArray asciiCacheArr cp (ValidQuad q)
-              pure (Just q)
+          newEpoch <- readIORef (gaEpoch ga)
+          if newEpoch /= curEpoch
+            then do
+              -- The atlas was reset during insertion: this slot's UVs are
+              -- already stale, so do not cache them.
+              resetAsciiCache newEpoch
+              pure (fmap slotToQuad mSlot)
+            else do
+              let !mq = fmap slotToQuad mSlot
+              writeSmallArray asciiCacheArr cp (Cached mq)
+              pure mq
+
+    lookupNonAsciiQuad !c = do
+      curEpoch <- readIORef (gaEpoch ga)
+      lastEpoch <- readIORef nonAsciiEpochRef
+      when (curEpoch /= lastEpoch) $ do
+        writeIORef nonAsciiEpochRef curEpoch
+        writeIORef nonAsciiCacheRef IM.empty
+      m <- readIORef nonAsciiCacheRef
+      case IM.lookup (ord c) m of
+        Just mq -> pure mq
+        Nothing -> do
+          mSlot <- lookupOrInsertGlyph ga sf c
+          newEpoch <- readIORef (gaEpoch ga)
+          if newEpoch /= curEpoch
+            then pure (fmap slotToQuad mSlot)
+            else do
+              let !mq = fmap slotToQuad mSlot
+              modifyIORef' nonAsciiCacheRef (IM.insert (ord c) mq)
+              pure mq
 
     {-# NOINLINE glyphLookup #-}
     glyphLookup !c =
       let !cp = ord c
        in if (fromIntegral cp :: Word) < 128
             then unsafePerformIO (lookupAsciiQuad cp)
-            else unsafePerformIO $ do
-              mSlot <- lookupOrInsertGlyph ga sf c
-              case mSlot of
-                Nothing -> pure Nothing
-                Just gs ->
-                  pure $
-                    Just
-                      GlyphQuad
-                        { gqX  = gsOffX gs / inv
-                        , gqY  = gsOffY gs / inv
-                        , gqW  = gsW    gs / inv
-                        , gqH  = gsH    gs / inv
-                        , gqU0 = gsU0   gs
-                        , gqV0 = gsV0   gs
-                        , gqU1 = gsU1   gs
-                        , gqV1 = gsV1   gs
-                        }
+            else unsafePerformIO (lookupNonAsciiQuad c)
 
     {-# NOINLINE advanceLookup #-}
     advanceLookup !c =
@@ -475,17 +486,18 @@ buildGlyphFontMetrics ga sf scale = do
 
     {-# NOINLINE kernLookup #-}
     kernLookup !prev !c =
-      let !pk = (sfId sf, ord prev, ord c)
-          cached = unsafePerformIO $ do
+      -- The cache lives on this 'FontMetrics', so the font id is constant and
+      -- the pair can be packed into a single Int key: no tuple on the hot path.
+      let !pk = (ord prev `shiftL` 21) .|. ord c
+       in unsafePerformIO $ do
             m <- readIORef kernCacheRef
-            pure (Map.lookup pk m)
-       in case cached of
-            Just k -> k
-            Nothing -> unsafePerformIO $ do
-              raw <- ttfGetKerning (sfFont sf) (fromIntegral (ord prev) :: CUInt) (fromIntegral (ord c) :: CUInt)
-              let !k = fromIntegral raw / inv
-              modifyIORef' kernCacheRef (Map.insert pk k)
-              pure k
+            case IM.lookup pk m of
+              Just k -> pure k
+              Nothing -> do
+                raw <- ttfGetKerning (sfFont sf) (fromIntegral (ord prev) :: CUInt) (fromIntegral (ord c) :: CUInt)
+                let !k = fromIntegral raw / inv
+                modifyIORef' kernCacheRef (IM.insert pk k)
+                pure k
 
     {-# NOINLINE runLookup #-}
     runLookup !txt = unsafePerformIO $ do
@@ -496,7 +508,9 @@ buildGlyphFontMetrics ga sf scale = do
         writeIORef runEpochRef ep
         writeIORef runCacheRef Map.empty
         writeIORef runLruRef []
-      let !key = (txt, sfId sf)
+      -- The cache is per 'FontMetrics', so the font id is implicit and the
+      -- key is the text alone: no per-lookup tuple allocation.
+      let !key = txt
       m <- readIORef runCacheRef
       case Map.lookup key m of
         Just rq -> pure rq

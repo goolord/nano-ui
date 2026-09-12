@@ -22,6 +22,7 @@ module NanoUI.Context.Types
   , DrawOpCacheEntry (..)
   , CustomDrawOpCacheEntry (..)
   , SpanCacheEntry (..)
+  , WidgetTextCacheEntry (..)
   , initialDrawingCacheState
   , InteractionState (..)
   , initialInteractionState
@@ -53,17 +54,15 @@ import NanoUI.Atlas (ImageAtlas)
 import NanoUI.Draw (DrawArena, DrawOp, DrawingBuild)
 import NanoUI.Font (FontMetrics)
 import NanoUI.Frame.SpanArena (SpanArena)
-import NanoUI.Icons (Icons)
 import NanoUI.Id (IdContext, WidgetId, hashWidgetId)
 import NanoUI.Input (UiCursorKind)
-import NanoUI.Layout.Arena (DirTag, NodeArena, NodeType)
+import NanoUI.Layout.Arena (DirTag, LayoutCache, NodeArena, NodeType)
 import NanoUI.Store (WidgetStore)
 import NanoUI.Style (FontStyle, FontVariant, FontWeight, Layout, Theme)
 import NanoUI.Types
   ( Color
   , Damage (..)
   , DamageBounds
-  , HostProfile
   , PopupAnchor
   , PopupPlacement
   , Rect
@@ -234,11 +233,22 @@ data SpanCacheEntry = SpanCacheEntry
   , sceRect :: !Rect
   , sceEffMaxW :: {-# UNPACK #-} !Float
   , sceRowChild :: {-# UNPACK #-} !Bool
-  , sceCellHost :: {-# UNPACK #-} !Bool
   , sceSpans :: ![(Rect, Text, Color, Color)]
   }
 
-type CustomMeasureFn = HostProfile -> FontMetrics -> (Float, Float) -> (Float, Float)
+-- | Cache entry for a widget node's label placement. Every input that changes
+-- the produced placement is in the key; the value is the placement list exactly
+-- as the painter consumes it, so a steady-state hit allocates nothing.
+data WidgetTextCacheEntry = WidgetTextCacheEntry
+  { wtcNodeType :: {-# UNPACK #-} !Int
+  , wtcStyle :: {-# UNPACK #-} !Int
+  , wtcFontSize :: {-# UNPACK #-} !Float
+  , wtcText :: !Text
+  , wtcRect :: !Rect
+  , wtcPlacements :: ![(Text, Float, Float, Float, Float)]
+  }
+
+type CustomMeasureFn = FontMetrics -> (Float, Float) -> (Float, Float)
 
 data CustomDrawContext = CustomDrawContext
   { cdcHovered  :: {-# UNPACK #-} !Bool
@@ -247,7 +257,6 @@ data CustomDrawContext = CustomDrawContext
   , cdcActive   :: {-# UNPACK #-} !Bool
   , cdcDisabled :: {-# UNPACK #-} !Bool
   , cdcTheme    :: !Theme
-  , cdcHost     :: !HostProfile
   , cdcFont     :: !FontMetrics
   }
 
@@ -359,13 +368,17 @@ data Context = Context
   , ctxResolveMeasure :: !(Float -> FontWeight -> FontStyle -> FontVariant -> Text -> IO (Float, Float))
   , ctxMeasureCache :: Maybe (IORef (HashMap MeasureCacheKey (Float, Float)))
   , ctxSpanCache :: !(IORef (IntMap SpanCacheEntry))
+  , ctxWidgetTextCache :: !(IORef (IntMap WidgetTextCacheEntry))
+  -- Whole-layout reuse cache (Phase 5A): cached signature + solved rects,
+  -- with the window size and font/theme generation it was captured under.
+  , ctxLayoutCache :: !(IORef (Maybe (LayoutCache, Size, Int)))
+  , ctxMetricGen :: !(IORef Int)
   -- True when the next present must repaint the whole window (fresh retain
   -- texture, forced full, continuous present, or window expose). When False,
   -- a DamageClip frame culls the paint pass to the damaged region.
   , ctxPaintFull :: !(IORef Bool)
   , ctxExternalText :: Bool
   , ctxTheme :: !(IORef Theme)
-  , ctxIcons :: Icons
   , ctxContainerStack :: IORef [Int]
   , ctxMessages :: IORef [FrameMsg]
   , ctxFocusables :: IORef (MutablePrimArray RealWorld WidgetId)
@@ -379,7 +392,6 @@ data Context = Context
   , ctxImageAtlas :: ImageAtlas
   , ctxWakeLoop :: IORef (Maybe (IO ()))
   , ctxHost :: IORef (Map TypeRep Dynamic)
-  , ctxHostProfile :: HostProfile
   , ctxDefaultLayout :: IORef Layout
   }
 
