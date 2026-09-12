@@ -86,7 +86,7 @@ runTerminalModalOverlayTest _ failed = do
           heading "nano-ui"
           muted "Immediate-mode GUI for Haskell."
           muted "Terminal backend demo."
-          row' (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fit}) (flex >> clickButton "Close" (pure ()))
+          row' (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fit}) (flex >> button_ "Close")
           pure ()
         pure dlg
   (dlg, drawData) <- warmupDraw ctx inp0 ui
@@ -129,7 +129,7 @@ runTerminalModalTightTest _ failed = do
         heading "nano-ui"
         muted "Immediate-mode GUI for Haskell."
         muted "Terminal backend demo."
-        row' (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fit}) (flex >> clickButton "Close" (pure ()))
+        row' (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fit}) (flex >> button_ "Close")
         pure ()
   (dlg, _, _, _) <- runFrame ctx inp0 ui >>= \_ -> runFrame ctx inp0 ui
   overlays <- collectOverlayTextSpans ctx inp0
@@ -149,7 +149,7 @@ runTerminalModalOpenRedrawTest _ failed = do
   let inp0 = withInputOff 80 24
       ui = do
         (open, setOpen) <- useFlag False
-        resp <- button "Open"
+        resp <- button' "Open"
         onClick resp (setOpen True)
         _ <- modal open "About" (label "body")
         pure resp

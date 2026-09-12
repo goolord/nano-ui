@@ -61,15 +61,13 @@ tuiApp st = do
             sep
             checked <-
               row' (stack {layoutHeight = Fit}) $ do
-                ok <- button "OK"
-                when (respClicked ok) $ emit (Clicked "OK")
-                cancel <- button "Cancel"
-                when (respClicked cancel) $ emit (Clicked "Cancel")
+                whenM (button "OK") $ emit (Clicked "OK")
+                whenM (button "Cancel") $ emit (Clicked "Cancel")
                 (_, c) <- checkbox "Feature" False
                 pure c
             row' (stack {layoutHeight = Fit}) $ do
-              clickButton "About" (setAbout True)
-              clickButton "Debug" (setDebug True)
+              whenM (button "About") (setAbout True)
+              whenM (button "Debug") (setDebug True)
             sep
             (curIdx, setTab) <- useTabIdx 0
             (tabResp, nextTab) <- tabs curIdx
@@ -121,7 +119,7 @@ tuiApp st = do
         muted "Terminal backend demo."
         row' (stack {layoutWidth = Grow 1, layoutHeight = Fit}) $ do
           flex
-          clickButton "Close" (setAbout False)
+          whenM (button "Close") (setAbout False)
     onClick aboutResp (setAbout False)
 
 debugWindowBody :: TermDebugSnapshot -> NanoUI ()

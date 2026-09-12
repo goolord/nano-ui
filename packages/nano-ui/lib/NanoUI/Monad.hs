@@ -38,10 +38,14 @@ module NanoUI.Monad
   , decodeMessages
   , reduceMessages
   , reduceUpdates
+  , whenM
+  , unlessM
+  , ifM
   )
 where
 
 
+import Control.Monad (unless, when)
 import Data.Hashable (Hashable, hash)
 import Data.IORef (readIORef, writeIORef)
 import Data.Typeable (Typeable)
@@ -300,3 +304,24 @@ damageFullNow :: (Ui :> es) => Eff es ()
 damageFullNow = do
   ctx <- askContext
   uiIO (damageFull ctx)
+
+-- | Monadic variant of 'when'. Runs the second action if the first returns 'True'.
+--
+-- Example:
+--
+-- @
+-- whenM (button "Save") saveDocument
+-- @
+{-# INLINE whenM #-}
+whenM :: Monad m => m Bool -> m () -> m ()
+whenM mb ma = mb >>= \b -> when b ma
+
+-- | Monadic variant of 'unless'. Runs the second action if the first returns 'False'.
+{-# INLINE unlessM #-}
+unlessM :: Monad m => m Bool -> m () -> m ()
+unlessM mb ma = mb >>= \b -> unless b ma
+
+-- | Monadic conditional selection.
+{-# INLINE ifM #-}
+ifM :: Monad m => m Bool -> m a -> m a -> m a
+ifM mb t f = mb >>= \b -> if b then t else f

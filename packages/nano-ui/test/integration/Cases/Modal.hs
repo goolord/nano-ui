@@ -25,12 +25,12 @@ runModalOverlayTest ctx failed = do
   let
     inp0 = withInput 320 200
     ui = column $ do
-      outside <- button "Outside"
-      (dlg, mInside) <- modal True "Title" (button "Inside")
+      outside <- button' "Outside"
+      (dlg, mInside) <- modal True "Title" (button' "Inside")
       pure (outside, dlg, mInside)
     closedUi = column $ do
       _ <- button "Outside"
-      (dlg, mInside) <- modal False "Title" (button "Inside")
+      (dlg, mInside) <- modal False "Title" (button' "Inside")
       pure (dlg, mInside)
 
   (dlgClosed, mInsideClosed) <- evalUi ctx inp0 closedUi
@@ -127,7 +127,7 @@ runModalOpenDamageTest _ failed = do
   ctx <- newContext
   let ui = do
         (open, setOpen) <- useFlag False
-        resp <- button "Open"
+        resp <- button' "Open"
         onClick resp (setOpen True)
         _ <- modal open "Title" (label "body")
         pure resp

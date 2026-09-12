@@ -22,7 +22,7 @@
 --
 -- Families, by tab:
 --
---   * Controls     — clickButton, checkbox, slider, select, comboBox,
+--   * Controls     — button, checkbox, slider, select, comboBox,
 --                    boundedRadioFieldset, colorPicker, textInput, textArea,
 --                    button + tooltip, contextMenu, file dialogs, dropZone
 --   * Graphics     — image gallery + progressBar driven by a pulsing value
@@ -280,10 +280,10 @@ demoUi = do
                   else ""
           unless (T.null fpsText) $
             void (labelEx (tight . fontMono . fontMuted $ defaultLayout) fpsText)
-          clickButton "OK" (setClick "OK")
-          clickButton "Cancel" (setClick "Cancel")
-          clickButton "About" (setAbout True)
-          clickButton "Debug" (setDebug (not debugOpen))
+          whenM (button "OK") (setClick "OK")
+          whenM (button "Cancel") (setClick "Cancel")
+          whenM (button "About") (setAbout True)
+          whenM (button "Debug") (setDebug (not debugOpen))
 
       ----------------------------------------------------------- body ----
       responsiveRowCol 720 (tight . gap gapLayout . fillW $ defaultLayout) $ do
@@ -350,35 +350,29 @@ demoUi = do
               -- Popups & menus: act on respClicked of the item you want.
               heading "Popups & Menus"
               rowWith (tight . gap gapInline . fillW) $ do
-                btnTip <- button "Hover for Tooltip"
+                btnTip <- button' "Hover for Tooltip"
                 tooltip btnTip "This is a floating tooltip widget!"
-                btnMenu <- button "Right-click Menu"
+                btnMenu <- button' "Right-click Menu"
                 void $ contextMenu btnMenu $ do
                   menuHeader "Context Menu"
                   menuSeparator
-                  cut <- menuItemWithShortcut "Cut" "Ctrl+X"
-                  copy <- menuItemWithShortcut "Copy" "Ctrl+C"
-                  paste <- menuItemWithShortcut "Paste" "Ctrl+V"
+                  whenM (menuItemWithShortcut "Cut" "Ctrl+X") (setClick "Cut")
+                  whenM (menuItemWithShortcut "Copy" "Ctrl+C") (setClick "Copy")
+                  whenM (menuItemWithShortcut "Paste" "Ctrl+V") (setClick "Paste")
                   menuSeparator
                   menuItemDisabled "Disabled Option"
-                  when (respClicked cut) (setClick "Cut")
-                  when (respClicked copy) (setClick "Copy")
-                  when (respClicked paste) (setClick "Paste")
               sep
               -- File dialogs: ask for a modal dialog handle, store it, and poll
               -- it every frame via useFileDialog (defined below).
               heading "File Dialogs"
               rowWith (tight . gap gapInline . fillW) $ do
-                openBtn <- button "Open File…"
-                saveBtn <- button "Save File…"
-                folderBtn <- button "Browse Folder…"
-                when (respClicked openBtn) $ do
+                whenM (button "Open File…") $ do
                   mdid <- askOpenFileDialog defaultFileDialogOptions { dialogAllowMany = True }
                   setOpenDlg mdid
-                when (respClicked saveBtn) $ do
+                whenM (button "Save File…") $ do
                   mdid <- askSaveFileDialog defaultFileDialogOptions
                   setSaveDlg mdid
-                when (respClicked folderBtn) $ do
+                whenM (button "Browse Folder…") $ do
                   mdid <- askOpenFolderDialog defaultFileDialogOptions
                   setFolderDlg mdid
               sep
@@ -600,7 +594,7 @@ demoUi = do
       muted "Esc closes this dialog, then the app."
       rowWith (gap gapInline . fillW) $ do
         flex
-        clickButton "Close" (setAbout False)
+        whenM (button "Close") (setAbout False)
   onClick aboutResp (setAbout False)
 
 ------------------------------------------------------------------------------
@@ -818,10 +812,10 @@ demoPaneHeader pid maximized pctx =
       box (fixedWH 3 16 defaultLayout) demoAccent
       void $ labelWith (tight . fontBold . fontMuted) (demoPaneTitle pid maximized)
       flex
-      void $ clickButton "+" (void (pgcSplit pctx AxisV))
-      void $ clickButton "=" (void (pgcSplit pctx AxisH))
-      void $ clickButton (if maximized then "R" else "M") (if maximized then pgcRestore pctx else pgcMaximize pctx)
-      void $ clickButton "x" (pgcClose pctx)
+      whenM (button "+") (void (pgcSplit pctx AxisV))
+      whenM (button "=") (void (pgcSplit pctx AxisH))
+      whenM (button (if maximized then "R" else "M")) (if maximized then pgcRestore pctx else pgcMaximize pctx)
+      whenM (button "x") (pgcClose pctx)
 
 demoPaneView :: (Ui :> es) => Bool -> Word64 -> PaneGridCtx es -> Eff es PaneView
 demoPaneView showHeader pid pctx = do

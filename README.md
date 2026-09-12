@@ -33,10 +33,9 @@ The engine evaluates layout, focus, input handling, animations, and damage track
 
 ### Local Hooks Pattern
 
-Transient UI state (such as counter values, text inputs, or toggle flags) lives inside component context:
+Transient UI state (such as counter values, text inputs, or toggle flags) lives inside component context. Notice how `button` directly returns `Bool`, working seamlessly with `whenM`:
 
 ```haskell
-import Control.Monad (when)
 import qualified Data.Text as T
 import NanoUI
 import NanoUI.Backend.Sdl (SdlOptions (..), defaultSdlOptions, runSdlApp)
@@ -47,17 +46,38 @@ main = runSdlApp defaultSdlOptions { sdlAppShouldQuit = inputKeysElem KeyEscape 
 counterApp :: NanoUI ()
 counterApp = do
   (count, setCount) <- useInt 0
-  column' (grow defaultLayout) $ do
+  columnWith (grow defaultLayout) $ do
     heading "Local Hooks Counter"
-    row' defaultLayout $ do
-      dec <- button "-"
-      when (respClicked dec) (setCount (count - 1))
-      
+    row $ do
+      whenM (button "-") (setCount (count - 1))
       label (T.pack (show count))
-      
-      inc <- button "+"
-      when (respClicked inc) (setCount (count + 1))
+      whenM (button "+") (setCount (count + 1))
 ```
+
+### Immediate-Mode Mental Model
+
+`nano-ui` follows the classic, immediate-mode GUI philosophy: **declaring a widget executes its hit-test, layout, and event logic immediately within the frame.**
+
+1. **Direct Boolean Actions (`button`, `menuItem`)**:
+   Standard interactive widgets return `Eff es Bool` indicating whether they were clicked during this frame:
+   ```haskell
+   whenM (button "Save") saveDocument
+   whenM (menuItem "Open...") openDocument
+   ```
+   `whenM`, `unlessM`, and `ifM` are re-exported directly from `NanoUI` so you don't need additional imports.
+
+2. **Inspecting Geometry & Metadata (`button'`, `menuItem'`)**:
+   When you need the widget's bounding box, hover state, or response metadata (for floating popups, tooltips, or context menus), use the primed variants which return `Eff es Response`:
+   ```haskell
+   saveBtn <- button' "Save"
+   tooltip saveBtn "Save current file (Ctrl+S)"
+   ```
+
+3. **Custom Layout Sizing (`buttonWith`, `sliderWith`)**:
+   Style and layout modifiers can be applied directly using `*With` combinators:
+   ```haskell
+   whenM (buttonWith (minW 120 . fillH) "Large Action") doWork
+   ```
 
 ### Elm Architecture Pattern (Emitters & Reducers)
 
@@ -75,9 +95,9 @@ update Increment n = n + 1
 update Decrement n = n - 1
 
 view :: Int -> NanoUI ()
-view n = column' (grow defaultLayout) $ do
+view n = columnWith (grow defaultLayout) $ do
   heading "Elm-Style Counter"
-  row' defaultLayout $ do
+  row $ do
     buttonEmit "-" Decrement
     label (T.pack (show n))
     buttonEmit "+" Increment
@@ -157,9 +177,10 @@ The repository is organized as a Cabal multi-package workspace:
 
 ### Built-in Components
 
-- **Input Controls**: `button`, `checkbox`, `slider`, `textInput`, `textArea`, `comboBox`, `colorPicker`, `radioFieldset`, `knob`, `toggleSwitch`
+- **Input Controls**: `button` / `button'` / `buttonWith`, `checkbox`, `slider` / `sliderWith`, `textInput`, `textArea`, `comboBox`, `colorPicker`, `radioFieldset`, `knob`, `toggleSwitch`
 - **Data Display**: `label`, `heading`, `sparkline`, `progressBar`, `circularProgress`, `table`, `tree`, `kv`, `card`
-- **Navigation**: `tabs`, `tabBar`, `menuItem`, `contextMenu`, `tooltip`, `toolbar`, `separator`, `spacer`
+- **Navigation & Overlays**: `tabs`, `tabBar`, `menuItem` / `menuItem'`, `contextMenu`, `tooltip`, `modal`, `window`, `popup`, `toolbar`, `separator`, `spacer`
+- **Control Flow**: `whenM`, `unlessM`, `ifM` (monadic branch combinators re-exported for immediate mode)
 - **Custom Painting**: `image`, `drawing`, `canvas`, `customWidget` (direct primitive quad, gradient, and path rendering)
 - **Animations**: `animate`, `animateEase`, `animateToSpring`, `pulse` (configurable spring dynamics)
 

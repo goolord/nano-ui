@@ -1,4 +1,4 @@
-﻿{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module RgfwDemoCommon where
 
@@ -9,6 +9,7 @@ import NanoUI
   ( NanoUI
   , boundedRadioFieldset
   , button
+  , button'
   , checkbox
   , contextMenu
   , emit
@@ -33,6 +34,7 @@ import NanoUI
   , slider
   , textArea
   , textInput
+  , whenM
   , window
   , respClicked
   , respChanged
@@ -189,25 +191,21 @@ appView m = do
       void $ label "NANO-UI // RGFW LEAN BACKEND"
       void $ flex
 
-      themeBtn <- button $ case currentTheme m of
+      whenM (button $ case currentTheme m of
         ThemeNight    -> "[Theme: Tomorrow Night]"
         ThemeLight    -> "[Theme: Tomorrow Light]"
-        ThemeMidnight -> "[Theme: Midnight Black]"
-      when (respClicked themeBtn) (emit CycleTheme)
+        ThemeMidnight -> "[Theme: Midnight Black]") (emit CycleTheme)
 
-      scaleBtn <- button ("[" <> formatDpiScale (dpiScale m) <> " DPI Scale]")
-      when (respClicked scaleBtn) (emit CycleScale)
+      whenM (button ("[" <> formatDpiScale (dpiScale m) <> " DPI Scale]")) (emit CycleScale)
 
-      debugBtn <- button (if debugOpen m then "[Debug: ON]" else "[Debug: OFF]")
-      when (respClicked debugBtn) (emit (ToggleDebug (not (debugOpen m))))
+      whenM (button (if debugOpen m then "[Debug: ON]" else "[Debug: OFF]")) (emit (ToggleDebug (not (debugOpen m))))
 
     -- Tab Bar
     gridWith 4 (gap 4 . fixedH 24) $ do
       let mkTab tab title = do
             let isActive = activeTab m == tab
                 tag = if isActive then "tab:active:" else "tab:"
-            btn <- button (tag <> title)
-            when (respClicked btn) (emit (SetTab tab))
+            whenM (button (tag <> title)) (emit (SetTab tab))
       mkTab TabControls "Controls"
       mkTab TabGallery "Unicode Gallery"
       mkTab TabArchitecture "Architecture"
@@ -240,12 +238,9 @@ viewControlsTab m = do
       -- Counter
       gridWith 4 (gap 6 . fixedH 22) $ do
         void $ label ("Counter: " <> T.pack (show (counter m)))
-        incBtn <- button " +1 "
-        when (respClicked incBtn) (emit Increment)
-        decBtn <- button " -1 "
-        when (respClicked decBtn) (emit Decrement)
-        rstBtn <- button " Reset "
-        when (respClicked rstBtn) (emit Reset)
+        whenM (button " +1 ") (emit Increment)
+        whenM (button " -1 ") (emit Decrement)
+        whenM (button " Reset ") (emit Reset)
 
       -- Checkbox
       gridWith 1 (gap 6 . fixedH 20) $ do
@@ -255,20 +250,16 @@ viewControlsTab m = do
       -- Context Menu
       gridWith 2 (gap 6 . fixedH 22) $ do
         void $ label "Context Menu:"
-        menuBtn <- button "Right-click Me"
+        menuBtn <- button' "Right-click Me"
         void $ contextMenu menuBtn $ do
           menuHeader "Edit Actions"
           menuSeparator
-          cCut <- menuItemWithShortcut "Cut" "Ctrl+X"
-          when (respClicked cCut) (emit (SetNotesText "Cut text to clipboard"))
-          cCopy <- menuItemWithShortcut "Copy" "Ctrl+C"
-          when (respClicked cCopy) (emit (SetNotesText "Copied text to clipboard"))
-          cPaste <- menuItemWithShortcut "Paste" "Ctrl+V"
-          when (respClicked cPaste) (emit (SetNotesText "Pasted text from clipboard"))
+          whenM (menuItemWithShortcut "Cut" "Ctrl+X") (emit (SetNotesText "Cut text to clipboard"))
+          whenM (menuItemWithShortcut "Copy" "Ctrl+C") (emit (SetNotesText "Copied text to clipboard"))
+          whenM (menuItemWithShortcut "Paste" "Ctrl+V") (emit (SetNotesText "Pasted text from clipboard"))
           menuSeparator
           menuHeader "System"
-          cReset <- menuItem "Reset Counter"
-          when (respClicked cReset) (emit Reset)
+          whenM (menuItem "Reset Counter") (emit Reset)
           menuItemDisabled "Disabled Command"
 
       -- Sliders
@@ -294,8 +285,7 @@ viewControlsTab m = do
       gridWith 1 (gap 2) $ do
         gridWith 2 (gap 4 . fixedH 18) $ do
           void $ label "Multi-line Notes Field:"
-          clrBtn <- button "Clear"
-          when (respClicked clrBtn) (emit ClearNotes)
+          whenM (button "Clear") (emit ClearNotes)
         (taResp, taVal) <- textArea (notesVal m)
         when (respChanged taResp) (emit (SetNotesText taVal))
 
@@ -496,8 +486,7 @@ viewDiagnosticsTab m = do
       void $ separator
 
       void $ label "Floating Diagnostics Window:"
-      diagBtn <- button (if debugOpen m then "[Close Debug Window]" else "[Open Floating Debug Window (FPS, Timing, Arena, RTS)]")
-      when (respClicked diagBtn) (emit (ToggleDebug (not (debugOpen m))))
+      whenM (button (if debugOpen m then "[Close Debug Window]" else "[Open Floating Debug Window (FPS, Timing, Arena, RTS)]")) (emit (ToggleDebug (not (debugOpen m))))
 
 main :: IO ()
 main = do
