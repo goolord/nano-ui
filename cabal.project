@@ -23,7 +23,7 @@ package nano-ui
   -- Scoped to the hot packages so ../ditto and the rgfw/form libraries keep
   -- their default field layout (their only cost here is a full rebuild on
   -- flag changes, with no win to show for it).
-  ghc-options: -mavx2 -funbox-strict-fields -fmax-worker-args=32 -fspecialise-aggressively -flate-specialise
+  ghc-options: -mavx2 -funbox-strict-fields -fmax-worker-args=32 -fspecialise-aggressively -flate-specialise -optc-ffast-math
 
 package nano-ui-sdl
   flags: +sdl
@@ -34,7 +34,7 @@ package nano-ui-sdl
 
 package nano-ui-demo
   flags: +sdl
-  ghc-options: -mavx2 -funbox-strict-fields -fmax-worker-args=32 -fspecialise-aggressively -flate-specialise
+  ghc-options: -mavx2 -funbox-strict-fields -fmax-worker-args=32 -fspecialise-aggressively -flate-specialise -optc-ffast-math
 
 package nano-ui-term
   ghc-options: -mavx2 -optc-mavx2 -optc-O3 -optc-ffast-math
