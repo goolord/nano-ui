@@ -320,21 +320,17 @@ tabControlsUi :: NanoUI ()
 tabControlsUi = columnWith (tight . gap 8 . fillW) $ do
   heading "Controls"
   void $ checkbox "Feature" False
-  void $ rowWith (tight . gap 8 . alignMid . fillW) $ do
-    void $ label "Volume"
-    void $ slider 0 100 50
+  void $ label "Volume"
+  void $ slider 0 100 50
   let qualities = ["Low", "Medium", "High"]
-  void $ rowWith (tight . gap 8 . alignMid . fillW) $ do
-    void $ label "Quality"
-    void $ select qualities 1
+  void $ selectLabeled "Quality" qualities 1
   void $ label "Accent"
   void $ colorPicker (colorRGBA 204 102 102 255)
-  void $ label "Theme"
+  muted "Theme"
   void $ radioFieldset ["Light", "Dark", "System"] 1
-  void $ rowWith (tight . gap 8 . alignMid . fillW) $ do
-    void $ label "Name"
-    void $ textInput ""
-  void $ label "Notes"
+  muted "Name"
+  void $ textInputWithPlaceholder "Enter name" ""
+  muted "Notes"
   void $ textArea "Edit me.\nSecond line."
   rowWith (tight . gap 8 . fillW) $ do
     btnTip <- button' "Hover for Tooltip"
@@ -399,30 +395,26 @@ benchCheckboxes = columnWith (tight . gap 2 . fillW) $
 
 benchSliders :: NanoUI ()
 benchSliders = columnWith (tight . gap 2 . fillW) $
-  forM_ [1 .. 100 :: Int] $ \i ->
-    rowWith (tight . gap 8 . alignMid . fillW) $ do
-      void $ label (T.pack ("Slider " <> show i))
-      void $ slider 0 100 (fromIntegral i)
+  forM_ [1 .. 100 :: Int] $ \i -> do
+    void $ label (T.pack ("Slider " <> show i))
+    void $ slider 0 100 (fromIntegral i)
 
 benchRadios :: NanoUI ()
 benchRadios = columnWith (tight . gap 2 . fillW) $
   forM_ [1 .. 100 :: Int] $ \i -> do
-    void $ label (T.pack ("Radio " <> show i))
+    muted (T.pack ("Radio " <> show i))
     void $ radioFieldset ["A", "B", "C"] (i `mod` 3)
 
 benchSelects :: NanoUI ()
 benchSelects = columnWith (tight . gap 2 . fillW) $
   forM_ [1 .. 100 :: Int] $ \i ->
-    rowWith (tight . gap 8 . alignMid . fillW) $ do
-      void $ label (T.pack ("Select " <> show i))
-      void $ select ["Option 1", "Option 2", "Option 3"] (i `mod` 3)
+    void $ selectLabeled (T.pack ("Select " <> show i)) ["Option 1", "Option 2", "Option 3"] (i `mod` 3)
 
 benchTextInputs :: NanoUI ()
 benchTextInputs = columnWith (tight . gap 2 . fillW) $
-  forM_ [1 .. 100 :: Int] $ \i ->
-    rowWith (tight . gap 8 . alignMid . fillW) $ do
-      void $ label (T.pack ("Input " <> show i))
-      void $ textInput "Hello World"
+  forM_ [1 .. 100 :: Int] $ \i -> do
+    muted (T.pack ("Input " <> show i))
+    void $ textInput "Hello World"
 
 benchTextAreas :: NanoUI ()
 benchTextAreas = columnWith (tight . gap 4 . fillW) $

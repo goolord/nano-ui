@@ -326,19 +326,16 @@ demoUi = do
               heading "Controls"
               (_, cVal) <- checkbox "Feature" False
               setChecked cVal
-              (_, vVal) <- rowWith (tight . gap 8 . alignMid . fillW) $ do
-                void $ label "Volume"
-                slider 0 100 50
+              void $ label "Volume"
+              (_, vVal) <- slider 0 100 50
               setVol (T.pack (show (round vVal :: Int)))
               let qualities = ["Low", "Medium", "High"]
-              (_, qualityIdx) <- rowWith (tight . gap 8 . alignMid . fillW) $ do
-                void $ label "Quality"
-                select qualities 1
+              (_, qualityIdx) <- selectLabeled "Quality" qualities 1
               setQuality (qualities !! qualityIdx)
               void $ label "Accent"
               (_, aVal) <- colorPickerRGBA demoAccent
               setAccent (colorPickerToHexA aVal)
-              void $ label "Theme"
+              muted "Theme"
               (_, tVal) <- boundedRadioFieldset ThemeDefault themeDisplayName
               setThemeName (themeDisplayName tVal)
               setUiTheme (themeForChoice tVal)
@@ -347,11 +344,10 @@ demoUi = do
               setFontChoice fVal
               when (respChanged fResp && not (T.null fVal)) $
                 setSdlUiFont (FontSearch [T.unpack fVal])
-              (_, nVal) <- rowWith (tight . gap 8 . alignMid . fillW) $ do
-                void $ label "Name"
-                textInput ""
+              muted "Name"
+              (_, nVal) <- textInputWithPlaceholder "Enter name" ""
               setName nVal
-              void $ label "Notes"
+              muted "Notes"
               (_, notesVal) <- textArea "Edit me.\nSecond line."
               setNotes notesVal
               sep
@@ -436,8 +432,8 @@ demoUi = do
               -- Live playground: type in the box, flip toggles, drag the size
               -- slider and watch the composed font style update the preview.
               heading "Live Playground"
-              rowWith (tight . gap gapInline . fillW . alignMid) $ do
-                void $ label "Preview text"
+              columnWith (tight . gap gapInline . fillW) $ do
+                muted "Preview text"
                 (_, tVal) <- textInput sampleText
                 setSampleText tVal
               rowWith (tight . gap gapInline . fillW . alignMid) $ do
@@ -450,8 +446,9 @@ demoUi = do
                 (_, sVal) <- checkbox "Strike" typeStrike
                 setTypeStrike sVal
               rowWith (tight . gap gapInline . fillW . alignMid) $ do
-                void $ label "Size"
-                (_, szVal) <- slider 12 40 typeSize
+                (_, szVal) <- columnWith (tight . gap gapInline . fillW) $ do
+                  void $ label "Size"
+                  slider 12 40 typeSize
                 setTypeSize szVal
                 void $ labelEx (tight . fontMono . fontMuted $ defaultLayout) (T.pack (printf "%.0f px" szVal))
               -- Font styles are ordinary style combinators; fold the toggles in.

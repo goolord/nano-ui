@@ -80,6 +80,7 @@ module NanoUI.Widgets
   , scrollConfigured
   , select
   , selectWith
+  , selectLabeled
   , boundedSelect
   , enumSelect
   , useEnumSelect
@@ -1208,13 +1209,28 @@ textAreaWith layout initial = do
 select :: Ui :> es => [Text] -> Int -> Eff es (Response, Int)
 select = selectWith id
 
+-- | Dropdown select with an inline caption: the closed control renders
+-- @caption: option@, the way selects looked before labels were decoupled. The
+-- plain 'select' stays caption-less; this is the opt-in for the old look.
+selectLabeled :: Ui :> es => Text -> [Text] -> Int -> Eff es (Response, Int)
+selectLabeled caption = selectEx id caption
+
 selectWith ::
   Ui :> es =>
   (Layout -> Layout) ->
   [Text] ->
   Int ->
   Eff es (Response, Int)
-selectWith modLayout options initial = do
+selectWith modLayout = selectEx modLayout ""
+
+selectEx ::
+  Ui :> es =>
+  (Layout -> Layout) ->
+  Text ->
+  [Text] ->
+  Int ->
+  Eff es (Response, Int)
+selectEx modLayout caption options initial = do
   wid <- nextId
   ctx <- askContext
   uiIO $ registerFocusable ctx wid
@@ -1228,7 +1244,7 @@ selectWith modLayout options initial = do
   when (not (IM.member key (storeInt store0)))
     $ uiIO
     $ setStore ctx (store0 {storeInt = IM.insert key clamped (storeInt store0)})
-  resp <- addWidgetWithOptions wid NodeSelect "" opts 0 (modLayout defaultLayout)
+  resp <- addWidgetWithOptions wid NodeSelect caption opts 0 (modLayout defaultLayout)
   inp <- askInput
   open <- uiIO $ do
     st <- getStore ctx

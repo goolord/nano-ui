@@ -111,7 +111,7 @@ animUi = do
         flex
         whenM (button (if tossed then "Catch" else "Toss")) (setTossed (not tossed))
         whenM (button (if stiffSpring then "Stiff" else "Bouncy")) (setStiffSpring (not stiffSpring))
-      throwSec <- rowWith (tight . gap 8 . alignMid . fillW) $ do
+      throwSec <- do
         void (label "Throw")
         (_, throwRaw) <- slider 35 140 75
         pure (throwRaw / 100)

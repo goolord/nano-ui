@@ -528,8 +528,9 @@ measureWidget na host fm measure idx = do
         measureMarkedWidget host fm measure body (treeRowLeading host fm depth)
       NodeSelect -> do
         opts <- getOptions na idx
-        let choices = if null opts then [""] else opts
-        dims <- mapM (measure . selectDisplayText) choices
+        let lbl = txt
+            choices = if null opts then [""] else opts
+        dims <- mapM (measure . selectDisplayText lbl) choices
         let (mw, mh) =
               case dims of
                 [] -> (0, 0)

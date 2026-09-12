@@ -231,8 +231,10 @@ textInputSearchTerminalText ph value cursor focused
   | T.null value = ph
   | otherwise = value
 
-selectDisplayText :: Text -> Text
-selectDisplayText opt = opt
+selectDisplayText :: Text -> Text -> Text
+selectDisplayText lbl opt
+  | T.null lbl = opt
+  | otherwise = lbl <> ": " <> opt
 
 -- Space reserved on the right of a select for the chevron.
 selectChevronReserve :: Float

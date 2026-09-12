@@ -331,6 +331,7 @@ module NanoUI
   , scrollConfigured
   , select
   , selectWith
+  , selectLabeled
   , boundedSelect
   , enumSelect
   , useEnumSelect
@@ -921,6 +922,7 @@ import NanoUI.Widgets
   , scrollConfigured
   , select
   , selectWith
+  , selectLabeled
   , sep
   , separator
   , slider

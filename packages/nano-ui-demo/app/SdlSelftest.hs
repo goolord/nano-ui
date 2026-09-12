@@ -191,9 +191,8 @@ selftest imgs ui = do
     drawOnce ui ctx' env base
     void $ saveScreenshot env (cacheDir </> "typography_styles.bmp")
     sizeSpan <- requireSpan "selftest: Size slider" (findRightmost "Size" spansType)
-    let sliderPos = V2 (v2X sizeSpan + 40) (v2Y sizeSpan)
-    for_ [20, 60, 100, 140, 180, 50, 120, -60, -100, 0 :: Float] $ \dx -> do
-      dragPos ui ctx' env base sliderPos (V2 (v2X sliderPos + dx) (v2Y sliderPos))
+    for_ [20, 60, 100, 140, 180, 50, 120, -60, -100, 0 :: Float] $ \dx ->
+      dragPos ui ctx' env base sizeSpan (V2 (v2X sizeSpan + dx) (v2Y sizeSpan))
     spansTypeAfter <- collectTextSpans ctx'
     unless (hasText "Live Playground" spansTypeAfter) $ fail "selftest: typography missing after size changes"
     clickTab ui ctx' env base "Panes"
