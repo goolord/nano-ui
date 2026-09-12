@@ -71,10 +71,15 @@ labeledArea lbl initial = do
   void (label lbl)
   textArea initial
 
+labeledInput :: Ui :> es => T.Text -> T.Text -> Eff es (Response, T.Text)
+labeledInput lbl initial = do
+  void (label lbl)
+  textInputWithPlaceholder ("Enter " <> lbl) initial
+
 runTextInputCursorTest :: Context -> IORef Int -> IO ()
 runTextInputCursorTest ctx failed = do
   let inp0 = withInput 320 120
-      ui = column (textInput "Name" "")
+      ui = column (labeledInput "Name" "")
   _ <- warmup2 ctx inp0 ui
   spans <- collectTextSpans ctx
   let labelPos = [(rectX r + rectW r / 2, rectY r + 0.5) | (r, txt, _, _, _) <- spans, txt == "Name"]
@@ -149,7 +154,7 @@ runTextInputCutClearsSelectionTest ctx failed = do
   clipRef <- newIORef (Nothing :: Maybe T.Text)
   let ctx' = withClipboard ctx (readIORef clipRef) (\s -> writeIORef clipRef (Just s) >> pure True)
       inp0 = withInput 320 120
-      ui = column (textInput "Name" "hello")
+      ui = column (textInput "hello")
   _ <- warmup2 ctx' inp0 ui
   _ <- runFrame ctx' (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   let shiftLeft =
@@ -169,7 +174,7 @@ runTextInputCutClearsSelectionTest ctx failed = do
 runTextInputWordKeysTest :: Context -> IORef Int -> IO ()
 runTextInputWordKeysTest ctx failed = do
   let inp0 = withInput 320 120
-      ui = column (textInput "Name" "hello world")
+      ui = column (textInput "hello world")
       ctrlMods = Modifiers False True False
   _ <- warmup2 ctx inp0 ui
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
@@ -215,7 +220,7 @@ runTextAreaCutClearsSelectionTest ctx failed = do
 runTextInputSelectionTest :: Context -> IORef Int -> IO ()
 runTextInputSelectionTest ctx failed = do
   let inp0 = withInput 320 120
-      ui = column (button "Other" >> textInput "Name" "hello")
+      ui = column (button "Other" >> textInput "hello")
   _ <- warmup2 ctx inp0 ui
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
@@ -231,7 +236,7 @@ runTextInputCtrlATest :: Context -> IORef Int -> IO ()
 runTextInputCtrlATest ctx failed = do
   term <- newCellContext
   let inp0 = withInput 320 120
-      ui = column (textInput "Name" "hello")
+      ui = column (textInput "hello")
   forM_ [ctx, term] $ \c -> do
     _ <- runFrame c inp0 ui
     _ <- runFrame c (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
@@ -286,7 +291,7 @@ runTextAreaCtrlATest ctx failed = do
 runTextInputMouseSelectionTest :: Context -> IORef Int -> IO ()
 runTextInputMouseSelectionTest ctx failed = do
   let inp0 = withInput 320 120
-      ui = column (textInput "Name" "hello")
+      ui = column (textInput "hello")
   _ <- warmup2 ctx inp0 ui
   spans <- collectTextSpans ctx
   case [r | (r, txt, _, _, _) <- spans, txt == "hello"] of
@@ -304,8 +309,8 @@ runTextInputClickSelectTest _ failed = do
   wordCtx <- newContext
   allCtx <- newContext
   let inp0 = withInput 320 120
-      uiWord = column (textInput "Name" "hello world")
-      uiAll = column (textInput "Name" "hello")
+      uiWord = column (textInput "hello world")
+      uiAll = column (textInput "hello")
   _ <- warmup2 wordCtx inp0 uiWord
   spans <- collectTextSpans wordCtx
   case [r | (r, txt, _, _, _) <- spans, txt == "hello world"] of
@@ -338,7 +343,7 @@ runTextInputClipboardTest ctx failed = do
   clipRef <- newIORef (Nothing :: Maybe T.Text)
   let ctx' = withClipboard ctx (readIORef clipRef) (\s -> writeIORef clipRef (Just s) >> pure True)
       inp0 = withInput 320 120
-      ui = column (textInput "Name" "hello")
+      ui = column (textInput "hello")
   _ <- warmup2 ctx' inp0 ui
   _ <- runFrame ctx' (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   let selectAll = inp0 {inputChars = "a", inputModifiers = Modifiers False True False}
@@ -358,7 +363,7 @@ runTextInputCutMenuTest ctx failed = do
   clipRef <- newIORef (Nothing :: Maybe T.Text)
   let ctx' = withClipboard ctx (readIORef clipRef) (\s -> writeIORef clipRef (Just s) >> pure True)
       inp0 = withInput 320 160
-      ui = column (textInput "Name" "hello")
+      ui = column (textInput "hello")
   _ <- warmup2 ctx' inp0 ui
   _ <- runFrame ctx' (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   spans <- collectTextSpans ctx'
@@ -390,7 +395,7 @@ runTextInputMenuTest ctx failed = do
   clipRef <- newIORef (Just "pasted")
   let ctx' = withClipboard ctx (readIORef clipRef) (\s -> writeIORef clipRef (Just s) >> pure True)
       inp0 = withInput 320 160
-      ui = column (textInput "Name" "hello")
+      ui = column (textInput "hello")
   _ <- warmup2 ctx' inp0 ui
   _ <- runFrame ctx' (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   spans <- collectTextSpans ctx'
@@ -413,7 +418,7 @@ runTextInputMenuUnfocusedTest ctx failed = do
   clipRef <- newIORef (Just "pasted")
   let ctx' = withClipboard ctx (readIORef clipRef) (\s -> writeIORef clipRef (Just s) >> pure True)
       inp0 = withInput 320 160
-      ui = column (textInput "Name" "hello")
+      ui = column (textInput "hello")
   _ <- warmup2 ctx' inp0 ui
   spans <- collectTextSpans ctx'
   case [r | (r, txt, _, _, _) <- spans, txt == "hello"] of
@@ -426,14 +431,14 @@ runTextInputMenuUnfocusedTest ctx failed = do
 
 runTextInputSpanTest :: Context -> IORef Int -> IO ()
 runTextInputSpanTest ctx failed = do
-  _ <- runFrame ctx (withInput 320 120) (column (textInput "Name" "hello"))
+  _ <- runFrame ctx (withInput 320 120) (column (textInput "hello"))
   spans <- collectTextSpans ctx
   assertSpansHas failed "hello" spans
 
 runTextInputFocusSdlTest :: Context -> IORef Int -> IO ()
 runTextInputFocusSdlTest ctx failed = do
   let inp0 = withInput 320 120
-      ui = column (textInput "Name" "")
+      ui = column (labeledInput "Name" "")
   (resp, _) <- warmup2 ctx inp0 ui
   spans <- collectTextSpans ctx
   case [(rectX r + rectW r / 2, rectY r + 0.5) | (r, txt, _, _, _) <- spans, "Enter" `T.isInfixOf` txt] of
@@ -488,7 +493,7 @@ runTextInputFocusTest :: Context -> IORef Int -> IO ()
 runTextInputFocusTest _ failed = do
   ctx <- newCellContext
   let inp0 = withInput 200 100
-      ui = column (textInput "Name" "")
+      ui = column (textInput "")
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect rx ry _ _ = respRect resp
       inp1 = inp0 {inputMousePos = V2 (rx + 1) (ry + 0.5), inputMouseDown = True, inputMousePressed = True}
@@ -499,7 +504,7 @@ runTextInputFocusTest _ failed = do
 runTextInputDirtyTest :: Context -> IORef Int -> IO ()
 runTextInputDirtyTest _ failed = do
   ctx <- newCellContext
-  let ui = column (textInput "Name" "")
+  let ui = column (textInput "")
       inp0 = (withInput 200 100) {inputMousePos = V2 20 20}
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect rx ry _ _ = respRect resp
@@ -524,7 +529,7 @@ runTextInputFfCaretTest ctx failed = do
   assertEq failed (textIndexAtX host fm fs (lineWidth fm fs)) 6
   assertEq failed (textIndexAtX host fm fs (lineWidth fm (T.take 3 fs))) 3
   let inp0 = withInput 320 120
-      ui = column (textInput "Name" fs)
+      ui = column (textInput fs)
   _ <- warmup2 ctx inp0 ui
   spans <- collectTextSpans ctx
   assertSpansHas failed fs spans
@@ -542,7 +547,7 @@ runTextInputScrollTest :: Context -> IORef Int -> IO ()
 runTextInputScrollTest ctx failed = do
   let longText = "VeryLongTextEnteredIntoTheFieldThatExceedsTheWidth"
       inp0 = withInput 200 120
-      ui = column (textInput "Name" longText)
+      ui = column (textInput longText)
   (resp, _) <- warmup2 ctx inp0 ui
   spans0 <- collectTextSpans ctx
   case [r | (r, txt, _, _, _) <- spans0, txt == longText] of

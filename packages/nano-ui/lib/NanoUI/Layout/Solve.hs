@@ -48,10 +48,10 @@ import NanoUI.Font
   , selectPadding
   , layoutLineHeight
   , sliderTrackHeight
-  , sliderTrackMargin
+  , sliderHandleDiameter
   , sliderHandleSlack
   )
-import NanoUI.Types (HostProfile, isCellHost)
+import NanoUI.Types (HostProfile, isCellHost, sliderBarCells)
 import NanoUI.Layout.Arena
   ( DirTag (..)
   , NodeArena
@@ -118,9 +118,7 @@ import NanoUI.WidgetText
   , treeMeasureLabel
   , selectDisplayText
   , selectChevronReserve
-  , sliderValueText
   , textInputFieldHeight
-  , textInputLabelGap
   , textInputMinWidth
   , textInputPlaceholder
   , textInputSearchMode
@@ -442,19 +440,15 @@ measureTextField ::
   Bool ->
   IO (Float, Float, Float, Float)
 measureTextField host fm measure txt multiline = do
-  let lbl = if T.null txt then " " else txt
-  (lw, lh) <- measure lbl
   if isCellHost host
     then do
-      (vw, vh) <- measure (if multiline then " " else textInputPlaceholder lbl)
-      pure (max lw vw, max lh vh, 0, 0)
+      (vw, vh) <- measure (if multiline || T.null txt then " " else textInputPlaceholder txt)
+      pure (max textInputMinWidth vw, vh, 0, 0)
     else do
-      pw <- if multiline then pure 0 else fst <$> measure (textInputPlaceholder lbl)
-      let gap = textInputLabelGap fm
-          fieldH = if multiline then max 96 (textInputFieldHeight fm * 4) else textInputFieldHeight fm
-          contentW = max textInputMinWidth (if multiline then lw else max lw pw)
-          -- A text area is caption-less: no label row.
-          contentH = if multiline then fieldH else lh + gap + fieldH
+      pw <- if multiline || T.null txt then pure 0 else fst <$> measure (textInputPlaceholder txt)
+      let fieldH = if multiline then max 96 (textInputFieldHeight fm * 4) else textInputFieldHeight fm
+          contentW = max textInputMinWidth pw
+          contentH = fieldH
       pure (contentW, contentH, 0, 0)
 
 -- Caption-less search box: single row tall, icons counted in the width budget.
@@ -512,15 +506,15 @@ measureWidget na host fm measure idx = do
   (tw, th, extraW, extraH) <-
     case nt of
       NodeSlider -> do
-        let lbl = if T.null txt then " " else txt
-        (lw, lh) <- measure lbl
-        (vw, _) <- measure (sliderValueText 100)
-        let trackExtra =
+        let contentW =
               if isCellHost host
-                then fmLineHeight fm * 0.35
-                else sliderTrackMargin + sliderTrackHeight + sliderHandleSlack
-            contentW = max lw vw
-        pure (contentW, lh, 0, trackExtra)
+                then fromIntegral (sliderBarCells + 2) * fmAdvance fm ' '
+                else 60
+            contentH =
+              if isCellHost host
+                then fmLineHeight fm
+                else max sliderHandleDiameter (sliderTrackHeight + 2 * sliderHandleSlack)
+        pure (contentW, contentH, 0, 0)
       NodeCheckbox -> do
         let body = if T.null txt then " " else txt
         measureMarkedWidget host fm measure body (checkboxLeading host fm)
@@ -534,17 +528,15 @@ measureWidget na host fm measure idx = do
         measureMarkedWidget host fm measure body (treeRowLeading host fm depth)
       NodeSelect -> do
         opts <- getOptions na idx
-        let lbl = txt
-            choices = if null opts then [""] else opts
-        dims <- mapM (measure . selectDisplayText lbl) choices
+        let choices = if null opts then [""] else opts
+        dims <- mapM (measure . selectDisplayText) choices
         let (mw, mh) =
               case dims of
                 [] -> (0, 0)
                 ds -> (maximum (map fst ds), maximum (map snd ds))
         pure (mw, mh, selectChevronReserve, 0)
       NodeColorPicker -> do
-        let lbl = if T.null txt then " " else txt
-        (mw, mh, extraH) <- colorPickerMeasureSize host fm measure lbl
+        (mw, mh, extraH) <- colorPickerMeasureSize host fm measure
         pure (mw, mh, 0, extraH)
       NodeTextInput
         | textInputBareMode si && not (isCellHost host) ->

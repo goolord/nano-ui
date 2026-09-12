@@ -62,7 +62,7 @@ inputText initial =
       ctx <- askContext
       prefix <- uiIO (getActiveFormPrefix ctx)
       let fieldKey = encodeFormId formId
-      (resp, newVal) <- textInput "" val
+      (resp, newVal) <- textInput val
       when (respChanged resp || newVal /= val) $
         uiIO (updateFieldInput ctx prefix fieldKey (FormInputText newVal))
     )
@@ -80,7 +80,7 @@ inputPassword initial =
       ctx <- askContext
       prefix <- uiIO (getActiveFormPrefix ctx)
       let fieldKey = encodeFormId formId
-      (resp, newVal) <- textInputPassword "" val
+      (resp, newVal) <- textInputPassword val
       when (respChanged resp || newVal /= val) $
         uiIO (updateFieldInput ctx prefix fieldKey (FormInputText newVal))
     )
@@ -136,7 +136,7 @@ inputSlider minV maxV initial =
       ctx <- askContext
       prefix <- uiIO (getActiveFormPrefix ctx)
       let fieldKey = encodeFormId formId
-      (resp, newVal) <- slider "" minV maxV val
+      (resp, newVal) <- slider minV maxV val
       when (respChanged resp || newVal /= val) $
         uiIO (updateFieldInput ctx prefix fieldKey (FormInputFloat newVal))
     )
@@ -155,7 +155,7 @@ inputSelect options initial =
       ctx <- askContext
       prefix <- uiIO (getActiveFormPrefix ctx)
       let fieldKey = encodeFormId formId
-      (resp, newVal) <- select "" options val
+      (resp, newVal) <- select options val
       when (respChanged resp || newVal /= val) $
         uiIO (updateFieldInput ctx prefix fieldKey (FormInputInt newVal))
     )

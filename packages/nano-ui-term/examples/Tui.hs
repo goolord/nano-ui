@@ -72,9 +72,15 @@ tuiApp st = do
             (curIdx, setTab) <- useTabIdx 0
             (tabResp, nextTab) <- tabs curIdx
               [ tab (0 :: Int) "Controls" $ do
-                  (_, vol) <- slider "Volume" 0 100 50
-                  (_, quality) <- select "Quality" ["Low", "High"] 0
-                  (_, name) <- textInput "Name" ""
+                  (_, vol) <- rowWith tight $ do
+                    void $ label "Volume: "
+                    slider 0 100 50
+                  (_, quality) <- rowWith tight $ do
+                    void $ label "Quality: "
+                    select ["Low", "High"] 0
+                  (_, name) <- rowWith tight $ do
+                    void $ label "Name: "
+                    textInput ""
                   _ <- labelEx (stack {layoutWidth = Grow 1}) $
                     T.intercalate " "
                       [ "vol=" <> T.pack (show (round vol :: Int))

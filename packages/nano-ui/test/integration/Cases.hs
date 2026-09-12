@@ -499,10 +499,10 @@ assertCheckboxNodeValue failed ctx expected = do
 runSliderTest :: Context -> IORef Int -> IO ()
 runSliderTest ctx failed = do
   let inp0 = withInput 300 80
-      ui = column (slider "Vol" 0 100 10)
+      ui = column (slider 0 100 10)
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect rx ry rw rh = respRect resp
-      track = sliderTrackBounds (ctxHostProfile ctx) (ctxFontMetrics ctx) "Vol" rx ry rw rh
+      track = sliderTrackBounds (ctxHostProfile ctx) (ctxFontMetrics ctx) rx ry rw rh
       drag = V2 (rectX track + rectW track * 0.75) (rectY track + rectH track / 2)
   ((_, val), _, _, _) <- runFrame ctx (inp0 {inputMousePos = drag, inputMouseDown = True, inputMousePressed = True}) ui
   assertGt failed val 10
@@ -510,11 +510,11 @@ runSliderTest ctx failed = do
 runSliderFillWidthTest :: Context -> IORef Int -> IO ()
 runSliderFillWidthTest ctx failed = do
   let inp0 = withInput 400 120
-      ui = columnWith fillW (slider "Vol" 0 100 0)
+      ui = columnWith fillW (slider 0 100 0)
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect rx ry rw rh = respRect resp
   assertGt failed rw 300
-  let track = sliderTrackBounds (ctxHostProfile ctx) (ctxFontMetrics ctx) "Vol" rx ry rw rh
+  let track = sliderTrackBounds (ctxHostProfile ctx) (ctxFontMetrics ctx) rx ry rw rh
       endDrag = V2 (rectX track + rectW track - 2) (rectY track + rectH track / 2)
   ((_, val), _, _, _) <- runFrame ctx (inp0 {inputMousePos = endDrag, inputMouseDown = True, inputMousePressed = True}) ui
   assertGt failed val 90

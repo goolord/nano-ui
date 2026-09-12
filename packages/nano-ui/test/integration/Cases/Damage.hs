@@ -136,7 +136,7 @@ runStateChangeDamageTest _ failed = do
         (name, setName) <- useText ""
         row $ do
           label_ ("Left pane: " <> name)
-          (resp, typed) <- textInput "Name" ""
+          (resp, typed) <- textInput ""
           when (respChanged resp) (setName typed)
 
   -- Warm up and focus textInput via Tab

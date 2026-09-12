@@ -59,28 +59,28 @@ checkboxControlled txt isChecked onChange = do
   pure resp
 
 -- | Controlled single-line text input driven by caller-owned state.
-textInputControlled :: Ui :> es => Text -> Text -> (Text -> Eff es ()) -> Eff es Response
-textInputControlled lbl currentText onChange = do
+textInputControlled :: Ui :> es => Text -> (Text -> Eff es ()) -> Eff es Response
+textInputControlled currentText onChange = do
   wid <- nextId
   ctx <- askContext
   let key = intKey wid
   st0 <- uiIO (getStore ctx)
   when (IM.lookup key (storeText st0) /= Just currentText) $
     uiIO $ setStore ctx (st0 {storeText = IM.insert key currentText (storeText st0)})
-  (resp, newVal) <- textInput lbl currentText
+  (resp, newVal) <- textInput currentText
   when (respChanged resp) $ onChange newVal
   pure resp
 
 -- | Controlled slider driven by caller-owned state.
-sliderControlled :: Ui :> es => Text -> Float -> Float -> Float -> (Float -> Eff es ()) -> Eff es Response
-sliderControlled lbl minV maxV currentVal onChange = do
+sliderControlled :: Ui :> es => Float -> Float -> Float -> (Float -> Eff es ()) -> Eff es Response
+sliderControlled minV maxV currentVal onChange = do
   wid <- nextId
   ctx <- askContext
   let key = intKey wid
   st0 <- uiIO (getStore ctx)
   when (IM.lookup key (storeFloat st0) /= Just currentVal) $
     uiIO $ setStore ctx (st0 {storeFloat = IM.insert key currentVal (storeFloat st0)})
-  (resp, newVal) <- slider lbl minV maxV currentVal
+  (resp, newVal) <- slider minV maxV currentVal
   when (respChanged resp) $ onChange newVal
   pure resp
 
@@ -99,23 +99,23 @@ checkboxEmit txt initial toMsg = do
   pure resp
 
 -- | Uncontrolled slider that emits a reducer message on value change.
-sliderEmit :: (Typeable msg, Ui :> es) => Text -> Float -> Float -> Float -> (Float -> msg) -> Eff es Response
-sliderEmit lbl minV maxV initial toMsg = do
-  (resp, newVal) <- slider lbl minV maxV initial
+sliderEmit :: (Typeable msg, Ui :> es) => Float -> Float -> Float -> (Float -> msg) -> Eff es Response
+sliderEmit minV maxV initial toMsg = do
+  (resp, newVal) <- slider minV maxV initial
   when (respChanged resp) (emit (toMsg newVal))
   pure resp
 
 -- | Uncontrolled dropdown select that emits a reducer message when selection changes.
-selectEmit :: (Typeable msg, Ui :> es) => Text -> [Text] -> Int -> (Int -> msg) -> Eff es Response
-selectEmit lbl opts initial toMsg = do
-  (resp, newVal) <- select lbl opts initial
+selectEmit :: (Typeable msg, Ui :> es) => [Text] -> Int -> (Int -> msg) -> Eff es Response
+selectEmit opts initial toMsg = do
+  (resp, newVal) <- select opts initial
   when (respChanged resp) (emit (toMsg newVal))
   pure resp
 
 -- | Uncontrolled text input that emits a reducer message when text changes.
-textInputEmit :: (Typeable msg, Ui :> es) => Text -> Text -> (Text -> msg) -> Eff es Response
-textInputEmit lbl initial toMsg = do
-  (resp, newVal) <- textInput lbl initial
+textInputEmit :: (Typeable msg, Ui :> es) => Text -> (Text -> msg) -> Eff es Response
+textInputEmit initial toMsg = do
+  (resp, newVal) <- textInput initial
   when (respChanged resp) (emit (toMsg newVal))
   pure resp
 

@@ -384,22 +384,18 @@ sliderHandleSlack = (sliderHandleDiameter - sliderTrackHeight) / 2
 sliderTrackMargin :: Float
 sliderTrackMargin = 4 + sliderHandleSlack
 
--- Pixel hosts: track spans the label row. Cell hosts: inline [bar] cells.
+-- Pixel hosts: centered track. Cell hosts: inline [bar] cells.
 {-# INLINE sliderTrackBounds #-}
-sliderTrackBounds :: HostProfile -> FontMetrics -> Text -> Float -> Float -> Float -> Float -> Rect
-sliderTrackBounds host fm lbl x y w h
+sliderTrackBounds :: HostProfile -> FontMetrics -> Float -> Float -> Float -> Float -> Rect
+sliderTrackBounds host fm x y w h
   | isCellHost host =
       let adv = fmAdvance fm ' '
           (ix, _) = widgetContentInset host fm
-          prefix = lineWidth fm (lbl <> " ")
           trackW = fromIntegral (sliderBarCells + 2) * adv
-       in Rect (x + ix + prefix) y trackW h
+       in Rect (x + ix) y trackW h
   | otherwise =
       let (lx, ly) = labelContentInset host fm
-          labelH = layoutLineHeight host fm
-          packedY = y + ly + labelH + sliderTrackMargin
-          maxY = y + h - sliderTrackHeight - sliderHandleSlack
-          trackY = if maxY >= packedY then packedY else max (y + ly + sliderHandleSlack) maxY
+          trackY = y + max ly ((h - sliderTrackHeight) / 2)
           trackX = x + lx
           trackW = max 0 (w - 2 * lx)
        in Rect trackX trackY trackW sliderTrackHeight

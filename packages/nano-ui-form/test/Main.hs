@@ -2,7 +2,7 @@
 
 module Main (main) where
 
-import Control.Monad (forM_, when)
+import Control.Monad (forM_)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Ditto.Types as Ditto

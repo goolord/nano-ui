@@ -147,6 +147,8 @@ module NanoUI
   , withTheme
   , setTheme
   , getTheme
+  , getStoreBool
+  , setStoreBool
   , themeSeries
   , scrollBarTrackColor
   , scrollBarThumbColor
@@ -236,6 +238,8 @@ module NanoUI
   , damageFullNow
   -- Widgets
   , Response (..)
+  , setChanged
+  , setClicked
   , Responding (..)
   , Clickable (..)
   , RightClickable (..)
@@ -545,7 +549,7 @@ where
 
 import NanoUI.Animatable (Animatable (..))
 import NanoUI.Compact (Compact, askCompact, compactHost)
-import NanoUI.Context (Ease (..), applyEase, getTheme, setTheme, withTheme)
+import NanoUI.Context (Ease (..), applyEase, getStoreBool, getTheme, setStoreBool, setTheme, withTheme)
 import NanoUI.Draw (drawTextBox, shiftDrawOp)
 import NanoUI.Font
   ( FontMetrics (..)
@@ -951,7 +955,7 @@ import NanoUI.Widgets
   , GridAxis (..)
   , paneGrid
   )
-import NanoUI.Widgets.Node (setSubmitted)
+import NanoUI.Widgets.Node (setChanged, setClicked, setSubmitted)
 import NanoUI.Widgets.Combinators (stripedRow)
 import NanoUI.Widgets.Drop
   ( DropTarget (..)

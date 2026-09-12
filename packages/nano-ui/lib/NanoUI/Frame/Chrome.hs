@@ -213,12 +213,12 @@ displayTextRest ctx nt idx txt terminal =
           let open = isSelectOpen store (intKey wid)
               icons = ctxIcons ctx
               caret = if open then iconSelectOpen icons else iconSelectClosed icons
-          pure (selectDisplayText txt opt <> caret)
+          pure (selectDisplayText opt <> caret)
         NodeColorPicker -> do
           store <- getStore ctx
           wid <- getWidgetId (ctxNodeArena ctx) idx
           let current = widgetStoreColor store wid colorPickerDefaultColor
-          pure (colorPickerDisplayText txt current)
+          pure (colorPickerDisplayText current)
         NodeTree -> do
           si <- getStyleIdx (ctxNodeArena ctx) idx
           let (_, depth, hasKids, expanded) = treeDecodeStyle si
@@ -247,7 +247,7 @@ displayTextRest ctx nt idx txt terminal =
         NodeTextArea -> textAreaStoredValue ctx idx
         NodeSelect -> do
           opt <- selectCurrentOption ctx idx
-          pure (selectDisplayText txt opt)
+          pure (selectDisplayText opt)
         _ -> pure txt
 
 textInputValue :: Context -> NodeIdx -> IO Text

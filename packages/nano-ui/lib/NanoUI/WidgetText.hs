@@ -164,28 +164,25 @@ searchFieldIconRects host fm x y w h =
    in (mag, clear)
 
 textInputPlaceholder :: Text -> Text
-textInputPlaceholder lbl =
-  if T.null lbl
-    then "Enter text"
-    else "Enter " <> T.toLower lbl
+textInputPlaceholder ph = ph
 
 textInputFieldText :: Text -> Text -> Bool -> Text
-textInputFieldText lbl value focused =
+textInputFieldText ph value focused =
   let body = value
    in if T.null body && not focused
-        then textInputPlaceholder lbl
+        then ph
         else body
 
 textInputTerminalText :: Text -> Text -> Int -> Bool -> Text
-textInputTerminalText lbl value cursor focused =
+textInputTerminalText ph value cursor focused =
   let body = value
       shown =
         if focused
           then
             let c = max 0 (min (T.length body) cursor)
              in T.take c body <> "\x2502" <> T.drop c body
-          else body
-   in lbl <> ": " <> shown
+          else if T.null body then ph else body
+   in shown
 
 -- | Marks a @NodeTextInput@ as a caption-less search field. Lives in the high
 -- style bits (like the button flags) so it survives the arena's int storage.
@@ -234,8 +231,8 @@ textInputSearchTerminalText ph value cursor focused
   | T.null value = ph
   | otherwise = value
 
-selectDisplayText :: Text -> Text -> Text
-selectDisplayText lbl opt = lbl <> ": " <> opt
+selectDisplayText :: Text -> Text
+selectDisplayText opt = opt
 
 -- Space reserved on the right of a select for the chevron.
 selectChevronReserve :: Float
@@ -309,8 +306,8 @@ parseHexDigit c
   | c >= 'A' && c <= 'F' = Just (fromIntegral (fromEnum c - 55))
   | otherwise = Nothing
 
-colorPickerDisplayText :: Text -> Color -> Text
-colorPickerDisplayText lbl col = colorPickerLabelText lbl <> ": " <> colorPickerToHex col
+colorPickerDisplayText :: Color -> Text
+colorPickerDisplayText col = colorPickerToHex col
 
 tableStripeEven :: Int
 tableStripeEven = 1

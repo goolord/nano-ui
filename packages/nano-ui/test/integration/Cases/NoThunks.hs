@@ -21,8 +21,8 @@ runNoThunksTest :: Context -> IORef Int -> IO ()
 runNoThunksTest ctx failed = do
   let inp = withInput 300 200
       ui = column $ do
-        _ <- textInput "Name" "hello"
-        _ <- slider "Vol" 0 100 42
+        _ <- textInput "hello"
+        _ <- slider 0 100 42
         pure ()
   _ <- runFrame ctx inp ui
   _ <- runFrame ctx inp ui

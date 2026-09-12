@@ -689,7 +689,7 @@ checkbox txt initial = do
 
 -- | Slider control with default layout ('fillW'). Returns @(response, currentValue)@.
 slider ::
-  Ui :> es => Text -> Float -> Float -> Float -> Eff es (Response, Float)
+  Ui :> es => Float -> Float -> Float -> Eff es (Response, Float)
 slider = sliderEx (fillW defaultLayout)
 
 -- | Slider with a custom layout modifier function.
@@ -697,18 +697,18 @@ slider = sliderEx (fillW defaultLayout)
 -- Example:
 --
 -- @
--- (resp, val) <- sliderWith (fixedW 200) "Volume" 0 100 currentVol
+-- (resp, val) <- sliderWith (fixedW 200) 0 100 currentVol
 -- @
 {-# INLINE sliderWith #-}
 sliderWith ::
   Ui :> es =>
-  (Layout -> Layout) -> Text -> Float -> Float -> Float -> Eff es (Response, Float)
+  (Layout -> Layout) -> Float -> Float -> Float -> Eff es (Response, Float)
 sliderWith f = sliderEx (f defaultLayout)
 
 sliderEx ::
   Ui :> es =>
-  Layout -> Text -> Float -> Float -> Float -> Eff es (Response, Float)
-sliderEx layout lbl minV maxV initial = do
+  Layout -> Float -> Float -> Float -> Eff es (Response, Float)
+sliderEx layout minV maxV initial = do
   wid <- nextId
   ctx <- askContext
   inp <- askInput
@@ -719,7 +719,7 @@ sliderEx layout lbl minV maxV initial = do
     frac = if maxV > minV then (current - minV) / (maxV - minV) else 0
     host = ctxHostProfile ctx
     fm = ctxFontMetrics ctx
-    nodeText = lbl
+    nodeText = ""
   resp <- addWidget wid NodeSlider nodeText frac layout
   active <- uiIO (readIORef (ctxActiveId ctx))
   blocked <- uiIO (getLastPointerBlocked ctx)
@@ -734,7 +734,7 @@ sliderEx layout lbl minV maxV initial = do
     track0 =
       case mrect of
         Just (Rect x y w h) ->
-          let tr = sliderTrackBounds host fm lbl x y w h
+          let tr = sliderTrackBounds host fm x y w h
            in if isCellHost host
                 then tr
                 else Rect (rectX tr) (rectY tr - sliderHandleSlack) (rectW tr) (rectH tr + 2 * sliderHandleSlack)
@@ -764,23 +764,23 @@ defaultTextInputConfig =
     , ticLayout = textInputLayout
     }
 
-textInput :: Ui :> es => Text -> Text -> Eff es (Response, Text)
+textInput :: Ui :> es => Text -> Eff es (Response, Text)
 textInput = textInputConfigured defaultTextInputConfig
 
-textInputWithPlaceholder :: Ui :> es => Text -> Text -> Text -> Eff es (Response, Text)
-textInputWithPlaceholder placeholder lbl initial =
-  textInputConfigured (defaultTextInputConfig {ticPlaceholder = placeholder}) lbl initial
+textInputWithPlaceholder :: Ui :> es => Text -> Text -> Eff es (Response, Text)
+textInputWithPlaceholder placeholder initial =
+  textInputConfigured (defaultTextInputConfig {ticPlaceholder = placeholder}) initial
 
-textInputPassword :: Ui :> es => Text -> Text -> Eff es (Response, Text)
-textInputPassword lbl initial =
-  textInputConfigured (defaultTextInputConfig {ticPassword = True}) lbl initial
+textInputPassword :: Ui :> es => Text -> Eff es (Response, Text)
+textInputPassword initial =
+  textInputConfigured (defaultTextInputConfig {ticPassword = True}) initial
 
-textInputConfigured :: Ui :> es => TextInputConfig -> Text -> Text -> Eff es (Response, Text)
-textInputConfigured cfg lbl initial =
+textInputConfigured :: Ui :> es => TextInputConfig -> Text -> Eff es (Response, Text)
+textInputConfigured cfg initial =
   buildTextInput
     0
     (ticLayout cfg)
-    lbl
+    (ticPlaceholder cfg)
     initial
     Nothing
 
@@ -795,7 +795,7 @@ buildTextInput ::
   Text ->
   Maybe Float ->
   Eff es (Response, Text)
-buildTextInput styleIdx layout lbl initial mDebounceMs = do
+buildTextInput styleIdx layout placeholder initial mDebounceMs = do
   wid <- nextId
   ctx <- askContext
   uiIO $ registerFocusable ctx wid
@@ -837,7 +837,7 @@ buildTextInput styleIdx layout lbl initial mDebounceMs = do
   changed <- case mDebounceMs of
     Nothing -> pure (newText /= current)
     Just ms -> uiIO (debounceSearchChanged ctx key isFocus (newText /= current) ms)
-  resp <- addWidgetStyled wid NodeTextInput lbl 0 layout styleIdx Nothing
+  resp <- addWidgetStyled wid NodeTextInput placeholder 0 layout styleIdx Nothing
   pure (setSubmitted submitted (setChanged changed resp), newText)
 
 -- | Debounced change pulse for a search field. Fires when the text differs from
@@ -1205,17 +1205,16 @@ textAreaWith layout initial = do
   resp <- addWidget wid NodeTextArea "" 0 layout
   pure (setChanged stateChanged resp, newText)
 
-select :: Ui :> es => Text -> [Text] -> Int -> Eff es (Response, Int)
+select :: Ui :> es => [Text] -> Int -> Eff es (Response, Int)
 select = selectWith id
 
 selectWith ::
   Ui :> es =>
   (Layout -> Layout) ->
-  Text ->
   [Text] ->
   Int ->
   Eff es (Response, Int)
-selectWith modLayout lbl options initial = do
+selectWith modLayout options initial = do
   wid <- nextId
   ctx <- askContext
   uiIO $ registerFocusable ctx wid
@@ -1229,7 +1228,7 @@ selectWith modLayout lbl options initial = do
   when (not (IM.member key (storeInt store0)))
     $ uiIO
     $ setStore ctx (store0 {storeInt = IM.insert key clamped (storeInt store0)})
-  resp <- addWidgetWithOptions wid NodeSelect lbl opts 0 (modLayout defaultLayout)
+  resp <- addWidgetWithOptions wid NodeSelect "" opts 0 (modLayout defaultLayout)
   inp <- askInput
   open <- uiIO $ do
     st <- getStore ctx
@@ -1267,25 +1266,25 @@ selectWith modLayout lbl options initial = do
     finalIdx = IM.findWithDefault clamped key (storeInt store1)
   pure (setChanged (finalIdx /= initial) resp, finalIdx)
 
-boundedSelect :: (Bounded a, Enum a, Ui :> es) => Text -> a -> (a -> Text) -> Eff es (Response, a)
-boundedSelect lbl initial encode =
+boundedSelect :: (Bounded a, Enum a, Ui :> es) => a -> (a -> Text) -> Eff es (Response, a)
+boundedSelect initial encode =
   let vs = [minBound .. maxBound]
       opts = map encode vs
-   in fmap (\(r, i) -> (r, toEnum (max 0 (min (length vs - 1) i)))) (select lbl opts (fromEnum initial))
+   in fmap (\(r, i) -> (r, toEnum (max 0 (min (length vs - 1) i)))) (select opts (fromEnum initial))
 
-enumSelect :: (Bounded a, Enum a, Show a, Ui :> es) => Text -> a -> Eff es (Response, a)
-enumSelect lbl initial = boundedSelect lbl initial (T.pack . show)
+enumSelect :: (Bounded a, Enum a, Show a, Ui :> es) => a -> Eff es (Response, a)
+enumSelect initial = boundedSelect initial (T.pack . show)
 
-useEnumSelect :: (Bounded a, Enum a, Show a, Ui :> es) => Text -> a -> Eff es a
-useEnumSelect lbl initial = do
+useEnumSelect :: (Bounded a, Enum a, Show a, Ui :> es) => a -> Eff es a
+useEnumSelect initial = do
   (val, setVal) <- useEnum initial
-  (resp, next) <- enumSelect lbl val
+  (resp, next) <- enumSelect val
   when (respChanged resp) (setVal next)
   pure next
 
-useEnumRadio :: (Bounded a, Enum a, Show a, Ui :> es) => Text -> a -> Eff es a
-useEnumRadio legend initial = do
+useEnumRadio :: (Bounded a, Enum a, Show a, Ui :> es) => a -> Eff es a
+useEnumRadio initial = do
   (val, setVal) <- useEnum initial
-  (resp, next) <- enumRadio legend val
+  (resp, next) <- enumRadio val
   when (respChanged resp) (setVal next)
   pure next

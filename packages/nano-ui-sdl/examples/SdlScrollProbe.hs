@@ -52,12 +52,21 @@ scrollProbeUi =
       panelWith (padXY 14 10 . gap 6 . fillW) $ do
         heading "Controls"
         void (checkbox "Feature" False)
-        void (slider "Volume" 0 100 50)
+        rowWith (tight . gap 8 . alignMid . fillW) $ do
+          void (label "Volume")
+          void (slider 0 100 50)
         let qualities = ["Low", "Medium", "High"]
-        void (select "Quality" qualities 1)
-        void (colorPicker "Accent" (NanoUI.colorRGBA 204 102 102 255))
-        void (radioFieldset "Theme" ["Light", "Dark", "System"] 1)
-        void (textInput "Name" "")
+        rowWith (tight . gap 8 . alignMid . fillW) $ do
+          void (label "Quality")
+          void (select qualities 1)
+        rowWith (tight . gap 8 . alignMid . fillW) $ do
+          void (label "Accent")
+          void (colorPicker (NanoUI.colorRGBA 204 102 102 255))
+        void (label "Theme")
+        void (radioFieldset ["Light", "Dark", "System"] 1)
+        rowWith (tight . gap 8 . alignMid . fillW) $ do
+          void (label "Name")
+          void (textInput "")
         void (label "Notes")
         void (textArea "Edit me.\nSecond line.")
         rowWith (tight . gap 8 . fillW) $ do
@@ -81,7 +90,9 @@ scrollProbeUi =
         heading "Fifth"
         void (label "Notes")
         void (textArea "Edit me.\nLine2\nLine3\nLine4\nLine5\nLine6\nLine7\nLine8\nLine9\nLine10")
-        void (boundedSelect "Theme" () (const "Tomorrow at Midnight Min"))
+        rowWith (tight . gap 8 . alignMid . fillW) $ do
+          void (label "Theme")
+          void (boundedSelect () (const "Tomorrow at Midnight Min"))
         sep
       panelWith (padXY 14 10 . gap 6 . fillW) $ do
         heading "Sixth"

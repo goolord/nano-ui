@@ -266,19 +266,19 @@ viewControlsTab m = do
       gridWith 1 (gap 2) $ do
         let volPct = round (volumeVal m * 100) :: Int
         void $ label ("Master Volume: " <> T.pack (show volPct) <> "%")
-        (slResp, slVal) <- slider "Vol" 0 1 (volumeVal m)
+        (slResp, slVal) <- slider 0 1 (volumeVal m)
         when (respChanged slResp) (emit (SetVolume slVal))
 
       gridWith 1 (gap 2) $ do
         let opPct = round (opacityVal m * 100) :: Int
         void $ label ("Surface Opacity: " <> T.pack (show opPct) <> "%")
-        (opResp, opVal) <- slider "Opacity" 0 1 (opacityVal m)
+        (opResp, opVal) <- slider 0 1 (opacityVal m)
         when (respChanged opResp) (emit (SetOpacity opVal))
 
       -- Text Input
       gridWith 1 (gap 2) $ do
         void $ label "Single-line Text Input:"
-        (tiResp, tiVal) <- textInput "Input" (textVal m)
+        (tiResp, tiVal) <- textInput (textVal m)
         when (respChanged tiResp) (emit (SetInputText tiVal))
 
       -- Text Area
@@ -291,7 +291,8 @@ viewControlsTab m = do
 
       -- Radio Buttons
       gridWith 1 (gap 2) $ do
-        (radResp, radVal) <- boundedRadioFieldset "Preset" (profileOpt m) $ \case
+        void $ label "Preset:"
+        (radResp, radVal) <- boundedRadioFieldset (profileOpt m) $ \case
           ProfileFast     -> "Fast (Low Latency)"
           ProfileBalanced -> "Balanced (Standard)"
           ProfileQuality  -> "Quality (High Detail)"

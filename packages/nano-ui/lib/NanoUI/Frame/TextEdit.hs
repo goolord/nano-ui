@@ -206,7 +206,6 @@ import NanoUI.WidgetText
   ( comboTextClip
   , textInputFieldHeight
   , textInputFieldText
-  , textInputLabelGap
   , textInputSearchMode
   , textInputBareMode
   , searchFieldIconRects
@@ -332,24 +331,8 @@ textEditMenuItemFg style enabled =
 -- Same box as `textInputGeom` / `textAreaGeom` field rects.
 textFieldRectAt :: Context -> NodeIdx -> IO Rect
 textFieldRectAt ctx idx = do
-  nt <- getNodeType (ctxNodeArena ctx) idx
   (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-  let host = ctxHostProfile ctx
-      fm = ctxFontMetrics ctx
-      labelH = layoutLineHeight host fm
-      gap = textInputLabelGap fm
-      fieldH = if nt == NodeTextInput then textInputFieldHeight fm else max 0 (h - labelH - gap)
-  if h + 0.5 < labelH + gap + (if nt == NodeTextInput then fieldH else 1)
-    then pure (Rect x y w h)
-    else
-      case nt of
-        NodeTextInput -> do
-          si <- getStyleIdx (ctxNodeArena ctx) idx
-          if textInputSearchMode si && not (isCellHost host)
-            then pure (Rect x y w h)
-            else pure (Rect x (y + labelH + gap) w fieldH)
-        NodeTextArea -> pure (Rect x (y + labelH + gap) w fieldH)
-        _ -> pure (Rect x y w h)
+  pure (Rect x y w h)
 
 textFieldMenuRect :: Context -> WidgetId -> IO (Maybe Rect)
 textFieldMenuRect ctx wid = do
@@ -642,12 +625,9 @@ data TextInputGeom = TextInputGeom
   deriving (Eq, Show)
 
 textInputGeom :: HostProfile -> FontMetrics -> Float -> Float -> Float -> Float -> TextInputGeom
-textInputGeom host fm x y w _h =
-  let labelH = layoutLineHeight host fm
-      gap = textInputLabelGap fm
-      fieldH = textInputFieldHeight fm
-      fieldY = y + labelH + gap
-   in TextInputGeom {tigFieldRect = Rect x fieldY w fieldH}
+textInputGeom _host fm x y w h =
+  let fieldH = if h > 0 then h else textInputFieldHeight fm
+   in TextInputGeom {tigFieldRect = Rect x y w fieldH}
 
 textInputFieldTextClip :: HostProfile -> TextInputGeom -> FontMetrics -> Rect
 textInputFieldTextClip host geom fm =

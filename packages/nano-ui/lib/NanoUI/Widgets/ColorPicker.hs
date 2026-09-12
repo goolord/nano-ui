@@ -95,8 +95,7 @@ import NanoUI.Types
   , rgbToHsv
   )
 import NanoUI.WidgetText
-  ( colorPickerLabelText
-  , colorPickerParseHex
+  ( colorPickerParseHex
   , colorPickerToHex
   , colorPickerToHexA
   , textInputFlagBare
@@ -230,8 +229,8 @@ colorPickerGeom ::
 colorPickerGeom showAlpha host fm x y w h =
   let
     labelH = layoutLineHeight host fm
-    contentTop = y + labelH + colorPickerGap
-    contentAvailH = max 0 (h - labelH - colorPickerGap)
+    contentTop = y
+    contentAvailH = h
     barW = colorPickerBarW
     barGap = colorPickerGap
     previewW = min colorPickerPreviewW (max 0 (w * 0.5))
@@ -274,18 +273,16 @@ colorPickerMeasureSize ::
   HostProfile
   -> FontMetrics
   -> (Text -> IO (Float, Float))
-  -> Text
   -> IO (Float, Float, Float)
-colorPickerMeasureSize host fm measure lbl =
+colorPickerMeasureSize host fm measure =
   if isCellHost host
     then do
-      (mw, mh) <- measure (lbl <> ": #000000")
+      (mw, mh) <- measure "#000000"
       pure (mw, mh, 0)
     else do
-      (lw, lh) <- measure (if T.null lbl then " " else lbl)
       let
-        contentW = max colorPickerMinWidth lw
-      pure (contentW, lh, colorPickerExtraH (layoutLineHeight host fm))
+        contentW = colorPickerMinWidth
+      pure (contentW, 0, colorPickerExtraH (layoutLineHeight host fm))
 
 -- Clamp each axis on its own so a corner is S/V 0 or 1, not a frozen mid value.
 svFromMouse :: Rect -> V2 -> (Float, Float)
@@ -476,38 +473,38 @@ colorPickerLabelLayout :: Layout
 colorPickerLabelLayout =
   defaultLayout {layoutPadding = Padding 0 0 0 0, layoutAlignY = AlignMiddle}
 
-colorPicker :: Ui :> es => Text -> Color -> Eff es (Response, Color)
+colorPicker :: Ui :> es => Color -> Eff es (Response, Color)
 colorPicker = colorPickerWith False
 
 -- | Alpha-aware picker: adds a vertical alpha bar and an A / @#RRGGBBAA@ field.
-colorPickerRGBA :: Ui :> es => Text -> Color -> Eff es (Response, Color)
+colorPickerRGBA :: Ui :> es => Color -> Eff es (Response, Color)
 colorPickerRGBA = colorPickerWith True
 
 colorPickerWith ::
-  Ui :> es => Bool -> Text -> Color -> Eff es (Response, Color)
-colorPickerWith showAlpha lbl initial = do
+  Ui :> es => Bool -> Color -> Eff es (Response, Color)
+colorPickerWith showAlpha initial = do
   ctx <- askContext
   if isCellHost (ctxHostProfile ctx)
-    then colorPickerCell lbl initial
-    else colorPickerRich showAlpha lbl initial
+    then colorPickerCell initial
+    else colorPickerRich showAlpha initial
 
--- Terminal hosts keep the single-line @label: #RRGGBB@ representation.
-colorPickerCell :: Ui :> es => Text -> Color -> Eff es (Response, Color)
-colorPickerCell lbl initial = do
+-- Terminal hosts keep the single-line @#RRGGBB@ representation.
+colorPickerCell :: Ui :> es => Color -> Eff es (Response, Color)
+colorPickerCell initial = do
   ctx <- askContext
   wid <- nextId
   uiIO $ registerFocusable ctx wid
   uiIO $ initColorPickerStore ctx wid initial
   resp <-
-    addWidget wid NodeColorPicker (colorPickerLabelText lbl) 0 (fillW defaultLayout)
+    addWidget wid NodeColorPicker "" 0 (fillW defaultLayout)
   store <- uiIO (getStore ctx)
   let
     final = widgetStoreColor store wid initial
   pure (setChanged (final /= initial) resp, final)
 
 colorPickerRich ::
-  Ui :> es => Bool -> Text -> Color -> Eff es (Response, Color)
-colorPickerRich showAlpha lbl initial = do
+  Ui :> es => Bool -> Color -> Eff es (Response, Color)
+colorPickerRich showAlpha initial = do
   ctx <- askContext
   inp <- askInput
   wid <- nextId
@@ -594,7 +591,7 @@ colorPickerRich showAlpha lbl initial = do
       addWidgetStyled
         wid
         NodeColorPicker
-        (colorPickerLabelText lbl)
+        ""
         0
         (fillW defaultLayout)
         (if showAlpha then colorPickerAlphaFlag else 0)

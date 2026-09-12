@@ -191,8 +191,9 @@ selftest imgs ui = do
     drawOnce ui ctx' env base
     void $ saveScreenshot env (cacheDir </> "typography_styles.bmp")
     sizeSpan <- requireSpan "selftest: Size slider" (findRightmost "Size" spansType)
+    let sliderPos = V2 (v2X sizeSpan + 40) (v2Y sizeSpan)
     for_ [20, 60, 100, 140, 180, 50, 120, -60, -100, 0 :: Float] $ \dx -> do
-      dragPos ui ctx' env base sizeSpan (V2 (v2X sizeSpan + dx) (v2Y sizeSpan))
+      dragPos ui ctx' env base sliderPos (V2 (v2X sliderPos + dx) (v2Y sliderPos))
     spansTypeAfter <- collectTextSpans ctx'
     unless (hasText "Live Playground" spansTypeAfter) $ fail "selftest: typography missing after size changes"
     clickTab ui ctx' env base "Panes"
@@ -279,7 +280,7 @@ selftest imgs ui = do
         rightT3 = maximumBy (comparing (rectX . fst)) ts3
         -- Exactly three panes: the middle is the one that is neither extreme.
         midT3 = fromMaybe leftT3 (listToMaybe (filter (\t -> t /= leftT3 && t /= rightT3) ts3))
-        fromTop = titleCenter midT3
+        fromTop = V2 (v2X (titleCenter midT3) + 70) (v2Y (titleCenter midT3) + 100)
         toTop = V2 (rectX (fst leftT3) - 10) (rectY (fst leftT3) + 150)
     dragPos ui ctx' env base fromTop toTop
     spansTop <- collectTextSpans ctx'

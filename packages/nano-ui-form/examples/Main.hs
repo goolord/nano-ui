@@ -32,7 +32,6 @@ import NanoUI
   , minW
   , muted
   , padAll
-  , respClicked
   , rowWith
   , scrollWith
   , sep
@@ -148,11 +147,11 @@ formDemoUi = do
             rowWith (tight . gap 10 . fillW) $ do
               btnSubmit <- button "Submit Registration"
               btnReset  <- button "Reset Form"
-              when (respClicked btnSubmit) $ do
+              when btnSubmit $ do
                 case mReg of
                   Just reg -> setSubmitted ("Successfully registered: " <> formatRegistration reg)
                   Nothing  -> setSubmitted "Submission failed: Please fix the highlighted validation errors."
-              when (respClicked btnReset) $ do
+              when btnReset $ do
                 resetForm "user_reg"
                 setSubmitted "Form has been reset to defaults."
 

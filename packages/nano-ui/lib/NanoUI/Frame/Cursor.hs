@@ -12,7 +12,6 @@ module NanoUI.Frame.Cursor
 import Data.IORef (readIORef)
 import Data.Maybe (fromMaybe, isJust)
 import qualified Data.IntMap.Strict as IM
-import qualified Data.Text as T
 import NanoUI.Context
   ( Context (..)
   , CustomDrawContext (..)
@@ -55,7 +54,6 @@ import NanoUI.Layout.Arena
   , getParent
   , getRect
   , getStyleIdx
-  , getText
   , getWidgetId
   , isScrollNode
   )
@@ -330,28 +328,27 @@ widgetPointerCursor ctx wid mouse = do
 
 sliderCursorKind :: Context -> WidgetId -> V2 -> Input -> IO UiCursorKind
 sliderCursorKind ctx wid mouse inp = do
-  visible <- widgetVisibleAt ctx wid mouse
-  if not visible
-    then pure UiCursorDefault
+  active <- readIORef (ctxActiveId ctx)
+  let dragging = active == wid && inputMouseDown inp
+  if dragging
+    then pure UiCursorGrabbing
     else do
-      mrect <- scrollHitRect ctx wid
-      active <- readIORef (ctxActiveId ctx)
-      let fm = ctxFontMetrics ctx
-          dragging = active == wid && inputMouseDown inp
-      lbl <-
-        findNodeByWidgetId ctx wid >>= \case
-          Nothing -> pure T.empty
-          Just idx -> getText (ctxNodeArena ctx) idx
-      pure $
-        case mrect of
-          Nothing -> UiCursorDefault
-          Just (Rect x y w h) ->
-            let tr = sliderTrackBounds (ctxHostProfile ctx) fm lbl x y w h
-                hitRect =
-                  if isCellHost (ctxHostProfile ctx)
-                    then tr
-                    else Rect (rectX tr) (rectY tr - sliderHandleSlack) (rectW tr) (rectH tr + 2 * sliderHandleSlack)
-             in grabDragKind (rectContains hitRect mouse) dragging inp
+      visible <- widgetVisibleAt ctx wid mouse
+      if not visible
+        then pure UiCursorDefault
+        else do
+          mrect <- scrollHitRect ctx wid
+          let fm = ctxFontMetrics ctx
+          pure $
+            case mrect of
+              Nothing -> UiCursorDefault
+              Just (Rect x y w h) ->
+                let tr = sliderTrackBounds (ctxHostProfile ctx) fm x y w h
+                    hitRect =
+                      if isCellHost (ctxHostProfile ctx)
+                        then tr
+                        else Rect (rectX tr) (rectY tr - sliderHandleSlack) (rectW tr) (rectH tr + 2 * sliderHandleSlack)
+                 in grabDragKind (rectContains hitRect mouse) False inp
 
 textInputCursorKind :: Context -> WidgetId -> V2 -> IO UiCursorKind
 textInputCursorKind ctx wid mouse = do
