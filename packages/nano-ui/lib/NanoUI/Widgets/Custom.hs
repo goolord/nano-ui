@@ -129,6 +129,7 @@ import NanoUI.Types
   , v2X
   , v2Y
   )
+import NanoUI.Widgets.Behavior (KeyNav (..), keyActivated, useKeyNav)
 import NanoUI.Widgets.Node
   ( Responding (..)
   , Response
@@ -475,6 +476,7 @@ knobWith layout diameter minV maxV initial = do
     { widgetLayout = fixedWH diameter diameter layout
     , widgetMeasure = Just $ \_ _ _ -> (diameter, diameter)
     , widgetCursor = Just (\_ -> UiCursorNsResize)
+    , widgetFocusable = True
     , widgetDraw = \cdc (Rect x y w h) -> runCanvas $ do
         let cx = x + w / 2
             cy = y + h / 2
@@ -500,10 +502,17 @@ knobWith layout diameter minV maxV initial = do
   let bounds = respRect resp
   drag <- useDrag2D bounds
   (_scrollX, scrollY) <- useWheelDelta bounds
+  nav <- useKeyNav wid
   let isDragging = dragActive drag
       dy = if isDragging then - v2Y (dragDelta drag) else 0
       dScroll = scrollY * 2.0
-      deltaNorm = if range > 0 then (dy / 120.0) + (dScroll / 60.0) else 0
+      dKey =
+        (if knRight nav || knUp nav then 1 else 0 :: Int)
+          - (if knLeft nav || knDown nav then 1 else 0)
+      deltaNorm =
+        if range > 0
+          then (dy / 120.0) + (dScroll / 60.0) + fromIntegral dKey * 0.05
+          else 0
       finalVal =
         if deltaNorm /= 0
           then max minV (min maxV (current + deltaNorm * range))
@@ -540,6 +549,7 @@ toggleSwitchWith layout initial = do
     { widgetLayout = fixedWH pillW pillH layout
     , widgetMeasure = Just $ \_ _ _ -> (pillW, pillH)
     , widgetCursor = Just (\_ -> UiCursorPointer)
+    , widgetFocusable = True
     , widgetDraw = \cdc (Rect x y w h) -> runCanvas $ do
         let theme = cdcTheme cdc
             r = h / 2
@@ -554,7 +564,8 @@ toggleSwitchWith layout initial = do
         drawStrokeRoundedRect (Rect x y w h) r 1 (styleBorder (themeButton theme))
         drawCircle (V2 thumbX thumbY) thumbR thumbCol
     }
-  let clicked = respClicked resp
+  keyClick <- keyActivated wid
+  let clicked = respClicked resp || keyClick
       newVal = if clicked then not current else current
   when clicked $ do
     uiIO $ do

@@ -495,6 +495,13 @@ colorPickerCell initial = do
   wid <- nextId
   uiIO $ registerFocusable ctx wid
   uiIO $ initColorPickerStore ctx wid initial
+  nav <- useKeyNav wid
+  let keyMoved = knLeft nav || knRight nav || knUp nav || knDown nav
+  when keyMoved $ do
+    st <- uiIO (getStore ctx)
+    uiIO $ applyColorPickerKeys ctx wid (widgetStoreColor st wid initial) nav
+    st2 <- uiIO (getStore ctx)
+    uiIO $ commitColorPickerCurrent ctx wid (widgetStoreColor st2 wid initial)
   resp <-
     addWidget wid NodeColorPicker "" 0 (fillW defaultLayout)
   store <- uiIO (getStore ctx)

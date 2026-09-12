@@ -33,7 +33,7 @@ import Data.IntSet qualified as IS
 import Data.Maybe (listToMaybe)
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
-import NanoUI.Context (getScrollOffset, setScrollOffset)
+import NanoUI.Context (getScrollOffset, registerFocusable, setScrollOffset)
 import NanoUI.Id (WidgetId (..))
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, nextId, uiIO, withKey)
@@ -45,6 +45,7 @@ import NanoUI.Style
   , tight
   )
 import NanoUI.Types (Rect (..), V2 (..), rectContains, v2X, v2Y)
+import NanoUI.Widgets.Behavior (keyActivated)
 import NanoUI.Widgets.Layout
   ( column'
   , row'
@@ -52,9 +53,11 @@ import NanoUI.Widgets.Layout
   , spacer
   )
 import NanoUI.Widgets.Node
-  ( Response (..)
+  ( Responding (respClicked)
+  , Response (..)
   , addWidgetStyled
   , rawRespRect
+  , setClicked
   )
 
 -- | One row of cells keyed by caller ids (column index, not visible position).
@@ -97,11 +100,16 @@ stripedRow rowIdx layout txt = do
   let stripe = if even rowIdx then 1 else 2
   addWidgetStyled wid NodeText txt 0 layout stripe Nothing
 
--- | Button with styleIdx for active, sort, badge, or close chrome.
+-- | Button with styleIdx for active, sort, badge, or close chrome. Focusable
+-- and activatable with Enter or Space while focused.
 buttonStyled :: (Ui :> es) => Text -> Float -> Layout -> Int -> Eff es Response
 buttonStyled txt value layout styleIdx = do
   wid <- nextId
-  addWidgetStyled wid NodeButton txt value layout styleIdx Nothing
+  ctx <- askContext
+  uiIO $ registerFocusable ctx wid
+  resp <- addWidgetStyled wid NodeButton txt value layout styleIdx Nothing
+  keyClick <- keyActivated wid
+  pure (setClicked (respClicked resp || keyClick) resp)
 
 selectableItem :: (Ui :> es) => NodeType -> Text -> Bool -> Layout -> Int -> Eff es Response
 selectableItem nt txt selected layout styleIdx = do

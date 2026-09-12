@@ -42,7 +42,6 @@ import NanoUI.Context (Context (..), bumpMirror, getPrevRect, getScrollOffset2D,
 import NanoUI.Font (scrollBarGutter, scrollBarListExtra, tableCellInset, textDisplayWidth)
 import NanoUI.Id (WidgetId (..))
 import NanoUI.Input (Input (..), inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased, inputMouseRightReleased)
-import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
 import NanoUI.Store (WidgetStore (..), slotDrag, slotDragW, slotKey)
 import NanoUI.Style (AlignX (..), AlignY (..), Direction (..), FontVariant (..), Layout (..), Padding (..), Sizing (..), defaultLayout, fillH, fillW, tight)
@@ -72,7 +71,6 @@ import NanoUI.Widgets.Node
   , Responding (..)
   , Response (..)
   , RightClickable (..)
-  , addWidgetStyled
   , rawRespRect
   , setChanged
   , setClicked
@@ -698,9 +696,8 @@ tableCfg cfg outerLayout key cols rows curSort =
       showAllResp <-
         if IS.null hidden0
           then pure Nothing
-          else fmap Just $ do
-            wid <- nextId
-            addWidgetStyled wid NodeButton "Show all columns" 0 (tight . fillW $ defaultLayout) 0 Nothing
+          else fmap Just $
+            buttonStyled "Show all columns" 0 (tight . fillW $ defaultLayout) 0
       headerPairs <-
         tableSplitPanes (tableFillInner cfg outerLayout) tableWid vWid hWid rowMinH frozenIdx unfrozenIdx pinned scrollRows colBox renderHeader renderCell
       finishTable

@@ -167,6 +167,13 @@ testSpecs =
   , TestSpec "scroll-lockstep-probe" False runScrollLockstepProbeTest
   , TestSpec "page-scroll-backdrop-coverage" False runPageScrollBackdropCoverageTest
   , TestSpec "tab-focus" False runTabFocusTest
+  , TestSpec "keyboard-button" False runKeyboardButtonTest
+  , TestSpec "keyboard-checkbox" False runKeyboardCheckboxTest
+  , TestSpec "keyboard-slider" True runKeyboardSliderTest
+  , TestSpec "keyboard-radio" False runKeyboardRadioTest
+  , TestSpec "keyboard-toggle" False runKeyboardToggleTest
+  , TestSpec "keyboard-tab-header" False runKeyboardTabHeaderTest
+  , TestSpec "keyboard-color-picker-cell" False runKeyboardColorPickerCellTest
   , TestSpec "select-initial" False runSelectTest
   , TestSpec "select-enum" False runEnumSelectTest
   , TestSpec "select-dropdown" False runSelectDropdownTest

@@ -6,6 +6,7 @@ module NanoUI.Widgets.Behavior
   , useReorder
   , useSelection
   , useKeyNav
+  , keyActivated
   , KeyNav (..)
   , useDismissable
   , dragThresholdPx
@@ -238,6 +239,13 @@ useKeyNav wid = do
           , knEnter = inputKeysElem KeyEnter keys
           , knSpace = T.any (== ' ') (inputChars inp)
           }
+
+-- | True when Enter or Space was pressed while @wid@ holds focus. Buttons,
+-- checkboxes, and toggle switches treat this as a click.
+keyActivated :: (Ui :> es) => WidgetId -> Eff es Bool
+keyActivated wid = do
+  nav <- useKeyNav wid
+  pure (knEnter nav || knSpace nav)
 
 -- | Escape and click-outside-rect dismiss. Consumes Escape when it fires.
 useDismissable :: (Ui :> es) => Rect -> Eff es Bool

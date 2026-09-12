@@ -202,6 +202,7 @@ test-suite nano-ui-test
         Cases.Combo
         Cases.Damage
         Cases.Demo
+        Cases.Keyboard
         Cases.Modal
         Cases.NoThunks
         Cases.Scroll

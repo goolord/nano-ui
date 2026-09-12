@@ -9,7 +9,7 @@ import Data.IORef (readIORef, writeIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Effectful (Eff, type (:>))
-import NanoUI.Context (Context (..), getPrevRect, getStore, intKey, setStore)
+import NanoUI.Context (Context (..), getPrevRect, getStore, intKey, registerFocusable, setStore)
 import NanoUI.Icons (radioMark)
 import NanoUI.Id (IdContext (..), WidgetId (..), mix64)
 import NanoUI.Input (Input, inputMousePos)
@@ -25,7 +25,7 @@ import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
 import NanoUI.Store (WidgetStore (..), slotKey)
 import NanoUI.Style (Layout, defaultLayout, fillW, gap, tight)
 import NanoUI.Types (Rect (..), isCellHost, rectContains, rectH, rectW)
-import NanoUI.Widgets.Behavior (useSelection)
+import NanoUI.Widgets.Behavior (KeyNav (..), useKeyNav, useSelection)
 import NanoUI.Widgets.Combinators (selectableItem)
 import NanoUI.Widgets.Layout (column')
 import NanoUI.Widgets.Node
@@ -62,17 +62,24 @@ radioFieldset options initial =
         !sel = case (lastInit, storedSel) of
           (Just li, Just s) | li == c0 -> max 0 (min (len - 1) s)
           _                            -> c0
+    uiIO $ registerFocusable ctx gid
+    nav <- useKeyNav gid
+    let
+      !navDelta =
+        (if knDown nav || knRight nav then 1 else 0 :: Int)
+          - (if knUp nav || knLeft nav then 1 else 0)
+      !selNav = if navDelta == 0 then sel else max 0 (min (len - 1) (sel + navDelta))
     column' radioGroupLay $ do
       tagContainer gid
       (combinedResp, clickedIdx) <-
         case opts of
           [l] -> do
-            r <- bit ctx sel 0 l
+            r <- bit ctx selNav 0 l
             pure (r, if rawRespClicked r then 0 else -1)
           _ -> do
             inp <- askInput
-            addRadioOptions ctx inp sel opts
-      let !finalSel = if clickedIdx >= 0 then clickedIdx else sel
+            addRadioOptions ctx inp selNav opts
+      let !finalSel = if clickedIdx >= 0 then clickedIdx else selNav
           !hasClick = clickedIdx >= 0
       uiIO $ do
         when (storedSel /= Just finalSel || lastInit /= Just c0) $ do

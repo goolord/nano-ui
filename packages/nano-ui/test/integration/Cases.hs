@@ -14,6 +14,7 @@ module Cases
   , module Cases.Tooltip
   , module Cases.Window
   , module Cases.Font
+  , module Cases.Keyboard
   , runAsciiTest
   , runAspectLayoutTest
   , runBase16ThemeTest
@@ -92,6 +93,7 @@ import Cases.TextInput
 import Cases.Tooltip
 import Cases.Window
 import Cases.Font
+import Cases.Keyboard
 import Control.Monad (forM, replicateM, void, when)
 import Control.Concurrent (threadDelay)
 import Data.ByteString qualified as BS

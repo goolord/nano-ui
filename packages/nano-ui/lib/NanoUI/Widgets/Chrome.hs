@@ -38,6 +38,7 @@ import NanoUI.Style
   , gap
   , tight
   )
+import NanoUI.Widgets.Behavior (keyActivated)
 import NanoUI.Widgets.Node (Responding (..), Response, addWidgetStyled, setClicked, setHovered)
 
 titleBarH :: Float
@@ -116,6 +117,7 @@ closeButton = do
           else tight . fixedWH closeButtonSize closeButtonSize . alignMid $ defaultLayout
   resp <- addWidgetStyled wid NodeButton stored 0 layout buttonFlagClose Nothing
   disabled <- uiIO (isDisabled ctx wid)
+  keyClick <- keyActivated wid
   pure $
-    setClicked (not disabled && respClicked resp) $
+    setClicked (not disabled && (respClicked resp || keyClick)) $
       setHovered (not disabled && respHovered resp) resp

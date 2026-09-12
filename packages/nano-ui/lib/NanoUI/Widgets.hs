@@ -348,7 +348,7 @@ import NanoUI.Types
   , v2X
   , v2Y
   )
-import NanoUI.Widgets.Behavior (DragAxis (..), useDrag1D)
+import NanoUI.Widgets.Behavior (DragAxis (..), KeyNav (..), keyActivated, useDrag1D, useKeyNav)
 import NanoUI.WidgetText
   ( colorPickerCurrentLabel
   , colorPickerDisplayText
@@ -645,10 +645,11 @@ buttonLayoutEx layout enabled txt = do
           else txt
   resp <- addWidget wid NodeButton stored 0 layout
   disabled <- uiIO (isDisabled ctx wid)
+  keyClick <- keyActivated wid
   let
     active = enabled && not disabled
   pure
-    $ setClicked (active && respClicked resp)
+    $ setClicked (active && (respClicked resp || keyClick))
     $ setHovered (active && respHovered resp) resp
 
 -- | Button with enabled/disabled flag and default layout.
@@ -661,6 +662,7 @@ checkbox :: Ui :> es => Text -> Bool -> Eff es (Response, Bool)
 checkbox txt initial = do
   wid <- nextId
   ctx <- askContext
+  uiIO $ registerFocusable ctx wid
   store <- uiIO (getStore ctx)
   let
     key = intKey wid
@@ -678,8 +680,9 @@ checkbox txt initial = do
       (if current then 1 else 0)
       defaultLayout
       Nothing
+  keyClick <- keyActivated wid
   let
-    clicked = respClicked resp
+    clicked = respClicked resp || keyClick
     display = if clicked then not current else current
   when clicked $
     uiIO $ do
@@ -713,6 +716,7 @@ sliderEx layout minV maxV initial = do
   wid <- nextId
   ctx <- askContext
   inp <- askInput
+  uiIO $ registerFocusable ctx wid
   store <- uiIO (getStore ctx)
   let
     key = intKey wid
@@ -745,7 +749,15 @@ sliderEx layout minV maxV initial = do
   when (dragging && not isActive) $ uiIO $ writeIORef (ctxActiveId ctx) wid
   when ((not dragging || blocked) && isActive) $
     uiIO $ writeIORef (ctxActiveId ctx) (WidgetId 0)
-  let finalVal = if dragging then dragged else current
+  nav <- useKeyNav wid
+  let
+    range = maxV - minV
+    step = if range > 0 then range / 100 else 0
+    navStep =
+      (if knRight nav || knUp nav then 1 else 0 :: Int)
+        - (if knLeft nav || knDown nav then 1 else 0)
+    baseVal = if dragging then dragged else current
+    finalVal = max minV (min maxV (baseVal + fromIntegral navStep * step))
   when (finalVal /= current) $
     uiIO $ setStore ctx (store {storeFloat = IM.insert key finalVal (storeFloat store)})
   pure (setChanged (finalVal /= current) resp, finalVal)
