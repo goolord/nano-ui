@@ -80,6 +80,8 @@ module NanoUI.Context
   , resetDrawingScopeCache
   , getStore
   , setStore
+  , getStoreBool
+  , setStoreBool
   , isDisabled
   , getScrollOffset
   , setScrollOffset
@@ -742,6 +744,19 @@ diffKeys old new =
         old
         new
     )
+
+{-# INLINE getStoreBool #-}
+getStoreBool :: Context -> WidgetId -> Bool -> IO Bool
+getStoreBool ctx wid def = do
+  st <- getStore ctx
+  pure (intBool (IM.findWithDefault (boolInt def) (intKey wid) (storeInt st)))
+
+{-# INLINE setStoreBool #-}
+setStoreBool :: Context -> WidgetId -> Bool -> IO ()
+setStoreBool ctx wid val = do
+  st <- getStore ctx
+  setStore ctx (st {storeInt = IM.insert (intKey wid) (boolInt val) (storeInt st)})
+  markDirty ctx
 
 {-# INLINE isDisabled #-}
 isDisabled :: Context -> WidgetId -> IO Bool

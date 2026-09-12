@@ -66,11 +66,11 @@ runTerminalSliderTrackTest :: Context -> IORef Int -> IO ()
 runTerminalSliderTrackTest _ failed = do
   ctx <- newAdaptiveTerminalContext
   let inp0 = withInput 60 10
-      ui = columnWith fillW (slider "Vol" 0 100 0)
+      ui = columnWith fillW (slider 0 100 0)
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect rx ry rw rh = respRect resp
       fm = ctxFontMetrics ctx
-      track = sliderTrackBounds (ctxHostProfile ctx) fm "Vol" rx ry rw rh
+      track = sliderTrackBounds (ctxHostProfile ctx) fm rx ry rw rh
   assert failed (rectW track < rw - 1 && rectW track >= 10)
   let endDrag = inp0 {inputMousePos = V2 (rectX track + rectW track - 0.5) (rectY track + rectH track / 2), inputMouseDown = True, inputMousePressed = True}
   ((_, val), _, _, _) <- runFrame ctx endDrag ui
@@ -390,7 +390,7 @@ runTerminalIconChromeTest _ failed = do
       rows = columnWith fillW (forM_ [1 .. 40 :: Int] (label_ . T.pack . show))
       ui = columnWith fillW $ do
         _ <- checkbox "Feature" False
-        _ <- select "Quality" ["Low", "High"] 0
+        _ <- select ["Low", "High"] 0
         scrollArea ((fillW defaultLayout) {layoutHeight = Fixed 20}) rows
   _ <- runFrame ctx inp ui
   (_, _, drawData, _) <- runFrame ctx inp ui
@@ -466,13 +466,13 @@ runTerminalTextInputDisplayTest :: Context -> IORef Int -> IO ()
 runTerminalTextInputDisplayTest _ failed = do
   ctx <- newAdaptiveTerminalContext
   let inp = withInput 40 10
-      ui = column (textInput "Name" "hello")
+      ui = column (textInput "hello")
   _ <- warmup2 ctx inp ui
   spans <- collectTextSpans ctx
-  case [txt | (_, txt, _, _, _) <- spans, "Name:" `T.isPrefixOf` txt] of
+  case [txt | (_, txt, _, _, _) <- spans, "hello" `T.isPrefixOf` txt] of
     [one] -> do
-      assertEq failed one "Name: hello"
-      assert failed (not ("Name: hello: hello" `T.isInfixOf` one))
+      assertEq failed one "hello"
+      assert failed (not ("hello: hello" `T.isInfixOf` one))
     _ -> assert failed False
 
 runTerminalSeparatorSpanTest :: Context -> IORef Int -> IO ()

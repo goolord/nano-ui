@@ -33,7 +33,7 @@ import NanoUI.Testing.Harness
 runSelectDropdownCursorTest :: Context -> IORef Int -> IO ()
 runSelectDropdownCursorTest ctx failed = do
   let inp0 = withInput 320 200
-      ui = column (select "Quality" ["Low", "High"] 0)
+      ui = column (select ["Low", "High"] 0)
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect sx sy sw sh = respRect resp
       (press, release) = clickPair inp0 (V2 (sx + sw / 2) (sy + sh / 2))
@@ -55,12 +55,12 @@ runSelectDropdownCursorTest ctx failed = do
 runSliderCursorTest :: Context -> IORef Int -> IO ()
 runSliderCursorTest ctx failed = do
   let inp0 = withInput 300 80
-      ui = column (slider "Volume" 0 100 50)
+      ui = column (slider 0 100 50)
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect rx ry rw rh = respRect resp
-      track = sliderTrackBounds (ctxHostProfile ctx) (ctxFontMetrics ctx) "Volume" rx ry rw rh
+      track = sliderTrackBounds (ctxHostProfile ctx) (ctxFontMetrics ctx) rx ry rw rh
       trackMid = V2 (rectX track + rectW track / 2) (rectY track + rectH track / 2)
-      labelPos = V2 (rx + 4) (ry + 4)
+      offPos = V2 (rx + rw + 20) (ry + rh + 20)
       hoverTrack = inp0 {inputMousePos = trackMid}
   _ <- runFrame ctx hoverTrack ui
   hoverKind <- uiCursorKind ctx hoverTrack
@@ -69,19 +69,19 @@ runSliderCursorTest ctx failed = do
   _ <- runFrame ctx pressTrack ui
   grabbing <- cursorKindIs ctx pressTrack UiCursorGrabbing
   assert failed grabbing
-  let dragOff = pressTrack {inputMousePos = labelPos}
+  let dragOff = pressTrack {inputMousePos = offPos}
   _ <- runFrame ctx dragOff ui
   grabbingOff <- cursorKindIs ctx dragOff UiCursorGrabbing
   assert failed grabbingOff
-  let hoverLabel = inp0 {inputMousePos = labelPos}
-  _ <- runFrame ctx hoverLabel ui
-  isDefault <- cursorKindIs ctx hoverLabel UiCursorDefault
+  let hoverOff = inp0 {inputMousePos = offPos}
+  _ <- runFrame ctx hoverOff ui
+  isDefault <- cursorKindIs ctx hoverOff UiCursorDefault
   assert failed isDefault
 
 runSelectOverlayDamageTest :: Context -> IORef Int -> IO ()
 runSelectOverlayDamageTest _ failed = do
   ctx <- newContext
-  let ui = column (select "Quality" ["Low", "Medium", "High"] 0)
+  let ui = column (select ["Low", "Medium", "High"] 0)
       inp0 = (withInput 320 160) {inputMousePos = V2 20 20}
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect sx sy sw sh = respRect resp
@@ -101,14 +101,14 @@ runSelectOverlayDamageTest _ failed = do
 
 runSelectTest :: Context -> IORef Int -> IO ()
 runSelectTest ctx failed = do
-  _ <- runFrame ctx (withInput 320 80) (column (select "Quality" ["Low", "Medium", "High"] 1))
+  _ <- runFrame ctx (withInput 320 80) (column (select ["Low", "Medium", "High"] 1))
   spans <- collectTextSpans ctx
-  assertSpansHas failed "Quality: Medium" spans
+  assertSpansHas failed "Medium" spans
 
 runSelectDropdownTest :: Context -> IORef Int -> IO ()
 runSelectDropdownTest ctx failed = do
   let inp0 = withInput 320 80
-      ui = column (select "Quality" ["Low", "High"] 0)
+      ui = column (select ["Low", "High"] 0)
       (press, release) = clickPair inp0 (V2 10 10)
   _ <- runFrame ctx inp0 ui
   _ <- runFrame ctx press ui
@@ -200,7 +200,7 @@ runSelectDropdownHoverTest _ failed = do
   ctx <- newCellContext
   let layout = defaultLayout {layoutPadding = Padding 0 0 0 0, layoutGap = 0}
       inp0 = withInput 40 6
-      ui = column' layout (select "Quality" ["Low", "High"] 0)
+      ui = column' layout (select ["Low", "High"] 0)
       (press, release) = clickPair inp0 (V2 1 0.5)
   _ <- runFrame ctx inp0 ui
   _ <- runFrame ctx press ui
@@ -230,7 +230,7 @@ runSelectDropdownHoverTest _ failed = do
 runSelectDropFlushTest :: Context -> IORef Int -> IO ()
 runSelectDropFlushTest ctx failed = do
   let inp0 = withInput 320 200
-      ui = select "Quality" ["Low", "High"] 1
+      ui = select ["Low", "High"] 1
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect sx sy sw sh = respRect resp
       (press, release) = clickPair inp0 (V2 (sx + sw / 2) (sy + sh / 2))
@@ -244,7 +244,7 @@ runSelectDropFlushTest ctx failed = do
 runSelectPickLowTest :: Context -> IORef Int -> IO ()
 runSelectPickLowTest ctx failed = do
   let inp0 = withInput 320 200
-      ui = select "Quality" ["Low", "Medium", "High"] 1
+      ui = select ["Low", "Medium", "High"] 1
   (resp, idx0) <- warmup2 ctx inp0 ui
   assertEq failed idx0 1
   let Rect sx sy sw _ = respRect resp
@@ -261,13 +261,13 @@ runSelectPickLowTest ctx failed = do
       ((_, idx1), _, _, _) <- runFrame ctx pickRelease ui
       assertEq failed idx1 0
       spans <- collectTextSpans ctx
-      assertSpansHas failed "Quality: Low" spans
+      assertSpansHas failed "Low" spans
     _ -> assert failed False
 
 runSelectDragToSelectTest :: Context -> IORef Int -> IO ()
 runSelectDragToSelectTest ctx failed = do
   let inp0 = withInput 320 200
-      ui = select "Quality" ["Low", "Medium", "High"] 1
+      ui = select ["Low", "Medium", "High"] 1
   (resp, idx0) <- warmup2 ctx inp0 ui
   assertEq failed idx0 1
   let Rect sx sy sw _ = respRect resp
@@ -294,13 +294,13 @@ runSelectDragToSelectTest ctx failed = do
       overlaysClosed <- collectOverlayTextSpans ctx release
       assert failed (not (any (\(_, txt, _, _, _) -> "Low" `T.isInfixOf` txt) overlaysClosed))
       spans <- collectTextSpans ctx
-      assertSpansHas failed "Quality: Low" spans
+      assertSpansHas failed "Low" spans
     _ -> assert failed False
 
 runSelectKeyboardTest :: Context -> IORef Int -> IO ()
 runSelectKeyboardTest ctx failed = do
   let inp0 = withInput 320 200
-      ui = column (select "Quality" ["Low", "Medium", "High"] 1)
+      ui = column (select ["Low", "Medium", "High"] 1)
   (resp, idx0) <- warmup2 ctx inp0 ui
   assertEq failed idx0 1
   let Rect sx sy sw sh = respRect resp
@@ -337,12 +337,12 @@ runEnumSelectTest :: Context -> IORef Int -> IO ()
 runEnumSelectTest ctx failed = do
   let inp0 = withInput 320 200
       ui = column $ do
-        (_, s1) <- enumSelect "Quality" SampleMed
-        (_, s2) <- enumRadio "Priority" SampleHigh
+        (_, s1) <- enumSelect SampleMed
+        (_, s2) <- enumRadio SampleHigh
         pure (s1, s2)
   ((sel, rad), _, _, _) <- runFrame ctx inp0 ui
   assertEq failed sel SampleMed
   assertEq failed rad SampleHigh
   spans <- collectTextSpans ctx
-  assertSpansHas failed "Quality: SampleMed" spans
+  assertSpansHas failed "SampleMed" spans
   assertSpansHas failed "SampleHigh" spans

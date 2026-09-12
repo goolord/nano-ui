@@ -42,6 +42,7 @@ import NanoUI
   , radioFieldset
   , respChanged
   , respClicked
+  , rowWith
   , select
   , slider
   , textInput
@@ -77,7 +78,8 @@ inputText name initial =
       ctx <- askContext
       prefix <- uiIO (getActiveFormPrefix ctx)
       let fieldKey = encodeFormId formId
-      (resp, newVal) <- textInput name val
+      void $ NUI.label name
+      (resp, newVal) <- textInput val
       when (respChanged resp || newVal /= val) $
         uiIO (updateFieldInput ctx prefix fieldKey (FormInputText newVal))
     )
@@ -96,7 +98,8 @@ inputTextWithPlaceholder placeholder name initial =
       ctx <- askContext
       prefix <- uiIO (getActiveFormPrefix ctx)
       let fieldKey = encodeFormId formId
-      (resp, newVal) <- textInputWithPlaceholder placeholder name val
+      void $ NUI.label name
+      (resp, newVal) <- textInputWithPlaceholder placeholder val
       when (respChanged resp || newVal /= val) $
         uiIO (updateFieldInput ctx prefix fieldKey (FormInputText newVal))
     )
@@ -115,7 +118,8 @@ inputPassword name initial =
       ctx <- askContext
       prefix <- uiIO (getActiveFormPrefix ctx)
       let fieldKey = encodeFormId formId
-      (resp, newVal) <- textInputPassword name val
+      void $ NUI.label name
+      (resp, newVal) <- textInputPassword val
       when (respChanged resp || newVal /= val) $
         uiIO (updateFieldInput ctx prefix fieldKey (FormInputText newVal))
     )
@@ -175,7 +179,8 @@ inputSlider name minV maxV initial =
       ctx <- askContext
       prefix <- uiIO (getActiveFormPrefix ctx)
       let fieldKey = encodeFormId formId
-      (resp, newVal) <- slider name minV maxV val
+      void $ NUI.label name
+      (resp, newVal) <- slider minV maxV val
       when (respChanged resp || newVal /= val) $
         uiIO (updateFieldInput ctx prefix fieldKey (FormInputFloat newVal))
     )
@@ -195,7 +200,8 @@ inputSelect name options initial =
       ctx <- askContext
       prefix <- uiIO (getActiveFormPrefix ctx)
       let fieldKey = encodeFormId formId
-      (resp, newVal) <- select name options val
+      void $ NUI.label name
+      (resp, newVal) <- select options val
       when (respChanged resp || newVal /= val) $
         uiIO (updateFieldInput ctx prefix fieldKey (FormInputInt newVal))
     )
@@ -223,7 +229,8 @@ inputRadio name options initial =
       ctx <- askContext
       prefix <- uiIO (getActiveFormPrefix ctx)
       let fieldKey = encodeFormId formId
-      (resp, newVal) <- radioFieldset name options val
+      void $ NUI.label name
+      (resp, newVal) <- radioFieldset options val
       when (respChanged resp || newVal /= val) $
         uiIO (updateFieldInput ctx prefix fieldKey (FormInputInt newVal))
     )
@@ -251,7 +258,8 @@ inputColor name initial =
       ctx <- askContext
       prefix <- uiIO (getActiveFormPrefix ctx)
       let fieldKey = encodeFormId formId
-      (resp, newVal) <- colorPicker name val
+      void $ NUI.label name
+      (resp, newVal) <- colorPicker val
       when (respChanged resp || newVal /= val) $
         uiIO (updateFieldInput ctx prefix fieldKey (FormInputText (colorPickerToHex newVal)))
     )

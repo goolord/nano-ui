@@ -37,11 +37,11 @@ runControlsTabHeightTest _ failed = do
     controlsBody dumpRef = do
       heading "Controls"
       (cb, checked) <- checkbox "Feature" False
-      (_, vol) <- slider "Volume" 0 100 50
-      (_, qualityIdx) <- select "Quality" ["Low", "Medium", "High"] 1
-      (cp, _) <- colorPicker "Accent" (colorRGBA 204 102 102 255)
-      (_, theme) <- boundedRadioFieldset "Theme" Dark (T.pack . show)
-      (ti, name) <- textInput "Name" ""
+      (_, vol) <- slider 0 100 50
+      (_, qualityIdx) <- select ["Low", "Medium", "High"] 1
+      (cp, _) <- colorPicker (colorRGBA 204 102 102 255)
+      (_, theme) <- boundedRadioFieldset Dark (T.pack . show)
+      (ti, name) <- textInput ""
       sep
       uiIO $ writeIORef dumpRef (Just (cb, cp, ti, checked, vol, qualityIdx, theme, name))
       pure cb
@@ -173,7 +173,7 @@ runColorPickerPreviewTest :: Context -> IORef Int -> IO ()
 runColorPickerPreviewTest _ failed = do
   ctx <- newPixelContext
   let inp0 = withInputOff 400 420
-      ui = void (colorPicker "Accent" (colorRGBA 204 102 102 255))
+      ui = void (colorPicker (colorRGBA 204 102 102 255))
   _ <- runFrame ctx inp0 ui
   _ <- runFrame ctx inp0 ui
   spans <- collectTextSpans ctx
@@ -196,7 +196,7 @@ runColorPickerCommitTest ctx failed = do
   let inp0 = withInput 400 420
       initial = colorRGBA 204 102 102 255
       packed c = colorToWord32 c
-      ui = colorPicker "Accent" initial
+      ui = colorPicker initial
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect x y w h = respRect resp
       wid = respId resp
@@ -220,7 +220,7 @@ runColorPickerRgbaTest :: Context -> IORef Int -> IO ()
 runColorPickerRgbaTest _ failed = do
   ctx <- newPixelContext
   let inp0 = withInputOff 400 460
-      ui = void (colorPickerRGBA "Accent" (colorRGBA 204 102 102 128))
+      ui = void (colorPickerRGBA (colorRGBA 204 102 102 128))
   _ <- runFrame ctx inp0 ui
   _ <- runFrame ctx inp0 ui
   spans <- collectTextSpans ctx
@@ -244,7 +244,7 @@ runColorPickerEditTest :: Context -> IORef Int -> IO ()
 runColorPickerEditTest ctx failed = do
   let inp0 = withInput 400 460
       initial = colorRGBA 204 102 102 255
-      ui = colorPicker "Accent" initial
+      ui = colorPicker initial
   _ <- warmup2 ctx inp0 ui
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
@@ -259,7 +259,7 @@ runColorPickerHoldTest :: Context -> IORef Int -> IO ()
 runColorPickerHoldTest ctx failed = do
   let inp0 = withInput 400 460
       initial = colorRGBA 204 102 102 255
-      ui = colorPicker "Accent" initial
+      ui = colorPicker initial
   (resp, _) <- warmup2 ctx inp0 ui
   let wid = respId resp
       Rect x y w h = respRect resp
@@ -288,7 +288,7 @@ runColorPickerKeyCommitTest ctx failed = do
   let inp0 = withInput 400 420
       initial = colorRGBA 204 102 102 255
       packed c = colorToWord32 c
-      ui = colorPicker "Accent" initial
+      ui = colorPicker initial
   (resp, _) <- warmup2 ctx inp0 ui
   let wid = respId resp
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui

@@ -146,17 +146,9 @@ paintTextInputNode env idx (Rect x y w h) = do
               paintTextFieldFrame da theme style focus fieldRect
               spans <- widgetTextSpans ctx NodeTextInput idx x y w h
               case spans of
-                (lblSpan : fieldSpan : _) -> do
-                  let (Rect lx ly _ _, lbl, lfg, _) = lblSpan
-                      (Rect fx fy _ _, field, ffg, _) = fieldSpan
-                  unless (T.null lbl) $ do
-                    pushText da fm lx ly lbl lfg
+                (fieldSpan : _) -> do
+                  let (Rect fx fy _ _, field, ffg, _) = fieldSpan
                   paintClippedFieldText ctx da fm style idx x y w h clip fx fy field ffg
-                [lblSpan] -> do
-                  let (Rect lx ly _ _, lbl, lfg, _) = lblSpan
-                  unless (T.null lbl) $ do
-                    pushText da fm lx ly lbl lfg
-                  paintClippedFieldText ctx da fm style idx x y w h clip lx ly T.empty lfg
                 _ -> pure ()
 
 -- | Multi-line text area.
@@ -332,12 +324,11 @@ paintWidgetBackground env idx nt style si isClose isTab isTable isMenu isMenuIte
 
 {-# NOINLINE paintSliderBody #-}
 paintSliderBody :: PaintEnv -> NodeIdx -> Float -> Float -> Float -> Float -> Float -> IO ()
-paintSliderBody env idx x y w h value = do
+paintSliderBody env _ x y w h value = do
   let da = peDrawArena env
       fm = peFontMetrics env
       theme = peTheme env
-  txt <- getText (peNodeArena env) idx
-  let track = sliderTrackBounds (peHost env) fm txt x y w h
+  let track = sliderTrackBounds (peHost env) fm x y w h
       tx = rectX track
       ty = rectY track
       tw = rectW track

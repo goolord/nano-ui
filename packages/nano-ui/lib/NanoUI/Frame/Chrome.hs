@@ -218,7 +218,7 @@ displayTextRest ctx nt idx txt terminal =
           store <- getStore ctx
           wid <- getWidgetId (ctxNodeArena ctx) idx
           let current = widgetStoreColor store wid colorPickerDefaultColor
-          pure (colorPickerDisplayText txt current)
+          pure (colorPickerDisplayText current)
         NodeTree -> do
           si <- getStyleIdx (ctxNodeArena ctx) idx
           let (_, depth, hasKids, expanded) = treeDecodeStyle si

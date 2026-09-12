@@ -695,7 +695,7 @@ runScrollTopClipTest _ failed = do
             card $ do
               heading "Controls"
               (cb, _) <- checkbox "Feature" False
-              _ <- slider "Volume" 0 100 50
+              _ <- slider 0 100 50
               mapM_ (\i -> void (label (T.pack ("pad line " <> show (i :: Int))))) [1 .. 16]
               uiIO $ writeIORef cbRef (Just cb)
               pure ()

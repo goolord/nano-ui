@@ -2,9 +2,9 @@
 
 module NanoUI.Widgets.Radio (radioFieldset, boundedRadioFieldset, enumRadio, useRadio) where
 
-import Control.Monad (unless, void, when)
+import Control.Monad (when)
 import qualified Data.IntMap.Strict as IM
-import Data.Hashable (hash, hashWithSalt)
+import Data.Hashable (hash)
 import Data.IORef (readIORef, writeIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -23,14 +23,13 @@ import NanoUI.Layout.Arena
   )
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
 import NanoUI.Store (WidgetStore (..), slotKey)
-import NanoUI.Style (Layout, defaultLayout, fillW, fontMuted, gap, tight)
+import NanoUI.Style (Layout, defaultLayout, fillW, gap, tight)
 import NanoUI.Types (Rect (..), isCellHost, rectContains, rectH, rectW)
 import NanoUI.Widgets.Behavior (useSelection)
 import NanoUI.Widgets.Combinators (selectableItem)
 import NanoUI.Widgets.Layout (column')
 import NanoUI.Widgets.Node
   ( Response (..)
-  , addWidgetStyled
   , mkResponse
   , parentIdx
   , resolveInteraction
@@ -44,15 +43,12 @@ radioLay = tight (fillW defaultLayout)
 radioGroupLay :: Layout
 radioGroupLay = tight (gap 4 (fillW defaultLayout))
 
-legendLay :: Layout
-legendLay = tight (fillW (fontMuted defaultLayout))
-
 radioSalt :: Int
 radioSalt = hash ("radio" :: Text)
 
-radioFieldset :: (Ui :> es) => Text -> [Text] -> Int -> Eff es (Response, Int)
-radioFieldset legend options initial =
-  withKey (hashWithSalt radioSalt legend) $ do
+radioFieldset :: (Ui :> es) => [Text] -> Int -> Eff es (Response, Int)
+radioFieldset options initial =
+  withKey radioSalt $ do
     gid <- nextId
     ctx <- askContext
     let opts = if null options then [""] else options
@@ -68,7 +64,6 @@ radioFieldset legend options initial =
           _                            -> c0
     column' radioGroupLay $ do
       tagContainer gid
-      unless (T.null legend) $ void (legendLabel legendLay legend)
       (combinedResp, clickedIdx) <-
         case opts of
           [l] -> do
@@ -132,25 +127,13 @@ radioResponse ctx inp pending wid = do
     then pure (mkResponse wid rect False False False False)
     else resolveInteraction ctx inp wid
 
-legendLabel :: (Ui :> es) => Layout -> Text -> Eff es Response
-legendLabel layout txt = do
-  wid <- nextId
-  addWidgetStyled
-    wid
-    NodeText
-    txt
-    0
-    layout
-    0
-    (Just (mkResponse wid (Rect 0 0 0 0) False False False False))
-
-boundedRadioFieldset :: (Bounded a, Enum a, Ui :> es) => Text -> a -> (a -> Text) -> Eff es (Response, a)
-boundedRadioFieldset legend initial encode =
+boundedRadioFieldset :: (Bounded a, Enum a, Ui :> es) => a -> (a -> Text) -> Eff es (Response, a)
+boundedRadioFieldset initial encode =
   let vs = take 256 [minBound .. maxBound]
-   in fmap (\(r, i) -> (r, toEnum (max 0 (min (length vs - 1) i)))) (radioFieldset legend (map encode vs) (fromEnum initial))
+   in fmap (\(r, i) -> (r, toEnum (max 0 (min (length vs - 1) i)))) (radioFieldset (map encode vs) (fromEnum initial))
 
-enumRadio :: (Bounded a, Enum a, Show a, Ui :> es) => Text -> a -> Eff es (Response, a)
-enumRadio legend initial = boundedRadioFieldset legend initial (T.pack . show)
+enumRadio :: (Bounded a, Enum a, Show a, Ui :> es) => a -> Eff es (Response, a)
+enumRadio initial = boundedRadioFieldset initial (T.pack . show)
 
 useRadio :: (Enum a, Ui :> es) => a -> Eff es (a, a -> Eff es ())
 useRadio initial = fmap (\(c, s) -> (toEnum c, s . fromEnum)) (useSelection (fromEnum initial))
