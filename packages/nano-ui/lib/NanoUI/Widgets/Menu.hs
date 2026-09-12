@@ -19,15 +19,16 @@ import Control.Monad (void, when)
 import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
-import NanoUI.Context (getStore, intKey, markDirty, setStore)
+import NanoUI.Context (Context (..), getStore, intKey, markDirty, setStore)
+import NanoUI.Font (menuItemPadX, menuItemRowH, menuMinW, menuOuterPad, menuSepH)
 import NanoUI.Input (inputMousePos, inputMouseReleased)
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO)
 import NanoUI.Store (WidgetStore (..), slotKey, slotMenuOpen, slotMenuPos)
-import NanoUI.Style (Layout (..), defaultLayout, fillW, fontMuted, gap, padXY, tight)
-import NanoUI.Types (PopupAnchor (..), PopupPlacement (..), V2 (..))
+import NanoUI.Style (Layout (..), defaultLayout, fillW, fixedH, fontMuted, gap, minW, padXY, tight)
+import NanoUI.Types (PopupAnchor (..), PopupPlacement (..), V2 (..), isCellHost)
 import NanoUI.WidgetText (buttonFlagMenu, buttonFlagMenuBar)
 import NanoUI.Widgets.Combinators (buttonStyled)
-import NanoUI.Widgets.Layout (columnWith, labelEx, sep)
+import NanoUI.Widgets.Layout (columnWith, labelEx, rowWith, sep)
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Widgets.Node (Responding (..), Response (..), containerResponse)
 import NanoUI.Widgets.Popup (PopupConfig (..), popup)
@@ -128,23 +129,30 @@ useContextMenu = do
 
 -- | Standard context menu item.
 menuItem :: Ui :> es => Text -> Eff es Response
-menuItem txt = buttonStyled txt 0 menuItemLayout buttonFlagMenu
+menuItem txt = menuRowLayout >>= \lay -> buttonStyled txt 0 lay buttonFlagMenu
 
 -- | Menu item with keyboard shortcut hint. Whole row is the button.
 menuItemWithShortcut :: Ui :> es => Text -> Text -> Eff es Response
 menuItemWithShortcut txt shortcut =
-  buttonStyled (txt <> "  " <> shortcut) 0 menuItemLayout buttonFlagMenu
+  menuRowLayout >>= \lay -> buttonStyled (txt <> "  " <> shortcut) 0 lay buttonFlagMenu
 
 -- | Menu item with leading icon name. Whole row is the button.
 menuItemWithIcon :: Ui :> es => Text -> Text -> Eff es Response
 menuItemWithIcon iconName txt =
-  buttonStyled (iconName <> " " <> txt) 0 menuItemLayout buttonFlagMenu
+  menuRowLayout >>= \lay -> buttonStyled (iconName <> " " <> txt) 0 lay buttonFlagMenu
 
--- | Row layout shared by menu items. The button's own content padding supplies
--- the symmetric text margins; no extra layout padding is added (a button's
--- measured width ignores layout padding anyway).
-menuItemLayout :: Layout
-menuItemLayout = tight . fillW $ defaultLayout
+-- | Row layout shared by menu items, matching the text-field context menu
+-- exactly: 28px rows and the same 148px minimum menu width on pixel hosts
+-- (@textEditMenuItemH@ / @textEditMenuMinW@ in "NanoUI.Frame.TextEdit"); cell
+-- hosts keep tight auto-sizing.
+menuRowLayout :: Ui :> es => Eff es Layout
+menuRowLayout = do
+  ctx <- askContext
+  let host = ctxHostProfile ctx
+  pure $
+    if isCellHost host
+      then tight . fillW $ defaultLayout
+      else minW menuMinW . fixedH (menuItemRowH host) . tight . fillW $ defaultLayout
 
 -- | Menu-bar title: a flat, label-sized button. @open@ tints the title while
 -- its drop-down is showing, so the active menu reads at a glance.
@@ -160,9 +168,23 @@ menuItemDisabled :: Ui :> es => Text -> Eff es ()
 menuItemDisabled txt =
   void (labelEx (tight . fillW . fontMuted $ defaultLayout) txt)
 
--- | Separator line inside a context menu.
+-- | Separator line inside a context menu, matching the text-field context
+-- menu painter exactly: a 1px rule inset 'menuItemPadX' from the panel edge
+-- (the popup already contributes 'menuOuterPad', the row adds the remainder)
+-- centered in a 'menuSepH' band (@lineY = bandY + h\/2@ via 4.5px vertical
+-- padding around a zero-height content box). The rule sits in a 'tight'
+-- column so it stays horizontal ('separator' adapts to its parent's
+-- direction and would grow vertically inside the padded row) and so the
+-- default 3px container padding does not inset or stretch it.
 menuSeparator :: Ui :> es => Eff es ()
-menuSeparator = sep
+menuSeparator = do
+  ctx <- askContext
+  let host = ctxHostProfile ctx
+  if isCellHost host
+    then void sep
+    else
+      rowWith (fixedH (menuSepH host) . padXY (menuItemPadX - menuOuterPad) 4.5 . fillW) $
+        columnWith (tight . fillW) (void sep)
 
 -- | Header / category title inside a context menu.
 menuHeader :: Ui :> es => Text -> Eff es ()

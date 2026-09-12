@@ -29,7 +29,7 @@ module NanoUI.Sdl.Dialog
   , pollFileDialogUi
   ) where
 
-import Control.Monad (forM, forM_)
+import Control.Monad (forM, forM_, unless, void)
 import Data.Int (Int32)
 import Data.IntMap.Strict qualified as IM
 import Data.IORef (atomicModifyIORef', readIORef)
@@ -40,7 +40,7 @@ import Foreign.C.String (CString, newCString, peekCString)
 import Foreign.C.Types (CChar)
 import Foreign.Marshal.Alloc (free)
 import Foreign.Marshal.Array (mallocArray)
-import Foreign.Ptr (FunPtr, Ptr, castFunPtr, castPtr, freeHaskellFunPtr, nullPtr)
+import Foreign.Ptr (FunPtr, Ptr, castFunPtr, castPtr, nullPtr)
 import Foreign.Storable (peekElemOff, pokeElemOff)
 import NanoUI.Sdl.Dialog.Types
   ( DialogCallback
@@ -50,6 +50,8 @@ import NanoUI.Sdl.Dialog.Types
   , FileDialogResult (..)
   , PendingDialog (..)
   , clearDialogState
+  , drainRetired
+  , retireDialogCallback
   )
 import NanoUI.Sdl.Display (pushRefreshEvent)
 import NanoUI.Sdl.Window (SdlEnv (..))
@@ -65,6 +67,8 @@ import SDL3.Sys.Dialog
   , showOpenFolderDialogSafe
   , showSaveFileDialogSafe
   )
+import SDL3.Sys.Video (raiseWindowSafe, restoreWindowSafe)
+import System.IO (hPutStrLn, stderr)
 
 -- | A file type filter shown in open/save dialogs.
 data FileFilter = FileFilter
@@ -113,17 +117,31 @@ openFolderDialog env opts =
 pollFileDialog :: SdlEnv -> FileDialogId -> IO FileDialogResult
 pollFileDialog env (FileDialogId did) = do
   let st = sdlDialogState env
+  -- Callbacks retired by an earlier poll are now certainly returned.
+  drainRetired st
   (mcb, result) <-
     atomicModifyIORef' (dsPending st) $ \pending ->
       case IM.lookup did pending of
         Nothing -> (pending, (Nothing, FileDialogUnknown))
         Just (PendingDialog FileDialogPending _) -> (pending, (Nothing, FileDialogPending))
         Just (PendingDialog status cb) -> (IM.delete did pending, (Just cb, status))
-  forM_ mcb freeHaskellFunPtr
   case result of
     FileDialogPending -> pure ()
     FileDialogUnknown -> pure ()
     _ -> do
+      -- Retire the callback for a later poll to free; the callback thread may
+      -- still be unwinding right now, and freeing a running wrapper is unsafe.
+      forM_ mcb (retireDialogCallback st)
+      -- The native dialog stole window focus; reclaim it so the app keeps
+      -- receiving hover/motion/wheel events without an extra click.
+      -- Restoration is a best-effort no-op when the window was never
+      -- minimized (its result is platform-dependent, so it is not a reliable
+      -- failure signal); only a failed raise means the window may still lack
+      -- focus and worth an audible warning.
+      void (restoreWindowSafe (sdlWindow env))
+      raised <- raiseWindowSafe (sdlWindow env)
+      unless raised $
+        hPutStrLn stderr "nano-ui: dialog completed but window raise failed; input may need a click"
       -- The dialog finished; request a redraw so the caller can reflect the
       -- result. Safe here: this runs on the polling (UI) thread.
       ctx <- readIORef (sdlCachedCtx env)
@@ -187,6 +205,8 @@ launchDialog env kind filters mDefault allowMany = do
   (filtersPtr, filterStrs) <- allocFilters filters
   (defaultPtr, defaultStr) <- allocDefault mDefault
   let st = sdlDialogState env
+  -- Free callbacks from dialogs that finished earlier.
+  drainRetired st
   did <- nextDialogId st
   rawFp <- mkDialogCallback (onResult did st filterStrs filtersPtr defaultStr)
   -- Register the handle before showing: the callback may fire before this
@@ -209,9 +229,10 @@ nextDialogId :: DialogState -> IO Int
 nextDialogId st = atomicModifyIORef' (dsNextId st) $ \n -> (n + 1, n + 1)
 
 -- | SDL invoked the callback: decode the file list, release the FFI buffers
--- this launch owned, wake the (possibly idle) event loop, and only then record
--- the outcome. Recording is the last action so that no thread ever observes a
--- finished dialog while the callback is still running.
+-- this launch owned, record the outcome, and only then wake the (possibly idle)
+-- event loop. The status must be visible before the wake, or the woken frame
+-- polls 'FileDialogPending', skips, and the result waits for an unrelated
+-- event.
 onResult ::
   Int ->
   DialogState ->
@@ -232,11 +253,11 @@ onResult did st filterStrs filtersPtr defaultStr _userdata filelistRaw _filterId
   forM_ filterStrs free
   free filtersPtr
   forM_ defaultStr free
-  pushRefreshEvent
   atomicModifyIORef' (dsPending st) $ \pending ->
     case IM.lookup did pending of
       Nothing -> (pending, ())
       Just pl -> (IM.insert did pl {pendingStatus = outcome} pending, ())
+  pushRefreshEvent
 
 -- | Decode SDL's null-terminated file list into a plain list of paths.
 --

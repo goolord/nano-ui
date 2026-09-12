@@ -110,6 +110,7 @@ import NanoUI.Frame.Chrome
   , displayText
   , floatingLabelPaint
   , textInputFocused
+  , textInputMenuItemPadX
   , textInputValue
   , widgetVisualStyle
   )
@@ -639,12 +640,11 @@ widgetTextPlacements ctx nt idx x y w h = do
             else
               if isMenuItemStyle si
                 then do
-                  -- Buttons reserve their own symmetric horizontal padding
-                  -- (buttonPadding); match it so left and right text margins
-                  -- are equal, with no extra gutter for the hover accent.
-                  let inset = fmAdvance fm ' '
+                  -- Match the text-field context menu pen exactly: label inset
+                  -- of textInputMenuItemPadX plus the widget content inset.
+                  let inset = textInputMenuItemPadX + ix
                       tx = x + inset
-                      avail = max 0 (w - 2 * inset)
+                      avail = max 0 (w - inset - ix)
                   pure [(txt, tx, centeredTextY (ctxHostProfile ctx) fm y h th, min tw avail, th)]
                 else do
                   let (tx, used) = alignedTextPen AlignCenter x w 0 fm txt

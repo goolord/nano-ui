@@ -837,6 +837,9 @@ setScrollOffset2D ctx wid off = do
   store <- getStore ctx
   let widKey = intKey wid
       sKey = slotKey slotTextAreaScroll widKey
+  -- Text areas only reach the first branch because `textAreaWith` seeds this
+  -- slot at init; without the seed a freshly mounted editor falls through to
+  -- the legacy container slots below and its offsets are never rendered.
   if IM.member sKey (storePoint store)
     then do
       let (sx, sy) = IM.findWithDefault (0, 0) sKey (storePoint store)

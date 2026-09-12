@@ -83,6 +83,7 @@ needsRedrawBody ctx prev inp = do
       ( dirty
           || anim
           || inputInteracted prev inp
+          || inputWindowRedraw inp
           || inputPointerHeld inp
           || isJust mDrag
           || isJust mWinDrag

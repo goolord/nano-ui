@@ -348,7 +348,7 @@ applyEvent inp ev =
         }
     EvScroll delta -> inp {inputScroll = v2Add (inputScroll inp) delta}
     EvDrop dropEv -> inp {inputDrops = V.snoc (inputDrops inp) dropEv}
-    EvRefresh -> inp
+    EvRefresh -> inp {inputWindowRedraw = True}
     EvWindowRedraw -> inp {inputWindowRedraw = True}
 
 isButtonEdge :: SdlEvent -> Bool

@@ -43,6 +43,8 @@ import NanoUI.Font
   , ScrollBarSlot (..)
   , widgetPadding
   , buttonPadding
+  , menuItemPadX
+  , menuOuterPad
   , selectPadding
   , layoutLineHeight
   , sliderTrackHeight
@@ -125,6 +127,7 @@ import NanoUI.WidgetText
   , textInputBareMode
   , searchFieldReserveW
   , isTableHeaderStyle
+  , isMenuItemStyle
   , tableHeaderDisplayText
   )
 import NanoUI.Frame.Scroll.Geometry
@@ -486,6 +489,11 @@ measureWidget na host fm measure idx = do
             | isTableHeaderStyle si ->
                 let (cx, cy) = tableCellInset host fm
                  in (2 * cx, 2 * cy)
+            -- Menu rows reserve the same gutter the text-field context menu
+            -- paints (outer pad + item pad on each side of the label), so the
+            -- generic popup panel sizes identically.
+            | isMenuItemStyle si ->
+                (2 * (menuOuterPad + menuItemPadX), snd (buttonPadding host fm))
             | otherwise -> buttonPadding host fm
           NodeSelect -> selectPadding host fm
           NodeTree -> treeItemPadding host fm

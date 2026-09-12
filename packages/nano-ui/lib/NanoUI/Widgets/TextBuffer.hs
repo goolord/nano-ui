@@ -98,16 +98,10 @@ getLineCount = length . toLines
 -- | Move to an absolute cursor position without changing document text.
 withCursor :: Cursor -> TextBuffer -> TextBuffer
 withCursor (Cursor row col) buf =
-  let lineTexts = toLines buf
-      lastRow = max 0 (length lineTexts - 1)
-      r = clamp 0 lastRow row
-      lineText =
-        if null lineTexts
-          then ""
-          else lineTexts !! r
-      c = clamp 0 (T.length lineText) col
-      z = TZ.moveCursor (r, c) (unTextBuffer (fromText (toText buf)))
-  in TextBuffer z c
+  -- 'moveCursorClosest' clamps like the old manual clamp, but skips the
+  -- 'toLines' pass (it only materialises the zipper's lines once).
+  let z = TZ.moveCursorClosest (row, col) (unTextBuffer buf)
+   in TextBuffer z (zipperCol z)
 
 zipperCol :: TZ.TextZipper T.Text -> Int
 zipperCol = snd . TZ.cursorPosition

@@ -74,6 +74,7 @@ module NanoUI.Frame.TextEdit
   ) where
 
 import Control.Monad (forM, forM_, unless, when)
+import Data.Dynamic (fromDynamic, toDyn)
 import Data.IORef (readIORef, writeIORef)
 import qualified Data.IntMap.Strict as IM
 import Data.Maybe (isJust)
@@ -109,6 +110,11 @@ import NanoUI.Font
   , fmLineHeight
   , fmSnapScale
   , layoutLineHeight
+  , menuAccentInset
+  , menuAccentW
+  , menuItemRowH
+  , menuMinW
+  , menuSepH
   , scrollBarGeomFor
   , scrollBarOuterGap
   , textDisplayWidth
@@ -161,7 +167,7 @@ import NanoUI.Layout.Arena
   , getText
   , getWidgetId
   )
-import NanoUI.Store (slotTextAreaCol, slotTextAreaContentFont, slotTextAreaContentH, slotTextAreaContentW, slotTextAreaRow, slotTextAreaScroll, slotTextAreaViewport, slotTextInputScroll)
+import NanoUI.Store (slotTextAreaBuffer, slotTextAreaCol, slotTextAreaContentFont, slotTextAreaContentH, slotTextAreaContentW, slotTextAreaRow, slotTextAreaScroll, slotTextAreaViewport, slotTextInputScroll)
 import NanoUI.Style
   ( FontStyle (..)
   , FontVariant (..)
@@ -244,14 +250,16 @@ textEditMenuRows =
   , TextEditMenuItem 3 "Select All"
   ]
 
+-- Row geometry delegates to the shared menu metrics in "NanoUI.Font" so the
+-- bespoke text-field context menu and the generic popup menu stay identical.
 textEditMenuSepH :: HostProfile -> Float
-textEditMenuSepH host = if isCellHost host then 1 else 9
+textEditMenuSepH = menuSepH
 
 textEditMenuMinW :: Float
-textEditMenuMinW = 148
+textEditMenuMinW = menuMinW
 
 textEditMenuItemH :: HostProfile -> Float
-textEditMenuItemH host = if isCellHost host then 1 else 28
+textEditMenuItemH = menuItemRowH
 
 textEditMenuRowH :: HostProfile -> TextEditMenuRow -> Float
 textEditMenuRowH host = \case
@@ -502,7 +510,12 @@ drawTextEditMenuOverlays ctx inp = do
                 when hovered $ do
                   pushRect da rowRect (styleHoverBg menuStyle)
                   let accent = themeAccent theme
-                      barRect = Rect (rectX rowRect) (rectY rowRect + 3) 2 (rectH rowRect - 6)
+                      barRect =
+                        Rect
+                          (rectX rowRect)
+                          (rectY rowRect + menuAccentInset)
+                          menuAccentW
+                          (rectH rowRect - 2 * menuAccentInset)
                   pushRoundedRect da barRect 1 accent
                 unless (T.null lbl) $ do
                   (_tw, th) <- ctxMeasureText ctx lbl
@@ -1001,9 +1014,9 @@ textAreaContentMetrics ctx idx = do
     then pure (cachedW, IM.findWithDefault 0 cacheKeyH (storeFloat store))
     else do
       fm <- resolveTextAreaFont ctx idx
+      buf <- ensureTextAreaBuffer ctx key (IM.findWithDefault "" key (storeText store))
       let host = ctxHostProfile ctx
-          text = IM.findWithDefault "" key (storeText store)
-          lineTexts = TB.toLines (TB.fromText text)
+          lineTexts = TB.toLines buf
           lineCount = max 1 (length lineTexts)
           lineH = onGrid (fmSnapScale fm) (fmLineHeight fm)
           contentH = fromIntegral lineCount * lineH
@@ -1020,6 +1033,25 @@ textAreaContentMetrics ctx idx = do
         )
       pure (contentW, contentH)
 
+-- | Return the text area's 'TB.TextBuffer', building it from the flat text only
+-- when the cache is cold. Rebuilding splits the whole document into lines, so
+-- caching it keeps loads and paint O(1) here. The cache is written together
+-- with the flat text by 'saveTextAreaState', so a present entry is always the
+-- buffer for the stored text.
+ensureTextAreaBuffer :: Context -> Int -> Text -> IO TB.TextBuffer
+ensureTextAreaBuffer ctx key text = do
+  store <- getStore ctx
+  cached :: Maybe (T.Text, TB.TextBuffer) <-
+    pure (IM.lookup (slotKey slotTextAreaBuffer key) (storeDyn store) >>= fromDynamic)
+  case cached of
+    Just (_, buf) -> pure buf
+    Nothing -> do
+      let buf = TB.fromText text
+      setStore
+        ctx
+        (store {storeDyn = IM.insert (slotKey slotTextAreaBuffer key) (toDyn (text, buf)) (storeDyn store)})
+      pure buf
+
 loadTextAreaStateAt :: Context -> NodeIdx -> Float -> Float -> Float -> Float -> IO TA.TextAreaState
 loadTextAreaStateAt ctx idx x y w h = do
   fm <- resolveTextAreaFont ctx idx
@@ -1028,15 +1060,16 @@ loadTextAreaStateAt ctx idx x y w h = do
 loadTextAreaStateAtFm :: Context -> NodeIdx -> FontMetrics -> Float -> Float -> Float -> Float -> IO TA.TextAreaState
 loadTextAreaStateAtFm ctx idx fm x y w h = do
   wid <- getWidgetId (ctxNodeArena ctx) idx
-  store <- getStore ctx
   let key = intKey wid
-      initial = IM.findWithDefault "" key (storeText store)
-      geom = textAreaGeom (ctxHostProfile ctx) fm x y w h
+  store <- getStore ctx
+  let initial = IM.findWithDefault "" key (storeText store)
+  buf <- ensureTextAreaBuffer ctx key initial
+  let geom = textAreaGeom (ctxHostProfile ctx) fm x y w h
       clip = textAreaFieldClip (ctxHostProfile ctx) geom fm
       vpW = rectW clip
       vpH = rectH clip
       lineH = tagLineHeight geom
-      state0 = TA.loadTextAreaState store key initial
+      state0 = TA.loadTextAreaStateWithBuffer store key initial buf
   pure (TA.setTextAreaViewport (realToFrac vpW, realToFrac vpH) (realToFrac lineH) state0)
 
 data TextAreaScrollBarLayouts = TextAreaScrollBarLayouts

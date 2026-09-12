@@ -23,6 +23,13 @@ module NanoUI.Font
   , widgetPadding
   , buttonPadding
   , selectPadding
+  , menuOuterPad
+  , menuItemPadX
+  , menuItemRowH
+  , menuSepH
+  , menuMinW
+  , menuAccentW
+  , menuAccentInset
   , centeredTextY
   , alignedTextPen
   , textInkEnd
@@ -208,6 +215,38 @@ selectPadding host fm
       let adv = fmAdvance fm ' '
           lh = layoutLineHeight host fm
        in (adv * 2.0, lh * 0.50)
+
+-- Menu metrics shared by the text-field context menu painter, the generic
+-- context-menu widgets, and the layout/paint passes, so both menus render
+-- identically by construction.
+
+-- | Blank border between the menu panel edge and its rows.
+menuOuterPad :: Float
+menuOuterPad = 6
+
+-- | Extra horizontal inset of a menu row's label past 'menuOuterPad'.
+menuItemPadX :: Float
+menuItemPadX = 10
+
+-- | Fixed height of one menu row.
+menuItemRowH :: HostProfile -> Float
+menuItemRowH host = if isCellHost host then 1 else 28
+
+-- | Height of a separator band inside a menu.
+menuSepH :: HostProfile -> Float
+menuSepH host = if isCellHost host then 1 else 9
+
+-- | Floor for the menu panel width.
+menuMinW :: Float
+menuMinW = 148
+
+-- | Width of the hover accent marker painted at a menu row's left edge.
+menuAccentW :: Float
+menuAccentW = 2
+
+-- | Gap between the hover accent marker and the row's top and bottom edges.
+menuAccentInset :: Float
+menuAccentInset = 3
 
 {-# INLINE layoutLineHeight #-}
 layoutLineHeight :: HostProfile -> FontMetrics -> Float

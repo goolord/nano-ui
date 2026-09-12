@@ -17,21 +17,27 @@ package *
   profiling-detail: late
 
 package nano-ui
-  ghc-options: -mavx2 -fspecialise-aggressively
+  -- Cheap, high-yield codegen wins: unbox every strict field (cuts heap
+  -- allocation in the Float/record-heavy paint/layout paths) and let
+  -- worker/wrapper take more arguments (multi-arg hot loops stop allocating).
+  -- Scoped to the hot packages so ../ditto and the rgfw/form libraries keep
+  -- their default field layout (their only cost here is a full rebuild on
+  -- flag changes, with no win to show for it).
+  ghc-options: -mavx2 -funbox-strict-fields -fmax-worker-args=32 -fspecialise-aggressively -flate-specialise
 
 package nano-ui-sdl
   flags: +sdl
-  ghc-options: -mavx2 -optc-mavx2 -optc-O3
+  -- -fspecialise-aggressively is deliberately absent: it is the flag family
+  -- that (with LLVM) blew up Paint.hs's compile time, and the render path
+  -- here is the same unboxed/effectful shape.
+  ghc-options: -mavx2 -funbox-strict-fields -fmax-worker-args=32 -flate-specialise -optc-mavx2 -optc-O3 -optc-ffast-math
 
 package nano-ui-demo
   flags: +sdl
-  ghc-options: -mavx2 -fspecialise-aggressively
+  ghc-options: -mavx2 -funbox-strict-fields -fmax-worker-args=32 -fspecialise-aggressively -flate-specialise
 
 package nano-ui-term
-  ghc-options: -mavx2 -optc-mavx2 -optc-O3
+  ghc-options: -mavx2 -optc-mavx2 -optc-O3 -optc-ffast-math
 
 package nano-ui-form
   flags: +sdl
-
-
-

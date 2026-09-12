@@ -45,6 +45,9 @@ testSpecs =
   , TestSpec "text-area-scrollbar-visibility" True runTextAreaScrollbarVisibilityTest
   , TestSpec "text-area-scroll-wheel" True runTextAreaScrollWheelTest
   , TestSpec "text-area-zoom-scroll" True runTextAreaZoomScrollTest
+  , TestSpec "refresh-forces-redraw" True runRefreshRedrawTest
+  , TestSpec "text-area-remount-scroll" True runTextAreaRemountScrollTest
+  , TestSpec "text-area-menu-pulse" True runTextAreaMenuPulseTest
   , TestSpec "text-area-scroll-drag" True runTextAreaScrollDragTest
   , TestSpec "text-area-cursor-on-scrollbar" True runTextAreaCursorOnScrollBarTest
   , TestSpec "text-area-hscrollbar-visibility" True runTextAreaHScrollbarVisibilityTest

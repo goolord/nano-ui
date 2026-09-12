@@ -30,6 +30,8 @@ module NanoUI.Store
   , slotTextAreaContentW
   , slotTextAreaContentH
   , slotTextAreaContentFont
+  , slotTextAreaBuffer
+  , slotTextAreaChanged
   , slotTextInputScroll
   , slotSearchCommitted
   , slotSearchAge
@@ -220,6 +222,18 @@ slotTextAreaContentH = 0x5441524100000019
 
 slotTextAreaContentFont :: Word64
 slotTextAreaContentFont = 0x544152410000001A
+
+-- | Cached 'TextBuffer' for the text area, keyed by its flat 'Text'. Loads and
+-- paint reuse it so the document is not re-split into lines every call.
+slotTextAreaBuffer :: Word64
+slotTextAreaBuffer = 0x544152410000001C
+
+-- | Set (value 1) to signal that the text area's text changed through a path
+-- that does not flow through 'Input' (e.g. a context-menu cut/paste). The
+-- text area widget reads and clears this on its next frame, so the caller
+-- still gets a 'respChanged' pulse for edits that carry no keys or chars.
+slotTextAreaChanged :: Word64
+slotTextAreaChanged = 0x544152410000001D
 
 slotTextInputScroll :: Word64
 slotTextInputScroll = 0x54494E5000000017

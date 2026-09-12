@@ -70,6 +70,10 @@ queryWindowLogicalSize win scale =
           pure (Size (realToFrac w) (realToFrac h))
         else pure (Size 0 0)
 
+-- | Pointer position relative to the window with mouse focus, in window
+-- coordinates. Uses 'SDL_GetMouseState' rather than the global pointer +
+-- window position: the latter is unreliable on Wayland (window position is not
+-- exposed) and breaks hover/wheel targeting.
 queryMouseWindowPos :: IO (Maybe V2)
 queryMouseWindowPos =
   alloca $ \xp ->
