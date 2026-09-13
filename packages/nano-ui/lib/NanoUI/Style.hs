@@ -490,37 +490,38 @@ flatStyle bg fg border hoverBg activeBg =
     , styleActiveBg = activeBg
     }
 
--- Charcoal tiling surfaces (Untitled.png) with Adwaita-dark widget chrome.
+-- | Slate work surfaces with recessed fields and a cool blue selection accent.
+-- Keep structural edges quiet; interactive borders and focus carry contrast.
 defaultTheme :: Theme
 defaultTheme =
   let panelStyle =
         flatStyle
-          (colorRGBA 34 34 38 255)
-          (colorRGBA 236 234 230 255)
-          (colorRGBA 62 64 72 255)
-          (colorRGBA 34 34 38 255)
-          (colorRGBA 30 30 34 255)
+          (colorRGBA 35 39 46 255)
+          (colorRGBA 230 234 240 255)
+          (colorRGBA 53 60 70 255)
+          (colorRGBA 35 39 46 255)
+          (colorRGBA 30 34 41 255)
    in Theme
-        { themeWindow = colorRGBA 24 24 27 255
+        { themeWindow = colorRGBA 26 29 35 255
         , themePanel = panelStyle
         , themeFloatingWindow = panelStyle
         , themeButton =
             flatStyle
-              (colorRGBA 52 52 58 255)
-              (colorRGBA 248 247 245 255)
-              (colorRGBA 74 76 84 255)
-              (colorRGBA 68 70 78 255)
-              (colorRGBA 42 42 48 255)
+              (colorRGBA 48 55 65 255)
+              (colorRGBA 240 243 247 255)
+              (colorRGBA 76 87 102 255)
+              (colorRGBA 62 73 88 255)
+              (colorRGBA 39 47 59 255)
         , themeInput =
             flatStyle
-              (colorRGBA 18 18 21 255)
-              (colorRGBA 236 234 230 255)
-              (colorRGBA 70 72 80 255)
-              (colorRGBA 24 24 28 255)
-              (colorRGBA 14 14 17 255)
-        , themeSeparator = colorRGBA 78 80 88 255
-        , themeAccent = colorRGBA 88 156 246 255
-        , themeMuted = colorRGBA 176 172 164 255
+              (colorRGBA 27 31 38 255)
+              (colorRGBA 230 234 240 255)
+              (colorRGBA 72 83 98 255)
+              (colorRGBA 32 38 47 255)
+              (colorRGBA 23 28 35 255)
+        , themeSeparator = colorRGBA 57 65 77 255
+        , themeAccent = colorRGBA 126 174 232 255
+        , themeMuted = colorRGBA 163 175 191 255
         , themeRed = colorRGBA 252 165 165 255
         , themeOrange = colorRGBA 216 140 72 255
         , themeYellow = colorRGBA 212 176 88 255

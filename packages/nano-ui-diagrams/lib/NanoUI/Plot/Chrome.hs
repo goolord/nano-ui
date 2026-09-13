@@ -42,11 +42,9 @@ import NanoUI
   , FontMetrics (..)
   , Rect (..)
   , Theme (..)
-  , defaultTheme
   , drawTextBox
   , fmLineHeight
   , lerpColor
-  , themeMuted
   , themeSeries
   )
 import NanoUI.Diagrams.Backend (B)
@@ -273,21 +271,20 @@ chartDiagram fm theme ps chart =
         rect (1 + leftM + rightM) (1 + botM + topM)
           # alignBL
           # moveTo (p2 (-leftM, -botM))
-      gridAxes =
-        (grid <> axes)
-          # lc (plotGrid ps)
-          # lwO (plotStroke 1)
-   in gridAxes <> seriesDia <> xLabs <> yLabs <> title <> xt <> yt <> legend <> phantom marginBox
+      gridDia = grid # lc (plotGrid ps) # lwO (plotStroke 1)
+      axesDia = axes # lc (plotMuted ps) # lwO (plotStroke 1)
+      -- Diagrams composes front-to-back: keep the grid behind the data.
+   in xLabs <> yLabs <> title <> xt <> yt <> legend <> seriesDia <> axesDia <> gridDia <> phantom marginBox
 
 plotLbl :: PlotStyle -> Double -> Double -> String -> Diagram B
 plotLbl ps ax ay s =
   alignedText ax ay s # fontSizeL 0.085 # fc (plotMuted ps) # lc (plotMuted ps) # lw none
 
 renderSeries :: PlotStyle -> Color -> Domain -> Domain -> Chart -> Series -> Diagram B
-renderSeries _ col xDom yDom chart s =
+renderSeries ps col xDom yDom chart s =
   let c = fromMaybe col (seriesColor s)
       ink = colourOf c
-      fillCol = lerpColor c (themeMuted defaultTheme) 0.22
+      fillCol = lerpColor c (plotFrameBg ps) 0.18
       fill = colourOf fillCol
       pts = seriesPoints chart s
       toP (x, y) = p2 (domainToPlot xDom (Range 0 1) x, domainToPlot yDom (Range 0 1) y)
@@ -297,7 +294,7 @@ renderSeries _ col xDom yDom chart s =
         ScatterSeries w mk ->
           GV.foldMap (\p -> markShape mk w ink (toP p)) pts
         BarSeries frac ->
-          renderBars fill frac pts
+          renderBars ink frac pts
         AreaSeries baseline ->
           areaPath baseline xDom yDom pts # fc fill # lw none
         StepSeries w ->

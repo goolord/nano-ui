@@ -326,7 +326,6 @@ import NanoUI.Style
   , alignMid
   , defaultLayout
   , fillW
-  , fontHeading
   , fontMono
   , fontMuted
   , fontDanger
@@ -496,7 +495,7 @@ box layout col = do
     )
 
 heading :: Ui :> es => Text -> Eff es ()
-heading txt = void (labelWith (tight . fontHeading) txt)
+heading txt = void (labelWith (tight . fontBold) txt)
 
 muted :: Ui :> es => Text -> Eff es ()
 muted txt = void (labelWith (fillW . fontMuted) txt)
@@ -523,7 +522,7 @@ kv k v = do
     keyLayout = tight . minW 88
   void $
     row' rowLayout $ do
-      void (labelEx (keyLayout defaultLayout) k)
+      void (labelEx (fontMuted . keyLayout $ defaultLayout) k)
       void (labelEx (tight . fillW . alignEnd $ defaultLayout) (T.stripEnd v))
 
 kvMonoRowLayout :: Layout

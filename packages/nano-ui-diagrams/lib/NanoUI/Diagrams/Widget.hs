@@ -87,7 +87,7 @@ themePlotStyle t =
    in PlotStyle
         { plotInk = colourOf (themeRed t)
         , plotFill = colourOf (lerpColor (themeAccent t) muted 0.22)
-        , plotGrid = colourOf (themeSeparator t)
+        , plotGrid = colourOf (lerpColor (themeSeparator t) muted 0.30)
         , plotMuted = colourOf muted
         , plotFrameBg = styleBg (themeInput t)
         , plotFrameBorder = styleBorder panel

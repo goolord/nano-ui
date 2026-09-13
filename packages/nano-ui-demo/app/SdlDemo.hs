@@ -117,7 +117,7 @@ main = do
             defaultSdlOptions
               { sdlAppShouldQuit = \inp -> inputKeysElem KeyEscape (inputKeys inp)
               , sdlAppImages = demoImages
-              , sdlAppTheme = Just tomorrowNightMinDarkTheme
+              , sdlAppTheme = Just defaultTheme
               , sdlAppVsync = cfgVsync cfg
               , sdlAppContinuous = cfgContinuous cfg
               , sdlWindowFullscreen = cfgFullscreen cfg
@@ -147,7 +147,7 @@ demoAccent = colorRGBA 204 102 102 255
 
 -- Spacing rhythm for the demo cards and columns.
 gapLayout, gapInline, gapMicro, gapText :: Float
-gapLayout = 6
+gapLayout = 12
 gapInline = 12
 gapMicro = 6
 gapText = 4
@@ -217,6 +217,7 @@ demoUi = do
   (click, setClick) <- useText "" -- label of the last button / menu item clicked
   (aboutOpen, setAbout) <- useFlag False
   (debugOpen, setDebug) <- useFlag debugOpenFromEnv
+  (inspectorOpen, setInspectorOpen) <- useFlag False -- compact-window readout
   -- Controls tab.
   (checked, setChecked) <- useFlag False -- checkbox
   (vol, setVol) <- useText "50" -- slider, as text
@@ -259,97 +260,122 @@ demoUi = do
   -- Diagnostics tab: last raw drop event (files/text/paths).
   (dropRaw, setDropRaw) <- useText ""
   rawInp <- askInput
+  let wideWorkspace = sizeW (inputWindowSize rawInp) >= 1000
+      inspectorWidth = if wideWorkspace then fixedW 280 else fillW
   let rawDrop = T.intercalate " | " [T.pack (show (dropEventType ev)) <> " " <> dropEventData ev | ev <- V.toList (inputDrops rawInp)]
   when (not (T.null rawDrop)) (setDropRaw rawDrop)
 
   -------------------------------------------------------------- toolbar ---
   scrollWith (tight . grow) $
-    columnWith (padAll 6 . gap gapLayout . fillW) $ do
-      panelWith (padXY 14 10 . gap gapInline . fillW) $
-        toolbar $ do
-          columnWith (tight . gap gapText) $ do
-            heading "nano-ui"
-            muted "SDL3 demo"
-          flex
+    columnWith (padAll 12 . gap gapLayout . fillW) $ do
+      panelWith (padXY 16 12 . gap gapInline . fillW) $
+        responsiveRowCol 960 (tight . gap gapInline . alignMid . fillW $ defaultLayout) $ do
+          rowWith (tight . gap gapInline . alignMid) $ do
+            void $ labelWith (tight . alignMid . fontBold . fontSize 22) "nano-ui"
+            void $ labelWith (tight . alignMid . fontMuted) "SDL3 / Widget cookbook"
+          when (sizeW (inputWindowSize rawInp) >= 960) flex
           -- Live frame stats + the shared header buttons.
           snap <- askSdlDebug
           let c = dbgCore snap
               fpsText =
                 if dbgPresentFps c > 0
-                  then T.pack (printf "%4.0f FPS (%5.2f ms)" (dbgPresentFps c) (dbgFrameMs c))
+                  then T.pack (printf "%4.0f FPS / %5.2f ms" (dbgPresentFps c) (dbgFrameMs c))
                   else ""
           unless (T.null fpsText) $
             void (labelEx (tight . fontMono . fontMuted $ defaultLayout) fpsText)
-          whenM (button "OK") (setClick "OK")
-          whenM (button "Cancel") (setClick "Cancel")
-          whenM (button "About") (setAbout True)
-          whenM (button "Debug") (setDebug (not debugOpen))
+          rowWith (tight . gap gapMicro . alignMid) $ do
+            whenM (button "OK") (setClick "OK")
+            whenM (button "Cancel") (setClick "Cancel")
+            whenM (button "About") (setAbout True)
+            whenM (button "Debug") (setDebug (not debugOpen))
 
       ----------------------------------------------------------- body ----
-      responsiveRowCol 720 (tight . gap gapLayout . fillW $ defaultLayout) $ do
+      responsiveRowCol 1000 (tight . gap gapLayout . fillW $ defaultLayout) $ do
         -- Left: a live readout of every hook value above. Tweak a widget on the
         -- right and watch its line update — instant confirmation the write-back
         -- idiom worked.
-        columnWith (tight . gap gapLayout . fillW) $ do
-          card $ do
-            heading "State"
-            let accent = fromMaybe demoAccent (colorPickerFromHex accentHex)
-            kv "Feature" (onOff checked)
-            kv "Volume" vol
-            kv "Quality" quality
+        columnWith (tight . gap gapLayout . inspectorWidth) $ do
+          panelWith (padAll 16 . gap 8 . fillW) $ do
             rowWith (tight . gap gapInline . alignMid . fillW) $ do
-              box (fixedWH 20 20 defaultLayout) accent
-              kv "Accent" accentHex
-            kv "Theme" themeName
-            kv "Font" fontChoice
-            kv "Name" (orDash name)
-            kv "Notes" (orDash notes)
-            kv "Tree" treeSel
-            kv "Table sort" (tableColumnLabel tableSortVal)
-            kv "Table order" (tableSortDirText tableSortVal)
-            kv "Clicked" (orDash click)
-            kv "Open file" (orDash openPath)
-            kv "Save file" (orDash savePath)
-            kv "Folder" (orDash folderPath)
-            kv "Dropped" (orDash (T.take 80 (firstDropLine dropLog)))
-            muted "Click widgets or type in Name or Notes."
-            muted "Esc closes About, then quits."
+              heading "State"
+              flex
+              unless wideWorkspace $
+                whenM (button (if inspectorOpen then "Hide values" else "Show values")) $
+                  setInspectorOpen (not inspectorOpen)
+            when (wideWorkspace || inspectorOpen) $ do
+              muted "Live widget values"
+              sep
+              let accent = fromMaybe demoAccent (colorPickerFromHex accentHex)
+              kv "Feature" (onOff checked)
+              kv "Volume" vol
+              kv "Quality" quality
+              rowWith (tight . gap gapInline . alignMid . fillW) $ do
+                box (fixedWH 20 20 defaultLayout) accent
+                kv "Accent" accentHex
+              sep
+              kv "Theme" themeName
+              kv "Font" fontChoice
+              kv "Name" (orDash name)
+              kv "Notes" (orDash notes)
+              sep
+              kv "Tree" treeSel
+              kv "Table sort" (tableColumnLabel tableSortVal)
+              kv "Table order" (tableSortDirText tableSortVal)
+              kv "Clicked" (orDash click)
+              sep
+              kv "Open file" (orDash openPath)
+              kv "Save file" (orDash savePath)
+              kv "Folder" (orDash folderPath)
+              kv "Dropped" (orDash (T.take 80 (firstDropLine dropLog)))
+              sep
+              muted "Edit a control to see its value here."
+              muted "Esc closes About, then quits."
 
         -- Right: the tabbed widget demos. Each tab body below is one widget
         -- family; its state hooks all live at the top of demoUi.
-        card $ do
+        panelWith (padAll 16 . gap 12 . fillW) $ do
           boundedTabs Controls (T.pack . show) $ \case
             ----------------------------------------------- Controls ---------
             -- Form widgets. The returned value is stored back through the hook;
             -- the State card on the left then shows it.
             Controls -> do
-              heading "Controls"
-              (_, cVal) <- checkbox "Feature" False
-              setChecked cVal
-              void $ label "Volume"
-              (_, vVal) <- slider 0 100 50
-              setVol (T.pack (show (round vVal :: Int)))
-              let qualities = ["Low", "Medium", "High"]
-              (_, qualityIdx) <- selectLabeled "Quality" qualities 1
-              setQuality (qualities !! qualityIdx)
-              void $ label "Accent"
-              (_, aVal) <- colorPickerRGBA demoAccent
-              setAccent (colorPickerToHexA aVal)
-              muted "Theme"
-              (_, tVal) <- boundedRadioFieldset ThemeDefault themeDisplayName
-              setThemeName (themeDisplayName tVal)
-              setUiTheme (themeForChoice tVal)
-              muted "Font: a combo box — type to filter (applies on Enter, a click, or losing focus; Esc reverts), scroll the list, hover or arrow to highlight."
-              (fResp, fVal) <- comboBox "Font" demoFontFamilies fontChoice
-              setFontChoice fVal
-              when (respChanged fResp && not (T.null fVal)) $
-                setSdlUiFont (FontSearch [T.unpack fVal])
-              muted "Name"
-              (_, nVal) <- textInputWithPlaceholder "Enter name" ""
-              setName nVal
-              muted "Notes"
-              (_, notesVal) <- textArea "Edit me.\nSecond line."
-              setNotes notesVal
+              responsiveRowCol 760 (tight . gap 24 . fillW $ defaultLayout) $ do
+                columnWith (tight . gap 10 . fillW) $ do
+                  heading "Controls"
+                  (_, cVal) <- checkbox "Feature" False
+                  setChecked cVal
+                  columnWith (tight . gap 4 . fillW) $ do
+                    kv "Volume" vol
+                    (_, vVal) <- slider 0 100 50
+                    setVol (T.pack (show (round vVal :: Int)))
+                  let qualities = ["Low", "Medium", "High"]
+                  (_, qualityIdx) <- selectLabeled "Quality" qualities 1
+                  setQuality (qualities !! qualityIdx)
+                  sep
+                  heading "Appearance"
+                  (_, tVal) <- demoField "Theme" $
+                    boundedRadioFieldset ThemeDefault themeDisplayName
+                  setThemeName (themeDisplayName tVal)
+                  setUiTheme (themeForChoice tVal)
+                  (fResp, fVal) <- demoField "Font" $
+                    comboBox "Font" demoFontFamilies fontChoice
+                  tooltip fResp "Type to filter; Enter applies, Esc reverts."
+                  setFontChoice fVal
+                  when (respChanged fResp && not (T.null fVal)) $
+                    setSdlUiFont (FontSearch [T.unpack fVal])
+                  sep
+                  heading "Text input"
+                  (_, nVal) <- demoField "Name" $
+                    textInputWithPlaceholder "Enter name" ""
+                  setName nVal
+                  (_, notesVal) <- demoField "Notes" $
+                    textArea "Edit me.\nSecond line."
+                  setNotes notesVal
+                columnWith (tight . gap 10 . fillW) $ do
+                  heading "Accent"
+                  muted "Choose a color or enter an exact value."
+                  (_, aVal) <- colorPickerRGBA demoAccent
+                  setAccent (colorPickerToHexA aVal)
               sep
               -- Popups & menus: act on respClicked of the item you want.
               heading "Popups & Menus"
@@ -549,23 +575,24 @@ demoUi = do
               heading "Plots"
               muted "Auto ticks, shared scales, and decimation."
               -- chart data lives in "DemoData" (plus the §Plots section below).
-              columnWith (tight . gap gapLayout . fillW) $ do
+              responsiveRowCol 760 (tight . gap 16 . fillW $ defaultLayout) $ do
                 columnWith (tight . gap gapMicro . fillW) $ do
                   muted "Sine + cosine"
-                  void $ plot (fillW defaultLayout) sineCosineChart
+                  void $ plot (minH 240 . fillW $ defaultLayout) sineCosineChart
                 columnWith (tight . gap gapMicro . fillW) $ do
                   muted "Weekly counts"
-                  void $ barChart (fillW defaultLayout) weeklyBars
+                  void $ barChart (minH 240 . fillW $ defaultLayout) weeklyBars
+              responsiveRowCol 760 (tight . gap 16 . fillW $ defaultLayout) $ do
                 columnWith (tight . gap gapMicro . fillW) $ do
                   muted "Sleep vs focus"
-                  void $ plot (fillW defaultLayout) sleepFocusChart
+                  void $ plot (minH 240 . fillW $ defaultLayout) sleepFocusChart
                 columnWith (tight . gap gapMicro . fillW) $ do
                   muted "Area"
-                  void $ areaChart (fillW defaultLayout) areaDemo
-                columnWith (tight . gap gapMicro . fillW) $ do
-                  muted "Drawing"
-                  ps <- uiPlotStyle
-                  void $ diagram (fillW $ defaultLayout {layoutMaxH = 200}) (drawingSample ps)
+                  void $ areaChart (minH 240 . fillW $ defaultLayout) areaDemo
+              columnWith (tight . gap gapMicro . fillW) $ do
+                muted "Drawing"
+                ps <- uiPlotStyle
+                void $ diagram (fillW $ defaultLayout {layoutMaxH = 200}) (drawingSample ps)
 
             ------------------------------------------- Diagnostics ---------
             Diagnostics -> do
@@ -607,6 +634,13 @@ demoUi = do
 ------------------------------------------------------------------------------
 -- §4  Controls-tab helpers
 ------------------------------------------------------------------------------
+
+-- | Keep a caption close to its field; the enclosing column spaces field groups.
+demoField :: T.Text -> NanoUI a -> NanoUI a
+demoField caption widget =
+  columnWith (tight . gap 4 . fillW) $ do
+    void $ labelWith (tight . fontMuted . fillW) caption
+    widget
 
 -- | Poll a pending dialog handle; on completion clear it and hand the chosen
 -- paths to the caller. Anything other than 'FileDialogPending' dismisses the
