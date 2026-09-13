@@ -28,7 +28,6 @@ common warnings
   ghc-options:
     -Wall
     -Wextra
-    -Werror
     -Wcompat
     -Widentities
     -Wincomplete-record-updates
@@ -65,7 +64,7 @@ library
         effectful ^>=2.6,
         hashable ^>=1.5,
         lens >=5.2 && <5.4,
-        nano-ui,
+        nano-ui ^>=0.1,
         text ^>=2.1,
         vector ^>=0.13
     hs-source-dirs:   lib

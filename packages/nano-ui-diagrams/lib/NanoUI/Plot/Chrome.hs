@@ -69,7 +69,6 @@ import NanoUI.Plot.Types
   , SeriesData (..)
   , SeriesKind (..)
   )
-import qualified Data.Vector.Generic as GV
 
 -- lwO is output pixels. Do not scale into the 0..1 plot box.
 plotStroke :: Float -> Double
@@ -109,19 +108,19 @@ chartChrome :: FontMetrics -> Chart -> ChartChrome
 chartChrome fm chart =
   let yDom = chartYDomain chart
       yLabels = map formatTick (niceTicks 6 yDom)
-      maxYW = maximum (map (textWidth fm . T.unpack) yLabels ++ [0 :: Float])
+      maxYW = maximum (0 : map (textWidth fm) yLabels)
       lh = fmLineHeight fm
       yTitleW =
         case chartYTitle chart of
           Nothing -> 0
-          Just t -> textWidth fm (T.unpack t)
+          Just t -> textWidth fm t
       legendW =
         case chartLegend chart of
           LegendNone -> 0
           _ ->
             maximum
               ( 0
-                  : map (textWidth fm . T.unpack . seriesName) (chartSeries chart)
+                  : map (textWidth fm . seriesName) (chartSeries chart)
               )
       s = plotGapRef fm
       px u = realToFrac u / s
@@ -169,14 +168,14 @@ chartChrome fm chart =
         , ccXTitleY = xTitleY
         }
 
-textWidth :: FontMetrics -> String -> Float
-textWidth fm s = rectW (drawTextBox fm 0 0 0 (-1) (T.pack s))
+textWidth :: FontMetrics -> T.Text -> Float
+textWidth fm s = rectW (drawTextBox fm 0 0 0 (-1) s)
 
 seriesDomains :: Chart -> (Domain, Domain)
 seriesDomains chart =
   case map seriesExtent (chartSeries chart) of
     [] -> (Domain 0 1, Domain 0 1)
-    d : ds -> foldl mergePair d ds
+    d : ds -> foldl' mergePair d ds
   where
     mergePair (dx, dy) (xd, yd) = (mergeDomains dx xd, mergeDomains dy yd)
 
@@ -205,8 +204,7 @@ chartDiagram fm theme ps chart =
       rightM = marginRight margins
       botM = marginBottom margins
       topM = marginTop margins
-      xDom = chartXDomain chart
-      yDom = chartYDomain chart
+      (xDom, yDom) = seriesDomains chart
       plotRange = Range 0 1
       xTicks = niceTicks 6 xDom
       yTicks = niceTicks 6 yDom
@@ -214,20 +212,14 @@ chartDiagram fm theme ps chart =
       xTickPad = ccXTickPad chrome
       toX v = domainToPlot xDom plotRange v
       toY v = domainToPlot yDom plotRange v
+      horizontalGrid = mconcat [fromVertices [p2 (0, toY y), p2 (1, toY y)] | y <- yTicks]
+      verticalGrid = mconcat [fromVertices [p2 (toX x, 0), p2 (toX x, 1)] | x <- xTicks]
       grid =
         case chartGrid chart of
           GridNone -> mempty
-          GridHorizontal ->
-            mconcat [fromVertices [p2 (0, toY y), p2 (1, toY y)] | y <- yTicks]
-          GridVertical ->
-            mconcat [fromVertices [p2 (toX x, 0), p2 (toX x, 1)] | x <- xTicks]
-          GridBoth ->
-            mconcat
-              [ fromVertices [p2 (0, toY y), p2 (1, toY y)] | y <- yTicks
-              ]
-              <> mconcat
-                [ fromVertices [p2 (toX x, 0), p2 (toX x, 1)] | x <- xTicks
-                ]
+          GridHorizontal -> horizontalGrid
+          GridVertical -> verticalGrid
+          GridBoth -> horizontalGrid <> verticalGrid
       axes =
         fromVertices [p2 (0, 0), p2 (1, 0)]
           <> fromVertices [p2 (0, 0), p2 (0, 1)]
@@ -259,13 +251,16 @@ chartDiagram fm theme ps chart =
           Just t ->
             plotLbl ps 1 0.5 (T.unpack t)
               # moveTo (p2 (ccYTitleX chrome, 0.5))
-      colors = themeSeries theme
+      coloredSeries =
+        [ (fromMaybe fallback (seriesColor s), s)
+        | (fallback, s) <- zip (cycle (themeSeries theme)) (chartSeries chart)
+        ]
       seriesDia =
         mconcat
-          [ renderSeries ps (colors !! (i `mod` length colors)) xDom yDom chart s
-          | (i, s) <- zip [0 ..] (chartSeries chart)
+          [ renderSeries ps color xDom yDom chart s
+          | (color, s) <- coloredSeries
           ]
-      legend = renderLegend fm ps colors chart chrome
+      legend = renderLegend fm ps coloredSeries chart chrome
       marginBox :: Diagram B
       marginBox =
         rect (1 + leftM + rightM) (1 + botM + topM)
@@ -281,9 +276,8 @@ plotLbl ps ax ay s =
   alignedText ax ay s # fontSizeL 0.085 # fc (plotMuted ps) # lc (plotMuted ps) # lw none
 
 renderSeries :: PlotStyle -> Color -> Domain -> Domain -> Chart -> Series -> Diagram B
-renderSeries ps col xDom yDom chart s =
-  let c = fromMaybe col (seriesColor s)
-      ink = colourOf c
+renderSeries ps c xDom yDom chart s =
+  let ink = colourOf c
       fillCol = lerpColor c (plotFrameBg ps) 0.18
       fill = colourOf fillCol
       pts = seriesPoints chart s
@@ -292,7 +286,7 @@ renderSeries ps col xDom yDom chart s =
         LineSeries w _ ->
           fromVertices (V.toList $ V.map toP pts) # lc ink # lwO (plotStroke w)
         ScatterSeries w mk ->
-          GV.foldMap (\p -> markShape mk w ink (toP p)) pts
+          foldMap (\p -> markShape mk w ink (toP p)) pts
         BarSeries frac ->
           renderBars ink frac pts
         AreaSeries baseline ->
@@ -305,25 +299,25 @@ seriesPoints chart s =
   case seriesData s of
     PointsXY pts ->
       let k = decimateK (V.length pts)
-       in if chartDecimate chart && length pts > k then lttb k pts else pts
+       in if chartDecimate chart && V.length pts > k then lttb k pts else pts
     CategoryY rows ->
-       V.zip (V.enumFromTo 0 (fromIntegral (V.length rows - 1) :: Double)) (V.map snd rows)
+       V.imap (\i (_, y) -> (fromIntegral i, y)) rows
 
 decimateK :: Int -> Int
 decimateK n = min n (max 64 (min 2000 (n `div` 2)))
 
-renderBars :: (GV.Vector v (Double, Double)) => Colour Double -> Float -> v (Double, Double) -> Diagram B
+renderBars :: Colour Double -> Float -> V.Vector (Double, Double) -> Diagram B
 renderBars fill frac pts
-  | GV.null pts = mempty
+  | V.null pts = mempty
   | otherwise =
-      let !len  = GV.length pts
+      let !len  = V.length pts
           !n    = fromIntegral len :: Double
           !w    = realToFrac frac / n
           !invN = 1.0 / n
           !xOff = 0.5 * invN
 
           -- Single-pass strict fold for maxY (avoids allocating a list or intermediate vector)
-          !maxY = GV.foldl' (\ !acc (_, y) -> max acc (abs y)) 1e-9 pts
+          !maxY = V.foldl' (\ !acc (_, y) -> max acc (abs y)) 1e-9 pts
           !invMaxY = 1.0 / maxY
 
           drawBar (x, y) =
@@ -335,11 +329,11 @@ renderBars fill frac pts
                   # fc fill
                   # lw none
                   # translate (posX ^& posY)
-       in GV.foldMap drawBar pts
+       in foldMap drawBar pts
 
-areaPath :: (GV.Vector v (Double, Double)) => Double -> Domain -> Domain -> v (Double, Double) -> Diagram B
+areaPath :: Double -> Domain -> Domain -> V.Vector (Double, Double) -> Diagram B
 areaPath baseline xDom yDom pts
-  | GV.null pts = mempty
+  | V.null pts = mempty
   | otherwise =
       let !unitRange = Range 0 1
           !baseY = domainToPlot yDom unitRange baseline
@@ -347,9 +341,9 @@ areaPath baseline xDom yDom pts
           toBase (!x, !_) = p2 (domainToPlot xDom unitRange x, baseY)
 
           -- Forward traversal builds `top` in order
-          top = GV.foldr (\p acc -> toTop p : acc) [] pts
+          top = V.foldr (\p acc -> toTop p : acc) [] pts
           -- Left fold naturally yields reverse order without allocating an intermediate reversed vector
-          base = GV.foldl' (\acc p -> toBase p : acc) [] pts
+          base = V.foldl' (\acc p -> toBase p : acc) [] pts
        in closedPoly (top ++ base)
 
 closedPoly :: [P2 Double] -> Diagram B
@@ -391,44 +385,29 @@ markShape MarkCross w c p =
       )
         # moveTo p
 
-renderLegend :: FontMetrics -> PlotStyle -> [Color] -> Chart -> ChartChrome -> Diagram B
-renderLegend fm ps colors chart chrome =
+renderLegend :: FontMetrics -> PlotStyle -> [(Color, Series)] -> Chart -> ChartChrome -> Diagram B
+renderLegend _ _ _ Chart {chartLegend = LegendNone} _ = mempty
+renderLegend fm ps coloredSeries chart chrome =
   let px = ccPx chrome
       row = px (fmLineHeight fm + 8)
       col =
-        let names = map (T.unpack . seriesName) (chartSeries chart)
+        let names = map seriesName (chartSeries chart)
             w = maximum (0 : map (textWidth fm) names)
          in px w + 0.22
       botLegendY =
         case chartXTitle chart of
           Nothing -> -(ccXTickPad chrome) - px (fmLineHeight fm) - px 6
           Just _ -> ccXTitleY chrome - px (fmLineHeight fm) - px 6
-   in case chartLegend chart of
-        LegendNone -> mempty
-        LegendRight ->
-          mconcat
-            [ legendEntry ps (colors !! (i `mod` length colors)) (T.unpack (seriesName s))
-              # moveTo (p2 (1.04, 0.98 - fromIntegral i * row))
-            | (i, s) <- zip [0 ..] (chartSeries chart)
-            ]
-        LegendBottom ->
-          mconcat
-            [ legendEntry ps (colors !! (i `mod` length colors)) (T.unpack (seriesName s))
-              # moveTo (p2 (fromIntegral i * col, botLegendY))
-            | (i, s) <- zip [0 ..] (chartSeries chart)
-            ]
-        LegendTop ->
-          mconcat
-            [ legendEntry ps (colors !! (i `mod` length colors)) (T.unpack (seriesName s))
-              # moveTo (p2 (fromIntegral i * col, 1.12))
-            | (i, s) <- zip [0 ..] (chartSeries chart)
-            ]
-        LegendInside ->
-          mconcat
-            [ legendEntry ps (colors !! (i `mod` length colors)) (T.unpack (seriesName s))
-              # moveTo (p2 (0.02, 0.98 - fromIntegral i * row))
-            | (i, s) <- zip [0 ..] (chartSeries chart)
-            ]
+      position i = case chartLegend chart of
+        LegendRight -> (1.04, 0.98 - i * row)
+        LegendBottom -> (i * col, botLegendY)
+        LegendTop -> (i * col, 1.12)
+        LegendInside -> (0.02, 0.98 - i * row)
+        LegendNone -> (0, 0)
+   in mconcat
+        [ legendEntry ps color (T.unpack (seriesName s)) # moveTo (p2 (position i))
+        | (i, (color, s)) <- zip [0 ..] coloredSeries
+        ]
 
 legendEntry :: PlotStyle -> Color -> String -> Diagram B
 legendEntry ps col name =

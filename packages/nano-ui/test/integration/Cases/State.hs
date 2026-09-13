@@ -95,3 +95,6 @@ runHookStateTest ctx failed = do
   check "flag" (useFlag False) False True
   check "enum" (useEnum LT) LT GT
   check "dynamic" (useState (0 :: Int, False)) (0, False) (12, True)
+  check "tab-index" (useTabIdx 0) 0 2
+  check "tab-enum" (useTab LT) LT GT
+  check "radio" (useRadio LT) LT GT

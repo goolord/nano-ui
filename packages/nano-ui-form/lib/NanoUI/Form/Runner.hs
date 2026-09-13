@@ -23,13 +23,14 @@ import NanoUI
   , inputKeysElem
   , uiIO
   , whenM
+  , withKey
   )
 import NanoUI.Monad (askContext, askInput)
 import NanoUI.Form.Backend
   ( isFormSubmitted
   , markFormSubmitted
   , resetFormState
-  , setActiveFormPrefix
+  , withFormPrefix
   )
 import NanoUI.Form.Types
   ( Form
@@ -40,12 +41,14 @@ import NanoUI.Form.Types
   , FormView (..)
   )
 
--- | Low-level runner: evaluates the formlet in 'FormUI', returning the raw 'FormView' and 'Ditto.Result'.
+-- | Evaluate a formlet and return its view and result. The view retains its
+-- prefix even when rendered after other forms or inside another form's view.
 runNanoForm :: Text -> Form err a -> NanoUI (Ditto.View err FormView, Ditto.Result err (Ditto.Proved a))
 runNanoForm prefix form = do
-  ctx <- askContext
-  uiIO $ setActiveFormPrefix ctx prefix
-  unFormUI $ Ditto.runForm prefix form
+  (view, result) <- withFormPrefix prefix (unFormUI (Ditto.runForm prefix form))
+  let scopedView (FormView action) =
+        FormView (withFormPrefix prefix (withKey prefix action))
+  pure (scopedView <$> view, result)
 
 -- | Default form runner: runs live validation and renders the form in 'NanoUI'.
 nanoForm :: Text -> Form Text a -> NanoUI (Maybe a)
@@ -76,7 +79,7 @@ nanoFormSubmit prefix submitLabel form = do
       clickedSubmit = btnClicked || enterPressed
   when clickedSubmit $
     uiIO (markFormSubmitted ctx prefix True)
-  pure $ case (clickedSubmit || submittedBefore, res) of
+  pure $ case (clickedSubmit, res) of
     (True, Ditto.Ok (Ditto.Proved _ a)) -> Just a
     _                                  -> Nothing
 

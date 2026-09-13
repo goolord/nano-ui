@@ -56,7 +56,7 @@ library
         effectful ^>=2.6,
         effectful-core ^>=2.6,
         hashable ^>=1.5,
-        nano-ui,
+        nano-ui ^>=0.1,
         text ^>=2.1
     hs-source-dirs:   lib
     default-language: GHC2024
@@ -75,12 +75,12 @@ executable nano-ui-form-example
         base ^>=4.22.0.0,
         containers ^>=0.8,
         ditto ^>=0.5.0,
-        nano-ui,
+        nano-ui ^>=0.1,
         nano-ui-form,
         text ^>=2.1
     if flag(sdl)
         build-depends:
-            nano-ui-sdl
+            nano-ui-sdl ^>=0.1
     if os(windows)
         ghc-options: -optl-mconsole
     if !flag(sdl)
@@ -93,6 +93,7 @@ test-suite nano-ui-form-test
     import:           warnings
     type:             exitcode-stdio-1.0
     main-is:          Main.hs
+    other-modules:    Scope
     ghc-options:      -rtsopts -threaded "-with-rtsopts=-M256m -N1"
     build-depends:
         base ^>=4.22.0.0,

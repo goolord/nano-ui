@@ -43,7 +43,6 @@ common warnings
   ghc-options:
     -Wall
     -Wextra
-    -Werror
     -Wcompat
     -Widentities
     -Wincomplete-record-updates
@@ -135,7 +134,7 @@ library
         containers ^>=0.8,
         effectful ^>=2.6,
         effectful-core ^>=2.6,
-        ghc,
+        ghc ^>=9.14,
         ghc-compact ^>=0.1,
         hashable ^>=1.5,
         hashtables ^>=1.4,
@@ -204,7 +203,9 @@ test-suite nano-ui-test
         Cases.Keyboard
         Cases.Cache
         Cases.Runner
+        Cases.SIMD
         Cases.State
+        Cases.Table
         Cases.Modal
         Cases.NoThunks
         Cases.Scroll

@@ -55,7 +55,6 @@ common warnings
   ghc-options:
     -Wall
     -Wextra
-    -Werror
     -Wcompat
     -Widentities
     -Wincomplete-record-updates
@@ -97,9 +96,9 @@ library
         effectful ^>=2.6,
         filepath ^>=1.5,
         file-embed ^>=0.0.16,
-        nano-ui,
+        nano-ui ^>=0.1,
         primitive ^>=0.9,
-        template-haskell,
+        template-haskell ^>=2.24,
         vector ^>=0.13,
         record-hasfield ^>=1.0,
         sdl3-bindgen-sys ^>=0.0.0.2,

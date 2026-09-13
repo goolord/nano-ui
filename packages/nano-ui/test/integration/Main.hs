@@ -2,7 +2,9 @@ module Main (main) where
 
 import Cases
 import Cases.Runner (runDrawingLockTest, runSessionLoopTest)
+import Cases.SIMD (runSimdWritesTest)
 import Cases.State (runCheckboxEmitKeyboardTest, runControlledStateTest, runHookStateTest)
+import Cases.Table (runTableReorderTest, runTableSortTest)
 import Data.IORef (IORef)
 import NanoUI.Testing (Context, newContext, newPixelContext)
 import NanoUI.Testing.Runner (runTests)
@@ -26,8 +28,11 @@ testSpecs =
   [ TestSpec "id-stability" False runIdStabilityTest
   , TestSpec "session-loop" False runSessionLoopTest
   , TestSpec "drawing-lock" False runDrawingLockTest
+  , TestSpec "simd-writes" False runSimdWritesTest
   , TestSpec "controlled-state" False runControlledStateTest
   , TestSpec "hook-state" False runHookStateTest
+  , TestSpec "table-sort" False runTableSortTest
+  , TestSpec "table-reorder" True runTableReorderTest
   , TestSpec "composite-animation-isolation" False runCompositeAnimationIsolationTest
   , TestSpec "checkbox-emit-keyboard" False runCheckboxEmitKeyboardTest
   , TestSpec "id-uniqueness" False runIdUniquenessTest

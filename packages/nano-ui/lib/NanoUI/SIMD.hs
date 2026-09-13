@@ -35,7 +35,6 @@ import GHC.Exts
   , Int (I#)
   , Int#
   , Word32X4#
-  , plusFloat#
   , broadcastFloatX4#
   , packFloatX4#
   , packWord32X4#
@@ -160,54 +159,28 @@ pokeQuadSIMD ::
   Float ->
   Word32 ->
   IO ()
-pokeQuadSIMD (Ptr vAddr#) (I# vOff#) (Ptr iAddr#) (I# iOff#) (F# x#) (F# y#) (F# w#) (F# h#) (F# u0#) (F# v0#) (F# u1#) (F# v1#) (F# r#) (F# g#) (F# b#) (F# a#) !baseIdx = do
-  let !baseV# = vAddr# `plusAddr#` vOff#
-      !baseI# = iAddr# `plusAddr#` iOff#
-      !x1# = x# `plusFloat#` w#
-      !y1# = y# `plusFloat#` h#
+pokeQuadSIMD vertices vOffset indices iOffset x y w h u0 v0 u1 v1 r g b a baseIdx = do
+  let x1 = x + w
+      y1 = y + h
+  pokeVertexSIMD vertices vOffset x y r g b a u0 v0
+  pokeVertexSIMD vertices (vOffset + 32) x1 y r g b a u1 v0
+  pokeVertexSIMD vertices (vOffset + 64) x1 y1 r g b a u1 v1
+  pokeVertexSIMD vertices (vOffset + 96) x y1 r g b a u0 v1
+  pokeQuadIndicesSIMD indices iOffset baseIdx
 
-  -- Write 4 vertices (each vertex is 2x FloatX4# = 32 bytes)
-  IO $ \s0 ->
-    -- V0: (x, y, r, g) | (b, a, u0, v0)
-    let !v0_lo# = packFloatX4# (# x#, y#, r#, g# #)
-        !v0_hi# = packFloatX4# (# b#, a#, u0#, v0# #)
-     in case writeFloatOffAddrAsFloatX4# baseV# 0# v0_lo# s0 of
-          s1 -> case writeFloatOffAddrAsFloatX4# (baseV# `plusAddr#` 16#) 0# v0_hi# s1 of
-            s2 ->
-              -- V1: (x1, y, r, g) | (b, a, u1, v0)
-              let !v1_lo# = packFloatX4# (# x1#, y#, r#, g# #)
-                  !v1_hi# = packFloatX4# (# b#, a#, u1#, v0# #)
-                  !v1_addr# = baseV# `plusAddr#` 32#
-               in case writeFloatOffAddrAsFloatX4# v1_addr# 0# v1_lo# s2 of
-                    s3 -> case writeFloatOffAddrAsFloatX4# (v1_addr# `plusAddr#` 16#) 0# v1_hi# s3 of
-                      s4 ->
-                        -- V2: (x1, y1, r, g) | (b, a, u1, v1)
-                        let !v2_lo# = packFloatX4# (# x1#, y1#, r#, g# #)
-                            !v2_hi# = packFloatX4# (# b#, a#, u1#, v1# #)
-                            !v2_addr# = baseV# `plusAddr#` 64#
-                         in case writeFloatOffAddrAsFloatX4# v2_addr# 0# v2_lo# s4 of
-                              s5 -> case writeFloatOffAddrAsFloatX4# (v2_addr# `plusAddr#` 16#) 0# v2_hi# s5 of
-                                s6 ->
-                                  -- V3: (x, y1, r, g) | (b, a, u0, v1)
-                                  let !v3_lo# = packFloatX4# (# x#, y1#, r#, g# #)
-                                      !v3_hi# = packFloatX4# (# b#, a#, u0#, v1# #)
-                                      !v3_addr# = baseV# `plusAddr#` 96#
-                                   in case writeFloatOffAddrAsFloatX4# v3_addr# 0# v3_lo# s6 of
-                                        s7 -> case writeFloatOffAddrAsFloatX4# (v3_addr# `plusAddr#` 16#) 0# v3_hi# s7 of
-                                          s8 -> (# s8, () #)
-
-  -- Write 6 quad indices: base, base+1, base+2, base, base+2, base+3
-  -- First 4 indices in one 128-bit vector store
+-- Six indices form the same two triangles for both solid and gradient quads.
+{-# INLINE pokeQuadIndicesSIMD #-}
+pokeQuadIndicesSIMD :: Ptr Word8 -> Int -> Word32 -> IO ()
+pokeQuadIndicesSIMD (Ptr addr#) offset@(I# offset#) baseIdx = do
   let !(W32# b0#) = baseIdx
       !(W32# b1#) = baseIdx + 1
       !(W32# b2#) = baseIdx + 2
       !idxVec# = packWord32X4# (# b0#, b1#, b2#, b0# #)
   IO $ \s0 ->
-    case writeWord32OffAddrAsWord32X4# baseI# 0# idxVec# s0 of
+    case writeWord32OffAddrAsWord32X4# (plusAddr# addr# offset#) 0# idxVec# s0 of
       s1 -> (# s1, () #)
-  let !iOffInt = I# iOff#
-  pokeByteOff (Ptr iAddr#) (iOffInt + 16) (baseIdx + 2)
-  pokeByteOff (Ptr iAddr#) (iOffInt + 20) (baseIdx + 3)
+  pokeByteOff (Ptr addr#) (offset + 16) (baseIdx + 2)
+  pokeByteOff (Ptr addr#) (offset + 20) (baseIdx + 3)
 
 -- | Vectorized Quad with 4 distinct corner colors (top-left, top-right, bottom-right, bottom-left)
 {-# INLINE pokeQuadGradientSIMD #-}
@@ -229,51 +202,16 @@ pokeQuadGradientSIMD ::
   Word32 ->
   IO ()
 pokeQuadGradientSIMD
-  (Ptr vAddr#) (I# vOff#) (Ptr iAddr#) (I# iOff#)
-  (F# x#) (F# y#) (F# w#) (F# h#)
-  (F# u#) (F# v#)
-  (F# r0#, F# g0#, F# b0#, F# a0#)
-  (F# r1#, F# g1#, F# b1#, F# a1#)
-  (F# r2#, F# g2#, F# b2#, F# a2#)
-  (F# r3#, F# g3#, F# b3#, F# a3#)
-  !baseIdx = do
-  let !baseV# = vAddr# `plusAddr#` vOff#
-      !x1# = x# `plusFloat#` w#
-      !y1# = y# `plusFloat#` h#
-
-  IO $ \s0 ->
-    let !v0_lo# = packFloatX4# (# x#, y#, r0#, g0# #)
-        !v0_hi# = packFloatX4# (# b0#, a0#, u#, v# #)
-        !v1_lo# = packFloatX4# (# x1#, y#, r1#, g1# #)
-        !v1_hi# = packFloatX4# (# b1#, a1#, u#, v# #)
-        !v2_lo# = packFloatX4# (# x1#, y1#, r2#, g2# #)
-        !v2_hi# = packFloatX4# (# b2#, a2#, u#, v# #)
-        !v3_lo# = packFloatX4# (# x#, y1#, r3#, g3# #)
-        !v3_hi# = packFloatX4# (# b3#, a3#, u#, v# #)
-        !v1_addr# = baseV# `plusAddr#` 32#
-        !v2_addr# = baseV# `plusAddr#` 64#
-        !v3_addr# = baseV# `plusAddr#` 96#
-     in case writeFloatOffAddrAsFloatX4# baseV# 0# v0_lo# s0 of
-          s1 -> case writeFloatOffAddrAsFloatX4# (baseV# `plusAddr#` 16#) 0# v0_hi# s1 of
-            s2 -> case writeFloatOffAddrAsFloatX4# v1_addr# 0# v1_lo# s2 of
-              s3 -> case writeFloatOffAddrAsFloatX4# (v1_addr# `plusAddr#` 16#) 0# v1_hi# s3 of
-                s4 -> case writeFloatOffAddrAsFloatX4# v2_addr# 0# v2_lo# s4 of
-                  s5 -> case writeFloatOffAddrAsFloatX4# (v2_addr# `plusAddr#` 16#) 0# v2_hi# s5 of
-                    s6 -> case writeFloatOffAddrAsFloatX4# v3_addr# 0# v3_lo# s6 of
-                      s7 -> case writeFloatOffAddrAsFloatX4# (v3_addr# `plusAddr#` 16#) 0# v3_hi# s7 of
-                        s8 -> (# s8, () #)
-
-  let !(W32# q0#) = baseIdx
-      !(W32# q1#) = baseIdx + 1
-      !(W32# q2#) = baseIdx + 2
-      !baseI# = iAddr# `plusAddr#` iOff#
-      !idxVec# = packWord32X4# (# q0#, q1#, q2#, q0# #)
-  IO $ \s0 ->
-    case writeWord32OffAddrAsWord32X4# baseI# 0# idxVec# s0 of
-      s1 -> (# s1, () #)
-  let !iOffInt = I# iOff#
-  pokeByteOff (Ptr iAddr#) (iOffInt + 16) (baseIdx + 2)
-  pokeByteOff (Ptr iAddr#) (iOffInt + 20) (baseIdx + 3)
+  vertices vOffset indices iOffset x y w h u v
+  (r0, g0, b0, a0) (r1, g1, b1, a1)
+  (r2, g2, b2, a2) (r3, g3, b3, a3) baseIdx = do
+  let x1 = x + w
+      y1 = y + h
+  pokeVertexSIMD vertices vOffset x y r0 g0 b0 a0 u v
+  pokeVertexSIMD vertices (vOffset + 32) x1 y r1 g1 b1 a1 u v
+  pokeVertexSIMD vertices (vOffset + 64) x1 y1 r2 g2 b2 a2 u v
+  pokeVertexSIMD vertices (vOffset + 96) x y1 r3 g3 b3 a3 u v
+  pokeQuadIndicesSIMD indices iOffset baseIdx
 
 -- | Evaluates 4 concentric arc positions in parallel using vector math:
 -- xs = cx + radii * ct
@@ -323,22 +261,4 @@ strokeStripNormalsSIMD ::
   Float ->
   Float ->
   ((Float, Float), (Float, Float), (Float, Float), (Float, Float))
-strokeStripNormalsSIMD
-  (F# px#) (F# py#) (F# nx#) (F# ny#)
-  (F# o0#) (F# o1#) (F# o2#) (F# o3#) =
-  let !pxVec# = broadcastFloatX4# px#
-      !pyVec# = broadcastFloatX4# py#
-      !nxVec# = broadcastFloatX4# nx#
-      !nyVec# = broadcastFloatX4# ny#
-      !offs# = packFloatX4# (# o0#, o1#, o2#, o3# #)
-      !xs# = plusFloatX4# pxVec# (timesFloatX4# nxVec# offs#)
-      !ys# = plusFloatX4# pyVec# (timesFloatX4# nyVec# offs#)
-   in case unpackFloatX4# xs# of
-        (# x0#, x1#, x2#, x3# #) ->
-          case unpackFloatX4# ys# of
-            (# y0#, y1#, y2#, y3# #) ->
-              ( (F# x0#, F# y0#)
-              , (F# x1#, F# y1#)
-              , (F# x2#, F# y2#)
-              , (F# x3#, F# y3#)
-              )
+strokeStripNormalsSIMD = concentricOffsetsSIMD

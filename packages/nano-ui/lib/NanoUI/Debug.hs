@@ -378,21 +378,18 @@ formatDrawRows s =
   ]
 
 formatCoreRtsRows :: CoreDebugSnapshot -> [(Text, Text)]
-formatCoreRtsRows s
-  | not (dbgRtsOn s) =
-      [ ("rts", "stats off (need +RTS -T)")
-      , ("haskell", T.pack (printf "%2d cap / %2d cpu" (dbgCaps s) (dbgCpus s)))
-      ]
-  | otherwise =
-      [ ("haskell", T.pack (printf "%2d cap / %2d cpu" (dbgCaps s) (dbgCpus s)))
-      , ("gc total", T.pack (printf "%10d" (dbgGcs s)))
-      , ("gc major", T.pack (printf "%10d" (dbgMajorGcs s)))
-      , ("last gen", T.pack (printf "%10d" (dbgLastGcGen s)))
-      , ("last gc", T.pack (printf "%7.2f ms" (dbgLastGcMs s)))
-      , ("heap live", T.pack (printf "%6.1f MiB" (dbgLiveMb s)))
-      , ("heap alloc", T.pack (printf "%6.1f MiB" (dbgAllocMb s)))
-      , ("copied", T.pack (printf "%6.1f MiB" (dbgCopiedMb s)))
-      , ("rss max", T.pack (printf "%6.1f MiB" (dbgMaxMemMb s)))
-      , ("gc time", T.pack (printf "%9.1f%%" (dbgGcPct s)))
-      ]
-
+formatCoreRtsRows s =
+  formatRtsRows RtsStatsSnapshot
+    { rtsEnabled = dbgRtsOn s
+    , rtsGcs = dbgGcs s
+    , rtsMajorGcs = dbgMajorGcs s
+    , rtsAllocMb = dbgAllocMb s
+    , rtsLiveMb = dbgLiveMb s
+    , rtsMaxMemMb = dbgMaxMemMb s
+    , rtsCopiedMb = dbgCopiedMb s
+    , rtsGcPct = dbgGcPct s
+    , rtsLastGcGen = dbgLastGcGen s
+    , rtsLastGcMs = dbgLastGcMs s
+    , rtsCaps = dbgCaps s
+    , rtsCpus = dbgCpus s
+    }

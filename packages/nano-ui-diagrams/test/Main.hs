@@ -2,7 +2,7 @@
 
 module Main (main) where
 
-import Control.Monad (unless)
+import Control.Monad (forM_, unless)
 import Data.Colour.Names (coral, steelblue)
 import Data.List (tails)
 import Data.Maybe (fromMaybe, listToMaybe)
@@ -32,7 +32,7 @@ import NanoUI.Plot.Chrome (Margins (..), chartDiagram, chartMargins, seriesDomai
 import NanoUI.Plot.Decimate (lttb)
 import NanoUI.Plot.Hit (nearestPlotHover)
 import NanoUI.Plot.Scale (formatTick, mergeDomains, niceTicks)
-import NanoUI.Plot.Series (area, bar, line, scatter, withMarker)
+import NanoUI.Plot.Series (area, bar, line, scatter, withColor, withMarker)
 import NanoUI.Plot.Types
   ( Chart (..)
   , Domain (..)
@@ -59,6 +59,7 @@ main = do
   testLttb
   testLabelFit fm
   testChartChrome fm
+  testLegendColors fm
   testPlotHover fm
   testClosedSeriesFills fm
   testGrowPlotHeight fm
@@ -367,6 +368,12 @@ testChartChrome fm = do
 
 testPlotHover :: FontMetrics -> IO ()
 testPlotHover _fm = do
+  forM_ [bareChart [], bareChart [line "empty" []]] $ \chart ->
+    unless (nearestPlotHover chart 0.5 0.5 == Nothing) $
+      fail "empty chart produced a hover target"
+  let tied = bareChart [line "first" [(0, 0), (0, 0)], line "second" [(0, 0)]]
+  unless (fmap (\h -> (hoverSeriesIdx h, hoverPointIdx h)) (nearestPlotHover tied 0.5 0.5) == Just (0, 0)) $
+    fail "equidistant hover targets did not prefer the first point"
   let c =
         Chart
           { chartTitle = Nothing
@@ -382,6 +389,25 @@ testPlotHover _fm = do
     Just h ->
       unless (hoverSeriesIdx h == 0 && hoverPointIdx h == 1 && hoverDataX h == 1 && hoverDataY h == 1) $
         fail "nearestPlotHover picked wrong point"
+
+-- Empty series isolate the legend strokes from data geometry. Every placement
+-- must retain the labels and use the same color overrides as the series.
+testLegendColors :: FontMetrics -> IO ()
+testLegendColors fm = do
+  let custom = colorRGBA 17 211 83 255
+      chart = bareChart [withColor custom (line "custom" []), line "default" []]
+      fallback = themeSeries defaultTheme !! 1
+  forM_ [LegendNone, LegendRight, LegendBottom, LegendTop, LegendInside] $ \position -> do
+    let ops = V.toList (diagramOps 400 280 (chartDiagram fm defaultTheme defaultPlotStyle chart {chartLegend = position}))
+        labels = [text | DrawText _ _ _ _ text _ <- ops, text == "custom" || text == "default"]
+        colors = [color | FillTriangle _ _ _ _ _ _ color <- ops]
+    if position == LegendNone
+      then unless (null labels && custom `notElem` colors) $ fail "hidden legend rendered entries"
+      else do
+        unless (length labels == 2 && "custom" `elem` labels && "default" `elem` labels) $
+          fail "legend lost or duplicated a series label"
+        unless (custom `elem` colors && fallback `elem` colors) $
+          fail "legend colors differ from series colors"
 
 bareChart :: [Series] -> Chart
 bareChart ss =

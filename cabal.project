@@ -22,18 +22,23 @@ package nano-ui
   -- Scoped to the hot packages so ../ditto and the rgfw/form libraries keep
   -- their default field layout (their only cost here is a full rebuild on
   -- flag changes, with no win to show for it).
-  ghc-options: -mavx2 -funbox-strict-fields -fmax-worker-args=32 -fspecialise-aggressively -flate-specialise -optc-ffast-math
+  ghc-options: -Werror -mavx2 -funbox-strict-fields -fmax-worker-args=32 -fspecialise-aggressively -flate-specialise -optc-ffast-math
 
 package nano-ui-sdl
   flags: +sdl
   -- -fspecialise-aggressively is deliberately absent: it is the flag family
   -- that (with LLVM) blew up Paint.hs's compile time, and the render path
   -- here is the same unboxed/effectful shape.
-  ghc-options: -mavx2 -funbox-strict-fields -fmax-worker-args=32 -flate-specialise -optc-mavx2 -optc-O3 -optc-ffast-math
+  ghc-options: -Werror -mavx2 -funbox-strict-fields -fmax-worker-args=32 -flate-specialise -optc-mavx2 -optc-O3 -optc-ffast-math
 
 package nano-ui-demo
   flags: +sdl
-  ghc-options: -mavx2 -funbox-strict-fields -fmax-worker-args=32 -fspecialise-aggressively -flate-specialise -optc-ffast-math
+  ghc-options: -Werror -mavx2 -funbox-strict-fields -fmax-worker-args=32 -fspecialise-aggressively -flate-specialise -optc-ffast-math
+
+-- Treat warnings as errors in development, without imposing that policy on
+-- downstream builds of the published packages.
+package nano-ui-diagrams
+  ghc-options: -Werror
 
 package nano-ui-form
   flags: +sdl

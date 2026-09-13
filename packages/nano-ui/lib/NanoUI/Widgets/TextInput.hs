@@ -71,6 +71,13 @@ toBuffer s =
       anc = TB.Cursor 0 (tisAnchor s)
    in (TB.withCursor cur buf0, anc)
 
+-- Editing collapses selection to the resulting cursor; navigation can retain
+-- the original anchor when Shift is held.
+fromBuffer :: Maybe Int -> TB.TextBuffer -> TextInputState
+fromBuffer anchor buf =
+  let c = TB.cursorCol (TB.getCursor buf)
+   in TextInputState (TB.toText buf) c (maybe c id anchor)
+
 selectAllTextInput :: TextInputState -> TextInputState
 selectAllTextInput s =
   s {tisAnchor = 0, tisCursor = T.length (tisText s)}
@@ -83,19 +90,13 @@ textInputCopy ctx s =
 textInputCut :: Context -> TextInputState -> IO TextInputState
 textInputCut ctx s = do
   let (buf, anc) = toBuffer s
-  buf' <- cutBufferText ctx anc buf
-  let TB.Cursor _ c = TB.getCursor buf'
-  pure (TextInputState (TB.toText buf') c c)
+  fromBuffer Nothing <$> cutBufferText ctx anc buf
 
 textInputPaste :: Context -> TextInputState -> IO TextInputState
 textInputPaste ctx s = do
   let (buf, anc) = toBuffer s
   mbuf' <- pasteBufferText ctx False anc buf
-  case mbuf' of
-    Nothing -> pure s
-    Just buf' -> do
-      let TB.Cursor _ c = TB.getCursor buf'
-      pure (TextInputState (TB.toText buf') c c)
+  pure (maybe s (fromBuffer Nothing) mbuf')
 
 applyTextInputMenuAction :: Context -> WidgetId -> Int -> IO ()
 applyTextInputMenuAction ctx wid item = do
@@ -156,35 +157,22 @@ insertChar s ch =
         if anc /= cur
           then TB.replaceRange (T.singleton ch) anc cur buf
           else TB.insertChar ch buf
-      TB.Cursor _ c = TB.getCursor buf'
-   in TextInputState (TB.toText buf') c c
+   in fromBuffer Nothing buf'
 
 applyKey :: Bool -> Bool -> TextInputState -> Key -> TextInputState
 applyKey word shift s key =
   let (buf, anc) = toBuffer s
       cur = TB.getCursor buf
       hasSel = anc /= cur
+      deleteWith f =
+        fromBuffer Nothing (if hasSel then TB.deleteRange anc cur buf else f buf)
    in case key of
         KeyBackspace
           | word -> moveWith shift buf anc TB.deletePrevWord
-          | hasSel ->
-              let buf' = TB.deleteRange anc cur buf
-                  TB.Cursor _ c = TB.getCursor buf'
-               in TextInputState (TB.toText buf') c c
-          | otherwise ->
-              let buf' = TB.deletePrevChar buf
-                  TB.Cursor _ c = TB.getCursor buf'
-               in TextInputState (TB.toText buf') c c
+          | otherwise -> deleteWith TB.deletePrevChar
         KeyDelete
           | word -> moveWith shift buf anc TB.deleteNextWord
-          | hasSel ->
-              let buf' = TB.deleteRange anc cur buf
-                  TB.Cursor _ c = TB.getCursor buf'
-               in TextInputState (TB.toText buf') c c
-          | otherwise ->
-              let buf' = TB.deleteChar buf
-                  TB.Cursor _ c = TB.getCursor buf'
-               in TextInputState (TB.toText buf') c c
+          | otherwise -> deleteWith TB.deleteChar
         KeyLeft
           | word -> moveWith shift buf anc TB.moveWordLeft
           | otherwise -> moveWith shift buf anc TB.moveLeft
@@ -197,7 +185,4 @@ applyKey word shift s key =
 
 moveWith :: Bool -> TB.TextBuffer -> TB.Cursor -> (TB.TextBuffer -> TB.TextBuffer) -> TextInputState
 moveWith shift buf anc f =
-  let buf' = f buf
-      TB.Cursor _ c = TB.getCursor buf'
-      a = if shift then TB.cursorCol anc else c
-   in TextInputState (TB.toText buf') c a
+  fromBuffer (if shift then Just (TB.cursorCol anc) else Nothing) (f buf)

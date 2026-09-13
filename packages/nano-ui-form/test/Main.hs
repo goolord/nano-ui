@@ -44,6 +44,7 @@ import NanoUI.Form
 import NanoUI.Form.Backend (emptyFormStateStore, getFormStore, updateFieldInput)
 import qualified NanoUI.Form.Unnamed as Unnamed
 import System.IO (BufferMode (NoBuffering), hSetBuffering, stdout)
+import Scope (runScopeTests)
 
 data Person = Person
   { personName :: !Text
@@ -83,6 +84,7 @@ main :: IO ()
 main = do
   hSetBuffering stdout NoBuffering
   putStrLn "=== Running nano-ui-form Test Suite ==="
+  runScopeTests
 
   putStrLn "Creating context..."
   ctx <- newContext

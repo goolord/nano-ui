@@ -6,7 +6,6 @@ module NanoUI.Sdl.Render
   , withRenderBatch
   , batchDrawRange
   , flushRenderBatch
-  , renderDrawData
   , renderDrawDataPass
   , setLogicalClipRect
   , setLogicalClipKey
@@ -113,10 +112,6 @@ applyClipState batch ref ren next = do
     case next of
       ClipNone -> clearLogicalClipRect ren
       ClipKey px py pw ph -> setLogicalClipKey ren (px, py, pw, ph)
-
-renderDrawData :: Ptr SDL_Renderer -> Float -> Color -> DrawData -> ImageAtlas -> IO ()
-renderDrawData _ _ _ _ _ =
-  error "renderDrawData requires an active RenderBatch; use renderDrawDataPass"
 
 renderDrawDataPass :: RenderBatch -> Ptr SDL_Renderer -> Float -> Maybe Color -> DrawData -> SmallArray Layer -> ImageAtlas -> Ptr () -> Damage -> IO ()
 renderDrawDataPass batch ren uiScale mClear drawData layers images glyphTex damage = do

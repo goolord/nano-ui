@@ -45,11 +45,11 @@ library
     build-depends:
         base ^>=4.22.0.0,
         bytestring ^>=0.12,
-        containers,
+        containers ^>=0.8,
         effectful ^>=2.6,
         file-embed ^>=0.0.16,
-        nano-ui-rgfw-bindings,
-        nano-ui,
+        nano-ui-rgfw-bindings ^>=0.1,
+        nano-ui ^>=0.1,
         primitive ^>=0.9,
         text ^>=2.1,
         vector ^>=0.13

@@ -13,12 +13,14 @@ module NanoUI.Form.Backend
   , getActiveFormPrefix
   , setActiveFormPrefix
   , clearActiveFormPrefix
+  , withFormPrefix
   , updateFieldInput
   , markFormSubmitted
   , isFormSubmitted
   , resetFormState
   ) where
 
+import Control.Monad (when)
 import Data.Dynamic (fromDynamic, toDyn)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Map.Strict as Map
@@ -34,6 +36,7 @@ import Ditto.Backend
 import Ditto.Core (Environment (..))
 import Ditto.Types (Value (..), encodeFormId)
 import GHC.Generics (Generic)
+import Effectful.Exception (bracket)
 import NanoUI (NanoUI, uiIO)
 import NanoUI.Monad (askContext)
 import NanoUI.Context (Context, getStore, markDirty, setStore)
@@ -95,7 +98,7 @@ instance Ditto.FormInput FormInput where
 instance FormError FormInput Text where
   commonFormError = commonFormErrorText formInputToText
 
--- | Well-known slot key in 'storeDyn' for the active form prefix stack.
+-- | Well-known slot key in 'storeDyn' for the dynamically scoped form prefix.
 activePrefixSlot :: Int
 activePrefixSlot = -0x464F524D -- -'FORM'
 
@@ -125,6 +128,21 @@ clearActiveFormPrefix ctx = do
   let ws' = ws { storeDyn = IM.delete activePrefixSlot (storeDyn ws) }
   setStore ctx ws'
 
+-- | Evaluate or render a form under its own prefix, restoring the enclosing
+-- prefix afterwards. Restore only this slot, so field updates survive the scope.
+withFormPrefix :: Text -> NanoUI a -> NanoUI a
+withFormPrefix prefix action = do
+  ctx <- askContext
+  let restorePrefix previous = uiIO $ do
+        ws <- getStore ctx
+        setStore ctx ws
+          { storeDyn = IM.alter (const previous) activePrefixSlot (storeDyn ws)
+          }
+  bracket
+    (uiIO $ IM.lookup activePrefixSlot . storeDyn <$> getStore ctx)
+    restorePrefix
+    (\_ -> uiIO (setActiveFormPrefix ctx prefix) >> action)
+
 -- | Retrieve the 'FormStateStore' for a given form prefix.
 getFormStore :: Context -> Text -> IO FormStateStore
 getFormStore ctx prefix = do
@@ -140,22 +158,29 @@ setFormStore ctx prefix fss = do
   let ws' = ws { storeDyn = IM.insert (formStoreKey prefix) (toDyn fss) (storeDyn ws) }
   setStore ctx ws'
 
+-- Form state lives in a Dynamic slot, which the core cannot compare. Keep
+-- equality and redraw notification here rather than in each mutation.
+modifyFormStore :: Context -> Text -> (FormStateStore -> FormStateStore) -> IO ()
+modifyFormStore ctx prefix update = do
+  previous <- getFormStore ctx prefix
+  let next = update previous
+  when (next /= previous) $ do
+    setFormStore ctx prefix next
+    markDirty ctx
+
 -- | Update a specific field's input in the form store.
 updateFieldInput :: Context -> Text -> Text -> FormInput -> IO ()
-updateFieldInput ctx prefix fieldKey inputVal = do
-  fss <- getFormStore ctx prefix
-  let inputs' = Map.insert fieldKey inputVal (fssInputs fss)
-      dirty'  = Set.insert fieldKey (fssDirty fss)
-      fss'    = fss { fssInputs = inputs', fssDirty = dirty' }
-  setFormStore ctx prefix fss'
-  markDirty ctx
+updateFieldInput ctx prefix fieldKey inputVal =
+  modifyFormStore ctx prefix $ \fss ->
+    fss
+      { fssInputs = Map.insert fieldKey inputVal (fssInputs fss)
+      , fssDirty = Set.insert fieldKey (fssDirty fss)
+      }
 
 -- | Mark a form as submitted.
 markFormSubmitted :: Context -> Text -> Bool -> IO ()
-markFormSubmitted ctx prefix isSubmitted = do
-  fss <- getFormStore ctx prefix
-  setFormStore ctx prefix (fss { fssSubmitted = isSubmitted })
-  markDirty ctx
+markFormSubmitted ctx prefix isSubmitted =
+  modifyFormStore ctx prefix (\fss -> fss {fssSubmitted = isSubmitted})
 
 -- | Check if a form has been submitted.
 isFormSubmitted :: Context -> Text -> IO Bool
@@ -165,9 +190,7 @@ isFormSubmitted ctx prefix = do
 
 -- | Reset form state back to empty.
 resetFormState :: Context -> Text -> IO ()
-resetFormState ctx prefix = do
-  setFormStore ctx prefix emptyFormStateStore
-  markDirty ctx
+resetFormState ctx prefix = modifyFormStore ctx prefix (const emptyFormStateStore)
 
 -- | Environment instance for 'FormUI' connecting ditto to nano-ui's context store.
 instance Environment FormUI FormInput where

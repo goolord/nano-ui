@@ -1,39 +1,31 @@
-{-# LANGUAGE MagicHash #-}
 {-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE UnboxedTuples #-}
 
 -- | Compile-time optimization invariants for nano-ui's hot-path coding
 -- patterns, checked by the inspection-testing plugin after the optimizer
 -- runs. The plugin can only inspect bindings defined in this module, so
--- each target is a faithful local copy of the library pattern it guards
--- (same definition style, same pragmas). If GHC stops optimizing the
--- pattern, the build fails.
+-- probes exercise the actual inline SIMD writers and representative private
+-- hashing patterns. If GHC stops optimizing them, the build fails.
 module Main
   ( main
   , localHashWidgetId
   , localFnv1a
   , localMixIntKey
   , localPokeVertexSIMD
+  , solidQuadProbe
+  , gradientQuadProbe
   ) where
 
 import Data.Bits (xor)
 import Data.Char (ord)
 import Data.Hashable (hash)
 import Data.IORef (IORef)
-import Data.Word (Word64, Word8)
-import GHC.Exts
-  ( Float (F#)
-  , Int (I#)
-  , packFloatX4#
-  , plusAddr#
-  , writeFloatOffAddrAsFloatX4#
-  )
-import GHC.IO (IO (IO))
-import GHC.Ptr (Ptr (..))
+import Data.Word (Word32, Word64, Word8)
+import Foreign.Ptr (Ptr)
 
 import Test.Inspection
 
 import NanoUI.Id (WidgetId (..))
+import NanoUI.SIMD qualified as SIMD
 
 main :: IO ()
 main = putStrLn "inspection invariants hold"
@@ -66,8 +58,7 @@ localMixIntKey (WidgetId base) k = WidgetId (mixFnv base (fromIntegral (hash k))
     mixFnv x y = (x `xor` y) * 1099511628211
 
 -- ---------------------------------------------------------------------------
--- Pattern 3: the SIMD vertex poke writes only through Addr#: no allocation.
--- (Copy of NanoUI.SIMD.pokeVertexSIMD.)
+-- Pattern 3: the actual SIMD vertex writer must inline without boxed tuples.
 -- ---------------------------------------------------------------------------
 
 localPokeVertexSIMD ::
@@ -82,14 +73,10 @@ localPokeVertexSIMD ::
   Float ->
   Float ->
   IO ()
-localPokeVertexSIMD (Ptr addr#) (I# byteOff#) (F# px#) (F# py#) (F# r#) (F# g#) (F# b#) (F# a#) (F# u#) (F# v#) = IO $ \s0 ->
-  case packFloatX4# (# px#, py#, r#, g# #) of
-    v0# ->
-      case packFloatX4# (# b#, a#, u#, v# #) of
-        v1# ->
-          case writeFloatOffAddrAsFloatX4# (plusAddr# addr# byteOff#) 0# v0# s0 of
-            s1 -> case writeFloatOffAddrAsFloatX4# (plusAddr# (plusAddr# addr# byteOff#) 16#) 0# v1# s1 of
-              s2 -> (# s2, () #)
+localPokeVertexSIMD ptr offset x y r g b a u v =
+  -- A real call-site offset prevents GHC from replacing this probe with a
+  -- top-level alias, which would make the type checks vacuous.
+  SIMD.pokeVertexSIMD ptr (offset + 32) x y r g b a u v
 
 -- ---------------------------------------------------------------------------
 -- Obligations
@@ -104,3 +91,25 @@ inspect $ hasNoTypeClasses 'localMixIntKey
 -- tuples/pairs may appear in the poke body.
 inspect $ 'localPokeVertexSIMD `hasNoType` ''(,)
 inspect $ 'localPokeVertexSIMD `hasNoType` ''Data.IORef.IORef
+inspect $ 'localPokeVertexSIMD `doesNotUse` 'SIMD.pokeVertexSIMD
+
+-- Inspect actual library calls, not copies of the quad writers. Dynamic
+-- offsets, coordinates, colors and indices prevent a constant-only probe from
+-- hiding boxing or a failure to inline the shared vertex writer.
+solidQuadProbe :: Ptr Word8 -> Ptr Word8 -> Int -> Float -> Word32 -> IO ()
+solidQuadProbe vp ip offset x base =
+  SIMD.pokeQuadSIMD vp offset ip offset x x x x 0 0 1 1 x x x 1 base
+
+gradientQuadProbe :: Ptr Word8 -> Ptr Word8 -> Int -> Float -> Word32 -> IO ()
+gradientQuadProbe vp ip offset x base =
+  SIMD.pokeQuadGradientSIMD vp offset ip offset x x x x 0 0
+    (x, 0, 0, 1) (0, x, 0, 1) (0, 0, x, 1) (x, x, x, 1) base
+
+inspect $ 'solidQuadProbe `doesNotUse` 'SIMD.pokeQuadSIMD
+inspect $ 'solidQuadProbe `doesNotUse` 'SIMD.pokeVertexSIMD
+inspect $ hasNoTypeClasses 'solidQuadProbe
+inspect $ 'solidQuadProbe `hasNoType` ''[]
+inspect $ 'gradientQuadProbe `doesNotUse` 'SIMD.pokeQuadGradientSIMD
+inspect $ 'gradientQuadProbe `doesNotUse` 'SIMD.pokeVertexSIMD
+inspect $ hasNoTypeClasses 'gradientQuadProbe
+inspect $ 'gradientQuadProbe `hasNoType` ''(,,,)

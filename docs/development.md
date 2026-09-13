@@ -11,6 +11,10 @@ cabal build all
 cabal test all --test-show-details=failures
 ```
 
+Warnings are enabled in each package's Cabal file. The workspace adds
+`-Werror` for the core, SDL, diagrams, and demo packages; published packages
+do not force downstream builds to treat compiler warnings as errors.
+
 For a shorter feedback cycle, select the affected suite:
 
 ```sh
@@ -65,11 +69,33 @@ Paths below are relative to `packages/`; Haskell modules live under `lib/`.
 - Form adapters let ditto own naming and validation. `Form.Field` owns stable
   widget scopes, input persistence, and conversion between values and widget
   indices. A labelled control must render its label inside the field scope.
+- Give independent forms distinct prefixes. `runNanoForm` binds the prefix
+  during evaluation and to the returned view, so delayed and nested views
+  retain their owner. `withFormPrefix` restores only the prefix slot; it must
+  never restore an old snapshot of the whole widget store.
+- Keep form mutation equality and redraw policy in `Form.Backend`. Unchanged
+  writes are no-ops. Submission history controls error visibility; the submit
+  runner returns a value only on a submission frame.
 - Preserve widget identity when changing layout or error views. Check several
   frames, including the appearance and disappearance of conditional content.
 - Controlled wrappers synchronize the upcoming widget's slot using
   `currentId`; the widget itself consumes it with `nextId`. Composite hooks
   need their own scope before assigning keys to their components.
+- Implement local state hooks through `NanoUI.Hooks`. Tab and radio selection
+  use the same integer hook, including its comparison against the latest store
+  when a setter runs more than once in a frame.
+- Table sizing is a pure calculation over rows encoded once with colonnade.
+  Use `gridColumnsLay` for keyed table rows, and `sortOn` for stable sorting
+  with cached keys in both directions.
+- Chart series and legends share resolved colors in `Plot.Chrome`. Legend
+  placement only determines coordinates; entry rendering has one path.
+- Layout's `textNodeMeasurer` resolves metrics and both measurement operations
+  together. Preserve the distinction between monospaced metrics and the host's
+  shaping-aware proportional measurement in every layout pass.
+- Compose SIMD quad writers from the inline vertex and index primitives.
+  `Cases.SIMD` checks the buffer layout and write boundaries; the inspection
+  suite checks that the actual library calls inline without retained tuple or
+  typeclass overhead.
 - Treat damage tracking as part of rendering correctness. A state change can
   require a follow-up frame even when there are no new host events.
 - Prefer the existing list/vector APIs and library combinators over parallel

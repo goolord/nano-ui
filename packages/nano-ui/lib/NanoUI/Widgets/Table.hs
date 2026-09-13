@@ -26,16 +26,15 @@ where
 import Colonnade (Colonnade, Headed (..), headed, headless)
 import Colonnade.Encode qualified as Encode
 import Control.Monad (void, when)
-import Control.Monad.ST (runST)
 import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
-import Data.List (sortBy)
+import Data.List (sortOn)
 import Data.Maybe (isJust, listToMaybe)
+import Data.Ord (Down (..))
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Read (decimal, signed)
 import Data.Vector qualified as V
-import Data.Vector.Mutable qualified as MV
 import Effectful (Eff, type (:>))
 import qualified Data.IntMap.Strict as IM
 import NanoUI.Context (Context (..), bumpMirror, getPrevRect, getScrollOffset2D, getStore, intKey, linkScrollAxes, markDirty, setStore)
@@ -52,6 +51,7 @@ import NanoUI.Widgets.Behavior (useReorder)
 import NanoUI.Widgets.Combinators
   ( buttonStyled
   , fitList
+  , gridColumnsLay
   , headerAtPoint
   , headerEdgeHit
   , keyedRowLay
@@ -82,12 +82,7 @@ tableStretchAny cfg = any (== ColStretch) (tableColSizes cfg)
 -- | True if the first n column sizes contain ColStretch.
 {-# INLINE tableStretchN #-}
 tableStretchN :: Int -> [ColSize] -> Bool
-tableStretchN n = go 0
- where
-  go !i _ | i >= n = False
-  go !_ (ColStretch : _) = True
-  go !i (_ : xs) = go (i + 1) xs
-  go !_ [] = False
+tableStretchN n = any (== ColStretch) . take n
 
 tableFillInner :: TableCfg -> Layout -> Bool
 tableFillInner cfg outer =
@@ -138,15 +133,6 @@ tableSplitPanes fillInner tableWid vWid hWid rowMinH frozenIdx unfrozenIdx pinne
      in if fill then fillW (fillH base) else base {layoutWidth = Fit, layoutMinW = minSum idxs}
   gridRowLay idxs =
     (if fillInner then fillW else id) (tight $ defaultLayout {layoutGap = 0, layoutMinW = minSum idxs})
-  renderGridRow rowLay colKeys colLays cells =
-    void $ row' rowLay $
-      let go _ [] [] [] = pure ()
-          go !first (k : ks) (clay : clays) (c : cs) = do
-            when (not first) $ void separator
-            void $ withKey k (column' clay c)
-            go False ks clays cs
-          go _ _ _ _ = pure ()
-       in go True colKeys colLays cells
   headerLine idxs renderHeader' =
     keyedRowLay (gridRowLay idxs) idxs $ \i ->
       column' (colBox i) (renderHeader' i)
@@ -158,7 +144,7 @@ tableSplitPanes fillInner tableWid vWid hWid rowMinH frozenIdx unfrozenIdx pinne
           withKey ("pin" :: Text, ri) $ do
             when (ri > 0) $ void separator
             let cell = renderCell ri r
-            renderGridRow rowLay idxs colLays [void (cell i) | i <- idxs]
+            gridColumnsLay rowLay idxs colLays [void (cell i) | i <- idxs]
       )
       (zip [0 ..] pinned)
   bodyBlock scrollWid virtualize idxs = do
@@ -195,7 +181,7 @@ tableSplitPanes fillInner tableWid vWid hWid rowMinH frozenIdx unfrozenIdx pinne
               when (rowIdx > 0) $ void separator
               let r = scrollRowsVec V.! rowIdx
                   cell = renderCell (rowIdx + freezeR) r
-              renderGridRow rowLay idxs colLays [void (cell colIdx) | colIdx <- idxs]
+              gridColumnsLay rowLay idxs colLays [void (cell colIdx) | colIdx <- idxs]
         )
         vis
       when (botH > 0) $ void (spacer Fit (Fixed botH))
@@ -340,11 +326,9 @@ sortRows cols sort rows =
   let n = V.length (Encode.getColonnade cols)
       idx = sortColIndex (clampSortCol n sort)
       enc = maybe (const T.empty) Encode.oneColonnadeEncode (Encode.getColonnade cols V.!? idx)
-      tagged = [(enc r, r) | r <- rows]
-      sorted = case sortColDir sort of
-        SortAsc -> sortBy (\(ka, _) (kb, _) -> compare ka kb) tagged
-        SortDesc -> sortBy (\(ka, _) (kb, _) -> compare kb ka) tagged
-   in map snd sorted
+   in case sortColDir sort of
+        SortAsc -> sortOn enc rows
+        SortDesc -> sortOn (Down . enc) rows
 
 columnCount :: Colonnade Headed row Text -> Int
 columnCount = V.length . Encode.getColonnade
@@ -361,44 +345,25 @@ isNumericCell txt =
           _ -> False
 
 columnMetrics :: Context -> Colonnade Headed row Text -> [row] -> ([Float], [Bool])
-columnMetrics ctx cols rows = runST $ do
+columnMetrics ctx cols rows =
   let fm = ctxFontMetrics ctx
       mono = ctxMonoFontMetrics ctx
       (ix, _) = tableCellInset fm
       cellPadX = 2 * ix
-      headerPadX = cellPadX
       hdrs = columnHeaders cols
-      numCols = length hdrs
-  if null rows || numCols == 0
-    then do
-      let widths = [textDisplayWidth fm (h <> tableSortReserve) + headerPadX | h <- hdrs]
-      pure (widths, replicate numCols False)
-    else do
-      let !encodedRows = V.fromList [Encode.row id cols r | r <- rows]
-      numMut <- MV.new numCols
-      V.forM_ (V.enumFromN 0 numCols) $ \c -> do
-        let !isNum = V.all (\v -> isNumericCell (v V.! c)) encodedRows
-        MV.write numMut c isNum
-      wMut <- MV.new numCols
-      let !hdrsVec = V.fromList hdrs
-      V.imapM_
-        ( \c hdr -> do
-            isNum <- MV.read numMut c
-            let !fontM = if isNum then mono else fm
-                !hdrW = textDisplayWidth fm (hdr <> tableSortReserve) + headerPadX
-                !maxCell =
-                  V.foldl'
-                    ( \acc v ->
-                        max acc (textDisplayWidth fontM (v V.! c) + cellPadX)
-                    )
-                    minColW
-                    encodedRows
-            MV.write wMut c (if hdrW > maxCell then hdrW else maxCell)
-        )
-        hdrsVec
-      widths <- V.toList <$> V.freeze wMut
-      numeric <- V.toList <$> V.freeze numMut
-      pure (widths, numeric)
+      -- Encode each row once, sharing it across column classification and sizing.
+      encodedRows = V.fromList [Encode.row id cols r | r <- rows]
+      measureColumn c hdr =
+        let hdrW = textDisplayWidth fm (hdr <> tableSortReserve) + cellPadX
+            isNum = not (null rows) && V.all (isNumericCell . (V.! c)) encodedRows
+            font = if isNum then mono else fm
+            cellW =
+              V.foldl'
+                (\w row -> max w (textDisplayWidth font (row V.! c) + cellPadX))
+                minColW
+                encodedRows
+         in (if null rows then hdrW else max hdrW cellW, isNum)
+   in unzip (zipWith measureColumn [0 ..] hdrs)
 
 nextSortCol :: Int -> SortCol -> Int -> SortCol
 nextSortCol n cur clicked =

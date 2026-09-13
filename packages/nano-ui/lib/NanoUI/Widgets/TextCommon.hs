@@ -45,21 +45,14 @@ textWordBounds :: Text -> Int -> (Int, Int)
 textWordBounds text raw
   | T.null text = (0, 0)
   | otherwise =
-      let n = T.length text
-          i = max 0 (min (n - 1) raw)
-          cls = textCharClass (T.index text i)
-          lo = goLeft cls i
-          hi = goRight cls n i + 1
-       in (lo, hi)
-  where
-    goLeft cls i
-      | i <= 0 = 0
-      | textCharClass (T.index text (i - 1)) == cls = goLeft cls (i - 1)
-      | otherwise = i
-    goRight cls n i
-      | i + 1 >= n = i
-      | textCharClass (T.index text (i + 1)) == cls = goRight cls n (i + 1)
-      | otherwise = i
+      -- Split once: repeatedly indexing UTF-8 text makes long-word selection
+      -- quadratic. The clamped index guarantees a non-empty suffix.
+      let i = max 0 (min (T.length text - 1) raw)
+          (before, after) = T.splitAt i text
+          sameClass = (== textCharClass (T.head after)) . textCharClass
+       in ( i - T.length (T.takeWhileEnd sameClass before)
+          , i + T.length (T.takeWhile sameClass after)
+          )
 
 -- | Calculate selection span for single/double/triple click.
 textSelectionForClick :: Text -> Int -> Int -> (Int, Int)
@@ -89,7 +82,6 @@ selectionCaretGeom :: Float -> Float -> Float -> Float -> (Float, Float, Float)
 selectionCaretGeom originX originY pw lineH =
   (originX + pw, originY + 1, max 4 (lineH - 2))
 
--- | Test if a character is part of a standard Ctrl shortcut (Ctrl+A, Ctrl+C, Ctrl+X, Ctrl+V).
 -- | Ctrl combinations that are editor/app shortcuts, never literal text. Beyond
 -- the clipboard combos this lists the zoom keys the SDL backend forwards as
 -- ctrl text (`=`, `+`, `-`, `0`), so focused fields do not insert them.
@@ -100,10 +92,10 @@ isCtrlCombo c ch = c && T.elem ch "aAcCxXvV=+-0\x01\x03\x16\x18"
 -- | Dispatch standard Ctrl keystrokes (A=selectAll, C=copy, X=cut, V=paste).
 dispatchCtrlChar :: Monad m => (a -> m a) -> (a -> m ()) -> (a -> m a) -> (a -> m a) -> a -> Char -> m a
 dispatchCtrlChar onSelectAll onCopy onCut onPaste s ch
-  | ch `elem` ('a' : 'A' : '\x01' : []) = onSelectAll s
-  | ch `elem` ('c' : 'C' : '\ETX' : []) = onCopy s >> pure s
-  | ch `elem` ('x' : 'X' : '\x18' : []) = onCut s
-  | ch `elem` ('v' : 'V' : '\x16' : []) = onPaste s
+  | T.elem ch "aA\x01" = onSelectAll s
+  | T.elem ch "cC\ETX" = onCopy s >> pure s
+  | T.elem ch "xX\x18" = onCut s
+  | T.elem ch "vV\x16" = onPaste s
   | otherwise = pure s
 
 -- | Check if a context menu action is enabled (0=Cut, 1=Copy, 2=Paste, 3=Select All).
@@ -138,18 +130,9 @@ copyBufferText ctx anc buf = do
 -- | Cut buffer text to clipboard and delete the range, returning the updated buffer.
 cutBufferText :: Context -> TB.Cursor -> TB.TextBuffer -> IO TB.TextBuffer
 cutBufferText ctx anc buf = do
+  copyBufferText ctx anc buf
   let cur = TB.getCursor buf
-  if anc /= cur
-    then do
-      let txt = TB.selectedText anc cur buf
-      when (not (T.null txt)) $
-        void (ctxClipboardSet ctx txt)
-      pure (TB.deleteRange anc cur buf)
-    else do
-      let txt = TB.toText buf
-      when (not (T.null txt)) $
-        void (ctxClipboardSet ctx txt)
-      pure (TB.fromText T.empty)
+  pure (if anc /= cur then TB.deleteRange anc cur buf else TB.empty)
 
 -- | Paste text from clipboard into buffer at selection or cursor.
 pasteBufferText :: Context -> Bool -> TB.Cursor -> TB.TextBuffer -> IO (Maybe TB.TextBuffer)

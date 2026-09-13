@@ -160,15 +160,10 @@ deleteSelection state =
 
 insertWithSelection :: Char -> TextAreaState -> TextAreaState
 insertWithSelection ch state =
-  case selectionRangeOf state of
-    Nothing ->
-      let buf' = TB.insertChar ch (buffer state)
-          cur = TB.getCursor buf'
-       in ensureCaretVisible state {buffer = buf', selectionAnchor = cur}
-    Just (lo, hi) ->
-      let buf' = TB.replaceRange (T.singleton ch) lo hi (buffer state)
-          cur = TB.getCursor buf'
-       in ensureCaretVisible state {buffer = buf', selectionAnchor = cur}
+  let buf' = case selectionRangeOf state of
+        Nothing -> TB.insertChar ch (buffer state)
+        Just (lo, hi) -> TB.replaceRange (T.singleton ch) lo hi (buffer state)
+   in ensureCaretVisible state {buffer = buf', selectionAnchor = TB.getCursor buf'}
 
 handleTextAreaEvent :: KeyInput -> Modifiers -> TextAreaState -> TextAreaState
 handleTextAreaEvent key mods state =
@@ -178,16 +173,7 @@ handleTextAreaEvent key mods state =
       n = pageLineCount state
       state' = case (key, ctrl, alt) of
         (KeyChar c, False, False) -> insertWithSelection c state
-        (KeyEnter, False, False) ->
-          case selectionRangeOf state of
-            Nothing ->
-              let buf' = TB.breakLine (buffer state)
-                  cur = TB.getCursor buf'
-               in ensureCaretVisible state {buffer = buf', selectionAnchor = cur}
-            Just (lo, hi) ->
-              let buf' = TB.replaceRange "\n" lo hi (buffer state)
-                  cur = TB.getCursor buf'
-               in ensureCaretVisible state {buffer = buf', selectionAnchor = cur}
+        (KeyEnter, False, False) -> insertWithSelection '\n' state
         (KeyBackspace, False, False) ->
           case selectionRangeOf state of
             Just _ -> deleteSelection state

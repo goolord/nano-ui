@@ -4,6 +4,7 @@ module Main (main) where
 
 import Test.Hspec
 import qualified Data.Text as T
+import NanoUI.Frame.TextEdit (textWordBounds)
 import NanoUI.Widgets.TextArea as TA
 import NanoUI.Widgets.TextBuffer as TB
 
@@ -36,6 +37,18 @@ spec = do
       TB.getCursor gone `shouldBe` TB.Cursor 0 0
       TB.toText mid `shouldBe` "ho"
       TB.getCursor mid `shouldBe` TB.Cursor 0 1
+
+    it "replaces a backwards selection across Unicode lines and places the caret after the insertion" $ do
+      let b = TB.fromText "αβ\n猫犬\nend"
+          start = TB.Cursor 0 1
+          end = TB.Cursor 1 1
+          replaced = TB.replaceRange "🙂\nλ" end start b
+          deleted = TB.deleteRange end start b
+      TB.selectedText end start b `shouldBe` "β\n猫"
+      TB.toText replaced `shouldBe` "α🙂\nλ犬\nend"
+      TB.getCursor replaced `shouldBe` TB.Cursor 1 1
+      TB.toText deleted `shouldBe` "α犬\nend"
+      TB.getCursor deleted `shouldBe` start
 
     it "roundtrips a trailing newline through fromText/toText" $ do
       TB.toText (TB.fromText "a\n") `shouldBe` "a\n"
@@ -81,6 +94,20 @@ spec = do
       -- Move up restores the preferred column too
       TB.getCursor (TB.moveUp bDown2) `shouldBe` TB.Cursor 1 2
 
+    it "clamps vertical motion at document boundaries without losing the preferred column" $ do
+      let top = TB.withCursor (TB.Cursor 0 3) (TB.fromText "abcd\nx\n猫猫猫猫")
+          bottom = TB.moveDown (TB.moveDown top)
+      TB.getCursor (TB.moveUp top) `shouldBe` TB.Cursor 0 3
+      TB.getCursor bottom `shouldBe` TB.Cursor 2 3
+      TB.getCursor (TB.moveDown bottom) `shouldBe` TB.Cursor 2 3
+      TB.getCursor (TB.moveUp (TB.moveUp bottom)) `shouldBe` TB.Cursor 0 3
+      TB.getCursor (TB.moveDown TB.empty) `shouldBe` TB.Cursor 0 0
+
+    it "finds the document end independently of the current cursor" $ do
+      TB.documentEnd (TB.fromText "α\n猫🙂") `shouldBe` TB.Cursor 1 2
+      TB.documentEnd (TB.fromText "α\n") `shouldBe` TB.Cursor 1 0
+      TB.documentEnd TB.empty `shouldBe` TB.Cursor 0 0
+
     it "deletes words backward properly" $ do
       let b = TB.deletePrevWord (TB.moveToEOL (TB.fromText "foo bar"))
       TB.toText b `shouldBe` "foo "
@@ -108,6 +135,18 @@ spec = do
       TB.toText b `shouldBe` ""
 
   describe "NanoUI.Widgets.TextArea" $ do
+    it "typing and Enter replace a backwards multiline selection and collapse its anchor" $ do
+      let selected = TA.setTextAreaSelection (TB.Cursor 1 1) (TB.Cursor 0 1) $
+            TA.initTextAreaState "abc\ndef"
+          typed = TA.handleTextAreaEvent (TA.KeyChar 'λ') noMods selected
+          entered = TA.handleTextAreaEvent TA.KeyEnter noMods selected
+      TB.toText (TA.buffer typed) `shouldBe` "aλef"
+      TB.getCursor (TA.buffer typed) `shouldBe` TB.Cursor 0 2
+      TA.selectionAnchor typed `shouldBe` TB.Cursor 0 2
+      TB.toText (TA.buffer entered) `shouldBe` "a\nef"
+      TB.getCursor (TA.buffer entered) `shouldBe` TB.Cursor 1 0
+      TA.selectionAnchor entered `shouldBe` TB.Cursor 1 0
+
     it "Ctrl+Left/Right move by word" $ do
       let s0 = TA.initTextAreaState "foo bar"
           sRight = TA.handleTextAreaEvent TA.KeyRight ctrlMods s0
@@ -145,3 +184,15 @@ spec = do
       TA.selectionAnchor fromLower `shouldBe` TB.Cursor 0 0
       TB.getCursor (TA.buffer fromUpper) `shouldBe` TB.Cursor 0 5
       TA.selectionAnchor fromUpper `shouldBe` TB.Cursor 0 0
+
+  describe "text word selection" $ do
+    it "groups Unicode words, whitespace and punctuation by character index" $ do
+      let text = "αβ_猫  🙂!?"
+      map (textWordBounds text) [0 .. 8] `shouldBe`
+        replicate 4 (0, 4) ++ replicate 2 (4, 6) ++ replicate 3 (6, 9)
+    it "clamps clicks outside the text and handles empty text" $ do
+      textWordBounds "" 10 `shouldBe` (0, 0)
+      textWordBounds "one two" (-10) `shouldBe` (0, 3)
+      textWordBounds "one two" 100 `shouldBe` (4, 7)
+    it "handles a long Unicode word" $ do
+      textWordBounds (T.replicate 10000 "猫") 5000 `shouldBe` (0, 10000)

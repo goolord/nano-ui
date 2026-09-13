@@ -21,13 +21,11 @@ import Control.Monad (when)
 import Data.Hashable (Hashable, hash)
 import Data.IORef (readIORef)
 import Data.List (find)
-import Data.Maybe (fromMaybe)
 import Effectful (Eff, type (:>))
 import qualified Data.IntMap.Strict as IM
 import qualified Data.IntSet as IS
 import NanoUI.Context
   ( Context (..)
-  , bumpMirror
   , getFocusId
   , getStore
   , intKey
@@ -40,6 +38,7 @@ import NanoUI.Context
   , slotDragW
   , slotKey
   )
+import NanoUI.Hooks (useInt)
 import NanoUI.Id (IdContext (..), WidgetId (..), enterKeyed, hashWidgetId, mix64)
 import NanoUI.Input
   ( Input (..)
@@ -156,24 +155,26 @@ useReorder order items = do
   store <- uiIO (getStore ctx)
   let from0 = IM.findWithDefault (-1) dragK (storeInt store)
       startX = IM.findWithDefault 0 (slotKey slotDragW key) (storeFloat store)
-      fromPress = if press then maybe (-1) fst hit else from0
-      dragging =
+      dragging = if press then maybe (-1) fst hit else from0
+      nextDrag =
         if release || not down
           then -1
-          else fromPress
-      moved = dragging >= 0 && abs (v2X mouse - startX) > dragThresholdPx
+          else dragging
+      -- Resolve the drop using the held source before clearing it on release.
+      moved =
+        not press && dragging >= 0 && abs (v2X mouse - startX) > dragThresholdPx
       dropTo = if moved then fmap fst hit else Nothing
       nextOrder =
-        case (release, moved, dropTo) of
-          (True, True, Just toCol) | dragging >= 0 -> moveItem order dragging toCol
+        case dropTo of
+          Just toCol | release -> moveItem order dragging toCol
           _ -> order
-  when (dragging /= from0 || (press && dragging >= 0)) $
+  when (nextDrag /= from0 || (press && nextDrag >= 0)) $
     uiIO $ do
       st <- getStore ctx
       setStore
         ctx
         ( st
-            { storeInt = IM.insert dragK dragging (storeInt st)
+            { storeInt = IM.insert dragK nextDrag (storeInt st)
             , storeFloat =
                 IM.insert
                   (slotKey slotDragW key)
@@ -181,35 +182,19 @@ useReorder order items = do
                   (storeFloat st)
             }
         )
-  pure (nextOrder, if dragging >= 0 then Just dragging else Nothing)
+  pure (nextOrder, if nextDrag >= 0 then Just nextDrag else Nothing)
 
 moveItem :: [Int] -> Int -> Int -> [Int]
 moveItem xs from to
   | from == to = xs
   | otherwise =
       let without = filter (/= from) xs
-          (pre, post) = splitAt (fromMaybe (length without) (indexOf to without)) without
+          (pre, post) = break (== to) without
        in pre ++ from : post
-
-indexOf :: Eq a => a -> [a] -> Maybe Int
-indexOf x = fmap fst . find ((== x) . snd) . zip [0 ..]
 
 -- | Discrete Int selection. Frame re-runs UI when the value changes.
 useSelection :: (Ui :> es) => Int -> Eff es (Int, Int -> Eff es ())
-useSelection initial = do
-  wid <- nextId
-  ctx <- askContext
-  let key = intKey wid
-      get = uiIO $ do
-        st <- getStore ctx
-        pure (IM.findWithDefault initial key (storeInt st))
-      set v = uiIO $ do
-        st <- getStore ctx
-        let prev = IM.findWithDefault initial key (storeInt st)
-        when (prev /= v) $
-          setStore ctx (bumpMirror (st {storeInt = IM.insert key v (storeInt st)}))
-  cur <- get
-  pure (cur, \v -> when (v /= cur) (set v))
+useSelection = useInt
 
 data KeyNav = KeyNav
   { knUp :: !Bool

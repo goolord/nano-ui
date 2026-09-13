@@ -45,7 +45,6 @@ module NanoUI.Widgets.TextBuffer
   ) where
 
 import qualified Data.Text as T
-import NanoUI.Types (clamp)
 import NanoUI.Font (tabSentinelChar)
 import qualified Data.Text.Zipper as TZ
 import qualified Data.Text.Zipper.Generic.Words as TZW
@@ -141,13 +140,8 @@ moveDown = moveByRow 1
 moveByRow :: Int -> TextBuffer -> TextBuffer
 moveByRow d (TextBuffer z goal) =
   let (row, _) = TZ.cursorPosition z
-      lineTexts = TZ.getText z
-      lastRow = max 0 (length lineTexts - 1)
-      newRow = clamp 0 lastRow (row + d)
-      lineText = lineTexts !! newRow
-      newCol = min goal (T.length lineText)
-      z' = TZ.moveCursor (newRow, newCol) z
-  in TextBuffer z' goal
+      z' = TZ.moveCursorClosest (row + d, goal) z
+   in TextBuffer z' goal
 
 moveToBOL :: TextBuffer -> TextBuffer
 moveToBOL = withZipper TZ.gotoBOL
@@ -227,13 +221,7 @@ cursorOffset buf (Cursor row col) =
    in sum (map ((+ 1) . T.length) (take row lineTexts)) + col
 
 deleteRange :: Cursor -> Cursor -> TextBuffer -> TextBuffer
-deleteRange a b buf =
-  let text = toText buf
-      (lo, hi) = selectionRange a b
-      loOff = cursorOffset buf lo
-      hiOff = cursorOffset buf hi
-      newBuf = fromText (T.take loOff text <> T.drop hiOff text)
-   in withCursor (offsetToCursor newBuf loOff) newBuf
+deleteRange = replaceRange T.empty
 
 replaceRange :: T.Text -> Cursor -> Cursor -> TextBuffer -> TextBuffer
 replaceRange insert a b buf =
@@ -258,11 +246,4 @@ offsetToCursor buf off =
    in go 0 lineTexts 0
 
 documentEnd :: TextBuffer -> Cursor
-documentEnd buf =
-  let lineTexts = toLines buf
-      r = max 0 (length lineTexts - 1)
-      c =
-        if null lineTexts
-          then 0
-          else T.length (lineTexts !! r)
-   in Cursor r c
+documentEnd = getCursor . moveToBottom

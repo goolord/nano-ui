@@ -137,6 +137,43 @@ import NanoUI.Frame.Scroll.Geometry
 
 type FontResolver = Float -> FontWeight -> FontStyle -> FontVariant -> IO (FontMetrics, Text -> IO (Float, Float))
 
+-- Keep font selection and single-line/wrapped measurement together so every
+-- layout pass uses the same policy. Monospaced text uses its metrics directly;
+-- proportional text uses the host's shaping-aware measurement callback.
+data TextMeasurer = TextMeasurer
+  { tmMetrics :: !FontMetrics
+  , tmLine    :: Text -> IO (Float, Float)
+  , tmWrapped :: Text -> Float -> IO (Float, Float)
+  }
+
+{-# INLINE textNodeMeasurer #-}
+textNodeMeasurer ::
+  NodeArena
+  -> FontMetrics
+  -> FontMetrics
+  -> (Text -> IO (Float, Float))
+  -> FontResolver
+  -> NodeIdx
+  -> IO TextMeasurer
+textNodeMeasurer na fm monoFm measure resolveFont idx = do
+  si <- getStyleIdx na idx
+  size <- getNodeFontSize na idx
+  let variant = textNodeFontVariant si
+      weight = textNodeFontWeight si
+      style = textNodeFontStyle si
+  (metrics, measureLine) <-
+    if size <= 0 && weight == WeightNormal && style == FontStyleNormal
+      then pure (if variant == FontMono then monoFm else fm, measure)
+      else resolveFont size weight style variant
+  pure $
+    if variant == FontMono
+      then
+        TextMeasurer metrics (pure . measureText metrics)
+          (\text width -> pure (measureTextWrapped metrics text width))
+      else
+        TextMeasurer metrics measureLine
+          (measureTextWrappedIO (fmap fst . measureLine) metrics)
+
 defaultFontResolver :: FontMetrics -> FontMetrics -> (Text -> IO (Float, Float)) -> FontResolver
 defaultFontResolver fm monoFm measure sz _w _st var =
   let baseFm = if var == FontMono then monoFm else fm
@@ -185,7 +222,7 @@ solveLayoutWithResolver na fm monoFm measure resolveFont lookupMeasure rootW roo
   withArenaArraysSnap na $ do
     a <- arenaArrays na
     count <- arenaCount na
-    whenPositive count $ do
+    when (count > 0) $ do
       measurePass na fm monoFm measure resolveFont lookupMeasure
       positionNodeA a na fm monoFm measure resolveFont 0 0 0 0 rootW rootH
       quantizeResultsA a count (fmSnapScale fm)
@@ -234,9 +271,6 @@ measurePass na fm monoFm measure resolveFont lookupMeasure = do
             measureNode a na fm monoFm measure resolveFont lookupMeasure idx
             go (idx - 1)
   go (count - 1)
-
-whenPositive :: Int -> IO () -> IO ()
-whenPositive n act = if n > 0 then act else pure ()
 
 measureNode ::
   NodeArenaArrays ->
@@ -321,22 +355,10 @@ measureTextNode na fm monoFm measure resolveFont idx = do
   (wTag, _) <- getWidthSizing na idx
   (hTag, hVal) <- getHeightSizing na idx
   parentAssigns <- growParent na idx
-  si <- getStyleIdx na idx
-  fontSizeVal <- getNodeFontSize na idx
-  let fvar    = textNodeFontVariant si
-      fweight = textNodeFontWeight si
-      fstyle  = textNodeFontStyle si
-  (textFm, measureFn) <-
-    if fontSizeVal <= 0 && fweight == WeightNormal && fstyle == FontStyleNormal
-      then if fvar == FontMono
-        then pure (monoFm, \t -> pure (measureText monoFm t))
-        else pure (fm, measure)
-      else resolveFont fontSizeVal fweight fstyle fvar
+  TextMeasurer {tmMetrics = textFm, tmLine = measureLine, tmWrapped = measureWrapped} <-
+    textNodeMeasurer na fm monoFm measure resolveFont idx
   txt <- getText na idx
-  (tw0, th0) <-
-    if fvar == FontMono
-      then pure (measureText textFm txt)
-      else measureFn txt
+  (tw0, th0) <- measureLine txt
   isRowChild <- parentIsRow na idx
   effMaxW <-
     if maxW < 1e8
@@ -350,10 +372,7 @@ measureTextNode na fm monoFm measure resolveFont idx = do
   (tw, th) <-
     if hasNewlines || (canWrap && effMaxW + 0.5 < tw0)
       then
-        memoWrapped na idx wrapW $
-          if fvar == FontMono
-            then pure (measureTextWrapped textFm plain wrapW)
-            else measureTextWrappedIO (\t -> fst <$> measureFn t) textFm plain wrapW
+        memoWrapped na idx wrapW (measureWrapped plain wrapW)
       else pure (tw0, th0)
   let reportedW =
         if wTag == SizingGrow && parentAssigns
@@ -392,11 +411,10 @@ measureSpacer :: NodeArena -> FontMetrics -> NodeIdx -> IO ()
 measureSpacer na _fm idx = do
   (wTag, wVal) <- getWidthSizing na idx
   (hTag, hVal) <- getHeightSizing na idx
-  -- Pixel hosts use 8px for non-Fixed spacers. Only Fit spacers shrink to 0.
+  -- Non-fixed spacers reserve the default 8px extent.
   let along tag val =
         case tag of
           SizingFixed -> val
-          SizingFit -> 8
           _ -> 8
       w = along wTag wVal
       h = along hTag hVal
@@ -774,32 +792,17 @@ recomputeFitHeightAtWidthGo na fm monoFm measure resolveFont idx availW = do
           if T.null txt
             then pure (clamp minH maxH 0)
             else do
-              si <- getStyleIdx na idx
-              fontSizeVal <- getNodeFontSize na idx
-              let fvar    = textNodeFontVariant si
-                  fweight = textNodeFontWeight si
-                  fstyle  = textNodeFontStyle si
-              (textFm, measureFn) <-
-                if fontSizeVal <= 0 && fweight == WeightNormal && fstyle == FontStyleNormal
-                  then if fvar == FontMono
-                    then pure (monoFm, \t -> pure (measureText monoFm t))
-                    else pure (fm, measure)
-                  else resolveFont fontSizeVal fweight fstyle fvar
+              TextMeasurer {tmMetrics = textFm, tmLine = measureLine, tmWrapped = measureWrapped} <-
+                textNodeMeasurer na fm monoFm measure resolveFont idx
               let (ix, _) = labelContentInset textFm
                   wrapW = max 0 (effW' - 2 * ix)
-              (tw0, _) <-
-                if fvar == FontMono
-                  then pure (measureText textFm txt)
-                  else measureFn txt
+              (tw0, _) <- measureLine txt
               let hasNewlines = T.any (== '\n') txt
                   canWrap = wTag /= SizingFit && not isRowChild && wrapW + 0.5 < tw0 && wrapW > 0
               if hasNewlines || canWrap
                 then do
                   (_, th) <-
-                    memoWrapped na idx wrapW $
-                      if fvar == FontMono
-                        then pure (measureTextWrapped textFm txt wrapW)
-                        else measureTextWrappedIO (\t -> fst <$> measureFn t) textFm txt wrapW
+                    memoWrapped na idx wrapW (measureWrapped txt wrapW)
                   pure (clamp minH maxH (max (layoutLineHeight textFm) th))
                 else pure oldH
       | otherwise -> pure oldH
@@ -836,10 +839,7 @@ recomputeFitHeightAtWidthGo na fm monoFm measure resolveFont idx availW = do
                                   _ -> innerW
                                 subW' = if subMaxW < 1e8 then min subW subMaxW else subW
                             subH <- recomputeFitHeightAtWidth na fm monoFm measure resolveFont ci subW'
-                            let (count', contentH') = case dir of
-                                  DirColumn -> (count + 1, contentH + subH)
-                                  DirRow -> (count + 1, max contentH subH)
-                            go ns count' contentH'
+                            go ns (count + 1) (contentH + subH)
               contentH <- go fc (0 :: Int) (0 :: Float)
               pure (clamp minH maxH (contentH + padT pad + padB pad))
 
@@ -959,32 +959,17 @@ positionNodeA a na fm monoFm measure resolveFont depth idx x y availW availH = d
         if T.null txt
           then pure (clamp minH maxH 0)
           else do
-            si <- getStyleIdx na idx
-            fontSizeVal <- getNodeFontSize na idx
-            let fvar    = textNodeFontVariant si
-                fweight = textNodeFontWeight si
-                fstyle  = textNodeFontStyle si
-            (textFm, measureFn) <-
-              if fontSizeVal <= 0 && fweight == WeightNormal && fstyle == FontStyleNormal
-                then if fvar == FontMono
-                  then pure (monoFm, \t -> pure (measureText monoFm t))
-                  else pure (fm, measure)
-                else resolveFont fontSizeVal fweight fstyle fvar
+            TextMeasurer {tmMetrics = textFm, tmLine = measureLine, tmWrapped = measureWrapped} <-
+              textNodeMeasurer na fm monoFm measure resolveFont idx
             let (ix, _) = labelContentInset textFm
                 wrapW = max 0 (w - 2 * ix)
-            (tw0, _) <-
-              if fvar == FontMono
-                then pure (measureText textFm txt)
-                else measureFn txt
+            (tw0, _) <- measureLine txt
             let hasNewlines = T.any (== '\n') txt
                 canWrap = wTag /= SizingFit && not isRowChild
             if hasNewlines || (canWrap && wrapW + 0.5 < tw0 && wrapW > 0)
               then do
                 (_, th) <-
-                  memoWrapped na idx wrapW $
-                    if fvar == FontMono
-                      then pure (measureTextWrapped textFm txt wrapW)
-                      else measureTextWrappedIO (\t -> fst <$> measureFn t) textFm txt wrapW
+                  memoWrapped na idx wrapW (measureWrapped txt wrapW)
                 pure (clamp minH maxH (max (layoutLineHeight textFm) th))
               else pure (clamp minH maxH (resolveSize hTag hVal intrinsicH availH minH maxH))
       else
@@ -1359,7 +1344,7 @@ positionGrid ::
   IO ()
 positionGrid a na fm monoFm measure resolveFont depth parent gCols minColW gap cx cy cw ch = do
   n <- loadChildrenScratchFromParent na parent cw ch
-  whenPositive n $ do
+  when (n > 0) $ do
     idxArr <- readIORef (naScratchIdx na)
     hArr <- readIORef (naScratchCross na)
     let cols =

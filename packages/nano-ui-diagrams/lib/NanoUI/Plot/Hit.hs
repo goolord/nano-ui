@@ -8,13 +8,15 @@ module NanoUI.Plot.Hit
   , nearestPlotHover
   ) where
 
+import Data.List (minimumBy)
 import Data.Maybe (fromMaybe)
+import Data.Ord (comparing)
 import Diagrams.Core (QDiagram)
 import Diagrams.Prelude qualified as Dia
 import NanoUI (FontMetrics, Rect (..), Theme (..), V2, rectContains, v2X, v2Y)
 import NanoUI.Diagrams.Backend (NanoUIBackend, uniformHeight)
 import NanoUI.Diagrams.Widget (PlotStyle (..))
-import NanoUI.Plot.Chrome (chartDiagram, chartXDomain, chartYDomain, seriesPoints)
+import NanoUI.Plot.Chrome (chartDiagram, seriesDomains, seriesPoints)
 import NanoUI.Plot.Scale (plotToDomain)
 import NanoUI.Plot.Types (Chart (..), PlotHover (..), Range (..))
 import qualified Data.Vector as V
@@ -106,40 +108,24 @@ diagramPointAtWithExtents dw dh (x0, x1) (y0, y1) w h d px py
                in Just (gx, gy)
 
 nearestPlotHover :: Chart -> Double -> Double -> Maybe PlotHover
-nearestPlotHover chart gx gy =
-  case chart of
-    Chart {chartSeries = []} -> Nothing
-    _ | gx < 0 || gx > 1 || gy < 0 || gy > 1 -> Nothing
-    Chart {chartSeries = series} ->
-      let xDom = chartXDomain chart
-          yDom = chartYDomain chart
-          dataX = plotToDomain xDom (Range 0 1) gx
-          dataY = plotToDomain yDom (Range 0 1) gy
-          candidates =
-            [ ( si
-              , ptIdx
-              , x
-              , y
-              , (x - dataX) * (x - dataX) + (y - dataY) * (y - dataY)
-              )
-            | (si, s) <- zip [0 ..] series
-            , (ptIdx, (x, y)) <- zip [0 ..] (V.toList (seriesPoints chart s))
-            ]
-       in case candidates of
-            [] -> Nothing
-            _ ->
-              let (si, ptIdx, x, y, _) = minimumBy (\(_, _, _, _, d0) (_, _, _, _, d1) -> compare d0 d1) candidates
-               in Just
-                    PlotHover
-                      { hoverDataX = x
-                      , hoverDataY = y
-                      , hoverSeriesIdx = si
-                      , hoverPointIdx = ptIdx
-                      }
-
-minimumBy :: (a -> a -> Ordering) -> [a] -> a
-minimumBy _ [] = error "minimumBy: empty list"
-minimumBy _ [x] = x
-minimumBy cmp (x : xs) =
-  let y = minimumBy cmp xs
-   in if cmp x y == GT then y else x
+nearestPlotHover chart gx gy
+  | gx < 0 || gx > 1 || gy < 0 || gy > 1 = Nothing
+  | otherwise = case candidates of
+      [] -> Nothing
+      _ -> Just (snd (minimumBy (comparing fst) candidates))
+ where
+  (xDom, yDom) = seriesDomains chart
+  dataX = plotToDomain xDom (Range 0 1) gx
+  dataY = plotToDomain yDom (Range 0 1) gy
+  candidates =
+    [ ( (x - dataX) * (x - dataX) + (y - dataY) * (y - dataY)
+      , PlotHover
+          { hoverDataX = x
+          , hoverDataY = y
+          , hoverSeriesIdx = si
+          , hoverPointIdx = ptIdx
+          }
+      )
+    | (si, s) <- zip [0 ..] (chartSeries chart)
+    , (ptIdx, (x, y)) <- zip [0 ..] (V.toList (seriesPoints chart s))
+    ]

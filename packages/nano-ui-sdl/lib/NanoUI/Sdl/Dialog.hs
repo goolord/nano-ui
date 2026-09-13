@@ -39,9 +39,9 @@ import Effectful (Eff, type (:>))
 import Foreign.C.String (CString, newCString, peekCString)
 import Foreign.C.Types (CChar)
 import Foreign.Marshal.Alloc (free)
-import Foreign.Marshal.Array (mallocArray)
+import Foreign.Marshal.Array (mallocArray, peekArray0)
 import Foreign.Ptr (FunPtr, Ptr, castFunPtr, castPtr, nullPtr)
-import Foreign.Storable (peekElemOff, pokeElemOff)
+import Foreign.Storable (pokeElemOff)
 import NanoUI.Sdl.Dialog.Types
   ( DialogCallback
   , DialogCallbackFunPtr
@@ -160,29 +160,17 @@ cancelFileDialog env (FileDialogId did) =
 -- | Open-file dialog, usable from within 'NanoUI' widget code. Returns
 -- 'Nothing' when there is no SDL host to launch a dialog.
 askOpenFileDialog :: Ui :> es => FileDialogOptions -> Eff es (Maybe FileDialogId)
-askOpenFileDialog opts = do
-  menv <- askHost
-  case menv of
-    Nothing -> pure Nothing
-    Just env -> uiIO (Just <$> openFileDialog env opts)
+askOpenFileDialog opts = askHost >>= traverse (uiIO . (`openFileDialog` opts))
 
 -- | Save-file dialog, usable from within 'NanoUI' widget code. Returns
 -- 'Nothing' when there is no SDL host to launch a dialog.
 askSaveFileDialog :: Ui :> es => FileDialogOptions -> Eff es (Maybe FileDialogId)
-askSaveFileDialog opts = do
-  menv <- askHost
-  case menv of
-    Nothing -> pure Nothing
-    Just env -> uiIO (Just <$> saveFileDialog env opts)
+askSaveFileDialog opts = askHost >>= traverse (uiIO . (`saveFileDialog` opts))
 
 -- | Folder dialog, usable from within 'NanoUI' widget code. Returns
 -- 'Nothing' when there is no SDL host to launch a dialog.
 askOpenFolderDialog :: Ui :> es => FileDialogOptions -> Eff es (Maybe FileDialogId)
-askOpenFolderDialog opts = do
-  menv <- askHost
-  case menv of
-    Nothing -> pure Nothing
-    Just env -> uiIO (Just <$> openFolderDialog env opts)
+askOpenFolderDialog opts = askHost >>= traverse (uiIO . (`openFolderDialog` opts))
 
 -- | Poll a dialog from within 'NanoUI' widget code.
 pollFileDialogUi :: Ui :> es => FileDialogId -> Eff es FileDialogResult
@@ -264,20 +252,9 @@ onResult did st filterStrs filtersPtr defaultStr _userdata filelistRaw _filterId
 -- A null list pointer means SDL hit an error; a null first entry means the
 -- user canceled.
 peekFileListRaw :: Ptr () -> IO (Maybe [FilePath])
-peekFileListRaw filelistRaw = do
-  let entries = castPtr filelistRaw :: Ptr (Ptr CChar)
-  if entries == nullPtr
-    then pure Nothing
-    else go entries 0
-  where
-    go ptrs i = do
-      p <- peekElemOff ptrs i
-      if p == nullPtr
-        then pure (Just [])
-        else do
-          path <- peekCString p
-          rest <- go ptrs (i + 1)
-          pure (fmap (path :) rest)
+peekFileListRaw filelistRaw
+  | filelistRaw == nullPtr = pure Nothing
+  | otherwise = Just <$> (peekArray0 nullPtr (castPtr filelistRaw) >>= traverse peekCString)
 
 allocFilters :: [FileFilter] -> IO (Ptr SDL_DialogFileFilter, [CString])
 allocFilters [] = pure (nullPtr, [])
