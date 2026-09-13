@@ -204,7 +204,7 @@ module NanoUI.Context
   , animInProgress
   ) where
 
-import Control.Monad (forM, forM_, when)
+import Control.Monad (foldM, forM, forM_, when)
 import Data.ByteString (ByteString)
 import Data.Dynamic (fromDynamic, toDyn)
 import Data.HashMap.Strict (HashMap)
@@ -1043,10 +1043,12 @@ registerImage ctx iid w h px = do
   pure ok
 
 {-# INLINE registerImages #-}
-registerImages :: Context -> [(ImageId, Int, Int, ByteString)] -> IO Bool
-registerImages ctx imgs = do
-  results <- mapM (\(iid, w, h, px) -> registerImage ctx iid w h px) imgs
-  pure (and results)
+registerImages :: Foldable f => Context -> f (ImageId, Int, Int, ByteString) -> IO Bool
+registerImages ctx = foldM register True
+  where
+    register ok (iid, w, h, px) = do
+      result <- registerImage ctx iid w h px
+      pure (ok && result)
 
 {-# INLINE lookupImageUv #-}
 lookupImageUv :: Context -> ImageId -> IO (Maybe (Float, Float, Float, Float))

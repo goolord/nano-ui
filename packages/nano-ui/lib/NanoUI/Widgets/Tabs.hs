@@ -392,24 +392,26 @@ syncTabHeaderActive ctx active resps =
       Just i -> setNodeValue (ctxNodeArena ctx) i (if k == active then 1 else 0)
       Nothing -> pure ()
 
-tabs :: (Eq a, Ui :> es) => a -> [Tab a (Eff es ())] -> Eff es (TabResponse a, a)
+tabs :: (Foldable f, Eq a, Ui :> es) => a -> f (Tab a (Eff es ())) -> Eff es (TabResponse a, a)
 tabs = tabsEx TabUnderline TabTop
 
-tabsEx :: (Eq a, Ui :> es) => TabStyle -> TabOrientation -> a -> [Tab a (Eff es ())] -> Eff es (TabResponse a, a)
-tabsEx style orient cur ts = tabStrip style orient cur ts (Just (renderBody ts))
+tabsEx :: (Foldable f, Eq a, Ui :> es) => TabStyle -> TabOrientation -> a -> f (Tab a (Eff es ())) -> Eff es (TabResponse a, a)
+tabsEx style orient cur inputTabs =
+  let ts = foldr (:) [] inputTabs
+   in tabStrip style orient cur ts (Just (renderBody ts))
 
-tabBar :: (Eq a, Ui :> es) => a -> [Tab a body] -> Eff es (TabResponse a, a)
+tabBar :: (Foldable f, Eq a, Ui :> es) => a -> f (Tab a body) -> Eff es (TabResponse a, a)
 tabBar = tabBarEx TabUnderline TabTop
 
-tabBarEx :: (Eq a, Ui :> es) => TabStyle -> TabOrientation -> a -> [Tab a body] -> Eff es (TabResponse a, a)
-tabBarEx style orient cur ts = tabStrip style orient cur ts Nothing
+tabBarEx :: (Foldable f, Eq a, Ui :> es) => TabStyle -> TabOrientation -> a -> f (Tab a body) -> Eff es (TabResponse a, a)
+tabBarEx style orient cur ts = tabStrip style orient cur (foldr (:) [] ts) Nothing
 
-tabsEmit :: (Typeable action, Eq a, Ui :> es) => (a -> action) -> a -> [Tab a (Eff es ())] -> Eff es (TabResponse a, a)
+tabsEmit :: (Foldable f, Typeable action, Eq a, Ui :> es) => (a -> action) -> a -> f (Tab a (Eff es ())) -> Eff es (TabResponse a, a)
 tabsEmit = tabsEmitEx TabUnderline TabTop
 
-tabsEmitEx :: (Typeable action, Eq a, Ui :> es) => TabStyle -> TabOrientation -> (a -> action) -> a -> [Tab a (Eff es ())] -> Eff es (TabResponse a, a)
+tabsEmitEx :: (Foldable f, Typeable action, Eq a, Ui :> es) => TabStyle -> TabOrientation -> (a -> action) -> a -> f (Tab a (Eff es ())) -> Eff es (TabResponse a, a)
 tabsEmitEx style orient toAction cur ts = do
-  (tabResp, nextTab) <- tabStrip style orient cur ts (Just (renderBody ts))
+  (tabResp, nextTab) <- tabsEx style orient cur ts
   when (tabRespClicked tabResp && nextTab /= cur) $ emit (toAction nextTab)
   pure (tabResp, nextTab)
 

@@ -51,6 +51,7 @@ main = do
       fm = monospaceMetrics 16
   testRendering ctx inp fm
   testConcaveTriangulation
+  testIndexedTriangulation
   testRectFastPath
   testStrokeCoversMidpoint
   testNiceTicks
@@ -165,6 +166,25 @@ triArea :: (Float, Float) -> (Float, Float) -> (Float, Float) -> Float
 triArea (x0, y0) (x1, y1) (x2, y2) =
   abs ((x0 - x2) * (y1 - y0) - (x0 - x1) * (y2 - y0)) * 0.5
 
+testIndexedTriangulation :: IO ()
+testIndexedTriangulation = do
+  forM_ [[], [(0, 0)], [(0, 0), (1, 1)], [(0, 0), (1, 1), (0, 0)]] $ \pts ->
+    unless (null (triangulatePolygon pts)) $ fail "undersized polygon emitted triangles"
+  -- Alternating radii exercise repeated ear removal and wraparound indices.
+  forM_ [3, 16, 127, 256 :: Int] $ \n -> do
+    let points =
+          [ let angle = 2 * pi * fromIntegral i / fromIntegral n
+                radius = if even i then 10 else 6
+             in (radius * cos angle, radius * sin angle)
+          | i <- [0 .. n - 1]
+          ]
+        polygonArea = abs (sum [x * y' - x' * y | ((x, y), (x', y')) <- zip points (drop 1 (cycle points))]) / 2
+    forM_ [points, reverse points, points ++ take 1 points] $ \pts -> do
+      let triangles = triangulatePolygon pts
+          areaSum = sum [triArea a b c | (a, b, c) <- triangles]
+      unless (length triangles == n - 2 && abs (areaSum - polygonArea) < 0.01) $
+        fail ("indexed triangulation changed polygon coverage: " ++ show (n, length triangles, areaSum, polygonArea))
+
 testRectFastPath :: IO ()
 testRectFastPath = do
   let ops = fillPolygon (themeRed defaultTheme) [(0, 0), (10, 0), (10, 5), (0, 5)]
@@ -217,7 +237,7 @@ testNiceTicks = do
 
 testMultiSeriesDomains :: IO ()
 testMultiSeriesDomains = do
-  let s1 = line "a" [(0, 0), (1, 1)]
+  let s1 = line "a" (V.fromList [(0, 0), (1, 1)])
       s2 = line "b" [(0, 10), (1, 20)]
       c =
         Chart

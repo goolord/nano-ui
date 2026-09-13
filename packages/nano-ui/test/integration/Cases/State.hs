@@ -1,14 +1,46 @@
-module Cases.State (runControlledStateTest, runCheckboxEmitKeyboardTest, runHookStateTest) where
+module Cases.State (runControlledStateTest, runCheckboxEmitKeyboardTest, runHookStateTest, runCollectionApiTest) where
 
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
+import Data.ByteString qualified as BS
 import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
+import Data.Sequence qualified as Seq
+import Data.Vector qualified as V
 import NanoUI
-import NanoUI.Context (Context (..), getStore, intKey)
+import NanoUI.Context (Context (..), getStore, intKey, registerImages, lookupImageUv)
+import NanoUI.Context.Types (FrameMsg (..), reduceMessages, reduceUpdates)
 import NanoUI.Store (WidgetStore (..))
 import NanoUI.Testing (clearDirty, decodeMessages, isDirty, runFrame)
 import NanoUI.Testing.Assert (assertEq)
 import NanoUI.Testing.Harness (withInputOff)
+
+runCollectionApiTest :: Context -> IORef Int -> IO ()
+runCollectionApiTest ctx failed = do
+  let messages = V.fromList [FrameMsg (2 :: Int), FrameMsg True, FrameMsg (3 :: Int)]
+      update digit model = model * 10 + digit
+  assertEq failed [2, 3] (decodeMessages messages :: [Int])
+  assertEq failed (123 :: Int) (reduceMessages update 1 messages)
+  assertEq failed (1 :: Int) (reduceMessages update 1 (V.empty :: V.Vector FrameMsg))
+  let updates = Seq.fromList [FrameMsg ((+ 2) :: Int -> Int), FrameMsg False, FrameMsg ((* 3) :: Int -> Int)]
+  assertEq failed (9 :: Int) (reduceUpdates 1 updates)
+  seen <- newIORef []
+  _ <- runFrame ctx (withInputOff 300 100) $
+    hstack (V.fromList [uiIO (modifyIORef' seen (key :)) | key <- [7, 2, 9 :: Int]])
+  assertEq failed [9, 2, 7] =<< readIORef seen
+  ((emptySelect, emptyRadio, combo), _, _, _) <- runFrame ctx (withInputOff 300 200) $
+    withKey ("collection-options" :: Text) $ column $ do
+      (_, selectIndex) <- select (V.empty :: V.Vector Text) 5
+      (_, radioIndex) <- radioFieldset (Seq.empty :: Seq.Seq Text) (-1)
+      (_, comboValue) <- comboBox "Choose" (Seq.fromList ["Alpha", "Beta"]) "Beta"
+      pure (selectIndex, radioIndex, comboValue)
+  assertEq failed 0 emptySelect
+  assertEq failed 0 emptyRadio
+  assertEq failed "Beta" combo
+  -- A failed image must not prevent later registrations in traversal order.
+  ok <- registerImages ctx (Seq.fromList [(ImageId 0, 1, 1, BS.replicate 4 255), (ImageId 42, 1, 1, BS.replicate 4 255)])
+  assertEq failed False ok
+  registered <- lookupImageUv ctx (ImageId 42)
+  assertEq failed True (case registered of Just _ -> True; Nothing -> False)
 
 runControlledStateTest :: Context -> IORef Int -> IO ()
 runControlledStateTest ctx failed = do

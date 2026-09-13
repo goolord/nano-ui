@@ -9,6 +9,7 @@ module NanoUI.Diagrams.Tessellation
   ) where
 
 import qualified Data.Vector as V
+import qualified Data.Vector.Unboxed as U
 import NanoUI (Color, DrawOp (..), Rect (..))
 
 bezierTolerance :: Float
@@ -19,7 +20,7 @@ triangulatePolygon [] = []
 triangulatePolygon [_] = []
 triangulatePolygon pts0 =
   let pts = stripClosed pts0
-   in if length pts < 3 then [] else earClip pts
+    in earClip (U.fromList pts)
 
 stripClosed :: [(Float, Float)] -> [(Float, Float)]
 stripClosed [] = []
@@ -29,10 +30,9 @@ stripClosed (p : rest) =
     q : _ | p == q -> p : init rest
     _ -> p : rest
 
-signedArea :: [(Float, Float)] -> Float
-signedArea [] = 0
+signedArea :: U.Vector (Float, Float) -> Float
 signedArea vs =
-  sum [cross a b / 2 | (a, b) <- take (length vs) (zip vs (drop 1 (cycle vs)))]
+  U.ifoldl' (\acc i a -> acc + cross a (vs U.! ((i + 1) `mod` U.length vs)) / 2) 0 vs
 
 cross :: (Float, Float) -> (Float, Float) -> Float
 cross (x0, y0) (x1, y1) = x0 * y1 - x1 * y0
@@ -48,11 +48,11 @@ isConvex ccw a b c =
 
 -- Fan-fill leftover only when every vertex turns the same way. A concave
 -- remainder fanned from vertex 0 can cover area outside the polygon.
-leftoverConvex :: Bool -> [(Float, Float)] -> Bool
+leftoverConvex :: Bool -> U.Vector (Float, Float) -> Bool
 leftoverConvex ccw vs =
-  let n = length vs
-      at i = vs !! (i `mod` n)
-   in n >= 3 && and [isConvex ccw (at (i - 1)) (at i) (at (i + 1)) | i <- [0 .. n - 1]]
+  let n = U.length vs
+      at i = vs U.! (i `mod` n)
+   in n >= 3 && U.ifoldr (\i cur rest -> isConvex ccw (at (i - 1)) cur (at (i + 1)) && rest) True vs
 
 pointInTri :: (Float, Float) -> (Float, Float) -> (Float, Float) -> (Float, Float) -> Bool
 pointInTri p a b c =
@@ -62,51 +62,48 @@ pointInTri p a b c =
       d3 = sign (p, c, a)
    in not ((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0))
 
-isEar :: Bool -> [(Float, Float)] -> Int -> Bool
+isEar :: Bool -> U.Vector (Float, Float) -> Int -> Bool
 isEar ccw vs i
   | i < 0 || i >= n = False
   | otherwise =
-      let prev = vs !! ((i - 1 + n) `mod` n)
-          cur = vs !! i
-          next = vs !! ((i + 1) `mod` n)
-          others =
-            [ p
-            | (j, p) <- zip [0 ..] vs
-            , j /= (i - 1 + n) `mod` n
-            , j /= i
-            , j /= (i + 1) `mod` n
-            ]
-       in isConvex ccw prev cur next && not (any (pointInTri cur prev next) others)
+      let prevIdx = (i - 1 + n) `mod` n
+          nextIdx = (i + 1) `mod` n
+          prev = vs U.! prevIdx
+          cur = vs U.! i
+          next = vs U.! nextIdx
+          outside j p rest =
+            (j == prevIdx || j == i || j == nextIdx || not (pointInTri p prev cur next)) && rest
+       in isConvex ccw prev cur next && U.ifoldr outside True vs
   where
-    n = length vs
+    n = U.length vs
 
-earClip :: [(Float, Float)] -> [((Float, Float), (Float, Float), (Float, Float))]
+earClip :: U.Vector (Float, Float) -> [((Float, Float), (Float, Float), (Float, Float))]
 earClip vs
-  | length vs < 3 = []
-  | length vs == 3 = [(vs !! 0, vs !! 1, vs !! 2)]
+  | U.length vs < 3 = []
+  | U.length vs == 3 = [(vs U.! 0, vs U.! 1, vs U.! 2)]
   | otherwise =
       let ccw = signedArea vs >= 0
           go remaining idx tries tris
             | nRem < 3 = tris
-            | nRem == 3 = (remaining !! 0, remaining !! 1, remaining !! 2) : tris
+            | nRem == 3 = (remaining U.! 0, remaining U.! 1, remaining U.! 2) : tris
             | tries >= nRem =
                 if nRem >= 3 && leftoverConvex ccw remaining
                   then
-                    let origin = remaining !! 0
+                    let origin = remaining U.! 0
                      in tris
-                          ++ [ (origin, remaining !! i, remaining !! (i + 1))
+                          ++ [ (origin, remaining U.! i, remaining U.! (i + 1))
                              | i <- [1 .. nRem - 2]
                              ]
                   else tris
             | isEar ccw remaining idx =
-                let prev = remaining !! ((idx - 1 + nRem) `mod` nRem)
-                    cur = remaining !! idx
-                    next = remaining !! ((idx + 1) `mod` nRem)
-                    newRem = take idx remaining ++ drop (idx + 1) remaining
+                let prev = remaining U.! ((idx - 1 + nRem) `mod` nRem)
+                    cur = remaining U.! idx
+                    next = remaining U.! ((idx + 1) `mod` nRem)
+                    newRem = U.take idx remaining U.++ U.drop (idx + 1) remaining
                  in go newRem 0 0 ((prev, cur, next) : tris)
             | otherwise = go remaining ((idx + 1) `mod` nRem) (tries + 1) tris
             where
-              nRem = length remaining
+              nRem = U.length remaining
        in reverse (go vs 0 0 [])
 
 fillPolygon :: Color -> [(Float, Float)] -> [DrawOp]

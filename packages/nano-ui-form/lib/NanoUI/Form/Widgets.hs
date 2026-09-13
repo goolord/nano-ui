@@ -30,8 +30,8 @@ import NanoUI
 import NanoUI.Form.Types (FormView (..))
 
 -- | Standard error view rendering a styled error callout directly below invalid fields.
-defaultErrorView :: [Text] -> FormView
-defaultErrorView [] = FormView (pure ())
+defaultErrorView :: Foldable f => f Text -> FormView
+defaultErrorView errs | null errs = FormView (pure ())
 defaultErrorView errs = FormView $ do
   let errBorder = colorRGBA 239 68 68 255
       errBg     = colorRGBA 48 20 22 255

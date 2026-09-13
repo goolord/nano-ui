@@ -45,12 +45,14 @@ radioGroupLay = tight (gap 4 (fillW defaultLayout))
 radioSalt :: Int
 radioSalt = hash ("radio" :: Text)
 
-radioFieldset :: (Ui :> es) => [Text] -> Int -> Eff es (Response, Int)
+radioFieldset :: (Foldable f, Ui :> es) => f Text -> Int -> Eff es (Response, Int)
 radioFieldset options initial =
   withKey radioSalt $ do
     gid <- nextId
     ctx <- askContext
-    let opts = if null options then [""] else options
+    let opts = case foldr (:) [] options of
+          [] -> [""]
+          xs -> xs
         !len = length opts
         !c0 = max 0 (min (len - 1) initial)
         !key = intKey gid

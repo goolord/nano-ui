@@ -121,7 +121,7 @@ sliderEmit minV maxV initial toMsg =
 
 -- | Uncontrolled dropdown select that emits a reducer message when selection changes.
 selectEmit ::
-  (Typeable msg, Ui :> es) => [Text] -> Int -> (Int -> msg) -> Eff es Response
+  (Foldable f, Typeable msg, Ui :> es) => f Text -> Int -> (Int -> msg) -> Eff es Response
 selectEmit opts initial toMsg =
   notifyChanged (select opts initial) (emit . toMsg)
 

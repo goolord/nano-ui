@@ -105,8 +105,8 @@ inputSlider name minV maxV initial =
     (fieldView respChanged FormInputFloat (labelled name (slider minV maxV)))
     initial
 
--- | Dropdown selection among a list of text options (returns selected index).
-inputSelect :: FormError FormInput err => Text -> [Text] -> Int -> Form err Int
+-- | Dropdown selection in fold order (returns selected index).
+inputSelect :: (Foldable f, FormError FormInput err) => Text -> f Text -> Int -> Form err Int
 inputSelect name options initial =
   Named.input
     name
@@ -121,7 +121,7 @@ inputEnumSelect ::
 inputEnumSelect name = enumField (inputSelect name)
 
 -- | Radio button group (returns selected index).
-inputRadio :: FormError FormInput err => Text -> [Text] -> Int -> Form err Int
+inputRadio :: (Foldable f, FormError FormInput err) => Text -> f Text -> Int -> Form err Int
 inputRadio name options initial =
   Named.input
     name

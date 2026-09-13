@@ -5,6 +5,7 @@ module Main (main) where
 import Control.Monad (forM_)
 import Data.Int (Int8)
 import Data.Text (Text)
+import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import qualified Ditto.Types as Ditto
 import NanoUI
@@ -90,6 +91,17 @@ main = do
   ctx <- newContext
   let inp = emptyInput { inputWindowSize = Size 60 20 }
   putStrLn "Context created."
+
+  let collectionForm :: Form Text (Int, Int, Int)
+      collectionForm = (,,)
+        <$> inputSelect "select" (Seq.fromList ["First", "Second"]) 1
+        <*> inputRadio "radio" (Seq.fromList ["First", "Second"]) 0
+        <*> Unnamed.inputSelect (Just "Only") 0
+  (_, collectionResult) <- runNanoUI ctx inp (runNanoForm "collections" collectionForm)
+  case collectionResult of
+    Ditto.Ok (Ditto.Proved _ values) ->
+      assert "Foldable form options preserve initial indices" (values == (1, 0, 0))
+    Ditto.Error errs -> error (show errs)
 
   putStrLn "\n--- Test 1: Valid Form Evaluation (runNanoUI) ---"
   (_, res1) <- runNanoUI ctx inp (runNanoForm "testPerson" personForm)

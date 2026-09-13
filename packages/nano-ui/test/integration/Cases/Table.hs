@@ -3,6 +3,7 @@ module Cases.Table (runTableSortTest, runTableReorderTest) where
 import Control.Monad (void)
 import Data.IORef (IORef)
 import Data.Text (Text)
+import Data.Vector qualified as V
 import NanoUI
 import NanoUI.Testing (Context, collectTextSpans, runFrame)
 import NanoUI.Testing.Assert (assertEq)
@@ -23,7 +24,7 @@ runTableSortTest _ failed = do
   assertEq
     failed
     [2, 4, 1, 3]
-    (map snd (sortRows columns (SortCol 0 SortAsc) rows))
+    (map snd (sortRows columns (SortCol 0 SortAsc) (V.fromList rows)))
   assertEq
     failed
     [1, 3, 2, 4]
@@ -35,7 +36,7 @@ runTableReorderTest :: Context -> IORef Int -> IO ()
 runTableReorderTest ctx failed = do
   let
     input = withInputOff 500 240
-    ui = simpleTable ["First", "Second", "Third"] [["a", "b", "c"]]
+    ui = simpleTable ["First", "Second", "Third"] (V.fromList [["a", "b", "c"], ["short"], []])
     draw inp = void (runFrame ctx inp ui)
     header name = do
       spans <- collectTextSpans ctx

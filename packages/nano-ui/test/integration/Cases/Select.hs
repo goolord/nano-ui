@@ -18,6 +18,7 @@ import Control.Monad (void)
 import Data.IORef (IORef)
 import Data.Text qualified as T
 import NanoUI
+import Data.Vector qualified as V
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, withInput)
 import NanoUI.Testing.Harness
@@ -140,7 +141,7 @@ runTreeSelectTest _ failed = do
 runTreeKeyboardTest :: Context -> IORef Int -> IO ()
 runTreeKeyboardTest _ failed = do
   ctx <- newContext
-  let items = [TreeItem "root" [TreeItem "child" []], TreeItem "leaf" []]
+  let items = V.fromList [TreeItem "root" [TreeItem "child" []], TreeItem "leaf" []]
       ui = column (tree "k" items 0)
       inp0 = withInput 40 12
   _ <- warmup2 ctx inp0 ui
@@ -149,10 +150,15 @@ runTreeKeyboardTest _ failed = do
   assertEq failed sel1 1
   ((_, sel0), _, _, _) <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyUp]}) ui
   assertEq failed sel0 0
+  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyDown]}) ui
+  ((_, parentSel), _, _, _) <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyLeft]}) ui
+  assertEq failed parentSel 0
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyEnter]}) ui
   _ <- runFrame ctx inp0 ui
   spans <- collectTextSpans ctx
   assert failed (not (any (\(_, t, _, _, _) -> "child" `T.isInfixOf` t) spans))
+  ((_, afterCollapsed), _, _, _) <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyDown]}) ui
+  assertEq failed afterCollapsed 2
 
 runSelectDropFlushTest :: Context -> IORef Int -> IO ()
 runSelectDropFlushTest ctx failed = do
@@ -227,7 +233,7 @@ runSelectDragToSelectTest ctx failed = do
 runSelectKeyboardTest :: Context -> IORef Int -> IO ()
 runSelectKeyboardTest ctx failed = do
   let inp0 = withInput 320 200
-      ui = column (select ["Low", "Medium", "High"] 1)
+      ui = column (select (V.fromList ["Low", "Medium", "High"]) 1)
   (resp, idx0) <- warmup2 ctx inp0 ui
   assertEq failed idx0 1
   let Rect sx sy sw sh = respRect resp

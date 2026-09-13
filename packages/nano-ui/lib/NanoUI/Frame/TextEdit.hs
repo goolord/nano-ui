@@ -80,6 +80,7 @@ import qualified Data.IntMap.Strict as IM
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Vector as V
 import NanoUI.Context
   ( Context (..)
   , TextFieldClickCell (..)
@@ -1111,13 +1112,18 @@ drawTextAreaSelection ::
   Theme ->
   Style ->
   IO ()
-drawTextAreaSelection da _ctx state geom fm theme style = do
+drawTextAreaSelection da _ctx state geom fm theme style =
+  drawTextAreaSelectionLines da (V.fromList (TB.toLines (TA.buffer state))) state geom fm theme style
+
+-- Share the indexed document with content/caret painting. Selecting many
+-- lines must not traverse the document prefix again for each selected row.
+drawTextAreaSelectionLines :: DrawArena -> V.Vector Text -> TA.TextAreaState -> TextAreaGeom -> FontMetrics -> Theme -> Style -> IO ()
+drawTextAreaSelectionLines da lineTexts state geom fm theme style = do
   snap <- textAreaSnap da
   let anchor = TA.selectionAnchor state
       cursor = TB.getCursor (TA.buffer state)
   when (anchor /= cursor) $ do
     let (lo, hi) = TB.selectionRange anchor cursor
-        lineTexts = TB.toLines (TA.buffer state)
         field = tagFieldRect geom
         lineH = tagLineHeight geom
         (ix, iy) = widgetContentInset fm
@@ -1132,8 +1138,8 @@ drawTextAreaSelection da _ctx state geom fm theme style = do
         hiCol = TB.cursorCol hi
     forM_ [loRow .. hiRow] $ \row -> do
       let line =
-            if row >= 0 && row < length lineTexts
-              then lineTexts !! row
+            if row >= 0 && row < V.length lineTexts
+              then lineTexts V.! row
               else ""
           lineLen = T.length line
           clampCol c = max 0 (min lineLen c)
@@ -1180,7 +1186,7 @@ drawTextAreaContentWith da ctx fm idx x y w h style = do
   state <- loadTextAreaStateAtFm ctx idx fm x y w h
   (contentW, contentH) <- textAreaContentMetrics ctx idx
   let buf = TA.buffer state
-      lineTexts = TB.toLines buf
+      lineTexts = V.fromList (TB.toLines buf)
       (scrollX, scrollY) = TA.scrollOffset state
       scrollXf = snap (realToFrac scrollX)
       scrollYf = snap (realToFrac scrollY)
@@ -1199,17 +1205,20 @@ drawTextAreaContentWith da ctx fm idx x y w h style = do
           (if isJust mHLayout then max 0 (rectH clip - barLaneH) else rectH clip)
   withClip da textClip $ do
     when focus $
-      drawTextAreaSelection da ctx state geom fm theme style
-    forM_ (zip [0 :: Int ..] lineTexts) $ \(row, line) -> do
-      let ly = contentTop + fromIntegral row * lineH - scrollYf
-      when (ly + lineH >= fieldTop && ly <= fieldBottom) $
-        unless (T.null line) $ do
-          pushText da fm contentX ly line fg
+      drawTextAreaSelectionLines da lineTexts state geom fm theme style
+    V.imapM_
+      (\row line -> do
+        let ly = contentTop + fromIntegral row * lineH - scrollYf
+        when (ly + lineH >= fieldTop && ly <= fieldBottom) $
+          unless (T.null line) $ do
+            pushText da fm contentX ly line fg
+      )
+      lineTexts
     when focus $ do
       let TB.Cursor row col = TB.getCursor buf
           currentLine =
-            if row >= 0 && row < length lineTexts
-              then lineTexts !! row
+            if row >= 0 && row < V.length lineTexts
+              then lineTexts V.! row
               else ""
           prefix = T.take col currentLine
           pw = textDisplayWidth fm prefix

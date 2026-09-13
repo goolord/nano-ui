@@ -217,20 +217,29 @@ fillTrianglePx ::
   IO ()
 fillTrianglePx surf (cx0, cy0, cx1, cy1) ax ay bx by cx cy col
   | area == 0 = pure ()
-  | otherwise =
-      forM_ [max cy0 (min3 ay by cy) .. min (cy1 - 1) (max3 ay by cy)] $ \py ->
-        forM_ [max cx0 (min3 ax bx cx) .. min (cx1 - 1) (max3 ax bx cx)] $ \px -> do
-          let !pxc = fromIntegral px + (0.5 :: Float)
-              !pyc = fromIntegral py + (0.5 :: Float)
-              edge x0 y0 x1 y1 =
-                (f x1 - f x0) * (pyc - f y0) - (f y1 - f y0) * (pxc - f x0)
-              !w0 = edge bx by cx cy
-              !w1 = edge cx cy ax ay
-              !w2 = edge ax ay bx by
-              !s = if area < 0 then -1 else 1
-          when (w0 * s >= 0 && w1 * s >= 0 && w2 * s >= 0) $
-            pokePixel surf px py col
+  | otherwise = goRows yLo
   where
+    xLo = max cx0 (min3 ax bx cx)
+    xHi = min (cx1 - 1) (max3 ax bx cx)
+    yLo = max cy0 (min3 ay by cy)
+    yHi = min (cy1 - 1) (max3 ay by cy)
+    -- The nested forM_ ranges leave a shared x-coordinate list in optimized
+    -- Core. Traverse numeric bounds directly instead, preserving row order.
+    goRows !py = when (py <= yHi) $ do
+      goCols py xLo
+      when (py < yHi) $ goRows (py + 1)
+    goCols !py !px = when (px <= xHi) $ do
+      let !pxc = fromIntegral px + (0.5 :: Float)
+          !pyc = fromIntegral py + (0.5 :: Float)
+          edge x0 y0 x1 y1 =
+            (f x1 - f x0) * (pyc - f y0) - (f y1 - f y0) * (pxc - f x0)
+          !w0 = edge bx by cx cy
+          !w1 = edge cx cy ax ay
+          !w2 = edge ax ay bx by
+          !s = if area < 0 then -1 else 1
+      when (w0 * s >= 0 && w1 * s >= 0 && w2 * s >= 0) $
+        pokePixel surf px py col
+      when (px < xHi) $ goCols py (px + 1)
     f :: Int -> Float
     f = fromIntegral
     area = (f bx - f ax) * (f cy - f ay) - (f cx - f ax) * (f by - f ay)

@@ -10,6 +10,7 @@ import System.Exit (exitFailure)
 
 import qualified Data.IntMap.Strict as IM
 import Data.IORef (newIORef, readIORef, writeIORef)
+import Data.Primitive.PrimArray (mapPrimArray)
 import qualified Data.Text as T
 import NanoUI.Debug (CoreDebugSnapshot (..))
 import NanoUI.Rgfw.Debug (RgfwDebugSnapshot (..), debugWindowBody, emptyRgfwDebug)
@@ -33,6 +34,7 @@ import NanoUI
   ( AlignX (..)
   , AlignY (..)
   , Direction (..)
+  , DrawOp (..)
   , Padding (..)
   , Rect (..)
   , Size (..)
@@ -41,6 +43,8 @@ import NanoUI
   , box
   , colorRGBA
   , defaultLayout
+  , drawing
+  , fixedWH
   , grow
   , label
   , label_
@@ -78,7 +82,9 @@ import NanoUI.Store
   , slotTextAreaRow
   )
 import NanoUI.Testing
-  ( collectRasterSpans
+  ( DrawCmd (..)
+  , DrawData (..)
+  , collectRasterSpans
   , newPixelContext
   , runFrame
   )
@@ -710,6 +716,40 @@ testDebugWindow = do
 
   freeRgfwSurface surf
 
+-- Check coverage and clipping pixel-for-pixel, including empty iteration
+-- bounds and reversed winding in the numeric raster loops.
+testTriangleRaster :: IO ()
+testTriangleRaster =
+  bracket (newOffscreenRgfwSurface 8 8) freeRgfwSurface $ \surf -> do
+    let full = Rect 0 0 8 8
+        clipped = Rect 2 0 3 4
+        triangle = (1, 1, 5, 1, 1, 5)
+        reversed = (1, 5, 5, 1, 1, 1)
+        inside x y = x >= 1 && y >= 1 && x + y <= 5
+        red = packColor (colorRGBA 255 0 0 255)
+        cases =
+          [ ("normal", full, triangle, inside)
+          , ("reversed", full, reversed, inside)
+          , ("clipped", clipped, triangle, \x y -> inside x y && x >= 2 && x < 5 && y < 4)
+          , ("outside", Rect 6 6 2 2, triangle, \_ _ -> False)
+          , ("empty clip", Rect 0 0 0 0, triangle, \_ _ -> False)
+          , ("degenerate", full, (1, 1, 3, 3, 5, 5), \_ _ -> False)
+          ]
+    forM_ cases $ \(name, clip, (ax, ay, bx, by, cx, cy), covered) -> do
+      clearScreen surf 0
+      ctx <- newPixelContext
+      (_, _, draw, _) <- runFrame ctx (emptyInput {inputWindowSize = Size 8 8}) $
+        drawing (fixedWH 8 8 defaultLayout) $ \_ ->
+          pure (FillTriangle ax ay bx by cx cy (colorRGBA 255 0 0 255))
+      let Rect clipX clipY clipW clipH = clip
+          clippedDraw = draw
+            { drawCommands = mapPrimArray (\cmd -> cmd {cmdClipX = clipX, cmdClipY = clipY, cmdClipW = clipW, cmdClipH = clipH}) (drawCommands draw)
+            }
+      renderArena surf getCozetteFont 1 clippedDraw [] []
+      pixels <- mapM (peekElemOff (sBuffer surf)) [0 .. 63]
+      let expected = [if covered x y then red else 0 | y <- [0 .. 7 :: Int], x <- [0 .. 7]]
+      assert ("triangle raster " ++ name) (pixels == expected)
+
 main :: IO ()
 main = do
   putStrLn "=== Running nano-ui-rgfw Unit Tests ==="
@@ -730,6 +770,7 @@ main = do
   testBoxAreaAveraging
   testWindowResizing
   testZOrderRenderArena
+  testTriangleRaster
   testWindowTitleAndCloseButton
   testDebugWindow
   putStrLn "=== All tests passed successfully! ==="

@@ -545,14 +545,14 @@ kvMono k v = do
       void (labelEx kLayout k)
       void (labelEx kvMonoValLayout val)
 
-kvBlock :: Ui :> es => [(Text, Text)] -> Eff es ()
+kvBlock :: (Foldable f, Ui :> es) => f (Text, Text) -> Eff es ()
 kvBlock rows =
   let maxK = foldl' (\acc (k, _) -> max acc (T.length k)) 0 rows
       padK k = T.justifyLeft maxK ' ' k
    in void $
         labelEx
           (tight . gap 0 . fontMono $ defaultLayout)
-          (T.unlines [padK k <> "  " <> v | (k, v) <- rows])
+          (T.unlines (foldr (\(k, v) rest -> (padK k <> "  " <> v) : rest) [] rows))
 
 card :: Ui :> es => Eff es a -> Eff es a
 card = panelWith (minW 300 . padXY 12 10 . gap 8 . fillW)
@@ -891,12 +891,14 @@ comboBoxRowsPerNotch :: Float
 comboBoxRowsPerNotch = 3
 
 -- | Case-insensitive substring filter behind the combo's suggestion list.
-comboFiltered :: [Text] -> Text -> [Text]
-comboFiltered opts q
+comboFiltered :: Foldable f => f Text -> Text -> [Text]
+comboFiltered options q
   | T.null q = opts
   | otherwise =
       let needle = T.toLower q
-       in filter (T.isInfixOf needle . T.toLower) opts
+        in filter (T.isInfixOf needle . T.toLower) opts
+  where
+    opts = foldr (:) [] options
 
 -- | Combo box: the 'searchField' with a select-style dropdown of options.
 -- While the field holds focus, the shared select dropdown overlay lists the
@@ -909,7 +911,7 @@ comboFiltered opts q
 -- highlight, the wheel scrolls the list (vertically over the rows,
 -- horizontally over the widest rows; the scrollbar thumbs drag too). The
 -- value is free text: options are suggestions, not a closed set.
-comboBox :: Ui :> es => Text -> [Text] -> Text -> Eff es (Response, Text)
+comboBox :: (Foldable f, Ui :> es) => Text -> f Text -> Text -> Eff es (Response, Text)
 comboBox placeholder options initial = do
   (resp, text) <-
     buildTextInput textInputFlagSearch searchFieldLayout placeholder initial Nothing
@@ -1169,28 +1171,28 @@ textAreaWith layout initial = do
   resp <- addWidget wid NodeTextArea "" 0 layout
   pure (setChanged stateChanged resp, newText)
 
-select :: Ui :> es => [Text] -> Int -> Eff es (Response, Int)
+select :: (Foldable f, Ui :> es) => f Text -> Int -> Eff es (Response, Int)
 select = selectWith id
 
 -- | Dropdown select with an inline caption: the closed control renders
 -- @caption: option@, the way selects looked before labels were decoupled. The
 -- plain 'select' stays caption-less; this is the opt-in for the old look.
-selectLabeled :: Ui :> es => Text -> [Text] -> Int -> Eff es (Response, Int)
+selectLabeled :: (Foldable f, Ui :> es) => Text -> f Text -> Int -> Eff es (Response, Int)
 selectLabeled caption = selectEx id caption
 
 selectWith ::
-  Ui :> es =>
+  (Foldable f, Ui :> es) =>
   (Layout -> Layout) ->
-  [Text] ->
+  f Text ->
   Int ->
   Eff es (Response, Int)
 selectWith modLayout = selectEx modLayout ""
 
 selectEx ::
-  Ui :> es =>
+  (Foldable f, Ui :> es) =>
   (Layout -> Layout) ->
   Text ->
-  [Text] ->
+  f Text ->
   Int ->
   Eff es (Response, Int)
 selectEx modLayout caption options initial = do
@@ -1198,7 +1200,9 @@ selectEx modLayout caption options initial = do
   ctx <- askContext
   uiIO $ registerFocusable ctx wid
   let
-    opts = if null options then [""] else options
+    opts = case foldr (:) [] options of
+      [] -> [""]
+      xs -> xs
     key = intKey wid
   store0 <- uiIO (getStore ctx)
   let

@@ -25,7 +25,7 @@ module NanoUI.Widgets.ColorPicker
   )
 where
 
-import Control.Monad (forM_, void, when)
+import Control.Monad (void, when)
 import Data.Bits ((.&.))
 import Data.IORef (readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
@@ -333,22 +333,26 @@ drawHueBar da rect =
       [0 .. stops - 1]
 
 drawChecker :: DrawArena -> Rect -> IO ()
-drawChecker da (Rect x y w h) =
-  let
+drawChecker da (Rect x y w h) = goRows 0
+  where
     s = 6 :: Float
     cols = ceiling (max 0 w / s) :: Int
     rows = ceiling (max 0 h / s) :: Int
-   in
-    forM_ [0 .. rows - 1] $ \ry ->
-      forM_ [0 .. cols - 1] $ \cx -> do
-        let
-          col =
-            if even (ry + cx) then colorRGBA 190 190 190 255 else colorRGBA 140 140 140 255
-          rx = x + fromIntegral cx * s
-          ry' = y + fromIntegral ry * s
-          cw = min s (max 0 (x + w - rx))
-          ch = min s (max 0 (y + h - ry'))
-        pushRect da (Rect rx ry' cw ch) col
+    -- Nested range folds retain a shared column list under -O2. Explicit
+    -- counters keep both loops numeric, without allocating that list.
+    goRows !ry = when (ry < rows) $ do
+      goCols ry 0
+      goRows (ry + 1)
+    goCols !ry !cx = when (cx < cols) $ do
+      let
+        col =
+          if even (ry + cx) then colorRGBA 190 190 190 255 else colorRGBA 140 140 140 255
+        rx = x + fromIntegral cx * s
+        ry' = y + fromIntegral ry * s
+        cw = min s (max 0 (x + w - rx))
+        ch = min s (max 0 (y + h - ry'))
+      pushRect da (Rect rx ry' cw ch) col
+      goCols ry (cx + 1)
 
 drawAlphaBar :: DrawArena -> Rect -> Color -> IO ()
 drawAlphaBar da rect col = do

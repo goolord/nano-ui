@@ -176,15 +176,15 @@ column' :: Ui :> es => Layout -> Eff es a -> Eff es a
 column' layout = container NodeContainer (layout {layoutDirection = Column})
 
 -- =============================================================================
--- List stacks
+-- Collection stacks
 -- =============================================================================
 
 {-# INLINE hstack #-}
-hstack :: Ui :> es => [Eff es ()] -> Eff es ()
+hstack :: (Foldable f, Ui :> es) => f (Eff es ()) -> Eff es ()
 hstack = row . sequence_
 
 {-# INLINE vstack #-}
-vstack :: Ui :> es => [Eff es ()] -> Eff es ()
+vstack :: (Foldable f, Ui :> es) => f (Eff es ()) -> Eff es ()
 vstack = column . sequence_
 
 -- =============================================================================

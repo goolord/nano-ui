@@ -44,7 +44,6 @@ import Data.IORef (IORef)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
 import Data.Map.Strict (Map)
-import Data.Maybe (mapMaybe)
 import Data.Primitive.PrimArray (MutablePrimArray)
 import Data.Text (Text)
 import Data.Typeable (TypeRep, Typeable, cast)
@@ -75,13 +74,13 @@ import NanoUI.Types
 data FrameMsg where
   FrameMsg :: Typeable a => a -> FrameMsg
 
-decodeMessages :: Typeable a => [FrameMsg] -> [a]
-decodeMessages = mapMaybe (\(FrameMsg x) -> cast x)
+decodeMessages :: (Foldable f, Typeable a) => f FrameMsg -> [a]
+decodeMessages = foldr (\(FrameMsg x) rest -> maybe rest (: rest) (cast x)) []
 
-reduceMessages :: Typeable msg => (msg -> model -> model) -> model -> [FrameMsg] -> model
-reduceMessages update model = foldl' (flip update) model . decodeMessages
+reduceMessages :: (Foldable f, Typeable msg) => (msg -> model -> model) -> model -> f FrameMsg -> model
+reduceMessages update = foldl' (\model (FrameMsg x) -> maybe model (`update` model) (cast x))
 
-reduceUpdates :: Typeable model => model -> [FrameMsg] -> model
+reduceUpdates :: (Foldable f, Typeable model) => model -> f FrameMsg -> model
 reduceUpdates = reduceMessages ($)
 
 type MeasureCacheKey = (Text, Float)

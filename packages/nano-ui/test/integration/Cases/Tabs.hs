@@ -16,6 +16,7 @@ import Control.Monad (forM_, replicateM)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Maybe (isJust)
 import Data.Text qualified as T
+import Data.Sequence qualified as Seq
 import NanoUI
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, run2Frames, withInput)
@@ -119,7 +120,7 @@ runTabsLazinessTest ctx failed = do
   evalCountB <- newIORef (0 :: Int)
   evalCountC <- newIORef (0 :: Int)
   let inp = withInput 200 100
-      ui = tabs TabB
+      ui = tabs TabB $ Seq.fromList
         [ tab TabA "A" (uiIO (modifyIORef' evalCountA (+ 1)) >> label_ "Body A")
         , tab TabB "B" (uiIO (modifyIORef' evalCountB (+ 1)) >> label_ "Body B")
         , tab TabC "C" (uiIO (modifyIORef' evalCountC (+ 1)) >> label_ "Body C")

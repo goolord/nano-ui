@@ -18,6 +18,7 @@ module NanoUI.Plot.Series
   ) where
 
 import Data.Text (Text)
+import Data.Foldable (toList)
 import Data.Vector (Vector)
 import Data.Vector qualified as V
 import NanoUI (Color)
@@ -28,20 +29,20 @@ import NanoUI.Plot.Types
   , SeriesKind (..)
   )
 
-line :: Text -> [(Double, Double)] -> Series
-line name = lineVec name . V.fromList
+line :: Foldable f => Text -> f (Double, Double) -> Series
+line name = lineVec name . V.fromList . toList
 
-scatter :: Text -> [(Double, Double)] -> Series
-scatter name = scatterVec name . V.fromList
+scatter :: Foldable f => Text -> f (Double, Double) -> Series
+scatter name = scatterVec name . V.fromList . toList
 
-bar :: Text -> [(Text, Double)] -> Series
-bar name = barVec name . V.fromList
+bar :: Foldable f => Text -> f (Text, Double) -> Series
+bar name = barVec name . V.fromList . toList
 
-area :: Text -> [(Double, Double)] -> Series
-area name = areaVec name . V.fromList
+area :: Foldable f => Text -> f (Double, Double) -> Series
+area name = areaVec name . V.fromList . toList
 
-step :: Text -> [(Double, Double)] -> Series
-step name = stepVec name . V.fromList
+step :: Foldable f => Text -> f (Double, Double) -> Series
+step name = stepVec name . V.fromList . toList
 
 withColor :: Color -> Series -> Series
 withColor c s = s {seriesColor = Just c}

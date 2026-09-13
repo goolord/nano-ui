@@ -26,10 +26,11 @@ where
 import Colonnade (Colonnade, Headed (..), headed, headless)
 import Colonnade.Encode qualified as Encode
 import Control.Monad (void, when)
+import Data.Foldable (toList)
 import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
 import Data.List (sortOn)
-import Data.Maybe (isJust, listToMaybe)
+import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Ord (Down (..))
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -55,7 +56,6 @@ import NanoUI.Widgets.Combinators
   , headerAtPoint
   , headerEdgeHit
   , keyedRowLay
-  , listAt
   , minColW
   , normalizeOrder
   , rebuildOrder
@@ -320,10 +320,10 @@ sortMarkStyle sort idx
   | sortColDir sort == SortDesc = 2 `shiftL` 16
   | otherwise = 1 `shiftL` 16
 
-sortRows :: Colonnade Headed row Text -> SortCol -> [row] -> [row]
-sortRows _ _ [] = []
-sortRows cols sort rows =
-  let n = V.length (Encode.getColonnade cols)
+sortRows :: Foldable f => Colonnade Headed row Text -> SortCol -> f row -> [row]
+sortRows cols sort inputRows =
+  let rows = toList inputRows
+      n = V.length (Encode.getColonnade cols)
       idx = sortColIndex (clampSortCol n sort)
       enc = maybe (const T.empty) Encode.oneColonnadeEncode (Encode.getColonnade cols V.!? idx)
    in case sortColDir sort of
@@ -333,9 +333,6 @@ sortRows cols sort rows =
 columnCount :: Colonnade Headed row Text -> Int
 columnCount = V.length . Encode.getColonnade
 
-columnHeaders :: Colonnade Headed row Text -> [Text]
-columnHeaders cols = V.toList (Encode.header id cols)
-
 isNumericCell :: Text -> Bool
 isNumericCell txt =
   let s = T.strip txt
@@ -344,14 +341,14 @@ isNumericCell txt =
           Right (_, rest) | T.null rest -> True
           _ -> False
 
-columnMetrics :: Context -> Colonnade Headed row Text -> [row] -> ([Float], [Bool])
-columnMetrics _ cols _ | columnCount cols == 0 = ([], [])
+columnMetrics :: Context -> Colonnade Headed row Text -> [row] -> (V.Vector Float, V.Vector Bool)
+columnMetrics _ cols _ | columnCount cols == 0 = (V.empty, V.empty)
 columnMetrics ctx cols rows =
   let fm = ctxFontMetrics ctx
       mono = ctxMonoFontMetrics ctx
       (ix, _) = tableCellInset fm
       cellPadX = 2 * ix
-      hdrs = columnHeaders cols
+      hdrs = Encode.header id cols
       -- Encode each row once, sharing it across column classification and sizing.
       !encodedRows = V.fromList [Encode.row id cols r | r <- rows]
       measureColumn c hdr =
@@ -364,7 +361,7 @@ columnMetrics ctx cols rows =
                 minColW
                 encodedRows
          in (if null rows then hdrW else max hdrW cellW, isNum)
-   in unzip (zipWith measureColumn [0 ..] hdrs)
+   in V.unzip (V.imap measureColumn hdrs)
 
 nextSortCol :: Int -> SortCol -> Int -> SortCol
 nextSortCol n cur clicked =
@@ -405,11 +402,16 @@ isReorderDrag n = n <= -2000
 dragCol :: Int -> Int
 dragCol n = abs n `mod` 1000
 
-resolvedWidth :: [ColSize] -> [Float] -> [Float] -> Int -> Float
+-- Metadata is indexed by original column id after reordering/hiding. Keep
+-- it indexed throughout layout, rather than walking a list for each cell.
+vectorAt :: V.Vector a -> Int -> a -> a
+vectorAt xs i fallback = fromMaybe fallback (xs V.!? i)
+
+resolvedWidth :: V.Vector ColSize -> V.Vector Float -> V.Vector Float -> Int -> Float
 resolvedWidth sizes contentWs stored i =
-  let contentW = max minColW (listAt contentWs i minColW)
-      saved = listAt stored i 0
-   in case listAt sizes i ColContent of
+  let contentW = max minColW (vectorAt contentWs i minColW)
+      saved = vectorAt stored i 0
+   in case vectorAt sizes i ColContent of
         ColStretch -> if saved > contentW then saved else contentW
         ColFixed f ->
           let base = max minColW f
@@ -419,16 +421,16 @@ resolvedWidth sizes contentWs stored i =
 -- Width floor a column cannot shrink under: its declared fixed width, else
 -- its content minimum. Shared by colSizing and the resize-drag clamp so a
 -- dragged or stored width never wraps the cell text.
-colFloor :: [ColSize] -> [Float] -> Int -> Float
-colFloor sizes contentWs i = case listAt sizes i ColContent of
+colFloor :: V.Vector ColSize -> V.Vector Float -> Int -> Float
+colFloor sizes contentWs i = case vectorAt sizes i ColContent of
   ColFixed f -> max minColW f
-  _ -> max minColW (listAt contentWs i minColW)
+  _ -> max minColW (vectorAt contentWs i minColW)
 
-colSizing :: Bool -> Bool -> [ColSize] -> [Float] -> [Float] -> Int -> Sizing
+colSizing :: Bool -> Bool -> V.Vector ColSize -> V.Vector Float -> V.Vector Float -> Int -> Sizing
 colSizing fillInner hasStretch sizes contentWs stored i =
-  let saved = listAt stored i 0
+  let saved = vectorAt stored i 0
       floorW = colFloor sizes contentWs i
-   in case listAt sizes i ColContent of
+   in case vectorAt sizes i ColContent of
         ColFixed _ -> Fixed (max floorW saved)
         ColStretch
           | saved > 0 -> Fixed (max floorW saved)
@@ -565,40 +567,42 @@ finishTable TableFinish{tfN = n, tfStateKey = stateKey, tfVis = vis, tfOrder0 = 
     when (st1 /= st) $ setStore ctx st1 >> markDirty ctx
   pure (TableResponse widgetResp nextSort nextOrder nextHidden)
 
-table :: (Ui :> es) => Text -> Colonnade Headed row Text -> [row] -> SortCol -> Eff es TableResponse
+table :: (Foldable f, Ui :> es) => Text -> Colonnade Headed row Text -> f row -> SortCol -> Eff es TableResponse
 table = tableEx (tight . fillW $ defaultLayout {layoutGap = 0})
 
-tableEx :: (Ui :> es) => Layout -> Text -> Colonnade Headed row Text -> [row] -> SortCol -> Eff es TableResponse
+tableEx :: (Foldable f, Ui :> es) => Layout -> Text -> Colonnade Headed row Text -> f row -> SortCol -> Eff es TableResponse
 tableEx = tableCfg defaultTableCfg
 
-simpleTable :: (Ui :> es) => [Text] -> [[Text]] -> Eff es TableResponse
+simpleTable :: (Foldable f, Ui :> es) => [Text] -> f [Text] -> Eff es TableResponse
 simpleTable headers rows = do
-  let cols = mconcat [headed h (\r -> if i < length r then r !! i else "") | (i, h) <- zip [0 ..] headers]
-  table "simple" cols rows (SortCol 0 SortAsc)
+  let cols = mconcat [headed h (\r -> if i < V.length r then r V.! i else "") | (i, h) <- zip [0 ..] headers]
+      indexedRows = map V.fromList (toList rows)
+  table "simple" cols indexedRows (SortCol 0 SortAsc)
 
 tableCfg ::
-  (Ui :> es) =>
+  (Foldable f, Ui :> es) =>
   TableCfg ->
   Layout ->
   Text ->
   Colonnade Headed row Text ->
-  [row] ->
+  f row ->
   SortCol ->
   Eff es TableResponse
-tableCfg cfg outerLayout key cols rows curSort =
+tableCfg cfg outerLayout key cols inputRows curSort =
   withKey ("table:" <> key) $ do
     stateWid <- nextId
     vWid <- nextId
     hWid <- nextId
     tableWid <- nextId
-    let n = columnCount cols
+    let rows = toList inputRows
+        n = columnCount cols
         sort0 = clampSortCol n curSort
         stateKey = intKey stateWid
     ctx <- askContext
     inp <- askInput
     st0 <- uiIO (getStore ctx)
     let (!contentWs, !numeric) = columnMetrics ctx cols rows
-        sizes = tableColSizes cfg
+        sizes = V.fromList (tableColSizes cfg)
         order0 = normalizeOrder n (IM.findWithDefault [0 .. n - 1] stateKey (storeIntList st0))
         hidden0 = IM.findWithDefault (tableHidden cfg) stateKey (storeIntSet st0)
         widths0 = fitList n 0 (IM.findWithDefault [] stateKey (storeFloatList st0))
@@ -616,7 +620,8 @@ tableCfg cfg outerLayout key cols rows curSort =
             then setAt (dragCol drag0) (max (dragMinCol (dragCol drag0)) (dragW0 + mx - dragX0)) widths0
             else widths0
     when (widths1 /= widths0) $ uiIO $ writeColW ctx stateKey widths1
-    let hasStretch = tableStretchN n sizes
+    let hasStretch = tableStretchN n (tableColSizes cfg)
+        indexedWidths = V.fromList widths1
         vis = visibleCols order0 hidden0
         freezeN = min (max 0 (tableFreezeCols cfg)) (length vis)
         freezeR = min (max 0 (tableFreezeRows cfg)) (length rows)
@@ -625,27 +630,25 @@ tableCfg cfg outerLayout key cols rows curSort =
         sorted = sortRows cols sort0 rows
         pinned = take freezeR sorted
         scrollRows = drop freezeR sorted
-        hdrs = columnHeaders cols
+        hdrs = Encode.header id cols
         rowMinH = 28
         fillInner = tableFillInner cfg outerLayout
-        mins = [resolvedWidth sizes contentWs widths1 i | i <- [0 .. n - 1]]
-        colBoxes = V.fromList [colBoxLayout (colSizing fillInner hasStretch sizes contentWs widths1 i) (listAt mins i minColW) | i <- [0 .. n - 1]]
+        mins = V.generate n (resolvedWidth sizes contentWs indexedWidths)
+        colBoxes = V.generate n $ \i -> colBoxLayout (colSizing fillInner hasStretch sizes contentWs indexedWidths i) (vectorAt mins i minColW)
         colBox i = if i < V.length colBoxes then colBoxes V.! i else tight defaultLayout
-        resolvedW i = listAt mins i minColW
-        cellLayouts = V.fromList
-          [ (tight defaultLayout)
+        resolvedW i = vectorAt mins i minColW
+        cellLayouts = V.generate n $ \i ->
+          (tight defaultLayout)
               { layoutWidth = Grow 1
               , layoutHeight = Grow 1
-              , layoutAlignX = if listAt numeric i False then AlignEnd else AlignStart
+              , layoutAlignX = if vectorAt numeric i False then AlignEnd else AlignStart
               , layoutAlignY = AlignMiddle
               , layoutMinH = rowMinH
-              , layoutFontVariant = if listAt numeric i False then FontMono else FontRegular
+              , layoutFontVariant = if vectorAt numeric i False then FontMono else FontRegular
               }
-          | i <- [0 .. n - 1]
-          ]
         renderHeader i =
           let !lay = if i < V.length cellLayouts then cellLayouts V.! i else tight defaultLayout
-           in buttonStyled (tableHeaderLabel (listAt hdrs i T.empty)) (if sortColIndex sort0 == i then 1 else 0) lay (sortMarkStyle sort0 i .|. buttonFlagTable)
+           in buttonStyled (tableHeaderLabel (vectorAt hdrs i T.empty)) (if sortColIndex sort0 == i then 1 else 0) lay (sortMarkStyle sort0 i .|. buttonFlagTable)
         renderCell ri r =
           let !rowCells = Encode.row id cols r
            in \i ->

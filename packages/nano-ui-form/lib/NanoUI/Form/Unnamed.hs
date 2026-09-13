@@ -79,7 +79,7 @@ inputSlider minV maxV initial =
     initial
 
 -- | Auto-enumerated select dropdown.
-inputSelect :: FormError FormInput err => [Text] -> Int -> Form err Int
+inputSelect :: (Foldable f, FormError FormInput err) => f Text -> Int -> Form err Int
 inputSelect options initial =
   Unnamed.input
     (Right . decodeInt initial)

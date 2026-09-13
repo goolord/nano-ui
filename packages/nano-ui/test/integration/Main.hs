@@ -3,7 +3,7 @@ module Main (main) where
 import Cases
 import Cases.Runner (runDrawingLockTest, runSessionLoopTest)
 import Cases.SIMD (runSimdWritesTest)
-import Cases.State (runCheckboxEmitKeyboardTest, runControlledStateTest, runHookStateTest)
+import Cases.State (runCheckboxEmitKeyboardTest, runControlledStateTest, runHookStateTest, runCollectionApiTest)
 import Cases.Table (runTableReorderTest, runTableSortTest)
 import Data.IORef (IORef)
 import NanoUI.Testing (Context, newContext, newPixelContext)
@@ -31,6 +31,7 @@ testSpecs =
   , TestSpec "simd-writes" False runSimdWritesTest
   , TestSpec "controlled-state" False runControlledStateTest
   , TestSpec "hook-state" False runHookStateTest
+  , TestSpec "collection-api" False runCollectionApiTest
   , TestSpec "table-sort" False runTableSortTest
   , TestSpec "table-reorder" True runTableReorderTest
   , TestSpec "composite-animation-isolation" False runCompositeAnimationIsolationTest

@@ -385,10 +385,7 @@ growPrimArray ref cap newCap defVal = do
 growBoxedStoreCopy :: a -> MutableArray RealWorld a -> Int -> Int -> IO (MutableArray RealWorld a)
 growBoxedStoreCopy emptyVal arr oldCap newCap = do
   newArr <- newArray newCap emptyVal
-  forM_ [0 .. oldCap - 1] $ \i ->
-    readArray arr i >>= writeArray newArr i
-  forM_ [oldCap .. newCap - 1] $ \i ->
-    writeArray newArr i emptyVal
+  copyMutableArray newArr 0 arr 0 oldCap
   pure newArr
 
 {-# INLINE sizingTag #-}
