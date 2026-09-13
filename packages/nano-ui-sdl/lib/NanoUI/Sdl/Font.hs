@@ -352,7 +352,9 @@ insertGlyph ga sf key c = do
 -- @Just GlyphQuad@ on each character.
 data CachedQuad
   = UncachedQuad
-  | Cached {-# UNPACK #-} !(Maybe GlyphQuad)
+  -- Preserve the cached object even with -funbox-strict-fields: unpacking it
+  -- defeats sharing and reconstructs the lookup result on every hit.
+  | Cached {-# NOUNPACK #-} !(Maybe GlyphQuad)
 
 -- | Build a 'FontMetrics' that populates 'fmGlyph' from the glyph atlas,
 -- so 'pushText' can emit real textured quads.  This must be called after

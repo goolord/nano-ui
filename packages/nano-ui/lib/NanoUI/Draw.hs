@@ -984,7 +984,9 @@ pushRoundedRect da rect@(Rect x y w h) radius col
 -- off-origin inset (delta = (box - mark)/2) away, and since absolute snapping
 -- rides on the fractional part of the widget position the mark would drift
 -- off-center by up to a pixel as the widget scrolls.
-{-# INLINE pushRoundedRectRaw #-}
+-- Keep the fused emitter out of its many paint callers: inlining it duplicates
+-- the corner loops and increases instruction-cache pressure substantially.
+{-# NOINLINE pushRoundedRectRaw #-}
 pushRoundedRectRaw :: DrawArena -> Rect -> Float -> Color -> IO ()
 pushRoundedRectRaw da (Rect x y w h) radius col
   | w <= 0 || h <= 0 = pure ()
@@ -1066,7 +1068,7 @@ pushRoundedRectRaw da (Rect x y w h) radius col
             pokeCorner (vi3 + 2 * cornerV) (ii3 + 2 * cornerI) (x + w - rad) (y + h - rad) 0
             pokeCorner (vi3 + 3 * cornerV) (ii3 + 3 * cornerI) (x + rad) (y + h - rad) (pi * 0.5)
 
-{-# INLINE pushRoundedStroke #-}
+{-# NOINLINE pushRoundedStroke #-}
 pushRoundedStroke :: DrawArena -> Rect -> Float -> Float -> Color -> IO ()
 pushRoundedStroke da (Rect x y w h) radius bw col
   | w <= 0 || h <= 0 || bw <= 0 = pure ()

@@ -76,6 +76,7 @@ module NanoUI.Layout.Arena
   , LayoutCache (..)
   , newLayoutCache
   , captureLayoutCache
+  , layoutCacheEligible
   , layoutInputsMatch
   , restoreLayoutCache
   ) where
@@ -749,8 +750,7 @@ snapshotLayoutRects na = do
   go 0
 
 -- | Cached layout signature and solved geometry for whole-layout reuse. The
--- arrays are preallocated and copied into, so capturing a steady frame costs
--- a memcpy and no GC allocation.
+-- backing arrays are reused; only cache misses capture a new solved frame.
 data LayoutCache = LayoutCache
   { lcCap :: !Int
   , lcCount :: !Int
@@ -801,11 +801,24 @@ captureLayoutCache na lc0 = do
   copyMutableArray (lcOptions lc) 0 (naArrOptionsStore a) 0 n
   pure lc {lcCount = n}
 
--- | Exact descriptor comparison. Only trees with no floating nodes and no
--- scroll containers are eligible: their solve writes only the geometry
--- columns, so the form arrays can be compared and the rects restored. Scroll
--- containers are allowed too: the solver overwrites only their value/content
--- width columns, which are excluded from the comparison and restored.
+-- | Floating placement depends on state outside the arena descriptor. Custom
+-- measurement is checked separately by Frame, which owns its registration.
+layoutCacheEligible :: NodeArena -> IO Bool
+layoutCacheEligible na = do
+  n <- arenaCount na
+  a <- arenaArrays na
+  let go !i
+        | i >= n = pure True
+        | otherwise = do
+            nt <- readPrimArray (naArrTags a) (i * 8)
+            if isFloatingNode (toEnum (fromIntegral nt))
+              then pure False
+              else go (i + 1)
+  if n <= 0 then pure False else go 0
+
+-- | Compare layout inputs, stopping at the first mismatch. Node values are
+-- paint state except on scroll containers, where they are solver outputs.
+-- Neither belongs in the layout-input signature.
 layoutInputsMatch :: NodeArena -> LayoutCache -> IO Bool
 layoutInputsMatch na lc = do
   n <- arenaCount na
@@ -813,40 +826,52 @@ layoutInputsMatch na lc = do
     then pure False
     else do
       a <- arenaArrays na
-      eligible <- goEligible (naArrTags a) 0 n
+      eligible <- layoutCacheEligible na
       if not eligible
         then pure False
         else do
-          styleEq <- styleMatch (naArrStyle a) (naArrTags a) (lcStyle lc) 0 n
-          tagsEq <- primEqWord8 (naArrTags a) (lcTags lc) 0 (n * 8)
-          treeEq <- primEqInt (naArrTree a) (lcTree lc) 0 (n * 8)
-          textEq <- boxedEq (naArrTextStore a) (lcText lc) 0 n
-          optsEq <- boxedEq (naArrOptionsStore a) (lcOptions lc) 0 n
-          pure (styleEq && tagsEq && treeEq && textEq && optsEq)
-  where
-    goEligible _ i n | i >= n = pure True
-    goEligible tags i n = do
-      raw <- readPrimArray tags (i * 8)
-      let !nt = toEnum (fromIntegral raw)
-      if isFloatingNode nt
-        then pure False
-        else goEligible tags (i + 1) n
+          andThen (styleMatch (naArrStyle a) (lcStyle lc) 0 n) $
+            andThen (primEqWord8 (naArrTags a) (lcTags lc) 0 (n * 8)) $
+              andThen (treeMatch a (lcTree lc) 0 n) $
+                andThen (boxedEq (naArrTextStore a) (lcText lc) 0 n) $
+                  boxedEq (naArrOptionsStore a) (lcOptions lc) 0 n
 
--- | Compare the style columns that feed layout. Scroll containers have their
--- value/content-width columns (12, 13) written by the solver, so those are
--- skipped and restored from the cache.
-styleMatch :: MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Word8 -> MutablePrimArray RealWorld Float -> Int -> Int -> IO Bool
-styleMatch x tags y i n
+{-# INLINE andThen #-}
+andThen :: IO Bool -> IO Bool -> IO Bool
+andThen check next = do
+  ok <- check
+  if ok then next else pure False
+
+-- Style columns 12/13 contain scroll extents or paint-only node values.
+styleMatch :: MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> Int -> Int -> IO Bool
+styleMatch x y i n
   | i >= n = pure True
   | otherwise = do
-      raw <- readPrimArray tags (i * 8)
+      let !base = i * 16
+      andThen (floatsEq x y base 0 11) $
+        andThen (floatsEq x y base 14 15) $
+          styleMatch x y (i + 1) n
+
+-- Leaf font colors do not affect layout. Box/image/drawing style IDs are
+-- paint data too; their intrinsic dimensions come from sizing constraints.
+-- Container column 7 remains significant because it holds the grid count.
+treeMatch :: NodeArenaArrays -> MutablePrimArray RealWorld Int -> Int -> Int -> IO Bool
+treeMatch a cached i n
+  | i >= n = pure True
+  | otherwise = do
+      raw <- readPrimArray (naArrTags a) (i * 8)
       let !nt = toEnum (fromIntegral raw)
-          !base = i * 16
-      ok <-
-        if isScrollNode nt
-          then (&&) <$> floatsEq x y base 0 11 <*> floatsEq x y base 14 15
-          else floatsEq x y base 0 15
-      if ok then styleMatch x tags y (i + 1) n else pure False
+          !base = i * 8
+          paintStyle = nt == NodeBox || nt == NodeImage || nt == NodeDrawing
+          go !j
+            | j >= 8 = treeMatch a cached (i + 1) n
+            | j == 5 && paintStyle = go (j + 1)
+            | j == 7 && not (isContainerNode nt) = go (j + 1)
+            | otherwise = do
+                x <- readPrimArray (naArrTree a) (base + j)
+                y <- readPrimArray cached (base + j)
+                if x == y then go (j + 1) else pure False
+      go 0
 
 -- | Compare style columns @[lo .. hi]@ of one node (offsets from @base@).
 floatsEq :: MutablePrimArray RealWorld Float -> MutablePrimArray RealWorld Float -> Int -> Int -> Int -> IO Bool
@@ -867,14 +892,6 @@ primEqWord8 x y i n
       b <- readPrimArray y i
       if a == b then primEqWord8 x y (i + 1) n else pure False
 
-primEqInt :: MutablePrimArray RealWorld Int -> MutablePrimArray RealWorld Int -> Int -> Int -> IO Bool
-primEqInt x y i n
-  | i >= n = pure True
-  | otherwise = do
-      a <- readPrimArray x i
-      b <- readPrimArray y i
-      if a == b then primEqInt x y (i + 1) n else pure False
-
 boxedEq :: Eq a => MutableArray RealWorld a -> MutableArray RealWorld a -> Int -> Int -> IO Bool
 boxedEq x y i n
   | i >= n = pure True
@@ -883,13 +900,21 @@ boxedEq x y i n
       b <- readArray y i
       if a == b then boxedEq x y (i + 1) n else pure False
 
--- | Restore the solved rects/clips and the solver-written style columns.
+-- | Restore only solver outputs. Rebuilt paint values/colors must survive a
+-- cache hit; copying the entire cached style array would revert them.
 restoreLayoutCache :: NodeArena -> LayoutCache -> IO ()
 restoreLayoutCache na lc = do
   a <- arenaArrays na
   let !n = lcCount lc
   copyMutablePrimArray (naArrGeom a) 0 (lcGeom lc) 0 (n * 10)
-  copyMutablePrimArray (naArrStyle a) 0 (lcStyle lc) 0 (n * 16)
+  let go !i
+        | i >= n = pure ()
+        | otherwise = do
+            raw <- readPrimArray (naArrTags a) (i * 8)
+            when (isScrollNode (toEnum (fromIntegral raw))) $
+              copyMutablePrimArray (naArrStyle a) (i * 16 + 12) (lcStyle lc) (i * 16 + 12) 2
+            go (i + 1)
+  go 0
 
 {-# INLINE getText #-}
 getText :: NodeArena -> NodeIdx -> IO Text

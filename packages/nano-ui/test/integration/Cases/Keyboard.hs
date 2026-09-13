@@ -7,13 +7,58 @@ module Cases.Keyboard
   , runKeyboardRadioTest
   , runKeyboardToggleTest
   , runKeyboardTabHeaderTest
+  , runKeyboardDisabledTest
+  , runKeyboardModalEligibilityTest
   ) where
 
-import Data.IORef (IORef)
+import Data.IORef (IORef, writeIORef)
+import Data.IntMap.Strict qualified as IM
 import NanoUI
+import NanoUI.Context (Context (..), intKey, setStore)
+import NanoUI.Store (WidgetStore (..), slotDisabled, slotKey)
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertGt)
 import NanoUI.Testing.Harness (warmup2, withInputOff)
+
+-- Retaining focus while a widget becomes disabled must not bypass the same
+-- guard used by pointer interaction. Exercise the shared key-navigation hook.
+runKeyboardDisabledTest :: Context -> IORef Int -> IO ()
+runKeyboardDisabledTest _ctx failed = do
+  let inp = withInputOff 300 160
+      check :: Eq a => NanoUI (Response, a) -> Input -> IO ()
+      check ui pressed = do
+        ctx <- newContext
+        ((resp, before), _, _, _) <- runFrame ctx inp ui
+        let wid = respId resp
+        st <- getStore ctx
+        setStore ctx st {storeInt = IM.insert (slotKey slotDisabled (intKey wid)) 1 (storeInt st)}
+        writeIORef (ctxFocusId ctx) wid
+        ((afterResp, after), _, _, _) <- runFrame ctx pressed ui
+        assertEq failed after before
+        assert failed (not (respChanged afterResp) && not (respClicked afterResp))
+  check (checkbox "Disabled" False) (keyInp KeyEnter inp)
+  check (checkbox "Disabled" False) (spaceInp inp)
+  check (slider 0 100 50) (keyInp KeyRight inp)
+  check (toggleSwitch False) (spaceInp inp)
+  check (do r <- button' "Disabled"; pure (r, respClicked r)) (keyInp KeyEnter inp)
+
+runKeyboardModalEligibilityTest :: Context -> IORef Int -> IO ()
+runKeyboardModalEligibilityTest ctx failed = do
+  let inp = withInputOff 400 300
+      ui = column $ do
+        outside <- checkbox "Outside" False
+        (_, inside) <- modal True "Modal" (checkbox "Inside" False)
+        pure (outside, inside)
+  ((outside, inside), _, _, _) <- runFrame ctx inp ui
+  writeIORef (ctxFocusId ctx) (respId (fst outside))
+  (((_, outsideValue), _), _, _, _) <- runFrame ctx (keyInp KeyEnter inp) ui
+  assert failed (not outsideValue)
+  case inside of
+    Nothing -> assert failed False
+    Just (resp, _) -> do
+      writeIORef (ctxFocusId ctx) (respId resp)
+      ((_, after), _, _, _) <- runFrame ctx (keyInp KeyEnter inp) ui
+      assert failed (maybe False snd after)
 
 -- | Step the tab focus to the next focusable.
 tabInp :: Input -> Input

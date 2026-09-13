@@ -15,6 +15,7 @@ module Cases
   , module Cases.Window
   , module Cases.Font
   , module Cases.Keyboard
+  , module Cases.Cache
   , runAspectLayoutTest
   , runBase16ThemeTest
   , runCheckboxTest
@@ -86,6 +87,7 @@ import Cases.Tooltip
 import Cases.Window
 import Cases.Font
 import Cases.Keyboard
+import Cases.Cache
 import Control.Monad (forM, replicateM, void, when)
 import Control.Concurrent (threadDelay)
 import Data.ByteString qualified as BS
@@ -995,6 +997,5 @@ runSearchFieldDebounceTest ctx failed = do
   threadDelay 50000
   ((rD, _), _, _, _) <- runFrame ctx inp0 ui
   assert failed (not (respChanged rD))
-
 
 

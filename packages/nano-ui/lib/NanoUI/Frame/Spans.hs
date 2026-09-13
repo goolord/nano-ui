@@ -8,6 +8,7 @@ module NanoUI.Frame.Spans
   , widgetHitRect
   , widgetTextSpans
   , widgetTextPlacements
+  , forWidgetTextPlacements_
   , collectNodeTextSpans
   , sliderValue
   , walkChildSpans
@@ -28,6 +29,7 @@ import NanoUI.Context
   ( Context (..)
   , SpanCacheEntry (..)
   , WidgetTextCacheEntry (..)
+  , WidgetTextPlacement (..)
   , WidgetStore (..)
   , getStore
   , intKey
@@ -449,8 +451,8 @@ widgetTextSpans ctx nt idx x y w h = do
         , not (T.null txt)
         ]
 
--- | Cacheable widget labels: their placement depends only on the node text,
--- style, font size and rect, so a steady-state frame can reuse the list. Text
+-- | Cacheable widget labels depend on text, style, font size, alignment and
+-- dimensions, but not the absolute node origin. Text
 -- fields / areas / colour pickers / sliders are data-dependent and stay out.
 cacheableWidgetLabel :: NodeType -> Bool
 cacheableWidgetLabel = \case
@@ -465,11 +467,41 @@ widgetTextPlacements ::
   Context -> NodeType -> NodeIdx -> Float -> Float -> Float -> Float -> IO [(T.Text, Float, Float, Float, Float)]
 widgetTextPlacements ctx nt idx x y w h
   | cacheableWidgetLabel nt = do
+      placement <- cachedWidgetLabel ctx nt idx w h
+      pure $ case placement of
+        Nothing -> []
+        Just (WidgetTextPlacement txt px py tw th) -> [(txt, x + px, y + py, tw, th)]
+  | otherwise = computeWidgetTextPlacements ctx nt idx x y w h
+
+-- | Runtime consumer API. The Bool marks the last placement (for table sort
+-- arrows); cached labels are translated directly into the consumer.
+{-# INLINE forWidgetTextPlacements_ #-}
+forWidgetTextPlacements_ ::
+  Context -> NodeType -> NodeIdx -> Float -> Float -> Float -> Float ->
+  (Bool -> T.Text -> Float -> Float -> Float -> Float -> IO ()) -> IO ()
+forWidgetTextPlacements_ ctx nt idx x y w h emit
+  | cacheableWidgetLabel nt = do
+      placement <- cachedWidgetLabel ctx nt idx w h
+      case placement of
+        Nothing -> pure ()
+        Just (WidgetTextPlacement txt px py tw th) -> emit True txt (x + px) (y + py) tw th
+  | otherwise = do
+      placements <- computeWidgetTextPlacements ctx nt idx x y w h
+      let go [] = pure ()
+          go ((txt, px, py, tw, th) : rest) =
+            emit (null rest) txt px py tw th >> go rest
+      go placements
+
+cachedWidgetLabel :: Context -> NodeType -> NodeIdx -> Float -> Float -> IO (Maybe WidgetTextPlacement)
+cachedWidgetLabel ctx nt idx w h
+  | cacheableWidgetLabel nt = do
       fontSizeVal <- getNodeFontSize (ctxNodeArena ctx) idx
       si <- getStyleIdx (ctxNodeArena ctx) idx
       txt <- displayText ctx nt idx
-      let r = Rect x y w h
-          ntTag = fromEnum nt
+      ax <- if nt == NodeButton && isTableHeaderStyle si
+        then getAlignX (ctxNodeArena ctx) idx
+        else pure AlignStart
+      let ntTag = fromEnum nt
       cache <- readIORef (ctxWidgetTextCache ctx)
       case IM.lookup idx cache of
         Just e
@@ -477,67 +509,72 @@ widgetTextPlacements ctx nt idx x y w h
               && wtcStyle e == si
               && wtcFontSize e == fontSizeVal
               && wtcText e == txt
-              && wtcRect e == r -> pure (wtcPlacements e)
+              && wtcWidth e == w
+              && wtcHeight e == h
+              && wtcAlign e == fromEnum ax -> pure (wtcPlacement e)
         _ -> do
-          ps <- computeWidgetTextPlacements ctx nt idx x y w h
+          placement <- computeWidgetLabel ctx nt txt si fontSizeVal ax w h
           writeIORef
             (ctxWidgetTextCache ctx)
-            (IM.insert idx (WidgetTextCacheEntry ntTag si fontSizeVal txt r ps) cache)
-          pure ps
-  | otherwise = computeWidgetTextPlacements ctx nt idx x y w h
+            (IM.insert idx (WidgetTextCacheEntry ntTag si fontSizeVal txt w h (fromEnum ax) placement) cache)
+          pure placement
+  | otherwise = pure Nothing
+
+-- All coordinates here are local. centeredTextY snaps the baseline offset,
+-- not the origin; final device-pixel snapping stays in the draw backend.
+computeWidgetLabel :: Context -> NodeType -> T.Text -> Int -> Float -> AlignX -> Float -> Float -> IO (Maybe WidgetTextPlacement)
+computeWidgetLabel ctx nt txt si fontSizeVal ax w h
+  | nt == NodeButton && isCloseButtonStyle si = pure Nothing
+  | otherwise = do
+      fm <- placementFont ctx fontSizeVal si
+      (tw, th) <- measurePlacementText ctx fontSizeVal si fm txt
+      let (ix, _) = widgetContentInset fm
+          (tx, used) = case nt of
+            NodeButton
+              | isTableHeaderStyle si -> alignedTextPen ax 0 w (fst (tableCellInset fm)) fm txt
+              | isMenuItemStyle si ->
+                  let inset = textInputMenuItemPadX + ix
+                   in (inset, min tw (max 0 (w - inset - ix)))
+              | otherwise -> alignedTextPen AlignCenter 0 w 0 fm txt
+            NodeSelect -> (ix, min tw (w - ix - selectChevronReserve))
+            NodeTree ->
+              let (_, depth, _, _) = treeDecodeStyle si
+               in (fst (labelContentInset fm) + treeRowLeading fm depth, tw)
+            _ -> (fst (labelContentInset fm) + checkboxLeading fm, tw)
+      let !placement = WidgetTextPlacement txt tx (centeredTextY fm 0 h th) used th
+      pure (Just placement)
+
+placementFont :: Context -> Float -> Int -> IO FontMetrics
+placementFont ctx sz si
+  | sz <= 0 && weight == WeightNormal && style == FontStyleNormal
+      && (variant == FontRegular || variant == FontMono) =
+      pure (if variant == FontMono then ctxMonoFontMetrics ctx else ctxFontMetrics ctx)
+  | otherwise = fst <$> ctxResolveFont ctx sz weight style variant
+  where
+    weight = textNodeFontWeight si
+    style = textNodeFontStyle si
+    variant = textNodeFontVariant si
+
+measurePlacementText :: Context -> Float -> Int -> FontMetrics -> T.Text -> IO (Float, Float)
+measurePlacementText ctx sz si fm txt
+  | sz <= 0 && weight == WeightNormal && style == FontStyleNormal
+      && (variant == FontRegular || variant == FontMono) =
+      if variant == FontMono then pure (measureText fm txt) else ctxMeasureText ctx txt
+  | otherwise = ctxResolveMeasure ctx sz weight style variant txt
+  where
+    weight = textNodeFontWeight si
+    style = textNodeFontStyle si
+    variant = textNodeFontVariant si
 
 computeWidgetTextPlacements ::
   Context -> NodeType -> NodeIdx -> Float -> Float -> Float -> Float -> IO [(T.Text, Float, Float, Float, Float)]
 computeWidgetTextPlacements ctx nt idx x y w h = do
   fontSizeVal <- getNodeFontSize (ctxNodeArena ctx) idx
   si <- getStyleIdx (ctxNodeArena ctx) idx
-  let fweight = textNodeFontWeight si
-      fstyle  = textNodeFontStyle si
-      fvar    = textNodeFontVariant si
-      isBaseSans = fontSizeVal <= 0 && fweight == WeightNormal && fstyle == FontStyleNormal && fvar == FontRegular
-      isBaseMono = fontSizeVal <= 0 && fweight == WeightNormal && fstyle == FontStyleNormal && fvar == FontMono
-  fm <-
-    if isBaseSans
-      then pure (ctxFontMetrics ctx)
-      else if isBaseMono
-        then pure (ctxMonoFontMetrics ctx)
-        else fst <$> ctxResolveFont ctx fontSizeVal fweight fstyle fvar
+  fm <- placementFont ctx fontSizeVal si
   let (ix, iy) = widgetContentInset fm
-      measureTxt t =
-        if isBaseSans
-          then ctxMeasureText ctx t
-          else if isBaseMono
-            then pure (measureText (ctxMonoFontMetrics ctx) t)
-            else ctxResolveMeasure ctx fontSizeVal fweight fstyle fvar t
+      measureTxt = measurePlacementText ctx fontSizeVal si fm
   case nt of
-    NodeButton -> do
-      if isCloseButtonStyle si
-        then pure []
-        else do
-          txt <- displayText ctx nt idx
-          (tw, th) <- measureTxt txt
-          if isTableHeaderStyle si
-            then do
-              ax <- getAlignX (ctxNodeArena ctx) idx
-              let (labelIx, _) = tableCellInset fm
-                  (tx, used) = alignedTextPen ax x w labelIx fm txt
-              pure [(txt, tx, centeredTextY fm y h th, used, th)]
-            else
-              if isMenuItemStyle si
-                then do
-                  -- Match the text-field context menu pen exactly: label inset
-                  -- of textInputMenuItemPadX plus the widget content inset.
-                  let inset = textInputMenuItemPadX + ix
-                      tx = x + inset
-                      avail = max 0 (w - inset - ix)
-                  pure [(txt, tx, centeredTextY fm y h th, min tw avail, th)]
-                else do
-                  let (tx, used) = alignedTextPen AlignCenter x w 0 fm txt
-                  pure [(txt, tx, centeredTextY fm y h th, used, th)]
-    NodeSelect -> do
-      txt <- displayText ctx nt idx
-      (tw, th) <- measureTxt txt
-      pure [(txt, x + ix, centeredTextY fm y h th, min tw (w - ix - selectChevronReserve), th)]
     NodeColorPicker -> do
       let showAlpha = colorPickerAlphaMode si
           geom = colorPickerGeom showAlpha fm x y w h
@@ -549,21 +586,6 @@ computeWidgetTextPlacements ctx nt idx x y w h = do
         [ (colorPickerCurrentLabel, cpgPreviewX geom, currentLabelY, cw, ch)
         , (colorPickerNewLabel, cpgPreviewX geom, newLabelY, nw, nh)
         ]
-    _ | nt == NodeCheckbox || nt == NodeRadio -> do
-      txt <- displayText ctx nt idx
-      (tw, th) <- measureTxt txt
-      let (cx, _) = labelContentInset fm
-          tx = x + cx + checkboxLeading fm
-          ty = centeredTextY fm y h th
-      pure [(txt, tx, ty, tw, th)]
-    NodeTree -> do
-      txt <- displayText ctx nt idx
-      (tw, th) <- measureTxt txt
-      let (_, depth, _, _) = treeDecodeStyle si
-          (cx, _) = labelContentInset fm
-          tx = x + cx + treeRowLeading fm depth
-          ty = centeredTextY fm y h th
-      pure [(txt, tx, ty, tw, th)]
     NodeSlider -> pure []
     NodeTextInput
       | textInputBareMode si -> do
@@ -655,4 +677,3 @@ collectFloatingSpansInto ctx floatCache wanted arena = do
                 walkChildSpans ctx floatCache idx clip arena
                 go (idx + 1)
   go 0
-

@@ -3,7 +3,7 @@
 
 module Main (main) where
 
-import Control.Monad (replicateM_, void, forM_)
+import Control.Monad (replicateM_, void, forM_, unless, when)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
 import GHC.Clock (getMonotonicTimeNSec)
 import GHC.Stats (RTSStats (..), getRTSStats)
@@ -25,9 +25,12 @@ import NanoUI.Backend.Sdl
   , withSdlBench
   )
 import NanoUI.Diagrams
+import NanoUI.Context (ctxNodeArena)
+import NanoUI.Layout.Arena (NodeType (NodeButton), findNodeRevM, getNodeType, getRect, getText)
 import NanoUI.Testing
   ( Context
   , collectTextSpans
+  , debugPanelOpen
   , runFrame
   , takeDamage
   , drawVertexCount
@@ -35,6 +38,7 @@ import NanoUI.Testing
   , drawCmdCount
   )
 import NanoUI.Testing.Harness (findExact)
+import NanoUI.Testing.Harness qualified as Harness
 import DemoData
   ( DemoPerson (..)
   , colPeople
@@ -120,13 +124,19 @@ main = do
       spansLatest <- collectTextSpans ctx'
       case findExact "Debug" spansLatest of
         Nothing -> putStrLn "  Debug button not found\n"
-        Just (V2 dbgX dbgY) -> do
+        Just _ -> do
           let clickDbg = do
-                let dInp = inp { inputMousePos = V2 dbgX dbgY, inputMouseDown = True, inputMousePressed = True }
-                void (sdlDrawFrame ctx' demoUi sdlEnv dInp False)
-                let uInp = inp { inputMousePos = V2 dbgX dbgY, inputMouseDown = False }
-                void (sdlDrawFrame ctx' demoUi sdlEnv uInp False)
-          clickDbg
+                -- Live stats can move the toolbar between workloads. Resolve
+                -- its current position and send the complete click lifecycle.
+                currentSpans <- collectTextSpans ctx'
+                case findExact "Debug" currentSpans of
+                  Nothing -> fail "Debug button missing during profiling"
+                  Just pos -> Harness.clickPos
+                    (\frameInp -> void (sdlDrawFrame ctx' demoUi sdlEnv frameInp False)) inp pos
+          alreadyOpen <- debugPanelOpen ctx'
+          unless alreadyOpen clickDbg
+          opened <- debugPanelOpen ctx'
+          unless opened (fail "Debug Open workload did not open the debug window")
           measureBench "Full DemoUi (Debug Open, SDL Present)" iterations $
             void (sdlDrawFrame ctx' demoUi sdlEnv inp False)
           measureBench "Full DemoUi (Debug Open, runFrame)" iterations $
@@ -161,7 +171,21 @@ main = do
           let wait1 = if want1 then 0 :: Int else if active1 then 250 else -1
           printf "  stats window queried         : active=%-5s waitTimeout=%-3d (4 Hz HUD refresh sustained)\n" (show active1) wait1
           putStrLn ""
-          clickDbg
+          -- The floating debug window can occlude the toolbar after it grows.
+          -- Its title-bar close button is the unlabelled NodeButton in this UI.
+          let arena = ctxNodeArena ctx'
+          closeNode <- findNodeRevM arena $ \i -> do
+            nt <- getNodeType arena i
+            if nt == NodeButton then T.null <$> getText arena i else pure False
+          case closeNode of
+            Nothing -> fail "Debug close button missing during profiling"
+            Just i -> do
+              (x, y, w, h) <- getRect arena i
+              Harness.clickPos
+                (\frameInp -> void (sdlDrawFrame ctx' demoUi sdlEnv frameInp False))
+                inp (V2 (x + w / 2) (y + h / 2))
+          stillOpen <- debugPanelOpen ctx'
+          when stillOpen (fail "Debug window did not close after profiling")
 
       putStrLn "--- 6. DEBUG HUD ROW STRUCTURE ---"
       let hudRows :: [[(T.Text, T.Text)]]

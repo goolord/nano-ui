@@ -5,7 +5,7 @@ module Main (main) where
 import Control.Exception (evaluate)
 import Control.Monad (replicateM_, void, when)
 import GHC.IO.Encoding (setLocaleEncoding, utf8)
-import GHC.Stats (RTSStats (..), getRTSStats)
+import GHC.Conc (getAllocationCounter)
 import NanoUI
 import NanoUI.Context (Context (..))
 import NanoUI.Testing (runFrame)
@@ -84,16 +84,22 @@ glyphLookupAlloc ctx = do
       step !n !acc =
         if n <= 0
           then acc
-          else case fmGlyph fm (chars !! (n `mod` len)) of
-            Just gq -> step (n - 1) (acc + gqW gq)
-            Nothing -> step (n - 1) acc
+          else
+            -- Force selection before the indirect glyph call; otherwise the
+            -- benchmark allocates a character-selection thunk per lookup.
+            let !c = chars !! (n `mod` len)
+             in case fmGlyph fm c of
+                  Just gq -> step (n - 1) (acc + gqW gq)
+                  Nothing -> step (n - 1) acc
   -- Warm every character so every lookup shares a cached 'Maybe'.
   _ <- evaluate (foldl' (\a c -> maybe a (\gq -> a + gqW gq) (fmGlyph fm c)) 0 chars)
   performGC
-  before <- getRTSStats
+  -- The thread allocation counter is current even if this probe never fills
+  -- the nursery. RTSStats.allocated_bytes only catches up at a GC.
+  before <- getAllocationCounter
   _ <- evaluate (step lookups 0)
-  after <- getRTSStats
-  pure (fromIntegral (allocated_bytes after - allocated_bytes before))
+  after <- getAllocationCounter
+  pure (fromIntegral before - fromIntegral after)
 
 -- | Bytes per warm lookup tolerated before the gate trips. The cached path
 -- should be zero; a reintroduced per-hit record would cost tens of bytes.

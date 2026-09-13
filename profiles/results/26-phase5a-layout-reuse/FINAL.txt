@@ -1,4 +1,6 @@
 nano-ui frame-allocation plan: final report
+HISTORICAL REPORT -- acceptance claims corrected after review of e73150d..6d1f596.
+See ../29-review-fixes/SUMMARY.md for the follow-up fixes and measurements.
 date: 2026-09-12 (Linux x86_64, GHC 9.14.1, -O2 -mavx2, RTS -N1 -A64m -T -I0)
 NOTE: the X display died partway through the session; the last measurements
 use SDL_VIDEODRIVER=dummy SDL_RENDER_DRIVER=software, which was verified to
@@ -9,20 +11,26 @@ died was byte-identical to baseline.
 
 FINAL ACCEPTANCE
 ----------------
-Allocation <=30% of baseline for the fixed workload:  MET
+Allocation <=30% of baseline for the medium/large synthetic button grids: RECORDED
   ui/runFrame medium  455 -> 134 KB  (29.5% of baseline, -70.5%)
   ui/runFrame large   945 -> 272 KB  (28.8% of baseline, -71.2%)
   ui/runFrame small    17 ->  11 KB  (64.7% of baseline)
-No interaction/rendering regressions:  MET
+Full DemoUi allocation fell from 509.7 to 264.4 KB (~48%), not >=70%.
+No interaction/rendering regressions: NOT ESTABLISHED
   cabal test all PASS; demo draw geometry byte-identical with and without
   layout reuse at every step; new cached-vs-uncached tests for layout,
-  scroll and deep nesting.
-Improved CPU frame time / no worse tail:  MET (noise-level; solve skipped)
+   scroll and deep nesting. Later review reproduced stale custom/metric layout,
+   stale header alignment, and disabled-widget keyboard activation regressions.
+Improved CPU frame time / no worse tail: NOT ESTABLISHED
   medium ~188 -> 174 us, large ~408 -> 374 us.
-Bounded caches and retained memory:  MET
+   These averages mix renderer conditions and contain no tail-latency evidence.
+   The profile's Debug Open click also omitted the release edge, so its unchanged
+   draw counts do not verify a debug-open workload.
+Bounded caches and retained memory: NOT ESTABLISHED
   LayoutCache arrays preallocated + geometrically grown; span/widget-text
   caches cleared on font/theme/DPI change; per-depth axis snapshots grow
-  on demand instead of clamping.
+   on demand instead of clamping. Those properties alone do not verify retained
+   text/native/GPU memory bounds.
 
 PHASES / CHANGES
 ----------------

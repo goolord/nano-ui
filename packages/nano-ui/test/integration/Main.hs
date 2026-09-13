@@ -30,6 +30,12 @@ testSpecs =
   , TestSpec "with-key" False runWithKeyTest
   , TestSpec "layout" False runLayoutTest
   , TestSpec "layout-reuse" False runLayoutReuseTest
+  , TestSpec "layout-cache-eligibility" False runLayoutCacheEligibilityTest
+  , TestSpec "metric-cache-invalidation" False runMetricCacheInvalidationTest
+  , TestSpec "widget-placement-cache" False runWidgetPlacementCacheTest
+  , TestSpec "layout-cache-paint-state" False runLayoutPaintStateTest
+  , TestSpec "keyboard-disabled" False runKeyboardDisabledTest
+  , TestSpec "keyboard-modal-eligibility" False runKeyboardModalEligibilityTest
   , TestSpec "deep-nesting" False runDeepNestingTest
   , TestSpec "row-panel-layout" False runRowPanelLayoutTest
   , TestSpec "draw" False runDrawTest

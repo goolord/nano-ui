@@ -31,8 +31,10 @@ import NanoUI.Context
   , getFocusId
   , getStore
   , intKey
+  , isDisabled
   , markEscapeConsumed
   , menuPointerGestureActive
+  , pointerBlockedByModal
   , setStore
   , slotDrag
   , slotDragW
@@ -45,6 +47,7 @@ import NanoUI.Input
   , inputChars
   , inputKeys
   , inputKeysElem
+  , inputKeysNull
   , inputMouseDown
   , inputMousePos
   , inputMousePressed
@@ -218,21 +221,27 @@ data KeyNav = KeyNav
   }
   deriving (Eq, Show)
 
--- | Arrow / Enter / Space while 'wid' is focused.
+-- | Arrow / Enter / Space while 'wid' is focused and eligible for input.
 {-# INLINE useKeyNav #-}
 useKeyNav :: (Ui :> es) => WidgetId -> Eff es KeyNav
 useKeyNav wid = do
-  ctx <- askContext
   inp <- askInput
-  focus <- uiIO (getFocusId ctx)
-  let on = hashWidgetId wid /= 0 && focus == wid
-      keys = inputKeys inp
+  let keys = inputKeys inp
       none = KeyNav False False False False False False
-  if not on
+  if hashWidgetId wid == 0 || (inputKeysNull keys && T.null (inputChars inp))
     then pure none
-    else
-      pure
-        KeyNav
+    else do
+      ctx <- askContext
+      focus <- uiIO (getFocusId ctx)
+      eligible <-
+        if focus /= wid
+          then pure False
+          else uiIO $ do
+            disabled <- isDisabled ctx wid
+            if disabled then pure False else not <$> pointerBlockedByModal ctx
+      if not eligible
+        then pure none
+        else pure KeyNav
           { knUp = inputKeysElem KeyUp keys
           , knDown = inputKeysElem KeyDown keys
           , knLeft = inputKeysElem KeyLeft keys

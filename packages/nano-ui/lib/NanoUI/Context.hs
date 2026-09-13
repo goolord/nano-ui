@@ -16,6 +16,7 @@ module NanoUI.Context
   , DrawFitCache (..)
   , SpanCacheEntry (..)
   , WidgetTextCacheEntry (..)
+  , WidgetTextPlacement (..)
   , InteractionState (..)
   , initialInteractionState
   , initialDamageState
@@ -115,6 +116,7 @@ module NanoUI.Context
   , withFontResolver
   , wrapMeasureCache
   , clearMeasureCache
+  , ensureMetricCaches
   , hasCustomLayoutInputs
   , withExternalText
   , withTheme
@@ -255,9 +257,11 @@ import NanoUI.Context.Types
   , PopupConfig (..)
   , SpanCacheEntry (..)
   , WidgetTextCacheEntry (..)
+  , WidgetTextPlacement (..)
   , FrameMsg (..)
   , InteractionState (..)
   , MeasureCacheKey
+  , MetricSource (..)
   , OverlayState (..)
   , TextFieldClickCell (..)
   , TextInputDrag (..)
@@ -1084,7 +1088,7 @@ withFontResolver ::
   (Float -> FontWeight -> FontStyle -> FontVariant -> IO (FontMetrics, Bool)) ->
   (Float -> FontWeight -> FontStyle -> FontVariant -> Text -> IO (Float, Float)) ->
   Context
-withFontResolver ctx rf rm = ctx {ctxResolveFont = rf, ctxResolveMeasure = rm}
+withFontResolver ctx rf rm = trackMetricSource ctx {ctxResolveFont = rf, ctxResolveMeasure = rm}
 
 withFontMetrics :: Context -> FontMetrics -> Context
 withFontMetrics ctx fm =
@@ -1093,7 +1097,7 @@ withFontMetrics ctx fm =
           { ctxFontMetrics = fm
           , ctxMeasureText = \txt -> pure (measureText fm txt)
           }
-   in ctx'
+   in trackMetricSource ctx'
         { ctxResolveFont = defaultResolveFont ctx'
         , ctxResolveMeasure = defaultResolveMeasure ctx'
         }
@@ -1101,7 +1105,7 @@ withFontMetrics ctx fm =
 withMonoFontMetrics :: Context -> FontMetrics -> Context
 withMonoFontMetrics ctx mono =
   let ctx' = ctx {ctxMonoFontMetrics = mono}
-   in ctx'
+   in trackMetricSource ctx'
         { ctxResolveFont = defaultResolveFont ctx'
         , ctxResolveMeasure = defaultResolveMeasure ctx'
         }
@@ -1109,9 +1113,30 @@ withMonoFontMetrics ctx mono =
 withMeasureText :: Context -> (Text -> IO (Float, Float)) -> Context
 withMeasureText ctx fn =
   let ctx' = ctx {ctxMeasureText = fn}
-   in ctx'
+   in trackMetricSource ctx'
         { ctxResolveMeasure = defaultResolveMeasure ctx'
         }
+
+-- Keep the identity boxed. No structural callback comparison or unsafe pure
+-- mutation is needed, and repeated frames with the same Context do no work.
+trackMetricSource :: Context -> Context
+trackMetricSource ctx =
+  ctx {ctxMetricSource = MetricSource
+    (ctxFontMetrics ctx) (ctxMonoFontMetrics ctx) (ctxMeasureText ctx)
+    (ctxResolveFont ctx) (ctxResolveMeasure ctx)}
+
+-- | Called once before building a frame. Context configuration remains pure;
+-- cache invalidation happens at the IO boundary, including when alternating
+-- between differently configured Contexts that share their backing stores.
+ensureMetricCaches :: Context -> IO ()
+ensureMetricCaches ctx = do
+  previous <- readIORef (ctxLastMetricSource ctx)
+  case previous of
+    Just source | ptrEq source (ctxMetricSource ctx) -> pure ()
+    _ -> do
+      clearMeasureCache ctx
+      damageFull ctx
+      markDirty ctx
 
 cacheMeasureText ::
   IORef (HashMap MeasureCacheKey (Float, Float)) ->
@@ -1133,11 +1158,12 @@ cacheMeasureText ref scale base txt = do
 wrapMeasureCache :: Float -> Context -> (Text -> IO (Float, Float)) -> Context
 wrapMeasureCache scale ctx measure =
   case ctxMeasureCache ctx of
-    Nothing -> ctx {ctxMeasureText = measure}
-    Just ref -> ctx {ctxMeasureText = cacheMeasureText ref scale measure}
+    Nothing -> trackMetricSource ctx {ctxMeasureText = measure}
+    Just ref -> trackMetricSource ctx {ctxMeasureText = cacheMeasureText ref scale measure}
 
 clearMeasureCache :: Context -> IO ()
 clearMeasureCache ctx = do
+  writeIORef (ctxLastMetricSource ctx) (Just (ctxMetricSource ctx))
   writeIORef (ctxSpanCache ctx) IM.empty
   writeIORef (ctxWidgetTextCache ctx) IM.empty
   writeIORef (ctxLayoutCache ctx) Nothing
@@ -1257,6 +1283,7 @@ newContext = do
   ctxWidgetTextCache <- newIORef IM.empty
   ctxLayoutCache <- newIORef Nothing
   ctxMetricGen <- newIORef 0
+  ctxLastMetricSource <- newIORef Nothing
   ctxPaintFull <- newIORef True
   let fm0 = monospaceMetrics 12
       ctx = Context
@@ -1284,6 +1311,8 @@ newContext = do
         , ctxWidgetTextCache
         , ctxLayoutCache
         , ctxMetricGen
+        , ctxMetricSource = InitialMetricSource
+        , ctxLastMetricSource
         , ctxPaintFull
         , ctxExternalText = False
         , ctxTheme

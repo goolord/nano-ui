@@ -54,6 +54,7 @@ import NanoUI.Context
   , tickAnimations
   , lookupCustomMeasure
   , hasCustomLayoutInputs
+  , ensureMetricCaches
   )
 import NanoUI.Context (beginFrameModal)
 import NanoUI.Damage (updatePrevRects, writeDamage)
@@ -131,6 +132,7 @@ import NanoUI.Id (WidgetId (..), initialIdContext)
 import NanoUI.Input (Input (..), inputMouseDown, stripInteractionInput)
 import NanoUI.Layout.Arena
   ( captureLayoutCache
+  , layoutCacheEligible
   , layoutInputsMatch
   , newLayoutCache
   , resetNodeArena
@@ -198,6 +200,7 @@ runFrameEff ::
   -> Eff (Ui : es) a
   -> IO (a, [FrameMsg], DrawData, Bool)
 runFrameEff unlift ctx inp ui = do
+  ensureMetricCaches ctx
   oldHot <- readIORef (ctxLastHotId ctx)
   oldActive <- readIORef (ctxActiveId ctx)
   oldFocus <- readIORef (ctxFocusId ctx)
@@ -376,10 +379,8 @@ solvePlaceWindows ctx w h = do
     h
     (lookupPopupConfig ctx)
 
--- | Phase 5A: if this frame's built tree exactly matches the previous solved
--- layout (same window, same font/theme generation, same node descriptors and
--- no floating/scroll/custom-measure nodes), restore the solved rects and skip
--- the solve. Falls back to a full solve on any mismatch.
+-- | Reuse solved geometry for unchanged layout inputs. Floating placement and
+-- custom measurement have dependencies outside the arena and must be solved.
 tryReuseLayout :: Context -> Size -> IO Bool
 tryReuseLayout ctx size = do
   custom <- hasCustomLayoutInputs ctx
@@ -400,10 +401,15 @@ tryReuseLayout ctx size = do
 -- | Snapshot the solved layout so the next frame can reuse it.
 captureLayout :: Context -> Size -> IO ()
 captureLayout ctx size = do
-  gen <- readIORef (ctxMetricGen ctx)
-  mc <- readIORef (ctxLayoutCache ctx)
-  c0 <- case mc of
-    Just (c, _, _) -> pure c
-    Nothing -> newLayoutCache 64
-  c <- captureLayoutCache (ctxNodeArena ctx) c0
-  writeIORef (ctxLayoutCache ctx) (Just (c, size, gen))
+  custom <- hasCustomLayoutInputs ctx
+  eligible <- if custom then pure False else layoutCacheEligible (ctxNodeArena ctx)
+  if not eligible
+    then writeIORef (ctxLayoutCache ctx) Nothing
+    else do
+      gen <- readIORef (ctxMetricGen ctx)
+      mc <- readIORef (ctxLayoutCache ctx)
+      c0 <- case mc of
+        Just (c, _, _) -> pure c
+        Nothing -> newLayoutCache 64
+      c <- captureLayoutCache (ctxNodeArena ctx) c0
+      writeIORef (ctxLayoutCache ctx) (Just (c, size, gen))

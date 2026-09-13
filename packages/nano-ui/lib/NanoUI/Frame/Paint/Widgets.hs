@@ -98,7 +98,7 @@ import NanoUI.Frame.Chrome
   , textInputValue
   , widgetVisualStyle
   )
-import NanoUI.Frame.Spans (widgetTextPlacements, widgetTextSpans)
+import NanoUI.Frame.Spans (forWidgetTextPlacements_, widgetTextSpans)
 import NanoUI.Frame.TextEdit
   ( TextAreaGeom (..)
   , TextInputGeom (..)
@@ -203,7 +203,7 @@ opaqueWidgetBg style nt isMenu isClose isTab isTable
   | otherwise =
       nt /= NodeCheckbox && nt /= NodeRadio && nt /= NodeSlider && nt /= NodeTextInput && nt /= NodeTextArea && nt /= NodeColorPicker
 
-{-# INLINE paintWidgetBackground #-}
+{-# NOINLINE paintWidgetBackground #-}
 paintWidgetBackground :: PaintEnv -> NodeIdx -> NodeType -> Style -> Int -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Rect -> Float -> Float -> Float -> Float -> Float -> IO ()
 paintWidgetBackground env idx nt style si isClose isTab isTable isMenu isMenuItem opaqueBg menuRowRect value x y w h = do
   let ctx = peContext env
@@ -344,7 +344,6 @@ paintWidgetForeground :: PaintEnv -> NodeIdx -> NodeType -> Style -> Int -> Bool
 paintWidgetForeground env idx nt style si isTable x y w h = do
   let ctx = peContext env
       da = peDrawArena env
-  placements <- widgetTextPlacements ctx nt idx x y w h
   mFontColor <- getNodeFontColor (peNodeArena env) idx
   fontSizeVal <- getNodeFontSize (peNodeArena env) idx
   let widgetFg = fromMaybe (styleFg style) mFontColor
@@ -357,19 +356,16 @@ paintWidgetForeground env idx nt style si isTable x y w h = do
     if isTable && sortMark /= 0
       then fst <$> ctxMeasureText ctx tableSortBlank
       else pure 0
-  let lastLine = length placements - 1
-      drawPlacement !i (txt, px, py, tw, th) =
+  let drawPlacement lastLine txt px py tw th =
         unless (T.null txt) $ do
           pushText da fm' px py txt widgetFg
           -- Table sort arrow: the label text ends in the blank reserve slot
           -- (the ▲/▼ codepoint is not in the pruned UI font), so paint the
           -- mark as a triangle centered in that slot — once, on the line
           -- that carries the slot.
-          when (isTable && sortMark /= 0 && i == lastLine) $
+          when (isTable && sortMark /= 0 && lastLine) $
             drawSortTriangle da (px + tw - sortSlotW / 2) (py + th / 2) (sortMark == 2) widgetFg
-      go !_ [] = pure ()
-      go !i (p : ps) = drawPlacement i p >> go (i + 1) ps
-  go (0 :: Int) placements
+  forWidgetTextPlacements_ ctx nt idx x y w h drawPlacement
 
 -- | Sort direction triangle for a table header: up when ascending, down when
 -- descending, centered on the label line in the header's reserved slot.

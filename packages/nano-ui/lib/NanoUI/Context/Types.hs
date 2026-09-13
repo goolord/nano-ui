@@ -3,6 +3,7 @@
 module NanoUI.Context.Types
   ( Context (..)
   , MeasureCacheKey
+  , MetricSource (..)
   , TextInputMenu (..)
   , TextInputDrag (..)
   , TextFieldClickCell (..)
@@ -23,6 +24,7 @@ module NanoUI.Context.Types
   , CustomDrawOpCacheEntry (..)
   , SpanCacheEntry (..)
   , WidgetTextCacheEntry (..)
+  , WidgetTextPlacement (..)
   , initialDrawingCacheState
   , InteractionState (..)
   , initialInteractionState
@@ -83,6 +85,19 @@ reduceUpdates :: Typeable model => model -> [FrameMsg] -> model
 reduceUpdates = reduceMessages ($)
 
 type MeasureCacheKey = (Text, Float)
+
+-- | Identity of a font/measurement configuration. Pure Context modifiers
+-- replace this value; the next frame invalidates shared caches if its identity
+-- differs. Holding the current inputs (not a revision counter/history) also
+-- distinguishes two differently configured Contexts derived from one parent.
+data MetricSource
+  = InitialMetricSource
+  | MetricSource
+      !FontMetrics
+      !FontMetrics
+      !(Text -> IO (Float, Float))
+      !(Float -> FontWeight -> FontStyle -> FontVariant -> IO (FontMetrics, Bool))
+      !(Float -> FontWeight -> FontStyle -> FontVariant -> Text -> IO (Float, Float))
 
 -- | Explicit damage invalidation request queued during frame evaluation.
 data DamageRequest
@@ -236,16 +251,25 @@ data SpanCacheEntry = SpanCacheEntry
   , sceSpans :: ![(Rect, Text, Color, Color)]
   }
 
--- | Cache entry for a widget node's label placement. Every input that changes
--- the produced placement is in the key; the value is the placement list exactly
--- as the painter consumes it, so a steady-state hit allocates nothing.
+-- | A cacheable widget label is a single line (or absent for close buttons).
+-- Coordinates are relative to the node origin; paint translates them without
+-- rebuilding a list or invalidating the cache when a widget scrolls.
+data WidgetTextPlacement = WidgetTextPlacement
+  !Text
+  {-# UNPACK #-} !Float
+  {-# UNPACK #-} !Float
+  {-# UNPACK #-} !Float
+  {-# UNPACK #-} !Float
+
 data WidgetTextCacheEntry = WidgetTextCacheEntry
   { wtcNodeType :: {-# UNPACK #-} !Int
   , wtcStyle :: {-# UNPACK #-} !Int
   , wtcFontSize :: {-# UNPACK #-} !Float
   , wtcText :: !Text
-  , wtcRect :: !Rect
-  , wtcPlacements :: ![(Text, Float, Float, Float, Float)]
+  , wtcWidth :: {-# UNPACK #-} !Float
+  , wtcHeight :: {-# UNPACK #-} !Float
+  , wtcAlign :: {-# UNPACK #-} !Int
+  , wtcPlacement :: {-# NOUNPACK #-} !(Maybe WidgetTextPlacement)
   }
 
 type CustomMeasureFn = FontMetrics -> (Float, Float) -> (Float, Float)
@@ -373,6 +397,8 @@ data Context = Context
   -- with the window size and font/theme generation it was captured under.
   , ctxLayoutCache :: !(IORef (Maybe (LayoutCache, Size, Int)))
   , ctxMetricGen :: !(IORef Int)
+  , ctxMetricSource :: {-# NOUNPACK #-} !MetricSource
+  , ctxLastMetricSource :: !(IORef (Maybe MetricSource))
   -- True when the next present must repaint the whole window (fresh retain
   -- texture, forced full, continuous present, or window expose). When False,
   -- a DamageClip frame culls the paint pass to the damaged region.
