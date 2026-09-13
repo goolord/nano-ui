@@ -13,7 +13,7 @@ module NanoUI.Sdl.Runner
   , readSdlDebugEnv
   ) where
 
-import Control.Exception (finally)
+import Control.Exception (finally, mask_)
 import Control.Monad (unless, void, when)
 import Data.IORef (IORef, readIORef, writeIORef)
 import Data.Primitive.SmallArray (SmallArray, smallArrayFromListN)
@@ -233,11 +233,12 @@ ensureRetain env w h scale = do
       when scaleChanged $ writeIORef (sdlRetain env) (tex, w, h, scale)
       -- Same pixel size after a DPI change still holds the old present.
       pure (tex, scaleChanged)
-    else do
-      retainDestroy tex
+    else mask_ $ do
+      -- Allocate before replacing: failure leaves the owned texture valid.
       tex' <- retainCreate (sdlRenderer env) w h
       when (tex' == nullPtr) $ fail "SDL_CreateTexture(retain) failed"
       writeIORef (sdlRetain env) (tex', w, h, scale)
+      retainDestroy tex
       pure (tex', True)
 
 askSdlEnv :: Ui :> es => Eff es (Maybe SdlEnv)

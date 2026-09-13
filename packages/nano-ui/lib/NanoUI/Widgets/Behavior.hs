@@ -6,6 +6,7 @@ module NanoUI.Widgets.Behavior
   , useReorder
   , useSelection
   , useKeyNav
+  , keyboardFocused
   , keyActivated
   , KeyNav (..)
   , useDismissable
@@ -206,6 +207,22 @@ data KeyNav = KeyNav
   }
   deriving (Eq, Show)
 
+-- | Focus alone does not grant keyboard input. A retained focus ID must still
+-- respect disabled state and the modal currently being declared. Unfocused
+-- controls avoid the store and modal checks entirely.
+{-# INLINE keyboardFocused #-}
+keyboardFocused :: Ui :> es => WidgetId -> Eff es Bool
+keyboardFocused wid
+  | hashWidgetId wid == 0 = pure False
+  | otherwise = do
+      ctx <- askContext
+      focus <- uiIO (getFocusId ctx)
+      if focus /= wid
+        then pure False
+        else uiIO $ do
+          disabled <- isDisabled ctx wid
+          if disabled then pure False else not <$> pointerBlockedByModal ctx
+
 -- | Arrow / Enter / Space while 'wid' is focused and eligible for input.
 {-# INLINE useKeyNav #-}
 useKeyNav :: (Ui :> es) => WidgetId -> Eff es KeyNav
@@ -216,14 +233,7 @@ useKeyNav wid = do
   if hashWidgetId wid == 0 || (inputKeysNull keys && T.null (inputChars inp))
     then pure none
     else do
-      ctx <- askContext
-      focus <- uiIO (getFocusId ctx)
-      eligible <-
-        if focus /= wid
-          then pure False
-          else uiIO $ do
-            disabled <- isDisabled ctx wid
-            if disabled then pure False else not <$> pointerBlockedByModal ctx
+      eligible <- keyboardFocused wid
       if not eligible
         then pure none
         else pure KeyNav

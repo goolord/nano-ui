@@ -112,20 +112,22 @@ nearestPlotHover chart gx gy
   | gx < 0 || gx > 1 || gy < 0 || gy > 1 = Nothing
   | otherwise = case candidates of
       [] -> Nothing
-      _ -> Just (snd (minimumBy (comparing fst) candidates))
+      _ -> Just (minimumBy (comparing distanceSquared) candidates)
  where
   (xDom, yDom) = seriesDomains chart
   dataX = plotToDomain xDom (Range 0 1) gx
   dataY = plotToDomain yDom (Range 0 1) gy
+  distanceSquared hover =
+    let dx = hoverDataX hover - dataX
+        dy = hoverDataY hover - dataY
+     in dx * dx + dy * dy
   candidates =
-    [ ( (x - dataX) * (x - dataX) + (y - dataY) * (y - dataY)
-      , PlotHover
-          { hoverDataX = x
-          , hoverDataY = y
-          , hoverSeriesIdx = si
-          , hoverPointIdx = ptIdx
-          }
-      )
+    [ PlotHover
+        { hoverDataX = x
+        , hoverDataY = y
+        , hoverSeriesIdx = si
+        , hoverPointIdx = ptIdx
+        }
     | (si, s) <- zip [0 ..] (chartSeries chart)
     , (ptIdx, (x, y)) <- zip [0 ..] (V.toList (seriesPoints chart s))
     ]

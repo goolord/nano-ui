@@ -147,7 +147,7 @@ demoAccent = colorRGBA 204 102 102 255
 
 -- Spacing rhythm for the demo cards and columns.
 gapLayout, gapInline, gapMicro, gapText :: Float
-gapLayout = 12
+gapLayout = 10
 gapInline = 12
 gapMicro = 6
 gapText = 4
@@ -267,11 +267,11 @@ demoUi = do
 
   -------------------------------------------------------------- toolbar ---
   scrollWith (tight . grow) $
-    columnWith (padAll 12 . gap gapLayout . fillW) $ do
+    columnWith (padAll gapLayout . gap gapLayout . fillW) $ do
       panelWith (padXY 16 12 . gap gapInline . fillW) $
         responsiveRowCol 960 (tight . gap gapInline . alignMid . fillW $ defaultLayout) $ do
           rowWith (tight . gap gapInline . alignMid) $ do
-            void $ labelWith (tight . alignMid . fontBold . fontSize 22) "nano-ui"
+            void $ labelWith (tight . alignMid . fontMedium . fontSize 22) "nano-ui"
             void $ labelWith (tight . alignMid . fontMuted) "SDL3 / Widget cookbook"
           when (sizeW (inputWindowSize rawInp) >= 960) flex
           -- Live frame stats + the shared header buttons.
@@ -414,7 +414,7 @@ demoUi = do
                 dropZone (padXY 16 12 . gap gapText . fillW $ defaultLayout) $ do
                   columnWith (tight . gap gapText . fillW) $ do
                     rowWith (tight . gap gapInline . alignMid . fillW) $ do
-                      void $ labelWith fontBold "Drop Zone"
+                      heading "Drop Zone"
                       flex
                       void $ labelEx (tight . fontMono . fontMuted $ defaultLayout) (if dropHovering then "hovering" else "idle")
                     void $ labelEx (tight . fontMuted . fillW $ defaultLayout) $
@@ -851,7 +851,7 @@ demoPaneHeader pid maximized pctx =
   panelWith (padXY 8 5 . fillW) $
     rowWith (tight . gap 8 . alignMid . fillW) $ do
       box (fixedWH 3 16 defaultLayout) demoAccent
-      void $ labelWith (tight . fontBold . fontMuted) (demoPaneTitle pid maximized)
+      void $ labelWith (tight . fontMedium . fontMuted) (demoPaneTitle pid maximized)
       flex
       whenM (button "+") (void (pgcSplit pctx AxisV))
       whenM (button "=") (void (pgcSplit pctx AxisH))

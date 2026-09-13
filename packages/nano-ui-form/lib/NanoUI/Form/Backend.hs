@@ -14,13 +14,14 @@ module NanoUI.Form.Backend
   , setActiveFormPrefix
   , clearActiveFormPrefix
   , withFormPrefix
+  , withFormWidgets
   , updateFieldInput
   , markFormSubmitted
   , isFormSubmitted
   , resetFormState
   ) where
 
-import Control.Monad (when)
+import Control.Monad (when, (<$!>))
 import Data.Dynamic (fromDynamic, toDyn)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Map.Strict as Map
@@ -28,6 +29,7 @@ import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Hashable (hash)
+import Data.Maybe (fromMaybe)
 import qualified Ditto.Backend as Ditto
 import Ditto.Backend
   ( FormError (..)
@@ -37,7 +39,7 @@ import Ditto.Core (Environment (..))
 import Ditto.Types (Value (..), encodeFormId)
 import GHC.Generics (Generic)
 import Effectful.Exception (bracket)
-import NanoUI (NanoUI, uiIO)
+import NanoUI (NanoUI, uiIO, withKey)
 import NanoUI.Monad (askContext)
 import NanoUI.Context (Context, getStore, markDirty, setStore)
 import NanoUI.Store (WidgetStore (..))
@@ -69,6 +71,18 @@ data FormStateStore = FormStateStore
 -- | Empty form state store.
 emptyFormStateStore :: FormStateStore
 emptyFormStateStore = FormStateStore Map.empty False Set.empty
+
+-- Keep reset identity alongside the form's values without exposing it in the
+-- public FormStateStore. A new generation starts fresh form-local widget state,
+-- including composite controls and text-area buffers.
+data StoredForm = StoredForm
+  { sfGeneration :: !Int
+  , sfState      :: !FormStateStore
+  }
+  deriving (Eq)
+
+emptyStoredForm :: StoredForm
+emptyStoredForm = StoredForm 0 emptyFormStateStore
 
 -- | Form execution monad wrapping 'NanoUI'.
 newtype FormUI a = FormUI { unFormUI :: NanoUI a }
@@ -143,29 +157,50 @@ withFormPrefix prefix action = do
     restorePrefix
     (\_ -> uiIO (setActiveFormPrefix ctx prefix) >> action)
 
+-- | Stable widget identity for a form, renewed when its state is reset.
+withFormWidgets :: Text -> NanoUI a -> NanoUI a
+withFormWidgets prefix action = do
+  ctx <- askContext
+  stored <- uiIO (getStoredForm ctx prefix)
+  withKey (prefix, sfGeneration stored) action
+
+getStoredForm :: Context -> Text -> IO StoredForm
+getStoredForm ctx prefix = do
+  ws <- getStore ctx
+  -- Resolve the lookup here rather than returning a thunk over the whole store.
+  pure $!
+    fromMaybe emptyStoredForm
+      (IM.lookup (formStoreKey prefix) (storeDyn ws) >>= fromDynamic)
+
+setStoredForm :: Context -> Text -> StoredForm -> IO ()
+setStoredForm ctx prefix !stored = do
+  ws <- getStore ctx
+  setStore ctx ws
+    { storeDyn = IM.insert (formStoreKey prefix) (toDyn stored) (storeDyn ws)
+    }
+
 -- | Retrieve the 'FormStateStore' for a given form prefix.
 getFormStore :: Context -> Text -> IO FormStateStore
-getFormStore ctx prefix = do
-  ws <- getStore ctx
-  case IM.lookup (formStoreKey prefix) (storeDyn ws) >>= fromDynamic of
-    Just fss -> pure fss
-    Nothing  -> pure emptyFormStateStore
+getFormStore ctx prefix = sfState <$!> getStoredForm ctx prefix
 
 -- | Persist the 'FormStateStore' for a given form prefix.
 setFormStore :: Context -> Text -> FormStateStore -> IO ()
 setFormStore ctx prefix fss = do
-  ws <- getStore ctx
-  let ws' = ws { storeDyn = IM.insert (formStoreKey prefix) (toDyn fss) (storeDyn ws) }
-  setStore ctx ws'
+  stored <- getStoredForm ctx prefix
+  setStoredForm ctx prefix stored {sfState = fss}
 
 -- Form state lives in a Dynamic slot, which the core cannot compare. Keep
 -- equality and redraw notification here rather than in each mutation.
 modifyFormStore :: Context -> Text -> (FormStateStore -> FormStateStore) -> IO ()
-modifyFormStore ctx prefix update = do
-  previous <- getFormStore ctx prefix
+modifyFormStore ctx prefix update =
+  modifyStoredForm ctx prefix (\stored -> stored {sfState = update (sfState stored)})
+
+modifyStoredForm :: Context -> Text -> (StoredForm -> StoredForm) -> IO ()
+modifyStoredForm ctx prefix update = do
+  previous <- getStoredForm ctx prefix
   let next = update previous
   when (next /= previous) $ do
-    setFormStore ctx prefix next
+    setStoredForm ctx prefix next
     markDirty ctx
 
 -- | Update a specific field's input in the form store.
@@ -188,9 +223,13 @@ isFormSubmitted ctx prefix = do
   fss <- getFormStore ctx prefix
   pure (fssSubmitted fss)
 
--- | Reset form state back to empty.
+-- | Reset values and renew widget identity so cached control state cannot
+-- repopulate the form with its old values on the next frame.
 resetFormState :: Context -> Text -> IO ()
-resetFormState ctx prefix = modifyFormStore ctx prefix (const emptyFormStateStore)
+resetFormState ctx prefix = modifyStoredForm ctx prefix $ \stored ->
+  if sfState stored == emptyFormStateStore
+    then stored
+    else StoredForm (sfGeneration stored + 1) emptyFormStateStore
 
 -- | Environment instance for 'FormUI' connecting ditto to nano-ui's context store.
 instance Environment FormUI FormInput where

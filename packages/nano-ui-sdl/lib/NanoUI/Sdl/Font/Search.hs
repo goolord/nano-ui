@@ -9,9 +9,10 @@ module NanoUI.Sdl.Font.Search
 
 import Control.Exception (IOException, catch)
 import Data.Char (isDigit, isLower, isSpace, isUpper, toLower)
-import Data.List (isInfixOf, maximumBy, sort, stripPrefix)
-import Data.Maybe (fromMaybe)
-import Data.Ord (comparing)
+import Data.List (isInfixOf, minimumBy, sort, stripPrefix)
+import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
+import Data.Ord (Down (..), comparing)
+import qualified Data.Set as Set
 import System.Directory (getHomeDirectory)
 import System.Directory.Recursive (getFilesRecursive)
 import System.Environment (lookupEnv)
@@ -22,13 +23,15 @@ import System.Info (os)
 -- matches.  Generic families like @monospace@ are expanded to a list of
 -- concrete families first.
 searchFonts :: [String] -> IO (Maybe FilePath)
-searchFonts names = go names
+searchFonts names = case concatMap families names of
+  [] -> pure Nothing
+  candidates -> do
+    files <- allFontFiles
+    pure (listToMaybe (mapMaybe (`bestMatch` files) candidates))
   where
-    go [] = pure Nothing
-    go (family : rest) =
-      searchFamily family >>= \case
-        Just path -> pure (Just path)
-        Nothing -> go rest
+    families name =
+      let norm = normalize name
+       in if null norm then [] else maybe [norm] (concatMap families) (expandGeneric norm)
 
 -- | Human-readable names for every installed font family, deduped and sorted.
 -- Each name is a usable 'searchFonts' token: the same normalization is applied
@@ -39,7 +42,7 @@ searchFonts names = go names
 listFontFamilies :: IO [String]
 listFontFamilies = do
   files <- allFontFiles
-  pure (dedupe (sort (map (prettyFamily . takeBaseName) files)))
+  pure (Set.toAscList (Set.fromList (map (prettyFamily . takeBaseName) files)))
 
 -- | Filename stem -> display family. Everything from the first @-@ is treated
 -- as style (\"Regular\", \"Bold Italic\", ...); camel case is split so
@@ -59,25 +62,6 @@ prettyFamily = separateCamel . stripStyle
           | isUpper c && (isLower prev || isDigit prev) = ' ' : c : goTail c cs
           | otherwise = c : goTail c cs
 
--- | Drop adjacent duplicates from a sorted list.
-dedupe :: Eq a => [a] -> [a]
-dedupe (x : y : rest)
-  | x == y = dedupe (y : rest)
-  | otherwise = x : dedupe (y : rest)
-dedupe xs = xs
-
-searchFamily :: String -> IO (Maybe FilePath)
-searchFamily family =
-  let norm = normalize family
-   in if null norm
-        then pure Nothing
-        else
-          case expandGeneric norm of
-            Just concreteFamilies -> searchFonts concreteFamilies
-            Nothing -> do
-              files <- allFontFiles
-              pure (bestMatch norm files)
-
 -- ---------------------------------------------------------------------------
 -- Directory traversal
 
@@ -87,7 +71,7 @@ searchFamily family =
 allFontFiles :: IO [FilePath]
 allFontFiles = do
   roots <- defaultFontDirs
-  fmap (sort . filter isFontFile . concat) (mapM filesBelow roots)
+  concat <$> mapM (fmap (sort . filter isFontFile) . filesBelow) roots
 
 filesBelow :: FilePath -> IO [FilePath]
 filesBelow root =
@@ -140,21 +124,15 @@ bestMatch norm files =
   case [(score, path) | path <- files, Just score <- [scoreFile norm path]] of
     [] -> Nothing
     scored ->
-      let (_, best) = maximumBy (comparing fst) scored
+      -- minimumBy keeps the first tie; descending scores prefer the best face.
+      let (_, best) = minimumBy (comparing (Down . fst)) scored
        in Just best
 
 scoreFile :: String -> FilePath -> Maybe Int
 scoreFile norm path =
   let stem = normalize (takeBaseName path)
       candidates = norm : familyAliases norm
-   in maxOver candidates stem
-  where
-    maxOver [] _ = Nothing
-    maxOver (c : cs) stem =
-      case (matchScore c stem, maxOver cs stem) of
-        (Nothing, rest) -> rest
-        (here, Nothing) -> here
-        (Just a, Just b) -> Just (max a b)
+   in maximum (Nothing : map (`matchScore` stem) candidates)
 
 matchScore :: String -> String -> Maybe Int
 matchScore "" _ = Nothing

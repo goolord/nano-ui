@@ -11,6 +11,7 @@ where
 import Control.Monad (forM_, when)
 import Data.Bits ((.|.))
 import Data.IORef (readIORef)
+import Data.List (find)
 import qualified Data.IntMap.Strict as IM
 import Data.Maybe (isJust, listToMaybe)
 import Data.Text (Text)
@@ -50,7 +51,7 @@ import NanoUI.Style
 import NanoUI.Types (Rect (..), rectContains, rectW, v2Y)
 import NanoUI.WidgetText (buttonFlagClose, buttonFlagTab)
 import NanoUI.Widgets.Behavior (useSelection)
-import NanoUI.Widgets.Combinators (buttonStyled)
+import NanoUI.Widgets.Combinators (buttonStyledEx)
 import NanoUI.Widgets.Layout (column', columnWith, row', rowWith, scrollAreaIdConfigured)
 import NanoUI.Widgets.Node
   ( Clickable (..)
@@ -117,8 +118,15 @@ mkTab = Tab
 
 -- | Header chrome height: one source for the strip bar, the scroller, and
 -- the paging arrows so they cannot drift apart.
-tabHeaderH :: Context -> Float
-tabHeaderH _ctx = 28
+tabHeaderH :: Float
+tabHeaderH = 28
+
+-- | One rendered header, shared by selection, close handling, and scrolling.
+data Header a = Header
+  { headerKey :: !a
+  , headerResponse :: !Response
+  , headerClosed :: !Bool
+  }
 
 tabStrip ::
   (Eq a, Ui :> es) =>
@@ -132,7 +140,7 @@ tabStrip style orient cur tabList mRenderBody = do
   ctx <- askContext
   groupId <- nextId
   let vertical = orient == TabLeft || orient == TabRight
-      h = tabHeaderH ctx
+      h = tabHeaderH
       styleVal = fromEnum style
       hdrLay =
         defaultLayout
@@ -198,7 +206,7 @@ renderScrollableHeaders ::
 renderScrollableHeaders ctx style hdrLay barLay groupId cur tabList = do
   scrollWid <- withKey ("tab-scroller" :: Text) nextId
   let fm = ctxFontMetrics ctx
-      h = tabHeaderH ctx
+      h = tabHeaderH
       styleVal = fromEnum style
       barPad = resolveLayoutPadding fm (layoutPadding barLay)
       arrowW = 26
@@ -259,7 +267,7 @@ renderScrollableHeaders ctx style hdrLay barLay groupId cur tabList = do
               , max 0 (rectW r - padL barPad - padR barPad)
               )
             Nothing -> (0, 0)
-    maxRight = maximum (0 : [rectX (rawRespRect r) + rectW (rawRespRect r) | (_, _, _, r) <- resps])
+    maxRight = maximum (0 : [rectX r + rectW r | header <- resps, let r = respRect (headerResponse header)])
     contentW = maxRight - viewX + (if overflow then off else 0)
     -- The first overflow frame has no scroller rect yet (mScr is Nothing);
     -- keep the last cached range instead of measuring against a phantom
@@ -289,7 +297,8 @@ renderScrollableHeaders ctx style hdrLay barLay groupId cur tabList = do
       finalOff
         | overflow
         , nextTab /= cur
-        , hr : _ <- [rawRespRect r | (k, _, _, r) <- resps, k == nextTab] =
+        , Just header <- find ((== nextTab) . headerKey) resps
+        , let hr = respRect (headerResponse header) =
             if rectX hr < viewX
               then max 0 (off - (viewX - rectX hr))
               else
@@ -322,7 +331,7 @@ arrowButton ctx hdrLay arrowW barH muted glyph = do
           , layoutHeight = Fixed barH
           , layoutFontColor = if muted then Just (themeMuted theme) else Nothing
           }
-  buttonStyled glyph 0 lay 0
+  buttonStyledEx (not muted) glyph 0 lay 0
 
 renderHeaders ::
   (Eq a, Ui :> es) =>
@@ -331,11 +340,11 @@ renderHeaders ::
   Int ->
   a ->
   [(Int, Tab a body)] ->
-  Eff es (TabResponse a, a, [(a, Bool, Maybe a, Response)])
+  Eff es (TabResponse a, a, [Header a])
 renderHeaders ctx hdrLay styleVal cur indexed = do
   resps <- mapM (\(i, t) -> withKey i (renderSingleHeader hdrLay (styleVal + 4 * i) cur t)) indexed
-  let clickedKeys = [k | (k, clicked, _, _) <- resps, clicked]
-      closedKey = listToMaybe [k | (_, _, Just k, _) <- resps]
+  let clickedKeys = [headerKey h | h <- resps, respClicked (headerResponse h), not (headerClosed h)]
+      closedKey = headerKey <$> find headerClosed resps
       nextTab = case clickedKeys of
         (k : _) -> k
         [] -> cur
@@ -343,7 +352,7 @@ renderHeaders ctx hdrLay styleVal cur indexed = do
       hasClicked = not (null clickedKeys)
       overallResp =
         TabResponse
-          { tabResponse = setChanged hasChanged (setClicked hasClicked (mconcat [r | (_, _, _, r) <- resps]))
+          { tabResponse = setChanged hasChanged (setClicked hasClicked (foldMap headerResponse resps))
           , tabClosed = closedKey
           , tabActive = nextTab
           }
@@ -357,26 +366,27 @@ renderSingleHeader ::
   Int ->
   a ->
   Tab a body ->
-  Eff es (a, Bool, Maybe a, Response)
+  Eff es (Header a)
 renderSingleHeader hdrLay packedStyle cur t = do
   let isActive = tabKey t == cur
       badge = maybe "" (\b -> " (" <> b <> ")") (tabBadge t)
       headerText = tabTitle t <> badge
       tabStyle = packedStyle .|. buttonFlagTab
+      headerButton = buttonStyledEx (not (tabDisabled t))
   if tabClosable t
     then do
       (tabResp, closed) <- rowWith tight $ do
-        resp <- buttonStyled headerText (if isActive then 1 else 0) hdrLay tabStyle
-        closeResp <- buttonStyled "\215" 0 (hdrLay {layoutPadding = Padding 2 4 4 4}) buttonFlagClose
+        resp <- headerButton headerText (if isActive then 1 else 0) hdrLay tabStyle
+        closeResp <- headerButton "\215" 0 (hdrLay {layoutPadding = Padding 2 4 4 4}) buttonFlagClose
         pure (resp, respClicked closeResp)
-      pure (tabKey t, respClicked tabResp && not closed, if closed then Just (tabKey t) else Nothing, tabResp)
+      pure (Header (tabKey t) tabResp closed)
     else do
-      resp <- buttonStyled headerText (if isActive then 1 else 0) hdrLay tabStyle
-      pure (tabKey t, respClicked resp, Nothing, resp)
+      resp <- headerButton headerText (if isActive then 1 else 0) hdrLay tabStyle
+      pure (Header (tabKey t) resp False)
 
-syncTabHeaderActive :: Eq a => Context -> a -> [(a, Bool, Maybe a, Response)] -> IO ()
+syncTabHeaderActive :: Eq a => Context -> a -> [Header a] -> IO ()
 syncTabHeaderActive ctx active resps =
-  forM_ resps $ \(k, _, _, r) -> do
+  forM_ resps $ \(Header k r _) -> do
     mIdx <- findNodeByWidgetId ctx (respId r)
     case mIdx of
       Just i -> setNodeValue (ctxNodeArena ctx) i (if k == active then 1 else 0)
@@ -418,6 +428,6 @@ boundedTabs initial encodeTab tabf = do
 renderBody :: (Eq a, Ui :> es) => [Tab a (Eff es ())] -> a -> Eff es ()
 renderBody ts activeKey =
   columnWith (tight . fillW) $
-    case filter (\t -> tabKey t == activeKey) ts of
-      (selected : _) -> tabBody selected
-      [] -> case ts of { (firstTab : _) -> tabBody firstTab; [] -> pure () }
+    case find ((== activeKey) . tabKey) ts of
+      Just selected -> tabBody selected
+      Nothing -> maybe (pure ()) tabBody (listToMaybe ts)

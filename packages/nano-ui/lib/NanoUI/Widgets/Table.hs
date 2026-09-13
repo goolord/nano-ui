@@ -345,6 +345,7 @@ isNumericCell txt =
           _ -> False
 
 columnMetrics :: Context -> Colonnade Headed row Text -> [row] -> ([Float], [Bool])
+columnMetrics _ cols _ | columnCount cols == 0 = ([], [])
 columnMetrics ctx cols rows =
   let fm = ctxFontMetrics ctx
       mono = ctxMonoFontMetrics ctx
@@ -352,7 +353,7 @@ columnMetrics ctx cols rows =
       cellPadX = 2 * ix
       hdrs = columnHeaders cols
       -- Encode each row once, sharing it across column classification and sizing.
-      encodedRows = V.fromList [Encode.row id cols r | r <- rows]
+      !encodedRows = V.fromList [Encode.row id cols r | r <- rows]
       measureColumn c hdr =
         let hdrW = textDisplayWidth fm (hdr <> tableSortReserve) + cellPadX
             isNum = not (null rows) && V.all (isNumericCell . (V.! c)) encodedRows

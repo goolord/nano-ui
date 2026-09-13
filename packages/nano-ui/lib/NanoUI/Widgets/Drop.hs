@@ -87,12 +87,11 @@ useDrop bounds = do
   let key = intKey wid
       activeK = slotKey slotDrop key
       posK = slotKey slotDropPos key
-      dropList = V.toList (inputDrops inp)
   store <- uiIO (getStore ctx)
   let active0 = IM.findWithDefault 0 activeK (storeInt store) /= 0
       lastPos0 = fmap (\(x, y) -> V2 x y) (IM.lookup posK (storePoint store))
       DropScan active1 lastPos1 filesRev textsRev =
-        foldl' (step bounds) (DropScan active0 lastPos0 [] []) dropList
+        V.foldl' (step bounds) (DropScan active0 lastPos0 [] []) (inputDrops inp)
       files = reverse filesRev
       texts = reverse textsRev
       hovered = active1 && posInside bounds lastPos1

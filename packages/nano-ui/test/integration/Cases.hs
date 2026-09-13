@@ -51,6 +51,7 @@ module Cases
   , runOverlayTest
   , runPanelPaintsTest
   , runPaneGridMixedDragTest
+  , runPaneGridClippedControlTest
   , runPercentLayoutTest
   , runPercentGapShrinkTest
   , runPointerCursorCheckboxTest
@@ -839,6 +840,9 @@ runPaneGridMixedDragTest ctx failed = do
   -- left pane onto the bottom-right pane's lower edge, and check the drop
   -- lands it below that pane (tree order of the restructured grid).
   rects <- newIORef IM.empty
+  closeRects <- newIORef IM.empty
+  stateUpdates <- newIORef IM.empty
+  paneStates <- newIORef IM.empty
   step <- newIORef (0 :: Int)
   nbRef <- newIORef (0 :: Word64)
   let inp0 = withInput 600 400
@@ -849,6 +853,15 @@ runPaneGridMixedDragTest ctx failed = do
           , pgSpacing = 4
           , pgViewPane = \pid pctx -> do
               liftIO (modifyIORef' rects (IM.insert (fromIntegral pid) (pgcRect pctx)))
+              (value, setValue) <- useInt 0
+              marker <- nextId
+              updates <- liftIO (readIORef stateUpdates)
+              case IM.lookup (fromIntegral pid) updates of
+                Nothing -> pure ()
+                Just n -> do
+                  setValue n
+                  liftIO (modifyIORef' stateUpdates (IM.delete (fromIntegral pid)))
+              liftIO (modifyIORef' paneStates (IM.insert (fromIntegral pid) (marker, value)))
               s <- liftIO (readIORef step)
               case s of
                 0 -> do
@@ -862,6 +875,9 @@ runPaneGridMixedDragTest ctx failed = do
                     _ <- pgcSplit pctx AxisH
                     liftIO (writeIORef step 2)
                 _ -> pure ()
+              close <- button' "x"
+              liftIO (modifyIORef' closeRects (IM.insert (fromIntegral pid) (respRect close)))
+              when (respClicked close) (pgcClose pctx)
               pure (PaneView "P" True Nothing)
           }
       ui = paneGrid cfg
@@ -871,10 +887,17 @@ runPaneGridMixedDragTest ctx failed = do
   (pgr0, _, _, _) <- runFrame ctx inp0 ui
   case pgrPanes pgr0 of
     [pa, pb, pc] -> do
+      let expectedValues = IM.fromList [(fromIntegral p, fromIntegral p + 100) | p <- [pa, pb, pc]]
+      writeIORef stateUpdates expectedValues
+      _ <- warmup2 ctx inp0 ui
+      initialStates <- readIORef paneStates
+      assertEq failed (IM.map snd initialStates) expectedValues
       rs <- readIORef rects
       case (IM.lookup (fromIntegral pa) rs, IM.lookup (fromIntegral pc) rs) of
         (Just ra, Just rc) -> do
-          let grab = V2 (rectX ra + rectW ra / 2) (rectY ra + rectH ra / 2)
+          -- Inside the header, only 2px from the divider: the gutter's
+          -- leeway must not extend into this pane and steal the drag.
+          let grab = V2 (rectX ra + rectW ra - 2) (rectY ra + 12)
               -- 30px above the grid's bottom edge: inside the pane's bottom
               -- drop zone but clear of the 20px top-level band.
               dest = V2 (rectX rc + rectW rc / 2) (rectY rc + rectH rc - 30)
@@ -897,12 +920,102 @@ runPaneGridMixedDragTest ctx failed = do
               hold = press {inputMousePos = dest, inputMousePressed = False}
               release = hold {inputMouseDown = False, inputMouseReleased = True}
           _ <- runFrame ctx press ui
+          writeIORef rects IM.empty
+          writeIORef paneStates IM.empty
+          _ <- runFrame ctx hold ui
+          during <- readIORef rects
+          duringStates <- readIORef paneStates
+          assertEq failed duringStates (IM.delete (fromIntegral pa) initialStates)
+          assert failed (not (IM.member (fromIntegral pa) during))
+          assertEq failed (IM.size during) 2
+          assert failed (all ((== gw) . rectW) (IM.elems during))
+          -- Crossing back over the original grab point must not make the
+          -- pane reappear or collapse the drag back into a click.
+          writeIORef rects IM.empty
+          _ <- runFrame ctx (hold {inputMousePos = grab}) ui
+          returned <- readIORef rects
+          assert failed (not (IM.member (fromIntegral pa) returned))
+          -- Releasing outside the grid restores the committed layout.
+          (cancelled, _, _, _) <- runFrame ctx (release {inputMousePos = V2 (-20) (-20)}) ui
+          assertEq failed (pgrPanes cancelled) [pa, pb, pc]
+          writeIORef rects IM.empty
+          _ <- warmup2 ctx inp0 ui
+          restored <- readIORef rects
+          assertEq failed restored rs
+          restoredStates <- readIORef paneStates
+          assertEq failed restoredStates initialStates
+          _ <- runFrame ctx press ui
           _ <- runFrame ctx hold ui
           (pgr1, _, _, _) <- runFrame ctx release ui
           assertEq failed (pgrPanes pgr1) [pb, pc, pa]
+          _ <- warmup2 ctx inp0 ui
+          droppedStates <- readIORef paneStates
+          assertEq failed droppedStates initialStates
+          buttons <- readIORef closeRects
+          case IM.lookup (fromIntegral pa) buttons of
+            Nothing -> assert failed False
+            Just closeRect -> do
+              let closePos = V2 (rectX closeRect + rectW closeRect / 2) (rectY closeRect + rectH closeRect / 2)
+                  closePress = press {inputMousePos = closePos}
+                  closeHold = hold {inputMousePos = V2 (v2X closePos + 60) (v2Y closePos + 40)}
+              _ <- runFrame ctx closePress ui
+              writeIORef rects IM.empty
+              _ <- runFrame ctx closeHold ui
+              duringClose <- readIORef rects
+              assertEq failed (IM.size duringClose) 3
+              (closed, _, _, _) <- runFrame ctx (release {inputMousePos = closePos}) ui
+              assertEq failed (pgrPanes closed) [pb, pc]
         _ -> assert failed False
     _ -> assert failed False
 
+
+-- A button scrolled above its viewport can geometrically overlap the header,
+-- but its invisible rectangle must not claim the header's drag press.
+runPaneGridClippedControlTest :: Context -> IORef Int -> IO ()
+runPaneGridClippedControlTest ctx failed = do
+  rendered <- newIORef False
+  geometry <- newIORef Nothing
+  let inp0 = withInput 300 240
+      ui = paneGrid defaultPaneGridConfig
+        { pgLayout = fillW . fillH
+        , pgViewPane = \_ _ -> do
+            liftIO (writeIORef rendered True)
+            header <- labelEx (fixedH 40 (fillW (tight defaultLayout))) "Header"
+            (sid, target) <- scrollArea (fixedH 120 (fillW (tight defaultLayout))) $
+              columnWith tight $ do
+                b <- button' "Scrolled control"
+                mapM_ (\_ -> void (label "Scroll content")) [1 .. 20 :: Int]
+                pure b
+            liftIO (writeIORef geometry (Just (respId header, sid, respId target)))
+            pure (PaneView "Panel" True Nothing)
+        }
+  _ <- warmup2 ctx inp0 ui
+  ids <- readIORef geometry
+  case ids of
+    Nothing -> assert failed False
+    Just (headerId, sid, targetId) -> do
+      headerRect <- getPrevRect ctx headerId
+      targetRect <- getPrevRect ctx targetId
+      case (headerRect, targetRect) of
+        (Just hr, Just br) -> do
+          -- Place the button's invisible center exactly in the header.
+          let headerY = rectY hr + rectH hr / 2
+          setScrollOffset ctx sid (rectY br + rectH br / 2 - headerY)
+          _ <- warmup2 ctx inp0 ui
+          hiddenRect <- getPrevRect ctx targetId
+          case hiddenRect of
+            Nothing -> assert failed False
+            Just r -> do
+              let grab = V2 (rectX r + rectW r / 2) (rectY r + rectH r / 2)
+                  press = inp0 {inputMousePos = grab, inputMouseDown = True, inputMousePressed = True}
+                  hold = press {inputMousePressed = False, inputMousePos = V2 (v2X grab + 30) (v2Y grab)}
+              assert failed (rectContains hr grab)
+              _ <- runFrame ctx press ui
+              writeIORef rendered False
+              _ <- runFrame ctx hold ui
+              stillRendered <- readIORef rendered
+              assert failed (not stillRendered)
+        _ -> assert failed False
 
 runBase16ThemeTest :: Context -> IORef Int -> IO ()
 runBase16ThemeTest ctx failed = do
@@ -997,5 +1110,3 @@ runSearchFieldDebounceTest ctx failed = do
   threadDelay 50000
   ((rD, _), _, _, _) <- runFrame ctx inp0 ui
   assert failed (not (respChanged rD))
-
-

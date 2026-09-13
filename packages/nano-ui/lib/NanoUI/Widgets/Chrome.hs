@@ -2,14 +2,10 @@
 
 -- | Floating overlay chrome: title bars, close buttons.
 module NanoUI.Widgets.Chrome
-  ( titleBarHFor
-  , modalTitleBarHFor
-  , modalTitleBarH
+  ( modalTitleBarH
   , titleBarChromeHFor
   , titleBarLayoutFor
   , titleLabelLayoutFor
-  , floatPadFor
-  , floatGapFor
   , floatMinFor
   , closeButton
   , windowChromeTop
@@ -18,12 +14,9 @@ module NanoUI.Widgets.Chrome
 
 import Effectful (Eff, type (:>))
 import NanoUI.WidgetText (buttonFlagClose)
-import NanoUI.Context (isDisabled, registerFocusable)
-import NanoUI.Layout.Arena (NodeType (NodeButton))
-import NanoUI.Monad (Ui, askContext, nextId, uiIO)
+import NanoUI.Monad (Ui)
 import NanoUI.Style
   ( Layout (..)
-  , Padding (..)
   , alignMid
   , defaultLayout
   , fillW
@@ -32,8 +25,8 @@ import NanoUI.Style
   , gap
   , tight
   )
-import NanoUI.Widgets.Behavior (keyActivated)
-import NanoUI.Widgets.Node (Responding (..), Response, addWidgetStyled, setClicked, setHovered)
+import NanoUI.Widgets.Combinators (buttonStyled)
+import NanoUI.Widgets.Node (Response)
 
 titleBarH :: Float
 titleBarH = 28
@@ -44,14 +37,8 @@ closeButtonSize = 24
 windowChromeTop :: Float
 windowChromeTop = 10
 
-titleBarHFor :: Float
-titleBarHFor = titleBarH
-
 modalTitleBarH :: Float
 modalTitleBarH = 40
-
-modalTitleBarHFor :: Float
-modalTitleBarHFor = modalTitleBarH
 
 windowChromeSepH :: Float
 windowChromeSepH = 1
@@ -68,26 +55,11 @@ titleLabelLayoutFor barH =
   (fixedH barH . alignMid . tight) $
     defaultLayout {layoutMinH = barH, layoutMaxH = barH}
 
-floatPadFor :: Padding -> Padding
-floatPadFor pad = pad
-
-floatGapFor :: Float -> Float
-floatGapFor g = g
-
 floatMinFor :: Float -> Float -> Float
 floatMinFor authored avail = max 1 (min authored avail)
 
 {-# INLINE closeButton #-}
 closeButton :: (Ui :> es) => Eff es Response
-closeButton = do
-  wid <- nextId
-  ctx <- askContext
-  uiIO $ registerFocusable ctx wid
-  let stored = ""
-      layout = tight . fixedWH closeButtonSize closeButtonSize . alignMid $ defaultLayout
-  resp <- addWidgetStyled wid NodeButton stored 0 layout buttonFlagClose Nothing
-  disabled <- uiIO (isDisabled ctx wid)
-  keyClick <- keyActivated wid
-  pure $
-    setClicked (not disabled && (respClicked resp || keyClick)) $
-      setHovered (not disabled && respHovered resp) resp
+closeButton = buttonStyled "" 0 layout buttonFlagClose
+  where
+    layout = tight . fixedWH closeButtonSize closeButtonSize . alignMid $ defaultLayout

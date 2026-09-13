@@ -107,6 +107,7 @@ import NanoUI.Rgfw.Render (renderArena)
 import NanoUI.Rgfw.Session (defaultRgfwOptions, optScale)
 import NanoUI.Rgfw.Surface
   ( clearScreen
+  , fillRect
   , freeRgfwSurface
   , newOffscreenRgfwSurface
   , packColor
@@ -167,6 +168,18 @@ testSurfaceAllocation = do
     freeRgfwSurface
     (const (pure ()))) :: IO (Either IOException ())
   assert "Surface dimensions cannot overflow the buffer allocation" (either (const True) (const False) oversized)
+  -- Odd row strides and short spans exercise the shared fill kernel's aligned
+  -- pairs and scalar tails. Clearing must cover the entire buffer exactly.
+  forM_ [1 .. 19] $ \w ->
+    bracket (newOffscreenRgfwSurface w 3) freeRgfwSurface $ \surface -> do
+      clearScreen surface 0x12345678
+      fillRect surface 1 1 (max 0 (w - 2)) 1 0xABCDEF01
+      pixels <- mapM (peekElemOff (sBuffer surface)) [0 .. w * 3 - 1]
+      let expected =
+            [ if y == 1 && x >= 1 && x < w - 1 then 0xABCDEF01 else 0x12345678
+            | y <- [0 .. 2 :: Int], x <- [0 .. w - 1]
+            ]
+      assert ("Shared pixel fill handles stride " ++ show w) (pixels == expected)
 
 testTomorrowThemes :: IO ()
 testTomorrowThemes = do

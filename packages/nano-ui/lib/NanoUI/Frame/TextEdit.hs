@@ -246,34 +246,21 @@ textEditMenuRows =
   , TextEditMenuItem 3 "Select All"
   ]
 
--- Row geometry delegates to the shared menu metrics in "NanoUI.Font" so the
--- bespoke text-field context menu and the generic popup menu stay identical.
-textEditMenuSepH :: Float
-textEditMenuSepH = menuSepH
-
-textEditMenuMinW :: Float
-textEditMenuMinW = menuMinW
-
-textEditMenuItemH :: Float
-textEditMenuItemH = menuItemRowH
-
+-- Use the same row metrics as generic popup menus.
 textEditMenuRowH :: TextEditMenuRow -> Float
 textEditMenuRowH = \case
-  TextEditMenuSep -> textEditMenuSepH
-  TextEditMenuItem {} -> textEditMenuItemH
+  TextEditMenuSep -> menuSepH
+  TextEditMenuItem {} -> menuItemRowH
 
 textEditMenuContentH :: Float
 textEditMenuContentH = sum (map textEditMenuRowH textEditMenuRows)
-
-textEditMenuStyle :: Theme -> Style
-textEditMenuStyle = overlayMenuStyle
 
 textEditMenuWidth :: Context -> IO Float
 textEditMenuWidth ctx = do
   let labels = [lbl | TextEditMenuItem _ lbl <- textEditMenuRows]
   ws <- mapM (ctxMeasureText ctx) labels
   let maxTw = maximum (map fst ws)
-  pure (max textEditMenuMinW (maxTw + 2 * textInputMenuItemPadX + 2 * textInputMenuOuterPad))
+  pure (max menuMinW (maxTw + 2 * textInputMenuItemPadX + 2 * textInputMenuOuterPad))
 
 textEditMenuRectAt :: FontMetrics -> Float -> Float -> Float -> Size -> Rect
 textEditMenuRectAt _fm x y menuW win =
@@ -458,7 +445,7 @@ drawTextEditMenuOverlays ctx inp = do
         let da = ctxDrawArena ctx
             mouse = inputMousePos inp
             menuRect = textEditMenuRect menu
-            menuStyle = textEditMenuStyle theme
+            menuStyle = overlayMenuStyle theme
             content = textEditMenuContentRect menuRect fm
             wid = textInputMenuWidget menu
         pushMenuShadow da menuRect (styleCornerRadius menuStyle)
@@ -512,7 +499,7 @@ collectTextEditMenuSpans ctx inp = do
       let fm = ctxFontMetrics ctx
           mouse = inputMousePos inp
           menuRect = textEditMenuRect menu
-          menuStyle = textEditMenuStyle theme
+          menuStyle = overlayMenuStyle theme
           content = textEditMenuContentRect menuRect fm
           wid = textInputMenuWidget menu
       allow <- widgetOverlayAllowed ctx wid
@@ -1464,4 +1451,3 @@ finalizeTextFieldMouse ctx inp = do
       Nothing -> finalizeTextAreaMouse ctx inp focus
   when (inputMouseReleased inp) $
     setTextInputDrag ctx Nothing
-

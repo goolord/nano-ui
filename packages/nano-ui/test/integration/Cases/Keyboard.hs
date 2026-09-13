@@ -36,10 +36,18 @@ runKeyboardDisabledTest _ctx failed = do
         ((afterResp, after), _, _, _) <- runFrame ctx pressed ui
         assertEq failed after before
         assert failed (not (respChanged afterResp) && not (respClicked afterResp))
+        afterStore <- getStore ctx
+        assertEq failed
+          (IM.lookup (intKey wid) (storeText st))
+          (IM.lookup (intKey wid) (storeText afterStore))
   check (checkbox "Disabled" False) (keyInp KeyEnter inp)
   check (checkbox "Disabled" False) (spaceInp inp)
   check (slider 0 100 50) (keyInp KeyRight inp)
   check (toggleSwitch False) (spaceInp inp)
+  check (textInput "initial") (inp {inputChars = "x"})
+  check (textArea "initial") (inp {inputChars = "x"})
+  check (searchField "Search" "initial") (inp {inputChars = "x"})
+  check (comboBox "Choose" ["initial", "other"] "initial") (inp {inputChars = "x"})
   check (do r <- button' "Disabled"; pure (r, respClicked r)) (keyInp KeyEnter inp)
 
 runKeyboardModalEligibilityTest :: Context -> IORef Int -> IO ()

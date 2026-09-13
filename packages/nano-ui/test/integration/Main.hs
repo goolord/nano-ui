@@ -212,6 +212,8 @@ testSpecs =
   , TestSpec "aspect-layout" False runAspectLayoutTest
   , TestSpec "label-align-end" False runLabelAlignEndTest
   , TestSpec "controls-tab-height" True runControlsTabHeightTest
+  , TestSpec "bounded-radio-offset" True runBoundedRadioTest
+  , TestSpec "tabs-disabled" True runTabsDisabledTest
   , TestSpec "color-picker-preview" True runColorPickerPreviewTest
   , TestSpec "color-picker-commit" True runColorPickerCommitTest
   , TestSpec "color-picker-key-commit" True runColorPickerKeyCommitTest
@@ -248,6 +250,7 @@ testSpecs =
   , TestSpec "widget-no-string-emit" False runWidgetNoStringEmitTest
   , TestSpec "panel-paints" False runPanelPaintsTest
   , TestSpec "pane-grid-mixed-drag" False runPaneGridMixedDragTest
+  , TestSpec "pane-grid-clipped-control" False runPaneGridClippedControlTest
   , TestSpec "separator-span" False runSeparatorSpanTest
   , TestSpec "header-top-pad" False runHeaderTopPadTest
   , TestSpec "fit-header-no-shrink" False runFitHeaderNoShrinkTest

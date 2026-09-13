@@ -1,5 +1,6 @@
 module Cases.Demo
   ( runControlsTabHeightTest
+  , runBoundedRadioTest
   , runColorPickerPreviewTest
   , runColorPickerCommitTest
   , runColorPickerKeyCommitTest
@@ -15,7 +16,7 @@ import Data.Text qualified as T
 import NanoUI
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, withInput)
-import NanoUI.Testing.Harness (pressAt, releaseAt, warmup2, withInputOff)
+import NanoUI.Testing.Harness (pressAt, releaseAt, runClickPair, warmup2, withInputOff)
 
 data DemoTab
   = Controls
@@ -28,6 +29,34 @@ data DemoTheme
   | Dark
   | System
   deriving (Bounded, Enum, Eq, Ord, Read, Show)
+
+newtype OffsetChoice = OffsetChoice Int
+  deriving (Eq, Show)
+
+instance Bounded OffsetChoice where
+  minBound = OffsetChoice 10
+  maxBound = OffsetChoice 12
+
+instance Enum OffsetChoice where
+  fromEnum (OffsetChoice n) = n
+  toEnum = OffsetChoice
+
+runBoundedRadioTest :: Context -> IORef Int -> IO ()
+runBoundedRadioTest ctx failed = do
+  let inp = withInputOff 300 160
+      ui initial = boundedRadioFieldset initial (T.pack . show)
+  (_, initial) <- warmup2 ctx inp (ui (OffsetChoice 11))
+  assertEq failed initial (OffsetChoice 11)
+  spans <- collectTextSpans ctx
+  case [r | (r, txt, _, _, _) <- spans, "OffsetChoice 12" `T.isInfixOf` txt] of
+    Rect x y w h : _ -> do
+      (_, selected) <- runClickPair ctx inp (ui (OffsetChoice 11)) (V2 (x + w / 2) (y + h / 2))
+      assertEq failed selected (OffsetChoice 12)
+      ((_, retained), _, _, _) <- runFrame ctx inp (ui (OffsetChoice 11))
+      assertEq failed retained selected
+      ((_, reset), _, _, _) <- runFrame ctx inp (ui (OffsetChoice 10))
+      assertEq failed reset (OffsetChoice 10)
+    [] -> assert failed False
 
 runControlsTabHeightTest :: Context -> IORef Int -> IO ()
 runControlsTabHeightTest _ failed = do

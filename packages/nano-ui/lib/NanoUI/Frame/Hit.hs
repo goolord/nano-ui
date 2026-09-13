@@ -8,6 +8,7 @@ module NanoUI.Frame.Hit
   , topmostModalIdx
   , nodeInTopmostModal
   , nodeInSubtree
+  , widgetIdInSubtree
   , modalHitAllowed
   , overlayHitAllowed
   , topmostOverlayAtMouse
@@ -71,6 +72,13 @@ nodeInSubtree ctx idx top = go idx
           parent <- getParent (ctxNodeArena ctx) i
           go parent
 
+-- | Membership predicate for an already-resolved subtree root. Callers
+-- filtering many widgets can resolve the root once for the whole operation.
+widgetIdInSubtree :: Context -> NodeIdx -> WidgetId -> IO Bool
+widgetIdInSubtree ctx root wid = do
+  node <- findNodeByWidgetId ctx wid
+  maybe (pure False) (\idx -> nodeInSubtree ctx idx root) node
+
 modalHitAllowed :: Context -> NodeIdx -> IO Bool
 modalHitAllowed ctx idx = do
   mTop <- topmostModalIdx ctx
@@ -82,7 +90,7 @@ overlayHitAllowed :: Context -> NodeIdx -> V2 -> IO Bool
 overlayHitAllowed ctx idx mouse = do
   mModal <- topmostModalIdx ctx
   case mModal of
-    Just _ -> modalHitAllowed ctx idx
+    Just top -> nodeInSubtree ctx idx top
     Nothing -> do
       mTop <- topmostOverlayAtMouse ctx mouse
       case mTop of
@@ -113,8 +121,10 @@ topmostFloatingAtMouse ctx mouse wanted =
 
 widgetOverlayAllowed :: Context -> WidgetId -> IO Bool
 widgetOverlayAllowed ctx wid = do
-  open <- modalTreeOpen ctx
-  if not open then pure True else widgetIdInModal ctx wid
+  top <- topmostModalIdx ctx
+  case top of
+    Nothing -> pure True
+    Just modal -> widgetIdInSubtree ctx modal wid
 
 widgetIdInModal :: Context -> WidgetId -> IO Bool
 widgetIdInModal ctx wid = do
@@ -174,7 +184,7 @@ scrollViewportHit ctx idx mouse = go idx
             then pure True
             else do
               nt <- getNodeType (ctxNodeArena ctx) p
-              if scrollViewportGate nt
+              if nt == NodeScrollContainer
                 then do
                   wid <- getWidgetId (ctxNodeArena ctx) p
                   mClip <- getPrevClipRect ctx wid
@@ -183,9 +193,3 @@ scrollViewportHit ctx idx mouse = go idx
                     Just clip ->
                       if rectContains clip mouse then go p else pure False
                 else go p
-
-scrollViewportGate :: NodeType -> Bool
-scrollViewportGate nt =
-  case nt of
-    NodeScrollContainer -> True
-    _ -> False

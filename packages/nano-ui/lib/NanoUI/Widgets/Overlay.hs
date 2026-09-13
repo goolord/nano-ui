@@ -55,10 +55,8 @@ import NanoUI.Style
 import NanoUI.Types (Rect (..), Size (..), rectContains, rectH, rectW)
 import NanoUI.Widgets.Chrome
   ( closeButton
-  , floatGapFor
   , floatMinFor
-  , floatPadFor
-  , modalTitleBarHFor
+  , modalTitleBarH
   , titleBarChromeHFor
   , titleBarLayoutFor
   , titleLabelLayoutFor
@@ -111,12 +109,12 @@ overlay kind open title child
           availW = max 1 (winW - 2 * margin)
           availH = max 1 (winH - 2 * margin)
           isModal = kind == ModalOverlay
-          padding = floatPadFor (if isModal then Padding 14 14 0 12 else windowPad)
-          barH = if isModal then modalTitleBarHFor else titleBarChromeHFor
+          padding = if isModal then Padding 14 14 0 12 else windowPad
+          barH = if isModal then modalTitleBarH else titleBarChromeHFor
           -- Window body breathing room: one side-pad between the chrome and
           -- the body, matching the window's left/right padding. Modals keep
           -- their own larger gap.
-          bodyGap = floatGapFor (if isModal then 8 else 10)
+          bodyGap = if isModal then 8 else 10
           minWidth =
             floatMinFor
               (if isModal then 260 else 280)

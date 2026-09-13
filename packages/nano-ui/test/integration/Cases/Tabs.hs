@@ -1,5 +1,6 @@
 module Cases.Tabs
   ( runTabsClosableTest
+  , runTabsDisabledTest
   , runTabsContentDamageTest
   , runTabsDamageTest
   , runTabsEmitTest
@@ -12,7 +13,7 @@ module Cases.Tabs
   ) where
 
 import Control.Monad (forM_, replicateM)
-import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Maybe (isJust)
 import Data.Text qualified as T
 import NanoUI
@@ -30,7 +31,7 @@ import NanoUI.Testing.Harness
   , warmup2
   )
 import NanoUI.Context (Context (..))
-import NanoUI.Layout.Arena (arenaCount, getRect, getText)
+import NanoUI.Layout.Arena (arenaCount, getRect, getText, getWidgetId)
 
 data DummyTab = TabA | TabB | TabC
   deriving (Eq, Show)
@@ -197,6 +198,46 @@ findCloseButtonRect ctx = do
                 pure (Just (Rect x y w h))
               else go (i + 1)
   go 0
+
+-- The public disabled flag covers both the header and its close control,
+-- including retained keyboard focus when an enabled tab becomes disabled.
+runTabsDisabledTest :: Context -> IORef Int -> IO ()
+runTabsDisabledTest _ failed = forM_ [TabTop, TabLeft] $ \orientation -> do
+  ctx <- newContext
+  let inp = withInputOff 400 240
+      ui disabled = tabsEx TabUnderline orientation TabA
+        [ (closableTab TabB "Disabled" (label_ "Body B")) {tabDisabled = disabled}
+        , tab TabA "Enabled" (label_ "Body A")
+        ]
+      check (response, active) = do
+        assertEq failed active TabA
+        assertEq failed (tabClosed response) Nothing
+        assert failed (not (respClicked response) && not (respChanged response))
+  _ <- warmup2 ctx inp (ui False)
+  let arena = ctxNodeArena ctx
+  n <- arenaCount arena
+  headers <- mapM (\i -> (,) <$> getText arena i <*> getWidgetId arena i) [0 .. n - 1]
+  _ <- warmup2 ctx inp (ui True)
+  spans <- collectTextSpans ctx
+  case [r | (r, txt, _, _, _) <- spans, txt == "Disabled"] of
+    Rect x y w h : _ -> check =<< runClickPair ctx inp (ui True) (V2 (x + w / 2) (y + h / 2))
+    [] -> assert failed False
+  closeRect <- findCloseButtonRect ctx
+  case closeRect of
+    Just (Rect x y w h) -> check =<< runClickPair ctx inp (ui True) (V2 (x + w / 2) (y + h / 2))
+    Nothing -> assert failed False
+  forM_ [wid | (txt, wid) <- headers, txt == "Disabled" || txt == "\215"] $ \wid -> do
+    writeIORef (ctxFocusId ctx) wid
+    (result, _, _, _) <- runFrame ctx (inp {inputKeys = inputKeysFromList [KeyEnter]}) (ui True)
+    check result
+  -- Re-enabling the same header preserves its identity and restores activation.
+  _ <- warmup2 ctx inp (ui False)
+  spansEnabled <- collectTextSpans ctx
+  case [r | (r, txt, _, _, _) <- spansEnabled, txt == "Disabled"] of
+    Rect x y w h : _ -> do
+      (_, active) <- runClickPair ctx inp (ui False) (V2 (x + w / 2) (y + h / 2))
+      assertEq failed active TabB
+    [] -> assert failed False
 
 runTabsStatePersistenceTest :: Context -> IORef Int -> IO ()
 runTabsStatePersistenceTest ctx failed = do

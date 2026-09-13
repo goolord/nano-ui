@@ -116,31 +116,12 @@ freeRgfwSurface surf = do
 
 {-# INLINE clearScreen #-}
 clearScreen :: RgfwSurface -> Word32 -> IO ()
-clearScreen surf color = do
-  let !total = sWidth surf * sHeight surf
-      !ptr = sBuffer surf
-      !w64 = (fromIntegral color `shiftL` 32) .|. fromIntegral color :: Word64
-      !ptr64 = castPtr ptr :: Ptr Word64
-      !total64 = total `shiftR` 1
+clearScreen surf color =
+  fillSpan (sBuffer surf) 0 (sWidth surf * sHeight surf) color (pixelPair color)
 
-      fill8 !i
-        | i + 7 < total64 = do
-            pokeElemOff ptr64 i w64
-            pokeElemOff ptr64 (i + 1) w64
-            pokeElemOff ptr64 (i + 2) w64
-            pokeElemOff ptr64 (i + 3) w64
-            pokeElemOff ptr64 (i + 4) w64
-            pokeElemOff ptr64 (i + 5) w64
-            pokeElemOff ptr64 (i + 6) w64
-            pokeElemOff ptr64 (i + 7) w64
-            fill8 (i + 8)
-        | i < total64 = do
-            pokeElemOff ptr64 i w64
-            fill8 (i + 1)
-        | otherwise = pure ()
-  fill8 0
-  when ((total .&. 1) /= 0) $
-    pokeElemOff ptr (total - 1) color
+{-# INLINE pixelPair #-}
+pixelPair :: Word32 -> Word64
+pixelPair color = (fromIntegral color `shiftL` 32) .|. fromIntegral color
 
 {-# INLINE currentClip #-}
 currentClip :: RgfwSurface -> IO ClipRect
@@ -232,7 +213,7 @@ fillRect surf x y w h color = do
       let !stride = sWidth surf
           !ptr = sBuffer surf
           !len = x1 - x0
-          !w64 = (fromIntegral color `shiftL` 32) .|. fromIntegral color :: Word64
+          !w64 = pixelPair color
 
           rowLoop !cy
             | cy >= y1 = pure ()

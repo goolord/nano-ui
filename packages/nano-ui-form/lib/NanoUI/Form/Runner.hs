@@ -23,7 +23,6 @@ import NanoUI
   , inputKeysElem
   , uiIO
   , whenM
-  , withKey
   )
 import NanoUI.Monad (askContext, askInput)
 import NanoUI.Form.Backend
@@ -31,6 +30,7 @@ import NanoUI.Form.Backend
   , markFormSubmitted
   , resetFormState
   , withFormPrefix
+  , withFormWidgets
   )
 import NanoUI.Form.Types
   ( Form
@@ -44,11 +44,21 @@ import NanoUI.Form.Types
 -- | Evaluate a formlet and return its view and result. The view retains its
 -- prefix even when rendered after other forms or inside another form's view.
 runNanoForm :: Text -> Form err a -> NanoUI (Ditto.View err FormView, Ditto.Result err (Ditto.Proved a))
-runNanoForm prefix form = do
-  (view, result) <- withFormPrefix prefix (unFormUI (Ditto.runForm prefix form))
-  let scopedView (FormView action) =
-        FormView (withFormPrefix prefix (withKey prefix action))
+runNanoForm prefix form = withNanoForm prefix form $ \view result -> do
+  let scopedView (FormView action) = FormView (withFormPrefix prefix action)
   pure (scopedView <$> view, result)
+
+-- Immediate runners evaluate and render in one prefix scope. Only a deferred
+-- view returned by runNanoForm needs to re-enter that scope when it is rendered.
+withNanoForm ::
+  Text
+  -> Form err a
+  -> (Ditto.View err FormView -> Ditto.Result err (Ditto.Proved a) -> NanoUI b)
+  -> NanoUI b
+withNanoForm prefix form consume = withFormPrefix prefix $ do
+  (view, result) <- unFormUI (Ditto.runForm prefix form)
+  let keyedView (FormView action) = FormView (withFormWidgets prefix action)
+  consume (keyedView <$> view) result
 
 -- | Default form runner: runs live validation and renders the form in 'NanoUI'.
 nanoForm :: Text -> Form Text a -> NanoUI (Maybe a)
@@ -56,8 +66,7 @@ nanoForm = nanoFormLive
 
 -- | Run a form with live validation: renders every frame and yields @Just a@ whenever valid.
 nanoFormLive :: Text -> Form Text a -> NanoUI (Maybe a)
-nanoFormLive prefix form = do
-  (view', res) <- runNanoForm prefix form
+nanoFormLive prefix form = withNanoForm prefix form $ \view' res -> do
   column' defaultLayout (renderResult True view' res)
   pure $ case res of
     Ditto.Ok (Ditto.Proved _ a) -> Just a
@@ -71,37 +80,37 @@ nanoFormSubmit prefix submitLabel form = do
   ctx <- askContext
   inp <- askInput
   submittedBefore <- uiIO (isFormSubmitted ctx prefix)
-  (view', res) <- runNanoForm prefix form
-  btnClicked <- column' defaultLayout $ do
-    renderResult submittedBefore view' res
-    button submitLabel
-  let enterPressed = inputKeysElem KeyEnter (inputKeys inp)
-      clickedSubmit = btnClicked || enterPressed
-  when clickedSubmit $
-    uiIO (markFormSubmitted ctx prefix True)
-  pure $ case (clickedSubmit, res) of
-    (True, Ditto.Ok (Ditto.Proved _ a)) -> Just a
-    _                                  -> Nothing
+  withNanoForm prefix form $ \view' res -> do
+    btnClicked <- column' defaultLayout $ do
+      renderResult submittedBefore view' res
+      button submitLabel
+    let enterPressed = inputKeysElem KeyEnter (inputKeys inp)
+        clickedSubmit = btnClicked || enterPressed
+    when clickedSubmit $
+      uiIO (markFormSubmitted ctx prefix True)
+    pure $ case (clickedSubmit, res) of
+      (True, Ditto.Ok (Ditto.Proved _ a)) -> Just a
+      _                                  -> Nothing
 
 -- | Detailed form runner with custom configuration.
 nanoFormEx :: FormConfig -> Text -> Form Text a -> NanoUI (FormStatus a)
 nanoFormEx cfg prefix form = do
   ctx <- askContext
   submittedBefore <- uiIO (isFormSubmitted ctx prefix)
-  (view', res) <- runNanoForm prefix form
-  let showErrors = case fcMode cfg of
-        FormLive     -> True
-        FormOnSubmit -> submittedBefore
-  column' defaultLayout $ do
-    renderResult showErrors view' res
-    case fcSubmitButton cfg of
-      Just lbl ->
-        whenM (button lbl) $
-          uiIO (markFormSubmitted ctx prefix True)
-      Nothing -> pure ()
-  pure $ case res of
-    Ditto.Ok (Ditto.Proved _ a) -> FormValid a
-    Ditto.Error errs -> FormInvalid errs
+  withNanoForm prefix form $ \view' res -> do
+    let showErrors = case fcMode cfg of
+          FormLive     -> True
+          FormOnSubmit -> submittedBefore
+    column' defaultLayout $ do
+      renderResult showErrors view' res
+      case fcSubmitButton cfg of
+        Just lbl ->
+          whenM (button lbl) $
+            uiIO (markFormSubmitted ctx prefix True)
+        Nothing -> pure ()
+    pure $ case res of
+      Ditto.Ok (Ditto.Proved _ a) -> FormValid a
+      Ditto.Error errs -> FormInvalid errs
 
 renderResult :: Bool -> Ditto.View err FormView -> Ditto.Result err a -> NanoUI ()
 renderResult showErrors view result =
@@ -111,7 +120,8 @@ renderResult showErrors view result =
       Ditto.Error errs | showErrors -> errs
       _ -> []
 
--- | Reset all stored input values for a form prefix.
+-- | Reset input values and the corresponding widget state for a form prefix.
+-- Re-evaluate the form on the next frame to render its defaults.
 resetForm :: Text -> NanoUI ()
 resetForm prefix = do
   ctx <- askContext

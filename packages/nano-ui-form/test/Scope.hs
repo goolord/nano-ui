@@ -2,6 +2,7 @@ module Scope (runScopeTests) where
 
 import Control.Exception (IOException, try)
 import Control.Monad (forM, forM_, unless, void)
+import Data.IORef (writeIORef)
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
 import Ditto.Core qualified as Ditto
@@ -17,21 +18,23 @@ import NanoUI
   , runNanoUI
   , uiIO
   )
-import NanoUI.Context (ctxNodeArena)
+import NanoUI.Context (ctxFocusId, ctxNodeArena)
 import NanoUI.Form
 import NanoUI.Form.Backend
   ( FormStateStore (..)
+  , emptyFormStateStore
   , getActiveFormPrefix
   , getFormStore
   , markFormSubmitted
   , resetFormState
   , setActiveFormPrefix
+  , setFormStore
   , updateFieldInput
   , withFormPrefix
   )
 import NanoUI.Id (WidgetId)
 import NanoUI.Layout.Arena
-  ( NodeType (NodeCheckbox)
+  ( NodeType (NodeCheckbox, NodeTextArea)
   , arenaCount
   , getNodeType
   , getRect
@@ -50,9 +53,14 @@ runScopeTests = do
   testPrefixRestoration
   testFormInvalidation
   testSubmitPulse
+  testResetWidgets
+  testResetTextArea
 
 checkboxes :: Context -> IO [(WidgetId, Rect)]
-checkboxes ctx = do
+checkboxes = controlsOf NodeCheckbox
+
+controlsOf :: NodeType -> Context -> IO [(WidgetId, Rect)]
+controlsOf wanted ctx = do
   let
     arena = ctxNodeArena ctx
   count <- arenaCount arena
@@ -61,7 +69,7 @@ checkboxes ctx = do
       [0 .. count - 1]
       ( \index -> do
           nodeType <- getNodeType arena index
-          if nodeType /= NodeCheckbox
+          if nodeType /= wanted
             then pure []
             else do
               wid <- getWidgetId arena index
@@ -180,3 +188,59 @@ testSubmitPulse = do
   check "valid submission did not return its value" (submitted == Just 42)
   idle <- warmup2 ctx input ui
   check "a submitted form kept emitting values on idle frames" (idle == Nothing)
+
+testResetWidgets :: IO ()
+testResetWidgets = do
+  ctx <- newPixelContext
+  let
+    input = withInputOff 400 240
+    ui =
+      columnWith fillW $
+        (,)
+          <$> nanoFormLive "reset-left" enabledForm
+          <*> nanoFormLive "reset-right" enabledForm
+  _ <- warmup2 ctx input ui
+  controls <- checkboxes ctx
+  case controls of
+    [(_, leftRect), (rightId, rightRect)] -> do
+      forM_ [leftRect, rightRect] $ \rect -> do
+        let
+          (press, release) = clickPair input (spanCenter rect)
+        void (runFrame ctx press ui)
+        void (runFrame ctx release ui)
+      edited <- warmup2 ctx input ui
+      check "checkboxes did not retain their edits" (edited == (Just True, Just True))
+      runNanoUI ctx input (resetForm "reset-left")
+      reset <- warmup2 ctx input ui
+      check
+        "reset did not restore defaults or changed another form"
+        (reset == (Just False, Just True))
+      after <- checkboxes ctx
+      check
+        "reset changed another form's widget identity"
+        (map fst (drop 1 after) == [rightId])
+      setFormStore ctx "reset-left" emptyFormStateStore
+      persisted <- warmup2 ctx input ui
+      check
+        "writing form data revived a retired widget cache"
+        (persisted == (Just False, Just True))
+    _ -> fail "expected two reset-test checkboxes"
+
+testResetTextArea :: IO ()
+testResetTextArea = do
+  ctx <- newPixelContext
+  let
+    input = withInputOff 400 240
+    ui = nanoFormLive "reset-editor" (inputTextArea "notes" "initial")
+  _ <- warmup2 ctx input ui
+  controls <- controlsOf NodeTextArea ctx
+  case controls of
+    [(wid, _)] -> do
+      writeIORef (ctxFocusId ctx) wid
+      void (runFrame ctx input {inputChars = "edited"} ui)
+      edited <- warmup2 ctx input ui
+      check "text area did not retain its edit" (edited == Just "editedinitial")
+      runNanoUI ctx input (resetForm "reset-editor")
+      reset <- warmup2 ctx input ui
+      check "reset retained the text area's cached buffer" (reset == Just "initial")
+    _ -> fail "expected one reset-test text area"

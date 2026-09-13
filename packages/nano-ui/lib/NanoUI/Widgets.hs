@@ -232,10 +232,8 @@ import NanoUI.Context
   , getLastPointerBlocked
   , getStore
   , intKey
-  , isDisabled
   , markDirty
   , markEscapeConsumed
-  , pointerBlockedByModal
   , registerFocusable
   , setStore
   , writeStoreFloat
@@ -330,6 +328,7 @@ import NanoUI.Style
   , fontMuted
   , fontDanger
   , fontBold
+  , fontMedium
   , fontItalic
   , fontUnderline
   , gap
@@ -346,7 +345,8 @@ import NanoUI.Types
   , v2X
   , v2Y
   )
-import NanoUI.Widgets.Behavior (DragAxis (..), KeyNav (..), keyActivated, useDrag1D, useKeyNav)
+import NanoUI.Widgets.Behavior (DragAxis (..), KeyNav (..), keyActivated, keyboardFocused, useDrag1D, useKeyNav)
+import NanoUI.Widgets.Combinators (buttonStyledEx)
 import NanoUI.WidgetText
   ( colorPickerCurrentLabel
   , colorPickerDisplayText
@@ -495,7 +495,7 @@ box layout col = do
     )
 
 heading :: Ui :> es => Text -> Eff es ()
-heading txt = void (labelWith (tight . fontBold) txt)
+heading txt = void (labelWith (tight . fontMedium) txt)
 
 muted :: Ui :> es => Text -> Eff es ()
 muted txt = void (labelWith (fillW . fontMuted) txt)
@@ -616,25 +616,7 @@ button_ txt = void (button' txt)
 -- | Button with custom layout and enabled state.
 {-# INLINE buttonLayoutEx #-}
 buttonLayoutEx :: (Ui :> es) => Layout -> Bool -> Text -> Eff es Response
-buttonLayoutEx layout enabled txt = do
-  wid <- nextId
-  ctx <- askContext
-  uiIO $ registerFocusable ctx wid
-  let stored = txt
-  resp <- addWidget wid NodeButton stored 0 layout
-  disabled <- uiIO (isDisabled ctx wid)
-  keyClick <- keyActivated wid
-  let
-    active = enabled && not disabled
-    hovered' = active && respHovered resp
-    clicked' = active && (respClicked resp || keyClick)
-  -- Stateless idle buttons: when neither flag changes, return the response
-  -- unchanged instead of allocating a fresh record via setClicked/setHovered.
-  pure
-    ( if rawRespHovered resp == hovered' && rawRespClicked resp == clicked'
-        then resp
-        else resp {rawRespHovered = hovered', rawRespClicked = clicked'}
-    )
+buttonLayoutEx layout enabled txt = buttonStyledEx enabled txt 0 layout 0
 
 -- | Button with enabled/disabled flag and default layout.
 {-# INLINE buttonEx #-}
@@ -799,10 +781,7 @@ buildTextInput styleIdx layout placeholder initial mDebounceMs = do
   let
     cursor = fromMaybe (T.length current) (IM.lookup (slotKey slotCursor key) (storeInt store))
     anchor = fromMaybe cursor (IM.lookup (slotKey slotAnchor key) (storeInt store))
-  focus <- uiIO (readIORef (ctxFocusId ctx))
-  blocked <- uiIO (pointerBlockedByModal ctx)
-  let
-    isFocus = focus == wid && not blocked
+  isFocus <- keyboardFocused wid
   newState <-
     if isFocus
       then uiIO (processTextInput ctx inp (TextInputState current cursor anchor))
@@ -949,11 +928,9 @@ comboBox placeholder options initial = do
       focusKey = slotKey slotComboFocus key
       liveKey = slotKey slotComboLive key
       keys = inputKeys inp
-  focus <- uiIO (readIORef (ctxFocusId ctx))
-  blocked <- uiIO (pointerBlockedByModal ctx)
+  isFocus <- keyboardFocused wid
   store <- uiIO (getStore ctx)
   let
-    isFocus = focus == wid && not blocked
     displayed = comboFiltered options text
     n = length displayed
     vis = max 1 comboBoxMaxVisible
@@ -1013,8 +990,8 @@ comboBox placeholder options initial = do
     onVTrack = maybe False (\(t, _) -> rectContains t mouse) vSb
     onHThumb = maybe False (\(_, th) -> rectContains th mouse) hSb
     onHTrack = maybe False (\(t, _) -> rectContains t mouse) hSb
-    pressed = not blocked && inputMousePressed inp
-    down = not blocked && inputMouseDown inp
+    pressed = isFocus && inputMousePressed inp
+    down = isFocus && inputMouseDown inp
     startV = pressed && overDrop && onVTrack
     startH = pressed && overDrop && not startV && onHTrack
     vThumbR = maybe (Rect 0 0 0 0) snd vSb
@@ -1151,9 +1128,7 @@ textAreaWith layout initial = do
       -- edits carry no keys or chars; folded into 'changed' so the caller
       -- gets its respChanged pulse, then cleared in the state write below.
       menuPulse = IM.member changedSlotKey (storeInt store)
-  focus <- uiIO (readIORef (ctxFocusId ctx))
-  blocked <- uiIO (pointerBlockedByModal ctx)
-  let isFocus = focus == wid && not blocked
+  isFocus <- keyboardFocused wid
   (newText, stateChanged) <-
     if isFocus
       then do

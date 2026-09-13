@@ -10,6 +10,7 @@ module NanoUI.Widgets.Combinators
   , indentedRow
   , stripedRow
   , buttonStyled
+  , buttonStyledEx
   , selectableItem
   , keyedRow
   , listAt
@@ -33,7 +34,7 @@ import Data.IntSet qualified as IS
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
-import NanoUI.Context (getScrollOffset, registerFocusable, setScrollOffset)
+import NanoUI.Context (getScrollOffset, isDisabled, registerFocusable, setScrollOffset)
 import NanoUI.Id (WidgetId (..))
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, nextId, uiIO, withKey)
@@ -53,8 +54,7 @@ import NanoUI.Widgets.Layout
   , spacer
   )
 import NanoUI.Widgets.Node
-  ( Responding (respClicked)
-  , Response (..)
+  ( Response (..)
   , addWidgetStyled
   , rawRespRect
   , setClicked
@@ -67,14 +67,14 @@ gridColumns = gridColumnsLay (tight $ defaultLayout {layoutGap = 0})
 -- | One row of cells with custom row layout.
 gridColumnsLay :: (Ui :> es) => Layout -> [Int] -> [Layout] -> [Eff es ()] -> Eff es ()
 gridColumnsLay lay keys layouts cells =
-  void $
-    row' lay $
-      mapM_
-        ( \(n, (k, colLay, cell)) -> do
-            when (n > 0) $ void separator
-            withKey k (column' colLay cell)
-        )
-        (zip [0 :: Int ..] (zip3 keys layouts cells))
+  void (row' lay (go True keys layouts cells))
+ where
+  -- Walk in lockstep without allocating zip tuples and indices per cell.
+  go first (key : moreKeys) (layout : moreLayouts) (cell : moreCells) = do
+    when (not first) $ void separator
+    void (withKey key (column' layout cell))
+    go False moreKeys moreLayouts moreCells
+  go _ _ _ _ = pure ()
 
 -- | Copy vertical scroll offset from master to slave.
 syncScroll :: (Ui :> es) => WidgetId -> WidgetId -> Eff es ()
@@ -103,13 +103,31 @@ stripedRow rowIdx layout txt = do
 -- | Button with styleIdx for active, sort, badge, or close chrome. Focusable
 -- and activatable with Enter or Space while focused.
 buttonStyled :: (Ui :> es) => Text -> Float -> Layout -> Int -> Eff es Response
-buttonStyled txt value layout styleIdx = do
+buttonStyled = buttonStyledEx True
+
+-- | Shared activation path for ordinary buttons, menu items, and header chrome.
+-- Disabled controls keep their identity and geometry but cannot take focus or
+-- activate, including through a click queued before they became disabled.
+{-# INLINE buttonStyledEx #-}
+buttonStyledEx :: (Ui :> es) => Bool -> Text -> Float -> Layout -> Int -> Eff es Response
+buttonStyledEx enabled txt value layout styleIdx = do
   wid <- nextId
   ctx <- askContext
-  uiIO $ registerFocusable ctx wid
+  disabled <- uiIO (isDisabled ctx wid)
+  let active = enabled && not disabled
+  when active $ uiIO (registerFocusable ctx wid)
   resp <- addWidgetStyled wid NodeButton txt value layout styleIdx Nothing
-  keyClick <- keyActivated wid
-  pure (setClicked (respClicked resp || keyClick) resp)
+  if active
+    then do
+      keyClick <- keyActivated wid
+      pure (if keyClick then setClicked True resp else resp)
+    else pure resp
+      { rawRespHovered = False
+      , rawRespPressed = False
+      , rawRespClicked = False
+      , rawRespRightPressed = False
+      , rawRespRightClicked = False
+      }
 
 selectableItem :: (Ui :> es) => NodeType -> Text -> Bool -> Layout -> Int -> Eff es Response
 selectableItem nt txt selected layout styleIdx = do

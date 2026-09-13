@@ -65,6 +65,7 @@ module NanoUI.Font
   ) where
 
 
+import Data.Functor.Identity (runIdentity)
 import Data.Text (Text)
 import qualified Data.Text as T
 import NanoUI.Types (Rect (..), onGrid)
@@ -490,32 +491,26 @@ wrappedSizeFrom lineH maxW textLines ws =
     [] -> (0, lineH)
     _ -> (min maxW (maximum ws), lineH * fromIntegral (length textLines))
 
+{-# INLINE wrapTextLines #-}
 wrapTextLines :: FontMetrics -> Text -> Float -> [Text]
 wrapTextLines fm txt maxW =
-  wrapTextLinesFit
-    (takeWidthAdvance fm)
-    (lineWidth fm)
-    txt
-    maxW
-
-wrapTextLinesFit :: (Float -> Text -> (Text, Text)) -> (Text -> Float) -> Text -> Float -> [Text]
-wrapTextLinesFit fit lineW txt maxW =
-  concatMap (\para -> wrapParagraphFit fit lineW para maxW) (T.lines txt)
+  concatMap
+    (\para -> runIdentity (wrapParagraphM fit (pure . lineWidth fm) para maxW))
+    (T.lines txt)
+ where
+  fit width = pure . takeWidthAdvance fm width
 
 wrapTextLinesIO :: (Text -> IO Float) -> FontMetrics -> Text -> Float -> IO [Text]
 wrapTextLinesIO lineW _ txt maxW =
-  concat <$> mapM (\para -> wrapParagraphIO lineW para maxW) (T.lines txt)
+  concat <$> mapM (\para -> wrapParagraphM (takeWidthM lineW) lineW para maxW) (T.lines txt)
 
-wrapParagraphFit :: (Float -> Text -> (Text, Text)) -> (Text -> Float) -> Text -> Float -> [Text]
-wrapParagraphFit fit lineW para maxW
-  | maxW <= 0 = []
-  | T.null para = [""]
-  | lineW para <= maxW = [para]
-  | T.any (== ' ') para = wrapWordsWith lineW (T.words para) maxW []
-  | otherwise = reverse (charLinesFit fit maxW para [])
-
-wrapParagraphIO :: (Text -> IO Float) -> Text -> Float -> IO [Text]
-wrapParagraphIO lineW para maxW
+-- The layout policy is shared by pure font metrics (Identity) and host-backed
+-- shaping (IO). Only measuring a line and fitting a prefix depend on the host.
+{-# INLINE wrapParagraphM #-}
+wrapParagraphM ::
+  Monad m =>
+  (Float -> Text -> m (Text, Text)) -> (Text -> m Float) -> Text -> Float -> m [Text]
+wrapParagraphM fit lineW para maxW
   | maxW <= 0 = pure []
   | T.null para = pure [""]
   | otherwise = do
@@ -523,72 +518,41 @@ wrapParagraphIO lineW para maxW
       if w <= maxW
         then pure [para]
         else if T.any (== ' ') para
-          then wrapWordsIO lineW (T.words para) maxW []
-          else reverse <$> charLinesIO lineW maxW para []
+          then wrapWordsM lineW maxW (T.words para)
+          else reverse <$> charLinesM fit maxW para []
 
-wrapWordsWith :: (Text -> Float) -> [Text] -> Float -> [Text] -> [Text]
-wrapWordsWith _ [] _ acc = reverse acc
-wrapWordsWith lineW (w : ws) maxW acc =
-  case acc of
-    [] ->
-      if lineW w <= maxW
-        then wrapWordsWith lineW ws maxW [w]
-        else wrapWordsWith lineW ws maxW (charLinesWith lineW maxW w [])
-    (line : rest) ->
-      let candidate = line <> " " <> w
-       in if lineW candidate <= maxW
-            then wrapWordsWith lineW ws maxW (candidate : rest)
-            else
-              if lineW w <= maxW
-                then wrapWordsWith lineW ws maxW (w : line : rest)
-                else wrapWordsWith lineW ws maxW (charLinesWith lineW maxW w [] ++ (line : rest))
+{-# INLINE wrapWordsM #-}
+wrapWordsM :: Monad m => (Text -> m Float) -> Float -> [Text] -> m [Text]
+wrapWordsM lineW maxW wordsToWrap = go wordsToWrap []
+ where
+  go [] acc = pure (reverse acc)
+  go (word : wordsLeft) acc = case acc of
+    [] -> startLine word wordsLeft acc
+    line : rest -> do
+      let candidate = line <> " " <> word
+      width <- lineW candidate
+      if width <= maxW
+        then go wordsLeft (candidate : rest)
+        else startLine word wordsLeft acc
+  startLine word wordsLeft acc = do
+    width <- lineW word
+    if width <= maxW
+      then go wordsLeft (word : acc)
+      else do
+        broken <- charLinesM (takeWidthM lineW) maxW word []
+        go wordsLeft (broken ++ acc)
 
-wrapWordsIO :: (Text -> IO Float) -> [Text] -> Float -> [Text] -> IO [Text]
-wrapWordsIO _ [] _ acc = pure (reverse acc)
-wrapWordsIO lineW (w : ws) maxW acc =
-  case acc of
-    [] -> do
-      wW <- lineW w
-      if wW <= maxW
-        then wrapWordsIO lineW ws maxW [w]
-        else do
-          broken <- charLinesIO lineW maxW w []
-          wrapWordsIO lineW ws maxW broken
-    (line : rest) -> do
-      let candidate = line <> " " <> w
-      cW <- lineW candidate
-      if cW <= maxW
-        then wrapWordsIO lineW ws maxW (candidate : rest)
-        else do
-          wW <- lineW w
-          if wW <= maxW
-            then wrapWordsIO lineW ws maxW (w : line : rest)
-            else do
-              broken <- charLinesIO lineW maxW w []
-              wrapWordsIO lineW ws maxW (broken ++ (line : rest))
-
-charLinesWith :: (Text -> Float) -> Float -> Text -> [Text] -> [Text]
-charLinesWith lineW = charLinesFit (takeWidthWith lineW)
-
-charLinesFit :: (Float -> Text -> (Text, Text)) -> Float -> Text -> [Text] -> [Text]
-charLinesFit fit maxW txt acc =
-  if T.null txt
-    then acc
-    else
-      let (line, rest) = fit maxW txt
-       in if T.null line
-            then acc
-            else charLinesFit fit maxW rest (line : acc)
-
-charLinesIO :: (Text -> IO Float) -> Float -> Text -> [Text] -> IO [Text]
-charLinesIO lineW maxW txt acc =
+{-# INLINE charLinesM #-}
+charLinesM ::
+  Monad m => (Float -> Text -> m (Text, Text)) -> Float -> Text -> [Text] -> m [Text]
+charLinesM fit maxW txt acc =
   if T.null txt
     then pure acc
     else do
-      (line, rest) <- takeWidthIO lineW maxW txt
+      (line, rest) <- fit maxW txt
       if T.null line
         then pure acc
-        else charLinesIO lineW maxW rest (line : acc)
+        else charLinesM fit maxW rest (line : acc)
 
 {-# INLINE lineWidth #-}
 lineWidth :: FontMetrics -> Text -> Float
@@ -641,79 +605,44 @@ takeWidthAdvance fm maxW txt
             then if len == 0 then (1, w', c) else (len, w, c)
             else (len + 1, w', c)
 
-takeWidthWith :: (Text -> Float) -> Float -> Text -> (Text, Text)
-takeWidthWith lineW maxW txt =
-  let n = T.length txt
-   in if n <= 0
-        then (txt, T.empty)
-        else
-          let fit = maxFit 1 n
-           in if fit <= 0
-                then (T.take 1 txt, T.drop 1 txt)
-                else if fit >= n
-                  then (txt, T.empty)
-                  else (T.take fit txt, T.drop fit txt)
+-- Always consume at least one character from non-empty text, even when a
+-- single glyph exceeds the available width, so wrapping makes progress.
+{-# INLINE takeWidthM #-}
+takeWidthM :: Monad m => (Text -> m Float) -> Float -> Text -> m (Text, Text)
+takeWidthM lineW maxW txt
+  | T.null txt = pure (txt, T.empty)
+  | otherwise = (`T.splitAt` txt) <$> maxFit 1 (T.length txt)
   where
     maxFit lo hi
-      | lo > hi = hi
-      | lo == hi = lo
-      | otherwise =
-          let mid = (lo + hi + 1) `div` 2
-           in if lineW (T.take mid txt) <= maxW
-                then maxFit mid hi
-                else maxFit lo (mid - 1)
-
-takeWidthIO :: (Text -> IO Float) -> Float -> Text -> IO (Text, Text)
-takeWidthIO lineW maxW txt = do
-  let n = T.length txt
-  if n <= 0
-    then pure (txt, T.empty)
-    else do
-      fit <- maxFit 1 n
-      if fit <= 0
-        then pure (T.take 1 txt, T.drop 1 txt)
-        else
-          if fit >= n
-            then pure (txt, T.empty)
-            else pure (T.take fit txt, T.drop fit txt)
-  where
-    maxFit lo hi
-      | lo > hi = pure hi
-      | lo == hi = pure lo
+      | lo >= hi = pure lo
       | otherwise = do
           let mid = (lo + hi + 1) `div` 2
           ok <- (<= maxW) <$> lineW (T.take mid txt)
           if ok then maxFit mid hi else maxFit lo (mid - 1)
 
+{-# INLINE truncateTextAdvance #-}
 truncateTextAdvance :: FontMetrics -> Float -> Text -> Text
-truncateTextAdvance fm maxW txt
-  | maxW <= 0 = ""
-  | otherwise =
-      let !totalW = lineWidth fm txt
-       in if totalW <= maxW
-            then txt
-            else
-              let ellW = lineWidth fm "..."
-               in if maxW <= ellW
-                    then fst (takeWidthAdvance fm maxW txt)
-                    else
-                      let (fit, _) = takeWidthAdvance fm (maxW - ellW) txt
-                       in T.dropWhileEnd (== '.') fit <> "..."
+truncateTextAdvance fm maxW txt =
+  runIdentity $
+    truncateTextM
+      (\width -> pure . takeWidthAdvance fm width)
+      (pure . lineWidth fm)
+      maxW
+      txt
 
+{-# INLINE truncateTextWith #-}
 truncateTextWith :: (Text -> Float) -> Float -> Text -> Text
-truncateTextWith lineW maxW txt
-  | maxW <= 0 = ""
-  | lineW txt <= maxW = txt
-  | otherwise =
-      let ellW = lineW "..."
-       in if maxW <= ellW
-            then fst (takeWidthWith lineW maxW txt)
-            else
-              let (fit, _) = takeWidthWith lineW (maxW - ellW) txt
-               in T.dropWhileEnd (== '.') fit <> "..."
+truncateTextWith lineW maxW txt =
+  runIdentity (truncateTextM (takeWidthM (pure . lineW)) (pure . lineW) maxW txt)
 
 truncateTextIO :: (Text -> IO Float) -> Float -> Text -> IO Text
-truncateTextIO lineW maxW txt
+truncateTextIO lineW = truncateTextM (takeWidthM lineW) lineW
+
+{-# INLINE truncateTextM #-}
+truncateTextM ::
+  Monad m =>
+  (Float -> Text -> m (Text, Text)) -> (Text -> m Float) -> Float -> Text -> m Text
+truncateTextM fitPrefix lineW maxW txt
   | maxW <= 0 = pure ""
   | otherwise = do
       w <- lineW txt
@@ -722,7 +651,7 @@ truncateTextIO lineW maxW txt
         else do
           ellW <- lineW "..."
           if maxW <= ellW
-            then fst <$> takeWidthIO lineW maxW txt
+            then fst <$> fitPrefix maxW txt
             else do
-              (fit, _) <- takeWidthIO lineW (maxW - ellW) txt
+              (fit, _) <- fitPrefix (maxW - ellW) txt
               pure (T.dropWhileEnd (== '.') fit <> "...")

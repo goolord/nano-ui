@@ -16,7 +16,7 @@ import Data.List (findIndex)
 import Data.Primitive.PrimArray (readPrimArray)
 import qualified Data.IntMap.Strict as IM
 import NanoUI.Context (Context (..), WidgetStore (..), getStore, intBool, intKey)
-import NanoUI.Frame.Hit (modalTreeOpen, widgetIdInModal)
+import NanoUI.Frame.Hit (topmostModalIdx, widgetIdInModal, widgetIdInSubtree)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Layout.Arena
   ( NodeType (NodeCheckbox, NodeRadio, NodeTree)
@@ -76,19 +76,23 @@ tabNextFocusables ctx cur shift = do
 
 filterModalFocusables :: Context -> [WidgetId] -> IO [WidgetId]
 filterModalFocusables ctx ids = do
-  open <- modalTreeOpen ctx
-  if not open
-    then pure ids
-    else filterM (widgetIdInModal ctx) ids
+  -- Searching the arena once per focusable makes a large modal's Tab traversal
+  -- quadratic. Resolve its root once, then test ancestry for each widget.
+  top <- topmostModalIdx ctx
+  case top of
+    Nothing -> pure ids
+    Just modal -> filterM (widgetIdInSubtree ctx modal) ids
 
 constrainFocusToModal :: Context -> IO ()
 constrainFocusToModal ctx = do
-  open <- modalTreeOpen ctx
-  when open $ do
-    focus <- readIORef (ctxFocusId ctx)
-    when (hashWidgetId focus /= 0) $ do
-      ok <- widgetIdInModal ctx focus
-      unless ok $ writeIORef (ctxFocusId ctx) (WidgetId 0)
+  top <- topmostModalIdx ctx
+  case top of
+    Nothing -> pure ()
+    Just modal -> do
+      focus <- readIORef (ctxFocusId ctx)
+      when (hashWidgetId focus /= 0) $ do
+        ok <- widgetIdInSubtree ctx modal focus
+        unless ok $ writeIORef (ctxFocusId ctx) (WidgetId 0)
 
 syncWidgetLabels :: Context -> IO ()
 syncWidgetLabels ctx = do

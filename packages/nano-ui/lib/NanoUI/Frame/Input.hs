@@ -11,9 +11,6 @@ module NanoUI.Frame.Input
   , findTopWidgetUnderMouse
   , isInteractiveNode
   , findTextInputUnderMouse
-  , whenM
-  , unlessM
-  , ifM
   ) where
 
 
@@ -50,7 +47,8 @@ import NanoUI.Input
   , modShift
   )
 import NanoUI.Layout.Arena
-  ( NodeType (..)
+  ( NodeIdx
+  , NodeType (..)
   , arenaCount
   , findNodeRevM
   , getNodeType
@@ -60,6 +58,7 @@ import NanoUI.Layout.Arena
   , getWidgetId
   )
 import NanoUI.Types (Rect (..), V2 (..), rectContains, rectH, rectW)
+import NanoUI.Monad (whenM)
 import NanoUI.Frame.Focus (filterModalFocusables, tabNext, tabNextFocusables)
 import NanoUI.Frame.Hit
   ( findNodeByWidgetId
@@ -78,21 +77,6 @@ import NanoUI.Frame.TextEdit
   , finalizeTextFieldMouse
   , textEditMenuRect
   )
-
--- | Monadic variant of 'when'.
-{-# INLINE whenM #-}
-whenM :: Monad m => m Bool -> m () -> m ()
-whenM mb ma = mb >>= \b -> when b ma
-
--- | Monadic variant of 'unless'.
-{-# INLINE unlessM #-}
-unlessM :: Monad m => m Bool -> m () -> m ()
-unlessM mb ma = mb >>= \b -> unless b ma
-
--- | Monadic conditional selection.
-{-# INLINE ifM #-}
-ifM :: Monad m => m Bool -> m a -> m a -> m a
-ifM mb t f = mb >>= \b -> if b then t else f
 
 finalizeTabFocus :: Context -> Input -> IO ()
 finalizeTabFocus ctx inp =
@@ -202,8 +186,8 @@ isInteractiveNode nt =
     || nt == NodeDrawing
 
 -- Clicks are finalized against solved layout rects; widgets only track press state.
--- Checkbox/radio write the store here. Buttons, tree rows, and select use the same
--- solved hit; if in-UI prev-rect tests missed, ctxClickedId fires next frame.
+-- Radio/tab selection is written here. Clickable widgets use the same solved
+-- hit; if in-UI prev-rect tests missed, ctxClickedId fires next frame.
 finalizePointerRelease :: Context -> Input -> IO ()
 finalizePointerRelease ctx inp =
   if not (inputMouseReleased inp)
@@ -232,51 +216,37 @@ finalizePointerRelease ctx inp =
                 (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
                 let rect = Rect x y w h
                 visible <- nodeClippedHit ctx idx rect mouse
-                when visible $
+                when visible $ do
                   case nt of
                     NodeRadio -> do
-                      parent <- getParent (ctxNodeArena ctx) idx
-                      when (parent >= 0) $ do
-                        store <- getStore ctx
-                        optIdx <- getStyleIdx (ctxNodeArena ctx) idx
-                        groupWid <- getWidgetId (ctxNodeArena ctx) parent
-                        let groupKey = intKey groupWid
-                        setStore
-                          ctx
-                          ( store
-                              { storeInt = IM.insert groupKey optIdx (storeInt store)
-                              }
-                          )
+                      optIdx <- getStyleIdx (ctxNodeArena ctx) idx
+                      setParentSelection ctx idx optIdx
                     NodeButton -> do
                       packed <- getStyleIdx (ctxNodeArena ctx) idx
-                      when (isTabButtonStyle packed) $ do
-                        parent <- getParent (ctxNodeArena ctx) idx
-                        when (parent >= 0) $ do
-                          store <- getStore ctx
-                          groupWid <- getWidgetId (ctxNodeArena ctx) parent
-                          let groupKey = intKey groupWid
-                              tabIdx = buttonVisualStyle packed `div` 4
-                          setStore
-                            ctx
-                            ( store
-                                { storeInt = IM.insert groupKey tabIdx (storeInt store)
-                                }
-                            )
-                      when (releasedClicked /= active) $ do
-                        uiHit <- inUiClickHit ctx active mouse
-                        unless uiHit $ writeIORef (ctxClickedId ctx) active
-                    _ | postsLayoutClick nt -> do
-                      when (releasedClicked /= active) $ do
-                        uiHit <- inUiClickHit ctx active mouse
-                        unless uiHit $ writeIORef (ctxClickedId ctx) active
+                      when (isTabButtonStyle packed) $
+                        setParentSelection ctx idx (buttonVisualStyle packed `div` 4)
                     _ -> pure ()
+                  when (postsLayoutClick nt && releasedClicked /= active) $ do
+                    uiHit <- inUiClickHit ctx active mouse
+                    unless uiHit $ writeIORef (ctxClickedId ctx) active
             writeIORef (ctxActiveId ctx) (WidgetId 0)
             when releasedOver $
               setAnimationValue ctx active 1
 
+-- Radio options and tab buttons keep their selection on the parent group.
+setParentSelection :: Context -> NodeIdx -> Int -> IO ()
+setParentSelection ctx idx selected = do
+  parent <- getParent (ctxNodeArena ctx) idx
+  when (parent >= 0) $ do
+    store <- getStore ctx
+    groupWid <- getWidgetId (ctxNodeArena ctx) parent
+    setStore ctx store
+      { storeInt = IM.insert (intKey groupWid) selected (storeInt store)
+      }
+
 postsLayoutClick :: NodeType -> Bool
 postsLayoutClick nt =
-  nt == NodeTree || nt == NodeSelect || nt == NodeCheckbox
+  nt == NodeButton || nt == NodeTree || nt == NodeSelect || nt == NodeCheckbox
 
 inUiClickHit :: Context -> WidgetId -> V2 -> IO Bool
 inUiClickHit ctx wid mouse = do
@@ -369,4 +339,3 @@ findTextInputUnderMouse ctx count mouse = go 0
                   if allow then pure (Just wid) else go (idx + 1)
                 else go (idx + 1)
             else go (idx + 1)
-

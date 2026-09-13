@@ -37,12 +37,10 @@ import Effectful (Eff, type (:>))
 import NanoUI.Context
   ( Context (..)
   , WidgetStore (..)
-  , getFocusId
   , getLastPointerBlocked
   , getStore
   , intKey
   , menuPointerGestureActive
-  , pointerBlockedByModal
   , registerFocusable
   , setStore
   )
@@ -102,6 +100,7 @@ import NanoUI.Widgets.Behavior
   ( DragAxis (..)
   , KeyNav (..)
   , keyedDragHeld
+  , keyboardFocused
   , useDrag1D
   , useKeyNav
   )
@@ -472,11 +471,6 @@ colorPickerRGBA = colorPickerWith True
 colorPickerWith ::
   Ui :> es => Bool -> Color -> Eff es (Response, Color)
 colorPickerWith showAlpha initial = do
-  colorPickerRich showAlpha initial
-
-colorPickerRich ::
-  Ui :> es => Bool -> Color -> Eff es (Response, Color)
-colorPickerRich showAlpha initial = do
   ctx <- askContext
   inp <- askInput
   wid <- nextId
@@ -718,10 +712,7 @@ buildColorField pct label expected = do
         (T.length stored0)
         (IM.lookup (slotKey slotCursor key) (storeInt store))
     anchor = fromMaybe cursor (IM.lookup (slotKey slotAnchor key) (storeInt store))
-  focus <- uiIO (getFocusId ctx)
-  blocked <- uiIO (pointerBlockedByModal ctx)
-  let
-    isFocus = focus == wid && not blocked
+  isFocus <- keyboardFocused wid
   newState <-
     if isFocus
       then uiIO (processTextInput ctx inp (TextInputState stored0 cursor anchor))

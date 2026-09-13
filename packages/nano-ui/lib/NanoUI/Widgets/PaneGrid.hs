@@ -30,7 +30,7 @@ import Data.IntMap.Strict qualified as IM
 import Data.List (find, minimumBy)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
-import Data.Maybe (fromMaybe, isJust, listToMaybe)
+import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Ord (comparing)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -65,7 +65,9 @@ import NanoUI.Input
   , inputMousePressed
   )
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
-import NanoUI.Id (WidgetId)
+import NanoUI.Id (IdContext (..), WidgetId, hashWidgetId)
+import NanoUI.Frame.Hit (nodeInteractionHit, scrollHitRect)
+import NanoUI.Frame.Input (isInteractiveNode)
 import NanoUI.Store
   ( WidgetStore (..)
   , slotKey
@@ -92,7 +94,6 @@ import NanoUI.Style
 import NanoUI.Types
   ( Rect (..)
   , V2 (..)
-  , colorRGBA
   , lerpColor
   , rectHit
   , rectH
@@ -118,7 +119,7 @@ import NanoUI.Widgets.Custom
   , runCanvas
   )
 import NanoUI.Widgets.Layout (column', row')
-import NanoUI.Layout.Arena (NodeType (..))
+import NanoUI.Layout.Arena (NodeType (..), arenaCount, getNodeType, getWidgetId)
 import NanoUI.Widgets.Node
   ( container
   , containerResponse
@@ -196,7 +197,8 @@ data PaneGridCtx es = PaneGridCtx
   , pgcMaximized :: !Bool
     -- ^ True when this pane currently fills the whole grid.
   , pgcDragging :: !Bool
-    -- ^ True when this pane is the one being drag-and-dropped.
+    -- ^ True while this pane's drag is armed. Once the drag threshold is
+    -- crossed, the pane is omitted from the visible layout until release.
   , pgcDndActive :: !Bool
     -- ^ True while any pane drag-and-drop gesture is in progress.
   , pgcSplit :: !(GridAxis -> Eff es Word64)
@@ -211,11 +213,12 @@ data PaneGridCtx es = PaneGridCtx
 -- purely optional and nothing here depends on one existing.
 data PaneView = PaneView
   { pvTitle :: !Text
-    -- ^ Label shown on the floating ghost while the pane is dragged.
+    -- ^ Label shown (abbreviated to fit) on the compact drag indicator.
   , pvDraggable :: !Bool
     -- ^ Grab the pane anywhere inside its own region to drag-and-drop it. This
     -- is the easy way to reorder panes without drawing a dedicated handle.
-    -- Pane still needs a drag only on a sub-region? see 'pvDragPick'.
+    -- Interactive children keep their pointer presses. Pane still needs a
+    -- drag only on a sub-region? see 'pvDragPick'.
   , pvDragPick :: !(Maybe Rect)
     -- ^ Optional absolute sub-region (e.g. just a title bar; position it via
     -- 'pgcRect') that also starts a drag. Both handles combine: the pane drags
@@ -249,12 +252,16 @@ data PaneGridResponse = PaneGridResponse
 data RenderedPane = RenderedPane
   { rpPaneId :: !Word64
   , rpView :: !PaneView
+  , rpControlHit :: !Bool
   }
 
 -- | Per-frame shared environment.
 data GridEnv es = GridEnv
   { geCtx :: !Context
   , geKey :: !Int
+  , gePaneScope :: !IdContext
+    -- ^ Pane identity is rooted at the grid widget, independent of split
+    -- ancestry so rearranging or temporarily collapsing splits preserves state.
   , geCfg :: !(PaneGridConfig es)
   , geGutter :: !Float
   , geThickness :: !Float
@@ -361,12 +368,12 @@ paneGrid cfg = do
       focusedInit = resolveFocus tree0 maxPane (fromIntegral focus0)
       mouse = inputMousePos inp
       (regions, dividers) = layoutNode minSize gutter tree0 baseRect
-      divMap = M.fromList [(diSplitId d, d) | d <- dividers]
   changedRef <- uiIO (newIORef False)
   let mGrab = IM.lookup grabK (storePoint st)
       dgi =
         computeDragInfo
           drag0
+          (IM.findWithDefault 0 grabK (storeInt st) /= 0)
           DragGeom
             { dgMinSize = minSize
             , dgGutter = gutter
@@ -377,17 +384,23 @@ paneGrid cfg = do
             }
           mGrab
           mouse
-      dgiShown = dgiActive dgi && (isJust (dgiGhost dgi) || isJust (dgiZone dgi))
+      dgiShown = dgiActive dgi && dgiMoved dgi && inputMouseDown inp
+      -- Keep the committed tree for cancellation and exact drop previews,
+      -- but close up the dragged pane's space in the live layout.
+      visibleTree = if dgiShown then treeRemovePane (fromIntegral drag0) tree0 else Just tree0
+      (visibleRegions, visibleDividers) = maybe (M.empty, []) (\t -> layoutNode minSize gutter t baseRect) visibleTree
+      divMap = M.fromList [(diSplitId d, d) | d <- visibleDividers]
       env =
         GridEnv
           { geCtx = ctx
           , geKey = key
+          , gePaneScope = IdContext (hashWidgetId wid) 0
           , geCfg = cfg
           , geGutter = gutter
           , geThickness = spacing
           , geMinSize = minSize
           , geLeeway = leeway
-          , geRegions = regions
+          , geRegions = visibleRegions
           , geBaseRect = baseRect
           , geTree = tree0
           , geGestK = gestK
@@ -421,7 +434,7 @@ paneGrid cfg = do
     if maxPane /= 0
       then void (renderMaxPane env maxPane)
       else do
-        rendered <- renderNode env divMap tree0
+        rendered <- maybe (pure []) (renderNode env divMap) visibleTree
         runGestures env dividers rendered dgi
         when (dgiShown && rectNonEmpty baseRect) $
           drawDragOverlay env wid rendered (dgiGhost dgi) (fmap fst (dgiZone dgi))
@@ -523,6 +536,17 @@ renderMaxPane :: (Ui :> es) => GridEnv es -> Word64 -> Eff es [RenderedPane]
 renderMaxPane env pid =
   renderPane env pid (geBaseRect env) (paneLay (geMinSize env)) False
 
+-- | Enter a pane's grid-relative identity scope while leaving the split tree's
+-- layout scopes intact. Consume one sibling just as 'withKey' does.
+withPaneKey :: (Ui :> es) => GridEnv es -> Word64 -> Eff es a -> Eff es a
+withPaneKey env pid action = do
+  let ref = ctxIdContext (geCtx env)
+  parent <- uiIO (readIORef ref)
+  uiIO (writeIORef ref (gePaneScope env))
+  result <- withKey pid action
+  uiIO (writeIORef ref (parent {siblingId = siblingId parent + 1}))
+  pure result
+
 -- | Render one pane's content via 'pgViewPane' under the pane's stable key.
 renderPane ::
   (Ui :> es) =>
@@ -533,10 +557,32 @@ renderPane ::
   Bool ->
   Eff es [RenderedPane]
 renderPane env pid rect lay dragging =
-  withKey pid $ do
+  withPaneKey env pid $ do
+    inp <- askInput
+    let ctx = geCtx env
+        arena = ctxNodeArena ctx
+    start <- uiIO (arenaCount arena)
     let ctxt = geMakeCtx env pid rect dragging
     (view, _) <- containerResponse NodeContainer lay (pgViewPane (geCfg env) pid ctxt)
-    pure [RenderedPane pid view]
+    -- Press ownership must be checked against previous solved child rects:
+    -- ctxActiveId is only finalized after this frame's UI has been built.
+    controlHit <-
+      if not (inputMousePressed inp)
+        then pure False
+        else uiIO $ do
+          end <- arenaCount arena
+          or <$> mapM
+            (\idx -> do
+              nt <- getNodeType arena idx
+              if isInteractiveNode nt
+                then do
+                  child <- getWidgetId arena idx
+                  r <- scrollHitRect ctx child
+                  maybe (pure False) (\childRect -> nodeInteractionHit ctx idx childRect (inputMousePos inp)) r
+                else pure False
+            )
+            [start .. end - 1]
+    pure [RenderedPane pid view controlHit]
 
 renderNode ::
   (Ui :> es) =>
@@ -632,29 +678,30 @@ drawDragOverlay ::
   Maybe Rect ->
   Eff es ()
 drawDragOverlay env wid rendered ghost zone = do
+  st <- uiIO (getStore (geCtx env))
   let ctx = geCtx env
       dragPane = fromIntegral (geDrag0 env)
-      title = maybe "" pvTitle (fmap rpView (find ((== dragPane) . rpPaneId) rendered))
+      cached = IM.lookup (geGrabK env) (storeDyn st) >>= fromDynamic
+      title = maybe (fromMaybe "" cached) pvTitle (fmap rpView (find ((== dragPane) . rpPaneId) rendered))
   uiIO $
     registerCustomDrawing ctx wid (\cdc _ -> drawOverlay (cdcTheme cdc) title ghost zone)
 
--- | Ghost + drop-zone chrome. Corner radius 2 and the drop shadow follow the
--- house style of floating chrome ('NanoUI.Frame.Chrome').
+-- | A compact, translucent drag indicator leaves the full-size drop preview
+-- visible. The indicator is offset from the pointer so it cannot obscure aim.
 drawOverlay :: Theme -> Text -> Maybe Rect -> Maybe Rect -> Vector DrawOp
 drawOverlay theme title ghost zone =
   runCanvas $ do
     let accent = themeAccent theme
         win = themeFloatingWindow theme
-        panelFill = lerpColor (styleBg win) accent 0.08
-        panelBorder = lerpColor (styleBg win) (styleFg win) 0.45
+        panelFill = fadeAlpha accent 48
+        panelBorder = fadeAlpha accent 128
         previewFill = fadeAlpha accent 32
+        shortTitle = if T.length title > 12 then T.take 11 title <> "…" else title
     forM_ ghost $ \gr -> do
-      -- Menu-style drop shadow: offset down-right, translucent black.
-      drawRoundedRect (Rect (rectX gr + 3) (rectY gr + 3) (rectW gr) (rectH gr)) 2 (colorRGBA 0 0 0 72)
       drawRoundedRect gr 2 panelFill
       drawStrokeRoundedRect gr 2 2 panelBorder
       when (not (T.null title)) $
-        drawText (V2 (rectX gr + 10) (rectY gr + 8)) AlignStart AlignTop title (styleFg win)
+        drawText (V2 (rectX gr + 6) (rectY gr + 6)) AlignStart AlignTop shortTitle (fadeAlpha (styleFg win) 160)
     forM_ zone $ \zr -> do
       drawRoundedRect zr 2 previewFill
       drawStrokeRoundedRect (rectInflate (-1) zr) 2 2 accent
@@ -689,27 +736,28 @@ data DragGeom = DragGeom
 -- back out with the grid's real 'dgGutter' and 'dgMinSize', so the
 -- highlighted rect is the exact region the pane lands in even when removing
 -- it reshapes the rest of a mixed-split grid.
-computeDragInfo :: Int -> DragGeom -> Maybe (Float, Float) -> V2 -> DragInfo
-computeDragInfo drag0 geom mGrab mouse
+computeDragInfo :: Int -> Bool -> DragGeom -> Maybe (Float, Float) -> V2 -> DragInfo
+computeDragInfo drag0 latched geom mGrab mouse
   | drag0 <= 0 = DragInfo False False Nothing Nothing
   | otherwise =
       let DragGeom{dgMinSize = minSize, dgGutter = gutter, dgTree = tree, dgBaseRect = baseRect, dgBand = band, dgRegions = regions} = geom
           pid = fromIntegral drag0
           mFrom = M.lookup pid regions
           (gx, gy) = fromMaybe (0, 0) mGrab
-          moved = case mFrom of
+          moved = latched || case mFrom of
             Just (Rect px py _ _) ->
               let vx = v2X mouse - (px + gx)
                   vy = v2Y mouse - (py + gy)
                in vx * vx + vy * vy > dragThresholdPx * dragThresholdPx
             Nothing -> False
           ghost = case mFrom of
-            Just (Rect _ _ pw ph)
-              | moved -> Just (Rect (v2X mouse - gx) (v2Y mouse - gy) pw ph)
+            Just _
+              | moved -> Just (Rect (v2X mouse + 12) (v2Y mouse + 12) 112 28)
             _ -> Nothing
+          targetRegions = maybe M.empty (\t -> fst (layoutNode minSize gutter t baseRect)) (treeRemovePane pid tree)
           under =
             [ (q, r)
-            | (q, r) <- M.toList regions
+            | (q, r) <- M.toList targetRegions
             , q /= pid
             , rectHit r mouse
             ]
@@ -739,27 +787,36 @@ runGestures env dividers rendered dgi = do
       down = inputMouseDown inp
       drag0 = geDrag0 env
       busy = drag0 /= 0
+      -- diBand already spans spacing + both leeway margins. Inflating it
+      -- again steals presses from the neighboring pane, especially headers.
       hitDiv =
         find
-          (\d -> rectHit (rectInflate (geLeeway env) (diBand d)) mouse)
+          (\d -> rectHit (diBand d) mouse)
           dividers
       -- The pane whose pick rect (or, when 'pvDraggable', whole region) is
       -- under the pointer.
       pickHit =
         listToMaybe
           [ p
-          | RenderedPane p v <- rendered
+          | pane <- rendered
+          , let p = rpPaneId pane
+                v = rpView pane
           , maybe False (`rectHit` mouse) (pvDragPick v)
               || (pvDraggable v && maybe False (`rectHit` mouse) (M.lookup p regions))
           ]
   menu <- uiIO (menuPointerGestureActive ctx)
-  when (press && not busy && not menu) $ do
+  when (press && not busy && not menu && not (any rpControlHit rendered)) $ do
     case hitDiv of
       Just d -> do
         writeGest env (negate (fromIntegral (diSplitId d)))
         writeResizeStart env d mouse
       Nothing ->
         forM_ pickHit $ \pid -> do
+          let title = maybe "" (pvTitle . rpView) (find ((== pid) . rpPaneId) rendered)
+          storeWrite env False False $ \st -> st
+            { storeDyn = IM.insert (geGrabK env) (toDyn title) (storeDyn st)
+            , storeInt = IM.delete (geGrabK env) (storeInt st)
+            }
           writeGest env (fromIntegral pid)
           writeGrab env $
             maybe (V2 0 0) (\(Rect px py _ _) -> V2 (v2X mouse - px) (v2Y mouse - py)) (M.lookup pid regions)
@@ -782,6 +839,8 @@ runGestures env dividers rendered dgi = do
   -- refresh paces the whole frame (4 fps). Window / scroll / resize drags mark
   -- dirty every frame for the same reason.
   when (drag0 > 0 && down) $ uiIO (markDirty ctx)
+  when (drag0 > 0 && down && dgiMoved dgi) $
+    storeWrite env False False $ \st -> st {storeInt = IM.insert (geGrabK env) 1 (storeInt st)}
   when (drag0 > 0 && not down) $ do
     let moved = fromIntegral drag0
     when (dgiMoved dgi) $
@@ -918,8 +977,8 @@ writeGest env n =
             else IM.insert (geGestK env) n (storeInt st)
       }
 
--- | Grab offset (mouse - pane origin) captured when a pane drag starts, so
--- the ghost tracks the pointer under the grab point.
+-- | Grab offset (mouse - pane origin) captured for the drag threshold. The
+-- indicator itself uses a small fixed offset from the current pointer.
 writeGrab :: (Ui :> es) => GridEnv es -> V2 -> Eff es ()
 writeGrab env off =
   storeWrite env False False $ \st ->

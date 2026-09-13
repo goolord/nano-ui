@@ -29,7 +29,7 @@ import NanoUI.Diagrams
   )
 import NanoUI.Diagrams.Tessellation (fillPolygon, strokePolyline, triangulatePolygon)
 import NanoUI.Plot.Chrome (Margins (..), chartDiagram, chartMargins, seriesDomains)
-import NanoUI.Plot.Decimate (lttb)
+import NanoUI.Plot.Decimate (lttb, minMaxDecimate)
 import NanoUI.Plot.Hit (nearestPlotHover)
 import NanoUI.Plot.Scale (formatTick, mergeDomains, niceTicks)
 import NanoUI.Plot.Series (area, bar, line, scatter, withColor, withMarker)
@@ -57,6 +57,7 @@ main = do
   testMultiSeriesDomains
   testDomainFollowsData
   testLttb
+  testMinMaxDecimate
   testLabelFit fm
   testChartChrome fm
   testLegendColors fm
@@ -259,6 +260,37 @@ testLttb = do
   let ys = V.toList (V.map snd out)
   unless (minimum ys < -0.5 && maximum ys > 0.5) $
     fail "LTTB lost waveform extrema"
+  let spike = V.fromList [(x, if x == 1 then 10 else 0) | x <- [0 .. 9]]
+  unless (lttb 3 spike == V.fromList [(0, 0), (1, 10), (9, 0)]) $
+    fail "LTTB skipped the first bucket's spike"
+  forM_ [0 .. 60] $ \n -> forM_ [-1 .. n + 1] $ \k -> do
+    let input = V.generate n (\i -> (fromIntegral i, sin (fromIntegral i)))
+        sampled = lttb k input
+    unless (V.length sampled == min n (max 0 k) && orderedPoints sampled) $
+      fail "LTTB violated its point budget or input order"
+    unless (V.null sampled || V.head sampled == V.head input) $
+      fail "LTTB lost the first endpoint"
+    unless (V.length sampled < 2 || V.last sampled == V.last input) $
+      fail "LTTB lost the last endpoint"
+
+testMinMaxDecimate :: IO ()
+testMinMaxDecimate = do
+  let descending = V.fromList [(x, 9 - x) | x <- [0 .. 8]]
+  unless (minMaxDecimate 2 descending == V.fromList [(0, 9), (4, 5), (5, 4), (8, 1)]) $
+    fail "min/max decimation lost extrema or reversed their order"
+  forM_ [0 .. 60] $ \n -> forM_ [-1 .. n + 1] $ \k -> do
+    let input = V.generate n (\i -> (fromIntegral i, sin (fromIntegral i)))
+        sampled = minMaxDecimate k input
+    unless (V.length sampled <= max 0 (2 * k) && orderedPoints sampled) $
+      fail "min/max decimation violated its bucket budget or input order"
+    unless (V.all (`V.elem` input) sampled) $
+      fail "min/max decimation invented a point"
+    unless (V.null sampled || (V.minimum (V.map snd input) == V.minimum (V.map snd sampled)
+      && V.maximum (V.map snd input) == V.maximum (V.map snd sampled))) $
+      fail "min/max decimation lost a global extremum"
+
+orderedPoints :: V.Vector (Double, Double) -> Bool
+orderedPoints points = V.and (V.zipWith (\a b -> fst a < fst b) points (V.drop 1 points))
 
 testLabelFit :: FontMetrics -> IO ()
 testLabelFit fm = do

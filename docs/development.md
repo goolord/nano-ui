@@ -7,9 +7,17 @@ dependencies as well as the Haskell toolchain. The current `cabal.project`
 also expects a checkout of `ditto` at `../ditto`.
 
 ```sh
-cabal build all
-cabal test all --test-show-details=failures
+cabal build -j1 all
+cabal test -j1 all --test-show-details=failures
 ```
+
+Start with a single build job: concurrent optimized GHC builds can exhaust
+memory even on a desktop workstation. If a compiler heap limit is needed,
+use `GHCRTS=-M4G cabal build -j1 <target>`; exceeding the limit then fails
+the build rather than consuming all available memory. Increase parallelism
+only after measuring the memory use of the affected targets.
+Apply `GHCRTS` to the build command, then run tests without it: some test
+executables intentionally do not enable runtime-option overrides.
 
 Warnings are enabled in each package's Cabal file. The workspace adds
 `-Werror` for the core, SDL, diagrams, and demo packages; published packages
@@ -23,6 +31,7 @@ cabal test text-buffer-spec --test-show-details=failures
 cabal test nano-ui-form-test --test-show-details=failures
 cabal test nano-ui-diagrams-test --test-show-details=failures
 cabal test nano-ui-rgfw-test --test-show-details=failures
+cabal test nano-ui-font-search-test --test-show-details=failures
 ```
 
 The integration suites run headlessly. Native presentation changes also need
@@ -36,6 +45,19 @@ and exercises font rendering and widget interaction:
 ```sh
 cabal run nano-ui-sdl-demo -- --selftest
 ```
+
+## Source release checks
+
+Run `cabal check` in each package directory, then `cabal sdist all` from the
+workspace. The core, SDL examples, and demo deliberately use `-O2`; Cabal
+reports an advisory warning for that option.
+
+Verify the generated archives as well as the checkout. In particular, SDL's
+private C headers belong in `extra-source-files`: `include-dirs` alone does
+not include them in a source distribution. A clean build of the archives
+catches omitted headers, embedded fonts, and other checkout-only assets.
+The workspace's local ditto dependency also needs to be available when
+building the form package from an archive.
 
 ## Where changes belong
 
@@ -76,6 +98,10 @@ Paths below are relative to `packages/`; Haskell modules live under `lib/`.
 - Keep form mutation equality and redraw policy in `Form.Backend`. Unchanged
   writes are no-ops. Submission history controls error visibility; the submit
   runner returns a value only on a submission frame.
+- Form reset renews the widget scope as well as clearing the value map. The
+  private stored-form record keeps that generation with the values; ordinary
+  `setFormStore` calls preserve it. Otherwise cached controls can immediately
+  write their pre-reset values back into an empty form.
 - Preserve widget identity when changing layout or error views. Check several
   frames, including the appearance and disappearance of conditional content.
 - Controlled wrappers synchronize the upcoming widget's slot using
@@ -84,11 +110,27 @@ Paths below are relative to `packages/`; Haskell modules live under `lib/`.
 - Implement local state hooks through `NanoUI.Hooks`. Tab and radio selection
   use the same integer hook, including its comparison against the latest store
   when a setter runs more than once in a frame.
+- Use `Widgets.Behavior.keyboardFocused` before processing keyboard input in
+  controls, including text editors. A retained focus ID does not override
+  disabled state or modal blocking.
 - Table sizing is a pure calculation over rows encoded once with colonnade.
   Use `gridColumnsLay` for keyed table rows, and `sortOn` for stable sorting
   with cached keys in both directions.
 - Chart series and legends share resolved colors in `Plot.Chrome`. Legend
   placement only determines coordinates; entry rendering has one path.
+- Tab header results use the private `Header` record for selection, closing,
+  and scroll geometry. Keep those consumers on the same rendered response.
+- Ordinary buttons, menu items, and close controls use `buttonStyledEx` for
+  pointer and keyboard activation. Explicitly disabled buttons and tabs keep
+  their geometry and identity but skip focus registration and activation.
+- Decimators return points in input order. LTTB's budget counts points and
+  preserves endpoints; min/max's budget counts buckets and retains each
+  bucket's extrema. Both accept empty input and non-positive budgets.
+- SDL font discovery scans the standard directories once per request and
+  matches all fallback families against that snapshot. Preserve root order
+  so user-installed faces win equal-score ties.
+- Replace native resources only after their replacements have been allocated
+  successfully; mask the ownership transfer against asynchronous exceptions.
 - Layout's `textNodeMeasurer` resolves metrics and both measurement operations
   together. Preserve the distinction between monospaced metrics and the host's
   shaping-aware proportional measurement in every layout pass.

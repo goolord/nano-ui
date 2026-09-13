@@ -73,7 +73,7 @@ radioFieldset options initial =
       (combinedResp, clickedIdx) <-
         case opts of
           [l] -> do
-            r <- bit ctx selNav 0 l
+            r <- selectableItem NodeRadio l (selNav == 0) radioLay 0
             pure (r, if rawRespClicked r then 0 else -1)
           _ -> do
             inp <- askInput
@@ -89,11 +89,6 @@ radioFieldset options initial =
                   IM.insert keyInit c0 (storeInt st)
             }
       pure (setChanged (finalSel /= sel || hasClick) combinedResp, finalSel)
-
-bit :: Ui :> es => Context -> Int -> Int -> Text -> Eff es Response
-bit _ctx sel i l = do
-  let on = sel == i
-  selectableItem NodeRadio l on radioLay i
 
 addRadioOptions :: Ui :> es => Context -> Input -> Int -> [Text] -> Eff es (Response, Int)
 addRadioOptions ctx inp sel opts =
@@ -131,10 +126,11 @@ radioResponse ctx inp pending wid = do
     then pure (mkResponse wid rect False False False False)
     else resolveInteraction ctx inp wid
 
-boundedRadioFieldset :: (Bounded a, Enum a, Ui :> es) => a -> (a -> Text) -> Eff es (Response, a)
+boundedRadioFieldset :: forall a es. (Bounded a, Enum a, Ui :> es) => a -> (a -> Text) -> Eff es (Response, a)
 boundedRadioFieldset initial encode =
   let vs = take 256 [minBound .. maxBound]
-   in fmap (\(r, i) -> (r, toEnum (max 0 (min (length vs - 1) i)))) (radioFieldset (map encode vs) (fromEnum initial))
+      lower = fromEnum (minBound :: a)
+   in fmap (\(r, i) -> (r, toEnum (lower + i))) (radioFieldset (map encode vs) (fromEnum initial - lower))
 
 enumRadio :: (Bounded a, Enum a, Show a, Ui :> es) => a -> Eff es (Response, a)
 enumRadio initial = boundedRadioFieldset initial (T.pack . show)
