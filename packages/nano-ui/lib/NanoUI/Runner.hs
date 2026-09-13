@@ -24,7 +24,7 @@ module NanoUI.Runner
   ) where
 
 import Control.Concurrent (threadDelay)
-import Control.Exception (finally)
+import Control.Exception (finally, mask)
 import Control.Monad (when)
 import Data.IORef
   ( IORef
@@ -129,10 +129,10 @@ newDrawingLock = DrawingLock <$> newIORef False
 
 -- | Attempt to execute an action under the drawing lock without blocking.
 tryWithDrawingLock :: DrawingLock -> IO a -> IO (Maybe a)
-tryWithDrawingLock (DrawingLock ref) act = do
+tryWithDrawingLock (DrawingLock ref) act = mask $ \restore -> do
   ok <- atomicModifyIORef' ref $ \busy -> if busy then (True, False) else (True, True)
   if ok
-    then Just <$> (act `finally` writeIORef ref False)
+    then Just <$> (restore act `finally` writeIORef ref False)
     else pure Nothing
 
 -- | Centralized decision predicate: should the host backend redraw this frame?
@@ -221,47 +221,29 @@ runSessionLoop ::
   Input ->
   IO ()
 runSessionLoop drv ctx0 inp0 = do
-  ctxRef <- newIORef ctx0
-  prevInpRef <- newIORef inp0
-  pendingDirtyRef <- newIORef False
-  wasAnimRef <- newIORef False
   clickTracker <- newClickTracker
   startT <- getMonotonicTime
 
-  let loop inp queued lastT = do
-        ctx <- readIORef ctxRef
+  let waitForEvents timeout lastT
+        | timeout < 0 = sdWaitEvents drv (-1)
+        | otherwise = do
+            polled <- sdPollEvents drv
+            if not (null polled)
+              then pure polled
+              else do
+                events <- sdWaitEvents drv timeout
+                -- Only a timed-out paced wait needs frame alignment.
+                when (timeout > 0 && null events) $
+                  alignFrameStart (sdAlignSec drv) lastT
+                pure events
+
+      loop ctx inp queued lastT pendingDirty wasAnim = do
         pending <- if null queued
           then do
-            pendingDirty <- readIORef pendingDirtyRef
-            wasAnimWait <- readIORef wasAnimRef
             timeout <- if pendingDirty
               then pure 0
-              else sdWaitTimeout drv ctx wasAnimWait
-            if timeout == 0
-              then do
-                polled <- sdPollEvents drv
-                if not (null polled)
-                  then pure polled
-                  else sdWaitEvents drv 0
-              else if timeout > 0
-                then do
-                  polled <- sdPollEvents drv
-                  if not (null polled)
-                    then pure polled
-                    else do
-                      evs <- sdWaitEvents drv timeout
-                      if not (null evs)
-                        then pure evs
-                        else do
-                          -- No events woke us: the timer fired, so wind onto
-                          -- the frame boundary before stamping this frame's
-                          -- start time. Keeps frame starts on uniform slices
-                          -- of the pacing period (their display-cadence)
-                          -- instead of drifting with the event waiter's own
-                          -- granularity.
-                          alignFrameStart (sdAlignSec drv) lastT
-                          pure []
-                else sdWaitEvents drv (-1)
+              else sdWaitTimeout drv ctx wasAnim
+            waitForEvents timeout lastT
           else pure queued
 
         let (group, rest) = splitFrame (sdIsButtonEdge drv) pending
@@ -276,39 +258,28 @@ runSessionLoop drv ctx0 inp0 = do
             let inpFolded = foldl' (sdApplyEvent drv) (clearEphemeral inp {inputDeltaTime = dt}) group
             inpStamped <- stampClicksWith (sdClickDistance drv) (sdClickTime drv) clickTracker inpFolded
             (ctx', inpSynced) <- sdSyncDisplay drv ctx inpStamped
-            writeIORef ctxRef ctx'
             hardQuit <- checkHardQuit ctx' inpSynced
             if hardQuit
               then pure ()
               else do
-                prevInp <- readIORef prevInpRef
-                wasAnim <- readIORef wasAnimRef
-                pendingDirty <- readIORef pendingDirtyRef
                 shouldDraw <- if pendingDirty
                   then pure True
-                  else sdShouldDraw drv ctx' prevInp inpSynced wasAnim
+                  else sdShouldDraw drv ctx' inp inpSynced wasAnim
                 -- Force a full present only on the settle frame where an
                 -- animation just finished (wasAnim && not animNow). Passing
                 -- wasAnim alone kept every frame of a running animation at
                 -- DamageFull, defeating clip damage for animated widgets.
                 animNow <- anyAnimating ctx'
-                synced <- if shouldDraw
-                  then do
-                    (dirtyOut, s) <- sdDraw drv ctx' inpSynced (wasAnim && not animNow)
-                    writeIORef pendingDirtyRef dirtyOut
-                    writeIORef prevInpRef s
-                    pure s
+                (dirtyOut, synced) <- if shouldDraw
+                  then sdDraw drv ctx' inpSynced (wasAnim && not animNow)
                   else do
                     sdSkip drv ctx' inpSynced
                     sdOnCursor drv ctx' inpSynced
-                    writeIORef prevInpRef inpSynced
-                    pure inpSynced
+                    pure (pendingDirty, inpSynced)
                 animAfter <- anyAnimating ctx'
-                writeIORef wasAnimRef animAfter
                 shouldTerm <- checkSessionQuit ctx' (sdShouldQuit drv) synced
                 if shouldTerm
                   then pure ()
-                  else loop synced rest now
+                  else loop ctx' synced rest now dirtyOut animAfter
 
-  loop inp0 [] startT
-
+  loop ctx0 inp0 [] startT False False

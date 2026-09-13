@@ -19,6 +19,7 @@ module NanoUI.Rgfw.Surface
   , upscaleSurface
   ) where
 
+import Control.Exception (bracketOnError, mask_)
 import Control.Monad (when)
 import Control.Monad.ST (RealWorld)
 import Data.Bits (shiftL, shiftR, (.&.), (.|.))
@@ -80,31 +81,31 @@ initClipStack !w !h = do
   pure (arr, ref)
 
 newRgfwSurface :: RGFW.Window -> Int -> Int -> IO RgfwSurface
-newRgfwSurface win w h = do
-  let !safeW = max 1 w
-      !safeH = max 1 h
-      !numBytes = safeW * safeH * 4
-  buf <- mallocBytes numBytes
-  surf <- RGFW.createSurface win (castPtr buf) safeW safeH RGFW.rgfw_formatBGRA8
-  (clipArr, depthRef) <- initClipStack safeW safeH
-  pure $ RgfwSurface safeW safeH buf surf clipArr depthRef
+newRgfwSurface win w h = mask_ $
+  bracketOnError (newOffscreenRgfwSurface w h) freeRgfwSurface $ \surface -> do
+    native@(RGFW.Surface ptr) <- RGFW.createSurface win
+      (castPtr (sBuffer surface)) (sWidth surface) (sHeight surface) RGFW.rgfw_formatBGRA8
+    when (ptr == nullPtr) $ fail "RGFW_createSurface failed"
+    pure surface {sRgfwSurface = native}
 
 newOffscreenRgfwSurface :: Int -> Int -> IO RgfwSurface
 newOffscreenRgfwSurface w h = do
   let !safeW = max 1 w
       !safeH = max 1 h
-      !numBytes = safeW * safeH * 4
-  buf <- mallocBytes numBytes
-  (clipArr, depthRef) <- initClipStack safeW safeH
-  pure $ RgfwSurface safeW safeH buf (RGFW.Surface nullPtr) clipArr depthRef
+  when (safeW > maxBound `div` 4 `div` safeH) $
+    fail "RGFW surface dimensions overflow the pixel buffer size"
+  bracketOnError (mallocBytes (safeW * safeH * 4)) free $ \buf -> do
+    (clipArr, depthRef) <- initClipStack safeW safeH
+    pure $ RgfwSurface safeW safeH buf (RGFW.Surface nullPtr) clipArr depthRef
 
 resizeRgfwSurface :: RGFW.Window -> RgfwSurface -> Int -> Int -> IO RgfwSurface
-resizeRgfwSurface win surf newW newH = do
-  if newW == sWidth surf && newH == sHeight surf
-    then pure surf
-    else do
+resizeRgfwSurface win surf newW newH
+  | max 1 newW == sWidth surf && max 1 newH == sHeight surf = pure surf
+  | otherwise = mask_ $ do
+      -- Keep the old surface valid if allocation of its replacement fails.
+      replacement <- newRgfwSurface win newW newH
       freeRgfwSurface surf
-      newRgfwSurface win newW newH
+      pure replacement
 
 freeRgfwSurface :: RgfwSurface -> IO ()
 freeRgfwSurface surf = do

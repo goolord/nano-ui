@@ -14,9 +14,10 @@ module Cases.Animation
   , runAnimationSpringTest
   , runAnimationStaggerTest
   , runAnimationStopTest
+  , runCompositeAnimationIsolationTest
   ) where
 
-import Control.Monad (replicateM_, void)
+import Control.Monad (forM_, replicateM_, void)
 import Data.IORef (IORef)
 import Data.Text qualified as T
 import NanoUI
@@ -248,6 +249,23 @@ runAnimationSpringATest _ failed = do
           _ -> False
         _ -> False
   assert failed (any ok shown)
+
+-- Each composite animation owns a scope; component indices alone are not
+-- unique when two vectors animate side by side in the same parent.
+runCompositeAnimationIsolationTest :: Context -> IORef Int -> IO ()
+runCompositeAnimationIsolationTest _ failed =
+  forM_ [animateToA EaseLinear 0.2, animateToSpringA presetSmooth] $ \animateVector -> do
+    ctx <- newContext
+    let inp = withDelta 200 100 0.05
+        ui = do
+          a <- animateVector (V2 1 2)
+          b <- animateVector (V2 (-1) (-2))
+          label_ (T.pack (show (a, b)))
+          pure (a, b)
+    replicateM_ 80 (runFrame ctx inp ui)
+    ((V2 ax ay, V2 bx by), _, _, _) <- runFrame ctx inp ui
+    assert failed (abs (ax - 1) < 0.05 && abs (ay - 2) < 0.05)
+    assert failed (abs (bx + 1) < 0.05 && abs (by + 2) < 0.05)
 
 runAnimationStopTest :: Context -> IORef Int -> IO ()
 runAnimationStopTest _ failed =

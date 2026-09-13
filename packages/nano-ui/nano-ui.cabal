@@ -91,6 +91,7 @@ library
         NanoUI.Damage
         NanoUI.Draw
         NanoUI.Font
+        NanoUI.Hooks
         NanoUI.Frame
         NanoUI.Frame.Cursor
         NanoUI.Frame.Input
@@ -202,6 +203,8 @@ test-suite nano-ui-test
         Cases.Demo
         Cases.Keyboard
         Cases.Cache
+        Cases.Runner
+        Cases.State
         Cases.Modal
         Cases.NoThunks
         Cases.Scroll

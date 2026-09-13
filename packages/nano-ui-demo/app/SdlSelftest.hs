@@ -330,7 +330,14 @@ selftest imgs ui = do
     clickPos ui ctx' env base about
     spansModal <- collectOverlayTextSpans ctx' base
     unless (hasText "Immediate-mode" spansModal) $ fail "selftest: About modal missing"
-    unless (hasText "Close" spansModal) $ fail "selftest: About Close button missing"
+    -- Font metrics can make the body overflow the modal's initial viewport.
+    -- The footer must be reachable by scrolling, not necessarily visible yet.
+    unless (hasText "Close" spansModal) $ do
+      bodyPos <- requireSpan "selftest: About body" (findExact "nano-ui" spansModal)
+      drawOnce ui ctx' env (base {inputMousePos = bodyPos, inputScroll = V2 0 10})
+      drawOnce ui ctx' env base
+    spansModalFooter <- collectOverlayTextSpans ctx' base
+    unless (hasText "Close" spansModalFooter) $ fail "selftest: About Close button unreachable"
     drawOnce ui ctx' env (base {inputKeys = inputKeysFromList [KeyEscape]})
     drawOnce ui ctx' env base
     spansClosed <- collectOverlayTextSpans ctx' base

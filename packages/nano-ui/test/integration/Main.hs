@@ -1,6 +1,8 @@
 module Main (main) where
 
 import Cases
+import Cases.Runner (runDrawingLockTest, runSessionLoopTest)
+import Cases.State (runCheckboxEmitKeyboardTest, runControlledStateTest, runHookStateTest)
 import Data.IORef (IORef)
 import NanoUI.Testing (Context, newContext, newPixelContext)
 import NanoUI.Testing.Runner (runTests)
@@ -22,6 +24,12 @@ main =
 testSpecs :: [TestSpec]
 testSpecs =
   [ TestSpec "id-stability" False runIdStabilityTest
+  , TestSpec "session-loop" False runSessionLoopTest
+  , TestSpec "drawing-lock" False runDrawingLockTest
+  , TestSpec "controlled-state" False runControlledStateTest
+  , TestSpec "hook-state" False runHookStateTest
+  , TestSpec "composite-animation-isolation" False runCompositeAnimationIsolationTest
+  , TestSpec "checkbox-emit-keyboard" False runCheckboxEmitKeyboardTest
   , TestSpec "id-uniqueness" False runIdUniquenessTest
   , TestSpec "id-zero-alloc" False runIdZeroAllocTest
   , TestSpec "id-keyed-list" False runIdKeyedListTest

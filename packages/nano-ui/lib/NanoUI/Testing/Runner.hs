@@ -20,6 +20,10 @@ runTests specs = do
   let
     wantAll = null args
     want name = wantAll || name `elem` args
+    names = [name | (name, _, _) <- specs]
+    unknown = filter (`notElem` names) args
+  when (not (null unknown)) $
+    fail ("Unknown test names: " ++ unwords unknown)
   failed <- newIORef (0 :: Int)
   failedTests <- newIORef (0 :: Int)
   forM_ specs $ \(name, mkCtx, run) ->

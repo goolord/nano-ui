@@ -359,6 +359,7 @@ import NanoUI.WidgetText
   , sliderValueText
   , textInputFlagSearch
   )
+import NanoUI.Hooks (useEnum, useFlag, useFloat, useInt, useState, useText, useToggle)
 import NanoUI.Widgets.Animate
   ( animate
   , animateEase
@@ -371,13 +372,6 @@ import NanoUI.Widgets.Animate
   , animateToSpringA
   , pulse
   , keepAnimating
-  , useState
-  , useFlag
-  , useText
-  , useInt
-  , useFloat
-  , useEnum
-  , useToggle
   )
 import NanoUI.Widgets.ColorPicker (colorPicker, colorPickerRGBA)
 import NanoUI.Widgets.Drawing (DrawOp (..), DrawingBuild, drawing, drawingVersioned, drawingCached)
@@ -648,7 +642,9 @@ buttonLayoutEx layout enabled txt = do
 buttonEx :: (Ui :> es) => Bool -> Text -> Eff es Response
 buttonEx = buttonLayoutEx defaultLayout
 
--- | Controlled checkbox. Returns @(response, currentValue)@.
+-- | Uncontrolled checkbox initialized from the supplied value.
+-- Returns @(response, currentValue)@; use @NanoUI.State.checkboxControlled@
+-- when the caller owns the current value.
 checkbox :: Ui :> es => Text -> Bool -> Eff es (Response, Bool)
 checkbox txt initial = do
   wid <- nextId

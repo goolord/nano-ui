@@ -97,18 +97,26 @@ drawEff ::
   Input ->
   Bool ->
   IO (Bool, Input)
-drawEff unlift ctx ui env inp forceFull = do
+drawEff unlift ctx ui env inp forceFull =
+  drawFrameWith ctx env inp forceFull $ do
+    (_, _, drawData, dirtyAfterUi) <- runFrameEff unlift ctx inp ui
+    pure (drawData, dirtyAfterUi)
+
+-- | Both application styles share atlas maintenance, retain preparation,
+-- timing, and presentation. Only evaluation of the UI differs.
+drawFrameWith :: Context -> SdlEnv -> Input -> Bool -> IO (DrawData, Bool) -> IO (Bool, Input)
+drawFrameWith ctx env inp forceFull evaluateUi = do
   SdlImage.syncImageAtlas (sdlRenderer env) (sdlImages env) ctx
-  (tex, retainNew, presentFull) <- prepareRetain ctx env inp forceFull
+  (tex, presentFull) <- prepareRetain ctx env inp forceFull
   t0 <- getMonotonicTime
-  (_, _, drawData, dirtyAfterUi) <- runFrameEff unlift ctx inp ui
+  (drawData, dirtyAfterUi) <- evaluateUi
   t1 <- getMonotonicTime
-  finishDraw ctx env inp tex retainNew presentFull t0 t1 drawData dirtyAfterUi
+  finishDraw ctx env inp tex presentFull t0 t1 drawData dirtyAfterUi
 
 -- | Decide whether this present repaints everything, then make sure the
 -- retain texture exists. Must run before the frame so the paint pass can cull
 -- to the damage clip when the present will be partial.
-prepareRetain :: Context -> SdlEnv -> Input -> Bool -> IO (Ptr (), Bool, Bool)
+prepareRetain :: Context -> SdlEnv -> Input -> Bool -> IO (Ptr (), Bool)
 prepareRetain ctx env inp forceFull = do
   -- Glyph-atlas maintenance before any quad is recorded: if the atlas ran
   -- out of space during the previous frame, reset it now (re-warming the
@@ -122,7 +130,7 @@ prepareRetain ctx env inp forceFull = do
   (tex, retainNew) <- ensureRetain env pw ph scale
   let presentFull = forceFull || retainNew || sdlContinuous env || inputWindowRedraw inp
   writeIORef (ctxPaintFull ctx) presentFull
-  pure (tex, retainNew, presentFull)
+  pure (tex, presentFull)
 
 drawReduceEff ::
   (IOE :> es, Typeable msg, Eq model) =>
@@ -135,18 +143,15 @@ drawReduceEff ::
   Input ->
   Bool ->
   IO (Bool, Input)
-drawReduceEff unlift update modelRef view ctx env inp forceFull = do
-  SdlImage.syncImageAtlas (sdlRenderer env) (sdlImages env) ctx
-  (tex, retainNew, presentFull) <- prepareRetain ctx env inp forceFull
-  t0 <- getMonotonicTime
-  m <- readIORef modelRef
-  (_, m', _, drawData, dirtyAfterUi) <- runFrameReduceEff unlift update ctx inp m view
-  writeIORef modelRef m'
-  t1 <- getMonotonicTime
-  finishDraw ctx env inp tex retainNew presentFull t0 t1 drawData dirtyAfterUi
+drawReduceEff unlift update modelRef view ctx env inp forceFull =
+  drawFrameWith ctx env inp forceFull $ do
+    m <- readIORef modelRef
+    (_, m', _, drawData, dirtyAfterUi) <- runFrameReduceEff unlift update ctx inp m view
+    writeIORef modelRef m'
+    pure (drawData, dirtyAfterUi)
 
-finishDraw :: Context -> SdlEnv -> Input -> Ptr () -> Bool -> Bool -> Double -> Double -> DrawData -> Bool -> IO (Bool, Input)
-finishDraw ctx env inp tex retainNew presentFull t0 t1 drawData dirtyAfterUi = do
+finishDraw :: Context -> SdlEnv -> Input -> Ptr () -> Bool -> Double -> Double -> DrawData -> Bool -> IO (Bool, Input)
+finishDraw ctx env inp tex presentFull t0 t1 drawData dirtyAfterUi = do
   let uiMs = (t1 - t0) * 1000
   scale <- readIORef (sdlScaleRef env)
   syncPointerCursor (sdlCursors env) ctx inp
@@ -157,11 +162,10 @@ finishDraw ctx env inp tex retainNew presentFull t0 t1 drawData dirtyAfterUi = d
   -- DamageFull here would turn every skip frame into a full present. A
   -- window redraw event (expose/restore) is the exception: the backbuffer
   -- is gone, so the next present must be full.
-  let damage0 =
+  let damage =
         if presentFull
           then DamageFull
           else snapDamage scale dmg0
-      damage = damage0
   writeIORef (sdlLastPresented env) False
   -- A glyph-atlas reset or exhaustion during the UI pass means quads
   -- recorded before that point hold stale (or unplaceable) UVs. Drop the
@@ -199,7 +203,7 @@ finishDraw ctx env inp tex retainNew presentFull t0 t1 drawData dirtyAfterUi = d
         batch
         (sdlRenderer env)
         scale
-        (if retainNew || damage == DamageFull then Just (themeWindow theme) else Nothing)
+        (if damage == DamageFull then Just (themeWindow theme) else Nothing)
         drawData
         allLayersArr
         (sdlImages env)

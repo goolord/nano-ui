@@ -1,5 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module NanoUI.Form.Unnamed
@@ -15,160 +13,84 @@ module NanoUI.Form.Unnamed
   , withErrors
   , withChildErrors
   , withFieldErrors
-  ) where
+  )
+where
 
-import Control.Monad (when)
 import Data.Text (Text)
-import qualified Data.Text as T
 import Ditto.Backend (FormError)
-import qualified Ditto.Generalized.Unnamed as Unnamed
-import Ditto.Types (encodeFormId)
+import Ditto.Generalized.Unnamed qualified as Unnamed
 import NanoUI
-  ( checkbox
-  , columnWith
-  , fillW
-  , gap
+  ( NanoUI
+  , Response
+  , checkbox
   , respChanged
   , respClicked
   , select
   , slider
+  , textArea
   , textInput
   , textInputPassword
-  , textArea
-  , tight
-  , uiIO
-  , withKey
   )
-import NanoUI.Monad (askContext)
-import NanoUI.Form.Backend (getActiveFormPrefix, updateFieldInput)
-import NanoUI.Form.Types
-  ( Form
-  , FormInput (..)
-  , FormView (..)
-  , formInputToText
+import NanoUI.Form.Field
+  ( decodeBool
+  , decodeFloatInput
+  , decodeInt
+  , enumField
+  , fieldErrors
+  , fieldView
   )
-import NanoUI.Form.Widgets (defaultErrorView)
-import Text.Read (readMaybe)
+import NanoUI.Form.Types (Form, FormInput (..), FormView, formInputToText)
 
 -- | Auto-enumerated text input.
 inputText :: FormError FormInput err => Text -> Form err Text
-inputText initial =
-  Unnamed.input
-    (\case
-      FormInputText t -> Right t
-      other           -> Right (formInputToText other)
-    )
-    (\formId val -> FormView $ withKey (encodeFormId formId) $ do
-      ctx <- askContext
-      prefix <- uiIO (getActiveFormPrefix ctx)
-      let fieldKey = encodeFormId formId
-      (resp, newVal) <- textInput val
-      when (respChanged resp || newVal /= val) $
-        uiIO (updateFieldInput ctx prefix fieldKey (FormInputText newVal))
-    )
-    initial
+inputText = textField textInput
 
 -- | Auto-enumerated password input.
 inputPassword :: FormError FormInput err => Text -> Form err Text
-inputPassword initial =
-  Unnamed.input
-    (\case
-      FormInputText t -> Right t
-      other           -> Right (formInputToText other)
-    )
-    (\formId val -> FormView $ withKey (encodeFormId formId) $ do
-      ctx <- askContext
-      prefix <- uiIO (getActiveFormPrefix ctx)
-      let fieldKey = encodeFormId formId
-      (resp, newVal) <- textInputPassword val
-      when (respChanged resp || newVal /= val) $
-        uiIO (updateFieldInput ctx prefix fieldKey (FormInputText newVal))
-    )
-    initial
+inputPassword = textField textInputPassword
 
 -- | Auto-enumerated text area input.
 inputTextArea :: FormError FormInput err => Text -> Form err Text
-inputTextArea initial =
+inputTextArea = textField textArea
+
+textField ::
+  FormError FormInput err =>
+  (Text -> NanoUI (Response, Text)) -> Text -> Form err Text
+textField widget =
   Unnamed.input
-    (\case
-      FormInputText t -> Right t
-      other           -> Right (formInputToText other)
-    )
-    (\formId val -> FormView $ withKey (encodeFormId formId) $ do
-      ctx <- askContext
-      prefix <- uiIO (getActiveFormPrefix ctx)
-      let fieldKey = encodeFormId formId
-      (resp, newVal) <- textArea val
-      when (respChanged resp || newVal /= val) $
-        uiIO (updateFieldInput ctx prefix fieldKey (FormInputText newVal))
-    )
-    initial
+    (Right . formInputToText)
+    (fieldView respChanged FormInputText widget)
 
 -- | Auto-enumerated checkbox toggle.
 inputCheckbox :: FormError FormInput err => Text -> Bool -> Form err Bool
 inputCheckbox lbl initial =
   Unnamed.input
-    (\case
-      FormInputBool b -> Right b
-      FormInputText t -> Right (t == "true")
-      _               -> Right initial
-    )
-    (\formId val -> FormView $ withKey (encodeFormId formId) $ do
-      ctx <- askContext
-      prefix <- uiIO (getActiveFormPrefix ctx)
-      let fieldKey = encodeFormId formId
-      (resp, newVal) <- checkbox lbl val
-      when (respClicked resp || newVal /= val) $
-        uiIO (updateFieldInput ctx prefix fieldKey (FormInputBool newVal))
-    )
+    (Right . decodeBool initial)
+    (fieldView respClicked FormInputBool (checkbox lbl))
     initial
 
 -- | Auto-enumerated slider input.
-inputSlider :: FormError FormInput err => Float -> Float -> Float -> Form err Float
+inputSlider ::
+  FormError FormInput err => Float -> Float -> Float -> Form err Float
 inputSlider minV maxV initial =
   Unnamed.input
-    (\case
-      FormInputFloat f -> Right f
-      FormInputText t  -> maybe (Right initial) Right (readMaybe (T.unpack t))
-      _                -> Right initial
-    )
-    (\formId val -> FormView $ withKey (encodeFormId formId) $ do
-      ctx <- askContext
-      prefix <- uiIO (getActiveFormPrefix ctx)
-      let fieldKey = encodeFormId formId
-      (resp, newVal) <- slider minV maxV val
-      when (respChanged resp || newVal /= val) $
-        uiIO (updateFieldInput ctx prefix fieldKey (FormInputFloat newVal))
-    )
+    (Right . decodeFloatInput initial)
+    (fieldView respChanged FormInputFloat (slider minV maxV))
     initial
 
 -- | Auto-enumerated select dropdown.
 inputSelect :: FormError FormInput err => [Text] -> Int -> Form err Int
 inputSelect options initial =
   Unnamed.input
-    (\case
-      FormInputInt i  -> Right i
-      FormInputText t -> maybe (Right initial) Right (readMaybe (T.unpack t))
-      _               -> Right initial
-    )
-    (\formId val -> FormView $ withKey (encodeFormId formId) $ do
-      ctx <- askContext
-      prefix <- uiIO (getActiveFormPrefix ctx)
-      let fieldKey = encodeFormId formId
-      (resp, newVal) <- select options val
-      when (respChanged resp || newVal /= val) $
-        uiIO (updateFieldInput ctx prefix fieldKey (FormInputInt newVal))
-    )
+    (Right . decodeInt initial)
+    (fieldView respChanged FormInputInt (select options))
     initial
 
 -- | Auto-enumerated select for bounded enums.
-inputEnumSelect :: forall a err. (Bounded a, Enum a, Show a, FormError FormInput err) => a -> Form err a
-inputEnumSelect initial =
-  let vs = [minBound .. maxBound] :: [a]
-      opts = map (T.pack . show) vs
-      toIdx a = fromEnum a
-      fromIdx i = toEnum (max 0 (min (length vs - 1) i))
-   in fmap fromIdx (inputSelect opts (toIdx initial))
+inputEnumSelect ::
+  forall a err.
+  (Bounded a, Enum a, Show a, FormError FormInput err) => a -> Form err a
+inputEnumSelect = enumField inputSelect
 
 -- | Render error messages originating directly from this form node.
 errors :: ([err] -> FormView) -> Form err ()
@@ -188,10 +110,4 @@ withChildErrors = Unnamed.withChildErrors
 
 -- | Automatically display validation errors directly below the widget.
 withFieldErrors :: Form Text a -> Form Text a
-withFieldErrors = withChildErrors (\(FormView widget) errs -> FormView $ do
-  columnWith (tight . gap 4 . fillW) $ do
-    widget
-    case errs of
-      [] -> pure ()
-      es -> runFormView (defaultErrorView es)
-  )
+withFieldErrors = withChildErrors fieldErrors

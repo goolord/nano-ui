@@ -55,10 +55,7 @@ nanoForm = nanoFormLive
 nanoFormLive :: Text -> Form Text a -> NanoUI (Maybe a)
 nanoFormLive prefix form = do
   (view', res) <- runNanoForm prefix form
-  let renderedView = case res of
-        Ditto.Error errs -> Ditto.unView view' errs
-        Ditto.Ok _       -> Ditto.unView view' []
-  column' defaultLayout (runFormView renderedView)
+  column' defaultLayout (renderResult True view' res)
   pure $ case res of
     Ditto.Ok (Ditto.Proved _ a) -> Just a
     Ditto.Error _               -> Nothing
@@ -72,14 +69,8 @@ nanoFormSubmit prefix submitLabel form = do
   inp <- askInput
   submittedBefore <- uiIO (isFormSubmitted ctx prefix)
   (view', res) <- runNanoForm prefix form
-  let shouldShowErrors = submittedBefore
-      renderedView = if shouldShowErrors
-        then case res of
-          Ditto.Error errs -> Ditto.unView view' errs
-          Ditto.Ok _       -> Ditto.unView view' []
-        else Ditto.unView view' []
   btnClicked <- column' defaultLayout $ do
-    runFormView renderedView
+    renderResult submittedBefore view' res
     button submitLabel
   let enterPressed = inputKeysElem KeyEnter (inputKeys inp)
       clickedSubmit = btnClicked || enterPressed
@@ -98,13 +89,8 @@ nanoFormEx cfg prefix form = do
   let showErrors = case fcMode cfg of
         FormLive     -> True
         FormOnSubmit -> submittedBefore
-      renderedView = if showErrors
-        then case res of
-          Ditto.Error errs -> Ditto.unView view' errs
-          Ditto.Ok _       -> Ditto.unView view' []
-        else Ditto.unView view' []
   column' defaultLayout $ do
-    runFormView renderedView
+    renderResult showErrors view' res
     case fcSubmitButton cfg of
       Just lbl ->
         whenM (button lbl) $
@@ -112,9 +98,15 @@ nanoFormEx cfg prefix form = do
       Nothing -> pure ()
   pure $ case res of
     Ditto.Ok (Ditto.Proved _ a) -> FormValid a
-    Ditto.Error errs ->
-      let textErrs = map (\(range, msg) -> (range, msg)) errs
-       in FormInvalid textErrs
+    Ditto.Error errs -> FormInvalid errs
+
+renderResult :: Bool -> Ditto.View err FormView -> Ditto.Result err a -> NanoUI ()
+renderResult showErrors view result =
+  runFormView (Ditto.unView view errorsToShow)
+  where
+    errorsToShow = case result of
+      Ditto.Error errs | showErrors -> errs
+      _ -> []
 
 -- | Reset all stored input values for a form prefix.
 resetForm :: Text -> NanoUI ()

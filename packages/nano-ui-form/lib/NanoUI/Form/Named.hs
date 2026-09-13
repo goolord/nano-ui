@@ -1,5 +1,4 @@
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module NanoUI.Form.Named
@@ -21,169 +20,89 @@ module NanoUI.Form.Named
   , withErrors
   , withChildErrors
   , withFieldErrors
-  ) where
+  )
+where
 
-import Control.Monad (void, when)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
-import qualified Data.Text as T
 import Ditto.Backend (FormError)
-import qualified Ditto.Core as Ditto
-import qualified Ditto.Generalized.Named as Named
-import Ditto.Types (encodeFormId)
+import Ditto.Core qualified as Ditto
+import Ditto.Generalized.Named qualified as Named
 import NanoUI
   ( Color
+  , NanoUI
+  , Response
   , checkbox
   , colorPicker
   , colorPickerFromHex
   , colorPickerToHex
-  , columnWith
-  , fillW
-  , gap
   , radioFieldset
   , respChanged
   , respClicked
-  , rowWith
   , select
   , slider
+  , textArea
   , textInput
   , textInputPassword
   , textInputWithPlaceholder
-  , textArea
-  , tight
-  , uiIO
-  , withKey
   )
-import qualified NanoUI as NUI
-import NanoUI.Monad (askContext)
-import NanoUI.Form.Backend (getActiveFormPrefix, updateFieldInput)
-import NanoUI.Form.Types
-  ( Form
-  , FormInput (..)
-  , FormView (..)
-  , formInputToText
+import NanoUI qualified as NUI
+import NanoUI.Form.Field
+  ( decodeBool
+  , decodeFloatInput
+  , decodeInt
+  , enumField
+  , fieldErrors
+  , fieldView
   )
-import NanoUI.Form.Widgets (defaultErrorView)
-import Text.Read (readMaybe)
+import NanoUI.Form.Types (Form, FormInput (..), FormView (..), formInputToText)
 
 -- | Single-line text input field.
 inputText :: FormError FormInput err => Text -> Text -> Form err Text
-inputText name initial =
-  Named.input
-    name
-    (\case
-      FormInputText t -> Right t
-      other           -> Right (formInputToText other)
-    )
-    (\formId val -> FormView $ withKey (encodeFormId formId) $ do
-      ctx <- askContext
-      prefix <- uiIO (getActiveFormPrefix ctx)
-      let fieldKey = encodeFormId formId
-      void $ NUI.label name
-      (resp, newVal) <- textInput val
-      when (respChanged resp || newVal /= val) $
-        uiIO (updateFieldInput ctx prefix fieldKey (FormInputText newVal))
-    )
-    initial
+inputText = textField textInput
 
 -- | Single-line text input field with custom placeholder text.
-inputTextWithPlaceholder :: FormError FormInput err => Text -> Text -> Text -> Form err Text
-inputTextWithPlaceholder placeholder name initial =
-  Named.input
-    name
-    (\case
-      FormInputText t -> Right t
-      other           -> Right (formInputToText other)
-    )
-    (\formId val -> FormView $ withKey (encodeFormId formId) $ do
-      ctx <- askContext
-      prefix <- uiIO (getActiveFormPrefix ctx)
-      let fieldKey = encodeFormId formId
-      void $ NUI.label name
-      (resp, newVal) <- textInputWithPlaceholder placeholder val
-      when (respChanged resp || newVal /= val) $
-        uiIO (updateFieldInput ctx prefix fieldKey (FormInputText newVal))
-    )
-    initial
+inputTextWithPlaceholder ::
+  FormError FormInput err => Text -> Text -> Text -> Form err Text
+inputTextWithPlaceholder placeholder = textField (textInputWithPlaceholder placeholder)
 
 -- | Password text input masking entered characters.
 inputPassword :: FormError FormInput err => Text -> Text -> Form err Text
-inputPassword name initial =
-  Named.input
-    name
-    (\case
-      FormInputText t -> Right t
-      other           -> Right (formInputToText other)
-    )
-    (\formId val -> FormView $ withKey (encodeFormId formId) $ do
-      ctx <- askContext
-      prefix <- uiIO (getActiveFormPrefix ctx)
-      let fieldKey = encodeFormId formId
-      void $ NUI.label name
-      (resp, newVal) <- textInputPassword val
-      when (respChanged resp || newVal /= val) $
-        uiIO (updateFieldInput ctx prefix fieldKey (FormInputText newVal))
-    )
-    initial
+inputPassword = textField textInputPassword
 
 -- | Multi-line text area input.
 inputTextArea :: FormError FormInput err => Text -> Text -> Form err Text
-inputTextArea name initial =
+inputTextArea = textField textArea
+
+textField ::
+  FormError FormInput err =>
+  (Text -> NanoUI (Response, Text)) -> Text -> Text -> Form err Text
+textField widget name =
   Named.input
     name
-    (\case
-      FormInputText t -> Right t
-      other           -> Right (formInputToText other)
-    )
-    (\formId val -> FormView $ withKey (encodeFormId formId) $ do
-      ctx <- askContext
-      prefix <- uiIO (getActiveFormPrefix ctx)
-      let fieldKey = encodeFormId formId
-      void $ NUI.label name
-      (resp, newVal) <- textArea val
-      when (respChanged resp || newVal /= val) $
-        uiIO (updateFieldInput ctx prefix fieldKey (FormInputText newVal))
-    )
-    initial
+    (Right . formInputToText)
+    (fieldView respChanged FormInputText (labelled name widget))
+
+labelled :: Text -> (a -> NanoUI b) -> a -> NanoUI b
+labelled name widget value = NUI.label_ name >> widget value
 
 -- | Checkbox toggle input.
 inputCheckbox :: FormError FormInput err => Text -> Bool -> Form err Bool
 inputCheckbox name initial =
   Named.input
     name
-    (\case
-      FormInputBool b -> Right b
-      FormInputText t -> Right (t == "true")
-      _               -> Right initial
-    )
-    (\formId val -> FormView $ withKey (encodeFormId formId) $ do
-      ctx <- askContext
-      prefix <- uiIO (getActiveFormPrefix ctx)
-      let fieldKey = encodeFormId formId
-      (resp, newVal) <- checkbox name val
-      when (respClicked resp || newVal /= val) $
-        uiIO (updateFieldInput ctx prefix fieldKey (FormInputBool newVal))
-    )
+    (Right . decodeBool initial)
+    (fieldView respClicked FormInputBool (checkbox name))
     initial
 
 -- | Floating-point slider input across the range @[minV, maxV]@.
-inputSlider :: FormError FormInput err => Text -> Float -> Float -> Float -> Form err Float
+inputSlider ::
+  FormError FormInput err => Text -> Float -> Float -> Float -> Form err Float
 inputSlider name minV maxV initial =
   Named.input
     name
-    (\case
-      FormInputFloat f -> Right f
-      FormInputText t  -> maybe (Right initial) Right (readMaybe (T.unpack t))
-      _                -> Right initial
-    )
-    (\formId val -> FormView $ withKey (encodeFormId formId) $ do
-      ctx <- askContext
-      prefix <- uiIO (getActiveFormPrefix ctx)
-      let fieldKey = encodeFormId formId
-      void $ NUI.label name
-      (resp, newVal) <- slider minV maxV val
-      when (respChanged resp || newVal /= val) $
-        uiIO (updateFieldInput ctx prefix fieldKey (FormInputFloat newVal))
-    )
+    (Right . decodeFloatInput initial)
+    (fieldView respChanged FormInputFloat (labelled name (slider minV maxV)))
     initial
 
 -- | Dropdown selection among a list of text options (returns selected index).
@@ -191,77 +110,47 @@ inputSelect :: FormError FormInput err => Text -> [Text] -> Int -> Form err Int
 inputSelect name options initial =
   Named.input
     name
-    (\case
-      FormInputInt i  -> Right i
-      FormInputText t -> maybe (Right initial) Right (readMaybe (T.unpack t))
-      _               -> Right initial
-    )
-    (\formId val -> FormView $ withKey (encodeFormId formId) $ do
-      ctx <- askContext
-      prefix <- uiIO (getActiveFormPrefix ctx)
-      let fieldKey = encodeFormId formId
-      void $ NUI.label name
-      (resp, newVal) <- select options val
-      when (respChanged resp || newVal /= val) $
-        uiIO (updateFieldInput ctx prefix fieldKey (FormInputInt newVal))
-    )
+    (Right . decodeInt initial)
+    (fieldView respChanged FormInputInt (labelled name (select options)))
     initial
 
 -- | Dropdown selection for any bounded enumeration type.
-inputEnumSelect :: forall a err. (Bounded a, Enum a, Show a, FormError FormInput err) => Text -> a -> Form err a
-inputEnumSelect name initial =
-  let vs = [minBound .. maxBound] :: [a]
-      opts = map (T.pack . show) vs
-      toIdx a = fromEnum a
-      fromIdx i = toEnum (max 0 (min (length vs - 1) i))
-   in fmap fromIdx (inputSelect name opts (toIdx initial))
+inputEnumSelect ::
+  forall a err.
+  (Bounded a, Enum a, Show a, FormError FormInput err) => Text -> a -> Form err a
+inputEnumSelect name = enumField (inputSelect name)
 
 -- | Radio button group (returns selected index).
 inputRadio :: FormError FormInput err => Text -> [Text] -> Int -> Form err Int
 inputRadio name options initial =
   Named.input
     name
-    (\case
-      FormInputInt i -> Right i
-      _              -> Right initial
+    ( \case
+        FormInputInt i -> Right i
+        _ -> Right initial
     )
-    (\formId val -> FormView $ withKey (encodeFormId formId) $ do
-      ctx <- askContext
-      prefix <- uiIO (getActiveFormPrefix ctx)
-      let fieldKey = encodeFormId formId
-      void $ NUI.label name
-      (resp, newVal) <- radioFieldset options val
-      when (respChanged resp || newVal /= val) $
-        uiIO (updateFieldInput ctx prefix fieldKey (FormInputInt newVal))
-    )
+    (fieldView respChanged FormInputInt (labelled name (radioFieldset options)))
     initial
 
 -- | Radio button group for any bounded enumeration type.
-inputEnumRadio :: forall a err. (Bounded a, Enum a, Show a, FormError FormInput err) => Text -> a -> Form err a
-inputEnumRadio name initial =
-  let vs = [minBound .. maxBound] :: [a]
-      opts = map (T.pack . show) vs
-      toIdx a = fromEnum a
-      fromIdx i = toEnum (max 0 (min (length vs - 1) i))
-   in fmap fromIdx (inputRadio name opts (toIdx initial))
+inputEnumRadio ::
+  forall a err.
+  (Bounded a, Enum a, Show a, FormError FormInput err) => Text -> a -> Form err a
+inputEnumRadio name = enumField (inputRadio name)
 
 -- | Color picker input.
 inputColor :: FormError FormInput err => Text -> Color -> Form err Color
 inputColor name initial =
   Named.input
     name
-    (\case
-      FormInputText t -> maybe (Right initial) Right (colorPickerFromHex t)
-      _               -> Right initial
+    ( \case
+        FormInputText t -> Right (fromMaybe initial (colorPickerFromHex t))
+        _ -> Right initial
     )
-    (\formId val -> FormView $ withKey (encodeFormId formId) $ do
-      ctx <- askContext
-      prefix <- uiIO (getActiveFormPrefix ctx)
-      let fieldKey = encodeFormId formId
-      void $ NUI.label name
-      (resp, newVal) <- colorPicker val
-      when (respChanged resp || newVal /= val) $
-        uiIO (updateFieldInput ctx prefix fieldKey (FormInputText (colorPickerToHex newVal)))
+    ( fieldView
+        respChanged
+        (FormInputText . colorPickerToHex)
+        (labelled name colorPicker)
     )
     initial
 
@@ -291,10 +180,4 @@ withChildErrors = Named.withChildErrors
 
 -- | Automatically display validation errors directly below the widget.
 withFieldErrors :: Form Text a -> Form Text a
-withFieldErrors = withChildErrors (\(FormView widget) errs -> FormView $ do
-  columnWith (tight . gap 4 . fillW) $ do
-    widget
-    case errs of
-      [] -> pure ()
-      es -> runFormView (defaultErrorView es)
-  )
+withFieldErrors = withChildErrors fieldErrors

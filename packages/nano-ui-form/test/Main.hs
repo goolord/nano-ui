@@ -3,6 +3,7 @@
 module Main (main) where
 
 import Control.Monad (forM_)
+import Data.Int (Int8)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Ditto.Types as Ditto
@@ -40,7 +41,8 @@ import NanoUI.Testing (collectTextSpans, getTheme, newContext, runFrame, withFon
 import NanoUI.Context (ctxNodeArena)
 import NanoUI.Layout.Arena (arenaCount, getNodeType, getParent, getRect, getText, getNodeValue, getWidthSizing, getHeightSizing)
 import NanoUI.Form
-import NanoUI.Form.Backend (updateFieldInput)
+import NanoUI.Form.Backend (emptyFormStateStore, getFormStore, updateFieldInput)
+import qualified NanoUI.Form.Unnamed as Unnamed
 import System.IO (BufferMode (NoBuffering), hSetBuffering, stdout)
 
 data Person = Person
@@ -113,8 +115,33 @@ main = do
     Nothing -> error "Expected live runner to produce Just Person"
 
   putStrLn "\n--- Test 4: resetForm & state isolation ---"
+  updateFieldInput ctx "testPerson" "name" (FormInputText "Changed")
+  updateFieldInput ctx "otherPerson" "name" (FormInputText "Preserved")
+  otherBefore <- getFormStore ctx "otherPerson"
   runNanoUI ctx inp (resetForm "testPerson")
-  assert "resetForm executed cleanly" True
+  resetStore <- getFormStore ctx "testPerson"
+  otherAfter <- getFormStore ctx "otherPerson"
+  assert "resetForm clears the selected form's state" (resetStore == emptyFormStateStore)
+  assert "resetForm preserves other forms" (otherAfter == otherBefore)
+
+  let enumForm :: Form Text (Int8, Int8, Int8)
+      enumForm = (,,)
+        <$> inputEnumSelect "select" (-42)
+        <*> inputEnumRadio "radio" 42
+        <*> Unnamed.inputEnumSelect (-12)
+      checkEnums expected = do
+        (_, result) <- runNanoUI ctx inp (runNanoForm "enums" enumForm)
+        case result of
+          Ditto.Ok (Ditto.Proved _ values) ->
+            assert "Enum fields use zero-based widget indices independently of enum bounds" (values == expected)
+          Ditto.Error errs -> error (show errs)
+  checkEnums (-42, 42, -12)
+  updateFieldInput ctx "enums" "select" (FormInputInt 0)
+  updateFieldInput ctx "enums" "radio" (FormInputInt 255)
+  checkEnums (minBound, maxBound, -12)
+  updateFieldInput ctx "enums" "select" (FormInputInt (-10))
+  updateFieldInput ctx "enums" "radio" (FormInputInt 300)
+  checkEnums (minBound, maxBound, -12)
 
   putStrLn "\n--- Test 5: withFieldErrors renders widget-level errors ---"
   (view5, res5) <- runNanoUI ctx inp (runNanoForm "failingWithErrors" $

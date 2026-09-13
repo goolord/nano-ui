@@ -30,7 +30,7 @@ where
 import Control.Monad (void, when)
 import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
-import Data.Maybe (listToMaybe)
+import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import NanoUI.Context (getScrollOffset, registerFocusable, setScrollOffset)
@@ -137,19 +137,10 @@ keyedRowLay lay keys act =
       (zip [0 :: Int ..] keys)
 
 listAt :: [a] -> Int -> a -> a
-listAt xs i d = go i xs
- where
-  go !n (x : xs')
-    | n <= 0 = x
-    | otherwise = go (n - 1) xs'
-  go !_ [] = d
+listAt xs i fallback = fromMaybe fallback (listToMaybe (drop i xs))
 
 fitList :: Int -> a -> [a] -> [a]
-fitList n d xs = go n xs
- where
-  go !k _ | k <= 0 = []
-  go !k (x : xs') = x : go (k - 1) xs'
-  go !k [] = d : go (k - 1) []
+fitList n fallback xs = take n (xs ++ repeat fallback)
 
 {-# INLINE listClipper #-}
 listClipper :: Int -> Float -> Float -> Float -> (Int, Int)
@@ -168,8 +159,10 @@ virtualIndices n scrollOff viewH itemH =
 
 setAt :: Int -> a -> [a] -> [a]
 setAt i x xs
-  | i < 0 || i >= length xs = xs
-  | otherwise = take i xs ++ x : drop (i + 1) xs
+  | i < 0 = xs
+  | otherwise = case splitAt i xs of
+      (before, _ : after) -> before ++ x : after
+      (_, []) -> xs
 
 normalizeOrder :: Int -> [Int] -> [Int]
 normalizeOrder n stored =
@@ -211,4 +204,3 @@ headerEdgeHit pad yTop yBot cols mouse =
 
 headerAtPoint :: [(Int, Response)] -> V2 -> Maybe Int
 headerAtPoint cols mouse = listToMaybe [i | (i, r) <- cols, rectContains (rawRespRect r) mouse]
-

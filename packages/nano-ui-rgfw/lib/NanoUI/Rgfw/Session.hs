@@ -10,7 +10,7 @@ module NanoUI.Rgfw.Session
   ) where
 
 import Control.Concurrent (threadDelay)
-import Control.Exception (finally)
+import Control.Exception (bracket, mask_)
 import Control.Monad (void, when)
 import Data.Bits ((.&.))
 import Data.Char (chr, isPrint, ord, toLower)
@@ -152,10 +152,13 @@ runRgfwSessionReduceCustom ::
   IO ()
 runRgfwSessionReduceCustom opts getThemeAndScale updateModel initialModel view = do
   let flags = if optCenter opts then R.rgfw_windowCenter else 0
-  mWin <- R.createWindow (optTitle opts) 0 0 (optWidth opts) (optHeight opts) flags
-  case mWin of
-    Nothing -> putStrLn "Failed to create RGFW window."
-    Just win -> do
+  bracket
+    (R.createWindow (optTitle opts) 0 0 (optWidth opts) (optHeight opts) flags)
+    (mapM_ R.closeWindow) $ \mWin -> case mWin of
+      Nothing -> putStrLn "Failed to create RGFW window."
+      Just win -> runWindow win
+  where
+    runWindow win = do
       let !refreshHz = if optRefreshHz opts > 0 then optRefreshHz opts else 60
           !refreshSec = 1.0 / fromIntegral refreshHz :: Double
       monScaleInit <- R.windowScale win
@@ -177,9 +180,6 @@ runRgfwSessionReduceCustom opts getThemeAndScale updateModel initialModel view =
           !initPhysH = optHeight opts
           !initLogW = max 1 (round (fromIntegral initPhysW / initScale) :: Int)
           !initLogH = max 1 (round (fromIntegral initPhysH / initScale) :: Int)
-
-      physSurf0 <- newRgfwSurface win initPhysW initPhysH
-      physSurfRef <- newIORef physSurf0
 
       modelRef <- newIORef initialModel
       scaleRef <- newIORef initScale
@@ -204,7 +204,10 @@ runRgfwSessionReduceCustom opts getThemeAndScale updateModel initialModel view =
               { inputWindowSize = Size (fromIntegral initLogW) (fromIntegral initLogH)
               }
 
-      R.withEventBuffer $ \evPtr -> do
+      bracket
+        (newRgfwSurface win initPhysW initPhysH >>= newIORef)
+        (\ref -> readIORef ref >>= freeRgfwSurface)
+        $ \physSurfRef -> R.withEventBuffer $ \evPtr -> do
         let !animateTimeout = max 1 (floor (refreshSec * 1000) - 2) :: Int
 
         let drawOne c curInp = do
@@ -284,9 +287,12 @@ runRgfwSessionReduceCustom opts getThemeAndScale updateModel initialModel view =
                     writeIORef scaleRef newScale
                     let !lw = max 1 (round (fromIntegral pw / newScale) :: Int)
                         !lh = max 1 (round (fromIntegral ph / newScale) :: Int)
-                    physSurf <- readIORef physSurfRef
-                    physSurf' <- resizeRgfwSurface win physSurf pw ph
-                    writeIORef physSurfRef physSurf'
+                    -- Publish the replacement before cleanup can observe the
+                    -- old, freed surface through the session reference.
+                    mask_ $ do
+                      physSurf <- readIORef physSurfRef
+                      physSurf' <- resizeRgfwSurface win physSurf pw ph
+                      writeIORef physSurfRef physSurf'
                     pure (c, inp { inputWindowSize = Size (fromIntegral lw) (fromIntegral lh) })
                 , sdWaitTimeout   = \c wasAnim -> do
                     animating <- anyAnimating c
@@ -318,15 +324,11 @@ runRgfwSessionReduceCustom opts getThemeAndScale updateModel initialModel view =
                 , sdClickTime     = 0.4
                 , sdAlignSec      = refreshSec
                 }
-        let cleanup = do
-              finalPhysSurf <- readIORef physSurfRef
-              freeRgfwSurface finalPhysSurf
-              R.closeWindow win
         -- Present the opening frame before entering the loop so the window has
         -- content immediately; once idle the loop blocks with no redraws.
         (_, inpStart) <- drawOne ctx initInp
         clearDirty ctx
-        runSessionLoop drv ctx inpStart `finally` cleanup
+        runSessionLoop drv ctx inpStart
 
 data RgfwEvent
   = RgfwEvClose

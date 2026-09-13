@@ -187,6 +187,9 @@ The repository is organized as a Cabal multi-package workspace:
 
 ## Building & Running Demos
 
+For the source map, focused test commands, and extension conventions, see the
+[development guide](docs/development.md).
+
 ### Build Matrix & Prerequisites
 
 | Backend | Cabal Flag | System Dependencies | Supported OS |

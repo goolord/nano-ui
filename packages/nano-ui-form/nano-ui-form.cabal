@@ -47,6 +47,8 @@ library
         NanoUI.Form.Unnamed
         NanoUI.Form.Validation
         NanoUI.Form.Widgets
+    other-modules:
+        NanoUI.Form.Field
     build-depends:
         base ^>=4.22.0.0,
         containers ^>=0.8,

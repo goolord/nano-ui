@@ -3,6 +3,7 @@
 
 module Main (main) where
 
+import Control.Exception (IOException, bracket, try)
 import Control.Monad (forM_)
 import Data.Bits (shiftR, (.&.))
 import System.Exit (exitFailure)
@@ -110,6 +111,8 @@ import NanoUI.Rgfw.Surface
   , newOffscreenRgfwSurface
   , packColor
   , sBuffer
+  , sWidth
+  , sHeight
   , toPhysRect
   )
 import NanoUI.Rgfw.Theme
@@ -149,6 +152,21 @@ testPackColor = do
   assert "Color byte packing - Red" (r == 0x12)
   assert "Color byte packing - Green" (g == 0x34)
   assert "Color byte packing - Blue" (b == 0x56)
+
+testSurfaceAllocation :: IO ()
+testSurfaceAllocation = do
+  bracket (newOffscreenRgfwSurface 0 (-1)) freeRgfwSurface $ \surface -> do
+    assert "Empty surface dimensions produce a usable pixel" (sWidth surface == 1 && sHeight surface == 1)
+    clearScreen surface 0x12345678
+    pixel <- peekElemOff (sBuffer surface) 0
+    assert "Minimum surface buffer can be cleared" (pixel == 0x12345678)
+  -- This product wraps to zero on machine Int arithmetic. Reject it before
+  -- allocating a tiny buffer for what claims to be a huge surface.
+  oversized <- try (bracket
+    (newOffscreenRgfwSurface (maxBound `div` 2 + 1) 2)
+    freeRgfwSurface
+    (const (pure ()))) :: IO (Either IOException ())
+  assert "Surface dimensions cannot overflow the buffer allocation" (either (const True) (const False) oversized)
 
 testTomorrowThemes :: IO ()
 testTomorrowThemes = do
@@ -684,6 +702,7 @@ main = do
   putStrLn "=== Running nano-ui-rgfw Unit Tests ==="
   testCozette
   testPackColor
+  testSurfaceAllocation
   testTomorrowThemes
   testMouseConstants
   testMultiClickWordBounds

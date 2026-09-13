@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module NanoUI.Plot.Scale
@@ -24,32 +25,20 @@ domainToPlot (Domain lo hi) (Range rLo rHi) v =
    in rLo + t * (rHi - rLo)
 
 plotToDomain :: Domain -> Range -> Double -> Double
-plotToDomain dom@(Domain lo _) rng v =
-  let dSpan = max 1e-9 (domainSpan dom)
-      t = (v - rangeLo rng) / max 1e-9 (rangeSpan rng)
+plotToDomain (Domain lo hi) (Range rLo rHi) v =
+  let dSpan = max 1e-9 (hi - lo)
+      t = (v - rLo) / max 1e-9 (rHi - rLo)
    in lo + t * dSpan
-
-domainSpan :: Domain -> Double
-domainSpan (Domain lo hi) = hi - lo
-
-rangeLo :: Range -> Double
-rangeLo (Range lo _) = lo
-
-rangeSpan :: Range -> Double
-rangeSpan (Range lo hi) = hi - lo
-
-{-# LANGUAGE BangPatterns #-}
 
 -- Works with Data.Vector, Data.Vector.Unboxed, or Data.Vector.Storable
 domainExtent :: (GV.Vector v Double) => v Double -> Domain
-domainExtent xs = case GV.length xs of
-  0 -> Domain 0 1
-  1 -> let !x = GV.unsafeHead xs in Domain (x - 0.5) (x + 0.5)
-  _ ->
+domainExtent xs = case GV.uncons xs of
+  Nothing -> Domain 0 1
+  Just (first, rest) ->
     -- Single-pass fold to find both min and max simultaneously
     let !(!lo, !hi) = GV.foldl' (\(!mn, !mx) !x -> (min mn x, max mx x))
-                               (GV.unsafeHead xs, GV.unsafeHead xs)
-                               (GV.unsafeTail xs)
+                               (first, first)
+                               rest
      in if lo == hi
           then Domain (lo - 0.5) (hi + 0.5)
           else Domain lo hi
@@ -61,7 +50,7 @@ padDomain :: Double -> Domain -> Domain
 padDomain frac (Domain lo hi) =
   let dSpan = max 1e-9 (hi - lo)
       pad = dSpan * frac
-       in Domain (lo - pad) (hi + pad)
+   in Domain (lo - pad) (hi + pad)
 
 finite :: Double -> Bool
 finite x = not (isNaN x || isInfinite x)
@@ -71,16 +60,11 @@ niceStep :: Double -> Double
 niceStep raw =
   let exp10 = floor (logBase 10 raw) :: Int
       f = raw / (10 ** fromIntegral exp10)
-      nf =
-        if f <= 1
-          then 1
-          else
-            if f <= 2
-              then 2
-              else
-                if f <= 5
-                  then 5
-                  else 10
+      nf
+        | f <= 1 = 1
+        | f <= 2 = 2
+        | f <= 5 = 5
+        | otherwise = 10
    in nf * (10 ** fromIntegral exp10)
 
 niceTicks :: Int -> Domain -> [Double]
