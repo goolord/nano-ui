@@ -310,9 +310,10 @@ resetNodeArena na = do
   writeIORef (naFrameTag na) (if ft == maxBound then 1 else ft + 1)
   !ep <- readIORef (naEpoch na)
   let !ep' = ep + 1
-  if ep' == 0
+  if ep' == 0 || (ep' .&. 0x7F == 0)
     then do
-      writeIORef (naEpoch na) 1
+      let !nextEp = if ep' == 0 then 1 else ep'
+      writeIORef (naEpoch na) nextEp
       writeIORef (naIndex na) =<< HT.new
     else writeIORef (naEpoch na) ep'
 

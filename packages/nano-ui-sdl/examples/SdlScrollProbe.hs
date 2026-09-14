@@ -20,7 +20,6 @@ import NanoUI.Testing (Context)
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath ((</>))
 import System.IO (hFlush, hSetEncoding, stderr, stdout)
-import System.IO.Unsafe (unsafePerformIO)
 
 probeWindow :: Size
 probeWindow = Size 720 929
@@ -109,19 +108,16 @@ runSweep :: Float -> Int -> IO ()
 runSweep delta n = do
   ctx0 <- newSdlContext
   frameRef <- newIORef (0 :: Int)
-  done <- newIORef False
   let outDir = probeOutRoot </> ("d" ++ show delta)
   createDirectoryIfMissing True outDir
-  let shouldQuit _ = unsafePerformIO (readIORef done)
+  let shouldQuit inp = KeyEscape `elem` inputKeys inp
       drawFn _c env inp _force = do
         i <- readIORef frameRef
         when (i <= 1) $ do
           sc <- readIORef (sdlScaleRef env)
           putStrLn ("  scaleRef=" ++ show sc ++ " winLogical=" ++ show (inputWindowSize inp))
         if i > n
-          then do
-            writeIORef done True
-            pure (False, inp)
+          then pure (False, inp {inputKeys = inputKeysFromList [KeyEscape]})
           else do
             let inp' =
                   inp

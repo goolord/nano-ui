@@ -53,7 +53,8 @@ import NanoUI
 import NanoUI.Backend.Sdl
 import NanoUI.Debug (CoreDebugSnapshot (..), formatCoreRtsRows)
 import NanoUI.Diagrams
-import NanoUI.Monad (askInput)
+import NanoUI.Monad (askInput, askContext)
+import NanoUI.Context (askHostIO, setHost)
 import Diagrams.Prelude
   ( Diagram
   , circle
@@ -74,7 +75,6 @@ import System.Console.GetOpt
   , usageInfo
   )
 import System.Environment (getArgs, lookupEnv)
-import System.IO.Unsafe (unsafePerformIO)
 import Text.Printf (printf)
 import qualified Data.ByteString as BS
 import qualified Data.Text as T
@@ -186,16 +186,28 @@ themeForChoice TomorrowMidnightMin = tomorrowMidnightMinDarkTheme
 
 -- | Font families offered by the Controls-tab font combo box, straight from
 -- the SDL backend's system font-directory scan ('listFontFamilies'; cached
--- once per process). The chosen family is pushed to the backend through
+-- once per context). The chosen family is pushed to the backend through
 -- 'setSdlUiFont' and re-rendered on the next frame. The fallback list only
 -- kicks in on systems where the scan finds no font files.
-demoFontFamilies :: [T.Text]
-demoFontFamilies =
-  let families = map T.pack (unsafePerformIO listFontFamilies)
-   in if null families
-        then ["Inter", "Noto Sans", "Adwaita Sans", "Cantarell", "Liberation Sans", "FreeSans"]
-        else families
-{-# NOINLINE demoFontFamilies #-}
+data DemoSettings = DemoSettings ![T.Text] !Bool
+
+demoSettings :: NanoUI DemoSettings
+demoSettings = do
+  ctx <- askContext
+  uiIO $ do
+    cached <- askHostIO ctx
+    case cached of
+      Just settings -> pure settings
+      Nothing -> do
+        families <- map T.pack <$> listFontFamilies
+        debugOpen <- isJust <$> lookupEnv "NANO_DEBUG_OPEN"
+        let settings = DemoSettings
+              (if null families
+                then ["Inter", "Noto Sans", "Adwaita Sans", "Cantarell", "Liberation Sans", "FreeSans"]
+                else families)
+              debugOpen
+        setHost ctx settings
+        pure settings
 
 ------------------------------------------------------------------------------
 -- §3  The showcase UI
@@ -206,12 +218,9 @@ demoFontFamilies =
 --   2. toolbar              brand, live FPS, OK / Cancel / About / Debug
 --   3. two-column body      left: live state; right: tabbed demos
 --   4. overlays             Debug window + About modal
-debugOpenFromEnv :: Bool
-debugOpenFromEnv = unsafePerformIO (isJust <$> lookupEnv "NANO_DEBUG_OPEN")
-{-# NOINLINE debugOpenFromEnv #-}
-
 demoUi :: NanoUI ()
 demoUi = do
+  DemoSettings demoFontFamilies debugOpenFromEnv <- demoSettings
   ---------------------------------------------------------------- hooks ---
   -- Toolbar / overlays.
   (click, setClick) <- useText "" -- label of the last button / menu item clicked

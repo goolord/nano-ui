@@ -8,8 +8,9 @@ module NanoUI.Diagrams.Tessellation
   , bezierTolerance
   ) where
 
-import qualified Data.Vector as V
+import Control.Monad.ST (runST)
 import qualified Data.Vector.Unboxed as U
+import qualified Data.Vector.Unboxed.Mutable as M
 import NanoUI (Color, DrawOp (..), Rect (..))
 
 bezierTolerance :: Float
@@ -46,14 +47,6 @@ isConvex ccw a b c =
       bc = diff b c
    in if ccw then cross ab bc >= 0 else cross ab bc <= 0
 
--- Fan-fill leftover only when every vertex turns the same way. A concave
--- remainder fanned from vertex 0 can cover area outside the polygon.
-leftoverConvex :: Bool -> U.Vector (Float, Float) -> Bool
-leftoverConvex ccw vs =
-  let n = U.length vs
-      at i = vs U.! (i `mod` n)
-   in n >= 3 && U.ifoldr (\i cur rest -> isConvex ccw (at (i - 1)) cur (at (i + 1)) && rest) True vs
-
 pointInTri :: (Float, Float) -> (Float, Float) -> (Float, Float) -> (Float, Float) -> Bool
 pointInTri p a b c =
   let sign (p1, p2, p3) = cross (diff p1 p3) (diff p2 p3)
@@ -62,49 +55,64 @@ pointInTri p a b c =
       d3 = sign (p, c, a)
    in not ((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0))
 
-isEar :: Bool -> U.Vector (Float, Float) -> Int -> Bool
-isEar ccw vs i
-  | i < 0 || i >= n = False
-  | otherwise =
-      let prevIdx = (i - 1 + n) `mod` n
-          nextIdx = (i + 1) `mod` n
-          prev = vs U.! prevIdx
-          cur = vs U.! i
-          next = vs U.! nextIdx
-          outside j p rest =
-            (j == prevIdx || j == i || j == nextIdx || not (pointInTri p prev cur next)) && rest
-       in isConvex ccw prev cur next && U.ifoldr outside True vs
-  where
-    n = U.length vs
-
 earClip :: U.Vector (Float, Float) -> [((Float, Float), (Float, Float), (Float, Float))]
 earClip vs
   | U.length vs < 3 = []
   | U.length vs == 3 = [(vs U.! 0, vs U.! 1, vs U.! 2)]
-  | otherwise =
-      let ccw = signedArea vs >= 0
-          go remaining idx tries tris
-            | nRem < 3 = tris
-            | nRem == 3 = (remaining U.! 0, remaining U.! 1, remaining U.! 2) : tris
-            | tries >= nRem =
-                if nRem >= 3 && leftoverConvex ccw remaining
-                  then
-                    let origin = remaining U.! 0
-                     in tris
-                          ++ [ (origin, remaining U.! i, remaining U.! (i + 1))
-                             | i <- [1 .. nRem - 2]
-                             ]
-                  else tris
-            | isEar ccw remaining idx =
-                let prev = remaining U.! ((idx - 1 + nRem) `mod` nRem)
-                    cur = remaining U.! idx
-                    next = remaining U.! ((idx + 1) `mod` nRem)
-                    newRem = U.take idx remaining U.++ U.drop (idx + 1) remaining
-                 in go newRem 0 0 ((prev, cur, next) : tris)
-            | otherwise = go remaining ((idx + 1) `mod` nRem) (tries + 1) tris
+  | otherwise = runST $ do
+      let !n = U.length vs
+          !ccw = signedArea vs >= 0
+          at = (vs U.!)
+      -- Coordinates never move. Remove an ear by relinking two neighbours,
+      -- instead of copying the remaining coordinate vector at every step.
+      prevs <- U.thaw (U.generate n (\i -> (i - 1 + n) `mod` n))
+      nexts <- U.thaw (U.generate n (\i -> (i + 1) `mod` n))
+      let triangle i = do
+            p <- M.read prevs i
+            q <- M.read nexts i
+            pure (p, q, (at p, at i, at q))
+          isEarAt first count i p q (a, b, c)
+            | not (isConvex ccw a b c) = pure False
+            | otherwise = outside first count
             where
-              nRem = U.length remaining
-       in reverse (go vs 0 0 [])
+              outside !_ 0 = pure True
+              outside !j !left
+                | j /= p && j /= i && j /= q && pointInTri (at j) a b c = pure False
+                | otherwise = do
+                    next <- M.read nexts j
+                    outside next (left - 1)
+          convex !_ 0 = pure True
+          convex !i !left = do
+            (_, q, (a, b, c)) <- triangle i
+            if isConvex ccw a b c then convex q (left - 1) else pure False
+          fan origin i left
+            | left <= 0 = pure []
+            | otherwise = do
+                q <- M.read nexts i
+                rest <- fan origin q (left - 1)
+                pure ((at origin, at i, at q) : rest)
+          go !first !count !idx !tries tris
+            | count == 3 = do
+                second <- M.read nexts first
+                third <- M.read nexts second
+                pure ((at first, at second, at third) : tris)
+            | tries >= count = do
+                isConvexRing <- convex first count
+                if isConvexRing then do
+                  second <- M.read nexts first
+                  rest <- fan first second (count - 2)
+                  pure (tris ++ rest)
+                else pure tris
+            | otherwise = do
+                (p, q, tri) <- triangle idx
+                ear <- isEarAt first count idx p q tri
+                if ear then do
+                  M.write nexts p q
+                  M.write prevs q p
+                  let !first' = if idx == first then q else first
+                  go first' (count - 1) first' 0 (tri : tris)
+                else go first count q (tries + 1) tris
+      reverse <$> go 0 n 0 0 []
 
 fillPolygon :: Color -> [(Float, Float)] -> [DrawOp]
 fillPolygon col pts =
@@ -139,11 +147,11 @@ strokePolyline col w closed pts0 =
    in if n < 2
         then []
         else
-          let !vPts = V.fromList pts
+          let !vPts = U.fromList pts
               !segCount = if closed then n else n - 1
-              !segNormals = V.generate segCount $ \i ->
-                let !(p0x, p0y) = vPts V.! i
-                    !(p1x, p1y) = vPts V.! ((i + 1) `mod` n)
+              !segNormals = U.generate segCount $ \i ->
+                let !(p0x, p0y) = vPts U.! i
+                    !(p1x, p1y) = vPts U.! ((i + 1) `mod` n)
                     dx = p1x - p0x
                     dy = p1y - p0y
                     nx = -dy
@@ -151,17 +159,17 @@ strokePolyline col w closed pts0 =
                     d = sqrt (nx * nx + ny * ny)
                  in if d <= 1e-9 then (0, 0) else (nx / d, ny / d)
               joinNormal !i
-                | not closed && i <= 0 = segNormals V.! 0
-                | not closed && i >= n - 1 = segNormals V.! (segCount - 1)
+                | not closed && i <= 0 = segNormals U.! 0
+                | not closed && i >= n - 1 = segNormals U.! (segCount - 1)
                 | otherwise =
-                    let (ax, ay) = segNormals V.! ((i - 1 + segCount) `mod` segCount)
-                        (bx, by) = segNormals V.! (i `mod` segCount)
+                    let (ax, ay) = segNormals U.! ((i - 1 + segCount) `mod` segCount)
+                        (bx, by) = segNormals U.! (i `mod` segCount)
                         sx = ax + bx
                         sy = ay + by
                         d = sqrt (sx * sx + sy * sy)
                      in if d <= 1e-9 then (0, 0) else (sx / d, sy / d)
               offset !i =
-                let (!px, !py) = vPts V.! i
+                let (!px, !py) = vPts U.! i
                     (!nx, !ny) = joinNormal i
                  in ((px + hw * nx, py + hw * ny), (px - hw * nx, py - hw * ny))
               buildQuads !i

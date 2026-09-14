@@ -63,8 +63,8 @@ selftest imgs ui = do
     (fmItal16, _) <- ctxResolveFont ctx 16.0 WeightNormal FontStyleItalic FontRegular
     (wNorm, _) <- ctxResolveMeasure ctx 16.0 WeightNormal FontStyleNormal FontRegular "Slanted synthetic italic font style."
     (wItal, _) <- ctxResolveMeasure ctx 16.0 WeightNormal FontStyleItalic FontRegular "Slanted synthetic italic font style."
-    let runNorm = lineWidth fmNorm16 "Slanted synthetic italic font style."
-        runItal = lineWidth fmItal16 "Slanted synthetic italic font style."
+    runNorm <- lineWidthIO fmNorm16 "Slanted synthetic italic font style."
+    runItal <- lineWidthIO fmItal16 "Slanted synthetic italic font style."
     when (abs (runNorm - wNorm) > 0.01) $
       fail $ printf "selftest: shaped width mismatch for normal sentence: measure=%.2f, fmRun=%.2f" wNorm runNorm
     when (abs (runItal - wItal) > 0.01) $
@@ -83,7 +83,7 @@ selftest imgs ui = do
     let checkRun :: String -> FontMetrics -> FontStyle -> String -> IO ()
         checkRun tag fm st pair = do
           (wab, _) <- ctxResolveMeasure ctx 20.0 WeightNormal st FontRegular (T.pack pair)
-          let runW = lineWidth fm (T.pack pair)
+          runW <- lineWidthIO fm (T.pack pair)
           when (abs (runW - wab) > 0.01) $
             fail $ printf "selftest: %s shaped width mismatch for '%s': measure=%.2f, fmRun=%.2f" tag pair wab runW
     checkRun "norm" fmNorm20 FontStyleNormal "To"
@@ -133,11 +133,14 @@ selftest imgs ui = do
     -- shaped run quad.
     (fmBig, _) <- ctxResolveFont ctx 64.0 WeightNormal FontStyleNormal FontRegular
     let bigTxt = T.replicate 400 "f"
-    when (isJust (fmRun fmBig bigTxt)) $
+    bigRun <- drawRun fmBig bigTxt
+    bigWidth <- lineWidthIO fmBig bigTxt
+    shortRun <- drawRun fmBig "fits"
+    when (isJust bigRun) $
       fail "selftest: oversized shaped run got a whole-run atlas quad"
-    when (lineWidth fmBig bigTxt <= 0) $
+    when (bigWidth <= 0) $
       fail "selftest: per-glyph fallback lost the oversized run width"
-    when (isNothing (fmRun fmBig "fits")) $
+    when (isNothing shortRun) $
       fail "selftest: short shaped run lost its whole-run atlas quad"
     let idle =
           emptyInput

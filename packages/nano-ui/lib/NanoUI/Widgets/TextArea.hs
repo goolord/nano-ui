@@ -271,10 +271,7 @@ computeTextAreaLayout measureWidth lineH state =
         [ VisualLine idx txt (fromIntegral idx * lineH - scrollY)
         | (idx, txt) <- indexedLines
         ]
-      currentLineText =
-        if r < length linesList
-          then linesList !! r
-          else ""
+      currentLineText = TB.lineAt r buf
       prefixText = T.take c currentLineText
       caretX = measureWidth prefixText - scrollX
       caretY = fromIntegral r * lineH - scrollY

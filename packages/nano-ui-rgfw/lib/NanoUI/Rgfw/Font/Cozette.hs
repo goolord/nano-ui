@@ -38,11 +38,11 @@ import Data.Primitive.PrimArray
   )
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified Data.Vector as V
+import qualified Data.Vector.Unboxed as U
 import Data.Word (Word16, Word32, Word8)
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (peekElemOff, pokeElemOff)
-import GHC.IO (unsafePerformIO)
+import Control.Monad.ST (ST, runST)
 import NanoUI (FontMetrics (..))
 
 -- 6x13 Cozette metrics
@@ -61,17 +61,9 @@ cozetteGlyphWidth = 7
 cozetteGlyphHeight :: Int
 cozetteGlyphHeight = 13
 
--- Group record in cmap format 12
-data CmapGroup = CmapGroup
-  { cgStart :: {-# UNPACK #-} !Word32
-  , cgEnd   :: {-# UNPACK #-} !Word32
-  , cgGlyph :: {-# UNPACK #-} !Word32
-  }
-  deriving (Show)
-
 data CozetteFont = CozetteFont
   { cfNumGlyphs   :: {-# UNPACK #-} !Int
-  , cfGroups      :: !(V.Vector CmapGroup)
+  , cfGroups      :: !(U.Vector (Word32, Word32, Word32)) -- start, end, glyph
   , cfGlyphData   :: !(PrimArray Word8)  -- 921 * 12 bytes of packed 7x13 bitmap bits
   , cfGlyphData1x :: !(PrimArray Word8)  -- 921 * 13 bytes of row-unpacked Word8s (1 byte per row)
   , cfGlyphData2x :: !(PrimArray Word16) -- 921 * 26 Word16s (14 bits per row, 26 rows per glyph)
@@ -106,7 +98,7 @@ parseWord32 bs off =
         .|. b3
 
 parseCozette :: ByteString -> CozetteFont
-parseCozette bs = unsafePerformIO $ do
+parseCozette bs = runST $ do
   -- Parse SFNT table directory
   let numTables = fromIntegral (parseWord16 bs 4)
       findTable tag i
@@ -132,7 +124,7 @@ parseCozette bs = unsafePerformIO $ do
               s = parseWord32 bs gOff
               e = parseWord32 bs (gOff + 4)
               gid = parseWord32 bs (gOff + 8)
-           in CmapGroup s e gid
+           in (s, e, gid)
         | g <- [0 .. nGroups - 1]
         ]
 
@@ -169,10 +161,10 @@ parseCozette bs = unsafePerformIO $ do
   frozen1xRows <- build1xRowGlyphs numGlyphs frozen1x
   frozen2x <- buildScale2xGlyphs numGlyphs frozen1x
   frozen4x <- buildScale4xGlyphs numGlyphs frozen2x
-  pure $ CozetteFont numGlyphs (V.fromList groups) frozen1x frozen1xRows frozen2x frozen4x
+  pure $ CozetteFont numGlyphs (U.fromList groups) frozen1x frozen1xRows frozen2x frozen4x
 
 -- | Build unpacked 1x glyphs: 13 bytes per glyph (1 byte per row, bit (7 - c) for col c).
-build1xRowGlyphs :: Int -> PrimArray Word8 -> IO (PrimArray Word8)
+build1xRowGlyphs :: Int -> PrimArray Word8 -> ST s (PrimArray Word8)
 build1xRowGlyphs !numGlyphs !arr = do
   mutArr1x <- newPrimArray (numGlyphs * 13)
   let forEachGlyph !gid
@@ -232,7 +224,7 @@ getGlyphBit1x !arr !gid !c !r
        in (b `shiftR` bitInByte) .&. 1
 
 -- | Build Scale2x glyphs: 14x26 per glyph, packed into Word16 (14 bits per row).
-buildScale2xGlyphs :: Int -> PrimArray Word8 -> IO (PrimArray Word16)
+buildScale2xGlyphs :: Int -> PrimArray Word8 -> ST s (PrimArray Word16)
 buildScale2xGlyphs !numGlyphs !arr = do
   mutArr2x <- newPrimArray (numGlyphs * 26)
   let forEachGlyph !gid
@@ -282,7 +274,7 @@ getGlyphBit2x !arr2x !gid !c !r
        in fromIntegral ((w `shiftR` (15 - c)) .&. 1)
 
 -- | Build Scale4x glyphs: 28x52 per glyph, packed into Word32 (28 bits per row).
-buildScale4xGlyphs :: Int -> PrimArray Word16 -> IO (PrimArray Word32)
+buildScale4xGlyphs :: Int -> PrimArray Word16 -> ST s (PrimArray Word32)
 buildScale4xGlyphs !numGlyphs !arr2x = do
   mutArr4x <- newPrimArray (numGlyphs * 52)
   let forEachGlyph !gid
@@ -366,18 +358,18 @@ charToGlyphId font c =
           0xf096 -> 1  -- FontAwesome square (\xf096) -> ' '
           _      -> binarySearch (cfGroups font) cp
   where
-    binarySearch grps cp = go 0 (V.length grps - 1)
+    binarySearch grps cp = go 0 (U.length grps - 1)
       where
         go !lo !hi
           | lo > hi = 0
           | otherwise =
               let !mid = (lo + hi) `div` 2
-                  grp = grps V.! mid
-               in if cp < cgStart grp
+                  (!start, !end, !glyph) = grps U.! mid
+               in if cp < start
                     then go lo (mid - 1)
-                    else if cp > cgEnd grp
+                    else if cp > end
                       then go (mid + 1) hi
-                      else cgGlyph grp + (cp - cgStart grp)
+                      else glyph + (cp - start)
 
 {-# INLINE renderGlyphToBuffer #-}
 renderGlyphToBuffer ::
@@ -834,5 +826,5 @@ cozetteMetrics =
     , fmKerning = \_ _ -> 0
     , fmRun = \_ -> Nothing
     , fmGlyph = \_ -> Nothing
+    , fmBackend = Nothing
     }
-

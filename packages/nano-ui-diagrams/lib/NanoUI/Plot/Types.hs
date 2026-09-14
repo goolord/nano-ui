@@ -18,6 +18,7 @@ module NanoUI.Plot.Types
 
 import Data.Text (Text)
 import Data.Vector (Vector)
+import Data.Vector.Unboxed qualified as U
 import NanoUI (Color, Response)
 
 data Domain = Domain !Double !Double
@@ -30,7 +31,7 @@ data ScaleType = Linear | Log | Category
   deriving (Eq, Show)
 
 data SeriesData
-  = PointsXY !(Vector (Double, Double))
+  = PointsXY !(U.Vector (Double, Double))
   | CategoryY !(Vector (Text, Double))
   deriving (Eq, Show)
 

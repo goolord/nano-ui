@@ -59,6 +59,9 @@ module NanoUI.Store
   , closeSelects
   , ptrEq
   , eqByPtr
+  , eqDynMap
+  , allSlotTags
+  , deleteWidgetState
   )
 where
 
@@ -69,7 +72,7 @@ import Data.Text (Text)
 import Data.Word (Word64)
 import qualified Data.IntMap.Strict as IM
 import GHC.Exts (isTrue#, reallyUnsafePtrEquality#)
-import NanoUI.Id (mix64)
+import NanoUI.Id (WidgetId (..), hashWidgetId, mix64)
 
 -- | Physical-equality shortcut. Pointer equality implies value equality for
 -- immutable values, so callers may use 'True' to skip a structural comparison
@@ -84,6 +87,15 @@ ptrEq a b = isTrue# (reallyUnsafePtrEquality# a b)
 {-# INLINE eqByPtr #-}
 eqByPtr :: Eq a => a -> a -> Bool
 eqByPtr a b = ptrEq a b || a == b
+
+-- | Dynamic values do not implement Eq, but we can verify equality via
+-- pointer equality fast path followed by checking key structure and
+-- pointer equality of each Dynamic element.
+{-# INLINE eqDynMap #-}
+eqDynMap :: IntMap Dynamic -> IntMap Dynamic -> Bool
+eqDynMap a b =
+  ptrEq a b
+    || (IM.size a == IM.size b && IM.isSubmapOfBy ptrEq a b)
 
 -- | Unified widget state. Same-type fields that share a widget key use 'slotKey'.
 data WidgetStore = WidgetStore
@@ -112,6 +124,7 @@ instance Eq WidgetStore where
       && eqByPtr (storeIntSet a) (storeIntSet b)
       && eqByPtr (storeFloatList a) (storeFloatList b)
       && eqByPtr (storeIntList a) (storeIntList b)
+      && eqDynMap (storeDyn a) (storeDyn b)
 
 instance Show WidgetStore where
   show st =
@@ -360,3 +373,74 @@ setSelectOpen st k False
 {-# INLINE closeSelects #-}
 closeSelects :: WidgetStore -> WidgetStore
 closeSelects st = st {storeOpenSelect = 0}
+
+-- | All built-in slot tags used across widgets.
+allSlotTags :: [Word64]
+allSlotTags =
+  [ slotDisabled
+  , slotCursor
+  , slotAnchor
+  , slotDrag
+  , slotDragW
+  , slotDrop
+  , slotDropPos
+  , slotWinSize
+  , slotMenuOpen
+  , slotMenuPos
+  , slotScrollCfg
+  , slotScrollOff
+  , slotScrollCross
+  , slotScrollLinkX
+  , slotScrollLinkY
+  , slotScrollContent
+  , slotTextAreaRow
+  , slotTextAreaCol
+  , slotTextAreaPrefCol
+  , slotTextAreaScroll
+  , slotTextAreaViewport
+  , slotTextAreaAnchorRow
+  , slotTextAreaAnchorCol
+  , slotTextAreaContentW
+  , slotTextAreaContentH
+  , slotTextAreaContentFont
+  , slotTextAreaBuffer
+  , slotTextAreaChanged
+  , slotTextInputScroll
+  , slotSearchCommitted
+  , slotSearchAge
+  , slotComboHighlight
+  , slotComboScroll
+  , slotComboCount
+  , slotComboScrollX
+  , slotComboContentW
+  , slotComboDrag
+  , slotComboDragOff
+  , slotComboCommitted
+  , slotComboFocus
+  , slotComboLive
+  , slotPaneGest
+  , slotPaneGrab
+  , slotPaneFocus
+  , slotPaneMax
+  , slotPaneResize
+  , slotPaneNext
+  ]
+
+-- | Remove all stored state across all slots for the given widget id.
+deleteWidgetState :: WidgetId -> WidgetStore -> WidgetStore
+deleteWidgetState wid store =
+  let !k0 = fromIntegral (hashWidgetId wid)
+      !keys = k0 : [slotKey tag k0 | tag <- allSlotTags]
+      delKeys :: IntMap a -> IntMap a
+      delKeys m = foldl' (flip IM.delete) m keys
+   in store
+        { storeInt = delKeys (storeInt store)
+        , storeFloat = delKeys (storeFloat store)
+        , storeDouble = delKeys (storeDouble store)
+        , storePoint = delKeys (storePoint store)
+        , storeText = delKeys (storeText store)
+        , storeIntSet = delKeys (storeIntSet store)
+        , storeFloatList = delKeys (storeFloatList store)
+        , storeIntList = delKeys (storeIntList store)
+        , storeDyn = delKeys (storeDyn store)
+        }

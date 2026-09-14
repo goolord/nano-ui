@@ -14,6 +14,7 @@ import Data.Colour (Colour)
 import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import Data.Vector qualified as V
+import Data.Vector.Unboxed qualified as U
 import Diagrams.Prelude
   ( Diagram
   , P2
@@ -52,6 +53,7 @@ import NanoUI.Diagrams.Widget (PlotStyle (..), colourOf)
 import NanoUI.Plot.Decimate (lttb)
 import NanoUI.Plot.Scale
   ( domainExtent
+  , domainExtentBy
   , domainToPlot
   , formatTick
   , mergeDomains
@@ -183,13 +185,11 @@ seriesExtent :: Series -> (Domain, Domain)
 seriesExtent s =
   case seriesData s of
     PointsXY pts ->
-      let xs = V.map fst pts
-          ys = V.map snd pts
+      let (xs, ys) = U.unzip pts
        in (padDomain 0.05 (domainExtent xs), padDomain 0.05 (domainExtent ys))
     CategoryY pts ->
-      let ys = V.map snd pts
-          n = V.length pts
-       in (Domain (-0.5) (fromIntegral n - 0.5), padDomain 0.05 (domainExtent ys))
+      let n = V.length pts
+       in (Domain (-0.5) (fromIntegral n - 0.5), padDomain 0.05 (domainExtentBy snd pts))
 
 chartXDomain :: Chart -> Domain
 chartYDomain :: Chart -> Domain
@@ -284,9 +284,9 @@ renderSeries ps c xDom yDom chart s =
       toP (x, y) = p2 (domainToPlot xDom (Range 0 1) x, domainToPlot yDom (Range 0 1) y)
    in case seriesKind s of
         LineSeries w _ ->
-          fromVertices (V.toList $ V.map toP pts) # lc ink # lwO (plotStroke w)
+          fromVertices (U.foldr (\p acc -> toP p : acc) [] pts) # lc ink # lwO (plotStroke w)
         ScatterSeries w mk ->
-          foldMap (\p -> markShape mk w ink (toP p)) pts
+          U.foldl' (\acc p -> acc <> markShape mk w ink (toP p)) mempty pts
         BarSeries frac ->
           renderBars ink frac pts
         AreaSeries baseline ->
@@ -294,30 +294,30 @@ renderSeries ps c xDom yDom chart s =
         StepSeries w ->
           fromVertices (V.toList $ stepPoints pts xDom yDom) # lc ink # lwO (plotStroke w)
 
-seriesPoints :: Chart -> Series -> V.Vector (Double, Double)
+seriesPoints :: Chart -> Series -> U.Vector (Double, Double)
 seriesPoints chart s =
   case seriesData s of
     PointsXY pts ->
-      let k = decimateK (V.length pts)
-       in if chartDecimate chart && V.length pts > k then lttb k pts else pts
+      let k = decimateK (U.length pts)
+       in if chartDecimate chart && U.length pts > k then lttb k pts else pts
     CategoryY rows ->
-       V.imap (\i (_, y) -> (fromIntegral i, y)) rows
+       U.generate (V.length rows) (\i -> (fromIntegral i, snd (rows V.! i)))
 
 decimateK :: Int -> Int
 decimateK n = min n (max 64 (min 2000 (n `div` 2)))
 
-renderBars :: Colour Double -> Float -> V.Vector (Double, Double) -> Diagram B
+renderBars :: Colour Double -> Float -> U.Vector (Double, Double) -> Diagram B
 renderBars fill frac pts
-  | V.null pts = mempty
+  | U.null pts = mempty
   | otherwise =
-      let !len  = V.length pts
+      let !len  = U.length pts
           !n    = fromIntegral len :: Double
           !w    = realToFrac frac / n
           !invN = 1.0 / n
           !xOff = 0.5 * invN
 
           -- Single-pass strict fold for maxY (avoids allocating a list or intermediate vector)
-          !maxY = V.foldl' (\ !acc (_, y) -> max acc (abs y)) 1e-9 pts
+          !maxY = U.foldl' (\ !acc (_, y) -> max acc (abs y)) 1e-9 pts
           !invMaxY = 1.0 / maxY
 
           drawBar (x, y) =
@@ -329,11 +329,11 @@ renderBars fill frac pts
                   # fc fill
                   # lw none
                   # translate (posX ^& posY)
-       in foldMap drawBar pts
+       in U.foldl' (\acc p -> acc <> drawBar p) mempty pts
 
-areaPath :: Double -> Domain -> Domain -> V.Vector (Double, Double) -> Diagram B
+areaPath :: Double -> Domain -> Domain -> U.Vector (Double, Double) -> Diagram B
 areaPath baseline xDom yDom pts
-  | V.null pts = mempty
+  | U.null pts = mempty
   | otherwise =
       let !unitRange = Range 0 1
           !baseY = domainToPlot yDom unitRange baseline
@@ -341,23 +341,23 @@ areaPath baseline xDom yDom pts
           toBase (!x, !_) = p2 (domainToPlot xDom unitRange x, baseY)
 
           -- Forward traversal builds `top` in order
-          top = V.foldr (\p acc -> toTop p : acc) [] pts
+          top = U.foldr (\p acc -> toTop p : acc) [] pts
           -- Left fold naturally yields reverse order without allocating an intermediate reversed vector
-          base = V.foldl' (\acc p -> toBase p : acc) [] pts
+          base = U.foldl' (\acc p -> toBase p : acc) [] pts
        in closedPoly (top ++ base)
 
 closedPoly :: [P2 Double] -> Diagram B
 closedPoly pts = fromVertices pts # closeTrail # strokeTrail
 
-stepPoints :: V.Vector (Double, Double) -> Domain -> Domain -> V.Vector (P2 Double)
+stepPoints :: U.Vector (Double, Double) -> Domain -> Domain -> V.Vector (P2 Double)
 stepPoints pts xDom yDom =
   let toP (x, y) = p2 (domainToPlot xDom (Range 0 1) x, domainToPlot yDom (Range 0 1) y)
-   in case V.length pts of
-        0 -> V.empty
-        _ ->
-          V.concatMap
-            (\((x0, y0), (x1, _)) -> V.fromList [toP (x0, y0), toP (x1, y0)])
-            (V.zip pts (V.drop 1 pts))
+   in V.generate (2 * max 0 (U.length pts - 1)) $ \i ->
+        let (!segment, !corner) = i `quotRem` 2
+            (!x0, !y0) = pts U.! segment
+         in if corner == 0
+              then toP (x0, y0)
+              else toP (fst (pts U.! (segment + 1)), y0)
 
 markShape :: MarkShape -> Float -> Colour Double -> P2 Double -> Diagram B
 markShape MarkCircle w c p =

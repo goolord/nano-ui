@@ -36,8 +36,15 @@ TTF_Font *nano_ui_ttf_open_font(const char *path, float ptsize)
 
 TTF_Font *nano_ui_ttf_open_font_memory(const void *data, size_t size, float ptsize)
 {
-    SDL_IOStream *stream = SDL_IOFromConstMem(data, size);
+    /* The font reads this stream after the Haskell ByteString callback ends.
+     * Give the stream its own storage, released by its autoclose lifetime. */
+    SDL_IOStream *stream = SDL_IOFromDynamicMem();
     if (!stream) {
+        return NULL;
+    }
+    if (SDL_WriteIO(stream, data, size) != size ||
+        SDL_SeekIO(stream, 0, SDL_IO_SEEK_SET) < 0) {
+        SDL_CloseIO(stream);
         return NULL;
     }
     SDL_PropertiesID props = SDL_CreateProperties();

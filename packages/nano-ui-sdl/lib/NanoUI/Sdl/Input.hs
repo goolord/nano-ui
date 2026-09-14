@@ -92,18 +92,21 @@ singletonEv :: SdlEvent -> SmallArray SdlEvent
 singletonEv ev = smallArrayFromListN 1 [ev]
 
 pollEvents :: IO (SmallArray SdlEvent)
-pollEvents = drain emptySmallArray
-  where
-    drain acc =
-      alloca $ \(p :: Ptr SDL_Event) -> do
-        got <- pollEventSafe p
-        if got
-          then do
-            evs <- decodeEvent p
-            if sizeofSmallArray evs == 0
-              then drain acc
-              else drain (acc <> evs)
-          else pure acc
+pollEvents =
+  alloca $ \(p :: Ptr SDL_Event) -> do
+    let drain acc = do
+          got <- pollEventSafe p
+          if got
+            then do
+              evs <- decodeEvent p
+              if sizeofSmallArray evs == 0
+                then drain acc
+                else drain (evs : acc)
+            else case acc of
+              [] -> pure emptySmallArray
+              [single] -> pure single
+              _ -> pure (mconcat (reverse acc))
+    drain []
 
 waitEvent :: IO (SmallArray SdlEvent)
 waitEvent =

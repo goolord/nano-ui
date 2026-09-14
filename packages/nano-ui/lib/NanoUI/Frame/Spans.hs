@@ -44,11 +44,12 @@ import NanoUI.Font
   , tableCellInset
   , layoutLineHeight
   , treeRowLeading
-  , truncateTextAdvance
   , truncateTextIO
   , widgetContentInset
   , wrapTextLinesIO
-  , measureText
+  , measureTextIO
+  , lineWidthIO
+  , prepareFontMetrics
   )
 import NanoUI.Input (Input)
 import NanoUI.Layout.Arena
@@ -332,13 +333,13 @@ collectNodeTextSpans ctx floatCache idx = do
                       if isBaseSans
                         then \t -> fmap fst (ctxMeasureText ctx t)
                         else if isBaseMono
-                          then \t -> pure (fst (measureText (ctxMonoFontMetrics ctx) t))
+                          then lineWidthIO (ctxMonoFontMetrics ctx)
                           else \t -> fmap fst (ctxResolveMeasure ctx fontSizeVal fweight fstyle fvar t)
                 tw0 <-
                   if isBaseSans
                     then fst <$> ctxMeasureText ctx txt0
                     else if isBaseMono
-                      then pure (fst (measureText (ctxMonoFontMetrics ctx) txt0))
+                      then lineWidthIO (ctxMonoFontMetrics ctx) txt0
                       else fst <$> ctxResolveMeasure ctx fontSizeVal fweight fstyle fvar txt0
                 let hasNewlines = T.any (== '\n') txt0
                     wrapCap
@@ -351,8 +352,10 @@ collectNodeTextSpans ctx floatCache idx = do
                 if hasNewlines || (canWrap && wrapCap + 0.5 < tw0)
                   then do
                     textLines <- wrapTextLinesIO measureWord textFm txt0 wrapW
-                    pure
-                      [ ( Rect
+                    mapM (\(i, line) -> do
+                      prepared <- prepareFontMetrics textFm line
+                      let (tx, used) = alignedTextPen ax x w ix prepared line
+                      pure ( Rect
                             tx
                             (centeredTextY textFm (y + onGrid (fmSnapScale textFm) (fromIntegral i * lineH)) lineH lineH)
                             used
@@ -360,20 +363,16 @@ collectNodeTextSpans ctx floatCache idx = do
                         , line
                         , fg
                         , paintBg
-                        )
-                      | (i, line) <- zip [(0 :: Int) ..] textLines
-                      , let (tx, used) = alignedTextPen ax x w ix textFm line
-                      ]
+                         )) (zip [(0 :: Int) ..] textLines)
                   else do
                     let contentW = max 0 (w - 2 * ix)
                     dispTxt <-
                       if tw0 > contentW && contentW > 0 && (wTag == SizingGrow || maxW < 1e8)
                         then
-                          if fvar == FontMono
-                            then pure (truncateTextAdvance textFm contentW txt0)
-                            else truncateTextIO measureWord contentW txt0
+                          truncateTextIO measureWord contentW txt0
                         else pure txt0
-                    let (tx, used) = alignedTextPen ax x w ix textFm dispTxt
+                    prepared <- prepareFontMetrics textFm dispTxt
+                    let (tx, used) = alignedTextPen ax x w ix prepared dispTxt
                         py = centeredTextY textFm y h lineH
                     pure [(Rect tx py used lineH, dispTxt, fg, paintBg)]
           let spans = stripeSpans ++ textSpans
@@ -526,7 +525,8 @@ computeWidgetLabel :: Context -> NodeType -> T.Text -> Int -> Float -> AlignX ->
 computeWidgetLabel ctx nt txt si fontSizeVal ax w h
   | nt == NodeButton && isCloseButtonStyle si = pure Nothing
   | otherwise = do
-      fm <- placementFont ctx fontSizeVal si
+      source <- placementFont ctx fontSizeVal si
+      fm <- prepareFontMetrics source txt
       (tw, th) <- measurePlacementText ctx fontSizeVal si fm txt
       let (ix, _) = widgetContentInset fm
           (tx, used) = case nt of
@@ -559,7 +559,7 @@ measurePlacementText :: Context -> Float -> Int -> FontMetrics -> T.Text -> IO (
 measurePlacementText ctx sz si fm txt
   | sz <= 0 && weight == WeightNormal && style == FontStyleNormal
       && (variant == FontRegular || variant == FontMono) =
-      if variant == FontMono then pure (measureText fm txt) else ctxMeasureText ctx txt
+      if variant == FontMono then measureTextIO fm txt else ctxMeasureText ctx txt
   | otherwise = ctxResolveMeasure ctx sz weight style variant txt
   where
     weight = textNodeFontWeight si
@@ -633,7 +633,8 @@ computeWidgetTextPlacements ctx nt idx x y w h = do
       txt <- displayText ctx nt idx
       ax <- getAlignX (ctxNodeArena ctx) idx
       (_tw, th) <- measureTxt txt
-      let (tx, used) = alignedTextPen ax x w ix fm txt
+      prepared <- prepareFontMetrics fm txt
+      let (tx, used) = alignedTextPen ax x w ix prepared txt
       pure [(txt, tx, centeredTextY fm y h th, used, th)]
 
 sliderValue :: Context -> NodeIdx -> IO Float

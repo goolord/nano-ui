@@ -82,6 +82,7 @@ module NanoUI.Context
   , resetDrawingScopeCache
   , getStore
   , setStore
+  , deleteWidgetStore
   , getStoreBool
   , setStoreBool
   , writeStoreInt
@@ -173,6 +174,8 @@ module NanoUI.Context
   , setAnimationValue
   , tickAnimations
   , getAnimationValue
+  , getAnimRest
+  , pruneAnimRest
   , FrameMsg (..)
   , decodeMessages
   , reduceMessages
@@ -285,7 +288,7 @@ import Data.Vector (Vector)
 import Data.Vector qualified as V
 import NanoUI.Draw (DrawingBuild, DrawOp, newDrawArena, shiftDrawOp)
 import NanoUI.Draw qualified as Draw
-import NanoUI.Font (FontMetrics, fmLineHeight, measureText, monospaceMetrics, scaleFontMetrics)
+import NanoUI.Font (FontMetrics, fmLineHeight, measureTextIO, monospaceMetrics, scaleFontMetrics)
 import NanoUI.Frame.SpanArena (newSpanArena)
 import NanoUI.Frame.Scroll.Geometry
   ( ScrollConfig (..)
@@ -305,6 +308,7 @@ import NanoUI.Store
   , boolInt
   , bumpMirror
   , closeSelects
+  , deleteWidgetState
   , emptyWidgetStore
   , intBool
   , isSelectOpen
@@ -741,24 +745,35 @@ setStore ctx store = do
             ++ diffKeys (storePoint prev) (storePoint store)
             ++ diffKeys (storeText prev) (storeText store)
             ++ diffKeys (storeFloatList prev) (storeFloatList store)
+            ++ diffKeys (storeIntList prev) (storeIntList store)
             ++ diffKeys (storeIntSet prev) (storeIntSet store)
+            ++ diffKeysBy ptrEq (storeDyn prev) (storeDyn store)
     forM_ changedKeys $ \k -> damageKey ctx k (DamageInflated defaultDamageSlop)
     markDirty ctx
 
-diffKeys :: Eq a => IntMap a -> IntMap a -> [Int]
-diffKeys old new
+{-# INLINE deleteWidgetStore #-}
+deleteWidgetStore :: Context -> WidgetId -> IO ()
+deleteWidgetStore ctx wid = do
+  st <- getStore ctx
+  setStore ctx (deleteWidgetState wid st)
+
+diffKeysBy :: (a -> a -> Bool) -> IntMap a -> IntMap a -> [Int]
+diffKeysBy eq old new
   -- Unchanged maps keep their identity through a record update; skip the
   -- whole merge when the caller only rebuilt a different field.
   | ptrEq old new = []
   | otherwise =
       IM.keys
         ( IM.mergeWithKey
-            (\_ a b -> if a == b then Nothing else Just ())
+            (\_ a b -> if eq a b then Nothing else Just ())
             (IM.map (const ()))
             (IM.map (const ()))
             old
             new
         )
+
+diffKeys :: Eq a => IntMap a -> IntMap a -> [Int]
+diffKeys = diffKeysBy (==)
 
 -- | Targeted single-slot write: compares only the target slot, updates one map
 -- field, damages the owning widget and wakes the loop. Unlike 'setStore' it
@@ -1077,7 +1092,7 @@ defaultResolveMeasure ctx sz _w _st var txt =
    in if var == FontMono
         then do
           let textFm = if scale /= 1.0 then scaleFontMetrics scale baseFm else baseFm
-          pure (measureText textFm txt)
+          measureTextIO textFm txt
         else if scale /= 1.0
           then do
             (w, h) <- ctxMeasureText ctx txt
@@ -1097,7 +1112,7 @@ withFontMetrics ctx fm =
   let ctx' =
         ctx
           { ctxFontMetrics = fm
-          , ctxMeasureText = \txt -> pure (measureText fm txt)
+          , ctxMeasureText = measureTextIO fm
           }
    in trackMetricSource ctx'
         { ctxResolveFont = defaultResolveFont ctx'
@@ -1305,7 +1320,7 @@ newContext = do
         , ctxIdContext
         , ctxFontMetrics = fm0
         , ctxMonoFontMetrics = fm0
-        , ctxMeasureText = \txt -> pure (measureText fm0 txt)
+        , ctxMeasureText = measureTextIO fm0
         , ctxResolveFont = defaultResolveFont ctx
         , ctxResolveMeasure = defaultResolveMeasure ctx
         , ctxMeasureCache = Nothing
@@ -1733,3 +1748,13 @@ stopAnimation ctx wid = do
   if IM.member key (asAnimations as)
     then settleKey ctx key val
     else pure ()
+
+{-# INLINE getAnimRest #-}
+getAnimRest :: Context -> IO (IntMap Float)
+getAnimRest ctx = asAnimRest <$> readIORef (ctxAnimationState ctx)
+
+{-# INLINE pruneAnimRest #-}
+pruneAnimRest :: Context -> (Int -> Bool) -> IO ()
+pruneAnimRest ctx shouldKeep =
+  modifyIORef' (ctxAnimationState ctx) $ \as ->
+    as {asAnimRest = IM.filterWithKey (\k _ -> shouldKeep k) (asAnimRest as)}

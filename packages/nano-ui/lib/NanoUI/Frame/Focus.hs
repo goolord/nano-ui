@@ -12,7 +12,6 @@ module NanoUI.Frame.Focus
 
 import Control.Monad (filterM, unless, when)
 import Data.IORef (readIORef, writeIORef)
-import Data.List (findIndex)
 import Data.Primitive.PrimArray (readPrimArray)
 import qualified Data.IntMap.Strict as IM
 import NanoUI.Context (Context (..), WidgetStore (..), getStore, intBool, intKey)
@@ -33,16 +32,18 @@ tabNext :: WidgetId -> [WidgetId] -> Bool -> WidgetId
 tabNext cur ids shift =
   case ids of
     [] -> WidgetId 0
-    _ ->
-      let idx = findIndex (== cur) ids
-          n = length ids
-          pick i = ids !! (i `mod` n)
-       in case idx of
-            Nothing -> ids !! 0
-            Just i ->
-              if shift
-                then pick (i - 1 + n)
-                else pick (i + 1)
+    first : rest ->
+      let lastId !prev [] = prev
+          lastId _ (x : xs) = lastId x xs
+          search _ [] = first
+          search prev (x : xs)
+            | x == cur = if shift then prev else case xs of
+                next : _ -> next
+                [] -> first
+            | otherwise = search x xs
+       in if cur == first && shift
+            then lastId first rest
+            else search first ids
 
 -- | Scan the live focus buffer. Skip zero ids. No freeze or list copy.
 tabNextFocusables :: Context -> WidgetId -> Bool -> IO WidgetId

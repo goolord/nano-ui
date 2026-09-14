@@ -36,10 +36,12 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Read (decimal, signed)
 import Data.Vector qualified as V
+import Data.Vector.Generic qualified as G
+import Data.Vector.Unboxed qualified as U
 import Effectful (Eff, type (:>))
 import qualified Data.IntMap.Strict as IM
 import NanoUI.Context (Context (..), bumpMirror, getPrevRect, getScrollOffset2D, getStore, intKey, linkScrollAxes, markDirty, setStore)
-import NanoUI.Font (scrollBarGutter, scrollBarListExtra, tableCellInset, textDisplayWidth)
+import NanoUI.Font (scrollBarGutter, scrollBarListExtra, tableCellInset, lineWidthIO)
 import NanoUI.Id (WidgetId (..))
 import NanoUI.Input (Input (..), inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased, inputMouseRightReleased)
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
@@ -341,8 +343,8 @@ isNumericCell txt =
           Right (_, rest) | T.null rest -> True
           _ -> False
 
-columnMetrics :: Context -> Colonnade Headed row Text -> [row] -> (V.Vector Float, V.Vector Bool)
-columnMetrics _ cols _ | columnCount cols == 0 = (V.empty, V.empty)
+columnMetrics :: Context -> Colonnade Headed row Text -> [row] -> IO (U.Vector Float, U.Vector Bool)
+columnMetrics _ cols _ | columnCount cols == 0 = pure (U.empty, U.empty)
 columnMetrics ctx cols rows =
   let fm = ctxFontMetrics ctx
       mono = ctxMonoFontMetrics ctx
@@ -351,17 +353,15 @@ columnMetrics ctx cols rows =
       hdrs = Encode.header id cols
       -- Encode each row once, sharing it across column classification and sizing.
       !encodedRows = V.fromList [Encode.row id cols r | r <- rows]
-      measureColumn c hdr =
-        let hdrW = textDisplayWidth fm (hdr <> tableSortReserve) + cellPadX
-            isNum = not (null rows) && V.all (isNumericCell . (V.! c)) encodedRows
+      measureColumn c hdr = do
+        hdrW <- (+ cellPadX) <$> lineWidthIO fm (hdr <> tableSortReserve)
+        let isNum = not (null rows) && V.all (isNumericCell . (V.! c)) encodedRows
             font = if isNum then mono else fm
-            cellW =
-              V.foldl'
-                (\w row -> max w (textDisplayWidth font (row V.! c) + cellPadX))
-                minColW
-                encodedRows
-         in (if null rows then hdrW else max hdrW cellW, isNum)
-   in V.unzip (V.imap measureColumn hdrs)
+        cellW <- V.foldM' (\w row -> do
+          width <- lineWidthIO font (row V.! c)
+          pure (max w (width + cellPadX))) minColW encodedRows
+        pure (if null rows then hdrW else max hdrW cellW, isNum)
+   in U.unzip <$> U.generateM (V.length hdrs) (\c -> measureColumn c (hdrs V.! c))
 
 nextSortCol :: Int -> SortCol -> Int -> SortCol
 nextSortCol n cur clicked =
@@ -404,10 +404,11 @@ dragCol n = abs n `mod` 1000
 
 -- Metadata is indexed by original column id after reordering/hiding. Keep
 -- it indexed throughout layout, rather than walking a list for each cell.
-vectorAt :: V.Vector a -> Int -> a -> a
-vectorAt xs i fallback = fromMaybe fallback (xs V.!? i)
+{-# INLINE vectorAt #-}
+vectorAt :: G.Vector v a => v a -> Int -> a -> a
+vectorAt xs i fallback = fromMaybe fallback (xs G.!? i)
 
-resolvedWidth :: V.Vector ColSize -> V.Vector Float -> V.Vector Float -> Int -> Float
+resolvedWidth :: V.Vector ColSize -> U.Vector Float -> U.Vector Float -> Int -> Float
 resolvedWidth sizes contentWs stored i =
   let contentW = max minColW (vectorAt contentWs i minColW)
       saved = vectorAt stored i 0
@@ -421,12 +422,12 @@ resolvedWidth sizes contentWs stored i =
 -- Width floor a column cannot shrink under: its declared fixed width, else
 -- its content minimum. Shared by colSizing and the resize-drag clamp so a
 -- dragged or stored width never wraps the cell text.
-colFloor :: V.Vector ColSize -> V.Vector Float -> Int -> Float
+colFloor :: V.Vector ColSize -> U.Vector Float -> Int -> Float
 colFloor sizes contentWs i = case vectorAt sizes i ColContent of
   ColFixed f -> max minColW f
   _ -> max minColW (vectorAt contentWs i minColW)
 
-colSizing :: Bool -> Bool -> V.Vector ColSize -> V.Vector Float -> V.Vector Float -> Int -> Sizing
+colSizing :: Bool -> Bool -> V.Vector ColSize -> U.Vector Float -> U.Vector Float -> Int -> Sizing
 colSizing fillInner hasStretch sizes contentWs stored i =
   let saved = vectorAt stored i 0
       floorW = colFloor sizes contentWs i
@@ -601,8 +602,8 @@ tableCfg cfg outerLayout key cols inputRows curSort =
     ctx <- askContext
     inp <- askInput
     st0 <- uiIO (getStore ctx)
-    let (!contentWs, !numeric) = columnMetrics ctx cols rows
-        sizes = V.fromList (tableColSizes cfg)
+    (!contentWs, !numeric) <- uiIO (columnMetrics ctx cols rows)
+    let sizes = V.fromList (tableColSizes cfg)
         order0 = normalizeOrder n (IM.findWithDefault [0 .. n - 1] stateKey (storeIntList st0))
         hidden0 = IM.findWithDefault (tableHidden cfg) stateKey (storeIntSet st0)
         widths0 = fitList n 0 (IM.findWithDefault [] stateKey (storeFloatList st0))
@@ -621,7 +622,7 @@ tableCfg cfg outerLayout key cols inputRows curSort =
             else widths0
     when (widths1 /= widths0) $ uiIO $ writeColW ctx stateKey widths1
     let hasStretch = tableStretchN n (tableColSizes cfg)
-        indexedWidths = V.fromList widths1
+        indexedWidths = U.fromList widths1
         vis = visibleCols order0 hidden0
         freezeN = min (max 0 (tableFreezeCols cfg)) (length vis)
         freezeR = min (max 0 (tableFreezeRows cfg)) (length rows)
@@ -633,7 +634,7 @@ tableCfg cfg outerLayout key cols inputRows curSort =
         hdrs = Encode.header id cols
         rowMinH = 28
         fillInner = tableFillInner cfg outerLayout
-        mins = V.generate n (resolvedWidth sizes contentWs indexedWidths)
+        mins = U.generate n (resolvedWidth sizes contentWs indexedWidths)
         colBoxes = V.generate n $ \i -> colBoxLayout (colSizing fillInner hasStretch sizes contentWs indexedWidths i) (vectorAt mins i minColW)
         colBox i = if i < V.length colBoxes then colBoxes V.! i else tight defaultLayout
         resolvedW i = vectorAt mins i minColW

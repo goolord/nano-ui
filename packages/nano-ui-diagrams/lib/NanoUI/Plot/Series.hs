@@ -21,6 +21,8 @@ import Data.Text (Text)
 import Data.Foldable (toList)
 import Data.Vector (Vector)
 import Data.Vector qualified as V
+import Data.Vector.Generic qualified as G
+import Data.Vector.Unboxed qualified as U
 import NanoUI (Color)
 import NanoUI.Plot.Types
   ( MarkShape (..)
@@ -30,19 +32,19 @@ import NanoUI.Plot.Types
   )
 
 line :: Foldable f => Text -> f (Double, Double) -> Series
-line name = lineVec name . V.fromList . toList
+line name = lineVec name . U.fromList . toList
 
 scatter :: Foldable f => Text -> f (Double, Double) -> Series
-scatter name = scatterVec name . V.fromList . toList
+scatter name = scatterVec name . U.fromList . toList
 
 bar :: Foldable f => Text -> f (Text, Double) -> Series
 bar name = barVec name . V.fromList . toList
 
 area :: Foldable f => Text -> f (Double, Double) -> Series
-area name = areaVec name . V.fromList . toList
+area name = areaVec name . U.fromList . toList
 
 step :: Foldable f => Text -> f (Double, Double) -> Series
-step name = stepVec name . V.fromList . toList
+step name = stepVec name . U.fromList . toList
 
 withColor :: Color -> Series -> Series
 withColor c s = s {seriesColor = Just c}
@@ -69,17 +71,23 @@ withBaseline b s =
     AreaSeries _ -> s {seriesKind = AreaSeries b}
     _ -> s
 
-lineVec :: Text -> Vector (Double, Double) -> Series
-lineVec name pts = Series name Nothing (LineSeries 1.5 Nothing) (PointsXY pts)
+-- | Numeric series retain unboxed coordinates. Unboxed inputs are shared;
+-- boxed/storable inputs are converted once at the construction boundary.
+{-# INLINE lineVec #-}
+lineVec :: G.Vector v (Double, Double) => Text -> v (Double, Double) -> Series
+lineVec name pts = Series name Nothing (LineSeries 1.5 Nothing) (PointsXY (G.convert pts))
 
-scatterVec :: Text -> Vector (Double, Double) -> Series
-scatterVec name pts = Series name Nothing (ScatterSeries 3 MarkCircle) (PointsXY pts)
+{-# INLINE scatterVec #-}
+scatterVec :: G.Vector v (Double, Double) => Text -> v (Double, Double) -> Series
+scatterVec name pts = Series name Nothing (ScatterSeries 3 MarkCircle) (PointsXY (G.convert pts))
 
-areaVec :: Text -> Vector (Double, Double) -> Series
-areaVec name pts = Series name Nothing (AreaSeries 0) (PointsXY pts)
+{-# INLINE areaVec #-}
+areaVec :: G.Vector v (Double, Double) => Text -> v (Double, Double) -> Series
+areaVec name pts = Series name Nothing (AreaSeries 0) (PointsXY (G.convert pts))
 
-stepVec :: Text -> Vector (Double, Double) -> Series
-stepVec name pts = Series name Nothing (StepSeries 1.5) (PointsXY pts)
+{-# INLINE stepVec #-}
+stepVec :: G.Vector v (Double, Double) => Text -> v (Double, Double) -> Series
+stepVec name pts = Series name Nothing (StepSeries 1.5) (PointsXY (G.convert pts))
 
 barVec :: Text -> Vector (Text, Double) -> Series
 barVec name pts = Series name Nothing (BarSeries 0.72) (CategoryY pts)

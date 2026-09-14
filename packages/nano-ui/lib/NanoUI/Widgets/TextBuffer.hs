@@ -9,6 +9,7 @@ module NanoUI.Widgets.TextBuffer
   , fromText
   , toText
   , toLines
+  , lineAt
     -- * Cursor & Metrics
   , getCursor
   , getLineCount
@@ -84,6 +85,15 @@ toText = T.intercalate "\n" . toLines
 toLines :: TextBuffer -> [T.Text]
 toLines = map decodeTabs . TZ.getText . unTextBuffer
 
+-- | Total row lookup. Decode only the requested line, without measuring
+-- or decoding the entire document first.
+lineAt :: Int -> TextBuffer -> T.Text
+lineAt row buf
+  | row < 0 = ""
+  | otherwise = case drop row (TZ.getText (unTextBuffer buf)) of
+      txt : _ -> decodeTabs txt
+      [] -> ""
+
 -- | Query current cursor coordinates.
 getCursor :: TextBuffer -> Cursor
 getCursor (TextBuffer z _) =
@@ -92,7 +102,7 @@ getCursor (TextBuffer z _) =
 
 -- | Return the total line count.
 getLineCount :: TextBuffer -> Int
-getLineCount = length . toLines
+getLineCount = length . TZ.getText . unTextBuffer
 
 -- | Move to an absolute cursor position without changing document text.
 withCursor :: Cursor -> TextBuffer -> TextBuffer

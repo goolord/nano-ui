@@ -118,8 +118,9 @@ import NanoUI.Font
   , menuSepH
   , scrollBarGeomFor
   , scrollBarOuterGap
-  , textDisplayWidth
   , textIndexAtX
+  , prepareFontMetrics
+  , lineWidthIO
   , widgetContentInset
   )
 import NanoUI.Frame.Chrome
@@ -228,9 +229,9 @@ import NanoUI.Widgets.TextCommon
 import NanoUI.Widgets.TextInput (applyTextInputMenuAction)
 
 textCharAtX :: Context -> Text -> Float -> Float -> IO Int
-textCharAtX ctx text startX mouseX =
-  let fm = ctxFontMetrics ctx
-   in pure (textIndexAtX fm text (max 0 (mouseX - startX)))
+textCharAtX ctx text startX mouseX = do
+  fm <- prepareFontMetrics (ctxFontMetrics ctx) text
+  pure (textIndexAtX fm text (max 0 (mouseX - startX)))
 
 data TextEditMenuRow
   = TextEditMenuSep
@@ -671,20 +672,20 @@ computeTextInputScroll ::
   Int ->
   Float ->
   Bool ->
-  Float
+  IO Float
 computeTextInputScroll fm viewportW value cursor oldScroll isFocused
-  | not isFocused = 0
-  | viewportW <= 0 = 0
-  | otherwise =
+  | not isFocused = pure 0
+  | viewportW <= 0 = pure 0
+  | otherwise = do
       let prefix = T.take (max 0 (min (T.length value) cursor)) value
-          caretRelX = textDisplayWidth fm prefix
-          totalTextW = textDisplayWidth fm value
-          maxScroll = max 0 (totalTextW + 1 - viewportW)
+      caretRelX <- lineWidthIO fm prefix
+      totalTextW <- lineWidthIO fm value
+      let maxScroll = max 0 (totalTextW + 1 - viewportW)
           s0
             | caretRelX < oldScroll = caretRelX
             | caretRelX + 1 > oldScroll + viewportW = caretRelX + 1 - viewportW
             | otherwise = oldScroll
-       in max 0 (min maxScroll s0)
+      pure (max 0 (min maxScroll s0))
 
 syncTextInputScroll :: Context -> NodeIdx -> Float -> Float -> Float -> Float -> IO Float
 syncTextInputScroll ctx idx x y w h = do
@@ -698,7 +699,7 @@ syncTextInputScroll ctx idx x y w h = do
       oldScroll = IM.findWithDefault 0 (slotKey slotTextInputScroll key) (storeFloat store)
       fm = ctxFontMetrics ctx
       availW = rectW clip
-      newScroll = computeTextInputScroll fm availW value cursor oldScroll focus
+  newScroll <- computeTextInputScroll fm availW value cursor oldScroll focus
   when (newScroll /= oldScroll) $ do
     setStore ctx (store {storeFloat = IM.insert (slotKey slotTextInputScroll key) newScroll (storeFloat store)})
   pure newScroll
@@ -721,10 +722,10 @@ drawTextInputSelection da ctx idx x y w h style = do
       (box, clip) <- nodeTextFieldGeom ctx idx x y w h
       let fm = ctxFontMetrics ctx
           selBg = selectionBgColor (themeAccent theme) (styleBg style)
-          wLo = textDisplayWidth fm (T.take selLo value)
-          wHi = textDisplayWidth fm (T.take selHi value)
           lineH = layoutLineHeight fm
           ty = centeredTextY fm (rectY box) (rectH box) lineH
+      wLo <- lineWidthIO fm (T.take selLo value)
+      wHi <- lineWidthIO fm (T.take selHi value)
       scrollX <- syncTextInputScroll ctx idx x y w h
       let selX = rectX clip + wLo - scrollX
           selW = wHi - wLo
@@ -743,8 +744,8 @@ drawTextInputCaret da ctx idx x y w h style = do
     let fm = ctxFontMetrics ctx
         fieldTxt = textInputFieldText lbl value focus
         prefix = T.take (max 0 (min (T.length fieldTxt) cursor)) fieldTxt
-        pw = textDisplayWidth fm prefix
         lineH = layoutLineHeight fm
+    pw <- lineWidthIO fm prefix
     (box, clip) <- nodeTextFieldGeom ctx idx x y w h
     let ty = centeredTextY fm (rectY box) (rectH box) lineH
     scrollX <- syncTextInputScroll ctx idx x y w h
@@ -922,7 +923,7 @@ textAreaContentMetrics ctx idx = do
           lineCount = max 1 (length lineTexts)
           lineH = onGrid (fmSnapScale fm) (fmLineHeight fm)
           contentH = fromIntegral lineCount * lineH
-          contentW = maximum (0 : [textDisplayWidth fm l | l <- lineTexts])
+      contentW <- maximum . (0 :) <$> mapM (lineWidthIO fm) lineTexts
       store' <- getStore ctx
       setStore
         ctx
@@ -1059,8 +1060,8 @@ isMouseOnTextAreaScrollBarAt ctx idx mouse = do
       lineCount = max 1 (length lineTexts)
       lineH = tagLineHeight geom
       contentH = fromIntegral lineCount * lineH
-      contentW = maximum (0 : [textDisplayWidth fm l | l <- lineTexts])
       (sx, sy) = IM.findWithDefault (0, 0) (slotKey slotTextAreaScroll key) (storePoint store)
+  contentW <- maximum . (0 :) <$> mapM (lineWidthIO fm) lineTexts
   pure (isMouseOnTextAreaScrollBar fm field contentW contentH sx sy mouse)
 
 syncTextAreaViewport :: Context -> NodeIdx -> Float -> Float -> Float -> Float -> IO ()
@@ -1156,9 +1157,9 @@ drawTextAreaSelectionLines da lineTexts state geom fm theme style = do
                   else lineLen
               )
       when (startCol < endCol) $ do
-        let wLo = textDisplayWidth fm (T.take startCol line)
-            wHi = textDisplayWidth fm (T.take endCol line)
-            selW = wHi - wLo
+        wLo <- lineWidthIO fm (T.take startCol line)
+        wHi <- lineWidthIO fm (T.take endCol line)
+        let selW = wHi - wLo
             ly = contentTop + fromIntegral row * lineH - scrollYf
             selX = rectX field + ix + wLo - scrollXf
             selH = max 4 lineH
@@ -1221,8 +1222,8 @@ drawTextAreaContentWith da ctx fm idx x y w h style = do
               then lineTexts V.! row
               else ""
           prefix = T.take col currentLine
-          pw = textDisplayWidth fm prefix
-          (caretX, caretY, caretH) = selectionCaretGeom contentX (contentTop + fromIntegral row * lineH - scrollYf) pw lineH
+      pw <- lineWidthIO fm prefix
+      let (caretX, caretY, caretH) = selectionCaretGeom contentX (contentTop + fromIntegral row * lineH - scrollYf) pw lineH
       drawTextCaret da caretX caretY caretH fg
   let base = themePanel theme
       trackBg = scrollBarTrackColor base theme
@@ -1274,8 +1275,8 @@ textAreaCursorAt :: Context -> TA.TextAreaState -> TextAreaHit -> V2 -> IO (Int,
 textAreaCursorAt ctx state hit mouse = do
   snap <- textAreaSnap (ctxDrawArena ctx)
   fm <- resolveTextAreaFont ctx (tahNodeIdx hit)
-  let lineTexts = TB.toLines (TA.buffer state)
-      lineCount = max 1 (length lineTexts)
+  let buf = TA.buffer state
+      lineCount = max 1 (TB.getLineCount buf)
       (scrollX, scrollY) = TA.scrollOffset state
       scrollXf = snap (realToFrac scrollX)
       scrollYf = snap (realToFrac scrollY)
@@ -1284,11 +1285,9 @@ textAreaCursorAt ctx state hit mouse = do
       relY = v2Y mouse - contentTop + scrollYf
       rawRow = floor (relY / max 1 (tahLineH hit))
       row = max 0 (min (lineCount - 1) rawRow)
-      line =
-        if row < length lineTexts
-          then lineTexts !! row
-          else ""
-      col = textIndexAtX fm line (max 0 (v2X mouse - (tahContentX hit - scrollXf)))
+      line = TB.lineAt row buf
+  prepared <- prepareFontMetrics fm line
+  let col = textIndexAtX prepared line (max 0 (v2X mouse - (tahContentX hit - scrollXf)))
   pure (row, col)
 
 updateTextAreaSelection :: Context -> WidgetId -> TextAreaHit -> TB.Cursor -> TB.Cursor -> IO ()
@@ -1328,11 +1327,7 @@ applyTextAreaClick ctx wid hit row col clicks
           (tahWidgetY hit)
           (tahWidgetW hit)
           (tahWidgetH hit)
-      let lineTexts = TB.toLines (TA.buffer state)
-          line =
-            if row >= 0 && row < length lineTexts
-              then lineTexts !! row
-              else ""
+      let line = TB.lineAt row (TA.buffer state)
           (lo, hi) = textWordBounds line col
           anchor = TB.Cursor row lo
           cursor = TB.Cursor row hi
@@ -1352,15 +1347,9 @@ applyTextAreaDrag ctx wid hit anchorRow anchorCol row col clicks
           (tahWidgetY hit)
           (tahWidgetW hit)
           (tahWidgetH hit)
-      let lineTexts = TB.toLines (TA.buffer state)
-          anchorLine =
-            if anchorRow >= 0 && anchorRow < length lineTexts
-              then lineTexts !! anchorRow
-              else ""
-          cursorLine =
-            if row >= 0 && row < length lineTexts
-              then lineTexts !! row
-              else ""
+      let buf = TA.buffer state
+          anchorLine = TB.lineAt anchorRow buf
+          cursorLine = TB.lineAt row buf
           (a0, a1) = textWordBounds anchorLine anchorCol
           (c0, c1) = textWordBounds cursorLine col
           anchor = TB.Cursor anchorRow (min a0 c0)

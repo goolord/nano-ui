@@ -20,6 +20,11 @@ ctrlMods = TA.Modifiers False True False
 spec :: Spec
 spec = do
   describe "NanoUI.Widgets.TextBuffer" $ do
+    it "looks up rows safely after cursor movement and decodes tabs" $ do
+      let b = TB.withCursor (TB.Cursor 1 1) (TB.fromText "α\tβ\n猫\n")
+      map (`TB.lineAt` b) [-1, 0, 1, 2, 3, maxBound]
+        `shouldBe` ["", "α\tβ", "猫", "", "", ""]
+
     it "initializes an empty buffer with a single line and (0,0) cursor" $ do
       let b = TB.empty
       TB.toText b `shouldBe` ""

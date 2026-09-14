@@ -8,9 +8,10 @@ module NanoUI.Plot.Widget
   , areaChart
   ) where
 
-import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
+import Data.Dynamic (fromDynamic, toDyn)
+import Data.IORef (readIORef)
 import qualified Data.IntMap.Strict as IM
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, catMaybes)
 import Data.Text (Text)
 import Diagrams.Prelude (Diagram, V2 (..), extentX, extentY, size)
 import Effectful (Eff, type (:>))
@@ -24,25 +25,29 @@ import NanoUI
   , uiFontMetrics
   , uiMousePos
   , uiTheme
+  , prepareFontMetricsMany
   )
-import NanoUI.Context (intKey)
-import NanoUI.Monad (nextId, uiIO)
+import NanoUI.Context (Context (..), WidgetStore (..), getStore, intKey, setStore)
+import NanoUI.Monad (askContext, nextId, uiIO)
 import NanoUI.Diagrams.Backend (B)
 import NanoUI.Diagrams.Widget (PlotStyle, diagramWithKeyAndEnvelope, uiPlotStyle)
-import NanoUI.Plot.Chrome (chartDiagram)
+import NanoUI.Plot.Chrome (chartDiagram, seriesDomains)
+import NanoUI.Plot.Scale (formatTick, niceTicks)
 import NanoUI.Plot.Hit (hitTestChartCached)
 import NanoUI.Plot.Series (area, bar, line, scatter)
 import NanoUI.Plot.Types
   ( Chart (..)
+  , Series (..)
   , GridMode (..)
   , LegendPos (..)
   , PlotResponse (..)
   )
-import System.IO.Unsafe (unsafePerformIO)
 
 data CachedChart = CachedChart
   { ccChart :: !Chart
   , ccTheme :: !Theme
+  , ccFont :: {-# UNPACK #-} !Int
+  , ccStyle :: !PlotStyle
   , ccVersion :: {-# UNPACK #-} !Int
   , ccDiagram :: !(Diagram B)
   , ccWidth :: {-# UNPACK #-} !Double
@@ -51,40 +56,39 @@ data CachedChart = CachedChart
   , ccExtY :: !(Double, Double)
   }
 
-{-# NOINLINE chartCacheRef #-}
-chartCacheRef :: IORef (IM.IntMap CachedChart)
-chartCacheRef = unsafePerformIO (newIORef IM.empty)
-
--- Monotonic version source for the draw-op / fit caches. Bumped only when a
--- chart diagram is rebuilt, so cached ops survive hover animations and other
--- per-frame state that does not change chart content.
-{-# NOINLINE chartVersionRef #-}
-chartVersionRef :: IORef Int
-chartVersionRef = unsafePerformIO (newIORef 0)
-
-cachedChartDiagram :: WidgetId -> FontMetrics -> Theme -> PlotStyle -> Chart -> IO CachedChart
-cachedChartDiagram wid fm theme ps chart = do
+-- Keep the cache in the owning context's widget store. Versions only need
+-- to distinguish successive contents of this widget's draw-op cache.
+cachedChartDiagram :: Context -> WidgetId -> FontMetrics -> Theme -> PlotStyle -> Chart -> IO CachedChart
+cachedChartDiagram ctx wid fm theme ps chart = do
   let k = intKey wid
-  cache <- readIORef chartCacheRef
-  case IM.lookup k cache of
-    Just cc | ccChart cc == chart && ccTheme cc == theme -> pure cc
+  font <- readIORef (ctxMetricGen ctx)
+  store <- getStore ctx
+  let previous = IM.lookup k (storeDyn store) >>= fromDynamic
+  case previous of
+    Just cc | ccChart cc == chart && ccTheme cc == theme && ccFont cc == font && ccStyle cc == ps -> pure cc
     _ -> do
-      let !d = chartDiagram fm theme ps chart
+      let (xDom, yDom) = seriesDomains chart
+          labels = catMaybes [chartTitle chart, chartXTitle chart, chartYTitle chart]
+            ++ map seriesName (chartSeries chart)
+            ++ map formatTick (niceTicks 6 xDom ++ niceTicks 6 yDom)
+      prepared <- prepareFontMetricsMany fm labels
+      let !d = chartDiagram prepared theme ps chart
           !(V2 dw dh) = size d
           extX = fromMaybe (0, dw) (extentX d)
           extY = fromMaybe (0, dh) (extentY d)
-      v <- atomicModifyIORef' chartVersionRef (\n -> (n + 1, n + 1))
-      let !cc = CachedChart chart theme v d dw dh extX extY
-      writeIORef chartCacheRef (IM.insert k cc cache)
+      let !v = maybe 1 ((+ 1) . ccVersion) previous
+          !cc = CachedChart chart theme font ps v d dw dh extX extY
+      setStore ctx (store {storeDyn = IM.insert k (toDyn cc) (storeDyn store)})
       pure cc
 
 plot :: Ui :> es => Layout -> Chart -> Eff es PlotResponse
 plot layout chart = do
   wid <- nextId
+  ctx <- askContext
   fm <- uiFontMetrics
   theme <- uiTheme
   ps <- uiPlotStyle
-  cc <- uiIO (cachedChartDiagram wid fm theme ps chart)
+  cc <- uiIO (cachedChartDiagram ctx wid fm theme ps chart)
   resp <- diagramWithKeyAndEnvelope (ccVersion cc) (ccWidth cc) (ccHeight cc) layout (ccDiagram cc)
   mouse <- uiMousePos
   let hover = hitTestChartCached (ccDiagram cc) (ccWidth cc) (ccHeight cc) (ccExtX cc) (ccExtY cc) chart (respRect resp) mouse

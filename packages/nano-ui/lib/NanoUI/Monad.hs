@@ -45,9 +45,10 @@ module NanoUI.Monad
 where
 
 
+import Control.Exception (bracket)
 import Control.Monad (unless, when)
 import Data.Hashable (Hashable, hash)
-import Data.IORef (readIORef, writeIORef)
+import Data.IORef (modifyIORef', readIORef, writeIORef)
 import Data.Typeable (Typeable)
 import Data.Word (Word64)
 import Effectful
@@ -65,6 +66,8 @@ import Effectful.Dispatch.Static
   , evalStaticRep
   , getStaticRep
   , localStaticRep
+  , unEff
+  , unsafeEff
   , unsafeEff_
   )
 import GHC.Clock (getMonotonicTime)
@@ -95,7 +98,6 @@ import NanoUI.Id
 import NanoUI.Style (Layout, Theme)
 import NanoUI.Input (Input, inputMousePos, inputWindowSize)
 import NanoUI.Types (DamageBounds, Rect, Size (..), V2)
-import Data.Foldable (forM_)
 
 type NanoUI = Eff '[Ui, IOE]
 
@@ -153,12 +155,13 @@ nextId = do
 -- | Issue many widget ids in one IO loop (avoids deep Eff bind chains).
 {-# INLINE burstNextIds #-}
 burstNextIds :: Ui :> es => Int -> Eff es ()
-burstNextIds n = do
-  ctx <- askContext
-  uiIO $ forM_ [1 .. n] $ \_ -> do
-    ic <- readIORef (ctxIdContext ctx)
-    let IdContext _ sid = ic
-    writeIORef (ctxIdContext ctx) (ic {siblingId = sid + 1})
+burstNextIds n
+  | n <= 0 = pure ()
+  | otherwise = do
+      ctx <- askContext
+      uiIO $ modifyIORef' (ctxIdContext ctx) $ \ic ->
+        let !sid = siblingId ic + fromIntegral n
+         in ic {siblingId = sid}
 
 {-# INLINE currentId #-}
 currentId :: Ui :> es => Eff es WidgetId
@@ -168,15 +171,15 @@ currentId = peekId
 scope :: Ui :> es => Eff es a -> Eff es a
 scope m = do
   ctx <- askContext
-  parent' <- uiIO $ do
-    old <- readIORef (ctxIdContext ctx)
-    let
-      (p, c) = enterScope scopeTag old
-    writeIORef (ctxIdContext ctx) c
-    pure p
-  r <- m
-  uiIO (writeIORef (ctxIdContext ctx) parent')
-  pure r
+  unsafeEff $ \es ->
+    bracket
+      (do
+        old <- readIORef (ctxIdContext ctx)
+        let (p, c) = enterScope scopeTag old
+        writeIORef (ctxIdContext ctx) c
+        pure p)
+      (\parent' -> writeIORef (ctxIdContext ctx) parent')
+      (\_ -> unEff m es)
 
 {-# INLINE keyed #-}
 
@@ -188,15 +191,15 @@ keyed k = keyedTag (fromIntegral (hash k))
 keyedTag :: Ui :> es => Word64 -> Eff es a -> Eff es a
 keyedTag tag m = do
   ctx <- askContext
-  parent' <- uiIO $ do
-    old <- readIORef (ctxIdContext ctx)
-    let
-      (p, c) = enterKeyed tag old
-    writeIORef (ctxIdContext ctx) c
-    pure p
-  r <- m
-  uiIO (writeIORef (ctxIdContext ctx) parent')
-  pure r
+  unsafeEff $ \es ->
+    bracket
+      (do
+        old <- readIORef (ctxIdContext ctx)
+        let (p, c) = enterKeyed tag old
+        writeIORef (ctxIdContext ctx) c
+        pure p)
+      (\parent' -> writeIORef (ctxIdContext ctx) parent')
+      (\_ -> unEff m es)
 
 {-# INLINE withKey #-}
 withKey :: (Hashable k, Ui :> es) => k -> Eff es a -> Eff es a

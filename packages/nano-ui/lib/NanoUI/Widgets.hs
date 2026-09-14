@@ -356,6 +356,7 @@ import NanoUI.WidgetText
   , colorPickerToHex
   , colorPickerToHexA
   , sliderValueText
+  , intValueText
   , textInputFlagSearch
   )
 import NanoUI.Hooks (useEnum, useFlag, useFloat, useInt, useState, useText, useToggle)
@@ -564,7 +565,7 @@ image :: Ui :> es => Layout -> ImageId -> Eff es Response
 image layout (ImageId tid) = do
   wid <- nextId
   let
-    stored = if tid <= 0 then T.empty else T.pack (show tid)
+    stored = if tid <= 0 then T.empty else intValueText tid
   addWidget wid NodeImage stored 0 layout
 
 -- | Immediate-mode button with default layout. Returns 'True' if clicked this frame.
@@ -1027,7 +1028,9 @@ comboBox placeholder options initial = do
     dragOff' | startV = vGrab | startH = hGrab | otherwise = dragOff0
     -- Enter commits only an explicitly highlighted row (hover or Up/Down).
     picked = isFocus && n > 0 && hi' >= 0 && KeyEnter `elem` keys
-    pickedText = displayed !! hi'
+    pickedText = case drop (max 0 hi') displayed of
+      chosen : _ | hi' >= 0 -> chosen
+      _ -> text
     escDismiss = isFocus && KeyEscape `elem` keys
     -- Commit points: Enter, a row click (the frame-side pick lands as a
     -- frame-start text the widget did not produce), and losing focus (which

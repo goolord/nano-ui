@@ -82,7 +82,7 @@ alignFrameStart periodSec lastT = do
   when (bulkUs > 0) (threadDelay bulkUs)
   fullSpin target
   where
-    tailSlack = 1e-3
+    tailSlack = 2.5e-4
     fullSpin target = do
       now <- getMonotonicTime
       when (now < target) (fullSpin target)

@@ -512,6 +512,13 @@ module NanoUI
   , askCompact
   -- Font
   , FontMetrics (..)
+  , FontBackend (..)
+  , prepareFontMetrics
+  , prepareFontMetricsMany
+  , measureTextIO
+  , lineWidthIO
+  , drawRun
+  , drawGlyph
   , GlyphQuad (..)
   , RunQuad (..)
   , scaleFontMetrics
@@ -541,6 +548,13 @@ import NanoUI.Context (Ease (..), applyEase, getStoreBool, getTheme, setStoreBoo
 import NanoUI.Draw (drawTextBox, shiftDrawOp)
 import NanoUI.Font
   ( FontMetrics (..)
+  , FontBackend (..)
+  , prepareFontMetrics
+  , prepareFontMetricsMany
+  , measureTextIO
+  , lineWidthIO
+  , drawRun
+  , drawGlyph
   , GlyphQuad (..)
   , RunQuad (..)
   , scaleFontMetrics

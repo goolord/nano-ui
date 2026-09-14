@@ -214,7 +214,7 @@ main = do
             void $ fst <$> window True "Debug" (columnWith (tight . gap 4 . minW 300 . fillW) $
               foldr (\(t, rows) rest -> do
                   void $ label t
-                  let maxK = foldl (\acc (k, _) -> max acc (T.length k)) 0 rows
+                  let maxK = foldl' (\acc (k, _) -> max acc (T.length k)) 0 rows
                   void $ labelEx (tight . gap 0 . fontMono $ defaultLayout)
                     (T.unlines [T.justifyLeft maxK ' ' k <> "  " <> v | (k, v) <- rows])
                   rest)

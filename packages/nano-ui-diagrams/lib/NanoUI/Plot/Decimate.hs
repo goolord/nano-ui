@@ -5,26 +5,30 @@ module NanoUI.Plot.Decimate
   , minMaxDecimate
   ) where
 
-import Data.Ord (comparing)
-import Data.Vector (Vector)
-import qualified Data.Vector as V
+import Control.Monad.ST (runST)
+import Data.Vector.Generic (Vector)
+import qualified Data.Vector.Generic as V
+import qualified Data.Vector.Generic.Mutable as MV
+import qualified Data.Vector.Unboxed as U
 
 -- | Largest-Triangle-Three-Buckets sampling. Returns at most the requested
 -- number of points in input order, preserving both endpoints for budgets >= 2.
-lttb :: Int -> Vector (Double, Double) -> Vector (Double, Double)
+{-# INLINABLE lttb #-}
+{-# SPECIALIZE lttb :: Int -> U.Vector (Double, Double) -> U.Vector (Double, Double) #-}
+lttb :: Vector v (Double, Double) => Int -> v (Double, Double) -> v (Double, Double)
 lttb k0 pts
   | k0 <= 0 = V.empty
   | n <= k0 = pts
   | k0 == 1 = V.take 1 pts
   | k0 == 2 = V.fromList [V.head pts, V.last pts]
-  | otherwise =
+  | otherwise = V.create $ do
+      out <- MV.new k0
       let !k = k0
           !bucketSize = fromIntegral (n - 2) / (fromIntegral (k - 2) :: Double)
           !firstPt = pts V.! 0
           !lastPt = pts V.! (n - 1)
-          go acc !i !prevIdx
-            | i >= k - 2 =
-                V.fromListN k (reverse (lastPt : acc))
+          go !i !prevIdx
+            | i >= k - 2 = MV.write out (k - 1) lastPt
             | otherwise =
                 let !rangeStart = floor (fromIntegral i * bucketSize) + 1
                     !rangeEnd = min (n - 1) (floor (fromIntegral (i + 1) * bucketSize) + 1)
@@ -46,12 +50,17 @@ lttb k0 pts
                     !best = if rangeStart < rangeEnd
                               then findBest (rangeStart + 1) initIdx initArea
                               else rangeStart
-                 in go (pts V.! best : acc) (i + 1) best
-       in go [firstPt] 0 0
+                 in do
+                   MV.write out (i + 1) (pts V.! best)
+                   go (i + 1) best
+      MV.write out 0 firstPt
+      go 0 0
+      pure out
   where
     !n = V.length pts
 
-bucketAvg :: Vector (Double, Double) -> Int -> Int -> (Double, Double)
+{-# INLINE bucketAvg #-}
+bucketAvg :: Vector v (Double, Double) => v (Double, Double) -> Int -> Int -> (Double, Double)
 bucketAvg pts !start !end
   | start >= end = (0, 0)
   | otherwise =
@@ -71,19 +80,34 @@ triArea (!x0, !y0) (!x1, !y1) (!x2, !y2) =
 -- | Split into at most @k@ buckets and retain each bucket's Y extrema in
 -- input order. The output has at most @2*k@ points; non-positive budgets
 -- return an empty vector. A point selected as both extrema is emitted once.
-minMaxDecimate :: Int -> Vector (Double, Double) -> Vector (Double, Double)
+{-# INLINABLE minMaxDecimate #-}
+{-# SPECIALIZE minMaxDecimate :: Int -> U.Vector (Double, Double) -> U.Vector (Double, Double) #-}
+minMaxDecimate :: Vector v (Double, Double) => Int -> v (Double, Double) -> v (Double, Double)
 minMaxDecimate k pts
   | k <= 0 = V.empty
   | len <= k = pts
-  | otherwise = V.concatMap extrema (V.generate numChunks chunk)
+  | otherwise = runST $ do
+      out <- MV.new (min len (2 * numChunks))
+      let chunks !start !written
+            | start >= len = V.freeze (MV.slice 0 written out)
+            | otherwise = do
+                let !end = start + min bucket (len - start)
+                    extrema !i !lowIdx !highIdx
+                      | i >= end = (lowIdx, highIdx)
+                      | otherwise =
+                          let !y = snd (pts V.! i)
+                              !lo' = if y < snd (pts V.! lowIdx) then i else lowIdx
+                              !hi' = if y > snd (pts V.! highIdx) then i else highIdx
+                           in extrema (i + 1) lo' hi'
+                    (!lo, !hi) = extrema (start + 1) start start
+                MV.write out written (pts V.! min lo hi)
+                if lo == hi
+                  then chunks end (written + 1)
+                  else do
+                    MV.write out (written + 1) (pts V.! max lo hi)
+                    chunks end (written + 2)
+      chunks 0 0
   where
     !len = V.length pts
     bucket = (len - 1) `div` k + 1
     numChunks = (len - 1) `div` bucket + 1
-    chunk i = V.slice (i * bucket) (min bucket (len - i * bucket)) pts
-    extrema xs =
-      let lo = V.minIndexBy (comparing snd) xs
-          hi = V.maxIndexBy (comparing snd) xs
-       in if lo == hi
-            then V.singleton (xs V.! lo)
-            else V.fromList [xs V.! min lo hi, xs V.! max lo hi]

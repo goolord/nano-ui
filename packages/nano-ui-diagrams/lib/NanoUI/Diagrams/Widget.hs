@@ -21,6 +21,7 @@ import Data.Colour.SRGB (sRGB24)
 import Data.Hashable (hash)
 import Data.Vector (Vector)
 import Data.Vector qualified as V
+import Data.Vector.Unboxed qualified as U
 import Diagrams.Core (QDiagram)
 import Diagrams.Prelude (Any, Diagram, V2 (..), size)
 import Effectful (Eff, type (:>))
@@ -56,6 +57,7 @@ import NanoUI
   , themeWindow
   , themeYellow
   , uiFontMetrics
+  , prepareFontMetricsMany
   , uiTheme
   )
 import NanoUI.Context (lookupDrawFitEnvelope)
@@ -118,23 +120,29 @@ uiPlotStyle = fmap themePlotStyle uiTheme
 
 labelFitScale :: FontMetrics -> V.Vector DrawOp -> Double
 labelFitScale fm ops =
-  let !ts = V.mapMaybe extractBox ops
-      !n  = V.length ts
+  let !ts = U.unfoldr nextBox 0
+      !n  = U.length ts
       !k  = outerLoop 0 (1.0 :: Float)
         where
           outerLoop !i !acc
             | i >= n - 1 = acc
             | otherwise  =
-                let !(x1, y1, px1, py1, tw1, th1) = V.unsafeIndex ts i
+                let !(x1, y1, px1, py1, tw1, th1) = U.unsafeIndex ts i
                     innerLoop !j !m
                       | j >= n    = m
                       | otherwise =
-                          let !(x2, y2, px2, py2, tw2, th2) = V.unsafeIndex ts j
+                          let !(x2, y2, px2, py2, tw2, th2) = U.unsafeIndex ts j
                               !pairVal = pairK x1 y1 px1 py1 tw1 th1 x2 y2 px2 py2 tw2 th2
                           in innerLoop (j + 1) (max m pairVal)
                 in outerLoop (i + 1) (innerLoop (i + 1) acc)
    in min 2 (realToFrac k)
   where
+    nextBox !i
+      | i >= V.length ops = Nothing
+      | otherwise = case extractBox (V.unsafeIndex ops i) of
+          Nothing -> nextBox (i + 1)
+          Just box -> Just (box, i + 1)
+
     extractBox (DrawText x y ax ay t _) =
       let !(Rect px py tw th) = drawTextBox fm x y ax ay t
        in Just (x, y, px, py, tw, th)
@@ -248,7 +256,7 @@ diagramWithKeyAndEnvelope userKey dw dh layout d = do
   theme <- uiTheme
   let content = hash (userKey, themePlotKey theme)
       ps = themePlotStyle theme
-  drawingCached dw dh (fmLineHeight fm) content layout (pure (fitLayout fm layout d)) $ \rectBox ->
+  drawingCached dw dh (fmLineHeight fm) content layout (fitLayoutIO fm layout d) $ \rectBox ->
     let borderW = 1
         inset = borderW
         inner =
@@ -277,7 +285,7 @@ diagramWithEnvelope dw dh layout d = do
   theme <- uiTheme
   let content = themePlotKey theme
       ps = themePlotStyle theme
-  drawingCached dw dh (fmLineHeight fm) content layout (pure (fitLayout fm layout d)) $ \rectBox ->
+  drawingCached dw dh (fmLineHeight fm) content layout (fitLayoutIO fm layout d) $ \rectBox ->
     let borderW = 1
         inset = borderW
         inner =
@@ -293,6 +301,14 @@ diagramWithEnvelope dw dh layout d = do
             then V.empty
             else V.map (shiftDrawOp (rectX inner) (rectY inner)) (diagramOps w h d)
      in diagramFrame ps borderW rectBox <> plot
+
+fitLayoutIO :: FontMetrics -> Layout -> Diagram B -> IO Layout
+fitLayoutIO fm layout d = do
+  let texts = V.foldr (\op rest -> case op of
+        DrawText _ _ _ _ t _ -> t : rest
+        _ -> rest) [] (diagramTextOps 100 100 d)
+  prepared <- prepareFontMetricsMany fm texts
+  pure (fitLayout prepared layout d)
 
 diagram :: Ui :> es => Layout -> QDiagram NanoUIBackend V2 Double Any -> Eff es Response
 diagram layout d = do

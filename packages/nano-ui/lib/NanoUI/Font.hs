@@ -4,6 +4,13 @@ module NanoUI.Font
   ( GlyphQuad (..)
   , RunQuad (..)
   , FontMetrics (..)
+  , FontBackend (..)
+  , prepareFontMetrics
+  , prepareFontMetricsMany
+  , measureTextIO
+  , lineWidthIO
+  , drawRun
+  , drawGlyph
   , monospaceMetrics
   , scaleFontMetrics
   , measureText
@@ -66,6 +73,7 @@ module NanoUI.Font
 
 
 import Data.Functor.Identity (runIdentity)
+import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 import NanoUI.Types (Rect (..), onGrid)
@@ -88,13 +96,13 @@ data GlyphQuad = GlyphQuad
 
 data RunQuad = RunQuad
   { rqX :: {-# UNPACK #-} !Float
-  , rqY :: ~Float
+  , rqY :: {-# UNPACK #-} !Float
   , rqW :: {-# UNPACK #-} !Float
   , rqH :: {-# UNPACK #-} !Float
-  , rqU0 :: ~Float
-  , rqV0 :: ~Float
-  , rqU1 :: ~Float
-  , rqV1 :: ~Float
+  , rqU0 :: {-# UNPACK #-} !Float
+  , rqV0 :: {-# UNPACK #-} !Float
+  , rqU1 :: {-# UNPACK #-} !Float
+  , rqV1 :: {-# UNPACK #-} !Float
   , rqAdvance :: {-# UNPACK #-} !Float
   }
   deriving (Eq, Show)
@@ -110,7 +118,60 @@ data FontMetrics = FontMetrics
   , fmKerning :: Char -> Char -> Float
   , fmRun :: Text -> Maybe RunQuad
   , fmGlyph :: Char -> Maybe GlyphQuad
+  -- | Optional effectful backend. Pure callbacks above are immutable metric
+  -- snapshots; they must never perform font loading or atlas mutation.
+  , fmBackend :: Maybe FontBackend
   }
+
+-- | Text preparation performs font queries in IO and returns an immutable
+-- snapshot for pure layout. Rasterisation is separate and occurs during draw.
+data FontBackend = FontBackend
+  { fbPrepare :: Text -> IO FontMetrics
+  , fbDrawRun :: Text -> IO (Maybe RunQuad)
+  , fbDrawGlyph :: Char -> IO (Maybe GlyphQuad)
+  }
+
+{-# INLINE prepareFontMetrics #-}
+prepareFontMetrics :: FontMetrics -> Text -> IO FontMetrics
+prepareFontMetrics fm txt = case fmBackend fm of
+  Nothing -> pure fm
+  Just backend -> fbPrepare backend txt
+
+-- | Prepare a finite text workspace for pure multi-label layout algorithms.
+prepareFontMetricsMany :: FontMetrics -> [Text] -> IO FontMetrics
+prepareFontMetricsMany fm texts = case fmBackend fm of
+  Nothing -> pure fm
+  Just _ -> do
+    combined <- prepareFontMetrics fm (T.intercalate "\n" texts)
+    runs <- mapM (\t -> do
+      prepared <- prepareFontMetrics fm t
+      pure (t, fmRun prepared t)) texts
+    let !byText = Map.fromList runs
+    pure combined {fmRun = \t -> Map.findWithDefault Nothing t byText}
+
+{-# INLINE lineWidthIO #-}
+lineWidthIO :: FontMetrics -> Text -> IO Float
+lineWidthIO fm txt = do
+  prepared <- prepareFontMetrics fm txt
+  pure $! lineWidth prepared txt
+
+{-# INLINE measureTextIO #-}
+measureTextIO :: FontMetrics -> Text -> IO (Float, Float)
+measureTextIO fm txt = do
+  prepared <- prepareFontMetrics fm txt
+  pure $! measureText prepared txt
+
+{-# INLINE drawRun #-}
+drawRun :: FontMetrics -> Text -> IO (Maybe RunQuad)
+drawRun fm txt = case fmBackend fm of
+  Nothing -> pure (fmRun fm txt)
+  Just backend -> fbDrawRun backend txt
+
+{-# INLINE drawGlyph #-}
+drawGlyph :: FontMetrics -> Char -> IO (Maybe GlyphQuad)
+drawGlyph fm c = case fmBackend fm of
+  Nothing -> pure (fmGlyph fm c)
+  Just backend -> fbDrawGlyph backend c
 
 {-# INLINE monospaceMetrics #-}
 monospaceMetrics :: Float -> FontMetrics
@@ -123,6 +184,7 @@ monospaceMetrics cell =
     , fmKerning = \_ _ -> 0
     , fmRun = \_ -> Nothing
     , fmGlyph = \_ -> Nothing
+    , fmBackend = Nothing
     }
 
 {-# INLINE scaleFontMetrics #-}
@@ -147,9 +209,19 @@ scaleFontMetrics s fm
                   , gqY = gqY gq * s
                   , gqW = gqW gq * s
                   , gqH = gqH gq * s
-                  }
+                   }
+        , fmBackend = fmap scaleBackend (fmBackend fm)
         }
   where
+    scaleBackend backend = FontBackend
+      { fbPrepare = \t -> scaleFontMetrics s <$> fbPrepare backend t
+      , fbDrawRun = \t -> fmap (fmap scaleRun) (fbDrawRun backend t)
+      , fbDrawGlyph = \c -> fmap (fmap scaleGlyph) (fbDrawGlyph backend c)
+      }
+    scaleGlyph gq = gq
+      { gqX = gqX gq * s, gqY = gqY gq * s
+      , gqW = gqW gq * s, gqH = gqH gq * s
+      }
     scaleRun rq =
       rq
         { rqX = rqX rq * s

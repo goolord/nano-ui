@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* Font backend effects are explicit: `FontMetrics` gains optional `fmBackend`; `prepareFontMetrics`, `prepareFontMetricsMany`, `lineWidthIO`, and `measureTextIO` prepare immutable layout snapshots, while `drawGlyph`/`drawRun` perform native rasterisation in IO. `RunQuad` is strict. Pure custom-font record constructors should set `fmBackend = Nothing`. SDL no longer hides font queries or atlas mutation in pure callbacks, and its memory-font stream owns its bytes. Backend callbacks reject closed native handles. See `docs/data-state-audit.md` for migration and verification details.
+* Numeric plots retain unboxed `PointsXY` vectors; numeric `*Vec` helpers accept generic boxed/unboxed/storable input. Ear clipping relinks mutable neighbor indices instead of copying its coordinate vector after every ear. Sampling, hover selection, stroke geometry, table metrics, and font metrics avoid boxed numeric intermediates and repeated list work.
+* Chart caches are context-owned and invalidate on metric generation, theme, style, and chart changes. Font caches use bounded strict updates and FIFO queues, numeric widget/form/tick text uses builders, text-area/focus/combo lookup is total, and extreme finite tick values no longer overflow during formatting.
+
 * Remove retained inner range lists from RGFW triangle rasterization and color-picker checkerboard painting. Optimized-Core inspection confirms numeric loops in both paths; RGFW regression tests cover triangle pixels, winding, clipping, and degeneracy. See `docs/range-loop-audit.md` for the remaining `forM_ [` audit.
 * Form adapters follow the collection-friendly widget APIs: named select/radio inputs, unnamed select inputs, and `defaultErrorView` accept `Foldable` collections.
 * Table column sizing/classification, headers, resolved widths, and cell layouts use vectors throughout indexed layout, including reordered and hidden columns. Select/labelled-select/layout-select APIs, `selectEmit`, `comboBox`, `radioFieldset`, and the `tabs` / `tabBar` / `tabsEmit` families accept `Foldable` option collections; tab bodies retain their selected-only execution semantics.

@@ -133,6 +133,19 @@ test-suite nano-ui-font-search-test
         dir-traverse ^>=0.2.3.0,
         filepath ^>=1.5
 
+test-suite nano-ui-font-effects-test
+    import:           extensions, warnings, rts-options
+    type:             exitcode-stdio-1.0
+    main-is:          FontEffects.hs
+    hs-source-dirs:   test
+    build-depends:
+        base ^>=4.22.0.0,
+        nano-ui,
+        nano-ui-sdl,
+        text ^>=2.1
+    if !flag(sdl)
+        buildable: False
+
 executable nano-ui-sdl-scrollprobe
     import:           extensions
     import:           ghc-options

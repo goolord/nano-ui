@@ -42,9 +42,9 @@ module NanoUI.Sdl.Font
   ) where
 
 import Control.Exception (SomeException, bracket, catch, throwIO)
-import Control.Monad (when)
+import Control.Monad (unless, when)
 import Data.Bits ((.|.), shiftL)
-import Foreign.Marshal.Alloc (alloca)
+import Foreign.Marshal.Alloc (alloca, allocaBytes)
 import Data.Char (ord)
 import Data.ByteString (ByteString)
 import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
@@ -57,20 +57,22 @@ import Data.Primitive.SmallArray
   , smallArrayFromList
   , writeSmallArray
   )
+import Data.Primitive.PrimArray (indexPrimArray, primArrayFromList)
 import Data.Word (Word64)
 import Data.Text (Text)
+import qualified Data.Sequence as Seq
 import qualified Data.Text as T
 import Foreign.C.String (CString, withCString)
 import Foreign.C.Types (CFloat (..), CInt (..), CSize (..), CUInt (..))
-import Foreign.ForeignPtr (ForeignPtr, mallocForeignPtrBytes, withForeignPtr)
 import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
 import Foreign.Storable (peek, poke, sizeOf)
-import GHC.IO (unsafePerformIO)
+import Data.Unique (hashUnique, newUnique)
 import qualified Data.ByteString as BS
 import System.Directory (getTemporaryDirectory, removeFile)
 import System.IO (hClose, openTempFile)
 import NanoUI
   ( FontMetrics (..)
+  , FontBackend (..)
   , FontStyle (..)
   , FontVariant (..)
   , FontWeight (..)
@@ -100,6 +102,7 @@ data SdlFont = SdlFont
   , sfSpaceAdvance :: Float
   , sfPath :: FilePath
   , sfTempPath :: !(Maybe FilePath)
+  , sfAlive :: !(IORef Bool)
   }
 
 data FontSource
@@ -143,14 +146,23 @@ data GlyphAtlas = GlyphAtlas
     gaResetFlag :: !(IORef Bool)
   , -- | Actions to run after every reset (re-warming the base fonts).
     gaRewarmHooks :: !(IORef [IO ()])
+  , gaAlive :: !(IORef Bool)
   }
 
-{-# NOINLINE fontIdCounter #-}
-fontIdCounter :: IORef Word64
-fontIdCounter = unsafePerformIO (newIORef 1)
-
 newFontId :: IO Word64
-newFontId = atomicModifyIORef' fontIdCounter (\n -> let !n' = n + 1 in (n', n))
+newFontId = fromIntegral . hashUnique <$> newUnique
+
+-- Backend effects are confined to the owning SDL thread. Retained snapshots
+-- may outlive a window or a cache entry, but must never query a freed handle.
+ensureFontAlive :: SdlFont -> IO ()
+ensureFontAlive sf = do
+  alive <- readIORef (sfAlive sf)
+  unless alive (fail "font backend used after closeFont")
+
+ensureAtlasAlive :: GlyphAtlas -> IO ()
+ensureAtlasAlive ga = do
+  alive <- readIORef (gaAlive ga)
+  unless alive (fail "font backend used after destroyGlyphAtlas")
 
 -- | Maximum number of shaped-run cache entries per 'FontMetrics'. Dynamic,
 -- ever-changing text (FPS counters, timers, percentages, mouse positions)
@@ -163,25 +175,14 @@ newFontId = atomicModifyIORef' fontIdCounter (\n -> let !n' = n + 1 in (n', n))
 runCacheCap :: Int
 runCacheCap = 1024
 
-{-# NOINLINE measureScratch #-}
-measureScratch :: ForeignPtr CFloat
-measureScratch = unsafePerformIO (mallocForeignPtrBytes (2 * sizeOf (0 :: CFloat)))
-
-{-# NOINLINE surfaceScratch #-}
-surfaceScratch :: ForeignPtr (Ptr ())
-surfaceScratch = unsafePerformIO (mallocForeignPtrBytes (sizeOf (nullPtr :: Ptr ())))
-
-{-# NOINLINE insertScratch #-}
-insertScratch :: ForeignPtr CFloat
-insertScratch = unsafePerformIO (mallocForeignPtrBytes (4 * sizeOf (0 :: CFloat)))
-
-{-# NOINLINE glyphMetricsScratch #-}
-glyphMetricsScratch :: ForeignPtr CInt
-glyphMetricsScratch = unsafePerformIO (mallocForeignPtrBytes (5 * sizeOf (0 :: CInt)))
+-- Entry-count limits alone do not bound retained text: edited oversized lines
+-- can otherwise keep thousands of full-document versions alive per font.
+cacheableText :: Text -> Bool
+cacheableText = (<= 4096) . T.length
 
 getGlyphAdvance :: SdlFont -> CUInt -> IO (Maybe Float)
 getGlyphAdvance sf cp =
-  withForeignPtr glyphMetricsScratch $ \p -> do
+  allocaBytes (5 * sizeOf (0 :: CInt)) $ \p -> do
     let pMinX = p
         pMaxX = plusPtr pMinX (sizeOf (0 :: CInt))
         pMinY = plusPtr pMaxX (sizeOf (0 :: CInt))
@@ -194,6 +195,22 @@ getGlyphAdvance sf cp =
         pure (Just (fromIntegral adv))
       else pure Nothing
 
+-- Metric-only geometry has no atlas lifetime and never rasterises a surface.
+getGlyphGeometry :: SdlFont -> Float -> Char -> IO (Maybe GlyphQuad)
+getGlyphGeometry sf inv c = allocaBytes (5 * sizeOf (0 :: CInt)) $ \p -> do
+  let pMaxX = plusPtr p (sizeOf (0 :: CInt))
+      pMinY = plusPtr pMaxX (sizeOf (0 :: CInt))
+      pMaxY = plusPtr pMinY (sizeOf (0 :: CInt))
+      pAdv = plusPtr pMaxY (sizeOf (0 :: CInt))
+  ok <- ttfGlyphMetrics (sfFont sf) (fromIntegral (ord c)) p pMaxX pMinY pMaxY pAdv
+  if not ok then pure Nothing else do
+    minX <- fromIntegral <$> peek p
+    maxX <- fromIntegral <$> peek pMaxX
+    minY <- fromIntegral <$> peek pMinY
+    maxY <- fromIntegral <$> peek pMaxY
+    pure $! Just (GlyphQuad (minX / inv) ((sfAscent sf - maxY) / inv)
+      ((maxX - minX) / inv) ((maxY - minY) / inv) 0 0 0 0)
+
 newGlyphAtlas :: Ptr SDL_Renderer -> IO GlyphAtlas
 newGlyphAtlas ren = do
   atlas <- textAtlasCreate ren
@@ -203,6 +220,7 @@ newGlyphAtlas ren = do
   needsReset <- newIORef False
   resetFlag <- newIORef False
   rewarms <- newIORef []
+  alive <- newIORef True
   pure
     GlyphAtlas
       { gaAtlas = atlas
@@ -211,10 +229,13 @@ newGlyphAtlas ren = do
       , gaNeedsReset = needsReset
       , gaResetFlag = resetFlag
       , gaRewarmHooks = rewarms
+      , gaAlive = alive
       }
 
 destroyGlyphAtlas :: GlyphAtlas -> IO ()
-destroyGlyphAtlas ga = textAtlasDestroy (gaAtlas ga)
+destroyGlyphAtlas ga = do
+  alive <- atomicModifyIORef' (gaAlive ga) (\open -> (False, open))
+  when alive $ textAtlasDestroy (gaAtlas ga)
 
 -- | Register an action to run after every atlas reset. The SDL backend
 -- registers a hook that re-warms the base fonts' ASCII glyphs
@@ -279,7 +300,7 @@ lookupOrInsertGlyph ga sf c = do
 insertGlyph :: GlyphAtlas -> SdlFont -> GlyphKey -> Char -> IO (Maybe GlyphSlot)
 insertGlyph ga sf key c = do
   let !cp = fromIntegral (ord c) :: CUInt
-  mMetrics <- withForeignPtr glyphMetricsScratch $ \p -> do
+  mMetrics <- allocaBytes (5 * sizeOf (0 :: CInt)) $ \p -> do
     let pMinX = p
         pMaxX = plusPtr pMinX (sizeOf (0 :: CInt))
         pMinY = plusPtr pMaxX (sizeOf (0 :: CInt))
@@ -300,7 +321,7 @@ insertGlyph ga sf key c = do
       modifyIORef' (gaEntries ga) (Map.insert key Nothing)
       pure Nothing
     Just (minX, maxY, adv) -> do
-      mSurf <- withForeignPtr surfaceScratch $ \sp -> do
+      mSurf <- alloca $ \sp -> do
         poke sp nullPtr
         ok <- ttfRenderGlyphSurface (sfFont sf) cp sp
         if not ok
@@ -356,11 +377,9 @@ data CachedQuad
   -- defeats sharing and reconstructs the lookup result on every hit.
   | Cached {-# NOUNPACK #-} !(Maybe GlyphQuad)
 
--- | Build a 'FontMetrics' that populates 'fmGlyph' from the glyph atlas,
--- so 'pushText' can emit real textured quads.  This must be called after
--- the atlas has been warmed (or lazily, as missing glyphs are inserted on
--- first use).  The returned metrics work at *logical* (unscaled) coordinates;
--- scale is the display pixel ratio already baked into the font's point size.
+-- | Build immutable metric snapshots and explicit IO rasterisation callbacks.
+-- Font queries happen in 'fbPrepare'; atlas insertion happens in 'fbDrawRun'
+-- and 'fbDrawGlyph'. All coordinates are logical (unscaled).
 --
 -- Standard ASCII (0..127) lookups are backed by a high-performance 'SmallMutableArray'
 -- fast path for branchless O(1) in-memory indexing, with automatic cache invalidation
@@ -373,8 +392,11 @@ buildGlyphFontMetrics ga sf scale = do
 
   -- Precompute ASCII 0..127 advances once directly from FreeType without atlas rasterization
   advs <- mapM (getGlyphAdvance sf) [0 .. 127 :: CUInt]
+  -- Reuse fixed ASCII geometry across dynamic labels, so preparing a fresh
+  -- counter string does not query native glyph metrics for each character.
+  asciiGeometry <- smallArrayFromList <$> mapM (getGlyphGeometry sf inv) ['\0' .. '\127']
   let !asciiAdvances =
-        smallArrayFromList
+        primArrayFromList
           [ case mAdv of
               Nothing  -> sfSpaceAdvance sf / inv
               Just adv -> adv / inv
@@ -396,7 +418,7 @@ buildGlyphFontMetrics ga sf scale = do
   -- layout, so a pair cache keeps the hot pen loops off the FFI
   -- boundary after first contact. Keyed by packed codepoint pair on this
   -- 'FontMetrics' (the font id is implicit).
-  kernCacheRef <- newIORef IM.empty
+  kernCacheRef <- newIORef (IM.empty, 0 :: Int)
 
   -- Shaped text runs: whole strings rendered through SDL3_ttf so GPOS
   -- kerning, ligatures, and contextual positioning are preserved.  Run
@@ -404,10 +426,11 @@ buildGlyphFontMetrics ga sf scale = do
   -- against the atlas epoch so a reset drops every stale entry on the
   -- next lookup (Nothing entries are for runs too large for the atlas,
   -- which draw per-glyph instead).  The cache is bounded by 'runCacheCap'.
-  -- Measurement fields are strict so layout queries do not force a render,
-  -- while uv/rqY stay lazy until 'pushText' draws the run.
+  -- Metric snapshots have their own bounded cache and survive atlas resets.
+  -- Run quads are fully evaluated by the effectful drawing path.
+  preparedRef <- newIORef (Map.empty, Seq.empty)
   runCacheRef <- newIORef Map.empty
-  runLruRef <- newIORef [] -- newest first; the last entry is evicted
+  runOrderRef <- newIORef Seq.empty -- insertion order; evict the oldest
   initRunEpoch <- readIORef (gaEpoch ga)
   runEpochRef <- newIORef initRunEpoch
 
@@ -469,47 +492,53 @@ buildGlyphFontMetrics ga sf scale = do
               pure mq
 
     {-# NOINLINE glyphLookup #-}
-    glyphLookup !c =
+    glyphLookup !c = do
+      ensureFontAlive sf
+      ensureAtlasAlive ga
       let !cp = ord c
-       in if (fromIntegral cp :: Word) < 128
-            then unsafePerformIO (lookupAsciiQuad cp)
-            else unsafePerformIO (lookupNonAsciiQuad c)
+      if (fromIntegral cp :: Word) < 128
+             then lookupAsciiQuad cp
+             else lookupNonAsciiQuad c
 
     {-# NOINLINE advanceLookup #-}
     advanceLookup !c =
       let !cp = ord c
        in if (fromIntegral cp :: Word) < 128
-            then indexSmallArray asciiAdvances cp
-            else unsafePerformIO $ do
+             then pure (indexPrimArray asciiAdvances cp)
+             else do
               mAdv <- getGlyphAdvance sf (fromIntegral cp)
               pure $! case mAdv of
                 Nothing  -> sfSpaceAdvance sf / inv
                 Just adv -> adv / inv
 
     {-# NOINLINE kernLookup #-}
-    kernLookup !prev !c =
+    kernLookup !prev !c = do
       -- The cache lives on this 'FontMetrics', so the font id is constant and
       -- the pair can be packed into a single Int key: no tuple on the hot path.
       let !pk = (ord prev `shiftL` 21) .|. ord c
-       in unsafePerformIO $ do
-            m <- readIORef kernCacheRef
-            case IM.lookup pk m of
-              Just k -> pure k
-              Nothing -> do
-                raw <- ttfGetKerning (sfFont sf) (fromIntegral (ord prev) :: CUInt) (fromIntegral (ord c) :: CUInt)
-                let !k = fromIntegral raw / inv
-                modifyIORef' kernCacheRef (IM.insert pk k)
-                pure k
+      (m, count) <- readIORef kernCacheRef
+      case IM.lookup pk m of
+        Just k -> pure k
+        Nothing -> do
+          raw <- ttfGetKerning (sfFont sf) (fromIntegral (ord prev) :: CUInt) (fromIntegral (ord c) :: CUInt)
+          let !k = fromIntegral raw / inv
+              !remaining = if count >= 4096 then IM.deleteMin m else m
+              !m' = IM.insert pk k remaining
+              !count' = min 4096 (count + 1)
+          writeIORef kernCacheRef $! (m', count')
+          pure k
 
     {-# NOINLINE runLookup #-}
-    runLookup !txt = unsafePerformIO $ do
+    runLookup !txt = do
+      ensureFontAlive sf
+      ensureAtlasAlive ga
       ep <- readIORef (gaEpoch ga)
       runEp <- readIORef runEpochRef
       when (runEp /= ep) $ do
         -- The atlas was reset: every cached run quad is stale.
         writeIORef runEpochRef ep
         writeIORef runCacheRef Map.empty
-        writeIORef runLruRef []
+        writeIORef runOrderRef Seq.empty
       -- The cache is per 'FontMetrics', so the font id is implicit and the
       -- key is the text alone: no per-lookup tuple allocation.
       let !key = txt
@@ -519,18 +548,19 @@ buildGlyphFontMetrics ga sf scale = do
         Nothing -> makeRunQuad key txt
 
     -- Bounded insert into the run cache: at 'runCacheCap' entries the
-    -- oldest entry (last in the LRU list) is dropped, so ever-changing
+    -- oldest entry is dropped in amortized O(1), so ever-changing
     -- text cannot grow the cache without limit.
+    cacheRun !key !_ | not (cacheableText key) = pure ()
     cacheRun !key !rq = do
       m <- readIORef runCacheRef
-      lru <- readIORef runLruRef
-      let (mEvict, lruEvict)
+      order <- readIORef runOrderRef
+      let (!mEvict, !orderEvict)
             | Map.size m >= runCacheCap
-            , (victim : rest) <- reverse lru =
-                (Map.delete victim m, reverse rest)
-            | otherwise = (m, lru)
-      writeIORef runCacheRef (Map.insert key rq mEvict)
-      writeIORef runLruRef (key : lruEvict)
+            , victim Seq.:< rest <- Seq.viewl order =
+                (Map.delete victim m, rest)
+            | otherwise = (m, order)
+      writeIORef runCacheRef $! Map.insert key rq mEvict
+      writeIORef runOrderRef $! orderEvict Seq.|> key
 
     -- Mirrors NANO_UI_TEXT_ATLAS_PAD in nano_ui_text_atlas.c.
     runAtlasPad :: Float
@@ -562,7 +592,7 @@ buildGlyphFontMetrics ga sf scale = do
       | T.null txt = pure Nothing
       | otherwise = do
           (w, h) <- withUtf8 txt $ \cstr len ->
-            withForeignPtr measureScratch $ \wp -> do
+            allocaBytes (2 * sizeOf (0 :: CFloat)) $ \wp -> do
               let hp = plusPtr wp (sizeOf (0 :: CFloat))
               ok <- ttfStringSize (sfFont sf) cstr len wp hp
               if not ok
@@ -578,17 +608,17 @@ buildGlyphFontMetrics ga sf scale = do
                   cacheRun key Nothing
                   pure Nothing
                 else do
-                  let uv = unsafePerformIO (renderRun txt)
-                      rq =
+                  (!u0, !v0, !u1, !v1) <- renderRun txt
+                  let !rq =
                         RunQuad
                           { rqX = 0
                           , rqY = 0
                           , rqW = w / inv
                           , rqH = h / inv
-                          , rqU0 = case uv of (u, _, _, _) -> u
-                          , rqV0 = case uv of (_, v, _, _) -> v
-                          , rqU1 = case uv of (_, _, u, _) -> u
-                          , rqV1 = case uv of (_, _, _, v) -> v
+                          , rqU0 = u0
+                          , rqV0 = v0
+                          , rqU1 = u1
+                          , rqV1 = v1
                           , rqAdvance = w / inv
                           }
                   cacheRun key (Just rq)
@@ -619,14 +649,55 @@ buildGlyphFontMetrics ga sf scale = do
                 (atW, atH) <- atlasSize (gaAtlas ga)
                 pure (px / atW, py / atH, (px + tw) / atW, (py + th) / atH)
 
-  pure $
-    baseFm
-      { fmGlyph   = glyphLookup
-      , fmAdvance = advanceLookup
-      , fmKerning = kernLookup
-      , fmRun     = runLookup
-      , fmSnapScale = inv
-      }
+    glyphGeometry c
+      | ord c < 128 = pure (indexSmallArray asciiGeometry (ord c))
+      | otherwise = getGlyphGeometry sf inv c
+
+    backend = FontBackend prepareText runLookup glyphLookup
+
+    prepareText txt = do
+      ensureFontAlive sf
+      (entries, order) <- readIORef preparedRef
+      case Map.lookup txt entries of
+        Just fm -> pure fm
+        Nothing -> do
+          let chars = T.foldl' (\m c -> IM.insert (ord c) c m) IM.empty (" HxM" <> txt)
+          advances <- traverse advanceLookup chars
+          geometry <- traverse glyphGeometry chars
+          let gather !pairs !previous remaining = case T.uncons remaining of
+                Nothing -> pure pairs
+                Just (c, rest) -> do
+                  let key = (ord previous `shiftL` 21) .|. ord c
+                  pairs' <- if IM.member key pairs then pure pairs else do
+                    k <- kernLookup previous c
+                    pure $! IM.insert key k pairs
+                  gather pairs' c rest
+          kerns <- gather IM.empty ' ' ("xM" <> txt)
+          (w, h) <- measureTtfText sf txt
+          let run
+                | T.null txt || w + 2 * runAtlasPad > runAtlasTexSize || h + 2 * runAtlasPad > runAtlasTexSize = Nothing
+                | otherwise = Just (RunQuad 0 0 (w / inv) (h / inv) 0 0 0 0 (w / inv))
+              !fm = baseFm
+                { fmAdvance = \c ->
+                    let cp = ord c
+                     in if cp < 128 then indexPrimArray asciiAdvances cp
+                          else IM.findWithDefault (sfSpaceAdvance sf / inv) cp advances
+                , fmKerning = \a b -> IM.findWithDefault 0 ((ord a `shiftL` 21) .|. ord b) kerns
+                , fmGlyph = \c -> IM.findWithDefault Nothing (ord c) geometry
+                , fmRun = \t -> if t == txt then run else Nothing
+                , fmBackend = Just backend
+                , fmSnapScale = inv
+                }
+              (!remaining, !order')
+                | Map.size entries >= runCacheCap
+                , victim Seq.:< rest <- Seq.viewl order = (Map.delete victim entries, rest)
+                | otherwise = (entries, order)
+              !entries' = Map.insert txt fm remaining
+              !nextOrder = order' Seq.|> txt
+          when (cacheableText txt) $ writeIORef preparedRef $! (entries', nextOrder)
+          pure fm
+
+  prepareText ""
 
 -- | Return the SDL_Texture backing the glyph atlas, for passing to the renderer.
 glyphAtlasTexture :: GlyphAtlas -> IO (Ptr ())
@@ -677,12 +748,14 @@ openFontFromMemoryTemp bs openPt = do
 readSdlFont :: FilePath -> Maybe FilePath -> Ptr () -> IO SdlFont
 readSdlFont path mTemp font = do
   fid <- newFontId
+  alive <- newIORef True
   lineSkip <- ttfLineSkip font
   ascent <- ttfAscent font
   spaceAdv <- ttfSpaceAdvance font
   pure
     SdlFont
       { sfId = fid
+      , sfAlive = alive
       , sfFont = font
       , sfLineSkip = realToFrac lineSkip
       , sfAscent = realToFrac ascent
@@ -712,8 +785,10 @@ fontSourcesSame _ _ = False
 
 closeFont :: SdlFont -> IO ()
 closeFont sf = do
-  ttfCloseFont (sfFont sf)
-  mapM_ removeFile (sfTempPath sf)
+  alive <- atomicModifyIORef' (sfAlive sf) (\open -> (False, open))
+  when alive $ do
+    ttfCloseFont (sfFont sf)
+    mapM_ removeFile (sfTempPath sf)
 
 withTtfMeasure :: Context -> SdlFont -> SdlFont -> Context
 withTtfMeasure ctx font monoFont = withTtfMeasureScaled ctx font monoFont 1.0
@@ -770,14 +845,19 @@ measureTtfTextScaled sf scale txt = do
   pure (w / inv, h / inv)
 
 measureTtfText :: SdlFont -> Text -> IO (Float, Float)
-measureTtfText sf txt
+measureTtfText sf txt = do
+  ensureFontAlive sf
+  measureTtfTextOpen sf txt
+
+measureTtfTextOpen :: SdlFont -> Text -> IO (Float, Float)
+measureTtfTextOpen sf txt
   -- TTF_GetStringSize treats length 0 as NUL-terminated. Empty Text is a
   -- byte-array slice, not a C string, so strlen would read heap garbage and
   -- the caret would jump. Same for T.take 0 of a non-empty value.
   | T.null txt = pure (0, sfLineSkip sf)
   | otherwise =
       withUtf8 txt $ \cstr len ->
-        withForeignPtr measureScratch $ \wp -> do
+        allocaBytes (2 * sizeOf (0 :: CFloat)) $ \wp -> do
           let hp = plusPtr wp (sizeOf (0 :: CFloat))
           ok <- ttfStringSize (sfFont sf) cstr len wp hp
           if ok
@@ -791,7 +871,7 @@ measureTtfText sf txt
 
 tryInsert :: Ptr () -> Ptr () -> IO (Maybe (Float, Float, Float, Float))
 tryInsert atlas surf =
-  withForeignPtr insertScratch $ \px -> do
+  allocaBytes (4 * sizeOf (0 :: CFloat)) $ \px -> do
     let py = plusPtr px (sizeOf (0 :: CFloat))
         tw = plusPtr py (sizeOf (0 :: CFloat))
         th = plusPtr tw (sizeOf (0 :: CFloat))
@@ -807,7 +887,7 @@ tryInsert atlas surf =
 
 atlasSize :: Ptr () -> IO (Float, Float)
 atlasSize atlas =
-  withForeignPtr insertScratch $ \w -> do
+  allocaBytes (2 * sizeOf (0 :: CFloat)) $ \w -> do
     let h = plusPtr w (sizeOf (0 :: CFloat))
     ok <- textAtlasSize atlas w h
     when (not ok) $ fail "text atlas size failed"

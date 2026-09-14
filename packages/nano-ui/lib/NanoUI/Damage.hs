@@ -6,7 +6,7 @@ module NanoUI.Damage
   , writeDamage
   ) where
 
-import Control.Monad (filterM, forM, when)
+import Control.Monad (filterM, forM, unless, when)
 import Data.IORef (readIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
@@ -18,6 +18,8 @@ import NanoUI.Context
   , getDamageRequests
   , getHotId
   , getLiveAnimations
+  , getAnimRest
+  , pruneAnimRest
   , getAnimRectless
   , getPrevRect
   , getPrevClips
@@ -146,12 +148,18 @@ updatePrevRects ctx = do
   oldTexts <- getPrevNodeTexts ctx
   let na = ctxNodeArena ctx
       bump rects = do
-        let rectless' =
+        rest <- getAnimRest ctx
+        let restKeys = IM.keys rest
+            allKeys = liveKeys ++ restKeys
+            rectless' =
               IM.fromList
                 [ (k, if IM.member k rects then 0 else IM.findWithDefault 0 k prevRectless + 1)
-                | k <- liveKeys
+                | k <- allKeys
                 ]
-        setAnimRectless ctx rectless'
+            deadRest = IM.filterWithKey (\k _ -> IM.findWithDefault 0 k rectless' > 300) rest
+        unless (IM.null deadRest) $
+          pruneAnimRest ctx (\k -> IM.notMember k deadRest)
+        setAnimRectless ctx (IM.filterWithKey (\k _ -> elem k liveKeys || (IM.member k rest && IM.notMember k deadRest)) rectless')
   count <- arenaCount na
   if count <= 0
     then do

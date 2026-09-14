@@ -5,9 +5,12 @@ module Main (main) where
 import Control.Monad (forM_, unless)
 import Data.Colour.Names (coral, steelblue)
 import Data.List (tails)
+import Data.IORef (readIORef)
+import Data.Foldable (toList)
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text qualified as T
 import Data.Vector qualified as V
+import Data.Vector.Unboxed qualified as U
 import Diagrams.Prelude
   ( Diagram
   , circle
@@ -18,6 +21,8 @@ import Diagrams.Prelude
   , ( # )
   )
 import NanoUI
+import NanoUI.Context (Context (..), DrawingCacheState (..), withFontMetrics)
+import NanoUI.Context.Types (DrawOpCacheEntry (..))
 import NanoUI.Diagrams
   ( B
   , PlotStyle (..)
@@ -31,8 +36,9 @@ import NanoUI.Diagrams.Tessellation (fillPolygon, strokePolyline, triangulatePol
 import NanoUI.Plot.Chrome (Margins (..), chartDiagram, chartMargins, seriesDomains)
 import NanoUI.Plot.Decimate (lttb, minMaxDecimate)
 import NanoUI.Plot.Hit (nearestPlotHover)
+import NanoUI.Plot.Widget qualified as Plot
 import NanoUI.Plot.Scale (formatTick, mergeDomains, niceTicks)
-import NanoUI.Plot.Series (area, bar, line, scatter, withColor, withMarker)
+import NanoUI.Plot.Series (area, bar, line, lineVec, scatter, withColor, withMarker)
 import NanoUI.Plot.Types
   ( Chart (..)
   , Domain (..)
@@ -41,8 +47,9 @@ import NanoUI.Plot.Types
   , MarkShape (..)
   , PlotHover (..)
   , Series (..)
+  , SeriesData (..)
   )
-import NanoUI.Testing (Context, DrawData (..), drawCmdNull, newPixelContext, runFrame)
+import NanoUI.Testing (DrawData (..), drawCmdNull, newPixelContext, runFrame)
 
 main :: IO ()
 main = do
@@ -58,6 +65,7 @@ main = do
   testMultiSeriesDomains
   testDomainFollowsData
   testLttb
+  testUnboxedSeries
   testMinMaxDecimate
   testLabelFit fm
   testChartChrome fm
@@ -65,7 +73,31 @@ main = do
   testPlotHover fm
   testClosedSeriesFills fm
   testGrowPlotHeight fm
+  testChartCache
   putStrLn "nano-ui-diagrams: ok"
+
+testChartCache :: IO ()
+testChartCache = do
+  base <- newPixelContext
+  other <- newPixelContext
+  let inp = emptyInput {inputWindowSize = Size 400 240}
+      fm = monospaceMetrics 16
+      larger = monospaceMetrics 24
+      ctx = withFontMetrics base fm
+      render c = do
+        _ <- runFrame c inp $ Plot.lineChart (fixedWH 360 200 defaultLayout) [(0, 0), (1, 1)]
+        cache <- readIORef (ctxDrawingCache c)
+        pure (map doeContent (toList (dcsDrawOpCache cache)))
+  first <- render ctx
+  again <- render ctx
+  unless (not (null first) && first == again) $
+    fail "chart cache did not reuse unchanged content"
+  changed <- render (withFontMetrics base larger)
+  unless (changed /= first) $
+    fail "chart cache ignored changed font metrics"
+  independent <- render (withFontMetrics other larger)
+  unless (independent == first) $
+    fail "chart cache version leaked across contexts"
 
 testRendering :: Context -> Input -> FontMetrics -> IO ()
 testRendering ctx inp fm = do
@@ -234,6 +266,12 @@ testNiceTicks = do
     fail "formatTick binary residue"
   unless (formatTick 0.0008 == "0.0008") $
     fail "formatTick small decimal"
+  unless (formatTick 1e308 == "1.000e308" && formatTick (-1e308) == "-1.000e308") $
+    fail "formatTick overflowed while snapping a finite value"
+  unless (niceTicks 6 (Domain (-1e308) 1e308) == []
+       && niceTicks 6 (Domain 1e308 1e308) == [1e308]
+       && niceTicks 0 (Domain 0 100) == []) $
+    fail "niceTicks failed on overflowing, singleton, or empty-budget domains"
 
 testMultiSeriesDomains :: IO ()
 testMultiSeriesDomains = do
@@ -271,6 +309,22 @@ testDomainFollowsData = do
   unless (xLo > 2 && yLo > 1) $
     fail "seriesDomains seeded with 0..1"
 
+testUnboxedSeries :: IO ()
+testUnboxedSeries = do
+  let points = U.fromList [(0, 1), (1, 4), (2, 2)]
+      boxed = V.fromList (U.toList points)
+  unless (lineVec "s" points == lineVec "s" boxed && line "s" (U.toList points) == lineVec "s" points) $
+    fail "numeric series constructors disagree across vector representations"
+  case seriesData (lineVec "s" boxed) of
+    PointsXY stored | stored == points -> pure ()
+    _ -> fail "numeric series did not retain unboxed points"
+  forM_ [0 .. 60] $ \n -> forM_ [-1 .. n + 1] $ \k -> do
+    let input = U.generate n (\i -> (fromIntegral i, sin (fromIntegral i)))
+        inputBoxed = V.fromList (U.toList input)
+    unless (U.toList (lttb k input) == V.toList (lttb k inputBoxed)
+         && U.toList (minMaxDecimate k input) == V.toList (minMaxDecimate k inputBoxed)) $
+      fail "decimation differs between boxed and unboxed input"
+
 testLttb :: IO ()
 testLttb = do
   let pts = V.fromList [(fromIntegral i, sin (fromIntegral i / 10)) | i <- [0 .. 9999 :: Int]]
@@ -295,6 +349,8 @@ testLttb = do
 
 testMinMaxDecimate :: IO ()
 testMinMaxDecimate = do
+  unless (minMaxDecimate 1 (V.fromList [(0, 2), (1, 2), (2, 2)]) == V.singleton (0, 2)) $
+    fail "min/max decimation changed equal-extrema tie handling"
   let descending = V.fromList [(x, 9 - x) | x <- [0 .. 8]]
   unless (minMaxDecimate 2 descending == V.fromList [(0, 9), (4, 5), (5, 4), (8, 1)]) $
     fail "min/max decimation lost extrema or reversed their order"

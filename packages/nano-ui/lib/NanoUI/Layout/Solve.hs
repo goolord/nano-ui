@@ -34,8 +34,8 @@ import NanoUI.Font
   , fmLineHeight
   , resolveLayoutGap
   , resolveLayoutPadding
-  , measureText
-  , measureTextWrapped
+  , measureTextIO
+  , lineWidthIO
   , measureTextWrappedIO
   , scaleFontMetrics
   , labelContentInset
@@ -172,13 +172,13 @@ textNodeMeasurer na fm monoFm measure resolveFont idx = do
 {-# INLINE measureFontLine #-}
 measureFontLine :: TextMeasurer -> Text -> IO (Float, Float)
 measureFontLine TextMeasurer {tmMetrics = metrics, tmVariant = variant, tmHostLine = hostLine} text
-  | variant == FontMono = pure (measureText metrics text)
+  | variant == FontMono = measureTextIO metrics text
   | otherwise = hostLine text
 
 {-# INLINE measureFontWrapped #-}
 measureFontWrapped :: TextMeasurer -> Text -> Float -> IO (Float, Float)
 measureFontWrapped TextMeasurer {tmMetrics = metrics, tmVariant = variant, tmHostLine = hostLine} text width
-  | variant == FontMono = pure (measureTextWrapped metrics text width)
+  | variant == FontMono = measureTextWrappedIO (lineWidthIO metrics) metrics text width
   | otherwise = measureTextWrappedIO (fmap fst . hostLine) metrics text width
 
 defaultFontResolver :: FontMetrics -> FontMetrics -> (Text -> IO (Float, Float)) -> FontResolver
@@ -191,7 +191,7 @@ defaultFontResolver fm monoFm measure sz _w _st var =
       textFm = if scale /= 1.0 then scaleFontMetrics scale baseFm else baseFm
       measureFn txt =
         if var == FontMono
-          then pure (measureText textFm txt)
+          then measureTextIO textFm txt
           else if scale /= 1.0
             then do
               (w, h) <- measure txt
@@ -921,9 +921,9 @@ loadChildrenScratchSolving na fm monoFm measure resolveFont parent availW availH
 positionNode :: NodeArena -> FontMetrics -> NodeIdx -> Float -> Float -> Float -> Float -> IO ()
 positionNode na fm idx x y availW availH = do
   a <- arenaArrays na
-  positionNodeA a na fm fm (\t -> pure (measureText fm t)) defaultResolve 0 idx x y availW availH
+  positionNodeA a na fm fm (measureTextIO fm) defaultResolve 0 idx x y availW availH
   where
-    defaultResolve _ _ _ _ = pure (fm, \t -> pure (measureText fm t))
+    defaultResolve _ _ _ _ = pure (fm, measureTextIO fm)
 
 positionNodeA ::
   NodeArenaArrays ->
@@ -1835,8 +1835,8 @@ positionWindowNode na fm idx x y w h = do
       gap = resolveLayoutGap fm gap0
   dir <- getDirection na idx
   a <- arenaArrays na
-  let defResolve _ _ _ _ = pure (fm, \t -> pure (measureText fm t))
-  positionChildren a na fm fm (\t -> pure (measureText fm t)) defResolve 0 idx dir gap pad x y w h
+  let defResolve _ _ _ _ = pure (fm, measureTextIO fm)
+  positionChildren a na fm fm (measureTextIO fm) defResolve 0 idx dir gap pad x y w h
 
 -- | Horizontal placement for a widget-anchored popup. Aligns the popup's left
 -- edge with the anchor even when the anchor sits inside the window margin (a

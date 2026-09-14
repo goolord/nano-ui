@@ -28,6 +28,10 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Lazy as TL
+import qualified Data.Text.Lazy.Builder as TB
+import qualified Data.Text.Lazy.Builder.Int as TB
+import qualified Data.Text.Lazy.Builder.RealFloat as TB
 import Data.Hashable (hash)
 import Data.Maybe (fromMaybe)
 import qualified Ditto.Backend as Ditto
@@ -57,8 +61,8 @@ data FormInput
 formInputToText :: FormInput -> Text
 formInputToText (FormInputText t) = t
 formInputToText (FormInputBool b) = if b then "true" else "false"
-formInputToText (FormInputInt i) = T.pack (show i)
-formInputToText (FormInputFloat f) = T.pack (show f)
+formInputToText (FormInputInt i) = TL.toStrict (TB.toLazyText (TB.decimal i))
+formInputToText (FormInputFloat f) = TL.toStrict (TB.toLazyText (TB.realFloat f))
 formInputToText (FormInputList ts) = T.intercalate "," ts
 
 -- | Internal store for form state across UI frames.

@@ -474,7 +474,9 @@ vertUv dd i =
     pure (u, v)
 
 modifyIORef :: IORef Int -> (Int -> Int) -> IO ()
-modifyIORef r f = readIORef r >>= writeIORef r . f
+modifyIORef r f = do
+  v <- readIORef r
+  writeIORef r $! f v
 
 checkIdleFullDamage ::
   IORef Int -> Context -> Input -> Input -> NanoUI a -> IO ()

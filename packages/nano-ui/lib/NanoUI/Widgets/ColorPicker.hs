@@ -95,6 +95,7 @@ import NanoUI.WidgetText
   , colorPickerToHex
   , colorPickerToHexA
   , textInputFlagBare
+  , intValueText
   )
 import NanoUI.Widgets.Behavior
   ( DragAxis (..)
@@ -808,10 +809,10 @@ applyColorPickerKeys ctx wid current nav = do
       )
 
 showByte :: Word8 -> Text
-showByte n = T.pack (show (fromIntegral n :: Int))
+showByte = intValueText . fromIntegral
 
 showInt :: Int -> Text
-showInt = T.pack . show
+showInt = intValueText
 
 readIntText :: Text -> Maybe Int
 readIntText t =

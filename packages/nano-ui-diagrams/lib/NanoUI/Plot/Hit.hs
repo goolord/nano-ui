@@ -8,9 +8,7 @@ module NanoUI.Plot.Hit
   , nearestPlotHover
   ) where
 
-import Data.List (minimumBy)
 import Data.Maybe (fromMaybe)
-import Data.Ord (comparing)
 import Diagrams.Core (QDiagram)
 import Diagrams.Prelude qualified as Dia
 import NanoUI (FontMetrics, Rect (..), Theme (..), V2, rectContains, v2X, v2Y)
@@ -19,7 +17,7 @@ import NanoUI.Diagrams.Widget (PlotStyle (..))
 import NanoUI.Plot.Chrome (chartDiagram, seriesDomains, seriesPoints)
 import NanoUI.Plot.Scale (plotToDomain)
 import NanoUI.Plot.Types (Chart (..), PlotHover (..), Range (..))
-import qualified Data.Vector as V
+import qualified Data.Vector.Unboxed as U
 
 diagramBorder :: Float
 diagramBorder = 1
@@ -110,9 +108,7 @@ diagramPointAtWithExtents dw dh (x0, x1) (y0, y1) w h d px py
 nearestPlotHover :: Chart -> Double -> Double -> Maybe PlotHover
 nearestPlotHover chart gx gy
   | gx < 0 || gx > 1 || gy < 0 || gy > 1 = Nothing
-  | otherwise = case candidates of
-      [] -> Nothing
-      _ -> Just (minimumBy (comparing distanceSquared) candidates)
+  | otherwise = scanSeries 0 Nothing (chartSeries chart)
  where
   (xDom, yDom) = seriesDomains chart
   dataX = plotToDomain xDom (Range 0 1) gx
@@ -121,13 +117,12 @@ nearestPlotHover chart gx gy
     let dx = hoverDataX hover - dataX
         dy = hoverDataY hover - dataY
      in dx * dx + dy * dy
-  candidates =
-    [ PlotHover
-        { hoverDataX = x
-        , hoverDataY = y
-        , hoverSeriesIdx = si
-        , hoverPointIdx = ptIdx
-        }
-    | (si, s) <- zip [0 ..] (chartSeries chart)
-    , (ptIdx, (x, y)) <- zip [0 ..] (V.toList (seriesPoints chart s))
-    ]
+  scanSeries !_ !best [] = best
+  scanSeries !si !best (s : rest) =
+    let pick current !ptIdx (!x, !y) =
+          let !candidate = PlotHover x y si ptIdx
+           in case current of
+                Just previous | distanceSquared previous <= distanceSquared candidate -> current
+                _ -> Just candidate
+        !best' = U.ifoldl' pick best (seriesPoints chart s)
+     in scanSeries (si + 1) best' rest

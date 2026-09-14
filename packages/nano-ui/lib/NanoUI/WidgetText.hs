@@ -1,5 +1,6 @@
 module NanoUI.WidgetText
   ( sliderValueText
+  , intValueText
   , treeEncodeStyle
   , treeDecodeStyle
   , treeDecodeStripe
@@ -65,7 +66,11 @@ module NanoUI.WidgetText
 import Data.Bits ((.&.), (.|.), complement, shiftL, shiftR)
 import Data.Char (chr)
 import Data.Maybe (fromMaybe)
+import Data.Primitive.SmallArray (SmallArray, indexSmallArray, smallArrayFromList)
 import Data.Text (Text)
+import qualified Data.Text.Lazy as TL
+import qualified Data.Text.Lazy.Builder as TB
+import qualified Data.Text.Lazy.Builder.Int as TB
 import Data.Word (Word8)
 import NanoUI.Font (FontMetrics (..), fmLineHeight, widgetContentInset)
 import NanoUI.Style (FontStyle (..), FontVariant (..), FontWeight (..), TextDecoration (..), Theme (..), styleBg, themeButton, themePanel, themeWindow)
@@ -73,7 +78,10 @@ import NanoUI.Types (Color (..), Rect (..), colorA, colorB, colorG, colorR, colo
 import qualified Data.Text as T
 
 sliderValueText :: Float -> Text
-sliderValueText = T.pack . show . (round :: Float -> Int)
+sliderValueText = intValueText . (round :: Float -> Int)
+
+intValueText :: Int -> Text
+intValueText = TL.toStrict . TB.toLazyText . TB.decimal
 
 -- | styleIdx: nodeIdx in bits 11+, depth in 0-7, hasKids bit 8, expanded bit 9, stripeOdd bit 10.
 treeEncodeStyle :: Int -> Int -> Bool -> Bool -> Bool -> Int
@@ -216,7 +224,12 @@ colorPickerToHexA :: Color -> Text
 colorPickerToHexA c = colorPickerToHex c <> hexByte (colorA c)
 
 hexByte :: Word8 -> Text
-hexByte n = T.pack (showHexWord8 n)
+hexByte n = indexSmallArray hexBytes (fromIntegral n)
+
+-- Each byte's two-character representation is allocated once, shared by
+-- color-picker labels instead of formatting fresh Strings every frame.
+hexBytes :: SmallArray Text
+hexBytes = smallArrayFromList [T.pack (showHexWord8 n) | n <- [0 .. 255]]
 
 showHexWord8 :: Word8 -> String
 showHexWord8 n =

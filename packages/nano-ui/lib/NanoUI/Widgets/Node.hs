@@ -134,7 +134,7 @@ instance RightClickable Response where
 instance Semigroup Response where
   a <> b =
     Response
-      { rawRespId = rawRespId b
+      { rawRespId = if rawRespId b == WidgetId 0 then rawRespId a else rawRespId b
       , rawRespRect = unionRespRect (rawRespRect a) (rawRespRect b)
       , rawRespHovered = rawRespHovered a || rawRespHovered b
       , rawRespPressed = rawRespPressed a || rawRespPressed b

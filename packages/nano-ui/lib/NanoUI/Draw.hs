@@ -48,6 +48,7 @@ module NanoUI.Draw
   , currentLayer
   ) where
 
+import Control.Exception (bracket_)
 import Control.Monad (unless, when)
 import Data.Bits (shiftR, (.&.))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
@@ -111,7 +112,7 @@ import GHC.Exts
   , writeWord32OffAddr#
   )
 import GHC.Word (Word8 (W8#), Word32 (W32#))
-import NanoUI.Font (FontMetrics (..), GlyphQuad (..), RunQuad (..), lineWidth)
+import NanoUI.Font (FontMetrics (..), GlyphQuad (..), RunQuad (..), lineWidth, prepareFontMetrics, drawRun, drawGlyph)
 import NanoUI.Style
   ( FontStyle (..)
   , FontWeight (..)
@@ -579,8 +580,9 @@ growBuffer count fptrRef ptrRef capRef pool elemBytes needElems = do
           newBytes = newCap * elemBytes
       newFPtr <- poolTake pool newBytes newCap
       let !newRaw = unsafeForeignPtrToPtr newFPtr
-      withForeignPtr oldFPtr $ \oldP ->
-        copyArray newRaw oldP (count * elemBytes)
+      withForeignPtr newFPtr $ \newP ->
+        withForeignPtr oldFPtr $ \oldP ->
+          copyArray newP oldP (count * elemBytes)
       poolGive pool oldFPtr cap
       writeIORef fptrRef newFPtr
       writeIORef ptrRef newRaw
@@ -712,10 +714,10 @@ withClip da rect act = do
   let (ox, oy, ow, oh) = old
       prev = Rect ox oy ow oh
       clip = maybe (Rect 0 0 0 0) id (rectIntersect prev rect)
-  setClip da clip
-  r <- act
-  setClip da prev
-  pure r
+  bracket_
+    (setClip da clip)
+    (setClip da prev)
+    act
 
 {-# INLINE setTexture #-}
 setTexture :: DrawArena -> Int -> IO ()
@@ -1279,8 +1281,9 @@ emitDrawOps da fm ops = V.mapM_ emitOne ops
     emitOne (FillQuadGradient r c0 c1 c2 c3) = pushQuadGradient da r c0 c1 c2 c3
     emitOne (DrawImageRect r tex u0 v0 u1 v1 c) = pushImage da r tex u0 v0 u1 v1 c
     emitOne (DrawText x y ax ay t c) = do
-      let Rect px py _ _ = drawTextBox fm x y ax ay t
-      pushText da fm px py t c
+      prepared <- prepareFontMetrics fm t
+      let Rect px py _ _ = drawTextBox prepared x y ax ay t
+      pushPreparedText da prepared px py t c
 
 {-# INLINE pushFilledTriangle #-}
 pushFilledTriangle :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
@@ -1309,7 +1312,12 @@ snapToPixel s v = onGrid s v
 {-# INLINE pushText #-}
 pushText :: DrawArena -> FontMetrics -> Float -> Float -> T.Text -> Color -> IO ()
 pushText _da _fm _x _y txt _col | T.null txt = pure ()
-pushText da fm x y txt col =
+pushText da fm x y txt col = do
+  prepared <- prepareFontMetrics fm txt
+  pushPreparedText da prepared x y txt col
+
+pushPreparedText :: DrawArena -> FontMetrics -> Float -> Float -> T.Text -> Color -> IO ()
+pushPreparedText da fm x y txt col =
   -- Snapping the pen to the device pixel grid keeps every glyph quad on a
   -- whole pixel. Advances, bearings, and ink sizes are all integer pixel
   -- counts divided by the snap scale, so snapping the origin alone aligns the
@@ -1318,7 +1326,7 @@ pushText da fm x y txt col =
   -- as scroll position changes.
   let !px = snapToPixel (fmSnapScale fm) x
       !py = snapToPixel (fmSnapScale fm) y
-   in case fmRun fm txt of
+   in drawRun fm txt >>= \case
         Just rq -> drawRunQuad da px py rq col
         Nothing -> do
           -- Batch every glyph of the run into one arena reservation instead of
@@ -1346,7 +1354,7 @@ pushText da fm x y txt col =
                       Nothing -> pure q
                       Just (c, rest) -> do
                         let !adv = advanceAfter prev c
-                        case fmGlyph fm c of
+                        drawGlyph fm c >>= \case
                           Nothing -> do
                             q' <-
                               if adv > 0 && c /= ' '
@@ -1386,9 +1394,14 @@ pushTextStyled ::
   T.Text ->
   Color ->
   IO ()
-pushTextStyled da fm weight fstyle deco x y txt col
+pushTextStyled da fm weight fstyle deco x y txt col = do
+  prepared <- prepareFontMetrics fm txt
+  pushPreparedTextStyled da prepared weight fstyle deco x y txt col
+
+pushPreparedTextStyled :: DrawArena -> FontMetrics -> FontWeight -> FontStyle -> TextDecoration -> Float -> Float -> T.Text -> Color -> IO ()
+pushPreparedTextStyled da fm weight fstyle deco x y txt col
   | weight == WeightNormal && fstyle == FontStyleNormal && deco == DecorationNone =
-      pushText da fm x y txt col
+      pushPreparedText da fm x y txt col
   | otherwise = do
       let !px = snapToPixel (fmSnapScale fm) x
           !py = snapToPixel (fmSnapScale fm) y
@@ -1440,7 +1453,7 @@ pushTextStyled da fm weight fstyle deco x y txt col
               pushRect da (Rect px sY textW thick) col
   where
     go !ox !oy !t !slantMult
-      | slantMult == 0.0 && weight == WeightNormal = pushText da fm ox oy t col
+      | slantMult == 0.0 && weight == WeightNormal = pushPreparedText da fm ox oy t col
       | slantMult == 0.0 = goNormal ox oy Nothing t
       | otherwise = goSlantedPrev ox oy Nothing t slantMult
 
@@ -1453,7 +1466,7 @@ pushTextStyled da fm weight fstyle deco x y txt col
         Nothing -> pure ()
         Just (c, rest) -> do
           let !adv = advanceAfter prev c
-          case fmGlyph fm c of
+          drawGlyph fm c >>= \case
             Nothing -> do
               when (adv > 0 && c /= ' ') $
                 pushRect da (Rect ox oy adv (fmLineHeight fm)) col
@@ -1472,7 +1485,7 @@ pushTextStyled da fm weight fstyle deco x y txt col
         Nothing -> pure ()
         Just (c, rest) -> do
           let !adv = advanceAfter prev c
-          case fmGlyph fm c of
+          drawGlyph fm c >>= \case
             Nothing -> do
               when (adv > 0 && c /= ' ') $
                 pushRect da (Rect ox oy adv (fmLineHeight fm)) col
