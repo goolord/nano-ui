@@ -29,6 +29,7 @@ module NanoUI.Frame.TextEdit
   , tagTextInputClippedSpans
   , textInputGeomForWidget
   , syncTextInputScroll
+  , nodeFontMetrics
     -- * Caret and selection drawing primitives
   , drawTextCaret
   , drawTextSelectionLine
@@ -99,6 +100,7 @@ import NanoUI.Context
   , setTextFieldClickCell
   , setTextInputDrag
   , setTextInputMenu
+  , setTextEditLastAction
   , slotAnchor
   , slotCursor
   , slotKey
@@ -121,6 +123,7 @@ import NanoUI.Font
   , textIndexAtX
   , prepareFontMetrics
   , lineWidthIO
+  , isDefaultNodeFont
   , widgetContentInset
   )
 import NanoUI.Frame.Chrome
@@ -207,8 +210,12 @@ import NanoUI.WidgetText
   , textInputFieldText
   , textInputSearchMode
   , textInputBareMode
+  , textInputSelectableMode
   , searchFieldIconRects
   , searchFieldTextClip
+  , textNodeFontStyle
+  , textNodeFontVariant
+  , textNodeFontWeight
   )
 import NanoUI.Widgets.TextArea
   ( TextAreaState (..)
@@ -219,19 +226,21 @@ import NanoUI.Widgets.TextArea
 import qualified NanoUI.Widgets.TextArea as TA
 import qualified NanoUI.Widgets.TextBuffer as TB
 import NanoUI.Widgets.TextCommon
-  ( menuActionEnabled
+  ( menuActionCopy
+  , menuActionEnabled
+  , menuActionSelectAll
   , selectionBgColor
   , selectionCaretGeom
   , textSelectionForClick
   , textSelectionForDrag
   , textWordBounds
   )
-import NanoUI.Widgets.TextInput (applyTextInputMenuAction)
+import NanoUI.Widgets.TextInput (applyTextInputMenuAction, isSelectableTextInput)
 
-textCharAtX :: Context -> Text -> Float -> Float -> IO Int
-textCharAtX ctx text startX mouseX = do
-  fm <- prepareFontMetrics (ctxFontMetrics ctx) text
-  pure (textIndexAtX fm text (max 0 (mouseX - startX)))
+textCharAtX :: FontMetrics -> Text -> Float -> Float -> IO Int
+textCharAtX fm text startX mouseX = do
+  prepared <- prepareFontMetrics fm text
+  pure (textIndexAtX prepared text (max 0 (mouseX - startX)))
 
 data TextEditMenuRow
   = TextEditMenuSep
@@ -586,13 +595,15 @@ nodeTextFieldGeom ctx idx x y w h = do
   si <- getStyleIdx (ctxNodeArena ctx) idx
   opts <- getOptions (ctxNodeArena ctx) idx
   let fm = ctxFontMetrics ctx
-  if textInputBareMode si
-    then
-      let (ix, iy) = widgetContentInset fm
-       in pure
-            ( Rect x y w h
-            , Rect (x + ix) (y + iy) (max 0 (w - 2 * ix)) (max 0 (h - 2 * iy))
-            )
+  if textInputSelectableMode si
+    then pure (Rect x y w h, Rect x y w h)
+    else if textInputBareMode si
+      then
+        let (ix, iy) = widgetContentInset fm
+         in pure
+              ( Rect x y w h
+              , Rect (x + ix) (y + iy) (max 0 (w - 2 * ix)) (max 0 (h - 2 * iy))
+              )
     else
       if textInputSearchMode si
         then
@@ -689,23 +700,39 @@ computeTextInputScroll fm viewportW value cursor oldScroll isFocused
 
 syncTextInputScroll :: Context -> NodeIdx -> Float -> Float -> Float -> Float -> IO Float
 syncTextInputScroll ctx idx x y w h = do
-  wid <- getWidgetId (ctxNodeArena ctx) idx
-  store <- getStore ctx
-  let key = intKey wid
-  value <- textInputValue ctx idx
-  focus <- textInputFocused ctx idx
-  (_, clip) <- nodeTextFieldGeom ctx idx x y w h
-  let cursor = IM.findWithDefault (T.length value) (slotKey slotCursor key) (storeInt store)
-      oldScroll = IM.findWithDefault 0 (slotKey slotTextInputScroll key) (storeFloat store)
-      fm = ctxFontMetrics ctx
-      availW = rectW clip
-  newScroll <- computeTextInputScroll fm availW value cursor oldScroll focus
-  when (newScroll /= oldScroll) $ do
-    setStore ctx (store {storeFloat = IM.insert (slotKey slotTextInputScroll key) newScroll (storeFloat store)})
-  pure newScroll
+  si <- getStyleIdx (ctxNodeArena ctx) idx
+  if textInputSelectableMode si
+    then pure 0
+    else do
+      wid <- getWidgetId (ctxNodeArena ctx) idx
+      store <- getStore ctx
+      let key = intKey wid
+      value <- textInputValue ctx idx
+      focus <- textInputFocused ctx idx
+      (_, clip) <- nodeTextFieldGeom ctx idx x y w h
+      let cursor = IM.findWithDefault (T.length value) (slotKey slotCursor key) (storeInt store)
+          oldScroll = IM.findWithDefault 0 (slotKey slotTextInputScroll key) (storeFloat store)
+          fm = ctxFontMetrics ctx
+          availW = rectW clip
+      newScroll <- computeTextInputScroll fm availW value cursor oldScroll focus
+      when (newScroll /= oldScroll) $ do
+        setStore ctx (store {storeFloat = IM.insert (slotKey slotTextInputScroll key) newScroll (storeFloat store)})
+      pure newScroll
 
-drawTextInputSelection :: DrawArena -> Context -> NodeIdx -> Float -> Float -> Float -> Float -> Style -> IO ()
-drawTextInputSelection da ctx idx x y w h style = do
+nodeFontMetrics :: Context -> NodeIdx -> IO FontMetrics
+nodeFontMetrics ctx idx = do
+  let arena = ctxNodeArena ctx
+  si <- getStyleIdx arena idx
+  fontSizeVal <- getNodeFontSize arena idx
+  let fvar = textNodeFontVariant si
+      fweight = textNodeFontWeight si
+      fstyle = textNodeFontStyle si
+  if isDefaultNodeFont fontSizeVal fweight fstyle fvar
+    then pure (if fvar == FontMono then ctxMonoFontMetrics ctx else ctxFontMetrics ctx)
+    else fst <$> ctxResolveFont ctx fontSizeVal fweight fstyle fvar
+
+drawTextInputSelection :: DrawArena -> Context -> NodeIdx -> Float -> Float -> Float -> Float -> Style -> Maybe Float -> IO ()
+drawTextInputSelection da ctx idx x y w h style mScrollX = do
   focus <- textInputFocused ctx idx
   when focus $ do
     value <- textInputValue ctx idx
@@ -720,37 +747,39 @@ drawTextInputSelection da ctx idx x y w h style = do
     when hasSel $ do
       theme <- readIORef (ctxTheme ctx)
       (box, clip) <- nodeTextFieldGeom ctx idx x y w h
-      let fm = ctxFontMetrics ctx
-          selBg = selectionBgColor (themeAccent theme) (styleBg style)
+      fm <- nodeFontMetrics ctx idx
+      let selBg = selectionBgColor (themeAccent theme) (styleBg style)
           lineH = layoutLineHeight fm
           ty = centeredTextY fm (rectY box) (rectH box) lineH
       wLo <- lineWidthIO fm (T.take selLo value)
       wHi <- lineWidthIO fm (T.take selHi value)
-      scrollX <- syncTextInputScroll ctx idx x y w h
+      scrollX <- maybe (syncTextInputScroll ctx idx x y w h) pure mScrollX
       let selX = rectX clip + wLo - scrollX
           selW = wHi - wLo
       drawTextSelectionLine da selX ty selW lineH selBg
 
 drawTextInputCaret :: DrawArena -> Context -> NodeIdx -> Float -> Float -> Float -> Float -> Style -> IO ()
 drawTextInputCaret da ctx idx x y w h style = do
-  focus <- textInputFocused ctx idx
-  when focus $ do
-    value <- textInputValue ctx idx
-    wid <- getWidgetId (ctxNodeArena ctx) idx
-    store <- getStore ctx
-    let key = intKey wid
-        cursor = IM.findWithDefault (T.length value) (slotKey slotCursor key) (storeInt store)
-    lbl <- getText (ctxNodeArena ctx) idx
-    let fm = ctxFontMetrics ctx
-        fieldTxt = textInputFieldText lbl value focus
-        prefix = T.take (max 0 (min (T.length fieldTxt) cursor)) fieldTxt
-        lineH = layoutLineHeight fm
-    pw <- lineWidthIO fm prefix
-    (box, clip) <- nodeTextFieldGeom ctx idx x y w h
-    let ty = centeredTextY fm (rectY box) (rectH box) lineH
-    scrollX <- syncTextInputScroll ctx idx x y w h
-    let (caretX, caretY, caretH) = selectionCaretGeom (rectX clip - scrollX) ty pw lineH
-    drawTextCaret da caretX caretY caretH (styleFg style)
+  si <- getStyleIdx (ctxNodeArena ctx) idx
+  unless (textInputSelectableMode si) $ do
+    focus <- textInputFocused ctx idx
+    when focus $ do
+      value <- textInputValue ctx idx
+      wid <- getWidgetId (ctxNodeArena ctx) idx
+      store <- getStore ctx
+      let key = intKey wid
+          cursor = IM.findWithDefault (T.length value) (slotKey slotCursor key) (storeInt store)
+      lbl <- getText (ctxNodeArena ctx) idx
+      fm <- nodeFontMetrics ctx idx
+      let fieldTxt = textInputFieldText lbl value focus
+          prefix = T.take (max 0 (min (T.length fieldTxt) cursor)) fieldTxt
+          lineH = layoutLineHeight fm
+      pw <- lineWidthIO fm prefix
+      (box, clip) <- nodeTextFieldGeom ctx idx x y w h
+      let ty = centeredTextY fm (rectY box) (rectH box) lineH
+      scrollX <- syncTextInputScroll ctx idx x y w h
+      let (caretX, caretY, caretH) = selectionCaretGeom (rectX clip - scrollX) ty pw lineH
+      drawTextCaret da caretX caretY caretH (styleFg style)
 
 applyTextInputClick :: Context -> WidgetId -> Text -> Int -> Int -> IO ()
 applyTextInputClick ctx wid value idx clicks =
@@ -779,7 +808,7 @@ updateTextInputSelection ctx wid anchor cursor = do
       )
     markDirty ctx
 
-textInputGeomForWidget :: Context -> WidgetId -> IO (Maybe (Rect, Float, Text))
+textInputGeomForWidget :: Context -> WidgetId -> IO (Maybe (Rect, Float, Text, FontMetrics))
 textInputGeomForWidget ctx wid = do
   mIdx <- findNodeByWidgetId ctx wid
   case mIdx of
@@ -792,12 +821,14 @@ textInputGeomForWidget ctx wid = do
           (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
           (field, clip) <- nodeTextFieldGeom ctx idx x y w h
           scrollX <- syncTextInputScroll ctx idx x y w h
+          fm <- nodeFontMetrics ctx idx
           let contentX = rectX clip - scrollX
           value <- textInputValue ctx idx
-          pure (Just (field, contentX, value))
+          pure (Just (field, contentX, value, fm))
 
 applyTextFieldMenuAction :: Context -> WidgetId -> Int -> IO ()
 applyTextFieldMenuAction ctx wid item = do
+  setTextEditLastAction ctx (Just (wid, item))
   mIdx <- findNodeByWidgetId ctx wid
   case mIdx of
     Nothing -> pure ()
@@ -812,9 +843,13 @@ textFieldMenuActionEnabled :: Context -> WidgetId -> Int -> IO Bool
 textFieldMenuActionEnabled ctx wid item = do
   store <- getStore ctx
   let key = intKey wid
-      text = IM.findWithDefault "" key (storeText store)
-  mclip <- ctxClipboardGet ctx
-  pure (menuActionEnabled (not (T.null text)) mclip item)
+      hasText = not (T.null (IM.findWithDefault "" key (storeText store)))
+  isSelectable <- isSelectableTextInput ctx wid
+  if isSelectable
+    then pure (hasText && (item == menuActionCopy || item == menuActionSelectAll))
+    else do
+      mclip <- ctxClipboardGet ctx
+      pure (menuActionEnabled hasText mclip item)
 
 collapseTextFieldSelection :: Context -> WidgetId -> IO ()
 collapseTextFieldSelection ctx wid =
@@ -1415,7 +1450,7 @@ finalizeTextFieldMouse ctx inp = do
   when (hashWidgetId focus /= 0) $ do
     mGeom <- textInputGeomForWidget ctx focus
     case mGeom of
-      Just (fieldRect, contentX, value) -> do
+      Just (fieldRect, contentX, value, fm) -> do
         let mouse = inputMousePos inp
             inField = rectContains fieldRect mouse
         if inputMousePressed inp && inField
@@ -1424,7 +1459,7 @@ finalizeTextFieldMouse ctx inp = do
             if cleared
               then clearSearchField ctx focus
               else do
-                idx <- textCharAtX ctx value contentX (v2X mouse)
+                idx <- textCharAtX fm value contentX (v2X mouse)
                 clicks <-
                   normalizeTextFieldClicks
                     ctx
@@ -1443,7 +1478,7 @@ finalizeTextFieldMouse ctx inp = do
                 | textInputDragWidget drag == focus
                     , not (textInputDragMultiline drag)
                     , inputMouseDown inp || inputMouseReleased inp -> do
-                    idx <- textCharAtX ctx value contentX (v2X mouse)
+                    idx <- textCharAtX fm value contentX (v2X mouse)
                     applyTextInputDrag ctx focus value (textInputDragAnchor drag) idx (textInputDragClicks drag)
               _ -> pure ()
       Nothing -> finalizeTextAreaMouse ctx inp focus

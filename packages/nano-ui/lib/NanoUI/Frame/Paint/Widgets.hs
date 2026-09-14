@@ -81,6 +81,7 @@ import NanoUI.WidgetText
   , tableSortBlank
   , tableSortMarkOf
   , textInputBareMode
+  , textInputSelectableMode
   , textInputFieldText
   , textInputSearchBody
   , textInputSearchMode
@@ -98,7 +99,7 @@ import NanoUI.Frame.Chrome
   , textInputValue
   , widgetVisualStyle
   )
-import NanoUI.Frame.Spans (forWidgetTextPlacements_, widgetTextSpans)
+import NanoUI.Frame.Spans (forWidgetTextPlacements_, selectableTextGeometry, widgetTextSpans)
 import NanoUI.Frame.TextEdit
   ( TextAreaGeom (..)
   , TextInputGeom (..)
@@ -125,8 +126,10 @@ paintTextInputNode env idx (Rect x y w h) = do
   style <- widgetVisualStyle ctx NodeTextInput idx
   focus <- textInputFocused ctx idx
   si <- getStyleIdx (peNodeArena env) idx
-  if textInputBareMode si
-    then paintBareField ctx da fm theme style idx focus x y w h
+  if textInputSelectableMode si
+    then paintSelectableText env style idx focus x y w h
+    else if textInputBareMode si
+      then paintBareField ctx da fm theme style idx focus x y w h
     else
       if textInputSearchMode si
         then do
@@ -403,7 +406,7 @@ paintClippedFieldText ::
   IO ()
 paintClippedFieldText ctx da fm style idx x y w h clip penX penY txt fg = do
   withClip da clip $ do
-    drawTextInputSelection da ctx idx x y w h style
+    drawTextInputSelection da ctx idx x y w h style Nothing
     unless (T.null txt) $ do
       pushText da fm penX penY txt fg
     drawTextInputCaret da ctx idx x y w h style
@@ -438,6 +441,29 @@ paintSearchField ctx da fm theme style idx focus x y w h = do
   paintClippedFieldText ctx da fm style idx x y w h clip (rectX clip - scrollX) ty display fg
   when (not isEmpty) $
     drawCloseIcon fm da (rectX clearRect) (rectY clearRect) (rectW clearRect) (rectH clearRect) iconCol
+
+-- | Selectable text: chrome-less, border-less, naturally sized text field
+-- that supports mouse drag selection and text copying without an insertion caret.
+paintSelectableText :: PaintEnv -> Style -> NodeIdx -> Bool -> Float -> Float -> Float -> Float -> IO ()
+paintSelectableText env style idx _focus x y w h = do
+  let ctx = peContext env
+      da = peDrawArena env
+      arena = peNodeArena env
+  si <- getStyleIdx arena idx
+  mFontColor <- getNodeFontColor arena idx
+  fontSizeVal <- getNodeFontSize arena idx
+  let fvar = textNodeFontVariant si
+      fweight = textNodeFontWeight si
+      fstyle = textNodeFontStyle si
+  (fm', _) <- resolveNodeFont env fontSizeVal fweight fstyle fvar
+  let clip = Rect x y w h
+  value <- textInputValue ctx idx
+  let fg = fromMaybe (styleFg style) mFontColor
+      (penX, ty, _) = selectableTextGeometry fm' x y h
+  withClip da clip $ do
+    drawTextInputSelection da ctx idx x y w h style (Just 0)
+    unless (T.null value) $ do
+      pushText da fm' penX ty value fg
 
 -- | Bare field: the box fills the node rect with no caption or icon chrome.
 -- Callers place their own label beside it.

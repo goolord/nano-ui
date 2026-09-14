@@ -9,6 +9,8 @@ module NanoUI.Frame.Spans
   , widgetTextSpans
   , widgetTextPlacements
   , forWidgetTextPlacements_
+  , selectableTextGeometry
+  , selectableTextPlacement
   , collectNodeTextSpans
   , sliderValue
   , walkChildSpans
@@ -50,6 +52,7 @@ import NanoUI.Font
   , measureTextIO
   , lineWidthIO
   , prepareFontMetrics
+  , isDefaultNodeFont
   )
 import NanoUI.Input (Input)
 import NanoUI.Layout.Arena
@@ -82,9 +85,9 @@ import NanoUI.Layout.Arena
   , isWidgetNode
   )
 import NanoUI.Layout.Solve (scrollBarSlotOf)
-import NanoUI.Style (AlignX (..), FontStyle (..), FontVariant (..), FontWeight (..), Padding (..), Style (..), styleBg, styleFg)
+import NanoUI.Style (AlignX (..), FontVariant (..), Padding (..), Style (..), styleBg, styleFg)
 import NanoUI.Types (Color (..), Rect (..), lerpColor, onGrid, rectH, rectIntersect, rectW, rectX, rectY)
-import NanoUI.WidgetText (isCloseButtonStyle, isMenuItemStyle, isTableHeaderStyle, textInputBareMode, textInputSearchMode)
+import NanoUI.WidgetText (isCloseButtonStyle, isMenuItemStyle, isTableHeaderStyle, textInputBareMode, textInputSearchMode, textInputSelectableMode)
 import NanoUI.WidgetText
   ( colorPickerCurrentLabel
   , colorPickerNewLabel
@@ -118,6 +121,7 @@ import NanoUI.Frame.TextEdit
   ( TextAreaGeom (..)
   , TextInputGeom (..)
   , collectTextEditMenuSpans
+  , nodeFontMetrics
   , tagTextInputClippedSpans
   , textAreaGeom
   , textAreaValue
@@ -226,7 +230,7 @@ collectClippedSpans' ctx floatCache idx nt clip arena = do
           NodeTextInput -> do
             si' <- getStyleIdx (ctxNodeArena ctx) idx
             spans <- collectNodeTextSpans ctx floatCache idx
-            if textInputBareMode si'
+            if textInputBareMode si' || textInputSelectableMode si'
               then pure (tagClippedSpans clipHere spans)
               else pure (tagTextInputClippedSpans clipHere x y w h fm spans)
           _ -> tagClippedSpans clipHere <$> collectNodeTextSpans ctx floatCache idx
@@ -317,29 +321,25 @@ collectNodeTextSpans ctx floatCache idx = do
               else do
                 let fweight = textNodeFontWeight si
                     fstyle = textNodeFontStyle si
-                    isBaseSans = fontSizeVal <= 0 && fweight == WeightNormal && fstyle == FontStyleNormal && fvar == FontRegular
-                    isBaseMono = fontSizeVal <= 0 && fweight == WeightNormal && fstyle == FontStyleNormal && fvar == FontMono
+                    isBase = isDefaultNodeFont fontSizeVal fweight fstyle fvar
+                    isBaseMono = isBase && fvar == FontMono
                 textFm <-
-                  if isBaseSans
-                    then pure (ctxFontMetrics ctx)
-                    else if isBaseMono
-                      then pure (ctxMonoFontMetrics ctx)
-                      else fst <$> ctxResolveFont ctx fontSizeVal fweight fstyle fvar
+                  if isBase
+                    then pure (if isBaseMono then ctxMonoFontMetrics ctx else ctxFontMetrics ctx)
+                    else fst <$> ctxResolveFont ctx fontSizeVal fweight fstyle fvar
                 let (ix, _) =
                       case mStripe of
                         Just _ -> tableCellInset textFm
                         Nothing -> labelContentInset textFm
-                    measureWord =
-                      if isBaseSans
-                        then \t -> fmap fst (ctxMeasureText ctx t)
-                        else if isBaseMono
-                          then lineWidthIO (ctxMonoFontMetrics ctx)
-                          else \t -> fmap fst (ctxResolveMeasure ctx fontSizeVal fweight fstyle fvar t)
+                    measureWord
+                      | isBaseMono = lineWidthIO (ctxMonoFontMetrics ctx)
+                      | isBase = \t -> fmap fst (ctxMeasureText ctx t)
+                      | otherwise = \t -> fmap fst (ctxResolveMeasure ctx fontSizeVal fweight fstyle fvar t)
                 tw0 <-
-                  if isBaseSans
-                    then fst <$> ctxMeasureText ctx txt0
-                    else if isBaseMono
-                      then lineWidthIO (ctxMonoFontMetrics ctx) txt0
+                  if isBaseMono
+                    then lineWidthIO (ctxMonoFontMetrics ctx) txt0
+                    else if isBase
+                      then fst <$> ctxMeasureText ctx txt0
                       else fst <$> ctxResolveMeasure ctx fontSizeVal fweight fstyle fvar txt0
                 let hasNewlines = T.any (== '\n') txt0
                     wrapCap
@@ -404,7 +404,7 @@ widgetHitRect ctx nt idx x y w h = do
   case nt of
     NodeTextInput -> do
       si <- getStyleIdx (ctxNodeArena ctx) idx
-      if textInputSearchMode si || textInputBareMode si
+      if textInputSearchMode si || textInputBareMode si || textInputSelectableMode si
         then pure (Rect x y w h)
         else pure (tigFieldRect (textInputGeom fm x y w h))
     NodeTextArea -> pure (tagFieldRect (textAreaGeom fm x y w h))
@@ -512,7 +512,7 @@ cachedWidgetLabel ctx nt idx w h
               && wtcHeight e == h
               && wtcAlign e == fromEnum ax -> pure (wtcPlacement e)
         _ -> do
-          placement <- computeWidgetLabel ctx nt txt si fontSizeVal ax w h
+          placement <- computeWidgetLabel ctx idx nt txt si fontSizeVal ax w h
           writeIORef
             (ctxWidgetTextCache ctx)
             (IM.insert idx (WidgetTextCacheEntry ntTag si fontSizeVal txt w h (fromEnum ax) placement) cache)
@@ -521,11 +521,11 @@ cachedWidgetLabel ctx nt idx w h
 
 -- All coordinates here are local. centeredTextY snaps the baseline offset,
 -- not the origin; final device-pixel snapping stays in the draw backend.
-computeWidgetLabel :: Context -> NodeType -> T.Text -> Int -> Float -> AlignX -> Float -> Float -> IO (Maybe WidgetTextPlacement)
-computeWidgetLabel ctx nt txt si fontSizeVal ax w h
+computeWidgetLabel :: Context -> NodeIdx -> NodeType -> T.Text -> Int -> Float -> AlignX -> Float -> Float -> IO (Maybe WidgetTextPlacement)
+computeWidgetLabel ctx idx nt txt si fontSizeVal ax w h
   | nt == NodeButton && isCloseButtonStyle si = pure Nothing
   | otherwise = do
-      source <- placementFont ctx fontSizeVal si
+      source <- nodeFontMetrics ctx idx
       fm <- prepareFontMetrics source txt
       (tw, th) <- measurePlacementText ctx fontSizeVal si fm txt
       let (ix, _) = widgetContentInset fm
@@ -544,21 +544,9 @@ computeWidgetLabel ctx nt txt si fontSizeVal ax w h
       let !placement = WidgetTextPlacement txt tx (centeredTextY fm 0 h th) used th
       pure (Just placement)
 
-placementFont :: Context -> Float -> Int -> IO FontMetrics
-placementFont ctx sz si
-  | sz <= 0 && weight == WeightNormal && style == FontStyleNormal
-      && (variant == FontRegular || variant == FontMono) =
-      pure (if variant == FontMono then ctxMonoFontMetrics ctx else ctxFontMetrics ctx)
-  | otherwise = fst <$> ctxResolveFont ctx sz weight style variant
-  where
-    weight = textNodeFontWeight si
-    style = textNodeFontStyle si
-    variant = textNodeFontVariant si
-
 measurePlacementText :: Context -> Float -> Int -> FontMetrics -> T.Text -> IO (Float, Float)
 measurePlacementText ctx sz si fm txt
-  | sz <= 0 && weight == WeightNormal && style == FontStyleNormal
-      && (variant == FontRegular || variant == FontMono) =
+  | isDefaultNodeFont sz weight style variant =
       if variant == FontMono then measureTextIO fm txt else ctxMeasureText ctx txt
   | otherwise = ctxResolveMeasure ctx sz weight style variant txt
   where
@@ -566,12 +554,38 @@ measurePlacementText ctx sz si fm txt
     style = textNodeFontStyle si
     variant = textNodeFontVariant si
 
+-- | Pure geometry of selectable text: the pen origin, centered baseline box and
+-- line height. Selectable text never scrolls, so the pen is just the node x.
+-- Paint uses this and skips the width measure; span placement appends it.
+selectableTextGeometry :: FontMetrics -> Float -> Float -> Float -> (Float, Float, Float)
+selectableTextGeometry fm x y h =
+  let lineH = layoutLineHeight fm
+   in (x, centeredTextY fm y h lineH, lineH)
+
+-- | Full selectable-text placement: geometry plus the measured content width,
+-- shared by span placement (which needs the width) and paint (via the pure
+-- geometry above).
+selectableTextPlacement ::
+  Context ->
+  Float ->
+  Int ->
+  FontMetrics ->
+  T.Text ->
+  Float ->
+  Float ->
+  Float ->
+  IO (Float, Float, Float, Float)
+selectableTextPlacement ctx sz si fm value x y h = do
+  let (penX, ty, lineH) = selectableTextGeometry fm x y h
+  (fw, _) <- measurePlacementText ctx sz si fm value
+  pure (penX, ty, fw, lineH)
+
 computeWidgetTextPlacements ::
   Context -> NodeType -> NodeIdx -> Float -> Float -> Float -> Float -> IO [(T.Text, Float, Float, Float, Float)]
 computeWidgetTextPlacements ctx nt idx x y w h = do
   fontSizeVal <- getNodeFontSize (ctxNodeArena ctx) idx
   si <- getStyleIdx (ctxNodeArena ctx) idx
-  fm <- placementFont ctx fontSizeVal si
+  fm <- nodeFontMetrics ctx idx
   let (ix, iy) = widgetContentInset fm
       measureTxt = measurePlacementText ctx fontSizeVal si fm
   case nt of
@@ -588,6 +602,10 @@ computeWidgetTextPlacements ctx nt idx x y w h = do
         ]
     NodeSlider -> pure []
     NodeTextInput
+      | textInputSelectableMode si -> do
+          value <- textInputValue ctx idx
+          (penX, ty, fw, lineH) <- selectableTextPlacement ctx fontSizeVal si fm value x y h
+          pure [(value, penX, ty, fw, lineH)]
       | textInputBareMode si -> do
           value <- textInputValue ctx idx
           focus <- textInputFocused ctx idx

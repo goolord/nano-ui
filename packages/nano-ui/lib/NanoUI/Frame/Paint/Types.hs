@@ -16,7 +16,7 @@ import NanoUI.Context
   ( Context (..)
   )
 import NanoUI.Draw (DrawArena)
-import NanoUI.Font (FontMetrics)
+import NanoUI.Font (FontMetrics, isDefaultNodeFont)
 import NanoUI.Layout.Arena
   ( NodeArena
   , NodeIdx
@@ -93,9 +93,6 @@ popupPanelRect ctx = go
 {-# INLINE resolveNodeFont #-}
 resolveNodeFont :: PaintEnv -> Float -> FontWeight -> FontStyle -> FontVariant -> IO (FontMetrics, Bool)
 resolveNodeFont env fontSizeVal fweight fstyle fvar
-  | isBaseSans = pure (peFontMetrics env, False)
-  | isBaseMono = pure (peMonoMetrics env, False)
+  | isDefaultNodeFont fontSizeVal fweight fstyle fvar =
+      pure (if fvar == FontMono then peMonoMetrics env else peFontMetrics env, False)
   | otherwise = ctxResolveFont (peContext env) fontSizeVal fweight fstyle fvar
-  where
-    isBaseSans = fontSizeVal <= 0 && fweight == WeightNormal && fstyle == FontStyleNormal && fvar == FontRegular
-    isBaseMono = fontSizeVal <= 0 && fweight == WeightNormal && fstyle == FontStyleNormal && fvar == FontMono

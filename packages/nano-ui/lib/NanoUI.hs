@@ -270,6 +270,13 @@ module NanoUI
   , label_
   , labelWith
   , labelEx
+  , selectableText
+  , selectableTextWith
+  , selectableTextEx
+  , menuActionCut
+  , menuActionCopy
+  , menuActionPaste
+  , menuActionSelectAll
   , button
   , button'
   , buttonWith
@@ -850,6 +857,9 @@ import NanoUI.Widgets
   , label_
   , labelWith
   , labelEx
+  , selectableText
+  , selectableTextWith
+  , selectableTextEx
   , modal
   , muted
   , mono
@@ -945,6 +955,7 @@ import NanoUI.Widgets
   , paneGrid
   )
 import NanoUI.Widgets.Node (setChanged, setClicked, setSubmitted)
+import NanoUI.Widgets.TextCommon (menuActionCopy, menuActionCut, menuActionPaste, menuActionSelectAll)
 import NanoUI.Widgets.Combinators (stripedRow)
 import NanoUI.Widgets.Drop
   ( DropTarget (..)

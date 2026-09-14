@@ -31,6 +31,8 @@ module NanoUI.Context
   , setTextFieldClickCell
   , getTextInputMenu
   , setTextInputMenu
+  , setTextEditLastAction
+  , takeTextEditLastAction
   , getSelectDropPress
   , setSelectDropPress
   , setOpenSelectDrop
@@ -98,6 +100,7 @@ module NanoUI.Context
   , getScrollOffset2D
   , setScrollOffset2D
   , setScrollConfig
+  , defaultScrollConfig
   , linkScrollAxes
   , getPrevRect
   , getPrevClipRect
@@ -378,6 +381,17 @@ getTextInputMenu ctx = isTextInputMenu <$> readIORef (ctxInteractionState ctx)
 {-# INLINE setTextInputMenu #-}
 setTextInputMenu :: Context -> Maybe TextInputMenu -> IO ()
 setTextInputMenu ctx v = modifyIORef' (ctxInteractionState ctx) (\s -> s {isTextInputMenu = v})
+
+{-# INLINE setTextEditLastAction #-}
+setTextEditLastAction :: Context -> Maybe (WidgetId, Int) -> IO ()
+setTextEditLastAction ctx v = modifyIORef' (ctxInteractionState ctx) (\s -> s {isTextEditLastAction = v})
+
+{-# INLINE takeTextEditLastAction #-}
+takeTextEditLastAction :: Context -> IO (Maybe (WidgetId, Int))
+takeTextEditLastAction ctx = do
+  act <- isTextEditLastAction <$> readIORef (ctxInteractionState ctx)
+  modifyIORef' (ctxInteractionState ctx) (\s -> s {isTextEditLastAction = Nothing})
+  pure act
 
 {-# INLINE getSelectDropPress #-}
 getSelectDropPress :: Context -> IO Bool

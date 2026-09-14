@@ -9,6 +9,10 @@ module NanoUI.Widgets.TextCommon
   , isCtrlCombo
   , dispatchCtrlChar
     -- * Menu actions
+  , menuActionCut
+  , menuActionCopy
+  , menuActionPaste
+  , menuActionSelectAll
   , menuActionEnabled
   , dispatchMenuAction
     -- * Selection and caret helpers
@@ -98,26 +102,32 @@ dispatchCtrlChar onSelectAll onCopy onCut onPaste s ch
   | T.elem ch "vV\x16" = onPaste s
   | otherwise = pure s
 
+-- | Context-menu action indices, shared by the dispatchers, the enablement
+-- checks and demo code so the numeric codes live in exactly one place.
+menuActionCut, menuActionCopy, menuActionPaste, menuActionSelectAll :: Int
+menuActionCut = 0
+menuActionCopy = 1
+menuActionPaste = 2
+menuActionSelectAll = 3
+
 -- | Check if a context menu action is enabled (0=Cut, 1=Copy, 2=Paste, 3=Select All).
 {-# INLINE menuActionEnabled #-}
 menuActionEnabled :: Bool -> Maybe Text -> Int -> Bool
-menuActionEnabled hasText mclip item =
-  case item of
-    0 -> hasText
-    1 -> hasText
-    2 -> maybe False (not . T.null) mclip
-    3 -> hasText
-    _ -> False
+menuActionEnabled hasText mclip item
+  | item == menuActionCut = hasText
+  | item == menuActionCopy = hasText
+  | item == menuActionPaste = maybe False (not . T.null) mclip
+  | item == menuActionSelectAll = hasText
+  | otherwise = False
 
 -- | Dispatch context menu action (0=Cut, 1=Copy, 2=Paste, 3=Select All).
 dispatchMenuAction :: Monad m => (s -> m s) -> (s -> m ()) -> (s -> m s) -> (s -> s) -> Int -> s -> m s
-dispatchMenuAction onCut onCopy onPaste onSelectAll item s =
-  case item of
-    0 -> onCut s
-    1 -> onCopy s >> pure s
-    2 -> onPaste s
-    3 -> pure (onSelectAll s)
-    _ -> pure s
+dispatchMenuAction onCut onCopy onPaste onSelectAll item s
+  | item == menuActionCut = onCut s
+  | item == menuActionCopy = onCopy s >> pure s
+  | item == menuActionPaste = onPaste s
+  | item == menuActionSelectAll = pure (onSelectAll s)
+  | otherwise = pure s
 
 -- | Copy buffer text (either selected range or full buffer) to clipboard.
 copyBufferText :: Context -> TB.Cursor -> TB.TextBuffer -> IO ()

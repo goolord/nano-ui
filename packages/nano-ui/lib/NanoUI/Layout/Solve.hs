@@ -47,6 +47,7 @@ import NanoUI.Font
   , menuOuterPad
   , selectPadding
   , layoutLineHeight
+  , isDefaultNodeFont
   , sliderTrackHeight
   , sliderHandleDiameter
   , sliderHandleSlack
@@ -121,6 +122,7 @@ import NanoUI.WidgetText
   , textInputPlaceholder
   , textInputSearchMode
   , textInputBareMode
+  , textInputSelectableMode
   , searchFieldReserveW
   , isTableHeaderStyle
   , isMenuItemStyle
@@ -162,7 +164,7 @@ textNodeMeasurer na fm monoFm measure resolveFont idx = do
       weight = textNodeFontWeight si
       style = textNodeFontStyle si
   (metrics, measureLine) <-
-    if size <= 0 && weight == WeightNormal && style == FontStyleNormal
+    if isDefaultNodeFont size weight style variant
       then pure (if variant == FontMono then monoFm else fm, measure)
       else resolveFont size weight style variant
   pure (TextMeasurer metrics variant measureLine)
@@ -311,7 +313,7 @@ measureNode a na fm monoFm measure resolveFont lookupMeasure idx = do
       case mFn of
         Just fn -> measureCustomNode na fm fn idx
         Nothing -> measureImage na idx
-    _ -> measureWidget na fm measure idx
+    _ -> measureWidget na fm monoFm measure resolveFont idx
 
 measureCustomNode ::
   NodeArena ->
@@ -475,8 +477,8 @@ measureBareField :: FontMetrics -> (Float, Float, Float, Float)
 measureBareField fm =
   (24, textInputFieldHeight fm, 0, 0)
 
-measureWidget :: NodeArena -> FontMetrics -> (Text -> IO (Float, Float)) -> NodeIdx -> IO ()
-measureWidget na fm measure idx = do
+measureWidget :: NodeArena -> FontMetrics -> FontMetrics -> (Text -> IO (Float, Float)) -> FontResolver -> NodeIdx -> IO ()
+measureWidget na fm monoFm measure resolveFont idx = do
   nt <- getNodeType na idx
   txt <- getText na idx
   si <- getStyleIdx na idx
@@ -501,7 +503,9 @@ measureWidget na fm measure idx = do
           NodeSlider -> labelContentInset' fm
           NodeCheckbox -> labelContentInset' fm
           NodeRadio -> labelContentInset' fm
-          NodeTextInput -> labelContentInset' fm
+          NodeTextInput
+            | textInputSelectableMode si -> (0, 0)
+            | otherwise -> labelContentInset' fm
           NodeTextArea -> labelContentInset' fm
           _ -> widgetPadding fm
       labelContentInset' fm' = let (cx, cy) = labelContentInset fm' in (2 * cx, cy)
@@ -536,6 +540,12 @@ measureWidget na fm measure idx = do
         (mw, mh, extraH) <- colorPickerMeasureSize fm measure
         pure (mw, mh, 0, extraH)
       NodeTextInput
+        | textInputSelectableMode si -> do
+            -- Size with the node's own font (paint and span placement resolve
+            -- it too); the ambient `measure` is the default font only.
+            measurer <- textNodeMeasurer na fm monoFm measure resolveFont idx
+            (mw, mh) <- measureFontLine measurer (if T.null txt then " " else txt)
+            pure (mw, mh, 0, 0)
         | textInputBareMode si ->
             pure (measureBareField fm)
         | textInputSearchMode si ->

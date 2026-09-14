@@ -41,6 +41,7 @@ module NanoUI.Font
   , alignedTextPen
   , textInkEnd
   , layoutLineHeight
+  , isDefaultNodeFont
   , checkboxBoxSize
   , checkboxLeading
   , treeItemPadding
@@ -77,7 +78,7 @@ import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 import NanoUI.Types (Rect (..), onGrid)
-import NanoUI.Style (AlignX (..), Padding (..))
+import NanoUI.Style (AlignX (..), FontStyle (..), FontVariant (..), FontWeight (..), Padding (..))
 
 tabSentinelChar :: Char
 tabSentinelChar = '\x2409'
@@ -515,6 +516,20 @@ measureText fm txt =
 -- | Line width for hit testing and centering.
 textDisplayWidth :: FontMetrics -> Text -> Float
 textDisplayWidth fm txt = lineWidth fm txt
+
+-- | The one policy for "does this node use the ambient base font, or does it
+-- need the host resolver?". A zero size with a plain weight/style and the
+-- regular or mono variant resolves to the pre-read base metrics; everything
+-- else (heading/muted/danger, bold, italic, explicit size) defers to the host.
+-- Layout, paint, span placement and hit testing all share this so they cannot
+-- pick different faces for the same node.
+{-# INLINE isDefaultNodeFont #-}
+isDefaultNodeFont :: Float -> FontWeight -> FontStyle -> FontVariant -> Bool
+isDefaultNodeFont size weight style variant =
+  size <= 0
+    && weight == WeightNormal
+    && style == FontStyleNormal
+    && (variant == FontRegular || variant == FontMono)
 
 -- Caret and click index using the same advances and kerning as pushText,
 -- so the caret lands exactly where the glyph to its left was drawn.

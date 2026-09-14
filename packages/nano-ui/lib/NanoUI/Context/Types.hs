@@ -348,6 +348,7 @@ data InteractionState = InteractionState
   , isTextInputDrag :: !(Maybe TextInputDrag)
   , isTextFieldClickCell :: !(Maybe TextFieldClickCell)
   , isTextInputMenu :: !(Maybe TextInputMenu)
+  , isTextEditLastAction :: !(Maybe (WidgetId, Int))
   , isSelectDropPress :: {-# UNPACK #-} !Bool
   , isOpenSelectDrop :: !(Maybe (WidgetId, Rect))
   , isMenuPointerGesture :: {-# UNPACK #-} !Bool
@@ -362,6 +363,7 @@ initialInteractionState = InteractionState
   , isTextInputDrag = Nothing
   , isTextFieldClickCell = Nothing
   , isTextInputMenu = Nothing
+  , isTextEditLastAction = Nothing
   , isSelectDropPress = False
   , isOpenSelectDrop = Nothing
   , isMenuPointerGesture = False

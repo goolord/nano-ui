@@ -14,6 +14,8 @@ module NanoUI.WidgetText
   , textInputSearchMode
   , textInputFlagBare
   , textInputBareMode
+  , textInputFlagSelectable
+  , textInputSelectableMode
   , textInputSearchBody
   , comboTextClip
   , searchFieldReserveW
@@ -177,6 +179,15 @@ textInputFlagBare = 0x08000000
 {-# INLINE textInputBareMode #-}
 textInputBareMode :: Int -> Bool
 textInputBareMode si = si .&. textInputFlagBare /= 0
+
+-- | Marks a @NodeTextInput@ as a selectable text label: read-only, caption-less,
+-- chrome-less, sized to its text content, with mouse drag-to-select and copy.
+textInputFlagSelectable :: Int
+textInputFlagSelectable = 0x10000000
+
+{-# INLINE textInputSelectableMode #-}
+textInputSelectableMode :: Int -> Bool
+textInputSelectableMode si = si .&. textInputFlagSelectable /= 0
 
 -- | Body of a search field: the live value, or the placeholder while empty and
 -- unfocused. @ph@ is the caller-supplied placeholder, not the derived one used

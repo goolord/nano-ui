@@ -33,7 +33,7 @@ package nano-ui-sdl
 
 package nano-ui-demo
   flags: +sdl
-  ghc-options: -Werror -mavx2 -funbox-strict-fields -fmax-worker-args=32 -fspecialise-aggressively -flate-specialise -optc-ffast-math
+  ghc-options: -Werror -mavx2
 
 -- Treat warnings as errors in development, without imposing that policy on
 -- downstream builds of the published packages.

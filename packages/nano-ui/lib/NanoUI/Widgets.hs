@@ -24,6 +24,9 @@ module NanoUI.Widgets
   , label
   , labelWith
   , labelEx
+  , selectableText
+  , selectableTextWith
+  , selectableTextEx
   , button
   , button'
   , buttonWith
@@ -433,6 +436,9 @@ import NanoUI.Widgets.TextInput
   , applyTextInputMenuAction
   , processTextInput
   , searchFieldLayout
+  , selectableText
+  , selectableTextWith
+  , selectableTextEx
   , textInputLayout
   )
 import NanoUI.Widgets.TextArea

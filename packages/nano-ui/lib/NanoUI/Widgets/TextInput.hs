@@ -3,23 +3,34 @@ module NanoUI.Widgets.TextInput
   , textInputLayout
   , searchFieldLayout
   , processTextInput
+  , processSelectableTextInput
   , applyTextInputMenuAction
+  , isSelectableTextInput
+  , selectableText
+  , selectableTextWith
+  , selectableTextEx
   )
 where
 
+import Control.Monad (when)
+import Data.Bits ((.|.))
 import Data.Char (isPrint)
 import Data.IORef (writeIORef)
 import Data.IntMap.Strict qualified as IM
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
+import Effectful (Eff, type (:>))
 import NanoUI.Context
   ( Context (..)
   , getStore
   , intKey
   , markDirty
+  , registerFocusable
   , setStore
   , setTextInputMenu
   )
+import NanoUI.Frame.Hit (findNodeByWidgetId)
 import NanoUI.Id (WidgetId)
 import NanoUI.Input
   ( Input (..)
@@ -30,8 +41,13 @@ import NanoUI.Input
   , inputKeys
   , inputModifiers
   )
+import NanoUI.Layout.Arena (NodeType (..), getNodeType, getStyleIdx)
+import NanoUI.Monad (Ui, askContext, askDefaultLayout, askInput, nextId, uiIO)
 import NanoUI.Store (WidgetStore (..), slotAnchor, slotCursor, slotKey)
 import NanoUI.Style (Layout (..), Sizing (..), defaultLayout)
+import NanoUI.WidgetText (packTextNodeStyleFull, textInputFlagSelectable, textInputSelectableMode)
+import NanoUI.Widgets.Behavior (keyboardFocused)
+import NanoUI.Widgets.Node (Response (..), addWidgetStyled)
 import NanoUI.Widgets.TextBuffer qualified as TB
 import NanoUI.Widgets.TextCommon
   ( copyBufferText
@@ -107,8 +123,20 @@ textInputPaste ctx s = do
   mbuf' <- pasteBufferText ctx False anc buf
   pure (maybe s (fromBuffer Nothing) mbuf')
 
+-- | True when the widget is a text input in selectable (read-only label) mode.
+isSelectableTextInput :: Context -> WidgetId -> IO Bool
+isSelectableTextInput ctx wid =
+  findNodeByWidgetId ctx wid >>= \case
+    Nothing -> pure False
+    Just idx -> do
+      nt <- getNodeType (ctxNodeArena ctx) idx
+      if nt /= NodeTextInput
+        then pure False
+        else textInputSelectableMode <$> getStyleIdx (ctxNodeArena ctx) idx
+
 applyTextInputMenuAction :: Context -> WidgetId -> Int -> IO ()
 applyTextInputMenuAction ctx wid item = do
+  isSelectable <- isSelectableTextInput ctx wid
   store <- getStore ctx
   let
     key = intKey wid
@@ -117,13 +145,17 @@ applyTextInputMenuAction ctx wid item = do
     anchor = IM.findWithDefault cursor (slotKey slotAnchor key) (storeInt store)
     s0 = TextInputState text cursor anchor
   s1 <-
-    dispatchMenuAction
-      (textInputCut ctx)
-      (textInputCopy ctx)
-      (textInputPaste ctx)
-      selectAllTextInput
-      item
-      s0
+    let
+      cutF = if isSelectable then pure else textInputCut ctx
+      pasteF = if isSelectable then pure else textInputPaste ctx
+     in
+      dispatchMenuAction
+        cutF
+        (textInputCopy ctx)
+        pasteF
+        selectAllTextInput
+        item
+        s0
   setStore
     ctx
     ( store
@@ -150,7 +182,7 @@ processTextInput ctx inp s0 = do
     chars = inputChars inp
   s1 <-
     if ctrl
-      then T.foldlM' (handleCtrlChar ctx) s0 chars
+      then T.foldlM' (handleCtrlChar ctx False) s0 chars
       else pure s0
   let
     filtered = T.filter (\ch -> not (isCtrlCombo ctrl ch) && isPrint ch && ch /= '\n') chars
@@ -160,13 +192,53 @@ processTextInput ctx inp s0 = do
     word = ctrl || alt
   pure (foldInputKeys (applyKey word shift) s2 keys)
 
-handleCtrlChar :: Context -> TextInputState -> Char -> IO TextInputState
-handleCtrlChar ctx =
+handleCtrlChar :: Context -> Bool -> TextInputState -> Char -> IO TextInputState
+handleCtrlChar ctx isSelectable =
   dispatchCtrlChar
     (pure . selectAllTextInput)
     (textInputCopy ctx)
-    (textInputCut ctx)
-    (textInputPaste ctx)
+    (if isSelectable then pure else textInputCut ctx)
+    (if isSelectable then pure else textInputPaste ctx)
+
+-- | Read-only input processing for selectable text labels: allows select-all (Ctrl+A),
+-- copying (Ctrl+C), and arrow/Home/End navigation (with Shift selection), but
+-- ignores character insertion, backspace, delete, cut, and paste.
+processSelectableTextInput :: Context -> Input -> TextInputState -> IO TextInputState
+processSelectableTextInput ctx inp s0 = do
+  let
+    mods = inputModifiers inp
+    ctrl = modCtrl mods
+    alt = modAlt mods
+    shift = modShift mods
+    keys = inputKeys inp
+    chars = inputChars inp
+  s1 <-
+    if ctrl
+      then T.foldlM' (handleCtrlChar ctx True) s0 chars
+      else pure s0
+  let word = ctrl || alt
+  pure (foldInputKeys (applyNavKeyState word shift) s1 keys)
+
+-- | State-level navigation for a fresh buffer; delegates to the shared core.
+applyNavKeyState :: Bool -> Bool -> TextInputState -> Key -> TextInputState
+applyNavKeyState word shift s key =
+  let (buf, anc) = toBuffer s
+   in applyNavKey word shift buf anc s key
+
+-- | Navigation keys on an already-opened buffer, shared by editable and
+-- read-only text inputs so `applyKey` reuses the buffer it just built.
+applyNavKey :: Bool -> Bool -> TB.TextBuffer -> TB.Cursor -> TextInputState -> Key -> TextInputState
+applyNavKey word shift buf anc s key =
+  case key of
+    KeyLeft
+      | word -> moveWith shift buf anc TB.moveWordLeft
+      | otherwise -> moveWith shift buf anc TB.moveLeft
+    KeyRight
+      | word -> moveWith shift buf anc TB.moveWordRight
+      | otherwise -> moveWith shift buf anc TB.moveRight
+    KeyHome -> moveWith shift buf anc TB.moveToBOL
+    KeyEnd -> moveWith shift buf anc TB.moveToEOL
+    _ -> s
 
 -- Host text events may contain a whole IME commit. Convert the state once and
 -- replace the selection once rather than rebuilding the buffer per character.
@@ -199,15 +271,7 @@ applyKey word shift s key =
       KeyDelete
         | word -> moveWith shift buf anc TB.deleteNextWord
         | otherwise -> deleteWith TB.deleteChar
-      KeyLeft
-        | word -> moveWith shift buf anc TB.moveWordLeft
-        | otherwise -> moveWith shift buf anc TB.moveLeft
-      KeyRight
-        | word -> moveWith shift buf anc TB.moveWordRight
-        | otherwise -> moveWith shift buf anc TB.moveRight
-      KeyHome -> moveWith shift buf anc TB.moveToBOL
-      KeyEnd -> moveWith shift buf anc TB.moveToEOL
-      _ -> s
+      _ -> applyNavKey word shift buf anc s key
 
 moveWith ::
   Bool
@@ -217,3 +281,61 @@ moveWith ::
   -> TextInputState
 moveWith shift buf anc f =
   fromBuffer (if shift then Just (TB.cursorCol anc) else Nothing) (f buf)
+
+-- | Selectable text label: displays text that can be highlighted/selected with the
+-- mouse and copied to the clipboard with Ctrl+C, but cannot be edited.
+selectableText :: Ui :> es => Text -> Eff es Response
+selectableText = selectableTextWith id
+
+-- | Selectable text label with a layout modifier.
+selectableTextWith :: Ui :> es => (Layout -> Layout) -> Text -> Eff es Response
+selectableTextWith f txt = do
+  base <- askDefaultLayout
+  selectableTextEx (f base) txt
+
+-- | Selectable text label with an explicit layout.
+selectableTextEx :: Ui :> es => Layout -> Text -> Eff es Response
+selectableTextEx layout txt = do
+  wid <- nextId
+  ctx <- askContext
+  uiIO $ registerFocusable ctx wid
+  inp <- askInput
+  store <- uiIO (getStore ctx)
+  let key = intKey wid
+      newLen = T.length txt
+      oldTxt = IM.findWithDefault "" key (storeText store)
+      store' =
+        if oldTxt /= txt
+          then
+            let cur = min newLen (fromMaybe newLen (IM.lookup (slotKey slotCursor key) (storeInt store)))
+                anc = min newLen (fromMaybe cur (IM.lookup (slotKey slotAnchor key) (storeInt store)))
+             in store
+                  { storeText = IM.insert key txt (storeText store)
+                  , storeInt =
+                      IM.insert (slotKey slotCursor key) cur $
+                        IM.insert (slotKey slotAnchor key) anc (storeInt store)
+                  }
+          else store
+  when (oldTxt /= txt) $ uiIO $ setStore ctx store'
+  let cursor = min newLen (fromMaybe newLen (IM.lookup (slotKey slotCursor key) (storeInt store')))
+      anchor = min newLen (fromMaybe cursor (IM.lookup (slotKey slotAnchor key) (storeInt store')))
+  isFocus <- keyboardFocused wid
+  when isFocus $ do
+    newState <- uiIO (processSelectableTextInput ctx inp (TextInputState txt cursor anchor))
+    let newCursor = min newLen (tisCursor newState)
+        newAnchor = min newLen (tisAnchor newState)
+    when (newCursor /= cursor || newAnchor /= anchor) $
+      uiIO $ setStore ctx (store'
+        { storeInt = IM.insert (slotKey slotCursor key) newCursor
+                   $ IM.insert (slotKey slotAnchor key) newAnchor (storeInt store')
+        })
+  let styleIdx =
+        textInputFlagSelectable
+          .|. packTextNodeStyleFull
+                (layoutFontVariant layout)
+                (layoutFontWeight layout)
+                (layoutFontStyle layout)
+                (layoutTextDecoration layout)
+                0
+  addWidgetStyled wid NodeTextInput txt 0 layout styleIdx Nothing
+
