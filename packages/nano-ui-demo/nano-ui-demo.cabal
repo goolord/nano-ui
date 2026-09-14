@@ -118,13 +118,11 @@ executable nano-ui-sdl-profile
     if !flag(sdl)
         buildable: False
 
-executable nano-ui-sdl-terminal
+common terminal
     import:           extensions
     import:           ghc-options
     import:           rts-options
     import:           warnings
-    main-is:          SdlTerminal.hs
-    ghc-options:      -main-is SdlTerminal
     c-sources:        app/terminal-size.c
     build-depends:
         base ^>=4.22.0.0,
@@ -138,6 +136,18 @@ executable nano-ui-sdl-terminal
     hs-source-dirs:   app
     if !flag(sdl) || os(windows)
         buildable: False
+
+executable nano-ui-sdl-terminal
+    import:           terminal
+    main-is:          SdlTerminal.hs
+    ghc-options:      -main-is SdlTerminal
+
+test-suite nano-ui-terminal-test
+    import:           terminal
+    type:             exitcode-stdio-1.0
+    main-is:          TerminalTest.hs
+    hs-source-dirs:   test
+    other-modules:    SdlTerminal
 
 executable nano-ui-sdl-notepad
     import:           extensions

@@ -234,9 +234,14 @@ Ctrl+C/D/Z; the shell and terminal driver handle editing and job control.
 The golfed emulator is fixed at 80×24 with a monospace font, UTF-8 decoding,
 wrapping, basic ANSI cursor movement and erasing, and 2,000 lines of scrollback.
 Use the mouse wheel or touchpad to browse history; typing returns to the live
-prompt. New output preserves your reading position. It is monochrome, without
-wide-character layout or full VT100 compatibility. Close the window or exit the
+prompt. New output preserves your reading position. It supports 16 ANSI colors,
+bold and inverse text, and advertises `TERM=ansi`; 256-color/truecolor sequences
+are consumed without changing the pen. There is no wide-character layout or
+full VT100 compatibility. Close the window or exit the
 shell to quit. The five-line C shim only sets the PTY size.
+
+Run parser, color, scrollback and PTY regression checks with
+`cabal test nano-ui-terminal-test --test-show-details=direct`.
 
 ### Reproducible Nix Flake
 
