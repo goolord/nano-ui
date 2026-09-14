@@ -10,6 +10,9 @@ module NanoUI.Backend.Rgfw
   , tomorrowMinLightTheme
   , tomorrowNightMinDarkTheme
   , tomorrowMidnightMinDarkTheme
+  , rgfwCoreTheme
+  , newRgfwContext
+  , applyRgfwTheme
   , RgfwDebugSnapshot (..)
   , RgfwDebugSampler
   , RgfwDebugHost (..)
@@ -27,6 +30,7 @@ module NanoUI.Backend.Rgfw
 
 import Data.Typeable (Typeable)
 import NanoUI (NanoUI)
+import NanoUI.Rgfw.Context (applyRgfwTheme, newRgfwContext)
 import NanoUI.Rgfw.Debug
   ( RgfwDebugHost (..)
   , RgfwDebugSampler
@@ -56,6 +60,7 @@ import NanoUI.Rgfw.Theme
   , tomorrowMinLightTheme
   , tomorrowNightMinDarkTheme
   , tomorrowMidnightMinDarkTheme
+  , rgfwCoreTheme
   )
 
 runRgfwApp :: RgfwOptions -> NanoUI () -> IO ()

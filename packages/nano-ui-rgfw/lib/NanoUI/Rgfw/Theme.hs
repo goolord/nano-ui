@@ -5,9 +5,10 @@ module NanoUI.Rgfw.Theme
   , tomorrowMinLightTheme
   , tomorrowNightMinDarkTheme
   , tomorrowMidnightMinDarkTheme
+  , rgfwCoreTheme
   ) where
 
-import NanoUI (Color, colorRGBA)
+import NanoUI (Color, Style (..), Theme (..), colorRGBA, defaultTheme)
 
 -- | Pure color theme.
 -- All visual geometry is strictly 1:1 rectangles matching bounding/collision boxes.
@@ -110,3 +111,30 @@ defaultDarkTheme = tomorrowNightMinDarkTheme
 
 defaultLightTheme :: RgfwTheme
 defaultLightTheme = tomorrowMinLightTheme
+
+-- | Core widget theme for an RGFW palette. Every style is square (corner radius
+-- 0, 1px border); status and series colours keep the core defaults.
+rgfwCoreTheme :: RgfwTheme -> Theme
+rgfwCoreTheme th =
+  defaultTheme
+    { themeWindow = thBackground th
+    , themePanel = panel
+    , themeFloatingWindow = panel
+    , themeButton = square (thWidgetBg th) (thWidgetHover th) (thWidgetActive th)
+    , themeInput = square (thBackground th) (thBackground th) (thBackground th)
+    , themeSeparator = thBorder th
+    , themeAccent = thPrimary th
+    , themeMuted = thTextMuted th
+    }
+  where
+    panel = square (thPanelBg th) (thPanelBg th) (thPanelBg th)
+    square bg hover active =
+      Style
+        { styleBg = bg
+        , styleFg = thText th
+        , styleBorder = thBorder th
+        , styleBorderWidth = 1
+        , styleCornerRadius = 0
+        , styleHoverBg = hover
+        , styleActiveBg = active
+        }

@@ -137,7 +137,7 @@ The repository is organized as a Cabal multi-package workspace:
 | :--- | :--- | :--- | :--- |
 | **`nano-ui`** | Core Engine | Core DSL, flex layout, damage tracker, test harness | `NanoUI`, `NanoUI.Testing` |
 | **`nano-ui-sdl`** | Desktop Window | Hardware-accelerated SDL3 & SDL3_ttf host | `NanoUI.Backend.Sdl` |
-| **`nano-ui-rgfw`** | Standalone Window | Self-contained RGFW host with Cozette bitmap font | `NanoUI.Backend.Rgfw` |
+| **`nano-ui-rgfw`** | Standalone Window | Self-contained RGFW OpenGL host with Cozette bitmap font | `NanoUI.Backend.Rgfw` |
 | **`nano-ui-rgfw-bindings`** | C Bindings | Low-level C FFI bindings for RGFW | `NanoUI.Rgfw.Native` |
 | **`nano-ui-diagrams`** | Graphics Bridge | Vector graphics and plotting via `diagrams-lib` | `NanoUI.Diagrams` |
 | **`nano-ui-form`** | Form Framework | Composable type-safe formlets built on `ditto` | `NanoUI.Form` |
@@ -195,7 +195,7 @@ For the source map, focused test commands, and extension conventions, see the
 | Backend | Cabal Flag | System Dependencies | Supported OS |
 | :--- | :--- | :--- | :--- |
 | **SDL3 Window** (`nano-ui-sdl`) | `-fsdl` | `sdl3 >= 3.2`, `sdl3-ttf >= 3.2`, `pkg-config` | Linux, macOS, Windows |
-| **RGFW Window** (`nano-ui-rgfw`) | None (Default) | C compiler (Bundled RGFW) | Linux, macOS, Windows |
+| **RGFW Window** (`nano-ui-rgfw`) | None (Default) | C compiler (Bundled RGFW), OpenGL 3.2 driver | Linux, macOS, Windows |
 | **SIMD Acceleration** | `-fsimd` | x86-64 CPU with AVX2 support | x86-64 |
 
 ### Cabal Commands

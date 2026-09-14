@@ -2,7 +2,7 @@ cabal-version:      3.4
 name:               nano-ui-rgfw
 version:            0.1.0.0
 synopsis:           Lean, no-frills RGFW backend for nano-ui with single-pass layout
-description:        Zero-dependency, high-performance RGFW software backend for nano-ui using single-pass layout, exact collision bounding boxes, and embedded Cozette bitmap font.
+description:        Zero-dependency, high-performance RGFW OpenGL backend for nano-ui using single-pass layout, exact collision bounding boxes, and embedded Cozette bitmap font.
 license:            MIT
 license-file:       LICENSE
 author:             goolord
@@ -36,12 +36,15 @@ library
     import:           warnings
     exposed-modules:
         NanoUI.Backend.Rgfw
+        NanoUI.Rgfw.Context
         NanoUI.Rgfw.Debug
         NanoUI.Rgfw.Font.Cozette
+        NanoUI.Rgfw.Gl
         NanoUI.Rgfw.Render
         NanoUI.Rgfw.Session
         NanoUI.Rgfw.Surface
         NanoUI.Rgfw.Theme
+    c-sources:        cbits/nano_ui_gl.c
     build-depends:
         base ^>=4.22.0.0,
         bytestring ^>=0.12,

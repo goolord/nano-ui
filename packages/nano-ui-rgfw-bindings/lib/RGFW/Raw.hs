@@ -13,6 +13,8 @@ module RGFW.Raw
   , c_RGFW_createSurface
   , c_RGFW_window_blitSurface
   , c_RGFW_surface_free
+  , c_rgfw_create_window_gl
+  , c_RGFW_window_swapBuffers_OpenGL
   , c_rgfw_event_type
   , c_rgfw_event_mouse_x
   , c_rgfw_event_mouse_y
@@ -122,6 +124,12 @@ foreign import ccall "RGFW_window_blitSurface"
 
 foreign import ccall "RGFW_surface_free"
   c_RGFW_surface_free :: Ptr RGFW_surface -> IO ()
+
+foreign import ccall "rgfw_create_window_gl"
+  c_rgfw_create_window_gl :: CString -> CInt -> CInt -> CInt -> CInt -> CUInt -> CInt -> CInt -> IO (Ptr RGFW_window)
+
+foreign import ccall "RGFW_window_swapBuffers_OpenGL"
+  c_RGFW_window_swapBuffers_OpenGL :: Ptr RGFW_window -> IO ()
 
 -- Accessor functions from rgfw_shim.c
 foreign import ccall "rgfw_shim.c rgfw_event_type"

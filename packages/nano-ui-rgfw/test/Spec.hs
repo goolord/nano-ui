@@ -41,7 +41,10 @@ import NanoUI
   , Sizing (..)
   , V2 (..)
   , box
+  , button
+  , checkbox
   , colorRGBA
+  , column
   , defaultLayout
   , drawing
   , fixedWH
@@ -55,7 +58,8 @@ import NanoUI
   , rectY
   , window
   )
-import Foreign.Storable (peekElemOff)
+import Foreign.Marshal.Alloc (allocaBytes, callocBytes, free)
+import Foreign.Storable (peekByteOff, peekElemOff)
 import NanoUI.Input (Input (..), Modifiers (..), emptyInput)
 import NanoUI.Widgets.TextArea (buffer, initTextAreaState, processTextArea, selectionAnchor)
 import NanoUI.Widgets.TextBuffer as TB (Cursor (..), getCursor, toText)
@@ -107,8 +111,11 @@ import NanoUI.Rgfw.Font.Cozette
   , cozetteLineHeight
   , cozetteMetrics
   , getCozetteFont
+  , renderGlyphScaledToBuffer
   , scale2x
   )
+import NanoUI.Rgfw.Context (newRgfwContext)
+import NanoUI.Rgfw.Gl (GlyphAtlas (..), atlasCell, bakeGlyphAtlas, glyphAtlasFor, writeSpanQuads)
 import NanoUI.Rgfw.Render (renderArena)
 import NanoUI.Rgfw.Session (defaultRgfwOptions, optScale)
 import NanoUI.Rgfw.Surface
@@ -750,6 +757,96 @@ testTriangleRaster =
       let expected = [if covered x y then red else 0 | y <- [0 .. 7 :: Int], x <- [0 .. 7]]
       assert ("triangle raster " ++ name) (pixels == expected)
 
+-- | An RGFW context renders square, themed widgets: button corners are the
+-- border colour, fills come from the RGFW palette, and label text is stamped
+-- glyphs rather than solid per-character boxes.
+testSquareThemedRaster :: IO ()
+testSquareThemedRaster = do
+  let theme = tomorrowNightMinDarkTheme
+      w = 240
+      h = 120
+      inp = emptyInput {inputWindowSize = Size (fromIntegral w) (fromIntegral h), inputMousePos = V2 (-100) (-100)}
+      ui = column $ do
+        _ <- button "Button"
+        _ <- checkbox "Checkbox label" True
+        pure ()
+  ctx <- newRgfwContext theme
+  (_, _, draw, _) <- runFrame ctx inp ui
+  (baseSpans, overlaySpans) <- collectRasterSpans ctx inp
+  surf <- newOffscreenRgfwSurface w h
+  clearScreen surf (packColor (thBackground theme))
+  renderArena surf getCozetteFont 1.0 draw baseSpans overlaySpans
+  let na = ctxNodeArena ctx
+      pixel x y = peekElemOff (sBuffer surf) (y * w + x)
+  n <- arenaCount na
+  rects <- mapM (\i -> (,) <$> getNodeType na i <*> getRect na i) [0 .. n - 1]
+  case [r | (NodeButton, r) <- rects] of
+    ((bx, by, bw, bh) : _) -> do
+      let x0 = round bx
+          y0 = round by
+          x1 = round (bx + bw) - 1
+          y1 = round (by + bh) - 1
+      corners <- mapM (uncurry pixel) [(x0, y0), (x1, y0), (x0, y1), (x1, y1)]
+      assert "Button corners are square (border colour)" (all (== packColor (thBorder theme)) corners)
+      fillPx <- pixel (x0 + 2) (y0 + 2)
+      assert "Button fill uses the RGFW palette" (fillPx == packColor (thWidgetBg theme))
+    [] -> assert "Button node present" False
+  case [(r, fg) | (r, t, fg, _, _) <- baseSpans, t == "Checkbox label"] of
+    ((Rect sx sy sw sh, fg) : _) -> do
+      px <- sequence [pixel x y | y <- [round sy .. round (sy + sh) - 1], x <- [round sx .. round (sx + sw) - 1]]
+      let lit = length (filter (== packColor fg) px)
+      assert "Checkbox label is glyphs, not solid boxes" (lit > 0 && lit * 2 < length px)
+    [] -> assert "Checkbox label span collected" False
+  freeRgfwSurface surf
+
+-- | The OpenGL glyph atlas holds every glyph exactly as the software blitter
+-- stamps it at that scale: the grid fits the font, and a cell equals a
+-- standalone render with nothing bleeding in from its neighbours.
+testGlyphAtlas :: IO ()
+testGlyphAtlas = do
+  let font = getCozetteFont
+  forM_ [1.0, 1.5, 2.0, 3.0, 4.0] $ \scale -> do
+    let ga = glyphAtlasFor font scale
+        cw = gaCellW ga
+        ch = gaCellH ga
+        label' = " at scale " ++ show scale
+    assert ("glyph atlas grid fits every glyph" ++ label')
+      (gaCols ga * (gaHeight ga `div` ch) >= cfNumGlyphs font && gaWidth ga == gaCols ga * cw)
+    bakeGlyphAtlas font ga $ \atlas ->
+      forM_ "A@#|" $ \c -> do
+        let gid = fromIntegral (charToGlyphId font c)
+            (ax, ay) = atlasCell ga gid
+        bracket (callocBytes (cw * ch * 4)) free $ \solo -> do
+          renderGlyphScaledToBuffer solo cw 0 0 cw ch scale 0 0 0xFFFFFFFF font (fromIntegral gid)
+          cell <- mapM (\(x, y) -> peekElemOff atlas ((ay + y) * gaWidth ga + ax + x)) [(x, y) | y <- [0 .. ch - 1], x <- [0 .. cw - 1]]
+          expected <- mapM (peekElemOff solo) [0 .. cw * ch - 1]
+          assert ("glyph atlas cell " ++ show c ++ " matches the blitter" ++ label')
+            (cell == expected && any (/= 0) expected)
+
+-- | Span glyph quads land on the software pen positions (spaces skipped,
+-- newlines reset the column) and clipping trims positions and UVs together.
+testSpanQuads :: IO ()
+testSpanQuads = do
+  let font = getCozetteFont
+      ga = glyphAtlasFor font 2.0
+      red = colorRGBA 255 0 0 255
+      aw = fromIntegral (gaWidth ga) :: Float
+      ah = fromIntegral (gaHeight ga) :: Float
+      (ax, ay) = atlasCell ga (fromIntegral (charToGlyphId font 'A'))
+      quads txt clip = allocaBytes (64 * 32) $ \buf -> do
+        n <- writeSpanQuads ga font 200 100 buf 0 (Rect 10 5 0 0, txt, red, red, clip)
+        vs <- mapM (\i -> mapM (\o -> peekByteOff buf (i * 32 + o)) [0, 4, 24, 28]) [0 .. n - 1]
+        pure (n, vs :: [[Float]])
+  (n1, v1) <- quads "A B\nC" (Rect 0 0 100 50)
+  assert "span quads: one quad per visible glyph" (n1 == 18)
+  assert "span quads: first glyph at the scaled pen" (take 1 v1 == [[20, 10, fromIntegral ax / aw, fromIntegral ay / ah]])
+  assert "span quads: newline resets the column" (map (take 2) (take 1 (drop 12 v1)) == [[20, 36]])
+  (n2, v2) <- quads "A" (Rect 12 0 100 50)
+  assert "span quads: clip trims position and UV"
+    (n2 == 6 && take 1 v2 == [[24, 10, fromIntegral (ax + 4) / aw, fromIntegral ay / ah]])
+  (n3, _) <- quads "A" (Rect 150 80 10 10)
+  assert "span quads: clip outside the framebuffer emits nothing" (n3 == 0)
+
 main :: IO ()
 main = do
   putStrLn "=== Running nano-ui-rgfw Unit Tests ==="
@@ -771,6 +868,9 @@ main = do
   testWindowResizing
   testZOrderRenderArena
   testTriangleRaster
+  testSquareThemedRaster
+  testGlyphAtlas
+  testSpanQuads
   testWindowTitleAndCloseButton
   testDebugWindow
   putStrLn "=== All tests passed successfully! ==="

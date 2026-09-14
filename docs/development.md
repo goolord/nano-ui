@@ -74,7 +74,8 @@ Paths below are relative to `packages/`; Haskell modules live under `lib/`.
 | Context and persistent widget storage | `nano-ui/lib/NanoUI/Context.hs`, `NanoUI/Context/`, `NanoUI/Store.hs` |
 | Shared host event loop | `nano-ui/lib/NanoUI/Runner.hs` |
 | SDL events and presentation | `nano-ui-sdl/lib/NanoUI/Sdl/Session.hs`, `NanoUI/Sdl/Runner.hs` |
-| RGFW session and rendering | `nano-ui-rgfw/lib/NanoUI/Rgfw/Session.hs`, `NanoUI/Rgfw/Render.hs` |
+| RGFW session and rendering | `nano-ui-rgfw/lib/NanoUI/Rgfw/Session.hs`, `NanoUI/Rgfw/Gl.hs`, `nano-ui-rgfw/cbits/nano_ui_gl.c` |
+| RGFW software rasterizer (tests, profiler) | `nano-ui-rgfw/lib/NanoUI/Rgfw/Render.hs`, `NanoUI/Rgfw/Surface.hs` |
 | Native RGFW bindings | `nano-ui-rgfw-bindings/lib/RGFW.hs`, `RGFW/Raw.hs` |
 | Diagram conversion and chart construction | `nano-ui-diagrams/lib/NanoUI/Diagrams/`, `NanoUI/Plot/` |
 | Form naming, adapters, and evaluation | `nano-ui-form/lib/NanoUI/Form/Named.hs`, `Unnamed.hs`, `Field.hs`, `Runner.hs` |

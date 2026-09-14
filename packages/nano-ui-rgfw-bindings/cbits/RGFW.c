@@ -4,6 +4,9 @@
 #ifndef RGFW_IMPLEMENTATION
 #define RGFW_IMPLEMENTATION
 #endif
+#ifndef RGFW_OPENGL
+#define RGFW_OPENGL
+#endif
 #include "RGFW.h"
 
 static RGFW_info s_rgfw_info;
@@ -30,6 +33,26 @@ RGFW_window* rgfw_create_window(const char* name, int32_t x, int32_t y, int32_t 
         rgfw_init(name ? name : "nano-ui");
     }
     return RGFW_createWindow(name, x, y, w, h, (RGFW_windowFlags)flags);
+}
+
+/* Create a window with a native core-profile OpenGL context of at least
+   major.minor, current on the calling thread. NULL if either fails. */
+RGFW_window* rgfw_create_window_gl(const char* name, int32_t x, int32_t y, int32_t w, int32_t h, uint32_t flags, int32_t major, int32_t minor) {
+    if (!s_rgfw_initialized && rgfw_init(name ? name : "nano-ui") != 0) return NULL;
+    /* rgfw_init does not request RGFW_initOpenGL, so load the GL library here. */
+    if (RGFW_loadGL() == RGFW_FALSE) return NULL;
+    RGFW_glHints* hints = RGFW_getGlobalHints_OpenGL();
+    hints->profile = RGFW_glCore;
+    hints->major = major;
+    hints->minor = minor;
+    hints->depth = 0;
+    hints->stencil = 0;
+    RGFW_window* win = RGFW_createWindow(name, x, y, w, h, (RGFW_windowFlags)flags | RGFW_windowOpenGL);
+    if (win != NULL && RGFW_window_getContext_OpenGL(win) == NULL) {
+        RGFW_window_close(win);
+        return NULL;
+    }
+    return win;
 }
 
 RGFW_surface* rgfw_create_surface(RGFW_window* win, uint8_t* data, int32_t w, int32_t h, uint8_t format) {

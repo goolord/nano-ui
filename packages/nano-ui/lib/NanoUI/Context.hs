@@ -130,6 +130,8 @@ module NanoUI.Context
   , enableMeasureCache
   , setHost
   , setDrawSnapScale
+  , setDrawSquareGeometry
+  , setDrawExternalText
   , askHostIO
   , pushMessage
   , drainMessages
@@ -1256,6 +1258,18 @@ setHost ctx val = do
 {-# INLINE setDrawSnapScale #-}
 setDrawSnapScale :: Context -> Float -> IO ()
 setDrawSnapScale ctx s = Draw.setDrawSnapScale (ctxDrawArena ctx) s
+
+-- | Emit rounded shapes and AA strokes as flat, axis-aligned fills. Software
+-- framebuffer hosts enable this so every primitive is a solid quad.
+{-# INLINE setDrawSquareGeometry #-}
+setDrawSquareGeometry :: Context -> Bool -> IO ()
+setDrawSquareGeometry ctx = Draw.setDrawSquareGeometry (ctxDrawArena ctx)
+
+-- | Skip text quads in the draw buffer. Hosts that rasterize text from the
+-- collected text spans enable this.
+{-# INLINE setDrawExternalText #-}
+setDrawExternalText :: Context -> Bool -> IO ()
+setDrawExternalText ctx = Draw.setDrawExternalText (ctxDrawArena ctx)
 
 {-# INLINE askHostIO #-}
 askHostIO :: forall a. (Typeable a) => Context -> IO (Maybe a)

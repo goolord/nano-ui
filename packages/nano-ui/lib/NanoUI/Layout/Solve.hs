@@ -1298,6 +1298,18 @@ withAxisSnaps na depth n availMain gapSum horizontal act = do
   copyMutablePrimArray outSnap 0 outArr 0 n
   act idxSnap outSnap
 
+-- | Like 'withAxisSnaps' but snapshots the unscaled child cross sizes instead
+-- of the distributed main-axis result. Grids compute rows from the measured
+-- child heights, so freezing them lets the recursion reuse the working scratch.
+withGridScratch :: NodeArena -> Int -> Int -> (MutablePrimArray RealWorld Int -> MutablePrimArray RealWorld Float -> IO a) -> IO a
+withGridScratch na depth n act = do
+  idxArr <- readIORef (naScratchIdx na)
+  hArr <- readIORef (naScratchCross na)
+  AxisSnapshot idxSnap crossSnap <- ensureAxisSnapshot na depth n
+  copyMutablePrimArray idxSnap 0 idxArr 0 n
+  copyMutablePrimArray crossSnap 0 hArr 0 n
+  act idxSnap crossSnap
+
 positionRowFromParent ::
   NodeArenaArrays ->
   NodeArena ->
@@ -1362,8 +1374,6 @@ positionGrid ::
 positionGrid a na fm monoFm measure resolveFont depth parent gCols minColW gap cx cy cw ch = do
   n <- loadChildrenScratchFromParent na parent cw ch
   when (n > 0) $ do
-    idxArr <- readIORef (naScratchIdx na)
-    hArr <- readIORef (naScratchCross na)
     let cols =
           if gCols > 0
             then gCols
@@ -1372,43 +1382,48 @@ positionGrid a na fm monoFm measure resolveFont depth parent gCols minColW gap c
               else 1
         colW = max 0 ((cw - gap * fromIntegral (cols - 1)) / fromIntegral cols)
         numRows = (n + cols - 1) `quot` cols
-        goRows !r !curY
-          | r >= numRows = pure ()
-          | otherwise = do
-              let getRowH !j !accH
-                    | j >= cols = pure accH
-                    | otherwise = do
-                        let k = r * cols + j
-                        if k >= n
-                          then pure accH
-                          else do
-                            h <- readPrimArray hArr k
-                            getRowH (j + 1) (max accH h)
-              rowH <- getRowH 0 0
-              let goCols !j
-                    | j >= cols = pure ()
-                    | otherwise = do
-                        let k = r * cols + j
-                        if k >= n
-                          then pure ()
-                          else do
-                            ci <- readPrimArray idxArr k
-                            (minW, minH, maxW, maxH) <- getMinMax na ci
-                            (wTag, wVal) <- getWidthSizing na ci
-                            (hTag, hVal) <- getHeightSizing na ci
-                            (_, _, iw, ih) <- getRect na ci
-                            let childW = clamp minW maxW (resolveSize wTag wVal iw colW minW maxW)
-                                childH = clamp minH maxH (resolveSize hTag hVal ih rowH minH maxH)
-                                itemX = cx + fromIntegral j * (colW + gap)
-                            ax <- getAlignX na ci
-                            ay <- getAlignY na ci
-                            let fx = alignX ax itemX colW childW
-                                fy = alignY ay curY rowH childH
-                            positionNodeA a na fm monoFm measure resolveFont (depth + 1) ci fx fy colW rowH
-                            goCols (j + 1)
-              goCols 0
-              goRows (r + 1) (curY + rowH + gap)
-    goRows 0 cy
+    -- Freeze child indices and their measured cross sizes before recursing.
+    -- Children reuse the working scratch while this grid iterates rows and
+    -- columns, so the live arrays would be clobbered by the first child.
+    withGridScratch na depth n $ \idxArr hArr ->
+      do
+        let goRows !r !curY
+              | r >= numRows = pure ()
+              | otherwise = do
+                  let getRowH !j !accH
+                        | j >= cols = pure accH
+                        | otherwise = do
+                            let k = r * cols + j
+                            if k >= n
+                              then pure accH
+                              else do
+                                h <- readPrimArray hArr k
+                                getRowH (j + 1) (max accH h)
+                  rowH <- getRowH 0 0
+                  let goCols !j
+                        | j >= cols = pure ()
+                        | otherwise = do
+                            let k = r * cols + j
+                            if k >= n
+                              then pure ()
+                              else do
+                                ci <- readPrimArray idxArr k
+                                (minW, minH, maxW, maxH) <- getMinMax na ci
+                                (wTag, wVal) <- getWidthSizing na ci
+                                (hTag, hVal) <- getHeightSizing na ci
+                                (_, _, iw, ih) <- getRect na ci
+                                let childW = clamp minW maxW (resolveSize wTag wVal iw colW minW maxW)
+                                    childH = clamp minH maxH (resolveSize hTag hVal ih rowH minH maxH)
+                                    itemX = cx + fromIntegral j * (colW + gap)
+                                ax <- getAlignX na ci
+                                ay <- getAlignY na ci
+                                let fx = alignX ax itemX colW childW
+                                    fy = alignY ay curY rowH childH
+                                positionNodeA a na fm monoFm measure resolveFont (depth + 1) ci fx fy colW rowH
+                                goCols (j + 1)
+                  goCols 0
+                  goRows (r + 1) (curY + rowH + gap)
+        goRows 0 cy
 
 positionColumnFromParent ::
   NodeArenaArrays ->

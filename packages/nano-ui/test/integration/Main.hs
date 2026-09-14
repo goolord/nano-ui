@@ -2,6 +2,8 @@ module Main (main) where
 
 import Cases
 import Cases.Atlas (runAtlasGrowthTest)
+import Cases.Grid (runGridColumnsWithFontColorTest, runNestedGridTest, runStaleFontColorTest)
+import Cases.HostDraw (runExternalTextTest, runSquareGeometryTest)
 import Cases.Runner (runDrawingLockTest, runSessionLoopTest)
 import Cases.SIMD (runSimdWritesTest)
 import Cases.State
@@ -61,6 +63,11 @@ testSpecs =
   , TestSpec "keyboard-modal-eligibility" False runKeyboardModalEligibilityTest
   , TestSpec "deep-nesting" False runDeepNestingTest
   , TestSpec "row-panel-layout" False runRowPanelLayoutTest
+  , TestSpec "grid-columns-font-color" False runGridColumnsWithFontColorTest
+  , TestSpec "grid-nested" False runNestedGridTest
+  , TestSpec "stale-font-color" False runStaleFontColorTest
+  , TestSpec "draw-square-geometry" False runSquareGeometryTest
+  , TestSpec "draw-external-text" False runExternalTextTest
   , TestSpec "draw" False runDrawTest
   , TestSpec "drawing" False runDrawingTest
   , TestSpec "overlay" False runOverlayTest

@@ -223,7 +223,7 @@ frameRows s =
       , ("haskell", T.pack (printf "%.2f ms" totalHaskellMs))
       , ("  ui+layout", T.pack (printf "%.2f ms" (D.dbgUiMs c)))
       , ("  render", T.pack (printf "%.2f ms" (D.dbgRenderMs c)))
-      , ("blit surface", T.pack (printf "%.2f ms" (dbgBlitMs s)))
+      , ("swap buffers", T.pack (printf "%.2f ms" (dbgBlitMs s)))
       , ("frames", T.pack (printf "%d" (D.dbgPresents c)))
       ]
 

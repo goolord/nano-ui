@@ -5,6 +5,8 @@ module RGFW
   , initRGFW
   , deinitRGFW
   , createWindow
+  , createWindowGL
+  , swapBuffersGL
   , closeWindow
   , pollEvent
   , waitForEvent
@@ -55,6 +57,20 @@ createWindow title x y w h flags =
     if ptr == nullPtr
       then pure Nothing
       else pure (Just (Window ptr))
+
+-- | Like 'createWindow', with a core-profile OpenGL context of at least the
+-- given major/minor version made current on the calling OS thread. 'Nothing'
+-- when the window or the context cannot be created.
+createWindowGL :: String -> Int -> Int -> Int -> Int -> Word32 -> Int -> Int -> IO (Maybe Window)
+createWindowGL title x y w h flags major minor =
+  withCString title $ \cTitle -> do
+    ptr <-
+      c_rgfw_create_window_gl cTitle (fromIntegral x) (fromIntegral y) (fromIntegral w) (fromIntegral h)
+        (fromIntegral flags) (fromIntegral major) (fromIntegral minor)
+    pure (if ptr == nullPtr then Nothing else Just (Window ptr))
+
+swapBuffersGL :: Window -> IO ()
+swapBuffersGL (Window w) = c_RGFW_window_swapBuffers_OpenGL w
 
 closeWindow :: Window -> IO ()
 closeWindow (Window ptr) = c_RGFW_window_close ptr

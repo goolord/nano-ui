@@ -32,6 +32,9 @@ import NanoUI
   , rowWith
   , separator
   , slider
+  , tab
+  , tabBar
+  , tabRespClicked
   , textArea
   , textInput
   , whenM
@@ -160,7 +163,7 @@ update :: Msg -> Model -> Model
 update msg m =
   let !m' = m {totalClicks = totalClicks m + 1}
    in case msg of
-        SetTab tab       -> m' {activeTab = tab}
+        SetTab t         -> m' {activeTab = t}
         CycleTheme       -> m' {currentTheme = nextEnum (currentTheme m)}
         CycleScale       ->
           let nextSc = case dpiScale m of
@@ -187,7 +190,7 @@ appView :: Model -> NanoUI ()
 appView m = do
   panelWith (padAll 12 . gap 8 . fillW . fillH) $ do
     -- Top Bar: Title, Theme, DPI Scale
-    rowWith (gap 8 . fixedH 24) $ do
+    rowWith (gap 8 . fixedH 24 . fillW) $ do
       void $ label "NANO-UI // RGFW LEAN BACKEND"
       void $ flex
 
@@ -201,15 +204,15 @@ appView m = do
       whenM (button (if debugOpen m then "[Debug: ON]" else "[Debug: OFF]")) (emit (ToggleDebug (not (debugOpen m))))
 
     -- Tab Bar
-    gridWith 4 (gap 4 . fixedH 24) $ do
-      let mkTab tab title = do
-            let isActive = activeTab m == tab
-                tag = if isActive then "tab:active:" else "tab:"
-            whenM (button (tag <> title)) (emit (SetTab tab))
-      mkTab TabControls "Controls"
-      mkTab TabGallery "Unicode Gallery"
-      mkTab TabArchitecture "Architecture"
-      mkTab TabDiagnostics "Diagnostics"
+    (tabResp, nextTab) <-
+      tabBar
+        (activeTab m)
+        [ tab TabControls "Controls" ()
+        , tab TabGallery "Unicode Gallery" ()
+        , tab TabArchitecture "Architecture" ()
+        , tab TabDiagnostics "Diagnostics" ()
+        ]
+    when (tabRespClicked tabResp && nextTab /= activeTab m) (emit (SetTab nextTab))
 
     void $ separator
 
@@ -236,7 +239,7 @@ viewControlsTab m = do
       void $ separator
 
       -- Counter
-      gridWith 4 (gap 6 . fixedH 22) $ do
+      gridWith 4 (gap 6 . fixedH 22 . fillW) $ do
         void $ label ("Counter: " <> T.pack (show (counter m)))
         whenM (button " +1 ") (emit Increment)
         whenM (button " -1 ") (emit Decrement)
@@ -333,7 +336,7 @@ viewControlsTab m = do
         let makeBar pct =
               let filled = max 0 (min 20 (pct `div` 5))
                   empty  = 20 - filled
-               in T.replicate filled "Γûê" <> T.replicate empty "Γûæ"
+               in T.replicate filled "█" <> T.replicate empty "░"
             volPct = round (volumeVal m * 100) :: Int
             opPct  = round (opacityVal m * 100) :: Int
         void $ label "Master Volume:"
@@ -359,33 +362,33 @@ viewGalleryTab = do
 
       gridWith 1 (gap 2) $ do
         void $ label "Greek Letters & Physics Variables:"
-        void $ label "╬ö ╬⌐ ╬ú ╬▒ ╬▓ ╬│ ╬┤ ╬╡ ╬╕ ╬╗ ╬╝ ╧Ç ╧ü ╧ä ╧ë"
+        void $ label "Δ Ω Σ α β γ δ ε θ λ μ π ρ τ ω"
 
       gridWith 1 (gap 2) $ do
         void $ label "Mathematical & Logic Operators:"
-        void $ label "┬▒ ├ù ├╖ ΓêÜ Γê₧ Γëñ ΓëÑ Γëá Γëê Γëí ΓêÇ Γêâ Γêê Γêë Γêº Γê¿ Γêé Γêç"
+        void $ label "± × ÷ √ ∞ ≤ ≥ ≠ ≈ ≡ ∀ ∃ ∈ ∉ ∧ ∨ ∂ ∇"
 
       gridWith 1 (gap 2) $ do
         void $ label "Box Drawing & Frame Elements:"
-        void $ label "ΓöîΓöÇΓöÇΓöÇΓö¼ΓöÇΓöÇΓöÇΓöÉ  ΓòöΓòÉΓòÉΓòÉΓòªΓòÉΓòÉΓòÉΓòù  ΓöÅΓöüΓöüΓöüΓö│ΓöüΓöüΓöüΓöô"
-        void $ label "Γöé A Γöé B Γöé  Γòæ X Γòæ Y Γòæ  Γöâ 1 Γöâ 2 Γöâ"
-        void $ label "Γö£ΓöÇΓöÇΓöÇΓö╝ΓöÇΓöÇΓöÇΓöñ  ΓòáΓòÉΓòÉΓòÉΓò¼ΓòÉΓòÉΓòÉΓòú  ΓöúΓöüΓöüΓöüΓòïΓöüΓöüΓöüΓö½"
-        void $ label "Γöé C Γöé D Γöé  Γòæ Z Γòæ W Γòæ  Γöâ 3 Γöâ 4 Γöâ"
-        void $ label "ΓööΓöÇΓöÇΓöÇΓö┤ΓöÇΓöÇΓöÇΓöÿ  ΓòÜΓòÉΓòÉΓòÉΓò⌐ΓòÉΓòÉΓòÉΓò¥  ΓöùΓöüΓöüΓöüΓö╗ΓöüΓöüΓöüΓö¢"
+        void $ label "┌───┬───┐  ╔═══╦═══╗  ┏━━━┳━━━┓"
+        void $ label "│ A │ B │  ║ X ║ Y ║  ┃ 1 ┃ 2 ┃"
+        void $ label "├───┼───┤  ╠═══╬═══╣  ┣━━━╋━━━┫"
+        void $ label "│ C │ D │  ║ Z ║ W ║  ┃ 3 ┃ 4 ┃"
+        void $ label "└───┴───┘  ╚═══╩═══╝  ┗━━━┻━━━┛"
 
       gridWith 1 (gap 2) $ do
         void $ label "Block Elements & Shading Meters:"
-        void $ label "Γûê Γûô ΓûÆ Γûæ ΓûÇ Γûä Γûî ΓûÉ Γûû Γûù Γûÿ ΓûÖ ΓûÜ Γû¢ Γû£ Γû¥ Γû₧ Γûƒ"
+        void $ label "█ ▓ ▒ ░ ▀ ▄ ▌ ▐ ▖ ▗ ▘ ▙ ▚ ▛ ▜ ▝ ▞ ▟"
 
       gridWith 1 (gap 2) $ do
         void $ label "Keycaps & Modifiers:"
-        void $ label "ΓÅÄ Enter  ΓçÑ Tab  Γîâ Ctrl  ΓîÑ Alt  Γîÿ Cmd  Γî½ Bksp  ΓÄï Esc"
+        void $ label "⏎ Enter  ⇥ Tab  ⌃ Ctrl  ⌥ Alt  ⌘ Cmd  ⌫ Bksp  ⎋ Esc"
 
       void $ separator
 
       gridWith 1 (gap 4) $ do
         void $ label "Nerd Font & UI Icon Buttons (4-Column Native Grid):"
-        gridWith 4 (gap 4 . fixedH 24) $ do
+        gridWith 4 (gap 4 . fixedH 24 . fillW) $ do
           void $ button "\xF002 Search"
           void $ button "\xF004 Health"
           void $ button "\xF005 Star"
@@ -400,8 +403,8 @@ viewGalleryTab = do
           void $ button "\xF04D Stop"
           void $ button "\xF188 Debug"
           void $ button "\xF11B Gamepad"
-          void $ button "ΓÅÄ Enter"
-          void $ button "ΓÄï Esc"
+          void $ button "⏎ Enter"
+          void $ button "⎋ Esc"
 
 -- | Tab 3: Architecture
 viewArchitectureTab :: NanoUI ()
@@ -430,7 +433,7 @@ viewArchitectureTab = do
       void $ label "   - 18,492-byte pruned OpenType bitmap font (.otb) embedded in binary."
       void $ label "   - 921 custom glyphs (ASCII, Greek, Math, Box, Powerline, Nerd icons)."
       void $ label "   - Uniform 6px cell width, 13px line height, 10px ascent."
-      void $ label "   - Direct 1-bit to 32-bit software blitter with zero FreeType dependency."
+      void $ label "   - 1-bit glyph blitter bakes an OpenGL atlas, zero FreeType dependency."
 
       void $ separator
 
@@ -464,8 +467,8 @@ viewDiagnosticsTab m = do
         void $ label "Logical Viewport Size:"
         void $ label (T.pack (show logW) <> " x " <> T.pack (show logH) <> " px")
         void $ label "Framebuffer Bit Depth:"
-        void $ label "32-bit BGRA (Software DIBSection)"
-        void $ label "Physical RAM Surface:"
+        void $ label "32-bit RGBA (OpenGL 3.2 core)"
+        void $ label "Framebuffer Memory:"
         void $ label (T.pack (show (physW * physH * 4 `div` 1024)) <> " KB")
         void $ label "Target Frame Rate:"
         void $ label "120 FPS max pacing"

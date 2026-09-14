@@ -3,10 +3,9 @@
 
 module NanoUI.Rgfw.Render
   ( renderArena
-  , renderTextEditMenuOverlay
   ) where
 
-import Control.Monad (forM_, when)
+import Control.Monad (when)
 import Data.Bits (shiftL, shiftR, (.&.), (.|.))
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -14,24 +13,10 @@ import Data.Word (Word8, Word32)
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (peekByteOff, peekElemOff, pokeElemOff)
-import NanoUI (Color (..), Rect (..), V2 (..), colorRGBA, rectContains)
-import NanoUI.Context
-  ( Context
-  , TextInputMenu (..)
-  , ctxFontMetrics
-  , getTextInputMenu
-  )
-import NanoUI.Frame.Hit (widgetOverlayAllowed)
-import NanoUI.Frame.TextEdit
-  ( TextEditMenuRow (..)
-  , textFieldMenuActionEnabled
-  , textEditMenuContentRect
-  , textEditMenuLayout
-  )
+import NanoUI (Color (..), Rect (..))
 import NanoUI.Rgfw.Font.Cozette (CozetteFont)
 import NanoUI.Rgfw.Surface
   ( RgfwSurface (..)
-  , drawRectOutline
   , drawTextScaled
   , fillRect
   , packColor
@@ -39,7 +24,6 @@ import NanoUI.Rgfw.Surface
   , pushClip
   , toPhysRect
   )
-import NanoUI.Rgfw.Theme (RgfwTheme (..))
 import NanoUI.Testing
   ( DrawCmd (..)
   , DrawData (..)
@@ -54,17 +38,19 @@ import NanoUI.Testing
 type RGBA = (Float, Float, Float, Float)
 
 -- | Rasterize a frame into pixels: walk the core's 'DrawData' in canonical
--- layer order filling every quad, then stamp the core's collected text spans
--- with the embedded Cozette bitmap font. Widget drawing (windows, popups,
+-- layer order filling every primitive, then stamp the core's collected text
+-- spans with the embedded Cozette bitmap font. Widget drawing (windows, popups,
 -- buttons, fields, scroll chrome, ...) comes from the core draw path, so RGFW
 -- gets theme parity and core drawing behavior for free.
 --
+-- The frame must come from a context built by
+-- 'NanoUI.Rgfw.Context.newRgfwContext': square geometry means the buffer holds
+-- only flat quads and triangles (no rounded fans or transparent AA fringes),
+-- and external text means it holds no text quads, so every primitive is filled
+-- as-is and glyphs come solely from the span lists.
+--
 -- Layer and span order: background quads, content quads, base spans, overlay
--- quads, chrome quads, overlay spans. Quads whose texture id is
--- 'glyphAtlasTextureId' are always plain colored quads on this host (the
--- Cozette metrics expose no glyph atlas, so core text lowers to per-character
--- advance rects), which is why every quad is filled rather than sampled;
--- glyphs themselves are stamped afterwards from the span lists.
+-- quads, chrome quads, overlay spans.
 renderArena ::
   RgfwSurface ->
   CozetteFont ->
@@ -134,20 +120,13 @@ walkPrims surf scale dd vp ip isDim clip !i !end
           stampTriangle surf scale dd vp clip ia ib ic
           walkPrims surf scale dd vp ip isDim clip (i + 3) end
 
--- | Fill a quad's bounding box with its colour. Two flat-fill approximations
--- apply:
---
---  * 4-corner gradient quads (no gradient support on the software surface)
---    are filled with the average of their corner colours. For the
---    equal-corner quads the core emits for plain rects this is the exact
---    colour.
---  * Quads with any corner alpha < 32 are coverage-AA fringes of strokes and
---    rounded corners and are skipped, so those edges lose their 1px soft
---    gradient but never smear a half-transparent flat colour.
---
--- Translucent fills (drop shadows, modal backdrop dims) alpha-blend instead
--- of overwriting; 'backdropDimTextureId' cmds blend uniformly (mix amount
--- taken from the vertex alpha).
+-- | Fill one quad. Axis-aligned quads are filled as pixel rects; rotated ones
+-- (diagonal strokes such as check marks and close crosses) are scan converted.
+-- 4-corner gradient quads have no gradient support on the software surface and
+-- take the average of their corner colours, which is exact for the
+-- equal-corner quads the core emits for plain rects. Translucent fills (drop
+-- shadows, modal backdrop dims) alpha-blend instead of overwriting;
+-- 'backdropDimTextureId' cmds blend uniformly (mix taken from vertex alpha).
 stampQuad ::
   RgfwSurface ->
   Float ->
@@ -163,24 +142,32 @@ stampQuad ::
 stampQuad surf scale dd vp isDim clip ia ib ic idv = do
   mvs <- mapM (vertexAt dd vp) [ia, ib, ic, idv]
   case mvs of
-    [Just (x0, y0, c0), Just (x1, y1, c1), Just (x2, y2, c2), Just (x3, y3, c3)] ->
-      when (minimum (map alpha8 [c0, c1, c2, c3]) >= 32) $ do
-        let !minX = minimum [x0, x1, x2, x3]
-            !maxX = maximum [x0, x1, x2, x3]
-            !minY = minimum [y0, y1, y2, y3]
-            !maxY = maximum [y0, y1, y2, y3]
-            !col = avgRGBA [c0, c1, c2, c3]
-            (!px, !py, !pw, !ph) = toPhysRect scale minX minY (maxX - minX) (maxY - minY)
-        case clipRect clip px py pw ph of
-          Nothing -> pure ()
-          Just (fx, fy, fw, fh) ->
-            if isDim || alpha8 col < 255
-              then blendRectPx surf fx fy fw fh col
-              else fillRect surf fx fy fw fh (surfaceWord col)
+    [Just (x0, y0, c0), Just (x1, y1, c1), Just (x2, y2, c2), Just (x3, y3, c3)] -> do
+      let !col = avgRGBA [c0, c1, c2, c3]
+          xs = [x0, x1, x2, x3]
+          ys = [y0, y1, y2, y3]
+          !minX = minimum xs
+          !maxX = maximum xs
+          !minY = minimum ys
+          !maxY = maximum ys
+          onEdge lo hi v = abs (v - lo) < 1.0e-3 || abs (v - hi) < 1.0e-3
+          axisAligned = all (onEdge minX maxX) xs && all (onEdge minY maxY) ys
+      when (alpha8 col > 0) $
+        if axisAligned
+          then do
+            let (!px, !py, !pw, !ph) = toPhysRect scale minX minY (maxX - minX) (maxY - minY)
+            case clipRect clip px py pw ph of
+              Nothing -> pure ()
+              Just (fx, fy, fw, fh) ->
+                if isDim || alpha8 col < 255
+                  then blendRectPx surf fx fy fw fh col
+                  else fillRect surf fx fy fw fh (surfaceWord col)
+          else
+            fillConvexPx surf clip [physPt scale x0 y0, physPt scale x1 y1, physPt scale x2 y2, physPt scale x3 y3] col
     _ -> pure ()
 
--- | Fill a triangle (sort arrows, select chevrons, rounded-corner fans) with
--- its average corner colour under the same alpha rules as 'stampQuad'.
+-- | Fill a triangle (sort arrows, select chevrons) with its average corner
+-- colour.
 stampTriangle ::
   RgfwSurface ->
   Float ->
@@ -194,35 +181,32 @@ stampTriangle ::
 stampTriangle surf scale dd vp clip ia ib ic = do
   mvs <- mapM (vertexAt dd vp) [ia, ib, ic]
   case mvs of
-    [Just (x0, y0, c0), Just (x1, y1, c1), Just (x2, y2, c2)] ->
-      when (minimum (map alpha8 [c0, c1, c2]) >= 32) $ do
-        let !col = avgRGBA [c0, c1, c2]
-            (!ax, !ay) = physPt scale x0 y0
-            (!bx, !by) = physPt scale x1 y1
-            (!cx, !cy) = physPt scale x2 y2
-        fillTrianglePx surf clip ax ay bx by cx cy col
+    [Just (x0, y0, c0), Just (x1, y1, c1), Just (x2, y2, c2)] -> do
+      let !col = avgRGBA [c0, c1, c2]
+      when (alpha8 col > 0) $
+        fillConvexPx surf clip [physPt scale x0 y0, physPt scale x1 y1, physPt scale x2 y2] col
     _ -> pure ()
 
--- | Flat triangle fill on pixel centers, clipped to the cmd clip.
-fillTrianglePx ::
+-- | Flat convex polygon fill on pixel centers, clipped to the cmd clip. Only
+-- triangles and rotated quads come through here; rects take the span fill.
+fillConvexPx ::
   RgfwSurface ->
   (Int, Int, Int, Int) ->
-  Int ->
-  Int ->
-  Int ->
-  Int ->
-  Int ->
-  Int ->
+  [(Int, Int)] ->
   RGBA ->
   IO ()
-fillTrianglePx surf (cx0, cy0, cx1, cy1) ax ay bx by cx cy col
+fillConvexPx _ _ [] _ = pure ()
+fillConvexPx surf (cx0, cy0, cx1, cy1) pts@(p0 : _) col
   | area == 0 = pure ()
   | otherwise = goRows yLo
   where
-    xLo = max cx0 (min3 ax bx cx)
-    xHi = min (cx1 - 1) (max3 ax bx cx)
-    yLo = max cy0 (min3 ay by cy)
-    yHi = min (cy1 - 1) (max3 ay by cy)
+    xLo = max cx0 (minimum (map fst pts))
+    xHi = min (cx1 - 1) (maximum (map fst pts))
+    yLo = max cy0 (minimum (map snd pts))
+    yHi = min (cy1 - 1) (maximum (map snd pts))
+    edges = zip pts (drop 1 pts ++ [p0])
+    area = sum [f ax * f by - f bx * f ay | ((ax, ay), (bx, by)) <- edges]
+    !s = if area < 0 then -1 else 1 :: Float
     -- The nested forM_ ranges leave a shared x-coordinate list in optimized
     -- Core. Traverse numeric bounds directly instead, preserving row order.
     goRows !py = when (py <= yHi) $ do
@@ -231,45 +215,30 @@ fillTrianglePx surf (cx0, cy0, cx1, cy1) ax ay bx by cx cy col
     goCols !py !px = when (px <= xHi) $ do
       let !pxc = fromIntegral px + (0.5 :: Float)
           !pyc = fromIntegral py + (0.5 :: Float)
-          edge x0 y0 x1 y1 =
-            (f x1 - f x0) * (pyc - f y0) - (f y1 - f y0) * (pxc - f x0)
-          !w0 = edge bx by cx cy
-          !w1 = edge cx cy ax ay
-          !w2 = edge ax ay bx by
-          !s = if area < 0 then -1 else 1
-      when (w0 * s >= 0 && w1 * s >= 0 && w2 * s >= 0) $
+          inside ((ax, ay), (bx, by)) =
+            ((f bx - f ax) * (pyc - f ay) - (f by - f ay) * (pxc - f ax)) * s >= 0
+      when (all inside edges) $
         pokePixel surf px py col
       when (px < xHi) $ goCols py (px + 1)
     f :: Int -> Float
     f = fromIntegral
-    area = (f bx - f ax) * (f cy - f ay) - (f cx - f ax) * (f by - f ay)
-    min3 p q r = min p (min q r)
-    max3 p q r = max p (max q r)
 
 -- | Stamp one core text span with the Cozette bitmap font. The span carries
 -- its own clip rect (logical pixels), pushed onto the surface clip stack for
--- the blit. The span background is only painted when it is opaque enough to
--- matter; translucent backgrounds already exist as quads in the DrawData.
+-- the blit. The span's background colour is a hint for cell hosts; every
+-- real background is already a quad in the DrawData, and span rects cover
+-- the text run rather than the widget, so painting it would overdraw.
 stampSpan ::
   RgfwSurface ->
   CozetteFont ->
   Float ->
   (Rect, Text, Color, Color, Rect) ->
   IO ()
-stampSpan surf font !scale (Rect rx ry rw rh, txt, fg, bg, clip)
+stampSpan surf font !scale (Rect rx ry _ _, txt, fg, _, clip)
   | T.null txt = pure ()
   | otherwise = case physClip surf scale clip of
       Nothing -> pure ()
       Just (cx0, cy0, cx1, cy1) -> do
-        let !bgA = colorAlphaOf bg
-        when (bgA >= 32) $ do
-          let (!px, !py, !pw, !ph) = toPhysRect scale rx ry rw rh
-          case clipRect (cx0, cy0, cx1, cy1) px py pw ph of
-            Just (fx, fy, fw, fh) ->
-              if bgA >= 255
-                then fillRect surf fx fy fw fh (packColor bg)
-                else blendRectPx surf fx fy fw fh (colorRGBAf bg)
-            Nothing -> pure ()
         pushClip surf cx0 cy0 (cx1 - cx0) (cy1 - cy0)
         drawTextScaled surf font scale rx ry txt (packColor fg)
         popClip surf
@@ -368,7 +337,7 @@ alpha8 c = max 0 (min 255 (round (rgbaA c * 255) :: Int))
 avgRGBA :: [RGBA] -> RGBA
 avgRGBA cs =
   let !n = fromIntegral (length cs) :: Float
-      mean f = sum (map f cs) / n
+      mean g = sum (map g cs) / n
    in ( mean (\(r, _, _, _) -> r)
       , mean (\(_, g, _, _) -> g)
       , mean (\(_, _, b, _) -> b)
@@ -376,7 +345,7 @@ avgRGBA cs =
       )
 
 clampByte :: Float -> Word32
-clampByte f = fromIntegral (max 0 (min 255 (round (f * 255) :: Int)))
+clampByte v = fromIntegral (max 0 (min 255 (round (v * 255) :: Int)))
 
 rgbaWord :: RGBA -> Word32
 rgbaWord (r, g, b, a) =
@@ -384,63 +353,3 @@ rgbaWord (r, g, b, a) =
 
 surfaceWord :: RGBA -> Word32
 surfaceWord = packColor . Color . rgbaWord
-
-colorAlphaOf :: Color -> Int
-colorAlphaOf (Color w) = fromIntegral (w .&. 0xFF)
-
-colorRGBAf :: Color -> RGBA
-colorRGBAf (Color w) =
-  ( fromIntegral ((w `shiftR` 24) .&. 0xFF) / 255
-  , fromIntegral ((w `shiftR` 16) .&. 0xFF) / 255
-  , fromIntegral ((w `shiftR` 8) .&. 0xFF) / 255
-  , fromIntegral (w .&. 0xFF) / 255
-  )
-
--- | Render the built-in text input / text area context menu overlay
-renderTextEditMenuOverlay ::
-  RgfwSurface ->
-  CozetteFont ->
-  Float -> -- Scale factor
-  RgfwTheme ->
-  Context ->
-  V2 -> -- Mouse position for hover highlight
-  IO ()
-renderTextEditMenuOverlay surf font !scale theme ctx mousePos = do
-  mMenu <- getTextInputMenu ctx
-  case mMenu of
-    Nothing -> pure ()
-    Just menu -> do
-      let wid = textInputMenuWidget menu
-      allow <- widgetOverlayAllowed ctx wid
-      when allow $ do
-        let menuRect = textInputMenuRect menu
-            (!mx, !my, !mw, !mh) = toPhysRect scale (rectX menuRect) (rectY menuRect) (rectW menuRect) (rectH menuRect)
-            content = textEditMenuContentRect menuRect (ctxFontMetrics ctx)
-            !cx = rectX content
-            !cy = rectY content
-            !cw = rectW content
-            !shadowOff = max 1 (round (2.0 * scale))
-        -- Drop shadow
-        fillRect surf (mx + shadowOff) (my + shadowOff) mw mh (packColor (colorRGBA 16 16 16 255))
-        -- Background & border
-        fillRect surf mx my mw mh (packColor (thPanelBg theme))
-        drawRectOutline surf mx my mw mh (packColor (thBorder theme))
-        -- Render menu rows
-        forM_ textEditMenuLayout $ \(entry, relY, h) -> do
-          let (!rowX, !rowY, !rowW, !rowH) = toPhysRect scale cx (cy + relY) cw h
-              rowRect = Rect cx (cy + relY) cw h
-          case entry of
-            TextEditMenuSep -> do
-              let !lineY = rowY + max 1 (rowH `div` 2)
-                  !padX = max 1 (round (2.0 * scale))
-              fillRect surf (rowX + padX) lineY (max 0 (rowW - padX * 2)) 1 (packColor (thBorder theme))
-            TextEditMenuItem action lbl -> do
-              enabled <- textFieldMenuActionEnabled ctx wid action
-              let !hovered = enabled && rectContains rowRect mousePos
-              when hovered $ do
-                fillRect surf rowX rowY rowW rowH (packColor (thWidgetHover theme))
-                let !barW = max 1 (round (2.0 * scale))
-                fillRect surf rowX (rowY + barW) barW (max 1 (rowH - barW * 2)) (packColor (thPrimary theme))
-              let !textColor = if enabled then thText theme else thTextMuted theme
-                  !textY = cy + relY + max 0.0 ((h - 13.0) / 2.0)
-              drawTextScaled surf font scale (cx + 5.0) textY lbl (packColor textColor)

@@ -11,11 +11,9 @@ import NanoUI
   , V2 (..)
   , emptyInput
   )
-import NanoUI.Context
-  ( withFontMetrics
-  )
-import NanoUI.Testing (collectRasterSpans, newPixelContext, runFrameEff)
-import NanoUI.Rgfw.Font.Cozette (cozetteMetrics, getCozetteFont)
+import NanoUI.Testing (collectRasterSpans, runFrameEff)
+import NanoUI.Rgfw.Context (newRgfwContext)
+import NanoUI.Rgfw.Font.Cozette (getCozetteFont)
 import NanoUI.Rgfw.Render (renderArena)
 import NanoUI.Rgfw.Surface (clearScreen, freeRgfwSurface, newOffscreenRgfwSurface, packColor)
 import NanoUI.Rgfw.Theme (RgfwTheme (..))
@@ -36,9 +34,8 @@ main = do
       !logH = max 1 (round (fromIntegral physH / scale) :: Int)
 
   surf <- newOffscreenRgfwSurface physW physH
-  ctx0 <- newPixelContext
-  let ctx = withFontMetrics ctx0 cozetteMetrics
-      font = getCozetteFont
+  ctx <- newRgfwContext theme
+  let font = getCozetteFont
       inp =
         emptyInput
           { inputWindowSize = Size (fromIntegral logW) (fromIntegral logH)

@@ -9,8 +9,8 @@ module NanoUI.Rgfw.Session
   , runRgfwSessionReduceCustom
   ) where
 
-import Control.Concurrent (threadDelay)
-import Control.Exception (bracket, mask_)
+import Control.Concurrent (rtsSupportsBoundThreads, runInBoundThread, threadDelay)
+import Control.Exception (bracket)
 import Control.Monad (void, when)
 import Data.Bits ((.&.))
 import Data.Char (chr, isPrint, ord, toLower)
@@ -39,7 +39,6 @@ import NanoUI.Context
   ( Context (..)
   , setHost
   , withClipboard
-  , withFontMetrics
   )
 import NanoUI.Testing
   ( UiCursorKind (..)
@@ -47,7 +46,6 @@ import NanoUI.Testing
   , clearDirty
   , collectRasterSpans
   , isDirty
-  , newPixelContext
   , runEff
   , runFrameReduceEff
   , textFieldActive
@@ -59,22 +57,15 @@ import NanoUI.Runner
   , shouldRedrawFrame
   )
 import NanoUI.Layout.Arena (arenaCount)
+import NanoUI.Rgfw.Context (applyRgfwTheme, newRgfwContext)
 import NanoUI.Rgfw.Debug
   ( RgfwDebugHost (..)
   , newRgfwDebugSampler
   , noteLoop
   , notePresent
   )
-import NanoUI.Rgfw.Font.Cozette (cozetteMetrics, getCozetteFont)
-import NanoUI.Rgfw.Render (renderArena, renderTextEditMenuOverlay)
-import NanoUI.Rgfw.Surface
-  ( RgfwSurface (..)
-  , clearScreen
-  , freeRgfwSurface
-  , newRgfwSurface
-  , packColor
-  , resizeRgfwSurface
-  )
+import NanoUI.Rgfw.Font.Cozette (getCozetteFont)
+import NanoUI.Rgfw.Gl (freeGlRenderer, newGlRenderer, renderArenaGl)
 import NanoUI.Rgfw.Theme (RgfwTheme (..), defaultDarkTheme)
 import qualified RGFW as R
 
@@ -150,14 +141,16 @@ runRgfwSessionReduceCustom ::
   model ->
   (model -> NanoUI ()) ->
   IO ()
-runRgfwSessionReduceCustom opts getThemeAndScale updateModel initialModel view = do
+runRgfwSessionReduceCustom opts getThemeAndScale updateModel initialModel view = inBoundThread $ do
   let flags = if optCenter opts then R.rgfw_windowCenter else 0
   bracket
-    (R.createWindow (optTitle opts) 0 0 (optWidth opts) (optHeight opts) flags)
+    (R.createWindowGL (optTitle opts) 0 0 (optWidth opts) (optHeight opts) flags 3 2)
     (mapM_ R.closeWindow) $ \mWin -> case mWin of
-      Nothing -> putStrLn "Failed to create RGFW window."
+      Nothing -> putStrLn "Failed to create RGFW window with an OpenGL 3.2 context."
       Just win -> runWindow win
   where
+    -- The GL context is current only on the OS thread that created it.
+    inBoundThread act = if rtsSupportsBoundThreads then runInBoundThread act else act
     runWindow win = do
       let !refreshHz = if optRefreshHz opts > 0 then optRefreshHz opts else 60
           !refreshSec = 1.0 / fromIntegral refreshHz :: Double
@@ -174,7 +167,7 @@ runRgfwSessionReduceCustom opts getThemeAndScale updateModel initialModel view =
                   then monScale
                   else 1.0
 
-      let (_, initScaleChoice) = getThemeAndScale initialModel
+      let (initTheme, initScaleChoice) = getThemeAndScale initialModel
           !initScale = resolveScale initScaleChoice initMonScale
           !initPhysW = optWidth opts
           !initPhysH = optHeight opts
@@ -193,8 +186,8 @@ runRgfwSessionReduceCustom opts getThemeAndScale updateModel initialModel view =
             writeIORef clipRef t
             pure True
 
-      ctx0 <- newPixelContext
-      let ctx = withClipboard (withFontMetrics ctx0 cozetteMetrics) getClip setClip
+      ctx0 <- newRgfwContext initTheme
+      let ctx = withClipboard ctx0 getClip setClip
       debugSampler <- newRgfwDebugSampler
       setHost ctx (RgfwDebugHost debugSampler)
       let font = getCozetteFont
@@ -204,15 +197,14 @@ runRgfwSessionReduceCustom opts getThemeAndScale updateModel initialModel view =
               { inputWindowSize = Size (fromIntegral initLogW) (fromIntegral initLogH)
               }
 
-      bracket
-        (newRgfwSurface win initPhysW initPhysH >>= newIORef)
-        (\ref -> readIORef ref >>= freeRgfwSurface)
-        $ \physSurfRef -> R.withEventBuffer $ \evPtr -> do
+      bracket newGlRenderer freeGlRenderer $ \renderer -> R.withEventBuffer $ \evPtr -> do
         let !animateTimeout = max 1 (floor (refreshSec * 1000) - 2) :: Int
 
         let drawOne c curInp = do
               tUiStart <- getMonotonicTime
               curModel <- readIORef modelRef
+              let (frameTheme, _) = getThemeAndScale curModel
+              applyRgfwTheme c frameTheme
               (_, newModel, _, drawData, dirtyAfterUi) <-
                 runFrameReduceEff runEff updateModel c curInp curModel view
               writeIORef modelRef newModel
@@ -223,17 +215,13 @@ runRgfwSessionReduceCustom opts getThemeAndScale updateModel initialModel view =
               curMonScale <- readIORef monScaleRef
               curScale <- readIORef scaleRef
               (pw, ph) <- readIORef winSizeRef
-              physSurf' <- readIORef physSurfRef
-              let (curTheme, _) = getThemeAndScale newModel
-              clearScreen physSurf' (packColor (thBackground curTheme))
               (baseSpans, overlaySpans) <- collectRasterSpans c curInp
-              renderArena physSurf' font curScale drawData baseSpans overlaySpans
-              renderTextEditMenuOverlay physSurf' font curScale curTheme c (inputMousePos curInp)
+              renderArenaGl renderer font curScale pw ph (thBackground frameTheme) drawData baseSpans overlaySpans
               tRenderEnd <- getMonotonicTime
               let !renderMs = (tRenderEnd - tRenderStart) * 1000.0
 
               tBlitStart <- getMonotonicTime
-              R.blitSurface win (sRgfwSurface physSurf')
+              R.swapBuffersGL win
               tBlitEnd <- getMonotonicTime
               let !blitMs = (tBlitEnd - tBlitStart) * 1000.0
                   !frameMs = (tBlitEnd - tUiStart) * 1000.0
@@ -263,7 +251,11 @@ runRgfwSessionReduceCustom opts getThemeAndScale updateModel initialModel view =
                   !elapsedUs = round (frameMs * 1000.0)
                   !delayUs = max 0 (targetFrameUs - elapsedUs)
               when (delayUs > 0) $ threadDelay delayUs
-              pure (dirtyAfterUi, curInp)
+              -- A reduced message may have switched palettes; restyle the core
+              -- now and request the frame that paints it.
+              let (nextTheme, _) = getThemeAndScale newModel
+              applyRgfwTheme c nextTheme
+              pure (dirtyAfterUi || nextTheme /= frameTheme, curInp)
 
         let drv =
               SessionDriver
@@ -287,18 +279,12 @@ runRgfwSessionReduceCustom opts getThemeAndScale updateModel initialModel view =
                     writeIORef scaleRef newScale
                     let !lw = max 1 (round (fromIntegral pw / newScale) :: Int)
                         !lh = max 1 (round (fromIntegral ph / newScale) :: Int)
-                    -- Publish the replacement before cleanup can observe the
-                    -- old, freed surface through the session reference.
-                    mask_ $ do
-                      physSurf <- readIORef physSurfRef
-                      physSurf' <- resizeRgfwSurface win physSurf pw ph
-                      writeIORef physSurfRef physSurf'
                     pure (c, inp { inputWindowSize = Size (fromIntegral lw) (fromIntegral lh) })
                 , sdWaitTimeout   = \c wasAnim -> do
                     animating <- anyAnimating c
                     editing <- textFieldActive c
                     dirtyWait <- isDirty c
-                    -- Presents are unthrottled (single-pass blit, no vsync), so
+                    -- Presents are unthrottled (swap interval 0, no vsync), so
                     -- a live in-view animation is paced at the refresh period
                     -- instead of spinning at 0 ms; idle blocks until the first
                     -- event so the loop goes fully quiet.

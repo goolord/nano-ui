@@ -201,6 +201,8 @@ test-suite nano-ui-test
         Cases.Combo
         Cases.Damage
         Cases.Demo
+        Cases.Grid
+        Cases.HostDraw
         Cases.Keyboard
         Cases.Cache
         Cases.Runner

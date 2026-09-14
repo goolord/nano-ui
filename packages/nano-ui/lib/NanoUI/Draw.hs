@@ -12,6 +12,8 @@ module NanoUI.Draw
   , resetDrawArena
   , setDrawSnapScale
   , getDrawSnapScale
+  , setDrawSquareGeometry
+  , setDrawExternalText
   , beginLayer
   , setClip
   , pushRect
@@ -317,6 +319,8 @@ data DrawArena = DrawArena
   , daCurrentTexture :: !(IORef Int)
   , daCmdStartIndex :: !(IORef Int)
   , daSnapScale :: !(IORef Float)
+  , daSquareGeometry :: !(IORef Bool)
+  , daExternalText :: !(IORef Bool)
   }
 
 {-# INLINE layerToWord8 #-}
@@ -498,6 +502,8 @@ newDrawArena = do
   daCurrentTexture <- newIORef glyphAtlasTextureId
   daCmdStartIndex <- newIORef 0
   daSnapScale <- newIORef 0.0
+  daSquareGeometry <- newIORef False
+  daExternalText <- newIORef False
   pure
     DrawArena
       { daVertexFPtr
@@ -518,6 +524,8 @@ newDrawArena = do
       , daCurrentTexture
       , daCmdStartIndex
       , daSnapScale
+      , daSquareGeometry
+      , daExternalText
       }
 
 {-# INLINE resetDrawArena #-}
@@ -542,6 +550,22 @@ setDrawSnapScale da s = writeIORef (daSnapScale da) (if s > 0 then s else 0)
 {-# INLINE getDrawSnapScale #-}
 getDrawSnapScale :: DrawArena -> IO Float
 getDrawSnapScale da = readIORef (daSnapScale da)
+
+-- | Square geometry for hosts that rasterize flat, axis-aligned fills (software
+-- framebuffers, cell grids). Rounded rects, circles and their strokes lower to
+-- plain rects, and coverage-AA strips lower to solid quads with no
+-- transparent fringe vertices. Persists across 'resetDrawArena'.
+{-# INLINE setDrawSquareGeometry #-}
+setDrawSquareGeometry :: DrawArena -> Bool -> IO ()
+setDrawSquareGeometry da = writeIORef (daSquareGeometry da)
+
+-- | External text for hosts that rasterize text themselves from the collected
+-- text spans. Text emitters push no quads, so fonts without a glyph atlas do
+-- not leave per-character advance boxes in the buffer. Persists across
+-- 'resetDrawArena'.
+{-# INLINE setDrawExternalText #-}
+setDrawExternalText :: DrawArena -> Bool -> IO ()
+setDrawExternalText da = writeIORef (daExternalText da)
 
 {-# NOINLINE poolTake #-}
 poolTake :: BufferPool -> Int -> Int -> IO (ForeignPtr Word8)
@@ -967,8 +991,12 @@ pushRoundedRect da rect@(Rect x y w h) radius col
   | w <= 0 || h <= 0 = pure ()
   | radius <= 0.5 = pushRect da rect col
   | otherwise = do
-      s <- readIORef (daSnapScale da)
-      pushRoundedRectRaw da (Rect (snapToPixel s x) (snapToPixel s y) w h) radius col
+      square <- readIORef (daSquareGeometry da)
+      if square
+        then pushRect da rect col
+        else do
+          s <- readIORef (daSnapScale da)
+          pushRoundedRectRaw da (Rect (snapToPixel s x) (snapToPixel s y) w h) radius col
 
 -- | Unsnapped variant used when the rect is already anchored to the snapped
 -- device pixel grid, e.g. a mark that must stay concentric with a border that
@@ -984,8 +1012,9 @@ pushRoundedRectRaw da (Rect x y w h) radius col
   | w <= 0 || h <= 0 = pure ()
   | radius <= 0.5 = pushRect da (Rect x y w h) col
   | otherwise = do
+      square <- readIORef (daSquareGeometry da)
       let !rad = min radius (min (w * 0.5) (h * 0.5))
-      if rad <= 0.5
+      if square || rad <= 0.5
         then pushRect da (Rect x y w h) col
         else do
           setTexture da glyphAtlasTextureId
@@ -1068,9 +1097,12 @@ pushRoundedStroke da (Rect x y w h) radius bw col
       let !px = snapToPixel s x
           !py = snapToPixel s y
       setTexture da glyphAtlasTextureId
+      square <- readIORef (daSquareGeometry da)
       let !rad = min (max 0 radius) (min (w * 0.5) (h * 0.5))
           !ibw = min bw (min (w * 0.5) (h * 0.5))
-      if rad <= 0.5
+      if square
+        then pushSquareStroke da px py w h ibw col
+        else if rad <= 0.5
         then do
           let !t = ibw
               !ox = px + t / 2
@@ -1161,9 +1193,29 @@ pushRoundedStroke da (Rect x y w h) radius bw col
                 pokeArc (viC + 2 * arcV) (iiC + 2 * arcI) (px + w - rad) (py + h - rad) 2
                 pokeArc (viC + 3 * arcV) (iiC + 3 * arcI) (px + rad) (py + h - rad) 3
 
+-- | Border of four flat rects inside @(x, y, w, h)@, @t@ thick. The origin is
+-- already snapped by the caller; the texture is already selected.
+pushSquareStroke :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
+pushSquareStroke da x y w h t col = do
+  let edge qx qy qw qh =
+        when (qw > 0 && qh > 0) $
+          pushQuad da (Rect qx qy qw qh) whitePixelU whitePixelV whitePixelU whitePixelV col
+      !innerH = h - 2 * t
+  edge x y w t
+  edge x (y + h - t) w t
+  edge x (y + t) t innerH
+  edge (x + w - t) (y + t) t innerH
+
 {-# INLINE pushLine #-}
 pushLine :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
-pushLine da x1 y1 x2 y2 thickness col =
+pushLine da x1 y1 x2 y2 thickness col = do
+  square <- readIORef (daSquareGeometry da)
+  if square
+    then pushStroke da x1 y1 x2 y2 thickness col
+    else pushLineCapsules da x1 y1 x2 y2 thickness col
+
+pushLineCapsules :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
+pushLineCapsules da x1 y1 x2 y2 thickness col =
   case strokeAxes x1 y1 x2 y2 of
     Nothing -> pure ()
     Just (dx, dy, len) -> do
@@ -1194,7 +1246,14 @@ pushStrokeAA da x0 y0 x1 y1 bw col
 pushStrokeAARaw :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
 pushStrokeAARaw da x0 y0 x1 y1 bw col
   | bw <= 0 = pure ()
-  | otherwise =
+  | otherwise = do
+      square <- readIORef (daSquareGeometry da)
+      if square
+        then pushStroke da x0 y0 x1 y1 bw col
+        else pushStrokeAAStrip da x0 y0 x1 y1 bw col
+
+pushStrokeAAStrip :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
+pushStrokeAAStrip da x0 y0 x1 y1 bw col =
       case strokeAxes x0 y0 x1 y1 of
         Nothing -> pure ()
         Just (dx, dy, len) -> do
@@ -1280,7 +1339,9 @@ emitDrawOps da fm ops = V.mapM_ emitOne ops
     emitOne (DrawText x y ax ay t c) = do
       prepared <- prepareFontMetrics fm t
       let Rect px py _ _ = drawTextBox prepared x y ax ay t
-      pushPreparedText da prepared px py t c
+      -- Drawing text has no collected text span, so it keeps its quads even
+      -- when the host rasterizes widget text externally.
+      pushPreparedTextQuads da prepared px py t c
 
 {-# INLINE pushFilledTriangle #-}
 pushFilledTriangle :: DrawArena -> Float -> Float -> Float -> Float -> Float -> Float -> Color -> IO ()
@@ -1314,7 +1375,12 @@ pushText da fm x y txt col = do
   pushPreparedText da prepared x y txt col
 
 pushPreparedText :: DrawArena -> FontMetrics -> Float -> Float -> T.Text -> Color -> IO ()
-pushPreparedText da fm x y txt col =
+pushPreparedText da fm x y txt col = do
+  external <- readIORef (daExternalText da)
+  unless external $ pushPreparedTextQuads da fm x y txt col
+
+pushPreparedTextQuads :: DrawArena -> FontMetrics -> Float -> Float -> T.Text -> Color -> IO ()
+pushPreparedTextQuads da fm x y txt col =
   -- Snapping the pen to the device pixel grid keeps every glyph quad on a
   -- whole pixel. Advances, bearings, and ink sizes are all integer pixel
   -- counts divided by the snap scale, so snapping the origin alone aligns the
@@ -1396,9 +1462,14 @@ pushTextStyled da fm weight fstyle deco x y txt col = do
   pushPreparedTextStyled da prepared weight fstyle deco x y txt col
 
 pushPreparedTextStyled :: DrawArena -> FontMetrics -> FontWeight -> FontStyle -> TextDecoration -> Float -> Float -> T.Text -> Color -> IO ()
-pushPreparedTextStyled da fm weight fstyle deco x y txt col
+pushPreparedTextStyled da fm weight fstyle deco x y txt col = do
+  external <- readIORef (daExternalText da)
+  unless external $ pushPreparedTextStyledQuads da fm weight fstyle deco x y txt col
+
+pushPreparedTextStyledQuads :: DrawArena -> FontMetrics -> FontWeight -> FontStyle -> TextDecoration -> Float -> Float -> T.Text -> Color -> IO ()
+pushPreparedTextStyledQuads da fm weight fstyle deco x y txt col
   | weight == WeightNormal && fstyle == FontStyleNormal && deco == DecorationNone =
-      pushPreparedText da fm x y txt col
+      pushPreparedTextQuads da fm x y txt col
   | otherwise = do
       let !px = snapToPixel (fmSnapScale fm) x
           !py = snapToPixel (fmSnapScale fm) y

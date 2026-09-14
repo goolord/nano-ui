@@ -186,6 +186,7 @@ data NodeArenaArrays = NodeArenaArrays
   , naArrTree :: !(MutablePrimArray RealWorld Int)
   , naArrTextStore :: !(MutableArray RealWorld Text)
   , naArrOptionsStore :: !(MutableArray RealWorld [Text])
+  , naArrFontColor :: !(MutablePrimArray RealWorld Int)
   }
 
 data NodeArena = NodeArena
@@ -245,6 +246,7 @@ newNodeArenaArrays cap = do
   naArrTree <- newPrimArray (cap * 8)
   naArrTextStore <- newArray cap T.empty
   naArrOptionsStore <- newArray cap []
+  naArrFontColor <- newPrimArray cap
   pure NodeArenaArrays {..}
 
 {-# INLINE newNodeArena #-}
@@ -352,6 +354,7 @@ ensureCapacity na needed = do
       naArrTree <- growPrimArrayCopy (naArrTree a) (cap * 8) (newCap * 8) 0
       naArrTextStore <- growBoxedStoreCopy T.empty (naArrTextStore a) cap newCap
       naArrOptionsStore <- growBoxedStoreCopy [] (naArrOptionsStore a) cap newCap
+      naArrFontColor <- growPrimArrayCopy (naArrFontColor a) cap newCap 0
       growPrimArray (naWrapTag na) cap newCap 0
       growPrimArray (naWrapKey na) cap newCap 0
       growPrimArray (naWrapW na) cap newCap 0
@@ -497,6 +500,7 @@ addNode na nt parent dir wSiz hSiz pad gap minW minH maxW maxH grow ax ay = do
   writePrimArray (naArrTree a) (tBase + 5) 0
   writePrimArray (naArrTree a) (tBase + 6) (-1)
   writePrimArray (naArrTree a) (tBase + 7) 0
+  writePrimArray (naArrFontColor a) idx 0
   writeArray (naArrOptionsStore a) idx []
 
   if parent >= 0
@@ -850,9 +854,9 @@ styleMatch x y i n
         andThen (floatsEq x y base 14 15) $
           styleMatch x y (i + 1) n
 
--- Leaf font colors do not affect layout. Box/image/drawing style IDs are
--- paint data too; their intrinsic dimensions come from sizing constraints.
--- Container column 7 remains significant because it holds the grid count.
+-- Box/image/drawing style IDs are paint data; their intrinsic dimensions come
+-- from sizing constraints. Column 7 holds the grid column count, which only
+-- containers consume.
 treeMatch :: NodeArenaArrays -> MutablePrimArray RealWorld Int -> Int -> Int -> IO Bool
 treeMatch a cached i n
   | i >= n = pure True
@@ -995,11 +999,13 @@ getNodeFontSize na idx = arenaArrays na >>= \a -> readPrimArray (naArrStyle a) (
 setNodeFontSize :: NodeArena -> NodeIdx -> Float -> IO ()
 setNodeFontSize na idx v = arenaArrays na >>= \a -> writePrimArray (naArrStyle a) (idx * 16 + 15) v
 
+-- | Per-node font color (paint-only, intentionally kept out of @naArrTree@
+-- where slot 7 holds the grid column count for containers).
 {-# INLINE getNodeFontColor #-}
 getNodeFontColor :: NodeArena -> NodeIdx -> IO (Maybe Color)
 getNodeFontColor na idx = do
   a <- arenaArrays na
-  val <- readPrimArray (naArrTree a) (idx * 8 + 7)
+  val <- readPrimArray (naArrFontColor a) idx
   if (val .&. 0x100000000) /= 0
     then pure (Just (Color (fromIntegral (val .&. 0xFFFFFFFF))))
     else pure Nothing
@@ -1011,7 +1017,7 @@ setNodeFontColor na idx mCol = do
   let val = case mCol of
         Nothing -> 0
         Just (Color w) -> 0x100000000 .|. fromIntegral w
-  writePrimArray (naArrTree a) (idx * 8 + 7) val
+  writePrimArray (naArrFontColor a) idx val
 
 {-# INLINE getStyleIdx #-}
 getStyleIdx :: NodeArena -> NodeIdx -> IO Int
