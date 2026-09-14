@@ -5,8 +5,10 @@ module NanoUI.Sdl.Image
   , syncImageAtlas
   , lookupImage
   , lookupAtlasTex
-  ) where
+  )
+where
 
+import Control.Exception (mask_)
 import Control.Monad (when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Word (Word8)
@@ -18,42 +20,38 @@ import Foreign.Storable (peek, poke)
 import NanoUI.Testing (Context, atlasSnapshot, atlasTextureId)
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
 
-data ImageAtlas = ImageAtlas
-  { iaTex :: IORef (Maybe (Ptr ()))
-  , iaW :: IORef Int
-  , iaH :: IORef Int
-  , iaGen :: IORef Int
+-- A texture and its metadata have one lifetime; publish them together.
+newtype ImageAtlas = ImageAtlas (IORef (Maybe AtlasTexture))
+
+data AtlasTexture = AtlasTexture
+  { atTexture :: !(Ptr ())
+  , atWidth :: !Int
+  , atHeight :: !Int
+  , atGeneration :: !Int
   }
 
 newImageAtlas :: IO ImageAtlas
-newImageAtlas = do
-  tex <- newIORef Nothing
-  w <- newIORef 0
-  h <- newIORef 0
-  gen <- newIORef 0
-  pure ImageAtlas {iaTex = tex, iaW = w, iaH = h, iaGen = gen}
+newImageAtlas = ImageAtlas <$> newIORef Nothing
 
 destroyImageAtlas :: ImageAtlas -> IO ()
-destroyImageAtlas atlas = do
-  mTex <- readIORef (iaTex atlas)
-  mapM_ destroyTexture mTex
-  writeIORef (iaTex atlas) Nothing
-  writeIORef (iaW atlas) 0
-  writeIORef (iaH atlas) 0
-  writeIORef (iaGen atlas) 0
+destroyImageAtlas (ImageAtlas ref) = mask_ $ do
+  old <- readIORef ref
+  writeIORef ref Nothing
+  mapM_ (destroyTexture . atTexture) old
 
 syncImageAtlas :: Ptr SDL_Renderer -> ImageAtlas -> Context -> IO ()
-syncImageAtlas ren atlas ctx = do
+syncImageAtlas ren atlas@(ImageAtlas ref) ctx = do
   snap <- atlasSnapshot ctx
   case snap of
     Nothing -> pure ()
     Just (w, h, pixels, gen) -> do
-      oldGen <- readIORef (iaGen atlas)
-      when (gen /= oldGen) $
+      old <- readIORef ref
+      when (Just gen /= fmap atGeneration old) $
         uploadAtlas ren atlas w h pixels gen
 
-uploadAtlas :: Ptr SDL_Renderer -> ImageAtlas -> Int -> Int -> ForeignPtr Word8 -> Int -> IO ()
-uploadAtlas ren atlas w h pixels gen =
+uploadAtlas ::
+  Ptr SDL_Renderer -> ImageAtlas -> Int -> Int -> ForeignPtr Word8 -> Int -> IO ()
+uploadAtlas ren (ImageAtlas ref) w h pixels gen = mask_ $
   withForeignPtr pixels $ \ptr ->
     alloca $ \out -> do
       poke out nullPtr
@@ -66,35 +64,34 @@ uploadAtlas ren atlas w h pixels gen =
           out
       when ok $ do
         tex <- peek out
-        old <- readIORef (iaTex atlas)
-        mapM_ destroyTexture old
-        writeIORef (iaTex atlas) (Just tex)
-        writeIORef (iaW atlas) w
-        writeIORef (iaH atlas) h
-        writeIORef (iaGen atlas) gen
+        old <- readIORef ref
+        writeIORef ref (Just (AtlasTexture tex w h gen))
+        mapM_ (destroyTexture . atTexture) old
 
 lookupImage :: ImageAtlas -> Int -> IO (Maybe (Ptr ()))
-lookupImage atlas tid
-  | tid == atlasTextureId = readIORef (iaTex atlas)
+lookupImage (ImageAtlas ref) tid
+  | tid == atlasTextureId = fmap atTexture <$> readIORef ref
   | otherwise = pure Nothing
 
 lookupAtlasTex :: ImageAtlas -> Int -> IO (Maybe (Ptr (), Float, Float))
-lookupAtlasTex atlas tid
+lookupAtlasTex (ImageAtlas ref) tid
   | tid == atlasTextureId = do
-      mTex <- readIORef (iaTex atlas)
-      tw <- fromIntegral <$> readIORef (iaW atlas)
-      th <- fromIntegral <$> readIORef (iaH atlas)
-      pure (fmap (\tex -> (tex, tw, th)) mTex)
+      texture <- readIORef ref
+      pure
+        ( fmap
+            (\t -> (atTexture t, fromIntegral (atWidth t), fromIntegral (atHeight t)))
+            texture
+        )
   | otherwise = pure Nothing
 
 foreign import ccall safe "nano_ui_create_rgba_texture"
   createRgbaTexture ::
-    Ptr SDL_Renderer ->
-    Ptr () ->
-    CInt ->
-    CInt ->
-    Ptr (Ptr ()) ->
-    IO Bool
+    Ptr SDL_Renderer
+    -> Ptr ()
+    -> CInt
+    -> CInt
+    -> Ptr (Ptr ())
+    -> IO Bool
 
 foreign import ccall safe "nano_ui_destroy_texture"
   destroyTexture :: Ptr () -> IO ()

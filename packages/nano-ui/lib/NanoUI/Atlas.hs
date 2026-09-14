@@ -5,12 +5,14 @@ module NanoUI.Atlas
   , registerImage
   , lookupImageUv
   , atlasSnapshot
-  ) where
+  )
+where
 
+import Control.Applicative ((<|>))
 import Data.ByteString (ByteString)
-import qualified Data.ByteString as BS
+import Data.ByteString qualified as BS
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import qualified Data.IntMap.Strict as IM
+import Data.IntMap.Strict qualified as IM
 import Data.Word (Word8)
 import Foreign.ForeignPtr (ForeignPtr, mallocForeignPtrBytes, withForeignPtr)
 import Foreign.Marshal.Utils (copyBytes, fillBytes)
@@ -29,9 +31,6 @@ atlasStart = 256
 
 atlasMax :: Int
 atlasMax = 4096
-
-maxImageDim :: Int
-maxImageDim = 8192
 
 data AtlasSlot = AtlasSlot
   { slotX :: {-# UNPACK #-} !Int
@@ -72,7 +71,7 @@ newImageAtlas = do
 registerImage :: ImageAtlas -> ImageId -> Int -> Int -> ByteString -> IO Bool
 registerImage (ImageAtlas ref) (ImageId tid) w h pixels
   | tid <= 0 || w <= 0 || h <= 0 = pure False
-  | w > maxImageDim || h > maxImageDim = pure False
+  | w > atlasMax - 2 * atlasPad || h > atlasMax - 2 * atlasPad = pure False
   | BS.length pixels < w * h * 4 = pure False
   | otherwise = do
       st0 <- readIORef ref
@@ -91,21 +90,24 @@ registerImage (ImageAtlas ref) (ImageId tid) w h pixels
               writeIORef ref st1
               pure True
 
-lookupImageUv :: ImageAtlas -> ImageId -> IO (Maybe (Float, Float, Float, Float))
+lookupImageUv ::
+  ImageAtlas -> ImageId -> IO (Maybe (Float, Float, Float, Float))
 lookupImageUv (ImageAtlas ref) (ImageId tid) = do
   st <- readIORef ref
   pure $
     case IM.lookup tid (asSlots st) of
       Nothing -> Nothing
       Just (AtlasSlot x y w h) ->
-        let fw = fromIntegral (asW st)
-            fh = fromIntegral (asH st)
-         in Just
-              ( fromIntegral x / fw
-              , fromIntegral y / fh
-              , fromIntegral (x + w) / fw
-              , fromIntegral (y + h) / fh
-              )
+        let
+          fw = fromIntegral (asW st)
+          fh = fromIntegral (asH st)
+         in
+          Just
+            ( fromIntegral x / fw
+            , fromIntegral y / fh
+            , fromIntegral (x + w) / fw
+            , fromIntegral (y + h) / fh
+            )
 
 -- Pinned pixel buffer. SDL uploads this pointer; do not copy to ByteString first.
 atlasSnapshot :: ImageAtlas -> IO (Maybe (Int, Int, ForeignPtr Word8, Int))
@@ -115,77 +117,60 @@ atlasSnapshot (ImageAtlas ref) = do
     then pure Nothing
     else pure (Just (asW st, asH st, asPtr st, asGen st))
 
-fitImage :: AtlasState -> Int -> Int -> Int -> ByteString -> IO (Maybe AtlasState)
-fitImage st0 tid w h pixels = do
-  st1 <- ensureCapacity st0 w h
-  case cursorFor st1 w h of
+fitImage ::
+  AtlasState -> Int -> Int -> Int -> ByteString -> IO (Maybe AtlasState)
+fitImage st0 tid w h pixels =
+  -- Plan the shelf position before allocating or copying the atlas. A full
+  -- atlas must reject an image without repeatedly allocating doomed growth.
+  case cursorFor st0 w h <|> cursorFor grown w h of
     Nothing -> pure Nothing
-    Just (x, y, st2) -> do
-      blitPixels (asPtr st2) (asW st2) x y w h pixels
-      let rowH = max (asRowH st2) h
+    Just (x, y, placed) -> do
+      fp <-
+        if asW placed == asW st0 && asH placed == asH st0
+          then pure (asPtr st0)
+          else do
+            resized <- allocPixels (asW placed) (asH placed)
+            copyAtlas (asPtr st0) (asW st0) (asH st0) resized (asW placed)
+            pure resized
+      blitPixels fp (asW placed) x y w h pixels
       pure $
         Just
-          st2
-            { asSlots = IM.insert tid (AtlasSlot x y w h) (asSlots st2)
+          placed
+            { asPtr = fp
+            , asSlots = IM.insert tid (AtlasSlot x y w h) (asSlots placed)
             , asX = x + w + atlasPad
             , asY = y
-            , asRowH = rowH
-            , asGen = asGen st2 + 1
+            , asRowH = max (asRowH placed) h
+            , asGen = asGen placed + 1
             }
+ where
+  grown =
+    st0
+      { asW = growDim (asW st0) (w + 2 * atlasPad)
+      , asH = growDim (asH st0) (asY st0 + asRowH st0 + h + 2 * atlasPad)
+      }
 
 cursorFor :: AtlasState -> Int -> Int -> Maybe (Int, Int, AtlasState)
 cursorFor st w h
   | asX st + w + atlasPad <= asW st && asY st + h + atlasPad <= asH st =
       Just (asX st, asY st, st)
-  | asY st + asRowH st + atlasPad + h + atlasPad <= asH st && w + 2 * atlasPad <= asW st =
-      let y = asY st + asRowH st + atlasPad
-       in Just (atlasPad, y, st {asX = atlasPad, asY = y, asRowH = 0})
+  | asY st + asRowH st + atlasPad + h + atlasPad <= asH st
+      && w + 2 * atlasPad <= asW st =
+      let
+        y = asY st + asRowH st + atlasPad
+       in
+        Just (atlasPad, y, st {asX = atlasPad, asY = y, asRowH = 0})
   | otherwise = Nothing
-
-ensureCapacity :: AtlasState -> Int -> Int -> IO AtlasState
-ensureCapacity st w h
-  | fits st w h = pure st
-  | otherwise = growUntil st w h
-
-fits :: AtlasState -> Int -> Int -> Bool
-fits st w h =
-  case cursorFor st w h of
-    Just _ -> True
-    Nothing -> False
-
-growUntil :: AtlasState -> Int -> Int -> IO AtlasState
-growUntil st w h
-  | w + 2 * atlasPad > atlasMax || h + 2 * atlasPad > atlasMax = pure st
-  | otherwise = do
-      let needW = max (asW st) (w + 2 * atlasPad)
-          needH =
-            max
-              (asH st)
-              (asY st + asRowH st + atlasPad + h + atlasPad)
-          newW = min atlasMax (growDim (asW st) needW)
-          newH = min atlasMax (growDim (asH st) needH)
-      if newW == asW st && newH == asH st
-        then pure st
-        else do
-          st' <- resizeAtlas st newW newH
-          if fits st' w h
-            then pure st'
-            else growUntil st' w h
 
 growDim :: Int -> Int -> Int
 growDim cur need
   | need <= cur = cur
-  | otherwise = max need (min atlasMax (cur * 2))
-
-resizeAtlas :: AtlasState -> Int -> Int -> IO AtlasState
-resizeAtlas st newW newH = do
-  fp <- allocPixels newW newH
-  copyAtlas (asPtr st) (asW st) (asH st) fp newW
-  pure st {asW = newW, asH = newH, asPtr = fp}
+  | otherwise = min atlasMax (max need (cur * 2))
 
 allocPixels :: Int -> Int -> IO (ForeignPtr Word8)
 allocPixels w h = do
-  let n = w * h * 4
+  let
+    n = w * h * 4
   fp <- mallocForeignPtrBytes n
   withForeignPtr fp $ \p -> fillBytes p 0 n
   pure fp
@@ -195,22 +180,23 @@ copyAtlas src oldW oldH dst newW =
   withForeignPtr src $ \sp ->
     withForeignPtr dst $ \dp ->
       mapM_ (copyRow sp dp) [0 .. oldH - 1]
-  where
-    rowBytes = oldW * 4
-    copyRow sp dp row =
-      copyBytes
-        (dp `plusPtr` (row * newW * 4))
-        (sp `plusPtr` (row * oldW * 4))
-        rowBytes
+ where
+  rowBytes = oldW * 4
+  copyRow sp dp row =
+    copyBytes
+      (dp `plusPtr` (row * newW * 4))
+      (sp `plusPtr` (row * oldW * 4))
+      rowBytes
 
-blitPixels :: ForeignPtr Word8 -> Int -> Int -> Int -> Int -> Int -> ByteString -> IO ()
+blitPixels ::
+  ForeignPtr Word8 -> Int -> Int -> Int -> Int -> Int -> ByteString -> IO ()
 blitPixels dest destW destX destY w h pixels =
   withForeignPtr dest $ \dp ->
     BS.useAsCStringLen pixels $ \(sp, _) ->
       mapM_ (copyRow dp sp) [0 .. h - 1]
-  where
-    copyRow dp sp row =
-      copyBytes
-        (dp `plusPtr` (((destY + row) * destW + destX) * 4))
-        (sp `plusPtr` (row * w * 4))
-        (w * 4)
+ where
+  copyRow dp sp row =
+    copyBytes
+      (dp `plusPtr` (((destY + row) * destW + destX) * 4))
+      (sp `plusPtr` (row * w * 4))
+      (w * 4)

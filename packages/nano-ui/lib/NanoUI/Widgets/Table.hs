@@ -40,7 +40,8 @@ import Data.Vector.Generic qualified as G
 import Data.Vector.Unboxed qualified as U
 import Effectful (Eff, type (:>))
 import qualified Data.IntMap.Strict as IM
-import NanoUI.Context (Context (..), bumpMirror, getPrevRect, getScrollOffset2D, getStore, intKey, linkScrollAxes, markDirty, setStore)
+import NanoUI.Context (Context (..), getPrevRect, getScrollOffset2D, getStore, intKey, linkScrollAxes, markDirty, setStore)
+import NanoUI.Hooks (useInt)
 import NanoUI.Font (scrollBarGutter, scrollBarListExtra, tableCellInset, lineWidthIO)
 import NanoUI.Id (WidgetId (..))
 import NanoUI.Input (Input (..), inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased, inputMouseRightReleased)
@@ -372,20 +373,8 @@ nextSortCol n cur clicked =
 
 useTableSort :: Ui :> es => SortCol -> Eff es (SortCol, SortCol -> Eff es ())
 useTableSort initial = do
-  wid <- nextId
-  ctx <- askContext
-  let key = intKey wid
-      packedInitial = packSort initial
-  st0 <- uiIO (getStore ctx)
-  let sortVal = unpackSort (IM.findWithDefault packedInitial key (storeInt st0))
-      setSort sort = uiIO $ do
-        st <- getStore ctx
-        let packed = packSort sort
-            prev = IM.findWithDefault packedInitial key (storeInt st)
-        when (prev /= packed) $ do
-          setStore ctx (bumpMirror (st {storeInt = IM.insert key packed (storeInt st)}))
-          markDirty ctx
-  pure (sortVal, setSort)
+  (packed, setPacked) <- useInt (packSort initial)
+  pure (unpackSort packed, setPacked . packSort)
 
 packResize :: Int -> Int
 packResize i = -(1000 + i)

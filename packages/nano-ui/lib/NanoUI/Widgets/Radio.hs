@@ -2,36 +2,23 @@
 
 module NanoUI.Widgets.Radio (radioFieldset, boundedRadioFieldset, enumRadio, useRadio) where
 
-import Control.Monad (when)
-import qualified Data.IntMap.Strict as IM
+import Control.Monad (foldM, when)
+import Data.Foldable (toList)
 import Data.Hashable (hash)
-import Data.IORef (readIORef, writeIORef)
+import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Effectful (Eff, type (:>))
-import NanoUI.Context (Context (..), getPrevRect, getStore, intKey, registerFocusable, setStore)
-import NanoUI.Id (IdContext (..), WidgetId (..), mix64)
-import NanoUI.Input (Input, inputMousePos)
-import NanoUI.Layout.Arena
-  ( NodeType (..)
-  , addNodeFromLayout
-  , setNodeText
-  , setNodeValue
-  , setStyleIdx
-  , setWidgetId
-  )
-import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
+import NanoUI.Context (getStore, intKey, registerFocusable, setStore)
+import NanoUI.Layout.Arena (NodeType (..))
+import NanoUI.Monad (Ui, askContext, nextId, uiIO, withKey)
 import NanoUI.Store (WidgetStore (..), slotKey)
 import NanoUI.Style (Layout, defaultLayout, fillW, gap, tight)
-import NanoUI.Types (Rect (..), rectContains, rectH, rectW)
 import NanoUI.Widgets.Behavior (KeyNav (..), useKeyNav, useSelection)
 import NanoUI.Widgets.Combinators (selectableItem)
 import NanoUI.Widgets.Layout (column')
 import NanoUI.Widgets.Node
   ( Response (..)
-  , mkResponse
-  , parentIdx
-  , resolveInteraction
   , setChanged
   , tagContainer
   )
@@ -45,24 +32,27 @@ radioGroupLay = tight (gap 4 (fillW defaultLayout))
 radioSalt :: Int
 radioSalt = hash ("radio" :: Text)
 
-radioFieldset :: (Foldable f, Ui :> es) => f Text -> Int -> Eff es (Response, Int)
+radioFieldset ::
+  (Foldable f, Ui :> es) => f Text -> Int -> Eff es (Response, Int)
 radioFieldset options initial =
   withKey radioSalt $ do
     gid <- nextId
     ctx <- askContext
-    let opts = case foldr (:) [] options of
-          [] -> [""]
-          xs -> xs
-        !len = length opts
-        !c0 = max 0 (min (len - 1) initial)
-        !key = intKey gid
-        !keyInit = slotKey 1 key
+    let
+      opts = case toList options of
+        [] -> [""]
+        xs -> xs
+      !len = length opts
+      !c0 = max 0 (min (len - 1) initial)
+      !key = intKey gid
+      !keyInit = slotKey 1 key
     st0 <- uiIO (getStore ctx)
-    let lastInit = IM.lookup keyInit (storeInt st0)
-        storedSel = IM.lookup key (storeInt st0)
-        !sel = case (lastInit, storedSel) of
-          (Just li, Just s) | li == c0 -> max 0 (min (len - 1) s)
-          _                            -> c0
+    let
+      lastInit = IM.lookup keyInit (storeInt st0)
+      storedSel = IM.lookup key (storeInt st0)
+      !sel = case (lastInit, storedSel) of
+        (Just li, Just s) | li == c0 -> max 0 (min (len - 1) s)
+        _ -> c0
     uiIO $ registerFocusable ctx gid
     nav <- useKeyNav gid
     let
@@ -72,67 +62,44 @@ radioFieldset options initial =
       !selNav = if navDelta == 0 then sel else max 0 (min (len - 1) (sel + navDelta))
     column' radioGroupLay $ do
       tagContainer gid
-      (combinedResp, clickedIdx) <-
-        case opts of
-          [l] -> do
-            r <- selectableItem NodeRadio l (selNav == 0) radioLay 0
-            pure (r, if rawRespClicked r then 0 else -1)
-          _ -> do
-            inp <- askInput
-            addRadioOptions ctx inp selNav opts
-      let !finalSel = if clickedIdx >= 0 then clickedIdx else selNav
-          !hasClick = clickedIdx >= 0
+      (combinedResp, clickedIdx) <- addRadioOptions selNav opts
+      let
+        !finalSel = if clickedIdx >= 0 then clickedIdx else selNav
+        !hasClick = clickedIdx >= 0
       uiIO $ do
         when (storedSel /= Just finalSel || lastInit /= Just c0) $ do
           st <- getStore ctx
-          setStore ctx st
-            { storeInt =
-                IM.insert key finalSel $
-                  IM.insert keyInit c0 (storeInt st)
-            }
+          setStore
+            ctx
+            st
+              { storeInt =
+                  IM.insert key finalSel $
+                    IM.insert keyInit c0 (storeInt st)
+              }
       pure (setChanged (finalSel /= sel || hasClick) combinedResp, finalSel)
 
-addRadioOptions :: Ui :> es => Context -> Input -> Int -> [Text] -> Eff es (Response, Int)
-addRadioOptions ctx inp sel opts =
-  uiIO $ do
-    stack <- readIORef (ctxContainerStack ctx)
-    ic@(IdContext cid sid) <- readIORef (ctxIdContext ctx)
-    pending <- readIORef (ctxClickedId ctx)
-    let parent = parentIdx stack
-        go !_ !_ [] !acc !clickedIdx =
-          pure ((acc, clickedIdx), sid)
-        go !i !s (l : ls) !acc !clickedIdx = do
-          let raw = mix64 cid s
-              wid = if raw == 0 then WidgetId 1 else WidgetId raw
-          idx <- addNodeFromLayout (ctxNodeArena ctx) NodeRadio parent radioLay
-          let on = sel == i
-              txt = l
-          setNodeText (ctxNodeArena ctx) idx txt
-          setNodeValue (ctxNodeArena ctx) idx (if on then 1 else 0)
-          setStyleIdx (ctxNodeArena ctx) idx i
-          setWidgetId (ctxNodeArena ctx) idx wid
-          r <- radioResponse ctx inp pending wid
-          let !clickedIdx' = if rawRespClicked r && clickedIdx < 0 then i else clickedIdx
-          go (i + 1) (s + 1) ls (acc <> r) clickedIdx'
-    (result, sid') <- go 0 sid opts mempty (-1)
-    writeIORef (ctxIdContext ctx) (ic {siblingId = sid'})
-    pure result
+-- Use the ordinary widget path for every option, including singleton groups.
+-- It owns IDs, node construction, and scroll-aware interaction geometry.
+addRadioOptions :: Ui :> es => Int -> [Text] -> Eff es (Response, Int)
+addRadioOptions sel opts = foldM addOption (mempty, -1) (zip [0 ..] opts)
+ where
+  addOption (!acc, !clickedIdx) (i, txt) = do
+    r <- selectableItem NodeRadio txt (sel == i) radioLay i
+    let
+      clickedIdx' = if rawRespClicked r && clickedIdx < 0 then i else clickedIdx
+    pure (acc <> r, clickedIdx')
 
-radioResponse :: Context -> Input -> WidgetId -> WidgetId -> IO Response
-radioResponse ctx inp pending wid = do
-  mrect <- getPrevRect ctx wid
-  let rect = maybe (Rect 0 0 0 0) id mrect
-      mouse = inputMousePos inp
-      underMouse = rectW rect > 0 && rectH rect > 0 && rectContains rect mouse
-  if not underMouse && pending /= wid
-    then pure (mkResponse wid rect False False False False)
-    else resolveInteraction ctx inp wid
-
-boundedRadioFieldset :: forall a es. (Bounded a, Enum a, Ui :> es) => a -> (a -> Text) -> Eff es (Response, a)
+boundedRadioFieldset ::
+  forall a es.
+  (Bounded a, Enum a, Ui :> es) => a -> (a -> Text) -> Eff es (Response, a)
 boundedRadioFieldset initial encode =
-  let vs = take 256 [minBound .. maxBound]
-      lower = fromEnum (minBound :: a)
-   in fmap (\(r, i) -> (r, toEnum (lower + i))) (radioFieldset (map encode vs) (fromEnum initial - lower))
+  let
+    vs = take 256 [minBound .. maxBound]
+    lower = fromEnum (minBound :: a)
+   in
+    fmap
+      (\(r, i) -> (r, toEnum (lower + i)))
+      (radioFieldset (map encode vs) (fromEnum initial - lower))
 
 enumRadio :: (Bounded a, Enum a, Show a, Ui :> es) => a -> Eff es (Response, a)
 enumRadio initial = boundedRadioFieldset initial (T.pack . show)

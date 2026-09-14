@@ -45,6 +45,7 @@ import Control.Exception (SomeException, bracket, catch, throwIO)
 import Control.Monad (unless, when)
 import Data.Bits ((.|.), shiftL)
 import Foreign.Marshal.Alloc (alloca, allocaBytes)
+import Foreign.Marshal.Array (advancePtr, allocaArray)
 import Data.Char (ord)
 import Data.ByteString (ByteString)
 import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
@@ -65,7 +66,7 @@ import qualified Data.Text as T
 import Foreign.C.String (CString, withCString)
 import Foreign.C.Types (CFloat (..), CInt (..), CSize (..), CUInt (..))
 import Foreign.Ptr (Ptr, castPtr, nullPtr, plusPtr)
-import Foreign.Storable (peek, poke, sizeOf)
+import Foreign.Storable (peek, peekElemOff, poke, sizeOf)
 import Data.Unique (hashUnique, newUnique)
 import qualified Data.ByteString as BS
 import System.Directory (getTemporaryDirectory, removeFile)
@@ -180,36 +181,54 @@ runCacheCap = 1024
 cacheableText :: Text -> Bool
 cacheableText = (<= 4096) . T.length
 
+-- Native glyph measurements have one representation, shared by metric-only
+-- preparation and atlas placement. Pixel bearings are unscaled here.
+data GlyphMetrics = GlyphMetrics
+  { gmMinX :: !Float
+  , gmMaxX :: !Float
+  , gmMinY :: !Float
+  , gmMaxY :: !Float
+  , gmAdvance :: !Float
+  }
+
+getGlyphMetrics :: SdlFont -> CUInt -> IO (Maybe GlyphMetrics)
+getGlyphMetrics sf cp = allocaArray 5 $ \p -> do
+  ok <-
+    ttfGlyphMetrics
+      (sfFont sf)
+      cp
+      p
+      (p `advancePtr` 1)
+      (p `advancePtr` 2)
+      (p `advancePtr` 3)
+      (p `advancePtr` 4)
+  let
+    metric i = fromIntegral <$> peekElemOff p i
+  if ok
+    then
+      Just
+        <$> (GlyphMetrics <$> metric 0 <*> metric 1 <*> metric 2 <*> metric 3 <*> metric 4)
+    else pure Nothing
+
 getGlyphAdvance :: SdlFont -> CUInt -> IO (Maybe Float)
-getGlyphAdvance sf cp =
-  allocaBytes (5 * sizeOf (0 :: CInt)) $ \p -> do
-    let pMinX = p
-        pMaxX = plusPtr pMinX (sizeOf (0 :: CInt))
-        pMinY = plusPtr pMaxX (sizeOf (0 :: CInt))
-        pMaxY = plusPtr pMinY (sizeOf (0 :: CInt))
-        pAdv  = plusPtr pMaxY (sizeOf (0 :: CInt))
-    ok <- ttfGlyphMetrics (sfFont sf) cp pMinX pMaxX pMinY pMaxY pAdv
-    if ok
-      then do
-        adv <- peek pAdv
-        pure (Just (fromIntegral adv))
-      else pure Nothing
+getGlyphAdvance sf cp = fmap gmAdvance <$> getGlyphMetrics sf cp
 
 -- Metric-only geometry has no atlas lifetime and never rasterises a surface.
 getGlyphGeometry :: SdlFont -> Float -> Char -> IO (Maybe GlyphQuad)
-getGlyphGeometry sf inv c = allocaBytes (5 * sizeOf (0 :: CInt)) $ \p -> do
-  let pMaxX = plusPtr p (sizeOf (0 :: CInt))
-      pMinY = plusPtr pMaxX (sizeOf (0 :: CInt))
-      pMaxY = plusPtr pMinY (sizeOf (0 :: CInt))
-      pAdv = plusPtr pMaxY (sizeOf (0 :: CInt))
-  ok <- ttfGlyphMetrics (sfFont sf) (fromIntegral (ord c)) p pMaxX pMinY pMaxY pAdv
-  if not ok then pure Nothing else do
-    minX <- fromIntegral <$> peek p
-    maxX <- fromIntegral <$> peek pMaxX
-    minY <- fromIntegral <$> peek pMinY
-    maxY <- fromIntegral <$> peek pMaxY
-    pure $! Just (GlyphQuad (minX / inv) ((sfAscent sf - maxY) / inv)
-      ((maxX - minX) / inv) ((maxY - minY) / inv) 0 0 0 0)
+getGlyphGeometry sf inv c =
+  fmap (metricsGlyphQuad sf inv) <$> getGlyphMetrics sf (fromIntegral (ord c))
+
+metricsGlyphQuad :: SdlFont -> Float -> GlyphMetrics -> GlyphQuad
+metricsGlyphQuad sf inv metrics =
+  GlyphQuad
+    (gmMinX metrics / inv)
+    ((sfAscent sf - gmMaxY metrics) / inv)
+    ((gmMaxX metrics - gmMinX metrics) / inv)
+    ((gmMaxY metrics - gmMinY metrics) / inv)
+    0
+    0
+    0
+    0
 
 newGlyphAtlas :: Ptr SDL_Renderer -> IO GlyphAtlas
 newGlyphAtlas ren = do
@@ -300,27 +319,12 @@ lookupOrInsertGlyph ga sf c = do
 insertGlyph :: GlyphAtlas -> SdlFont -> GlyphKey -> Char -> IO (Maybe GlyphSlot)
 insertGlyph ga sf key c = do
   let !cp = fromIntegral (ord c) :: CUInt
-  mMetrics <- allocaBytes (5 * sizeOf (0 :: CInt)) $ \p -> do
-    let pMinX = p
-        pMaxX = plusPtr pMinX (sizeOf (0 :: CInt))
-        pMinY = plusPtr pMaxX (sizeOf (0 :: CInt))
-        pMaxY = plusPtr pMinY (sizeOf (0 :: CInt))
-        pAdv  = plusPtr pMaxY (sizeOf (0 :: CInt))
-    ok <- ttfGlyphMetrics (sfFont sf) cp pMinX pMaxX pMinY pMaxY pAdv
-    if not ok
-      then pure Nothing
-      else do
-        minX <- peek pMinX
-        _maxX <- peek pMaxX
-        _minY <- peek pMinY
-        maxY <- peek pMaxY
-        adv  <- peek pAdv
-        pure (Just (fromIntegral minX, fromIntegral maxY, fromIntegral adv))
+  mMetrics <- getGlyphMetrics sf cp
   case mMetrics of
     Nothing -> do
       modifyIORef' (gaEntries ga) (Map.insert key Nothing)
       pure Nothing
-    Just (minX, maxY, adv) -> do
+    Just metrics -> do
       mSurf <- alloca $ \sp -> do
         poke sp nullPtr
         ok <- ttfRenderGlyphSurface (sfFont sf) cp sp
@@ -351,8 +355,8 @@ insertGlyph ga sf key c = do
               -- TTF_GetGlyphImage is a tight bitmap. Place it with the font
               -- bearings: pen + minX, lineTop + (ascent - maxY). Do not clamp
               -- minX; monospace glyphs are often centered (minX > 0).
-              let !offX = minX
-                  !offY = sfAscent sf - maxY
+              let !offX = gmMinX metrics
+                  !offY = sfAscent sf - gmMaxY metrics
                   !slot =
                     GlyphSlot
                       { gsW    = tw
@@ -363,7 +367,7 @@ insertGlyph ga sf key c = do
                       , gsV1   = (py + th) / atH
                       , gsOffX = offX
                       , gsOffY = offY
-                      , gsAdvX = adv
+                      , gsAdvX = gmAdvance metrics
                       }
               modifyIORef' (gaEntries ga) (Map.insert key (Just slot))
               pure (Just slot)
@@ -390,17 +394,17 @@ buildGlyphFontMetrics ga sf scale = do
   let !inv = if scale > 0 then scale else 1
       baseFm = ttfFontMetricsScaled sf scale
 
-  -- Precompute ASCII 0..127 advances once directly from FreeType without atlas rasterization
-  advs <- mapM (getGlyphAdvance sf) [0 .. 127 :: CUInt]
+  -- Query ASCII metrics once for both advances and geometry, without atlas rasterization.
+  asciiMetrics <- mapM (getGlyphMetrics sf) [0 .. 127 :: CUInt]
   -- Reuse fixed ASCII geometry across dynamic labels, so preparing a fresh
   -- counter string does not query native glyph metrics for each character.
-  asciiGeometry <- smallArrayFromList <$> mapM (getGlyphGeometry sf inv) ['\0' .. '\127']
-  let !asciiAdvances =
+  let !asciiGeometry = smallArrayFromList (map (fmap (metricsGlyphQuad sf inv)) asciiMetrics)
+      !asciiAdvances =
         primArrayFromList
-          [ case mAdv of
+          [ case metrics of
               Nothing  -> sfSpaceAdvance sf / inv
-              Just adv -> adv / inv
-          | mAdv <- advs
+              Just m -> gmAdvance m / inv
+          | metrics <- asciiMetrics
           ]
 
   -- Cache of ASCII 0..127 glyph quads with epoch-based invalidation

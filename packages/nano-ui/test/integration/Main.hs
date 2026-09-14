@@ -1,9 +1,15 @@
 module Main (main) where
 
 import Cases
+import Cases.Atlas (runAtlasGrowthTest)
 import Cases.Runner (runDrawingLockTest, runSessionLoopTest)
 import Cases.SIMD (runSimdWritesTest)
-import Cases.State (runCheckboxEmitKeyboardTest, runControlledStateTest, runHookStateTest, runCollectionApiTest)
+import Cases.State
+  ( runCheckboxEmitKeyboardTest
+  , runCollectionApiTest
+  , runControlledStateTest
+  , runHookStateTest
+  )
 import Cases.Table (runTableReorderTest, runTableSortTest)
 import Data.IORef (IORef)
 import NanoUI.Testing (Context, newContext, newPixelContext)
@@ -11,16 +17,16 @@ import NanoUI.Testing.Runner (runTests)
 
 data TestSpec
   = TestSpec
-      { specName :: String
-      , specSdl :: Bool
-      , specRun :: Context -> IORef Int -> IO ()
-      }
+  { specName :: String
+  , specSdl :: Bool
+  , specRun :: Context -> IORef Int -> IO ()
+  }
 
 main :: IO ()
 main =
   runTests
     [ (specName, if specSdl then newPixelContext else newContext, specRun)
-    | TestSpec{specName, specSdl, specRun} <- testSpecs
+    | TestSpec {specName, specSdl, specRun} <- testSpecs
     ]
 
 testSpecs :: [TestSpec]
@@ -34,7 +40,10 @@ testSpecs =
   , TestSpec "collection-api" False runCollectionApiTest
   , TestSpec "table-sort" False runTableSortTest
   , TestSpec "table-reorder" True runTableReorderTest
-  , TestSpec "composite-animation-isolation" False runCompositeAnimationIsolationTest
+  , TestSpec
+      "composite-animation-isolation"
+      False
+      runCompositeAnimationIsolationTest
   , TestSpec "checkbox-emit-keyboard" False runCheckboxEmitKeyboardTest
   , TestSpec "id-uniqueness" False runIdUniquenessTest
   , TestSpec "id-zero-alloc" False runIdZeroAllocTest
@@ -62,9 +71,15 @@ testSpecs =
   , TestSpec "pointer-cursor-checkbox" False runPointerCursorCheckboxTest
   , TestSpec "text-input-cursor" False runTextInputCursorTest
   , TestSpec "text-area-cursor" True runTextAreaCursorTest
-  , TestSpec "text-area-cut-clears-selection" False runTextAreaCutClearsSelectionTest
+  , TestSpec
+      "text-area-cut-clears-selection"
+      False
+      runTextAreaCutClearsSelectionTest
   , TestSpec "text-area-ctrl-a" False runTextAreaCtrlATest
-  , TestSpec "text-area-scrollbar-visibility" True runTextAreaScrollbarVisibilityTest
+  , TestSpec
+      "text-area-scrollbar-visibility"
+      True
+      runTextAreaScrollbarVisibilityTest
   , TestSpec "text-area-scroll-wheel" True runTextAreaScrollWheelTest
   , TestSpec "text-area-zoom-scroll" True runTextAreaZoomScrollTest
   , TestSpec "refresh-forces-redraw" True runRefreshRedrawTest
@@ -72,14 +87,23 @@ testSpecs =
   , TestSpec "text-area-menu-pulse" True runTextAreaMenuPulseTest
   , TestSpec "text-area-scroll-drag" True runTextAreaScrollDragTest
   , TestSpec "text-area-cursor-on-scrollbar" True runTextAreaCursorOnScrollBarTest
-  , TestSpec "text-area-hscrollbar-visibility" True runTextAreaHScrollbarVisibilityTest
+  , TestSpec
+      "text-area-hscrollbar-visibility"
+      True
+      runTextAreaHScrollbarVisibilityTest
   , TestSpec "text-area-hscroll-wheel" True runTextAreaHScrollWheelTest
   , TestSpec "text-area-hscroll-drag" True runTextAreaHScrollDragTest
   , TestSpec "text-area-2d-scroll" True runTextArea2DScrollTest
   , TestSpec "text-area-hscroll-cursor-click" True runTextAreaHScrollCursorClickTest
-  , TestSpec "text-area-scroll-cursor-leaves-viewport" True runTextAreaScrollCursorLeavesViewportTest
+  , TestSpec
+      "text-area-scroll-cursor-leaves-viewport"
+      True
+      runTextAreaScrollCursorLeavesViewportTest
   , TestSpec "text-field-hover-boundary" True runTextFieldHoverBoundaryTest
-  , TestSpec "text-input-cut-clears-selection" False runTextInputCutClearsSelectionTest
+  , TestSpec
+      "text-input-cut-clears-selection"
+      False
+      runTextInputCutClearsSelectionTest
   , TestSpec "text-input-selection" False runTextInputSelectionTest
   , TestSpec "text-input-ctrl-a" False runTextInputCtrlATest
   , TestSpec "text-input-mouse-selection" False runTextInputMouseSelectionTest
@@ -87,6 +111,7 @@ testSpecs =
   , TestSpec "modal-overlay" False runModalOverlayTest
   , TestSpec "modal-no-phantom-scroll" False runModalNoPhantomScrollTest
   , TestSpec "image" False runImageTest
+  , TestSpec "atlas-growth" False runAtlasGrowthTest
   , TestSpec "text-input-clipboard" False runTextInputClipboardTest
   , TestSpec "text-input-cut-menu" False runTextInputCutMenuTest
   , TestSpec "text-input-menu" False runTextInputMenuTest
@@ -191,6 +216,7 @@ testSpecs =
   , TestSpec "keyboard-checkbox" False runKeyboardCheckboxTest
   , TestSpec "keyboard-slider" True runKeyboardSliderTest
   , TestSpec "keyboard-radio" False runKeyboardRadioTest
+  , TestSpec "text-input-batch" False runTextInputBatchTest
   , TestSpec "keyboard-toggle" False runKeyboardToggleTest
   , TestSpec "keyboard-tab-header" False runKeyboardTabHeaderTest
   , TestSpec "select-initial" False runSelectTest
@@ -240,7 +266,6 @@ testSpecs =
   , TestSpec "tabs-content-damage" False runTabsContentDamageTest
   , TestSpec "tabs-in-panel-damage" False runTabsInPanelDamageTest
   , TestSpec "panel-body-swap-damage" False runPanelBodySwapDamageTest
-    
   , TestSpec "host-slot" False runHostSlotTest
   , TestSpec "compact-host" False runCompactHostTest
   , TestSpec "embed-state" False runEmbedStateTest

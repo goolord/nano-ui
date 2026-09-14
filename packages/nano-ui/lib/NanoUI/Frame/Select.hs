@@ -25,6 +25,7 @@ module NanoUI.Frame.Select
 
 import Control.Monad (forM, forM_, unless, when)
 import Data.IORef (readIORef, writeIORef)
+import Data.Maybe (isJust)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Text as T
 import NanoUI.Context
@@ -93,8 +94,14 @@ openDropdownOwner ctx idx nt
 
 openSelectDropOwnerAt :: Context -> V2 -> IO (Maybe WidgetId)
 openSelectDropOwnerAt ctx mouse = do
-  store <- getStore ctx
   count <- arenaCount (ctxNodeArena ctx)
+  fmap (fmap fst) $ findOpenDropdown ctx count (\_ dropRect -> rectContains dropRect mouse)
+
+-- Forward queries share ownership and geometry rules. Keep the predicate
+-- explicit: outside-click handling includes the anchor; menu ownership does not.
+findOpenDropdown :: Context -> Int -> (Rect -> Rect -> Bool) -> IO (Maybe (WidgetId, Rect))
+findOpenDropdown ctx count accepts = do
+  store <- getStore ctx
   let go idx
         | idx >= count = pure Nothing
         | otherwise = do
@@ -103,13 +110,17 @@ openSelectDropOwnerAt ctx mouse = do
             case mOwner of
               Nothing -> go (idx + 1)
               Just wid -> do
-                opts <- getOptions (ctxNodeArena ctx) idx
-                (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-                let dropRect = ownerDropRect ctx nt wid store opts x y w h
-                if rectContains dropRect mouse
-                  then pure (Just wid)
+                (anchor, dropRect) <- dropdownBounds ctx store idx nt wid
+                if accepts anchor dropRect
+                  then pure (Just (wid, dropRect))
                   else go (idx + 1)
   go 0
+
+dropdownBounds :: Context -> WidgetStore -> NodeIdx -> NodeType -> WidgetId -> IO (Rect, Rect)
+dropdownBounds ctx store idx nt wid = do
+  opts <- getOptions (ctxNodeArena ctx) idx
+  (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+  pure (Rect x y w h, ownerDropRect ctx nt wid store opts x y w h)
 
 cacheOpenSelectDrop :: Context -> IO ()
 cacheOpenSelectDrop ctx = do
@@ -119,20 +130,8 @@ cacheOpenSelectDrop ctx = do
     then setOpenSelectDrop ctx Nothing
     else do
       count <- arenaCount (ctxNodeArena ctx)
-      m <- go 0 count store
+      m <- findOpenDropdown ctx count (\_ _ -> True)
       setOpenSelectDrop ctx m
-  where
-    go idx n st
-      | idx >= n = pure Nothing
-      | otherwise = do
-          nt <- getNodeType (ctxNodeArena ctx) idx
-          mOwner <- openDropdownOwner ctx idx nt
-          case mOwner of
-            Nothing -> go (idx + 1) n st
-            Just wid -> do
-              opts <- getOptions (ctxNodeArena ctx) idx
-              (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-              pure (Just (wid, ownerDropRect ctx nt wid st opts x y w h))
 
 markSelectDropPress :: Context -> Input -> IO ()
 markSelectDropPress ctx inp =
@@ -207,23 +206,10 @@ finalizeSelectKeyboard ctx inp = do
 pickSelectKeyboardTarget ::
   Context -> WidgetId -> WidgetStore -> Bool -> IO (Maybe (WidgetId, Bool))
 pickSelectKeyboardTarget ctx focus store wantStep = do
-  if wantStep
-    then do
-      mFocus <- selectWidgetIfAny ctx focus
-      case mFocus of
-        Just wid -> do
-          let open = isSelectOpen store (intKey wid)
-          pure (Just (wid, open))
-        Nothing -> do
-          mOpen <- findOpenSelectWidget ctx
-          case mOpen of
-            Nothing -> pure Nothing
-            Just w -> pure (Just (w, True))
-    else do
-      mOpen <- findOpenSelectWidget ctx
-      case mOpen of
-        Nothing -> pure Nothing
-        Just w -> pure (Just (w, True))
+  mFocus <- if wantStep then selectWidgetIfAny ctx focus else pure Nothing
+  case mFocus of
+    Just wid -> pure (Just (wid, isSelectOpen store (intKey wid)))
+    Nothing -> fmap (fmap (, True)) (findOpenSelectWidget ctx)
 
 selectWidgetIfAny :: Context -> WidgetId -> IO (Maybe WidgetId)
 selectWidgetIfAny ctx wid
@@ -329,24 +315,8 @@ finalizeSelectPick ctx inp =
     go 0
 
 openSelectHit :: Context -> Int -> V2 -> IO Bool
-openSelectHit ctx count mouse = do
-  store <- getStore ctx
-  let go idx
-        | idx >= count = pure False
-        | otherwise = do
-            nt <- getNodeType (ctxNodeArena ctx) idx
-            mOwner <- openDropdownOwner ctx idx nt
-            case mOwner of
-              Nothing -> go (idx + 1)
-              Just wid -> do
-                (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-                opts <- getOptions (ctxNodeArena ctx) idx
-                let btnRect = Rect x y w h
-                    dropRect = ownerDropRect ctx nt wid store opts x y w h
-                if rectContains btnRect mouse || rectContains dropRect mouse
-                  then pure True
-                  else go (idx + 1)
-  go 0
+openSelectHit ctx count mouse =
+  isJust <$> findOpenDropdown ctx count (\anchor dropRect -> rectContains anchor mouse || rectContains dropRect mouse)
 
 findSelectUnderMouse :: Context -> V2 -> IO (Maybe WidgetId)
 findSelectUnderMouse ctx mouse = do
@@ -362,10 +332,7 @@ findSelectUnderMouse ctx mouse = do
           if not allow
             then pure False
             else do
-              (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-              opts <- getOptions (ctxNodeArena ctx) idx
-              let btnRect = Rect x y w h
-                  dropRect = ownerDropRect ctx nt wid store opts x y w h
+              (btnRect, dropRect) <- dropdownBounds ctx store idx nt wid
               pure (rectContains btnRect mouse || rectContains dropRect mouse)
   case mIdx of
     Nothing -> pure Nothing
@@ -676,4 +643,3 @@ tagSelectClippedSpans parentClip x y w h fm spans =
    in case rectIntersect parentClip textClip of
         Nothing -> []
         Just clip -> map (\(rect, txt, fg, bg) -> (rect, txt, fg, bg, clip)) spans
-

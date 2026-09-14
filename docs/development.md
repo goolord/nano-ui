@@ -108,8 +108,8 @@ Paths below are relative to `packages/`; Haskell modules live under `lib/`.
   `currentId`; the widget itself consumes it with `nextId`. Composite hooks
   need their own scope before assigning keys to their components.
 - Implement local state hooks through `NanoUI.Hooks`. Tab and radio selection
-  use the same integer hook, including its comparison against the latest store
-  when a setter runs more than once in a frame.
+  and packed table sorting use the same integer hook, including its comparison
+  against the latest store when a setter runs more than once in a frame.
 - Use `Widgets.Behavior.keyboardFocused` before processing keyboard input in
   controls, including text editors. A retained focus ID does not override
   disabled state or modal blocking.
@@ -123,14 +123,37 @@ Paths below are relative to `packages/`; Haskell modules live under `lib/`.
 - Ordinary buttons, menu items, and close controls use `buttonStyledEx` for
   pointer and keyboard activation. Explicitly disabled buttons and tabs keep
   their geometry and identity but skip focus registration and activation.
+- Radio options use `selectableItem` for both singleton and multi-option
+  groups. Keep ID allocation and scroll-aware hit geometry in the shared
+  widget path rather than reproducing them in a control-specific loop.
+- Handle host text commits as batches. `TextInput` converts its state once per
+  commit, and `TextBuffer` delegates insertion to text-zipper's `insertMany`
+  while adapting tabs and updating the preferred column once. Empty commits
+  preserve selection and preferred-column state.
+- Diagram text extraction is a rendering mode of `NanoUIBackend`; it shares
+  sizing, transforms, and styles with the full render and skips path emission.
+  A diagram carries backend-specific primitive dictionaries, so never use
+  `unsafeCoerce` to switch its backend.
+- Dropdown ownership, cached bounds, and outside-click checks share
+  `Frame.Select.findOpenDropdown`. Its predicate distinguishes menu-only hits
+  from hits on the anchor or menu; reverse-order pointer routing also checks
+  overlay eligibility.
+- Plan image-atlas placement before allocating a larger pixel buffer. Failed
+  placement preserves the existing pixels, UVs, and generation; successful
+  growth copies the old rows once before publishing the new state.
 - Decimators return points in input order. LTTB's budget counts points and
   preserves endpoints; min/max's budget counts buckets and retains each
   bucket's extrema. Both accept empty input and non-positive budgets.
 - SDL font discovery scans the standard directories once per request and
   matches all fallback families against that snapshot. Preserve root order
   so user-installed faces win equal-score ties.
+- SDL glyph metrics have one native reader and one record representation.
+  Build the ASCII advance and geometry caches from the same measurements;
+  metric preparation must remain independent of atlas rasterization.
 - Replace native resources only after their replacements have been allocated
   successfully; mask the ownership transfer against asynchronous exceptions.
+  Keep an SDL image texture's dimensions and generation in the same state
+  record as its pointer, so upload and cleanup publish one coherent value.
 - Layout's `textNodeMeasurer` resolves metrics and both measurement operations
   together. Preserve the distinction between monospaced metrics and the host's
   shaping-aware proportional measurement in every layout pass.

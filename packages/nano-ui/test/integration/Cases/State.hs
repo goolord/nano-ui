@@ -130,3 +130,4 @@ runHookStateTest ctx failed = do
   check "tab-index" (useTabIdx 0) 0 2
   check "tab-enum" (useTab LT) LT GT
   check "radio" (useRadio LT) LT GT
+  check "table-sort" (useTableSort (SortCol 0 SortAsc)) (SortCol 0 SortAsc) (SortCol 2 SortDesc)
