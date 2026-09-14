@@ -4,7 +4,6 @@ module NanoUI.Sdl.Image
   , destroyImageAtlas
   , syncImageAtlas
   , lookupImage
-  , lookupAtlasTex
   )
 where
 
@@ -25,8 +24,6 @@ newtype ImageAtlas = ImageAtlas (IORef (Maybe AtlasTexture))
 
 data AtlasTexture = AtlasTexture
   { atTexture :: !(Ptr ())
-  , atWidth :: !Int
-  , atHeight :: !Int
   , atGeneration :: !Int
   }
 
@@ -65,23 +62,12 @@ uploadAtlas ren (ImageAtlas ref) w h pixels gen = mask_ $
       when ok $ do
         tex <- peek out
         old <- readIORef ref
-        writeIORef ref (Just (AtlasTexture tex w h gen))
+        writeIORef ref (Just (AtlasTexture tex gen))
         mapM_ (destroyTexture . atTexture) old
 
 lookupImage :: ImageAtlas -> Int -> IO (Maybe (Ptr ()))
 lookupImage (ImageAtlas ref) tid
   | tid == atlasTextureId = fmap atTexture <$> readIORef ref
-  | otherwise = pure Nothing
-
-lookupAtlasTex :: ImageAtlas -> Int -> IO (Maybe (Ptr (), Float, Float))
-lookupAtlasTex (ImageAtlas ref) tid
-  | tid == atlasTextureId = do
-      texture <- readIORef ref
-      pure
-        ( fmap
-            (\t -> (atTexture t, fromIntegral (atWidth t), fromIntegral (atHeight t)))
-            texture
-        )
   | otherwise = pure Nothing
 
 foreign import ccall safe "nano_ui_create_rgba_texture"

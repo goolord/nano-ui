@@ -16,7 +16,7 @@ module NanoUI.Sdl.Render
   , snapDamage
   ) where
 
-import NanoUI.Sdl.Image (ImageAtlas, lookupAtlasTex)
+import NanoUI.Sdl.Image (ImageAtlas, lookupImage)
 
 import Control.Exception (bracket)
 import Control.Monad (void, when)
@@ -113,8 +113,8 @@ applyClipState batch ref ren next = do
       ClipNone -> clearLogicalClipRect ren
       ClipKey px py pw ph -> setLogicalClipKey ren (px, py, pw, ph)
 
-renderDrawDataPass :: RenderBatch -> Ptr SDL_Renderer -> Float -> Maybe Color -> DrawData -> SmallArray Layer -> ImageAtlas -> Ptr () -> Damage -> IO ()
-renderDrawDataPass batch ren uiScale mClear drawData layers images glyphTex damage = do
+renderDrawDataPass :: RenderBatch -> Ptr SDL_Renderer -> Maybe Color -> DrawData -> SmallArray Layer -> ImageAtlas -> Ptr () -> Damage -> IO ()
+renderDrawDataPass batch ren mClear drawData layers images glyphTex damage = do
   when (not (damageIsEmpty damage) && sizeofSmallArray layers /= 0) $ do
     clipRef <- newIORef ClipNone
     clearLogicalClipRect ren
@@ -133,7 +133,6 @@ renderDrawDataPass batch ren uiScale mClear drawData layers images glyphTex dama
           DamageFull -> Nothing
           DamageClip r -> Just r
         vc = drawVertexCount drawData
-        ic = drawIndexCount drawData
         cmds = drawCommands drawData
         slices = drawLayerSlices drawData
         !layerMask = computeLayerMask layers
@@ -141,7 +140,7 @@ renderDrawDataPass batch ren uiScale mClear drawData layers images glyphTex dama
       withForeignPtr (drawIndices drawData) $ \ip ->
         let drawOne !cmd =
               when (testLayerMask layerMask (cmdLayer cmd)) $
-                drawCmd batch ren uiScale vp vc ip ic images glyphTex clip clipRef cmd
+                drawCmd batch ren vp vc ip images glyphTex clip clipRef cmd
             goLy !li
               | li >= sizeofPrimArray slices = pure ()
               | otherwise = do
@@ -186,18 +185,16 @@ testLayerMask !mask !l =
 drawCmd ::
   RenderBatch ->
   Ptr SDL_Renderer ->
-  Float ->
   Ptr Word8 ->
   Int ->
   Ptr Word8 ->
-  Int ->
   ImageAtlas ->
   Ptr () ->
   Maybe Rect ->
   IORef ClipState ->
   DrawCmd ->
   IO ()
-drawCmd batch ren uiScale vp vc ip ic images glyphTex mDamage clipRef cmd = do
+drawCmd batch ren vp vc ip images glyphTex mDamage clipRef cmd = do
   let !count = fromIntegral (cmdIndexCount cmd)
       !cmdRect = Rect (cmdClipX cmd) (cmdClipY cmd) (cmdClipW cmd) (cmdClipH cmd)
       !cmdOpen = cmdClipW cmd >= 1e8 || cmdClipH cmd >= 1e8
@@ -214,16 +211,13 @@ drawCmd batch ren uiScale vp vc ip ic images glyphTex mDamage clipRef cmd = do
           else applyClipState batch clipRef ren (toClipKey clip)
         let !start = fromIntegral (cmdIndexOffset cmd)
             !texId = cmdTextureId cmd
-        (tex, tw, th) <-
+        tex <-
           if texId == glyphAtlasTextureId
-            then pure (glyphTex, 0, 0)
+            then pure glyphTex
             else if texId > 0
-              then
-                lookupAtlasTex images texId >>= \case
-                  Just hit -> pure hit
-                  Nothing  -> pure (nullPtr, 0, 0)
-              else pure (nullPtr, 0, 0)
-        batchDrawRange batch vp vc ip ic start count texId tex tw th uiScale mDamage
+              then maybe nullPtr id <$> lookupImage images texId
+              else pure nullPtr
+        batchDrawRange batch vp vc ip start count tex mDamage
 
 {-# INLINE unpackColor #-}
 unpackColor :: Color -> (Word8, Word8, Word8, Word8)
@@ -270,28 +264,18 @@ batchDrawRange ::
   Ptr Word8 ->
   Int ->
   Int ->
-  Int ->
-  Int ->
   Ptr () ->
-  Float ->
-  Float ->
-  Float ->
   Maybe Rect ->
   IO ()
-batchDrawRange (RenderBatch p) verts vc indices ic start n texId tex tw th scale mDmg =
+batchDrawRange (RenderBatch p) verts vc indices start n tex mDmg =
   batchDrawRangeC
     p
     verts
     (ci vc)
     indices
-    (ci ic)
     (ci start)
     (ci n)
-    (ci texId)
     tex
-    (cf tw)
-    (cf th)
-    (cf scale)
     hasDmg
     (cf dx)
     (cf dy)
@@ -323,12 +307,7 @@ foreign import ccall unsafe "nano_ui_batch_draw_range"
     Ptr Word8 ->
     CInt ->
     CInt ->
-    CInt ->
-    CInt ->
     Ptr () ->
-    CFloat ->
-    CFloat ->
-    CFloat ->
     CInt ->
     CFloat ->
     CFloat ->

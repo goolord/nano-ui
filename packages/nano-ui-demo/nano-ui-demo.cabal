@@ -118,6 +118,24 @@ executable nano-ui-sdl-profile
     if !flag(sdl)
         buildable: False
 
+executable nano-ui-sdl-terminal
+    import:           extensions
+    import:           ghc-options
+    import:           rts-options
+    import:           warnings
+    main-is:          SdlTerminal.hs
+    ghc-options:      -main-is SdlTerminal
+    build-depends:
+        base ^>=4.22.0.0,
+        nano-ui ^>=0.1,
+        nano-ui-sdl ^>=0.1,
+        process ^>=1.6,
+        streaming ^>=0.2,
+        text ^>=2.1
+    hs-source-dirs:   app
+    if !flag(sdl) || os(windows)
+        buildable: False
+
 executable nano-ui-sdl-notepad
     import:           extensions
     import:           ghc-options

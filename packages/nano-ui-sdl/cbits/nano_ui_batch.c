@@ -9,7 +9,6 @@ struct NanoUiBatch {
     const uint8_t *verts;
     int vert_count;
     const uint8_t *indices;
-    int index_count;
     SDL_Texture *pending_texture;
     int pending_start;
     int pending_n;
@@ -59,25 +58,15 @@ void nano_ui_batch_draw_range(
     const uint8_t *verts,
     int vert_count,
     const uint8_t *indices,
-    int index_count,
     int index_start,
     int index_n,
-    int tex_id,
     SDL_Texture *texture,
-    float tex_w,
-    float tex_h,
-    float scale,
     int has_damage,
     float dmg_x,
     float dmg_y,
     float dmg_w,
     float dmg_h)
 {
-    (void)tex_id;
-    (void)tex_w;
-    (void)tex_h;
-    (void)scale;
-
     if (!batch || !verts || !indices || vert_count <= 0 || index_n < 3) {
         return;
     }
@@ -182,7 +171,6 @@ void nano_ui_batch_draw_range(
     batch->verts = verts;
     batch->vert_count = vert_count;
     batch->indices = indices;
-    batch->index_count = index_count;
     batch->pending_texture = texture;
     batch->pending_start = index_start;
     batch->pending_n = index_n;

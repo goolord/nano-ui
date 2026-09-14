@@ -5,14 +5,17 @@
 -- It is deliberately decoupled from "SdlDemo": the app passes in its own
 -- images and UI so this module never needs to know what the demo looks like.
 --
--- Run via @cabal run -fsdl nano-ui-sdl-demo -- --selftest@.
+-- Run via @cabal run -fsdl nano-ui-sdl-demo -- --selftest@; add
+-- @--continuous@ to exercise direct-to-window presentation.
 module SdlSelftest
     ( selftest
     ) where
 
+import Control.Concurrent (threadDelay)
 import Control.Monad (unless, void, when)
 import Data.Char (isDigit)
 import Data.Foldable (for_)
+import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.List (maximumBy, minimumBy)
 import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe)
 import Data.Ord (comparing)
@@ -20,6 +23,7 @@ import Data.Primitive.SmallArray (SmallArray)
 import NanoUI
 import NanoUI.Backend.Sdl
 import NanoUI.Context (ctxResolveFont, ctxResolveMeasure)
+import NanoUI.Debug (CoreDebugSnapshot (dbgPresents))
 import NanoUI.Testing
   ( Context
   , collectOverlayTextSpans
@@ -42,8 +46,8 @@ import qualified Data.Text as T
 
 -- | Draw the given UI on a hidden SDL window and drive it through the main
 -- widget interactions, failing loudly on any regression.
-selftest :: SmallArray RgbaImage -> NanoUI () -> IO ()
-selftest imgs ui = do
+selftest :: Bool -> SmallArray RgbaImage -> NanoUI () -> IO ()
+selftest continuous imgs ui = do
   ctx0 <- newSdlContext
   ok <- registerDemoImages ctx0 imgs
   unless ok $ fail "selftest: registerImage failed"
@@ -55,6 +59,7 @@ selftest imgs ui = do
       { sdlWindowHidden = True
       , sdlWindowSize = Size 1280 800
       , sdlWindowResizable = False
+      , sdlAppContinuous = continuous
       }
     ctx0
     $ \ctx env -> do
@@ -351,6 +356,21 @@ selftest imgs ui = do
     spansDebug <- collectOverlayTextSpans ctx' base
     unless (hasText "Frame" spansDebug) $ fail "selftest: Debug window missing"
     unless (hasText "Runtime" spansDebug) $ fail "selftest: Debug Runtime section missing"
+    -- Formatted rows may be reused between samples, but must track the next
+    -- backend refresh rather than freezing the first snapshot in the cache.
+    sampledDraws <- newIORef 0
+    let observeDebug = do
+          snapshot <- askSdlDebug
+          uiIO $ writeIORef sampledDraws (dbgPresents (dbgCore snapshot))
+          ui
+    drawOnce observeDebug ctx' env base
+    previous <- readIORef sampledDraws
+    threadDelay 300000
+    drawOnce observeDebug ctx' env base
+    current <- readIORef sampledDraws
+    refreshed <- collectOverlayTextSpans ctx' base
+    unless (current > previous && isJust (findExact (T.pack (show current)) refreshed)) $
+      fail "selftest: Debug draws counter did not refresh"
   putStrLn "selftest: ok"
 
 -- | Draw one frame of the UI under test (no presenting).

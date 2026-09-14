@@ -16,6 +16,7 @@ module NanoUI.Sdl.Display
   , pushRefreshEvent
   , readRefreshEventType
   , retainCreate
+  , windowTargetMatchesSize
   , retainBegin
   , retainBlit
   , retainDestroy
@@ -175,6 +176,9 @@ pushRefreshEvent = void pushRefreshEventC
 foreign import ccall unsafe "nano_ui_retain_create"
   retainCreateC :: Ptr SDL_Renderer -> CInt -> CInt -> IO (Ptr ())
 
+foreign import ccall unsafe "nano_ui_window_target_matches_size"
+  windowTargetMatchesSizeC :: Ptr SDL_Renderer -> CInt -> CInt -> IO Bool
+
 foreign import ccall unsafe "nano_ui_retain_begin"
   retainBeginC :: Ptr SDL_Renderer -> Ptr () -> CFloat -> IO Bool
 
@@ -189,6 +193,12 @@ retainDestroy = retainDestroyC
 
 retainCreate :: Ptr SDL_Renderer -> Int -> Int -> IO (Ptr ())
 retainCreate ren w h = retainCreateC ren (fromIntegral w) (fromIntegral h)
+
+-- | Direct drawing is equivalent to the retained blit only at the same
+-- pixel dimensions; content scale and window pixel density can differ.
+windowTargetMatchesSize :: Ptr SDL_Renderer -> Int -> Int -> IO Bool
+windowTargetMatchesSize ren w h =
+  windowTargetMatchesSizeC ren (fromIntegral w) (fromIntegral h)
 
 retainBegin :: Ptr SDL_Renderer -> Ptr () -> Float -> IO Bool
 retainBegin ren tex scale = retainBeginC ren tex (realToFrac scale)

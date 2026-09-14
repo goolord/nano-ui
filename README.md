@@ -213,12 +213,24 @@ cabal run nano-ui-rgfw-demo
 # Launch the SDL3 notepad example (menu bar, file open/save, multi-line editor)
 cabal run nano-ui-sdl-notepad
 
+# Launch the tiny shell example (Linux/macOS)
+cabal run nano-ui-sdl-terminal
+
 # Launch hardware-accelerated SDL3 demo (requires -fsdl flag)
 cabal run -fsdl nano-ui-sdl-demo
 
 # Launch performance profiling suite
 cabal run nano-ui-profile
 ```
+
+### Terminal example
+
+[`SdlTerminal.hs`](packages/nano-ui-demo/app/SdlTerminal.hs) is a tiny command-and-output
+window backed by one persistent `/bin/sh`, so `cd` and shell variables carry between
+commands. Type, use Backspace to edit, and press Enter to send a line. The Haskell
+`streaming` library reads output in a background thread (`S.repeatM` → `S.mapM_`),
+including stderr. The pane follows the last 20 lines. Close the window to quit.
+It uses pipes rather than a PTY: no ANSI emulation or full-screen interactive apps.
 
 ### Reproducible Nix Flake
 

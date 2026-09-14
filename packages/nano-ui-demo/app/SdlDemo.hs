@@ -102,7 +102,7 @@ main :: IO ()
 main = do
   args <- getArgs
   if "--selftest" `elem` args
-    then SdlSelftest.selftest demoImages demoUi
+    then SdlSelftest.selftest ("--continuous" `elem` args) demoImages demoUi
     else do
       let cfg = parseArgs args
       if cfgHelp cfg
@@ -919,23 +919,38 @@ drawingSample ps =
 -- §9  Debug window content
 ------------------------------------------------------------------------------
 
-debugBody :: SdlDebugSnapshot -> NanoUI ()
-debugBody s =
-  columnWith (tight . gap 4 . minW 300 . fillW) $ do
-    debugSection "Frame" (frameRows s)
-    sep
-    debugSection "Draw" (drawRows s)
-    sep
-    debugSection "Display" (displayRows s)
-    sep
-    debugSection "Runtime" (rtsRows s)
+type DebugRows = SmallArray (T.Text, T.Text)
 
-debugSection :: T.Text -> SmallArray (T.Text, T.Text) -> NanoUI ()
+-- The backend samples at 4 Hz. Share the formatted rows between samples
+-- instead of running printf for every field on every continuous frame.
+data DemoDebugRows = DemoDebugRows !SdlDebugSnapshot !(DebugRows, DebugRows, DebugRows, DebugRows)
+
+debugBody :: SdlDebugSnapshot -> NanoUI ()
+debugBody s = do
+  ctx <- askContext
+  (frames, draws, display, runtime) <- uiIO $ do
+    cached <- askHostIO ctx
+    case cached of
+      Just (DemoDebugRows previous rows) | previous == s -> pure rows
+      _ -> do
+        let rows = (frameRows s, drawRows s, displayRows s, rtsRows s)
+        setHost ctx (DemoDebugRows s rows)
+        pure rows
+  columnWith (tight . gap 4 . minW 300 . fillW) $ do
+    debugSection "Frame" frames
+    sep
+    debugSection "Draw" draws
+    sep
+    debugSection "Display" display
+    sep
+    debugSection "Runtime" runtime
+
+debugSection :: T.Text -> DebugRows -> NanoUI ()
 debugSection title rows = do
   heading title
   mapM_ (\(k, v) -> kvMono k v) rows
 
-frameRows :: SdlDebugSnapshot -> SmallArray (T.Text, T.Text)
+frameRows :: SdlDebugSnapshot -> DebugRows
 frameRows s =
   let c = dbgCore s
       haskellMs = dbgUiMs c + dbgRenderMs c
@@ -951,7 +966,7 @@ frameRows s =
         , ("skips", T.pack (printf "%10d" (dbgSkips c)))
         ]
 
-drawRows :: SdlDebugSnapshot -> SmallArray (T.Text, T.Text)
+drawRows :: SdlDebugSnapshot -> DebugRows
 drawRows s =
   let c = dbgCore s
    in smallArrayFromList
@@ -960,7 +975,7 @@ drawRows s =
         , ("cmds", T.pack (printf "%10d" (dbgCmds c)))
         ]
 
-displayRows :: SdlDebugSnapshot -> SmallArray (T.Text, T.Text)
+displayRows :: SdlDebugSnapshot -> DebugRows
 displayRows s =
   let c = dbgCore s
    in smallArrayFromList
@@ -973,7 +988,7 @@ displayRows s =
         , ("font", T.pack (dbgFontPath s))
         ]
 
-rtsRows :: SdlDebugSnapshot -> SmallArray (T.Text, T.Text)
+rtsRows :: SdlDebugSnapshot -> DebugRows
 rtsRows s = smallArrayFromList (formatCoreRtsRows (dbgCore s))
 
 ------------------------------------------------------------------------------

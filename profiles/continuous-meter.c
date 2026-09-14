@@ -43,19 +43,20 @@ static int compare_double(const void *a, const void *b) {
 
 bool SDL_RenderPresent(void *renderer) {
     static bool (*present)(void *);
+    static const char *(*name)(void *);
+    static bool (*output_size)(void *, int *, int *);
     static unsigned count;
     static double start, previous, start_cpu, present_time;
     static double frame_times[FRAMES];
 
     if (!present) {
         present = dlsym(RTLD_NEXT, "SDL_RenderPresent");
-        const char *(*name)(void *) = dlsym(RTLD_NEXT, "SDL_GetRendererName");
-        if (!present || !name) {
+        name = dlsym(RTLD_NEXT, "SDL_GetRendererName");
+        output_size = dlsym(RTLD_NEXT, "SDL_GetRenderOutputSize");
+        if (!present || !name || !output_size) {
             fputs("continuous-meter: SDL symbols unavailable\n", stderr);
             _exit(2);
         }
-        fprintf(stderr, "continuous-meter renderer=%s warmup=%d frames=%d\n",
-                name(renderer), WARMUP, FRAMES);
     }
     double before = wall_time();
     bool ok = present(renderer);
@@ -67,7 +68,11 @@ bool SDL_RenderPresent(void *renderer) {
 
     ++count;
     if (count == WARMUP) {
-        start = previous = after;
+        int width, height;
+        if (!output_size(renderer, &width, &height)) _exit(2);
+        fprintf(stderr, "continuous-meter renderer=%s pixels=%dx%d warmup=%d frames=%d\n",
+                name(renderer), width, height, WARMUP, FRAMES);
+        start = previous = wall_time();
         start_cpu = cpu_time();
     } else if (count > WARMUP) {
         frame_times[count - WARMUP - 1] = after - previous;

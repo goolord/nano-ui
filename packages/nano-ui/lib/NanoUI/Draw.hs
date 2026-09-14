@@ -872,16 +872,6 @@ cornerSegments :: Int
 cornerSegments = 4
 
 -- Precomputed unit-circle cos/sin for rounded-rect corners (4 segments per 90° arc).
-{-# INLINE cornerQuadrant #-}
-cornerQuadrant :: Float -> Int
-cornerQuadrant a0 =
-  if a0 >= pi && a0 < pi * 1.5
-    then 0
-    else
-      if a0 >= pi * 1.5
-        then 1
-        else if a0 < pi * 0.5 then 2 else 3
-
 {-# INLINE cornerCosSin #-}
 cornerCosSin :: Int -> Int -> (Float, Float)
 cornerCosSin q seg =
@@ -1028,11 +1018,10 @@ pushRoundedRectRaw da (Rect x y w h) radius col
                   pokeVertex vp (vBase + 96) qx qy2 cr cg cb ca u v
                   let !a = fromIntegral (base + vi) :: Word32
                   pokeQuadIndices ip ((baseIdx + ii) * indexSize) a (a + 1) (a + 2) (a + 3)
-                pokeCorner !vi !ii !ccx !ccy !a0 = do
+                pokeCorner !vi !ii !ccx !ccy !q = do
                   let !vBase = (base + vi) * vertexSize
                       !centerIdx = fromIntegral (base + vi) :: Word32
                       !inRad = max 0 (rad - 1.0)
-                      !q = cornerQuadrant a0
                   pokeVertex vp vBase ccx ccy cr cg cb ca u v
                   loopIO 0 segs $ \i -> do
                     let !(ct, st) = cornerCosSin q i
@@ -1065,10 +1054,10 @@ pushRoundedRectRaw da (Rect x y w h) radius col
             when hasLR $ do
               pokeQuadAt vi2 ii2 x (y + rad) rad midH
               pokeQuadAt (vi2 + 4) (ii2 + 6) (x + w - rad) (y + rad) rad midH
-            pokeCorner vi3 ii3 (x + rad) (y + rad) pi
-            pokeCorner (vi3 + cornerV) (ii3 + cornerI) (x + w - rad) (y + rad) (pi * 1.5)
-            pokeCorner (vi3 + 2 * cornerV) (ii3 + 2 * cornerI) (x + w - rad) (y + h - rad) 0
-            pokeCorner (vi3 + 3 * cornerV) (ii3 + 3 * cornerI) (x + rad) (y + h - rad) (pi * 0.5)
+            pokeCorner vi3 ii3 (x + rad) (y + rad) 0
+            pokeCorner (vi3 + cornerV) (ii3 + cornerI) (x + w - rad) (y + rad) 1
+            pokeCorner (vi3 + 2 * cornerV) (ii3 + 2 * cornerI) (x + w - rad) (y + h - rad) 2
+            pokeCorner (vi3 + 3 * cornerV) (ii3 + 3 * cornerI) (x + rad) (y + h - rad) 3
 
 {-# NOINLINE pushRoundedStroke #-}
 pushRoundedStroke :: DrawArena -> Rect -> Float -> Float -> Color -> IO ()
@@ -1113,13 +1102,19 @@ pushRoundedStroke da (Rect x y w h) radius bw col
               !doTB = midW >= 0.001
               !doLR = midH >= 0.001
               !stripCount = (if doTB then 2 else 0) + (if doLR then 2 else 0)
-              !arcV = (n + 1) * 4
-              !arcI = n * 18
+              -- Hairlines have coincident inner/outer core rings. Share that
+              -- ring and omit its zero-area triangles instead of submitting
+              -- a fourth vertex and a third quad for every arc segment.
+              !core = max 0 (ibw * 0.5 - 0.5)
+              !hasCore = core > 0
+              !arcStride = if hasCore then 4 else 3
+              !arcIndices = if hasCore then 18 else 12
+              !arcV = (n + 1) * arcStride
+              !arcI = n * arcIndices
               !needV = stripCount * 8 + 4 * arcV
               !needI = stripCount * 18 + 4 * arcI
           withVertsRaw da needV needI $ \vp ip base baseIdx -> do
             let !(r, g, b, a) = unpackColorF col
-                !core = max 0 (ibw * 0.5 - 0.5)
                 pokeArc !vi !ii !ccx !ccy !q = do
                   let !inner = max 0 (cr - core)
                       !outerR = cr + core
@@ -1127,21 +1122,23 @@ pushRoundedStroke da (Rect x y w h) radius bw col
                       !outerAA = outerR + 1.0
                   loopIO 0 n $ \i -> do
                     let !(ct, st) = cornerCosSin q i
-                        !v0 = base + vi + i * 4
+                        !v0 = base + vi + i * arcStride
                         !vBase = v0 * vertexSize
                         ((p0x, p0y), (p1x, p1y), (p2x, p2y), (p3x, p3y)) =
                           concentricOffsetsSIMD ccx ccy ct st innerAA inner outerR outerAA
                     pokeVertex vp vBase p0x p0y r g b 0 whitePixelU whitePixelV
                     pokeVertex vp (vBase + 32) p1x p1y r g b a whitePixelU whitePixelV
-                    pokeVertex vp (vBase + 64) p2x p2y r g b a whitePixelU whitePixelV
-                    pokeVertex vp (vBase + 96) p3x p3y r g b 0 whitePixelU whitePixelV
+                    when hasCore $
+                      pokeVertex vp (vBase + 64) p2x p2y r g b a whitePixelU whitePixelV
+                    pokeVertex vp (vBase + (arcStride - 1) * vertexSize) p3x p3y r g b 0 whitePixelU whitePixelV
                   loopIO 0 (n - 1) $ \i -> do
-                    let !va = fromIntegral (base + vi + i * 4) :: Word32
-                        !vb = va + 4
-                        !iOff = (baseIdx + ii + i * 18) * indexSize
+                    let !va = fromIntegral (base + vi + i * arcStride) :: Word32
+                        !vb = va + fromIntegral arcStride
+                        !iOff = (baseIdx + ii + i * arcIndices) * indexSize
                     pokeQuadIndices ip iOff va (va + 1) (vb + 1) vb
                     pokeQuadIndices ip (iOff + 24) (va + 1) (va + 2) (vb + 2) (vb + 1)
-                    pokeQuadIndices ip (iOff + 48) (va + 2) (va + 3) (vb + 3) (vb + 2)
+                    when hasCore $
+                      pokeQuadIndices ip (iOff + 48) (va + 2) (va + 3) (vb + 3) (vb + 2)
                 !viLR = if doTB then 16 else 0
                 !iiLR = if doTB then 36 else 0
                 !viC = stripCount * 8

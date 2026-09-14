@@ -245,18 +245,23 @@ SDL_Texture *nano_ui_retain_create(SDL_Renderer *renderer, int w, int h)
     return tex;
 }
 
+bool nano_ui_window_target_matches_size(SDL_Renderer *renderer, int w, int h)
+{
+    int output_w, output_h;
+    return SDL_GetRenderOutputSize(renderer, &output_w, &output_h)
+        && output_w == w && output_h == h;
+}
+
 bool nano_ui_retain_begin(SDL_Renderer *renderer, SDL_Texture *tex, float scale)
 {
-    if (!renderer || !tex) {
+    /* A NULL texture draws full-repaint sessions straight to the window. */
+    if (!renderer) {
         return false;
     }
     if (!SDL_SetRenderTarget(renderer, tex)) {
         return false;
     }
-    if (scale > 0.f) {
-        (void)SDL_SetRenderScale(renderer, scale, scale);
-    }
-    return true;
+    return scale <= 0.f || SDL_SetRenderScale(renderer, scale, scale);
 }
 
 bool nano_ui_retain_blit(SDL_Renderer *renderer, SDL_Texture *tex)

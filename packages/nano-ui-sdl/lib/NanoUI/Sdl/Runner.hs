@@ -1,6 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 
--- | SDL3 draw path: frame execution and retain-texture present.
+-- | SDL3 draw path: retained damage updates or direct continuous presentation.
 module NanoUI.Sdl.Runner
   ( newSdlContext
   , runSdlSession
@@ -63,6 +63,8 @@ import NanoUI.Sdl.Display
   , retainBlit
   , retainCreate
   , retainDestroy
+  , setRenderScale
+  , windowTargetMatchesSize
   , windowToLogicalCoords
   )
 import NanoUI.Sdl.Render (flushRenderBatch)
@@ -113,9 +115,8 @@ drawFrameWith ctx env inp forceFull evaluateUi = do
   t1 <- getMonotonicTime
   finishDraw ctx env inp tex presentFull t0 t1 drawData dirtyAfterUi
 
--- | Decide whether this present repaints everything, then make sure the
--- retain texture exists. Must run before the frame so the paint pass can cull
--- to the damage clip when the present will be partial.
+-- | Choose the render target and whether to repaint everything. Must run
+-- before the frame so paint can cull to damage for retained partial updates.
 prepareRetain :: Context -> SdlEnv -> Input -> Bool -> IO (Ptr (), Bool)
 prepareRetain ctx env inp forceFull = do
   -- Glyph-atlas maintenance before any quad is recorded: if the atlas ran
@@ -127,7 +128,17 @@ prepareRetain ctx env inp forceFull = do
   let Size lw lh = inputWindowSize inp
       pw = max 1 (round (lw * scale))
       ph = max 1 (round (lh * scale))
-  (tex, retainNew) <- ensureRetain env pw ph scale
+  -- Continuous sessions repaint every pixel, so retaining and copying a
+  -- second framebuffer only adds a target switch and a full-window blit.
+  -- A null target selects the window backbuffer directly.
+  direct <-
+    if sdlContinuous env
+      then windowTargetMatchesSize (sdlRenderer env) pw ph
+      else pure False
+  (tex, retainNew) <-
+    if direct
+      then pure (nullPtr, False)
+      else ensureRetain env pw ph scale
   let presentFull = forceFull || retainNew || sdlContinuous env || inputWindowRedraw inp
   writeIORef (ctxPaintFull ctx) presentFull
   pure (tex, presentFull)
@@ -183,26 +194,19 @@ finishDraw ctx env inp tex presentFull t0 t1 drawData dirtyAfterUi = do
       pure (atlasReset || dirtyAfterUi, inp)
     else do
       okBegin <- retainBegin (sdlRenderer env) tex scale
-      unless okBegin $ fail "SDL_SetRenderTarget(retain) failed"
+      unless okBegin $ fail "SDL_SetRenderTarget/Scale failed"
       theme <- readIORef (ctxTheme ctx)
       glyphTex <- glyphAtlasTexture (sdlGlyphAtlas env)
       -- Persistent batch created once per session (sdlBatch): no C
       -- calloc/free pair per presented frame. Flush unconditionally so an
       -- aborted pass cannot leak pending geometry into the next frame.
       --
-      -- A full repaint must start from a clean retain texture: the frame only
-      -- records draw commands for what the app paints, and a bare window
-      -- background (no full-window panel node) leaves the rest of the texture
-      -- untouched. Without the clear, text that moved or shrank on a bare
-      -- backdrop ghosts against the previous frame's pixels. Partial clips
-      -- keep the undamaged region and never clear. The clear targets the
-      -- retain texture, which is only blitted to the window afterwards, so it
-      -- cannot flash on screen mid-frame.
+      -- Full repaints clear the target, including bare backdrop regions.
+      -- Partial updates preserve the undamaged part of the retained texture.
       let batch = sdlBatch env
       renderDrawDataPass
         batch
         (sdlRenderer env)
-        scale
         (if damage == DamageFull then Just (themeWindow theme) else Nothing)
         drawData
         allLayersArr
@@ -213,8 +217,13 @@ finishDraw ctx env inp tex presentFull t0 t1 drawData dirtyAfterUi = do
       t2 <- getMonotonicTime
       -- Damage limits updates to the retained texture, not the final copy:
       -- SDL leaves the window backbuffer undefined after each present.
-      okBlit <- retainBlit (sdlRenderer env) tex
-      unless okBlit $ fail "SDL_RenderTexture(retain) failed"
+      -- Restore the window's pixel coordinate system before polling events.
+      -- Retained sessions do this as part of their final texture copy.
+      okBlit <-
+        if tex == nullPtr
+          then setRenderScale (sdlRenderer env) 1
+          else retainBlit (sdlRenderer env) tex
+      unless okBlit $ fail "SDL window presentation preparation failed"
       void $ renderPresentSafe (sdlRenderer env)
       t3 <- getMonotonicTime
       let renderMs = (t2 - t1) * 1000
