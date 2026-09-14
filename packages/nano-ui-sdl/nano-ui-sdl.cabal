@@ -71,6 +71,7 @@ library
     import:           warnings
     exposed-modules:
         NanoUI.Backend.Sdl
+        NanoUI.Sdl.Input
         NanoUI.Sdl.NanoUIFont
         NanoUI.Sdl.Session
     other-modules:
@@ -86,7 +87,6 @@ library
         NanoUI.Sdl.Font.Resolve
         NanoUI.Sdl.Font.Search
         NanoUI.Sdl.Image
-        NanoUI.Sdl.Input
         NanoUI.Sdl.Render
         NanoUI.Sdl.Window
     build-depends:

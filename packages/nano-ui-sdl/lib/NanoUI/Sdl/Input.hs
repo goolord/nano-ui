@@ -179,6 +179,8 @@ keyDown p = do
         | modCtrl mods && code == sdlPlusKeycode -> singletonEv (EvText "+" mods)
         | modCtrl mods && code == sdlMinusKeycode -> singletonEv (EvText "-" mods)
         | modCtrl mods && code == sdlZeroKeycode -> singletonEv (EvText "0" mods)
+        | modCtrl mods && code >= 32 && code <= 126 ->
+            singletonEv (EvText (T.singleton (toEnum (fromIntegral code))) mods)
         | otherwise -> emptySmallArray
 
 textInput :: Ptr SDL_Event -> IO (SmallArray SdlEvent)

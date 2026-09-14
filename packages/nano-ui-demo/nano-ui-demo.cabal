@@ -125,13 +125,16 @@ executable nano-ui-sdl-terminal
     import:           warnings
     main-is:          SdlTerminal.hs
     ghc-options:      -main-is SdlTerminal
+    c-sources:        app/terminal-size.c
     build-depends:
         base ^>=4.22.0.0,
+        bytestring ^>=0.12,
         nano-ui ^>=0.1,
         nano-ui-sdl ^>=0.1,
-        process ^>=1.6,
         streaming ^>=0.2,
-        text ^>=2.1
+        text ^>=2.1,
+        unix ^>=2.8,
+        vector ^>=0.13
     hs-source-dirs:   app
     if !flag(sdl) || os(windows)
         buildable: False

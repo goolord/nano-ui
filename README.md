@@ -213,7 +213,7 @@ cabal run nano-ui-rgfw-demo
 # Launch the SDL3 notepad example (menu bar, file open/save, multi-line editor)
 cabal run nano-ui-sdl-notepad
 
-# Launch the tiny shell example (Linux/macOS)
+# Launch the minimal PTY terminal example (Linux/macOS)
 cabal run nano-ui-sdl-terminal
 
 # Launch hardware-accelerated SDL3 demo (requires -fsdl flag)
@@ -225,12 +225,18 @@ cabal run nano-ui-profile
 
 ### Terminal example
 
-[`SdlTerminal.hs`](packages/nano-ui-demo/app/SdlTerminal.hs) is a tiny command-and-output
-window backed by one persistent `/bin/sh`, so `cd` and shell variables carry between
-commands. Type, use Backspace to edit, and press Enter to send a line. The Haskell
-`streaming` library reads output in a background thread (`S.repeatM` → `S.mapM_`),
-including stderr. The pane follows the last 20 lines. Close the window to quit.
-It uses pipes rather than a PTY: no ANSI emulation or full-screen interactive apps.
+[`SdlTerminal.hs`](packages/nano-ui-demo/app/SdlTerminal.hs) attaches `/bin/sh -i`
+to a real controlling PTY. The Haskell `streaming` library folds nonblocking PTY
+chunks into a pure screen state (`S.unfoldr` → `S.fold`) and drives the window
+(`S.iterateM` → `S.mapM_`). Keyboard input goes directly to the PTY, including
+Ctrl+C/D/Z; the shell and terminal driver handle editing and job control.
+
+The golfed emulator is fixed at 80×24 with a monospace font, UTF-8 decoding,
+wrapping, basic ANSI cursor movement and erasing, and 2,000 lines of scrollback.
+Use the mouse wheel or touchpad to browse history; typing returns to the live
+prompt. New output preserves your reading position. It is monochrome, without
+wide-character layout or full VT100 compatibility. Close the window or exit the
+shell to quit. The five-line C shim only sets the PTY size.
 
 ### Reproducible Nix Flake
 
