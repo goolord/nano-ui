@@ -175,8 +175,14 @@ settleKey ctx key val = do
       changed = case prevLive of
         Just v -> not (approxEq v val)
         Nothing -> not (approxEq prevRest val)
-      anims' = IM.delete key (asAnimations as)
-      rest' = if approxEq val 0 then IM.delete key (asAnimRest as) else IM.insert key val (asAnimRest as)
+      -- A spring at rest settles every frame; rebuild only maps that change.
+      anims' = case prevLive of
+        Just _ -> IM.delete key (asAnimations as)
+        Nothing -> asAnimations as
+      rest'
+        | approxEq val 0 = if IM.member key (asAnimRest as) then IM.delete key (asAnimRest as) else asAnimRest as
+        | prevRest == val = asAnimRest as
+        | otherwise = IM.insert key val (asAnimRest as)
   writeIORef (ctxAnimationState ctx) $!
     as
       { asAnimations = anims'

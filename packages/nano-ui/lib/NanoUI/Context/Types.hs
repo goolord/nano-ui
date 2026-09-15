@@ -301,7 +301,6 @@ data DrawingCacheState = DrawingCacheState
   , dcsDrawOpCache :: !(IntMap DrawOpCacheEntry)
   , dcsCustomDrawOpCache :: !(IntMap CustomDrawOpCacheEntry)
   , dcsDrawFitCache :: !(IntMap DrawFitCache)
-  , dcsWidgetNodeTypes :: !(Maybe (IntMap NodeType))
   }
 
 -- | Strict cache entry for a popup's anchor configuration.
@@ -338,7 +337,6 @@ initialDrawingCacheState = DrawingCacheState
   , dcsDrawOpCache = IM.empty
   , dcsCustomDrawOpCache = IM.empty
   , dcsDrawFitCache = IM.empty
-  , dcsWidgetNodeTypes = Nothing
   }
 
 data InteractionState = InteractionState

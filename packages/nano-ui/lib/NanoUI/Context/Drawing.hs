@@ -17,8 +17,6 @@ module NanoUI.Context.Drawing
   , lookupCustomCursor
   , registerCustomDamageSlop
   , lookupCustomDamageSlop
-  , getWidgetNodeTypes
-  , setWidgetNodeTypes
   , resetDrawingScopeCache
   , hasCustomLayoutInputs
   ) where
@@ -46,7 +44,6 @@ import NanoUI.Context.Types
 import NanoUI.Draw (DrawOp, DrawingBuild, shiftDrawOp)
 import NanoUI.Id (WidgetId)
 import NanoUI.Input (UiCursorKind)
-import NanoUI.Layout.Arena (NodeType)
 import NanoUI.Style (Layout)
 import NanoUI.Types (PopupAnchor, PopupPlacement, Rect (..), rectH, rectW)
 
@@ -241,22 +238,12 @@ registerCustomDamageSlop = registerIn dcsCustomDamageSlop (\m dc -> dc {dcsCusto
 lookupCustomDamageSlop :: Context -> WidgetId -> IO (Maybe Float)
 lookupCustomDamageSlop = lookupIn dcsCustomDamageSlop
 
-{-# INLINE getWidgetNodeTypes #-}
-getWidgetNodeTypes :: Context -> IO (Maybe (IntMap NodeType))
-getWidgetNodeTypes ctx = dcsWidgetNodeTypes <$> readIORef (ctxDrawingCache ctx)
-
-{-# INLINE setWidgetNodeTypes #-}
-setWidgetNodeTypes :: Context -> Maybe (IntMap NodeType) -> IO ()
-setWidgetNodeTypes ctx m =
-  modifyIORef' (ctxDrawingCache ctx) $ \dc -> dc {dcsWidgetNodeTypes = m}
-
 resetDrawingScopeCache :: Context -> IO ()
 resetDrawingScopeCache ctx =
   modifyIORef' (ctxDrawingCache ctx) $ \dc ->
     dc
       { dcsDrawings = IM.empty
       , dcsPopupConfigs = IM.empty
-      , dcsWidgetNodeTypes = Nothing
       , dcsCustomMeasures = IM.empty
       , dcsCustomCursors = IM.empty
       , dcsCustomDrawings = IM.empty

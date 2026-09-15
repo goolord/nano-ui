@@ -290,7 +290,7 @@ renderSeries ps c xDom yDom chart s =
         AreaSeries baseline ->
           areaPath baseline xDom yDom pts # fc fill # lw none
         StepSeries w ->
-          fromVertices (V.toList $ stepPoints pts xDom yDom) # lc ink # lwO (plotStroke w)
+          fromVertices (stepPoints pts xDom yDom) # lc ink # lwO (plotStroke w)
 
 seriesPoints :: Chart -> Series -> U.Vector (Double, Double)
 seriesPoints chart s =
@@ -346,15 +346,13 @@ areaPath baseline xDom yDom pts
 closedPoly :: [P2 Double] -> Diagram B
 closedPoly pts = fromVertices pts # closeTrail # strokeTrail
 
-stepPoints :: U.Vector (Double, Double) -> Domain -> Domain -> V.Vector (P2 Double)
+stepPoints :: U.Vector (Double, Double) -> Domain -> Domain -> [P2 Double]
 stepPoints pts xDom yDom =
   let toP (x, y) = p2 (domainToPlot xDom x, domainToPlot yDom y)
-   in V.generate (2 * max 0 (U.length pts - 1)) $ \i ->
-        let (!segment, !corner) = i `quotRem` 2
-            (!x0, !y0) = pts U.! segment
-         in if corner == 0
-              then toP (x0, y0)
-              else toP (fst (pts U.! (segment + 1)), y0)
+   in U.foldr
+        (\((x0, y0), (x1, _)) acc -> toP (x0, y0) : toP (x1, y0) : acc)
+        []
+        (U.zip pts (U.drop 1 pts))
 
 markShape :: MarkShape -> Float -> Colour Double -> P2 Double -> Diagram B
 markShape MarkCircle w c p =

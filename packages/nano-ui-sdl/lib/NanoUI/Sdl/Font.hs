@@ -41,7 +41,9 @@ import Data.Char (ord)
 import Data.ByteString (ByteString)
 import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
 import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef, writeIORef)
-import qualified Data.Set as Set
+import qualified Data.HashMap.Strict as HM
+import Data.Hashable (Hashable (..))
+import qualified Data.IntSet as IS
 import Data.Primitive.SmallArray
   ( indexSmallArray
   , newSmallArray
@@ -82,7 +84,6 @@ import NanoUI.Testing
   , wrapMeasureCache
   )
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
-import qualified Data.Map.Strict as Map
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Text.Foreign as TF
 
@@ -118,12 +119,11 @@ data GlyphSlot = GlyphSlot
   , gsAdvX :: {-# UNPACK #-} !Float -- horizontal advance (pixels, at font scale)
   }
 
--- | (font ID, Unicode codepoint)
-type GlyphKey = (Word64, Char)
-
 data GlyphAtlas = GlyphAtlas
   { gaAtlas :: !(Ptr ())
-  , gaEntries :: !(IORef (Map.Map GlyphKey (Maybe GlyphSlot)))
+  , -- | Glyph slots by font id, then codepoint. Closing a font drops its inner
+    -- map instead of scanning every glyph.
+    gaEntries :: !(IORef (IM.IntMap (IM.IntMap (Maybe GlyphSlot))))
   , gaEpoch :: !(IORef Word64)
   , -- | An insertion failed (atlas out of space) during the last frame; the
     -- atlas must be reset at the next frame start, before any quad is
@@ -171,23 +171,29 @@ runCacheCap = 1024
 cacheableText :: Text -> Bool
 cacheableText txt = T.compareLength txt 4096 /= GT
 
--- | A map bounded by entry count: 'insertBounded' into a full cache evicts the
--- first key of 'bcOrder' and returns its value so the owner can release it.
+-- | A hash map bounded by entry count: 'insertBounded' into a full cache evicts
+-- the first key of 'bcOrder' and returns its value so the owner can release
+-- it. Hashing a text key once beats comparing it at every level of a tree.
 data BoundedCache k v = BoundedCache
-  { bcEntries :: !(Map.Map k v)
+  { bcEntries :: !(HM.HashMap k v)
   , bcOrder :: !(Seq.Seq k)
+  -- ^ Each key once, oldest first. Its length is the entry count, which
+  -- 'HM.size' would have to count.
   }
 
 emptyBounded :: BoundedCache k v
-emptyBounded = BoundedCache Map.empty Seq.empty
+emptyBounded = BoundedCache HM.empty Seq.empty
 
-insertBounded :: Ord k => Int -> k -> v -> BoundedCache k v -> (BoundedCache k v, Maybe v)
-insertBounded cap k v (BoundedCache m order)
-  | Map.member k m = (BoundedCache (Map.insert k v m) order, Nothing)
-  | Map.size m >= cap
-  , victim Seq.:<| rest <- order =
-      (BoundedCache (Map.insert k v (Map.delete victim m)) (rest Seq.|> k), Map.lookup victim m)
-  | otherwise = (BoundedCache (Map.insert k v m) (order Seq.|> k), Nothing)
+insertBounded :: Hashable k => Int -> k -> v -> BoundedCache k v -> (BoundedCache k v, Maybe v)
+insertBounded cap k v (BoundedCache m order) =
+  case HM.alterF (\old -> (old, Just v)) k m of
+    (Just _, m') -> (BoundedCache m' order, Nothing)
+    (Nothing, m')
+      | Seq.length order >= cap
+      , victim Seq.:<| rest <- order ->
+          let (evicted, m'') = HM.alterF (\old -> (old, Nothing)) victim m'
+           in (BoundedCache m'' (rest Seq.|> k), evicted)
+      | otherwise -> (BoundedCache m' (order Seq.|> k), Nothing)
 
 -- Native glyph measurements have one representation, shared by metric-only
 -- preparation and atlas placement. Pixel bearings are unscaled here.
@@ -242,7 +248,7 @@ newGlyphAtlas :: Ptr SDL_Renderer -> IO GlyphAtlas
 newGlyphAtlas ren = do
   atlas <- textAtlasCreate ren
   when (atlas == nullPtr) $ fail "nano_ui_text_atlas_create failed (glyph)"
-  entries <- newIORef Map.empty
+  entries <- newIORef IM.empty
   epoch <- newIORef 0
   needsReset <- newIORef False
   resetFlag <- newIORef False
@@ -275,7 +281,7 @@ registerGlyphAtlasRewarm ga hook = modifyIORef' (gaRewarmHooks ga) (hook :)
 resetGlyphAtlas :: GlyphAtlas -> IO ()
 resetGlyphAtlas ga = do
   modifyIORef' (gaEpoch ga) (+1)
-  writeIORef (gaEntries ga) Map.empty
+  writeIORef (gaEntries ga) IM.empty
   writeIORef (gaNeedsReset ga) False
   textAtlasReset (gaAtlas ga)
   hooks <- readIORef (gaRewarmHooks ga)
@@ -318,19 +324,20 @@ warmGlyphAtlas ga sf =
 -- characters that have no glyph (e.g. control characters).
 lookupOrInsertGlyph :: GlyphAtlas -> SdlFont -> Char -> IO (Maybe GlyphSlot)
 lookupOrInsertGlyph ga sf c = do
-  let !key = (sfId sf, c)
   entries <- readIORef (gaEntries ga)
-  case Map.lookup key entries of
+  case IM.lookup (fromIntegral (sfId sf)) entries >>= IM.lookup (ord c) of
     Just mSlot -> pure mSlot
-    Nothing    -> insertGlyph ga sf key c
+    Nothing    -> insertGlyph ga sf c
 
-insertGlyph :: GlyphAtlas -> SdlFont -> GlyphKey -> Char -> IO (Maybe GlyphSlot)
-insertGlyph ga sf key c = do
+insertGlyph :: GlyphAtlas -> SdlFont -> Char -> IO (Maybe GlyphSlot)
+insertGlyph ga sf c = do
   let !cp = fromIntegral (ord c) :: CUInt
+      record entry =
+        modifyIORef' (gaEntries ga) (IM.insertWith IM.union (fromIntegral (sfId sf)) (IM.singleton (ord c) entry))
   mMetrics <- getGlyphMetrics sf cp
   case mMetrics of
     Nothing -> do
-      modifyIORef' (gaEntries ga) (Map.insert key Nothing)
+      record Nothing
       pure Nothing
     Just metrics -> do
       mSurf <- alloca $ \sp -> do
@@ -343,7 +350,7 @@ insertGlyph ga sf key c = do
             if surf == nullPtr then pure Nothing else pure (Just surf)
       case mSurf of
         Nothing -> do
-          modifyIORef' (gaEntries ga) (Map.insert key Nothing)
+          record Nothing
           pure Nothing
         Just surf -> do
           -- If the atlas is full, defer the reset to the next frame start
@@ -356,7 +363,7 @@ insertGlyph ga sf key c = do
           case mPos of
             Nothing -> do
               markAtlasExhausted ga
-              modifyIORef' (gaEntries ga) (Map.insert key Nothing)
+              record Nothing
               pure Nothing
             Just (px, py, tw, th) -> do
               (atW, atH) <- atlasSize (gaAtlas ga)
@@ -377,7 +384,7 @@ insertGlyph ga sf key c = do
                       , gsOffY = offY
                       , gsAdvX = gmAdvance metrics
                       }
-              modifyIORef' (gaEntries ga) (Map.insert key (Just slot))
+              record (Just slot)
               pure (Just slot)
 
 -- | ASCII glyph-cache slot. The cached 'Maybe' is shared on every hit, so a
@@ -528,7 +535,7 @@ buildGlyphFontMetrics ga sf scale = do
       -- the pair can be packed into a single Int key: no tuple on the hot path.
       let !pk = (ord prev `shiftL` 21) .|. ord c
       cache <- readIORef kernCacheRef
-      case Map.lookup pk (bcEntries cache) of
+      case HM.lookup pk (bcEntries cache) of
         Just k -> pure k
         Nothing -> do
           raw <- ttfGetKerning (sfFont sf) (fromIntegral (ord prev) :: CUInt) (fromIntegral (ord c) :: CUInt)
@@ -550,7 +557,7 @@ buildGlyphFontMetrics ga sf scale = do
       -- The cache is per 'FontMetrics', so the font id is implicit and the
       -- key is the text alone: no per-lookup tuple allocation.
       cache <- readIORef runCacheRef
-      case Map.lookup txt (bcEntries cache) of
+      case HM.lookup txt (bcEntries cache) of
         Just rq -> pure rq
         Nothing -> makeRunQuad txt
 
@@ -656,7 +663,7 @@ buildGlyphFontMetrics ga sf scale = do
     prepareText txt = do
       ensureFontAlive sf
       prepared <- readIORef preparedRef
-      case Map.lookup txt (bcEntries prepared) of
+      case HM.lookup txt (bcEntries prepared) of
         Just fm -> pure fm
         Nothing -> do
           let insertChar m c = IM.insert (ord c) c m
@@ -983,6 +990,10 @@ data FontCacheKey = FontCacheKey
   , fckItalic  :: !Bool
   } deriving (Eq, Ord, Show)
 
+instance Hashable FontCacheKey where
+  hashWithSalt s (FontCacheKey variant ptKey bold italic) =
+    s `hashWithSalt` fromEnum variant `hashWithSalt` ptKey `hashWithSalt` bold `hashWithSalt` italic
+
 data CachedFontEntry = CachedFontEntry
   { cfeFont    :: !SdlFont
   , cfeFm      :: !FontMetrics
@@ -993,7 +1004,7 @@ makeCachedFontEntry :: SdlFont -> FontMetrics -> Float -> IO CachedFontEntry
 makeCachedFontEntry font fm scale = do
   measCache <- newIORef emptyBounded
   let meas txt = do
-        cached <- Map.lookup txt . bcEntries <$> readIORef measCache
+        cached <- HM.lookup txt . bcEntries <$> readIORef measCache
         case cached of
           Just sz -> pure sz
           Nothing -> do
@@ -1062,13 +1073,12 @@ setSdlFontCacheSource cache src = writeIORef (sfcPrimarySourceRef cache) src
 closeCachedFonts :: GlyphAtlas -> [SdlFont] -> IO ()
 closeCachedFonts ga fonts = do
   mapM_ closeFont fonts
-  let ids = Set.fromList (map sfId fonts)
-  modifyIORef' (gaEntries ga) (Map.filterWithKey (\(fid, _) _ -> not (Set.member fid ids)))
+  modifyIORef' (gaEntries ga) (`IM.withoutKeys` IS.fromList (map (fromIntegral . sfId) fonts))
 
 destroySdlFontCache :: SdlFontCache -> IO ()
 destroySdlFontCache cache = do
   dynamic <- atomicModifyIORef' (sfcDynamicCache cache) (\c -> (emptyBounded, c))
-  closeCachedFonts (sfcGlyphAtlas cache) (map cfeFont (Map.elems (bcEntries dynamic)))
+  closeCachedFonts (sfcGlyphAtlas cache) (map cfeFont (HM.elems (bcEntries dynamic)))
 
 resetSdlFontCache ::
   SdlFontCache ->
@@ -1084,7 +1094,7 @@ resetSdlFontCache cache newScale newBaseFont newBaseFm newMonoFont newMonoFm = d
   sansEntry <- makeCachedFontEntry newBaseFont newBaseFm newScale
   monoEntry <- makeCachedFontEntry newMonoFont newMonoFm newScale
   writeIORef (sfcBaseEntries cache) (sansEntry, monoEntry)
-  closeCachedFonts (sfcGlyphAtlas cache) (map cfeFont (Map.elems (bcEntries dynamic)))
+  closeCachedFonts (sfcGlyphAtlas cache) (map cfeFont (HM.elems (bcEntries dynamic)))
 
 getOrLoadCachedFont ::
   SdlFontCache ->
@@ -1112,15 +1122,18 @@ getOrLoadCachedFont cache sz weight style var = do
     else do
       let key = FontCacheKey var ptKey isBold isItalic
       dynamic <- readIORef (sfcDynamicCache cache)
-      case Map.lookup key (bcEntries dynamic) of
+      case HM.lookup key (bcEntries dynamic) of
         Just entry -> do
           -- Least recently used goes first: move a hit to the back of the
           -- eviction order, so fonts drawn every frame are never closed.
           case Seq.viewr (bcOrder dynamic) of
             _ Seq.:> newest | newest == key -> pure ()
             _ ->
-              writeIORef (sfcDynamicCache cache) $!
-                dynamic {bcOrder = Seq.filter (/= key) (bcOrder dynamic) Seq.|> key}
+              -- Each key appears in the order once, and a hot key sits near
+              -- the back, so search from the right and delete that one entry.
+              let order = bcOrder dynamic
+               in writeIORef (sfcDynamicCache cache) $!
+                    dynamic {bcOrder = maybe order (`Seq.deleteAt` order) (Seq.elemIndexR key order) Seq.|> key}
           pure entry
         Nothing -> do
           scale <- readIORef (sfcScaleRef cache)

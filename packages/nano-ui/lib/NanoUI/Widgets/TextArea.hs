@@ -358,7 +358,7 @@ textAreaWith' f value = do
         -- content size measured for the old text, and the menu pulse.
         when changed $
           uiIO $ do
-            st <- saveTextAreaState key newState <$> getStore ctx
+            st <- saveTextAreaState key newText newState <$> getStore ctx
             setStore ctx st
               { storeText = IM.insert seenKey newText (storeText st)
               , storeInt = IM.delete changedSlotKey (storeInt st)
@@ -411,12 +411,14 @@ loadTextAreaStateWithBuffer store key text buf0 =
      , viewportSize = viewport
      }
 
-saveTextAreaState :: Int -> TextAreaState -> WidgetStore -> WidgetStore
-saveTextAreaState key state store =
+-- | Store the editor state with its text. Callers pass the text because they
+-- usually have it already, and 'TB.toText' joins the whole document.
+saveTextAreaState :: Int -> Text -> TextAreaState -> WidgetStore -> WidgetStore
+saveTextAreaState key text state store =
   let TB.Cursor row col = TB.getCursor (buffer state)
       TB.Cursor anchorRow anchorCol = selectionAnchor state
    in store
-        { storeText = IM.insert key (TB.toText (buffer state)) (storeText store)
+        { storeText = IM.insert key text (storeText store)
         , storeDyn =
             IM.insert (slotKey slotTextAreaBuffer key) (toDyn (buffer state)) (storeDyn store)
         , storeInt =
@@ -462,10 +464,11 @@ applyTextAreaMenuAction ctx wid action = do
   -- outside Input, so the caller still gets a respChanged pulse. Gated on an
   -- actual text delta: selection-only actions (Select All, Copy) must not
   -- pulse.
-  let setChangedFlag =
-        if TB.toText (buffer s0) == TB.toText (buffer s1)
-          then saveTextAreaState key s1 store
-          else saveTextAreaState key s1 store {storeInt = IM.insert (slotKey slotTextAreaChanged key) 1 (storeInt store)}
+  let newText = TB.toText (buffer s1)
+      setChangedFlag =
+        if TB.toText (buffer s0) == newText
+          then saveTextAreaState key newText s1 store
+          else saveTextAreaState key newText s1 store {storeInt = IM.insert (slotKey slotTextAreaChanged key) 1 (storeInt store)}
   setStore ctx setChangedFlag
   -- Menu actions are how a caller edits a field that may not be under the
   -- pointer; focus it so the selection highlight and caret become visible.

@@ -251,7 +251,10 @@ updateTextAreaSelection :: Context -> WidgetId -> TextAreaHit -> TB.Cursor -> TB
 updateTextAreaSelection ctx wid hit anchor cursor = do
   state0 <- loadHitState ctx hit
   store <- getStore ctx
-  setStore ctx (TA.saveTextAreaState (intKey wid) (TA.setTextAreaSelection anchor cursor state0) store)
+  -- A selection change keeps the stored text, so the document is not rejoined.
+  let key = intKey wid
+      text = IM.findWithDefault "" key (storeText store)
+  setStore ctx (TA.saveTextAreaState key text (TA.setTextAreaSelection anchor cursor state0) store)
   markDirty ctx
 
 applyTextAreaClick :: Context -> WidgetId -> TextAreaHit -> Int -> Int -> Int -> IO ()
@@ -324,4 +327,4 @@ collapseTextAreaSelection ctx wid = do
       row = IM.findWithDefault 0 (slotKey slotTextAreaRow key) (storeInt store)
       col = IM.findWithDefault 0 (slotKey slotTextAreaCol key) (storeInt store)
       state = loadTextAreaState store key text
-  setStore ctx (saveTextAreaState key state {selectionAnchor = TB.Cursor row col} store)
+  setStore ctx (saveTextAreaState key text state {selectionAnchor = TB.Cursor row col} store)

@@ -242,9 +242,7 @@ onResult did st filterStrs filtersPtr defaultStr _userdata filelistRaw _filterId
   free filtersPtr
   forM_ defaultStr free
   atomicModifyIORef' (dsPending st) $ \pending ->
-    case IM.lookup did pending of
-      Nothing -> (pending, ())
-      Just pl -> (IM.insert did pl {pendingStatus = outcome} pending, ())
+    (IM.adjust (\pl -> pl {pendingStatus = outcome}) did pending, ())
   pushRefreshEvent
 
 -- | Decode SDL's null-terminated file list into a plain list of paths.

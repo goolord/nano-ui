@@ -26,10 +26,9 @@ triangulatePolygon pts0 =
 stripClosed :: [(Float, Float)] -> [(Float, Float)]
 stripClosed [] = []
 stripClosed [p] = [p]
-stripClosed (p : rest) =
-  case reverse rest of
-    q : _ | p == q -> p : init rest
-    _ -> p : rest
+stripClosed (p : rest)
+  | p == last rest = p : init rest
+  | otherwise = p : rest
 
 signedArea :: U.Vector (Float, Float) -> Float
 signedArea vs =

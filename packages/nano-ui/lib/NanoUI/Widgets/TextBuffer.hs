@@ -83,9 +83,10 @@ fromText t =
    in
     TextBuffer z 0
 
--- | Flatten all lines into a single newline-separated Text block.
+-- | Flatten all lines into a single newline-separated Text block. The tab
+-- stand-in is never a newline, so one decode pass after the join suffices.
 toText :: TextBuffer -> T.Text
-toText = T.intercalate "\n" . toLines
+toText = decodeTabs . T.intercalate "\n" . TZ.getText . unTextBuffer
 
 -- | Extract all lines for measurement and rendering loops.
 toLines :: TextBuffer -> [T.Text]

@@ -25,7 +25,6 @@ import NanoUI.Context
   , lookupCustomCursor
   )
 import NanoUI.Font (FontMetrics, sliderHandleSlack, sliderTrackBounds)
-import NanoUI.Frame.Chrome (widgetNodeTypeTable)
 import NanoUI.Frame.Hit (findNodeByWidgetId, nodePointVisible, scrollHitRect)
 import NanoUI.Frame.Scroll (ScrollBarLayout (..), scrollBarsFor)
 import NanoUI.Frame.Select (overlayMenuOwnerAt, selectDropRect)
@@ -78,15 +77,14 @@ uiCursorKind ctx inp = do
   case mKind of
     Just k -> pure k
     Nothing -> do
-      table <- widgetNodeTypeTable ctx
       let mouse = inputMousePos inp
       active <- readIORef (ctxActiveId ctx)
-      activeKind <- cursorKindAt table ctx active mouse inp
+      activeKind <- cursorKindAt ctx active mouse inp
       if activeKind /= UiCursorDefault
         then pure activeKind
         else do
           hot <- getHotId ctx
-          cursorKindAt table ctx hot mouse inp
+          cursorKindAt ctx hot mouse inp
 
 selectDropdownCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
 selectDropdownCursorKind ctx inp = do
@@ -147,8 +145,8 @@ scrollThumbHit ctx mouse =
   where
     na = ctxNodeArena ctx
 
-cursorKindAt :: IM.IntMap NodeType -> Context -> WidgetId -> V2 -> Input -> IO UiCursorKind
-cursorKindAt table ctx wid mouse inp
+cursorKindAt :: Context -> WidgetId -> V2 -> Input -> IO UiCursorKind
+cursorKindAt ctx wid mouse inp
   | hashWidgetId wid == 0 = pure UiCursorDefault
   | otherwise = do
       disabled <- isDisabled ctx wid
@@ -177,8 +175,11 @@ cursorKindAt table ctx wid mouse inp
                           , cdcFont = ctxFontMetrics ctx
                           }
                   pure (cursorFn cdc)
-            Nothing ->
-              case IM.lookup (intKey wid) table of
+            Nothing -> do
+              -- Resolve the node through the arena's id index rather than
+              -- building a type table of every widget for two lookups.
+              mNodeType <- findNodeByWidgetId ctx wid >>= traverse (getNodeType (ctxNodeArena ctx))
+              case mNodeType of
                 Just NodeButton -> widgetPointerCursor ctx wid mouse
                 Just NodeCheckbox -> widgetPointerCursor ctx wid mouse
                 Just NodeRadio -> widgetPointerCursor ctx wid mouse

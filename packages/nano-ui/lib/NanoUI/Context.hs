@@ -83,8 +83,6 @@ module NanoUI.Context
   , lookupCustomCursor
   , registerCustomDamageSlop
   , lookupCustomDamageSlop
-  , getWidgetNodeTypes
-  , setWidgetNodeTypes
   , resetDrawingScopeCache
   , getStore
   , setStore

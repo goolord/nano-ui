@@ -358,8 +358,7 @@ renderSingleHeader ::
   Eff es (Header a)
 renderSingleHeader hdrLay packedStyle cur t = do
   let isActive = tabKey t == cur
-      badge = maybe "" (\b -> " (" <> b <> ")") (tabBadge t)
-      headerText = tabTitle t <> badge
+      headerText = maybe (tabTitle t) (\b -> mconcat [tabTitle t, " (", b, ")"]) (tabBadge t)
       tabStyle = packedStyle .|. buttonFlagTab
       headerButton = buttonStyledEx (not (tabDisabled t))
   if tabClosable t

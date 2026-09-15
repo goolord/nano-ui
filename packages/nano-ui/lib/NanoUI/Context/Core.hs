@@ -331,19 +331,26 @@ setStore ctx store = do
   -- thunks, and writeIORef would otherwise park one in the long-lived store
   -- every frame.
   writeIORef (ctxStore ctx) $! store
-  when (prev /= store) $ do
-    let changedKeys =
-          diffKeys (storeInt prev) (storeInt store)
-            ++ diffKeys (storeFloat prev) (storeFloat store)
-            ++ diffKeys (storeDouble prev) (storeDouble store)
-            ++ diffKeys (storePoint prev) (storePoint store)
-            ++ diffKeys (storeText prev) (storeText store)
-            ++ diffKeys (storeFloatList prev) (storeFloatList store)
-            ++ diffKeys (storeIntList prev) (storeIntList store)
-            ++ diffKeys (storeIntSet prev) (storeIntSet store)
-            ++ diffKeysBy ptrEq (storeDyn prev) (storeDyn store)
-    forM_ changedKeys $ \k -> damageKey ctx k (DamageInflated defaultDamageSlop)
-    markDirty ctx
+  let changedKeys =
+        diffKeys (storeInt prev) (storeInt store)
+          ++ diffKeys (storeFloat prev) (storeFloat store)
+          ++ diffKeys (storeDouble prev) (storeDouble store)
+          ++ diffKeys (storePoint prev) (storePoint store)
+          ++ diffKeys (storeText prev) (storeText store)
+          ++ diffKeys (storeFloatList prev) (storeFloatList store)
+          ++ diffKeys (storeIntList prev) (storeIntList store)
+          ++ diffKeys (storeIntSet prev) (storeIntSet store)
+          ++ diffKeysBy ptrEq (storeDyn prev) (storeDyn store)
+  -- The key diff doubles as the store comparison: checking 'prev /= store'
+  -- first would walk every changed map twice.
+  when
+    ( storeMirrorGen prev /= storeMirrorGen store
+        || storeOpenSelect prev /= storeOpenSelect store
+        || not (null changedKeys)
+    )
+    $ do
+      forM_ changedKeys $ \k -> damageKey ctx k (DamageInflated defaultDamageSlop)
+      markDirty ctx
 
 deleteWidgetStore :: Context -> WidgetId -> IO ()
 deleteWidgetStore ctx wid = do

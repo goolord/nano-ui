@@ -8,6 +8,7 @@ module NanoUI.Damage
 import Control.Monad (filterM, forM, unless, when)
 import Data.IORef (readIORef)
 import Data.IntMap.Strict qualified as IM
+import Data.IntSet qualified as IS
 import Data.Text (Text)
 import Data.Maybe (catMaybes, fromMaybe, isJust)
 import NanoUI.Context
@@ -45,7 +46,7 @@ import NanoUI.Input
   , inputWindowSize
   )
 import NanoUI.Frame.Hit (findNodeByKey)
-import NanoUI.Store (eqByPtr, mirrorStoresChanged, slotKey, slotScrollCross, slotTextAreaScroll)
+import NanoUI.Store (eqByPtr, mirrorStoresChanged, ptrEq, slotKey, slotScrollCross, slotTextAreaScroll)
 import NanoUI.Layout.Arena
   ( NodeArena
   , NodeType (..)
@@ -140,17 +141,16 @@ updatePrevRects ctx = do
   let na = ctxNodeArena ctx
       bump rects = do
         rest <- getAnimRest ctx
-        let restKeys = IM.keys rest
-            allKeys = IM.keys live ++ restKeys
-            rectless' =
-              IM.fromList
-                [ (k, if IM.member k rects then 0 else IM.findWithDefault 0 k prevRectless + 1)
-                | k <- allKeys
-                ]
+        let rectless' =
+              IM.fromSet
+                (\k -> if IM.member k rects then 0 else IM.findWithDefault 0 k prevRectless + 1)
+                (IM.keysSet live <> IM.keysSet rest)
             deadRest = IM.filterWithKey (\k _ -> IM.findWithDefault 0 k rectless' > 300) rest
         unless (IM.null deadRest) $
           pruneAnimRest ctx (\k -> IM.notMember k deadRest)
-        setAnimRectless ctx (IM.filterWithKey (\k _ -> IM.member k live ||(IM.member k rest && IM.notMember k deadRest)) rectless')
+        -- Every key is live or resting, so this drops exactly the dead resting
+        -- keys that are not live again.
+        setAnimRectless ctx (rectless' `IM.difference` (deadRest `IM.difference` live))
   count <- arenaCount na
   if count <= 0
     then do
@@ -236,7 +236,7 @@ data FrameSnapshot = FrameSnapshot
   , fsFloatingRects :: !(IM.IntMap Rect)
   , fsRects :: !(IM.IntMap Rect)
   , fsTexts :: !(IM.IntMap Text)
-  , fsAnimKeys :: ![Int]
+  , fsAnimKeys :: !IS.IntSet
   }
 
 -- | What the finished frame looks like and what changed since the snapshot.
@@ -350,7 +350,7 @@ needsFullDamage snap d =
     missingAnim =
       any
         (\k -> k /= 0 && IM.notMember k oldRects && IM.notMember k newRects && recentlyRectless k)
-        (fsAnimKeys snap ++ IM.keys (fdLiveAnims d))
+        (IS.toList (fsAnimKeys snap <> IM.keysSet (fdLiveAnims d)))
     panelRects = IM.elems (fdFloatingRects d)
     allInPanels rs =
       not (null panelRects)
@@ -416,7 +416,7 @@ clipDamage ctx snap d = do
       else pure []
   animRs <-
     fmap concat $
-      forM (filter (/= 0) (fsAnimKeys snap ++ IM.keys (fdLiveAnims d))) $ \k ->
+      forM (IS.toList (IS.delete 0 (fsAnimKeys snap <> IM.keysSet (fdLiveAnims d)))) $ \k ->
         catMaybes <$> forM (catMaybes [IM.lookup k oldRects, IM.lookup k newRects])
           (clipKeyRect ctx k . rectInflate defaultDamageSlop)
   -- Backdrop expansion covers interaction slop (hover/press
@@ -436,11 +436,17 @@ clipDamage ctx snap d = do
       -- damage alone would leave them stale. New text keys inside
       -- floating panels also land here; outside panels the
       -- keysChanged predicate already forces full damage.
-      textChangedKeys =
-        [ k
-        | (k, t) <- IM.toList (fdTexts d)
-        , IM.lookup k (fsTexts snap) /= Just t
-        ]
+      textChangedKeys
+        -- updatePrevRects keeps last frame's map when no text changed.
+        | ptrEq (fdTexts d) (fsTexts snap) = []
+        | otherwise =
+            IM.keys $
+              IM.mergeWithKey
+                (\_ new old -> if new /= old then Just () else Nothing)
+                (IM.map (const ()))
+                (const IM.empty)
+                (fdTexts d)
+                (fsTexts snap)
   textRs <-
     fmap concat $
       forM textChangedKeys $ \k ->
@@ -541,14 +547,16 @@ partitionDiffs old new kMoved = go kMoved [] []
       | otherwise = go rest dOld dNew
 
 keyedRectDeltas :: IM.IntMap Rect -> IM.IntMap Rect -> [(Int, Rect)]
-keyedRectDeltas old new =
-  filter (rectNonEmpty . snd) $ IM.toList $
-    IM.mergeWithKey
-      (\_ a b -> if a /= b then Just (rectUnion a b) else Nothing)
-      id
-      id
-      old
-      new
+keyedRectDeltas old new
+  | ptrEq old new = []
+  | otherwise =
+      filter (rectNonEmpty . snd) $ IM.toList $
+        IM.mergeWithKey
+          (\_ a b -> if a /= b then Just (rectUnion a b) else Nothing)
+          id
+          id
+          old
+          new
 
 clipDeltaToScrollViewport :: Context -> (Int, Rect) -> IO Rect
 clipDeltaToScrollViewport ctx (k, r) = do

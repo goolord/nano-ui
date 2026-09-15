@@ -91,12 +91,14 @@ library
         effectful-core ^>=2.6,
         filepath ^>=1.5,
         file-embed ^>=0.0.16,
+        hashable ^>=1.5,
         nano-ui ^>=0.1,
         primitive ^>=0.9,
         vector ^>=0.13,
         record-hasfield ^>=1.0,
         sdl3-bindgen-sys ^>=0.0.0.2,
-        text ^>=2.1
+        text ^>=2.1,
+        unordered-containers ^>=0.2
     hs-source-dirs:   lib
     if !flag(sdl)
         buildable: False

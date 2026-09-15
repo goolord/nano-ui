@@ -147,7 +147,7 @@ menuItemWith (MenuItem lbl hint enabled)
           , rawRespRightClicked = False
           }
   where
-    text = maybe lbl (\s -> lbl <> "  " <> s) hint
+    text = maybe lbl (\s -> mconcat [lbl, "  ", s]) hint
 
 -- | Menu row. 'True' on the frame it is clicked.
 --

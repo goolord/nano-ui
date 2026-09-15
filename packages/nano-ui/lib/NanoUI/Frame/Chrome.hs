@@ -2,8 +2,7 @@
 
 -- | Widget paint helpers: labels, styles, rects, menu panels and display text.
 module NanoUI.Frame.Chrome
-  ( widgetNodeTypeTable
-  , floatingAncestor
+  ( floatingAncestor
   , displayText
   , widgetVisualStyle
   , textInputValue
@@ -32,9 +31,7 @@ import NanoUI.Context
   , WidgetStore (..)
   , getAnimationValue
   , getStore
-  , getWidgetNodeTypes
   , intKey
-  , setWidgetNodeTypes
   )
 import NanoUI.Draw (DrawArena, pushRect, pushRoundedRect, pushRoundedStroke)
 import NanoUI.Font (menuAccentInset, menuAccentW)
@@ -43,7 +40,6 @@ import NanoUI.Id (hashWidgetId)
 import NanoUI.Layout.Arena
   ( NodeIdx
   , NodeType (..)
-  , foldNodesM
   , getNodeType
   , getNodeValue
   , getOptions
@@ -52,7 +48,6 @@ import NanoUI.Layout.Arena
   , getText
   , getWidgetId
   , isFloatingNode
-  , isWidgetNode
   )
 import NanoUI.Style
   ( Style (..)
@@ -133,22 +128,6 @@ textInputFocused ctx idx = do
   wid <- getWidgetId (ctxNodeArena ctx) idx
   focus <- readIORef (ctxFocusId ctx)
   pure (focus == wid)
-
-widgetNodeTypeTable :: Context -> IO (IM.IntMap NodeType)
-widgetNodeTypeTable ctx = do
-  cached <- getWidgetNodeTypes ctx
-  case cached of
-    Just table -> pure table
-    Nothing -> do
-      let na = ctxNodeArena ctx
-          addWidget acc idx = do
-            nt <- getNodeType na idx
-            if isWidgetNode nt
-              then (\wid -> IM.insert (intKey wid) nt acc) <$> getWidgetId na idx
-              else pure acc
-      table <- foldNodesM na addWidget IM.empty
-      setWidgetNodeTypes ctx (Just table)
-      pure table
 
 -- | Transparent fills and no border.
 clearStyle :: Style -> Style
