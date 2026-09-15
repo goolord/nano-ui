@@ -77,7 +77,7 @@ newDialogState =
 -- | Forget every pending dialog. Used during SDL teardown: dialogs still
 -- open on the OS side keep running and their callbacks are left to the
 -- process, but all handles become 'FileDialogUnknown'. Entries still in the
--- current retirement batch are deliberately NOT freed here — SDL may still be
+-- current retirement batch are deliberately NOT freed here: SDL may still be
 -- unwinding their wrappers during teardown; they leak to process exit.
 clearDialogState :: DialogState -> IO ()
 clearDialogState st = do

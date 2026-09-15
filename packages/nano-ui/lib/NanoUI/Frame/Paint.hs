@@ -230,7 +230,7 @@ paintScrollContainerNode env idx rect@(Rect x y w h) = do
   -- into the window backdrop. That backdrop only exists while the runner
   -- clears it on DamageFull frames; on clip frames (scrolling, resize)
   -- the strip vacated by scrolled content has no covering command and
-  -- the retained texture would show stale pixels — a ghost of a previous
+  -- the retained texture would show stale pixels, a ghost of a previous
   -- scroll position. Paint the full rect with the window color instead:
   -- invisible on a cleared backdrop, and clip replay then always
   -- repaints the whole viewport.

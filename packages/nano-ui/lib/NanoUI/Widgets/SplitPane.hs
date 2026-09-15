@@ -308,13 +308,13 @@ topLevelDropTarget band r@(Rect l t w h) (V2 x y)
 -- 'PaneDrop' the drop performs. The highlight is found by simulating the
 -- drop ('treeMovePane' with a throwaway split id) and laying the resulting
 -- tree out ('layoutNode') into the grid rect, so it is exactly the region the
--- dragged pane will occupy after the drop — accounting for the restructuring
+-- dragged pane will occupy after the drop, accounting for the restructuring
 -- that removing the pane causes (its parent split collapses and sibling
 -- subtrees expand) and for 'spacing' and min-size floors. Estimating the rect
 -- from the target's pre-drop bounds goes wrong wherever mixed 'AxisV' /
 -- 'AxisH' splits make those two layouts diverge. @spacing@ must be the gutter
--- actually laid out between panes — 'NanoUI.Widgets.PaneGrid' passes
--- @pgSpacing + 2 * pgLeeway@, not @pgSpacing@ — or the preview regions drift
+-- actually laid out between panes: 'NanoUI.Widgets.PaneGrid' passes
+-- @pgSpacing + 2 * pgLeeway@, not @pgSpacing@, or the preview regions drift
 -- from the on-screen layout. 'Nothing' when the drop cannot be performed
 -- (unknown pane ids, 'DropTop' on a single-pane grid).
 dropPreview :: Float -> Float -> GridNode -> Word64 -> Rect -> PaneDrop -> Maybe (Rect, PaneDrop)

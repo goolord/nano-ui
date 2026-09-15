@@ -376,8 +376,8 @@ comboScrollGeom (Rect dx dy dw dh) n vis win xOff contentW =
         else Nothing
    in (inner, vSb, hSb, usableW)
 
--- | Combo dropdown rect: like 'selectDropRect', but with no outer margin —
--- rows start flush at the top — and the height reserves a flush bottom
+-- | Combo dropdown rect: like 'selectDropRect', but with no outer margin
+-- (rows start flush at the top), and the height reserves a flush bottom
 -- scrollbar lane when the widest row overflows, so the horizontal bar never
 -- covers the bottommost row. Must agree with 'comboScrollGeom' on when lanes
 -- appear (same inputs, same formulas).

@@ -393,7 +393,7 @@ data CachedQuad
 -- Font queries happen in 'fbPrepare'; atlas insertion happens in 'fbDrawRun'
 -- and 'fbDrawGlyph'. All coordinates are logical (unscaled).
 --
--- Standard ASCII (0..127) lookups are backed by a high-performance 'SmallMutableArray'
+-- Standard ASCII (0..127) lookups are backed by a 'SmallMutableArray'
 -- fast path for branchless O(1) in-memory indexing, with automatic cache invalidation
 -- whenever the underlying glyph atlas is reset.
 {-# NOINLINE buildGlyphFontMetrics #-}

@@ -196,7 +196,7 @@ runFrameEff unlift ctx inp ui = do
   clearDirty ctx
   animKeys <- IM.keys <$> getLiveAnimations ctx
   -- Wheel and thumb-drag input targets the previous frame's layout, so apply
-  -- it while that arena is still intact — before it is reset for the new
+  -- it while that arena is still intact, before it is reset for the new
   -- build. Settling offsets before the UI pass keeps build-time
   -- virtualization (table body rows) materialized for the range that will
   -- actually be visible, without a second build pass.

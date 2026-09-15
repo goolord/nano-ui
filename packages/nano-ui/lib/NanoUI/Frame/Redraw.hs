@@ -94,7 +94,7 @@ focusedNodeIs ctx ref p = do
 
 -- Select dropdown or text-input menu is open. Overlay hover is not a widget id.
 -- A focused combo (a search-style field carrying options) also owns an open
--- dropdown: report it so every frame while it is up redraws with full damage —
+-- dropdown: report it so every frame while it is up redraws with full damage:
 -- the floating list is painted by an overlay, so clip-damage frames would
 -- leave stale rows in the retained texture.
 overlayMenuOpen :: Context -> IO Bool

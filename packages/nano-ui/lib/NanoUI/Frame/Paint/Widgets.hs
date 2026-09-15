@@ -275,7 +275,7 @@ paintWidgetForeground env idx nt style si (Rect x y w h) = do
           pushText da fm px py txt widgetFg
           -- Table sort arrow: the label text ends in the blank reserve slot
           -- (the ▲/▼ codepoint is not in the pruned UI font), so paint the
-          -- mark as a triangle centered in that slot — once, on the line
+          -- mark as a triangle centered in that slot, once, on the line
           -- that carries the slot.
           when (sortMark /= 0 && lastLine) $
             drawSortTriangle da (px + tw - sortSlotW / 2) (py + th / 2) (sortMark == 2) widgetFg
@@ -386,7 +386,7 @@ drawSearchMagnifier da (Rect x y w h) col = do
   pushLine da (cx + startOff) (cy + startOff) (cx + endOff) (cy + endOff) t col
 
 -- | Combo box field: the search field's full-rect editable box, but styled
--- like a dropdown — no magnifier or clear chrome, and a select chevron in the
+-- like a dropdown: no magnifier or clear chrome, and a select chevron in the
 -- right reserve that flips up while the dropdown is open (i.e. focused).
 paintComboField :: Context -> DrawArena -> FontMetrics -> Style -> NodeIdx -> Bool -> Rect -> IO ()
 paintComboField ctx da fm style idx focus box@(Rect x y w h) = do
