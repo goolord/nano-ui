@@ -29,6 +29,7 @@ import NanoUI.Testing.Harness
   , warmup2
   )
 import NanoUI.Context (Context (..))
+import NanoUI.Emit qualified as Emit
 import NanoUI.Layout.Arena (arenaCount, getRect, getText, getWidgetId)
 
 data DummyTab = TabA | TabB | TabC
@@ -72,9 +73,9 @@ runTabsLazinessTest ctx failed = do
   evalCountC <- newIORef (0 :: Int)
   let inp = withInput 200 100
       ui = tabs TabB $ Seq.fromList
-        [ tab TabA "A" (uiIO (modifyIORef' evalCountA (+ 1)) >> label_ "Body A")
-        , tab TabB "B" (uiIO (modifyIORef' evalCountB (+ 1)) >> label_ "Body B")
-        , tab TabC "C" (uiIO (modifyIORef' evalCountC (+ 1)) >> label_ "Body C")
+        [ tab TabA "A" (uiIO (modifyIORef' evalCountA (+ 1)) >> label "Body A")
+        , tab TabB "B" (uiIO (modifyIORef' evalCountB (+ 1)) >> label "Body B")
+        , tab TabC "C" (uiIO (modifyIORef' evalCountC (+ 1)) >> label "Body C")
         ]
   _ <- runFrame ctx inp ui
   cntA <- readIORef evalCountA
@@ -90,10 +91,11 @@ data TabMsg = MsgSelect DummyTab | MsgClose DummyTab
 runTabsEmitTest :: Context -> IORef Int -> IO ()
 runTabsEmitTest ctx failed = do
   let inp0 = withInput 300 100
-      ui curTab = tabsEmit MsgSelect curTab
-        [ tab TabA "Alpha" (label_ "Body A")
-        , tab TabB "Beta" (label_ "Body B")
+      ui curTab = Emit.tabs curTab
+        [ tab TabA "Alpha" (label "Body A")
+        , tab TabB "Beta" (label "Body B")
         ]
+        MsgSelect
   _ <- runFrame ctx inp0 (ui TabA)
   spans <- collectTextSpans ctx
   case [r | (r, txt, _, _, _) <- spans, "Beta" `T.isInfixOf` txt] of
@@ -117,17 +119,17 @@ runTabResponseForwardingTest _ failed = do
 runTabsClosableTest :: Context -> IORef Int -> IO ()
 runTabsClosableTest ctx failed = do
   let inp0 = withInput 300 100
-      ui curTab = tabs curTab
-        [ closableTab TabA "Alpha" (label_ "Body A")
-        , closableTab TabB "Beta" (label_ "Body B")
+      ui curTab = tabs' curTab
+        [ closableTab TabA "Alpha" (label "Body A")
+        , closableTab TabB "Beta" (label "Body B")
         ]
   _ <- runFrame ctx inp0 (ui TabA)
   mClose <- findCloseButtonRect ctx
   case mClose of
     Just (Rect cx cy cw ch) -> do
-      (tResp, activeTab) <- runClickPair ctx inp0 (ui TabA) (V2 (cx + cw / 2) (cy + ch / 2))
+      tResp <- runClickPair ctx inp0 (ui TabA) (V2 (cx + cw / 2) (cy + ch / 2))
       assertEq failed (tabClosed tResp) (Just TabA)
-      assertEq failed activeTab TabA
+      assertEq failed (tabActive tResp) TabA
     Nothing -> assert failed False
 
 findCloseButtonRect :: Context -> IO (Maybe Rect)
@@ -151,12 +153,12 @@ runTabsDisabledTest :: Context -> IORef Int -> IO ()
 runTabsDisabledTest _ failed = forM_ [TabTop, TabLeft] $ \orientation -> do
   ctx <- newContext
   let inp = withInputOff 400 240
-      ui disabled = tabsWith defaultTabsConfig {tabsOrientation = orientation} TabA
-        [ (closableTab TabB "Disabled" (label_ "Body B")) {tabDisabled = disabled}
-        , tab TabA "Enabled" (label_ "Body A")
+      ui disabled = tabsConfigured' defaultTabsConfig {tabsOrientation = orientation} TabA
+        [ (closableTab TabB "Disabled" (label "Body B")) {tabDisabled = disabled}
+        , tab TabA "Enabled" (label "Body A")
         ]
-      check (response, active) = do
-        assertEq failed active TabA
+      check response = do
+        assertEq failed (tabActive response) TabA
         assertEq failed (tabClosed response) Nothing
         assert failed (not (respClicked response) && not (respChanged response))
   _ <- warmup2 ctx inp (ui False)
@@ -181,8 +183,8 @@ runTabsDisabledTest _ failed = forM_ [TabTop, TabLeft] $ \orientation -> do
   spansEnabled <- collectTextSpans ctx
   case [r | (r, txt, _, _, _) <- spansEnabled, txt == "Disabled"] of
     Rect x y w h : _ -> do
-      (_, active) <- runClickPair ctx inp (ui False) (V2 (x + w / 2) (y + h / 2))
-      assertEq failed active TabB
+      response <- runClickPair ctx inp (ui False) (V2 (x + w / 2) (y + h / 2))
+      assertEq failed (tabActive response) TabB
     [] -> assert failed False
 
 runTabsStatePersistenceTest :: Context -> IORef Int -> IO ()
@@ -194,8 +196,8 @@ runTabsStatePersistenceTest ctx failed = do
               withKey ("flag" :: T.Text) $ do
                 (flag, setFlag) <- useFlag False
                 whenM (button "ToggleA") (setFlag (not flag))
-                label_ (if flag then "FlagIsOn" else "FlagIsOff")
-        , tab TabB "B" (label_ "OtherTab")
+                label (if flag then "FlagIsOn" else "FlagIsOff")
+        , tab TabB "B" (label "OtherTab")
         ]
   _ <- runFrame ctx inp0 (ui TabA)
   spans0 <- collectTextSpans ctx
@@ -219,9 +221,9 @@ runTabsStatePersistenceTest ctx failed = do
 runTabsDamageTest :: Context -> IORef Int -> IO ()
 runTabsDamageTest ctx failed = do
   let inp0 = withInputOff 300 100
-      ui curTab = tabs curTab
-        [ tab TabA "Alpha" (label_ "Body A with some text")
-        , tab TabB "Beta" (label_ "Body B different widgets")
+      ui curTab = tabs' curTab
+        [ tab TabA "Alpha" (label "Body A with some text")
+        , tab TabB "Beta" (label "Body B different widgets")
         ]
       covers dmg (Rect rx ry rw rh) = case dmg of
         DamageFull -> True
@@ -239,8 +241,8 @@ runTabsDamageTest ctx failed = do
     (Rect bx by bw bh : _) -> do
       let (press, release) = clickPair inp0 (V2 (bx + bw / 2) (by + bh / 2))
       _ <- runFrame ctx press (ui TabA)
-      ((resp, newTab), _, _, _) <- runFrame ctx release (ui TabA)
-      assert failed (respChanged resp && newTab == TabB)
+      (resp, _, _, _) <- runFrame ctx release (ui TabA)
+      assert failed (respChanged resp && tabActive resp == TabB)
       spansSwitch <- collectTextSpans ctx
       assertSpansHas failed "Body B" spansSwitch
       assert failed (not (hasText "Body A" spansSwitch))

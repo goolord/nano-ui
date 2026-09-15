@@ -115,7 +115,7 @@ runLayoutPaintStateTest ctx failed = do
   let inp = withInputOff 400 300
       ui value color = do
         column $ do
-          box (fixedWH 30 30 defaultLayout) color
+          box (fixedWH 30 30) color
           uiIO $ do
             let na = ctxNodeArena ctx
             i <- addNodeFromLayout na NodeSlider 0 (fixedWH 200 30 defaultLayout)

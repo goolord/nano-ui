@@ -23,7 +23,6 @@ import NanoUI.Backend.Sdl
 import NanoUI.Context
   ( Context (..)
   , damageFull
-  , defaultScrollConfig
   , getPrevRect
   , getScrollOffset2D
   , markDirty
@@ -249,7 +248,7 @@ logsApp stateRef = do
             _ -> pure ()
         Nothing -> pure ()
 
-  column' (tight . fillW . fillH $ defaultLayout {layoutGap = 0}) $ do
+  columnWith (tight . fillW . fillH . gap 0) $ do
     stLive <- uiIO $ readIORef stateRef
     let allLogsBefore = asLogs stLive
         filteredLogsBefore = case asFilterLevel stLive of
@@ -258,7 +257,7 @@ logsApp stateRef = do
 
     -- Header Toolbar
     renderHeaderToolbar mutateState stLive (V.length allLogsBefore) (V.length filteredLogsBefore) (allSelected, setAllSelected)
-    void separator
+    separator
 
     -- Re-read state after toolbar interactions so filter/burst/clear changes
     -- take effect IMMEDIATELY in this frame's layout and paint passes!
@@ -277,7 +276,7 @@ logsApp stateRef = do
     renderLogScroller stateRef allSelected filteredLogs
 
     -- Copy after the scroller pass: a focused row's own Ctrl+C runs inside
-    -- selectableTextEx during the scroller pass and would otherwise overwrite
+    -- selectableTextWith during the scroller pass and would otherwise overwrite
     -- the clipboard with a single row.
     when (allSelected && cPressed) $ copyAllLogs
     case mMenuAction of
@@ -285,7 +284,7 @@ logsApp stateRef = do
       _ -> pure ()
 
     -- Status Bar
-    void separator
+    separator
     renderStatusBar (V.length allLogs) (V.length filteredLogs) allSelected
 
 renderHeaderToolbar ::
@@ -302,27 +301,27 @@ renderHeaderToolbar mutateState st totalCount filteredCount (allSelected, setAll
         clicked <- buttonWith (if asFilterLevel st == lvl then fontBold else id) lbl
         when clicked $
           mutateState (\s -> s {asFilterLevel = lvl})
-  panelStyled' (colorRGBA 24 29 38 255) (colorRGBA 45 52 64 255) (fillW defaultLayout) $ do
-    column' (tight . fillW . padXY 12 10 $ defaultLayout {layoutGap = 8}) $ do
+  panelStyledWith (colorRGBA 24 29 38 255) (colorRGBA 45 52 64 255) fillW $ do
+    columnWith (tight . fillW . padXY 12 10 . gap 8) $ do
       -- Top line: Title, Badges, and Stats
-      row' (tight . fillW . alignMid $ defaultLayout {layoutGap = 12}) $ do
-        void $ labelEx (fontBold . fontSize 16 . tight $ defaultLayout) "Log Viewer"
-        void $ labelEx (fontMono . fontMuted . tight $ defaultLayout) ("[" <> T.pack (show totalCount) <> " total]")
+      rowWith (tight . fillW . alignMid . gap 12) $ do
+        labelWith (fontBold . fontSize 16 . tight) "Log Viewer"
+        labelWith (fontMono . fontMuted . tight) ("[" <> T.pack (show totalCount) <> " total]")
 
         when (filteredCount /= totalCount) $
-          void $ labelEx (fontMono . fontColor (colorRGBA 235 203 139 255) . tight $ defaultLayout)
+          labelWith (fontMono . fontColor (colorRGBA 235 203 139 255) . tight)
             ("[" <> T.pack (show filteredCount) <> " filtered]")
 
         -- Live stream indicator
         if asStreaming st
-          then void $ labelEx (fontMono . fontBold . fontColor (colorRGBA 163 190 140 255) . tight $ defaultLayout) "[● STREAMING]"
-          else void $ labelEx (fontMono . fontMuted . tight $ defaultLayout) "[⏸ PAUSED]"
+          then labelWith (fontMono . fontBold . fontColor (colorRGBA 163 190 140 255) . tight) "[● STREAMING]"
+          else labelWith (fontMono . fontMuted . tight) "[⏸ PAUSED]"
 
         when allSelected $
-          void $ labelEx (fontMono . fontBold . fontColor (colorRGBA 235 203 139 255) . tight $ defaultLayout) "[● ALL SELECTED]"
+          labelWith (fontMono . fontBold . fontColor (colorRGBA 235 203 139 255) . tight) "[● ALL SELECTED]"
 
       -- Controls line: Buttons for streaming, bursts, clear, selection, and filters
-      row' (tight . fillW . alignMid $ defaultLayout {layoutGap = 8}) $ do
+      rowWith (tight . fillW . alignMid . gap 8) $ do
         -- Stream toggle
         streamClicked <- button (if asStreaming st then "Pause Stream" else "Start Stream")
         when streamClicked $
@@ -341,7 +340,7 @@ renderHeaderToolbar mutateState st totalCount filteredCount (allSelected, setAll
         when clearClicked $
           mutateState (\s -> s {asLogs = V.empty, asNextId = 1})
 
-        void (spacer (Fixed 8) Fit)
+        spacer (Fixed 8) Fit
 
         -- Selection controls
         selAllClicked <- buttonWith (if allSelected then fontBold else id) (if allSelected then "Deselect All" else "Select All")
@@ -349,10 +348,10 @@ renderHeaderToolbar mutateState st totalCount filteredCount (allSelected, setAll
           setAllSelected (not allSelected)
           uiIO $ markDirty ctx >> damageFull ctx
 
-        void (spacer (Fixed 8) Fit)
+        spacer (Fixed 8) Fit
 
         -- Filter pills
-        void $ labelEx (fontMuted . tight $ defaultLayout) "Filter:"
+        labelWith (fontMuted . tight) "Filter:"
         filterPill Nothing "ALL"
         filterPill (Just LevelInfo) "INFO"
         filterPill (Just LevelWarn) "WARN"
@@ -412,11 +411,11 @@ renderLogScroller stateRef allSelected logs = do
   when reqJump $ setReqJump False
 
   -- Sticky indicator banner & Jump to Bottom button
-  row' (tight . fillW . padXY 12 4 $ defaultLayout {layoutAlignY = AlignMiddle, layoutGap = 8}) $ do
+  rowWith (tight . fillW . padXY 12 4 . alignMid . gap 8) $ do
     if isSticky
-      then void $ labelEx (fontMono . fontBold . fontColor (colorRGBA 163 190 140 255) . tight $ defaultLayout) "● PINNED"
+      then labelWith (fontMono . fontBold . fontColor (colorRGBA 163 190 140 255) . tight) "● PINNED"
       else do
-        void $ labelEx (fontMono . fontBold . fontColor (colorRGBA 235 203 139 255) . tight $ defaultLayout) "⏸ UNPINNED (reading history)"
+        labelWith (fontMono . fontBold . fontColor (colorRGBA 235 203 139 255) . tight) "⏸ UNPINNED (reading history)"
         jumpClicked <- buttonWith (fontColor (colorRGBA 136 192 208 255) . fontBold) "Jump to Bottom"
         when jumpClicked $
           setReqJump True
@@ -433,39 +432,41 @@ renderLogScroller stateRef allSelected logs = do
       topH = fromIntegral firstVis * logRowH
       botH = fromIntegral (max 0 (n - lastVis - 1)) * logRowH
 
-  scrollAreaIdConfigured scrollWid (fillW . fillH $ defaultLayout) defaultScrollConfig $ do
-    column' (tight $ defaultLayout {layoutGap = 0, layoutMinW = 1200}) $ do
-      when (topH > 0) $ void (spacer Fit (Fixed topH))
+  -- The same key scope gives the scroll area the id read above as scrollWid,
+  -- so this frame's offset and sticky state apply to it.
+  void $ withKey ("log-scroller" :: Text) $ scrollArea2D (fillW . fillH) $ do
+    columnWith (tight . gap 0 . minW 1200) $ do
+      when (topH > 0) $ spacer Fit (Fixed topH)
       mapM_
         ( \idx ->
             let entry = logs V.! idx
              in withKey (leId entry) $ renderLogRow allSelected entry
         )
         visIndices
-      when (botH > 0) $ void (spacer Fit (Fixed botH))
+      when (botH > 0) $ spacer Fit (Fixed botH)
 
 renderLogRow :: Ui :> es => Bool -> LogEntry -> Eff es ()
 renderLogRow isAllSel entry = do
   let lineText = formatLogLine entry
       col = levelColor (leLevel entry)
-      rowLay = tight . fixedH logRowH . padXY 8 2 $ defaultLayout {layoutAlignY = AlignMiddle}
-      rowBody = void $ selectableTextWith (fontColor col . fontMono . tight) lineText
+      rowLay = tight . fixedH logRowH . padXY 8 2 . alignMid
+      rowBody = selectableTextWith (fontColor col . fontMono . tight) lineText
   if isAllSel
-    then panelStyled' (colorRGBA 45 65 95 255) (colorRGBA 70 100 145 255) rowLay rowBody
-    else row' rowLay rowBody
+    then panelStyledWith (colorRGBA 45 65 95 255) (colorRGBA 70 100 145 255) rowLay rowBody
+    else rowWith rowLay rowBody
 
 renderStatusBar :: Ui :> es => Int -> Int -> Bool -> Eff es ()
 renderStatusBar totalCount filteredCount allSelected = do
-  panelStyled' (colorRGBA 20 24 32 255) (colorRGBA 45 52 64 255) (fillW defaultLayout) $ do
-    row' (tight . fillW . padXY 12 4 . alignMid $ defaultLayout {layoutGap = 16}) $ do
-      void $ labelEx (fontMono . fontMuted . tight $ defaultLayout)
+  panelStyledWith (colorRGBA 20 24 32 255) (colorRGBA 45 52 64 255) fillW $ do
+    rowWith (tight . fillW . padXY 12 4 . alignMid . gap 16) $ do
+      labelWith (fontMono . fontMuted . tight)
         ("Total: " <> T.pack (show totalCount) <> " logs | Filtered: " <> T.pack (show filteredCount))
       if allSelected
         then
-          void $ labelEx (fontMono . fontBold . fontColor (colorRGBA 235 203 139 255) . tight $ defaultLayout)
+          labelWith (fontMono . fontBold . fontColor (colorRGBA 235 203 139 255) . tight)
             "ALL LOGS SELECTED | Ctrl+C to copy all | ESC to clear"
         else
-          void $ labelEx (fontMuted . tight $ defaultLayout)
+          labelWith (fontMuted . tight)
             "Tip: Click & drag to select | Right-click for Copy/Select All | 2D Scroll | Ctrl+Q to quit"
 
 --------------------------------------------------------------------------------

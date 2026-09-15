@@ -12,6 +12,7 @@ module NanoUI.Testing.Harness
   , warmup
   , warmup2
   , warmupDraw
+  , held
   , runClick
   , runClickPair
   , runClickRelease
@@ -42,7 +43,7 @@ module NanoUI.Testing.Harness
   ) where
 
 import Control.Monad (forM, void, when)
-import Data.IORef (IORef)
+import Data.IORef (IORef, readIORef, writeIORef)
 import Data.Text qualified as T
 import Data.Word (Word32, Word8)
 import Foreign.C.Types (CSize (..))
@@ -63,7 +64,7 @@ foreign import ccall unsafe "string.h memcpy" c_memcpy :: Ptr Word8 -> Ptr Word8
 -- | Decode the quads a frame actually rasterised: one @(rect, color)@ per
 -- six-index quad, in draw order. Span and arena queries cannot see chrome
 -- (scroller wells, scrollbar lanes); this can. Every rasterised op in the
--- draw arena is emitted as 4 vertices / 6 indices — a command that breaks
+-- draw arena is emitted as 4 vertices / 6 indices; a command that breaks
 -- that packing fails loudly here instead of decoding garbage.
 drawQuads :: DrawData -> IO [(Rect, Color)]
 drawQuads dd =
@@ -273,6 +274,16 @@ warmupDraw ctx inp ui = do
   _ <- runFrame ctx inp ui
   (a, _, draw, _) <- runFrame ctx inp ui
   pure (a, draw)
+
+-- | Drive a controlled input the way an application does: pass the value held
+-- in the test's 'IORef' and store the widget's result for the next frame. Not
+-- a hook: a hook write makes the frame run the view again without input, and
+-- the frame then returns that pass's result without its click or change flags.
+held :: Ui :> es => IORef a -> (a -> Eff es (r, a)) -> Eff es (r, a)
+held ref widget = do
+  result <- widget =<< uiIO (readIORef ref)
+  uiIO (writeIORef ref (snd result))
+  pure result
 
 runClick :: Context -> Input -> NanoUI a -> V2 -> IO ()
 runClick ctx inp0 ui pos = do

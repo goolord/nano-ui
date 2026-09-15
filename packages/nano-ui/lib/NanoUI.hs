@@ -1,230 +1,79 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- |
 -- Module      : NanoUI
--- Description : Purely functional immediate-mode GUI toolkit for Haskell
+-- Description : Immediate-mode GUI toolkit
 -- Copyright   : (c) 2026 Zachary Churchill
 -- License     : MIT
 -- Maintainer  : zacharyachurchill@gmail.com
 --
--- @nano-ui@ is an immediate-mode graphical user interface (IMGUI) toolkit for Haskell.
---
--- = Immediate-Mode Mental Model
---
--- Unlike traditional retained-mode frameworks (such as the HTML DOM, Qt, or GTK),
--- @nano-ui@ has:
---
--- * __Zero retained widget objects__: You do not instantiate or store widget handles.
--- * __Zero mutable synchronization__: Widget state is not synchronized through getters and setters.
--- * __Zero callback chains__: Widgets do not register event listeners.
---
--- Instead, your application describes the entire user interface /every single frame/ as a pure
--- function of state. Widgets evaluate on the spot and return what the user did during that frame.
---
--- = Two State Paradigms
---
--- @nano-ui@ supports two complementary state management architectures:
---
--- == 1. Local Component Hooks
---
--- Best suited for transient UI state (dialog visibility, tab selection, form field drafts).
+-- A view is a function that runs every frame. Widgets are ordinary calls:
+-- each one lays itself out, reads this frame's input, and returns what the
+-- user did. There are no widget objects to keep and no callbacks to register.
 --
 -- @
--- counterApp :: NanoUI ()
--- counterApp = do
---   (count, setCount) <- useInt 0
---   column $ do
---     heading "Counter"
---     rowWith (gap 8) $ do
---       whenM (button "-") (setCount (count - 1))
---       label (T.pack (show count))
---       whenM (button "+") (setCount (count + 1))
+-- counter :: NanoUI ()
+-- counter = do
+--   (n, setN) <- useInt 0
+--   row $ do
+--     whenM (button "-") (setN (n - 1))
+--     label (T.pack (show n))
+--     whenM (button "+") (setN (n + 1))
 -- @
 --
--- == 2. Pure Elm Architecture (Reducers & Emitters)
+-- Run a view with a backend: @runSdlApp@ from @nano-ui-sdl@ or @runRgfwApp@
+-- from @nano-ui-rgfw@.
 --
--- Best suited for deterministic, replayable, application-wide domain state.
+-- = Conventions
 --
--- @
--- data Msg = Increment | Decrement
+-- * Widgets return what you usually need: 'Bool' for buttons and menu items,
+--   the new value for inputs, and @()@ for text and decoration.
+-- * A primed name also returns the widget's 'Response', for hover state,
+--   geometry, tooltips, and change or submit flags: @button'@, @slider'@.
+-- * Inputs are controlled. Pass the current value and keep the result; a
+--   change you do not store is undone on the next frame. Editing state such
+--   as the caret, a drag in progress, or an open dropdown stays inside the
+--   widget.
+-- * Layout arguments are modifiers, as in @buttonWith (fixedW 120)@ or
+--   @columnWith (gap 8 . padAll 12)@. Widgets with more options take a
+--   configuration record: 'textInputConfigured', 'tabsConfigured'.
 --
--- update :: Msg -> Int -> Int
--- update Increment n = n + 1
--- update Decrement n = n - 1
+-- = State
 --
--- view :: Int -> NanoUI ()
--- view count = column $ do
---   heading "Elm-Style Counter"
---   rowWith (gap 8) $ do
---     buttonEmit "-" Decrement
---     label (T.pack (show count))
---     buttonEmit "+" Increment
--- @
---
+-- Keep state in local hooks ('useInt', 'useText', 'useState'), in a model you
+-- pass down through the view, or in a reducer: "NanoUI.Emit" has widgets that
+-- emit messages, and the backends' reducer runners fold them into the model.
 module NanoUI
-  ( -- Types
-    V2 (..)
-  , Rect (..)
-  , Size (..)
-  , Color (..)
-  , colorRGBA
-  , colorToWord32
-  , colorLuminance
-  , colorR
-  , colorG
-  , colorB
-  , colorA
-  , lerpColor
-  , contrastRatio
-  , ImageId (..)
-  , Damage (..)
-  , DamageBounds (..)
-  , defaultDamageSlop
-  , sliderDamageSlop
-  , haloDamageSlop
-  , resolveDamageRect
-  , rectContains
-  , rectInflate
-  , rectIntersect
-  , rectUnion
-  , v2Add
-  , v2Sub
-  -- Input
-  , Input (..)
-  , Key (..)
-  , Modifiers (..)
-  , DropType (..)
-  , DropEvent (..)
-  , emptyDropEvents
-  , emptyInput
-  , inputInteracted
-  , inputPointerHeld
-  , appendInputKey
-  , emptyInputKeys
-  , inputKeysElem
-  , inputKeysFromList
-  , inputKeysNull
-  , foldInputKeys
-  -- Style
-  , Sizing (..)
-  , Direction (..)
-  , AlignX (..)
-  , AlignY (..)
-  , Padding (..)
-  , FontVariant (..)
-  , FontWeight (..)
-  , FontStyle (..)
-  , TextDecoration (..)
-  , Layout (..)
-  , defaultLayout
-  , askDefaultLayout
-  , withDefaultLayout
-  , withLayout
-  , Style (..)
-  , Theme (..)
-  , defaultTheme
-  , tomorrowNightMinDarkTheme
-  , tomorrowMinLightTheme
-  , tomorrowMidnightMinDarkTheme
-  , Base16 (..)
-  , themeFromBase16
-  , themeFromBase16Dark
-  , themeFromBase16Light
-  , base16TomorrowNight
-  , base16TomorrowLight
-  , withTheme
-  , setTheme
-  , getTheme
-  , getStoreBool
-  , setStoreBool
-  , themeSeries
-  , scrollBarTrackColor
-  , scrollBarThumbColor
-  , panelPaintPad
-  , windowPad
-  , windowMargin
-  , padAll
-  , padXY
-  , gap
-  , fillW
-  , fillH
-  , grow
-  , minW
-  , maxW
-  , fixedW
-  , minH
-  , maxH
-  , fixedH
-  , fixedWH
-  , alignMid
-  , alignEnd
-  , alignStart
-  , alignCenter
-  , alignTop
-  , alignBottom
-  , tight
-  , percent
-  , gridMinColW
-  , fixedAspectW
-  , fixedAspectH
-  , gridCols
-  , LayoutModifier
-  , fontRegular
-  , fontHeading
-  , fontMuted
-  , fontMono
-  , fontDanger
-  , fontSize
-  , fontSizeScale
-  , fontColor
-  , fontWeight
-  , fontBold
-  , fontLight
-  , fontMedium
-  , fontSemiBold
-  , fontExtraBold
-  , fontBlack
-  , fontStyle
-  , fontItalic
-  , fontOblique
-  , textDecoration
-  , fontUnderline
-  , fontStrike
-  -- ID
-  , WidgetId (..)
-  , IdContext
-  , initialIdContext
-  , mix64
-  , mixFnv
-  , widgetId
-  , hashWidgetId
-  -- Monad
-  , NanoUI
+  ( -- * Views
+    NanoUI
   , Ui
   , runUi
   , runNanoUI
   , uiIO
-  , emit
-  , nextId
-  , burstNextIds
-  , currentId
+  , whenM
+  , unlessM
+  , ifM
+  , windowSize
+  , windowWidth
+  , windowHeight
+  , uiMousePos
+
+    -- * Widget identity
   , scope
   , keyed
   , keyedTag
   , withKey
-  , uiFontMetrics
-  , uiTheme
-  , setUiTheme
-  , uiMousePos
-  , damageWidgetNow
-  , damageKeyNow
-  , damageRectNow
-  , damageGroupNow
-  , damageFullNow
-  -- Widgets
+  , nextId
+  , currentId
+  , burstNextIds
+  , WidgetId (..)
+  , IdContext
+  , initialIdContext
+  , widgetId
+  , hashWidgetId
+  , mix64
+  , mixFnv
+
+    -- * Responses
   , Response (..)
-  , setChanged
-  , setClicked
   , HasResponse (..)
   , respId
   , respRect
@@ -235,114 +84,132 @@ module NanoUI
   , respSubmitted
   , respRightPressed
   , respRightClicked
-  , onRightClick
+  , setChanged
+  , setClicked
   , setSubmitted
-  , panel
-  , panelWith
-  , panel'
-  , panelStyled
-  , panelStyledWith
-  , panelStyled'
-  , callout
-  , calloutWith
+
+    -- * Containers
   , row
   , rowWith
-  , row'
   , column
   , columnWith
-  , column'
   , grid
   , gridWith
-  , grid'
+  , panel
+  , panelWith
+  , panelStyled
+  , panelStyledWith
+  , card
+  , callout
+  , calloutWith
+  , toolbar
+  , center
   , responsive
   , responsiveRowCol
-  , hstack
-  , vstack
+  , scroll
+  , scrollWith
+  , scroll2D
+  , scroll2DWith
+  , scrollArea
+  , scrollArea2D
+  , separator
+  , spacer
+  , flex
+
+    -- * Text
   , label
-  , label_
+  , label'
   , labelWith
-  , labelEx
+  , labelWith'
+  , heading
+  , muted
+  , mono
+  , danger
+  , bold
+  , italic
+  , underline
+  , kv
+  , kvMono
+  , kvBlock
   , selectableText
+  , selectableText'
   , selectableTextWith
-  , selectableTextEx
-  , MenuAction (..)
+  , selectableTextWith'
+
+    -- * Buttons and menus
   , button
   , button'
   , buttonWith
   , buttonWith'
-  , button_
-  , buttonEx
-  , checkbox
-  , slider
-  , sliderWith
-  , sliderEx
-  , textInput
-  , TextInputConfig (..)
-  , defaultTextInputConfig
-  , textInputConfigured
-  , textInputWithPlaceholder
-  , textInputPassword
-  , SearchFieldConfig (..)
-  , defaultSearchFieldConfig
-  , searchField
-  , searchFieldConfigured
-  , comboBox
-  , textArea
-  , textAreaWith
-  , separator
-  , spacer
-  , tooltip
-  , tooltipWidget
-  , tooltipWith
-  , withTooltip
-  , popup
-  , popupEx
-  , PopupAnchor (..)
-  , PopupPlacement (..)
-  , PopupConfig (..)
-  , defaultPopupConfig
-  , contextMenu
-  , contextMenuArea
-  , useContextMenu
   , menuButton
-  , MenuItem (..)
-  , menuItemWith
+  , menuButton'
   , menuItem
-  , menuItemWithShortcut
+  , menuItem'
+  , menuItemShortcut
   , menuItemDisabled
   , menuSeparator
   , menuHeader
-  , scroll
-  , scrollWith
-  , scroll'
-  , scroll2DWith
-  , scroll2D'
-  , scrollArea
-  , scrollArea2D
-  , scrollAreaId
-  , scrollAreaIdConfigured
-  , scrollConfigured
-  , select
-  , selectWith
-  , selectLabeled
-  , boundedSelect
-  , enumSelect
-  , colorPicker
-  , colorPickerRGBA
-  , colorPickerToHex
-  , colorPickerToHexA
-  , colorPickerFromHex
-  , radioFieldset
-  , boundedRadioFieldset
+  , contextMenu
+  , contextMenuArea
+  , useContextMenu
+  , MenuAction (..)
+
+    -- * Inputs
+  , checkbox
+  , checkbox'
+  , toggleSwitch
+  , toggleSwitch'
+  , toggleSwitchWith
+  , toggleSwitchWith'
+  , radio
+  , radio'
+  , boundedRadio
+  , boundedRadio'
   , enumRadio
-  , stripedRow
-  , TreeItem (..)
-  , tree
-  , modal
-  , window
-  , windowSize
-  , windowWidth
-  , windowHeight
+  , enumRadio'
+  , select
+  , select'
+  , selectWith
+  , selectWith'
+  , boundedSelect
+  , boundedSelect'
+  , enumSelect
+  , enumSelect'
+  , slider
+  , slider'
+  , sliderWith
+  , sliderWith'
+  , knob
+  , knob'
+  , knobWith
+  , knobWith'
+  , TextInputConfig (..)
+  , defaultTextInputConfig
+  , textInput
+  , textInput'
+  , textInputConfigured
+  , textInputConfigured'
+  , SearchFieldConfig (..)
+  , defaultSearchFieldConfig
+  , searchField
+  , searchField'
+  , searchFieldConfigured
+  , searchFieldConfigured'
+  , comboBox
+  , comboBox'
+  , textArea
+  , textArea'
+  , textAreaWith
+  , textAreaWith'
+  , colorPicker
+  , colorPicker'
+  , colorPickerRGBA
+  , colorPickerRGBA'
+  , colorToHex
+  , colorToHexA
+  , colorFromHex
+
+    -- * Tabs, trees, and tables
   , Tab (..)
   , TabStyle (..)
   , TabOrientation (..)
@@ -352,28 +219,49 @@ module NanoUI
   , tab
   , closableTab
   , tabs
-  , tabsWith
+  , tabs'
+  , tabsConfigured
+  , tabsConfigured'
   , tabBar
-  , tabBarWith
-  , tabsEmit
-  , boundedTabs
+  , tabBar'
+  , tabBarConfigured
+  , tabBarConfigured'
+  , TreeItem (..)
+  , tree
+  , tree'
   , SortDir (..)
   , SortCol (..)
   , ColSize (..)
-  , TableCfg (..)
+  , TableConfig (..)
   , TableResponse (..)
-  , defaultTableCfg
+  , defaultTableConfig
   , table
-  , tableEx
-  , tableCfg
+  , tableWith
+  , tableConfigured
   , simpleTable
   , useTableSort
   , tableHiddenIndices
   , sortRows
-  , headed
-  , headless
   , Colonnade
   , Headed (..)
+  , headed
+  , headless
+
+    -- * Overlays
+  , modal
+  , window
+  , PopupAnchor (..)
+  , PopupPlacement (..)
+  , PopupConfig (..)
+  , defaultPopupConfig
+  , popup
+  , popupWith
+  , tooltip
+  , tooltipAt
+  , tooltipWidget
+  , withTooltip
+
+    -- * Pane grids
   , PaneGridConfig (..)
   , defaultPaneGridConfig
   , PaneGridCtx (..)
@@ -381,6 +269,23 @@ module NanoUI
   , PaneGridResponse (..)
   , GridAxis (..)
   , paneGrid
+
+    -- * Progress and sparklines
+  , progressBar
+  , progressBar'
+  , progressBarWith
+  , progressBarWith'
+  , circularProgress
+  , circularProgress'
+  , circularProgressWith
+  , circularProgressWith'
+  , sparkline
+  , sparkline'
+  , sparklineWith
+  , sparklineWith'
+
+    -- * Images and drawing
+  , ImageId (..)
   , image
   , box
   , drawing
@@ -390,10 +295,11 @@ module NanoUI
   , DrawingBuild
   , drawTextBox
   , shiftDrawOp
+
+    -- * Custom widgets
   , CustomWidgetSpec (..)
   , defaultCustomWidgetSpec
   , customWidget
-  , customWidget_
   , customWidgetWithId
   , CustomDrawContext (..)
   , CustomMeasureFn
@@ -401,7 +307,6 @@ module NanoUI
   , CanvasM
   , runCanvas
   , canvas
-  , canvasWith
   , drawRect
   , drawRoundedRect
   , drawCircle
@@ -418,28 +323,25 @@ module NanoUI
   , useDrag2D
   , Drag2D (..)
   , useWheelDelta
+
+    -- * Drag and drop
+  , DropType (..)
+  , DropEvent (..)
+  , emptyDropEvents
   , DropTarget (..)
   , useDrop
-  , onDrop
-  , onDropHover
   , dropZone
-  , knob
-  , knobWith
-  , toggleSwitch
-  , toggleSwitchWith
-  , circularProgress
-  , circularProgressWith
-  , progressBar
-  , progressBarWith
-  , sparkline
-  , sparklineWith
-  , onClick
-  , whenM
-  , unlessM
-  , ifM
+
+    -- * Local state
+  , useState
   , useFlag
-  , useText
   , useToggle
+  , useInt
+  , useFloat
+  , useEnum
+  , useText
+
+    -- * Animation
   , Transition (..)
   , animate
   , animateTo
@@ -447,211 +349,60 @@ module NanoUI
   , pulse
   , keepAnimating
   , Animatable (..)
-  , heading
-  , muted
-  , mono
-  , danger
-  , bold
-  , italic
-  , underline
-  , kv
-  , kvMono
-  , kvBlock
-  , card
-  , toolbar
-  , sep
-  , flex
-  , center
-  , image_
-  , useState
-  , useInt
-  , useFloat
-  , useEnum
-  , checkboxControlled
-  , sliderControlled
-  , textInputControlled
-  , buttonEmit
-  , checkboxEmit
-  , sliderEmit
-  , selectEmit
-  , textInputEmit
-  , searchFieldEmit
-  -- Animation
   , Ease (..)
   , applyEase
   , SpringParams (..)
   , presetBouncy
   , presetSmooth
   , presetStiff
-  -- Compact
-  , Compact
-  , compactHost
-  , askCompact
-  -- Font
-  , FontMetrics (..)
-  , FontBackend (..)
-  , prepareFontMetrics
-  , prepareFontMetricsMany
-  , measureTextIO
-  , lineWidthIO
-  , drawRun
-  , drawGlyph
-  , GlyphQuad (..)
-  , RunQuad (..)
-  , scaleFontMetrics
-  , monospaceMetrics
-  , lineWidth
-  , labelContentInset
-  , tableCellInset
-  , widgetContentInset
-  , widgetPadding
-  , treeItemPadding
-  , resolveLayoutGap
-  , resolveLayoutPadding
-  , scrollBarGutter
-  , scrollBarPageExtra
-  , scrollBarListExtra
-  , scrollBarWidth
-  , scrollBarWindowGutter
-  )
-where
 
-import NanoUI.Animatable (Animatable (..))
-import NanoUI.Compact (Compact, askCompact, compactHost)
-import NanoUI.Context (Ease (..), applyEase, getStoreBool, getTheme, setStoreBool, setTheme, withTheme)
-import NanoUI.Draw (drawTextBox, shiftDrawOp)
-import NanoUI.Font
-  ( FontMetrics (..)
-  , FontBackend (..)
-  , prepareFontMetrics
-  , prepareFontMetricsMany
-  , measureTextIO
-  , lineWidthIO
-  , drawRun
-  , drawGlyph
-  , GlyphQuad (..)
-  , RunQuad (..)
-  , scaleFontMetrics
-  , labelContentInset
-  , tableCellInset
-  , lineWidth
-  , monospaceMetrics
-  , resolveLayoutGap
-  , resolveLayoutPadding
-  , scrollBarGutter
-  , scrollBarListExtra
-  , scrollBarPageExtra
-  , scrollBarWidth
-  , scrollBarWindowGutter
-  , widgetContentInset
-  , widgetPadding
-  , treeItemPadding
-  )
-import NanoUI.Id
-  ( IdContext
-  , WidgetId (..)
-  , hashWidgetId
-  , initialIdContext
-  , mix64
-  , mixFnv
-  , widgetId
-  )
-import NanoUI.Input
-  ( Input (..)
-  , Key (..)
-  , Modifiers (..)
-  , DropEvent (..)
-  , DropType (..)
-  , appendInputKey
-  , emptyDropEvents
-  , emptyInput
-  , emptyInputKeys
-  , foldInputKeys
-  , inputInteracted
-  , inputKeysElem
-  , inputKeysFromList
-  , inputKeysNull
-  , inputPointerHeld
-  )
-import NanoUI.Monad
-  ( NanoUI
-  , Ui
+    -- * Layout
+  , Layout (..)
+  , LayoutModifier
+  , Sizing (..)
+  , Direction (..)
+  , AlignX (..)
+  , AlignY (..)
+  , Padding (..)
+  , defaultLayout
   , askDefaultLayout
   , withDefaultLayout
-  , withLayout
-  , currentId
-  , damageFullNow
-  , damageGroupNow
-  , damageKeyNow
-  , damageRectNow
-  , damageWidgetNow
-  , emit
-  , keyed
-  , keyedTag
-  , nextId
-  , burstNextIds
-  , runNanoUI
-  , runUi
-  , scope
-  , uiIO
-  , uiFontMetrics
-  , uiTheme
-  , setUiTheme
-  , uiMousePos
-  , windowSize
-  , windowWidth
-  , windowHeight
-  , withKey
-  , whenM
-  , unlessM
-  , ifM
-  )
-import NanoUI.Animation
-  ( SpringParams (..)
-  , presetBouncy
-  , presetSmooth
-  , presetStiff
-  )
-import NanoUI.Style
-  ( AlignX (..)
-  , AlignY (..)
-  , Direction (..)
+  , padAll
+  , padXY
+  , gap
+  , fillW
+  , fillH
+  , grow
+  , minW
+  , maxW
+  , fixedW
+  , minH
+  , maxH
+  , fixedH
+  , fixedWH
+  , alignMid
+  , alignEnd
+  , alignStart
+  , alignCenter
+  , alignTop
+  , alignBottom
+  , tight
+  , percent
+  , gridMinColW
+  , gridCols
+  , fixedAspectW
+  , fixedAspectH
+
+    -- * Text style
   , FontVariant (..)
   , FontWeight (..)
   , FontStyle (..)
   , TextDecoration (..)
-  , Layout (..)
-  , LayoutModifier
-  , Padding (..)
-  , Sizing (..)
-  , Style (..)
-  , Theme (..)
-  , alignBottom
-  , alignCenter
-  , alignEnd
-  , alignMid
-  , alignStart
-  , alignTop
-  , fixedAspectW
-  , fixedAspectH
-  , gridMinColW
-  , gridCols
-  , defaultLayout
-  , defaultTheme
-  , tomorrowNightMinDarkTheme
-  , tomorrowMinLightTheme
-  , tomorrowMidnightMinDarkTheme
-  , Base16 (..)
-  , themeFromBase16
-  , themeFromBase16Dark
-  , themeFromBase16Light
-  , base16TomorrowNight
-  , base16TomorrowLight
+  , fontRegular
   , fontHeading
   , fontMuted
   , fontMono
   , fontDanger
-  , fontRegular
   , fontSize
   , fontSizeScale
   , fontColor
@@ -668,25 +419,282 @@ import NanoUI.Style
   , textDecoration
   , fontUnderline
   , fontStrike
+
+    -- * Themes
+  , Theme (..)
+  , Style (..)
+  , defaultTheme
+  , tomorrowNightMinDarkTheme
+  , tomorrowMinLightTheme
+  , tomorrowMidnightMinDarkTheme
+  , Base16 (..)
+  , themeFromBase16
+  , themeFromBase16Dark
+  , themeFromBase16Light
+  , base16TomorrowNight
+  , base16TomorrowLight
+  , withTheme
+  , setTheme
+  , getTheme
+  , uiTheme
+  , setUiTheme
   , themeSeries
+  , scrollBarTrackColor
+  , scrollBarThumbColor
+
+    -- * Geometry and colour
+  , V2 (..)
+  , Rect (..)
+  , Size (..)
+  , Color (..)
+  , colorRGBA
+  , colorToWord32
+  , colorLuminance
+  , colorR
+  , colorG
+  , colorB
+  , colorA
+  , lerpColor
+  , contrastRatio
+  , rectContains
+  , rectInflate
+  , rectIntersect
+  , rectUnion
+  , v2Add
+  , v2Sub
+
+    -- * Input
+  , Input (..)
+  , Key (..)
+  , Modifiers (..)
+  , emptyInput
+  , inputInteracted
+  , inputPointerHeld
+  , appendInputKey
+  , emptyInputKeys
+  , inputKeysElem
+  , inputKeysFromList
+  , inputKeysNull
+  , foldInputKeys
+
+    -- * Damage
+  , Damage (..)
+  , DamageBounds (..)
+  , defaultDamageSlop
+  , sliderDamageSlop
+  , haloDamageSlop
+  , resolveDamageRect
+  , damageWidgetNow
+  , damageKeyNow
+  , damageRectNow
+  , damageGroupNow
+  , damageFullNow
+
+    -- * Backend support
+  , FontMetrics (..)
+  , FontBackend (..)
+  , prepareFontMetrics
+  , prepareFontMetricsMany
+  , measureTextIO
+  , lineWidthIO
+  , lineWidth
+  , drawRun
+  , drawGlyph
+  , GlyphQuad (..)
+  , RunQuad (..)
+  , scaleFontMetrics
+  , monospaceMetrics
+  , uiFontMetrics
+  , labelContentInset
+  , tableCellInset
+  , widgetContentInset
+  , widgetPadding
+  , treeItemPadding
+  , resolveLayoutGap
+  , resolveLayoutPadding
+  , scrollBarGutter
+  , scrollBarPageExtra
+  , scrollBarListExtra
+  , scrollBarWidth
+  , scrollBarWindowGutter
+  , panelPaintPad
+  , windowPad
+  , windowMargin
+  , Compact
+  , compactHost
+  , askCompact
+  )
+where
+
+import NanoUI.Animatable (Animatable (..))
+import NanoUI.Animation
+  ( SpringParams (..)
+  , presetBouncy
+  , presetSmooth
+  , presetStiff
+  )
+import NanoUI.Compact (Compact, askCompact, compactHost)
+import NanoUI.Context (Ease (..), applyEase, getTheme, setTheme, withTheme)
+import NanoUI.Draw (drawTextBox, shiftDrawOp)
+import NanoUI.Font
+  ( FontBackend (..)
+  , FontMetrics (..)
+  , GlyphQuad (..)
+  , RunQuad (..)
+  , drawGlyph
+  , drawRun
+  , labelContentInset
+  , lineWidth
+  , lineWidthIO
+  , measureTextIO
+  , monospaceMetrics
+  , prepareFontMetrics
+  , prepareFontMetricsMany
+  , resolveLayoutGap
+  , resolveLayoutPadding
+  , scaleFontMetrics
+  , scrollBarGutter
+  , scrollBarListExtra
+  , scrollBarPageExtra
+  , scrollBarWidth
+  , scrollBarWindowGutter
+  , tableCellInset
+  , treeItemPadding
+  , widgetContentInset
+  , widgetPadding
+  )
+import NanoUI.Id
+  ( IdContext
+  , WidgetId (..)
+  , hashWidgetId
+  , initialIdContext
+  , mix64
+  , mixFnv
+  , widgetId
+  )
+import NanoUI.Input
+  ( DropEvent (..)
+  , DropType (..)
+  , Input (..)
+  , Key (..)
+  , Modifiers (..)
+  , appendInputKey
+  , emptyDropEvents
+  , emptyInput
+  , emptyInputKeys
+  , foldInputKeys
+  , inputInteracted
+  , inputKeysElem
+  , inputKeysFromList
+  , inputKeysNull
+  , inputPointerHeld
+  )
+import NanoUI.Monad
+  ( NanoUI
+  , Ui
+  , askDefaultLayout
+  , burstNextIds
+  , currentId
+  , damageFullNow
+  , damageGroupNow
+  , damageKeyNow
+  , damageRectNow
+  , damageWidgetNow
+  , ifM
+  , keyed
+  , keyedTag
+  , nextId
+  , runNanoUI
+  , runUi
+  , scope
+  , setUiTheme
+  , uiFontMetrics
+  , uiIO
+  , uiMousePos
+  , uiTheme
+  , unlessM
+  , whenM
+  , windowHeight
+  , windowSize
+  , windowWidth
+  , withDefaultLayout
+  , withKey
+  )
+import NanoUI.Style
+  ( AlignX (..)
+  , AlignY (..)
+  , Base16 (..)
+  , Direction (..)
+  , FontStyle (..)
+  , FontVariant (..)
+  , FontWeight (..)
+  , Layout (..)
+  , LayoutModifier
+  , Padding (..)
+  , Sizing (..)
+  , Style (..)
+  , TextDecoration (..)
+  , Theme (..)
+  , alignBottom
+  , alignCenter
+  , alignEnd
+  , alignMid
+  , alignStart
+  , alignTop
+  , base16TomorrowLight
+  , base16TomorrowNight
+  , defaultLayout
+  , defaultTheme
   , fillH
   , fillW
+  , fixedAspectH
+  , fixedAspectW
   , fixedH
   , fixedW
   , fixedWH
+  , fontBlack
+  , fontBold
+  , fontColor
+  , fontDanger
+  , fontExtraBold
+  , fontHeading
+  , fontItalic
+  , fontLight
+  , fontMedium
+  , fontMono
+  , fontMuted
+  , fontOblique
+  , fontRegular
+  , fontSemiBold
+  , fontSize
+  , fontSizeScale
+  , fontStrike
+  , fontStyle
+  , fontUnderline
+  , fontWeight
   , gap
+  , gridCols
+  , gridMinColW
   , grow
-  , minW
+  , maxH
   , maxW
   , minH
-  , maxH
+  , minW
   , padAll
   , padXY
   , panelPaintPad
   , percent
   , scrollBarThumbColor
   , scrollBarTrackColor
+  , textDecoration
+  , themeFromBase16
+  , themeFromBase16Dark
+  , themeFromBase16Light
+  , themeSeries
   , tight
+  , tomorrowMidnightMinDarkTheme
+  , tomorrowMinLightTheme
+  , tomorrowNightMinDarkTheme
   , windowMargin
   , windowPad
   )
@@ -698,11 +706,11 @@ import NanoUI.Types
   , Rect (..)
   , Size (..)
   , V2 (..)
+  , colorA
   , colorB
   , colorG
   , colorLuminance
   , colorR
-  , colorA
   , colorRGBA
   , colorToWord32
   , contrastRatio
@@ -719,257 +727,24 @@ import NanoUI.Types
   , v2Sub
   )
 import NanoUI.Widgets
-  ( HasResponse (..)
-  , Response (..)
-  , TreeItem (..)
-  , respId
-  , respRect
-  , respHovered
-  , respPressed
-  , respClicked
-  , respChanged
-  , respSubmitted
-  , respRightPressed
-  , respRightClicked
-  , Transition (..)
-  , animate
-  , animateTo
-  , animateToA
-  , pulse
-  , keepAnimating
-  , box
-  , drawing
-  , drawingVersioned
-  , drawingCached
-  , DrawOp (..)
-  , DrawingBuild
-  , CustomWidgetSpec (..)
-  , defaultCustomWidgetSpec
-  , customWidget
-  , customWidget_
-  , customWidgetWithId
-  , CustomDrawContext (..)
-  , CustomMeasureFn
-  , CustomDrawBuild
-  , CanvasM
-  , runCanvas
-  , canvas
-  , canvasWith
-  , drawRect
-  , drawRoundedRect
-  , drawCircle
-  , drawStroke
-  , drawStrokeRoundedRect
-  , drawStrokeCircle
-  , drawStrokeAA
-  , drawQuadGradient
-  , drawLinearGradientH
-  , drawLinearGradientV
-  , drawImage
-  , drawImageUV
-  , drawText
-  , useDrag2D
-  , Drag2D (..)
-  , useWheelDelta
-  , knob
-  , knobWith
-  , toggleSwitch
-  , toggleSwitchWith
-  , circularProgress
-  , circularProgressWith
-  , progressBar
-  , progressBarWith
-  , sparkline
-  , sparklineWith
-  , button
-  , button'
-  , buttonWith
-  , buttonWith'
-  , button_
-  , buttonEx
-  , card
-  , checkbox
-  , colorPicker
-  , colorPickerFromHex
-  , colorPickerRGBA
-  , colorPickerToHex
-  , colorPickerToHexA
-  , column
-  , flex
-  , heading
-  , image
-  , image_
-  , kv
-  , kvMono
-  , kvBlock
-  , label
-  , label_
-  , labelWith
-  , labelEx
-  , selectableText
-  , selectableTextWith
-  , selectableTextEx
-  , modal
-  , muted
-  , mono
-  , bold
-  , italic
-  , underline
-  , onClick
-  , panel
-  , panelStyled
-  , panelStyledWith
-  , panelStyled'
-  , callout
-  , calloutWith
-  , danger
-  , boundedSelect
-  , enumSelect
-  , radioFieldset
-  , boundedRadioFieldset
-  , enumRadio
-  , row
-  , onRightClick
-  , popup
-  , popupEx
-  , PopupAnchor (..)
-  , PopupPlacement (..)
-  , PopupConfig (..)
-  , defaultPopupConfig
-  , tooltip
-  , tooltipWidget
-  , tooltipWith
-  , withTooltip
-  , contextMenu
-  , contextMenuArea
-  , useContextMenu
-  , menuButton
-  , MenuItem (..)
-  , menuItemWith
-  , menuItem
-  , menuItemWithShortcut
-  , menuItemDisabled
-  , menuSeparator
-  , menuHeader
-  , scroll
-  , scrollWith
-  , scroll'
-  , scroll2DWith
-  , scroll2D'
-  , scrollArea
-  , scrollArea2D
-  , scrollAreaIdConfigured
-  , scrollConfigured
-  , select
-  , selectWith
-  , selectLabeled
-  , sep
-  , separator
-  , slider
-  , sliderWith
-  , sliderEx
-  , spacer
-  , textInput
-  , TextInputConfig (..)
-  , defaultTextInputConfig
-  , textInputConfigured
-  , textInputWithPlaceholder
-  , textInputPassword
-  , SearchFieldConfig (..)
-  , defaultSearchFieldConfig
-  , searchField
-  , searchFieldConfigured
-  , comboBox
-  , textArea
-  , textAreaWith
-  , toolbar
-  , tree
-  , useFlag
-  , useText
-  , useToggle
-  , window
-  , PaneGridConfig (..)
-  , defaultPaneGridConfig
-  , PaneGridCtx (..)
-  , PaneView (..)
-  , PaneGridResponse (..)
-  , GridAxis (..)
-  , paneGrid
-  )
+import NanoUI.Widgets.Drop (DropTarget (..), dropZone, useDrop)
 import NanoUI.Widgets.Node (setChanged, setClicked, setSubmitted)
-import NanoUI.Widgets.TextCommon (MenuAction (..))
-import NanoUI.Widgets.Combinators (stripedRow)
-import NanoUI.Widgets.Drop
-  ( DropTarget (..)
-  , dropZone
-  , onDrop
-  , onDropHover
-  , useDrop
-  )
 import NanoUI.Widgets.Tabs
   ( Tab (..)
   , TabOrientation (..)
   , TabResponse (..)
   , TabStyle (..)
   , TabsConfig (..)
-  , boundedTabs
   , closableTab
   , defaultTabsConfig
   , tab
   , tabBar
-  , tabBarWith
+  , tabBar'
+  , tabBarConfigured
+  , tabBarConfigured'
   , tabs
-  , tabsEmit
-  , tabsWith
+  , tabs'
+  , tabsConfigured
+  , tabsConfigured'
   )
-import NanoUI.Widgets.Table
-  ( Colonnade
-  , ColSize (..)
-  , Headed (..)
-  , SortCol (..)
-  , SortDir (..)
-  , TableCfg (..)
-  , TableResponse (..)
-  , defaultTableCfg
-  , headed
-  , headless
-  , sortRows
-  , table
-  , tableCfg
-  , tableEx
-  , simpleTable
-  , tableHiddenIndices
-  , useTableSort
-  )
-import NanoUI.Widgets.Layout
-  ( center
-  , column'
-  , columnWith
-  , grid
-  , gridWith
-  , grid'
-  , responsive
-  , responsiveRowCol
-  , hstack
-  , panel'
-  , panelWith
-  , row'
-  , rowWith
-  , scrollAreaId
-  , vstack
-  )
-import NanoUI.State
-  ( buttonEmit
-  , checkboxControlled
-  , checkboxEmit
-  , selectEmit
-  , sliderControlled
-  , sliderEmit
-  , textInputControlled
-  , textInputEmit
-  , searchFieldEmit
-  , useEnum
-  , useFloat
-  , useInt
-  , useState
-  )
+import NanoUI.Widgets.TextCommon (MenuAction (..))

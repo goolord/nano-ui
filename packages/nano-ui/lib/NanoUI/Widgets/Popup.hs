@@ -6,9 +6,9 @@ module NanoUI.Widgets.Popup
   , PopupConfig (..)
   , defaultPopupConfig
   , popup
-  , popupEx
+  , popupWith
   , tooltipWidget
-  , tooltipWith
+  , tooltipAt
   , tooltip
   , withTooltip
   )
@@ -82,22 +82,27 @@ defaultPopupConfig anchor =
     , cfgOffset = 4
     }
 
+-- | A floating panel placed by the config, shown while @open@. Returns the
+-- body's result while open. The 'Response' reports a dismissal (Escape, or a
+-- click outside when 'cfgDismissable') as a click.
 popup ::
   Ui :> es =>
   Bool ->
   PopupConfig ->
   Eff es a ->
   Eff es (Response, Maybe a)
-popup open cfg child = popupEx open cfg (tight defaultLayout) child
+popup open cfg child = popupWith open cfg id child
 
-popupEx ::
+-- | 'popup' with a modifier applied to its tight default layout.
+popupWith ::
   Ui :> es =>
   Bool ->
   PopupConfig ->
-  Layout ->
+  (Layout -> Layout) ->
   Eff es a ->
   Eff es (Response, Maybe a)
-popupEx open cfg layout child = do
+popupWith open cfg f child = do
+  let layout = f (tight defaultLayout)
   wid <- nextId
   ctx <- askContext
   if not open
@@ -166,22 +171,27 @@ withTooltip mainChild tipChild = do
   mTip <- tooltipWidget contResp tipChild
   pure (res, mTip)
 
--- | Concise tooltip with specified placement.
-tooltipWith ::
+-- | 'tooltip' with a placement.
+tooltipAt ::
   (Ui :> es, HasResponse r) =>
   PopupPlacement ->
   r ->
   Text ->
   Eff es ()
-tooltipWith placement target txt =
+tooltipAt placement target txt =
   void (popup (respHovered target) cfg (label txt))
   where
     cfg = (defaultPopupConfig (AnchorRect (respRect target))) {cfgPlacement = placement, cfgDismissable = False}
 
--- | Standard text tooltip widget on hover.
+-- | Text shown below a widget while the pointer is over it.
+--
+-- @
+-- save <- button' "Save"
+-- tooltip save "Write the file to disk"
+-- @
 tooltip ::
   (Ui :> es, HasResponse r) =>
   r ->
   Text ->
   Eff es ()
-tooltip = tooltipWith PlacementBelow
+tooltip = tooltipAt PlacementBelow

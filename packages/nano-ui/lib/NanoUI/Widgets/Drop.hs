@@ -1,27 +1,17 @@
 {-# LANGUAGE StrictData #-}
 
--- | Composable OS drag-and-drop support for widgets.
+-- | Operating-system drag and drop.
 --
--- The low-level event stream is 'NanoUI.Input.DropEvent' (see 'inputDrops').
--- This module provides a small, reusable hook that turns those events into a
--- per-widget 'DropTarget', plus action combinators in the style of 'onClick':
+-- 'useDrop' turns the frame's 'NanoUI.Input.DropEvent's into a 'DropTarget'
+-- for one rectangle. 'dropZone' wraps a panel and does the same for its rect.
 --
 -- @
--- (body, resp) <- panelResponse' layout $ do
---   ...
--- target <- useDrop (respRect resp)
--- onDropHover target (damageWidgetNow (respId resp) DamageSelf)
--- onDrop target (mapM_ handleFile (dropFiles target))
+-- (_, _, target) <- dropZone fillW (label "Drop files here")
+-- when (dropReceived target) (mapM_ openFile (dropFiles target))
 -- @
 module NanoUI.Widgets.Drop
-  ( -- * Widget-facing result
-    DropTarget (..)
-    -- * Hook
+  ( DropTarget (..)
   , useDrop
-    -- * Action combinators
-  , onDrop
-  , onDropHover
-    -- * Convenience
   , dropZone
   ) where
 
@@ -40,7 +30,7 @@ import NanoUI.Input
   , DropType (..)
   , inputDrops
   )
-import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO)
+import NanoUI.Monad (Ui, askContext, askDefaultLayout, askInput, nextId, uiIO)
 import NanoUI.Store
   ( WidgetStore (..)
   , slotDrop
@@ -150,21 +140,11 @@ useDrop bounds = do
 posInside :: Rect -> Maybe V2 -> Bool
 posInside bounds = maybe False (rectContains bounds)
 
--- | Run an action when a payload was dropped on the target this frame.
-onDrop :: DropTarget -> Eff es () -> Eff es ()
-onDrop target act = when (dropReceived target) act
-
--- | Run an action while a drag is hovering over the target.
-onDropHover :: DropTarget -> Eff es () -> Eff es ()
-onDropHover target act = when (dropHovered target) act
-
--- | Wrap a panel as a drop zone, returning the child result, its click
--- 'Response', and the drop 'DropTarget'.
---
--- Combine with 'onDrop'/'onDropHover' (or inspect 'dropFiles'/'dropTexts')
--- to react to the drop without hand-rolling the rect plumbing.
-dropZone :: Ui :> es => Layout -> Eff es a -> Eff es (a, Response, DropTarget)
-dropZone layout child = do
-  (a, resp) <- containerResponse NodePanel layout child
+-- | A panel that is also a drop target. Returns the body's result, the
+-- panel's 'Response', and the 'DropTarget' for its rect.
+dropZone :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es (a, Response, DropTarget)
+dropZone f child = do
+  base <- askDefaultLayout
+  (a, resp) <- containerResponse NodePanel (f base) child
   target <- useDrop (respRect resp)
   pure (a, resp, target)

@@ -95,6 +95,12 @@ module NanoUI.Context
   , writeStoreFloat
   , writeStoreText
   , writeStoreBool
+  , adoptStoreInt
+  , adoptStoreFloat
+  , adoptStoreText
+  , recordStoreInt
+  , recordStoreFloat
+  , recordStoreText
   , isDisabled
   , getScrollOffset
   , setScrollOffset

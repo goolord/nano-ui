@@ -1,5 +1,11 @@
-module Cases.State (runControlledStateTest, runHookStateTest, runCollectionApiTest) where
+module Cases.State
+  ( runControlledInputsTest
+  , runControlledStateTest
+  , runHookStateTest
+  , runCollectionApiTest
+  ) where
 
+import Control.Monad (forM_, when)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.ByteString qualified as BS
 import Data.IntMap.Strict qualified as IM
@@ -9,21 +15,21 @@ import Data.Vector qualified as V
 import NanoUI
 import NanoUI.Context (Context (..), getStore, intKey, registerImages, lookupImageUv)
 import NanoUI.Store (WidgetStore (..))
-import NanoUI.Testing (clearDirty, isDirty, runFrame)
-import NanoUI.Testing.Assert (assertEq)
-import NanoUI.Testing.Harness (withInputOff)
+import NanoUI.Testing (clearDirty, collectTextSpans, isDirty, runFrame)
+import NanoUI.Testing.Assert (assert, assertEq)
+import NanoUI.Testing.Harness (tabInp, warmup2, withInputOff)
 
 runCollectionApiTest :: Context -> IORef Int -> IO ()
 runCollectionApiTest ctx failed = do
   seen <- newIORef []
   _ <- runFrame ctx (withInputOff 300 100) $
-    hstack (V.fromList [uiIO (modifyIORef' seen (key :)) | key <- [7, 2, 9 :: Int]])
+    row (sequence_ (V.fromList [uiIO (modifyIORef' seen (key :)) | key <- [7, 2, 9 :: Int]]))
   assertEq failed [9, 2, 7] =<< readIORef seen
   ((emptySelect, emptyRadio, combo), _, _, _) <- runFrame ctx (withInputOff 300 200) $
     withKey ("collection-options" :: Text) $ column $ do
-      (_, selectIndex) <- select (V.empty :: V.Vector Text) 5
-      (_, radioIndex) <- radioFieldset (Seq.empty :: Seq.Seq Text) (-1)
-      (_, comboValue) <- comboBox "Choose" (Seq.fromList ["Alpha", "Beta"]) "Beta"
+      selectIndex <- select (V.empty :: V.Vector Text) 5
+      radioIndex <- radio (Seq.empty :: Seq.Seq Text) (-1)
+      comboValue <- comboBox "Choose" (Seq.fromList ["Alpha", "Beta"]) "Beta"
       pure (selectIndex, radioIndex, comboValue)
   assertEq failed 0 emptySelect
   assertEq failed 0 emptyRadio
@@ -41,13 +47,10 @@ runControlledStateTest ctx failed = do
     inp = withInputOff 300 200
     ui checked text value = column $ do
       expectedId <- currentId
-      check <-
-        checkboxControlled
-          "Controlled"
-          checked
-          (\v -> uiIO (modifyIORef' callbacks (<> [v])))
-      field <- textInputControlled text (const (pure ()))
-      range <- sliderControlled 0 100 value (const (pure ()))
+      (check, checked') <- checkbox' "Controlled" checked
+      when (respChanged check) (uiIO (modifyIORef' callbacks (<> [checked'])))
+      (field, _) <- textInput' text
+      (range, _) <- slider' 0 100 value
       pure (expectedId, check, field, range)
   _ <- runFrame ctx inp (ui True "initial" 25)
   ((expectedId, check, field, range), _, _, _) <-
@@ -74,6 +77,39 @@ runControlledStateTest ctx failed = do
   settled <- getStore ctx
   assertEq failed (Just 0) (IM.lookup (intKey (respId check)) (storeInt settled))
   assertEq failed [True] =<< readIORef callbacks
+
+-- | Inputs show the value the caller passes: a value the caller changes
+-- between frames is shown, a user edit the caller passes back is kept, and
+-- one it ignores is undone on the next frame. 'runControlledStateTest' covers
+-- a declined checkbox toggle.
+runControlledInputsTest :: Context -> IORef Int -> IO ()
+runControlledInputsTest ctx failed = do
+  let
+    inp = withInputOff 300 200
+    ui (checked, text) = column $ do
+      checked' <- checkbox "Opt" checked
+      text' <- textInput text
+      pure (checked', text')
+  _ <- warmup2 ctx inp (ui (False, "one"))
+  forM_
+    [ -- The caller's new values, with no input.
+      (inp, (True, "two"), (True, "two"))
+    , -- Tab focuses the checkbox; Space toggles it and the caller keeps it.
+      (tabInp inp, (True, "two"), (True, "two"))
+    , (inp {inputChars = " "}, (True, "two"), (False, "two"))
+    , (tabInp inp, (False, "two"), (False, "two"))
+    , -- Tab moved focus to the field. A kept edit stays.
+      (inp {inputChars = "x"}, (False, "two"), (False, "twox"))
+    , (inp, (False, "twox"), (False, "twox"))
+    , -- An ignored edit is undone on the following frame.
+      (inp {inputChars = "y"}, (False, "twox"), (False, "twoxy"))
+    , (inp, (False, "twox"), (False, "twox"))
+    ]
+    $ \(input, value, expected) -> do
+      (result, _, _, _) <- runFrame ctx input (ui value)
+      assertEq failed expected result
+      spans <- collectTextSpans ctx
+      assert failed (any (\(_, txt, _, _, _) -> txt == snd expected) spans)
 
 runHookStateTest :: Context -> IORef Int -> IO ()
 runHookStateTest ctx failed = do

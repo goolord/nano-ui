@@ -224,7 +224,7 @@ main = withPty $ \fd -> do                                                      
       $ S.iterateM advance (pure (blank, B.empty, False))                                         -- iterate frame advance step from initial blank state
 
 view :: Term -> NanoUI ()                                                                         -- draw terminal UI widget tree
-view t = void $ canvas (fontMono . grow $ defaultLayout) $ \(Rect x y w h) -> do                  -- create responsive canvas element
+view t = void $ canvas (fontMono . grow) $ \(Rect x y w h) -> do                                -- create responsive canvas element
   drawRect (Rect x y w h) 0x181D26FF                                                              -- clear window background (#181D26)
   V.imapM_ (\i (c, f, b) -> do                                                                    -- iterate through all cells in viewport
     let (ry, col) = i `quotRem` 80                                                                -- row index (0..23) and column index (0..79)

@@ -13,7 +13,7 @@ import Data.Text qualified as T
 import NanoUI
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, withInput)
-import NanoUI.Testing.Harness (pressAt, releaseAt, runClickPair, spanCenter, warmup2, withInputOff)
+import NanoUI.Testing.Harness (held, pressAt, releaseAt, runClickPair, spanCenter, warmup2, withInputOff)
 
 data DemoTab
   = Controls
@@ -41,7 +41,7 @@ instance Enum OffsetChoice where
 runBoundedRadioTest :: Context -> IORef Int -> IO ()
 runBoundedRadioTest ctx failed = do
   let inp = withInputOff 300 160
-      ui initial = boundedRadioFieldset initial (T.pack . show)
+      ui = boundedRadio' (T.pack . show)
   (_, initial) <- warmup2 ctx inp (ui (OffsetChoice 11))
   assertEq failed initial (OffsetChoice 11)
   spans <- collectTextSpans ctx
@@ -49,7 +49,7 @@ runBoundedRadioTest ctx failed = do
     Rect x y w h : _ -> do
       (_, selected) <- runClickPair ctx inp (ui (OffsetChoice 11)) (V2 (x + w / 2) (y + h / 2))
       assertEq failed selected (OffsetChoice 12)
-      ((_, retained), _, _, _) <- runFrame ctx inp (ui (OffsetChoice 11))
+      ((_, retained), _, _, _) <- runFrame ctx inp (ui selected)
       assertEq failed retained selected
       ((_, reset), _, _, _) <- runFrame ctx inp (ui (OffsetChoice 10))
       assertEq failed reset (OffsetChoice 10)
@@ -62,13 +62,13 @@ runControlsTabHeightTest ctx failed = do
       withInputOff 1280 800
     controlsBody dumpRef = do
       heading "Controls"
-      (cb, _) <- checkbox "Feature" False
+      (cb, _) <- checkbox' "Feature" False
       _ <- slider 0 100 50
       _ <- select ["Low", "Medium", "High"] 1
-      (cp, _) <- colorPicker (colorRGBA 204 102 102 255)
-      _ <- boundedRadioFieldset Dark (T.pack . show)
-      (ti, _) <- textInput ""
-      sep
+      (cp, _) <- colorPicker' (colorRGBA 204 102 102 255)
+      _ <- boundedRadio (T.pack . show) Dark
+      (ti, _) <- textInput' ""
+      separator
       uiIO $ writeIORef dumpRef (Just (cb, cp, ti))
     demoPage dumpRef =
       scrollWith (tight . grow) $
@@ -86,12 +86,17 @@ runControlsTabHeightTest ctx failed = do
               card $ do
                 heading "Gallery"
                 mapM_ (\i -> void (label (T.pack ("thumb line " <> show (i :: Int))))) [1 .. 8]
-            card $
-              boundedTabs Controls (T.pack . show) $ \demoTab ->
-                case demoTab of
-                  Controls -> controlsBody dumpRef
-                  List -> heading "Tree"
-                  Diagnostics -> heading "Diagnostics"
+            card $ do
+              (demoTab, setDemoTab) <- useEnum Controls
+              setDemoTab
+                =<< tabs
+                  demoTab
+                  [ tab t (T.pack (show t)) $ case t of
+                      Controls -> controlsBody dumpRef
+                      List -> heading "Tree"
+                      Diagnostics -> heading "Diagnostics"
+                  | t <- [minBound ..]
+                  ]
     -- Heights of the checkbox, colour picker and text input, in that order.
     heights c dumpRef = do
       m <- readIORef dumpRef
@@ -152,10 +157,11 @@ runControlsTabHeightTest ctx failed = do
 -- field and reset to white), and the release commits.
 runColorPickerCommitTest :: Context -> IORef Int -> IO ()
 runColorPickerCommitTest ctx failed = do
+  let initial = colorRGBA 204 102 102 255
+  colorRef <- newIORef initial
   let inp0 = withInput 400 420
-      initial = colorRGBA 204 102 102 255
       packed c = colorToWord32 c
-      ui = colorPicker initial
+      ui = held colorRef colorPicker'
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect x y w h = respRect resp
       wid = respId resp
@@ -199,7 +205,7 @@ runColorPickerEditTest :: Context -> IORef Int -> IO ()
 runColorPickerEditTest ctx failed = do
   let inp0 = withInput 400 460
       initial = colorRGBA 204 102 102 255
-      ui = colorPicker initial
+      ui = colorPicker' initial
   _ <- warmup2 ctx inp0 ui
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
@@ -213,9 +219,10 @@ runColorPickerEditTest ctx failed = do
 -- commits at once: the base colour follows the live one.
 runColorPickerChangeOnceTest :: Context -> IORef Int -> IO ()
 runColorPickerChangeOnceTest ctx failed = do
+  let initial = colorRGBA 204 102 102 255
+  colorRef <- newIORef initial
   let inp0 = withInput 400 420
-      initial = colorRGBA 204 102 102 255
-      ui = colorPicker initial
+      ui = held colorRef colorPicker'
       changed inp = (\((resp, _), _, _, _) -> respChanged resp) <$> runFrame ctx inp ui
   (resp, _) <- warmup2 ctx inp0 ui
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui

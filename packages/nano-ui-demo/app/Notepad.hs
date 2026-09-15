@@ -241,25 +241,25 @@ notepadUi = do
         setOpenMenu ""
         askOpenFileDialog defaultFileDialogOptions >>= setOpenDlg
       whenM (menuItem "Save") (setOpenMenu "" >> saveDocument False)
-      whenM (menuItemWithShortcut "Save As..." "Ctrl+Shift+S") (setOpenMenu "" >> saveDocument True)
+      whenM (menuItemShortcut "Save As..." "Ctrl+Shift+S") (setOpenMenu "" >> saveDocument True)
       menuSeparator
-      whenM (menuItemWithShortcut "Exit" "Esc") (setOpenMenu "" >> uiIO exitSuccess)
+      whenM (menuItemShortcut "Exit" "Esc") (setOpenMenu "" >> uiIO exitSuccess)
 
     editMenu = do
-      whenM (menuItemWithShortcut "Cut" "Ctrl+X") (editAction MenuCut)
-      whenM (menuItemWithShortcut "Copy" "Ctrl+C") (editAction MenuCopy)
-      whenM (menuItemWithShortcut "Paste" "Ctrl+V") (editAction MenuPaste)
+      whenM (menuItemShortcut "Cut" "Ctrl+X") (editAction MenuCut)
+      whenM (menuItemShortcut "Copy" "Ctrl+C") (editAction MenuCopy)
+      whenM (menuItemShortcut "Paste" "Ctrl+V") (editAction MenuPaste)
       menuSeparator
-      whenM (menuItemWithShortcut "Select All" "Ctrl+A") (editAction MenuSelectAll)
+      whenM (menuItemShortcut "Select All" "Ctrl+A") (editAction MenuSelectAll)
 
     viewMenu = do
       whenM
         (menuItem (if showStatus then "Hide Status Bar" else "Show Status Bar"))
         (setOpenMenu "" >> setShowStatus (not showStatus))
       menuSeparator
-      whenM (menuItemWithShortcut "Zoom In" "Ctrl++") (setOpenMenu "" >> setZoom (min 4.0 (zoom * 1.1)))
-      whenM (menuItemWithShortcut "Zoom Out" "Ctrl+-") (setOpenMenu "" >> setZoom (max 0.5 (zoom / 1.1)))
-      whenM (menuItemWithShortcut "Reset Zoom" "Ctrl+0") (setOpenMenu "" >> setZoom 1.0)
+      whenM (menuItemShortcut "Zoom In" "Ctrl++") (setOpenMenu "" >> setZoom (min 4.0 (zoom * 1.1)))
+      whenM (menuItemShortcut "Zoom Out" "Ctrl+-") (setOpenMenu "" >> setZoom (max 0.5 (zoom / 1.1)))
+      whenM (menuItemShortcut "Reset Zoom" "Ctrl+0") (setOpenMenu "" >> setZoom 1.0)
       menuSeparator
       whenM (menuItem "Document Statistics") (setOpenMenu "" >> setStatusMsg (documentStats docText))
 
@@ -277,14 +277,12 @@ notepadUi = do
       , ("View", viewMenu)
       , ("Help", helpMenu)
       ]
-    void $ separator
+    separator
 
     (editorResp, editorText) <-
       keyed docGen $
-        textAreaWith
-          ( grow . minW 240 . minH 160 . fontSizeScale zoom $
-              defaultLayout
-          )
+        textAreaWith'
+          (grow . minW 240 . minH 160 . fontSizeScale zoom)
           docText
     when (respChanged editorResp) $ do
       setDocText editorText
@@ -292,19 +290,19 @@ notepadUi = do
     when (respId editorResp /= editorId) (setEditorId (respId editorResp))
 
     when showStatus $ do
-      void $ separator
+      separator
       statusBar docPath docDirty docText statusMsg zoom
 
   --------------------------------------------------------------- overlays ---
   (aboutResp, _) <-
     modal aboutOpen "About" $ do
       heading "nano-ui Notepad"
-      muted "A menu-bar notepad built with nano-ui on SDL3."
-      muted "File, Edit, View and Help are wired to real actions."
+      labelWith fontMuted "A menu-bar notepad built with nano-ui on SDL3."
+      labelWith fontMuted "File, Edit, View and Help are wired to real actions."
       rowWith fillW $ do
         flex
         whenM (button "Close") (setAboutOpen False)
-  onClick aboutResp (setAboutOpen False)
+  when (respClicked aboutResp) (setAboutOpen False)
 
 --------------------------------------------------------------------------------
 -- Local menu-bar widget
@@ -319,7 +317,7 @@ menuBar openMenu setOpen entries = do
     for_ entries $ \(menuLabel, body) -> do
       let
         isOpen = openMenu == menuLabel
-      btn <- menuButton menuLabel isOpen
+      btn <- menuButton' menuLabel isOpen
       let
         cfg =
           (defaultPopupConfig (AnchorRect (respRect btn)))
@@ -347,12 +345,12 @@ writeDocument filePath contents = do
 statusBar :: Text -> Bool -> Text -> Text -> Float -> NanoUI ()
 statusBar path dirty contents message zoomVal =
   rowWith (tight . gap 12 . fillW . padXY 8 4) $ do
-    void $ labelEx (tight . fontMuted $ defaultLayout) message
+    labelWith (tight . fontMuted) message
     flex
-    void $ labelEx (tight . fontMuted $ defaultLayout)
+    labelWith (tight . fontMuted)
       ((if T.null path then "Untitled" else path) <> (if dirty then " *" else ""))
-    void $ labelEx (tight . fontMuted $ defaultLayout) (documentStats contents)
-    void $ labelEx (tight . fontMuted $ defaultLayout)
+    labelWith (tight . fontMuted) (documentStats contents)
+    labelWith (tight . fontMuted)
       ("Zoom: " <> T.pack (show (round (zoomVal * 100) :: Int)) <> "%")
 
 documentStats :: Text -> Text

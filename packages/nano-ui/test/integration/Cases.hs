@@ -72,6 +72,7 @@ import Effectful (liftIO)
 import Effectful.State.Static.Local (State, evalState, get, modify)
 import NanoUI
 import NanoUI.Context (Context (..))
+import NanoUI.Emit qualified as Emit
 import NanoUI.Layout.Arena (NodeType (..), arenaCount, getNodeType, getNodeValue)
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertGt, runClickReduce, withInput)
@@ -79,6 +80,7 @@ import NanoUI.Testing.Harness
   ( centerOf
   , checkLabelAlignEndInk
   , clickPair
+  , held
   , spanXOf
   , spanYOf
   , vertUv
@@ -171,7 +173,7 @@ runDeepNestingTest ctx failed = do
 -- side by side above it.
 runResponsiveWrapTest :: Context -> IORef Int -> IO ()
 runResponsiveWrapTest ctx failed = do
-  let ui = responsiveRowCol 720 (tight . gap 8 . fillW $ defaultLayout) $ do
+  let ui = responsiveRowCol 720 (tight . gap 8 . fillW) $ do
         columnWith (tight . gap 8 . fillW) (card (void (label "LeftTop")) >> card (void (label "LeftBot")))
         card (void (label "Right"))
   _ <- warmup2 ctx (withInput 520 800) ui
@@ -188,7 +190,7 @@ runResponsiveWrapTest ctx failed = do
 runDrawingTest :: Context -> IORef Int -> IO ()
 runDrawingTest ctx failed = do
   let ui =
-        drawing (fixedWH 80 40 defaultLayout) $ \r ->
+        drawing (fixedWH 80 40) $ \r ->
           V.singleton
             ( Stroke
                 (rectX r)
@@ -209,7 +211,7 @@ runPointerCursorTest ctx failed = do
   let inp0 = withInput 200 100
       ui = column $ do
         btn <- button' "Click"
-        (cb, _) <- checkbox "Feature" False
+        (cb, _) <- checkbox' "Feature" False
         pure (btn, cb)
       wantAt inp = runFrame ctx inp ui >> pointerCursorWanted ctx inp
   (btn, cb) <- warmup2 ctx inp0 ui
@@ -230,11 +232,17 @@ runImageTest ctx failed = do
   ok7 <- registerImage ctx (ImageId 7) 4 4 (px 0 0 255)
   assert failed (ok1 && ok7)
   let inp0 = withInput 320 200
-      imgLayout = defaultLayout {layoutWidth = Fixed 40, layoutHeight = Fixed 24}
-      ui = row (image imgLayout (ImageId 1) >> image imgLayout (ImageId 7))
-  (resp, drawData) <- warmupDraw ctx inp0 ui
-  let Rect _ _ w h = respRect resp
-  assert failed (abs (w - 40) <= 0.5 && abs (h - 24) <= 0.5)
+      imgLayout = fixedWH 40 24
+      ui = row $ do
+        image imgLayout (ImageId 1)
+        wid <- currentId
+        image imgLayout (ImageId 7)
+        pure wid
+  (wid, drawData) <- warmupDraw ctx inp0 ui
+  mRect <- getPrevRect ctx wid
+  case mRect of
+    Just (Rect _ _ w h) -> assert failed (abs (w - 40) <= 0.5 && abs (h - 24) <= 0.5)
+    Nothing -> assert failed False
   let texCmds = filter (\c -> cmdTextureId c == atlasTextureId) (drawCmdElems drawData)
   assertEq failed (length texCmds) 1
   assert failed (any (\c -> cmdIndexCount c == 12) texCmds)
@@ -281,8 +289,9 @@ runHoverDamageTest ctx failed = do
 -- post-UI value sync must not reset it to unchecked when no state is stored.
 runCheckboxInitialTest :: Context -> IORef Int -> IO ()
 runCheckboxInitialTest ctx failed = do
+  checkedRef <- newIORef True
   let inp0 = withInput 200 100
-      ui = column (checkbox "Opt" True)
+      ui = column (held checkedRef (checkbox' "Opt"))
   (resp, _) <- warmup2 ctx inp0 ui
   assertCheckboxNodeValue failed ctx 1
   let Rect rx ry _ _ = respRect resp
@@ -317,7 +326,7 @@ assertCheckboxNodeValue failed ctx expected = do
 runSliderFillWidthTest :: Context -> IORef Int -> IO ()
 runSliderFillWidthTest ctx failed = do
   let inp0 = withInput 400 120
-      ui = columnWith fillW (slider 0 100 0)
+      ui = columnWith fillW (slider' 0 100 0)
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect rx ry rw rh = respRect resp
   assertGt failed rw 300
@@ -332,15 +341,15 @@ runSliderFillWidthTest ctx failed = do
 runPercentGapShrinkTest :: Context -> IORef Int -> IO ()
 runPercentGapShrinkTest ctx failed = do
   let quarters = rowWith (fixedW 200 . tight . gap 0) $ do
-        a <- labelEx (percent 25 . tight $ defaultLayout) "A"
-        b <- labelEx (percent 75 . tight $ defaultLayout) "B"
+        a <- labelWith' (percent 25 . tight) "A"
+        b <- labelWith' (percent 75 . tight) "B"
         pure (a, b)
   (qa, qb) <- warmup2 ctx (withInput 200 80) quarters
   assert failed (abs (rectW (respRect qa) - 50) <= 1 && abs (rectW (respRect qb) - 150) <= 1)
   let inp = withInput 300 80
       ui = rowWith (fixedW 206 . tight . gap 6) $ do
-        a <- labelEx (percent 50 . tight $ defaultLayout) "A"
-        b <- labelEx (percent 50 . tight $ defaultLayout) "B"
+        a <- labelWith' (percent 50 . tight) "A"
+        b <- labelWith' (percent 50 . tight) "B"
         pure (a, b)
   (a, b) <- warmup2 ctx inp ui
   let Rect xa _ wa _ = respRect a
@@ -361,8 +370,9 @@ runPercentGapShrinkTest ctx failed = do
 --   because prev-rect tracking skips zero-area rects.
 runGrowSplitTest :: Context -> IORef Int -> IO ()
 runGrowSplitTest ctx failed = do
-  let growLabel l = labelEx (fillW . l . tight $ defaultLayout)
-      cases :: [(Input, Rect -> Float, NanoUI [Response], [Float])]
+  let growLabel l txt = respId <$> labelWith' (fillW . l . tight) txt
+      growSpacer = currentId <* spacer (Fixed 10) (Grow 1)
+      cases :: [(Input, Rect -> Float, NanoUI [WidgetId], [Float])]
       cases =
         [ ( withInput 210 40
           , rectW
@@ -385,12 +395,13 @@ runGrowSplitTest ctx failed = do
         , ( withInput 60 200
           , rectH
           , columnWith (fixedH 200 . tight . gap 0) $
-              sequence [spacer (Fixed 10) (Grow 1), spacer (Fixed 10) (Grow 1)]
+              sequence [growSpacer, growSpacer]
           , [100, 100]
           )
         ]
   forM_ cases $ \(inp, size, ui, want) -> do
-    got <- map (size . respRect) <$> warmup2 ctx inp ui
+    ids <- warmup2 ctx inp ui
+    got <- mapM (fmap (maybe 0 size) . getPrevRect ctx) ids
     assertEq failed (length got) (length want)
     forM_ (zip got want) $ \(g, w) -> assert failed (abs (g - w) <= 0.5)
 
@@ -405,7 +416,7 @@ runLabelAlignEndTest _ failed = do
     inp = emptyInput {inputWindowSize = Size (boxW + 8) 8}
     ui =
       rowWith (fixedW boxW . tight . gap 0) $
-        labelEx (fillW . alignEnd . tight $ defaultLayout) "ab"
+        labelWith' (fillW . alignEnd . tight) "ab"
   _ <- runFrame ctx inp ui
   (lab, _, _, _) <- runFrame ctx inp ui
   spans <- collectTextSpans ctx
@@ -422,7 +433,7 @@ runLabelAlignEndTest _ failed = do
 runAspectLayoutTest :: Context -> IORef Int -> IO ()
 runAspectLayoutTest ctx failed = do
   let inp = withInput 320 240
-      ui = columnWith (fixedW 160 . tight) (labelEx (fixedAspectW 160 2 . tight $ defaultLayout) "X")
+      ui = columnWith (fixedW 160 . tight) (labelWith' (fixedAspectW 160 2 . tight) "X")
   resp <- warmup2 ctx inp ui
   let Rect _ _ w h = respRect resp
   assert failed (abs (w - 160) <= 1 && abs (h - 80) <= 1)
@@ -478,11 +489,11 @@ runReduceMessagesTest ctx failed = do
       model0 = Counter 0
       view _ =
         column $
-          emit Inc >> emit Dec >> emit Inc >> emit ("noise" :: String)
+          Emit.emit Inc >> Emit.emit Dec >> Emit.emit Inc >> Emit.emit ("noise" :: String)
   ((), model1, msgs, _, dirty) <- runFrameReduce updateCounter ctx inp model0 view
   assert failed (msgs == [Inc, Dec, Inc] && model1 == Counter 1 && dirty)
   -- Messages that cancel out leave the model unchanged and not dirty.
-  let identity _ = column (emit Inc >> emit Dec)
+  let identity _ = column (Emit.emit Inc >> Emit.emit Dec)
   ((), model2, msgs2, _, dirty2) <- runFrameReduce updateCounter ctx inp model0 identity
   assert failed (msgs2 == [Inc, Dec] && model2 == Counter 0 && not dirty2)
 
@@ -491,8 +502,8 @@ runReduceClickTest ctx failed = do
   let inp0 = withInput 240 120
       view m = do
         resp <- button' "Go"
-        onClick resp (emit Inc)
-        label_ (T.pack (show (counterN m)))
+        when (respClicked resp) (Emit.emit Inc)
+        label (T.pack (show (counterN m)))
         pure resp
   _ <- runFrameReduce updateCounter ctx inp0 (Counter 0) view
   (resp, model0, _, _, _) <- runFrameReduce updateCounter ctx inp0 (Counter 0) view
@@ -515,9 +526,9 @@ runWidgetNoStringEmitTest ctx failed = do
 runPanelPaintsTest :: Context -> IORef Int -> IO ()
 runPanelPaintsTest ctx failed = do
   let inp = withInput 200 200
-      fat = padAll 16 (fillW defaultLayout)
-  (_, _, colDraw, _) <- runFrame ctx inp (column' fat (label "x"))
-  (_, _, panDraw, _) <- runFrame ctx inp (panel' fat (label "x"))
+      fat = padAll 16 . fillW
+  (_, _, colDraw, _) <- runFrame ctx inp (columnWith fat (label "x"))
+  (_, _, panDraw, _) <- runFrame ctx inp (panelWith fat (label "x"))
   assertGt failed (drawVertexCount panDraw) (drawVertexCount colDraw)
 
 -- | Drag-drop previews must come from simulating the post-drop layout, not
@@ -528,7 +539,7 @@ runPanelPaintsTest ctx failed = do
 runPaneGridMixedDragTest :: Context -> IORef Int -> IO ()
 runPaneGridMixedDragTest ctx failed = do
   -- Model level: vertical root split with a horizontal split inside the right
-  -- branch — pane 1 left, panes 2 (top right) and 3 (bottom right).
+  -- branch: pane 1 left, panes 2 (top right) and 3 (bottom right).
   let minSize = 40
       gutter = 4
       base = Rect 0 0 600 400
@@ -545,7 +556,7 @@ runPaneGridMixedDragTest ctx failed = do
       ]
   -- Cross-axis edge drop on the bottom-right pane: removing pane 1 collapses
   -- the root split, so the right branch re-flows to the whole grid and pane 1
-  -- lands in its bottom-right corner — not in a half of the target's old rect
+  -- lands in its bottom-right corner, not in a half of the target's old rect
   -- (which would be Rect 304 302 296 98).
   let dtA = dropTargetForPane r3 (V2 (rectX r3 + rectW r3 / 2) (rectY r3 + rectH r3 * 0.9)) 3
   assertEq failed dtA (DropSplit 3 AxisH False)
@@ -708,8 +719,8 @@ runPaneGridClippedControlTest ctx failed = do
         { pgLayout = fillW . fillH
         , pgViewPane = \_ _ -> do
             liftIO (writeIORef rendered True)
-            header <- labelEx (fixedH 40 (fillW (tight defaultLayout))) "Header"
-            (sid, target) <- scrollArea (fixedH 120 (fillW (tight defaultLayout))) $
+            header <- labelWith' (fixedH 40 . fillW . tight) "Header"
+            (sid, target) <- scrollArea (fixedH 120 . fillW . tight) $
               columnWith tight $ do
                 b <- button' "Scrolled control"
                 mapM_ (\_ -> void (label "Scroll content")) [1 .. 20 :: Int]
@@ -749,8 +760,9 @@ runPaneGridClippedControlTest ctx failed = do
 -- immediate (non-debounced) change pulse.
 runSearchFieldClearTest :: Context -> IORef Int -> IO ()
 runSearchFieldClearTest ctx failed = do
+  queryRef <- newIORef "hello world"
   let inp0 = withInput 320 100
-      ui = column (searchField "Search…" "hello world")
+      ui = column (held queryRef (searchField' "Search…"))
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect bx by bw bh = respRect resp
       cy = by + bh / 2
@@ -777,8 +789,9 @@ runSearchFieldClearTest ctx failed = do
 -- has been idle for the configured debounce window.
 runSearchFieldDebounceTest :: Context -> IORef Int -> IO ()
 runSearchFieldDebounceTest ctx failed = do
+  queryRef <- newIORef ""
   let inp0 = withInput 320 100
-      ui = column (searchFieldConfigured (defaultSearchFieldConfig {sfcDebounceMs = 40}) "")
+      ui = column (held queryRef (searchFieldConfigured' (defaultSearchFieldConfig {sfcDebounceMs = 40})))
   _ <- warmup2 ctx inp0 ui
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   ((rA, tA), _, _, _) <- runFrame ctx (inp0 {inputChars = "a"}) ui

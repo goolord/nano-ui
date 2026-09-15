@@ -16,13 +16,17 @@ module NanoUI.Widgets.Layout
   , columnWith
   , column'
   , label
+  , label'
   , labelWith
+  , labelWith'
   , labelEx
   , separator
   , spacer
+  , flex
   , scroll
   , scrollWith
   , scroll'
+  , scroll2D
   , scroll2DWith
   , scroll2D'
   , scrollArea
@@ -36,10 +40,6 @@ module NanoUI.Widgets.Layout
   , responsive
   , responsiveRowCol
   , center
-  , hstack
-  , vstack
-  , flex
-  , sep
   )
 where
 
@@ -177,18 +177,6 @@ column' :: Ui :> es => Layout -> Eff es a -> Eff es a
 column' layout = container NodeContainer (layout {layoutDirection = Column})
 
 -- =============================================================================
--- Collection stacks
--- =============================================================================
-
-{-# INLINE hstack #-}
-hstack :: (Foldable f, Ui :> es) => f (Eff es ()) -> Eff es ()
-hstack = row . sequence_
-
-{-# INLINE vstack #-}
-vstack :: (Foldable f, Ui :> es) => f (Eff es ()) -> Eff es ()
-vstack = column . sequence_
-
--- =============================================================================
 -- Grid
 -- =============================================================================
 
@@ -216,25 +204,36 @@ responsive breakpoint wideContainer narrowContainer child = do
   let w = sizeW (inputWindowSize inp)
   if w >= breakpoint then wideContainer child else narrowContainer child
 
--- | Row when window width >= breakpoint; Column when narrower.
--- Direct replacement for flex-wrapping responsive layouts.
+-- | A row while the window is at least @breakpoint@ wide, a column below it.
 {-# INLINE responsiveRowCol #-}
-responsiveRowCol :: Ui :> es => Float -> Layout -> Eff es a -> Eff es a
-responsiveRowCol breakpoint layout child = do
+responsiveRowCol :: Ui :> es => Float -> (Layout -> Layout) -> Eff es a -> Eff es a
+responsiveRowCol breakpoint f child = do
   inp <- askInput
+  base <- askDefaultLayout
   let w = sizeW (inputWindowSize inp)
       dir = if w >= breakpoint then Row else Column
-  container NodeContainer (layout {layoutDirection = dir}) child
+  container NodeContainer ((f base) {layoutDirection = dir}) child
 
+-- | A line of text. Newlines start new lines.
 {-# INLINE label #-}
-label :: Ui :> es => Text -> Eff es Response
-label txt = do
+label :: Ui :> es => Text -> Eff es ()
+label txt = void (label' txt)
+
+-- | 'label' returning its 'Response', for a tooltip or an anchored popup.
+{-# INLINE label' #-}
+label' :: Ui :> es => Text -> Eff es Response
+label' txt = do
   base <- askDefaultLayout
   labelEx base txt
 
+-- | 'label' with a layout modifier, for example @labelWith fontMono@.
 {-# INLINE labelWith #-}
-labelWith :: Ui :> es => (Layout -> Layout) -> Text -> Eff es Response
-labelWith f txt = do
+labelWith :: Ui :> es => (Layout -> Layout) -> Text -> Eff es ()
+labelWith f txt = void (labelWith' f txt)
+
+{-# INLINE labelWith' #-}
+labelWith' :: Ui :> es => (Layout -> Layout) -> Text -> Eff es Response
+labelWith' f txt = do
   base <- askDefaultLayout
   labelEx (f base) txt
 
@@ -244,16 +243,14 @@ labelEx layout txt = do
   wid <- nextId
   addWidget wid NodeText txt 0 layout
 
-{-# INLINE sep #-}
-sep :: Ui :> es => Eff es ()
-sep = void separator
-
+-- | Takes up the remaining space along the parent's direction.
 {-# INLINE flex #-}
 flex :: Ui :> es => Eff es ()
-flex = void (spacer (Grow 1) Fit)
+flex = spacer (Grow 1) Fit
 
-separator :: Ui :> es => Eff es Response
-separator = do
+-- | A one-pixel rule: horizontal in a column, vertical in a row.
+separator :: Ui :> es => Eff es ()
+separator = void $ do
   wid <- nextId
   ctx <- askContext
   inp <- askInput
@@ -272,13 +269,14 @@ separator = do
           DirRow -> (Row, Fixed 1, Grow 1)
     addSizingLeafNode ctx inp wid NodeSeparator dir wSiz hSiz
 
+-- | Empty space with the given sizing on each axis.
 {-# INLINE spacer #-}
-spacer :: Ui :> es => Sizing -> Sizing -> Eff es Response
+spacer :: Ui :> es => Sizing -> Sizing -> Eff es ()
 spacer w h = do
   wid <- nextId
   ctx <- askContext
   inp <- askInput
-  uiIO $ addSizingLeafNode ctx inp wid NodeSpacer Row w h
+  void (uiIO $ addSizingLeafNode ctx inp wid NodeSpacer Row w h)
 
 {-# INLINE scroll #-}
 scroll :: Ui :> es => Eff es a -> Eff es a
@@ -290,9 +288,8 @@ scrollWith = (`withDefaultWith` scroll')
 
 {-# INLINE scroll' #-}
 scroll' :: Ui :> es => Layout -> Eff es a -> Eff es a
-scroll' layout child = do
-  (_, r) <- scrollArea layout child
-  pure r
+scroll' layout child =
+  snd <$> scrollConfigured (scrollDefault1D (layoutDirection layout)) layout child
 
 {-# INLINE center #-}
 center :: Ui :> es => Eff es a -> Eff es a
@@ -319,14 +316,13 @@ configureScrollContainer ctx wid cfg idx = do
   setStyleIdx (ctxNodeArena ctx) idx (encodeScrollConfig cfg)
   setScrollConfig ctx wid cfg
 
+-- | 'scrollWith' that also returns the container's widget id, which keys its
+-- scroll offset.
 {-# INLINE scrollArea #-}
-scrollArea :: Ui :> es => Layout -> Eff es a -> Eff es (WidgetId, a)
-scrollArea layout child = do
-  ctx <- askContext
-  wid <- nextId
-  let cfg = scrollDefault1D (layoutDirection layout)
-  r <- scrollContainerWith wid (configureScrollContainer ctx wid cfg) layout child
-  pure (wid, r)
+scrollArea :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es (WidgetId, a)
+scrollArea f child = do
+  layout <- f <$> askDefaultLayout
+  scrollConfigured (scrollDefault1D (layoutDirection layout)) layout child
 
 -- | Scroll container with a chosen widget id. Same id on two panes shares the offset.
 scrollAreaId :: Ui :> es => WidgetId -> Layout -> Int -> Eff es a -> Eff es a
@@ -340,17 +336,25 @@ scrollAreaIdConfigured wid layout cfg child = do
   ctx <- askContext
   scrollContainerWith wid (configureScrollContainer ctx wid cfg) layout child
 
+-- | Scroll container on both axes.
+{-# INLINE scroll2D #-}
+scroll2D :: Ui :> es => Eff es a -> Eff es a
+scroll2D = withDefault scroll2D'
+
 {-# INLINE scroll2DWith #-}
 scroll2DWith :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es a
 scroll2DWith = (`withDefaultWith` scroll2D')
 
 {-# INLINE scroll2D' #-}
 scroll2D' :: Ui :> es => Layout -> Eff es a -> Eff es a
-scroll2D' layout child = fmap snd (scrollArea2D layout child)
+scroll2D' layout child = fmap snd (scrollConfigured defaultScrollConfig layout child)
 
+-- | 'scroll2DWith' that also returns the container's widget id.
 {-# INLINE scrollArea2D #-}
-scrollArea2D :: Ui :> es => Layout -> Eff es a -> Eff es (WidgetId, a)
-scrollArea2D layout child = scrollConfigured defaultScrollConfig layout child
+scrollArea2D :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es (WidgetId, a)
+scrollArea2D f child = do
+  layout <- f <$> askDefaultLayout
+  scrollConfigured defaultScrollConfig layout child
 
 {-# INLINE scrollConfigured #-}
 scrollConfigured :: Ui :> es => ScrollConfig -> Layout -> Eff es a -> Eff es (WidgetId, a)

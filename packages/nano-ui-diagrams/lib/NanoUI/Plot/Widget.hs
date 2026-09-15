@@ -81,30 +81,33 @@ cachedChartDiagram ctx wid fm theme ps chart = do
       setStore ctx (store {storeDyn = IM.insert k (toDyn cc) (storeDyn store)})
       pure cc
 
-plot :: Ui :> es => Layout -> Chart -> Eff es PlotResponse
-plot layout chart = do
+-- | Draw a chart sized by the layout modifier. The response reports the
+-- nearest data point under the pointer.
+plot :: Ui :> es => (Layout -> Layout) -> Chart -> Eff es PlotResponse
+plot f chart = do
   wid <- nextId
   ctx <- askContext
   fm <- uiFontMetrics
   theme <- uiTheme
   ps <- uiPlotStyle
   cc <- uiIO (cachedChartDiagram ctx wid fm theme ps chart)
-  resp <- diagramWithKeyAndEnvelope (ccVersion cc) (ccWidth cc) (ccHeight cc) layout (ccDiagram cc)
+  resp <- diagramWithKeyAndEnvelope (ccVersion cc) (ccWidth cc) (ccHeight cc) f (ccDiagram cc)
   mouse <- uiMousePos
   let hover = hitTestChartCached (ccDiagram cc) (ccWidth cc) (ccHeight cc) (ccExtX cc) (ccExtY cc) chart (respRect resp) mouse
   pure PlotResponse {plotResponse = resp, plotHover = hover}
 
-lineChart :: Ui :> es => Layout -> [(Double, Double)] -> Eff es PlotResponse
-lineChart layout pts = plot layout (singleSeries True (line "series" pts))
+-- | One line series with a grid and no legend.
+lineChart :: Ui :> es => (Layout -> Layout) -> [(Double, Double)] -> Eff es PlotResponse
+lineChart f pts = plot f (singleSeries True (line "series" pts))
 
-barChart :: Ui :> es => Layout -> [(Text, Double)] -> Eff es PlotResponse
-barChart layout pts = plot layout (singleSeries False (bar "series" pts))
+barChart :: Ui :> es => (Layout -> Layout) -> [(Text, Double)] -> Eff es PlotResponse
+barChart f pts = plot f (singleSeries False (bar "series" pts))
 
-scatterChart :: Ui :> es => Layout -> [(Double, Double)] -> Eff es PlotResponse
-scatterChart layout pts = plot layout (singleSeries False (scatter "series" pts))
+scatterChart :: Ui :> es => (Layout -> Layout) -> [(Double, Double)] -> Eff es PlotResponse
+scatterChart f pts = plot f (singleSeries False (scatter "series" pts))
 
-areaChart :: Ui :> es => Layout -> [(Double, Double)] -> Eff es PlotResponse
-areaChart layout pts = plot layout (singleSeries True (area "series" pts))
+areaChart :: Ui :> es => (Layout -> Layout) -> [(Double, Double)] -> Eff es PlotResponse
+areaChart f pts = plot f (singleSeries True (area "series" pts))
 
 -- | A gridded chart of one series without a legend, optionally decimated.
 singleSeries :: Bool -> Series -> Chart

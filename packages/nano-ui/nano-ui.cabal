@@ -66,7 +66,7 @@ library
         NanoUI.Layout.Arena
         NanoUI.Layout.Solve
         NanoUI.Monad
-        NanoUI.State
+        NanoUI.Emit
         NanoUI.Testing
         NanoUI.Testing.Assert
         NanoUI.Testing.Harness

@@ -25,7 +25,7 @@ import NanoUI.Context
   , startSpring
   )
 import NanoUI.Monad (Ui, askContext, nextId, scope, uiIO, uiTime, withKey)
-import NanoUI.Widgets.Node (Response, respId)
+import NanoUI.Widgets.Node (HasResponse, respId)
 
 -- | How an animated value moves.
 data Transition
@@ -94,16 +94,14 @@ pulse periodSec = do
     period = max 0.001 (realToFrac periodSec :: Double)
   pure (realToFrac (0.5 + 0.5 * sin (2 * pi * t / period)) :: Float)
 
--- | Keep a widget's response animating indefinitely so the frame loop never
--- idles. Some widgets are driven by the wall clock (see 'pulse', or draw from
--- 'NanoUI.Monad.uiTime' directly) rather than by a frame-counted animation; a
--- page containing only those would otherwise go idle after animating settles
--- and stop repainting. Returns the response unchanged for composition, e.g.
+-- | Keep a widget animating indefinitely so the frame loop never idles. Widgets
+-- driven by the wall clock ('pulse', or drawing from 'NanoUI.Monad.uiTime')
+-- rather than by a frame-counted animation would otherwise stop repainting
+-- once other animations settle.
 --
--- > progResp <- progressBar =<< pulse 6
--- > keepAnimating progResp
-keepAnimating :: Ui :> es => Response -> Eff es Response
+-- > bar <- progressBar' =<< pulse 6
+-- > keepAnimating bar
+keepAnimating :: (HasResponse r, Ui :> es) => r -> Eff es ()
 keepAnimating resp = do
   ctx <- askContext
   uiIO (startAnimation ctx (respId resp) 0 1 1e9)
-  pure resp

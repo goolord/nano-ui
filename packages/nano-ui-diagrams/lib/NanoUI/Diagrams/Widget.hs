@@ -40,6 +40,7 @@ import NanoUI
   , colorG
   , colorR
   , colorToWord32
+  , defaultLayout
   , defaultTheme
   , drawTextBox
   , drawingCached
@@ -243,24 +244,28 @@ fitLayout fm layout d =
                 , layoutMaxH = hF
                 }
 
+-- | 'diagramWithEnvelope' whose cached draw ops are also keyed by @userKey@.
+-- Change the key when the diagram's content changes.
 diagramWithKeyAndEnvelope ::
   Ui :> es =>
   Int ->
   Double ->
   Double ->
-  Layout ->
+  (Layout -> Layout) ->
   QDiagram NanoUIBackend V2 Double Any ->
   Eff es Response
-diagramWithKeyAndEnvelope userKey = framedDiagram (\t -> hash (userKey, themePlotKey t))
+diagramWithKeyAndEnvelope userKey dw dh f =
+  framedDiagram (\t -> hash (userKey, themePlotKey t)) dw dh (f defaultLayout)
 
+-- | 'diagram' with an explicit envelope width and height.
 diagramWithEnvelope ::
   Ui :> es =>
   Double ->
   Double ->
-  Layout ->
+  (Layout -> Layout) ->
   QDiagram NanoUIBackend V2 Double Any ->
   Eff es Response
-diagramWithEnvelope = framedDiagram themePlotKey
+diagramWithEnvelope dw dh f = framedDiagram themePlotKey dw dh (f defaultLayout)
 
 -- | Draw a diagram inside the plot frame. Its draw ops are cached under the
 -- content key the caller derives from the current theme.
@@ -276,7 +281,7 @@ framedDiagram contentKey dw dh layout d = do
   fm <- uiFontMetrics
   theme <- uiTheme
   let ps = themePlotStyle theme
-  drawingCached dw dh (fmLineHeight fm) (contentKey theme) layout (fitLayoutIO fm layout d) $ \rectBox ->
+  drawingCached dw dh (fmLineHeight fm) (contentKey theme) (const layout) (fitLayoutIO fm layout d) $ \rectBox ->
     let borderW = 1
         inset = borderW
         inner =
@@ -301,16 +306,18 @@ fitLayoutIO fm layout d = do
   prepared <- prepareFontMetricsMany fm texts
   pure (fitLayout prepared layout d)
 
-diagram :: Ui :> es => Layout -> QDiagram NanoUIBackend V2 Double Any -> Eff es Response
-diagram layout d = do
+-- | Draw a diagram inside a framed box sized by the layout modifier. Text in
+-- the diagram is measured with the current font so labels fit.
+diagram :: Ui :> es => (Layout -> Layout) -> QDiagram NanoUIBackend V2 Double Any -> Eff es Response
+diagram f d = do
   ctx <- askContext
   wid <- currentId
   fm <- uiFontMetrics
   theme <- uiTheme
   let content = themePlotKey theme
-  mEnv <- uiIO (lookupDrawFitEnvelope ctx wid (fmLineHeight fm) content layout)
+  mEnv <- uiIO (lookupDrawFitEnvelope ctx wid (fmLineHeight fm) content (f defaultLayout))
   case mEnv of
-    Just (dw, dh) -> diagramWithEnvelope dw dh layout d
+    Just (dw, dh) -> diagramWithEnvelope dw dh f d
     Nothing ->
       let V2 dw dh = size d
-       in diagramWithEnvelope dw dh layout d
+       in diagramWithEnvelope dw dh f d

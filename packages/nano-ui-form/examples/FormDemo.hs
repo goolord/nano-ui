@@ -2,7 +2,7 @@
 -- suite's layout check.
 module FormDemo (formDemoUi) where
 
-import Control.Monad (forM_, void, when)
+import Control.Monad (forM_, when)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Ditto.Types as Ditto
@@ -11,7 +11,7 @@ import NanoUI
   , NanoUI
   , button
   , card
-  , colorPickerToHex
+  , colorToHex
   , colorRGBA
   , columnWith
   , danger
@@ -29,7 +29,7 @@ import NanoUI
   , padAll
   , rowWith
   , scrollWith
-  , sep
+  , separator
   , tight
   , toolbar
   , useText
@@ -103,7 +103,7 @@ formatRegistration r =
   "User @" <> regUsername r <> " (" <> regEmail r <> "), Age: "
     <> T.pack (show (round (regAge r) :: Int))
     <> ", Tier: " <> T.pack (show (regTier r))
-    <> ", Color: " <> colorPickerToHex (regThemeColor r)
+    <> ", Color: " <> colorToHex (regThemeColor r)
     <> ", Subscribed: " <> (if regSubscribe r then "Yes" else "No")
 
 formDemoUi :: NanoUI ()
@@ -124,16 +124,16 @@ formDemoUi = do
           muted "Type-safe, composable immediate-mode forms powered by ditto & rendered via SDL3"
         flex
         muted "Press ESC to exit"
-      sep
+      separator
       rowWith (tight . gap 20 . fillW) $ do
         -- Left Column: Interactive Formlet
         columnWith (tight . gap 12 . fillW) $ do
           card $ do
             heading "User Profile & Registration"
             muted "All inputs validate live using composable applicative proofs."
-            sep
+            separator
             runFormView renderedView
-            sep
+            separator
             rowWith (tight . gap 10 . fillW) $ do
               btnSubmit <- button "Submit Registration"
               btnReset  <- button "Reset Form"
@@ -150,24 +150,24 @@ formDemoUi = do
           card $ do
             heading "Live Form Inspector"
             muted "Real-time decode and proof telemetry:"
-            sep
+            separator
             case res of
               Ditto.Ok (Ditto.Proved _ reg) -> do
                 heading "Status: VALID"
-                sep
+                separator
                 kv "Username" (regUsername reg)
                 kv "Email" (regEmail reg)
                 kv "Age" (T.pack (show (round (regAge reg) :: Int)) <> " years old")
                 kv "Account Tier" (T.pack (show (regTier reg)))
-                kv "Color Hex" (colorPickerToHex (regThemeColor reg))
+                kv "Color Hex" (colorToHex (regThemeColor reg))
                 kv "Newsletter" (if regSubscribe reg then "Active" else "Inactive")
-                sep
+                separator
                 columnWith (tight . gap 4 . fillW) $ do
                   muted "Bio:"
-                  void $ labelWith (tight . fillW . maxW 350 . fontMono) (regBio reg)
+                  labelWith (tight . fillW . maxW 350 . fontMono) (regBio reg)
               Ditto.Error errs -> do
                 danger "Status: INVALID / INCOMPLETE"
-                sep
+                separator
                 heading "Active Validation Errors:"
                 forM_ errs $ \(_, errMsg) -> do
                   danger ("• " <> errMsg)
@@ -175,7 +175,7 @@ formDemoUi = do
           card $ do
             heading "Submission Activity"
             muted "Record of last form submission:"
-            sep
+            separator
             if T.null submittedMsg
               then muted "No submission attempted yet."
-              else void $ labelWith (tight . fillW . maxW 350 . fontMono) submittedMsg
+              else labelWith (tight . fillW . maxW 350 . fontMono) submittedMsg

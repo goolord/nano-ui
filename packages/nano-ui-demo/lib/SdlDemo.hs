@@ -6,15 +6,16 @@
 -- Every interactive widget follows the same immediate-mode shape:
 --
 -- @
---   (resp, newVal) <- widget label currentVal   -- draw it, get what changed
---   when (respClicked resp) (doSomething)       -- react to gestures
---   setX newVal                                 -- write it back to state
+--   newVal <- widget label currentVal           -- draw the current value
+--   setX newVal                                 -- store what the user changed
+--   (resp, newVal) <- widget' label currentVal  -- primed: also the Response
 -- @
 --
--- The widget's value outlives the frame only because you persist it. State
--- lives in hooks created by the @use*@ functions. Hooks must be called in the
--- same order every frame, so all of them sit together at the top of 'demoUi'
--- — even for tabs that are currently hidden.
+-- Inputs are controlled: the widget's value outlives the frame only because
+-- you persist it and pass it back. State lives in hooks created by the
+-- @use*@ functions. Hooks must be called in the same order every frame, so
+-- all of them sit together at the top of 'demoUi', even for tabs that are
+-- currently hidden.
 --
 -- Style is expressed as layout-style functions threaded through the container
 -- widget: columnWith (padAll 6 . gap 8 . fillW) $...  Text widgets compose
@@ -22,16 +23,16 @@
 --
 -- Families, by tab:
 --
---   * Controls     — button, checkbox, slider, select, comboBox,
---                    boundedRadioFieldset, colorPicker, textInput, textArea,
---                    button + tooltip, contextMenu, file dialogs, dropZone
---   * Graphics     — image gallery + progressBar driven by a pulsing value
---   * Typography   — label / labelEx + the @font*@ style combinators
---   * List         — tree, searchField
---   * Table        — tableCfg (needs useTableSort)
---   * Panes        — paneGrid
---   * Plots        — plot, barChart, areaChart, diagram (data at the bottom)
---   * Diagnostics  — debug readouts from the SDL backend
+--   * Controls:     button, checkbox, slider, select, comboBox,
+--                   boundedRadio, colorPicker, textInput, textArea,
+--                   button + tooltip, contextMenu, file dialogs, dropZone
+--   * Graphics:     image gallery + progressBar driven by a pulsing value
+--   * Typography:   label / labelWith + the @font*@ style combinators
+--   * List:         tree, searchField
+--   * Table:        tableWith (needs useTableSort)
+--   * Panes:        paneGrid
+--   * Plots:        plot, barChart, areaChart, diagram (data at the bottom)
+--   * Diagnostics:  debug readouts from the SDL backend
 --
 -- The entry point is 'main' (§1) with a small CLI; the argument plumbing is the
 -- last section of this file. The automated UI test lives in its own module,
@@ -45,6 +46,7 @@ module SdlDemo
 
 import Control.Monad (unless, void, when)
 import Data.Foldable (for_)
+import Data.List (elemIndex)
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Primitive.SmallArray (SmallArray, smallArrayFromList)
 import Data.Word (Word64)
@@ -229,15 +231,16 @@ demoUi = do
   (aboutOpen, setAbout) <- useFlag False
   (debugOpen, setDebug) <- useFlag debugOpenFromEnv
   (inspectorOpen, setInspectorOpen) <- useFlag False -- compact-window readout
+  (activeTab, setActiveTab) <- useEnum Controls -- tabs
   -- Controls tab.
   (checked, setChecked) <- useFlag False -- checkbox
-  (vol, setVol) <- useText "50" -- slider, as text
+  (vol, setVol) <- useFloat 50 -- slider
   (quality, setQuality) <- useText "Medium" -- select
-  (accentHex, setAccent) <- useText (colorPickerToHexA demoAccent) -- colorPickerRGBA
-  (themeName, setThemeName) <- useText (themeDisplayName ThemeDefault) -- boundedRadioFieldset
+  (accent, setAccent) <- useState demoAccent -- colorPickerRGBA
+  (themeChoice, setThemeChoice) <- useEnum ThemeDefault -- boundedRadio
   (fontChoice, setFontChoice) <- useText "Inter" -- comboBox
   (name, setName) <- useText "" -- textInput
-  (notes, setNotes) <- useText "" -- textArea
+  (notes, setNotes) <- useText "Edit me.\nSecond line." -- textArea
   (dropLog, setDropLog) <- useText "" -- dropZone result, multi-line
   (dropHovering, setDropHovering) <- useFlag False -- drag-over state
   -- File dialog handles; results land in the paths below via useFileDialog.
@@ -254,6 +257,7 @@ demoUi = do
   useFileDialog folderDlg setFolderDlg $ \paths ->
     setFolderPath (maybe "" T.pack (listToMaybe paths))
   -- List tab.
+  (searchText, setSearchText) <- useText "" -- live searchField text
   (searchQuery, setSearchQuery) <- useText "" -- committed searchField value
   (peopleMatches, setPeopleMatches) <- useState demoPeople -- filtered rows
   (treeSel, setTreeSel) <- useText "0" -- tree selection index
@@ -273,6 +277,7 @@ demoUi = do
   rawInp <- askInput
   let wideWorkspace = sizeW (inputWindowSize rawInp) >= 1000
       inspectorWidth = if wideWorkspace then fixedW 280 else fillW
+      volText = T.pack (show (round vol :: Int))
   let rawDrop = T.intercalate " | " [T.pack (show (dropEventType ev)) <> " " <> dropEventData ev | ev <- V.toList (inputDrops rawInp)]
   when (not (T.null rawDrop)) (setDropRaw rawDrop)
 
@@ -280,10 +285,10 @@ demoUi = do
   scrollWith (tight . grow) $
     columnWith (padAll gapLayout . gap gapLayout . fillW) $ do
       panelWith (padXY 16 12 . gap gapInline . fillW) $
-        responsiveRowCol 960 (tight . gap gapInline . alignMid . fillW $ defaultLayout) $ do
+        responsiveRowCol 960 (tight . gap gapInline . alignMid . fillW) $ do
           rowWith (tight . gap gapInline . alignMid) $ do
-            void $ labelWith (tight . alignMid . fontMedium . fontSize 22) "nano-ui"
-            void $ labelWith (tight . alignMid . fontMuted) "SDL3 / Widget cookbook"
+            labelWith (tight . alignMid . fontMedium . fontSize 22) "nano-ui"
+            labelWith (tight . alignMid . fontMuted) "SDL3 / Widget cookbook"
           when (sizeW (inputWindowSize rawInp) >= 960) flex
           -- Live frame stats + the shared header buttons.
           snap <- askSdlDebug
@@ -293,7 +298,7 @@ demoUi = do
                   then T.pack (printf "%4.0f FPS / %5.2f ms" (dbgPresentFps c) (dbgFrameMs c))
                   else ""
           unless (T.null fpsText) $
-            void (labelEx (tight . fontMono . fontMuted $ defaultLayout) fpsText)
+            labelWith (tight . fontMono . fontMuted) fpsText
           rowWith (tight . gap gapMicro . alignMid) $ do
             whenM (button "OK") (setClick "OK")
             whenM (button "Cancel") (setClick "Cancel")
@@ -301,9 +306,9 @@ demoUi = do
             whenM (button "Debug") (setDebug (not debugOpen))
 
       ----------------------------------------------------------- body ----
-      responsiveRowCol 1000 (tight . gap gapLayout . fillW $ defaultLayout) $ do
+      responsiveRowCol 1000 (tight . gap gapLayout . fillW) $ do
         -- Left: a live readout of every hook value above. Tweak a widget on the
-        -- right and watch its line update — instant confirmation the write-back
+        -- right and watch its line update: instant confirmation the write-back
         -- idiom worked.
         columnWith (tight . gap gapLayout . inspectorWidth) $ do
           panelWith (padAll 16 . gap 8 . fillW) $ do
@@ -315,79 +320,77 @@ demoUi = do
                   setInspectorOpen (not inspectorOpen)
             when (wideWorkspace || inspectorOpen) $ do
               muted "Live widget values"
-              sep
-              let accent = fromMaybe demoAccent (colorPickerFromHex accentHex)
+              separator
               kv "Feature" (if checked then "on" else "off")
-              kv "Volume" vol
+              kv "Volume" volText
               kv "Quality" quality
               rowWith (tight . gap gapInline . alignMid . fillW) $ do
-                box (fixedWH 20 20 defaultLayout) accent
-                kv "Accent" accentHex
-              sep
-              kv "Theme" themeName
+                box (fixedWH 20 20) accent
+                kv "Accent" (colorToHexA accent)
+              separator
+              kv "Theme" (themeDisplayName themeChoice)
               kv "Font" fontChoice
               kv "Name" (orDash name)
               kv "Notes" (orDash notes)
-              sep
+              separator
               kv "Tree" treeSel
               kv "Table sort" (tableColumnLabel tableSortVal)
               kv "Table order" (tableSortDirText tableSortVal)
               kv "Clicked" (orDash click)
-              sep
+              separator
               kv "Open file" (orDash openPath)
               kv "Save file" (orDash savePath)
               kv "Folder" (orDash folderPath)
               kv "Dropped" (orDash (T.take 80 (fromMaybe "" (listToMaybe (T.lines dropLog)))))
-              sep
+              separator
               muted "Edit a control to see its value here."
               muted "Esc closes About, then quits."
 
         -- Right: the tabbed widget demos. Each tab body below is one widget
         -- family; its state hooks all live at the top of demoUi.
         panelWith (padAll 16 . gap 12 . fillW) $ do
-          boundedTabs Controls (T.pack . show) $ \case
+          newTab <- tabs activeTab $ flip map [minBound .. maxBound] $ \page ->
+            tab page (T.pack (show page)) $ case page of
             ----------------------------------------------- Controls ---------
             -- Form widgets. The returned value is stored back through the hook;
             -- the State card on the left then shows it.
             Controls -> do
-              responsiveRowCol 760 (tight . gap 24 . fillW $ defaultLayout) $ do
+              responsiveRowCol 760 (tight . gap 24 . fillW) $ do
                 columnWith (tight . gap 10 . fillW) $ do
                   heading "Controls"
-                  (_, cVal) <- checkbox "Feature" False
-                  setChecked cVal
+                  setChecked =<< checkbox "Feature" checked
                   columnWith (tight . gap 4 . fillW) $ do
-                    kv "Volume" vol
-                    (_, vVal) <- slider 0 100 50
-                    setVol (T.pack (show (round vVal :: Int)))
+                    kv "Volume" volText
+                    setVol =<< slider 0 100 vol
                   let qualities = ["Low", "Medium", "High"]
-                  (_, qualityIdx) <- selectLabeled "Quality" qualities 1
+                  qualityIdx <- demoField "Quality" $
+                    select qualities (fromMaybe 1 (elemIndex quality qualities))
                   setQuality (qualities !! qualityIdx)
-                  sep
+                  separator
                   heading "Appearance"
-                  (_, tVal) <- demoField "Theme" $
-                    boundedRadioFieldset ThemeDefault themeDisplayName
-                  setThemeName (themeDisplayName tVal)
+                  tVal <- demoField "Theme" $
+                    boundedRadio themeDisplayName themeChoice
+                  setThemeChoice tVal
                   setUiTheme (themeForChoice tVal)
                   (fResp, fVal) <- demoField "Font" $
-                    comboBox "Font" demoFontFamilies fontChoice
+                    comboBox' "Font" demoFontFamilies fontChoice
                   tooltip fResp "Type to filter; Enter applies, Esc reverts."
                   setFontChoice fVal
                   when (respChanged fResp && not (T.null fVal)) $
                     setSdlUiFont (FontSearch [T.unpack fVal])
-                  sep
+                  separator
                   heading "Text input"
-                  (_, nVal) <- demoField "Name" $
-                    textInputWithPlaceholder "Enter name" ""
+                  nVal <- demoField "Name" $
+                    textInputConfigured defaultTextInputConfig {ticPlaceholder = "Enter name"} name
                   setName nVal
-                  (_, notesVal) <- demoField "Notes" $
-                    textArea "Edit me.\nSecond line."
+                  notesVal <- demoField "Notes" $
+                    textArea notes
                   setNotes notesVal
                 columnWith (tight . gap 10 . fillW) $ do
                   heading "Accent"
                   muted "Choose a color or enter an exact value."
-                  (_, aVal) <- colorPickerRGBA demoAccent
-                  setAccent (colorPickerToHexA aVal)
-              sep
+                  setAccent =<< colorPickerRGBA accent
+              separator
               -- Popups & menus: act on respClicked of the item you want.
               heading "Popups & Menus"
               rowWith (tight . gap gapInline . fillW) $ do
@@ -397,12 +400,12 @@ demoUi = do
                 void $ contextMenu btnMenu $ do
                   menuHeader "Context Menu"
                   menuSeparator
-                  whenM (menuItemWithShortcut "Cut" "Ctrl+X") (setClick "Cut")
-                  whenM (menuItemWithShortcut "Copy" "Ctrl+C") (setClick "Copy")
-                  whenM (menuItemWithShortcut "Paste" "Ctrl+V") (setClick "Paste")
+                  whenM (menuItemShortcut "Cut" "Ctrl+X") (setClick "Cut")
+                  whenM (menuItemShortcut "Copy" "Ctrl+C") (setClick "Copy")
+                  whenM (menuItemShortcut "Paste" "Ctrl+V") (setClick "Paste")
                   menuSeparator
                   menuItemDisabled "Disabled Option"
-              sep
+              separator
               -- File dialogs: ask for a modal dialog handle, store it, and poll
               -- it every frame via useFileDialog.
               heading "File Dialogs"
@@ -416,26 +419,26 @@ demoUi = do
                 whenM (button "Browse Folder…") $ do
                   mdid <- askOpenFolderDialog defaultFileDialogOptions
                   setFolderDlg mdid
-              sep
-              -- Drag & drop: dropZone returns a target; onDrop reads its files
-              -- and texts. dropHovering mirrors the hover state for styling.
+              separator
+              -- Drag & drop: dropZone returns a target; dropReceived reports its
+              -- files and texts. dropHovering mirrors the hover state for styling.
               heading "Drag & Drop"
               muted "Drag a file or highlighted text from another app onto the zone."
               (_, _, dropTgt) <-
-                dropZone (padXY 16 12 . gap gapText . fillW $ defaultLayout) $ do
+                dropZone (padXY 16 12 . gap gapText . fillW) $ do
                   columnWith (tight . gap gapText . fillW) $ do
                     rowWith (tight . gap gapInline . alignMid . fillW) $ do
                       heading "Drop Zone"
                       flex
-                      void $ labelEx (tight . fontMono . fontMuted $ defaultLayout) (if dropHovering then "hovering" else "idle")
-                    void $ labelEx (tight . fontMuted . fillW $ defaultLayout) $
+                      labelWith (tight . fontMono . fontMuted) (if dropHovering then "hovering" else "idle")
+                    labelWith (tight . fontMuted . fillW) $
                       if dropHovering
                         then "Release to accept dropped files or text."
                         else "Files land here; text lands here too."
                     when (not (T.null dropLog)) $ do
-                      sep
-                      void $ labelEx (tight . fontMono . fillW $ defaultLayout) dropLog
-              onDrop dropTgt $ do
+                      separator
+                      labelWith (tight . fontMono . fillW) dropLog
+              when (dropReceived dropTgt) $ do
                 let droppedLines =
                       [ "file:  " <> (if T.length f <= 60 then f else "…" <> T.takeEnd 59 f) | f <- dropFiles dropTgt ]
                         ++ [ "text:  " <> (if T.length t <= 60 then t else T.take 59 t <> "…") | t <- dropTexts dropTgt ]
@@ -446,46 +449,41 @@ demoUi = do
             ----------------------------------------------- Graphics ---------
             Graphics -> do
               heading "Graphics"
-              sep
+              separator
               -- Images registered from demoImages.
               rowWith (tight . gap gapInline . fillW) $ do
                 thumb (ImageId 1) "Swatch"
                 thumb (ImageId 2) "Checker"
                 thumb (ImageId 3) "Stripe"
-              sep
+              separator
               -- A plain response-driven bar. pulse provides a smooth
               -- clock-driven 0-1 sweep and keepAnimating holds it live.
-              muted "A single rounded bar, smoothly oscillating 0–100%."
-              progResp <- progressBar =<< pulse 6
-              void (keepAnimating progResp)
+              muted "A single rounded bar, smoothly oscillating 0-100%."
+              progResp <- progressBar' =<< pulse 6
+              keepAnimating progResp
 
             --------------------------------------------- Typography ---------
             Typography -> do
               heading "Typography & Font Styling"
               muted "Font sizing, variable weights, synthetic slant, and text decorations."
-              sep
+              separator
               -- Live playground: type in the box, flip toggles, drag the size
               -- slider and watch the composed font style update the preview.
               heading "Live Playground"
               columnWith (tight . gap gapInline . fillW) $ do
                 muted "Preview text"
-                (_, tVal) <- textInput sampleText
-                setSampleText tVal
+                setSampleText =<< textInput sampleText
               rowWith (tight . gap gapInline . fillW . alignMid) $ do
-                (_, bVal) <- checkbox "Bold" typeBold
-                setTypeBold bVal
-                (_, iVal) <- checkbox "Italic" typeItalic
-                setTypeItalic iVal
-                (_, uVal) <- checkbox "Underline" typeUnderline
-                setTypeUnderline uVal
-                (_, sVal) <- checkbox "Strike" typeStrike
-                setTypeStrike sVal
+                setTypeBold =<< checkbox "Bold" typeBold
+                setTypeItalic =<< checkbox "Italic" typeItalic
+                setTypeUnderline =<< checkbox "Underline" typeUnderline
+                setTypeStrike =<< checkbox "Strike" typeStrike
               rowWith (tight . gap gapInline . fillW . alignMid) $ do
-                (_, szVal) <- columnWith (tight . gap gapInline . fillW) $ do
-                  void $ label "Size"
+                szVal <- columnWith (tight . gap gapInline . fillW) $ do
+                  label "Size"
                   slider 12 40 typeSize
                 setTypeSize szVal
-                void $ labelEx (tight . fontMono . fontMuted $ defaultLayout) (T.pack (printf "%.0f px" szVal))
+                labelWith (tight . fontMono . fontMuted) (T.pack (printf "%.0f px" szVal))
               -- Font styles are ordinary style combinators; fold the toggles in.
               let applyWeight = if typeBold then fontBold else id
                   applyItalic = if typeItalic then fontItalic else id
@@ -497,14 +495,14 @@ demoUi = do
                   customStyle = fontSize typeSize . applyWeight . applyItalic . applyDeco . fillW
                   previewTxt = if T.null sampleText then "Type specimen preview..." else sampleText
               panelWith (padAll 10 . fillW) $
-                void $ labelWith customStyle previewTxt
-              sep
+                labelWith customStyle previewTxt
+              separator
               heading "Type Scale"
               typeScale
-              sep
+              separator
               heading "Weights & Styles"
               weightsStyles
-              sep
+              separator
               heading "Color & Highlights"
               colorHighlights
 
@@ -517,17 +515,18 @@ demoUi = do
                       Right (n, _) -> n
                       Left _ -> 0
               scroll2DWith (fixedH 300 . fillW) $ do
-                (_, sel) <- tree "demo" demoTree sel0
+                sel <- tree "demo" demoTree sel0
                 setTreeSel (T.pack (show sel))
-              sep
+              separator
               heading "Searchable list"
               muted "Type to filter. The debounced search commits on a pause; the filtered list is cached and only recomputed when the committed query changes."
-              (qResp, qVal) <- searchField "Filter people (name, role, city…)" ""
+              (qResp, qVal) <- searchField' "Filter people (name, role, city…)" searchText
+              setSearchText qVal
               when (respChanged qResp) $ do
                 setSearchQuery qVal
                 setPeopleMatches (peopleMatching qVal)
               rowWith (tight . gap gapInline . fillW . alignMid) $ do
-                muted ("Committed: " <> (if T.null searchQuery then "—" else searchQuery))
+                muted ("Committed: " <> (if T.null searchQuery then "(none)" else searchQuery))
                 flex
                 muted
                   ( "Matches: "
@@ -539,26 +538,25 @@ demoUi = do
                     then void (muted "No matches.")
                     else
                       for_ peopleMatches $ \p ->
-                        void $ labelEx (tight . fillW $ defaultLayout) (personRowLabel p)
+                        labelWith (tight . fillW) (personRowLabel p)
 
             ---------------------------------------------------- Table ---------
             Table -> do
               heading "Table"
               muted "Click a header to sort. Drag a header to reorder."
               muted "Drag a header edge to resize. Right-click a header to hide."
-              -- tableCfg re-renders every frame; keep the sort state in a hook
+              -- tableWith re-renders every frame; keep the sort state in a hook
               -- (useTableSort) and mirror changes back into it.
               tableResp <-
-                tableCfg
-                  defaultTableCfg
-                  (tight . fillW . fixedH 280 $ defaultLayout {layoutGap = 0})
+                tableWith
+                  (fixedH 280)
                   "people"
                   colPeople
                   demoPeople
                   tableSortVal
               let nextSort = tableSort tableResp
               when (respChanged tableResp) (setTableSort nextSort)
-              sep
+              separator
               kv "Sorted by" (tableColumnLabel nextSort)
               kv "Order" (tableSortDirText nextSort)
               kv "Hidden" (tableHiddenLabel (tableHiddenIndices tableResp))
@@ -571,10 +569,10 @@ demoUi = do
               muted "Drag a pane to the grid's outer edge to restructure at the top level."
               muted "+ splits vertically, = splits horizontally, x closes, M maximizes, R restores."
               muted "Arrow keys jump between panes while the grid is focused."
-              (hdrResp, headersOn) <- checkbox "Pane headers" showPaneHeaders
-              when (respChanged hdrResp) (setShowPaneHeaders headersOn)
+              headersOn <- checkbox "Pane headers" showPaneHeaders
+              setShowPaneHeaders headersOn
               pgr <- paneGrid (demoPaneGridCfg headersOn)
-              sep
+              separator
               kv "Panes" (T.pack (show (pgrPaneCount pgr)))
               kv "Focused" (T.pack (show (pgrFocusedPane pgr)))
               kv "Maximized" (T.pack (show (pgrMaximizedPane pgr)))
@@ -584,24 +582,24 @@ demoUi = do
               heading "Plots"
               muted "Auto ticks, shared scales, and decimation."
               -- chart data lives in "DemoData" (plus the §Plots section below).
-              responsiveRowCol 760 (tight . gap 16 . fillW $ defaultLayout) $ do
+              responsiveRowCol 760 (tight . gap 16 . fillW) $ do
                 columnWith (tight . gap gapMicro . fillW) $ do
                   muted "Sine + cosine"
-                  void $ plot (minH 240 . fillW $ defaultLayout) sineCosineChart
+                  void $ plot (minH 240 . fillW) sineCosineChart
                 columnWith (tight . gap gapMicro . fillW) $ do
                   muted "Weekly counts"
-                  void $ barChart (minH 240 . fillW $ defaultLayout) weeklyBars
-              responsiveRowCol 760 (tight . gap 16 . fillW $ defaultLayout) $ do
+                  void $ barChart (minH 240 . fillW) weeklyBars
+              responsiveRowCol 760 (tight . gap 16 . fillW) $ do
                 columnWith (tight . gap gapMicro . fillW) $ do
                   muted "Sleep vs focus"
-                  void $ plot (minH 240 . fillW $ defaultLayout) sleepFocusChart
+                  void $ plot (minH 240 . fillW) sleepFocusChart
                 columnWith (tight . gap gapMicro . fillW) $ do
                   muted "Area"
-                  void $ areaChart (minH 240 . fillW $ defaultLayout) areaDemo
+                  void $ areaChart (minH 240 . fillW) areaDemo
               columnWith (tight . gap gapMicro . fillW) $ do
                 muted "Drawing"
                 ps <- uiPlotStyle
-                void $ diagram (fillW $ defaultLayout {layoutMaxH = 200}) (drawingSample ps)
+                void $ diagram (fillW . maxH 200) (drawingSample ps)
 
             ------------------------------------------- Diagnostics ---------
             Diagnostics -> do
@@ -621,15 +619,16 @@ demoUi = do
               kv "Last drop event" (orDash dropRaw)
               kv "Evaluation" "Zero-Cost Inactive Tabs"
               kv "State" "SrcLoc Preserved"
+          setActiveTab newTab
 
   -------------------------------------------------------------- overlays ---
   -- Debug window: a plain draggable window opened by the toolbar toggle.
   when debugOpen $ do
     snap <- askSdlDebug
     (win, _) <- window True "Debug" (debugBody snap)
-    onClick win (setDebug False)
+    when (respClicked win) (setDebug False)
   -- About modal: modal gives (response, _); clicking anywhere or pressing Esc
-  -- fires onClick on the response, which closes it.
+  -- sets respClicked on the response, which closes it.
   (aboutResp, _) <-
     modal aboutOpen "About" $ do
       heading "nano-ui"
@@ -638,7 +637,7 @@ demoUi = do
       rowWith (gap gapInline . fillW) $ do
         flex
         whenM (button "Close") (setAbout False)
-  onClick aboutResp (setAbout False)
+  when (respClicked aboutResp) (setAbout False)
 
 ------------------------------------------------------------------------------
 -- §4  Controls-tab helpers
@@ -648,7 +647,7 @@ demoUi = do
 demoField :: T.Text -> NanoUI a -> NanoUI a
 demoField caption widget =
   columnWith (tight . gap 4 . fillW) $ do
-    void $ labelWith (tight . fontMuted . fillW) caption
+    labelWith (tight . fontMuted . fillW) caption
     widget
 
 -- | Dashed-out empty values in the State readout.
@@ -659,7 +658,7 @@ orDash s = if T.null s then "-" else s
 thumb :: ImageId -> T.Text -> NanoUI ()
 thumb iid caption =
   columnWith (tight . gap gapMicro) $ do
-    image_ (fixedWH 88 88 defaultLayout) iid
+    image (fixedWH 88 88) iid
     muted caption
 
 ------------------------------------------------------------------------------
@@ -672,72 +671,72 @@ typeScale :: NanoUI ()
 typeScale =
   columnWith (tight . gap gapMicro . fillW) $ do
     rowWith (tight . gap gapInline . alignMid . fillW) $ do
-      void $ labelEx (tight . fixedW 60 . fontMono . fontMuted $ defaultLayout) "32px"
-      void $ labelWith (fontSize 32 . fontBold) "Display Headline"
+      labelWith (tight . fixedW 60 . fontMono . fontMuted) "32px"
+      labelWith (fontSize 32 . fontBold) "Display Headline"
     rowWith (tight . gap gapInline . alignMid . fillW) $ do
-      void $ labelEx (tight . fixedW 60 . fontMono . fontMuted $ defaultLayout) "24px"
-      void $ labelWith (fontSize 24 . fontSemiBold) "Page Section Title"
+      labelWith (tight . fixedW 60 . fontMono . fontMuted) "24px"
+      labelWith (fontSize 24 . fontSemiBold) "Page Section Title"
     rowWith (tight . gap gapInline . alignMid . fillW) $ do
-      void $ labelEx (tight . fixedW 60 . fontMono . fontMuted $ defaultLayout) "18px"
-      void $ labelWith (fontSize 18 . fontMedium) "Card Subtitle & Highlights"
+      labelWith (tight . fixedW 60 . fontMono . fontMuted) "18px"
+      labelWith (fontSize 18 . fontMedium) "Card Subtitle & Highlights"
     rowWith (tight . gap gapInline . alignMid . fillW) $ do
-      void $ labelEx (tight . fixedW 60 . fontMono . fontMuted $ defaultLayout) "16px"
-      void $ labelWith (fontSize 16) "Standard body text (16px base line height)"
+      labelWith (tight . fixedW 60 . fontMono . fontMuted) "16px"
+      labelWith (fontSize 16) "Standard body text (16px base line height)"
     rowWith (tight . gap gapInline . alignMid . fillW) $ do
-      void $ labelEx (tight . fixedW 60 . fontMono . fontMuted $ defaultLayout) "12px"
-      void $ labelWith (fontSize 12 . fontMuted) "Auxiliary caption, footnote, or timestamp"
+      labelWith (tight . fixedW 60 . fontMono . fontMuted) "12px"
+      labelWith (fontSize 12 . fontMuted) "Auxiliary caption, footnote, or timestamp"
 
 weightsStyles :: NanoUI ()
 weightsStyles =
   columnWith (tight . gap gapMicro . fillW) $ do
     rowWith (tight . gap gapInline . fillW) $ do
-      void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "Light"
-      void $ labelWith fontLight "Sphinx of black quartz, judge my vow."
+      labelWith (tight . fixedW 80 . fontMono . fontMuted) "Light"
+      labelWith fontLight "Sphinx of black quartz, judge my vow."
     rowWith (tight . gap gapInline . fillW) $ do
-      void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "Normal"
-      void $ label "Sphinx of black quartz, judge my vow."
+      labelWith (tight . fixedW 80 . fontMono . fontMuted) "Normal"
+      label "Sphinx of black quartz, judge my vow."
     rowWith (tight . gap gapInline . fillW) $ do
-      void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "Medium"
-      void $ labelWith fontMedium "Sphinx of black quartz, judge my vow."
+      labelWith (tight . fixedW 80 . fontMono . fontMuted) "Medium"
+      labelWith fontMedium "Sphinx of black quartz, judge my vow."
     rowWith (tight . gap gapInline . fillW) $ do
-      void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "SemiBold"
-      void $ labelWith fontSemiBold "Sphinx of black quartz, judge my vow."
+      labelWith (tight . fixedW 80 . fontMono . fontMuted) "SemiBold"
+      labelWith fontSemiBold "Sphinx of black quartz, judge my vow."
     rowWith (tight . gap gapInline . fillW) $ do
-      void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "Bold"
-      void $ labelWith fontBold "Sphinx of black quartz, judge my vow."
+      labelWith (tight . fixedW 80 . fontMono . fontMuted) "Bold"
+      labelWith fontBold "Sphinx of black quartz, judge my vow."
     rowWith (tight . gap gapInline . fillW) $ do
-      void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "ExtraBold"
-      void $ labelWith fontExtraBold "Sphinx of black quartz, judge my vow."
+      labelWith (tight . fixedW 80 . fontMono . fontMuted) "ExtraBold"
+      labelWith fontExtraBold "Sphinx of black quartz, judge my vow."
     rowWith (tight . gap gapInline . fillW) $ do
-      void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "Black"
-      void $ labelWith fontBlack "Sphinx of black quartz, judge my vow."
+      labelWith (tight . fixedW 80 . fontMono . fontMuted) "Black"
+      labelWith fontBlack "Sphinx of black quartz, judge my vow."
     rowWith (tight . gap gapInline . fillW) $ do
-      void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "Italic"
-      void $ labelWith fontItalic "Slanted synthetic italic font style."
+      labelWith (tight . fixedW 80 . fontMono . fontMuted) "Italic"
+      labelWith fontItalic "Slanted synthetic italic font style."
     rowWith (tight . gap gapInline . fillW) $ do
-      void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "Underline"
-      void $ labelWith fontUnderline "Underlined emphasis and interactive links."
+      labelWith (tight . fixedW 80 . fontMono . fontMuted) "Underline"
+      labelWith fontUnderline "Underlined emphasis and interactive links."
     rowWith (tight . gap gapInline . fillW) $ do
-      void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "Strike"
-      void $ labelWith fontStrike "Completed tasks and deprecated pricing."
+      labelWith (tight . fixedW 80 . fontMono . fontMuted) "Strike"
+      labelWith fontStrike "Completed tasks and deprecated pricing."
     rowWith (tight . gap gapInline . fillW) $ do
-      void $ labelEx (tight . fixedW 80 . fontMono . fontMuted $ defaultLayout) "Both"
-      void $ labelWith (fontUnderline . fontStrike) "Both underline and strikethrough lines."
+      labelWith (tight . fixedW 80 . fontMono . fontMuted) "Both"
+      labelWith (fontUnderline . fontStrike) "Both underline and strikethrough lines."
 
 colorHighlights :: NanoUI ()
 colorHighlights =
   columnWith (tight . gap gapMicro . fillW) $ do
     rowWith (tight . gap gapInline . fillW) $ do
-      void $ labelWith (fontBold . fontColor (colorRGBA 224 108 117 255)) "Crimson Red"
-      void $ labelWith (fontBold . fontColor (colorRGBA 152 195 121 255)) "Emerald Green"
-      void $ labelWith (fontBold . fontColor (colorRGBA 229 192 123 255)) "Amber Gold"
-      void $ labelWith (fontBold . fontColor (colorRGBA 86 182 194 255)) "Glacier Cyan"
-      void $ labelWith (fontBold . fontColor (colorRGBA 198 120 221 255)) "Orchid Violet"
+      labelWith (fontBold . fontColor (colorRGBA 224 108 117 255)) "Crimson Red"
+      labelWith (fontBold . fontColor (colorRGBA 152 195 121 255)) "Emerald Green"
+      labelWith (fontBold . fontColor (colorRGBA 229 192 123 255)) "Amber Gold"
+      labelWith (fontBold . fontColor (colorRGBA 86 182 194 255)) "Glacier Cyan"
+      labelWith (fontBold . fontColor (colorRGBA 198 120 221 255)) "Orchid Violet"
     rowWith (tight . gap gapInline . fillW . alignMid) $ do
       muted "Sale example:"
-      void $ labelWith (fontStrike . fontMuted) "$129.00"
-      void $ labelWith (fontSize 18 . fontBold . fontColor (colorRGBA 152 195 121 255)) "$79.00"
-      void $ labelWith (fontSize 12 . fontItalic . fontColor (colorRGBA 229 192 123 255)) "(Save 38%)"
+      labelWith (fontStrike . fontMuted) "$129.00"
+      labelWith (fontSize 18 . fontBold . fontColor (colorRGBA 152 195 121 255)) "$79.00"
+      labelWith (fontSize 12 . fontItalic . fontColor (colorRGBA 229 192 123 255)) "(Save 38%)"
 
 ------------------------------------------------------------------------------
 -- §6  List & Table demo data
@@ -767,7 +766,7 @@ peopleMatching raw
 personRowLabel :: DemoPerson -> T.Text
 personRowLabel p =
   demoPersonName p
-    <> " — "
+    <> " - "
     <> demoPersonRole p
     <> ", "
     <> demoPersonCity p
@@ -830,8 +829,8 @@ demoPaneHeader :: (Ui :> es) => Word64 -> Bool -> PaneGridCtx es -> Eff es ()
 demoPaneHeader pid maximized pctx =
   panelWith (padXY 8 5 . fillW) $
     rowWith (tight . gap 8 . alignMid . fillW) $ do
-      box (fixedWH 3 16 defaultLayout) demoAccent
-      void $ labelWith (tight . fontMedium . fontMuted) (demoPaneTitle pid maximized)
+      box (fixedWH 3 16) demoAccent
+      labelWith (tight . fontMedium . fontMuted) (demoPaneTitle pid maximized)
       flex
       whenM (button "+") (void (pgcSplit pctx AxisV))
       whenM (button "=") (void (pgcSplit pctx AxisH))
@@ -843,7 +842,7 @@ demoPaneView showHeader pid pctx = do
   let maximized = pgcMaximized pctx
   columnWith (tight . gap 6 . fillW) $ do
     when showHeader (demoPaneHeader pid maximized pctx)
-    box (fillW defaultLayout) demoAccent
+    box fillW demoAccent
     void $ muted ("Contents of " <> T.pack (show pid) <> ". Drag the pane to move or split it.")
   pure
     PaneView
@@ -909,11 +908,11 @@ debugBody s = do
         pure rows
   columnWith (tight . gap 4 . minW 300 . fillW) $ do
     debugSection "Frame" frames
-    sep
+    separator
     debugSection "Draw" draws
-    sep
+    separator
     debugSection "Display" display
-    sep
+    separator
     debugSection "Runtime" runtime
 
 debugSection :: T.Text -> DebugRows -> NanoUI ()

@@ -8,7 +8,7 @@ module Cases.Select
   , runTreeSelectTest
   ) where
 
-import Data.IORef (IORef)
+import Data.IORef (IORef, newIORef)
 import Data.Text qualified as T
 import NanoUI
 import Data.Vector qualified as V
@@ -18,6 +18,7 @@ import NanoUI.Testing.Harness
   ( assertSpansHas
   , clickPair
   , hasText
+  , held
   , runClickRelease
   , warmup2
   )
@@ -25,7 +26,7 @@ import NanoUI.Testing.Harness
 runSliderCursorTest :: Context -> IORef Int -> IO ()
 runSliderCursorTest ctx failed = do
   let inp0 = withInput 300 80
-      ui = column (slider 0 100 50)
+      ui = column (slider' 0 100 50)
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect rx ry rw rh = respRect resp
       track = sliderTrackBounds (ctxFontMetrics ctx) rx ry rw rh
@@ -50,7 +51,7 @@ runSliderCursorTest ctx failed = do
 
 runSelectOverlayDamageTest :: Context -> IORef Int -> IO ()
 runSelectOverlayDamageTest ctx failed = do
-  let ui = column (select ["Low", "Medium", "High"] 0)
+  let ui = column (select' ["Low", "Medium", "High"] 0)
       inp0 = (withInput 320 160) {inputMousePos = V2 20 20}
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect sx sy sw sh = respRect resp
@@ -72,7 +73,7 @@ runTreeSelectTest :: Context -> IORef Int -> IO ()
 runTreeSelectTest ctx failed = do
   let inp0 = withInput 40 12
       items = [TreeItem "alpha" [], TreeItem "beta" []]
-      ui = column (tree "t" items 0)
+      ui = column (tree' "t" items 0)
   (resp, sel0) <- warmup2 ctx inp0 ui
   assertEq failed sel0 0
   let Rect rx ry _rh rh = respRect resp
@@ -85,8 +86,9 @@ runTreeSelectTest ctx failed = do
 -- Enter collapses the selected parent.
 runTreeKeyboardTest :: Context -> IORef Int -> IO ()
 runTreeKeyboardTest ctx failed = do
+  selectedRef <- newIORef 0
   let items = V.fromList [TreeItem "root" [TreeItem "child" []], TreeItem "leaf" []]
-      ui = column (tree "k" items 0)
+      ui = column (held selectedRef (tree' "k" items))
       inp0 = withInput 40 12
   _ <- warmup2 ctx inp0 ui
   spans0 <- collectTextSpans ctx
@@ -109,11 +111,12 @@ runTreeKeyboardTest ctx failed = do
 -- Open dropdown rows show the pointer cursor on hover and press, and
 -- respChanged fires on the frame the selection changes and not on later
 -- frames (regression: it compared the index against the initial one, so it
--- stayed set, and selectEmit emitted, every frame after a pick).
+-- stayed set, and Emit.select emitted, every frame after a pick).
 runSelectChangeOnceTest :: Context -> IORef Int -> IO ()
 runSelectChangeOnceTest ctx failed = do
+  indexRef <- newIORef 1
   let inp0 = withInput 320 200
-      ui = select ["Low", "Medium", "High"] 1
+      ui = held indexRef (select' ["Low", "Medium", "High"])
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect sx sy sw sh = respRect resp
       (openPress, openRelease) = clickPair inp0 (V2 (sx + sw / 2) (sy + sh / 2))
@@ -142,7 +145,7 @@ runSelectChangeOnceTest ctx failed = do
 runSelectDragToSelectTest :: Context -> IORef Int -> IO ()
 runSelectDragToSelectTest ctx failed = do
   let inp0 = withInput 320 200
-      ui = select ["Low", "Medium", "High"] 1
+      ui = select' ["Low", "Medium", "High"] 1
   (resp, idx0) <- warmup2 ctx inp0 ui
   assertEq failed idx0 1
   let Rect sx sy sw _ = respRect resp
@@ -174,8 +177,9 @@ runSelectDragToSelectTest ctx failed = do
 
 runSelectKeyboardTest :: Context -> IORef Int -> IO ()
 runSelectKeyboardTest ctx failed = do
+  indexRef <- newIORef 1
   let inp0 = withInput 320 200
-      ui = column (select (V.fromList ["Low", "Medium", "High"]) 1)
+      ui = column (held indexRef (select' (V.fromList ["Low", "Medium", "High"])))
   (resp, idx0) <- warmup2 ctx inp0 ui
   assertEq failed idx0 1
   let Rect sx sy sw sh = respRect resp

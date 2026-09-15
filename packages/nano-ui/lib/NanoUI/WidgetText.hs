@@ -32,9 +32,9 @@ module NanoUI.WidgetText
   , colorPickerCurrentLabel
   , colorPickerNewLabel
   , colorPickerDisplayText
-  , colorPickerToHex
-  , colorPickerToHexA
-  , colorPickerFromHex
+  , colorToHex
+  , colorToHexA
+  , colorFromHex
   , colorPickerParseHex
   , buttonFlagClose
   , buttonFlagTab
@@ -238,13 +238,13 @@ colorPickerCurrentLabel = "Current"
 colorPickerNewLabel :: Text
 colorPickerNewLabel = "New"
 
-colorPickerToHex :: Color -> Text
-colorPickerToHex c =
+colorToHex :: Color -> Text
+colorToHex c =
   "#" <> hexByte (colorR c) <> hexByte (colorG c) <> hexByte (colorB c)
 
 -- | Eight-digit form for the alpha-aware picker: @#RRGGBBAA@.
-colorPickerToHexA :: Color -> Text
-colorPickerToHexA c = colorPickerToHex c <> hexByte (colorA c)
+colorToHexA :: Color -> Text
+colorToHexA c = colorToHex c <> hexByte (colorA c)
 
 hexByte :: Word8 -> Text
 hexByte n = indexSmallArray hexBytes (fromIntegral n)
@@ -276,8 +276,8 @@ colorPickerParseHex txt =
           pure (r, g, b, Just a)
         _ -> Nothing
 
-colorPickerFromHex :: Text -> Maybe Color
-colorPickerFromHex txt = do
+colorFromHex :: Text -> Maybe Color
+colorFromHex txt = do
   (r, g, b, ma) <- colorPickerParseHex txt
   pure (colorRGBA r g b (fromMaybe 255 ma))
 
@@ -288,7 +288,7 @@ parseHexPair t = case T.unpack t of
   _ -> Nothing
 
 colorPickerDisplayText :: Color -> Text
-colorPickerDisplayText col = colorPickerToHex col
+colorPickerDisplayText col = colorToHex col
 
 tableStripeEven :: Int
 tableStripeEven = 1

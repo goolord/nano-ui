@@ -41,12 +41,12 @@ runAnimationDamageTest :: Context -> IORef Int -> IO ()
 runAnimationDamageTest _ failed = do
   ctx <- newContext
   let idleInp = withDelta 200 100 0
-      idle = label_ "anim"
+      idle = label "anim"
       tweenInp = idleInp {inputDeltaTime = 0.05}
       ui = do
         t <- animateTo (Tween EaseLinear 0.4 0) 1
         void (spacer (Fixed (20 + 80 * t)) Fit)
-        label_ "anim"
+        label "anim"
       hasMove dmg = case dmg of
         DamageFull -> True
         DamageClip r -> rectW r > 0 && rectH r > 0
@@ -62,7 +62,7 @@ runAnimationDamageTest _ failed = do
       uiFast = do
         t <- animateTo (Tween EaseLinear 0.2 0) 1
         void (spacer (Fixed (20 + 80 * t)) Fit)
-        label_ "anim"
+        label "anim"
   _ <- runFrame ctx2 idleInp idle
   _ <- runFrame ctx2 idleInp idle
   _ <- runFrame ctx2 fastInp uiFast
@@ -88,7 +88,7 @@ runAnimationStaggerTest ctx failed = do
   let ui = do
         _ <- withKey ("lead" :: String) (animateTo (Tween EaseLinear 0.4 0) 1)
         t <- withKey ("trail" :: String) (animateTo (Tween EaseLinear 0.4 0.08) 1)
-        label_ (T.pack ("t=" ++ show t))
+        label (T.pack ("t=" ++ show t))
       trailVal = do
         spans <- collectTextSpans ctx
         let shown = [txt | (_, txt, _, _, _) <- spans]
@@ -149,7 +149,7 @@ runCompositeAnimationIsolationTest _ failed =
         ui = do
           a <- animateVector (V2 1 2)
           b <- animateVector (V2 (-1) (-2))
-          label_ (T.pack (show (a, b)))
+          label (T.pack (show (a, b)))
           pure (a, b)
     replicateM_ 80 (runFrame ctx inp ui)
     ((V2 ax ay, V2 bx by), _, _, _) <- runFrame ctx inp ui

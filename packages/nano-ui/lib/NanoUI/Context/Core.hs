@@ -60,6 +60,12 @@ module NanoUI.Context.Core
   , writeStoreFloat
   , writeStoreText
   , writeStoreBool
+  , adoptStoreInt
+  , adoptStoreFloat
+  , adoptStoreText
+  , recordStoreInt
+  , recordStoreFloat
+  , recordStoreText
   , isDisabled
   ) where
 
@@ -91,6 +97,7 @@ import NanoUI.Store
   , ptrEq
   , slotDisabled
   , slotKey
+  , slotSeen
   )
 import NanoUI.Types (Damage, DamageBounds (..), Rect, Size, defaultDamageSlop, rectH, rectW)
 
@@ -395,6 +402,66 @@ writeStoreText = writeSlot storeText (\m st -> st {storeText = m})
 {-# INLINE writeStoreBool #-}
 writeStoreBool :: Context -> WidgetId -> Bool -> IO ()
 writeStoreBool ctx owner v = writeStoreInt ctx owner (intKey owner) (boolInt v)
+
+-- | Controlled widgets take their value from the caller every frame. The
+-- caller's value replaces the stored one only when it differs from the value
+-- the widget last returned ('recordSlot'). An edit applied between frames,
+-- such as a menu cut, then survives a caller that passes the previous result
+-- back, while a value changed by the application still wins.
+{-# INLINE adoptSlot #-}
+adoptSlot ::
+  Eq a =>
+  (WidgetStore -> IntMap a) ->
+  (IntMap a -> WidgetStore -> WidgetStore) ->
+  Context ->
+  WidgetId ->
+  Int ->
+  a ->
+  IO ()
+adoptSlot field setField ctx owner k v = do
+  st <- readIORef (ctxStore ctx)
+  let
+    m = field st
+    seenK = slotKey slotSeen k
+  when (IM.lookup seenK m /= Just v) $ do
+    writeIORef (ctxStore ctx) $! setField (IM.insert seenK v (IM.insert k v m)) st
+    when (IM.lookup k m /= Just v) $ do
+      damageWidget ctx owner DamageSelf
+      markDirty ctx
+
+-- | Remember the value a controlled widget returned this frame.
+{-# INLINE recordSlot #-}
+recordSlot ::
+  Eq a =>
+  (WidgetStore -> IntMap a) ->
+  (IntMap a -> WidgetStore -> WidgetStore) ->
+  Context ->
+  Int ->
+  a ->
+  IO ()
+recordSlot field setField ctx k v = do
+  st <- readIORef (ctxStore ctx)
+  let seenK = slotKey slotSeen k
+  when (IM.lookup seenK (field st) /= Just v) $
+    writeIORef (ctxStore ctx) $! setField (IM.insert seenK v (field st)) st
+
+adoptStoreInt :: Context -> WidgetId -> Int -> Int -> IO ()
+adoptStoreInt = adoptSlot storeInt (\m st -> st {storeInt = m})
+
+adoptStoreFloat :: Context -> WidgetId -> Int -> Float -> IO ()
+adoptStoreFloat = adoptSlot storeFloat (\m st -> st {storeFloat = m})
+
+adoptStoreText :: Context -> WidgetId -> Int -> Text -> IO ()
+adoptStoreText = adoptSlot storeText (\m st -> st {storeText = m})
+
+recordStoreInt :: Context -> Int -> Int -> IO ()
+recordStoreInt = recordSlot storeInt (\m st -> st {storeInt = m})
+
+recordStoreFloat :: Context -> Int -> Float -> IO ()
+recordStoreFloat = recordSlot storeFloat (\m st -> st {storeFloat = m})
+
+recordStoreText :: Context -> Int -> Text -> IO ()
+recordStoreText = recordSlot storeText (\m st -> st {storeText = m})
 
 {-# INLINE getStoreBool #-}
 getStoreBool :: Context -> WidgetId -> Bool -> IO Bool

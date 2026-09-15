@@ -135,7 +135,7 @@ testChartCache = do
     ctx = withFontMetrics base fm
     render c = do
       _ <-
-        runFrame c inp $ Plot.lineChart (fixedWH 360 200 defaultLayout) [(0, 0), (1, 1)]
+        runFrame c inp $ Plot.lineChart (fixedWH 360 200) [(0, 0), (1, 1)]
       cache <- readIORef (ctxDrawingCache c)
       pure (map doeContent (toList (dcsDrawOpCache cache)))
   first <- render ctx
@@ -155,12 +155,12 @@ testRendering ctx inp = do
     ok d = drawIndexCount d > 0 && not (drawCmdNull d)
   (_, _, filled, _) <-
     runFrame ctx inp $
-      diagram (fixedWH 200 80 defaultLayout) (circle 1 # fc coral # lw none)
+      diagram (fixedWH 200 80) (circle 1 # fc coral # lw none)
   unless (ok filled) $
     fail "diagram produced no draw commands"
   (_, _, filledAgain, _) <-
     runFrame ctx inp $
-      diagram (fixedWH 200 80 defaultLayout) (circle 1 # fc coral # lw none)
+      diagram (fixedWH 200 80) (circle 1 # fc coral # lw none)
   unless (ok filledAgain) $
     fail "cached diagram produced no draw commands"
 

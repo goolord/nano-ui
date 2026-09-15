@@ -33,26 +33,26 @@ smallUi, mediumUi, largeUi :: NanoUI ()
 smallUi =
   columnWith (gap 8) $ do
     void (button "OK")
-    void (label "Hello")
+    label "Hello"
 
 mediumUi =
-  column'
-    (defaultLayout {layoutWidth = Grow 1, layoutHeight = Grow 1, layoutGap = 8})
+  columnWith
+    (grow . gap 8)
     ( do
         replicateM_ 12 $
-          grid' 8 (defaultLayout {layoutGap = 8}) $
+          gridWith 8 (gap 8) $
             replicateM_ 8 (void (button "OK"))
-        void (label "nano-ui SDL bench")
+        label "nano-ui SDL bench"
     )
 
 largeUi =
-  column'
-    (defaultLayout {layoutWidth = Grow 1, layoutHeight = Grow 1, layoutGap = 6})
+  columnWith
+    (grow . gap 6)
     ( do
         replicateM_ 20 $
-          grid' 10 (defaultLayout {layoutGap = 6}) $
+          gridWith 10 (gap 6) $
             replicateM_ 10 (void (button "Item"))
-        replicateM_ 8 (void (label "Status line with a bit of text"))
+        replicateM_ 8 (label "Status line with a bit of text")
     )
 
 configureBenchIO :: IO ()

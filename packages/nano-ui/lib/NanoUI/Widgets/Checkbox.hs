@@ -1,30 +1,36 @@
 -- | Checkbox control.
-module NanoUI.Widgets.Checkbox (checkbox) where
+module NanoUI.Widgets.Checkbox (checkbox, checkbox') where
 
-import Control.Monad (when)
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
-import NanoUI.Context (getStoreBool, registerFocusable, writeStoreBool)
+import NanoUI.Context (adoptStoreInt, getStoreBool, intKey, recordStoreInt, registerFocusable, writeStoreBool)
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, nextId, uiIO)
+import NanoUI.Store (boolInt)
 import NanoUI.Style (defaultLayout)
 import NanoUI.Widgets.Behavior (keyActivated)
 import NanoUI.Widgets.Node (Response, addWidget, respClicked, setChanged)
 
--- | Uncontrolled checkbox initialized from the supplied value.
--- Returns @(response, currentValue)@; use @NanoUI.State.checkboxControlled@
--- when the caller owns the current value.
-checkbox :: Ui :> es => Text -> Bool -> Eff es (Response, Bool)
-checkbox txt initial = do
+-- | Checkbox with a caption. Pass whether it is checked; the result is the
+-- state after this frame's click or Space/Enter.
+{-# INLINE checkbox #-}
+checkbox :: Ui :> es => Text -> Bool -> Eff es Bool
+checkbox txt checked = snd <$> checkbox' txt checked
+
+checkbox' :: Ui :> es => Text -> Bool -> Eff es (Response, Bool)
+checkbox' txt checked = do
   wid <- nextId
   ctx <- askContext
   uiIO $ registerFocusable ctx wid
-  current <- uiIO (getStoreBool ctx wid initial)
+  let key = intKey wid
+  uiIO $ adoptStoreInt ctx wid key (boolInt checked)
+  current <- uiIO (getStoreBool ctx wid checked)
   resp <- addWidget wid NodeCheckbox txt (if current then 1 else 0) defaultLayout
   keyClick <- keyActivated wid
   let
     clicked = respClicked resp || keyClick
     display = current /= clicked
-  when clicked $
-    uiIO $ writeStoreBool ctx wid display
+  uiIO $ do
+    writeStoreBool ctx wid display
+    recordStoreInt ctx key (boolInt display)
   pure (setChanged clicked resp, display)

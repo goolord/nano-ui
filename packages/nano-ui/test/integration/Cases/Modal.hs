@@ -4,7 +4,7 @@ module Cases.Modal
   , runModalOverlayTest
   ) where
 
-import Control.Monad (forM_)
+import Control.Monad (forM_, when)
 import Data.IORef (IORef)
 import Data.Text qualified as T
 import NanoUI
@@ -76,7 +76,7 @@ runModalNoPhantomScrollTest ctx failed = do
   let inp0 = withInput 400 300
       ui = modal True "About" $ do
         _ <- label "Immediate-mode GUI for Haskell."
-        row' (defaultLayout {layoutWidth = Grow 1}) $ do
+        rowWith fillW $ do
           _ <- spacer (Grow 1) Fit
           _ <- button "Close"
           pure ()
@@ -97,9 +97,9 @@ runModalCloseDamageTest ctx failed = do
   let ui = do
         (open, setOpen) <- useFlag False
         resp <- button' "Open"
-        onClick resp (setOpen True)
+        when (respClicked resp) (setOpen True)
         (dlg, _) <- modal open "Title" (label "body")
-        onClick dlg (setOpen False)
+        when (respClicked dlg) (setOpen False)
         pure resp
       inp0 = withInputOff 320 240
       esc = inp0 {inputKeys = inputKeysFromList [KeyEscape]}

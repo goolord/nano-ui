@@ -4,8 +4,8 @@ module NanoUI.Widgets.Tabs
   ( Tab (..), TabStyle (..), TabOrientation (..), TabResponse (..)
   , TabsConfig (..), defaultTabsConfig
   , tab, closableTab
-  , tabs, tabsWith, tabBar, tabBarWith, tabsEmit
-  , boundedTabs
+  , tabs, tabs', tabsConfigured, tabsConfigured'
+  , tabBar, tabBar', tabBarConfigured, tabBarConfigured'
   )
 where
 
@@ -16,7 +16,6 @@ import Data.List (find)
 import qualified Data.IntMap.Strict as IM
 import Data.Maybe (isJust, listToMaybe)
 import Data.Text (Text)
-import Data.Typeable (Typeable)
 import Effectful (Eff, type (:>))
 import NanoUI.Context
   ( Context (..)
@@ -31,11 +30,10 @@ import NanoUI.Context
 import NanoUI.Font (resolveLayoutPadding)
 import NanoUI.Frame.Hit (findNodeByWidgetId)
 import NanoUI.Frame.Scroll.Geometry (scrollAxisRange, scrollBare, scrollHorizontalHidden, scrollLineFor)
-import NanoUI.Hooks (useEnum)
 import NanoUI.Id (WidgetId)
 import NanoUI.Input (inputMousePos, inputScroll)
 import NanoUI.Layout.Arena (setNodeValue)
-import NanoUI.Monad (Ui, askContext, askInput, emit, nextId, uiIO, withKey)
+import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
 import NanoUI.Store (WidgetStore (storeFloat), slotKey, slotScrollContent)
 import NanoUI.Style
   ( AlignX (..)
@@ -57,7 +55,6 @@ import NanoUI.Widgets.Layout (column', columnWith, row', rowWith, scrollAreaIdCo
 import NanoUI.Widgets.Node
   ( HasResponse (..)
   , Response (..)
-  , respChanged
   , respClicked
   , respId
   , respRect
@@ -220,7 +217,7 @@ renderScrollableHeaders ctx style hdrLay barLay groupId cur tabList = do
           , layoutPadding = Padding 0 0 0 0
           }
       -- Hidden + bare: the scroller owns the clip, offset, wheel, and damage
-      -- but paints nothing — no well, no scrollbar — so the headers look
+      -- but paints nothing (no well, no scrollbar), so the headers look
       -- exactly as they did before the strip could scroll.
       scrollerCfg = scrollHorizontalHidden {scrollBare = True}
       rangeKey = slotKey slotScrollContent (intKey scrollWid)
@@ -384,34 +381,43 @@ syncTabHeaderActive ctx active resps =
       Just i -> setNodeValue (ctxNodeArena ctx) i (if k == active then 1 else 0)
       Nothing -> pure ()
 
--- | Tab headers plus the active tab's body, with 'defaultTabsConfig'.
-tabs :: (Foldable f, Eq a, Ui :> es) => a -> f (Tab a (Eff es ())) -> Eff es (TabResponse a, a)
-tabs = tabsWith defaultTabsConfig
+-- | Tab headers and the active tab's body. Pass the active key; the result is
+-- the active key after this frame's clicks or arrow keys. Only the active
+-- tab's body runs.
+{-# INLINE tabs #-}
+tabs :: (Foldable f, Eq a, Ui :> es) => a -> f (Tab a (Eff es ())) -> Eff es a
+tabs = tabsConfigured defaultTabsConfig
 
-tabsWith :: (Foldable f, Eq a, Ui :> es) => TabsConfig -> a -> f (Tab a (Eff es ())) -> Eff es (TabResponse a, a)
-tabsWith cfg cur inputTabs =
+-- | 'tabs' returning the 'TabResponse', which also reports a closed tab.
+{-# INLINE tabs' #-}
+tabs' :: (Foldable f, Eq a, Ui :> es) => a -> f (Tab a (Eff es ())) -> Eff es (TabResponse a)
+tabs' = tabsConfigured' defaultTabsConfig
+
+-- | 'tabs' with a header style and placement.
+tabsConfigured :: (Foldable f, Eq a, Ui :> es) => TabsConfig -> a -> f (Tab a (Eff es ())) -> Eff es a
+tabsConfigured cfg active inputTabs =
   let ts = foldr (:) [] inputTabs
-   in tabStrip cfg cur ts (Just (renderBody ts))
+   in snd <$> tabStrip cfg active ts (Just (renderBody ts))
+
+tabsConfigured' :: (Foldable f, Eq a, Ui :> es) => TabsConfig -> a -> f (Tab a (Eff es ())) -> Eff es (TabResponse a)
+tabsConfigured' cfg active inputTabs =
+  let ts = foldr (:) [] inputTabs
+   in fst <$> tabStrip cfg active ts (Just (renderBody ts))
 
 -- | Tab headers only; the caller renders the body.
-tabBar :: (Foldable f, Eq a, Ui :> es) => a -> f (Tab a body) -> Eff es (TabResponse a, a)
-tabBar = tabBarWith defaultTabsConfig
+{-# INLINE tabBar #-}
+tabBar :: (Foldable f, Eq a, Ui :> es) => a -> f (Tab a body) -> Eff es a
+tabBar = tabBarConfigured defaultTabsConfig
 
-tabBarWith :: (Foldable f, Eq a, Ui :> es) => TabsConfig -> a -> f (Tab a body) -> Eff es (TabResponse a, a)
-tabBarWith cfg cur ts = tabStrip cfg cur (foldr (:) [] ts) Nothing
+{-# INLINE tabBar' #-}
+tabBar' :: (Foldable f, Eq a, Ui :> es) => a -> f (Tab a body) -> Eff es (TabResponse a)
+tabBar' = tabBarConfigured' defaultTabsConfig
 
--- | 'tabs' that emits @toAction@ for the newly selected tab.
-tabsEmit :: (Foldable f, Typeable action, Eq a, Ui :> es) => (a -> action) -> a -> f (Tab a (Eff es ())) -> Eff es (TabResponse a, a)
-tabsEmit toAction cur ts = do
-  (tabResp, nextTab) <- tabs cur ts
-  when (respChanged tabResp) $ emit (toAction nextTab)
-  pure (tabResp, nextTab)
+tabBarConfigured :: (Foldable f, Eq a, Ui :> es) => TabsConfig -> a -> f (Tab a body) -> Eff es a
+tabBarConfigured cfg active ts = snd <$> tabStrip cfg active (foldr (:) [] ts) Nothing
 
-boundedTabs :: (Bounded a, Enum a, Eq a, Ui :> es) => a -> (a -> Text) -> (a -> Eff es ()) -> Eff es ()
-boundedTabs initial encodeTab tabf = do
-  (curTab, setTab) <- useEnum initial
-  (tabResp, nextTab) <- tabs curTab (fmap (\x -> tab x (encodeTab x) (tabf x)) [minBound .. maxBound])
-  when (respChanged tabResp) (setTab nextTab)
+tabBarConfigured' :: (Foldable f, Eq a, Ui :> es) => TabsConfig -> a -> f (Tab a body) -> Eff es (TabResponse a)
+tabBarConfigured' cfg active ts = fst <$> tabStrip cfg active (foldr (:) [] ts) Nothing
 
 renderBody :: (Eq a, Ui :> es) => [Tab a (Eff es ())] -> a -> Eff es ()
 renderBody ts activeKey =

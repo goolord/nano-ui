@@ -14,7 +14,7 @@ module Cases.Scroll
   , runPageScrollBackdropCoverageTest
   ) where
 
-import Control.Monad (forM, forM_, replicateM, replicateM_, void)
+import Control.Monad (forM, forM_, replicateM, replicateM_, void, when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (sort)
 import Data.Maybe (listToMaybe)
@@ -48,7 +48,7 @@ import NanoUI.Testing.Harness
 runScrollThumbCursorTest :: Context -> IORef Int -> IO ()
 runScrollThumbCursorTest ctx failed = do
   let inp0 = withInput 200 120
-      ui = scrollArea (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 80})
+      ui = scrollArea (fillW . fixedH 80)
              (column (replicateM 8 (label "scroll line") >> pure ()))
   ((sid, ()), _, _, _) <- runFrame ctx inp0 ui >>= \_ -> runFrame ctx inp0 ui
   mrect <- getPrevRect ctx sid
@@ -76,22 +76,22 @@ runScrollBarGutterTest :: Context -> IORef Int -> IO ()
 runScrollBarGutterTest ctx failed = do
   let fm = ctxFontMetrics ctx
       wideThen n = do
-        r <- labelEx (fillW defaultLayout) "Wide"
+        r <- labelWith' fillW "Wide"
         _ <- replicateM n (label "scroll line")
         pure r
       cases =
         [ ( withInput 200 120
-          , scrollArea (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 60}) (wideThen 8)
+          , scrollArea (fillW . fixedH 60) (wideThen 8)
           , scrollBarGutter fm + scrollBarListExtra
           , padR (layoutPadding defaultLayout)
           )
         , ( withInput 240 140
-          , scrollArea (tight (grow defaultLayout)) (wideThen 20)
+          , scrollArea (tight . grow) (wideThen 20)
           , scrollBarGutter fm + scrollBarPageExtra
           , 0
           )
         , ( withInput 240 140
-          , panelWith grow (scrollArea (tight (grow defaultLayout)) (wideThen 20))
+          , panelWith grow (scrollArea (tight . grow) (wideThen 20))
           , scrollBarGutter fm + scrollBarListExtra
           , 0
           )
@@ -105,7 +105,7 @@ runScrollDamageTest :: Context -> IORef Int -> IO ()
 runScrollDamageTest ctx failed = do
   let scrollUi =
         fmap fst $
-          scrollArea (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 60}) $
+          scrollArea (fillW . fixedH 60) $
             column (replicateM 8 (label "scroll line") >> pure ())
       inp0 = withInputOff 200 120
   sid <- warmup2 ctx inp0 scrollUi
@@ -118,7 +118,7 @@ runScrollDamageTest ctx failed = do
 
 -- Ghosting guard: a grow×grow (page-level) scroll container paints no well,
 -- so on clip frames the strip vacated by scrolled content has no covering
--- command and the retained texture would show stale pixels — a ghost of a
+-- command and the retained texture would show stale pixels, a ghost of a
 -- previous scroll position. Every frame must emit a full-viewport fill (the
 -- window-color backdrop) so clip replay repaints the whole viewport.
 runPageScrollBackdropCoverageTest :: Context -> IORef Int -> IO ()
@@ -126,7 +126,7 @@ runPageScrollBackdropCoverageTest ctx failed = do
   let inp0 = withInputOff 300 220
       ui = fmap fst $
         scrollArea
-          (defaultLayout {layoutWidth = Grow 1, layoutHeight = Grow 1})
+          grow
           (column (replicateM 20 (label "scroll backdrop line") >> pure ()))
   sid <- warmup2 ctx inp0 ui
   setScrollOffset ctx sid 120
@@ -157,7 +157,7 @@ runScrollTopClipTest _ failed = do
           columnWith (padAll 8 . gap 8 . fillW) $
             card $ do
               heading "Controls"
-              (cb, _) <- checkbox "Feature" False
+              (cb, _) <- checkbox' "Feature" False
               _ <- slider 0 100 50
               mapM_ (\i -> void (label (T.pack ("pad line " <> show (i :: Int))))) [1 .. 16]
               uiIO $ writeIORef cbRef (Just cb)
@@ -183,9 +183,9 @@ runScrollTopClipTest _ failed = do
 runNestedScrollTest :: Context -> IORef Int -> IO ()
 runNestedScrollTest ctx failed = do
   let inp0 = withInput 200 200
-      ui = scrollArea (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 90}) $
+      ui = scrollArea (fillW . fixedH 90) $
              column $ do
-               (inner, ()) <- scrollArea (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 40}) $
+               (inner, ()) <- scrollArea (fillW . fixedH 40) $
                                 column (mapM_ (\i -> label (T.pack ("in " <> show (i :: Int)))) [1 .. 12])
                mapM_ (\i -> label (T.pack ("out " <> show (i :: Int)))) [1 .. 12]
                pure inner
@@ -228,10 +228,10 @@ runNestedScrollTest ctx failed = do
 runScrollHoverClipTest :: Context -> IORef Int -> IO ()
 runScrollHoverClipTest ctx failed = do
   let inp0 = withInput 200 200
-      ui = scrollArea (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 80}) $
+      ui = scrollArea (fillW . fixedH 80) $
              column $ do
                 mapM_ (\i -> label (T.pack ("out " <> show (i :: Int)))) [1 .. 10]
-                (inner, ()) <- scrollArea (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 36}) $
+                (inner, ()) <- scrollArea (fillW . fixedH 36) $
                                  column (mapM_ (\i -> label (T.pack ("in " <> show (i :: Int)))) [1 .. 8])
                 pure inner
   (_, inner) <- warmup2 ctx inp0 ui
@@ -251,8 +251,8 @@ runScrollButtonClickTest :: Context -> IORef Int -> IO ()
 runScrollButtonClickTest ctx failed = do
   pixel <- newPixelContext
   forM_
-    [ (ctx, withInput 240 160, defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 80})
-    , (pixel, withInput 640 120, tight (grow defaultLayout))
+    [ (ctx, withInput 240 160, fillW . fixedH 80)
+    , (pixel, withInput 640 120, tight . grow)
     ] $ \(c, inp0, scrollLayout) -> do
       let ui = do
             (hit, setHit) <- useText ""
@@ -260,7 +260,7 @@ runScrollButtonClickTest ctx failed = do
                              column $ do
                                mapM_ (\_ -> void (label "pad")) [(1 :: Int) .. 6]
                                b <- button' "Target"
-                               onClick b (setHit "yes")
+                               when (respClicked b) (setHit "yes")
                                pure b
             pure (sid, hit, resp)
       (sid, hit0, _) <- warmup2 c inp0 ui
@@ -281,9 +281,9 @@ runScrollButtonClickTest ctx failed = do
 runNestedScrollFocusTest :: Context -> IORef Int -> IO ()
 runNestedScrollFocusTest ctx failed = do
   let inp0 = withInput 240 220
-      ui = scrollArea (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 90}) $
+      ui = scrollArea (fillW . fixedH 90) $
              column $ do
-               pair <- scrollArea (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 50}) $
+               pair <- scrollArea (fillW . fixedH 50) $
                          column $ do
                            b <- button' "In"
                            mapM_ (\i -> label (T.pack ("in " <> show (i :: Int)))) [1 .. 10]
@@ -309,11 +309,11 @@ runScrolledOutImmunityTest ctx failed = do
   let inp0 = withInput 240 160
       ui = do
         (hit, setHit) <- useText ""
-        (sid, b) <- scrollArea (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 8}) $
+        (sid, b) <- scrollArea (fillW . fixedH 8) $
                       column $ do
                         mapM_ (\_ -> void (label "pad")) [(1 :: Int) .. 40]
                         btn <- button' "Target"
-                        onClick btn (setHit "yes")
+                        when (respClicked btn) (setHit "yes")
                         pure btn
         pure (sid, b, hit)
   (sid, b, hit0) <- warmup2 ctx inp0 ui
@@ -361,13 +361,13 @@ runScrollLockstepProbeTest ctx failed = do
         , ("Table sort", "Name")
         ]
       kvRow k v =
-        row' (tight . gap 12 . alignMid . fillW $ defaultLayout) $ do
-          void (labelEx (minW 88 (tight defaultLayout)) (T.pack k))
-          void (labelEx (tight . fillW . alignEnd $ defaultLayout) (T.pack v))
+        rowWith (tight . gap 12 . alignMid . fillW) $ do
+          labelWith (minW 88 . tight) (T.pack k)
+          labelWith (tight . fillW . alignEnd) (T.pack v)
       keys = map (T.pack . fst) rows
       ui =
         scrollArea
-          (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 200})
+          (fillW . fixedH 200)
           (column (mapM_ (\(k, v) -> kvRow k v >> separator) rows))
   _ <- runFrame ctx inp0 ui
   ((sid, ()), _, _, _) <- runFrame ctx inp0 ui
@@ -452,7 +452,7 @@ run2DPadFillOverflowTest _ failed = do
   ctx <- newPixelContext
   let inp0 = withInput 320 240
       ui =
-        scrollArea2D (padAll 6 . fixedH 168 . fillW $ defaultLayout) $
+        scrollArea2D (padAll 6 . fixedH 168 . fillW) $
           columnWith (tight . fillW) $
             mapM_ (void . label) (map T.pack ["alpha", "beta", "gamma"])
   (wid, ()) <- warmup2 ctx inp0 ui
@@ -465,7 +465,7 @@ run2DPadFillOverflowTest _ failed = do
   _ <- runFrame ctx wheel ui
   V2 offX offY <- getScrollOffset2D ctx wid
   assert failed (offX == 0 && offY == 0)
-  let ui1 = scrollArea (padAll 6 . fixedH 80 . fillW $ defaultLayout) (void (labelEx (tight defaultLayout) (T.pack "fits")))
+  let ui1 = scrollArea (padAll 6 . fixedH 80 . fillW) (labelWith tight (T.pack "fits"))
   (wid1, ()) <- warmup2 ctx inp0 ui1
   mState1 <- scrollNodeState ctx wid1 False
   case mState1 of
@@ -517,9 +517,9 @@ run2DPadOverflowScrollsTest _ failed = do
   ctx <- newPixelContext
   let inp0 = (withInput 320 240) {inputMousePos = V2 100 100}
       ui =
-        scrollArea2D (padAll 6 . fixedH 168 . fillW $ defaultLayout) $
+        scrollArea2D (padAll 6 . fixedH 168 . fillW) $
           columnWith (tight . fillW) $ do
-            void (labelEx (tight . fixedW 500 $ defaultLayout) (T.pack "wide child"))
+            labelWith (tight . fixedW 500) (T.pack "wide child")
             mapM_ (void . label) (map T.pack (replicate 30 "scroll line"))
   (wid, ()) <- warmup2 ctx inp0 ui
   mState <- scrollNodeState ctx wid True

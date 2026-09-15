@@ -64,7 +64,7 @@ runTooltipScrollPosTest :: Context -> IORef Int -> IO ()
 runTooltipScrollPosTest ctx failed = do
   let inp0 = withInput 200 200
       ui =
-        scrollArea (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 80}) $
+        scrollArea (fillW . fixedH 80) $
           column $ do
             mapM_ (\_ -> void (label "pad line")) [(1 :: Int) .. 40]
             btn <- button' "Tip Target"

@@ -257,7 +257,7 @@ churnWindowUi k = do
   _ <- button "Outside"
   void $ fst <$> window True "Churn" (columnWith (tight . gap 4 . minW 300 . fillW) $ do
     void $ kvMono "value" (T.pack (replicate (1 + (k `mod` 9)) 'M'))
-    void $ label "static row"
+    label "static row"
     )
 
 churnFrame :: Context -> Input -> IORef Int -> IO ()
@@ -296,16 +296,17 @@ tabControlsUi :: NanoUI ()
 tabControlsUi = columnWith (tight . gap 8 . fillW) $ do
   heading "Controls"
   void $ checkbox "Feature" False
-  void $ label "Volume"
+  label "Volume"
   void $ slider 0 100 50
   let qualities = ["Low", "Medium", "High"]
-  void $ selectLabeled "Quality" qualities 1
-  void $ label "Accent"
+  label "Quality"
+  void $ select qualities 1
+  label "Accent"
   void $ colorPicker (colorRGBA 204 102 102 255)
   muted "Theme"
-  void $ radioFieldset ["Light", "Dark", "System"] 1
+  void $ radio ["Light", "Dark", "System"] 1
   muted "Name"
-  void $ textInputWithPlaceholder "Enter name" ""
+  void $ textInputConfigured defaultTextInputConfig {ticPlaceholder = "Enter name"} ""
   muted "Notes"
   void $ textArea "Edit me.\nSecond line."
   rowWith (tight . gap 8 . fillW) $ do
@@ -314,9 +315,9 @@ tabControlsUi = columnWith (tight . gap 8 . fillW) $ do
     btnMenu <- button' "Right-click Menu"
     void $ contextMenu btnMenu $ do
       menuHeader "Context Menu"
-      void $ menuItemWithShortcut "Cut" "Ctrl+X"
-      void $ menuItemWithShortcut "Copy" "Ctrl+C"
-      void $ menuItemWithShortcut "Paste" "Ctrl+V"
+      void $ menuItemShortcut "Cut" "Ctrl+X"
+      void $ menuItemShortcut "Copy" "Ctrl+C"
+      void $ menuItemShortcut "Paste" "Ctrl+V"
 
 tabListUi :: NanoUI ()
 tabListUi = columnWith (tight . gap 8 . fillW) $ do
@@ -327,15 +328,14 @@ tabListUi = columnWith (tight . gap 8 . fillW) $ do
   scroll2DWith (padAll 6 . fixedH 136 . fillW) $
     columnWith (tight . gap 0 . fillW) $
       forM_ [1 .. 12 :: Int] $ \i ->
-        void $ labelEx (tight . fillW $ defaultLayout) (T.pack ("Item " <> show i))
+        labelWith (tight . fillW) (T.pack ("Item " <> show i))
 
 tabTableUi :: NanoUI ()
 tabTableUi = columnWith (tight . gap 8 . fillW) $ do
   heading "Table"
   void $
-    tableCfg
-      defaultTableCfg
-      (tight . fillW . fixedH 280 $ defaultLayout {layoutGap = 0})
+    tableWith
+      (fixedH 280)
       "people"
       colPeople
       demoPeople
@@ -344,8 +344,8 @@ tabTableUi = columnWith (tight . gap 8 . fillW) $ do
 tabPlotsUi :: NanoUI ()
 tabPlotsUi = columnWith (tight . gap 8 . fillW) $ do
   heading "Plots"
-  void $ plot (fillW . fixedH 120 $ defaultLayout) sineCosineChart
-  void $ barChart (fillW . fixedH 120 $ defaultLayout) weeklyBars
+  void $ plot (fillW . fixedH 120) sineCosineChart
+  void $ barChart (fillW . fixedH 120) weeklyBars
 
 tabDiagnosticsUi :: NanoUI ()
 tabDiagnosticsUi = columnWith (tight . gap 4 . fillW) $ do
@@ -372,19 +372,20 @@ benchCheckboxes = columnWith (tight . gap 2 . fillW) $
 benchSliders :: NanoUI ()
 benchSliders = columnWith (tight . gap 2 . fillW) $
   forM_ [1 .. 100 :: Int] $ \i -> do
-    void $ label (T.pack ("Slider " <> show i))
+    label (T.pack ("Slider " <> show i))
     void $ slider 0 100 (fromIntegral i)
 
 benchRadios :: NanoUI ()
 benchRadios = columnWith (tight . gap 2 . fillW) $
   forM_ [1 .. 100 :: Int] $ \i -> do
     muted (T.pack ("Radio " <> show i))
-    void $ radioFieldset ["A", "B", "C"] (i `mod` 3)
+    void $ radio ["A", "B", "C"] (i `mod` 3)
 
 benchSelects :: NanoUI ()
 benchSelects = columnWith (tight . gap 2 . fillW) $
-  forM_ [1 .. 100 :: Int] $ \i ->
-    void $ selectLabeled (T.pack ("Select " <> show i)) ["Option 1", "Option 2", "Option 3"] (i `mod` 3)
+  forM_ [1 .. 100 :: Int] $ \i -> do
+    label (T.pack ("Select " <> show i))
+    void $ select ["Option 1", "Option 2", "Option 3"] (i `mod` 3)
 
 benchTextInputs :: NanoUI ()
 benchTextInputs = columnWith (tight . gap 2 . fillW) $
@@ -400,7 +401,7 @@ benchTextAreas = columnWith (tight . gap 4 . fillW) $
 benchColorPickers :: NanoUI ()
 benchColorPickers = columnWith (tight . gap 4 . fillW) $
   forM_ [1 .. 20 :: Int] $ \_ -> do
-    void $ label "Pick"
+    label "Pick"
     void $ colorPicker (colorRGBA 100 150 200 255)
 
 benchLabels :: NanoUI ()
@@ -411,20 +412,20 @@ benchLabels = columnWith (tight . gap 2 . fillW) $
 benchBoxes :: NanoUI ()
 benchBoxes = gridWith 10 (tight . gap 2 . fillW) $
   forM_ [1 .. 100 :: Int] $ \i ->
-    box (fixedWH 20 20 defaultLayout) (colorRGBA (fromIntegral (i * 2)) 120 200 255)
+    box (fixedWH 20 20) (colorRGBA (fromIntegral (i * 2)) 120 200 255)
 
 benchImages :: NanoUI ()
 benchImages = gridWith 10 (tight . gap 2 . fillW) $
   forM_ [1 .. 100 :: Int] $ \i ->
-    image_ (fixedWH 24 24 defaultLayout) (ImageId (1 + i `mod` 3))
+    image (fixedWH 24 24) (ImageId (1 + i `mod` 3))
 
 benchContainers :: NanoUI ()
 benchContainers = columnWith (tight . gap 2 . fillW) $
   forM_ [1 .. 50 :: Int] $ \_ ->
     rowWith (tight . gap 2 . fillW) $ do
-      box (fixedWH 10 10 defaultLayout) (colorRGBA 255 0 0 255)
-      box (fixedWH 10 10 defaultLayout) (colorRGBA 0 255 0 255)
-      box (fixedWH 10 10 defaultLayout) (colorRGBA 0 0 255 255)
+      box (fixedWH 10 10) (colorRGBA 255 0 0 255)
+      box (fixedWH 10 10) (colorRGBA 0 255 0 255)
+      box (fixedWH 10 10) (colorRGBA 0 0 255 255)
 
 --------------------------------------------------------------------------------
 -- Scaling Benchmarks
@@ -433,12 +434,12 @@ benchContainers = columnWith (tight . gap 2 . fillW) $
 benchLargeTable :: NanoUI ()
 benchLargeTable =
   let rows = [DemoPerson (T.pack ("Name " <> show i)) (T.pack ("Dept " <> show (i `mod` 5))) (20 + i) "City" "Role" | i <- [1 .. 50 :: Int]]
-   in void $ tableCfg defaultTableCfg (tight . fillW . fixedH 400 $ defaultLayout) "bigTable" colPeople rows (SortCol 0 SortAsc)
+   in void $ tableWith (fixedH 400 . gap 8) "bigTable" colPeople rows (SortCol 0 SortAsc)
 
 benchHugeTable :: NanoUI ()
 benchHugeTable =
   let rows = [DemoPerson (T.pack ("Name " <> show i)) (T.pack ("Dept " <> show (i `mod` 5))) (20 + i) "City" "Role" | i <- [1 .. 200 :: Int]]
-   in void $ tableCfg defaultTableCfg (tight . fillW . fixedH 400 $ defaultLayout) "hugeTable" colPeople rows (SortCol 0 SortAsc)
+   in void $ tableWith (fixedH 400 . gap 8) "hugeTable" colPeople rows (SortCol 0 SortAsc)
 
 benchLargeTree :: NanoUI ()
 benchLargeTree =
@@ -449,4 +450,4 @@ benchLargeChart :: NanoUI ()
 benchLargeChart =
   let pts = [(x, sin x * cos (x * 0.5)) | x <- [0.0, 0.02 .. 10.0 :: Double]]
       c = withGrid GridBoth $ chart [line "f(x)" pts]
-   in void $ plot (fillW . fixedH 200 $ defaultLayout) c
+   in void $ plot (fillW . fixedH 200) c

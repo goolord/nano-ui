@@ -11,14 +11,15 @@ module Cases.Keyboard
   , runKeyboardModalEligibilityTest
   ) where
 
-import Data.IORef (IORef, writeIORef)
+import Data.IORef (IORef, newIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import NanoUI
 import NanoUI.Context (Context (..), intKey, setStore)
+import NanoUI.Emit qualified as Emit
 import NanoUI.Store (WidgetStore (..), slotDisabled, slotKey)
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertGt)
-import NanoUI.Testing.Harness (centerOf, clickPair, keyInp, tabInp, warmup2, withInputOff)
+import NanoUI.Testing.Harness (centerOf, clickPair, held, keyInp, tabInp, warmup2, withInputOff)
 
 -- Retaining focus while a widget becomes disabled must not bypass the same
 -- guard used by pointer interaction. Exercise the shared key-navigation hook.
@@ -40,22 +41,22 @@ runKeyboardDisabledTest _ctx failed = do
         assertEq failed
           (IM.lookup (intKey wid) (storeText st))
           (IM.lookup (intKey wid) (storeText afterStore))
-  check (checkbox "Disabled" False) (keyInp KeyEnter inp)
-  check (checkbox "Disabled" False) (spaceInp inp)
-  check (slider 0 100 50) (keyInp KeyRight inp)
-  check (toggleSwitch False) (spaceInp inp)
-  check (textInput "initial") (inp {inputChars = "x"})
-  check (textArea "initial") (inp {inputChars = "x"})
-  check (searchField "Search" "initial") (inp {inputChars = "x"})
-  check (comboBox "Choose" ["initial", "other"] "initial") (inp {inputChars = "x"})
+  check (checkbox' "Disabled" False) (keyInp KeyEnter inp)
+  check (checkbox' "Disabled" False) (spaceInp inp)
+  check (slider' 0 100 50) (keyInp KeyRight inp)
+  check (toggleSwitch' False) (spaceInp inp)
+  check (textInput' "initial") (inp {inputChars = "x"})
+  check (textArea' "initial") (inp {inputChars = "x"})
+  check (searchField' "Search" "initial") (inp {inputChars = "x"})
+  check (comboBox' "Choose" ["initial", "other"] "initial") (inp {inputChars = "x"})
   check (do r <- button' "Disabled"; pure (r, respClicked r)) (keyInp KeyEnter inp)
 
 runKeyboardModalEligibilityTest :: Context -> IORef Int -> IO ()
 runKeyboardModalEligibilityTest ctx failed = do
   let inp = withInputOff 400 300
       ui = column $ do
-        outside <- checkbox "Outside" False
-        (_, inside) <- modal True "Modal" (checkbox "Inside" False)
+        outside <- checkbox' "Outside" False
+        (_, inside) <- modal True "Modal" (checkbox' "Inside" False)
         pure (outside, inside)
   ((outside, inside), _, _, _) <- runFrame ctx inp ui
   writeIORef (ctxFocusId ctx) (respId (fst outside))
@@ -90,29 +91,34 @@ runKeyboardButtonTest ctx failed = do
   ((_, bEnter), _, _, _) <- runFrame ctx (keyInp KeyEnter inp0) ui
   assert failed bEnter
 
--- | A focused checkbox toggles with Space and Enter, and 'checkboxEmit'
+-- | A focused checkbox toggles with Space and Enter, and 'Emit.checkbox'
 -- emits its new value on keyboard activation.
 runKeyboardCheckboxTest :: Context -> IORef Int -> IO ()
 runKeyboardCheckboxTest ctx failed = do
+  checkedRef <- newIORef False
   let inp0 = withInputOff 200 100
-      ui = column (checkbox "Opt" False)
+      ui = column (held checkedRef (checkbox' "Opt"))
   _ <- warmup2 ctx inp0 ui
   _ <- runFrame ctx (tabInp inp0) ui
   ((_, checked1), _, _, _) <- runFrame ctx (spaceInp inp0) ui
   assert failed checked1
   ((_, checked2), _, _, _) <- runFrame ctx (keyInp KeyEnter inp0) ui
   assert failed (not checked2)
-  let emitUi = checkboxEmit "Emit" False id
-  (resp, _, _, _) <- runFrame ctx inp0 emitUi
-  writeIORef (ctxFocusId ctx) (respId resp)
+  let emitUi = do
+        wid <- currentId
+        Emit.checkbox "Emit" False id
+        pure wid
+  (wid, _, _, _) <- runFrame ctx inp0 emitUi
+  writeIORef (ctxFocusId ctx) wid
   (_, messages, _, _) <- runFrame ctx (keyInp KeyEnter inp0) emitUi
   assertEq failed [True] (decodeMessages messages :: [Bool])
 
 -- | A focused slider steps with the arrow keys.
 runKeyboardSliderTest :: Context -> IORef Int -> IO ()
 runKeyboardSliderTest ctx failed = do
+  valueRef <- newIORef 50
   let inp0 = withInputOff 300 80
-      ui = column (slider 0 100 50)
+      ui = column (held valueRef (slider' 0 100))
   (_, v0) <- warmup2 ctx inp0 ui
   assertEq failed v0 50
   _ <- runFrame ctx (tabInp inp0) ui
@@ -128,8 +134,9 @@ runKeyboardSliderTest ctx failed = do
 -- | A focused radio group changes selection with the arrow keys.
 runKeyboardRadioTest :: Context -> IORef Int -> IO ()
 runKeyboardRadioTest ctx failed = do
+  selectedRef <- newIORef 0
   let inp0 = withInputOff 200 160
-      ui = column (radioFieldset ["A", "B", "C"] 0)
+      ui = column (held selectedRef (radio' ["A", "B", "C"]))
   (_, sel0) <- warmup2 ctx inp0 ui
   assertEq failed sel0 0
   _ <- runFrame ctx (tabInp inp0) ui
@@ -143,8 +150,9 @@ runKeyboardRadioTest ctx failed = do
 -- | A toggle switch flips with Space and Enter while focused, and on click.
 runKeyboardToggleTest :: Context -> IORef Int -> IO ()
 runKeyboardToggleTest ctx failed = do
+  onRef <- newIORef False
   let inp0 = withInputOff 200 100
-      ui = column (toggleSwitch False)
+      ui = column (held onRef toggleSwitch')
   (resp0, v0) <- warmup2 ctx inp0 ui
   assert failed (not v0)
   _ <- runFrame ctx (tabInp inp0) ui
@@ -169,13 +177,13 @@ runKeyboardTabHeaderTest ctx failed = do
   let inp0 = withInputOff 300 100
       ui cur =
         tabs cur
-          [ tab KBA "Alpha" (label_ "BodyA")
-          , tab KBB "Beta" (label_ "BodyB")
+          [ tab KBA "Alpha" (label "BodyA")
+          , tab KBB "Beta" (label "BodyB")
           ]
   _ <- warmup2 ctx inp0 (ui KBA)
   _ <- runFrame ctx (tabInp inp0) (ui KBA)
-  ((_, active1), _, _, _) <- runFrame ctx (keyInp KeyEnter inp0) (ui KBA)
+  (active1, _, _, _) <- runFrame ctx (keyInp KeyEnter inp0) (ui KBA)
   assertEq failed active1 KBA
   _ <- runFrame ctx (tabInp inp0) (ui KBA)
-  ((_, active2), _, _, _) <- runFrame ctx (keyInp KeyEnter inp0) (ui KBA)
+  (active2, _, _, _) <- runFrame ctx (keyInp KeyEnter inp0) (ui KBA)
   assertEq failed active2 KBB

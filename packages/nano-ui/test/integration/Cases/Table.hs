@@ -103,16 +103,10 @@ runPageWheelAboveTableTest _ failed = do
   ctx <- newPixelContext
   let inp0 = withInput 320 220
       wheelAt = inp0 {inputMousePos = V2 160 80, inputScroll = V2 0 5}
-      ui = scrollArea (fillW . fixedH 200 $ defaultLayout {layoutGap = 0}) $ do
+      ui = scrollArea (fillW . fixedH 200 . gap 0) $ do
         mapM_ (\i -> label (T.pack ("head " <> show (i :: Int)))) [1 .. 10]
         (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
-        tableCfg
-          defaultTableCfg
-          (tight . fillW . fixedH 120 $ defaultLayout {layoutGap = 0})
-          "people"
-          tableScrollCols
-          tableScrollRows
-          tableSort
+        tableWith (fixedH 120) "people" tableScrollCols tableScrollRows tableSort
   (pageWid, _) <- warmup2 ctx inp0 ui
   _ <- runFrame ctx wheelAt ui
   _ <- runFrame ctx wheelAt ui
@@ -149,9 +143,8 @@ runTableScrollRevealTest _ failed = do
       ui = do
         (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
         void
-          ( tableCfg
-              defaultTableCfg
-              (tight . fillW . fixedH 150 $ defaultLayout {layoutGap = 0})
+          ( tableWith
+              (fixedH 150)
               "people"
               tableScrollCols
               tableScrollRows
@@ -184,7 +177,7 @@ runTableWrapRowStretchTest :: Context -> IORef Int -> IO ()
 runTableWrapRowStretchTest _ failed = do
   ctx <- newPixelContext
   let inp0 = (withInput 700 400) {inputMousePos = V2 (-40) (-40)}
-      cfg = defaultTableCfg {tableColSizes = [ColFixed 280, ColFixed 90]}
+      cfg = defaultTableConfig {tableColSizes = [ColFixed 280, ColFixed 90]}
       wrapCols = headed "Name" fst <> headed "Notes" snd
       rows =
         [ ("row-" <> T.pack (show (i :: Int)), T.unwords (replicate 24 "lorem"))
@@ -193,9 +186,9 @@ runTableWrapRowStretchTest _ failed = do
       ui = do
         (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
         void
-          ( tableCfg
+          ( tableConfigured
               cfg
-              (tight . fillW $ defaultLayout {layoutGap = 0})
+              id
               "wrap-stretch"
               wrapCols
               rows
@@ -247,9 +240,8 @@ runTableResizeOverflowTest ctx failed = do
       ui = do
         (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
         void
-          ( tableCfg
-              defaultTableCfg
-              (tight . fillW . fixedH 180 $ defaultLayout {layoutGap = 0})
+          ( tableWith
+              (fixedH 180)
               "resize-lane"
               tableScrollCols
               rows
@@ -369,15 +361,15 @@ runTableFirstColWidthTest :: Context -> IORef Int -> IO ()
 runTableFirstColWidthTest ctx failed = do
   let inp0 = (withInput 400 200) {inputMousePos = V2 60 80}
       cfg =
-        defaultTableCfg
+        defaultTableConfig
           { tableColSizes = [ColContent, ColStretch]
           }
       ui = do
         (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
         void
-          ( tableCfg
+          ( tableConfigured
               cfg
-              (tight . fillW $ defaultLayout {layoutGap = 0})
+              id
               "people"
               tableFirstColCols
               tableFirstColRows
@@ -397,9 +389,8 @@ runTableFirstColWidthTest ctx failed = do
       fitUi = do
         (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
         void
-          ( tableCfg
-              defaultTableCfg
-              (tight . fixedH 100 $ defaultLayout {layoutGap = 0})
+          ( tableWith
+              (fixedH 100 . (\l -> l {layoutWidth = Fit}))
               "people"
               tableFirstColCols
               tableFirstColRows
@@ -437,7 +428,7 @@ runTableFillWidthTest _ failed = do
   ctx <- newContext
   let inp0 = (withInput 500 200) {inputMousePos = V2 200 80}
       cfg =
-        defaultTableCfg
+        defaultTableConfig
           { tableColSizes =
               [ ColContent
               , ColStretch
@@ -449,9 +440,9 @@ runTableFillWidthTest _ failed = do
       ui = do
         (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
         void
-          ( tableCfg
+          ( tableConfigured
               cfg
-              (tight . fillW $ defaultLayout {layoutGap = 0})
+              id
               "people"
               tableFillCols
               tableFillRows
@@ -540,9 +531,8 @@ runTableColResizeDemoReproTest _ failed =
               card $ do
                 (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
                 void
-                  ( tableCfg
-                      defaultTableCfg
-                      (tight . fillW . fixedH 280 $ defaultLayout {layoutGap = 0})
+                  ( tableWith
+                      (fixedH 280)
                       "people"
                       demoPeopleCols
                       demoPeopleRows
@@ -719,13 +709,13 @@ runTableHBarReachTest :: Context -> IORef Int -> IO ()
 runTableHBarReachTest _ failed = do
   ctx <- newPixelContext
   let inp0 = (withInput 700 320) {inputMousePos = V2 300 160}
-      cfg = defaultTableCfg {tableColSizes = [ColFixed 500, ColFixed 500]}
+      cfg = defaultTableConfig {tableColSizes = [ColFixed 500, ColFixed 500]}
       ui = do
         (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
         void
-          ( tableCfg
+          ( tableConfigured
               cfg
-              (tight . fillW . fixedH 200 $ defaultLayout {layoutGap = 0})
+              (fixedH 200)
               "people"
               tableScrollCols
               tableScrollRows

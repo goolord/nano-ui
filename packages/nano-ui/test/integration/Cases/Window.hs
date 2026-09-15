@@ -40,7 +40,7 @@ runWindowScrollGutterTest ctx failed = do
   let inp0 = withInput 640 360
       long = T.pack (replicate 48 'M')
       ui = window True "GutterWin" $ do
-        wide <- labelEx (fillW defaultLayout) "WWWW"
+        wide <- labelWith' fillW "WWWW"
         kv "Key" long
         mapM_ (\i -> label (T.pack ("line " <> show (i :: Int)))) [1 .. 24]
         pure wide
@@ -93,12 +93,12 @@ runOverlayPanelLiveTest _ failed = do
 
 runFitHeaderNoShrinkTest :: Context -> IORef Int -> IO ()
 runFitHeaderNoShrinkTest ctx failed = do
-  let header = panelWith (padXY 16 12 . fillW) (label "nano-ui SDL3 demo")
+  let header = panelWith (padXY 16 12 . fillW) (label' "nano-ui SDL3 demo")
       only = columnWith (padAll 12 . grow) header
       withBody = columnWith (padAll 12 . gap 8 . grow) $ do
         h <- header
         scrollWith (tight . grow) $
-          columnWith fillW (mapM_ (label_ . T.pack . show) [1 .. 40 :: Int])
+          columnWith fillW (mapM_ (label . T.pack . show) [1 .. 40 :: Int])
         pure h
       tall = withInput 400 800
       short = withInput 400 200
@@ -268,7 +268,7 @@ runPageWindowScrollTest _ failed = do
             column $
               mapM_ (\i -> label (T.pack ("line " <> show (i :: Int)))) [1 .. 30]
       nested = do
-        (_, win) <- scrollArea (tight (grow defaultLayout)) $ do
+        (_, win) <- scrollArea (tight . grow) $ do
           void (button "OK")
           debugWindow
         pure win
@@ -336,9 +336,9 @@ runScrolledDebugToggleTest ctx failed = do
       title = T.pack "Debug"
       ui = do
         (open, setOpen) <- useFlag False
-        (_, dbgBtn) <- scrollArea (tight (grow defaultLayout)) $ do
+        (_, dbgBtn) <- scrollArea (tight . grow) $ do
           b <- button' "Debug"
-          onClick b (setOpen (not open))
+          when (respClicked b) (setOpen (not open))
           pure b
         when open $ void (window True "Debug" (label "fps"))
         pure dbgBtn
@@ -437,15 +437,19 @@ runSeparatorSpanTest :: Context -> IORef Int -> IO ()
 runSeparatorSpanTest ctx failed = do
   let inp = withInput 200 120
       ui = columnWith fillW $ do
-        label_ "A"
-        resp <- separator
-        label_ "B"
-        pure resp
+        label "A"
+        sid <- currentId
+        separator
+        label "B"
+        pure sid
   _ <- runFrame ctx inp ui
-  (resp, _, _, _) <- runFrame ctx inp ui
-  let Rect _ _ w h = respRect resp
-  assert failed (w >= 100)
-  assert failed (h <= 2)
+  (sid, _, _, _) <- runFrame ctx inp ui
+  mRect <- getPrevRect ctx sid
+  case mRect of
+    Just (Rect _ _ w h) -> do
+      assert failed (w >= 100)
+      assert failed (h <= 2)
+    Nothing -> assert failed False
 
 runHeadingMonoTruncateTest :: Context -> IORef Int -> IO ()
 runHeadingMonoTruncateTest ctx failed = do

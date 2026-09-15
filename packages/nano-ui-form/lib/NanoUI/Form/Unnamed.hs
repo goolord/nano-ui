@@ -22,14 +22,16 @@ import Ditto.Generalized.Unnamed qualified as Unnamed
 import NanoUI
   ( NanoUI
   , Response
-  , checkbox
+  , TextInputConfig (..)
+  , checkbox'
+  , defaultTextInputConfig
   , respChanged
   , respClicked
-  , select
-  , slider
-  , textArea
-  , textInput
-  , textInputPassword
+  , select'
+  , slider'
+  , textArea'
+  , textInput'
+  , textInputConfigured'
   )
 import NanoUI.Form.Backend (FormInput (..), formInputToText)
 import NanoUI.Form.Field
@@ -50,15 +52,15 @@ import NanoUI.Form.Types (Form)
 
 -- | Auto-enumerated text input.
 inputText :: FormError FormInput err => Text -> Form err Text
-inputText = textField textInput
+inputText = textField textInput'
 
 -- | Auto-enumerated password input.
 inputPassword :: FormError FormInput err => Text -> Form err Text
-inputPassword = textField textInputPassword
+inputPassword = textField (textInputConfigured' defaultTextInputConfig {ticPassword = True})
 
 -- | Auto-enumerated text area input.
 inputTextArea :: FormError FormInput err => Text -> Form err Text
-inputTextArea = textField textArea
+inputTextArea = textField textArea'
 
 textField ::
   FormError FormInput err =>
@@ -73,7 +75,7 @@ inputCheckbox :: FormError FormInput err => Text -> Bool -> Form err Bool
 inputCheckbox lbl initial =
   Unnamed.input
     (Right . decodeBool initial)
-    (fieldView respClicked FormInputBool (checkbox lbl))
+    (fieldView respClicked FormInputBool (checkbox' lbl))
     initial
 
 -- | Auto-enumerated slider input.
@@ -82,7 +84,7 @@ inputSlider ::
 inputSlider minV maxV initial =
   Unnamed.input
     (Right . decodeFloatInput initial)
-    (fieldView respChanged FormInputFloat (slider minV maxV))
+    (fieldView respChanged FormInputFloat (slider' minV maxV))
     initial
 
 -- | Auto-enumerated select dropdown.
@@ -90,7 +92,7 @@ inputSelect :: (Foldable f, FormError FormInput err) => f Text -> Int -> Form er
 inputSelect options initial =
   Unnamed.input
     (Right . decodeInt initial)
-    (fieldView respChanged FormInputInt (select options))
+    (fieldView respChanged FormInputInt (select' options))
     initial
 
 -- | Auto-enumerated select for bounded enums.

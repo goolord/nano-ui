@@ -32,19 +32,20 @@ import NanoUI
   ( Color
   , NanoUI
   , Response
-  , checkbox
-  , colorPicker
-  , colorPickerFromHex
-  , colorPickerToHex
-  , radioFieldset
+  , TextInputConfig (..)
+  , checkbox'
+  , colorFromHex
+  , colorPicker'
+  , colorToHex
+  , defaultTextInputConfig
+  , radio'
   , respChanged
   , respClicked
-  , select
-  , slider
-  , textArea
-  , textInput
-  , textInputPassword
-  , textInputWithPlaceholder
+  , select'
+  , slider'
+  , textArea'
+  , textInput'
+  , textInputConfigured'
   )
 import NanoUI qualified as NUI
 import NanoUI.Form.Field
@@ -60,20 +61,20 @@ import NanoUI.Form.Types (Form, FormView (..))
 
 -- | Single-line text input field.
 inputText :: FormError FormInput err => Text -> Text -> Form err Text
-inputText = textField textInput
+inputText = textField textInput'
 
 -- | Single-line text input field with custom placeholder text.
 inputTextWithPlaceholder ::
   FormError FormInput err => Text -> Text -> Text -> Form err Text
-inputTextWithPlaceholder placeholder = textField (textInputWithPlaceholder placeholder)
+inputTextWithPlaceholder placeholder = textField (textInputConfigured' defaultTextInputConfig {ticPlaceholder = placeholder})
 
 -- | Password text input masking entered characters.
 inputPassword :: FormError FormInput err => Text -> Text -> Form err Text
-inputPassword = textField textInputPassword
+inputPassword = textField (textInputConfigured' defaultTextInputConfig {ticPassword = True})
 
 -- | Multi-line text area input.
 inputTextArea :: FormError FormInput err => Text -> Text -> Form err Text
-inputTextArea = textField textArea
+inputTextArea = textField textArea'
 
 textField ::
   FormError FormInput err =>
@@ -85,7 +86,7 @@ textField widget name =
     (fieldView respChanged FormInputText (labelled name widget))
 
 labelled :: Text -> (a -> NanoUI b) -> a -> NanoUI b
-labelled name widget value = NUI.label_ name >> widget value
+labelled name widget value = NUI.label name >> widget value
 
 -- | Checkbox toggle input.
 inputCheckbox :: FormError FormInput err => Text -> Bool -> Form err Bool
@@ -93,7 +94,7 @@ inputCheckbox name initial =
   Named.input
     name
     (Right . decodeBool initial)
-    (fieldView respClicked FormInputBool (checkbox name))
+    (fieldView respClicked FormInputBool (checkbox' name))
     initial
 
 -- | Floating-point slider input across the range @[minV, maxV]@.
@@ -103,7 +104,7 @@ inputSlider name minV maxV initial =
   Named.input
     name
     (Right . decodeFloatInput initial)
-    (fieldView respChanged FormInputFloat (labelled name (slider minV maxV)))
+    (fieldView respChanged FormInputFloat (labelled name (slider' minV maxV)))
     initial
 
 -- | Dropdown selection in fold order (returns selected index).
@@ -112,7 +113,7 @@ inputSelect name options initial =
   Named.input
     name
     (Right . decodeInt initial)
-    (fieldView respChanged FormInputInt (labelled name (select options)))
+    (fieldView respChanged FormInputInt (labelled name (select' options)))
     initial
 
 -- | Dropdown selection for any bounded enumeration type.
@@ -127,7 +128,7 @@ inputRadio name options initial =
   Named.input
     name
     (Right . decodeInt initial)
-    (fieldView respChanged FormInputInt (labelled name (radioFieldset options)))
+    (fieldView respChanged FormInputInt (labelled name (radio' options)))
     initial
 
 -- | Radio button group for any bounded enumeration type.
@@ -142,23 +143,23 @@ inputColor name initial =
   Named.input
     name
     ( \case
-        FormInputText t -> Right (fromMaybe initial (colorPickerFromHex t))
+        FormInputText t -> Right (fromMaybe initial (colorFromHex t))
         _ -> Right initial
     )
     ( fieldView
         respChanged
-        (FormInputText . colorPickerToHex)
-        (labelled name colorPicker)
+        (FormInputText . colorToHex)
+        (labelled name colorPicker')
     )
     initial
 
 -- | Static label inside a form.
 label :: Text -> Form err ()
-label txt = Ditto.view (FormView (NUI.label_ txt))
+label txt = Ditto.view (FormView (NUI.label txt))
 
 -- | Visual separator line inside a form.
 separator :: Form err ()
-separator = Ditto.view (FormView NUI.sep)
+separator = Ditto.view (FormView NUI.separator)
 
 -- | Render error messages originating directly from this form node.
 errors :: ([err] -> FormView) -> Form err ()

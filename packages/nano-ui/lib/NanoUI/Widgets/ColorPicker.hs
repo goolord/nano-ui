@@ -16,7 +16,9 @@ module NanoUI.Widgets.ColorPicker
   , colorPickerBarHitRect
   , drawColorPickerPanel
   , colorPicker
+  , colorPicker'
   , colorPickerRGBA
+  , colorPickerRGBA'
   )
 where
 
@@ -37,6 +39,7 @@ import NanoUI.Context
   , getMenuPointerGesture
   , getStore
   , intKey
+  , recordStoreInt
   , registerFocusable
   , setStore
   )
@@ -55,7 +58,7 @@ import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), inputMouseDown, inputMousePressed)
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
-import NanoUI.Store (slotColorBase, slotKey)
+import NanoUI.Store (slotColorBase, slotKey, slotSeen)
 import NanoUI.Style
   ( AlignY (..)
   , Direction (..)
@@ -91,8 +94,8 @@ import NanoUI.WidgetText
   , colorPickerMinWidth
   , colorPickerParseHex
   , colorPickerSvH
-  , colorPickerToHex
-  , colorPickerToHexA
+  , colorToHex
+  , colorToHexA
   , textInputFlagBare
   , intValueText
   )
@@ -427,12 +430,23 @@ colorPickerLabelLayout :: Layout
 colorPickerLabelLayout =
   defaultLayout {layoutPadding = Padding 0 0 0 0, layoutAlignY = AlignMiddle}
 
-colorPicker :: Ui :> es => Color -> Eff es (Response, Color)
-colorPicker = colorPickerWith False
+-- | RGB colour picker: a saturation/value field, a hue bar, and RGB, HSV and
+-- hex fields. Pass the current colour; the result is the colour after this
+-- frame's edits.
+{-# INLINE colorPicker #-}
+colorPicker :: Ui :> es => Color -> Eff es Color
+colorPicker value = snd <$> colorPickerWith False value
 
--- | Alpha-aware picker: adds a vertical alpha bar and an A / @#RRGGBBAA@ field.
-colorPickerRGBA :: Ui :> es => Color -> Eff es (Response, Color)
-colorPickerRGBA = colorPickerWith True
+colorPicker' :: Ui :> es => Color -> Eff es (Response, Color)
+colorPicker' = colorPickerWith False
+
+-- | 'colorPicker' with an alpha bar and an A / @#RRGGBBAA@ field.
+{-# INLINE colorPickerRGBA #-}
+colorPickerRGBA :: Ui :> es => Color -> Eff es Color
+colorPickerRGBA value = snd <$> colorPickerWith True value
+
+colorPickerRGBA' :: Ui :> es => Color -> Eff es (Response, Color)
+colorPickerRGBA' = colorPickerWith True
 
 -- | The byte fields: label, the channel read, and the channel write.
 rgbChannels, rgbaChannels :: [(Text, Color -> Word8, Word8 -> Color -> Color)]
@@ -455,15 +469,15 @@ hsvChannels =
 
 colorPickerWith ::
   Ui :> es => Bool -> Color -> Eff es (Response, Color)
-colorPickerWith showAlpha initial = do
+colorPickerWith showAlpha value = do
   ctx <- askContext
   wid <- nextId
   uiIO $ registerFocusable ctx wid
-  uiIO $ initColorPickerStore ctx wid initial
+  uiIO $ adoptColorPickerValue ctx wid value
   let
     key = intKey wid
     pct = 100 / (if showAlpha then 4 else 3)
-    readColor = (\st -> widgetStoreColor st wid initial) <$> uiIO (getStore ctx)
+    readColor = (\st -> widgetStoreColor st wid value) <$> uiIO (getStore ctx)
     writePicker col hue sv = uiIO (getStore ctx >>= setStore ctx . putColorState key col hue sv)
     writeColor col =
       let (h, s, v) = rgbToHsv col
@@ -480,7 +494,7 @@ colorPickerWith showAlpha initial = do
         (fillW defaultLayout)
         (if showAlpha then colorPickerAlphaFlag else 0)
         Nothing
-    start <- colorPickerCanvas showAlpha wid initial cResp
+    start <- colorPickerCanvas showAlpha wid value cResp
     -- Only the focused field edits, so each row's fields share one store read.
     rgb <- readColor
     _ <- container NodeContainer colorPickerRowLayout $
@@ -494,9 +508,9 @@ colorPickerWith showAlpha initial = do
               writeColor (set (fromIntegral n) (withAlpha (alphaOf rgb) rgb))
     hsvStore <- uiIO (getStore ctx)
     let
-      (s0, v0) = widgetStoreSv hsvStore wid initial
-      hsv = (widgetStoreHue hsvStore wid initial, s0, v0)
-      alpha = alphaOf (widgetStoreColor hsvStore wid initial)
+      (s0, v0) = widgetStoreSv hsvStore wid value
+      hsv = (widgetStoreHue hsvStore wid value, s0, v0)
+      alpha = alphaOf (widgetStoreColor hsvStore wid value)
     _ <- container NodeContainer colorPickerRowLayout $ do
       forM_ hsvChannels $ \(lbl, shown, edit) -> do
         (txt, focused) <- colorField pct lbl (intValueText (shown hsv))
@@ -508,13 +522,14 @@ colorPickerWith showAlpha initial = do
       when showAlpha $
         void (container NodeContainer (colorPickerFieldGroupLayout pct) (pure ()))
     hex <- readColor
-    let hexText = if showAlpha then colorPickerToHexA hex else colorPickerToHex hex
+    let hexText = if showAlpha then colorToHexA hex else colorToHex hex
     (thex, fhex) <- colorField 100 "" hexText
     when (fhex && thex /= hexText) $
       forM_ (colorPickerParseHex thex) $ \(r, g, b, ma) ->
         writeColor (colorRGBA r g b (if showAlpha then fromMaybe (colorA hex) ma else 255))
     final <- readColor
     pure (start, final, cResp)
+  uiIO $ recordStoreInt ctx key (fromIntegral (colorToWord32 final))
   pure (setChanged (final /= start) cResp, final)
 
 -- | The SV field and the hue / alpha bars: pointer drags, then arrow keys,
@@ -610,21 +625,24 @@ colorField pct label expected = do
         Nothing
   pure (shown, isFocus)
 
-initColorPickerStore :: Context -> WidgetId -> Color -> IO ()
-initColorPickerStore ctx wid initial = do
+-- | Adopt the caller's colour as 'NanoUI.Context.adoptStoreInt' does. A new
+-- colour also resets the hue, S/V, and the "current" swatch.
+adoptColorPickerValue :: Context -> WidgetId -> Color -> IO ()
+adoptColorPickerValue ctx wid value = do
   store0 <- getStore ctx
   let
     key = intKey wid
-  when (not (IM.member key (storeInt store0))) $
-    let
-      (hInit, sInit, vInit) = rgbToHsv initial
-      packed = fromIntegral (colorToWord32 initial)
-     in
-      setStore
-        ctx
-        ( putColorState key initial (clamp 0 360 hInit) (sInit, vInit) $
-            store0 {storeInt = IM.insert (slotKey slotColorBase key) packed (storeInt store0)}
-        )
+    packed = fromIntegral (colorToWord32 value)
+    seenKey = slotKey slotSeen key
+    ints = IM.insert seenKey packed (storeInt store0)
+  when (IM.lookup seenKey (storeInt store0) /= Just packed) $
+    setStore ctx $
+      if IM.lookup key (storeInt store0) == Just packed
+        then store0 {storeInt = ints}
+        else
+          let (h, s, v) = rgbToHsv value
+           in putColorState key value (clamp 0 360 h) (s, v) $
+                store0 {storeInt = IM.insert (slotKey slotColorBase key) packed ints}
 
 commitColorPickerCurrent :: Context -> WidgetId -> Color -> IO ()
 commitColorPickerCurrent ctx wid col = do

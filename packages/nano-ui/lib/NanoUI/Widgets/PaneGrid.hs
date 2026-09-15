@@ -110,7 +110,7 @@ import NanoUI.Widgets.Custom
   ( CustomWidgetSpec (..)
   , CustomDrawContext (..)
   , defaultCustomWidgetSpec
-  , customWidget_
+  , customWidget
   , drawRect
   , drawRoundedRect
   , drawStroke
@@ -618,7 +618,7 @@ draggingPane env pid = fromIntegral (geDrag0 env) == pid
 dividerWidget :: (Ui :> es) => GridEnv es -> GridAxis -> Eff es ()
 dividerWidget env axis = do
   void $
-    customWidget_
+    customWidget
       defaultCustomWidgetSpec
         { widgetLayout = dLay
         , widgetDraw = \cdc rect -> drawDivider cdc rect axis (geThickness env) (geLeeway env)

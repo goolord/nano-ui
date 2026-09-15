@@ -28,7 +28,7 @@ import NanoUI
   , inputMousePos
   , inputWindowSize
   , kvBlock
-  , sep
+  , separator
   , uiIO
   )
 import NanoUI.Monad
@@ -171,12 +171,12 @@ debugWindowBody :: Ui :> es => RgfwDebugSnapshot -> Eff es ()
 debugWindowBody snap = do
   heading "Frame"
   kvBlock (formatFpsRows (dbgCore snap))
-  sep
+  separator
   heading "Layout & Draw"
   kvBlock (layoutRows snap)
-  sep
+  separator
   heading "Display & Scale"
   kvBlock (displayRows snap)
-  sep
+  separator
   heading "RTS Runtime"
   kvBlock (formatCoreRtsRows (dbgCore snap))

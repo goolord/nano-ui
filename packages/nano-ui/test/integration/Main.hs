@@ -13,6 +13,7 @@ import Cases.Runner (runDrawingLockTest, runSessionLoopTest)
 import Cases.SIMD (runSimdWritesTest)
 import Cases.State
   ( runCollectionApiTest
+  , runControlledInputsTest
   , runControlledStateTest
   , runHookStateTest
   )
@@ -55,6 +56,7 @@ testSpecs =
   , TestSpec "simd-writes" False runSimdWritesTest
   , TestSpec "no-thunks" False runNoThunksTest
   , TestSpec "controlled-state" False runControlledStateTest
+  , TestSpec "controlled-inputs" False runControlledInputsTest
   , TestSpec "hook-state" False runHookStateTest
   , TestSpec "collection-api" False runCollectionApiTest
   , TestSpec "embed-state" False runEmbedStateTest

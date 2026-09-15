@@ -4,6 +4,7 @@
 -- The per-frame logic is the pure 'comboStep' over a persisted 'ComboState'.
 module NanoUI.Widgets.Combo
   ( comboBox
+  , comboBox'
   , ComboState (..)
   , ComboInput (..)
   , ComboStep (..)
@@ -24,6 +25,7 @@ import NanoUI.Context
   , intKey
   , markDirty
   , markEscapeConsumed
+  , recordStoreText
   , setStore
   )
 import NanoUI.Font (FontMetrics)
@@ -277,11 +279,16 @@ comboStep ci cs0 =
 -- While the field holds focus, the shared select dropdown overlay lists the
 -- options filtered by the field text (all of them while it is empty). The
 -- value is free text: options are suggestions, not a closed set. See
--- 'comboStep' for when the value commits.
-comboBox :: (Foldable f, Ui :> es) => Text -> f Text -> Text -> Eff es (Response, Text)
-comboBox placeholder options initial = do
+-- 'comboStep' for when the value commits. Pass the current text; the result is
+-- the text after this frame, and 'respChanged' on 'comboBox'' marks a commit.
+{-# INLINE comboBox #-}
+comboBox :: (Foldable f, Ui :> es) => Text -> f Text -> Text -> Eff es Text
+comboBox placeholder options value = snd <$> comboBox' placeholder options value
+
+comboBox' :: (Foldable f, Ui :> es) => Text -> f Text -> Text -> Eff es (Response, Text)
+comboBox' placeholder options value = do
   (resp, text) <-
-    buildTextInput textInputFlagSearch searchFieldLayout placeholder initial Nothing
+    buildTextInput textInputFlagSearch searchFieldLayout placeholder value Nothing
   ctx <- askContext
   inp <- askInput
   let wid = rawRespId resp
@@ -298,7 +305,7 @@ comboBox placeholder options initial = do
           , csContentW = IM.findWithDefault 0 (slotKey slotComboContentW key) (storeFloat store)
           , csDrag = IM.findWithDefault 0 (slotKey slotComboDrag key) (storeInt store)
           , csDragOff = IM.findWithDefault 0 (slotKey slotComboDragOff key) (storeFloat store)
-          , csCommitted = IM.findWithDefault initial (slotKey slotComboCommitted key) (storeText store)
+          , csCommitted = IM.findWithDefault value (slotKey slotComboCommitted key) (storeText store)
           , csLive = IM.findWithDefault text (slotKey slotComboLive key) (storeText store)
           , csFocused = IM.findWithDefault 0 (slotKey slotComboFocus key) (storeInt store) /= 0
           }
@@ -363,4 +370,5 @@ comboBox placeholder options initial = do
   uiIO $
     findNodeByWidgetId ctx wid
       >>= mapM_ (\idx -> setOptions (ctxNodeArena ctx) idx (take comboBoxMaxVisible (drop (csWindow cs1) displayed)))
+  uiIO $ recordStoreText ctx key finalText
   pure (setChanged (isJust (stepCommit step)) resp, finalText)

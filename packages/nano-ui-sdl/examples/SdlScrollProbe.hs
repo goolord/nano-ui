@@ -47,45 +47,47 @@ scrollProbeUi =
         kv "Theme radio" "Tomorrow Min"
         kv "Name" "nano"
         kv "Notes" "Edit me."
-        sep
+        separator
       panelWith (padXY 14 10 . gap 6 . fillW) $ do
         heading "Controls"
         void (checkbox "Feature" False)
-        void (label "Volume")
+        label "Volume"
         void (slider 0 100 50)
         let qualities = ["Low", "Medium", "High"]
-        void (selectLabeled "Quality" qualities 1)
-        void (label "Accent")
+        label "Quality"
+        void (select qualities 1)
+        label "Accent"
         void (colorPicker (NanoUI.colorRGBA 204 102 102 255))
         muted "Theme"
-        void (radioFieldset ["Light", "Dark", "System"] 1)
+        void (radio ["Light", "Dark", "System"] 1)
         muted "Name"
-        void (textInputWithPlaceholder "Enter name" "")
+        void (textInputConfigured defaultTextInputConfig {ticPlaceholder = "Enter name"} "")
         muted "Notes"
         void (textArea "Edit me.\nSecond line.")
         rowWith (tight . gap 8 . fillW) $ do
           void (button "Hover for Tooltip")
           void (button "Right-click Menu")
-        sep
+        separator
       panelWith (padXY 14 10 . gap 6 . fillW) $ do
         heading "Popups"
         kv "Value" "right-aligned value"
         kv "Checked" "off"
         kv "Notes" "third card"
-        sep
+        separator
       panelWith (padXY 14 10 . gap 6 . fillW) $ do
         heading "Fourth"
         kv "Volume" "50"
         kv "Theme" "Tomorrow at Midnight Min"
         kv "Name" "nano"
         kv "Notes" "Edit me."
-        sep
+        separator
       panelWith (padXY 14 10 . gap 6 . fillW) $ do
         heading "Fifth"
         muted "Notes"
         void (textArea "Edit me.\nLine2\nLine3\nLine4\nLine5\nLine6\nLine7\nLine8\nLine9\nLine10")
-        void (selectLabeled "Theme" ["Tomorrow at Midnight Min"] 0)
-        sep
+        label "Theme"
+        void (select ["Tomorrow at Midnight Min"] 0)
+        separator
       panelWith (padXY 14 10 . gap 6 . fillW) $ do
         heading "Sixth"
         kv "Feature" "on"

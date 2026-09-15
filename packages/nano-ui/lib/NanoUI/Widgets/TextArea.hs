@@ -14,7 +14,9 @@ module NanoUI.Widgets.TextArea
   , computeTextAreaLayout
     -- * Widget
   , textArea
+  , textArea'
   , textAreaWith
+  , textAreaWith'
   , textAreaLayout
   , processTextArea
   , loadTextAreaState
@@ -68,6 +70,7 @@ import NanoUI.Store
   , slotTextAreaRow
   , slotTextAreaScroll
   , slotTextAreaViewport
+  , slotSeen
   )
 import NanoUI.Style (FontStyle (..), FontVariant (..), FontWeight (..), Layout (..), Sizing (..), defaultLayout)
 import NanoUI.Types (clamp)
@@ -279,39 +282,50 @@ textAreaLayout =
     , layoutHeight = Fixed 140
     }
 
--- | Caption-less multi-line text editor using the default 'textAreaLayout'.
--- Pair it with a 'label' when a caption is wanted.
-textArea :: Ui :> es => Text -> Eff es (Response, Text)
-textArea = textAreaWith textAreaLayout
+-- | Multi-line text editor. Pass the current text; the result is the text
+-- after this frame's edits. Pair it with a 'label' when a caption is wanted.
+{-# INLINE textArea #-}
+textArea :: Ui :> es => Text -> Eff es Text
+textArea value = snd <$> textAreaWith' id value
 
--- | Caption-less multi-line text editor with a caller-supplied layout. Use this
--- to make the editor grow before it is solved (for example @grow defaultLayout@
--- to fill its parent).
-textAreaWith :: Ui :> es => Layout -> Text -> Eff es (Response, Text)
-textAreaWith layout initial = do
+{-# INLINE textArea' #-}
+textArea' :: Ui :> es => Text -> Eff es (Response, Text)
+textArea' = textAreaWith' id
+
+-- | 'textArea' with a modifier applied to 'textAreaLayout', for example
+-- 'grow' to fill the parent.
+{-# INLINE textAreaWith #-}
+textAreaWith :: Ui :> es => (Layout -> Layout) -> Text -> Eff es Text
+textAreaWith f value = snd <$> textAreaWith' f value
+
+textAreaWith' :: Ui :> es => (Layout -> Layout) -> Text -> Eff es (Response, Text)
+textAreaWith' f value = do
   wid <- nextId
   ctx <- askContext
   uiIO $ registerFocusable ctx wid
   inp <- askInput
-  store <- uiIO (getStore ctx)
-  let key = intKey wid
+  store0 <- uiIO (getStore ctx)
+  let layout = f textAreaLayout
+      key = intKey wid
+      seenKey = slotKey slotSeen key
       contentCacheKey = slotKey slotTextAreaContentFont key
       changedSlotKey = slotKey slotTextAreaChanged key
-  when (not (IM.member key (storeText store)))
-    $ uiIO
-    -- Seed the scroll slot too: the wheel/drag paths write offsets through
-    -- setScrollOffset2D, which only updates the text area's slot once it
-    -- exists (otherwise the offset lands in legacy storage and is never read).
-    -- Seeding the text also orphans any cached buffer or content size for the
-    -- key, so neither can outlive its 'storeText'.
-    $ setStore ctx
-      store
-        { storeText = IM.insert key initial (storeText store)
-        , storePoint = IM.insert (slotKey slotTextAreaScroll key) (0, 0) (storePoint store)
-        , storeFloat = IM.delete contentCacheKey (storeFloat store)
-        , storeDyn = IM.delete (slotKey slotTextAreaBuffer key) (storeDyn store)
+      texts0 = storeText store0
+      replaced = IM.lookup key texts0 /= Just value
+  -- Adopt the caller's text the way 'adoptStoreText' does. A replaced document
+  -- orphans any cached buffer or content size for the key. Seed the scroll
+  -- slot too: the wheel and drag paths write offsets through
+  -- setScrollOffset2D, which only updates the text area's slot once it exists.
+  when (IM.lookup seenKey texts0 /= Just value) $
+    uiIO $ setStore ctx
+      store0
+        { storeText = IM.insert seenKey value (IM.insert key value texts0)
+        , storePoint = IM.insertWith (\_ old -> old) (slotKey slotTextAreaScroll key) (0, 0) (storePoint store0)
+        , storeFloat = if replaced then IM.delete contentCacheKey (storeFloat store0) else storeFloat store0
+        , storeDyn = if replaced then IM.delete (slotKey slotTextAreaBuffer key) (storeDyn store0) else storeDyn store0
         }
-  let current = IM.findWithDefault initial key (storeText store)
+  store <- uiIO (getStore ctx)
+  let current = IM.findWithDefault value key (storeText store)
       -- Set by menu actions (cut/paste through applyTextAreaMenuAction) whose
       -- edits carry no keys or chars; folded into 'changed' so the caller
       -- gets its respChanged pulse, then cleared in the state write below.
@@ -324,7 +338,7 @@ textAreaWith layout initial = do
           if layoutFontSize layout <= 0
             then pure (ctxFontMetrics ctx)
             else fst <$> uiIO (ctxResolveFont ctx (layoutFontSize layout) WeightNormal FontStyleNormal FontRegular)
-        let oldState = loadTextAreaState store key initial
+        let oldState = loadTextAreaState store key value
             (vw, vh) = IM.findWithDefault (200, 96) (slotKey slotTextAreaViewport key) (storePoint store)
         newState <- uiIO (processTextArea ctx inp (realToFrac vw) (realToFrac vh) (realToFrac (fmLineHeight editFm)) oldState)
         let newText = TB.toText (buffer newState)
@@ -344,7 +358,8 @@ textAreaWith layout initial = do
           uiIO $ do
             st <- saveTextAreaState key newState <$> getStore ctx
             setStore ctx st
-              { storeInt = IM.delete changedSlotKey (storeInt st)
+              { storeText = IM.insert seenKey newText (storeText st)
+              , storeInt = IM.delete changedSlotKey (storeInt st)
               , storeFloat = IM.delete contentCacheKey (storeFloat st)
               }
         pure (newText, changed)

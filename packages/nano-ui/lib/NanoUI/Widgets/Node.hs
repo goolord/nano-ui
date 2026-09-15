@@ -14,8 +14,6 @@ module NanoUI.Widgets.Node
   , respSubmitted
   , respRightPressed
   , respRightClicked
-  , onClick
-  , onRightClick
   , mkResponse
   , emptyModalResp
   , setClicked
@@ -132,14 +130,6 @@ respRightPressed = rawRespRightPressed . toResponse
 {-# INLINE respRightClicked #-}
 respRightClicked :: HasResponse r => r -> Bool
 respRightClicked = rawRespRightClicked . toResponse
-
-{-# INLINE onClick #-}
-onClick :: HasResponse r => r -> Eff es () -> Eff es ()
-onClick resp = when (respClicked resp)
-
-{-# INLINE onRightClick #-}
-onRightClick :: HasResponse r => r -> Eff es () -> Eff es ()
-onRightClick resp = when (respRightClicked resp)
 
 data Response = Response
   { rawRespId :: !WidgetId

@@ -1,6 +1,6 @@
 module Main (main) where
 
-import Control.Monad (forM_, void, when)
+import Control.Monad (forM_, when)
 import NanoUI
 import NanoUI.Backend.Sdl (SdlOptions (..), defaultSdlOptions, runSdlApp)
 import qualified Data.Text as T
@@ -74,6 +74,7 @@ animUi = do
   (bellowsOpen, setBellows) <- useFlag False
   (tossed, setTossed) <- useFlag False
   (stiffSpring, setStiffSpring) <- useFlag False
+  (throwRaw, setThrowRaw) <- useFloat 75
   tossT <-
     withKey ("toss" :: String)
       ( animateTo
@@ -112,9 +113,10 @@ animUi = do
         whenM (button (if tossed then "Catch" else "Toss")) (setTossed (not tossed))
         whenM (button (if stiffSpring then "Stiff" else "Bouncy")) (setStiffSpring (not stiffSpring))
       throwSec <- do
-        void (label "Throw")
-        (_, throwRaw) <- slider 35 140 75
-        pure (throwRaw / 100)
+        label "Throw"
+        newThrow <- slider 35 140 throwRaw
+        setThrowRaw newThrow
+        pure (newThrow / 100)
       cycleThrow <- lockThrow exposed throwSec
       let cycleLen = pullCycleLen cycleThrow
       pullPhase <-
@@ -135,7 +137,7 @@ animUi = do
           flex
           let iris = 12 + 22 * bellowsT
               irisCol = lerpColor film (lerpColor paper ruby 0.18) bellowsT
-          box (fixedWH iris iris defaultLayout) irisCol
+          box (fixedWH iris iris) irisCol
 
 settled :: Float -> Bool
 settled x = abs x < 0.001
@@ -152,7 +154,7 @@ transport exposed rewinding throwSec time wash glow = do
   let washCol = lerpColor film lamp (wash * (0.45 + 0.55 * glow))
   columnWith (tight . gap 0 . fillW) $ do
     perfs
-    withKey ("washTop" :: String) (void (box (fixedH 10 . fillW $ defaultLayout) washCol))
+    withKey ("washTop" :: String) (box (fixedH 10 . fillW) washCol)
     ts <-
       columnWith (padXY 0 10 . gap 10 . fillW) $
         sequence
@@ -163,20 +165,20 @@ transport exposed rewinding throwSec time wash glow = do
           , lane exposed rewinding throwSec time "Claw" EaseOutBack
           , lane exposed rewinding throwSec time "Bezier" (EaseCubicBezier 0.33 0 0.2 1)
           ]
-    withKey ("washBot" :: String) (void (box (fixedH 10 . fillW $ defaultLayout) washCol))
+    withKey ("washBot" :: String) (box (fixedH 10 . fillW) washCol)
     perfs
     pure ts
 
 perfs :: NanoUI ()
 perfs =
   rowWith (tight . gap 0 . alignMid . fillW) $ do
-    withKey ("perfL" :: String) (void (box (fixedWH 12 18 defaultLayout) film))
+    withKey ("perfL" :: String) (box (fixedWH 12 18) film)
     forM_ [0 .. 16 :: Int] $ \i ->
       withKey i $ do
-        void (box (fixedWH 6 18 defaultLayout) film)
-        void (box (fixedWH 7 6 defaultLayout) punch)
-        void (box (fixedWH 3 18 defaultLayout) film)
-    withKey ("perfR" :: String) (void (box (fillW . fixedH 18 $ defaultLayout) film))
+        box (fixedWH 6 18) film
+        box (fixedWH 7 6) punch
+        box (fixedWH 3 18) film
+    withKey ("perfR" :: String) (box (fillW . fixedH 18) film)
 
 pullHoldSec :: Float
 pullHoldSec = 1
@@ -221,12 +223,12 @@ trackRow :: T.Text -> Float -> Color -> NanoUI ()
 trackRow name t shuttle =
   withKey name $
     rowWith (tight . gap 12 . alignMid . fillW) $ do
-      void (labelEx (tight . fixedW 72 $ defaultLayout) name)
+      labelWith (tight . fixedW 72) name
       columnWith (tight . gap 0 . fillW) $ do
         let travel = 394.0 :: Float
         rowWith (tight . alignMid . fillW) $ do
-          void (box (fixedWH 4 22 defaultLayout) film)
-          void (spacer (Fixed (max 0 (t * travel))) Fit)
-          void (box (fixedWH 16 16 defaultLayout) shuttle)
+          box (fixedWH 4 22) film
+          spacer (Fixed (max 0 (t * travel))) Fit
+          box (fixedWH 16 16) shuttle
           flex
-          void (box (fixedWH 4 22 defaultLayout) film)
+          box (fixedWH 4 22) film

@@ -26,7 +26,7 @@ runCustomWidgetMeasureTest :: Context -> IORef Int -> IO ()
 runCustomWidgetMeasureTest ctx failed = do
   let inp = withInput 400 400
       ui measure = column $ do
-        customWidget_ defaultCustomWidgetSpec
+        fst <$> customWidget defaultCustomWidgetSpec
           { widgetMeasure = measure
           , widgetLayout = defaultLayout
           }
@@ -42,7 +42,7 @@ runCustomWidgetCursorTest :: Context -> IORef Int -> IO ()
 runCustomWidgetCursorTest ctx failed = do
   let inp0 = withInput 300 300
       ui = column $ do
-        customWidget_ defaultCustomWidgetSpec
+        fst <$> customWidget defaultCustomWidgetSpec
           { widgetLayout = fixedWH 80 80 defaultLayout
           , widgetCursor = Just (\_ -> UiCursorNsResize)
           }
@@ -63,8 +63,10 @@ runCustomWidgetInteractionTest :: Context -> IORef Int -> IO ()
 runCustomWidgetInteractionTest ctx failed = do
   let inp0 = withInput 300 300
       ui = column $ do
-        canvasWith (fixedWH 80 40 defaultLayout) $ \cdc _r -> do
-          pure (cdcHovered cdc, cdcPressed cdc)
+        customWidget defaultCustomWidgetSpec
+          { widgetLayout = fixedWH 80 40 defaultLayout
+          , widgetInteract = \resp cdc _ -> (resp, (cdcHovered cdc, cdcPressed cdc))
+          }
   (resp0, _) <- warmup2 ctx inp0 ui
   let Rect rx ry rw rh = respRect resp0
       pos = V2 (rx + rw / 2) (ry + rh / 2)
@@ -83,8 +85,8 @@ runCustomWidgetQueuedClickTest :: Context -> IORef Int -> IO ()
 runCustomWidgetQueuedClickTest ctx failed = do
   let inp0 = (withInput 300 300) {inputMousePos = V2 290 290}
       ui = column $ do
-        (fromCanvas, ()) <- canvasWith (fixedWH 80 40 defaultLayout) (\_ _ -> pure ())
-        fromSpec <- customWidget_ defaultCustomWidgetSpec {widgetLayout = fixedWH 80 40 defaultLayout}
+        fromCanvas <- canvas (fixedWH 80 40) (\_ -> pure ())
+        fromSpec <- fst <$> customWidget defaultCustomWidgetSpec {widgetLayout = fixedWH 80 40 defaultLayout}
         pure [fromCanvas, fromSpec]
   warm <- warmup2 ctx inp0 ui
   forM_ (zip [0 :: Int ..] warm) $ \(i, resp0) -> do
@@ -96,7 +98,7 @@ runCustomWidgetQueuedClickTest ctx failed = do
 runReferenceKnobTest :: Context -> IORef Int -> IO ()
 runReferenceKnobTest ctx failed = do
   let inp0 = withInput 300 300
-      ui = column $ knob 0 100 25
+      ui = column $ knob' 0 100 25
   (resp0, val0) <- warmup2 ctx inp0 ui
   assert failed (val0 == 25)
 

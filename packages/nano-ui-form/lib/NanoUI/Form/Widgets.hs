@@ -11,21 +11,18 @@ module NanoUI.Form.Widgets
 import Control.Monad (forM_)
 import Data.Text (Text)
 import NanoUI
-  ( AlignY (AlignMiddle)
-  , Layout (..)
-  , Sizing (Grow)
+  ( alignMid
   , card
   , colorRGBA
-  , column'
+  , columnWith
   , danger
-  , defaultLayout
   , fillW
   , gap
   , heading
-  , label_
+  , label
   , padXY
   , panelStyledWith
-  , row'
+  , rowWith
   )
 import NanoUI.Form.Types (FormView (..))
 
@@ -42,39 +39,20 @@ defaultErrorView errs = FormView $ do
 -- | Wrap a form view in a flex-growing column with standard form gap.
 formContainer :: FormView -> FormView
 formContainer (FormView inner) = FormView $ do
-  column'
-    (defaultLayout
-      { layoutGap = 10
-      , layoutWidth = Grow 1
-      }
-    )
-    inner
+  columnWith (gap 10 . fillW) inner
 
 -- | Horizontal layout putting a field label on the left and form control on the right.
 formRow :: Text -> FormView -> FormView
 formRow lbl (FormView inner) = FormView $ do
-  row'
-    (defaultLayout
-      { layoutGap = 8
-      , layoutWidth = Grow 1
-      , layoutAlignY = AlignMiddle
-      }
-    )
-    $ do
-      label_ lbl
+  rowWith (gap 8 . fillW . alignMid) $ do
+      label lbl
       inner
 
 -- | Vertical field layout placing a label directly above the form control.
 formField :: Text -> FormView -> FormView
 formField lbl (FormView inner) = FormView $ do
-  column'
-    (defaultLayout
-      { layoutGap = 3
-      , layoutWidth = Grow 1
-      }
-    )
-    $ do
-      label_ lbl
+  columnWith (gap 3 . fillW) $ do
+      label lbl
       inner
 
 -- | Group related form fields into a titled visual card.
@@ -82,10 +60,4 @@ formGroup :: Text -> FormView -> FormView
 formGroup title (FormView inner) = FormView $ do
   card $ do
     heading title
-    column'
-      (defaultLayout
-        { layoutGap = 6
-        , layoutWidth = Grow 1
-        }
-      )
-      inner
+    columnWith (gap 6 . fillW) inner

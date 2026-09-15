@@ -25,11 +25,10 @@ import NanoUI
   , checkbox
   , colorRGBA
   , column
-  , defaultLayout
   , drawing
   , fixedWH
   , grow
-  , label_
+  , label
   , window
   )
 import Foreign.Marshal.Alloc (allocaBytes, callocBytes, free)
@@ -176,8 +175,8 @@ testZOrderRenderArena = do
   let inp = emptyInput {inputWindowSize = Size 100 100}
       boxCol = colorRGBA 0x11 0x22 0x33 255
       ui = do
-        box (grow defaultLayout) boxCol
-        window True "Z" (label_ "hi")
+        box grow boxCol
+        window True "Z" (label "hi")
   (_, _, draw, _) <- runFrame ctx inp ui
   (baseSpans, overlaySpans) <- collectRasterSpans ctx inp
 
@@ -235,7 +234,7 @@ testTriangleRaster =
       clearScreen surf 0
       ctx <- newPixelContext
       (_, _, draw, _) <- runFrame ctx (emptyInput {inputWindowSize = Size 8 8}) $
-        drawing (fixedWH 8 8 defaultLayout) $ \_ ->
+        drawing (fixedWH 8 8) $ \_ ->
           pure (FillTriangle ax ay bx by cx cy (colorRGBA 255 0 0 255))
       let Rect clipX clipY clipW clipH = clip
           clippedDraw = draw

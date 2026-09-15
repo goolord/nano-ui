@@ -28,7 +28,7 @@ module Cases.TextInput
   )
 where
 
-import Control.Monad (forM_, replicateM, replicateM_, void)
+import Control.Monad (forM_, replicateM, replicateM_)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Text qualified as T
@@ -58,6 +58,7 @@ import NanoUI.Testing.Assert (assert, assertEq, assertGt, withInput)
 import NanoUI.Testing.Harness
   ( assertSpansHas
   , clickPair
+  , held
   , warmup2
   )
 import NanoUI.Widgets.TextArea
@@ -78,7 +79,7 @@ runTextInputBatchTest :: Context -> IORef Int -> IO ()
 runTextInputBatchTest ctx failed = do
   let
     inp = withInput 320 120
-    ui = column (textInput "aOLDz")
+    ui = column (textInput' "aOLDz")
     left = inp {inputKeys = inputKeysFromList [KeyLeft]}
     step event = runFrame ctx event ui
   (resp, _) <- warmup2 ctx inp ui
@@ -112,13 +113,13 @@ runTextInputBatchTest ctx failed = do
 -- field kept the label span and geometry the tests assert against).
 labeledArea :: T.Text -> T.Text -> NanoUI (Response, T.Text)
 labeledArea lbl initial = do
-  void (label lbl)
-  textArea initial
+  label lbl
+  textArea' initial
 
 labeledInput :: Ui :> es => T.Text -> T.Text -> Eff es (Response, T.Text)
 labeledInput lbl initial = do
-  void (label lbl)
-  textInputWithPlaceholder ("Enter " <> lbl) initial
+  label lbl
+  textInputConfigured' defaultTextInputConfig {ticPlaceholder = "Enter " <> lbl} initial
 
 runTextInputCursorTest :: Context -> IORef Int -> IO ()
 runTextInputCursorTest ctx failed = do
@@ -164,6 +165,7 @@ runTextInputCursorTest ctx failed = do
 
 runTextInputCutClearsSelectionTest :: Context -> IORef Int -> IO ()
 runTextInputCutClearsSelectionTest ctx failed = do
+  textRef <- newIORef "hello"
   clipRef <- newIORef (Nothing :: Maybe T.Text)
   let
     ctx' =
@@ -172,7 +174,7 @@ runTextInputCutClearsSelectionTest ctx failed = do
         (readIORef clipRef)
         (\s -> writeIORef clipRef (Just s) >> pure True)
     inp0 = withInput 320 120
-    ui = column (textInput "hello")
+    ui = column (held textRef textInput')
   _ <- warmup2 ctx' inp0 ui
   _ <- runFrame ctx' (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   let
@@ -196,9 +198,10 @@ runTextInputCutClearsSelectionTest ctx failed = do
 -- the single-line text input like they do in the text area.
 runTextInputWordKeysTest :: Context -> IORef Int -> IO ()
 runTextInputWordKeysTest ctx failed = do
+  textRef <- newIORef "hello world"
   let
     inp0 = withInput 320 120
-    ui = column (textInput "hello world")
+    ui = column (held textRef textInput')
     ctrlMods = Modifiers False True False
   _ <- warmup2 ctx inp0 ui
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
@@ -238,6 +241,7 @@ runTextInputWordKeysTest ctx failed = do
 runTextAreaCutClearsSelectionTest :: Context -> IORef Int -> IO ()
 runTextAreaCutClearsSelectionTest ctx failed = do
   clipRef <- newIORef (Nothing :: Maybe T.Text)
+  textRef <- newIORef "hello"
   let
     ctx' =
       withClipboard
@@ -245,7 +249,7 @@ runTextAreaCutClearsSelectionTest ctx failed = do
         (readIORef clipRef)
         (\s -> writeIORef clipRef (Just s) >> pure True)
     inp0 = withInput 320 220
-    ui = column (labeledArea "Notes" "hello")
+    ui = column (label "Notes" >> held textRef textArea')
   _ <- warmup2 ctx' inp0 ui
   _ <- runFrame ctx' (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   _ <-
@@ -266,9 +270,10 @@ runTextAreaCutClearsSelectionTest ctx failed = do
 
 runTextInputSelectionTest :: Context -> IORef Int -> IO ()
 runTextInputSelectionTest ctx failed = do
+  textRef <- newIORef "hello"
   let
     inp0 = withInput 320 120
-    ui = column (button "Other" >> textInput "hello")
+    ui = column (button "Other" >> held textRef textInput')
   _ <- warmup2 ctx inp0 ui
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
@@ -297,7 +302,7 @@ runTextInputMouseSelectionTest :: Context -> IORef Int -> IO ()
 runTextInputMouseSelectionTest ctx failed = do
   let
     inp0 = withInput 320 120
-    ui = column (textInput "hello")
+    ui = column (textInput' "hello")
   _ <- warmup2 ctx inp0 ui
   spans <- collectTextSpans ctx
   case [r | (r, txt, _, _, _) <- spans, txt == "hello"] of
@@ -342,7 +347,7 @@ runTextInputClickSelectTest ctx failed = do
     -- Click n times at the start of the field showing txt, then Backspace.
     clicksThenBackspace c txt n = do
       let
-        ui = column (textInput txt)
+        ui = column (textInput' txt)
       _ <- warmup2 c inp0 ui
       spans <- collectTextSpans c
       case [r | (r, t, _, _, _) <- spans, t == txt] of
@@ -371,6 +376,7 @@ runTextInputClickSelectTest ctx failed = do
 
 runTextInputClipboardTest :: Context -> IORef Int -> IO ()
 runTextInputClipboardTest ctx failed = do
+  textRef <- newIORef "hello"
   clipRef <- newIORef (Nothing :: Maybe T.Text)
   let
     ctx' =
@@ -379,7 +385,7 @@ runTextInputClipboardTest ctx failed = do
         (readIORef clipRef)
         (\s -> writeIORef clipRef (Just s) >> pure True)
     inp0 = withInput 320 120
-    ui = column (textInput "hello")
+    ui = column (held textRef textInput')
   _ <- warmup2 ctx' inp0 ui
   _ <- runFrame ctx' (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   let
@@ -407,7 +413,7 @@ runTextInputPasswordTest ctx failed = do
         (readIORef clipRef)
         (\s -> writeIORef clipRef (Just s) >> pure True)
     inp0 = withInput 320 120
-    ui = column (textInputPassword "hunter2")
+    ui = column (textInputConfigured' defaultTextInputConfig {ticPassword = True} "hunter2")
   _ <- warmup2 ctx' inp0 ui
   spans <- collectTextSpans ctx'
   assert failed (not (any (\(_, txt, _, _, _) -> "hunter2" `T.isInfixOf` txt) spans))
@@ -423,9 +429,12 @@ runTextInputPasswordTest ctx failed = do
   assertEq failed val "hunter2"
 
 -- The text input's context menu offers Paste even while unfocused, and its
--- Paste and Cut entries edit the field through the clipboard.
+-- Paste and Cut entries edit the field through the clipboard. The menu edits
+-- the field between frames, so each edit must survive the caller passing back
+-- the result of the frame before it.
 runTextInputMenuTest :: Context -> IORef Int -> IO ()
 runTextInputMenuTest ctx failed = do
+  textRef <- newIORef "hello"
   clipRef <- newIORef (Just "pasted")
   let
     ctx' =
@@ -434,7 +443,7 @@ runTextInputMenuTest ctx failed = do
         (readIORef clipRef)
         (\s -> writeIORef clipRef (Just s) >> pure True)
     inp0 = withInput 320 160
-    ui = column (textInput "hello")
+    ui = column (held textRef textInput')
   _ <- warmup2 ctx' inp0 ui
   spans <- collectTextSpans ctx'
   case [r | (r, txt, _, _, _) <- spans, txt == "hello"] of
@@ -494,7 +503,7 @@ runTextInputFocusSdlTest ctx failed = do
 runTextInputDirtyTest :: Context -> IORef Int -> IO ()
 runTextInputDirtyTest ctx failed = do
   let
-    ui = column (textInput "")
+    ui = column (textInput' "")
     inp0 = (withInput 200 100) {inputMousePos = V2 20 20}
   (resp, _) <- warmup2 ctx inp0 ui
   let
@@ -519,7 +528,7 @@ runTextInputFfCaretTest ctx failed = do
   assertEq failed (textIndexAtX fm fs (lineWidth fm (T.take 3 fs))) 3
   let
     inp0 = withInput 320 120
-    ui = column (textInput fs)
+    ui = column (textInput' fs)
   _ <- warmup2 ctx inp0 ui
   spans <- collectTextSpans ctx
   assertSpansHas failed fs spans
@@ -540,7 +549,7 @@ runTextInputScrollTest ctx failed = do
   let
     longText = "VeryLongTextEnteredIntoTheFieldThatExceedsTheWidth"
     inp0 = withInput 200 120
-    ui = column (textInput longText)
+    ui = column (textInput' longText)
   (resp, _) <- warmup2 ctx inp0 ui
   spans0 <- collectTextSpans ctx
   case [r | (r, txt, _, _, _) <- spans0, txt == longText] of
@@ -627,7 +636,7 @@ runTextAreaZoomScrollTest ctx failed = do
   let
     longText = T.unlines ["Line " <> T.pack (show (i :: Int)) | i <- [1 .. 40]]
     inp0 = withInput 320 220
-    ui = column $ textAreaWith (fontSize 32 $ defaultLayout) longText
+    ui = column $ textAreaWith' (fontSize 32) longText
   (resp, _) <- warmup2 ctx inp0 ui
   mHit <- textAreaHitForWidget ctx (respId resp)
   case mHit of
@@ -1001,12 +1010,14 @@ runRefreshRedrawTest ctx failed = do
 -- the frame, so the change must surface as a 'respChanged' pulse through the
 -- text-area store flag -- otherwise callers (the notepad's dirty tracking)
 -- never learn the document changed. Regression for the hadInput guard in
--- 'textAreaWith'.
+-- 'textAreaWith'. The caller holds the text, so the cut must also survive the
+-- release frame, where the caller still passes back the pre-cut result.
 runTextAreaMenuPulseTest :: Context -> IORef Int -> IO ()
 runTextAreaMenuPulseTest ctx failed = do
+  textRef <- newIORef "abc"
   let
     inp0 = withInput 320 220
-    ui = column (textAreaWith (grow $ defaultLayout) "abc")
+    ui = column (held textRef (textAreaWith' grow))
   (resp0, initial) <- warmup2 ctx inp0 ui
   assertEq failed initial "abc"
   mHit <- textAreaHitForWidget ctx (respId resp0)
@@ -1045,8 +1056,9 @@ runTextAreaMenuPulseTest ctx failed = do
           ((resp, val), _, _, _) <- runFrame ctx pickRelease ui
           assert failed (respChanged resp)
           assertEq failed val ""
-          ((respIdle, _), _, _, _) <- runFrame ctx inp0 ui
+          ((respIdle, valIdle), _, _, _) <- runFrame ctx inp0 ui
           assert failed (not (respChanged respIdle))
+          assertEq failed valIdle ""
         _ -> assert failed False
 
 -- | After the editor is remounted under a new key (the notepad remounts on file
@@ -1057,7 +1069,7 @@ runTextAreaRemountScrollTest ctx failed = do
   let
     longText = T.unlines ["Line " <> T.pack (show (i :: Int)) | i <- [1 .. 40]]
     inp0 = withInput 320 220
-    mkUi k = column $ keyed k $ textAreaWith (grow $ defaultLayout) longText
+    mkUi k = column $ keyed k $ textAreaWith' grow longText
   _ <- warmup2 ctx inp0 (mkUi (1 :: Int))
   (resp, _) <- warmup2 ctx inp0 (mkUi (2 :: Int))
   mHit <- textAreaHitForWidget ctx (respId resp)

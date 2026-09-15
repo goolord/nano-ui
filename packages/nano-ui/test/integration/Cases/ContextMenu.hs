@@ -15,8 +15,8 @@ menuUi :: NanoUI (Response, Maybe (Response, Response))
 menuUi = column $ do
   btn <- button' "Target Button"
   mInside <- contextMenu btn $ do
-    cut <- menuItemWith (MenuItem "Cut" Nothing True)
-    copy <- menuItemWith (MenuItem "Copy" Nothing True)
+    cut <- menuItem' "Cut"
+    copy <- menuItem' "Copy"
     pure (cut, copy)
   pure (btn, mInside)
 
@@ -55,7 +55,7 @@ runContextMenuScrollPosTest :: Context -> IORef Int -> IO ()
 runContextMenuScrollPosTest ctx failed = do
   let inp0 = withInput 200 200
       ui =
-        scrollArea (defaultLayout {layoutWidth = Grow 1, layoutHeight = Fixed 80}) $
+        scrollArea (fillW . fixedH 80) $
           column $ do
             mapM_ (\_ -> void (label "pad line")) [(1 :: Int) .. 40]
             btn <- button' "Menu Target"

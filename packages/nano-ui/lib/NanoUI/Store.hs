@@ -51,8 +51,7 @@ module NanoUI.Store
   , slotPaneMax
   , slotPaneResize
   , slotPaneNext
-  , slotRadioInit
-  , slotSelectSeen
+  , slotSeen
   , slotColorBase
   , boolInt
   , intBool
@@ -222,8 +221,7 @@ data Slot
   | SlotPaneMax
   | SlotPaneResize
   | SlotPaneNext
-  | SlotRadioInit
-  | SlotSelectSeen
+  | SlotSeen
   | SlotColorBase
   deriving (Enum, Bounded)
 
@@ -233,13 +231,9 @@ data Slot
 slotTag :: Slot -> Word64
 slotTag s = mix64 0x534C4F5454414753 (fromIntegral (fromEnum s))
 
--- | The initial selection a radio group was last rendered with.
-slotRadioInit :: Word64
-slotRadioInit = slotTag SlotRadioInit
-
--- | The index a select last reported, so 'respChanged' fires only on change.
-slotSelectSeen :: Word64
-slotSelectSeen = slotTag SlotSelectSeen
+-- | The value a controlled widget last returned to its caller.
+slotSeen :: Word64
+slotSeen = slotTag SlotSeen
 
 -- | A colour picker's opening colour.
 slotColorBase :: Word64
@@ -417,7 +411,7 @@ slotPaneResize :: Word64
 slotPaneResize = slotTag SlotPaneResize
 
 -- PaneGrid id seed (storeInt): next split / pane id to allocate. Strictly
--- monotonic per grid — ids are never reused, so per-pane state keyed by pane
+-- monotonic per grid: ids are never reused, so per-pane state keyed by pane
 -- id cannot collide with a closed pane's state.
 slotPaneNext :: Word64
 slotPaneNext = slotTag SlotPaneNext

@@ -3,10 +3,13 @@
 -- | Dropdown select.
 module NanoUI.Widgets.Select
   ( select
+  , select'
   , selectWith
-  , selectLabeled
+  , selectWith'
   , boundedSelect
+  , boundedSelect'
   , enumSelect
+  , enumSelect'
   )
 where
 
@@ -16,42 +19,48 @@ import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
 import Data.Text qualified as T
 import Effectful (Eff, type (:>))
-import NanoUI.Context (Context (..), getStore, intKey, markDirty, registerFocusable, setStore, writeStoreInt)
+import NanoUI.Context
+  ( Context (..)
+  , adoptStoreInt
+  , getStore
+  , intKey
+  , markDirty
+  , recordStoreInt
+  , registerFocusable
+  , setStore
+  )
 import NanoUI.Frame.Select (selectDropPickIndex, selectDropRect, selectItemH)
 import NanoUI.Input (inputMousePos, inputMousePressed, inputMouseReleased)
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO)
-import NanoUI.Store (WidgetStore (..), isSelectOpen, setSelectOpen, slotKey, slotSelectSeen)
+import NanoUI.Store (WidgetStore (..), isSelectOpen, setSelectOpen)
 import NanoUI.Style (Layout, defaultLayout)
 import NanoUI.Types (Rect (..), clamp, rectContains, rectHit, rectNonEmpty, v2Y)
 import NanoUI.Widgets.Combinators (withBoundedIndex)
 import NanoUI.Widgets.Node (Response, addWidgetWithOptions, respRect, setChanged)
 
-select :: (Foldable f, Ui :> es) => f Text -> Int -> Eff es (Response, Int)
-select = selectWith id
+-- | Dropdown over @options@ in fold order. Pass the selected index; the result
+-- is the index after this frame's pick.
+{-# INLINE select #-}
+select :: (Foldable f, Ui :> es) => f Text -> Int -> Eff es Int
+select options index = snd <$> selectWith' id options index
 
--- | Dropdown select with an inline caption: the closed control renders
--- @caption: option@, the way selects looked before labels were decoupled. The
--- plain 'select' stays caption-less; this is the opt-in for the old look.
-selectLabeled :: (Foldable f, Ui :> es) => Text -> f Text -> Int -> Eff es (Response, Int)
-selectLabeled caption = selectEx id caption
+{-# INLINE select' #-}
+select' :: (Foldable f, Ui :> es) => f Text -> Int -> Eff es (Response, Int)
+select' = selectWith' id
 
-selectWith ::
+-- | 'select' with a layout modifier.
+{-# INLINE selectWith #-}
+selectWith :: (Foldable f, Ui :> es) => (Layout -> Layout) -> f Text -> Int -> Eff es Int
+selectWith f options index = snd <$> selectWith' f options index
+
+selectWith' ::
   (Foldable f, Ui :> es) =>
   (Layout -> Layout) ->
   f Text ->
   Int ->
   Eff es (Response, Int)
-selectWith modLayout = selectEx modLayout ""
-
-selectEx ::
-  (Foldable f, Ui :> es) =>
-  (Layout -> Layout) ->
-  Text ->
-  f Text ->
-  Int ->
-  Eff es (Response, Int)
-selectEx modLayout caption options initial = do
+selectWith' f options index = do
   wid <- nextId
   ctx <- askContext
   uiIO $ registerFocusable ctx wid
@@ -61,14 +70,12 @@ selectEx modLayout caption options initial = do
       xs -> xs
     n = length opts
     key = intKey wid
-    seenKey = slotKey slotSelectSeen key
+  uiIO $ adoptStoreInt ctx wid key (clamp 0 (n - 1) index)
   store0 <- uiIO (getStore ctx)
   let
-    clamped = clamp 0 (n - 1) (IM.findWithDefault initial key (storeInt store0))
+    current = clamp 0 (n - 1) (IM.findWithDefault index key (storeInt store0))
     open = isSelectOpen store0 key
-  when (not (IM.member key (storeInt store0))) $
-    uiIO $ writeStoreInt ctx wid key clamped
-  resp <- addWidgetWithOptions wid NodeSelect caption opts 0 (modLayout defaultLayout)
+  resp <- addWidgetWithOptions wid NodeSelect "" opts 0 (f defaultLayout)
   inp <- askInput
   let
     rect@(Rect rx ry rw rh) = respRect resp
@@ -88,15 +95,24 @@ selectEx modLayout caption options initial = do
         writeIORef (ctxFocusId ctx) wid
         markDirty ctx
   store1 <- uiIO (getStore ctx)
-  let
-    finalIdx = IM.findWithDefault clamped key (storeInt store1)
-    seen = IM.lookup seenKey (storeInt store1)
-  when (seen /= Just finalIdx) $
-    uiIO $ writeStoreInt ctx wid seenKey finalIdx
-  pure (setChanged (maybe False (/= finalIdx) seen) resp, finalIdx)
+  let finalIdx = clamp 0 (n - 1) (IM.findWithDefault current key (storeInt store1))
+  uiIO $ recordStoreInt ctx key finalIdx
+  -- Compare with the caller's index, not 'current': a dropdown or keyboard
+  -- pick lands in the store between frames and must still report a change.
+  pure (setChanged (finalIdx /= clamp 0 (n - 1) index) resp, finalIdx)
 
-boundedSelect :: (Bounded a, Enum a, Ui :> es) => a -> (a -> Text) -> Eff es (Response, a)
-boundedSelect initial encode = withBoundedIndex encode initial select
+-- | Select over every value of a bounded enum, labelled by @encode@.
+{-# INLINE boundedSelect #-}
+boundedSelect :: (Bounded a, Enum a, Ui :> es) => (a -> Text) -> a -> Eff es a
+boundedSelect encode value = snd <$> boundedSelect' encode value
 
-enumSelect :: (Bounded a, Enum a, Show a, Ui :> es) => a -> Eff es (Response, a)
-enumSelect initial = boundedSelect initial (T.pack . show)
+boundedSelect' :: (Bounded a, Enum a, Ui :> es) => (a -> Text) -> a -> Eff es (Response, a)
+boundedSelect' encode value = withBoundedIndex encode value select'
+
+-- | 'boundedSelect' labelled with 'show'.
+{-# INLINE enumSelect #-}
+enumSelect :: (Bounded a, Enum a, Show a, Ui :> es) => a -> Eff es a
+enumSelect = boundedSelect (T.pack . show)
+
+enumSelect' :: (Bounded a, Enum a, Show a, Ui :> es) => a -> Eff es (Response, a)
+enumSelect' = boundedSelect' (T.pack . show)

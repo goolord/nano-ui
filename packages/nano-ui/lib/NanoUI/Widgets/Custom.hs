@@ -1,29 +1,26 @@
 {-# LANGUAGE OverloadedStrings #-}
 
--- | First-class custom widget definition system for nano-ui.
+-- | Custom widgets and the reference widgets built on them.
 --
--- Provides:
--- 1. 'CustomWidgetSpec' & 'customWidget': A unified specification for leaf/interactive widgets
---    supporting custom layout measurement, interaction-aware drawing, custom cursors, and damage slop.
--- 2. 'CanvasM': A fast, declarative monadic canvas builder emitting vector 'DrawOp's.
--- 3. 'canvas' & 'canvasWith': Ergonomic one-line helpers for custom graphics and interactive visual components.
--- 4. Reusable 2D gesture hooks ('useDrag2D', 'useWheelDelta').
+-- 'customWidget' takes a 'CustomWidgetSpec': a layout, optional measurement,
+-- drawing that sees hover and press state, a cursor, and damage slop.
+-- 'canvas' is the short form for drawing into a laid-out rectangle with
+-- 'CanvasM'. 'useDrag2D' and 'useWheelDelta' are gesture hooks for your own
+-- controls; 'knob' and 'toggleSwitch' show how they fit together.
 module NanoUI.Widgets.Custom
-  ( -- * Custom Widget Specification
+  ( -- * Custom widgets
     CustomWidgetSpec (..)
   , defaultCustomWidgetSpec
   , customWidget
-  , customWidget_
   , customWidgetWithId
   , CustomDrawContext (..)
   , CustomMeasureFn
   , CustomDrawBuild
   , mkCustomDrawContext
-    -- * Canvas Monad & Drawing
+    -- * Canvas
   , CanvasM
   , runCanvas
   , canvas
-  , canvasWith
   , drawRect
   , drawRoundedRect
   , drawCircle
@@ -37,21 +34,31 @@ module NanoUI.Widgets.Custom
   , drawImage
   , drawImageUV
   , drawText
-    -- * Common Gesture & Behavior Helpers
+    -- * Gestures
   , useDrag2D
   , Drag2D (..)
   , useWheelDelta
-    -- * Reference Custom Widgets
+    -- * Reference widgets
   , knob
+  , knob'
   , knobWith
+  , knobWith'
   , toggleSwitch
+  , toggleSwitch'
   , toggleSwitchWith
+  , toggleSwitchWith'
   , circularProgress
+  , circularProgress'
   , circularProgressWith
+  , circularProgressWith'
   , progressBar
+  , progressBar'
   , progressBarWith
+  , progressBarWith'
   , sparkline
+  , sparkline'
   , sparklineWith
+  , sparklineWith'
   ) where
 
 import Control.Monad (void, when)
@@ -67,12 +74,16 @@ import NanoUI.Context
   , CustomDrawBuild
   , CustomDrawContext (..)
   , CustomMeasureFn
+  , adoptStoreFloat
+  , adoptStoreInt
   , getFocusId
   , getHotId
   , getStore
   , getStoreBool
   , intKey
   , isDisabled
+  , recordStoreFloat
+  , recordStoreInt
   , registerCustomCursor
   , registerCustomDamageSlop
   , registerCustomDrawing
@@ -95,7 +106,7 @@ import NanoUI.Input
   )
 import NanoUI.Layout.Arena (NodeType (NodeDrawing))
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO)
-import NanoUI.Store (WidgetStore (..), slotDrag, slotKey)
+import NanoUI.Store (WidgetStore (..), boolInt, slotDrag, slotKey)
 import NanoUI.Style
   ( AlignX (..)
   , AlignY (..)
@@ -314,29 +325,13 @@ customWidget spec = do
   wid <- nextId
   customWidgetWithId wid spec
 
--- | Convenient variant of 'customWidget' when no custom value is returned.
-customWidget_ :: (Ui :> es) => CustomWidgetSpec () -> Eff es Response
-customWidget_ spec = fmap fst (customWidget spec)
-
--- | Declarative canvas widget for rendering custom shapes, diagrams, or graphics.
-canvas :: (Ui :> es) => Layout -> (Rect -> CanvasM ()) -> Eff es Response
-canvas lay drawAction =
-  customWidget_ defaultCustomWidgetSpec
-    { widgetLayout = lay
+-- | Draw into a rectangle sized by the layout modifier. Use 'customWidget'
+-- when the drawing needs hover or press state.
+canvas :: (Ui :> es) => (Layout -> Layout) -> (Rect -> CanvasM ()) -> Eff es Response
+canvas f drawAction =
+  fst <$> customWidget defaultCustomWidgetSpec
+    { widgetLayout = f defaultLayout
     , widgetDraw   = \_ rect -> runCanvas (drawAction rect)
-    }
-
--- | Interactive canvas widget that receives hover, press, focus, and theme states.
-canvasWith ::
-  (Ui :> es) =>
-  Layout ->
-  (CustomDrawContext -> Rect -> CanvasM a) ->
-  Eff es (Response, a)
-canvasWith lay drawAction =
-  customWidget defaultCustomWidgetSpec
-    { widgetLayout   = lay
-    , widgetDraw     = \cdc rect -> runCanvas (void (drawAction cdc rect))
-    , widgetInteract = \resp cdc _ -> (resp, fst (runCanvasM (drawAction cdc (respRect resp)) id))
     }
 
 -- -----------------------------------------------------------------------------
@@ -408,34 +403,35 @@ useWheelDelta bounds = do
 -- Reference Custom Widgets
 -- -----------------------------------------------------------------------------
 
--- | Rotary dial / knob control.
--- Draggable vertically to adjust value between min and max bounds.
--- Mouse wheel over the knob allows fine-tuning.
-knob
-  :: (Ui :> es)
-  => Float                -- ^ Minimum value
-  -> Float                -- ^ Maximum value
-  -> Float                -- ^ Initial / default value
-  -> Eff es (Response, Float)
-knob = knobWith defaultLayout 36.0
+-- | Rotary knob over @[minV, maxV]@, 36 px across. Drag vertically, scroll,
+-- or use the arrow keys. Pass the current value; the result is the value
+-- after this frame.
+{-# INLINE knob #-}
+knob :: Ui :> es => Float -> Float -> Float -> Eff es Float
+knob minV maxV value = snd <$> knobWith' id 36 minV maxV value
 
--- | Rotary knob with custom layout and diameter.
-knobWith
-  :: (Ui :> es)
-  => Layout
-  -> Float                -- ^ Diameter in pixels
-  -> Float                -- ^ Min value
-  -> Float                -- ^ Max value
-  -> Float                -- ^ Initial / default value
-  -> Eff es (Response, Float)
-knobWith layout diameter minV maxV initial = do
+{-# INLINE knob' #-}
+knob' :: Ui :> es => Float -> Float -> Float -> Eff es (Response, Float)
+knob' = knobWith' id 36
+
+-- | 'knob' with a layout modifier and a diameter in pixels.
+{-# INLINE knobWith #-}
+knobWith :: Ui :> es => (Layout -> Layout) -> Float -> Float -> Float -> Float -> Eff es Float
+knobWith f diameter minV maxV value = snd <$> knobWith' f diameter minV maxV value
+
+knobWith' ::
+  Ui :> es =>
+  (Layout -> Layout) -> Float -> Float -> Float -> Float -> Eff es (Response, Float)
+knobWith' f diameter minV maxV value = do
   wid <- nextId
   ctx <- askContext
-  current <- IM.findWithDefault initial (intKey wid) . storeFloat <$> uiIO (getStore ctx)
+  let key = intKey wid
+  uiIO $ adoptStoreFloat ctx wid key value
+  current <- IM.findWithDefault value key . storeFloat <$> uiIO (getStore ctx)
   let range = maxV - minV
       frac = if range > 0 then clamp01 ((current - minV) / range) else 0
   (resp, ()) <- customWidgetWithId wid defaultCustomWidgetSpec
-    { widgetLayout = fixedWH diameter diameter layout
+    { widgetLayout = fixedWH diameter diameter (f defaultLayout)
     , widgetMeasure = Just $ \_ _ -> (diameter, diameter)
     , widgetCursor = Just (\_ -> UiCursorNsResize)
     , widgetFocusable = True
@@ -479,31 +475,37 @@ knobWith layout diameter minV maxV initial = do
         if deltaNorm /= 0
           then clamp minV maxV (current + deltaNorm * range)
           else current
-  when (finalVal /= current) $
-    uiIO $ writeStoreFloat ctx wid (intKey wid) finalVal
+  uiIO $ do
+    when (finalVal /= current) $ writeStoreFloat ctx wid key finalVal
+    recordStoreFloat ctx key finalVal
   pure (setChanged (finalVal /= current) resp, finalVal)
 
--- | iOS-style toggle pill switch.
-toggleSwitch
-  :: (Ui :> es)
-  => Bool                 -- ^ Initial state
-  -> Eff es (Response, Bool)
-toggleSwitch = toggleSwitchWith defaultLayout
+-- | On/off switch. Pass the current state; the result is the state after
+-- this frame's click or Space/Enter.
+{-# INLINE toggleSwitch #-}
+toggleSwitch :: Ui :> es => Bool -> Eff es Bool
+toggleSwitch on = snd <$> toggleSwitchWith' id on
 
--- | Toggle switch with custom layout constraints.
-toggleSwitchWith
-  :: (Ui :> es)
-  => Layout
-  -> Bool
-  -> Eff es (Response, Bool)
-toggleSwitchWith layout initial = do
+{-# INLINE toggleSwitch' #-}
+toggleSwitch' :: Ui :> es => Bool -> Eff es (Response, Bool)
+toggleSwitch' = toggleSwitchWith' id
+
+-- | 'toggleSwitch' with a layout modifier.
+{-# INLINE toggleSwitchWith #-}
+toggleSwitchWith :: Ui :> es => (Layout -> Layout) -> Bool -> Eff es Bool
+toggleSwitchWith f on = snd <$> toggleSwitchWith' f on
+
+toggleSwitchWith' :: Ui :> es => (Layout -> Layout) -> Bool -> Eff es (Response, Bool)
+toggleSwitchWith' f on = do
   wid <- nextId
   ctx <- askContext
-  current <- uiIO (getStoreBool ctx wid initial)
+  let key = intKey wid
+  uiIO $ adoptStoreInt ctx wid key (boolInt on)
+  current <- uiIO (getStoreBool ctx wid on)
   let pillW = 44.0
       pillH = 24.0
   (resp, ()) <- customWidgetWithId wid defaultCustomWidgetSpec
-    { widgetLayout = fixedWH pillW pillH layout
+    { widgetLayout = fixedWH pillW pillH (f defaultLayout)
     , widgetMeasure = Just $ \_ _ -> (pillW, pillH)
     , widgetCursor = Just (\_ -> UiCursorPointer)
     , widgetFocusable = True
@@ -524,27 +526,29 @@ toggleSwitchWith layout initial = do
   keyClick <- keyActivated wid
   let clicked = respClicked resp || keyClick
       newVal = current /= clicked
-  when clicked $
-    uiIO $ writeStoreBool ctx wid newVal
+  uiIO $ do
+    writeStoreBool ctx wid newVal
+    recordStoreInt ctx key (boolInt newVal)
   pure (setChanged clicked resp, newVal)
 
--- | Circular progress ring indicator (clamped between 0.0 and 1.0).
-circularProgress
-  :: (Ui :> es)
-  => Float                -- ^ Progress fraction (0.0 to 1.0)
-  -> Eff es Response
-circularProgress = circularProgressWith defaultLayout 32.0
+-- | Progress ring for a fraction in @[0, 1]@, 32 px across.
+{-# INLINE circularProgress #-}
+circularProgress :: Ui :> es => Float -> Eff es ()
+circularProgress frac = void (circularProgressWith' id 32 frac)
 
--- | Circular progress ring with custom layout and diameter.
-circularProgressWith
-  :: (Ui :> es)
-  => Layout
-  -> Float                -- ^ Diameter in pixels
-  -> Float                -- ^ Progress fraction (0.0 to 1.0)
-  -> Eff es Response
-circularProgressWith layout diameter frac = do
-  customWidget_ defaultCustomWidgetSpec
-    { widgetLayout = fixedWH diameter diameter layout
+{-# INLINE circularProgress' #-}
+circularProgress' :: Ui :> es => Float -> Eff es Response
+circularProgress' = circularProgressWith' id 32
+
+-- | 'circularProgress' with a layout modifier and a diameter in pixels.
+{-# INLINE circularProgressWith #-}
+circularProgressWith :: Ui :> es => (Layout -> Layout) -> Float -> Float -> Eff es ()
+circularProgressWith f diameter frac = void (circularProgressWith' f diameter frac)
+
+circularProgressWith' :: Ui :> es => (Layout -> Layout) -> Float -> Float -> Eff es Response
+circularProgressWith' f diameter frac =
+  fst <$> customWidget defaultCustomWidgetSpec
+    { widgetLayout = fixedWH diameter diameter (f defaultLayout)
     , widgetMeasure = Just $ \_ _ -> (diameter, diameter)
     , widgetDraw = \cdc (Rect x y w h) -> runCanvas $ do
         let cx = x + w / 2
@@ -559,25 +563,26 @@ circularProgressWith layout diameter frac = do
           drawCircle (V2 cx cy) (r * clampedFrac) accent
     }
 
--- | Horizontal linear progress bar. The fraction is clamped to 0..1; the bar
--- fills the available width at a fixed height (like a slider track).
-progressBar
-  :: (Ui :> es)
-  => Float                -- ^ Progress fraction (0.0 to 1.0)
-  -> Eff es Response
-progressBar = progressBarWith defaultLayout progressBarDefaultHeight
+-- | Horizontal progress bar for a fraction in @[0, 1]@. It fills the
+-- available width at a fixed height.
+{-# INLINE progressBar #-}
+progressBar :: Ui :> es => Float -> Eff es ()
+progressBar frac = void (progressBarWith' id progressBarDefaultHeight frac)
 
--- | Horizontal linear progress bar with a custom layout and bar height.
-progressBarWith
-  :: (Ui :> es)
-  => Layout
-  -> Float                -- ^ Bar height in pixels
-  -> Float                -- ^ Progress fraction (0.0 to 1.0)
-  -> Eff es Response
-progressBarWith layout height frac =
+{-# INLINE progressBar' #-}
+progressBar' :: Ui :> es => Float -> Eff es Response
+progressBar' = progressBarWith' id progressBarDefaultHeight
+
+-- | 'progressBar' with a layout modifier and a bar height in pixels.
+{-# INLINE progressBarWith #-}
+progressBarWith :: Ui :> es => (Layout -> Layout) -> Float -> Float -> Eff es ()
+progressBarWith f height frac = void (progressBarWith' f height frac)
+
+progressBarWith' :: Ui :> es => (Layout -> Layout) -> Float -> Float -> Eff es Response
+progressBarWith' f height frac =
   let !barH = max 0 height
-   in customWidget_ defaultCustomWidgetSpec
-        { widgetLayout = fillW (fixedH barH layout)
+   in fst <$> customWidget defaultCustomWidgetSpec
+        { widgetLayout = fillW (fixedH barH (f defaultLayout))
         , widgetMeasure = Just $ \_ _ -> (progressBarDefaultWidth, barH)
         , widgetDraw = \cdc (Rect x y w h) -> runCanvas $ do
             let theme = cdcTheme cdc
@@ -601,24 +606,24 @@ progressBarDefaultHeight, progressBarDefaultWidth :: Float
 progressBarDefaultHeight = 12.0
 progressBarDefaultWidth = 120.0
 
--- | Compact inline data chart drawing smooth anti-aliased polyline segments.
-sparkline
-  :: (Ui :> es)
-  => [Float]              -- ^ Data point sequence
-  -> Eff es Response
-sparkline = sparklineWith defaultLayout 80.0 24.0
+-- | A small line chart of the values, 80 by 24 px, scaled to their range.
+{-# INLINE sparkline #-}
+sparkline :: Ui :> es => [Float] -> Eff es ()
+sparkline values = void (sparklineWith' id 80 24 values)
 
--- | Sparkline chart with custom layout and dimensions.
-sparklineWith
-  :: (Ui :> es)
-  => Layout
-  -> Float                -- ^ Preferred width
-  -> Float                -- ^ Preferred height
-  -> [Float]              -- ^ Data point sequence
-  -> Eff es Response
-sparklineWith layout prefW prefH values = do
-  customWidget_ defaultCustomWidgetSpec
-    { widgetLayout = fixedWH prefW prefH layout
+{-# INLINE sparkline' #-}
+sparkline' :: Ui :> es => [Float] -> Eff es Response
+sparkline' = sparklineWith' id 80 24
+
+-- | 'sparkline' with a layout modifier and a width and height in pixels.
+{-# INLINE sparklineWith #-}
+sparklineWith :: Ui :> es => (Layout -> Layout) -> Float -> Float -> [Float] -> Eff es ()
+sparklineWith f prefW prefH values = void (sparklineWith' f prefW prefH values)
+
+sparklineWith' :: Ui :> es => (Layout -> Layout) -> Float -> Float -> [Float] -> Eff es Response
+sparklineWith' f prefW prefH values =
+  fst <$> customWidget defaultCustomWidgetSpec
+    { widgetLayout = fixedWH prefW prefH (f defaultLayout)
     , widgetMeasure = Just $ \_ _ -> (prefW, prefH)
     , widgetDraw = \cdc (Rect x y rw rh) -> runCanvas $ do
         let theme = cdcTheme cdc

@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE BangPatterns #-}
 
-module NanoUI.Widgets.Tree (TreeItem (..), tree) where
+module NanoUI.Widgets.Tree (TreeItem (..), tree, tree') where
 
 import Control.Applicative ((<|>))
 import Control.Monad (when)
@@ -12,7 +12,7 @@ import Data.Text (Text)
 import qualified Data.Vector as V
 import Effectful (Eff, type (:>))
 import qualified Data.IntSet as IS
-import NanoUI.Context (Context (..), getFocusId, intKey, registerFocusable)
+import NanoUI.Context (Context (..), adoptStoreInt, getFocusId, intKey, recordStoreInt, registerFocusable)
 import NanoUI.Font (treeChevronRect)
 import NanoUI.Frame.Hit (scrollHitRect)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
@@ -128,18 +128,26 @@ treeRow rowIdx (nodeIdx, depth, hasKids, lbl) selectedIdx expandedSet = do
         then pure (setChanged False resp, Nothing, Just (toggle nodeIdx expandedSet))
         else pure (setChanged (not selected) resp, Just nodeIdx, Nothing)
 
-tree :: (Foldable f, Ui :> es) => Text -> f TreeItem -> Int -> Eff es (Response, Int)
-tree key inputItems initial =
+-- | Collapsible tree. Rows are numbered in pre-order; pass the selected row
+-- and the result is the selection after this frame's click or arrow keys.
+-- Expansion is kept by the widget. @key@ distinguishes trees in one scope.
+{-# INLINE tree #-}
+tree :: (Foldable f, Ui :> es) => Text -> f TreeItem -> Int -> Eff es Int
+tree key items index = snd <$> tree' key items index
+
+tree' :: (Foldable f, Ui :> es) => Text -> f TreeItem -> Int -> Eff es (Response, Int)
+tree' key inputItems index =
   withKey ("tree:" <> key) $ do
     groupId <- nextId
+    ctx <- askContext
     let items = toList inputItems
         groupKey = intKey groupId
         total = forestSize items
-        clamped = if total <= 0 then 0 else clamp 0 (total - 1) initial
+        clamped = if total <= 0 then 0 else clamp 0 (total - 1) index
+    uiIO $ adoptStoreInt ctx groupId groupKey clamped
     selected <- ensureInt groupKey clamped
     expandedSet <- ensureIntSet groupKey (parentIndices items)
     let rows = visibleRows expandedSet items
-    ctx <- askContext
     columnWith (tight . gap 0 . fillW) $ do
       tagContainer groupId
       results <- V.imapM (\rowIdx row@(i, _, _, _) -> withKey i (treeRow rowIdx row selected expandedSet)) rows
@@ -150,6 +158,7 @@ tree key inputItems initial =
       nav <- useKeyNav focus
       let (keySel, keyExp, mFocus) = treeKeyNav nav rows resps focus afterClickSel afterClickExp
       when (keySel /= selected) $ putInt groupKey keySel
+      uiIO $ recordStoreInt ctx groupKey keySel
       when (keyExp /= expandedSet) $ putIntSet groupKey keyExp
       maybe (pure ()) (\wid -> uiIO $ writeIORef (ctxFocusId ctx) wid) mFocus
       pure (setChanged (keySel /= selected) (fold resps), keySel)

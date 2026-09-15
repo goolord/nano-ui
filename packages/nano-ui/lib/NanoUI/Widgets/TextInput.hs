@@ -14,23 +14,26 @@ module NanoUI.Widgets.TextInput
   , TextInputConfig (..)
   , defaultTextInputConfig
   , textInput
+  , textInput'
   , textInputConfigured
-  , textInputWithPlaceholder
-  , textInputPassword
+  , textInputConfigured'
   , SearchFieldConfig (..)
   , defaultSearchFieldConfig
   , searchField
+  , searchField'
   , searchFieldConfigured
+  , searchFieldConfigured'
   , buildTextInput
   , editTextField
     -- * Selectable text
   , selectableText
+  , selectableText'
   , selectableTextWith
-  , selectableTextEx
+  , selectableTextWith'
   )
 where
 
-import Control.Monad (when)
+import Control.Monad (void, when)
 import Data.Bits ((.|.))
 import Data.Char (isPrint)
 import Data.IORef (writeIORef)
@@ -42,9 +45,11 @@ import Effectful (Eff, type (:>))
 import GHC.Clock (getMonotonicTime)
 import NanoUI.Context
   ( Context (..)
+  , adoptStoreText
   , getStore
   , intKey
   , markDirty
+  , recordStoreText
   , registerFocusable
   , setStore
   , setTextInputMenu
@@ -323,24 +328,32 @@ defaultTextInputConfig =
     , ticLayout = textInputLayout
     }
 
-textInput :: Ui :> es => Text -> Eff es (Response, Text)
-textInput = textInputConfigured defaultTextInputConfig
+-- | Single-line text field. Pass the current text; the result is the text
+-- after this frame's typing, pastes, and menu edits.
+{-# INLINE textInput #-}
+textInput :: Ui :> es => Text -> Eff es Text
+textInput value = snd <$> textInputConfigured' defaultTextInputConfig value
 
-textInputWithPlaceholder :: Ui :> es => Text -> Text -> Eff es (Response, Text)
-textInputWithPlaceholder placeholder initial =
-  textInputConfigured (defaultTextInputConfig {ticPlaceholder = placeholder}) initial
+{-# INLINE textInput' #-}
+textInput' :: Ui :> es => Text -> Eff es (Response, Text)
+textInput' = textInputConfigured' defaultTextInputConfig
 
-textInputPassword :: Ui :> es => Text -> Eff es (Response, Text)
-textInputPassword initial =
-  textInputConfigured (defaultTextInputConfig {ticPassword = True}) initial
+-- | 'textInput' with a placeholder, password masking, or its own layout.
+--
+-- @
+-- secret' <- textInputConfigured defaultTextInputConfig {ticPassword = True} secret
+-- @
+{-# INLINE textInputConfigured #-}
+textInputConfigured :: Ui :> es => TextInputConfig -> Text -> Eff es Text
+textInputConfigured cfg value = snd <$> textInputConfigured' cfg value
 
-textInputConfigured :: Ui :> es => TextInputConfig -> Text -> Eff es (Response, Text)
-textInputConfigured cfg initial =
+textInputConfigured' :: Ui :> es => TextInputConfig -> Text -> Eff es (Response, Text)
+textInputConfigured' cfg value =
   buildTextInput
     (if ticPassword cfg then textInputFlagPassword else 0)
     (ticLayout cfg)
     (ticPlaceholder cfg)
-    initial
+    value
     Nothing
 
 -- | One frame of a single-line field's text state: load the text (seeding
@@ -358,7 +371,11 @@ editTextField wid password initial unfocusedText = do
   let
     key = intKey wid
     stored = IM.lookup key (storeText store)
-    s0 = loadTextInputState store key (fromMaybe initial stored)
+    text0 = fromMaybe initial stored
+    -- Text replaced from outside the field can be shorter than the caret.
+    len0 = T.length text0
+    loaded = loadTextInputState store key text0
+    s0 = loaded {tisCursor = min len0 (tisCursor loaded), tisAnchor = min len0 (tisAnchor loaded)}
   when (isNothing stored) $
     uiIO $ writeStoreText ctx wid key initial
   isFocus <- keyboardFocused wid
@@ -370,10 +387,11 @@ editTextField wid password initial unfocusedText = do
     uiIO $ setStore ctx (saveTextInputState key s1 store)
   pure (tisText s0, tisText s1, isFocus)
 
--- | Shared single-line field builder. @styleIdx@ may carry the search or
--- password flag on a @NodeTextInput@; when @mDebounceMs@ is present the returned
--- change pulse is delayed until the text has been idle for that long (immediate
--- for clear clicks).
+-- | Shared single-line field builder. The caller's @value@ is adopted as by
+-- 'NanoUI.Context.adoptStoreText'. @styleIdx@ may carry the search or password
+-- flag on a @NodeTextInput@; when @mDebounceMs@ is present the returned change
+-- pulse is delayed until the text has been idle for that long (immediate for
+-- clear clicks).
 buildTextInput ::
   Ui :> es =>
   Int ->
@@ -382,15 +400,18 @@ buildTextInput ::
   Text ->
   Maybe Float ->
   Eff es (Response, Text)
-buildTextInput styleIdx layout placeholder initial mDebounceMs = do
+buildTextInput styleIdx layout placeholder value mDebounceMs = do
   wid <- nextId
-  (oldText, newText, isFocus) <- editTextField wid (textInputPasswordMode styleIdx) initial Nothing
   ctx <- askContext
+  let key = intKey wid
+  uiIO $ adoptStoreText ctx wid key value
+  (oldText, newText, isFocus) <- editTextField wid (textInputPasswordMode styleIdx) value Nothing
+  uiIO $ recordStoreText ctx key newText
   inp <- askInput
   let submitted = isFocus && KeyEnter `elem` inputKeys inp
   changed <- case mDebounceMs of
     Nothing -> pure (newText /= oldText)
-    Just ms -> uiIO (debounceSearchChanged ctx (intKey wid) isFocus (newText /= oldText) ms)
+    Just ms -> uiIO (debounceSearchChanged ctx key isFocus (newText /= oldText) ms)
   resp <- addWidgetStyled wid NodeTextInput placeholder 0 layout styleIdx Nothing
   pure (setSubmitted submitted (setChanged changed resp), newText)
 
@@ -453,38 +474,53 @@ defaultSearchFieldConfig =
     , sfcLayout = searchFieldLayout
     }
 
-searchField :: Ui :> es => Text -> Text -> Eff es (Response, Text)
-searchField placeholder initial =
-  searchFieldConfigured (defaultSearchFieldConfig {sfcPlaceholder = placeholder}) initial
+-- | Search box with a magnifier and a clear button; the first argument is the
+-- placeholder. Pass the current text; the result is the text after this
+-- frame. 'respChanged' on 'searchField'' is debounced: it fires once typing
+-- pauses, or at once when the field is cleared.
+{-# INLINE searchField #-}
+searchField :: Ui :> es => Text -> Text -> Eff es Text
+searchField placeholder value = snd <$> searchField' placeholder value
 
-searchFieldConfigured ::
+{-# INLINE searchField' #-}
+searchField' :: Ui :> es => Text -> Text -> Eff es (Response, Text)
+searchField' placeholder =
+  searchFieldConfigured' (defaultSearchFieldConfig {sfcPlaceholder = placeholder})
+
+{-# INLINE searchFieldConfigured #-}
+searchFieldConfigured :: Ui :> es => SearchFieldConfig -> Text -> Eff es Text
+searchFieldConfigured cfg value = snd <$> searchFieldConfigured' cfg value
+
+searchFieldConfigured' ::
   Ui :> es => SearchFieldConfig -> Text -> Eff es (Response, Text)
-searchFieldConfigured cfg initial =
+searchFieldConfigured' cfg value =
   buildTextInput
     textInputFlagSearch
     (sfcLayout cfg)
     (sfcPlaceholder cfg)
-    initial
+    value
     (Just (sfcDebounceMs cfg))
 
 -- -----------------------------------------------------------------------------
 -- Selectable text
 -- -----------------------------------------------------------------------------
 
--- | Selectable text label: displays text that can be highlighted/selected with the
--- mouse and copied to the clipboard with Ctrl+C, but cannot be edited.
-selectableText :: Ui :> es => Text -> Eff es Response
+-- | Read-only text that can be selected with the mouse and copied with Ctrl+C.
+{-# INLINE selectableText #-}
+selectableText :: Ui :> es => Text -> Eff es ()
 selectableText = selectableTextWith id
 
--- | Selectable text label with a layout modifier.
-selectableTextWith :: Ui :> es => (Layout -> Layout) -> Text -> Eff es Response
-selectableTextWith f txt = do
-  base <- askDefaultLayout
-  selectableTextEx (f base) txt
+{-# INLINE selectableText' #-}
+selectableText' :: Ui :> es => Text -> Eff es Response
+selectableText' = selectableTextWith' id
 
--- | Selectable text label with an explicit layout.
-selectableTextEx :: Ui :> es => Layout -> Text -> Eff es Response
-selectableTextEx layout txt = do
+{-# INLINE selectableTextWith #-}
+selectableTextWith :: Ui :> es => (Layout -> Layout) -> Text -> Eff es ()
+selectableTextWith f txt = void (selectableTextWith' f txt)
+
+selectableTextWith' :: Ui :> es => (Layout -> Layout) -> Text -> Eff es Response
+selectableTextWith' f txt = do
+  layout <- f <$> askDefaultLayout
   wid <- nextId
   ctx <- askContext
   uiIO $ registerFocusable ctx wid

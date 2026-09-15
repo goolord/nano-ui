@@ -6,7 +6,6 @@ module Cases.Damage
   , runOrphanAnimationDamageSettlesTest
   ) where
 
-import Control.Monad (when)
 import Data.IORef (IORef)
 import NanoUI
 import NanoUI.Testing
@@ -100,9 +99,8 @@ runStateChangeDamageTest ctx failed = do
       ui = do
         (name, setName) <- useText ""
         row $ do
-          label_ ("Left pane: " <> name)
-          (resp, typed) <- textInput ""
-          when (respChanged resp) (setName typed)
+          label ("Left pane: " <> name)
+          setName =<< textInput name
 
   -- Warm up and focus textInput via Tab
   _ <- warmup2 ctx inp0 ui
@@ -119,13 +117,13 @@ runOrphanAnimationDamageSettlesTest ctx failed = do
   let winInp = withInput 400 300
       inp = winInp {inputDeltaTime = 0.05}
       withBar = columnWith (padAll 20) $ do
-        barResp <- spacer (Fixed 40) (Fixed 20)
-        pure barResp
+        bar <- currentId
+        spacer (Fixed 40) (Fixed 20)
+        pure bar
       withoutBar = columnWith (padAll 20) (pure ())
   -- Warm up: the bar widget occupies a nonzero 40x20 rect in the arena.
-  (barResp, _, _, _) <- runFrame ctx inp withBar
+  (wid, _, _, _) <- runFrame ctx inp withBar
   _ <- takeDamage ctx
-  let wid = respId barResp
   -- keepAnimating-style perpetual animation on an established widget.
   startAnimation ctx wid 0 1 1e9
   -- Widget present and animating => damage is a clip over it, not a

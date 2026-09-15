@@ -16,8 +16,7 @@ import NanoUI
   ( Key (KeyEnter)
   , NanoUI
   , button
-  , column'
-  , defaultLayout
+  , column
   , inputKeys
   , inputKeysElem
   , uiIO
@@ -78,7 +77,7 @@ nanoFormSubmit prefix submitLabel form = do
   inp <- askInput
   submittedBefore <- uiIO (isFormSubmitted ctx prefix)
   withNanoForm prefix form $ \view' res -> do
-    btnClicked <- column' defaultLayout $ do
+    btnClicked <- column $ do
       renderResult submittedBefore view' res
       button submitLabel
     let enterPressed = inputKeysElem KeyEnter (inputKeys inp)
@@ -98,7 +97,7 @@ nanoFormEx cfg prefix form = do
     let showErrors = case fcMode cfg of
           FormLive     -> True
           FormOnSubmit -> submittedBefore
-    column' defaultLayout $ do
+    column $ do
       renderResult showErrors view' res
       case fcSubmitButton cfg of
         Just lbl ->

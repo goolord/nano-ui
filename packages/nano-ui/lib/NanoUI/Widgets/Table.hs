@@ -4,12 +4,12 @@ module NanoUI.Widgets.Table
   ( SortDir (..)
   , SortCol (..)
   , ColSize (..)
-  , TableCfg (..)
+  , TableConfig (..)
   , TableResponse (..)
-  , defaultTableCfg
+  , defaultTableConfig
   , table
-  , tableEx
-  , tableCfg
+  , tableWith
+  , tableConfigured
   , simpleTable
   , useTableSort
   , tableHiddenIndices
@@ -256,7 +256,7 @@ data SortCol = SortCol {sortColIndex :: !Int, sortColDir :: !SortDir}
 data ColSize = ColContent | ColStretch | ColFixed Float
   deriving (Eq, Show)
 
-data TableCfg = TableCfg
+data TableConfig = TableConfig
   { tableFreezeCols :: {-# UNPACK #-} !Int
   , tableFreezeRows :: {-# UNPACK #-} !Int
   , tableColSizes :: ![ColSize]
@@ -264,8 +264,8 @@ data TableCfg = TableCfg
   }
   deriving (Eq, Show)
 
-defaultTableCfg :: TableCfg
-defaultTableCfg = TableCfg 0 0 [] IS.empty
+defaultTableConfig :: TableConfig
+defaultTableConfig = TableConfig 0 0 [] IS.empty
 
 data TableResponse = TableResponse
   { tableWidgetResponse :: !Response
@@ -432,7 +432,7 @@ writeColW ctx key ws = do
   st <- getStore ctx
   setStore ctx (st {storeFloatList = IM.insert key ws (storeFloatList st)})
 
--- | Inputs tableCfg collects for finishTable. Positional args invite silent
+-- | Inputs tableConfigured collects for finishTable. Positional args invite silent
 -- transposition (two [Float]s, several plain Floats), so keep them named.
 data TableFinish = TableFinish
   { tfN :: Int
@@ -552,29 +552,40 @@ finishTable TableFinish{tfN = n, tfStateKey = stateKey, tfVis = vis, tfOrder0 = 
           }
   pure (TableResponse widgetResp nextSort nextOrder nextHidden)
 
+-- | Sortable table with resizable, reorderable columns. @key@ tells tables in
+-- one scope apart, and the columns are a colonnade over @row@. Pass the
+-- current sort; the 'TableResponse' carries the sort after this frame's
+-- header clicks, along with the column order and hidden columns.
+{-# INLINE table #-}
 table :: (Foldable f, Ui :> es) => Text -> Colonnade Headed row Text -> f row -> SortCol -> Eff es TableResponse
-table = tableEx (tight . fillW $ defaultLayout {layoutGap = 0})
+table = tableConfigured defaultTableConfig id
 
-tableEx :: (Foldable f, Ui :> es) => Layout -> Text -> Colonnade Headed row Text -> f row -> SortCol -> Eff es TableResponse
-tableEx = tableCfg defaultTableCfg
+-- | 'table' with a layout modifier.
+{-# INLINE tableWith #-}
+tableWith :: (Foldable f, Ui :> es) => (Layout -> Layout) -> Text -> Colonnade Headed row Text -> f row -> SortCol -> Eff es TableResponse
+tableWith = tableConfigured defaultTableConfig
 
+-- | A table of text rows under the given headers.
 simpleTable :: (Foldable f, Ui :> es) => [Text] -> f [Text] -> Eff es TableResponse
 simpleTable headers rows = do
   let cols = mconcat [headed h (\r -> vectorAt r i "") | (i, h) <- zip [0 ..] headers]
       indexedRows = map V.fromList (toList rows)
   table "simple" cols indexedRows (SortCol 0 SortAsc)
 
-tableCfg ::
+-- | 'tableWith' with column sizes, frozen rows and columns, and initially
+-- hidden columns.
+tableConfigured ::
   (Foldable f, Ui :> es) =>
-  TableCfg ->
-  Layout ->
+  TableConfig ->
+  (Layout -> Layout) ->
   Text ->
   Colonnade Headed row Text ->
   f row ->
   SortCol ->
   Eff es TableResponse
-tableCfg cfg outerLayout key cols inputRows curSort =
+tableConfigured cfg f key cols inputRows curSort =
   withKey ("table:" <> key) $ do
+    let outerLayout = f (tight . fillW $ defaultLayout {layoutGap = 0})
     stateWid <- nextId
     vWid <- nextId
     hWid <- nextId

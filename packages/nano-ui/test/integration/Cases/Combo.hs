@@ -9,12 +9,12 @@ module Cases.Combo
   , runComboWheelScrollTest
   ) where
 
-import Data.IORef (IORef)
+import Data.IORef (IORef, newIORef)
 import Data.Text qualified as T
 import NanoUI
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, withInput)
-import NanoUI.Testing.Harness (clickPair, hasText, warmup2)
+import NanoUI.Testing.Harness (clickPair, hasText, held, warmup2)
 
 comboOpts :: [T.Text]
 comboOpts = ["Alpha Sans", "Beta Serif", "Gamma Mono", "Delta Round"]
@@ -31,8 +31,9 @@ comboLongOpts =
 -- anything on its own: Enter with no highlight leaves the typed text alone.
 runComboFilterTest :: Context -> IORef Int -> IO ()
 runComboFilterTest ctx failed = do
+  textRef <- newIORef ""
   let inp0 = withInput 320 100
-      ui = comboBox "Font" comboOpts ""
+      ui = held textRef (comboBox' "Font" comboOpts)
   _ <- warmup2 ctx inp0 ui
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   _ <- runFrame ctx (inp0 {inputChars = "ga"}) ui
@@ -47,7 +48,7 @@ runComboFilterTest ctx failed = do
 runComboKeyboardPickTest :: Context -> IORef Int -> IO ()
 runComboKeyboardPickTest ctx failed = do
   let inp0 = withInput 320 100
-      ui = comboBox "Font" comboOpts ""
+      ui = comboBox' "Font" comboOpts ""
   _ <- warmup2 ctx inp0 ui
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyDown]}) ui
@@ -62,7 +63,7 @@ runComboKeyboardPickTest ctx failed = do
 runComboMousePickTest :: Context -> IORef Int -> IO ()
 runComboMousePickTest ctx failed = do
   let inp0 = withInput 320 200
-      ui = comboBox "Font" comboOpts ""
+      ui = comboBox' "Font" comboOpts ""
   _ <- warmup2 ctx inp0 ui
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   _ <- runFrame ctx inp0 ui
@@ -89,7 +90,7 @@ runComboMousePickTest ctx failed = do
 runComboHoverHighlightTest :: Context -> IORef Int -> IO ()
 runComboHoverHighlightTest ctx failed = do
   let inp0 = withInput 320 200
-      ui = comboBox "Font" comboOpts ""
+      ui = comboBox' "Font" comboOpts ""
   _ <- warmup2 ctx inp0 ui
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   _ <- runFrame ctx inp0 ui
@@ -124,7 +125,7 @@ runComboHoverHighlightTest ctx failed = do
 runComboScrollbarDragTest :: Context -> IORef Int -> IO ()
 runComboScrollbarDragTest ctx failed = do
   let inp0 = withInput 320 300
-      ui = comboBox "Fonts" comboLongOpts ""
+      ui = comboBox' "Fonts" comboLongOpts ""
   (resp, _) <- warmup2 ctx inp0 ui
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   _ <- runFrame ctx inp0 ui
@@ -151,8 +152,9 @@ runComboScrollbarDragTest ctx failed = do
 -- commits the text.
 runComboBlurCommitTest :: Context -> IORef Int -> IO ()
 runComboBlurCommitTest ctx failed = do
+  textRef <- newIORef ""
   let inp0 = withInput 320 200
-      ui = column (comboBox "Font" comboOpts "")
+      ui = column (held textRef (comboBox' "Font" comboOpts))
   _ <- warmup2 ctx inp0 ui
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   ((rA, tA), _, _, _) <- runFrame ctx (inp0 {inputChars = "N"}) ui
@@ -182,8 +184,9 @@ runComboBlurCommitTest ctx failed = do
 -- the last committed value without a commit pulse, and the dropdown closes.
 runComboEscapeRevertTest :: Context -> IORef Int -> IO ()
 runComboEscapeRevertTest ctx failed = do
+  textRef <- newIORef "Inter"
   let inp0 = withInput 320 200
-      ui = comboBox "Font" comboOpts "Inter"
+      ui = held textRef (comboBox' "Font" comboOpts)
   (r0, t0) <- warmup2 ctx inp0 ui
   assertEq failed t0 "Inter"
   assert failed (not (respChanged r0))
@@ -208,7 +211,7 @@ runComboWheelScrollTest :: Context -> IORef Int -> IO ()
 runComboWheelScrollTest ctx failed = do
   let inp0 = withInput 200 260
       long = "A Very Long Font Family Name That Overflows"
-      ui = comboBox "Fonts" (comboLongOpts ++ [long]) ""
+      ui = comboBox' "Fonts" (comboLongOpts ++ [long]) ""
   _ <- warmup2 ctx inp0 ui
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   _ <- runFrame ctx inp0 ui

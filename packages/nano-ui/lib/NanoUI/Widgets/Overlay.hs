@@ -65,7 +65,7 @@ import NanoUI.Widgets.Layout
   , labelEx
   , row'
   , scrollWith
-  , sep
+  , separator
   )
 import NanoUI.Widgets.Node
   ( Response (..)
@@ -152,7 +152,7 @@ overlay kind open title child = do
                 WindowOverlay -> withKey title titleLabel
             flex
             withKey ("close" :: Text) closeButton
-        when (isModal && not (T.null title)) sep
+        when (isModal && not (T.null title)) separator
         r <- scrollWith (tight . grow) child
         when isModal (uiIO (endModal ctx))
         pure (close, r)

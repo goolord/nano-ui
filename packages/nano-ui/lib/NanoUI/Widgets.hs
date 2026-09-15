@@ -11,104 +11,35 @@ module NanoUI.Widgets
   , respSubmitted
   , respRightPressed
   , respRightClicked
-  , onClick
-  , onRightClick
   , panel
   , panelWith
-  , panel'
   , panelStyled
   , panelStyledWith
-  , panelStyled'
   , callout
   , calloutWith
   , row
   , rowWith
-  , row'
   , column
   , columnWith
-  , column'
   , grid
   , gridWith
-  , grid'
-  , label
-  , labelWith
-  , labelEx
-  , selectableText
-  , selectableTextWith
-  , selectableTextEx
-  , button
-  , button'
-  , buttonWith
-  , buttonWith'
-  , button_
-  , buttonEx
-  , checkbox
-  , slider
-  , sliderWith
-  , sliderEx
-  , textInput
-  , SearchFieldConfig (..)
-  , defaultSearchFieldConfig
-  , searchField
-  , searchFieldConfigured
-  , comboBox
-  , textArea
-  , textAreaWith
-  , separator
-  , spacer
-  , tooltip
-  , tooltipWidget
-  , tooltipWith
-  , withTooltip
-  , popup
-  , popupEx
-  , PopupAnchor (..)
-  , PopupPlacement (..)
-  , PopupConfig (..)
-  , defaultPopupConfig
-  , contextMenu
-  , contextMenuArea
-  , useContextMenu
-  , menuButton
-  , MenuItem (..)
-  , menuItemWith
-  , menuItem
-  , menuItemWithShortcut
-  , menuItemDisabled
-  , menuSeparator
-  , menuHeader
+  , center
+  , responsive
+  , responsiveRowCol
   , scroll
   , scrollWith
-  , scroll'
+  , scroll2D
   , scroll2DWith
-  , scroll2D'
   , scrollArea
   , scrollArea2D
-  , scrollAreaIdConfigured
-  , scrollConfigured
-  , select
-  , selectWith
-  , selectLabeled
-  , boundedSelect
-  , enumSelect
-  , radioFieldset
-  , boundedRadioFieldset
-  , enumRadio
-  , TreeItem (..)
-  , tree
-  , colorPicker
-  , colorPickerRGBA
-  , modal
-  , window
-  , image
-  , label_
-  , useState
-  , useFlag
-  , useText
-  , useInt
-  , useFloat
-  , useEnum
-  , useToggle
+  , label
+  , label'
+  , labelWith
+  , labelWith'
+  , selectableText
+  , selectableText'
+  , selectableTextWith
+  , selectableTextWith'
   , heading
   , muted
   , mono
@@ -119,78 +50,97 @@ module NanoUI.Widgets
   , kv
   , kvMono
   , kvBlock
-  , TextInputConfig (..)
-  , defaultTextInputConfig
-  , textInputConfigured
-  , textInputWithPlaceholder
-  , textInputPassword
   , card
   , toolbar
-  , sep
+  , separator
+  , spacer
   , flex
-  , image_
+  , image
   , box
-  , drawing
-  , drawingVersioned
-  , drawingCached
-  , DrawOp (..)
-  , DrawingBuild
-  , CustomWidgetSpec (..)
-  , defaultCustomWidgetSpec
-  , customWidget
-  , customWidget_
-  , customWidgetWithId
-  , CustomDrawContext (..)
-  , CustomMeasureFn
-  , CustomDrawBuild
-  , CanvasM
-  , runCanvas
-  , canvas
-  , canvasWith
-  , drawRect
-  , drawRoundedRect
-  , drawCircle
-  , drawStroke
-  , drawStrokeRoundedRect
-  , drawStrokeCircle
-  , drawStrokeAA
-  , drawQuadGradient
-  , drawLinearGradientH
-  , drawLinearGradientV
-  , drawImage
-  , drawImageUV
-  , drawText
-  , useDrag2D
-  , Drag2D (..)
-  , useWheelDelta
-  , knob
-  , knobWith
-  , toggleSwitch
-  , toggleSwitchWith
-  , circularProgress
-  , circularProgressWith
-  , progressBar
-  , progressBarWith
-  , sparkline
-  , sparklineWith
-  , Transition (..)
-  , animate
-  , animateTo
-  , animateToA
-  , pulse
-  , keepAnimating
-  , colorPickerToHex
-  , colorPickerToHexA
-  , colorPickerFromHex
+  , button
+  , button'
+  , buttonWith
+  , buttonWith'
+  , checkbox
+  , checkbox'
+  , radio
+  , radio'
+  , boundedRadio
+  , boundedRadio'
+  , enumRadio
+  , enumRadio'
+  , select
+  , select'
+  , selectWith
+  , selectWith'
+  , boundedSelect
+  , boundedSelect'
+  , enumSelect
+  , enumSelect'
+  , slider
+  , slider'
+  , sliderWith
+  , sliderWith'
+  , TextInputConfig (..)
+  , defaultTextInputConfig
+  , textInput
+  , textInput'
+  , textInputConfigured
+  , textInputConfigured'
+  , SearchFieldConfig (..)
+  , defaultSearchFieldConfig
+  , searchField
+  , searchField'
+  , searchFieldConfigured
+  , searchFieldConfigured'
+  , comboBox
+  , comboBox'
+  , textArea
+  , textArea'
+  , textAreaWith
+  , textAreaWith'
+  , colorPicker
+  , colorPicker'
+  , colorPickerRGBA
+  , colorPickerRGBA'
+  , colorToHex
+  , colorToHexA
+  , colorFromHex
+  , TreeItem (..)
+  , tree
+  , tree'
+  , modal
+  , window
+  , PopupAnchor (..)
+  , PopupPlacement (..)
+  , PopupConfig (..)
+  , defaultPopupConfig
+  , popup
+  , popupWith
+  , tooltip
+  , tooltipAt
+  , tooltipWidget
+  , withTooltip
+  , contextMenu
+  , contextMenuArea
+  , useContextMenu
+  , menuButton
+  , menuButton'
+  , menuItem
+  , menuItem'
+  , menuItemShortcut
+  , menuItemDisabled
+  , menuSeparator
+  , menuHeader
   , SortDir (..)
   , SortCol (..)
   , ColSize (..)
-  , TableCfg (..)
+  , TableConfig (..)
   , TableResponse (..)
-  , defaultTableCfg
+  , defaultTableConfig
   , table
-  , tableEx
-  , tableCfg
+  , tableWith
+  , tableConfigured
   , simpleTable
   , useTableSort
   , tableHiddenIndices
@@ -206,16 +156,80 @@ module NanoUI.Widgets
   , PaneGridResponse (..)
   , GridAxis (..)
   , paneGrid
+  , drawing
+  , drawingVersioned
+  , drawingCached
+  , DrawOp (..)
+  , DrawingBuild
+  , CustomWidgetSpec (..)
+  , defaultCustomWidgetSpec
+  , customWidget
+  , customWidgetWithId
+  , CustomDrawContext (..)
+  , CustomMeasureFn
+  , CustomDrawBuild
+  , CanvasM
+  , runCanvas
+  , canvas
+  , drawRect
+  , drawRoundedRect
+  , drawCircle
+  , drawStroke
+  , drawStrokeRoundedRect
+  , drawStrokeCircle
+  , drawStrokeAA
+  , drawQuadGradient
+  , drawLinearGradientH
+  , drawLinearGradientV
+  , drawImage
+  , drawImageUV
+  , drawText
+  , useDrag2D
+  , Drag2D (..)
+  , useWheelDelta
+  , knob
+  , knob'
+  , knobWith
+  , knobWith'
+  , toggleSwitch
+  , toggleSwitch'
+  , toggleSwitchWith
+  , toggleSwitchWith'
+  , circularProgress
+  , circularProgress'
+  , circularProgressWith
+  , circularProgressWith'
+  , progressBar
+  , progressBar'
+  , progressBarWith
+  , progressBarWith'
+  , sparkline
+  , sparkline'
+  , sparklineWith
+  , sparklineWith'
+  , Transition (..)
+  , animate
+  , animateTo
+  , animateToA
+  , pulse
+  , keepAnimating
+  , useState
+  , useFlag
+  , useText
+  , useInt
+  , useFloat
+  , useEnum
+  , useToggle
   )
 where
 
 import NanoUI.Hooks (useEnum, useFlag, useFloat, useInt, useState, useText, useToggle)
-import NanoUI.WidgetText (colorPickerFromHex, colorPickerToHex, colorPickerToHexA)
+import NanoUI.WidgetText (colorFromHex, colorToHex, colorToHexA)
 import NanoUI.Widgets.Animate (Transition (..), animate, animateTo, animateToA, keepAnimating, pulse)
-import NanoUI.Widgets.Button (button, button', buttonEx, buttonWith, buttonWith', button_)
-import NanoUI.Widgets.Checkbox (checkbox)
-import NanoUI.Widgets.ColorPicker (colorPicker, colorPickerRGBA)
-import NanoUI.Widgets.Combo (comboBox)
+import NanoUI.Widgets.Button (button, button', buttonWith, buttonWith')
+import NanoUI.Widgets.Checkbox (checkbox, checkbox')
+import NanoUI.Widgets.ColorPicker (colorPicker, colorPicker', colorPickerRGBA, colorPickerRGBA')
+import NanoUI.Widgets.Combo (comboBox, comboBox')
 import NanoUI.Widgets.Custom
   ( CanvasM
   , CustomDrawBuild
@@ -224,12 +238,12 @@ import NanoUI.Widgets.Custom
   , CustomWidgetSpec (..)
   , Drag2D (..)
   , canvas
-  , canvasWith
   , circularProgress
+  , circularProgress'
   , circularProgressWith
+  , circularProgressWith'
   , customWidget
   , customWidgetWithId
-  , customWidget_
   , defaultCustomWidgetSpec
   , drawCircle
   , drawImage
@@ -245,14 +259,22 @@ import NanoUI.Widgets.Custom
   , drawStrokeRoundedRect
   , drawText
   , knob
+  , knob'
   , knobWith
+  , knobWith'
   , progressBar
+  , progressBar'
   , progressBarWith
+  , progressBarWith'
   , runCanvas
   , sparkline
+  , sparkline'
   , sparklineWith
+  , sparklineWith'
   , toggleSwitch
+  , toggleSwitch'
   , toggleSwitchWith
+  , toggleSwitchWith'
   , useDrag2D
   , useWheelDelta
   )
@@ -263,12 +285,10 @@ import NanoUI.Widgets.Display
   , danger
   , heading
   , image
-  , image_
   , italic
   , kv
   , kvBlock
   , kvMono
-  , label_
   , mono
   , muted
   , toolbar
@@ -278,56 +298,49 @@ import NanoUI.Widgets.Drawing (DrawOp (..), DrawingBuild, drawing, drawingCached
 import NanoUI.Widgets.Layout
   ( callout
   , calloutWith
+  , center
   , column
-  , column'
   , columnWith
   , flex
   , grid
-  , grid'
   , gridWith
   , label
-  , labelEx
+  , label'
   , labelWith
+  , labelWith'
   , panel
-  , panel'
   , panelStyled
-  , panelStyled'
   , panelStyledWith
   , panelWith
+  , responsive
+  , responsiveRowCol
   , row
-  , row'
   , rowWith
   , scroll
-  , scroll'
-  , scroll2D'
+  , scroll2D
   , scroll2DWith
   , scrollArea
   , scrollArea2D
-  , scrollAreaIdConfigured
-  , scrollConfigured
   , scrollWith
-  , sep
   , separator
   , spacer
   )
 import NanoUI.Widgets.Menu
-  ( MenuItem (..)
-  , contextMenu
+  ( contextMenu
   , contextMenuArea
   , menuButton
+  , menuButton'
   , menuHeader
   , menuItem
+  , menuItem'
   , menuItemDisabled
-  , menuItemWith
-  , menuItemWithShortcut
+  , menuItemShortcut
   , menuSeparator
   , useContextMenu
   )
 import NanoUI.Widgets.Node
   ( HasResponse (..)
   , Response (..)
-  , onClick
-  , onRightClick
   , respChanged
   , respClicked
   , respHovered
@@ -354,48 +367,60 @@ import NanoUI.Widgets.Popup
   , PopupPlacement (..)
   , defaultPopupConfig
   , popup
-  , popupEx
+  , popupWith
   , tooltip
+  , tooltipAt
   , tooltipWidget
-  , tooltipWith
   , withTooltip
   )
-import NanoUI.Widgets.Radio (boundedRadioFieldset, enumRadio, radioFieldset)
-import NanoUI.Widgets.Select (boundedSelect, enumSelect, select, selectLabeled, selectWith)
-import NanoUI.Widgets.Slider (slider, sliderEx, sliderWith)
+import NanoUI.Widgets.Radio (boundedRadio, boundedRadio', enumRadio, enumRadio', radio, radio')
+import NanoUI.Widgets.Select
+  ( boundedSelect
+  , boundedSelect'
+  , enumSelect
+  , enumSelect'
+  , select
+  , select'
+  , selectWith
+  , selectWith'
+  )
+import NanoUI.Widgets.Slider (slider, slider', sliderWith, sliderWith')
 import NanoUI.Widgets.Table
   ( ColSize (..)
   , Colonnade
   , Headed (..)
   , SortCol (..)
   , SortDir (..)
-  , TableCfg (..)
+  , TableConfig (..)
   , TableResponse (..)
-  , defaultTableCfg
+  , defaultTableConfig
   , headed
   , headless
   , simpleTable
   , sortRows
   , table
-  , tableCfg
-  , tableEx
+  , tableConfigured
   , tableHiddenIndices
+  , tableWith
   , useTableSort
   )
-import NanoUI.Widgets.TextArea (textArea, textAreaWith)
+import NanoUI.Widgets.TextArea (textArea, textArea', textAreaWith, textAreaWith')
 import NanoUI.Widgets.TextInput
   ( SearchFieldConfig (..)
   , TextInputConfig (..)
   , defaultSearchFieldConfig
   , defaultTextInputConfig
   , searchField
+  , searchField'
   , searchFieldConfigured
+  , searchFieldConfigured'
   , selectableText
-  , selectableTextEx
+  , selectableText'
   , selectableTextWith
+  , selectableTextWith'
   , textInput
+  , textInput'
   , textInputConfigured
-  , textInputPassword
-  , textInputWithPlaceholder
+  , textInputConfigured'
   )
-import NanoUI.Widgets.Tree (TreeItem (..), tree)
+import NanoUI.Widgets.Tree (TreeItem (..), tree, tree')

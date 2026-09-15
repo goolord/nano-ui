@@ -1,18 +1,26 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module NanoUI.Widgets.Radio (radioFieldset, boundedRadioFieldset, enumRadio) where
+module NanoUI.Widgets.Radio
+  ( radio
+  , radio'
+  , boundedRadio
+  , boundedRadio'
+  , enumRadio
+  , enumRadio'
+  )
+where
 
-import Control.Monad (foldM, when)
+import Control.Monad (foldM)
 import Data.Foldable (toList)
 import Data.Hashable (hash)
 import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
 import Data.Text qualified as T
 import Effectful (Eff, type (:>))
-import NanoUI.Context (getStore, intKey, registerFocusable, setStore)
+import NanoUI.Context (adoptStoreInt, getStore, intKey, recordStoreInt, registerFocusable, writeStoreInt)
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, nextId, uiIO, withKey)
-import NanoUI.Store (WidgetStore (..), slotKey, slotRadioInit)
+import NanoUI.Store (WidgetStore (..))
 import NanoUI.Style (Layout, defaultLayout, fillW, gap, tight)
 import NanoUI.Types (clamp)
 import NanoUI.Widgets.Behavior (KeyNav (..), useKeyNav)
@@ -33,9 +41,15 @@ radioGroupLay = tight (gap 4 (fillW defaultLayout))
 radioSalt :: Int
 radioSalt = hash ("radio" :: Text)
 
-radioFieldset ::
+-- | A column of radio buttons over @options@ in fold order. Pass the selected
+-- index; the result is the index after this frame's click or arrow keys.
+{-# INLINE radio #-}
+radio :: (Foldable f, Ui :> es) => f Text -> Int -> Eff es Int
+radio options index = snd <$> radio' options index
+
+radio' ::
   (Foldable f, Ui :> es) => f Text -> Int -> Eff es (Response, Int)
-radioFieldset options initial =
+radio' options index =
   withKey radioSalt $ do
     gid <- nextId
     ctx <- askContext
@@ -44,16 +58,10 @@ radioFieldset options initial =
         [] -> [""]
         xs -> xs
       !len = length opts
-      !c0 = clamp 0 (len - 1) initial
       !key = intKey gid
-      !keyInit = slotKey slotRadioInit key
+    uiIO $ adoptStoreInt ctx gid key (clamp 0 (len - 1) index)
     st0 <- uiIO (getStore ctx)
-    let
-      lastInit = IM.lookup keyInit (storeInt st0)
-      storedSel = IM.lookup key (storeInt st0)
-      !sel = case (lastInit, storedSel) of
-        (Just li, Just s) | li == c0 -> clamp 0 (len - 1) s
-        _ -> c0
+    let !sel = clamp 0 (len - 1) (IM.findWithDefault index key (storeInt st0))
     uiIO $ registerFocusable ctx gid
     nav <- useKeyNav gid
     let
@@ -64,14 +72,13 @@ radioFieldset options initial =
     column' radioGroupLay $ do
       tagContainer gid
       (combinedResp, clickedIdx) <- addRadioOptions selNav opts
-      let
-        !finalSel = if clickedIdx >= 0 then clickedIdx else selNav
-        !hasClick = clickedIdx >= 0
-      when (storedSel /= Just finalSel || lastInit /= Just c0) $
-        uiIO $
-          getStore ctx >>= \st -> setStore ctx $
-            st {storeInt = IM.insert key finalSel (IM.insert keyInit c0 (storeInt st))}
-      pure (setChanged (finalSel /= sel || hasClick) combinedResp, finalSel)
+      let !finalSel = if clickedIdx >= 0 then clickedIdx else selNav
+      uiIO $ do
+        writeStoreInt ctx gid key finalSel
+        recordStoreInt ctx key finalSel
+      -- Compare with the caller's index, as 'NanoUI.Widgets.Select' does, so a
+      -- selection stored between frames still reports a change.
+      pure (setChanged (finalSel /= clamp 0 (len - 1) index) combinedResp, finalSel)
 
 -- Use the ordinary widget path for every option, including singleton groups.
 -- It owns IDs, node construction, and scroll-aware interaction geometry.
@@ -84,9 +91,18 @@ addRadioOptions sel opts = foldM addOption (mempty, -1) (zip [0 ..] opts)
       clickedIdx' = if rawRespClicked r && clickedIdx < 0 then i else clickedIdx
     pure (acc <> r, clickedIdx')
 
-boundedRadioFieldset ::
-  (Bounded a, Enum a, Ui :> es) => a -> (a -> Text) -> Eff es (Response, a)
-boundedRadioFieldset initial encode = withBoundedIndex encode initial radioFieldset
+-- | Radio buttons for every value of a bounded enum, labelled by @encode@.
+{-# INLINE boundedRadio #-}
+boundedRadio :: (Bounded a, Enum a, Ui :> es) => (a -> Text) -> a -> Eff es a
+boundedRadio encode value = snd <$> boundedRadio' encode value
 
-enumRadio :: (Bounded a, Enum a, Show a, Ui :> es) => a -> Eff es (Response, a)
-enumRadio initial = boundedRadioFieldset initial (T.pack . show)
+boundedRadio' :: (Bounded a, Enum a, Ui :> es) => (a -> Text) -> a -> Eff es (Response, a)
+boundedRadio' encode value = withBoundedIndex encode value radio'
+
+-- | 'boundedRadio' labelled with 'show'.
+{-# INLINE enumRadio #-}
+enumRadio :: (Bounded a, Enum a, Show a, Ui :> es) => a -> Eff es a
+enumRadio = boundedRadio (T.pack . show)
+
+enumRadio' :: (Bounded a, Enum a, Show a, Ui :> es) => a -> Eff es (Response, a)
+enumRadio' = boundedRadio' (T.pack . show)
