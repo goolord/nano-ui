@@ -244,7 +244,7 @@ collectNodeTextSpans ctx idx = do
             if T.null raw
               then pure []
               else do
-                (fm, _, measure) <- resolveFontFor ctx fontSize si
+                (fm, _, measure) <- resolveFontFor ctx NodeText fontSize si
                 let ix = fst ((if isJust mStripe then tableCellInset else labelContentInset) fm)
                     measureW = fmap fst . measure
                     lineH = fmLineHeight fm
@@ -398,7 +398,7 @@ computeWidgetLabel :: Context -> NodeType -> T.Text -> Int -> Float -> AlignX ->
 computeWidgetLabel ctx nt txt si fontSizeVal ax w h
   | nt == NodeButton && isCloseButtonStyle si = pure Nothing
   | otherwise = do
-      (source, _, measure) <- resolveFontFor ctx fontSizeVal si
+      (source, _, measure) <- resolveFontFor ctx nt fontSizeVal si
       fm <- prepareFontMetrics source txt
       (tw, th) <- measure txt
       let (ix, _) = widgetContentInset fm
@@ -430,7 +430,7 @@ computeWidgetTextPlacements ::
 computeWidgetTextPlacements ctx nt idx x y w h = do
   fontSizeVal <- getNodeFontSize (ctxNodeArena ctx) idx
   si <- getStyleIdx (ctxNodeArena ctx) idx
-  (fm, _, measureTxt) <- resolveFontFor ctx fontSizeVal si
+  (fm, _, measureTxt) <- resolveFontFor ctx nt fontSizeVal si
   let (ix, iy) = widgetContentInset fm
       lineH = fmLineHeight fm
   case nt of

@@ -269,7 +269,7 @@ paintWidgetForeground env idx nt style si (Rect x y w h) = do
       da = peDrawArena env
   mFontColor <- getNodeFontColor (peNodeArena env) idx
   fontSize <- getNodeFontSize (peNodeArena env) idx
-  (fm, _, _) <- resolveFontFor ctx fontSize si
+  (fm, _, _) <- resolveFontFor ctx nt fontSize si
   let widgetFg = fromMaybe (styleFg style) mFontColor
       sortMark = if nt == NodeButton && isTableHeaderStyle si then tableSortMarkOf si else 0
       -- Table sort arrow: pinned to the header's right edge, inside the cell
@@ -392,7 +392,7 @@ paintSelectableText env style idx rect@(Rect x y w h) = do
   si <- getStyleIdx arena idx
   mFontColor <- getNodeFontColor arena idx
   fontSize <- getNodeFontSize arena idx
-  (fm, _, _) <- resolveFontFor ctx fontSize si
+  (fm, _, _) <- resolveFontFor ctx NodeTextInput fontSize si
   value <- textInputValue ctx idx
   let (penX, ty, _) = selectableTextGeometry fm x y h
   withClip da rect $ do

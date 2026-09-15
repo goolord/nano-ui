@@ -327,7 +327,7 @@ paintTextNode env idx rect = do
   unless (T.null raw) $ do
     spans <- collectNodeTextSpans (peContext env) idx
     fontSize <- getNodeFontSize arena idx
-    (fm, isNative, _) <- resolveFontFor (peContext env) fontSize si
+    (fm, isNative, _) <- resolveFontFor (peContext env) NodeText fontSize si
     let deco = textNodeTextDecoration si
         weight = if isNative then WeightNormal else textNodeFontWeight si
         style = if isNative then FontStyleNormal else textNodeFontStyle si

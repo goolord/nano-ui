@@ -17,8 +17,10 @@ import NanoUI.Frame.Scroll.Geometry
   )
 import NanoUI.Layout.Arena
   ( NodeIdx
+  , NodeType (..)
   , getDirection
   , getNodeFontSize
+  , getNodeType
   , getNodeValue
   , getPadding
   , getScrollContentW
@@ -29,16 +31,20 @@ import NanoUI.Style (FontVariant (..))
 import NanoUI.Types (Rect)
 import NanoUI.WidgetText (textNodeFontStyle, textNodeFontVariant, textNodeFontWeight)
 
--- | Font for an explicit node size and packed style: the metrics, whether the
--- host returned a native styled face (paint then skips synthetic weight and
--- slant), and the matching measure. Base sans and mono resolve to the
--- pre-read metrics; everything else defers to the host resolver. INLINE: it
--- runs for every text-bearing node painted, and inlining lets the result
--- triple fold away at each call site (measured: 30 MB less allocation over
--- the 3000-frame profile).
+-- | Font for a node of type @nt@ with an explicit size and packed style: the
+-- metrics, whether the host returned a native styled face (paint then skips
+-- synthetic weight and slant), and the matching measure. Base sans and mono
+-- resolve to the pre-read metrics; everything else defers to the host
+-- resolver. INLINE: it runs for every text-bearing node painted, and inlining
+-- lets the result triple fold away at each call site (measured: 30 MB less
+-- allocation over the 3000-frame profile).
+--
+-- Only text and text-input nodes pack a font into their style. Other widgets
+-- keep their own data in those bits (a radio's option index, a colour picker
+-- part, a tab's look), so their style must not be read as a font.
 {-# INLINE resolveFontFor #-}
-resolveFontFor :: Context -> Float -> Int -> IO (FontMetrics, Bool, Text -> IO (Float, Float))
-resolveFontFor ctx size si
+resolveFontFor :: Context -> NodeType -> Float -> Int -> IO (FontMetrics, Bool, Text -> IO (Float, Float))
+resolveFontFor ctx nt size packed
   | isDefaultNodeFont size weight style variant =
       pure $
         if variant == FontMono
@@ -48,6 +54,7 @@ resolveFontFor ctx size si
       (fm, native) <- ctxResolveFont ctx size weight style variant
       pure (fm, native, ctxResolveMeasure ctx size weight style variant)
   where
+    si = if nt == NodeText || nt == NodeTextInput then packed else 0
     variant = textNodeFontVariant si
     weight = textNodeFontWeight si
     style = textNodeFontStyle si
@@ -55,9 +62,10 @@ resolveFontFor ctx size si
 -- | Metrics of the font node @idx@ is styled with.
 nodeFontMetrics :: Context -> NodeIdx -> IO FontMetrics
 nodeFontMetrics ctx idx = do
+  nt <- getNodeType (ctxNodeArena ctx) idx
   si <- getStyleIdx (ctxNodeArena ctx) idx
   size <- getNodeFontSize (ctxNodeArena ctx) idx
-  (fm, _, _) <- resolveFontFor ctx size si
+  (fm, _, _) <- resolveFontFor ctx nt size si
   pure fm
 
 -- | Content viewport of scroll node @idx@ placed at @x y w h@: its padding box
