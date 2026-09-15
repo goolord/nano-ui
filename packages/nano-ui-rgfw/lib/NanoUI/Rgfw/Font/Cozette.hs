@@ -13,8 +13,6 @@ module NanoUI.Rgfw.Font.Cozette
   , cozetteScalePath
   , cozetteGlyphFootprint
   , charToGlyphId
-  , scale2x
-  , boxAverageCoverage
   , cozetteGlyphBit1x
   , cozetteGlyphBit2x
   , cozetteGlyphBit4x
@@ -201,23 +199,6 @@ epx b d e f h
       , if h == f then f else e
       )
   | otherwise = (e, e, e, e)
-
--- | Scale a 2D boolean grid with EPX. Given width W, height H and a pixel
--- query (col -> row -> Bool), returns the query for the 2W x 2H result.
-scale2x :: Int -> Int -> (Int -> Int -> Bool) -> (Int -> Int -> Bool)
-scale2x !w !h getPixel = \ !c2 !r2 ->
-  if c2 < 0 || c2 >= w * 2 || r2 < 0 || r2 >= h * 2
-    then False
-    else
-      let !c = c2 `div` 2
-          !r = r2 `div` 2
-          at x y = x >= 0 && x < w && y >= 0 && y < h && getPixel x y
-          (tl, tr, bl, br) = epx (at c (r - 1)) (at (c - 1) r) (getPixel c r) (at (c + 1) r) (at c (r + 1))
-       in case (c2 .&. 1, r2 .&. 1) of
-            (0, 0) -> tl
-            (1, 0) -> tr
-            (0, 1) -> bl
-            _ -> br
 
 -- | EPX-double every glyph of a table: @srcW@ x @srcH@ source bits per glyph
 -- (@bitAt gid col row@, 0 outside the glyph) become 2 * @srcH@ rows of
@@ -453,17 +434,6 @@ boxCoverage !srcW !srcH row !x0 !x1 !y0 !y1
           let !ovX = max 0 (min (fromIntegral (sx + 1)) x1 - max (fromIntegral sx) x0)
               !inc = if testBit bits (31 - sx) then ovX * ovY else 0
            in goCol bits ovY (sx + 1) (acc + inc)
-
--- | Coverage, in [0, 1], of destination pixel (dx, dy) when a @srcW@ x @srcH@
--- grid (at most 32 columns) is box-averaged onto @targetW@ x @targetH@.
-boxAverageCoverage :: Int -> Int -> Int -> Int -> (Int -> Int -> Bool) -> Int -> Int -> Float
-boxAverageCoverage srcW srcH targetW targetH isSet dx dy =
-  boxCoverage srcW srcH rowMask (fromIntegral dx * scaleX) (fromIntegral (dx + 1) * scaleX)
-    (fromIntegral dy * scaleY) (fromIntegral (dy + 1) * scaleY)
-  where
-    scaleX = fromIntegral srcW / fromIntegral targetW :: Float
-    scaleY = fromIntegral srcH / fromIntegral targetH :: Float
-    rowMask sy = foldl' (\m sx -> if isSet sx sy then setBit m (31 - sx) else m) (0 :: Word32) [0 .. srcW - 1]
 
 -- | Visit the glyph pen positions (physical pixels) of a text run laid out
 -- from logical (logX, logY) at a scale, threading an accumulator. @\\r@

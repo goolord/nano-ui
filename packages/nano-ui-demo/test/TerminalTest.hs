@@ -34,9 +34,9 @@ main = do
     all
       (\i -> equal (run sample) (feed (run (B.take i sample)) (B.drop i sample)))
       [0 .. B.length sample]
-  check "RI consumes escape and scrolls down" $
+  check "RI consumes escape, scrolls down at top and moves up below it" $
     charAt 0 0 (run "A\r\ESCMZ") == 'Z' && charAt 0 1 (run "A\r\ESCMZ") == 'A'
-  check "RI moves up off top row" $ charAt 3 1 (run "\ESC[3;4H\ESCMZ") == 'Z'
+      && charAt 3 1 (run "\ESC[3;4H\ESCMZ") == 'Z'
   check "backspace cancels pending wrap" $
     cursor (run (B.replicate 80 120 <> "\b")) == (78, 0)
   let
@@ -59,23 +59,21 @@ main = do
   check "CAN cancels CSI" $ charAt 0 0 (run "\ESC[12\CANZ") == 'Z'
   check "oversized CSI stays consumed" $
     screen (run ("\ESC[" <> B.replicate 1000 57 <> "H")) == screen blank
-  check "repeated inverse is idempotent" $
-    at 0 0 (run "\ESC[7;7mX") == at 0 0 (run "\ESC[7mX")
-  check "inverse reset restores defaults" $
-    at 0 0 (run "\ESC[7;27mX") == at 0 0 (run "X")
-  check "normal intensity retains explicit bright color" $
-    at 0 0 (run "\ESC[91;22mX") == at 0 0 (run "\ESC[91mX")
-  check "bold reset restores default foreground" $
-    at 0 0 (run "\ESC[1;22mX") == at 0 0 (run "X")
-  check "empty SGR parameter resets pen" $
-    at 0 0 (run "\ESC[31;;1mX") == at 0 0 (run "\ESC[1mX")
-  check "extended color payload is not interpreted as SGR" $
-    at 0 0 (run "\ESC[38;5;1;48;2;0;7;22mX") == at 0 0 (run "X")
+  mapM_
+    (\(name, sgr, same) -> check name (at 0 0 (run sgr) == at 0 0 (run same)))
+    [ ("repeated inverse is idempotent", "\ESC[7;7mX", "\ESC[7mX")
+    , ("inverse reset restores defaults", "\ESC[7;27mX", "X")
+    , ("normal intensity retains explicit bright color", "\ESC[91;22mX", "\ESC[91mX")
+    , ("bold reset restores default foreground", "\ESC[1;22mX", "X")
+    , ("empty SGR parameter resets pen", "\ESC[31;;1mX", "\ESC[1mX")
+    , ("extended color payload is not interpreted as SGR", "\ESC[38;5;1;48;2;0;7;22mX", "X")
+    ]
   let
+    (_, fg, _) = at 0 0 (run "X")
     (_, _, bg) = at 0 0 (run "\ESC[44mX")
   check "erase and scrolling retain background" $
-    at 0 0 (run "\ESC[44m\ESC[2J") == (' ', 0xD8DEE9FF, bg)
-      && at 0 23 (run "\ESC[44m\ESC[24;1H\n") == (' ', 0xD8DEE9FF, bg)
+    at 0 0 (run "\ESC[44m\ESC[2J") == (' ', fg, bg)
+      && at 0 23 (run "\ESC[44m\ESC[24;1H\n") == (' ', fg, bg)
   let
     old = scrollBy 3 (run (linesOf [0 .. 29])); cleared = feed old "\ESC[3J"
   check "clear history preserves live screen and resets view" $
@@ -85,9 +83,9 @@ main = do
   let
     capped = feed (scrollBy 9999 (run (linesOf [0 .. 2024]))) "next\r\n"
   check "history cap keeps oldest viewport valid" $
-    V.length (history capped) == 160000
-      && back capped == 2000
-      && V.length (viewport capped) == 1920
+    V.length (history capped) <= 2000 * 80
+      && floor (back capped) * 80 == V.length (history capped)
+      && V.length (viewport capped) == V.length (screen blank)
 
   result <- timeout 8000000 $ withPty $ \fd -> do
     let

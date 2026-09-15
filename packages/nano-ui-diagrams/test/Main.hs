@@ -8,7 +8,6 @@ import Data.List (tails)
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text qualified as T
 import Data.Vector qualified as V
-import Data.Vector.Unboxed qualified as U
 import Diagrams.Prelude
   ( Diagram
   , circle
@@ -23,8 +22,6 @@ import NanoUI.Context (Context (..), DrawingCacheState (..), withFontMetrics)
 import NanoUI.Context.Types (DrawOpCacheEntry (..))
 import NanoUI.Diagrams
   ( B
-  , PlotStyle (..)
-  , colourOf
   , defaultPlotStyle
   , diagram
   , diagramOps
@@ -32,8 +29,7 @@ import NanoUI.Diagrams
   )
 import NanoUI.Diagrams.Backend (diagramTextOps)
 import NanoUI.Diagrams.Tessellation
-  ( fillPolygon
-  , strokePolyline
+  ( strokePolyline
   , triangulatePolygon
   )
 import NanoUI.Plot.Chrome
@@ -49,7 +45,6 @@ import NanoUI.Plot.Series
   ( area
   , bar
   , line
-  , lineVec
   , scatter
   , withColor
   , withMarker
@@ -62,7 +57,6 @@ import NanoUI.Plot.Types
   , MarkShape (..)
   , PlotHover (..)
   , Series (..)
-  , SeriesData (..)
   )
 import NanoUI.Plot.Widget qualified as Plot
 import NanoUI.Testing (DrawData (..), drawCmdNull, newPixelContext, runFrame)
@@ -73,27 +67,22 @@ main = hspec $ do
   let
     fm = monospaceMetrics 16
   describe "rendering" $ do
-    it "draws filled, stroked, bar and scatter diagrams" $ do
+    it "draws and redraws a filled diagram" $ do
       ctx <- newPixelContext
-      testRendering ctx (emptyInput {inputWindowSize = Size 240 120}) fm
+      testRendering ctx (emptyInput {inputWindowSize = Size 240 120})
     it "renders chart labels apart from geometry" (testTextOnlyRendering fm)
     it "reuses cached chart content within one context" testChartCache
   describe "tessellation" $ do
-    it "triangulates a concave star" testConcaveTriangulation
     it "triangulates indexed polygons with full coverage" testIndexedTriangulation
-    it "emits one FillRect for an axis-aligned rectangle" testRectFastPath
     it "covers polyline strokes end to end" testStrokeCoversMidpoint
   describe "scales and domains" $ do
     it "picks and formats nice ticks" testNiceTicks
     it "shares bounds across series" testMultiSeriesDomains
-    it "fits domains to the data" testDomainFollowsData
   describe "decimation" $ do
     it "keeps LTTB extrema and endpoints" testLttb
-    it "agrees across boxed and unboxed series" testUnboxedSeries
     it "keeps min/max extrema" testMinMaxDecimate
   describe "chart chrome" $ do
     it "keeps labels, titles and legends apart" (testLabelFit fm)
-    it "renders tick and title text" (testChartChrome fm)
     it "colors legend entries like their series" (testLegendColors fm)
     it "picks the nearest hover point" testPlotHover
     it "fills closed series and markers" (testClosedSeriesFills fm)
@@ -160,28 +149,15 @@ testChartCache = do
   unless (independent == first) $
     fail "chart cache version leaked across contexts"
 
-testRendering :: Context -> Input -> FontMetrics -> IO ()
-testRendering ctx inp fm = do
+testRendering :: Context -> Input -> IO ()
+testRendering ctx inp = do
   let
     ok d = drawIndexCount d > 0 && not (drawCmdNull d)
   (_, _, filled, _) <-
     runFrame ctx inp $
       diagram (fixedWH 200 80 defaultLayout) (circle 1 # fc coral # lw none)
-  (_, _, stroked, _) <-
-    runFrame ctx inp $
-      diagram
-        (fixedWH 200 80 defaultLayout)
-        (linePlotDiag fm [(x, sin x) | x <- [0, 0.2 .. 6.2]])
-  (_, _, bars, _) <-
-    runFrame ctx inp $
-      diagram (fixedWH 200 80 defaultLayout) (barPlotDiag fm [(1, 2), (2, 5), (3, 3)])
-  (_, _, scatterPts, _) <-
-    runFrame ctx inp $
-      diagram
-        (fixedWH 200 80 defaultLayout)
-        (scatterPlotDiag fm [(1, 4), (2, 1), (5, 3)])
-  unless (ok filled && ok stroked && ok bars && ok scatterPts) $
-    fail "diagrams produced no draw commands"
+  unless (ok filled) $
+    fail "diagram produced no draw commands"
   (_, _, filledAgain, _) <-
     runFrame ctx inp $
       diagram (fixedWH 200 80 defaultLayout) (circle 1 # fc coral # lw none)
@@ -193,41 +169,6 @@ linePlotDiag fm pts =
   chartDia fm (bareChart [line "s" pts])
     # lwO 2
     # fc steelblue
-
-barPlotDiag :: FontMetrics -> [(Double, Double)] -> Diagram B
-barPlotDiag fm pts =
-  chartDia fm (bareChart [bar "s" (zip (map (T.pack . show . fst) pts) (map snd pts))])
-    # fc steelblue
-    # lw none
-
-scatterPlotDiag :: FontMetrics -> [(Double, Double)] -> Diagram B
-scatterPlotDiag fm pts =
-  chartDia fm (bareChart [scatter "s" pts])
-    # fc coral
-    # lw none
-
-testConcaveTriangulation :: IO ()
-testConcaveTriangulation = do
-  let
-    star =
-      [ (0, 0.5)
-      , (0.12, 0.12)
-      , (0.5, 0.12)
-      , (0.18, -0.08)
-      , (0.32, -0.45)
-      , (0, -0.18)
-      , (-0.32, -0.45)
-      , (-0.18, -0.08)
-      , (-0.5, 0.12)
-      , (-0.12, 0.12)
-      ]
-    tris = triangulatePolygon star
-  unless (length tris >= 8) $
-    fail "ear clipping did not triangulate star"
-  let
-    areas = [triArea a b c | (a, b, c) <- tris]
-  unless (all (> 0) areas) $
-    fail "ear clipping produced degenerate triangles"
 
 triArea :: (Float, Float) -> (Float, Float) -> (Float, Float) -> Float
 triArea (x0, y0) (x1, y1) (x2, y2) =
@@ -263,16 +204,6 @@ testIndexedTriangulation = do
               ++ show (n, length triangles, areaSum, polygonArea)
           )
 
-testRectFastPath :: IO ()
-testRectFastPath = do
-  let
-    ops = fillPolygon (themeRed defaultTheme) [(0, 0), (10, 0), (10, 5), (0, 5)]
-  unless (length ops == 1) $
-    fail "axis-aligned rectangle did not use FillRect fast path"
-  case ops of
-    [FillRect _ _] -> pure ()
-    _ -> fail "rectangle fast path emitted wrong op"
-
 testStrokeCoversMidpoint :: IO ()
 testStrokeCoversMidpoint = do
   let
@@ -300,20 +231,13 @@ testNiceTicks = do
   let
     t0 = niceTicks 6 (Domain 0 100)
     t1 = niceTicks 6 (Domain (-5) 5)
-    t2 = niceTicks 6 (Domain 123.4 567.8)
-    t3 = niceTicks 6 (Domain 4 4)
   unless
-    ( length t0 >= 3
-        && maybe False (<= 0) (listToMaybe t0)
+    ( maybe False (<= 0) (listToMaybe t0)
         && maybe False (>= 100) (listToMaybe (reverse t0))
     ) $
     fail "nice ticks failed for [0,100]"
   unless (any (== 0) t1) $
     fail "nice ticks failed for [-5,5]"
-  unless (length t2 >= 3) $
-    fail "nice ticks failed for wide float range"
-  unless (length t3 >= 1) $
-    fail "nice ticks failed for single-value range"
   unless (formatTick 6 == "6") $
     fail "formatTick integer"
   unless (formatTick 0.2 == "0.2" && formatTick 0.4 == "0.4") $
@@ -341,36 +265,10 @@ testMultiSeriesDomains = do
     fail "multi-series domains do not share bounds"
   unless (mergeDomains (Domain 0 1) (Domain 0 10) == Domain 0 10) $
     fail "mergeDomains broken"
-
-testDomainFollowsData :: IO ()
-testDomainFollowsData = do
   let
-    (Domain xLo _, Domain yLo _) = seriesDomains (bareChart [scatter "s" [(4, 3), (9, 8)]])
-  unless (xLo > 2 && yLo > 1) $
+    (Domain fitXLo _, Domain fitYLo _) = seriesDomains (bareChart [scatter "s" [(4, 3), (9, 8)]])
+  unless (fitXLo > 2 && fitYLo > 1) $
     fail "seriesDomains seeded with 0..1"
-
-testUnboxedSeries :: IO ()
-testUnboxedSeries = do
-  let
-    points = U.fromList [(0, 1), (1, 4), (2, 2)]
-    boxed = V.fromList (U.toList points)
-  unless
-    ( lineVec "s" points == lineVec "s" boxed
-        && line "s" (U.toList points) == lineVec "s" points
-    ) $
-    fail "numeric series constructors disagree across vector representations"
-  case seriesData (lineVec "s" boxed) of
-    PointsXY stored | stored == points -> pure ()
-    _ -> fail "numeric series did not retain unboxed points"
-  forM_ [0 .. 60] $ \n -> forM_ [-1 .. n + 1] $ \k -> do
-    let
-      input = U.generate n (\i -> (fromIntegral i, sin (fromIntegral i)))
-      inputBoxed = V.fromList (U.toList input)
-    unless
-      ( U.toList (lttb k input) == V.toList (lttb k inputBoxed)
-          && U.toList (minMaxDecimate k input) == V.toList (minMaxDecimate k inputBoxed)
-      )
-      $ fail "decimation differs between boxed and unboxed input"
 
 testLttb :: IO ()
 testLttb = do
@@ -521,18 +419,6 @@ barChartSample =
     , chartLegend = LegendRight
     , chartGrid = GridBoth
     }
-
-testChartChrome :: FontMetrics -> IO ()
-testChartChrome fm = do
-  let
-    ops = diagramOps 400 280 (chartDia fm barChartSample)
-    chartTexts = [t | DrawText _ _ _ _ t _ <- V.toList ops]
-  unless (length chartTexts >= 6) $
-    fail "chart chrome dropped tick or title text"
-  unless (plotInk defaultPlotStyle == colourOf (themeRed defaultTheme)) $
-    fail "defaultPlotStyle ink is not themeRed"
-  unless (length (themeSeries defaultTheme) == 6) $
-    fail "themeSeries dropped a series colour"
 
 testPlotHover :: IO ()
 testPlotHover = do

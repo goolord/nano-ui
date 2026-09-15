@@ -82,10 +82,8 @@ test-suite nano-ui-rgfw-test
     main-is:          Spec.hs
     build-depends:
         base ^>=4.22.0.0,
-        containers ^>=0.7 || ^>=0.8,
         nano-ui,
         nano-ui-rgfw,
         nano-ui-rgfw-bindings,
-        primitive ^>=0.9,
-        text ^>=2.1
+        primitive ^>=0.9
     hs-source-dirs:   test

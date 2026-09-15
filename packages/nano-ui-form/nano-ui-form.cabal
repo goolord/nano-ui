@@ -65,7 +65,6 @@ flag sdl
     manual: True
     default: True
 
--- FormDemo is shared with the test suite, which checks the demo's layout.
 executable nano-ui-form-example
     import:           extensions
     import:           warnings
@@ -92,9 +91,7 @@ test-suite nano-ui-form-test
     import:           warnings
     type:             exitcode-stdio-1.0
     main-is:          Main.hs
-    other-modules:
-        FormDemo
-        Scope
+    other-modules:    Scope
     ghc-options:      -rtsopts -threaded "-with-rtsopts=-M256m -N1"
     build-depends:
         base ^>=4.22.0.0,
@@ -103,5 +100,4 @@ test-suite nano-ui-form-test
         nano-ui,
         nano-ui-form,
         text ^>=2.1
-    -- test/ comes first so its Main.hs, not the example's, is the entry point.
-    hs-source-dirs:   test examples
+    hs-source-dirs:   test
