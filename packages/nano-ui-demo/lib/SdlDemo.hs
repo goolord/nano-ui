@@ -353,7 +353,7 @@ demoUi = do
                   then T.pack (printf "%4.0f FPS / %5.2f ms" (dbgPresentFps c) (dbgFrameMs c))
                   else ""
           unless (T.null fpsText) $
-            labelWith (tight . fontMono . fontMuted) fpsText
+            labelWith (tight . alignMid . fontMono . fontMuted) fpsText
           rowWith (tight . gap gapMicro . alignMid) $ do
             whenM (button "OK") (setClick "OK")
             whenM (button "Cancel") (setClick "Cancel")
@@ -368,7 +368,7 @@ demoUi = do
         columnWith (tight . gap gapLayout . inspectorWidth) $ do
           panelWith (padAll 16 . gap 8 . fillW) $ do
             rowWith (tight . gap gapInline . alignMid . fillW) $ do
-              heading "State"
+              labelWith (tight . alignMid . fontMedium) "State"
               flex
               unless wideWorkspace $
                 whenM (button (if inspectorOpen then "Hide values" else "Show values")) $
@@ -379,9 +379,13 @@ demoUi = do
               kv "Feature" (if checked then "on" else "off")
               kv "Volume" volText
               kv "Quality" quality
-              rowWith (tight . gap gapInline . alignMid . fillW) $ do
-                box (fixedWH 20 20) accent
-                kv "Accent" (colorToHexA accent)
+              -- The swatch sits beside the value, so the key lines up with
+              -- the rows above and below.
+              rowWith (tight . gap gapMicro . alignMid . fillW) $ do
+                labelWith (tight . alignMid . fontMuted . minW 88) "Accent"
+                flex
+                box (alignMid . fixedWH 14 14) accent
+                labelWith (tight . alignMid) (colorToHexA accent)
               separator
               kv "Theme" (themeDisplayName themeChoice)
               kv "Font" fontChoice
@@ -421,20 +425,8 @@ demoUi = do
                     setVol =<< slider 0 100 vol
                   let qualities = ["Low", "Medium", "High"]
                   qualityIdx <- demoField "Quality" $
-                    select qualities (fromMaybe 1 (elemIndex quality qualities))
+                    selectWith fillW qualities (fromMaybe 1 (elemIndex quality qualities))
                   setQuality (qualities !! qualityIdx)
-                  separator
-                  heading "Appearance"
-                  tVal <- demoField "Theme" $
-                    boundedRadio themeDisplayName themeChoice
-                  setThemeChoice tVal
-                  setUiTheme (themeForChoice tVal)
-                  (fResp, fVal) <- demoField "Font" $
-                    comboBox' "Font" demoFontFamilies fontChoice
-                  tooltip fResp "Type to filter; Enter applies, Esc reverts."
-                  setFontChoice fVal
-                  when (respChanged fResp && not (T.null fVal)) $
-                    setSdlUiFont (FontSearch [T.unpack fVal])
                   separator
                   heading "Text input"
                   nVal <- demoField "Name" $
@@ -454,6 +446,18 @@ demoUi = do
                       numericInputConfigured defaultNumericInputConfig {nicMin = 0, nicMax = 0xFFFF, nicHex = True} mask
                     setMask maskVal
                 columnWith (tight . gap 10 . fillW) $ do
+                  heading "Appearance"
+                  tVal <- demoField "Theme" $
+                    boundedRadio themeDisplayName themeChoice
+                  setThemeChoice tVal
+                  setUiTheme (themeForChoice tVal)
+                  (fResp, fVal) <- demoField "Font" $
+                    comboBox' "Font" demoFontFamilies fontChoice
+                  tooltip fResp "Type to filter; Enter applies, Esc reverts."
+                  setFontChoice fVal
+                  when (respChanged fResp && not (T.null fVal)) $
+                    setSdlUiFont (FontSearch [T.unpack fVal])
+                  separator
                   heading "Accent"
                   muted "Choose a color or enter an exact value."
                   setAccent =<< colorPickerRGBA accent
@@ -495,9 +499,9 @@ demoUi = do
                 dropZone (padXY 16 12 . gap gapText . fillW) $ do
                   columnWith (tight . gap gapText . fillW) $ do
                     rowWith (tight . gap gapInline . alignMid . fillW) $ do
-                      heading "Drop Zone"
+                      labelWith (tight . alignMid . fontMedium) "Drop Zone"
                       flex
-                      labelWith (tight . fontMono . fontMuted) (if dropHovering then "hovering" else "idle")
+                      labelWith (tight . alignMid . fontMono . fontMuted) (if dropHovering then "hovering" else "idle")
                     labelWith (tight . fontMuted . fillW) $
                       if dropHovering
                         then "Release to accept dropped files or text."
@@ -566,12 +570,9 @@ demoUi = do
                 setTypeItalic =<< checkbox "Italic" typeItalic
                 setTypeUnderline =<< checkbox "Underline" typeUnderline
                 setTypeStrike =<< checkbox "Strike" typeStrike
-              rowWith (tight . gap gapInline . fillW . alignMid) $ do
-                szVal <- columnWith (tight . gap gapInline . fillW) $ do
-                  label "Size"
-                  slider 12 40 typeSize
-                setTypeSize szVal
-                labelWith (tight . fontMono . fontMuted) (T.pack (printf "%.0f px" szVal))
+              columnWith (tight . gap gapText . fillW) $ do
+                kv "Size" (T.pack (printf "%.0f px" typeSize))
+                setTypeSize =<< slider 12 40 typeSize
               -- Font styles are ordinary style combinators; fold the toggles in.
               let applyWeight = if typeBold then fontBold else id
                   applyItalic = if typeItalic then fontItalic else id
@@ -652,11 +653,8 @@ demoUi = do
             ---------------------------------------------------- Panes ---------
             Panes -> do
               heading "Pane Grid"
-              muted "Drag a divider to resize. Drag a pane onto another pane to reorder:"
-              muted "drop on its center to swap, on its edge to split it."
-              muted "Drag a pane to the grid's outer edge to restructure at the top level."
-              muted "+ splits vertically, = splits horizontally, x closes, M maximizes, R restores."
-              muted "Arrow keys jump between panes while the grid is focused."
+              muted "Drag a divider to resize. Drop a pane on another pane's center to swap them, on its edge to split it, or on the grid's outer edge to restructure the grid."
+              muted "+ splits vertically, = splits horizontally, x closes, M maximizes, R restores. Arrow keys move between panes while the grid is focused."
               headersOn <- checkbox "Pane headers" showPaneHeaders
               setShowPaneHeaders headersOn
               pgr <- paneGrid (demoPaneGridCfg headersOn)
@@ -703,10 +701,8 @@ demoUi = do
               kv "SDL Present" (T.pack (printf "%.2f ms" (dbgPresentMs c)))
               kv "Draw Calls" (T.pack (printf "%d" (dbgCmds c)))
               kv "Vertices / Indices" (T.pack (printf "%d / %d" (dbgVerts c) (dbgIndices c)))
-              kv "Renderer" (dbgRenderer snap <> if dbgVsync snap then " (vsync on)" else " (vsync off)" <> T.pack (printf ", refresh %d Hz" (dbgRefreshHz snap)))
+              kv "Renderer" (dbgRenderer snap <> if dbgVsync snap then " (vsync on)" else " (vsync off)")
               kv "Last drop event" (orDash dropRaw)
-              kv "Evaluation" "Zero-Cost Inactive Tabs"
-              kv "State" "SrcLoc Preserved"
           setActiveTab newTab
 
   -------------------------------------------------------------- overlays ---
@@ -759,56 +755,56 @@ typeScale :: NanoUI ()
 typeScale =
   columnWith (tight . gap gapMicro . fillW) $ do
     rowWith (tight . gap gapInline . alignMid . fillW) $ do
-      labelWith (tight . fixedW 60 . fontMono . fontMuted) "32px"
-      labelWith (fontSize 32 . fontBold) "Display Headline"
+      labelWith (tight . alignMid . fixedW 60 . fontMono . fontMuted) "32px"
+      labelWith (alignMid . fontSize 32 . fontBold) "Display Headline"
     rowWith (tight . gap gapInline . alignMid . fillW) $ do
-      labelWith (tight . fixedW 60 . fontMono . fontMuted) "24px"
-      labelWith (fontSize 24 . fontSemiBold) "Page Section Title"
+      labelWith (tight . alignMid . fixedW 60 . fontMono . fontMuted) "24px"
+      labelWith (alignMid . fontSize 24 . fontSemiBold) "Page Section Title"
     rowWith (tight . gap gapInline . alignMid . fillW) $ do
-      labelWith (tight . fixedW 60 . fontMono . fontMuted) "18px"
-      labelWith (fontSize 18 . fontMedium) "Card Subtitle & Highlights"
+      labelWith (tight . alignMid . fixedW 60 . fontMono . fontMuted) "18px"
+      labelWith (alignMid . fontSize 18 . fontMedium) "Card Subtitle & Highlights"
     rowWith (tight . gap gapInline . alignMid . fillW) $ do
-      labelWith (tight . fixedW 60 . fontMono . fontMuted) "16px"
-      labelWith (fontSize 16) "Standard body text (16px base line height)"
+      labelWith (tight . alignMid . fixedW 60 . fontMono . fontMuted) "16px"
+      labelWith (alignMid . fontSize 16) "Standard body text (16px base line height)"
     rowWith (tight . gap gapInline . alignMid . fillW) $ do
-      labelWith (tight . fixedW 60 . fontMono . fontMuted) "12px"
-      labelWith (fontSize 12 . fontMuted) "Auxiliary caption, footnote, or timestamp"
+      labelWith (tight . alignMid . fixedW 60 . fontMono . fontMuted) "12px"
+      labelWith (alignMid . fontSize 12 . fontMuted) "Auxiliary caption, footnote, or timestamp"
 
 weightsStyles :: NanoUI ()
 weightsStyles =
   columnWith (tight . gap gapMicro . fillW) $ do
     rowWith (tight . gap gapInline . fillW) $ do
-      labelWith (tight . fixedW 80 . fontMono . fontMuted) "Light"
+      labelWith (tight . fixedW 96 . fontMono . fontMuted) "Light"
       labelWith fontLight "Sphinx of black quartz, judge my vow."
     rowWith (tight . gap gapInline . fillW) $ do
-      labelWith (tight . fixedW 80 . fontMono . fontMuted) "Normal"
+      labelWith (tight . fixedW 96 . fontMono . fontMuted) "Normal"
       label "Sphinx of black quartz, judge my vow."
     rowWith (tight . gap gapInline . fillW) $ do
-      labelWith (tight . fixedW 80 . fontMono . fontMuted) "Medium"
+      labelWith (tight . fixedW 96 . fontMono . fontMuted) "Medium"
       labelWith fontMedium "Sphinx of black quartz, judge my vow."
     rowWith (tight . gap gapInline . fillW) $ do
-      labelWith (tight . fixedW 80 . fontMono . fontMuted) "SemiBold"
+      labelWith (tight . fixedW 96 . fontMono . fontMuted) "SemiBold"
       labelWith fontSemiBold "Sphinx of black quartz, judge my vow."
     rowWith (tight . gap gapInline . fillW) $ do
-      labelWith (tight . fixedW 80 . fontMono . fontMuted) "Bold"
+      labelWith (tight . fixedW 96 . fontMono . fontMuted) "Bold"
       labelWith fontBold "Sphinx of black quartz, judge my vow."
     rowWith (tight . gap gapInline . fillW) $ do
-      labelWith (tight . fixedW 80 . fontMono . fontMuted) "ExtraBold"
+      labelWith (tight . fixedW 96 . fontMono . fontMuted) "ExtraBold"
       labelWith fontExtraBold "Sphinx of black quartz, judge my vow."
     rowWith (tight . gap gapInline . fillW) $ do
-      labelWith (tight . fixedW 80 . fontMono . fontMuted) "Black"
+      labelWith (tight . fixedW 96 . fontMono . fontMuted) "Black"
       labelWith fontBlack "Sphinx of black quartz, judge my vow."
     rowWith (tight . gap gapInline . fillW) $ do
-      labelWith (tight . fixedW 80 . fontMono . fontMuted) "Italic"
+      labelWith (tight . fixedW 96 . fontMono . fontMuted) "Italic"
       labelWith fontItalic "Slanted synthetic italic font style."
     rowWith (tight . gap gapInline . fillW) $ do
-      labelWith (tight . fixedW 80 . fontMono . fontMuted) "Underline"
+      labelWith (tight . fixedW 96 . fontMono . fontMuted) "Underline"
       labelWith fontUnderline "Underlined emphasis and interactive links."
     rowWith (tight . gap gapInline . fillW) $ do
-      labelWith (tight . fixedW 80 . fontMono . fontMuted) "Strike"
+      labelWith (tight . fixedW 96 . fontMono . fontMuted) "Strike"
       labelWith fontStrike "Completed tasks and deprecated pricing."
     rowWith (tight . gap gapInline . fillW) $ do
-      labelWith (tight . fixedW 80 . fontMono . fontMuted) "Both"
+      labelWith (tight . fixedW 96 . fontMono . fontMuted) "Both"
       labelWith (fontUnderline . fontStrike) "Both underline and strikethrough lines."
 
 colorHighlights :: NanoUI ()
@@ -915,22 +911,23 @@ demoPaneTitle pid maximized =
 -- pane can be grabbed anywhere to reorder it.
 demoPaneHeader :: (Ui :> es) => Word64 -> Bool -> PaneGridCtx es -> Eff es ()
 demoPaneHeader pid maximized pctx =
-  panelWith (padXY 8 5 . fillW) $
-    rowWith (tight . gap 8 . alignMid . fillW) $ do
-      box (fixedWH 3 16) demoAccent
-      labelWith (tight . fontMedium . fontMuted) (demoPaneTitle pid maximized)
-      flex
-      whenM (button "+") (void (pgcSplit pctx AxisV))
-      whenM (button "=") (void (pgcSplit pctx AxisH))
-      whenM (button (if maximized then "R" else "M")) (if maximized then pgcRestore pctx else pgcMaximize pctx)
-      whenM (button "x") (pgcClose pctx)
+  rowWith (tight . gap gapMicro . alignMid . fillW) $ do
+    box (alignMid . fixedWH 3 16) demoAccent
+    labelWith (tight . alignMid . fontMedium) (demoPaneTitle pid maximized)
+    flex
+    whenM (button "+") (void (pgcSplit pctx AxisV))
+    whenM (button "=") (void (pgcSplit pctx AxisH))
+    whenM (button (if maximized then "R" else "M")) (if maximized then pgcRestore pctx else pgcMaximize pctx)
+    whenM (button "x") (pgcClose pctx)
 
+-- | Each pane is a card, so panes stay distinct with the headers off.
 demoPaneView :: (Ui :> es) => Bool -> Word64 -> PaneGridCtx es -> Eff es PaneView
 demoPaneView showHeader pid pctx = do
   let maximized = pgcMaximized pctx
-  columnWith (tight . gap 6 . fillW) $ do
-    when showHeader (demoPaneHeader pid maximized pctx)
-    box fillW demoAccent
+  panelWith (padAll gapLayout . gap gapLayout . grow) $ do
+    when showHeader $ do
+      demoPaneHeader pid maximized pctx
+      separator
     void $ muted ("Contents of " <> T.pack (show pid) <> ". Drag the pane to move or split it.")
   pure
     PaneView
