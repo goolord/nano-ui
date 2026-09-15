@@ -6,6 +6,7 @@ module Cases.Demo
   , runColorPickerBarKeysTest
   , runColorPickerRgbaTest
   , runColorPickerEditTest
+  , runColorPickerDragAfterFieldTest
   ) where
 
 import Control.Monad (void)
@@ -199,7 +200,8 @@ runColorPickerRgbaTest ctx failed = do
   assert failed (has "Current")
   assert failed (has "New")
 
--- Typing in a channel field must recolour on the same frame (live edits).
+-- Typing in a channel field must recolour on the same frame (live edits). The
+-- fields are numeric: Up steps the focused one, and letters are dropped.
 runColorPickerEditTest :: Context -> IORef Int -> IO ()
 runColorPickerEditTest ctx failed = do
   let inp0 = withInput 400 460
@@ -214,6 +216,38 @@ runColorPickerEditTest ctx failed = do
   ((_, col), _, _, _) <- runFrame ctx (inp0 {inputChars = "10"}) ui
   assertEq failed (colorR col) 10
   assertEq failed (colorG col) 102
+  ((_, stepped), _, _, _) <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyUp]}) ui
+  assertEq failed (colorR stepped) 11
+  ((_, lettered), _, _, _) <- runFrame ctx (inp0 {inputChars = "x"}) ui
+  assertEq failed (colorR lettered) 11
+
+-- A channel field that had focus must not pull the colour back while the
+-- canvas is dragged: pressing the canvas takes focus away from the field.
+runColorPickerDragAfterFieldTest :: Context -> IORef Int -> IO ()
+runColorPickerDragAfterFieldTest ctx failed = do
+  let initial = colorRGBA 204 102 102 255
+  colorRef <- newIORef initial
+  let inp0 = withInput 400 460
+      ui = held colorRef colorPicker'
+      tabKey = inp0 {inputKeys = inputKeysFromList [KeyTab]}
+  (resp, _) <- warmup2 ctx inp0 ui
+  -- Tab past the field and the hue bar to the R field.
+  _ <- runFrame ctx tabKey ui
+  _ <- runFrame ctx tabKey ui
+  _ <- runFrame ctx tabKey ui
+  let sv = colorPickerSvSquare (respRect resp)
+      press = pressAt inp0 (V2 (rectX sv + 2) (rectY sv + 2))
+      drag =
+        press
+          { inputMousePressed = False
+          , inputMousePos = V2 (rectX sv + rectW sv * 0.9) (rectY sv + rectH sv * 0.9)
+          }
+  _ <- runFrame ctx press ui
+  _ <- runFrame ctx drag ui
+  ((_, col), _, _, _) <- runFrame ctx drag ui
+  -- Low value keeps every channel dark; a field still writing R would leave
+  -- it at 204.
+  assert failed (colorR col < 60)
 
 -- respChanged fires on the frame the colour moves and not on later frames
 -- (regression: it compared the colour against the initial one). A key step

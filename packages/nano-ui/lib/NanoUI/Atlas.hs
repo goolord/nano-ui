@@ -3,6 +3,7 @@ module NanoUI.Atlas
   , newImageAtlas
   , atlasTextureId
   , registerImage
+  , freshImageId
   , lookupImageUv
   , atlasSnapshot
   )
@@ -48,6 +49,8 @@ data AtlasState = AtlasState
   , asY :: {-# UNPACK #-} !Int
   , asRowH :: {-# UNPACK #-} !Int
   , asGen :: {-# UNPACK #-} !Int
+  , asLastFresh :: {-# UNPACK #-} !Int
+  -- ^ The last id 'freshImageId' returned.
   }
 
 newtype ImageAtlas = ImageAtlas (IORef AtlasState)
@@ -66,6 +69,7 @@ newImageAtlas = do
         , asY = atlasPad
         , asRowH = 0
         , asGen = 0
+        , asLastFresh = 0
         }
 
 registerImage :: ImageAtlas -> ImageId -> Int -> Int -> ByteString -> IO Bool
@@ -89,6 +93,16 @@ registerImage (ImageAtlas ref) (ImageId tid) w h pixels
             Just st1 -> do
               writeIORef ref st1
               pure True
+
+-- | An id above every registered image's and every id this returned before.
+-- An id the app picks itself can still collide with one returned and not yet
+-- registered, so register those first.
+freshImageId :: ImageAtlas -> IO ImageId
+freshImageId (ImageAtlas ref) = do
+  st <- readIORef ref
+  let tid = 1 + maybe (asLastFresh st) (max (asLastFresh st) . fst) (IM.lookupMax (asSlots st))
+  writeIORef ref st {asLastFresh = tid}
+  pure (ImageId tid)
 
 lookupImageUv ::
   ImageAtlas -> ImageId -> IO (Maybe (Float, Float, Float, Float))

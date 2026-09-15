@@ -29,8 +29,6 @@ import Data.IORef (readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
-import Data.Text qualified as T
-import Data.Text.Read qualified as TR
 import Data.Word (Word8)
 import Effectful (Eff, type (:>))
 import NanoUI.Context
@@ -105,8 +103,6 @@ import NanoUI.WidgetText
   , colorPickerSvH
   , colorToHex
   , colorToHexA
-  , intValueText
-  , textInputFlagBare
   )
 import NanoUI.Widgets.Behavior
   ( DragAxis (..)
@@ -122,6 +118,7 @@ import NanoUI.Widgets.Node
   , respRect
   , setChanged
   )
+import NanoUI.Widgets.NumericInput (NumericInputConfig (..), defaultNumericInputConfig, numericInputConfigured)
 import NanoUI.Widgets.TextInput (editTextField)
 
 colorPickerDefaultColor :: Color
@@ -424,6 +421,10 @@ colorPickerFieldLayout =
     , layoutPadding = Padding 0 0 0 0
     }
 
+-- A numeric channel field: room for three digits beside its stepper.
+colorPickerChannelLayout :: Layout
+colorPickerChannelLayout = colorPickerFieldLayout {layoutMinW = 60}
+
 colorPickerLabelLayout :: Layout
 colorPickerLabelLayout =
   defaultLayout {layoutPadding = Padding 0 0 0 0, layoutAlignY = AlignMiddle}
@@ -460,15 +461,16 @@ rgbChannels =
   ]
 rgbaChannels = rgbChannels ++ [("A", colorA, \v c -> colorRGBA (colorR c) (colorG c) (colorB c) v)]
 
--- | The HSV fields: label, the shown value, and the (hue, s, v) a typed value makes.
-hsvChannels :: [(Text, (Float, Float, Float) -> Int, Int -> (Float, Float, Float) -> (Float, Float, Float))]
+-- | The HSV fields: label, the largest value, the shown value, and the
+-- (hue, s, v) a typed value makes.
+hsvChannels :: [(Text, Int, (Float, Float, Float) -> Int, Int -> (Float, Float, Float) -> (Float, Float, Float))]
 hsvChannels =
-  [ ("H", \(h, _, _) -> round h, \n (_, s, v) -> (clamp 0 360 (fromIntegral n), s, v))
-  , ("S", \(_, s, _) -> round (s * 100), \n (h, _, v) -> (h, percent n, v))
-  , ("V", \(_, _, v) -> round (v * 100), \n (h, s, _) -> (h, s, percent n))
+  [ ("H", 360, \(h, _, _) -> round h, \n (_, s, v) -> (fromIntegral n, s, v))
+  , ("S", 100, \(_, s, _) -> round (s * 100), \n (h, _, v) -> (h, percent n, v))
+  , ("V", 100, \(_, _, v) -> round (v * 100), \n (h, s, _) -> (h, s, percent n))
   ]
   where
-    percent n = clamp01 (fromIntegral (clamp 0 100 n) / 100)
+    percent n = fromIntegral n / 100
 
 -- | Widget ids of a picker's parts. The field's id keys the picker's state.
 data PickerParts = PickerParts
@@ -515,30 +517,29 @@ colorPickerWith showAlpha value = do
     _ <- container NodeContainer colorPickerRowLayout $
       forM_ (if showAlpha then rgbaChannels else rgbChannels) $ \(lbl, get, set) -> do
         let shown = fromIntegral (get rgb)
-        (txt, focused) <- colorField pct lbl (intValueText shown)
-        -- A focused field is re-read every frame; only a different number edits.
-        when focused $
-          forM_ (readIntText txt) $ \n ->
-            when (n >= 0 && n <= 255 && n /= shown) $
-              writeColor (set (fromIntegral n) (withAlpha (alphaOf rgb) rgb))
+        n <- channelField pct lbl 255 shown
+        when (n /= shown) $
+          writeColor (set (fromIntegral n) (withAlpha (alphaOf rgb) rgb))
     hsvStore <- uiIO (getStore ctx)
     let
       (s0, v0) = widgetStoreSv hsvStore wid value
       hsv = (widgetStoreHue hsvStore wid value, s0, v0)
       alpha = alphaOf (widgetStoreColor hsvStore wid value)
     _ <- container NodeContainer colorPickerRowLayout $ do
-      forM_ hsvChannels $ \(lbl, shown, edit) -> do
-        (txt, focused) <- colorField pct lbl (intValueText (shown hsv))
-        when focused $
-          forM_ (readIntText txt) $ \n ->
-            when (n /= shown hsv) $ do
-              let (h, s, v) = edit n hsv
-              writePicker (withAlpha alpha (hsvToRgb h s v)) h (s, v)
+      forM_ hsvChannels $ \(lbl, hi, shown, edit) -> do
+        n <- channelField pct lbl hi (shown hsv)
+        when (n /= shown hsv) $ do
+          let (h, s, v) = edit n hsv
+          writePicker (withAlpha alpha (hsvToRgb h s v)) h (s, v)
       when showAlpha $
         void (container NodeContainer (colorPickerFieldGroupLayout pct) (pure ()))
     hex <- readColor
     let hexText = if showAlpha then colorToHexA hex else colorToHex hex
-    (thex, fhex) <- colorField 100 "" hexText
+    hexWid <- nextId
+    (_, thex, fhex) <- editTextField hexWid False hexText (Just hexText)
+    _ <-
+      container NodeContainer (colorPickerFieldGroupLayout 100) $
+        addWidgetStyled hexWid NodeTextInput "" 0 colorPickerFieldLayout 0 Nothing
     when (fhex && thex /= hexText) $
       forM_ (colorPickerParseHex thex) $ \(r, g, b, ma) ->
         writeColor (colorRGBA r g b (if showAlpha then fromMaybe (colorA hex) ma else 255))
@@ -627,26 +628,17 @@ colorPickerCanvas parts initial svResp hueResp alphaResp = do
       commitColorPickerCurrent ctx wid (widgetStoreColor st wid initial)
   pure current0
 
--- | One channel field: an optional inline label and a bare text box that
--- shows @expected@ while unfocused. Returns its text and whether it is focused.
-colorField :: Ui :> es => Float -> Text -> Text -> Eff es (Text, Bool)
-colorField pct label expected = do
-  wid <- nextId
-  (_, shown, isFocus) <- editTextField wid False expected (Just expected)
-  _ <-
-    container NodeContainer (colorPickerFieldGroupLayout pct) $ do
-      when (not (T.null label)) $ do
-        labelWid <- nextId
-        void (addWidget labelWid NodeText label 0 colorPickerLabelLayout)
-      addWidgetStyled
-        wid
-        NodeTextInput
-        ""
-        0
-        colorPickerFieldLayout
-        textInputFlagBare
-        Nothing
-  pure (shown, isFocus)
+-- | One channel field: an inline label and a numeric box over @0..hi@ that
+-- shows @value@ while unfocused. Returns the value after this frame's edits.
+channelField :: Ui :> es => Float -> Text -> Int -> Int -> Eff es Int
+channelField pct label hi value =
+  container NodeContainer (colorPickerFieldGroupLayout pct) $ do
+    labelWid <- nextId
+    void (addWidget labelWid NodeText label 0 colorPickerLabelLayout)
+    round
+      <$> numericInputConfigured
+        defaultNumericInputConfig {nicMin = 0, nicMax = fromIntegral hi, nicLayout = colorPickerChannelLayout}
+        (fromIntegral value)
 
 -- | Adopt the caller's colour as 'NanoUI.Context.adoptStoreInt' does. A new
 -- colour also resets the hue, S/V, and the "current" swatch.
@@ -713,9 +705,3 @@ applyColorPickerKeys ctx wid fallback inp svFocus hueFocus = do
   when moved $
     setStore ctx (putColorState (intKey wid) col' h' sv' store)
   pure moved
-
-readIntText :: Text -> Maybe Int
-readIntText t =
-  case TR.signed TR.decimal (T.strip t) of
-    Right (n, rest) | T.null rest -> Just n
-    _ -> Nothing

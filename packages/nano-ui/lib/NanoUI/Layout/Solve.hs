@@ -994,8 +994,8 @@ scrollBarSlotOf na idx = do
     then pure ScrollBarList
     else do
       parent <- getParent na idx
-      -- A modal's body scrolls like a window's: its bar hangs in the panel
-      -- padding instead of taking a gutter from the body.
+      -- A modal's body scrolls like a window's: its bar sits just inside the
+      -- panel's edge, out in the panel padding.
       isWin <-
         if parent < 0
           then pure False

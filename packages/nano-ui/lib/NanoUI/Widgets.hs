@@ -58,6 +58,9 @@ module NanoUI.Widgets
   , spacer
   , flex
   , image
+  , image'
+  , freshImageId
+  , registerImageRgba
   , box
   , button
   , button'
@@ -291,14 +294,17 @@ import NanoUI.Widgets.Display
   , box
   , card
   , danger
+  , freshImageId
   , heading
   , image
+  , image'
   , italic
   , kv
   , kvBlock
   , kvMono
   , mono
   , muted
+  , registerImageRgba
   , toolbar
   , underline
   )

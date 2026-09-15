@@ -27,7 +27,8 @@
 --                   boundedRadio, colorPicker, textInput, textArea,
 --                   numericInput,
 --                   button + tooltip, contextMenu, file dialogs, dropZone
---   * Graphics:     image gallery + progressBar driven by a pulsing value
+--   * Graphics:     image gallery, an animated GIF, and a progressBar driven
+--                   by a pulsing value
 --   * Typography:   label / labelWith + the @font*@ style combinators
 --   * List:         tree, searchField
 --   * Table:        tableWith (needs useTableSort)
@@ -45,7 +46,10 @@ module SdlDemo
     , demoUi
     ) where
 
-import Control.Monad (unless, void, when)
+import Control.Concurrent (forkIO)
+import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, tryTakeMVar)
+import Control.Exception (SomeException, displayException, evaluate, try)
+import Control.Monad (forM, unless, void, when)
 import Data.Foldable (for_)
 import Data.List (elemIndex)
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
@@ -56,8 +60,9 @@ import NanoUI
 import NanoUI.Backend.Sdl
 import NanoUI.Debug (CoreDebugSnapshot (..), formatCoreRtsRows)
 import NanoUI.Diagrams
-import NanoUI.Monad (askInput, askContext)
+import NanoUI.Monad (askInput, askContext, uiTime)
 import NanoUI.Context (askHostIO, setHost)
+import Paths_nano_ui_demo (getDataFileName)
 import Diagrams.Prelude
   ( Diagram
   , circle
@@ -79,10 +84,13 @@ import System.Console.GetOpt
   )
 import System.Environment (getArgs, lookupEnv)
 import Text.Printf (printf)
+import qualified Codec.Picture as JP
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Internal as BSI
 import qualified Data.Text as T
 import qualified Data.Text.Read as T.Read
 import qualified Data.Vector as V
+import qualified Data.Vector.Storable as VS
 import qualified SdlSelftest
 
 import DemoApp (useFileDialog)
@@ -145,6 +153,46 @@ demoImages =
     , RgbaImage (ImageId 2) 32 32 checkerPixels
     , RgbaImage (ImageId 3) 32 32 stripePixels
     ]
+
+-- | An animated GIF loading in the background: each frame's width, height and
+-- RGBA pixels once decoded, or why the file could not be used.
+newtype GifLoad = GifLoad (MVar (Either String [(Int, Int, BS.ByteString)]))
+  deriving (Eq)
+
+-- | Start loading an animated GIF while the app runs. The file is read and
+-- decoded with JuicyPixels on a background thread, so the frame that starts
+-- the load does not stall. Collect the frames with 'gifFrames'.
+loadGif :: Ui :> es => FilePath -> Eff es GifLoad
+loadGif path =
+  uiIO $ do
+    done <- newEmptyMVar
+    _ <- forkIO $ do
+      decoded <- try $ do
+        bytes <- BS.readFile path
+        frames <- either fail pure (JP.decodeGifImages bytes)
+        when (null frames) (fail "the file has no frames")
+        forM frames $ \frame -> do
+          let rgba = JP.convertRGBA8 frame
+              (fp, n) = VS.unsafeToForeignPtr0 (JP.imageData rgba)
+          -- Decode and convert here, so registering the frames only copies.
+          pixels <- evaluate (BSI.fromForeignPtr0 fp n)
+          pure (JP.imageWidth rgba, JP.imageHeight rgba, pixels)
+      putMVar done (either (\e -> Left (displayException (e :: SomeException))) Right decoded)
+    pure (GifLoad done)
+
+-- | Register a finished load's frames under fresh ids, in order. 'Nothing'
+-- while the file is still decoding, then the frames' ids or why the file could
+-- not be used. The result comes once; keep it. Registering stops at the first
+-- frame the atlas refuses.
+gifFrames :: Ui :> es => GifLoad -> Eff es (Maybe (Either String (V.Vector ImageId)))
+gifFrames (GifLoad done) =
+  uiIO (tryTakeMVar done) >>= traverse (either (pure . Left) (register []))
+  where
+    register ids [] = pure (Right (V.fromList (reverse ids)))
+    register ids ((w, h, pixels) : rest) = do
+      iid <- freshImageId
+      ok <- registerImageRgba iid w h pixels
+      if ok then register (iid : ids) rest else pure (Left "the image atlas is full")
 
 -- | Demo accent used across the state readout and pane headers.
 demoAccent :: Color
@@ -249,6 +297,8 @@ demoUi = do
   -- File dialog handles; results land in the paths below via useFileDialog.
   (openDlg, setOpenDlg) <- useState (Nothing :: Maybe FileDialogId)
   (saveDlg, setSaveDlg) <- useState (Nothing :: Maybe FileDialogId)
+  (lick, setLick) <- useState (Nothing :: Maybe (Either String (V.Vector ImageId))) -- GIF frames, once loaded
+  (lickLoad, setLickLoad) <- useState (Nothing :: Maybe GifLoad) -- the GIF while it decodes
   (folderDlg, setFolderDlg) <- useState (Nothing :: Maybe FileDialogId)
   (openPath, setOpenPath) <- useText ""
   (savePath, setSavePath) <- useText ""
@@ -285,8 +335,8 @@ demoUi = do
   when (not (T.null rawDrop)) (setDropRaw rawDrop)
 
   -------------------------------------------------------------- toolbar ---
-  -- The page padding matches the gap between cards, and the page scrollbar
-  -- sits centered in the right padding.
+  -- The page padding matches the gap between cards. The page scrollbar sits
+  -- just inside the window's right edge, that same gap from the cards.
   scrollWith (padAll gapLayout . grow) $
     columnWith (tight . gap gapLayout . fillW) $ do
       panelWith (padXY 16 12 . gap gapInline . fillW) $
@@ -472,6 +522,27 @@ demoUi = do
                 thumb (ImageId 1) "Swatch"
                 thumb (ImageId 2) "Checker"
                 thumb (ImageId 3) "Stripe"
+              separator
+              -- An animated GIF loaded from disk the first time this tab
+              -- shows: loadGif decodes it in the background, and gifFrames
+              -- registers its frames once that is done. Each frame is its own
+              -- image, and the clock picks which one to show; every frame of
+              -- this GIF lasts 100 ms. keepAnimating keeps frames coming while
+              -- it loads and plays.
+              case lick of
+                Nothing -> do
+                  keepAnimating =<< labelWith' (fillW . fontMuted) "Loading lick.gif..."
+                  case lickLoad of
+                    Nothing -> do
+                      path <- uiIO (getDataFileName "data/lick.gif")
+                      setLickLoad . Just =<< loadGif path
+                    Just pending -> mapM_ (setLick . Just) =<< gifFrames pending
+                Just (Left err) -> muted ("Could not load lick.gif: " <> T.pack err)
+                Just (Right frames) -> do
+                  t <- uiTime
+                  columnWith (tight . gap gapMicro) $ do
+                    keepAnimating =<< image' (fixedWH 150 150) (frames V.! (floor (t * 10) `mod` V.length frames))
+                    muted "lick.gif"
               separator
               -- A plain response-driven bar. pulse provides a smooth
               -- clock-driven 0-1 sweep and keepAnimating holds it live.

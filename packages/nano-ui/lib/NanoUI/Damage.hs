@@ -193,8 +193,10 @@ updatePrevRects ctx = do
                             !cm' = case mClip of
                               Just c -> if IM.lookup k cm == Just c then cm else IM.insert k c cm
                               Nothing -> if IM.member k cm then IM.delete k cm else cm
+                        -- Text nodes, and images, whose text is their image
+                        -- id: switching an image repaints it like new text.
                         tm' <-
-                          if nt == NodeText
+                          if nt == NodeText || nt == NodeImage
                             then do
                               txt <- getText na i
                               pure $! if IM.lookup k tm == Just txt then tm else IM.insert k txt tm
@@ -453,12 +455,18 @@ clipDamage ctx snap d = do
         case IM.lookup k newRects of
           Nothing -> pure []
           Just r -> do
-            -- A text change can reflow the enclosing scroller's
-            -- content and reactivate/resize its chrome (thumb,
-            -- caps) outside the text rect; damage the scroll
-            -- node's full rect so the lane repaints.
-            mScroll <- scrollAncestorRect ctx k
-            pure (r : maybe [] pure mScroll)
+            -- An image that switched to another image keeps its size, so
+            -- only its own rect repaints. A text change can reflow the
+            -- enclosing scroller's content and reactivate/resize its
+            -- chrome (thumb, caps) outside the text rect; damage the
+            -- scroll node's full rect so the lane repaints.
+            mIdx <- findNodeByKey ctx k
+            isImage <- maybe (pure False) (fmap (== NodeImage) . getNodeType (ctxNodeArena ctx)) mIdx
+            if isImage
+              then pure [r]
+              else do
+                mScroll <- scrollAncestorRect ctx k
+                pure (r : maybe [] pure mScroll)
   let layoutRs = if fdScrollOnly d then [] else fdSettledMoved d
       -- Keys that left repaint as the current backdrop over their
       -- old rects. Keys that arrived must repaint inside their new

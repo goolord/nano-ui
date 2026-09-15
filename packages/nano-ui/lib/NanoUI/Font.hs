@@ -53,9 +53,9 @@ module NanoUI.Font
   , scrollBarWidth
   , scrollBarSlimWidth
   , scrollBarSideGap
-  , scrollBarLane
   , scrollBarMargin
   , scrollBarGeomFor
+  , scrollBarGap
   , scrollBarGutter
   , ScrollBarSlot (..)
   , classifyScrollBar
@@ -420,20 +420,19 @@ sliderTrackBounds fm x y w h =
       trackW = max 0 (w - 2 * lx)
    in Rect trackX trackY trackW sliderTrackHeight
 
--- | Thickness of a list scrollbar.
+-- | Thickness of a list or page scrollbar.
 scrollBarWidth :: Float
 scrollBarWidth = 8
 
--- Page and window bodies take a slimmer bar, so its lane fits inside ordinary
--- padding and the content keeps its full width.
+-- Window bodies take a slimmer bar.
 scrollBarSlimWidth :: Float
 scrollBarSlimWidth = 4
 
 scrollBarMargin :: Float
 scrollBarMargin = 3
 
--- | Gap on each side of a bar: one between the bar and the content, one
--- between the bar and the scroller's edge.
+-- | The sliver between a page or window bar and the outer edge, and the
+-- smallest gap on either side of a list bar.
 scrollBarSideGap :: Float
 scrollBarSideGap = 3
 
@@ -442,7 +441,7 @@ scrollBarGeomFor :: ScrollBarSlot -> (Float, Float)
 scrollBarGeomFor slot =
   case slot of
     ScrollBarList -> (scrollBarWidth, scrollBarMargin)
-    ScrollBarPage -> (scrollBarSlimWidth, scrollBarMargin)
+    ScrollBarPage -> (scrollBarWidth, scrollBarMargin)
     -- Window bar: side gaps only. No end inset.
     ScrollBarWindow -> (scrollBarSlimWidth, 0)
 
@@ -455,20 +454,25 @@ classifyScrollBar isWindowBody isPageGrow
   | isPageGrow = ScrollBarPage
   | otherwise = ScrollBarList
 
--- | Lane across a bar: the bar with a side gap on each side.
-scrollBarLane :: ScrollBarSlot -> Float
-scrollBarLane slot = fst (scrollBarGeomFor slot) + 2 * scrollBarSideGap
+-- | Gap between the content and a bar, given the padding @trailPad@ on the
+-- bar's side: the padding itself, never under 'scrollBarSideGap'.
+scrollBarGap :: Float -> Float
+scrollBarGap trailPad = max scrollBarSideGap trailPad
 
 -- | Space an overflowing scroller takes from its content, beside the padding
--- @trailPad@ on the bar's side. The bar is centered across that padding and
--- the gutter together, so padding that already holds the lane costs the
--- content nothing. A window body's bar hangs into the window's own padding
--- and never takes content space.
+-- @trailPad@ on the bar's side, so the content stops one gap before the bar.
+-- A list bar keeps a gap to its well's edge as well. A page bar sits a side
+-- gap inside the page's edge. A window body's bar sits out in the window's
+-- padding, a side gap inside the window's edge, so that padding is the gap
+-- and only the bar and the side gap come out of the content.
 scrollBarGutter :: ScrollBarSlot -> Float -> Float
 scrollBarGutter slot trailPad =
-  case slot of
-    ScrollBarWindow -> 0
-    _ -> max 0 (scrollBarLane slot - trailPad)
+  let (barW, _) = scrollBarGeomFor slot
+      gap = scrollBarGap trailPad
+   in case slot of
+        ScrollBarList -> barW + 2 * gap - trailPad
+        ScrollBarPage -> barW + scrollBarSideGap + gap - trailPad
+        ScrollBarWindow -> barW + scrollBarSideGap
 
 scrollLayoutGutter :: ScrollBarSlot -> Float -> Float -> Float -> Float
 scrollLayoutGutter slot trailPad contentSize innerMain

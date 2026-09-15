@@ -41,15 +41,15 @@ import NanoUI.Font
   ( FontMetrics
   , ScrollBarSlot (..)
   , resolveLayoutPadding
+  , scrollBarGap
   , scrollBarGeomFor
   , scrollBarGutter
-  , scrollBarLane
   , scrollBarSideGap
   , scrollLayoutGutter
   )
 import NanoUI.Types (Color, Rect (..), V2 (..), rectH, rectIntersect, rectW, rectX, rectY, v2X, v2Y)
 import NanoUI.Layout.Arena (DirTag (..))
-import NanoUI.Style (Direction (..), Padding (..), Style (..), styleBorderWidth)
+import NanoUI.Style (Direction (..), Padding (..), Style (..), styleBorderWidth, windowPad)
 
 -- | Axis scrollbar visibility and interaction policy.
 data ScrollPolicy
@@ -295,29 +295,26 @@ scrollViewportClip2D fm slot cfg x y w h pad contentW contentH =
       (gutterW, gutterH) = scrollGutters2D slot cfg pad contentW contentH innerW innerH
    in Rect (rectX base) (rectY base) (max 0 (innerW - gutterW)) (max 0 (innerH - gutterH))
 
--- | The strip a bar sits in. A window body's bar hangs into the window's
--- padding, one side gap clear of the body. Any other bar is centered across
--- the scroller's trailing padding plus the gutter reserved beside it (see
--- 'scrollBarGutter'), so the gaps on either side of it match.
+-- | The strip a bar sits in. A list bar sits one gap (see 'scrollBarGap')
+-- inside its well's edge. A page bar sits a side gap inside the page's edge,
+-- and a window body's bar a side gap inside the window's edge, out in the
+-- window's padding. The gutter keeps the content one gap before each of them.
 scrollChromeLane ::
   ScrollBarSlot -> DirTag -> Float -> Float -> Float -> Float -> Padding -> Rect
 scrollChromeLane slot dir x y w h pad =
   let (barW, _) = scrollBarGeomFor slot
-      hang = slot == ScrollBarWindow
-      across trailPad = (max (scrollBarLane slot) trailPad + barW) / 2
+      -- From the scroller's edge in to the bar's far side. Window and modal
+      -- bodies only scroll vertically, so the window's side padding is the
+      -- one that places their bar.
+      inset trailPad = case slot of
+        ScrollBarList -> scrollBarGap trailPad
+        ScrollBarPage -> scrollBarSideGap
+        ScrollBarWindow -> scrollBarSideGap - padR windowPad
    in case dir of
         DirColumn ->
-          let laneX =
-                if hang
-                  then x + w + scrollBarSideGap
-                  else max x (x + w - across (padR pad))
-           in Rect laneX (y + padT pad) barW (max 0 (h - padT pad - padB pad))
+          Rect (max x (x + w - inset (padR pad) - barW)) (y + padT pad) barW (max 0 (h - padT pad - padB pad))
         DirRow ->
-          let laneY =
-                if hang
-                  then y + h + scrollBarSideGap
-                  else max y (y + h - across (padB pad))
-           in Rect (x + padL pad) laneY (max 0 (w - padL pad - padR pad)) barW
+          Rect (x + padL pad) (max y (y + h - inset (padB pad) - barW)) (max 0 (w - padL pad - padR pad)) barW
 
 scrollBarLayout ::
   FontMetrics ->

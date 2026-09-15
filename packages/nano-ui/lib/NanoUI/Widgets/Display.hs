@@ -16,16 +16,22 @@ module NanoUI.Widgets.Display
   , card
   , toolbar
   , image
+  , image'
+  , freshImageId
+  , registerImageRgba
   , box
   )
 where
 
 import Control.Monad (void)
+import Data.ByteString (ByteString)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Effectful (Eff, type (:>))
+import NanoUI.Atlas qualified as Atlas
+import NanoUI.Context (Context (..), registerImage)
 import NanoUI.Layout.Arena (NodeType (..))
-import NanoUI.Monad (Ui, nextId)
+import NanoUI.Monad (Ui, askContext, nextId, uiIO)
 import NanoUI.Style
   ( Layout (..)
   , alignEnd
@@ -47,7 +53,7 @@ import NanoUI.Style
 import NanoUI.Types (Color (..), ImageId (..), colorToWord32)
 import NanoUI.WidgetText (intValueText)
 import NanoUI.Widgets.Layout (labelEx, labelWith, panelWith, row', rowWith)
-import NanoUI.Widgets.Node (addWidget, addWidgetStyled)
+import NanoUI.Widgets.Node (Response, addWidget, addWidgetStyled)
 
 heading :: Ui :> es => Text -> Eff es ()
 heading = labelWith (tight . fontMedium)
@@ -103,11 +109,32 @@ toolbar = rowWith (tight . gap 8 . alignMid . fillW)
 
 -- | An image registered with the host, sized by the layout modifier.
 image :: Ui :> es => (Layout -> Layout) -> ImageId -> Eff es ()
-image f (ImageId tid) = do
+image f iid = void (image' f iid)
+
+-- | 'image' with its 'Response', for example to 'NanoUI.keepAnimating' an
+-- image whose id changes over time.
+image' :: Ui :> es => (Layout -> Layout) -> ImageId -> Eff es Response
+image' f (ImageId tid) = do
   wid <- nextId
   let
     stored = if tid <= 0 then T.empty else intValueText tid
-  void (addWidget wid NodeImage stored 0 (f defaultLayout))
+  addWidget wid NodeImage stored 0 (f defaultLayout)
+
+-- | An image id that no registered image uses and no earlier call returned.
+-- Take one for each image registered while the app runs.
+freshImageId :: Ui :> es => Eff es ImageId
+freshImageId = do
+  ctx <- askContext
+  uiIO (Atlas.freshImageId (ctxImageAtlas ctx))
+
+-- | Register an RGBA image (4 bytes a pixel, rows top to bottom) under an id
+-- while the app runs, for 'image' to draw. Returns 'False' when the size or
+-- pixels are invalid, an image of another size already has the id, or the
+-- atlas is full. An image of the same size is replaced.
+registerImageRgba :: Ui :> es => ImageId -> Int -> Int -> ByteString -> Eff es Bool
+registerImageRgba iid w h pixels = do
+  ctx <- askContext
+  uiIO (registerImage ctx iid w h pixels)
 
 -- | A solid rectangle sized by the layout modifier.
 box :: Ui :> es => (Layout -> Layout) -> Color -> Eff es ()

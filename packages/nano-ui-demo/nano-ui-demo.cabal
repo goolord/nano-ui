@@ -13,6 +13,8 @@ category:           Graphics
 build-type:         Simple
 extra-doc-files:
     README.md
+data-files:
+    data/lick.gif
 
 flag sdl
     description: Build the SDL3 demos. Needs SDL3, SDL3_ttf, and pkg-config.
@@ -75,12 +77,15 @@ library demo-common
         DemoData
         SdlDemo
         SdlSelftest
+    other-modules:    Paths_nano_ui_demo
+    autogen-modules:  Paths_nano_ui_demo
     build-depends:
         bytestring ^>=0.12,
         diagrams-lib >=1.6 && <1.7,
         directory ^>=1.3,
         effectful-core ^>=2.6,
         filepath ^>=1.5,
+        JuicyPixels ^>=3.3,
         nano-ui ^>=0.1,
         nano-ui-diagrams ^>=0.1,
         nano-ui-sdl ^>=0.1,

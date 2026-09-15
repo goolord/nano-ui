@@ -20,6 +20,7 @@ module Cases
   , runCheckboxInitialTest
   , runDrawingTest
   , runEmbedStateTest
+  , runEmptyFrameTest
   , runFitMutedWidthTest
   , runGrowSplitTest
   , runHostSlotTest
@@ -27,6 +28,7 @@ module Cases
   , runIdKeyedListTest
   , runKvMultilineHeightTest
   , runImageTest
+  , runImageSwapDamageTest
   , runLabelAlignEndTest
   , runLayoutReuseTest
   , runDeepNestingTest
@@ -75,7 +77,18 @@ import Effectful.State.Static.Local (State, evalState, get, modify)
 import NanoUI
 import NanoUI.Context (Context (..))
 import NanoUI.Emit qualified as Emit
-import NanoUI.Layout.Arena (NodeType (..), arenaCount, getNodeType, getNodeValue)
+import NanoUI.Layout.Arena
+  ( NodeType (..)
+  , arenaArrays
+  , arenaCount
+  , getNodeType
+  , getNodeValue
+  , tagNodeType
+  , treeFirstChild
+  , treeNextSibling
+  , writeTagEnum
+  , writeTree
+  )
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertGt, runClickReduce, withInput)
 import NanoUI.Testing.Harness
@@ -227,6 +240,62 @@ runPointerCursorTest ctx failed = do
   pressBox <- wantAt (hoverBox {inputMouseDown = True, inputMousePressed = True, inputMouseReleased = False})
   assert failed pressBox
 
+-- A frame whose UI adds no widgets is an empty frame, not a read of a node
+-- that was never added: presses, wheel input, redraw and cursor queries all
+-- run on the empty arena. Node 0 starts out as a container that is its own
+-- child, so any read of it recurses without end. Widgets added on the next
+-- frame still lay out.
+runEmptyFrameTest :: Context -> IORef Int -> IO ()
+runEmptyFrameTest ctx failed = do
+  arrays <- arenaArrays (ctxNodeArena ctx)
+  writeTagEnum arrays 0 tagNodeType NodeContainer
+  writeTree arrays 0 treeFirstChild 0
+  writeTree arrays 0 treeNextSibling (-1)
+  let inp0 = (withInput 320 200) {inputMousePos = V2 40 40}
+      press = inp0 {inputMouseDown = True, inputMousePressed = True, inputScroll = V2 0 1}
+      ui = row $ do
+        wid <- currentId
+        image (fixedWH 40 24) (ImageId 0)
+        pure wid
+  _ <- runFrame ctx inp0 (pure ())
+  _ <- runFrame ctx press (pure ())
+  _ <- needsRedraw ctx inp0 (inp0 {inputMousePos = V2 60 60})
+  _ <- uiCursorKind ctx inp0
+  _ <- runFrame ctx inp0 ui
+  (wid, _, _, _) <- runFrame ctx inp0 ui
+  mRect <- getPrevRect ctx wid
+  assert failed (maybe False (\(Rect _ _ w h) -> abs (w - 40) <= 0.5 && abs (h - 24) <= 0.5) mRect)
+
+-- Switching an image to another id repaints the image, and only the image:
+-- frames swapped inside a page must neither leave a stale frame on screen nor
+-- repaint the whole page.
+runImageSwapDamageTest :: Context -> IORef Int -> IO ()
+runImageSwapDamageTest ctx failed = do
+  let px a = BS.pack (concat (replicate 16 [a, 0, 0, 255]))
+  ok1 <- registerImage ctx (ImageId 1) 4 4 (px 60)
+  ok2 <- registerImage ctx (ImageId 2) 4 4 (px 120)
+  assert failed (ok1 && ok2)
+  frameRef <- newIORef (ImageId 1)
+  let inp0 = withInputOff 320 200
+      ui = fmap snd $
+        scrollArea (padAll 10 . grow) $
+          column $ do
+            label "frames"
+            wid <- currentId
+            image (fixedWH 40 24) =<< uiIO (readIORef frameRef)
+            pure wid
+  wid <- warmup2 ctx inp0 ui
+  _ <- takeDamage ctx
+  writeIORef frameRef (ImageId 2)
+  _ <- runFrame ctx inp0 ui
+  dmg <- takeDamage ctx
+  mRect <- getPrevRect ctx wid
+  case (dmg, mRect) of
+    (DamageClip (Rect dx dy dw dh), Just (Rect ix iy iw ih)) -> do
+      assert failed (dx <= ix && dy <= iy && dx + dw >= ix + iw && dy + dh >= iy + ih)
+      assert failed (dw * dh < 320 * 200 / 4)
+    _ -> assert failed False
+
 runImageTest :: Context -> IORef Int -> IO ()
 runImageTest ctx failed = do
   let px a b c = BS.pack (concat (replicate 16 [a, b, c, 255]))
@@ -251,6 +320,9 @@ runImageTest ctx failed = do
   (u0, _) <- vertUv drawData 0
   (u4, _) <- vertUv drawData 4
   assert failed (abs (u0 - u4) >= 1e-6)
+  -- Fresh ids start above the registered ones and never repeat.
+  ((fresh1, fresh2), _, _, _) <- runFrame ctx inp0 ((,) <$> freshImageId <*> freshImageId)
+  assertEq failed (map unImageId [fresh1, fresh2]) [8, 9]
   let missing = image imgLayout (ImageId 0)
   _ <- runFrame ctx inp0 missing
   (_, _, missingData, _) <- runFrame ctx inp0 missing

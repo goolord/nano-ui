@@ -46,7 +46,8 @@ runWindowScrollGutterTest ctx failed = do
         pure wide
   (win, mwide) <- warmup2 ctx inp0 ui
   let Rect wx _ ww _ = respRect win
-      contentRight = wx + ww - padR windowPad
+      -- The body's content keeps the window's side padding before the bar.
+      contentRight = wx + ww - padR windowPad - scrollBarGutter ScrollBarWindow 0
   spans <- collectOverlayTextSpans ctx inp0
   let titleYs = [rectY r | (r, txt, _, _, _) <- spans, "GutterWin" `T.isInfixOf` txt]
   assert failed (not (null titleYs))

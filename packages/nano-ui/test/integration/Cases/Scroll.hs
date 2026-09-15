@@ -17,7 +17,7 @@ module Cases.Scroll
 import Control.Monad (forM, forM_, replicateM, replicateM_, void, when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (sort)
-import Data.Maybe (listToMaybe)
+import Data.Maybe (isJust, isNothing, listToMaybe)
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Ptr (Ptr, castPtr)
 import Foreign.Storable (peekElemOff)
@@ -68,10 +68,10 @@ runScrollThumbCursorTest ctx failed = do
           grabbing <- cursorKindIs ctx press UiCursorGrabbing
           assert failed grabbing
 
--- The scroll content's right edge stops at the scrollbar gutter: the bar's
--- lane less the scroller's right padding. List scrollers (fixed height, or
--- grow inside a panel) take a list lane and page-level grow scrollers a slim
--- one; a page padded wide enough for its lane keeps its full width.
+-- The scroll content's right edge stops at the scrollbar gutter, one gap
+-- before the bar. The gap matches the scroller's right padding and is never
+-- under the side gap. A list bar keeps that gap to its well's edge as well;
+-- a page bar sits a side gap inside the page's edge.
 runScrollBarGutterTest :: Context -> IORef Int -> IO ()
 runScrollBarGutterTest ctx failed = do
   let listPad = padR (layoutPadding defaultLayout)
@@ -92,7 +92,7 @@ runScrollBarGutterTest ctx failed = do
           )
         , ( withInput 240 140
           , scrollArea (padAll 12 . grow) (wideThen 20)
-          , 0
+          , scrollBarGutter ScrollBarPage 12
           , 12
           )
         , ( withInput 240 140
@@ -104,6 +104,23 @@ runScrollBarGutterTest ctx failed = do
   forM_ cases $ \(inp0, ui, gutter, endPad) -> do
     (sid, child) <- warmup2 ctx inp0 ui
     assertScrollGutterPad failed ctx sid child gutter endPad
+  -- The padded page's bar takes the pointer just inside the page's edge. The
+  -- sliver past it and the gap before it stay clear.
+  let inp0 = withInputOff 240 140
+      page = scrollArea (padAll 12 . grow) (wideThen 20)
+  (sid, _) <- warmup2 ctx inp0 page
+  mrect <- getPrevRect ctx sid
+  case mrect of
+    Nothing -> assert failed False
+    Just (Rect sx sy sw sh) -> do
+      let ys = [sy + sh * n / 8 | n <- [1 .. 7]]
+      let barLeft = sx + sw - scrollBarGutter ScrollBarPage 12
+      onBar <- findGrabHover ctx page inp0 (barLeft + scrollBarWidth / 2) ys
+      assert failed (isJust onBar)
+      past <- findGrabHover ctx page inp0 (sx + sw - 1) ys
+      assert failed (isNothing past)
+      gapBefore <- findGrabHover ctx page inp0 (barLeft - 6) ys
+      assert failed (isNothing gapBefore)
 
 -- Each change of a scroll offset damages the scroll viewport only.
 runScrollDamageTest :: Context -> IORef Int -> IO ()

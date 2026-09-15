@@ -52,6 +52,7 @@ import NanoUI.Layout.Arena
   ( DirTag (..)
   , NodeIdx
   , NodeType (..)
+  , arenaCount
   , findNodeM
   , forChildNodes_
   , getDirection
@@ -79,8 +80,11 @@ import NanoUI.Types (Rect (..), V2 (..), rectContains, rectIntersect, rectUnion)
 applyScrollOffsets :: Context -> IO ()
 applyScrollOffsets ctx = do
   snapshotLayoutRects (ctxNodeArena ctx)
-  (wx, wy, ww, wh) <- getRect (ctxNodeArena ctx) 0
-  transformSubtree ctx 0 0 0 (Rect wx wy ww wh)
+  -- A frame that added no widgets has no root to walk.
+  count <- arenaCount (ctxNodeArena ctx)
+  when (count > 0) $ do
+    (wx, wy, ww, wh) <- getRect (ctxNodeArena ctx) 0
+    transformSubtree ctx 0 0 0 (Rect wx wy ww wh)
 
 transformSubtree :: Context -> NodeIdx -> Float -> Float -> Rect -> IO ()
 transformSubtree ctx idx scrollX scrollY parentClip = do
@@ -267,11 +271,15 @@ tryApplyScrollWheelDelta ctx wid (V2 wheelX wheelY) = do
 
 findScrollNodeUnderMouse :: Context -> V2 -> IO (Maybe NodeIdx)
 findScrollNodeUnderMouse ctx mouse = do
-  mModal <- topmostModalAtMouse ctx mouse
-  mTop <- topmostOverlayAtMouse ctx mouse
-  let start = fromMaybe 0 (maybe mTop Just mModal)
-  (x, y, w, h) <- getRect (ctxNodeArena ctx) start
-  queryScrollTarget ctx start mouse (Rect x y w h)
+  count <- arenaCount (ctxNodeArena ctx)
+  if count <= 0
+    then pure Nothing
+    else do
+      mModal <- topmostModalAtMouse ctx mouse
+      mTop <- topmostOverlayAtMouse ctx mouse
+      let start = fromMaybe 0 (maybe mTop Just mModal)
+      (x, y, w, h) <- getRect (ctxNodeArena ctx) start
+      queryScrollTarget ctx start mouse (Rect x y w h)
 
 queryScrollTarget :: Context -> NodeIdx -> V2 -> Rect -> IO (Maybe NodeIdx)
 queryScrollTarget ctx idx mouse parentClip = do

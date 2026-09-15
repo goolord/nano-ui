@@ -295,6 +295,9 @@ module NanoUI
     -- * Images and drawing
   , ImageId (..)
   , image
+  , image'
+  , freshImageId
+  , registerImageRgba
   , box
   , drawing
   , drawingVersioned

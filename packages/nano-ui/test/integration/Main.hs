@@ -90,6 +90,8 @@ testSpecs =
   , TestSpec "draw-external-text" False runExternalTextTest
   , TestSpec "drawing" False runDrawingTest
   , TestSpec "image" False runImageTest
+  , TestSpec "empty-frame" False runEmptyFrameTest
+  , TestSpec "image-swap-damage" False runImageSwapDamageTest
   , TestSpec "atlas-growth" False runAtlasGrowthTest
   -- Pointer, redraw and damage
   , TestSpec "pointer-cursor" False runPointerCursorTest
@@ -149,6 +151,7 @@ testSpecs =
   , TestSpec "color-picker-edit" True runColorPickerEditTest
   , TestSpec "color-picker-change-once" True runColorPickerChangeOnceTest
   , TestSpec "color-picker-bar-keys" True runColorPickerBarKeysTest
+  , TestSpec "color-picker-drag-after-field" True runColorPickerDragAfterFieldTest
   , TestSpec "controls-tab-height" True runControlsTabHeightTest
   , TestSpec "bounded-radio-offset" True runBoundedRadioTest
   -- Text input and text area
