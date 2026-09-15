@@ -1,16 +1,19 @@
 cabal-version:      3.4
 name:               nano-ui-diagrams
 version:            0.1.0.0
-synopsis:           diagrams backend for nano-ui drawings and plots
+synopsis:           Charts and diagrams drawings for nano-ui
 description:
-    Lowers diagrams-lib paths into nano-ui draw ops so plots and
-    drawings share the pinned vertex arena.
+    Places diagrams-lib drawings in nano-ui layouts and builds line, bar,
+    scatter, and area charts with axes, legends, and hover lookup.
 license:            MIT
 license-file:       LICENSE
 author:             goolord
 maintainer:         zacharyachurchill@gmail.com
 category:           Graphics
 build-type:         Simple
+extra-doc-files:
+    CHANGELOG.md
+    README.md
 
 common extensions
     default-language: GHC2024

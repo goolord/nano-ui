@@ -1,14 +1,19 @@
 cabal-version:      3.4
 name:               nano-ui-rgfw-bindings
 version:            0.1.0.0
-synopsis:           Haskell bindings for RGFW
-description:        Lightweight, single-header, zero-dependency windowing and input framework for Haskell.
+synopsis:           Haskell bindings to RGFW
+description:
+    Bindings to RGFW, a single-header C library for windows, input, and
+    OpenGL contexts. The C source is bundled with the package.
 license:            MIT
 license-file:       LICENSE
 author:             goolord
 maintainer:         zacharyachurchill@gmail.com
 category:           Graphics
 build-type:         Simple
+extra-doc-files:
+    CHANGELOG.md
+    README.md
 
 common warnings
     ghc-options:

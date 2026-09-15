@@ -1,19 +1,23 @@
 cabal-version:      3.4
 name:               nano-ui-demo
 version:            0.1.0.0
-synopsis:           Showcase applications and interactive demos for nano-ui
-description:        SDL3 showcase apps for nano-ui: a widget cookbook with diagrams plots, a notepad, a log viewer and a terminal.
+synopsis:           Example applications for nano-ui
+description:
+    SDL3 examples for nano-ui: a widget tour, a text editor, a log viewer, and
+    a terminal.
 license:            MIT
 license-file:       LICENSE
 author:             goolord
 maintainer:         zacharyachurchill@gmail.com
 category:           Graphics
 build-type:         Simple
+extra-doc-files:
+    README.md
 
 flag sdl
-    description: Build the SDL3 window demos (requires SDL3, SDL3_ttf, and pkg-config)
+    description: Build the SDL3 demos. Needs SDL3, SDL3_ttf, and pkg-config.
     manual: True
-    default: False
+    default: True
 
 common extensions
     default-language: GHC2024

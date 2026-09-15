@@ -1,22 +1,28 @@
 cabal-version:      3.4
 name:               nano-ui-sdl
 version:            0.1.0.0
-synopsis:           SDL3 backend for nano-ui
-description:        Pixel-host window backend for nano-ui. Requires SDL3, SDL3_ttf, and pkg-config.
+synopsis:           SDL3 window backend for nano-ui
+description:
+    Runs nano-ui views in an SDL3 window with TrueType text and native file
+    dialogs. Requires SDL3, SDL3_ttf, and pkg-config.
 license:            MIT
 license-file:       LICENSE
 author:             goolord
 maintainer:         zacharyachurchill@gmail.com
 category:           Graphics
 build-type:         Simple
+extra-doc-files:
+    CHANGELOG.md
+    README.md
+
 extra-source-files:
     data/inter.ttf
     cbits/*.h
 
 flag sdl
-    description: Build the SDL3 window backend (requires SDL3, SDL3_ttf, and pkg-config)
+    description: Build the SDL3 backend. Needs SDL3, SDL3_ttf, and pkg-config.
     manual: True
-    default: False
+    default: True
 
 flag simd
     description: Compile the batch culler with AVX2 (x86-64 only; the binary then requires an AVX2 CPU)
@@ -102,7 +108,6 @@ library
                           cbits/nano_ui_text_atlas.c
         include-dirs:     cbits
         pkgconfig-depends: sdl3 >= 3.2, sdl3-ttf >= 3.2
-        cc-options:       -O2
         -- nano_ui_batch.c falls back to a scalar cull loop without __AVX2__.
         if flag(simd) && arch(x86_64)
             cc-options:   -mavx2

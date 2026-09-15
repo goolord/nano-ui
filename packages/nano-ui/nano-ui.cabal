@@ -1,9 +1,11 @@
 cabal-version:      3.4
 name:               nano-ui
 version:            0.1.0.0
-synopsis:           Purely functional immediate-mode GUI core for Haskell
-description:        Backend-agnostic IMGUI library with topological path IDs, two-pass flex layout,
-                    pinned vertex arenas, and damage-tracked idle rendering.
+synopsis:           Immediate-mode GUI toolkit for Haskell
+description:
+    Widgets, layout, and input handling for immediate-mode interfaces. A view
+    is a function that runs every frame, and widgets return what the user did.
+    Pair it with a window backend such as nano-ui-sdl or nano-ui-rgfw.
 license:            MIT
 license-file:       LICENSE
 author:             goolord

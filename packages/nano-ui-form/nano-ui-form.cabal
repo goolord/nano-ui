@@ -1,14 +1,19 @@
 cabal-version:      3.4
 name:               nano-ui-form
 version:            0.1.0.0
-synopsis:           Ditto formlet library for nano-ui
-description:        Type-safe, composable immediate-mode GUI forms for nano-ui powered by ditto.
+synopsis:           Validated forms for nano-ui, built on ditto
+description:
+    Applicative forms whose inputs are nano-ui widgets, with validation errors
+    shown under each field.
 license:            MIT
 license-file:       LICENSE
 author:             goolord
 maintainer:         zacharyachurchill@gmail.com
 category:           Graphics
 build-type:         Simple
+extra-doc-files:
+    CHANGELOG.md
+    README.md
 
 common extensions
     default-language: GHC2024
