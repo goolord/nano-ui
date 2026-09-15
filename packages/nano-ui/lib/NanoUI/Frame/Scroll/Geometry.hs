@@ -35,6 +35,7 @@ module NanoUI.Frame.Scroll.Geometry
   ) where
 
 import Data.Bits ((.&.), shiftL, shiftR)
+import Data.Maybe (mapMaybe)
 import Data.Text (Text)
 import NanoUI.Font
   ( FontMetrics
@@ -455,12 +456,7 @@ textClipSlop = 4
 
 tagClippedSpans :: Rect -> [(Rect, Text, Color, Color)] -> [(Rect, Text, Color, Color, Rect)]
 tagClippedSpans clip =
-  concatMap
-    ( \(rect, txt, fg, bg) ->
-        case rectIntersect clip (padTextClipRect rect) of
-          Nothing -> []
-          Just clipHere -> [(rect, txt, fg, bg, clipHere)]
-    )
+  mapMaybe (\(rect, txt, fg, bg) -> (rect, txt, fg, bg,) <$> rectIntersect clip (padTextClipRect rect))
 
 padTextClipRect :: Rect -> Rect
 padTextClipRect (Rect x y w h) = Rect x y (w + textClipSlop) h

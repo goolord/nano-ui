@@ -46,9 +46,9 @@ getScrollOffset ctx wid = do
   let key = intKey wid
       sKey = slotKey slotTextAreaScroll key
   off <-
-    if IM.member sKey (storePoint s)
-      then pure (snd (IM.findWithDefault (0, 0) sKey (storePoint s)))
-      else do
+    case IM.lookup sKey (storePoint s) of
+      Just (_, sy) -> pure sy
+      Nothing -> do
         cfg <- getScrollConfig ctx wid
         if scrollConfigNative2D cfg
           then v2Y <$> getScrollOffset2D ctx wid
@@ -60,13 +60,12 @@ setScrollOffset ctx wid off = do
   store <- getStore ctx
   let key = intKey wid
       sKey = slotKey slotTextAreaScroll key
-  if IM.member sKey (storePoint store)
-    then do
-      let (sx, sy) = IM.findWithDefault (0, 0) sKey (storePoint store)
+  case IM.lookup sKey (storePoint store) of
+    Just (sx, sy) ->
       when (sy /= off) $ do
         setStore ctx (store {storePoint = IM.insert sKey (sx, off) (storePoint store)})
         damageWidget ctx wid DamageSelf
-    else do
+    Nothing -> do
       cfg <- getScrollConfig ctx wid
       if scrollConfigNative2D cfg
         then do
@@ -93,11 +92,9 @@ getScrollOffset2D ctx wid = do
   let widKey = intKey wid
       sKey = slotKey slotTextAreaScroll widKey
   v <-
-    if IM.member sKey (storePoint s)
-      then do
-        let (sx, sy) = IM.findWithDefault (0, 0) sKey (storePoint s)
-        pure (V2 sx sy)
-      else do
+    case IM.lookup sKey (storePoint s) of
+      Just (sx, sy) -> pure (V2 sx sy)
+      Nothing -> do
         let offKey = slotKey slotScrollOff widKey
             crossKey = slotKey slotScrollCross widKey
         case IM.lookup offKey (storePoint s) of
@@ -120,15 +117,14 @@ setScrollOffset2D ctx wid off = do
   -- Text areas only reach the first branch because `textAreaWith` seeds this
   -- slot at init; without the seed a freshly mounted editor falls through to
   -- the legacy container slots below and its offsets are never rendered.
-  if IM.member sKey (storePoint store)
-    then do
-      let (sx, sy) = IM.findWithDefault (0, 0) sKey (storePoint store)
-          sx' = v2X off
+  case IM.lookup sKey (storePoint store) of
+    Just (sx, sy) -> do
+      let sx' = v2X off
           sy' = v2Y off
       when (sx /= sx' || sy /= sy') $ do
         setStore ctx (store {storePoint = IM.insert sKey (sx', sy') (storePoint store)})
         damageWidget ctx wid DamageSelf
-    else do
+    Nothing -> do
       let offKey = slotKey slotScrollOff widKey
           crossKey = slotKey slotScrollCross widKey
           prev = IM.lookup offKey (storePoint store)

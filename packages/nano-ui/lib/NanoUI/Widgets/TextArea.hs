@@ -341,10 +341,12 @@ textAreaWith' f value = do
         let oldState = loadTextAreaState store key value
             (vw, vh) = IM.findWithDefault (200, 96) (slotKey slotTextAreaViewport key) (storePoint store)
         newState <- uiIO (processTextArea ctx inp (realToFrac vw) (realToFrac vh) (realToFrac (fmLineHeight editFm)) oldState)
-        let newText = TB.toText (buffer newState)
-            -- 'processTextArea' only edits text when this frame carried keys or
-            -- chars, so the O(document) 'TB.toText' compare is guarded by
-            -- that; idle focused frames stop at the cheap cursor/scroll checks.
+        let newText
+              -- 'processTextArea' only edits text when this frame carried keys
+              -- or chars, so idle focused frames skip the O(document)
+              -- 'TB.toText' and stop at the cheap cursor/scroll checks.
+              | hadInput || changed = TB.toText (buffer newState)
+              | otherwise = current
             hadInput = not (T.null (inputChars inp)) || not (inputKeysNull (inputKeys inp))
             changed =
               cursorOf newState /= cursorOf oldState

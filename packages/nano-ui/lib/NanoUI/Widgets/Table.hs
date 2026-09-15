@@ -24,6 +24,7 @@ where
 import Colonnade (Colonnade, Headed (..), headed, headless)
 import Colonnade.Encode qualified as Encode
 import Control.Monad (unless, void, when)
+import Data.Char (isDigit)
 import Data.Foldable (toList)
 import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
@@ -32,7 +33,6 @@ import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Ord (Down (..))
 import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Text.Read (decimal, signed)
 import Data.Vector qualified as V
 import Data.Vector.Generic qualified as G
 import Data.Vector.Unboxed qualified as U
@@ -167,7 +167,7 @@ tableSplitPanes tp =
     pure hs
   bodyBlock idxs = do
     ctx <- askContext
-    let n = length scrollRows
+    let n = V.length scrollRowsVec
     (lo, hi) <-
       if n == 0 || rowMinH <= 0
         then pure (0, -1)
@@ -206,7 +206,7 @@ tableSplitPanes tp =
         vGutter = scrollBarGutter fm + scrollBarListExtra
         idxs = unfrozenIdx
     mPrevV <- uiIO (getPrevRect ctx vWid)
-    let totalH = fromIntegral (length scrollRows) * rowMinH
+    let totalH = fromIntegral (V.length scrollRowsVec) * rowMinH
         -- Prev-frame decision, one frame behind the body scroller's live 2D
         -- gutter: on the frame the vertical bar first appears (or vanishes)
         -- the header spacer disagrees with the body's reserved lane for one
@@ -317,10 +317,10 @@ columnCount = V.length . Encode.getColonnade
 isNumericCell :: Text -> Bool
 isNumericCell txt =
   let s = T.strip txt
-   in not (T.null s)
-        && case signed decimal s :: Either String (Integer, Text) of
-          Right (_, rest) | T.null rest -> True
-          _ -> False
+      digits = case T.uncons s of
+        Just (c, rest) | c == '-' || c == '+' -> rest
+        _ -> s
+   in not (T.null digits) && T.all isDigit digits
 
 columnMetrics :: Context -> Colonnade Headed row Text -> [row] -> IO (U.Vector Float, U.Vector Bool)
 columnMetrics _ cols _ | columnCount cols == 0 = pure (U.empty, U.empty)
@@ -619,7 +619,7 @@ tableConfigured cfg f key cols inputRows curSort =
         indexedWidths = U.fromList widths1
         vis = visibleCols order0 hidden0
         freezeN = clamp 0 (length vis) (tableFreezeCols cfg)
-        freezeR = clamp 0 (length rows) (tableFreezeRows cfg)
+        freezeR = max 0 (tableFreezeRows cfg)
         sorted = sortRows cols sort0 rows
         hdrs = Encode.header id cols
         rowMinH = 28

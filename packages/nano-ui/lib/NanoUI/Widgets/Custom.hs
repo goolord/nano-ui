@@ -156,18 +156,18 @@ newtype CanvasM a = CanvasM { runCanvasM :: ([DrawOp] -> [DrawOp]) -> (a, [DrawO
 
 instance Functor CanvasM where
   fmap f (CanvasM m) = CanvasM $ \s ->
-    let (a, s') = m s in (f a, s')
+    case m s of (a, s') -> (f a, s')
 
 instance Applicative CanvasM where
   pure a = CanvasM $ \s -> (a, s)
   CanvasM mf <*> CanvasM mx = CanvasM $ \s ->
-    let (f, s1) = mf s
-        (x, s2) = mx s1
-     in (f x, s2)
+    case mf s of
+      (f, s1) -> case mx s1 of
+        (x, s2) -> (f x, s2)
 
 instance Monad CanvasM where
   CanvasM m >>= f = CanvasM $ \s ->
-    let (a, s') = m s in runCanvasM (f a) s'
+    case m s of (a, s') -> runCanvasM (f a) s'
 
 -- | Compile a 'CanvasM' block into an immutable 'Vector DrawOp'.
 runCanvas :: CanvasM a -> Vector DrawOp
@@ -652,7 +652,7 @@ sparklineWith' f prefW prefH values =
                   drawStrokeAA p1 p2 1.5 accent
                   drawSegments (p2 : rest)
             drawSegments pts
-            case reverse pts of
-              (lastPt : _) -> drawCircle lastPt 2.5 accent
-              _            -> pure ()
+            case pts of
+              [] -> pure ()
+              _ -> drawCircle (last pts) 2.5 accent
     }

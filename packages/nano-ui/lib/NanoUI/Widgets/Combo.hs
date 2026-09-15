@@ -12,7 +12,7 @@ module NanoUI.Widgets.Combo
   )
 where
 
-import Control.Monad (when)
+import Control.Monad (foldM, when, (<$!>))
 import Data.IORef (writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Maybe (fromMaybe, isJust)
@@ -311,7 +311,7 @@ comboBox' placeholder options value = do
           }
   contentW <- uiIO $
     if isFocus && not (null displayed)
-      then maximum . (0 :) <$> mapM (fmap fst . ctxMeasureText ctx) displayed
+      then foldM (\widest t -> max widest . fst <$!> ctxMeasureText ctx t) 0 displayed
       else pure (csContentW cs0)
   let step =
         comboStep

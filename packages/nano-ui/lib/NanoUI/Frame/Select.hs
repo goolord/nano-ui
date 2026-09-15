@@ -49,7 +49,7 @@ import NanoUI.Frame.Hit (findNodeByWidgetId, widgetOverlayAllowed)
 import NanoUI.Frame.Scroll.Geometry (padTextClipRect)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), Key (..), foldInputKeys, inputKeys, inputMouseDown, inputMousePos, inputMousePressed)
-import NanoUI.Layout.Arena (NodeType (NodeSelect, NodeTextInput), findNodeM, foldNodesM, getNodeType, getOptions, getRect, getWidgetId)
+import NanoUI.Layout.Arena (NodeType (NodeSelect, NodeTextInput), findNodeM, foldNodeRevM, getNodeType, getOptions, getRect, getWidgetId)
 import NanoUI.Store (slotAnchor, slotComboContentW, slotComboCount, slotComboHighlight, slotComboScroll, slotComboScrollX, slotCursor, slotKey)
 import NanoUI.Style (Style (..), Theme (..), scrollBarThumbColor, scrollBarTrackColor, themeAccent, themeInput)
 import NanoUI.Types (Color (..), Rect (..), V2 (..), rectContains, rectIntersect)
@@ -81,7 +81,7 @@ openDropdowns ctx = do
   -- so most frames skip the walk.
   if not (anySelectOpen store) && hashWidgetId focus == 0
     then pure []
-    else reverse <$> foldNodesM na (\acc idx -> maybe acc (: acc) <$> dropdownAt store focus idx) []
+    else foldNodeRevM na (\acc idx -> maybe acc (: acc) <$> dropdownAt store focus idx) []
   where
     na = ctxNodeArena ctx
     dropdownAt store focus idx =

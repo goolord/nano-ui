@@ -132,7 +132,7 @@ getNonzeroRect arena i = do
 
 updatePrevRects :: Context -> IO ()
 updatePrevRects ctx = do
-  liveKeys <- IM.keys <$> getLiveAnimations ctx
+  live <- getLiveAnimations ctx
   prevRectless <- getAnimRectless ctx
   oldRects <- getPrevRects ctx
   oldClips <- getPrevClips ctx
@@ -141,7 +141,7 @@ updatePrevRects ctx = do
       bump rects = do
         rest <- getAnimRest ctx
         let restKeys = IM.keys rest
-            allKeys = liveKeys ++ restKeys
+            allKeys = IM.keys live ++ restKeys
             rectless' =
               IM.fromList
                 [ (k, if IM.member k rects then 0 else IM.findWithDefault 0 k prevRectless + 1)
@@ -150,7 +150,7 @@ updatePrevRects ctx = do
             deadRest = IM.filterWithKey (\k _ -> IM.findWithDefault 0 k rectless' > 300) rest
         unless (IM.null deadRest) $
           pruneAnimRest ctx (\k -> IM.notMember k deadRest)
-        setAnimRectless ctx (IM.filterWithKey (\k _ -> elem k liveKeys || (IM.member k rest && IM.notMember k deadRest)) rectless')
+        setAnimRectless ctx (IM.filterWithKey (\k _ -> IM.member k live ||(IM.member k rest && IM.notMember k deadRest)) rectless')
   count <- arenaCount na
   if count <= 0
     then do
@@ -197,8 +197,8 @@ updatePrevRects ctx = do
                           if nt == NodeText
                             then do
                               txt <- getText na i
-                              pure (if IM.lookup k tm == Just txt then tm else IM.insert k txt tm)
-                            else pure (if IM.member k tm then IM.delete k tm else tm)
+                              pure $! if IM.lookup k tm == Just txt then tm else IM.insert k txt tm
+                            else pure $! if IM.member k tm then IM.delete k tm else tm
                         go olds (i + 1) m' cm' tm' (foundOld + if isOld then 1 else 0) dropped
       go oldRects 0 oldRects oldClips oldTexts 0 False
 

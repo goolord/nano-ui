@@ -97,7 +97,7 @@ displayText ctx nt idx = do
   case nt of
     NodeButton -> do
       si <- getStyleIdx (ctxNodeArena ctx) idx
-      pure (if isTableHeaderStyle si then tableHeaderDisplayText si txt else txt)
+      pure $! if isTableHeaderStyle si then tableHeaderDisplayText si txt else txt
     NodeTextInput -> textInputFieldText txt <$> textInputValue ctx idx <*> textInputFocused ctx idx
     NodeTextArea -> textInputValue ctx idx
     NodeSelect -> selectDisplayText txt <$> selectCurrentOption ctx idx
@@ -335,7 +335,7 @@ widgetVisualStyle ctx nt idx = do
         | otherwise = hoverBackground widgetBase animT isHot
   -- Idle widgets (no hover/active tint change) reuse the base style record
   -- rather than allocating a fresh Style through a record update.
-  pure (if bg == styleBg widgetBase then widgetBase else widgetBase {styleBg = bg})
+  pure $! if bg == styleBg widgetBase then widgetBase else widgetBase {styleBg = bg}
 
 hoverBackground :: Style -> Float -> Bool -> Color
 hoverBackground base val isHot

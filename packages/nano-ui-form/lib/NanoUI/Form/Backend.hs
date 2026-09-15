@@ -115,7 +115,7 @@ activePrefixSlot = -0x464F524D -- -'FORM'
 
 -- | Hash a form prefix to a unique 'IntMap' key.
 formStoreKey :: Text -> Int
-formStoreKey prefix = hash ("nano-ui-form:" <> prefix)
+formStoreKey prefix = hash ("nano-ui-form:" :: Text, prefix)
 
 -- | Retrieve the active form prefix in the current context.
 getActiveFormPrefix :: Context -> IO Text

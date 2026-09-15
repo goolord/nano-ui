@@ -88,7 +88,7 @@ stepSpring params x v target dt
   | dt <= 0 = (x, v)
   | otherwise = go x v dt 0
   where
-    go pos vel remain n
+    go !pos !vel remain n
       | remain <= 1e-8 || n >= maxSubsteps = (pos, vel)
       | otherwise =
           let h = min maxSubstep remain

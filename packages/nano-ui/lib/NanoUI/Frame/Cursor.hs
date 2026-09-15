@@ -281,7 +281,7 @@ tableColResizeCursorKind ctx inp = do
   let dragging = any (\n -> n <= -1000 && n > -2000) (IM.elems (storeInt store))
       na = ctxNodeArena ctx
       V2 mx my = inputMousePos inp
-  if dragging && inputMouseDown inp
+  if inputMouseDown inp && dragging
     then pure (Just UiCursorEwResize)
     else do
       mEdge <-

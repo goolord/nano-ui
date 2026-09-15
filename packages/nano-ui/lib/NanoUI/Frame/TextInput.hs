@@ -23,6 +23,7 @@ module NanoUI.Frame.TextInput
 import Control.Monad (unless, when)
 import Data.IORef (readIORef)
 import qualified Data.IntMap.Strict as IM
+import Data.Maybe (mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import NanoUI.Context
@@ -171,10 +172,8 @@ tagTextInputClippedSpans parentClip x y w h fm spans =
         let clipRect = padTextClipRect rect
             isField = rectOverlapArea fieldClip clipRect > rectOverlapArea labelClip clipRect
             area = if isField then fieldClip else labelClip
-         in case rectIntersect area clipRect >>= rectIntersect parentClip of
-              Nothing -> []
-              Just clip -> [(rect, txt, fg, bg, clip)]
-   in concatMap tagOne spans
+         in (rect, txt, fg, bg,) <$> (rectIntersect area clipRect >>= rectIntersect parentClip)
+   in mapMaybe tagOne spans
 
 drawTextCaret :: DrawArena -> Float -> Float -> Float -> Color -> IO ()
 drawTextCaret da caretX caretY caretH fg =
@@ -190,7 +189,7 @@ computeTextInputScroll fm viewportW value cursor oldScroll isFocused
   | not isFocused = pure 0
   | viewportW <= 0 = pure 0
   | otherwise = do
-      let prefix = T.take (max 0 (min (T.length value) cursor)) value
+      let prefix = T.take cursor value
       caretRelX <- lineWidthIO fm prefix
       totalTextW <- lineWidthIO fm value
       let maxScroll = max 0 (totalTextW + 1 - viewportW)
@@ -260,7 +259,7 @@ drawTextInputCaret da ctx idx x y w h style = do
       lbl <- getText (ctxNodeArena ctx) idx
       fm <- nodeFontMetrics ctx idx
       let fieldTxt = textInputFieldText lbl value focus
-          prefix = T.take (max 0 (min (T.length fieldTxt) cursor)) fieldTxt
+          prefix = T.take cursor fieldTxt
           lineH = fmLineHeight fm
       pw <- lineWidthIO fm prefix
       (Rect _ boxY _ boxH, Rect clipX _ _ _) <- nodeTextFieldGeom ctx idx x y w h

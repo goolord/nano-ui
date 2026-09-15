@@ -548,6 +548,7 @@ rootAttachParent na parent
       n <- arenaCount na
       pure (if n > 0 then 0 else -1)
 
+{-# INLINE addNode #-}
 addNode ::
   NodeArena ->
   NodeType ->

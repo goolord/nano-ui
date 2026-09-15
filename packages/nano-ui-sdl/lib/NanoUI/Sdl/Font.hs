@@ -169,7 +169,7 @@ runCacheCap = 1024
 -- Entry-count limits alone do not bound retained text: edited oversized lines
 -- can otherwise keep thousands of full-document versions alive per font.
 cacheableText :: Text -> Bool
-cacheableText = (<= 4096) . T.length
+cacheableText txt = T.compareLength txt 4096 /= GT
 
 -- | A map bounded by entry count: 'insertBounded' into a full cache evicts the
 -- first key of 'bcOrder' and returns its value so the owner can release it.
@@ -659,7 +659,8 @@ buildGlyphFontMetrics ga sf scale = do
       case Map.lookup txt (bcEntries prepared) of
         Just fm -> pure fm
         Nothing -> do
-          let chars = T.foldl' (\m c -> IM.insert (ord c) c m) IM.empty (" HxM" <> txt)
+          let insertChar m c = IM.insert (ord c) c m
+              chars = T.foldl' insertChar (T.foldl' insertChar IM.empty " HxM") txt
           advances <- traverse advanceLookup chars
           geometry <- traverse glyphGeometry chars
           let gather !pairs !previous remaining = case T.uncons remaining of
@@ -670,7 +671,8 @@ buildGlyphFontMetrics ga sf scale = do
                     k <- kernLookup previous c
                     pure $! IM.insert key k pairs
                   gather pairs' c rest
-          kerns <- gather IM.empty ' ' ("xM" <> txt)
+          seedKerns <- gather IM.empty ' ' "xM"
+          kerns <- gather seedKerns 'M' txt
           (w, h) <- measureTtfText sf txt
           let run
                 | T.null txt || w + 2 * runAtlasPad > runAtlasTexSize || h + 2 * runAtlasPad > runAtlasTexSize = Nothing

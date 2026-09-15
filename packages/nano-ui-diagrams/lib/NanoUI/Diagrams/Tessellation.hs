@@ -143,12 +143,12 @@ strokePolyline _ _ _ [_] = []
 strokePolyline col w closed pts0 =
   let pts = if closed && length pts0 > 2 then stripClosed pts0 else pts0
       hw = w / 2
-      !n = length pts
+      !vPts = U.fromList pts
+      !n = U.length vPts
    in if n < 2
         then []
         else
-          let !vPts = U.fromList pts
-              !segCount = if closed then n else n - 1
+          let !segCount = if closed then n else n - 1
               !segNormals = U.generate segCount $ \i ->
                 let !(p0x, p0y) = vPts U.! i
                     !(p1x, p1y) = vPts U.! ((i + 1) `mod` n)
@@ -168,7 +168,8 @@ strokePolyline col w closed pts0 =
                         sy = ay + by
                         d = sqrt (sx * sx + sy * sy)
                      in if d <= 1e-9 then (0, 0) else (sx / d, sy / d)
-              offset !i =
+              -- Adjacent quads share a vertex, so offset each vertex once.
+              !offsets = U.generate n $ \i ->
                 let (!px, !py) = vPts U.! i
                     (!nx, !ny) = joinNormal i
                  in ((px + hw * nx, py + hw * ny), (px - hw * nx, py - hw * ny))
@@ -176,8 +177,8 @@ strokePolyline col w closed pts0 =
                 | i >= segCount = []
                 | otherwise =
                     let !j = if closed then (i + 1) `mod` n else i + 1
-                        ((!x0a, !y0a), (!x0b, !y0b)) = offset i
-                        ((!x1a, !y1a), (!x1b, !y1b)) = offset j
+                        ((!x0a, !y0a), (!x0b, !y0b)) = offsets U.! i
+                        ((!x1a, !y1a), (!x1b, !y1b)) = offsets U.! j
                      in FillTriangle x0a y0a x1a y1a x1b y1b col
                           : FillTriangle x0a y0a x1b y1b x0b y0b col
                           : buildQuads (i + 1)

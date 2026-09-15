@@ -102,11 +102,13 @@ syncTextAreaViewport ctx idx fm x y w h = do
       (sx, sy) = IM.findWithDefault (0, 0) (slotKey slotTextAreaScroll key) (storePoint store)
       sx' = max 0 (min (max 0 (contentW - tabViewW bars)) sx)
       sy' = max 0 (min (max 0 (contentH - tabViewH bars)) sy)
-      pts0 = IM.insert (slotKey slotTextAreaViewport key) (clipW, clipH) (storePoint store)
+      viewportKey = slotKey slotTextAreaViewport key
+      pts0 = IM.insert viewportKey (clipW, clipH) (storePoint store)
       pts1
         | sx' /= sx || sy' /= sy = IM.insert (slotKey slotTextAreaScroll key) (sx', sy') pts0
         | otherwise = pts0
-  setStore ctx (store {storePoint = pts1})
+  unless (sx' == sx && sy' == sy && IM.lookup viewportKey (storePoint store) == Just (clipW, clipH)) $
+    setStore ctx (store {storePoint = pts1})
 
 -- | Snap a text-area scroll offset to the device pixel grid, the same grid
 -- 'pushText' snaps to, so line pens and hit-testing stay in lockstep (and in

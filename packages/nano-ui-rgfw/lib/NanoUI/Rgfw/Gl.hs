@@ -27,7 +27,7 @@ import Control.Monad (foldM, when)
 import Data.Bits (shiftR, (.&.))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Int (Int32)
-import qualified Data.Text as T
+import qualified Data.Text.Foreign as TF
 import Data.Word (Word32, Word8)
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Marshal.Alloc (callocBytes, free, reallocBytes)
@@ -203,9 +203,10 @@ ensureTextCapacity r !needVerts = do
       writeIORef (glText r) (p', cap')
       pure p'
 
--- | Upper bound on a span list's glyph count.
+-- | Upper bound on a span list's glyph count: the UTF-8 byte length, which is
+-- O(1) per span.
 spanChars :: [TextSpan] -> Int
-spanChars = foldl' (\acc (_, t, _, _, _) -> acc + T.length t) 0
+spanChars = foldl' (\acc (_, t, _, _, _) -> acc + TF.lengthWord8 t) 0
 
 -- | Append a span's glyph quads to a vertex buffer, 6 vertices per glyph in
 -- the core's vertex layout: physical-pixel position, span colour, atlas UV.

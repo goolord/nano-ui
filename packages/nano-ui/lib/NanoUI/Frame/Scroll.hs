@@ -95,7 +95,7 @@ transformSubtree ctx idx scrollX scrollY parentClip = do
       then getRect na idx
       else pure (lx + sx, ly + sy, lw, lh)
   when (not floating) $ setRect na idx vx vy vw vh
-  (childScrollX, childScrollY, childClip) <-
+  (!childScrollX, !childScrollY, !childClip) <-
     if isScrollNode nt
       then do
         clip <- within <$> scrollViewportAt ctx idx vx vy lw lh
@@ -114,7 +114,7 @@ transformSubtree ctx idx scrollX scrollY parentClip = do
             NodePanel -> do
               theme <- readIORef (ctxTheme ctx)
               pure (within (borderContentClip (themePanel theme) (Rect vx vy vw vh)))
-            _ -> pure (if floating then Rect vx vy vw vh else parentClip)
+            _ -> pure $! if floating then Rect vx vy vw vh else parentClip
         setClipRect na idx clip
         pure (sx, sy, clip)
   forChildNodes_ na idx $ \ci ->

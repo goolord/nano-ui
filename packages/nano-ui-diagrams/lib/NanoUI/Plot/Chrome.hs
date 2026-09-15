@@ -103,12 +103,12 @@ data ChartChrome = ChartChrome
   }
 
 chartMargins :: FontMetrics -> Chart -> Margins
-chartMargins fm chart = ccMargins (chartChrome fm chart)
+chartMargins fm chart = ccMargins (chartChrome fm (chartYDomain chart) chart)
 
-chartChrome :: FontMetrics -> Chart -> ChartChrome
-chartChrome fm chart =
-  let yDom = chartYDomain chart
-      yLabels = map formatTick (niceTicks 6 yDom)
+-- | Chrome for a chart whose y domain the caller has already computed.
+chartChrome :: FontMetrics -> Domain -> Chart -> ChartChrome
+chartChrome fm yDom chart =
+  let yLabels = map formatTick (niceTicks 6 yDom)
       maxYW = maximum (0 : map (textWidth fm) yLabels)
       lh = fmLineHeight fm
       yTitleW =
@@ -197,7 +197,7 @@ chartYDomain = snd . seriesDomains
 
 chartDiagram :: FontMetrics -> Theme -> PlotStyle -> Chart -> Diagram B
 chartDiagram fm theme ps chart =
-  let chrome = chartChrome fm chart
+  let chrome = chartChrome fm yDom chart
       margins = ccMargins chrome
       leftM = marginLeft margins
       rightM = marginRight margins

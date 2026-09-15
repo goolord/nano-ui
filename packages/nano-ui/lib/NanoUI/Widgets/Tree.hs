@@ -41,18 +41,18 @@ forestSize :: [TreeItem] -> Int
 forestSize = foldl' (\acc x -> acc + subtreeSize x) 0
 
 -- | Visible rows in pre-order, skipping the children of collapsed nodes. One
--- pass: rows are consed onto an accumulator and reversed once.
+-- pass: rows come out in order, and a subtree hands the next pre-order index
+-- to the continuation that lists its later siblings.
 visibleRows :: IS.IntSet -> [TreeItem] -> V.Vector TreeRow
-visibleRows expanded items = V.fromList (reverse (snd (go 0 0 items [])))
+visibleRows expanded items = V.fromList (go 0 0 items (const []))
   where
-    go !idx !_ [] acc = (idx, acc)
-    go !idx !depth (item@(TreeItem lbl kids) : rest) acc =
+    go !idx !_ [] k = k idx
+    go !idx !depth (item@(TreeItem lbl kids) : rest) k =
       let hasKids = not (null kids)
-          row = (idx, depth, hasKids, lbl)
-       in if hasKids && IS.member idx expanded
-            then case go (idx + 1) (depth + 1) kids (row : acc) of
-              (next, acc') -> go next depth rest acc'
-            else go (idx + subtreeSize item) depth rest (row : acc)
+       in (idx, depth, hasKids, lbl)
+            : if hasKids && IS.member idx expanded
+              then go (idx + 1) (depth + 1) kids (\next -> go next depth rest k)
+              else go (idx + subtreeSize item) depth rest k
 
 -- | Pre-order indices of every node that has children (the default expansion).
 parentIndices :: [TreeItem] -> IS.IntSet

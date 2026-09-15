@@ -117,12 +117,10 @@ startSpring :: Context -> WidgetId -> SpringParams -> Float -> IO ()
 startSpring ctx wid params target = do
   let key = intKey wid
   as <- readIORef (ctxAnimationState ctx)
-  cur <- case IM.lookup key (asAnimations as) of
-    Just a -> pure (animationValue a)
-    Nothing -> pure (IM.findWithDefault 0 key (asAnimRest as))
   let (pos, vel) = case IM.lookup key (asAnimations as) of
         Just (SpringAnim p v _ _) -> (p, v)
-        _ -> (cur, 0)
+        Just a -> (animationValue a, 0)
+        Nothing -> (IM.findWithDefault 0 key (asAnimRest as), 0)
   if abs (pos - target) <= springEps && abs vel <= springEps
     then settleKey ctx key target
     else do
@@ -194,8 +192,8 @@ getAnimationValue ctx wid = do
   let key = intKey wid
   as <- readIORef (ctxAnimationState ctx)
   case IM.lookup key (asAnimations as) of
-    Just a -> pure (animationValue a)
-    Nothing -> pure (IM.findWithDefault 0 key (asAnimRest as))
+    Just a -> pure $! animationValue a
+    Nothing -> pure $! IM.findWithDefault 0 key (asAnimRest as)
 
 -- | Stop the animation on @wid@ in place, freezing it at its current value.
 -- The frozen value stays readable via 'getAnimationValue'; the widget stops

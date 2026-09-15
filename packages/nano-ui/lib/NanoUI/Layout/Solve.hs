@@ -9,7 +9,7 @@ module NanoUI.Layout.Solve
   , scrollBarSlotOf
   ) where
 
-import Control.Monad (when)
+import Control.Monad (foldM, when)
 import Data.IORef (readIORef)
 import Data.Primitive.PrimArray
   ( MutablePrimArray
@@ -489,11 +489,11 @@ measureWidget env@SolveEnv {seArena = na, seFm = fm, seMeasure = measure} idx = 
       NodeSelect -> do
         opts <- getOptions na idx
         let choices = if null opts then [""] else opts
-        dims <- mapM (measure . selectDisplayText txt) choices
-        let (mw, mh) =
-              case dims of
-                [] -> (0, 0)
-                ds -> (maximum (map fst ds), maximum (map snd ds))
+        (mw, mh) <-
+          foldM
+            (\(!mw, !mh) c -> (\(w, h) -> (max mw w, max mh h)) <$> measure (selectDisplayText txt c))
+            (0, 0)
+            choices
         pure (mw, mh, selectChevronReserve, 0)
       NodeColorPicker -> pure (colorPickerMinWidth, 0, 0, colorPickerExtraH)
       NodeTextInput

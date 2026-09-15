@@ -14,9 +14,9 @@ module NanoUI.Sdl.Input
 import Data.Bits ((.&.))
 import qualified Data.Text as T
 import Data.Text (Text)
+import qualified Data.Text.Foreign as TF
 import qualified Data.Vector as V
 import Data.Word (Word32)
-import Foreign.C.String (peekCString)
 import Foreign.C.Types (CFloat)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr, nullPtr)
@@ -161,8 +161,8 @@ textInput p = do
   if textPtr == nullPtr
     then pure Nothing
     else do
-      str <- peekCString textPtr
-      pure (if null str then Nothing else Just (EvText (T.pack str) mods))
+      txt <- TF.peekCString textPtr
+      pure (if T.null txt then Nothing else Just (EvText txt mods))
 
 mouseMotion :: Ptr SDL_Event -> IO SdlEvent
 mouseMotion p = do
@@ -219,7 +219,7 @@ dropEvent p ty = do
   payload <-
     if dataPtr == nullPtr
       then pure ""
-      else T.pack <$> peekCString dataPtr
+      else TF.peekCString dataPtr
   pure (EvDrop (DropEvent ty pos payload))
 
 peekModifiers :: IO Modifiers

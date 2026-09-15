@@ -108,7 +108,14 @@ persistWindowPositions ctx = do
             wid <- getWidgetId na idx
             (x, y, w, h) <- getRect na idx
             let k = intKey wid
-            pure acc {storePoint = IM.insert k (x, y) (IM.insert (slotKey slotWinSize k) (w, h) (storePoint acc))}
+                sizeKey = slotKey slotWinSize k
+                points = storePoint acc
+            -- Keep an unchanged map as is, so the store comparison below
+            -- short-circuits on pointer equality.
+            pure $
+              if IM.lookup k points == Just (x, y) && IM.lookup sizeKey points == Just (w, h)
+                then acc
+                else acc {storePoint = IM.insert k (x, y) (IM.insert sizeKey (w, h) points)}
   store1 <- foldNodesM na record store0
   when (store1 /= store0) $ setStore ctx store1
 
@@ -314,14 +321,21 @@ resizeEdgeTarget ctx mouse = do
   case mWin of
     Nothing -> pure Nothing
     Just idx -> do
-      blocked <- resizeHaloBlocked ctx mouse idx
-      overClose <- windowTitleHasInteractive ctx idx mouse
-      mTitle <- windowTitleRect ctx idx
       (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
       let rect = Rect x y w h
-      if blocked || overClose || maybe False (`rectContains` mouse) mTitle
-        then pure Nothing
-        else fmap (idx,rect,) <$> windowResizeEdgeFor ctx idx rect mouse
+      -- The halo covers the window interior, so find the edge first and run
+      -- the hover probe and node scans only when there is one.
+      mEdge <- windowResizeEdgeFor ctx idx rect mouse
+      case mEdge of
+        Nothing -> pure Nothing
+        Just edge -> do
+          mTitle <- windowTitleRect ctx idx
+          if maybe False (`rectContains` mouse) mTitle
+            then pure Nothing
+            else do
+              blocked <- resizeHaloBlocked ctx mouse idx
+              overControl <- if blocked then pure False else windowTitleHasInteractive ctx idx mouse
+              pure (if blocked || overControl then Nothing else Just (idx, rect, edge))
 
 tryStartWindowResize :: Context -> V2 -> IO Bool
 tryStartWindowResize ctx mouse@(V2 mx my) = do

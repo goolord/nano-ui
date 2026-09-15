@@ -234,7 +234,9 @@ selectedText a b buf =
 cursorOffset :: TextBuffer -> Cursor -> Int
 cursorOffset buf (Cursor row col) =
   let
-    lineTexts = toLines buf
+    -- Tab decoding swaps one character for one, so the encoded lines have
+    -- the same lengths and need no 'toLines' pass.
+    lineTexts = TZ.getText (unTextBuffer buf)
    in
     sum (map ((+ 1) . T.length) (take row lineTexts)) + col
 
@@ -257,7 +259,7 @@ replaceRange insert a b buf =
 offsetToCursor :: TextBuffer -> Int -> Cursor
 offsetToCursor buf off =
   let
-    lineTexts = toLines buf
+    lineTexts = TZ.getText (unTextBuffer buf)
     go _ [] _ = Cursor 0 0
     go r (ln : rest) acc =
       let

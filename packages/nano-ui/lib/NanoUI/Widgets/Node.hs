@@ -390,7 +390,7 @@ resolveInteraction ctx inp wid = do
       Nothing -> Rect 0 0 0 0
     canHit = rectHit rect mouse || pending == wid
   if not canHit
-    then pure (mkResponse wid rect False False False False)
+    then pure $! mkResponse wid rect False False False False
     else do
       disabled <- isDisabled ctx wid
       blocked <- pointerBlockedByOverlay ctx mouse
@@ -413,7 +413,7 @@ resolveInteraction ctx inp wid = do
       let
         clicked = (hovered && inputMouseReleased inp) || pending == wid
         rightClicked = hovered && inputMouseRightReleased inp
-      pure $
+      pure $!
         Response
           { rawRespId = wid
           , rawRespRect = rect

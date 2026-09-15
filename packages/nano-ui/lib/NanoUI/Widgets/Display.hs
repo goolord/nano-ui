@@ -93,7 +93,7 @@ kvBlock rows =
    in void $
         labelEx
           (tight . gap 0 . fontMono $ defaultLayout)
-          (T.unlines (foldr (\(k, v) rest -> (padK k <> "  " <> v) : rest) [] rows))
+          (T.concat (foldr (\(k, v) rest -> padK k : "  " : v : "\n" : rest) [] rows))
 
 card :: Ui :> es => Eff es a -> Eff es a
 card = panelWith (minW 300 . padXY 12 10 . gap 8 . fillW)

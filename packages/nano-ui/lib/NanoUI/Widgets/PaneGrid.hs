@@ -381,7 +381,9 @@ paneGrid cfg = do
       -- Keep the committed tree for cancellation and exact drop previews,
       -- but close up the dragged pane's space in the live layout.
       visibleTree = if dgiShown then treeRemovePane (fromIntegral drag0) tree0 else Just tree0
-      (visibleRegions, visibleDividers) = maybe (M.empty, []) (\t -> layoutNode minSize gutter t baseRect) visibleTree
+      (visibleRegions, visibleDividers)
+        | dgiShown = maybe (M.empty, []) (\t -> layoutNode minSize gutter t baseRect) visibleTree
+        | otherwise = (regions, dividers)
       divMap = M.fromList [(diSplitId d, d) | d <- visibleDividers]
       env =
         GridEnv
