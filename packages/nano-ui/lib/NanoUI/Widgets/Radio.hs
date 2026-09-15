@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module NanoUI.Widgets.Radio (radioFieldset, boundedRadioFieldset, enumRadio, useRadio) where
+module NanoUI.Widgets.Radio (radioFieldset, boundedRadioFieldset, enumRadio) where
 
 import Control.Monad (foldM, when)
 import Data.Foldable (toList)
@@ -12,10 +12,11 @@ import Effectful (Eff, type (:>))
 import NanoUI.Context (getStore, intKey, registerFocusable, setStore)
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, nextId, uiIO, withKey)
-import NanoUI.Store (WidgetStore (..), slotKey)
+import NanoUI.Store (WidgetStore (..), slotKey, slotRadioInit)
 import NanoUI.Style (Layout, defaultLayout, fillW, gap, tight)
-import NanoUI.Widgets.Behavior (KeyNav (..), useKeyNav, useSelection)
-import NanoUI.Widgets.Combinators (selectableItem)
+import NanoUI.Types (clamp)
+import NanoUI.Widgets.Behavior (KeyNav (..), useKeyNav)
+import NanoUI.Widgets.Combinators (selectableItem, withBoundedIndex)
 import NanoUI.Widgets.Layout (column')
 import NanoUI.Widgets.Node
   ( Response (..)
@@ -43,15 +44,15 @@ radioFieldset options initial =
         [] -> [""]
         xs -> xs
       !len = length opts
-      !c0 = max 0 (min (len - 1) initial)
+      !c0 = clamp 0 (len - 1) initial
       !key = intKey gid
-      !keyInit = slotKey 1 key
+      !keyInit = slotKey slotRadioInit key
     st0 <- uiIO (getStore ctx)
     let
       lastInit = IM.lookup keyInit (storeInt st0)
       storedSel = IM.lookup key (storeInt st0)
       !sel = case (lastInit, storedSel) of
-        (Just li, Just s) | li == c0 -> max 0 (min (len - 1) s)
+        (Just li, Just s) | li == c0 -> clamp 0 (len - 1) s
         _ -> c0
     uiIO $ registerFocusable ctx gid
     nav <- useKeyNav gid
@@ -59,23 +60,17 @@ radioFieldset options initial =
       !navDelta =
         (if knDown nav || knRight nav then 1 else 0 :: Int)
           - (if knUp nav || knLeft nav then 1 else 0)
-      !selNav = if navDelta == 0 then sel else max 0 (min (len - 1) (sel + navDelta))
+      !selNav = if navDelta == 0 then sel else clamp 0 (len - 1) (sel + navDelta)
     column' radioGroupLay $ do
       tagContainer gid
       (combinedResp, clickedIdx) <- addRadioOptions selNav opts
       let
         !finalSel = if clickedIdx >= 0 then clickedIdx else selNav
         !hasClick = clickedIdx >= 0
-      uiIO $ do
-        when (storedSel /= Just finalSel || lastInit /= Just c0) $ do
-          st <- getStore ctx
-          setStore
-            ctx
-            st
-              { storeInt =
-                  IM.insert key finalSel $
-                    IM.insert keyInit c0 (storeInt st)
-              }
+      when (storedSel /= Just finalSel || lastInit /= Just c0) $
+        uiIO $
+          getStore ctx >>= \st -> setStore ctx $
+            st {storeInt = IM.insert key finalSel (IM.insert keyInit c0 (storeInt st))}
       pure (setChanged (finalSel /= sel || hasClick) combinedResp, finalSel)
 
 -- Use the ordinary widget path for every option, including singleton groups.
@@ -90,19 +85,8 @@ addRadioOptions sel opts = foldM addOption (mempty, -1) (zip [0 ..] opts)
     pure (acc <> r, clickedIdx')
 
 boundedRadioFieldset ::
-  forall a es.
   (Bounded a, Enum a, Ui :> es) => a -> (a -> Text) -> Eff es (Response, a)
-boundedRadioFieldset initial encode =
-  let
-    vs = take 256 [minBound .. maxBound]
-    lower = fromEnum (minBound :: a)
-   in
-    fmap
-      (\(r, i) -> (r, toEnum (lower + i)))
-      (radioFieldset (map encode vs) (fromEnum initial - lower))
+boundedRadioFieldset initial encode = withBoundedIndex encode initial radioFieldset
 
 enumRadio :: (Bounded a, Enum a, Show a, Ui :> es) => a -> Eff es (Response, a)
 enumRadio initial = boundedRadioFieldset initial (T.pack . show)
-
-useRadio :: (Enum a, Ui :> es) => a -> Eff es (a, a -> Eff es ())
-useRadio initial = fmap (\(c, s) -> (toEnum c, s . fromEnum)) (useSelection (fromEnum initial))

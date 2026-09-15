@@ -1,5 +1,3 @@
-{-# LANGUAGE UnliftedFFITypes #-}
-
 module NanoUI.Types
   ( V2 (..)
   , Rect (..)
@@ -110,9 +108,6 @@ colorFromWord32 = Color
 {-# INLINE clamp #-}
 clamp :: Ord a => a -> a -> a -> a
 clamp lo hi x = max lo (min hi x)
-{-# SPECIALIZE clamp :: Float -> Float -> Float -> Float #-}
-{-# SPECIALIZE clamp :: Int -> Int -> Int -> Int #-}
-{-# SPECIALIZE clamp :: Double -> Double -> Double -> Double #-}
 
 {-# INLINE clamp01 #-}
 clamp01 :: Float -> Float
@@ -130,7 +125,6 @@ onGrid s v
   | s > 0 = fromIntegral (round (v * s) :: Int) / s
   | otherwise = v
 
-{-# INLINE rgbToHsv #-}
 rgbToHsv :: Color -> (Float, Float, Float)
 rgbToHsv c =
   let r = fromIntegral (colorR c) / 255
@@ -151,7 +145,6 @@ rgbToHsv c =
       h = if rawH < 0 then rawH + 360 else rawH
    in (h, s, v)
 
-{-# INLINE hsvToRgb #-}
 hsvToRgb :: Float -> Float -> Float -> Color
 hsvToRgb h s v =
   let hi = floor (h / 60) :: Int
@@ -182,16 +175,12 @@ contrastRatio a b =
    in (hi + 0.05) / (lo + 0.05)
 
 colorLuminance :: Color -> Double
-colorLuminance = relLum
-
-relLum :: Color -> Double
-relLum c =
+colorLuminance c =
   0.2126 * srgb (colorR c) + 0.7152 * srgb (colorG c) + 0.0722 * srgb (colorB c)
 
-{-# INLINE lerpColor #-}
 lerpColor :: Color -> Color -> Float -> Color
 lerpColor (Color a) (Color b) t =
-  let u = max 0 (min 1 t)
+  let u = clamp01 t
       ch shift =
         round $
           fromIntegral ((a `shiftR` shift) .&. 0xFF) * (1 - u)
@@ -309,12 +298,6 @@ instance Eq DamageBounds where
   DamageNone == DamageNone = True
   _ == _ = False
 
-instance Semigroup DamageBounds where
-  (<>) = DamageUnion
-
-instance Monoid DamageBounds where
-  mempty = DamageSelf
-
 -- | Standard damage slop for text overhang, focus rings, and border anti-aliasing.
 defaultDamageSlop :: Float
 defaultDamageSlop = 4.0
@@ -328,7 +311,6 @@ haloDamageSlop :: Float
 haloDamageSlop = 12.0
 
 -- | Resolve damage bounds against a given layout rect.
-{-# INLINE resolveDamageRect #-}
 resolveDamageRect :: DamageBounds -> Rect -> Rect
 resolveDamageRect bounds r =
   case bounds of
@@ -336,7 +318,14 @@ resolveDamageRect bounds r =
     DamageInflated pad -> rectInflate pad r
     DamageExact exactR -> exactR
     DamageCustom f -> f r
-    DamageUnion a b -> rectUnion (resolveDamageRect a r) (resolveDamageRect b r)
+    DamageUnion a b ->
+      -- An empty side (DamageNone, or an unlaid-out rect) contributes
+      -- nothing; a plain rect union would stretch the damage to the origin.
+      let ra = resolveDamageRect a r
+          rb = resolveDamageRect b r
+       in if not (rectNonEmpty ra)
+            then rb
+            else if not (rectNonEmpty rb) then ra else rectUnion ra rb
     DamageNone -> Rect 0 0 0 0
 
 {-# INLINE v2Add #-}

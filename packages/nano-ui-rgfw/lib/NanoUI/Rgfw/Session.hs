@@ -1,28 +1,23 @@
-{-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 module NanoUI.Rgfw.Session
   ( RgfwOptions (..)
   , defaultRgfwOptions
-  , runRgfwSession
-  , runRgfwSessionReduce
-  , runRgfwSessionReduceCustom
+  , runRgfwApp
+  , runRgfwAppReduce
+  , runRgfwAppReduceCustom
+  -- * Input translation
+  , RgfwEvent
+  , decodeRgfwEvents
+  , applyRgfwEvent
   ) where
 
 import Control.Concurrent (rtsSupportsBoundThreads, runInBoundThread, threadDelay)
 import Control.Exception (bracket)
 import Control.Monad (void, when)
 import Data.Bits ((.&.))
-import Data.Char (chr, isPrint, ord, toLower)
-import Data.IORef
-  ( IORef
-  , newIORef
-  , readIORef
-  , writeIORef
-  )
+import Data.Char (chr, isPrint, ord)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import qualified Data.Text as T
 import Data.Typeable (Typeable)
-import qualified Data.Vector as V
 import Data.Word (Word8, Word32)
 import Foreign.Ptr (Ptr)
 import GHC.Clock (getMonotonicTime)
@@ -33,6 +28,7 @@ import NanoUI
   , NanoUI
   , Size (..)
   , V2 (..)
+  , appendInputKey
   , emptyInput
   )
 import NanoUI.Context
@@ -40,6 +36,7 @@ import NanoUI.Context
   , setHost
   , withClipboard
   )
+import NanoUI.Input (MouseButton (..), applyMouseButton)
 import NanoUI.Testing
   ( UiCursorKind (..)
   , anyAnimating
@@ -60,6 +57,7 @@ import NanoUI.Layout.Arena (arenaCount)
 import NanoUI.Rgfw.Context (applyRgfwTheme, newRgfwContext)
 import NanoUI.Rgfw.Debug
   ( RgfwDebugHost (..)
+  , RgfwFrameStats (..)
   , newRgfwDebugSampler
   , noteLoop
   , notePresent
@@ -92,21 +90,30 @@ defaultRgfwOptions =
     }
 
 mapRgfwKey :: Word32 -> Maybe Key
-mapRgfwKey k =
-  case k of
-    8   -> Just KeyBackspace
-    127 -> Just KeyDelete
-    10  -> Just KeyEnter
-    13  -> Just KeyEnter
-    27  -> Just KeyEscape
-    9   -> Just KeyTab
-    162 -> Just KeyUp
-    163 -> Just KeyDown
-    164 -> Just KeyLeft
-    165 -> Just KeyRight
-    168 -> Just KeyEnd
-    169 -> Just KeyHome
-    _   -> Nothing
+mapRgfwKey k
+  | k == R.rgfw_keyBackSpace = Just KeyBackspace
+  | k == R.rgfw_keyDelete = Just KeyDelete
+  | k == R.rgfw_keyReturn = Just KeyEnter
+  | k == R.rgfw_keyEscape = Just KeyEscape
+  | k == R.rgfw_keyTab = Just KeyTab
+  | k == R.rgfw_keyUp = Just KeyUp
+  | k == R.rgfw_keyDown = Just KeyDown
+  | k == R.rgfw_keyLeft = Just KeyLeft
+  | k == R.rgfw_keyRight = Just KeyRight
+  | k == R.rgfw_keyEnd = Just KeyEnd
+  | k == R.rgfw_keyHome = Just KeyHome
+  | otherwise = Nothing
+
+-- | Decode RGFW key modifier bits. Super (Cmd) counts as Ctrl.
+modsFromRgfw :: Word8 -> Modifiers
+modsFromRgfw m =
+  Modifiers
+    { modShift = has R.rgfw_modShift
+    , modCtrl = has R.rgfw_modControl || has R.rgfw_modSuper
+    , modAlt = has R.rgfw_modAlt
+    }
+  where
+    has bit = m .&. bit /= 0
 
 mapRgfwCursor :: UiCursorKind -> Word8
 mapRgfwCursor kind = case kind of
@@ -120,20 +127,20 @@ mapRgfwCursor kind = case kind of
   UiCursorNwseResize -> R.rgfw_mouseResizeNWSE
   UiCursorNeswResize -> R.rgfw_mouseResizeNESW
 
-runRgfwSession :: RgfwOptions -> NanoUI () -> IO ()
-runRgfwSession opts app = runRgfwSessionReduce opts (\() m -> m) () (\_ -> app)
+runRgfwApp :: RgfwOptions -> NanoUI () -> IO ()
+runRgfwApp opts app = runRgfwAppReduce opts (\() m -> m) () (\_ -> app)
 
-runRgfwSessionReduce ::
+runRgfwAppReduce ::
   (Typeable msg, Eq model) =>
   RgfwOptions ->
   (msg -> model -> model) ->
   model ->
   (model -> NanoUI ()) ->
   IO ()
-runRgfwSessionReduce opts =
-  runRgfwSessionReduceCustom opts (\_ -> (optTheme opts, optScale opts))
+runRgfwAppReduce opts =
+  runRgfwAppReduceCustom opts (\_ -> (optTheme opts, optScale opts))
 
-runRgfwSessionReduceCustom ::
+runRgfwAppReduceCustom ::
   (Typeable msg, Eq model) =>
   RgfwOptions ->
   (model -> (RgfwTheme, Float)) ->
@@ -141,7 +148,7 @@ runRgfwSessionReduceCustom ::
   model ->
   (model -> NanoUI ()) ->
   IO ()
-runRgfwSessionReduceCustom opts getThemeAndScale updateModel initialModel view = inBoundThread $ do
+runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inBoundThread $ do
   let flags = if optCenter opts then R.rgfw_windowCenter else 0
   bracket
     (R.createWindowGL (optTitle opts) 0 0 (optWidth opts) (optHeight opts) flags 3 2)
@@ -177,25 +184,28 @@ runRgfwSessionReduceCustom opts getThemeAndScale updateModel initialModel view =
       modelRef <- newIORef initialModel
       scaleRef <- newIORef initScale
       winSizeRef <- newIORef (initPhysW, initPhysH)
-
-      clipRef <- newIORef ("" :: T.Text)
-      let getClip = do
-            t <- readIORef clipRef
-            pure (if T.null t then Nothing else Just t)
-          setClip t = do
-            writeIORef clipRef t
-            pure True
+      cursorRef <- newIORef UiCursorDefault
 
       ctx0 <- newRgfwContext initTheme
-      let ctx = withClipboard ctx0 getClip setClip
+      let ctx = withClipboard ctx0 (fmap T.pack <$> R.readClipboardText) (R.writeClipboardText . T.unpack)
       debugSampler <- newRgfwDebugSampler
       setHost ctx (RgfwDebugHost debugSampler)
       let font = getCozetteFont
-
-      let initInp =
+          initInp =
             emptyInput
               { inputWindowSize = Size (fromIntegral initLogW) (fromIntegral initLogH)
               }
+          -- Set the pointer shape only when the wanted kind changes.
+          syncCursor c inp = do
+            want <- uiCursorKind c inp
+            cur <- readIORef cursorRef
+            when (want /= cur) $ do
+              writeIORef cursorRef want
+              let icon = mapRgfwCursor want
+              void $
+                if icon == R.rgfw_mouseArrow
+                  then R.setMouseDefault win
+                  else R.setMouseStandard win icon
 
       bracket newGlRenderer freeGlRenderer $ \renderer -> R.withEventBuffer $ \evPtr -> do
         let !animateTimeout = max 1 (floor (refreshSec * 1000) - 2) :: Int
@@ -210,6 +220,8 @@ runRgfwSessionReduceCustom opts getThemeAndScale updateModel initialModel view =
               writeIORef modelRef newModel
               tUiEnd <- getMonotonicTime
               let !uiMs = (tUiEnd - tUiStart) * 1000.0
+              -- The core loop syncs the cursor only on skipped frames.
+              syncCursor c curInp
 
               tRenderStart <- getMonotonicTime
               curMonScale <- readIORef monScaleRef
@@ -220,28 +232,21 @@ runRgfwSessionReduceCustom opts getThemeAndScale updateModel initialModel view =
               tRenderEnd <- getMonotonicTime
               let !renderMs = (tRenderEnd - tRenderStart) * 1000.0
 
-              tBlitStart <- getMonotonicTime
+              tSwapStart <- getMonotonicTime
               R.swapBuffersGL win
-              tBlitEnd <- getMonotonicTime
-              let !blitMs = (tBlitEnd - tBlitStart) * 1000.0
-                  !frameMs = (tBlitEnd - tUiStart) * 1000.0
+              tSwapEnd <- getMonotonicTime
+              let !swapMs = (tSwapEnd - tSwapStart) * 1000.0
+                  !frameMs = (tSwapEnd - tUiStart) * 1000.0
 
-              let Size lw lh = inputWindowSize curInp
-                  !na = ctxNodeArena c
-              count <- arenaCount na
-              notePresent
-                debugSampler
-                uiMs
-                renderMs
-                blitMs
-                frameMs
-                count
-                lw
-                lh
-                pw
-                ph
-                curScale
-                curMonScale
+              nodes <- arenaCount (ctxNodeArena c)
+              notePresent debugSampler uiMs renderMs swapMs frameMs drawData
+                RgfwFrameStats
+                  { fsNodes = nodes
+                  , fsPhysW = pw
+                  , fsPhysH = ph
+                  , fsScale = curScale
+                  , fsMonScale = curMonScale
+                  }
 
               -- Single-pass full redraws with no vsync: pace frames onto the
               -- refresh period rather than a fixed 8.3 ms spin. The waiter
@@ -298,13 +303,8 @@ runRgfwSessionReduceCustom opts getThemeAndScale updateModel initialModel view =
                     shouldRedrawFrame c prevInp inpSynced wasAnim False False
                 , sdDraw          = \c curInp _ -> drawOne c curInp
                 , sdSkip          = \_ _ -> pure ()
-                , sdOnCursor      = \c curInp -> do
-                    curKind <- uiCursorKind c curInp
-                    let cursorIcon = mapRgfwCursor curKind
-                    if cursorIcon == R.rgfw_mouseArrow
-                      then void (R.setMouseDefault win)
-                      else void (R.setMouseStandard win cursorIcon)
-                , sdNoteLoop      = \_ -> noteLoop debugSampler
+                , sdOnCursor      = syncCursor
+                , sdNoteLoop      = noteLoop debugSampler
                 , sdShouldQuit    = \_ -> False
                 , sdClickDistance = 5.0
                 , sdClickTime     = 0.4
@@ -316,91 +316,101 @@ runRgfwSessionReduceCustom opts getThemeAndScale updateModel initialModel view =
         clearDirty ctx
         runSessionLoop drv ctx inpStart
 
+-- | An RGFW event translated for the input fold.
 data RgfwEvent
   = RgfwEvClose
-  | RgfwEvResize !Int !Int
-  | RgfwEvScale !Float
+  | RgfwEvResize -- ^ window size or monitor scale changed (read back at sync)
   | RgfwEvMotion !Float !Float
   | RgfwEvButton !Word8 !Bool
   | RgfwEvScroll !Float !Float
-  | RgfwEvKeyChar !Char
+  | RgfwEvChar !Char !Bool -- ^ typed character; True when a Ctrl chord typed it
   | RgfwEvKeyPress !Word32 !Word8
-  | RgfwEvKeyRelease !Word32 !Word8
+  | RgfwEvKeyRelease !Word8
 
+-- | Drain the RGFW queue, recording size and scale changes for the next sync.
 pollRgfwEvents :: R.Window -> Ptr R.RGFW_event -> IORef Float -> IORef Float -> IORef (Int, Int) -> IO [RgfwEvent]
 pollRgfwEvents win evPtr scaleRef monScaleRef winSizeRef = do
-  s <- readIORef scaleRef
-  go s []
+  raw <- drain []
+  scale <- readIORef scaleRef
+  pure (decodeRgfwEvents scale raw)
   where
-    go s acc = do
+    drain acc = do
       ev <- R.pollEvent win evPtr
       case ev of
         R.EventNone -> pure (reverse acc)
-        R.EventWindowClose -> go s (RgfwEvClose : acc)
         R.EventWindowResize nw nh -> do
           writeIORef winSizeRef (nw, nh)
-          go s (RgfwEvResize nw nh : acc)
+          drain (ev : acc)
         R.EventScaleUpdate sx _ -> do
-          let !validScale = if sx > 0 then sx else 1
-          writeIORef monScaleRef validScale
-          go s (RgfwEvScale validScale : acc)
-        R.EventMouseMotion mx my ->
-          go s (RgfwEvMotion (fromIntegral mx / s) (fromIntegral my / s) : acc)
-        R.EventMouseButton btn down -> go s (RgfwEvButton btn down : acc)
-        R.EventMouseScroll dx dy -> go s (RgfwEvScroll dx dy : acc)
-        R.EventKeyChar ch -> go s (RgfwEvKeyChar ch : acc)
-        R.EventKeyPress k m -> go s (RgfwEvKeyPress k m : acc)
-        R.EventKeyRelease k m -> go s (RgfwEvKeyRelease k m : acc)
-        _ -> go s acc
+          writeIORef monScaleRef (if sx > 0 then sx else 1)
+          drain (ev : acc)
+        _ -> drain (ev : acc)
+
+-- | What the previous event typed. One keystroke can queue both a key-char
+-- and a Ctrl+letter key-press event, in either order (X11 queues the char
+-- first), and must type its letter once.
+data Typed = TypedNothing | TypedByChar !Char | TypedByChord !Char
+  deriving (Eq)
+
+-- | Translate a batch of raw events in queue order. Pointer positions are
+-- divided by the logical scale. A Ctrl+letter press types its letter unless
+-- the adjacent key-char event of the same keystroke already did, and a
+-- key-char event right after such a press is dropped.
+decodeRgfwEvents :: Float -> [R.Event] -> [RgfwEvent]
+decodeRgfwEvents scale = go TypedNothing
+  where
+    go _ [] = []
+    go typed (ev : rest) = case ev of
+      R.EventKeyPress k m
+        | modCtrl (modsFromRgfw m) && k >= R.rgfw_keyA && k <= R.rgfw_keyZ ->
+            let c = chr (fromIntegral k)
+             in RgfwEvKeyPress k m
+                  : if typed == TypedByChar c
+                      then go TypedNothing rest
+                      else RgfwEvChar c True : go (TypedByChord c) rest
+      -- Control codes \x01..\x1a are Ctrl+letter chords; backspace and delete
+      -- are keys, not text.
+      R.EventKeyChar ch
+        | ch /= '\b' && ch /= '\DEL' && (isPrint ch || chord) ->
+            let c = if chord then chr (ord ch + 96) else ch
+             in if typed == TypedByChord c
+                  then go TypedNothing rest
+                  else RgfwEvChar c chord : go (TypedByChar c) rest
+        where
+          chord = ch >= '\x01' && ch <= '\x1a'
+      _ -> maybe id (:) (untyped ev) (go TypedNothing rest)
+    untyped ev = case ev of
+      R.EventWindowClose -> Just RgfwEvClose
+      R.EventWindowResize _ _ -> Just RgfwEvResize
+      R.EventScaleUpdate _ _ -> Just RgfwEvResize
+      R.EventMouseMotion x y -> Just (RgfwEvMotion (fromIntegral x / scale) (fromIntegral y / scale))
+      R.EventMouseButton btn down -> Just (RgfwEvButton btn down)
+      R.EventMouseScroll dx dy -> Just (RgfwEvScroll dx dy)
+      R.EventKeyPress k m -> Just (RgfwEvKeyPress k m)
+      R.EventKeyRelease _ m -> Just (RgfwEvKeyRelease m)
+      _ -> Nothing
 
 applyRgfwEvent :: Input -> RgfwEvent -> Input
 applyRgfwEvent inp ev = case ev of
   RgfwEvClose -> inp
-  RgfwEvResize _ _ -> inp
-  RgfwEvScale _ -> inp
+  RgfwEvResize -> inp
   RgfwEvMotion x y -> inp {inputMousePos = V2 x y}
-  RgfwEvButton btn isDown ->
-    if btn == R.rgfw_mouseLeft
-      then let wasDown = inputMouseDown inp
-            in inp {inputMouseDown = isDown, inputMousePressed = isDown && not wasDown, inputMouseReleased = not isDown && wasDown}
-      else if btn == R.rgfw_mouseRight
-        then let wasDown = inputMouseRightDown inp
-              in inp {inputMouseRightDown = isDown, inputMouseRightPressed = isDown && not wasDown, inputMouseRightReleased = not isDown && wasDown}
-        else inp
+  RgfwEvButton btn down
+    | btn == R.rgfw_mouseLeft -> applyMouseButton MouseLeft down inp
+    | btn == R.rgfw_mouseRight -> applyMouseButton MouseRight down inp
+    | otherwise -> inp
   RgfwEvScroll dx dy -> inp {inputScroll = V2 dx dy}
-  RgfwEvKeyChar ch ->
-    let isCtrl = ch >= '\x01' && ch <= '\x1a'
-        eff = if isCtrl then chr (ord ch + 96) else ch
-     in if (isPrint ch || isCtrl) && ch /= '\177' && ch /= '\b'
-          then let cur = inputChars inp
-                   already = not (T.null cur) && T.last cur == eff
-                   curMods = inputModifiers inp
-                   mods = if isCtrl then curMods {modCtrl = True} else curMods
-                in if already
-                     then inp {inputModifiers = mods}
-                     else inp {inputChars = T.snoc cur eff, inputModifiers = mods}
-          else inp
+  RgfwEvChar c chord ->
+    inp
+      { inputChars = T.snoc (inputChars inp) c
+      , inputModifiers = if chord then (inputModifiers inp) {modCtrl = True} else inputModifiers inp
+      }
   RgfwEvKeyPress k m ->
-    let shift = (m .&. 16) /= 0
-        ctrl  = (m .&. 4) /= 0 || (m .&. 32) /= 0
-        alt   = (m .&. 8) /= 0
-        mods  = Modifiers shift ctrl alt
-        curKeys = inputKeys inp
-        newKeys = case mapRgfwKey k of
-          Just mk -> V.snoc curKeys mk
-          Nothing -> curKeys
-        curChars = inputChars inp
-        newChars =
-          if ctrl && ((k >= 65 && k <= 90) || (k >= 97 && k <= 122))
-            then let !c = toLower (chr (fromIntegral k))
-                  in if not (T.null curChars) && T.last curChars == c then curChars else T.snoc curChars c
-            else curChars
-     in inp {inputKeys = newKeys, inputChars = newChars, inputModifiers = mods}
-  RgfwEvKeyRelease _k m ->
-    let shift = (m .&. 16) /= 0
-        ctrl  = (m .&. 4) /= 0 || (m .&. 32) /= 0
-        alt   = (m .&. 8) /= 0
-     in inp {inputModifiers = Modifiers shift ctrl alt}
+    inp
+      { inputKeys = maybe id appendInputKey (mapRgfwKey k) (inputKeys inp)
+      , inputModifiers = modsFromRgfw m
+      }
+  RgfwEvKeyRelease m -> inp {inputModifiers = modsFromRgfw m}
 
 isRgfwButtonEdge :: RgfwEvent -> Bool
 isRgfwButtonEdge (RgfwEvButton {}) = True

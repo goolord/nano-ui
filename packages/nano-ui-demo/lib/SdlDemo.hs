@@ -82,6 +82,7 @@ import qualified Data.Text.Read as T.Read
 import qualified Data.Vector as V
 import qualified SdlSelftest
 
+import DemoApp (useFileDialog)
 import DemoData
   ( DemoPerson (..)
   , colPeople
@@ -104,7 +105,8 @@ main = do
   if "--selftest" `elem` args
     then SdlSelftest.selftest ("--continuous" `elem` args) demoImages demoUi
     else do
-      let cfg = parseArgs args
+      let (cfgUpdates, _, _) = getOpt Permute options args
+          cfg = foldl' (flip id) defaultDemoConfig cfgUpdates
       if cfgHelp cfg
         then putStr (usageInfo "Usage: nano-ui-sdl-demo [OPTIONS]" options)
         else do
@@ -315,7 +317,7 @@ demoUi = do
               muted "Live widget values"
               sep
               let accent = fromMaybe demoAccent (colorPickerFromHex accentHex)
-              kv "Feature" (onOff checked)
+              kv "Feature" (if checked then "on" else "off")
               kv "Volume" vol
               kv "Quality" quality
               rowWith (tight . gap gapInline . alignMid . fillW) $ do
@@ -335,7 +337,7 @@ demoUi = do
               kv "Open file" (orDash openPath)
               kv "Save file" (orDash savePath)
               kv "Folder" (orDash folderPath)
-              kv "Dropped" (orDash (T.take 80 (firstDropLine dropLog)))
+              kv "Dropped" (orDash (T.take 80 (fromMaybe "" (listToMaybe (T.lines dropLog)))))
               sep
               muted "Edit a control to see its value here."
               muted "Esc closes About, then quits."
@@ -402,7 +404,7 @@ demoUi = do
                   menuItemDisabled "Disabled Option"
               sep
               -- File dialogs: ask for a modal dialog handle, store it, and poll
-              -- it every frame via useFileDialog (defined below).
+              -- it every frame via useFileDialog.
               heading "File Dialogs"
               rowWith (tight . gap gapInline . fillW) $ do
                 whenM (button "Open File…") $ do
@@ -434,11 +436,9 @@ demoUi = do
                       sep
                       void $ labelEx (tight . fontMono . fillW $ defaultLayout) dropLog
               onDrop dropTgt $ do
-                let keepFront n t = if T.length t <= n then t else T.take (n - 1) t <> "…"
-                    keepEnd n t = if T.length t <= n then t else "…" <> T.takeEnd (n - 1) t
-                    droppedLines =
-                      [ "file:  " <> keepEnd 60 f | f <- dropFiles dropTgt ]
-                        ++ [ "text:  " <> keepFront 60 t | t <- dropTexts dropTgt ]
+                let droppedLines =
+                      [ "file:  " <> (if T.length f <= 60 then f else "…" <> T.takeEnd 59 f) | f <- dropFiles dropTgt ]
+                        ++ [ "text:  " <> (if T.length t <= 60 then t else T.take 59 t <> "…") | t <- dropTexts dropTgt ]
                 setDropLog (if null droppedLines then dropLog else T.intercalate "\n" droppedLines)
               when (dropHovered dropTgt && not dropHovering) (setDropHovering True)
               when (not (dropHovered dropTgt) && dropHovering) (setDropHovering False)
@@ -550,14 +550,14 @@ demoUi = do
               -- (useTableSort) and mirror changes back into it.
               tableResp <-
                 tableCfg
-                  demoTableCfg
+                  defaultTableCfg
                   (tight . fillW . fixedH 280 $ defaultLayout {layoutGap = 0})
                   "people"
                   colPeople
                   demoPeople
                   tableSortVal
               let nextSort = tableSort tableResp
-              when (tableRespChanged tableResp) (setTableSort nextSort)
+              when (respChanged tableResp) (setTableSort nextSort)
               sep
               kv "Sorted by" (tableColumnLabel nextSort)
               kv "Order" (tableSortDirText nextSort)
@@ -651,32 +651,9 @@ demoField caption widget =
     void $ labelWith (tight . fontMuted . fillW) caption
     widget
 
--- | Poll a pending dialog handle; on completion clear it and hand the chosen
--- paths to the caller. Anything other than 'FileDialogPending' dismisses the
--- handle, so each result is consumed exactly once.
-useFileDialog ::
-  Maybe FileDialogId ->
-  (Maybe FileDialogId -> NanoUI ()) ->
-  ([FilePath] -> NanoUI ()) ->
-  NanoUI ()
-useFileDialog mdid clear onPaths =
-  for_ mdid $ \did ->
-    pollFileDialogUi did >>= \case
-      FileDialogPending -> pure ()
-      FileDialogSelected paths -> onPaths paths >> clear Nothing
-      _done -> clear Nothing
-
-onOff :: Bool -> T.Text
-onOff True = "on"
-onOff False = "off"
-
 -- | Dashed-out empty values in the State readout.
 orDash :: T.Text -> T.Text
 orDash s = if T.null s then "-" else s
-
--- | First line of a multi-line log, for compact summary rows.
-firstDropLine :: T.Text -> T.Text
-firstDropLine = maybe "" id . listToMaybe . T.lines
 
 -- | Image tile in the Graphics tab: the caption is muted under the sprite.
 thumb :: ImageId -> T.Text -> NanoUI ()
@@ -766,9 +743,6 @@ colorHighlights =
 -- §6  List & Table demo data
 ------------------------------------------------------------------------------
 
-demoTableCfg :: TableCfg
-demoTableCfg = defaultTableCfg
-
 -- | Case-folded haystack used to filter 'demoPeople'.
 personSearchText :: DemoPerson -> T.Text
 personSearchText p =
@@ -848,9 +822,6 @@ demoPaneTitle pid maximized =
     <> T.pack (show pid)
     <> if maximized then "  (maximized)" else ""
 
-demoPaneBlurb :: Word64 -> T.Text
-demoPaneBlurb pid = "Contents of " <> T.pack (show pid) <> ". Drag the pane to move or split it."
-
 -- | The header is just the pane's own content, so it is entirely optional:
 -- 'showHeader' 'False' drops it and the pane becomes a bare canvas body. The
 -- whole pane is still a drag handle either way ('pvDraggable'), so a headerless
@@ -873,7 +844,7 @@ demoPaneView showHeader pid pctx = do
   columnWith (tight . gap 6 . fillW) $ do
     when showHeader (demoPaneHeader pid maximized pctx)
     box (fillW defaultLayout) demoAccent
-    void $ muted (demoPaneBlurb pid)
+    void $ muted ("Contents of " <> T.pack (show pid) <> ". Drag the pane to move or split it.")
   pure
     PaneView
       { pvTitle = demoPaneTitle pid maximized
@@ -933,7 +904,7 @@ debugBody s = do
     case cached of
       Just (DemoDebugRows previous rows) | previous == s -> pure rows
       _ -> do
-        let rows = (frameRows s, drawRows s, displayRows s, rtsRows s)
+        let rows = (frameRows s, drawRows s, displayRows s, smallArrayFromList (formatCoreRtsRows (dbgCore s)))
         setHost ctx (DemoDebugRows s rows)
         pure rows
   columnWith (tight . gap 4 . minW 300 . fillW) $ do
@@ -987,9 +958,6 @@ displayRows s =
           )
         , ("font", T.pack (dbgFontPath s))
         ]
-
-rtsRows :: SdlDebugSnapshot -> DebugRows
-rtsRows s = smallArrayFromList (formatCoreRtsRows (dbgCore s))
 
 ------------------------------------------------------------------------------
 -- §10  Image pixels (RGBA, row-major, 32x32)
@@ -1066,12 +1034,9 @@ readMaybeFloat s = case reads s of
   [(x, "")] -> Just x
   _ -> Nothing
 
-parseBool :: String -> Bool
-parseBool s = s `elem` ["true", "True", "1"]
-
 options :: [OptDescr (DemoConfig -> DemoConfig)]
 options =
-  [ Option ['v'] ["vsync"] (ReqArg (\s cfg -> cfg { cfgVsync = parseBool s }) "BOOL") "Enable or disable vsync (true/false, default: true)"
+  [ Option ['v'] ["vsync"] (ReqArg (\s cfg -> cfg { cfgVsync = s `elem` ["true", "True", "1"] }) "BOOL") "Enable or disable vsync (true/false, default: true)"
   , Option ['c'] ["continuous"] (NoArg (\cfg -> cfg { cfgContinuous = True, cfgVsync = False })) "Continuous unthrottled rendering (disables vsync)"
   , Option ['b'] ["benchmark"] (NoArg (\cfg -> cfg { cfgContinuous = True, cfgVsync = False })) "Benchmark mode: continuous rendering with vsync disabled"
   , Option ['f'] ["fps"] (NoArg (\cfg -> cfg { cfgContinuous = True, cfgVsync = False })) "Show uncapped FPS (continuous, vsync false)"
@@ -1082,8 +1047,3 @@ options =
   , Option ['H'] ["height"] (ReqArg (\s cfg -> cfg { cfgHeight = readMaybeFloat s }) "PX") "Initial window height in pixels (default: 800)"
   , Option ['h', '?'] ["help"] (NoArg (\cfg -> cfg { cfgHelp = True })) "Show help and command-line options"
   ]
-
-parseArgs :: [String] -> DemoConfig
-parseArgs argv =
-  case getOpt Permute options argv of
-    (fs, _, _) -> foldl' (flip id) defaultDemoConfig fs

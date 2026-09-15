@@ -25,6 +25,7 @@ import NanoUI.Style
   , gap
   , tight
   )
+import NanoUI.Types (clamp)
 import NanoUI.Widgets.Combinators (buttonStyled)
 import NanoUI.Widgets.Node (Response)
 
@@ -56,7 +57,7 @@ titleLabelLayoutFor barH =
     defaultLayout {layoutMinH = barH, layoutMaxH = barH}
 
 floatMinFor :: Float -> Float -> Float
-floatMinFor authored avail = max 1 (min authored avail)
+floatMinFor authored avail = clamp 1 avail authored
 
 {-# INLINE closeButton #-}
 closeButton :: (Ui :> es) => Eff es Response

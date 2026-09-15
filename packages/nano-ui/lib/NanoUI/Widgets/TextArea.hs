@@ -5,15 +5,16 @@ module NanoUI.Widgets.TextArea
     TextAreaState (..)
   , initTextAreaState
   , setTextAreaViewport
-  , KeyInput (..)
+  , TextAreaEvent (..)
   , Modifiers (..)
   , handleTextAreaEvent
-  , setTextAreaCursor
   , setTextAreaSelection
   , TextAreaLayout (..)
   , VisualLine (..)
   , computeTextAreaLayout
-    -- * Widget glue
+    -- * Widget
+  , textArea
+  , textAreaWith
   , textAreaLayout
   , processTextArea
   , loadTextAreaState
@@ -29,19 +30,22 @@ import Data.IORef (writeIORef)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.IntMap.Strict as IM
+import Effectful (Eff, type (:>))
 import NanoUI.Context
   ( Context (..)
   , getStore
   , intKey
   , markDirty
+  , registerFocusable
   , setStore
   , setTextInputDrag
   , setTextInputMenu
   )
+import NanoUI.Font (fmLineHeight)
 import NanoUI.Id (WidgetId)
 import NanoUI.Input
   ( Input (..)
-  , Key
+  , Key (..)
   , Modifiers (..)
   , foldInputKeys
   , inputChars
@@ -49,7 +53,8 @@ import NanoUI.Input
   , inputKeysNull
   , inputModifiers
   )
-import qualified NanoUI.Input as Inp
+import NanoUI.Layout.Arena (NodeType (..))
+import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO)
 import NanoUI.Store
   ( WidgetStore (..)
   , slotKey
@@ -58,15 +63,20 @@ import NanoUI.Store
   , slotTextAreaBuffer
   , slotTextAreaChanged
   , slotTextAreaCol
+  , slotTextAreaContentFont
   , slotTextAreaPrefCol
   , slotTextAreaRow
   , slotTextAreaScroll
   , slotTextAreaViewport
   )
-import NanoUI.Style (Layout (..), Sizing (..), defaultLayout)
-import NanoUI.Widgets.TextBuffer as TB
+import NanoUI.Style (FontStyle (..), FontVariant (..), FontWeight (..), Layout (..), Sizing (..), defaultLayout)
+import NanoUI.Types (clamp)
+import NanoUI.Widgets.Behavior (keyboardFocused)
+import NanoUI.Widgets.Node (Response, addWidget, setChanged)
+import qualified NanoUI.Widgets.TextBuffer as TB
 import NanoUI.Widgets.TextCommon
-  ( copyBufferText
+  ( MenuAction
+  , copyBufferText
   , cutBufferText
   , dispatchCtrlChar
   , dispatchMenuAction
@@ -74,19 +84,10 @@ import NanoUI.Widgets.TextCommon
   , pasteBufferText
   )
 
-data KeyInput
-  = KeyChar !Char
-  | KeyEnter
-  | KeyBackspace
-  | KeyDelete
-  | KeyLeft
-  | KeyRight
-  | KeyUp
-  | KeyDown
-  | KeyHome
-  | KeyEnd
-  | KeyPageUp
-  | KeyPageDown
+-- | One editor input: a typed character or a key.
+data TextAreaEvent
+  = TAChar !Char
+  | TAKey !Key
   deriving (Eq, Show)
 
 data TextAreaState = TextAreaState
@@ -128,13 +129,6 @@ clearSelection state =
   let cur = cursorOf state
    in state {selectionAnchor = cur, buffer = TB.withCursor cur (buffer state)}
 
-setTextAreaCursor :: Int -> Int -> TextAreaState -> TextAreaState
-setTextAreaCursor row col state =
-  let buf =
-        let b = TB.withCursor (TB.Cursor row col) (buffer state)
-         in b {TB.preferredCol = col}
-   in ensureCaretVisible (clearSelection state {buffer = buf})
-
 setTextAreaSelection :: TB.Cursor -> TB.Cursor -> TextAreaState -> TextAreaState
 setTextAreaSelection anchor cursor state =
   let buf =
@@ -165,61 +159,55 @@ insertWithSelection ch state =
         Just (lo, hi) -> TB.replaceRange (T.singleton ch) lo hi (buffer state)
    in ensureCaretVisible state {buffer = buf', selectionAnchor = TB.getCursor buf'}
 
-handleTextAreaEvent :: KeyInput -> Modifiers -> TextAreaState -> TextAreaState
-handleTextAreaEvent key mods state =
-  let shift = modShift mods
-      ctrl = modCtrl mods
-      alt = modAlt mods
-      n = pageLineCount state
-      state' = case (key, ctrl, alt) of
-        (KeyChar c, False, False) -> insertWithSelection c state
-        (KeyEnter, False, False) -> insertWithSelection '\n' state
-        (KeyBackspace, False, False) ->
-          case selectionRangeOf state of
-            Just _ -> deleteSelection state
-            Nothing -> moveCursor False TB.deletePrevChar state
-        (KeyBackspace, True, _) -> moveCursor shift TB.deletePrevWord state
-        (KeyBackspace, _, True) -> moveCursor shift TB.deletePrevWord state
-        (KeyDelete, False, False) ->
-          case selectionRangeOf state of
-            Just _ -> deleteSelection state
-            Nothing -> moveCursor False TB.deleteChar state
-        (KeyDelete, True, _) -> moveCursor shift TB.deleteNextWord state
-        (KeyLeft, False, False) -> moveCursor shift TB.moveLeft state
-        (KeyLeft, True, _) -> moveCursor shift TB.moveWordLeft state
-        (KeyRight, False, False) -> moveCursor shift TB.moveRight state
-        (KeyRight, True, _) -> moveCursor shift TB.moveWordRight state
-        (KeyUp, False, False) -> moveCursor shift TB.moveUp state
-        (KeyDown, False, False) -> moveCursor shift TB.moveDown state
-        (KeyHome, False, False) -> moveCursor shift TB.moveToBOL state
-        (KeyEnd, False, False) -> moveCursor shift TB.moveToEOL state
-        (KeyPageUp, False, False) -> moveCursor shift (applyN n TB.moveUp) state
-        (KeyPageDown, False, False) -> moveCursor shift (applyN n TB.moveDown) state
-        (KeyChar c, True, False)
-          | toLower c == 'k' || c == '\v' -> moveCursor shift TB.killToEOL state
-          | toLower c == 'u' || c == '\NAK' -> moveCursor shift TB.killToBOL state
-          | toLower c == 'a' || c == '\x01' -> selectAllTextArea state
-          | toLower c == 'e' || c == '\ENQ' -> moveCursor shift TB.moveToEOL state
-          | otherwise -> state
-        _ -> state
-   in ensureCaretVisible state'
+-- | Apply one typed character or key. Ctrl or Alt turns Backspace, Delete,
+-- Left and Right into word edits and motions; Ctrl+K/U/A/E kill to the end or
+-- start of the line, select all, and jump to the line end. Escape and Tab
+-- belong to the frame (menus, focus) and leave the editor untouched.
+handleTextAreaEvent :: TextAreaEvent -> Modifiers -> TextAreaState -> TextAreaState
+handleTextAreaEvent (TAKey KeyEscape) _ state = state
+handleTextAreaEvent (TAKey KeyTab) _ state = state
+handleTextAreaEvent event mods state =
+  ensureCaretVisible $ case event of
+    TAChar c
+      | not word -> insertWithSelection c state
+      | ctrl && not alt -> ctrlChar (toLower c) c
+      | otherwise -> state
+    TAKey key -> case key of
+      KeyEnter | not word -> insertWithSelection '\n' state
+      KeyBackspace
+        | word -> move TB.deletePrevWord
+        | otherwise -> deleteOr TB.deletePrevChar
+      KeyDelete
+        | word -> move TB.deleteNextWord
+        | otherwise -> deleteOr TB.deleteChar
+      KeyLeft -> move (if word then TB.moveWordLeft else TB.moveLeft)
+      KeyRight -> move (if word then TB.moveWordRight else TB.moveRight)
+      KeyUp | not word -> move TB.moveUp
+      KeyDown | not word -> move TB.moveDown
+      KeyHome | not word -> move TB.moveToBOL
+      KeyEnd | not word -> move TB.moveToEOL
+      _ -> state
+  where
+    shift = modShift mods
+    ctrl = modCtrl mods
+    alt = modAlt mods
+    word = ctrl || alt
+    move f = moveCursor shift f state
+    deleteOr f = case selectionRangeOf state of
+      Just _ -> deleteSelection state
+      Nothing -> moveCursor False f state
+    -- Ctrl letters may arrive as the letter or as its control code.
+    ctrlChar lower c
+      | lower == 'k' || c == '\v' = move TB.killToEOL
+      | lower == 'u' || c == '\NAK' = move TB.killToBOL
+      | lower == 'a' || c == '\x01' = selectAllTextArea state
+      | lower == 'e' || c == '\ENQ' = move TB.moveToEOL
+      | otherwise = state
 
 selectAllTextArea :: TextAreaState -> TextAreaState
 selectAllTextArea state =
   let end = TB.documentEnd (buffer state)
    in setTextAreaSelection (TB.Cursor 0 0) end state
-
-pageLineCount :: TextAreaState -> Int
-pageLineCount state =
-  let h = snd (viewportSize state)
-      lh = lineHeight state
-  in
-    if h <= 0 || lh <= 0
-      then 1
-      else max 1 (floor (h / lh))
-
-applyN :: Int -> (a -> a) -> a -> a
-applyN n f x = foldl' (\acc _ -> f acc) x [1 .. n]
 
 ensureCaretVisible :: TextAreaState -> TextAreaState
 ensureCaretVisible state =
@@ -236,10 +224,7 @@ ensureCaretVisible state =
         | caretY < sy = caretY
         | caretY + caretH > sy + vh = caretY + caretH - vh
         | otherwise = sy
-  in state {scrollOffset = (sx, clampDouble 0 maxSy sy')}
-
-clampDouble :: Double -> Double -> Double -> Double
-clampDouble lo hi x = max lo (min hi x)
+  in state {scrollOffset = (sx, clamp 0 maxSy sy')}
 
 data VisualLine = VisualLine
   { visualLineIndex :: !Int
@@ -283,7 +268,7 @@ computeTextAreaLayout measureWidth lineH state =
     }
 
 --------------------------------------------------------------------------------
--- Widget glue
+-- Widget
 --------------------------------------------------------------------------------
 
 textAreaLayout :: Layout
@@ -294,16 +279,89 @@ textAreaLayout =
     , layoutHeight = Fixed 140
     }
 
+-- | Caption-less multi-line text editor using the default 'textAreaLayout'.
+-- Pair it with a 'label' when a caption is wanted.
+textArea :: Ui :> es => Text -> Eff es (Response, Text)
+textArea = textAreaWith textAreaLayout
+
+-- | Caption-less multi-line text editor with a caller-supplied layout. Use this
+-- to make the editor grow before it is solved (for example @grow defaultLayout@
+-- to fill its parent).
+textAreaWith :: Ui :> es => Layout -> Text -> Eff es (Response, Text)
+textAreaWith layout initial = do
+  wid <- nextId
+  ctx <- askContext
+  uiIO $ registerFocusable ctx wid
+  inp <- askInput
+  store <- uiIO (getStore ctx)
+  let key = intKey wid
+      contentCacheKey = slotKey slotTextAreaContentFont key
+      changedSlotKey = slotKey slotTextAreaChanged key
+  when (not (IM.member key (storeText store)))
+    $ uiIO
+    -- Seed the scroll slot too: the wheel/drag paths write offsets through
+    -- setScrollOffset2D, which only updates the text area's slot once it
+    -- exists (otherwise the offset lands in legacy storage and is never read).
+    -- Seeding the text also orphans any cached buffer or content size for the
+    -- key, so neither can outlive its 'storeText'.
+    $ setStore ctx
+      store
+        { storeText = IM.insert key initial (storeText store)
+        , storePoint = IM.insert (slotKey slotTextAreaScroll key) (0, 0) (storePoint store)
+        , storeFloat = IM.delete contentCacheKey (storeFloat store)
+        , storeDyn = IM.delete (slotKey slotTextAreaBuffer key) (storeDyn store)
+        }
+  let current = IM.findWithDefault initial key (storeText store)
+      -- Set by menu actions (cut/paste through applyTextAreaMenuAction) whose
+      -- edits carry no keys or chars; folded into 'changed' so the caller
+      -- gets its respChanged pulse, then cleared in the state write below.
+      menuPulse = IM.member changedSlotKey (storeInt store)
+  isFocus <- keyboardFocused wid
+  (newText, stateChanged) <-
+    if isFocus
+      then do
+        editFm <-
+          if layoutFontSize layout <= 0
+            then pure (ctxFontMetrics ctx)
+            else fst <$> uiIO (ctxResolveFont ctx (layoutFontSize layout) WeightNormal FontStyleNormal FontRegular)
+        let oldState = loadTextAreaState store key initial
+            (vw, vh) = IM.findWithDefault (200, 96) (slotKey slotTextAreaViewport key) (storePoint store)
+        newState <- uiIO (processTextArea ctx inp (realToFrac vw) (realToFrac vh) (realToFrac (fmLineHeight editFm)) oldState)
+        let newText = TB.toText (buffer newState)
+            -- 'processTextArea' only edits text when this frame carried keys or
+            -- chars, so the O(document) 'TB.toText' compare is guarded by
+            -- that; idle focused frames stop at the cheap cursor/scroll checks.
+            hadInput = not (T.null (inputChars inp)) || not (inputKeysNull (inputKeys inp))
+            changed =
+              cursorOf newState /= cursorOf oldState
+                || selectionAnchor newState /= selectionAnchor oldState
+                || scrollOffset newState /= scrollOffset oldState
+                || menuPulse
+                || (hadInput && newText /= current)
+        -- Saving writes the new text and its buffer together; drop only the
+        -- content size measured for the old text, and the menu pulse.
+        when changed $
+          uiIO $ do
+            st <- saveTextAreaState key newState <$> getStore ctx
+            setStore ctx st
+              { storeInt = IM.delete changedSlotKey (storeInt st)
+              , storeFloat = IM.delete contentCacheKey (storeFloat st)
+              }
+        pure (newText, changed)
+      else pure (current, False)
+  resp <- addWidget wid NodeTextArea "" 0 layout
+  pure (setChanged stateChanged resp, newText)
+
 loadTextAreaState :: WidgetStore -> Int -> Text -> TextAreaState
 loadTextAreaState store key initial =
   let text = IM.findWithDefault initial key (storeText store)
       -- The buffer cache is written together with storeText by
       -- saveTextAreaState, so a present entry is always the buffer for the
       -- stored text; no (O(document)) re-comparison is needed.
-      cachedBuffer :: Maybe (T.Text, TB.TextBuffer) =
+      cachedBuffer :: Maybe TB.TextBuffer =
         IM.lookup (slotKey slotTextAreaBuffer key) (storeDyn store) >>= fromDynamic
       buf0 = case cachedBuffer of
-        Just (_, cached) -> cached
+        Just cached -> cached
         Nothing -> TB.fromText text
    in loadTextAreaStateWithBuffer store key text buf0
 
@@ -340,11 +398,10 @@ saveTextAreaState :: Int -> TextAreaState -> WidgetStore -> WidgetStore
 saveTextAreaState key state store =
   let TB.Cursor row col = TB.getCursor (buffer state)
       TB.Cursor anchorRow anchorCol = selectionAnchor state
-      flat = TB.toText (buffer state)
    in store
-        { storeText = IM.insert key flat (storeText store)
+        { storeText = IM.insert key (TB.toText (buffer state)) (storeText store)
         , storeDyn =
-            IM.insert (slotKey slotTextAreaBuffer key) (toDyn (flat, buffer state)) (storeDyn store)
+            IM.insert (slotKey slotTextAreaBuffer key) (toDyn (buffer state)) (storeDyn store)
         , storeInt =
             IM.insert (slotKey slotTextAreaRow key) row $
               IM.insert (slotKey slotTextAreaCol key) col $
@@ -377,13 +434,13 @@ textAreaPaste ctx state = do
       let cur = TB.getCursor buf'
       pure (ensureCaretVisible state {buffer = buf', selectionAnchor = cur})
 
-applyTextAreaMenuAction :: Context -> WidgetId -> Int -> IO ()
-applyTextAreaMenuAction ctx wid item = do
+applyTextAreaMenuAction :: Context -> WidgetId -> MenuAction -> IO ()
+applyTextAreaMenuAction ctx wid action = do
   store <- getStore ctx
   let key = intKey wid
       text = IM.findWithDefault "" key (storeText store)
       s0 = loadTextAreaState store key text
-  s1 <- dispatchMenuAction (textAreaCut ctx) (textAreaCopy ctx) (textAreaPaste ctx) selectAllTextArea item s0
+  s1 <- dispatchMenuAction (textAreaCut ctx) (textAreaCopy ctx) (textAreaPaste ctx) selectAllTextArea action s0
   -- The pulse flag signals the next text-area frame that its text changed
   -- outside Input, so the caller still gets a respChanged pulse. Gated on an
   -- actual text delta: selection-only actions (Select All, Copy) must not
@@ -410,15 +467,9 @@ processTextArea ctx inp vpW vpH lineH s0 = do
     if ctrl
       then T.foldlM' (handleCtrlChar ctx) s1 (inputChars inp)
       else pure s1
-  let filtered = T.filter (\ch -> not (isCtrlCombo ctrl ch) && isPrint ch) (inputChars inp)
-      s3 = T.foldl' (\s ch -> handleTextAreaEvent (KeyChar ch) mods s) s2 filtered
-  pure
-    ( foldInputKeys
-        ( \s k -> maybe s (\ki -> handleTextAreaEvent ki mods s) (mapKey k)
-        )
-        s3
-        (inputKeys inp)
-    )
+  let typed = T.filter (\ch -> not (isCtrlCombo ctrl ch) && isPrint ch) (inputChars inp)
+      s3 = T.foldl' (\s ch -> handleTextAreaEvent (TAChar ch) mods s) s2 typed
+  pure (foldInputKeys (\s k -> handleTextAreaEvent (TAKey k) mods s) s3 (inputKeys inp))
 
 handleCtrlChar :: Context -> TextAreaState -> Char -> IO TextAreaState
 handleCtrlChar ctx =
@@ -427,16 +478,3 @@ handleCtrlChar ctx =
     (textAreaCopy ctx)
     (textAreaCut ctx)
     (textAreaPaste ctx)
-
-mapKey :: Key -> Maybe KeyInput
-mapKey = \case
-  Inp.KeyBackspace -> Just KeyBackspace
-  Inp.KeyDelete -> Just KeyDelete
-  Inp.KeyEnter -> Just KeyEnter
-  Inp.KeyLeft -> Just KeyLeft
-  Inp.KeyRight -> Just KeyRight
-  Inp.KeyUp -> Just KeyUp
-  Inp.KeyDown -> Just KeyDown
-  Inp.KeyHome -> Just KeyHome
-  Inp.KeyEnd -> Just KeyEnd
-  _ -> Nothing

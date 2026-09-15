@@ -24,14 +24,11 @@ module NanoUI.Widgets.TextBuffer
   , moveDown
   , moveToBOL
   , moveToEOL
-  , moveToTop
   , moveToBottom
   , moveWordLeft
   , moveWordRight
 
     -- * Selection
-  , compareCursor
-  , cursorBefore
   , selectionRange
   , selectedText
   , deleteRange
@@ -56,12 +53,13 @@ import Data.Text.Zipper qualified as TZ
 import Data.Text.Zipper.Generic.Words qualified as TZW
 import NanoUI.Font (tabSentinelChar)
 
--- | Zero-indexed logical (row, column) position in the buffer.
+-- | Zero-indexed logical (row, column) position in the buffer. Fields are
+-- row then column, so the derived 'Ord' is document order.
 data Cursor = Cursor
   { cursorRow :: {-# UNPACK #-} !Int
   , cursorCol :: {-# UNPACK #-} !Int
   }
-  deriving (Eq, Show)
+  deriving (Eq, Ord, Show)
 
 -- | Document state backed by a 2D text zipper.
 data TextBuffer = TextBuffer
@@ -176,9 +174,6 @@ moveToBOL = withZipper TZ.gotoBOL
 moveToEOL :: TextBuffer -> TextBuffer
 moveToEOL = withZipper TZ.gotoEOL
 
-moveToTop :: TextBuffer -> TextBuffer
-moveToTop = withZipper TZ.gotoBOF
-
 moveToBottom :: TextBuffer -> TextBuffer
 moveToBottom = withZipper TZ.gotoEOF
 
@@ -223,18 +218,8 @@ killToEOL = withZipper TZ.killToEOL
 killToBOL :: TextBuffer -> TextBuffer
 killToBOL = withZipper TZ.killToBOL
 
-compareCursor :: Cursor -> Cursor -> Ordering
-compareCursor (Cursor r1 c1) (Cursor r2 c2) =
-  compare r1 r2 <> compare c1 c2
-
-cursorBefore :: Cursor -> Cursor -> Bool
-cursorBefore a b = compareCursor a b == LT
-
 selectionRange :: Cursor -> Cursor -> (Cursor, Cursor)
-selectionRange a b =
-  if cursorBefore a b
-    then (a, b)
-    else (b, a)
+selectionRange a b = (min a b, max a b)
 
 selectedText :: Cursor -> Cursor -> TextBuffer -> T.Text
 selectedText a b buf =

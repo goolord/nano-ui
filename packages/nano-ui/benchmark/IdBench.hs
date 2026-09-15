@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 module Main (main) where
 
 import Control.Monad (forM_, replicateM_, void, when)
@@ -13,7 +11,7 @@ import Test.Tasty.Bench
 benchInput :: Input
 benchInput = emptyInput {inputWindowSize = Size 100 100}
 
--- Match id-zero-alloc: a layout root is required or runFrame overflows.
+-- A layout root is required or runFrame overflows.
 idBurst :: NanoUI ()
 idBurst = column (burstNextIds 4096)
 

@@ -1,0 +1,325 @@
+{-# LANGUAGE DataKinds #-}
+
+-- | Multi-line text areas: content painting (lines, selection, caret and
+-- scrollbars) and mouse selection.
+module NanoUI.Frame.TextArea
+  ( TextAreaHit (..)
+  , textAreaHitForWidget
+  , drawTextAreaContentWith
+  , finalizeTextAreaMouse
+  , collapseTextAreaSelection
+  ) where
+
+import Control.Monad (forM_, unless, when)
+import Data.IORef (readIORef)
+import qualified Data.IntMap.Strict as IM
+import Data.Maybe (catMaybes, isJust)
+import Data.Text (Text)
+import qualified Data.Text as T
+import qualified Data.Vector as V
+import NanoUI.Context
+  ( Context (..)
+  , TextInputDrag (..)
+  , WidgetStore (..)
+  , getStore
+  , getTextInputDrag
+  , intKey
+  , markDirty
+  , setStore
+  , setTextInputDrag
+  , slotKey
+  )
+import NanoUI.Draw (DrawArena, getDrawSnapScale, pushText, withClip)
+import NanoUI.Font (FontMetrics, lineWidthIO, prepareFontMetrics, textIndexAtX, widgetContentInset)
+import NanoUI.Frame.Chrome (paintScrollBarLayout, textInputFocused)
+import NanoUI.Frame.Hit (findNodeByWidgetId)
+import NanoUI.Frame.TextArea.Content
+  ( ensureTextAreaBuffer
+  , isMouseOnTextAreaScrollBarAt
+  , resolveTextAreaFont
+  , textAreaContentMetrics
+  )
+import NanoUI.Frame.TextArea.Geometry
+import NanoUI.Frame.TextInput (drawTextCaret, drawTextSelectionLine, normalizeTextFieldClicks)
+import NanoUI.Id (WidgetId)
+import NanoUI.Input
+  ( Input (..)
+  , inputMouseClicks
+  , inputMouseDown
+  , inputMousePos
+  , inputMousePressed
+  , inputMouseReleased
+  )
+import NanoUI.Layout.Arena (NodeIdx, NodeType (NodeTextArea), getNodeType, getRect, getWidgetId)
+import NanoUI.Store (slotTextAreaCol, slotTextAreaRow, slotTextAreaScroll, slotTextAreaViewport)
+import NanoUI.Style (Style (..), Theme, scrollBarThumbColor, scrollBarTrackColor, themeAccent, themePanel)
+import NanoUI.Types (Rect (..), V2 (..), onGrid, rectContains)
+import NanoUI.Widgets.TextArea (TextAreaState (..), loadTextAreaState, saveTextAreaState)
+import qualified NanoUI.Widgets.TextArea as TA
+import qualified NanoUI.Widgets.TextBuffer as TB
+import NanoUI.Widgets.TextCommon (selectionBgColor, selectionCaretGeom, textWordBounds)
+
+data TextAreaHit = TextAreaHit
+  { tahNodeIdx :: !NodeIdx
+  , tahFieldRect :: !Rect
+  , tahContentX :: !Float
+  , tahLineH :: !Float
+  , tahWidgetX :: !Float
+  , tahWidgetY :: !Float
+  , tahWidgetW :: !Float
+  , tahWidgetH :: !Float
+  }
+
+-- | Editor state of the text area at @idx@, its viewport set from the field
+-- clip.
+loadTextAreaStateAt :: Context -> NodeIdx -> FontMetrics -> Float -> Float -> Float -> Float -> IO TA.TextAreaState
+loadTextAreaStateAt ctx idx fm x y w h = do
+  wid <- getWidgetId (ctxNodeArena ctx) idx
+  let key = intKey wid
+  store <- getStore ctx
+  let initial = IM.findWithDefault "" key (storeText store)
+  buf <- ensureTextAreaBuffer ctx key initial
+  let geom = textAreaGeom fm x y w h
+      Rect _ _ vpW vpH = textAreaFieldClip geom fm
+      state0 = TA.loadTextAreaStateWithBuffer store key initial buf
+  pure (TA.setTextAreaViewport (realToFrac vpW, realToFrac vpH) (realToFrac (tagLineHeight geom)) state0)
+
+loadHitState :: Context -> TextAreaHit -> IO TA.TextAreaState
+loadHitState ctx hit = do
+  fm <- resolveTextAreaFont ctx (tahNodeIdx hit)
+  loadTextAreaStateAt ctx (tahNodeIdx hit) fm (tahWidgetX hit) (tahWidgetY hit) (tahWidgetW hit) (tahWidgetH hit)
+
+-- | Record the text viewport and clamp the stored scroll to the content.
+syncTextAreaViewport :: Context -> NodeIdx -> FontMetrics -> Float -> Float -> Float -> Float -> IO ()
+syncTextAreaViewport ctx idx fm x y w h = do
+  wid <- getWidgetId (ctxNodeArena ctx) idx
+  (contentW, contentH) <- textAreaContentMetrics ctx idx
+  -- Read after the metrics query: a cold query caches into the store.
+  store <- getStore ctx
+  let key = intKey wid
+      Rect _ _ clipW clipH = textAreaFieldClip (textAreaGeom fm x y w h) fm
+      bars = textAreaBars fm (Rect x y w h) contentW contentH
+      (sx, sy) = IM.findWithDefault (0, 0) (slotKey slotTextAreaScroll key) (storePoint store)
+      sx' = max 0 (min (max 0 (contentW - tabViewW bars)) sx)
+      sy' = max 0 (min (max 0 (contentH - tabViewH bars)) sy)
+      pts0 = IM.insert (slotKey slotTextAreaViewport key) (clipW, clipH) (storePoint store)
+      pts1
+        | sx' /= sx || sy' /= sy = IM.insert (slotKey slotTextAreaScroll key) (sx', sy') pts0
+        | otherwise = pts0
+  setStore ctx (store {storePoint = pts1})
+
+-- | Snap a text-area scroll offset to the device pixel grid, the same grid
+-- 'pushText' snaps to, so line pens and hit-testing stay in lockstep (and in
+-- agreement with each other) while the text area scrolls. The raw 'Double'
+-- offset keeps sub-pixel wheel deltas; only the applied value is quantized.
+textAreaSnap :: DrawArena -> IO (Float -> Float)
+textAreaSnap da = onGrid <$> getDrawSnapScale da
+
+-- Share the indexed document with content/caret painting. Selecting many
+-- lines must not traverse the document prefix again for each selected row.
+drawTextAreaSelectionLines :: DrawArena -> V.Vector Text -> TA.TextAreaState -> TextAreaGeom -> FontMetrics -> Theme -> Style -> IO ()
+drawTextAreaSelectionLines da lineTexts state geom fm theme style = do
+  snap <- textAreaSnap da
+  let anchor = TA.selectionAnchor state
+      cursor = TB.getCursor (TA.buffer state)
+  when (anchor /= cursor) $ do
+    let (lo, hi) = TB.selectionRange anchor cursor
+        field = tagFieldRect geom
+        lineH = tagLineHeight geom
+        (ix, iy) = widgetContentInset fm
+        (scrollX, scrollY) = TA.scrollOffset state
+        scrollXf = snap (realToFrac scrollX)
+        scrollYf = snap (realToFrac scrollY)
+        contentTop = rectY' field + iy
+        selBg = selectionBgColor (themeAccent theme) (styleBg style)
+        loRow = TB.cursorRow lo
+        hiRow = TB.cursorRow hi
+    forM_ [loRow .. hiRow] $ \row -> do
+      let line = if row >= 0 && row < V.length lineTexts then lineTexts V.! row else ""
+          clampCol c = max 0 (min (T.length line) c)
+          startCol = clampCol (if row == loRow then TB.cursorCol lo else 0)
+          endCol = clampCol (if row == hiRow then TB.cursorCol hi else T.length line)
+      when (startCol < endCol) $ do
+        wLo <- lineWidthIO fm (T.take startCol line)
+        wHi <- lineWidthIO fm (T.take endCol line)
+        let ly = contentTop + fromIntegral row * lineH - scrollYf
+            selX = rectX' field + ix + wLo - scrollXf
+        drawTextSelectionLine da selX ly (wHi - wLo) (max 4 lineH) selBg
+  where
+    rectX' (Rect rx _ _ _) = rx
+    rectY' (Rect _ ry _ _) = ry
+
+-- | Text-area content with the node font already resolved, so a paint pass
+-- that also needs it (for the field frame) resolves it once.
+drawTextAreaContentWith :: DrawArena -> Context -> FontMetrics -> NodeIdx -> Float -> Float -> Float -> Float -> Style -> IO ()
+drawTextAreaContentWith da ctx fm idx x y w h style = do
+  snap <- textAreaSnap da
+  syncTextAreaViewport ctx idx fm x y w h
+  focus <- textInputFocused ctx idx
+  theme <- readIORef (ctxTheme ctx)
+  let geom = textAreaGeom fm x y w h
+      field@(Rect _ fieldTop _ fieldH) = tagFieldRect geom
+      lineH = tagLineHeight geom
+      Rect clipX contentTop clipW clipH = textAreaFieldClip geom fm
+      fg = styleFg style
+  state <- loadTextAreaStateAt ctx idx fm x y w h
+  (contentW, contentH) <- textAreaContentMetrics ctx idx
+  let buf = TA.buffer state
+      lineTexts = V.fromList (TB.toLines buf)
+      (scrollX, scrollY) = TA.scrollOffset state
+      scrollXf = snap (realToFrac scrollX)
+      scrollYf = snap (realToFrac scrollY)
+      contentX = clipX - scrollXf
+      layouts = textAreaScrollBarLayouts fm field contentW contentH scrollXf scrollYf
+      (laneW, laneH) = textAreaBarLanes fm
+      textClip =
+        Rect
+          clipX
+          contentTop
+          (if isJust (tasbVertical layouts) then max 0 (clipW - laneW) else clipW)
+          (if isJust (tasbHorizontal layouts) then max 0 (clipH - laneH) else clipH)
+  withClip da textClip $ do
+    when focus $
+      drawTextAreaSelectionLines da lineTexts state geom fm theme style
+    V.imapM_
+      ( \row line -> do
+          let ly = contentTop + fromIntegral row * lineH - scrollYf
+          when (ly + lineH >= fieldTop && ly <= fieldTop + fieldH) $
+            unless (T.null line) $
+              pushText da fm contentX ly line fg
+      )
+      lineTexts
+    when focus $ do
+      let TB.Cursor row col = TB.getCursor buf
+          currentLine = if row >= 0 && row < V.length lineTexts then lineTexts V.! row else ""
+      pw <- lineWidthIO fm (T.take col currentLine)
+      let (caretX, caretY, caretH) = selectionCaretGeom contentX (contentTop + fromIntegral row * lineH - scrollYf) pw lineH
+      drawTextCaret da caretX caretY caretH fg
+  let base = themePanel theme
+  mapM_
+    (paintScrollBarLayout da (scrollBarTrackColor base theme) (scrollBarThumbColor base theme))
+    (catMaybes [tasbVertical layouts, tasbHorizontal layouts])
+
+textAreaHitForWidget :: Context -> WidgetId -> IO (Maybe TextAreaHit)
+textAreaHitForWidget ctx wid = do
+  mIdx <- findNodeByWidgetId ctx wid
+  case mIdx of
+    Nothing -> pure Nothing
+    Just idx -> do
+      nt <- getNodeType (ctxNodeArena ctx) idx
+      if nt /= NodeTextArea
+        then pure Nothing
+        else do
+          (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+          fm <- resolveTextAreaFont ctx idx
+          let geom = textAreaGeom fm x y w h
+              Rect clipX _ _ _ = textAreaFieldClip geom fm
+          pure
+            ( Just
+                TextAreaHit
+                  { tahNodeIdx = idx
+                  , tahFieldRect = tagFieldRect geom
+                  , tahContentX = clipX
+                  , tahLineH = tagLineHeight geom
+                  , tahWidgetX = x
+                  , tahWidgetY = y
+                  , tahWidgetW = w
+                  , tahWidgetH = h
+                  }
+            )
+
+textAreaCursorAt :: Context -> TA.TextAreaState -> TextAreaHit -> V2 -> IO (Int, Int)
+textAreaCursorAt ctx state hit (V2 mouseX mouseY) = do
+  snap <- textAreaSnap (ctxDrawArena ctx)
+  fm <- resolveTextAreaFont ctx (tahNodeIdx hit)
+  let buf = TA.buffer state
+      lineCount = max 1 (TB.getLineCount buf)
+      (scrollX, scrollY) = TA.scrollOffset state
+      scrollXf = snap (realToFrac scrollX)
+      scrollYf = snap (realToFrac scrollY)
+      (_, iy) = widgetContentInset fm
+      Rect _ fieldY _ _ = tahFieldRect hit
+      relY = mouseY - (fieldY + iy) + scrollYf
+      row = max 0 (min (lineCount - 1) (floor (relY / max 1 (tahLineH hit))))
+      line = TB.lineAt row buf
+  prepared <- prepareFontMetrics fm line
+  pure (row, textIndexAtX prepared line (max 0 (mouseX - (tahContentX hit - scrollXf))))
+
+updateTextAreaSelection :: Context -> WidgetId -> TextAreaHit -> TB.Cursor -> TB.Cursor -> IO ()
+updateTextAreaSelection ctx wid hit anchor cursor = do
+  state0 <- loadHitState ctx hit
+  store <- getStore ctx
+  setStore ctx (TA.saveTextAreaState (intKey wid) (TA.setTextAreaSelection anchor cursor state0) store)
+  markDirty ctx
+
+applyTextAreaClick :: Context -> WidgetId -> TextAreaHit -> Int -> Int -> Int -> IO ()
+applyTextAreaClick ctx wid hit row col clicks
+  | clicks >= 3 = do
+      state <- loadHitState ctx hit
+      updateTextAreaSelection ctx wid hit (TB.Cursor 0 0) (TB.documentEnd (TA.buffer state))
+  | clicks == 2 = do
+      state <- loadHitState ctx hit
+      let (lo, hi) = textWordBounds (TB.lineAt row (TA.buffer state)) col
+      updateTextAreaSelection ctx wid hit (TB.Cursor row lo) (TB.Cursor row hi)
+  | otherwise =
+      updateTextAreaSelection ctx wid hit (TB.Cursor row col) (TB.Cursor row col)
+
+applyTextAreaDrag :: Context -> WidgetId -> TextAreaHit -> Int -> Int -> Int -> Int -> Int -> IO ()
+applyTextAreaDrag ctx wid hit anchorRow anchorCol row col clicks
+  | clicks >= 3 = applyTextAreaClick ctx wid hit row col clicks
+  | clicks == 2 = do
+      state <- loadHitState ctx hit
+      let buf = TA.buffer state
+          (a0, a1) = textWordBounds (TB.lineAt anchorRow buf) anchorCol
+          (c0, c1) = textWordBounds (TB.lineAt row buf) col
+      updateTextAreaSelection ctx wid hit (TB.Cursor anchorRow (min a0 c0)) (TB.Cursor row (max a1 c1))
+  | otherwise =
+      updateTextAreaSelection ctx wid hit (TB.Cursor anchorRow anchorCol) (TB.Cursor row col)
+
+-- | Mouse selection in text area @wid@: press (with word and document
+-- multi-clicks) and drag. Presses on the scrollbars are left to the scroller.
+finalizeTextAreaMouse :: Context -> Input -> WidgetId -> IO ()
+finalizeTextAreaMouse ctx inp wid = do
+  mHit <- textAreaHitForWidget ctx wid
+  case mHit of
+    Nothing -> pure ()
+    Just hit -> do
+      let mouse = inputMousePos inp
+      onScroll <- isMouseOnTextAreaScrollBarAt ctx (tahNodeIdx hit) mouse
+      let cursorAtMouse = do
+            state <- loadHitState ctx hit
+            textAreaCursorAt ctx state hit mouse
+      if inputMousePressed inp && rectContains (tahFieldRect hit) mouse && not onScroll
+        then do
+          (row, col) <- cursorAtMouse
+          clicks <- normalizeTextFieldClicks ctx wid 0 row col True (max 1 (inputMouseClicks inp))
+          applyTextAreaClick ctx wid hit row col clicks
+          setTextInputDrag ctx (Just (TextInputDrag wid 0 row col True clicks))
+        else do
+          mDrag <- getTextInputDrag ctx
+          case mDrag of
+            Just drag
+              | textInputDragWidget drag == wid
+                  , textInputDragMultiline drag
+                  , inputMouseDown inp || inputMouseReleased inp -> do
+                  (row, col) <- cursorAtMouse
+                  applyTextAreaDrag
+                    ctx
+                    wid
+                    hit
+                    (textInputDragAnchorRow drag)
+                    (textInputDragAnchorCol drag)
+                    row
+                    col
+                    (textInputDragClicks drag)
+            _ -> pure ()
+
+collapseTextAreaSelection :: Context -> WidgetId -> IO ()
+collapseTextAreaSelection ctx wid = do
+  store <- getStore ctx
+  let key = intKey wid
+      text = IM.findWithDefault "" key (storeText store)
+      row = IM.findWithDefault 0 (slotKey slotTextAreaRow key) (storeInt store)
+      col = IM.findWithDefault 0 (slotKey slotTextAreaCol key) (storeInt store)
+      state = loadTextAreaState store key text
+  setStore ctx (saveTextAreaState key state {selectionAnchor = TB.Cursor row col} store)

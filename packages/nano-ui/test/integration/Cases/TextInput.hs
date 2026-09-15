@@ -3,6 +3,7 @@ module Cases.TextInput
   , runButtonPressReleaseHoverTest
   , runTextInputClickSelectTest
   , runTextInputClipboardTest
+  , runTextInputPasswordTest
   , runTextInputCtrlATest
   , runTextInputCursorTest
   , runTextAreaCursorTest
@@ -21,6 +22,7 @@ module Cases.TextInput
   , runTextInputFfCaretTest
   , runTextInputScrollTest
   , runTextInputWordKeysTest
+  , runTextAreaAltWordKeysTest
   , runTextInputBatchTest
   , runKvMultilineHeightTest
   , runTextAreaScrollbarVisibilityTest
@@ -319,6 +321,29 @@ runTextInputWordKeysTest ctx failed = do
   ((_, v4), _, _, _) <- runFrame ctx inp0 ui
   assertEq failed v4 "X "
 
+-- Alt edits and moves by word in a text area, like Ctrl (regression: only
+-- Alt+Backspace was handled; Alt+Delete/Left/Right did nothing).
+runTextAreaAltWordKeysTest :: Context -> IORef Int -> IO ()
+runTextAreaAltWordKeysTest ctx failed = do
+  let
+    inp0 = withInput 320 220
+    ui = column (textArea "foo bar")
+    withAlt key = inp0 {inputKeys = inputKeysFromList [key], inputModifiers = Modifiers False False True}
+  _ <- warmup2 ctx inp0 ui
+  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
+  -- Alt+Delete at the start removes the first word.
+  _ <- runFrame ctx (withAlt KeyDelete) ui
+  ((_, v1), _, _, _) <- runFrame ctx inp0 ui
+  assertEq failed v1 " bar"
+  -- Alt+Right jumps over the next word; typing there proves the caret moved.
+  _ <- runFrame ctx (withAlt KeyRight) ui
+  ((_, v2), _, _, _) <- runFrame ctx (inp0 {inputChars = "X"}) ui
+  assertEq failed v2 " barX"
+  -- Alt+Left jumps back to the start of that word.
+  _ <- runFrame ctx (withAlt KeyLeft) ui
+  ((_, v3), _, _, _) <- runFrame ctx (inp0 {inputChars = "Y"}) ui
+  assertEq failed v3 " YbarX"
+
 runTextAreaCutClearsSelectionTest :: Context -> IORef Int -> IO ()
 runTextAreaCutClearsSelectionTest ctx failed = do
   clipRef <- newIORef (Nothing :: Maybe T.Text)
@@ -586,6 +611,33 @@ runTextInputClipboardTest ctx failed = do
   _ <- runFrame ctx' selectAll ui >> runFrame ctx' clear ui
   ((_, val), _, _, _) <- runFrame ctx' paste ui
   assertEq failed val "hello"
+
+-- A password field displays one mask character per character, and Ctrl+C
+-- leaves the clipboard untouched while the field keeps its real value.
+runTextInputPasswordTest :: Context -> IORef Int -> IO ()
+runTextInputPasswordTest ctx failed = do
+  clipRef <- newIORef (Nothing :: Maybe T.Text)
+  let
+    ctx' =
+      withClipboard
+        ctx
+        (readIORef clipRef)
+        (\s -> writeIORef clipRef (Just s) >> pure True)
+    inp0 = withInput 320 120
+    ui = column (textInputPassword "hunter2")
+  _ <- warmup2 ctx' inp0 ui
+  spans <- collectTextSpans ctx'
+  assert failed (not (any (\(_, txt, _, _, _) -> "hunter2" `T.isInfixOf` txt) spans))
+  assertSpansHas failed "*******" spans
+  _ <- runFrame ctx' (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
+  let
+    selectAll = inp0 {inputChars = "a", inputModifiers = Modifiers False True False}
+    copy = inp0 {inputChars = "c", inputModifiers = Modifiers False True False}
+  _ <- runFrame ctx' selectAll ui
+  ((_, val), _, _, _) <- runFrame ctx' copy ui
+  clip <- readIORef clipRef
+  assertEq failed clip Nothing
+  assertEq failed val "hunter2"
 
 runTextInputCutMenuTest :: Context -> IORef Int -> IO ()
 runTextInputCutMenuTest ctx failed = do
@@ -1426,7 +1478,7 @@ runTextAreaMenuPulseTest ctx failed = do
         (focusPress, focusRelease) = clickPair inp0 mid
       _ <- runFrame ctx focusPress ui >> runFrame ctx focusRelease ui
       -- Selection-only actions must NOT pulse: no text delta.
-      applyTextAreaMenuAction ctx (respId resp0) 3
+      applyTextAreaMenuAction ctx (respId resp0) MenuSelectAll
       ((respSel, valSel), _, _, _) <- runFrame ctx inp0 ui
       assert failed (not (respChanged respSel))
       assertEq failed valSel "abc"

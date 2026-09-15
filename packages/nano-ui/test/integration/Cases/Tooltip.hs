@@ -11,7 +11,7 @@ import Data.IORef (IORef)
 import Data.Text qualified as T
 import NanoUI
 import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, eval2Ui, evalUi, withInput)
+import NanoUI.Testing.Assert (assert, evalUi, withInput)
 import NanoUI.Testing.Harness (centerOf, warmup2)
 
 runTooltipHoverTest :: Context -> IORef Int -> IO ()
@@ -27,7 +27,7 @@ runTooltipHoverTest ctx failed = do
   assert failed (not (any (\(_, txt, _, _, _) -> "Helpful advice" `T.isInfixOf` txt) spans0))
 
   -- Hovered: tooltip overlay present
-  btnWarm <- eval2Ui ctx inp0 (button' "Help Target")
+  btnWarm <- warmup2 ctx inp0 (button' "Help Target")
   let hoverInp = inp0 {inputMousePos = centerOf btnWarm}
   _ <- runFrame ctx hoverInp ui
   _ <- runFrame ctx hoverInp ui
@@ -49,7 +49,7 @@ runTooltipWidgetTest ctx failed = do
   assert failed (case mBody0 of Nothing -> True; _ -> False)
 
   -- When hovered, child is evaluated / rendered
-  btnWarm <- eval2Ui ctx inp0 (button' "Rich Info")
+  btnWarm <- warmup2 ctx inp0 (button' "Rich Info")
   let hoverInp = inp0 {inputMousePos = centerOf btnWarm}
   _ <- runFrame ctx hoverInp ui
   (mBody1, _, _, _) <- runFrame ctx hoverInp ui
@@ -60,7 +60,7 @@ runTooltipSpansTest ctx failed = do
   let inp0 = withInput 640 480
       ui = withTooltip (button' "Action Button") (label "Detailed description")
 
-  btnWarm <- eval2Ui ctx inp0 (button' "Action Button")
+  btnWarm <- warmup2 ctx inp0 (button' "Action Button")
   let hoverInp = inp0 {inputMousePos = centerOf btnWarm}
   _ <- runFrame ctx hoverInp ui
   _ <- runFrame ctx hoverInp ui

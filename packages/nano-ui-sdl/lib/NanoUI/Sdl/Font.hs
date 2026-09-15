@@ -3,9 +3,6 @@ module NanoUI.Sdl.Font
   , FontSource (..)
   , GlyphAtlas
   , withTtf
-  , openFont
-  , openFontFromMemory
-  , openFontSource
   , openFontSourceWithFallback
   , closeFont
   , fontSourceLabel
@@ -16,13 +13,8 @@ module NanoUI.Sdl.Font
   , prepareGlyphAtlasForFrame
   , takeGlyphAtlasResetFlag
   , warmGlyphAtlas
-  , withTtfMeasure
-  , withTtfMeasureScaled
   , withTtfMeasureGlyph
-  , ttfFontMetricsScaled
   , buildGlyphFontMetrics
-  , measureTtfText
-  , measureTtfTextScaled
   , glyphAtlasTexture
   , SdlFontCache
   , CachedFontEntry (..)
@@ -32,7 +24,6 @@ module NanoUI.Sdl.Font
   , setSdlFontCacheSource
   , withTtfFontCache
   , getOrLoadCachedFont
-  , ttfSetFontStyle
   , ttfSaveRenderText
   , ttfGetKerning
   , ttfGetPairKerning
@@ -101,7 +92,6 @@ data SdlFont = SdlFont
   , sfLineSkip :: Float
   , sfAscent :: Float
   , sfSpaceAdvance :: Float
-  , sfPath :: FilePath
   , sfTempPath :: !(Maybe FilePath)
   , sfAlive :: !(IORef Bool)
   }
@@ -180,6 +170,24 @@ runCacheCap = 1024
 -- can otherwise keep thousands of full-document versions alive per font.
 cacheableText :: Text -> Bool
 cacheableText = (<= 4096) . T.length
+
+-- | A map bounded by entry count: 'insertBounded' into a full cache evicts the
+-- first key of 'bcOrder' and returns its value so the owner can release it.
+data BoundedCache k v = BoundedCache
+  { bcEntries :: !(Map.Map k v)
+  , bcOrder :: !(Seq.Seq k)
+  }
+
+emptyBounded :: BoundedCache k v
+emptyBounded = BoundedCache Map.empty Seq.empty
+
+insertBounded :: Ord k => Int -> k -> v -> BoundedCache k v -> (BoundedCache k v, Maybe v)
+insertBounded cap k v (BoundedCache m order)
+  | Map.member k m = (BoundedCache (Map.insert k v m) order, Nothing)
+  | Map.size m >= cap
+  , victim Seq.:<| rest <- order =
+      (BoundedCache (Map.insert k v (Map.delete victim m)) (rest Seq.|> k), Map.lookup victim m)
+  | otherwise = (BoundedCache (Map.insert k v m) (order Seq.|> k), Nothing)
 
 -- Native glyph measurements have one representation, shared by metric-only
 -- preparation and atlas placement. Pixel bearings are unscaled here.
@@ -422,7 +430,7 @@ buildGlyphFontMetrics ga sf scale = do
   -- layout, so a pair cache keeps the hot pen loops off the FFI
   -- boundary after first contact. Keyed by packed codepoint pair on this
   -- 'FontMetrics' (the font id is implicit).
-  kernCacheRef <- newIORef (IM.empty, 0 :: Int)
+  kernCacheRef <- newIORef emptyBounded
 
   -- Shaped text runs: whole strings rendered through SDL3_ttf so GPOS
   -- kerning, ligatures, and contextual positioning are preserved.  Run
@@ -432,9 +440,8 @@ buildGlyphFontMetrics ga sf scale = do
   -- which draw per-glyph instead).  The cache is bounded by 'runCacheCap'.
   -- Metric snapshots have their own bounded cache and survive atlas resets.
   -- Run quads are fully evaluated by the effectful drawing path.
-  preparedRef <- newIORef (Map.empty, Seq.empty)
-  runCacheRef <- newIORef Map.empty
-  runOrderRef <- newIORef Seq.empty -- insertion order; evict the oldest
+  preparedRef <- newIORef emptyBounded
+  runCacheRef <- newIORef emptyBounded
   initRunEpoch <- readIORef (gaEpoch ga)
   runEpochRef <- newIORef initRunEpoch
 
@@ -520,16 +527,14 @@ buildGlyphFontMetrics ga sf scale = do
       -- The cache lives on this 'FontMetrics', so the font id is constant and
       -- the pair can be packed into a single Int key: no tuple on the hot path.
       let !pk = (ord prev `shiftL` 21) .|. ord c
-      (m, count) <- readIORef kernCacheRef
-      case IM.lookup pk m of
+      cache <- readIORef kernCacheRef
+      case Map.lookup pk (bcEntries cache) of
         Just k -> pure k
         Nothing -> do
           raw <- ttfGetKerning (sfFont sf) (fromIntegral (ord prev) :: CUInt) (fromIntegral (ord c) :: CUInt)
           let !k = fromIntegral raw / inv
-              !remaining = if count >= 4096 then IM.deleteMin m else m
-              !m' = IM.insert pk k remaining
-              !count' = min 4096 (count + 1)
-          writeIORef kernCacheRef $! (m', count')
+          -- At most 4096 pairs per font.
+          writeIORef kernCacheRef $! fst (insertBounded 4096 pk k cache)
           pure k
 
     {-# NOINLINE runLookup #-}
@@ -541,30 +546,19 @@ buildGlyphFontMetrics ga sf scale = do
       when (runEp /= ep) $ do
         -- The atlas was reset: every cached run quad is stale.
         writeIORef runEpochRef ep
-        writeIORef runCacheRef Map.empty
-        writeIORef runOrderRef Seq.empty
+        writeIORef runCacheRef emptyBounded
       -- The cache is per 'FontMetrics', so the font id is implicit and the
       -- key is the text alone: no per-lookup tuple allocation.
-      let !key = txt
-      m <- readIORef runCacheRef
-      case Map.lookup key m of
+      cache <- readIORef runCacheRef
+      case Map.lookup txt (bcEntries cache) of
         Just rq -> pure rq
-        Nothing -> makeRunQuad key txt
+        Nothing -> makeRunQuad txt
 
-    -- Bounded insert into the run cache: at 'runCacheCap' entries the
-    -- oldest entry is dropped in amortized O(1), so ever-changing
-    -- text cannot grow the cache without limit.
-    cacheRun !key !_ | not (cacheableText key) = pure ()
-    cacheRun !key !rq = do
-      m <- readIORef runCacheRef
-      order <- readIORef runOrderRef
-      let (!mEvict, !orderEvict)
-            | Map.size m >= runCacheCap
-            , victim Seq.:< rest <- Seq.viewl order =
-                (Map.delete victim m, rest)
-            | otherwise = (m, order)
-      writeIORef runCacheRef $! Map.insert key rq mEvict
-      writeIORef runOrderRef $! orderEvict Seq.|> key
+    -- Bounded insert into the run cache, so ever-changing text cannot grow
+    -- it without limit.
+    cacheRun !key !rq =
+      when (cacheableText key) $
+        modifyIORef' runCacheRef (fst . insertBounded runCacheCap key rq)
 
     -- Mirrors NANO_UI_TEXT_ATLAS_PAD in nano_ui_text_atlas.c.
     runAtlasPad :: Float
@@ -592,7 +586,7 @@ buildGlyphFontMetrics ga sf scale = do
     -- runs stay uncached and fall back to the per-glyph path in pushText /
     -- lineWidth, which measures and draws with the same advances and kerning.
     {-# NOINLINE makeRunQuad #-}
-    makeRunQuad !key !txt
+    makeRunQuad !txt
       | T.null txt = pure Nothing
       | otherwise = do
           (w, h) <- withUtf8 txt $ \cstr len ->
@@ -609,7 +603,7 @@ buildGlyphFontMetrics ga sf scale = do
               let tooBig = w + 2 * runAtlasPad > atW || h + 2 * runAtlasPad > atH
               if tooBig
                 then do
-                  cacheRun key Nothing
+                  cacheRun txt Nothing
                   pure Nothing
                 else do
                   (!u0, !v0, !u1, !v1) <- renderRun txt
@@ -625,7 +619,7 @@ buildGlyphFontMetrics ga sf scale = do
                           , rqV1 = v1
                           , rqAdvance = w / inv
                           }
-                  cacheRun key (Just rq)
+                  cacheRun txt (Just rq)
                   pure (Just rq)
       where
         renderRun t =
@@ -661,8 +655,8 @@ buildGlyphFontMetrics ga sf scale = do
 
     prepareText txt = do
       ensureFontAlive sf
-      (entries, order) <- readIORef preparedRef
-      case Map.lookup txt entries of
+      prepared <- readIORef preparedRef
+      case Map.lookup txt (bcEntries prepared) of
         Just fm -> pure fm
         Nothing -> do
           let chars = T.foldl' (\m c -> IM.insert (ord c) c m) IM.empty (" HxM" <> txt)
@@ -692,13 +686,8 @@ buildGlyphFontMetrics ga sf scale = do
                 , fmBackend = Just backend
                 , fmSnapScale = inv
                 }
-              (!remaining, !order')
-                | Map.size entries >= runCacheCap
-                , victim Seq.:< rest <- Seq.viewl order = (Map.delete victim entries, rest)
-                | otherwise = (entries, order)
-              !entries' = Map.insert txt fm remaining
-              !nextOrder = order' Seq.|> txt
-          when (cacheableText txt) $ writeIORef preparedRef $! (entries', nextOrder)
+          when (cacheableText txt) $
+            writeIORef preparedRef $! fst (insertBounded runCacheCap txt fm prepared)
           pure fm
 
   prepareText ""
@@ -723,7 +712,7 @@ openFont path ptsize =
     font <- ttfOpenFont cpath (realToFrac ptsize)
     when (font == nullPtr) $
       fail ("TTF_OpenFont failed for " ++ path)
-    readSdlFont path Nothing font
+    readSdlFont Nothing font
 
 openFontFromMemory :: ByteString -> FilePath -> Float -> IO SdlFont
 openFontFromMemory bs label ptsize =
@@ -735,7 +724,7 @@ openFontFromMemory bs label ptsize =
           else openFontFromMemoryTemp bs ptsize
     when (fontPtr == nullPtr) $
       fail ("TTF_OpenFont failed for in-memory font " ++ label)
-    readSdlFont label mTemp fontPtr
+    readSdlFont mTemp fontPtr
 
 openFontFromMemoryTemp :: ByteString -> Float -> IO (Ptr (), Maybe FilePath)
 openFontFromMemoryTemp bs openPt = do
@@ -749,8 +738,9 @@ openFontFromMemoryTemp bs openPt = do
       then removeFile path >> pure (nullPtr, Nothing)
       else pure (font, Just path)
 
-readSdlFont :: FilePath -> Maybe FilePath -> Ptr () -> IO SdlFont
-readSdlFont path mTemp font = do
+-- | Wrap an open TTF font; @mTemp@ is a temp file to delete on close.
+readSdlFont :: Maybe FilePath -> Ptr () -> IO SdlFont
+readSdlFont mTemp font = do
   fid <- newFontId
   alive <- newIORef True
   lineSkip <- ttfLineSkip font
@@ -764,7 +754,6 @@ readSdlFont path mTemp font = do
       , sfLineSkip = realToFrac lineSkip
       , sfAscent = realToFrac ascent
       , sfSpaceAdvance = realToFrac spaceAdv
-      , sfPath = path
       , sfTempPath = mTemp
       }
 
@@ -794,36 +783,17 @@ closeFont sf = do
     ttfCloseFont (sfFont sf)
     mapM_ removeFile (sfTempPath sf)
 
-withTtfMeasure :: Context -> SdlFont -> SdlFont -> Context
-withTtfMeasure ctx font monoFont = withTtfMeasureScaled ctx font monoFont 1.0
-
-withTtfMeasureScaled :: Context -> SdlFont -> SdlFont -> Float -> Context
-withTtfMeasureScaled ctx sf monoSf scale =
-  let fm = ttfFontMetricsScaled sf scale
-      monoFm = ttfFontMetricsScaled monoSf scale
-      measure txt = measureTtfTextScaled sf scale txt
-      ctx1 =
-        withExternalText
-          ( withMeasureText
-              (withMonoFontMetrics (withFontMetrics ctx fm) monoFm)
-              measure
-          )
-          True
-   in wrapMeasureCache scale ctx1 measure
-
--- | Like 'withTtfMeasureScaled' but uses glyph-atlas-backed 'FontMetrics'
--- (produced by 'buildGlyphFontMetrics') so that 'pushText' emits real
--- per-glyph textured quads into the draw arena.  Text measurement still
--- uses the SDL_ttf string-size path for accurate layout.
+-- | Install glyph-atlas-backed 'FontMetrics' (from 'buildGlyphFontMetrics')
+-- so that 'pushText' emits per-glyph textured quads into the draw arena.
+-- Text measurement uses the primary font's SDL_ttf string-size path.
 withTtfMeasureGlyph ::
   Context ->
-  SdlFont ->
   SdlFont ->
   FontMetrics -> -- ^ glyph-atlas fm for primary font
   FontMetrics -> -- ^ glyph-atlas fm for mono font
   Float ->
   Context
-withTtfMeasureGlyph ctx sf _monoSf fm monoFm scale =
+withTtfMeasureGlyph ctx sf fm monoFm scale =
   let measure txt = measureTtfTextScaled sf scale txt
       ctx1 =
         withExternalText
@@ -1017,22 +987,17 @@ data CachedFontEntry = CachedFontEntry
   , cfeMeasure :: !(Text -> IO (Float, Float))
   }
 
-data DynamicCache = DynamicCache
-  { dcEntries :: !(Map.Map FontCacheKey CachedFontEntry)
-  , dcLru     :: ![FontCacheKey]
-  }
-
 makeCachedFontEntry :: SdlFont -> FontMetrics -> Float -> IO CachedFontEntry
 makeCachedFontEntry font fm scale = do
-  measCache <- newIORef Map.empty
-  let baseMeas txt = measureTtfTextScaled font scale txt
-      meas txt = do
-        m <- readIORef measCache
-        case Map.lookup txt m of
+  measCache <- newIORef emptyBounded
+  let meas txt = do
+        cached <- Map.lookup txt . bcEntries <$> readIORef measCache
+        case cached of
           Just sz -> pure sz
           Nothing -> do
-            sz <- baseMeas txt
-            modifyIORef' measCache (Map.insert txt sz)
+            sz <- measureTtfTextScaled font scale txt
+            when (cacheableText txt) $
+              modifyIORef' measCache (fst . insertBounded runCacheCap txt sz)
             pure sz
   pure CachedFontEntry
     { cfeFont    = font
@@ -1049,7 +1014,7 @@ data SdlFontCache = SdlFontCache
   , sfcBasePt         :: !Float
   , sfcScaleRef       :: !(IORef Float)
   , sfcBaseEntries    :: !(IORef (CachedFontEntry, CachedFontEntry))
-  , sfcDynamicCache   :: !(IORef DynamicCache)
+  , sfcDynamicCache   :: !(IORef (BoundedCache FontCacheKey CachedFontEntry))
   }
 
 newSdlFontCache ::
@@ -1071,7 +1036,7 @@ newSdlFontCache primary fallback mono monoFb ga basePt scale baseFont baseFm mon
   sansEntry <- makeCachedFontEntry baseFont baseFm scale
   monoEntry <- makeCachedFontEntry monoFont monoFm scale
   baseEntriesRef <- newIORef (sansEntry, monoEntry)
-  cacheRef <- newIORef (DynamicCache Map.empty [])
+  cacheRef <- newIORef emptyBounded
   pure
     SdlFontCache
       { sfcPrimarySourceRef = primaryRef
@@ -1091,15 +1056,17 @@ newSdlFontCache primary fallback mono monoFb ga basePt scale baseFont baseFm mon
 setSdlFontCacheSource :: SdlFontCache -> FontSource -> IO ()
 setSdlFontCacheSource cache src = writeIORef (sfcPrimarySourceRef cache) src
 
+-- | Close fonts and drop their glyphs from the shared atlas index.
+closeCachedFonts :: GlyphAtlas -> [SdlFont] -> IO ()
+closeCachedFonts ga fonts = do
+  mapM_ closeFont fonts
+  let ids = Set.fromList (map sfId fonts)
+  modifyIORef' (gaEntries ga) (Map.filterWithKey (\(fid, _) _ -> not (Set.member fid ids)))
+
 destroySdlFontCache :: SdlFontCache -> IO ()
 destroySdlFontCache cache = do
-  dc <- readIORef (sfcDynamicCache cache)
-  writeIORef (sfcDynamicCache cache) (DynamicCache Map.empty [])
-  let closedFonts = map cfeFont (Map.elems (dcEntries dc))
-      closedIds = map sfId closedFonts
-  mapM_ closeFont closedFonts
-  let idSet = Set.fromList closedIds
-  modifyIORef' (gaEntries (sfcGlyphAtlas cache)) (Map.filterWithKey (\(fid, _) _ -> not (Set.member fid idSet)))
+  dynamic <- atomicModifyIORef' (sfcDynamicCache cache) (\c -> (emptyBounded, c))
+  closeCachedFonts (sfcGlyphAtlas cache) (map cfeFont (Map.elems (bcEntries dynamic)))
 
 resetSdlFontCache ::
   SdlFontCache ->
@@ -1110,36 +1077,12 @@ resetSdlFontCache ::
   FontMetrics ->
   IO ()
 resetSdlFontCache cache newScale newBaseFont newBaseFm newMonoFont newMonoFm = do
-  dc <- readIORef (sfcDynamicCache cache)
-  writeIORef (sfcDynamicCache cache) (DynamicCache Map.empty [])
+  dynamic <- atomicModifyIORef' (sfcDynamicCache cache) (\c -> (emptyBounded, c))
   writeIORef (sfcScaleRef cache) newScale
   sansEntry <- makeCachedFontEntry newBaseFont newBaseFm newScale
   monoEntry <- makeCachedFontEntry newMonoFont newMonoFm newScale
   writeIORef (sfcBaseEntries cache) (sansEntry, monoEntry)
-  let closedFonts = map cfeFont (Map.elems (dcEntries dc))
-      closedIds = map sfId closedFonts
-  mapM_ closeFont closedFonts
-  let idSet = Set.fromList closedIds
-  modifyIORef' (gaEntries (sfcGlyphAtlas cache)) (Map.filterWithKey (\(fid, _) _ -> not (Set.member fid idSet)))
-
-evictOldestIfNeeded :: GlyphAtlas -> DynamicCache -> IO DynamicCache
-evictOldestIfNeeded ga dc
-  | length (dcLru dc) < 48 = pure dc
-  | otherwise =
-      case reverse (dcLru dc) of
-        [] -> pure dc
-        (victim : _) -> do
-          case Map.lookup victim (dcEntries dc) of
-            Just victimEntry -> do
-              let vSf = cfeFont victimEntry
-                  vId = sfId vSf
-              closeFont vSf
-              modifyIORef' (gaEntries ga) (Map.filterWithKey (\(fid, _) _ -> fid /= vId))
-            Nothing -> pure ()
-          pure DynamicCache
-            { dcEntries = Map.delete victim (dcEntries dc)
-            , dcLru     = filter (/= victim) (dcLru dc)
-            }
+  closeCachedFonts (sfcGlyphAtlas cache) (map cfeFont (Map.elems (bcEntries dynamic)))
 
 getOrLoadCachedFont ::
   SdlFontCache ->
@@ -1166,15 +1109,18 @@ getOrLoadCachedFont cache sz weight style var = do
       pure (if var == FontMono then monoEntry else sansEntry)
     else do
       let key = FontCacheKey var ptKey isBold isItalic
-      dc <- readIORef (sfcDynamicCache cache)
-      case Map.lookup key (dcEntries dc) of
+      dynamic <- readIORef (sfcDynamicCache cache)
+      case Map.lookup key (bcEntries dynamic) of
         Just entry -> do
-          case dcLru dc of
-            (h:_) | h == key -> pure ()
-            _ -> writeIORef (sfcDynamicCache cache) dc { dcLru = key : filter (/= key) (dcLru dc) }
+          -- Least recently used goes first: move a hit to the back of the
+          -- eviction order, so fonts drawn every frame are never closed.
+          case Seq.viewr (bcOrder dynamic) of
+            _ Seq.:> newest | newest == key -> pure ()
+            _ ->
+              writeIORef (sfcDynamicCache cache) $!
+                dynamic {bcOrder = Seq.filter (/= key) (bcOrder dynamic) Seq.|> key}
           pure entry
         Nothing -> do
-          dcClean <- evictOldestIfNeeded (sfcGlyphAtlas cache) dc
           scale <- readIORef (sfcScaleRef cache)
           primarySans <- readIORef (sfcPrimarySourceRef cache)
           let (primary, fallback) =
@@ -1191,11 +1137,10 @@ getOrLoadCachedFont cache sz weight style var = do
           -- Dynamic fonts insert only glyphs actually drawn on screen.
           fm <- buildGlyphFontMetrics (sfcGlyphAtlas cache) font scale
           entry <- makeCachedFontEntry font fm scale
-          let newDc = DynamicCache
-                { dcEntries = Map.insert key entry (dcEntries dcClean)
-                , dcLru     = key : dcLru dcClean
-                }
-          writeIORef (sfcDynamicCache cache) newDc
+          -- At most 48 dynamic sizes and styles stay open.
+          let (dynamic', evicted) = insertBounded 48 key entry dynamic
+          writeIORef (sfcDynamicCache cache) $! dynamic'
+          mapM_ (closeCachedFonts (sfcGlyphAtlas cache) . pure . cfeFont) evicted
           pure entry
 
 withTtfFontCache :: SdlFontCache -> Context -> Context

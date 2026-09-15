@@ -7,16 +7,12 @@ module NanoUI.Frame.Paint.Types
   ( PaintEnv (..)
   , buildPaintEnv
   , popupPanelRect
-  , resolveNodeFont
   ) where
 
-
 import Data.IORef (readIORef)
-import NanoUI.Context
-  ( Context (..)
-  )
+import NanoUI.Context (Context (..))
 import NanoUI.Draw (DrawArena)
-import NanoUI.Font (FontMetrics, isDefaultNodeFont)
+import NanoUI.Font (FontMetrics)
 import NanoUI.Layout.Arena
   ( NodeArena
   , NodeIdx
@@ -25,12 +21,7 @@ import NanoUI.Layout.Arena
   , getParent
   , getRect
   )
-import NanoUI.Style
-  ( FontStyle (..)
-  , FontVariant (..)
-  , FontWeight (..)
-  , Theme
-  )
+import NanoUI.Style (Theme)
 import NanoUI.Types (Rect (..))
 
 -- | Everything a paint pass needs, bundled so the walker does not re-read the
@@ -46,7 +37,6 @@ data PaintEnv = PaintEnv
   , peDrawArena :: DrawArena
   , peTheme :: Theme
   , peFontMetrics :: FontMetrics
-  , peMonoMetrics :: FontMetrics
   , peOccluders :: [Rect]
   , peHasOccluders :: Bool
   }
@@ -63,7 +53,6 @@ buildPaintEnv ctx occluders = do
     , peDrawArena = ctxDrawArena ctx
     , peTheme = theme
     , peFontMetrics = ctxFontMetrics ctx
-    , peMonoMetrics = ctxMonoFontMetrics ctx
     , peOccluders = occluders
     , peHasOccluders = not (null occluders)
     }
@@ -84,15 +73,3 @@ popupPanelRect ctx = go
               (px, py, pw, ph) <- getRect (ctxNodeArena ctx) p
               pure (Just (Rect px py pw ph))
             else go p
-
--- | Resolve the font for a text-bearing node. Base sans/mono sizes resolve to
--- the pre-read metrics with no per-node IORef traffic; anything else defers
--- to the host font resolver. The second component says whether the resolver
--- returned a native style-driven face (which suppresses weight/style tweaks
--- that the renderer applies itself).
-{-# INLINE resolveNodeFont #-}
-resolveNodeFont :: PaintEnv -> Float -> FontWeight -> FontStyle -> FontVariant -> IO (FontMetrics, Bool)
-resolveNodeFont env fontSizeVal fweight fstyle fvar
-  | isDefaultNodeFont fontSizeVal fweight fstyle fvar =
-      pure (if fvar == FontMono then peMonoMetrics env else peFontMetrics env, False)
-  | otherwise = ctxResolveFont (peContext env) fontSizeVal fweight fstyle fvar

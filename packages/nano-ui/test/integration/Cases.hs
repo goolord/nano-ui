@@ -40,8 +40,6 @@ module Cases
   , runIdKeyedListTest
   , runIdleTest
   , runIdStabilityTest
-  , runIdUniquenessTest
-  , runIdZeroAllocTest
   , runImageTest
   , runInteractionTest
   , runLabelAlignEndTest
@@ -107,7 +105,6 @@ import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertGt, measureRespW, runClickReduce, withInput)
 import NanoUI.Testing.Harness
   ( centerOf
-  , checkLabelAlignEnd
   , checkLabelAlignEndInk
   , clickPair
   , spanXOf
@@ -118,8 +115,8 @@ import NanoUI.Testing.Harness
   , withInputOff
   )
 import NanoUI.Widgets.SplitPane
-  ( DropTarget (..)
-  , GridNode (..)
+  ( GridNode (..)
+  , PaneDrop (..)
   , dropPreview
   , dropTargetForPane
   , layoutNode
@@ -136,19 +133,6 @@ runIdStabilityTest ctx failed = do
   case ids1 of
     [a, b, c] -> assert failed (a /= b && b /= c && a /= c)
     _ -> assert failed False
-
-runIdUniquenessTest :: Context -> IORef Int -> IO ()
-runIdUniquenessTest ctx failed = do
-  (ids, _, _, _) <- runFrame ctx (withInput 100 100) (column (replicateM 3 nextId))
-  case ids of
-    [a, b, c] -> assert failed (a /= b && b /= c && a /= c)
-    _ -> assert failed False
-
-runIdZeroAllocTest :: Context -> IORef Int -> IO ()
-runIdZeroAllocTest ctx failed = do
-  let inp = withInput 100 100
-  _ <- runFrame ctx inp $ column $ burstNextIds 4096
-  assert failed True
 
 runIdKeyedListTest :: Context -> IORef Int -> IO ()
 runIdKeyedListTest ctx failed = do
@@ -658,7 +642,27 @@ runGrowEqualSplitHeightTest ctx failed = do
 
 runLabelAlignEndTest :: Context -> IORef Int -> IO ()
 runLabelAlignEndTest _ failed = do
-  checkLabelAlignEnd failed =<< newPixelContext
+  ctx <- newPixelContext
+  let
+    fm = ctxFontMetrics ctx
+    (ix, _) = labelContentInset fm
+    tw = fmAdvance fm ' ' * 2
+    boxW = tw + 2 * ix + 4
+    inp = emptyInput {inputWindowSize = Size (boxW + 8) 8}
+    ui =
+      rowWith (fixedW boxW . tight . gap 0) $
+        labelEx (fillW . alignEnd . tight $ defaultLayout) "ab"
+  _ <- runFrame ctx inp ui
+  (lab, _, _, _) <- runFrame ctx inp ui
+  spans <- collectTextSpans ctx
+  let
+    Rect bx _ bw _ = respRect lab
+    hits = [r | (r, txt, _, _, _) <- spans, T.isInfixOf (T.pack "ab") txt]
+  case hits of
+    [] -> assert failed False
+    Rect x _ w _ : _ -> do
+      assert failed (abs ((x + w) - (bx + bw - ix)) <= 0.6)
+      assert failed (abs (w - tw) <= 0.6)
   checkLabelAlignEndInk failed
 
 runAspectLayoutTest :: Context -> IORef Int -> IO ()
@@ -1033,16 +1037,6 @@ runBase16ThemeTest ctx failed = do
   assertEq failed (themeYellow dark) (base0A base16TomorrowNight)
   assertEq failed (themeGreen dark) (base0B base16TomorrowNight)
   assertEq failed (themePurple dark) (base0E base16TomorrowNight)
-  -- Lowercase aliases match uppercase record fields
-  assertEq failed (base0a base16TomorrowNight) (base0A base16TomorrowNight)
-  assertEq failed (base0b base16TomorrowNight) (base0B base16TomorrowNight)
-  assertEq failed (base0c base16TomorrowNight) (base0C base16TomorrowNight)
-  assertEq failed (base0d base16TomorrowNight) (base0D base16TomorrowNight)
-  assertEq failed (base0e base16TomorrowNight) (base0E base16TomorrowNight)
-  assertEq failed (base0f base16TomorrowNight) (base0F base16TomorrowNight)
-  -- Function aliases produce identical themes
-  assertEq failed dark (base16Theme base16TomorrowNight)
-  assertEq failed dark (base16ToTheme base16TomorrowNight)
   -- Dark theme styling checks
   assertEq failed (styleBg (themeInput dark)) (base00 base16TomorrowNight)
   assertEq failed (styleBg (themeButton dark)) (base02 base16TomorrowNight)

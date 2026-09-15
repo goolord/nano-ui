@@ -6,6 +6,7 @@ module Cases.Select
   , runSelectKeyboardTest
   , runSelectOverlayDamageTest
   , runSelectPickLowTest
+  , runSelectChangeOnceTest
   , runSelectTest
   , runEnumSelectTest
   , runSliderCursorTest
@@ -196,6 +197,29 @@ runSelectPickLowTest ctx failed = do
       spans <- collectTextSpans ctx
       assertSpansHas failed "Low" spans
     _ -> assert failed False
+
+-- respChanged fires on the frame the selection changes and not on later
+-- frames (regression: it compared the index against the initial one, so it
+-- stayed set, and selectEmit emitted, every frame after a pick).
+runSelectChangeOnceTest :: Context -> IORef Int -> IO ()
+runSelectChangeOnceTest ctx failed = do
+  let inp0 = withInput 320 200
+      ui = select ["Low", "Medium", "High"] 1
+  (resp, _) <- warmup2 ctx inp0 ui
+  let Rect sx sy sw sh = respRect resp
+      (openPress, openRelease) = clickPair inp0 (V2 (sx + sw / 2) (sy + sh / 2))
+  _ <- runFrame ctx openPress ui
+  _ <- runFrame ctx openRelease ui
+  overlays <- collectOverlayTextSpans ctx openRelease
+  case [rectY r | (r, txt, _, _, _) <- overlays, "Low" `T.isInfixOf` txt] of
+    (lowY : _) -> do
+      let (pickPress, pickRelease) = clickPair inp0 (V2 (sx + sw / 2) (lowY + 0.5))
+          frame inp = (\((r, i), _, _, _) -> (respChanged r, i)) <$> runFrame ctx inp ui
+      results <- mapM frame [pickPress, pickRelease, inp0, inp0, inp0]
+      assertEq failed (map snd (drop 1 results)) [0, 0, 0, 0]
+      assertEq failed (length (filter fst results)) 1
+      assertEq failed (map fst (drop 2 results)) [False, False, False]
+    [] -> assert failed False
 
 runSelectDragToSelectTest :: Context -> IORef Int -> IO ()
 runSelectDragToSelectTest ctx failed = do

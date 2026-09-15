@@ -18,14 +18,14 @@ import NanoUI.Context (Context (..), intKey, setStore)
 import NanoUI.Store (WidgetStore (..), slotDisabled, slotKey)
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertGt)
-import NanoUI.Testing.Harness (warmup2, withInputOff)
+import NanoUI.Testing.Harness (keyInp, tabInp, warmup2, withInputOff)
 
 -- Retaining focus while a widget becomes disabled must not bypass the same
 -- guard used by pointer interaction. Exercise the shared key-navigation hook.
 runKeyboardDisabledTest :: Context -> IORef Int -> IO ()
 runKeyboardDisabledTest _ctx failed = do
   let inp = withInputOff 300 160
-      check :: Eq a => NanoUI (Response, a) -> Input -> IO ()
+      check :: (Eq a, Show a) => NanoUI (Response, a) -> Input -> IO ()
       check ui pressed = do
         ctx <- newContext
         ((resp, before), _, _, _) <- runFrame ctx inp ui
@@ -67,14 +67,6 @@ runKeyboardModalEligibilityTest ctx failed = do
       writeIORef (ctxFocusId ctx) (respId resp)
       ((_, after), _, _, _) <- runFrame ctx (keyInp KeyEnter inp) ui
       assert failed (maybe False snd after)
-
--- | Step the tab focus to the next focusable.
-tabInp :: Input -> Input
-tabInp inp = inp {inputKeys = inputKeysFromList [KeyTab]}
-
--- | A single key-down frame.
-keyInp :: Key -> Input -> Input
-keyInp k inp = inp {inputKeys = inputKeysFromList [k]}
 
 -- | A space key-down frame (space arrives as a character, not a Key).
 spaceInp :: Input -> Input

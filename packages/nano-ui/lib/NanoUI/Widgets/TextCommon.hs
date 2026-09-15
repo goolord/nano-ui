@@ -9,10 +9,7 @@ module NanoUI.Widgets.TextCommon
   , isCtrlCombo
   , dispatchCtrlChar
     -- * Menu actions
-  , menuActionCut
-  , menuActionCopy
-  , menuActionPaste
-  , menuActionSelectAll
+  , MenuAction (..)
   , menuActionEnabled
   , dispatchMenuAction
     -- * Selection and caret helpers
@@ -31,7 +28,7 @@ import Data.Char (isAlphaNum, isSpace)
 import Data.Text (Text)
 import qualified Data.Text as T
 import NanoUI.Context (Context (..))
-import NanoUI.Types (Color, lerpColor)
+import NanoUI.Types (Color, clamp, lerpColor)
 import qualified NanoUI.Widgets.TextBuffer as TB
 
 -- | Character classification for double-click word selection.
@@ -51,7 +48,7 @@ textWordBounds text raw
   | otherwise =
       -- Split once: repeatedly indexing UTF-8 text makes long-word selection
       -- quadratic. The clamped index guarantees a non-empty suffix.
-      let i = max 0 (min (T.length text - 1) raw)
+      let i = clamp 0 (T.length text - 1) raw
           (before, after) = T.splitAt i text
           sameClass = (== textCharClass (T.head after)) . textCharClass
        in ( i - T.length (T.takeWhileEnd sameClass before)
@@ -102,32 +99,25 @@ dispatchCtrlChar onSelectAll onCopy onCut onPaste s ch
   | T.elem ch "vV\x16" = onPaste s
   | otherwise = pure s
 
--- | Context-menu action indices, shared by the dispatchers, the enablement
--- checks and demo code so the numeric codes live in exactly one place.
-menuActionCut, menuActionCopy, menuActionPaste, menuActionSelectAll :: Int
-menuActionCut = 0
-menuActionCopy = 1
-menuActionPaste = 2
-menuActionSelectAll = 3
+-- | Text-field context-menu actions, in menu order (their 'fromEnum' is the
+-- menu row index).
+data MenuAction = MenuCut | MenuCopy | MenuPaste | MenuSelectAll
+  deriving (Eq, Show, Enum, Bounded)
 
--- | Check if a context menu action is enabled (0=Cut, 1=Copy, 2=Paste, 3=Select All).
-{-# INLINE menuActionEnabled #-}
-menuActionEnabled :: Bool -> Maybe Text -> Int -> Bool
-menuActionEnabled hasText mclip item
-  | item == menuActionCut = hasText
-  | item == menuActionCopy = hasText
-  | item == menuActionPaste = maybe False (not . T.null) mclip
-  | item == menuActionSelectAll = hasText
-  | otherwise = False
+-- | Whether a context-menu action applies: Paste needs clipboard text, the
+-- others need field text.
+menuActionEnabled :: Bool -> Maybe Text -> MenuAction -> Bool
+menuActionEnabled hasText mclip = \case
+  MenuPaste -> maybe False (not . T.null) mclip
+  _ -> hasText
 
--- | Dispatch context menu action (0=Cut, 1=Copy, 2=Paste, 3=Select All).
-dispatchMenuAction :: Monad m => (s -> m s) -> (s -> m ()) -> (s -> m s) -> (s -> s) -> Int -> s -> m s
-dispatchMenuAction onCut onCopy onPaste onSelectAll item s
-  | item == menuActionCut = onCut s
-  | item == menuActionCopy = onCopy s >> pure s
-  | item == menuActionPaste = onPaste s
-  | item == menuActionSelectAll = pure (onSelectAll s)
-  | otherwise = pure s
+-- | Run a context-menu action on an editor state.
+dispatchMenuAction :: Monad m => (s -> m s) -> (s -> m ()) -> (s -> m s) -> (s -> s) -> MenuAction -> s -> m s
+dispatchMenuAction onCut onCopy onPaste onSelectAll action s = case action of
+  MenuCut -> onCut s
+  MenuCopy -> s <$ onCopy s
+  MenuPaste -> onPaste s
+  MenuSelectAll -> pure (onSelectAll s)
 
 -- | Copy buffer text (either selected range or full buffer) to clipboard.
 copyBufferText :: Context -> TB.Cursor -> TB.TextBuffer -> IO ()

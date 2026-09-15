@@ -1,5 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 
+-- | Floating window input: dragging by the title bar, edge and inner-east
+-- resizing, the resize cursor, and persisting window placement.
 module NanoUI.Frame.Window
   ( lookupWindowPos
   , lookupWindowSize
@@ -7,21 +9,14 @@ module NanoUI.Frame.Window
   , updateWindowDrag
   , updateWindowResize
   , resizeFromEdge
-  , cursorForResizeEdge
   , windowResizeEdgeAt
   , WindowResizeEdge (..)
-  , drawWindowOverlays
-  , drawModalOverlays
-  , drawPopupOverlays
   , windowResizeCursorKind
-  , topmostWindowAtResizeHalo
   ) where
 
-
-import Control.Monad (forM_, when)
-import Data.IORef (readIORef)
-import Data.Maybe (isJust)
+import Control.Monad (when)
 import qualified Data.IntMap.Strict as IM
+import Data.Maybe (fromMaybe, isJust)
 import NanoUI.Context
   ( Context (..)
   , WidgetStore (..)
@@ -39,15 +34,19 @@ import NanoUI.Context
   , slotKey
   , slotWinSize
   )
-import NanoUI.Draw (pushRect, withClip)
-import NanoUI.Font (ScrollBarSlot (..), resolveLayoutPadding)
+import NanoUI.Font (ScrollBarSlot (..))
+import NanoUI.Frame.Hit (findNodeByWidgetId, nodeInSubtree, topmostOverlayAtMouse)
+import NanoUI.Frame.Input (findTopWidgetUnderMouse, isInteractiveNode)
+import NanoUI.Frame.Redraw (probeHotId)
+import NanoUI.Frame.Scroll.Geometry (scrollChromeLane)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
-import NanoUI.Input (Input (..), inputMouseDown, inputMousePos, inputMousePressed)
+import NanoUI.Input (Input (..), UiCursorKind (..), inputMouseDown, inputMousePos, inputMousePressed)
 import NanoUI.Layout.Arena
   ( NodeIdx
   , NodeType (..)
-  , arenaCount
+  , findChildM
   , findNodeRevM
+  , foldNodesM
   , getDirection
   , getFirstChild
   , getMinMax
@@ -59,32 +58,8 @@ import NanoUI.Layout.Arena
   , getWidgetId
   )
 import NanoUI.Layout.Solve (positionWindowNode, scrollBarSlotOf)
-import NanoUI.Style
-  ( Padding (..)
-  , Style (..)
-  , Theme (..)
-  , padL
-  , padR
-  , padT
-  , themeOverlayDim
-  , themeSeparator
-  )
-import NanoUI.Types (DamageBounds (..), Rect (..), Size (..), V2 (..), haloDamageSlop, rectContains, rectY)
-import NanoUI.Input (UiCursorKind (..))
-import NanoUI.Frame.Chrome
-  ( fillStyledRect
-  , overlayMenuStyle
-  , overlayModalStyle
-  , overlayWindowStyle
-  , pushMenuShadow
-  , strokeStyledRect
-  )
-import NanoUI.Frame.Scroll.Geometry (scrollChromeLane)
-import NanoUI.Frame.Hit (findNodeByWidgetId, modalTreeOpen, nodeInSubtree, topmostOverlayAtMouse)
-import NanoUI.Frame.Input (findTopWidgetUnderMouse, isInteractiveNode)
-import NanoUI.Frame.Paint (walkChildren)
-import NanoUI.Frame.Redraw (probeHotId)
-import NanoUI.Widgets.Chrome (titleBarChromeHFor, windowChromeSepH)
+import NanoUI.Style (Padding (..))
+import NanoUI.Types (DamageBounds (..), Rect (..), V2 (..), haloDamageSlop, rectContains)
 
 topmostWindowAtResizeHalo :: Context -> V2 -> IO (Maybe NodeIdx)
 topmostWindowAtResizeHalo ctx mouse =
@@ -103,11 +78,9 @@ topmostWindowAtResizeHalo ctx mouse =
               else windowInnerEastResizeHit ctx idx rect mouse
 
 windowInnerEastResizeHit :: Context -> NodeIdx -> Rect -> V2 -> IO Bool
-windowInnerEastResizeHit ctx winIdx winRect mouse@(V2 mx _) = do
-  let Rect x _ w _ = winRect
+windowInnerEastResizeHit ctx winIdx (Rect x _ w _) mouse@(V2 mx _) = do
   pad <- getPadding (ctxNodeArena ctx) winIdx
-  let pr = padR pad
-  if mx < x + w - pr || mx > x + w
+  if mx < x + w - padR pad || mx > x + w
     then pure False
     else do
       mLane <- windowBodyScrollLane ctx winIdx
@@ -125,29 +98,19 @@ lookupWindowSize ctx wid = do
 
 persistWindowPositions :: Context -> IO ()
 persistWindowPositions ctx = do
-  count <- arenaCount (ctxNodeArena ctx)
   store0 <- getStore ctx
-  store1 <- foldlWin 0 count store0
+  let na = ctxNodeArena ctx
+      record acc idx = do
+        nt <- getNodeType na idx
+        if nt /= NodeWindow
+          then pure acc
+          else do
+            wid <- getWidgetId na idx
+            (x, y, w, h) <- getRect na idx
+            let k = intKey wid
+            pure acc {storePoint = IM.insert k (x, y) (IM.insert (slotKey slotWinSize k) (w, h) (storePoint acc))}
+  store1 <- foldNodesM na record store0
   when (store1 /= store0) $ setStore ctx store1
-  where
-    foldlWin idx count acc
-      | idx >= count = pure acc
-      | otherwise = do
-          nt <- getNodeType (ctxNodeArena ctx) idx
-          acc' <-
-            if nt /= NodeWindow
-              then pure acc
-              else do
-                wid <- getWidgetId (ctxNodeArena ctx) idx
-                (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-                let k = intKey wid
-                pure
-                  acc
-                    { storePoint =
-                        IM.insert k (x, y) $
-                          IM.insert (slotKey slotWinSize k) (w, h) (storePoint acc)
-                    }
-          foldlWin (idx + 1) count acc'
 
 updateWindowDrag :: Context -> Input -> IO Bool
 updateWindowDrag ctx inp = do
@@ -160,15 +123,8 @@ updateWindowDrag ctx inp = do
         Just (wid, gx, gy)
           | inputMouseDown inp -> do
               let V2 mx my = inputMousePos inp
-                  pos = (mx - gx, my - gy)
               store <- getStore ctx
-              setStore
-                ctx
-                ( store
-                    { storePoint =
-                        IM.insert (intKey wid) pos (storePoint store)
-                    }
-                )
+              setStore ctx (store {storePoint = IM.insert (intKey wid) (mx - gx, my - gy) (storePoint store)})
               damageWidget ctx wid (DamageInflated haloDamageSlop)
               markDirty ctx
               pure True
@@ -176,9 +132,7 @@ updateWindowDrag ctx inp = do
               setWindowDrag ctx Nothing
               pure False
         Nothing
-          | inputMousePressed inp -> do
-              started <- tryStartWindowDrag ctx (inputMousePos inp)
-              pure started
+          | inputMousePressed inp -> tryStartWindowDrag ctx (inputMousePos inp)
           | otherwise -> pure False
 
 windowResizeHandleFor :: Float
@@ -211,47 +165,42 @@ windowResizeEdgeAt (Rect x y w h) (V2 mx my) =
               (_, _, True, _) -> ResizeW
               _ -> ResizeE
 
-innerEastCornerEdge :: Padding -> Rect -> Float -> Maybe WindowResizeEdge
+innerEastCornerEdge :: Padding -> Rect -> Float -> WindowResizeEdge
 innerEastCornerEdge pad (Rect _ y _ h) my =
   let s = windowResizeHandleFor
       minBand = 6
       topBand = max minBand (min s (padT pad))
       botBand = max minBand (min s (padB pad))
-   in case (my >= y && my < y + topBand, my > y + h - botBand && my <= y + h) of
-        (True, _) -> Just ResizeNE
-        (_, True) -> Just ResizeSE
-        _ -> Just ResizeE
+   in if my >= y && my < y + topBand
+        then ResizeNE
+        else if my > y + h - botBand && my <= y + h then ResizeSE else ResizeE
 
+-- | Lane of the window body's scrollbar while its content overflows.
 windowBodyScrollLane :: Context -> NodeIdx -> IO (Maybe Rect)
 windowBodyScrollLane ctx winIdx = do
-  fc <- getFirstChild (ctxNodeArena ctx) winIdx
-  go fc
-  where
-    go ci
-      | ci < 0 = pure Nothing
-      | otherwise = do
-          nt <- getNodeType (ctxNodeArena ctx) ci
-          ns <- getNextSibling (ctxNodeArena ctx) ci
-          case nt of
-            NodeScrollContainer -> do
-              slot <- scrollBarSlotOf (ctxNodeArena ctx) ci
-              if slot /= ScrollBarWindow
-                then go ns
-                else do
-                  (x, y, w, h) <- getRect (ctxNodeArena ctx) ci
-                  pad <- getPadding (ctxNodeArena ctx) ci
-                  dir <- getDirection (ctxNodeArena ctx) ci
-                  contentSize <- getNodeValue (ctxNodeArena ctx) ci
-                  let fm = ctxFontMetrics ctx
-                      innerH = h - padT pad - padB pad
-                  if contentSize <= innerH
-                    then go ns
-                    else
-                      pure
-                        ( Just
-                            (scrollChromeLane fm slot dir x y w h pad)
-                        )
-            _ -> go ns
+  let na = ctxNodeArena ctx
+  mBody <-
+    findChildM na winIdx $ \ci -> do
+      nt <- getNodeType na ci
+      if nt /= NodeScrollContainer
+        then pure False
+        else do
+          slot <- scrollBarSlotOf na ci
+          if slot /= ScrollBarWindow
+            then pure False
+            else do
+              (_, _, _, h) <- getRect na ci
+              pad <- getPadding na ci
+              contentSize <- getNodeValue na ci
+              pure (contentSize > h - padT pad - padB pad)
+  traverse
+    ( \ci -> do
+        (x, y, w, h) <- getRect na ci
+        pad <- getPadding na ci
+        dir <- getDirection na ci
+        pure (scrollChromeLane ScrollBarWindow dir x y w h pad)
+    )
+    mBody
 
 windowInnerResizeEdgeAt :: Context -> NodeIdx -> Rect -> V2 -> IO (Maybe WindowResizeEdge)
 windowInnerResizeEdgeAt ctx winIdx winRect@(Rect x y w h) mouse@(V2 mx my) = do
@@ -259,36 +208,34 @@ windowInnerResizeEdgeAt ctx winIdx winRect@(Rect x y w h) mouse@(V2 mx my) = do
   if hit
     then do
       pad <- getPadding (ctxNodeArena ctx) winIdx
-      pure (innerEastCornerEdge pad winRect (v2Y mouse))
+      pure (Just (innerEastCornerEdge pad winRect my))
     else do
       let cornerW = min 16 (w / 3)
           cornerH = min 16 (h / 3)
           botH = min 6 (h / 3)
           inBotRightCorner = mx >= x + w - cornerW && mx <= x + w && my >= y + h - cornerH && my <= y + h
           inBotEdge = mx >= x && mx <= x + w && my >= y + h - botH && my <= y + h
-      if inBotRightCorner
-        then pure (Just ResizeSE)
-        else if inBotEdge
-          then pure (Just ResizeS)
-          else pure Nothing
+      pure $
+        if inBotRightCorner
+          then Just ResizeSE
+          else if inBotEdge then Just ResizeS else Nothing
 
 windowResizeEdgeFor :: Context -> NodeIdx -> Rect -> V2 -> IO (Maybe WindowResizeEdge)
-windowResizeEdgeFor ctx winIdx winRect mouse = do
+windowResizeEdgeFor ctx winIdx winRect mouse =
   case windowResizeEdgeAt winRect mouse of
     Just edge -> pure (Just edge)
     Nothing -> windowInnerResizeEdgeAt ctx winIdx winRect mouse
 
 cursorForResizeEdge :: WindowResizeEdge -> UiCursorKind
-cursorForResizeEdge edge =
-  case edge of
-    ResizeN -> UiCursorNsResize
-    ResizeS -> UiCursorNsResize
-    ResizeE -> UiCursorEwResize
-    ResizeW -> UiCursorEwResize
-    ResizeNW -> UiCursorNwseResize
-    ResizeSE -> UiCursorNwseResize
-    ResizeNE -> UiCursorNeswResize
-    ResizeSW -> UiCursorNeswResize
+cursorForResizeEdge = \case
+  ResizeN -> UiCursorNsResize
+  ResizeS -> UiCursorNsResize
+  ResizeE -> UiCursorEwResize
+  ResizeW -> UiCursorEwResize
+  ResizeNW -> UiCursorNwseResize
+  ResizeSE -> UiCursorNwseResize
+  ResizeNE -> UiCursorNeswResize
+  ResizeSW -> UiCursorNeswResize
 
 resizeFromEdge :: WindowResizeDrag -> V2 -> Float -> Float -> (Float, Float, Float, Float)
 resizeFromEdge wrd (V2 mx my) winW winH =
@@ -300,26 +247,11 @@ resizeFromEdge wrd (V2 mx my) winW winH =
       !maxH = min (wrdMaxH wrd) winH
       !right0 = wrdStartX wrd + wrdStartW wrd
       !bottom0 = wrdStartY wrd + wrdStartH wrd
-      !fromE = case wrdEdge wrd of
-        ResizeE -> True
-        ResizeNE -> True
-        ResizeSE -> True
-        _ -> False
-      !fromW = case wrdEdge wrd of
-        ResizeW -> True
-        ResizeNW -> True
-        ResizeSW -> True
-        _ -> False
-      !fromS = case wrdEdge wrd of
-        ResizeS -> True
-        ResizeSE -> True
-        ResizeSW -> True
-        _ -> False
-      !fromN = case wrdEdge wrd of
-        ResizeN -> True
-        ResizeNE -> True
-        ResizeNW -> True
-        _ -> False
+      edge = wrdEdge wrd
+      !fromE = edge `elem` [ResizeE, ResizeNE, ResizeSE]
+      !fromW = edge `elem` [ResizeW, ResizeNW, ResizeSW]
+      !fromS = edge `elem` [ResizeS, ResizeSE, ResizeSW]
+      !fromN = edge `elem` [ResizeN, ResizeNE, ResizeNW]
       !w0
         | fromE = wrdStartW wrd + dx
         | fromW = wrdStartW wrd - dx
@@ -343,15 +275,9 @@ updateWindowResize ctx inp winW winH = do
     Just wrd
       | inputMouseDown inp -> do
           let (nw, nh, nx, ny) = resizeFromEdge wrd (inputMousePos inp) winW winH
+              key = intKey (wrdWidget wrd)
           store <- getStore ctx
-          setStore
-            ctx
-            ( store
-                { storePoint =
-                    IM.insert (slotKey slotWinSize (intKey (wrdWidget wrd))) (nw, nh) $
-                      IM.insert (intKey (wrdWidget wrd)) (nx, ny) (storePoint store)
-                }
-            )
+          setStore ctx (store {storePoint = IM.insert (slotKey slotWinSize key) (nw, nh) (IM.insert key (nx, ny) (storePoint store))})
           relayoutWindow ctx winW winH (wrdWidget wrd) nw nh
           damageWidget ctx (wrdWidget wrd) (DamageInflated haloDamageSlop)
           markDirty ctx
@@ -374,71 +300,64 @@ relayoutWindow ctx winW winH wid nw nh = do
           h = max minH (min (min maxH winH) nh)
       mpos <- lookupWindowPos ctx wid
       (x, y, _, _) <- getRect (ctxNodeArena ctx) idx
-      let (x0, y0) = maybe (x, y) id mpos
+      let (x0, y0) = fromMaybe (x, y) mpos
           x' = max 0 (min x0 (max 0 (winW - w)))
           y' = max 0 (min y0 (max 0 (winH - h)))
       positionWindowNode (ctxNodeArena ctx) (ctxFontMetrics ctx) idx x' y' w h
 
-tryStartWindowResize :: Context -> V2 -> IO Bool
-tryStartWindowResize ctx mouse = do
+-- | Resize edge under @mouse@ for the topmost window whose halo holds it,
+-- unless the halo is blocked or the pointer is on the title bar or one of its
+-- controls.
+resizeEdgeTarget :: Context -> V2 -> IO (Maybe (NodeIdx, Rect, WindowResizeEdge))
+resizeEdgeTarget ctx mouse = do
   mWin <- topmostWindowAtResizeHalo ctx mouse
   case mWin of
-    Nothing -> pure False
+    Nothing -> pure Nothing
     Just idx -> do
       blocked <- resizeHaloBlocked ctx mouse idx
       overClose <- windowTitleHasInteractive ctx idx mouse
       mTitle <- windowTitleRect ctx idx
-      let overTitle = maybe False (`rectContains` mouse) mTitle
       (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-      if blocked || overClose || overTitle
-        then pure False
-        else do
-          mEdge <- windowResizeEdgeFor ctx idx (Rect x y w h) mouse
-          case mEdge of
-            Nothing -> pure False
-            Just edge -> do
-              wid <- getWidgetId (ctxNodeArena ctx) idx
-              (minW, minH, maxW, maxH) <- getMinMax (ctxNodeArena ctx) idx
-              let V2 mx my = mouse
-              setWindowResize ctx $
-                Just
-                  WindowResizeDrag
-                    { wrdWidget = wid
-                    , wrdEdge = edge
-                    , wrdGrabX = mx
-                    , wrdGrabY = my
-                    , wrdStartX = x
-                    , wrdStartY = y
-                    , wrdStartW = w
-                    , wrdStartH = h
-                    , wrdMinW = minW
-                    , wrdMinH = minH
-                    , wrdMaxW = maxW
-                    , wrdMaxH = maxH
-                    }
-              markDirty ctx
-              pure True
+      let rect = Rect x y w h
+      if blocked || overClose || maybe False (`rectContains` mouse) mTitle
+        then pure Nothing
+        else fmap (idx,rect,) <$> windowResizeEdgeFor ctx idx rect mouse
+
+tryStartWindowResize :: Context -> V2 -> IO Bool
+tryStartWindowResize ctx mouse@(V2 mx my) = do
+  mTarget <- resizeEdgeTarget ctx mouse
+  case mTarget of
+    Nothing -> pure False
+    Just (idx, Rect x y w h, edge) -> do
+      wid <- getWidgetId (ctxNodeArena ctx) idx
+      (minW, minH, maxW, maxH) <- getMinMax (ctxNodeArena ctx) idx
+      setWindowResize ctx $
+        Just
+          WindowResizeDrag
+            { wrdWidget = wid
+            , wrdEdge = edge
+            , wrdGrabX = mx
+            , wrdGrabY = my
+            , wrdStartX = x
+            , wrdStartY = y
+            , wrdStartW = w
+            , wrdStartH = h
+            , wrdMinW = minW
+            , wrdMinH = minH
+            , wrdMaxW = maxW
+            , wrdMaxH = maxH
+            }
+      markDirty ctx
+      pure True
 
 windowResizeCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
 windowResizeCursorKind ctx inp = do
   mDrag <- getWindowResize ctx
   case mDrag of
-    Just wrd | inputMouseDown inp -> pure (Just (cursorForResizeEdge (wrdEdge wrd)))
-    Just _ -> pure Nothing
-    Nothing -> do
-      let mouse = inputMousePos inp
-      mWin <- topmostWindowAtResizeHalo ctx mouse
-      case mWin of
-        Nothing -> pure Nothing
-        Just idx -> do
-          blocked <- resizeHaloBlocked ctx mouse idx
-          overClose <- windowTitleHasInteractive ctx idx mouse
-          mTitle <- windowTitleRect ctx idx
-          let overTitle = maybe False (`rectContains` mouse) mTitle
-          (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-          if blocked || overClose || overTitle
-            then pure Nothing
-            else fmap cursorForResizeEdge <$> windowResizeEdgeFor ctx idx (Rect x y w h) mouse
+    Just wrd
+      | inputMouseDown inp -> pure (Just (cursorForResizeEdge (wrdEdge wrd)))
+      | otherwise -> pure Nothing
+    Nothing -> fmap (\(_, _, edge) -> cursorForResizeEdge edge) <$> resizeEdgeTarget ctx (inputMousePos inp)
 
 -- Halo must not steal hits from page widgets or another window's interior.
 resizeHaloBlocked :: Context -> V2 -> NodeIdx -> IO Bool
@@ -457,31 +376,27 @@ resizeHaloBlocked ctx mouse winIdx = do
             Just hotIdx -> not <$> nodeInSubtree ctx hotIdx winIdx
 
 tryStartWindowDrag :: Context -> V2 -> IO Bool
-tryStartWindowDrag ctx mouse = do
+tryStartWindowDrag ctx mouse@(V2 mx my) = do
   mTop <- topmostOverlayAtMouse ctx mouse
   case mTop of
     Nothing -> pure False
     Just idx -> do
       nt <- getNodeType (ctxNodeArena ctx) idx
-      if nt /= NodeWindow
-        then pure False
-        else do
-          mTitle <- windowTitleRect ctx idx
-          case mTitle of
-            Nothing -> pure False
-            Just title -> do
-              let overTitle = rectContains title mouse
-              overClose <- windowTitleHasInteractive ctx idx mouse
-              if overTitle && not overClose
-                then do
-                  wid <- getWidgetId (ctxNodeArena ctx) idx
-                  (wx, wy, _, _) <- getRect (ctxNodeArena ctx) idx
-                  let V2 mx my = mouse
-                  setWindowDrag ctx (Just (wid, mx - wx, my - wy))
-                  markDirty ctx
-                  pure True
-                else pure False
+      mTitle <- if nt == NodeWindow then windowTitleRect ctx idx else pure Nothing
+      case mTitle of
+        Just title | rectContains title mouse -> do
+          overClose <- windowTitleHasInteractive ctx idx mouse
+          if overClose
+            then pure False
+            else do
+              wid <- getWidgetId (ctxNodeArena ctx) idx
+              (wx, wy, _, _) <- getRect (ctxNodeArena ctx) idx
+              setWindowDrag ctx (Just (wid, mx - wx, my - wy))
+              markDirty ctx
+              pure True
+        _ -> pure False
 
+-- | Title bar: the window's topmost child, stretched up to the window top.
 windowTitleRect :: Context -> NodeIdx -> IO (Maybe Rect)
 windowTitleRect ctx idx = do
   (_, wy, _, _) <- getRect (ctxNodeArena ctx) idx
@@ -491,8 +406,7 @@ windowTitleRect ctx idx = do
     Nothing -> Nothing
     Just (Rect cx cy cw ch) ->
       let topY = min wy cy
-          totalH = (cy - topY) + ch
-       in Just (Rect cx topY cw totalH)
+       in Just (Rect cx topY cw ((cy - topY) + ch))
   where
     go ci best
       | ci < 0 = pure best
@@ -500,11 +414,9 @@ windowTitleRect ctx idx = do
           (x, y, w, h) <- getRect (ctxNodeArena ctx) ci
           ns <- getNextSibling (ctxNodeArena ctx) ci
           let here = Rect x y w h
-              best' =
-                case best of
-                  Nothing -> Just here
-                  Just b -> if y < rectY b then Just here else Just b
-          go ns best'
+          go ns $ case best of
+            Just b@(Rect _ by _ _) | y >= by -> Just b
+            _ -> Just here
 
 windowTitleHasInteractive :: Context -> NodeIdx -> V2 -> IO Bool
 windowTitleHasInteractive ctx idx mouse = do
@@ -513,59 +425,4 @@ windowTitleHasInteractive ctx idx mouse = do
     Nothing -> pure False
     Just wid -> do
       mNode <- findNodeByWidgetId ctx wid
-      case mNode of
-        Nothing -> pure False
-        Just wi -> nodeInSubtree ctx wi idx
-
-drawWindowOverlays :: Context -> IO ()
-drawWindowOverlays ctx = do
-  theme <- readIORef (ctxTheme ctx)
-  let style = overlayWindowStyle theme
-      da = ctxDrawArena ctx
-      fm = ctxFontMetrics ctx
-  forFloatingNode ctx NodeWindow $ \idx rect@(Rect x y w _) -> do
-    drawFloatingPanel ctx idx style rect rect
-    pad0 <- getPadding (ctxNodeArena ctx) idx
-    let pad = resolveLayoutPadding fm pad0
-        chromeH = titleBarChromeHFor
-        sepY = y + padT pad + chromeH - windowChromeSepH
-        sepX = x + padL pad
-        sepW = max 0 (w - padL pad - padR pad)
-    pushRect da (Rect sepX sepY sepW windowChromeSepH) (themeSeparator theme)
-
-drawPopupOverlays :: Context -> IO ()
-drawPopupOverlays ctx = do
-  theme <- readIORef (ctxTheme ctx)
-  let style = overlayMenuStyle theme
-  forFloatingNode ctx NodePopup $ \idx rect ->
-    drawFloatingPanel ctx idx style rect rect
-
-drawModalOverlays :: Context -> Size -> IO ()
-drawModalOverlays ctx (Size ww wh) = do
-  theme <- readIORef (ctxTheme ctx)
-  let da = ctxDrawArena ctx
-  found <- modalTreeOpen ctx
-  when found $ do
-    pushRect da (Rect 0 0 ww wh) (themeOverlayDim theme)
-    forFloatingNode ctx NodeModal $ \idx rect -> do
-      let style = overlayModalStyle theme
-          clip = rect
-      drawFloatingPanel ctx idx style rect clip
-
-forFloatingNode :: Context -> NodeType -> (NodeIdx -> Rect -> IO ()) -> IO ()
-forFloatingNode ctx nodeType draw = do
-  count <- arenaCount (ctxNodeArena ctx)
-  forM_ [0 .. count - 1] $ \idx -> do
-    actualType <- getNodeType (ctxNodeArena ctx) idx
-    when (actualType == nodeType) $ do
-      (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-      draw idx (Rect x y w h)
-
-drawFloatingPanel :: Context -> NodeIdx -> Style -> Rect -> Rect -> IO ()
-drawFloatingPanel ctx idx style rect@(Rect x y w h) clip = do
-  let da = ctxDrawArena ctx
-  pushMenuShadow da rect (styleCornerRadius style)
-  fillStyledRect da style rect
-  strokeStyledRect da style x y w h
-  withClip da clip $ walkChildren ctx idx
-
+      maybe (pure False) (\wi -> nodeInSubtree ctx wi idx) mNode

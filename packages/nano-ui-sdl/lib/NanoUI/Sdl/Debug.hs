@@ -1,7 +1,6 @@
 module NanoUI.Sdl.Debug
   ( SdlDebugSnapshot (..)
-  , SdlDebugSampler (..)
-  , SamplerRef
+  , SdlDebugSampler
   , newSdlDebugSampler
   , noteLoop
   , notePresent
@@ -12,13 +11,16 @@ module NanoUI.Sdl.Debug
   , emptySdlDebug
   ) where
 
+import Control.Monad (when)
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
+import Data.Maybe (isJust)
 import Data.Text (Text, unpack)
 import GHC.Clock (getMonotonicTime)
 import NanoUI (Size (..), V2 (..))
 import NanoUI.Debug
   ( CoreDebugSnapshot (..)
   , DebugSampler (..)
+  , DebugSamplerRef
   , debugRefreshSec
   , emptyCoreDebugSnapshot
   , makeCoreDebugSnapshot
@@ -26,6 +28,7 @@ import NanoUI.Debug
   , noteDebugLoop
   , noteDebugPresent
   , noteDebugSkip
+  , presentRate
   , readRtsSnapshot
   )
 import qualified NanoUI.Debug as D
@@ -43,19 +46,20 @@ data SdlDebugSnapshot = SdlDebugSnapshot
   }
   deriving (Eq, Show)
 
-
+-- | The core sampler, the last published snapshot, and whether
+-- NANO_FRAME_TRACE (read once at creation) is set.
 data SdlDebugSampler = SdlDebugSampler
-  { sdsSampler  :: !(IORef DebugSampler)
+  { sdsSampler  :: !DebugSamplerRef
   , sdsSnapshot :: !(IORef SdlDebugSnapshot)
+  , sdsTrace    :: !Bool
   }
 
-type SamplerRef = IORef SdlDebugSampler
-
-newSdlDebugSampler :: IO SamplerRef
-newSdlDebugSampler = do
-  sRef <- newDebugSampler
-  snapRef <- newIORef emptySdlDebug
-  newIORef $ SdlDebugSampler sRef snapRef
+newSdlDebugSampler :: IO SdlDebugSampler
+newSdlDebugSampler =
+  SdlDebugSampler
+    <$> newDebugSampler
+    <*> newIORef emptySdlDebug
+    <*> (isJust <$> lookupEnv "NANO_FRAME_TRACE")
 
 emptySdlDebug :: SdlDebugSnapshot
 emptySdlDebug =
@@ -68,29 +72,20 @@ emptySdlDebug =
     , dbgRefreshHz = 0
     }
 
-noteLoop :: SamplerRef -> Float -> IO ()
-noteLoop ref dt = do
-  s <- readIORef ref
-  noteDebugLoop (sdsSampler s) dt
+noteLoop :: SdlDebugSampler -> Float -> IO ()
+noteLoop = noteDebugLoop . sdsSampler
 
-noteSkip :: SamplerRef -> IO ()
-noteSkip ref = do
-  s <- readIORef ref
-  noteDebugSkip (sdsSampler s)
+noteSkip :: SdlDebugSampler -> IO ()
+noteSkip = noteDebugSkip . sdsSampler
 
-isDebugActive :: SamplerRef -> IO Bool
-isDebugActive ref = do
-  s <- readIORef ref
-  D.isDebugActive (sdsSampler s)
+isDebugActive :: SdlDebugSampler -> IO Bool
+isDebugActive = D.isDebugActive . sdsSampler
 
-takeDebugLive :: SamplerRef -> Bool -> IO Bool
-takeDebugLive ref windowOpen = do
-  s <- readIORef ref
-  D.takeDebugLive (sdsSampler s) windowOpen
+takeDebugLive :: SdlDebugSampler -> Bool -> IO Bool
+takeDebugLive = D.takeDebugLive . sdsSampler
 
-notePresent :: SamplerRef -> Double -> Double -> Double -> Double -> DrawData -> IO ()
-notePresent ref uiMs renderMs presentMs frameMs dd = do
-  s <- readIORef ref
+notePresent :: SdlDebugSampler -> Double -> Double -> Double -> Double -> DrawData -> IO ()
+notePresent s uiMs renderMs presentMs frameMs dd =
   noteDebugPresent
     (sdsSampler s)
     uiMs
@@ -101,33 +96,25 @@ notePresent ref uiMs renderMs presentMs frameMs dd = do
     (drawIndexCount dd)
     (drawCmdCount dd)
 
-readSdlDebug :: SamplerRef -> Size -> V2 -> FilePath -> Float -> Text -> Bool -> Int -> IO SdlDebugSnapshot
-readSdlDebug ref (Size ww wh) (V2 mx my) fontPath scale renderer vsync refreshHz = do
-  s <- readIORef ref
+readSdlDebug :: SdlDebugSampler -> Size -> V2 -> FilePath -> Float -> Text -> Bool -> Int -> IO SdlDebugSnapshot
+readSdlDebug s (Size ww wh) (V2 mx my) fontPath scale renderer vsync refreshHz = do
   now <- getMonotonicTime
-  (refresh, _cur) <-
-    atomicModifyIORef' (sdsSampler s) $ \curSampler ->
-      let elapsed = now - smLastDebugT curSampler
-          refresh = smLastDebugT curSampler <= 0 || elapsed >= debugRefreshSec
-       in (curSampler {smWantFrame = refresh || smWantFrame curSampler, smLastQueryT = now}, (refresh, curSampler))
+  refresh <-
+    atomicModifyIORef' (sdsSampler s) $ \cur ->
+      let due = smLastDebugT cur <= 0 || now - smLastDebugT cur >= debugRefreshSec
+       in (cur {smWantFrame = due || smWantFrame cur, smLastQueryT = now}, due)
   if not refresh
     then readIORef (sdsSnapshot s)
     else do
       rts <- readRtsSnapshot
-      (rate, cur2) <-
-        atomicModifyIORef' (sdsSampler s) $ \curSampler ->
-          let (rated, rate) = D.presentRate now curSampler
-              s' =
-                rated
-                  { smLastDebugT = now
-                  , smWantFrame = False
-                  , smLastQueryT = now
-                  }
-           in (s', (rate, s'))
-      let core = (makeCoreDebugSnapshot cur2 ww wh mx my rts) {dbgPresentFps = rate}
-          snap =
+      (rate, sampled) <-
+        atomicModifyIORef' (sdsSampler s) $ \cur ->
+          let (rated, rate) = presentRate now cur
+              cur' = rated {smLastDebugT = now, smWantFrame = False, smLastQueryT = now}
+           in (cur', (rate, cur'))
+      let snap =
             SdlDebugSnapshot
-              { dbgCore     = core
+              { dbgCore     = (makeCoreDebugSnapshot sampled ww wh mx my rts) {dbgPresentFps = rate}
               , dbgScale    = scale
               , dbgFontPath = fontPath
               , dbgRenderer = renderer
@@ -135,32 +122,27 @@ readSdlDebug ref (Size ww wh) (V2 mx my) fontPath scale renderer vsync refreshHz
               , dbgRefreshHz = refreshHz
               }
       writeIORef (sdsSnapshot s) snap
-      traceFrame snap
+      when (sdsTrace s) (traceFrame snap)
       pure snap
 
--- | Env-gated per-refresh timing trace (NANO_FRAME_TRACE=1). Prints the
--- snapshot's phase EMAs so live-loop costs can be compared across builds.
+-- | Per-refresh timing trace (NANO_FRAME_TRACE). Prints the snapshot's phase
+-- EMAs so live-loop costs can be compared across builds.
 traceFrame :: SdlDebugSnapshot -> IO ()
-traceFrame s = do
-  let c = dbgCore s
-  on <- lookupEnv "NANO_FRAME_TRACE"
-  case on of
-    Nothing -> pure ()
-    Just _ ->
-      Text.Printf.printf
-        "TRACE refreshHz=%3d rend=%s vsync=%d presentFps=%6.0f loopFps=%6.0f frameMs=%6.3f uiMs=%6.3f renderMs=%6.3f presentMs=%6.3f verts=%5d cmds=%2d presents=%d skips=%d\n"
-        (dbgRefreshHz s)
-        (unpack (dbgRenderer s))
-        (dbgBoolInt (dbgVsync s))
-        (dbgPresentFps c)
-        (dbgLoopFps c)
-        (dbgFrameMs c)
-        (dbgUiMs c)
-        (dbgRenderMs c)
-        (dbgPresentMs c)
-        (dbgVerts c)
-        (dbgCmds c)
-        (dbgPresents c)
-        (dbgSkips c)
+traceFrame s =
+  printf
+    "TRACE refreshHz=%3d rend=%s vsync=%d presentFps=%6.0f loopFps=%6.0f frameMs=%6.3f uiMs=%6.3f renderMs=%6.3f presentMs=%6.3f verts=%5d cmds=%2d presents=%d skips=%d\n"
+    (dbgRefreshHz s)
+    (unpack (dbgRenderer s))
+    (if dbgVsync s then 1 else 0 :: Int)
+    (dbgPresentFps c)
+    (dbgLoopFps c)
+    (dbgFrameMs c)
+    (dbgUiMs c)
+    (dbgRenderMs c)
+    (dbgPresentMs c)
+    (dbgVerts c)
+    (dbgCmds c)
+    (dbgPresents c)
+    (dbgSkips c)
   where
-    dbgBoolInt b = if b then (1 :: Int) else 0
+    c = dbgCore s

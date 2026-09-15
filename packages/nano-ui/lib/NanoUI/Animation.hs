@@ -17,6 +17,7 @@ module NanoUI.Animation
 
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IM
+import NanoUI.Types (clamp01)
 
 -- Cubic Bezier easing. X control points are clamped to [0, 1] (CSS-style).
 -- t=0 and t=1 return the endpoints so Newton cannot pop the first/last frame.
@@ -25,8 +26,8 @@ evaluateBezier x1 y1 x2 y2 t0
   | t0 <= 0 = 0
   | t0 >= 1 = 1
   | otherwise =
-      let p1 = max 0 (min 1 x1)
-          p2 = max 0 (min 1 x2)
+      let p1 = clamp01 x1
+          p2 = clamp01 x2
           tau = solveBezierX p1 p2 t0 0.5 0
        in sampleBezier y1 y2 tau
 
@@ -54,7 +55,7 @@ solveBezierX p1 p2 targetT estimate iter
                     if abs deriv < 1e-6
                       then if deriv >= 0 then 1e-6 else -1e-6
                       else deriv
-                  nextEst = max 0 (min 1 (estimate - errorVal / safeDeriv))
+                  nextEst = clamp01 (estimate - errorVal / safeDeriv)
                in solveBezierX p1 p2 targetT nextEst (iter + 1)
 
 data SpringParams = SpringParams
@@ -160,7 +161,7 @@ easeSameSpec _ _ _ _ _ = False
 -- EaseOutBack may return a value outside that range (overshoot).
 applyEase :: Ease -> Float -> Float
 applyEase ease t0 =
-  let t = max 0 (min 1 t0)
+  let t = clamp01 t0
    in case ease of
         EaseLinear -> t
         EaseInQuad -> t * t

@@ -7,7 +7,6 @@
 ![Haskell](https://img.shields.io/badge/Haskell-GHC_9.14-5e5086?style=flat-square&logo=haskell)
 ![License](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)
 ![Backends](https://img.shields.io/badge/Backends-SDL3_%7C_RGFW-informational?style=flat-square)
-![SIMD](https://img.shields.io/badge/SIMD-AVX2-success?style=flat-square)
 
 Applications describe their user interface as a pure function of state.<br/>
 The engine evaluates layout, focus, input handling, animations, and damage tracking every frame, returning a batched draw list to the host renderer.
@@ -24,7 +23,7 @@ The engine evaluates layout, focus, input handling, animations, and damage track
 - **Backend Agnostic**: Swap host packages to render inside hardware-accelerated SDL3 windows or lightweight RGFW windows without touching your UI code.
 - **Dual State Architecture**: Choose local component hooks (`useInt`, `useState`) or pure Elm-style reducers (`buttonEmit`, `runSdlAppReduce`) for app-wide state.
 - **Damage-Tracked Rendering**: Skips redrawing idle frames when state remains unchanged, minimizing CPU usage.
-- **AVX2 SIMD Acceleration**: Low-level C kernels (`-mavx2`) accelerate tree layout solving, damage union math, and vertex buffer generation.
+- **SIMD Vertex Writing**: Quads are written into pinned vertex buffers with GHC's 128-bit SIMD primops; the SDL backend can additionally cull draw batches with AVX2 C kernels (`-fsimd`, x86-64).
 - **Headless Testing**: Test component behavior deterministically frame-by-frame and inspect layout output headlessly.
 
 ---
@@ -66,7 +65,7 @@ counterApp = do
    ```
    `whenM`, `unlessM`, and `ifM` are re-exported directly from `NanoUI` so you don't need additional imports.
 
-2. **Inspecting Geometry & Metadata (`button'`, `menuItem'`)**:
+2. **Inspecting Geometry & Metadata (`button'`)**:
    When you need the widget's bounding box, hover state, or response metadata (for floating popups, tooltips, or context menus), use the primed variants which return `Eff es Response`:
    ```haskell
    saveBtn <- button' "Save"
@@ -138,10 +137,10 @@ The repository is organized as a Cabal multi-package workspace:
 | **`nano-ui`** | Core Engine | Core DSL, flex layout, damage tracker, test harness | `NanoUI`, `NanoUI.Testing` |
 | **`nano-ui-sdl`** | Desktop Window | Hardware-accelerated SDL3 & SDL3_ttf host | `NanoUI.Backend.Sdl` |
 | **`nano-ui-rgfw`** | Standalone Window | Self-contained RGFW OpenGL host with Cozette bitmap font | `NanoUI.Backend.Rgfw` |
-| **`nano-ui-rgfw-bindings`** | C Bindings | Low-level C FFI bindings for RGFW | `NanoUI.Rgfw.Native` |
+| **`nano-ui-rgfw-bindings`** | C Bindings | Low-level C FFI bindings for RGFW | `RGFW`, `RGFW.Raw` |
 | **`nano-ui-diagrams`** | Graphics Bridge | Vector graphics and plotting via `diagrams-lib` | `NanoUI.Diagrams` |
 | **`nano-ui-form`** | Form Framework | Composable type-safe formlets built on `ditto` | `NanoUI.Form` |
-| **`nano-ui-demo`** | Showcases | Multi-backend showcase and profiling suites | `nano-ui-sdl-demo`, `nano-ui-sdl-profile` |
+| **`nano-ui-demo`** | Showcases | SDL3 widget cookbook, notepad, log viewer, terminal, and profiler | `nano-ui-sdl-demo`, `nano-ui-sdl-notepad`, `nano-ui-sdl-logs`, `nano-ui-sdl-terminal`, `nano-ui-sdl-profile` |
 
 ---
 
@@ -178,10 +177,10 @@ The repository is organized as a Cabal multi-package workspace:
 
 - **Input Controls**: `button` / `button'` / `buttonWith`, `checkbox`, `slider` / `sliderWith`, `textInput`, `textArea`, `comboBox`, `colorPicker`, `radioFieldset`, `knob`, `toggleSwitch`
 - **Data Display**: `label`, `heading`, `sparkline`, `progressBar`, `circularProgress`, `table`, `tree`, `kv`, `card`
-- **Navigation & Overlays**: `tabs`, `tabBar`, `menuItem` / `menuItem'`, `contextMenu`, `tooltip`, `modal`, `window`, `popup`, `toolbar`, `separator`, `spacer`
+- **Navigation & Overlays**: `tabs`, `tabBar`, `menuItem` / `menuItemWith`, `contextMenu`, `tooltip`, `modal`, `window`, `popup`, `toolbar`, `separator`, `spacer`
 - **Control Flow**: `whenM`, `unlessM`, `ifM` (monadic branch combinators re-exported for immediate mode)
 - **Custom Painting**: `image`, `drawing`, `canvas`, `customWidget` (direct primitive quad, gradient, and path rendering)
-- **Animations**: `animate`, `animateEase`, `animateToSpring`, `pulse` (configurable spring dynamics)
+- **Animations**: `animate`, `animateTo`, `animateToA` (driven by a tween or spring `Transition`), `pulse` (periodic)
 
 ---
 
@@ -196,7 +195,7 @@ For the source map, focused test commands, and extension conventions, see the
 | :--- | :--- | :--- | :--- |
 | **SDL3 Window** (`nano-ui-sdl`) | `-fsdl` | `sdl3 >= 3.2`, `sdl3-ttf >= 3.2`, `pkg-config` | Linux, macOS, Windows |
 | **RGFW Window** (`nano-ui-rgfw`) | None (Default) | C compiler (Bundled RGFW), OpenGL 3.2 driver | Linux, macOS, Windows |
-| **SIMD Acceleration** | `-fsimd` | x86-64 CPU with AVX2 support | x86-64 |
+| **AVX2 batch culling** (`nano-ui-sdl`, off by default) | `-fsimd` | x86-64 CPU with AVX2 support | x86-64 |
 
 ### Cabal Commands
 
@@ -225,7 +224,7 @@ cabal run nano-ui-profile
 
 ### Terminal example
 
-[`SdlTerminal.hs`](packages/nano-ui-demo/app/SdlTerminal.hs) attaches `/bin/sh -i`
+[`SdlTerminal.hs`](packages/nano-ui-demo/lib/SdlTerminal.hs) attaches `/bin/sh -i`
 to a real controlling PTY. The Haskell `streaming` library folds nonblocking PTY
 chunks into a pure screen state (`S.unfoldr` → `S.fold`) and drives the window
 (`S.iterateM` → `S.mapM_`). Keyboard input goes directly to the PTY, including

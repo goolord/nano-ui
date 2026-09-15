@@ -1,7 +1,5 @@
-#include "nano_ui_opt.h"
 #include <SDL3/SDL.h>
 #include <SDL3_ttf/SDL_ttf.h>
-#include <hb.h>
 #include <stddef.h>
 #include <stdbool.h>
 #include <stdint.h>

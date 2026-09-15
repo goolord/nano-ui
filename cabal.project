@@ -11,29 +11,26 @@ packages:
 tests: True
 benchmarks: True
 
+-- Packages build at Cabal's default -O1. On the headless frame profiler the
+-- core at -O1 matches the runtime of the previous -O2 build while compiling
+-- about twice as fast; add `optimization: 2` locally for release profiling.
 package *
-  optimization: 2
   profiling-detail: late
 
+-- No specialisation, worker/wrapper, or field-unboxing flags: measured on the
+-- headless frame profiler, -fspecialise-aggressively -flate-specialise
+-- -fmax-worker-args=32 -funbox-strict-fields made the core ~12% slower at
+-- runtime while adding compile time.
 package nano-ui
-  -- Cheap, high-yield codegen wins: unbox every strict field (cuts heap
-  -- allocation in the Float/record-heavy paint/layout paths) and let
-  -- worker/wrapper take more arguments (multi-arg hot loops stop allocating).
-  -- Scoped to the hot packages so ../ditto and the rgfw/form libraries keep
-  -- their default field layout (their only cost here is a full rebuild on
-  -- flag changes, with no win to show for it).
-  ghc-options: -Werror -mavx2 -funbox-strict-fields -fmax-worker-args=32 -fspecialise-aggressively -flate-specialise -optc-ffast-math
+  ghc-options: -Werror
 
 package nano-ui-sdl
-  flags: +sdl
-  -- -fspecialise-aggressively is deliberately absent: it is the flag family
-  -- that (with LLVM) blew up Paint.hs's compile time, and the render path
-  -- here is the same unboxed/effectful shape.
-  ghc-options: -Werror -mavx2 -funbox-strict-fields -fmax-worker-args=32 -flate-specialise -optc-mavx2 -optc-O3 -optc-ffast-math
+  flags: +sdl +simd
+  ghc-options: -Werror
 
 package nano-ui-demo
   flags: +sdl
-  ghc-options: -Werror -mavx2
+  ghc-options: -Werror
 
 -- Treat warnings as errors in development, without imposing that policy on
 -- downstream builds of the published packages.

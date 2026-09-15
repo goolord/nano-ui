@@ -1,13 +1,10 @@
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE BangPatterns #-}
-
 module Main (main) where
 
 import Control.Monad (replicateM_, void, forM_, unless, when)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
 import GHC.Clock (getMonotonicTimeNSec)
 import GHC.Stats (RTSStats (..), getRTSStats)
-import System.IO (hSetBuffering, stdout, BufferMode(LineBuffering), hFlush)
+import System.IO (hSetBuffering, stdout, BufferMode(LineBuffering))
 import System.Mem (performGC)
 import Text.Printf (printf)
 import qualified Data.Text as T
@@ -64,17 +61,10 @@ profileInput =
     , inputMouseDown = False
     }
 
-profileInputActive :: Input
-profileInputActive =
-  emptyInput
-    { inputWindowSize = Size 1280 800
-    , inputMousePos = V2 640 400
-    , inputMouseDown = True
-    }
-
+-- | Mean wall time and allocation per run after a short warmup. The clock
+-- stops before the second GC, which only brings the allocation counter current.
 measureBench :: String -> Int -> IO () -> IO ()
 measureBench name iters action = do
-  -- Warmup
   replicateM_ 5 action
   performGC
   s0 <- getRTSStats
@@ -83,12 +73,11 @@ measureBench name iters action = do
   t1 <- getMonotonicTimeNSec
   performGC
   s1 <- getRTSStats
-  let totalMs = (fromIntegral (t1 - t0) / 1e6) :: Double
-      avgMs = totalMs / fromIntegral iters
-      totalAlloc = fromIntegral (allocated_bytes s1 - allocated_bytes s0) :: Double
-      avgAllocKb = (totalAlloc / fromIntegral iters) / 1024.0
-  printf "%-32s : %8.3f ms/frame  |  %8.1f KB alloc/frame\n" name avgMs avgAllocKb
-  hFlush stdout
+  let perIter :: Double -> Double
+      perIter total = total / fromIntegral iters
+  printf "%-32s : %8.3f ms/frame  |  %8.1f KB alloc/frame\n" name
+    (perIter (fromIntegral (t1 - t0) / 1e6))
+    (perIter (fromIntegral (allocated_bytes s1 - allocated_bytes s0) / 1024))
 
 main :: IO ()
 main = do
@@ -103,7 +92,7 @@ main = do
     then fail "registerImage failed"
     else withSdlBench ctx0 $ \ctx sdlEnv -> do
       (ctx', inp) <- syncDisplay ctx sdlEnv profileInput
-      (_, inpAct) <- syncDisplay ctx sdlEnv profileInputActive
+      (_, inpAct) <- syncDisplay ctx sdlEnv profileInput {inputMouseDown = True}
 
       putStrLn "--- 1. FULL DEMO UI (Controls Tab, Idle vs Active Mouse) ---"
       measureBench "Full DemoUi (Idle, SDL Present)" iterations $
@@ -164,7 +153,7 @@ main = do
           active0 <- isDebugActive cadRef
           want0 <- takeDebugLive cadRef active0
           let wait0 = if want0 then 0 :: Int else if active0 then 250 else -1
-          printf "  plain window, no stats query : active=%-5s waitTimeout=%-3d (block; was 250 ms wake + 4 Hz full redraws)\n" (show active0) wait0
+          printf "  plain window, no stats query : active=%-5s waitTimeout=%-3d (blocks until the next event)\n" (show active0) wait0
           _ <- readSdlDebug cadRef (Size 1280 800) (V2 640 400) "profile" 1 "sdl" True 0
           active1 <- isDebugActive cadRef
           want1 <- takeDebugLive cadRef active1
@@ -186,45 +175,6 @@ main = do
                 inp (V2 (x + w / 2) (y + h / 2))
           stillOpen <- debugPanelOpen ctx'
           when stillOpen (fail "Debug window did not close after profiling")
-
-      putStrLn "--- 6. DEBUG HUD ROW STRUCTURE ---"
-      let hudRows :: [[(T.Text, T.Text)]]
-          hudRows =
-            [ [("present", " 119.9 fps"), ("loop", "2201.3 fps"), ("frame cpu", "0.45 ms"), ("haskell", "0.23 ms"), ("  ui", "0.12 ms"), ("  render", "0.11 ms"), ("sdl present", "0.20 ms"), ("draws", "1234"), ("skips", "7")]
-            , [("verts", "4706"), ("indices", "8123"), ("cmds", "19")]
-            , [("window", "1280x800"), ("scale", "1.00"), ("mouse", "640, 400"), ("renderer", "opengl")]
-            , [("heap", "12.3 MB"), ("threads", "120"), ("uptime", "00:12:34")]
-            ]
-          hudTitles = ["Frame", "Draw", "Display", "Runtime"] :: [T.Text]
-          hudKvUi =
-            void $ fst <$> window True "Debug" (columnWith (tight . gap 4 . minW 300 . fillW) $
-              foldr (\(t, rows) rest -> do
-                  void $ label t
-                  mapM_ (\(k, v) -> void (kvMono k v)) rows
-                  rest)
-                (pure ()) (zip hudTitles hudRows))
-          hudLabelUi =
-            void $ fst <$> window True "Debug" (columnWith (tight . gap 4 . minW 300 . fillW) $
-              foldr (\(t, rows) rest -> do
-                  void $ label t
-                  mapM_ (\(k, v) -> void (labelEx (tight . fontMono $ defaultLayout) (k <> "  " <> v))) rows
-                  rest)
-                (pure ()) (zip hudTitles hudRows))
-          hudBlockUi =
-            void $ fst <$> window True "Debug" (columnWith (tight . gap 4 . minW 300 . fillW) $
-              foldr (\(t, rows) rest -> do
-                  void $ label t
-                  let maxK = foldl' (\acc (k, _) -> max acc (T.length k)) 0 rows
-                  void $ labelEx (tight . gap 0 . fontMono $ defaultLayout)
-                    (T.unlines [T.justifyLeft maxK ' ' k <> "  " <> v | (k, v) <- rows])
-                  rest)
-                (pure ()) (zip hudTitles hudRows))
-      forM_ [("kvMono rows (current)" :: String, hudKvUi), ("one mono label/row", hudLabelUi), ("one block label/section", hudBlockUi)] $ \(name, ui) -> do
-        _ <- runFrame ctx' inp ui
-        (_, _, ddHud, _) <- runFrame ctx' inp ui
-        printf "  %-26s : verts=%5d cmds=%2d  " name (drawVertexCount ddHud) (drawCmdCount ddHud)
-        measureBench "frame" iterations $ void (runFrame ctx' inp ui)
-      putStrLn ""
 
       putStrLn "--- 2. DEMO TABS IN ISOLATION (Full runFrame + draw) ---"
       measureBench "Tab: Controls" iterations $
@@ -334,7 +284,9 @@ countDamageKinds ctx n act = go n (0, 0, 0)
           dmg <- takeDamage ctx
           case dmg of
             DamageFull -> go (k - 1) (f + 1, c, empty)
-            DamageClip _ -> go (k - 1) (f, c + 1, empty)
+            DamageClip (Rect _ _ w h)
+              | w <= 0 || h <= 0 -> go (k - 1) (f, c, empty + 1)
+              | otherwise -> go (k - 1) (f, c + 1, empty)
 
 --------------------------------------------------------------------------------
 -- Isolated Tab UIs

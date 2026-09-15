@@ -4,7 +4,6 @@
 
 module NanoUI.Diagrams.Backend
   ( NanoUIBackend (..)
-  , NanoUITextBackend (..)
   , B
   , diagramOps
   , diagramTextOps
@@ -75,18 +74,11 @@ import NanoUI.Diagrams.Tessellation
 data NanoUIBackend = NanoUIBackend
   deriving (Eq, Show)
 
-data NanoUITextBackend = NanoUITextBackend
-  deriving (Eq, Show)
-
 type B = NanoUIBackend
 
 type instance V NanoUIBackend = V2
 
 type instance N NanoUIBackend = Double
-
-type instance V NanoUITextBackend = V2
-
-type instance N NanoUITextBackend = Double
 
 fullSize :: Lens' (Options NanoUIBackend V2 n) (SizeSpec V2 n)
 fullSize f (NanoUIOptions sz textOnly) = fmap (\sz' -> NanoUIOptions sz' textOnly) (f sz)
@@ -101,29 +93,11 @@ instance (Typeable n, RealFloat n) => Backend NanoUIBackend V2 n where
    where
     (sz, t, d') = adjustDia2D fullSize c opts (d # reflectY)
 
-instance (Typeable n, RealFloat n) => Backend NanoUITextBackend V2 n where
-  newtype Render NanoUITextBackend V2 n = NRenderText (DiaCore.Style V2 n -> DList DrawOp)
-  type Result NanoUITextBackend V2 n = Vector DrawOp
-  data Options NanoUITextBackend V2 n = NanoUITextOptions (SizeSpec V2 n)
-  renderRTree _ _ rt = V.fromList (DL.toList (walkText mempty rt))
-  adjustDia c opts d = (sz, t <> reflectionY, d')
-   where
-    (sz, t, d') = adjustDia2D nanoTextSize c opts (d # reflectY)
-
-nanoTextSize :: Lens' (Options NanoUITextBackend V2 n) (SizeSpec V2 n)
-nanoTextSize f (NanoUITextOptions sz) = fmap NanoUITextOptions (f sz)
-
 instance Semigroup (Render NanoUIBackend V2 n) where
   NRenderFull f <> NRenderFull g = NRenderFull (\textOnly sty -> f textOnly sty <> g textOnly sty)
 
 instance Monoid (Render NanoUIBackend V2 n) where
   mempty = NRenderFull (\_ _ -> DL.empty)
-
-instance Semigroup (Render NanoUITextBackend V2 n) where
-  NRenderText f <> NRenderText g = NRenderText (\sty -> f sty <> g sty)
-
-instance Monoid (Render NanoUITextBackend V2 n) where
-  mempty = NRenderText (const DL.empty)
 
 walkFull ::
   (Typeable n, RealFloat n) =>
@@ -141,27 +115,11 @@ walkFull textOnly sty (Node n cs) =
     RStyle s -> foldMap (walkFull textOnly (sty <> s)) cs
     _ -> foldMap (walkFull textOnly sty) cs
 
-walkText ::
-  (Typeable n, RealFloat n) =>
-  DiaCore.Style V2 n -> RTree NanoUITextBackend V2 n Annotation -> DList DrawOp
-walkText sty (Node n cs) =
-  case n of
-    RPrim prim ->
-      let
-        NRenderText f = render NanoUITextBackend prim
-       in
-        f sty
-    RStyle s -> foldMap (walkText (sty <> s)) cs
-    _ -> foldMap (walkText sty) cs
-
 instance (Typeable n, RealFloat n) => Renderable (Path V2 n) NanoUIBackend where
   render _ path = NRenderFull $ \textOnly sty ->
     if textOnly
       then DL.empty
       else foldMap (DL.fromList . trailOps sty) (pathTrails path)
-
-instance RealFloat n => Renderable (Path V2 n) NanoUITextBackend where
-  render _ _ = NRenderText (const DL.empty)
 
 textOps ::
   (Typeable n, RealFloat n) => Text n -> DiaCore.Style V2 n -> DList DrawOp
@@ -187,9 +145,6 @@ textOps (Text tr align str) sty
 
 instance (Typeable n, RealFloat n) => Renderable (Text n) NanoUIBackend where
   render _ t = NRenderFull (const (textOps t))
-
-instance (Typeable n, RealFloat n) => Renderable (Text n) NanoUITextBackend where
-  render _ t = NRenderText (textOps t)
 
 trailOps ::
   (Typeable n, RealFloat n) =>

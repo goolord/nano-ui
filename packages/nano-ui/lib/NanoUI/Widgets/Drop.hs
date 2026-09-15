@@ -50,7 +50,7 @@ import NanoUI.Store
 import NanoUI.Style (Layout)
 import NanoUI.Types (Rect, V2 (..), rectContains)
 import NanoUI.Layout.Arena (NodeType (..))
-import NanoUI.Widgets.Node (Responding (respRect), Response, containerResponse)
+import NanoUI.Widgets.Node (Response, containerResponse, respRect)
 
 -- | Per-frame drop state for a single rectangular drop target.
 data DropTarget = DropTarget
@@ -90,24 +90,54 @@ useDrop bounds = do
   store <- uiIO (getStore ctx)
   let active0 = IM.findWithDefault 0 activeK (storeInt store) /= 0
       lastPos0 = fmap (\(x, y) -> V2 x y) (IM.lookup posK (storePoint store))
-      DropScan active1 lastPos1 filesRev textsRev =
-        V.foldl' (step bounds) (DropScan active0 lastPos0 [] []) (inputDrops inp)
-      files = reverse filesRev
-      texts = reverse textsRev
+      events = inputDrops inp
+      -- A drag is active from 'DropBegin' until 'DropComplete'.
+      active1 =
+        V.foldl'
+          ( \active ev -> case dropEventType ev of
+              DropBegin -> True
+              DropComplete -> False
+              _ -> active
+          )
+          active0
+          events
+      -- Tracked position after each event: only 'DropPosition' moves it and
+      -- 'DropComplete' clears it. Payload events leave it unchanged, so a
+      -- payload is attributed to the position at that point in the sequence,
+      -- not to the frame's final position.
+      positions =
+        V.postscanl'
+          ( \pos ev -> case dropEventType ev of
+              DropPosition -> maybe pos Just (dropEventPos ev)
+              DropComplete -> Nothing
+              _ -> pos
+          )
+          lastPos0
+          events
+      lastPos1 = if V.null positions then lastPos0 else V.last positions
+      payloads ty =
+        V.toList
+          ( V.map
+              (dropEventData . fst)
+              (V.filter (\(ev, pos) -> dropEventType ev == ty && posInside bounds pos) (V.zip events positions))
+          )
+      files = payloads DropFile
+      texts = payloads DropText
       hovered = active1 && posInside bounds lastPos1
-      lastPosStore1 = fmap (\(V2 x y) -> (x, y)) lastPos1
   when (active1 /= active0 || lastPos1 /= lastPos0) $
-    uiIO $ do
-      let sInt =
-            if active1
-              then IM.insert activeK 1 (storeInt store)
-              else IM.delete activeK (storeInt store)
-          sPoint =
-            maybe
-              (IM.delete posK (storePoint store))
-              (\p -> IM.insert posK p (storePoint store))
-              lastPosStore1
-      setStore ctx (store {storeInt = sInt, storePoint = sPoint})
+    uiIO $
+      getStore ctx >>= \st -> setStore ctx $
+        st
+          { storeInt =
+              if active1
+                then IM.insert activeK 1 (storeInt st)
+                else IM.delete activeK (storeInt st)
+          , storePoint =
+              maybe
+                (IM.delete posK (storePoint st))
+                (\(V2 x y) -> IM.insert posK (x, y) (storePoint st))
+                lastPos1
+          }
   pure
     DropTarget
       { dropHovered = hovered
@@ -117,27 +147,8 @@ useDrop bounds = do
       , dropPosition = lastPos1
       }
 
--- | Position tracking plus payloads collected while scanning a frame's events.
--- A target only remembers the drag position reported by 'DropPosition' events;
--- payload coordinates are never folded back into the tracked position.
-data DropScan = DropScan !Bool !(Maybe V2) ![Text] ![Text]
-
 posInside :: Rect -> Maybe V2 -> Bool
 posInside bounds = maybe False (rectContains bounds)
-
-step :: Rect -> DropScan -> DropEvent -> DropScan
-step bounds (DropScan active lastPos filesRev textsRev) ev =
-  case dropEventType ev of
-    DropBegin -> DropScan True lastPos filesRev textsRev
-    DropComplete -> DropScan False Nothing filesRev textsRev
-    DropPosition ->
-      DropScan active (maybe lastPos Just (dropEventPos ev)) filesRev textsRev
-    DropFile ->
-      let hit = posInside bounds lastPos
-       in DropScan active lastPos (if hit then dropEventData ev : filesRev else filesRev) textsRev
-    DropText ->
-      let hit = posInside bounds lastPos
-       in DropScan active lastPos filesRev (if hit then dropEventData ev : textsRev else textsRev)
 
 -- | Run an action when a payload was dropped on the target this frame.
 onDrop :: DropTarget -> Eff es () -> Eff es ()

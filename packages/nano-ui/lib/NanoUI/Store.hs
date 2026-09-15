@@ -51,6 +51,9 @@ module NanoUI.Store
   , slotPaneMax
   , slotPaneResize
   , slotPaneNext
+  , slotRadioInit
+  , slotSelectSeen
+  , slotColorBase
   , boolInt
   , intBool
   , anySelectOpen
@@ -59,8 +62,6 @@ module NanoUI.Store
   , closeSelects
   , ptrEq
   , eqByPtr
-  , eqDynMap
-  , allSlotTags
   , deleteWidgetState
   )
 where
@@ -171,110 +172,183 @@ bumpMirror st = st {storeMirrorGen = storeMirrorGen st + 1}
 slotKey :: Word64 -> Int -> Int
 slotKey tag k = fromIntegral (mix64 (fromIntegral k) tag)
 
+-- | Every built-in slot. 'deleteWidgetState' clears all of them, so a new slot
+-- only needs a constructor here to be cleaned up with its widget.
+data Slot
+  = SlotDisabled
+  | SlotCursor
+  | SlotAnchor
+  | SlotDrag
+  | SlotDragW
+  | SlotDrop
+  | SlotDropPos
+  | SlotWinSize
+  | SlotMenuOpen
+  | SlotMenuPos
+  | SlotScrollCfg
+  | SlotScrollOff
+  | SlotScrollCross
+  | SlotScrollLinkX
+  | SlotScrollLinkY
+  | SlotScrollContent
+  | SlotTextAreaRow
+  | SlotTextAreaCol
+  | SlotTextAreaPrefCol
+  | SlotTextAreaScroll
+  | SlotTextAreaViewport
+  | SlotTextAreaAnchorRow
+  | SlotTextAreaAnchorCol
+  | SlotTextAreaContentW
+  | SlotTextAreaContentH
+  | SlotTextAreaContentFont
+  | SlotTextAreaBuffer
+  | SlotTextAreaChanged
+  | SlotTextInputScroll
+  | SlotSearchCommitted
+  | SlotSearchAge
+  | SlotComboHighlight
+  | SlotComboScroll
+  | SlotComboCount
+  | SlotComboScrollX
+  | SlotComboContentW
+  | SlotComboDrag
+  | SlotComboDragOff
+  | SlotComboCommitted
+  | SlotComboFocus
+  | SlotComboLive
+  | SlotPaneGest
+  | SlotPaneGrab
+  | SlotPaneFocus
+  | SlotPaneMax
+  | SlotPaneResize
+  | SlotPaneNext
+  | SlotRadioInit
+  | SlotSelectSeen
+  | SlotColorBase
+  deriving (Enum, Bounded)
+
+-- | Tag for a built-in slot: the constructor index mixed with a salt, so tags
+-- are well spread and distinct from small ad-hoc tags passed to 'slotKey'.
+{-# INLINE slotTag #-}
+slotTag :: Slot -> Word64
+slotTag s = mix64 0x534C4F5454414753 (fromIntegral (fromEnum s))
+
+-- | The initial selection a radio group was last rendered with.
+slotRadioInit :: Word64
+slotRadioInit = slotTag SlotRadioInit
+
+-- | The index a select last reported, so 'respChanged' fires only on change.
+slotSelectSeen :: Word64
+slotSelectSeen = slotTag SlotSelectSeen
+
+-- | A colour picker's opening colour.
+slotColorBase :: Word64
+slotColorBase = slotTag SlotColorBase
+
 slotDisabled :: Word64
-slotDisabled = 0xD15AB1ED00000001
+slotDisabled = slotTag SlotDisabled
 
 slotCursor :: Word64
-slotCursor = 0xC025000100000002
+slotCursor = slotTag SlotCursor
 
 slotAnchor :: Word64
-slotAnchor = 0xA4C4000200000003
+slotAnchor = slotTag SlotAnchor
 
 slotDrag :: Word64
-slotDrag = 0xD2A6000400000004
+slotDrag = slotTag SlotDrag
 
 slotDragW :: Word64
-slotDragW = 0xD2A6000500000005
+slotDragW = slotTag SlotDragW
 
 slotDrop :: Word64
-slotDrop = 0xD20D000000000018
+slotDrop = slotTag SlotDrop
 
 slotDropPos :: Word64
-slotDropPos = 0xD20D000000000019
+slotDropPos = slotTag SlotDropPos
 
 slotWinSize :: Word64
-slotWinSize = 0x5712E00600000006
+slotWinSize = slotTag SlotWinSize
 
 slotMenuOpen :: Word64
-slotMenuOpen = 0x4D454E5500000007
+slotMenuOpen = slotTag SlotMenuOpen
 
 slotMenuPos :: Word64
-slotMenuPos = 0x4D454E5500000008
+slotMenuPos = slotTag SlotMenuPos
 
 slotScrollCfg :: Word64
-slotScrollCfg = 0x5343524346000009
+slotScrollCfg = slotTag SlotScrollCfg
 
 slotScrollOff :: Word64
-slotScrollOff = 0x53434F464600000A
+slotScrollOff = slotTag SlotScrollOff
 
 slotScrollCross :: Word64
-slotScrollCross = 0x5343524F5800000C
+slotScrollCross = slotTag SlotScrollCross
 
 slotScrollLinkX :: Word64
-slotScrollLinkX = 0x534C4E4B5800000D
+slotScrollLinkX = slotTag SlotScrollLinkX
 
 slotScrollLinkY :: Word64
-slotScrollLinkY = 0x534C4E4B5900000E
+slotScrollLinkY = slotTag SlotScrollLinkY
 
 slotScrollContent :: Word64
-slotScrollContent = 0x534352435400000B
+slotScrollContent = slotTag SlotScrollContent
 
 slotTextAreaRow :: Word64
-slotTextAreaRow = 0x5441524100000010
+slotTextAreaRow = slotTag SlotTextAreaRow
 
 slotTextAreaCol :: Word64
-slotTextAreaCol = 0x5441524100000011
+slotTextAreaCol = slotTag SlotTextAreaCol
 
 slotTextAreaPrefCol :: Word64
-slotTextAreaPrefCol = 0x5441524100000012
+slotTextAreaPrefCol = slotTag SlotTextAreaPrefCol
 
 slotTextAreaScroll :: Word64
-slotTextAreaScroll = 0x5441524100000013
+slotTextAreaScroll = slotTag SlotTextAreaScroll
 
 slotTextAreaViewport :: Word64
-slotTextAreaViewport = 0x5441524100000014
+slotTextAreaViewport = slotTag SlotTextAreaViewport
 
 slotTextAreaAnchorRow :: Word64
-slotTextAreaAnchorRow = 0x5441524100000015
+slotTextAreaAnchorRow = slotTag SlotTextAreaAnchorRow
 
 slotTextAreaAnchorCol :: Word64
-slotTextAreaAnchorCol = 0x5441524100000016
+slotTextAreaAnchorCol = slotTag SlotTextAreaAnchorCol
 
 -- | Cached text-area content extent (max line width, line count * line
 -- height) and the node font size they were measured at. Recomputing the width
 -- scans every character of the document, so it is cached and only refreshed
 -- when the text or font changes.
 slotTextAreaContentW :: Word64
-slotTextAreaContentW = 0x5441524100000018
+slotTextAreaContentW = slotTag SlotTextAreaContentW
 
 slotTextAreaContentH :: Word64
-slotTextAreaContentH = 0x5441524100000019
+slotTextAreaContentH = slotTag SlotTextAreaContentH
 
 slotTextAreaContentFont :: Word64
-slotTextAreaContentFont = 0x544152410000001A
+slotTextAreaContentFont = slotTag SlotTextAreaContentFont
 
 -- | Cached 'TextBuffer' for the text area, keyed by its flat 'Text'. Loads and
 -- paint reuse it so the document is not re-split into lines every call.
 slotTextAreaBuffer :: Word64
-slotTextAreaBuffer = 0x544152410000001C
+slotTextAreaBuffer = slotTag SlotTextAreaBuffer
 
 -- | Set (value 1) to signal that the text area's text changed through a path
 -- that does not flow through 'Input' (e.g. a context-menu cut/paste). The
 -- text area widget reads and clears this on its next frame, so the caller
 -- still gets a 'respChanged' pulse for edits that carry no keys or chars.
 slotTextAreaChanged :: Word64
-slotTextAreaChanged = 0x544152410000001D
+slotTextAreaChanged = slotTag SlotTextAreaChanged
 
 slotTextInputScroll :: Word64
-slotTextInputScroll = 0x54494E5000000017
+slotTextInputScroll = slotTag SlotTextInputScroll
 
 -- Search-field debounce bookkeeping. Text slots on the text widget id: the last
 -- committed query and the monotonic timestamp of the last edit.
 slotSearchCommitted :: Word64
-slotSearchCommitted = 0x534541524300001D
+slotSearchCommitted = slotTag SlotSearchCommitted
 
 slotSearchAge :: Word64
-slotSearchAge = 0x534541524700001B
+slotSearchAge = slotTag SlotSearchAge
 
 -- Combo box suggestion state (storeInt/storeFloat, keyed by the field
 -- widget): the highlighted option index (absolute into the filtered list),
@@ -283,70 +357,70 @@ slotSearchAge = 0x534541524700001B
 -- widget's thumb-drag gesture share (total filtered count, widest row, x
 -- offset, drag axis + grab offset).
 slotComboHighlight :: Word64
-slotComboHighlight = 0x434F4D424F000030
+slotComboHighlight = slotTag SlotComboHighlight
 
 slotComboScroll :: Word64
-slotComboScroll = 0x434F4D424F000031
+slotComboScroll = slotTag SlotComboScroll
 
 slotComboCount :: Word64
-slotComboCount = 0x434F4D424F000032
+slotComboCount = slotTag SlotComboCount
 
 slotComboScrollX :: Word64
-slotComboScrollX = 0x434F4D424F000033
+slotComboScrollX = slotTag SlotComboScrollX
 
 slotComboContentW :: Word64
-slotComboContentW = 0x434F4D424F000034
+slotComboContentW = slotTag SlotComboContentW
 
 slotComboDrag :: Word64
-slotComboDrag = 0x434F4D424F000035
+slotComboDrag = slotTag SlotComboDrag
 
 slotComboDragOff :: Word64
-slotComboDragOff = 0x434F4D424F000036
+slotComboDragOff = slotTag SlotComboDragOff
 
 -- The last committed value (storeText): typing edits the live field text but
 -- only Enter, a row click, or losing focus commits it (Escape reverts).
 slotComboCommitted :: Word64
-slotComboCommitted = 0x434F4D424F000037
+slotComboCommitted = slotTag SlotComboCommitted
 
 -- Had-focus flag (storeInt) so the widget can see the focus-lost transition
 -- on the frame after blur and commit then.
 slotComboFocus :: Word64
-slotComboFocus = 0x434F4D424F000038
+slotComboFocus = slotTag SlotComboFocus
 
 -- The field text as the widget last produced it (storeText): a frame-start
 -- value that differs from it changed externally (a frame-side row pick or a
 -- clipboard menu action), not by typing.
 slotComboLive :: Word64
-slotComboLive = 0x434F4D424F000039
+slotComboLive = slotTag SlotComboLive
 
 -- PaneGrid gesture slot (storeInt): 0 none, positive = dragged pane id,
 -- negative = split id being resized. Mirrors slotDrag's press-held-release
 -- lifecycle but keyed by the grid widget instead of a per-pane leaf.
 slotPaneGest :: Word64
-slotPaneGest = 0x50414E450000001C
+slotPaneGest = slotTag SlotPaneGest
 
 -- PaneGrid drag grab offset (storePoint): (mouse - pane origin) at grab start.
 slotPaneGrab :: Word64
-slotPaneGrab = 0x50414E450000001D
+slotPaneGrab = slotTag SlotPaneGrab
 
 -- PaneGrid keyboard-navigation focus: focused pane id (0 = none, auto-first).
 slotPaneFocus :: Word64
-slotPaneFocus = 0x50414E450000001E
+slotPaneFocus = slotTag SlotPaneFocus
 
 -- PaneGrid maximize state: maximized pane id (0 = none).
 slotPaneMax :: Word64
-slotPaneMax = 0x50414E450000001F
+slotPaneMax = slotTag SlotPaneMax
 
 -- PaneGrid resize start (storePoint): (ratio, main-axis mouse) captured when a
 -- divider is first grabbed, so dragging moves it by delta rather than snapping.
 slotPaneResize :: Word64
-slotPaneResize = 0x50414E4500000020
+slotPaneResize = slotTag SlotPaneResize
 
 -- PaneGrid id seed (storeInt): next split / pane id to allocate. Strictly
 -- monotonic per grid — ids are never reused, so per-pane state keyed by pane
 -- id cannot collide with a closed pane's state.
 slotPaneNext :: Word64
-slotPaneNext = 0x50414E4500000021
+slotPaneNext = slotTag SlotPaneNext
 
 boolInt :: Bool -> Int
 boolInt b = if b then 1 else 0
@@ -374,63 +448,11 @@ setSelectOpen st k False
 closeSelects :: WidgetStore -> WidgetStore
 closeSelects st = st {storeOpenSelect = 0}
 
--- | All built-in slot tags used across widgets.
-allSlotTags :: [Word64]
-allSlotTags =
-  [ slotDisabled
-  , slotCursor
-  , slotAnchor
-  , slotDrag
-  , slotDragW
-  , slotDrop
-  , slotDropPos
-  , slotWinSize
-  , slotMenuOpen
-  , slotMenuPos
-  , slotScrollCfg
-  , slotScrollOff
-  , slotScrollCross
-  , slotScrollLinkX
-  , slotScrollLinkY
-  , slotScrollContent
-  , slotTextAreaRow
-  , slotTextAreaCol
-  , slotTextAreaPrefCol
-  , slotTextAreaScroll
-  , slotTextAreaViewport
-  , slotTextAreaAnchorRow
-  , slotTextAreaAnchorCol
-  , slotTextAreaContentW
-  , slotTextAreaContentH
-  , slotTextAreaContentFont
-  , slotTextAreaBuffer
-  , slotTextAreaChanged
-  , slotTextInputScroll
-  , slotSearchCommitted
-  , slotSearchAge
-  , slotComboHighlight
-  , slotComboScroll
-  , slotComboCount
-  , slotComboScrollX
-  , slotComboContentW
-  , slotComboDrag
-  , slotComboDragOff
-  , slotComboCommitted
-  , slotComboFocus
-  , slotComboLive
-  , slotPaneGest
-  , slotPaneGrab
-  , slotPaneFocus
-  , slotPaneMax
-  , slotPaneResize
-  , slotPaneNext
-  ]
-
 -- | Remove all stored state across all slots for the given widget id.
 deleteWidgetState :: WidgetId -> WidgetStore -> WidgetStore
 deleteWidgetState wid store =
   let !k0 = fromIntegral (hashWidgetId wid)
-      !keys = k0 : [slotKey tag k0 | tag <- allSlotTags]
+      !keys = k0 : [slotKey (slotTag s) k0 | s <- [minBound .. maxBound]]
       delKeys :: IntMap a -> IntMap a
       delKeys m = foldl' (flip IM.delete) m keys
    in store

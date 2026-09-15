@@ -3,20 +3,14 @@
 
 -- | Layout and visual helpers shared by Table, Tabs, Tree, and Radio.
 module NanoUI.Widgets.Combinators
-  ( gridColumns
-  , gridColumnsLay
-  , syncScroll
-  , headerRow
-  , indentedRow
+  ( gridColumnsLay
   , stripedRow
   , buttonStyled
   , buttonStyledEx
   , selectableItem
-  , keyedRow
-  , listAt
+  , withBoundedIndex
   , fitList
   , listClipper
-  , virtualIndices
   , setAt
   , normalizeOrder
   , visibleCols
@@ -31,27 +25,19 @@ where
 import Control.Monad (void, when)
 import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
-import Data.Maybe (fromMaybe, listToMaybe)
+import Data.Maybe (listToMaybe)
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
-import NanoUI.Context (getScrollOffset, isDisabled, registerFocusable, setScrollOffset)
-import NanoUI.Id (WidgetId (..))
+import NanoUI.Context (isDisabled, registerFocusable)
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, nextId, uiIO, withKey)
-import NanoUI.Style
-  ( Layout (..)
-  , Sizing (..)
-  , defaultLayout
-  , fillW
-  , tight
-  )
+import NanoUI.Style (Layout (..))
 import NanoUI.Types (Rect (..), V2 (..), rectContains, v2X, v2Y)
 import NanoUI.Widgets.Behavior (keyActivated)
 import NanoUI.Widgets.Layout
   ( column'
   , row'
   , separator
-  , spacer
   )
 import NanoUI.Widgets.Node
   ( Response (..)
@@ -59,10 +45,6 @@ import NanoUI.Widgets.Node
   , rawRespRect
   , setClicked
   )
-
--- | One row of cells keyed by caller ids (column index, not visible position).
-gridColumns :: (Ui :> es) => [Int] -> [Layout] -> [Eff es ()] -> Eff es ()
-gridColumns = gridColumnsLay (tight $ defaultLayout {layoutGap = 0})
 
 -- | One row of cells with custom row layout.
 gridColumnsLay :: (Ui :> es) => Layout -> [Int] -> [Layout] -> [Eff es ()] -> Eff es ()
@@ -75,24 +57,6 @@ gridColumnsLay lay keys layouts cells =
     void (withKey key (column' layout cell))
     go False moreKeys moreLayouts moreCells
   go _ _ _ _ = pure ()
-
--- | Copy vertical scroll offset from master to slave.
-syncScroll :: (Ui :> es) => WidgetId -> WidgetId -> Eff es ()
-syncScroll master slave = do
-  ctx <- askContext
-  uiIO $ do
-    off <- getScrollOffset ctx master
-    setScrollOffset ctx slave off
-
-headerRow :: (Ui :> es) => Layout -> Eff es a -> Eff es a
-headerRow = row'
-
-indentedRow :: (Ui :> es) => Int -> Layout -> Eff es a -> Eff es a
-indentedRow depth layout child =
-  row' layout $ do
-    when (depth > 0) $
-      void (spacer (Fixed (fromIntegral depth * 12)) Fit)
-    child
 
 stripedRow :: (Ui :> es) => Int -> Layout -> Text -> Eff es Response
 stripedRow rowIdx layout txt = do
@@ -141,8 +105,18 @@ selectableItem nt txt selected layout styleIdx = do
     styleIdx
     Nothing
 
-keyedRow :: (Ui :> es) => [Int] -> (Int -> Eff es a) -> Eff es [a]
-keyedRow = keyedRowLay (tight . fillW $ defaultLayout {layoutGap = 0})
+-- | Run an index-based picker over every value of a bounded enum. Indices
+-- are offset by @fromEnum minBound@, so enums that do not start at 0 map
+-- correctly. Meant for small enums: every value becomes an option.
+withBoundedIndex ::
+  forall a r f.
+  (Bounded a, Enum a, Functor f) =>
+  (a -> Text) -> a -> ([Text] -> Int -> f (r, Int)) -> f (r, a)
+withBoundedIndex encode initial pick =
+  fmap (toEnum . (+ lower))
+    <$> pick (map encode [minBound .. maxBound]) (fromEnum initial - lower)
+  where
+    lower = fromEnum (minBound :: a)
 
 keyedRowLay :: (Ui :> es) => Layout -> [Int] -> (Int -> Eff es a) -> Eff es [a]
 keyedRowLay lay keys act =
@@ -154,12 +128,11 @@ keyedRowLay lay keys act =
       )
       (zip [0 :: Int ..] keys)
 
-listAt :: [a] -> Int -> a -> a
-listAt xs i fallback = fromMaybe fallback (listToMaybe (drop i xs))
-
 fitList :: Int -> a -> [a] -> [a]
 fitList n fallback xs = take n (xs ++ repeat fallback)
 
+-- | First and last visible item index for a uniform-height list, or
+-- @(0, -1)@ when nothing is visible.
 {-# INLINE listClipper #-}
 listClipper :: Int -> Float -> Float -> Float -> (Int, Int)
 listClipper itemCount scrollOff viewH itemH
@@ -168,12 +141,6 @@ listClipper itemCount scrollOff viewH itemH
       let firstVis = max 0 (floor (scrollOff / itemH))
           lastVis = min (itemCount - 1) (floor ((scrollOff + viewH - 1) / itemH))
        in if lastVis < firstVis then (0, -1) else (firstVis, lastVis)
-
-{-# INLINE virtualIndices #-}
-virtualIndices :: Int -> Float -> Float -> Float -> [Int]
-virtualIndices n scrollOff viewH itemH =
-  let (lo, hi) = listClipper n scrollOff viewH itemH
-   in if hi < lo then [] else [lo .. hi]
 
 setAt :: Int -> a -> [a] -> [a]
 setAt i x xs

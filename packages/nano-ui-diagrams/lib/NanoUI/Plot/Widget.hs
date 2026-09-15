@@ -18,7 +18,6 @@ import Effectful (Eff, type (:>))
 import NanoUI
   ( FontMetrics
   , Layout
-  , Responding (..)
   , Theme
   , Ui
   , WidgetId
@@ -26,11 +25,13 @@ import NanoUI
   , uiMousePos
   , uiTheme
   , prepareFontMetricsMany
+  , respRect
   )
 import NanoUI.Context (Context (..), WidgetStore (..), getStore, intKey, setStore)
 import NanoUI.Monad (askContext, nextId, uiIO)
 import NanoUI.Diagrams.Backend (B)
 import NanoUI.Diagrams.Widget (PlotStyle, diagramWithKeyAndEnvelope, uiPlotStyle)
+import NanoUI.Plot.Builder qualified as Builder
 import NanoUI.Plot.Chrome (chartDiagram, seriesDomains)
 import NanoUI.Plot.Scale (formatTick, niceTicks)
 import NanoUI.Plot.Hit (hitTestChartCached)
@@ -38,7 +39,6 @@ import NanoUI.Plot.Series (area, bar, line, scatter)
 import NanoUI.Plot.Types
   ( Chart (..)
   , Series (..)
-  , GridMode (..)
   , LegendPos (..)
   , PlotResponse (..)
   )
@@ -95,57 +95,18 @@ plot layout chart = do
   pure PlotResponse {plotResponse = resp, plotHover = hover}
 
 lineChart :: Ui :> es => Layout -> [(Double, Double)] -> Eff es PlotResponse
-lineChart layout pts =
-  plot
-    layout
-    Chart
-      { chartTitle = Nothing
-      , chartXTitle = Nothing
-      , chartYTitle = Nothing
-      , chartSeries = [line "series" pts]
-      , chartLegend = LegendNone
-      , chartGrid = GridBoth
-      , chartDecimate = True
-      }
+lineChart layout pts = plot layout (singleSeries True (line "series" pts))
 
 barChart :: Ui :> es => Layout -> [(Text, Double)] -> Eff es PlotResponse
-barChart layout pts =
-  plot
-    layout
-    Chart
-      { chartTitle = Nothing
-      , chartXTitle = Nothing
-      , chartYTitle = Nothing
-      , chartSeries = [bar "series" pts]
-      , chartLegend = LegendNone
-      , chartGrid = GridBoth
-      , chartDecimate = False
-      }
+barChart layout pts = plot layout (singleSeries False (bar "series" pts))
 
 scatterChart :: Ui :> es => Layout -> [(Double, Double)] -> Eff es PlotResponse
-scatterChart layout pts =
-  plot
-    layout
-    Chart
-      { chartTitle = Nothing
-      , chartXTitle = Nothing
-      , chartYTitle = Nothing
-      , chartSeries = [scatter "series" pts]
-      , chartLegend = LegendNone
-      , chartGrid = GridBoth
-      , chartDecimate = False
-      }
+scatterChart layout pts = plot layout (singleSeries False (scatter "series" pts))
 
 areaChart :: Ui :> es => Layout -> [(Double, Double)] -> Eff es PlotResponse
-areaChart layout pts =
-  plot
-    layout
-    Chart
-      { chartTitle = Nothing
-      , chartXTitle = Nothing
-      , chartYTitle = Nothing
-      , chartSeries = [area "series" pts]
-      , chartLegend = LegendNone
-      , chartGrid = GridBoth
-      , chartDecimate = True
-      }
+areaChart layout pts = plot layout (singleSeries True (area "series" pts))
+
+-- | A gridded chart of one series without a legend, optionally decimated.
+singleSeries :: Bool -> Series -> Chart
+singleSeries decimate s =
+  Builder.withDecimate decimate (Builder.withLegend LegendNone (Builder.chart [s]))

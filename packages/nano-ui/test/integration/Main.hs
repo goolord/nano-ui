@@ -47,8 +47,6 @@ testSpecs =
       False
       runCompositeAnimationIsolationTest
   , TestSpec "checkbox-emit-keyboard" False runCheckboxEmitKeyboardTest
-  , TestSpec "id-uniqueness" False runIdUniquenessTest
-  , TestSpec "id-zero-alloc" False runIdZeroAllocTest
   , TestSpec "id-keyed-list" False runIdKeyedListTest
   , TestSpec "fit-sizing" False runFitSizingTest
   , TestSpec "fit-muted-width" False runFitMutedWidthTest
@@ -120,6 +118,7 @@ testSpecs =
   , TestSpec "image" False runImageTest
   , TestSpec "atlas-growth" False runAtlasGrowthTest
   , TestSpec "text-input-clipboard" False runTextInputClipboardTest
+  , TestSpec "text-input-password" False runTextInputPasswordTest
   , TestSpec "text-input-cut-menu" False runTextInputCutMenuTest
   , TestSpec "text-input-menu" False runTextInputMenuTest
   , TestSpec "text-input-menu-unfocused" False runTextInputMenuUnfocusedTest
@@ -138,7 +137,7 @@ testSpecs =
   , TestSpec "hover-damage" False runHoverDamageTest
   , TestSpec "scroll-damage" False runScrollDamageTest
   , TestSpec "damage-bounds-resolution" False runDamageBoundsResolutionTest
-  , TestSpec "damage-bounds-monoid" False runDamageBoundsMonoidTest
+  , TestSpec "damage-bounds-union" False runDamageBoundsUnionTest
   , TestSpec "damage-widget-explicit" False runExplicitDamageWidgetTest
   , TestSpec "damage-rect-explicit" False runExplicitDamageRectTest
   , TestSpec "damage-full-explicit" False runExplicitDamageFullTest
@@ -166,6 +165,7 @@ testSpecs =
   , TestSpec "select-overlay-damage" False runSelectOverlayDamageTest
   , TestSpec "text-input-dirty" False runTextInputDirtyTest
   , TestSpec "text-input-word-keys" False runTextInputWordKeysTest
+  , TestSpec "text-area-alt-word-keys" False runTextAreaAltWordKeysTest
   , TestSpec "search-field-clear" False runSearchFieldClearTest
   , TestSpec "search-field-debounce" False runSearchFieldDebounceTest
   , TestSpec "combo-initial" False runComboInitialTest
@@ -180,6 +180,7 @@ testSpecs =
   , TestSpec "combo-wheel-x" False runComboWheelXTest
   , TestSpec "combo-wheel-scroll" False runComboWheelScrollTest
   , TestSpec "combo-word-keys" False runComboWordKeysTest
+  , TestSpec "combo-step" False runComboStepTest
   , TestSpec "modal-close-damage" False runModalCloseDamageTest
   , TestSpec "modal-open-damage" False runModalOpenDamageTest
   , TestSpec "window-close-damage" False runWindowCloseDamageTest
@@ -200,6 +201,7 @@ testSpecs =
   , TestSpec "animation-spring-dt" False runAnimationSpringDtTest
   , TestSpec "animation-spring-hold" False runAnimationSpringHoldTest
   , TestSpec "animation-spring-a" False runAnimationSpringATest
+  , TestSpec "animatable-color-padding" False runAnimatableColorPaddingTest
   , TestSpec "checkbox-toggle" False runCheckboxTest
   , TestSpec "checkbox-initial" False runCheckboxInitialTest
   , TestSpec "slider-store" True runSliderTest
@@ -233,6 +235,7 @@ testSpecs =
   , TestSpec "select-pick-low" False runSelectPickLowTest
   , TestSpec "select-drag-to-select" False runSelectDragToSelectTest
   , TestSpec "select-keyboard" False runSelectKeyboardTest
+  , TestSpec "select-change-once" False runSelectChangeOnceTest
   , TestSpec "tree-initial" False runTreeInitialTest
   , TestSpec "tree-select" False runTreeSelectTest
   , TestSpec "tree-keyboard" False runTreeKeyboardTest
@@ -254,6 +257,7 @@ testSpecs =
   , TestSpec "color-picker-hold" True runColorPickerHoldTest
   , TestSpec "color-picker-rgba" True runColorPickerRgbaTest
   , TestSpec "color-picker-edit" True runColorPickerEditTest
+  , TestSpec "color-picker-change-once" True runColorPickerChangeOnceTest
   , TestSpec "scroll-grow-click" True runScrollButtonClickSdlTest
   , TestSpec "scroll-bar-gutter" False runScrollBarGutterTest
   , TestSpec "scroll-bar-gutter-grow" True runGrowScrollGutterTest
@@ -272,6 +276,7 @@ testSpecs =
   , TestSpec "tabs-damage" False runTabsDamageTest
   , TestSpec "tabs-content-damage" False runTabsContentDamageTest
   , TestSpec "tabs-in-panel-damage" False runTabsInPanelDamageTest
+  , TestSpec "tab-response-forwarding" False runTabResponseForwardingTest
   , TestSpec "panel-body-swap-damage" False runPanelBodySwapDamageTest
   , TestSpec "host-slot" False runHostSlotTest
   , TestSpec "compact-host" False runCompactHostTest
@@ -317,6 +322,7 @@ testSpecs =
   , TestSpec "custom-widget-measure" False runCustomWidgetMeasureTest
   , TestSpec "custom-widget-cursor" False runCustomWidgetCursorTest
   , TestSpec "custom-widget-interaction" False runCustomWidgetInteractionTest
+  , TestSpec "custom-widget-queued-click" False runCustomWidgetQueuedClickTest
   , TestSpec "custom-widget-knob" False runReferenceKnobTest
   , TestSpec "custom-widget-toggle" False runReferenceToggleSwitchTest
   , TestSpec "custom-widget-progress-bar" False runReferenceProgressBarTest

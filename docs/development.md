@@ -23,6 +23,36 @@ Warnings are enabled in each package's Cabal file. The workspace adds
 `-Werror` for the core, SDL, diagrams, and demo packages; published packages
 do not force downstream builds to treat compiler warnings as errors.
 
+### Optimization and compile time
+
+Packages build at Cabal's default `-O1`. A clean `-j1` build of the core
+library takes about 57 s, against 4 min 25 s for the earlier `-O2`
+configuration, and the headless frame profiler
+(`cabal run nano-ui-profile -- +RTS -s`) runs about 3% faster than that build.
+For release profiling, opt in locally through `cabal.project.local`:
+
+```cabal
+package nano-ui
+  optimization: 2
+```
+
+Keep the following in mind when touching hot code:
+
+- Reserve `{-# INLINE #-}` for small bodies (a few lines) and for helpers in
+  per-vertex, per-glyph, or per-node inner loops. An INLINE body is copied
+  into every call site and into the interface file, so a large one multiplies
+  simplifier work and recompiles every importer when it changes. Measured on
+  the core: small per-widget wrappers such as `buttonStyledEx` and
+  `addWidgetStyled` pay for themselves, while inlining the large
+  `resolveInteraction` and `addNode` bodies into every widget bought about 3%
+  of frame time for 11 s of a 57 s clean build.
+- Do not add `-fspecialise-aggressively`, `-flate-specialise`,
+  `-fmax-worker-args`, or `-funbox-strict-fields` to the project: together
+  they made the core slower at runtime as well as slower to build.
+- Check compile-time regressions with
+  `cabal build <target> --ghc-options="-ddump-timings -ddump-to-file"`
+  and compare the per-module `*.dump-timings` files.
+
 For a shorter feedback cycle, select the affected suite:
 
 ```sh
@@ -49,8 +79,8 @@ cabal run nano-ui-sdl-demo -- --selftest
 ## Source release checks
 
 Run `cabal check` in each package directory, then `cabal sdist all` from the
-workspace. The core, SDL examples, and demo deliberately use `-O2`; Cabal
-reports an advisory warning for that option.
+workspace. Packages do not force an optimization level, so `cabal check`
+should report no optimization warnings.
 
 Verify the generated archives as well as the checkout. In particular, SDL's
 private C headers belong in `extra-source-files`: `include-dirs` alone does
@@ -167,6 +197,11 @@ Paths below are relative to `packages/`; Haskell modules live under `lib/`.
 - Prefer the existing list/vector APIs and library combinators over parallel
   implementations. Keep specialized storage and native kernels tied to their
   measured hot paths.
+- Write code inline rather than introducing small helpers. A new function
+  should remove real duplication (several lines repeated at several call
+  sites) or name a genuinely non-obvious computation; one-line aliases, thin
+  re-wrappers, and functions used once or twice make readers look up a name
+  without removing any complexity.
 - Add regression tests for observable behavior and failure cases. Core cases
   live in `nano-ui/test/integration/Cases/` and are registered in `Main.hs`
   and the package's Cabal `other-modules` list.

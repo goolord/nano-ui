@@ -27,9 +27,6 @@ common extensions
         ScopedTypeVariables
         UnboxedTuples
 
-common ghc-options
-    ghc-options: -Wall -Widentities
-
 common rts-options
     ghc-options:
         -rtsopts
@@ -38,6 +35,10 @@ common rts-options
 
 common test-rts-options
     ghc-options: -rtsopts -threaded "-with-rtsopts=-A8m -H64m -K128m -T"
+
+-- Tests, benchmarks and executables also reject dependencies they never import.
+common unused-packages
+    ghc-options: -Wunused-packages
 
 common warnings
   ghc-options:
@@ -55,7 +56,6 @@ common warnings
 library
     import:           extensions
     import:           warnings
-    ghc-options:      -O2
     exposed-modules:
         NanoUI
         NanoUI.Context
@@ -73,6 +73,7 @@ library
         NanoUI.Testing.Runner
         NanoUI.Widgets.TextBuffer
         NanoUI.Widgets.TextArea
+        NanoUI.Widgets.Combo
         NanoUI.Widgets.Custom
         NanoUI.Widgets.PaneGrid
         NanoUI.Widgets.SplitPane
@@ -87,12 +88,21 @@ library
         NanoUI.Animation
         NanoUI.Atlas
         NanoUI.Compact
+        NanoUI.Context.Animation
+        NanoUI.Context.Core
+        NanoUI.Context.Drawing
+        NanoUI.Context.Overlay
+        NanoUI.Context.Scroll
         NanoUI.Damage
         NanoUI.Draw
         NanoUI.Font
         NanoUI.Hooks
         NanoUI.Frame
         NanoUI.Frame.Cursor
+        NanoUI.Draw.Arena
+        NanoUI.Draw.Shapes
+        NanoUI.Draw.Text
+        NanoUI.Draw.Types
         NanoUI.Frame.Input
         NanoUI.Frame.Chrome
         NanoUI.Frame.Focus
@@ -103,8 +113,15 @@ library
         NanoUI.Frame.Scroll
         NanoUI.Frame.Scroll.Geometry
         NanoUI.Frame.Select
+        NanoUI.Frame.Node
+        NanoUI.Frame.Overlay
         NanoUI.Frame.Spans
         NanoUI.Frame.SpanArena
+        NanoUI.Frame.TextArea
+        NanoUI.Frame.TextArea.Content
+        NanoUI.Frame.TextArea.Geometry
+        NanoUI.Frame.TextEdit.Menu
+        NanoUI.Frame.TextInput
         NanoUI.Style
         NanoUI.Types
         NanoUI.WidgetText
@@ -127,14 +144,17 @@ library
         NanoUI.Widgets.Behavior
         NanoUI.Widgets.Combinators
         NanoUI.Widgets.Drop
+        NanoUI.Widgets.Button
+        NanoUI.Widgets.Checkbox
+        NanoUI.Widgets.Display
+        NanoUI.Widgets.Select
+        NanoUI.Widgets.Slider
     build-depends:
         base ^>=4.22.0.0,
         bytestring ^>=0.12,
         colonnade ^>=1.2,
         containers ^>=0.8,
-        effectful ^>=2.6,
         effectful-core ^>=2.6,
-        ghc ^>=9.14,
         ghc-compact ^>=0.1,
         hashable ^>=1.5,
         hashtables ^>=1.4,
@@ -148,36 +168,21 @@ library
 
 benchmark nano-ui-id-bench
     import:           extensions
+    import:           test-rts-options
     import:           warnings
+    import:           unused-packages
     type:             exitcode-stdio-1.0
     main-is:          IdBench.hs
-    ghc-options:
-        -rtsopts
-        -threaded
-        "-with-rtsopts=-A8m -H64m -K128m -T"
     build-depends:
         base ^>=4.22.0.0,
         nano-ui,
         tasty-bench ^>=0.4
     hs-source-dirs:   benchmark
-    default-language: GHC2024
-
-executable nano-ui-demo
-    import:           extensions
-    import:           rts-options
-    import:           warnings
-    ghc-options:      -O2
-    main-is:          Demo.hs
-    build-depends:
-        base ^>=4.22.0.0,
-        nano-ui,
-        text ^>=2.1
-    hs-source-dirs:   examples
-    default-language: GHC2024
 
 test-suite text-buffer-spec
     import:           extensions
     import:           warnings
+    import:           unused-packages
     type:             exitcode-stdio-1.0
     main-is:          NanoUI/TextBufferSpec.hs
     build-depends:
@@ -186,12 +191,12 @@ test-suite text-buffer-spec
         nano-ui,
         text ^>=2.1
     hs-source-dirs:   test
-    default-language: GHC2024
 
 test-suite nano-ui-test
     import:           extensions
     import:           test-rts-options
     import:           warnings
+    import:           unused-packages
     type:             exitcode-stdio-1.0
     main-is:          Main.hs
     other-modules:
@@ -230,24 +235,17 @@ test-suite nano-ui-test
         text ^>=2.1,
         vector ^>=0.13
     hs-source-dirs:   test/integration
-    default-language: GHC2024
 
 executable nano-ui-profile
     import:           extensions
     import:           rts-options
     import:           warnings
-    ghc-options:      -O2
+    import:           unused-packages
     main-is:          Profile.hs
     hs-source-dirs:   examples
     build-depends:
         base ^>=4.22.0.0,
-        bytestring ^>=0.12,
-        containers ^>=0.8,
-        effectful-core ^>=2.6,
-        nano-ui,
-        text ^>=2.1,
-        vector ^>=0.13
-    default-language: GHC2024
+        nano-ui
 
 -- Compile-time verification of optimization invariants (inspection-testing).
 -- Assertions fail the build if GHC stops inlining or starts allocating in the
@@ -255,6 +253,7 @@ executable nano-ui-profile
 test-suite nano-ui-inspection
     import:           extensions
     import:           warnings
+    import:           unused-packages
     type:             exitcode-stdio-1.0
     main-is:          Inspection.hs
     ghc-options:      -fplugin=Test.Inspection.Plugin
@@ -264,4 +263,3 @@ test-suite nano-ui-inspection
         inspection-testing,
         nano-ui
     hs-source-dirs:   test/inspection
-    default-language: GHC2024

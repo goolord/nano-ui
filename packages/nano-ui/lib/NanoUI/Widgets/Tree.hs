@@ -3,6 +3,7 @@
 
 module NanoUI.Widgets.Tree (TreeItem (..), tree) where
 
+import Control.Applicative ((<|>))
 import Control.Monad (when)
 import Data.IORef (writeIORef)
 import Data.Foldable (fold, toList)
@@ -19,7 +20,7 @@ import NanoUI.Input (inputMousePos)
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
 import NanoUI.Style (defaultLayout, fillW, gap, tight)
-import NanoUI.Types (Rect (..), rectContains)
+import NanoUI.Types (Rect (..), clamp, rectContains)
 import NanoUI.WidgetText (treeEncodeStyle)
 import NanoUI.Widgets.Behavior (KeyNav (..), ensureInt, ensureIntSet, putInt, putIntSet, useKeyNav)
 import NanoUI.Widgets.Combinators (selectableItem)
@@ -29,44 +30,43 @@ import NanoUI.Widgets.Node (Response (..), setChanged, tagContainer)
 data TreeItem = TreeItem {treeItemLabel :: !Text, treeItemChildren :: ![TreeItem]}
   deriving (Eq, Show)
 
-countSubtree :: (n -> [n]) -> n -> Int
-countSubtree kids node = 1 + foldl' (\acc k -> acc + countSubtree kids k) 0 (kids node)
+-- | A visible row: pre-order node index, depth, whether it has children, label.
+type TreeRow = (Int, Int, Bool, Text)
 
-countForest :: (n -> [n]) -> [n] -> Int
-countForest kids = foldl' (\acc x -> acc + countSubtree kids x) 0
+-- | Nodes in a subtree, its root included.
+subtreeSize :: TreeItem -> Int
+subtreeSize item = 1 + forestSize (treeItemChildren item)
 
-visibleForest :: (n -> [n]) -> IS.IntSet -> [n] -> [(Int, Int, Bool, n)]
-visibleForest kids expanded items = snd (go 0 0 items)
+forestSize :: [TreeItem] -> Int
+forestSize = foldl' (\acc x -> acc + subtreeSize x) 0
+
+-- | Visible rows in pre-order, skipping the children of collapsed nodes. One
+-- pass: rows are consed onto an accumulator and reversed once.
+visibleRows :: IS.IntSet -> [TreeItem] -> V.Vector TreeRow
+visibleRows expanded items = V.fromList (reverse (snd (go 0 0 items [])))
   where
-    go !idx _ [] = (idx, [])
-    go !idx !depth (x : xs) =
-      let k = kids x
-          hasKids = not (null k)
-          isExp = hasKids && IS.member idx expanded
-          (afterKidsIdx, kVis) =
-            if isExp
-              then go (idx + 1) (depth + 1) k
-              else if hasKids
-                then (idx + countSubtree kids x, [])
-                else (idx + 1, [])
-          (finalIdx, sVis) = go afterKidsIdx depth xs
-       in (finalIdx, (idx, depth, hasKids, x) : (kVis ++ sVis))
+    go !idx !_ [] acc = (idx, acc)
+    go !idx !depth (item@(TreeItem lbl kids) : rest) acc =
+      let hasKids = not (null kids)
+          row = (idx, depth, hasKids, lbl)
+       in if hasKids && IS.member idx expanded
+            then case go (idx + 1) (depth + 1) kids (row : acc) of
+              (next, acc') -> go next depth rest acc'
+            else go (idx + subtreeSize item) depth rest (row : acc)
 
-forestParents :: (n -> [n]) -> [n] -> [Int]
-forestParents kids items = snd (go 0 items)
+-- | Pre-order indices of every node that has children (the default expansion).
+parentIndices :: [TreeItem] -> IS.IntSet
+parentIndices items = snd (go 0 items IS.empty)
   where
-    go !idx [] = (idx, [])
-    go !idx (x : xs) =
-      let k = kids x
-          hasKids = not (null k)
-          (afterKids, kParents) = if hasKids then go (idx + 1) k else (idx + 1, [])
-          (finalIdx, sParents) = go afterKids xs
-          thisParent = if hasKids then [idx] else []
-       in (finalIdx, thisParent ++ kParents ++ sParents)
+    go !idx [] acc = (idx, acc)
+    go !idx (TreeItem _ kids : rest) acc
+      | null kids = go (idx + 1) rest acc
+      | otherwise = case go (idx + 1) kids (IS.insert idx acc) of
+          (next, acc') -> go next rest acc'
 
 treeKeyNav ::
   KeyNav ->
-  V.Vector (Int, Int, Bool, a) ->
+  V.Vector TreeRow ->
   V.Vector Response ->
   WidgetId ->
   Int ->
@@ -105,14 +105,7 @@ treeKeyNav nav rows resps focus selected expanded
 toggle :: Int -> IS.IntSet -> IS.IntSet
 toggle idx s = if IS.member idx s then IS.delete idx s else IS.insert idx s
 
-firstJust :: (a -> Maybe b) -> V.Vector a -> Maybe b
-firstJust project = V.foldr step Nothing
-  where
-    step result rest = case project result of
-      Just x -> Just x
-      Nothing -> rest
-
-treeRow :: (Ui :> es) => Int -> (Int, Int, Bool, Text) -> Int -> IS.IntSet -> Eff es (Response, Maybe Int, Maybe IS.IntSet)
+treeRow :: (Ui :> es) => Int -> TreeRow -> Int -> IS.IntSet -> Eff es (Response, Maybe Int, Maybe IS.IntSet)
 treeRow rowIdx (nodeIdx, depth, hasKids, lbl) selectedIdx expandedSet = do
   ctx <- askContext
   inp <- askInput
@@ -141,19 +134,18 @@ tree key inputItems initial =
     groupId <- nextId
     let items = toList inputItems
         groupKey = intKey groupId
-        total = countForest treeItemChildren items
-        clamped = if total <= 0 then 0 else max 0 (min (total - 1) initial)
-        defaultExpanded = IS.fromList (forestParents treeItemChildren items)
+        total = forestSize items
+        clamped = if total <= 0 then 0 else clamp 0 (total - 1) initial
     selected <- ensureInt groupKey clamped
-    expandedSet <- ensureIntSet groupKey defaultExpanded
-    let rows = V.fromList [(i, d, has, treeItemLabel item) | (i, d, has, item) <- visibleForest treeItemChildren expandedSet items]
+    expandedSet <- ensureIntSet groupKey (parentIndices items)
+    let rows = visibleRows expandedSet items
     ctx <- askContext
     columnWith (tight . gap 0 . fillW) $ do
       tagContainer groupId
       results <- V.imapM (\rowIdx row@(i, _, _, _) -> withKey i (treeRow rowIdx row selected expandedSet)) rows
       let resps = V.map (\(r, _, _) -> r) results
-          afterClickSel = fromMaybe selected (firstJust (\(_, idx, _) -> idx) results)
-          afterClickExp = fromMaybe expandedSet (firstJust (\(_, _, s) -> s) results)
+          afterClickSel = fromMaybe selected (V.foldr (\(_, idx, _) rest -> idx <|> rest) Nothing results)
+          afterClickExp = fromMaybe expandedSet (V.foldr (\(_, _, s) rest -> s <|> rest) Nothing results)
       focus <- uiIO (getFocusId ctx)
       nav <- useKeyNav focus
       let (keySel, keyExp, mFocus) = treeKeyNav nav rows resps focus afterClickSel afterClickExp

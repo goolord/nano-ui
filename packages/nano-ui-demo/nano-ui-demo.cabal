@@ -2,7 +2,7 @@ cabal-version:      3.4
 name:               nano-ui-demo
 version:            0.1.0.0
 synopsis:           Showcase applications and interactive demos for nano-ui
-description:        Multi-backend showcase integrating SDL3, Diagrams, and interactive UI components.
+description:        SDL3 showcase apps for nano-ui: a widget cookbook with diagrams plots, a notepad, a log viewer and a terminal.
 license:            MIT
 license-file:       LICENSE
 author:             goolord
@@ -15,11 +15,6 @@ flag sdl
     manual: True
     default: False
 
-flag simd
-    description: Enable AVX2 SIMD vectorization and aggressive specialization
-    manual: True
-    default: True
-
 common extensions
     default-language: GHC2024
     default-extensions:
@@ -28,22 +23,8 @@ common extensions
         DuplicateRecordFields
         FlexibleContexts
         GeneralizedNewtypeDeriving
-        MagicHash
         OverloadedStrings
         ScopedTypeVariables
-        UnboxedTuples
-
-common ghc-options
-    ghc-options: -Wall -Widentities -O2
-    if flag(simd)
-        ghc-options: -mavx2
-
-
-common rts-options
-    ghc-options:
-        -rtsopts
-        -threaded
-        "-with-rtsopts=-N1 -A64m -T -I0"
 
 common warnings
   ghc-options:
@@ -57,139 +38,111 @@ common warnings
     -Wmissing-home-modules
     -Wpartial-fields
     -Wredundant-constraints
+    -Wunused-packages
+
+common rts-options
+    ghc-options:
+        -rtsopts
+        -threaded
+        "-with-rtsopts=-N1 -A64m -T -I0"
+
+-- Every component needs the SDL backend.
+common sdl-app
+    import:           extensions
+    import:           warnings
+    build-depends:    base ^>=4.22.0.0
+    if !flag(sdl)
+        buildable: False
+
+common sdl-exe
+    import:           sdl-app
+    import:           rts-options
+    hs-source-dirs:   app
+    if os(windows)
+        ghc-options: -optl-mconsole
+
+-- Modules shared by the executables and the terminal test, compiled once.
+library demo-common
+    import:           sdl-app
+    visibility:       private
+    hs-source-dirs:   lib
+    exposed-modules:
+        DemoApp
+        DemoData
+        SdlDemo
+        SdlSelftest
+    build-depends:
+        bytestring ^>=0.12,
+        diagrams-lib >=1.6 && <1.7,
+        directory ^>=1.3,
+        effectful-core ^>=2.6,
+        filepath ^>=1.5,
+        nano-ui ^>=0.1,
+        nano-ui-diagrams ^>=0.1,
+        nano-ui-sdl ^>=0.1,
+        primitive ^>=0.9,
+        text ^>=2.1,
+        vector ^>=0.13
+    if !os(windows)
+        exposed-modules:  SdlTerminal
+        c-sources:        cbits/terminal-size.c
+        build-depends:
+            streaming ^>=0.2,
+            unix ^>=2.8
 
 executable nano-ui-sdl-demo
-    import:           extensions
-    import:           ghc-options
-    import:           rts-options
-    import:           warnings
-    main-is:          SdlDemo.hs
-    ghc-options:      -main-is SdlDemo
-    other-modules:    DemoData
-                      SdlSelftest
-    build-depends:
-        base ^>=4.22.0.0,
-        bytestring ^>=0.12,
-        diagrams-lib >=1.6 && <1.7,
-        directory ^>=1.3,
-        effectful ^>=2.6,
-        effectful-core ^>=2.6,
-        filepath ^>=1.5,
-        nano-ui ^>=0.1,
-        nano-ui-diagrams ^>=0.1,
-        nano-ui-sdl ^>=0.1,
-        primitive ^>=0.9,
-        vector ^>=0.13,
-        text ^>=2.1
-    hs-source-dirs:   app
-    default-language: GHC2024
-    if os(windows)
-        ghc-options: -optl-mconsole
-    if !flag(sdl)
-        buildable: False
+    import:           sdl-exe
+    main-is:          Demo.hs
+    build-depends:    nano-ui-demo:demo-common
 
 executable nano-ui-sdl-profile
-    import:           extensions
-    import:           ghc-options
-    import:           rts-options
-    import:           warnings
-    main-is:          SdlProfile.hs
-    other-modules:    DemoData
-                      SdlDemo
-                      SdlSelftest
+    import:           sdl-exe
+    main-is:          Profile.hs
     build-depends:
-        base ^>=4.22.0.0,
-        bytestring ^>=0.12,
-        diagrams-lib >=1.6 && <1.7,
-        directory ^>=1.3,
-        effectful ^>=2.6,
-        effectful-core ^>=2.6,
-        filepath ^>=1.5,
         nano-ui ^>=0.1,
+        nano-ui-demo:demo-common,
         nano-ui-diagrams ^>=0.1,
         nano-ui-sdl ^>=0.1,
-        primitive ^>=0.9,
-        vector ^>=0.13,
         text ^>=2.1
-    hs-source-dirs:   app
-    default-language: GHC2024
-    if os(windows)
-        ghc-options: -optl-mconsole
-    if !flag(sdl)
-        buildable: False
 
-common terminal
-    import:           extensions
-    import:           ghc-options
-    import:           rts-options
-    import:           warnings
-    c-sources:        app/terminal-size.c
+executable nano-ui-sdl-notepad
+    import:           sdl-exe
+    main-is:          Notepad.hs
     build-depends:
-        base ^>=4.22.0.0,
         bytestring ^>=0.12,
         nano-ui ^>=0.1,
+        nano-ui-demo:demo-common,
         nano-ui-sdl ^>=0.1,
-        streaming ^>=0.2,
+        text ^>=2.1
+
+executable nano-ui-sdl-logs
+    import:           sdl-exe
+    main-is:          Logs.hs
+    build-depends:
+        effectful-core ^>=2.6,
+        nano-ui ^>=0.1,
+        nano-ui-sdl ^>=0.1,
         text ^>=2.1,
-        unix ^>=2.8,
         vector ^>=0.13
-    hs-source-dirs:   app
-    if !flag(sdl) || os(windows)
-        buildable: False
 
 executable nano-ui-sdl-terminal
-    import:           terminal
-    main-is:          SdlTerminal.hs
-    ghc-options:      -main-is SdlTerminal
+    import:           sdl-exe
+    main-is:          Terminal.hs
+    build-depends:    nano-ui-demo:demo-common
+    if os(windows)
+        buildable: False
 
 test-suite nano-ui-terminal-test
-    import:           terminal
+    import:           sdl-app
+    import:           rts-options
     type:             exitcode-stdio-1.0
     main-is:          TerminalTest.hs
     hs-source-dirs:   test
-    other-modules:    SdlTerminal
-
-executable nano-ui-sdl-notepad
-    import:           extensions
-    import:           ghc-options
-    import:           rts-options
-    import:           warnings
-    main-is:          SdlNotepad.hs
-    ghc-options:      -main-is SdlNotepad
     build-depends:
-        base ^>=4.22.0.0,
         bytestring ^>=0.12,
-        directory ^>=1.3,
-        nano-ui ^>=0.1,
-        nano-ui-sdl ^>=0.1,
-        text ^>=2.1
-    hs-source-dirs:   app
-    default-language: GHC2024
-    if os(windows)
-        ghc-options: -optl-mconsole
-    if !flag(sdl)
-        buildable: False
-
-executable nano-ui-sdl-logs
-    import:           extensions
-    import:           ghc-options
-    import:           rts-options
-    import:           warnings
-    main-is:          SdlLogs.hs
-    ghc-options:      -main-is SdlLogs
-    build-depends:
-        base ^>=4.22.0.0,
-        bytestring ^>=0.12,
-        directory ^>=1.3,
-        effectful ^>=2.6,
-        effectful-core ^>=2.6,
-        nano-ui ^>=0.1,
-        nano-ui-sdl ^>=0.1,
+        nano-ui-demo:demo-common,
+        streaming ^>=0.2,
         text ^>=2.1,
         vector ^>=0.13
-    hs-source-dirs:   app
-    default-language: GHC2024
     if os(windows)
-        ghc-options: -optl-mconsole
-    if !flag(sdl)
         buildable: False

@@ -12,7 +12,6 @@ module NanoUI.Form.Backend
   , setFormStore
   , getActiveFormPrefix
   , setActiveFormPrefix
-  , clearActiveFormPrefix
   , withFormPrefix
   , withFormWidgets
   , updateFieldInput
@@ -25,7 +24,6 @@ import Control.Monad (when, (<$!>))
 import Data.Dynamic (fromDynamic, toDyn)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Map.Strict as Map
-import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Lazy as TL
@@ -69,12 +67,11 @@ formInputToText (FormInputList ts) = T.intercalate "," ts
 data FormStateStore = FormStateStore
   { fssInputs    :: !(Map.Map Text FormInput)
   , fssSubmitted :: !Bool
-  , fssDirty     :: !(Set.Set Text)
   } deriving stock (Eq, Show, Generic)
 
 -- | Empty form state store.
 emptyFormStateStore :: FormStateStore
-emptyFormStateStore = FormStateStore Map.empty False Set.empty
+emptyFormStateStore = FormStateStore Map.empty False
 
 -- Keep reset identity alongside the form's values without exposing it in the
 -- public FormStateStore. A new generation starts fresh form-local widget state,
@@ -84,9 +81,6 @@ data StoredForm = StoredForm
   , sfState      :: !FormStateStore
   }
   deriving (Eq)
-
-emptyStoredForm :: StoredForm
-emptyStoredForm = StoredForm 0 emptyFormStateStore
 
 -- | Form execution monad wrapping 'NanoUI'.
 newtype FormUI a = FormUI { unFormUI :: NanoUI a }
@@ -108,7 +102,6 @@ instance Ditto.FormInput FormInput where
   getInputTexts other = [formInputToText other]
 
   getInputString fi = T.unpack <$> Ditto.getInputText fi
-  getInputStrings fi = map T.unpack (Ditto.getInputTexts fi)
 
   getInputFile _ = Right ()
 
@@ -128,23 +121,13 @@ formStoreKey prefix = hash ("nano-ui-form:" <> prefix)
 getActiveFormPrefix :: Context -> IO Text
 getActiveFormPrefix ctx = do
   ws <- getStore ctx
-  case IM.lookup activePrefixSlot (storeDyn ws) >>= fromDynamic of
-    Just (p :: Text) -> pure p
-    _                -> pure ""
+  pure $! fromMaybe "" (IM.lookup activePrefixSlot (storeDyn ws) >>= fromDynamic)
 
 -- | Set the active form prefix in the current context.
 setActiveFormPrefix :: Context -> Text -> IO ()
 setActiveFormPrefix ctx prefix = do
   ws <- getStore ctx
-  let ws' = ws { storeDyn = IM.insert activePrefixSlot (toDyn prefix) (storeDyn ws) }
-  setStore ctx ws'
-
--- | Clear the active form prefix in the current context.
-clearActiveFormPrefix :: Context -> IO ()
-clearActiveFormPrefix ctx = do
-  ws <- getStore ctx
-  let ws' = ws { storeDyn = IM.delete activePrefixSlot (storeDyn ws) }
-  setStore ctx ws'
+  setStore ctx ws {storeDyn = IM.insert activePrefixSlot (toDyn prefix) (storeDyn ws)}
 
 -- | Evaluate or render a form under its own prefix, restoring the enclosing
 -- prefix afterwards. Restore only this slot, so field updates survive the scope.
@@ -172,16 +155,12 @@ getStoredForm :: Context -> Text -> IO StoredForm
 getStoredForm ctx prefix = do
   ws <- getStore ctx
   -- Resolve the lookup here rather than returning a thunk over the whole store.
-  pure $!
-    fromMaybe emptyStoredForm
-      (IM.lookup (formStoreKey prefix) (storeDyn ws) >>= fromDynamic)
+  pure $! fromMaybe (StoredForm 0 emptyFormStateStore) (IM.lookup (formStoreKey prefix) (storeDyn ws) >>= fromDynamic)
 
 setStoredForm :: Context -> Text -> StoredForm -> IO ()
 setStoredForm ctx prefix !stored = do
   ws <- getStore ctx
-  setStore ctx ws
-    { storeDyn = IM.insert (formStoreKey prefix) (toDyn stored) (storeDyn ws)
-    }
+  setStore ctx ws {storeDyn = IM.insert (formStoreKey prefix) (toDyn stored) (storeDyn ws)}
 
 -- | Retrieve the 'FormStateStore' for a given form prefix.
 getFormStore :: Context -> Text -> IO FormStateStore
@@ -211,10 +190,7 @@ modifyStoredForm ctx prefix update = do
 updateFieldInput :: Context -> Text -> Text -> FormInput -> IO ()
 updateFieldInput ctx prefix fieldKey inputVal =
   modifyFormStore ctx prefix $ \fss ->
-    fss
-      { fssInputs = Map.insert fieldKey inputVal (fssInputs fss)
-      , fssDirty = Set.insert fieldKey (fssDirty fss)
-      }
+    fss {fssInputs = Map.insert fieldKey inputVal (fssInputs fss)}
 
 -- | Mark a form as submitted.
 markFormSubmitted :: Context -> Text -> Bool -> IO ()

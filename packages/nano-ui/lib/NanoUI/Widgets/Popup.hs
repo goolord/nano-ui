@@ -14,22 +14,21 @@ module NanoUI.Widgets.Popup
   )
 where
 
-import Control.Monad (void, when)
-import Data.IORef (readIORef, writeIORef)
+import Control.Monad (void)
+import Data.IORef (modifyIORef')
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import NanoUI.Context
   ( Context (..)
-  , getCurrentFloatingId
   , getPrevRect
   , registerPopupConfig
   , seedFloatingPanel
-  , setCurrentFloatingId
   )
 import NanoUI.Font (resolveLayoutGap, resolveLayoutPadding)
-import NanoUI.Input (inputMousePos)
-import NanoUI.Layout.Arena (NodeType (..), addNode, rootAttachParent, setWidgetId)
 import NanoUI.Id (enterScope, scopeTag)
+import NanoUI.Input (inputMousePos)
+import NanoUI.Layout.Arena (NodeType (..), addNode)
 import NanoUI.Monad
   ( Ui
   , askContext
@@ -50,19 +49,20 @@ import NanoUI.Types
   ( PopupAnchor (..)
   , PopupPlacement (..)
   , Rect (..)
-  , rectContains
-  , rectH
-  , rectW
+  , rectHit
+  , rectNonEmpty
   )
 import NanoUI.Widgets.Behavior (useDismissable)
 import NanoUI.Widgets.Layout (label)
 import NanoUI.Widgets.Node
-  ( Responding (..)
+  ( HasResponse
   , Response (..)
   , containerResponse
   , emptyModalResp
+  , floatingPanel
   , mkResponse
-  , parentIdx
+  , respHovered
+  , respRect
   )
 
 data PopupConfig = PopupConfig
@@ -100,95 +100,59 @@ popupEx ::
 popupEx open cfg layout child = do
   wid <- nextId
   ctx <- askContext
-  inp <- askInput
-  parent' <- uiIO $ do
-    oldCtx <- readIORef (ctxIdContext ctx)
-    let
-      (parent', childCtx) = enterScope scopeTag oldCtx
-    writeIORef (ctxIdContext ctx) childCtx
-    pure parent'
-  result <-
-    if not open
-      then pure (emptyModalResp wid, Nothing)
-      else do
-        body <- do
-          stack <- uiIO (readIORef (ctxContainerStack ctx))
-          let
-            fm = ctxFontMetrics ctx
-            parent0 = parentIdx stack
-            pad = Padding 6 6 6 6
-            gap = 4
-            resolvedPad = resolveLayoutPadding fm pad
-            resolvedGap = resolveLayoutGap fm gap
-            dir = layoutDirection layout
-            wSiz = layoutWidth layout
-            hSiz = layoutHeight layout
-          prevFloat <- uiIO $ do
-            parent <- rootAttachParent (ctxNodeArena ctx) parent0
-            registerPopupConfig ctx wid (cfgAnchor cfg) (cfgPlacement cfg) (cfgOffset cfg)
-            idx <-
-              addNode
-                (ctxNodeArena ctx)
-                NodePopup
-                parent
-                dir
-                wSiz
-                hSiz
-                resolvedPad
-                resolvedGap
-                0
-                0
-                1e9
-                1e9
-                0
-                AlignStart
-                AlignTop
-            setWidgetId (ctxNodeArena ctx) idx wid
-            writeIORef (ctxContainerStack ctx) (idx : stack)
-            mPrev <- getPrevRect ctx wid
-            let seedRect = maybe (Rect 0 0 0 0) id mPrev
-            when (rectW seedRect > 0 && rectH seedRect > 0) $
-              seedFloatingPanel ctx wid seedRect
-            prev <- getCurrentFloatingId ctx
-            setCurrentFloatingId ctx (Just wid)
-            pure prev
-          r <- child
-          uiIO $ do
-            writeIORef (ctxContainerStack ctx) stack
-            setCurrentFloatingId ctx prevFloat
-          pure r
-        mrect <- uiIO (getPrevRect ctx wid)
-        let
-          mouse = inputMousePos inp
-          panel = maybe (Rect 0 0 0 0) id mrect
-          inPanel = rectW panel > 0 && rectH panel > 0 && rectContains panel mouse
-        dismissed <-
-          if cfgDismissable cfg && rectW panel > 0 && rectH panel > 0
-            then useDismissable panel
-            else pure False
-        pure
-          ( mkResponse wid panel inPanel False dismissed dismissed
-          , Just body
-          )
-  uiIO $ writeIORef (ctxIdContext ctx) parent'
-  pure result
+  if not open
+    then do
+      -- A closed popup still consumes its id scope, so the ids of later
+      -- siblings do not shift when it opens.
+      uiIO (modifyIORef' (ctxIdContext ctx) (fst . enterScope scopeTag))
+      pure (emptyModalResp wid, Nothing)
+    else do
+      inp <- askInput
+      let
+        fm = ctxFontMetrics ctx
+        addPopupNode parent = do
+          registerPopupConfig ctx wid (cfgAnchor cfg) (cfgPlacement cfg) (cfgOffset cfg)
+          addNode
+            (ctxNodeArena ctx)
+            NodePopup
+            parent
+            (layoutDirection layout)
+            (layoutWidth layout)
+            (layoutHeight layout)
+            (resolveLayoutPadding fm (Padding 6 6 6 6))
+            (resolveLayoutGap fm 4)
+            0
+            0
+            1e9
+            1e9
+            0
+            AlignStart
+            AlignTop
+        seedFromPrev = getPrevRect ctx wid >>= mapM_ (seedFloatingPanel ctx wid)
+      body <- floatingPanel True wid addPopupNode seedFromPrev child
+      mrect <- uiIO (getPrevRect ctx wid)
+      let
+        panel = fromMaybe (Rect 0 0 0 0) mrect
+        inPanel = rectHit panel (inputMousePos inp)
+      dismissed <-
+        if cfgDismissable cfg && rectNonEmpty panel
+          then useDismissable panel
+          else pure False
+      pure
+        ( mkResponse wid panel inPanel False dismissed dismissed
+        , Just body
+        )
 
 -- | Attach a rich tooltip widget to any target response, displayed on hover.
 tooltipWidget ::
-  (Ui :> es, Responding r) =>
+  (Ui :> es, HasResponse r) =>
   r ->
   Eff es a ->
   Eff es (Maybe a)
-tooltipWidget target child = do
-  let hovered = respHovered target
-      rect = respRect target
-      cfg = PopupConfig
-        { cfgAnchor = AnchorRect rect
-        , cfgPlacement = PlacementBelow
-        , cfgDismissable = False
-        , cfgOffset = 4
-        }
-  fmap snd (popup hovered cfg child)
+tooltipWidget target child =
+  snd <$> popup (respHovered target) cfg child
+  where
+    cfg = (defaultPopupConfig (AnchorRect (respRect target))) {cfgPlacement = PlacementBelow, cfgDismissable = False}
 
 -- | Attach a rich tooltip widget to an inner UI computation.
 withTooltip ::
@@ -204,25 +168,19 @@ withTooltip mainChild tipChild = do
 
 -- | Concise tooltip with specified placement.
 tooltipWith ::
-  (Ui :> es, Responding r) =>
+  (Ui :> es, HasResponse r) =>
   PopupPlacement ->
   r ->
   Text ->
   Eff es ()
-tooltipWith placement target txt = do
-  let hovered = respHovered target
-      rect = respRect target
-      cfg = PopupConfig
-        { cfgAnchor = AnchorRect rect
-        , cfgPlacement = placement
-        , cfgDismissable = False
-        , cfgOffset = 4
-        }
-  void (popup hovered cfg (label txt))
+tooltipWith placement target txt =
+  void (popup (respHovered target) cfg (label txt))
+  where
+    cfg = (defaultPopupConfig (AnchorRect (respRect target))) {cfgPlacement = placement, cfgDismissable = False}
 
 -- | Standard text tooltip widget on hover.
 tooltip ::
-  (Ui :> es, Responding r) =>
+  (Ui :> es, HasResponse r) =>
   r ->
   Text ->
   Eff es ()

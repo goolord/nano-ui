@@ -10,7 +10,7 @@ import Data.IORef (IORef)
 import Data.Text qualified as T
 import NanoUI
 import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertEq, eval2Ui, evalUi, withInput)
+import NanoUI.Testing.Assert (assert, assertEq, evalUi, withInput)
 import NanoUI.Testing.Harness
   ( centerOf
   , checkIdleFullDamage
@@ -85,7 +85,7 @@ runModalOverlayTest ctx failed = do
   let tallUi = modal True "Tall" $ do
         forM_ [1 .. 40 :: Int] (\i -> label (T.pack ("Row " <> show i)))
         button "Close"
-  (dlgTall, _) <- eval2Ui ctx inp0 tallUi
+  (dlgTall, _) <- warmup2 ctx inp0 tallUi
   assert failed (rectH (respRect dlgTall) <= 200)
 
 runModalNoPhantomScrollTest :: Context -> IORef Int -> IO ()

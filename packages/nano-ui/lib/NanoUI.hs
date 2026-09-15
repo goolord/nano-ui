@@ -123,25 +123,13 @@ module NanoUI
   , Style (..)
   , Theme (..)
   , defaultTheme
-  , tomorrowNightMinTheme
   , tomorrowNightMinDarkTheme
-  , tomorrowLightTheme
   , tomorrowMinLightTheme
-  , tomorrowMidnightMinTheme
   , tomorrowMidnightMinDarkTheme
   , Base16 (..)
-  , Base16ColorScheme
-  , base0a
-  , base0b
-  , base0c
-  , base0d
-  , base0e
-  , base0f
   , themeFromBase16
   , themeFromBase16Dark
   , themeFromBase16Light
-  , base16Theme
-  , base16ToTheme
   , base16TomorrowNight
   , base16TomorrowLight
   , withTheme
@@ -180,7 +168,6 @@ module NanoUI
   , fixedAspectW
   , fixedAspectH
   , gridCols
-  , cols
   , LayoutModifier
   , fontRegular
   , fontHeading
@@ -190,7 +177,6 @@ module NanoUI
   , fontSize
   , fontSizeScale
   , fontColor
-  , textColor
   , fontWeight
   , fontBold
   , fontLight
@@ -204,7 +190,6 @@ module NanoUI
   , textDecoration
   , fontUnderline
   , fontStrike
-  , fontStrikethrough
   -- ID
   , WidgetId (..)
   , IdContext
@@ -240,9 +225,16 @@ module NanoUI
   , Response (..)
   , setChanged
   , setClicked
-  , Responding (..)
-  , Clickable (..)
-  , RightClickable (..)
+  , HasResponse (..)
+  , respId
+  , respRect
+  , respHovered
+  , respPressed
+  , respClicked
+  , respChanged
+  , respSubmitted
+  , respRightPressed
+  , respRightClicked
   , onRightClick
   , setSubmitted
   , panel
@@ -273,10 +265,7 @@ module NanoUI
   , selectableText
   , selectableTextWith
   , selectableTextEx
-  , menuActionCut
-  , menuActionCopy
-  , menuActionPaste
-  , menuActionSelectAll
+  , MenuAction (..)
   , button
   , button'
   , buttonWith
@@ -313,16 +302,13 @@ module NanoUI
   , PopupConfig (..)
   , defaultPopupConfig
   , contextMenu
-  , withContextMenu
   , contextMenuArea
   , useContextMenu
   , menuButton
+  , MenuItem (..)
+  , menuItemWith
   , menuItem
-  , menuItem'
   , menuItemWithShortcut
-  , menuItemWithShortcut'
-  , menuItemWithIcon
-  , menuItemWithIcon'
   , menuItemDisabled
   , menuSeparator
   , menuHeader
@@ -341,7 +327,6 @@ module NanoUI
   , selectLabeled
   , boundedSelect
   , enumSelect
-  , useEnumSelect
   , colorPicker
   , colorPickerRGBA
   , colorPickerToHex
@@ -350,8 +335,6 @@ module NanoUI
   , radioFieldset
   , boundedRadioFieldset
   , enumRadio
-  , useEnumRadio
-  , useRadio
   , stripedRow
   , TreeItem (..)
   , tree
@@ -364,19 +347,15 @@ module NanoUI
   , TabStyle (..)
   , TabOrientation (..)
   , TabResponse (..)
-  , tabRespClicked
-  , tabRespChanged
+  , TabsConfig (..)
+  , defaultTabsConfig
   , tab
   , closableTab
-  , mkTab
   , tabs
-  , tabsEx
+  , tabsWith
   , tabBar
-  , tabBarEx
+  , tabBarWith
   , tabsEmit
-  , tabsEmitEx
-  , useTab
-  , useTabIdx
   , boundedTabs
   , SortDir (..)
   , SortCol (..)
@@ -389,8 +368,6 @@ module NanoUI
   , tableCfg
   , simpleTable
   , useTableSort
-  , tableRespChanged
-  , tableRespClicked
   , tableHiddenIndices
   , sortRows
   , headed
@@ -441,8 +418,6 @@ module NanoUI
   , useDrag2D
   , Drag2D (..)
   , useWheelDelta
-  , useClickGesture
-  , ClickGesture (..)
   , DropTarget (..)
   , useDrop
   , onDrop
@@ -465,15 +440,10 @@ module NanoUI
   , useFlag
   , useText
   , useToggle
+  , Transition (..)
   , animate
-  , animateEase
-  , animateEaseDelay
   , animateTo
-  , animateToEase
-  , animateToEaseDelay
-  , animateToSpring
   , animateToA
-  , animateToSpringA
   , pulse
   , keepAnimating
   , Animatable (..)
@@ -543,9 +513,6 @@ module NanoUI
   , scrollBarListExtra
   , scrollBarWidth
   , scrollBarWindowGutter
-  -- Frame
-  , FrameResult (..)
-  , FrameReduceResult (..)
   )
 where
 
@@ -668,29 +635,16 @@ import NanoUI.Style
   , fixedAspectW
   , fixedAspectH
   , gridMinColW
-  , cols
   , gridCols
   , defaultLayout
   , defaultTheme
-  , tomorrowNightMinTheme
   , tomorrowNightMinDarkTheme
-  , tomorrowLightTheme
   , tomorrowMinLightTheme
-  , tomorrowMidnightMinTheme
   , tomorrowMidnightMinDarkTheme
   , Base16 (..)
-  , Base16ColorScheme
-  , base0a
-  , base0b
-  , base0c
-  , base0d
-  , base0e
-  , base0f
   , themeFromBase16
   , themeFromBase16Dark
   , themeFromBase16Light
-  , base16Theme
-  , base16ToTheme
   , base16TomorrowNight
   , base16TomorrowLight
   , fontHeading
@@ -701,7 +655,6 @@ import NanoUI.Style
   , fontSize
   , fontSizeScale
   , fontColor
-  , textColor
   , fontWeight
   , fontBold
   , fontLight
@@ -715,7 +668,6 @@ import NanoUI.Style
   , textDecoration
   , fontUnderline
   , fontStrike
-  , fontStrikethrough
   , themeSeries
   , fillH
   , fillW
@@ -737,9 +689,6 @@ import NanoUI.Style
   , tight
   , windowMargin
   , windowPad
-  , gridMinColW
-  , fixedAspectW
-  , fixedAspectH
   )
 import NanoUI.Types
   ( Color (..)
@@ -770,22 +719,24 @@ import NanoUI.Types
   , v2Sub
   )
 import NanoUI.Widgets
-  ( Clickable (..)
-  , Responding (..)
+  ( HasResponse (..)
   , Response (..)
   , TreeItem (..)
+  , respId
+  , respRect
+  , respHovered
+  , respPressed
+  , respClicked
+  , respChanged
+  , respSubmitted
+  , respRightPressed
+  , respRightClicked
+  , Transition (..)
   , animate
-  , animateEase
-  , animateEaseDelay
   , animateTo
   , animateToA
-  , animateToEase
-  , animateToEaseDelay
-  , animateToSpring
-  , animateToSpringA
   , pulse
   , keepAnimating
-  , boundedRadioFieldset
   , box
   , drawing
   , drawingVersioned
@@ -820,8 +771,6 @@ import NanoUI.Widgets
   , useDrag2D
   , Drag2D (..)
   , useWheelDelta
-  , useClickGesture
-  , ClickGesture (..)
   , knob
   , knobWith
   , toggleSwitch
@@ -876,13 +825,10 @@ import NanoUI.Widgets
   , danger
   , boundedSelect
   , enumSelect
-  , useEnumSelect
   , radioFieldset
   , boundedRadioFieldset
   , enumRadio
-  , useEnumRadio
   , row
-  , RightClickable (..)
   , onRightClick
   , popup
   , popupEx
@@ -895,16 +841,13 @@ import NanoUI.Widgets
   , tooltipWith
   , withTooltip
   , contextMenu
-  , withContextMenu
   , contextMenuArea
   , useContextMenu
   , menuButton
+  , MenuItem (..)
+  , menuItemWith
   , menuItem
-  , menuItem'
   , menuItemWithShortcut
-  , menuItemWithShortcut'
-  , menuItemWithIcon
-  , menuItemWithIcon'
   , menuItemDisabled
   , menuSeparator
   , menuHeader
@@ -942,7 +885,6 @@ import NanoUI.Widgets
   , toolbar
   , tree
   , useFlag
-  , useRadio
   , useText
   , useToggle
   , window
@@ -955,7 +897,7 @@ import NanoUI.Widgets
   , paneGrid
   )
 import NanoUI.Widgets.Node (setChanged, setClicked, setSubmitted)
-import NanoUI.Widgets.TextCommon (menuActionCopy, menuActionCut, menuActionPaste, menuActionSelectAll)
+import NanoUI.Widgets.TextCommon (MenuAction (..))
 import NanoUI.Widgets.Combinators (stripedRow)
 import NanoUI.Widgets.Drop
   ( DropTarget (..)
@@ -969,20 +911,16 @@ import NanoUI.Widgets.Tabs
   , TabOrientation (..)
   , TabResponse (..)
   , TabStyle (..)
+  , TabsConfig (..)
   , boundedTabs
   , closableTab
-  , mkTab
+  , defaultTabsConfig
   , tab
   , tabBar
-  , tabBarEx
-  , tabRespChanged
-  , tabRespClicked
+  , tabBarWith
   , tabs
   , tabsEmit
-  , tabsEmitEx
-  , tabsEx
-  , useTab
-  , useTabIdx
+  , tabsWith
   )
 import NanoUI.Widgets.Table
   ( Colonnade
@@ -1000,8 +938,6 @@ import NanoUI.Widgets.Table
   , tableCfg
   , tableEx
   , simpleTable
-  , tableRespChanged
-  , tableRespClicked
   , tableHiddenIndices
   , useTableSort
   )
@@ -1036,8 +972,4 @@ import NanoUI.State
   , useFloat
   , useInt
   , useState
-  )
-import NanoUI.Frame
-  ( FrameResult (..)
-  , FrameReduceResult (..)
   )

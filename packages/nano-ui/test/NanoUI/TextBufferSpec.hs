@@ -4,6 +4,7 @@ module Main (main) where
 
 import Data.Text qualified as T
 import NanoUI.Frame.TextEdit (textWordBounds)
+import NanoUI.Input (Key (..))
 import NanoUI.Widgets.TextArea as TA
 import NanoUI.Widgets.TextBuffer as TB
 import Test.Hspec
@@ -172,8 +173,8 @@ spec = do
         selected =
           TA.setTextAreaSelection (TB.Cursor 1 1) (TB.Cursor 0 1) $
             TA.initTextAreaState "abc\ndef"
-        typed = TA.handleTextAreaEvent (TA.KeyChar 'λ') noMods selected
-        entered = TA.handleTextAreaEvent TA.KeyEnter noMods selected
+        typed = TA.handleTextAreaEvent (TA.TAChar 'λ') noMods selected
+        entered = TA.handleTextAreaEvent (TA.TAKey KeyEnter) noMods selected
       TB.toText (TA.buffer typed) `shouldBe` "aλef"
       TB.getCursor (TA.buffer typed) `shouldBe` TB.Cursor 0 2
       TA.selectionAnchor typed `shouldBe` TB.Cursor 0 2
@@ -184,30 +185,28 @@ spec = do
     it "Ctrl+Left/Right move by word" $ do
       let
         s0 = TA.initTextAreaState "foo bar"
-        sRight = TA.handleTextAreaEvent TA.KeyRight ctrlMods s0
-        sLeft = TA.handleTextAreaEvent TA.KeyLeft ctrlMods sRight
+        sRight = TA.handleTextAreaEvent (TA.TAKey KeyRight) ctrlMods s0
+        sLeft = TA.handleTextAreaEvent (TA.TAKey KeyLeft) ctrlMods sRight
       TB.getCursor (TA.buffer sRight) `shouldBe` TB.Cursor 0 3
       TB.getCursor (TA.buffer sLeft) `shouldBe` TB.Cursor 0 0
 
-    it "PageDown/PageUp move by viewport page and follow the caret" $ do
+    it "Alt edits and moves by word like Ctrl" $ do
       let
-        s0 =
-          TA.setTextAreaViewport (80, 32) 16 $
-            TA.initTextAreaState "l0\nl1\nl2\nl3"
-        sDown = TA.handleTextAreaEvent TA.KeyPageDown noMods s0
-        sDown2 = TA.handleTextAreaEvent TA.KeyPageDown noMods sDown
-        sUp = TA.handleTextAreaEvent TA.KeyPageUp noMods sDown2
-      TB.getCursor (TA.buffer sDown) `shouldBe` TB.Cursor 2 0
-      snd (TA.scrollOffset sDown) `shouldBe` 16
-      TB.getCursor (TA.buffer sDown2) `shouldBe` TB.Cursor 3 0
-      TB.getCursor (TA.buffer sUp) `shouldBe` TB.Cursor 1 0
+        s0 = TA.initTextAreaState "foo bar"
+        altMods = TA.Modifiers False False True
+        deleted = TA.handleTextAreaEvent (TA.TAKey KeyDelete) altMods s0
+        right = TA.handleTextAreaEvent (TA.TAKey KeyRight) altMods s0
+        left = TA.handleTextAreaEvent (TA.TAKey KeyLeft) altMods right
+      TB.toText (TA.buffer deleted) `shouldBe` " bar"
+      TB.getCursor (TA.buffer right) `shouldBe` TB.Cursor 0 3
+      TB.getCursor (TA.buffer left) `shouldBe` TB.Cursor 0 0
 
     it "layout subtracts scrollOffset from caret and line Y" $ do
       let
         s0 =
           TA.setTextAreaViewport (80, 16) 16 $
             TA.initTextAreaState "a\nb"
-        s1 = TA.handleTextAreaEvent TA.KeyDown noMods s0
+        s1 = TA.handleTextAreaEvent (TA.TAKey KeyDown) noMods s0
         layout = TA.computeTextAreaLayout (fromIntegral . T.length) 16 s1
       TA.layoutCaretY layout `shouldBe` 0
       map TA.visualLineY (TA.layoutLines layout) `shouldBe` [-16, 0]
@@ -215,9 +214,9 @@ spec = do
     it "Ctrl+A and Ctrl+a both select all" $ do
       let
         s0 = TA.initTextAreaState "hello"
-        atEnd = TA.handleTextAreaEvent TA.KeyEnd noMods s0
-        fromLower = TA.handleTextAreaEvent (TA.KeyChar 'a') ctrlMods atEnd
-        fromUpper = TA.handleTextAreaEvent (TA.KeyChar 'A') ctrlMods atEnd
+        atEnd = TA.handleTextAreaEvent (TA.TAKey KeyEnd) noMods s0
+        fromLower = TA.handleTextAreaEvent (TA.TAChar 'a') ctrlMods atEnd
+        fromUpper = TA.handleTextAreaEvent (TA.TAChar 'A') ctrlMods atEnd
       TB.getCursor (TA.buffer fromLower) `shouldBe` TB.Cursor 0 5
       TA.selectionAnchor fromLower `shouldBe` TB.Cursor 0 0
       TB.getCursor (TA.buffer fromUpper) `shouldBe` TB.Cursor 0 5

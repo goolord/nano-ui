@@ -76,24 +76,24 @@ animUi = do
   (stiffSpring, setStiffSpring) <- useFlag False
   tossT <-
     withKey ("toss" :: String)
-      ( animateToSpring
-          (if stiffSpring then presetStiff else presetBouncy)
+      ( animateTo
+          (Spring (if stiffSpring then presetStiff else presetBouncy))
           (if tossed then 1 else 0)
       )
   lampT <-
     if lampOn
-      then withKey ("lamp" :: String) (animateEase EaseInOutCubic 0 1 1.6)
+      then withKey ("lamp" :: String) (animate (Tween EaseInOutCubic 1.6 0) 0 1)
       else pure 0
   wash <-
-    withKey ("wash" :: String) (animateToEase EaseInOutCubic (if lampOn then 1 else 0) 0.85)
+    withKey ("wash" :: String) (animateTo (Tween EaseInOutCubic 0.85 0) (if lampOn then 1 else 0))
   bellowsT <-
-    withKey ("bellows" :: String) (animateToEase EaseOutCubic (if bellowsOpen then 1 else 0) 0.45)
+    withKey ("bellows" :: String) (animateTo (Tween EaseOutCubic 0.45 0) (if bellowsOpen then 1 else 0))
   clock <-
     if exposed
-      then withKey ("clock" :: String) (animateEase EaseLinear 0 1 3.2)
+      then withKey ("clock" :: String) (animate (Tween EaseLinear 3.2 0) 0 1)
       else
         if rewinding
-          then withKey ("clock" :: String) (animateTo 0 0.35)
+          then withKey ("clock" :: String) (animateTo (Tween EaseLinear 0.35 0) 0)
           else pure 0
   let frames = floor (clock * 128) :: Int
       footage = T.pack (printf "%d+%02d" (frames `div` 16) (frames `mod` 16))
@@ -119,7 +119,7 @@ animUi = do
       let cycleLen = pullCycleLen cycleThrow
       pullPhase <-
         if exposed
-          then withKey ("pulldown" :: String) (animateEase EaseLinear 0 1 cycleLen)
+          then withKey ("pulldown" :: String) (animate (Tween EaseLinear cycleLen 0) 0 1)
           else pure 0
       let time = pullPhase * cycleLen
       tossRail tossT
@@ -145,7 +145,7 @@ lockThrow exposed throwSec =
   withKey ("cycleThrow" :: String) $
     if exposed
       then pure throwSec
-      else animateTo 0 0.35 >> pure throwSec
+      else animateTo (Tween EaseLinear 0.35 0) 0 >> pure throwSec
 
 transport :: Bool -> Bool -> Float -> Float -> Float -> Float -> NanoUI [Float]
 transport exposed rewinding throwSec time wash glow = do
@@ -212,7 +212,7 @@ lane exposed rewinding throwSec time name ease = do
       then pure (laneT ease throwSec time)
       else
         if rewinding
-          then withKey name (animateToEase ease 0 throwSec)
+          then withKey name (animateTo (Tween ease throwSec 0) 0)
           else pure 0
   trackRow name t paper
   pure t

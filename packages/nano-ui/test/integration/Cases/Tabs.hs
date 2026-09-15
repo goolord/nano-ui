@@ -10,6 +10,7 @@ module Cases.Tabs
   , runTabsScrollTest
   , runTabsStatePersistenceTest
   , runPanelBodySwapDamageTest
+  , runTabResponseForwardingTest
   ) where
 
 import Control.Monad (forM_, replicateM)
@@ -25,9 +26,9 @@ import NanoUI.Testing.Harness
   , centerOf
   , clickPair
   , drawQuads
+  , hasText
   , runClick
   , runClickPair
-  , spansHas
   , withInputOff
   , warmup2
   )
@@ -169,10 +170,20 @@ runTabsEmitTest ctx failed = do
       assertEq failed (decodeMessages msgs :: [TabMsg]) [MsgSelect TabB]
     [] -> assert failed False
 
+-- Composite responses expose every flag of their widget response
+-- (regression: TabResponse dropped respSubmitted).
+runTabResponseForwardingTest :: Context -> IORef Int -> IO ()
+runTabResponseForwardingTest _ failed = do
+  let inner = mempty {rawRespSubmitted = True, rawRespRightPressed = True, rawRespChanged = True}
+      tabResp = TabResponse inner Nothing TabA
+      tableResp = TableResponse inner (SortCol 0 SortAsc) [] mempty
+  assert failed (respSubmitted tabResp && respRightPressed tabResp && respChanged tabResp)
+  assert failed (respSubmitted tableResp && respRightPressed tableResp && respChanged tableResp)
+
 runTabsClosableTest :: Context -> IORef Int -> IO ()
 runTabsClosableTest ctx failed = do
   let inp0 = withInput 300 100
-      ui curTab = tabsEx TabUnderline TabTop curTab
+      ui curTab = tabs curTab
         [ closableTab TabA "Alpha" (label_ "Body A")
         , closableTab TabB "Beta" (label_ "Body B")
         ]
@@ -206,7 +217,7 @@ runTabsDisabledTest :: Context -> IORef Int -> IO ()
 runTabsDisabledTest _ failed = forM_ [TabTop, TabLeft] $ \orientation -> do
   ctx <- newContext
   let inp = withInputOff 400 240
-      ui disabled = tabsEx TabUnderline orientation TabA
+      ui disabled = tabsWith defaultTabsConfig {tabsOrientation = orientation} TabA
         [ (closableTab TabB "Disabled" (label_ "Body B")) {tabDisabled = disabled}
         , tab TabA "Enabled" (label_ "Body A")
         ]
@@ -264,7 +275,7 @@ runTabsStatePersistenceTest ctx failed = do
       _ <- runFrame ctx inp0 (ui TabB)
       spans2 <- collectTextSpans ctx
       assertSpansHas failed "OtherTab" spans2
-      assert failed (not (spansHas "FlagIsOn" spans2))
+      assert failed (not (hasText "FlagIsOn" spans2))
 
       _ <- runFrame ctx inp0 (ui TabA)
       spans3 <- collectTextSpans ctx
@@ -296,7 +307,7 @@ runTabsDamageTest _ failed = do
       assert failed (respChanged resp && newTab == TabB)
       spansSwitch <- collectTextSpans ctx
       assertSpansHas failed "Body B" spansSwitch
-      assert failed (not (spansHas "Body A" spansSwitch))
+      assert failed (not (hasText "Body A" spansSwitch))
       dSwitch <- takeDamage ctx
       assertEq failed dSwitch DamageFull
 
@@ -357,7 +368,7 @@ runTabsScrollTest _ failed = do
   _ <- runFrame wide wideInp (mkTabs 0)
   _ <- runFrame wide wideInp (mkTabs 0)
   wideSpans <- collectTextSpans wide
-  forM_ labels $ \l -> assert failed (spansHas l wideSpans)
+  forM_ labels $ \l -> assert failed (hasText l wideSpans)
   assert failed (not (T.any (`elem` chevrons) (T.concat [t | (_, t, _, _, _) <- wideSpans])))
 
   ctx <- newContext
@@ -368,8 +379,8 @@ runTabsScrollTest _ failed = do
   -- the arrow buttons show from the third frame on.
   _ <- runFrame ctx inp (mkTabs 0)
   spans0 <- collectTextSpans ctx
-  assert failed (spansHas "Controls" spans0)
-  assert failed (not (spansHas "LongestTabName" spans0))
+  assert failed (hasText "Controls" spans0)
+  assert failed (not (hasText "LongestTabName" spans0))
 
   -- No scroller well: while the strip is scrollable it must not paint the
   -- input background, the input border, or any scrollbar track or thumb
@@ -401,14 +412,14 @@ runTabsScrollTest _ failed = do
       runClick ctx inp (mkTabs 0) (V2 (ax + aw / 2) (ay + ah / 2))
       _ <- runFrame ctx inp (mkTabs 0)
       spans1 <- collectTextSpans ctx
-      assert failed (not (spansHas "Controls" spans1))
+      assert failed (not (hasText "Controls" spans1))
       mLeft <- arrowRect ctx '\8249'
       case mLeft of
         (Rect lx ly lw lh : _) -> do
           runClick ctx inp (mkTabs 0) (V2 (lx + lw / 2) (ly + lh / 2))
           _ <- runFrame ctx inp (mkTabs 0)
           spans2 <- collectTextSpans ctx
-          assert failed (spansHas "Controls" spans2)
+          assert failed (hasText "Controls" spans2)
         _ -> assert failed False
     _ -> assert failed False
 
@@ -421,7 +432,7 @@ runTabsScrollTest _ failed = do
       _ <- runFrame ctx wheelDown (mkTabs 0)
       _ <- runFrame ctx inp (mkTabs 0)
       spans4 <- collectTextSpans ctx
-      assert failed (not (spansHas "Controls" spans4))
+      assert failed (not (hasText "Controls" spans4))
 
       -- Left+right wheel over the bar scrolls the same offset through the
       -- framework scroller. The vertical wheel pinned the offset at max, so
@@ -435,15 +446,15 @@ runTabsScrollTest _ failed = do
       _ <- runFrame ctx (wheelX 10) (mkTabs 0)
       _ <- runFrame ctx inp (mkTabs 0)
       spans5 <- collectTextSpans ctx
-      assert failed (not (spansHas "Controls" spans5))
+      assert failed (not (hasText "Controls" spans5))
       _ <- runFrame ctx (wheelX (-100)) (mkTabs 0)
       _ <- runFrame ctx inp (mkTabs 0)
       spans6 <- collectTextSpans ctx
-      assert failed (spansHas "Controls" spans6)
+      assert failed (hasText "Controls" spans6)
       _ <- runFrame ctx (wheelX (-100)) (mkTabs 0)
       _ <- runFrame ctx inp (mkTabs 0)
       spans7 <- collectTextSpans ctx
-      assert failed (spansHas "Controls" spans7)
+      assert failed (hasText "Controls" spans7)
     _ -> assert failed False
 
   -- Tab-list changes recompute the reachable range: shrinking back under
@@ -456,7 +467,7 @@ runTabsScrollTest _ failed = do
   _ <- runFrame ctx inp (mkShort 0)
   _ <- runFrame ctx inp (mkShort 0)
   spansS <- collectTextSpans ctx
-  forM_ shortLabels $ \l -> assert failed (spansHas l spansS)
+  forM_ shortLabels $ \l -> assert failed (hasText l spansS)
   mRightS <- arrowRect ctx '\8250'
   mLeftS <- arrowRect ctx '\8249'
   assert failed (null mRightS && null mLeftS)
@@ -466,4 +477,4 @@ runTabsScrollTest _ failed = do
   spansG <- collectTextSpans ctx
   mRightG <- arrowRect ctx '\8250'
   assert failed (not (null mRightG))
-  assert failed (not (spansHas "LongestTabName" spansG))
+  assert failed (not (hasText "LongestTabName" spansG))

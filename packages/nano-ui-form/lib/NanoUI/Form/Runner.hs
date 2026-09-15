@@ -2,7 +2,6 @@
 
 module NanoUI.Form.Runner
   ( runNanoForm
-  , nanoForm
   , nanoFormLive
   , nanoFormSubmit
   , nanoFormEx
@@ -37,9 +36,10 @@ import NanoUI.Form.Types
   , FormConfig (..)
   , FormMode (..)
   , FormStatus (..)
-  , FormUI (..)
   , FormView (..)
+  , defaultFormConfig
   )
+import NanoUI.Form.Backend (FormUI (..))
 
 -- | Evaluate a formlet and return its view and result. The view retains its
 -- prefix even when rendered after other forms or inside another form's view.
@@ -60,17 +60,14 @@ withNanoForm prefix form consume = withFormPrefix prefix $ do
   let keyedView (FormView action) = FormView (withFormWidgets prefix action)
   consume (keyedView <$> view) result
 
--- | Default form runner: runs live validation and renders the form in 'NanoUI'.
-nanoForm :: Text -> Form Text a -> NanoUI (Maybe a)
-nanoForm = nanoFormLive
-
--- | Run a form with live validation: renders every frame and yields @Just a@ whenever valid.
+-- | Default form runner: renders the form every frame with live validation
+-- and yields @Just a@ whenever it is valid.
 nanoFormLive :: Text -> Form Text a -> NanoUI (Maybe a)
-nanoFormLive prefix form = withNanoForm prefix form $ \view' res -> do
-  column' defaultLayout (renderResult True view' res)
-  pure $ case res of
-    Ditto.Ok (Ditto.Proved _ a) -> Just a
-    Ditto.Error _               -> Nothing
+nanoFormLive prefix form = do
+  status <- nanoFormEx defaultFormConfig prefix form
+  pure $ case status of
+    FormValid a -> Just a
+    FormInvalid _ -> Nothing
 
 -- | Run a form with an integrated submit button.
 -- Validation errors are only displayed after the first submission attempt.

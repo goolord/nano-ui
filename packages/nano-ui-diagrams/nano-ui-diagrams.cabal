@@ -36,6 +36,7 @@ common warnings
     -Wmissing-home-modules
     -Wpartial-fields
     -Wredundant-constraints
+    -Wunused-packages
 
 library
     import:           extensions
@@ -61,14 +62,13 @@ library
         diagrams-core >=1.5 && <1.6,
         diagrams-lib >=1.6 && <1.7,
         dlist ^>=1.0,
-        effectful ^>=2.6,
+        effectful-core ^>=2.6,
         hashable ^>=1.5,
         lens >=5.2 && <5.4,
         nano-ui ^>=0.1,
         text ^>=2.1,
         vector ^>=0.13
     hs-source-dirs:   lib
-    default-language: GHC2024
 
 test-suite nano-ui-diagrams-test
     import:           extensions
@@ -79,9 +79,9 @@ test-suite nano-ui-diagrams-test
         base ^>=4.22.0.0,
         colour >=2.3.2 && <2.4,
         diagrams-lib >=1.6 && <1.7,
+        hspec ^>=2.11,
         nano-ui,
         nano-ui-diagrams,
         text ^>=2.1,
         vector ^>=0.13
     hs-source-dirs:   test
-    default-language: GHC2024

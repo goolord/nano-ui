@@ -1,23 +1,11 @@
-{-# LANGUAGE BangPatterns #-}
-
 -- | Universal session loop helpers: timing, click tracking, drawing locks, redraw predicates, and lifecycle checks.
 module NanoUI.Runner
-  ( -- * Timing
-    maxFrameDt
-  , stepDeltaTime
-    -- * Click Tracking
-  , ClickTracker (..)
-  , newClickTracker
-  , stampClicksWith
-    -- * Drawing Lock
-  , DrawingLock (..)
+  ( -- * Drawing Lock
+    DrawingLock (..)
   , newDrawingLock
   , tryWithDrawingLock
     -- * Redraw Decision
   , shouldRedrawFrame
-    -- * Session Loop Helpers
-  , checkSessionQuit
-  , checkHardQuit
     -- * Universal Session Runner
   , SessionDriver (..)
   , runSessionLoop
@@ -58,13 +46,6 @@ import NanoUI.Types (V2 (..))
 maxFrameDt :: Float
 maxFrameDt = 0.05
 
--- | Advance monotonic clock and calculate clamped delta-time.
-stepDeltaTime :: Double -> IO (Double, Float)
-stepDeltaTime lastT = do
-  now <- getMonotonicTime
-  let !dt = min maxFrameDt (realToFrac (now - lastT))
-  pure (now, dt)
-
 -- | Wind forward to the next frame boundary after a timed-out event wait.
 -- When pacing is active the backend requests a wait of ~period, but a one-shot
 -- sleep lets frame starts drift by the scheduler's timer granularity (and land
@@ -94,15 +75,9 @@ data ClickTrack = ClickTrack
   , ctCount :: !Int
   }
 
-newtype ClickTracker = ClickTracker (IORef ClickTrack)
-
--- | Create a new click tracker initialized to no previous clicks.
-newClickTracker :: IO ClickTracker
-newClickTracker = ClickTracker <$> newIORef ClickTrack {ctTime = 0, ctPos = V2 (-999) (-999), ctCount = 0}
-
 -- | Stamp multi-click counts into an 'Input' record with custom distance and time thresholds.
-stampClicksWith :: Float -> Double -> ClickTracker -> Input -> IO Input
-stampClicksWith !distLimit !timeLimit (ClickTracker ref) inp
+stampClicksWith :: Float -> Double -> IORef ClickTrack -> Input -> IO Input
+stampClicksWith !distLimit !timeLimit ref inp
   | not (inputMousePressed inp) = pure inp
   | otherwise = do
       now <- getMonotonicTime
@@ -161,18 +136,6 @@ shouldRedrawFrame ctx prevInp curInp wasAnim continuous wantDebug = do
           scrollEdge = inputScroll curInp /= V2 0 0
       pure (need || anim || forceFinal || dirty || editing || pointerEdge || scrollEdge)
 
--- | Check if the session should terminate, respecting modals/overlays consuming Escape/Quit.
-checkSessionQuit :: Context -> (Input -> Bool) -> Input -> IO Bool
-checkSessionQuit ctx shouldQuit inp = do
-  overlayQuit <- overlayConsumesQuit ctx inp
-  pure (shouldQuit inp && not overlayQuit)
-
--- | Check if hard quit (e.g. Ctrl+C) was requested while not inside an active text editor.
-checkHardQuit :: Context -> Input -> IO Bool
-checkHardQuit ctx inp = do
-  editActive <- textInputEditActive ctx
-  pure (isHardQuitInput inp && not editActive)
-
 -- | Universal backend session driver configuration.
 data SessionDriver ev = SessionDriver
   { sdPollEvents    :: IO [ev]
@@ -221,7 +184,7 @@ runSessionLoop ::
   Input ->
   IO ()
 runSessionLoop drv ctx0 inp0 = do
-  clickTracker <- newClickTracker
+  clickTracker <- newIORef ClickTrack {ctTime = 0, ctPos = V2 (-999) (-999), ctCount = 0}
   startT <- getMonotonicTime
 
   let waitForEvents timeout lastT
@@ -253,13 +216,15 @@ runSessionLoop drv ctx0 inp0 = do
         if hardQuitEv || sessionQuitEv
           then pure ()
           else do
-            (now, dt) <- stepDeltaTime lastT
+            now <- getMonotonicTime
+            let !dt = min maxFrameDt (realToFrac (now - lastT))
             sdNoteLoop drv dt
             let inpFolded = foldl' (sdApplyEvent drv) (clearEphemeral inp {inputDeltaTime = dt}) group
             inpStamped <- stampClicksWith (sdClickDistance drv) (sdClickTime drv) clickTracker inpFolded
             (ctx', inpSynced) <- sdSyncDisplay drv ctx inpStamped
-            hardQuit <- checkHardQuit ctx' inpSynced
-            if hardQuit
+            -- Hard quit (e.g. Ctrl+C) is ignored while a text editor is active.
+            editActiveSynced <- textInputEditActive ctx'
+            if isHardQuitInput inpSynced && not editActiveSynced
               then pure ()
               else do
                 shouldDraw <- if pendingDirty
@@ -277,8 +242,9 @@ runSessionLoop drv ctx0 inp0 = do
                     sdOnCursor drv ctx' inpSynced
                     pure (pendingDirty, inpSynced)
                 animAfter <- anyAnimating ctx'
-                shouldTerm <- checkSessionQuit ctx' (sdShouldQuit drv) synced
-                if shouldTerm
+                -- Open modals/overlays consume Escape/Quit before the app sees it.
+                overlayQuit <- overlayConsumesQuit ctx' synced
+                if sdShouldQuit drv synced && not overlayQuit
                   then pure ()
                   else loop ctx' synced rest now dirtyOut animAfter
 

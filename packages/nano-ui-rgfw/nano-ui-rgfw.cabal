@@ -9,20 +9,12 @@ author:             goolord
 maintainer:         zacharyachurchill@gmail.com
 category:           Graphics
 build-type:         Simple
-data-files:         data/cozette.min.otb
+extra-source-files: data/cozette.min.otb
 
 common extensions
     default-language: GHC2024
     default-extensions:
-        BangPatterns
-        DeriveGeneric
-        DuplicateRecordFields
-        GeneralizedNewtypeDeriving
-        MagicHash
         OverloadedStrings
-        RecordWildCards
-        ScopedTypeVariables
-        UnboxedTuples
 
 common warnings
     ghc-options:
@@ -30,6 +22,7 @@ common warnings
         -Wextra
         -Wcompat
         -Widentities
+        -Wunused-packages
 
 library
     import:           extensions
@@ -48,8 +41,7 @@ library
     build-depends:
         base ^>=4.22.0.0,
         bytestring ^>=0.12,
-        containers ^>=0.8,
-        effectful ^>=2.6,
+        effectful-core ^>=2.6,
         file-embed ^>=0.0.16,
         nano-ui-rgfw-bindings ^>=0.1,
         nano-ui ^>=0.1,
@@ -57,7 +49,6 @@ library
         text ^>=2.1,
         vector ^>=0.13
     hs-source-dirs:   lib
-    default-language: GHC2024
 
 executable nano-ui-rgfw-demo
     import:           extensions
@@ -70,7 +61,6 @@ executable nano-ui-rgfw-demo
         nano-ui-rgfw,
         text ^>=2.1
     hs-source-dirs:   examples
-    default-language: GHC2024
 
 executable nano-ui-rgfw-profile
     import:           extensions
@@ -79,15 +69,11 @@ executable nano-ui-rgfw-profile
     other-modules:    RgfwDemoCommon
     build-depends:
         base ^>=4.22.0.0,
-        containers,
-        effectful ^>=2.6,
+        effectful-core ^>=2.6,
         nano-ui,
         nano-ui-rgfw,
-        nano-ui-rgfw-bindings,
-        primitive ^>=0.9,
         text ^>=2.1
     hs-source-dirs:   examples
-    default-language: GHC2024
 
 test-suite nano-ui-rgfw-test
     import:           extensions
@@ -96,7 +82,6 @@ test-suite nano-ui-rgfw-test
     main-is:          Spec.hs
     build-depends:
         base ^>=4.22.0.0,
-        bytestring ^>=0.12,
         containers ^>=0.7 || ^>=0.8,
         nano-ui,
         nano-ui-rgfw,
@@ -104,4 +89,3 @@ test-suite nano-ui-rgfw-test
         primitive ^>=0.9,
         text ^>=2.1
     hs-source-dirs:   test
-    default-language: GHC2024

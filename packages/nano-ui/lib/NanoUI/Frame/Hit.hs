@@ -6,16 +6,12 @@ module NanoUI.Frame.Hit
   , findNodeByKey
   , modalTreeOpen
   , topmostModalIdx
-  , nodeInTopmostModal
   , nodeInSubtree
   , widgetIdInSubtree
-  , modalHitAllowed
   , overlayHitAllowed
   , topmostOverlayAtMouse
   , topmostModalAtMouse
-  , topmostWindowAtMouse
   , widgetOverlayAllowed
-  , widgetIdInModal
   , scrollHitRect
   , nodePointVisible
   , nodeClippedHit
@@ -55,13 +51,6 @@ topmostModalIdx ctx =
   findNodeRevM (ctxNodeArena ctx) $ \i ->
     (== NodeModal) <$> getNodeType (ctxNodeArena ctx) i
 
-nodeInTopmostModal :: Context -> NodeIdx -> IO Bool
-nodeInTopmostModal ctx idx = do
-  mTop <- topmostModalIdx ctx
-  case mTop of
-    Nothing -> pure False
-    Just top -> nodeInSubtree ctx idx top
-
 nodeInSubtree :: Context -> NodeIdx -> NodeIdx -> IO Bool
 nodeInSubtree ctx idx top = go idx
   where
@@ -78,13 +67,6 @@ widgetIdInSubtree :: Context -> NodeIdx -> WidgetId -> IO Bool
 widgetIdInSubtree ctx root wid = do
   node <- findNodeByWidgetId ctx wid
   maybe (pure False) (\idx -> nodeInSubtree ctx idx root) node
-
-modalHitAllowed :: Context -> NodeIdx -> IO Bool
-modalHitAllowed ctx idx = do
-  mTop <- topmostModalIdx ctx
-  case mTop of
-    Nothing -> pure True
-    Just top -> nodeInSubtree ctx idx top
 
 overlayHitAllowed :: Context -> NodeIdx -> V2 -> IO Bool
 overlayHitAllowed ctx idx mouse = do
@@ -105,10 +87,6 @@ topmostModalAtMouse :: Context -> V2 -> IO (Maybe NodeIdx)
 topmostModalAtMouse ctx mouse =
   topmostFloatingAtMouse ctx mouse (== NodeModal)
 
-topmostWindowAtMouse :: Context -> V2 -> IO (Maybe NodeIdx)
-topmostWindowAtMouse ctx mouse =
-  topmostFloatingAtMouse ctx mouse (== NodeWindow)
-
 topmostFloatingAtMouse :: Context -> V2 -> (NodeType -> Bool) -> IO (Maybe NodeIdx)
 topmostFloatingAtMouse ctx mouse wanted =
   findNodeRevM (ctxNodeArena ctx) $ \idx -> do
@@ -125,13 +103,6 @@ widgetOverlayAllowed ctx wid = do
   case top of
     Nothing -> pure True
     Just modal -> widgetIdInSubtree ctx modal wid
-
-widgetIdInModal :: Context -> WidgetId -> IO Bool
-widgetIdInModal ctx wid = do
-  mIdx <- findNodeByWidgetId ctx wid
-  case mIdx of
-    Nothing -> pure False
-    Just idx -> nodeInTopmostModal ctx idx
 
 -- Prev rects are visual space (snapshot after applyScrollOffsets).
 scrollHitRect :: Context -> WidgetId -> IO (Maybe Rect)

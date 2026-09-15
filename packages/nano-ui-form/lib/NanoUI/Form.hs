@@ -40,7 +40,6 @@ module NanoUI.Form
 
     -- * Form Runners
   , runNanoForm
-  , nanoForm
   , nanoFormLive
   , nanoFormSubmit
   , nanoFormEx
@@ -79,9 +78,9 @@ import NanoUI.Form.Named
   , withErrors
   , withFieldErrors
   )
+import NanoUI.Form.Backend (FormInput (..), FormUI (..), liftNanoUI)
 import NanoUI.Form.Runner
-  ( nanoForm
-  , nanoFormEx
+  ( nanoFormEx
   , nanoFormLive
   , nanoFormSubmit
   , resetForm
@@ -90,13 +89,10 @@ import NanoUI.Form.Runner
 import NanoUI.Form.Types
   ( Form
   , FormConfig (..)
-  , FormInput (..)
   , FormMode (..)
   , FormStatus (..)
-  , FormUI (..)
   , FormView (..)
   , defaultFormConfig
-  , liftNanoUI
   )
 import NanoUI.Form.Validation
 import NanoUI.Form.Widgets

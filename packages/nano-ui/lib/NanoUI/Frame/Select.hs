@@ -2,31 +2,28 @@
 
 module NanoUI.Frame.Select
   ( selectDropRect
-  , selectDropGap
   , selectItemH
   , selectDropPickIndex
   , closeSelectOnOutsideClick
   , finalizeSelectKeyboard
   , finalizeSelectPick
   , markSelectDropPress
-  , openSelectHit
   , drawSelectOverlays
   , collectSelectDropdownSpans
   , findSelectUnderMouse
   , overlayMenuOwnerAt
   , cacheOpenSelectDrop
-  , selectTextClip
   , tagSelectClippedSpans
   , comboDropRect
   , comboDropPickIndex
   , comboScrollGeom
   ) where
 
-
 import Control.Monad (forM, forM_, unless, when)
+import Data.Foldable (find)
 import Data.IORef (readIORef, writeIORef)
-import Data.Maybe (isJust)
 import qualified Data.IntMap.Strict as IM
+import Data.Maybe (catMaybes, listToMaybe)
 import qualified Data.Text as T
 import NanoUI.Context
   ( Context (..)
@@ -46,92 +43,122 @@ import NanoUI.Context
   , setStore
   )
 import NanoUI.Draw (pushRect, pushRoundedRect, pushText, withClip)
-import NanoUI.Font (FontMetrics, centeredTextY, widgetContentInset)
+import NanoUI.Font (FontMetrics, centeredTextY, menuItemPadX, menuItemRowH, menuOuterPad, widgetContentInset)
+import NanoUI.Frame.Chrome (overlayMenuStyle, paintMenuAccent, paintMenuPanel)
+import NanoUI.Frame.Hit (findNodeByWidgetId, widgetOverlayAllowed)
+import NanoUI.Frame.Scroll.Geometry (padTextClipRect)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), Key (..), foldInputKeys, inputKeys, inputMouseDown, inputMousePos, inputMousePressed)
-import NanoUI.Layout.Arena (NodeIdx, NodeType (NodeSelect, NodeTextInput), arenaCount, findNodeRevM, getNodeType, getOptions, getRect, getWidgetId)
+import NanoUI.Layout.Arena (NodeType (NodeSelect, NodeTextInput), findNodeM, foldNodesM, getNodeType, getOptions, getRect, getWidgetId)
 import NanoUI.Store (slotAnchor, slotComboContentW, slotComboCount, slotComboHighlight, slotComboScroll, slotComboScrollX, slotCursor, slotKey)
 import NanoUI.Style (Style (..), Theme (..), scrollBarThumbColor, scrollBarTrackColor, themeAccent, themeInput)
-import NanoUI.Types (Color (..), Rect (..), V2 (..), rectContains, rectH, rectIntersect, rectW, rectX, rectY, v2Y)
-import NanoUI.Frame.Scroll.Geometry (padTextClipRect)
+import NanoUI.Types (Color (..), Rect (..), V2 (..), rectContains, rectIntersect)
 import NanoUI.WidgetText (selectChevronReserve)
-import NanoUI.Frame.Chrome
-  ( fillStyledRect
-  , pushMenuShadow
-  , strokeStyledRect
-  , overlayMenuStyle
-  , textInputMenuItemPadX
-  , textInputMenuOuterPad
-  )
-import NanoUI.Frame.Hit (findNodeByWidgetId, widgetOverlayAllowed)
+
+-- | An open dropdown: a select with its open flag set, or a combo box (a
+-- search field carrying options) exactly while it holds focus.
+data Dropdown = Dropdown
+  { ddWidget :: !WidgetId
+  , ddCombo :: !Bool
+  , ddOptions :: [T.Text]
+  , ddAnchor :: !Rect
+  , ddRect :: !Rect
+  , ddPicked :: !Int
+  -- ^ Row shown as picked: the select's value, or the combo's keyboard
+  -- highlight relative to its window (-1 highlights nothing).
+  , ddComboRows :: !Int
+  , ddComboWindow :: !Int
+  , ddComboScrollX :: !Float
+  , ddComboContentW :: !Float
+  }
+
+-- | Every open dropdown, in arena order.
+openDropdowns :: Context -> IO [Dropdown]
+openDropdowns ctx = do
+  store <- getStore ctx
+  focus <- readIORef (ctxFocusId ctx)
+  -- Selects open only through the store flag and combos only while focused,
+  -- so most frames skip the walk.
+  if not (anySelectOpen store) && hashWidgetId focus == 0
+    then pure []
+    else reverse <$> foldNodesM na (\acc idx -> maybe acc (: acc) <$> dropdownAt store focus idx) []
+  where
+    na = ctxNodeArena ctx
+    dropdownAt store focus idx =
+      getNodeType na idx >>= \case
+        NodeSelect -> do
+          wid <- getWidgetId na idx
+          if isSelectOpen store (intKey wid) then Just <$> build store idx wid False else pure Nothing
+        NodeTextInput -> do
+          wid <- getWidgetId na idx
+          opts <- getOptions na idx
+          if wid /= focus || null opts then pure Nothing else Just <$> build store idx wid True
+        _ -> pure Nothing
+    build store idx wid combo = do
+      opts <- getOptions na idx
+      (x, y, w, h) <- getRect na idx
+      let key = intKey wid
+          slotInt slot def = IM.findWithDefault def (slotKey slot key) (storeInt store)
+          slotFloat slot = IM.findWithDefault 0 (slotKey slot key) (storeFloat store)
+          nOpts = length opts
+          rows = slotInt slotComboCount nOpts
+          window = slotInt slotComboScroll 0
+          contentW = slotFloat slotComboContentW
+          fm = ctxFontMetrics ctx
+      pure
+        Dropdown
+          { ddWidget = wid
+          , ddCombo = combo
+          , ddOptions = opts
+          , ddAnchor = Rect x y w h
+          , ddRect =
+              if combo
+                then comboDropRect fm x y w h nOpts rows contentW
+                else selectDropRect fm x y w h nOpts
+          , ddPicked =
+              if combo
+                then slotInt slotComboHighlight (-1) - window
+                else IM.findWithDefault 0 key (storeInt store)
+          , ddComboRows = rows
+          , ddComboWindow = window
+          , ddComboScrollX = slotFloat slotComboScrollX
+          , ddComboContentW = contentW
+          }
+
+-- | One placed row of an open dropdown.
+data DropdownRow = DropdownRow
+  { drIndex :: !Int
+  , drOption :: T.Text
+  , drRect :: !Rect
+  , drTextX :: !Float
+  , drHovered :: !Bool
+  }
+
+-- | Rows of an open dropdown, shared by its painter and its text spans. Combo
+-- rows sit flush at the drop rect's top edge (no outer margin) and scroll
+-- horizontally; select rows keep their padded layout.
+dropdownRows :: FontMetrics -> V2 -> Dropdown -> [DropdownRow]
+dropdownRows fm mouse dd =
+  let Rect dx dy dw _ = ddRect dd
+      top = if ddCombo dd then dy else dy + menuOuterPad
+      textX0 = dx + menuItemPadX + fst (widgetContentInset fm)
+      textX = if ddCombo dd then textX0 - ddComboScrollX dd else textX0
+   in [ DropdownRow i opt row textX (rectContains row mouse)
+      | (i, opt) <- zip [0 ..] (ddOptions dd)
+      , let row = Rect dx (top + menuItemRowH * fromIntegral i) dw menuItemRowH
+      ]
 
 overlayMenuOwnerAt :: Context -> V2 -> IO (Maybe WidgetId)
 overlayMenuOwnerAt ctx mouse = do
   mMenu <- getTextInputMenu ctx
   case mMenu of
-    Just m | rectContains (textInputMenuRect m) mouse ->
-      pure (Just (textInputMenuWidget m))
-    _ -> openSelectDropOwnerAt ctx mouse
-
--- | Live dropdown owners: selects with their open flag set, and combo boxes —
--- search-style text fields carrying options — exactly while they hold focus
--- (a combo's dropdown is visible whenever its field is focused).
-openDropdownOwner :: Context -> NodeIdx -> NodeType -> IO (Maybe WidgetId)
-openDropdownOwner ctx idx nt
-  | nt == NodeSelect = do
-      store <- getStore ctx
-      wid <- getWidgetId (ctxNodeArena ctx) idx
-      pure (if isSelectOpen store (intKey wid) then Just wid else Nothing)
-  | nt == NodeTextInput = do
-      wid <- getWidgetId (ctxNodeArena ctx) idx
-      focus <- readIORef (ctxFocusId ctx)
-      if focus /= wid
-        then pure Nothing
-        else do
-          opts <- getOptions (ctxNodeArena ctx) idx
-          pure (if null opts then Nothing else Just wid)
-  | otherwise = pure Nothing
-
-openSelectDropOwnerAt :: Context -> V2 -> IO (Maybe WidgetId)
-openSelectDropOwnerAt ctx mouse = do
-  count <- arenaCount (ctxNodeArena ctx)
-  fmap (fmap fst) $ findOpenDropdown ctx count (\_ dropRect -> rectContains dropRect mouse)
-
--- Forward queries share ownership and geometry rules. Keep the predicate
--- explicit: outside-click handling includes the anchor; menu ownership does not.
-findOpenDropdown :: Context -> Int -> (Rect -> Rect -> Bool) -> IO (Maybe (WidgetId, Rect))
-findOpenDropdown ctx count accepts = do
-  store <- getStore ctx
-  let go idx
-        | idx >= count = pure Nothing
-        | otherwise = do
-            nt <- getNodeType (ctxNodeArena ctx) idx
-            mOwner <- openDropdownOwner ctx idx nt
-            case mOwner of
-              Nothing -> go (idx + 1)
-              Just wid -> do
-                (anchor, dropRect) <- dropdownBounds ctx store idx nt wid
-                if accepts anchor dropRect
-                  then pure (Just (wid, dropRect))
-                  else go (idx + 1)
-  go 0
-
-dropdownBounds :: Context -> WidgetStore -> NodeIdx -> NodeType -> WidgetId -> IO (Rect, Rect)
-dropdownBounds ctx store idx nt wid = do
-  opts <- getOptions (ctxNodeArena ctx) idx
-  (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-  pure (Rect x y w h, ownerDropRect ctx nt wid store opts x y w h)
+    Just m | rectContains (textInputMenuRect m) mouse -> pure (Just (textInputMenuWidget m))
+    _ -> fmap ddWidget . find (\dd -> rectContains (ddRect dd) mouse) <$> openDropdowns ctx
 
 cacheOpenSelectDrop :: Context -> IO ()
 cacheOpenSelectDrop ctx = do
-  store <- getStore ctx
-  focus <- readIORef (ctxFocusId ctx)
-  if not (anySelectOpen store) && hashWidgetId focus == 0
-    then setOpenSelectDrop ctx Nothing
-    else do
-      count <- arenaCount (ctxNodeArena ctx)
-      m <- findOpenDropdown ctx count (\_ _ -> True)
-      setOpenSelectDrop ctx m
+  dropdowns <- openDropdowns ctx
+  setOpenSelectDrop ctx ((\dd -> (ddWidget dd, ddRect dd)) <$> listToMaybe dropdowns)
 
 markSelectDropPress :: Context -> Input -> IO ()
 markSelectDropPress ctx inp =
@@ -139,9 +166,9 @@ markSelectDropPress ctx inp =
     store <- getStore ctx
     when (anySelectOpen store) $ do
       let mouse = inputMousePos inp
-      count <- arenaCount (ctxNodeArena ctx)
-      hit <- openSelectHit ctx count mouse
-      when hit $ setSelectDropPress ctx True
+      dropdowns <- openDropdowns ctx
+      when (any (\dd -> rectContains (ddAnchor dd) mouse || rectContains (ddRect dd) mouse) dropdowns) $
+        setSelectDropPress ctx True
 
 closeSelectOnOutsideClick :: Context -> Input -> IO ()
 closeSelectOnOutsideClick ctx inp =
@@ -149,15 +176,13 @@ closeSelectOnOutsideClick ctx inp =
     store <- getStore ctx
     when (anySelectOpen store) $ do
       let mouse = inputMousePos inp
-      count <- arenaCount (ctxNodeArena ctx)
-      hit <- openSelectHit ctx count mouse
-      unless hit $
+      dropdowns <- openDropdowns ctx
+      unless (any (\dd -> rectContains (ddAnchor dd) mouse || rectContains (ddRect dd) mouse) dropdowns) $
         setStore ctx (closeSelects store)
 
 finalizeSelectKeyboard :: Context -> Input -> IO ()
 finalizeSelectKeyboard ctx inp = do
-  let keys = inputKeys inp
-      (wantNext, wantPrev, wantEsc, wantEnter) =
+  let (wantNext, wantPrev, wantEsc, wantEnter) =
         foldInputKeys
           ( \(n, p, e, r) k ->
               ( n || k == KeyDown || k == KeyRight
@@ -167,49 +192,38 @@ finalizeSelectKeyboard ctx inp = do
               )
           )
           (False, False, False, False)
-          keys
+          (inputKeys inp)
       wantStep = wantNext || wantPrev
   when (wantStep || wantEsc || wantEnter) $ do
     focus <- readIORef (ctxFocusId ctx)
     store <- getStore ctx
     mTarget <- pickSelectKeyboardTarget ctx focus store wantStep
-    case mTarget of
-      Nothing -> pure ()
-      Just (wid, open) -> do
-        allow <- widgetOverlayAllowed ctx wid
-        when allow $
-          case () of
-            _ | wantEsc || wantEnter ->
-                when open $ do
-                  setStore ctx (setSelectOpen store (intKey wid) False)
-                  when wantEsc $ markEscapeConsumed ctx
+    forM_ mTarget $ \(wid, open) -> do
+      allow <- widgetOverlayAllowed ctx wid
+      when allow $
+        if wantEsc || wantEnter
+          then when open $ do
+            setStore ctx (setSelectOpen store (intKey wid) False)
+            when wantEsc $ markEscapeConsumed ctx
+            markDirty ctx
+          else do
+            mIdx <- findNodeByWidgetId ctx wid
+            forM_ mIdx $ \idx -> do
+              n <- length <$> getOptions (ctxNodeArena ctx) idx
+              when (n > 0) $ do
+                let key = intKey wid
+                    cur = IM.findWithDefault 0 key (storeInt store)
+                    next = max 0 (min (n - 1) (cur + if wantNext then 1 else -1))
+                when (next /= cur) $ do
+                  setStore ctx (store {storeInt = IM.insert key next (storeInt store)})
                   markDirty ctx
-            _ | wantStep -> do
-                mIdx <- findNodeByWidgetId ctx wid
-                case mIdx of
-                  Nothing -> pure ()
-                  Just idx -> do
-                    opts <- getOptions (ctxNodeArena ctx) idx
-                    let n = length opts
-                    if n <= 0
-                      then pure ()
-                      else do
-                        let key = intKey wid
-                            cur = IM.findWithDefault 0 key (storeInt store)
-                            delta = if wantNext then 1 else -1
-                            next = max 0 (min (n - 1) (cur + delta))
-                        when (next /= cur) $ do
-                          setStore ctx (store {storeInt = IM.insert key next (storeInt store)})
-                          markDirty ctx
-            _ -> pure ()
 
-pickSelectKeyboardTarget ::
-  Context -> WidgetId -> WidgetStore -> Bool -> IO (Maybe (WidgetId, Bool))
+pickSelectKeyboardTarget :: Context -> WidgetId -> WidgetStore -> Bool -> IO (Maybe (WidgetId, Bool))
 pickSelectKeyboardTarget ctx focus store wantStep = do
   mFocus <- if wantStep then selectWidgetIfAny ctx focus else pure Nothing
   case mFocus of
     Just wid -> pure (Just (wid, isSelectOpen store (intKey wid)))
-    Nothing -> fmap (fmap (, True)) (findOpenSelectWidget ctx)
+    Nothing -> fmap (,True) <$> findOpenSelectWidget ctx
 
 selectWidgetIfAny :: Context -> WidgetId -> IO (Maybe WidgetId)
 selectWidgetIfAny ctx wid
@@ -220,154 +234,93 @@ selectWidgetIfAny ctx wid
         Nothing -> pure Nothing
         Just idx -> do
           nt <- getNodeType (ctxNodeArena ctx) idx
-          if nt == NodeSelect then pure (Just wid) else pure Nothing
+          pure (if nt == NodeSelect then Just wid else Nothing)
 
 findOpenSelectWidget :: Context -> IO (Maybe WidgetId)
 findOpenSelectWidget ctx = do
   store <- getStore ctx
-  count <- arenaCount (ctxNodeArena ctx)
-  let go idx
-        | idx >= count = pure Nothing
-        | otherwise = do
-            nt <- getNodeType (ctxNodeArena ctx) idx
-            if nt /= NodeSelect
-              then go (idx + 1)
-              else do
-                wid <- getWidgetId (ctxNodeArena ctx) idx
-                if isSelectOpen store (intKey wid)
-                  then pure (Just wid)
-                  else go (idx + 1)
-  go 0
+  let na = ctxNodeArena ctx
+  mIdx <-
+    findNodeM na $ \idx -> do
+      nt <- getNodeType na idx
+      if nt /= NodeSelect
+        then pure False
+        else isSelectOpen store . intKey <$> getWidgetId na idx
+  traverse (getWidgetId na) mIdx
 
 finalizeSelectPick :: Context -> Input -> IO ()
 finalizeSelectPick ctx inp =
   when (inputMousePressed inp || inputMouseReleased inp) $ do
-    let mouse = inputMousePos inp
-    count <- arenaCount (ctxNodeArena ctx)
-    let go idx
-          | idx >= count = pure ()
-          | otherwise = do
-              nt <- getNodeType (ctxNodeArena ctx) idx
-              mOwner <- openDropdownOwner ctx idx nt
-              case mOwner of
-                Nothing -> go (idx + 1)
-                Just wid -> do
-                  allow <- widgetOverlayAllowed ctx wid
-                  if not allow
-                    then go (idx + 1)
-                    else do
-                      opts <- getOptions (ctxNodeArena ctx) idx
-                      (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-                      st <- getStore ctx
-                      let dropRect = ownerDropRect ctx nt wid st opts x y w h
-                          itemH = selectItemH h
-                      when (rectContains dropRect mouse) $ do
-                        let key = intKey wid
-                        case nt of
-                          NodeTextInput -> do
-                            -- Combo: pick on press only, never from the
-                            -- scrollbar lanes, so finishing a thumb drag
-                            -- cannot commit a row. Picking commits the
-                            -- option text into the field and defocuses it:
-                            -- the combo's dropdown is visible exactly while
-                            -- focused, so the menu disappears with the pick.
-                            let cN = IM.findWithDefault (length opts) (slotKey slotComboCount key) (storeInt st)
-                                cWin = IM.findWithDefault 0 (slotKey slotComboScroll key) (storeInt st)
-                                cCW = IM.findWithDefault 0 (slotKey slotComboContentW key) (storeFloat st)
-                                cX = IM.findWithDefault 0 (slotKey slotComboScrollX key) (storeFloat st)
-                                (_, vSb, hSb, _) = comboScrollGeom dropRect cN (length opts) cWin cX cCW
-                                onLane =
-                                  maybe False (\(t, _) -> rectContains t mouse) vSb
-                                    || maybe False (\(t, _) -> rectContains t mouse) hSb
-                            when (inputMousePressed inp && not onLane) $
-                              case comboDropPickIndex dropRect itemH (length opts) (v2Y mouse) of
-                                Nothing -> pure ()
-                                Just pickedI -> do
-                                  let txt = case drop pickedI opts of
-                                        (o : _) -> o
-                                        _ -> ""
-                                      len = T.length txt
-                                  setStore
-                                    ctx
-                                    ( st
-                                        { storeText = IM.insert key txt (storeText st)
-                                        , storeInt =
-                                            IM.insert (slotKey slotCursor key) len $
-                                              IM.insert (slotKey slotAnchor key) len (storeInt st)
-                                        }
-                                    )
-                                  writeIORef (ctxFocusId ctx) (WidgetId 0)
-                                  markDirty ctx
-                          _ ->
-                            case selectDropPickIndex dropRect itemH (length opts) (v2Y mouse) of
-                              Nothing -> pure ()
-                              Just pickedI -> do
-                                setStore
-                                  ctx
-                                  ( setSelectOpen
-                                      (st {storeInt = IM.insert key pickedI (storeInt st)})
-                                      key
-                                      False
-                                  )
-                                writeIORef (ctxFocusId ctx) wid
-                                markDirty ctx
-                      go (idx + 1)
-    go 0
+    let mouse@(V2 _ mouseY) = inputMousePos inp
+    dropdowns <- openDropdowns ctx
+    forM_ dropdowns $ \dd -> do
+      allow <- widgetOverlayAllowed ctx (ddWidget dd)
+      when (allow && rectContains (ddRect dd) mouse) $ do
+        st <- getStore ctx
+        let wid = ddWidget dd
+            key = intKey wid
+            nOpts = length (ddOptions dd)
+        if ddCombo dd
+          then do
+            -- Combo: pick on press only, never from the scrollbar lanes, so
+            -- finishing a thumb drag cannot commit a row. Picking commits the
+            -- option text into the field and defocuses it: the combo's
+            -- dropdown is visible exactly while focused, so the menu
+            -- disappears with the pick.
+            let (_, vSb, hSb, _) = comboScrollGeom (ddRect dd) (ddComboRows dd) nOpts (ddComboWindow dd) (ddComboScrollX dd) (ddComboContentW dd)
+                onLane = any (\(track, _) -> rectContains track mouse) (catMaybes [vSb, hSb])
+            when (inputMousePressed inp && not onLane) $
+              forM_ (comboDropPickIndex (ddRect dd) menuItemRowH nOpts mouseY) $ \picked -> do
+                let txt = maybe "" id (listToMaybe (drop picked (ddOptions dd)))
+                    len = T.length txt
+                setStore
+                  ctx
+                  ( st
+                      { storeText = IM.insert key txt (storeText st)
+                      , storeInt =
+                          IM.insert (slotKey slotCursor key) len $
+                            IM.insert (slotKey slotAnchor key) len (storeInt st)
+                      }
+                  )
+                writeIORef (ctxFocusId ctx) (WidgetId 0)
+                markDirty ctx
+          else
+            forM_ (selectDropPickIndex (ddRect dd) menuItemRowH nOpts mouseY) $ \picked -> do
+              setStore ctx (setSelectOpen (st {storeInt = IM.insert key picked (storeInt st)}) key False)
+              writeIORef (ctxFocusId ctx) wid
+              markDirty ctx
 
-openSelectHit :: Context -> Int -> V2 -> IO Bool
-openSelectHit ctx count mouse =
-  isJust <$> findOpenDropdown ctx count (\anchor dropRect -> rectContains anchor mouse || rectContains dropRect mouse)
-
+-- | Topmost open dropdown owner (in reverse arena order) whose anchor or menu
+-- is under @mouse@ and that the modal state lets receive input.
 findSelectUnderMouse :: Context -> V2 -> IO (Maybe WidgetId)
 findSelectUnderMouse ctx mouse = do
-  store <- getStore ctx
-  mIdx <-
-    findNodeRevM (ctxNodeArena ctx) $ \idx -> do
-      nt <- getNodeType (ctxNodeArena ctx) idx
-      mOwner <- openDropdownOwner ctx idx nt
-      case mOwner of
-        Nothing -> pure False
-        Just wid -> do
-          allow <- widgetOverlayAllowed ctx wid
-          if not allow
-            then pure False
-            else do
-              (btnRect, dropRect) <- dropdownBounds ctx store idx nt wid
-              pure (rectContains btnRect mouse || rectContains dropRect mouse)
-  case mIdx of
-    Nothing -> pure Nothing
-    Just idx -> Just <$> getWidgetId (ctxNodeArena ctx) idx
+  dropdowns <- openDropdowns ctx
+  firstAllowed [dd | dd <- reverse dropdowns, rectContains (ddAnchor dd) mouse || rectContains (ddRect dd) mouse]
+  where
+    firstAllowed [] = pure Nothing
+    firstAllowed (dd : rest) = do
+      allow <- widgetOverlayAllowed ctx (ddWidget dd)
+      if allow then pure (Just (ddWidget dd)) else firstAllowed rest
 
 selectItemH :: Float -> Float
-selectItemH _rh = 28
+selectItemH _ = menuItemRowH
 
-selectDropOuterPad :: Float
-selectDropOuterPad = textInputMenuOuterPad
-
--- | Vertical gap/margin between the select widget and its dropdown menu.
+-- | Vertical gap between the select widget and its dropdown menu.
 selectDropGap :: Float
 selectDropGap = 4
 
 selectDropRect :: FontMetrics -> Float -> Float -> Float -> Float -> Int -> Rect
 selectDropRect _fm x y w h nOpts =
-  let itemH = selectItemH h
-      pad = selectDropOuterPad
-      gap = selectDropGap
-   in Rect x (y + h + gap) w (itemH * fromIntegral nOpts + 2 * pad)
-
-selectDropItemY :: FontMetrics -> Rect -> Float -> Int -> Float
-selectDropItemY _fm dropRect itemH i =
-  rectY dropRect + selectDropOuterPad + itemH * fromIntegral i
+  Rect x (y + h + selectDropGap) w (menuItemRowH * fromIntegral nOpts + 2 * menuOuterPad)
 
 selectDropPickIndex :: Rect -> Float -> Int -> Float -> Maybe Int
 selectDropPickIndex dropRect itemH nOpts mouseY =
-  let innerH = itemH * fromIntegral nOpts
-      pad = max 0 ((rectH dropRect - innerH) / 2)
-      rel = mouseY - rectY dropRect - pad
+  let Rect _ dy _ dh = dropRect
+      innerH = itemH * fromIntegral nOpts
+      rel = mouseY - dy - max 0 ((dh - innerH) / 2)
    in if rel < 0 || rel >= innerH
         then Nothing
-        else
-          Just (max 0 (min (nOpts - 1) (floor (rel / max itemH 1))))
+        else Just (max 0 (min (nOpts - 1) (floor (rel / max itemH 1))))
 
 -- Combo dropdown scrollbar sizes: lane thickness and the shortest a thumb
 -- ever gets.
@@ -389,50 +342,37 @@ comboScrollGeom ::
   Float ->
   Float ->
   (Rect, Maybe (Rect, Rect), Maybe (Rect, Rect), Float)
-comboScrollGeom dropRect n vis win xOff contentW =
+comboScrollGeom (Rect dx dy dw dh) n vis win xOff contentW =
   let
     vScroll = n > vis && vis > 0
     vLaneW = if vScroll then comboSbW else 0
-    usableW = max 0 (rectW dropRect - vLaneW)
+    usableW = max 0 (dw - vLaneW)
     hScroll = contentW > usableW && contentW > 0
     hLaneH = if hScroll then comboSbW else 0
     -- Rows fill the drop rect from the top, stopping short of the lanes.
-    inner =
-      Rect
-        (rectX dropRect)
-        (rectY dropRect)
-        (max 0 (rectW dropRect - vLaneW))
-        (max 0 (rectH dropRect - hLaneH))
+    inner = Rect dx dy (max 0 (dw - vLaneW)) (max 0 (dh - hLaneH))
     -- Lanes sit flush against the dropdown border and share the corner.
-    vTrack =
-      Rect
-        (rectX dropRect + rectW dropRect - comboSbW)
-        (rectY dropRect)
-        comboSbW
-        (max 0 (rectH dropRect - hLaneH))
-    hTrack =
-      Rect
-        (rectX dropRect)
-        (rectY dropRect + rectH dropRect - comboSbW)
-        (max 0 (rectW dropRect - vLaneW))
-        comboSbW
+    vTrack = Rect (dx + dw - comboSbW) dy comboSbW (max 0 (dh - hLaneH))
+    hTrack = Rect dx (dy + dh - comboSbW) (max 0 (dw - vLaneW)) comboSbW
     vSb =
       if vScroll
         then
-          let trackH = max 1 (rectH vTrack)
+          let Rect vx vy _ vh = vTrack
+              trackH = max 1 vh
               thumbH = max (min comboSbMinThumb trackH) (min trackH (trackH * fromIntegral vis / fromIntegral n))
               maxWin = max 1 (n - vis)
-              ty = rectY vTrack + (trackH - thumbH) * fromIntegral (max 0 (min maxWin win)) / fromIntegral maxWin
-           in Just (vTrack, Rect (rectX vTrack + 2) ty (comboSbW - 4) thumbH)
+              ty = vy + (trackH - thumbH) * fromIntegral (max 0 (min maxWin win)) / fromIntegral maxWin
+           in Just (vTrack, Rect (vx + 2) ty (comboSbW - 4) thumbH)
         else Nothing
     hSb =
       if hScroll
         then
-          let trackW = max 1 (rectW hTrack)
+          let Rect hx hy hw _ = hTrack
+              trackW = max 1 hw
               thumbW = max (min comboSbMinThumb trackW) (min trackW (trackW * usableW / contentW))
               maxOff = max 1 (contentW - usableW)
-              tx = rectX hTrack + (trackW - thumbW) * (max 0 (min maxOff xOff)) / maxOff
-           in Just (hTrack, Rect tx (rectY hTrack + 2) thumbW (comboSbW - 4))
+              tx = hx + (trackW - thumbW) * max 0 (min maxOff xOff) / maxOff
+           in Just (hTrack, Rect tx (hy + 2) thumbW (comboSbW - 4))
         else Nothing
    in (inner, vSb, hSb, usableW)
 
@@ -441,126 +381,60 @@ comboScrollGeom dropRect n vis win xOff contentW =
 -- scrollbar lane when the widest row overflows, so the horizontal bar never
 -- covers the bottommost row. Must agree with 'comboScrollGeom' on when lanes
 -- appear (same inputs, same formulas).
-comboDropRect ::
-  FontMetrics -> Float -> Float -> Float -> Float -> Int -> Int -> Float -> Rect
+comboDropRect :: FontMetrics -> Float -> Float -> Float -> Float -> Int -> Int -> Float -> Rect
 comboDropRect _fm x y w h nRows nTotal contentW =
-  let itemH = selectItemH h
-      gap = selectDropGap
-      vScroll = nTotal > nRows
-      vLaneW = if vScroll then comboSbW else 0
-      usableW = max 0 (w - vLaneW)
-      hScroll = contentW > usableW && contentW > 0
-   in Rect x (y + h + gap) w (fromIntegral nRows * itemH + (if hScroll then comboSbW else 0))
+  let vLaneW = if nTotal > nRows then comboSbW else 0
+      hScroll = contentW > max 0 (w - vLaneW) && contentW > 0
+   in Rect x (y + h + selectDropGap) w (fromIntegral nRows * menuItemRowH + (if hScroll then comboSbW else 0))
 
 -- | Row index at @mouseY@ for a combo dropdown, whose rows start flush at the
 -- drop rect's top (unlike 'selectDropPickIndex', which centers them).
 comboDropPickIndex :: Rect -> Float -> Int -> Float -> Maybe Int
-comboDropPickIndex dropRect itemH nOpts mouseY =
-  let rel = mouseY - rectY dropRect
+comboDropPickIndex (Rect _ dy _ _) itemH nOpts mouseY =
+  let rel = mouseY - dy
    in if rel < 0 || rel >= itemH * fromIntegral nOpts
         then Nothing
         else Just (max 0 (min (nOpts - 1) (floor (rel / max itemH 1))))
 
--- | Dropdown rect for an open dropdown owner: 'selectDropRect' for selects,
--- 'comboDropRect' for combos.
-ownerDropRect :: Context -> NodeType -> WidgetId -> WidgetStore -> [T.Text] -> Float -> Float -> Float -> Float -> Rect
-ownerDropRect ctx nt wid store opts x y w h = case nt of
-  NodeTextInput ->
-    let key = intKey wid
-        cN = IM.findWithDefault (length opts) (slotKey slotComboCount key) (storeInt store)
-        cCW = IM.findWithDefault 0 (slotKey slotComboContentW key) (storeFloat store)
-     in comboDropRect (ctxFontMetrics ctx) x y w h (length opts) cN cCW
-  _ -> selectDropRect (ctxFontMetrics ctx) x y w h (length opts)
-
 drawSelectOverlays :: Context -> Input -> IO ()
 drawSelectOverlays ctx inp = do
   theme <- readIORef (ctxTheme ctx)
-  count <- arenaCount (ctxNodeArena ctx)
-  let go idx
-        | idx >= count = pure ()
-        | otherwise = do
-            nt <- getNodeType (ctxNodeArena ctx) idx
-            mOwner <- openDropdownOwner ctx idx nt
-            case mOwner of
-              Nothing -> go (idx + 1)
-              Just wid -> do
-                store <- getStore ctx
-                allow <- widgetOverlayAllowed ctx wid
-                if allow
-                  then do
-                    opts <- getOptions (ctxNodeArena ctx) idx
-                    (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-                    drawDropdownMenu ctx inp theme nt wid store opts x y w h
-                  else pure ()
-                go (idx + 1)
-  go 0
+  dropdowns <- openDropdowns ctx
+  forM_ dropdowns $ \dd -> do
+    allow <- widgetOverlayAllowed ctx (ddWidget dd)
+    when allow $ drawDropdownMenu ctx inp theme dd
 
--- | Paint one owner's dropdown menu (select or combo). Selects keep the
--- historical full-width rows; the combo list has no outer margin (rows start
--- flush at the drop rect's top), clips to the inner area (so x-shifted text
--- and row fills stop at the scrollbar lanes) and gets vertical / horizontal
--- scrollbars when the filtered rows or the widest row overflow the window.
-drawDropdownMenu ::
-  Context -> Input -> Theme -> NodeType -> WidgetId -> WidgetStore -> [T.Text] -> Float -> Float -> Float -> Float -> IO ()
-drawDropdownMenu ctx inp theme nt wid store opts x y w h = do
+-- | Paint one open dropdown (select or combo). The combo list clips to its
+-- inner area (so x-shifted text and row fills stop at the scrollbar lanes)
+-- and gets vertical / horizontal scrollbars when the filtered rows or the
+-- widest row overflow the window.
+drawDropdownMenu :: Context -> Input -> Theme -> Dropdown -> IO ()
+drawDropdownMenu ctx inp theme dd = do
   let da = ctxDrawArena ctx
       fm = ctxFontMetrics ctx
-      mouse = inputMousePos inp
-      key = intKey wid
-      isCombo = nt == NodeTextInput
-      comboHi = IM.findWithDefault (-1) (slotKey slotComboHighlight key) (storeInt store)
-      comboWin = IM.findWithDefault 0 (slotKey slotComboScroll key) (storeInt store)
-      comboN = IM.findWithDefault (length opts) (slotKey slotComboCount key) (storeInt store)
-      comboCW = IM.findWithDefault 0 (slotKey slotComboContentW key) (storeFloat store)
-      comboX = IM.findWithDefault 0 (slotKey slotComboScrollX key) (storeFloat store)
-      -- Combo keyboard highlight, window-relative; -1 (nothing highlighted)
-      -- must stay unhighlighted.
-      picked = case nt of
-        NodeTextInput -> comboHi - comboWin
-        _ -> IM.findWithDefault 0 key (storeInt store)
-      itemH = selectItemH h
-      dropRect = ownerDropRect ctx nt wid store opts x y w h
-      (inner, vSb, hSb, _) =
-        if isCombo
-          then comboScrollGeom dropRect comboN (length opts) comboWin comboX comboCW
-          else (dropRect, Nothing, Nothing, rectW dropRect)
-      dropStyle = overlayMenuStyle theme
-      r = styleCornerRadius dropStyle
-  pushMenuShadow da dropRect r
-  fillStyledRect da dropStyle dropRect
-  strokeStyledRect da dropStyle (rectX dropRect) (rectY dropRect) (rectW dropRect) (rectH dropRect)
-  let (ix, _) = widgetContentInset fm
-      -- Combo rows sit flush at the drop rect's top edge (no outer margin);
-      -- select rows keep their padded layout.
-      rowY i = if isCombo then rectY dropRect + itemH * fromIntegral i else selectDropItemY fm dropRect itemH i
+      style = overlayMenuStyle theme
       paintRows =
-        forM_ (zip ([0 ..] :: [Int]) opts) $ \(i, opt) -> do
-          let iy = rowY i
-              itemRect = Rect (rectX dropRect) iy (rectW dropRect) itemH
-              hovered = rectContains itemRect mouse
-          when (hovered || i == picked) $ do
-            let bg = if hovered then styleHoverBg dropStyle else styleActiveBg dropStyle
-            pushRect da itemRect bg
-            when hovered $ do
-              let accent = themeAccent theme
-                  barRect = Rect (rectX itemRect) (rectY itemRect + 3) 2 (rectH itemRect - 6)
-              pushRoundedRect da barRect 1 accent
-          unless (T.null opt) $ do
-            (_tw, th) <- ctxMeasureText ctx opt
-            let tx0 = rectX dropRect + textInputMenuItemPadX + ix
-                tx = if isCombo then tx0 - comboX else tx0
-                ty = centeredTextY fm iy itemH th
-                itemFg = if i == picked then themeAccent theme else styleFg dropStyle
-            pushText da fm tx ty opt itemFg
-  if isCombo
+        forM_ (dropdownRows fm (inputMousePos inp) dd) $ \row -> do
+          let picked = drIndex row == ddPicked dd
+              Rect _ ry _ rh = drRect row
+          if drHovered row
+            then do
+              pushRect da (drRect row) (styleHoverBg style)
+              paintMenuAccent da theme (drRect row)
+            else when picked $ pushRect da (drRect row) (styleActiveBg style)
+          unless (T.null (drOption row)) $ do
+            (_, th) <- ctxMeasureText ctx (drOption row)
+            pushText da fm (drTextX row) (centeredTextY fm ry rh th) (drOption row) $
+              if picked then themeAccent theme else styleFg style
+  paintMenuPanel da style (ddRect dd)
+  if ddCombo dd
     then do
-      withClip da inner paintRows
-      let base = themeInput theme
-          trackCol = scrollBarTrackColor base theme
-          thumbCol = scrollBarThumbColor base theme
+      let (inner, vSb, hSb, _) = comboScrollGeom (ddRect dd) (ddComboRows dd) (length (ddOptions dd)) (ddComboWindow dd) (ddComboScrollX dd) (ddComboContentW dd)
+          base = themeInput theme
           drawBar (track, thumb) = do
-            pushRect da track trackCol
-            pushRoundedRect da thumb 3 thumbCol
+            pushRect da track (scrollBarTrackColor base theme)
+            pushRoundedRect da thumb 3 (scrollBarThumbColor base theme)
+      withClip da inner paintRows
       mapM_ drawBar vSb
       mapM_ drawBar hSb
     else paintRows
@@ -568,78 +442,30 @@ drawDropdownMenu ctx inp theme nt wid store opts x y w h = do
 collectSelectDropdownSpans :: Context -> Input -> IO [(Rect, T.Text, Color, Color, Rect)]
 collectSelectDropdownSpans ctx inp = do
   theme <- readIORef (ctxTheme ctx)
+  dropdowns <- openDropdowns ctx
   let fm = ctxFontMetrics ctx
-      mouse = inputMousePos inp
-  count <- arenaCount (ctxNodeArena ctx)
-  let go idx
-        | idx >= count = pure []
-        | otherwise = do
-            nt <- getNodeType (ctxNodeArena ctx) idx
-            mOwner <- openDropdownOwner ctx idx nt
-            case mOwner of
-              Nothing -> go (idx + 1)
-              Just wid -> do
-                store <- getStore ctx
-                allow <- widgetOverlayAllowed ctx wid
-                if not allow
-                  then go (idx + 1)
-                  else do
-                    opts <- getOptions (ctxNodeArena ctx) idx
-                    (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-                    let key = intKey wid
-                        itemH = selectItemH h
-                        dropRect = ownerDropRect ctx nt wid store opts x y w h
-                        comboHi =
-                          IM.findWithDefault (-1) (slotKey slotComboHighlight key) (storeInt store)
-                        comboWin = IM.findWithDefault 0 (slotKey slotComboScroll key) (storeInt store)
-                        comboX = IM.findWithDefault 0 (slotKey slotComboScrollX key) (storeFloat store)
-                        picked = case nt of
-                          NodeTextInput -> comboHi - comboWin
-                          _ -> IM.findWithDefault 0 key (storeInt store)
-                        dropStyle = overlayMenuStyle theme
-                        fg = styleFg dropStyle
-                    do
-                      let (ix, _) = widgetContentInset fm
-                          dropBg = styleBg dropStyle
-                          -- Combo rows sit flush at the drop rect's top
-                          -- edge (no outer margin); select rows keep
-                          -- their padded layout.
-                          rowY i = case nt of
-                            NodeTextInput -> rectY dropRect + itemH * fromIntegral i
-                            _ -> selectDropItemY fm dropRect itemH i
-                      itemSpans <-
-                        forM (zip ([0 ..] :: [Int]) opts) $ \(i, opt) ->
-                          if T.null opt
-                            then pure []
-                            else do
-                              (tw, th) <- ctxMeasureText ctx opt
-                              let itemY = rowY i
-                                  itemRect = Rect (rectX dropRect) itemY (rectW dropRect) itemH
-                                  hovered = rectContains itemRect mouse
-                                  rowBg
-                                    | hovered = styleHoverBg dropStyle
-                                    | i == picked = styleActiveBg dropStyle
-                                    | otherwise = dropBg
-                                  ty = centeredTextY fm itemY itemH th
-                                  tx0 = rectX dropRect + textInputMenuItemPadX + ix
-                                  tx = case nt of
-                                    NodeTextInput -> tx0 - comboX
-                                    _ -> tx0
-                              pure [(Rect tx ty tw th, opt, fg, rowBg, dropRect)]
-                      rest <- go (idx + 1)
-                      pure (concat itemSpans ++ rest)
-  go 0
-
-
-selectTextClip :: Float -> Float -> Float -> Float -> FontMetrics -> Rect
-selectTextClip x y w h fm =
-  let (ix, _) = widgetContentInset fm
-   in Rect (x + ix) y (max 0 (w - ix - selectChevronReserve)) (max 0 h)
+      style = overlayMenuStyle theme
+  fmap concat . forM dropdowns $ \dd -> do
+    allow <- widgetOverlayAllowed ctx (ddWidget dd)
+    if not allow
+      then pure []
+      else fmap concat . forM (dropdownRows fm (inputMousePos inp) dd) $ \row ->
+        if T.null (drOption row)
+          then pure []
+          else do
+            (tw, th) <- ctxMeasureText ctx (drOption row)
+            let Rect _ ry _ rh = drRect row
+                bg
+                  | drHovered row = styleHoverBg style
+                  | drIndex row == ddPicked dd = styleActiveBg style
+                  | otherwise = styleBg style
+            pure [(Rect (drTextX row) (centeredTextY fm ry rh th) tw th, drOption row, styleFg style, bg, ddRect dd)]
 
 tagSelectClippedSpans ::
   Rect -> Float -> Float -> Float -> Float -> FontMetrics -> [(Rect, T.Text, Color, Color)] -> [(Rect, T.Text, Color, Color, Rect)]
 tagSelectClippedSpans parentClip x y w h fm spans =
-  let textClip = padTextClipRect (selectTextClip x y w h fm)
+  let (ix, _) = widgetContentInset fm
+      textClip = padTextClipRect (Rect (x + ix) y (max 0 (w - ix - selectChevronReserve)) (max 0 h))
    in case rectIntersect parentClip textClip of
         Nothing -> []
-        Just clip -> map (\(rect, txt, fg, bg) -> (rect, txt, fg, bg, clip)) spans
+        Just clip -> [(rect, txt, fg, bg, clip) | (rect, txt, fg, bg) <- spans]

@@ -1,4 +1,3 @@
-#include "nano_ui_opt.h"
 #include "nano_ui_text_atlas.h"
 
 #include <SDL3/SDL.h>

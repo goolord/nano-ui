@@ -1,4 +1,3 @@
-{-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | First-class custom widget definition system for nano-ui.
@@ -8,7 +7,7 @@
 --    supporting custom layout measurement, interaction-aware drawing, custom cursors, and damage slop.
 -- 2. 'CanvasM': A fast, declarative monadic canvas builder emitting vector 'DrawOp's.
 -- 3. 'canvas' & 'canvasWith': Ergonomic one-line helpers for custom graphics and interactive visual components.
--- 4. Reusable 2D gesture hooks ('useDrag2D', 'useWheelDelta', 'useClickGesture').
+-- 4. Reusable 2D gesture hooks ('useDrag2D', 'useWheelDelta').
 module NanoUI.Widgets.Custom
   ( -- * Custom Widget Specification
     CustomWidgetSpec (..)
@@ -42,8 +41,6 @@ module NanoUI.Widgets.Custom
   , useDrag2D
   , Drag2D (..)
   , useWheelDelta
-  , useClickGesture
-  , ClickGesture (..)
     -- * Reference Custom Widgets
   , knob
   , knobWith
@@ -73,15 +70,17 @@ import NanoUI.Context
   , getFocusId
   , getHotId
   , getStore
+  , getStoreBool
   , intKey
   , isDisabled
-  , markDirty
   , registerCustomCursor
   , registerCustomDamageSlop
   , registerCustomDrawing
   , registerCustomMeasure
   , registerFocusable
   , setStore
+  , writeStoreBool
+  , writeStoreFloat
   )
 import NanoUI.Draw (DrawOp (..))
 import NanoUI.Font (FontMetrics)
@@ -92,12 +91,11 @@ import NanoUI.Input
   , inputMouseDown
   , inputMousePos
   , inputMousePressed
-  , inputMouseReleased
   , inputScroll
   )
 import NanoUI.Layout.Arena (NodeType (NodeDrawing))
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO)
-import NanoUI.Store (WidgetStore (..), boolInt, intBool, slotDrag, slotKey)
+import NanoUI.Store (WidgetStore (..), slotDrag, slotKey)
 import NanoUI.Style
   ( AlignX (..)
   , AlignY (..)
@@ -119,22 +117,22 @@ import NanoUI.Types
   , ImageId (..)
   , Rect (..)
   , V2 (..)
+  , clamp
+  , clamp01
   , colorRGBA
   , defaultDamageSlop
   , rectContains
-  , rectH
-  , rectW
-  , rectX
-  , rectY
   , v2X
   , v2Y
   )
 import NanoUI.Widgets.Behavior (KeyNav (..), keyActivated, useKeyNav)
 import NanoUI.Widgets.Node
-  ( Responding (..)
-  , Response
+  ( Response
   , addWidget
-  , mkResponse
+  , respClicked
+  , respHovered
+  , respPressed
+  , respRect
   , setChanged
   )
 
@@ -242,8 +240,11 @@ data CustomWidgetSpec a = CustomWidgetSpec
     -- ^ Whether this widget accepts tab/keyboard focus.
   , widgetDamageSlop :: !Float
     -- ^ Padding added to dirty rectangles (for shadows, glow, or drag handles).
-  , widgetInteract   :: !(WidgetId -> Rect -> CustomDrawContext -> Input -> (Response, a))
-    -- ^ Interaction response and value evaluation hook.
+  , widgetInteract   :: !(Response -> CustomDrawContext -> Input -> (Response, a))
+    -- ^ Interaction hook. It receives the widget's resolved 'Response' (hover,
+    -- press, right-click, and clicks including one queued from a previous
+    -- frame), the draw context and the input, and returns the final response
+    -- and value.
   }
 
 -- | Default configuration for a custom widget with standard hover/press/click behavior.
@@ -255,26 +256,29 @@ defaultCustomWidgetSpec = CustomWidgetSpec
   , widgetCursor     = Nothing
   , widgetFocusable  = False
   , widgetDamageSlop = defaultDamageSlop
-  , widgetInteract   = \wid r cdc inp ->
-      let hovered = cdcHovered cdc
-          pressed = cdcPressed cdc
-          clicked = hovered && inputMouseReleased inp
-       in (mkResponse wid r hovered pressed clicked False, ())
+  , widgetInteract   = \resp _ _ -> (resp, ())
   }
 
 -- | Build the draw context a custom widget sees, resolving hover/press/focus
 -- state for @wid@ from the ambient context. One policy for state masking.
 mkCustomDrawContext :: Context -> FontMetrics -> WidgetId -> IO CustomDrawContext
 mkCustomDrawContext ctx fm wid = do
+  hot <- getHotId ctx
+  active <- readIORef (ctxActiveId ctx)
+  customDrawContext ctx fm wid (hot == wid) (active == wid)
+
+-- | Draw context for @wid@ with the given hover and press state; a disabled
+-- widget is never hovered or pressed.
+customDrawContext :: Context -> FontMetrics -> WidgetId -> Bool -> Bool -> IO CustomDrawContext
+customDrawContext ctx fm wid hovered pressed = do
   disabled <- isDisabled ctx wid
   focused <- (== wid) <$> getFocusId ctx
-  hot <- getHotId ctx
   active <- readIORef (ctxActiveId ctx)
   theme <- readIORef (ctxTheme ctx)
   pure
     CustomDrawContext
-      { cdcHovered = hot == wid && not disabled
-      , cdcPressed = active == wid && not disabled
+      { cdcHovered = hovered && not disabled
+      , cdcPressed = pressed && not disabled
       , cdcFocused = focused
       , cdcActive = active == wid
       , cdcDisabled = disabled
@@ -289,33 +293,14 @@ customWidgetWithId wid spec = do
   inp <- askInput
   uiIO $ do
     when (widgetFocusable spec) $ registerFocusable ctx wid
-    case widgetMeasure spec of
-      Just mFn -> registerCustomMeasure ctx wid mFn
-      Nothing  -> pure ()
+    mapM_ (registerCustomMeasure ctx wid) (widgetMeasure spec)
     registerCustomDrawing ctx wid (widgetDraw spec)
-    case widgetCursor spec of
-      Just cFn -> registerCustomCursor ctx wid cFn
-      Nothing  -> pure ()
+    mapM_ (registerCustomCursor ctx wid) (widgetCursor spec)
     when (widgetDamageSlop spec > 0) $
       registerCustomDamageSlop ctx wid (widgetDamageSlop spec)
   resp0 <- addWidget wid NodeDrawing T.empty 0 (widgetLayout spec)
-  (resp, val) <- uiIO $ do
-    disabled <- isDisabled ctx wid
-    focused <- (== wid) <$> getFocusId ctx
-    active <- readIORef (ctxActiveId ctx)
-    theme <- readIORef (ctxTheme ctx)
-    let cdc =
-          CustomDrawContext
-            { cdcHovered  = respHovered resp0
-            , cdcPressed  = respPressed resp0
-            , cdcFocused  = focused
-            , cdcActive   = active == wid
-            , cdcDisabled = disabled
-            , cdcTheme    = theme
-            , cdcFont     = ctxFontMetrics ctx
-            }
-    pure (widgetInteract spec wid (respRect resp0) cdc inp)
-  pure (resp, val)
+  cdc <- uiIO (customDrawContext ctx (ctxFontMetrics ctx) wid (respHovered resp0) (respPressed resp0))
+  pure (widgetInteract spec resp0 cdc inp)
 
 -- | Instantiates a custom widget from a 'CustomWidgetSpec'.
 --
@@ -351,12 +336,7 @@ canvasWith lay drawAction =
   customWidget defaultCustomWidgetSpec
     { widgetLayout   = lay
     , widgetDraw     = \cdc rect -> runCanvas (void (drawAction cdc rect))
-    , widgetInteract = \wid r cdc inp ->
-        let hovered = cdcHovered cdc
-            pressed = cdcPressed cdc
-            clicked = hovered && inputMouseReleased inp
-            val     = fst (runCanvasM (drawAction cdc r) id)
-         in (mkResponse wid r hovered pressed clicked False, val)
+    , widgetInteract = \resp cdc _ -> (resp, fst (runCanvasM (drawAction cdc (respRect resp)) id))
     }
 
 -- -----------------------------------------------------------------------------
@@ -383,38 +363,36 @@ useDrag2D bounds = do
   wid <- nextId
   ctx <- askContext
   inp <- askInput
-  let key = intKey wid
-      dragK = slotKey slotDrag key
-      slotPosX = dragK + 1
-      slotPosY = dragK + 2
+  -- The drag flag lives in 'storeInt' and the last pointer position in
+  -- 'storePoint', both under the widget's drag slot.
+  let dragK = slotKey slotDrag (intKey wid)
       mouse = inputMousePos inp
-      down = inputMouseDown inp
-      press = inputMousePressed inp
   store <- uiIO (getStore ctx)
   let active0 = IM.findWithDefault 0 dragK (storeInt store) /= 0
-      hit = rectContains bounds mouse
-      active = down && (active0 || (press && hit))
-      prevX = IM.findWithDefault (v2X mouse) slotPosX (storeFloat store)
-      prevY = IM.findWithDefault (v2Y mouse) slotPosY (storeFloat store)
+      active = inputMouseDown inp && (active0 || (inputMousePressed inp && rectContains bounds mouse))
+      (prevX, prevY) = IM.findWithDefault (v2X mouse, v2Y mouse) dragK (storePoint store)
       delta =
         if active && active0
           then V2 (v2X mouse - prevX) (v2Y mouse - prevY)
           else V2 0 0
       clampedMouse =
         V2
-          (max (rectX bounds) (min (rectX bounds + rectW bounds) (v2X mouse)))
-          (max (rectY bounds) (min (rectY bounds + rectH bounds) (v2Y mouse)))
-  uiIO $ do
-    st <- getStore ctx
-    let sInt =
-          if active
-            then IM.insert dragK 1 (storeInt st)
-            else IM.delete dragK (storeInt st)
-        sFloat =
-          if active
-            then IM.insert slotPosX (v2X mouse) (IM.insert slotPosY (v2Y mouse) (storeFloat st))
-            else IM.delete slotPosX (IM.delete slotPosY (storeFloat st))
-    setStore ctx (st { storeInt = sInt, storeFloat = sFloat })
+          (clamp (rectX bounds) (rectX bounds + rectW bounds) (v2X mouse))
+          (clamp (rectY bounds) (rectY bounds + rectH bounds) (v2Y mouse))
+  when (active || active0) $
+    uiIO $
+      getStore ctx >>= \st -> setStore ctx $
+        if active
+          then
+            st
+              { storeInt = IM.insert dragK 1 (storeInt st)
+              , storePoint = IM.insert dragK (v2X mouse, v2Y mouse) (storePoint st)
+              }
+          else
+            st
+              { storeInt = IM.delete dragK (storeInt st)
+              , storePoint = IM.delete dragK (storePoint st)
+              }
   pure Drag2D { dragPosition = clampedMouse, dragActive = active, dragDelta = delta }
 
 -- | Inspects mouse wheel scroll delta when pointer is hovering over bounds.
@@ -425,18 +403,6 @@ useWheelDelta bounds = do
   if rectContains bounds mouse
     then pure (v2X (inputScroll inp), v2Y (inputScroll inp))
     else pure (0, 0)
-
--- | Gesture classification for mouse clicks.
-data ClickGesture
-  = ClickNone
-  | ClickSingle
-  deriving (Eq, Show)
-
--- | Determines click gestures on a widget response.
-useClickGesture :: Response -> ClickGesture
-useClickGesture resp
-  | respClicked resp = ClickSingle
-  | otherwise        = ClickNone
 
 -- -----------------------------------------------------------------------------
 -- Reference Custom Widgets
@@ -465,11 +431,9 @@ knobWith
 knobWith layout diameter minV maxV initial = do
   wid <- nextId
   ctx <- askContext
-  store <- uiIO (getStore ctx)
-  let key = intKey wid
-      current = IM.findWithDefault initial key (storeFloat store)
-      range = maxV - minV
-      frac = if range > 0 then max 0 (min 1 ((current - minV) / range)) else 0
+  current <- IM.findWithDefault initial (intKey wid) . storeFloat <$> uiIO (getStore ctx)
+  let range = maxV - minV
+      frac = if range > 0 then clamp01 ((current - minV) / range) else 0
   (resp, ()) <- customWidgetWithId wid defaultCustomWidgetSpec
     { widgetLayout = fixedWH diameter diameter layout
     , widgetMeasure = Just $ \_ _ -> (diameter, diameter)
@@ -513,13 +477,10 @@ knobWith layout diameter minV maxV initial = do
           else 0
       finalVal =
         if deltaNorm /= 0
-          then max minV (min maxV (current + deltaNorm * range))
+          then clamp minV maxV (current + deltaNorm * range)
           else current
-  when (finalVal /= current) $ do
-    uiIO $ do
-      st <- getStore ctx
-      setStore ctx (st { storeFloat = IM.insert key finalVal (storeFloat st) })
-      markDirty ctx
+  when (finalVal /= current) $
+    uiIO $ writeStoreFloat ctx wid (intKey wid) finalVal
   pure (setChanged (finalVal /= current) resp, finalVal)
 
 -- | iOS-style toggle pill switch.
@@ -538,10 +499,8 @@ toggleSwitchWith
 toggleSwitchWith layout initial = do
   wid <- nextId
   ctx <- askContext
-  store <- uiIO (getStore ctx)
-  let key = intKey wid
-      current = intBool (IM.findWithDefault (boolInt initial) key (storeInt store))
-      pillW = 44.0
+  current <- uiIO (getStoreBool ctx wid initial)
+  let pillW = 44.0
       pillH = 24.0
   (resp, ()) <- customWidgetWithId wid defaultCustomWidgetSpec
     { widgetLayout = fixedWH pillW pillH layout
@@ -564,12 +523,9 @@ toggleSwitchWith layout initial = do
     }
   keyClick <- keyActivated wid
   let clicked = respClicked resp || keyClick
-      newVal = if clicked then not current else current
-  when clicked $ do
-    uiIO $ do
-      st <- getStore ctx
-      setStore ctx (st { storeInt = IM.insert key (boolInt newVal) (storeInt st) })
-      markDirty ctx
+      newVal = current /= clicked
+  when clicked $
+    uiIO $ writeStoreBool ctx wid newVal
   pure (setChanged clicked resp, newVal)
 
 -- | Circular progress ring indicator (clamped between 0.0 and 1.0).
@@ -597,7 +553,7 @@ circularProgressWith layout diameter frac = do
             theme = cdcTheme cdc
             trackCol = styleBorder (themeButton theme)
             accent = themeAccent theme
-            clampedFrac = max 0 (min 1 frac)
+            clampedFrac = clamp01 frac
         drawStrokeCircle (V2 cx cy) r 2.0 trackCol
         when (clampedFrac > 0) $
           drawCircle (V2 cx cy) (r * clampedFrac) accent
@@ -631,7 +587,7 @@ progressBarWith layout height frac =
                 barW = max 0 w
                 barH' = max 0 h
                 rad = barH' / 2
-                clamped = max 0 (min 1 frac)
+                clamped = clamp01 frac
                 fillWpx = barW * clamped
                 fillRad = if barH' <= 0 then 0 else min rad (fillWpx / 2)
             drawRoundedRect (Rect x y barW barH') rad trackCol

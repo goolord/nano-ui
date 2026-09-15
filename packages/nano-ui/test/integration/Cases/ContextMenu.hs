@@ -13,15 +13,15 @@ import Data.IORef (IORef)
 import Data.Text qualified as T
 import NanoUI
 import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, eval2Ui, evalUi, withInput)
+import NanoUI.Testing.Assert (assert, evalUi, withInput)
 import NanoUI.Testing.Harness (centerOf, clickPair, rightClickPair, runRightClick, warmup2)
 
 menuUi :: NanoUI (Response, Maybe (Response, Response))
 menuUi = column $ do
   btn <- button' "Target Button"
   mInside <- contextMenu btn $ do
-    cut <- menuItem' "Cut"
-    copy <- menuItem' "Copy"
+    cut <- menuItemWith (MenuItem "Cut" Nothing True)
+    copy <- menuItemWith (MenuItem "Copy" Nothing True)
     pure (cut, copy)
   pure (btn, mInside)
 
@@ -88,7 +88,7 @@ runContextMenuAreaTest ctx failed = do
           menuHeader "Actions"
           menuSeparator
           paste <- menuItemWithShortcut "Paste" "Ctrl+V"
-          delete <- menuItemWithIcon "[X]" "Delete"
+          delete <- menuItem "[X] Delete"
           menuItemDisabled "Export"
           pure (paste, delete)
         pure (areaVal, mInside)
@@ -105,7 +105,7 @@ runContextMenuSpansTest ctx failed = do
           void $ menuItem "Special Action"
           void $ menuItemWithShortcut "Find" "Ctrl+F"
 
-  (btnWarm) <- eval2Ui ctx inp0 (button' "Target Button")
+  (btnWarm) <- warmup2 ctx inp0 (button' "Target Button")
   runRightClick ctx inp0 ui (centerOf btnWarm)
 
   spans <- collectOverlayTextSpans ctx inp0

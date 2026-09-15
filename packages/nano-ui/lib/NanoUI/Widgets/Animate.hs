@@ -1,18 +1,15 @@
 module NanoUI.Widgets.Animate
-  ( animate
-  , animateEase
-  , animateEaseDelay
+  ( Transition (..)
+  , animate
   , animateTo
-  , animateToEase
-  , animateToEaseDelay
-  , animateToSpring
   , animateToA
-  , animateToSpringA
   , pulse
   , keepAnimating
   )
 where
 
+import Control.Monad (when)
+import Data.Maybe (isNothing)
 import Effectful (Eff, type (:>))
 import NanoUI.Animatable (Animatable (..))
 import NanoUI.Animation (SpringParams)
@@ -22,62 +19,58 @@ import NanoUI.Context
   , easeSameSpec
   , getAnimationValue
   , lookupAnimation
+  , setAnimationValue
   , startAnimation
   , startAnimationEaseDelay
   , startSpring
   )
 import NanoUI.Monad (Ui, askContext, nextId, scope, uiIO, uiTime, withKey)
-import NanoUI.Widgets.Node (Response (..), respId)
+import NanoUI.Widgets.Node (Response, respId)
 
-animate :: Ui :> es => Float -> Float -> Float -> Eff es Float
-animate = animateEase EaseLinear
+-- | How an animated value moves.
+data Transition
+  = -- | Eased tween: duration and start delay, in seconds.
+    Tween !Ease !Float !Float
+  | -- | Damped spring; retargets from its current position and velocity.
+    Spring !SpringParams
 
-animateEase :: Ui :> es => Ease -> Float -> Float -> Float -> Eff es Float
-animateEase ease from to dur = animateEaseDelay ease from to dur 0
-
-animateEaseDelay ::
-  Ui :> es => Ease -> Float -> Float -> Float -> Float -> Eff es Float
-animateEaseDelay ease from to dur delay = do
+-- | Animate from @from@ to @to@. It starts over from @from@ once it has
+-- finished (a tween completes, a spring settles) or its tween changes, so
+-- calling it every frame cycles.
+animate :: Ui :> es => Transition -> Float -> Float -> Eff es Float
+animate transition from to = do
   wid <- nextId
   ctx <- askContext
   uiIO $ do
-    startAnimationEaseDelay ctx wid from to dur ease delay
+    case transition of
+      Tween ease dur delay -> startAnimationEaseDelay ctx wid from to dur ease delay
+      Spring params -> do
+        running <- lookupAnimation ctx wid
+        when (isNothing running) (setAnimationValue ctx wid from)
+        startSpring ctx wid params to
     getAnimationValue ctx wid
 
-animateTo :: Ui :> es => Float -> Float -> Eff es Float
-animateTo = animateToEase EaseLinear
-
-animateToEase :: Ui :> es => Ease -> Float -> Float -> Eff es Float
-animateToEase ease target dur = animateToEaseDelay ease target dur 0
-
-animateToEaseDelay ::
-  Ui :> es => Ease -> Float -> Float -> Float -> Eff es Float
-animateToEaseDelay ease target dur delay = do
+-- | Animate from the current value toward @target@. An unchanged target keeps
+-- the running animation; a new one retargets from wherever the value is.
+animateTo :: Ui :> es => Transition -> Float -> Eff es Float
+animateTo transition target = do
   wid <- nextId
   ctx <- askContext
   uiIO $ do
-    cur <- getAnimationValue ctx wid
-    manim <- lookupAnimation ctx wid
-    case manim of
-      Just a | easeSameSpec a ease dur delay target -> pure cur
-      Nothing | approxEq cur target -> pure cur
-      _ -> do
-        startAnimationEaseDelay ctx wid cur target dur ease delay
-        getAnimationValue ctx wid
-
-animateToSpring :: Ui :> es => SpringParams -> Float -> Eff es Float
-animateToSpring params target = do
-  wid <- nextId
-  ctx <- askContext
-  uiIO $ do
-    startSpring ctx wid params target
+    case transition of
+      Tween ease dur delay -> do
+        cur <- getAnimationValue ctx wid
+        manim <- lookupAnimation ctx wid
+        case manim of
+          Just a | easeSameSpec a ease dur delay target -> pure ()
+          Nothing | approxEq cur target -> pure ()
+          _ -> startAnimationEaseDelay ctx wid cur target dur ease delay
+      Spring params -> startSpring ctx wid params target
     getAnimationValue ctx wid
 
-animateToA :: (Animatable a, Ui :> es) => Ease -> Float -> a -> Eff es a
-animateToA ease dur = animateComponents (\value -> animateToEase ease value dur)
-
-animateToSpringA :: (Animatable a, Ui :> es) => SpringParams -> a -> Eff es a
-animateToSpringA params = animateComponents (animateToSpring params)
+-- | 'animateTo' for every component of a composite value.
+animateToA :: (Animatable a, Ui :> es) => Transition -> a -> Eff es a
+animateToA transition = animateComponents (animateTo transition)
 
 -- Component keys are local to one composite value, not its parent widget.
 animateComponents ::

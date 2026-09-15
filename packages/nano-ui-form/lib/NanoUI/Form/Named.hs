@@ -55,7 +55,8 @@ import NanoUI.Form.Field
   , fieldErrors
   , fieldView
   )
-import NanoUI.Form.Types (Form, FormInput (..), FormView (..), formInputToText)
+import NanoUI.Form.Backend (FormInput (..), formInputToText)
+import NanoUI.Form.Types (Form, FormView (..))
 
 -- | Single-line text input field.
 inputText :: FormError FormInput err => Text -> Text -> Form err Text
@@ -125,10 +126,7 @@ inputRadio :: (Foldable f, FormError FormInput err) => Text -> f Text -> Int -> 
 inputRadio name options initial =
   Named.input
     name
-    ( \case
-        FormInputInt i -> Right i
-        _ -> Right initial
-    )
+    (Right . decodeInt initial)
     (fieldView respChanged FormInputInt (labelled name (radioFieldset options)))
     initial
 

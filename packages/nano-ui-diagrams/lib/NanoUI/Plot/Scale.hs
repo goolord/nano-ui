@@ -14,24 +14,20 @@ module NanoUI.Plot.Scale
 
 import Data.Text (Text)
 import Data.Text qualified as T
-import NanoUI.Plot.Types (Domain (..), Range (..))
+import NanoUI.Plot.Types (Domain (..))
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Builder as TB
 import qualified Data.Text.Lazy.Builder.Int as TB
 import qualified Data.Text.Lazy.Builder.RealFloat as TB
 import qualified Data.Vector.Generic as GV
 
-domainToPlot :: Domain -> Range -> Double -> Double
-domainToPlot (Domain lo hi) (Range rLo rHi) v =
-  let dSpan = max 1e-9 (hi - lo)
-      t = (v - lo) / dSpan
-   in rLo + t * (rHi - rLo)
+-- | Map a domain value into the unit plot box: @lo@ goes to 0, @hi@ to 1.
+domainToPlot :: Domain -> Double -> Double
+domainToPlot (Domain lo hi) v = (v - lo) / max 1e-9 (hi - lo)
 
-plotToDomain :: Domain -> Range -> Double -> Double
-plotToDomain (Domain lo hi) (Range rLo rHi) v =
-  let dSpan = max 1e-9 (hi - lo)
-      t = (v - rLo) / max 1e-9 (rHi - rLo)
-   in lo + t * dSpan
+-- | Inverse of 'domainToPlot'.
+plotToDomain :: Domain -> Double -> Double
+plotToDomain (Domain lo hi) v = lo + v * max 1e-9 (hi - lo)
 
 -- Works with Data.Vector, Data.Vector.Unboxed, or Data.Vector.Storable
 domainExtent :: (GV.Vector v Double) => v Double -> Domain

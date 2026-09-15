@@ -11,6 +11,7 @@ module Cases.Combo
   , runComboWheelScrollTest
   , runComboWheelXTest
   , runComboWordKeysTest
+  , runComboStepTest
   ) where
 
 import Data.IORef (IORef)
@@ -19,6 +20,50 @@ import NanoUI
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, withInput)
 import NanoUI.Testing.Harness (clickPair, warmup2)
+import NanoUI.Widgets.Combo (ComboInput (..), ComboState (..), ComboStep (..), comboStep)
+
+-- The combo's frame logic is pure: highlight, Enter commit, typing and Escape.
+runComboStepTest :: Context -> IORef Int -> IO ()
+runComboStepTest ctx failed = do
+  let
+    idle =
+      ComboInput
+        { ciFocused = True
+        , ciEdited = False
+        , ciText = ""
+        , ciRows = ["Alpha", "Beta", "Gamma"]
+        , ciContentW = 60
+        , ciField = Rect 0 0 0 0
+        , ciMetrics = ctxFontMetrics ctx
+        , ciMouse = V2 0 0
+        , ciPressed = False
+        , ciDown = False
+        , ciScroll = V2 0 0
+        , ciKeyUp = False
+        , ciKeyDown = False
+        , ciEnter = False
+        , ciEscape = False
+        }
+    s0 = ComboState (-1) 0 0 0 0 0 "" "" True
+    down1 = comboStep idle {ciKeyDown = True} s0
+    down2 = comboStep idle {ciKeyDown = True} (stepState down1)
+    enter = comboStep idle {ciEnter = True} (stepState down2)
+    typed = comboStep idle {ciEdited = True, ciText = "G", ciRows = ["Gamma"]} (stepState down2)
+    escaped = comboStep idle {ciEscape = True, ciText = "Gam"} ((stepState enter) {csLive = "Gam"})
+  assertEq failed (csHighlight (stepState down1)) 0
+  assertEq failed (csHighlight (stepState down2)) 1
+  assertEq failed (stepCommit down2) Nothing
+  -- Enter commits the highlighted row and moves the caret.
+  assertEq failed (stepCommit enter) (Just "Beta")
+  assert failed (stepPicked enter)
+  assertEq failed (csLive (stepState enter)) "Beta"
+  -- Typing clears the highlight and never commits.
+  assertEq failed (csHighlight (stepState typed)) (-1)
+  assertEq failed (stepCommit typed) Nothing
+  -- Escape reverts to the committed value without committing.
+  assert failed (stepDismissed escaped)
+  assertEq failed (csLive (stepState escaped)) "Beta"
+  assertEq failed (stepCommit escaped) Nothing
 
 comboOpts :: [T.Text]
 comboOpts = ["Alpha Sans", "Beta Serif", "Gamma Mono", "Delta Round"]

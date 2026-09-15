@@ -34,7 +34,7 @@ import NanoUI.Testing.Harness
   , clickPair
   , dragWindowEdge
   , runDragFrom
-  , spanLabelYs
+  , spanYOf
   , warmup2
   , windowTitleGrab
   , withInputOff
@@ -323,7 +323,7 @@ runPageWindowScrollTest ctx failed = do
   win <- warmup2 ctx inp0 ui
   let Rect wx _ ww _ = respRect win
   spans0 <- collectOverlayTextSpans ctx inp0
-  case spanLabelYs line1 spans0 of
+  case spanYOf line1 spans0 of
     [] -> assert failed False
     b0 : _ -> do
       let wheelAt = V2 (wx + ww / 2) (b0 + 2)
@@ -343,7 +343,7 @@ runSiblingWindowScrollTest ctx failed = do
   win <- warmup2 ctx inp0 ui
   let Rect wx _ ww _ = respRect win
   spans0 <- collectOverlayTextSpans ctx inp0
-  case spanLabelYs line1 spans0 of
+  case spanYOf line1 spans0 of
     [] -> assert failed False
     b0 : _ -> do
       let wheelAt = V2 (wx + ww / 2) (b0 + 2)
@@ -429,7 +429,7 @@ runWindowScrollWheelTest ctx failed = do
   let Rect wx _ ww wh = respRect win
   assert failed (ww > 0 && wh > 0)
   spans0 <- collectOverlayTextSpans ctx inp0
-  case spanLabelYs line1 spans0 of
+  case spanYOf line1 spans0 of
     [] -> assert failed False
     b0 : _ ->
       assertWheelTitlePinned failed ctx inp0 ui title line1 (V2 (wx + ww / 2) (b0 + 2)) Nothing

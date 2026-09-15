@@ -3,27 +3,21 @@
 -- | SDL3 draw path: retained damage updates or direct continuous presentation.
 module NanoUI.Sdl.Runner
   ( newSdlContext
-  , runSdlSession
   , sdlDrawFrame
-  , drawEff
   , drawReduceEff
-  , askSdlEnv
   , askSdlDebug
   , setSdlUiFont
-  , readSdlDebugEnv
   ) where
 
 import Control.Exception (finally, mask_)
 import Control.Monad (unless, void, when)
 import Data.IORef (IORef, readIORef, writeIORef)
-import Data.Primitive.SmallArray (SmallArray, smallArrayFromListN)
 import Data.Typeable (Typeable)
 import GHC.Clock (getMonotonicTime)
 import NanoUI
   ( Input (..)
   , NanoUI
   , Size (..)
-  , V2 (..)
   , themeWindow
   )
 import Effectful (Eff, IOE, type (:>))
@@ -31,24 +25,22 @@ import NanoUI.Testing
   ( Context
   , Damage (..)
   , DrawData
-  , Layer (..)
   , Ui
+  , askHost
   , ctxPaintFull
   , ctxTheme
   , damageFull
   , damageIsEmpty
   , markDirty
+  , newPixelContext
   , runEff
   , runFrameEff
   , runFrameReduceEff
   , takeDamage
-  , askHost
   , uiIO
   )
-import NanoUI.Testing (newPixelContext)
-import NanoUI.Sdl.Session (runSdlSession)
 import NanoUI.Sdl.Debug
-  ( SdlDebugSnapshot (..)
+  ( SdlDebugSnapshot
   , emptySdlDebug
   , notePresent
   , noteSkip
@@ -56,39 +48,34 @@ import NanoUI.Sdl.Debug
   )
 import NanoUI.Sdl.Cursor (syncPointerCursor)
 import NanoUI.Sdl.Display
-  ( queryMouseWindowPos
+  ( destroyTexture
+  , queryMouseWindowPos
   , queryRendererName
   , queryWindowLogicalSize
   , retainBegin
   , retainBlit
   , retainCreate
-  , retainDestroy
   , setRenderScale
   , windowTargetMatchesSize
-  , windowToLogicalCoords
   )
-import NanoUI.Sdl.Render (flushRenderBatch)
 import NanoUI.Sdl.Font
   ( fontSourceLabel
   , glyphAtlasTexture
   , prepareGlyphAtlasForFrame
   , takeGlyphAtlasResetFlag
   )
-import NanoUI.Sdl.NanoUIFont (NanoUIFont (..))
+import NanoUI.Sdl.NanoUIFont (NanoUIFont)
+import NanoUI.Sdl.Render (flushRenderBatch, renderDrawDataPass, snapDamage)
 import NanoUI.Sdl.Window (SdlEnv (..))
 import Foreign.Ptr (Ptr, nullPtr)
 import qualified NanoUI.Sdl.Image as SdlImage
-import NanoUI.Sdl.Render (renderDrawDataPass, snapDamage)
 import SDL3.Sys.Render (renderPresentSafe)
 
 newSdlContext :: IO Context
 newSdlContext = newPixelContext
 
-allLayersArr :: SmallArray Layer
-allLayersArr = smallArrayFromListN 4 [LayerBackground, LayerContent, LayerOverlay, LayerChrome]
-
 sdlDrawFrame :: Context -> NanoUI () -> SdlEnv -> Input -> Bool -> IO (Bool, Input)
-sdlDrawFrame ctx ui env inp forceFull = drawEff runEff ctx ui env inp forceFull
+sdlDrawFrame = drawEff runEff
 
 drawEff ::
   IOE :> es =>
@@ -209,7 +196,6 @@ finishDraw ctx env inp tex presentFull t0 t1 drawData dirtyAfterUi = do
         (sdlRenderer env)
         (if damage == DamageFull then Just (themeWindow theme) else Nothing)
         drawData
-        allLayersArr
         (sdlImages env)
         glyphTex
         damage
@@ -247,7 +233,7 @@ ensureRetain env w h scale = do
       tex' <- retainCreate (sdlRenderer env) w h
       when (tex' == nullPtr) $ fail "SDL_CreateTexture(retain) failed"
       writeIORef (sdlRetain env) (tex', w, h, scale)
-      retainDestroy tex
+      destroyTexture tex
       pure (tex', True)
 
 askSdlEnv :: Ui :> es => Eff es (Maybe SdlEnv)
@@ -277,8 +263,7 @@ readSdlDebugEnv env = do
   scale <- readIORef (sdlScaleRef env)
   fontSource <- readIORef (sdlFontSourceRef env)
   name <- queryRendererName (sdlRenderer env)
-  size <- queryWindowLogicalSize (sdlWindow env) scale
-  mouse <- queryMouseWindowPos
-  let pos = maybe (V2 0 0) (windowToLogicalCoords scale) mouse
-      refreshHz = round (1 / sdlRefreshPeriod env)
+  size <- queryWindowLogicalSize (sdlWindow env)
+  pos <- queryMouseWindowPos
+  let refreshHz = round (1 / sdlRefreshPeriod env)
   readSdlDebug (sdlDebug env) size pos (fontSourceLabel fontSource) scale name (sdlVsync env) refreshHz

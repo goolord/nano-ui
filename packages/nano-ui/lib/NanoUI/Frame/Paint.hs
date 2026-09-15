@@ -1,47 +1,49 @@
--- Paint traversal for NanoUI. This module owns the node walk; all widget
--- chrome painting lives in sibling NanoUI.Frame.Paint.Widgets.
+-- Paint traversal for NanoUI. This module owns the node walk and the
+-- structural painters; widget chrome painting lives in sibling
+-- NanoUI.Frame.Paint.Widgets.
 --
 -- The module is shaped for GHC's optimizer: the recursive walker
 --
 --   paintNodeWithEnv -> lowerNodeVisible (explicit dispatch)
 --         -> per-node painters (containers recurse via walkChildrenWithOccluders)
 --
--- sits on top of {-# NOINLINE #-} seams, and the two heavyweight parts
--- (widget chrome, leaf painters) were extracted into separate modules so no
--- single module carries the whole painting body inside the recursive loop.
--- That stops the simplifier / SpecConstr from seeing one monolithic binding
--- in the loop, which is what blew up compilation under
--- -fspecialise-aggressively + LLVM. See the note above the OPTIONS_GHC
--- pragma for the guard flag.
+-- sits on top of {-# NOINLINE #-} seams, and the heavyweight painters (widget
+-- chrome, text, scroll containers, drawings) stay out of line, so no single
+-- binding carries the whole painting body inside the recursive loop. That
+-- stops the simplifier / SpecConstr from seeing one monolithic binding in the
+-- loop, which is what blew up compilation under -fspecialise-aggressively +
+-- LLVM; hence the guard flags below.
 {-# OPTIONS_GHC -fasm -fno-specialise-aggressively #-}
 
 {-# LANGUAGE DataKinds #-}
 
 module NanoUI.Frame.Paint
   ( lowerShapes
-  , lowerNode
   , walkChildren
   ) where
 
-
 import Control.Monad (forM_, unless, when)
 import Data.IORef (readIORef)
-import Data.Word (Word32)
-import qualified Data.IntMap.Strict as IM
+import Data.Maybe (catMaybes)
 import qualified Data.Text as T
-import NanoUI.Widgets.Custom (mkCustomDrawContext)
+import Data.Word (Word32)
 import NanoUI.Context
   ( Context (..)
   , DrawingEntry (..)
   , atlasTextureId
   , cachedCustomDrawingOps
   , cachedDrawingOps
+  , getScrollOffset
+  , getScrollOffset2D
   , lookupCustomDrawing
   , lookupDrawing
   , lookupImageUv
   )
 import NanoUI.Draw
   ( DrawArena (..)
+  , Layer (..)
+  , beginLayer
+  , currentLayer
   , emitDrawOps
   , pushImage
   , pushRect
@@ -49,72 +51,78 @@ import NanoUI.Draw
   , pushTextStyled
   , withClip
   )
+import NanoUI.Font (ScrollBarSlot (..))
+import NanoUI.Frame.Chrome
+  ( fillStyledRect
+  , floatingAncestor
+  , imageIdFromText
+  , overlayMenuStyle
+  , overlayModalStyle
+  , overlayWindowStyle
+  , paintScrollBarLayout
+  , strokeStyledRect
+  )
+import NanoUI.Frame.Node (resolveFontFor, scrollViewportAt)
+import NanoUI.Frame.Paint.Types (PaintEnv (..), buildPaintEnv)
+import NanoUI.Frame.Paint.Widgets (paintTextAreaNode, paintTextInputNode, paintWidget)
+import NanoUI.Frame.Scroll.Geometry
+  ( borderContentClip
+  , decodeScrollConfig
+  , isScrollStyle2D
+  , padContentClip
+  , scrollBare
+  , scrollBarLayout
+  , scrollBarLayouts2D
+  , scrollChromeActive
+  )
+import NanoUI.Frame.Spans (collectNodeTextSpans)
 import NanoUI.Layout.Arena
   ( DirTag (..)
   , NodeIdx
   , NodeType (..)
   , SizingTag (..)
   , arenaCount
+  , foldNodesM
   , forChildNodes_
-  , getScrollContentW
   , getDirection
   , getHeightSizing
+  , getNodeFontSize
   , getNodeType
   , getNodeValue
   , getPadding
   , getRect
+  , getScrollContentW
   , getStyleIdx
   , getText
-  , getWidthSizing
   , getWidgetId
+  , getWidthSizing
   , isFloatingNode
-  , getNodeFontSize
   )
 import NanoUI.Layout.Solve (scrollBarSlotOf)
 import NanoUI.Style
   ( FontStyle (..)
   , FontWeight (..)
-  , TextDecoration (..)
   , Style (..)
+  , TextDecoration (..)
   , Theme (..)
-  , styleBg
+  , scrollBarThumbColor
+  , scrollBarTrackColor
   , themeAccent
   , themeFloatingWindow
   , themeInput
   , themePanel
-  , unpackPanelStyle
   , themeSeparator
   , themeWindow
+  , unpackPanelStyle
   )
-import NanoUI.Types (Color (..), ImageId (..), Rect (..), colorA, colorRGBA, rectFullyInside, rectInflate, rectH, rectW, rectX, rectY)
+import NanoUI.Types (Color (..), ImageId (..), Rect (..), V2 (..), colorA, colorRGBA, rectFullyInside, rectInflate)
+import NanoUI.Widgets.Custom (mkCustomDrawContext)
 import NanoUI.WidgetText
   ( tableStripeColor
-  , textNodeFontVariant
-  , textNodeFontWeight
   , textNodeFontStyle
+  , textNodeFontWeight
   , textNodeTextDecoration
   )
-import NanoUI.Frame.Chrome
-  ( fillStyledRect
-  , floatingAncestor
-  , imageIdFromText
-  , overlayModalStyle
-  , overlayMenuStyle
-  , overlayWindowStyle
-  , strokeStyledRect
-  )
-import NanoUI.Frame.Scroll.Geometry (borderContentClip, padContentClip, scrollContentClip)
-import NanoUI.Frame.Scroll (paintScrollChrome)
-import NanoUI.Frame.Scroll.Geometry
-  ( decodeScrollConfig
-  , isScrollStyle2D
-  , scrollBare
-  , scrollChromeActive
-  , scrollViewportClip2D
-  )
-import NanoUI.Frame.Spans (collectNodeTextSpans)
-import NanoUI.Frame.Paint.Types (PaintEnv (..), buildPaintEnv, resolveNodeFont)
-import NanoUI.Frame.Paint.Widgets (paintTextAreaNode, paintTextInputNode, paintWidget)
 
 lowerShapes :: Context -> IO ()
 lowerShapes ctx = do
@@ -123,39 +131,29 @@ lowerShapes ctx = do
     occluders <- collectFloatingOccluders ctx
     buildPaintEnv ctx occluders >>= (`paintNodeWithEnv` 0)
 
+-- | Rects of opaque floating panels, inset past their rounded border, that
+-- hide whatever lies fully behind them.
 collectFloatingOccluders :: Context -> IO [Rect]
 collectFloatingOccluders ctx = do
-  n <- arenaCount (ctxNodeArena ctx)
   theme <- readIORef (ctxTheme ctx)
-  let winStyle = overlayWindowStyle theme
-      modalStyle = overlayModalStyle theme
-      menuStyle = overlayMenuStyle theme
+  let na = ctxNodeArena ctx
       isOpaque s = colorA (styleBg s) == 255
-      winOpaque = isOpaque winStyle
-      modalOpaque = isOpaque modalStyle
-      menuOpaque = isOpaque menuStyle
-      go idx acc
-        | idx >= n = pure acc
-        | otherwise = do
-            nt <- getNodeType (ctxNodeArena ctx) idx
-            case nt of
-              NodeWindow | winOpaque -> checkPanel idx acc
-              NodeModal  | modalOpaque -> checkPanel idx acc
-              NodePopup  | menuOpaque -> checkPanel idx acc
-              _ -> go (idx + 1) acc
-      checkPanel idx acc = do
-        (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-        if w > 6 && h > 6
-          then do
-            let !r = rectInflate (-3) (Rect x y w h)
-            go (idx + 1) (r : acc)
-          else go (idx + 1) acc
-  go 0 []
-
--- | Public single-node entry point: builds a fresh paint env (no occluders).
-{-# NOINLINE lowerNode #-}
-lowerNode :: Context -> NodeIdx -> IO ()
-lowerNode ctx idx = buildPaintEnv ctx [] >>= (`paintNodeWithEnv` idx)
+      winOpaque = isOpaque (overlayWindowStyle theme)
+      modalOpaque = isOpaque (overlayModalStyle theme)
+      menuOpaque = isOpaque (overlayMenuStyle theme)
+      occludes = \case
+        NodeWindow -> winOpaque
+        NodeModal -> modalOpaque
+        NodePopup -> menuOpaque
+        _ -> False
+      addPanel acc idx = do
+        nt <- getNodeType na idx
+        if not (occludes nt)
+          then pure acc
+          else do
+            (x, y, w, h) <- getRect na idx
+            pure (if w > 6 && h > 6 then rectInflate (-3) (Rect x y w h) : acc else acc)
+  foldNodesM na addPanel []
 
 -- | Clip + occluder short-circuit, then lower the node. NOINLINE so the
 -- recursive container walk never exposes the dispatch below to the simplifier.
@@ -163,26 +161,18 @@ lowerNode ctx idx = buildPaintEnv ctx [] >>= (`paintNodeWithEnv` idx)
 paintNodeWithEnv :: PaintEnv -> NodeIdx -> IO ()
 paintNodeWithEnv env idx = do
   (x, y, w, h) <- getRect (peNodeArena env) idx
-  let da = peDrawArena env
-  (cx, cy, cw, ch) <- readIORef (daCurrentClip da)
+  (cx, cy, cw, ch) <- readIORef (daCurrentClip (peDrawArena env))
   let !l = max x cx
       !t = max y cy
       !r = min (x + w) (cx + cw)
       !b = min (y + h) (cy + ch)
-  if r <= l || b <= t
-    then pure ()
-    else do
-      if peHasOccluders env && any (rectFullyInside (Rect l t (r - l) (b - t))) (peOccluders env)
-        then pure ()
-        else do
-          nt <- getNodeType (peNodeArena env) idx
-          let !rect = Rect x y w h
-          lowerNodeVisible env idx nt rect
+  unless (r <= l || b <= t) $
+    unless (peHasOccluders env && any (rectFullyInside (Rect l t (r - l) (b - t))) (peOccluders env)) $ do
+      nt <- getNodeType (peNodeArena env) idx
+      lowerNodeVisible env idx nt (Rect x y w h)
 
 -- | Explicit per-node-type dispatch. Kept NOINLINE and thin so the recursive
--- loop never sees the branch bodies; the structural painters are INLINE and
--- fold into this one (non-recursive) function, while the heavyweight widget
--- chrome stays out-of-line in Paint.Widgets.
+-- loop never sees the branch bodies.
 {-# NOINLINE lowerNodeVisible #-}
 lowerNodeVisible :: PaintEnv -> NodeIdx -> NodeType -> Rect -> IO ()
 lowerNodeVisible env idx nt rect =
@@ -204,80 +194,36 @@ lowerNodeVisible env idx nt rect =
     NodeWidget -> pure ()
     _ -> paintWidget env idx nt rect
 
-{-# INLINE paintContainerNode #-}
 paintContainerNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
 paintContainerNode env idx rect = do
   walkChildrenWithOccluders env idx
   let ctx = peContext env
   wid <- getWidgetId (peNodeArena env) idx
   mBuild <- lookupCustomDrawing ctx wid
-  case mBuild of
-    Nothing -> pure ()
-    Just build -> do
-      let fm = peFontMetrics env
-          da = peDrawArena env
-      cdc <- mkCustomDrawContext ctx fm wid
-      withClip da rect (emitDrawOps da fm (build cdc rect))
+  forM_ mBuild $ \build -> do
+    let fm = peFontMetrics env
+        da = peDrawArena env
+    cdc <- mkCustomDrawContext ctx fm wid
+    withClip da rect (emitDrawOps da fm (build cdc rect))
 
-{-# INLINE paintPanelNode #-}
 paintPanelNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
-paintPanelNode env idx rect = do
+paintPanelNode env idx rect@(Rect x y w h) = do
   let da = peDrawArena env
-      tm = peTheme env
+      panel = themePanel (peTheme env)
   si <- getStyleIdx (peNodeArena env) idx
-  let style = if si /= 0
-                then unpackPanelStyle (themePanel tm) si
-                else themePanel tm
+  let style = if si /= 0 then unpackPanelStyle panel si else panel
   fillStyledRect da style rect
-  strokeStyledRect da style (rectX rect) (rectY rect) (rectW rect) (rectH rect)
+  strokeStyledRect da style x y w h
   withClip da (borderContentClip style rect) $ walkChildrenWithOccluders env idx
 
-{-# INLINE paintScrollContainerNode #-}
+{-# NOINLINE paintScrollContainerNode #-}
 paintScrollContainerNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
-paintScrollContainerNode env idx rect = do
+paintScrollContainerNode env idx rect@(Rect x y w h) = do
   let ctx = peContext env
       arena = peNodeArena env
       da = peDrawArena env
       tm = peTheme env
-      fm = peFontMetrics env
-      Rect x y w h = rect
-  mFloat <- floatingAncestor ctx idx
-  let inFloating = maybe False isFloatingNode mFloat
-      baseStyle
-        | inFloating = themeFloatingWindow tm
-        | otherwise  = themeInput tm
-  pad <- getPadding arena idx
-  (wTag, _) <- getWidthSizing arena idx
-  (hTag, _) <- getHeightSizing arena idx
   si <- getStyleIdx arena idx
-  dir <- getDirection arena idx
-  slot <- scrollBarSlotOf arena idx
-  let cfg = decodeScrollConfig si
-      native2D = isScrollStyle2D si
-      padClip = padContentClip fm x y w h pad
-      innerW = rectW padClip
-      innerH = rectH padClip
-      wellStyle = baseStyle {styleCornerRadius = 0}
-  (showChrome, inner) <-
-    if native2D
-      then do
-        contentH <- getNodeValue arena idx
-        contentW <- getScrollContentW arena idx
-        pure
-          ( scrollChromeActive cfg True DirColumn contentH innerH
-              || scrollChromeActive cfg True DirRow contentW innerW
-          , scrollViewportClip2D fm slot cfg x y w h pad contentW contentH
-          )
-      else do
-        contentSize <- getNodeValue arena idx
-        let innerMain =
-              case dir of
-                DirColumn -> innerH
-                DirRow -> innerW
-        pure
-          ( scrollChromeActive cfg False dir contentSize innerMain
-          , scrollContentClip fm slot cfg dir x y w h pad contentSize
-          )
   -- A bare scroller paints nothing at all: it only lends its clip and
   -- offset, so whatever sits behind it (window, panel) keeps showing
   -- through. Grow×grow scrollers (page-level) keep no well so they blend
@@ -288,81 +234,112 @@ paintScrollContainerNode env idx rect = do
   -- scroll position. Paint the full rect with the window color instead:
   -- invisible on a cleared backdrop, and clip replay then always
   -- repaints the whole viewport.
-  if scrollBare cfg
-    then pure ()
-    else
-      if wTag == SizingGrow && hTag == SizingGrow
-        then pushRect da rect (if inFloating then styleBg (themeFloatingWindow tm) else themeWindow tm)
-        else do
-          fillStyledRect da wellStyle rect
-          strokeStyledRect da wellStyle x y w h
+  unless (scrollBare (decodeScrollConfig si)) $ do
+    inFloating <- maybe False isFloatingNode <$> floatingAncestor ctx idx
+    (wTag, _) <- getWidthSizing arena idx
+    (hTag, _) <- getHeightSizing arena idx
+    if wTag == SizingGrow && hTag == SizingGrow
+      then pushRect da rect (if inFloating then styleBg (themeFloatingWindow tm) else themeWindow tm)
+      else do
+        let well = (if inFloating then themeFloatingWindow tm else themeInput tm) {styleCornerRadius = 0}
+        fillStyledRect da well rect
+        strokeStyledRect da well x y w h
+  inner <- scrollViewportAt ctx idx x y w h
   withClip da inner $ walkChildrenWithOccluders env idx
-  when showChrome $ do
-    wid <- getWidgetId arena idx
-    paintScrollChrome ctx da idx wid x y w h pad tm
+  paintScrollChrome env idx rect
 
-{-# INLINE paintTextNode #-}
+-- | Scrollbars of a scroll container whose chrome is active, drawn one layer
+-- above the content so they stay on top of it.
+paintScrollChrome :: PaintEnv -> NodeIdx -> Rect -> IO ()
+paintScrollChrome env idx (Rect x y w h) = do
+  let ctx = peContext env
+      na = peNodeArena env
+      da = peDrawArena env
+      fm = peFontMetrics env
+      theme = peTheme env
+  si <- getStyleIdx na idx
+  pad <- getPadding na idx
+  slot <- scrollBarSlotOf na idx
+  wid <- getWidgetId na idx
+  contentMain <- getNodeValue na idx
+  let cfg = decodeScrollConfig si
+      Rect _ _ innerW innerH = padContentClip fm x y w h pad
+  bars <-
+    if isScrollStyle2D si
+      then do
+        contentW <- getScrollContentW na idx
+        if scrollChromeActive cfg DirColumn contentMain innerH || scrollChromeActive cfg DirRow contentW innerW
+          then do
+            V2 offX offY <- getScrollOffset2D ctx wid
+            let (mV, mH) = scrollBarLayouts2D fm slot cfg x y w h pad contentW contentMain offX offY
+            pure (catMaybes [mV, mH])
+          else pure []
+      else do
+        dir <- getDirection na idx
+        let innerMain = case dir of
+              DirColumn -> innerH
+              DirRow -> innerW
+        if scrollChromeActive cfg dir contentMain innerMain
+          then do
+            off <- getScrollOffset ctx wid
+            pure (catMaybes [scrollBarLayout fm slot dir x y w h pad contentMain off])
+          else pure []
+  unless (null bars) $ do
+    layer <- currentLayer da
+    beginLayer da (if layer == LayerOverlay then LayerChrome else LayerContent)
+    let base = case slot of
+          ScrollBarWindow -> themeFloatingWindow theme
+          _ -> themeInput theme
+    mapM_ (paintScrollBarLayout da (scrollBarTrackColor base theme) (scrollBarThumbColor base theme)) bars
+    beginLayer da layer
+
+{-# NOINLINE paintTextNode #-}
 paintTextNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
 paintTextNode env idx rect = do
-  let ctx = peContext env
-      arena = peNodeArena env
+  let arena = peNodeArena env
       da = peDrawArena env
-      tm = peTheme env
   si <- getStyleIdx arena idx
-  case tableStripeColor tm si of
-    Just stripe -> pushRect da rect stripe
-    _ -> pure ()
+  forM_ (tableStripeColor (peTheme env) si) (pushRect da rect)
   raw <- getText arena idx
   unless (T.null raw) $ do
-    spans <- collectNodeTextSpans ctx IM.empty idx
-    fontSizeVal <- getNodeFontSize arena idx
-    let fvar = textNodeFontVariant si
-        fweight = textNodeFontWeight si
-        fstyle  = textNodeFontStyle si
-        fdeco   = textNodeTextDecoration si
-    (fm', isNative) <- resolveNodeFont env fontSizeVal fweight fstyle fvar
-    if not isNative && fdeco == DecorationNone
-      then forM_ spans $ \(Rect tx ty _ _, line, spanFg, _) ->
-        unless (T.null line) $
-          pushText da fm' tx ty line spanFg
-      else do
-        let effWeight = if isNative then WeightNormal else fweight
-            effStyle  = if isNative then FontStyleNormal else fstyle
-        forM_ spans $ \(Rect tx ty _ _, line, spanFg, _) ->
-          unless (T.null line) $
-            pushTextStyled da fm' effWeight effStyle fdeco tx ty line spanFg
+    spans <- collectNodeTextSpans (peContext env) idx
+    fontSize <- getNodeFontSize arena idx
+    (fm, isNative, _) <- resolveFontFor (peContext env) fontSize si
+    let deco = textNodeTextDecoration si
+        weight = if isNative then WeightNormal else textNodeFontWeight si
+        style = if isNative then FontStyleNormal else textNodeFontStyle si
+        plain = not isNative && deco == DecorationNone
+    forM_ spans $ \(Rect tx ty _ _, line, spanFg, _) ->
+      unless (T.null line) $
+        if plain
+          then pushText da fm tx ty line spanFg
+          else pushTextStyled da fm weight style deco tx ty line spanFg
 
-{-# INLINE paintSeparatorNode #-}
 paintSeparatorNode :: PaintEnv -> Rect -> IO ()
-paintSeparatorNode env rect = do
-  let da = peDrawArena env
-      tm = peTheme env
-      Rect x y w h = rect
-      hair = 1
-  if w >= h
-    then pushRect da (Rect x (y + (h - hair) / 2) w hair) (themeSeparator tm)
-    else pushRect da (Rect (x + (w - hair) / 2) y hair h) (themeSeparator tm)
+paintSeparatorNode env (Rect x y w h) =
+  pushRect (peDrawArena env) line (themeSeparator (peTheme env))
+  where
+    line
+      | w >= h = Rect x (y + (h - 1) / 2) w 1
+      | otherwise = Rect (x + (w - 1) / 2) y 1 h
 
-{-# INLINE paintBoxNode #-}
 paintBoxNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
 paintBoxNode env idx rect = do
   si <- getStyleIdx (peNodeArena env) idx
   -- styleIdx holds RGBA Word32 bits; see `box` in NanoUI.Widgets.
   pushRect (peDrawArena env) rect (Color (fromIntegral si :: Word32))
 
-{-# INLINE paintImageNode #-}
 paintImageNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
 paintImageNode env idx rect = do
-  let ctx = peContext env
-      da = peDrawArena env
+  let da = peDrawArena env
   tex <- imageIdFromText <$> getText (peNodeArena env) idx
-  mUv <- lookupImageUv ctx (ImageId tex)
+  mUv <- lookupImageUv (peContext env) (ImageId tex)
   case mUv of
     Just (u0, v0, u1, v1) ->
       pushImage da rect atlasTextureId u0 v0 u1 v1 (colorRGBA 255 255 255 255)
     _ -> pushRect da rect (themeAccent (peTheme env))
 
-{-# INLINE paintDrawingNode #-}
+{-# NOINLINE paintDrawingNode #-}
 paintDrawingNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
 paintDrawingNode env idx rect = do
   let ctx = peContext env
@@ -377,11 +354,9 @@ paintDrawingNode env idx rect = do
       withClip da rect (emitDrawOps da fm ops)
     Nothing -> do
       mBuild <- lookupDrawing ctx wid
-      case mBuild of
-        Nothing -> pure ()
-        Just (DrawingEntry content build) -> do
-          ops <- cachedDrawingOps ctx wid content rect build
-          withClip da rect (emitDrawOps da fm ops)
+      forM_ mBuild $ \(DrawingEntry content build) -> do
+        ops <- cachedDrawingOps ctx wid content rect build
+        withClip da rect (emitDrawOps da fm ops)
 
 -- | Lower the children of @idx@ with the current paint env. NOINLINE keeps
 -- this recursive call out of the simplifier's loop analysis, so the whole
@@ -391,8 +366,8 @@ walkChildrenWithOccluders :: PaintEnv -> NodeIdx -> IO ()
 walkChildrenWithOccluders env idx =
   forChildNodes_ (peNodeArena env) idx (paintNodeWithEnv env)
 
--- | Public children-walk entry point (keeps the public signature of the
--- original 'walkChildren', which callers invoke inside their own clips).
+-- | Children walk for callers painting a subtree inside their own clip
+-- (floating overlays); builds a fresh env without occluders.
 {-# NOINLINE walkChildren #-}
 walkChildren :: Context -> NodeIdx -> IO ()
 walkChildren ctx idx = buildPaintEnv ctx [] >>= (`walkChildrenWithOccluders` idx)

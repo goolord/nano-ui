@@ -11,25 +11,13 @@ module NanoUI.Style
   , Style (..)
   , Theme (..)
   , defaultTheme
-  , tomorrowNightMinTheme
   , tomorrowNightMinDarkTheme
-  , tomorrowLightTheme
   , tomorrowMinLightTheme
-  , tomorrowMidnightMinTheme
   , tomorrowMidnightMinDarkTheme
   , Base16 (..)
-  , Base16ColorScheme
-  , base0a
-  , base0b
-  , base0c
-  , base0d
-  , base0e
-  , base0f
   , themeFromBase16
   , themeFromBase16Dark
   , themeFromBase16Light
-  , base16Theme
-  , base16ToTheme
   , base16TomorrowNight
   , base16TomorrowLight
   , packPanelStyle
@@ -63,7 +51,6 @@ module NanoUI.Style
   , fixedAspectW
   , fixedAspectH
   , gridCols
-  , cols
   , FontVariant (..)
   , FontWeight (..)
   , FontStyle (..)
@@ -77,7 +64,6 @@ module NanoUI.Style
   , fontSize
   , fontSizeScale
   , fontColor
-  , textColor
   , fontWeight
   , fontBold
   , fontLight
@@ -91,7 +77,6 @@ module NanoUI.Style
   , textDecoration
   , fontUnderline
   , fontStrike
-  , fontStrikethrough
   , alignStart
   , alignCenter
   , alignTop
@@ -221,178 +206,129 @@ defaultLayout =
     , layoutTextDecoration = DecorationNone
     }
 
-{-# INLINE padAll #-}
 padAll :: Float -> Layout -> Layout
 padAll n l = l {layoutPadding = Padding n n n n}
 
-{-# INLINE padXY #-}
 padXY :: Float -> Float -> Layout -> Layout
 padXY x y l = l {layoutPadding = Padding x x y y}
 
-{-# INLINE gap #-}
 gap :: Float -> Layout -> Layout
 gap n l = l {layoutGap = n}
 
-{-# INLINE fillW #-}
 fillW :: Layout -> Layout
 fillW l = l {layoutWidth = Grow 1}
 
-{-# INLINE fillH #-}
 fillH :: Layout -> Layout
 fillH l = l {layoutHeight = Grow 1}
 
-{-# INLINE grow #-}
 grow :: Layout -> Layout
 grow = fillW . fillH
 
-{-# INLINE minW #-}
 minW :: Float -> Layout -> Layout
 minW n l = l {layoutMinW = n}
 
-{-# INLINE maxW #-}
 maxW :: Float -> Layout -> Layout
 maxW n l = l {layoutMaxW = n}
 
-{-# INLINE fixedW #-}
 fixedW :: Float -> Layout -> Layout
 fixedW n l = l {layoutWidth = Fixed n, layoutMinW = n, layoutMaxW = n}
 
-{-# INLINE minH #-}
 minH :: Float -> Layout -> Layout
 minH n l = l {layoutMinH = n}
 
-{-# INLINE maxH #-}
 maxH :: Float -> Layout -> Layout
 maxH n l = l {layoutMaxH = n}
 
-{-# INLINE fixedH #-}
 fixedH :: Float -> Layout -> Layout
 fixedH n l = l {layoutHeight = Fixed n}
 
-{-# INLINE fixedWH #-}
 fixedWH :: Float -> Float -> Layout -> Layout
 fixedWH w h l = l {layoutWidth = Fixed w, layoutHeight = Fixed h}
 
-{-# INLINE alignMid #-}
 alignMid :: Layout -> Layout
 alignMid l = l {layoutAlignY = AlignMiddle}
 
-{-# INLINE alignEnd #-}
 alignEnd :: Layout -> Layout
 alignEnd l = l {layoutAlignX = AlignEnd}
 
-{-# INLINE tight #-}
 tight :: Layout -> Layout
 tight l = l {layoutPadding = Padding 0 0 0 0}
 
-{-# INLINE percent #-}
 percent :: Float -> Layout -> Layout
 percent p l = l {layoutWidth = Percent p}
 
-{-# INLINE gridMinColW #-}
 gridMinColW :: Float -> Layout -> Layout
 gridMinColW w l = l {layoutGridMinColW = max 0 w}
 
-{-# INLINE fixedAspectW #-}
 fixedAspectW :: Float -> Float -> Layout -> Layout
 fixedAspectW w ratio = fixedWH w (w / ratio)
 
-{-# INLINE fixedAspectH #-}
 fixedAspectH :: Float -> Float -> Layout -> Layout
 fixedAspectH h ratio = fixedWH (h * ratio) h
 
-{-# INLINE gridCols #-}
 gridCols :: Int -> Layout -> Layout
 gridCols n l = l {layoutGridCols = max 0 n}
 
-{-# INLINE cols #-}
-cols :: Int -> Layout -> Layout
-cols = gridCols
-
-{-# INLINE fontRegular #-}
 fontRegular :: Layout -> Layout
 fontRegular l = l {layoutFontVariant = FontRegular}
 
-{-# INLINE fontHeading #-}
 fontHeading :: Layout -> Layout
 fontHeading l = l {layoutFontVariant = FontHeading}
 
-{-# INLINE fontMuted #-}
 fontMuted :: Layout -> Layout
 fontMuted l = l {layoutFontVariant = FontMuted}
 
-{-# INLINE fontMono #-}
 fontMono :: Layout -> Layout
 fontMono l = l {layoutFontVariant = FontMono}
 
-{-# INLINE fontDanger #-}
 fontDanger :: Layout -> Layout
 fontDanger l = l {layoutFontVariant = FontDanger}
 
-{-# INLINE fontSize #-}
 fontSize :: Float -> Layout -> Layout
 fontSize sz l = l {layoutFontSize = max 0 sz}
 
-{-# INLINE fontSizeScale #-}
 fontSizeScale :: Float -> Layout -> Layout
 fontSizeScale s l =
   let cur = layoutFontSize l
       sz = if cur > 0 then cur * s else 16 * s
    in l {layoutFontSize = max 0 sz}
 
-{-# INLINE fontColor #-}
 fontColor :: Color -> Layout -> Layout
 fontColor col l = l {layoutFontColor = Just col}
 
-{-# INLINE textColor #-}
-textColor :: Color -> Layout -> Layout
-textColor = fontColor
-
-{-# INLINE fontWeight #-}
 fontWeight :: FontWeight -> Layout -> Layout
 fontWeight w l = l {layoutFontWeight = w}
 
-{-# INLINE fontBold #-}
 fontBold :: Layout -> Layout
 fontBold = fontWeight WeightBold
 
-{-# INLINE fontLight #-}
 fontLight :: Layout -> Layout
 fontLight = fontWeight WeightLight
 
-{-# INLINE fontMedium #-}
 fontMedium :: Layout -> Layout
 fontMedium = fontWeight WeightMedium
 
-{-# INLINE fontSemiBold #-}
 fontSemiBold :: Layout -> Layout
 fontSemiBold = fontWeight WeightSemiBold
 
-{-# INLINE fontExtraBold #-}
 fontExtraBold :: Layout -> Layout
 fontExtraBold = fontWeight WeightExtraBold
 
-{-# INLINE fontBlack #-}
 fontBlack :: Layout -> Layout
 fontBlack = fontWeight WeightBlack
 
-{-# INLINE fontStyle #-}
 fontStyle :: FontStyle -> Layout -> Layout
 fontStyle s l = l {layoutFontStyle = s}
 
-{-# INLINE fontItalic #-}
 fontItalic :: Layout -> Layout
 fontItalic = fontStyle FontStyleItalic
 
-{-# INLINE fontOblique #-}
 fontOblique :: Layout -> Layout
 fontOblique = fontStyle FontStyleOblique
 
-{-# INLINE textDecoration #-}
 textDecoration :: TextDecoration -> Layout -> Layout
 textDecoration d l = l {layoutTextDecoration = d}
 
-{-# INLINE fontUnderline #-}
 fontUnderline :: Layout -> Layout
 fontUnderline l =
   let newDeco = case layoutTextDecoration l of
@@ -401,7 +337,6 @@ fontUnderline l =
         _ -> DecorationUnderline
    in l {layoutTextDecoration = newDeco}
 
-{-# INLINE fontStrike #-}
 fontStrike :: Layout -> Layout
 fontStrike l =
   let newDeco = case layoutTextDecoration l of
@@ -410,23 +345,15 @@ fontStrike l =
         _ -> DecorationStrikethrough
    in l {layoutTextDecoration = newDeco}
 
-{-# INLINE fontStrikethrough #-}
-fontStrikethrough :: Layout -> Layout
-fontStrikethrough = fontStrike
-
-{-# INLINE alignStart #-}
 alignStart :: Layout -> Layout
 alignStart l = l {layoutAlignX = AlignStart}
 
-{-# INLINE alignCenter #-}
 alignCenter :: Layout -> Layout
 alignCenter l = l {layoutAlignX = AlignCenter}
 
-{-# INLINE alignTop #-}
 alignTop :: Layout -> Layout
 alignTop l = l {layoutAlignY = AlignTop}
 
-{-# INLINE alignBottom #-}
 alignBottom :: Layout -> Layout
 alignBottom l = l {layoutAlignY = AlignBottom}
 
@@ -565,8 +492,8 @@ fadeAlpha :: Color -> Word8 -> Color
 fadeAlpha (Color w) a = Color ((w .&. 0xFFFFFF00) .|. fromIntegral a)
 
 -- | Ported from "Tomorrow Night Min" in https://github.com/biaqat/tomorrow-min-theme-zed
-tomorrowNightMinTheme :: Theme
-tomorrowNightMinTheme =
+tomorrowNightMinDarkTheme :: Theme
+tomorrowNightMinDarkTheme =
   let panelStyle =
         flatStyle
           (colorRGBA 30 31 33 255)  -- base.bg #1E1F21 (elevated panel canvas)
@@ -607,13 +534,9 @@ tomorrowNightMinTheme =
   separatorColor = colorRGBA 55 59 65 255              -- base.selection #373B41 (subtle divider)
   activeColor    = colorRGBA 103 150 230 255           -- vscode.cornflower_blue #6796E6
 
-
-tomorrowNightMinDarkTheme :: Theme
-tomorrowNightMinDarkTheme = tomorrowNightMinTheme
-
 -- | Ported from "Tomorrow Min" in https://github.com/biaqat/tomorrow-min-theme-zed
-tomorrowLightTheme :: Theme
-tomorrowLightTheme =
+tomorrowMinLightTheme :: Theme
+tomorrowMinLightTheme =
   let panelStyle =
         flatStyle
           (colorRGBA 242 242 242 255)  -- #F2F2F2
@@ -650,12 +573,9 @@ tomorrowLightTheme =
         , themeOverlayDim = colorRGBA 0 0 0 100
         }
 
-tomorrowMinLightTheme :: Theme
-tomorrowMinLightTheme = tomorrowLightTheme
-
 -- | Ported from "Tomorrow at Midnight Min" in https://github.com/biaqat/tomorrow-min-theme-zed
-tomorrowMidnightMinTheme :: Theme
-tomorrowMidnightMinTheme =
+tomorrowMidnightMinDarkTheme :: Theme
+tomorrowMidnightMinDarkTheme =
   let panelStyle =
         flatStyle
           (colorRGBA 16 17 20 255)  -- #101114 (elevated panel canvas)
@@ -696,9 +616,6 @@ tomorrowMidnightMinTheme =
   separatorColor = colorRGBA 48 52 70 255              -- #303446
   activeColor    = colorRGBA 140 182 226 255           -- #8CB6E2
 
-tomorrowMidnightMinDarkTheme :: Theme
-tomorrowMidnightMinDarkTheme = tomorrowMidnightMinTheme
-
 -- -----------------------------------------------------------------------------
 -- Base16 Colorschemes
 -- -----------------------------------------------------------------------------
@@ -725,17 +642,6 @@ data Base16 = Base16
   }
   deriving (Eq, Show)
 
-type Base16ColorScheme = Base16
-
--- | Lowercase field aliases for the hex letter tones in Base16.
-base0a, base0b, base0c, base0d, base0e, base0f :: Base16 -> Color
-base0a = base0A
-base0b = base0B
-base0c = base0C
-base0d = base0D
-base0e = base0E
-base0f = base0F
-
 -- | Calculate a 'Theme' from a 'Base16' colorscheme, automatically selecting
 -- dark or light styling based on background vs foreground luminance.
 themeFromBase16 :: Base16 -> Theme
@@ -744,14 +650,6 @@ themeFromBase16 b
   | otherwise = themeFromBase16Light b
   where
     isDark = colorLuminance (base00 b) < colorLuminance (base05 b)
-
--- | Alias for 'themeFromBase16'.
-base16Theme :: Base16 -> Theme
-base16Theme = themeFromBase16
-
--- | Alias for 'themeFromBase16'.
-base16ToTheme :: Base16 -> Theme
-base16ToTheme = themeFromBase16
 
 -- | Calculate a dark 'Theme' from a 'Base16' colorscheme.
 themeFromBase16Dark :: Base16 -> Theme

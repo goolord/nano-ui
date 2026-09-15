@@ -1,29 +1,18 @@
 module NanoUI.Sdl.Render
-  ( ClipState (..)
-  , RenderBatch
+  ( RenderBatch
   , newRenderBatch
   , destroyRenderBatch
-  , withRenderBatch
-  , batchDrawRange
   , flushRenderBatch
   , renderDrawDataPass
-  , setLogicalClipRect
-  , setLogicalClipKey
-  , clearLogicalClipRect
-  , logicalClipKey
-  , toClipKey
-  , clipPixelRect
   , snapDamage
   ) where
 
 import NanoUI.Sdl.Image (ImageAtlas, lookupImage)
 
-import Control.Exception (bracket)
 import Control.Monad (void, when)
-import Data.Bits (shiftL, shiftR, (.&.), (.|.))
+import Data.Bits (shiftR, (.&.))
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Primitive.PrimArray (indexPrimArray, sizeofPrimArray)
-import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray)
 import Data.Word (Word8)
 import Foreign.C.Types (CFloat (..), CInt (..))
 import Foreign.ForeignPtr (withForeignPtr)
@@ -33,7 +22,6 @@ import NanoUI.Testing
   ( Damage (..)
   , DrawCmd (..)
   , DrawData (..)
-  , Layer (..)
   , LayerSlice (..)
   , damageIsEmpty
   , glyphAtlasTextureId
@@ -65,43 +53,14 @@ snapDamage scale (DamageClip (Rect x y w h)) =
       ph = fromIntegral (ceiling ((y + h) * scale) :: Int) / scale - py
    in DamageClip (Rect px py pw ph)
 
-{-# INLINE clipPixelRect #-}
-clipPixelRect :: Float -> Rect -> (Float, Float, Float, Float)
-clipPixelRect uiScale (Rect x y w h) =
-  let s = if uiScale > 0 then uiScale else 1
-      x0 = fromIntegral (floor (x * s) :: Int) :: Float
-      y0 = fromIntegral (floor (y * s) :: Int) :: Float
-      x1 = fromIntegral (ceiling ((x + w) * s) :: Int) :: Float
-      y1 = fromIntegral (ceiling ((y + h) * s) :: Int) :: Float
-   in (x0, y0, x1 - x0, y1 - y0)
-
-{-# INLINE logicalClipKey #-}
-logicalClipKey :: Rect -> (Int, Int, Int, Int)
-logicalClipKey (Rect x y w h) =
+{-# INLINE toClipKey #-}
+toClipKey :: Rect -> ClipState
+toClipKey (Rect x y w h) =
   let px = floor x :: Int
       py = floor y :: Int
       x1 = ceiling (x + w) :: Int
       y1 = ceiling (y + h) :: Int
-      pw = max 1 (x1 - px)
-      ph = max 1 (y1 - py)
-   in (px, py, pw, ph)
-
-{-# INLINE toClipKey #-}
-toClipKey :: Rect -> ClipState
-toClipKey r =
-  let (px, py, pw, ph) = logicalClipKey r
-   in ClipKey px py pw ph
-
-setLogicalClipKey :: Ptr SDL_Renderer -> (Int, Int, Int, Int) -> IO ()
-setLogicalClipKey ren (px, py, pw, ph) =
-  c_set_clip_rect ren (fromIntegral px) (fromIntegral py) (fromIntegral pw) (fromIntegral ph)
-
-setLogicalClipRect :: Ptr SDL_Renderer -> Rect -> IO ()
-setLogicalClipRect ren r =
-  setLogicalClipKey ren (logicalClipKey r)
-
-clearLogicalClipRect :: Ptr SDL_Renderer -> IO ()
-clearLogicalClipRect ren = c_clear_clip_rect ren
+   in ClipKey px py (max 1 (x1 - px)) (max 1 (y1 - py))
 
 applyClipState :: RenderBatch -> IORef ClipState -> Ptr SDL_Renderer -> ClipState -> IO ()
 applyClipState batch ref ren next = do
@@ -110,14 +69,17 @@ applyClipState batch ref ren next = do
     flushRenderBatch batch
     writeIORef ref next
     case next of
-      ClipNone -> clearLogicalClipRect ren
-      ClipKey px py pw ph -> setLogicalClipKey ren (px, py, pw, ph)
+      ClipNone -> c_clear_clip_rect ren
+      ClipKey px py pw ph ->
+        c_set_clip_rect ren (fromIntegral px) (fromIntegral py) (fromIntegral pw) (fromIntegral ph)
 
-renderDrawDataPass :: RenderBatch -> Ptr SDL_Renderer -> Maybe Color -> DrawData -> SmallArray Layer -> ImageAtlas -> Ptr () -> Damage -> IO ()
-renderDrawDataPass batch ren mClear drawData layers images glyphTex damage = do
-  when (not (damageIsEmpty damage) && sizeofSmallArray layers /= 0) $ do
+-- | Draw every command in layer-slice order, clipped to its own rect and to
+-- the damage. A full repaint with a clear colour clears the target first.
+renderDrawDataPass :: RenderBatch -> Ptr SDL_Renderer -> Maybe Color -> DrawData -> ImageAtlas -> Ptr () -> Damage -> IO ()
+renderDrawDataPass batch ren mClear drawData images glyphTex damage =
+  when (not (damageIsEmpty damage)) $ do
     clipRef <- newIORef ClipNone
-    clearLogicalClipRect ren
+    c_clear_clip_rect ren
     case (mClear, damage) of
       (Just clearColor, DamageFull) -> do
         let (cr, cg, cb, ca) = unpackColor clearColor
@@ -135,51 +97,21 @@ renderDrawDataPass batch ren mClear drawData layers images glyphTex damage = do
         vc = drawVertexCount drawData
         cmds = drawCommands drawData
         slices = drawLayerSlices drawData
-        !layerMask = computeLayerMask layers
     withForeignPtr (drawVertices drawData) $ \vp ->
       withForeignPtr (drawIndices drawData) $ \ip ->
-        let drawOne !cmd =
-              when (testLayerMask layerMask (cmdLayer cmd)) $
-                drawCmd batch ren vp vc ip images glyphTex clip clipRef cmd
-            goLy !li
+        let goLy !li
               | li >= sizeofPrimArray slices = pure ()
               | otherwise = do
                   let LayerSlice off cnt = indexPrimArray slices li
                       goCmd !j
                         | j >= cnt = pure ()
                         | otherwise = do
-                            drawOne (indexPrimArray cmds (off + j))
+                            drawCmd batch ren vp vc ip images glyphTex clip clipRef (indexPrimArray cmds (off + j))
                             goCmd (j + 1)
                   goCmd 0
                   goLy (li + 1)
          in goLy 0
     applyClipState batch clipRef ren ClipNone
-
-{-# INLINE layerOrder #-}
-layerOrder :: Layer -> Int
-layerOrder ly =
-  case ly of
-    LayerBackground -> 0
-    LayerContent -> 1
-    LayerOverlay -> 2
-    LayerChrome -> 3
-
-{-# INLINE computeLayerMask #-}
-computeLayerMask :: SmallArray Layer -> Int
-computeLayerMask arr = go 0 0
-  where
-    !len = sizeofSmallArray arr
-    go !acc !i
-      | i >= len = acc
-      | otherwise =
-          let !l = indexSmallArray arr i
-              !bit = 1 `shiftL` layerOrder l
-           in go (acc .|. bit) (i + 1)
-
-{-# INLINE testLayerMask #-}
-testLayerMask :: Int -> Layer -> Bool
-testLayerMask !mask !l =
-  (mask .&. (1 `shiftL` layerOrder l)) /= 0
 
 {-# INLINE drawCmd #-}
 drawCmd ::
@@ -241,18 +173,6 @@ newRenderBatch ren = do
 
 destroyRenderBatch :: RenderBatch -> IO ()
 destroyRenderBatch (RenderBatch p) = batchDestroy p
-
-withRenderBatch :: Ptr SDL_Renderer -> (RenderBatch -> IO a) -> IO a
-withRenderBatch ren act =
-  bracket
-    (newRenderBatch ren)
-    destroyRenderBatch
-    $ \rb -> do
-      result <- act rb
-      batchFlush (batchPtr rb)
-      pure result
-  where
-    batchPtr (RenderBatch p) = p
 
 flushRenderBatch :: RenderBatch -> IO ()
 flushRenderBatch (RenderBatch p) = batchFlush p

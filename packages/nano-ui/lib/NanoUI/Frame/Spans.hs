@@ -7,34 +7,21 @@ module NanoUI.Frame.Spans
   , widgetNodeCount
   , widgetHitRect
   , widgetTextSpans
-  , widgetTextPlacements
   , forWidgetTextPlacements_
   , selectableTextGeometry
-  , selectableTextPlacement
   , collectNodeTextSpans
-  , sliderValue
-  , walkChildSpans
   ) where
 
-
-import Control.Monad (unless, when)
+import Control.Monad (forM, unless, when)
 import Data.IORef (readIORef, writeIORef)
-import Data.Maybe (fromMaybe)
 import qualified Data.IntMap.Strict as IM
+import Data.Maybe (fromMaybe, isJust)
 import qualified Data.Text as T
-import NanoUI.Widgets.ColorPicker
-  ( ColorPickerGeom (..)
-  , colorPickerAlphaMode
-  , colorPickerGeom
-  )
 import NanoUI.Context
   ( Context (..)
   , SpanCacheEntry (..)
   , WidgetTextCacheEntry (..)
   , WidgetTextPlacement (..)
-  , WidgetStore (..)
-  , getStore
-  , intKey
   )
 import NanoUI.Damage (floatingPanelRects)
 import NanoUI.Font
@@ -43,17 +30,22 @@ import NanoUI.Font
   , centeredTextY
   , checkboxLeading
   , labelContentInset
+  , menuItemPadX
+  , prepareFontMetrics
   , tableCellInset
-  , layoutLineHeight
   , treeRowLeading
   , truncateTextIO
   , widgetContentInset
   , wrapTextLinesIO
-  , measureTextIO
-  , lineWidthIO
-  , prepareFontMetrics
-  , isDefaultNodeFont
   )
+import NanoUI.Frame.Chrome (displayText, textInputFocused, textInputValue, widgetVisualStyle)
+import NanoUI.Frame.Node (resolveFontFor, scrollViewportAt)
+import NanoUI.Frame.Scroll.Geometry (padContentClip, tagClippedSpans)
+import NanoUI.Frame.Select (collectSelectDropdownSpans, tagSelectClippedSpans)
+import NanoUI.Frame.SpanArena (SpanArena, pushSpan, resetSpanArena, spanArenaToList, spanArenaToListOccluded, withSpanArenaSnap)
+import NanoUI.Frame.TextArea.Geometry (TextAreaGeom (..), textAreaGeom)
+import NanoUI.Frame.TextEdit.Menu (collectTextEditMenuSpans)
+import NanoUI.Frame.TextInput (TextInputGeom (..), syncTextInputScroll, tagTextInputClippedSpans, textInputGeom)
 import NanoUI.Input (Input)
 import NanoUI.Layout.Arena
   ( NodeArena
@@ -61,187 +53,114 @@ import NanoUI.Layout.Arena
   , NodeType (..)
   , SizingTag (..)
   , arenaCount
+  , forNodes_
   , getAlignX
-  , getScrollContentW
   , getClipRect
-  , getDirection
   , getFirstChild
   , getMinMax
   , getNextSibling
-  , getParent
+  , getNodeFontColor
+  , getNodeFontSize
   , getNodeType
-  , getNodeValue
   , getPadding
+  , getParent
   , getRect
   , getStyleIdx
   , getText
   , getWidthSizing
-  , getWidgetId
-  , getNodeFontSize
-  , getNodeFontColor
-  , parentIsRow
   , isFloatingNode
   , isScrollNode
   , isWidgetNode
+  , parentIsRow
   )
-import NanoUI.Layout.Solve (scrollBarSlotOf)
-import NanoUI.Style (AlignX (..), FontVariant (..), Padding (..), Style (..), styleBg, styleFg)
-import NanoUI.Types (Color (..), Rect (..), lerpColor, onGrid, rectH, rectIntersect, rectW, rectX, rectY)
-import NanoUI.WidgetText (isCloseButtonStyle, isMenuItemStyle, isTableHeaderStyle, textInputBareMode, textInputSearchMode, textInputSelectableMode)
+import NanoUI.Style (AlignX (..), FontVariant (..), Padding (..), Style (..), Theme (..), themeAccent, themeMuted, themePanel)
+import NanoUI.Types (Color (..), Rect (..), lerpColor, onGrid, rectIntersect)
+import NanoUI.Widgets.ColorPicker (ColorPickerGeom (..), colorPickerAlphaMode, colorPickerGeom)
 import NanoUI.WidgetText
   ( colorPickerCurrentLabel
   , colorPickerNewLabel
+  , isCloseButtonStyle
+  , isMenuItemStyle
+  , isTableHeaderStyle
   , selectChevronReserve
-  , textInputFieldText
-  , treeDecodeStyle
   , tableStripeColor
-  , textNodeFontStyle
+  , textInputBareMode
+  , textInputFieldText
+  , textInputSearchMode
+  , textInputSelectableMode
   , textNodeFontVariant
-  , textNodeFontWeight
+  , treeDecodeStyle
   )
-import NanoUI.Frame.Chrome
-  ( buildFloatingAncestorMap
-  , displayText
-  , floatingLabelPaint
-  , textInputFocused
-  , textInputMenuItemPadX
-  , textInputValue
-  , widgetVisualStyle
-  )
-import NanoUI.Frame.Scroll.Geometry
-  ( decodeScrollConfig
-  , isScrollStyle2D
-  , padContentClip
-  , scrollContentClip
-  , scrollViewportClip2D
-  , tagClippedSpans
-  )
-import NanoUI.Frame.Select (collectSelectDropdownSpans, tagSelectClippedSpans)
-import NanoUI.Frame.TextEdit
-  ( TextAreaGeom (..)
-  , TextInputGeom (..)
-  , collectTextEditMenuSpans
-  , nodeFontMetrics
-  , tagTextInputClippedSpans
-  , textAreaGeom
-  , textAreaValue
-  , textInputGeom
-  , syncTextInputScroll
-  )
-import NanoUI.Frame.SpanArena (SpanArena, pushSpan, resetSpanArena, spanArenaToList, spanArenaToListOccluded, withSpanArenaSnap)
 
 collectTextSpans :: Context -> IO [(Rect, T.Text, Color, Color, Rect)]
 collectTextSpans ctx = do
-  floatCache <- buildFloatingAncestorMap ctx
-  collectTextSpansCached ctx floatCache
-
-collectOverlayTextSpans :: Context -> Input -> IO [(Rect, T.Text, Color, Color, Rect)]
-collectOverlayTextSpans ctx inp = do
-  floatCache <- buildFloatingAncestorMap ctx
-  collectOverlayTextSpansCached ctx inp floatCache
-
-collectRasterSpans :: Context -> Input -> IO ([(Rect, T.Text, Color, Color, Rect)], [(Rect, T.Text, Color, Color, Rect)])
-collectRasterSpans ctx inp = do
-  floatCache <- buildFloatingAncestorMap ctx
-  base <- collectTextSpansCached ctx floatCache
-  overlay <- collectOverlayTextSpansCached ctx inp floatCache
-  pure (base, overlay)
-
-collectTextSpansCached :: Context -> IM.IntMap (Maybe NodeType) -> IO [(Rect, T.Text, Color, Color, Rect)]
-collectTextSpansCached ctx floatCache = do
   count <- arenaCount (ctxNodeArena ctx)
   let arena = ctxSpanBase ctx
   resetSpanArena arena
   withSpanArenaSnap arena $
     when (count > 0) $
-      collectClippedSpans ctx floatCache 0 (Rect 0 0 1e9 1e9) arena
+      collectClippedSpans ctx 0 (Rect 0 0 1e9 1e9) arena
   panels <- floatingPanelRects ctx
   spanArenaToListOccluded panels arena
 
-collectOverlayTextSpansCached :: Context -> Input -> IM.IntMap (Maybe NodeType) -> IO [(Rect, T.Text, Color, Color, Rect)]
-collectOverlayTextSpansCached ctx inp floatCache = do
+collectOverlayTextSpans :: Context -> Input -> IO [(Rect, T.Text, Color, Color, Rect)]
+collectOverlayTextSpans ctx inp = do
   let arena = ctxSpanOverlay ctx
+      push (r, t, fg, bg, c) = pushSpan arena r t fg bg c
   resetSpanArena arena
   withSpanArenaSnap arena $ do
-    collectFloatingSpansInto ctx floatCache NodeWindow arena
-    collectFloatingSpansInto ctx floatCache NodeModal arena
-    collectFloatingSpansInto ctx floatCache NodePopup arena
+    collectFloatingSpansInto ctx NodeWindow arena
+    collectFloatingSpansInto ctx NodeModal arena
+    collectFloatingSpansInto ctx NodePopup arena
     drops <- collectSelectDropdownSpans ctx inp
     menu <- collectTextEditMenuSpans ctx inp
-    mapM_ (pushSpan5 arena) drops
-    mapM_ (pushSpan5 arena) menu
+    mapM_ push drops
+    mapM_ push menu
   spanArenaToList arena
 
-pushSpan5 :: SpanArena -> (Rect, T.Text, Color, Color, Rect) -> IO ()
-pushSpan5 arena (r, t, fg, bg, c) = pushSpan arena r t fg bg c
+collectRasterSpans :: Context -> Input -> IO ([(Rect, T.Text, Color, Color, Rect)], [(Rect, T.Text, Color, Color, Rect)])
+collectRasterSpans ctx inp = (,) <$> collectTextSpans ctx <*> collectOverlayTextSpans ctx inp
 
 widgetNodeCount :: Context -> IO Int
 widgetNodeCount ctx = arenaCount (ctxNodeArena ctx)
 
 {-# INLINE collectClippedSpans #-}
-collectClippedSpans :: Context -> IM.IntMap (Maybe NodeType) -> NodeIdx -> Rect -> SpanArena -> IO ()
-collectClippedSpans ctx floatCache idx clip arena = do
+collectClippedSpans :: Context -> NodeIdx -> Rect -> SpanArena -> IO ()
+collectClippedSpans ctx idx clip arena = do
   nt <- getNodeType (ctxNodeArena ctx) idx
   unless (isFloatingNode nt) $
-    collectClippedSpans' ctx floatCache idx nt clip arena
+    collectClippedSpans' ctx idx nt clip arena
 
-collectClippedSpans' :: Context -> IM.IntMap (Maybe NodeType) -> NodeIdx -> NodeType -> Rect -> SpanArena -> IO ()
-collectClippedSpans' ctx floatCache idx nt clip arena = do
+collectClippedSpans' :: Context -> NodeIdx -> NodeType -> Rect -> SpanArena -> IO ()
+collectClippedSpans' ctx idx nt clip arena = do
   (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-  pad <- getPadding (ctxNodeArena ctx) idx
-  let nodeRect = Rect x y w h
-      fm = ctxFontMetrics ctx
   mClipChildren <-
     if isScrollNode nt
-      then do
-        mLive <- getClipRect (ctxNodeArena ctx) idx
-        case mLive of
-          Just live ->
-            pure (rectIntersect clip live)
-          Nothing -> do
-            si <- getStyleIdx (ctxNodeArena ctx) idx
-            dir <- getDirection (ctxNodeArena ctx) idx
-            slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
-            let cfg = decodeScrollConfig si
-            content <-
-              if isScrollStyle2D si
-                then do
-                  contentH <- getNodeValue (ctxNodeArena ctx) idx
-                  contentW <- getScrollContentW (ctxNodeArena ctx) idx
-                  pure $
-                    scrollViewportClip2D fm slot cfg x y w h pad contentW contentH
-                else do
-                  contentSize <- getNodeValue (ctxNodeArena ctx) idx
-                  pure $
-                    scrollContentClip fm slot cfg dir x y w h pad contentSize
-            pure (rectIntersect clip content)
-      else
-        if nt == NodePanel
-          then pure (rectIntersect clip nodeRect)
-          else pure (Just clip)
+      then
+        getClipRect (ctxNodeArena ctx) idx >>= \case
+          Just live -> pure (rectIntersect clip live)
+          Nothing -> rectIntersect clip <$> scrollViewportAt ctx idx x y w h
+      else pure (if nt == NodePanel then rectIntersect clip (Rect x y w h) else Just clip)
   case mClipChildren of
     Nothing -> pure ()
     Just clipHere -> do
+      let fm = ctxFontMetrics ctx
+      spans <- collectNodeTextSpans ctx idx
       here <-
         case nt of
-          NodeSelect -> do
-            spans <- collectNodeTextSpans ctx floatCache idx
-            pure (tagSelectClippedSpans clipHere x y w h fm spans)
+          NodeSelect -> pure (tagSelectClippedSpans clipHere x y w h fm spans)
           NodeTextInput -> do
-            si' <- getStyleIdx (ctxNodeArena ctx) idx
-            spans <- collectNodeTextSpans ctx floatCache idx
-            if textInputBareMode si' || textInputSelectableMode si'
-              then pure (tagClippedSpans clipHere spans)
-              else pure (tagTextInputClippedSpans clipHere x y w h fm spans)
-          _ -> tagClippedSpans clipHere <$> collectNodeTextSpans ctx floatCache idx
+            si <- getStyleIdx (ctxNodeArena ctx) idx
+            pure $
+              if textInputBareMode si || textInputSelectableMode si
+                then tagClippedSpans clipHere spans
+                else tagTextInputClippedSpans clipHere x y w h fm spans
+          _ -> pure (tagClippedSpans clipHere spans)
       mapM_ (\(r, t, fg, bg, c) -> pushSpan arena r t fg bg c) here
-      walkChildSpans ctx floatCache idx clipHere arena
+      walkChildSpans ctx idx clipHere arena
 
-{-# INLINE walkChildSpans #-}
-walkChildSpans :: Context -> IM.IntMap (Maybe NodeType) -> NodeIdx -> Rect -> SpanArena -> IO ()
-walkChildSpans ctx floatCache idx clip arena = do
-  fc <- getFirstChild (ctxNodeArena ctx) idx
-  go fc
+walkChildSpans :: Context -> NodeIdx -> Rect -> SpanArena -> IO ()
+walkChildSpans ctx idx clip arena = getFirstChild (ctxNodeArena ctx) idx >>= go
   where
     go ci
       | ci < 0 = pure ()
@@ -249,9 +168,8 @@ walkChildSpans ctx floatCache idx clip arena = do
           ns <- getNextSibling (ctxNodeArena ctx) ci
           -- Later siblings paint under earlier ones; walk reverse then collect.
           go ns
-          collectClippedSpans ctx floatCache ci clip arena
+          collectClippedSpans ctx ci clip arena
 
-{-# INLINE findAncestorMaxW #-}
 findAncestorMaxW :: NodeArena -> NodeIdx -> IO Float
 findAncestorMaxW na idx = go idx 0
   where
@@ -261,8 +179,7 @@ findAncestorMaxW na idx = go idx 0
         then pure 1e9
         else do
           pad <- getPadding na p
-          let padW = padL pad + padR pad
-              padAccum' = padAccum + padW
+          let padAccum' = padAccum + padL pad + padR pad
           (_, _, pMaxW, _) <- getMinMax na p
           (pwTag, pwVal) <- getWidthSizing na p
           if pwTag == SizingFixed
@@ -271,132 +188,101 @@ findAncestorMaxW na idx = go idx 0
               then pure (max 0 (pMaxW - padAccum'))
               else go p padAccum'
 
--- Placement uses glyph ink (alignedTextPen), not TTF_GetStringSize. Wrap
--- still measures with the host so line breaks stay on the TTF width.
-collectNodeTextSpans :: Context -> IM.IntMap (Maybe NodeType) -> NodeIdx -> IO [(Rect, T.Text, Color, Color)]
-collectNodeTextSpans ctx floatCache idx = do
+-- | Text spans of one node. A text node's spans are cached per node until
+-- its inputs change. Placement uses glyph ink ('alignedTextPen'), not
+-- TTF_GetStringSize; wrapping still measures with the host so line breaks
+-- stay on the TTF width.
+collectNodeTextSpans :: Context -> NodeIdx -> IO [(Rect, T.Text, Color, Color)]
+collectNodeTextSpans ctx idx = do
   let arena = ctxNodeArena ctx
   nt <- getNodeType arena idx
   (x, y, w, h) <- getRect arena idx
-  theme <- readIORef (ctxTheme ctx)
-  if nt == NodeText
-    then do
+  if nt /= NodeText
+    then if isWidgetNode nt then widgetTextSpans ctx nt idx x y w h else pure []
+    else do
+      theme <- readIORef (ctxTheme ctx)
       raw <- getText arena idx
       si <- getStyleIdx arena idx
       mCustomCol <- getNodeFontColor arena idx
-      fontSizeVal <- getNodeFontSize arena idx
+      fontSize <- getNodeFontSize arena idx
       ax <- getAlignX arena idx
       (_, _, maxW, _) <- getMinMax arena idx
       (wTag, _) <- getWidthSizing arena idx
       isRowChild <- parentIsRow arena idx
-      let fvar = textNodeFontVariant si
-          (txt0, defaultFg, defaultBg) = floatingLabelPaint floatCache ctx idx theme fvar raw
-          fg = fromMaybe defaultFg mCustomCol
+      effMaxW <- if maxW < 1e8 then pure maxW else findAncestorMaxW arena idx
+      let rect = Rect x y w h
           mStripe = tableStripeColor theme si
-          paintBg = case mStripe of
-            Just bg -> bg
-            Nothing -> defaultBg
-          stripeSpans = []
-      effMaxW <-
-        if maxW < 1e8
-          then pure maxW
-          else findAncestorMaxW arena idx
+          variantFg = case textNodeFontVariant si of
+            FontHeading -> themeAccent theme
+            FontMuted -> themeMuted theme
+            FontDanger -> themeRed theme
+            _ -> styleFg (themePanel theme)
+          fg = fromMaybe variantFg mCustomCol
+          bg = fromMaybe (styleBg (themePanel theme)) mStripe
       cache <- readIORef (ctxSpanCache ctx)
       case IM.lookup idx cache of
         Just e
-          | sceText e == txt0
+          | sceText e == raw
               && sceFg e == fg
-              && sceBg e == paintBg
+              && sceBg e == bg
               && sceStyle e == si
-              && sceFontSize e == fontSizeVal
+              && sceFontSize e == fontSize
               && sceAlign e == fromEnum ax
               && sceWidthTag e == fromEnum wTag
-              && (let r = sceRect e in rectX r == x && rectY r == y && rectW r == w && rectH r == h)
+              && sceRect e == rect
               && sceEffMaxW e == effMaxW
-              && sceRowChild e == isRowChild -> pure (sceSpans e)
+              && sceRowChild e == isRowChild ->
+              pure (sceSpans e)
         _ -> do
-          textSpans <-
+          placed <-
             if T.null raw
               then pure []
               else do
-                let fweight = textNodeFontWeight si
-                    fstyle = textNodeFontStyle si
-                    isBase = isDefaultNodeFont fontSizeVal fweight fstyle fvar
-                    isBaseMono = isBase && fvar == FontMono
-                textFm <-
-                  if isBase
-                    then pure (if isBaseMono then ctxMonoFontMetrics ctx else ctxFontMetrics ctx)
-                    else fst <$> ctxResolveFont ctx fontSizeVal fweight fstyle fvar
-                let (ix, _) =
-                      case mStripe of
-                        Just _ -> tableCellInset textFm
-                        Nothing -> labelContentInset textFm
-                    measureWord
-                      | isBaseMono = lineWidthIO (ctxMonoFontMetrics ctx)
-                      | isBase = \t -> fmap fst (ctxMeasureText ctx t)
-                      | otherwise = \t -> fmap fst (ctxResolveMeasure ctx fontSizeVal fweight fstyle fvar t)
-                tw0 <-
-                  if isBaseMono
-                    then lineWidthIO (ctxMonoFontMetrics ctx) txt0
-                    else if isBase
-                      then fst <$> ctxMeasureText ctx txt0
-                      else fst <$> ctxResolveMeasure ctx fontSizeVal fweight fstyle fvar txt0
-                let hasNewlines = T.any (== '\n') txt0
+                (fm, _, measure) <- resolveFontFor ctx fontSize si
+                let ix = fst ((if isJust mStripe then tableCellInset else labelContentInset) fm)
+                    measureW = fmap fst . measure
+                    lineH = fmLineHeight fm
+                    contentW = max 0 (w - 2 * ix)
                     wrapCap
                       | effMaxW < 1e8 = max 0 effMaxW
                       | wTag == SizingGrow && w > 0 = w
                       | otherwise = effMaxW
-                    canWrap = not isRowChild && wrapCap < 1e8
-                    wrapW = max 0 (wrapCap - 2 * ix)
-                    lineH = layoutLineHeight textFm
-                if hasNewlines || (canWrap && wrapCap + 0.5 < tw0)
+                tw <- measureW raw
+                if T.any (== '\n') raw || (not isRowChild && wrapCap < 1e8 && wrapCap + 0.5 < tw)
                   then do
-                    textLines <- wrapTextLinesIO measureWord textFm txt0 wrapW
-                    mapM (\(i, line) -> do
-                      prepared <- prepareFontMetrics textFm line
+                    textLines <- wrapTextLinesIO measureW raw (max 0 (wrapCap - 2 * ix))
+                    forM (zip [(0 :: Int) ..] textLines) $ \(i, line) -> do
+                      prepared <- prepareFontMetrics fm line
                       let (tx, used) = alignedTextPen ax x w ix prepared line
-                      pure ( Rect
-                            tx
-                            (centeredTextY textFm (y + onGrid (fmSnapScale textFm) (fromIntegral i * lineH)) lineH lineH)
-                            used
-                            lineH
-                        , line
-                        , fg
-                        , paintBg
-                         )) (zip [(0 :: Int) ..] textLines)
+                          ty = centeredTextY fm (y + onGrid (fmSnapScale fm) (fromIntegral i * lineH)) lineH lineH
+                      pure (Rect tx ty used lineH, line)
                   else do
-                    let contentW = max 0 (w - 2 * ix)
-                    dispTxt <-
-                      if tw0 > contentW && contentW > 0 && (wTag == SizingGrow || maxW < 1e8)
-                        then
-                          truncateTextIO measureWord contentW txt0
-                        else pure txt0
-                    prepared <- prepareFontMetrics textFm dispTxt
-                    let (tx, used) = alignedTextPen ax x w ix prepared dispTxt
-                        py = centeredTextY textFm y h lineH
-                    pure [(Rect tx py used lineH, dispTxt, fg, paintBg)]
-          let spans = stripeSpans ++ textSpans
-              key =
-                SpanCacheEntry
-                  { sceText = txt0
-                  , sceFg = fg
-                  , sceBg = paintBg
-                  , sceStyle = si
-                  , sceFontSize = fontSizeVal
-                  , sceAlign = fromEnum ax
-                  , sceWidthTag = fromEnum wTag
-                  , sceRect = Rect x y w h
-                  , sceEffMaxW = effMaxW
-                  , sceRowChild = isRowChild
-                  , sceSpans = spans
-                  }
-          writeIORef (ctxSpanCache ctx) (IM.insert idx key cache)
+                    shown <-
+                      if tw > contentW && contentW > 0 && (wTag == SizingGrow || maxW < 1e8)
+                        then truncateTextIO measureW contentW raw
+                        else pure raw
+                    prepared <- prepareFontMetrics fm shown
+                    let (tx, used) = alignedTextPen ax x w ix prepared shown
+                    pure [(Rect tx (centeredTextY fm y h lineH) used lineH, shown)]
+          let spans = [(r, line, fg, bg) | (r, line) <- placed]
+          writeIORef (ctxSpanCache ctx) $
+            IM.insert
+              idx
+              SpanCacheEntry
+                { sceText = raw
+                , sceFg = fg
+                , sceBg = bg
+                , sceStyle = si
+                , sceFontSize = fontSize
+                , sceAlign = fromEnum ax
+                , sceWidthTag = fromEnum wTag
+                , sceRect = rect
+                , sceEffMaxW = effMaxW
+                , sceRowChild = isRowChild
+                , sceSpans = spans
+                }
+              cache
           pure spans
-    else
-      if isWidgetNode nt
-        then widgetTextSpans ctx nt idx x y w h
-        else pure []
-
 
 widgetHitRect :: Context -> NodeType -> NodeIdx -> Float -> Float -> Float -> Float -> IO Rect
 widgetHitRect ctx nt idx x y w h = do
@@ -410,45 +296,29 @@ widgetHitRect ctx nt idx x y w h = do
     NodeTextArea -> pure (tagFieldRect (textAreaGeom fm x y w h))
     NodeButton -> do
       si <- getStyleIdx (ctxNodeArena ctx) idx
+      -- Close buttons get a padded target that stays inside the title bar, so
+      -- the inner east resize still works below the control.
       if isCloseButtonStyle si
-        then pure (closeButtonHitRect fm x y w h)
+        then pure (Rect (x - 8) (y - 4) (w + 10) (h + 4))
         else pure (Rect x y w h)
     _ -> pure (Rect x y w h)
-
--- Hit rect: padded in the title bar.
-closeButtonHitRect :: FontMetrics -> Float -> Float -> Float -> Float -> Rect
-closeButtonHitRect _fm x y w h =
-  -- Easier to tap; keep the target inside the title bar so inner east resize
-  -- still works below the close control.
-  Rect (x - 8) (y - 4) (w + 10) (h + 4)
 
 widgetTextSpans ::
   Context -> NodeType -> NodeIdx -> Float -> Float -> Float -> Float -> IO [(Rect, T.Text, Color, Color)]
 widgetTextSpans ctx nt idx x y w h = do
   style <- widgetVisualStyle ctx nt idx
   mFontColor <- getNodeFontColor (ctxNodeArena ctx) idx
+  placements <- widgetTextPlacements ctx nt idx x y w h
   let fg = fromMaybe (styleFg style) mFontColor
       bg = styleBg style
   case nt of
     NodeTextInput -> do
-      placements <- widgetTextPlacements ctx nt idx x y w h
       value <- textInputValue ctx idx
       focus <- textInputFocused ctx idx
-      let placeholder = T.null value && not focus
-          fieldFg
-            | placeholder = lerpColor fg bg 0.40
-            | otherwise = fg
-      pure
-        [ (Rect px py tw th, txt, fieldFg, bg)
-        | (txt, px, py, tw, th) <- placements
-        ]
-    _ -> do
-      placements <- widgetTextPlacements ctx nt idx x y w h
-      pure
-        [ (Rect px py tw th, txt, fg, bg)
-        | (txt, px, py, tw, th) <- placements
-        , not (T.null txt)
-        ]
+      let fieldFg = if T.null value && not focus then lerpColor fg bg 0.40 else fg
+      pure [(Rect px py tw th, txt, fieldFg, bg) | (txt, px, py, tw, th) <- placements]
+    _ ->
+      pure [(Rect px py tw th, txt, fg, bg) | (txt, px, py, tw, th) <- placements, not (T.null txt)]
 
 -- | Cacheable widget labels depend on text, style, font size, alignment and
 -- dimensions, but not the absolute node origin. Text
@@ -467,9 +337,7 @@ widgetTextPlacements ::
 widgetTextPlacements ctx nt idx x y w h
   | cacheableWidgetLabel nt = do
       placement <- cachedWidgetLabel ctx nt idx w h
-      pure $ case placement of
-        Nothing -> []
-        Just (WidgetTextPlacement txt px py tw th) -> [(txt, x + px, y + py, tw, th)]
+      pure [(txt, x + px, y + py, tw, th) | Just (WidgetTextPlacement txt px py tw th) <- [placement]]
   | otherwise = computeWidgetTextPlacements ctx nt idx x y w h
 
 -- | Runtime consumer API. The Bool marks the last placement (for table sort
@@ -492,48 +360,47 @@ forWidgetTextPlacements_ ctx nt idx x y w h emit
       go placements
 
 cachedWidgetLabel :: Context -> NodeType -> NodeIdx -> Float -> Float -> IO (Maybe WidgetTextPlacement)
-cachedWidgetLabel ctx nt idx w h
-  | cacheableWidgetLabel nt = do
-      fontSizeVal <- getNodeFontSize (ctxNodeArena ctx) idx
-      si <- getStyleIdx (ctxNodeArena ctx) idx
-      txt <- displayText ctx nt idx
-      ax <- if nt == NodeButton && isTableHeaderStyle si
-        then getAlignX (ctxNodeArena ctx) idx
-        else pure AlignStart
-      let ntTag = fromEnum nt
-      cache <- readIORef (ctxWidgetTextCache ctx)
-      case IM.lookup idx cache of
-        Just e
-          | wtcNodeType e == ntTag
-              && wtcStyle e == si
-              && wtcFontSize e == fontSizeVal
-              && wtcText e == txt
-              && wtcWidth e == w
-              && wtcHeight e == h
-              && wtcAlign e == fromEnum ax -> pure (wtcPlacement e)
-        _ -> do
-          placement <- computeWidgetLabel ctx idx nt txt si fontSizeVal ax w h
-          writeIORef
-            (ctxWidgetTextCache ctx)
-            (IM.insert idx (WidgetTextCacheEntry ntTag si fontSizeVal txt w h (fromEnum ax) placement) cache)
-          pure placement
-  | otherwise = pure Nothing
+cachedWidgetLabel ctx nt idx w h = do
+  fontSizeVal <- getNodeFontSize (ctxNodeArena ctx) idx
+  si <- getStyleIdx (ctxNodeArena ctx) idx
+  txt <- displayText ctx nt idx
+  ax <-
+    if nt == NodeButton && isTableHeaderStyle si
+      then getAlignX (ctxNodeArena ctx) idx
+      else pure AlignStart
+  let ntTag = fromEnum nt
+  cache <- readIORef (ctxWidgetTextCache ctx)
+  case IM.lookup idx cache of
+    Just e
+      | wtcNodeType e == ntTag
+          && wtcStyle e == si
+          && wtcFontSize e == fontSizeVal
+          && wtcText e == txt
+          && wtcWidth e == w
+          && wtcHeight e == h
+          && wtcAlign e == fromEnum ax -> pure (wtcPlacement e)
+    _ -> do
+      placement <- computeWidgetLabel ctx nt txt si fontSizeVal ax w h
+      writeIORef
+        (ctxWidgetTextCache ctx)
+        (IM.insert idx (WidgetTextCacheEntry ntTag si fontSizeVal txt w h (fromEnum ax) placement) cache)
+      pure placement
 
 -- All coordinates here are local. centeredTextY snaps the baseline offset,
 -- not the origin; final device-pixel snapping stays in the draw backend.
-computeWidgetLabel :: Context -> NodeIdx -> NodeType -> T.Text -> Int -> Float -> AlignX -> Float -> Float -> IO (Maybe WidgetTextPlacement)
-computeWidgetLabel ctx idx nt txt si fontSizeVal ax w h
+computeWidgetLabel :: Context -> NodeType -> T.Text -> Int -> Float -> AlignX -> Float -> Float -> IO (Maybe WidgetTextPlacement)
+computeWidgetLabel ctx nt txt si fontSizeVal ax w h
   | nt == NodeButton && isCloseButtonStyle si = pure Nothing
   | otherwise = do
-      source <- nodeFontMetrics ctx idx
+      (source, _, measure) <- resolveFontFor ctx fontSizeVal si
       fm <- prepareFontMetrics source txt
-      (tw, th) <- measurePlacementText ctx fontSizeVal si fm txt
+      (tw, th) <- measure txt
       let (ix, _) = widgetContentInset fm
           (tx, used) = case nt of
             NodeButton
               | isTableHeaderStyle si -> alignedTextPen ax 0 w (fst (tableCellInset fm)) fm txt
               | isMenuItemStyle si ->
-                  let inset = textInputMenuItemPadX + ix
+                  let inset = menuItemPadX + ix
                    in (inset, min tw (max 0 (w - inset - ix)))
               | otherwise -> alignedTextPen AlignCenter 0 w 0 fm txt
             NodeSelect -> (ix, min tw (w - ix - selectChevronReserve))
@@ -544,155 +411,76 @@ computeWidgetLabel ctx idx nt txt si fontSizeVal ax w h
       let !placement = WidgetTextPlacement txt tx (centeredTextY fm 0 h th) used th
       pure (Just placement)
 
-measurePlacementText :: Context -> Float -> Int -> FontMetrics -> T.Text -> IO (Float, Float)
-measurePlacementText ctx sz si fm txt
-  | isDefaultNodeFont sz weight style variant =
-      if variant == FontMono then measureTextIO fm txt else ctxMeasureText ctx txt
-  | otherwise = ctxResolveMeasure ctx sz weight style variant txt
-  where
-    weight = textNodeFontWeight si
-    style = textNodeFontStyle si
-    variant = textNodeFontVariant si
-
 -- | Pure geometry of selectable text: the pen origin, centered baseline box and
 -- line height. Selectable text never scrolls, so the pen is just the node x.
--- Paint uses this and skips the width measure; span placement appends it.
+-- Paint uses this and skips the width measure; span placement adds it.
 selectableTextGeometry :: FontMetrics -> Float -> Float -> Float -> (Float, Float, Float)
 selectableTextGeometry fm x y h =
-  let lineH = layoutLineHeight fm
+  let lineH = fmLineHeight fm
    in (x, centeredTextY fm y h lineH, lineH)
-
--- | Full selectable-text placement: geometry plus the measured content width,
--- shared by span placement (which needs the width) and paint (via the pure
--- geometry above).
-selectableTextPlacement ::
-  Context ->
-  Float ->
-  Int ->
-  FontMetrics ->
-  T.Text ->
-  Float ->
-  Float ->
-  Float ->
-  IO (Float, Float, Float, Float)
-selectableTextPlacement ctx sz si fm value x y h = do
-  let (penX, ty, lineH) = selectableTextGeometry fm x y h
-  (fw, _) <- measurePlacementText ctx sz si fm value
-  pure (penX, ty, fw, lineH)
 
 computeWidgetTextPlacements ::
   Context -> NodeType -> NodeIdx -> Float -> Float -> Float -> Float -> IO [(T.Text, Float, Float, Float, Float)]
 computeWidgetTextPlacements ctx nt idx x y w h = do
   fontSizeVal <- getNodeFontSize (ctxNodeArena ctx) idx
   si <- getStyleIdx (ctxNodeArena ctx) idx
-  fm <- nodeFontMetrics ctx idx
+  (fm, _, measureTxt) <- resolveFontFor ctx fontSizeVal si
   let (ix, iy) = widgetContentInset fm
-      measureTxt = measurePlacementText ctx fontSizeVal si fm
+      lineH = fmLineHeight fm
   case nt of
     NodeColorPicker -> do
-      let showAlpha = colorPickerAlphaMode si
-          geom = colorPickerGeom showAlpha fm x y w h
+      let geom = colorPickerGeom (colorPickerAlphaMode si) fm x y w h
       (cw, ch) <- measureTxt colorPickerCurrentLabel
       (nw, nh) <- measureTxt colorPickerNewLabel
-      let currentLabelY = centeredTextY fm (cpgCurrentLabelY geom) (cpgLabelH geom) ch
-          newLabelY = centeredTextY fm (cpgNewLabelY geom) (cpgLabelH geom) nh
       pure
-        [ (colorPickerCurrentLabel, cpgPreviewX geom, currentLabelY, cw, ch)
-        , (colorPickerNewLabel, cpgPreviewX geom, newLabelY, nw, nh)
+        [ (colorPickerCurrentLabel, cpgPreviewX geom, centeredTextY fm (cpgCurrentLabelY geom) (cpgLabelH geom) ch, cw, ch)
+        , (colorPickerNewLabel, cpgPreviewX geom, centeredTextY fm (cpgNewLabelY geom) (cpgLabelH geom) nh, nw, nh)
         ]
     NodeSlider -> pure []
     NodeTextInput
       | textInputSelectableMode si -> do
           value <- textInputValue ctx idx
-          (penX, ty, fw, lineH) <- selectableTextPlacement ctx fontSizeVal si fm value x y h
-          pure [(value, penX, ty, fw, lineH)]
-      | textInputBareMode si -> do
+          let (penX, ty, selLineH) = selectableTextGeometry fm x y h
+          (fw, _) <- measureTxt value
+          pure [(value, penX, ty, fw, selLineH)]
+      | otherwise -> do
+          let bare = textInputBareMode si
+          ph <- if bare then pure "" else getText (ctxNodeArena ctx) idx
           value <- textInputValue ctx idx
           focus <- textInputFocused ctx idx
-          let fieldTxt = textInputFieldText "" value focus
-              lineH = layoutLineHeight fm
+          let fieldTxt = textInputFieldText ph value focus
+              Rect _ fieldY _ fieldH = if bare then Rect x y w h else tigFieldRect (textInputGeom fm x y w h)
           (fw, _) <- measureTxt fieldTxt
           scrollX <- syncTextInputScroll ctx idx x y w h
-          pure
-            [ ( fieldTxt
-              , x + ix - scrollX
-              , centeredTextY fm y h lineH
-              , fw
-              , lineH
-              )
-            ]
-    NodeTextInput -> do
-      ph <- getText (ctxNodeArena ctx) idx
-      value <- textInputValue ctx idx
-      focus <- textInputFocused ctx idx
-      let geom = textInputGeom fm x y w h
-          field = tigFieldRect geom
-          fieldTxt = textInputFieldText ph value focus
-          lineH = layoutLineHeight fm
-      (fw, _) <- measureTxt fieldTxt
-      scrollX <- syncTextInputScroll ctx idx x y w h
-      pure
-        [ (fieldTxt, x + ix - scrollX, centeredTextY fm (rectY field) (rectH field) lineH, fw, lineH)
-        ]
+          pure [(fieldTxt, x + ix - scrollX, centeredTextY fm fieldY fieldH lineH, fw, lineH)]
     NodeTextArea -> do
       lbl <- getText (ctxNodeArena ctx) idx
-      value <- textAreaValue ctx idx
-      let geom = textAreaGeom fm x y w h
-          field = tagFieldRect geom
-          labelH = layoutLineHeight fm
+      value <- textInputValue ctx idx
+      let Rect _ fieldY _ fieldH = tagFieldRect (textAreaGeom fm x y w h)
       (lw, lh) <- measureTxt lbl
       (fw, _) <- measureTxt (if T.null value then " " else value)
       pure
-        [ (lbl, x, centeredTextY fm y labelH lh, lw, lh)
-        , (value, x + ix, rectY field + iy, fw, rectH field)
+        [ (lbl, x, centeredTextY fm y lineH lh, lw, lh)
+        , (value, x + ix, fieldY + iy, fw, fieldH)
         ]
     NodeDrawing -> pure []
     _ -> do
       txt <- displayText ctx nt idx
       ax <- getAlignX (ctxNodeArena ctx) idx
-      (_tw, th) <- measureTxt txt
+      (_, th) <- measureTxt txt
       prepared <- prepareFontMetrics fm txt
       let (tx, used) = alignedTextPen ax x w ix prepared txt
       pure [(txt, tx, centeredTextY fm y h th, used, th)]
 
-sliderValue :: Context -> NodeIdx -> IO Float
-sliderValue ctx idx = do
-  wid <- getWidgetId (ctxNodeArena ctx) idx
-  store <- getStore ctx
-  pure (IM.findWithDefault 0 (intKey wid) (storeFloat store))
-
--- Returns a style whose background already reflects hover/active state, so the
--- rect fill and the text cells agree on one color.
-collectFloatingSpansInto :: Context -> IM.IntMap (Maybe NodeType) -> NodeType -> SpanArena -> IO ()
-collectFloatingSpansInto ctx floatCache wanted arena = do
-  count <- arenaCount (ctxNodeArena ctx)
-  let fm = ctxFontMetrics ctx
-      go !idx
-        | idx >= count = pure ()
-        | otherwise = do
-            nt <- getNodeType (ctxNodeArena ctx) idx
-            if nt /= wanted
-              then go (idx + 1)
-              else do
-                (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-                pad <- getPadding (ctxNodeArena ctx) idx
-                dir <- getDirection (ctxNodeArena ctx) idx
-                si <- getStyleIdx (ctxNodeArena ctx) idx
-                slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
-                let cfg = decodeScrollConfig si
-                clip <-
-                  if not (isScrollNode nt)
-                    then pure $ padContentClip fm x y w h pad
-                    else if isScrollStyle2D si
-                      then do
-                        contentH <- getNodeValue (ctxNodeArena ctx) idx
-                        contentW <- getScrollContentW (ctxNodeArena ctx) idx
-                        pure $
-                          scrollViewportClip2D fm slot cfg x y w h pad contentW contentH
-                      else do
-                        contentSize <- getNodeValue (ctxNodeArena ctx) idx
-                        pure $
-                          scrollContentClip fm slot cfg dir x y w h pad contentSize
-                walkChildSpans ctx floatCache idx clip arena
-                go (idx + 1)
-  go 0
+-- | Spans inside every floating panel of one kind, clipped to its content box.
+collectFloatingSpansInto :: Context -> NodeType -> SpanArena -> IO ()
+collectFloatingSpansInto ctx wanted arena =
+  forNodes_ (ctxNodeArena ctx) $ \idx -> do
+    nt <- getNodeType (ctxNodeArena ctx) idx
+    when (nt == wanted) $ do
+      (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+      clip <-
+        if isScrollNode nt
+          then scrollViewportAt ctx idx x y w h
+          else padContentClip (ctxFontMetrics ctx) x y w h <$> getPadding (ctxNodeArena ctx) idx
+      walkChildSpans ctx idx clip arena

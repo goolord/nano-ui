@@ -5,12 +5,6 @@
 
 module NanoUI.Form.Types
   ( FormView (..)
-  , FormInput (..)
-  , formInputToText
-  , FormStateStore (..)
-  , emptyFormStateStore
-  , FormUI (..)
-  , liftNanoUI
   , Form
   , FormStatus (..)
   , FormMode (..)
@@ -22,14 +16,7 @@ import Data.Text (Text)
 import qualified Ditto.Core as Ditto
 import Ditto.Types (FormRange)
 import NanoUI (NanoUI)
-import NanoUI.Form.Backend
-  ( FormInput (..)
-  , FormStateStore (..)
-  , FormUI (..)
-  , emptyFormStateStore
-  , formInputToText
-  , liftNanoUI
-  )
+import NanoUI.Form.Backend (FormInput, FormUI)
 
 -- | View representation for forms in nano-ui.
 -- Forms compose sequentially via '<*>' by sequencing their widget rendering actions.
@@ -46,8 +33,7 @@ type Form err a = Ditto.Form FormUI FormInput err FormView a
 
 -- | Outcome of evaluating a form.
 data FormStatus a
-  = FormIdle !a
-  | FormValid !a
+  = FormValid !a
   | FormInvalid ![(FormRange, Text)]
   deriving stock (Eq, Show, Functor)
 

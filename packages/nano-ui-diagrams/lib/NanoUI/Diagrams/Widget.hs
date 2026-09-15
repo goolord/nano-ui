@@ -251,27 +251,7 @@ diagramWithKeyAndEnvelope ::
   Layout ->
   QDiagram NanoUIBackend V2 Double Any ->
   Eff es Response
-diagramWithKeyAndEnvelope userKey dw dh layout d = do
-  fm <- uiFontMetrics
-  theme <- uiTheme
-  let content = hash (userKey, themePlotKey theme)
-      ps = themePlotStyle theme
-  drawingCached dw dh (fmLineHeight fm) content layout (fitLayoutIO fm layout d) $ \rectBox ->
-    let borderW = 1
-        inset = borderW
-        inner =
-          Rect
-            (rectX rectBox + inset)
-            (rectY rectBox + inset)
-            (max 0 (rectW rectBox - 2 * inset))
-            (max 0 (rectH rectBox - 2 * inset))
-        w = realToFrac (rectW inner) :: Double
-        h = realToFrac (rectH inner)
-        plot =
-          if w <= 0 || h <= 0
-            then V.empty
-            else V.map (shiftDrawOp (rectX inner) (rectY inner)) (diagramOps w h d)
-     in diagramFrame ps borderW rectBox <> plot
+diagramWithKeyAndEnvelope userKey = framedDiagram (\t -> hash (userKey, themePlotKey t))
 
 diagramWithEnvelope ::
   Ui :> es =>
@@ -280,12 +260,23 @@ diagramWithEnvelope ::
   Layout ->
   QDiagram NanoUIBackend V2 Double Any ->
   Eff es Response
-diagramWithEnvelope dw dh layout d = do
+diagramWithEnvelope = framedDiagram themePlotKey
+
+-- | Draw a diagram inside the plot frame. Its draw ops are cached under the
+-- content key the caller derives from the current theme.
+framedDiagram ::
+  Ui :> es =>
+  (Theme -> Int) ->
+  Double ->
+  Double ->
+  Layout ->
+  QDiagram NanoUIBackend V2 Double Any ->
+  Eff es Response
+framedDiagram contentKey dw dh layout d = do
   fm <- uiFontMetrics
   theme <- uiTheme
-  let content = themePlotKey theme
-      ps = themePlotStyle theme
-  drawingCached dw dh (fmLineHeight fm) content layout (fitLayoutIO fm layout d) $ \rectBox ->
+  let ps = themePlotStyle theme
+  drawingCached dw dh (fmLineHeight fm) (contentKey theme) layout (fitLayoutIO fm layout d) $ \rectBox ->
     let borderW = 1
         inset = borderW
         inner =

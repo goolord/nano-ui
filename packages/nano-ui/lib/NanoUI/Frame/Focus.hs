@@ -3,7 +3,6 @@
 -- | Focus traversal and modal focus constraints.
 module NanoUI.Frame.Focus
   ( filterModalFocusables
-  , widgetIdInModal
   , constrainFocusToModal
   , syncWidgetLabels
   , tabNext
@@ -15,7 +14,7 @@ import Data.IORef (readIORef, writeIORef)
 import Data.Primitive.PrimArray (readPrimArray)
 import qualified Data.IntMap.Strict as IM
 import NanoUI.Context (Context (..), WidgetStore (..), getStore, intBool, intKey)
-import NanoUI.Frame.Hit (topmostModalIdx, widgetIdInModal, widgetIdInSubtree)
+import NanoUI.Frame.Hit (topmostModalIdx, widgetIdInSubtree)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Layout.Arena
   ( NodeType (NodeCheckbox, NodeRadio, NodeTree)

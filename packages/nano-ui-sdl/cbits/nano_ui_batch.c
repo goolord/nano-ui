@@ -1,4 +1,3 @@
-#include "nano_ui_opt.h"
 #include "nano_ui_batch.h"
 #include "nano_ui_simd.h"
 

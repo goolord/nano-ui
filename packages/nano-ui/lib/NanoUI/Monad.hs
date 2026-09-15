@@ -88,11 +88,11 @@ import NanoUI.Context
   )
 import NanoUI.Font (FontMetrics)
 import NanoUI.Id
-  ( IdContext (IdContext, siblingId)
-  , WidgetId (..)
+  ( IdContext (siblingId)
+  , WidgetId
   , enterKeyed
   , enterScope
-  , mix64
+  , idContextWidgetId
   , scopeTag
   )
 import NanoUI.Style (Layout, Theme)
@@ -129,15 +129,13 @@ emit msg = do
   ctx <- askContext
   uiIO (pushMessage ctx (FrameMsg msg))
 
-{-# INLINE peekId #-}
-peekId :: Ui :> es => Eff es WidgetId
-peekId = do
+-- | The id 'nextId' would issue, without consuming it.
+{-# INLINE currentId #-}
+currentId :: Ui :> es => Eff es WidgetId
+currentId = do
   ctx <- askContext
   ic <- uiIO (readIORef (ctxIdContext ctx))
-  let
-    IdContext cid sid = ic
-    raw = mix64 cid sid
-  pure (if raw == 0 then WidgetId 1 else WidgetId raw)
+  pure (idContextWidgetId ic)
 
 {-# INLINE nextId #-}
 nextId :: Ui :> es => Eff es WidgetId
@@ -145,12 +143,8 @@ nextId = do
   ctx <- askContext
   uiIO $ do
     ic <- readIORef (ctxIdContext ctx)
-    let
-      IdContext cid sid = ic
-      raw = mix64 cid sid
-      wid = if raw == 0 then WidgetId 1 else WidgetId raw
-    writeIORef (ctxIdContext ctx) (ic {siblingId = sid + 1})
-    pure wid
+    writeIORef (ctxIdContext ctx) (ic {siblingId = siblingId ic + 1})
+    pure (idContextWidgetId ic)
 
 -- | Issue many widget ids in one IO loop (avoids deep Eff bind chains).
 {-# INLINE burstNextIds #-}
@@ -163,23 +157,26 @@ burstNextIds n
         let !sid = siblingId ic + fromIntegral n
          in ic {siblingId = sid}
 
-{-# INLINE currentId #-}
-currentId :: Ui :> es => Eff es WidgetId
-currentId = peekId
-
-{-# INLINE scope #-}
-scope :: Ui :> es => Eff es a -> Eff es a
-scope m = do
+-- Run @m@ in the child context from @enter@, then restore the advanced parent
+-- (also on exceptions).
+{-# INLINE withIdFrame #-}
+withIdFrame ::
+  Ui :> es => (IdContext -> (IdContext, IdContext)) -> Eff es a -> Eff es a
+withIdFrame enter m = do
   ctx <- askContext
   unsafeEff $ \es ->
     bracket
       (do
         old <- readIORef (ctxIdContext ctx)
-        let (p, c) = enterScope scopeTag old
+        let (p, c) = enter old
         writeIORef (ctxIdContext ctx) c
         pure p)
       (\parent' -> writeIORef (ctxIdContext ctx) parent')
       (\_ -> unEff m es)
+
+{-# INLINE scope #-}
+scope :: Ui :> es => Eff es a -> Eff es a
+scope = withIdFrame (enterScope scopeTag)
 
 {-# INLINE keyed #-}
 
@@ -189,17 +186,7 @@ keyed k = keyedTag (fromIntegral (hash k))
 
 {-# INLINE keyedTag #-}
 keyedTag :: Ui :> es => Word64 -> Eff es a -> Eff es a
-keyedTag tag m = do
-  ctx <- askContext
-  unsafeEff $ \es ->
-    bracket
-      (do
-        old <- readIORef (ctxIdContext ctx)
-        let (p, c) = enterKeyed tag old
-        writeIORef (ctxIdContext ctx) c
-        pure p)
-      (\parent' -> writeIORef (ctxIdContext ctx) parent')
-      (\_ -> unEff m es)
+keyedTag tag = withIdFrame (enterKeyed tag)
 
 {-# INLINE withKey #-}
 withKey :: (Hashable k, Ui :> es) => k -> Eff es a -> Eff es a

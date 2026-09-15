@@ -4,6 +4,8 @@ module NanoUI.Testing.Harness
   , rightClickPair
   , pressAt
   , releaseAt
+  , keyInp
+  , tabInp
   , withInputOff
   , withDelta
   , centerOf
@@ -12,16 +14,10 @@ module NanoUI.Testing.Harness
   , warmupDraw
   , runClick
   , runRightClick
-  , runClickMsgs
   , runClickPair
   , runClickRelease
   , withAnimCtx
   , assertSpansHas
-  , spanYs
-  , spanLabelYs
-  , closeSpanBottom
-  , closeSpanCenter
-  , spansHas
   , spanYOf
   , spanXOf
   , assertScrollGutter
@@ -30,8 +26,6 @@ module NanoUI.Testing.Harness
   , findGrabHover
   , dragWindowEdge
   , vertUv
-  , modifyIORef
-  , checkLabelAlignEnd
   , checkLabelAlignEndInk
   , checkIdleFullDamage
   , windowTitleGrab
@@ -44,7 +38,6 @@ module NanoUI.Testing.Harness
   , findHeader
   , findRightmost
   , requireSpan
-  , clickAt
   , clickPos
   , clickTab
   , dragPos
@@ -52,7 +45,7 @@ module NanoUI.Testing.Harness
   ) where
 
 import Control.Monad (forM, void, when)
-import Data.IORef (IORef, readIORef, writeIORef)
+import Data.IORef (IORef)
 import Data.Text qualified as T
 import Data.Word (Word32, Word8)
 import Foreign.C.Types (CSize (..))
@@ -60,10 +53,11 @@ import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Marshal.Alloc (allocaBytes)
 import Foreign.Ptr (Ptr, plusPtr)
 import Foreign.Storable (peekByteOff)
+import GHC.Stack (HasCallStack)
 import NanoUI
 import NanoUI.Font (alignedTextPen, textInkEnd)
 import NanoUI.Testing
-import NanoUI.Testing.Assert (bump, failWhen, withInput)
+import NanoUI.Testing.Assert (assert, assertEq, assertLt, bump, withInput)
 
 type DemoSpan = (Rect, T.Text, Color, Color, Rect)
 
@@ -125,7 +119,7 @@ drawQuads dd =
 spanCenter :: Rect -> V2
 spanCenter (Rect x y w h) = V2 (x + w / 2) (y + h / 2)
 
-hasText :: T.Text -> [DemoSpan] -> Bool
+hasText :: T.Text -> [(Rect, T.Text, a, b, c)] -> Bool
 hasText needle = any (\(_, txt, _, _, _) -> needle `T.isInfixOf` txt)
 
 -- Blank-glyph markers some span labels carry in front of their text (blanked
@@ -247,6 +241,14 @@ releaseAt press =
     , inputMouseReleased = True
     }
 
+-- | A single key-down frame.
+keyInp :: Key -> Input -> Input
+keyInp k inp = inp {inputKeys = inputKeysFromList [k]}
+
+-- | Step the tab focus to the next focusable.
+tabInp :: Input -> Input
+tabInp = keyInp KeyTab
+
 withInputOff :: Float -> Float -> Input
 withInputOff w h =
   let inp = withInput w h
@@ -258,11 +260,7 @@ withDelta w h dt =
    in inp {inputDeltaTime = dt}
 
 centerOf :: Response -> V2
-centerOf resp =
-  let
-    Rect rx ry rw rh = respRect resp
-   in
-    V2 (rx + rw / 2) (ry + rh / 2)
+centerOf = spanCenter . respRect
 
 warmup :: Context -> Input -> NanoUI a -> IO ()
 warmup ctx inp ui = void (runFrame ctx inp ui)
@@ -292,14 +290,6 @@ runRightClick ctx inp0 ui pos = do
   _ <- runFrame ctx press ui
   void (runFrame ctx release ui)
 
-runClickMsgs :: Context -> Input -> NanoUI a -> V2 -> IO [FrameMsg]
-runClickMsgs ctx inp0 ui pos = do
-  let
-    (press, release) = clickPair inp0 pos
-  _ <- runFrame ctx press ui
-  (_, msgs, _, _) <- runFrame ctx release ui
-  pure msgs
-
 runClickPair :: Context -> Input -> NanoUI a -> V2 -> IO a
 runClickPair ctx inp0 ui pos = do
   let
@@ -327,34 +317,11 @@ withAnimCtx w h dt body failed = do
   ctx <- newContext
   body ctx (withDelta w h dt) failed
 
-assertSpansHas :: IORef Int -> T.Text -> [(Rect, T.Text, a, b, c)] -> IO ()
-assertSpansHas failed needle spans = failWhen failed (not (spansHas needle spans))
+assertSpansHas :: HasCallStack => IORef Int -> T.Text -> [(Rect, T.Text, a, b, c)] -> IO ()
+assertSpansHas failed needle spans = assert failed (hasText needle spans)
 
 spanYs :: T.Text -> [(Rect, T.Text, a, b, c)] -> [Float]
 spanYs needle spans = [rectY r | (r, txt, _, _, _) <- spans, needle `T.isInfixOf` txt]
-
-spanLabelYs :: T.Text -> [(Rect, T.Text, a, b, c)] -> [Float]
-spanLabelYs needle spans = [rectY r | (r, txt, _, _, _) <- spans, txt == needle]
-
-closeSpanBottom :: [(Rect, T.Text, a, b, c)] -> Maybe Float
-closeSpanBottom spans =
-  case
-    [ rectY r + rectH r
-    | (r, txt, _, _, _) <- spans
-    , "Close" `T.isInfixOf` txt
-    , T.strip txt /= "X"
-    ] of
-    [] -> Nothing
-    bs -> Just (maximum bs)
-
-closeSpanCenter :: [(Rect, T.Text, a, b, c)] -> Maybe V2
-closeSpanCenter spans =
-  case [r | (r, txt, _, _, _) <- spans, T.strip txt == "X"] of
-    (Rect x y w h : _) -> Just (V2 (x + w / 2) (y + h / 2))
-    [] -> Nothing
-
-spansHas :: T.Text -> [(Rect, T.Text, a, b, c)] -> Bool
-spansHas needle spans = any (\(_, txt, _, _, _) -> needle `T.isInfixOf` txt) spans
 
 spanYOf :: T.Text -> [(Rect, T.Text, a, b, c)] -> [Float]
 spanYOf lbl spans = [y | (Rect _ y _ _, txt, _, _, _) <- spans, txt == lbl]
@@ -363,7 +330,8 @@ spanXOf :: T.Text -> [(Rect, T.Text, a, b, c)] -> [Float]
 spanXOf lbl spans = [x | (Rect x _ _ _, txt, _, _, _) <- spans, txt == lbl]
 
 assertScrollGutter ::
-  IORef Int
+  HasCallStack
+  => IORef Int
   -> Context
   -> WidgetId
   -> Response
@@ -373,7 +341,8 @@ assertScrollGutter failed ctx sid child gutter =
   assertScrollGutterPad failed ctx sid child gutter 0
 
 assertScrollGutterPad ::
-  IORef Int
+  HasCallStack
+  => IORef Int
   -> Context
   -> WidgetId
   -> Response
@@ -383,16 +352,17 @@ assertScrollGutterPad ::
 assertScrollGutterPad failed ctx sid child gutter endPad = do
   mrect <- getPrevRect ctx sid
   case mrect of
-    Nothing -> bump failed
+    Nothing -> assert failed False
     Just (Rect sx _ sw _) -> do
       let
         Rect cx _ cw _ = respRect child
         contentRight = sx + sw - endPad - gutter
-      failWhen failed (cx + cw < contentRight - 0.5)
-      failWhen failed (cx + cw > contentRight + 0.01)
+      assert failed (cx + cw >= contentRight - 0.5)
+      assert failed (cx + cw <= contentRight + 0.01)
 
 assertWheelTitlePinned ::
-  IORef Int
+  HasCallStack
+  => IORef Int
   -> Context
   -> Input
   -> NanoUI a
@@ -405,10 +375,10 @@ assertWheelTitlePinned failed ctx inp0 ui title line1 wheelAt mClipMax = do
   spans0 <- collectOverlayTextSpans ctx inp0
   let
     titleYs0 = spanYs title spans0
-    line1Ys0 = spanLabelYs line1 spans0
-  failWhen failed (null titleYs0)
+    line1Ys0 = spanYOf line1 spans0
+  assert failed (not (null titleYs0))
   case line1Ys0 of
-    [] -> bump failed
+    [] -> assert failed False
     b0 : _ -> do
       let
         wheel = inp0 {inputMousePos = wheelAt, inputScroll = V2 0 1}
@@ -416,17 +386,17 @@ assertWheelTitlePinned failed ctx inp0 ui title line1 wheelAt mClipMax = do
       spans1 <- collectOverlayTextSpans ctx wheel
       let
         titleYs1 = spanYs title spans1
-        line1Ys1 = spanLabelYs line1 spans1
+        line1Ys1 = spanYOf line1 spans1
       case (titleYs0, titleYs1) of
-        (y0 : _, y1 : _) -> failWhen failed (y1 /= y0)
-        _ -> bump failed
+        (y0 : _, y1 : _) -> assertEq failed y1 y0
+        _ -> assert failed False
       case line1Ys1 of
         [] -> pure ()
-        b1 : _ -> failWhen failed (b1 >= b0)
+        b1 : _ -> assertLt failed b1 b0
       case mClipMax of
         Nothing -> pure ()
         Just maxY ->
-          failWhen failed (any (\(Rect _ y _ h, _, _, _, _) -> y < 0 || y + h > maxY) spans1)
+          assert failed (not (any (\(Rect _ y _ h, _, _, _, _) -> y < 0 || y + h > maxY) spans1))
 
 findGrabHover ::
   Context -> NanoUI a -> Input -> Float -> [Float] -> IO (Maybe Input)
@@ -473,44 +443,18 @@ vertUv dd i =
     v <- peekByteOff p (off + 28) :: IO Float
     pure (u, v)
 
-modifyIORef :: IORef Int -> (Int -> Int) -> IO ()
-modifyIORef r f = do
-  v <- readIORef r
-  writeIORef r $! f v
-
 checkIdleFullDamage ::
-  IORef Int -> Context -> Input -> Input -> NanoUI a -> IO ()
+  HasCallStack => IORef Int -> Context -> Input -> Input -> NanoUI a -> IO ()
 checkIdleFullDamage failed ctx inpAfter inpIdle ui = do
   need <- needsRedraw ctx inpAfter inpIdle
-  failWhen failed (not need)
+  assert failed need
   _ <- runFrame ctx inpIdle ui
   dmg <- takeDamage ctx
-  failWhen failed (dmg /= DamageFull)
-
-checkLabelAlignEnd :: IORef Int -> Context -> IO ()
-checkLabelAlignEnd failed ctx = do
-  let
-    fm = ctxFontMetrics ctx
-    (ix, _) = labelContentInset fm
-    tw = fmAdvance fm ' ' * 2
-    boxW = tw + 2 * ix + 4
-    inp = emptyInput {inputWindowSize = Size (boxW + 8) 8}
-    ui =
-      rowWith (fixedW boxW . tight . gap 0) $
-        labelEx (fillW . alignEnd . tight $ defaultLayout) "ab"
-  _ <- runFrame ctx inp ui
-  (lab, _, _, _) <- runFrame ctx inp ui
-  spans <- collectTextSpans ctx
-  let
-    Rect bx _ bw _ = respRect lab
-    hits = [r | (r, txt, _, _, _) <- spans, T.isInfixOf (T.pack "ab") txt]
-  case hits of
-    [] -> bump failed
-    Rect x _ w _ : _ -> do
-      when (abs ((x + w) - (bx + bw - ix)) > 0.6) $ bump failed
-      when (abs (w - tw) > 0.6) $ bump failed
+  assert failed (dmg == DamageFull)
 
 -- AlignEnd pins last-glyph ink, so "10" / "1i" / "1." share one right edge.
+-- Lives here rather than with its test case because the pen and ink helpers
+-- are internal to the library.
 checkLabelAlignEndInk :: IORef Int -> IO ()
 checkLabelAlignEndInk failed = do
   let

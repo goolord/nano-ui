@@ -1,5 +1,3 @@
-{-# LANGUAGE StrictData #-}
-
 module NanoUI.Context
   ( Context (..)
   , MeasureCacheKey
@@ -23,6 +21,12 @@ module NanoUI.Context
   , initialOverlayState
   , initialAnimationState
   , initialDrawingCacheState
+  , getsInteraction
+  , modifyInteraction
+  , getsOverlay
+  , modifyOverlay
+  , getsDamage
+  , modifyDamage
   , getScrollDrag
   , setScrollDrag
   , getTextInputDrag
@@ -88,11 +92,8 @@ module NanoUI.Context
   , getStoreBool
   , setStoreBool
   , writeStoreInt
-  , writeStoreIntFlag
   , writeStoreFloat
-  , writeStoreFloatFlag
   , writeStoreText
-  , writeStoreTextFlag
   , writeStoreBool
   , isDisabled
   , getScrollOffset
@@ -150,7 +151,6 @@ module NanoUI.Context
   , markEscapeConsumed
   , pointerBlockedByModal
   , pointerBlockedByOverlay
-  , menuPointerGestureActive
   , armMenuPointerCapture
   , seedFloatingPanel
   , beginModal
@@ -212,16 +212,14 @@ module NanoUI.Context
   , animInProgress
   ) where
 
-import Control.Monad (foldM, forM, forM_, when)
+import Control.Monad (foldM, forM, when)
 import Data.ByteString (ByteString)
 import Data.Dynamic (fromDynamic, toDyn)
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HashMap
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
-import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
 import Data.Map.Strict qualified as Map
-import Data.Maybe (isNothing)
 import Data.Primitive.PrimArray
   ( copyMutablePrimArray
   , newPrimArray
@@ -239,41 +237,42 @@ import NanoUI.Animation
   , Ease (..)
   , SpringParams (..)
   , animInProgress
-  , animationValue
   , applyEase
   , approxEq
   , easeSameSpec
   , presetBouncy
   , presetSmooth
   , presetStiff
-  , springEps
-  , stepAnim
-  , writeRest
   )
 import NanoUI.Atlas (atlasTextureId)
 import NanoUI.Atlas qualified as Atlas
+import NanoUI.Context.Animation
+import NanoUI.Context.Core
+import NanoUI.Context.Drawing
+import NanoUI.Context.Overlay
+import NanoUI.Context.Scroll
 import NanoUI.Context.Types
   ( AnimationState (..)
   , Context (..)
-  , CustomDrawOpCacheEntry (..)
+  , CustomDrawBuild
+  , CustomDrawContext (..)
+  , CustomMeasureFn
   , DamageRequest (..)
   , DamageState (..)
   , DrawFitCache (..)
-  , DrawOpCacheEntry (..)
   , DrawingCacheState (..)
   , DrawingEntry (..)
-  , PopupConfig (..)
-  , SpanCacheEntry (..)
-  , WidgetTextCacheEntry (..)
-  , WidgetTextPlacement (..)
   , FrameMsg (..)
   , InteractionState (..)
   , MeasureCacheKey
   , MetricSource (..)
   , OverlayState (..)
+  , SpanCacheEntry (..)
   , TextFieldClickCell (..)
   , TextInputDrag (..)
   , TextInputMenu (..)
+  , WidgetTextCacheEntry (..)
+  , WidgetTextPlacement (..)
   , WindowResizeDrag (..)
   , WindowResizeEdge (..)
   , decodeMessages
@@ -285,35 +284,20 @@ import NanoUI.Context.Types
   , intKey
   , reduceMessages
   , reduceUpdates
-  , CustomDrawBuild
-  , CustomDrawContext (..)
-  , CustomMeasureFn
   )
-import Data.Vector (Vector)
-import Data.Vector qualified as V
-import NanoUI.Draw (DrawingBuild, DrawOp, newDrawArena, shiftDrawOp)
+import NanoUI.Draw (newDrawArena)
 import NanoUI.Draw qualified as Draw
 import NanoUI.Font (FontMetrics, fmLineHeight, measureTextIO, monospaceMetrics, scaleFontMetrics)
 import NanoUI.Frame.SpanArena (newSpanArena)
-import NanoUI.Frame.Scroll.Geometry
-  ( ScrollConfig (..)
-  , decodeScrollConfig
-  , defaultScrollConfig
-  , encodeScrollConfig
-  , scrollConfigNative2D
-  )
-import NanoUI.Id (WidgetId (..), hashWidgetId, initialIdContext)
-import NanoUI.Input (Input (..), Key (KeyEscape), UiCursorKind, inputKeys, inputKeysElem, inputMousePos, inputMousePressed)
-import NanoUI.Layout.Arena (DirTag, NodeType, getRect, lookupNodeByKey, newNodeArena)
-
-
+import NanoUI.Frame.Scroll.Geometry (defaultScrollConfig)
+import NanoUI.Id (WidgetId (..), initialIdContext)
+import NanoUI.Layout.Arena (newNodeArena)
 import NanoUI.Store
   ( WidgetStore (..)
   , anySelectOpen
   , boolInt
   , bumpMirror
   , closeSelects
-  , deleteWidgetState
   , emptyWidgetStore
   , intBool
   , isSelectOpen
@@ -325,746 +309,10 @@ import NanoUI.Store
   , slotDrag
   , slotDragW
   , slotKey
-  , slotScrollCfg
-  , slotScrollOff
-  , slotTextAreaScroll
-  , slotScrollCross
-  , slotScrollLinkX
-  , slotScrollLinkY
   , slotWinSize
   )
-import NanoUI.Style (FontStyle, FontVariant (..), FontWeight, Layout, Theme, defaultLayout, defaultTheme)
-import NanoUI.Types
-  ( Damage (..)
-  , DamageBounds (..)
-  , ImageId (..)
-  , onGrid
-  , PopupAnchor (..)
-  , PopupPlacement (..)
-  , Rect (..)
-  , Size (..)
-  , V2 (..)
-  , defaultDamageSlop
-  , rectContains
-  , rectH
-  , rectW
-  , v2X
-  , v2Y
-  )
-
-{-# INLINE getScrollDrag #-}
-getScrollDrag :: Context -> IO (Maybe (WidgetId, DirTag, Float))
-getScrollDrag ctx = isScrollDrag <$> readIORef (ctxInteractionState ctx)
-
-{-# INLINE setScrollDrag #-}
-setScrollDrag :: Context -> Maybe (WidgetId, DirTag, Float) -> IO ()
-setScrollDrag ctx v = modifyIORef' (ctxInteractionState ctx) (\s -> s {isScrollDrag = v})
-
-{-# INLINE getTextInputDrag #-}
-getTextInputDrag :: Context -> IO (Maybe TextInputDrag)
-getTextInputDrag ctx = isTextInputDrag <$> readIORef (ctxInteractionState ctx)
-
-{-# INLINE setTextInputDrag #-}
-setTextInputDrag :: Context -> Maybe TextInputDrag -> IO ()
-setTextInputDrag ctx v = modifyIORef' (ctxInteractionState ctx) (\s -> s {isTextInputDrag = v})
-
-{-# INLINE getTextFieldClickCell #-}
-getTextFieldClickCell :: Context -> IO (Maybe TextFieldClickCell)
-getTextFieldClickCell ctx = isTextFieldClickCell <$> readIORef (ctxInteractionState ctx)
-
-{-# INLINE setTextFieldClickCell #-}
-setTextFieldClickCell :: Context -> Maybe TextFieldClickCell -> IO ()
-setTextFieldClickCell ctx v = modifyIORef' (ctxInteractionState ctx) (\s -> s {isTextFieldClickCell = v})
-
-{-# INLINE getTextInputMenu #-}
-getTextInputMenu :: Context -> IO (Maybe TextInputMenu)
-getTextInputMenu ctx = isTextInputMenu <$> readIORef (ctxInteractionState ctx)
-
-{-# INLINE setTextInputMenu #-}
-setTextInputMenu :: Context -> Maybe TextInputMenu -> IO ()
-setTextInputMenu ctx v = modifyIORef' (ctxInteractionState ctx) (\s -> s {isTextInputMenu = v})
-
-{-# INLINE setTextEditLastAction #-}
-setTextEditLastAction :: Context -> Maybe (WidgetId, Int) -> IO ()
-setTextEditLastAction ctx v = modifyIORef' (ctxInteractionState ctx) (\s -> s {isTextEditLastAction = v})
-
-{-# INLINE takeTextEditLastAction #-}
-takeTextEditLastAction :: Context -> IO (Maybe (WidgetId, Int))
-takeTextEditLastAction ctx = do
-  act <- isTextEditLastAction <$> readIORef (ctxInteractionState ctx)
-  modifyIORef' (ctxInteractionState ctx) (\s -> s {isTextEditLastAction = Nothing})
-  pure act
-
-{-# INLINE getSelectDropPress #-}
-getSelectDropPress :: Context -> IO Bool
-getSelectDropPress ctx = isSelectDropPress <$> readIORef (ctxInteractionState ctx)
-
-{-# INLINE setSelectDropPress #-}
-setSelectDropPress :: Context -> Bool -> IO ()
-setSelectDropPress ctx v = modifyIORef' (ctxInteractionState ctx) (\s -> s {isSelectDropPress = v})
-
-{-# INLINE getOpenSelectDrop #-}
-getOpenSelectDrop :: Context -> IO (Maybe (WidgetId, Rect))
-getOpenSelectDrop ctx = isOpenSelectDrop <$> readIORef (ctxInteractionState ctx)
-
-{-# INLINE setOpenSelectDrop #-}
-setOpenSelectDrop :: Context -> Maybe (WidgetId, Rect) -> IO ()
-setOpenSelectDrop ctx v = modifyIORef' (ctxInteractionState ctx) (\s -> s {isOpenSelectDrop = v})
-
-{-# INLINE getMenuPointerGesture #-}
-getMenuPointerGesture :: Context -> IO Bool
-getMenuPointerGesture ctx = isMenuPointerGesture <$> readIORef (ctxInteractionState ctx)
-
-{-# INLINE setMenuPointerGesture #-}
-setMenuPointerGesture :: Context -> Bool -> IO ()
-setMenuPointerGesture ctx v = modifyIORef' (ctxInteractionState ctx) (\s -> s {isMenuPointerGesture = v})
-
-{-# INLINE getWindowDrag #-}
-getWindowDrag :: Context -> IO (Maybe (WidgetId, Float, Float))
-getWindowDrag ctx = isWindowDrag <$> readIORef (ctxInteractionState ctx)
-
-{-# INLINE setWindowDrag #-}
-setWindowDrag :: Context -> Maybe (WidgetId, Float, Float) -> IO ()
-setWindowDrag ctx v = modifyIORef' (ctxInteractionState ctx) (\s -> s {isWindowDrag = v})
-
-{-# INLINE getWindowResize #-}
-getWindowResize :: Context -> IO (Maybe WindowResizeDrag)
-getWindowResize ctx = isWindowResize <$> readIORef (ctxInteractionState ctx)
-
-{-# INLINE setWindowResize #-}
-setWindowResize :: Context -> Maybe WindowResizeDrag -> IO ()
-setWindowResize ctx v = modifyIORef' (ctxInteractionState ctx) (\s -> s {isWindowResize = v})
-
-{-# INLINE requestDamage #-}
-requestDamage :: Context -> DamageRequest -> IO ()
-requestDamage ctx req =
-  modifyIORef' (ctxDamageState ctx) $ \ds ->
-    ds {dsRequests = req : dsRequests ds}
-
-{-# INLINE damageWidget #-}
-damageWidget :: Context -> WidgetId -> DamageBounds -> IO ()
-damageWidget ctx wid bounds
-  | hashWidgetId wid == 0 = pure ()
-  | otherwise = requestDamage ctx (ReqWidget wid bounds)
-
-{-# INLINE damageKey #-}
-damageKey :: Context -> Int -> DamageBounds -> IO ()
-damageKey ctx k bounds
-  | k == 0 = pure ()
-  | otherwise = requestDamage ctx (ReqKey k bounds)
-
-{-# INLINE damageRect #-}
-damageRect :: Context -> Rect -> IO ()
-damageRect ctx r
-  | rectW r <= 0 || rectH r <= 0 = pure ()
-  | otherwise = requestDamage ctx (ReqRect r)
-
-{-# INLINE damagePeers #-}
-damagePeers :: Context -> [WidgetId] -> DamageBounds -> IO ()
-damagePeers ctx wids bounds =
-  case filter (\w -> hashWidgetId w /= 0) wids of
-    [] -> pure ()
-    valid -> requestDamage ctx (ReqPeers valid bounds)
-
-{-# INLINE damageFull #-}
-damageFull :: Context -> IO ()
-damageFull ctx = requestDamage ctx ReqFull
-
-{-# INLINE getDamageRequests #-}
-getDamageRequests :: Context -> IO [DamageRequest]
-getDamageRequests ctx = dsRequests <$> readIORef (ctxDamageState ctx)
-
-{-# INLINE markDirty #-}
-markDirty :: Context -> IO ()
-markDirty ctx = do
-  modifyIORef' (ctxDamageState ctx) $ \ds -> ds {dsDirty = True}
-  wake <- readIORef (ctxWakeLoop ctx)
-  case wake of
-    Just act -> act
-    Nothing -> pure ()
-
-{-# INLINE modifyIORefList #-}
-modifyIORefList :: IORef [a] -> (a -> [a] -> [a]) -> a -> IO ()
-modifyIORefList ref cons val = do
-  xs <- readIORef ref
-  writeIORef ref (cons val xs)
-
-{-# INLINE clearDirty #-}
-clearDirty :: Context -> IO ()
-clearDirty ctx =
-  modifyIORef' (ctxDamageState ctx) $ \ds -> ds {dsDirty = False}
-
-{-# INLINE isDirty #-}
-isDirty :: Context -> IO Bool
-isDirty ctx = dsDirty <$> readIORef (ctxDamageState ctx)
-
-{-# INLINE setWakeLoop #-}
-setWakeLoop :: Context -> IO () -> IO ()
-setWakeLoop ctx wake = writeIORef (ctxWakeLoop ctx) (Just wake)
-
-{-# INLINE takeDamage #-}
-takeDamage :: Context -> IO Damage
-takeDamage ctx = dsDamage <$> readIORef (ctxDamageState ctx)
-
-{-# INLINE getLastWindowSize #-}
-getLastWindowSize :: Context -> IO Size
-getLastWindowSize ctx = dsLastWindowSize <$> readIORef (ctxDamageState ctx)
-
-{-# INLINE setDamageAndWindowSize #-}
-setDamageAndWindowSize :: Context -> Damage -> Size -> IO ()
-setDamageAndWindowSize ctx dmg sz =
-  modifyIORef' (ctxDamageState ctx) $ \ds ->
-    ds {dsDamage = dmg, dsLastWindowSize = sz, dsRequests = []}
-
-{-# INLINE registerPopupConfig #-}
-registerPopupConfig :: Context -> WidgetId -> PopupAnchor -> PopupPlacement -> Float -> IO ()
-registerPopupConfig ctx wid anchor placement offset =
-  modifyIORef' (ctxDrawingCache ctx) $ \dc ->
-    dc {dcsPopupConfigs = IM.insert (intKey wid) (PopupConfig anchor placement offset) (dcsPopupConfigs dc)}
-
-{-# INLINE lookupPopupConfig #-}
-lookupPopupConfig :: Context -> WidgetId -> IO (Maybe (PopupAnchor, PopupPlacement, Float))
-lookupPopupConfig ctx wid = do
-  dc <- readIORef (ctxDrawingCache ctx)
-  pure $ case IM.lookup (intKey wid) (dcsPopupConfigs dc) of
-    Just (PopupConfig anchor placement offset) -> Just (anchor, placement, offset)
-    Nothing -> Nothing
-
-{-# INLINE registerDrawing #-}
-registerDrawing :: Context -> WidgetId -> Int -> DrawingBuild -> IO ()
-registerDrawing ctx wid content build =
-  modifyIORef' (ctxDrawingCache ctx) $ \dc ->
-    dc {dcsDrawings = IM.insert (intKey wid) (DrawingEntry content build) (dcsDrawings dc)}
-
-{-# INLINE lookupDrawing #-}
-lookupDrawing :: Context -> WidgetId -> IO (Maybe DrawingEntry)
-lookupDrawing ctx wid = do
-  dc <- readIORef (ctxDrawingCache ctx)
-  pure (IM.lookup (intKey wid) (dcsDrawings dc))
-
--- | Rebuild draw ops when the content version or width/height change. A move
--- only translates. An unversioned drawing (content 0) additionally drops its
--- cache while the widget is animating, since it has no other invalidation
--- signal; versioned drawings are invalidated by their content key alone.
-cachedDrawingOps :: Context -> WidgetId -> Int -> Rect -> DrawingBuild -> IO (Vector DrawOp)
-cachedDrawingOps ctx wid content rect build = do
-  let k = intKey wid
-  animated <-
-    if content == 0
-      then IM.member k <$> getLiveAnimations ctx
-      else pure False
-  dc <- readIORef (ctxDrawingCache ctx)
-  case IM.lookup k (dcsDrawOpCache dc) of
-    Just DrawOpCacheEntry {doeContent = c, doeBounds = r, doeOps = ops}
-      | c == content && not animated && rectW r == rectW rect && rectH r == rectH rect ->
-          if rectX r == rectX rect && rectY r == rectY rect
-            then pure ops
-            else do
-              let ops' =
-                    V.map
-                      (shiftDrawOp (rectX rect - rectX r) (rectY rect - rectY r))
-                      ops
-              modifyIORef' (ctxDrawingCache ctx) $ \s ->
-                s {dcsDrawOpCache = IM.insert k (DrawOpCacheEntry content rect ops') (dcsDrawOpCache s)}
-              pure ops'
-    _ -> do
-      let ops = build rect
-      modifyIORef' (ctxDrawingCache ctx) $ \s ->
-        s {dcsDrawOpCache = IM.insert k (DrawOpCacheEntry content rect ops) (dcsDrawOpCache s)}
-      pure ops
-
--- | Reuse a derived layout while envelope, font, content key, and caller layout match.
-cachedWidgetLayout ::
-  Context ->
-  WidgetId ->
-  Double ->
-  Double ->
-  Float ->
-  Int ->
-  Layout ->
-  IO Layout ->
-  IO Layout
-cachedWidgetLayout ctx wid dw dh lh content incoming compute = do
-  let k = intKey wid
-  dc <- readIORef (ctxDrawingCache ctx)
-  case IM.lookup k (dcsDrawFitCache dc) of
-    Just e
-      | dfcDw e == dw
-          && dfcDh e == dh
-          && dfcLh e == lh
-          && dfcContent e == content
-          && dfcIn e == incoming ->
-          pure (dfcOut e)
-    _ -> do
-      out <- compute
-      modifyIORef' (ctxDrawingCache ctx) $ \s ->
-        s { dcsDrawFitCache = IM.insert k (DrawFitCache dw dh lh content incoming out) (dcsDrawFitCache s)
-          , dcsDrawOpCache = IM.delete k (dcsDrawOpCache s)
-          }
-      pure out
-
-{-# INLINE lookupDrawFitEnvelope #-}
-lookupDrawFitEnvelope ::
-  Context ->
-  WidgetId ->
-  Float ->
-  Int ->
-  Layout ->
-  IO (Maybe (Double, Double))
-lookupDrawFitEnvelope ctx wid lh content incoming = do
-  let k = intKey wid
-  dc <- readIORef (ctxDrawingCache ctx)
-  case IM.lookup k (dcsDrawFitCache dc) of
-    Just e
-      | dfcLh e == lh
-          && dfcContent e == content
-          && dfcIn e == incoming ->
-          pure (Just (dfcDw e, dfcDh e))
-    _ -> pure Nothing
-
--- | Drop cached ops for drawings that did not rebuild this frame.
-pruneDrawOpCache :: Context -> IO ()
-pruneDrawOpCache ctx =
-  modifyIORef' (ctxDrawingCache ctx) $ \dc ->
-    let live = dcsDrawings dc
-        customLive = dcsCustomDrawings dc
-     in dc
-          { dcsDrawOpCache = dcsDrawOpCache dc `IM.intersection` live
-          , dcsCustomDrawOpCache = dcsCustomDrawOpCache dc `IM.intersection` customLive
-          , dcsDrawFitCache = dcsDrawFitCache dc `IM.intersection` live
-          }
-
-{-# INLINE registerCustomDrawing #-}
-registerCustomDrawing :: Context -> WidgetId -> CustomDrawBuild -> IO ()
-registerCustomDrawing ctx wid build =
-  modifyIORef' (ctxDrawingCache ctx) $ \dc ->
-    dc {dcsCustomDrawings = IM.insert (intKey wid) build (dcsCustomDrawings dc)}
-
-{-# INLINE lookupCustomDrawing #-}
-lookupCustomDrawing :: Context -> WidgetId -> IO (Maybe CustomDrawBuild)
-lookupCustomDrawing ctx wid = do
-  dc <- readIORef (ctxDrawingCache ctx)
-  pure (IM.lookup (intKey wid) (dcsCustomDrawings dc))
-
--- | Cached draw ops for custom widgets with interaction state awareness.
-cachedCustomDrawingOps ::
-  Context ->
-  WidgetId ->
-  Rect ->
-  CustomDrawContext ->
-  CustomDrawBuild ->
-  IO (Vector DrawOp)
-cachedCustomDrawingOps ctx wid rect cdc build = do
-  let k = intKey wid
-      hov = cdcHovered cdc
-      prs = cdcPressed cdc
-      foc = cdcFocused cdc
-  animated <- IM.member k <$> getLiveAnimations ctx
-  dc <- readIORef (ctxDrawingCache ctx)
-  case IM.lookup k (dcsCustomDrawOpCache dc) of
-    Just CustomDrawOpCacheEntry {cdeBounds = r, cdeHovered = h, cdePressed = p, cdeFocused = f, cdeOps = ops}
-      | not animated
-          && h == hov && p == prs && f == foc && rectW r == rectW rect && rectH r == rectH rect ->
-          if rectX r == rectX rect && rectY r == rectY rect
-            then pure ops
-            else do
-              let ops' =
-                    V.map
-                      (shiftDrawOp (rectX rect - rectX r) (rectY rect - rectY r))
-                      ops
-              modifyIORef' (ctxDrawingCache ctx) $ \s ->
-                s {dcsCustomDrawOpCache = IM.insert k (CustomDrawOpCacheEntry rect hov prs foc ops') (dcsCustomDrawOpCache s)}
-              pure ops'
-    _ -> do
-      let ops = build cdc rect
-      modifyIORef' (ctxDrawingCache ctx) $ \s ->
-        s {dcsCustomDrawOpCache = IM.insert k (CustomDrawOpCacheEntry rect hov prs foc ops) (dcsCustomDrawOpCache s)}
-      pure ops
-
-{-# INLINE registerCustomMeasure #-}
-registerCustomMeasure :: Context -> WidgetId -> CustomMeasureFn -> IO ()
-registerCustomMeasure ctx wid fn =
-  modifyIORef' (ctxDrawingCache ctx) $ \dc ->
-    dc {dcsCustomMeasures = IM.insert (intKey wid) fn (dcsCustomMeasures dc)}
-
-{-# INLINE lookupCustomMeasure #-}
-lookupCustomMeasure :: Context -> WidgetId -> IO (Maybe CustomMeasureFn)
-lookupCustomMeasure ctx wid = do
-  dc <- readIORef (ctxDrawingCache ctx)
-  pure (IM.lookup (intKey wid) (dcsCustomMeasures dc))
-
-{-# INLINE registerCustomCursor #-}
-registerCustomCursor :: Context -> WidgetId -> (CustomDrawContext -> UiCursorKind) -> IO ()
-registerCustomCursor ctx wid fn =
-  modifyIORef' (ctxDrawingCache ctx) $ \dc ->
-    dc {dcsCustomCursors = IM.insert (intKey wid) fn (dcsCustomCursors dc)}
-
-{-# INLINE lookupCustomCursor #-}
-lookupCustomCursor :: Context -> WidgetId -> IO (Maybe (CustomDrawContext -> UiCursorKind))
-lookupCustomCursor ctx wid = do
-  dc <- readIORef (ctxDrawingCache ctx)
-  pure (IM.lookup (intKey wid) (dcsCustomCursors dc))
-
-{-# INLINE registerCustomDamageSlop #-}
-registerCustomDamageSlop :: Context -> WidgetId -> Float -> IO ()
-registerCustomDamageSlop ctx wid slop =
-  modifyIORef' (ctxDrawingCache ctx) $ \dc ->
-    dc {dcsCustomDamageSlop = IM.insert (intKey wid) slop (dcsCustomDamageSlop dc)}
-
-{-# INLINE lookupCustomDamageSlop #-}
-lookupCustomDamageSlop :: Context -> WidgetId -> IO (Maybe Float)
-lookupCustomDamageSlop ctx wid = do
-  dc <- readIORef (ctxDrawingCache ctx)
-  pure (IM.lookup (intKey wid) (dcsCustomDamageSlop dc))
-
-{-# INLINE getWidgetNodeTypes #-}
-getWidgetNodeTypes :: Context -> IO (Maybe (IntMap NodeType))
-getWidgetNodeTypes ctx = dcsWidgetNodeTypes <$> readIORef (ctxDrawingCache ctx)
-
-{-# INLINE setWidgetNodeTypes #-}
-setWidgetNodeTypes :: Context -> Maybe (IntMap NodeType) -> IO ()
-setWidgetNodeTypes ctx m =
-  modifyIORef' (ctxDrawingCache ctx) $ \dc ->
-    dc {dcsWidgetNodeTypes = m}
-
-{-# INLINE resetDrawingScopeCache #-}
-resetDrawingScopeCache :: Context -> IO ()
-resetDrawingScopeCache ctx =
-  modifyIORef' (ctxDrawingCache ctx) $ \dc ->
-    dc
-      { dcsDrawings = IM.empty
-      , dcsPopupConfigs = IM.empty
-      , dcsWidgetNodeTypes = Nothing
-      , dcsCustomMeasures = IM.empty
-      , dcsCustomCursors = IM.empty
-      , dcsCustomDrawings = IM.empty
-      , dcsCustomDamageSlop = IM.empty
-      }
-
-{-# INLINE getStore #-}
-getStore :: Context -> IO WidgetStore
-getStore ctx = readIORef (ctxStore ctx)
-
-{-# INLINE setStore #-}
-setStore :: Context -> WidgetStore -> IO ()
-setStore ctx store = do
-  prev <- readIORef (ctxStore ctx)
-  -- WHNF-force the incoming record: record-update arguments are unevaluated
-  -- thunks, and writeIORef would otherwise park one in the long-lived store
-  -- every frame.
-  writeIORef (ctxStore ctx) $! store
-  when (prev /= store) $ do
-    let changedKeys =
-          diffKeys (storeInt prev) (storeInt store)
-            ++ diffKeys (storeFloat prev) (storeFloat store)
-            ++ diffKeys (storeDouble prev) (storeDouble store)
-            ++ diffKeys (storePoint prev) (storePoint store)
-            ++ diffKeys (storeText prev) (storeText store)
-            ++ diffKeys (storeFloatList prev) (storeFloatList store)
-            ++ diffKeys (storeIntList prev) (storeIntList store)
-            ++ diffKeys (storeIntSet prev) (storeIntSet store)
-            ++ diffKeysBy ptrEq (storeDyn prev) (storeDyn store)
-    forM_ changedKeys $ \k -> damageKey ctx k (DamageInflated defaultDamageSlop)
-    markDirty ctx
-
-{-# INLINE deleteWidgetStore #-}
-deleteWidgetStore :: Context -> WidgetId -> IO ()
-deleteWidgetStore ctx wid = do
-  st <- getStore ctx
-  setStore ctx (deleteWidgetState wid st)
-
-diffKeysBy :: (a -> a -> Bool) -> IntMap a -> IntMap a -> [Int]
-diffKeysBy eq old new
-  -- Unchanged maps keep their identity through a record update; skip the
-  -- whole merge when the caller only rebuilt a different field.
-  | ptrEq old new = []
-  | otherwise =
-      IM.keys
-        ( IM.mergeWithKey
-            (\_ a b -> if eq a b then Nothing else Just ())
-            (IM.map (const ()))
-            (IM.map (const ()))
-            old
-            new
-        )
-
-diffKeys :: Eq a => IntMap a -> IntMap a -> [Int]
-diffKeys = diffKeysBy (==)
-
--- | Targeted single-slot write: compares only the target slot, updates one map
--- field, damages the owning widget and wakes the loop. Unlike 'setStore' it
--- never diffs the whole store, and an equal write is a no-op. The 'Bool'
--- variant bumps the mirror generation for hooks whose write must re-run the UI.
-{-# INLINE writeStoreInt #-}
-writeStoreInt :: Context -> WidgetId -> Int -> Int -> IO ()
-writeStoreInt = writeStoreIntFlag False
-
-{-# INLINE writeStoreIntFlag #-}
-writeStoreIntFlag :: Bool -> Context -> WidgetId -> Int -> Int -> IO ()
-writeStoreIntFlag bump ctx owner k v = do
-  st <- readIORef (ctxStore ctx)
-  case IM.lookup k (storeInt st) of
-    Just old | old == v -> pure ()
-    _ -> do
-      let st' = st {storeInt = IM.insert k v (storeInt st)}
-      writeIORef (ctxStore ctx) $! if bump then bumpMirror st' else st'
-      damageWidget ctx owner DamageSelf
-      markDirty ctx
-
-{-# INLINE writeStoreFloat #-}
-writeStoreFloat :: Context -> WidgetId -> Int -> Float -> IO ()
-writeStoreFloat = writeStoreFloatFlag False
-
-{-# INLINE writeStoreFloatFlag #-}
-writeStoreFloatFlag :: Bool -> Context -> WidgetId -> Int -> Float -> IO ()
-writeStoreFloatFlag bump ctx owner k v = do
-  st <- readIORef (ctxStore ctx)
-  case IM.lookup k (storeFloat st) of
-    Just old | old == v -> pure ()
-    _ -> do
-      let st' = st {storeFloat = IM.insert k v (storeFloat st)}
-      writeIORef (ctxStore ctx) $! if bump then bumpMirror st' else st'
-      damageWidget ctx owner DamageSelf
-      markDirty ctx
-
-{-# INLINE writeStoreText #-}
-writeStoreText :: Context -> WidgetId -> Int -> Text -> IO ()
-writeStoreText = writeStoreTextFlag False
-
-{-# INLINE writeStoreTextFlag #-}
-writeStoreTextFlag :: Bool -> Context -> WidgetId -> Int -> Text -> IO ()
-writeStoreTextFlag bump ctx owner k v = do
-  st <- readIORef (ctxStore ctx)
-  case IM.lookup k (storeText st) of
-    Just old | old == v -> pure ()
-    _ -> do
-      let st' = st {storeText = IM.insert k v (storeText st)}
-      writeIORef (ctxStore ctx) $! if bump then bumpMirror st' else st'
-      damageWidget ctx owner DamageSelf
-      markDirty ctx
-
-{-# INLINE writeStoreBool #-}
-writeStoreBool :: Context -> WidgetId -> Bool -> IO ()
-writeStoreBool ctx owner v = writeStoreInt ctx owner (intKey owner) (boolInt v)
-
-{-# INLINE getStoreBool #-}
-getStoreBool :: Context -> WidgetId -> Bool -> IO Bool
-getStoreBool ctx wid def = do
-  st <- getStore ctx
-  pure (intBool (IM.findWithDefault (boolInt def) (intKey wid) (storeInt st)))
-
-{-# INLINE setStoreBool #-}
-setStoreBool :: Context -> WidgetId -> Bool -> IO ()
-setStoreBool ctx wid val = do
-  writeStoreBool ctx wid val
-  markDirty ctx
-
-{-# INLINE isDisabled #-}
-isDisabled :: Context -> WidgetId -> IO Bool
-isDisabled ctx wid = do
-  s <- getStore ctx
-  pure (intBool (IM.findWithDefault 0 (slotKey slotDisabled (intKey wid)) (storeInt s)))
-
-{-# INLINE snapScrollOffset #-}
-snapScrollOffset :: Context -> Float -> IO Float
-snapScrollOffset ctx v = do
-  s <- Draw.getDrawSnapScale (ctxDrawArena ctx)
-  pure (onGrid s v)
-
-{-# INLINE getScrollOffset #-}
-getScrollOffset :: Context -> WidgetId -> IO Float
-getScrollOffset ctx wid = do
-  s <- getStore ctx
-  let key = intKey wid
-      sKey = slotKey slotTextAreaScroll key
-  off <-
-    if IM.member sKey (storePoint s)
-      then pure (snd (IM.findWithDefault (0, 0) sKey (storePoint s)))
-      else do
-        cfg <- getScrollConfig ctx wid
-        if scrollConfigNative2D cfg
-          then v2Y <$> getScrollOffset2D ctx wid
-          else pure (IM.findWithDefault 0 key (storeFloat s))
-  snapScrollOffset ctx off
-
-{-# INLINE setScrollOffset #-}
-setScrollOffset :: Context -> WidgetId -> Float -> IO ()
-setScrollOffset ctx wid off = do
-  store <- getStore ctx
-  let key = intKey wid
-      sKey = slotKey slotTextAreaScroll key
-  if IM.member sKey (storePoint store)
-    then do
-      let (sx, sy) = IM.findWithDefault (0, 0) sKey (storePoint store)
-      when (sy /= off) $ do
-        setStore ctx (store {storePoint = IM.insert sKey (sx, off) (storePoint store)})
-        damageWidget ctx wid DamageSelf
-        markDirty ctx
-    else do
-      cfg <- getScrollConfig ctx wid
-      if scrollConfigNative2D cfg
-        then do
-          cur <- getScrollOffset2D ctx wid
-          setScrollOffset2D ctx wid (V2 (v2X cur) off)
-        else do
-          let prev = IM.findWithDefault 0 key (storeFloat store)
-          when (prev /= off) $ do
-            let floats0 = IM.insert key off (storeFloat store)
-                yKey = IM.findWithDefault 0 (slotKey slotScrollLinkY key) (storeInt store)
-            if yKey == 0
-              then setStore ctx (store {storeFloat = floats0})
-              else do
-                let offKey = slotKey slotScrollOff yKey
-                    crossKey = slotKey slotScrollCross yKey
-                    prevY = IM.findWithDefault 0 yKey floats0
-                    floats1 = IM.insert yKey prevY $ IM.insert crossKey off floats0
-                    points = IM.insert offKey (off, prevY) (storePoint store)
-                setStore ctx (store {storeFloat = floats1, storePoint = points})
-
-{-# INLINE getScrollOffset2D #-}
-getScrollOffset2D :: Context -> WidgetId -> IO V2
-getScrollOffset2D ctx wid = do
-  s <- getStore ctx
-  let widKey = intKey wid
-      sKey = slotKey slotTextAreaScroll widKey
-  v <-
-    if IM.member sKey (storePoint s)
-      then do
-        let (sx, sy) = IM.findWithDefault (0, 0) sKey (storePoint s)
-        pure (V2 sx sy)
-      else do
-        let offKey = slotKey slotScrollOff widKey
-            crossKey = slotKey slotScrollCross widKey
-        case IM.lookup offKey (storePoint s) of
-          Just (x, y) -> pure (V2 x y)
-          Nothing ->
-            pure
-              ( V2
-                  (IM.findWithDefault 0 crossKey (storeFloat s))
-                  (IM.findWithDefault 0 widKey (storeFloat s))
-              )
-  sx <- snapScrollOffset ctx (v2X v)
-  sy <- snapScrollOffset ctx (v2Y v)
-  pure (V2 sx sy)
-
-{-# INLINE setScrollOffset2D #-}
-setScrollOffset2D :: Context -> WidgetId -> V2 -> IO ()
-setScrollOffset2D ctx wid off = do
-  store <- getStore ctx
-  let widKey = intKey wid
-      sKey = slotKey slotTextAreaScroll widKey
-  -- Text areas only reach the first branch because `textAreaWith` seeds this
-  -- slot at init; without the seed a freshly mounted editor falls through to
-  -- the legacy container slots below and its offsets are never rendered.
-  if IM.member sKey (storePoint store)
-    then do
-      let (sx, sy) = IM.findWithDefault (0, 0) sKey (storePoint store)
-          sx' = v2X off
-          sy' = v2Y off
-      when (sx /= sx' || sy /= sy') $ do
-        setStore ctx (store {storePoint = IM.insert sKey (sx', sy') (storePoint store)})
-        damageWidget ctx wid DamageSelf
-        markDirty ctx
-    else do
-      let offKey = slotKey slotScrollOff widKey
-          crossKey = slotKey slotScrollCross widKey
-          prev = IM.lookup offKey (storePoint store)
-          next = (v2X off, v2Y off)
-          prevY = IM.findWithDefault 0 widKey (storeFloat store)
-          prevX = IM.findWithDefault 0 crossKey (storeFloat store)
-          xLink = IM.findWithDefault 0 (slotKey slotScrollLinkX widKey) (storeInt store)
-      when (prev /= Just next || prevY /= v2Y off || prevX /= v2X off) $ do
-        let floats0 =
-              IM.insert widKey (v2Y off) $
-                IM.insert crossKey (v2X off) (storeFloat store)
-            floats1 =
-              if xLink == 0 then floats0 else IM.insert xLink (v2X off) floats0
-        setStore ctx
-          ( store
-              { storePoint = IM.insert offKey next (storePoint store)
-              , storeFloat = floats1
-              }
-          )
-
-{-# INLINE linkScrollAxes #-}
-linkScrollAxes :: Context -> WidgetId -> WidgetId -> IO ()
-linkScrollAxes ctx yWid xWid = do
-  store <- getStore ctx
-  let yKey = intKey yWid
-      xKey = intKey xWid
-      ints =
-        IM.insert (slotKey slotScrollLinkX yKey) xKey $
-          IM.insert (slotKey slotScrollLinkY xKey) yKey (storeInt store)
-  setStore ctx (store {storeInt = ints})
-  V2 x2 y <- getScrollOffset2D ctx yWid
-  x1 <- do
-    s <- getStore ctx
-    pure (IM.findWithDefault 0 xKey (storeFloat s))
-  let x = if x2 == 0 && x1 /= 0 then x1 else x2
-  when (x /= x2 || x /= x1) $
-    setScrollOffset2D ctx yWid (V2 x y)
-
-{-# INLINE getScrollConfig #-}
-getScrollConfig :: Context -> WidgetId -> IO ScrollConfig
-getScrollConfig ctx wid = do
-  s <- getStore ctx
-  let cfgKey = slotKey slotScrollCfg (intKey wid)
-      bits = IM.findWithDefault (encodeScrollConfig defaultScrollConfig) cfgKey (storeInt s)
-  pure (decodeScrollConfig bits)
-
-{-# INLINE setScrollConfig #-}
-setScrollConfig :: Context -> WidgetId -> ScrollConfig -> IO ()
-setScrollConfig ctx wid cfg = do
-  store <- getStore ctx
-  let cfgKey = slotKey slotScrollCfg (intKey wid)
-      bits = encodeScrollConfig cfg
-      prev = IM.findWithDefault (encodeScrollConfig defaultScrollConfig) cfgKey (storeInt store)
-  when (prev /= bits) $
-    setStore ctx (store {storeInt = IM.insert cfgKey bits (storeInt store)})
-
-{-# INLINE getPrevRects #-}
-getPrevRects :: Context -> IO (IntMap Rect)
-getPrevRects ctx = dsPrevRects <$> readIORef (ctxDamageState ctx)
-
-{-# INLINE getPrevClips #-}
-getPrevClips :: Context -> IO (IntMap Rect)
-getPrevClips ctx = dsPrevClips <$> readIORef (ctxDamageState ctx)
-
-{-# INLINE setPrevRectsAndClips #-}
-setPrevRectsAndClips :: Context -> IntMap Rect -> IntMap Rect -> IO ()
-setPrevRectsAndClips ctx rects clips =
-  modifyIORef' (ctxDamageState ctx) $ \ds ->
-    ds {dsPrevRects = rects, dsPrevClips = clips}
-
-{-# INLINE getPrevNodeTexts #-}
-getPrevNodeTexts :: Context -> IO (IntMap Text)
-getPrevNodeTexts ctx = dsPrevNodeTexts <$> readIORef (ctxDamageState ctx)
-
-{-# INLINE setPrevNodeTexts #-}
-setPrevNodeTexts :: Context -> IntMap Text -> IO ()
-setPrevNodeTexts ctx texts =
-  modifyIORef' (ctxDamageState ctx) $ \ds ->
-    ds {dsPrevNodeTexts = texts}
-
-{-# INLINE getPrevRectByKey #-}
-getPrevRectByKey :: Context -> Int -> IO (Maybe Rect)
-getPrevRectByKey ctx k = do
-  m <- dsPrevRects <$> readIORef (ctxDamageState ctx)
-  pure (IM.lookup k m)
-
-{-# INLINE getPrevRect #-}
-getPrevRect :: Context -> WidgetId -> IO (Maybe Rect)
-getPrevRect ctx wid = getPrevRectByKey ctx (intKey wid)
-
-{-# INLINE getPrevClipRectByKey #-}
-getPrevClipRectByKey :: Context -> Int -> IO (Maybe Rect)
-getPrevClipRectByKey ctx k = do
-  m <- dsPrevClips <$> readIORef (ctxDamageState ctx)
-  pure (IM.lookup k m)
-
-{-# INLINE getPrevClipRect #-}
-getPrevClipRect :: Context -> WidgetId -> IO (Maybe Rect)
-getPrevClipRect ctx wid = getPrevClipRectByKey ctx (intKey wid)
+import NanoUI.Style (FontStyle, FontVariant (..), FontWeight, Theme, defaultLayout, defaultTheme)
+import NanoUI.Types (ImageId)
 
 {-# INLINE registerImage #-}
 registerImage :: Context -> ImageId -> Int -> Int -> ByteString -> IO Bool
@@ -1073,7 +321,6 @@ registerImage ctx iid w h px = do
   when ok (markDirty ctx)
   pure ok
 
-{-# INLINE registerImages #-}
 registerImages :: Foldable f => Context -> f (ImageId, Int, Int, ByteString) -> IO Bool
 registerImages ctx = foldM register True
   where
@@ -1089,31 +336,28 @@ lookupImageUv ctx = Atlas.lookupImageUv (ctxImageAtlas ctx)
 atlasSnapshot :: Context -> IO (Maybe (Int, Int, ForeignPtr Word8, Int))
 atlasSnapshot ctx = Atlas.atlasSnapshot (ctxImageAtlas ctx)
 
-defaultResolveFont :: Context -> Float -> FontWeight -> FontStyle -> FontVariant -> IO (FontMetrics, Bool)
-defaultResolveFont ctx sz _w _st var =
+-- | Metrics for a font variant scaled to line height @sz@, and the scale
+-- factor applied (1 when @sz@ or the base line height is not positive).
+{-# INLINE resolveScale #-}
+resolveScale :: Context -> Float -> FontVariant -> (FontMetrics, Float)
+resolveScale ctx sz var =
   let baseFm = if var == FontMono then ctxMonoFontMetrics ctx else ctxFontMetrics ctx
       scale =
         if sz > 0 && fmLineHeight baseFm > 0
           then sz / fmLineHeight baseFm
           else 1.0
-   in pure (if scale /= 1.0 then scaleFontMetrics scale baseFm else baseFm, False)
+   in (if scale /= 1.0 then scaleFontMetrics scale baseFm else baseFm, scale)
+
+defaultResolveFont :: Context -> Float -> FontWeight -> FontStyle -> FontVariant -> IO (FontMetrics, Bool)
+defaultResolveFont ctx sz _w _st var = pure (fst (resolveScale ctx sz var), False)
 
 defaultResolveMeasure :: Context -> Float -> FontWeight -> FontStyle -> FontVariant -> Text -> IO (Float, Float)
-defaultResolveMeasure ctx sz _w _st var txt =
-  let baseFm = if var == FontMono then ctxMonoFontMetrics ctx else ctxFontMetrics ctx
-      scale =
-        if sz > 0 && fmLineHeight baseFm > 0
-          then sz / fmLineHeight baseFm
-          else 1.0
-   in if var == FontMono
-        then do
-          let textFm = if scale /= 1.0 then scaleFontMetrics scale baseFm else baseFm
-          measureTextIO textFm txt
-        else if scale /= 1.0
-          then do
-            (w, h) <- ctxMeasureText ctx txt
-            pure (w * scale, h * scale)
-          else ctxMeasureText ctx txt
+defaultResolveMeasure ctx sz _w _st var txt
+  | var == FontMono = measureTextIO textFm txt
+  | scale /= 1.0 = (\(w, h) -> (w * scale, h * scale)) <$> ctxMeasureText ctx txt
+  | otherwise = ctxMeasureText ctx txt
+  where
+    (textFm, scale) = resolveScale ctx sz var
 
 {-# INLINE withFontResolver #-}
 withFontResolver ::
@@ -1163,9 +407,13 @@ trackMetricSource ctx =
 -- between differently configured Contexts that share their backing stores.
 ensureMetricCaches :: Context -> IO ()
 ensureMetricCaches ctx = do
+  -- Compare evaluated identities: passed unevaluated, the selector application
+  -- is a fresh thunk without optimisation, so the check would miss every
+  -- frame and force full damage with cleared caches.
+  let !current = ctxMetricSource ctx
   previous <- readIORef (ctxLastMetricSource ctx)
   case previous of
-    Just source | ptrEq source (ctxMetricSource ctx) -> pure ()
+    Just source | ptrEq source current -> pure ()
     _ -> do
       clearMeasureCache ctx
       damageFull ctx
@@ -1187,30 +435,30 @@ cacheMeasureText ref scale base txt = do
       modifyIORef' ref (HashMap.insert key sz)
       pure sz
 
-{-# INLINE wrapMeasureCache #-}
 wrapMeasureCache :: Float -> Context -> (Text -> IO (Float, Float)) -> Context
 wrapMeasureCache scale ctx measure =
   case ctxMeasureCache ctx of
     Nothing -> trackMetricSource ctx {ctxMeasureText = measure}
     Just ref -> trackMetricSource ctx {ctxMeasureText = cacheMeasureText ref scale measure}
 
-clearMeasureCache :: Context -> IO ()
-clearMeasureCache ctx = do
-  writeIORef (ctxLastMetricSource ctx) (Just (ctxMetricSource ctx))
+-- | Drop text span, widget text and whole-layout caches and bump the metric
+-- generation, for changes that alter how text lays out.
+invalidateTextCaches :: Context -> IO ()
+invalidateTextCaches ctx = do
   writeIORef (ctxSpanCache ctx) IM.empty
   writeIORef (ctxWidgetTextCache ctx) IM.empty
   writeIORef (ctxLayoutCache ctx) Nothing
   modifyIORef' (ctxMetricGen ctx) (+ 1)
+
+clearMeasureCache :: Context -> IO ()
+clearMeasureCache ctx = do
+  -- Store the evaluated source so 'ensureMetricCaches' can match its identity.
+  let !source = ctxMetricSource ctx
+  writeIORef (ctxLastMetricSource ctx) (Just source)
+  invalidateTextCaches ctx
   case ctxMeasureCache ctx of
     Just ref -> writeIORef ref HashMap.empty
     Nothing -> pure ()
-
--- | True when any node has a custom measure function, whose output is not
--- captured by the arena descriptor comparison, so whole-layout reuse must be
--- disabled for the frame.
-hasCustomLayoutInputs :: Context -> IO Bool
-hasCustomLayoutInputs ctx =
-  not . IM.null . dcsCustomMeasures <$> readIORef (ctxDrawingCache ctx)
 
 withExternalText :: Context -> Bool -> Context
 withExternalText ctx ext = ctx {ctxExternalText = ext}
@@ -1225,10 +473,7 @@ setTheme ctx th = do
   cur <- readIORef (ctxTheme ctx)
   when (cur /= th) $ do
     writeIORef (ctxTheme ctx) th
-    writeIORef (ctxSpanCache ctx) IM.empty
-    writeIORef (ctxWidgetTextCache ctx) IM.empty
-    writeIORef (ctxLayoutCache ctx) Nothing
-    modifyIORef' (ctxMetricGen ctx) (+ 1)
+    invalidateTextCaches ctx
     damageFull ctx
     markDirty ctx
 
@@ -1280,7 +525,7 @@ askHostIO ctx = do
 
 {-# INLINE pushMessage #-}
 pushMessage :: Context -> FrameMsg -> IO ()
-pushMessage ctx msg = modifyIORefList (ctxMessages ctx) (:) msg
+pushMessage ctx msg = modifyIORef' (ctxMessages ctx) (msg :)
 
 {-# INLINE drainMessages #-}
 drainMessages :: Context -> IO [FrameMsg]
@@ -1293,7 +538,6 @@ drainMessages ctx = do
 -- Constructors
 -- =============================================================================
 
-{-# INLINE newContext #-}
 newContext :: IO Context
 newContext = do
   nodeArena <- newNodeArena
@@ -1378,7 +622,6 @@ newContext = do
         }
   pure ctx
 
-{-# INLINE newPixelHostContext #-}
 newPixelHostContext :: IO Context
 newPixelHostContext = do
   ctx0 <- newContext
@@ -1397,7 +640,6 @@ getFocusId ctx = readIORef (ctxFocusId ctx)
 getHotId :: Context -> IO WidgetId
 getHotId ctx = readIORef (ctxHotId ctx)
 
-{-# INLINE registerFocusable #-}
 registerFocusable :: Context -> WidgetId -> IO ()
 registerFocusable ctx wid = do
   idx <- readIORef (ctxFocusablesCount ctx)
@@ -1422,367 +664,3 @@ getFocusables ctx = do
   count <- readIORef (ctxFocusablesCount ctx)
   arr <- readIORef (ctxFocusables ctx)
   forM [0 .. count - 1] (readPrimArray arr)
-
-textInputEditActive :: Context -> IO Bool
-textInputEditActive ctx = do
-  focus <- readIORef (ctxFocusId ctx)
-  menu <- getTextInputMenu ctx
-  pure (hashWidgetId focus /= 0 || menu /= Nothing)
-
-modalActive :: Context -> IO Bool
-modalActive ctx = do
-  os <- readIORef (ctxOverlayState ctx)
-  pure (osModalWasActive os || osModalActive os)
-
-overlayConsumesQuit :: Context -> Input -> IO Bool
-overlayConsumesQuit ctx inp = do
-  os <- readIORef (ctxOverlayState ctx)
-  let esc = inputKeysElem KeyEscape (inputKeys inp)
-  pure (esc && osEscapeConsumed os)
-
-markEscapeConsumed :: Context -> IO ()
-markEscapeConsumed ctx =
-  modifyIORef' (ctxOverlayState ctx) $ \os ->
-    os {osEscapeConsumed = True}
-
-pointerBlockedByModal :: Context -> IO Bool
-pointerBlockedByModal ctx = do
-  os <- readIORef (ctxOverlayState ctx)
-  if osModalDepth os > 0 then pure False else pure (osModalWasActive os || osModalActive os)
-
-pointerBlockedByOverlay :: Context -> V2 -> IO Bool
-pointerBlockedByOverlay ctx mouse = do
-  gesture <- getMenuPointerGesture ctx
-  blocked <-
-    if gesture
-      then pure True
-      else do
-        menuBlocked <- overlayMenuBlocksPointer ctx mouse
-        if menuBlocked
-          then pure True
-          else do
-            modalBlocked <- pointerBlockedByModal ctx
-            if modalBlocked
-              then pure True
-              else do
-                mTop <- cachedTopmost ctx mouse
-                case mTop of
-                  Nothing -> pure False
-                  Just top -> do
-                    mCur <- getCurrentFloatingId ctx
-                    pure (mCur /= Just top)
-  modifyIORef' (ctxOverlayState ctx) $ \os ->
-    os {osLastPointerBlocked = blocked}
-  pure blocked
-
-menuPointerGestureActive :: Context -> IO Bool
-menuPointerGestureActive ctx = getMenuPointerGesture ctx
-
-armMenuPointerCapture :: Context -> Input -> IO ()
-armMenuPointerCapture ctx inp =
-  when (inputMousePressed inp) $ do
-    blocked <- overlayMenuBlocksPointer ctx (inputMousePos inp)
-    setMenuPointerGesture ctx blocked
-
-overlayMenuBlocksPointer :: Context -> V2 -> IO Bool
-overlayMenuBlocksPointer ctx mouse = do
-  mMenu <- getTextInputMenu ctx
-  let textMenu =
-        case mMenu of
-          Just m | rectContains (textInputMenuRect m) mouse -> True
-          _ -> False
-  if textMenu
-    then pure True
-    else do
-      mDrop <- getOpenSelectDrop ctx
-      pure
-        ( case mDrop of
-            Just (_, r) -> rectContains r mouse
-            Nothing -> False
-        )
-
-cachedTopmost :: Context -> V2 -> IO (Maybe WidgetId)
-cachedTopmost ctx mouse = do
-  cache <- osTopmostCache <$> readIORef (ctxOverlayState ctx)
-  case cache of
-    Just (p, t) | p == mouse -> pure t
-    _ -> do
-      t <- topmostFloatingAtMouse ctx mouse
-      modifyIORef' (ctxOverlayState ctx) $ \os ->
-        os {osTopmostCache = Just (mouse, t)}
-      pure t
-
-topmostFloatingAtMouse :: Context -> V2 -> IO (Maybe WidgetId)
-topmostFloatingAtMouse ctx mouse = do
-  os <- readIORef (ctxOverlayState ctx)
-  let rects = osPrevFloatingRects os
-      order = osPrevFloatingOrder os
-  if IM.null rects && null order
-    then pure Nothing
-    else
-      let hit k = case IM.lookup k rects of
-            Just r | rectW r > 0 && rectH r > 0 && rectContains r mouse -> True
-            _ -> False
-          picked = foldl' (\acc k -> if hit k then Just k else acc) Nothing order
-       in case picked of
-            Just k -> pure (Just (WidgetId (fromIntegral k)))
-            Nothing -> pure Nothing
-
-seedFloatingPanel :: Context -> WidgetId -> Rect -> IO ()
-seedFloatingPanel ctx wid rect
-  | rectW rect <= 0 || rectH rect <= 0 = pure ()
-  | otherwise = do
-      let k = intKey wid
-      modifyIORef' (ctxOverlayState ctx) $ \os ->
-        let rects = IM.insert k rect (osPrevFloatingRects os)
-            order = filter (/= k) (osPrevFloatingOrder os) ++ [k]
-         in os
-              { osPrevFloatingRects = rects
-              , osPrevFloatingOrder = order
-              , osTopmostCache = Nothing
-              }
-
-beginModal :: Context -> IO ()
-beginModal ctx =
-  modifyIORef' (ctxOverlayState ctx) $ \os ->
-    os {osModalActive = True, osModalDepth = osModalDepth os + 1}
-
-endModal :: Context -> IO ()
-endModal ctx =
-  modifyIORef' (ctxOverlayState ctx) $ \os ->
-    os {osModalDepth = max 0 (osModalDepth os - 1)}
-
-beginFrameModal :: Context -> IO ()
-beginFrameModal ctx =
-  modifyIORef' (ctxOverlayState ctx) $ \os ->
-    os
-      { osModalWasActive = osModalActive os
-      , osModalActive = False
-      , osModalDepth = 0
-      , osTopmostCache = Nothing
-      , osCurrentFloatingId = Nothing
-      , osLastPointerBlocked = False
-      , osEscapeConsumed = False
-      }
-
-modalDamageFlip :: Context -> IO Bool
-modalDamageFlip ctx = do
-  os <- readIORef (ctxOverlayState ctx)
-  pure (osModalWasActive os /= osModalActive os)
-
-{-# INLINE getCurrentFloatingId #-}
-getCurrentFloatingId :: Context -> IO (Maybe WidgetId)
-getCurrentFloatingId ctx = osCurrentFloatingId <$> readIORef (ctxOverlayState ctx)
-
-{-# INLINE setCurrentFloatingId #-}
-setCurrentFloatingId :: Context -> Maybe WidgetId -> IO ()
-setCurrentFloatingId ctx m =
-  modifyIORef' (ctxOverlayState ctx) $ \os ->
-    os {osCurrentFloatingId = m}
-
-{-# INLINE getLastPointerBlocked #-}
-getLastPointerBlocked :: Context -> IO Bool
-getLastPointerBlocked ctx = osLastPointerBlocked <$> readIORef (ctxOverlayState ctx)
-
-{-# INLINE getPrevFloatingRects #-}
-getPrevFloatingRects :: Context -> IO (IntMap Rect)
-getPrevFloatingRects ctx = osPrevFloatingRects <$> readIORef (ctxOverlayState ctx)
-
-{-# INLINE setPrevFloatingPanels #-}
-setPrevFloatingPanels :: Context -> IntMap Rect -> [Int] -> IO ()
-setPrevFloatingPanels ctx rects order =
-  modifyIORef' (ctxOverlayState ctx) $ \os ->
-    os {osPrevFloatingRects = rects, osPrevFloatingOrder = order}
-
-{-# INLINE getFloatingAncestor #-}
-getFloatingAncestor :: Context -> IO (Maybe (IntMap (Maybe NodeType)))
-getFloatingAncestor ctx = osFloatingAncestor <$> readIORef (ctxOverlayState ctx)
-
-{-# INLINE setFloatingAncestor #-}
-setFloatingAncestor :: Context -> Maybe (IntMap (Maybe NodeType)) -> IO ()
-setFloatingAncestor ctx m =
-  modifyIORef' (ctxOverlayState ctx) $ \os ->
-    os {osFloatingAncestor = m}
-
--- =============================================================================
--- Animation
--- =============================================================================
-
-{-# INLINE anyAnimating #-}
-anyAnimating :: Context -> IO Bool
-anyAnimating ctx = asAnyAnimating <$> readIORef (ctxAnimationState ctx)
-
-{-# INLINE getLiveAnimations #-}
-getLiveAnimations :: Context -> IO (IntMap Animation)
-getLiveAnimations ctx = IM.filter animInProgress . asAnimations <$> readIORef (ctxAnimationState ctx)
-
--- Consecutive frames each live animation has had no nonzero widget rect in the
--- arena. Maintained by 'NanoUI.Damage.updatePrevRects'; used by 'writeDamage'
--- to bound the DamageFull escalation for rect-less animations so a perpetual
--- animation whose widget left the arena (e.g. `keepAnimating` on a widget
--- hidden by a tab switch) stops repainting the whole window after a frame or
--- two, instead of forever.
-{-# INLINE getAnimRectless #-}
-getAnimRectless :: Context -> IO (IntMap Int)
-getAnimRectless ctx = asRectless <$> readIORef (ctxAnimationState ctx)
-
-{-# INLINE setAnimRectless #-}
-setAnimRectless :: Context -> IntMap Int -> IO ()
-setAnimRectless ctx m =
-  modifyIORef' (ctxAnimationState ctx) $ \as -> as {asRectless = m}
-
-{-# INLINE takeAnimSettled #-}
-takeAnimSettled :: Context -> IO Bool
-takeAnimSettled ctx = do
-  as <- readIORef (ctxAnimationState ctx)
-  if asAnimSettled as
-    then do
-      writeIORef (ctxAnimationState ctx) (as {asAnimSettled = False})
-      pure True
-    else pure False
-
-{-# INLINE lookupAnimation #-}
-lookupAnimation :: Context -> WidgetId -> IO (Maybe Animation)
-lookupAnimation ctx wid = do
-  as <- readIORef (ctxAnimationState ctx)
-  pure (IM.lookup (intKey wid) (asAnimations as))
-
-{-# INLINE startAnimation #-}
-startAnimation :: Context -> WidgetId -> Float -> Float -> Float -> IO ()
-startAnimation ctx wid start end dur = startAnimationEase ctx wid start end dur EaseLinear
-
-{-# INLINE startAnimationEase #-}
-startAnimationEase :: Context -> WidgetId -> Float -> Float -> Float -> Ease -> IO ()
-startAnimationEase ctx wid start end dur ease = startAnimationEaseDelay ctx wid start end dur ease 0
-
-{-# INLINE startAnimationEaseDelay #-}
-startAnimationEaseDelay :: Context -> WidgetId -> Float -> Float -> Float -> Ease -> Float -> IO ()
-startAnimationEaseDelay ctx wid start end dur ease delay = do
-  let key = intKey wid
-  as <- readIORef (ctxAnimationState ctx)
-  if dur <= 0 || approxEq start end
-    then settleKey ctx key end
-    else do
-      let req = max 0 delay
-          (elapsed, delayLeft) = case IM.lookup key (asAnimations as) of
-            Just (EaseAnim aStart aEnd aDur aElapsed aEase aDelay aDelayReq)
-              | approxEq aStart start && approxEq aEnd end && aEase == ease && approxEq aDur dur && approxEq req aDelayReq ->
-                  (aElapsed, aDelay)
-            _ -> (0, req)
-      modifyIORef' (ctxAnimationState ctx) $ \s ->
-        s
-          { asAnimRest = IM.delete key (asAnimRest s)
-          , asAnimations = IM.insert key (EaseAnim start end dur elapsed ease delayLeft req) (asAnimations s)
-          , asAnyAnimating = True
-          }
-      markDirtyIfOrphan ctx key
-
-startSpring :: Context -> WidgetId -> SpringParams -> Float -> IO ()
-startSpring ctx wid params target = do
-  let key = intKey wid
-  as <- readIORef (ctxAnimationState ctx)
-  cur <- case IM.lookup key (asAnimations as) of
-    Just a -> pure (animationValue a)
-    Nothing -> pure (IM.findWithDefault 0 key (asAnimRest as))
-  let (pos, vel) = case IM.lookup key (asAnimations as) of
-        Just (SpringAnim p v _ _) -> (p, v)
-        _ -> (cur, 0)
-  if abs (pos - target) <= springEps && abs vel <= springEps
-    then settleKey ctx key target
-    else do
-      modifyIORef' (ctxAnimationState ctx) $ \s ->
-        s
-          { asAnimRest = IM.delete key (asAnimRest s)
-          , asAnimations = IM.insert key (SpringAnim pos vel target params) (asAnimations s)
-          , asAnyAnimating = True
-          }
-      markDirtyIfOrphan ctx key
-
-{-# INLINE setAnimationValue #-}
-setAnimationValue :: Context -> WidgetId -> Float -> IO ()
-setAnimationValue ctx wid val = settleKey ctx (intKey wid) val
-
-{-# INLINE tickAnimations #-}
-tickAnimations :: Context -> Float -> IO ()
-tickAnimations ctx dt =
-  modifyIORef' (ctxAnimationState ctx) $ \as ->
-    if IM.null (asAnimations as)
-      then as {asAnyAnimating = False, asAnimSettled = False}
-      else
-        let stepped = IM.map (stepAnim dt) (asAnimations as)
-            (live, done) = IM.partition animInProgress stepped
-            rest' = IM.foldlWithKey' writeRest (asAnimRest as) done
-         in as
-              { asAnimations = live
-              , asAnimRest = rest'
-              , asAnyAnimating = not (IM.null live)
-              , asAnimSettled = not (IM.null done)
-              }
-
-markDirtyIfOrphan :: Context -> Int -> IO ()
-markDirtyIfOrphan ctx key = do
-  mprev <- getPrevRectByKey ctx key
-  hasNow <- nodeHasKey ctx key
-  when (isNothing mprev && not hasNow) (markDirty ctx)
-
-nodeHasKey :: Context -> Int -> IO Bool
-nodeHasKey ctx key = do
-  mIdx <- lookupNodeByKey (ctxNodeArena ctx) key
-  case mIdx of
-    Nothing -> pure False
-    Just idx -> do
-      (_, _, w, h) <- getRect (ctxNodeArena ctx) idx
-      pure (w > 0 && h > 0)
-
-settleKey :: Context -> Int -> Float -> IO ()
-settleKey ctx key val = do
-  as <- readIORef (ctxAnimationState ctx)
-  let prevRest = IM.findWithDefault 0 key (asAnimRest as)
-      prevLive = fmap animationValue (IM.lookup key (asAnimations as))
-      changed = case prevLive of
-        Just v -> not (approxEq v val)
-        Nothing -> not (approxEq prevRest val)
-      anims' = IM.delete key (asAnimations as)
-      rest' = if approxEq val 0 then IM.delete key (asAnimRest as) else IM.insert key val (asAnimRest as)
-  writeIORef (ctxAnimationState ctx) $
-    as
-      { asAnimations = anims'
-      , asAnimRest = rest'
-      , asAnyAnimating = any animInProgress anims'
-      }
-  when changed $ do
-    damageKey ctx key (DamageInflated defaultDamageSlop)
-    markDirty ctx
-
-{-# INLINE getAnimationValue #-}
-getAnimationValue :: Context -> WidgetId -> IO Float
-getAnimationValue ctx wid = do
-  let key = intKey wid
-  as <- readIORef (ctxAnimationState ctx)
-  case IM.lookup key (asAnimations as) of
-    Just a -> pure (animationValue a)
-    Nothing -> pure (IM.findWithDefault 0 key (asAnimRest as))
-
-{-# INLINE stopAnimation #-}
--- | Stop the animation on @wid@ in place, freezing it at its current value.
--- The frozen value stays readable via 'getAnimationValue'; the widget stops
--- driving redraws and the context stops reporting as animating (unless other
--- animations are still running). Stopping is idempotent.
-stopAnimation :: Context -> WidgetId -> IO ()
-stopAnimation ctx wid = do
-  val <- getAnimationValue ctx wid
-  let key = intKey wid
-  as <- readIORef (ctxAnimationState ctx)
-  if IM.member key (asAnimations as)
-    then settleKey ctx key val
-    else pure ()
-
-{-# INLINE getAnimRest #-}
-getAnimRest :: Context -> IO (IntMap Float)
-getAnimRest ctx = asAnimRest <$> readIORef (ctxAnimationState ctx)
-
-{-# INLINE pruneAnimRest #-}
-pruneAnimRest :: Context -> (Int -> Bool) -> IO ()
-pruneAnimRest ctx shouldKeep =
-  modifyIORef' (ctxAnimationState ctx) $ \as ->
-    as {asAnimRest = IM.filterWithKey (\k _ -> shouldKeep k) (asAnimRest as)}

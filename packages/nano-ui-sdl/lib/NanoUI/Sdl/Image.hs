@@ -16,6 +16,7 @@ import Foreign.ForeignPtr (ForeignPtr, withForeignPtr)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr, castPtr, nullPtr)
 import Foreign.Storable (peek, poke)
+import NanoUI.Sdl.Display (destroyTexture)
 import NanoUI.Testing (Context, atlasSnapshot, atlasTextureId)
 import SDL3.Sys.Bindgen.Render (SDL_Renderer)
 
@@ -78,6 +79,3 @@ foreign import ccall safe "nano_ui_create_rgba_texture"
     -> CInt
     -> Ptr (Ptr ())
     -> IO Bool
-
-foreign import ccall safe "nano_ui_destroy_texture"
-  destroyTexture :: Ptr () -> IO ()

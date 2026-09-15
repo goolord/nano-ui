@@ -12,7 +12,7 @@ import qualified Data.IntMap.Strict as IM
 import Data.IORef (newIORef, readIORef, writeIORef)
 import Data.Primitive.PrimArray (mapPrimArray)
 import qualified Data.Text as T
-import NanoUI.Debug (CoreDebugSnapshot (..))
+import NanoUI.Debug (CoreDebugSnapshot (..), RtsStatsSnapshot (..))
 import NanoUI.Rgfw.Debug (RgfwDebugSnapshot (..), debugWindowBody, emptyRgfwDebug)
 import NanoUI.Layout.Arena
   ( DirTag (..)
@@ -117,7 +117,8 @@ import NanoUI.Rgfw.Font.Cozette
 import NanoUI.Rgfw.Context (newRgfwContext)
 import NanoUI.Rgfw.Gl (GlyphAtlas (..), atlasCell, bakeGlyphAtlas, glyphAtlasFor, writeSpanQuads)
 import NanoUI.Rgfw.Render (renderArena)
-import NanoUI.Rgfw.Session (defaultRgfwOptions, optScale)
+import NanoUI.Rgfw.Session (applyRgfwEvent, decodeRgfwEvents, defaultRgfwOptions, optScale)
+import RGFW (Event (..))
 import NanoUI.Rgfw.Surface
   ( clearScreen
   , fillRect
@@ -153,6 +154,7 @@ testCozette = do
   assert "Cozette '~' maps to glyph 95" (charToGlyphId font '~' == 95)
   assert "Cozette advance is 6px" (cozetteCharAdvance == 6)
   assert "Cozette line height is 13px" (cozetteLineHeight == 13)
+  assert "Cozette space glyph is blank" (not (or [cozetteGlyphBit1x font 1 x y | x <- [0 .. 6], y <- [0 .. 12]]))
 
 testPackColor :: IO ()
 testPackColor = do
@@ -608,7 +610,8 @@ testDebugWindow :: IO ()
 testDebugWindow = do
   ctx <- newPixelContext
   let inp = emptyInput { inputWindowSize = Size 800 600 }
-      snap = emptyRgfwDebug { dbgCore = (dbgCore emptyRgfwDebug) { dbgRtsOn = True } }
+      core = dbgCore emptyRgfwDebug
+      snap = emptyRgfwDebug { dbgCore = core { dbgRts = (dbgRts core) { rtsEnabled = True } } }
   (_, _, draw, _) <- runFrame ctx inp (window True "Debug Diagnostics" (debugWindowBody snap))
   let na = ctxNodeArena ctx
   -- runFrame already solved layout and placed the floating window; do not
@@ -813,7 +816,7 @@ testGlyphAtlas = do
     assert ("glyph atlas grid fits every glyph" ++ label')
       (gaCols ga * (gaHeight ga `div` ch) >= cfNumGlyphs font && gaWidth ga == gaCols ga * cw)
     bakeGlyphAtlas font ga $ \atlas ->
-      forM_ "A@#|" $ \c -> do
+      forM_ ("A@#|" :: String) $ \c -> do
         let gid = fromIntegral (charToGlyphId font c)
             (ax, ay) = atlasCell ga gid
         bracket (callocBytes (cw * ch * 4)) free $ \solo -> do
@@ -847,9 +850,30 @@ testSpanQuads = do
   (n3, _) <- quads "A" (Rect 150 80 10 10)
   assert "span quads: clip outside the framebuffer emits nothing" (n3 == 0)
 
+-- | RGFW keyboard translation: repeated letters all type, and one Ctrl+letter
+-- keystroke types its letter once, whichever of its key-char and key-press
+-- events RGFW queues first.
+testRgfwTyping :: IO ()
+testRgfwTyping = do
+  let typed = foldl' applyRgfwEvent emptyInput . decodeRgfwEvents 1
+      chars = inputChars . typed
+      ctrlHeld = modCtrl . inputModifiers . typed
+      keyL = fromIntegral (fromEnum 'l')
+      plainL = [EventKeyChar 'l', EventKeyPress keyL 0]
+      ctrlLCharFirst = [EventKeyChar '\x0c', EventKeyPress keyL R.rgfw_modControl]
+      ctrlLPressFirst = [EventKeyPress keyL R.rgfw_modControl, EventKeyChar '\x0c']
+  assert "RGFW typing: repeated key-char events all type" (chars [EventKeyChar 'l', EventKeyChar 'l'] == "ll")
+  assert "RGFW typing: repeated keystrokes all type" (chars (plainL ++ plainL) == "ll")
+  assert "RGFW typing: Ctrl+L queued char-first types once" (chars ctrlLCharFirst == "l" && ctrlHeld ctrlLCharFirst)
+  assert "RGFW typing: Ctrl+L queued press-first types once" (chars ctrlLPressFirst == "l" && ctrlHeld ctrlLPressFirst)
+  assert "RGFW typing: a Ctrl+L press without a char types" (chars [EventKeyPress keyL R.rgfw_modControl] == "l")
+  assert "RGFW typing: Ctrl+L twice types twice"
+    (chars (ctrlLCharFirst ++ ctrlLCharFirst) == "ll" && chars (ctrlLPressFirst ++ ctrlLPressFirst) == "ll")
+
 main :: IO ()
 main = do
   putStrLn "=== Running nano-ui-rgfw Unit Tests ==="
+  testRgfwTyping
   testCozette
   testPackColor
   testSurfaceAllocation

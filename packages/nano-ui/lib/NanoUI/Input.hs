@@ -11,6 +11,8 @@ module NanoUI.Input
   , inputInteracted
   , inputPointerHeld
   , appendInputKey
+  , MouseButton (..)
+  , applyMouseButton
   , inputKeysNull
   , inputKeysElem
   , foldInputKeys
@@ -162,6 +164,18 @@ splitFrame isEdge events =
 appendInputKey :: Key -> Vector Key -> Vector Key
 appendInputKey k ks = V.snoc ks k
 
+-- | Mouse buttons tracked by 'Input'.
+data MouseButton = MouseLeft | MouseRight
+  deriving (Eq, Show)
+
+-- | Apply a button transition: the held state plus that frame's one-shot
+-- pressed or released flag.
+applyMouseButton :: MouseButton -> Bool -> Input -> Input
+applyMouseButton MouseLeft True inp = inp {inputMouseDown = True, inputMousePressed = True}
+applyMouseButton MouseLeft False inp = inp {inputMouseDown = False, inputMouseReleased = True}
+applyMouseButton MouseRight True inp = inp {inputMouseRightDown = True, inputMouseRightPressed = True}
+applyMouseButton MouseRight False inp = inp {inputMouseRightDown = False, inputMouseRightReleased = True}
+
 {-# INLINE inputKeysFromList #-}
 inputKeysFromList :: [Key] -> Vector Key
 inputKeysFromList = V.fromList
@@ -185,7 +199,6 @@ foldInputKeys :: (a -> Key -> a) -> a -> Vector Key -> a
 foldInputKeys = V.foldl'
 
 -- Buttons, keys, scroll, resize. Mouse motion alone does not count.
-{-# INLINE inputInteracted #-}
 inputInteracted :: Input -> Input -> Bool
 inputInteracted a b =
   inputMouseDown a /= inputMouseDown b
@@ -208,7 +221,6 @@ inputPointerHeld inp =
   inputMouseDown inp || inputMouseRightDown inp
 
 -- Rebuild UI after store mirrors update. Keep hover/drag; drop one-shot input.
-{-# INLINE stripInteractionInput #-}
 stripInteractionInput :: Input -> Input
 stripInteractionInput inp =
   inp

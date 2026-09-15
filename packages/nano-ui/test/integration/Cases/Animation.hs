@@ -1,5 +1,6 @@
 module Cases.Animation
-  ( runAnimationBezierTest
+  ( runAnimatableColorPaddingTest
+  , runAnimationBezierTest
   , runAnimationDamageTest
   , runAnimationDelayTest
   , runAnimationEaseTest
@@ -22,7 +23,7 @@ import Data.IORef (IORef)
 import Data.Text qualified as T
 import NanoUI
 import NanoUI.Testing
-import NanoUI.Testing.Assert (assert)
+import NanoUI.Testing.Assert (assert, assertEq)
 import NanoUI.Testing.Harness (withAnimCtx, withDelta)
 
 runAnimationIdleTest :: Context -> IORef Int -> IO ()
@@ -69,7 +70,7 @@ runAnimationHoldTest _ failed = do
   ctx <- newContext
   let inp = withDelta 200 100 0.1
       ui = do
-        t <- animateTo 1 0.2
+        t <- animateTo (Tween EaseLinear 0.2 0) 1
         label_ (T.pack (show t))
   replicateM_ 6 (runFrame ctx inp ui)
   live <- anyAnimating ctx
@@ -94,7 +95,7 @@ runAnimationDamageTest _ failed = do
       idle = label_ "anim"
       tweenInp = idleInp {inputDeltaTime = 0.05}
       ui = do
-        t <- animateTo 1 0.4
+        t <- animateTo (Tween EaseLinear 0.4 0) 1
         void (spacer (Fixed (20 + 80 * t)) Fit)
         label_ "anim"
       hasMove dmg = case dmg of
@@ -110,7 +111,7 @@ runAnimationDamageTest _ failed = do
   ctx2 <- newContext
   let fastInp = idleInp {inputDeltaTime = 0.5}
       uiFast = do
-        t <- animateTo 1 0.2
+        t <- animateTo (Tween EaseLinear 0.2 0) 1
         void (spacer (Fixed (20 + 80 * t)) Fit)
         label_ "anim"
   _ <- runFrame ctx2 idleInp idle
@@ -141,8 +142,8 @@ runAnimationStaggerTest _ failed =
   withAnimCtx 200 100 0.02
     (\ctx inp fl -> do
       let ui = do
-            _ <- withKey ("lead" :: String) (animateToEaseDelay EaseLinear 1 0.4 0)
-            t <- withKey ("trail" :: String) (animateToEaseDelay EaseLinear 1 0.4 0.08)
+            _ <- withKey ("lead" :: String) (animateTo (Tween EaseLinear 0.4 0) 1)
+            t <- withKey ("trail" :: String) (animateTo (Tween EaseLinear 0.4 0.08) 1)
             label_ (T.pack ("t=" ++ show t))
           trailVal = do
             spans <- collectTextSpans ctx
@@ -222,7 +223,7 @@ runAnimationSpringHoldTest _ failed = do
   ctx <- newContext
   let inp = withDelta 200 100 0.05
       ui = do
-        t <- animateToSpring presetSmooth 1
+        t <- animateTo (Spring presetSmooth) 1
         label_ (T.pack (show t))
   replicateM_ 81 (runFrame ctx inp ui)
   live <- anyAnimating ctx
@@ -236,7 +237,7 @@ runAnimationSpringATest _ failed = do
   ctx <- newContext
   let inp = withDelta 200 100 0.05
       ui = do
-        V2 x y <- withKey ("vec" :: String) (animateToSpringA presetSmooth (V2 1 2))
+        V2 x y <- withKey ("vec" :: String) (animateToA (Spring presetSmooth) (V2 1 2))
         label_ (T.pack (show x ++ "," ++ show y))
   replicateM_ 80 (runFrame ctx inp ui)
   live <- anyAnimating ctx
@@ -250,11 +251,19 @@ runAnimationSpringATest _ failed = do
         _ -> False
   assert failed (any ok shown)
 
+-- Short colour component lists pad RGB with 0 and alpha with 1.
+runAnimatableColorPaddingTest :: Context -> IORef Int -> IO ()
+runAnimatableColorPaddingTest _ failed = do
+  assertEq failed (colorRGBA 0 0 0 255) (fromComponents [])
+  assertEq failed (colorRGBA 255 0 0 255) (fromComponents [1])
+  assertEq failed (colorRGBA 255 0 255 255) (fromComponents [1, 0, 1])
+  assertEq failed (colorRGBA 0 255 0 0) (fromComponents [0, 1, 0, 0, 1])
+
 -- Each composite animation owns a scope; component indices alone are not
 -- unique when two vectors animate side by side in the same parent.
 runCompositeAnimationIsolationTest :: Context -> IORef Int -> IO ()
 runCompositeAnimationIsolationTest _ failed =
-  forM_ [animateToA EaseLinear 0.2, animateToSpringA presetSmooth] $ \animateVector -> do
+  forM_ [animateToA (Tween EaseLinear 0.2 0), animateToA (Spring presetSmooth)] $ \animateVector -> do
     ctx <- newContext
     let inp = withDelta 200 100 0.05
         ui = do

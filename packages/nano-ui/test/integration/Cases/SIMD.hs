@@ -64,4 +64,3 @@ runSimdWritesTest _ failed = do
   let
     expectedOffsets = ((1, 2), (4, 6), (7, 10), (10, 14))
   assertEq failed expectedOffsets (concentricOffsetsSIMD 1 2 3 4 0 1 2 3)
-  assertEq failed expectedOffsets (strokeStripNormalsSIMD 1 2 3 4 0 1 2 3)

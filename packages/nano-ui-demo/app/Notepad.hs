@@ -5,7 +5,7 @@
 -- 'NanoUI' function driven by local state hooks.
 --
 -- Run with @cabal run nano-ui-sdl-notepad@.
-module SdlNotepad (main, notepadUi) where
+module Main (main) where
 
 import Control.Exception (SomeException, try)
 import Control.Monad (unless, void, when)
@@ -16,6 +16,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
 import Data.Text.IO qualified as TIO
+import DemoApp (useFileDialog)
 import NanoUI
 import NanoUI.Backend.Sdl
 import NanoUI.Monad (askContext, askInput)
@@ -28,7 +29,6 @@ import NanoUI.Testing.Harness
   , requireSpan
   )
 import NanoUI.Widgets.TextArea (applyTextAreaMenuAction)
-import System.Directory (getTemporaryDirectory, removeFile)
 import System.Environment (getArgs)
 import System.Exit (exitSuccess)
 
@@ -72,22 +72,6 @@ selftest = do
       let
         base = emptyInput {inputWindowSize = Size 1000 720, inputMousePos = V2 500 400}
         drawFrame inp = void (sdlDrawFrame ctx notepadUi env inp False)
-        clickAt2 pos = clickPos drawFrame base pos
-
-      -- readFileFast round-trips a temp file.
-      tmpDir <- getTemporaryDirectory
-      let
-        tmpPath = tmpDir <> "/nano-ui-notepad-read.txt"
-      writeFile tmpPath "hello read\nsecond line"
-      raw <- readFileFast tmpPath
-      let
-        decoded = TE.decodeUtf8 raw
-      unless (decoded == "hello read\nsecond line") $
-        fail "selftest: readFileFast round-trip failed"
-      writeFile tmpPath ""
-      rawEmpty <- readFileFast tmpPath
-      unless (BS.null rawEmpty) $ fail "selftest: readFileFast empty file failed"
-      removeFile tmpPath
 
       mapM_ drawFrame [base, base]
 
@@ -95,12 +79,12 @@ selftest = do
       unless (hasText "Ready" spans0) $ fail "selftest: status bar missing"
       filePos <- requireSpan "selftest: File menu" (findExact "File" spans0)
 
-      clickAt2 filePos
+      clickPos drawFrame base filePos
       spansFile <- collectOverlayTextSpans ctx base
       unless (hasText "Save As..." spansFile) $
         fail "selftest: File menu did not open"
       newPos <- requireSpan "selftest: New item" (findExact "New" spansFile)
-      clickAt2 newPos
+      clickPos drawFrame base newPos
       baseSpansNew <- collectTextSpans ctx
       overlaySpansNew <- collectOverlayTextSpans ctx base
       when (hasText "Save As..." overlaySpansNew) $
@@ -111,15 +95,15 @@ selftest = do
       -- Focus the editor and type; Select All from the Edit menu must keep the
       -- field focused so the selection highlights and the next keystroke
       -- replaces the selection.
-      clickAt2 (V2 500 300)
+      clickPos drawFrame base (V2 500 300)
       drawFrame base {inputChars = "abc"}
       drawFrame base
       editPos <- requireSpan "selftest: Edit menu" (findExact "Edit" baseSpansNew)
-      clickAt2 editPos
+      clickPos drawFrame base editPos
       spansEdit <- collectOverlayTextSpans ctx base
       selectAllPos <-
         requireSpan "selftest: Select All item" (findRightmost "Select All" spansEdit)
-      clickAt2 selectAllPos
+      clickPos drawFrame base selectAllPos
       drawFrame base {inputChars = "Z"}
       drawFrame base
       spansReplaced <- collectTextSpans ctx
@@ -146,20 +130,20 @@ selftest = do
       filePos2 <-
         requireSpan "selftest: File menu (exit)" . findExact "File"
           =<< collectTextSpans ctx
-      clickAt2 filePos2
+      clickPos drawFrame base filePos2
       spansFile2 <- collectOverlayTextSpans ctx base
       unless (hasText "Exit" spansFile2) $
         fail "selftest: File menu missing Exit item"
-      clickAt2 (V2 500 300) -- dismiss the menu without activating Exit
+      clickPos drawFrame base (V2 500 300) -- dismiss the menu without activating Exit
 
       helpPos <- requireSpan "selftest: Help menu" (findExact "Help" baseSpansNew)
-      clickAt2 helpPos
+      clickPos drawFrame base helpPos
       spansHelp <- collectOverlayTextSpans ctx base
       unless (hasText "About nano-ui Notepad" spansHelp) $
         fail "selftest: Help menu did not open"
       aboutPos <-
         requireSpan "selftest: About item" (findExact "About nano-ui Notepad" spansHelp)
-      clickAt2 aboutPos
+      clickPos drawFrame base aboutPos
       spansAbout <- collectOverlayTextSpans ctx base
       unless (hasText "built with nano-ui" spansAbout) $
         fail "selftest: About modal did not open"
@@ -204,7 +188,7 @@ notepadUi = do
       setOpenMenu ""
       setDocGen (docGen + 1)
       loaded <-
-        uiIO (try (readFileFast filePath) :: IO (Either SomeException BS.ByteString))
+        uiIO (try (BS.readFile filePath) :: IO (Either SomeException BS.ByteString))
       case loaded of
         Left _ -> setStatusMsg ("Could not open " <> T.pack filePath)
         Right raw -> do
@@ -226,18 +210,12 @@ notepadUi = do
 
   ------------------------------------------------------------- menu data ---
   let
-    closeThen action = setOpenMenu "" >> action
-
     newDocument = do
       setDocText ""
       setDocPath ""
       setDocGen (docGen + 1)
       setDocDirty False
       setStatusMsg "New document"
-
-    openDocument = do
-      mHandle <- askOpenFileDialog defaultFileDialogOptions
-      setOpenDlg mHandle
 
     saveDocument forceDialog =
       if forceDialog || T.null docPath
@@ -258,33 +236,35 @@ notepadUi = do
       uiIO (applyTextAreaMenuAction ctx editorId itemIndex)
 
     fileMenu = do
-      whenM (menuItem "New") (closeThen newDocument)
-      whenM (menuItem "Open...") (closeThen openDocument)
-      whenM (menuItem "Save") (closeThen (saveDocument False))
-      whenM (menuItemWithShortcut "Save As..." "Ctrl+Shift+S") (closeThen (saveDocument True))
+      whenM (menuItem "New") (setOpenMenu "" >> newDocument)
+      whenM (menuItem "Open...") $ do
+        setOpenMenu ""
+        askOpenFileDialog defaultFileDialogOptions >>= setOpenDlg
+      whenM (menuItem "Save") (setOpenMenu "" >> saveDocument False)
+      whenM (menuItemWithShortcut "Save As..." "Ctrl+Shift+S") (setOpenMenu "" >> saveDocument True)
       menuSeparator
-      whenM (menuItemWithShortcut "Exit" "Esc") (closeThen (uiIO exitSuccess))
+      whenM (menuItemWithShortcut "Exit" "Esc") (setOpenMenu "" >> uiIO exitSuccess)
 
     editMenu = do
-      whenM (menuItemWithShortcut "Cut" "Ctrl+X") (editAction 0)
-      whenM (menuItemWithShortcut "Copy" "Ctrl+C") (editAction 1)
-      whenM (menuItemWithShortcut "Paste" "Ctrl+V") (editAction 2)
+      whenM (menuItemWithShortcut "Cut" "Ctrl+X") (editAction MenuCut)
+      whenM (menuItemWithShortcut "Copy" "Ctrl+C") (editAction MenuCopy)
+      whenM (menuItemWithShortcut "Paste" "Ctrl+V") (editAction MenuPaste)
       menuSeparator
-      whenM (menuItemWithShortcut "Select All" "Ctrl+A") (editAction 3)
+      whenM (menuItemWithShortcut "Select All" "Ctrl+A") (editAction MenuSelectAll)
 
     viewMenu = do
       whenM
         (menuItem (if showStatus then "Hide Status Bar" else "Show Status Bar"))
-        (closeThen (setShowStatus (not showStatus)))
+        (setOpenMenu "" >> setShowStatus (not showStatus))
       menuSeparator
-      whenM (menuItemWithShortcut "Zoom In" "Ctrl++") (closeThen (setZoom (min 4.0 (zoom * 1.1))))
-      whenM (menuItemWithShortcut "Zoom Out" "Ctrl+-") (closeThen (setZoom (max 0.5 (zoom / 1.1))))
-      whenM (menuItemWithShortcut "Reset Zoom" "Ctrl+0") (closeThen (setZoom 1.0))
+      whenM (menuItemWithShortcut "Zoom In" "Ctrl++") (setOpenMenu "" >> setZoom (min 4.0 (zoom * 1.1)))
+      whenM (menuItemWithShortcut "Zoom Out" "Ctrl+-") (setOpenMenu "" >> setZoom (max 0.5 (zoom / 1.1)))
+      whenM (menuItemWithShortcut "Reset Zoom" "Ctrl+0") (setOpenMenu "" >> setZoom 1.0)
       menuSeparator
-      whenM (menuItem "Document Statistics") (closeThen (setStatusMsg (documentStats docText)))
+      whenM (menuItem "Document Statistics") (setOpenMenu "" >> setStatusMsg (documentStats docText))
 
     helpMenu = do
-      whenM (menuItem "About nano-ui Notepad") (closeThen (setAboutOpen True))
+      whenM (menuItem "About nano-ui Notepad") (setOpenMenu "" >> setAboutOpen True)
       menuItemDisabled "nano-ui on GitHub"
 
   --------------------------------------------------------------- layout ---
@@ -358,46 +338,22 @@ menuBar openMenu setOpen entries = do
 -- Helpers
 --------------------------------------------------------------------------------
 
--- | Poll a pending dialog handle; consume each result exactly once.
-useFileDialog ::
-  Maybe FileDialogId
-  -> (Maybe FileDialogId -> NanoUI ())
-  -> ([FilePath] -> NanoUI ())
-  -> NanoUI ()
-useFileDialog mHandle clear consume =
-  for_ mHandle $ \handle ->
-    pollFileDialogUi handle >>= \case
-      FileDialogPending -> pure ()
-      FileDialogSelected chosenPaths -> consume chosenPaths >> clear Nothing
-      _finished -> clear Nothing
-
 writeDocument :: FilePath -> Text -> NanoUI Bool
 writeDocument filePath contents = do
   result <-
     uiIO (try (TIO.writeFile filePath contents) :: IO (Either SomeException ()))
   pure (either (const False) (const True) result)
 
--- | Open a file with a single strict read; the caller lenient-decodes the
--- bytes into 'Text'.
-readFileFast :: FilePath -> IO BS.ByteString
-readFileFast = BS.readFile
-
 statusBar :: Text -> Bool -> Text -> Text -> Float -> NanoUI ()
 statusBar path dirty contents message zoomVal =
   rowWith (tight . gap 12 . fillW . padXY 8 4) $ do
     void $ labelEx (tight . fontMuted $ defaultLayout) message
     flex
-    void $ labelEx (tight . fontMuted $ defaultLayout) (documentLabel path dirty)
+    void $ labelEx (tight . fontMuted $ defaultLayout)
+      ((if T.null path then "Untitled" else path) <> (if dirty then " *" else ""))
     void $ labelEx (tight . fontMuted $ defaultLayout) (documentStats contents)
-    void $ labelEx (tight . fontMuted $ defaultLayout) (zoomLabel zoomVal)
-
-zoomLabel :: Float -> Text
-zoomLabel zoomVal =
-  "Zoom: " <> T.pack (show (round (zoomVal * 100) :: Int)) <> "%"
-
-documentLabel :: Text -> Bool -> Text
-documentLabel path dirty =
-  (if T.null path then "Untitled" else path) <> (if dirty then " *" else "")
+    void $ labelEx (tight . fontMuted $ defaultLayout)
+      ("Zoom: " <> T.pack (show (round (zoomVal * 100) :: Int)) <> "%")
 
 documentStats :: Text -> Text
 documentStats contents =

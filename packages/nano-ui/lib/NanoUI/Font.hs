@@ -5,6 +5,7 @@ module NanoUI.Font
   , RunQuad (..)
   , FontMetrics (..)
   , FontBackend (..)
+  , CustomMeasureFn
   , prepareFontMetrics
   , prepareFontMetricsMany
   , measureTextIO
@@ -14,14 +15,11 @@ module NanoUI.Font
   , monospaceMetrics
   , scaleFontMetrics
   , measureText
-  , measureTextWrapped
   , measureTextWrappedIO
-  , wrapTextLines
   , wrapTextLinesIO
-  , truncateTextAdvance
-  , truncateTextWith
   , truncateTextIO
   , lineWidth
+  , kernedAdvance
   , textDisplayWidth
   , textIndexAtX
   , labelContentInset
@@ -55,7 +53,6 @@ module NanoUI.Font
   , scrollBarWidth
   , scrollBarWindowWidth
   , scrollBarMargin
-  , scrollBarGeom
   , scrollBarGeomFor
   , scrollBarGutter
   , ScrollBarSlot (..)
@@ -67,13 +64,10 @@ module NanoUI.Font
   , scrollBarWindowGutter
   , sliderTrackBounds
   , sliderTrackHeight
-  , sliderTrackMargin
   , sliderHandleDiameter
   , sliderHandleSlack
   ) where
 
-
-import Data.Functor.Identity (runIdentity)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -132,6 +126,10 @@ data FontBackend = FontBackend
   , fbDrawGlyph :: Char -> IO (Maybe GlyphQuad)
   }
 
+-- | Custom node measurement: font metrics and available (width, height) to
+-- the node's desired (width, height).
+type CustomMeasureFn = FontMetrics -> (Float, Float) -> (Float, Float)
+
 {-# INLINE prepareFontMetrics #-}
 prepareFontMetrics :: FontMetrics -> Text -> IO FontMetrics
 prepareFontMetrics fm txt = case fmBackend fm of
@@ -174,7 +172,6 @@ drawGlyph fm c = case fmBackend fm of
   Nothing -> pure (fmGlyph fm c)
   Just backend -> fbDrawGlyph backend c
 
-{-# INLINE monospaceMetrics #-}
 monospaceMetrics :: Float -> FontMetrics
 monospaceMetrics cell =
   FontMetrics
@@ -188,7 +185,6 @@ monospaceMetrics cell =
     , fmBackend = Nothing
     }
 
-{-# INLINE scaleFontMetrics #-}
 scaleFontMetrics :: Float -> FontMetrics -> FontMetrics
 scaleFontMetrics s fm
   | s == 1.0 = fm
@@ -336,7 +332,6 @@ alignedTextBox ax x w ix tw =
 
 -- Last glyph ink right in the same space as 'pushText' (pen + gqX + gqW).
 -- Falls back to advance when 'fmGlyph' is Nothing (tests).
-{-# INLINE textInkEnd #-}
 textInkEnd :: FontMetrics -> Text -> Float
 textInkEnd fm txt =
   case T.unsnoc txt of
@@ -353,7 +348,6 @@ textInkEnd fm txt =
 -- Align using per-glyph advances (same as 'pushText'), not TTF_GetStringSize.
 -- When the line fits, AlignEnd/Center shift by ink so the visual right edge
 -- stays put as the last character's right bearing changes.
-{-# INLINE alignedTextPen #-}
 alignedTextPen :: AlignX -> Float -> Float -> Float -> FontMetrics -> Text -> (Float, Float)
 alignedTextPen ax x w ix fm txt =
   let tw = lineWidth fm txt
@@ -419,10 +413,6 @@ sliderHandleDiameter = 18
 sliderHandleSlack :: Float
 sliderHandleSlack = (sliderHandleDiameter - sliderTrackHeight) / 2
 
--- Distance from label baseline to track: 4px gap to handle + handle overhang
-sliderTrackMargin :: Float
-sliderTrackMargin = 4 + sliderHandleSlack
-
 {-# INLINE sliderTrackBounds #-}
 sliderTrackBounds :: FontMetrics -> Float -> Float -> Float -> Float -> Rect
 sliderTrackBounds fm x y w h =
@@ -442,24 +432,18 @@ scrollBarWindowWidth = 4
 scrollBarMargin :: Float
 scrollBarMargin = 3
 
-scrollBarGeom :: FontMetrics -> (Float, Float)
-scrollBarGeom fm = scrollBarGeomFor fm ScrollBarList
-
-scrollBarGeomFor :: FontMetrics -> ScrollBarSlot -> (Float, Float)
-scrollBarGeomFor _fm slot =
-  let barW = case slot of
-        ScrollBarWindow -> scrollBarWindowWidth
-        _ -> scrollBarWidth
-      -- Window bar: side gaps only. No end inset.
-      endM = case slot of
-        ScrollBarWindow -> 0
-        _ -> scrollBarMargin
-   in (barW, endM)
+-- | Bar width and end margin for a slot.
+scrollBarGeomFor :: ScrollBarSlot -> (Float, Float)
+scrollBarGeomFor slot =
+  case slot of
+    -- Window bar: side gaps only. No end inset.
+    ScrollBarWindow -> (scrollBarWindowWidth, 0)
+    _ -> (scrollBarWidth, scrollBarMargin)
 
 -- Bar plus end margin. List/page overflow reserves this on the cross axis.
 scrollBarGutter :: FontMetrics -> Float
-scrollBarGutter fm =
-  let (barW, barMargin) = scrollBarGeom fm
+scrollBarGutter _fm =
+  let (barW, barMargin) = scrollBarGeomFor ScrollBarList
    in barW + barMargin
 
 data ScrollBarSlot = ScrollBarPage | ScrollBarList | ScrollBarWindow
@@ -502,10 +486,9 @@ scrollBarOuterGap slot =
 
 -- Width the window bar occupies in the parent pad (not taken from content).
 scrollBarWindowGutter :: FontMetrics -> Float
-scrollBarWindowGutter fm =
-  let (barW, _) = scrollBarGeomFor fm ScrollBarWindow
-      side = scrollBarOuterGap ScrollBarWindow
-   in barW + 2 * side
+scrollBarWindowGutter _fm =
+  let (barW, _) = scrollBarGeomFor ScrollBarWindow
+   in barW + 2 * scrollBarOuterGap ScrollBarWindow
 
 measureText :: FontMetrics -> Text -> (Float, Float)
 measureText fm txt =
@@ -531,6 +514,14 @@ isDefaultNodeFont size weight style variant =
     && style == FontStyleNormal
     && (variant == FontRegular || variant == FontMono)
 
+-- | Advance of @c@ plus its kerning against the previous character: the one
+-- pen step shared by measuring, hit testing and glyph emission.
+{-# INLINE kernedAdvance #-}
+kernedAdvance :: FontMetrics -> Maybe Char -> Char -> Float
+kernedAdvance fm prev c = case prev of
+  Nothing -> fmAdvance fm c
+  Just p -> fmAdvance fm c + fmKerning fm p c
+
 -- Caret and click index using the same advances and kerning as pushText,
 -- so the caret lands exactly where the glyph to its left was drawn.
 textIndexAtX :: FontMetrics -> Text -> Float -> Int
@@ -542,106 +533,10 @@ textIndexAtX fm txt x
       case T.uncons t of
         Nothing -> i
         Just (c, rest) ->
-          let adv = charW prev c
+          let adv = kernedAdvance fm prev c
               mid = acc + adv * 0.5
            in if x < mid then i else go (i + 1) (acc + adv) (Just c) rest
-    charW prev c =
-      case prev of
-        Nothing -> fmAdvance fm c
-        Just p -> fmAdvance fm c + fmKerning fm p c
 
-measureTextWrapped :: FontMetrics -> Text -> Float -> (Float, Float)
-measureTextWrapped fm txt maxW
-  | maxW <= 0 = (0, fmLineHeight fm)
-  | T.null txt = (0, fmLineHeight fm)
-  | not (T.any (== '\n') txt) && lineW txt <= maxW = (lineW txt, fmLineHeight fm)
-  | otherwise =
-      let lineH = fmLineHeight fm
-          textLines = wrapTextLines fm txt maxW
-       in wrappedSize lineW lineH maxW textLines
-  where
-    lineW = textDisplayWidth fm
-
-measureTextWrappedIO :: (Text -> IO Float) -> FontMetrics -> Text -> Float -> IO (Float, Float)
-measureTextWrappedIO lineW fm txt maxW = do
-  textLines <- wrapTextLinesIO lineW fm txt maxW
-  ws <- mapM lineW textLines
-  pure (wrappedSizeFrom (fmLineHeight fm) maxW textLines ws)
-
-wrappedSize :: (Text -> Float) -> Float -> Float -> [Text] -> (Float, Float)
-wrappedSize lineW lineH maxW textLines =
-  wrappedSizeFrom lineH maxW textLines (map lineW textLines)
-
-wrappedSizeFrom :: Float -> Float -> [Text] -> [Float] -> (Float, Float)
-wrappedSizeFrom lineH maxW textLines ws =
-  case textLines of
-    [] -> (0, lineH)
-    _ -> (min maxW (maximum ws), lineH * fromIntegral (length textLines))
-
-{-# INLINE wrapTextLines #-}
-wrapTextLines :: FontMetrics -> Text -> Float -> [Text]
-wrapTextLines fm txt maxW =
-  concatMap
-    (\para -> runIdentity (wrapParagraphM fit (pure . lineWidth fm) para maxW))
-    (T.lines txt)
- where
-  fit width = pure . takeWidthAdvance fm width
-
-wrapTextLinesIO :: (Text -> IO Float) -> FontMetrics -> Text -> Float -> IO [Text]
-wrapTextLinesIO lineW _ txt maxW =
-  concat <$> mapM (\para -> wrapParagraphM (takeWidthM lineW) lineW para maxW) (T.lines txt)
-
--- The layout policy is shared by pure font metrics (Identity) and host-backed
--- shaping (IO). Only measuring a line and fitting a prefix depend on the host.
-{-# INLINE wrapParagraphM #-}
-wrapParagraphM ::
-  Monad m =>
-  (Float -> Text -> m (Text, Text)) -> (Text -> m Float) -> Text -> Float -> m [Text]
-wrapParagraphM fit lineW para maxW
-  | maxW <= 0 = pure []
-  | T.null para = pure [""]
-  | otherwise = do
-      w <- lineW para
-      if w <= maxW
-        then pure [para]
-        else if T.any (== ' ') para
-          then wrapWordsM lineW maxW (T.words para)
-          else reverse <$> charLinesM fit maxW para []
-
-{-# INLINE wrapWordsM #-}
-wrapWordsM :: Monad m => (Text -> m Float) -> Float -> [Text] -> m [Text]
-wrapWordsM lineW maxW wordsToWrap = go wordsToWrap []
- where
-  go [] acc = pure (reverse acc)
-  go (word : wordsLeft) acc = case acc of
-    [] -> startLine word wordsLeft acc
-    line : rest -> do
-      let candidate = line <> " " <> word
-      width <- lineW candidate
-      if width <= maxW
-        then go wordsLeft (candidate : rest)
-        else startLine word wordsLeft acc
-  startLine word wordsLeft acc = do
-    width <- lineW word
-    if width <= maxW
-      then go wordsLeft (word : acc)
-      else do
-        broken <- charLinesM (takeWidthM lineW) maxW word []
-        go wordsLeft (broken ++ acc)
-
-{-# INLINE charLinesM #-}
-charLinesM ::
-  Monad m => (Float -> Text -> m (Text, Text)) -> Float -> Text -> [Text] -> m [Text]
-charLinesM fit maxW txt acc =
-  if T.null txt
-    then pure acc
-    else do
-      (line, rest) <- fit maxW txt
-      if T.null line
-        then pure acc
-        else charLinesM fit maxW rest (line : acc)
-
-{-# INLINE lineWidth #-}
 lineWidth :: FontMetrics -> Text -> Float
 lineWidth fm line
   | T.null line = 0
@@ -659,44 +554,60 @@ lineWidth fm line
                     fst (T.foldl' step (fmAdvance fm c0, c0) rest)
                   Nothing -> 0
   where
-    step (!w, !prev) c = (w + fmAdvance fm c + fmKerning fm prev c, c)
+    step (!w, !prev) c = (w + kernedAdvance fm (Just prev) c, c)
 
-takeWidthAdvance :: FontMetrics -> Float -> Text -> (Text, Text)
-takeWidthAdvance fm maxW txt
-  | T.null txt = (txt, T.empty)
-  | maxW <= 0 = (T.empty, txt)
-  | otherwise =
-      let !adv = fmAdvance fm ' '
-          !xAdv = fmAdvance fm 'x'
-          !mAdv = fmAdvance fm 'M'
-       in if adv == xAdv && xAdv == mAdv && adv > 0 && fmKerning fm 'x' 'M' == 0
-            then
-              let !count = floor (maxW / adv)
-                  !n = T.length txt
-               in if count >= n
-                    then (txt, T.empty)
-                    else if count <= 0
-                      then (T.take 1 txt, T.drop 1 txt)
-                      else (T.take count txt, T.drop count txt)
-            else
-              let (!len, _, _) = T.foldl' step (0, 0.0 :: Float, ' ') txt
-               in if len <= 0
-                    then (T.take 1 txt, T.drop 1 txt)
-                    else if len >= T.length txt
-                      then (txt, T.empty)
-                      else (T.take len txt, T.drop len txt)
+measureTextWrappedIO :: (Text -> IO Float) -> FontMetrics -> Text -> Float -> IO (Float, Float)
+measureTextWrappedIO lineW fm txt maxW = do
+  textLines <- wrapTextLinesIO lineW txt maxW
+  ws <- mapM lineW textLines
+  let lineH = fmLineHeight fm
+  pure $ case textLines of
+    [] -> (0, lineH)
+    _ -> (min maxW (maximum ws), lineH * fromIntegral (length textLines))
+
+-- | Wrap each paragraph to @maxW@ using the host line measure: whole words
+-- first, characters for words (or paragraphs) that cannot fit.
+wrapTextLinesIO :: (Text -> IO Float) -> Text -> Float -> IO [Text]
+wrapTextLinesIO lineW txt maxW = concat <$> mapM wrapParagraph (T.lines txt)
   where
-    step (!len, !w, !prev) c =
-      let w' = w + fmAdvance fm c + (if len == 0 then 0 else fmKerning fm prev c)
-       in if w' > maxW
-            then if len == 0 then (1, w', c) else (len, w, c)
-            else (len + 1, w', c)
+    wrapParagraph para
+      | maxW <= 0 = pure []
+      | T.null para = pure [""]
+      | otherwise = do
+          w <- lineW para
+          if w <= maxW
+            then pure [para]
+            else if T.any (== ' ') para
+              then wrapWords (T.words para) []
+              else reverse <$> charLines para []
+    wrapWords [] acc = pure (reverse acc)
+    wrapWords (word : wordsLeft) acc = case acc of
+      [] -> startLine word wordsLeft acc
+      line : rest -> do
+        let candidate = line <> " " <> word
+        width <- lineW candidate
+        if width <= maxW
+          then wrapWords wordsLeft (candidate : rest)
+          else startLine word wordsLeft acc
+    startLine word wordsLeft acc = do
+      width <- lineW word
+      if width <= maxW
+        then wrapWords wordsLeft (word : acc)
+        else do
+          broken <- charLines word []
+          wrapWords wordsLeft (broken ++ acc)
+    charLines chunk acc
+      | T.null chunk = pure acc
+      | otherwise = do
+          (line, rest) <- takeWidth lineW maxW chunk
+          if T.null line
+            then pure acc
+            else charLines rest (line : acc)
 
 -- Always consume at least one character from non-empty text, even when a
 -- single glyph exceeds the available width, so wrapping makes progress.
-{-# INLINE takeWidthM #-}
-takeWidthM :: Monad m => (Text -> m Float) -> Float -> Text -> m (Text, Text)
-takeWidthM lineW maxW txt
+takeWidth :: (Text -> IO Float) -> Float -> Text -> IO (Text, Text)
+takeWidth lineW maxW txt
   | T.null txt = pure (txt, T.empty)
   | otherwise = (`T.splitAt` txt) <$> maxFit 1 (T.length txt)
   where
@@ -707,29 +618,8 @@ takeWidthM lineW maxW txt
           ok <- (<= maxW) <$> lineW (T.take mid txt)
           if ok then maxFit mid hi else maxFit lo (mid - 1)
 
-{-# INLINE truncateTextAdvance #-}
-truncateTextAdvance :: FontMetrics -> Float -> Text -> Text
-truncateTextAdvance fm maxW txt =
-  runIdentity $
-    truncateTextM
-      (\width -> pure . takeWidthAdvance fm width)
-      (pure . lineWidth fm)
-      maxW
-      txt
-
-{-# INLINE truncateTextWith #-}
-truncateTextWith :: (Text -> Float) -> Float -> Text -> Text
-truncateTextWith lineW maxW txt =
-  runIdentity (truncateTextM (takeWidthM (pure . lineW)) (pure . lineW) maxW txt)
-
 truncateTextIO :: (Text -> IO Float) -> Float -> Text -> IO Text
-truncateTextIO lineW = truncateTextM (takeWidthM lineW) lineW
-
-{-# INLINE truncateTextM #-}
-truncateTextM ::
-  Monad m =>
-  (Float -> Text -> m (Text, Text)) -> (Text -> m Float) -> Float -> Text -> m Text
-truncateTextM fitPrefix lineW maxW txt
+truncateTextIO lineW maxW txt
   | maxW <= 0 = pure ""
   | otherwise = do
       w <- lineW txt
@@ -738,7 +628,7 @@ truncateTextM fitPrefix lineW maxW txt
         else do
           ellW <- lineW "..."
           if maxW <= ellW
-            then fst <$> fitPrefix maxW txt
+            then fst <$> takeWidth lineW maxW txt
             else do
-              (fit, _) <- fitPrefix (maxW - ellW) txt
+              (fit, _) <- takeWidth lineW (maxW - ellW) txt
               pure (T.dropWhileEnd (== '.') fit <> "...")

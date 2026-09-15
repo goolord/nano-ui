@@ -2,16 +2,14 @@
 
 module NanoUI.Frame.Cursor
   ( UiCursorKind (..)
-  , grabHoverKind
-  , grabDragKind
   , uiCursorKind
   , pointerCursorWanted
   , cursorKindIs
-  , textFieldHoverCursorKind
   ) where
+
 import Data.IORef (readIORef)
-import Data.Maybe (fromMaybe, isJust)
 import qualified Data.IntMap.Strict as IM
+import Data.Maybe (fromMaybe, isJust)
 import NanoUI.Context
   ( Context (..)
   , CustomDrawContext (..)
@@ -19,8 +17,6 @@ import NanoUI.Context
   , getFocusId
   , getHotId
   , getScrollDrag
-  , getScrollOffset
-  , getScrollOffset2D
   , getSelectDropPress
   , getStore
   , intKey
@@ -29,6 +25,15 @@ import NanoUI.Context
   , lookupCustomCursor
   )
 import NanoUI.Font (FontMetrics, sliderHandleSlack, sliderTrackBounds)
+import NanoUI.Frame.Chrome (widgetNodeTypeTable)
+import NanoUI.Frame.Hit (findNodeByWidgetId, nodePointVisible, scrollHitRect)
+import NanoUI.Frame.Scroll (ScrollBarLayout (..), scrollBarsFor)
+import NanoUI.Frame.Select (overlayMenuOwnerAt, selectDropRect)
+import NanoUI.Frame.TextArea.Content (isMouseOnTextAreaScrollBarAt)
+import NanoUI.Frame.TextArea.Geometry (TextAreaGeom (..), textAreaGeom)
+import NanoUI.Frame.TextEdit.Menu (textEditMenuCursorKind, textFieldWidgetAtMouse)
+import NanoUI.Frame.TextInput (nodeTextFieldGeom, searchClearHit)
+import NanoUI.Frame.Window (windowResizeCursorKind)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input
   ( Input (..)
@@ -42,129 +47,81 @@ import NanoUI.Layout.Arena
   ( DirTag (..)
   , NodeIdx
   , NodeType (..)
-  , arenaCount
-  , getScrollContentW
+  , findChildM
+  , findNodeM
   , getDirection
-  , getFirstChild
-  , getNextSibling
   , getNodeType
-  , getNodeValue
   , getOptions
-  , getPadding
   , getParent
   , getRect
   , getStyleIdx
   , getWidgetId
   , isScrollNode
   )
-import NanoUI.Layout.Solve (scrollBarSlotOf)
-import NanoUI.Types (Rect (..), V2 (..), rectContains, v2X, v2Y)
+import NanoUI.Types (Rect (..), V2 (..), rectContains)
 import NanoUI.WidgetText (isTableHeaderStyle)
-import NanoUI.Frame.Chrome (widgetNodeTypeTable)
-import NanoUI.Frame.Hit (findNodeByWidgetId, scrollHitRect, nodePointVisible)
-import NanoUI.Frame.Scroll (ScrollBarLayout (..), scrollBarLayout, textAreaContentGeom)
-import NanoUI.Frame.Scroll.Geometry
-  ( decodeScrollConfig
-  , isScrollStyle2D
-  , scrollChromeSuppressed
-  )
-import NanoUI.Frame.Scroll.Geometry qualified as ScrollGeom (scrollBarLayouts2D)
-import NanoUI.Frame.Select (overlayMenuOwnerAt, selectDropRect)
-import NanoUI.Frame.TextEdit
-  ( TextAreaGeom (..)
-  , TextAreaScrollBarLayouts (..)
-  , isMouseOnTextAreaScrollBarAt
-  , searchClearHit
-  , textAreaGeom
-  , textAreaScrollBarLayouts
-  , textEditMenuCursorKind
-  , textFieldWidgetAtMouse
-  , nodeTextFieldGeom
-  )
-import NanoUI.Frame.Window (windowResizeCursorKind)
 
 uiCursorKind :: Context -> Input -> IO UiCursorKind
 uiCursorKind ctx inp = do
-  mMenu <- textEditMenuCursorKind ctx inp
-  case mMenu of
+  -- The first query with an opinion wins; later ones do not run.
+  mKind <-
+    foldr
+      (\query rest -> query >>= maybe rest (pure . Just))
+      (pure Nothing)
+      [ textEditMenuCursorKind ctx inp
+      , selectDropdownCursorKind ctx inp
+      , windowResizeCursorKind ctx inp
+      , tableColResizeCursorKind ctx inp
+      , scrollThumbCursorKind ctx inp
+      , textFieldHoverCursorKind ctx inp
+      ]
+  case mKind of
     Just k -> pure k
     Nothing -> do
-      let mouse = inputMousePos inp
       table <- widgetNodeTypeTable ctx
-      mDrop <- selectDropdownCursorKind ctx inp
-      case mDrop of
-        Just k -> pure k
-        Nothing -> do
-          mResize <- windowResizeCursorKind ctx inp
-          case mResize of
-            Just k -> pure k
-            Nothing -> do
-              mCol <- tableColResizeCursorKind ctx inp
-              case mCol of
-                Just k -> pure k
-                Nothing -> do
-                  mScroll <- scrollThumbCursorKind ctx inp
-                  case mScroll of
-                    Just k -> pure k
-                    Nothing -> do
-                      mField <- textFieldHoverCursorKind ctx inp
-                      case mField of
-                        Just k -> pure k
-                        Nothing -> do
-                          active <- readIORef (ctxActiveId ctx)
-                          activeKind <- cursorKindAt table ctx active mouse inp
-                          if activeKind /= UiCursorDefault
-                            then pure activeKind
-                            else do
-                              hot <- getHotId ctx
-                              cursorKindAt table ctx hot mouse inp
+      let mouse = inputMousePos inp
+      active <- readIORef (ctxActiveId ctx)
+      activeKind <- cursorKindAt table ctx active mouse inp
+      if activeKind /= UiCursorDefault
+        then pure activeKind
+        else do
+          hot <- getHotId ctx
+          cursorKindAt table ctx hot mouse inp
 
 selectDropdownCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
 selectDropdownCursorKind ctx inp = do
   let mouse = inputMousePos inp
+      na = ctxNodeArena ctx
   dropPress <- getSelectDropPress ctx
   store <- getStore ctx
-  count <- arenaCount (ctxNodeArena ctx)
-  let go idx
-        | idx >= count = pure Nothing
-        | otherwise = do
-            nt <- getNodeType (ctxNodeArena ctx) idx
-            if nt /= NodeSelect
-              then go (idx + 1)
-              else do
-                wid <- getWidgetId (ctxNodeArena ctx) idx
-                let key = intKey wid
-                    open = isSelectOpen store key
-                opts <- getOptions (ctxNodeArena ctx) idx
-                (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-                let fm = ctxFontMetrics ctx
-                    dropRect = selectDropRect fm x y w h (length opts)
-                    inDrop = rectContains dropRect mouse
-                if inDrop && (open || dropPress)
-                  then pure (Just UiCursorPointer)
-                  else go (idx + 1)
-  mSel <- go 0
-  case mSel of
-    Just k -> pure (Just k)
-    -- A focused combo's dropdown (visible while its field holds focus) is not
-    -- a select: pointer over its menu like the select's. The text-input menu
-    -- case inside overlayMenuOwnerAt is unreachable here —
-    -- textEditMenuCursorKind runs first in uiCursorKind.
-    Nothing -> do
-      mOwner <- overlayMenuOwnerAt ctx mouse
-      pure (if isJust mOwner then Just UiCursorPointer else Nothing)
+  mSel <-
+    findNodeM na $ \idx -> do
+      nt <- getNodeType na idx
+      if nt /= NodeSelect
+        then pure False
+        else do
+          wid <- getWidgetId na idx
+          opts <- getOptions na idx
+          (x, y, w, h) <- getRect na idx
+          let dropRect = selectDropRect (ctxFontMetrics ctx) x y w h (length opts)
+          pure ((isSelectOpen store (intKey wid) || dropPress) && rectContains dropRect mouse)
+  if isJust mSel
+    then pure (Just UiCursorPointer)
+    else
+      -- A focused combo's dropdown (visible while its field holds focus) is
+      -- not a select: pointer over its menu like the select's. The text-input
+      -- menu case inside overlayMenuOwnerAt is unreachable here, since
+      -- textEditMenuCursorKind runs first in uiCursorKind.
+      (UiCursorPointer <$) <$> overlayMenuOwnerAt ctx mouse
 
 scrollThumbCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
 scrollThumbCursorKind ctx inp = do
   mDrag <- getScrollDrag ctx
-  let clicking = inputMouseDown inp
-  if clicking && isJust mDrag
+  if inputMouseDown inp && isJust mDrag
     then pure (Just UiCursorGrabbing)
     else do
       onThumb <- scrollThumbHit ctx (inputMousePos inp)
-      if onThumb
-        then pure (Just (grabHoverKind True inp))
-        else pure Nothing
+      pure (if onThumb then Just (grabHoverKind True inp) else Nothing)
 
 -- Field well, not the label. Independent of focus and hot. A search field's
 -- clear button raises the pointer cursor; everywhere else over a field is text.
@@ -179,79 +136,16 @@ textFieldHoverCursorKind ctx inp = do
       pure (Just (if onClear then UiCursorPointer else UiCursorText))
 
 scrollThumbHit :: Context -> V2 -> IO Bool
-scrollThumbHit ctx mouse = do
-  count <- arenaCount (ctxNodeArena ctx)
-  go 0 count
+scrollThumbHit ctx mouse =
+  fmap isJust . findNodeM na $ \idx -> do
+    nt <- getNodeType na idx
+    if nt /= NodeTextArea && not (isScrollNode nt)
+      then pure False
+      else do
+        wid <- getWidgetId na idx
+        any (\(_, layout, _) -> rectContains (sbThumb layout) mouse) <$> scrollBarsFor ctx idx wid
   where
-    go idx count
-      | idx >= count = pure False
-      | otherwise = do
-          nt <- getNodeType (ctxNodeArena ctx) idx
-          if nt == NodeTextArea
-            then do
-              wid <- getWidgetId (ctxNodeArena ctx) idx
-              (fm, field, _lineH, contentW, contentH, _lanes) <- textAreaContentGeom ctx idx
-              V2 curX curY <- getScrollOffset2D ctx wid
-              let layouts = textAreaScrollBarLayouts fm field contentW contentH curX curY
-                  hitV = case tasbVertical layouts of
-                    Just layout -> rectContains (sbThumb layout) mouse
-                    Nothing -> False
-                  hitH = case tasbHorizontal layouts of
-                    Just layout -> rectContains (sbThumb layout) mouse
-                    Nothing -> False
-              if hitV || hitH
-                then pure True
-                else go (idx + 1) count
-            else if not (isScrollNode nt)
-              then go (idx + 1) count
-              else do
-              si <- getStyleIdx (ctxNodeArena ctx) idx
-              let cfg = decodeScrollConfig si
-              wid <- getWidgetId (ctxNodeArena ctx) idx
-              pad <- getPadding (ctxNodeArena ctx) idx
-              (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-              dir <- getDirection (ctxNodeArena ctx) idx
-              slot <- scrollBarSlotOf (ctxNodeArena ctx) idx
-              let fm = ctxFontMetrics ctx
-                  thumbHit axis contentSize axisOff =
-                    case scrollBarLayout fm slot axis x y w h pad contentSize axisOff of
-                      Just layout -> rectContains (sbThumb layout) mouse
-                      Nothing -> False
-              onThumb <-
-                if isScrollStyle2D si
-                  then do
-                    contentH <- getNodeValue (ctxNodeArena ctx) idx
-                    contentW <- getScrollContentW (ctxNodeArena ctx) idx
-                    V2 offX offY <- getScrollOffset2D ctx wid
-                    let (mV, mH) =
-                          ScrollGeom.scrollBarLayouts2D
-                            fm
-                            slot
-                            cfg
-                            x
-                            y
-                            w
-                            h
-                            pad
-                            contentW
-                            contentH
-                            offX
-                            offY
-                        hitLayout mLayout =
-                          case mLayout of
-                            Just layout -> rectContains (sbThumb layout) mouse
-                            Nothing -> False
-                    pure (hitLayout mV || hitLayout mH)
-                  else
-                    if scrollChromeSuppressed cfg False dir
-                      then pure False
-                      else do
-                        contentSize <- getNodeValue (ctxNodeArena ctx) idx
-                        off <- getScrollOffset ctx wid
-                        pure (thumbHit dir contentSize off)
-              if onThumb
-                then pure True
-                else go (idx + 1) count
+    na = ctxNodeArena ctx
 
 cursorKindAt :: IM.IntMap NodeType -> Context -> WidgetId -> V2 -> Input -> IO UiCursorKind
 cursorKindAt table ctx wid mouse inp
@@ -303,13 +197,7 @@ selectCursorKind ctx wid mouse = do
     then pure UiCursorDefault
     else do
       mrect <- scrollHitRect ctx wid
-      pure $
-        case mrect of
-          Nothing -> UiCursorDefault
-          Just rect ->
-            if rectContains rect mouse
-              then UiCursorPointer
-              else UiCursorDefault
+      pure (if maybe False (`rectContains` mouse) mrect then UiCursorPointer else UiCursorDefault)
 
 widgetVisibleAt :: Context -> WidgetId -> V2 -> IO Bool
 widgetVisibleAt ctx wid mouse = do
@@ -326,8 +214,7 @@ widgetPointerCursor ctx wid mouse = do
 sliderCursorKind :: Context -> WidgetId -> V2 -> Input -> IO UiCursorKind
 sliderCursorKind ctx wid mouse inp = do
   active <- readIORef (ctxActiveId ctx)
-  let dragging = active == wid && inputMouseDown inp
-  if dragging
+  if active == wid && inputMouseDown inp
     then pure UiCursorGrabbing
     else do
       visible <- widgetVisibleAt ctx wid mouse
@@ -335,13 +222,12 @@ sliderCursorKind ctx wid mouse inp = do
         then pure UiCursorDefault
         else do
           mrect <- scrollHitRect ctx wid
-          let fm = ctxFontMetrics ctx
           pure $
             case mrect of
               Nothing -> UiCursorDefault
               Just (Rect x y w h) ->
-                let tr = sliderTrackBounds fm x y w h
-                    hitRect = Rect (rectX tr) (rectY tr - sliderHandleSlack) (rectW tr) (rectH tr + 2 * sliderHandleSlack)
+                let Rect tx ty tw th = sliderTrackBounds (ctxFontMetrics ctx) x y w h
+                    hitRect = Rect tx (ty - sliderHandleSlack) tw (th + 2 * sliderHandleSlack)
                  in grabDragKind (rectContains hitRect mouse) False inp
 
 textInputCursorKind :: Context -> WidgetId -> V2 -> IO UiCursorKind
@@ -383,51 +269,42 @@ textFieldCursorKind ctx wid mouse fieldAt = do
     then pure UiCursorDefault
     else do
       mrect <- scrollHitRect ctx wid
-      case mrect of
-        Nothing -> pure UiCursorDefault
-        Just (Rect x y w h) ->
-          let field = fieldAt (ctxFontMetrics ctx) x y w h
-           in pure $
-                if rectContains field mouse
-                  then UiCursorText
-                  else UiCursorDefault
+      pure $
+        case mrect of
+          Just (Rect x y w h)
+            | rectContains (fieldAt (ctxFontMetrics ctx) x y w h) mouse -> UiCursorText
+          _ -> UiCursorDefault
 
 tableColResizeCursorKind :: Context -> Input -> IO (Maybe UiCursorKind)
 tableColResizeCursorKind ctx inp = do
   store <- getStore ctx
   let dragging = any (\n -> n <= -1000 && n > -2000) (IM.elems (storeInt store))
+      na = ctxNodeArena ctx
+      V2 mx my = inputMousePos inp
   if dragging && inputMouseDown inp
     then pure (Just UiCursorEwResize)
     else do
-      count <- arenaCount (ctxNodeArena ctx)
-      let mouse = inputMousePos inp
-          go idx
-            | idx >= count = pure Nothing
-            | otherwise = do
-                nt <- getNodeType (ctxNodeArena ctx) idx
-                if nt /= NodeButton
-                  then go (idx + 1)
-                  else do
-                    si <- getStyleIdx (ctxNodeArena ctx) idx
-                    if not (isTableHeaderStyle si)
-                      then go (idx + 1)
-                      else do
-                        (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
-                        -- The resize cursor spans the whole column height
-                        -- (header plus body cells down to the body
-                        -- scroller's bottom edge), matching the drag grab
-                        -- zone: tableBodyScrollerBottom locates the same
-                        -- body scroller whose rect the grab zone anchors
-                        -- on (its prev-frame value, readable at build
-                        -- time), so the two zones cannot disagree.
-                        mBot <- tableBodyScrollerBottom ctx idx
-                        let yBot = fromMaybe (y + h) mBot
-                            hitY = v2Y mouse >= y && v2Y mouse <= yBot
-                            hitEdge = abs (v2X mouse - (x + w)) <= 4
-                        if hitY && hitEdge && w > 0 && h > 0
-                          then pure (Just UiCursorEwResize)
-                          else go (idx + 1)
-      go 0
+      mEdge <-
+        findNodeM na $ \idx -> do
+          nt <- getNodeType na idx
+          if nt /= NodeButton
+            then pure False
+            else do
+              si <- getStyleIdx na idx
+              if not (isTableHeaderStyle si)
+                then pure False
+                else do
+                  (x, y, w, h) <- getRect na idx
+                  -- The resize cursor spans the whole column height
+                  -- (header plus body cells down to the body
+                  -- scroller's bottom edge), matching the drag grab
+                  -- zone: tableBodyScrollerBottom locates the same
+                  -- body scroller whose rect the grab zone anchors
+                  -- on (its prev-frame value, readable at build
+                  -- time), so the two zones cannot disagree.
+                  yBot <- fromMaybe (y + h) <$> tableBodyScrollerBottom ctx idx
+                  pure (my >= y && my <= yBot && abs (mx - (x + w)) <= 4 && w > 0 && h > 0)
+      pure (UiCursorEwResize <$ mEdge)
 
 -- | Bottom edge of a table's body scroller, located structurally from one
 -- of its header buttons: walk up to the first ancestor that has a direct
@@ -444,32 +321,20 @@ tableBodyScrollerBottom ctx = goUp
       if p < 0
         then pure Nothing
         else do
-          mScroller <- firstColumnScrollChild p
+          mScroller <-
+            findChildM na p $ \c -> do
+              nt <- getNodeType na c
+              if isScrollNode nt
+                then (== DirColumn) <$> getDirection na c
+                else pure False
           case mScroller of
             Just sc -> do
               (_, sy, _, sh) <- getRect na sc
               pure (Just (sy + sh))
             Nothing -> goUp p
-    firstColumnScrollChild p = do
-      fc <- getFirstChild na p
-      let go c
-            | c < 0 = pure Nothing
-            | otherwise = do
-                nt <- getNodeType na c
-                hit <-
-                  if not (isScrollNode nt)
-                    then pure False
-                    else do
-                      d <- getDirection na c
-                      pure (d == DirColumn)
-                if hit
-                  then pure (Just c)
-                  else getNextSibling na c >>= go
-      go fc
 
 pointerCursorWanted :: Context -> Input -> IO Bool
 pointerCursorWanted ctx inp = cursorKindIs ctx inp UiCursorPointer
 
 cursorKindIs :: Context -> Input -> UiCursorKind -> IO Bool
 cursorKindIs ctx inp want = (== want) <$> uiCursorKind ctx inp
-

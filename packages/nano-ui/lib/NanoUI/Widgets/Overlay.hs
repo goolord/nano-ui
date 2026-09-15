@@ -7,8 +7,8 @@ module NanoUI.Widgets.Overlay
 where
 
 import Control.Monad (void, when)
-import Data.IORef (readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Effectful (Eff, type (:>))
@@ -16,12 +16,10 @@ import NanoUI.Context
   ( Context (..)
   , beginModal
   , endModal
-  , getCurrentFloatingId
   , getPrevRect
   , getStore
   , intKey
   , seedFloatingPanel
-  , setCurrentFloatingId
   )
 import NanoUI.Font (resolveLayoutGap, resolveLayoutPadding)
 import NanoUI.Id (WidgetId)
@@ -29,7 +27,7 @@ import NanoUI.Input
   ( inputMousePos
   , inputWindowSize
   )
-import NanoUI.Layout.Arena (NodeType (..), addNode, rootAttachParent, setWidgetId)
+import NanoUI.Layout.Arena (NodeType (..), addNode)
 import NanoUI.Monad
   ( Ui
   , askContext
@@ -52,7 +50,7 @@ import NanoUI.Style
   , windowMargin
   , windowPad
   )
-import NanoUI.Types (Rect (..), Size (..), rectContains, rectH, rectW)
+import NanoUI.Types (Rect (..), Size (..), rectHit, rectNonEmpty)
 import NanoUI.Widgets.Chrome
   ( closeButton
   , floatMinFor
@@ -70,11 +68,11 @@ import NanoUI.Widgets.Layout
   , sep
   )
 import NanoUI.Widgets.Node
-  ( Responding (..)
-  , Response (..)
+  ( Response (..)
   , emptyModalResp
+  , floatingPanel
   , mkResponse
-  , parentIdx
+  , respClicked
   )
 
 data OverlayKind
@@ -91,108 +89,79 @@ window = overlay WindowOverlay
 overlay ::
   Ui :> es =>
   OverlayKind -> Bool -> Text -> Eff es a -> Eff es (Response, Maybe a)
-overlay kind open title child
-  | not open = do
-      wid <- nextId
-      pure (emptyModalResp wid, Nothing)
-  | otherwise = do
-      wid <- nextId
+overlay kind open title child = do
+  wid <- nextId
+  if not open
+    then pure (emptyModalResp wid, Nothing)
+    else do
       ctx <- askContext
       inp <- askInput
-      (closeResp, body) <- do
-        stack <- uiIO (readIORef (ctxContainerStack ctx))
-        let
-          fm = ctxFontMetrics ctx
-          parent0 = parentIdx stack
-          Size winW winH = inputWindowSize inp
-          margin = resolveLayoutGap fm windowMargin
-          availW = max 1 (winW - 2 * margin)
-          availH = max 1 (winH - 2 * margin)
-          isModal = kind == ModalOverlay
-          padding = if isModal then Padding 14 14 0 12 else windowPad
-          barH = if isModal then modalTitleBarH else titleBarChromeHFor
-          -- Window body breathing room: one side-pad between the chrome and
-          -- the body, matching the window's left/right padding. Modals keep
-          -- their own larger gap.
-          bodyGap = if isModal then 8 else 10
-          minWidth =
-            floatMinFor
-              (if isModal then 260 else 280)
-              availW
-          minHeight =
-            if isModal
-              then 0
-              else
-                let
-                  pad = resolveLayoutPadding fm padding
-                 in
-                  min availH (padT pad + titleBarChromeHFor + bodyGap + padB pad)
-          maxW = availW
-          maxH = availH
-        prevFloat <- uiIO $ do
-          parent <- rootAttachParent (ctxNodeArena ctx) parent0
-          idx <-
-            addNode
-              (ctxNodeArena ctx)
-              (if isModal then NodeModal else NodeWindow)
-              parent
-              Column
-              Fit
-              Fit
-              padding
-              bodyGap
-              minWidth
-              minHeight
-              maxW
-              maxH
-              0
-              AlignStart
-              AlignTop
-          setWidgetId (ctxNodeArena ctx) idx wid
-          writeIORef (ctxContainerStack ctx) (idx : stack)
+      let
+        fm = ctxFontMetrics ctx
+        Size winW winH = inputWindowSize inp
+        margin = resolveLayoutGap fm windowMargin
+        availW = max 1 (winW - 2 * margin)
+        availH = max 1 (winH - 2 * margin)
+        isModal = kind == ModalOverlay
+        padding = if isModal then Padding 14 14 0 12 else windowPad
+        barH = if isModal then modalTitleBarH else titleBarChromeHFor
+        -- Window body breathing room: one side-pad between the chrome and
+        -- the body, matching the window's left/right padding. Modals keep
+        -- their own larger gap.
+        bodyGap = if isModal then 8 else 10
+        minWidth =
+          floatMinFor
+            (if isModal then 260 else 280)
+            availW
+        minHeight =
+          if isModal
+            then 0
+            else
+              let
+                pad = resolveLayoutPadding fm padding
+               in
+                min availH (padT pad + titleBarChromeHFor + bodyGap + padB pad)
+        addOverlayNode parent =
+          addNode
+            (ctxNodeArena ctx)
+            (if isModal then NodeModal else NodeWindow)
+            parent
+            Column
+            Fit
+            Fit
+            padding
+            bodyGap
+            minWidth
+            minHeight
+            availW
+            availH
+            0
+            AlignStart
+            AlignTop
+        enter = do
           when isModal (beginModal ctx)
-          seedRect <- floatingSeedRect ctx wid isModal minWidth minHeight margin winW winH
-          seedFloatingPanel ctx wid seedRect
-          prev <- getCurrentFloatingId ctx
-          setCurrentFloatingId ctx (Just wid)
-          pure prev
-        (closeResp, r) <- do
-          close <-
-            row' (titleBarLayoutFor barH) $ do
-              when (not (T.null title)) $
-                case kind of
-                  ModalOverlay ->
-                    void
-                      ( labelEx
-                          (titleLabelLayoutFor barH)
-                          title
-                      )
-                  WindowOverlay ->
-                    withKey
-                      title
-                      ( void
-                          ( labelEx
-                              (titleLabelLayoutFor barH)
-                              title
-                          )
-                      )
-              flex
-              withKey ("close" :: Text) closeButton
-          when (kind == ModalOverlay && not (T.null title)) sep
-          r <- scrollWith (tight . grow) child
-          pure (close, r)
-        uiIO $ do
-          when isModal (endModal ctx)
-          writeIORef (ctxContainerStack ctx) stack
-          setCurrentFloatingId ctx prevFloat
-        pure (closeResp, r)
+          seedFloatingPanel ctx wid
+            =<< floatingSeedRect ctx wid isModal minWidth minHeight margin winW winH
+        titleLabel = void (labelEx (titleLabelLayoutFor barH) title)
+      (closeResp, body) <- floatingPanel False wid addOverlayNode enter $ do
+        close <-
+          row' (titleBarLayoutFor barH) $ do
+            when (not (T.null title)) $
+              case kind of
+                ModalOverlay -> titleLabel
+                WindowOverlay -> withKey title titleLabel
+            flex
+            withKey ("close" :: Text) closeButton
+        when (isModal && not (T.null title)) sep
+        r <- scrollWith (tight . grow) child
+        when isModal (uiIO (endModal ctx))
+        pure (close, r)
       mrect <- uiIO (getPrevRect ctx wid)
       let
-        mouse = inputMousePos inp
-        panel = maybe (Rect 0 0 0 0) id mrect
-        inPanel = rectW panel > 0 && rectH panel > 0 && rectContains panel mouse
+        panel = fromMaybe (Rect 0 0 0 0) mrect
+        inPanel = rectHit panel (inputMousePos inp)
       outside <-
-        if kind == ModalOverlay && rectW panel > 0 && rectH panel > 0
+        if isModal && rectNonEmpty panel
           then useDismissable panel
           else pure False
       let dismissed = outside || respClicked closeResp
@@ -214,7 +183,7 @@ floatingSeedRect ::
 floatingSeedRect ctx wid isModal minWidth minHeight margin winW winH = do
   mPrev <- getPrevRect ctx wid
   case mPrev of
-    Just r | rectW r > 0 && rectH r > 0 -> pure r
+    Just r | rectNonEmpty r -> pure r
     _ -> do
       store <- getStore ctx
       let

@@ -2,9 +2,10 @@
 
 module NanoUI.Widgets.Tabs
   ( Tab (..), TabStyle (..), TabOrientation (..), TabResponse (..)
-  , tabRespClicked, tabRespChanged, tab, closableTab, mkTab
-  , tabs, tabsEx, tabBar, tabBarEx, tabsEmit, tabsEmitEx
-  , useTab, useTabIdx, boundedTabs
+  , TabsConfig (..), defaultTabsConfig
+  , tab, closableTab
+  , tabs, tabsWith, tabBar, tabBarWith, tabsEmit
+  , boundedTabs
   )
 where
 
@@ -30,6 +31,7 @@ import NanoUI.Context
 import NanoUI.Font (resolveLayoutPadding)
 import NanoUI.Frame.Hit (findNodeByWidgetId)
 import NanoUI.Frame.Scroll.Geometry (scrollAxisRange, scrollBare, scrollHorizontalHidden, scrollLineFor)
+import NanoUI.Hooks (useEnum)
 import NanoUI.Id (WidgetId)
 import NanoUI.Input (inputMousePos, inputScroll)
 import NanoUI.Layout.Arena (setNodeValue)
@@ -48,16 +50,17 @@ import NanoUI.Style
   , themeMuted
   , tight
   )
-import NanoUI.Types (Rect (..), rectContains, rectW, v2Y)
+import NanoUI.Types (Rect (..), clamp, rectContains, rectW, v2Y)
 import NanoUI.WidgetText (buttonFlagClose, buttonFlagTab)
-import NanoUI.Widgets.Behavior (useSelection)
 import NanoUI.Widgets.Combinators (buttonStyledEx)
 import NanoUI.Widgets.Layout (column', columnWith, row', rowWith, scrollAreaIdConfigured)
 import NanoUI.Widgets.Node
-  ( Clickable (..)
-  , RightClickable (..)
-  , Responding (..)
+  ( HasResponse (..)
   , Response (..)
+  , respChanged
+  , respClicked
+  , respId
+  , respRect
   , setChanged
   , setClicked
   , tagContainer
@@ -68,6 +71,17 @@ data TabStyle = TabUnderline | TabPill | TabSegmented | TabContained
 
 data TabOrientation = TabTop | TabBottom | TabLeft | TabRight
   deriving (Eq, Show, Enum, Bounded)
+
+-- | Header look and placement for 'tabsWith' and 'tabBarWith'.
+data TabsConfig = TabsConfig
+  { tabsStyle :: !TabStyle
+  , tabsOrientation :: !TabOrientation
+  }
+  deriving (Eq, Show)
+
+-- | Underlined headers along the top.
+defaultTabsConfig :: TabsConfig
+defaultTabsConfig = TabsConfig TabUnderline TabTop
 
 data Tab a body = Tab
   { tabKey :: !a
@@ -85,36 +99,15 @@ data TabResponse a = TabResponse
   }
   deriving (Eq, Show)
 
-instance Responding (TabResponse a) where
-  respId (TabResponse r _ _) = respId r
-  respRect (TabResponse r _ _) = respRect r
-  respHovered (TabResponse r _ _) = respHovered r
-  respPressed (TabResponse r _ _) = respPressed r
-  respClicked (TabResponse r _ _) = respClicked r
-  respChanged (TabResponse r _ _) = respChanged r
-  respRightPressed (TabResponse r _ _) = respRightPressed r
-  respRightClicked (TabResponse r _ _) = respRightClicked r
-
-instance Clickable (TabResponse a) where
-  respIsClicked (TabResponse r _ _) = respClicked r
-
-instance RightClickable (TabResponse a) where
-  respIsRightClicked (TabResponse r _ _) = respRightClicked r
-
-tabRespClicked :: TabResponse a -> Bool
-tabRespClicked = respClicked
-
-tabRespChanged :: TabResponse a -> Bool
-tabRespChanged = respChanged
+instance HasResponse (TabResponse a) where
+  {-# INLINE toResponse #-}
+  toResponse = tabResponse
 
 tab :: a -> Text -> body -> Tab a body
 tab key title body = Tab key title False False Nothing body
 
 closableTab :: a -> Text -> body -> Tab a body
 closableTab key title body = Tab key title True False Nothing body
-
-mkTab :: a -> Text -> Bool -> Bool -> Maybe Text -> body -> Tab a body
-mkTab = Tab
 
 -- | Header chrome height: one source for the strip bar, the scroller, and
 -- the paging arrows so they cannot drift apart.
@@ -130,13 +123,12 @@ data Header a = Header
 
 tabStrip ::
   (Eq a, Ui :> es) =>
-  TabStyle ->
-  TabOrientation ->
+  TabsConfig ->
   a ->
   [Tab a body] ->
   Maybe (a -> Eff es ()) ->
   Eff es (TabResponse a, a)
-tabStrip style orient cur tabList mRenderBody = do
+tabStrip (TabsConfig style orient) cur tabList mRenderBody = do
   ctx <- askContext
   groupId <- nextId
   let vertical = orient == TabLeft || orient == TabRight
@@ -291,7 +283,7 @@ renderScrollableHeaders ctx style hdrLay barLay groupId cur tabList = do
         | maybe False respClicked leftResp, canLeft = max 0 (off - page)
         | maybe False respClicked rightResp, canRight = min maxOff (off + page)
         | overflow, notches /= 0, maxOff > 0 =
-            max 0 (min maxOff (off + fromIntegral notches * scrollLineFor))
+            clamp 0 maxOff (off + fromIntegral notches * scrollLineFor)
         | overflow, off > maxOff + 0.5 = maxOff
         | otherwise = off
       finalOff
@@ -392,40 +384,34 @@ syncTabHeaderActive ctx active resps =
       Just i -> setNodeValue (ctxNodeArena ctx) i (if k == active then 1 else 0)
       Nothing -> pure ()
 
+-- | Tab headers plus the active tab's body, with 'defaultTabsConfig'.
 tabs :: (Foldable f, Eq a, Ui :> es) => a -> f (Tab a (Eff es ())) -> Eff es (TabResponse a, a)
-tabs = tabsEx TabUnderline TabTop
+tabs = tabsWith defaultTabsConfig
 
-tabsEx :: (Foldable f, Eq a, Ui :> es) => TabStyle -> TabOrientation -> a -> f (Tab a (Eff es ())) -> Eff es (TabResponse a, a)
-tabsEx style orient cur inputTabs =
+tabsWith :: (Foldable f, Eq a, Ui :> es) => TabsConfig -> a -> f (Tab a (Eff es ())) -> Eff es (TabResponse a, a)
+tabsWith cfg cur inputTabs =
   let ts = foldr (:) [] inputTabs
-   in tabStrip style orient cur ts (Just (renderBody ts))
+   in tabStrip cfg cur ts (Just (renderBody ts))
 
+-- | Tab headers only; the caller renders the body.
 tabBar :: (Foldable f, Eq a, Ui :> es) => a -> f (Tab a body) -> Eff es (TabResponse a, a)
-tabBar = tabBarEx TabUnderline TabTop
+tabBar = tabBarWith defaultTabsConfig
 
-tabBarEx :: (Foldable f, Eq a, Ui :> es) => TabStyle -> TabOrientation -> a -> f (Tab a body) -> Eff es (TabResponse a, a)
-tabBarEx style orient cur ts = tabStrip style orient cur (foldr (:) [] ts) Nothing
+tabBarWith :: (Foldable f, Eq a, Ui :> es) => TabsConfig -> a -> f (Tab a body) -> Eff es (TabResponse a, a)
+tabBarWith cfg cur ts = tabStrip cfg cur (foldr (:) [] ts) Nothing
 
+-- | 'tabs' that emits @toAction@ for the newly selected tab.
 tabsEmit :: (Foldable f, Typeable action, Eq a, Ui :> es) => (a -> action) -> a -> f (Tab a (Eff es ())) -> Eff es (TabResponse a, a)
-tabsEmit = tabsEmitEx TabUnderline TabTop
-
-tabsEmitEx :: (Foldable f, Typeable action, Eq a, Ui :> es) => TabStyle -> TabOrientation -> (a -> action) -> a -> f (Tab a (Eff es ())) -> Eff es (TabResponse a, a)
-tabsEmitEx style orient toAction cur ts = do
-  (tabResp, nextTab) <- tabsEx style orient cur ts
-  when (tabRespClicked tabResp && nextTab /= cur) $ emit (toAction nextTab)
+tabsEmit toAction cur ts = do
+  (tabResp, nextTab) <- tabs cur ts
+  when (respChanged tabResp) $ emit (toAction nextTab)
   pure (tabResp, nextTab)
-
-useTabIdx :: (Ui :> es) => Int -> Eff es (Int, Int -> Eff es ())
-useTabIdx = useSelection
-
-useTab :: (Enum a, Ui :> es) => a -> Eff es (a, a -> Eff es ())
-useTab initial = fmap (\(c, s) -> (toEnum c, s . fromEnum)) (useSelection (fromEnum initial))
 
 boundedTabs :: (Bounded a, Enum a, Eq a, Ui :> es) => a -> (a -> Text) -> (a -> Eff es ()) -> Eff es ()
 boundedTabs initial encodeTab tabf = do
-  (curTab, setTab) <- useTab initial
+  (curTab, setTab) <- useEnum initial
   (tabResp, nextTab) <- tabs curTab (fmap (\x -> tab x (encodeTab x) (tabf x)) [minBound .. maxBound])
-  when (tabRespChanged tabResp) (setTab nextTab)
+  when (respChanged tabResp) (setTab nextTab)
 
 renderBody :: (Eq a, Ui :> es) => [Tab a (Eff es ())] -> a -> Eff es ()
 renderBody ts activeKey =

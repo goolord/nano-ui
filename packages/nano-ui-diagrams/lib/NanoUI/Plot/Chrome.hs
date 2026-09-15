@@ -66,7 +66,6 @@ import NanoUI.Plot.Types
   , GridMode (..)
   , LegendPos (..)
   , MarkShape (..)
-  , Range (..)
   , Series (..)
   , SeriesData (..)
   , SeriesKind (..)
@@ -103,8 +102,8 @@ data ChartChrome = ChartChrome
   , ccXTitleY :: !Double
   }
 
-chartMargins :: FontMetrics -> PlotStyle -> Chart -> Margins
-chartMargins fm _ chart = ccMargins (chartChrome fm chart)
+chartMargins :: FontMetrics -> Chart -> Margins
+chartMargins fm chart = ccMargins (chartChrome fm chart)
 
 chartChrome :: FontMetrics -> Chart -> ChartChrome
 chartChrome fm chart =
@@ -205,13 +204,12 @@ chartDiagram fm theme ps chart =
       botM = marginBottom margins
       topM = marginTop margins
       (xDom, yDom) = seriesDomains chart
-      plotRange = Range 0 1
       xTicks = niceTicks 6 xDom
       yTicks = niceTicks 6 yDom
       tickPad = ccTickPad chrome
       xTickPad = ccXTickPad chrome
-      toX v = domainToPlot xDom plotRange v
-      toY v = domainToPlot yDom plotRange v
+      toX = domainToPlot xDom
+      toY = domainToPlot yDom
       horizontalGrid = mconcat [fromVertices [p2 (0, toY y), p2 (1, toY y)] | y <- yTicks]
       verticalGrid = mconcat [fromVertices [p2 (toX x, 0), p2 (toX x, 1)] | x <- xTicks]
       grid =
@@ -281,7 +279,7 @@ renderSeries ps c xDom yDom chart s =
       fillCol = lerpColor c (plotFrameBg ps) 0.18
       fill = colourOf fillCol
       pts = seriesPoints chart s
-      toP (x, y) = p2 (domainToPlot xDom (Range 0 1) x, domainToPlot yDom (Range 0 1) y)
+      toP (x, y) = p2 (domainToPlot xDom x, domainToPlot yDom y)
    in case seriesKind s of
         LineSeries w _ ->
           fromVertices (U.foldr (\p acc -> toP p : acc) [] pts) # lc ink # lwO (plotStroke w)
@@ -335,10 +333,9 @@ areaPath :: Double -> Domain -> Domain -> U.Vector (Double, Double) -> Diagram B
 areaPath baseline xDom yDom pts
   | U.null pts = mempty
   | otherwise =
-      let !unitRange = Range 0 1
-          !baseY = domainToPlot yDom unitRange baseline
-          toTop (!x, !y) = p2 (domainToPlot xDom unitRange x, domainToPlot yDom unitRange y)
-          toBase (!x, !_) = p2 (domainToPlot xDom unitRange x, baseY)
+      let !baseY = domainToPlot yDom baseline
+          toTop (!x, !y) = p2 (domainToPlot xDom x, domainToPlot yDom y)
+          toBase (!x, !_) = p2 (domainToPlot xDom x, baseY)
 
           -- Forward traversal builds `top` in order
           top = U.foldr (\p acc -> toTop p : acc) [] pts
@@ -351,7 +348,7 @@ closedPoly pts = fromVertices pts # closeTrail # strokeTrail
 
 stepPoints :: U.Vector (Double, Double) -> Domain -> Domain -> V.Vector (P2 Double)
 stepPoints pts xDom yDom =
-  let toP (x, y) = p2 (domainToPlot xDom (Range 0 1) x, domainToPlot yDom (Range 0 1) y)
+  let toP (x, y) = p2 (domainToPlot xDom x, domainToPlot yDom y)
    in V.generate (2 * max 0 (U.length pts - 1)) $ \i ->
         let (!segment, !corner) = i `quotRem` 2
             (!x0, !y0) = pts U.! segment

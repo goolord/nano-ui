@@ -8,13 +8,10 @@ module NanoUI.Sdl.Session
 import Control.Exception (bracket)
 import Control.Monad (void)
 import Data.IORef (newIORef, readIORef, writeIORef)
-import Data.Primitive.SmallArray (sizeofSmallArray)
-import NanoUI
-  ( Input (..)
-  , emptyInput
-  , inputWindowSize
-  )
+import Data.Maybe (maybeToList)
+import NanoUI (Input (..), emptyInput)
 import NanoUI.Debug (debugRefreshSec)
+import NanoUI.Input (clearEphemeral)
 import NanoUI.Runner
   ( SessionDriver (..)
   , newDrawingLock
@@ -34,7 +31,6 @@ import NanoUI.Sdl.Cursor (syncPointerCursor)
 import NanoUI.Sdl.Input
   ( SdlEvent (..)
   , applyEvent
-  , clearEphemeral
   , isButtonEdge
   , isHardQuit
   , pollEvents
@@ -91,11 +87,10 @@ runSdlSession options ctx setup shouldQuit drawFn =
                       writeIORef prev s
     let drainUntilQuiet c inp = do
           pending <- pollEvents
-          let inp' = foldl' applyEvent inp pending
-          (c', inp'') <- syncDisplay c env inp'
-          if sizeofSmallArray pending == 0
-            then pure (c', inp'')
-            else drainUntilQuiet c' inp''
+          (c', inp') <- syncDisplay c env (foldl' applyEvent inp pending)
+          if null pending
+            then pure (c', inp')
+            else drainUntilQuiet c' inp'
     let inpSeed = emptyInput {inputWindowSize = sdlWindowSize options}
     (ctx1, inp0) <- drainUntilQuiet ctx0 inpSeed
     writeIORef ctxRef ctx1
@@ -126,11 +121,9 @@ runSdlSession options ctx setup shouldQuit drawFn =
     writeIORef prev synced1
     let drv =
           SessionDriver
-            { sdPollEvents    = foldr (:) [] <$> pollEvents
+            { sdPollEvents    = pollEvents
             , sdWaitEvents    = \t ->
-                if t < 0
-                  then foldr (:) [] <$> waitEvent
-                  else foldr (:) [] <$> waitEventTimeout t
+                maybeToList <$> if t < 0 then waitEvent else waitEventTimeout t
             , sdApplyEvent    = applyEvent
             , sdIsButtonEdge  = isButtonEdge
             , sdIsHardQuit    = isHardQuit

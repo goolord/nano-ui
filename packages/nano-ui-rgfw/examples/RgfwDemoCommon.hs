@@ -34,7 +34,6 @@ import NanoUI
   , slider
   , tab
   , tabBar
-  , tabRespClicked
   , textArea
   , textInput
   , whenM
@@ -212,7 +211,7 @@ appView m = do
         , tab TabArchitecture "Architecture" ()
         , tab TabDiagnostics "Diagnostics" ()
         ]
-    when (tabRespClicked tabResp && nextTab /= activeTab m) (emit (SetTab nextTab))
+    when (respClicked tabResp && nextTab /= activeTab m) (emit (SetTab nextTab))
 
     void $ separator
 

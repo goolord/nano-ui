@@ -1,4 +1,3 @@
-#include "nano_ui_opt.h"
 #include <SDL3/SDL.h>
 #include <stddef.h>
 #include <stdbool.h>
@@ -81,11 +80,11 @@ int nano_ui_window_refresh_rate(SDL_Window *window)
     return best;
 }
 
-bool nano_ui_window_logical_size(
-    SDL_Window *window,
-    float scale,
-    float *out_w,
-    float *out_h)
+/* SDL_GetWindowSize already returns the window-coordinate (logical) size, not
+ * pixels. Dividing by the display scale would shrink the logical size on
+ * DPI-scaled displays (fullscreen), which made the retained framebuffer too
+ * small and sheared NEAREST-sampled text during the blit. */
+bool nano_ui_window_logical_size(SDL_Window *window, float *out_w, float *out_h)
 {
     if (!window) {
         return false;
@@ -95,32 +94,14 @@ bool nano_ui_window_logical_size(
     if (!SDL_GetWindowSize(window, &w, &h)) {
         return false;
     }
-    /* SDL_GetWindowSize already returns the window-coordinate (logical) size,
-     * not pixels. Dividing by the display scale would shrink the logical size
-     * by `scale` on DPI-scaled displays (fullscreen), which made the retained
-     * framebuffer too small and sheared NEAREST-sampled text during the blit. */
-    (void)scale;
-    if (out_w) {
-        *out_w = (float)w;
-    }
-    if (out_h) {
-        *out_h = (float)h;
-    }
+    *out_w = (float)w;
+    *out_h = (float)h;
     return true;
 }
 
-bool nano_ui_mouse_window_pos(float *out_x, float *out_y)
+void nano_ui_mouse_window_pos(float *out_x, float *out_y)
 {
-    float x = 0.f;
-    float y = 0.f;
-    (void)SDL_GetMouseState(&x, &y);
-    if (out_x) {
-        *out_x = x;
-    }
-    if (out_y) {
-        *out_y = y;
-    }
-    return true;
+    (void)SDL_GetMouseState(out_x, out_y);
 }
 
 typedef void (*nano_ui_resize_cb)(void);
@@ -210,27 +191,6 @@ bool nano_ui_renderer_name(SDL_Renderer *renderer, char *buf, size_t cap)
     return true;
 }
 
-bool nano_ui_fill_solid_rect(
-    SDL_Renderer *renderer,
-    Uint8 r,
-    Uint8 g,
-    Uint8 b,
-    Uint8 a,
-    float x,
-    float y,
-    float w,
-    float h)
-{
-    if (!renderer || w <= 0.f || h <= 0.f) {
-        return true;
-    }
-    if (!SDL_SetRenderDrawColor(renderer, r, g, b, a)) {
-        return false;
-    }
-    SDL_FRect rect = {x, y, w, h};
-    return SDL_RenderFillRect(renderer, &rect);
-}
-
 SDL_Texture *nano_ui_retain_create(SDL_Renderer *renderer, int w, int h)
 {
     if (!renderer || w <= 0 || h <= 0) {
@@ -277,24 +237,6 @@ bool nano_ui_retain_blit(SDL_Renderer *renderer, SDL_Texture *tex)
     }
     (void)SDL_SetRenderScale(renderer, 1.f, 1.f);
     return SDL_RenderTexture(renderer, tex, NULL, NULL);
-}
-
-void nano_ui_free_surface(void *surface)
-{
-    SDL_DestroySurface((SDL_Surface *)surface);
-}
-
-bool nano_ui_render_coords_from_window(
-    SDL_Renderer *renderer,
-    float window_x,
-    float window_y,
-    float *out_x,
-    float *out_y)
-{
-    if (!renderer) {
-        return false;
-    }
-    return SDL_RenderCoordinatesFromWindow(renderer, window_x, window_y, out_x, out_y);
 }
 
 bool nano_ui_save_screenshot(SDL_Renderer *renderer, const char *path)

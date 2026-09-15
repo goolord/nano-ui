@@ -1,39 +1,35 @@
 module RGFW
   ( Window (..)
-  , Surface (..)
   , Event (..)
-  , initRGFW
-  , deinitRGFW
-  , createWindow
   , createWindowGL
   , swapBuffersGL
   , closeWindow
   , pollEvent
   , waitForEvent
   , withEventBuffer
-  , createSurface
-  , blitSurface
-  , freeSurface
   , windowSize
   , windowScale
   , setMouseStandard
   , setMouseDefault
+  , readClipboardText
+  , writeClipboardText
   -- Re-exports
   , module RGFW.Raw
   ) where
 
 import Data.Char (chr)
+import Data.List (dropWhileEnd)
 import Data.Word (Word8, Word32)
 import Foreign.C.String (withCString)
-import Foreign.C.Types (CFloat (..), CInt (..), CUChar (..), CUInt (..))
-import Foreign.Marshal.Alloc (allocaBytes)
-import Foreign.Ptr (Ptr, castPtr, nullPtr)
+import Foreign.C.Types (CFloat (..), CInt (..), CSize (..), CUChar (..), CUInt (..))
+import Foreign.Marshal.Alloc (alloca, allocaBytes)
+import Foreign.Ptr (Ptr, nullPtr)
+import Foreign.Storable (peek)
+import GHC.Foreign (peekCStringLen, withCStringLen)
+import GHC.IO.Encoding (utf8)
 import RGFW.Raw
 
 newtype Window = Window (Ptr RGFW_window)
-  deriving (Eq, Show)
-
-newtype Surface = Surface (Ptr RGFW_surface)
   deriving (Eq, Show)
 
 data Event
@@ -50,15 +46,7 @@ data Event
   | EventOther !Word8
   deriving (Eq, Show)
 
-createWindow :: String -> Int -> Int -> Int -> Int -> Word32 -> IO (Maybe Window)
-createWindow title x y w h flags =
-  withCString title $ \cTitle -> do
-    ptr <- c_RGFW_createWindow cTitle (fromIntegral x) (fromIntegral y) (fromIntegral w) (fromIntegral h) (fromIntegral flags)
-    if ptr == nullPtr
-      then pure Nothing
-      else pure (Just (Window ptr))
-
--- | Like 'createWindow', with a core-profile OpenGL context of at least the
+-- | Create a window with a core-profile OpenGL context of at least the
 -- given major/minor version made current on the calling OS thread. 'Nothing'
 -- when the window or the context cannot be created.
 createWindowGL :: String -> Int -> Int -> Int -> Int -> Word32 -> Int -> Int -> IO (Maybe Window)
@@ -86,6 +74,7 @@ withEventBuffer f = do
   sz <- c_rgfw_event_size
   allocaBytes (fromIntegral sz) f
 
+-- | Take the next queued event; 'EventNone' only when the queue is empty.
 pollEvent :: Window -> Ptr RGFW_event -> IO Event
 pollEvent (Window win) evPtr = do
   hasEv <- c_RGFW_window_checkEvent win evPtr
@@ -105,9 +94,11 @@ pollEvent (Window win) evPtr = do
           | t == rgfw_keyChar -> do
             CUInt val <- c_rgfw_event_keyChar_value evPtr
             let !cInt = fromIntegral val :: Int
+            -- An invalid code point is still an event: reporting EventNone
+            -- would read as an empty queue and stall the rest of the batch.
             if (cInt >= 0 && cInt <= 0x10FFFF) && not (cInt >= 0xD800 && cInt <= 0xDFFF)
               then pure (EventKeyChar (chr cInt))
-              else pure EventNone
+              else pure (EventOther t)
           | t == rgfw_mouseButtonPressed -> do
             CUChar b <- c_rgfw_event_button_value evPtr
             pure (EventMouseButton b True)
@@ -135,25 +126,6 @@ pollEvent (Window win) evPtr = do
           | otherwise ->
             pure (EventOther t)
 
-initRGFW :: String -> IO Bool
-initRGFW name = withCString name $ \cName -> do
-  res <- c_rgfw_init cName
-  pure (res == 0)
-
-deinitRGFW :: IO ()
-deinitRGFW = c_rgfw_deinit
-
-createSurface :: Window -> Ptr Word8 -> Int -> Int -> Word8 -> IO Surface
-createSurface (Window win) ptr w h fmt = do
-  s <- c_RGFW_createSurface win (castPtr ptr) (fromIntegral w) (fromIntegral h) (CUChar fmt)
-  pure (Surface s)
-
-blitSurface :: Window -> Surface -> IO ()
-blitSurface (Window w) (Surface s) = c_RGFW_window_blitSurface w s
-
-freeSurface :: Surface -> IO ()
-freeSurface (Surface s) = c_RGFW_surface_free s
-
 windowSize :: Window -> IO (Int, Int)
 windowSize (Window w) = do
   CInt width <- c_rgfw_window_w w
@@ -175,3 +147,23 @@ setMouseDefault (Window win) = do
   CUChar res <- c_rgfw_window_set_mouse_default win
   pure (res /= 0)
 
+-- | The system clipboard's text, if it holds any (UTF-8). Needs an open
+-- window; on X11 it waits for the selection owner to convert the data.
+readClipboardText :: IO (Maybe String)
+readClipboardText =
+  alloca $ \lenPtr -> do
+    ptr <- c_rgfw_read_clipboard_text lenPtr
+    CSize len <- peek lenPtr
+    if ptr == nullPtr || len == 0
+      then pure Nothing
+      else do
+        -- The length counts RGFW's NUL terminator when it includes one.
+        txt <- dropWhileEnd (== '\0') <$> peekCStringLen utf8 (ptr, fromIntegral len)
+        pure (if null txt then Nothing else Just txt)
+
+-- | Replace the system clipboard with text (UTF-8); 'False' if refused.
+writeClipboardText :: String -> IO Bool
+writeClipboardText txt =
+  withCStringLen utf8 txt $ \(ptr, len) -> do
+    CUChar ok <- c_rgfw_write_clipboard_text ptr (fromIntegral len)
+    pure (ok /= 0)

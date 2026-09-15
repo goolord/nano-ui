@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 module Main (main) where
 
 import Control.Monad (forM_, unless)
@@ -68,33 +66,58 @@ import NanoUI.Plot.Types
   )
 import NanoUI.Plot.Widget qualified as Plot
 import NanoUI.Testing (DrawData (..), drawCmdNull, newPixelContext, runFrame)
+import Test.Hspec (describe, hspec, it)
 
 main :: IO ()
-main = do
-  ctx <- newPixelContext
+main = hspec $ do
   let
-    inp = emptyInput {inputWindowSize = Size 240 120}
     fm = monospaceMetrics 16
-  testRendering ctx inp fm
-  testTextOnlyRendering fm
-  testConcaveTriangulation
-  testIndexedTriangulation
-  testRectFastPath
-  testStrokeCoversMidpoint
-  testNiceTicks
-  testMultiSeriesDomains
-  testDomainFollowsData
-  testLttb
-  testUnboxedSeries
-  testMinMaxDecimate
-  testLabelFit fm
-  testChartChrome fm
-  testLegendColors fm
-  testPlotHover fm
-  testClosedSeriesFills fm
-  testGrowPlotHeight fm
-  testChartCache
-  putStrLn "nano-ui-diagrams: ok"
+  describe "rendering" $ do
+    it "draws filled, stroked, bar and scatter diagrams" $ do
+      ctx <- newPixelContext
+      testRendering ctx (emptyInput {inputWindowSize = Size 240 120}) fm
+    it "renders chart labels apart from geometry" (testTextOnlyRendering fm)
+    it "reuses cached chart content within one context" testChartCache
+  describe "tessellation" $ do
+    it "triangulates a concave star" testConcaveTriangulation
+    it "triangulates indexed polygons with full coverage" testIndexedTriangulation
+    it "emits one FillRect for an axis-aligned rectangle" testRectFastPath
+    it "covers polyline strokes end to end" testStrokeCoversMidpoint
+  describe "scales and domains" $ do
+    it "picks and formats nice ticks" testNiceTicks
+    it "shares bounds across series" testMultiSeriesDomains
+    it "fits domains to the data" testDomainFollowsData
+  describe "decimation" $ do
+    it "keeps LTTB extrema and endpoints" testLttb
+    it "agrees across boxed and unboxed series" testUnboxedSeries
+    it "keeps min/max extrema" testMinMaxDecimate
+  describe "chart chrome" $ do
+    it "keeps labels, titles and legends apart" (testLabelFit fm)
+    it "renders tick and title text" (testChartChrome fm)
+    it "colors legend entries like their series" (testLegendColors fm)
+    it "picks the nearest hover point" testPlotHover
+    it "fills closed series and markers" (testClosedSeriesFills fm)
+    it "caps the height of growing plots" (testGrowPlotHeight fm)
+
+-- | A chart of the given series with no legend, grid or decimation.
+bareChart :: [Series] -> Chart
+bareChart ss =
+  Chart
+    { chartTitle = Nothing
+    , chartXTitle = Nothing
+    , chartYTitle = Nothing
+    , chartSeries = ss
+    , chartLegend = LegendNone
+    , chartGrid = GridNone
+    , chartDecimate = False
+    }
+
+chartDia :: FontMetrics -> Chart -> Diagram B
+chartDia fm = chartDiagram fm defaultTheme defaultPlotStyle
+
+rectsOverlap :: Rect -> Rect -> Bool
+rectsOverlap (Rect x1 y1 w1 h1) (Rect x2 y2 w2 h2) =
+  x1 < x2 + w2 && x2 < x1 + w1 && y1 < y2 + h2 && y2 < y1 + h1
 
 testTextOnlyRendering :: FontMetrics -> IO ()
 testTextOnlyRendering fm = do
@@ -167,54 +190,21 @@ testRendering ctx inp fm = do
 
 linePlotDiag :: FontMetrics -> [(Double, Double)] -> Diagram B
 linePlotDiag fm pts =
-  chartDiagram fm defaultTheme defaultPlotStyle lineChart
+  chartDia fm (bareChart [line "s" pts])
     # lwO 2
     # fc steelblue
- where
-  lineChart =
-    Chart
-      { chartTitle = Nothing
-      , chartXTitle = Nothing
-      , chartYTitle = Nothing
-      , chartSeries = [line "s" pts]
-      , chartLegend = LegendNone
-      , chartGrid = GridNone
-      , chartDecimate = False
-      }
 
 barPlotDiag :: FontMetrics -> [(Double, Double)] -> Diagram B
 barPlotDiag fm pts =
-  chartDiagram fm defaultTheme defaultPlotStyle barChart
+  chartDia fm (bareChart [bar "s" (zip (map (T.pack . show . fst) pts) (map snd pts))])
     # fc steelblue
     # lw none
- where
-  barChart =
-    Chart
-      { chartTitle = Nothing
-      , chartXTitle = Nothing
-      , chartYTitle = Nothing
-      , chartSeries = [bar "s" (zip (map (T.pack . show . fst) pts) (map snd pts))]
-      , chartLegend = LegendNone
-      , chartGrid = GridNone
-      , chartDecimate = False
-      }
 
 scatterPlotDiag :: FontMetrics -> [(Double, Double)] -> Diagram B
 scatterPlotDiag fm pts =
-  chartDiagram fm defaultTheme defaultPlotStyle scatterChart
+  chartDia fm (bareChart [scatter "s" pts])
     # fc coral
     # lw none
- where
-  scatterChart =
-    Chart
-      { chartTitle = Nothing
-      , chartXTitle = Nothing
-      , chartYTitle = Nothing
-      , chartSeries = [scatter "s" pts]
-      , chartLegend = LegendNone
-      , chartGrid = GridNone
-      , chartDecimate = False
-      }
 
 testConcaveTriangulation :: IO ()
 testConcaveTriangulation = do
@@ -346,17 +336,7 @@ testMultiSeriesDomains = do
   let
     s1 = line "a" (V.fromList [(0, 0), (1, 1)])
     s2 = line "b" [(0, 10), (1, 20)]
-    c =
-      Chart
-        { chartTitle = Nothing
-        , chartXTitle = Nothing
-        , chartYTitle = Nothing
-        , chartSeries = [s1, s2]
-        , chartLegend = LegendRight
-        , chartGrid = GridBoth
-        , chartDecimate = False
-        }
-    (Domain xLo xHi, Domain yLo yHi) = seriesDomains c
+    (Domain xLo xHi, Domain yLo yHi) = seriesDomains (bareChart [s1, s2])
   unless (yLo <= 0 && yHi >= 20 && xLo <= 0 && xHi >= 1) $
     fail "multi-series domains do not share bounds"
   unless (mergeDomains (Domain 0 1) (Domain 0 10) == Domain 0 10) $
@@ -365,17 +345,7 @@ testMultiSeriesDomains = do
 testDomainFollowsData :: IO ()
 testDomainFollowsData = do
   let
-    c =
-      Chart
-        { chartTitle = Nothing
-        , chartXTitle = Nothing
-        , chartYTitle = Nothing
-        , chartSeries = [scatter "s" [(4, 3), (9, 8)]]
-        , chartLegend = LegendNone
-        , chartGrid = GridNone
-        , chartDecimate = False
-        }
-    (Domain xLo _, Domain yLo _) = seriesDomains c
+    (Domain xLo _, Domain yLo _) = seriesDomains (bareChart [scatter "s" [(4, 3), (9, 8)]])
   unless (xLo > 2 && yLo > 1) $
     fail "seriesDomains seeded with 0..1"
 
@@ -462,7 +432,7 @@ orderedPoints points = V.and (V.zipWith (\a b -> fst a < fst b) points (V.drop 1
 testLabelFit :: FontMetrics -> IO ()
 testLabelFit fm = do
   let
-    dump = chartDiagram fm defaultTheme defaultPlotStyle barChartSample
+    dump = chartDia fm barChartSample
     fitted = fitLayout fm (fixedH 180 defaultLayout) dump
     ops =
       case (layoutWidth fitted, layoutHeight fitted) of
@@ -471,15 +441,9 @@ testLabelFit fm = do
     texts = [(x, y, ax, ay, t) | DrawText x y ax ay t _ <- V.toList ops]
     xs = [x | (x, _, _, _, _) <- texts]
     boxes = [drawTextBox fm x y ax ay t | (x, y, ax, ay, t) <- texts]
-    overlap a b =
-      let
-        Rect x1 y1 w1 h1 = a
-        Rect x2 y2 w2 h2 = b
-       in
-        x1 < x2 + w2 && x2 < x1 + w1 && y1 < y2 + h2 && y2 < y1 + h1
   unless (length xs >= 3 && maximum xs - minimum xs > 20) $
     fail "axis labels did not spread along x"
-  unless (not (or [overlap a b | (a : rest) <- tails boxes, b <- rest])) $
+  unless (not (or [rectsOverlap a b | (a : rest) <- tails boxes, b <- rest])) $
     fail "axis label boxes overlap"
   let
     sleepChart =
@@ -488,17 +452,14 @@ testLabelFit fm = do
         , chartYTitle = Just "focus"
         , chartXTitle = Just "hours slept"
         }
-    legendDump = chartDiagram fm defaultTheme defaultPlotStyle sleepChart
+    legendDump = chartDia fm sleepChart
     legendOps = diagramOps 400 240 legendDump
     tightOps = diagramOps 220 150 legendDump
-    barDump = chartDiagram fm defaultTheme defaultPlotStyle barChartSample
-    barTightOps = diagramOps 220 150 barDump
+    barTightOps = diagramOps 220 150 dump
     botChart = sleepChart {chartLegend = LegendBottom}
-    botOps = diagramOps 400 240 (chartDiagram fm defaultTheme defaultPlotStyle botChart)
+    botOps = diagramOps 400 240 (chartDia fm botChart)
     tickText t =
       T.all (\c -> c == '-' || c == '.' || c >= '0' && c <= '9') t && not (T.null t)
-    boxesOverlap (Rect x1 y1 w1 h1) (Rect x2 y2 w2 h2) =
-      x1 < x2 + w2 && x2 < x1 + w1 && y1 < y2 + h2 && y2 < y1 + h1
     overlapTitleTick chart w h drawOps =
       let
         ts =
@@ -511,7 +472,7 @@ testLabelFit fm = do
           ]
         ticks = [b | (b, t) <- ts, tickText t]
        in
-        or [boxesOverlap a b | a <- titles, b <- ticks]
+        or [rectsOverlap a b | a <- titles, b <- ticks]
     overlapLegendTick chart w h drawOps =
       let
         names = map seriesName (chartSeries chart)
@@ -528,7 +489,7 @@ testLabelFit fm = do
           ]
         ticks = [b | (b, t) <- ts, tickText t]
        in
-        or [boxesOverlap a b | a <- legends, b <- ticks]
+        or [rectsOverlap a b | a <- legends, b <- ticks]
   unless (not (overlapTitleTick sleepChart 400 240 legendOps)) $
     fail "axis titles overlap ticks"
   unless (not (overlapLegendTick sleepChart 400 240 legendOps)) $
@@ -548,28 +509,23 @@ testLabelFit fm = do
         , chartYTitle = Just "y"
         , chartXTitle = Just "x"
         }
-    shortM = chartMargins fm defaultPlotStyle shortTitles
+    shortM = chartMargins fm shortTitles
   unless (marginLeft shortM < 0.85 && marginBottom shortM < 0.65) $
     fail "short axis titles left a huge gutter"
 
 barChartSample :: Chart
 barChartSample =
-  Chart
-    { chartTitle = Nothing
-    , chartXTitle = Just "day"
+  (bareChart [bar "count" [("Mon", 2), ("Tue", 5), ("Wed", 4), ("Thu", 7), ("Fri", 3)]])
+    { chartXTitle = Just "day"
     , chartYTitle = Just "count"
-    , chartSeries =
-        [bar "count" [("Mon", 2), ("Tue", 5), ("Wed", 4), ("Thu", 7), ("Fri", 3)]]
     , chartLegend = LegendRight
     , chartGrid = GridBoth
-    , chartDecimate = False
     }
 
 testChartChrome :: FontMetrics -> IO ()
 testChartChrome fm = do
   let
-    chart = barChartSample
-    ops = diagramOps 400 280 (chartDiagram fm defaultTheme defaultPlotStyle chart)
+    ops = diagramOps 400 280 (chartDia fm barChartSample)
     chartTexts = [t | DrawText _ _ _ _ t _ <- V.toList ops]
   unless (length chartTexts >= 6) $
     fail "chart chrome dropped tick or title text"
@@ -578,8 +534,8 @@ testChartChrome fm = do
   unless (length (themeSeries defaultTheme) == 6) $
     fail "themeSeries dropped a series colour"
 
-testPlotHover :: FontMetrics -> IO ()
-testPlotHover _fm = do
+testPlotHover :: IO ()
+testPlotHover = do
   forM_ [bareChart [], bareChart [line "empty" []]] $ \chart ->
     unless (nearestPlotHover chart 0.5 0.5 == Nothing) $
       fail "empty chart produced a hover target"
@@ -590,18 +546,7 @@ testPlotHover _fm = do
         == Just (0, 0)
     ) $
     fail "equidistant hover targets did not prefer the first point"
-  let
-    c =
-      Chart
-        { chartTitle = Nothing
-        , chartXTitle = Nothing
-        , chartYTitle = Nothing
-        , chartSeries = [line "a" [(0, 0), (1, 1), (2, 4)]]
-        , chartLegend = LegendNone
-        , chartGrid = GridNone
-        , chartDecimate = False
-        }
-  case nearestPlotHover c 0.5 0.5 of
+  case nearestPlotHover (bareChart [line "a" [(0, 0), (1, 1), (2, 4)]]) 0.5 0.5 of
     Nothing -> fail "nearestPlotHover missed center point"
     Just h ->
       unless
@@ -622,13 +567,7 @@ testLegendColors fm = do
     fallback = themeSeries defaultTheme !! 1
   forM_ [LegendNone, LegendRight, LegendBottom, LegendTop, LegendInside] $ \position -> do
     let
-      ops =
-        V.toList
-          ( diagramOps
-              400
-              280
-              (chartDiagram fm defaultTheme defaultPlotStyle chart {chartLegend = position})
-          )
+      ops = V.toList (diagramOps 400 280 (chartDia fm chart {chartLegend = position}))
       labels =
         [text | DrawText _ _ _ _ text _ <- ops, text == "custom" || text == "default"]
       colors = [color | FillTriangle _ _ _ _ _ _ color <- ops]
@@ -642,64 +581,17 @@ testLegendColors fm = do
         unless (custom `elem` colors && fallback `elem` colors) $
           fail "legend colors differ from series colors"
 
-bareChart :: [Series] -> Chart
-bareChart ss =
-  Chart
-    { chartTitle = Nothing
-    , chartXTitle = Nothing
-    , chartYTitle = Nothing
-    , chartSeries = ss
-    , chartLegend = LegendNone
-    , chartGrid = GridNone
-    , chartDecimate = False
-    }
-
 fillTriCount :: V.Vector DrawOp -> Int
 fillTriCount ops = length [() | FillTriangle {} <- V.toList ops]
 
 testClosedSeriesFills :: FontMetrics -> IO ()
 testClosedSeriesFills fm = do
   let
-    areaOps =
-      diagramOps
-        200
-        120
-        ( chartDiagram
-            fm
-            defaultTheme
-            defaultPlotStyle
-            (bareChart [area "a" [(0, 1), (1, 2), (2, 0)]])
-        )
-    diamondOps =
-      diagramOps
-        200
-        120
-        ( chartDiagram
-            fm
-            defaultTheme
-            defaultPlotStyle
-            (bareChart [withMarker MarkDiamond (scatter "d" [(1, 1), (2, 3)])])
-        )
-    triOps =
-      diagramOps
-        200
-        120
-        ( chartDiagram
-            fm
-            defaultTheme
-            defaultPlotStyle
-            (bareChart [withMarker MarkTriangle (scatter "t" [(1, 1)])])
-        )
-    crossOps =
-      diagramOps
-        200
-        120
-        ( chartDiagram
-            fm
-            defaultTheme
-            defaultPlotStyle
-            (bareChart [withMarker MarkCross (scatter "x" [(8, 8)])])
-        )
+    seriesOps s = diagramOps 200 120 (chartDia fm (bareChart [s]))
+    areaOps = seriesOps (area "a" [(0, 1), (1, 2), (2, 0)])
+    diamondOps = seriesOps (withMarker MarkDiamond (scatter "d" [(1, 1), (2, 3)]))
+    triOps = seriesOps (withMarker MarkTriangle (scatter "t" [(1, 1)]))
+    crossOps = seriesOps (withMarker MarkCross (scatter "x" [(8, 8)]))
     ink = fromMaybe (themeRed defaultTheme) (listToMaybe (themeSeries defaultTheme))
     inkXs =
       [ x
@@ -719,7 +611,6 @@ testClosedSeriesFills fm = do
 testGrowPlotHeight :: FontMetrics -> IO ()
 testGrowPlotHeight fm = do
   let
-    dump = chartDiagram fm defaultTheme defaultPlotStyle barChartSample
-    fitted = fitLayout fm (fillW defaultLayout) dump
+    fitted = fitLayout fm (fillW defaultLayout) (chartDia fm barChartSample)
   unless (layoutMinH fitted <= 260 && layoutMaxH fitted <= 260) $
     fail "plot grow height ballooned"

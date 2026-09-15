@@ -1,20 +1,17 @@
 {-# LANGUAGE DerivingStrategies #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE StrictData #-}
 
 module NanoUI.Id
   ( WidgetId (..)
   , IdContext (..)
   , initialIdContext
+  , idContextWidgetId
   , widgetId
   , hashWidgetId
-  , hashSrcLoc
   , fnv1a
   , mix64
   , mixFnv
-  , mixId
   , scopeTag
-  , keyedTag
   , enterScope
   , enterKeyed
   )
@@ -22,7 +19,7 @@ where
 
 import Data.Bits (shiftR, xor)
 import Data.Char (ord)
-import Data.Hashable (Hashable, hash)
+import Data.Hashable (Hashable)
 import Data.Primitive.Types (Prim)
 import Data.Word (Word64, Word8)
 import GHC.Stack (HasCallStack, SrcLoc (..), callStack, getCallStack)
@@ -39,6 +36,16 @@ data IdContext = IdContext
 
 initialIdContext :: IdContext
 initialIdContext = IdContext 0x243F6A8885A308D3 0
+
+-- | Id of the next sibling in this context. A zero hash becomes 1, so
+-- @WidgetId 0@ never names a real widget.
+{-# INLINE idContextWidgetId #-}
+idContextWidgetId :: IdContext -> WidgetId
+idContextWidgetId (IdContext cid sid) =
+  let
+    raw = mix64 cid sid
+   in
+    if raw == 0 then WidgetId 1 else WidgetId raw
 
 scopeTag :: Word64
 scopeTag = 0x9E3779B185EBCA87
@@ -77,7 +84,6 @@ widgetId =
    in
     hashSrcLoc loc
 
-{-# INLINE hashSrcLoc #-}
 hashSrcLoc :: SrcLoc -> WidgetId
 hashSrcLoc
   ( SrcLoc
@@ -99,21 +105,13 @@ hashSrcLoc
 hashWidgetId :: WidgetId -> Word64
 hashWidgetId (WidgetId w) = w
 
-{-# INLINE mixId #-}
-mixId :: Hashable k => WidgetId -> k -> WidgetId
-mixId (WidgetId base) k = WidgetId (base `mixFnv` fromIntegral (hash k))
-
 {-# INLINE fnv1a #-}
 fnv1a :: String -> Word64
 fnv1a s =
   foldl'
-    (\acc c -> (fromIntegral @Word8 @Word64 (c2w c) `xor` acc) * 0x00000100000001B3)
+    (\acc c -> (fromIntegral @Word8 @Word64 (fromIntegral (ord c)) `xor` acc) * 0x00000100000001B3)
     0xcbf29ce484222325
     s
- where
-  c2w :: Char -> Word8
-  c2w = fromIntegral . ord
-  {-# INLINE c2w #-}
 
 {-# INLINE mix64 #-}
 mix64 :: Word64 -> Word64 -> Word64

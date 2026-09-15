@@ -7,6 +7,7 @@ import Control.Monad (void, when)                                               
 import Data.Bits ((.&.))                                                                          -- Ctrl modifier ASCII masking
 import Data.ByteString qualified as B                                                             -- raw PTY byte buffer I/O
 import Data.Char (chr, isPrint, ord, toUpper)                                                     -- character mapping & classification
+import Data.Ord (clamp)                                                                           -- bound cursor, scroll offset & CSI params
 import Data.Text qualified as T                                                                   -- Unicode text processing
 import Data.Text.Encoding qualified as E                                                          -- streaming UTF-8 text decoder
 import Data.Text.Encoding.Error (lenientDecode)                                                   -- replacement char on bad UTF-8
@@ -53,11 +54,8 @@ feed :: Term -> B.ByteString -> Term                                            
 feed t bytes = case E.streamDecodeUtf8With lenientDecode (utf8 t <> bytes) of                     -- stream decode UTF-8 with unconsumed rest
   E.Some text rest _ -> (T.foldl' step t text) {utf8 = rest}                                      -- fold step over decoded chars and save rest
 
-clamp :: Ord a => a -> a -> a -> a                                                                -- restrict value within [lo, hi] range
-clamp lo hi = max lo . min hi                                                                     -- lower and upper bound clamping
-
 move :: Int -> Int -> Term -> Term                                                                -- move cursor position with screen clamping
-move x y t = t {cursor = (clamp 0 79 x, clamp 0 23 y)}                                            -- keep cursor within 80 cols and 24 rows
+move x y t = t {cursor = (clamp (0, 79) x, clamp (0, 23) y)}                                      -- keep cursor within 80 cols and 24 rows
 
 lineFeed :: Int -> Term -> Term                                                                   -- move cursor vertically by n with scrolling
 lineFeed n t                                                                                      -- handle screen scroll boundaries
@@ -70,7 +68,7 @@ lineFeed n t                                                                    
         spaces = V.replicate 80 (cell (pen t) ' '); rows = history t <> V.take 80 (screen t)      -- blank 80-char row and updated history rows
 
 scrollBy :: Float -> Term -> Term                                                                 -- offset visible viewport into scrollback
-scrollBy n t = t {back = clamp 0 (fromIntegral (V.length (history t) `div` 80)) (back t + n)}     -- clamp scroll offset to available history
+scrollBy n t = t {back = clamp (0, fromIntegral (V.length (history t) `div` 80)) (back t + n)}    -- clamp scroll offset to available history
 
 viewport :: Term -> V.Vector Cell                                                                 -- slice 1920 cells for current viewport
 viewport t                                                                                        -- extract visible cells from screen or history
@@ -126,7 +124,7 @@ csi raw cmd t = case cmd of                                                     
   'm' -> t {pen = sgr (pen t) codes}                                                              -- SGR: Select Graphic Rendition (colors/styles)
   _   -> t                                                                                        -- ignore unhandled CSI commands
   where                                                                                           -- argument parsing and screen wiping helpers
-    parseCode = maybe 0 (fromInteger . clamp 0 10000) . readMaybe . T.unpack                      -- parse single integer parameter clamped to 10000
+    parseCode = maybe 0 (fromInteger . clamp (0, 10000)) . readMaybe . T.unpack                   -- parse single integer parameter clamped to 10000
     codes = map parseCode (T.splitOn ";" (T.pack raw))                                            -- parse semicolon-separated parameter list
     p = sum (take 1 codes); q = sum (take 1 (drop 1 codes))                                       -- first argument p (default 0), second argument q
     n = max 1 p; (col, y) = cursor t; x = min 79 col; i = y * 80 + x; end = y * 80 + 79           -- count n (default 1), cursor offsets, row bounds

@@ -10,7 +10,6 @@ module NanoUI.Sdl.Display
   , setRenderScale
   , setRenderVSync
   , queryRendererName
-  , windowToLogicalCoords
   , installResizeWatch
   , initRefreshEvent
   , pushRefreshEvent
@@ -19,8 +18,8 @@ module NanoUI.Sdl.Display
   , windowTargetMatchesSize
   , retainBegin
   , retainBlit
-  , retainDestroy
-) where
+  , destroyTexture
+  ) where
 
 import Control.Monad (unless, void)
 import Data.Text (Text)
@@ -59,11 +58,12 @@ queryWindowRefreshHz win = do
   hz <- windowRefreshRateC win
   pure (max 0 (fromIntegral hz))
 
-queryWindowLogicalSize :: Ptr SDL_Window -> Float -> IO Size
-queryWindowLogicalSize win scale =
+-- | Window size in window (logical) coordinates; 0x0 when SDL cannot say.
+queryWindowLogicalSize :: Ptr SDL_Window -> IO Size
+queryWindowLogicalSize win =
   alloca $ \wp ->
     alloca $ \hp -> do
-      ok <- windowLogicalSizeC win (realToFrac scale) wp hp
+      ok <- windowLogicalSizeC win wp hp
       if ok
         then do
           w <- peek wp
@@ -75,17 +75,14 @@ queryWindowLogicalSize win scale =
 -- coordinates. Uses 'SDL_GetMouseState' rather than the global pointer +
 -- window position: the latter is unreliable on Wayland (window position is not
 -- exposed) and breaks hover/wheel targeting.
-queryMouseWindowPos :: IO (Maybe V2)
+queryMouseWindowPos :: IO V2
 queryMouseWindowPos =
   alloca $ \xp ->
     alloca $ \yp -> do
-      ok <- mouseWindowPosC xp yp
-      if ok
-        then do
-          x <- peek xp
-          y <- peek yp
-          pure (Just (V2 (realToFrac x) (realToFrac y)))
-        else pure Nothing
+      mouseWindowPosC xp yp
+      x <- peek xp
+      y <- peek yp
+      pure (V2 (realToFrac x) (realToFrac y))
 
 -- Renderer stays at 1:1 pixels; layout uses logical coordinates.
 setRenderScale :: Ptr SDL_Renderer -> Float -> IO Bool
@@ -99,9 +96,6 @@ queryRendererName ren =
   allocaBytes 64 $ \buf -> do
     ok <- rendererNameC ren buf 64
     if ok then T.pack <$> peekCString buf else pure "unknown"
-
-windowToLogicalCoords :: Float -> V2 -> V2
-windowToLogicalCoords _scale (V2 wx wy) = V2 wx wy
 
 -- Windows runs a modal loop while the user drags the border, so the app
 -- event watch does not run. SDL still delivers resize events to this watch.
@@ -130,15 +124,10 @@ foreign import ccall unsafe "nano_ui_window_refresh_rate"
   windowRefreshRateC :: Ptr SDL_Window -> IO CInt
 
 foreign import ccall unsafe "nano_ui_window_logical_size"
-  windowLogicalSizeC ::
-    Ptr SDL_Window ->
-    CFloat ->
-    Ptr CFloat ->
-    Ptr CFloat ->
-    IO Bool
+  windowLogicalSizeC :: Ptr SDL_Window -> Ptr CFloat -> Ptr CFloat -> IO Bool
 
 foreign import ccall unsafe "nano_ui_mouse_window_pos"
-  mouseWindowPosC :: Ptr CFloat -> Ptr CFloat -> IO Bool
+  mouseWindowPosC :: Ptr CFloat -> Ptr CFloat -> IO ()
 
 foreign import ccall unsafe "nano_ui_set_render_scale"
   setRenderScaleC :: Ptr SDL_Renderer -> CFloat -> IO Bool
@@ -185,11 +174,9 @@ foreign import ccall unsafe "nano_ui_retain_begin"
 foreign import ccall unsafe "nano_ui_retain_blit"
   retainBlitC :: Ptr SDL_Renderer -> Ptr () -> IO Bool
 
+-- | Destroy an SDL texture (retain target or image atlas); NULL is a no-op.
 foreign import ccall unsafe "nano_ui_destroy_texture"
-  retainDestroyC :: Ptr () -> IO ()
-
-retainDestroy :: Ptr () -> IO ()
-retainDestroy = retainDestroyC
+  destroyTexture :: Ptr () -> IO ()
 
 retainCreate :: Ptr SDL_Renderer -> Int -> Int -> IO (Ptr ())
 retainCreate ren w h = retainCreateC ren (fromIntegral w) (fromIntegral h)

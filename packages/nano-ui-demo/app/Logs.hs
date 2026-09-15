@@ -1,6 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-{-# OPTIONS_GHC -O1 #-}
-
 -- | A standalone SDL3 example application demonstrating a high-throughput,
 -- virtualized log viewer with sticky-scroll semantics and selectable text.
 --
@@ -12,12 +9,7 @@
 --   * Interactive controls: stream toggle, bursts (+100, +1000), filter by level,
 --     clear buffer, and a 'Jump to Bottom' button when unpinned.
 --   * Automated headless verification via @cabal run nano-ui-sdl-logs -- --selftest@.
-module SdlLogs
-  ( main
-  , logsApp
-  , selftest
-  )
-where
+module Main (main) where
 
 import Control.Monad (unless, void, when)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
@@ -107,19 +99,13 @@ sampleTemplates =
   , (LevelInfo, "TLS handshake completed with client cipher=TLS_AES_256_GCM_SHA384")
   ]
 
-sampleTemplatesCount :: Int
-sampleTemplatesCount = length sampleTemplates
-
-sampleServicesCount :: Int
-sampleServicesCount = length sampleServices
-
 maxLogCapacity :: Int
 maxLogCapacity = 50000
 
 generateLogEntry :: Int -> LogEntry
 generateLogEntry idx =
-  let (lvl, msg) = sampleTemplates !! (idx `mod` sampleTemplatesCount)
-      src = sampleServices !! ((idx * 3) `mod` sampleServicesCount)
+  let (lvl, msg) = sampleTemplates !! (idx `mod` length sampleTemplates)
+      src = sampleServices !! ((idx * 3) `mod` length sampleServices)
       sec = (idx * 7) `mod` 60
       minu = (idx `div` 8) `mod` 60
       hr = 10 + (idx `div` 480) `mod` 12
@@ -154,9 +140,6 @@ appendEntries st count =
         { asLogs = capped
         , asNextId = curId + count
         }
-
-appendLogs :: IORef AppState -> Int -> IO ()
-appendLogs ref count = modifyIORef' ref (`appendEntries` count)
 
 formatLogLine :: LogEntry -> Text
 formatLogLine entry =
@@ -226,7 +209,7 @@ logsApp stateRef = do
   -- Check menu action from right-click context menu (e.g. Select All or Copy)
   mMenuAction <- uiIO $ takeTextEditLastAction ctx
   case mMenuAction of
-    Just (_, item) | item == menuActionSelectAll -> do
+    Just (_, item) | item == fromEnum MenuSelectAll -> do
       -- Select All chosen from context menu
       setAllSelected True
       uiIO $ markDirty ctx >> damageFull ctx
@@ -298,7 +281,7 @@ logsApp stateRef = do
     -- the clipboard with a single row.
     when (allSelected && cPressed) $ copyAllLogs
     case mMenuAction of
-      Just (_, item) | item == menuActionCopy && allSelected -> copyAllLogs
+      Just (_, item) | item == fromEnum MenuCopy && allSelected -> copyAllLogs
       _ -> pure ()
 
     -- Status Bar
@@ -327,16 +310,16 @@ renderHeaderToolbar mutateState st totalCount filteredCount (allSelected, setAll
         void $ labelEx (fontMono . fontMuted . tight $ defaultLayout) ("[" <> T.pack (show totalCount) <> " total]")
 
         when (filteredCount /= totalCount) $
-          void $ labelEx (fontMono . textColor (colorRGBA 235 203 139 255) . tight $ defaultLayout)
+          void $ labelEx (fontMono . fontColor (colorRGBA 235 203 139 255) . tight $ defaultLayout)
             ("[" <> T.pack (show filteredCount) <> " filtered]")
 
         -- Live stream indicator
         if asStreaming st
-          then void $ labelEx (fontMono . fontBold . textColor (colorRGBA 163 190 140 255) . tight $ defaultLayout) "[● STREAMING]"
+          then void $ labelEx (fontMono . fontBold . fontColor (colorRGBA 163 190 140 255) . tight $ defaultLayout) "[● STREAMING]"
           else void $ labelEx (fontMono . fontMuted . tight $ defaultLayout) "[⏸ PAUSED]"
 
         when allSelected $
-          void $ labelEx (fontMono . fontBold . textColor (colorRGBA 235 203 139 255) . tight $ defaultLayout) "[● ALL SELECTED]"
+          void $ labelEx (fontMono . fontBold . fontColor (colorRGBA 235 203 139 255) . tight $ defaultLayout) "[● ALL SELECTED]"
 
       -- Controls line: Buttons for streaming, bursts, clear, selection, and filters
       row' (tight . fillW . alignMid $ defaultLayout {layoutGap = 8}) $ do
@@ -431,10 +414,10 @@ renderLogScroller stateRef allSelected logs = do
   -- Sticky indicator banner & Jump to Bottom button
   row' (tight . fillW . padXY 12 4 $ defaultLayout {layoutAlignY = AlignMiddle, layoutGap = 8}) $ do
     if isSticky
-      then void $ labelEx (fontMono . fontBold . textColor (colorRGBA 163 190 140 255) . tight $ defaultLayout) "● PINNED"
+      then void $ labelEx (fontMono . fontBold . fontColor (colorRGBA 163 190 140 255) . tight $ defaultLayout) "● PINNED"
       else do
-        void $ labelEx (fontMono . fontBold . textColor (colorRGBA 235 203 139 255) . tight $ defaultLayout) "⏸ UNPINNED (reading history)"
-        jumpClicked <- buttonWith (textColor (colorRGBA 136 192 208 255) . fontBold) "Jump to Bottom"
+        void $ labelEx (fontMono . fontBold . fontColor (colorRGBA 235 203 139 255) . tight $ defaultLayout) "⏸ UNPINNED (reading history)"
+        jumpClicked <- buttonWith (fontColor (colorRGBA 136 192 208 255) . fontBold) "Jump to Bottom"
         when jumpClicked $
           setReqJump True
 
@@ -466,7 +449,7 @@ renderLogRow isAllSel entry = do
   let lineText = formatLogLine entry
       col = levelColor (leLevel entry)
       rowLay = tight . fixedH logRowH . padXY 8 2 $ defaultLayout {layoutAlignY = AlignMiddle}
-      rowBody = void $ selectableTextWith (textColor col . fontMono . tight) lineText
+      rowBody = void $ selectableTextWith (fontColor col . fontMono . tight) lineText
   if isAllSel
     then panelStyled' (colorRGBA 45 65 95 255) (colorRGBA 70 100 145 255) rowLay rowBody
     else row' rowLay rowBody
@@ -479,7 +462,7 @@ renderStatusBar totalCount filteredCount allSelected = do
         ("Total: " <> T.pack (show totalCount) <> " logs | Filtered: " <> T.pack (show filteredCount))
       if allSelected
         then
-          void $ labelEx (fontMono . fontBold . textColor (colorRGBA 235 203 139 255) . tight $ defaultLayout)
+          void $ labelEx (fontMono . fontBold . fontColor (colorRGBA 235 203 139 255) . tight $ defaultLayout)
             "ALL LOGS SELECTED | Ctrl+C to copy all | ESC to clear"
         else
           void $ labelEx (fontMuted . tight $ defaultLayout)
@@ -506,7 +489,7 @@ main = do
               modCtrl (inputModifiers inp)
                 && T.any (`T.elem` ("qQ" :: Text)) (inputChars inp)
           }
-          (logsApp appStateRef)
+        (logsApp appStateRef)
 
 -- | Headless verification testing:
 --   1. Initial rendering of virtualized logs and PINNED status.
@@ -551,7 +534,7 @@ selftest = do
         fail "selftest: full log line (sequence ID, timestamp, level, service, message) not found in selectable spans"
 
       -- 3. Test sticky scroll: append 40 new logs while pinned
-      appendLogs appStateRef 40
+      modifyIORef' appStateRef (`appendEntries` 40)
       drawFrame baseInput
       drawFrame baseInput
 
@@ -570,7 +553,7 @@ selftest = do
 
       -- 5. Append 50 more logs while reading history in the middle:
       -- The scrollbar / viewport must NOT move, and state must stay UNPINNED
-      appendLogs appStateRef 50
+      modifyIORef' appStateRef (`appendEntries` 50)
       drawFrame baseInput
 
       spans3 <- collectTextSpans ctx

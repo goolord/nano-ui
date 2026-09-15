@@ -1,114 +1,26 @@
-{-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE MagicHash #-}
-{-# LANGUAGE StrictData #-}
-{-# LANGUAGE UnboxedTuples #-}
-
--- | SIMD vector acceleration primitives for geometry lowering and rendering.
--- Uses GHC native SIMD primops (FloatX4#, Word32X4#) under AVX/SSE for high-throughput
--- vector stores and arithmetic, with zero FFI overhead.
+-- | Vertex and index writers for the draw buffers. Each vertex is written with
+-- two 128-bit GHC SIMD stores (FloatX4#) instead of eight scalar stores.
 module NanoUI.SIMD
-  ( SIMD4Float (..)
-  , SIMD4Word32 (..)
-  , broadcastSIMD4Float
-  , packSIMD4Float
-  , plusSIMD4Float
-  , timesSIMD4Float
-  , fmaSIMD4Float
-  , writeAddrSIMD4Float
-  , readAddrSIMD4Float
-  , packSIMD4Word32
-  , writeAddrSIMD4Word32
-  , readAddrSIMD4Word32
-  , pokeVertexSIMD
+  ( pokeVertexSIMD
   , pokeQuadSIMD
   , pokeQuadGradientSIMD
   , concentricOffsetsSIMD
-  , strokeStripNormalsSIMD
   ) where
 
 import GHC.Ptr (Ptr (..))
 import Foreign.Storable (pokeByteOff)
 import GHC.Exts
-  ( Addr#
-  , Float (F#)
-  , FloatX4#
+  ( Float (F#)
   , Int (I#)
-  , Int#
-  , Word32X4#
-  , broadcastFloatX4#
   , packFloatX4#
   , packWord32X4#
   , plusAddr#
-  , plusFloatX4#
-  , readFloatOffAddrAsFloatX4#
-  , readWord32OffAddrAsWord32X4#
-  , timesFloatX4#
-  , unpackFloatX4#
   , writeFloatOffAddrAsFloatX4#
   , writeWord32OffAddrAsWord32X4#
   )
 import GHC.Word (Word32 (W32#))
 import GHC.IO (IO (..))
 import Data.Word (Word8)
-
--- | 4-wide 32-bit float vector.
-data SIMD4Float = SIMD4Float FloatX4#
-
--- | 4-wide 32-bit unsigned integer vector.
-data SIMD4Word32 = SIMD4Word32 Word32X4#
-
-{-# INLINE broadcastSIMD4Float #-}
-broadcastSIMD4Float :: Float -> SIMD4Float
-broadcastSIMD4Float (F# f#) = SIMD4Float (broadcastFloatX4# f#)
-
-{-# INLINE packSIMD4Float #-}
-packSIMD4Float :: Float -> Float -> Float -> Float -> SIMD4Float
-packSIMD4Float (F# a#) (F# b#) (F# c#) (F# d#) =
-  SIMD4Float (packFloatX4# (# a#, b#, c#, d# #))
-
-{-# INLINE plusSIMD4Float #-}
-plusSIMD4Float :: SIMD4Float -> SIMD4Float -> SIMD4Float
-plusSIMD4Float (SIMD4Float a#) (SIMD4Float b#) =
-  SIMD4Float (plusFloatX4# a# b#)
-
-{-# INLINE timesSIMD4Float #-}
-timesSIMD4Float :: SIMD4Float -> SIMD4Float -> SIMD4Float
-timesSIMD4Float (SIMD4Float a#) (SIMD4Float b#) =
-  SIMD4Float (timesFloatX4# a# b#)
-
-{-# INLINE fmaSIMD4Float #-}
--- | Computes a * b + c using vector operations.
-fmaSIMD4Float :: SIMD4Float -> SIMD4Float -> SIMD4Float -> SIMD4Float
-fmaSIMD4Float a b c = plusSIMD4Float (timesSIMD4Float a b) c
-
-{-# INLINE writeAddrSIMD4Float #-}
-writeAddrSIMD4Float :: Addr# -> Int# -> SIMD4Float -> IO ()
-writeAddrSIMD4Float addr# off# (SIMD4Float v#) = IO $ \s0 ->
-  case writeFloatOffAddrAsFloatX4# addr# off# v# s0 of
-    s1 -> (# s1, () #)
-
-{-# INLINE readAddrSIMD4Float #-}
-readAddrSIMD4Float :: Addr# -> Int# -> IO SIMD4Float
-readAddrSIMD4Float addr# off# = IO $ \s0 ->
-  case readFloatOffAddrAsFloatX4# addr# off# s0 of
-    (# s1, v# #) -> (# s1, SIMD4Float v# #)
-
-{-# INLINE packSIMD4Word32 #-}
-packSIMD4Word32 :: Word32 -> Word32 -> Word32 -> Word32 -> SIMD4Word32
-packSIMD4Word32 (W32# a#) (W32# b#) (W32# c#) (W32# d#) =
-  SIMD4Word32 (packWord32X4# (# a#, b#, c#, d# #))
-
-{-# INLINE writeAddrSIMD4Word32 #-}
-writeAddrSIMD4Word32 :: Addr# -> Int# -> SIMD4Word32 -> IO ()
-writeAddrSIMD4Word32 addr# off# (SIMD4Word32 v#) = IO $ \s0 ->
-  case writeWord32OffAddrAsWord32X4# addr# off# v# s0 of
-    s1 -> (# s1, () #)
-
-{-# INLINE readAddrSIMD4Word32 #-}
-readAddrSIMD4Word32 :: Addr# -> Int# -> IO SIMD4Word32
-readAddrSIMD4Word32 addr# off# = IO $ \s0 ->
-  case readWord32OffAddrAsWord32X4# addr# off# s0 of
-    (# s1, v# #) -> (# s1, SIMD4Word32 v# #)
 
 -- | Writes one 32-byte Vertex (8 floats) into memory using two 128-bit SIMD stores
 -- instead of 8 scalar stores.
@@ -213,9 +125,14 @@ pokeQuadGradientSIMD
   pokeVertexSIMD vertices (vOffset + 96) x y1 r3 g3 b3 a3 u v
   pokeQuadIndicesSIMD indices iOffset baseIdx
 
--- | Evaluates 4 concentric arc positions in parallel using vector math:
+-- | Evaluates 4 concentric arc positions:
 -- xs = cx + radii * ct
 -- ys = cy + radii * st
+--
+-- Scalar on purpose: GHC 9.14.1 miscompiles the broadcast/pack/unpack FloatX4#
+-- version at -O2 once it is inlined into a loop (liberate-case computed the y
+-- lane from cx), corrupting anti-aliased border vertices. The results are
+-- bit-identical to the vector version, which also multiplied and added separately.
 {-# INLINE concentricOffsetsSIMD #-}
 concentricOffsetsSIMD ::
   Float ->
@@ -227,38 +144,9 @@ concentricOffsetsSIMD ::
   Float ->
   Float ->
   ((Float, Float), (Float, Float), (Float, Float), (Float, Float))
-concentricOffsetsSIMD
-  (F# cx#) (F# cy#) (F# ct#) (F# st#)
-  (F# r0#) (F# r1#) (F# r2#) (F# r3#) =
-  let !cxVec# = broadcastFloatX4# cx#
-      !cyVec# = broadcastFloatX4# cy#
-      !ctVec# = broadcastFloatX4# ct#
-      !stVec# = broadcastFloatX4# st#
-      !radii# = packFloatX4# (# r0#, r1#, r2#, r3# #)
-      !xs# = plusFloatX4# cxVec# (timesFloatX4# radii# ctVec#)
-      !ys# = plusFloatX4# cyVec# (timesFloatX4# radii# stVec#)
-   in case unpackFloatX4# xs# of
-        (# x0#, x1#, x2#, x3# #) ->
-          case unpackFloatX4# ys# of
-            (# y0#, y1#, y2#, y3# #) ->
-              ( (F# x0#, F# y0#)
-              , (F# x1#, F# y1#)
-              , (F# x2#, F# y2#)
-              , (F# x3#, F# y3#)
-              )
-
--- | Evaluates 4 coverage strip normal offsets in parallel:
--- xs = px + nx * offsets
--- ys = py + ny * offsets
-{-# INLINE strokeStripNormalsSIMD #-}
-strokeStripNormalsSIMD ::
-  Float ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
-  ((Float, Float), (Float, Float), (Float, Float), (Float, Float))
-strokeStripNormalsSIMD = concentricOffsetsSIMD
+concentricOffsetsSIMD cx cy ct st r0 r1 r2 r3 =
+  ( (cx + r0 * ct, cy + r0 * st)
+  , (cx + r1 * ct, cy + r1 * st)
+  , (cx + r2 * ct, cy + r2 * st)
+  , (cx + r3 * ct, cy + r3 * st)
+  )

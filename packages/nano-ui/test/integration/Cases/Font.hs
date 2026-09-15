@@ -51,7 +51,7 @@ runFontColorTest ctx failed = do
       blue = colorRGBA 0 0 255 255
       ui = column $ do
         void $ labelWith (fontColor red) "Red Label"
-        void $ labelWith (textColor blue) "Blue Label"
+        void $ labelWith (fontColor blue) "Blue Label"
   _ <- runFrame ctx inp ui
   spans <- collectTextSpans ctx
   let textSpans = filter (\(_, txt, _, _, _) -> not (T.null txt)) spans

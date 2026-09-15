@@ -7,11 +7,7 @@ module NanoUI.Sdl.Cursor
 
 import Control.Monad (void, when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import Data.Word (Word32)
-import Foreign.C.Types (CUInt (..))
-import Foreign.Marshal.Alloc (allocaBytes)
 import Foreign.Ptr (Ptr, nullPtr)
-import Foreign.Storable (peekByteOff)
 import NanoUI (Input (..))
 import NanoUI.Testing (Context, UiCursorKind (..), uiCursorKind)
 import System.Environment (lookupEnv)
@@ -23,59 +19,6 @@ import SDL3.Sys.Mouse
   , getDefaultCursorSafe
   , setCursorSafe
   )
-
--- SDL 3.2+ SDL_SystemCursor indices (SDL_mouse.h); bindgen exports only 0–19.
-sdlSystemCursorGrabIdx, sdlSystemCursorGrabbingIdx :: Word32
-sdlSystemCursorGrabIdx = 27
-sdlSystemCursorGrabbingIdx = 28
-
-foreign import ccall unsafe "SDL_GetVersion"
-  c_SDL_GetVersion :: Ptr Word32 -> IO ()
-
-foreign import ccall unsafe "SDL_CreateSystemCursor"
-  c_SDL_CreateSystemCursor :: CUInt -> IO (Ptr Mouse.SDL_Cursor)
-
-sdlVersionAtLeast :: Word32 -> Word32 -> IO Bool
-sdlVersionAtLeast wantMajor wantMinor =
-  allocaBytes 12 $ \ptr -> do
-    c_SDL_GetVersion ptr
-    major <- peekByteOff ptr 0
-    minor <- peekByteOff ptr 4
-    pure $
-      major > wantMajor
-        || (major == wantMajor && minor >= wantMinor)
-
-createExtendedSystemCursor :: Word32 -> IO (Ptr Mouse.SDL_Cursor)
-createExtendedSystemCursor idx = c_SDL_CreateSystemCursor (fromIntegral idx)
-
-extendedGrabCursorsSupported :: IO Bool
-extendedGrabCursorsSupported = do
-  okVer <- sdlVersionAtLeast 3 2
-  if not okVer
-    then pure False
-    else do
-      cur <- createExtendedSystemCursor sdlSystemCursorGrabIdx
-      if cur == nullPtr
-        then pure False
-        else do
-          destroyCursorSafe cur
-          pure True
-
-grabCursorOrFallback :: Ptr Mouse.SDL_Cursor -> Bool -> IO (Ptr Mouse.SDL_Cursor)
-grabCursorOrFallback moveFallback supported =
-  if supported
-    then do
-      cur <- createExtendedSystemCursor sdlSystemCursorGrabIdx
-      if cur /= nullPtr then pure cur else pure moveFallback
-    else pure moveFallback
-
-grabbingCursorOrFallback :: Ptr Mouse.SDL_Cursor -> Bool -> IO (Ptr Mouse.SDL_Cursor)
-grabbingCursorOrFallback moveFallback supported =
-  if supported
-    then do
-      cur <- createExtendedSystemCursor sdlSystemCursorGrabbingIdx
-      if cur /= nullPtr then pure cur else pure moveFallback
-    else pure moveFallback
 
 data SdlCursors = SdlCursors
   { scDefault :: Ptr Mouse.SDL_Cursor
@@ -102,9 +45,11 @@ initCursors = do
   ew <- createSystemCursorSafe Mouse.SDL_SYSTEM_CURSOR_EW_RESIZE
   nwse <- createSystemCursorSafe Mouse.SDL_SYSTEM_CURSOR_NWSE_RESIZE
   nesw <- createSystemCursorSafe Mouse.SDL_SYSTEM_CURSOR_NESW_RESIZE
-  supported <- extendedGrabCursorsSupported
-  grab <- grabCursorOrFallback moveFallback supported
-  grabbing <- grabbingCursorOrFallback moveFallback supported
+  -- SDL_SYSTEM_CURSOR_GRAB (27) and GRABBING (28) have no bindgen patterns.
+  -- Where SDL or the platform lacks them creation returns NULL, and the move
+  -- cursor stands in.
+  grab <- createSystemCursorSafe (Mouse.SDL_SystemCursor 27)
+  grabbing <- createSystemCursorSafe (Mouse.SDL_SystemCursor 28)
   current <- newIORef UiCursorDefault
   -- Debug aid, read once here so cursor changes stay allocation-free:
   -- NANO_CURSOR_TRACE=1 logs every cursor change to stderr.
@@ -118,8 +63,8 @@ initCursors = do
       , scPointer = ptr
       , scText = text
       , scMoveFallback = moveFallback
-      , scGrab = grab
-      , scGrabbing = grabbing
+      , scGrab = if grab == nullPtr then moveFallback else grab
+      , scGrabbing = if grabbing == nullPtr then moveFallback else grabbing
       , scNsResize = ns
       , scEwResize = ew
       , scNwseResize = nwse

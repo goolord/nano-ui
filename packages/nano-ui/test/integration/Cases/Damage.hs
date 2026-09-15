@@ -1,6 +1,6 @@
 module Cases.Damage
   ( runDamageBoundsResolutionTest
-  , runDamageBoundsMonoidTest
+  , runDamageBoundsUnionTest
   , runExplicitDamageWidgetTest
   , runExplicitDamageRectTest
   , runExplicitDamageFullTest
@@ -31,17 +31,17 @@ runDamageBoundsResolutionTest _ failed = do
   assertEq failed rCustom (Rect 9 18 110 70)
   assertEq failed rNone (Rect 0 0 0 0)
 
-runDamageBoundsMonoidTest :: Context -> IORef Int -> IO ()
-runDamageBoundsMonoidTest _ failed = do
+runDamageBoundsUnionTest :: Context -> IORef Int -> IO ()
+runDamageBoundsUnionTest _ failed = do
   let base = Rect 10 20 100 50
-      b1 = DamageInflated 4.0
-      b2 = DamageInflated 8.0
-      bUnion = b1 <> b2
+      bUnion = DamageUnion (DamageInflated 4.0) (DamageInflated 8.0)
       rUnion = resolveDamageRect bUnion base
       rExpected = rectUnion (Rect 6 16 108 58) (Rect 2 12 116 66)
 
   assertEq failed rUnion rExpected
-  assertEq failed (resolveDamageRect mempty base) base
+  -- DamageNone is the identity of a union rather than a rect at the origin.
+  assertEq failed (resolveDamageRect (DamageUnion DamageSelf DamageNone) base) base
+  assertEq failed (resolveDamageRect (DamageUnion DamageNone (DamageExact base)) (Rect 0 0 0 0)) base
 
 runExplicitDamageWidgetTest :: Context -> IORef Int -> IO ()
 runExplicitDamageWidgetTest _ failed = do

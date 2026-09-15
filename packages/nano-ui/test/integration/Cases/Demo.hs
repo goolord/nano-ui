@@ -4,6 +4,7 @@ module Cases.Demo
   , runColorPickerPreviewTest
   , runColorPickerCommitTest
   , runColorPickerKeyCommitTest
+  , runColorPickerChangeOnceTest
   , runColorPickerRgbaTest
   , runColorPickerEditTest
   , runColorPickerHoldTest
@@ -311,6 +312,20 @@ runColorPickerHoldTest ctx failed = do
   stH <- getStore ctx
   assert failed (colP /= colorToWord32 initial)
   assertEq failed (colorToWord32 (widgetStoreColor stH wid initial)) colP
+
+-- respChanged fires on the frame the colour moves and not on later frames
+-- (regression: it compared the colour against the initial one).
+runColorPickerChangeOnceTest :: Context -> IORef Int -> IO ()
+runColorPickerChangeOnceTest ctx failed = do
+  let inp0 = withInput 400 420
+      ui = colorPicker (colorRGBA 204 102 102 255)
+      changed inp = (\((resp, _), _, _, _) -> respChanged resp) <$> runFrame ctx inp ui
+  _ <- warmup2 ctx inp0 ui
+  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
+  moved <- changed (inp0 {inputKeys = inputKeysFromList [KeyRight]})
+  assert failed moved
+  idle <- mapM changed [inp0, inp0]
+  assertEq failed idle [False, False]
 
 runColorPickerKeyCommitTest :: Context -> IORef Int -> IO ()
 runColorPickerKeyCommitTest ctx failed = do

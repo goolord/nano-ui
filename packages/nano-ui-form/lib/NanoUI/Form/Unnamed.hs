@@ -31,15 +31,22 @@ import NanoUI
   , textInput
   , textInputPassword
   )
+import NanoUI.Form.Backend (FormInput (..), formInputToText)
 import NanoUI.Form.Field
   ( decodeBool
   , decodeFloatInput
   , decodeInt
   , enumField
-  , fieldErrors
   , fieldView
   )
-import NanoUI.Form.Types (Form, FormInput (..), FormView, formInputToText)
+import NanoUI.Form.Named
+  ( childErrors
+  , errors
+  , withChildErrors
+  , withErrors
+  , withFieldErrors
+  )
+import NanoUI.Form.Types (Form)
 
 -- | Auto-enumerated text input.
 inputText :: FormError FormInput err => Text -> Form err Text
@@ -91,23 +98,3 @@ inputEnumSelect ::
   forall a err.
   (Bounded a, Enum a, Show a, FormError FormInput err) => a -> Form err a
 inputEnumSelect = enumField inputSelect
-
--- | Render error messages originating directly from this form node.
-errors :: ([err] -> FormView) -> Form err ()
-errors = Unnamed.errors
-
--- | Render error messages originating from this form node and any descendant nodes.
-childErrors :: ([err] -> FormView) -> Form err ()
-childErrors = Unnamed.childErrors
-
--- | Wrap a form with a custom error handler for its direct errors.
-withErrors :: (FormView -> [err] -> FormView) -> Form err a -> Form err a
-withErrors = Unnamed.withErrors
-
--- | Wrap a form with a custom error handler for errors from it or any child.
-withChildErrors :: (FormView -> [err] -> FormView) -> Form err a -> Form err a
-withChildErrors = Unnamed.withChildErrors
-
--- | Automatically display validation errors directly below the widget.
-withFieldErrors :: Form Text a -> Form Text a
-withFieldErrors = withChildErrors fieldErrors

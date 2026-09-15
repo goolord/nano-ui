@@ -1,41 +1,22 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 
 module NanoUI.Plot.Hit
-  ( hitTestChart
-  , hitTestChartCached
-  , diagramPointAt
+  ( hitTestChartCached
   , diagramPointAtWithExtents
   , nearestPlotHover
   ) where
 
-import Data.Maybe (fromMaybe)
 import Diagrams.Core (QDiagram)
 import Diagrams.Prelude qualified as Dia
-import NanoUI (FontMetrics, Rect (..), Theme (..), V2, rectContains, v2X, v2Y)
+import NanoUI (Rect (..), V2, rectContains, v2X, v2Y)
 import NanoUI.Diagrams.Backend (NanoUIBackend, uniformHeight)
-import NanoUI.Diagrams.Widget (PlotStyle (..))
-import NanoUI.Plot.Chrome (chartDiagram, seriesDomains, seriesPoints)
+import NanoUI.Plot.Chrome (seriesDomains, seriesPoints)
 import NanoUI.Plot.Scale (plotToDomain)
-import NanoUI.Plot.Types (Chart (..), PlotHover (..), Range (..))
+import NanoUI.Plot.Types (Chart (..), PlotHover (..))
 import qualified Data.Vector.Unboxed as U
 
 diagramBorder :: Float
 diagramBorder = 1
-
-hitTestChart ::
-  FontMetrics ->
-  Theme ->
-  PlotStyle ->
-  Chart ->
-  Rect ->
-  V2 ->
-  Maybe PlotHover
-hitTestChart fm theme ps chart widgetRect mouse =
-  let d = chartDiagram fm theme ps chart
-      Dia.V2 dw dh = Dia.size d
-      extX = fromMaybe (0, dw) (Dia.extentX d)
-      extY = fromMaybe (0, dh) (Dia.extentY d)
-   in hitTestChartCached d dw dh extX extY chart widgetRect mouse
 
 hitTestChartCached ::
   QDiagram NanoUIBackend Dia.V2 Double Dia.Any ->
@@ -64,19 +45,6 @@ hitTestChartCached d dw dh extX extY chart widgetRect mouse =
            in case diagramPointAtWithExtents dw dh extX extY w h d lx ly of
                 Nothing -> Nothing
                 Just (gx, gy) -> nearestPlotHover chart gx gy
-
-diagramPointAt ::
-  Double ->
-  Double ->
-  QDiagram NanoUIBackend Dia.V2 Double Dia.Any ->
-  Float ->
-  Float ->
-  Maybe (Double, Double)
-diagramPointAt w h d px py =
-  let Dia.V2 dw dh = Dia.size d
-      extX = fromMaybe (0, dw) (Dia.extentX d)
-      extY = fromMaybe (0, dh) (Dia.extentY d)
-   in diagramPointAtWithExtents dw dh extX extY w h d px py
 
 diagramPointAtWithExtents ::
   Double ->
@@ -111,8 +79,8 @@ nearestPlotHover chart gx gy
   | otherwise = scanSeries 0 Nothing (chartSeries chart)
  where
   (xDom, yDom) = seriesDomains chart
-  dataX = plotToDomain xDom (Range 0 1) gx
-  dataY = plotToDomain yDom (Range 0 1) gy
+  dataX = plotToDomain xDom gx
+  dataY = plotToDomain yDom gy
   distanceSquared hover =
     let dx = hoverDataX hover - dataX
         dy = hoverDataY hover - dataY

@@ -1,25 +1,23 @@
-{-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 module NanoUI.Rgfw.Render
   ( renderArena
   ) where
 
 import Control.Monad (when)
 import Data.Bits (shiftL, shiftR, (.&.), (.|.))
-import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Word (Word8, Word32)
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (peekByteOff, peekElemOff, pokeElemOff)
 import NanoUI (Color (..), Rect (..))
+import NanoUI.Rgfw.Context (TextSpan, paintInLayerOrder)
 import NanoUI.Rgfw.Font.Cozette (CozetteFont)
 import NanoUI.Rgfw.Surface
   ( RgfwSurface (..)
   , drawTextScaled
   , fillRect
   , packColor
+  , physClip
   , popClip
   , pushClip
   , toPhysRect
@@ -27,7 +25,6 @@ import NanoUI.Rgfw.Surface
 import NanoUI.Testing
   ( DrawCmd (..)
   , DrawData (..)
-  , Layer (..)
   , backdropDimTextureId
   , forDrawCmdsInLayer_
   , indexSize
@@ -37,37 +34,30 @@ import NanoUI.Testing
 -- | One vertex colour, straight out of the shared draw buffer.
 type RGBA = (Float, Float, Float, Float)
 
--- | Rasterize a frame into pixels: walk the core's 'DrawData' in canonical
--- layer order filling every primitive, then stamp the core's collected text
--- spans with the embedded Cozette bitmap font. Widget drawing (windows, popups,
--- buttons, fields, scroll chrome, ...) comes from the core draw path, so RGFW
--- gets theme parity and core drawing behavior for free.
+-- | Rasterize a frame into pixels: fill every primitive of the core's
+-- 'DrawData' and stamp the core's collected text spans with the embedded
+-- Cozette bitmap font, in 'paintInLayerOrder'. Widget drawing (windows,
+-- popups, buttons, fields, scroll chrome, ...) comes from the core draw path,
+-- so RGFW gets theme parity and core drawing behavior for free.
 --
 -- The frame must come from a context built by
 -- 'NanoUI.Rgfw.Context.newRgfwContext': square geometry means the buffer holds
 -- only flat quads and triangles (no rounded fans or transparent AA fringes),
 -- and external text means it holds no text quads, so every primitive is filled
 -- as-is and glyphs come solely from the span lists.
---
--- Layer and span order: background quads, content quads, base spans, overlay
--- quads, chrome quads, overlay spans.
 renderArena ::
   RgfwSurface ->
   CozetteFont ->
   Float -> -- logical (layout) -> physical (pixel) scale
   DrawData ->
-  [(Rect, Text, Color, Color, Rect)] -> -- base spans (rect, text, fg, bg, clip)
-  [(Rect, Text, Color, Color, Rect)] -> -- overlay spans
+  [TextSpan] -> -- base spans
+  [TextSpan] -> -- overlay spans
   IO ()
-renderArena surf font !scale drawData baseSpans overlaySpans = do
-  forDrawCmdsInLayer_ LayerBackground drawData (applyCmd surf scale drawData)
-  forDrawCmdsInLayer_ LayerContent drawData (applyCmd surf scale drawData)
-  -- Spans after content quads so scroll tracks do not erase box rules.
-  mapM_ (stampSpan surf font scale) baseSpans
-  forDrawCmdsInLayer_ LayerOverlay drawData (applyCmd surf scale drawData)
-  -- Floating chrome (window scrollbars) before overlay text.
-  forDrawCmdsInLayer_ LayerChrome drawData (applyCmd surf scale drawData)
-  mapM_ (stampSpan surf font scale) overlaySpans
+renderArena surf font !scale drawData baseSpans overlaySpans =
+  paintInLayerOrder
+    (\layer -> forDrawCmdsInLayer_ layer drawData (applyCmd surf scale drawData))
+    (mapM_ (stampSpan surf font scale) baseSpans)
+    (mapM_ (stampSpan surf font scale) overlaySpans)
 
 applyCmd :: RgfwSurface -> Float -> DrawData -> DrawCmd -> IO ()
 applyCmd surf !scale dd cmd
@@ -75,7 +65,7 @@ applyCmd surf !scale dd cmd
   | otherwise =
       withForeignPtr (drawVertices dd) $ \vp ->
         withForeignPtr (drawIndices dd) $ \ip ->
-          case physClip surf scale (Rect (cmdClipX cmd) (cmdClipY cmd) (cmdClipW cmd) (cmdClipH cmd)) of
+          case physClip scale (sWidth surf) (sHeight surf) (Rect (cmdClipX cmd) (cmdClipY cmd) (cmdClipW cmd) (cmdClipH cmd)) of
             Nothing -> pure ()
             Just clip -> walkPrims surf scale dd vp ip isDim clip start (start + count)
   where
@@ -228,15 +218,10 @@ fillConvexPx surf (cx0, cy0, cx1, cy1) pts@(p0 : _) col
 -- the blit. The span's background colour is a hint for cell hosts; every
 -- real background is already a quad in the DrawData, and span rects cover
 -- the text run rather than the widget, so painting it would overdraw.
-stampSpan ::
-  RgfwSurface ->
-  CozetteFont ->
-  Float ->
-  (Rect, Text, Color, Color, Rect) ->
-  IO ()
+stampSpan :: RgfwSurface -> CozetteFont -> Float -> TextSpan -> IO ()
 stampSpan surf font !scale (Rect rx ry _ _, txt, fg, _, clip)
   | T.null txt = pure ()
-  | otherwise = case physClip surf scale clip of
+  | otherwise = case physClip scale (sWidth surf) (sHeight surf) clip of
       Nothing -> pure ()
       Just (cx0, cy0, cx1, cy1) -> do
         pushClip surf cx0 cy0 (cx1 - cx0) (cy1 - cy0)
@@ -305,16 +290,6 @@ vertexAt dd vp vi
 
 peekFloatAt :: Ptr Word8 -> Int -> IO Float
 peekFloatAt p off = peekByteOff p off
-
--- | Clip rect (logical) scaled and intersected with the surface bounds.
-physClip :: RgfwSurface -> Float -> Rect -> Maybe (Int, Int, Int, Int)
-physClip surf !scale (Rect x y w h) =
-  let (!px, !py, !pw, !ph) = toPhysRect scale x y w h
-      !x0 = max 0 px
-      !y0 = max 0 py
-      !x1 = min (sWidth surf) (px + pw)
-      !y1 = min (sHeight surf) (py + ph)
-   in if x0 >= x1 || y0 >= y1 then Nothing else Just (x0, y0, x1, y1)
 
 clipRect :: (Int, Int, Int, Int) -> Int -> Int -> Int -> Int -> Maybe (Int, Int, Int, Int)
 clipRect (cx0, cy0, cx1, cy1) x y w h =

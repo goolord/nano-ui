@@ -3,6 +3,7 @@ module Cases.CustomWidget
   , runCustomWidgetMeasureTest
   , runCustomWidgetCursorTest
   , runCustomWidgetInteractionTest
+  , runCustomWidgetQueuedClickTest
   , runReferenceKnobTest
   , runReferenceToggleSwitchTest
   , runReferenceProgressBarTest
@@ -10,13 +11,13 @@ module Cases.CustomWidget
   , runDropTargetTest
   ) where
 
-import Control.Monad (void)
-import Data.IORef (IORef)
+import Control.Monad (forM_, void)
+import Data.IORef (IORef, writeIORef)
 import Data.Vector qualified as V
 import NanoUI
+import NanoUI.Context (Context (..))
 import NanoUI.Testing
-  ( Context
-  , UiCursorKind (..)
+  ( UiCursorKind (..)
   , cursorKindIs
   , drawCmdCount
   , drawIndexCount
@@ -97,6 +98,22 @@ runCustomWidgetInteractionTest ctx failed = do
   assert failed (respClicked respClick)
   assert failed hovered
   assert failed (not pressed)
+
+-- | A click the frame queued for a widget whose pointer hit missed still
+-- reaches custom widgets (regression: their default interaction rebuilt the
+-- click from hover and release alone, dropping the queued click).
+runCustomWidgetQueuedClickTest :: Context -> IORef Int -> IO ()
+runCustomWidgetQueuedClickTest ctx failed = do
+  let inp0 = (withInput 300 300) {inputMousePos = V2 290 290}
+      ui = column $ do
+        (fromCanvas, ()) <- canvasWith (fixedWH 80 40 defaultLayout) (\_ _ -> pure ())
+        fromSpec <- customWidget_ defaultCustomWidgetSpec {widgetLayout = fixedWH 80 40 defaultLayout}
+        pure [fromCanvas, fromSpec]
+  warm <- warmup2 ctx inp0 ui
+  forM_ (zip [0 :: Int ..] warm) $ \(i, resp0) -> do
+    writeIORef (ctxClickedId ctx) (respId resp0)
+    (resps, _, _, _) <- runFrame ctx inp0 ui
+    assert failed (map respClicked resps == [j == i | j <- [0 .. length resps - 1]])
 
 -- | Verifies the reference rotary knob widget.
 runReferenceKnobTest :: Context -> IORef Int -> IO ()

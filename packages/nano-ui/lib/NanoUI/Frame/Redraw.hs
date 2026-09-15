@@ -7,12 +7,10 @@ module NanoUI.Frame.Redraw
   , floatingPanelActive
   , debugPanelOpen
   , overlayMenuOpen
-  , hoverWouldChange
   , probeHotId
   ) where
 
-
-import Data.IORef (readIORef)
+import Data.IORef (IORef, readIORef)
 import Data.Maybe (isJust)
 import NanoUI.Context
   ( Context (..)
@@ -27,11 +25,13 @@ import NanoUI.Context
   , isDirty
   , modalActive
   )
+import NanoUI.Frame.Hit (findNodeByWidgetId, nodePointVisible, overlayHitAllowed)
+import NanoUI.Frame.Select (overlayMenuOwnerAt)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), inputInteracted, inputMousePos, inputPointerHeld)
 import NanoUI.Layout.Arena
   ( NodeType (..)
-  , arenaCount
+  , findNodeM
   , foldNodeRevM
   , getNodeType
   , getOptions
@@ -40,11 +40,34 @@ import NanoUI.Layout.Arena
   , isWidgetNode
   )
 import NanoUI.Types (V2 (..))
-import NanoUI.Frame.Hit (findNodeByWidgetId, overlayHitAllowed, nodePointVisible)
-import NanoUI.Frame.Select (overlayMenuOwnerAt)
 
 needsRedraw :: Context -> Input -> Input -> IO Bool
-needsRedraw = needsRedrawBody
+needsRedraw ctx prev inp = do
+  dirty <- isDirty ctx
+  anim <- anyAnimating ctx
+  mDrag <- getScrollDrag ctx
+  mWinDrag <- getWindowDrag ctx
+  overlay <- overlayMenuOpen ctx
+  edit <- textFieldActive ctx
+  let moved = inputMousePos prev /= inputMousePos inp
+  if dirty
+    || anim
+    || inputInteracted prev inp
+    || inputWindowRedraw inp
+    || inputPointerHeld inp
+    || isJust mDrag
+    || isJust mWinDrag
+    || (overlay && moved)
+    || edit
+    then pure True
+    else
+      -- Idle: hover can only change when the pointer moved since the frame
+      -- whose hover state we still hold. Skip the O(n) hot probe otherwise.
+      if not moved
+        then pure False
+        else do
+          lastHot <- readIORef (ctxLastHotId ctx)
+          (/= lastHot) <$> probeHotId ctx (inputMousePos inp)
 
 -- Window/scroll/resize drag marks dirty every frame, so input must still be
 -- polled on those frames.
@@ -54,51 +77,20 @@ pointerDragActive ctx = do
   winDrag <- isJust <$> getWindowDrag ctx
   scrollDrag <- isJust <$> getScrollDrag ctx
   winResize <- isJust <$> getWindowResize ctx
-  sliderOrPicker <- widgetDragActive ctx
+  sliderOrPicker <- focusedNodeIs ctx ctxActiveId (\nt -> nt == NodeSlider || nt == NodeColorPicker)
   pure (winDrag || scrollDrag || winResize || sliderOrPicker)
 
-widgetDragActive :: Context -> IO Bool
-widgetDragActive ctx = do
-  active <- readIORef (ctxActiveId ctx)
-  if hashWidgetId active == 0
+-- | Whether the node of the widget id held in @ref@ satisfies @p@.
+focusedNodeIs :: Context -> (Context -> IORef WidgetId) -> (NodeType -> Bool) -> IO Bool
+focusedNodeIs ctx ref p = do
+  wid <- readIORef (ref ctx)
+  if hashWidgetId wid == 0
     then pure False
     else do
-      mIdx <- findNodeByWidgetId ctx active
+      mIdx <- findNodeByWidgetId ctx wid
       case mIdx of
         Nothing -> pure False
-        Just idx -> do
-          nt <- getNodeType (ctxNodeArena ctx) idx
-          pure (nt == NodeSlider || nt == NodeColorPicker)
-
-needsRedrawBody :: Context -> Input -> Input -> IO Bool
-needsRedrawBody ctx prev inp = do
-  dirty <- isDirty ctx
-  anim <- anyAnimating ctx
-  mDrag <- getScrollDrag ctx
-  mWinDrag <- getWindowDrag ctx
-  overlay <- overlayMenuOpen ctx
-  edit <- textFieldActive ctx
-  let overlayMove = overlay && inputMousePos prev /= inputMousePos inp
-  early <-
-    pure
-      ( dirty
-          || anim
-          || inputInteracted prev inp
-          || inputWindowRedraw inp
-          || inputPointerHeld inp
-          || isJust mDrag
-          || isJust mWinDrag
-          || overlayMove
-          || edit
-      )
-  if early
-    then pure True
-    else
-      -- Idle: hover can only change when the pointer moved since the frame
-      -- whose hover state we still hold. Skip the O(n) hot probe otherwise.
-      if inputMousePos prev == inputMousePos inp
-        then pure False
-        else hoverWouldChange ctx inp
+        Just idx -> p <$> getNodeType (ctxNodeArena ctx) idx
 
 -- Select dropdown or text-input menu is open. Overlay hover is not a widget id.
 -- A focused combo (a search-style field carrying options) also owns an open
@@ -111,32 +103,6 @@ overlayMenuOpen ctx = do
   menu <- getTextInputMenu ctx
   if anySelectOpen store || isJust menu
     then pure True
-    else comboDropdownOpen ctx
-
-comboDropdownOpen :: Context -> IO Bool
-comboDropdownOpen ctx = do
-  focus <- readIORef (ctxFocusId ctx)
-  if hashWidgetId focus == 0
-    then pure False
-    else do
-      mIdx <- findNodeByWidgetId ctx focus
-      case mIdx of
-        Nothing -> pure False
-        Just idx -> do
-          nt <- getNodeType (ctxNodeArena ctx) idx
-          if nt /= NodeTextInput
-            then pure False
-            else do
-              opts <- getOptions (ctxNodeArena ctx) idx
-              pure (not (null opts))
-
--- Focused text field or its context menu. Keep the loop live so typed bytes
--- are not stuck behind SDL_WaitEvent.
-textFieldActive :: Context -> IO Bool
-textFieldActive ctx = do
-  menu <- getTextInputMenu ctx
-  if isJust menu
-    then pure True
     else do
       focus <- readIORef (ctxFocusId ctx)
       if hashWidgetId focus == 0
@@ -147,7 +113,18 @@ textFieldActive ctx = do
             Nothing -> pure False
             Just idx -> do
               nt <- getNodeType (ctxNodeArena ctx) idx
-              pure (nt == NodeTextInput || nt == NodeTextArea)
+              if nt /= NodeTextInput
+                then pure False
+                else not . null <$> getOptions (ctxNodeArena ctx) idx
+
+-- Focused text field or its context menu. Keep the loop live so typed bytes
+-- are not stuck behind SDL_WaitEvent.
+textFieldActive :: Context -> IO Bool
+textFieldActive ctx = do
+  menu <- getTextInputMenu ctx
+  if isJust menu
+    then pure True
+    else focusedNodeIs ctx ctxFocusId (\nt -> nt == NodeTextInput || nt == NodeTextArea)
 
 -- Last frame still has a floating node (modal or window). Used by backends to
 -- decide whether overlay content might need periodic refresh (debug HUD).
@@ -156,35 +133,12 @@ floatingPanelActive ctx = do
   modal <- modalActive ctx
   if modal
     then pure True
-    else do
-      count <- arenaCount (ctxNodeArena ctx)
-      let go idx
-            | idx >= count = pure False
-            | otherwise = do
-                nt <- getNodeType (ctxNodeArena ctx) idx
-                if isFloatingNode nt
-                  then pure True
-                  else go (idx + 1)
-      go 0
+    else isJust <$> findNodeM (ctxNodeArena ctx) (fmap isFloatingNode . getNodeType (ctxNodeArena ctx))
 
 -- Floating window overlay (debug HUD). Prev floating rects persist across idle frames.
 debugPanelOpen :: Context -> IO Bool
-debugPanelOpen ctx = do
-  count <- arenaCount (ctxNodeArena ctx)
-  let go idx
-        | idx >= count = pure False
-        | otherwise = do
-            nt <- getNodeType (ctxNodeArena ctx) idx
-            if nt == NodeWindow
-              then pure True
-              else go (idx + 1)
-  go 0
-
-hoverWouldChange :: Context -> Input -> IO Bool
-hoverWouldChange ctx inp = do
-  lastHot <- readIORef (ctxLastHotId ctx)
-  nextHot <- probeHotId ctx (inputMousePos inp)
-  pure (nextHot /= lastHot)
+debugPanelOpen ctx =
+  isJust <$> findNodeM (ctxNodeArena ctx) (fmap (== NodeWindow) . getNodeType (ctxNodeArena ctx))
 
 probeHotId :: Context -> V2 -> IO WidgetId
 probeHotId ctx mouse = do
@@ -195,19 +149,16 @@ probeHotId ctx mouse = do
       mOverlay <- overlayMenuOwnerAt ctx mouse
       case mOverlay of
         Just wid -> pure wid
-        Nothing ->
-          foldNodeRevM (ctxNodeArena ctx) updateHot (WidgetId 0)
+        Nothing -> foldNodeRevM (ctxNodeArena ctx) updateHot (WidgetId 0)
   where
     updateHot acc idx = do
       nt <- getNodeType (ctxNodeArena ctx) idx
       if not (isWidgetNode nt)
         then pure acc
         else do
-          wid <- getWidgetId (ctxNodeArena ctx) idx
           visible <- nodePointVisible ctx idx mouse
-          if visible
-            then do
+          if not visible
+            then pure acc
+            else do
               allow <- overlayHitAllowed ctx idx mouse
-              pure (if allow then wid else acc)
-            else pure acc
-
+              if allow then getWidgetId (ctxNodeArena ctx) idx else pure acc

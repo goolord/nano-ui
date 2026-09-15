@@ -1,9 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 
 module NanoUI.Frame
-  ( FrameResult (..)
-  , FrameReduceResult (..)
-  , runFrame
+  ( runFrame
   , runFrameEff
   , runFrameReduce
   , runFrameReduceEff
@@ -47,7 +45,6 @@ import NanoUI.Context
   , markDirty
   , pruneDrawOpCache
   , resetDrawingScopeCache
-  , setFloatingAncestor
   , setMenuPointerGesture
   , setSelectDropPress
   , takeDamage
@@ -57,7 +54,7 @@ import NanoUI.Context
   , ensureMetricCaches
   )
 import NanoUI.Context (beginFrameModal)
-import NanoUI.Damage (updatePrevRects, writeDamage)
+import NanoUI.Damage (FrameSnapshot (..), updatePrevRects, writeDamage)
 import NanoUI.Draw
   ( DrawArena
   , DrawData
@@ -79,7 +76,6 @@ import NanoUI.Frame.Input
   , finalizeSelectFocus
   , finalizeTabFocus
   , finalizeTextInputFocus
-  , finalizeTextInputMouse
   , refreshHover
   )
 import NanoUI.Frame.Focus (constrainFocusToModal, syncWidgetLabels)
@@ -111,7 +107,9 @@ import NanoUI.Frame.Spans
   , collectTextSpans
   , widgetNodeCount
   )
-import NanoUI.Frame.TextEdit
+import NanoUI.Frame.Overlay (drawModalOverlays, drawPopupOverlays, drawWindowOverlays)
+import NanoUI.Frame.TextEdit (finalizeTextFieldMouse)
+import NanoUI.Frame.TextEdit.Menu
   ( closeTextEditMenuOnEscape
   , closeTextEditMenuOnOutsideClick
   , drawTextEditMenuOverlays
@@ -119,10 +117,7 @@ import NanoUI.Frame.TextEdit
   , openTextEditMenu
   )
 import NanoUI.Frame.Window
-  ( drawModalOverlays
-  , drawPopupOverlays
-  , drawWindowOverlays
-  , lookupWindowPos
+  ( lookupWindowPos
   , lookupWindowSize
   , persistWindowPositions
   , updateWindowDrag
@@ -138,25 +133,10 @@ import NanoUI.Layout.Arena
   , resetNodeArena
   , restoreLayoutCache
   )
-import NanoUI.Layout.Solve (placeModals, placePopups, placeWindows, solveLayoutWithResolver)
+import NanoUI.Layout.Solve (placeModals, placePopups, placeWindows, solveLayout)
 import NanoUI.Monad (NanoUI, Ui, runUi)
 import NanoUI.Store (mirrorStoresChanged)
 import NanoUI.Types (Damage (..), Size (..), rectInflate)
-
-data FrameResult a = FrameResult
-  { frameValue :: !a
-  , frameMessages :: ![FrameMsg]
-  , frameDrawData :: !DrawData
-  , frameNeedsRedraw :: !Bool
-  }
-
-data FrameReduceResult a model msg = FrameReduceResult
-  { frValue :: !a
-  , frModel :: !model
-  , frMessages :: ![msg]
-  , frDrawData :: !DrawData
-  , frNeedsRedraw :: !Bool
-  }
 
 runFrame :: Context -> Input -> NanoUI a -> IO (a, [FrameMsg], DrawData, Bool)
 runFrame = runFrameEff runEff
@@ -267,7 +247,7 @@ runFrameEff unlift ctx inp ui = do
   finalizePointerRelease ctx inp
   finalizeTextInputFocus ctx inp
   finalizeSelectFocus ctx inp
-  finalizeTextInputMouse ctx inp
+  finalizeTextFieldMouse ctx inp
   closeTextEditMenuOnOutsideClick ctx inp
   openTextEditMenu ctx inp
   finalizeTextEditMenuPick ctx inp
@@ -292,23 +272,22 @@ runFrameEff unlift ctx inp ui = do
   tickAnimations ctx (inputDeltaTime inp)
   pruneDrawOpCache ctx
   overlayOpen <- overlayMenuOpen ctx
-  writeDamage
-    ctx
-    inp
-    wasDirty
-    overlayOpen
-    oldSize
-    oldStore
-    oldHot
-    oldActive
-    oldFocus
-    oldHotRect
-    oldActiveRect
-    oldFocusRect
-    oldFloatingRects
-    oldRects
-    oldTexts
-    animKeys
+  writeDamage ctx inp overlayOpen
+    FrameSnapshot
+      { fsWasDirty = wasDirty
+      , fsSize = oldSize
+      , fsStore = oldStore
+      , fsHot = oldHot
+      , fsActive = oldActive
+      , fsFocus = oldFocus
+      , fsHotRect = oldHotRect
+      , fsActiveRect = oldActiveRect
+      , fsFocusRect = oldFocusRect
+      , fsFloatingRects = oldFloatingRects
+      , fsRects = oldRects
+      , fsTexts = oldTexts
+      , fsAnimKeys = animKeys
+      }
   -- Clip frames only repaint the damaged region: the retain texture already
   -- holds every other pixel, and the runner scissors the present to the same
   -- damage. Inflate by one logical pixel to cover the runner's outward pixel
@@ -348,14 +327,13 @@ resetUiBuildScopes ctx = do
   writeIORef (ctxFocusablesCount ctx) 0
   writeIORef (ctxHotId ctx) (WidgetId 0)
   resetDrawingScopeCache ctx
-  setFloatingAncestor ctx Nothing
 
 solvePlaceWindows :: Context -> Float -> Float -> IO ()
 solvePlaceWindows ctx w h = do
   let fontResolver sz weight style var = do
         (fm, _) <- ctxResolveFont ctx sz weight style var
         pure (fm, ctxResolveMeasure ctx sz weight style var)
-  solveLayoutWithResolver
+  solveLayout
     (ctxNodeArena ctx)
     (ctxFontMetrics ctx)
     (ctxMonoFontMetrics ctx)

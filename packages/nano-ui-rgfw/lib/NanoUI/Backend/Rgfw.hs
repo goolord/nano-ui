@@ -14,44 +14,24 @@ module NanoUI.Backend.Rgfw
   , newRgfwContext
   , applyRgfwTheme
   , RgfwDebugSnapshot (..)
-  , RgfwDebugSampler
-  , RgfwDebugHost (..)
   , askRgfwDebug
   , debugWindowBody
-  , allDebugRows
-  , frameRows
-  , layoutRows
-  , displayRows
-  , rtsRows
   , emptyRgfwDebug
-  , newRgfwDebugSampler
-  , readRgfwDebug
   ) where
 
-import Data.Typeable (Typeable)
-import NanoUI (NanoUI)
 import NanoUI.Rgfw.Context (applyRgfwTheme, newRgfwContext)
 import NanoUI.Rgfw.Debug
-  ( RgfwDebugHost (..)
-  , RgfwDebugSampler
-  , RgfwDebugSnapshot (..)
-  , allDebugRows
+  ( RgfwDebugSnapshot (..)
   , askRgfwDebug
   , debugWindowBody
-  , displayRows
   , emptyRgfwDebug
-  , frameRows
-  , layoutRows
-  , newRgfwDebugSampler
-  , readRgfwDebug
-  , rtsRows
   )
 import NanoUI.Rgfw.Session
   ( RgfwOptions (..)
   , defaultRgfwOptions
-  , runRgfwSession
-  , runRgfwSessionReduce
-  , runRgfwSessionReduceCustom
+  , runRgfwApp
+  , runRgfwAppReduce
+  , runRgfwAppReduceCustom
   )
 import NanoUI.Rgfw.Theme
   ( RgfwTheme (..)
@@ -62,25 +42,3 @@ import NanoUI.Rgfw.Theme
   , tomorrowMidnightMinDarkTheme
   , rgfwCoreTheme
   )
-
-runRgfwApp :: RgfwOptions -> NanoUI () -> IO ()
-runRgfwApp = runRgfwSession
-
-runRgfwAppReduce ::
-  (Typeable msg, Eq model) =>
-  RgfwOptions ->
-  (msg -> model -> model) ->
-  model ->
-  (model -> NanoUI ()) ->
-  IO ()
-runRgfwAppReduce = runRgfwSessionReduce
-
-runRgfwAppReduceCustom ::
-  (Typeable msg, Eq model) =>
-  RgfwOptions ->
-  (model -> (RgfwTheme, Float)) ->
-  (msg -> model -> model) ->
-  model ->
-  (model -> NanoUI ()) ->
-  IO ()
-runRgfwAppReduceCustom = runRgfwSessionReduceCustom

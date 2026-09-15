@@ -3,11 +3,8 @@ module NanoUI.Sdl.Window
   , SdlEnv (..)
   , SdlOptions (..)
   , defaultSdlOptions
-  , defaultWindowSize
   , withSdl
   , withSdlBench
-  , acquireSdlBench
-  , releaseSdlBench
   , syncDisplay
   , saveScreenshot
   ) where
@@ -26,12 +23,13 @@ import Foreign.C.String (CString, withCString)
 import Foreign.Marshal.Alloc (alloca)
 import Foreign.Ptr (Ptr, nullPtr)
 import Foreign.Storable (peek)
-import NanoUI (FontMetrics (..), ImageId, Input (..), Size (..), Theme)
+import NanoUI (ImageId, Input (..), Size (..), Theme)
 import NanoUI.Context (Context (..), setDrawSnapScale)
 import NanoUI.Testing (clearMeasureCache, markDirty, setHost, setWakeLoop)
 import NanoUI.Sdl.Display
   ( defaultFontSize
   , defaultUiScale
+  , destroyTexture
   , initBenchHints
   , initRefreshEvent
   , initSdlHints
@@ -40,10 +38,8 @@ import NanoUI.Sdl.Display
   , queryWindowDisplayScale
   , queryWindowLogicalSize
   , queryWindowRefreshHz
-  , retainDestroy
   , setRenderScale
   , setRenderVSync
-  , windowToLogicalCoords
   )
 import NanoUI.Sdl.Clipboard (withSdlClipboard)
 import NanoUI.Sdl.Cursor (SdlCursors (..), destroyCursors, initCursors)
@@ -156,22 +152,21 @@ defaultSdlOptions =
 -- returns the real output scale, the window keeps its logical size, and the
 -- pixel buffer (and therefore the retain texture, glyph atlas, and fonts)
 -- rasterizes at the native pixel density.
-computeWindowFlags :: Bool -> Bool -> Bool -> Bool -> Bool -> SDL_WindowFlags
-computeWindowFlags resizable fullscreen borderless alwaysOnTop hidden =
+windowFlags :: SdlOptions -> SDL_WindowFlags
+windowFlags opts =
   SDL_WindowFlags $
     0x0000000000002000
-      .|. (if resizable then 0x0000000000000020 else 0)
-      .|. (if fullscreen then 0x0000000000000001 else 0)
-      .|. (if borderless then 0x0000000000000010 else 0)
-      .|. (if alwaysOnTop then 0x0000000000010000 else 0)
-      .|. (if hidden then 0x0000000000000008 else 0)
+      .|. flag sdlWindowResizable 0x0000000000000020
+      .|. flag sdlWindowFullscreen 0x0000000000000001
+      .|. flag sdlWindowBorderless 0x0000000000000010
+      .|. flag sdlWindowAlwaysOnTop 0x0000000000010000
+      .|. flag sdlWindowHidden 0x0000000000000008
+  where
+    flag field bit = if field opts then bit else 0
 
 -- Hidden only. Do not combine with resizable for bench windows on Windows.
 sdlWindowHiddenFlag :: SDL_WindowFlags
 sdlWindowHiddenFlag = SDL_WindowFlags 0x0000000000000008
-
-benchWindowSize :: Size
-benchWindowSize = Size 800 600
 
 scaleEpsilon :: Float
 scaleEpsilon = 0.001
@@ -185,20 +180,20 @@ data SdlEnv = SdlEnv
   , sdlFontRequestRef :: !(IORef NanoUIFont)
   , sdlFontAppliedRef :: !(IORef NanoUIFont)
   , sdlFontSize :: !Float
+  , sdlForcedScale :: !(Maybe Float)
+  -- ^ NANO_FORCE_SCALE override of the display scale, read at startup.
   , sdlScaleRef :: IORef Float
   , sdlFontRef :: IORef SdlFont
   , sdlMonoFontRef :: IORef SdlFont
   , sdlGlyphAtlas :: GlyphAtlas
   , sdlImages :: ImageAtlas
   , sdlCursors :: SdlCursors
-  , sdlDebug :: IORef SdlDebugSampler
+  , sdlDebug :: SdlDebugSampler
   , sdlRetain :: IORef (Ptr (), Int, Int, Float)
   , sdlLastPresented :: IORef Bool
   , sdlVsync :: !Bool
   , sdlRefreshPeriod :: !Double
   , sdlContinuous :: !Bool
-  , sdlCachedFm :: !(IORef FontMetrics)
-  , sdlCachedMonoFm :: !(IORef FontMetrics)
   , sdlCachedCtx :: !(IORef Context)
   , sdlFontCache :: !SdlFontCache
   , sdlDialogState :: !DialogState
@@ -210,16 +205,14 @@ defaultWindowSize = Size 1280 800
 -- Layout in logical coordinates; draw/text rasterize at native pixel density.
 syncDisplay :: Context -> SdlEnv -> Input -> IO (Context, Input)
 syncDisplay ctx env inp = do
-  real <- queryWindowDisplayScale (sdlWindow env)
-  forced <- lookupEnv "NANO_FORCE_SCALE"
-  let scale = case forced >>= readMaybe of
-        Just s | s > 0 -> s
-        _ -> real
-  unlessM (setRenderScale (sdlRenderer env) defaultUiScale) $
-    fail "SDL_SetRenderScale failed"
+  scale <- maybe (queryWindowDisplayScale (sdlWindow env)) pure (sdlForcedScale env)
   oldScale <- readIORef (sdlScaleRef env)
   let scaleChanged = abs (scale - oldScale) > scaleEpsilon
   when scaleChanged $ do
+    -- Presents leave the renderer at 1:1 pixels; re-assert it only when the
+    -- display scale moves.
+    unlessM (setRenderScale (sdlRenderer env) defaultUiScale) $
+      fail "SDL_SetRenderScale failed"
     writeIORef (sdlScaleRef env) scale
     setDrawSnapScale ctx scale
   -- Runtime font-family switch: the app publishes its requested family through
@@ -234,7 +227,7 @@ syncDisplay ctx env inp = do
     setSdlFontCacheSource (sdlFontCache env) newSource
     writeIORef (sdlFontAppliedRef env) requested
   when (scaleChanged || fontChanged) (rebuildScaledFonts ctx env scale)
-  queried <- queryWindowLogicalSize (sdlWindow env) scale
+  queried <- queryWindowLogicalSize (sdlWindow env)
   let winSize =
         case queried of
           Size 0 0 ->
@@ -242,10 +235,9 @@ syncDisplay ctx env inp = do
               Size 0 0 -> defaultWindowSize
               s -> s
           s -> s
-  inpSized <- syncInput env scale inp {inputWindowSize = winSize}
+  mouse <- queryMouseWindowPos
   ctxMeasured <- readIORef (sdlCachedCtx env)
-  let ctx' = withSdlClipboard ctxMeasured
-  pure (ctx', inpSized)
+  pure (withSdlClipboard ctxMeasured, inp {inputWindowSize = winSize, inputMousePos = mouse})
 
 -- | Reopen the base sans/mono fonts at @scale@, rebuild metrics and the text
 -- resolver, and invalidate cached measurements. Shared by the DPI-change and
@@ -267,108 +259,85 @@ rebuildScaledFonts ctx env scale = do
   let ga = sdlGlyphAtlas env
   fm <- buildGlyphFontMetrics ga newFont scale
   monoFm <- buildGlyphFontMetrics ga newMono scale
-  let ctx' = withTtfFontCache (sdlFontCache env) (withTtfMeasureGlyph ctx newFont newMono fm monoFm scale)
+  let ctx' = withTtfFontCache (sdlFontCache env) (withTtfMeasureGlyph ctx newFont fm monoFm scale)
   resetSdlFontCache (sdlFontCache env) scale newFont fm newMono monoFm
-  writeIORef (sdlCachedFm env) fm
-  writeIORef (sdlCachedMonoFm env) monoFm
   writeIORef (sdlCachedCtx env) ctx'
   clearMeasureCache ctx
   markDirty ctx
 
-syncInput :: SdlEnv -> Float -> Input -> IO Input
-syncInput _env scale inp = do
-  mPos <- queryMouseWindowPos
-  pure $
-    case mPos of
-      Just windowPos -> inp {inputMousePos = windowToLogicalCoords scale windowPos}
-      Nothing -> inp
+-- | Everything a window session is opened with, besides the context.
+data WindowConfig = WindowConfig
+  { wcTitle :: !Text
+  , wcSize :: !Size
+  , wcFlags :: !SDL_WindowFlags
+  , wcBench :: !Bool
+  -- ^ Hidden benchmark window: bench hints, no vsync setup or text input.
+  , wcVsync :: !Bool
+  , wcContinuous :: !Bool
+  , wcUiFont :: !NanoUIFont
+  , wcMonoFont :: !NanoUIFont
+  , wcFontSize :: !Float
+  }
 
 withSdl :: SdlOptions -> Context -> (Context -> SdlEnv -> IO a) -> IO a
-withSdl opts ctx act =
-  let Size w h = sdlWindowSize opts
-      flags =
-        computeWindowFlags
-          (sdlWindowResizable opts)
-          (sdlWindowFullscreen opts)
-          (sdlWindowBorderless opts)
-          (sdlWindowAlwaysOnTop opts)
-          (sdlWindowHidden opts)
-    in withSdlWindow
-        ctx
-        (sdlWindowTitle opts)
-        w
-        h
-        flags
-        False
-        (sdlAppVsync opts)
-        (sdlAppContinuous opts)
-        (sdlAppFont opts)
-        (sdlAppMonoFont opts)
-        (sdlAppFontSize opts)
-        act
+withSdl opts ctx =
+  withSdlWindow
+    ctx
+    WindowConfig
+      { wcTitle = sdlWindowTitle opts
+      , wcSize = sdlWindowSize opts
+      , wcFlags = windowFlags opts
+      , wcBench = False
+      , wcVsync = sdlAppVsync opts
+      , wcContinuous = sdlAppContinuous opts
+      , wcUiFont = sdlAppFont opts
+      , wcMonoFont = sdlAppMonoFont opts
+      , wcFontSize = sdlAppFontSize opts
+      }
 
 withSdlBench :: Context -> (Context -> SdlEnv -> IO a) -> IO a
-withSdlBench ctx act =
-  let Size w h = benchWindowSize
-   in withSdlWindow
-        ctx
-        "nano-ui-bench"
-        w
-        h
-        sdlWindowHiddenFlag
-        True
-        False
-        True
-        DefaultFont
-        DefaultFont
-        defaultFontSize
-        act
+withSdlBench ctx =
+  withSdlWindow
+    ctx
+    WindowConfig
+      { wcTitle = "nano-ui-bench"
+      , wcSize = Size 800 600
+      , wcFlags = sdlWindowHiddenFlag
+      , wcBench = True
+      , wcVsync = False
+      , wcContinuous = True
+      , wcUiFont = DefaultFont
+      , wcMonoFont = DefaultFont
+      , wcFontSize = defaultFontSize
+      }
 
-withSdlWindow ::
-  Context ->
-  Text ->
-  Float ->
-  Float ->
-  SDL_WindowFlags ->
-  Bool ->
-  Bool ->
-  Bool ->
-  NanoUIFont ->
-  NanoUIFont ->
-  Float ->
-  (Context -> SdlEnv -> IO a) ->
-  IO a
-withSdlWindow ctx title w h flags bench vsync continuous uiFont monoFont fontSize act =
+withSdlWindow :: Context -> WindowConfig -> (Context -> SdlEnv -> IO a) -> IO a
+withSdlWindow ctx cfg act =
   withTtf $ do
-    if bench then initBenchHints else initSdlHints vsync
-    fontSource <- resolveNanoUIFont uiFont
-    monoSource <- resolveNanoUIFont monoFont
+    if wcBench cfg then initBenchHints else initSdlHints (wcVsync cfg)
+    fontSource <- resolveNanoUIFont (wcUiFont cfg)
+    monoSource <- resolveNanoUIFont (wcMonoFont cfg)
     bracket
-      (startSdlWindow ctx title w h flags bench vsync continuous uiFont fontSource monoSource fontSize)
-      (\(_, env) -> stopSdlWindow bench env)
-      $ \(ctx', env) -> act ctx' env
+      (startSdlWindow ctx cfg fontSource monoSource)
+      (\(_, env) -> stopSdlWindow (wcBench cfg) env)
+      (uncurry act)
 
-startSdlWindow ::
-  Context ->
-  Text ->
-  Float ->
-  Float ->
-  SDL_WindowFlags ->
-  Bool ->
-  Bool ->
-  Bool ->
-  NanoUIFont ->
-  FontSource ->
-  FontSource ->
-  Float ->
-  IO (Context, SdlEnv)
-startSdlWindow ctx title w h flags bench vsync continuous uiFont fontSource monoSource fontSize = do
+startSdlWindow :: Context -> WindowConfig -> FontSource -> FontSource -> IO (Context, SdlEnv)
+startSdlWindow ctx cfg fontSource monoSource = do
   unlessM (initSafe (SDL_InitFlags 32)) $
     fail "SDL_Init(SDL_INIT_VIDEO) failed"
   unlessM initRefreshEvent $
     fail "SDL_RegisterEvents failed for refresh wake"
+  let Size w h = wcSize cfg
+      fontSize = wcFontSize cfg
+      bench = wcBench cfg
+  -- NANO_FORCE_SCALE: debug override of the display scale.
+  forcedEnv <- lookupEnv "NANO_FORCE_SCALE"
+  let forcedScale = case forcedEnv >>= readMaybe of
+        Just s | s > 0 -> Just s
+        _ -> Nothing
   env <-
-    TextForeign.withCString title $ \titlePtr ->
+    TextForeign.withCString (wcTitle cfg) $ \titlePtr ->
       alloca $ \winPtr ->
         alloca $ \renPtr -> do
           ok <-
@@ -376,7 +345,7 @@ startSdlWindow ctx title w h flags bench vsync continuous uiFont fontSource mono
               (PtrConst.unsafeFromPtr titlePtr)
               (round w)
               (round h)
-              flags
+              (wcFlags cfg)
               winPtr
               renPtr
           unless ok $ fail "SDL_CreateWindowAndRenderer failed"
@@ -391,8 +360,8 @@ startSdlWindow ctx title w h flags bench vsync continuous uiFont fontSource mono
           fontRef <- newIORef font
           monoFontRef <- newIORef monoFont
           fontSourceRef <- newIORef fontSource
-          fontRequestRef <- newIORef uiFont
-          fontAppliedRef <- newIORef uiFont
+          fontRequestRef <- newIORef (wcUiFont cfg)
+          fontAppliedRef <- newIORef (wcUiFont cfg)
           glyphAtlas <- newGlyphAtlas ren
           -- Re-warm the base fonts after every atlas reset (DPI change,
           -- font switch, exhaustion recovery) so the next frame does not
@@ -409,61 +378,57 @@ startSdlWindow ctx title w h flags bench vsync continuous uiFont fontSource mono
           cursors <- initCursors
           debug <- newSdlDebugSampler
           retain <- newIORef (nullPtr, 0, 0, 0)
-          let ga = glyphAtlas
-          fm <- buildGlyphFontMetrics ga font scale
-          monoFm <- buildGlyphFontMetrics ga monoFont scale
+          fm <- buildGlyphFontMetrics glyphAtlas font scale
+          monoFm <- buildGlyphFontMetrics glyphAtlas monoFont scale
           fontCache <-
             newSdlFontCache
               fontSource
               embeddedFontSource
               monoSource
               embeddedFontSource
-              ga
+              glyphAtlas
               fontSize
               scale
               font
               fm
               monoFont
               monoFm
-          cachedFm <- newIORef fm
-          cachedMonoFm <- newIORef monoFm
-          let baseCtx = withTtfFontCache fontCache (withTtfMeasureGlyph ctx font monoFont fm monoFm scale)
-          cachedCtx <- newIORef baseCtx
+          cachedCtx <- newIORef (withTtfFontCache fontCache (withTtfMeasureGlyph ctx font fm monoFm scale))
           let refreshPeriod =
                 if refreshHz > 0
                   then 1 / fromIntegral refreshHz
                   else 1 / 60
           unlessM (setRenderScale ren defaultUiScale) $
             fail "SDL_SetRenderScale failed"
-          unless bench $ void $ setRenderVSync ren vsync
-          when (not bench) $ void $ startTextInputSafe win
+          unless bench $ do
+            void $ setRenderVSync ren (wcVsync cfg)
+            void $ startTextInputSafe win
           dialogState <- newDialogState
           lastPresented <- newIORef False
           batch <- newRenderBatch ren
           pure
             SdlEnv
-               { sdlWindow = win
-               , sdlRenderer = ren
-               , sdlBatch = batch
-               , sdlFontSourceRef = fontSourceRef
-               , sdlMonoFontSource = monoSource
-               , sdlFontRequestRef = fontRequestRef
-               , sdlFontAppliedRef = fontAppliedRef
-               , sdlFontSize = fontSize
-               , sdlScaleRef = scaleRef
-               , sdlFontRef = fontRef
-               , sdlMonoFontRef = monoFontRef
-               , sdlGlyphAtlas = glyphAtlas
-               , sdlImages = images
-               , sdlCursors = cursors
-               , sdlDebug = debug
-               , sdlRetain = retain
-               , sdlLastPresented = lastPresented
-               , sdlVsync = vsync
-               , sdlRefreshPeriod = refreshPeriod
-              , sdlContinuous = continuous
-              , sdlCachedFm = cachedFm
-              , sdlCachedMonoFm = cachedMonoFm
+              { sdlWindow = win
+              , sdlRenderer = ren
+              , sdlBatch = batch
+              , sdlFontSourceRef = fontSourceRef
+              , sdlMonoFontSource = monoSource
+              , sdlFontRequestRef = fontRequestRef
+              , sdlFontAppliedRef = fontAppliedRef
+              , sdlFontSize = fontSize
+              , sdlForcedScale = forcedScale
+              , sdlScaleRef = scaleRef
+              , sdlFontRef = fontRef
+              , sdlMonoFontRef = monoFontRef
+              , sdlGlyphAtlas = glyphAtlas
+              , sdlImages = images
+              , sdlCursors = cursors
+              , sdlDebug = debug
+              , sdlRetain = retain
+              , sdlLastPresented = lastPresented
+              , sdlVsync = wcVsync cfg
+              , sdlRefreshPeriod = refreshPeriod
+              , sdlContinuous = wcContinuous cfg
               , sdlCachedCtx = cachedCtx
               , sdlFontCache = fontCache
               , sdlDialogState = dialogState
@@ -478,7 +443,7 @@ stopSdlWindow :: Bool -> SdlEnv -> IO ()
 stopSdlWindow bench env = do
   clearDialogState (sdlDialogState env)
   (tex, _, _, _) <- readIORef (sdlRetain env)
-  retainDestroy tex
+  destroyTexture tex
   destroyRenderBatch (sdlBatch env)
   destroyCursors (sdlCursors env)
   destroyImageAtlas (sdlImages env)
@@ -488,22 +453,11 @@ stopSdlWindow bench env = do
   closeFont font
   monoFont <- readIORef (sdlMonoFontRef env)
   closeFont monoFont
-  when (not bench) $ void $ stopTextInputSafe (sdlWindow env)
+  unless bench $ void $ stopTextInputSafe (sdlWindow env)
   void $ setRenderScale (sdlRenderer env) defaultUiScale
   destroyRendererSafe (sdlRenderer env)
   destroyWindowSafe (sdlWindow env)
   quitSafe
-
-acquireSdlBench :: Context -> IO (Context, SdlEnv)
-acquireSdlBench ctx =
-  withTtf $ do
-    initBenchHints
-    fontSource <- resolveNanoUIFont DefaultFont
-    let Size w h = benchWindowSize
-    startSdlWindow ctx "nano-ui-bench" w h sdlWindowHiddenFlag True False True DefaultFont fontSource fontSource defaultFontSize
-
-releaseSdlBench :: SdlEnv -> IO ()
-releaseSdlBench env = withTtf $ stopSdlWindow True env
 
 unlessM :: IO Bool -> IO () -> IO ()
 unlessM p act = do

@@ -52,8 +52,8 @@ import GHC.Exts (RealWorld)
 
 import NanoUI.Animation (Animation)
 import NanoUI.Atlas (ImageAtlas)
-import NanoUI.Draw (DrawArena, DrawOp, DrawingBuild)
-import NanoUI.Font (FontMetrics)
+import NanoUI.Draw.Types (DrawArena, DrawOp, DrawingBuild)
+import NanoUI.Font (CustomMeasureFn, FontMetrics)
 import NanoUI.Frame.SpanArena (SpanArena)
 import NanoUI.Id (IdContext, WidgetId, hashWidgetId)
 import NanoUI.Input (UiCursorKind)
@@ -270,8 +270,6 @@ data WidgetTextCacheEntry = WidgetTextCacheEntry
   , wtcAlign :: {-# UNPACK #-} !Int
   , wtcPlacement :: {-# NOUNPACK #-} !(Maybe WidgetTextPlacement)
   }
-
-type CustomMeasureFn = FontMetrics -> (Float, Float) -> (Float, Float)
 
 data CustomDrawContext = CustomDrawContext
   { cdcHovered  :: {-# UNPACK #-} !Bool

@@ -44,7 +44,7 @@ module NanoUI.Widgets.Layout
 where
 
 import Control.Monad (void)
-import Data.IORef (readIORef, writeIORef)
+import Data.IORef (readIORef)
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import NanoUI.Context (Context (..), setScrollConfig)
@@ -86,6 +86,7 @@ import NanoUI.Widgets.Node
   , container
   , containerStyled
   , parentIdx
+  , withContainerNode
   )
 
 -- =============================================================================
@@ -251,7 +252,6 @@ sep = void separator
 flex :: Ui :> es => Eff es ()
 flex = void (spacer (Grow 1) Fit)
 
-{-# INLINE separator #-}
 separator :: Ui :> es => Eff es Response
 separator = do
   wid <- nextId
@@ -303,18 +303,14 @@ center = columnWith (grow . alignMid . (\l -> l { layoutAlignX = AlignCenter }))
 scrollContainerWith :: Ui :> es => WidgetId -> (NodeIdx -> IO ()) -> Layout -> Eff es a -> Eff es a
 scrollContainerWith wid setup layout child = do
   ctx <- askContext
-  stack <- uiIO $ do
-    stack0 <- readIORef (ctxContainerStack ctx)
-    let
-      parent = parentIdx stack0
-    idx <- addNodeFromLayout (ctxNodeArena ctx) NodeScrollContainer parent layout
+  idx <- uiIO $ do
+    stack <- readIORef (ctxContainerStack ctx)
+    idx <- addNodeFromLayout (ctxNodeArena ctx) NodeScrollContainer (parentIdx stack) layout
     setWidgetId (ctxNodeArena ctx) idx wid
     setup idx
-    writeIORef (ctxContainerStack ctx) (idx : stack0)
-    pure stack0
-  r <- child
-  uiIO (writeIORef (ctxContainerStack ctx) stack)
-  pure r
+    pure idx
+  -- Unscoped: a scroll container's children keep their parent's id scope.
+  withContainerNode False idx child
 
 -- | Style index + context scroll config for a container with a chosen config.
 {-# INLINE configureScrollContainer #-}

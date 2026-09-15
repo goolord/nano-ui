@@ -54,15 +54,14 @@ selftest continuous imgs ui = do
   -- Artifacts (font renders, screenshots) land in $XDG_CACHE_HOME/nano-ui-demo.
   cacheDir <- getXdgDirectory XdgCache "nano-ui-demo"
   createDirectoryIfMissing True cacheDir
-  withSdl
-    defaultSdlOptions
-      { sdlWindowHidden = True
-      , sdlWindowSize = Size 1280 800
-      , sdlWindowResizable = False
-      , sdlAppContinuous = continuous
-      }
-    ctx0
-    $ \ctx env -> do
+  let opts =
+        defaultSdlOptions
+          { sdlWindowHidden = True
+          , sdlWindowSize = Size 1280 800
+          , sdlWindowResizable = False
+          , sdlAppContinuous = continuous
+          }
+  withSdl opts ctx0 $ \ctx env -> do
     -- Shaped-run font measurement must match SDL3_ttf string measurement.
     (fmNorm16, _) <- ctxResolveFont ctx 16.0 WeightNormal FontStyleNormal FontRegular
     (fmItal16, _) <- ctxResolveFont ctx 16.0 WeightNormal FontStyleItalic FontRegular
@@ -249,7 +248,7 @@ selftest continuous imgs ui = do
           , not (T.null rest)
           , T.all isDigit (T.takeWhile (/= ' ') rest)
           ]
-        titleCenter (r, _) = V2 (rectX r + rectW r / 2) (rectY r + rectH r / 2)
+        titleCenter = Harness.spanCenter . fst
         leftTitle4 = minimumBy (comparing (rectX . fst)) (titles spansPane4)
         rightTitle4 = maximumBy (comparing (rectX . fst)) (titles spansPane4)
     -- Edge drop: grab the right pane and drop it on the left pane's LEFT edge.

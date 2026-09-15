@@ -4,7 +4,6 @@ module NanoUI.Widgets.Behavior
   , keyedDragHeld
   , useDrag1D
   , useReorder
-  , useSelection
   , useKeyNav
   , keyboardFocused
   , keyActivated
@@ -32,14 +31,13 @@ import NanoUI.Context
   , intKey
   , isDisabled
   , markEscapeConsumed
-  , menuPointerGestureActive
+  , getMenuPointerGesture
   , pointerBlockedByModal
   , setStore
   , slotDrag
   , slotDragW
   , slotKey
   )
-import NanoUI.Hooks (useInt)
 import NanoUI.Id (IdContext (..), WidgetId (..), enterKeyed, hashWidgetId, mix64)
 import NanoUI.Input
   ( Input (..)
@@ -56,7 +54,7 @@ import NanoUI.Input
   )
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO)
 import NanoUI.Store (WidgetStore (..))
-import NanoUI.Types (Rect (..), rectHit, v2X, v2Y)
+import NanoUI.Types (Rect (..), clamp01, rectHit, v2X, v2Y)
 import qualified Data.Text as T
 
 -- | Pointer slop in pixels before a held press counts as a drag.
@@ -107,30 +105,27 @@ useDrag1D axis lo hi current track = do
         DragAxisY -> v2Y (inputMousePos inp)
       down = inputMouseDown inp
   store <- uiIO (getStore ctx)
-  gesture <- uiIO (menuPointerGestureActive ctx)
+  gesture <- uiIO (getMenuPointerGesture ctx)
   let active0 = IM.findWithDefault 0 dragK (storeInt store) /= 0
       hit = rectHit track (inputMousePos inp) && not gesture
       active = down && not gesture && (active0 || hit)
       frac =
         if trackLen <= 0
           then 0
-          else max 0 (min 1 ((mouse - origin) / trackLen))
+          else clamp01 ((mouse - origin) / trackLen)
       next =
         if active
           then lo + frac * (hi - lo)
           else current
   when (active /= active0) $
-    uiIO $ do
-      st <- getStore ctx
-      setStore
-        ctx
-        ( st
-            { storeInt =
-                if active
-                  then IM.insert dragK 1 (storeInt st)
-                  else IM.delete dragK (storeInt st)
-            }
-        )
+    uiIO $
+      getStore ctx >>= \st -> setStore ctx $
+        st
+          { storeInt =
+              if active
+                then IM.insert dragK 1 (storeInt st)
+                else IM.delete dragK (storeInt st)
+          }
   pure (next, active)
 
 -- | Drag-and-drop reorder of a visible index list.
@@ -170,19 +165,16 @@ useReorder order items = do
           Just toCol | release -> moveItem order dragging toCol
           _ -> order
   when (nextDrag /= from0 || (press && nextDrag >= 0)) $
-    uiIO $ do
-      st <- getStore ctx
-      setStore
-        ctx
-        ( st
-            { storeInt = IM.insert dragK nextDrag (storeInt st)
-            , storeFloat =
-                IM.insert
-                  (slotKey slotDragW key)
-                  (if press then v2X mouse else startX)
-                  (storeFloat st)
-            }
-        )
+    uiIO $
+      getStore ctx >>= \st -> setStore ctx $
+        st
+          { storeInt = IM.insert dragK nextDrag (storeInt st)
+          , storeFloat =
+              IM.insert
+                (slotKey slotDragW key)
+                (if press then v2X mouse else startX)
+                (storeFloat st)
+          }
   pure (nextOrder, if nextDrag >= 0 then Just nextDrag else Nothing)
 
 moveItem :: [Int] -> Int -> Int -> [Int]
@@ -192,10 +184,6 @@ moveItem xs from to
       let without = filter (/= from) xs
           (pre, post) = break (== to) without
        in pre ++ from : post
-
--- | Discrete Int selection. Frame re-runs UI when the value changes.
-useSelection :: (Ui :> es) => Int -> Eff es (Int, Int -> Eff es ())
-useSelection = useInt
 
 data KeyNav = KeyNav
   { knUp :: !Bool
@@ -224,7 +212,6 @@ keyboardFocused wid
           if disabled then pure False else not <$> pointerBlockedByModal ctx
 
 -- | Arrow / Enter / Space while 'wid' is focused and eligible for input.
-{-# INLINE useKeyNav #-}
 useKeyNav :: (Ui :> es) => WidgetId -> Eff es KeyNav
 useKeyNav wid = do
   inp <- askInput
@@ -292,14 +279,12 @@ putInt :: (Ui :> es) => Int -> Int -> Eff es ()
 putInt key v = do
   ctx <- askContext
   st <- uiIO (getStore ctx)
-  case IM.lookup key (storeInt st) of
-    Just old | old == v -> pure ()
-    _ -> uiIO $ setStore ctx (st {storeInt = IM.insert key v (storeInt st)})
+  when (IM.lookup key (storeInt st) /= Just v) $
+    uiIO $ setStore ctx (st {storeInt = IM.insert key v (storeInt st)})
 
 putIntSet :: (Ui :> es) => Int -> IS.IntSet -> Eff es ()
 putIntSet key v = do
   ctx <- askContext
   st <- uiIO (getStore ctx)
-  case IM.lookup key (storeIntSet st) of
-    Just old | old == v -> pure ()
-    _ -> uiIO $ setStore ctx (st {storeIntSet = IM.insert key v (storeIntSet st)})
+  when (IM.lookup key (storeIntSet st) /= Just v) $
+    uiIO $ setStore ctx (st {storeIntSet = IM.insert key v (storeIntSet st)})

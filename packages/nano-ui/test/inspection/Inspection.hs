@@ -48,7 +48,7 @@ localFnv1a s = go 0xcbf29ce484222325 s
 
 -- ---------------------------------------------------------------------------
 -- Pattern 2: polymorphic key mixing must specialize away its Hashable dict.
--- (Copy of NanoUI.Id.mixId for Int keys.)
+-- (Copy of the widget-id key-mixing pattern, 'mixFnv' over a hashed key, for Int keys.)
 -- ---------------------------------------------------------------------------
 
 localMixIntKey :: WidgetId -> Int -> WidgetId

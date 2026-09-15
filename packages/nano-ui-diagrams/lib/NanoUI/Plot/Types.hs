@@ -2,8 +2,6 @@
 
 module NanoUI.Plot.Types
   ( Domain (..)
-  , Range (..)
-  , ScaleType (..)
   , SeriesData (..)
   , MarkShape (..)
   , SeriesKind (..)
@@ -22,12 +20,6 @@ import Data.Vector.Unboxed qualified as U
 import NanoUI (Color, Response)
 
 data Domain = Domain !Double !Double
-  deriving (Eq, Show)
-
-data Range = Range !Double !Double
-  deriving (Eq, Show)
-
-data ScaleType = Linear | Log | Category
   deriving (Eq, Show)
 
 data SeriesData

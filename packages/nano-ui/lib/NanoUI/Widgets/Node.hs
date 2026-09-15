@@ -4,24 +4,30 @@
 -- | Widget node construction and interaction responses.
 module NanoUI.Widgets.Node
   ( Response (..)
-  , Responding (..)
-  , Clickable (..)
-  , RightClickable (..)
+  , HasResponse (..)
+  , respId
+  , respRect
+  , respHovered
+  , respPressed
+  , respClicked
+  , respChanged
+  , respSubmitted
+  , respRightPressed
+  , respRightClicked
+  , onClick
   , onRightClick
   , mkResponse
   , emptyModalResp
   , setClicked
   , setChanged
-  , setHovered
-  , setPressed
   , setSubmitted
-  , setRightClicked
-  , setRightPressed
   , parentIdx
   , container
   , containerStyled
   , containerResponse
   , containerResponseStyled
+  , withContainerNode
+  , floatingPanel
   , addWidget
   , addWidgetResp
   , addWidgetStyled
@@ -38,8 +44,10 @@ import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import NanoUI.Context
   ( Context (..)
+  , getCurrentFloatingId
   , isDisabled
   , pointerBlockedByOverlay
+  , setCurrentFloatingId
   )
 import NanoUI.Id (WidgetId (..), enterScope, hashWidgetId, scopeTag)
 import NanoUI.Input
@@ -51,9 +59,11 @@ import NanoUI.Input
   , inputMouseRightReleased
   )
 import NanoUI.Layout.Arena
-  ( NodeType (..)
+  ( NodeIdx
+  , NodeType (..)
   , addNode
   , addNodeFromLayout
+  , rootAttachParent
   , setNodeText
   , setOptions
   , setNodeValue
@@ -70,7 +80,7 @@ import NanoUI.Style
   , Padding (..)
   , Sizing (..)
   )
-import NanoUI.Types (Rect (..), rectContains, rectH, rectUnion, rectW)
+import NanoUI.Types (Rect (..), rectContains, rectH, rectHit, rectUnion, rectW)
 import NanoUI.Frame.Hit (findNodeByWidgetId, nodeInteractionHit, scrollHitRect)
 
 parentIdx :: [Int] -> Int
@@ -78,28 +88,58 @@ parentIdx = \case
   [] -> -1
   (p : _) -> p
 
-class Responding r where
-  respId :: r -> WidgetId
-  respRect :: r -> Rect
-  respHovered :: r -> Bool
-  respPressed :: r -> Bool
-  respClicked :: r -> Bool
-  respChanged :: r -> Bool
-  respSubmitted :: r -> Bool
-  respSubmitted _ = False
-  respRightPressed :: r -> Bool
-  respRightPressed _ = False
-  respRightClicked :: r -> Bool
-  respRightClicked _ = False
+-- | Anything that carries a widget 'Response' (composite widget results such
+-- as 'NanoUI.Widgets.Tabs.TabResponse'). The @resp*@ accessors work on all of them.
+class HasResponse r where
+  toResponse :: r -> Response
 
-class Clickable r where
-  respIsClicked :: r -> Bool
+instance HasResponse Response where
+  {-# INLINE toResponse #-}
+  toResponse = id
 
-class RightClickable r where
-  respIsRightClicked :: r -> Bool
+{-# INLINE respId #-}
+respId :: HasResponse r => r -> WidgetId
+respId = rawRespId . toResponse
 
-onRightClick :: RightClickable r => r -> Eff es () -> Eff es ()
-onRightClick resp act = when (respIsRightClicked resp) act
+{-# INLINE respRect #-}
+respRect :: HasResponse r => r -> Rect
+respRect = rawRespRect . toResponse
+
+{-# INLINE respHovered #-}
+respHovered :: HasResponse r => r -> Bool
+respHovered = rawRespHovered . toResponse
+
+{-# INLINE respPressed #-}
+respPressed :: HasResponse r => r -> Bool
+respPressed = rawRespPressed . toResponse
+
+{-# INLINE respClicked #-}
+respClicked :: HasResponse r => r -> Bool
+respClicked = rawRespClicked . toResponse
+
+{-# INLINE respChanged #-}
+respChanged :: HasResponse r => r -> Bool
+respChanged = rawRespChanged . toResponse
+
+{-# INLINE respSubmitted #-}
+respSubmitted :: HasResponse r => r -> Bool
+respSubmitted = rawRespSubmitted . toResponse
+
+{-# INLINE respRightPressed #-}
+respRightPressed :: HasResponse r => r -> Bool
+respRightPressed = rawRespRightPressed . toResponse
+
+{-# INLINE respRightClicked #-}
+respRightClicked :: HasResponse r => r -> Bool
+respRightClicked = rawRespRightClicked . toResponse
+
+{-# INLINE onClick #-}
+onClick :: HasResponse r => r -> Eff es () -> Eff es ()
+onClick resp = when (respClicked resp)
+
+{-# INLINE onRightClick #-}
+onRightClick :: HasResponse r => r -> Eff es () -> Eff es ()
+onRightClick resp = when (respRightClicked resp)
 
 data Response = Response
   { rawRespId :: !WidgetId
@@ -113,23 +153,6 @@ data Response = Response
   , rawRespRightClicked :: !Bool
   }
   deriving (Eq, Show)
-
-instance Responding Response where
-  respId = rawRespId
-  respRect = rawRespRect
-  respHovered = rawRespHovered
-  respPressed = rawRespPressed
-  respClicked = rawRespClicked
-  respChanged = rawRespChanged
-  respSubmitted = rawRespSubmitted
-  respRightPressed = rawRespRightPressed
-  respRightClicked = rawRespRightClicked
-
-instance Clickable Response where
-  respIsClicked = rawRespClicked
-
-instance RightClickable Response where
-  respIsRightClicked = rawRespRightClicked
 
 instance Semigroup Response where
   a <> b =
@@ -163,18 +186,6 @@ setChanged c r = r {rawRespChanged = c}
 setSubmitted :: Bool -> Response -> Response
 setSubmitted s r = r {rawRespSubmitted = s}
 
-setHovered :: Bool -> Response -> Response
-setHovered h r = r {rawRespHovered = h}
-
-setPressed :: Bool -> Response -> Response
-setPressed p r = r {rawRespPressed = p}
-
-setRightClicked :: Bool -> Response -> Response
-setRightClicked c r = r {rawRespRightClicked = c}
-
-setRightPressed :: Bool -> Response -> Response
-setRightPressed p r = r {rawRespRightPressed = p}
-
 mkResponse :: WidgetId -> Rect -> Bool -> Bool -> Bool -> Bool -> Response
 mkResponse wid rect hovered pressed clicked changed =
   Response
@@ -190,7 +201,7 @@ mkResponse wid rect hovered pressed clicked changed =
     }
 
 emptyModalResp :: WidgetId -> Response
-emptyModalResp wid = mkResponse wid (Rect 0 0 0 0) False False False False
+emptyModalResp wid = mempty {rawRespId = wid}
 
 container :: Ui :> es => NodeType -> Layout -> Eff es a -> Eff es a
 container nt layout child = runContainer nt layout Nothing child
@@ -216,26 +227,55 @@ runContainer nt layout mWid child = runContainerStyled nt layout mWid 0 child
 runContainerStyled :: Ui :> es => NodeType -> Layout -> Maybe WidgetId -> Int -> Eff es a -> Eff es a
 runContainerStyled nt layout mWid si child = do
   ctx <- askContext
-  (stack, parent') <- uiIO $ do
-    stack0 <- readIORef (ctxContainerStack ctx)
-    let
-      parent = parentIdx stack0
-    idx <- addNodeFromLayout (ctxNodeArena ctx) nt parent layout
+  idx <- uiIO $ do
+    stack <- readIORef (ctxContainerStack ctx)
+    idx <- addNodeFromLayout (ctxNodeArena ctx) nt (parentIdx stack) layout
     when (si /= 0) $
       setStyleIdx (ctxNodeArena ctx) idx si
-    case mWid of
-      Just wid -> setWidgetId (ctxNodeArena ctx) idx wid
-      Nothing -> pure ()
+    mapM_ (setWidgetId (ctxNodeArena ctx) idx) mWid
+    pure idx
+  withContainerNode True idx child
+
+-- | Push container node @idx@ (already added under the current parent), run
+-- @child@ inside it, then pop. @scoped@ also runs the children in a fresh id
+-- scope; it changes the children's widget ids (and so their store keys), so
+-- callers pick it explicitly: plain containers scope, scroll containers do not.
+withContainerNode :: Ui :> es => Bool -> NodeIdx -> Eff es a -> Eff es a
+withContainerNode scoped idx child = do
+  ctx <- askContext
+  (stack, parentIds) <- uiIO $ do
+    stack0 <- readIORef (ctxContainerStack ctx)
     writeIORef (ctxContainerStack ctx) (idx : stack0)
-    oldCtx <- readIORef (ctxIdContext ctx)
-    let
-      (parent', childCtx) = enterScope scopeTag oldCtx
-    writeIORef (ctxIdContext ctx) childCtx
-    pure (stack0, parent')
+    ids0 <- readIORef (ctxIdContext ctx)
+    if scoped
+      then do
+        let (parentIds, childIds) = enterScope scopeTag ids0
+        writeIORef (ctxIdContext ctx) childIds
+        pure (stack0, parentIds)
+      else pure (stack0, ids0)
   r <- child
   uiIO $ do
     writeIORef (ctxContainerStack ctx) stack
-    writeIORef (ctxIdContext ctx) parent'
+    when scoped $ writeIORef (ctxIdContext ctx) parentIds
+  pure r
+
+-- | A floating panel (popup, modal, window): its node attaches to the root
+-- layer and it is the current floating panel while @body@ runs. @addPanel@
+-- adds the node under the given parent; @enter@ runs once the node is pushed
+-- (seeding its rect, opening a modal).
+floatingPanel ::
+  Ui :> es => Bool -> WidgetId -> (Int -> IO NodeIdx) -> IO () -> Eff es a -> Eff es a
+floatingPanel scoped wid addPanel enter body = do
+  ctx <- askContext
+  let arena = ctxNodeArena ctx
+  prevFloat <- uiIO (getCurrentFloatingId ctx)
+  idx <- uiIO $ do
+    stack <- readIORef (ctxContainerStack ctx)
+    idx <- addPanel =<< rootAttachParent arena (parentIdx stack)
+    setWidgetId arena idx wid
+    pure idx
+  r <- withContainerNode scoped idx (uiIO (enter >> setCurrentFloatingId ctx (Just wid)) >> body)
+  uiIO (setCurrentFloatingId ctx prevFloat)
   pure r
 
 addSizingLeafNode ::
@@ -348,7 +388,6 @@ addWidgetWithOptions wid nt txt opts value layout = do
     setWidgetId (ctxNodeArena ctx) idx wid
     resolveInteraction ctx inp wid
 
-{-# INLINE resolveInteraction #-}
 resolveInteraction :: Context -> Input -> WidgetId -> IO Response
 resolveInteraction ctx inp wid = do
   mrect <- scrollHitRect ctx wid
@@ -359,11 +398,7 @@ resolveInteraction ctx inp wid = do
     rect = case mrect of
       Just r -> r
       Nothing -> Rect 0 0 0 0
-    underMouse =
-      rectW rect > 0
-        && rectH rect > 0
-        && rectContains rect mouse
-    canHit = underMouse || pending == wid
+    canHit = rectHit rect mouse || pending == wid
   if not canHit
     then pure (mkResponse wid rect False False False False)
     else do

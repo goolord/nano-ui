@@ -1,5 +1,3 @@
-{-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE MagicHash #-}
 {-# LANGUAGE TemplateHaskell #-}
 
 module NanoUI.Rgfw.Font.Cozette
@@ -11,20 +9,23 @@ module NanoUI.Rgfw.Font.Cozette
   , cozetteAscent
   , cozetteGlyphWidth
   , cozetteGlyphHeight
+  , CozetteScalePath (..)
+  , cozetteScalePath
+  , cozetteGlyphFootprint
   , charToGlyphId
   , scale2x
   , boxAverageCoverage
   , cozetteGlyphBit1x
   , cozetteGlyphBit2x
   , cozetteGlyphBit4x
-  , renderGlyphToBuffer
   , renderGlyphScaledToBuffer
-  , renderTextToBuffer
   , renderTextScaledToBuffer
+  , foldPenPositions
   ) where
 
 import Control.Monad (when)
-import Data.Bits (shiftL, shiftR, (.&.), (.|.))
+import Control.Monad.ST (ST, runST)
+import Data.Bits (Bits, setBit, shiftL, shiftR, testBit, (.&.), (.|.))
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import Data.Char (ord)
@@ -36,13 +37,13 @@ import Data.Primitive.PrimArray
   , unsafeFreezePrimArray
   , writePrimArray
   )
+import Data.Primitive.Types (Prim)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Vector.Unboxed as U
 import Data.Word (Word16, Word32, Word8)
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (peekElemOff, pokeElemOff)
-import Control.Monad.ST (ST, runST)
 import NanoUI (FontMetrics (..))
 
 -- 6x13 Cozette metrics
@@ -159,8 +160,8 @@ parseCozette bs = runST $ do
   loadGlyphs 0
   frozen1x <- unsafeFreezePrimArray mutArr
   frozen1xRows <- build1xRowGlyphs numGlyphs frozen1x
-  frozen2x <- buildScale2xGlyphs numGlyphs frozen1x
-  frozen4x <- buildScale4xGlyphs numGlyphs frozen2x
+  frozen2x <- buildEpxTable numGlyphs 7 13 15 (getGlyphBit1x frozen1x)
+  frozen4x <- buildEpxTable numGlyphs 14 26 31 (getGlyphBit2x frozen2x)
   pure $ CozetteFont numGlyphs (U.fromList groups) frozen1x frozen1xRows frozen2x frozen4x
 
 -- | Build unpacked 1x glyphs: 13 bytes per glyph (1 byte per row, bit (7 - c) for col c).
@@ -187,9 +188,22 @@ build1xRowGlyphs !numGlyphs !arr = do
   forEachGlyph 0
   unsafeFreezePrimArray mutArr1x
 
--- | Scale a 2D boolean grid using the Scale2x (AdvMAME2x / EPX) algorithm.
--- Given width W, height H, and a pixel query function (col -> row -> Bool),
--- returns a scaled pixel function (col -> row -> Bool) for width (W * 2) and height (H * 2).
+-- | The EPX (Scale2x) rule: the 2x2 block replacing pixel @e@, given its
+-- neighbours above (@b@), left (@d@), right (@f@) and below (@h@), as
+-- (top-left, top-right, bottom-left, bottom-right).
+{-# INLINE epx #-}
+epx :: Eq a => a -> a -> a -> a -> a -> (a, a, a, a)
+epx b d e f h
+  | b /= h && d /= f =
+      ( if d == b then d else e
+      , if b == f then f else e
+      , if d == h then d else e
+      , if h == f then f else e
+      )
+  | otherwise = (e, e, e, e)
+
+-- | Scale a 2D boolean grid with EPX. Given width W, height H and a pixel
+-- query (col -> row -> Bool), returns the query for the 2W x 2H result.
 scale2x :: Int -> Int -> (Int -> Int -> Bool) -> (Int -> Int -> Bool)
 scale2x !w !h getPixel = \ !c2 !r2 ->
   if c2 < 0 || c2 >= w * 2 || r2 < 0 || r2 >= h * 2
@@ -197,20 +211,40 @@ scale2x !w !h getPixel = \ !c2 !r2 ->
     else
       let !c = c2 `div` 2
           !r = r2 `div` 2
-          !subX = c2 .&. 1
-          !subY = r2 .&. 1
-          !b = if r > 0 then getPixel c (r - 1) else False
-          !d = if c > 0 then getPixel (c - 1) r else False
-          !e = getPixel c r
-          !f = if c + 1 < w then getPixel (c + 1) r else False
-          !h' = if r + 1 < h then getPixel c (r + 1) else False
-       in if b /= h' && d /= f
-            then case (subX, subY) of
-              (0, 0) -> if d == b then d else e
-              (1, 0) -> if b == f then f else e
-              (0, 1) -> if d == h' then d else e
-              _      -> if h' == f then f else e
-            else e
+          at x y = x >= 0 && x < w && y >= 0 && y < h && getPixel x y
+          (tl, tr, bl, br) = epx (at c (r - 1)) (at (c - 1) r) (getPixel c r) (at (c + 1) r) (at c (r + 1))
+       in case (c2 .&. 1, r2 .&. 1) of
+            (0, 0) -> tl
+            (1, 0) -> tr
+            (0, 1) -> bl
+            _ -> br
+
+-- | EPX-double every glyph of a table: @srcW@ x @srcH@ source bits per glyph
+-- (@bitAt gid col row@, 0 outside the glyph) become 2 * @srcH@ rows of
+-- 2 * @srcW@ bits, column 0 at bit @msb@.
+{-# INLINE buildEpxTable #-}
+buildEpxTable :: (Prim w, Bits w, Num w) => Int -> Int -> Int -> Int -> (Int -> Int -> Int -> Word8) -> ST s (PrimArray w)
+buildEpxTable !numGlyphs !srcW !srcH !msb bitAt = do
+  out <- newPrimArray (numGlyphs * 2 * srcH)
+  let forGlyph !gid = when (gid < numGlyphs) $ do
+        forRow gid 0
+        forGlyph (gid + 1)
+      forRow !gid !r = when (r < srcH) $ do
+        let (!top, !bot) = rowPair gid r 0 0 0
+            !base = gid * 2 * srcH + 2 * r
+        writePrimArray out base top
+        writePrimArray out (base + 1) bot
+        forRow gid (r + 1)
+      rowPair !gid !r !c !top !bot
+        | c >= srcW = (top, bot)
+        | otherwise =
+            let (e0, e1, e2, e3) =
+                  epx (bitAt gid c (r - 1)) (bitAt gid (c - 1) r) (bitAt gid c r) (bitAt gid (c + 1) r) (bitAt gid c (r + 1))
+                !bit0 = msb - 2 * c
+                put v i acc = if v /= 0 then setBit acc i else acc
+             in rowPair gid r (c + 1) (put e1 (bit0 - 1) (put e0 bit0 top)) (put e3 (bit0 - 1) (put e2 bit0 bot))
+  forGlyph 0
+  unsafeFreezePrimArray out
 
 {-# INLINE getGlyphBit1x #-}
 getGlyphBit1x :: PrimArray Word8 -> Int -> Int -> Int -> Word8
@@ -223,48 +257,6 @@ getGlyphBit1x !arr !gid !c !r
           !b = indexPrimArray arr byteIdx
        in (b `shiftR` bitInByte) .&. 1
 
--- | Build Scale2x glyphs: 14x26 per glyph, packed into Word16 (14 bits per row).
-buildScale2xGlyphs :: Int -> PrimArray Word8 -> ST s (PrimArray Word16)
-buildScale2xGlyphs !numGlyphs !arr = do
-  mutArr2x <- newPrimArray (numGlyphs * 26)
-  let forEachGlyph !gid
-        | gid >= numGlyphs = pure ()
-        | otherwise = do
-            let forEachRow !r
-                  | r >= 13 = pure ()
-                  | otherwise = do
-                      let buildRowPair !c !topAcc !botAcc
-                            | c >= 7 = (topAcc, botAcc)
-                            | otherwise =
-                                let !b = getGlyphBit1x arr gid c (r - 1)
-                                    !d = getGlyphBit1x arr gid (c - 1) r
-                                    !e = getGlyphBit1x arr gid c r
-                                    !f = getGlyphBit1x arr gid (c + 1) r
-                                    !h = getGlyphBit1x arr gid c (r + 1)
-                                    !(e0, e1, e2, e3) =
-                                      if b /= h && d /= f
-                                        then ( if d == b then d else e
-                                             , if b == f then f else e
-                                             , if d == h then d else e
-                                             , if h == f then f else e
-                                             )
-                                        else (e, e, e, e)
-                                    !c0 = 2 * c
-                                    !c1 = c0 + 1
-                                    !topBit0 = fromIntegral e0 `shiftL` (15 - c0)
-                                    !topBit1 = fromIntegral e1 `shiftL` (15 - c1)
-                                    !botBit0 = fromIntegral e2 `shiftL` (15 - c0)
-                                    !botBit1 = fromIntegral e3 `shiftL` (15 - c1)
-                                 in buildRowPair (c + 1) (topAcc .|. topBit0 .|. topBit1) (botAcc .|. botBit0 .|. botBit1)
-                      let !(topRowWord, botRowWord) = buildRowPair 0 0 0
-                      writePrimArray mutArr2x (gid * 26 + 2 * r) topRowWord
-                      writePrimArray mutArr2x (gid * 26 + 2 * r + 1) botRowWord
-                      forEachRow (r + 1)
-            forEachRow 0
-            forEachGlyph (gid + 1)
-  forEachGlyph 0
-  unsafeFreezePrimArray mutArr2x
-
 {-# INLINE getGlyphBit2x #-}
 getGlyphBit2x :: PrimArray Word16 -> Int -> Int -> Int -> Word8
 getGlyphBit2x !arr2x !gid !c !r
@@ -272,48 +264,6 @@ getGlyphBit2x !arr2x !gid !c !r
   | otherwise =
       let !w = indexPrimArray arr2x (gid * 26 + r)
        in fromIntegral ((w `shiftR` (15 - c)) .&. 1)
-
--- | Build Scale4x glyphs: 28x52 per glyph, packed into Word32 (28 bits per row).
-buildScale4xGlyphs :: Int -> PrimArray Word16 -> ST s (PrimArray Word32)
-buildScale4xGlyphs !numGlyphs !arr2x = do
-  mutArr4x <- newPrimArray (numGlyphs * 52)
-  let forEachGlyph !gid
-        | gid >= numGlyphs = pure ()
-        | otherwise = do
-            let forEachRow !r
-                  | r >= 26 = pure ()
-                  | otherwise = do
-                      let buildRowPair !c !topAcc !botAcc
-                            | c >= 14 = (topAcc, botAcc)
-                            | otherwise =
-                                let !b = getGlyphBit2x arr2x gid c (r - 1)
-                                    !d = getGlyphBit2x arr2x gid (c - 1) r
-                                    !e = getGlyphBit2x arr2x gid c r
-                                    !f = getGlyphBit2x arr2x gid (c + 1) r
-                                    !h = getGlyphBit2x arr2x gid c (r + 1)
-                                    !(e0, e1, e2, e3) =
-                                      if b /= h && d /= f
-                                        then ( if d == b then d else e
-                                             , if b == f then f else e
-                                             , if d == h then d else e
-                                             , if h == f then f else e
-                                             )
-                                        else (e, e, e, e)
-                                    !c0 = 2 * c
-                                    !c1 = c0 + 1
-                                    !topBit0 = fromIntegral e0 `shiftL` (31 - c0)
-                                    !topBit1 = fromIntegral e1 `shiftL` (31 - c1)
-                                    !botBit0 = fromIntegral e2 `shiftL` (31 - c0)
-                                    !botBit1 = fromIntegral e3 `shiftL` (31 - c1)
-                                 in buildRowPair (c + 1) (topAcc .|. topBit0 .|. topBit1) (botAcc .|. botBit0 .|. botBit1)
-                      let !(topRowWord, botRowWord) = buildRowPair 0 0 0
-                      writePrimArray mutArr4x (gid * 52 + 2 * r) topRowWord
-                      writePrimArray mutArr4x (gid * 52 + 2 * r + 1) botRowWord
-                      forEachRow (r + 1)
-            forEachRow 0
-            forEachGlyph (gid + 1)
-  forEachGlyph 0
-  unsafeFreezePrimArray mutArr4x
 
 -- | Query whether a pixel is set in the 1x glyph
 cozetteGlyphBit1x :: CozetteFont -> Word32 -> Int -> Int -> Bool
@@ -371,24 +321,40 @@ charToGlyphId font c =
                       then go (mid + 1) hi
                       else glyph + (cp - start)
 
-{-# INLINE renderGlyphToBuffer #-}
-renderGlyphToBuffer ::
-  Ptr Word32 ->
-  Int ->
-  Int ->
-  Int ->
-  Int ->
-  Int ->
-  Int ->
-  Int ->
-  Word32 ->
-  CozetteFont ->
-  Word32 ->
-  IO ()
-renderGlyphToBuffer !dstPtr !stride !clipX0 !clipY0 !clipX1 !clipY1 !penX !penY !color !font !gid =
-  renderGlyphScaledToBuffer dstPtr stride clipX0 clipY0 clipX1 clipY1 1.0 penX penY color font gid
+-- | How a glyph is drawn at a scale.
+data CozetteScalePath
+  = ScaleExact1x   -- ^ at or below 1x: the 7x13 bitmap
+  | ScaleExact2x   -- ^ within 0.05 of 2x: the EPX 14x26 bitmap
+  | ScaleExact4x   -- ^ within 0.05 of 4x: the double-EPX 28x52 bitmap
+  | ScaleBoxFrom2x -- ^ other scales below 2x: the 14x26 bitmap, box-averaged
+  | ScaleBoxFrom4x -- ^ other scales: the 28x52 bitmap, box-averaged
+  deriving (Eq, Show)
 
-{-# INLINE renderGlyphScaledToBuffer #-}
+cozetteScalePath :: Float -> CozetteScalePath
+cozetteScalePath s
+  | s <= 1.0 = ScaleExact1x
+  | abs (s - 2.0) < 0.05 = ScaleExact2x
+  | abs (s - 4.0) < 0.05 = ScaleExact4x
+  | s < 2.0 = ScaleBoxFrom2x
+  | otherwise = ScaleBoxFrom4x
+
+-- | Pixel footprint of one glyph drawn at a scale.
+cozetteGlyphFootprint :: Float -> (Int, Int)
+cozetteGlyphFootprint s = case cozetteScalePath s of
+  ScaleExact1x -> (cozetteGlyphWidth, cozetteGlyphHeight)
+  ScaleExact2x -> (2 * cozetteGlyphWidth, 2 * cozetteGlyphHeight)
+  ScaleExact4x -> (4 * cozetteGlyphWidth, 4 * cozetteGlyphHeight)
+  _ ->
+    ( max 1 (round (fromIntegral cozetteGlyphWidth * s))
+    , max 1 (round (fromIntegral cozetteGlyphHeight * s))
+    )
+
+-- | Stamp one glyph with its top-left at (penX, penY) into a @stride@-wide
+-- BGRA buffer, clipped to [clipX0, clipX1) x [clipY0, clipY1). Exact scales
+-- copy a bitmap; other scales box-average the next larger EPX bitmap and
+-- blend by coverage. Glyph 1 (space) draws nothing; unknown ids draw glyph 0.
+-- Not inlined: the GL host only calls it while baking its glyph atlas.
+{-# NOINLINE renderGlyphScaledToBuffer #-}
 renderGlyphScaledToBuffer ::
   Ptr Word32 ->
   Int ->
@@ -403,389 +369,126 @@ renderGlyphScaledToBuffer ::
   CozetteFont ->
   Word32 ->
   IO ()
-renderGlyphScaledToBuffer !dstPtr !stride !clipX0 !clipY0 !clipX1 !clipY1 !scale !penX !penY !color !font !gid
-  | scale <= 1.0 = do
-      -- 1x fast path (unpacked 7x13 rows)
-      let !safeGid = if fromIntegral gid < cfNumGlyphs font then fromIntegral gid else 0
-      when (safeGid /= 1) $ do
-        if penX >= clipX1 || penX + 7 <= clipX0 || penY >= clipY1 || penY + 13 <= clipY0
-          then pure ()
-          else do
-            let !baseOff = safeGid * 13
-                !arr1x = cfGlyphData1x font
-            if penX >= clipX0 && penX + 7 <= clipX1 && penY >= clipY0 && penY + 13 <= clipY1
-              then do
-                -- Unclipped fast path: write directly without per-pixel bounds check
-                let renderRowUnclipped !r
-                      | r >= 13 = pure ()
-                      | otherwise = do
-                          let !rowByte = indexPrimArray arr1x (baseOff + r)
-                          if rowByte == 0
-                            then renderRowUnclipped (r + 1)
-                            else do
-                              let !rowDstOff = (penY + r) * stride + penX
-                              when (rowByte .&. 0x80 /= 0) $ pokeElemOff dstPtr (rowDstOff + 0) color
-                              when (rowByte .&. 0x40 /= 0) $ pokeElemOff dstPtr (rowDstOff + 1) color
-                              when (rowByte .&. 0x20 /= 0) $ pokeElemOff dstPtr (rowDstOff + 2) color
-                              when (rowByte .&. 0x10 /= 0) $ pokeElemOff dstPtr (rowDstOff + 3) color
-                              when (rowByte .&. 0x08 /= 0) $ pokeElemOff dstPtr (rowDstOff + 4) color
-                              when (rowByte .&. 0x04 /= 0) $ pokeElemOff dstPtr (rowDstOff + 5) color
-                              when (rowByte .&. 0x02 /= 0) $ pokeElemOff dstPtr (rowDstOff + 6) color
-                              renderRowUnclipped (r + 1)
-                renderRowUnclipped 0
-              else do
-                -- Partially clipped fallback
-                let renderRowClipped !r
-                      | r >= 13 = pure ()
-                      | otherwise = do
-                          let !y = penY + r
-                          if y >= clipY0 && y < clipY1
-                            then do
-                              let !rowByte = indexPrimArray arr1x (baseOff + r)
-                              if rowByte == 0
-                                then renderRowClipped (r + 1)
-                                else do
-                                  let renderColClipped !c
-                                        | c >= 7 = pure ()
-                                        | otherwise = do
-                                            let !x = penX + c
-                                            when (x >= clipX0 && x < clipX1 && (rowByte .&. (0x80 `shiftR` c) /= 0)) $
-                                              pokeElemOff dstPtr (y * stride + x) color
-                                            renderColClipped (c + 1)
-                                  renderColClipped 0
-                                  renderRowClipped (r + 1)
-                            else renderRowClipped (r + 1)
-                renderRowClipped 0
+renderGlyphScaledToBuffer !dst !stride !clipX0 !clipY0 !clipX1 !clipY1 !scale !penX !penY !color !font !gid =
+  when (glyph /= 1) $ case cozetteScalePath scale of
+    ScaleExact1x -> blitMask dst stride penX penY color (rowsOf 13) (colsOf 7) row1x
+    ScaleExact2x -> blitMask dst stride penX penY color (rowsOf 26) (colsOf 14) row2x
+    ScaleExact4x -> blitMask dst stride penX penY color (rowsOf 52) (colsOf 28) row4x
+    ScaleBoxFrom2x -> boxed 14 26 row2x
+    ScaleBoxFrom4x -> boxed 28 52 row4x
+  where
+    !glyph = if fromIntegral gid < cfNumGlyphs font then fromIntegral gid else 0 :: Int
+    -- Bitmap rows as masks with column 0 at bit 31.
+    row1x r = fromIntegral (indexPrimArray (cfGlyphData1x font) (glyph * 13 + r)) `shiftL` 24
+    row2x r = fromIntegral (indexPrimArray (cfGlyphData2x font) (glyph * 26 + r)) `shiftL` 16
+    row4x r = indexPrimArray (cfGlyphData4x font) (glyph * 52 + r)
+    -- The part of an h-row / w-column footprint inside the clip.
+    rowsOf h = (max 0 (clipY0 - penY), min h (clipY1 - penY))
+    colsOf w = (max 0 (clipX0 - penX), min w (clipX1 - penX))
+    boxed :: Int -> Int -> (Int -> Word32) -> IO ()
+    boxed !srcW !srcH row = goRow dy0
+      where
+        (!tw, !th) = cozetteGlyphFootprint scale
+        !scaleX = fromIntegral srcW / fromIntegral tw :: Float
+        !scaleY = fromIntegral srcH / fromIntegral th :: Float
+        (!dy0, !dy1) = rowsOf th
+        (!dx0, !dx1) = colsOf tw
+        goRow !dy = when (dy < dy1) $ do
+          let !y0 = fromIntegral dy * scaleY
+              !y1 = fromIntegral (dy + 1) * scaleY
+              !base = (penY + dy) * stride + penX
+              goCol !dx = when (dx < dx1) $ do
+                let !off = base + dx
+                    !cov = boxCoverage srcW srcH row (fromIntegral dx * scaleX) (fromIntegral (dx + 1) * scaleX) y0 y1
+                    !effA = round (fromIntegral srcA * cov) :: Int
+                -- Skip near-transparent coverage; overwrite near-opaque.
+                when (effA > 3) $
+                  if effA >= 252
+                    then pokeElemOff dst off color
+                    else do
+                      d <- peekElemOff dst off
+                      let !invA = 255 - effA
+                          mix s = fromIntegral ((channel color s * effA + channel d s * invA + 127) `div` 255) :: Word32
+                      pokeElemOff dst off (0xFF000000 .|. (mix 16 `shiftL` 16) .|. (mix 8 `shiftL` 8) .|. mix 0)
+                goCol (dx + 1)
+          goCol dx0
+          goRow (dy + 1)
+        !srcA = channel color 24
+        channel w s = fromIntegral ((w `shiftR` s) .&. 0xFF) :: Int
 
-  | abs (scale - 2.0) < 0.05 = do
-      -- Exact 2x Scale2x fast path (14x26 bitmap)
-      let !safeGid = if fromIntegral gid < cfNumGlyphs font then fromIntegral gid else 0
-      when (safeGid /= 1) $ do
-        if penX >= clipX1 || penX + 14 <= clipX0 || penY >= clipY1 || penY + 26 <= clipY0
-          then pure ()
-          else do
-            let !baseOff = safeGid * 26
-                !arr2x = cfGlyphData2x font
-            if penX >= clipX0 && penX + 14 <= clipX1 && penY >= clipY0 && penY + 26 <= clipY1
-              then do
-                -- Unclipped 2x fast path
-                let renderRow2xUnclipped !r
-                      | r >= 26 = pure ()
-                      | otherwise = do
-                          let !rowWord = indexPrimArray arr2x (baseOff + r)
-                          if rowWord == 0
-                            then renderRow2xUnclipped (r + 1)
-                            else do
-                              let !rowDstOff = (penY + r) * stride + penX
-                                  renderCol2x !c
-                                    | c >= 14 = pure ()
-                                    | otherwise = do
-                                        when ((rowWord .&. (0x8000 `shiftR` c)) /= 0) $
-                                          pokeElemOff dstPtr (rowDstOff + c) color
-                                        renderCol2x (c + 1)
-                              renderCol2x 0
-                              renderRow2xUnclipped (r + 1)
-                renderRow2xUnclipped 0
-              else do
-                -- Clipped 2x fallback
-                let renderRow2xClipped !r
-                      | r >= 26 = pure ()
-                      | otherwise = do
-                          let !y = penY + r
-                          if y >= clipY0 && y < clipY1
-                            then do
-                              let !rowWord = indexPrimArray arr2x (baseOff + r)
-                              if rowWord == 0
-                                then renderRow2xClipped (r + 1)
-                                else do
-                                  let renderCol2x !c
-                                        | c >= 14 = pure ()
-                                        | otherwise = do
-                                            let !x = penX + c
-                                            when (x >= clipX0 && x < clipX1 && ((rowWord .&. (0x8000 `shiftR` c)) /= 0)) $
-                                              pokeElemOff dstPtr (y * stride + x) color
-                                            renderCol2x (c + 1)
-                                  renderCol2x 0
-                                  renderRow2xClipped (r + 1)
-                            else renderRow2xClipped (r + 1)
-                renderRow2xClipped 0
+-- | Write @color@ wherever a row mask (column 0 at bit 31) has a bit set, over
+-- the given row and column ranges of a glyph at (penX, penY).
+{-# INLINE blitMask #-}
+blitMask :: Ptr Word32 -> Int -> Int -> Int -> Word32 -> (Int, Int) -> (Int, Int) -> (Int -> Word32) -> IO ()
+blitMask !dst !stride !penX !penY !color (!r0, !r1) (!c0, !c1) row = goRow r0
+  where
+    goRow !r = when (r < r1) $ do
+      let !bits = row r
+      when (bits /= 0) $ goCol ((penY + r) * stride + penX) bits c0
+      goRow (r + 1)
+    goCol !base !bits !c = when (c < c1) $ do
+      when (testBit bits (31 - c)) $ pokeElemOff dst (base + c) color
+      goCol base bits (c + 1)
 
-  | abs (scale - 4.0) < 0.05 = do
-      -- Exact 4x Scale4x fast path (28x52 bitmap)
-      let !safeGid = if fromIntegral gid < cfNumGlyphs font then fromIntegral gid else 0
-          !baseOff = safeGid * 52
-          !arr4x = cfGlyphData4x font
-          renderRow4x !r
-            | r >= 52 = pure ()
-            | otherwise = do
-                let !y = penY + r
-                if y >= clipY0 && y < clipY1
-                  then do
-                    let !rowWord = indexPrimArray arr4x (baseOff + r)
-                        renderCol4x !c
-                          | c >= 28 = pure ()
-                          | otherwise = do
-                              let !x = penX + c
-                              if x >= clipX0 && x < clipX1
-                                then do
-                                  if (rowWord `shiftR` (31 - c)) .&. 1 == 1
-                                    then pokeElemOff dstPtr (y * stride + x) color
-                                    else pure ()
-                                  renderCol4x (c + 1)
-                                else renderCol4x (c + 1)
-                    renderCol4x 0
-                    renderRow4x (r + 1)
-                  else renderRow4x (r + 1)
-      renderRow4x 0
+-- | Covered fraction, in [0, 1], of the texel box [x0, x1) x [y0, y1) on a
+-- @srcW@ x @srcH@ grid whose rows are masks with column 0 at bit 31.
+{-# INLINE boxCoverage #-}
+boxCoverage :: Int -> Int -> (Int -> Word32) -> Float -> Float -> Float -> Float -> Float
+boxCoverage !srcW !srcH row !x0 !x1 !y0 !y1
+  | area > 0 = max 0 (min 1 (goRow (max 0 (floor y0)) 0 / area))
+  | otherwise = 0
+  where
+    !area = (x1 - x0) * (y1 - y0)
+    !syMax = min (srcH - 1) (floor (y1 - 1e-5))
+    !sxMin = max 0 (floor x0)
+    !sxMax = min (srcW - 1) (floor (x1 - 1e-5))
+    goRow !sy !acc
+      | sy > syMax = acc
+      | otherwise =
+          let !ovY = max 0 (min (fromIntegral (sy + 1)) y1 - max (fromIntegral sy) y0)
+           in goRow (sy + 1) (acc + goCol (row sy) ovY sxMin 0)
+    goCol !bits !ovY !sx !acc
+      | sx > sxMax = acc
+      | otherwise =
+          let !ovX = max 0 (min (fromIntegral (sx + 1)) x1 - max (fromIntegral sx) x0)
+              !inc = if testBit bits (31 - sx) then ovX * ovY else 0
+           in goCol bits ovY (sx + 1) (acc + inc)
 
-  | scale < 2.0 = do
-      -- Fractional scale < 2.0 (e.g. 0.75, 1.25, 1.33, 1.5, 1.75)
-      -- Scaled with Scale2x to the next integer 2 (14x26 bitmap),
-      -- then downscaled using Box / Area Averaging.
-      let !safeGid = if fromIntegral gid < cfNumGlyphs font then fromIntegral gid else 0
-          !baseOff = safeGid * 26
-          !arr2x = cfGlyphData2x font
-          !targetW = max 1 (round (7.0 * scale)) :: Int
-          !targetH = max 1 (round (13.0 * scale)) :: Int
-          !fSrcW = 14.0 :: Float
-          !fSrcH = 26.0 :: Float
-          !scaleX = fSrcW / fromIntegral targetW
-          !scaleY = fSrcH / fromIntegral targetH
-          !srcR = fromIntegral ((color `shiftR` 16) .&. 0xFF) :: Int
-          !srcG = fromIntegral ((color `shiftR` 8) .&. 0xFF) :: Int
-          !srcB = fromIntegral (color .&. 0xFF) :: Int
-          !srcA = fromIntegral ((color `shiftR` 24) .&. 0xFF) :: Int
+-- | Coverage, in [0, 1], of destination pixel (dx, dy) when a @srcW@ x @srcH@
+-- grid (at most 32 columns) is box-averaged onto @targetW@ x @targetH@.
+boxAverageCoverage :: Int -> Int -> Int -> Int -> (Int -> Int -> Bool) -> Int -> Int -> Float
+boxAverageCoverage srcW srcH targetW targetH isSet dx dy =
+  boxCoverage srcW srcH rowMask (fromIntegral dx * scaleX) (fromIntegral (dx + 1) * scaleX)
+    (fromIntegral dy * scaleY) (fromIntegral (dy + 1) * scaleY)
+  where
+    scaleX = fromIntegral srcW / fromIntegral targetW :: Float
+    scaleY = fromIntegral srcH / fromIntegral targetH :: Float
+    rowMask sy = foldl' (\m sx -> if isSet sx sy then setBit m (31 - sx) else m) (0 :: Word32) [0 .. srcW - 1]
 
-          renderRowFrac2x !dy
-            | dy >= targetH = pure ()
-            | otherwise = do
-                let !y = penY + dy
-                if y >= clipY0 && y < clipY1
-                  then do
-                    let !boxY0 = fromIntegral dy * scaleY
-                        !boxY1 = fromIntegral (dy + 1) * scaleY
-                        !syMin = max 0 (floor boxY0) :: Int
-                        !syMax = min 25 (floor (boxY1 - 1e-5)) :: Int
+-- | Visit the glyph pen positions (physical pixels) of a text run laid out
+-- from logical (logX, logY) at a scale, threading an accumulator. @\\r@
+-- returns to column 0, @\\n@ starts the next line, and space (glyph 1)
+-- advances without a visit.
+{-# INLINE foldPenPositions #-}
+foldPenPositions :: CozetteFont -> Float -> Float -> Float -> a -> (a -> Int -> Int -> Word32 -> IO a) -> Text -> IO a
+foldPenPositions font !scale !logX !logY z step = go (0 :: Int) (0 :: Int) z
+  where
+    pen origin i advance = round ((origin + fromIntegral i * advance) * scale)
+    go !col !line !acc t = case T.uncons t of
+      Nothing -> pure acc
+      Just ('\r', rest) -> go 0 line acc rest
+      Just ('\n', rest) -> go 0 (line + 1) acc rest
+      Just (c, rest) -> do
+        let !gid = charToGlyphId font c
+        acc' <-
+          if gid == 1
+            then pure acc
+            else step acc (pen logX col cozetteCharAdvance) (pen logY line cozetteLineHeight) gid
+        go (col + 1) line acc' rest
 
-                        renderColFrac2x !dx
-                          | dx >= targetW = pure ()
-                          | otherwise = do
-                              let !x = penX + dx
-                              if x >= clipX0 && x < clipX1
-                                then do
-                                  let !boxX0 = fromIntegral dx * scaleX
-                                      !boxX1 = fromIntegral (dx + 1) * scaleX
-                                      !boxArea = (boxX1 - boxX0) * (boxY1 - boxY0)
-                                      !sxMin = max 0 (floor boxX0) :: Int
-                                      !sxMax = min 13 (floor (boxX1 - 1e-5)) :: Int
-
-                                      loopY !sy !accY
-                                        | sy > syMax = accY
-                                        | otherwise =
-                                            let !rowWord = indexPrimArray arr2x (baseOff + sy)
-                                                !y0 = fromIntegral sy :: Float
-                                                !y1 = fromIntegral (sy + 1) :: Float
-                                                !ovY = max 0.0 (min y1 boxY1 - max y0 boxY0)
-                                                loopX !sx !accX
-                                                  | sx > sxMax = accX
-                                                  | otherwise =
-                                                      let !isSet = (rowWord `shiftR` (15 - sx)) .&. 1 == 1
-                                                          !x0 = fromIntegral sx :: Float
-                                                          !x1 = fromIntegral (sx + 1) :: Float
-                                                          !ovX = max 0.0 (min x1 boxX1 - max x0 boxX0)
-                                                          !inc = if isSet then ovX * ovY else 0.0
-                                                       in loopX (sx + 1) (accX + inc)
-                                                !rowSum = loopX sxMin 0.0
-                                             in loopY (sy + 1) (accY + rowSum)
-
-                                      !cov = if boxArea > 0.0 then loopY syMin 0.0 / boxArea else 0.0
-                                      !covClamped = max 0.0 (min 1.0 cov)
-                                      !effA = round (fromIntegral srcA * covClamped) :: Int
-
-                                  if effA <= 3
-                                    then pure ()
-                                    else if effA >= 252
-                                      then pokeElemOff dstPtr (y * stride + x) color
-                                      else do
-                                        let !off = y * stride + x
-                                        dst <- peekElemOff dstPtr off
-                                        let !invA = 255 - effA
-                                            !dstR = fromIntegral ((dst `shiftR` 16) .&. 0xFF) :: Int
-                                            !dstG = fromIntegral ((dst `shiftR` 8) .&. 0xFF) :: Int
-                                            !dstB = fromIntegral (dst .&. 0xFF) :: Int
-                                            !outR = (srcR * effA + dstR * invA + 127) `div` 255
-                                            !outG = (srcG * effA + dstG * invA + 127) `div` 255
-                                            !outB = (srcB * effA + dstB * invA + 127) `div` 255
-                                            !outColor = (0xFF `shiftL` 24)
-                                                    .|. (fromIntegral outR `shiftL` 16)
-                                                    .|. (fromIntegral outG `shiftL` 8)
-                                                    .|. fromIntegral outB
-                                        pokeElemOff dstPtr off outColor
-                                  renderColFrac2x (dx + 1)
-                                else renderColFrac2x (dx + 1)
-                    renderColFrac2x 0
-                    renderRowFrac2x (dy + 1)
-                  else renderRowFrac2x (dy + 1)
-      renderRowFrac2x 0
-
-  | otherwise = do
-      -- Fractional scale >= 2.0 (e.g. 2.25, 2.5, 2.75, 3.0, 3.5)
-      -- Scaled with Scale2x twice to next integer power 4 (28x52 bitmap),
-      -- then downscaled using Box / Area Averaging.
-      let !safeGid = if fromIntegral gid < cfNumGlyphs font then fromIntegral gid else 0
-          !baseOff = safeGid * 52
-          !arr4x = cfGlyphData4x font
-          !targetW = max 1 (round (7.0 * scale)) :: Int
-          !targetH = max 1 (round (13.0 * scale)) :: Int
-          !fSrcW = 28.0 :: Float
-          !fSrcH = 52.0 :: Float
-          !scaleX = fSrcW / fromIntegral targetW
-          !scaleY = fSrcH / fromIntegral targetH
-          !srcR = fromIntegral ((color `shiftR` 16) .&. 0xFF) :: Int
-          !srcG = fromIntegral ((color `shiftR` 8) .&. 0xFF) :: Int
-          !srcB = fromIntegral (color .&. 0xFF) :: Int
-          !srcA = fromIntegral ((color `shiftR` 24) .&. 0xFF) :: Int
-
-          renderRowFrac4x !dy
-            | dy >= targetH = pure ()
-            | otherwise = do
-                let !y = penY + dy
-                if y >= clipY0 && y < clipY1
-                  then do
-                    let !boxY0 = fromIntegral dy * scaleY
-                        !boxY1 = fromIntegral (dy + 1) * scaleY
-                        !syMin = max 0 (floor boxY0) :: Int
-                        !syMax = min 51 (floor (boxY1 - 1e-5)) :: Int
-
-                        renderColFrac4x !dx
-                          | dx >= targetW = pure ()
-                          | otherwise = do
-                              let !x = penX + dx
-                              if x >= clipX0 && x < clipX1
-                                then do
-                                  let !boxX0 = fromIntegral dx * scaleX
-                                      !boxX1 = fromIntegral (dx + 1) * scaleX
-                                      !boxArea = (boxX1 - boxX0) * (boxY1 - boxY0)
-                                      !sxMin = max 0 (floor boxX0) :: Int
-                                      !sxMax = min 27 (floor (boxX1 - 1e-5)) :: Int
-
-                                      loopY !sy !accY
-                                        | sy > syMax = accY
-                                        | otherwise =
-                                            let !rowWord = indexPrimArray arr4x (baseOff + sy)
-                                                !y0 = fromIntegral sy :: Float
-                                                !y1 = fromIntegral (sy + 1) :: Float
-                                                !ovY = max 0.0 (min y1 boxY1 - max y0 boxY0)
-                                                loopX !sx !accX
-                                                  | sx > sxMax = accX
-                                                  | otherwise =
-                                                      let !isSet = (rowWord `shiftR` (31 - sx)) .&. 1 == 1
-                                                          !x0 = fromIntegral sx :: Float
-                                                          !x1 = fromIntegral (sx + 1) :: Float
-                                                          !ovX = max 0.0 (min x1 boxX1 - max x0 boxX0)
-                                                          !inc = if isSet then ovX * ovY else 0.0
-                                                       in loopX (sx + 1) (accX + inc)
-                                                !rowSum = loopX sxMin 0.0
-                                             in loopY (sy + 1) (accY + rowSum)
-
-                                      !cov = if boxArea > 0.0 then loopY syMin 0.0 / boxArea else 0.0
-                                      !covClamped = max 0.0 (min 1.0 cov)
-                                      !effA = round (fromIntegral srcA * covClamped) :: Int
-
-                                  if effA <= 3
-                                    then pure ()
-                                    else if effA >= 252
-                                      then pokeElemOff dstPtr (y * stride + x) color
-                                      else do
-                                        let !off = y * stride + x
-                                        dst <- peekElemOff dstPtr off
-                                        let !invA = 255 - effA
-                                            !dstR = fromIntegral ((dst `shiftR` 16) .&. 0xFF) :: Int
-                                            !dstG = fromIntegral ((dst `shiftR` 8) .&. 0xFF) :: Int
-                                            !dstB = fromIntegral (dst .&. 0xFF) :: Int
-                                            !outR = (srcR * effA + dstR * invA + 127) `div` 255
-                                            !outG = (srcG * effA + dstG * invA + 127) `div` 255
-                                            !outB = (srcB * effA + dstB * invA + 127) `div` 255
-                                            !outColor = (0xFF `shiftL` 24)
-                                                    .|. (fromIntegral outR `shiftL` 16)
-                                                    .|. (fromIntegral outG `shiftL` 8)
-                                                    .|. fromIntegral outB
-                                        pokeElemOff dstPtr off outColor
-                                  renderColFrac4x (dx + 1)
-                                else renderColFrac4x (dx + 1)
-                    renderColFrac4x 0
-                    renderRowFrac4x (dy + 1)
-                  else renderRowFrac4x (dy + 1)
-      renderRowFrac4x 0
-
--- | Pure Box / Area Averaging calculation.
--- Computes the coverage [0.0 .. 1.0] of source grid (srcW x srcH) within
--- the continuous bounding box of destination pixel (dx, dy) in target grid (targetW x targetH).
-{-# INLINE boxAverageCoverage #-}
-boxAverageCoverage ::
-  Int ->
-  Int ->
-  Int ->
-  Int ->
-  (Int -> Int -> Bool) ->
-  Int ->
-  Int ->
-  Float
-boxAverageCoverage !srcW !srcH !targetW !targetH isSet !dx !dy =
-  let !fSrcW = fromIntegral srcW :: Float
-      !fSrcH = fromIntegral srcH :: Float
-      !fTgtW = fromIntegral targetW :: Float
-      !fTgtH = fromIntegral targetH :: Float
-      !scaleX = fSrcW / fTgtW
-      !scaleY = fSrcH / fTgtH
-      !boxX0 = fromIntegral dx * scaleX
-      !boxX1 = fromIntegral (dx + 1) * scaleX
-      !boxY0 = fromIntegral dy * scaleY
-      !boxY1 = fromIntegral (dy + 1) * scaleY
-      !boxArea = (boxX1 - boxX0) * (boxY1 - boxY0)
-      !syMin = max 0 (floor boxY0)
-      !syMax = min (srcH - 1) (floor (boxY1 - 1e-5))
-      !sxMin = max 0 (floor boxX0)
-      !sxMax = min (srcW - 1) (floor (boxX1 - 1e-5))
-
-      loopY !sy !accY
-        | sy > syMax = accY
-        | otherwise =
-            let !y0 = fromIntegral sy :: Float
-                !y1 = fromIntegral (sy + 1) :: Float
-                !ovY = max 0.0 (min y1 boxY1 - max y0 boxY0)
-                loopX !sx !accX
-                  | sx > sxMax = accX
-                  | otherwise =
-                      let !x0 = fromIntegral sx :: Float
-                          !x1 = fromIntegral (sx + 1) :: Float
-                          !ovX = max 0.0 (min x1 boxX1 - max x0 boxX0)
-                          !inc = if isSet sx sy then ovX * ovY else 0.0
-                       in loopX (sx + 1) (accX + inc)
-                !rowSum = loopX sxMin 0.0
-             in loopY (sy + 1) (accY + rowSum)
-
-      !covered = loopY syMin 0.0
-   in if boxArea > 0.0 then max 0.0 (min 1.0 (covered / boxArea)) else 0.0
-
-{-# INLINE renderTextToBuffer #-}
-renderTextToBuffer ::
-  Ptr Word32 ->
-  Int ->
-  Int ->
-  Int ->
-  Int ->
-  Int ->
-  Int ->
-  Int ->
-  Word32 ->
-  CozetteFont ->
-  Text ->
-  IO ()
-renderTextToBuffer !dstPtr !stride !clipX0 !clipY0 !clipX1 !clipY1 !startX !startY !color !font !txt =
-  renderTextScaledToBuffer dstPtr stride clipX0 clipY0 clipX1 clipY1 1.0 (fromIntegral startX) (fromIntegral startY) color font txt
-
-{-# INLINE renderTextScaledToBuffer #-}
+-- | Stamp a text run laid out from logical (logX, logY) at a scale; clip and
+-- buffer as for 'renderGlyphScaledToBuffer'.
+{-# NOINLINE renderTextScaledToBuffer #-}
 renderTextScaledToBuffer ::
   Ptr Word32 ->
   Int ->
@@ -800,21 +503,9 @@ renderTextScaledToBuffer ::
   CozetteFont ->
   Text ->
   IO ()
-renderTextScaledToBuffer !dstPtr !stride !clipX0 !clipY0 !clipX1 !clipY1 !scale !logX !logY !color !font !txt =
-  go (0 :: Int) (0 :: Int) txt
-  where
-    go !_ !_ !t | T.null t = pure ()
-    go !col !line !t = case T.uncons t of
-      Nothing -> pure ()
-      Just ('\r', rest) -> go 0 line rest
-      Just ('\n', rest) -> go 0 (line + 1) rest
-      Just (c, rest) -> do
-        let !gid = charToGlyphId font c
-        when (gid /= 1) $ do
-          let !penX = round ((logX + fromIntegral col * 6.0) * scale)
-              !penY = round ((logY + fromIntegral line * 13.0) * scale)
-          renderGlyphScaledToBuffer dstPtr stride clipX0 clipY0 clipX1 clipY1 scale penX penY color font gid
-        go (col + 1) line rest
+renderTextScaledToBuffer !dst !stride !clipX0 !clipY0 !clipX1 !clipY1 !scale !logX !logY !color !font =
+  foldPenPositions font scale logX logY () $ \() penX penY gid ->
+    renderGlyphScaledToBuffer dst stride clipX0 clipY0 clipX1 clipY1 scale penX penY color font gid
 
 cozetteMetrics :: FontMetrics
 cozetteMetrics =

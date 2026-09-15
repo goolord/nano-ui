@@ -1,5 +1,3 @@
-{-# LANGUAGE DataKinds #-}
-
 -- | SDL3 backend: event loop, rendering, and application runners.
 module NanoUI.Backend.Sdl
   ( RgbaImage (..)
@@ -51,17 +49,17 @@ import Data.IORef (newIORef)
 import Data.Primitive.SmallArray (SmallArray)
 import Data.Text (Text)
 import Data.Typeable (Typeable)
-import Effectful (Eff, IOE, type (:>))
 import Foreign.C.String (withCString)
+import Foreign.C.Types (CUInt)
+import Foreign.Ptr (Ptr)
 import NanoUI
-  ( FontStyle (..)
-  , FontVariant (..)
-  , FontWeight (..)
-  , Input (..)
+  ( FontStyle
+  , FontVariant
+  , FontWeight
   , NanoUI
-  , Ui
   )
-import NanoUI.Sdl.Runner (askSdlDebug, drawEff, drawReduceEff, newSdlContext, runSdlSession, sdlDrawFrame, setSdlUiFont)
+import NanoUI.Sdl.Runner (askSdlDebug, drawReduceEff, newSdlContext, sdlDrawFrame, setSdlUiFont)
+import NanoUI.Sdl.Session (runSdlSession)
 import NanoUI.Sdl.Debug
   ( SdlDebugSnapshot (..)
   , isDebugActive
@@ -104,7 +102,8 @@ import NanoUI.Testing (Context, registerImage, runEff, withTheme)
 runSdlApp :: SdlOptions -> NanoUI () -> IO ()
 runSdlApp options ui = do
   ctx <- sdlContext options
-  runSdlAppWithQuit options ctx (sdlAppShouldQuit options) ui
+  runSdlSession options ctx (const (pure ())) (sdlAppShouldQuit options) $ \c ->
+    sdlDrawFrame c ui
 
 runSdlAppReduce ::
   (Typeable msg, Eq model) =>
@@ -115,7 +114,9 @@ runSdlAppReduce ::
   IO ()
 runSdlAppReduce options update model view = do
   ctx <- sdlContext options
-  runSdlAppWithQuitReduce options update ctx model (sdlAppShouldQuit options) view
+  modelRef <- newIORef model
+  runSdlSession options ctx (const (pure ())) (sdlAppShouldQuit options) $
+    drawReduceEff runEff update modelRef view
 
 sdlContext :: SdlOptions -> IO Context
 sdlContext options = do
@@ -138,74 +139,30 @@ registerRgbaImage ctx img =
     (rgbaImageHeight img)
     (rgbaImagePixels img)
 
-runSdlAppWithQuit :: SdlOptions -> Context -> (Input -> Bool) -> NanoUI () -> IO ()
-runSdlAppWithQuit options = runSdlAppWithQuitEff options runEff
-
-runSdlAppWithQuitEff ::
-  IOE :> es =>
-  SdlOptions ->
-  (forall x. Eff es x -> IO x) ->
-  Context ->
-  (Input -> Bool) ->
-  Eff (Ui : es) () ->
-  IO ()
-runSdlAppWithQuitEff options unlift ctx shouldQuit ui =
-  runSdlSession options ctx (const (pure ())) shouldQuit $ \c env i force ->
-    drawEff unlift c ui env i force
-
-runSdlAppWithQuitReduce ::
-  (Typeable msg, Eq model) =>
-  SdlOptions ->
-  (msg -> model -> model) ->
-  Context ->
-  model ->
-  (Input -> Bool) ->
-  (model -> NanoUI ()) ->
-  IO ()
-runSdlAppWithQuitReduce options = runSdlAppWithQuitReduceEff options runEff
-
-runSdlAppWithQuitReduceEff ::
-  (IOE :> es, Typeable msg, Eq model) =>
-  SdlOptions ->
-  (forall x. Eff es x -> IO x) ->
-  (msg -> model -> model) ->
-  Context ->
-  model ->
-  (Input -> Bool) ->
-  (model -> Eff (Ui : es) ()) ->
-  IO ()
-runSdlAppWithQuitReduceEff options unlift update ctx model0 shouldQuit view = do
-  modelRef <- newIORef model0
-  runSdlSession options ctx (const (pure ())) shouldQuit $ \c env i force ->
-    drawReduceEff unlift update modelRef view c env i force
+-- | Run a native query on a codepoint pair of the cached font for a size and
+-- style.
+fontPairQuery ::
+  (Ptr () -> CUInt -> CUInt -> IO a) ->
+  SdlEnv -> Float -> FontWeight -> FontStyle -> FontVariant -> Char -> Char -> IO a
+fontPairQuery query env sz weight style var c1 c2 = do
+  entry <- getOrLoadCachedFont (sdlFontCache env) sz weight style var
+  query (sfFont (cfeFont entry)) (fromIntegral (ord c1)) (fromIntegral (ord c2))
 
 saveFontRenderText :: SdlEnv -> Float -> FontWeight -> FontStyle -> FontVariant -> Text -> FilePath -> IO Bool
 saveFontRenderText env sz weight style var txt path = do
   entry <- getOrLoadCachedFont (sdlFontCache env) sz weight style var
-  withUtf8 txt $ \ctext _ ->
-    withCString path $ \cpath ->
-      ttfSaveRenderText (sfFont (cfeFont entry)) ctext cpath
+  withUtf8 txt $ \ctext _ -> withCString path (ttfSaveRenderText (sfFont (cfeFont entry)) ctext)
 
 queryFontKerning :: SdlEnv -> Float -> FontWeight -> FontStyle -> FontVariant -> Char -> Char -> IO Int
-queryFontKerning env sz weight style var c1 c2 = do
-  entry <- getOrLoadCachedFont (sdlFontCache env) sz weight style var
-  let cp1 = fromIntegral (ord c1)
-      cp2 = fromIntegral (ord c2)
-  fromIntegral <$> ttfGetKerning (sfFont (cfeFont entry)) cp1 cp2
+queryFontKerning env sz weight style var c1 c2 =
+  fromIntegral <$> fontPairQuery ttfGetKerning env sz weight style var c1 c2
 
 queryFontPairKerning :: SdlEnv -> Float -> FontWeight -> FontStyle -> FontVariant -> Char -> Char -> IO Int
-queryFontPairKerning env sz weight style var c1 c2 = do
-  entry <- getOrLoadCachedFont (sdlFontCache env) sz weight style var
-  let cp1 = fromIntegral (ord c1)
-      cp2 = fromIntegral (ord c2)
-  fromIntegral <$> ttfGetPairKerning (sfFont (cfeFont entry)) cp1 cp2
+queryFontPairKerning env sz weight style var c1 c2 =
+  fromIntegral <$> fontPairQuery ttfGetPairKerning env sz weight style var c1 c2
 
 debugFontPair :: SdlEnv -> Float -> FontWeight -> FontStyle -> FontVariant -> Char -> Char -> IO ()
-debugFontPair env sz weight style var c1 c2 = do
-  entry <- getOrLoadCachedFont (sdlFontCache env) sz weight style var
-  let cp1 = fromIntegral (ord c1)
-      cp2 = fromIntegral (ord c2)
-  ttfDebugPair (sfFont (cfeFont entry)) cp1 cp2
+debugFontPair = fontPairQuery ttfDebugPair
 
 dumpFontLayout :: SdlEnv -> Float -> FontWeight -> FontStyle -> FontVariant -> Text -> IO ()
 dumpFontLayout env sz weight style var txt = do

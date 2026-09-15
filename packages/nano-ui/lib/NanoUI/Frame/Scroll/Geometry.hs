@@ -10,7 +10,6 @@ module NanoUI.Frame.Scroll.Geometry
   , scrollViewportClip2D
   , scrollChromeLane
   , scrollBarLayout
-  , scrollBarLayoutIn
   , scrollBarLayouts2D
   , scrollAxisRange
   , scrollOffsetFromThumb
@@ -20,13 +19,10 @@ module NanoUI.Frame.Scroll.Geometry
   , scrollConfigNative2D
   , scrollDefault1D
   , scrollVerticalAuto
-  , scrollHorizontalAuto
-  , scrollHorizontalAlways
   , scrollVerticalHidden
   , scrollHorizontalHidden
   , scrollAxisGutter
   , scrollGutters2D
-  , scrollShowsChrome
   , scrollChromeSuppressed
   , scrollWheelSuppressed
   , scrollLineFor
@@ -131,12 +127,6 @@ scrollVerticalAuto = ScrollConfig ScrollNone ScrollAuto True False
 scrollHorizontalAuto :: ScrollConfig
 scrollHorizontalAuto = ScrollConfig ScrollAuto ScrollNone True False
 
--- | Horizontal bar always shown and reserved (1D, no vertical bar). Used
--- when the caller reserves the lane itself and needs the scroller's clip to
--- agree with that reservation on every frame.
-scrollHorizontalAlways :: ScrollConfig
-scrollHorizontalAlways = ScrollConfig ScrollAlways ScrollNone True False
-
 scrollVerticalHidden :: ScrollConfig
 scrollVerticalHidden = ScrollConfig ScrollNone ScrollHidden True False
 
@@ -184,8 +174,8 @@ scrollGutters2D fm slot cfg contentW contentH innerW innerH =
 isScrollStyle2D :: Int -> Bool
 isScrollStyle2D si = si /= 0 && scrollConfigNative2D (decodeScrollConfig si)
 
-scrollShowsChrome :: ScrollConfig -> Bool -> DirTag -> Bool
-scrollShowsChrome cfg _native2D dir =
+scrollShowsChrome :: ScrollConfig -> DirTag -> Bool
+scrollShowsChrome cfg dir =
   case dir of
     DirColumn -> axisShows (scrollPolicyY cfg)
     DirRow -> axisShows (scrollPolicyX cfg)
@@ -195,17 +185,14 @@ scrollShowsChrome cfg _native2D dir =
       ScrollAlways -> True
       _ -> False
 
-scrollChromeSuppressed :: ScrollConfig -> Bool -> DirTag -> Bool
-scrollChromeSuppressed cfg native2D dir = not (scrollShowsChrome cfg native2D dir)
+scrollChromeSuppressed :: ScrollConfig -> DirTag -> Bool
+scrollChromeSuppressed cfg dir = not (scrollShowsChrome cfg dir)
 
 -- | Distance one wheel notch scrolls along a live axis. Window hosts step a
 -- text line. Widgets that map wheel notches onto a scroller's offset share
 -- this so the step cannot drift per caller.
 scrollLineFor :: Float
-scrollLineFor = scrollLine
-
-scrollLine :: Float
-scrollLine = 20
+scrollLineFor = 20
 
 -- | Wheel eligibility is wider than chrome eligibility: a hidden bar never
 -- paints or drags, but it still scrolls. Only a dead axis ('ScrollNone')
@@ -238,15 +225,9 @@ scrollAxisRange contentSize innerMain trailingPad
   | contentSize > innerMain + 0.5 = max 0 (contentSize + trailingPad - innerMain)
   | otherwise = 0
 
-scrollChromeActive ::
-  ScrollConfig ->
-  Bool ->
-  DirTag ->
-  Float ->
-  Float ->
-  Bool
-scrollChromeActive cfg native2D dir contentSize innerMain =
-  scrollShowsChrome cfg native2D dir
+scrollChromeActive :: ScrollConfig -> DirTag -> Float -> Float -> Bool
+scrollChromeActive cfg dir contentSize innerMain =
+  scrollShowsChrome cfg dir
     && scrollAxisOverflows
       (case dir of
          DirColumn -> scrollPolicyY cfg
@@ -317,9 +298,9 @@ scrollViewportClip2D fm slot cfg x y w h pad contentW contentH =
    in Rect (rectX base) (rectY base) (max 0 (innerW - gutterW)) (max 0 (innerH - gutterH))
 
 scrollChromeLane ::
-  FontMetrics -> ScrollBarSlot -> DirTag -> Float -> Float -> Float -> Float -> Padding -> Rect
-scrollChromeLane fm slot dir x y w h pad =
-  let (barW, _) = scrollBarGeomFor fm slot
+  ScrollBarSlot -> DirTag -> Float -> Float -> Float -> Float -> Padding -> Rect
+scrollChromeLane slot dir x y w h pad =
+  let (barW, _) = scrollBarGeomFor slot
       outer = scrollBarOuterGap slot
       hang = slot == ScrollBarWindow
    in case dir of
@@ -348,13 +329,13 @@ scrollBarLayout ::
   Float ->
   Float ->
   Maybe ScrollBarLayout
-scrollBarLayout fm slot dir x y w h pad contentSize off =
+scrollBarLayout _fm slot dir x y w h pad contentSize off =
   let innerW = w - padL pad - padR pad
       innerH = h - padT pad - padB pad
       viewMain = case dir of
         DirColumn -> innerH
         DirRow -> innerW
-   in scrollBarLayoutIn fm slot dir x y w h pad viewMain contentSize off
+   in scrollBarLayoutIn slot dir x y w h pad viewMain contentSize off
 
 -- | 'scrollBarLayout' with an explicit visible main extent. A native 2D
 -- scroller passes the padding box minus the cross-axis lane (see
@@ -362,7 +343,6 @@ scrollBarLayout fm slot dir x y w h pad contentSize off =
 -- that is actually visible rather than the lane-underlapped padding box. On a
 -- one-dimensional scroller @viewMain@ is just the padding box on that axis.
 scrollBarLayoutIn ::
-  FontMetrics ->
   ScrollBarSlot ->
   DirTag ->
   Float ->
@@ -374,8 +354,8 @@ scrollBarLayoutIn ::
   Float ->
   Float ->
   Maybe ScrollBarLayout
-scrollBarLayoutIn fm slot dir x y w h pad viewMain contentSize off =
-  let (barW, barMargin) = scrollBarGeomFor fm slot
+scrollBarLayoutIn slot dir x y w h pad viewMain contentSize off =
+  let (barW, barMargin) = scrollBarGeomFor slot
       minThumb = 16
    in case dir of
         DirColumn ->
@@ -385,7 +365,7 @@ scrollBarLayoutIn fm slot dir x y w h pad viewMain contentSize off =
            in if maxOff <= 0
                 then Nothing
                 else
-                  let lane = scrollChromeLane fm slot DirColumn x y w h pad
+                  let lane = scrollChromeLane slot DirColumn x y w h pad
                       trackX = rectX lane
                       trackY = y + padT pad + barMargin
                       trackH = max 0 (viewMain - 2 * barMargin)
@@ -406,7 +386,7 @@ scrollBarLayoutIn fm slot dir x y w h pad viewMain contentSize off =
            in if maxOff <= 0
                 then Nothing
                 else
-                  let lane = scrollChromeLane fm slot DirRow x y w h pad
+                  let lane = scrollChromeLane slot DirRow x y w h pad
                       trackY = rectY lane
                       trackX = x + padL pad + barMargin
                       trackW = max 0 (viewMain - 2 * barMargin)
@@ -445,8 +425,8 @@ scrollBarLayouts2D fm slot cfg x y w h pad contentW contentH offX offY =
       (gutterW, gutterH) = scrollGutters2D fm slot cfg contentW contentH innerW innerH
       viewW = max 0 (innerW - gutterW)
       viewH = max 0 (innerH - gutterH)
-      v = scrollBarLayoutIn fm slot DirColumn x y w h pad viewH contentH offY
-      hr = scrollBarLayoutIn fm slot DirRow x y w h pad viewW contentW offX
+      v = scrollBarLayoutIn slot DirColumn x y w h pad viewH contentH offY
+      hr = scrollBarLayoutIn slot DirRow x y w h pad viewW contentW offX
    in (v, hr)
 
 scrollOffsetFromThumb :: DirTag -> ScrollBarLayout -> Float -> V2 -> Float

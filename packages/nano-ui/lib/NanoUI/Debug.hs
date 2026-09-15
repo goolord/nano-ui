@@ -1,12 +1,8 @@
 module NanoUI.Debug
   ( debugRefreshSec
   , blend
-  , bytesMb
-  , nsMs
-  , rtsFields
   , RtsStatsSnapshot (..)
   , readRtsSnapshot
-  , formatRtsRows
   , CoreDebugSnapshot (..)
   , emptyCoreDebugSnapshot
   , DebugSampler (..)
@@ -41,30 +37,6 @@ blend prev sample
   | prev <= 0 = sample
   | otherwise = prev * 0.85 + sample * 0.15
 
-bytesMb :: Word64 -> Double
-bytesMb n = fromIntegral n / (1024 * 1024)
-
-nsMs :: Integral a => a -> Double
-nsMs n = fromIntegral n / 1.0e6
-
-rtsFields :: RTSStats -> (Word32, Word32, Double, Double, Double, Double, Double, Word32, Double)
-rtsFields st =
-  let tot = elapsed_ns st
-      gcNs = gc_elapsed_ns st
-      pct = if tot > 0 then 100 * fromIntegral gcNs / fromIntegral tot else 0
-      lastGc = gc st
-   in
-    ( gcs st
-    , major_gcs st
-    , bytesMb (allocated_bytes st)
-    , bytesMb (gcdetails_live_bytes lastGc)
-    , bytesMb (max_mem_in_use_bytes st)
-    , bytesMb (copied_bytes st)
-    , pct
-    , gcdetails_gen lastGc
-    , nsMs (gcdetails_elapsed_ns lastGc)
-    )
-
 data RtsStatsSnapshot = RtsStatsSnapshot
   { rtsEnabled :: !Bool
   , rtsGcs :: !Word32
@@ -81,65 +53,51 @@ data RtsStatsSnapshot = RtsStatsSnapshot
   }
   deriving (Eq, Show)
 
+emptyRtsSnapshot :: RtsStatsSnapshot
+emptyRtsSnapshot =
+  RtsStatsSnapshot
+    { rtsEnabled = False
+    , rtsGcs = 0
+    , rtsMajorGcs = 0
+    , rtsAllocMb = 0
+    , rtsLiveMb = 0
+    , rtsMaxMemMb = 0
+    , rtsCopiedMb = 0
+    , rtsGcPct = 0
+    , rtsLastGcGen = 0
+    , rtsLastGcMs = 0
+    , rtsCaps = 0
+    , rtsCpus = 0
+    }
+
 readRtsSnapshot :: IO RtsStatsSnapshot
 readRtsSnapshot = do
   caps <- getNumCapabilities
   cpus <- getNumProcessors
   rtsOn <- getRTSStatsEnabled
   if not rtsOn
-    then
-      pure
-        RtsStatsSnapshot
-          { rtsEnabled = False
-          , rtsGcs = 0
-          , rtsMajorGcs = 0
-          , rtsAllocMb = 0
-          , rtsLiveMb = 0
-          , rtsMaxMemMb = 0
-          , rtsCopiedMb = 0
-          , rtsGcPct = 0
-          , rtsLastGcGen = 0
-          , rtsLastGcMs = 0
-          , rtsCaps = caps
-          , rtsCpus = cpus
-          }
+    then pure emptyRtsSnapshot {rtsCaps = caps, rtsCpus = cpus}
     else do
       st <- getRTSStats
-      let (gcsVal, major, alloc, live, maxMem, copied, gcPct, lastGen, lastMs) = rtsFields st
+      let tot = elapsed_ns st
+          lastGc = gc st
+          bytesMb n = fromIntegral n / (1024 * 1024)
       pure
         RtsStatsSnapshot
           { rtsEnabled = True
-          , rtsGcs = gcsVal
-          , rtsMajorGcs = major
-          , rtsAllocMb = alloc
-          , rtsLiveMb = live
-          , rtsMaxMemMb = maxMem
-          , rtsCopiedMb = copied
-          , rtsGcPct = gcPct
-          , rtsLastGcGen = lastGen
-          , rtsLastGcMs = lastMs
+          , rtsGcs = gcs st
+          , rtsMajorGcs = major_gcs st
+          , rtsAllocMb = bytesMb (allocated_bytes st)
+          , rtsLiveMb = bytesMb (gcdetails_live_bytes lastGc)
+          , rtsMaxMemMb = bytesMb (max_mem_in_use_bytes st)
+          , rtsCopiedMb = bytesMb (copied_bytes st)
+          , rtsGcPct =
+              if tot > 0 then 100 * fromIntegral (gc_elapsed_ns st) / fromIntegral tot else 0
+          , rtsLastGcGen = gcdetails_gen lastGc
+          , rtsLastGcMs = fromIntegral (gcdetails_elapsed_ns lastGc) / 1.0e6
           , rtsCaps = caps
           , rtsCpus = cpus
           }
-
-formatRtsRows :: RtsStatsSnapshot -> [(Text, Text)]
-formatRtsRows s
-  | not (rtsEnabled s) =
-      [ ("rts", "stats off (need +RTS -T)")
-      , ("haskell", T.pack (printf "%2d cap / %2d cpu" (rtsCaps s) (rtsCpus s)))
-      ]
-  | otherwise =
-      [ ("haskell", T.pack (printf "%2d cap / %2d cpu" (rtsCaps s) (rtsCpus s)))
-      , ("gc total", T.pack (printf "%10d" (rtsGcs s)))
-      , ("gc major", T.pack (printf "%10d" (rtsMajorGcs s)))
-      , ("last gen", T.pack (printf "%10d" (rtsLastGcGen s)))
-      , ("last gc", T.pack (printf "%7.2f ms" (rtsLastGcMs s)))
-      , ("heap live", T.pack (printf "%6.1f MiB" (rtsLiveMb s)))
-      , ("heap alloc", T.pack (printf "%6.1f MiB" (rtsAllocMb s)))
-      , ("copied", T.pack (printf "%6.1f MiB" (rtsCopiedMb s)))
-      , ("rss max", T.pack (printf "%6.1f MiB" (rtsMaxMemMb s)))
-      , ("gc time", T.pack (printf "%9.1f%%" (rtsGcPct s)))
-      ]
 
 data CoreDebugSnapshot = CoreDebugSnapshot
   { dbgPresentFps :: !Double
@@ -157,18 +115,7 @@ data CoreDebugSnapshot = CoreDebugSnapshot
   , dbgWinH       :: !Float
   , dbgMouseX     :: !Float
   , dbgMouseY     :: !Float
-  , dbgRtsOn      :: !Bool
-  , dbgGcs        :: !Word32
-  , dbgMajorGcs   :: !Word32
-  , dbgAllocMb    :: !Double
-  , dbgLiveMb     :: !Double
-  , dbgMaxMemMb   :: !Double
-  , dbgCopiedMb   :: !Double
-  , dbgGcPct      :: !Double
-  , dbgLastGcGen  :: !Word32
-  , dbgLastGcMs   :: !Double
-  , dbgCaps       :: !Int
-  , dbgCpus       :: !Int
+  , dbgRts        :: !RtsStatsSnapshot
   }
   deriving (Eq, Show)
 
@@ -190,18 +137,7 @@ emptyCoreDebugSnapshot =
     , dbgWinH = 0
     , dbgMouseX = 0
     , dbgMouseY = 0
-    , dbgRtsOn = False
-    , dbgGcs = 0
-    , dbgMajorGcs = 0
-    , dbgAllocMb = 0
-    , dbgLiveMb = 0
-    , dbgMaxMemMb = 0
-    , dbgCopiedMb = 0
-    , dbgGcPct = 0
-    , dbgLastGcGen = 0
-    , dbgLastGcMs = 0
-    , dbgCaps = 0
-    , dbgCpus = 0
+    , dbgRts = emptyRtsSnapshot
     }
 
 data DebugSampler = DebugSampler
@@ -344,18 +280,7 @@ makeCoreDebugSnapshot s winW winH mouseX mouseY rts =
     , dbgWinH = winH
     , dbgMouseX = mouseX
     , dbgMouseY = mouseY
-    , dbgRtsOn = rtsEnabled rts
-    , dbgGcs = rtsGcs rts
-    , dbgMajorGcs = rtsMajorGcs rts
-    , dbgAllocMb = rtsAllocMb rts
-    , dbgLiveMb = rtsLiveMb rts
-    , dbgMaxMemMb = rtsMaxMemMb rts
-    , dbgCopiedMb = rtsCopiedMb rts
-    , dbgGcPct = rtsGcPct rts
-    , dbgLastGcGen = rtsLastGcGen rts
-    , dbgLastGcMs = rtsLastGcMs rts
-    , dbgCaps = rtsCaps rts
-    , dbgCpus = rtsCpus rts
+    , dbgRts = rts
     }
 
 formatFpsRows :: CoreDebugSnapshot -> [(Text, Text)]
@@ -378,18 +303,22 @@ formatDrawRows s =
   ]
 
 formatCoreRtsRows :: CoreDebugSnapshot -> [(Text, Text)]
-formatCoreRtsRows s =
-  formatRtsRows RtsStatsSnapshot
-    { rtsEnabled = dbgRtsOn s
-    , rtsGcs = dbgGcs s
-    , rtsMajorGcs = dbgMajorGcs s
-    , rtsAllocMb = dbgAllocMb s
-    , rtsLiveMb = dbgLiveMb s
-    , rtsMaxMemMb = dbgMaxMemMb s
-    , rtsCopiedMb = dbgCopiedMb s
-    , rtsGcPct = dbgGcPct s
-    , rtsLastGcGen = dbgLastGcGen s
-    , rtsLastGcMs = dbgLastGcMs s
-    , rtsCaps = dbgCaps s
-    , rtsCpus = dbgCpus s
-    }
+formatCoreRtsRows core
+  | not (rtsEnabled s) =
+      [ ("rts", "stats off (need +RTS -T)")
+      , ("haskell", T.pack (printf "%2d cap / %2d cpu" (rtsCaps s) (rtsCpus s)))
+      ]
+  | otherwise =
+      [ ("haskell", T.pack (printf "%2d cap / %2d cpu" (rtsCaps s) (rtsCpus s)))
+      , ("gc total", T.pack (printf "%10d" (rtsGcs s)))
+      , ("gc major", T.pack (printf "%10d" (rtsMajorGcs s)))
+      , ("last gen", T.pack (printf "%10d" (rtsLastGcGen s)))
+      , ("last gc", T.pack (printf "%7.2f ms" (rtsLastGcMs s)))
+      , ("heap live", T.pack (printf "%6.1f MiB" (rtsLiveMb s)))
+      , ("heap alloc", T.pack (printf "%6.1f MiB" (rtsAllocMb s)))
+      , ("copied", T.pack (printf "%6.1f MiB" (rtsCopiedMb s)))
+      , ("rss max", T.pack (printf "%6.1f MiB" (rtsMaxMemMb s)))
+      , ("gc time", T.pack (printf "%9.1f%%" (rtsGcPct s)))
+      ]
+  where
+    s = dbgRts core

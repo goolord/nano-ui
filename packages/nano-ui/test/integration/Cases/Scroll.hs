@@ -72,11 +72,11 @@ import NanoUI.Testing.Assert (assert, assertEq, assertGt, bump, withInput)
 import NanoUI.Testing.Harness
   ( assertScrollGutter
   , assertScrollGutterPad
+  , drawQuads
   , findGrabHover
   , runClickPair
   , spanXOf
   , spanYOf
-  , spanLabelYs
   , warmup2
   , withInputOff
   )
@@ -177,14 +177,14 @@ runPageScrollBackdropCoverageTest _ failed = do
   case mRect of
     Nothing -> pure ()
     Just (Rect rx ry rw rh) -> do
-      quads <- decodeQuads draw
+      quads <- drawQuads draw
       let covered =
             any
-              (\(qx1, qy1, qx2, qy2, _, _) ->
-                abs (qx1 - rx) <= 0.6
-                  && abs (qy1 - ry) <= 0.6
-                  && abs (qx2 - (rx + rw)) <= 0.6
-                  && abs (qy2 - (ry + rh)) <= 0.6)
+              (\(Rect qx qy qw qh, _) ->
+                abs (qx - rx) <= 0.6
+                  && abs (qy - ry) <= 0.6
+                  && abs (qx + qw - (rx + rw)) <= 0.6
+                  && abs (qy + qh - (ry + rh)) <= 0.6)
               quads
       assert failed covered
 
@@ -1085,7 +1085,7 @@ runScrollLockstepProbeTest ctx failed = do
     (_, _, draw, _) <- runFrame ctx inp0 ui
     snapped <- getScrollOffset ctx sid
     spans <- collectTextSpans ctx
-    let keyYs = [listToMaybe (spanLabelYs k spans) | k <- keys]
+    let keyYs = [listToMaybe (spanYOf k spans) | k <- keys]
     quads <- decodeQuads draw
     let fillTops =
           [ qy1

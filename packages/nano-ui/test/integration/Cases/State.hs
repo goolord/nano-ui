@@ -98,7 +98,7 @@ runHookStateTest :: Context -> IORef Int -> IO ()
 runHookStateTest ctx failed = do
   let
     inp = withInputOff 300 100
-    check :: Eq a => Text -> NanoUI (a, a -> NanoUI ()) -> a -> a -> IO ()
+    check :: (Eq a, Show a) => Text -> NanoUI (a, a -> NanoUI ()) -> a -> a -> IO ()
     check key hook initial changed = do
       let
         evaluate = runNanoUI ctx inp (withKey key hook)
@@ -127,7 +127,4 @@ runHookStateTest ctx failed = do
   check "flag" (useFlag False) False True
   check "enum" (useEnum LT) LT GT
   check "dynamic" (useState (0 :: Int, False)) (0, False) (12, True)
-  check "tab-index" (useTabIdx 0) 0 2
-  check "tab-enum" (useTab LT) LT GT
-  check "radio" (useRadio LT) LT GT
   check "table-sort" (useTableSort (SortCol 0 SortAsc)) (SortCol 0 SortAsc) (SortCol 2 SortDesc)

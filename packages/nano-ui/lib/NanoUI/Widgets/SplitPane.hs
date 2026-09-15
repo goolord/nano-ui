@@ -14,7 +14,7 @@
 module NanoUI.Widgets.SplitPane
   ( GridAxis (..)
   , GridNode (..)
-  , DropTarget (..)
+  , PaneDrop (..)
   , treePanes
   , treeSize
   , paneExist
@@ -38,7 +38,7 @@ import Control.Applicative ((<|>))
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
 import Data.Word (Word64)
-import NanoUI.Types (Rect (..), V2 (..), clamp, clamp01, rectH, rectW, rectX, rectY, v2X, v2Y)
+import NanoUI.Types (Rect (..), V2 (..), clamp, clamp01, rectH, rectNonEmpty, rectW, rectX, rectY)
 
 -- | Divider orientation. 'AxisV' draws a vertical divider (panes left/right),
 -- 'AxisH' draws a horizontal divider (panes stacked top/bottom).
@@ -65,7 +65,7 @@ data GridNode
   deriving (Eq, Show)
 
 -- | Result of dropping a dragged pane on a target pane.
-data DropTarget
+data PaneDrop
   = DropSwap Word64
       -- ^ Drop on the center of the pane: the two panes swap places.
   | DropSplit Word64 GridAxis Bool
@@ -79,24 +79,26 @@ data DropTarget
       -- pane on the A (left/top) side, 'False' on the B (right/bottom) side.
   deriving (Eq, Show)
 
+-- | Fold a tree bottom-up: @onPane@ for each pane id, @onSplit@ for each
+-- split (id, axis, ratio) with its already-folded A and B sides. The sides
+-- are passed lazily, so a short-circuiting @onSplit@ stops early.
+foldGrid :: (Word64 -> r) -> (Word64 -> GridAxis -> Float -> r -> r -> r) -> GridNode -> r
+foldGrid onPane onSplit = go
+  where
+    go (Pane pid) = onPane pid
+    go (Split sid axis ratio a b) = onSplit sid axis ratio (go a) (go b)
+
 -- | Pane ids in the tree (depth-first, A then B).
 treePanes :: GridNode -> [Word64]
-treePanes = \case
-  Pane pid -> [pid]
-  Split _ _ _ a b -> treePanes a <> treePanes b
+treePanes = foldGrid pure (\_ _ _ a b -> a <> b)
 
 -- | Number of panes.
 treeSize :: GridNode -> Int
-treeSize = \case
-  Pane _ -> 1
-  Split _ _ _ a b -> treeSize a + treeSize b
+treeSize = foldGrid (const 1) (\_ _ _ a b -> a + b)
 
 -- | Does a pane with the given id exist?
 paneExist :: GridNode -> Word64 -> Bool
-paneExist t p = go t
-  where
-    go (Pane pid) = pid == p
-    go (Split _ _ _ a b) = go a || go b
+paneExist t p = foldGrid (== p) (\_ _ _ a b -> a || b) t
 
 -- | Minimum (width, height) that must be reserved for a subtree under a
 -- 'minSize' per-pane floor and 'spacing' between every split level.
@@ -181,55 +183,38 @@ layoutNode minSize spacing sp r =
 -- split; 'False' puts it on the B (right/bottom) side. Returns the updated
 -- tree (unchanged if the pane does not exist).
 treeSplit :: Word64 -> Word64 -> GridAxis -> Bool -> Word64 -> GridNode -> GridNode
-treeSplit targetPaneId splitId axis newOnA newPaneId = go
+treeSplit targetPaneId splitId axis newOnA newPaneId = foldGrid onPane Split
   where
-    go (Pane p)
-      | p == targetPaneId =
-          if newOnA
-            then Split splitId axis 0.5 (Pane newPaneId) (Pane p)
-            else Split splitId axis 0.5 (Pane p) (Pane newPaneId)
-      | otherwise = Pane p
-    go (Split sid0 ax r a b) = Split sid0 ax r (go a) (go b)
+    onPane p
+      | p /= targetPaneId = Pane p
+      | newOnA = Split splitId axis 0.5 (Pane newPaneId) (Pane p)
+      | otherwise = Split splitId axis 0.5 (Pane p) (Pane newPaneId)
 
 -- | Set the raw ratio of a split (clamped to @[0,1]@).
 treeSetRatio :: Word64 -> Float -> GridNode -> GridNode
-treeSetRatio splitId r = go
-  where
-    go (Pane p) = Pane p
-    go (Split sid0 ax r0 a b)
-      | sid0 == splitId = Split sid0 ax (clamp01 r) a b
-      | otherwise = Split sid0 ax r0 (go a) (go b)
+treeSetRatio splitId r =
+  foldGrid Pane (\sid ax r0 -> Split sid ax (if sid == splitId then clamp01 r else r0))
 
 -- | Remove a pane. The sibling subtree absorbs its space. @Nothing@ if the
 -- pane does not exist or removing it would empty the tree.
 treeRemovePane :: Word64 -> GridNode -> Maybe GridNode
-treeRemovePane pid = go
+treeRemovePane pid = foldGrid onPane onSplit
   where
-    go (Pane p)
-      | p == pid = Nothing
-      | otherwise = Just (Pane p)
-    go (Split sid0 ax r0 a b) =
-      case (go a, go b) of
-        (Nothing, Just b') -> Just b'
-        (Just a', Nothing) -> Just a'
-        (Just a', Just b') -> Just (Split sid0 ax r0 a' b')
-        (Nothing, Nothing) -> Nothing
+    onPane p = if p == pid then Nothing else Just (Pane p)
+    onSplit sid ax r0 ma mb = case (ma, mb) of
+      (Just a, Just b) -> Just (Split sid ax r0 a b)
+      (Nothing, b) -> b
+      (a, Nothing) -> a
 
 -- | Swap two panes by id (content follows the pane id).
 treeSwapPanes :: Word64 -> Word64 -> GridNode -> GridNode
-treeSwapPanes a b = go
-  where
-    go (Pane p)
-      | p == a = Pane b
-      | p == b = Pane a
-      | otherwise = Pane p
-    go (Split sid0 ax r0 x y) = Split sid0 ax r0 (go x) (go y)
+treeSwapPanes a b = foldGrid (\p -> Pane (if p == a then b else if p == b then a else p)) Split
 
 -- | Move a pane onto a drop target. Center drops swap the two panes; edge
 -- drops split the target pane with the given fresh split id and move the
 -- dragged pane into the new child; top-level drops wrap the whole tree in a
 -- new root split with the dragged pane on one side.
-treeMovePane :: Word64 -> Word64 -> DropTarget -> GridNode -> Maybe GridNode
+treeMovePane :: Word64 -> Word64 -> PaneDrop -> GridNode -> Maybe GridNode
 treeMovePane moved splitId dt tree
   | not (paneExist tree moved) = Nothing
   | otherwise =
@@ -283,28 +268,21 @@ data EdgeZone = ZoneCenter | ZoneLeft | ZoneRight | ZoneTop | ZoneBottom
 
 -- | Classify a drop point into a zone of the target pane.
 edgeZone :: Rect -> V2 -> EdgeZone
-edgeZone r mouse =
-  let w = rectW r
-      h = rectH r
-   in if w <= 0 || h <= 0
-        then ZoneCenter
-        else
-          let tx = (v2X mouse - rectX r) / w
-              ty = (v2Y mouse - rectY r) / h
-           in if tx < 0.25
-                then ZoneLeft
-                else if tx > 0.75
-                  then ZoneRight
-                  else if ty < 0.25
-                    then ZoneTop
-                    else if ty > 0.75
-                      then ZoneBottom
-                      else ZoneCenter
+edgeZone r (V2 mx my)
+  | not (rectNonEmpty r) = ZoneCenter
+  | tx < 0.25 = ZoneLeft
+  | tx > 0.75 = ZoneRight
+  | ty < 0.25 = ZoneTop
+  | ty > 0.75 = ZoneBottom
+  | otherwise = ZoneCenter
+  where
+    tx = (mx - rectX r) / rectW r
+    ty = (my - rectY r) / rectH r
 
--- | Classify a drop point on a target pane into the 'DropTarget' the drop
+-- | Classify a drop point on a target pane into the 'PaneDrop' the drop
 -- performs: the pane's center swaps the two panes, an edge zone splits the
 -- target along that edge's axis with the dragged pane on the near side.
-dropTargetForPane :: Rect -> V2 -> Word64 -> DropTarget
+dropTargetForPane :: Rect -> V2 -> Word64 -> PaneDrop
 dropTargetForPane r mouse tgt =
   case edgeZone r mouse of
     ZoneCenter -> DropSwap tgt
@@ -317,28 +295,17 @@ dropTargetForPane r mouse tgt =
 -- sits within @band@ px of a grid edge, return the 'DropTop' target for that
 -- edge; otherwise 'Nothing'. Checked before pane-level drops so the outermost
 -- edge always restructures the whole grid.
-topLevelDropTarget :: Float -> Rect -> V2 -> Maybe DropTarget
-topLevelDropTarget band r mouse
-  | rectW r <= 0 || rectH r <= 0 = Nothing
-  | otherwise =
-      let x = v2X mouse
-          y = v2Y mouse
-          l = rectX r
-          t = rectY r
-          w = rectW r
-          h = rectH r
-       in if x <= l + band
-            then Just (DropTop AxisV True)
-            else if x >= l + w - band
-              then Just (DropTop AxisV False)
-              else if y <= t + band
-                then Just (DropTop AxisH True)
-                else if y >= t + h - band
-                  then Just (DropTop AxisH False)
-                  else Nothing
+topLevelDropTarget :: Float -> Rect -> V2 -> Maybe PaneDrop
+topLevelDropTarget band r@(Rect l t w h) (V2 x y)
+  | not (rectNonEmpty r) = Nothing
+  | x <= l + band = Just (DropTop AxisV True)
+  | x >= l + w - band = Just (DropTop AxisV False)
+  | y <= t + band = Just (DropTop AxisH True)
+  | y >= t + h - band = Just (DropTop AxisH False)
+  | otherwise = Nothing
 
 -- | Drop preview for a drop target: the rect to highlight and the
--- 'DropTarget' the drop performs. The highlight is found by simulating the
+-- 'PaneDrop' the drop performs. The highlight is found by simulating the
 -- drop ('treeMovePane' with a throwaway split id) and laying the resulting
 -- tree out ('layoutNode') into the grid rect, so it is exactly the region the
 -- dragged pane will occupy after the drop — accounting for the restructuring
@@ -350,7 +317,7 @@ topLevelDropTarget band r mouse
 -- @pgSpacing + 2 * pgLeeway@, not @pgSpacing@ — or the preview regions drift
 -- from the on-screen layout. 'Nothing' when the drop cannot be performed
 -- (unknown pane ids, 'DropTop' on a single-pane grid).
-dropPreview :: Float -> Float -> GridNode -> Word64 -> Rect -> DropTarget -> Maybe (Rect, DropTarget)
+dropPreview :: Float -> Float -> GridNode -> Word64 -> Rect -> PaneDrop -> Maybe (Rect, PaneDrop)
 dropPreview minSize spacing tree moved baseRect dt = do
   t' <- treeMovePane moved 0 dt tree
   let (regions, _) = layoutNode minSize spacing t' baseRect

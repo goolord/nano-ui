@@ -7,7 +7,6 @@ module NanoUI.WidgetText
   , textInputFieldText
   , textInputPlaceholder
   , textInputMinWidth
-  , textInputLabelGap
   , textInputFieldPadY
   , textInputFieldHeight
   , textInputFlagSearch
@@ -16,7 +15,8 @@ module NanoUI.WidgetText
   , textInputBareMode
   , textInputFlagSelectable
   , textInputSelectableMode
-  , textInputSearchBody
+  , textInputFlagPassword
+  , textInputPasswordMode
   , comboTextClip
   , searchFieldReserveW
   , searchFieldTextClip
@@ -24,6 +24,10 @@ module NanoUI.WidgetText
   , selectDisplayText
   , selectChevronReserve
   , selectChevronCenterX
+  , colorPickerMinWidth
+  , colorPickerGap
+  , colorPickerSvH
+  , colorPickerExtraH
   , colorPickerLabelText
   , colorPickerCurrentLabel
   , colorPickerNewLabel
@@ -40,12 +44,9 @@ module NanoUI.WidgetText
   , buttonFlagMask
   , tableStripeEven
   , tableStripeOdd
-  , tableScrollSlaveStyle
-  , scrollNative2DStyle
   , tableSortReserve
   , tableStripeColor
   , stripeColor
-  , packTextNodeStyle
   , packTextNodeStyleFull
   , textNodeFontVariant
   , textNodeFontWeight
@@ -66,7 +67,7 @@ module NanoUI.WidgetText
   ) where
 
 import Data.Bits ((.&.), (.|.), complement, shiftL, shiftR)
-import Data.Char (chr)
+import Data.Char (digitToInt, isHexDigit)
 import Data.Maybe (fromMaybe)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, smallArrayFromList)
 import Data.Text (Text)
@@ -74,6 +75,7 @@ import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Builder as TB
 import qualified Data.Text.Lazy.Builder.Int as TB
 import Data.Word (Word8)
+import Numeric (showHex)
 import NanoUI.Font (FontMetrics (..), fmLineHeight, widgetContentInset)
 import NanoUI.Style (FontStyle (..), FontVariant (..), FontWeight (..), TextDecoration (..), Theme (..), styleBg, themeButton, themePanel, themeWindow)
 import NanoUI.Types (Color (..), Rect (..), colorA, colorB, colorG, colorR, colorRGBA, lerpColor)
@@ -107,10 +109,6 @@ treeDecodeStripe s = if s .&. 0x400 /= 0 then tableStripeOdd else tableStripeEve
 
 textInputMinWidth :: Float
 textInputMinWidth = 160
-
-textInputLabelGap :: FontMetrics -> Float
-textInputLabelGap fm =
-  if fmLineHeight fm <= 14 then 3 else 4
 
 textInputFieldPadY :: FontMetrics -> Float
 textInputFieldPadY fm = max 3 (fmAdvance fm ' ' * 1.25)
@@ -189,14 +187,14 @@ textInputFlagSelectable = 0x10000000
 textInputSelectableMode :: Int -> Bool
 textInputSelectableMode si = si .&. textInputFlagSelectable /= 0
 
--- | Body of a search field: the live value, or the placeholder while empty and
--- unfocused. @ph@ is the caller-supplied placeholder, not the derived one used
--- by captioned 'textInputFieldText'.
-textInputSearchBody :: Text -> Text -> Bool -> Text
-textInputSearchBody ph value focused =
-  if T.null value && not focused
-    then ph
-    else value
+-- | Marks a @NodeTextInput@ as a password field: its value is displayed masked
+-- and is never copied or cut to the clipboard.
+textInputFlagPassword :: Int
+textInputFlagPassword = 0x20000000
+
+{-# INLINE textInputPasswordMode #-}
+textInputPasswordMode :: Int -> Bool
+textInputPasswordMode si = si .&. textInputFlagPassword /= 0
 
 -- | Region a combo box's editable text may occupy: from the left content inset
 -- to the select chevron reserve on the right.
@@ -216,6 +214,20 @@ selectChevronReserve = 16
 
 selectChevronCenterX :: Float -> Float -> Float
 selectChevronCenterX x w = x + w - selectChevronReserve / 2
+
+colorPickerMinWidth :: Float
+colorPickerMinWidth = 240
+
+colorPickerGap :: Float
+colorPickerGap = 4
+
+-- Side of the square SV field; the canvas reserves the label above it.
+colorPickerSvH :: Float
+colorPickerSvH = 250
+
+-- extraH below the title: SV field + gap. The solver adds the measured label.
+colorPickerExtraH :: Float
+colorPickerExtraH = colorPickerSvH + colorPickerGap
 
 colorPickerLabelText :: Text -> Text
 colorPickerLabelText = T.strip
@@ -240,14 +252,9 @@ hexByte n = indexSmallArray hexBytes (fromIntegral n)
 -- Each byte's two-character representation is allocated once, shared by
 -- color-picker labels instead of formatting fresh Strings every frame.
 hexBytes :: SmallArray Text
-hexBytes = smallArrayFromList [T.pack (showHexWord8 n) | n <- [0 .. 255]]
-
-showHexWord8 :: Word8 -> String
-showHexWord8 n =
-  let hi = n `div` 16
-      lo = n `mod` 16
-      ch i = if i < 10 then chr (48 + fromIntegral i) else chr (87 + fromIntegral i)
-   in [ch hi, ch lo]
+hexBytes =
+  smallArrayFromList
+    [T.justifyRight 2 '0' (T.pack (showHex n "")) | n <- [0 .. 255 :: Int]]
 
 -- | Parse a hex colour, accepting an optional leading @#@ and either 6 or 8
 -- digits. The fourth component is 'Nothing' for the six-digit form.
@@ -275,17 +282,10 @@ colorPickerFromHex txt = do
   pure (colorRGBA r g b (fromMaybe 255 ma))
 
 parseHexPair :: Text -> Maybe Word8
-parseHexPair t =
-  case (parseHexDigit (T.index t 0), parseHexDigit (T.index t 1)) of
-    (Just a, Just b) -> Just (a * 16 + b)
-    _ -> Nothing
-
-parseHexDigit :: Char -> Maybe Word8
-parseHexDigit c
-  | c >= '0' && c <= '9' = Just (fromIntegral (fromEnum c - 48))
-  | c >= 'a' && c <= 'f' = Just (fromIntegral (fromEnum c - 87))
-  | c >= 'A' && c <= 'F' = Just (fromIntegral (fromEnum c - 55))
-  | otherwise = Nothing
+parseHexPair t = case T.unpack t of
+  [hi, lo]
+    | isHexDigit hi && isHexDigit lo -> Just (fromIntegral (digitToInt hi * 16 + digitToInt lo))
+  _ -> Nothing
 
 colorPickerDisplayText :: Color -> Text
 colorPickerDisplayText col = colorPickerToHex col
@@ -304,10 +304,6 @@ packTextNodeStyleFull fvar weight fstyle deco stripe =
     .|. ((fromEnum weight .&. 0x0F) `shiftL` 8)
     .|. ((fromEnum fstyle .&. 0x03) `shiftL` 12)
     .|. ((fromEnum deco .&. 0x03) `shiftL` 14)
-
-{-# INLINE packTextNodeStyle #-}
-packTextNodeStyle :: FontVariant -> Int -> Int
-packTextNodeStyle fvar stripe = packTextNodeStyleFull fvar WeightNormal FontStyleNormal DecorationNone stripe
 
 {-# INLINE textNodeFontVariant #-}
 textNodeFontVariant :: Int -> FontVariant
@@ -354,14 +350,6 @@ stripeColor theme s
 
 tableStripeColor :: Theme -> Int -> Maybe Color
 tableStripeColor theme si = stripeColor theme (textNodeStripe si)
-
--- | Scroll container that shares an id with a master pane and must not paint chrome.
-tableScrollSlaveStyle :: Int
-tableScrollSlaveStyle = 1
-
--- | Native 2D scroll container (both axes active).
-scrollNative2DStyle :: Int
-scrollNative2DStyle = 2
 
 -- | Trailing slot reserved in every header so the sort mark never changes column width.
 tableSortReserve :: Text

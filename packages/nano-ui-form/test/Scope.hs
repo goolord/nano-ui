@@ -1,4 +1,4 @@
-module Scope (runScopeTests) where
+module Scope (check, runScopeTests) where
 
 import Control.Exception (IOException, try)
 import Control.Monad (forM, forM_, unless, void)
