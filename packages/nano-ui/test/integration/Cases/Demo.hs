@@ -3,6 +3,7 @@ module Cases.Demo
   , runBoundedRadioTest
   , runColorPickerCommitTest
   , runColorPickerChangeOnceTest
+  , runColorPickerBarKeysTest
   , runColorPickerRgbaTest
   , runColorPickerEditTest
   ) where
@@ -163,10 +164,8 @@ runColorPickerCommitTest ctx failed = do
       packed c = colorToWord32 c
       ui = held colorRef colorPicker'
   (resp, _) <- warmup2 ctx inp0 ui
-  let Rect x y w h = respRect resp
-      wid = respId resp
-      geom = colorPickerGeom False (ctxFontMetrics ctx) x y w h
-      sv = cpgSv geom
+  let wid = respId resp
+      sv = colorPickerSvSquare (respRect resp)
       pt = V2 (rectX sv + rectW sv * 0.9) (rectY sv + 2)
       press = pressAt inp0 pt
       release = releaseAt press
@@ -207,6 +206,8 @@ runColorPickerEditTest ctx failed = do
       initial = colorRGBA 204 102 102 255
       ui = colorPicker' initial
   _ <- warmup2 ctx inp0 ui
+  -- Tab past the field and the hue bar to the R field.
+  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyBackspace, KeyBackspace, KeyBackspace]}) ui
@@ -236,3 +237,27 @@ runColorPickerChangeOnceTest ctx failed = do
   assertEq failed base neu
   idle <- mapM changed [inp0, inp0]
   assertEq failed idle [False, False]
+
+-- The hue and alpha bars are focus stops after the field. An arrow moves a
+-- bar's handle the way it is drawn (down raises the hue, up lowers the alpha),
+-- Shift steps ten times as far, and Home / End jump to the bar's ends.
+runColorPickerBarKeysTest :: Context -> IORef Int -> IO ()
+runColorPickerBarKeysTest ctx failed = do
+  let initial = colorRGBA 204 102 102 200
+  colorRef <- newIORef initial
+  let inp0 = withInput 440 460
+      ui = held colorRef colorPickerRGBA'
+      frame inp = (\((_, c), _, _, _) -> c) <$> runFrame ctx inp ui
+      key k = inp0 {inputKeys = inputKeysFromList [k]}
+  _ <- warmup2 ctx inp0 ui
+  _ <- frame (key KeyTab)
+  _ <- frame (key KeyTab)
+  shifted <- frame ((key KeyDown) {inputModifiers = Modifiers True False False})
+  assert failed (colorG shifted > colorG initial + 10)
+  home <- frame (key KeyHome)
+  assert failed (colorG home <= colorG initial + 1)
+  _ <- frame (key KeyTab)
+  opaque <- frame (key KeyEnd)
+  assertEq failed (colorA opaque) 255
+  lowered <- frame (key KeyUp)
+  assertEq failed (colorA lowered) 254

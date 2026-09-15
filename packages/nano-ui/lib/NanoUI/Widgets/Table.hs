@@ -40,7 +40,7 @@ import Effectful (Eff, type (:>))
 import qualified Data.IntMap.Strict as IM
 import NanoUI.Context (Context (..), getPrevRect, getScrollOffset2D, getStore, intKey, linkScrollAxes, setStore)
 import NanoUI.Hooks (useInt)
-import NanoUI.Font (scrollBarGutter, scrollBarListExtra, tableCellInset, lineWidthIO)
+import NanoUI.Font (ScrollBarSlot (..), scrollBarGutter, tableCellInset, lineWidthIO)
 import NanoUI.Id (WidgetId (..))
 import NanoUI.Input (Input (..), inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased, inputMouseRightReleased)
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
@@ -202,8 +202,8 @@ tableSplitPanes tp =
       pure hs
   unfrozenPane = do
     ctx <- askContext
-    let fm = ctxFontMetrics ctx
-        vGutter = scrollBarGutter fm + scrollBarListExtra
+    -- The body scroller has no padding, so its whole lane is gutter.
+    let vGutter = scrollBarGutter ScrollBarList 0
         idxs = unfrozenIdx
     mPrevV <- uiIO (getPrevRect ctx vWid)
     let totalH = fromIntegral (V.length scrollRowsVec) * rowMinH

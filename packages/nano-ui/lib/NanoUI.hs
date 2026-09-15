@@ -191,6 +191,12 @@ module NanoUI
   , textInput'
   , textInputConfigured
   , textInputConfigured'
+  , NumericInputConfig (..)
+  , defaultNumericInputConfig
+  , numericInput
+  , numericInput'
+  , numericInputConfigured
+  , numericInputConfigured'
   , SearchFieldConfig (..)
   , defaultSearchFieldConfig
   , searchField
@@ -514,11 +520,9 @@ module NanoUI
   , treeItemPadding
   , resolveLayoutGap
   , resolveLayoutPadding
+  , ScrollBarSlot (..)
   , scrollBarGutter
-  , scrollBarPageExtra
-  , scrollBarListExtra
   , scrollBarWidth
-  , scrollBarWindowGutter
   , panelPaintPad
   , windowPad
   , windowMargin
@@ -543,6 +547,7 @@ import NanoUI.Font
   , FontMetrics (..)
   , GlyphQuad (..)
   , RunQuad (..)
+  , ScrollBarSlot (..)
   , drawGlyph
   , drawRun
   , labelContentInset
@@ -556,10 +561,7 @@ import NanoUI.Font
   , resolveLayoutPadding
   , scaleFontMetrics
   , scrollBarGutter
-  , scrollBarListExtra
-  , scrollBarPageExtra
   , scrollBarWidth
-  , scrollBarWindowGutter
   , tableCellInset
   , treeItemPadding
   , widgetContentInset

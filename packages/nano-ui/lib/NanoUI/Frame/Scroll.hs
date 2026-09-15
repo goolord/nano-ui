@@ -240,7 +240,7 @@ tryApplyScrollWheelDelta ctx wid (V2 wheelX wheelY) = do
               contentW <- getScrollContentW na idx
               slot <- scrollBarSlotOf na idx
               let (gutterW, gutterH) =
-                    scrollGutters2D (ctxFontMetrics ctx) slot (decodeScrollConfig si) contentW contentMain innerW innerH
+                    scrollGutters2D slot (decodeScrollConfig si) pad contentW contentMain innerW innerH
               apply2D
                 (scrollAxisRange contentW (max 0 (innerW - gutterW)) (padR pad))
                 (scrollAxisRange contentMain (max 0 (innerH - gutterH)) (padB pad))

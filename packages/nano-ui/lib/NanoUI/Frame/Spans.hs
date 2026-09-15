@@ -30,6 +30,7 @@ import NanoUI.Font
   , centeredTextY
   , checkboxLeading
   , labelContentInset
+  , layoutLineHeight
   , menuItemPadX
   , prepareFontMetrics
   , tableCellInset
@@ -75,16 +76,18 @@ import NanoUI.Layout.Arena
   )
 import NanoUI.Style (AlignX (..), FontVariant (..), Padding (..), Style (..), Theme (..), themeAccent, themeMuted, themePanel)
 import NanoUI.Types (Color (..), Rect (..), lerpColor, onGrid, rectIntersect)
-import NanoUI.Widgets.ColorPicker (ColorPickerGeom (..), colorPickerAlphaMode, colorPickerGeom)
+import NanoUI.Widgets.ColorPicker (ColorPickerPart (..), colorPickerPartOf, colorPickerPartRect, colorPickerPreviewGeom)
 import NanoUI.WidgetText
   ( colorPickerCurrentLabel
   , colorPickerNewLabel
   , isCloseButtonStyle
   , isMenuItemStyle
   , isTableHeaderStyle
+  , numericTextClip
   , selectChevronReserve
   , tableStripeColor
   , textInputBareMode
+  , textInputNumericMode
   , textInputFieldText
   , textInputSearchMode
   , textInputSelectableMode
@@ -152,9 +155,12 @@ collectClippedSpans' ctx idx nt clip arena = do
           NodeTextInput -> do
             si <- getStyleIdx (ctxNodeArena ctx) idx
             pure $
-              if textInputBareMode si || textInputSelectableMode si
-                then tagClippedSpans clipHere spans
-                else tagTextInputClippedSpans clipHere x y w h fm spans
+              if textInputNumericMode si
+                then maybe [] (`tagClippedSpans` spans) (rectIntersect clipHere (numericTextClip fm x y w h))
+                else
+                  if textInputBareMode si || textInputSelectableMode si
+                    then tagClippedSpans clipHere spans
+                    else tagTextInputClippedSpans clipHere x y w h fm spans
           _ -> pure (tagClippedSpans clipHere spans)
       mapM_ (\(r, t, fg, bg, c) -> pushSpan arena r t fg bg c) here
       walkChildSpans ctx idx clipHere arena
@@ -290,7 +296,7 @@ widgetHitRect ctx nt idx x y w h = do
   case nt of
     NodeTextInput -> do
       si <- getStyleIdx (ctxNodeArena ctx) idx
-      if textInputSearchMode si || textInputBareMode si || textInputSelectableMode si
+      if textInputSearchMode si || textInputBareMode si || textInputSelectableMode si || textInputNumericMode si
         then pure (Rect x y w h)
         else pure (tigFieldRect (textInputGeom fm x y w h))
     NodeTextArea -> pure (tagFieldRect (textAreaGeom fm x y w h))
@@ -428,14 +434,18 @@ computeWidgetTextPlacements ctx nt idx x y w h = do
   let (ix, iy) = widgetContentInset fm
       lineH = fmLineHeight fm
   case nt of
-    NodeColorPicker -> do
-      let geom = colorPickerGeom (colorPickerAlphaMode si) fm x y w h
-      (cw, ch) <- measureTxt colorPickerCurrentLabel
-      (nw, nh) <- measureTxt colorPickerNewLabel
-      pure
-        [ (colorPickerCurrentLabel, cpgPreviewX geom, centeredTextY fm (cpgCurrentLabelY geom) (cpgLabelH geom) ch, cw, ch)
-        , (colorPickerNewLabel, cpgPreviewX geom, centeredTextY fm (cpgNewLabelY geom) (cpgLabelH geom) nh, nw, nh)
-        ]
+    NodeColorPicker
+      | colorPickerPartOf si /= PickerPreview -> pure []
+      | otherwise -> do
+          band@(Rect bx _ _ _) <- colorPickerPartRect (ctxNodeArena ctx) idx (Rect x y w h)
+          let (currentY, _, newY, _) = colorPickerPreviewGeom fm band
+              labelH = layoutLineHeight fm
+          (cw, ch) <- measureTxt colorPickerCurrentLabel
+          (nw, nh) <- measureTxt colorPickerNewLabel
+          pure
+            [ (colorPickerCurrentLabel, bx, centeredTextY fm currentY labelH ch, cw, ch)
+            , (colorPickerNewLabel, bx, centeredTextY fm newY labelH nh, nw, nh)
+            ]
     NodeSlider -> pure []
     NodeTextInput
       | textInputSelectableMode si -> do
@@ -444,7 +454,7 @@ computeWidgetTextPlacements ctx nt idx x y w h = do
           (fw, _) <- measureTxt value
           pure [(value, penX, ty, fw, selLineH)]
       | otherwise -> do
-          let bare = textInputBareMode si
+          let bare = textInputBareMode si || textInputNumericMode si
           ph <- if bare then pure "" else getText (ctxNodeArena ctx) idx
           value <- textInputValue ctx idx
           focus <- textInputFocused ctx idx

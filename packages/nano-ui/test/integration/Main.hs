@@ -116,6 +116,7 @@ testSpecs =
   -- Keyboard
   , TestSpec "keyboard-disabled" False runKeyboardDisabledTest
   , TestSpec "keyboard-modal-eligibility" False runKeyboardModalEligibilityTest
+  , TestSpec "keyboard-focus-ring" False runKeyboardFocusRingTest
   , TestSpec "keyboard-button" False runKeyboardButtonTest
   , TestSpec "keyboard-checkbox" False runKeyboardCheckboxTest
   , TestSpec "keyboard-slider" True runKeyboardSliderTest
@@ -131,6 +132,7 @@ testSpecs =
   , TestSpec "select-drag-to-select" False runSelectDragToSelectTest
   , TestSpec "select-keyboard" False runSelectKeyboardTest
   , TestSpec "select-change-once" False runSelectChangeOnceTest
+  , TestSpec "select-close-keeps-focus" False runSelectCloseKeepsFocusTest
   , TestSpec "select-overlay-damage" False runSelectOverlayDamageTest
   , TestSpec "tree-select" False runTreeSelectTest
   , TestSpec "tree-keyboard" False runTreeKeyboardTest
@@ -146,6 +148,7 @@ testSpecs =
   , TestSpec "color-picker-rgba" True runColorPickerRgbaTest
   , TestSpec "color-picker-edit" True runColorPickerEditTest
   , TestSpec "color-picker-change-once" True runColorPickerChangeOnceTest
+  , TestSpec "color-picker-bar-keys" True runColorPickerBarKeysTest
   , TestSpec "controls-tab-height" True runControlsTabHeightTest
   , TestSpec "bounded-radio-offset" True runBoundedRadioTest
   -- Text input and text area
@@ -161,6 +164,8 @@ testSpecs =
       runTextInputCutClearsSelectionTest
   , TestSpec "text-input-clipboard" False runTextInputClipboardTest
   , TestSpec "text-input-password" False runTextInputPasswordTest
+  , TestSpec "numeric-input" False runNumericInputTest
+  , TestSpec "numeric-input-hex" False runNumericInputHexTest
   , TestSpec "text-input-menu" False runTextInputMenuTest
   , TestSpec "text-input-ff-caret" False runTextInputFfCaretTest
   , TestSpec "text-input-focus-sdl" True runTextInputFocusSdlTest
@@ -221,6 +226,7 @@ testSpecs =
   , TestSpec "tab-response-forwarding" False runTabResponseForwardingTest
   -- Modals, windows and panes
   , TestSpec "modal-overlay" False runModalOverlayTest
+  , TestSpec "modal-fits-text" False runModalFitsTextTest
   , TestSpec "modal-no-phantom-scroll" False runModalNoPhantomScrollTest
   , TestSpec "modal-close-damage" False runModalCloseDamageTest
   , TestSpec "window-overlay" False runWindowOverlayTest

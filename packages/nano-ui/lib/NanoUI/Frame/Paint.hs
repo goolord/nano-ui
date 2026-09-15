@@ -47,6 +47,7 @@ import NanoUI.Draw
   , emitDrawOps
   , pushImage
   , pushRect
+  , pushRoundedStroke
   , pushText
   , pushTextStyled
   , withClip
@@ -76,6 +77,7 @@ import NanoUI.Frame.Scroll.Geometry
   , scrollChromeActive
   )
 import NanoUI.Frame.Spans (collectNodeTextSpans)
+import NanoUI.Id (hashWidgetId)
 import NanoUI.Layout.Arena
   ( DirTag (..)
   , NodeIdx
@@ -116,6 +118,7 @@ import NanoUI.Style
   , unpackPanelStyle
   )
 import NanoUI.Types (Color (..), ImageId (..), Rect (..), V2 (..), colorA, colorRGBA, rectFullyInside, rectInflate)
+import NanoUI.Widgets.ColorPicker (colorPickerPartRect)
 import NanoUI.Widgets.Custom (mkCustomDrawContext)
 import NanoUI.WidgetText
   ( tableStripeColor
@@ -175,7 +178,7 @@ paintNodeWithEnv env idx = do
 -- loop never sees the branch bodies.
 {-# NOINLINE lowerNodeVisible #-}
 lowerNodeVisible :: PaintEnv -> NodeIdx -> NodeType -> Rect -> IO ()
-lowerNodeVisible env idx nt rect =
+lowerNodeVisible env idx nt rect = do
   case nt of
     NodeContainer -> paintContainerNode env idx rect
     NodePanel -> paintPanelNode env idx rect
@@ -193,6 +196,26 @@ lowerNodeVisible env idx nt rect =
     NodeDrawing -> paintDrawingNode env idx rect
     NodeWidget -> pure ()
     _ -> paintWidget env idx nt rect
+  unless (hashWidgetId (peFocusRing env) == 0) $
+    paintFocusRing env idx nt rect
+
+-- | Accent ring around the widget holding keyboard focus. Text fields and
+-- selects already swap in an accent border while focused, so they get none.
+-- Tree rows fill their scroller edge to edge, so their ring sits just inside
+-- the row; colour picker parts ring the square or bar they draw.
+{-# NOINLINE paintFocusRing #-}
+paintFocusRing :: PaintEnv -> NodeIdx -> NodeType -> Rect -> IO ()
+paintFocusRing env idx nt rect = do
+  wid <- getWidgetId (peNodeArena env) idx
+  when (wid == peFocusRing env && nt /= NodeTextInput && nt /= NodeTextArea && nt /= NodeSelect) $ do
+    target <-
+      if nt == NodeColorPicker
+        then colorPickerPartRect (peNodeArena env) idx rect
+        else pure rect
+    let (ring, radius)
+          | nt == NodeTree = (rectInflate (-1) target, 0)
+          | otherwise = (rectInflate 2 target, 4)
+    pushRoundedStroke (peDrawArena env) ring radius 1.5 (themeAccent (peTheme env))
 
 paintContainerNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
 paintContainerNode env idx rect = do

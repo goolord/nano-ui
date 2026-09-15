@@ -3,6 +3,7 @@ module Cases.Select
   , runSelectKeyboardTest
   , runSelectOverlayDamageTest
   , runSelectChangeOnceTest
+  , runSelectCloseKeepsFocusTest
   , runSliderCursorTest
   , runTreeKeyboardTest
   , runTreeSelectTest
@@ -208,3 +209,23 @@ runSelectKeyboardTest ctx failed = do
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyLeft]}) ui
   ((_, idx4), _, _, _) <- runFrame ctx inp0 ui
   assertEq failed idx4 1
+
+-- Clicking an open select's own field closes the dropdown and keeps the
+-- select focused (regression: the closing press cleared focus).
+runSelectCloseKeepsFocusTest :: Context -> IORef Int -> IO ()
+runSelectCloseKeepsFocusTest ctx failed = do
+  indexRef <- newIORef 1
+  let inp0 = withInput 320 200
+      ui = column (held indexRef (select' (V.fromList ["Low", "Medium", "High"])))
+      listed spans = any (\(_, txt, _, _, _) -> txt == "Low") spans
+  (resp, _) <- warmup2 ctx inp0 ui
+  let Rect sx sy sw sh = respRect resp
+      mid = V2 (sx + sw / 2) (sy + sh / 2)
+  openRelease <- runClickRelease ctx inp0 ui mid
+  assert failed . listed =<< collectOverlayTextSpans ctx openRelease
+  closeRelease <- runClickRelease ctx openRelease ui mid
+  let idle = closeRelease {inputMouseReleased = False}
+  _ <- runFrame ctx idle ui
+  assert failed . not . listed =<< collectOverlayTextSpans ctx idle
+  focus <- getFocusId ctx
+  assertEq failed focus (respId resp)

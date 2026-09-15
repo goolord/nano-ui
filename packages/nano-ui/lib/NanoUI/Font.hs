@@ -51,17 +51,15 @@ module NanoUI.Font
   , resolveLayoutPadding
   , tabSentinelChar
   , scrollBarWidth
-  , scrollBarWindowWidth
+  , scrollBarSlimWidth
+  , scrollBarSideGap
+  , scrollBarLane
   , scrollBarMargin
   , scrollBarGeomFor
   , scrollBarGutter
   , ScrollBarSlot (..)
   , classifyScrollBar
   , scrollLayoutGutter
-  , scrollBarOuterGap
-  , scrollBarPageExtra
-  , scrollBarListExtra
-  , scrollBarWindowGutter
   , sliderTrackBounds
   , sliderTrackHeight
   , sliderHandleDiameter
@@ -422,29 +420,31 @@ sliderTrackBounds fm x y w h =
       trackW = max 0 (w - 2 * lx)
    in Rect trackX trackY trackW sliderTrackHeight
 
+-- | Thickness of a list scrollbar.
 scrollBarWidth :: Float
 scrollBarWidth = 8
 
--- Thinner than list/page so the body gutter stays small.
-scrollBarWindowWidth :: Float
-scrollBarWindowWidth = 4
+-- Page and window bodies take a slimmer bar, so its lane fits inside ordinary
+-- padding and the content keeps its full width.
+scrollBarSlimWidth :: Float
+scrollBarSlimWidth = 4
 
 scrollBarMargin :: Float
 scrollBarMargin = 3
+
+-- | Gap on each side of a bar: one between the bar and the content, one
+-- between the bar and the scroller's edge.
+scrollBarSideGap :: Float
+scrollBarSideGap = 3
 
 -- | Bar width and end margin for a slot.
 scrollBarGeomFor :: ScrollBarSlot -> (Float, Float)
 scrollBarGeomFor slot =
   case slot of
+    ScrollBarList -> (scrollBarWidth, scrollBarMargin)
+    ScrollBarPage -> (scrollBarSlimWidth, scrollBarMargin)
     -- Window bar: side gaps only. No end inset.
-    ScrollBarWindow -> (scrollBarWindowWidth, 0)
-    _ -> (scrollBarWidth, scrollBarMargin)
-
--- Bar plus end margin. List/page overflow reserves this on the cross axis.
-scrollBarGutter :: FontMetrics -> Float
-scrollBarGutter _fm =
-  let (barW, barMargin) = scrollBarGeomFor ScrollBarList
-   in barW + barMargin
+    ScrollBarWindow -> (scrollBarSlimWidth, 0)
 
 data ScrollBarSlot = ScrollBarPage | ScrollBarList | ScrollBarWindow
   deriving (Eq, Show)
@@ -455,40 +455,25 @@ classifyScrollBar isWindowBody isPageGrow
   | isPageGrow = ScrollBarPage
   | otherwise = ScrollBarList
 
--- Extra inset from the page scroll's right edge. Reserved in layout.
-scrollBarPageExtra :: Float
-scrollBarPageExtra = 4
+-- | Lane across a bar: the bar with a side gap on each side.
+scrollBarLane :: ScrollBarSlot -> Float
+scrollBarLane slot = fst (scrollBarGeomFor slot) + 2 * scrollBarSideGap
 
--- Extra inset from a list well's right edge. Reserved in layout.
-scrollBarListExtra :: Float
-scrollBarListExtra = 3
-
--- Gap on both sides of a window body bar.
-scrollBarWindowSide :: Float
-scrollBarWindowSide = 2
-
-scrollLayoutGutter :: FontMetrics -> ScrollBarSlot -> Float -> Float -> Float
-scrollLayoutGutter fm slot contentSize innerMain
-  | contentSize <= innerMain = 0
-  | otherwise =
-      case slot of
-        -- Window bar hangs into the parent pad. Content keeps the full inner width.
-        ScrollBarWindow -> 0
-        ScrollBarList -> scrollBarGutter fm + scrollBarListExtra
-        ScrollBarPage -> scrollBarGutter fm + scrollBarPageExtra
-
-scrollBarOuterGap :: ScrollBarSlot -> Float
-scrollBarOuterGap slot =
+-- | Space an overflowing scroller takes from its content, beside the padding
+-- @trailPad@ on the bar's side. The bar is centered across that padding and
+-- the gutter together, so padding that already holds the lane costs the
+-- content nothing. A window body's bar hangs into the window's own padding
+-- and never takes content space.
+scrollBarGutter :: ScrollBarSlot -> Float -> Float
+scrollBarGutter slot trailPad =
   case slot of
-    ScrollBarList -> scrollBarListExtra
-    ScrollBarPage -> scrollBarPageExtra
-    ScrollBarWindow -> scrollBarWindowSide
+    ScrollBarWindow -> 0
+    _ -> max 0 (scrollBarLane slot - trailPad)
 
--- Width the window bar occupies in the parent pad (not taken from content).
-scrollBarWindowGutter :: FontMetrics -> Float
-scrollBarWindowGutter _fm =
-  let (barW, _) = scrollBarGeomFor ScrollBarWindow
-   in barW + 2 * scrollBarOuterGap ScrollBarWindow
+scrollLayoutGutter :: ScrollBarSlot -> Float -> Float -> Float -> Float
+scrollLayoutGutter slot trailPad contentSize innerMain
+  | contentSize <= innerMain = 0
+  | otherwise = scrollBarGutter slot trailPad
 
 measureText :: FontMetrics -> Text -> (Float, Float)
 measureText fm txt =

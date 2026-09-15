@@ -14,7 +14,7 @@ module NanoUI.Frame.TextArea.Geometry
   , isMouseOnTextAreaScrollBar
   ) where
 
-import NanoUI.Font (FontMetrics (..), ScrollBarSlot (..), scrollBarGeomFor, scrollBarOuterGap, widgetContentInset)
+import NanoUI.Font (FontMetrics (..), ScrollBarSlot (..), scrollBarGeomFor, scrollBarSideGap, widgetContentInset)
 import NanoUI.Frame.Scroll.Geometry (ScrollBarLayout (..), scrollBarLayout, scrollChromeLane)
 import NanoUI.Layout.Arena (DirTag (..))
 import NanoUI.Style (Padding (..))
@@ -44,7 +44,7 @@ textAreaFieldClip geom fm =
 -- | Width of the vertical and height of the horizontal scrollbar lane.
 textAreaBarLanes :: FontMetrics -> (Float, Float)
 textAreaBarLanes _fm =
-  let lane = fst (scrollBarGeomFor ScrollBarList) + scrollBarOuterGap ScrollBarList
+  let lane = fst (scrollBarGeomFor ScrollBarList) + scrollBarSideGap
    in (lane, lane)
 
 -- | Which scrollbars a text area shows for its content extent, the text

@@ -36,6 +36,7 @@ import NanoUI.Font
   , labelContentInset
   , sliderHandleDiameter
   , sliderTrackBounds
+  , tableCellInset
   , treeChevronRect
   , widgetContentInset
   )
@@ -77,26 +78,29 @@ import NanoUI.Layout.Arena
 import NanoUI.Style (Style, styleBg, styleBorder, styleFg, themeAccent, themeInput)
 import NanoUI.Types (Color (..), Rect (..), clamp01, colorA, colorRGBA, lerpColor, onGrid)
 import NanoUI.WidgetText
-  ( buttonVisualStyle
+  ( buttonCloseTrailing
+  , buttonVisualStyle
   , comboTextClip
   , isCloseButtonStyle
   , isMenuBarStyle
   , isMenuItemStyle
   , isTabButtonStyle
   , isTableHeaderStyle
+  , numericStepperRects
+  , numericTextClip
   , searchFieldIconRects
   , searchFieldTextClip
   , selectChevronCenterX
   , selectChevronReserve
-  , tableSortBlank
   , tableSortMarkOf
   , textInputBareMode
+  , textInputNumericMode
   , textInputFieldText
   , textInputSearchMode
   , textInputSelectableMode
   , treeDecodeStyle
   )
-import NanoUI.Widgets.ColorPicker (colorPickerAlphaMode, drawColorPickerPanel)
+import NanoUI.Widgets.ColorPicker (drawColorPickerPart)
 
 -- | Single-line text input: selectable, bare, search, combo or captioned field
 -- depending on the node's visual style.
@@ -109,30 +113,33 @@ paintTextInputNode env idx rect@(Rect x y w h) = do
   style <- widgetVisualStyle ctx NodeTextInput idx
   focus <- textInputFocused ctx idx
   si <- getStyleIdx (peNodeArena env) idx
-  if textInputSelectableMode si
-    then paintSelectableText env style idx rect
+  if textInputNumericMode si
+    then paintNumericField ctx da fm style idx focus rect
     else
-      if textInputBareMode si
-        then do
-          let (ix, iy) = widgetContentInset fm
-          paintTextFieldFrame da style rect
-          value <- textInputValue ctx idx
-          paintFieldValue ctx da fm style idx focus rect (Rect (x + ix) (y + iy) (max 0 (w - 2 * ix)) (max 0 (h - 2 * iy))) "" value
+      if textInputSelectableMode si
+        then paintSelectableText env style idx rect
         else
-          if textInputSearchMode si
+          if textInputBareMode si
             then do
-              opts <- getOptions (peNodeArena env) idx
-              if null opts
-                then paintSearchField ctx da fm style idx focus rect
-                else paintComboField ctx da fm style idx focus rect
-            else do
-              let geom = textInputGeom fm x y w h
-              paintTextFieldFrame da style (tigFieldRect geom)
-              spans <- widgetTextSpans ctx NodeTextInput idx x y w h
-              case spans of
-                (Rect fx fy _ _, field, ffg, _) : _ ->
-                  paintClippedFieldText ctx da fm style idx x y w h (textInputFieldTextClip geom fm) fx fy field ffg
-                [] -> pure ()
+              let (ix, iy) = widgetContentInset fm
+              paintTextFieldFrame da style rect
+              value <- textInputValue ctx idx
+              paintFieldValue ctx da fm style idx focus rect (Rect (x + ix) (y + iy) (max 0 (w - 2 * ix)) (max 0 (h - 2 * iy))) "" value
+            else
+              if textInputSearchMode si
+                then do
+                  opts <- getOptions (peNodeArena env) idx
+                  if null opts
+                    then paintSearchField ctx da fm style idx focus rect
+                    else paintComboField ctx da fm style idx focus rect
+                else do
+                  let geom = textInputGeom fm x y w h
+                  paintTextFieldFrame da style (tigFieldRect geom)
+                  spans <- widgetTextSpans ctx NodeTextInput idx x y w h
+                  case spans of
+                    (Rect fx fy _ _, field, ffg, _) : _ ->
+                      paintClippedFieldText ctx da fm style idx x y w h (textInputFieldTextClip geom fm) fx fy field ffg
+                    [] -> pure ()
 
 -- | Multi-line text area.
 {-# NOINLINE paintTextAreaNode #-}
@@ -211,12 +218,11 @@ paintWidgetBackground env idx nt style si menuRowRect value (Rect x y w h) = do
       when hasKids $
         drawTreeChevron da fm x y w h depth expanded (styleFg style)
     NodeSlider -> paintSliderBody env x y w h value
-    NodeButton -> when isClose $ drawCloseIcon da x y w h (styleFg style)
+    NodeButton -> when isClose $ drawCloseIcon da (buttonVisualStyle si == buttonCloseTrailing) x y w h (styleFg style)
     NodeSelect -> drawSelectChevron da False x y w h (styleFg style)
     NodeColorPicker -> do
       store <- getStore ctx
-      wid <- getWidgetId (peNodeArena env) idx
-      drawColorPickerPanel (colorPickerAlphaMode si) fm da store wid style x y w h
+      drawColorPickerPart (peNodeArena env) idx fm da store style (Rect x y w h)
     _ -> pure ()
 
 {-# NOINLINE paintSliderBody #-}
@@ -266,19 +272,16 @@ paintWidgetForeground env idx nt style si (Rect x y w h) = do
   (fm, _, _) <- resolveFontFor ctx fontSize si
   let widgetFg = fromMaybe (styleFg style) mFontColor
       sortMark = if nt == NodeButton && isTableHeaderStyle si then tableSortMarkOf si else 0
-  sortSlotW <-
-    if sortMark /= 0
-      then fst <$> ctxMeasureText ctx tableSortBlank
-      else pure 0
-  let drawPlacement lastLine txt px py tw th =
+      -- Table sort arrow: pinned to the header's right edge, inside the cell
+      -- inset, whatever the label's alignment. The label still ends in a
+      -- blank reserve slot (the ▲/▼ codepoint is not in the pruned UI font),
+      -- which keeps the column wide enough for the text and the arrow.
+      sortArrowX = x + w - fst (tableCellInset fm) - 5
+      drawPlacement lastLine txt px py _ th =
         unless (T.null txt) $ do
           pushText da fm px py txt widgetFg
-          -- Table sort arrow: the label text ends in the blank reserve slot
-          -- (the ▲/▼ codepoint is not in the pruned UI font), so paint the
-          -- mark as a triangle centered in that slot, once, on the line
-          -- that carries the slot.
           when (sortMark /= 0 && lastLine) $
-            drawSortTriangle da (px + tw - sortSlotW / 2) (py + th / 2) (sortMark == 2) widgetFg
+            drawSortTriangle da sortArrowX (py + th / 2) (sortMark == 2) widgetFg
   forWidgetTextPlacements_ ctx nt idx x y w h drawPlacement
 
 -- | Sort direction triangle for a table header: up when ascending, down when
@@ -340,6 +343,30 @@ paintFieldValue ctx da fm style idx focus (Rect x y w h) clip@(Rect clipX _ _ _)
           )
   paintClippedFieldText ctx da fm style idx x y w h clip (clipX - scrollX) ty display fg
 
+-- | Numeric field: the box, its value clipped left of the stepper, and the
+-- stepper's up and down arrows beside a rule.
+paintNumericField :: Context -> DrawArena -> FontMetrics -> Style -> NodeIdx -> Bool -> Rect -> IO ()
+paintNumericField ctx da fm style idx focus box@(Rect x y w h) = do
+  paintTextFieldFrame da style box
+  value <- textInputValue ctx idx
+  let (up@(Rect ux _ _ _), down) = numericStepperRects x y w h
+      iconCol = lerpColor (styleFg style) (styleBg style) 0.4
+      ruleCol = lerpColor (styleBorder style) (styleBg style) 0.4
+  pushLine da ux (y + 4) ux (y + h - 4) 1 ruleCol
+  drawStepArrow da True up iconCol
+  drawStepArrow da False down iconCol
+  paintFieldValue ctx da fm style idx focus box (numericTextClip fm x y w h) "" value
+
+-- | A stepper arrow in its half of the stepper, nudged toward the other half so
+-- the pair reads as one control.
+drawStepArrow :: DrawArena -> Bool -> Rect -> Color -> IO ()
+drawStepArrow da up (Rect sx sy sw sh) col = do
+  let cx = sx + sw / 2
+      cy = sy + sh / 2 + (if up then 1 else -1)
+      hw = 3.6
+      tip = if up then -2.4 else 2.4
+  pushFilledTriangle da (cx - hw) (cy - tip * 0.35) (cx + hw) (cy - tip * 0.35) cx (cy + tip) col
+
 -- | Caption-less search field: box fills the node rect, magnifier on the left,
 -- clear (×) on the right when there is text, and the editable value / caret /
 -- selection confined to the space between them.
@@ -353,7 +380,7 @@ paintSearchField ctx da fm style idx focus box@(Rect x y w h) = do
   drawSearchMagnifier da magRect iconCol
   paintFieldValue ctx da fm style idx focus box (searchFieldTextClip fm x y w h) lbl value
   unless (T.null value) $
-    drawCloseIcon da cx cy cw ch iconCol
+    drawCloseIcon da False cx cy cw ch iconCol
 
 -- | Selectable text: chrome-less, border-less, naturally sized text field
 -- that supports mouse drag selection and text copying without an insertion caret.
@@ -481,12 +508,13 @@ drawRadio da fm style x y h value accent well =
             !dy = onGrid s by + (b - dot) / 2
         pushRoundedRectRaw da (Rect dx dy dot dot) (dot / 2) accent
 
-drawCloseIcon :: DrawArena -> Float -> Float -> Float -> Float -> Color -> IO ()
-drawCloseIcon da x y w h col = do
-  let cx = x + w / 2
-      cy = y + h / 2
-      arm = min w h * 0.21
+-- | A cross centered in the box, or against its right edge when @trailing@.
+drawCloseIcon :: DrawArena -> Bool -> Float -> Float -> Float -> Float -> Color -> IO ()
+drawCloseIcon da trailing x y w h col = do
+  let arm = min w h * 0.21
       t = max 1.75 (min w h * 0.085)
+      cx = if trailing then x + w - arm - t / 2 else x + w / 2
+      cy = y + h / 2
   pushLine da (cx - arm) (cy - arm) (cx + arm) (cy + arm) t col
   pushLine da (cx - arm) (cy + arm) (cx + arm) (cy - arm) t col
 

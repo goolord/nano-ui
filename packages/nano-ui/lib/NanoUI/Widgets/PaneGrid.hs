@@ -40,7 +40,9 @@ import Effectful (Eff, type (:>))
 import NanoUI.Context
   ( Context (..)
   , bumpMirror
+  , damageWidget
   , getFocusId
+  , getFocusVisible
   , getPrevRect
   , getStore
   , intKey
@@ -92,7 +94,8 @@ import NanoUI.Style
   , separatorTrackColor
   )
 import NanoUI.Types
-  ( Rect (..)
+  ( DamageBounds (..)
+  , Rect (..)
   , V2 (..)
   , lerpColor
   , rectHit
@@ -427,6 +430,13 @@ paneGrid cfg = do
         runGestures env dividers rendered dgi
         when (dgiShown && rectNonEmpty baseRect) $
           drawDragOverlay env wid rendered (dgiGhost dgi) (fmap fst (dgiZone dgi))
+        -- Keyboard focus also rings the focused pane, so the arrow keys show
+        -- where they moved; the grid's own ring says the grid holds focus.
+        ringPane <- uiIO ((&&) <$> getFocusVisible ctx <*> ((== wid) <$> getFocusId ctx))
+        when (ringPane && not dgiShown) $
+          forM_ (M.lookup focusedInit visibleRegions) $ \r ->
+            uiIO $ registerCustomDrawing ctx wid $ \cdc _ ->
+              runCanvas (drawStrokeRoundedRect (rectInflate (-2) r) 2 1.5 (themeAccent (cdcTheme cdc)))
 
   -- Keyboard navigation for the focused grid. Escape restores a maximized
   -- pane unless something earlier in the pass already consumed it (e.g. a
@@ -441,6 +451,8 @@ paneGrid cfg = do
     when (knRight nav) $ moveFocus env cur (1, 0)
     when (knUp nav) $ moveFocus env cur (0, -1)
     when (knDown nav) $ moveFocus env cur (0, 1)
+    when (knLeft nav || knRight nav || knUp nav || knDown nav) $
+      uiIO (damageWidget ctx wid (DamageInflated 0))
     when (T.any (== 'm') ch) $ maximizePane env cur
     when (T.any (== 'x') ch) $ closePane env cur
     when (inputKeysElem KeyEscape (inputKeys inp)) $ do
@@ -817,11 +829,12 @@ runGestures env dividers rendered dgi = do
       st <- uiIO (getStore ctx)
       let (ratio0, main0) =
             IM.findWithDefault (diRatio d, mouseMain d mouse) (slotKey slotPaneResize (geKey env)) (storePoint st)
-          avail = mainLen (diAxis d) (diRegion d)
+          -- The ratio shares out the region minus the divider gutter.
+          usable = mainLen (diAxis d) (diRegion d) - geGutter env
           r0 =
-            if avail <= 0
+            if usable <= 0
               then ratio0
-              else ratio0 + (mouseMain d mouse - main0) / avail
+              else ratio0 + (mouseMain d mouse - main0) / usable
           r' = clampTreeRatio (geTree env) sid (diRegion d) (geGutter env) (geMinSize env) r0
        in putTree env (Just (treeSetRatio sid r' (geTree env)))
   when (drag0 < 0 && not down) $ writeGest env 0

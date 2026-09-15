@@ -89,6 +89,12 @@ module NanoUI.Widgets
   , textInput'
   , textInputConfigured
   , textInputConfigured'
+  , NumericInputConfig (..)
+  , defaultNumericInputConfig
+  , numericInput
+  , numericInput'
+  , numericInputConfigured
+  , numericInputConfigured'
   , SearchFieldConfig (..)
   , defaultSearchFieldConfig
   , searchField
@@ -355,6 +361,7 @@ import NanoUI.Widgets.Node
   , respRightPressed
   , respSubmitted
   )
+import NanoUI.Widgets.NumericInput (NumericInputConfig (..), defaultNumericInputConfig, numericInput, numericInput', numericInputConfigured, numericInputConfigured')
 import NanoUI.Widgets.Overlay (modal, window)
 import NanoUI.Widgets.PaneGrid
   ( GridAxis (..)

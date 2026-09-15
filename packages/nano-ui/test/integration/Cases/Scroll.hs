@@ -55,8 +55,7 @@ runScrollThumbCursorTest ctx failed = do
   case mrect of
     Nothing -> assert failed False
     Just (Rect rx ry rw rh) -> do
-      let barW = scrollBarWidth
-          thumbX = rx + rw - scrollBarListExtra - barW / 2
+      let thumbX = rx + rw - scrollBarGutter ScrollBarList 0 / 2
           tryYs = [ry + rh * n / 8 | n <- [1 .. 7]]
       mHover <- findGrabHover ctx ui inp0 thumbX tryYs
       case mHover of
@@ -69,12 +68,13 @@ runScrollThumbCursorTest ctx failed = do
           grabbing <- cursorKindIs ctx press UiCursorGrabbing
           assert failed grabbing
 
--- The scroll content's right edge stops at the scrollbar gutter: list
--- scrollers (fixed height, or grow inside a panel) reserve the list extra and
--- page-level grow scrollers the page extra.
+-- The scroll content's right edge stops at the scrollbar gutter: the bar's
+-- lane less the scroller's right padding. List scrollers (fixed height, or
+-- grow inside a panel) take a list lane and page-level grow scrollers a slim
+-- one; a page padded wide enough for its lane keeps its full width.
 runScrollBarGutterTest :: Context -> IORef Int -> IO ()
 runScrollBarGutterTest ctx failed = do
-  let fm = ctxFontMetrics ctx
+  let listPad = padR (layoutPadding defaultLayout)
       wideThen n = do
         r <- labelWith' fillW "Wide"
         _ <- replicateM n (label "scroll line")
@@ -82,17 +82,22 @@ runScrollBarGutterTest ctx failed = do
       cases =
         [ ( withInput 200 120
           , scrollArea (fillW . fixedH 60) (wideThen 8)
-          , scrollBarGutter fm + scrollBarListExtra
-          , padR (layoutPadding defaultLayout)
+          , scrollBarGutter ScrollBarList listPad
+          , listPad
           )
         , ( withInput 240 140
           , scrollArea (tight . grow) (wideThen 20)
-          , scrollBarGutter fm + scrollBarPageExtra
+          , scrollBarGutter ScrollBarPage 0
           , 0
           )
         , ( withInput 240 140
+          , scrollArea (padAll 12 . grow) (wideThen 20)
+          , 0
+          , 12
+          )
+        , ( withInput 240 140
           , panelWith grow (scrollArea (tight . grow) (wideThen 20))
-          , scrollBarGutter fm + scrollBarListExtra
+          , scrollBarGutter ScrollBarList 0
           , 0
           )
         ]
@@ -539,8 +544,7 @@ run2DPadOverflowScrollsTest _ failed = do
       -- (the 500px child overflows), so it takes its lane out of the vertical
       -- viewport: view = innerH - laneH.
       let laneH =
-            scrollBarGutter (ctxFontMetrics ctx)
-              + scrollBarListExtra
+            scrollBarGutter ScrollBarList padTestPx
           wheelDown = inp0 {inputScroll = V2 0 50}
       replicateM_ 40 (runFrame ctx wheelDown ui)
       V2 _ offEnd <- getScrollOffset2D ctx wid

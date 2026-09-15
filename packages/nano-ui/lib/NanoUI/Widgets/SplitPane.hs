@@ -124,14 +124,16 @@ mainMins AxisV (wa, _) (wb, _) = (wa, wb)
 mainMins AxisH (_, ha) (_, hb) = (ha, hb)
 
 -- | A-side extent for a split along its main axis, honouring the subtree
--- minima and the gutter between the sides. Falls back to the raw ratio when
--- the region is too small to satisfy both minima.
+-- minima. The ratio shares out the extent left after the gutter between the
+-- sides, so a 0.5 split gives both sides the same length. Falls back to the
+-- raw share when the region is too small to satisfy both minima.
 splitLength :: Float -> Float -> Float -> Float -> Float -> Float
 splitLength spacing avail minA minB ratio
   | avail <= 0 = 0
-  | lo <= hi = clamp lo hi (ratio * avail)
-  | otherwise = clamp 0 avail (ratio * avail)
+  | lo <= hi = clamp lo hi share
+  | otherwise = clamp 0 avail share
   where
+    share = ratio * max 0 (avail - spacing)
     lo = minA
     hi = avail - spacing - minB
 
@@ -255,13 +257,14 @@ clampTreeRatio tree splitId region spacing minSize r0 =
     Just (Pane _) -> r0
     Just (Split _ ax _ a b) ->
       let avail = mainLen ax region
-       in if avail <= 0
+          usable = avail - spacing
+       in if usable <= 0
             then r0
             else
               let (wa, ha) = subtreeMin minSize spacing a
                   (wb, hb) = subtreeMin minSize spacing b
                   (mA, mB) = mainMins ax (wa, ha) (wb, hb)
-               in splitLength spacing avail mA mB r0 / avail
+               in splitLength spacing avail mA mB r0 / usable
 
 -- | Which drop zone a pointer falls into for a target pane rect.
 data EdgeZone = ZoneCenter | ZoneLeft | ZoneRight | ZoneTop | ZoneBottom

@@ -25,6 +25,7 @@
 --
 --   * Controls:     button, checkbox, slider, select, comboBox,
 --                   boundedRadio, colorPicker, textInput, textArea,
+--                   numericInput,
 --                   button + tooltip, contextMenu, file dialogs, dropZone
 --   * Graphics:     image gallery + progressBar driven by a pulsing value
 --   * Typography:   label / labelWith + the @font*@ style combinators
@@ -241,6 +242,8 @@ demoUi = do
   (fontChoice, setFontChoice) <- useText "Inter" -- comboBox
   (name, setName) <- useText "" -- textInput
   (notes, setNotes) <- useText "Edit me.\nSecond line." -- textArea
+  (count, setCount) <- useState (12 :: Double) -- numericInput
+  (mask, setMask) <- useState (0xC0FF :: Double) -- hexadecimal numericInput
   (dropLog, setDropLog) <- useText "" -- dropZone result, multi-line
   (dropHovering, setDropHovering) <- useFlag False -- drag-over state
   -- File dialog handles; results land in the paths below via useFileDialog.
@@ -282,8 +285,10 @@ demoUi = do
   when (not (T.null rawDrop)) (setDropRaw rawDrop)
 
   -------------------------------------------------------------- toolbar ---
-  scrollWith (tight . grow) $
-    columnWith (padAll gapLayout . gap gapLayout . fillW) $ do
+  -- The page padding matches the gap between cards, and the page scrollbar
+  -- sits centered in the right padding.
+  scrollWith (padAll gapLayout . grow) $
+    columnWith (tight . gap gapLayout . fillW) $ do
       panelWith (padXY 16 12 . gap gapInline . fillW) $
         responsiveRowCol 960 (tight . gap gapInline . alignMid . fillW) $ do
           rowWith (tight . gap gapInline . alignMid) $ do
@@ -332,6 +337,8 @@ demoUi = do
               kv "Font" fontChoice
               kv "Name" (orDash name)
               kv "Notes" (orDash notes)
+              kv "Count" (T.pack (show (round count :: Int)))
+              kv "Mask" (T.pack (printf "0x%04X" (round mask :: Int)))
               separator
               kv "Tree" treeSel
               kv "Table sort" (tableColumnLabel tableSortVal)
@@ -386,6 +393,16 @@ demoUi = do
                   notesVal <- demoField "Notes" $
                     textArea notes
                   setNotes notesVal
+                  separator
+                  heading "Numbers"
+                  -- Arrow keys or the stepper step the value; Shift steps by ten.
+                  rowWith (tight . gap gapInline . fillW) $ do
+                    countVal <- demoField "Count (0-100)" $
+                      numericInputConfigured defaultNumericInputConfig {nicMin = 0, nicMax = 100} count
+                    setCount countVal
+                    maskVal <- demoField "Mask (hex)" $
+                      numericInputConfigured defaultNumericInputConfig {nicMin = 0, nicMax = 0xFFFF, nicHex = True} mask
+                    setMask maskVal
                 columnWith (tight . gap 10 . fillW) $ do
                   heading "Accent"
                   muted "Choose a color or enter an exact value."

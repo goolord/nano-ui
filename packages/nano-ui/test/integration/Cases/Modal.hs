@@ -2,6 +2,7 @@ module Cases.Modal
   ( runModalCloseDamageTest
   , runModalNoPhantomScrollTest
   , runModalOverlayTest
+  , runModalFitsTextTest
   ) where
 
 import Control.Monad (forM_, when)
@@ -9,7 +10,7 @@ import Data.IORef (IORef)
 import Data.Text qualified as T
 import NanoUI
 import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertEq, evalUi, withInput)
+import NanoUI.Testing.Assert (assert, assertEq, assertGt, evalUi, withInput)
 import NanoUI.Testing.Harness
   ( centerOf
   , checkIdleFullDamage
@@ -110,3 +111,18 @@ runModalCloseDamageTest ctx failed = do
   checkIdleFullDamage failed ctx idle idle ui
   _ <- runFrame ctx esc ui
   checkIdleFullDamage failed ctx idle idle ui
+
+-- A modal widens for a filling label instead of wrapping it, so the label
+-- stays one line inside the modal (regression: the label reported no width, the
+-- modal stayed at its minimum, and the wrapped body overflowed into a scroll).
+runModalFitsTextTest :: Context -> IORef Int -> IO ()
+runModalFitsTextTest ctx failed = do
+  let inp = withInput 800 600
+      sentence = T.pack "A sentence that is wider than the smallest modal allows."
+      ui = fst <$> modal True "About" (muted sentence)
+  dlg <- warmup2 ctx inp ui
+  spans <- collectOverlayTextSpans ctx inp
+  let Rect _ _ dw _ = respRect dlg
+      whole = [r | (r, t, _, _, _) <- spans, t == sentence]
+  assertEq failed (length whole) 1
+  forM_ whole $ \(Rect _ _ tw _) -> assertGt failed (dw + 0.5) tw

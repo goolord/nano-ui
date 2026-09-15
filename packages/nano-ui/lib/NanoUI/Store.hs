@@ -53,6 +53,8 @@ module NanoUI.Store
   , slotPaneNext
   , slotSeen
   , slotColorBase
+  , slotNumericHeld
+  , slotNumericRepeat
   , boolInt
   , intBool
   , anySelectOpen
@@ -223,6 +225,8 @@ data Slot
   | SlotPaneNext
   | SlotSeen
   | SlotColorBase
+  | SlotNumericHeld
+  | SlotNumericRepeat
   deriving (Enum, Bounded)
 
 -- | Tag for a built-in slot: the constructor index mixed with a salt, so tags
@@ -238,6 +242,15 @@ slotSeen = slotTag SlotSeen
 -- | A colour picker's opening colour.
 slotColorBase :: Word64
 slotColorBase = slotTag SlotColorBase
+
+-- | The stepper arrow a numeric field's press holds: 1 up, -1 down.
+slotNumericHeld :: Word64
+slotNumericHeld = slotTag SlotNumericHeld
+
+-- | When a numeric field's held stepper arrow next repeats, in monotonic
+-- seconds.
+slotNumericRepeat :: Word64
+slotNumericRepeat = slotTag SlotNumericRepeat
 
 slotDisabled :: Word64
 slotDisabled = slotTag SlotDisabled

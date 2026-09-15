@@ -13,6 +13,7 @@ import Data.IORef (readIORef)
 import NanoUI.Context (Context (..))
 import NanoUI.Draw (DrawArena)
 import NanoUI.Font (FontMetrics)
+import NanoUI.Id (WidgetId (..))
 import NanoUI.Layout.Arena
   ( NodeArena
   , NodeIdx
@@ -39,6 +40,8 @@ data PaintEnv = PaintEnv
   , peFontMetrics :: FontMetrics
   , peOccluders :: [Rect]
   , peHasOccluders :: Bool
+  , peFocusRing :: WidgetId
+    -- ^ The focused widget while its keyboard focus ring shows, else 0.
   }
 
 -- | Locality helper for callers inside the paint frame loop; a fresh env
@@ -47,6 +50,8 @@ data PaintEnv = PaintEnv
 buildPaintEnv :: Context -> [Rect] -> IO PaintEnv
 buildPaintEnv ctx occluders = do
   theme <- readIORef (ctxTheme ctx)
+  focus <- readIORef (ctxFocusId ctx)
+  focusVisible <- readIORef (ctxFocusVisible ctx)
   pure PaintEnv
     { peContext = ctx
     , peNodeArena = ctxNodeArena ctx
@@ -55,6 +60,7 @@ buildPaintEnv ctx occluders = do
     , peFontMetrics = ctxFontMetrics ctx
     , peOccluders = occluders
     , peHasOccluders = not (null occluders)
+    , peFocusRing = if focusVisible then focus else WidgetId 0
     }
 
 -- | Rect of the nearest popup-panel ancestor of @idx@, if any. Menu rows use

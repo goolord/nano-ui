@@ -22,8 +22,7 @@ module NanoUI.Testing
   , scrollBarLayout
   , ScrollBarLayout (..)
   , sliderTrackBounds
-  , colorPickerGeom
-  , ColorPickerGeom (..)
+  , colorPickerSvSquare
   , widgetStoreBaseColor
   , widgetStoreColor
   , collectTextSpans
@@ -212,8 +211,7 @@ import NanoUI.Draw
 import NanoUI.Damage (floatingPanelRects)
 import NanoUI.Font (lineWidth, sliderTrackBounds, textDisplayWidth, textIndexAtX)
 import NanoUI.Widgets.ColorPicker
-  ( ColorPickerGeom (..)
-  , colorPickerGeom
+  ( colorPickerSvSquare
   , widgetStoreBaseColor
   , widgetStoreColor
   )

@@ -376,6 +376,9 @@ data Context = Context
   , ctxClickedId :: IORef WidgetId
   , ctxReleaseClickedId :: IORef WidgetId
   , ctxFocusId :: IORef WidgetId
+  -- | Focus last moved by keyboard, so the focused widget shows its ring. A
+  -- pointer press hides it again.
+  , ctxFocusVisible :: IORef Bool
   , ctxStore :: IORef WidgetStore
   , ctxDamageState :: IORef DamageState
   , ctxOverlayState :: IORef OverlayState

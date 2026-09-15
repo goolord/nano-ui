@@ -118,8 +118,7 @@ import NanoUI.Id (WidgetId)
 import NanoUI.Style (AlignX (..), AlignY (..), FontStyle (..), FontVariant (..), FontWeight (..), Padding (..), windowMargin)
 import NanoUI.Types (PopupAnchor (..), PopupPlacement (..), Rect (..), V2 (..), clamp, onGrid)
 import NanoUI.WidgetText
-  ( colorPickerExtraH
-  , colorPickerMinWidth
+  ( colorPickerSvH
   , textNodeFontVariant
   , textNodeFontWeight
   , textNodeFontStyle
@@ -131,6 +130,8 @@ import NanoUI.WidgetText
   , textInputPlaceholder
   , textInputSearchMode
   , textInputBareMode
+  , textInputNumericMode
+  , numericStepperW
   , textInputSelectableMode
   , searchFieldReserveW
   , isTableHeaderStyle
@@ -368,14 +369,27 @@ measureTextNode env@SolveEnv {seArena = na} idx = do
       SizingFixed -> clamp minH maxH hVal
       _ -> clamp minH maxH (max lineH th)
 
+-- | Whether a grow-width node's width is assigned from above rather than
+-- reported: its parent grows, and the nearest ancestor that does not grow is
+-- not a modal. A modal takes its width from what it holds, so a grow label
+-- inside one still reports its natural width; otherwise the modal could never
+-- widen for it and the label would wrap into more lines than the modal
+-- measured. Windows keep their own width and truncate long lines instead.
 growParent :: NodeArena -> NodeIdx -> IO Bool
-growParent na idx = do
-  parent <- getParent na idx
-  if parent < 0
-    then pure False
-    else do
-      (pwTag, _) <- getWidthSizing na parent
-      pure (pwTag == SizingGrow)
+growParent na idx = getParent na idx >>= go True
+  where
+    go isParent p
+      | p < 0 = pure (not isParent)
+      | otherwise = do
+          (pwTag, _) <- getWidthSizing na p
+          if pwTag == SizingGrow
+            then getParent na p >>= go False
+            else
+              if isParent
+                then pure False
+                else do
+                  nt <- getNodeType na p
+                  pure (nt /= NodeModal)
 
 measureImage :: NodeArena -> NodeIdx -> IO ()
 measureImage na idx = do
@@ -495,7 +509,8 @@ measureWidget env@SolveEnv {seArena = na, seFm = fm, seMeasure = measure} idx = 
             (0, 0)
             choices
         pure (mw, mh, selectChevronReserve, 0)
-      NodeColorPicker -> pure (colorPickerMinWidth, 0, 0, colorPickerExtraH)
+      -- Picker parts carry fixed layouts; the field grows to its square.
+      NodeColorPicker -> pure (0, colorPickerSvH, 0, 0)
       NodeTextInput
         | textInputSelectableMode si -> do
             -- Size with the node's own font (paint and span placement resolve
@@ -503,6 +518,9 @@ measureWidget env@SolveEnv {seArena = na, seFm = fm, seMeasure = measure} idx = 
             measurer <- textNodeMeasurer env idx
             (mw, mh) <- measureFontLine measurer (if T.null txt then " " else txt)
             pure (mw, mh, 0, 0)
+        -- Numeric field: a short editable box and its stepper.
+        | textInputNumericMode si ->
+            pure (56, textInputFieldHeight fm, numericStepperW, 0)
         -- Bare field: just the editable box (no caption, no icon chrome).
         | textInputBareMode si ->
             pure (24, textInputFieldHeight fm, 0, 0)
@@ -598,7 +616,7 @@ measureScrollContainer na fm idx = do
         | isScrollStyle2D si = 0
         | otherwise =
             case dir of
-              DirColumn -> scrollAxisGutter (scrollPolicyY cfg) fm slot contentH assignedInnerH
+              DirColumn -> scrollAxisGutter (scrollPolicyY cfg) slot (padR pad) contentH assignedInnerH
               DirRow -> 0
       viewportW =
         case wTag of
@@ -908,7 +926,7 @@ positionScrollChildren ::
   Float ->
   Float ->
   IO ()
-positionScrollChildren env@SolveEnv {seArena = na, seFm = fm} depth idx dir gap pad px py pw ph = do
+positionScrollChildren env@SolveEnv {seArena = na} depth idx dir gap pad px py pw ph = do
   si <- getStyleIdx na idx
   contentSize <- getNodeValue na idx
   slot <- scrollBarSlotOf na idx
@@ -920,7 +938,7 @@ positionScrollChildren env@SolveEnv {seArena = na, seFm = fm} depth idx dir gap 
     then do
       contentW <- getScrollContentW na idx
       let cfg = decodeScrollConfig si
-          (gutterW, gutterH) = scrollGutters2D fm slot cfg contentW contentSize innerW innerH
+          (gutterW, gutterH) = scrollGutters2D slot cfg pad contentW contentSize innerW innerH
           viewW = max 0 (innerW - gutterW)
           viewH = max 0 (innerH - gutterH)
           -- Keep measured content. Shrinking to the clip wraps table columns.
@@ -930,8 +948,8 @@ positionScrollChildren env@SolveEnv {seArena = na, seFm = fm} depth idx dir gap 
       positionChildren env depth idx DirColumn gap (Padding 0 0 0 0) cx cy layoutW layoutH
     else do
       let cfg = decodeScrollConfig si
-          gutterCol = scrollAxisGutter (scrollPolicyY cfg) fm slot contentSize innerH
-          gutterRow = scrollAxisGutter (scrollPolicyX cfg) fm slot contentSize innerW
+          gutterCol = scrollAxisGutter (scrollPolicyY cfg) slot (padR pad) contentSize innerH
+          gutterRow = scrollAxisGutter (scrollPolicyX cfg) slot (padB pad) contentSize innerW
       case dir of
         DirRow -> do
           (wTag, _) <- getWidthSizing na idx
@@ -976,12 +994,14 @@ scrollBarSlotOf na idx = do
     then pure ScrollBarList
     else do
       parent <- getParent na idx
+      -- A modal's body scrolls like a window's: its bar hangs in the panel
+      -- padding instead of taking a gutter from the body.
       isWin <-
         if parent < 0
           then pure False
           else do
             pnt <- getNodeType na parent
-            pure (pnt == NodeWindow)
+            pure (pnt == NodeWindow || pnt == NodeModal)
       (wTag, _) <- getWidthSizing na idx
       (hTag, _) <- getHeightSizing na idx
       inPanel <- hasPanelAncestor na parent
@@ -1172,7 +1192,11 @@ positionRowFromParent env@SolveEnv {seArena = na, seFm = fm} depth parent gap cx
               ay <- getAlignY na ci
               let fy = alignY ay cy ch crossH
               positionNodeA env (depth + 1) ci x fy fw crossH
-              goRow (i + 1) (cur + fw + gap) x
+              -- A grow child that its max width stopped short of its share
+              -- hands the rest to the siblings after it instead of leaving a
+              -- hole.
+              placedW <- readGeom (seArrays env) ci geomW
+              goRow (i + 1) (cur + min fw placedW + gap) x
     goRow 0 cx (if s > 0 then onGrid s cx - step else cx)
 
 positionGrid ::

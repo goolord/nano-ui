@@ -15,6 +15,7 @@ module Cases
   , module Cases.Window
   , module Cases.Keyboard
   , module Cases.Cache
+  , module Cases.NumericInput
   , runAspectLayoutTest
   , runCheckboxInitialTest
   , runDrawingTest
@@ -59,6 +60,7 @@ import Cases.Tooltip
 import Cases.Window
 import Cases.Keyboard
 import Cases.Cache
+import Cases.NumericInput
 import Control.Monad (forM, forM_, void, when)
 import Control.Concurrent (threadDelay)
 import Data.ByteString qualified as BS
@@ -550,30 +552,30 @@ runPaneGridMixedDragTest ctx failed = do
       preview dt = dropPreview minSize gutter tree0 1 base dt
   assertEq failed regions0 $
     M.fromList
-      [ (1, Rect 0 0 300 400)
-      , (2, Rect 304 0 296 200)
-      , (3, Rect 304 204 296 196)
+      [ (1, Rect 0 0 298 400)
+      , (2, Rect 302 0 298 198)
+      , (3, Rect 302 202 298 198)
       ]
   -- Cross-axis edge drop on the bottom-right pane: removing pane 1 collapses
   -- the root split, so the right branch re-flows to the whole grid and pane 1
   -- lands in its bottom-right corner, not in a half of the target's old rect
-  -- (which would be Rect 304 302 296 98).
+  -- (which would be Rect 302 301 298 99).
   let dtA = dropTargetForPane r3 (V2 (rectX r3 + rectW r3 / 2) (rectY r3 + rectH r3 * 0.9)) 3
   assertEq failed dtA (DropSplit 3 AxisH False)
-  assertEq failed (preview dtA) (Just (Rect 0 306 600 94, DropSplit 3 AxisH False))
+  assertEq failed (preview dtA) (Just (Rect 0 303 600 97, DropSplit 3 AxisH False))
   -- Edge drop on the top-right pane.
   let dtB = dropTargetForPane r2 (V2 (rectX r2 + rectW r2 * 0.9) (rectY r2 + rectH r2 / 2)) 2
   assertEq failed dtB (DropSplit 2 AxisV False)
-  assertEq failed (preview dtB) (Just (Rect 304 0 296 200, DropSplit 2 AxisV False))
+  assertEq failed (preview dtB) (Just (Rect 302 0 298 198, DropSplit 2 AxisV False))
   -- Center drop swaps; the preview is the target's exact region.
   let dtC = dropTargetForPane r2 (V2 (rectX r2 + rectW r2 / 2) (rectY r2 + rectH r2 / 2)) 2
   assertEq failed dtC (DropSwap 2)
-  assertEq failed (preview dtC) (Just (Rect 304 0 296 200, DropSwap 2))
+  assertEq failed (preview dtC) (Just (Rect 302 0 298 198, DropSwap 2))
   -- Top-level edge drops restructure the whole grid.
   assertEq failed (topLevelDropTarget 20 base (V2 5 200)) (Just (DropTop AxisV True))
   assertEq failed (topLevelDropTarget 20 base (V2 300 200)) Nothing
   let dtD = DropTop AxisV True
-  assertEq failed (preview dtD) (Just (Rect 0 0 300 400, DropTop AxisV True))
+  assertEq failed (preview dtD) (Just (Rect 0 0 298 400, DropTop AxisV True))
 
   -- Widget level: build the same mixed grid through a live paneGrid, drag the
   -- left pane onto the bottom-right pane's lower edge, and check the drop

@@ -9,12 +9,13 @@ module Cases.Keyboard
   , runKeyboardTabHeaderTest
   , runKeyboardDisabledTest
   , runKeyboardModalEligibilityTest
+  , runKeyboardFocusRingTest
   ) where
 
 import Data.IORef (IORef, newIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import NanoUI
-import NanoUI.Context (Context (..), intKey, setStore)
+import NanoUI.Context (Context (..), getFocusVisible, intKey, setStore)
 import NanoUI.Emit qualified as Emit
 import NanoUI.Store (WidgetStore (..), slotDisabled, slotKey)
 import NanoUI.Testing
@@ -187,3 +188,17 @@ runKeyboardTabHeaderTest ctx failed = do
   _ <- runFrame ctx (tabInp inp0) (ui KBA)
   (active2, _, _, _) <- runFrame ctx (keyInp KeyEnter inp0) (ui KBA)
   assertEq failed active2 KBB
+
+-- Moving focus with Tab shows the focus ring; a pointer press hides it.
+runKeyboardFocusRingTest :: Context -> IORef Int -> IO ()
+runKeyboardFocusRingTest ctx failed = do
+  let inp = withInputOff 300 160
+      ui = column (button' "Go")
+  _ <- warmup2 ctx inp ui
+  assert failed . not =<< getFocusVisible ctx
+  _ <- runFrame ctx (tabInp inp) ui
+  assert failed =<< getFocusVisible ctx
+  let (press, release) = clickPair inp (V2 5 150)
+  _ <- runFrame ctx press ui
+  _ <- runFrame ctx release ui
+  assert failed . not =<< getFocusVisible ctx

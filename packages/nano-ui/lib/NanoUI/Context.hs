@@ -145,6 +145,7 @@ module NanoUI.Context
   , newPixelHostContext
   -- Focus
   , getFocusId
+  , getFocusVisible
   , getHotId
   , registerFocusable
   , getFocusables
@@ -552,6 +553,7 @@ newContext = do
   ctxClickedId <- newIORef (WidgetId 0)
   ctxReleaseClickedId <- newIORef (WidgetId 0)
   ctxFocusId <- newIORef (WidgetId 0)
+  ctxFocusVisible <- newIORef False
   ctxStore <- newIORef emptyWidgetStore
   ctxDamageState <- newIORef initialDamageState
   ctxOverlayState <- newIORef initialOverlayState
@@ -588,6 +590,7 @@ newContext = do
         , ctxClickedId
         , ctxReleaseClickedId
         , ctxFocusId
+        , ctxFocusVisible
         , ctxStore
         , ctxDamageState
         , ctxOverlayState
@@ -639,6 +642,12 @@ newPixelHostContext = do
 {-# INLINE getFocusId #-}
 getFocusId :: Context -> IO WidgetId
 getFocusId ctx = readIORef (ctxFocusId ctx)
+
+-- | Whether the focused widget shows its focus ring: focus moved by keyboard
+-- since the last pointer press.
+{-# INLINE getFocusVisible #-}
+getFocusVisible :: Context -> IO Bool
+getFocusVisible ctx = readIORef (ctxFocusVisible ctx)
 
 {-# INLINE getHotId #-}
 getHotId :: Context -> IO WidgetId

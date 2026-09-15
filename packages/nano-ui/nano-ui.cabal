@@ -137,6 +137,7 @@ library
         NanoUI.Widgets.ColorPicker
         NanoUI.Widgets.Drawing
         NanoUI.Widgets.TextInput
+        NanoUI.Widgets.NumericInput
         NanoUI.Widgets.TextCommon
         NanoUI.Widgets.Animate
         NanoUI.Widgets.Overlay
@@ -222,6 +223,7 @@ test-suite nano-ui-test
         Cases.Select
         Cases.Tabs
         Cases.TextInput
+        Cases.NumericInput
         Cases.ContextMenu
         Cases.CustomWidget
         Cases.Tooltip

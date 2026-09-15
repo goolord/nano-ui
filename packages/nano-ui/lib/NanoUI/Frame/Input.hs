@@ -20,6 +20,7 @@ import NanoUI.Context
   ( Context (..)
   , TextInputMenu (..)
   , WidgetStore (..)
+  , damageWidget
   , getFocusables
   , getMenuPointerGesture
   , getStore
@@ -71,7 +72,7 @@ import NanoUI.Layout.Arena
   , getWidgetId
   )
 import NanoUI.Monad (whenM)
-import NanoUI.Types (Rect (..), V2 (..), rectContains, rectH, rectW)
+import NanoUI.Types (DamageBounds (..), Rect (..), V2 (..), defaultDamageSlop, rectContains, rectH, rectW)
 import NanoUI.WidgetText (buttonVisualStyle, isMenuBarStyle, isMenuItemStyle, isTabButtonStyle)
 
 finalizeTabFocus :: Context -> Input -> IO ()
@@ -79,20 +80,23 @@ finalizeTabFocus ctx inp =
   when (inputKeysElem KeyTab (inputKeys inp)) $ do
     open <- modalTreeOpen ctx
     let shift = modShift (inputModifiers inp)
-    if not open
-      then do
-        cur <- readIORef (ctxFocusId ctx)
-        next <- tabNextFocusables ctx cur shift
-        when (hashWidgetId next /= 0) $ do
-          writeIORef (ctxFocusId ctx) next
-          markDirty ctx
-      else do
-        focusables <- getFocusables ctx
-        ids <- filterModalFocusables ctx (filter (/= WidgetId 0) focusables)
-        unless (null ids) $ do
-          cur <- readIORef (ctxFocusId ctx)
-          writeIORef (ctxFocusId ctx) (tabNext cur ids shift)
-          markDirty ctx
+    cur <- readIORef (ctxFocusId ctx)
+    next <-
+      if not open
+        then tabNextFocusables ctx cur shift
+        else do
+          focusables <- getFocusables ctx
+          ids <- filterModalFocusables ctx (filter (/= WidgetId 0) focusables)
+          pure (if null ids then WidgetId 0 else tabNext cur ids shift)
+    when (hashWidgetId next /= 0) $ do
+      -- Keyboard focus shows its ring until the next pointer press. Focus that
+      -- stays put (a lone focusable) changes no focus rect, so damage it here.
+      wasVisible <- readIORef (ctxFocusVisible ctx)
+      when (next == cur && not wasVisible) $
+        damageWidget ctx next (DamageInflated defaultDamageSlop)
+      writeIORef (ctxFocusId ctx) next
+      writeIORef (ctxFocusVisible ctx) True
+      markDirty ctx
 
 -- Flat menu buttons never animate: their hover highlight snaps on and off.
 isMenuButtonWidget :: Context -> WidgetId -> IO Bool
@@ -125,6 +129,8 @@ refreshHover ctx inp = do
 finalizePointerPress :: Context -> Input -> IO ()
 finalizePointerPress ctx inp =
   when (inputMousePressed inp) $ do
+    -- A pointer press hides the keyboard focus ring.
+    writeIORef (ctxFocusVisible ctx) False
     gesture <- getMenuPointerGesture ctx
     if gesture
       then writeIORef (ctxActiveId ctx) (WidgetId 0)
@@ -275,7 +281,11 @@ finalizeTextInputFocus ctx inp =
 finalizeSelectFocus :: Context -> Input -> IO ()
 finalizeSelectFocus ctx inp =
   when (inputMousePressed inp) $ do
-    mWid <- findSelectUnderMouse ctx (inputMousePos inp)
+    let mouse = inputMousePos inp
+    mOpen <- findSelectUnderMouse ctx mouse
+    -- A press on a select's own field that just closed its dropdown leaves no
+    -- open dropdown under the pointer, but the select keeps focus all the same.
+    mWid <- maybe (findTopWidgetUnderMouse ctx mouse (== NodeSelect)) (pure . Just) mOpen
     case mWid of
       Nothing -> pure ()
       Just wid ->

@@ -43,9 +43,8 @@ import NanoUI.Font
   , resolveLayoutPadding
   , scrollBarGeomFor
   , scrollBarGutter
-  , scrollBarListExtra
-  , scrollBarOuterGap
-  , scrollBarPageExtra
+  , scrollBarLane
+  , scrollBarSideGap
   , scrollLayoutGutter
   )
 import NanoUI.Types (Color, Rect (..), V2 (..), rectH, rectIntersect, rectW, rectX, rectY, v2X, v2Y)
@@ -134,38 +133,36 @@ scrollVerticalHidden = ScrollConfig ScrollNone ScrollHidden True False
 scrollHorizontalHidden :: ScrollConfig
 scrollHorizontalHidden = ScrollConfig ScrollHidden ScrollNone True False
 
+-- | Cross-axis gutter for one bar. @trailPad@ is the scroller's padding on
+-- the bar's side (right for the vertical bar, bottom for the horizontal one).
 scrollAxisGutter ::
   ScrollPolicy ->
-  FontMetrics ->
   ScrollBarSlot ->
   Float ->
   Float ->
+  Float ->
   Float
-scrollAxisGutter policy fm slot contentSize innerMain =
+scrollAxisGutter policy slot trailPad contentSize innerMain =
   case policy of
     ScrollNone -> 0
     ScrollHidden -> 0
-    ScrollAuto -> scrollLayoutGutter fm slot contentSize innerMain
-    ScrollAlways ->
-      case slot of
-        ScrollBarWindow -> 0
-        ScrollBarList -> scrollBarGutter fm + scrollBarListExtra
-        ScrollBarPage -> scrollBarGutter fm + scrollBarPageExtra
+    ScrollAuto -> scrollLayoutGutter slot trailPad contentSize innerMain
+    ScrollAlways -> scrollBarGutter slot trailPad
 
 -- Vertical bar takes width. Horizontal bar takes height. Second pass
 -- covers the corner case where one bar makes the other axis overflow.
 scrollGutters2D ::
-  FontMetrics ->
   ScrollBarSlot ->
   ScrollConfig ->
+  Padding ->
   Float ->
   Float ->
   Float ->
   Float ->
   (Float, Float)
-scrollGutters2D fm slot cfg contentW contentH innerW innerH =
-  let gVert inner = scrollAxisGutter (scrollPolicyY cfg) fm slot contentH inner
-      gHorz inner = scrollAxisGutter (scrollPolicyX cfg) fm slot contentW inner
+scrollGutters2D slot cfg pad contentW contentH innerW innerH =
+  let gVert inner = scrollAxisGutter (scrollPolicyY cfg) slot (padR pad) contentH inner
+      gHorz inner = scrollAxisGutter (scrollPolicyX cfg) slot (padB pad) contentW inner
       gW0 = gVert innerH
       gH0 = gHorz innerW
       gW = gVert (innerH - gH0)
@@ -270,11 +267,11 @@ scrollContentClip fm slot cfg dir x y w h pad contentSize =
         case dir of
           DirColumn -> rectH base
           DirRow -> rectW base
-      policy =
+      (policy, trailPad) =
         case dir of
-          DirColumn -> scrollPolicyY cfg
-          DirRow -> scrollPolicyX cfg
-      gutter = scrollAxisGutter policy fm slot contentSize innerMain
+          DirColumn -> (scrollPolicyY cfg, padR pad)
+          DirRow -> (scrollPolicyX cfg, padB pad)
+      gutter = scrollAxisGutter policy slot trailPad contentSize innerMain
    in case dir of
         DirColumn -> Rect (rectX base) (rectY base) (max 0 (rectW base - gutter)) (rectH base)
         DirRow -> Rect (rectX base) (rectY base) (rectW base) (max 0 (rectH base - gutter))
@@ -295,27 +292,31 @@ scrollViewportClip2D fm slot cfg x y w h pad contentW contentH =
   let base = padContentClip fm x y w h pad
       innerW = rectW base
       innerH = rectH base
-      (gutterW, gutterH) = scrollGutters2D fm slot cfg contentW contentH innerW innerH
+      (gutterW, gutterH) = scrollGutters2D slot cfg pad contentW contentH innerW innerH
    in Rect (rectX base) (rectY base) (max 0 (innerW - gutterW)) (max 0 (innerH - gutterH))
 
+-- | The strip a bar sits in. A window body's bar hangs into the window's
+-- padding, one side gap clear of the body. Any other bar is centered across
+-- the scroller's trailing padding plus the gutter reserved beside it (see
+-- 'scrollBarGutter'), so the gaps on either side of it match.
 scrollChromeLane ::
   ScrollBarSlot -> DirTag -> Float -> Float -> Float -> Float -> Padding -> Rect
 scrollChromeLane slot dir x y w h pad =
   let (barW, _) = scrollBarGeomFor slot
-      outer = scrollBarOuterGap slot
       hang = slot == ScrollBarWindow
+      across trailPad = (max (scrollBarLane slot) trailPad + barW) / 2
    in case dir of
         DirColumn ->
           let laneX =
                 if hang
-                  then x + w + outer
-                  else max x (x + w - outer - barW)
+                  then x + w + scrollBarSideGap
+                  else max x (x + w - across (padR pad))
            in Rect laneX (y + padT pad) barW (max 0 (h - padT pad - padB pad))
         DirRow ->
           let laneY =
                 if hang
-                  then y + h + outer
-                  else max y (y + h - outer - barW)
+                  then y + h + scrollBarSideGap
+                  else max y (y + h - across (padB pad))
            in Rect (x + padL pad) laneY (max 0 (w - padL pad - padR pad)) barW
 
 scrollBarLayout ::
@@ -420,10 +421,10 @@ scrollBarLayouts2D ::
   Float ->
   Float ->
   (Maybe ScrollBarLayout, Maybe ScrollBarLayout)
-scrollBarLayouts2D fm slot cfg x y w h pad contentW contentH offX offY =
+scrollBarLayouts2D _fm slot cfg x y w h pad contentW contentH offX offY =
   let innerW = w - padL pad - padR pad
       innerH = h - padT pad - padB pad
-      (gutterW, gutterH) = scrollGutters2D fm slot cfg contentW contentH innerW innerH
+      (gutterW, gutterH) = scrollGutters2D slot cfg pad contentW contentH innerW innerH
       viewW = max 0 (innerW - gutterW)
       viewH = max 0 (innerH - gutterH)
       v = scrollBarLayoutIn slot DirColumn x y w h pad viewH contentH offY

@@ -103,7 +103,9 @@ overlay kind open title child = do
         availW = max 1 (winW - 2 * margin)
         availH = max 1 (winH - 2 * margin)
         isModal = kind == ModalOverlay
-        padding = if isModal then Padding 14 14 0 12 else windowPad
+        -- Modals share the window's side padding, which also holds the
+        -- body's scrollbar lane with even gaps either side of the bar.
+        padding = if isModal then windowPad {padB = 12} else windowPad
         barH = if isModal then modalTitleBarH else titleBarChromeHFor
         -- Window body breathing room: one side-pad between the chrome and
         -- the body, matching the window's left/right padding. Modals keep

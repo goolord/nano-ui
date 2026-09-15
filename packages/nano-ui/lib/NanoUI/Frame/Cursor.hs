@@ -58,6 +58,7 @@ import NanoUI.Layout.Arena
   , isScrollNode
   )
 import NanoUI.Types (Rect (..), V2 (..), rectContains)
+import NanoUI.WidgetText (numericStepperRects, textInputNumericMode)
 import NanoUI.WidgetText (isTableHeaderStyle)
 
 uiCursorKind :: Context -> Input -> IO UiCursorKind
@@ -131,7 +132,23 @@ textFieldHoverCursorKind ctx inp = do
     Nothing -> pure Nothing
     Just wid -> do
       onClear <- searchClearHit ctx wid mouse
-      pure (Just (if onClear then UiCursorPointer else UiCursorText))
+      onStepper <- numericStepperHit ctx wid mouse
+      pure (Just (if onClear || onStepper then UiCursorPointer else UiCursorText))
+
+-- | Whether the pointer is over a numeric field's stepper, which takes the
+-- pointer cursor rather than the text cursor.
+numericStepperHit :: Context -> WidgetId -> V2 -> IO Bool
+numericStepperHit ctx wid mouse =
+  findNodeByWidgetId ctx wid >>= \case
+    Nothing -> pure False
+    Just idx -> do
+      si <- getStyleIdx (ctxNodeArena ctx) idx
+      if not (textInputNumericMode si)
+        then pure False
+        else do
+          (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
+          let (up, down) = numericStepperRects x y w h
+          pure (rectContains up mouse || rectContains down mouse)
 
 scrollThumbHit :: Context -> V2 -> IO Bool
 scrollThumbHit ctx mouse =
@@ -242,7 +259,11 @@ textInputCursorKind ctx wid mouse = do
       case (mIdx, mrect) of
         (Just idx, Just (Rect x y w h)) -> do
           (field, _) <- nodeTextFieldGeom ctx idx x y w h
-          pure (if rectContains field mouse then UiCursorText else UiCursorDefault)
+          onStepper <- numericStepperHit ctx wid mouse
+          pure $
+            if onStepper
+              then UiCursorPointer
+              else if rectContains field mouse then UiCursorText else UiCursorDefault
         _ -> pure UiCursorDefault
 
 textAreaCursorKind :: Context -> WidgetId -> V2 -> IO UiCursorKind

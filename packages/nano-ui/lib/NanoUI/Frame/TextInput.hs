@@ -73,9 +73,11 @@ import NanoUI.Style (Style (..), themeAccent)
 import NanoUI.Types (Color (..), Rect (..), V2 (..), rectContains, rectIntersect, rectOverlapArea, rectW)
 import NanoUI.WidgetText
   ( comboTextClip
+  , numericTextClip
   , searchFieldIconRects
   , searchFieldTextClip
   , textInputBareMode
+  , textInputNumericMode
   , textInputFieldHeight
   , textInputFieldText
   , textInputSearchMode
@@ -120,7 +122,9 @@ nodeTextFieldGeom ctx idx x y w h = do
     if textInputSelectableMode si
       then (box, box)
       else
-        if textInputBareMode si
+        if textInputNumericMode si
+          then (box, numericTextClip fm x y w h)
+          else if textInputBareMode si
           then (box, Rect (x + ix) (y + iy) (max 0 (w - 2 * ix)) (max 0 (h - 2 * iy)))
           else
             if textInputSearchMode si

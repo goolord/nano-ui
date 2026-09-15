@@ -17,6 +17,11 @@ module NanoUI.WidgetText
   , textInputSelectableMode
   , textInputFlagPassword
   , textInputPasswordMode
+  , textInputFlagNumeric
+  , textInputNumericMode
+  , numericStepperW
+  , numericTextClip
+  , numericStepperRects
   , comboTextClip
   , searchFieldReserveW
   , searchFieldTextClip
@@ -24,10 +29,8 @@ module NanoUI.WidgetText
   , selectDisplayText
   , selectChevronReserve
   , selectChevronCenterX
-  , colorPickerMinWidth
   , colorPickerGap
   , colorPickerSvH
-  , colorPickerExtraH
   , colorPickerLabelText
   , colorPickerCurrentLabel
   , colorPickerNewLabel
@@ -37,6 +40,7 @@ module NanoUI.WidgetText
   , colorFromHex
   , colorPickerParseHex
   , buttonFlagClose
+  , buttonCloseTrailing
   , buttonFlagTab
   , buttonFlagTable
   , buttonFlagMenu
@@ -196,6 +200,33 @@ textInputFlagPassword = 0x20000000
 textInputPasswordMode :: Int -> Bool
 textInputPasswordMode si = si .&. textInputFlagPassword /= 0
 
+-- | Marks a @NodeTextInput@ as a numeric field: a caption-less box whose text
+-- stops short of an up / down stepper at its right edge.
+textInputFlagNumeric :: Int
+textInputFlagNumeric = 0x40000000
+
+{-# INLINE textInputNumericMode #-}
+textInputNumericMode :: Int -> Bool
+textInputNumericMode si = si .&. textInputFlagNumeric /= 0
+
+-- | Width of a numeric field's stepper column.
+numericStepperW :: Float
+numericStepperW = 18
+
+-- | Region a numeric field's text may occupy: inside the content inset, left
+-- of the stepper.
+numericTextClip :: FontMetrics -> Float -> Float -> Float -> Float -> Rect
+numericTextClip fm x y w h =
+  let (ix, iy) = widgetContentInset fm
+   in Rect (x + ix) (y + iy) (max 0 (w - 2 * ix - numericStepperW)) (max 0 (h - 2 * iy))
+
+-- | The up and down halves of a numeric field's stepper.
+numericStepperRects :: Float -> Float -> Float -> Float -> (Rect, Rect)
+numericStepperRects x y w h =
+  let sx = x + w - numericStepperW
+      half = h / 2
+   in (Rect sx y numericStepperW half, Rect sx (y + half) numericStepperW (h - half))
+
 -- | Region a combo box's editable text may occupy: from the left content inset
 -- to the select chevron reserve on the right.
 comboTextClip :: FontMetrics -> Float -> Float -> Float -> Float -> Rect
@@ -215,19 +246,12 @@ selectChevronReserve = 16
 selectChevronCenterX :: Float -> Float -> Float
 selectChevronCenterX x w = x + w - selectChevronReserve / 2
 
-colorPickerMinWidth :: Float
-colorPickerMinWidth = 240
-
 colorPickerGap :: Float
 colorPickerGap = 4
 
--- Side of the square SV field; the canvas reserves the label above it.
+-- Height of a colour picker's field row; the field grows to a square this tall.
 colorPickerSvH :: Float
 colorPickerSvH = 250
-
--- extraH below the title: SV field + gap. The solver adds the measured label.
-colorPickerExtraH :: Float
-colorPickerExtraH = colorPickerSvH + colorPickerGap
 
 colorPickerLabelText :: Text -> Text
 colorPickerLabelText = T.strip
@@ -381,6 +405,12 @@ tableHeaderDisplayText _styleIdx txt =
 -- Type flags live in bits 28-31 so visual style and tab index stay in the low bits.
 buttonFlagClose :: Int
 buttonFlagClose = 0x20000000
+
+-- | Visual style of a title-bar close button: its cross sits against the
+-- box's right edge, so it lines up with the panel padding the way the title
+-- does on the left.
+buttonCloseTrailing :: Int
+buttonCloseTrailing = 1
 
 buttonFlagTab :: Int
 buttonFlagTab = 0x40000000

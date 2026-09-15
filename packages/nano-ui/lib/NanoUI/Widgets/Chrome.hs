@@ -12,8 +12,9 @@ module NanoUI.Widgets.Chrome
   , windowChromeSepH
   ) where
 
+import Data.Bits ((.|.))
 import Effectful (Eff, type (:>))
-import NanoUI.WidgetText (buttonFlagClose)
+import NanoUI.WidgetText (buttonCloseTrailing, buttonFlagClose)
 import NanoUI.Monad (Ui)
 import NanoUI.Style
   ( Layout (..)
@@ -61,6 +62,6 @@ floatMinFor authored avail = clamp 1 avail authored
 
 {-# INLINE closeButton #-}
 closeButton :: (Ui :> es) => Eff es Response
-closeButton = buttonStyled "" 0 layout buttonFlagClose
+closeButton = buttonStyled "" 0 layout (buttonFlagClose .|. buttonCloseTrailing)
   where
     layout = tight . fixedWH closeButtonSize closeButtonSize . alignMid $ defaultLayout
