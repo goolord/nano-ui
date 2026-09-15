@@ -21,6 +21,8 @@ module NanoUI.Widgets
   , rowWith
   , column
   , columnWith
+  , hstack
+  , vstack
   , grid
   , gridWith
   , center
@@ -304,8 +306,10 @@ import NanoUI.Widgets.Layout
   , flex
   , grid
   , gridWith
+  , hstack
   , label
   , label'
+  , vstack
   , labelWith
   , labelWith'
   , panel

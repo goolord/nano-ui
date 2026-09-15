@@ -15,6 +15,8 @@ module NanoUI.Widgets.Layout
   , column
   , columnWith
   , column'
+  , hstack
+  , vstack
   , label
   , label'
   , labelWith
@@ -175,6 +177,20 @@ columnWith = (`withDefaultWith` column')
 {-# INLINE column' #-}
 column' :: Ui :> es => Layout -> Eff es a -> Eff es a
 column' layout = container NodeContainer (layout {layoutDirection = Column})
+
+-- =============================================================================
+-- Collection stacks
+-- =============================================================================
+
+-- | Run a collection of widgets side by side, as in @hstack (map label names)@.
+{-# INLINE hstack #-}
+hstack :: (Foldable f, Ui :> es) => f (Eff es ()) -> Eff es ()
+hstack = row . sequence_
+
+-- | Run a collection of widgets top to bottom.
+{-# INLINE vstack #-}
+vstack :: (Foldable f, Ui :> es) => f (Eff es ()) -> Eff es ()
+vstack = column . sequence_
 
 -- =============================================================================
 -- Grid

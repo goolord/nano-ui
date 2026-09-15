@@ -23,7 +23,7 @@ runCollectionApiTest :: Context -> IORef Int -> IO ()
 runCollectionApiTest ctx failed = do
   seen <- newIORef []
   _ <- runFrame ctx (withInputOff 300 100) $
-    row (sequence_ (V.fromList [uiIO (modifyIORef' seen (key :)) | key <- [7, 2, 9 :: Int]]))
+    hstack (V.fromList [uiIO (modifyIORef' seen (key :)) | key <- [7, 2, 9 :: Int]])
   assertEq failed [9, 2, 7] =<< readIORef seen
   ((emptySelect, emptyRadio, combo), _, _, _) <- runFrame ctx (withInputOff 300 200) $
     withKey ("collection-options" :: Text) $ column $ do

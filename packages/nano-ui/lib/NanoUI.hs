@@ -93,6 +93,8 @@ module NanoUI
   , rowWith
   , column
   , columnWith
+  , hstack
+  , vstack
   , grid
   , gridWith
   , panel
