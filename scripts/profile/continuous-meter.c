@@ -2,7 +2,7 @@
  * real event loop between presents, including GC and presentation waits, then
  * prints results and exits after 1,000 warmup + 10,000 measured frames.
  *
- * cc -O2 -Wall -Wextra -shared -fPIC profiles/continuous-meter.c \
+ * cc -O2 -Wall -Wextra -shared -fPIC scripts/profile/continuous-meter.c \
  *    -o /tmp/nano-continuous-meter.so -ldl
  * SDL_VIDEODRIVER=x11 SDL_RENDER_DRIVER=opengl \
  * LD_PRELOAD=/tmp/nano-continuous-meter.so path/to/nano-ui-sdl-demo --continuous
