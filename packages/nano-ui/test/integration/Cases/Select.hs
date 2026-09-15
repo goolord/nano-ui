@@ -1,21 +1,13 @@
 module Cases.Select
   ( runSelectDragToSelectTest
-  , runSelectDropdownCursorTest
-  , runSelectDropdownTest
-  , runSelectDropFlushTest
   , runSelectKeyboardTest
   , runSelectOverlayDamageTest
-  , runSelectPickLowTest
   , runSelectChangeOnceTest
-  , runSelectTest
-  , runEnumSelectTest
   , runSliderCursorTest
-  , runTreeInitialTest
   , runTreeKeyboardTest
   , runTreeSelectTest
   ) where
 
-import Control.Monad (void)
 import Data.IORef (IORef)
 import Data.Text qualified as T
 import NanoUI
@@ -25,31 +17,10 @@ import NanoUI.Testing.Assert (assert, assertEq, withInput)
 import NanoUI.Testing.Harness
   ( assertSpansHas
   , clickPair
+  , hasText
   , runClickRelease
   , warmup2
   )
-
-runSelectDropdownCursorTest :: Context -> IORef Int -> IO ()
-runSelectDropdownCursorTest ctx failed = do
-  let inp0 = withInput 320 200
-      ui = column (select ["Low", "High"] 0)
-  (resp, _) <- warmup2 ctx inp0 ui
-  let Rect sx sy sw sh = respRect resp
-      (press, release) = clickPair inp0 (V2 (sx + sw / 2) (sy + sh / 2))
-  _ <- runFrame ctx press ui
-  _ <- runFrame ctx release ui
-  overlaysOpen <- collectOverlayTextSpans ctx release
-  case [rectY r | (r, txt, _, _, _) <- overlaysOpen, "Low" `T.isInfixOf` txt] of
-    (lowY : _) -> do
-      let hover = inp0 {inputMousePos = V2 (sx + sw / 2) (lowY + 0.5)}
-      _ <- runFrame ctx hover ui
-      kind <- uiCursorKind ctx hover
-      assertEq failed kind UiCursorPointer
-      let press' = hover {inputMouseDown = True, inputMousePressed = True}
-      _ <- runFrame ctx press' ui
-      pressKind <- uiCursorKind ctx press'
-      assertEq failed pressKind UiCursorPointer
-    _ -> assert failed False
 
 runSliderCursorTest :: Context -> IORef Int -> IO ()
 runSliderCursorTest ctx failed = do
@@ -78,8 +49,7 @@ runSliderCursorTest ctx failed = do
   assert failed isDefault
 
 runSelectOverlayDamageTest :: Context -> IORef Int -> IO ()
-runSelectOverlayDamageTest _ failed = do
-  ctx <- newContext
+runSelectOverlayDamageTest ctx failed = do
   let ui = column (select ["Low", "Medium", "High"] 0)
       inp0 = (withInput 320 160) {inputMousePos = V2 20 20}
   (resp, _) <- warmup2 ctx inp0 ui
@@ -98,36 +68,8 @@ runSelectOverlayDamageTest _ failed = do
       assertEq failed dmg DamageFull
     [] -> assert failed False
 
-runSelectTest :: Context -> IORef Int -> IO ()
-runSelectTest ctx failed = do
-  _ <- runFrame ctx (withInput 320 80) (column (select ["Low", "Medium", "High"] 1))
-  spans <- collectTextSpans ctx
-  assertSpansHas failed "Medium" spans
-
-runSelectDropdownTest :: Context -> IORef Int -> IO ()
-runSelectDropdownTest ctx failed = do
-  let inp0 = withInput 320 80
-      ui = column (select ["Low", "High"] 0)
-      (press, release) = clickPair inp0 (V2 10 10)
-  _ <- runFrame ctx inp0 ui
-  _ <- runFrame ctx press ui
-  _ <- runFrame ctx release ui
-  overlays <- collectOverlayTextSpans ctx release
-  assert failed (any (\(_, txt, _, _, _) -> "Low" `T.isInfixOf` txt) overlays)
-  assert failed (any (\(_, txt, _, _, _) -> "High" `T.isInfixOf` txt) overlays)
-
-runTreeInitialTest :: Context -> IORef Int -> IO ()
-runTreeInitialTest _ failed = do
-  ctx <- newContext
-  let items = [TreeItem "root" [TreeItem "child" []], TreeItem "leaf" []]
-  _ <- runFrame ctx (withInput 40 12) (column (void (tree "t" items 0)))
-  spans <- collectTextSpans ctx
-  let texts = [txt | (_, txt, _, _, _) <- spans]
-  assert failed (any ("root" `T.isInfixOf`) texts && any ("child" `T.isInfixOf`) texts && any ("leaf" `T.isInfixOf`) texts)
-
 runTreeSelectTest :: Context -> IORef Int -> IO ()
-runTreeSelectTest _ failed = do
-  ctx <- newContext
+runTreeSelectTest ctx failed = do
   let inp0 = withInput 40 12
       items = [TreeItem "alpha" [], TreeItem "beta" []]
       ui = column (tree "t" items 0)
@@ -139,13 +81,16 @@ runTreeSelectTest _ failed = do
   ((_, sel), _, _, _) <- runFrame ctx release ui
   assertEq failed sel 1
 
+-- A tree renders expanded, moves its selection with the arrow keys, and
+-- Enter collapses the selected parent.
 runTreeKeyboardTest :: Context -> IORef Int -> IO ()
-runTreeKeyboardTest _ failed = do
-  ctx <- newContext
+runTreeKeyboardTest ctx failed = do
   let items = V.fromList [TreeItem "root" [TreeItem "child" []], TreeItem "leaf" []]
       ui = column (tree "k" items 0)
       inp0 = withInput 40 12
   _ <- warmup2 ctx inp0 ui
+  spans0 <- collectTextSpans ctx
+  assert failed (hasText "root" spans0 && hasText "child" spans0 && hasText "leaf" spans0)
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
   ((_, sel1), _, _, _) <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyDown]}) ui
   assertEq failed sel1 1
@@ -157,47 +102,11 @@ runTreeKeyboardTest _ failed = do
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyEnter]}) ui
   _ <- runFrame ctx inp0 ui
   spans <- collectTextSpans ctx
-  assert failed (not (any (\(_, t, _, _, _) -> "child" `T.isInfixOf` t) spans))
+  assert failed (not (hasText "child" spans))
   ((_, afterCollapsed), _, _, _) <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyDown]}) ui
   assertEq failed afterCollapsed 2
 
-runSelectDropFlushTest :: Context -> IORef Int -> IO ()
-runSelectDropFlushTest ctx failed = do
-  let inp0 = withInput 320 200
-      ui = select ["Low", "High"] 1
-  (resp, _) <- warmup2 ctx inp0 ui
-  let Rect sx sy sw sh = respRect resp
-      (press, release) = clickPair inp0 (V2 (sx + sw / 2) (sy + sh / 2))
-  _ <- runFrame ctx press ui
-  _ <- runFrame ctx release ui
-  overlays <- collectOverlayTextSpans ctx release
-  case [rectY r | (r, txt, _, _, _) <- overlays, "Low" `T.isInfixOf` txt] of
-    (lowY : _) -> assert failed (lowY - (sy + sh) <= 18)
-    [] -> assert failed False
-
-runSelectPickLowTest :: Context -> IORef Int -> IO ()
-runSelectPickLowTest ctx failed = do
-  let inp0 = withInput 320 200
-      ui = select ["Low", "Medium", "High"] 1
-  (resp, idx0) <- warmup2 ctx inp0 ui
-  assertEq failed idx0 1
-  let Rect sx sy sw _ = respRect resp
-      (openPress, openRelease) = clickPair inp0 (V2 (sx + sw / 2) (sy + 10))
-  _ <- runFrame ctx openPress ui
-  _ <- runFrame ctx openRelease ui
-  overlaysOpen <- collectOverlayTextSpans ctx openRelease
-  case [rectY r | (r, txt, _, _, _) <- overlaysOpen, "Low" `T.isInfixOf` txt] of
-    (lowY : _) -> do
-      let (pickPress, pickRelease) = clickPair inp0 (V2 (sx + sw / 2) (lowY + 0.5))
-      _ <- runFrame ctx pickPress ui
-      focusAfterPick <- getFocusId ctx
-      assert failed (hashWidgetId focusAfterPick /= 0)
-      ((_, idx1), _, _, _) <- runFrame ctx pickRelease ui
-      assertEq failed idx1 0
-      spans <- collectTextSpans ctx
-      assertSpansHas failed "Low" spans
-    _ -> assert failed False
-
+-- Open dropdown rows show the pointer cursor on hover and press, and
 -- respChanged fires on the frame the selection changes and not on later
 -- frames (regression: it compared the index against the initial one, so it
 -- stayed set, and selectEmit emitted, every frame after a pick).
@@ -213,12 +122,21 @@ runSelectChangeOnceTest ctx failed = do
   overlays <- collectOverlayTextSpans ctx openRelease
   case [rectY r | (r, txt, _, _, _) <- overlays, "Low" `T.isInfixOf` txt] of
     (lowY : _) -> do
-      let (pickPress, pickRelease) = clickPair inp0 (V2 (sx + sw / 2) (lowY + 0.5))
+      let lowPos = V2 (sx + sw / 2) (lowY + 0.5)
+          hover = inp0 {inputMousePos = lowPos}
+          (pickPress, pickRelease) = clickPair inp0 lowPos
           frame inp = (\((r, i), _, _, _) -> (respChanged r, i)) <$> runFrame ctx inp ui
-      results <- mapM frame [pickPress, pickRelease, inp0, inp0, inp0]
-      assertEq failed (map snd (drop 1 results)) [0, 0, 0, 0]
+      _ <- runFrame ctx hover ui
+      hoverKind <- uiCursorKind ctx hover
+      assertEq failed hoverKind UiCursorPointer
+      pressed <- frame pickPress
+      pressKind <- uiCursorKind ctx pickPress
+      assertEq failed pressKind UiCursorPointer
+      rest <- mapM frame [pickRelease, inp0, inp0, inp0]
+      let results = pressed : rest
+      assertEq failed (map snd rest) [0, 0, 0, 0]
       assertEq failed (length (filter fst results)) 1
-      assertEq failed (map fst (drop 2 results)) [False, False, False]
+      assertEq failed (map fst (drop 1 rest)) [False, False, False]
     [] -> assert failed False
 
 runSelectDragToSelectTest :: Context -> IORef Int -> IO ()
@@ -286,20 +204,3 @@ runSelectKeyboardTest ctx failed = do
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyLeft]}) ui
   ((_, idx4), _, _, _) <- runFrame ctx inp0 ui
   assertEq failed idx4 1
-
-data SampleEnum = SampleLow | SampleMed | SampleHigh
-  deriving (Eq, Show, Enum, Bounded)
-
-runEnumSelectTest :: Context -> IORef Int -> IO ()
-runEnumSelectTest ctx failed = do
-  let inp0 = withInput 320 200
-      ui = column $ do
-        (_, s1) <- enumSelect SampleMed
-        (_, s2) <- enumRadio SampleHigh
-        pure (s1, s2)
-  ((sel, rad), _, _, _) <- runFrame ctx inp0 ui
-  assertEq failed sel SampleMed
-  assertEq failed rad SampleHigh
-  spans <- collectTextSpans ctx
-  assertSpansHas failed "SampleMed" spans
-  assertSpansHas failed "SampleHigh" spans

@@ -1,7 +1,5 @@
 module Cases.Tooltip
   ( runTooltipHoverTest
-  , runTooltipWidgetTest
-  , runTooltipSpansTest
   , runTooltipIdStableTest
   , runTooltipScrollPosTest
   ) where
@@ -12,60 +10,41 @@ import Data.Text qualified as T
 import NanoUI
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, evalUi, withInput)
-import NanoUI.Testing.Harness (centerOf, warmup2)
+import NanoUI.Testing.Harness (centerOf, hasText, warmup2)
 
+-- Hovering shows a text tooltip, and a widget tooltip only evaluates its body
+-- while hovered.
 runTooltipHoverTest :: Context -> IORef Int -> IO ()
 runTooltipHoverTest ctx failed = do
   let inp0 = withInput 640 480
-      ui = column $ do
-        btn <- button' "Help Target"
-        tooltip btn "Helpful advice here"
-
-  -- Unhovered: no tooltip overlay
-  _ <- evalUi ctx inp0 ui
-  spans0 <- collectOverlayTextSpans ctx inp0
-  assert failed (not (any (\(_, txt, _, _, _) -> "Helpful advice" `T.isInfixOf` txt) spans0))
-
-  -- Hovered: tooltip overlay present
-  btnWarm <- warmup2 ctx inp0 (button' "Help Target")
-  let hoverInp = inp0 {inputMousePos = centerOf btnWarm}
-  _ <- runFrame ctx hoverInp ui
-  _ <- runFrame ctx hoverInp ui
-  spans1 <- collectOverlayTextSpans ctx hoverInp
-  assert failed (any (\(_, txt, _, _, _) -> "Helpful advice" `T.isInfixOf` txt) spans1)
-
-runTooltipWidgetTest :: Context -> IORef Int -> IO ()
-runTooltipWidgetTest ctx failed = do
-  let inp0 = withInput 640 480
-      ui = column $ do
-        btn <- button' "Rich Info"
-        tooltipWidget btn $ do
+      ui = rowWith fillW $ do
+        help <- button' "Help Target"
+        tooltip help "Helpful advice here"
+        _ <- spacer (Grow 1) Fit
+        rich <- button' "Rich Info"
+        body <- tooltipWidget rich $ do
           row $ do
             void (label "[Icon]")
             label "Rich tooltip body text"
+        pure (help, rich, body)
 
-  -- When unhovered, child is not evaluated / rendered
-  mBody0 <- evalUi ctx inp0 ui
-  assert failed (case mBody0 of Nothing -> True; _ -> False)
+  -- Unhovered: no tooltip overlay, and the widget body is not evaluated
+  (help, rich, body0) <- warmup2 ctx inp0 ui
+  spans0 <- collectOverlayTextSpans ctx inp0
+  assert failed (not (hasText "Helpful advice" spans0))
+  assert failed (case body0 of Nothing -> True; _ -> False)
 
-  -- When hovered, child is evaluated / rendered
-  btnWarm <- warmup2 ctx inp0 (button' "Rich Info")
-  let hoverInp = inp0 {inputMousePos = centerOf btnWarm}
-  _ <- runFrame ctx hoverInp ui
-  (mBody1, _, _, _) <- runFrame ctx hoverInp ui
-  assert failed (case mBody1 of Just _ -> True; Nothing -> False)
+  -- Hovered: tooltip overlay present
+  let hoverHelp = inp0 {inputMousePos = centerOf help}
+  _ <- runFrame ctx hoverHelp ui
+  _ <- runFrame ctx hoverHelp ui
+  spans1 <- collectOverlayTextSpans ctx hoverHelp
+  assert failed (hasText "Helpful advice" spans1)
 
-runTooltipSpansTest :: Context -> IORef Int -> IO ()
-runTooltipSpansTest ctx failed = do
-  let inp0 = withInput 640 480
-      ui = withTooltip (button' "Action Button") (label "Detailed description")
-
-  btnWarm <- warmup2 ctx inp0 (button' "Action Button")
-  let hoverInp = inp0 {inputMousePos = centerOf btnWarm}
-  _ <- runFrame ctx hoverInp ui
-  _ <- runFrame ctx hoverInp ui
-  spans <- collectOverlayTextSpans ctx hoverInp
-  assert failed (any (\(_, txt, _, _, _) -> "Detailed description" `T.isInfixOf` txt) spans)
+  let hoverRich = inp0 {inputMousePos = centerOf rich}
+  _ <- runFrame ctx hoverRich ui
+  ((_, _, body1), _, _, _) <- runFrame ctx hoverRich ui
+  assert failed (case body1 of Just _ -> True; Nothing -> False)
 
 runTooltipIdStableTest :: Context -> IORef Int -> IO ()
 runTooltipIdStableTest ctx failed = do

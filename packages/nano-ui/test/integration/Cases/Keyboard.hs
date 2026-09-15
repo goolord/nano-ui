@@ -18,7 +18,7 @@ import NanoUI.Context (Context (..), intKey, setStore)
 import NanoUI.Store (WidgetStore (..), slotDisabled, slotKey)
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertGt)
-import NanoUI.Testing.Harness (keyInp, tabInp, warmup2, withInputOff)
+import NanoUI.Testing.Harness (centerOf, clickPair, keyInp, tabInp, warmup2, withInputOff)
 
 -- Retaining focus while a widget becomes disabled must not bypass the same
 -- guard used by pointer interaction. Exercise the shared key-navigation hook.
@@ -90,7 +90,8 @@ runKeyboardButtonTest ctx failed = do
   ((_, bEnter), _, _, _) <- runFrame ctx (keyInp KeyEnter inp0) ui
   assert failed bEnter
 
--- | A focused checkbox toggles with Space and Enter.
+-- | A focused checkbox toggles with Space and Enter, and 'checkboxEmit'
+-- emits its new value on keyboard activation.
 runKeyboardCheckboxTest :: Context -> IORef Int -> IO ()
 runKeyboardCheckboxTest ctx failed = do
   let inp0 = withInputOff 200 100
@@ -101,6 +102,11 @@ runKeyboardCheckboxTest ctx failed = do
   assert failed checked1
   ((_, checked2), _, _, _) <- runFrame ctx (keyInp KeyEnter inp0) ui
   assert failed (not checked2)
+  let emitUi = checkboxEmit "Emit" False id
+  (resp, _, _, _) <- runFrame ctx inp0 emitUi
+  writeIORef (ctxFocusId ctx) (respId resp)
+  (_, messages, _, _) <- runFrame ctx (keyInp KeyEnter inp0) emitUi
+  assertEq failed [True] (decodeMessages messages :: [Bool])
 
 -- | A focused slider steps with the arrow keys.
 runKeyboardSliderTest :: Context -> IORef Int -> IO ()
@@ -134,18 +140,25 @@ runKeyboardRadioTest ctx failed = do
   ((_, sel3), _, _, _) <- runFrame ctx (keyInp KeyUp inp0) ui
   assertEq failed sel3 1
 
--- | A focused toggle switch flips with Space and Enter.
+-- | A toggle switch flips with Space and Enter while focused, and on click.
 runKeyboardToggleTest :: Context -> IORef Int -> IO ()
 runKeyboardToggleTest ctx failed = do
   let inp0 = withInputOff 200 100
       ui = column (toggleSwitch False)
-  (_, v0) <- warmup2 ctx inp0 ui
+  (resp0, v0) <- warmup2 ctx inp0 ui
   assert failed (not v0)
   _ <- runFrame ctx (tabInp inp0) ui
   ((_, v1), _, _, _) <- runFrame ctx (spaceInp inp0) ui
   assert failed v1
   ((_, v2), _, _, _) <- runFrame ctx (keyInp KeyEnter inp0) ui
   assert failed (not v2)
+  let (press, release) = clickPair inp0 (centerOf resp0)
+  _ <- runFrame ctx press ui
+  ((clicked, v3), _, _, _) <- runFrame ctx release ui
+  assert failed (respClicked clicked && v3)
+  _ <- runFrame ctx press ui
+  ((clicked2, v4), _, _, _) <- runFrame ctx release ui
+  assert failed (respClicked clicked2 && not v4)
 
 data KB = KBA | KBB
   deriving (Eq, Show)

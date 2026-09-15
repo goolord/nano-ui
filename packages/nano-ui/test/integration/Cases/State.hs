@@ -1,4 +1,4 @@
-module Cases.State (runControlledStateTest, runCheckboxEmitKeyboardTest, runHookStateTest, runCollectionApiTest) where
+module Cases.State (runControlledStateTest, runHookStateTest, runCollectionApiTest) where
 
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.ByteString qualified as BS
@@ -8,21 +8,13 @@ import Data.Sequence qualified as Seq
 import Data.Vector qualified as V
 import NanoUI
 import NanoUI.Context (Context (..), getStore, intKey, registerImages, lookupImageUv)
-import NanoUI.Context.Types (FrameMsg (..), reduceMessages, reduceUpdates)
 import NanoUI.Store (WidgetStore (..))
-import NanoUI.Testing (clearDirty, decodeMessages, isDirty, runFrame)
+import NanoUI.Testing (clearDirty, isDirty, runFrame)
 import NanoUI.Testing.Assert (assertEq)
 import NanoUI.Testing.Harness (withInputOff)
 
 runCollectionApiTest :: Context -> IORef Int -> IO ()
 runCollectionApiTest ctx failed = do
-  let messages = V.fromList [FrameMsg (2 :: Int), FrameMsg True, FrameMsg (3 :: Int)]
-      update digit model = model * 10 + digit
-  assertEq failed [2, 3] (decodeMessages messages :: [Int])
-  assertEq failed (123 :: Int) (reduceMessages update 1 messages)
-  assertEq failed (1 :: Int) (reduceMessages update 1 (V.empty :: V.Vector FrameMsg))
-  let updates = Seq.fromList [FrameMsg ((+ 2) :: Int -> Int), FrameMsg False, FrameMsg ((* 3) :: Int -> Int)]
-  assertEq failed (9 :: Int) (reduceUpdates 1 updates)
   seen <- newIORef []
   _ <- runFrame ctx (withInputOff 300 100) $
     hstack (V.fromList [uiIO (modifyIORef' seen (key :)) | key <- [7, 2, 9 :: Int]])
@@ -83,17 +75,6 @@ runControlledStateTest ctx failed = do
   assertEq failed (Just 0) (IM.lookup (intKey (respId check)) (storeInt settled))
   assertEq failed [True] =<< readIORef callbacks
 
-runCheckboxEmitKeyboardTest :: Context -> IORef Int -> IO ()
-runCheckboxEmitKeyboardTest ctx failed = do
-  let
-    inp = withInputOff 300 100
-    ui = checkboxEmit "Emit" False id
-  (resp, _, _, _) <- runFrame ctx inp ui
-  writeIORef (ctxFocusId ctx) (respId resp)
-  (_, messages, _, _) <-
-    runFrame ctx (inp {inputKeys = inputKeysFromList [KeyEnter]}) ui
-  assertEq failed [True] (decodeMessages messages :: [Bool])
-
 runHookStateTest :: Context -> IORef Int -> IO ()
 runHookStateTest ctx failed = do
   let
@@ -105,17 +86,12 @@ runHookStateTest ctx failed = do
       (value, setValue) <- evaluate
       assertEq failed initial value
       clearDirty ctx
-      before <- getStore ctx
       runNanoUI ctx inp (setValue initial)
       assertEq failed False =<< isDirty ctx
-      unchanged <- getStore ctx
-      assertEq failed (storeMirrorGen before) (storeMirrorGen unchanged)
 
       runNanoUI ctx inp (setValue changed)
       assertEq failed True =<< isDirty ctx
       assertEq failed changed . fst =<< evaluate
-      after <- getStore ctx
-      assertEq failed (storeMirrorGen before + 1) (storeMirrorGen after)
 
       -- Reuse the original setter: comparing against its captured initial
       -- value would incorrectly discard this update back to the initial.

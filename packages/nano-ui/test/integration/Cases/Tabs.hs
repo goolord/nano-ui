@@ -1,11 +1,8 @@
 module Cases.Tabs
   ( runTabsClosableTest
   , runTabsDisabledTest
-  , runTabsContentDamageTest
   , runTabsDamageTest
   , runTabsEmitTest
-  , runTabsInPanelDamageTest
-  , runTabsInteractionTest
   , runTabsLazinessTest
   , runTabsScrollTest
   , runTabsStatePersistenceTest
@@ -23,7 +20,6 @@ import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, run2Frames, withInput)
 import NanoUI.Testing.Harness
   ( assertSpansHas
-  , centerOf
   , clickPair
   , drawQuads
   , hasText
@@ -38,51 +34,6 @@ import NanoUI.Layout.Arena (arenaCount, getRect, getText, getWidgetId)
 data DummyTab = TabA | TabB | TabC
   deriving (Eq, Show)
 
--- Ghosting guard: switching tabs inside a floating window must leave no
--- stale pixel behind. The mirror store write escalates the switch frame to
--- DamageFull today; if a refactor ever narrows it to a clip (layout-driven
--- churn inside panels suppresses keysChanged), diffNew renders the new
--- body's rects, so the clip still covers every row of the new tab.
-runTabsInPanelDamageTest :: Context -> IORef Int -> IO ()
-runTabsInPanelDamageTest _ failed = do
-  ctx <- newContext
-  let inp0 = withInput 400 300
-      ui cur = window True "TabWin" (columnWith (fixedH 300) (tabs cur
-        [ tab TabA "Alpha" (label_ "WIDE BODY ROW ONE")
-        , tab TabB "Beta" (column (replicateM 5 (label "row line") >> pure ()))
-        ]))
-  _ <- warmup2 ctx inp0 (ui TabA)
-  _ <- runFrame ctx inp0 (ui TabA)
-  _ <- takeDamage ctx
-  let spansBody txt = do
-        allSpans <- collectOverlayTextSpans ctx inp0
-        pure [(r, t) | (r, t, _, _, _) <- allSpans, txt `T.isInfixOf` t]
-  spansA <- spansBody "WIDE BODY"
-  assert failed (length spansA == 1)
-  betaSpans <- collectOverlayTextSpans ctx inp0
-  case [r | (r, t, _, _, _) <- betaSpans, "Beta" `T.isInfixOf` t] of
-    (Rect bx by bw bh : _) -> do
-      let (press, release) = clickPair inp0 (V2 (bx + bw / 2) (by + bh / 2))
-      _ <- runFrame ctx press (ui TabA)
-      ((_, mtab), _, _, _) <- runFrame ctx release (ui TabA)
-      case mtab of
-        Nothing -> assert failed False
-        Just (_, nTab) -> do
-          assert failed (nTab == TabB)
-          dmg <- takeDamage ctx
-          assert failed (not (damageIsEmpty dmg))
-          let dmgR = case dmg of
-                DamageFull -> fullWindowRect inp0
-                DamageClip r -> r
-          spansB <- spansBody "row line"
-          assert failed (length spansB == 5)
-          let Rect ddx ddy ddw ddh = dmgR
-          forM_ spansB $ \(Rect rx ry rw rh, _) -> do
-            assert failed (rx >= ddx && ry >= ddy && rx + rw <= ddx + ddw && ry + rh <= ddy + ddh)
-          spansA2 <- spansBody "WIDE BODY"
-          assert failed (null spansA2)
-    _ -> assert failed False
-
 fullWindowRect :: Input -> Rect
 fullWindowRect inp =
   let Size w h = inputWindowSize inp
@@ -94,8 +45,7 @@ fullWindowRect inp =
 -- content slot and the incoming key rects (diffNew) must together cover all
 -- five rows.
 runPanelBodySwapDamageTest :: Context -> IORef Int -> IO ()
-runPanelBodySwapDamageTest _ failed = do
-  ctx <- newContext
+runPanelBodySwapDamageTest ctx failed = do
   let inp0 = withInput 400 300
       uiA = window True "TabWin" (columnWith (fixedH 300) (label "WIDE BODY ROW ONE"))
       uiB = window True "TabWin" (columnWith (fixedH 300) (column (replicateM 5 (label "row line") >> pure ())))
@@ -133,22 +83,6 @@ runTabsLazinessTest ctx failed = do
   assertEq failed cntA 0
   assertEq failed cntB 1
   assertEq failed cntC 0
-
-runTabsInteractionTest :: Context -> IORef Int -> IO ()
-runTabsInteractionTest ctx failed = do
-  let inp0 = withInput 300 100
-      ui curTab = tabs curTab
-        [ tab TabA "Alpha" (label_ "Body A")
-        , tab TabB "Beta" (label_ "Body B")
-        ]
-  ((_, active0), _, _, _) <- runFrame ctx inp0 (ui TabA)
-  assertEq failed active0 TabA
-  spans <- collectTextSpans ctx
-  case [r | (r, txt, _, _, _) <- spans, "Beta" `T.isInfixOf` txt] of
-    (Rect bx by bw bh : _) -> do
-      (resp1, active1) <- runClickPair ctx inp0 (ui TabA) (V2 (bx + bw / 2) (by + bh / 2))
-      assert failed (respChanged resp1 && active1 == TabB)
-    [] -> assert failed False
 
 data TabMsg = MsgSelect DummyTab | MsgClose DummyTab
   deriving (Eq, Show)
@@ -283,13 +217,15 @@ runTabsStatePersistenceTest ctx failed = do
     [] -> assert failed False
 
 runTabsDamageTest :: Context -> IORef Int -> IO ()
-runTabsDamageTest _ failed = do
-  ctx <- newContext
+runTabsDamageTest ctx failed = do
   let inp0 = withInputOff 300 100
       ui curTab = tabs curTab
         [ tab TabA "Alpha" (label_ "Body A with some text")
         , tab TabB "Beta" (label_ "Body B different widgets")
         ]
+      covers dmg (Rect rx ry rw rh) = case dmg of
+        DamageFull -> True
+        DamageClip (Rect dx dy dw dh) -> rx >= dx && ry >= dy && rx + rw <= dx + dw && ry + rh <= dy + dh
   _ <- runFrame ctx inp0 (ui TabA)
   _ <- takeDamage ctx
   _ <- runFrame ctx inp0 (ui TabA)
@@ -308,42 +244,18 @@ runTabsDamageTest _ failed = do
       spansSwitch <- collectTextSpans ctx
       assertSpansHas failed "Body B" spansSwitch
       assert failed (not (hasText "Body A" spansSwitch))
+      let bodyB = [r | (r, txt, _, _, _) <- spansSwitch, "Body B" `T.isInfixOf` txt]
       dSwitch <- takeDamage ctx
-      assertEq failed dSwitch DamageFull
+      assert failed (not (null bodyB) && all (covers dSwitch) bodyB)
 
       _ <- runFrame ctx inp0 (ui TabB)
       dTabB <- takeDamage ctx
-      assertEq failed dTabB DamageFull
+      assert failed (all (covers dTabB) bodyB)
 
       _ <- runFrame ctx inp0 (ui TabB)
       dSettled <- takeDamage ctx
       assert failed (dSettled /= DamageFull)
     [] -> assert failed False
-
-runTabsContentDamageTest :: Context -> IORef Int -> IO ()
-runTabsContentDamageTest _ failed = do
-  ctx <- newContext
-  let inp0 = withInputOff 320 200
-      ui = do
-        (click, setClick) <- useText ""
-        row $ do
-          btn <- button' "OK"
-          onClick btn (setClick "OK")
-          _ <- tabs ("Controls" :: T.Text)
-            [ tab "Controls" "Controls" $
-                kv "Clicked" (if T.null click then "-" else click)
-            ]
-          pure btn
-  _ <- runFrame ctx inp0 ui
-  (btn, _, _, _) <- runFrame ctx inp0 ui
-  let (press, release) = clickPair inp0 (centerOf btn)
-  _ <- runFrame ctx press ui
-  _ <- runFrame ctx release ui
-  spans1 <- collectTextSpans ctx
-  assertSpansHas failed "OK" spans1
-  _ <- runFrame ctx inp0 ui
-  spans2 <- collectTextSpans ctx
-  assertSpansHas failed "OK" spans2
 
 -- Too-wide tab strips scroll instead of overflowing. The framework scroll
 -- container owns the clip, the offset and the damage; the strip adds

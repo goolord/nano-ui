@@ -2,6 +2,7 @@ module Cases.Grid
   ( runGridColumnsWithFontColorTest
   , runNestedGridTest
   , runStaleFontColorTest
+  , runFontCompositionTest
   ) where
 
 import Control.Monad (void)
@@ -9,6 +10,8 @@ import Data.IORef (IORef)
 import Data.List (nub)
 import qualified Data.Text as T
 import NanoUI
+import NanoUI.Context (Context (..))
+import NanoUI.Layout.Arena (arenaCount, getStyleIdx, getText)
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, withInput)
 
@@ -75,3 +78,39 @@ runStaleFontColorTest ctx failed = do
   case spanOf "plain" spans of
     Just (_, fg) -> assert failed (fg /= red)
     Nothing -> assert failed False
+
+-- | Font size, colour, weight, style and decoration modifiers compose on one
+-- label, and the bold/italic/underline helpers set the same style bits.
+runFontCompositionTest :: Context -> IORef Int -> IO ()
+runFontCompositionTest ctx failed = do
+  let inp = withInput 800 600
+      customCol = colorRGBA 12 34 56 255
+      ui = column $ do
+        void $ label "Standard Text"
+        void $ labelWith (fontSize 24.0 . fontBold . fontItalic . fontUnderline . fontColor customCol) "Composed"
+        void $ labelWith fontStrike "Strike Text"
+        bold "Bold Helper"
+        italic "Italic Helper"
+        underline "Underline Helper"
+  _ <- runFrame ctx inp ui
+  spans <- collectTextSpans ctx
+  case (spanOf "Standard Text" spans, spanOf "Composed" spans) of
+    (Just (std, stdFg), Just (r, fg)) -> do
+      assertEq failed (rectH std) 16.0
+      assertEq failed (rectH r) 24.0
+      assertEq failed fg customCol
+      assert failed (stdFg /= customCol)
+    _ -> assert failed False
+  let na = ctxNodeArena ctx
+  n <- arenaCount na
+  styles <- mapM (\i -> (,) <$> getText na i <*> getStyleIdx na i) [0 .. n - 1]
+  case mapM (`lookup` styles) ["Composed", "Strike Text", "Bold Helper", "Italic Helper", "Underline Helper"] of
+    Just [composed, strike, b, i, u] -> do
+      assertEq failed (textNodeFontWeight composed) WeightBold
+      assertEq failed (textNodeFontStyle composed) FontStyleItalic
+      assertEq failed (textNodeTextDecoration composed) DecorationUnderline
+      assertEq failed (textNodeTextDecoration strike) DecorationStrikethrough
+      assertEq failed (textNodeFontWeight b) WeightBold
+      assertEq failed (textNodeFontStyle i) FontStyleItalic
+      assertEq failed (textNodeTextDecoration u) DecorationUnderline
+    _ -> assert failed False

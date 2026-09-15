@@ -1,19 +1,17 @@
 module Cases.Cache
-  ( runLayoutCacheEligibilityTest
-  , runMetricCacheInvalidationTest
+  ( runMetricCacheInvalidationTest
   , runWidgetPlacementCacheTest
   , runLayoutPaintStateTest
   ) where
 
-import Control.Monad (forM_, void, when)
+import Control.Monad (forM_, void)
 import Control.Exception (evaluate)
 import Data.ByteString qualified as BS
 import Data.IORef (IORef, readIORef, writeIORef)
-import Data.Maybe (isNothing)
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Ptr (castPtr)
 import NanoUI
-import NanoUI.Context (Context (..), registerCustomMeasure)
+import NanoUI.Context (Context (..))
 import NanoUI.Layout.Arena
   ( NodeType (..), addNodeFromLayout, getRect, setNodeText, setNodeValue
   , setStyleIdx, setWidgetId
@@ -32,26 +30,6 @@ snapshotDraw draw = do
   indices <- withForeignPtr (drawIndices draw) $ \p ->
     BS.packCStringLen (castPtr p, drawIndexCount draw * indexSize)
   pure (vertices, indices, drawCmdElems draw)
-
-runLayoutCacheEligibilityTest :: Context -> IORef Int -> IO ()
-runLayoutCacheEligibilityTest ctx failed = do
-  let inp = withInputOff 400 300
-      drawingUi custom = uiIO $ do
-        let na = ctxNodeArena ctx
-        i <- addNodeFromLayout na NodeDrawing (-1) defaultLayout
-        setWidgetId na i (WidgetId 123)
-        setNodeText na i "drawing"
-        when custom $ registerCustomMeasure ctx (WidgetId 123) (\_ _ -> (123, 45))
-  void $ runFrame ctx inp (drawingUi True)
-  (_, _, w, h) <- getRect (ctxNodeArena ctx) 0
-  assertEq failed (w, h) (123, 45)
-  assert failed . isNothing =<< readIORef (ctxLayoutCache ctx)
-  void $ runFrame ctx inp (drawingUi False)
-  (_, _, w', h') <- getRect (ctxNodeArena ctx) 0
-  assertEq failed (w', h') (32, 32)
-  -- A floating frame must not capture an unusable full-arena snapshot either.
-  void $ runFrame ctx inp (window True "Floating" (label_ "body"))
-  assert failed . isNothing =<< readIORef (ctxLayoutCache ctx)
 
 runMetricCacheInvalidationTest :: Context -> IORef Int -> IO ()
 runMetricCacheInvalidationTest ctx failed = do

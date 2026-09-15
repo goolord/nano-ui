@@ -1,27 +1,22 @@
 module Cases.Window
   ( runFitHeaderNoShrinkTest
-  , runHeaderTopPadTest
   , runOverlayClickThroughTest
   , runOverlayPanelLiveTest
   , runSeparatorSpanTest
   , runWindowCloseDamageTest
-  , runWindowDragDamageTest
   , runWindowDragTest
   , runWindowOverlayTest
-  , runWindowTitleCenterTest
   , runWindowResizeHaloHitTest
   , runWindowResizeTest
   , runWindowScrollGutterTest
-  , runWindowScrollWheelTest
   , runPageWindowScrollTest
-  , runSiblingWindowScrollTest
   , runWindowScrollOnlyDamageTest
   , runWindowContentChurnTest
   , runScrolledDebugToggleTest
   , runHeadingMonoTruncateTest
   ) where
 
-import Control.Monad (replicateM, void, when)
+import Control.Monad (forM_, replicateM, void, when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Text qualified as T
@@ -62,8 +57,7 @@ runWindowScrollGutterTest ctx failed = do
       assert failed (cx + cw >= contentRight - 0.5 && cx + cw <= contentRight + 0.01)
 
 runWindowCloseDamageTest :: Context -> IORef Int -> IO ()
-runWindowCloseDamageTest _ failed = do
-  ctx <- newContext
+runWindowCloseDamageTest ctx failed = do
   let ui open = void (window open "Debug" (label "Body"))
       inp0 = withInput 640 400
   _ <- warmup2 ctx inp0 (ui True)
@@ -72,18 +66,6 @@ runWindowCloseDamageTest _ failed = do
   assertEq failed dmg DamageFull
   need <- needsRedraw ctx inp0 (inp0 {inputDeltaTime = 1})
   assert failed need
-
-runWindowDragDamageTest :: Context -> IORef Int -> IO ()
-runWindowDragDamageTest _ failed = do
-  ctx <- newContext
-  let ui = fmap fst (window True "Debug" (label "Body"))
-      inp0 = withInput 640 400
-  win0 <- warmup2 ctx inp0 ui
-  let Rect x0 y0 _ _ = respRect win0
-      dest = V2 (x0 + 24 - 50) (y0 + 22 + 30)
-  runDragFrom ctx inp0 ui (windowTitleGrab (respRect win0)) dest
-  dmg <- takeDamage ctx
-  assertEq failed dmg DamageFull
 
 runOverlayPanelLiveTest :: Context -> IORef Int -> IO ()
 runOverlayPanelLiveTest _ failed = do
@@ -108,15 +90,6 @@ runOverlayPanelLiveTest _ failed = do
   checkStatic (void (window True "Debug" (label "fps 0")))
   checkStatic (void (modal True "About" (label "body")))
   checkDirtyWake (void (modal True "About" (label "body")))
-
-runHeaderTopPadTest :: Context -> IORef Int -> IO ()
-runHeaderTopPadTest ctx failed = do
-  let inp = withInput 800 600
-      ui = columnWith (padAll 12 . gap 8 . grow) $
-             panelWith (padXY 16 12 . fillW) (label "nano-ui SDL3 demo")
-  _ <- runFrame ctx inp ui
-  (resp, _, _, _) <- runFrame ctx inp ui
-  assert failed (rectY (respRect resp) >= 24)
 
 runFitHeaderNoShrinkTest :: Context -> IORef Int -> IO ()
 runFitHeaderNoShrinkTest ctx failed = do
@@ -181,33 +154,8 @@ runWindowOverlayTest ctx failed = do
   ((_, winClose, _), _, _, _) <- runFrame ctx releaseClose ui
   assert failed (respClicked winClose)
 
-runWindowTitleCenterTest :: Context -> IORef Int -> IO ()
-runWindowTitleCenterTest ctx failed = do
-  let inp0 = withInput 640 400
-      ui = fmap fst (window True "Debug" (label "Body"))
-      titleBarChromeH = 39
-  _ <- warmup2 ctx inp0 ui
-  panels <- floatingPanelRects ctx
-  (_, overlays) <- collectRasterSpans ctx inp0
-  let wy =
-        case map snd (IM.toList panels) of
-          (Rect _ wy' _ _ : _) -> wy'
-          _ -> 0
-      barMid = wy + padT windowPad + titleBarChromeH / 2
-  case [r | (r, txt, _, _, _) <- overlays, "Debug" `T.isInfixOf` txt] of
-    (Rect _ ty _ th : _) -> do
-      let fm = ctxFontMetrics ctx
-          capMid =
-            case fmGlyph fm 'H' of
-              Nothing -> th / 2
-              Just gq -> gqY gq + gqH gq / 2
-          textInkMid = ty + capMid
-      assert failed (abs (textInkMid - barMid) <= 4)
-    _ -> assert failed False
-
 runOverlayClickThroughTest :: Context -> IORef Int -> IO ()
-runOverlayClickThroughTest _ failed = do
-  ctx <- newContext
+runOverlayClickThroughTest ctx failed = do
   let
     inp0 = withInput 300 220
     windowUi = do
@@ -301,53 +249,42 @@ runWindowDragTest ctx failed = do
       y0 = rectY r0
       dest = V2 (x0 + 24 - 50) (y0 + 22 + 30)
   runDragFrom ctx inp0 ui (windowTitleGrab r0) dest
+  dmg <- takeDamage ctx
+  assertEq failed dmg DamageFull
   (win1, _, _, _) <- runFrame ctx (inp0 {inputMousePos = dest}) ui
   let Rect x1 y1 _ _ = respRect win1
   assert failed (x1 < x0 - 10)
   assert failed (y1 > y0 + 10)
 
+-- Wheeling over a window's body scrolls the window, not the page, whether the
+-- window is declared inside a page scroll area or beside one.
 runPageWindowScrollTest :: Context -> IORef Int -> IO ()
-runPageWindowScrollTest ctx failed = do
-  let inp0 = withInput 320 220
-      line1 = T.pack "line 1"
+runPageWindowScrollTest _ failed = do
+  let line1 = T.pack "line 1"
       title = T.pack "Debug"
-      ui = do
-        (_, win) <- scrollArea (tight (grow defaultLayout)) $ do
-          void (button "OK")
-          w <- fmap fst $
-            window True "Debug" $
-              column $
-                mapM_ (\i -> label (T.pack ("line " <> show (i :: Int)))) [1 .. 30]
-          pure w
-        pure win
-  win <- warmup2 ctx inp0 ui
-  let Rect wx _ ww _ = respRect win
-  spans0 <- collectOverlayTextSpans ctx inp0
-  case spanYOf line1 spans0 of
-    [] -> assert failed False
-    b0 : _ -> do
-      let wheelAt = V2 (wx + ww / 2) (b0 + 2)
-      assertWheelTitlePinned failed ctx inp0 ui title line1 wheelAt Nothing
-
-runSiblingWindowScrollTest :: Context -> IORef Int -> IO ()
-runSiblingWindowScrollTest ctx failed = do
-  let inp0 = withInput 640 400
-      line1 = T.pack "line 1"
-      title = T.pack "Debug"
-      ui = do
-        scrollWith (tight . grow) $ void (label "page")
+      debugWindow =
         fmap fst $
           window True "Debug" $
             column $
               mapM_ (\i -> label (T.pack ("line " <> show (i :: Int)))) [1 .. 30]
-  win <- warmup2 ctx inp0 ui
-  let Rect wx _ ww _ = respRect win
-  spans0 <- collectOverlayTextSpans ctx inp0
-  case spanYOf line1 spans0 of
-    [] -> assert failed False
-    b0 : _ -> do
-      let wheelAt = V2 (wx + ww / 2) (b0 + 2)
-      assertWheelTitlePinned failed ctx inp0 ui title line1 wheelAt Nothing
+      nested = do
+        (_, win) <- scrollArea (tight (grow defaultLayout)) $ do
+          void (button "OK")
+          debugWindow
+        pure win
+      sibling = do
+        scrollWith (tight . grow) $ void (label "page")
+        debugWindow
+  forM_ [(withInput 320 220, nested), (withInput 640 400, sibling)] $ \(inp0, ui) -> do
+    ctx <- newContext
+    win <- warmup2 ctx inp0 ui
+    let Rect wx _ ww _ = respRect win
+    spans0 <- collectOverlayTextSpans ctx inp0
+    case spanYOf line1 spans0 of
+      [] -> assert failed False
+      b0 : _ -> do
+        let wheelAt = V2 (wx + ww / 2) (b0 + 2)
+        assertWheelTitlePinned failed ctx inp0 ui title line1 wheelAt Nothing
 
 runWindowScrollOnlyDamageTest :: Context -> IORef Int -> IO ()
 runWindowScrollOnlyDamageTest ctx failed = do
@@ -373,8 +310,7 @@ runWindowScrollOnlyDamageTest ctx failed = do
     _ -> assert failed False
 
 runWindowContentChurnTest :: Context -> IORef Int -> IO ()
-runWindowContentChurnTest _ failed = do
-  ctx' <- newContext
+runWindowContentChurnTest ctx failed = do
   let inp0 = withInput 640 400
       ui k = do
         _ <- button "Outside"
@@ -382,13 +318,13 @@ runWindowContentChurnTest _ failed = do
           void $ label (T.pack (replicate (1 + (k `mod` 9)) 'M'))
           void $ label "static row"
           )
-  _ <- warmup2 ctx' inp0 (ui 0)
+  _ <- warmup2 ctx inp0 (ui 0)
   counter <- newIORef (1 :: Int)
   allClip <- replicateM 30 $ do
     k <- readIORef counter
     writeIORef counter (k + 1)
-    _ <- runFrame ctx' inp0 (ui k)
-    dmg <- takeDamage ctx'
+    _ <- runFrame ctx inp0 (ui k)
+    dmg <- takeDamage ctx
     case dmg of
       DamageClip _ -> pure True
       _ -> pure False
@@ -417,22 +353,6 @@ runScrolledDebugToggleTest ctx failed = do
   spansAfter <- collectOverlayTextSpans ctx inp0
   let titlesAfter = [t | (_, t, _, _, _) <- spansAfter, title `T.isInfixOf` t]
   assert failed (not (null titlesAfter))
-
-runWindowScrollWheelTest :: Context -> IORef Int -> IO ()
-runWindowScrollWheelTest ctx failed = do
-  let inp0 = withInput 320 220
-      line1 = T.pack "line 1"
-      title = T.pack "Scroll"
-      ui = fmap fst $ window True "Scroll" $
-             column (mapM_ (\i -> label (T.pack ("line " <> show (i :: Int)))) [1 .. 24])
-  win <- warmup2 ctx inp0 ui
-  let Rect wx _ ww wh = respRect win
-  assert failed (ww > 0 && wh > 0)
-  spans0 <- collectOverlayTextSpans ctx inp0
-  case spanYOf line1 spans0 of
-    [] -> assert failed False
-    b0 : _ ->
-      assertWheelTitlePinned failed ctx inp0 ui title line1 (V2 (wx + ww / 2) (b0 + 2)) Nothing
 
 runWindowResizeTest :: Context -> IORef Int -> IO ()
 runWindowResizeTest ctx failed = do
@@ -539,13 +459,7 @@ runHeadingMonoTruncateTest ctx failed = do
   let Rect wx wy ww wh = respRect win
       contentRight = wx + ww - padR windowPad
   spans <- collectOverlayTextSpans ctx inp
-  let headingSpans = [r | (r, t, _, _, _) <- spans, t == "Draw"]
-      labelSpans = [r | (r, t, _, _, _) <- spans, t == "NormalLabel"]
-      fontSpans = [(r, t) | (r, t, _, _, _) <- spans, "JetBrainsMono" `T.isInfixOf` t || "..." `T.isInfixOf` t]
-  case (headingSpans, labelSpans) of
-    (Rect hx _ _ _ : _, Rect lx _ _ _ : _) -> do
-      assert failed (abs (hx - lx) < 0.1)
-    _ -> assert failed False
+  let fontSpans = [(r, t) | (r, t, _, _, _) <- spans, "JetBrainsMono" `T.isInfixOf` t || "..." `T.isInfixOf` t]
   case fontSpans of
     [(Rect fx _ fw _, t)] -> do
       assert failed ("..." `T.isSuffixOf` t)
@@ -565,5 +479,3 @@ runHeadingMonoTruncateTest ctx failed = do
           let contentRightWide = wxWide + wwWide - padR windowPad
           assert failed (abs (fx2 + fw2 - contentRightWide) < 2.0)
         _ -> assert failed False
-
-

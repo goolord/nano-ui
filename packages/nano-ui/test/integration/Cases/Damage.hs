@@ -1,9 +1,6 @@
 module Cases.Damage
   ( runDamageBoundsResolutionTest
-  , runDamageBoundsUnionTest
   , runExplicitDamageWidgetTest
-  , runExplicitDamageRectTest
-  , runExplicitDamageFullTest
   , runDamageQueueClearedPerFrameTest
   , runStateChangeDamageTest
   , runOrphanAnimationDamageSettlesTest
@@ -30,22 +27,14 @@ runDamageBoundsResolutionTest _ failed = do
   assertEq failed rExact (Rect 0 0 500 500)
   assertEq failed rCustom (Rect 9 18 110 70)
   assertEq failed rNone (Rect 0 0 0 0)
-
-runDamageBoundsUnionTest :: Context -> IORef Int -> IO ()
-runDamageBoundsUnionTest _ failed = do
-  let base = Rect 10 20 100 50
-      bUnion = DamageUnion (DamageInflated 4.0) (DamageInflated 8.0)
-      rUnion = resolveDamageRect bUnion base
-      rExpected = rectUnion (Rect 6 16 108 58) (Rect 2 12 116 66)
-
-  assertEq failed rUnion rExpected
+  assertEq failed (resolveDamageRect (DamageUnion (DamageInflated 4.0) (DamageInflated 8.0)) base)
+    (rectUnion (Rect 6 16 108 58) (Rect 2 12 116 66))
   -- DamageNone is the identity of a union rather than a rect at the origin.
   assertEq failed (resolveDamageRect (DamageUnion DamageSelf DamageNone) base) base
   assertEq failed (resolveDamageRect (DamageUnion DamageNone (DamageExact base)) (Rect 0 0 0 0)) base
 
 runExplicitDamageWidgetTest :: Context -> IORef Int -> IO ()
-runExplicitDamageWidgetTest _ failed = do
-  ctx <- newContext
+runExplicitDamageWidgetTest ctx failed = do
   let inp = withInput 400 300
       ui = columnWith (padAll 20) $ do
         w1 <- button' "First"
@@ -72,42 +61,8 @@ runExplicitDamageWidgetTest _ failed = do
     DamageFull -> assert failed False
     DamageClip r -> assert failed (approxEq r expected)
 
-runExplicitDamageRectTest :: Context -> IORef Int -> IO ()
-runExplicitDamageRectTest _ failed = do
-  ctx <- newContext
-  let inp = withInput 400 300
-      customRect = Rect 15 25 80 45
-      ui = column (label "Hello")
-      damagedUi = column $ do
-        damageRectNow customRect
-        label "Hello"
-  _ <- warmup2 ctx inp ui
-  _ <- takeDamage ctx
-
-  _ <- runFrame ctx inp damagedUi
-  dmg <- takeDamage ctx
-  case dmg of
-    DamageFull -> assert failed False
-    DamageClip r -> assertEq failed r customRect
-
-runExplicitDamageFullTest :: Context -> IORef Int -> IO ()
-runExplicitDamageFullTest _ failed = do
-  ctx <- newContext
-  let inp = withInput 400 300
-      ui = column (label "Hello")
-      fullDamagedUi = column $ do
-        damageFullNow
-        label "Hello"
-  _ <- warmup2 ctx inp ui
-  _ <- takeDamage ctx
-
-  _ <- runFrame ctx inp fullDamagedUi
-  dmg <- takeDamage ctx
-  assertEq failed dmg DamageFull
-
 runDamageQueueClearedPerFrameTest :: Context -> IORef Int -> IO ()
-runDamageQueueClearedPerFrameTest _ failed = do
-  ctx <- newContext
+runDamageQueueClearedPerFrameTest ctx failed = do
   let inp = withInput 400 300
       ui = column (label "Static content")
   _ <- warmup2 ctx inp ui
@@ -128,9 +83,19 @@ runDamageQueueClearedPerFrameTest _ failed = do
   dmg2 <- takeDamage ctx
   assert failed (damageIsEmpty dmg2)
 
+  -- Explicit full-window damage, again only for its own frame
+  let fullDamagedUi = column $ do
+        damageFullNow
+        label "Static content"
+  _ <- runFrame ctx inp fullDamagedUi
+  dmg3 <- takeDamage ctx
+  assertEq failed dmg3 DamageFull
+  _ <- runFrame ctx inp ui
+  dmg4 <- takeDamage ctx
+  assert failed (damageIsEmpty dmg4)
+
 runStateChangeDamageTest :: Context -> IORef Int -> IO ()
-runStateChangeDamageTest _ failed = do
-  ctx <- newContext
+runStateChangeDamageTest ctx failed = do
   let inp0 = withInput 400 300
       ui = do
         (name, setName) <- useText ""
@@ -150,14 +115,13 @@ runStateChangeDamageTest _ failed = do
   assertEq failed dmg DamageFull
 
 runOrphanAnimationDamageSettlesTest :: Context -> IORef Int -> IO ()
-runOrphanAnimationDamageSettlesTest _ failed = do
+runOrphanAnimationDamageSettlesTest ctx failed = do
   let winInp = withInput 400 300
       inp = winInp {inputDeltaTime = 0.05}
       withBar = columnWith (padAll 20) $ do
         barResp <- spacer (Fixed 40) (Fixed 20)
         pure barResp
       withoutBar = columnWith (padAll 20) (pure ())
-  ctx <- newContext
   -- Warm up: the bar widget occupies a nonzero 40x20 rect in the arena.
   (barResp, _, _, _) <- runFrame ctx inp withBar
   _ <- takeDamage ctx

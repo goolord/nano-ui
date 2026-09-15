@@ -224,7 +224,6 @@ test-suite nano-ui-test
         Cases.CustomWidget
         Cases.Tooltip
         Cases.Window
-        Cases.Font
     build-depends:
         base ^>=4.22.0.0,
         bytestring,
@@ -259,7 +258,6 @@ test-suite nano-ui-inspection
     ghc-options:      -fplugin=Test.Inspection.Plugin
     build-depends:
         base ^>=4.22.0.0,
-        hashable,
         inspection-testing,
         nano-ui
     hs-source-dirs:   test/inspection

@@ -2,17 +2,33 @@ module Main (main) where
 
 import Cases
 import Cases.Atlas (runAtlasGrowthTest)
-import Cases.Grid (runGridColumnsWithFontColorTest, runNestedGridTest, runStaleFontColorTest)
+import Cases.Grid
+  ( runFontCompositionTest
+  , runGridColumnsWithFontColorTest
+  , runNestedGridTest
+  , runStaleFontColorTest
+  )
 import Cases.HostDraw (runExternalTextTest, runSquareGeometryTest)
 import Cases.Runner (runDrawingLockTest, runSessionLoopTest)
 import Cases.SIMD (runSimdWritesTest)
 import Cases.State
-  ( runCheckboxEmitKeyboardTest
-  , runCollectionApiTest
+  ( runCollectionApiTest
   , runControlledStateTest
   , runHookStateTest
   )
-import Cases.Table (runTableReorderTest, runTableSortTest)
+import Cases.Table
+  ( runPageWheelAboveTableTest
+  , runTableCellPadTest
+  , runTableColResizeDemoReproTest
+  , runTableFillWidthTest
+  , runTableFirstColWidthTest
+  , runTableHBarReachTest
+  , runTableReorderTest
+  , runTableResizeOverflowTest
+  , runTableScrollRevealTest
+  , runTableSortTest
+  , runTableWrapRowStretchTest
+  )
 import Data.IORef (IORef)
 import NanoUI.Testing (Context, newContext, newPixelContext)
 import NanoUI.Testing.Runner (runTests)
@@ -33,143 +49,89 @@ main =
 
 testSpecs :: [TestSpec]
 testSpecs =
-  [ TestSpec "id-stability" False runIdStabilityTest
-  , TestSpec "session-loop" False runSessionLoopTest
+  -- Runner, state and messages
+  [ TestSpec "session-loop" False runSessionLoopTest
   , TestSpec "drawing-lock" False runDrawingLockTest
   , TestSpec "simd-writes" False runSimdWritesTest
+  , TestSpec "no-thunks" False runNoThunksTest
   , TestSpec "controlled-state" False runControlledStateTest
   , TestSpec "hook-state" False runHookStateTest
   , TestSpec "collection-api" False runCollectionApiTest
-  , TestSpec "table-sort" False runTableSortTest
-  , TestSpec "table-reorder" True runTableReorderTest
+  , TestSpec "embed-state" False runEmbedStateTest
+  , TestSpec "host-slot" False runHostSlotTest
+  , TestSpec "reduce-messages" False runReduceMessagesTest
+  , TestSpec "reduce-click" False runReduceClickTest
+  , TestSpec "widget-no-string-emit" False runWidgetNoStringEmitTest
+  -- Ids, layout and caches
+  , TestSpec "id-keyed-list" False runIdKeyedListTest
+  , TestSpec "fit-muted-width" False runFitMutedWidthTest
+  , TestSpec "fit-header-no-shrink" False runFitHeaderNoShrinkTest
+  , TestSpec "layout-reuse" False runLayoutReuseTest
+  , TestSpec "metric-cache-invalidation" False runMetricCacheInvalidationTest
+  , TestSpec "widget-placement-cache" False runWidgetPlacementCacheTest
+  , TestSpec "layout-cache-paint-state" False runLayoutPaintStateTest
+  , TestSpec "deep-nesting" False runDeepNestingTest
+  , TestSpec "grow-split" False runGrowSplitTest
+  , TestSpec "percent-gap-shrink" False runPercentGapShrinkTest
+  , TestSpec "aspect-layout" False runAspectLayoutTest
+  , TestSpec "label-align-end" False runLabelAlignEndTest
+  , TestSpec "responsive-wrap" True runResponsiveWrapTest
+  , TestSpec "kv-multiline-height" True runKvMultilineHeightTest
+  , TestSpec "separator-span" False runSeparatorSpanTest
+  , TestSpec "panel-paints" False runPanelPaintsTest
+  , TestSpec "grid-columns-font-color" False runGridColumnsWithFontColorTest
+  , TestSpec "grid-nested" False runNestedGridTest
+  , TestSpec "stale-font-color" False runStaleFontColorTest
+  , TestSpec "font-composition" True runFontCompositionTest
+  -- Drawing
+  , TestSpec "draw-square-geometry" False runSquareGeometryTest
+  , TestSpec "draw-external-text" False runExternalTextTest
+  , TestSpec "drawing" False runDrawingTest
+  , TestSpec "image" False runImageTest
+  , TestSpec "atlas-growth" False runAtlasGrowthTest
+  -- Pointer, redraw and damage
+  , TestSpec "pointer-cursor" False runPointerCursorTest
+  , TestSpec "hover-damage" False runHoverDamageTest
+  , TestSpec "damage-bounds-resolution" False runDamageBoundsResolutionTest
+  , TestSpec "damage-widget-explicit" False runExplicitDamageWidgetTest
+  , TestSpec "damage-queue-cleared" False runDamageQueueClearedPerFrameTest
+  , TestSpec "damage-state-change" False runStateChangeDamageTest
+  , TestSpec "damage-orphan-anim-settles" False runOrphanAnimationDamageSettlesTest
+  , TestSpec "panel-body-swap-damage" False runPanelBodySwapDamageTest
+  , TestSpec "refresh-forces-redraw" False runRefreshRedrawTest
+  -- Animation
+  , TestSpec "animation-settle" False runAnimationSettleTest
+  , TestSpec "animation-damage" False runAnimationDamageTest
+  , TestSpec "animation-stagger" False runAnimationStaggerTest
+  , TestSpec "animation-bezier" False runAnimationBezierTest
+  , TestSpec "animation-spring-retarget" False runAnimationSpringRetargetTest
+  , TestSpec "animation-spring-dt" False runAnimationSpringDtTest
   , TestSpec
       "composite-animation-isolation"
       False
       runCompositeAnimationIsolationTest
-  , TestSpec "checkbox-emit-keyboard" False runCheckboxEmitKeyboardTest
-  , TestSpec "id-keyed-list" False runIdKeyedListTest
-  , TestSpec "fit-sizing" False runFitSizingTest
-  , TestSpec "fit-muted-width" False runFitMutedWidthTest
-  , TestSpec "with-key" False runWithKeyTest
-  , TestSpec "layout" False runLayoutTest
-  , TestSpec "layout-reuse" False runLayoutReuseTest
-  , TestSpec "layout-cache-eligibility" False runLayoutCacheEligibilityTest
-  , TestSpec "metric-cache-invalidation" False runMetricCacheInvalidationTest
-  , TestSpec "widget-placement-cache" False runWidgetPlacementCacheTest
-  , TestSpec "layout-cache-paint-state" False runLayoutPaintStateTest
+  , TestSpec "button-hover-anim" False runButtonHoverAnimTest
+  -- Keyboard
   , TestSpec "keyboard-disabled" False runKeyboardDisabledTest
   , TestSpec "keyboard-modal-eligibility" False runKeyboardModalEligibilityTest
-  , TestSpec "deep-nesting" False runDeepNestingTest
-  , TestSpec "row-panel-layout" False runRowPanelLayoutTest
-  , TestSpec "grid-columns-font-color" False runGridColumnsWithFontColorTest
-  , TestSpec "grid-nested" False runNestedGridTest
-  , TestSpec "stale-font-color" False runStaleFontColorTest
-  , TestSpec "draw-square-geometry" False runSquareGeometryTest
-  , TestSpec "draw-external-text" False runExternalTextTest
-  , TestSpec "draw" False runDrawTest
-  , TestSpec "drawing" False runDrawingTest
-  , TestSpec "overlay" False runOverlayTest
-  , TestSpec "interaction" False runInteractionTest
-  , TestSpec "hover" False runHoverTest
-  , TestSpec "no-thunks" False runNoThunksTest
-  , TestSpec "pointer-cursor" False runPointerCursorTest
-  , TestSpec "pointer-cursor-checkbox" False runPointerCursorCheckboxTest
-  , TestSpec "text-input-cursor" False runTextInputCursorTest
-  , TestSpec "text-area-cursor" True runTextAreaCursorTest
-  , TestSpec
-      "text-area-cut-clears-selection"
-      False
-      runTextAreaCutClearsSelectionTest
-  , TestSpec "text-area-ctrl-a" False runTextAreaCtrlATest
-  , TestSpec
-      "text-area-scrollbar-visibility"
-      True
-      runTextAreaScrollbarVisibilityTest
-  , TestSpec "text-area-scroll-wheel" True runTextAreaScrollWheelTest
-  , TestSpec "text-area-zoom-scroll" True runTextAreaZoomScrollTest
-  , TestSpec "refresh-forces-redraw" True runRefreshRedrawTest
-  , TestSpec "text-area-remount-scroll" True runTextAreaRemountScrollTest
-  , TestSpec "text-area-menu-pulse" True runTextAreaMenuPulseTest
-  , TestSpec "text-area-scroll-drag" True runTextAreaScrollDragTest
-  , TestSpec "text-area-cursor-on-scrollbar" True runTextAreaCursorOnScrollBarTest
-  , TestSpec
-      "text-area-hscrollbar-visibility"
-      True
-      runTextAreaHScrollbarVisibilityTest
-  , TestSpec "text-area-hscroll-wheel" True runTextAreaHScrollWheelTest
-  , TestSpec "text-area-hscroll-drag" True runTextAreaHScrollDragTest
-  , TestSpec "text-area-2d-scroll" True runTextArea2DScrollTest
-  , TestSpec "text-area-hscroll-cursor-click" True runTextAreaHScrollCursorClickTest
-  , TestSpec
-      "text-area-scroll-cursor-leaves-viewport"
-      True
-      runTextAreaScrollCursorLeavesViewportTest
-  , TestSpec "text-field-hover-boundary" True runTextFieldHoverBoundaryTest
-  , TestSpec
-      "text-input-cut-clears-selection"
-      False
-      runTextInputCutClearsSelectionTest
-  , TestSpec "text-input-selection" False runTextInputSelectionTest
-  , TestSpec "text-input-ctrl-a" False runTextInputCtrlATest
-  , TestSpec "text-input-mouse-selection" False runTextInputMouseSelectionTest
-  , TestSpec "text-input-click-select" False runTextInputClickSelectTest
-  , TestSpec "modal-overlay" False runModalOverlayTest
-  , TestSpec "modal-no-phantom-scroll" False runModalNoPhantomScrollTest
-  , TestSpec "image" False runImageTest
-  , TestSpec "atlas-growth" False runAtlasGrowthTest
-  , TestSpec "text-input-clipboard" False runTextInputClipboardTest
-  , TestSpec "text-input-password" False runTextInputPasswordTest
-  , TestSpec "text-input-cut-menu" False runTextInputCutMenuTest
-  , TestSpec "text-input-menu" False runTextInputMenuTest
-  , TestSpec "text-input-menu-unfocused" False runTextInputMenuUnfocusedTest
-  , TestSpec "select-dropdown-cursor" False runSelectDropdownCursorTest
+  , TestSpec "keyboard-button" False runKeyboardButtonTest
+  , TestSpec "keyboard-checkbox" False runKeyboardCheckboxTest
+  , TestSpec "keyboard-slider" True runKeyboardSliderTest
+  , TestSpec "keyboard-radio" False runKeyboardRadioTest
+  , TestSpec "keyboard-toggle" False runKeyboardToggleTest
+  , TestSpec "keyboard-tab-header" False runKeyboardTabHeaderTest
+  -- Controls
+  , TestSpec "checkbox-initial" False runCheckboxInitialTest
   , TestSpec "slider-cursor" True runSliderCursorTest
-  , TestSpec "scroll-thumb-cursor" False runScrollThumbCursorTest
-  , TestSpec "text-input-span" True runTextInputSpanTest
-  , TestSpec "text-input-ff-caret" False runTextInputFfCaretTest
-  , TestSpec "text-input-focus-sdl" True runTextInputFocusSdlTest
-  , TestSpec "text-input-scroll" True runTextInputScrollTest
-  , TestSpec "kv-multiline-height" True runKvMultilineHeightTest
-  , TestSpec "button-hover-anim" False runButtonHoverAnimTest
-  , TestSpec "button-press-release-hover" False runButtonPressReleaseHoverTest
-  , TestSpec "idle" False runIdleTest
-  , TestSpec "hover-skip" False runHoverSkipTest
-  , TestSpec "hover-damage" False runHoverDamageTest
-  , TestSpec "scroll-damage" False runScrollDamageTest
-  , TestSpec "damage-bounds-resolution" False runDamageBoundsResolutionTest
-  , TestSpec "damage-bounds-union" False runDamageBoundsUnionTest
-  , TestSpec "damage-widget-explicit" False runExplicitDamageWidgetTest
-  , TestSpec "damage-rect-explicit" False runExplicitDamageRectTest
-  , TestSpec "damage-full-explicit" False runExplicitDamageFullTest
-  , TestSpec "damage-queue-cleared" False runDamageQueueClearedPerFrameTest
-  , TestSpec "damage-state-change" False runStateChangeDamageTest
-  , TestSpec "damage-orphan-anim-settles" False runOrphanAnimationDamageSettlesTest
-  , TestSpec "table-scroll" False runTableScrollTest
-  , TestSpec "table-scroll-reveal" False runTableScrollRevealTest
-  , TestSpec "page-wheel-above-table" False runPageWheelAboveTableTest
-  , TestSpec "table-wrap-row-stretch" False runTableWrapRowStretchTest
-  , TestSpec "table-first-col" False runTableFirstColWidthTest
-  , TestSpec "table-fill-width" False runTableFillWidthTest
-  , TestSpec "table-content-slack" False runTableContentSlackTest
-  , TestSpec "table-cell-pad" True runTableCellPadTest
-  , TestSpec "table-fit-scroll-col" False runTableFitScrollColWidthTest
-  , TestSpec "table-tab-wrap-row" True runTableTabWrapRowTest
-  , TestSpec "table-resize-header-lane" False runTableResizeHeaderLaneTest
-  , TestSpec "scroll-2d-pad-fill-overflow" False run2DPadFillOverflowTest
-  , TestSpec "scroll-2d-pad-overflow-scrolls" False run2DPadOverflowScrollsTest
-  , TestSpec "table-col-resize-cursor" False runTableColResizeCursorTest
-  , TestSpec "table-col-resize-body" False runTableColResizeDemoReproTest
-  , TestSpec "table-hbar-stable" False runTableHBarStableTest
-  , TestSpec "table-hbar-reach" False runTableHBarReachTest
-  , TestSpec "scroll-top-clip" True runScrollTopClipTest
-  , TestSpec "select-overlay-damage" False runSelectOverlayDamageTest
-  , TestSpec "text-input-dirty" False runTextInputDirtyTest
-  , TestSpec "text-input-word-keys" False runTextInputWordKeysTest
-  , TestSpec "text-area-alt-word-keys" False runTextAreaAltWordKeysTest
+  , TestSpec "slider-fill-width" True runSliderFillWidthTest
   , TestSpec "search-field-clear" False runSearchFieldClearTest
   , TestSpec "search-field-debounce" False runSearchFieldDebounceTest
-  , TestSpec "combo-initial" False runComboInitialTest
-  , TestSpec "combo-focused-dropdown" False runComboFocusedDropdownTest
+  , TestSpec "select-drag-to-select" False runSelectDragToSelectTest
+  , TestSpec "select-keyboard" False runSelectKeyboardTest
+  , TestSpec "select-change-once" False runSelectChangeOnceTest
+  , TestSpec "select-overlay-damage" False runSelectOverlayDamageTest
+  , TestSpec "tree-select" False runTreeSelectTest
+  , TestSpec "tree-keyboard" False runTreeKeyboardTest
   , TestSpec "combo-filter" False runComboFilterTest
   , TestSpec "combo-keyboard-pick" False runComboKeyboardPickTest
   , TestSpec "combo-mouse-pick" False runComboMousePickTest
@@ -177,159 +139,113 @@ testSpecs =
   , TestSpec "combo-escape-revert" False runComboEscapeRevertTest
   , TestSpec "combo-hover-highlight" False runComboHoverHighlightTest
   , TestSpec "combo-scrollbar-drag" False runComboScrollbarDragTest
-  , TestSpec "combo-wheel-x" False runComboWheelXTest
   , TestSpec "combo-wheel-scroll" False runComboWheelScrollTest
-  , TestSpec "combo-word-keys" False runComboWordKeysTest
-  , TestSpec "combo-step" False runComboStepTest
-  , TestSpec "modal-close-damage" False runModalCloseDamageTest
-  , TestSpec "modal-open-damage" False runModalOpenDamageTest
-  , TestSpec "window-close-damage" False runWindowCloseDamageTest
-  , TestSpec "window-drag-damage" False runWindowDragDamageTest
-  , TestSpec "overlay-panel-live" False runOverlayPanelLiveTest
-  , TestSpec "animation-idle" False runAnimationIdleTest
-  , TestSpec "animation-settle" False runAnimationSettleTest
-  , TestSpec "animation-ease" False runAnimationEaseTest
-  , TestSpec "animation-hold" False runAnimationHoldTest
-  , TestSpec "animation-damage" False runAnimationDamageTest
-  , TestSpec "animation-delay" False runAnimationDelayTest
-  , TestSpec "animation-stagger" False runAnimationStaggerTest
-  , TestSpec "animation-stop" False runAnimationStopTest
-  , TestSpec "animation-shared-ctx" False runAnimationSharedCtxTest
-  , TestSpec "animation-bezier" False runAnimationBezierTest
-  , TestSpec "animation-spring" False runAnimationSpringTest
-  , TestSpec "animation-spring-retarget" False runAnimationSpringRetargetTest
-  , TestSpec "animation-spring-dt" False runAnimationSpringDtTest
-  , TestSpec "animation-spring-hold" False runAnimationSpringHoldTest
-  , TestSpec "animation-spring-a" False runAnimationSpringATest
-  , TestSpec "animatable-color-padding" False runAnimatableColorPaddingTest
-  , TestSpec "checkbox-toggle" False runCheckboxTest
-  , TestSpec "checkbox-initial" False runCheckboxInitialTest
-  , TestSpec "slider-store" True runSliderTest
-  , TestSpec "slider-fill-width" True runSliderFillWidthTest
-  , TestSpec "scroll-wheel" False runScrollTest
-  , TestSpec "nested-scroll" False runNestedScrollTest
-  , TestSpec "nested-scroll-focus" False runNestedScrollFocusTest
-  , TestSpec "scroll-hover-clip" False runScrollHoverClipTest
-  , TestSpec "scroll-hit-offset" False runScrollHitOffsetTest
-  , TestSpec "scroll-button-click" False runScrollButtonClickTest
-  , TestSpec "scroll-scrolled-out-click" False runScrolledOutClickImmunityTest
-  , TestSpec "scroll-scrolled-out-hover" False runScrolledOutHoverImmunityTest
-  , TestSpec "scroll-scrolled-out-cursor" False runScrolledOutCursorImmunityTest
-  , TestSpec "scroll-child-damage-offset" False runScrollChildDamageOffsetTest
-  , TestSpec "scroll-2d-wheel" False run2DScrollWheelTest
-  , TestSpec "table-2d-scroll-sync" False runTable2DScrollSyncTest
-  , TestSpec "scroll-lockstep-probe" False runScrollLockstepProbeTest
-  , TestSpec "page-scroll-backdrop-coverage" False runPageScrollBackdropCoverageTest
-  , TestSpec "tab-focus" False runTabFocusTest
-  , TestSpec "keyboard-button" False runKeyboardButtonTest
-  , TestSpec "keyboard-checkbox" False runKeyboardCheckboxTest
-  , TestSpec "keyboard-slider" True runKeyboardSliderTest
-  , TestSpec "keyboard-radio" False runKeyboardRadioTest
-  , TestSpec "text-input-batch" False runTextInputBatchTest
-  , TestSpec "keyboard-toggle" False runKeyboardToggleTest
-  , TestSpec "keyboard-tab-header" False runKeyboardTabHeaderTest
-  , TestSpec "select-initial" False runSelectTest
-  , TestSpec "select-enum" False runEnumSelectTest
-  , TestSpec "select-dropdown" False runSelectDropdownTest
-  , TestSpec "select-drop-flush" True runSelectDropFlushTest
-  , TestSpec "select-pick-low" False runSelectPickLowTest
-  , TestSpec "select-drag-to-select" False runSelectDragToSelectTest
-  , TestSpec "select-keyboard" False runSelectKeyboardTest
-  , TestSpec "select-change-once" False runSelectChangeOnceTest
-  , TestSpec "tree-initial" False runTreeInitialTest
-  , TestSpec "tree-select" False runTreeSelectTest
-  , TestSpec "tree-keyboard" False runTreeKeyboardTest
-  , TestSpec "grow-fits-window" False runGrowFitsWindowTest
-  , TestSpec "grow-equal-split" False runGrowEqualSplitTest
-  , TestSpec "grow-content-floor" False runGrowContentFloorTest
-  , TestSpec "grow-lock-cascade" False runGrowLockCascadeTest
-  , TestSpec "grow-equal-split-height" False runGrowEqualSplitHeightTest
-  , TestSpec "percent-layout" False runPercentLayoutTest
-  , TestSpec "percent-gap-shrink" False runPercentGapShrinkTest
-  , TestSpec "aspect-layout" False runAspectLayoutTest
-  , TestSpec "label-align-end" False runLabelAlignEndTest
-  , TestSpec "controls-tab-height" True runControlsTabHeightTest
-  , TestSpec "bounded-radio-offset" True runBoundedRadioTest
-  , TestSpec "tabs-disabled" True runTabsDisabledTest
-  , TestSpec "color-picker-preview" True runColorPickerPreviewTest
   , TestSpec "color-picker-commit" True runColorPickerCommitTest
-  , TestSpec "color-picker-key-commit" True runColorPickerKeyCommitTest
-  , TestSpec "color-picker-hold" True runColorPickerHoldTest
   , TestSpec "color-picker-rgba" True runColorPickerRgbaTest
   , TestSpec "color-picker-edit" True runColorPickerEditTest
   , TestSpec "color-picker-change-once" True runColorPickerChangeOnceTest
-  , TestSpec "scroll-grow-click" True runScrollButtonClickSdlTest
-  , TestSpec "scroll-bar-gutter" False runScrollBarGutterTest
-  , TestSpec "scroll-bar-gutter-grow" True runGrowScrollGutterTest
-  , TestSpec "column-card-wrap" True runColumnCardWrapTest
-  , TestSpec "two-card-wrap" True runTwoCardWrapTest
-  , TestSpec "demo-wrap-wide-order" True runDemoWrapWideOrderTest
-  , TestSpec "scroll-bar-gutter-panel" True runPanelGrowScrollGutterTest
+  , TestSpec "controls-tab-height" True runControlsTabHeightTest
+  , TestSpec "bounded-radio-offset" True runBoundedRadioTest
+  -- Text input and text area
+  , TestSpec "text-input-cursor" False runTextInputCursorTest
+  , TestSpec "text-input-batch" False runTextInputBatchTest
+  , TestSpec "text-input-selection" False runTextInputSelectionTest
+  , TestSpec "text-input-mouse-selection" False runTextInputMouseSelectionTest
+  , TestSpec "text-input-click-select" False runTextInputClickSelectTest
+  , TestSpec "text-input-word-keys" False runTextInputWordKeysTest
+  , TestSpec
+      "text-input-cut-clears-selection"
+      False
+      runTextInputCutClearsSelectionTest
+  , TestSpec "text-input-clipboard" False runTextInputClipboardTest
+  , TestSpec "text-input-password" False runTextInputPasswordTest
+  , TestSpec "text-input-menu" False runTextInputMenuTest
+  , TestSpec "text-input-ff-caret" False runTextInputFfCaretTest
+  , TestSpec "text-input-focus-sdl" True runTextInputFocusSdlTest
+  , TestSpec "text-input-scroll" True runTextInputScrollTest
+  , TestSpec "text-input-dirty" False runTextInputDirtyTest
+  , TestSpec
+      "text-area-cut-clears-selection"
+      False
+      runTextAreaCutClearsSelectionTest
+  , TestSpec "text-area-scroll-wheel" True runTextAreaScrollWheelTest
+  , TestSpec "text-area-zoom-scroll" True runTextAreaZoomScrollTest
+  , TestSpec "text-area-remount-scroll" True runTextAreaRemountScrollTest
+  , TestSpec "text-area-menu-pulse" True runTextAreaMenuPulseTest
+  , TestSpec "text-area-scroll-drag" True runTextAreaScrollDragTest
+  , TestSpec "text-area-cursor-on-scrollbar" True runTextAreaCursorOnScrollBarTest
+  , TestSpec "text-area-hscroll-wheel" True runTextAreaHScrollWheelTest
+  , TestSpec "text-area-hscroll-drag" True runTextAreaHScrollDragTest
+  , TestSpec "text-area-2d-scroll" True runTextArea2DScrollTest
+  , TestSpec
+      "text-area-scroll-cursor-leaves-viewport"
+      True
+      runTextAreaScrollCursorLeavesViewportTest
+  -- Scrolling
+  , TestSpec "scroll-thumb-cursor" False runScrollThumbCursorTest
+  , TestSpec "scroll-bar-gutter" True runScrollBarGutterTest
   , TestSpec "window-scroll-gutter" True runWindowScrollGutterTest
-  , TestSpec "use-flag-click" False runUseFlagClickTest
+  , TestSpec "scroll-damage" False runScrollDamageTest
+  , TestSpec "scroll-top-clip" True runScrollTopClipTest
+  , TestSpec "nested-scroll" False runNestedScrollTest
+  , TestSpec "nested-scroll-focus" False runNestedScrollFocusTest
+  , TestSpec "scroll-hover-clip" False runScrollHoverClipTest
+  , TestSpec "scroll-button-click" False runScrollButtonClickTest
+  , TestSpec "scroll-scrolled-out" False runScrolledOutImmunityTest
+  , TestSpec "scroll-lockstep-probe" False runScrollLockstepProbeTest
+  , TestSpec "page-scroll-backdrop-coverage" False runPageScrollBackdropCoverageTest
+  , TestSpec "scroll-2d-pad-fill-overflow" False run2DPadFillOverflowTest
+  , TestSpec "scroll-2d-pad-overflow-scrolls" False run2DPadOverflowScrollsTest
+  -- Tables
+  , TestSpec "table-sort" False runTableSortTest
+  , TestSpec "table-reorder" True runTableReorderTest
+  , TestSpec "table-scroll-reveal" False runTableScrollRevealTest
+  , TestSpec "page-wheel-above-table" False runPageWheelAboveTableTest
+  , TestSpec "table-wrap-row-stretch" False runTableWrapRowStretchTest
+  , TestSpec "table-first-col" False runTableFirstColWidthTest
+  , TestSpec "table-fill-width" False runTableFillWidthTest
+  , TestSpec "table-cell-pad" True runTableCellPadTest
+  , TestSpec "table-resize-overflow" True runTableResizeOverflowTest
+  , TestSpec "table-col-resize-body" False runTableColResizeDemoReproTest
+  , TestSpec "table-hbar-reach" False runTableHBarReachTest
+  -- Tabs
   , TestSpec "tabs-laziness" False runTabsLazinessTest
-  , TestSpec "tabs-interaction" False runTabsInteractionTest
   , TestSpec "tabs-emit" False runTabsEmitTest
   , TestSpec "tabs-closable" False runTabsClosableTest
+  , TestSpec "tabs-disabled" True runTabsDisabledTest
   , TestSpec "tabs-scroll" False runTabsScrollTest
   , TestSpec "tabs-state-persistence" False runTabsStatePersistenceTest
   , TestSpec "tabs-damage" False runTabsDamageTest
-  , TestSpec "tabs-content-damage" False runTabsContentDamageTest
-  , TestSpec "tabs-in-panel-damage" False runTabsInPanelDamageTest
   , TestSpec "tab-response-forwarding" False runTabResponseForwardingTest
-  , TestSpec "panel-body-swap-damage" False runPanelBodySwapDamageTest
-  , TestSpec "host-slot" False runHostSlotTest
-  , TestSpec "compact-host" False runCompactHostTest
-  , TestSpec "embed-state" False runEmbedStateTest
-  , TestSpec "reduce-messages" False runReduceMessagesTest
-  , TestSpec "reduce-updates" False runReduceUpdatesTest
-  , TestSpec "reduce-click" False runReduceClickTest
-  , TestSpec "reduce-identity" False runReduceIdentityTest
-  , TestSpec "widget-no-string-emit" False runWidgetNoStringEmitTest
-  , TestSpec "panel-paints" False runPanelPaintsTest
-  , TestSpec "pane-grid-mixed-drag" False runPaneGridMixedDragTest
-  , TestSpec "pane-grid-clipped-control" False runPaneGridClippedControlTest
-  , TestSpec "separator-span" False runSeparatorSpanTest
-  , TestSpec "header-top-pad" False runHeaderTopPadTest
-  , TestSpec "fit-header-no-shrink" False runFitHeaderNoShrinkTest
+  -- Modals, windows and panes
+  , TestSpec "modal-overlay" False runModalOverlayTest
+  , TestSpec "modal-no-phantom-scroll" False runModalNoPhantomScrollTest
+  , TestSpec "modal-close-damage" False runModalCloseDamageTest
   , TestSpec "window-overlay" False runWindowOverlayTest
-  , TestSpec "window-title-center" True runWindowTitleCenterTest
   , TestSpec "overlay-click-through" False runOverlayClickThroughTest
+  , TestSpec "overlay-panel-live" False runOverlayPanelLiveTest
   , TestSpec "window-drag" False runWindowDragTest
-  , TestSpec "window-scroll-wheel" False runWindowScrollWheelTest
+  , TestSpec "window-close-damage" False runWindowCloseDamageTest
   , TestSpec "page-window-scroll" False runPageWindowScrollTest
-  , TestSpec "sibling-window-scroll" False runSiblingWindowScrollTest
   , TestSpec "window-scroll-only-damage" False runWindowScrollOnlyDamageTest
   , TestSpec "window-content-churn" False runWindowContentChurnTest
   , TestSpec "scrolled-debug-toggle" False runScrolledDebugToggleTest
   , TestSpec "window-resize" False runWindowResizeTest
   , TestSpec "window-resize-halo-hit" False runWindowResizeHaloHitTest
+  , TestSpec "heading-mono-truncate" False runHeadingMonoTruncateTest
+  , TestSpec "pane-grid-mixed-drag" False runPaneGridMixedDragTest
+  , TestSpec "pane-grid-clipped-control" False runPaneGridClippedControlTest
+  -- Context menus and tooltips
   , TestSpec "context-menu-open" False runContextMenuOpenTest
-  , TestSpec "context-menu-dismiss" False runContextMenuDismissTest
-  , TestSpec "context-menu-right-dismiss" False runContextMenuRightDismissTest
-  , TestSpec "context-menu-pick" False runContextMenuPickTest
-  , TestSpec "context-menu-area" False runContextMenuAreaTest
-  , TestSpec "context-menu-spans" False runContextMenuSpansTest
   , TestSpec "context-menu-scroll-pos" False runContextMenuScrollPosTest
   , TestSpec "tooltip-hover" False runTooltipHoverTest
-  , TestSpec "tooltip-widget" False runTooltipWidgetTest
-  , TestSpec "tooltip-spans" False runTooltipSpansTest
   , TestSpec "tooltip-id-stable" False runTooltipIdStableTest
   , TestSpec "tooltip-scroll-pos" False runTooltipScrollPosTest
-  , TestSpec "heading-mono-truncate" False runHeadingMonoTruncateTest
-  , TestSpec "base16-theme" False runBase16ThemeTest
-  , TestSpec "custom-widget-canvas" True runCustomWidgetCanvasTest
+  -- Custom widgets
   , TestSpec "custom-widget-measure" False runCustomWidgetMeasureTest
   , TestSpec "custom-widget-cursor" False runCustomWidgetCursorTest
   , TestSpec "custom-widget-interaction" False runCustomWidgetInteractionTest
   , TestSpec "custom-widget-queued-click" False runCustomWidgetQueuedClickTest
   , TestSpec "custom-widget-knob" False runReferenceKnobTest
-  , TestSpec "custom-widget-toggle" False runReferenceToggleSwitchTest
-  , TestSpec "custom-widget-progress-bar" False runReferenceProgressBarTest
-  , TestSpec "custom-widget-sparkline" True runReferenceProgressAndSparklineTest
   , TestSpec "drop-target" False runDropTargetTest
-  , TestSpec "font-size" True runFontSizeTest
-  , TestSpec "font-color" True runFontColorTest
-  , TestSpec "font-weight-style-deco" False runFontWeightStyleDecoTest
-  , TestSpec "font-composition" True runFontCompositionTest
   ]

@@ -11,7 +11,6 @@ module NanoUI.Testing.Assert
   , assertLt
   , withInput
   , run2Frames
-  , measureRespW
   , evalUi
   , runClickReduce
   ) where
@@ -20,7 +19,7 @@ import Control.Monad (unless, when)
 import Data.IORef (IORef, modifyIORef')
 import Data.Typeable (Typeable)
 import GHC.Stack (HasCallStack, callStack, prettyCallStack, withFrozenCallStack)
-import NanoUI (emptyInput, Input (..), NanoUI, Response (..), Size (..), V2 (..), rectW, respRect)
+import NanoUI (emptyInput, Input (..), NanoUI, Response (..), Size (..), V2 (..))
 import NanoUI.Testing (Context, DrawData, FrameMsg, runFrame, runFrameReduce)
 
 bump :: IORef Int -> IO ()
@@ -52,11 +51,6 @@ run2Frames :: Context -> Input -> NanoUI a -> IO (a, [FrameMsg], DrawData, Bool)
 run2Frames ctx inp ui = do
   _ <- runFrame ctx inp ui
   runFrame ctx inp ui
-
-measureRespW :: Context -> Input -> NanoUI Response -> IO Float
-measureRespW ctx inp ui = do
-  (resp, _, _, _) <- run2Frames ctx inp ui
-  pure (rectW (respRect resp))
 
 evalUi :: Context -> Input -> NanoUI a -> IO a
 evalUi ctx inp ui = do

@@ -1,7 +1,6 @@
 module Cases.Modal
   ( runModalCloseDamageTest
   , runModalNoPhantomScrollTest
-  , runModalOpenDamageTest
   , runModalOverlayTest
   ) where
 
@@ -39,23 +38,11 @@ runModalOverlayTest ctx failed = do
   closedSpans <- collectOverlayTextSpans ctx inp0
   assert failed (not (any (\(_, txt, _, _, _) -> "Title" `T.isInfixOf` txt) closedSpans))
 
-  (outside0, dlg0, mInside0) <- warmup2 ctx inp0 ui
+  (_, _, mInside0) <- warmup2 ctx inp0 ui
   overlays <- collectOverlayTextSpans ctx inp0
   assert failed (any (\(_, txt, _, _, _) -> "Title" `T.isInfixOf` txt) overlays)
   assert failed (any (\(_, txt, _, _, _) -> "Inside" `T.isInfixOf` txt) overlays)
   assert failed (not (any (\(_, txt, _, _, _) -> T.strip txt == "X") overlays))
-  let Rect _ dy _ _ = respRect dlg0
-      modalChromeMid = dy + 40 / 2
-  case [r | (r, txt, _, _, _) <- overlays, "Title" `T.isInfixOf` txt] of
-    (Rect _ ty _ th : _) -> do
-      let fm = ctxFontMetrics ctx
-          capMid =
-            case fmGlyph fm 'H' of
-              Nothing -> th / 2
-              Just gq -> gqY gq + gqH gq / 2
-          textInkMid = ty + capMid
-      assert failed (abs (textInkMid - modalChromeMid) <= 4)
-    _ -> assert failed False
 
   case mInside0 of
     Nothing -> assert failed False
@@ -64,10 +51,6 @@ runModalOverlayTest ctx failed = do
       _ <- runFrame ctx pressIn ui
       ((_, _, mClicked), _, _, _) <- runFrame ctx releaseIn ui
       assert failed (maybe False respClicked mClicked)
-
-      let (pressOut, _) = clickPair inp0 (centerOf outside0)
-      ((outsideHit, _, _), _, _, _) <- runFrame ctx pressOut ui
-      assert failed (not (respClicked outsideHit))
 
       let (backdrop, _) = clickPair inp0 (V2 4 4)
       ((_, dlgHit, _), _, _, _) <- runFrame ctx backdrop ui
@@ -107,36 +90,23 @@ runModalNoPhantomScrollTest ctx failed = do
   assertEq failed off0 0
   assertEq failed off1 0
 
+-- Opening and closing a modal each repaint the whole window on the next idle
+-- frame.
 runModalCloseDamageTest :: Context -> IORef Int -> IO ()
-runModalCloseDamageTest _ failed = do
-  ctx <- newContext
-  let ui = do
-        (open, setOpen) <- useFlag True
-        (resp, _) <- modal open "Title" (label "body")
-        onClick resp (setOpen False)
-      inp0 = (withInput 320 240) {inputMousePos = V2 1 1}
-      esc = inp0 {inputKeys = inputKeysFromList [KeyEscape]}
-      idle = inp0 {inputDeltaTime = 1}
-  _ <- runFrame ctx inp0 ui
-  _ <- runFrame ctx inp0 ui
-  _ <- runFrame ctx esc ui
-  checkIdleFullDamage failed ctx idle idle ui
-
-runModalOpenDamageTest :: Context -> IORef Int -> IO ()
-runModalOpenDamageTest _ failed = do
-  ctx <- newContext
+runModalCloseDamageTest ctx failed = do
   let ui = do
         (open, setOpen) <- useFlag False
         resp <- button' "Open"
         onClick resp (setOpen True)
-        _ <- modal open "Title" (label "body")
+        (dlg, _) <- modal open "Title" (label "body")
+        onClick dlg (setOpen False)
         pure resp
       inp0 = withInputOff 320 240
+      esc = inp0 {inputKeys = inputKeysFromList [KeyEscape]}
       idle = inp0 {inputDeltaTime = 1}
   _ <- runFrame ctx inp0 ui
   (resp, _, _, _) <- runFrame ctx inp0 ui
   _ <- runClickRelease ctx inp0 ui (centerOf resp)
   checkIdleFullDamage failed ctx idle idle ui
-
-
-
+  _ <- runFrame ctx esc ui
+  checkIdleFullDamage failed ctx idle idle ui

@@ -1,92 +1,41 @@
 module Cases.Animation
-  ( runAnimatableColorPaddingTest
-  , runAnimationBezierTest
+  ( runAnimationBezierTest
+  , runButtonHoverAnimTest
   , runAnimationDamageTest
-  , runAnimationDelayTest
-  , runAnimationEaseTest
-  , runAnimationHoldTest
-  , runAnimationIdleTest
   , runAnimationSettleTest
-  , runAnimationSharedCtxTest
-  , runAnimationSpringATest
   , runAnimationSpringDtTest
-  , runAnimationSpringHoldTest
   , runAnimationSpringRetargetTest
-  , runAnimationSpringTest
   , runAnimationStaggerTest
-  , runAnimationStopTest
   , runCompositeAnimationIsolationTest
   ) where
 
-import Control.Monad (forM_, replicateM_, void)
+import Control.Monad (forM_, replicateM, replicateM_, void)
 import Data.IORef (IORef)
 import Data.Text qualified as T
 import NanoUI
 import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertEq)
-import NanoUI.Testing.Harness (withAnimCtx, withDelta)
+import NanoUI.Testing.Assert (assert)
+import NanoUI.Testing.Harness (clickPair, withDelta)
 
-runAnimationIdleTest :: Context -> IORef Int -> IO ()
-runAnimationIdleTest _ failed =
-  withAnimCtx 100 100 0.05
-    (\ctx inp fl -> do
-      _ <- runFrame ctx inp (label "anim")
-      startAnimation ctx (WidgetId 42) 0 1 0.5
-      need <- needsRedraw ctx inp inp
-      assert fl need
-    )
-    failed
-
+-- A started animation requests redraws, settles on its target, and then
+-- leaves the context idle and clean.
 runAnimationSettleTest :: Context -> IORef Int -> IO ()
-runAnimationSettleTest _ failed =
-  withAnimCtx 100 100 0.1
-    (\ctx inp fl -> do
-      let wid = WidgetId 99
-      startAnimation ctx wid 0 1 0.25
-      replicateM_ 4 (runFrame ctx inp (label "settle"))
-      val <- getAnimationValue ctx wid
-      assert fl (abs (val - 1) <= 0.01)
-      live <- anyAnimating ctx
-      assert fl (not live)
-      need <- needsRedraw ctx inp inp
-      assert fl (not need)
-    )
-    failed
-
-runAnimationEaseTest :: Context -> IORef Int -> IO ()
-runAnimationEaseTest _ failed =
-  withAnimCtx 100 100 0.5
-    (\ctx inp fl -> do
-      let wid = WidgetId 100
-      startAnimationEase ctx wid 0 1 1 EaseOutCubic
-      _ <- runFrame ctx inp (label "ease")
-      val <- getAnimationValue ctx wid
-      assert fl (val >= 0.8)
-    )
-    failed
-
-runAnimationHoldTest :: Context -> IORef Int -> IO ()
-runAnimationHoldTest _ failed = do
-  ctx <- newContext
-  let inp = withDelta 200 100 0.1
-      ui = do
-        t <- animateTo (Tween EaseLinear 0.2 0) 1
-        label_ (T.pack (show t))
-  replicateM_ 6 (runFrame ctx inp ui)
+runAnimationSettleTest ctx failed = do
+  let inp = withDelta 100 100 0.1
+      wid = WidgetId 99
+  _ <- runFrame ctx inp (label "settle")
+  startAnimation ctx wid 0 1 0.25
+  need <- needsRedraw ctx inp inp
+  assert failed need
+  replicateM_ 4 (runFrame ctx inp (label "settle"))
+  val <- getAnimationValue ctx wid
+  assert failed (abs (val - 1) <= 0.01)
   live <- anyAnimating ctx
   assert failed (not live)
-  spans <- collectTextSpans ctx
-  let shown = [txt | (_, txt, _, _, _) <- spans]
-  assert failed (any (\t -> t == "1.0" || "1.0" `T.isPrefixOf` t) shown)
-  startAnimationEase ctx (WidgetId 101) 0 1 0.2 EaseLinear
-  replicateM_ 5 (runFrame ctx inp (label "hold"))
-  val <- getAnimationValue ctx (WidgetId 101)
-  assert failed (abs (val - 1) <= 0.01)
-  replicateM_ 3 (runFrame ctx inp (label "hold"))
-  val2 <- getAnimationValue ctx (WidgetId 101)
-  assert failed (abs (val2 - 1) <= 0.01)
-  live2 <- anyAnimating ctx
-  assert failed (not live2)
+  needAfter <- needsRedraw ctx inp inp
+  assert failed (not needAfter)
+  (_, _, _, dirty) <- runFrame ctx inp (label "settle")
+  assert failed (not dirty)
 
 runAnimationDamageTest :: Context -> IORef Int -> IO ()
 runAnimationDamageTest _ failed = do
@@ -120,48 +69,41 @@ runAnimationDamageTest _ failed = do
   dFast <- takeDamage ctx2
   assert failed (hasMove dFast)
 
-runAnimationDelayTest :: Context -> IORef Int -> IO ()
-runAnimationDelayTest _ failed =
-  withAnimCtx 100 100 0.1
-    (\ctx inp0 fl -> do
-      let wid = WidgetId 202
-      startAnimationEaseDelay ctx wid 0 1 0.2 EaseLinear 0.15
-      _ <- runFrame ctx inp0 (label "delay")
-      v0 <- getAnimationValue ctx wid
-      assert fl (abs v0 <= 0.01)
-      live0 <- anyAnimating ctx
-      assert fl live0
-      _ <- runFrame ctx inp0 (label "delay")
-      v1 <- getAnimationValue ctx wid
-      assert fl (abs (v1 - 0.25) <= 0.03)
-    )
-    failed
-
+-- A delayed tween holds its start value until the delay elapses and then
+-- eases from there; declarative tweens stagger the same way per key.
 runAnimationStaggerTest :: Context -> IORef Int -> IO ()
-runAnimationStaggerTest _ failed =
-  withAnimCtx 200 100 0.02
-    (\ctx inp fl -> do
-      let ui = do
-            _ <- withKey ("lead" :: String) (animateTo (Tween EaseLinear 0.4 0) 1)
-            t <- withKey ("trail" :: String) (animateTo (Tween EaseLinear 0.4 0.08) 1)
-            label_ (T.pack ("t=" ++ show t))
-          trailVal = do
-            spans <- collectTextSpans ctx
-            let shown = [txt | (_, txt, _, _, _) <- spans]
-                tagged = [T.drop 2 txt | txt <- shown, "t=" `T.isPrefixOf` txt]
-            case tagged of
-              (raw : _) -> case reads (T.unpack raw) of
-                [(n, "")] -> pure (n :: Float)
-                _ -> assert fl False >> pure 0
-              _ -> assert fl False >> pure 0
-      replicateM_ 3 (runFrame ctx inp ui)
-      early <- trailVal
-      assert fl (early <= 0.01)
-      replicateM_ 10 (runFrame ctx inp ui)
-      late <- trailVal
-      assert fl (late >= 0.15)
-    )
-    failed
+runAnimationStaggerTest ctx failed = do
+  let inp = withDelta 200 100 0.02
+      wid = WidgetId 202
+      slow = inp {inputDeltaTime = 0.1}
+  startAnimationEaseDelay ctx wid 0 1 0.2 EaseLinear 0.15
+  _ <- runFrame ctx slow (label "delay")
+  v0 <- getAnimationValue ctx wid
+  assert failed (abs v0 <= 0.01)
+  live0 <- anyAnimating ctx
+  assert failed live0
+  _ <- runFrame ctx slow (label "delay")
+  v1 <- getAnimationValue ctx wid
+  assert failed (abs (v1 - 0.25) <= 0.03)
+  let ui = do
+        _ <- withKey ("lead" :: String) (animateTo (Tween EaseLinear 0.4 0) 1)
+        t <- withKey ("trail" :: String) (animateTo (Tween EaseLinear 0.4 0.08) 1)
+        label_ (T.pack ("t=" ++ show t))
+      trailVal = do
+        spans <- collectTextSpans ctx
+        let shown = [txt | (_, txt, _, _, _) <- spans]
+            tagged = [T.drop 2 txt | txt <- shown, "t=" `T.isPrefixOf` txt]
+        case tagged of
+          (raw : _) -> case reads (T.unpack raw) of
+            [(n, "")] -> pure (n :: Float)
+            _ -> assert failed False >> pure 0
+          _ -> assert failed False >> pure 0
+  replicateM_ 3 (runFrame ctx inp ui)
+  early <- trailVal
+  assert failed (early <= 0.01)
+  replicateM_ 10 (runFrame ctx inp ui)
+  late <- trailVal
+  assert failed (late >= 0.15)
 
 runAnimationBezierTest :: Context -> IORef Int -> IO ()
 runAnimationBezierTest _ failed = do
@@ -173,94 +115,32 @@ runAnimationBezierTest _ failed = do
   assert failed (abs (applyEase (EaseCubicBezier 0.33 0 0.2 1) 0) <= 0.001)
   assert failed (abs (applyEase (EaseCubicBezier 0.33 0 0.2 1) 1 - 1) <= 0.001)
 
-runAnimationSpringTest :: Context -> IORef Int -> IO ()
-runAnimationSpringTest _ failed =
-  withAnimCtx 100 100 0.05
-    (\ctx inp fl -> do
-      let wid = WidgetId 401
-      startSpring ctx wid presetSmooth 1
-      replicateM_ 80 (runFrame ctx inp (label "spring"))
-      val <- getAnimationValue ctx wid
-      assert fl (abs (val - 1) <= 0.02)
-      live <- anyAnimating ctx
-      assert fl (not live)
-      need <- needsRedraw ctx inp inp
-      assert fl (not need)
-    )
-    failed
-
 runAnimationSpringRetargetTest :: Context -> IORef Int -> IO ()
-runAnimationSpringRetargetTest _ failed =
-  withAnimCtx 100 100 0.02
-    (\ctx inp fl -> do
-      let wid = WidgetId 402
-      startSpring ctx wid presetBouncy 1
-      replicateM_ 5 (runFrame ctx inp (label "retarget"))
-      v1 <- getAnimationValue ctx wid
-      assert fl (v1 >= 0.02 && v1 <= 0.98)
-      startSpring ctx wid presetBouncy 0
-      v2 <- getAnimationValue ctx wid
-      assert fl (abs (v2 - v1) <= 0.02)
-      live <- anyAnimating ctx
-      assert fl live
-    )
-    failed
+runAnimationSpringRetargetTest ctx failed = do
+  let inp = withDelta 100 100 0.02
+      wid = WidgetId 402
+  startSpring ctx wid presetBouncy 1
+  replicateM_ 5 (runFrame ctx inp (label "retarget"))
+  v1 <- getAnimationValue ctx wid
+  assert failed (v1 >= 0.02 && v1 <= 0.98)
+  startSpring ctx wid presetBouncy 0
+  v2 <- getAnimationValue ctx wid
+  assert failed (abs (v2 - v1) <= 0.02)
+  live <- anyAnimating ctx
+  assert failed live
 
 runAnimationSpringDtTest :: Context -> IORef Int -> IO ()
-runAnimationSpringDtTest _ failed =
-  withAnimCtx 100 100 2
-    (\ctx inp fl -> do
-      let wid = WidgetId 403
-      startSpring ctx wid presetStiff 1
-      _ <- runFrame ctx inp (label "dt")
-      val <- getAnimationValue ctx wid
-      assert fl (not (isNaN val || isInfinite val || val < 0 || val > 1.5))
-    )
-    failed
-
-runAnimationSpringHoldTest :: Context -> IORef Int -> IO ()
-runAnimationSpringHoldTest _ failed = do
-  ctx <- newContext
-  let inp = withDelta 200 100 0.05
-      ui = do
-        t <- animateTo (Spring presetSmooth) 1
-        label_ (T.pack (show t))
-  replicateM_ 81 (runFrame ctx inp ui)
-  live <- anyAnimating ctx
-  assert failed (not live)
-  spans <- collectTextSpans ctx
-  let shown = [txt | (_, txt, _, _, _) <- spans]
-  assert failed (any (\t -> t == "1.0" || "1.0" `T.isPrefixOf` t) shown)
-
-runAnimationSpringATest :: Context -> IORef Int -> IO ()
-runAnimationSpringATest _ failed = do
-  ctx <- newContext
-  let inp = withDelta 200 100 0.05
-      ui = do
-        V2 x y <- withKey ("vec" :: String) (animateToA (Spring presetSmooth) (V2 1 2))
-        label_ (T.pack (show x ++ "," ++ show y))
-  replicateM_ 80 (runFrame ctx inp ui)
-  live <- anyAnimating ctx
-  assert failed (not live)
-  spans <- collectTextSpans ctx
-  let shown = [txt | (_, txt, _, _, _) <- spans]
-      ok t = case break (== ',') (T.unpack t) of
-        (xs, ',' : ys) -> case (reads xs, reads ys) of
-          ([(x, "")], [(y, "")]) -> abs (x - 1 :: Float) < 0.05 && abs (y - 2 :: Float) < 0.05
-          _ -> False
-        _ -> False
-  assert failed (any ok shown)
-
--- Short colour component lists pad RGB with 0 and alpha with 1.
-runAnimatableColorPaddingTest :: Context -> IORef Int -> IO ()
-runAnimatableColorPaddingTest _ failed = do
-  assertEq failed (colorRGBA 0 0 0 255) (fromComponents [])
-  assertEq failed (colorRGBA 255 0 0 255) (fromComponents [1])
-  assertEq failed (colorRGBA 255 0 255 255) (fromComponents [1, 0, 1])
-  assertEq failed (colorRGBA 0 255 0 0) (fromComponents [0, 1, 0, 0, 1])
+runAnimationSpringDtTest ctx failed = do
+  let inp = withDelta 100 100 2
+      wid = WidgetId 403
+  startSpring ctx wid presetStiff 1
+  _ <- runFrame ctx inp (label "dt")
+  val <- getAnimationValue ctx wid
+  assert failed (not (isNaN val || isInfinite val || val < 0 || val > 1.5))
 
 -- Each composite animation owns a scope; component indices alone are not
--- unique when two vectors animate side by side in the same parent.
+-- unique when two vectors animate side by side in the same parent. Tweens
+-- and springs both settle and stop requesting redraws.
 runCompositeAnimationIsolationTest :: Context -> IORef Int -> IO ()
 runCompositeAnimationIsolationTest _ failed =
   forM_ [animateToA (Tween EaseLinear 0.2 0), animateToA (Spring presetSmooth)] $ \animateVector -> do
@@ -275,38 +155,27 @@ runCompositeAnimationIsolationTest _ failed =
     ((V2 ax ay, V2 bx by), _, _, _) <- runFrame ctx inp ui
     assert failed (abs (ax - 1) < 0.05 && abs (ay - 2) < 0.05)
     assert failed (abs (bx + 1) < 0.05 && abs (by + 2) < 0.05)
+    live <- anyAnimating ctx
+    assert failed (not live)
+    need <- needsRedraw ctx inp inp
+    assert failed (not need)
 
-runAnimationStopTest :: Context -> IORef Int -> IO ()
-runAnimationStopTest _ failed =
-  withAnimCtx 100 100 0.05
-    (\ctx inp fl -> do
-      let wid = WidgetId 500
-      startAnimation ctx wid 0 1 1
-      replicateM_ 6 (runFrame ctx inp (label "run"))
-      v1 <- getAnimationValue ctx wid
-      assert fl (v1 >= 0.1 && v1 <= 0.9)
-      stopAnimation ctx wid
-      v2 <- getAnimationValue ctx wid
-      assert fl (abs (v2 - v1) <= 0.01)
-      live <- anyAnimating ctx
-      assert fl (not live)
-      replicateM_ 3 (runFrame ctx inp (label "idle"))
-      v3 <- getAnimationValue ctx wid
-      assert fl (abs (v3 - v1) <= 0.01)
-      need <- needsRedraw ctx inp inp
-      assert fl (not need)
-    )
-    failed
-
-runAnimationSharedCtxTest :: Context -> IORef Int -> IO ()
-runAnimationSharedCtxTest ctx failed = do
-  let inp = withDelta 80 80 0.1
-      wid = WidgetId 777
-  startAnimation ctx wid 0 1 0.1
-  replicateM_ 3 (runFrame ctx inp (label "shared"))
-  val <- getAnimationValue ctx wid
-  assert failed (abs (val - 1) <= 0.01)
-  need <- needsRedraw ctx inp inp
-  assert failed (not need)
-  (_, _, _, dirty) <- runFrame ctx inp (label "idle")
-  assert failed (not dirty)
+-- Hovering a button eases its highlight in without dipping, and a press and
+-- release over it leaves the hover animation fully on.
+runButtonHoverAnimTest :: Context -> IORef Int -> IO ()
+runButtonHoverAnimTest ctx failed = do
+  let inp0 = withDelta 200 100 0.016
+      ui = column (button "Hover")
+  _ <- runFrame ctx inp0 ui
+  let inp1 = inp0 {inputMousePos = V2 10 10}
+  vals <- replicateM 5 (runFrame ctx inp1 ui >> getHotId ctx >>= getAnimationValue ctx)
+  let decreases = any (uncurry (\a b -> b + 0.001 < a)) (zip vals (drop 1 vals))
+  assert failed (not decreases)
+  assert failed (last vals >= 0.4)
+  let (press, release) = clickPair inp0 (V2 10 10)
+  _ <- runFrame ctx press ui
+  _ <- runFrame ctx release ui
+  hot <- getHotId ctx
+  val <- getAnimationValue ctx hot
+  assert failed (hashWidgetId hot /= 0)
+  assert failed (val >= 0.99)

@@ -13,14 +13,11 @@ module NanoUI.Testing.Harness
   , warmup2
   , warmupDraw
   , runClick
-  , runRightClick
   , runClickPair
   , runClickRelease
-  , withAnimCtx
   , assertSpansHas
   , spanYOf
   , spanXOf
-  , assertScrollGutter
   , assertScrollGutterPad
   , assertWheelTitlePinned
   , findGrabHover
@@ -284,12 +281,6 @@ runClick ctx inp0 ui pos = do
   _ <- runFrame ctx press ui
   void (runFrame ctx release ui)
 
-runRightClick :: Context -> Input -> NanoUI a -> V2 -> IO ()
-runRightClick ctx inp0 ui pos = do
-  let (press, release) = rightClickPair inp0 pos
-  _ <- runFrame ctx press ui
-  void (runFrame ctx release ui)
-
 runClickPair :: Context -> Input -> NanoUI a -> V2 -> IO a
 runClickPair ctx inp0 ui pos = do
   let
@@ -306,17 +297,6 @@ runClickRelease ctx inp0 ui pos = do
   _ <- runFrame ctx release ui
   pure release
 
-withAnimCtx ::
-  Float
-  -> Float
-  -> Float
-  -> (Context -> Input -> IORef Int -> IO ())
-  -> IORef Int
-  -> IO ()
-withAnimCtx w h dt body failed = do
-  ctx <- newContext
-  body ctx (withDelta w h dt) failed
-
 assertSpansHas :: HasCallStack => IORef Int -> T.Text -> [(Rect, T.Text, a, b, c)] -> IO ()
 assertSpansHas failed needle spans = assert failed (hasText needle spans)
 
@@ -328,17 +308,6 @@ spanYOf lbl spans = [y | (Rect _ y _ _, txt, _, _, _) <- spans, txt == lbl]
 
 spanXOf :: T.Text -> [(Rect, T.Text, a, b, c)] -> [Float]
 spanXOf lbl spans = [x | (Rect x _ _ _, txt, _, _, _) <- spans, txt == lbl]
-
-assertScrollGutter ::
-  HasCallStack
-  => IORef Int
-  -> Context
-  -> WidgetId
-  -> Response
-  -> Float
-  -> IO ()
-assertScrollGutter failed ctx sid child gutter =
-  assertScrollGutterPad failed ctx sid child gutter 0
 
 assertScrollGutterPad ::
   HasCallStack

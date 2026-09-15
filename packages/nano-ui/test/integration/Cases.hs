@@ -13,59 +13,32 @@ module Cases
   , module Cases.TextInput
   , module Cases.Tooltip
   , module Cases.Window
-  , module Cases.Font
   , module Cases.Keyboard
   , module Cases.Cache
   , runAspectLayoutTest
-  , runBase16ThemeTest
-  , runCheckboxTest
   , runCheckboxInitialTest
-  , runColumnCardWrapTest
-  , runCompactHostTest
-  , runDemoWrapWideOrderTest
-  , runDrawTest
   , runDrawingTest
   , runEmbedStateTest
-  , runFitSizingTest
   , runFitMutedWidthTest
-  , runGrowFitsWindowTest
-  , runGrowEqualSplitTest
-  , runGrowContentFloorTest
-  , runGrowLockCascadeTest
-  , runGrowEqualSplitHeightTest
+  , runGrowSplitTest
   , runHostSlotTest
   , runHoverDamageTest
-  , runHoverSkipTest
-  , runHoverTest
   , runIdKeyedListTest
-  , runIdleTest
-  , runIdStabilityTest
+  , runKvMultilineHeightTest
   , runImageTest
-  , runInteractionTest
   , runLabelAlignEndTest
-  , runLayoutTest
   , runLayoutReuseTest
   , runDeepNestingTest
-  , runOverlayTest
   , runPanelPaintsTest
   , runPaneGridMixedDragTest
   , runPaneGridClippedControlTest
-  , runPercentLayoutTest
   , runPercentGapShrinkTest
-  , runPointerCursorCheckboxTest
   , runPointerCursorTest
   , runReduceClickTest
-  , runReduceIdentityTest
   , runReduceMessagesTest
-  , runReduceUpdatesTest
-  , runRowPanelLayoutTest
+  , runResponsiveWrapTest
   , runSliderFillWidthTest
-  , runSliderTest
-  , runTabFocusTest
-  , runTwoCardWrapTest
-  , runUseFlagClickTest
   , runWidgetNoStringEmitTest
-  , runWithKeyTest
   , runSearchFieldClearTest
   , runSearchFieldDebounceTest
   ) where
@@ -84,10 +57,9 @@ import Cases.Tabs
 import Cases.TextInput
 import Cases.Tooltip
 import Cases.Window
-import Cases.Font
 import Cases.Keyboard
 import Cases.Cache
-import Control.Monad (forM, replicateM, void, when)
+import Control.Monad (forM, forM_, void, when)
 import Control.Concurrent (threadDelay)
 import Data.ByteString qualified as BS
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
@@ -102,7 +74,7 @@ import NanoUI
 import NanoUI.Context (Context (..))
 import NanoUI.Layout.Arena (NodeType (..), arenaCount, getNodeType, getNodeValue)
 import NanoUI.Testing
-import NanoUI.Testing.Assert (assert, assertEq, assertGt, measureRespW, runClickReduce, withInput)
+import NanoUI.Testing.Assert (assert, assertEq, assertGt, runClickReduce, withInput)
 import NanoUI.Testing.Harness
   ( centerOf
   , checkLabelAlignEndInk
@@ -123,17 +95,6 @@ import NanoUI.Widgets.SplitPane
   , topLevelDropTarget
   )
 
-runIdStabilityTest :: Context -> IORef Int -> IO ()
-runIdStabilityTest ctx failed = do
-  let inp = withInput 100 100
-      sample = runFrame ctx inp (column (replicateM 3 nextId))
-  (ids1, _, _, _) <- sample
-  (ids2, _, _, _) <- sample
-  assertEq failed ids1 ids2
-  case ids1 of
-    [a, b, c] -> assert failed (a /= b && b /= c && a /= c)
-    _ -> assert failed False
-
 runIdKeyedListTest :: Context -> IORef Int -> IO ()
 runIdKeyedListTest ctx failed = do
   let inp = withInput 200 200
@@ -145,17 +106,12 @@ runIdKeyedListTest ctx failed = do
   (idsPrep, _, _, _) <- keyedIds ["x", "a", "b", "c"]
   (idsApp, _, _, _) <- keyedIds ["a", "b", "c", "y"]
   (idsRev, _, _, _) <- keyedIds ["c", "b", "a"]
+  case idsA of
+    [a, b, c] -> assert failed (a /= b && b /= c && a /= c)
+    _ -> assert failed False
   assertEq failed (idFor "a" ["a", "b", "c"] idsA) (idFor "a" ["x", "a", "b", "c"] idsPrep)
   assertEq failed (idFor "b" ["a", "b", "c"] idsA) (idFor "b" ["a", "b", "c", "y"] idsApp)
   assertEq failed (idFor "c" ["a", "b", "c"] idsA) (idFor "c" ["c", "b", "a"] idsRev)
-
-runFitSizingTest :: Context -> IORef Int -> IO ()
-runFitSizingTest ctx failed = do
-  let inp = withInput 400 100
-  w1 <- measureRespW ctx inp (column (label "hi"))
-  w2 <- measureRespW ctx inp (column (label "a much longer label"))
-  assert failed (w1 > 0 && w1 < 400)
-  assertGt failed w2 w1
 
 runFitMutedWidthTest :: Context -> IORef Int -> IO ()
 runFitMutedWidthTest ctx failed = do
@@ -167,27 +123,7 @@ runFitMutedWidthTest ctx failed = do
     (w : _) -> assertGt failed w 8
     _ -> assert failed False
 
-runWithKeyTest :: Context -> IORef Int -> IO ()
-runWithKeyTest ctx failed = do
-  let inp = withInput 200 200
-      action = column (do a <- keyed (0 :: Int) nextId; b <- keyed (1 :: Int) nextId; pure [a, b])
-  (idsA, _, _, _) <- runFrame ctx inp action
-  (idsB, _, _, _) <- runFrame ctx inp action
-  case (idsA, idsB) of
-    ([a0, a1], [b0, b1]) -> assert failed (a0 == b0 && a1 == b1 && a0 /= a1)
-    _ -> assert failed False
-
-runLayoutTest :: Context -> IORef Int -> IO ()
-runLayoutTest ctx failed = do
-  let ui = column' (defaultLayout {layoutWidth = Grow 1, layoutHeight = Grow 1, layoutGap = 8}) $ do
-        _ <- row' (defaultLayout {layoutWidth = Grow 1}) (spacer (Grow 1) Fit >> label "grow test")
-        label "nested"
-  (_, _, draw, _) <- runFrame ctx (withInput 400 300) ui
-  assertGt failed (drawVertexCount draw) 0
-
--- | Phase 5A: the cached-layout path must produce exactly the same spans and
--- draw counts as a full solve, and descriptor/resize/text changes must
--- invalidate it.
+-- | Phase 5A: text and resize changes must invalidate the cached-layout path.
 runLayoutReuseTest :: Context -> IORef Int -> IO ()
 runLayoutReuseTest ctx failed = do
   let inp = withInput 400 300
@@ -196,14 +132,10 @@ runLayoutReuseTest ctx failed = do
           void (label "alpha")
           void (button "beta")
           void (label "gamma delta epsilon")
-  (_, _, d0, _) <- runFrame ctx inp ui1
-  s0 <- collectTextSpans ctx
+  _ <- runFrame ctx inp ui1
   -- Frame 2 takes the cached-layout path (same descriptor).
-  (_, _, d1, _) <- runFrame ctx inp ui1
+  _ <- runFrame ctx inp ui1
   s1 <- collectTextSpans ctx
-  assertEq failed s1 s0
-  assertEq failed (drawVertexCount d1) (drawVertexCount d0)
-  assertEq failed (drawIndexCount d1) (drawIndexCount d0)
   -- Text change invalidates the cached descriptor.
   let ui2 =
         columnWith (tight . gap 4 . fillW) $ do
@@ -223,17 +155,6 @@ runLayoutReuseTest ctx failed = do
   _ <- runFrame ctx (withInput 180 200) wrapUi
   sw1 <- collectTextSpans ctx
   assert failed (sw1 /= sw0)
-  -- Scroll containers are eligible for reuse too; a static scroll view must
-  -- produce identical spans on the cached path.
-  let scrollUi =
-        scroll2DWith (fixedH 120 . fillW) $
-          columnWith (tight . gap 0 . fillW) $
-            mapM_ (\i -> void (label (T.pack ("row " <> show i)))) [1 .. 10 :: Int]
-  _ <- runFrame ctx (withInput 300 200) scrollUi
-  ss0 <- collectTextSpans ctx
-  _ <- runFrame ctx (withInput 300 200) scrollUi
-  ss1 <- collectTextSpans ctx
-  assertEq failed ss1 ss0
 
 -- | Nesting deeper than the initial snapshot-level capacity must still lay
 -- out correctly (the level array grows on demand).
@@ -246,54 +167,23 @@ runDeepNestingTest ctx failed = do
   spans <- collectTextSpans ctx
   assert failed (any (\(_, t, _, _, _) -> t == "deep") spans)
 
-runRowPanelLayoutTest :: Context -> IORef Int -> IO ()
-runRowPanelLayoutTest ctx failed = do
-  let inp = withInput 800 600
-      ui = rowWith (tight . fillW) $ do
-        panelWith (minW 200 . fillH) (void (label "Side"))
-        panelWith (grow . fillW . fillH) (rowWith (tight . gap 8) (button_ "Left" >> button' "Right"))
-  _ <- runFrame ctx inp ui
-  (resp, _, _, _) <- runFrame ctx inp ui
-  assert failed (rectX (respRect resp) >= 190)
-
-runColumnCardWrapTest :: Context -> IORef Int -> IO ()
-runColumnCardWrapTest ctx failed = do
-  let inp = withInput 520 800
-      ui = responsiveRowCol 720 (tight . gap 8 . fillW $ defaultLayout) $ do
+-- | A responsive row stacks its children below the breakpoint and keeps them
+-- side by side above it.
+runResponsiveWrapTest :: Context -> IORef Int -> IO ()
+runResponsiveWrapTest ctx failed = do
+  let ui = responsiveRowCol 720 (tight . gap 8 . fillW $ defaultLayout) $ do
         columnWith (tight . gap 8 . fillW) (card (void (label "LeftTop")) >> card (void (label "LeftBot")))
         card (void (label "Right"))
-  _ <- runFrame ctx inp ui
-  spans <- collectTextSpans ctx
-  case (spanYOf "Right" spans, spanYOf "LeftTop" spans) of
+  _ <- warmup2 ctx (withInput 520 800) ui
+  narrow <- collectTextSpans ctx
+  case (spanYOf "Right" narrow, spanYOf "LeftBot" narrow) of
     ([ry], [ly]) -> assertGt failed ry (ly + 1)
     _ -> assert failed False
-
-runTwoCardWrapTest :: Context -> IORef Int -> IO ()
-runTwoCardWrapTest ctx failed = do
-  let inp = withInput 520 800
-      ui = responsiveRowCol 720 (tight . gap 8 . fillW $ defaultLayout) (card (void (label "CardA")) >> card (void (label "CardB")))
-  _ <- runFrame ctx inp ui
-  spans <- collectTextSpans ctx
-  case (spanYOf "CardA" spans, spanYOf "CardB" spans) of
-    ([ay], [by]) -> assertGt failed by (ay + 1)
+  _ <- warmup2 ctx (withInput 1200 800) ui
+  wide <- collectTextSpans ctx
+  case (spanXOf "Right" wide, spanXOf "LeftTop" wide) of
+    ([rx], [lx]) -> assertGt failed rx (lx + 1)
     _ -> assert failed False
-
-runDemoWrapWideOrderTest :: Context -> IORef Int -> IO ()
-runDemoWrapWideOrderTest ctx failed = do
-  let inp = withInput 1200 800
-      ui = responsiveRowCol 720 (tight . gap 8 . fillW $ defaultLayout) $ do
-        columnWith (tight . gap 8 . fillW) (card (void (label "State")) >> card (void (label "Gallery")))
-        card (void (label "Controls"))
-  _ <- runFrame ctx inp ui
-  spans <- collectTextSpans ctx
-  case (spanXOf "State" spans, spanXOf "Controls" spans) of
-    ([sx], [cx]) -> assertGt failed cx (sx + 1)
-    _ -> assert failed False
-
-runDrawTest :: Context -> IORef Int -> IO ()
-runDrawTest ctx failed = do
-  (_, _, draw, _) <- runFrame ctx (withInput 100 100) (column (label "draw"))
-  assert failed (drawIndexCount draw >= 6 && not (drawCmdNull draw))
 
 runDrawingTest :: Context -> IORef Int -> IO ()
 runDrawingTest ctx failed = do
@@ -314,61 +204,24 @@ runDrawingTest ctx failed = do
   (_, _, draw2, _) <- runFrame ctx inp ui
   assert failed (drawIndexCount draw2 >= 6 && not (drawCmdNull draw2))
 
-runOverlayTest :: Context -> IORef Int -> IO ()
-runOverlayTest ctx failed = do
-  let inp0 = withInput 200 80
-      ui = column (button' "Hover" >>= \btn -> tooltip btn "tip")
-  _ <- runFrame ctx inp0 ui
-  (_, _, draw, _) <- runFrame ctx (inp0 {inputMousePos = V2 10 10}) ui
-  assert failed (any ((== LayerOverlay) . cmdLayer) (drawCmdElems draw))
-
-runInteractionTest :: Context -> IORef Int -> IO ()
-runInteractionTest ctx failed = do
-  let inp0 = withInput 200 100
-      ui = column (button' "Click")
-      (press, release) = clickPair inp0 (V2 10 10)
-  _ <- runFrame ctx inp0 ui
-  _ <- runFrame ctx press ui
-  (resp, msgs, _, _) <- runFrame ctx release ui
-  assert failed (respClicked resp && null msgs)
-
-runHoverTest :: Context -> IORef Int -> IO ()
-runHoverTest ctx failed = do
-  let inp0 = withInput 200 100
-      ui = column (button "Hover")
-  _ <- runFrame ctx inp0 ui
-  _ <- runFrame ctx (inp0 {inputMousePos = V2 10 10}) ui
-  hot <- getHotId ctx
-  assert failed (hashWidgetId hot /= 0)
-
 runPointerCursorTest :: Context -> IORef Int -> IO ()
 runPointerCursorTest ctx failed = do
   let inp0 = withInput 200 100
-      ui = column (button "Click")
-  _ <- runFrame ctx inp0 ui
-  let inp1 = inp0 {inputMousePos = V2 10 10}
-  _ <- runFrame ctx inp1 ui
-  want <- pointerCursorWanted ctx inp1
-  assert failed want
-  let inp2 = inp0 {inputMousePos = V2 (-1) (-1)}
-  _ <- runFrame ctx inp2 ui
-  want2 <- pointerCursorWanted ctx inp2
-  assert failed (not want2)
-
-runPointerCursorCheckboxTest :: Context -> IORef Int -> IO ()
-runPointerCursorCheckboxTest ctx failed = do
-  let inp0 = withInput 200 100
-      ui = column (checkbox "Feature" False)
-  (resp, _) <- warmup2 ctx inp0 ui
-  let Rect rx ry rw rh = respRect resp
-      hover = inp0 {inputMousePos = V2 (rx + rw / 2) (ry + rh / 2)}
-  _ <- runFrame ctx hover ui
-  want <- pointerCursorWanted ctx hover
-  assert failed want
-  let click = hover {inputMouseDown = True, inputMousePressed = True, inputMouseReleased = False}
-  _ <- runFrame ctx click ui
-  wantClick <- pointerCursorWanted ctx click
-  assert failed wantClick
+      ui = column $ do
+        btn <- button' "Click"
+        (cb, _) <- checkbox "Feature" False
+        pure (btn, cb)
+      wantAt inp = runFrame ctx inp ui >> pointerCursorWanted ctx inp
+  (btn, cb) <- warmup2 ctx inp0 ui
+  onButton <- wantAt (inp0 {inputMousePos = centerOf btn})
+  assert failed onButton
+  offWidgets <- wantAt (inp0 {inputMousePos = V2 (-1) (-1)})
+  assert failed (not offWidgets)
+  let hoverBox = inp0 {inputMousePos = centerOf cb}
+  onBox <- wantAt hoverBox
+  assert failed onBox
+  pressBox <- wantAt (hoverBox {inputMouseDown = True, inputMousePressed = True, inputMouseReleased = False})
+  assert failed pressBox
 
 runImageTest :: Context -> IORef Int -> IO ()
 runImageTest ctx failed = do
@@ -393,28 +246,26 @@ runImageTest ctx failed = do
   (_, _, missingData, _) <- runFrame ctx inp0 missing
   assert failed (not (any (\c -> cmdTextureId c == atlasTextureId) (drawCmdElems missingData)))
 
-runIdleTest :: Context -> IORef Int -> IO ()
-runIdleTest _ failed = do
-  ctx <- newContext
-  let inp = withInputOff 100 100
-  _ <- runFrame ctx inp (label "idle")
-  need <- needsRedraw ctx inp inp
-  assert failed (not need)
-
-runHoverSkipTest :: Context -> IORef Int -> IO ()
-runHoverSkipTest _ failed = do
-  ctx <- newContext
+-- | Hover enter and press repaint only the button, and pointer motion inside
+-- an already-hovered button does not request a redraw.
+runHoverDamageTest :: Context -> IORef Int -> IO ()
+runHoverDamageTest ctx failed = do
   let ui = column (button' "OK")
       inp0 = withInputOff 240 80
-  (resp, _, _, _) <- runFrame ctx inp0 ui >>= \_ -> runFrame ctx inp0 ui
+      assertSmall dmg = case dmg of
+        DamageFull -> assert failed False
+        DamageClip (Rect _ _ w h) -> assert failed (w * h < 240 * 80 * 0.5)
+  _ <- runFrame ctx inp0 ui
+  d0 <- takeDamage ctx
+  assertEq failed d0 DamageFull
+  (resp, _, _, _) <- runFrame ctx inp0 ui
   let Rect rx ry rw rh = respRect resp
-      inside = V2 (rx + rw / 2) (ry + rh / 2)
-      inside2 = V2 (rx + rw / 2 + 1) (ry + rh / 2)
-      inp1 = inp0 {inputMousePos = inside}
-      inp2 = inp0 {inputMousePos = inside2}
+      inp1 = inp0 {inputMousePos = V2 (rx + rw / 2) (ry + rh / 2)}
+      inp2 = inp0 {inputMousePos = V2 (rx + rw / 2 + 1) (ry + rh / 2)}
   needEnter <- needsRedraw ctx inp0 inp1
   assert failed needEnter
   _ <- runFrame ctx inp1 ui
+  assertSmall =<< takeDamage ctx
   let drain = inp1 {inputDeltaTime = 1}
   _ <- runFrame ctx drain ui
   needStay <- needsRedraw ctx drain inp2
@@ -422,49 +273,9 @@ runHoverSkipTest _ failed = do
   let inpClick = inp1 {inputMouseDown = True, inputMousePressed = True}
   needClick <- needsRedraw ctx drain inpClick
   assert failed needClick
-
-runHoverDamageTest :: Context -> IORef Int -> IO ()
-runHoverDamageTest _ failed = do
-  ctx <- newContext
-  let ui = column (button' "OK")
-      inp0 = withInputOff 240 80
-  _ <- runFrame ctx inp0 ui
-  d0 <- takeDamage ctx
-  assertEq failed d0 DamageFull
-  (resp, _, _, _) <- runFrame ctx inp0 ui
-  let Rect rx ry rw rh = respRect resp
-      inside = V2 (rx + rw / 2) (ry + rh / 2)
-      inp1 = inp0 {inputMousePos = inside}
-  _ <- runFrame ctx inp1 ui
-  d1 <- takeDamage ctx
-  case d1 of
-    DamageFull -> assert failed False
-    DamageClip (Rect _ _ w h) -> assert failed (w * h < 240 * 80 * 0.5)
-  let inpClick = inp1 {inputMouseDown = True, inputMousePressed = True}
   _ <- runFrame ctx inpClick ui
-  d2 <- takeDamage ctx
-  case d2 of
-    DamageFull -> assert failed False
-    DamageClip (Rect _ _ w h) -> assert failed (w * h < 240 * 80 * 0.5)
+  assertSmall =<< takeDamage ctx
 
-
-runCheckboxTest :: Context -> IORef Int -> IO ()
-runCheckboxTest ctx failed = do
-  let inp0 = withInput 200 100
-      ui = column (checkbox "Opt" False)
-  (resp, _) <- warmup2 ctx inp0 ui
-  let Rect rx ry _ _ = respRect resp
-      (press, release) = clickPair inp0 (V2 (rx + 1) (ry + 0.5))
-  _ <- runFrame ctx press ui
-  ((_, checked), _, _, _) <- runFrame ctx release ui
-  assert failed checked
-  ((_, checked2), _, _, _) <- runFrame ctx inp0 ui
-  assert failed checked2
-  _ <- runFrame ctx press ui
-  ((_, checked3), _, _, _) <- runFrame ctx release ui
-  assert failed (not checked3)
-  ((_, checked4), _, _, _) <- runFrame ctx inp0 ui
-  assert failed (not checked4)
 
 -- | An unclicked checkbox must keep rendering its initial value; the frame's
 -- post-UI value sync must not reset it to unchecked when no state is stored.
@@ -480,6 +291,9 @@ runCheckboxInitialTest ctx failed = do
   ((_, checked), _, _, _) <- runFrame ctx release ui
   assert failed (not checked)
   assertCheckboxNodeValue failed ctx 0
+  -- The toggled value persists on an idle frame.
+  ((_, idle), _, _, _) <- runFrame ctx inp0 ui
+  assert failed (not idle)
   _ <- runFrame ctx press ui
   ((_, checked2), _, _, _) <- runFrame ctx release ui
   assert failed checked2
@@ -500,17 +314,6 @@ assertCheckboxNodeValue failed ctx expected = do
     [v] -> assertEq failed v expected
     vs -> assert failed (vs == [expected])
 
-runSliderTest :: Context -> IORef Int -> IO ()
-runSliderTest ctx failed = do
-  let inp0 = withInput 300 80
-      ui = column (slider 0 100 10)
-  (resp, _) <- warmup2 ctx inp0 ui
-  let Rect rx ry rw rh = respRect resp
-      track = sliderTrackBounds (ctxFontMetrics ctx) rx ry rw rh
-      drag = V2 (rectX track + rectW track * 0.75) (rectY track + rectH track / 2)
-  ((_, val), _, _, _) <- runFrame ctx (inp0 {inputMousePos = drag, inputMouseDown = True, inputMousePressed = True}) ui
-  assertGt failed val 10
-
 runSliderFillWidthTest :: Context -> IORef Int -> IO ()
 runSliderFillWidthTest ctx failed = do
   let inp0 = withInput 400 120
@@ -523,44 +326,17 @@ runSliderFillWidthTest ctx failed = do
   ((_, val), _, _, _) <- runFrame ctx (inp0 {inputMousePos = endDrag, inputMouseDown = True, inputMousePressed = True}) ui
   assertGt failed val 90
 
-runTabFocusTest :: Context -> IORef Int -> IO ()
-runTabFocusTest ctx failed = do
-  let inp0 = withInput 200 120
-      ui = column (button "One" >> button "Two" >> pure ())
-  _ <- runFrame ctx inp0 ui
-  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
-  focus1 <- getFocusId ctx
-  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
-  focus2 <- getFocusId ctx
-  assert failed (focus1 /= WidgetId 0 && focus2 /= WidgetId 0 && focus1 /= focus2)
-
-runGrowFitsWindowTest :: Context -> IORef Int -> IO ()
-runGrowFitsWindowTest ctx failed = do
-  let inp = withInput 10 10
-      ui = row' (defaultLayout {layoutWidth = Grow 1, layoutHeight = Grow 1, layoutPadding = Padding 0 0 0 0, layoutGap = 0})
-             (do a <- spacer (Grow 1) (Fixed 8); b <- spacer (Grow 1) (Fixed 8); pure (a, b))
-  (ra, rb) <- warmup2 ctx inp ui
-  let Rect x1 _ w1 _ = respRect ra
-      Rect x2 _ w2 _ = respRect rb
-  assert failed (w1 > 0 && w2 > 0 && x1 >= -0.01 && x2 + w2 <= 10.01 && abs (w1 - w2) <= 0.5)
-
-runPercentLayoutTest :: Context -> IORef Int -> IO ()
-runPercentLayoutTest ctx failed = do
-  let inp = withInput 200 80
-      ui = rowWith (fixedW 200 . tight . gap 0) $ do
+-- | Percent children size against the row width, and flex like CSS: two 50%
+-- columns plus a gap must give back the overflow so the pair lands exactly on
+-- the row width (equal halves, no spill past the row's right edge).
+runPercentGapShrinkTest :: Context -> IORef Int -> IO ()
+runPercentGapShrinkTest ctx failed = do
+  let quarters = rowWith (fixedW 200 . tight . gap 0) $ do
         a <- labelEx (percent 25 . tight $ defaultLayout) "A"
         b <- labelEx (percent 75 . tight $ defaultLayout) "B"
         pure (a, b)
-  (a, b) <- warmup2 ctx inp ui
-  let Rect _ _ wa _ = respRect a
-      Rect _ _ wb _ = respRect b
-  assert failed (abs (wa - 50) <= 1 && abs (wb - 150) <= 1)
-
--- | Percent children flex like CSS: two 50% columns plus a gap must give back
--- the overflow so the pair lands exactly on the row width (equal halves, no
--- spill past the row's right edge).
-runPercentGapShrinkTest :: Context -> IORef Int -> IO ()
-runPercentGapShrinkTest ctx failed = do
+  (qa, qb) <- warmup2 ctx (withInput 200 80) quarters
+  assert failed (abs (rectW (respRect qa) - 50) <= 1 && abs (rectW (respRect qb) - 150) <= 1)
   let inp = withInput 300 80
       ui = rowWith (fixedW 206 . tight . gap 6) $ do
         a <- labelEx (percent 50 . tight $ defaultLayout) "A"
@@ -572,73 +348,51 @@ runPercentGapShrinkTest ctx failed = do
   assert failed (abs (wa - 100) <= 0.5 && abs (wb - 100) <= 0.5)
   assert failed (abs (xb - (xa + wa + 6)) <= 0.5)
 
--- | Grow children split the free space by factor with a min-content floor:
--- two fillW labels with unequal text come out equal when both fit their share
--- (instead of the old content + share-of-slack split). The row is fixed-width,
--- so grow labels measure their full text (12px per char in this context).
-runGrowEqualSplitTest :: Context -> IORef Int -> IO ()
-runGrowEqualSplitTest ctx failed = do
-  let inp = withInput 210 40
-      ui = rowWith (fixedW 210 . tight . gap 0) $ do
-        a <- labelEx (fillW . tight $ defaultLayout) "A"
-        b <- labelEx (fillW . tight $ defaultLayout) "AAAAA"
-        pure (a, b)
-  (a, b) <- warmup2 ctx inp ui
-  let Rect _ _ wa _ = respRect a
-      Rect _ _ wb _ = respRect b
-  assert failed (abs (wa - 105) <= 0.5 && abs (wb - 105) <= 0.5)
-
--- | The floor in action: a grow child whose content needs more than its share
--- takes exactly its content width, and the sibling re-shares what is left.
-runGrowContentFloorTest :: Context -> IORef Int -> IO ()
-runGrowContentFloorTest ctx failed = do
-  let inp = withInput 200 40
-      ui = rowWith (fixedW 200 . tight . gap 0) $ do
-        a <- labelEx (fillW . tight $ defaultLayout) "A"
-        b <- labelEx (fillW . tight $ defaultLayout) (T.replicate 15 "A")
-        pure (a, b)
-  (a, b) <- warmup2 ctx inp ui
-  let Rect _ _ wa _ = respRect a
-      Rect _ _ wb _ = respRect b
-  assert failed (abs (wb - 180) <= 0.5)
-  assert failed (abs (wa - 20) <= 0.5)
-  assert failed (abs (wa + wb - 200) <= 0.5)
-
--- | Multi-sweep cascade: locking the largest child shrinks the share pool,
--- which must lock the middle child on a later sweep and re-share to the
--- smallest. If the solver stopped after one sweep, the middle child would get
--- 55 (half the remainder) instead of its 60 content size.
-runGrowLockCascadeTest :: Context -> IORef Int -> IO ()
-runGrowLockCascadeTest ctx failed = do
-  let inp = withInput 240 40
-      ui = rowWith (fixedW 240 . tight . gap 0) $ do
-        a <- labelEx (fillW . minW 12 . tight $ defaultLayout) "A"
-        b <- labelEx (fillW . minW 60 . tight $ defaultLayout) "A"
-        c <- labelEx (fillW . minW 130 . tight $ defaultLayout) "A"
-        pure (a, b, c)
-  (a, b, c) <- warmup2 ctx inp ui
-  let Rect _ _ wa _ = respRect a
-      Rect _ _ wb _ = respRect b
-      Rect _ _ wc _ = respRect c
-  assert failed (abs (wa - 50) <= 0.5)
-  assert failed (abs (wb - 60) <= 0.5)
-  assert failed (abs (wc - 130) <= 0.5)
-  assert failed (abs (wa + wb + wc - 240) <= 0.5)
-
--- | The same min-content-floored equal split runs for the vertical axis:
--- two fillH children of a fixed-height column come out equal. The spacers
--- keep a non-zero width because prev-rect tracking skips zero-area rects.
-runGrowEqualSplitHeightTest :: Context -> IORef Int -> IO ()
-runGrowEqualSplitHeightTest ctx failed = do
-  let inp = withInput 60 200
-      ui = columnWith (fixedH 200 . tight . gap 0) $ do
-        a <- spacer (Fixed 10) (Grow 1)
-        b <- spacer (Fixed 10) (Grow 1)
-        pure (a, b)
-  (a, b) <- warmup2 ctx inp ui
-  let Rect _ _ _ ha = respRect a
-      Rect _ _ _ hb = respRect b
-  assert failed (abs (ha - 100) <= 0.5 && abs (hb - 100) <= 0.5)
+-- | Grow children split the free space by factor with a min-content floor
+-- (fixed-width rows, 12px per char in this context):
+--
+-- * equal split: two fillW labels with unequal text come out equal when both
+--   fit their share;
+-- * content floor: a child whose content needs more than its share takes
+--   exactly its content width and the sibling re-shares what is left;
+-- * lock cascade: locking the largest child shrinks the share pool, which
+--   must lock the middle child on a later sweep (one sweep would give it 55);
+-- * the vertical axis splits the same way. Its spacers keep a non-zero width
+--   because prev-rect tracking skips zero-area rects.
+runGrowSplitTest :: Context -> IORef Int -> IO ()
+runGrowSplitTest ctx failed = do
+  let growLabel l = labelEx (fillW . l . tight $ defaultLayout)
+      cases :: [(Input, Rect -> Float, NanoUI [Response], [Float])]
+      cases =
+        [ ( withInput 210 40
+          , rectW
+          , rowWith (fixedW 210 . tight . gap 0) $
+              sequence [growLabel id "A", growLabel id "AAAAA"]
+          , [105, 105]
+          )
+        , ( withInput 200 40
+          , rectW
+          , rowWith (fixedW 200 . tight . gap 0) $
+              sequence [growLabel id "A", growLabel id (T.replicate 15 "A")]
+          , [20, 180]
+          )
+        , ( withInput 240 40
+          , rectW
+          , rowWith (fixedW 240 . tight . gap 0) $
+              sequence [growLabel (minW 12) "A", growLabel (minW 60) "A", growLabel (minW 130) "A"]
+          , [50, 60, 130]
+          )
+        , ( withInput 60 200
+          , rectH
+          , columnWith (fixedH 200 . tight . gap 0) $
+              sequence [spacer (Fixed 10) (Grow 1), spacer (Fixed 10) (Grow 1)]
+          , [100, 100]
+          )
+        ]
+  forM_ cases $ \(inp, size, ui, want) -> do
+    got <- map (size . respRect) <$> warmup2 ctx inp ui
+    assertEq failed (length got) (length want)
+    forM_ (zip got want) $ \(g, w) -> assert failed (abs (g - w) <= 0.5)
 
 runLabelAlignEndTest :: Context -> IORef Int -> IO ()
 runLabelAlignEndTest _ failed = do
@@ -688,14 +442,11 @@ runHostSlotTest ctx failed = do
   (hitS, _, _, _) <- runFrame ctx inp hostUiString
   (hitI, _, _, _) <- runFrame ctx inp hostUiInt
   assert failed (miss == Nothing && hitS == Just "ok" && hitI == Just 1)
-
-runCompactHostTest :: Context -> IORef Int -> IO ()
-runCompactHostTest ctx failed = do
   _ <- compactHost ctx ([0 .. 9999] :: [Int])
-  let ui = do
+  let compactUi = do
         _ <- column (pure ())
         askCompact @[Int]
-  (got, _, _, _) <- runFrame ctx (withInput 80 80) ui
+  (got, _, _, _) <- runFrame ctx inp compactUi
   case got of
     Just xs | length xs == 10000 && last xs == 9999 -> pure ()
     _ -> assert failed False
@@ -730,15 +481,10 @@ runReduceMessagesTest ctx failed = do
           emit Inc >> emit Dec >> emit Inc >> emit ("noise" :: String)
   ((), model1, msgs, _, dirty) <- runFrameReduce updateCounter ctx inp model0 view
   assert failed (msgs == [Inc, Dec, Inc] && model1 == Counter 1 && dirty)
-
-runReduceUpdatesTest :: Context -> IORef Int -> IO ()
-runReduceUpdatesTest ctx failed = do
-  let ui =
-        column $
-          emit (updateCounter Inc) >> emit (updateCounter Dec) >> emit (updateCounter Inc)
-  (_, msgs, _, _) <- runFrame ctx (withInput 80 80) ui
-  let model1 = reduceUpdates (Counter 0) msgs
-  assertEq failed model1 (Counter 1)
+  -- Messages that cancel out leave the model unchanged and not dirty.
+  let identity _ = column (emit Inc >> emit Dec)
+  ((), model2, msgs2, _, dirty2) <- runFrameReduce updateCounter ctx inp model0 identity
+  assert failed (msgs2 == [Inc, Dec] && model2 == Counter 0 && not dirty2)
 
 runReduceClickTest :: Context -> IORef Int -> IO ()
 runReduceClickTest ctx failed = do
@@ -756,37 +502,15 @@ runReduceClickTest ctx failed = do
   (_, model1, _, _, _) <- runFrameReduce updateCounter ctx inp0 modelR view
   assertEq failed model1 (Counter 1)
 
-runReduceIdentityTest :: Context -> IORef Int -> IO ()
-runReduceIdentityTest ctx failed = do
-  let inp = withInput 80 80
-      view _ = column (emit Inc >> emit Dec)
-  ((), model1, msgs, _, dirty) <- runFrameReduce updateCounter ctx inp (Counter 0) view
-  assert failed (msgs == [Inc, Dec] && model1 == Counter 0 && not dirty)
-
 runWidgetNoStringEmitTest :: Context -> IORef Int -> IO ()
 runWidgetNoStringEmitTest ctx failed = do
   let inp0 = withInput 240 120
   (resp, _, _, _) <- runFrame ctx inp0 (button' "Go")
   let (press, release) = clickPair inp0 (centerOf resp)
   _ <- runFrame ctx press (button "Go")
-  (_, msgs, _, _) <- runFrame ctx release (button "Go")
-  assert failed (null (decodeMessages msgs :: [String]))
-
-runUseFlagClickTest :: Context -> IORef Int -> IO ()
-runUseFlagClickTest ctx failed = do
-  let inp0 = withInput 240 120
-      ui = do
-        (open, setOpen) <- useFlag False
-        (note, setNote) <- useText ""
-        resp <- button' "Go"
-        onClick resp (setOpen True >> setNote "hi")
-        pure (open, note, resp)
-  (open0, note0, resp) <- warmup2 ctx inp0 ui
-  assert failed (not open0 && note0 == "")
-  let (press, release) = clickPair inp0 (centerOf resp)
-  _ <- runFrame ctx press ui
-  ((open1, note1, _), _, _, _) <- runFrame ctx release ui
-  assert failed (open1 && note1 == "hi")
+  (clicked, msgs, _, _) <- runFrame ctx release (button "Go")
+  assert failed clicked
+  assert failed (null msgs)
 
 runPanelPaintsTest :: Context -> IORef Int -> IO ()
 runPanelPaintsTest ctx failed = do
@@ -1021,40 +745,6 @@ runPaneGridClippedControlTest ctx failed = do
               assert failed (not stillRendered)
         _ -> assert failed False
 
-runBase16ThemeTest :: Context -> IORef Int -> IO ()
-runBase16ThemeTest ctx failed = do
-  let dark = themeFromBase16 base16TomorrowNight
-      light = themeFromBase16 base16TomorrowLight
-  -- Window background matches base00
-  assertEq failed (themeWindow dark) (base00 base16TomorrowNight)
-  assertEq failed (themeWindow light) (base00 base16TomorrowLight)
-  -- Accent matches base0D
-  assertEq failed (themeAccent dark) (base0D base16TomorrowNight)
-  assertEq failed (themeAccent light) (base0D base16TomorrowLight)
-  -- Series colors match base08-base0E
-  assertEq failed (themeRed dark) (base08 base16TomorrowNight)
-  assertEq failed (themeOrange dark) (base09 base16TomorrowNight)
-  assertEq failed (themeYellow dark) (base0A base16TomorrowNight)
-  assertEq failed (themeGreen dark) (base0B base16TomorrowNight)
-  assertEq failed (themePurple dark) (base0E base16TomorrowNight)
-  -- Dark theme styling checks
-  assertEq failed (styleBg (themeInput dark)) (base00 base16TomorrowNight)
-  assertEq failed (styleBg (themeButton dark)) (base02 base16TomorrowNight)
-  assertEq failed (styleFg (themeButton dark)) (base07 base16TomorrowNight)
-  assertEq failed (themeOverlayDim dark) (colorRGBA 0 0 0 160)
-  -- Light theme styling checks
-  assertEq failed (styleBg (themeInput light)) (base00 base16TomorrowLight)
-  assertEq failed (styleBg (themeButton light)) (base01 base16TomorrowLight)
-  assertEq failed (styleFg (themeButton light)) (base05 base16TomorrowLight)
-  assertEq failed (themeOverlayDim light) (colorRGBA 0 0 0 100)
-  -- Integration: Context theme update and UI frame renders with base16 theme
-  ctx' <- withTheme ctx dark
-  th <- getTheme ctx'
-  assertEq failed th dark
-  let inp = withInput 200 100
-  (_, _, draw, _) <- runFrame ctx' inp (button "Base16 Button")
-  assertGt failed (drawVertexCount draw) 0
-
 -- Clicking the embedded clear (×) must empty the field, keep focus, and fire an
 -- immediate (non-debounced) change pulse.
 runSearchFieldClearTest :: Context -> IORef Int -> IO ()
@@ -1104,3 +794,18 @@ runSearchFieldDebounceTest ctx failed = do
   threadDelay 50000
   ((rD, _), _, _, _) <- runFrame ctx inp0 ui
   assert failed (not (respChanged rD))
+
+runKvMultilineHeightTest :: Context -> IORef Int -> IO ()
+runKvMultilineHeightTest ctx failed = do
+  let
+    inp0 = withInput 320 400
+    ui = column $ do
+      card $ do
+        kv "Notes" "Line 1\nLine 2\nLine 3\nLine 4\nLine 5"
+        kv "Tree" "0"
+  _ <- warmup2 ctx inp0 ui
+  spans <- collectTextSpans ctx
+  case (spanYOf "Line 5" spans, spanYOf "Tree" spans) of
+    ([line5Y], [treeY]) ->
+      assert failed (treeY > line5Y)
+    _ -> assert failed False

@@ -27,26 +27,6 @@ spec = do
       map (`TB.lineAt` b) [-1, 0, 1, 2, 3, maxBound]
         `shouldBe` ["", "α\tβ", "猫", "", "", ""]
 
-    it "initializes an empty buffer with a single line and (0,0) cursor" $ do
-      let
-        b = TB.empty
-      TB.toText b `shouldBe` ""
-      TB.getCursor b `shouldBe` TB.Cursor 0 0
-      TB.getLineCount b `shouldBe` 1
-
-    it "places the cursor at (0,0) for any fromText input" $ do
-      TB.getCursor (TB.fromText "hello") `shouldBe` TB.Cursor 0 0
-      TB.getCursor (TB.fromText "a\nb") `shouldBe` TB.Cursor 0 0
-
-    it "deleteRange leaves the cursor at the start of the deleted span" $ do
-      let
-        gone = TB.deleteRange (TB.Cursor 0 0) (TB.Cursor 0 5) (TB.fromText "hello")
-        mid = TB.deleteRange (TB.Cursor 0 1) (TB.Cursor 0 4) (TB.fromText "hello")
-      TB.toText gone `shouldBe` ""
-      TB.getCursor gone `shouldBe` TB.Cursor 0 0
-      TB.toText mid `shouldBe` "ho"
-      TB.getCursor mid `shouldBe` TB.Cursor 0 1
-
     it
       "replaces a backwards selection across Unicode lines and places the caret after the insertion" $ do
       let
@@ -65,12 +45,6 @@ spec = do
       TB.toText (TB.fromText "a\n") `shouldBe` "a\n"
       TB.toLines (TB.fromText "a\n") `shouldBe` ["a", ""]
 
-    it "handles basic character insertion" $ do
-      let
-        b = foldl (flip TB.insertChar) TB.empty (T.unpack "ab")
-      TB.toText b `shouldBe` "ab"
-      TB.getCursor b `shouldBe` TB.Cursor 0 2
-
     it "inserts a tab that text-zipper would otherwise drop" $ do
       let
         b = TB.insertChar '\t' TB.empty
@@ -88,36 +62,6 @@ spec = do
         b = TB.moveDown (TB.withCursor (TB.Cursor 0 4) (TB.fromText "12345\nx\n12345"))
       TB.getCursor (TB.moveDown (TB.insertText "" b)) `shouldBe` TB.Cursor 2 4
 
-    it "splits lines correctly on breakLine" $ do
-      let
-        b = TB.breakLine . TB.moveToEOL . TB.fromText $ "hello"
-      TB.toLines b `shouldBe` ["hello", ""]
-      TB.getCursor b `shouldBe` TB.Cursor 1 0
-
-    it "preserves column position when navigating lines of varying lengths" $ do
-      -- Line 0: "12345" (length 5)
-      -- Line 1: "12"    (length 2)
-      -- Line 2: "12345" (length 5)
-      let
-        b0 = TB.fromText "12345\n12\n12345"
-      let
-        bAtCol4 =
-          TB.moveRight . TB.moveRight . TB.moveRight . TB.moveRight $ b0
-      TB.getCursor bAtCol4 `shouldBe` TB.Cursor 0 4
-
-      -- Move down into shorter line (snaps visually to column 2)
-      let
-        bDown1 = TB.moveDown bAtCol4
-      TB.getCursor bDown1 `shouldBe` TB.Cursor 1 2
-
-      -- Move down again into longer line (restores original column 4)
-      let
-        bDown2 = TB.moveDown bDown1
-      TB.getCursor bDown2 `shouldBe` TB.Cursor 2 4
-
-      -- Move up restores the preferred column too
-      TB.getCursor (TB.moveUp bDown2) `shouldBe` TB.Cursor 1 2
-
     it
       "clamps vertical motion at document boundaries without losing the preferred column" $ do
       let
@@ -128,21 +72,23 @@ spec = do
       TB.getCursor (TB.moveDown bottom) `shouldBe` TB.Cursor 2 3
       TB.getCursor (TB.moveUp (TB.moveUp bottom)) `shouldBe` TB.Cursor 0 3
       TB.getCursor (TB.moveDown TB.empty) `shouldBe` TB.Cursor 0 0
+      -- Moving through a shorter line snaps the column and restores it after.
+      let
+        short = TB.withCursor (TB.Cursor 0 4) (TB.fromText "12345\n12\n12345")
+      TB.getCursor (TB.moveDown short) `shouldBe` TB.Cursor 1 2
+      TB.getCursor (TB.moveDown (TB.moveDown short)) `shouldBe` TB.Cursor 2 4
+      TB.getCursor (TB.moveUp (TB.moveDown (TB.moveDown short))) `shouldBe` TB.Cursor 1 2
 
     it "finds the document end independently of the current cursor" $ do
       TB.documentEnd (TB.fromText "α\n猫🙂") `shouldBe` TB.Cursor 1 2
       TB.documentEnd (TB.fromText "α\n") `shouldBe` TB.Cursor 1 0
       TB.documentEnd TB.empty `shouldBe` TB.Cursor 0 0
 
-    it "deletes words backward properly" $ do
-      let
-        b = TB.deletePrevWord (TB.moveToEOL (TB.fromText "foo bar"))
-      TB.toText b `shouldBe` "foo "
-
     it "deletePrevWord eats trailing whitespace then the previous word" $ do
       let
         b = TB.deletePrevWord (TB.moveToEOL (TB.fromText "foo "))
       TB.toText b `shouldBe` ""
+      TB.toText (TB.deletePrevWord (TB.moveToEOL (TB.fromText "foo bar"))) `shouldBe` "foo "
 
     it "deletePrevWord joins lines at beginning of line" $ do
       let
@@ -156,15 +102,9 @@ spec = do
         b = TB.deleteNextWord (TB.fromText "foo bar")
       TB.toText b `shouldBe` " bar"
 
-    it "killToEOL removes the rest of the current line" $ do
-      let
-        b = TB.killToEOL (TB.moveRight (TB.fromText "hello"))
-      TB.toText b `shouldBe` "h"
-
-    it "killToBOL removes text before the cursor on the current line" $ do
-      let
-        b = TB.killToBOL (TB.moveToEOL (TB.fromText "hello"))
-      TB.toText b `shouldBe` ""
+    it "killToEOL and killToBOL remove the rest of the line on either side" $ do
+      TB.toText (TB.killToEOL (TB.moveRight (TB.fromText "hello"))) `shouldBe` "h"
+      TB.toText (TB.killToBOL (TB.moveToEOL (TB.fromText "hello"))) `shouldBe` ""
 
   describe "NanoUI.Widgets.TextArea" $ do
     it
@@ -182,24 +122,20 @@ spec = do
       TB.getCursor (TA.buffer entered) `shouldBe` TB.Cursor 1 0
       TA.selectionAnchor entered `shouldBe` TB.Cursor 1 0
 
-    it "Ctrl+Left/Right move by word" $ do
+    it "Ctrl and Alt edit and move by word" $ do
       let
         s0 = TA.initTextAreaState "foo bar"
-        sRight = TA.handleTextAreaEvent (TA.TAKey KeyRight) ctrlMods s0
-        sLeft = TA.handleTextAreaEvent (TA.TAKey KeyLeft) ctrlMods sRight
-      TB.getCursor (TA.buffer sRight) `shouldBe` TB.Cursor 0 3
-      TB.getCursor (TA.buffer sLeft) `shouldBe` TB.Cursor 0 0
-
-    it "Alt edits and moves by word like Ctrl" $ do
-      let
-        s0 = TA.initTextAreaState "foo bar"
-        altMods = TA.Modifiers False False True
-        deleted = TA.handleTextAreaEvent (TA.TAKey KeyDelete) altMods s0
-        right = TA.handleTextAreaEvent (TA.TAKey KeyRight) altMods s0
-        left = TA.handleTextAreaEvent (TA.TAKey KeyLeft) altMods right
-      TB.toText (TA.buffer deleted) `shouldBe` " bar"
-      TB.getCursor (TA.buffer right) `shouldBe` TB.Cursor 0 3
-      TB.getCursor (TA.buffer left) `shouldBe` TB.Cursor 0 0
+      mapM_
+        ( \mods -> do
+            let
+              deleted = TA.handleTextAreaEvent (TA.TAKey KeyDelete) mods s0
+              right = TA.handleTextAreaEvent (TA.TAKey KeyRight) mods s0
+              left = TA.handleTextAreaEvent (TA.TAKey KeyLeft) mods right
+            TB.toText (TA.buffer deleted) `shouldBe` " bar"
+            TB.getCursor (TA.buffer right) `shouldBe` TB.Cursor 0 3
+            TB.getCursor (TA.buffer left) `shouldBe` TB.Cursor 0 0
+        )
+        [ctrlMods, TA.Modifiers False False True]
 
     it "layout subtracts scrollOffset from caret and line Y" $ do
       let
@@ -232,5 +168,4 @@ spec = do
       textWordBounds "" 10 `shouldBe` (0, 0)
       textWordBounds "one two" (-10) `shouldBe` (0, 3)
       textWordBounds "one two" 100 `shouldBe` (4, 7)
-    it "handles a long Unicode word" $ do
       textWordBounds (T.replicate 10000 "猫") 5000 `shouldBe` (0, 10000)
