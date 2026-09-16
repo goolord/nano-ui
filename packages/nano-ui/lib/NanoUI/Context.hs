@@ -20,6 +20,7 @@ module NanoUI.Context
   , initialDamageState
   , initialOverlayState
   , initialAnimationState
+  , initialScrollState
   , initialDrawingCacheState
   , getsInteraction
   , modifyInteraction
@@ -110,6 +111,36 @@ module NanoUI.Context
   , setScrollConfig
   , defaultScrollConfig
   , linkScrollAxes
+  , ScrollTuning (..)
+  , defaultScrollTuning
+  , getScrollTuning
+  , setScrollTuning
+  , getScrollStep
+  , setScrollStep
+  , resolveScrollStep
+  , ScrollAxes (..)
+  , ScrollMetrics (..)
+  , getScrollMetrics
+  , cacheScrollMetrics
+  , beginScrollMetrics
+  , getScrollOffsetIn
+  , setScrollOffsetIn
+  , ScrollBehavior (..)
+  , ScrollAlign (..)
+  , scrollTo
+  , scrollBy
+  , scrollPages
+  , scrollToStart
+  , scrollToEnd
+  , scrollIntoView
+  , scrollRectIntoView
+  , applyScrollTarget
+  , scrollTargetOffset
+  , scrollGliding
+  , anyScrollGliding
+  , clampScrollOffset
+  , cancelScrollGlide
+  , stepScrollGlides
   , getPrevRect
   , getPrevClipRect
   , getPrevRects
@@ -286,6 +317,7 @@ import NanoUI.Context.Types
   , WindowResizeEdge (..)
   , decodeMessages
   , initialAnimationState
+  , initialScrollState
   , initialDamageState
   , initialDrawingCacheState
   , initialInteractionState
@@ -567,6 +599,7 @@ newContext = do
   ctxDamageState <- newIORef initialDamageState
   ctxOverlayState <- newIORef initialOverlayState
   ctxAnimationState <- newIORef initialAnimationState
+  ctxScrollState <- newIORef initialScrollState
   ctxDrawingCache <- newIORef initialDrawingCacheState
   ctxIdContext <- newIORef initialIdContext
   ctxContainerStack <- newIORef []
@@ -606,6 +639,7 @@ newContext = do
         , ctxDamageState
         , ctxOverlayState
         , ctxAnimationState
+        , ctxScrollState
         , ctxDrawingCache
         , ctxIdContext
         , ctxFontMetrics = fm0

@@ -24,9 +24,7 @@ import NanoUI.Context
   ( Context (..)
   , damageFull
   , getPrevRect
-  , getScrollOffset2D
   , markDirty
-  , setScrollOffset2D
   , takeTextEditLastAction
   )
 import NanoUI.Monad (askContext, askInput, uiTime)

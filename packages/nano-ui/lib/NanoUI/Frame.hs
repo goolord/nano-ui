@@ -47,6 +47,7 @@ import NanoUI.Context
   , resetDrawingScopeCache
   , setMenuPointerGesture
   , setSelectDropPress
+  , stepScrollGlides
   , takeDamage
   , tickAnimations
   , lookupCustomMeasure
@@ -203,6 +204,9 @@ runFrameEff unlift ctx inp ui = do
   -- virtualization (table body rows) materialized for the range that will
   -- actually be visible, without a second build pass.
   updateScrollWheel ctx inp
+  -- A glide advances with the wheel, before the build, for the same reason:
+  -- the offset this frame renders at is the one virtualization must see.
+  stepScrollGlides ctx (inputDeltaTime inp)
   updateScrollDrag ctx inp
   resetNodeArena (ctxNodeArena ctx)
   resetDrawArena (ctxDrawArena ctx)

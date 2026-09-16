@@ -353,6 +353,57 @@ module NanoUI
   , useEnum
   , useText
 
+    -- * Scrolling
+
+    -- | A scroll container ('scroll', 'scroll2D') handles the wheel and its
+    -- own scrollbars. These move one from the outside, keyed by the
+    -- 'WidgetId' that 'scrollArea' and 'scrollArea2D' hand back.
+    --
+    -- How far the wheel goes, and whether a scroll glides onto its target
+    -- instead of jumping, is one setting for the whole app:
+    --
+    -- @
+    -- 'setScrollTuning' ctx 'defaultScrollTuning'
+    --   { 'scrollWheelStep' = 3 * rowHeight  -- three rows a notch
+    --   , 'scrollSmoothTime' = 0.12          -- glide onto it
+    --   }
+    -- @
+    --
+    -- 'setScrollStep' gives one list a step of its own. With a glide time
+    -- set, every wheel notch and every 'ScrollSmooth' command eases onto its
+    -- target over that many seconds, and the frame loop keeps drawing until
+    -- it lands.
+    --
+    -- 'scrollIntoView' brings a widget inside the scroller into view: the row
+    -- a keyboard selection just moved to, say. A list that only builds the
+    -- rows it shows has no widget to point at for the rest, so scroll to
+    -- where the row would be with 'scrollRectIntoView', whose rectangle is in
+    -- content coordinates. 'getScrollMetrics' reports the viewport, range and
+    -- offset such a list needs to pick its visible rows in the first place.
+  , ScrollTuning (..)
+  , defaultScrollTuning
+  , getScrollTuning
+  , setScrollTuning
+  , getScrollStep
+  , setScrollStep
+  , ScrollMetrics (..)
+  , ScrollAxes (..)
+  , getScrollMetrics
+  , ScrollBehavior (..)
+  , ScrollAlign (..)
+  , scrollTo
+  , scrollBy
+  , scrollPages
+  , scrollToStart
+  , scrollToEnd
+  , scrollIntoView
+  , scrollRectIntoView
+  , scrollGliding
+  , getScrollOffset
+  , setScrollOffset
+  , getScrollOffset2D
+  , setScrollOffset2D
+
     -- * Animation
   , Transition (..)
   , animate
@@ -544,7 +595,36 @@ import NanoUI.Animation
   , presetStiff
   )
 import NanoUI.Compact (Compact, askCompact, compactHost)
-import NanoUI.Context (Ease (..), applyEase, getTheme, setTheme, withTheme)
+import NanoUI.Context
+  ( Ease (..)
+  , ScrollAlign (..)
+  , ScrollAxes (..)
+  , ScrollBehavior (..)
+  , ScrollMetrics (..)
+  , ScrollTuning (..)
+  , applyEase
+  , defaultScrollTuning
+  , getScrollMetrics
+  , getScrollOffset
+  , getScrollOffset2D
+  , getScrollStep
+  , getScrollTuning
+  , getTheme
+  , scrollBy
+  , scrollGliding
+  , scrollIntoView
+  , scrollPages
+  , scrollRectIntoView
+  , scrollTo
+  , scrollToEnd
+  , scrollToStart
+  , setScrollOffset
+  , setScrollOffset2D
+  , setScrollStep
+  , setScrollTuning
+  , setTheme
+  , withTheme
+  )
 import NanoUI.Draw (drawTextBox, shiftDrawOp)
 import NanoUI.Font
   ( FontBackend (..)

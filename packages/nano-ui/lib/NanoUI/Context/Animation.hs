@@ -36,14 +36,20 @@ import NanoUI.Animation
   , writeRest
   )
 import NanoUI.Context.Core (damageKey, getsDamage, markDirty)
-import NanoUI.Context.Types (AnimationState (..), Context (..), DamageState (..), intKey)
+import NanoUI.Context.Types (AnimationState (..), Context (..), DamageState (..), ScrollState (..), intKey)
 import NanoUI.Id (WidgetId)
 import NanoUI.Layout.Arena (getRect, lookupNodeByKey)
 import NanoUI.Types (DamageBounds (..), defaultDamageSlop)
 
+-- | Whether the frame loop has to keep drawing: an animation is running, or a
+-- scroller is still gliding onto its target.
 {-# INLINE anyAnimating #-}
 anyAnimating :: Context -> IO Bool
-anyAnimating ctx = asAnyAnimating <$> readIORef (ctxAnimationState ctx)
+anyAnimating ctx = do
+  anim <- asAnyAnimating <$> readIORef (ctxAnimationState ctx)
+  if anim
+    then pure True
+    else not . IM.null . ssGlides <$> readIORef (ctxScrollState ctx)
 
 {-# INLINE getLiveAnimations #-}
 getLiveAnimations :: Context -> IO (IntMap Animation)

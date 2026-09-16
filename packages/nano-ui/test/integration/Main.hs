@@ -32,6 +32,7 @@ import Cases.Table
   , runTableReorderTest
   , runTableResizeOverflowTest
   , runTableScrollRevealTest
+  , runTableSharedScrollMetricsTest
   , runTableSortTest
   , runTableWrapRowStretchTest
   )
@@ -212,10 +213,16 @@ testSpecs =
   , TestSpec "page-scroll-backdrop-coverage" False runPageScrollBackdropCoverageTest
   , TestSpec "scroll-2d-pad-fill-overflow" False run2DPadFillOverflowTest
   , TestSpec "scroll-2d-pad-overflow-scrolls" False run2DPadOverflowScrollsTest
+  , TestSpec "scroll-step" False runScrollStepTest
+  , TestSpec "scroll-smooth" False runScrollSmoothTest
+  , TestSpec "scroll-metrics" False runScrollMetricsTest
+  , TestSpec "scroll-into-view" False runScrollIntoViewTest
+  , TestSpec "scroll-glide-clamp" False runScrollGlideClampTest
   -- Tables
   , TestSpec "table-sort" False runTableSortTest
   , TestSpec "table-reorder" True runTableReorderTest
   , TestSpec "table-scroll-reveal" False runTableScrollRevealTest
+  , TestSpec "table-shared-scroll-metrics" False runTableSharedScrollMetricsTest
   , TestSpec "page-wheel-above-table" False runPageWheelAboveTableTest
   , TestSpec "table-wrap-row-stretch" False runTableWrapRowStretchTest
   , TestSpec "table-first-col" False runTableFirstColWidthTest

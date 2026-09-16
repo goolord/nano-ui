@@ -36,6 +36,10 @@ counter = do
   anything else.
 - Row, column, and grid layout with scrolling. Layout options are
   `Layout -> Layout` modifiers, as in `columnWith (gap 8 . padAll 12)`.
+- Scrollers take a wheel step and a glide time (`setScrollTuning`,
+  `setScrollStep`), and move from code: `scrollTo`, `scrollBy`, `scrollPages`,
+  and `scrollIntoView`. `getScrollMetrics` gives a virtualized list the
+  viewport and offset it needs to pick its rows.
 - Keyboard focus and navigation for every control.
 - Backends block on input and run a frame only when something needs
   redrawing. Each frame computes its damage against the previous one.

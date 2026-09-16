@@ -33,7 +33,7 @@ import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Text qualified as T
 import NanoUI
-import NanoUI.Context (getScrollOffset2D, intKey)
+import NanoUI.Context (intKey)
 import NanoUI.Frame.TextEdit
   ( TextAreaGeom (..)
   , TextAreaHit (..)

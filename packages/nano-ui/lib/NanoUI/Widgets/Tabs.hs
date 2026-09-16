@@ -24,12 +24,13 @@ import NanoUI.Context
   , getStore
   , intKey
   , markDirty
+  , resolveScrollStep
   , setScrollOffset
   , setStore
   )
 import NanoUI.Font (resolveLayoutPadding)
 import NanoUI.Frame.Hit (findNodeByWidgetId)
-import NanoUI.Frame.Scroll.Geometry (scrollAxisRange, scrollBare, scrollHorizontalHidden, scrollLineFor)
+import NanoUI.Frame.Scroll.Geometry (scrollAxisRange, scrollBare, scrollHorizontalHidden)
 import NanoUI.Id (WidgetId)
 import NanoUI.Input (inputMousePos, inputScroll)
 import NanoUI.Layout.Arena (setNodeValue)
@@ -231,6 +232,7 @@ renderScrollableHeaders ctx style hdrLay barLay groupId cur tabList = do
   let maxOffPrev = max 0 (IM.findWithDefault 0 rangeKey (storeFloat store))
       overflow = maxOffPrev > 0.5
   off <- uiIO (getScrollOffset ctx scrollWid)
+  wheelStep <- uiIO (resolveScrollStep ctx scrollWid)
   mBar <- uiIO (getPrevRect ctx groupId)
   mScr <- uiIO (getPrevRect ctx scrollWid)
   inp <- askInput
@@ -280,7 +282,7 @@ renderScrollableHeaders ctx style hdrLay barLay groupId cur tabList = do
         | maybe False respClicked leftResp, canLeft = max 0 (off - page)
         | maybe False respClicked rightResp, canRight = min maxOff (off + page)
         | overflow, notches /= 0, maxOff > 0 =
-            clamp 0 maxOff (off + fromIntegral notches * scrollLineFor)
+            clamp 0 maxOff (off + fromIntegral notches * wheelStep)
         | overflow, off > maxOff + 0.5 = maxOff
         | otherwise = off
       finalOff

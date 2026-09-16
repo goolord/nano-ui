@@ -8,6 +8,7 @@ module Cases.Table
   , runTableReorderTest
   , runTableResizeOverflowTest
   , runTableScrollRevealTest
+  , runTableSharedScrollMetricsTest
   , runTableSortTest
   , runTableWrapRowStretchTest
   ) where
@@ -16,13 +17,13 @@ import Control.Monad (forM, forM_, replicateM_, void)
 import Data.Bits ((.&.))
 import Data.IORef (IORef)
 import Data.IntMap.Strict qualified as IM
-import Data.List (sortBy, sortOn)
-import Data.Maybe (catMaybes, listToMaybe)
+import Data.List (sortBy, sortOn, tails)
+import Data.Maybe (catMaybes, isJust, listToMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Vector qualified as V
 import NanoUI
-import NanoUI.Context (ctxNodeArena, getScrollOffset2D)
+import NanoUI.Context (ctxNodeArena)
 import NanoUI.Layout.Arena
   ( DirTag (..)
   , NodeIdx
@@ -150,6 +151,10 @@ runTableScrollRevealTest _ failed = do
               tableScrollRows
               tableSort
           )
+  -- A step of one line keeps the scroll below short enough that the rows it
+  -- lands on are still in ascending label order (the table sorts the labels
+  -- as text, so "row-2" comes after "row-19").
+  setScrollTuning ctx defaultScrollTuning {scrollWheelStep = 20}
   -- Three warmups so virtualization settles on the real viewport height.
   _ <- runFrame ctx inp0 ui
   _ <- runFrame ctx inp0 ui
@@ -758,3 +763,41 @@ runTableHBarReachTest _ failed = do
           case (xOf "Value", xOf "val-") of
             (Just headerX, Just cellX) -> assert failed (abs (headerX - cellX) <= 1)
             _ -> assert failed False
+
+-- A table with frozen columns builds two scroll nodes under one widget id.
+-- Only one of them may publish the body's geometry: if both did, every frame
+-- would rewrite the store with the other pane's viewport twice a frame, for
+-- as long as the table is on screen. One publishes; what it publishes is the
+-- body scroller, whole, and it holds still from frame to frame.
+runTableSharedScrollMetricsTest :: Context -> IORef Int -> IO ()
+runTableSharedScrollMetricsTest _ failed = do
+  ctx <- newPixelContext
+  let inp0 = (withInput 320 220) {inputMousePos = V2 40 80}
+      cfg = defaultTableConfig {tableFreezeCols = 1}
+      ui = do
+        (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
+        void (tableConfigured cfg (fixedH 150) "people" tableScrollCols tableScrollRows tableSort)
+  replicateM_ 3 (runFrame ctx inp0 ui)
+  bodyWid <- tableBodyScrollWid ctx
+  case bodyWid of
+    Nothing -> assert failed False
+    Just wid -> do
+      before <- getScrollMetrics ctx wid
+      assert failed (isJust before)
+      -- The pane that owns both scrollbars, not the frozen column's sliver.
+      assertEq failed (Just ScrollAxisXY) (fmap scrollAxes before)
+      _ <- runFrame ctx inp0 ui
+      after <- getScrollMetrics ctx wid
+      assertEq failed before after
+
+-- The widget id shared by the table body's panes: the id of the first scroll
+-- container the arena holds that another scroll container repeats.
+tableBodyScrollWid :: Context -> IO (Maybe WidgetId)
+tableBodyScrollWid ctx = do
+  let na = ctxNodeArena ctx
+  n <- arenaCount na
+  wids <- fmap catMaybes $ forM [0 .. n - 1] $ \i -> do
+    nt <- getNodeType na i
+    if nt == NodeScrollContainer then Just <$> getWidgetId na i else pure Nothing
+  pure (listToMaybe [w | w : rest <- tails wids, w `elem` rest])
+

@@ -20,6 +20,11 @@ module NanoUI.Store
   , slotScrollCross
   , slotScrollLinkX
   , slotScrollLinkY
+  , slotScrollStep
+  , slotScrollAxes
+  , slotScrollViewPos
+  , slotScrollViewSize
+  , slotScrollRange
   , slotTextAreaRow
   , slotTextAreaCol
   , slotTextAreaPrefCol
@@ -191,6 +196,11 @@ data Slot
   | SlotScrollCross
   | SlotScrollLinkX
   | SlotScrollLinkY
+  | SlotScrollStep
+  | SlotScrollAxes
+  | SlotScrollViewPos
+  | SlotScrollViewSize
+  | SlotScrollRange
   | SlotScrollContent
   | SlotTextAreaRow
   | SlotTextAreaCol
@@ -296,6 +306,21 @@ slotScrollLinkX = slotTag SlotScrollLinkX
 
 slotScrollLinkY :: Word64
 slotScrollLinkY = slotTag SlotScrollLinkY
+
+slotScrollStep :: Word64
+slotScrollStep = slotTag SlotScrollStep
+
+slotScrollAxes :: Word64
+slotScrollAxes = slotTag SlotScrollAxes
+
+slotScrollViewPos :: Word64
+slotScrollViewPos = slotTag SlotScrollViewPos
+
+slotScrollViewSize :: Word64
+slotScrollViewSize = slotTag SlotScrollViewSize
+
+slotScrollRange :: Word64
+slotScrollRange = slotTag SlotScrollRange
 
 slotScrollContent :: Word64
 slotScrollContent = slotTag SlotScrollContent

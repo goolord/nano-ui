@@ -16,6 +16,12 @@ module NanoUI.Context.Types
   , initialOverlayState
   , AnimationState (..)
   , initialAnimationState
+  , ScrollTuning (..)
+  , defaultScrollTuning
+  , ScrollAxes (..)
+  , ScrollGlide (..)
+  , ScrollState (..)
+  , initialScrollState
   , DrawFitCache (..)
   , DrawingEntry (..)
   , DrawingCacheState (..)
@@ -44,6 +50,8 @@ import Data.HashMap.Strict (HashMap)
 import Data.IORef (IORef)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
+import Data.IntSet (IntSet)
+import Data.IntSet qualified as IS
 import Data.Map.Strict (Map)
 import Data.Primitive.PrimArray (MutablePrimArray)
 import Data.Text (Text)
@@ -225,6 +233,63 @@ initialAnimationState = AnimationState
   , asRectless = IM.empty
   }
 
+-- | How far one wheel notch scrolls, and how long a scroll takes to settle.
+-- One setting for the whole context; a single scroller can take its own step
+-- (see @setScrollStep@).
+data ScrollTuning = ScrollTuning
+  { scrollWheelStep :: Float
+  -- ^ Pixels one wheel notch scrolls. The default is three text lines, which
+  -- is what Windows and most desktops send a notch as.
+  , scrollSmoothTime :: Float
+  -- ^ Seconds a scroll takes to cover most of the distance to its target.
+  -- @0@ (the default) lands on it in the same frame.
+  }
+  deriving (Eq, Show)
+
+defaultScrollTuning :: ScrollTuning
+defaultScrollTuning =
+  ScrollTuning
+    { scrollWheelStep = 60
+    , scrollSmoothTime = 0
+    }
+
+-- | Which axes a scroller moves on, and how an offset in window axes (x
+-- rightwards, y downwards) maps onto its stored offset. A 1D row scroller
+-- keeps its offset in the main-axis slot, so its horizontal offset is the one
+-- that needs swapping.
+data ScrollAxes
+  = ScrollAxisY
+  | ScrollAxisX
+  | ScrollAxisXY
+  deriving (Eq, Show)
+
+-- | A scroller on its way to an offset it has not reached yet. The target is
+-- in window axes and already clamped to the scroller's range.
+data ScrollGlide = ScrollGlide
+  { sgWidget :: WidgetId
+  , sgTarget :: V2
+  , sgAxes :: ScrollAxes
+  }
+  deriving (Eq, Show)
+
+data ScrollState = ScrollState
+  { ssTuning :: !ScrollTuning
+  , ssGlides :: !(IntMap ScrollGlide)
+  , ssCached :: !IntSet
+  -- ^ Scrollers whose geometry has been published this frame. Two scroll
+  -- nodes can share a widget id (a table's frozen pane and its body), and
+  -- without this the second would overwrite the first every frame, churning
+  -- the store and flipping the geometry the commands read.
+  }
+
+initialScrollState :: ScrollState
+initialScrollState =
+  ScrollState
+    { ssTuning = defaultScrollTuning
+    , ssGlides = IM.empty
+    , ssCached = IS.empty
+    }
+
 data DrawFitCache = DrawFitCache
   { dfcDw :: {-# UNPACK #-} !Double
   , dfcDh :: {-# UNPACK #-} !Double
@@ -405,6 +470,7 @@ data Context = Context
   , ctxDamageState :: IORef DamageState
   , ctxOverlayState :: IORef OverlayState
   , ctxAnimationState :: IORef AnimationState
+  , ctxScrollState :: !(IORef ScrollState)
   , ctxDrawingCache :: IORef DrawingCacheState
   , ctxIdContext :: IORef IdContext
   , ctxFontMetrics :: FontMetrics

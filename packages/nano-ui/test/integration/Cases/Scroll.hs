@@ -12,6 +12,11 @@ module Cases.Scroll
   , run2DPadOverflowScrollsTest
   , runScrollLockstepProbeTest
   , runPageScrollBackdropCoverageTest
+  , runScrollStepTest
+  , runScrollSmoothTest
+  , runScrollMetricsTest
+  , runScrollIntoViewTest
+  , runScrollGlideClampTest
   ) where
 
 import Control.Monad (forM, forM_, replicateM, replicateM_, void, when)
@@ -23,7 +28,7 @@ import Foreign.Ptr (Ptr, castPtr)
 import Foreign.Storable (peekElemOff)
 import Data.Text qualified as T
 import NanoUI
-import NanoUI.Context (ctxNodeArena, getScrollOffset2D, setDrawSnapScale)
+import NanoUI.Context (ctxNodeArena, setDrawSnapScale)
 import NanoUI.Layout.Arena
   ( NodeType (..)
   , arenaCount
@@ -566,3 +571,170 @@ run2DPadOverflowScrollsTest _ failed = do
       replicateM_ 40 (runFrame ctx wheelDown ui)
       V2 _ offEnd <- getScrollOffset2D ctx wid
       assert failed (abs (offEnd - (contentH + padTestPx - (innerH - laneH))) < 1.5)
+
+-- The wheel covers the configured step per notch: the context's by default,
+-- and the scroller's own once it is given one.
+runScrollStepTest :: Context -> IORef Int -> IO ()
+runScrollStepTest _ failed = do
+  ctx <- newPixelContext
+  let inp0 = withInput 200 120
+      ui = scrollArea (fillW . fixedH 80) (column (replicateM_ 16 (label "scroll line")))
+  setScrollTuning ctx defaultScrollTuning {scrollWheelStep = 40}
+  (sid, ()) <- warmup2 ctx inp0 ui
+  mRect <- getPrevRect ctx sid
+  case mRect of
+    Nothing -> assert failed False
+    Just (Rect sx sy sw sh) -> do
+      let wheel = inp0 {inputMousePos = V2 (sx + sw / 2) (sy + sh / 2), inputScroll = V2 0 1}
+      _ <- runFrame ctx wheel ui
+      assertEq failed 40 =<< getScrollOffset ctx sid
+      -- The scroller's own step overrides the context's from the next notch on.
+      setScrollStep ctx sid 12
+      _ <- runFrame ctx wheel ui
+      assertEq failed 52 =<< getScrollOffset ctx sid
+      -- Back to the context's step.
+      setScrollStep ctx sid 0
+      _ <- runFrame ctx wheel ui
+      assertEq failed 92 =<< getScrollOffset ctx sid
+
+-- With a glide time set, a notch eases onto its target over several frames,
+-- and the frame loop counts the scroller as animating until it lands.
+runScrollSmoothTest :: Context -> IORef Int -> IO ()
+runScrollSmoothTest _ failed = do
+  ctx <- newPixelContext
+  let inp0 = withInput 200 120
+      ui = scrollArea (fillW . fixedH 80) (column (replicateM_ 16 (label "scroll line")))
+  setScrollTuning ctx defaultScrollTuning {scrollWheelStep = 60, scrollSmoothTime = 0.2}
+  (sid, ()) <- warmup2 ctx inp0 ui
+  mRect <- getPrevRect ctx sid
+  case mRect of
+    Nothing -> assert failed False
+    Just (Rect sx sy sw sh) -> do
+      let tick = inp0 {inputMousePos = V2 (sx + sw / 2) (sy + sh / 2), inputDeltaTime = 1 / 60}
+          wheel = tick {inputScroll = V2 0 1}
+      _ <- runFrame ctx wheel ui
+      partial <- getScrollOffset ctx sid
+      assertGt failed partial 0
+      assert failed (partial < 60)
+      assert failed =<< scrollGliding ctx sid
+      assert failed =<< anyAnimating ctx
+      -- It settles exactly on the target, and stops asking for frames there.
+      replicateM_ 30 (runFrame ctx tick ui)
+      assertEq failed 60 =<< getScrollOffset ctx sid
+      gliding <- scrollGliding ctx sid
+      assert failed (not gliding)
+      -- A notch mid-glide adds to the throw instead of restarting it.
+      _ <- runFrame ctx wheel ui
+      _ <- runFrame ctx wheel ui
+      replicateM_ 30 (runFrame ctx tick ui)
+      assertEq failed 180 =<< getScrollOffset ctx sid
+      -- Setting an offset outright wins over whatever was in flight.
+      _ <- runFrame ctx wheel ui
+      setScrollOffset ctx sid 20
+      replicateM_ 5 (runFrame ctx tick ui)
+      assertEq failed 20 =<< getScrollOffset ctx sid
+
+-- The metrics a scroller publishes each frame, and the commands that read
+-- them: to the end, back to the start, and by whole pages.
+runScrollMetricsTest :: Context -> IORef Int -> IO ()
+runScrollMetricsTest _ failed = do
+  ctx <- newPixelContext
+  let inp0 = withInput 200 160
+      ui = scrollArea (fillW . fixedH 80) (column (replicateM_ 16 (label "scroll line")))
+  (sid, ()) <- warmup2 ctx inp0 ui
+  mMetrics <- getScrollMetrics ctx sid
+  case mMetrics of
+    Nothing -> assert failed False
+    Just m -> do
+      assertEq failed (scrollAxes m) ScrollAxisY
+      assertEq failed (scrollOffset m) (V2 0 0)
+      assertGt failed (v2Y (scrollRange m)) 0
+      assertEq failed (v2X (scrollRange m)) 0
+      -- The viewport is the scroller's box inside its padding and bar lane.
+      mRect <- getPrevRect ctx sid
+      case mRect of
+        Nothing -> assert failed False
+        Just r -> do
+          assert failed (rectW (scrollViewport m) <= rectW r)
+          assert failed (rectH (scrollViewport m) <= rectH r)
+      scrollToEnd ctx sid ScrollInstant
+      _ <- runFrame ctx inp0 ui
+      assertEq failed (v2Y (scrollRange m)) =<< getScrollOffset ctx sid
+      scrollToStart ctx sid ScrollInstant
+      _ <- runFrame ctx inp0 ui
+      assertEq failed 0 =<< getScrollOffset ctx sid
+      scrollPages ctx sid (V2 0 1) ScrollInstant
+      _ <- runFrame ctx inp0 ui
+      paged <- getScrollOffset ctx sid
+      assertEq failed (min (v2Y (scrollRange m)) (rectH (scrollViewport m))) paged
+
+-- Scrolling a widget into view, by widget and by content rectangle.
+runScrollIntoViewTest :: Context -> IORef Int -> IO ()
+runScrollIntoViewTest _ failed = do
+  ctx <- newPixelContext
+  let inp0 = withInput 200 160
+      ui =
+        scrollArea (fillW . fixedH 80) $
+          column (forM [1 .. 16 :: Int] (\i -> label' (T.pack ("line " <> show i))))
+  (sid, rows) <- warmup2 ctx inp0 ui
+  let target = respId (rows !! 11)
+  scrollIntoView ctx sid target ScrollStart ScrollInstant
+  _ <- runFrame ctx inp0 ui
+  mAfter <- getScrollMetrics ctx sid
+  mRow <- getPrevRect ctx target
+  case (mAfter, mRow) of
+    (Just m, Just r) -> do
+      -- The row sits against the top of the viewport, whole.
+      assert failed (abs (rectY r - rectY (scrollViewport m)) < 1.5)
+      -- Already in view: the nearest alignment leaves the offset alone.
+      before <- getScrollOffset ctx sid
+      scrollIntoView ctx sid target ScrollNearest ScrollInstant
+      _ <- runFrame ctx inp0 ui
+      assertEq failed before =<< getScrollOffset ctx sid
+      -- A row above the viewport comes back to the top edge.
+      let above = respId (rows !! 1)
+      scrollIntoView ctx sid above ScrollNearest ScrollInstant
+      _ <- runFrame ctx inp0 ui
+      mAbove <- getPrevRect ctx above
+      case mAbove of
+        Nothing -> assert failed False
+        Just ra -> assert failed (abs (rectY ra - rectY (scrollViewport m)) < 1.5)
+      -- A content rectangle no widget was built for (a virtualized row)
+      -- lands the same way.
+      let rowH = rectH r
+      scrollRectIntoView ctx sid (Rect 0 (rowH * 8) 10 rowH) ScrollStart ScrollInstant
+      _ <- runFrame ctx inp0 ui
+      off <- getScrollOffset ctx sid
+      assert failed (abs (off - rowH * 8) < 1.5)
+    _ -> assert failed False
+
+-- Content that shrinks under a glide pulls the glide back with it: the
+-- scroller must not coast to an offset the shorter content cannot reach and
+-- sit there showing nothing.
+runScrollGlideClampTest :: Context -> IORef Int -> IO ()
+runScrollGlideClampTest _ failed = do
+  ctx <- newPixelContext
+  rows <- newIORef (40 :: Int)
+  let inp0 = withInput 200 120
+      ui = do
+        n <- uiIO (readIORef rows)
+        scrollArea (fillW . fixedH 80) (column (replicateM_ n (label "scroll line")))
+  setScrollTuning ctx defaultScrollTuning {scrollWheelStep = 60, scrollSmoothTime = 0.2}
+  (sid, ()) <- warmup2 ctx inp0 ui
+  mRect <- getPrevRect ctx sid
+  case mRect of
+    Nothing -> assert failed False
+    Just (Rect sx sy sw sh) -> do
+      let tick = inp0 {inputMousePos = V2 (sx + sw / 2) (sy + sh / 2), inputDeltaTime = 1 / 60}
+          wheel = tick {inputScroll = V2 0 8}
+      _ <- runFrame ctx wheel ui
+      assert failed =<< scrollGliding ctx sid
+      writeIORef rows 12
+      replicateM_ 40 (runFrame ctx tick ui)
+      mMetrics <- getScrollMetrics ctx sid
+      off <- getScrollOffset ctx sid
+      case mMetrics of
+        Nothing -> assert failed False
+        Just m -> do
+          assertGt failed (v2Y (scrollRange m)) 0
+          assert failed (off <= v2Y (scrollRange m) + 0.5)
