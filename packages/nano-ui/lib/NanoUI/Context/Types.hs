@@ -391,6 +391,12 @@ data Context = Context
   , ctxActiveId :: IORef WidgetId
   , ctxClickedId :: IORef WidgetId
   , ctxReleaseClickedId :: IORef WidgetId
+  -- | Where the held left and right buttons went down, cleared when they come
+  -- up. A click belongs to the widget the press landed on, so a widget
+  -- hit-tests this point as well as the release point. 'Nothing' — a release
+  -- with no press behind it — lets the release stand on its own.
+  , ctxPressPos :: IORef (Maybe V2)
+  , ctxRightPressPos :: IORef (Maybe V2)
   , ctxFocusId :: IORef WidgetId
   -- | Focus last moved by keyboard, so the focused widget shows its ring. A
   -- pointer press hides it again.

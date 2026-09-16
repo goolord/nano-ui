@@ -71,7 +71,9 @@ import NanoUI.Frame.Cursor
   , uiCursorKind
   )
 import NanoUI.Frame.Input
-  ( finalizePointerPress
+  ( armPointerPress
+  , disarmPointerPress
+  , finalizePointerPress
   , finalizePointerRelease
   , finalizeSelectFocus
   , finalizeTabFocus
@@ -212,6 +214,7 @@ runFrameEff unlift ctx inp ui = do
   beginFrameModal ctx
   writeIORef (ctxReleaseClickedId ctx) (WidgetId 0)
   armMenuPointerCapture ctx inp
+  armPointerPress ctx inp
   result0 <- unlift (runUi ctx inp ui)
   -- Pending click is one-shot. Clear before a mirror rebuild so toggles do not fire twice.
   writeIORef (ctxClickedId ctx) (WidgetId 0)
@@ -245,6 +248,7 @@ runFrameEff unlift ctx inp ui = do
   applyScrollOffsets ctx
   finalizePointerPress ctx inp
   finalizePointerRelease ctx inp
+  disarmPointerPress ctx inp
   finalizeTextInputFocus ctx inp
   finalizeSelectFocus ctx inp
   finalizeTextFieldMouse ctx inp

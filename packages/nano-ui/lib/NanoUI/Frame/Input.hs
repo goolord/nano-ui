@@ -3,6 +3,8 @@
 module NanoUI.Frame.Input
   ( finalizeTabFocus
   , refreshHover
+  , armPointerPress
+  , disarmPointerPress
   , finalizePointerPress
   , finalizePointerRelease
   , finalizeTextInputFocus
@@ -57,6 +59,8 @@ import NanoUI.Input
   , inputMousePos
   , inputMousePressed
   , inputMouseReleased
+  , inputMouseRightPressed
+  , inputMouseRightReleased
   , modShift
   )
 import NanoUI.Layout.Arena
@@ -124,6 +128,21 @@ refreshHover ctx inp = do
     newMenu <- isMenuButtonWidget ctx newHot
     when (hashWidgetId prevHot /= 0 && not prevMenu) $ startAnimation ctx prevHot 1 0 0.12
     when (hashWidgetId newHot /= 0 && not newMenu) $ startAnimation ctx newHot 0 1 0.12
+
+-- | Remember where a press landed, before the UI builds: widgets resolve their
+-- click against this point, so a release that drifted onto a neighbour fires
+-- nowhere. Runs every frame; 'disarmPointerPress' clears it once the button
+-- comes up and the frame has consumed the release.
+armPointerPress :: Context -> Input -> IO ()
+armPointerPress ctx inp = do
+  let here = Just (inputMousePos inp)
+  when (inputMousePressed inp) $ writeIORef (ctxPressPos ctx) here
+  when (inputMouseRightPressed inp) $ writeIORef (ctxRightPressPos ctx) here
+
+disarmPointerPress :: Context -> Input -> IO ()
+disarmPointerPress ctx inp = do
+  when (inputMouseReleased inp) $ writeIORef (ctxPressPos ctx) Nothing
+  when (inputMouseRightReleased inp) $ writeIORef (ctxRightPressPos ctx) Nothing
 
 -- Same walk as refreshHover: later nodes paint first, earlier widget hits win.
 finalizePointerPress :: Context -> Input -> IO ()

@@ -9,6 +9,11 @@ import Cases.Grid
   , runStaleFontColorTest
   )
 import Cases.HostDraw (runExternalTextTest, runSquareGeometryTest)
+import Cases.PointerRelease
+  ( runReleaseElsewhereTest
+  , runReleaseReturnsTest
+  , runRightReleaseElsewhereTest
+  )
 import Cases.Runner (runDrawingLockTest, runSessionLoopTest)
 import Cases.SIMD (runSimdWritesTest)
 import Cases.State
@@ -251,6 +256,9 @@ testSpecs =
   -- Context menus and tooltips
   , TestSpec "context-menu-open" False runContextMenuOpenTest
   , TestSpec "context-menu-scroll-pos" False runContextMenuScrollPosTest
+  , TestSpec "release-elsewhere" False runReleaseElsewhereTest
+  , TestSpec "right-release-elsewhere" False runRightReleaseElsewhereTest
+  , TestSpec "release-returns" False runReleaseReturnsTest
   , TestSpec "tooltip-hover" False runTooltipHoverTest
   , TestSpec "tooltip-id-stable" False runTooltipIdStableTest
   , TestSpec "tooltip-scroll-pos" False runTooltipScrollPosTest

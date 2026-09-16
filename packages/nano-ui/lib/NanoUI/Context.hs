@@ -559,6 +559,8 @@ newContext = do
   ctxActiveId <- newIORef (WidgetId 0)
   ctxClickedId <- newIORef (WidgetId 0)
   ctxReleaseClickedId <- newIORef (WidgetId 0)
+  ctxPressPos <- newIORef Nothing
+  ctxRightPressPos <- newIORef Nothing
   ctxFocusId <- newIORef (WidgetId 0)
   ctxFocusVisible <- newIORef False
   ctxStore <- newIORef emptyWidgetStore
@@ -596,6 +598,8 @@ newContext = do
         , ctxActiveId
         , ctxClickedId
         , ctxReleaseClickedId
+        , ctxPressPos
+        , ctxRightPressPos
         , ctxFocusId
         , ctxFocusVisible
         , ctxStore

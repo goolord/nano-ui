@@ -394,25 +394,47 @@ resolveInteraction ctx inp wid = do
     else do
       disabled <- isDisabled ctx wid
       blocked <- pointerBlockedByOverlay ctx mouse
+      mIdx <- findNodeByWidgetId ctx wid
       let
-        captured =
-          hashWidgetId active /= 0 && active /= wid && inputMouseDown inp
+        hitAt p = case mIdx of
+          Nothing -> pure (rectContains rect p)
+          Just idx -> nodeInteractionHit ctx idx rect p
+        -- Whether the button held in @ref@ went down on this widget. A press
+        -- the frame never saw — synthesized input, or one swallowed before it
+        -- arrived — leaves the gesture unowned, so nobody is ruled out.
+        startedHere ref = readIORef ref >>= maybe (pure True) hitAt
+      -- A held button belongs to whatever it went down on. Another widget the
+      -- drag passes over is not hovered, so it neither lights up nor reports a
+      -- press of its own.
+      captured <-
+        if not (inputMouseDown inp)
+          then pure False
+          else
+            if hashWidgetId active /= 0 && active /= wid
+              then pure True
+              else not <$> startedHere (ctxPressPos ctx)
       hovered <-
         if disabled || blocked || captured
           then pure False
-          else
-            findNodeByWidgetId ctx wid >>= \case
-              Nothing ->
-                pure (rectContains rect mouse)
-              Just idx -> nodeInteractionHit ctx idx rect mouse
+          else hitAt mouse
       let
         pressed = hovered && inputMouseDown inp
         rightPressed = hovered && inputMouseRightDown inp
-      when (hovered && inputMouseReleased inp && wid == active) $
+      -- The click belongs to whatever the press went down on: a release that
+      -- drifted here from a neighbouring widget is not this widget's click.
+      released <-
+        if hovered && inputMouseReleased inp
+          then startedHere (ctxPressPos ctx)
+          else pure False
+      rightReleased <-
+        if hovered && inputMouseRightReleased inp
+          then startedHere (ctxRightPressPos ctx)
+          else pure False
+      when (released && wid == active) $
         writeIORef (ctxReleaseClickedId ctx) wid
       let
-        clicked = (hovered && inputMouseReleased inp) || pending == wid
-        rightClicked = hovered && inputMouseRightReleased inp
+        clicked = released || pending == wid
+        rightClicked = rightReleased
       pure $!
         Response
           { rawRespId = wid

@@ -42,7 +42,7 @@ import NanoUI.Context (Context (..), getPrevRect, getScrollOffset2D, getStore, i
 import NanoUI.Hooks (useInt)
 import NanoUI.Font (ScrollBarSlot (..), scrollBarGutter, tableCellInset, lineWidthIO)
 import NanoUI.Id (WidgetId (..))
-import NanoUI.Input (Input (..), inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased, inputMouseRightReleased)
+import NanoUI.Input (Input (..), inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased)
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
 import NanoUI.Store (WidgetStore (..), slotDrag, slotDragW, slotKey)
 import NanoUI.Style (AlignX (..), AlignY (..), Direction (..), FontVariant (..), Layout (..), Padding (..), Sizing (..), defaultLayout, fillH, fillW, tight)
@@ -72,7 +72,7 @@ import NanoUI.Widgets.Node
   , Response (..)
   , rawRespRect
   , respClicked
-  , respHovered
+  , respRightClicked
   , setChanged
   , setClicked
   , tagContainer
@@ -508,7 +508,9 @@ finishTable TableFinish{tfN = n, tfStateKey = stateKey, tfVis = vis, tfOrder0 = 
         | otherwise = dragW0
       headerW i = maybe (resolvedW i) (\r -> let w = rectW (rawRespRect r) in if w > 0 then w else resolvedW i) (lookup i headerPairs)
       nextOrder = if vis' /= vis then rebuildOrder hidden0 vis' order0 else order0
-      hideClicked = [i | (i, r) <- headerPairs, respHovered r, inputMouseRightReleased inp, drag0 == HeaderIdle]
+      -- respRightClicked, not a bare release: a right press that went down
+      -- elsewhere and came up over a header must not hide that column.
+      hideClicked = [i | (i, r) <- headerPairs, respRightClicked r, drag0 == HeaderIdle]
       nextHidden = case showAllResp of
         Just r | respClicked r -> IS.empty
         _ -> case hideClicked of
