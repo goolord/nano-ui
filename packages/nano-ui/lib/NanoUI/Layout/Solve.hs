@@ -9,17 +9,19 @@ module NanoUI.Layout.Solve
   , scrollBarSlotOf
   ) where
 
-import Control.Monad (foldM, when)
+import Control.Monad (foldM, unless, when)
 import Data.IORef (readIORef)
 import Data.Primitive.PrimArray
   ( MutablePrimArray
   , copyMutablePrimArray
+  , newPrimArray
   , readPrimArray
   , writePrimArray
   )
 import Data.Primitive.Types (Prim)
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Word (Word8)
 import GHC.Exts (RealWorld)
 import NanoUI.Font
   ( CustomMeasureFn
@@ -76,6 +78,8 @@ import NanoUI.Layout.Arena
   , writeGeom
   , readStyle
   , readTagEnum
+  , readTree
+  , treeParent
   , getAlignX
   , getAlignY
   , getChildCount
@@ -97,6 +101,7 @@ import NanoUI.Layout.Arena
   , getWidthSizing
   , parentIsRow
   , isContainerNode
+  , isFloatingNode
   , isScrollNode
   , setRect
   , getNodeValue
@@ -263,20 +268,35 @@ solveLayout na fm monoFm measure resolveFont lookupMeasure rootW rootH =
 quantizeResultsA :: NodeArenaArrays -> Int -> Float -> IO ()
 quantizeResultsA a count s
   | s <= 0 = pure ()
-  | otherwise = go 0
-  where
-    go i
-      | i >= count = pure ()
-      | otherwise = do
-          x <- readGeom a i geomX
-          y <- readGeom a i geomY
-          w <- readGeom a i geomW
-          h <- readGeom a i geomH
-          writeGeom a i geomX (onGrid s x)
-          writeGeom a i geomY (onGrid s y)
-          writeGeom a i geomW (max 0 (onGrid s w))
-          writeGeom a i geomH (max 0 (onGrid s h))
-          go (i + 1)
+  | otherwise = do
+      -- A floating node (modal, window, popup) and everything inside it is
+      -- laid out by placement after the solve, which sizes the subtree from
+      -- these measured sizes. Rounding them here would size a dialog and its
+      -- content-sized parts off their content, so the subtree keeps them;
+      -- placement overwrites its geometry anyway. A parent always precedes
+      -- its children, so one pass marks each node from its parent.
+      floating <- newPrimArray count :: IO (MutablePrimArray RealWorld Word8)
+      let go i
+            | i >= count = pure ()
+            | otherwise = do
+                nt <- readTagEnum a i tagNodeType
+                parent <- readTree a i treeParent
+                inFloating <-
+                  if isFloatingNode nt
+                    then pure True
+                    else if parent >= 0 then (/= 0) <$> readPrimArray floating parent else pure False
+                writePrimArray floating i (if inFloating then 1 else 0)
+                unless inFloating $ do
+                  x <- readGeom a i geomX
+                  y <- readGeom a i geomY
+                  w <- readGeom a i geomW
+                  h <- readGeom a i geomH
+                  writeGeom a i geomX (onGrid s x)
+                  writeGeom a i geomY (onGrid s y)
+                  writeGeom a i geomW (max 0 (onGrid s w))
+                  writeGeom a i geomH (max 0 (onGrid s h))
+                go (i + 1)
+      go 0
 
 measurePass :: SolveEnv -> Int -> IO ()
 measurePass env count = do
@@ -908,10 +928,18 @@ adjustFitHeight na fm idx minH maxH x y w = do
         step maxB ci = do
           (_, subY, _, subH) <- getRect na ci
           pure (max maxB (subY + subH))
+        -- Rounding a child's origin to the nearest device pixel can put its
+        -- bottom up to half a pixel below where measurement did. That is not
+        -- content outgrowing the measurement: growing for it adds half a
+        -- pixel at every nested content-sized level, until a dialog sized to
+        -- its content overflows its own scroll viewport. The small epsilon
+        -- absorbs float error in the rounding.
+        s = fmSnapScale fm
+        snapSlack = if s > 0 then 0.5 / s + 1.0e-3 else 0
     maxB <- foldFlowChildrenM na idx step y
     let fitH = clamp minH maxH (maxB + padB pad - y)
     (_, _, _, curH) <- getRect na idx
-    when (fitH > curH) $
+    when (fitH > curH + snapSlack) $
       setRect na idx x y w fitH
 
 positionScrollChildren ::

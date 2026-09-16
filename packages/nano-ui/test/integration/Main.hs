@@ -232,6 +232,7 @@ testSpecs =
   , TestSpec "modal-fits-text" False runModalFitsTextTest
   , TestSpec "modal-no-phantom-scroll" False runModalNoPhantomScrollTest
   , TestSpec "modal-close-damage" False runModalCloseDamageTest
+  , TestSpec "modal-fractional-scale-no-scroll" False runModalFractionalScaleNoScrollTest
   , TestSpec "window-overlay" False runWindowOverlayTest
   , TestSpec "overlay-click-through" False runOverlayClickThroughTest
   , TestSpec "overlay-panel-live" False runOverlayPanelLiveTest
