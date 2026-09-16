@@ -39,6 +39,8 @@ import NanoUI.Context
   , setPrevRectsAndClips
   , takeAnimSettled
   , lookupCustomDamageSlop
+  , lookupCustomDrawing
+  , refreshCustomDrawingOps
   )
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input
@@ -66,6 +68,7 @@ import NanoUI.Layout.Arena
   , isScrollNode
   )
 import NanoUI.Frame.Scroll.Geometry (decodeScrollConfig, scrollBare)
+import NanoUI.Widgets.Custom (mkCustomDrawContext)
 import NanoUI.Types
   ( Damage (..)
   , DamageBounds (..)
@@ -267,6 +270,8 @@ data FrameDelta = FrameDelta
   -- ^ Rects of keys that left the arena.
   , fdArrived :: [Rect]
   -- ^ Rects of keys that joined the arena.
+  , fdRedrawn :: ![Int]
+  -- ^ Keys of custom widgets whose ops changed at an unchanged rect.
   }
 
 writeDamage :: Context -> Input -> Bool -> FrameSnapshot -> IO ()
@@ -282,6 +287,7 @@ writeDamage ctx inp overlayOpen snap = do
   winDragActive <- isJust <$> getWindowDrag ctx
   winResizeActive <- isJust <$> getWindowResize ctx
   requests <- getDamageRequests ctx
+  redrawn <- refreshCustomDrawings ctx
   let oldRects = fsRects snap
       oldStore = fsStore snap
       newFloatingRects = IM.fromList panels
@@ -311,6 +317,7 @@ writeDamage ctx inp overlayOpen snap = do
           , fdSettledMoved = filter (\r -> rectArea r >= layoutSettleMinArea) moved
           , fdVanished = diffOld
           , fdArrived = diffNew
+          , fdRedrawn = redrawn
           }
   dmg <-
     if needsFullDamage snap delta
@@ -321,6 +328,30 @@ writeDamage ctx inp overlayOpen snap = do
   when modalFlip (markDirty ctx)
   when (fdFloatingChanged delta && not (IM.null (fsFloatingRects snap) && not (IM.null newFloatingRects))) $
     markDirty ctx
+
+-- | Rebuild every custom widget's ops for this frame and return the keys of
+-- those whose ops changed at an unchanged rect. Their drawing follows state
+-- the arena does not hold, so nothing else damages them, and paint must not
+-- replay last frame's ops for them.
+refreshCustomDrawings :: Context -> IO [Int]
+refreshCustomDrawings ctx = arenaCount na >>= \count -> go count 0 []
+  where
+    na = ctxNodeArena ctx
+    go count !i acc
+      | i >= count = pure acc
+      | otherwise = do
+          nt <- getNodeType na i
+          if nt /= NodeDrawing
+            then go count (i + 1) acc
+            else do
+              wid <- getWidgetId na i
+              lookupCustomDrawing ctx wid >>= \case
+                Nothing -> go count (i + 1) acc
+                Just build -> do
+                  (x, y, w, h) <- getRect na i
+                  cdc <- mkCustomDrawContext ctx (ctxFontMetrics ctx) wid
+                  changed <- refreshCustomDrawingOps ctx wid (Rect x y w h) cdc build
+                  go count (i + 1) (if changed then intKey wid : acc else acc)
 
 -- | Whether the frame repaints the whole window rather than a clip.
 needsFullDamage :: FrameSnapshot -> FrameDelta -> Bool
@@ -467,6 +498,11 @@ clipDamage ctx snap d = do
               else do
                 mScroll <- scrollAncestorRect ctx k
                 pure (r : maybe [] pure mScroll)
+  -- Custom widgets redrawn in place repaint their own rects, like a text
+  -- change that keeps its rect.
+  redrawnRs <-
+    catMaybes
+      <$> forM (fdRedrawn d) (\k -> maybe (pure Nothing) (clipKeyRect ctx k) (IM.lookup k newRects))
   let layoutRs = if fdScrollOnly d then [] else fdSettledMoved d
       -- Keys that left repaint as the current backdrop over their
       -- old rects. Keys that arrived must repaint inside their new
@@ -487,6 +523,7 @@ clipDamage ctx snap d = do
               ++ vanishedRs
               ++ floatingRs
               ++ textRs
+              ++ redrawnRs
           )
       clip = clipRectToWindow winW winH base
       winArea = winW * winH

@@ -317,7 +317,8 @@ customWidgetWithId wid spec = do
 --
 -- Connects the widget into:
 -- - The two-pass layout arena (respecting 'widgetMeasure' or layout constraints).
--- - Off-heap vector drawing pipeline (cached with automatic interaction-change invalidation).
+-- - Off-heap vector drawing pipeline. The draw function runs once per frame,
+--   so it may read any state; the widget repaints whenever its ops change.
 -- - Interactive hit-testing, focus management, and custom cursor resolution.
 -- - Accurate damage region tracking with 'widgetDamageSlop'.
 customWidget :: (Ui :> es) => CustomWidgetSpec a -> Eff es (Response, a)

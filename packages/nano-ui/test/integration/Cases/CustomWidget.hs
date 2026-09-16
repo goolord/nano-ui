@@ -3,6 +3,7 @@ module Cases.CustomWidget
   , runCustomWidgetCursorTest
   , runCustomWidgetInteractionTest
   , runCustomWidgetQueuedClickTest
+  , runCustomWidgetContentDamageTest
   , runReferenceKnobTest
   , runDropTargetTest
   ) where
@@ -16,9 +17,10 @@ import NanoUI.Testing
   ( UiCursorKind (..)
   , cursorKindIs
   , runFrame
+  , takeDamage
   )
 import NanoUI.Testing.Assert (assert, assertEq, withInput)
-import NanoUI.Testing.Harness (clickPair, warmup2)
+import NanoUI.Testing.Harness (clickPair, drawQuads, warmup2, withInputOff)
 
 -- | Verifies custom intrinsic layout measurement via widgetMeasure hook, and
 -- that the measurement reverts once the hook is gone.
@@ -93,6 +95,44 @@ runCustomWidgetQueuedClickTest ctx failed = do
     writeIORef (ctxClickedId ctx) (respId resp0)
     (resps, _, _, _) <- runFrame ctx inp0 ui
     assert failed (map respClicked resps == [j == i | j <- [0 .. length resps - 1]])
+
+-- | A custom widget whose drawing reads state from outside the spec repaints
+-- when that state changes, though its rect and hover/press state stay the
+-- same (regression: its ops were cached on those alone, so a table header
+-- kept drawing its sort arrow after another column took the sort, and the
+-- frame damaged nothing).
+runCustomWidgetContentDamageTest :: Context -> IORef Int -> IO ()
+runCustomWidgetContentDamageTest ctx failed = do
+  let inp = withInputOff 400 300
+      red = colorRGBA 255 0 0 255
+      blue = colorRGBA 0 0 255 255
+      ui on = column $ do
+        label "Other"
+        fst <$> customWidget defaultCustomWidgetSpec
+          { widgetLayout = fixedWH 80 40 defaultLayout
+          , widgetDraw = \_ r -> runCanvas (drawRect r (if on then red else blue))
+          }
+      covers (Rect cx cy cw ch) (Rect x y w h) =
+        cx <= x && cy <= y && cx + cw >= x + w && cy + ch >= y + h
+  resp <- warmup2 ctx inp (ui False)
+  _ <- takeDamage ctx
+  (_, _, draw, _) <- runFrame ctx inp (ui True)
+  dmg <- takeDamage ctx
+  case dmg of
+    DamageClip clip -> assert failed (covers clip (respRect resp))
+    DamageFull -> assert failed False
+  quads <- drawQuads draw
+  assert failed (any ((== red) . snd) quads)
+  assert failed (not (any ((== blue) . snd) quads))
+  -- The built-in progress bar captures its fraction the same way.
+  let bar frac = column (progressBar' frac)
+  barResp <- warmup2 ctx inp (bar 0.2)
+  _ <- takeDamage ctx
+  _ <- runFrame ctx inp (bar 0.8)
+  barDmg <- takeDamage ctx
+  case barDmg of
+    DamageClip clip -> assert failed (covers clip (respRect barResp))
+    DamageFull -> assert failed False
 
 -- | Verifies the reference rotary knob widget.
 runReferenceKnobTest :: Context -> IORef Int -> IO ()

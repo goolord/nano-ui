@@ -77,6 +77,7 @@ module NanoUI.Context
   , registerCustomDrawing
   , lookupCustomDrawing
   , cachedCustomDrawingOps
+  , refreshCustomDrawingOps
   , registerCustomMeasure
   , lookupCustomMeasure
   , registerCustomCursor
