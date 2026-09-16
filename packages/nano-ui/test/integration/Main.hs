@@ -101,6 +101,7 @@ testSpecs =
   , TestSpec "damage-queue-cleared" False runDamageQueueClearedPerFrameTest
   , TestSpec "damage-state-change" False runStateChangeDamageTest
   , TestSpec "damage-orphan-anim-settles" False runOrphanAnimationDamageSettlesTest
+  , TestSpec "versioned-drawing-damage" False runVersionedDrawingDamageTest
   , TestSpec "panel-body-swap-damage" False runPanelBodySwapDamageTest
   , TestSpec "refresh-forces-redraw" False runRefreshRedrawTest
   -- Animation
@@ -259,6 +260,7 @@ testSpecs =
   , TestSpec "custom-widget-interaction" False runCustomWidgetInteractionTest
   , TestSpec "custom-widget-queued-click" False runCustomWidgetQueuedClickTest
   , TestSpec "custom-widget-content-damage" False runCustomWidgetContentDamageTest
+  , TestSpec "custom-widget-content-key" False runCustomWidgetContentKeyTest
   , TestSpec "custom-widget-knob" False runReferenceKnobTest
   , TestSpec "drop-target" False runDropTargetTest
   ]

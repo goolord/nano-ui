@@ -4,18 +4,23 @@ module Cases.CustomWidget
   , runCustomWidgetInteractionTest
   , runCustomWidgetQueuedClickTest
   , runCustomWidgetContentDamageTest
+  , runCustomWidgetContentKeyTest
   , runReferenceKnobTest
   , runDropTargetTest
   ) where
 
 import Control.Monad (forM_, void)
 import Data.IORef (IORef, writeIORef)
+import Data.IntMap.Strict qualified as IM
 import Data.Vector qualified as V
 import NanoUI
-import NanoUI.Context (Context (..))
+import NanoUI.Context (Context (..), intKey, setStore)
+import NanoUI.Store (WidgetStore (..), slotDisabled, slotKey)
 import NanoUI.Testing
   ( UiCursorKind (..)
   , cursorKindIs
+  , getStore
+  , newContext
   , runFrame
   , takeDamage
   )
@@ -112,14 +117,12 @@ runCustomWidgetContentDamageTest ctx failed = do
           { widgetLayout = fixedWH 80 40 defaultLayout
           , widgetDraw = \_ r -> runCanvas (drawRect r (if on then red else blue))
           }
-      covers (Rect cx cy cw ch) (Rect x y w h) =
-        cx <= x && cy <= y && cx + cw >= x + w && cy + ch >= y + h
   resp <- warmup2 ctx inp (ui False)
   _ <- takeDamage ctx
   (_, _, draw, _) <- runFrame ctx inp (ui True)
   dmg <- takeDamage ctx
   case dmg of
-    DamageClip clip -> assert failed (covers clip (respRect resp))
+    DamageClip clip -> assert failed (coversRect clip (respRect resp))
     DamageFull -> assert failed False
   quads <- drawQuads draw
   assert failed (any ((== red) . snd) quads)
@@ -131,8 +134,112 @@ runCustomWidgetContentDamageTest ctx failed = do
   _ <- runFrame ctx inp (bar 0.8)
   barDmg <- takeDamage ctx
   case barDmg of
-    DamageClip clip -> assert failed (covers clip (respRect barResp))
+    DamageClip clip -> assert failed (coversRect clip (respRect barResp))
     DamageFull -> assert failed False
+
+-- | A content key is taken at its word: while it is unchanged the widget
+-- neither rebuilds its ops nor repaints, a new key does both, and a theme
+-- change rebuilds them even though the key did not move, since the ops can
+-- read the theme.
+runCustomWidgetContentKeyTest :: Context -> IORef Int -> IO ()
+runCustomWidgetContentKeyTest ctx failed = do
+  let inp = withInputOff 400 300
+      red = colorRGBA 255 0 0 255
+      blue = colorRGBA 0 0 255 255
+      ui key on = column $ do
+        label "Other"
+        fst <$> customWidget defaultCustomWidgetSpec
+          { widgetLayout = fixedWH 80 40 defaultLayout
+          , widgetContent = key
+          , widgetDraw = \_ r -> runCanvas (drawRect r (if on then red else blue))
+          }
+  resp <- warmup2 ctx inp (ui 1 False)
+  _ <- takeDamage ctx
+
+  -- Same key, different captured state: the ops it already has stand.
+  (_, _, keptDraw, _) <- runFrame ctx inp (ui 1 True)
+  keptDmg <- takeDamage ctx
+  keptQuads <- drawQuads keptDraw
+  assert failed (any ((== blue) . snd) keptQuads)
+  case keptDmg of
+    DamageClip clip -> assert failed (not (coversRect clip (respRect resp)))
+    DamageFull -> assert failed False
+
+  -- A new key rebuilds and repaints.
+  (_, _, freshDraw, _) <- runFrame ctx inp (ui 2 True)
+  freshDmg <- takeDamage ctx
+  freshQuads <- drawQuads freshDraw
+  assert failed (any ((== red) . snd) freshQuads)
+  case freshDmg of
+    DamageClip clip -> assert failed (coversRect clip (respRect resp))
+    DamageFull -> assert failed False
+
+  -- Disabling the widget repaints it: the ops rebuild in their disabled form,
+  -- and disabled is not one of the roles damage already follows.
+  let grey = colorRGBA 128 128 128 255
+      dimmable = column $ do
+        label "Other"
+        fst <$> customWidget defaultCustomWidgetSpec
+          { widgetLayout = fixedWH 80 40 defaultLayout
+          , widgetContent = 4
+          , widgetDraw = \cdc r -> runCanvas (drawRect r (if cdcDisabled cdc then grey else blue))
+          }
+  disabledCtx <- newContext
+  dresp <- warmup2 disabledCtx inp dimmable
+  _ <- takeDamage disabledCtx
+  st <- getStore disabledCtx
+  setStore disabledCtx st {storeInt = IM.insert (slotKey slotDisabled (intKey (respId dresp))) 1 (storeInt st)}
+  (_, _, disabledDraw, _) <- runFrame disabledCtx inp dimmable
+  disabledDmg <- takeDamage disabledCtx
+  disabledQuads <- drawQuads disabledDraw
+  assert failed (any ((== grey) . snd) disabledQuads)
+  case disabledDmg of
+    DamageClip clip -> assert failed (coversRect clip (respRect dresp))
+    DamageFull -> pure ()
+
+  -- A keyed widget that only moved still draws at its new place: paint
+  -- translates the ops it kept.
+  let moved lead = column $ do
+        spacer Fit (Fixed lead)
+        fst <$> customWidget defaultCustomWidgetSpec
+          { widgetLayout = fixedWH 80 40 defaultLayout
+          , widgetContent = 5
+          , widgetDraw = \_ r -> runCanvas (drawRect r red)
+          }
+  settled <- warmup2 ctx inp (moved 40)
+  let Rect _ my _ _ = respRect settled
+  _ <- warmup2 ctx inp (moved 10)
+  (_, _, movedDraw, _) <- runFrame ctx inp (moved 40)
+  movedQuads <- drawQuads movedDraw
+  assert failed (any (\(Rect _ qy _ _, c) -> c == red && abs (qy - my) < 0.5) movedQuads)
+
+  -- Swapping the theme rebuilds a keyed widget that draws from the theme,
+  -- through either theme entry point.
+  let accent2 = colorRGBA 7 8 9 255
+      accent3 = colorRGBA 11 12 13 255
+      themed = column $ do
+        label "Other"
+        fst <$> customWidget defaultCustomWidgetSpec
+          { widgetLayout = fixedWH 80 40 defaultLayout
+          , widgetContent = 3
+          , widgetDraw = \cdc r -> runCanvas (drawRect r (themeAccent (cdcTheme cdc)))
+          }
+  _ <- warmup2 ctx inp themed
+  theme0 <- getTheme ctx
+  setTheme ctx theme0 {themeAccent = accent2}
+  (_, _, themedDraw, _) <- runFrame ctx inp themed
+  themedQuads <- drawQuads themedDraw
+  assert failed (any ((== accent2) . snd) themedQuads)
+  ctx3 <- withTheme ctx theme0 {themeAccent = accent3}
+  (_, _, withThemeDraw, _) <- runFrame ctx3 inp themed
+  withThemeQuads <- drawQuads withThemeDraw
+  assert failed (any ((== accent3) . snd) withThemeQuads)
+  setTheme ctx theme0
+
+-- | Whether a damage clip covers a widget's rect.
+coversRect :: Rect -> Rect -> Bool
+coversRect (Rect cx cy cw ch) (Rect x y w h) =
+  cx <= x && cy <= y && cx + cw >= x + w && cy + ch >= y + h
 
 -- | Verifies the reference rotary knob widget.
 runReferenceKnobTest :: Context -> IORef Int -> IO ()

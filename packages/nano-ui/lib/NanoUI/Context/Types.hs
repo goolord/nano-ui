@@ -21,6 +21,7 @@ module NanoUI.Context.Types
   , DrawingCacheState (..)
   , PopupConfig (..)
   , DrawOpCacheEntry (..)
+  , CustomDrawingEntry (..)
   , CustomDrawOpCacheEntry (..)
   , SpanCacheEntry (..)
   , WidgetTextCacheEntry (..)
@@ -283,6 +284,15 @@ data CustomDrawContext = CustomDrawContext
 
 type CustomDrawBuild = CustomDrawContext -> Rect -> Vector DrawOp
 
+-- | A registered custom drawing: its content key plus the op builder. A
+-- non-zero key is the author's promise that the ops follow it, so a frame
+-- whose key is unchanged neither rebuilds nor repaints them. Key 0 means the
+-- drawing carries no key and is rebuilt every frame and compared.
+data CustomDrawingEntry = CustomDrawingEntry
+  { cdrContent :: {-# UNPACK #-} !Int
+  , cdrBuild :: !CustomDrawBuild
+  }
+
 -- | A registered drawing: content version plus the op builder. The version
 -- participates in the draw-op cache key, so a builder whose output changes
 -- without its size changing must bump the version to invalidate.
@@ -294,7 +304,7 @@ data DrawingEntry = DrawingEntry
 data DrawingCacheState = DrawingCacheState
   { dcsPopupConfigs :: !(IntMap PopupConfig)
   , dcsDrawings :: !(IntMap DrawingEntry)
-  , dcsCustomDrawings :: !(IntMap CustomDrawBuild)
+  , dcsCustomDrawings :: !(IntMap CustomDrawingEntry)
   , dcsCustomMeasures :: !(IntMap CustomMeasureFn)
   , dcsCustomCursors :: !(IntMap (CustomDrawContext -> UiCursorKind))
   , dcsCustomDamageSlop :: !(IntMap Float)
@@ -317,12 +327,18 @@ data DrawOpCacheEntry = DrawOpCacheEntry
   , doeOps :: !(Vector DrawOp)
   }
 
--- | Strict cache entry for a custom drawing's compiled draw ops.
+-- | Strict cache entry for a custom drawing's compiled draw ops. Every input
+-- the ops can depend on is part of the key: the content key, the rect, the
+-- interaction state the draw context exposes, and the metric generation, which
+-- a theme or font change bumps.
 data CustomDrawOpCacheEntry = CustomDrawOpCacheEntry
-  { cdeBounds :: !Rect
+  { cdeContent :: {-# UNPACK #-} !Int
+  , cdeBounds :: !Rect
   , cdeHovered :: {-# UNPACK #-} !Bool
   , cdePressed :: {-# UNPACK #-} !Bool
   , cdeFocused :: {-# UNPACK #-} !Bool
+  , cdeDisabled :: {-# UNPACK #-} !Bool
+  , cdeGen :: {-# UNPACK #-} !Int
   , cdeOps :: !(Vector DrawOp)
   }
 

@@ -29,6 +29,7 @@ import qualified Data.Text as T
 import Data.Word (Word32)
 import NanoUI.Context
   ( Context (..)
+  , CustomDrawingEntry (..)
   , DrawingEntry (..)
   , atlasTextureId
   , cachedCustomDrawingOps
@@ -223,7 +224,7 @@ paintContainerNode env idx rect = do
   let ctx = peContext env
   wid <- getWidgetId (peNodeArena env) idx
   mBuild <- lookupCustomDrawing ctx wid
-  forM_ mBuild $ \build -> do
+  forM_ mBuild $ \(CustomDrawingEntry _ build) -> do
     let fm = peFontMetrics env
         da = peDrawArena env
     cdc <- mkCustomDrawContext ctx fm wid
@@ -371,9 +372,9 @@ paintDrawingNode env idx rect = do
   wid <- getWidgetId (peNodeArena env) idx
   mCustomBuild <- lookupCustomDrawing ctx wid
   case mCustomBuild of
-    Just customBuild -> do
+    Just (CustomDrawingEntry content customBuild) -> do
       cdc <- mkCustomDrawContext ctx fm wid
-      ops <- cachedCustomDrawingOps ctx wid rect cdc customBuild
+      ops <- cachedCustomDrawingOps ctx wid content rect cdc customBuild
       withClip da rect (emitDrawOps da fm ops)
     Nothing -> do
       mBuild <- lookupDrawing ctx wid

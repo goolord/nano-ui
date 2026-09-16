@@ -78,6 +78,8 @@ module NanoUI.Context
   , lookupCustomDrawing
   , cachedCustomDrawingOps
   , refreshCustomDrawingOps
+  , drawingOpsStale
+  , CustomDrawingEntry (..)
   , registerCustomMeasure
   , lookupCustomMeasure
   , registerCustomCursor
@@ -262,6 +264,7 @@ import NanoUI.Context.Types
   , Context (..)
   , CustomDrawBuild
   , CustomDrawContext (..)
+  , CustomDrawingEntry (..)
   , CustomMeasureFn
   , DamageRequest (..)
   , DamageState (..)
@@ -469,9 +472,12 @@ clearMeasureCache ctx = do
 withExternalText :: Context -> Bool -> Context
 withExternalText ctx ext = ctx {ctxExternalText = ext}
 
+-- | Configure a context's theme. Goes through 'setTheme' so a theme swapped
+-- between frames invalidates the caches keyed on it, drawing-op caches
+-- included, instead of leaving widgets painting the previous theme.
 withTheme :: Context -> Theme -> IO Context
 withTheme ctx theme = do
-  writeIORef (ctxTheme ctx) theme
+  setTheme ctx theme
   pure ctx
 
 setTheme :: Context -> Theme -> IO ()

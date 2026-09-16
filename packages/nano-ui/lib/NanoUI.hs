@@ -312,6 +312,7 @@ module NanoUI
   , defaultCustomWidgetSpec
   , customWidget
   , customWidgetWithId
+  , contentKey
   , CustomDrawContext (..)
   , CustomMeasureFn
   , CustomDrawBuild

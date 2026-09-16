@@ -40,7 +40,11 @@ import NanoUI.Context
   , takeAnimSettled
   , lookupCustomDamageSlop
   , lookupCustomDrawing
+  , lookupDrawing
   , refreshCustomDrawingOps
+  , drawingOpsStale
+  , CustomDrawingEntry (..)
+  , DrawingEntry (..)
   )
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input
@@ -271,7 +275,7 @@ data FrameDelta = FrameDelta
   , fdArrived :: [Rect]
   -- ^ Rects of keys that joined the arena.
   , fdRedrawn :: ![Int]
-  -- ^ Keys of custom widgets whose ops changed at an unchanged rect.
+  -- ^ Keys of drawings whose ops changed at an unchanged rect.
   }
 
 writeDamage :: Context -> Input -> Bool -> FrameSnapshot -> IO ()
@@ -329,10 +333,11 @@ writeDamage ctx inp overlayOpen snap = do
   when (fdFloatingChanged delta && not (IM.null (fsFloatingRects snap) && not (IM.null newFloatingRects))) $
     markDirty ctx
 
--- | Rebuild every custom widget's ops for this frame and return the keys of
--- those whose ops changed at an unchanged rect. Their drawing follows state
--- the arena does not hold, so nothing else damages them, and paint must not
--- replay last frame's ops for them.
+-- | Settle every drawing's ops for this frame and return the keys of those
+-- that now draw something else at an unchanged rect. A drawing follows state
+-- the arena does not hold, so nothing else damages it, and paint must not
+-- replay the previous frame's ops for it. What this costs per widget is the
+-- widget's own choice: see 'refreshCustomDrawingOps'.
 refreshCustomDrawings :: Context -> IO [Int]
 refreshCustomDrawings ctx = arenaCount na >>= \count -> go count 0 []
   where
@@ -345,13 +350,22 @@ refreshCustomDrawings ctx = arenaCount na >>= \count -> go count 0 []
             then go count (i + 1) acc
             else do
               wid <- getWidgetId na i
-              lookupCustomDrawing ctx wid >>= \case
-                Nothing -> go count (i + 1) acc
-                Just build -> do
-                  (x, y, w, h) <- getRect na i
+              (x, y, w, h) <- getRect na i
+              let rect = Rect x y w h
+              mCustom <- lookupCustomDrawing ctx wid
+              changed <- case mCustom of
+                Just (CustomDrawingEntry content build) -> do
                   cdc <- mkCustomDrawContext ctx (ctxFontMetrics ctx) wid
-                  changed <- refreshCustomDrawingOps ctx wid (Rect x y w h) cdc build
-                  go count (i + 1) (if changed then intKey wid : acc else acc)
+                  refreshCustomDrawingOps ctx wid content rect cdc build
+                Nothing -> do
+                  -- A versioned drawing rebuilds in paint once its version
+                  -- changes, but the pixels it covered still need damage. An
+                  -- unversioned one is cached by contract, so it stays put.
+                  mDrawing <- lookupDrawing ctx wid
+                  case mDrawing of
+                    Just (DrawingEntry content _) | content /= 0 -> drawingOpsStale ctx wid content rect
+                    _ -> pure False
+              go count (i + 1) (if changed then intKey wid : acc else acc)
 
 -- | Whether the frame repaints the whole window rather than a clip.
 needsFullDamage :: FrameSnapshot -> FrameDelta -> Bool
@@ -498,8 +512,8 @@ clipDamage ctx snap d = do
               else do
                 mScroll <- scrollAncestorRect ctx k
                 pure (r : maybe [] pure mScroll)
-  -- Custom widgets redrawn in place repaint their own rects, like a text
-  -- change that keeps its rect.
+  -- Drawings redrawn in place repaint their own rects, like a text change
+  -- that keeps its rect.
   redrawnRs <-
     catMaybes
       <$> forM (fdRedrawn d) (\k -> maybe (pure Nothing) (clipKeyRect ctx k) (IM.lookup k newRects))

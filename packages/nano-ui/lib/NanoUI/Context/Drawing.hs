@@ -12,6 +12,7 @@ module NanoUI.Context.Drawing
   , lookupCustomDrawing
   , cachedCustomDrawingOps
   , refreshCustomDrawingOps
+  , drawingOpsStale
   , registerCustomMeasure
   , lookupCustomMeasure
   , registerCustomCursor
@@ -34,6 +35,7 @@ import NanoUI.Context.Types
   , CustomDrawBuild
   , CustomDrawContext (..)
   , CustomDrawOpCacheEntry (..)
+  , CustomDrawingEntry (..)
   , CustomMeasureFn
   , DrawFitCache (..)
   , DrawOpCacheEntry (..)
@@ -185,63 +187,115 @@ pruneDrawOpCache ctx =
           }
 
 {-# INLINE registerCustomDrawing #-}
-registerCustomDrawing :: Context -> WidgetId -> CustomDrawBuild -> IO ()
-registerCustomDrawing = registerIn dcsCustomDrawings (\m dc -> dc {dcsCustomDrawings = m})
+registerCustomDrawing :: Context -> WidgetId -> Int -> CustomDrawBuild -> IO ()
+registerCustomDrawing ctx wid content build =
+  registerIn dcsCustomDrawings (\m dc -> dc {dcsCustomDrawings = m}) ctx wid (CustomDrawingEntry content build)
 
 {-# INLINE lookupCustomDrawing #-}
-lookupCustomDrawing :: Context -> WidgetId -> IO (Maybe CustomDrawBuild)
+lookupCustomDrawing :: Context -> WidgetId -> IO (Maybe CustomDrawingEntry)
 lookupCustomDrawing = lookupIn dcsCustomDrawings
 
+-- | Whether a cache entry was built from these inputs, leaving aside where the
+-- widget sits: ops built at another origin translate rather than rebuild.
+{-# INLINE customEntryMatches #-}
+customEntryMatches :: CustomDrawOpCacheEntry -> Int -> Rect -> CustomDrawContext -> Int -> Bool
+customEntryMatches e content rect cdc gen =
+  cdeContent e == content
+    && rectW (cdeBounds e) == rectW rect
+    && rectH (cdeBounds e) == rectH rect
+    && cdeHovered e == cdcHovered cdc
+    && cdePressed e == cdcPressed cdc
+    && cdeFocused e == cdcFocused cdc
+    && cdeDisabled e == cdcDisabled cdc
+    && cdeGen e == gen
+
 -- | Draw ops for a custom widget's paint: the ops 'refreshCustomDrawingOps'
--- built this frame while the rect and interaction state still match, else a
--- fresh build.
+-- settled on this frame while every input still matches, translated if the
+-- widget only moved, else a fresh build.
 cachedCustomDrawingOps ::
   Context ->
   WidgetId ->
+  Int ->
   Rect ->
   CustomDrawContext ->
   CustomDrawBuild ->
   IO (Vector DrawOp)
-cachedCustomDrawingOps ctx wid rect cdc build = do
+cachedCustomDrawingOps ctx wid content rect cdc build = do
   let k = intKey wid
+  gen <- readIORef (ctxMetricGen ctx)
   cached <- IM.lookup k . dcsCustomDrawOpCache <$> readIORef (ctxDrawingCache ctx)
-  case cached of
-    Just CustomDrawOpCacheEntry {cdeBounds = r, cdeHovered = h, cdePressed = p, cdeFocused = f, cdeOps = ops}
-      | r == rect && h == cdcHovered cdc && p == cdcPressed cdc && f == cdcFocused cdc -> pure ops
-    _ -> do
-      let ops = build cdc rect
-      storeCustomDrawingOps ctx k rect cdc ops
-      pure ops
+  let hit = case cached of
+        Just e | customEntryMatches e content rect cdc gen -> Just (cdeBounds e, cdeOps e)
+        _ -> Nothing
+  serveOps hit rect (build cdc rect) (storeCustomDrawingOps ctx k content rect cdc gen)
 
--- | Build a custom widget's ops for this frame and cache them for paint,
--- returning whether they differ from the ops cached at the same rect. A build
--- can read state its spec does not carry (a sort flag, a fraction), so neither
--- the rect nor the hover and press state shows that its output changed; only
--- building it does. A new or moved widget reports no change: rect damage
--- already covers it.
+-- | Settle a custom widget's ops for this frame and cache them for paint,
+-- returning whether what it draws changed at an unchanged rect.
+--
+-- A widget that declares a content key is taken at its word, as a versioned
+-- drawing is: an unchanged key with unchanged size, interaction state and
+-- metrics neither rebuilds the ops nor repaints them, animating or not, so a
+-- drawing that reads an animated value has to fold it into its key. One that
+-- only moved keeps its ops too; paint translates them. Without a key (0) the
+-- build can read anything (a sort flag, a fraction), and nothing but building
+-- it shows that its output changed, so it is rebuilt and compared.
+--
+-- Whatever forced a rebuild, the ops it produced decide the damage, so a key
+-- bumped without a visible change repaints nothing and a rebuild the key never
+-- mentioned still repaints. A new, moved or resized widget reports no change:
+-- rect damage covers it.
 refreshCustomDrawingOps ::
   Context ->
   WidgetId ->
+  Int ->
   Rect ->
   CustomDrawContext ->
   CustomDrawBuild ->
   IO Bool
-refreshCustomDrawingOps ctx wid rect cdc build = do
+refreshCustomDrawingOps ctx wid content rect cdc build = do
   let k = intKey wid
-      ops = build cdc rect
+  gen <- readIORef (ctxMetricGen ctx)
   cached <- IM.lookup k . dcsCustomDrawOpCache <$> readIORef (ctxDrawingCache ctx)
-  let (changed, kept) = case cached of
-        Just CustomDrawOpCacheEntry {cdeBounds = r, cdeOps = old}
-          | r == rect -> if old == ops then (False, old) else (True, ops)
-        _ -> (False, ops)
-  storeCustomDrawingOps ctx k rect cdc kept
-  pure changed
+  let keyed = content /= 0
+  case cached of
+    -- A keyed widget that only moved keeps its ops: paint translates them, and
+    -- the move is damaged by the rect delta.
+    Just e | keyed && customEntryMatches e content rect cdc gen -> pure False
+    _ -> do
+      let ops = build cdc rect
+          -- Whatever made this frame rebuild - the key, the interaction state,
+          -- a theme or font change - the ops are built now, so ask them
+          -- directly rather than trusting the key for damage as well.
+          changed = case cached of
+            Just e | cdeBounds e == rect -> cdeOps e /= ops
+            _ -> False
+      storeCustomDrawingOps ctx k content rect cdc gen ops
+      pure changed
 
-storeCustomDrawingOps :: Context -> Int -> Rect -> CustomDrawContext -> Vector DrawOp -> IO ()
-storeCustomDrawingOps ctx k rect cdc ops =
+storeCustomDrawingOps :: Context -> Int -> Int -> Rect -> CustomDrawContext -> Int -> Vector DrawOp -> IO ()
+storeCustomDrawingOps ctx k content rect cdc gen ops =
   modifyIORef' (ctxDrawingCache ctx) $ \s ->
-    let entry = CustomDrawOpCacheEntry rect (cdcHovered cdc) (cdcPressed cdc) (cdcFocused cdc) ops
+    let entry =
+          CustomDrawOpCacheEntry
+            content
+            rect
+            (cdcHovered cdc)
+            (cdcPressed cdc)
+            (cdcFocused cdc)
+            (cdcDisabled cdc)
+            gen
+            ops
      in s {dcsCustomDrawOpCache = IM.insert k entry (dcsCustomDrawOpCache s)}
+
+-- | Whether a versioned drawing's cached ops are for another version at the
+-- same rect. Paint rebuilds them; the pixels they covered must repaint too,
+-- and checking the version costs nothing next to building the ops here.
+drawingOpsStale :: Context -> WidgetId -> Int -> Rect -> IO Bool
+drawingOpsStale ctx wid content rect = do
+  cached <- IM.lookup (intKey wid) . dcsDrawOpCache <$> readIORef (ctxDrawingCache ctx)
+  pure $ case cached of
+    Just DrawOpCacheEntry {doeContent = c, doeBounds = r} -> c /= content && r == rect
+    Nothing -> False
 
 {-# INLINE registerCustomMeasure #-}
 registerCustomMeasure :: Context -> WidgetId -> CustomMeasureFn -> IO ()

@@ -22,7 +22,11 @@ import NanoUI.Widgets.Node (Response, addWidget)
 
 -- | Vector ops for a laid-out widget. Paint caches ops while width and height
 -- stay the same, then translates when the widget moves. Unversioned: the cache
--- drops while the widget animates because the builder has no content key.
+-- drops while the widget animates because the builder has no content key, and
+-- a builder that draws something else at the same size neither rebuilds nor
+-- repaints. Use 'drawingVersioned' for output that changes, or
+-- 'NanoUI.Widgets.Custom.customWidget' without a key to have every frame
+-- rebuild and compare.
 drawing :: Ui :> es => (Layout -> Layout) -> (Rect -> Vector DrawOp) -> Eff es Response
 drawing f build = do
   wid <- nextId
@@ -32,9 +36,10 @@ drawing f build = do
 
 -- | Like 'drawing', but the tessellated op cache is keyed by an explicit
 -- content version. Change the version whenever the builder output changes
--- (a model pointer, dirty counter, or content hash). Frames with the same
--- version replay cached ops without rebuilding, even while the widget
--- animates. Version 0 means unversioned, as in 'drawing'.
+-- (a model pointer, dirty counter, or content hash): that rebuilds the ops and
+-- repaints the widget. Frames with the same version replay cached ops without
+-- rebuilding, even while the widget animates. Version 0 means unversioned, as
+-- in 'drawing'.
 drawingVersioned :: Ui :> es => Int -> (Layout -> Layout) -> (Rect -> Vector DrawOp) -> Eff es Response
 drawingVersioned version f build = do
   wid <- nextId

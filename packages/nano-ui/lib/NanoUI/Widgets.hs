@@ -176,6 +176,7 @@ module NanoUI.Widgets
   , defaultCustomWidgetSpec
   , customWidget
   , customWidgetWithId
+  , contentKey
   , CustomDrawContext (..)
   , CustomMeasureFn
   , CustomDrawBuild
@@ -255,6 +256,7 @@ import NanoUI.Widgets.Custom
   , circularProgressWith'
   , customWidget
   , customWidgetWithId
+  , contentKey
   , defaultCustomWidgetSpec
   , drawCircle
   , drawImage

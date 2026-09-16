@@ -248,7 +248,8 @@ executable nano-ui-profile
     hs-source-dirs:   examples
     build-depends:
         base ^>=4.22.0.0,
-        nano-ui
+        nano-ui,
+        vector ^>=0.13
 
 -- Compile-time verification of optimization invariants (inspection-testing).
 -- Assertions fail the build if GHC stops inlining or starts allocating in the

@@ -117,7 +117,14 @@ package nano-ui
 - `-fspecialise-aggressively`, `-flate-specialise`, `-fmax-worker-args`, and
   `-funbox-strict-fields` made the core slower at runtime as well as slower to
   build. Leave them off.
-- `cabal run nano-ui-profile -- +RTS -s` runs frames headlessly.
+- A custom widget without a `widgetContent` key has its ops rebuilt and
+  compared every frame, since only building them shows whether what it draws
+  changed. That is right for a handful of ops and wasteful for thousands: give
+  an op-heavy drawing a key covering everything it reads, and an unchanged key
+  skips the rebuild and the repaint. `contentKey` hashes numbers into one.
+- `cabal run nano-ui-profile -- +RTS -s` runs frames headlessly. It takes a
+  scene: `widgets` (the default), `canvas` for an op-heavy unkeyed custom
+  widget, and `canvas-keyed` for the same drawing with a content key.
   `scripts/profile/` has helpers for cost-centre profiles and for timing the
   SDL demo's real event loop.
 - Compare compile times per module with

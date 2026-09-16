@@ -435,7 +435,7 @@ paneGrid cfg = do
         ringPane <- uiIO ((&&) <$> getFocusVisible ctx <*> ((== wid) <$> getFocusId ctx))
         when (ringPane && not dgiShown) $
           forM_ (M.lookup focusedInit visibleRegions) $ \r ->
-            uiIO $ registerCustomDrawing ctx wid $ \cdc _ ->
+            uiIO $ registerCustomDrawing ctx wid 0 $ \cdc _ ->
               runCanvas (drawStrokeRoundedRect (rectInflate (-2) r) 2 1.5 (themeAccent (cdcTheme cdc)))
 
   -- Keyboard navigation for the focused grid. Escape restores a maximized
@@ -687,7 +687,7 @@ drawDragOverlay env wid rendered ghost zone = do
       cached = IM.lookup (slotKey slotPaneGrab (geKey env)) (storeDyn st) >>= fromDynamic
       title = maybe (fromMaybe "" cached) pvTitle (fmap rpView (find ((== dragPane) . rpPaneId) rendered))
   uiIO $
-    registerCustomDrawing ctx wid (\cdc _ -> drawOverlay (cdcTheme cdc) title ghost zone)
+    registerCustomDrawing ctx wid 0 (\cdc _ -> drawOverlay (cdcTheme cdc) title ghost zone)
 
 -- | A compact, translucent drag indicator leaves the full-size drop preview
 -- visible. The indicator is offset from the pointer so it cannot obscure aim.

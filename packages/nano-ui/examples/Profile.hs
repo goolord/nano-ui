@@ -1,15 +1,73 @@
 module Main (main) where
 
-import Control.Monad (replicateM_, void)
+import Control.Monad (forM_, replicateM_, void)
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
+import Data.Vector (Vector)
 import NanoUI
 import NanoUI.Testing (newContext, runFrame)
+import System.Environment (getArgs)
+import System.IO.Unsafe (unsafePerformIO)
 
 -- Enough frames for a stable time profile without an interactive window.
 iterations :: Int
 iterations = 3000
 
+-- | A grid of buttons and labels: the ordinary widget path.
+widgetScene :: NanoUI ()
+widgetScene =
+  columnWith
+    (grow . gap 8)
+    ( do
+        replicateM_ 12 $
+          gridWith 8 (gap 8) $
+            replicateM_ 8 (void (button "OK"))
+        label "nano-ui profile loop"
+    )
+
+-- | A thousand rects: enough ops that building them costs more than replaying
+-- them, which is the case a content key is for.
+canvasOps :: CustomDrawContext -> Rect -> Vector DrawOp
+canvasOps cdc (Rect x y w h) = runCanvas $ do
+  let side = 32 :: Int
+      cw = w / fromIntegral side
+      ch = h / fromIntegral side
+      accent = themeAccent (cdcTheme cdc)
+  forM_ [0 .. side - 1] $ \i ->
+    forM_ [0 .. side - 1] $ \j -> do
+      let fx = x + fromIntegral i * cw
+          fy = y + fromIntegral j * ch
+          tint = fromIntegral ((i * side + j) `mod` 255) / 255
+      drawRect (Rect fx fy (cw - 1) (ch - 1)) (lerpColor accent (colorRGBA 255 255 255 255) tint)
+
+-- | 'canvasOps', counting the frames that actually build the ops. The count
+-- says which path a scene took: one build for a keyed widget the frames reuse,
+-- one per frame for an unkeyed one.
+{-# NOINLINE countedCanvasOps #-}
+countedCanvasOps :: CustomDrawContext -> Rect -> Vector DrawOp
+countedCanvasOps cdc rect = unsafePerformIO $ do
+  modifyIORef' buildCount (+ 1)
+  pure (canvasOps cdc rect)
+
+{-# NOINLINE buildCount #-}
+buildCount :: IORef Int
+buildCount = unsafePerformIO (newIORef 0)
+
+-- | An op-heavy custom widget. Pass 0 for the unkeyed path, which rebuilds and
+-- compares its ops every frame, or a content key, which reuses them while it
+-- is unchanged.
+canvasScene :: Int -> NanoUI ()
+canvasScene key =
+  void $
+    customWidget
+      defaultCustomWidgetSpec
+        { widgetLayout = fixedWH 512 512 defaultLayout
+        , widgetContent = key
+        , widgetDraw = countedCanvasOps
+        }
+
 main :: IO ()
 main = do
+  args <- getArgs
   ctx <- newContext
   let inp =
         emptyInput
@@ -17,14 +75,10 @@ main = do
           , inputMousePos = V2 400 300
           , inputMouseDown = True
           }
-      ui =
-        columnWith
-          (grow . gap 8)
-          ( do
-              replicateM_ 12 $
-                gridWith 8 (gap 8) $
-                  replicateM_ 8 (void (button "OK"))
-              label "nano-ui profile loop"
-          )
+      (name, ui) = case args of
+        ("canvas" : _) -> ("canvas", canvasScene 0)
+        ("canvas-keyed" : _) -> ("canvas-keyed", canvasScene 1)
+        _ -> ("widgets", widgetScene)
   replicateM_ iterations (void (runFrame ctx inp ui))
-  putStrLn ("profiled " ++ show iterations ++ " frames")
+  builds <- readIORef buildCount
+  putStrLn ("profiled " ++ show iterations ++ " " ++ name ++ " frames, op builds: " ++ show builds)

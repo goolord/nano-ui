@@ -3,7 +3,8 @@
 -- | Custom widgets and the reference widgets built on them.
 --
 -- 'customWidget' takes a 'CustomWidgetSpec': a layout, optional measurement,
--- drawing that sees hover and press state, a cursor, and damage slop.
+-- drawing that sees hover and press state, an optional content key, a cursor,
+-- and damage slop.
 -- 'canvas' is the short form for drawing into a laid-out rectangle with
 -- 'CanvasM'. 'useDrag2D' and 'useWheelDelta' are gesture hooks for your own
 -- controls; 'knob' and 'toggleSwitch' show how they fit together.
@@ -13,6 +14,7 @@ module NanoUI.Widgets.Custom
   , defaultCustomWidgetSpec
   , customWidget
   , customWidgetWithId
+  , contentKey
   , CustomDrawContext (..)
   , CustomMeasureFn
   , CustomDrawBuild
@@ -95,7 +97,8 @@ import NanoUI.Context
   )
 import NanoUI.Draw (DrawOp (..))
 import NanoUI.Font (FontMetrics)
-import NanoUI.Id (WidgetId)
+import GHC.Float (castFloatToWord32)
+import NanoUI.Id (WidgetId, mix64)
 import NanoUI.Input
   ( Input (..)
   , UiCursorKind (..)
@@ -245,6 +248,17 @@ data CustomWidgetSpec a = CustomWidgetSpec
     -- ^ Optional intrinsic measurement hook for 'Fit' or dynamic sizing.
   , widgetDraw       :: !CustomDrawBuild
     -- ^ Vector drawing procedure receiving interaction context and layout rect.
+  , widgetContent    :: !Int
+    -- ^ Content key: a number that changes whenever 'widgetDraw' would draw
+    -- something different from the state it reads (a value, a flag, a model
+    -- revision; 'contentKey' hashes numbers into one). A frame whose key,
+    -- size, interaction state and metrics are unchanged neither rebuilds the
+    -- ops nor repaints the widget (a widget that only moved has its ops
+    -- translated), so key a drawing whose ops are expensive to build. The default 0 means no key: the ops are rebuilt every frame and
+    -- compared, which repaints correctly whatever the drawing reads but pays
+    -- for the rebuild. A stale key draws stale pixels, so derive it from
+    -- everything the drawing reads, an animated value included: a key is
+    -- believed while the widget animates, as a versioned drawing's version is.
   , widgetCursor     :: !(Maybe (CustomDrawContext -> UiCursorKind))
     -- ^ Optional custom mouse cursor when pointer is over the widget.
   , widgetFocusable  :: !Bool
@@ -264,11 +278,22 @@ defaultCustomWidgetSpec = CustomWidgetSpec
   { widgetLayout     = defaultLayout
   , widgetMeasure    = Nothing
   , widgetDraw       = \_ _ -> V.empty
+  , widgetContent    = 0
   , widgetCursor     = Nothing
   , widgetFocusable  = False
   , widgetDamageSlop = defaultDamageSlop
   , widgetInteract   = \resp _ _ -> (resp, ())
   }
+
+-- | A 'widgetContent' key for a drawing whose output follows these numbers.
+-- Pass every value the drawing reads; @0@ means "no key", so a hash that lands
+-- there becomes 1.
+{-# INLINE contentKey #-}
+contentKey :: [Float] -> Int
+contentKey vs =
+  let raw = foldl' (\acc v -> mix64 acc (fromIntegral (castFloatToWord32 v))) 0x9E3779B97F4A7C15 vs
+      k = fromIntegral raw
+   in if k == 0 then 1 else k
 
 -- | Build the draw context a custom widget sees, resolving hover/press/focus
 -- state for @wid@ from the ambient context. One policy for state masking.
@@ -305,7 +330,7 @@ customWidgetWithId wid spec = do
   uiIO $ do
     when (widgetFocusable spec) $ registerFocusable ctx wid
     mapM_ (registerCustomMeasure ctx wid) (widgetMeasure spec)
-    registerCustomDrawing ctx wid (widgetDraw spec)
+    registerCustomDrawing ctx wid (widgetContent spec) (widgetDraw spec)
     mapM_ (registerCustomCursor ctx wid) (widgetCursor spec)
     when (widgetDamageSlop spec > 0) $
       registerCustomDamageSlop ctx wid (widgetDamageSlop spec)
@@ -317,8 +342,9 @@ customWidgetWithId wid spec = do
 --
 -- Connects the widget into:
 -- - The two-pass layout arena (respecting 'widgetMeasure' or layout constraints).
--- - Off-heap vector drawing pipeline. The draw function runs once per frame,
---   so it may read any state; the widget repaints whenever its ops change.
+-- - Off-heap vector drawing pipeline. Without a 'widgetContent' key the draw
+--   function runs once a frame and the widget repaints when its ops change, so
+--   it may read anything; with one, an unchanged key skips both.
 -- - Interactive hit-testing, focus management, and custom cursor resolution.
 -- - Accurate damage region tracking with 'widgetDamageSlop'.
 customWidget :: (Ui :> es) => CustomWidgetSpec a -> Eff es (Response, a)
@@ -436,6 +462,7 @@ knobWith' f diameter minV maxV value = do
     , widgetMeasure = Just $ \_ _ -> (diameter, diameter)
     , widgetCursor = Just (\_ -> UiCursorNsResize)
     , widgetFocusable = True
+    , widgetContent = contentKey [frac]
     , widgetDraw = \cdc (Rect x y w h) -> runCanvas $ do
         let cx = x + w / 2
             cy = y + h / 2
@@ -510,6 +537,7 @@ toggleSwitchWith' f on = do
     , widgetMeasure = Just $ \_ _ -> (pillW, pillH)
     , widgetCursor = Just (\_ -> UiCursorPointer)
     , widgetFocusable = True
+    , widgetContent = contentKey [if current then 1 else 0]
     , widgetDraw = \cdc (Rect x y w h) -> runCanvas $ do
         let theme = cdcTheme cdc
             r = h / 2
@@ -551,6 +579,7 @@ circularProgressWith' f diameter frac =
   fst <$> customWidget defaultCustomWidgetSpec
     { widgetLayout = fixedWH diameter diameter (f defaultLayout)
     , widgetMeasure = Just $ \_ _ -> (diameter, diameter)
+    , widgetContent = contentKey [clamp01 frac]
     , widgetDraw = \cdc (Rect x y w h) -> runCanvas $ do
         let cx = x + w / 2
             cy = y + h / 2
@@ -585,6 +614,7 @@ progressBarWith' f height frac =
    in fst <$> customWidget defaultCustomWidgetSpec
         { widgetLayout = fillW (fixedH barH (f defaultLayout))
         , widgetMeasure = Just $ \_ _ -> (progressBarDefaultWidth, barH)
+        , widgetContent = contentKey [clamp01 frac]
         , widgetDraw = \cdc (Rect x y w h) -> runCanvas $ do
             let theme = cdcTheme cdc
                 trackCol = styleBg (themeButton theme)
@@ -626,6 +656,7 @@ sparklineWith' f prefW prefH values =
   fst <$> customWidget defaultCustomWidgetSpec
     { widgetLayout = fixedWH prefW prefH (f defaultLayout)
     , widgetMeasure = Just $ \_ _ -> (prefW, prefH)
+    , widgetContent = contentKey values
     , widgetDraw = \cdc (Rect x y rw rh) -> runCanvas $ do
         let theme = cdcTheme cdc
             accent = themeAccent theme

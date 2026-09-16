@@ -4,6 +4,7 @@ module Cases.Damage
   , runDamageQueueClearedPerFrameTest
   , runStateChangeDamageTest
   , runOrphanAnimationDamageSettlesTest
+  , runVersionedDrawingDamageTest
   ) where
 
 import Data.IORef (IORef)
@@ -11,6 +12,26 @@ import NanoUI
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, withInput)
 import NanoUI.Testing.Harness (warmup2)
+
+-- | A new version on a versioned drawing repaints its rect. Paint rebuilds the
+-- ops once the version moves, and nothing else damages them, so a clip frame
+-- would otherwise keep the pixels it drew last time.
+runVersionedDrawingDamageTest :: Context -> IORef Int -> IO ()
+runVersionedDrawingDamageTest ctx failed = do
+  let inp = withInput 400 300
+      ui version = column $ do
+        _ <- label "Other"
+        drawingVersioned version (fixedWH 80 40) $ \r ->
+          runCanvas (drawRect r (colorRGBA 255 0 0 255))
+      covers (Rect cx cy cw ch) (Rect x y w h) =
+        cx <= x && cy <= y && cx + cw >= x + w && cy + ch >= y + h
+  resp <- warmup2 ctx inp (ui 1)
+  _ <- takeDamage ctx
+  _ <- runFrame ctx inp (ui 2)
+  dmg <- takeDamage ctx
+  case dmg of
+    DamageClip clip -> assert failed (covers clip (respRect resp))
+    DamageFull -> assert failed False
 
 runDamageBoundsResolutionTest :: Context -> IORef Int -> IO ()
 runDamageBoundsResolutionTest _ failed = do
