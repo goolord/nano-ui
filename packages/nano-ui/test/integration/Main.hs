@@ -257,6 +257,7 @@ testSpecs =
   , TestSpec "custom-widget-cursor" False runCustomWidgetCursorTest
   , TestSpec "custom-widget-interaction" False runCustomWidgetInteractionTest
   , TestSpec "custom-widget-queued-click" False runCustomWidgetQueuedClickTest
+  , TestSpec "custom-widget-content-damage" False runCustomWidgetContentDamageTest
   , TestSpec "custom-widget-knob" False runReferenceKnobTest
   , TestSpec "drop-target" False runDropTargetTest
   ]

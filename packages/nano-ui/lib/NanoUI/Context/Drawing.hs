@@ -11,6 +11,7 @@ module NanoUI.Context.Drawing
   , registerCustomDrawing
   , lookupCustomDrawing
   , cachedCustomDrawingOps
+  , refreshCustomDrawingOps
   , registerCustomMeasure
   , lookupCustomMeasure
   , registerCustomCursor
@@ -191,7 +192,9 @@ registerCustomDrawing = registerIn dcsCustomDrawings (\m dc -> dc {dcsCustomDraw
 lookupCustomDrawing :: Context -> WidgetId -> IO (Maybe CustomDrawBuild)
 lookupCustomDrawing = lookupIn dcsCustomDrawings
 
--- | Cached draw ops for custom widgets with interaction state awareness.
+-- | Draw ops for a custom widget's paint: the ops 'refreshCustomDrawingOps'
+-- built this frame while the rect and interaction state still match, else a
+-- fresh build.
 cachedCustomDrawingOps ::
   Context ->
   WidgetId ->
@@ -201,18 +204,44 @@ cachedCustomDrawingOps ::
   IO (Vector DrawOp)
 cachedCustomDrawingOps ctx wid rect cdc build = do
   let k = intKey wid
-      hov = cdcHovered cdc
-      prs = cdcPressed cdc
-      foc = cdcFocused cdc
-  animated <- isAnimatingKey ctx k
   cached <- IM.lookup k . dcsCustomDrawOpCache <$> readIORef (ctxDrawingCache ctx)
-  let hit = case cached of
-        Just CustomDrawOpCacheEntry {cdeBounds = r, cdeHovered = h, cdePressed = p, cdeFocused = f, cdeOps = ops}
-          | not animated && h == hov && p == prs && f == foc -> Just (r, ops)
-        _ -> Nothing
-  serveOps hit rect (build cdc rect) $ \ops ->
-    modifyIORef' (ctxDrawingCache ctx) $ \s ->
-      s {dcsCustomDrawOpCache = IM.insert k (CustomDrawOpCacheEntry rect hov prs foc ops) (dcsCustomDrawOpCache s)}
+  case cached of
+    Just CustomDrawOpCacheEntry {cdeBounds = r, cdeHovered = h, cdePressed = p, cdeFocused = f, cdeOps = ops}
+      | r == rect && h == cdcHovered cdc && p == cdcPressed cdc && f == cdcFocused cdc -> pure ops
+    _ -> do
+      let ops = build cdc rect
+      storeCustomDrawingOps ctx k rect cdc ops
+      pure ops
+
+-- | Build a custom widget's ops for this frame and cache them for paint,
+-- returning whether they differ from the ops cached at the same rect. A build
+-- can read state its spec does not carry (a sort flag, a fraction), so neither
+-- the rect nor the hover and press state shows that its output changed; only
+-- building it does. A new or moved widget reports no change: rect damage
+-- already covers it.
+refreshCustomDrawingOps ::
+  Context ->
+  WidgetId ->
+  Rect ->
+  CustomDrawContext ->
+  CustomDrawBuild ->
+  IO Bool
+refreshCustomDrawingOps ctx wid rect cdc build = do
+  let k = intKey wid
+      ops = build cdc rect
+  cached <- IM.lookup k . dcsCustomDrawOpCache <$> readIORef (ctxDrawingCache ctx)
+  let (changed, kept) = case cached of
+        Just CustomDrawOpCacheEntry {cdeBounds = r, cdeOps = old}
+          | r == rect -> if old == ops then (False, old) else (True, ops)
+        _ -> (False, ops)
+  storeCustomDrawingOps ctx k rect cdc kept
+  pure changed
+
+storeCustomDrawingOps :: Context -> Int -> Rect -> CustomDrawContext -> Vector DrawOp -> IO ()
+storeCustomDrawingOps ctx k rect cdc ops =
+  modifyIORef' (ctxDrawingCache ctx) $ \s ->
+    let entry = CustomDrawOpCacheEntry rect (cdcHovered cdc) (cdcPressed cdc) (cdcFocused cdc) ops
+     in s {dcsCustomDrawOpCache = IM.insert k entry (dcsCustomDrawOpCache s)}
 
 {-# INLINE registerCustomMeasure #-}
 registerCustomMeasure :: Context -> WidgetId -> CustomMeasureFn -> IO ()
