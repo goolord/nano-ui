@@ -3,6 +3,7 @@ module Cases.Modal
   , runModalNoPhantomScrollTest
   , runModalOverlayTest
   , runModalFitsTextTest
+  , runModalFractionalScaleNoScrollTest
   ) where
 
 import Control.Monad (forM_, when)
@@ -16,6 +17,7 @@ import NanoUI.Testing.Harness
   , checkIdleFullDamage
   , clickPair
   , runClickRelease
+  , spanYOf
   , warmup2
   , withInputOff
   )
@@ -111,6 +113,47 @@ runModalCloseDamageTest ctx failed = do
   checkIdleFullDamage failed ctx idle idle ui
   _ <- runFrame ctx esc ui
   checkIdleFullDamage failed ctx idle idle ui
+
+-- At a fractional display scale, a modal sized to its content does not scroll
+-- when that content uses fixed sizes off the device-pixel grid (regression:
+-- the solve rounded the measured sizes inside the modal before placement laid
+-- it out from them, and snapping a child's origin pushed its bottom below its
+-- measured bottom so content-sized parents grew level after level; the body
+-- overflowed its viewport by more than the scroll tolerance).
+runModalFractionalScaleNoScrollTest :: Context -> IORef Int -> IO ()
+runModalFractionalScaleNoScrollTest _ failed =
+  forM_ [(scale, rows, nested) | scale <- [1, 1.25, 1.5, 1.75], rows <- [4 .. 8 :: Int], nested <- [False, True]] $ \(scale, rows, nested) -> do
+    base <- newContext
+    let ctx = withFontMetrics base ((monospaceMetrics 12) {fmSnapScale = scale})
+        inp = withInputOff 1000 1000
+        field i = rowWith (fillW . fixedH 30 . alignMid) (label (T.pack ("Field " <> show i)))
+        section = columnWith (fillW . gap 6) $ do
+          label "Section"
+          columnWith (fillW . gap 0) $ do
+            spacer Fit (Fixed 3)
+            forM_ [1 .. rows] field
+            spacer Fit (Fixed 3)
+        body = columnWith (gap 10) (section >> section >> section >> button "Close")
+        -- As the arena's root, and inside other content as an app opens one.
+        ui
+          | nested = column (label "Behind" >> fst <$> modal True "Details" body)
+          | otherwise = fst <$> modal True "Details" body
+        -- Whether a wheel over the modal moves its first field.
+        scrolls c i = do
+          dlg <- warmup2 c i ui
+          let Rect mx my mw mh = respRect dlg
+              wheel = i {inputMousePos = V2 (mx + mw / 2) (my + mh / 2), inputScroll = V2 0 3}
+          spans0 <- collectOverlayTextSpans c i
+          _ <- runFrame c wheel ui
+          spans1 <- collectOverlayTextSpans c wheel
+          assert failed (not (null (spanYOf "Field 1" spans0)))
+          pure (spanYOf "Field 1" spans1 /= spanYOf "Field 1" spans0)
+    fits <- scrolls ctx inp
+    assertEq failed fits False
+    -- The same body in a short window does scroll, so the check can fail.
+    short <- newContext
+    clipped <- scrolls (withFontMetrics short ((monospaceMetrics 12) {fmSnapScale = scale})) (withInputOff 1000 300)
+    assertEq failed clipped True
 
 -- A modal widens for a filling label instead of wrapping it, so the label
 -- stays one line inside the modal (regression: the label reported no width, the
