@@ -33,12 +33,10 @@ import NanoUI.Font
   ( FontMetrics (..)
   , centeredTextY
   , checkboxBoxSize
-  , labelContentInset
   , sliderHandleDiameter
   , sliderTrackBounds
   , tableCellInset
   , treeChevronRect
-  , widgetContentInset
   )
 import NanoUI.Frame.Chrome
   ( fillStyledRect
@@ -55,14 +53,12 @@ import NanoUI.Frame.Paint.Types (PaintEnv (..), popupPanelRect)
 import NanoUI.Frame.Spans (forWidgetTextPlacements_, selectableTextGeometry, widgetTextSpans)
 import NanoUI.Frame.TextArea (drawTextAreaContentWith)
 import NanoUI.Frame.TextArea.Content (resolveTextAreaFont)
-import NanoUI.Frame.TextArea.Geometry (TextAreaGeom (..), textAreaGeom)
 import NanoUI.Frame.TextInput
-  ( TextInputGeom (..)
-  , drawTextInputCaret
+  ( drawTextInputCaret
   , drawTextInputSelection
   , syncTextInputScroll
+  , textInputFieldRect
   , textInputFieldTextClip
-  , textInputGeom
   )
 import NanoUI.Layout.Arena
   ( NodeIdx
@@ -93,7 +89,6 @@ import NanoUI.WidgetText
   , selectChevronCenterX
   , selectChevronReserve
   , tableSortMarkOf
-  , textInputBareMode
   , textInputNumericMode
   , textInputFieldText
   , textInputSearchMode
@@ -119,27 +114,20 @@ paintTextInputNode env idx rect@(Rect x y w h) = do
       if textInputSelectableMode si
         then paintSelectableText env style idx rect
         else
-          if textInputBareMode si
+          if textInputSearchMode si
             then do
-              let (ix, iy) = widgetContentInset fm
-              paintTextFieldFrame da style rect
-              value <- textInputValue ctx idx
-              paintFieldValue ctx da fm style idx focus rect (Rect (x + ix) (y + iy) (max 0 (w - 2 * ix)) (max 0 (h - 2 * iy))) "" value
-            else
-              if textInputSearchMode si
-                then do
-                  opts <- getOptions (peNodeArena env) idx
-                  if null opts
-                    then paintSearchField ctx da fm style idx focus rect
-                    else paintComboField ctx da fm style idx focus rect
-                else do
-                  let geom = textInputGeom fm x y w h
-                  paintTextFieldFrame da style (tigFieldRect geom)
-                  spans <- widgetTextSpans ctx NodeTextInput idx x y w h
-                  case spans of
-                    (Rect fx fy _ _, field, ffg, _) : _ ->
-                      paintClippedFieldText ctx da fm style idx x y w h (textInputFieldTextClip geom fm) fx fy field ffg
-                    [] -> pure ()
+              opts <- getOptions (peNodeArena env) idx
+              if null opts
+                then paintSearchField ctx da fm style idx focus rect
+                else paintComboField ctx da fm style idx focus rect
+            else do
+              let field = textInputFieldRect fm x y w h
+              paintTextFieldFrame da style field
+              spans <- widgetTextSpans ctx NodeTextInput idx x y w h
+              case spans of
+                (Rect fx fy _ _, txt, ffg, _) : _ ->
+                  paintClippedFieldText ctx da fm style idx x y w h (textInputFieldTextClip fm field) fx fy txt ffg
+                [] -> pure ()
 
 -- | Multi-line text area.
 {-# NOINLINE paintTextAreaNode #-}
@@ -149,7 +137,7 @@ paintTextAreaNode env idx (Rect x y w h) = do
       da = peDrawArena env
   style <- widgetVisualStyle ctx NodeTextArea idx
   areaFm <- resolveTextAreaFont ctx idx
-  paintTextFieldFrame da style (tagFieldRect (textAreaGeom areaFm x y w h))
+  paintTextFieldFrame da style (Rect x y w h)
   drawTextAreaContentWith da ctx areaFm idx x y w h style
 
 -- | Generic foreground / chrome widget (button, checkbox, radio, slider,
@@ -230,7 +218,7 @@ paintSliderBody :: PaintEnv -> Float -> Float -> Float -> Float -> Float -> IO (
 paintSliderBody env x y w h value = do
   let da = peDrawArena env
       theme = peTheme env
-      track@(Rect tx ty tw th) = sliderTrackBounds (peFontMetrics env) x y w h
+      track@(Rect tx ty tw th) = sliderTrackBounds x y w h
       trackR = 3
       fillW = max 0 (tw * clamp01 value)
       outline = styleBorder (themeInput theme)
@@ -276,7 +264,7 @@ paintWidgetForeground env idx nt style si (Rect x y w h) = do
       -- inset, whatever the label's alignment. The label still ends in a
       -- blank reserve slot (the ▲/▼ codepoint is not in the pruned UI font),
       -- which keeps the column wide enough for the text and the arrow.
-      sortArrowX = x + w - fst (tableCellInset fm) - 5
+      sortArrowX = x + w - tableCellInset - 5
       drawPlacement lastLine txt px py _ th =
         unless (T.null txt) $ do
           pushText da fm px py txt widgetFg
@@ -451,9 +439,8 @@ drawChoiceControl ::
   (Float -> Float -> Float -> IO ()) ->
   IO ()
 drawChoiceControl da fm style x y h r bw value accent well solidChecked postMark = do
-  let (ix, _) = labelContentInset fm
-      box = checkboxBoxSize fm
-      bx = x + ix
+  let box = checkboxBoxSize fm
+      bx = x
       by = verticallyCenteredBox y h box
       outer = Rect bx by box box
       checked = value >= 0.5

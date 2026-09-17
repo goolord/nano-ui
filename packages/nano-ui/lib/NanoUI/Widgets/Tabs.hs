@@ -28,7 +28,6 @@ import NanoUI.Context
   , setStore
   , currentTheme
   )
-import NanoUI.Font (resolveLayoutPadding)
 import NanoUI.Frame.Hit (findNodeByWidgetId)
 import NanoUI.Frame.Scroll.Geometry (scrollAxisRange, scrollBare, scrollHorizontalHidden)
 import NanoUI.Id (WidgetId)
@@ -195,10 +194,9 @@ renderScrollableHeaders ::
   Eff es (TabResponse a, a)
 renderScrollableHeaders ctx style hdrLay barLay groupId cur tabList = do
   scrollWid <- withKey ("tab-scroller" :: Text) nextId
-  let fm = ctxFontMetrics ctx
-      h = tabHeaderH
+  let h = tabHeaderH
       styleVal = fromEnum style
-      barPad = resolveLayoutPadding fm (layoutPadding barLay)
+      barPad = layoutPadding barLay
       arrowW = 26
       leftGlyph = "\8249"
       rightGlyph = "\8250"

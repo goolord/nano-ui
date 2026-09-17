@@ -83,7 +83,6 @@ nodeFontMetrics ctx idx = do
 scrollViewportAt :: Context -> NodeIdx -> Float -> Float -> Float -> Float -> IO Rect
 scrollViewportAt ctx idx x y w h = do
   let na = ctxNodeArena ctx
-      fm = ctxFontMetrics ctx
   si <- getStyleIdx na idx
   pad <- getPadding na idx
   slot <- scrollBarSlotOf na idx
@@ -92,7 +91,7 @@ scrollViewportAt ctx idx x y w h = do
   if isScrollStyle2D si
     then do
       contentW <- getScrollContentW na idx
-      pure (scrollViewportClip2D fm slot cfg x y w h pad contentW contentMain)
+      pure (scrollViewportClip2D slot cfg x y w h pad contentW contentMain)
     else do
       dir <- getDirection na idx
-      pure (scrollContentClip fm slot cfg dir x y w h pad contentMain)
+      pure (scrollContentClip slot cfg dir x y w h pad contentMain)

@@ -403,7 +403,7 @@ runSliderFillWidthTest ctx failed = do
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect rx ry rw rh = respRect resp
   assertGt failed rw 300
-  let track = sliderTrackBounds (ctxFontMetrics ctx) rx ry rw rh
+  let track = sliderTrackBounds rx ry rw rh
       endDrag = V2 (rectX track + rectW track - 2) (rectY track + rectH track / 2)
   ((_, val), _, _, _) <- runFrame ctx (inp0 {inputMousePos = endDrag, inputMouseDown = True, inputMousePressed = True}) ui
   assertGt failed val 90
@@ -483,9 +483,8 @@ runLabelAlignEndTest _ failed = do
   ctx <- newPixelContext
   let
     fm = ctxFontMetrics ctx
-    (ix, _) = labelContentInset fm
     tw = fmAdvance fm ' ' * 2
-    boxW = tw + 2 * ix + 4
+    boxW = tw + 4
     inp = emptyInput {inputWindowSize = Size (boxW + 8) 8}
     ui =
       rowWith (fixedW boxW . tight . gap 0) $
@@ -499,7 +498,7 @@ runLabelAlignEndTest _ failed = do
   case hits of
     [] -> assert failed False
     Rect x _ w _ : _ -> do
-      assert failed (abs ((x + w) - (bx + bw - ix)) <= 0.6)
+      assert failed (abs ((x + w) - (bx + bw)) <= 0.6)
       assert failed (abs (w - tw) <= 0.6)
   checkLabelAlignEndInk failed
 

@@ -14,13 +14,12 @@ module NanoUI.Frame.TextEdit
   , normalizeTextFieldClicks
   , textWordBounds
     -- * Text areas
-  , TextAreaGeom (..)
   , TextAreaHit (..)
   , TextAreaScrollBarLayouts (..)
   , resolveTextAreaFont
   , textAreaContentMetrics
-  , textAreaBarLanes
-  , textAreaGeom
+  , textAreaBarLane
+  , textAreaLineHeight
   , textAreaHitForWidget
   , textAreaScrollBarLayout
   , textAreaHScrollBarLayout

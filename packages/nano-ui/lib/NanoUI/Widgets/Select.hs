@@ -29,7 +29,8 @@ import NanoUI.Context
   , registerFocusable
   , setStore
   )
-import NanoUI.Frame.Select (selectDropPickIndex, selectDropRect, selectItemH)
+import NanoUI.Font (menuItemRowH)
+import NanoUI.Frame.Select (selectDropPickIndex, selectDropRect)
 import NanoUI.Input (inputMousePos, inputMousePressed, inputMouseReleased)
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO)
@@ -80,7 +81,7 @@ selectWith' f options index = do
   let
     rect@(Rect rx ry rw rh) = respRect resp
     mouse = inputMousePos inp
-    dropRect = selectDropRect (ctxFontMetrics ctx) rx ry rw rh n
+    dropRect = selectDropRect rx ry rw rh n
   when (rectHit rect mouse && inputMousePressed inp) $
     uiIO $ do
       st <- getStore ctx
@@ -88,7 +89,7 @@ selectWith' f options index = do
       writeIORef (ctxFocusId ctx) wid
       markDirty ctx
   when (open && rectNonEmpty rect && rectContains dropRect mouse && inputMouseReleased inp) $
-    forM_ (selectDropPickIndex dropRect (selectItemH rh) n (v2Y mouse)) $ \picked ->
+    forM_ (selectDropPickIndex dropRect menuItemRowH n (v2Y mouse)) $ \picked ->
       uiIO $ do
         st <- getStore ctx
         setStore ctx (setSelectOpen (st {storeInt = IM.insert key picked (storeInt st)}) key False)

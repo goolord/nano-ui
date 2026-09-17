@@ -30,7 +30,6 @@ import NanoUI.Frame.Hit (findNodeByWidgetId, nodePointVisible, scrollHitRect)
 import NanoUI.Frame.Scroll (ScrollBarLayout (..), scrollBarsFor)
 import NanoUI.Frame.Select (overlayMenuOwnerAt, selectDropRect)
 import NanoUI.Frame.TextArea.Content (isMouseOnTextAreaScrollBarAt)
-import NanoUI.Frame.TextArea.Geometry (TextAreaGeom (..), textAreaGeom)
 import NanoUI.Frame.TextEdit.Menu (textEditMenuCursorKind, textFieldWidgetAtMouse)
 import NanoUI.Frame.TextInput (nodeTextFieldGeom, searchClearHit)
 import NanoUI.Frame.Window (windowResizeCursorKind)
@@ -103,7 +102,7 @@ selectDropdownCursorKind ctx inp = do
           wid <- getWidgetId na idx
           opts <- getOptions na idx
           (x, y, w, h) <- getRect na idx
-          let dropRect = selectDropRect (ctxFontMetrics ctx) x y w h (length opts)
+          let dropRect = selectDropRect x y w h (length opts)
           pure ((isSelectOpen store (intKey wid) || dropPress) && rectContains dropRect mouse)
   if isJust mSel
     then pure (Just UiCursorPointer)
@@ -245,7 +244,7 @@ sliderCursorKind ctx wid mouse inp = do
             case mrect of
               Nothing -> UiCursorDefault
               Just (Rect x y w h) ->
-                let Rect tx ty tw th = sliderTrackBounds (ctxFontMetrics ctx) x y w h
+                let Rect tx ty tw th = sliderTrackBounds x y w h
                     hitRect = Rect tx (ty - sliderHandleSlack) tw (th + 2 * sliderHandleSlack)
                  in grabDragKind (rectContains hitRect mouse) False inp
 
@@ -277,8 +276,8 @@ textAreaCursorKind ctx wid mouse = do
       if onScroll
         then pure UiCursorDefault
         else
-          textFieldCursorKind ctx wid mouse $ \fm x y w h ->
-            tagFieldRect (textAreaGeom fm x y w h)
+          textFieldCursorKind ctx wid mouse $ \_ x y w h ->
+            Rect x y w h
 
 textFieldCursorKind ::
   Context ->

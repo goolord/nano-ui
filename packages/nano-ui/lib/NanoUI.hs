@@ -670,13 +670,9 @@ module NanoUI
   , scaleFontMetrics
   , monospaceMetrics
   , uiFontMetrics
-  , labelContentInset
-  , tableCellInset
   , widgetContentInset
   , widgetPadding
   , treeItemPadding
-  , resolveLayoutGap
-  , resolveLayoutPadding
   , ScrollBarSlot (..)
   , scrollBarGutter
   , scrollBarWidth
@@ -737,19 +733,15 @@ import NanoUI.Font
   , ScrollBarSlot (..)
   , drawGlyph
   , drawShaped
-  , labelContentInset
   , lineWidth
   , lineWidthIO
   , measureTextIO
   , monospaceMetrics
   , prepareFontMetrics
   , prepareFontMetricsMany
-  , resolveLayoutGap
-  , resolveLayoutPadding
   , scaleFontMetrics
   , scrollBarGutter
   , scrollBarWidth
-  , tableCellInset
   , treeItemPadding
   , widgetContentInset
   , widgetPadding

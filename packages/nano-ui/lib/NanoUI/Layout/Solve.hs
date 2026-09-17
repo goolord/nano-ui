@@ -7,6 +7,7 @@ module NanoUI.Layout.Solve
   , computePopupPosition
   , positionWindowNode
   , scrollBarSlotOf
+  , findAncestorMaxW
   ) where
 
 import Control.Monad (foldM, unless, when)
@@ -31,12 +32,9 @@ import NanoUI.Font
   , treeRowLeading
   , treeItemPadding
   , classifyScrollBar
-  , resolveLayoutGap
-  , resolveLayoutPadding
   , measureTextIO
   , lineWidthIO
   , measureTextWrappedIO
-  , labelContentInset
   , tableCellInset
   , ScrollBarSlot (..)
   , widgetPadding
@@ -44,7 +42,6 @@ import NanoUI.Font
   , menuItemPadX
   , menuOuterPad
   , selectPadding
-  , layoutLineHeight
   , isDefaultNodeFont
   , sliderTrackHeight
   , sliderHandleDiameter
@@ -134,7 +131,6 @@ import NanoUI.WidgetText
   , textInputMinWidth
   , textInputPlaceholder
   , textInputSearchMode
-  , textInputBareMode
   , textInputNumericMode
   , numericStepperW
   , textInputSelectableMode
@@ -229,9 +225,8 @@ measureTextNodeAt :: SolveEnv -> NodeIdx -> Text -> Float -> (Float -> Float -> 
 measureTextNodeAt env idx txt outerW shouldWrap = do
   measurer@TextMeasurer {tmMetrics = textFm} <- textNodeMeasurer env idx
   (tw0, th0) <- measureFontLine measurer txt
-  let (ix, _) = labelContentInset textFm
-      wrapW = max 0 (outerW - 2 * ix)
-      lineH = layoutLineHeight textFm
+  let wrapW = max 0 outerW
+      lineH = fmLineHeight textFm
       na = seArena env
   if T.any (== '\n') txt || shouldWrap wrapW tw0
     then do
@@ -314,7 +309,7 @@ measureNode env@SolveEnv {seArena = na, seFm = fm} idx = do
     NodeText -> measureTextNode env idx
     NodeSpacer -> measureSpacer na idx
     NodeSeparator -> measureSeparator na idx
-    NodeScrollContainer -> measureScrollContainer na fm idx
+    NodeScrollContainer -> measureScrollContainer na idx
     NodeImage -> measureImage na idx
     NodeBox -> measureImage na idx
     NodeDrawing -> do
@@ -355,8 +350,7 @@ findAncestorMaxW na idx = go idx 0
         then pure 1e9
         else do
           pad <- getPadding na p
-          let padW = padL pad + padR pad
-              padAccum' = padAccum + padW
+          let padAccum' = padAccum + padL pad + padR pad
           (_, _, pMaxW, _) <- getMinMax na p
           (pwTag, pwVal) <- getWidthSizing na p
           if pwTag == SizingFixed
@@ -489,8 +483,7 @@ measureWidget env@SolveEnv {seArena = na, seFm = fm, seMeasure = measure} idx = 
         case nt of
           NodeButton
             | isTableHeaderStyle si ->
-                let (cx, cy) = tableCellInset fm
-                 in (2 * cx, 2 * cy)
+                (2 * tableCellInset, 0)
             -- Menu rows reserve the same gutter the text-field context menu
             -- paints (outer pad + item pad on each side of the label), so the
             -- generic popup panel sizes identically.
@@ -508,8 +501,7 @@ measureWidget env@SolveEnv {seArena = na, seFm = fm, seMeasure = measure} idx = 
                 || nt == NodeRadio
                 || nt == NodeTextInput
                 || nt == NodeTextArea ->
-                let (cx, cy) = labelContentInset fm
-                 in (2 * cx, cy)
+                (0, 0)
             | otherwise -> widgetPadding fm
   (tw, th, extraW, extraH) <-
     case nt of
@@ -541,9 +533,6 @@ measureWidget env@SolveEnv {seArena = na, seFm = fm, seMeasure = measure} idx = 
         -- Numeric field: a short editable box and its stepper.
         | textInputNumericMode si ->
             pure (56, textInputFieldHeight fm, numericStepperW, 0)
-        -- Bare field: just the editable box (no caption, no icon chrome).
-        | textInputBareMode si ->
-            pure (24, textInputFieldHeight fm, 0, 0)
         | textInputSearchMode si ->
             measureSearchField fm measure txt
         | otherwise -> measureTextField fm measure txt False
@@ -568,11 +557,9 @@ measureWidget env@SolveEnv {seArena = na, seFm = fm, seMeasure = measure} idx = 
   setRect na idx 0 0 w h
 
 measureContainer :: SolveEnv -> NodeIdx -> IO ()
-measureContainer env@SolveEnv {seArena = na, seFm = fm} idx = do
-  pad0 <- getPadding na idx
-  gap0 <- getGap na idx
-  let pad = resolveLayoutPadding fm pad0
-      gap = resolveLayoutGap fm gap0
+measureContainer env@SolveEnv {seArena = na} idx = do
+  pad <- getPadding na idx
+  gap <- getGap na idx
   dir <- getDirection na idx
   gCols <- getGridCols na idx
   minColW <- getGridMinColW na idx
@@ -609,13 +596,11 @@ measureContainer env@SolveEnv {seArena = na, seFm = fm} idx = do
           _ -> clamp minH maxH (contentH + padT pad + padB pad)
   setRect na idx 0 0 w h
 
-measureScrollContainer :: NodeArena -> FontMetrics -> NodeIdx -> IO ()
-measureScrollContainer na fm idx = do
-  pad0 <- getPadding na idx
-  gap0 <- getGap na idx
-  let pad = resolveLayoutPadding fm pad0
-      gap = resolveLayoutGap fm gap0
-      padX = padL pad + padR pad
+measureScrollContainer :: NodeArena -> NodeIdx -> IO ()
+measureScrollContainer na idx = do
+  pad <- getPadding na idx
+  gap <- getGap na idx
+  let padX = padL pad + padR pad
       padY = padT pad + padB pad
   dir <- getDirection na idx
   si <- getStyleIdx na idx
@@ -805,11 +790,9 @@ recomputeFitHeightAtWidthGo env@SolveEnv {seArena = na, seFm = fm, seLookupMeasu
           if dir == DirRow
             then pure oldH
             else do
-              pad0 <- getPadding na idx
-              gap0 <- getGap na idx
-              let pad = resolveLayoutPadding fm pad0
-                  gap = resolveLayoutGap fm gap0
-                  innerW = max 0 (effW' - padL pad - padR pad)
+              pad <- getPadding na idx
+              gap <- getGap na idx
+              let innerW = max 0 (effW' - padL pad - padR pad)
                   step (FlowAcc count contentH _) ci = do
                     (subWTag, subWVal) <- getWidthSizing na ci
                     (_, _, subMaxW, _) <- getMinMax na ci
@@ -921,7 +904,7 @@ positionNodeA env@SolveEnv {seArena = na, seArrays = a, seFm = fm, seLookupMeasu
               else pure (clamp minH maxH (resolveSize hTag hVal intrinsicH availH minH maxH))
   setRect na idx x y w h
   when (isContainerNode nt) $ do
-    (pad, gap, dir) <- containerFlow na fm idx
+    (pad, gap, dir) <- containerFlow na idx
     if isScrollNode nt
       then positionScrollChildren env depth idx dir gap pad x y w h
       else positionChildren env depth idx dir gap pad x y w h
@@ -930,20 +913,19 @@ positionNodeA env@SolveEnv {seArena = na, seArrays = a, seFm = fm, seLookupMeasu
 
 -- | A container's resolved padding and gap, and its direction.
 {-# INLINE containerFlow #-}
-containerFlow :: NodeArena -> FontMetrics -> NodeIdx -> IO (Padding, Float, DirTag)
-containerFlow na fm idx = do
-  pad0 <- getPadding na idx
-  gap0 <- getGap na idx
+containerFlow :: NodeArena -> NodeIdx -> IO (Padding, Float, DirTag)
+containerFlow na idx = do
+  pad <- getPadding na idx
+  gap <- getGap na idx
   dir <- getDirection na idx
-  pure (resolveLayoutPadding fm pad0, resolveLayoutGap fm gap0, dir)
+  pure (pad, gap, dir)
 
 adjustFitHeight :: NodeArena -> FontMetrics -> NodeIdx -> Float -> Float -> Float -> Float -> Float -> IO ()
 adjustFitHeight na fm idx minH maxH x y w = do
   fc <- getFirstChild na idx
   when (fc >= 0) $ do
-    pad0 <- getPadding na idx
-    let pad = resolveLayoutPadding fm pad0
-        step maxB ci = do
+    pad <- getPadding na idx
+    let step maxB ci = do
           (_, subY, _, subH) <- getRect na ci
           pure (max maxB (subY + subH))
         -- Rounding a child's origin to the nearest device pixel can put its
@@ -1594,7 +1576,7 @@ alignY AlignBottom cy ch ih = cy + ch - ih
 placeModals :: NodeArena -> FontMetrics -> Float -> Float -> IO ()
 placeModals na fm winW winH = do
   env <- floatingEnv na fm
-  let margin = resolveLayoutGap fm windowMargin
+  let margin = windowMargin
   forNodes_ na $ \idx -> do
     nt <- getNodeType na idx
     when (nt == NodeModal) $ do
@@ -1616,7 +1598,7 @@ placeWindows ::
   (WidgetId -> IO (Maybe (Float, Float))) ->
   IO ()
 placeWindows na fm winW winH lookupPos lookupSize = do
-  let margin = resolveLayoutGap fm windowMargin
+  let margin = windowMargin
   forNodes_ na $ \idx -> do
     nt <- getNodeType na idx
     when (nt == NodeWindow) $ do
@@ -1644,7 +1626,7 @@ placeWindows na fm winW winH lookupPos lookupSize = do
 positionWindowNode :: NodeArena -> FontMetrics -> NodeIdx -> Float -> Float -> Float -> Float -> IO ()
 positionWindowNode na fm idx x y w h = do
   setRect na idx x y w h
-  (pad, gap, dir) <- containerFlow na fm idx
+  (pad, gap, dir) <- containerFlow na idx
   env <- floatingEnv na fm
   positionChildren env 0 idx dir gap pad x y w h
 
@@ -1742,7 +1724,7 @@ placePopups ::
   IO ()
 placePopups na fm winW winH lookupAnchor = do
   env <- floatingEnv na fm
-  let margin = resolveLayoutGap fm windowMargin
+  let margin = windowMargin
   forNodes_ na $ \idx -> do
     nt <- getNodeType na idx
     when (nt == NodePopup) $ do

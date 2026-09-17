@@ -295,7 +295,6 @@ paintScrollChrome env idx (Rect x y w h) = do
   let ctx = peContext env
       na = peNodeArena env
       da = peDrawArena env
-      fm = peFontMetrics env
       theme = peTheme env
   si <- getStyleIdx na idx
   pad <- getPadding na idx
@@ -303,7 +302,7 @@ paintScrollChrome env idx (Rect x y w h) = do
   wid <- getWidgetId na idx
   contentMain <- getNodeValue na idx
   let cfg = decodeScrollConfig si
-      Rect _ _ innerW innerH = padContentClip fm x y w h pad
+      Rect _ _ innerW innerH = padContentClip x y w h pad
   bars <-
     if isScrollStyle2D si
       then do
@@ -311,7 +310,7 @@ paintScrollChrome env idx (Rect x y w h) = do
         if scrollChromeActive cfg DirColumn contentMain innerH || scrollChromeActive cfg DirRow contentW innerW
           then do
             V2 offX offY <- getScrollOffset2D ctx wid
-            let (mV, mH) = scrollBarLayouts2D fm slot cfg x y w h pad contentW contentMain offX offY
+            let (mV, mH) = scrollBarLayouts2D slot cfg x y w h pad contentW contentMain offX offY
             pure (catMaybes [mV, mH])
           else pure []
       else do
@@ -322,7 +321,7 @@ paintScrollChrome env idx (Rect x y w h) = do
         if scrollChromeActive cfg dir contentMain innerMain
           then do
             off <- getScrollOffset ctx wid
-            pure (catMaybes [scrollBarLayout fm slot dir x y w h pad contentMain off])
+            pure (catMaybes [scrollBarLayout slot dir x y w h pad contentMain off])
           else pure []
   unless (null bars) $ do
     layer <- currentLayer da

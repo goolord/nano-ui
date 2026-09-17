@@ -4,8 +4,7 @@
 -- selection painting, and mouse selection. Also holds the click-count and
 -- caret primitives the text area shares.
 module NanoUI.Frame.TextInput
-  ( TextInputGeom (..)
-  , textInputGeom
+  ( textInputFieldRect
   , textInputFieldTextClip
   , nodeTextFieldGeom
   , tagTextInputClippedSpans
@@ -76,7 +75,6 @@ import NanoUI.WidgetText
   , numericTextClip
   , searchFieldIconRects
   , searchFieldTextClip
-  , textInputBareMode
   , textInputNumericMode
   , textInputFieldHeight
   , textInputFieldText
@@ -89,20 +87,14 @@ import NanoUI.Widgets.TextCommon
   , textSelectionForDrag
   )
 
-data TextInputGeom = TextInputGeom
-  { tigFieldRect :: Rect
-  }
-  deriving (Eq, Show)
-
-textInputGeom :: FontMetrics -> Float -> Float -> Float -> Float -> TextInputGeom
-textInputGeom fm x y w h =
+textInputFieldRect :: FontMetrics -> Float -> Float -> Float -> Float -> Rect
+textInputFieldRect fm x y w h =
   let fieldH = if h > 0 then h else textInputFieldHeight fm
-   in TextInputGeom {tigFieldRect = Rect x y w fieldH}
+   in Rect x y w fieldH
 
-textInputFieldTextClip :: TextInputGeom -> FontMetrics -> Rect
-textInputFieldTextClip geom fm =
-  let Rect fx fy fw fh = tigFieldRect geom
-      (ix, iy) = widgetContentInset fm
+textInputFieldTextClip :: FontMetrics -> Rect -> Rect
+textInputFieldTextClip fm (Rect fx fy fw fh) =
+  let (ix, iy) = widgetContentInset fm
    in Rect (fx + ix) (fy + iy) (max 0 (fw - 2 * ix)) (max 0 (fh - 2 * iy))
 
 -- | Resolve the box a field paints/hits and the clip its text is confined to.
@@ -115,20 +107,17 @@ nodeTextFieldGeom ctx idx x y w h = do
   opts <- getOptions (ctxNodeArena ctx) idx
   let fm = ctxFontMetrics ctx
       box = Rect x y w h
-      (ix, iy) = widgetContentInset fm
-      geom = textInputGeom fm x y w h
+      field = textInputFieldRect fm x y w h
   pure $
     if textInputSelectableMode si
       then (box, box)
       else
         if textInputNumericMode si
           then (box, numericTextClip fm x y w h)
-          else if textInputBareMode si
-          then (box, Rect (x + ix) (y + iy) (max 0 (w - 2 * ix)) (max 0 (h - 2 * iy)))
           else
             if textInputSearchMode si
               then (box, if null opts then searchFieldTextClip fm x y w h else comboTextClip fm x y w h)
-              else (tigFieldRect geom, textInputFieldTextClip geom fm)
+              else (field, textInputFieldTextClip fm field)
 
 -- | Whether the pointer is over the clear (×) button of a non-empty search
 -- field. Search fields reserve that slot even when empty, but the button is
@@ -168,8 +157,7 @@ clearSearchField ctx wid = do
 tagTextInputClippedSpans ::
   Rect -> Float -> Float -> Float -> Float -> FontMetrics -> [(Rect, T.Text, Color, Color)] -> [(Rect, T.Text, Color, Color, Rect)]
 tagTextInputClippedSpans parentClip x y w h fm spans =
-  let geom = textInputGeom fm x y w h
-      fieldClip = textInputFieldTextClip geom fm
+  let fieldClip = textInputFieldTextClip fm (textInputFieldRect fm x y w h)
       labelClip = Rect x y w (fmLineHeight fm)
       tagOne (rect, txt, fg, bg) =
         let clipRect = padTextClipRect rect

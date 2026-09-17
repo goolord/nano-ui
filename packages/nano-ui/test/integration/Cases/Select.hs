@@ -30,7 +30,7 @@ runSliderCursorTest ctx failed = do
       ui = column (slider' 0 100 50)
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect rx ry rw rh = respRect resp
-      track = sliderTrackBounds (ctxFontMetrics ctx) rx ry rw rh
+      track = sliderTrackBounds rx ry rw rh
       trackMid = V2 (rectX track + rectW track / 2) (rectY track + rectH track / 2)
       offPos = V2 (rx + rw + 20) (ry + rh + 20)
       hoverTrack = inp0 {inputMousePos = trackMid}

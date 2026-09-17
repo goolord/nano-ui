@@ -36,8 +36,7 @@ import NanoUI.Context
   )
 import NanoUI.Draw (pushRect, pushText)
 import NanoUI.Font
-  ( FontMetrics
-  , centeredTextY
+  ( centeredTextY
   , menuItemPadX
   , menuItemRowH
   , menuMinW
@@ -101,8 +100,8 @@ textEditMenuWidth ctx = do
   pure (max menuMinW (maximum ws + 2 * menuItemPadX + 2 * menuOuterPad))
 
 -- | Menu rect at the pointer, kept inside the window.
-textEditMenuRectAt :: FontMetrics -> Float -> Float -> Float -> Size -> Rect
-textEditMenuRectAt _fm x y menuW (Size ww wh) =
+textEditMenuRectAt :: Float -> Float -> Float -> Size -> Rect
+textEditMenuRectAt x y menuW (Size ww wh) =
   let h = 2 * menuOuterPad + textEditMenuContentH
    in Rect (max 0 (min x (ww - menuW))) (max 0 (min y (wh - h))) menuW h
 
@@ -148,7 +147,7 @@ openTextEditMenu ctx inp =
       Just wid -> do
         writeIORef (ctxFocusId ctx) wid
         menuW <- textEditMenuWidth ctx
-        let menuRect = textEditMenuRectAt (ctxFontMetrics ctx) mx my menuW (inputWindowSize inp)
+        let menuRect = textEditMenuRectAt mx my menuW (inputWindowSize inp)
         setTextInputMenu ctx (Just (TextInputMenu wid menuRect))
         markDirty ctx
 

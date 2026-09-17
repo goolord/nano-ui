@@ -125,7 +125,6 @@ module NanoUI.Testing
   , compactHost
   , askCompact
     -- * Text measurement
-  , textDisplayWidth
   , lineWidth
   , textIndexAtX
   , caretX
@@ -211,7 +210,7 @@ import NanoUI.Draw
   , vertexSize
   )
 import NanoUI.Damage (floatingPanelRects)
-import NanoUI.Font (caretX, lineWidth, selectionSpans, sliderTrackBounds, textDisplayWidth, textIndexAtX)
+import NanoUI.Font (caretX, lineWidth, selectionSpans, sliderTrackBounds, textIndexAtX)
 import NanoUI.Widgets.ColorPicker
   ( colorPickerSvSquare
   , widgetStoreBaseColor

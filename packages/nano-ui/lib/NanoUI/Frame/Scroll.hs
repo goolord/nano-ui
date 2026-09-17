@@ -141,7 +141,6 @@ transformSubtree ctx idx scrollX scrollY parentClip = do
 scrollNodeGeometry :: Context -> NodeIdx -> Rect -> IO (ScrollAxes, Rect, V2)
 scrollNodeGeometry ctx idx (Rect x y w h) = do
   let na = ctxNodeArena ctx
-      fm = ctxFontMetrics ctx
   pad <- getPadding na idx
   si <- getStyleIdx na idx
   slot <- scrollBarSlotOf na idx
@@ -151,7 +150,7 @@ scrollNodeGeometry ctx idx (Rect x y w h) = do
   if isScrollStyle2D si
     then do
       contentW <- getScrollContentW na idx
-      let viewport = scrollViewportClip2D fm slot cfg x y w h pad contentW contentMain
+      let viewport = scrollViewportClip2D slot cfg x y w h pad contentW contentMain
       pure
         ( ScrollAxisXY
         , viewport
@@ -161,7 +160,7 @@ scrollNodeGeometry ctx idx (Rect x y w h) = do
         )
     else do
       dir <- getDirection na idx
-      let viewport = scrollContentClip fm slot cfg dir x y w h pad contentMain
+      let viewport = scrollContentClip slot cfg dir x y w h pad contentMain
       pure $ case dir of
         DirColumn ->
           ( ScrollAxisY
@@ -395,12 +394,11 @@ scrollBarsFor ctx idx wid = do
       slot <- scrollBarSlotOf na idx
       contentMain <- getNodeValue na idx
       let cfg = decodeScrollConfig si
-          fm = ctxFontMetrics ctx
       if isScrollStyle2D si
         then do
           contentW <- getScrollContentW na idx
           cur@(V2 offX offY) <- getScrollOffset2D ctx wid
-          let (mV, mH) = scrollBarLayouts2D fm slot cfg x y w h pad contentW contentMain offX offY
+          let (mV, mH) = scrollBarLayouts2D slot cfg x y w h pad contentW contentMain offX offY
           pure (axes2D cur mV mH)
         else
           if scrollChromeSuppressed cfg dir
@@ -409,7 +407,7 @@ scrollBarsFor ctx idx wid = do
               off <- getScrollOffset ctx wid
               pure
                 [ (dir, layout, \new -> when (new /= off) (setScrollOffset ctx wid new))
-                | Just layout <- [scrollBarLayout fm slot dir x y w h pad contentMain off]
+                | Just layout <- [scrollBarLayout slot dir x y w h pad contentMain off]
                 ]
   where
     na = ctxNodeArena ctx

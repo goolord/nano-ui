@@ -328,8 +328,7 @@ columnMetrics _ cols _ | columnCount cols == 0 = pure (emptyPrimArray, emptySmal
 columnMetrics ctx cols rows =
   let fm = ctxFontMetrics ctx
       mono = ctxMonoFontMetrics ctx
-      (ix, _) = tableCellInset fm
-      cellPadX = 2 * ix
+      cellPadX = 2 * tableCellInset
       hdrs = Encode.header id cols
       -- Encode each row once, sharing it across column classification and sizing.
       encodedRows = [Encode.row id cols r | r <- rows]

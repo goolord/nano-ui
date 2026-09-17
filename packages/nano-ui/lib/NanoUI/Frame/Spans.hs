@@ -30,8 +30,6 @@ import NanoUI.Font
   , alignedTextPen
   , centeredTextY
   , checkboxLeading
-  , labelContentInset
-  , layoutLineHeight
   , menuItemPadX
   , prepareFontMetrics
   , tableCellInset
@@ -45,13 +43,11 @@ import NanoUI.Frame.Node (resolveFontFor, scrollViewportAt)
 import NanoUI.Frame.Scroll.Geometry (padContentClip, tagClippedSpans)
 import NanoUI.Frame.Select (collectSelectDropdownSpans, tagSelectClippedSpans)
 import NanoUI.Frame.SpanArena (SpanArena, pushSpan, resetSpanArena, spanArenaToList, spanArenaToListOccluded, withSpanArenaSnap)
-import NanoUI.Frame.TextArea.Geometry (TextAreaGeom (..), textAreaGeom)
 import NanoUI.Frame.TextEdit.Menu (collectTextEditMenuSpans)
-import NanoUI.Frame.TextInput (TextInputGeom (..), syncTextInputScroll, tagTextInputClippedSpans, textInputGeom)
+import NanoUI.Frame.TextInput (syncTextInputScroll, tagTextInputClippedSpans, textInputFieldRect)
 import NanoUI.Input (Input)
 import NanoUI.Layout.Arena
-  ( NodeArena
-  , NodeIdx
+  ( NodeIdx
   , NodeType (..)
   , SizingTag (..)
   , arenaCount
@@ -65,7 +61,6 @@ import NanoUI.Layout.Arena
   , getNodeFontSize
   , getNodeType
   , getPadding
-  , getParent
   , getRect
   , getStyleIdx
   , getText
@@ -75,7 +70,8 @@ import NanoUI.Layout.Arena
   , isWidgetNode
   , parentIsRow
   )
-import NanoUI.Style (AlignX (..), FontVariant (..), Padding (..), Style (..), Theme (..), themeAccent, themeMuted, themePanel)
+import NanoUI.Layout.Solve (findAncestorMaxW)
+import NanoUI.Style (AlignX (..), FontVariant (..), Style (..), Theme (..), themeAccent, themeMuted, themePanel)
 import NanoUI.Types (Color (..), Rect (..), lerpColor, onGrid, rectIntersect)
 import NanoUI.Widgets.ColorPicker (ColorPickerPart (..), colorPickerPartOf, colorPickerPartRect, colorPickerPreviewGeom)
 import NanoUI.WidgetText
@@ -87,7 +83,6 @@ import NanoUI.WidgetText
   , numericTextClip
   , selectChevronReserve
   , tableStripeColor
-  , textInputBareMode
   , textInputNumericMode
   , textInputFieldText
   , textInputSearchMode
@@ -159,7 +154,7 @@ collectClippedSpans' ctx idx nt clip arena = do
               if textInputNumericMode si
                 then maybe [] (`tagClippedSpans` spans) (rectIntersect clipHere (numericTextClip fm x y w h))
                 else
-                  if textInputBareMode si || textInputSelectableMode si
+                  if textInputSelectableMode si
                     then tagClippedSpans clipHere spans
                     else tagTextInputClippedSpans clipHere x y w h fm spans
           _ -> pure (tagClippedSpans clipHere spans)
@@ -176,24 +171,6 @@ walkChildSpans ctx idx clip arena = getFirstChild (ctxNodeArena ctx) idx >>= go
           -- Later siblings paint under earlier ones; walk reverse then collect.
           go ns
           collectClippedSpans ctx ci clip arena
-
-findAncestorMaxW :: NodeArena -> NodeIdx -> IO Float
-findAncestorMaxW na idx = go idx 0
-  where
-    go cur !padAccum = do
-      p <- getParent na cur
-      if p < 0
-        then pure 1e9
-        else do
-          pad <- getPadding na p
-          let padAccum' = padAccum + padL pad + padR pad
-          (_, _, pMaxW, _) <- getMinMax na p
-          (pwTag, pwVal) <- getWidthSizing na p
-          if pwTag == SizingFixed
-            then pure (max 0 (pwVal - padAccum'))
-            else if pMaxW < 1e8
-              then pure (max 0 (pMaxW - padAccum'))
-              else go p padAccum'
 
 -- | Text spans of one node. A text node's spans are cached per node until
 -- its inputs change. Placement uses glyph ink ('alignedTextPen'), not
@@ -246,7 +223,7 @@ collectNodeTextSpans ctx idx = do
               then pure []
               else do
                 (fm, _, measure) <- resolveFontFor ctx NodeText fontSize si
-                let ix = fst ((if isJust mStripe then tableCellInset else labelContentInset) fm)
+                let ix = if isJust mStripe then tableCellInset else 0
                     measureW = fmap fst . measure
                     lineH = fmLineHeight fm
                     contentW = max 0 (w - 2 * ix)
@@ -297,10 +274,10 @@ widgetHitRect ctx nt idx x y w h = do
   case nt of
     NodeTextInput -> do
       si <- getStyleIdx (ctxNodeArena ctx) idx
-      if textInputSearchMode si || textInputBareMode si || textInputSelectableMode si || textInputNumericMode si
+      if textInputSearchMode si || textInputSelectableMode si || textInputNumericMode si
         then pure (Rect x y w h)
-        else pure (tigFieldRect (textInputGeom fm x y w h))
-    NodeTextArea -> pure (tagFieldRect (textAreaGeom fm x y w h))
+        else pure (textInputFieldRect fm x y w h)
+    NodeTextArea -> pure (Rect x y w h)
     NodeButton -> do
       si <- getStyleIdx (ctxNodeArena ctx) idx
       -- Close buttons get a padded target that stays inside the title bar, so
@@ -405,7 +382,7 @@ computeWidgetLabel ctx nt txt si fontSizeVal ax w h
       let (ix, _) = widgetContentInset fm
           (tx, used) = case nt of
             NodeButton
-              | isTableHeaderStyle si -> alignedTextPen ax 0 w (fst (tableCellInset fm)) fm txt
+              | isTableHeaderStyle si -> alignedTextPen ax 0 w tableCellInset fm txt
               | isMenuItemStyle si ->
                   let inset = menuItemPadX + ix
                    in (inset, min tw (max 0 (w - inset - ix)))
@@ -413,8 +390,8 @@ computeWidgetLabel ctx nt txt si fontSizeVal ax w h
             NodeSelect -> (ix, min tw (w - ix - selectChevronReserve))
             NodeTree ->
               let (_, depth, _, _) = treeDecodeStyle si
-               in (fst (labelContentInset fm) + treeRowLeading fm depth, tw)
-            _ -> (fst (labelContentInset fm) + checkboxLeading fm, tw)
+               in (treeRowLeading fm depth, tw)
+            _ -> (checkboxLeading fm, tw)
       let !placement = WidgetTextPlacement txt tx (centeredTextY fm 0 h th) used th
       pure (Just placement)
 
@@ -440,7 +417,7 @@ computeWidgetTextPlacements ctx nt idx x y w h = do
       | otherwise -> do
           band@(Rect bx _ _ _) <- colorPickerPartRect (ctxNodeArena ctx) idx (Rect x y w h)
           let (currentY, _, newY, _) = colorPickerPreviewGeom fm band
-              labelH = layoutLineHeight fm
+              labelH = fmLineHeight fm
           (cw, ch) <- measureTxt colorPickerCurrentLabel
           (nw, nh) <- measureTxt colorPickerNewLabel
           pure
@@ -455,24 +432,23 @@ computeWidgetTextPlacements ctx nt idx x y w h = do
           (fw, _) <- measureTxt value
           pure [(value, penX, ty, fw, selLineH)]
       | otherwise -> do
-          let bare = textInputBareMode si || textInputNumericMode si
-          ph <- if bare then pure "" else getText (ctxNodeArena ctx) idx
+          let numeric = textInputNumericMode si
+          ph <- if numeric then pure "" else getText (ctxNodeArena ctx) idx
           value <- textInputValue ctx idx
           focus <- textInputFocused ctx idx
           let fieldTxt = textInputFieldText ph value focus
-              Rect _ fieldY _ fieldH = if bare then Rect x y w h else tigFieldRect (textInputGeom fm x y w h)
+              Rect _ fieldY _ fieldH = if numeric then Rect x y w h else textInputFieldRect fm x y w h
           (fw, _) <- measureTxt fieldTxt
           scrollX <- syncTextInputScroll ctx idx x y w h
           pure [(fieldTxt, x + ix - scrollX, centeredTextY fm fieldY fieldH lineH, fw, lineH)]
     NodeTextArea -> do
       lbl <- getText (ctxNodeArena ctx) idx
       value <- textInputValue ctx idx
-      let Rect _ fieldY _ fieldH = tagFieldRect (textAreaGeom fm x y w h)
       (lw, lh) <- measureTxt lbl
       (fw, _) <- measureTxt (if T.null value then " " else value)
       pure
         [ (lbl, x, centeredTextY fm y lineH lh, lw, lh)
-        , (value, x + ix, fieldY + iy, fw, fieldH)
+        , (value, x + ix, y + iy, fw, h)
         ]
     NodeDrawing -> pure []
     _ -> do
@@ -493,5 +469,5 @@ collectFloatingSpansInto ctx wanted arena =
       clip <-
         if isScrollNode nt
           then scrollViewportAt ctx idx x y w h
-          else padContentClip (ctxFontMetrics ctx) x y w h <$> getPadding (ctxNodeArena ctx) idx
+          else padContentClip x y w h <$> getPadding (ctxNodeArena ctx) idx
       walkChildSpans ctx idx clip arena

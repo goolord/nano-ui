@@ -38,9 +38,7 @@ import Data.Bits ((.&.), shiftL, shiftR)
 import Data.Maybe (mapMaybe)
 import Data.Text (Text)
 import NanoUI.Font
-  ( FontMetrics
-  , ScrollBarSlot (..)
-  , resolveLayoutPadding
+  ( ScrollBarSlot (..)
   , scrollBarGap
   , scrollBarGeomFor
   , scrollBarGutter
@@ -240,17 +238,15 @@ data ScrollBarLayout = ScrollBarLayout
   }
   deriving (Eq, Show)
 
-padContentClip :: FontMetrics -> Float -> Float -> Float -> Float -> Padding -> Rect
-padContentClip fm x y w h pad0 =
-  let pad = resolveLayoutPadding fm pad0
-   in Rect
-        (x + padL pad)
-        (y + padT pad)
-        (max 0 (w - padL pad - padR pad))
-        (max 0 (h - padT pad - padB pad))
+padContentClip :: Float -> Float -> Float -> Float -> Padding -> Rect
+padContentClip x y w h pad =
+  Rect
+    (x + padL pad)
+    (y + padT pad)
+    (max 0 (w - padL pad - padR pad))
+    (max 0 (h - padT pad - padB pad))
 
 scrollContentClip ::
-  FontMetrics ->
   ScrollBarSlot ->
   ScrollConfig ->
   DirTag ->
@@ -261,8 +257,8 @@ scrollContentClip ::
   Padding ->
   Float ->
   Rect
-scrollContentClip fm slot cfg dir x y w h pad contentSize =
-  let base = padContentClip fm x y w h pad
+scrollContentClip slot cfg dir x y w h pad contentSize =
+  let base = padContentClip x y w h pad
       innerMain =
         case dir of
           DirColumn -> rectH base
@@ -277,7 +273,6 @@ scrollContentClip fm slot cfg dir x y w h pad contentSize =
         DirRow -> Rect (rectX base) (rectY base) (rectW base) (max 0 (rectH base - gutter))
 
 scrollViewportClip2D ::
-  FontMetrics ->
   ScrollBarSlot ->
   ScrollConfig ->
   Float ->
@@ -288,8 +283,8 @@ scrollViewportClip2D ::
   Float ->
   Float ->
   Rect
-scrollViewportClip2D fm slot cfg x y w h pad contentW contentH =
-  let base = padContentClip fm x y w h pad
+scrollViewportClip2D slot cfg x y w h pad contentW contentH =
+  let base = padContentClip x y w h pad
       innerW = rectW base
       innerH = rectH base
       (gutterW, gutterH) = scrollGutters2D slot cfg pad contentW contentH innerW innerH
@@ -317,7 +312,6 @@ scrollChromeLane slot dir x y w h pad =
           Rect (x + padL pad) (max y (y + h - inset (padB pad) - barW)) (max 0 (w - padL pad - padR pad)) barW
 
 scrollBarLayout ::
-  FontMetrics ->
   ScrollBarSlot ->
   DirTag ->
   Float ->
@@ -328,7 +322,7 @@ scrollBarLayout ::
   Float ->
   Float ->
   Maybe ScrollBarLayout
-scrollBarLayout _fm slot dir x y w h pad contentSize off =
+scrollBarLayout slot dir x y w h pad contentSize off =
   let innerW = w - padL pad - padR pad
       innerH = h - padT pad - padB pad
       viewMain = case dir of
@@ -405,7 +399,6 @@ scrollBarLayoutIn slot dir x y w h pad viewMain contentSize off =
 -- the range and thumb are computed against the viewport minus the opposite
 -- scrollbar lane.
 scrollBarLayouts2D ::
-  FontMetrics ->
   ScrollBarSlot ->
   ScrollConfig ->
   Float ->
@@ -418,7 +411,7 @@ scrollBarLayouts2D ::
   Float ->
   Float ->
   (Maybe ScrollBarLayout, Maybe ScrollBarLayout)
-scrollBarLayouts2D _fm slot cfg x y w h pad contentW contentH offX offY =
+scrollBarLayouts2D slot cfg x y w h pad contentW contentH offX offY =
   let innerW = w - padL pad - padR pad
       innerH = h - padT pad - padB pad
       (gutterW, gutterH) = scrollGutters2D slot cfg pad contentW contentH innerW innerH

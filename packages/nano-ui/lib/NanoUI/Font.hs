@@ -24,9 +24,7 @@ module NanoUI.Font
   , truncateTextIO
   , lineWidth
   , kernedAdvance
-  , textDisplayWidth
   , textIndexAtX
-  , labelContentInset
   , tableCellInset
   , widgetContentInset
   , widgetPadding
@@ -42,7 +40,6 @@ module NanoUI.Font
   , centeredTextY
   , alignedTextPen
   , textInkEnd
-  , layoutLineHeight
   , isDefaultNodeFont
   , checkboxBoxSize
   , checkboxLeading
@@ -51,8 +48,6 @@ module NanoUI.Font
   , treeChevronLeading
   , treeRowLeading
   , treeChevronRect
-  , resolveLayoutGap
-  , resolveLayoutPadding
   , scrollBarWidth
   , scrollBarSlimWidth
   , scrollBarSideGap
@@ -74,7 +69,7 @@ import Data.Primitive.PrimArray (PrimArray, imapPrimArray, indexPrimArray, mapPr
 import Data.Text (Text)
 import qualified Data.Text as T
 import NanoUI.Types (Rect (..), onGrid)
-import NanoUI.Style (AlignX (..), FontStyle (..), FontVariant (..), FontWeight (..), Padding (..))
+import NanoUI.Style (AlignX (..), FontStyle (..), FontVariant (..), FontWeight (..))
 
 data GlyphQuad = GlyphQuad
   { gqX :: {-# UNPACK #-} !Float
@@ -239,24 +234,9 @@ scaleFontMetrics s fm
     scaleGlyphs (ShapedGlyphs quads) =
       ShapedGlyphs (imapPrimArray (\i v -> if i `mod` 8 < 4 then v * s else v) quads)
 
--- Layout gap/pad are authored in pixel steps (see defaultLayout).
-{-# INLINE resolveLayoutGap #-}
-resolveLayoutGap :: FontMetrics -> Float -> Float
-resolveLayoutGap _fm g = g
-
-{-# INLINE resolveLayoutPadding #-}
-resolveLayoutPadding :: FontMetrics -> Padding -> Padding
-resolveLayoutPadding _fm (Padding l t r b) = Padding l t r b
-
--- Labels share the node origin with rects and images. Outer gap lives on card/panel padding.
-{-# INLINE labelContentInset #-}
-labelContentInset :: FontMetrics -> (Float, Float)
-labelContentInset _fm = (0, 0)
-
--- Table text inset. Zebra and header fills use the full cell rect.
-{-# INLINE tableCellInset #-}
-tableCellInset :: FontMetrics -> (Float, Float)
-tableCellInset _fm = (6, 0)
+-- | Horizontal text inset of a table cell. Zebra and header fills use the full cell rect.
+tableCellInset :: Float
+tableCellInset = 6
 
 {-# INLINE widgetContentInset #-}
 widgetContentInset :: FontMetrics -> (Float, Float)
@@ -268,14 +248,14 @@ widgetContentInset fm =
 buttonPadding :: FontMetrics -> (Float, Float)
 buttonPadding fm =
   let adv = fmAdvance fm ' '
-      lh = layoutLineHeight fm
+      lh = fmLineHeight fm
    in (adv * 2.0, lh * 0.30)
 
 {-# INLINE selectPadding #-}
 selectPadding :: FontMetrics -> (Float, Float)
 selectPadding fm =
   let adv = fmAdvance fm ' '
-      lh = layoutLineHeight fm
+      lh = fmLineHeight fm
    in (adv * 2.0, lh * 0.50)
 
 -- Menu metrics shared by the text-field context menu painter, the generic
@@ -309,10 +289,6 @@ menuAccentW = 2
 -- | Gap between the hover accent marker and the row's top and bottom edges.
 menuAccentInset :: Float
 menuAccentInset = 3
-
-{-# INLINE layoutLineHeight #-}
-layoutLineHeight :: FontMetrics -> Float
-layoutLineHeight fm = fmLineHeight fm
 
 {-# INLINE centeredTextY #-}
 centeredTextY :: FontMetrics -> Float -> Float -> Float -> Float
@@ -390,7 +366,7 @@ checkboxLeading fm = checkboxBoxSize fm + 8
 {-# INLINE treeItemPadding #-}
 treeItemPadding :: FontMetrics -> (Float, Float)
 treeItemPadding fm =
-  let lh = layoutLineHeight fm
+  let lh = fmLineHeight fm
    in (0, max 8 (fromIntegral (round (lh * 0.40) :: Int)))
 
 {-# INLINE treeIndentStep #-}
@@ -409,10 +385,9 @@ treeRowLeading fm depth =
 {-# INLINE treeChevronRect #-}
 treeChevronRect :: FontMetrics -> Float -> Float -> Float -> Float -> Int -> Rect
 treeChevronRect fm x y _w h depth =
-  let (ix, _) = labelContentInset fm
-      indent = treeIndentStep fm * fromIntegral (max 0 depth)
+  let indent = treeIndentStep fm * fromIntegral (max 0 depth)
       lead = max 1 (treeChevronLeading fm)
-   in Rect (x + ix + indent) y lead h
+   in Rect (x + indent) y lead h
 
 sliderTrackHeight :: Float
 sliderTrackHeight = 10
@@ -424,13 +399,10 @@ sliderHandleSlack :: Float
 sliderHandleSlack = (sliderHandleDiameter - sliderTrackHeight) / 2
 
 {-# INLINE sliderTrackBounds #-}
-sliderTrackBounds :: FontMetrics -> Float -> Float -> Float -> Float -> Rect
-sliderTrackBounds fm x y w h =
-  let (lx, ly) = labelContentInset fm
-      trackY = y + max ly ((h - sliderTrackHeight) / 2)
-      trackX = x + lx
-      trackW = max 0 (w - 2 * lx)
-   in Rect trackX trackY trackW sliderTrackHeight
+sliderTrackBounds :: Float -> Float -> Float -> Float -> Rect
+sliderTrackBounds x y w h =
+  let trackY = y + max 0 ((h - sliderTrackHeight) / 2)
+   in Rect x trackY (max 0 w) sliderTrackHeight
 
 -- | Thickness of a list or page scrollbar.
 scrollBarWidth :: Float
@@ -496,10 +468,6 @@ measureText fm txt =
   let h = fmLineHeight fm
       w = lineWidth fm txt
    in (w, h)
-
--- | Line width for hit testing and centering.
-textDisplayWidth :: FontMetrics -> Text -> Float
-textDisplayWidth fm txt = lineWidth fm txt
 
 -- | The one policy for "does this node use the ambient base font, or does it
 -- need the host resolver?". A zero size with a plain weight/style and the

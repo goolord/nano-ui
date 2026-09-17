@@ -28,9 +28,9 @@ import NanoUI.Context
   , recordStoreText
   , setStore
   )
-import NanoUI.Font (FontMetrics)
+import NanoUI.Font (FontMetrics, menuItemRowH)
 import NanoUI.Frame.Hit (findNodeByWidgetId)
-import NanoUI.Frame.Select (comboDropPickIndex, comboDropRect, comboScrollGeom, selectItemH)
+import NanoUI.Frame.Select (comboDropPickIndex, comboDropRect, comboScrollGeom)
 import NanoUI.Id (WidgetId (..))
 import NanoUI.Input (Key (..), inputKeys, inputMouseDown, inputMousePos, inputMousePressed, inputScroll)
 import NanoUI.Layout.Arena (setOptions)
@@ -199,9 +199,9 @@ comboStep ci cs0 =
       | otherwise = clampWin v
     Rect rx ry rw rh = ciField ci
     mouse = ciMouse ci
-    dropRect = comboDropRect (ciMetrics ci) rx ry rw rh (min vis n) n contentW
+    dropRect = comboDropRect rx ry rw rh (min vis n) n contentW
     overDrop = isFocus && rectNonEmpty (ciField ci) && rectContains dropRect mouse
-    itemH = selectItemH rh
+    itemH = menuItemRowH
     -- Hover highlights the row under the pointer (and makes it the Enter
     -- target); it never commits by itself. Rows on screen belong to the
     -- previous frame's window, so the hit test maps through storedWin.

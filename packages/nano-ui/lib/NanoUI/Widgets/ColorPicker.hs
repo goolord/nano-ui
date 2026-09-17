@@ -50,8 +50,7 @@ import NanoUI.Draw
   , pushRoundedStroke
   )
 import NanoUI.Font
-  ( FontMetrics
-  , layoutLineHeight
+  ( FontMetrics (..)
   )
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), Key (..), inputKeys, inputKeysElem, inputModifiers, inputMouseDown, inputMousePressed, modShift)
@@ -235,7 +234,7 @@ colorPickerPartRect na idx rect@(Rect x _ w _) = do
 colorPickerPreviewGeom :: FontMetrics -> Rect -> (Float, Rect, Float, Rect)
 colorPickerPreviewGeom fm (Rect x y w h) =
   let
-    labelH = layoutLineHeight fm
+    labelH = fmLineHeight fm
     swatchW = min colorPickerSwatchW w
     swatchH = clamp 0 colorPickerSwatchH (h - labelH * 2 - colorPickerGap)
     stackH = labelH + swatchH + colorPickerGap + labelH + swatchH

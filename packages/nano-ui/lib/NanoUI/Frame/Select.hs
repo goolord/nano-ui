@@ -2,7 +2,6 @@
 
 module NanoUI.Frame.Select
   ( selectDropRect
-  , selectItemH
   , selectDropPickIndex
   , closeSelectOnOutsideClick
   , finalizeSelectKeyboard
@@ -106,7 +105,6 @@ openDropdowns ctx = do
           rows = slotInt slotComboCount nOpts
           window = slotInt slotComboScroll 0
           contentW = slotFloat slotComboContentW
-          fm = ctxFontMetrics ctx
       pure
         Dropdown
           { ddWidget = wid
@@ -115,8 +113,8 @@ openDropdowns ctx = do
           , ddAnchor = Rect x y w h
           , ddRect =
               if combo
-                then comboDropRect fm x y w h nOpts rows contentW
-                else selectDropRect fm x y w h nOpts
+                then comboDropRect x y w h nOpts rows contentW
+                else selectDropRect x y w h nOpts
           , ddPicked =
               if combo
                 then slotInt slotComboHighlight (-1) - window
@@ -305,15 +303,12 @@ findSelectUnderMouse ctx mouse = do
       allow <- widgetOverlayAllowed ctx (ddWidget dd)
       if allow then pure (Just (ddWidget dd)) else firstAllowed rest
 
-selectItemH :: Float -> Float
-selectItemH _ = menuItemRowH
-
 -- | Vertical gap between the select widget and its dropdown menu.
 selectDropGap :: Float
 selectDropGap = 4
 
-selectDropRect :: FontMetrics -> Float -> Float -> Float -> Float -> Int -> Rect
-selectDropRect _fm x y w h nOpts =
+selectDropRect :: Float -> Float -> Float -> Float -> Int -> Rect
+selectDropRect x y w h nOpts =
   Rect x (y + h + selectDropGap) w (menuItemRowH * fromIntegral nOpts + 2 * menuOuterPad)
 
 selectDropPickIndex :: Rect -> Float -> Int -> Float -> Maybe Int
@@ -384,8 +379,8 @@ comboScrollGeom (Rect dx dy dw dh) n vis win xOff contentW =
 -- scrollbar lane when the widest row overflows, so the horizontal bar never
 -- covers the bottommost row. Must agree with 'comboScrollGeom' on when lanes
 -- appear (same inputs, same formulas).
-comboDropRect :: FontMetrics -> Float -> Float -> Float -> Float -> Int -> Int -> Float -> Rect
-comboDropRect _fm x y w h nRows nTotal contentW =
+comboDropRect :: Float -> Float -> Float -> Float -> Int -> Int -> Float -> Rect
+comboDropRect x y w h nRows nTotal contentW =
   let vLaneW = if nTotal > nRows then comboSbW else 0
       hScroll = contentW > max 0 (w - vLaneW) && contentW > 0
    in Rect x (y + h + selectDropGap) w (fromIntegral nRows * menuItemRowH + (if hScroll then comboSbW else 0))

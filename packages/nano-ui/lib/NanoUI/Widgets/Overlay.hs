@@ -21,7 +21,6 @@ import NanoUI.Context
   , intKey
   , seedFloatingPanel
   )
-import NanoUI.Font (resolveLayoutGap, resolveLayoutPadding)
 import NanoUI.Id (WidgetId)
 import NanoUI.Input
   ( inputMousePos
@@ -97,9 +96,8 @@ overlay kind open title child = do
       ctx <- askContext
       inp <- askInput
       let
-        fm = ctxFontMetrics ctx
         Size winW winH = inputWindowSize inp
-        margin = resolveLayoutGap fm windowMargin
+        margin = windowMargin
         availW = max 1 (winW - 2 * margin)
         availH = max 1 (winH - 2 * margin)
         isModal = kind == ModalOverlay
@@ -120,10 +118,7 @@ overlay kind open title child = do
           if isModal
             then 0
             else
-              let
-                pad = resolveLayoutPadding fm padding
-               in
-                min availH (padT pad + titleBarChromeHFor + bodyGap + padB pad)
+              min availH (padT padding + titleBarChromeHFor + bodyGap + padB padding)
         addOverlayNode parent =
           addNode
             (ctxNodeArena ctx)

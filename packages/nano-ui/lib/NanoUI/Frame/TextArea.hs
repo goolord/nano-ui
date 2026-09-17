@@ -78,10 +78,9 @@ loadTextAreaStateAt ctx idx fm x y w h = do
   store <- getStore ctx
   let initial = IM.findWithDefault "" key (storeText store)
   buf <- ensureTextAreaBuffer ctx key initial
-  let geom = textAreaGeom fm x y w h
-      Rect _ _ vpW vpH = textAreaFieldClip geom fm
+  let Rect _ _ vpW vpH = textAreaFieldClip fm (Rect x y w h)
       state0 = TA.loadTextAreaStateWithBuffer store key initial buf
-  pure (TA.setTextAreaViewport (realToFrac vpW, realToFrac vpH) (realToFrac (tagLineHeight geom)) state0)
+  pure (TA.setTextAreaViewport (realToFrac vpW, realToFrac vpH) (realToFrac (textAreaLineHeight fm)) state0)
 
 loadHitState :: Context -> TextAreaHit -> IO TA.TextAreaState
 loadHitState ctx hit = do
@@ -99,7 +98,7 @@ syncTextAreaViewport ctx idx fm x y w h = do
   -- Read after the metrics query: a cold query caches into the store.
   store <- getStore ctx
   let key = intKey wid
-      Rect _ _ clipW clipH = textAreaFieldClip (textAreaGeom fm x y w h) fm
+      Rect _ _ clipW clipH = textAreaFieldClip fm (Rect x y w h)
       bars = textAreaBars fm (Rect x y w h) contentW contentH
       (sx, sy) = IM.findWithDefault (0, 0) (slotKey slotTextAreaScroll key) (storePoint store)
       sx' = max 0 (min (max 0 (contentW - tabViewW bars)) sx)
@@ -121,20 +120,19 @@ textAreaSnap da = onGrid <$> getDrawSnapScale da
 
 -- | The selection highlight on the rows between @firstRow@ and @lastRow@,
 -- the ones in view.
-drawTextAreaSelectionLines :: DrawArena -> Int -> Int -> TA.TextAreaState -> TextAreaGeom -> FontMetrics -> Theme -> IO ()
-drawTextAreaSelectionLines da firstRow lastRow state geom fm theme = do
+drawTextAreaSelectionLines :: DrawArena -> Int -> Int -> TA.TextAreaState -> Rect -> FontMetrics -> Theme -> IO ()
+drawTextAreaSelectionLines da firstRow lastRow state (Rect fieldX fieldY _ _) fm theme = do
   snap <- textAreaSnap da
   let anchor = TA.selectionAnchor state
       cursor = TB.getCursor (TA.buffer state)
   when (anchor /= cursor) $ do
     let (lo, hi) = TB.selectionRange anchor cursor
-        field = tagFieldRect geom
-        lineH = tagLineHeight geom
+        lineH = textAreaLineHeight fm
         (ix, iy) = widgetContentInset fm
         (scrollX, scrollY) = TA.scrollOffset state
         scrollXf = snap (realToFrac scrollX)
         scrollYf = snap (realToFrac scrollY)
-        contentTop = rectY' field + iy
+        contentTop = fieldY + iy
         selBg = themeSelection theme
         loRow = TB.cursorRow lo
         hiRow = TB.cursorRow hi
@@ -147,10 +145,7 @@ drawTextAreaSelectionLines da firstRow lastRow state geom fm theme = do
         prepared <- prepareFontMetrics fm line
         let ly = contentTop + fromIntegral row * lineH - scrollYf
         forM_ (selectionSpans prepared line startCol endCol) $ \(wLo, wHi) ->
-          drawTextSelectionLine da (rectX' field + ix + wLo - scrollXf) ly (wHi - wLo) (max 4 lineH) selBg
-  where
-    rectX' (Rect rx _ _ _) = rx
-    rectY' (Rect _ ry _ _) = ry
+          drawTextSelectionLine da (fieldX + ix + wLo - scrollXf) ly (wHi - wLo) (max 4 lineH) selBg
 
 -- | Text-area content with the node font already resolved, so a paint pass
 -- that also needs it (for the field frame) resolves it once.
@@ -160,10 +155,9 @@ drawTextAreaContentWith da ctx fm idx x y w h style = do
   syncTextAreaViewport ctx idx fm x y w h
   focus <- textInputFocused ctx idx
   theme <- nodeTheme ctx idx
-  let geom = textAreaGeom fm x y w h
-      field@(Rect _ fieldTop _ fieldH) = tagFieldRect geom
-      lineH = tagLineHeight geom
-      Rect clipX contentTop clipW clipH = textAreaFieldClip geom fm
+  let field = Rect x y w h
+      lineH = textAreaLineHeight fm
+      Rect clipX contentTop clipW clipH = textAreaFieldClip fm field
       fg = styleFg style
   state <- loadTextAreaStateAt ctx idx fm x y w h
   (contentW, contentH) <- textAreaContentMetrics ctx idx
@@ -173,21 +167,20 @@ drawTextAreaContentWith da ctx fm idx x y w h style = do
       scrollYf = snap (realToFrac scrollY)
       contentX = clipX - scrollXf
       layouts = textAreaScrollBarLayouts fm field contentW contentH scrollXf scrollYf
-      (laneW, laneH) = textAreaBarLanes fm
       textClip =
         Rect
           clipX
           contentTop
-          (if isJust (tasbVertical layouts) then max 0 (clipW - laneW) else clipW)
-          (if isJust (tasbHorizontal layouts) then max 0 (clipH - laneH) else clipH)
+          (if isJust (tasbVertical layouts) then max 0 (clipW - textAreaBarLane) else clipW)
+          (if isJust (tasbHorizontal layouts) then max 0 (clipH - textAreaBarLane) else clipH)
       -- Only the rows in view are read, so painting costs the same however
       -- long the document is.
       rowAt py = floor ((py - contentTop + scrollYf) / max 1 lineH) :: Int
-      firstRow = max 0 (rowAt fieldTop)
-      lastRow = min (TB.getLineCount buf - 1) (rowAt (fieldTop + fieldH))
+      firstRow = max 0 (rowAt y)
+      lastRow = min (TB.getLineCount buf - 1) (rowAt (y + h))
   withClip da textClip $ do
     when focus $
-      drawTextAreaSelectionLines da firstRow lastRow state geom fm theme
+      drawTextAreaSelectionLines da firstRow lastRow state field fm theme
     forM_ [firstRow .. lastRow] $ \row -> do
       let line = TB.lineAt row buf
           ly = contentTop + fromIntegral row * lineH - scrollYf
@@ -216,15 +209,15 @@ textAreaHitForWidget ctx wid = do
         else do
           (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
           fm <- resolveTextAreaFont ctx idx
-          let geom = textAreaGeom fm x y w h
-              Rect clipX _ _ _ = textAreaFieldClip geom fm
+          let field = Rect x y w h
+              Rect clipX _ _ _ = textAreaFieldClip fm field
           pure
             ( Just
                 TextAreaHit
                   { tahNodeIdx = idx
-                  , tahFieldRect = tagFieldRect geom
+                  , tahFieldRect = field
                   , tahContentX = clipX
-                  , tahLineH = tagLineHeight geom
+                  , tahLineH = textAreaLineHeight fm
                   , tahWidgetX = x
                   , tahWidgetY = y
                   , tahWidgetW = w

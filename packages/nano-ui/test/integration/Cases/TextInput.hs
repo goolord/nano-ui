@@ -37,13 +37,12 @@ import Data.Text qualified as T
 import NanoUI
 import NanoUI.Context (intKey)
 import NanoUI.Frame.TextEdit
-  ( TextAreaGeom (..)
-  , TextAreaHit (..)
+  ( TextAreaHit (..)
   , TextAreaScrollBarLayouts (..)
   , resolveTextAreaFont
   , textAreaContentMetrics
-  , textAreaBarLanes
-  , textAreaGeom
+  , textAreaBarLane
+  , textAreaLineHeight
   , textAreaHScrollBarLayout
   , textAreaHitForWidget
   , textAreaScrollBarLayout
@@ -584,17 +583,13 @@ runTextAreaScrollWheelTest ctx failed = do
     inp0 = withInput 320 220
     ui = column (labeledArea "Notes" longText)
     uiShort = column (keyed (1 :: Int) (labeledArea "Short" "Line 1\nLine 2"))
-    fieldCenter c r = do
-      let
-        Rect rx ry rw rh = r
-        field = tagFieldRect (textAreaGeom (ctxFontMetrics c) rx ry rw rh)
-      pure (V2 (rectX field + rectW field / 2) (rectY field + rectH field / 2))
+    fieldCenter (Rect rx ry rw rh) = pure (V2 (rx + rw / 2) (ry + rh / 2))
   -- Text that fits the viewport does not wheel-scroll.
   (respShort, _) <- warmup2 ctx inp0 uiShort
   mRectShort <- getPrevRect ctx (respId respShort)
   case mRectShort of
     Just r -> do
-      pos <- fieldCenter ctx r
+      pos <- fieldCenter r
       _ <- runFrame ctx (inp0 {inputMousePos = pos, inputScroll = V2 0 1}) uiShort
       offShort <- getScrollOffset ctx (respId respShort)
       assertEq failed offShort 0
@@ -603,7 +598,7 @@ runTextAreaScrollWheelTest ctx failed = do
   mRect <- getPrevRect ctx (respId resp)
   case mRect of
     Just r -> do
-      pos <- fieldCenter ctx r
+      pos <- fieldCenter r
       let
         wheelDown = inp0 {inputMousePos = pos, inputScroll = V2 0 1}
       off0 <- getScrollOffset ctx (respId resp)
@@ -649,11 +644,12 @@ runTextAreaZoomScrollTest ctx failed = do
         lineH = tahLineH hit
         lineCount = max 1 (length (toLines (fromText longText)))
         contentH = fromIntegral lineCount * lineH
-        contentW = maximum (0 : [textDisplayWidth fm l | l <- T.lines longText])
+        contentW = maximum (0 : [lineWidth fm l | l <- T.lines longText])
         (ix, iy) = widgetContentInset fm
         innerW = rectW field - 2 * ix
         innerH = rectH field - 2 * iy
-        (barLaneW, barLaneH) = textAreaBarLanes fm
+        barLaneW = textAreaBarLane
+        barLaneH = textAreaBarLane
         hasV0 = contentH > innerH
         hasH = contentW > (if hasV0 then max 0 (innerW - barLaneW) else innerW)
         availH = if hasH then max 0 (innerH - barLaneH) else innerH
@@ -676,9 +672,8 @@ runTextAreaScrollDragTest ctx failed = do
     Just (Rect rx ry rw rh) -> do
       let
         fm = ctxFontMetrics ctx
-        geom = textAreaGeom fm rx ry rw rh
-        field = tagFieldRect geom
-        contentH = 40 * tagLineHeight geom
+        field = Rect rx ry rw rh
+        contentH = 40 * textAreaLineHeight fm
       off0 <- getScrollOffset ctx (respId resp)
       assertEq failed off0 0
       case textAreaScrollBarLayout fm field contentH off0 of
@@ -736,9 +731,8 @@ runTextAreaCursorOnScrollBarTest ctx failed = do
     ([(lx, ly)], Just (Rect rx ry rw rh)) -> do
       let
         fm = ctxFontMetrics ctx
-        geom = textAreaGeom fm rx ry rw rh
-        field = tagFieldRect geom
-        contentH = 40 * tagLineHeight geom
+        field = Rect rx ry rw rh
+        contentH = 40 * textAreaLineHeight fm
       -- Hover over label -> UiCursorDefault
       let
         labelHover = inp0 {inputMousePos = V2 lx ly}
@@ -785,8 +779,7 @@ runTextAreaHScrollWheelTest ctx failed = do
     Just (Rect rx ry rw rh) -> do
       let
         fm = ctxFontMetrics ctx
-        geom = textAreaGeom fm rx ry rw rh
-        field = tagFieldRect geom
+        field = Rect rx ry rw rh
         pos = V2 (rectX field + rectW field / 2) (rectY field + rectH field / 2)
         wheelRight = inp0 {inputMousePos = pos, inputScroll = V2 1 0}
       V2 offX0 offY0 <- getScrollOffset2D ctx (respId resp)
@@ -825,7 +818,7 @@ runTextAreaHScrollWheelTest ctx failed = do
       V2 offX3 _ <- getScrollOffset2D ctx (respId resp)
       assertEq failed offX3 0
       -- The horizontal thumb shows the grab cursors.
-      case textAreaHScrollBarLayout fm field (textDisplayWidth fm longLine) 0 of
+      case textAreaHScrollBarLayout fm field (lineWidth fm longLine) 0 of
         Nothing -> assert failed False
         Just layout -> do
           let
@@ -853,9 +846,8 @@ runTextAreaHScrollDragTest ctx failed = do
     Just (Rect rx ry rw rh) -> do
       let
         fm = ctxFontMetrics ctx
-        geom = textAreaGeom fm rx ry rw rh
-        field = tagFieldRect geom
-        contentW = textDisplayWidth fm longLine
+        field = Rect rx ry rw rh
+        contentW = lineWidth fm longLine
       V2 offX0 _ <- getScrollOffset2D ctx (respId resp)
       assertEq failed offX0 0
       case textAreaHScrollBarLayout fm field contentW offX0 of
@@ -907,11 +899,11 @@ runTextArea2DScrollTest ctx failed = do
     Just (Rect rx ry rw rh) -> do
       let
         fm = ctxFontMetrics ctx
-        geom = textAreaGeom fm rx ry rw rh
-        field = tagFieldRect geom
-        contentH = 40 * tagLineHeight geom
-        contentW = maximum (0 : [textDisplayWidth fm l | l <- lines2D])
-        (barLaneW, barLaneH) = textAreaBarLanes fm
+        field = Rect rx ry rw rh
+        contentH = 40 * textAreaLineHeight fm
+        contentW = maximum (0 : [lineWidth fm l | l <- lines2D])
+        barLaneW = textAreaBarLane
+        barLaneH = textAreaBarLane
         layouts = textAreaScrollBarLayouts fm field contentW contentH 0 0
       case (tasbVertical layouts, tasbHorizontal layouts) of
         (Just vLayout, Just hLayout) -> do
@@ -947,9 +939,7 @@ runTextAreaScrollCursorLeavesViewportTest ctx failed = do
   case mRect of
     Just (Rect rx ry rw rh) -> do
       let
-        fm = ctxFontMetrics ctx
-        geom = textAreaGeom fm rx ry rw rh
-        field = tagFieldRect geom
+        field = Rect rx ry rw rh
         pos = V2 (rectX field + rectW field / 2) (rectY field + rectH field / 2)
         key = intKey (respId resp)
 

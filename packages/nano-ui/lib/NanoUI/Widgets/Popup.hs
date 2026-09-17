@@ -25,7 +25,6 @@ import NanoUI.Context
   , registerPopupConfig
   , seedFloatingPanel
   )
-import NanoUI.Font (resolveLayoutGap, resolveLayoutPadding)
 import NanoUI.Id (enterScope, scopeTag)
 import NanoUI.Input (inputMousePos)
 import NanoUI.Layout.Arena (NodeType (..), addNode)
@@ -114,7 +113,6 @@ popupWith open cfg f child = do
     else do
       inp <- askInput
       let
-        fm = ctxFontMetrics ctx
         addPopupNode parent = do
           registerPopupConfig ctx wid (cfgAnchor cfg) (cfgPlacement cfg) (cfgOffset cfg)
           addNode
@@ -124,8 +122,8 @@ popupWith open cfg f child = do
             (layoutDirection layout)
             (layoutWidth layout)
             (layoutHeight layout)
-            (resolveLayoutPadding fm (Padding 6 6 6 6))
-            (resolveLayoutGap fm 4)
+            (Padding 6 6 6 6)
+            4
             0
             0
             1e9

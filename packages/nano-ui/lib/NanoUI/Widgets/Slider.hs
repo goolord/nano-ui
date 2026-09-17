@@ -68,7 +68,6 @@ sliderWith' f minV maxV value = do
   let
     current = IM.findWithDefault value key (storeFloat store)
     frac = if maxV > minV then (current - minV) / (maxV - minV) else 0
-    fm = ctxFontMetrics ctx
   resp <- addWidget wid NodeSlider "" frac (f (fillW defaultLayout))
   active <- uiIO (readIORef (ctxActiveId ctx))
   blocked <- uiIO (getLastPointerBlocked ctx)
@@ -83,7 +82,7 @@ sliderWith' f minV maxV value = do
     track0 =
       case mrect of
         Just (Rect x y w h) ->
-          let tr = sliderTrackBounds fm x y w h
+          let tr = sliderTrackBounds x y w h
            in Rect (rectX tr) (rectY tr - sliderHandleSlack) (rectW tr) (rectH tr + 2 * sliderHandleSlack)
         Nothing -> Rect 0 0 0 0
     track = if blocked || heldByOther then Rect 0 0 0 0 else track0

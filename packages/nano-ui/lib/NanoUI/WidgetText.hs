@@ -11,8 +11,6 @@ module NanoUI.WidgetText
   , textInputFieldHeight
   , textInputFlagSearch
   , textInputSearchMode
-  , textInputFlagBare
-  , textInputBareMode
   , textInputFlagSelectable
   , textInputSelectableMode
   , textInputFlagPassword
@@ -172,15 +170,6 @@ textInputFlagSearch = 0x04000000
 {-# INLINE textInputSearchMode #-}
 textInputSearchMode :: Int -> Bool
 textInputSearchMode si = si .&. textInputFlagSearch /= 0
-
--- | Marks a @NodeTextInput@ as a bare field: caption-less and chrome-less,
--- so callers can render their own label beside it. The node rect is the box.
-textInputFlagBare :: Int
-textInputFlagBare = 0x08000000
-
-{-# INLINE textInputBareMode #-}
-textInputBareMode :: Int -> Bool
-textInputBareMode si = si .&. textInputFlagBare /= 0
 
 -- | Marks a @NodeTextInput@ as a selectable text label: read-only, caption-less,
 -- chrome-less, sized to its text content, with mouse drag-to-select and copy.
