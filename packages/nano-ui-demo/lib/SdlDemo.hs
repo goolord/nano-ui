@@ -614,6 +614,9 @@ demoUi = do
               separator
               heading "Color & Highlights"
               colorHighlights
+              separator
+              heading "Rich Text"
+              richTextSample
 
             ----------------------------------------------------- List ---------
             List -> do
@@ -826,6 +829,21 @@ weightsStyles =
     rowWith (tight . gap gapInline . fillW) $ do
       labelWith (tight . fixedW 96 . fontMono . fontMuted) "Both"
       labelWith (fontUnderline . fontStrike) "Both underline and strikethrough lines."
+
+-- | Mixed styles and links in one wrapped paragraph.
+richTextSample :: NanoUI ()
+richTextSample = do
+  (lastLink, setLastLink) <- useState ("none yet" :: T.Text)
+  target <-
+    richTextWith fillW
+      [ "A paragraph can mix ", strong "bold", ", ", emphasis "italic", ", "
+      , inlineCode "monospace", " and ", inlineWith (fontSemiBold . fontColor (colorRGBA 229 192 123 255)) "coloured"
+      , " pieces, ", inlineWith (fontSize 20) "larger", " ones on the same baseline, and links such as "
+      , hyperlink "documentation" "the documentation", " or ", hyperlink "changelog" "the changelog"
+      , ". It wraps at the width of its column."
+      ]
+  for_ target setLastLink
+  labelWith fontMuted ("Last link clicked: " <> lastLink)
 
 colorHighlights :: NanoUI ()
 colorHighlights =

@@ -6,6 +6,8 @@
 module NanoUI.Draw.Types
   ( Layer (..)
   , DrawOp (..)
+  , TextFont (..)
+  , defaultTextFont
   , DrawingBuild
   , shiftDrawOp
   , DrawCmd (..)
@@ -64,6 +66,7 @@ import GHC.Exts
   , writeWord32OffAddr#
   )
 import GHC.Word (Word8 (W8#), Word32 (W32#))
+import NanoUI.Style (FontStyle (..), FontVariant (..), FontWeight (..), TextDecoration (..))
 import NanoUI.Types (Color (..), Rect (..))
 
 data Layer = LayerBackground | LayerContent | LayerOverlay | LayerChrome
@@ -127,7 +130,30 @@ data DrawOp
   -- ^ Pen at (x, y) is the alignment point. ax 0..1 is left..right. ay 0..1 is
   -- bottom..top. ay < 0 means baseline (x is left, y is the baseline). Glyph size
   -- is the host font (`drawTextBox`).
+  | DrawTextStyled
+      {-# UNPACK #-} !Float
+      {-# UNPACK #-} !Float
+      !TextFont
+      !T.Text
+      !Color
+  -- ^ Text in a font of its own, its line box's top left corner at (x, y).
   deriving (Eq)
+
+-- | The font a 'DrawTextStyled' draws with: the same choices a label's
+-- layout makes.
+data TextFont = TextFont
+  { textFontSize :: {-# UNPACK #-} !Float
+  -- ^ Point size, @0@ for the theme's.
+  , textFontVariant :: !FontVariant
+  , textFontWeight :: !FontWeight
+  , textFontStyle :: !FontStyle
+  , textFontDecoration :: !TextDecoration
+  }
+  deriving (Eq, Show)
+
+-- | The theme's regular font.
+defaultTextFont :: TextFont
+defaultTextFont = TextFont 0 FontRegular WeightNormal FontStyleNormal DecorationNone
 
 -- | Translate every vertex in a 'DrawOp'. Paint reuses ops when only (x, y) moved.
 shiftDrawOp :: Float -> Float -> DrawOp -> DrawOp
@@ -145,6 +171,7 @@ shiftDrawOp dx dy op =
     FillQuadGradient (Rect x y w h) c0 c1 c2 c3 -> FillQuadGradient (Rect (x + dx) (y + dy) w h) c0 c1 c2 c3
     DrawImageRect (Rect x y w h) tex u0 v0 u1 v1 c -> DrawImageRect (Rect (x + dx) (y + dy) w h) tex u0 v0 u1 v1 c
     DrawText x y ax ay t c -> DrawText (x + dx) (y + dy) ax ay t c
+    DrawTextStyled x y font t c -> DrawTextStyled (x + dx) (y + dy) font t c
 
 type DrawingBuild = Rect -> Vector DrawOp
 

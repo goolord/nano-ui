@@ -17,7 +17,7 @@ import Data.Primitive.PrimArray (indexPrimArray, sizeofPrimArray)
 import Data.Word (Word32)
 import NanoUI.Draw.Arena
 import NanoUI.Draw.Shapes
-import NanoUI.Draw.Types (DrawArena (..), DrawOp (..), glyphAtlasTextureId, indexSize, vertexSize)
+import NanoUI.Draw.Types (DrawArena (..), DrawOp (..), TextFont (..), glyphAtlasTextureId, indexSize, vertexSize)
 import NanoUI.Font
   ( FontMetrics (..)
   , GlyphQuad (..)
@@ -228,8 +228,10 @@ pushPreparedTextStyledQuads da fm weight fstyle deco x y txt col
           DecorationUnderlineStrike -> underline >> strike
           DecorationNone -> pure ()
 
-emitDrawOps :: DrawArena -> FontMetrics -> Vector DrawOp -> IO ()
-emitDrawOps da fm = V.mapM_ emitOne
+-- | Emit ops with @fm@ as the default font and @resolve@ giving the font of
+-- styled text, and whether it draws its weight and slant natively.
+emitDrawOps :: DrawArena -> FontMetrics -> (TextFont -> IO (FontMetrics, Bool)) -> Vector DrawOp -> IO ()
+emitDrawOps da fm resolve = V.mapM_ emitOne
   where
     emitOne (FillRect r c) = pushRect da r c
     emitOne (FillRoundedRect r radius c) = pushRoundedRect da r radius c
@@ -249,3 +251,9 @@ emitDrawOps da fm = V.mapM_ emitOne
       -- Drawing text has no collected text span, so it keeps its quads even
       -- when the host rasterizes widget text externally.
       pushPreparedTextQuads da prepared px py t c
+    emitOne (DrawTextStyled x y font t c) = do
+      (styledFm, native) <- resolve font
+      let weight = if native then WeightNormal else textFontWeight font
+          fstyle = if native then FontStyleNormal else textFontStyle font
+      prepared <- prepareFontMetrics styledFm t
+      pushPreparedTextStyledQuads da prepared weight fstyle (textFontDecoration font) x y t c

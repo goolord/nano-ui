@@ -80,6 +80,7 @@ library
         NanoUI.Widgets.TextArea
         NanoUI.Widgets.Combo
         NanoUI.Widgets.Custom
+        NanoUI.Widgets.RichText
         NanoUI.Widgets.PaneGrid
         NanoUI.Widgets.SplitPane
         NanoUI.Store
@@ -218,6 +219,7 @@ test-suite nano-ui-test
         Cases.Keyboard
         Cases.Cache
         Cases.Runner
+        Cases.RichText
         Cases.SIMD
         Cases.Shaping
         Cases.Styling

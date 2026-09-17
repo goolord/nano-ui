@@ -6,6 +6,8 @@ module NanoUI.Draw
   , DrawData (..)
   , DrawArena (..)
   , DrawOp (..)
+  , TextFont (..)
+  , defaultTextFont
   , DrawingBuild
   , shiftDrawOp
   , newDrawArena

@@ -2,12 +2,14 @@
 -- font a node renders and measures in, and a scroll node's content viewport.
 module NanoUI.Frame.Node
   ( resolveFontFor
+  , resolveTextFont
   , nodeFontMetrics
   , scrollViewportAt
   ) where
 
 import Data.Text (Text)
 import NanoUI.Context (Context (..))
+import NanoUI.Draw.Types (TextFont (..))
 import NanoUI.Font (FontMetrics, isDefaultNodeFont, measureTextIO)
 import NanoUI.Frame.Scroll.Geometry
   ( decodeScrollConfig
@@ -58,6 +60,14 @@ resolveFontFor ctx nt size packed
     variant = textNodeFontVariant si
     weight = textNodeFontWeight si
     style = textNodeFontStyle si
+
+-- | The font a 'DrawTextStyled' op names, and whether the host draws its
+-- weight and slant natively.
+resolveTextFont :: Context -> TextFont -> IO (FontMetrics, Bool)
+resolveTextFont ctx (TextFont size variant weight style _)
+  | isDefaultNodeFont size weight style variant =
+      pure (if variant == FontMono then ctxMonoFontMetrics ctx else ctxFontMetrics ctx, False)
+  | otherwise = ctxResolveFont ctx size weight style variant
 
 -- | Metrics of the font node @idx@ is styled with.
 nodeFontMetrics :: Context -> NodeIdx -> IO FontMetrics

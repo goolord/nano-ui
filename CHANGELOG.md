@@ -32,6 +32,17 @@
   at the display's scale, into the image atlas.
 - `spinner`, an indeterminate loading indicator that repaints only its own
   rect while it turns.
+- Rich text: `richText` draws a paragraph of `Inline` pieces, wrapped at its
+  width, and returns the target of a link clicked this frame. Pieces are
+  string literals, `strong`, `emphasis`, `inlineCode`, `inlineWith` with any
+  font modifiers (size, weight, colour, decoration), and
+  `hyperlink target label`, drawn in the theme's link colour, underlined
+  while hovered, with the pointer cursor. `restyle` adds modifiers to a
+  piece, and `richTextWith` sets the paragraph's default font. Mixed sizes
+  share a baseline. A paragraph keeps its measured words between frames
+  while its pieces, fonts and colours stay the same.
+- `DrawTextStyled` draws text in a `TextFont` (size, variant, weight, style
+  and decoration) from custom widgets.
 - Shaped text in the SDL backend. Lines are laid out by SDL_ttf and
   HarfBuzz with ligatures, contextual forms and marks, and drawn glyph by
   glyph from the atlas. Arabic, Hebrew, Devanagari, CJK and other scripts
@@ -66,6 +77,11 @@
   `styled (panelStyle (background bg . borderColor border))` around a panel.
   `callout` tints the theme's panel colour instead of a fixed dark grey.
 - `uiTheme` returns the theme of the enclosing `styled` scope.
+- A custom widget with a measure hook and a fit height is measured again at
+  the width layout gives it, as wrapped labels are, so its height can follow
+  its width.
+- Custom widgets with a content key rebuild their ops when a theme scope
+  changes, instead of keeping the old theme's colours.
 - `RunQuad`, `fmRun` and `drawRun` are replaced by `fmShape` and
   `drawShaped`. A backend without shaping sets `fmShape = const Nothing` and
   keeps per-character advances and kerning.

@@ -313,6 +313,18 @@ module NanoUI
   , spinner'
   , spinnerWith
   , spinnerWith'
+  , Inline
+  , inlineText
+  , inlineWith
+  , restyle
+  , strong
+  , emphasis
+  , inlineCode
+  , hyperlink
+  , richText
+  , richText'
+  , richTextWith
+  , richTextWith'
   , sparkline
   , sparkline'
   , sparklineWith
@@ -336,6 +348,8 @@ module NanoUI
   , drawingVersioned
   , drawingCached
   , DrawOp (..)
+  , TextFont (..)
+  , defaultTextFont
   , DrawingBuild
   , drawTextBox
   , shiftDrawOp
@@ -712,7 +726,7 @@ import NanoUI.Context
   , setTheme
   , withTheme
   )
-import NanoUI.Draw (drawTextBox, shiftDrawOp)
+import NanoUI.Draw (TextFont (..), defaultTextFont, drawTextBox, shiftDrawOp)
 import NanoUI.Font
   ( FontBackend (..)
   , FontMetrics (..)

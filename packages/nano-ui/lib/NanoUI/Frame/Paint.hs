@@ -67,7 +67,7 @@ import NanoUI.Frame.Chrome
   , paintScrollBarLayout
   , strokeStyledRect
   )
-import NanoUI.Frame.Node (resolveFontFor, scrollViewportAt)
+import NanoUI.Frame.Node (resolveFontFor, resolveTextFont, scrollViewportAt)
 import NanoUI.Frame.Paint.Types (PaintEnv (..), buildPaintEnv)
 import NanoUI.Frame.Paint.Widgets (paintTextAreaNode, paintTextInputNode, paintWidget)
 import NanoUI.Frame.Scroll.Geometry
@@ -246,7 +246,7 @@ paintContainerNode env idx rect = do
     let fm = peFontMetrics env
         da = peDrawArena env
     cdc <- mkCustomDrawContext ctx fm wid
-    withClip da rect (emitDrawOps da fm (build cdc rect))
+    withClip da rect (emitDrawOps da fm (resolveTextFont ctx) (build cdc rect))
 
 paintPanelNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
 paintPanelNode env idx rect@(Rect x y w h) = do
@@ -397,12 +397,12 @@ paintDrawingNode env idx rect = do
     Just (CustomDrawingEntry content customBuild) -> do
       cdc <- mkCustomDrawContext ctx fm wid
       ops <- cachedCustomDrawingOps ctx wid content rect cdc customBuild
-      withClip da rect (emitDrawOps da fm ops)
+      withClip da rect (emitDrawOps da fm (resolveTextFont ctx) ops)
     Nothing -> do
       mBuild <- lookupDrawing ctx wid
       forM_ mBuild $ \(DrawingEntry content build) -> do
         ops <- cachedDrawingOps ctx wid content rect build
-        withClip da rect (emitDrawOps da fm ops)
+        withClip da rect (emitDrawOps da fm (resolveTextFont ctx) ops)
 
 -- | Lower the children of @idx@ with the current paint env. NOINLINE keeps
 -- this recursive call out of the simplifier's loop analysis, so the whole

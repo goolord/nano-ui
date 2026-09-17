@@ -220,6 +220,18 @@ module NanoUI.Widgets
   , spinner'
   , spinnerWith
   , spinnerWith'
+  , Inline
+  , inlineText
+  , inlineWith
+  , restyle
+  , strong
+  , emphasis
+  , inlineCode
+  , hyperlink
+  , richText
+  , richText'
+  , richTextWith
+  , richTextWith'
   , progressBar
   , progressBar'
   , progressBarWith
@@ -251,6 +263,7 @@ import NanoUI.Widgets.Button (button, button', buttonWith, buttonWith')
 import NanoUI.Widgets.Checkbox (checkbox, checkbox')
 import NanoUI.Widgets.ColorPicker (colorPicker, colorPicker', colorPickerRGBA, colorPickerRGBA')
 import NanoUI.Widgets.Combo (comboBox, comboBox')
+import NanoUI.Widgets.RichText (Inline, emphasis, hyperlink, inlineCode, inlineText, inlineWith, restyle, richText, richText', richTextWith, richTextWith', strong)
 import NanoUI.Widgets.Custom
   ( CanvasM
   , CustomDrawBuild

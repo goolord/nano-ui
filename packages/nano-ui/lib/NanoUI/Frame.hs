@@ -22,7 +22,7 @@ module NanoUI.Frame
 where
 
 import Control.Monad (unless, when)
-import Data.IORef (readIORef, writeIORef)
+import Data.IORef (modifyIORef', readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Typeable (Typeable)
 import Effectful (Eff, IOE, runEff, type (:>))
@@ -235,8 +235,10 @@ runFrameEff unlift ctx inp ui = do
         unlift (runUi ctx (stripInteractionInput inp) ui)
       else pure result0
   -- Scopes only change how nodes look, which the rect and text diffs below
-  -- cannot see.
-  whenM (themeScopesChanged ctx) (damageFull ctx)
+  -- cannot see, and custom widgets' cached ops hold the old theme's colours.
+  whenM (themeScopesChanged ctx) $ do
+    damageFull ctx
+    modifyIORef' (ctxMetricGen ctx) (+ 1)
   -- Sync widget node values (checkbox/radio/tree) from the store before measure
   -- so labels and layout reflect the current state.
   syncWidgetLabels ctx

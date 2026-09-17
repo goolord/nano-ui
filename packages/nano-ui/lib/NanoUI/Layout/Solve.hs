@@ -767,7 +767,7 @@ recomputeFitHeightAtWidth env idx availW = do
   pure h
 
 recomputeFitHeightAtWidthGo :: SolveEnv -> NodeIdx -> Float -> IO Float
-recomputeFitHeightAtWidthGo env@SolveEnv {seArena = na, seFm = fm} idx availW = do
+recomputeFitHeightAtWidthGo env@SolveEnv {seArena = na, seFm = fm, seLookupMeasure = lookupMeasure} idx availW = do
   nt <- getNodeType na idx
   (minW, minH, maxW, maxH) <- getMinMax na idx
   (wTag, wVal) <- getWidthSizing na idx
@@ -789,6 +789,15 @@ recomputeFitHeightAtWidthGo env@SolveEnv {seArena = na, seFm = fm} idx availW = 
               TextBox {tbWrapped, tbH, tbLineH} <-
                 measureTextNodeAt env idx txt effW' (wrapsNarrower (wTag /= SizingFit && not isRowChild))
               pure (if tbWrapped then clamp minH maxH (max tbLineH tbH) else oldH)
+      | otherwise -> pure oldH
+
+    -- A measured drawing, like wrapped text, can be taller when narrower.
+    NodeDrawing
+      | hTag == SizingFit -> do
+          wid <- getWidgetId na idx
+          lookupMeasure wid >>= \case
+            Just measure -> pure (clamp minH maxH (snd (measure fm (effW', if maxH < 1e8 then maxH else 1e9))))
+            Nothing -> pure oldH
       | otherwise -> pure oldH
 
     _ | (nt == NodeContainer || nt == NodePanel), hTag /= SizingFixed -> do
@@ -870,7 +879,7 @@ positionNodeA ::
   Float ->
   Float ->
   IO ()
-positionNodeA env@SolveEnv {seArena = na, seArrays = a, seFm = fm} depth idx x y availW availH = do
+positionNodeA env@SolveEnv {seArena = na, seArrays = a, seFm = fm, seLookupMeasure = lookupMeasure} depth idx x y availW availH = do
   minW <- readStyle a idx styleMinW
   minH <- readStyle a idx styleMinH
   maxW <- readStyle a idx styleMaxW
@@ -900,7 +909,16 @@ positionNodeA env@SolveEnv {seArena = na, seArrays = a, seFm = fm} depth idx x y
       else
         if (nt == NodeContainer || nt == NodePanel) && hTag == SizingFit
           then pure (clamp minH maxH (max intrinsicH availH))
-          else pure (clamp minH maxH (resolveSize hTag hVal intrinsicH availH minH maxH))
+          else
+            if nt == NodeDrawing && hTag == SizingFit && w /= intrinsicW
+              then do
+                -- A measured drawing laid out at another width than it was
+                -- measured at takes its height at the width it got.
+                wid <- getWidgetId na idx
+                lookupMeasure wid >>= \case
+                  Just measure -> pure (clamp minH maxH (snd (measure fm (w, if maxH < 1e8 then maxH else 1e9))))
+                  Nothing -> pure (clamp minH maxH (resolveSize hTag hVal intrinsicH availH minH maxH))
+              else pure (clamp minH maxH (resolveSize hTag hVal intrinsicH availH minH maxH))
   setRect na idx x y w h
   when (isContainerNode nt) $ do
     (pad, gap, dir) <- containerFlow na fm idx
