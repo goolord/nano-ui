@@ -13,14 +13,12 @@ where
 import Control.Monad (foldM)
 import Data.Foldable (toList)
 import Data.Hashable (hash)
-import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
 import Data.Text qualified as T
 import Effectful (Eff, type (:>))
-import NanoUI.Context (adoptStoreInt, getStore, intKey, recordStoreInt, registerFocusable, writeStoreInt)
+import NanoUI.Context (adoptStoreInt, intKey, recordStoreInt, registerFocusable, writeStoreInt)
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, nextId, uiIO, withKey)
-import NanoUI.Store (WidgetStore (..))
 import NanoUI.Style (Layout, defaultLayout, fillW, gap, tight)
 import NanoUI.Types (clamp)
 import NanoUI.Widgets.Behavior (KeyNav (..), useKeyNav)
@@ -59,9 +57,8 @@ radio' options index =
         xs -> xs
       !len = length opts
       !key = intKey gid
-    uiIO $ adoptStoreInt ctx gid key (clamp 0 (len - 1) index)
-    st0 <- uiIO (getStore ctx)
-    let !sel = clamp 0 (len - 1) (IM.findWithDefault index key (storeInt st0))
+    stored <- uiIO $ adoptStoreInt ctx gid key (clamp 0 (len - 1) index)
+    let !sel = clamp 0 (len - 1) stored
     uiIO $ registerFocusable ctx gid
     nav <- useKeyNav gid
     let

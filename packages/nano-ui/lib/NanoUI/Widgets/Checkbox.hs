@@ -3,10 +3,10 @@ module NanoUI.Widgets.Checkbox (checkbox, checkbox') where
 
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
-import NanoUI.Context (adoptStoreInt, getStoreBool, intKey, recordStoreInt, registerFocusable, writeStoreBool)
+import NanoUI.Context (adoptStoreInt, intKey, recordStoreInt, registerFocusable, writeStoreBool)
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, nextId, uiIO)
-import NanoUI.Store (boolInt)
+import NanoUI.Store (boolInt, intBool)
 import NanoUI.Style (defaultLayout)
 import NanoUI.Widgets.Behavior (keyActivated)
 import NanoUI.Widgets.Node (Response, addWidget, respClicked, setChanged)
@@ -23,8 +23,7 @@ checkbox' txt checked = do
   ctx <- askContext
   uiIO $ registerFocusable ctx wid
   let key = intKey wid
-  uiIO $ adoptStoreInt ctx wid key (boolInt checked)
-  current <- uiIO (getStoreBool ctx wid checked)
+  current <- intBool <$> uiIO (adoptStoreInt ctx wid key (boolInt checked))
   resp <- addWidget wid NodeCheckbox txt (if current then 1 else 0) defaultLayout
   keyClick <- keyActivated wid
   let

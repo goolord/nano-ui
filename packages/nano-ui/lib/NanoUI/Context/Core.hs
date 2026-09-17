@@ -318,7 +318,8 @@ writeStoreBool ctx owner v = writeStoreInt ctx owner (intKey owner) (boolInt v)
 -- caller's value replaces the stored one only when it differs from the value
 -- the widget last returned ('recordSlot'). An edit applied between frames,
 -- such as a menu cut, then survives a caller that passes the previous result
--- back, while a value changed by the application still wins.
+-- back, while a value changed by the application still wins. Returns the
+-- slot's value after adopting.
 {-# INLINE adoptSlot #-}
 adoptSlot ::
   Eq a =>
@@ -328,17 +329,20 @@ adoptSlot ::
   WidgetId ->
   Int ->
   a ->
-  IO ()
+  IO a
 adoptSlot field setField ctx owner k v = do
   st <- readIORef (ctxStore ctx)
   let
     m = field st
     seenK = slotKey SlotSeen k
-  when (IM.lookup seenK m /= Just v) $ do
-    writeIORef (ctxStore ctx) $! setField (IM.insert seenK v (IM.insert k v m)) st
-    when (IM.lookup k m /= Just v) $ do
-      damageWidget ctx owner DamageSelf
-      markDirty ctx
+  if IM.lookup seenK m == Just v
+    then pure $! IM.findWithDefault v k m
+    else do
+      writeIORef (ctxStore ctx) $! setField (IM.insert seenK v (IM.insert k v m)) st
+      when (IM.lookup k m /= Just v) $ do
+        damageWidget ctx owner DamageSelf
+        markDirty ctx
+      pure v
 
 -- | Remember the value a controlled widget returned this frame.
 {-# INLINE recordSlot #-}
@@ -356,13 +360,13 @@ recordSlot field setField ctx k v = do
   when (IM.lookup seenK (field st) /= Just v) $
     writeIORef (ctxStore ctx) $! setField (IM.insert seenK v (field st)) st
 
-adoptStoreInt :: Context -> WidgetId -> Int -> Int -> IO ()
+adoptStoreInt :: Context -> WidgetId -> Int -> Int -> IO Int
 adoptStoreInt = adoptSlot storeInt (\m st -> st {storeInt = m})
 
-adoptStoreFloat :: Context -> WidgetId -> Int -> Float -> IO ()
+adoptStoreFloat :: Context -> WidgetId -> Int -> Float -> IO Float
 adoptStoreFloat = adoptSlot storeFloat (\m st -> st {storeFloat = m})
 
-adoptStoreText :: Context -> WidgetId -> Int -> Text -> IO ()
+adoptStoreText :: Context -> WidgetId -> Int -> Text -> IO Text
 adoptStoreText = adoptSlot storeText (\m st -> st {storeText = m})
 
 recordStoreInt :: Context -> Int -> Int -> IO ()

@@ -12,7 +12,7 @@ import Data.Text (Text)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, mapSmallArray', sizeofSmallArray, smallArrayFromList)
 import Effectful (Eff, type (:>))
 import qualified Data.IntSet as IS
-import NanoUI.Context (Context (..), adoptStoreInt, getFocusId, intKey, recordStoreInt, registerFocusable)
+import NanoUI.Context (Context (..), adoptStoreInt, getFocusId, intKey, recordStoreInt, registerFocusable, writeStoreInt)
 import NanoUI.Font (treeChevronRect)
 import NanoUI.Frame.Hit (scrollHitRect)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
@@ -22,7 +22,7 @@ import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
 import NanoUI.Style (defaultLayout, fillW, gap, tight)
 import NanoUI.Types (Rect (..), clamp, rectContains)
 import NanoUI.WidgetText (treeEncodeStyle)
-import NanoUI.Widgets.Behavior (KeyNav (..), ensureInt, ensureIntSet, putInt, putIntSet, useKeyNav)
+import NanoUI.Widgets.Behavior (KeyNav (..), ensureIntSet, putIntSet, useKeyNav)
 import NanoUI.Widgets.Combinators (selectableItem)
 import NanoUI.Widgets.Layout (columnWith)
 import NanoUI.Widgets.Node (Response (..), setChanged, tagContainer)
@@ -144,8 +144,7 @@ tree' key inputItems index =
         groupKey = intKey groupId
         total = forestSize items
         clamped = if total <= 0 then 0 else clamp 0 (total - 1) index
-    uiIO $ adoptStoreInt ctx groupId groupKey clamped
-    selected <- ensureInt groupKey clamped
+    selected <- uiIO $ adoptStoreInt ctx groupId groupKey clamped
     expandedSet <- ensureIntSet groupKey (parentIndices items)
     let rows = visibleRows expandedSet items
     columnWith (tight . gap 0 . fillW) $ do
@@ -159,8 +158,9 @@ tree' key inputItems index =
       focus <- uiIO (getFocusId ctx)
       nav <- useKeyNav focus
       let (keySel, keyExp, mFocus) = treeKeyNav nav rows resps focus afterClickSel afterClickExp
-      when (keySel /= selected) $ putInt groupKey keySel
-      uiIO $ recordStoreInt ctx groupKey keySel
+      uiIO $ do
+        writeStoreInt ctx groupId groupKey keySel
+        recordStoreInt ctx groupKey keySel
       when (keyExp /= expandedSet) $ putIntSet groupKey keyExp
       maybe (pure ()) (\wid -> uiIO $ writeIORef (ctxFocusId ctx) wid) mFocus
       pure (setChanged (keySel /= selected) (fold resps), keySel)

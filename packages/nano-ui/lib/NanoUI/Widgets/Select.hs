@@ -71,10 +71,10 @@ selectWith' f options index = do
       xs -> xs
     n = length opts
     key = intKey wid
-  uiIO $ adoptStoreInt ctx wid key (clamp 0 (n - 1) index)
+  stored <- uiIO $ adoptStoreInt ctx wid key (clamp 0 (n - 1) index)
   store0 <- uiIO (getStore ctx)
   let
-    current = clamp 0 (n - 1) (IM.findWithDefault index key (storeInt store0))
+    current = clamp 0 (n - 1) stored
     open = isSelectOpen store0 key
   resp <- addWidgetWithOptions wid NodeSelect "" opts 0 (f defaultLayout)
   inp <- askInput

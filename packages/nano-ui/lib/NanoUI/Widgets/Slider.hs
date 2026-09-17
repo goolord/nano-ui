@@ -9,13 +9,11 @@ where
 
 import Control.Monad (when)
 import Data.IORef (readIORef, writeIORef)
-import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
 import NanoUI.Context
   ( Context (..)
   , adoptStoreFloat
-  , getStore
   , intKey
   , recordStoreFloat
   , registerFocusable
@@ -29,7 +27,6 @@ import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (inputMouseDown, inputMousePressed)
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
-import NanoUI.Store (WidgetStore (..))
 import NanoUI.Style (Layout, defaultLayout, fillW)
 import NanoUI.Types (Rect (..), clamp)
 import NanoUI.Widgets.Behavior (DragAxis (..), KeyNav (..), useDrag1D, useKeyNav)
@@ -64,10 +61,8 @@ sliderWith' f minV maxV value = do
   inp <- askInput
   uiIO $ registerFocusable ctx wid
   let key = intKey wid
-  uiIO $ adoptStoreFloat ctx wid key value
-  store <- uiIO (getStore ctx)
+  current <- uiIO $ adoptStoreFloat ctx wid key value
   let
-    current = IM.findWithDefault value key (storeFloat store)
     frac = if maxV > minV then (current - minV) / (maxV - minV) else 0
   resp <- addWidget wid NodeSlider "" frac (f (fillW defaultLayout))
   active <- uiIO (readIORef (ctxActiveId ctx))
@@ -101,6 +96,6 @@ sliderWith' f minV maxV value = do
     baseVal = if dragging then dragged else current
     finalVal = clamp minV maxV (baseVal + fromIntegral navStep * step)
   uiIO $ do
-    when (finalVal /= current) $ writeStoreFloat ctx wid key finalVal
+    writeStoreFloat ctx wid key finalVal
     recordStoreFloat ctx key finalVal
   pure (setChanged (finalVal /= current) resp, finalVal)

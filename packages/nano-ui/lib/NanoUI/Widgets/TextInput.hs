@@ -300,7 +300,7 @@ buildTextInput styleIdx layout placeholder value mDebounceMs = do
   wid <- nextId
   ctx <- askContext
   let key = intKey wid
-  uiIO $ adoptStoreText ctx wid key value
+  _ <- uiIO $ adoptStoreText ctx wid key value
   (oldText, newText, isFocus, pulse) <- editTextField wid (textInputPasswordMode styleIdx) value Nothing
   uiIO $ recordStoreText ctx key newText
   inp <- askInput

@@ -84,7 +84,6 @@ import NanoUI.Context
   , getFocusId
   , getHotId
   , getStore
-  , getStoreBool
   , intKey
   , isDisabled
   , recordStoreFloat
@@ -113,7 +112,7 @@ import NanoUI.Input
   )
 import NanoUI.Layout.Arena (NodeType (NodeDrawing))
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, uiTime)
-import NanoUI.Store (WidgetStore (..), boolInt, Slot (..), slotKey)
+import NanoUI.Store (WidgetStore (..), boolInt, intBool, Slot (..), slotKey)
 import NanoUI.Style
   ( AlignX (..)
   , AlignY (..)
@@ -459,8 +458,7 @@ knobWith' f diameter minV maxV value = do
   wid <- nextId
   ctx <- askContext
   let key = intKey wid
-  uiIO $ adoptStoreFloat ctx wid key value
-  current <- IM.findWithDefault value key . storeFloat <$> uiIO (getStore ctx)
+  current <- uiIO $ adoptStoreFloat ctx wid key value
   let range = maxV - minV
       frac = if range > 0 then clamp01 ((current - minV) / range) else 0
   (resp, ()) <- customWidgetWithId wid defaultCustomWidgetSpec
@@ -510,7 +508,7 @@ knobWith' f diameter minV maxV value = do
           then clamp minV maxV (current + deltaNorm * range)
           else current
   uiIO $ do
-    when (finalVal /= current) $ writeStoreFloat ctx wid key finalVal
+    writeStoreFloat ctx wid key finalVal
     recordStoreFloat ctx key finalVal
   pure (setChanged (finalVal /= current) resp, finalVal)
 
@@ -534,8 +532,7 @@ toggleSwitchWith' f on = do
   wid <- nextId
   ctx <- askContext
   let key = intKey wid
-  uiIO $ adoptStoreInt ctx wid key (boolInt on)
-  current <- uiIO (getStoreBool ctx wid on)
+  current <- intBool <$> uiIO (adoptStoreInt ctx wid key (boolInt on))
   let pillW = 44.0
       pillH = 24.0
   (resp, ()) <- customWidgetWithId wid defaultCustomWidgetSpec
