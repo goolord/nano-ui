@@ -52,7 +52,6 @@ import NanoUI.Draw
   , pushImage
   , pushRect
   , pushRoundedStroke
-  , pushText
   , pushTextStyled
   , withClip
   )
@@ -103,7 +102,6 @@ import NanoUI.Style
   ( FontStyle (..)
   , FontWeight (..)
   , Style (..)
-  , TextDecoration (..)
   , Theme (..)
   , scrollBarThumbColor
   , scrollBarTrackColor
@@ -328,12 +326,9 @@ paintTextNode env idx rect = do
     let deco = textNodeTextDecoration si
         weight = if isNative then WeightNormal else textNodeFontWeight si
         style = if isNative then FontStyleNormal else textNodeFontStyle si
-        plain = weight == WeightNormal && style == FontStyleNormal && deco == DecorationNone
     forM_ spans $ \(Rect tx ty _ _, line, spanFg, _) ->
       unless (T.null line) $
-        if plain
-          then pushText da fm tx ty line spanFg
-          else pushTextStyled da fm weight style deco tx ty line spanFg
+        pushTextStyled da fm weight style deco tx ty line spanFg
 
 paintSeparatorNode :: PaintEnv -> Rect -> IO ()
 paintSeparatorNode env (Rect x y w h) =
