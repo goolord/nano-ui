@@ -239,5 +239,4 @@ box f col = do
         0
         (f defaultLayout)
         (fromIntegral (colorToWord32 col))
-        Nothing
     )

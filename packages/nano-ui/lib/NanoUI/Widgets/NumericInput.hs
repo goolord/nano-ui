@@ -109,7 +109,7 @@ numericInputConfigured' cfg value = do
     s0 = loaded {tisCursor = min len0 (tisCursor loaded), tisAnchor = min len0 (tisAnchor loaded)}
     lastValue = IM.findWithDefault given key (storeDouble store)
   mEdited <- if isFocus then uiIO (editTextInput ctx singleLineMode inp store key s0) else pure Nothing
-  resp <- addWidgetStyled wid NodeTextInput "" 0 (nicLayout cfg) textInputFlagNumeric Nothing
+  resp <- addWidgetStyled wid NodeTextInput "" 0 (nicLayout cfg) textInputFlagNumeric
   let
     -- An edit that would leave text no number can start with is dropped.
     typed = maybe s0 editorTextState mEdited

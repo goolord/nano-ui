@@ -62,7 +62,7 @@ stripedRow :: (Ui :> es) => Int -> Layout -> Text -> Eff es Response
 stripedRow rowIdx layout txt = do
   wid <- nextId
   let stripe = if even rowIdx then 1 else 2
-  addWidgetStyled wid NodeText txt 0 layout stripe Nothing
+  addWidgetStyled wid NodeText txt 0 layout stripe
 
 -- | Button with styleIdx for active, sort, badge, or close chrome. Focusable
 -- and activatable with Enter or Space while focused.
@@ -80,7 +80,7 @@ buttonStyledEx enabled txt value layout styleIdx = do
   disabled <- uiIO (isDisabled ctx wid)
   let active = enabled && not disabled
   when active $ uiIO (registerFocusable ctx wid)
-  resp <- addWidgetStyled wid NodeButton txt value layout styleIdx Nothing
+  resp <- addWidgetStyled wid NodeButton txt value layout styleIdx
   if active
     then do
       keyClick <- keyActivated wid
@@ -103,7 +103,6 @@ selectableItem nt txt selected layout styleIdx = do
     (if selected then 1 else 0)
     layout
     styleIdx
-    Nothing
 
 -- | Run an index-based picker over every value of a bounded enum. Indices
 -- are offset by @fromEnum minBound@, so enums that do not start at 0 map

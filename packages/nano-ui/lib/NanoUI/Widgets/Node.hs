@@ -21,13 +21,10 @@ module NanoUI.Widgets.Node
   , setSubmitted
   , parentIdx
   , container
-  , containerStyled
   , containerResponse
-  , containerResponseStyled
   , withContainerNode
   , floatingPanel
   , addWidget
-  , addWidgetResp
   , addWidgetStyled
   , addWidgetWithOptions
   , addSizingLeafNode
@@ -196,32 +193,21 @@ emptyModalResp wid = mempty {rawRespId = wid}
 container :: Ui :> es => NodeType -> Layout -> Eff es a -> Eff es a
 container nt layout child = runContainer nt layout Nothing child
 
-containerStyled :: Ui :> es => NodeType -> Layout -> Int -> Eff es a -> Eff es a
-containerStyled nt layout si child = runContainerStyled nt layout Nothing si child
-
 containerResponse :: Ui :> es => NodeType -> Layout -> Eff es a -> Eff es (a, Response)
-containerResponse nt layout child = containerResponseStyled nt layout 0 child
-
-containerResponseStyled :: Ui :> es => NodeType -> Layout -> Int -> Eff es a -> Eff es (a, Response)
-containerResponseStyled nt layout si child = do
+containerResponse nt layout child = do
   wid <- nextId
   ctx <- askContext
   inp <- askInput
-  r <- runContainerStyled nt layout (Just wid) si child
+  r <- runContainer nt layout (Just wid) child
   resp <- uiIO (resolveInteraction ctx inp wid)
   pure (r, resp)
 
 runContainer :: Ui :> es => NodeType -> Layout -> Maybe WidgetId -> Eff es a -> Eff es a
-runContainer nt layout mWid child = runContainerStyled nt layout mWid 0 child
-
-runContainerStyled :: Ui :> es => NodeType -> Layout -> Maybe WidgetId -> Int -> Eff es a -> Eff es a
-runContainerStyled nt layout mWid si child = do
+runContainer nt layout mWid child = do
   ctx <- askContext
   idx <- uiIO $ do
     stack <- readIORef (ctxContainerStack ctx)
     idx <- addNodeFromLayout (ctxNodeArena ctx) nt (parentIdx stack) layout
-    when (si /= 0) $
-      setStyleIdx (ctxNodeArena ctx) idx si
     mapM_ (setWidgetId (ctxNodeArena ctx) idx) mWid
     pure idx
   withContainerNode True idx child
@@ -310,20 +296,7 @@ addWidget ::
   -> Float
   -> Layout
   -> Eff es Response
-addWidget wid nt txt value layout = addWidgetResp wid nt txt value layout Nothing
-
-{-# INLINE addWidgetResp #-}
-addWidgetResp ::
-  Ui :> es =>
-  WidgetId
-  -> NodeType
-  -> Text
-  -> Float
-  -> Layout
-  -> Maybe Response
-  -> Eff es Response
-addWidgetResp wid nt txt value layout mResp =
-  addWidgetStyled wid nt txt value layout 0 mResp
+addWidget wid nt txt value layout = addWidgetStyled wid nt txt value layout 0
 
 {-# INLINE addWidgetStyled #-}
 addWidgetStyled ::
@@ -334,9 +307,8 @@ addWidgetStyled ::
   -> Float
   -> Layout
   -> Int
-  -> Maybe Response
   -> Eff es Response
-addWidgetStyled wid nt txt value layout styleIdx mResp = do
+addWidgetStyled wid nt txt value layout styleIdx = do
   ctx <- askContext
   inp <- askInput
   uiIO $ do
@@ -351,9 +323,7 @@ addWidgetStyled wid nt txt value layout styleIdx mResp = do
           | otherwise = styleIdx
     setStyleIdx (ctxNodeArena ctx) idx effectiveStyle
     setWidgetId (ctxNodeArena ctx) idx wid
-    case mResp of
-      Just resp -> pure resp
-      Nothing -> resolveInteraction ctx inp wid
+    resolveInteraction ctx inp wid
 
 addWidgetWithOptions ::
   Ui :> es =>

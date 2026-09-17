@@ -322,7 +322,7 @@ buildTextInput styleIdx layout placeholder value mDebounceMs = do
   changed <- case mDebounceMs of
     Nothing -> pure edited
     Just ms -> uiIO (debounceSearchChanged ctx key isFocus edited ms)
-  resp <- addWidgetStyled wid NodeTextInput placeholder 0 layout styleIdx Nothing
+  resp <- addWidgetStyled wid NodeTextInput placeholder 0 layout styleIdx
   pure (setSubmitted submitted (setChanged changed resp), newText)
 
 -- | Debounced change pulse for a search field. Fires when the text differs from
@@ -460,4 +460,4 @@ selectableTextWith' f txt = do
                 (layoutFontStyle layout)
                 (layoutTextDecoration layout)
                 0
-  addWidgetStyled wid NodeTextInput txt 0 layout styleIdx Nothing
+  addWidgetStyled wid NodeTextInput txt 0 layout styleIdx

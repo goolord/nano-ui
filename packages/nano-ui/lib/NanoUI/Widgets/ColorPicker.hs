@@ -495,7 +495,7 @@ colorPickerWith showAlpha value = do
        in writePicker col (clamp 0 360 h) (s, v)
     -- Without the alpha bar the colour stays opaque.
     alphaOf c = if showAlpha then colorA c else 255
-    part pid p lay = addWidgetStyled pid NodeColorPicker "" 0 lay (fromEnum p) Nothing
+    part pid p lay = addWidgetStyled pid NodeColorPicker "" 0 lay (fromEnum p)
   uiIO $ do
     adoptColorPickerValue ctx wid value
     mapM_ (registerFocusable ctx) (wid : ppHue parts : [ppAlpha parts | showAlpha])
@@ -538,7 +538,7 @@ colorPickerWith showAlpha value = do
     (_, thex, fhex, _) <- editTextField hexWid False hexText (Just hexText)
     _ <-
       container NodeContainer (colorPickerFieldGroupLayout 100) $
-        addWidgetStyled hexWid NodeTextInput "" 0 colorPickerFieldLayout 0 Nothing
+        addWidgetStyled hexWid NodeTextInput "" 0 colorPickerFieldLayout 0
     when (fhex && thex /= hexText) $
       forM_ (colorPickerParseHex thex) $ \(r, g, b, ma) ->
         writeColor (colorRGBA r g b (if showAlpha then fromMaybe (colorA hex) ma else 255))
