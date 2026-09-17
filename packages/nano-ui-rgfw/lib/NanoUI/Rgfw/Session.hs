@@ -10,7 +10,7 @@ module NanoUI.Rgfw.Session
   , applyRgfwEvent
   ) where
 
-import Control.Concurrent (rtsSupportsBoundThreads, runInBoundThread, threadDelay)
+import Control.Concurrent (rtsSupportsBoundThreads, runInBoundThread)
 import Control.Exception (bracket)
 import Control.Monad (void, when)
 import Data.Bits ((.&.))
@@ -254,15 +254,6 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
                   , fsScale = curScale
                   , fsMonScale = curMonScale
                   }
-
-              -- Single-pass full redraws with no vsync: pace frames onto the
-              -- refresh period rather than a fixed 8.3 ms spin. The waiter
-              -- gates idle frames, so this only runs when something actually
-              -- needs presenting.
-              let !targetFrameUs = max 1 (round (refreshSec * 1e6) :: Int)
-                  !elapsedUs = round (frameMs * 1000.0)
-                  !delayUs = max 0 (targetFrameUs - elapsedUs)
-              when (delayUs > 0) $ threadDelay delayUs
               -- A reduced message that switched themes changed the model, so
               -- the core marks the frame dirty and the next one applies it.
               pure (dirtyAfterUi, curInp)
