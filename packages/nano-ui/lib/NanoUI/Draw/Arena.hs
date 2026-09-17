@@ -13,6 +13,7 @@ module NanoUI.Draw.Arena
   , setDrawExternalText
   , beginLayer
   , currentLayer
+  , currentClip
   , setClip
   , withClip
   , setTexture
@@ -84,13 +85,15 @@ newDrawArena = do
   daCmdCount <- newIORef 0
   daCmdCapacity <- newIORef cmdInitialCapacity
   daCurrentLayer <- newIORef LayerContent
-  daCurrentClip <- newIORef (0, 0, 1e9, 1e9)
+  daCurrentClip <- newPrimArray 4
   daCurrentTexture <- newIORef glyphAtlasTextureId
   daCmdStartIndex <- newIORef 0
   daSnapScale <- newIORef 0.0
   daSquareGeometry <- newIORef False
   daExternalText <- newIORef False
-  pure DrawArena {..}
+  let da = DrawArena {..}
+  resetDrawArena da
+  pure da
 
 resetDrawArena :: DrawArena -> IO ()
 resetDrawArena da = do
@@ -98,7 +101,7 @@ resetDrawArena da = do
   writeIORef (daIndexCount da) 0
   writeIORef (daCmdCount da) 0
   writeIORef (daCurrentLayer da) LayerContent
-  writeIORef (daCurrentClip da) (0, 0, 1e9, 1e9)
+  setClip da (Rect 0 0 1e9 1e9)
   writeIORef (daCurrentTexture da) glyphAtlasTextureId
   writeIORef (daCmdStartIndex da) 0
 
@@ -210,7 +213,7 @@ flushCmd da = do
   start <- readIORef (daCmdStartIndex da)
   end <- readIORef (daIndexCount da)
   when (end > start) $ do
-    (cx, cy, cw, ch) <- readIORef (daCurrentClip da)
+    Rect cx cy cw ch <- currentClip da
     tex <- readIORef (daCurrentTexture da)
     layer <- readIORef (daCurrentLayer da)
     n <- readIORef (daCmdCount da)
@@ -256,15 +259,29 @@ beginLayer da layer = do
 setClip :: DrawArena -> Rect -> IO ()
 setClip da (Rect x y w h) = do
   flushCmd da
-  writeIORef (daCurrentClip da) (x, y, w, h)
+  let clip = daCurrentClip da
+  writePrimArray clip 0 x
+  writePrimArray clip 1 y
+  writePrimArray clip 2 w
+  writePrimArray clip 3 h
+
+{-# INLINE currentClip #-}
+currentClip :: DrawArena -> IO Rect
+currentClip da = do
+  let clip = daCurrentClip da
+  x <- readPrimArray clip 0
+  y <- readPrimArray clip 1
+  w <- readPrimArray clip 2
+  h <- readPrimArray clip 3
+  pure $! Rect x y w h
+
 
 -- | Run @act@ clipped to the intersection with the current clip. Not
 -- exception-safe: the frame resets the clip before the next paint anyway.
 {-# INLINE withClip #-}
 withClip :: DrawArena -> Rect -> IO a -> IO a
 withClip da rect act = do
-  (ox, oy, ow, oh) <- readIORef (daCurrentClip da)
-  let prev = Rect ox oy ow oh
+  prev <- currentClip da
   setClip da (fromMaybe (Rect 0 0 0 0) (rectIntersect prev rect))
   act <* setClip da prev
 

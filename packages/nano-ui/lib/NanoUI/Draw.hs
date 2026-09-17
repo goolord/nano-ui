@@ -18,6 +18,7 @@ module NanoUI.Draw
   , setDrawExternalText
   , beginLayer
   , currentLayer
+  , currentClip
   , setClip
   , withClip
   , finishDraw

@@ -396,7 +396,8 @@ data DrawArena = DrawArena
   , daCmdCount :: !(IORef Int)
   , daCmdCapacity :: !(IORef Int)
   , daCurrentLayer :: !(IORef Layer)
-  , daCurrentClip :: !(IORef (Float, Float, Float, Float))
+  , daCurrentClip :: !(MutablePrimArray RealWorld Float)
+  -- ^ The current clip rect: x, y, width and height.
   , daCurrentTexture :: !(IORef Int)
   , daCmdStartIndex :: !(IORef Int)
   , daSnapScale :: !(IORef Float)

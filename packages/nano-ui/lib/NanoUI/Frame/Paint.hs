@@ -24,7 +24,6 @@ module NanoUI.Frame.Paint
 
 import Control.Monad (forM_, unless, when)
 import Data.Bits ((.&.))
-import Data.IORef (readIORef)
 import Data.Maybe (catMaybes, fromMaybe)
 import qualified Data.Text as T
 import Data.Word (Word32)
@@ -44,9 +43,9 @@ import NanoUI.Context
   , scopeTheme
   )
 import NanoUI.Draw
-  ( DrawArena (..)
-  , Layer (..)
+  ( Layer (..)
   , beginLayer
+  , currentClip
   , currentLayer
   , emitDrawOps
   , pushImage
@@ -163,7 +162,7 @@ collectFloatingOccluders ctx = do
 paintNodeWithEnv :: PaintEnv -> NodeIdx -> IO ()
 paintNodeWithEnv env idx = do
   (x, y, w, h) <- getRect (peNodeArena env) idx
-  (cx, cy, cw, ch) <- readIORef (daCurrentClip (peDrawArena env))
+  Rect cx cy cw ch <- currentClip (peDrawArena env)
   let !l = max (x - paintOverhang) cx
       !t = max (y - paintOverhang) cy
       !r = min (x + w + paintOverhang) (cx + cw)
