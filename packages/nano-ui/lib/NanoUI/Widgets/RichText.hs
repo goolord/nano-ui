@@ -250,7 +250,7 @@ richTextWith' f pieces = do
               DecorationStrikethrough -> [strike]
               DecorationUnderlineStrike -> [under, strike]
               DecorationNone -> []
-      drawKey = key `hashWithSalt` maybe (-1) id hoveredRun
+      drawKey = key `hashWithSalt` fromMaybe (-1) hoveredRun
   uiIO $ do
     unless (paraWidth para0 == rw && isJust cached && fmap paraKey cached == Just key) $
       modifyIORef' cacheRef $ \m ->

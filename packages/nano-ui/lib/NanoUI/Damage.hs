@@ -5,7 +5,7 @@ module NanoUI.Damage
   , writeDamage
   ) where
 
-import Control.Monad (filterM, forM, unless, when)
+import Control.Monad (filterM, forM, join, unless, when)
 import Data.IORef (readIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.IntSet qualified as IS
@@ -639,7 +639,7 @@ clipKeyRect ctx k r
 -- stops at the first scroll node even when its rect is empty.
 scrollAncestorRect :: Context -> Int -> IO (Maybe Rect)
 scrollAncestorRect ctx k =
-  findNodeByKey ctx k >>= maybe (pure Nothing) (fmap (fromMaybe Nothing) . walkAncestors step na)
+  findNodeByKey ctx k >>= maybe (pure Nothing) (fmap join . walkAncestors step na)
   where
     na = ctxNodeArena ctx
     step i = do

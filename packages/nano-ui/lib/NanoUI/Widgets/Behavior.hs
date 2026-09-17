@@ -37,7 +37,7 @@ import NanoUI.Context
   , Slot (..)
   , slotKey
   )
-import NanoUI.Id (IdContext (..), WidgetId (..), enterKeyed, hashWidgetId, mix64)
+import NanoUI.Id (WidgetId (..), enterKeyed, hashWidgetId, idContextWidgetId)
 import NanoUI.Input
   ( Input (..)
   , Key (..)
@@ -70,10 +70,7 @@ keyedDragHeld k = do
   ctx <- askContext
   uiIO $ do
     old <- readIORef (ctxIdContext ctx)
-    let (_, child) = enterKeyed (fromIntegral (hash k)) old
-        IdContext cid sid = child
-        raw = mix64 cid sid
-        wid = if raw == 0 then WidgetId 1 else WidgetId raw
+    let wid = idContextWidgetId (snd (enterKeyed (fromIntegral (hash k)) old))
         dragK = slotKey SlotDrag (intKey wid)
     store <- getStore ctx
     pure (IM.findWithDefault 0 dragK (storeInt store) /= 0)

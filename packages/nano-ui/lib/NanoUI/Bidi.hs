@@ -12,6 +12,7 @@ module NanoUI.Bidi
   , needsBidi
   ) where
 
+import Control.Applicative ((<|>))
 import Data.Char (ord)
 import Data.List.NonEmpty qualified as NE
 import Data.Text (Text)
@@ -113,8 +114,8 @@ resolveNeutrals paragraphRtl classes =
         | k == R || k == AN || k == EN = Just True
         | otherwise = Nothing
       directions = map direction classes
-      before = scanl (\acc d -> maybe acc Just d) Nothing directions
-      after = drop 1 (scanr (\d acc -> maybe acc Just d) Nothing directions)
+      before = scanl (\acc d -> d <|> acc) Nothing directions
+      after = drop 1 (scanr (<|>) Nothing directions)
       resolve k b a
         | k == WS || k == ON = case (b, a) of
             (Just x, Just y) | x == y -> if x then R else L

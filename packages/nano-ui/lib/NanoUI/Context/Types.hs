@@ -520,7 +520,6 @@ data Context = Context
   , ctxMessages :: IORef [FrameMsg]
   , ctxFocusables :: IORef (MutablePrimArray RealWorld WidgetId)
   , ctxFocusablesCount :: IORef Int
-  , ctxFocusablesCap :: IORef Int
   , ctxSpanBase :: SpanArena
   , ctxSpanOverlay :: SpanArena
   , ctxInteractionState :: !(IORef InteractionState)

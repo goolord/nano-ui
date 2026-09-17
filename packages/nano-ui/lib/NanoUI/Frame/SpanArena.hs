@@ -23,9 +23,9 @@ import Data.Primitive (Prim)
 import Data.Primitive.Array (MutableArray, copyMutableArray, newArray, readArray, writeArray)
 import Data.Primitive.PrimArray
   ( MutablePrimArray
-  , copyMutablePrimArray
   , newPrimArray
   , readPrimArray
+  , resizeMutablePrimArray
   , writePrimArray
   )
 import Data.Text (Text)
@@ -132,16 +132,16 @@ ensureSpanCap sa needed = do
   cap <- readIORef (saCap sa)
   when (needed > cap) $ do
     let newCap = max needed (cap * 2)
-    growP (saX sa) cap newCap
-    growP (saY sa) cap newCap
-    growP (saW sa) cap newCap
-    growP (saH sa) cap newCap
-    growP (saClipX sa) cap newCap
-    growP (saClipY sa) cap newCap
-    growP (saClipW sa) cap newCap
-    growP (saClipH sa) cap newCap
-    growP (saFg sa) cap newCap
-    growP (saBg sa) cap newCap
+    growP (saX sa) newCap
+    growP (saY sa) newCap
+    growP (saW sa) newCap
+    growP (saH sa) newCap
+    growP (saClipX sa) newCap
+    growP (saClipY sa) newCap
+    growP (saClipW sa) newCap
+    growP (saClipH sa) newCap
+    growP (saFg sa) newCap
+    growP (saBg sa) newCap
     growT (saText sa) cap newCap
     writeIORef (saCap sa) newCap
     -- Keep an active snapshot pointing at the fresh columns.
@@ -150,14 +150,10 @@ ensureSpanCap sa needed = do
       Just _ -> readSpanArenaArrays sa >>= writeIORef (saSnap sa) . Just
       Nothing -> pure ()
 
-growP :: Prim a => IORef (MutablePrimArray RealWorld a) -> Int -> Int -> IO ()
-growP ref oldCap newCap = do
-  arr <- readIORef ref
-  newArr <- newPrimArray newCap
-  copyMutablePrimArray newArr 0 arr 0 oldCap
-  writeIORef ref newArr
-{-# SPECIALIZE growP :: IORef (MutablePrimArray RealWorld Float) -> Int -> Int -> IO () #-}
-{-# SPECIALIZE growP :: IORef (MutablePrimArray RealWorld Word32) -> Int -> Int -> IO () #-}
+growP :: Prim a => IORef (MutablePrimArray RealWorld a) -> Int -> IO ()
+growP ref newCap = readIORef ref >>= (`resizeMutablePrimArray` newCap) >>= writeIORef ref
+{-# SPECIALIZE growP :: IORef (MutablePrimArray RealWorld Float) -> Int -> IO () #-}
+{-# SPECIALIZE growP :: IORef (MutablePrimArray RealWorld Word32) -> Int -> IO () #-}
 
 growT :: IORef (MutableArray RealWorld Text) -> Int -> Int -> IO ()
 growT ref oldCap newCap = do

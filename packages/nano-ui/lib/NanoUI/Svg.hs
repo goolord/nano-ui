@@ -36,7 +36,7 @@ import Text.XML.Hexml qualified as Hexml
 import Data.Primitive.PrimArray (MutablePrimArray, PrimArray, copyMutablePrimArray, indexPrimArray, newPrimArray, readPrimArray, setPrimArray, sizeofPrimArray, unsafeFreezePrimArray, writePrimArray)
 import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray, smallArrayFromList)
 import Data.Word (Word8)
-import NanoUI.Types (Color (..), colorA, colorB, colorG, colorR, colorRGBA)
+import NanoUI.Types (Color (..), clamp01, colorA, colorB, colorG, colorR, colorRGBA)
 
 -- | A parsed SVG document.
 data Svg = Svg
@@ -226,7 +226,7 @@ collect m0 style0 (Element name attrs children) =
   let props = attrs ++ styleProperties (fromMaybe "" (lookup "style" attrs))
       m = maybe m0 (mul m0 . parseTransform) (lookup "transform" attrs)
       -- Opacity multiplies down the tree; the other properties replace.
-      style = (applyProperties props style0) {psOpacity = psOpacity style0 * maybe 1 clampUnit (lookup "opacity" props >>= number1)}
+      style = (applyProperties props style0) {psOpacity = psOpacity style0 * maybe 1 clamp01 (lookup "opacity" props >>= number1)}
       shape segs = [Shape (smallArrayFromList segs) m style]
       num k = fromMaybe 0 (lookup k attrs >>= length1)
    in case name of
@@ -268,12 +268,10 @@ applyProperties props s0 = foldl step s0 props
         _ -> s {psJoin = JoinMiter}
       "stroke-miterlimit" -> maybe s (\l -> s {psMiterLimit = max 1 l}) (number1 v)
       "fill-rule" -> s {psRule = if v == "evenodd" then EvenOdd else NonZero}
-      "fill-opacity" -> maybe s (\o -> s {psFillOpacity = clampUnit o}) (number1 v)
-      "stroke-opacity" -> maybe s (\o -> s {psStrokeOpacity = clampUnit o}) (number1 v)
+      "fill-opacity" -> maybe s (\o -> s {psFillOpacity = clamp01 o}) (number1 v)
+      "stroke-opacity" -> maybe s (\o -> s {psStrokeOpacity = clamp01 o}) (number1 v)
       _ -> s
 
-clampUnit :: Float -> Float
-clampUnit = max 0 . min 1
 
 parsePaint :: Text -> Paint
 parsePaint raw

@@ -119,6 +119,7 @@ import Data.Primitive.PrimArray
   , readPrimArray
   , setPrimArray
   , writePrimArray
+  , resizeMutablePrimArray
   )
 import Data.Primitive.Types (Prim)
 import GHC.Exts (RealWorld)
@@ -495,8 +496,7 @@ ensureCapacity na needed = do
 {-# NOINLINE growPrimArrayCopy #-}
 growPrimArrayCopy :: Prim a => MutablePrimArray RealWorld a -> Int -> Int -> a -> IO (MutablePrimArray RealWorld a)
 growPrimArrayCopy oldArr cap newCap defVal = do
-  newArr <- newPrimArray newCap
-  copyMutablePrimArray newArr 0 oldArr 0 cap
+  newArr <- resizeMutablePrimArray oldArr newCap
   setPrimArray newArr cap (newCap - cap) defVal
   pure newArr
 

@@ -66,7 +66,7 @@ import NanoUI.Input
   , inputMousePos
   , inputMousePressed
   )
-import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
+import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withIdFrame, withKey)
 import NanoUI.Id (IdContext (..), WidgetId, hashWidgetId)
 import NanoUI.Frame.Hit (nodeInteractionHit, scrollHitRect)
 import NanoUI.Frame.Input (isInteractiveNode)
@@ -535,13 +535,8 @@ renderMaxPane env pid =
 -- | Enter a pane's grid-relative identity scope while leaving the split tree's
 -- layout scopes intact. Consume one sibling just as 'withKey' does.
 withPaneKey :: (Ui :> es) => GridEnv es -> Word64 -> Eff es a -> Eff es a
-withPaneKey env pid action = do
-  let ref = ctxIdContext (geCtx env)
-  parent <- uiIO (readIORef ref)
-  uiIO (writeIORef ref (gePaneScope env))
-  result <- withKey pid action
-  uiIO (writeIORef ref (parent {siblingId = siblingId parent + 1}))
-  pure result
+withPaneKey env pid =
+  withIdFrame (\parent -> (parent {siblingId = siblingId parent + 1}, gePaneScope env)) . withKey pid
 
 -- | Render one pane's content via 'pgViewPane' under the pane's stable key.
 renderPane ::

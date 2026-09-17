@@ -234,10 +234,11 @@ import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Map.Strict qualified as Map
 import Data.Primitive.PrimArray
-  ( copyMutablePrimArray
-  , newPrimArray
+  ( newPrimArray
   , readPrimArray
   , writePrimArray
+  , getSizeofMutablePrimArray
+  , resizeMutablePrimArray
   )
 import Data.Proxy (Proxy (..))
 import Data.Text (Text)
@@ -576,7 +577,6 @@ newContext = do
   let initCap = 64
   ctxFocusables <- newIORef =<< newPrimArray initCap
   ctxFocusablesCount <- newIORef 0
-  ctxFocusablesCap <- newIORef initCap
   ctxSpanBase <- newSpanArena 64
   ctxSpanOverlay <- newSpanArena 64
   ctxInteractionState <- newIORef initialInteractionState
@@ -632,7 +632,6 @@ newContext = do
         , ctxMessages
         , ctxFocusables
         , ctxFocusablesCount
-        , ctxFocusablesCap
         , ctxSpanBase
         , ctxSpanOverlay
         , ctxInteractionState
@@ -676,17 +675,14 @@ registerFocusable ctx wid = do
   scope <- getArenaScope (ctxNodeArena ctx)
   when (scope .&. 1 == 0) $ do
     idx <- readIORef (ctxFocusablesCount ctx)
-    cap <- readIORef (ctxFocusablesCap ctx)
     arr <- readIORef (ctxFocusables ctx)
+    cap <- getSizeofMutablePrimArray arr
     arr' <-
       if idx >= cap
         then do
-          let newCap = max 16 (cap * 2)
-          newArr <- newPrimArray newCap
-          copyMutablePrimArray newArr 0 arr 0 idx
-          writeIORef (ctxFocusables ctx) newArr
-          writeIORef (ctxFocusablesCap ctx) newCap
-          pure newArr
+          grown <- resizeMutablePrimArray arr (max 16 (cap * 2))
+          writeIORef (ctxFocusables ctx) grown
+          pure grown
         else pure arr
     writePrimArray arr' idx wid
     writeIORef (ctxFocusablesCount ctx) (idx + 1)

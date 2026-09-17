@@ -36,12 +36,12 @@ import Data.Maybe (fromMaybe)
 import Data.Primitive.PrimArray
   ( MutablePrimArray
   , PrimArray
-  , copyMutablePrimArray
   , newPrimArray
   , readPrimArray
   , setPrimArray
   , unsafeFreezePrimArray
   , writePrimArray
+  , resizeMutablePrimArray
   )
 import Data.Word (Word32, Word8)
 import Foreign.ForeignPtr (ForeignPtr, mallocForeignPtrBytes, withForeignPtr)
@@ -196,8 +196,7 @@ growCmdStore :: DrawArena -> Int -> IO ()
 growCmdStore da oldCap = do
   let newCap = oldCap * 2
   arr <- readIORef (daCmdStore da)
-  newArr <- newPrimArray newCap
-  copyMutablePrimArray newArr 0 arr 0 oldCap
+  newArr <- resizeMutablePrimArray arr newCap
   writeIORef (daCmdStore da) newArr
   writeIORef (daCmdCapacity da) newCap
 

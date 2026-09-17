@@ -12,6 +12,7 @@ module NanoUI.Monad
   , keyed
   , keyedTag
   , scope
+  , withIdFrame
   , nextId
   , burstNextIds
   , currentId

@@ -57,7 +57,7 @@ import NanoUI.Layout.Arena
   )
 import NanoUI.Layout.Solve (positionWindowNode, scrollBarSlotOf)
 import NanoUI.Style (Padding (..))
-import NanoUI.Types (DamageBounds (..), Rect (..), V2 (..), haloDamageSlop, rectContains)
+import NanoUI.Types (DamageBounds (..), Rect (..), V2 (..), haloDamageSlop, rectContains, rectInflate)
 
 topmostWindowAtResizeHalo :: Context -> V2 -> IO (Maybe NodeIdx)
 topmostWindowAtResizeHalo ctx mouse =
@@ -71,7 +71,7 @@ topmostWindowAtResizeHalo ctx mouse =
           then pure False
           else do
             let rect = Rect x y w h
-            if rectContains (windowResizeHalo rect) mouse
+            if rectContains (rectInflate windowResizeHandleFor rect) mouse
               then pure True
               else windowInnerEastResizeHit ctx idx rect mouse
 
@@ -142,11 +142,6 @@ updateWindowDrag ctx inp = do
 
 windowResizeHandleFor :: Float
 windowResizeHandleFor = 12
-
-windowResizeHalo :: Rect -> Rect
-windowResizeHalo (Rect x y w h) =
-  let s = windowResizeHandleFor
-   in Rect (x - s) (y - s) (w + 2 * s) (h + 2 * s)
 
 -- Handles sit outside the window. The right pad strip also resizes beside the bar.
 windowResizeEdgeAt :: Rect -> V2 -> Maybe WindowResizeEdge

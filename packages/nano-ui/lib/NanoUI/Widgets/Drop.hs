@@ -15,6 +15,7 @@ module NanoUI.Widgets.Drop
   , dropZone
   ) where
 
+import Control.Applicative ((<|>))
 import Control.Monad (when)
 import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
@@ -97,7 +98,7 @@ useDrop bounds = do
       positions =
         drop 1 $ scanl
           ( \pos ev -> case dropEventType ev of
-              DropPosition -> maybe pos Just (dropEventPos ev)
+              DropPosition -> dropEventPos ev <|> pos
               DropComplete -> Nothing
               _ -> pos
           )

@@ -91,7 +91,7 @@ finalizeTabFocus ctx inp =
         else do
           focusables <- getFocusables ctx
           ids <- filterModalFocusables ctx (filter (/= WidgetId 0) focusables)
-          pure (if null ids then WidgetId 0 else tabNext cur ids shift)
+          pure (tabNext cur ids shift)
     when (hashWidgetId next /= 0) $ do
       -- Keyboard focus shows its ring until the next pointer press. Focus that
       -- stays put (a lone focusable) changes no focus rect, so damage it here.

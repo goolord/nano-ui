@@ -94,9 +94,7 @@ import NanoUI.Widgets.Node
 
 {-# INLINE withDefault #-}
 withDefault :: Ui :> es => (Layout -> Eff es a -> Eff es r) -> Eff es a -> Eff es r
-withDefault c child = do
-  base <- askDefaultLayout
-  c base child
+withDefault = withDefaultWith id
 
 {-# INLINE withDefaultWith #-}
 withDefaultWith :: Ui :> es => (Layout -> Layout) -> (Layout -> Eff es a -> Eff es r) -> Eff es a -> Eff es r

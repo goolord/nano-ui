@@ -193,7 +193,7 @@ noteDebugLoop ref dt =
         fps = if dtD > 1e-4 && dtD < 0.25 then 1 / dtD else 0
         ema' =
           if fps > 0
-            then if smLoopEma s <= 0 then fps else blend (smLoopEma s) fps
+            then blend (smLoopEma s) fps
             else smLoopEma s
      in (s {smLoopEma = ema'}, ())
 
@@ -233,7 +233,7 @@ noteDebugPresent ref uiMs renderMs presentMs frameMs verts indices cmds = do
             else 0
         ema' =
           if instantFps > 0
-            then if smPresentEma s <= 0 then instantFps else blend (smPresentEma s) instantFps
+            then blend (smPresentEma s) instantFps
             else smPresentEma s
      in ( s
              { smPresentEma = ema'

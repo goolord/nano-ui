@@ -11,6 +11,7 @@ module NanoUI.Frame.Scroll
   , ScrollBarLayout (..)
   ) where
 
+import Control.Applicative ((<|>))
 import Control.Monad (forM_, void, when)
 import Data.Foldable (find)
 import Data.Maybe (fromMaybe)
@@ -309,7 +310,7 @@ findScrollNodeUnderMouse ctx mouse = do
     else do
       mModal <- topmostModalAtMouse ctx mouse
       mTop <- topmostOverlayAtMouse ctx mouse
-      let start = fromMaybe 0 (maybe mTop Just mModal)
+      let start = fromMaybe 0 (mModal <|> mTop)
       (x, y, w, h) <- getRect (ctxNodeArena ctx) start
       queryScrollTarget ctx start mouse (Rect x y w h)
 
