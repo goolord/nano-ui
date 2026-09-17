@@ -38,6 +38,7 @@ module NanoUI.Context.Types
   , CustomMeasureFn
   , CustomDrawContext (..)
   , CustomDrawBuild
+  , ThemeScopes (..)
   , FrameMsg (..)
   , decodeMessages
   , reduceMessages
@@ -54,6 +55,8 @@ import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
 import Data.Map.Strict (Map)
 import Data.Primitive.PrimArray (MutablePrimArray)
+import Data.Primitive.SmallArray (SmallMutableArray)
+import Data.Word (Word64)
 import Data.Text (Text)
 import Data.Typeable (TypeRep, Typeable, cast)
 import Data.Vector (Vector)
@@ -79,6 +82,27 @@ import NanoUI.Types
   , Size (..)
   , V2
   )
+
+-- | Themes the view's @styled@ scopes pushed this frame, and last frame's, to
+-- tell whether a frame changed only how its scopes look. A node's scope holds
+-- an index into 'tsThemes' plus one; index 0 is the context theme.
+data ThemeScopes = ThemeScopes
+  { tsCount :: {-# UNPACK #-} !Int
+  , tsThemes :: !(SmallMutableArray RealWorld Theme)
+  -- ^ What each scope is drawn with.
+  , tsRaw :: !(SmallMutableArray RealWorld Theme)
+  -- ^ Each scope's theme before a disabled scope faded it, which nested
+  -- @styled@ scopes modify.
+  , tsPrevCount :: {-# UNPACK #-} !Int
+  , tsPrev :: !(SmallMutableArray RealWorld Theme)
+  , tsPrevRaw :: !(SmallMutableArray RealWorld Theme)
+  , tsDisabled :: !Bool
+  -- ^ A disabled scope was entered this pass, so some widget may be disabled.
+  , tsChanged :: !Bool
+  -- ^ A pushed theme differs from the one at its index last frame.
+  , tsPrevSig :: {-# UNPACK #-} !Word64
+  -- ^ Last frame's scope signature ('NanoUI.Layout.Arena.getScopeSignature').
+  }
 
 data FrameMsg where
   FrameMsg :: Typeable a => a -> FrameMsg
@@ -493,6 +517,7 @@ data Context = Context
   , ctxPaintFull :: !(IORef Bool)
   , ctxExternalText :: Bool
   , ctxTheme :: !(IORef Theme)
+  , ctxThemeScopes :: !(IORef ThemeScopes)
   , ctxContainerStack :: IORef [Int]
   , ctxMessages :: IORef [FrameMsg]
   , ctxFocusables :: IORef (MutablePrimArray RealWorld WidgetId)

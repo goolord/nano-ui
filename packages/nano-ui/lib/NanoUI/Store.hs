@@ -4,7 +4,6 @@ module NanoUI.Store
   , mirrorStoresChanged
   , bumpMirror
   , slotKey
-  , slotDisabled
   , slotCursor
   , slotAnchor
   , slotDrag
@@ -181,8 +180,7 @@ slotKey tag k = fromIntegral (mix64 (fromIntegral k) tag)
 -- | Every built-in slot. 'deleteWidgetState' clears all of them, so a new slot
 -- only needs a constructor here to be cleaned up with its widget.
 data Slot
-  = SlotDisabled
-  | SlotCursor
+  = SlotCursor
   | SlotAnchor
   | SlotDrag
   | SlotDragW
@@ -261,9 +259,6 @@ slotNumericHeld = slotTag SlotNumericHeld
 -- seconds.
 slotNumericRepeat :: Word64
 slotNumericRepeat = slotTag SlotNumericRepeat
-
-slotDisabled :: Word64
-slotDisabled = slotTag SlotDisabled
 
 slotCursor :: Word64
 slotCursor = slotTag SlotCursor

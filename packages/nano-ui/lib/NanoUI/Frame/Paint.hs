@@ -23,6 +23,7 @@ module NanoUI.Frame.Paint
   ) where
 
 import Control.Monad (forM_, unless, when)
+import Data.Bits ((.&.))
 import Data.IORef (readIORef)
 import Data.Maybe (catMaybes)
 import qualified Data.Text as T
@@ -39,6 +40,8 @@ import NanoUI.Context
   , lookupCustomDrawing
   , lookupDrawing
   , lookupImageUv
+  , nodeTheme
+  , scopeTheme
   )
 import NanoUI.Draw
   ( DrawArena (..)
@@ -90,6 +93,7 @@ import NanoUI.Layout.Arena
   , getDirection
   , getHeightSizing
   , getNodeFontSize
+  , getNodeScope
   , getNodeType
   , getNodeValue
   , getPadding
@@ -116,7 +120,9 @@ import NanoUI.Style
   , themePanel
   , themeSeparator
   , themeWindow
-  , unpackPanelStyle
+  , fadeAlpha
+  , themeDisabledFade
+  , themeFocusRing
   )
 import NanoUI.Types (Color (..), ImageId (..), Rect (..), V2 (..), colorA, colorRGBA, rectFullyInside, rectInflate)
 import NanoUI.Widgets.ColorPicker (colorPickerPartRect)
@@ -139,20 +145,17 @@ lowerShapes ctx = do
 -- hide whatever lies fully behind them.
 collectFloatingOccluders :: Context -> IO [Rect]
 collectFloatingOccluders ctx = do
-  theme <- readIORef (ctxTheme ctx)
   let na = ctxNodeArena ctx
       isOpaque s = colorA (styleBg s) == 255
-      winOpaque = isOpaque (overlayWindowStyle theme)
-      modalOpaque = isOpaque (overlayModalStyle theme)
-      menuOpaque = isOpaque (overlayMenuStyle theme)
-      occludes = \case
-        NodeWindow -> winOpaque
-        NodeModal -> modalOpaque
-        NodePopup -> menuOpaque
+      occludes theme = \case
+        NodeWindow -> isOpaque (overlayWindowStyle theme)
+        NodeModal -> isOpaque (overlayModalStyle theme)
+        NodePopup -> isOpaque (overlayMenuStyle theme)
         _ -> False
       addPanel acc idx = do
         nt <- getNodeType na idx
-        if not (occludes nt)
+        opaque <- if isFloatingNode nt then (`occludes` nt) <$> nodeTheme ctx idx else pure False
+        if not opaque
           then pure acc
           else do
             (x, y, w, h) <- getRect na idx
@@ -177,7 +180,12 @@ paintNodeWithEnv env idx = do
   unless (w <= 0 || h <= 0 || r <= l || b <= t) $
     unless (peHasOccluders env && any (rectFullyInside (Rect l t (r - l) (b - t))) (peOccluders env)) $ do
       nt <- getNodeType (peNodeArena env) idx
-      lowerNodeVisible env idx nt (Rect x y w h)
+      scope <- getNodeScope (peNodeArena env) idx
+      if scope == peScope env
+        then lowerNodeVisible env idx nt (Rect x y w h)
+        else do
+          theme <- scopeTheme (peContext env) scope
+          lowerNodeVisible env {peTheme = theme, peScope = scope} idx nt (Rect x y w h)
 
 -- | How far a node may paint outside its rect: the focus ring sits 2px out
 -- with a 1.5px stroke.
@@ -225,7 +233,7 @@ paintFocusRing env idx nt rect = do
     let (ring, radius)
           | nt == NodeTree = (rectInflate (-1) target, 0)
           | otherwise = (rectInflate 2 target, 4)
-    pushRoundedStroke (peDrawArena env) ring radius 1.5 (themeAccent (peTheme env))
+    pushRoundedStroke (peDrawArena env) ring radius 1.5 (themeFocusRing (peTheme env))
 
 paintContainerNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
 paintContainerNode env idx rect = do
@@ -242,9 +250,7 @@ paintContainerNode env idx rect = do
 paintPanelNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
 paintPanelNode env idx rect@(Rect x y w h) = do
   let da = peDrawArena env
-      panel = themePanel (peTheme env)
-  si <- getStyleIdx (peNodeArena env) idx
-  let style = if si /= 0 then unpackPanelStyle panel si else panel
+      style = themePanel (peTheme env)
   fillStyledRect da style rect
   strokeStyledRect da style x y w h
   withClip da (borderContentClip style rect) $ walkChildrenWithOccluders env idx
@@ -368,8 +374,13 @@ paintImageNode env idx rect = do
   tex <- imageIdFromText <$> getText (peNodeArena env) idx
   mUv <- lookupImageUv (peContext env) (ImageId tex)
   case mUv of
-    Just (u0, v0, u1, v1) ->
-      pushImage da rect atlasTextureId u0 v0 u1 v1 (colorRGBA 255 255 255 255)
+    Just (u0, v0, u1, v1) -> do
+      -- A disabled image fades the way disabled widget colours do.
+      let tint
+            | peScope env .&. 1 /= 0 = fadeAlpha white (round (255 * (1 - themeDisabledFade (peTheme env))))
+            | otherwise = white
+          white = colorRGBA 255 255 255 255
+      pushImage da rect atlasTextureId u0 v0 u1 v1 tint
     _ -> pushRect da rect (themeAccent (peTheme env))
 
 {-# NOINLINE paintDrawingNode #-}

@@ -8,21 +8,21 @@ module NanoUI.Frame.Overlay
 
 import Control.Monad (when)
 import Data.IORef (readIORef)
-import NanoUI.Context (Context (..))
+import NanoUI.Context (Context (..), nodeTheme)
 import NanoUI.Draw (pushRect, withClip)
 import NanoUI.Frame.Chrome (overlayMenuStyle, overlayModalStyle, overlayWindowStyle, paintMenuPanel)
 import NanoUI.Frame.Hit (modalTreeOpen)
 import NanoUI.Frame.Paint (walkChildren)
 import NanoUI.Layout.Arena (NodeIdx, NodeType (..), forNodes_, getNodeType, getPadding, getRect)
-import NanoUI.Style (Padding (..), Style, themeOverlayDim, themeSeparator)
+import NanoUI.Style (Padding (..), Style, Theme, themeOverlayDim, themeSeparator)
 import NanoUI.Types (Rect (..), Size (..))
 import NanoUI.Widgets.Chrome (titleBarChromeHFor, windowChromeSepH)
 
 drawWindowOverlays :: Context -> IO ()
-drawWindowOverlays ctx = do
-  theme <- readIORef (ctxTheme ctx)
+drawWindowOverlays ctx =
   forFloatingNode ctx NodeWindow $ \idx rect@(Rect x y w _) -> do
-    drawFloatingPanel ctx idx (overlayWindowStyle theme) rect
+    theme <- nodeTheme ctx idx
+    drawFloatingPanel ctx theme idx (overlayWindowStyle theme) rect
     pad <- getPadding (ctxNodeArena ctx) idx
     let sepY = y + padT pad + titleBarChromeHFor - windowChromeSepH
     pushRect
@@ -31,10 +31,10 @@ drawWindowOverlays ctx = do
       (themeSeparator theme)
 
 drawPopupOverlays :: Context -> IO ()
-drawPopupOverlays ctx = do
-  theme <- readIORef (ctxTheme ctx)
-  forFloatingNode ctx NodePopup $ \idx rect ->
-    drawFloatingPanel ctx idx (overlayMenuStyle theme) rect
+drawPopupOverlays ctx =
+  forFloatingNode ctx NodePopup $ \idx rect -> do
+    theme <- nodeTheme ctx idx
+    drawFloatingPanel ctx theme idx (overlayMenuStyle theme) rect
 
 drawModalOverlays :: Context -> Size -> IO ()
 drawModalOverlays ctx (Size ww wh) = do
@@ -42,8 +42,9 @@ drawModalOverlays ctx (Size ww wh) = do
   when found $ do
     theme <- readIORef (ctxTheme ctx)
     pushRect (ctxDrawArena ctx) (Rect 0 0 ww wh) (themeOverlayDim theme)
-    forFloatingNode ctx NodeModal $ \idx rect ->
-      drawFloatingPanel ctx idx (overlayModalStyle theme) rect
+    forFloatingNode ctx NodeModal $ \idx rect -> do
+      modalTheme <- nodeTheme ctx idx
+      drawFloatingPanel ctx modalTheme idx (overlayModalStyle modalTheme) rect
 
 forFloatingNode :: Context -> NodeType -> (NodeIdx -> Rect -> IO ()) -> IO ()
 forFloatingNode ctx nodeType draw =
@@ -53,7 +54,7 @@ forFloatingNode ctx nodeType draw =
       (x, y, w, h) <- getRect (ctxNodeArena ctx) idx
       draw idx (Rect x y w h)
 
-drawFloatingPanel :: Context -> NodeIdx -> Style -> Rect -> IO ()
-drawFloatingPanel ctx idx style rect = do
-  paintMenuPanel (ctxDrawArena ctx) style rect
+drawFloatingPanel :: Context -> Theme -> NodeIdx -> Style -> Rect -> IO ()
+drawFloatingPanel ctx theme idx style rect = do
+  paintMenuPanel (ctxDrawArena ctx) theme style rect
   withClip (ctxDrawArena ctx) rect (walkChildren ctx idx)

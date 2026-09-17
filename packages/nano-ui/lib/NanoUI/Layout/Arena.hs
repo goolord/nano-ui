@@ -115,6 +115,10 @@ module NanoUI.Layout.Arena
   , setNodeFontSize
   , getNodeFontColor
   , setNodeFontColor
+  , getNodeScope
+  , getArenaScope
+  , setArenaScope
+  , getScopeSignature
   , ensureScratchCapacity
   , AxisSnapshot (..)
   , ensureAxisSnapshot
@@ -137,7 +141,7 @@ module NanoUI.Layout.Arena
 
 import Control.Exception (bracket_)
 import Control.Monad (forM_, when)
-import Data.Bits (shiftL, shiftR, (.&.), (.|.))
+import Data.Bits (shiftL, shiftR, xor, (.&.), (.|.))
 import Data.HashTable.IO (BasicHashTable)
 import qualified Data.HashTable.IO as HT
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
@@ -242,6 +246,9 @@ data NodeArenaArrays = NodeArenaArrays
   , naArrTextStore :: !(MutableArray RealWorld Text)
   , naArrOptionsStore :: !(MutableArray RealWorld [Text])
   , naArrFontColor :: !(MutablePrimArray RealWorld Int)
+  , naArrScope :: !(MutablePrimArray RealWorld Int)
+  -- ^ The paint scope each node was added under: a theme index shifted left
+  -- one bit, and the disabled flag in bit 0. See 'NanoUI.Context.Theme'.
   }
 
 data NodeArena = NodeArena
@@ -263,6 +270,10 @@ data NodeArena = NodeArena
   , naFitMemo :: IORef WidthMemo
   , naEpoch :: IORef Word32
   , naIndex :: IORef (BasicHashTable WidgetId Word64)
+  -- The scope new nodes are stamped with, and a signature of the scoped
+  -- nodes added this frame, so a frame that only changes scopes can tell.
+  , naScope :: IORef Int
+  , naScopeSig :: IORef Word64
   }
 
 -- | Flex solver scratch: child node indices, their measured widths and
@@ -408,6 +419,7 @@ newNodeArenaArrays cap = do
   naArrTextStore <- newArray cap T.empty
   naArrOptionsStore <- newArray cap []
   naArrFontColor <- newPrimArray cap
+  naArrScope <- newPrimArray cap
   pure NodeArenaArrays {..}
 
 newFlexScratch :: Int -> IO FlexScratch
@@ -447,11 +459,15 @@ newNodeArena = do
   naFitMemo <- newIORef =<< newWidthMemo cap
   naEpoch <- newIORef 1
   naIndex <- newIORef =<< HT.new
+  naScope <- newIORef 0
+  naScopeSig <- newIORef 0
   pure NodeArena {..}
 
 resetNodeArena :: NodeArena -> IO ()
 resetNodeArena na = do
   writeIORef (naCount na) 0
+  writeIORef (naScope na) 0
+  writeIORef (naScopeSig na) 0
   !ft <- readIORef (naFrameTag na)
   writeIORef (naFrameTag na) (if ft == maxBound then 1 else ft + 1)
   !ep <- readIORef (naEpoch na)
@@ -499,6 +515,7 @@ ensureCapacity na needed = do
       naArrTextStore <- growBoxedStoreCopy T.empty (naArrTextStore a) cap newCap
       naArrOptionsStore <- growBoxedStoreCopy [] (naArrOptionsStore a) cap newCap
       naArrFontColor <- growPrimArrayCopy (naArrFontColor a) cap newCap 0
+      naArrScope <- growPrimArrayCopy (naArrScope a) cap newCap 0
       growWidthMemo (naWrapMemo na) cap newCap
       growWidthMemo (naFitMemo na) cap newCap
       let newA = NodeArenaArrays {..}
@@ -605,6 +622,11 @@ addNode na nt parent dir wSiz hSiz pad gap minW minH maxW maxH grow ax ay = do
   writeTree a idx treeNextSibling (-1)
   writeTree a idx treeTextIdx (-1)
   writePrimArray (naArrFontColor a) idx 0
+  scope <- readIORef (naScope na)
+  writePrimArray (naArrScope a) idx scope
+  when (scope /= 0) $ do
+    sig <- readIORef (naScopeSig na)
+    writeIORef (naScopeSig na) $! (sig * 0x100000001b3) `xor` (fromIntegral idx `shiftL` 32 .|. fromIntegral scope)
   writeArray (naArrOptionsStore a) idx []
 
   when (parent >= 0) $ do
@@ -1031,6 +1053,22 @@ setNodeFontColor na idx mCol = do
         Nothing -> 0
         Just (Color w) -> 0x100000000 .|. fromIntegral w
   writePrimArray (naArrFontColor a) idx val
+
+{-# INLINE getNodeScope #-}
+getNodeScope :: NodeArena -> NodeIdx -> IO Int
+getNodeScope na idx = arenaArrays na >>= \a -> readPrimArray (naArrScope a) idx
+
+{-# INLINE getArenaScope #-}
+getArenaScope :: NodeArena -> IO Int
+getArenaScope na = readIORef (naScope na)
+
+{-# INLINE setArenaScope #-}
+setArenaScope :: NodeArena -> Int -> IO ()
+setArenaScope na = writeIORef (naScope na)
+
+{-# INLINE getScopeSignature #-}
+getScopeSignature :: NodeArena -> IO Word64
+getScopeSignature na = readIORef (naScopeSig na)
 
 {-# INLINE getStyleIdx #-}
 getStyleIdx :: NodeArena -> NodeIdx -> IO Int

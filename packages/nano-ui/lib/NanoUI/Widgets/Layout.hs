@@ -4,9 +4,6 @@ module NanoUI.Widgets.Layout
   ( panel
   , panelWith
   , panel'
-  , panelStyled
-  , panelStyledWith
-  , panelStyled'
   , callout
   , calloutWith
   , row
@@ -67,7 +64,7 @@ import NanoUI.Layout.Arena
   , setWidgetId
   )
 import NanoUI.Input (Input (inputWindowSize))
-import NanoUI.Monad (Ui, askContext, askDefaultLayout, askInput, nextId, uiIO)
+import NanoUI.Monad (Ui, askContext, askDefaultLayout, askInput, nextId, styled, uiIO)
 import NanoUI.Style
   ( AlignX (..)
   , Direction (..)
@@ -77,16 +74,17 @@ import NanoUI.Style
   , fillW
   , gap
   , grow
-  , packPanelStyle
   , padXY
+  , panelStyle
   )
-import NanoUI.Types (Color (..), Size (..), colorRGBA, lerpColor)
+import NanoUI.Style qualified as Style
+import NanoUI.Types (Color (..), Size (..), lerpColor)
 import NanoUI.Widgets.Node
   ( Response
   , addSizingLeafNode
   , addWidget
   , container
-  , containerStyled
+
   , parentIdx
   , withContainerNode
   )
@@ -123,28 +121,19 @@ panelWith = (`withDefaultWith` panel')
 panel' :: Ui :> es => Layout -> Eff es a -> Eff es a
 panel' = container NodePanel
 
-{-# INLINE panelStyled #-}
-panelStyled :: Ui :> es => Color -> Color -> Eff es a -> Eff es a
-panelStyled bgCol borderCol = withDefault (panelStyled' bgCol borderCol)
-
-{-# INLINE panelStyledWith #-}
-panelStyledWith :: Ui :> es => Color -> Color -> (Layout -> Layout) -> Eff es a -> Eff es a
-panelStyledWith bgCol borderCol f = withDefaultWith f (panelStyled' bgCol borderCol)
-
-{-# INLINE panelStyled' #-}
-panelStyled' :: Ui :> es => Color -> Color -> Layout -> Eff es a -> Eff es a
-panelStyled' bgCol borderCol layout child =
-  containerStyled NodePanel layout (packPanelStyle bgCol borderCol) child
-
 {-# INLINE callout #-}
 callout :: Ui :> es => Color -> Eff es a -> Eff es a
 callout borderCol = calloutWith borderCol id
 
+-- | A panel tinted with @col@: a border in it and a faint wash of it over the
+-- panel colour. The tint applies to the callout's own panel and to panels
+-- nested in it.
 {-# INLINE calloutWith #-}
 calloutWith :: Ui :> es => Color -> (Layout -> Layout) -> Eff es a -> Eff es a
-calloutWith borderCol f =
-  let bgCol = lerpColor borderCol (colorRGBA 30 30 35 255) 0.88
-   in panelStyledWith bgCol borderCol (f . padXY 10 6 . gap 8 . fillW)
+calloutWith col f =
+  styled
+    (\t -> panelStyle (Style.background (lerpColor col (Style.styleBg (Style.themePanel t)) 0.88) . Style.borderColor col) t)
+    . panelWith (f . padXY 10 6 . gap 8 . fillW)
 
 -- =============================================================================
 -- Row

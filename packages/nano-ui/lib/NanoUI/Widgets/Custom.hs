@@ -94,6 +94,7 @@ import NanoUI.Context
   , setStore
   , writeStoreBool
   , writeStoreFloat
+  , widgetTheme
   )
 import NanoUI.Draw (DrawOp (..))
 import NanoUI.Font (FontMetrics)
@@ -125,6 +126,7 @@ import NanoUI.Style
   , themeAccent
   , themeButton
   , themePanel
+  , themeOnAccent
   )
 import NanoUI.Types
   ( Color
@@ -133,7 +135,6 @@ import NanoUI.Types
   , V2 (..)
   , clamp
   , clamp01
-  , colorRGBA
   , defaultDamageSlop
   , rectContains
   , v2X
@@ -310,7 +311,7 @@ customDrawContext ctx fm wid hovered pressed = do
   disabled <- isDisabled ctx wid
   focused <- (== wid) <$> getFocusId ctx
   active <- readIORef (ctxActiveId ctx)
-  theme <- readIORef (ctxTheme ctx)
+  theme <- widgetTheme ctx wid
   pure
     CustomDrawContext
       { cdcHovered = hovered && not disabled
@@ -547,7 +548,7 @@ toggleSwitchWith' f on = do
             thumbR = r - 3
             thumbX = if current then (x + w - r) else (x + r)
             thumbY = y + r
-            thumbCol = colorRGBA 255 255 255 255
+            thumbCol = themeOnAccent theme
         drawRoundedRect (Rect x y w h) r bgCol
         drawStrokeRoundedRect (Rect x y w h) r 1 (styleBorder (themeButton theme))
         drawCircle (V2 thumbX thumbY) thumbR thumbCol

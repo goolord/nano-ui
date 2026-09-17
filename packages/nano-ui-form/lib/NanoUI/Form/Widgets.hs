@@ -21,7 +21,9 @@ import NanoUI
   , heading
   , label
   , padXY
-  , panelStyledWith
+  , calloutWith
+  , themeRed
+  , uiTheme
   , rowWith
   )
 import NanoUI.Form.Types (FormView (..))
@@ -30,9 +32,8 @@ import NanoUI.Form.Types (FormView (..))
 defaultErrorView :: Foldable f => f Text -> FormView
 defaultErrorView errs | null errs = FormView (pure ())
 defaultErrorView errs = FormView $ do
-  let errBorder = colorRGBA 239 68 68 255
-      errBg     = colorRGBA 48 20 22 255
-  panelStyledWith errBg errBorder (padXY 8 4 . gap 2 . fillW) $ do
+  errColor <- themeRed <$> uiTheme
+  calloutWith errColor (padXY 8 4 . gap 2) $ do
     forM_ errs $ \err ->
       danger ("• " <> err)
 

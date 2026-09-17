@@ -21,7 +21,6 @@ module NanoUI.Frame.TextInput
   ) where
 
 import Control.Monad (unless, when)
-import Data.IORef (readIORef)
 import qualified Data.IntMap.Strict as IM
 import Data.Maybe (mapMaybe)
 import Data.Text (Text)
@@ -42,6 +41,7 @@ import NanoUI.Context
   , slotAnchor
   , slotCursor
   , slotKey
+  , nodeTheme
   )
 import NanoUI.Draw (DrawArena, pushRect)
 import NanoUI.Font (FontMetrics (..), centeredTextY, lineWidthIO, prepareFontMetrics, textIndexAtX, widgetContentInset)
@@ -69,7 +69,7 @@ import NanoUI.Layout.Arena
   , getWidgetId
   )
 import NanoUI.Store (slotTextInputScroll)
-import NanoUI.Style (Style (..), themeAccent)
+import NanoUI.Style (Style (..), themeSelection)
 import NanoUI.Types (Color (..), Rect (..), V2 (..), rectContains, rectIntersect, rectOverlapArea, rectW)
 import NanoUI.WidgetText
   ( comboTextClip
@@ -84,8 +84,7 @@ import NanoUI.WidgetText
   , textInputSelectableMode
   )
 import NanoUI.Widgets.TextCommon
-  ( selectionBgColor
-  , selectionCaretGeom
+  ( selectionCaretGeom
   , textSelectionForClick
   , textSelectionForDrag
   )
@@ -222,8 +221,8 @@ syncTextInputScroll ctx idx x y w h = do
         setStore ctx (store {storeFloat = IM.insert (slotKey slotTextInputScroll key) newScroll (storeFloat store)})
       pure newScroll
 
-drawTextInputSelection :: DrawArena -> Context -> NodeIdx -> Float -> Float -> Float -> Float -> Style -> Maybe Float -> IO ()
-drawTextInputSelection da ctx idx x y w h style mScrollX = do
+drawTextInputSelection :: DrawArena -> Context -> NodeIdx -> Float -> Float -> Float -> Float -> Maybe Float -> IO ()
+drawTextInputSelection da ctx idx x y w h mScrollX = do
   focus <- textInputFocused ctx idx
   when focus $ do
     value <- textInputValue ctx idx
@@ -235,7 +234,7 @@ drawTextInputSelection da ctx idx x y w h style mScrollX = do
         selLo = min anchor cursor
         selHi = max anchor cursor
     when (selLo < selHi) $ do
-      theme <- readIORef (ctxTheme ctx)
+      theme <- nodeTheme ctx idx
       (Rect _ boxY _ boxH, Rect clipX _ _ _) <- nodeTextFieldGeom ctx idx x y w h
       fm <- nodeFontMetrics ctx idx
       let lineH = fmLineHeight fm
@@ -248,7 +247,7 @@ drawTextInputSelection da ctx idx x y w h style mScrollX = do
         (centeredTextY fm boxY boxH lineH)
         (wHi - wLo)
         lineH
-        (selectionBgColor (themeAccent theme) (styleBg style))
+        (themeSelection theme)
 
 drawTextInputCaret :: DrawArena -> Context -> NodeIdx -> Float -> Float -> Float -> Float -> Style -> IO ()
 drawTextInputCaret da ctx idx x y w h style = do

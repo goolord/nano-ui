@@ -326,4 +326,11 @@ findTextInputUnderMouse ctx mouse = do
           rect <- widgetHitRect ctx nt idx x y w h
           hit <- nodeClippedHit ctx idx rect mouse
           if hit then overlayHitAllowed ctx idx mouse else pure False
-  traverse (getWidgetId na) mIdx
+  mWid <- traverse (getWidgetId na) mIdx
+  -- A press on a disabled field lands on nothing: it takes focus from
+  -- whichever field had it and gives it to none.
+  case mWid of
+    Just wid -> do
+      disabled <- isDisabled ctx wid
+      pure (if disabled then Nothing else Just wid)
+    Nothing -> pure Nothing

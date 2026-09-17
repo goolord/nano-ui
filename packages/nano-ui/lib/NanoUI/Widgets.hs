@@ -13,8 +13,6 @@ module NanoUI.Widgets
   , respRightClicked
   , panel
   , panelWith
-  , panelStyled
-  , panelStyledWith
   , callout
   , calloutWith
   , row
@@ -327,8 +325,6 @@ import NanoUI.Widgets.Layout
   , labelWith
   , labelWith'
   , panel
-  , panelStyled
-  , panelStyledWith
   , panelWith
   , responsive
   , responsiveRowCol

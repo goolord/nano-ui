@@ -23,6 +23,7 @@ import NanoUI.Context
   , isDisabled
   , isSelectOpen
   , lookupCustomCursor
+  , widgetTheme
   )
 import NanoUI.Font (FontMetrics, sliderHandleSlack, sliderTrackBounds)
 import NanoUI.Frame.Hit (findNodeByWidgetId, nodePointVisible, scrollHitRect)
@@ -180,7 +181,7 @@ cursorKindAt ctx wid mouse inp
                   active <- readIORef (ctxActiveId ctx)
                   hot <- getHotId ctx
                   focused <- (== wid) <$> getFocusId ctx
-                  theme <- readIORef (ctxTheme ctx)
+                  theme <- widgetTheme ctx wid
                   let cdc =
                         CustomDrawContext
                           { cdcHovered = hot == wid

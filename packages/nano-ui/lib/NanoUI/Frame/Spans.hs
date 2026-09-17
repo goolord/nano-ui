@@ -22,6 +22,7 @@ import NanoUI.Context
   , SpanCacheEntry (..)
   , WidgetTextCacheEntry (..)
   , WidgetTextPlacement (..)
+  , nodeTheme
   )
 import NanoUI.Damage (floatingPanelRects)
 import NanoUI.Font
@@ -206,7 +207,7 @@ collectNodeTextSpans ctx idx = do
   if nt /= NodeText
     then if isWidgetNode nt then widgetTextSpans ctx nt idx x y w h else pure []
     else do
-      theme <- readIORef (ctxTheme ctx)
+      theme <- nodeTheme ctx idx
       raw <- getText arena idx
       si <- getStyleIdx arena idx
       mCustomCol <- getNodeFontColor arena idx

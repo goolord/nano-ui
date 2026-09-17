@@ -37,6 +37,9 @@ data PaintEnv = PaintEnv
   , peNodeArena :: NodeArena
   , peDrawArena :: DrawArena
   , peTheme :: Theme
+  , peScope :: Int
+    -- ^ The node scope 'peTheme' belongs to. A node in another scope repaints
+    -- its subtree with that scope's theme.
   , peFontMetrics :: FontMetrics
   , peOccluders :: [Rect]
   , peHasOccluders :: Bool
@@ -57,6 +60,7 @@ buildPaintEnv ctx occluders = do
     , peNodeArena = ctxNodeArena ctx
     , peDrawArena = ctxDrawArena ctx
     , peTheme = theme
+    , peScope = 0
     , peFontMetrics = ctxFontMetrics ctx
     , peOccluders = occluders
     , peHasOccluders = not (null occluders)

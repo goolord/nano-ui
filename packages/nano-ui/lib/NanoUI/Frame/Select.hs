@@ -41,6 +41,8 @@ import NanoUI.Context
   , setSelectDropPress
   , setSelectOpen
   , setStore
+  , widgetTheme
+  , isDisabled
   )
 import NanoUI.Draw (pushRect, pushRoundedRect, pushText, withClip)
 import NanoUI.Font (FontMetrics, centeredTextY, menuItemPadX, menuItemRowH, menuOuterPad, widgetContentInset)
@@ -234,7 +236,8 @@ selectWidgetIfAny ctx wid
         Nothing -> pure Nothing
         Just idx -> do
           nt <- getNodeType (ctxNodeArena ctx) idx
-          pure (if nt == NodeSelect then Just wid else Nothing)
+          disabled <- isDisabled ctx wid
+          pure (if nt == NodeSelect && not disabled then Just wid else Nothing)
 
 findOpenSelectWidget :: Context -> IO (Maybe WidgetId)
 findOpenSelectWidget ctx = do
@@ -398,11 +401,12 @@ comboDropPickIndex (Rect _ dy _ _) itemH nOpts mouseY =
 
 drawSelectOverlays :: Context -> Input -> IO ()
 drawSelectOverlays ctx inp = do
-  theme <- readIORef (ctxTheme ctx)
   dropdowns <- openDropdowns ctx
   forM_ dropdowns $ \dd -> do
     allow <- widgetOverlayAllowed ctx (ddWidget dd)
-    when allow $ drawDropdownMenu ctx inp theme dd
+    when allow $ do
+      theme <- widgetTheme ctx (ddWidget dd)
+      drawDropdownMenu ctx inp theme dd
 
 -- | Paint one open dropdown (select or combo). The combo list clips to its
 -- inner area (so x-shifted text and row fills stop at the scrollbar lanes)
@@ -426,7 +430,7 @@ drawDropdownMenu ctx inp theme dd = do
             (_, th) <- ctxMeasureText ctx (drOption row)
             pushText da fm (drTextX row) (centeredTextY fm ry rh th) (drOption row) $
               if picked then themeAccent theme else styleFg style
-  paintMenuPanel da style (ddRect dd)
+  paintMenuPanel da theme style (ddRect dd)
   if ddCombo dd
     then do
       let (inner, vSb, hSb, _) = comboScrollGeom (ddRect dd) (ddComboRows dd) (length (ddOptions dd)) (ddComboWindow dd) (ddComboScrollX dd) (ddComboContentW dd)
@@ -441,12 +445,11 @@ drawDropdownMenu ctx inp theme dd = do
 
 collectSelectDropdownSpans :: Context -> Input -> IO [(Rect, T.Text, Color, Color, Rect)]
 collectSelectDropdownSpans ctx inp = do
-  theme <- readIORef (ctxTheme ctx)
   dropdowns <- openDropdowns ctx
   let fm = ctxFontMetrics ctx
-      style = overlayMenuStyle theme
   fmap concat . forM dropdowns $ \dd -> do
     allow <- widgetOverlayAllowed ctx (ddWidget dd)
+    style <- overlayMenuStyle <$> widgetTheme ctx (ddWidget dd)
     if not allow
       then pure []
       else fmap concat . forM (dropdownRows fm (inputMousePos inp) dd) $ \row ->

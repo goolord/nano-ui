@@ -104,6 +104,15 @@ module NanoUI.Context
   , recordStoreFloat
   , recordStoreText
   , isDisabled
+  , newThemeScopes
+  , beginThemeScopes
+  , pushThemeScope
+  , themeScopesChanged
+  , scopeTheme
+  , scopeRawTheme
+  , currentTheme
+  , nodeTheme
+  , widgetTheme
   , getScrollOffset
   , setScrollOffset
   , getScrollOffset2D
@@ -227,7 +236,6 @@ module NanoUI.Context
   , WidgetStore (..)
   , bumpMirror
   , slotKey
-  , slotDisabled
   , slotCursor
   , slotAnchor
   , slotDrag
@@ -252,6 +260,7 @@ module NanoUI.Context
   ) where
 
 import Control.Monad (foldM, forM, when)
+import Data.Bits ((.&.))
 import Data.ByteString (ByteString)
 import Data.Dynamic (fromDynamic, toDyn)
 import Data.HashMap.Strict (HashMap)
@@ -332,7 +341,7 @@ import NanoUI.Font (FontMetrics, fmLineHeight, measureTextIO, monospaceMetrics, 
 import NanoUI.Frame.SpanArena (newSpanArena)
 import NanoUI.Frame.Scroll.Geometry (defaultScrollConfig)
 import NanoUI.Id (WidgetId (..), initialIdContext)
-import NanoUI.Layout.Arena (newNodeArena)
+import NanoUI.Layout.Arena (getArenaScope, newNodeArena)
 import NanoUI.Store
   ( WidgetStore (..)
   , anySelectOpen
@@ -346,7 +355,6 @@ import NanoUI.Store
   , setSelectOpen
   , slotAnchor
   , slotCursor
-  , slotDisabled
   , slotDrag
   , slotDragW
   , slotKey
@@ -616,6 +624,7 @@ newContext = do
   ctxHost <- newIORef Map.empty
   ctxDefaultLayout <- newIORef defaultLayout
   ctxTheme <- newIORef defaultTheme
+  ctxThemeScopes <- newIORef =<< newThemeScopes
   ctxSpanCache <- newIORef IM.empty
   ctxWidgetTextCache <- newIORef IM.empty
   ctxLayoutCache <- newIORef Nothing
@@ -657,6 +666,7 @@ newContext = do
         , ctxPaintFull
         , ctxExternalText = False
         , ctxTheme
+        , ctxThemeScopes
         , ctxContainerStack
         , ctxMessages
         , ctxFocusables
@@ -698,23 +708,27 @@ getFocusVisible ctx = readIORef (ctxFocusVisible ctx)
 getHotId :: Context -> IO WidgetId
 getHotId ctx = readIORef (ctxHotId ctx)
 
+-- | Add @wid@ to this frame's keyboard focus order, unless it is declared in a
+-- disabled scope.
 registerFocusable :: Context -> WidgetId -> IO ()
 registerFocusable ctx wid = do
-  idx <- readIORef (ctxFocusablesCount ctx)
-  cap <- readIORef (ctxFocusablesCap ctx)
-  arr <- readIORef (ctxFocusables ctx)
-  arr' <-
-    if idx >= cap
-      then do
-        let newCap = max 16 (cap * 2)
-        newArr <- newPrimArray newCap
-        copyMutablePrimArray newArr 0 arr 0 idx
-        writeIORef (ctxFocusables ctx) newArr
-        writeIORef (ctxFocusablesCap ctx) newCap
-        pure newArr
-      else pure arr
-  writePrimArray arr' idx wid
-  writeIORef (ctxFocusablesCount ctx) (idx + 1)
+  scope <- getArenaScope (ctxNodeArena ctx)
+  when (scope .&. 1 == 0) $ do
+    idx <- readIORef (ctxFocusablesCount ctx)
+    cap <- readIORef (ctxFocusablesCap ctx)
+    arr <- readIORef (ctxFocusables ctx)
+    arr' <-
+      if idx >= cap
+        then do
+          let newCap = max 16 (cap * 2)
+          newArr <- newPrimArray newCap
+          copyMutablePrimArray newArr 0 arr 0 idx
+          writeIORef (ctxFocusables ctx) newArr
+          writeIORef (ctxFocusablesCap ctx) newCap
+          pure newArr
+        else pure arr
+    writePrimArray arr' idx wid
+    writeIORef (ctxFocusablesCount ctx) (idx + 1)
 
 {-# INLINE getFocusables #-}
 getFocusables :: Context -> IO [WidgetId]

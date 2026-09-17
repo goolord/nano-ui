@@ -14,7 +14,6 @@ module NanoUI.Frame.Scroll
 
 import Control.Monad (forM_, void, when)
 import Data.Foldable (find)
-import Data.IORef (readIORef)
 import Data.Maybe (fromMaybe)
 import NanoUI.Context
   ( Context (..)
@@ -35,6 +34,7 @@ import NanoUI.Context
   , setScrollDrag
   , setScrollOffset
   , setScrollOffset2D
+  , nodeTheme
   )
 import NanoUI.Frame.Hit (topmostModalAtMouse, topmostOverlayAtMouse)
 import NanoUI.Frame.Node (scrollViewportAt)
@@ -126,7 +126,7 @@ transformSubtree ctx idx scrollX scrollY parentClip = do
         clip <-
           case nt of
             NodePanel -> do
-              theme <- readIORef (ctxTheme ctx)
+              theme <- nodeTheme ctx idx
               pure (within (borderContentClip (themePanel theme) (Rect vx vy vw vh)))
             _ -> pure $! if floating then Rect vx vy vw vh else parentClip
         setClipRect na idx clip

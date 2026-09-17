@@ -16,7 +16,7 @@ import Data.Word (Word8, Word32)                                                
 import Foreign.C.Error (Errno (..), eAGAIN, eIO, eWOULDBLOCK, throwErrnoIfMinus1_)                -- POSIX errno checks
 import Foreign.C.Types (CInt (..))                                                                -- C ABI types for winsize ioctl
 import GHC.IO.Exception (IOException (..))                                                        -- inspect errno on I/O exceptions
-import NanoUI                                                                                     -- core UI canvas & drawing monad
+import NanoUI hiding (scrollBy)                                                                   -- core UI canvas & drawing monad
 import NanoUI.Backend.Sdl                                                                         -- SDL2 window & context initialization
 import NanoUI.Sdl.Input (SdlEvent (..), applyEvent, pollEvents)                                   -- SDL event loop & input handling
 import Streaming (Of (..))                                                                        -- stream pair result type

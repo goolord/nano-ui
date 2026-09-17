@@ -16,6 +16,14 @@ import Cases.PointerRelease
   )
 import Cases.Runner (runDrawingLockTest, runSessionLoopTest)
 import Cases.SIMD (runSimdWritesTest)
+import Cases.Styling
+  ( runDisabledFocusOrderTest
+  , runDisabledLookTest
+  , runDisabledPointerTest
+  , runStyledDamageTest
+  , runStyledNestingTest
+  , runStyledPaintTest
+  )
 import Cases.State
   ( runCollectionApiTest
   , runControlledInputsTest
@@ -126,6 +134,12 @@ testSpecs =
   , TestSpec "button-hover-anim" False runButtonHoverAnimTest
   -- Keyboard
   , TestSpec "keyboard-disabled" False runKeyboardDisabledTest
+  , TestSpec "disabled-pointer" False runDisabledPointerTest
+  , TestSpec "disabled-focus-order" False runDisabledFocusOrderTest
+  , TestSpec "disabled-look" False runDisabledLookTest
+  , TestSpec "styled-paint" False runStyledPaintTest
+  , TestSpec "styled-nesting" False runStyledNestingTest
+  , TestSpec "styled-damage" False runStyledDamageTest
   , TestSpec "keyboard-modal-eligibility" False runKeyboardModalEligibilityTest
   , TestSpec "keyboard-focus-ring" False runKeyboardFocusRingTest
   , TestSpec "keyboard-button" False runKeyboardButtonTest

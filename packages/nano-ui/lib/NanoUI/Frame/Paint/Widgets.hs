@@ -75,8 +75,8 @@ import NanoUI.Layout.Arena
   , getText
   , getWidgetId
   )
-import NanoUI.Style (Style, styleBg, styleBorder, styleFg, themeAccent, themeInput)
-import NanoUI.Types (Color (..), Rect (..), clamp01, colorA, colorRGBA, lerpColor, onGrid)
+import NanoUI.Style (Style, styleBg, styleBorder, styleFg, themeAccent, themeInput, themeOnAccent)
+import NanoUI.Types (Color (..), Rect (..), clamp01, colorA, lerpColor, onGrid)
 import NanoUI.WidgetText
   ( buttonCloseTrailing
   , buttonVisualStyle
@@ -211,7 +211,7 @@ paintWidgetBackground env idx nt style si menuRowRect value (Rect x y w h) = do
   when isTable $
     paintTableHeader da theme (value > 0.5) style x y w h
   case nt of
-    NodeCheckbox -> drawCheckbox da fm style x y h value (themeAccent theme) (styleBg (themeInput theme))
+    NodeCheckbox -> drawCheckbox da fm style x y h value (themeAccent theme) (styleBg (themeInput theme)) (themeOnAccent theme)
     NodeRadio -> drawRadio da fm style x y h value (themeAccent theme) (styleBg (themeInput theme))
     NodeTree -> do
       let (_, depth, hasKids, expanded) = treeDecodeStyle si
@@ -259,7 +259,7 @@ paintSliderBody env x y w h value = do
     da
     (Rect (handleCx - innerD / 2) (handleHy + (handleD - innerD) / 2) innerD innerD)
     (innerD / 2)
-    (colorRGBA 255 255 255 255)
+    (themeOnAccent theme)
   pushRoundedStroke da (Rect (handleCx - handleD / 2) handleHy handleD handleD) (handleD / 2) bw outline
 
 {-# NOINLINE paintWidgetForeground #-}
@@ -320,7 +320,7 @@ paintClippedFieldText ::
   IO ()
 paintClippedFieldText ctx da fm style idx x y w h clip penX penY txt fg =
   withClip da clip $ do
-    drawTextInputSelection da ctx idx x y w h style Nothing
+    drawTextInputSelection da ctx idx x y w h Nothing
     unless (T.null txt) $
       pushText da fm penX penY txt fg
     drawTextInputCaret da ctx idx x y w h style
@@ -396,7 +396,7 @@ paintSelectableText env style idx rect@(Rect x y w h) = do
   value <- textInputValue ctx idx
   let (penX, ty, _) = selectableTextGeometry fm x y h
   withClip da rect $ do
-    drawTextInputSelection da ctx idx x y w h style (Just 0)
+    drawTextInputSelection da ctx idx x y w h (Just 0)
     unless (T.null value) $
       pushText da fm penX ty value (fromMaybe (styleFg style) mFontColor)
 
@@ -470,13 +470,13 @@ drawChoiceControl da fm style x y h r bw value accent well solidChecked postMark
       pushRoundedStroke da outer r bw strokeCol
       when checked $ postMark bx by box
 
-drawCheckbox :: DrawArena -> FontMetrics -> Style -> Float -> Float -> Float -> Float -> Color -> Color -> IO ()
-drawCheckbox da fm style x y h value accent well =
+drawCheckbox :: DrawArena -> FontMetrics -> Style -> Float -> Float -> Float -> Float -> Color -> Color -> Color -> IO ()
+drawCheckbox da fm style x y h value accent well mark =
   let box = checkboxBoxSize fm
       r = min 6 (box / 3.5)
       bw = 1.5
    in drawChoiceControl da fm style x y h r bw value accent well True $ \bx by b ->
-        drawCheckboxMark da bx by b (colorRGBA 255 255 255 255)
+        drawCheckboxMark da bx by b mark
 
 drawCheckboxMark :: DrawArena -> Float -> Float -> Float -> Color -> IO ()
 drawCheckboxMark da bx by box markCol = do

@@ -17,7 +17,7 @@ module NanoUI.Frame.TextEdit.Menu
   ) where
 
 import Control.Monad (forM, forM_, unless, when)
-import Data.IORef (readIORef, writeIORef)
+import Data.IORef (writeIORef)
 import qualified Data.IntMap.Strict as IM
 import qualified Data.Text as T
 import NanoUI.Context
@@ -32,6 +32,7 @@ import NanoUI.Context
   , markEscapeConsumed
   , setTextEditLastAction
   , setTextInputMenu
+  , widgetTheme
   )
 import NanoUI.Draw (pushRect, pushText)
 import NanoUI.Font
@@ -232,14 +233,14 @@ drawTextEditMenuOverlays ctx inp = do
     let wid = textInputMenuWidget menu
     allow <- widgetOverlayAllowed ctx wid
     when allow $ do
-      theme <- readIORef (ctxTheme ctx)
+      theme <- widgetTheme ctx wid
       let da = ctxDrawArena ctx
           fm = ctxFontMetrics ctx
           menuRect = textInputMenuRect menu
           style = overlayMenuStyle theme
           Rect contentX _ _ _ = textEditMenuContentRect menuRect
           labelX = contentX + menuItemPadX + fst (widgetContentInset fm)
-      paintMenuPanel da style menuRect
+      paintMenuPanel da theme style menuRect
       forM_ (textEditMenuLayout menuRect) $ \case
         (TextEditMenuSep, Rect rx ry rw rh) ->
           pushRect da (Rect (rx + menuItemPadX) (ry + rh / 2) (rw - 2 * menuItemPadX) 1) (themeSeparator theme)
@@ -263,7 +264,7 @@ collectTextEditMenuSpans ctx inp = do
       if not allow
         then pure []
         else do
-          theme <- readIORef (ctxTheme ctx)
+          theme <- widgetTheme ctx wid
           let fm = ctxFontMetrics ctx
               menuRect = textInputMenuRect menu
               style = overlayMenuStyle theme

@@ -25,6 +25,9 @@ module NanoUI.Monad
   , uiTime
   , uiTheme
   , setUiTheme
+  , styled
+  , themed
+  , disabledWhen
   , uiMousePos
   , windowSize
   , windowWidth
@@ -47,6 +50,7 @@ where
 
 import Control.Exception (bracket)
 import Control.Monad (unless, when)
+import Data.Bits (shiftL, (.&.), (.|.))
 import Data.Hashable (Hashable, hash)
 import Data.IORef (modifyIORef', readIORef, writeIORef)
 import Data.Typeable (Typeable)
@@ -81,7 +85,10 @@ import NanoUI.Context
   , damageRect
   , damageWidget
   , decodeMessages
+  , currentTheme
   , pushMessage
+  , pushThemeScope
+  , scopeRawTheme
   , setTheme
   , reduceMessages
   , reduceUpdates
@@ -95,8 +102,9 @@ import NanoUI.Id
   , idContextWidgetId
   , scopeTag
   )
-import NanoUI.Style (Layout, Theme)
-import NanoUI.Input (Input, inputMousePos, inputWindowSize)
+import NanoUI.Layout.Arena (getArenaScope, setArenaScope)
+import NanoUI.Style (Layout, Theme, disabledTheme)
+import NanoUI.Input (Input (..), inputMousePos, inputWindowSize, stripInteractionInput)
 import NanoUI.Types (DamageBounds, Rect, Size (..), V2)
 
 type NanoUI = Eff '[Ui, IOE]
@@ -225,11 +233,74 @@ uiFontMetrics = fmap ctxFontMetrics askContext
 uiTime :: Ui :> es => Eff es Double
 uiTime = uiIO getMonotonicTime
 
+-- | The theme the view is drawn with where this is called: the context theme
+-- as modified by the enclosing 'styled' and 'disabledWhen' scopes.
 {-# INLINE uiTheme #-}
 uiTheme :: Ui :> es => Eff es Theme
 uiTheme = do
   ctx <- askContext
-  uiIO (readIORef (ctxTheme ctx))
+  uiIO (currentTheme ctx)
+
+-- | Draw a part of the view with a modified theme. Widgets declared inside
+-- take their colours, borders and corner radii from it, and 'styled' scopes
+-- nest, each modifying the theme of the scope around it:
+--
+-- > styled (buttonStyle (cornerRadius 8)) $ do
+-- >   styled primary (button "Save")
+-- >   button "Cancel"
+--
+-- The modifier runs once per scope per frame. The theme only affects how
+-- widgets look, never their layout.
+{-# INLINE styled #-}
+styled :: Ui :> es => (Theme -> Theme) -> Eff es a -> Eff es a
+styled f = withPaintScope $ \ctx outer -> do
+  raw <- f <$> scopeRawTheme ctx outer
+  let !disabled = outer .&. 1
+  ti <- pushThemeScope ctx (disabled /= 0) raw (if disabled /= 0 then disabledTheme raw else raw)
+  pure ((ti `shiftL` 1) .|. disabled)
+
+-- | Draw a part of the view with another theme, whatever the theme around it.
+{-# INLINE themed #-}
+themed :: Ui :> es => Theme -> Eff es a -> Eff es a
+themed theme = styled (const theme)
+
+-- | Disable every widget declared inside when the condition holds. Disabled
+-- widgets keep their place, state and layout, but take no pointer or
+-- keyboard input, cannot be focused, and are drawn with 'disabledTheme'.
+--
+-- > disabledWhen (T.null name) $ whenM (button "Save") save
+{-# INLINE disabledWhen #-}
+disabledWhen :: Ui :> es => Bool -> Eff es a -> Eff es a
+disabledWhen False m = m
+disabledWhen True m =
+  -- The view inside sees no presses, keys or wheel, so no widget's own input
+  -- handling can fire; the frame's focus and click passes check the scope.
+  localStaticRep
+    (\(UiRep ctx inp l) -> UiRep ctx (stripInteractionInput inp) {inputMouseDown = False, inputMouseRightDown = False} l)
+    (withPaintScope enter m)
+  where
+    enter ctx outer
+      | outer .&. 1 /= 0 = pure outer
+      | otherwise = do
+          raw <- scopeRawTheme ctx outer
+          ti <- pushThemeScope ctx True raw (disabledTheme raw)
+          pure ((ti `shiftL` 1) .|. 1)
+
+-- Run @m@ with the arena scope @enter@ picks, then restore the scope around it
+-- (also on exceptions).
+{-# INLINE withPaintScope #-}
+withPaintScope :: Ui :> es => (Context -> Int -> IO Int) -> Eff es a -> Eff es a
+withPaintScope enter m = do
+  ctx <- askContext
+  let na = ctxNodeArena ctx
+  unsafeEff $ \es ->
+    bracket
+      (do
+        old <- getArenaScope na
+        setArenaScope na =<< enter ctx old
+        pure old)
+      (setArenaScope na)
+      (\_ -> unEff m es)
 
 {-# INLINE setUiTheme #-}
 setUiTheme :: Ui :> es => Theme -> Eff es ()

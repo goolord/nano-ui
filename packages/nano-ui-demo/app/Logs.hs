@@ -299,7 +299,7 @@ renderHeaderToolbar mutateState st totalCount filteredCount (allSelected, setAll
         clicked <- buttonWith (if asFilterLevel st == lvl then fontBold else id) lbl
         when clicked $
           mutateState (\s -> s {asFilterLevel = lvl})
-  panelStyledWith (colorRGBA 24 29 38 255) (colorRGBA 45 52 64 255) fillW $ do
+  styled (panelStyle (background (colorRGBA 24 29 38 255) . borderColor (colorRGBA 45 52 64 255))) $ panelWith fillW $ do
     columnWith (tight . fillW . padXY 12 10 . gap 8) $ do
       -- Top line: Title, Badges, and Stats
       rowWith (tight . fillW . alignMid . gap 12) $ do
@@ -450,12 +450,12 @@ renderLogRow isAllSel entry = do
       rowLay = tight . fixedH logRowH . padXY 8 2 . alignMid
       rowBody = selectableTextWith (fontColor col . fontMono . tight) lineText
   if isAllSel
-    then panelStyledWith (colorRGBA 45 65 95 255) (colorRGBA 70 100 145 255) rowLay rowBody
+    then styled (panelStyle (background (colorRGBA 45 65 95 255) . borderColor (colorRGBA 70 100 145 255))) (panelWith rowLay rowBody)
     else rowWith rowLay rowBody
 
 renderStatusBar :: Ui :> es => Int -> Int -> Bool -> Eff es ()
 renderStatusBar totalCount filteredCount allSelected = do
-  panelStyledWith (colorRGBA 20 24 32 255) (colorRGBA 45 52 64 255) fillW $ do
+  styled (panelStyle (background (colorRGBA 20 24 32 255) . borderColor (colorRGBA 45 52 64 255))) $ panelWith fillW $ do
     rowWith (tight . fillW . padXY 12 4 . alignMid . gap 16) $ do
       labelWith (fontMono . fontMuted . tight)
         ("Total: " <> T.pack (show totalCount) <> " logs | Filtered: " <> T.pack (show filteredCount))

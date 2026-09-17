@@ -32,6 +32,7 @@ import NanoUI.Context
   , getAnimationValue
   , getStore
   , intKey
+  , nodeTheme
   )
 import NanoUI.Draw (DrawArena, pushRect, pushRoundedRect, pushRoundedStroke)
 import NanoUI.Font (menuAccentInset, menuAccentW)
@@ -59,8 +60,10 @@ import NanoUI.Style
   , themeMuted
   , themePanel
   , themeWindow
+  , themeOnAccent
+  , themeShadow
   )
-import NanoUI.Types (Color (..), Rect (..), colorRGBA, lerpColor)
+import NanoUI.Types (Color (..), Rect (..), colorA, colorRGBA, lerpColor)
 import NanoUI.WidgetText
   ( buttonFlagsFromStyle
   , buttonVisualStyle
@@ -151,7 +154,7 @@ tabHeaderVisualStyle theme styleIdx isActive =
       clear = colorRGBA 0 0 0 0
       hoverLift = lerpColor (themeWindow theme) (styleHoverBg btn) 0.55
       (cr, activeBg, activeFg, activeBw, inactFg) = case styleIdx of
-        1 -> (6, accent, colorRGBA 255 255 255 255, 0, muted)
+        1 -> (6, accent, themeOnAccent theme, 0, muted)
         2 -> (8, styleBg panel, styleFg panel, 1, muted)
         _ -> (6, styleBg panel, styleFg panel, 1, lerpColor muted (styleFg panel) 0.78)
    in if isActive
@@ -251,7 +254,7 @@ widgetVisualStyle ctx nt idx = do
           then buttonFlagsFromStyle styleIdx
           else (False, False, False)
       isMenu = nt == NodeButton && (isMenuItemStyle styleIdx || isMenuBarStyle styleIdx)
-  theme <- readIORef (ctxTheme ctx)
+  theme <- nodeTheme ctx idx
   let isFocus = focus == wid
       isHot = wid == hot
       focusBorder s = if isFocus then s {styleBorder = themeAccent theme} else s
@@ -297,7 +300,7 @@ widgetVisualStyle ctx nt idx = do
                 (themeButton theme)
                   { styleBg = themeAccent theme
                   , styleHoverBg = themeAccent theme
-                  , styleFg = colorRGBA 255 255 255 255
+                  , styleFg = themeOnAccent theme
                   , styleBorder = themeAccent theme
                   }
           _ -> themeButton theme
@@ -356,11 +359,12 @@ overlayWindowStyle theme = (themeFloatingWindow theme) {styleCornerRadius = 2, s
 overlayModalStyle :: Theme -> Style
 overlayModalStyle theme = (overlayMenuStyle theme) {styleCornerRadius = 2, styleBorderWidth = 1}
 
--- | Panel behind menus, dropdowns and floating windows: an offset shadow, then
--- the styled fill and border.
-paintMenuPanel :: DrawArena -> Style -> Rect -> IO ()
-paintMenuPanel da style rect@(Rect x y w h) = do
-  pushRoundedRect da (Rect (x + 3) (y + 3) w h) (styleCornerRadius style) (colorRGBA 0 0 0 72)
+-- | Panel behind menus, dropdowns and floating windows: the theme's offset
+-- shadow, then the styled fill and border.
+paintMenuPanel :: DrawArena -> Theme -> Style -> Rect -> IO ()
+paintMenuPanel da theme style rect@(Rect x y w h) = do
+  when (colorA (themeShadow theme) > 0) $
+    pushRoundedRect da (Rect (x + 3) (y + 3) w h) (styleCornerRadius style) (themeShadow theme)
   fillStyledRect da style rect
   strokeStyledRect da style x y w h
 

@@ -15,9 +15,9 @@ module Cases.Keyboard
 import Data.IORef (IORef, newIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import NanoUI
-import NanoUI.Context (Context (..), getFocusVisible, intKey, setStore)
+import NanoUI.Context (Context (..), getFocusVisible, intKey)
 import NanoUI.Emit qualified as Emit
-import NanoUI.Store (WidgetStore (..), slotDisabled, slotKey)
+import NanoUI.Store (WidgetStore (..))
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertGt)
 import NanoUI.Testing.Harness (centerOf, clickPair, held, keyInp, tabInp, warmup2, withInputOff)
@@ -28,14 +28,13 @@ runKeyboardDisabledTest :: Context -> IORef Int -> IO ()
 runKeyboardDisabledTest _ctx failed = do
   let inp = withInputOff 300 160
       check :: (Eq a, Show a) => NanoUI (Response, a) -> Input -> IO ()
-      check ui pressed = do
+      check widget pressed = do
         ctx <- newContext
-        ((resp, before), _, _, _) <- runFrame ctx inp ui
+        ((resp, before), _, _, _) <- runFrame ctx inp widget
         let wid = respId resp
         st <- getStore ctx
-        setStore ctx st {storeInt = IM.insert (slotKey slotDisabled (intKey wid)) 1 (storeInt st)}
         writeIORef (ctxFocusId ctx) wid
-        ((afterResp, after), _, _, _) <- runFrame ctx pressed ui
+        ((afterResp, after), _, _, _) <- runFrame ctx pressed (disabledWhen True widget)
         assertEq failed after before
         assert failed (not (respChanged afterResp) && not (respClicked afterResp))
         afterStore <- getStore ctx

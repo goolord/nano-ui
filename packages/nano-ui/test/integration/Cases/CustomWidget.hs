@@ -11,15 +11,12 @@ module Cases.CustomWidget
 
 import Control.Monad (forM_, void)
 import Data.IORef (IORef, writeIORef)
-import Data.IntMap.Strict qualified as IM
 import Data.Vector qualified as V
 import NanoUI
-import NanoUI.Context (Context (..), intKey, setStore)
-import NanoUI.Store (WidgetStore (..), slotDisabled, slotKey)
+import NanoUI.Context (Context (..))
 import NanoUI.Testing
   ( UiCursorKind (..)
   , cursorKindIs
-  , getStore
   , newContext
   , runFrame
   , takeDamage
@@ -177,19 +174,17 @@ runCustomWidgetContentKeyTest ctx failed = do
   -- Disabling the widget repaints it: the ops rebuild in their disabled form,
   -- and disabled is not one of the roles damage already follows.
   let grey = colorRGBA 128 128 128 255
-      dimmable = column $ do
+      dimmable off = column $ do
         label "Other"
-        fst <$> customWidget defaultCustomWidgetSpec
+        disabledWhen off $ fst <$> customWidget defaultCustomWidgetSpec
           { widgetLayout = fixedWH 80 40 defaultLayout
           , widgetContent = 4
           , widgetDraw = \cdc r -> runCanvas (drawRect r (if cdcDisabled cdc then grey else blue))
           }
   disabledCtx <- newContext
-  dresp <- warmup2 disabledCtx inp dimmable
+  dresp <- warmup2 disabledCtx inp (dimmable False)
   _ <- takeDamage disabledCtx
-  st <- getStore disabledCtx
-  setStore disabledCtx st {storeInt = IM.insert (slotKey slotDisabled (intKey (respId dresp))) 1 (storeInt st)}
-  (_, _, disabledDraw, _) <- runFrame disabledCtx inp dimmable
+  (_, _, disabledDraw, _) <- runFrame disabledCtx inp (dimmable True)
   disabledDmg <- takeDamage disabledCtx
   disabledQuads <- drawQuads disabledDraw
   assert failed (any ((== grey) . snd) disabledQuads)
@@ -217,21 +212,21 @@ runCustomWidgetContentKeyTest ctx failed = do
   -- through either theme entry point.
   let accent2 = colorRGBA 7 8 9 255
       accent3 = colorRGBA 11 12 13 255
-      themed = column $ do
+      themedUi = column $ do
         label "Other"
         fst <$> customWidget defaultCustomWidgetSpec
           { widgetLayout = fixedWH 80 40 defaultLayout
           , widgetContent = 3
           , widgetDraw = \cdc r -> runCanvas (drawRect r (themeAccent (cdcTheme cdc)))
           }
-  _ <- warmup2 ctx inp themed
+  _ <- warmup2 ctx inp themedUi
   theme0 <- getTheme ctx
   setTheme ctx theme0 {themeAccent = accent2}
-  (_, _, themedDraw, _) <- runFrame ctx inp themed
+  (_, _, themedDraw, _) <- runFrame ctx inp themedUi
   themedQuads <- drawQuads themedDraw
   assert failed (any ((== accent2) . snd) themedQuads)
   ctx3 <- withTheme ctx theme0 {themeAccent = accent3}
-  (_, _, withThemeDraw, _) <- runFrame ctx3 inp themed
+  (_, _, withThemeDraw, _) <- runFrame ctx3 inp themedUi
   withThemeQuads <- drawQuads withThemeDraw
   assert failed (any ((== accent3) . snd) withThemeQuads)
   setTheme ctx theme0

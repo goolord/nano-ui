@@ -11,7 +11,6 @@ where
 
 import Control.Monad (forM_, when)
 import Data.Bits ((.|.))
-import Data.IORef (readIORef)
 import Data.List (find)
 import qualified Data.IntMap.Strict as IM
 import Data.Maybe (isJust, listToMaybe)
@@ -27,6 +26,7 @@ import NanoUI.Context
   , resolveScrollStep
   , setScrollOffset
   , setStore
+  , currentTheme
   )
 import NanoUI.Font (resolveLayoutPadding)
 import NanoUI.Frame.Hit (findNodeByWidgetId)
@@ -315,7 +315,7 @@ cacheScrollRange ctx key v = do
 -- not jump as you page to either end.
 arrowButton :: (Ui :> es) => Context -> Layout -> Float -> Float -> Bool -> Text -> Eff es Response
 arrowButton ctx hdrLay arrowW barH muted glyph = do
-  theme <- uiIO (readIORef (ctxTheme ctx))
+  theme <- uiIO (currentTheme ctx)
   let lay =
         hdrLay
           { layoutWidth = Fixed arrowW

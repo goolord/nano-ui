@@ -29,6 +29,9 @@ import Effectful (Eff, IOE, runEff, type (:>))
 import NanoUI.Context
   ( Context (..)
   , armMenuPointerCapture
+  , beginThemeScopes
+  , damageFull
+  , themeScopesChanged
   , FrameMsg (..)
   , clearDirty
   , decodeMessages
@@ -137,7 +140,7 @@ import NanoUI.Layout.Arena
   , restoreLayoutCache
   )
 import NanoUI.Layout.Solve (placeModals, placePopups, placeWindows, solveLayout)
-import NanoUI.Monad (NanoUI, Ui, runUi)
+import NanoUI.Monad (NanoUI, Ui, runUi, whenM)
 import NanoUI.Store (mirrorStoresChanged)
 import NanoUI.Style (Theme (..))
 import NanoUI.Types (Damage (..), Size (..), rectInflate, rectNonEmpty)
@@ -209,6 +212,7 @@ runFrameEff unlift ctx inp ui = do
   -- the offset this frame renders at is the one virtualization must see.
   stepScrollGlides ctx (inputDeltaTime inp)
   updateScrollDrag ctx inp
+  beginThemeScopes ctx True
   resetNodeArena (ctxNodeArena ctx)
   resetDrawArena (ctxDrawArena ctx)
   resetUiBuildScopes ctx
@@ -230,6 +234,9 @@ runFrameEff unlift ctx inp ui = do
         resetUiBuild ctx
         unlift (runUi ctx (stripInteractionInput inp) ui)
       else pure result0
+  -- Scopes only change how nodes look, which the rect and text diffs below
+  -- cannot see.
+  whenM (themeScopesChanged ctx) (damageFull ctx)
   -- Sync widget node values (checkbox/radio/tree) from the store before measure
   -- so labels and layout reflect the current state.
   syncWidgetLabels ctx
@@ -322,6 +329,7 @@ runFrameEff unlift ctx inp ui = do
 -- prev rects; only rebuilds node arena and id scopes.
 resetUiBuild :: Context -> IO ()
 resetUiBuild ctx = do
+  beginThemeScopes ctx False
   resetNodeArena (ctxNodeArena ctx)
   resetUiBuildScopes ctx
 

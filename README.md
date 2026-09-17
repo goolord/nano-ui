@@ -45,8 +45,11 @@ counter = do
   redrawing. Each frame computes its damage against the previous one.
 - State in local hooks (`useInt`, `useText`, `useState`), in your own model,
   or in a reducer with `NanoUI.Emit`.
-- Eased and spring animation, and themes, including ones built from Base16
-  schemes.
+- Eased and spring animation.
+- Themes, including ones built from Base16 schemes, changed for part of a
+  view with `styled` and composable modifiers, as in
+  `styled (primary . buttonStyle (cornerRadius 6)) (button "Save")`.
+  `disabledWhen` switches widgets off.
 - `NanoUI.Testing` runs frames headlessly on scripted input, for tests.
 
 ## Examples

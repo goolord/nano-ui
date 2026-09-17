@@ -20,8 +20,35 @@ module NanoUI.Style
   , themeFromBase16Light
   , base16TomorrowNight
   , base16TomorrowLight
-  , packPanelStyle
-  , unpackPanelStyle
+  -- * Style modifiers
+  , background
+  , foreground
+  , borderColor
+  , borderWidth
+  , cornerRadius
+  , hoverBackground
+  , pressBackground
+  , fillColor
+  -- * Theme modifiers
+  , buttonStyle
+  , inputStyle
+  , panelStyle
+  , windowStyle
+  , everyStyle
+  , accentColor
+  , textColor
+  , mutedColor
+  , linkColor
+  , selectionColor
+  , windowColor
+  , rounded
+  , tinted
+  , primary
+  , destructive
+  , success
+  , subtle
+  , readableOn
+  , disabledTheme
   , themeSeries
   , separatorTrackColor
   , scrollBarTrackColor
@@ -83,9 +110,9 @@ module NanoUI.Style
   , alignBottom
   ) where
 
-import Data.Bits ((.&.), (.|.), shiftL, shiftR)
-import Data.Word (Word8, Word32, Word64)
-import NanoUI.Types (Color (..), colorLuminance, colorRGBA, lerpColor)
+import Data.Bits ((.&.), (.|.))
+import Data.Word (Word8)
+import NanoUI.Types (Color (..), colorA, colorLuminance, colorRGBA, contrastRatio, lerpColor)
 
 data Sizing
   = Fixed Float
@@ -368,23 +395,6 @@ data Style = Style
   }
   deriving (Eq, Show)
 
-{-# INLINE packPanelStyle #-}
-packPanelStyle :: Color -> Color -> Int
-packPanelStyle (Color bg) (Color border) =
-  let bg64 = fromIntegral bg :: Word64
-      br64 = fromIntegral border :: Word64
-   in fromIntegral ((br64 `shiftL` 32) .|. (bg64 .&. 0xFFFFFFFF))
-
-{-# INLINE unpackPanelStyle #-}
-unpackPanelStyle :: Style -> Int -> Style
-unpackPanelStyle baseStyle si =
-  let raw = fromIntegral si :: Word64
-      bg = fromIntegral (raw .&. 0xFFFFFFFF) :: Word32
-      border = fromIntegral ((raw `shiftR` 32) .&. 0xFFFFFFFF) :: Word32
-      s1 = if bg /= 0 then baseStyle { styleBg = Color bg } else baseStyle
-      s2 = if border /= 0 then s1 { styleBorder = Color border } else s1
-   in s2
-
 data Theme = Theme
   { themeWindow :: {-# UNPACK #-} !Color
   , themePanel :: !Style
@@ -400,8 +410,188 @@ data Theme = Theme
   , themeGreen :: {-# UNPACK #-} !Color
   , themePurple :: {-# UNPACK #-} !Color
   , themeOverlayDim :: {-# UNPACK #-} !Color
+  , themeOnAccent :: {-# UNPACK #-} !Color
+  -- ^ Text and marks drawn on an accent fill: a checked box, an active tab,
+  -- a primary button.
+  , themeSelection :: {-# UNPACK #-} !Color
+  -- ^ Selected text's highlight, drawn under the text. Usually translucent.
+  , themeFocusRing :: {-# UNPACK #-} !Color
+  , themeLink :: {-# UNPACK #-} !Color
+  , themeShadow :: {-# UNPACK #-} !Color
+  -- ^ Offset shadow under menus, dropdowns and floating windows. A zero alpha
+  -- draws none.
+  , themeDisabledFade :: {-# UNPACK #-} !Float
+  -- ^ How far a disabled widget's colours fade toward the window colour, from
+  -- 0 (not at all) to 1 (invisible).
   }
   deriving (Eq, Show)
+
+-- -----------------------------------------------------------------------------
+-- Style and theme modifiers
+-- -----------------------------------------------------------------------------
+
+-- $modifiers
+-- Styles and themes change the way layouts do: through functions that
+-- compose with @(.)@. A @Style -> Style@ edits one surface, and a
+-- @Theme -> Theme@ edits the theme a part of the view is drawn with (see
+-- @styled@ in "NanoUI"):
+--
+-- > styled (buttonStyle (cornerRadius 8) . accentColor teal) $ do ...
+-- > styled primary (button "Save")
+
+background :: Color -> Style -> Style
+background c s = s {styleBg = c}
+
+foreground :: Color -> Style -> Style
+foreground c s = s {styleFg = c}
+
+borderColor :: Color -> Style -> Style
+borderColor c s = s {styleBorder = c}
+
+borderWidth :: Float -> Style -> Style
+borderWidth w s = s {styleBorderWidth = max 0 w}
+
+cornerRadius :: Float -> Style -> Style
+cornerRadius r s = s {styleCornerRadius = max 0 r}
+
+hoverBackground :: Color -> Style -> Style
+hoverBackground c s = s {styleHoverBg = c}
+
+pressBackground :: Color -> Style -> Style
+pressBackground c s = s {styleActiveBg = c}
+
+-- | A background with hover and press shades derived from it: hovering mixes
+-- in some of the foreground, pressing darkens.
+fillColor :: Color -> Style -> Style
+fillColor c s =
+  s
+    { styleBg = c
+    , styleHoverBg = lerpColor c (styleFg s) 0.12
+    , styleActiveBg = lerpColor c (colorRGBA 0 0 0 (colorA c)) 0.18
+    }
+
+buttonStyle :: (Style -> Style) -> Theme -> Theme
+buttonStyle f t = t {themeButton = f (themeButton t)}
+
+-- | Text fields, text areas, sliders' wells and scroller wells.
+inputStyle :: (Style -> Style) -> Theme -> Theme
+inputStyle f t = t {themeInput = f (themeInput t)}
+
+-- | Panels, cards, menus, and label text.
+panelStyle :: (Style -> Style) -> Theme -> Theme
+panelStyle f t = t {themePanel = f (themePanel t)}
+
+-- | Floating windows.
+windowStyle :: (Style -> Style) -> Theme -> Theme
+windowStyle f t = t {themeFloatingWindow = f (themeFloatingWindow t)}
+
+everyStyle :: (Style -> Style) -> Theme -> Theme
+everyStyle f = buttonStyle f . inputStyle f . panelStyle f . windowStyle f
+
+accentColor :: Color -> Theme -> Theme
+accentColor c t = t {themeAccent = c, themeFocusRing = c, themeSelection = fadeAlpha c (colorA (themeSelection t))}
+
+-- | The foreground of every surface.
+textColor :: Color -> Theme -> Theme
+textColor c = everyStyle (foreground c)
+
+mutedColor :: Color -> Theme -> Theme
+mutedColor c t = t {themeMuted = c}
+
+linkColor :: Color -> Theme -> Theme
+linkColor c t = t {themeLink = c}
+
+selectionColor :: Color -> Theme -> Theme
+selectionColor c t = t {themeSelection = c}
+
+-- | The backdrop behind everything, which disabled widgets also fade toward.
+windowColor :: Color -> Theme -> Theme
+windowColor c t = t {themeWindow = c}
+
+-- | The corner radius of every surface.
+rounded :: Float -> Theme -> Theme
+rounded r = everyStyle (cornerRadius r)
+
+-- | Buttons filled with a colour picked from the theme, with a readable label.
+--
+-- > styled (tinted themePurple) (button "Tag")
+tinted :: (Theme -> Color) -> Theme -> Theme
+tinted pick t =
+  let c = pick t
+      label = readableOn t c
+   in buttonStyle
+        ( \s ->
+            s
+              { styleBg = c
+              , styleFg = label
+              , styleBorder = c
+              , styleHoverBg = lerpColor c label 0.14
+              , styleActiveBg = lerpColor c (themeWindow t) 0.22
+              }
+        )
+        t
+
+-- | Buttons in the accent colour, for the action a view is for.
+primary :: Theme -> Theme
+primary = tinted themeAccent
+
+-- | Buttons in the theme's red, for destructive actions.
+destructive :: Theme -> Theme
+destructive = tinted themeRed
+
+success :: Theme -> Theme
+success = tinted themeGreen
+
+-- | Buttons without a fill or border until hovered, for toolbars and
+-- secondary actions.
+subtle :: Theme -> Theme
+subtle =
+  buttonStyle $ \s ->
+    s
+      { styleBg = clear
+      , styleBorder = clear
+      , styleBorderWidth = 0
+      , styleHoverBg = fadeAlpha (styleFg s) 30
+      , styleActiveBg = fadeAlpha (styleFg s) 48
+      }
+  where
+    clear = colorRGBA 0 0 0 0
+
+-- | Whichever of the theme's text colours reads best on @c@.
+readableOn :: Theme -> Color -> Color
+readableOn t c =
+  let candidates = [themeOnAccent t, styleFg (themePanel t), themeWindow t]
+      best a b = if contrastRatio a c >= contrastRatio b c then a else b
+   in foldr1 best candidates
+
+-- | The theme disabled widgets are drawn with: every colour faded toward the
+-- window colour by 'themeDisabledFade', and no hover or press feedback.
+disabledTheme :: Theme -> Theme
+disabledTheme t =
+  let f = themeDisabledFade t
+      fade c
+        | colorA c == 0 = c
+        | otherwise = fadeAlpha (lerpColor c (themeWindow t) f) (colorA c)
+      fadeStyle s =
+        let bg = fade (styleBg s)
+         in s {styleBg = bg, styleFg = fade (styleFg s), styleBorder = fade (styleBorder s), styleHoverBg = bg, styleActiveBg = bg}
+   in t
+        { themePanel = fadeStyle (themePanel t)
+        , themeFloatingWindow = fadeStyle (themeFloatingWindow t)
+        , themeButton = fadeStyle (themeButton t)
+        , themeInput = fadeStyle (themeInput t)
+        , themeSeparator = fade (themeSeparator t)
+        , themeAccent = fade (themeAccent t)
+        , themeMuted = fade (themeMuted t)
+        , themeRed = fade (themeRed t)
+        , themeOrange = fade (themeOrange t)
+        , themeYellow = fade (themeYellow t)
+        , themeGreen = fade (themeGreen t)
+        , themePurple = fade (themePurple t)
+        , themeOnAccent = fade (themeOnAccent t)
+        , themeFocusRing = fade (themeFocusRing t)
+        , themeLink = fade (themeLink t)
+        }
 
 -- | Flat widget style: bg/fg/border plus hover and active fills.
 -- Border width 1, corner radius 2 -- the house look for built-in themes.
@@ -421,7 +611,7 @@ flatStyle bg fg border hoverBg activeBg =
 -- Keep structural edges quiet; interactive borders and focus carry contrast.
 defaultTheme :: Theme
 defaultTheme =
-  let panelStyle =
+  let panelSurface =
         flatStyle
           (colorRGBA 34 34 38 255)
           (colorRGBA 236 234 230 255)
@@ -430,8 +620,8 @@ defaultTheme =
           (colorRGBA 30 30 34 255)
    in Theme
         { themeWindow = colorRGBA 24 24 27 255
-        , themePanel = panelStyle
-        , themeFloatingWindow = panelStyle
+        , themePanel = panelSurface
+        , themeFloatingWindow = panelSurface
         , themeButton =
             flatStyle
               (colorRGBA 52 52 58 255)
@@ -455,6 +645,12 @@ defaultTheme =
         , themeGreen = colorRGBA 104 168 124 255
         , themePurple = colorRGBA 176 140 220 255
         , themeOverlayDim = colorRGBA 8 8 10 176
+        , themeOnAccent = colorRGBA 255 255 255 255
+        , themeSelection = fadeAlpha (colorRGBA 88 156 246 255) 115
+        , themeFocusRing = colorRGBA 88 156 246 255
+        , themeLink = colorRGBA 124 178 250 255
+        , themeShadow = colorRGBA 0 0 0 72
+        , themeDisabledFade = 0.55
         }
 
 -- Status and series colours in hue order, then accent.
@@ -494,33 +690,33 @@ fadeAlpha (Color w) a = Color ((w .&. 0xFFFFFF00) .|. fromIntegral a)
 -- | Ported from "Tomorrow Night Min" in https://github.com/biaqat/tomorrow-min-theme-zed
 tomorrowNightMinDarkTheme :: Theme
 tomorrowNightMinDarkTheme =
-  let panelStyle =
+  let panelSurface =
         flatStyle
           (colorRGBA 30 31 33 255)  -- base.bg #1E1F21 (elevated panel canvas)
           (colorRGBA 234 234 234 255)  -- bright.fg #EAEAEA
-          borderColor
+          edgeCol
           (colorRGBA 52 54 62 255)  -- #34363E
           (colorRGBA 26 27 29 255)  -- #1A1B1D
    in Theme
         { themeWindow = colorRGBA 23 24 26 255         -- #17181A (dark root window backdrop)
-        , themePanel = panelStyle
-        , themeFloatingWindow = panelStyle
+        , themePanel = panelSurface
+        , themeFloatingWindow = panelSurface
         , themeButton =
             flatStyle
               (colorRGBA 44 46 51 255)  -- elevated button surface
               (colorRGBA 245 245 245 255)  -- bright.fg / white
-              borderColor
+              edgeCol
               (colorRGBA 69 74 83 255)  -- #454A53
               (colorRGBA 28 29 32 255)  -- depressed on click
         , themeInput =
             flatStyle
               (colorRGBA 23 24 26 255)  -- #17181A (recessed into #1E1F21 panel)
               (colorRGBA 234 234 234 255)  -- bright.fg #EAEAEA
-              borderColor
+              edgeCol
               (colorRGBA 29 30 33 255)
               (colorRGBA 19 20 22 255)
-        , themeSeparator = separatorColor
-        , themeAccent = activeColor
+        , themeSeparator = sepCol
+        , themeAccent = accentCol
         , themeMuted = colorRGBA 150 152 150 255       -- comment #969896
         , themeRed = colorRGBA 204 102 102 255         -- base.red #CC6666
         , themeOrange = colorRGBA 222 147 95 255       -- base.orange #DE935F
@@ -528,16 +724,22 @@ tomorrowNightMinDarkTheme =
         , themeGreen = colorRGBA 181 189 104 255       -- base.green #B5BD68
         , themePurple = colorRGBA 178 148 187 255      -- base.purple #B294BB
         , themeOverlayDim = colorRGBA 0 0 0 160
+        , themeOnAccent = colorRGBA 255 255 255 255
+        , themeSelection = fadeAlpha accentCol 115
+        , themeFocusRing = accentCol
+        , themeLink = accentCol
+        , themeShadow = colorRGBA 0 0 0 72
+        , themeDisabledFade = 0.55
         }
   where
-  borderColor    = colorRGBA 77 80 87 255              -- window #4D5057 (touch brighter crisp border)
-  separatorColor = colorRGBA 55 59 65 255              -- base.selection #373B41 (subtle divider)
-  activeColor    = colorRGBA 103 150 230 255           -- vscode.cornflower_blue #6796E6
+  edgeCol    = colorRGBA 77 80 87 255              -- window #4D5057 (touch brighter crisp border)
+  sepCol = colorRGBA 55 59 65 255              -- base.selection #373B41 (subtle divider)
+  accentCol    = colorRGBA 103 150 230 255           -- vscode.cornflower_blue #6796E6
 
 -- | Ported from "Tomorrow Min" in https://github.com/biaqat/tomorrow-min-theme-zed
 tomorrowMinLightTheme :: Theme
 tomorrowMinLightTheme =
-  let panelStyle =
+  let panelSurface =
         flatStyle
           (colorRGBA 242 242 242 255)  -- #F2F2F2
           (colorRGBA 55 59 65 255)  -- #373B41
@@ -546,8 +748,8 @@ tomorrowMinLightTheme =
           (colorRGBA 219 219 219 255)  -- #DBDBDB
    in Theme
         { themeWindow = colorRGBA 255 255 255 255     -- #FFFFFF
-        , themePanel = panelStyle
-        , themeFloatingWindow = panelStyle
+        , themePanel = panelSurface
+        , themeFloatingWindow = panelSurface
         , themeButton =
             flatStyle
               (colorRGBA 232 232 232 255)  -- #E8E8E8 (step down from panel for zebra rows)
@@ -571,38 +773,44 @@ tomorrowMinLightTheme =
         , themeGreen = colorRGBA 113 140 0 255        -- Tomorrow Green #718C00
         , themePurple = colorRGBA 137 91 144 255      -- Tomorrow Purple #895B90
         , themeOverlayDim = colorRGBA 0 0 0 100
+        , themeOnAccent = colorRGBA 255 255 255 255
+        , themeSelection = fadeAlpha (colorRGBA 82 134 188 255) 80
+        , themeFocusRing = colorRGBA 82 134 188 255
+        , themeLink = colorRGBA 66 113 174 255
+        , themeShadow = colorRGBA 0 0 0 36
+        , themeDisabledFade = 0.55
         }
 
 -- | Ported from "Tomorrow at Midnight Min" in https://github.com/biaqat/tomorrow-min-theme-zed
 tomorrowMidnightMinDarkTheme :: Theme
 tomorrowMidnightMinDarkTheme =
-  let panelStyle =
+  let panelSurface =
         flatStyle
           (colorRGBA 16 17 20 255)  -- #101114 (elevated panel canvas)
           (colorRGBA 238 238 238 255)  -- #EEEEEE
-          borderColor
+          edgeCol
           (colorRGBA 46 48 56 255)  -- #2E3038
           (colorRGBA 12 13 15 255)  -- #0C0D0F
    in Theme
         { themeWindow = colorRGBA 0 0 0 255           -- #000000 (pitch black root window backdrop)
-        , themePanel = panelStyle
-        , themeFloatingWindow = panelStyle
+        , themePanel = panelSurface
+        , themeFloatingWindow = panelSurface
         , themeButton =
             flatStyle
               (colorRGBA 26 27 34 255)  -- #1A1B22
               (colorRGBA 238 238 238 255)  -- #EEEEEE
-              borderColor
+              edgeCol
               (colorRGBA 54 58 72 255)  -- #363A48
               (colorRGBA 56 60 81 255)  -- #383C51
         , themeInput =
             flatStyle
               (colorRGBA 13 14 18 255)  -- #0D0E12 (recessed into panel)
               (colorRGBA 238 238 238 255)
-              borderColor
+              edgeCol
               (colorRGBA 21 22 28 255)
               (colorRGBA 8 9 11 255)
-        , themeSeparator = separatorColor
-        , themeAccent = activeColor
+        , themeSeparator = sepCol
+        , themeAccent = accentCol
         , themeMuted = colorRGBA 128 132 150 255       -- #808496
         , themeRed = colorRGBA 213 78 83 255           -- bright.red #D54E53
         , themeOrange = colorRGBA 231 140 69 255       -- bright.orange #E78C45
@@ -610,11 +818,17 @@ tomorrowMidnightMinDarkTheme =
         , themeGreen = colorRGBA 185 202 74 255        -- bright.green #B9CA4A
         , themePurple = colorRGBA 195 151 216 255      -- bright.purple #C397D8
         , themeOverlayDim = colorRGBA 0 0 0 160
+        , themeOnAccent = colorRGBA 255 255 255 255
+        , themeSelection = fadeAlpha accentCol 115
+        , themeFocusRing = accentCol
+        , themeLink = accentCol
+        , themeShadow = colorRGBA 0 0 0 96
+        , themeDisabledFade = 0.55
         }
   where
-  borderColor    = colorRGBA 48 52 70 255              -- #303446
-  separatorColor = colorRGBA 48 52 70 255              -- #303446
-  activeColor    = colorRGBA 140 182 226 255           -- #8CB6E2
+  edgeCol    = colorRGBA 48 52 70 255              -- #303446
+  sepCol = colorRGBA 48 52 70 255              -- #303446
+  accentCol    = colorRGBA 140 182 226 255           -- #8CB6E2
 
 -- -----------------------------------------------------------------------------
 -- Base16 Colorschemes
@@ -654,34 +868,34 @@ themeFromBase16 b
 -- | Calculate a dark 'Theme' from a 'Base16' colorscheme.
 themeFromBase16Dark :: Base16 -> Theme
 themeFromBase16Dark b =
-  let borderColor = lerpColor (base02 b) (base03 b) 0.35
+  let edgeCol = lerpColor (base02 b) (base03 b) 0.35
       panelBg = lerpColor (base01 b) (base02 b) 0.3
-      panelStyle =
+      panelSurface =
         flatStyle
           panelBg
           (base05 b)
-          borderColor
+          edgeCol
           (lerpColor panelBg (base02 b) 0.5)
           (lerpColor panelBg (base00 b) 0.4)
    in Theme
         { themeWindow = base00 b
-        , themePanel = panelStyle
-        , themeFloatingWindow = panelStyle
+        , themePanel = panelSurface
+        , themeFloatingWindow = panelSurface
         , themeButton =
             flatStyle
               (base02 b)
               (base07 b)
-              borderColor
+              edgeCol
               (lerpColor (base02 b) (base03 b) 0.4)
               (base01 b)
         , themeInput =
             flatStyle
               (base00 b)
               (base05 b)
-              borderColor
+              edgeCol
               (base01 b)
               (base00 b)
-        , themeSeparator = borderColor
+        , themeSeparator = edgeCol
         , themeAccent = base0D b
         , themeMuted = base03 b
         , themeRed = base08 b
@@ -690,39 +904,45 @@ themeFromBase16Dark b =
         , themeGreen = base0B b
         , themePurple = base0E b
         , themeOverlayDim = colorRGBA 0 0 0 160
+        , themeOnAccent = if colorLuminance (base0D b) > 0.6 then base00 b else colorRGBA 255 255 255 255
+        , themeSelection = fadeAlpha (base0D b) 115
+        , themeFocusRing = base0D b
+        , themeLink = base0D b
+        , themeShadow = colorRGBA 0 0 0 72
+        , themeDisabledFade = 0.55
         }
 
 -- | Calculate a light 'Theme' from a 'Base16' colorscheme.
 themeFromBase16Light :: Base16 -> Theme
 themeFromBase16Light b =
-  let borderColor = base02 b
+  let edgeCol = base02 b
       panelBg = lerpColor (base00 b) (base01 b) 0.5
-      panelStyle =
+      panelSurface =
         flatStyle
           panelBg
           (base05 b)
-          borderColor
+          edgeCol
           (lerpColor panelBg (base00 b) 0.4)
           (lerpColor panelBg (base02 b) 0.4)
    in Theme
         { themeWindow = base00 b
-        , themePanel = panelStyle
-        , themeFloatingWindow = panelStyle
+        , themePanel = panelSurface
+        , themeFloatingWindow = panelSurface
         , themeButton =
             flatStyle
               (base01 b)
               (base05 b)
-              borderColor
+              edgeCol
               (base02 b)
               (lerpColor (base02 b) (base03 b) 0.35)
         , themeInput =
             flatStyle
               (base00 b)
               (base05 b)
-              borderColor
+              edgeCol
               (lerpColor (base00 b) (base01 b) 0.3)
               (lerpColor (base00 b) (base01 b) 0.6)
-        , themeSeparator = borderColor
+        , themeSeparator = edgeCol
         , themeAccent = base0D b
         , themeMuted = base03 b
         , themeRed = base08 b
@@ -731,6 +951,12 @@ themeFromBase16Light b =
         , themeGreen = base0B b
         , themePurple = base0E b
         , themeOverlayDim = colorRGBA 0 0 0 100
+        , themeOnAccent = if colorLuminance (base0D b) > 0.6 then base07 b else colorRGBA 255 255 255 255
+        , themeSelection = fadeAlpha (base0D b) 80
+        , themeFocusRing = base0D b
+        , themeLink = base0D b
+        , themeShadow = colorRGBA 0 0 0 36
+        , themeDisabledFade = 0.55
         }
 
 -- | Tomorrow Night Base16 reference palette.

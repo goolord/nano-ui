@@ -67,10 +67,22 @@ module NanoUI.Context.Core
   , recordStoreFloat
   , recordStoreText
   , isDisabled
+  -- Theme scopes
+  , newThemeScopes
+  , beginThemeScopes
+  , pushThemeScope
+  , themeScopesChanged
+  , scopeTheme
+  , scopeRawTheme
+  , currentTheme
+  , nodeTheme
+  , widgetTheme
   ) where
 
 import Control.Monad (forM_, when)
+import Data.Bits (shiftR, (.&.))
 import Data.IORef (modifyIORef', readIORef, writeIORef)
+import Data.Primitive.SmallArray (copySmallMutableArray, newSmallArray, readSmallArray, getSizeofSmallMutableArray, writeSmallArray)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
@@ -84,21 +96,22 @@ import NanoUI.Context.Types
   , TextFieldClickCell
   , TextInputDrag
   , TextInputMenu
+  , ThemeScopes (..)
   , WindowResizeDrag
   , intKey
   )
 import NanoUI.Id (WidgetId, hashWidgetId)
-import NanoUI.Layout.Arena (DirTag)
+import NanoUI.Layout.Arena (DirTag, NodeIdx, getArenaScope, getNodeScope, getScopeSignature, lookupNodeByWidgetId)
 import NanoUI.Store
   ( WidgetStore (..)
   , boolInt
   , deleteWidgetState
   , intBool
   , ptrEq
-  , slotDisabled
   , slotKey
   , slotSeen
   )
+import NanoUI.Style (Theme)
 import NanoUI.Types (Damage, DamageBounds (..), Rect, Size, defaultDamageSlop, rectH, rectW)
 
 -- =============================================================================
@@ -480,7 +493,138 @@ getStoreBool ctx wid def =
 setStoreBool :: Context -> WidgetId -> Bool -> IO ()
 setStoreBool = writeStoreBool
 
+-- | Whether @wid@ was declared inside a disabled scope. A widget asks before
+-- its node exists, while the scope it is declared in is still the arena's.
 {-# INLINE isDisabled #-}
 isDisabled :: Context -> WidgetId -> IO Bool
-isDisabled ctx wid =
-  intBool . IM.findWithDefault 0 (slotKey slotDisabled (intKey wid)) . storeInt <$> getStore ctx
+isDisabled ctx wid = do
+  ts <- readIORef (ctxThemeScopes ctx)
+  if tsDisabled ts then scopeDisabled ctx wid else pure False
+
+{-# NOINLINE scopeDisabled #-}
+scopeDisabled :: Context -> WidgetId -> IO Bool
+scopeDisabled ctx wid = do
+  let na = ctxNodeArena ctx
+  mIdx <- lookupNodeByWidgetId na wid
+  scope <- maybe (getArenaScope na) (getNodeScope na) mIdx
+  pure (scope .&. 1 /= 0)
+
+-- =============================================================================
+-- Theme scopes
+-- =============================================================================
+
+newThemeScopes :: IO ThemeScopes
+newThemeScopes = do
+  let unset = error "theme scope: unset"
+  cur <- newSmallArray 8 unset
+  raw <- newSmallArray 8 unset
+  prev <- newSmallArray 8 unset
+  prevRaw <- newSmallArray 8 unset
+  pure
+    ThemeScopes
+      { tsCount = 0
+      , tsThemes = cur
+      , tsRaw = raw
+      , tsPrevCount = 0
+      , tsPrev = prev
+      , tsPrevRaw = prevRaw
+      , tsDisabled = False
+      , tsChanged = False
+      , tsPrevSig = 0
+      }
+
+-- | Start a view pass with no pushed themes. The first pass of a frame keeps
+-- last frame's themes to compare against; a rebuild pass keeps comparing
+-- against the same ones.
+beginThemeScopes :: Context -> Bool -> IO ()
+beginThemeScopes ctx newFrame = do
+  ts <- readIORef (ctxThemeScopes ctx)
+  if newFrame
+    then do
+      sig <- getScopeSignature (ctxNodeArena ctx)
+      writeIORef (ctxThemeScopes ctx) $!
+        ts
+          { tsCount = 0
+          , tsThemes = tsPrev ts
+          , tsRaw = tsPrevRaw ts
+          , tsPrevCount = tsCount ts
+          , tsPrev = tsThemes ts
+          , tsPrevRaw = tsRaw ts
+          , tsDisabled = False
+          , tsChanged = False
+          , tsPrevSig = sig
+          }
+    else writeIORef (ctxThemeScopes ctx) $! ts {tsCount = 0, tsDisabled = False, tsChanged = False}
+
+-- | Add a scope drawn with @theme@, whose nested scopes modify @raw@ and which
+-- is disabled or not, and
+-- return its theme index. A theme equal to last frame's at the same index
+-- keeps last frame's value.
+pushThemeScope :: Context -> Bool -> Theme -> Theme -> IO Int
+pushThemeScope ctx disabled raw theme = do
+  ts <- readIORef (ctxThemeScopes ctx)
+  let !i = tsCount ts
+  cap <- getSizeofSmallMutableArray (tsThemes ts)
+  (themes, raws) <-
+    if i < cap
+      then pure (tsThemes ts, tsRaw ts)
+      else do
+        grown <- newSmallArray (cap * 2) theme
+        copySmallMutableArray grown 0 (tsThemes ts) 0 i
+        grownRaw <- newSmallArray (cap * 2) raw
+        copySmallMutableArray grownRaw 0 (tsRaw ts) 0 i
+        pure (grown, grownRaw)
+  same <-
+    if i < tsPrevCount ts
+      then (== theme) <$> readSmallArray (tsPrev ts) i
+      else pure False
+  writeSmallArray themes i theme
+  writeSmallArray raws i raw
+  writeIORef (ctxThemeScopes ctx) $!
+    ts {tsCount = i + 1, tsThemes = themes, tsRaw = raws, tsDisabled = tsDisabled ts || disabled, tsChanged = tsChanged ts || not same}
+  pure (i + 1)
+
+-- | Whether this frame's scopes look different from last frame's: a theme
+-- changed, scopes were added or dropped, or nodes moved between scopes.
+themeScopesChanged :: Context -> IO Bool
+themeScopesChanged ctx = do
+  ts <- readIORef (ctxThemeScopes ctx)
+  sig <- getScopeSignature (ctxNodeArena ctx)
+  pure (tsChanged ts || tsCount ts /= tsPrevCount ts || sig /= tsPrevSig ts)
+
+{-# INLINE scopeTheme #-}
+scopeTheme :: Context -> Int -> IO Theme
+scopeTheme ctx scope
+  | ti == 0 = readIORef (ctxTheme ctx)
+  | otherwise = do
+      ts <- readIORef (ctxThemeScopes ctx)
+      readSmallArray (tsThemes ts) (ti - 1)
+  where
+    !ti = scope `shiftR` 1
+
+-- | A scope's theme before any disabled scope faded it.
+scopeRawTheme :: Context -> Int -> IO Theme
+scopeRawTheme ctx scope
+  | ti == 0 = readIORef (ctxTheme ctx)
+  | otherwise = do
+      ts <- readIORef (ctxThemeScopes ctx)
+      readSmallArray (tsRaw ts) (ti - 1)
+  where
+    !ti = scope `shiftR` 1
+
+-- | The theme of the scope the view is declaring in.
+{-# INLINE currentTheme #-}
+currentTheme :: Context -> IO Theme
+currentTheme ctx = getArenaScope (ctxNodeArena ctx) >>= scopeTheme ctx
+
+{-# INLINE nodeTheme #-}
+nodeTheme :: Context -> NodeIdx -> IO Theme
+nodeTheme ctx idx = getNodeScope (ctxNodeArena ctx) idx >>= scopeTheme ctx
+
+-- | The theme of @wid@'s node, or of the current scope before it has one.
+widgetTheme :: Context -> WidgetId -> IO Theme
+widgetTheme ctx wid = do
+  ts <- readIORef (ctxThemeScopes ctx)
+  if tsCount ts == 0
+    then readIORef (ctxTheme ctx)
+    else lookupNodeByWidgetId (ctxNodeArena ctx) wid >>= maybe (currentTheme ctx) (nodeTheme ctx)

@@ -99,8 +99,6 @@ module NanoUI
   , gridWith
   , panel
   , panelWith
-  , panelStyled
-  , panelStyledWith
   , card
   , callout
   , calloutWith
@@ -483,6 +481,60 @@ module NanoUI
   , fontUnderline
   , fontStrike
 
+    -- * Styling
+    -- | A 'Theme' says how every kind of widget looks: a 'Style' for each
+    -- surface (buttons, inputs, panels, floating windows) and colours for
+    -- accents, text selection, links and so on. The context holds one theme
+    -- for the whole app ('setTheme'); 'styled' changes it for part of the
+    -- view. Style and theme modifiers compose with @(.)@ like layout
+    -- modifiers do:
+    --
+    -- @
+    -- toolbar = 'styled' ('subtle' . 'buttonStyle' ('cornerRadius' 6)) $ 'row' $ do
+    --   'whenM' ('button' \"Open\") openFile
+    --   'styled' 'primary' ('whenM' ('button' \"Save\") save)
+    -- @
+    --
+    -- Scopes nest, and each one modifies the theme around it, so a modifier
+    -- written once ('primary', 'destructive', or one of your own) works in any
+    -- theme. 'uiTheme' reads the theme where it is called.
+    --
+    -- 'disabledWhen' switches the widgets inside it off: they keep their
+    -- layout and state, take no input, and fade toward the window colour.
+  , styled
+  , themed
+  , disabledWhen
+  , uiTheme
+    -- ** Style modifiers
+  , background
+  , foreground
+  , borderColor
+  , borderWidth
+  , cornerRadius
+  , hoverBackground
+  , pressBackground
+  , fillColor
+    -- ** Theme modifiers
+  , buttonStyle
+  , inputStyle
+  , panelStyle
+  , windowStyle
+  , everyStyle
+  , accentColor
+  , textColor
+  , mutedColor
+  , linkColor
+  , selectionColor
+  , windowColor
+  , rounded
+  , primary
+  , destructive
+  , success
+  , subtle
+  , tinted
+  , readableOn
+  , disabledTheme
+
     -- * Themes
   , Theme (..)
   , Style (..)
@@ -499,7 +551,6 @@ module NanoUI
   , withTheme
   , setTheme
   , getTheme
-  , uiTheme
   , setUiTheme
   , themeSeries
   , scrollBarTrackColor
@@ -684,6 +735,9 @@ import NanoUI.Monad
   , burstNextIds
   , currentId
   , damageFullNow
+  , disabledWhen
+  , styled
+  , themed
   , damageGroupNow
   , damageKeyNow
   , damageRectNow
@@ -723,6 +777,33 @@ import NanoUI.Style
   , Style (..)
   , TextDecoration (..)
   , Theme (..)
+  , accentColor
+  , background
+  , borderColor
+  , borderWidth
+  , buttonStyle
+  , cornerRadius
+  , destructive
+  , disabledTheme
+  , everyStyle
+  , fillColor
+  , foreground
+  , hoverBackground
+  , inputStyle
+  , linkColor
+  , mutedColor
+  , panelStyle
+  , pressBackground
+  , primary
+  , readableOn
+  , rounded
+  , selectionColor
+  , subtle
+  , success
+  , textColor
+  , tinted
+  , windowColor
+  , windowStyle
   , alignBottom
   , alignCenter
   , alignEnd

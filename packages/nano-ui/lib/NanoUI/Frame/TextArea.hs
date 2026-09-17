@@ -11,7 +11,7 @@ module NanoUI.Frame.TextArea
   ) where
 
 import Control.Monad (forM_, unless, when)
-import Data.IORef (readIORef, writeIORef)
+import Data.IORef (writeIORef)
 import qualified Data.IntMap.Strict as IM
 import Data.Maybe (catMaybes, isJust)
 import Data.Text (Text)
@@ -28,6 +28,7 @@ import NanoUI.Context
   , setStore
   , setTextInputDrag
   , slotKey
+  , nodeTheme
   )
 import NanoUI.Draw (DrawArena, getDrawSnapScale, pushText, withClip)
 import NanoUI.Font (FontMetrics, lineWidthIO, prepareFontMetrics, textIndexAtX, widgetContentInset)
@@ -52,12 +53,12 @@ import NanoUI.Input
   )
 import NanoUI.Layout.Arena (NodeIdx, NodeType (NodeTextArea), getNodeType, getRect, getWidgetId)
 import NanoUI.Store (slotTextAreaCol, slotTextAreaRow, slotTextAreaScroll, slotTextAreaViewport)
-import NanoUI.Style (Style (..), Theme, scrollBarThumbColor, scrollBarTrackColor, themeAccent, themePanel)
+import NanoUI.Style (Style (..), Theme, scrollBarThumbColor, scrollBarTrackColor, themePanel, themeSelection)
 import NanoUI.Types (Rect (..), V2 (..), onGrid, rectContains)
 import NanoUI.Widgets.TextArea (TextAreaState (..), loadTextAreaState, saveTextAreaState)
 import qualified NanoUI.Widgets.TextArea as TA
 import qualified NanoUI.Widgets.TextBuffer as TB
-import NanoUI.Widgets.TextCommon (selectionBgColor, selectionCaretGeom, textWordBounds)
+import NanoUI.Widgets.TextCommon (selectionCaretGeom, textWordBounds)
 
 data TextAreaHit = TextAreaHit
   { tahNodeIdx :: !NodeIdx
@@ -122,8 +123,8 @@ textAreaSnap da = onGrid <$> getDrawSnapScale da
 
 -- Share the indexed document with content/caret painting. Selecting many
 -- lines must not traverse the document prefix again for each selected row.
-drawTextAreaSelectionLines :: DrawArena -> V.Vector Text -> TA.TextAreaState -> TextAreaGeom -> FontMetrics -> Theme -> Style -> IO ()
-drawTextAreaSelectionLines da lineTexts state geom fm theme style = do
+drawTextAreaSelectionLines :: DrawArena -> V.Vector Text -> TA.TextAreaState -> TextAreaGeom -> FontMetrics -> Theme -> IO ()
+drawTextAreaSelectionLines da lineTexts state geom fm theme = do
   snap <- textAreaSnap da
   let anchor = TA.selectionAnchor state
       cursor = TB.getCursor (TA.buffer state)
@@ -136,7 +137,7 @@ drawTextAreaSelectionLines da lineTexts state geom fm theme style = do
         scrollXf = snap (realToFrac scrollX)
         scrollYf = snap (realToFrac scrollY)
         contentTop = rectY' field + iy
-        selBg = selectionBgColor (themeAccent theme) (styleBg style)
+        selBg = themeSelection theme
         loRow = TB.cursorRow lo
         hiRow = TB.cursorRow hi
     forM_ [loRow .. hiRow] $ \row -> do
@@ -161,7 +162,7 @@ drawTextAreaContentWith da ctx fm idx x y w h style = do
   snap <- textAreaSnap da
   syncTextAreaViewport ctx idx fm x y w h
   focus <- textInputFocused ctx idx
-  theme <- readIORef (ctxTheme ctx)
+  theme <- nodeTheme ctx idx
   let geom = textAreaGeom fm x y w h
       field@(Rect _ fieldTop _ fieldH) = tagFieldRect geom
       lineH = tagLineHeight geom
@@ -185,7 +186,7 @@ drawTextAreaContentWith da ctx fm idx x y w h style = do
           (if isJust (tasbHorizontal layouts) then max 0 (clipH - laneH) else clipH)
   withClip da textClip $ do
     when focus $
-      drawTextAreaSelectionLines da lineTexts state geom fm theme style
+      drawTextAreaSelectionLines da lineTexts state geom fm theme
     V.imapM_
       ( \row line -> do
           let ly = contentTop + fromIntegral row * lineH - scrollYf

@@ -307,12 +307,12 @@ runTabsScrollTest _ failed = do
   quads <- drawQuads dd
   let Size winW _ = inputWindowSize inp
       bar = Rect 0 0 winW 34
-      inputStyle = themeInput theme
+      inputSurface = themeInput theme
       forbidden =
-        [ styleBg inputStyle
-        , styleBorder inputStyle
-        , scrollBarTrackColor inputStyle theme
-        , scrollBarThumbColor inputStyle theme
+        [ styleBg inputSurface
+        , styleBorder inputSurface
+        , scrollBarTrackColor inputSurface theme
+        , scrollBarThumbColor inputSurface theme
         ]
       inBar = [(r, c) | (r, c) <- quads, isJust (rectIntersect r bar), c `elem` forbidden]
   assert failed (null inBar)
