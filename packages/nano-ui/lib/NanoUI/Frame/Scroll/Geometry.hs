@@ -1,6 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 
--- | Unified scrollbar geometry: gutters, viewport clips, track/thumb layout.
+-- | Scrollbar geometry: gutters, viewport clips, and track and thumb layout.
 module NanoUI.Frame.Scroll.Geometry
   ( ScrollPolicy (..)
   , ScrollConfig (..)

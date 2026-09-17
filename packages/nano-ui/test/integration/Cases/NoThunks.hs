@@ -14,8 +14,8 @@ import NanoUI.Testing.Assert (assert, withInput)
 -- frame whose widgets populate several store maps, then check every stored
 -- value directly with nothunks. (Container spines/lists are not checked:
 -- on GHC 9.14 nothunks flags WHNF list and IntMap internals as thunks, a
--- false positive. Individual values -- Text, Int, Float, Float pairs --
--- are checked precisely, which catches the strict-container WHNF trap
+-- false positive. Individual values (Text, Int, Float, Float pairs) are
+-- checked precisely, which catches the strict-container WHNF trap
 -- where a stored tuple's components remain unevaluated.)
 runNoThunksTest :: Context -> IORef Int -> IO ()
 runNoThunksTest ctx failed = do

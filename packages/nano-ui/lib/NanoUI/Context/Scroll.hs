@@ -172,7 +172,7 @@ writeScrollOffset2D ctx wid off = do
       sKey = slotKey SlotTextAreaScroll widKey
   -- Text areas only reach the first branch because `textAreaWith` seeds this
   -- slot at init; without the seed a freshly mounted editor falls through to
-  -- the legacy container slots below and its offsets are never rendered.
+  -- the container slots below and its offsets are never rendered.
   case IM.lookup sKey (storePoint store) of
     Just (sx, sy) -> do
       let sx' = v2X off
@@ -324,7 +324,7 @@ beginScrollMetrics ctx =
 
 -- | Record what the scroll pass measured, so the commands and the app can
 -- read it between frames. Writes nothing when nothing moved, and nothing at
--- all for a second node sharing this one's widget id — a table's frozen pane
+-- all for a second node sharing this one's widget id. A table's frozen pane
 -- and its body share theirs, and letting both publish would rewrite the store
 -- every frame and hand the commands a viewport that alternates between panes.
 cacheScrollMetrics :: Context -> WidgetId -> ScrollAxes -> Rect -> V2 -> IO ()
@@ -470,8 +470,8 @@ scrollToEnd ctx wid behavior =
 
 -- | Scroll @target@ into the viewport of the scroller @wid@ it is built
 -- inside. Both widgets are read from the last frame's layout, so a widget
--- that was not built then — a row a virtualized list left out — cannot be
--- found; scroll to its content rectangle with 'scrollRectIntoView' instead.
+-- that was not built then, such as a row a virtualized list left out, cannot
+-- be found; scroll to its content rectangle with 'scrollRectIntoView' instead.
 scrollIntoView :: Context -> WidgetId -> WidgetId -> ScrollAlign -> ScrollBehavior -> IO ()
 scrollIntoView ctx wid target align behavior = do
   mMetrics <- getScrollMetrics ctx wid

@@ -27,7 +27,7 @@ import NanoUI.Types (Rect (..))
 
 -- | Everything a paint pass needs, bundled so the walker does not re-read the
 -- theme IORef (or rebuild arena handles) for every node. Baked once per
--- frame by 'buildPaintEnv'. Fields are deliberately lazy: under
+-- frame by 'buildPaintEnv'. Fields are lazy: under
 -- -funbox-strict-fields a strict paint env would unbox every reachable
 -- field of Context/Theme/Style recursively, turning each record selector into
 -- a ~100-way case that dominates Core size; lazy fields stay single pointers

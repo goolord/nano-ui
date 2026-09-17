@@ -371,8 +371,8 @@ resolveInteraction ctx inp wid = do
           Nothing -> pure (rectContains rect p)
           Just idx -> nodeInteractionHit ctx idx rect p
         -- Whether the button held in @ref@ went down on this widget. A press
-        -- the frame never saw — synthesized input, or one swallowed before it
-        -- arrived — leaves the gesture unowned, so nobody is ruled out.
+        -- the frame never saw (synthesized input, or one swallowed before it
+        -- arrived) leaves the gesture unowned, so nobody is ruled out.
         startedHere ref = readIORef ref >>= maybe (pure True) hitAt
       -- A held button belongs to whatever it went down on. Another widget the
       -- drag passes over is not hovered, so it neither lights up nor reports a

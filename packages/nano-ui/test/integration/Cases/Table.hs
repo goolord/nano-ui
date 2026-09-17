@@ -226,16 +226,16 @@ runTableWrapRowStretchTest ctx failed = do
     dedup = foldr (\x acc -> if x `elem` acc then acc else x : acc) []
 
 -- Resizing a column past the pane's right edge overflows the body. On every
--- drag frame the header row must stay inside the row scroller's clip (the
--- horizontal bar lane used to cover the header's bottom half for a frame,
--- flickering it mid-drag), and once the drag settles the body scroller's
+-- drag frame the header row must stay inside the row scroller's clip, with
+-- no frame where the horizontal bar lane covers the header's bottom half,
+-- and once the drag settles the body scroller's
 -- horizontal bar drags the shared offset both ways.
 runTableResizeOverflowTest :: Context -> IORef Int -> IO ()
 runTableResizeOverflowTest ctx failed = do
   let inp0 = (withInput 400 300) {inputMousePos = V2 30 30}
       -- Five rows put the body just inside the vertical bar's toggle band:
       -- the bar appears exactly when the header lane spacer appears, which is
-      -- the sequence that used to clip the header.
+      -- the sequence that could clip the header.
       rows = take 5 tableScrollRows
       ui = do
         (tableSort, _) <- useTableSort (SortCol 0 SortAsc)

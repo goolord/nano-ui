@@ -1,5 +1,7 @@
 {-# LANGUAGE BangPatterns #-}
 
+-- | The multi-line text area widget and its state: the document buffer,
+-- caret and selection, viewport, and commands run against it.
 module NanoUI.Widgets.TextArea
   ( -- * Pure state
     TextAreaState (..)

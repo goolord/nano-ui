@@ -1,5 +1,7 @@
 {-# LANGUAGE StrictData #-}
 
+-- | The per-frame 'Input' record backends fill in: pointer state, keys and
+-- modifiers, typed characters, scroll, window size, and file drops.
 module NanoUI.Input
   ( Key (..)
   , Modifiers (..)

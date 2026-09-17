@@ -1,5 +1,7 @@
 {-# LANGUAGE StrictData #-}
 
+-- | Record types behind 'Context': interaction, damage, overlay, animation,
+-- scroll and drawing-cache state, theme scopes, and frame messages.
 module NanoUI.Context.Types
   ( Context (..)
   , MeasureCacheKey
@@ -480,8 +482,8 @@ data Context = Context
   , ctxReleaseClickedId :: IORef WidgetId
   -- | Where the held left and right buttons went down, cleared when they come
   -- up. A click belongs to the widget the press landed on, so a widget
-  -- hit-tests this point as well as the release point. 'Nothing' — a release
-  -- with no press behind it — lets the release stand on its own.
+  -- hit-tests this point as well as the release point. 'Nothing' (a release
+  -- with no press behind it) lets the release stand on its own.
   , ctxPressPos :: IORef (Maybe V2)
   , ctxRightPressPos :: IORef (Maybe V2)
   , ctxFocusId :: IORef WidgetId

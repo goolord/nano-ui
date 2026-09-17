@@ -155,8 +155,8 @@ runControlsTabHeightTest ctx failed = do
   assert failed (not (leftH > 80 && bodyH > leftH * 0.92))
 
 -- A press on the SV field previews without committing, a held press keeps
--- sampling it (the drag key recorded on the press frame used to blank the
--- field and reset to white), and the release commits.
+-- sampling it without blanking the field or resetting it to white, and the
+-- release commits.
 runColorPickerCommitTest :: Context -> IORef Int -> IO ()
 runColorPickerCommitTest ctx failed = do
   let initial = colorRGBA 204 102 102 255

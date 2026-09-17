@@ -1,6 +1,6 @@
 -- | Deterministic frame execution and render inspection for tests and tools.
--- Application code should use backend runners ('NanoUI.Backend.Term',
--- 'NanoUI.Backend.Sdl') instead of this module.
+-- Application code should use a backend's runner, such as
+-- @runSdlApp@ in @NanoUI.Backend.Sdl@, instead of this module.
 module NanoUI.Testing
   ( -- * Frame
     runFrame
@@ -240,6 +240,7 @@ import NanoUI.WidgetText (textNodeFontStyle, textNodeFontWeight, textNodeTextDec
 import NanoUI.Types (Damage (..), damageIsEmpty)
 import Effectful (Eff, IOE, runEff, type (:>))
 
--- | Pixel-host context with SDL-like defaults for headless tests.
+-- | A headless context for tests: 16px monospace metrics, the measure cache
+-- on, text kept out of the vertex buffer, and the default theme.
 newPixelContext :: IO Context
 newPixelContext = newPixelHostContext

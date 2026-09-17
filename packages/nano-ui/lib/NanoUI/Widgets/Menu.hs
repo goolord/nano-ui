@@ -165,10 +165,9 @@ menuItemShortcut txt hint = respClicked <$> menuItemWith (MenuItem txt (Just hin
 menuItemDisabled :: Ui :> es => Text -> Eff es ()
 menuItemDisabled txt = void (menuItemWith (MenuItem txt Nothing False))
 
--- | Row layout shared by menu items, matching the text-field context menu
--- exactly: 28px rows and the same 148px minimum menu width on pixel hosts
--- (@textEditMenuItemH@ / @textEditMenuMinW@ in "NanoUI.Frame.TextEdit"); cell
--- hosts keep tight auto-sizing.
+-- | Row layout shared by menu items, matching the text-field context menu:
+-- 28px rows and a 148px minimum menu width (@menuItemRowH@ and @menuMinW@ in
+-- @NanoUI.Font@).
 menuRowLayout :: Layout
 menuRowLayout = minW menuMinW . fixedH menuItemRowH . tight . fillW $ defaultLayout
 

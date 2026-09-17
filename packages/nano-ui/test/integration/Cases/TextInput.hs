@@ -977,9 +977,9 @@ runRefreshRedrawTest ctx failed = do
 
 -- | A context-menu Cut/Paste edits the document without any keys or chars on
 -- the frame, so the change must surface as a 'respChanged' pulse through the
--- text-area store flag -- otherwise callers (the notepad's dirty tracking)
--- never learn the document changed. Regression for the hadInput guard in
--- 'textAreaWith'. The caller holds the text, so the cut must also survive the
+-- text-area store flag, or callers (the notepad's dirty tracking) never learn
+-- the document changed. Covers the hadInput guard in 'textAreaWith'. The
+-- caller holds the text, so the cut must also survive the
 -- release frame, where the caller still passes back the pre-cut result.
 runTextAreaMenuPulseTest :: Context -> IORef Int -> IO ()
 runTextAreaMenuPulseTest ctx failed = do
@@ -1000,7 +1000,7 @@ runTextAreaMenuPulseTest ctx failed = do
       let
         (focusPress, focusRelease) = clickPair inp0 mid
       _ <- runFrame ctx focusPress ui >> runFrame ctx focusRelease ui
-      -- Selection-only actions must NOT pulse: no text delta.
+      -- Selection-only actions do not pulse: no text delta.
       _ <- runFrame ctx inp0 (runTextCommand (respId resp0) SelectAll)
       ((respSel, valSel), _, _, _) <- runFrame ctx inp0 ui
       assert failed (not (respChanged respSel))

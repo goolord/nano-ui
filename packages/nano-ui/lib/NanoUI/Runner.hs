@@ -1,4 +1,6 @@
--- | Universal session loop helpers: timing, click tracking, drawing locks, redraw predicates, and lifecycle checks.
+-- | The event loop the backends share: event waiting and frame pacing, click
+-- counting, the redraw decision, quit handling, and the drawing lock. A
+-- backend supplies a 'SessionDriver' for event translation and presentation.
 module NanoUI.Runner
   ( -- * Drawing Lock
     DrawingLock (..)
@@ -6,7 +8,7 @@ module NanoUI.Runner
   , tryWithDrawingLock
     -- * Redraw Decision
   , shouldRedrawFrame
-    -- * Universal Session Runner
+    -- * Session loop
   , SessionDriver (..)
   , runSessionLoop
   ) where
@@ -144,7 +146,7 @@ shouldRedrawFrame ctx prevInp curInp wasAnim continuous wantDebug = do
           scrollEdge = inputScroll curInp /= V2 0 0
       pure (need || wasAnim || pointerEdge || scrollEdge)
 
--- | Universal backend session driver configuration.
+-- | What a backend provides to 'runSessionLoop'.
 data SessionDriver ev = SessionDriver
   { sdPollEvents    :: IO [ev]
     -- ^ Non-blocking poll for pending backend events.
@@ -259,9 +261,8 @@ runSessionLoop drv ctx0 inp0 = do
                   then pure True
                   else sdShouldDraw drv ctx' inp inpSynced wasAnim debugDue
                 -- Force a full present only on the settle frame where an
-                -- animation just finished (wasAnim && not animNow). Passing
-                -- wasAnim alone kept every frame of a running animation at
-                -- DamageFull, defeating clip damage for animated widgets.
+                -- animation just finished (wasAnim && not animNow), so running
+                -- animations keep clip damage.
                 animNow <- anyAnimating ctx'
                 (dirtyOut, synced) <- if shouldDraw
                   then sdDraw drv ctx' inpSynced (wasAnim && not animNow)

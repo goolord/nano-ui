@@ -1,4 +1,4 @@
--- | Concise assertion and frame helpers for the integration test suite.
+-- | Assertion and frame helpers for the integration test suite.
 --
 -- Assertions count failures in a shared 'IORef' instead of aborting, so one
 -- test reports every broken expectation. Each failure prints the caller's

@@ -43,12 +43,15 @@ runTextCommand wid cmd = do
   ctx <- askContext
   uiIO (applyTextFieldCommand ctx wid cmd)
 
--- | Whether 'NanoUI.Undo' would change the field, for enabling a menu item.
+-- | Whether 'NanoUI.Widgets.TextCommand.Undo' would change the field, for
+-- enabling a menu item.
 textCanUndo :: Ui :> es => WidgetId -> Eff es Bool
 textCanUndo wid = do
   ctx <- askContext
   uiIO (canUndo <$> textFieldHistory ctx wid)
 
+-- | Whether 'NanoUI.Widgets.TextCommand.Redo' would change the field, for
+-- enabling a menu item.
 textCanRedo :: Ui :> es => WidgetId -> Eff es Bool
 textCanRedo wid = do
   ctx <- askContext

@@ -1,3 +1,5 @@
+-- | The widget store: per-widget state in maps by value type, keyed by widget
+-- id and 'Slot'.
 module NanoUI.Store
   ( WidgetStore (..)
   , emptyWidgetStore
@@ -48,7 +50,8 @@ eqDynMap a b =
   ptrEq a b
     || (IM.size a == IM.size b && IM.isSubmapOfBy ptrEq a b)
 
--- | Unified widget state. Same-type fields that share a widget key use 'slotKey'.
+-- | Widget state for every widget, in maps by value type. Same-type fields
+-- that share a widget key use 'slotKey'.
 data WidgetStore = WidgetStore
   { storeMirrorGen :: {-# UNPACK #-} !Word64
   , storeOpenSelect :: {-# UNPACK #-} !Int

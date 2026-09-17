@@ -1,6 +1,8 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE StrictData #-}
 
+-- | Widget ids and the id context they are derived from. See the
+-- "Widget identity" section of "NanoUI" for how ids are assigned.
 module NanoUI.Id
   ( WidgetId (..)
   , IdContext (..)

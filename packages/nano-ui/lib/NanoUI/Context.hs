@@ -1,3 +1,7 @@
+-- | The 'Context' a view runs against, and the operations on its state:
+-- focus, dirty flags and damage, the widget store, drawing and measure
+-- caches, overlays, and host hooks. Backends and advanced widgets use this
+-- module; views normally only need "NanoUI".
 module NanoUI.Context
   ( Context (..)
   , MeasureCacheKey

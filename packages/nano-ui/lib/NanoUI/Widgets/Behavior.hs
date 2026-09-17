@@ -1,4 +1,6 @@
--- | Concrete interaction hooks. No generic view trait; store-backed state only.
+-- | Interaction hooks shared by widgets: 1D drags, drag reordering, arrow-key
+-- navigation, click-outside and Escape dismissal, and the keyboard focus
+-- check. Their state lives in the widget store.
 module NanoUI.Widgets.Behavior
   ( DragAxis (..)
   , keyedDragHeld

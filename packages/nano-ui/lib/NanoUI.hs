@@ -57,6 +57,18 @@ module NanoUI
   , uiMousePos
 
     -- * Widget identity
+
+    -- | Every widget and hook takes the next 'WidgetId' in its container:
+    -- ids count up in call order among siblings, and a container starts a
+    -- new count for its children. Widget state is stored under that id, so
+    -- the same widgets and hooks must run in the same order every frame.
+    --
+    -- A widget that runs on some frames and not others moves the ids of the
+    -- siblings after it. Put the conditional part inside 'scope', which takes
+    -- one id whether or not its body adds anything. For a list whose items
+    -- are added, removed or reordered, run each item under 'withKey' (or
+    -- 'keyed') with a key unique among its siblings, so the item's state
+    -- follows its key instead of its position.
   , scope
   , keyed
   , keyedTag

@@ -1,5 +1,8 @@
 {-# LANGUAGE RecordWildCards #-}
 
+-- | The node arena: one frame's layout nodes stored column-wise in primitive
+-- arrays (geometry, style, tags and tree links), with accessors, traversals
+-- and the layout cache.
 module NanoUI.Layout.Arena
   ( NodeIdx
   , NodeType (..)
@@ -225,7 +228,8 @@ data NodeArenaArrays = NodeArenaArrays
   , naArrFontColor :: !(MutablePrimArray RealWorld Int)
   , naArrScope :: !(MutablePrimArray RealWorld Int)
   -- ^ The paint scope each node was added under: a theme index shifted left
-  -- one bit, and the disabled flag in bit 0. See 'NanoUI.Context.Theme'.
+  -- one bit, and the disabled flag in bit 0. See
+  -- 'NanoUI.Context.Types.ThemeScopes'.
   }
 
 data NodeArena = NodeArena
@@ -1002,7 +1006,7 @@ getNodeFontSize na idx = arenaArrays na >>= \a -> readStyle a idx styleFontSize
 setNodeFontSize :: NodeArena -> NodeIdx -> Float -> IO ()
 setNodeFontSize na idx v = arenaArrays na >>= \a -> writeStyle a idx styleFontSize v
 
--- | Per-node font color (paint-only, intentionally kept out of @naArrTree@
+-- | Per-node font color (paint-only, kept out of @naArrTree@
 -- where 'treeGridCols' holds the grid column count for containers).
 {-# INLINE getNodeFontColor #-}
 getNodeFontColor :: NodeArena -> NodeIdx -> IO (Maybe Color)
@@ -1083,8 +1087,8 @@ ensureAxisSnapshot na depth needed = do
           writeArray arr d (Just s)
           pure s
 
--- | Grow the per-depth snapshot-level array to hold at least @need@ levels.
--- Replaces the old fixed depth clamp so arbitrarily deep nesting is safe.
+-- | Grow the per-depth snapshot-level array to hold at least @need@ levels,
+-- so nesting depth has no fixed limit.
 ensureSnapLevelsArr :: NodeArena -> MutableArray RealWorld (Maybe AxisSnapshot) -> Int -> IO (MutableArray RealWorld (Maybe AxisSnapshot))
 ensureSnapLevelsArr na arr need = do
   let !sz = sizeofMutableArray arr

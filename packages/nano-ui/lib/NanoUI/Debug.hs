@@ -1,3 +1,5 @@
+-- | Debug readout sampling shared by the backends: frame timing and skip
+-- counts, RTS statistics, draw counts, and the rows the debug windows show.
 module NanoUI.Debug
   ( debugRefreshSec
   , blend
@@ -200,9 +202,9 @@ noteDebugSkip ref =
 
 -- | Debug HUD cadence is driven by actual snapshot consumption: a snapshot
 -- query ('refreshDebugSnapshot') refreshes 'smLastQueryT', so the 4 Hz refresh
--- loop only sustains while a stats window is being built. Mere window presence
--- must not count as activity, or the event loop wakes every refresh period
--- even when only a plain floating window is open.
+-- loop only runs while a stats window is being built. An open window alone
+-- does not count as activity, or the event loop would wake every refresh
+-- period while any floating window is open.
 isDebugActive :: DebugSamplerRef -> IO Bool
 isDebugActive ref = do
   now <- getMonotonicTime

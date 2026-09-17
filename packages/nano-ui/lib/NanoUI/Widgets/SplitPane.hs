@@ -1,6 +1,6 @@
 {-# LANGUAGE LambdaCase #-}
 
--- | Pure pane-grid tree model and geometry (iced 'PaneGrid'-style).
+-- | Pure pane-grid tree model and geometry, modelled on iced's @PaneGrid@.
 --
 -- A 'GridNode' is a binary split tree of panes. Each split stores an axis
 -- ('AxisV' = vertical divider splitting width, 'AxisH' = horizontal divider
@@ -9,7 +9,7 @@
 -- pane state can be keyed by pane id regardless of position in the tree.
 --
 -- All functions here are pure; the interactive wrapper in
--- 'NanoUI.Widgets.PaneGrid' persists a 'GridNode' as a 'Data.Dynamic' value
+-- "NanoUI.Widgets.PaneGrid" persists a 'GridNode' as a "Data.Dynamic" value
 -- in the widget store.
 module NanoUI.Widgets.SplitPane
   ( GridAxis (..)

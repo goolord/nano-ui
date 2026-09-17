@@ -1,10 +1,11 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Interactive pane grid with resizable dividers (iced 'PaneGrid'-style).
+-- | Interactive pane grid with resizable dividers, modelled on iced's
+-- @PaneGrid@.
 --
 -- The grid is a binary split tree ('NanoUI.Widgets.SplitPane.GridNode')
--- persisted per widget as a 'Data.Dynamic' value in the widget store.
+-- persisted per widget as a "Data.Dynamic" value in the widget store.
 --
 -- Panes are rendered through the user-provided 'pgViewPane', which receives a
 -- 'PaneGridCtx' with immediate-mode actions to split, close, maximize, or

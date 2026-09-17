@@ -589,7 +589,7 @@ disabledTheme t =
         }
 
 -- | Flat widget style: bg/fg/border plus hover and active fills.
--- Border width 1, corner radius 2 -- the house look for built-in themes.
+-- Border width 1 and corner radius 2, as the built-in themes use.
 flatStyle :: Color -> Color -> Color -> Color -> Color -> Style
 flatStyle bg fg border hoverBg activeBg =
   Style

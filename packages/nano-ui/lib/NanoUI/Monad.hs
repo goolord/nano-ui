@@ -1,6 +1,8 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeFamilies #-}
 
+-- | The 'Ui' effect and the 'NanoUI' view type: running a view, widget id
+-- scopes and keys, theme scopes, and damage requests from inside a view.
 module NanoUI.Monad
   ( NanoUI
   , Ui

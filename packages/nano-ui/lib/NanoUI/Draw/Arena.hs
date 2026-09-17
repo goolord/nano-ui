@@ -107,8 +107,8 @@ resetDrawArena da = do
 
 -- | Device pixel scale used to snap primitive origins/endpoints to whole
 -- device pixels. A non-positive value disables snapping. The SDL backend keeps
--- this in sync with the display scale; cell and headless hosts leave it
--- disabled so their grid/ASCII rasterizers keep their original coordinates.
+-- this in sync with the display scale. Headless contexts and the RGFW backend
+-- leave it disabled.
 {-# INLINE setDrawSnapScale #-}
 setDrawSnapScale :: DrawArena -> Float -> IO ()
 setDrawSnapScale da s = writeIORef (daSnapScale da) (if s > 0 then s else 0)
@@ -117,8 +117,8 @@ setDrawSnapScale da s = writeIORef (daSnapScale da) (if s > 0 then s else 0)
 getDrawSnapScale :: DrawArena -> IO Float
 getDrawSnapScale da = readIORef (daSnapScale da)
 
--- | Square geometry for hosts that rasterize flat, axis-aligned fills (software
--- framebuffers, cell grids). Rounded rects, circles and their strokes lower to
+-- | Square geometry for hosts that draw flat, axis-aligned fills, such as the
+-- RGFW backend. Rounded rects, circles and their strokes lower to
 -- plain rects, and coverage-AA strips lower to solid quads with no
 -- transparent fringe vertices. Persists across 'resetDrawArena'.
 {-# INLINE setDrawSquareGeometry #-}

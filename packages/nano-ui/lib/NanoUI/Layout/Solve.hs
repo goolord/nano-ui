@@ -1,3 +1,5 @@
+-- | The layout solver: measures and places the node arena's flow tree, then
+-- positions modals, windows and popups.
 module NanoUI.Layout.Solve
   ( solveLayout
   , FontResolver
@@ -1031,7 +1033,7 @@ positionScrollChildren env@SolveEnv {seArena = na} depth idx dir gap pad px py p
     -- scale. Measuring from the padding-box origin double-counts the leading
     -- padding and makes a child that exactly fills the viewport look
     -- padX/padY bigger, surfacing a phantom scrollbar on padded scrollers.
-    -- The trailing padding is deliberately excluded here too (so it cannot
+    -- The trailing padding is excluded here too (so it cannot
     -- surface a bar by itself); scrollAxisRange adds it back into the
     -- reachable range once an axis genuinely overflows, so scrolling to the
     -- end still reveals it.
