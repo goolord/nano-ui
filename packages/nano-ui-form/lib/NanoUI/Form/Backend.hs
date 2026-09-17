@@ -1,3 +1,5 @@
+-- | The ditto environment forms run in: field input values, form prefixes and
+-- submitted state, kept in the widget store.
 module NanoUI.Form.Backend
   ( FormInput (..)
   , formInputToText
@@ -44,7 +46,7 @@ import NanoUI.Monad (askContext)
 import NanoUI.Context (Context, getStore, markDirty, setStore)
 import NanoUI.Store (WidgetStore (..))
 
--- | Unified input representation for form field values.
+-- | A form field's raw input value, before parsing.
 data FormInput
   = FormInputText !Text
   | FormInputBool !Bool

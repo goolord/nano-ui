@@ -1,3 +1,5 @@
+-- | The RGFW window session: options, the runners, and translation of RGFW
+-- events into 'NanoUI.Input.Input'.
 module NanoUI.Rgfw.Session
   ( RgfwOptions (..)
   , defaultRgfwOptions
@@ -68,14 +70,19 @@ import NanoUI.Rgfw.Font.Cozette (getCozetteFont)
 import NanoUI.Rgfw.Gl (freeGlRenderer, newGlRenderer, renderArenaGl)
 import qualified RGFW as R
 
+-- | Window and rendering options for the RGFW runners.
 data RgfwOptions = RgfwOptions
   { optTitle  :: !String
   , optWidth  :: !Int
   , optHeight :: !Int
   , optTheme  :: !Theme
+  -- ^ Any core theme; the backend draws it square ('NanoUI.Rgfw.Context.applyRgfwTheme').
   , optCenter :: !Bool
+  -- ^ Center the window on the screen.
   , optScale  :: !Float
+  -- ^ UI scale. @0@ follows the monitor's scale.
   , optRefreshHz :: !Int
+  -- ^ Frame pacing rate while animating. @0@ means 60.
   }
 
 defaultRgfwOptions :: RgfwOptions

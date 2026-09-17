@@ -1,3 +1,4 @@
+-- | Form inputs without a label, with automatically numbered field names.
 module NanoUI.Form.Unnamed
   ( inputText
   , inputPassword

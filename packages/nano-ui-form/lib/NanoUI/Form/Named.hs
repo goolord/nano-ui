@@ -1,3 +1,5 @@
+-- | Named form inputs: each takes a name that identifies the field and is
+-- shown as its label. "NanoUI.Form" re-exports these.
 module NanoUI.Form.Named
   ( inputText
   , inputTextWithPlaceholder

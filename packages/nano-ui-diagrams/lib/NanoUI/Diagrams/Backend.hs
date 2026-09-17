@@ -1,3 +1,5 @@
+-- | A diagrams-lib backend that renders a diagram to nano-ui @DrawOp@ values,
+-- scaled into a target size.
 module NanoUI.Diagrams.Backend
   ( NanoUIBackend (..)
   , B

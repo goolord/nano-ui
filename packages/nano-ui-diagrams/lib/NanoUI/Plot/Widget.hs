@@ -1,3 +1,5 @@
+-- | Chart widgets: 'plot' draws a chart and reports the hovered point, and
+-- 'lineChart', 'barChart', 'scatterChart' and 'areaChart' draw one series.
 module NanoUI.Plot.Widget
   ( plot
   , lineChart

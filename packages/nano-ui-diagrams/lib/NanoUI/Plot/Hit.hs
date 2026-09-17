@@ -1,3 +1,4 @@
+-- | Finding the data point nearest the pointer on a drawn chart.
 module NanoUI.Plot.Hit
   ( hitTestChartCached
   , nearestPlotHover

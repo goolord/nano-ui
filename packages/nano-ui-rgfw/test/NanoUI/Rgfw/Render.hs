@@ -214,8 +214,8 @@ fillConvexPx surf (cx0, cy0, cx1, cy1) pts@(p0 : _) col
 
 -- | Stamp one core text span with the Cozette bitmap font. The span carries
 -- its own clip rect (logical pixels), pushed onto the surface clip stack for
--- the blit. The span's background colour is a hint for cell hosts; every
--- real background is already a quad in the DrawData, and span rects cover
+-- the blit. The span's background colour is not painted: every real
+-- background is already a quad in the DrawData, and span rects cover
 -- the text run rather than the widget, so painting it would overdraw.
 stampSpan :: RgfwSurface -> CozetteFont -> Float -> TextSpan -> IO ()
 stampSpan surf font !scale (Rect rx ry _ _, txt, fg, _, clip)

@@ -1,3 +1,5 @@
+-- | Context setup for RGFW: Cozette metrics, square geometry, text drawn
+-- from spans, and square themes.
 module NanoUI.Rgfw.Context
   ( newRgfwContext
   , applyRgfwTheme
@@ -17,10 +19,11 @@ import NanoUI.Context
 import NanoUI.Rgfw.Font.Cozette (cozetteMetrics)
 import NanoUI.Testing (Layer (..), newPixelContext)
 
--- | Pixel context configured for the RGFW renderers: Cozette metrics, square
--- geometry (every primitive reaches the renderer as a flat quad or triangle), text left to the span stamper, and the core theme derived
--- made square. Sessions, tests and profiles share it so they render the same
--- frame.
+-- | Pixel context configured for RGFW: Cozette metrics, square geometry
+-- (every primitive reaches the renderer as a flat quad or triangle), text
+-- left to the span stamper, and the given theme made square
+-- ('applyRgfwTheme'). Sessions, tests and profiles share it so they render
+-- the same frame.
 newRgfwContext :: Theme -> IO Context
 newRgfwContext theme = do
   ctx0 <- newPixelContext
@@ -40,7 +43,8 @@ applyRgfwTheme ctx = setTheme ctx . everyStyle (cornerRadius 0 . borderWidth 1)
 -- text, foreground, background, and clip, in logical pixels.
 type TextSpan = (Rect, Text, Color, Color, Rect)
 
--- | The paint order both RGFW renderers follow: background and content
+-- | The paint order the OpenGL renderer and the test suite's software
+-- rasteriser follow: background and content
 -- geometry, base text spans (after content, so scroll tracks cannot erase box
 -- rules), overlay geometry, floating chrome (window scrollbars), then overlay
 -- text spans.

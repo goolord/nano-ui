@@ -1,3 +1,4 @@
+-- | Form, view, status and configuration types.
 module NanoUI.Form.Types
   ( FormView (..)
   , Form

@@ -1,3 +1,5 @@
+-- | Layout helpers for form views: containers, labelled rows and fields,
+-- titled groups, and the default error view.
 module NanoUI.Form.Widgets
   ( defaultErrorView
   , formContainer

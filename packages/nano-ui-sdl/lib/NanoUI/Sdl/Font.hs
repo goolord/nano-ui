@@ -1247,7 +1247,8 @@ foreign import ccall unsafe "nano_ui_ttf_get_kerning"
   ttfGetKerning :: Ptr () -> CUInt -> CUInt -> IO CInt
 
 -- ---------------------------------------------------------------------------
--- Dynamic font cache for crisp text rendering at arbitrary sizes and styles
+-- Font cache: the base sans and mono faces, plus fonts opened per size and
+-- variant on demand
 
 -- | A font variant and its point size key, @round (targetPt * 2)@.
 data FontCacheKey = FontCacheKey !FontVariant !Int

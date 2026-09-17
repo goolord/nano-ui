@@ -1,3 +1,5 @@
+-- | Mapping between data domains and plot coordinates, tick placement and
+-- labels, and domain extents.
 module NanoUI.Plot.Scale
   ( domainToPlot
   , plotToDomain

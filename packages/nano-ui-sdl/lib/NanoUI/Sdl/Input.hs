@@ -1,6 +1,8 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 {-# LANGUAGE NoFieldSelectors #-}
 
+-- | SDL3 event polling and waiting, and translation of SDL events into
+-- 'NanoUI.Input.Input'.
 module NanoUI.Sdl.Input
   ( SdlEvent (..)
   , pollEvents

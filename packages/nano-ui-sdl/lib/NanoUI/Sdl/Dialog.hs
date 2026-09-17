@@ -7,7 +7,7 @@
 -- poll the handle on later frames to observe completion.
 --
 -- Threading: SDL3 may invoke the dialog callback on a background thread, so
--- the callback here is deliberately minimal: it decodes the result, frees the
+-- the callback here does little: it decodes the result, frees the
 -- FFI buffers it owned, wakes the event loop, and records the outcome. All
 -- UI-affecting work ('markDirty', releasing the callback 'FunPtr') is deferred
 -- to the thread that polls the result.

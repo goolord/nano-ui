@@ -1,3 +1,4 @@
+-- | Font selection for the SDL backend.
 module NanoUI.Sdl.NanoUIFont
   ( NanoUIFont (..)
   ) where

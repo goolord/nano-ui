@@ -1,3 +1,5 @@
+-- | Running a form in a view: live validation, a submit button, a configured
+-- runner, a deferred view, and reset.
 module NanoUI.Form.Runner
   ( runNanoForm
   , nanoFormLive

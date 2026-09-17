@@ -1,7 +1,6 @@
 -- | Locate system font files by walking the standard font directories for the
--- current platform (no fontconfig dependency, no streaming library).  Each
--- candidate file is matched against the requested family name using a
--- normalised-filename heuristic.
+-- current platform, without fontconfig. Each candidate file is matched
+-- against the requested family name using a normalised-filename heuristic.
 module NanoUI.Sdl.Font.Search
   ( searchFonts
   , searchFontFamilies

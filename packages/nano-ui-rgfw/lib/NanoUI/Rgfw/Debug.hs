@@ -1,5 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | RGFW frame statistics and the debug window body that shows them with the
+-- core debug rows.
 module NanoUI.Rgfw.Debug
   ( RgfwDebugSnapshot (..)
   , RgfwFrameStats (..)

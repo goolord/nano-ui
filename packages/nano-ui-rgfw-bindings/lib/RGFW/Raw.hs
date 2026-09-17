@@ -1,3 +1,5 @@
+-- | Foreign imports of RGFW and the accessor functions in @cbits/RGFW.c@, plus
+-- the event type, mouse button, key, modifier and window flag constants.
 module RGFW.Raw
   ( RGFW_window
   , RGFW_event

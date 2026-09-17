@@ -1,3 +1,5 @@
+-- | Point reduction for long series: largest-triangle-three-buckets and
+-- per-bucket minimum and maximum.
 module NanoUI.Plot.Decimate
   ( lttb
   , minMaxDecimate

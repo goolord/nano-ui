@@ -1,3 +1,5 @@
+-- | Proofs that parse and validate field values: numbers, text length,
+-- ranges, email addresses, and custom predicates.
 module NanoUI.Form.Validation
   ( -- * Proof combinators
     Proof (..)

@@ -1,3 +1,6 @@
+-- | Validated forms for nano-ui, built on ditto. A 'Form' is an applicative
+-- value whose inputs are nano-ui widgets; run one in a view with
+-- 'nanoFormLive', 'nanoFormSubmit', 'nanoFormEx' or 'runNanoForm'.
 module NanoUI.Form
   ( -- * Core Form Types
     Form

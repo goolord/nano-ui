@@ -1,3 +1,5 @@
+-- | Polygon triangulation and filling, polyline stroking, and cubic Bezier
+-- flattening for the diagrams backend.
 module NanoUI.Diagrams.Tessellation
   ( triangulatePolygon
   , fillPolygon

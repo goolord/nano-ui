@@ -1,4 +1,5 @@
--- | diagrams-lib backend that emits nano-ui 'DrawOp's.
+-- | The whole nano-ui-diagrams API: the diagrams-lib backend, the diagram
+-- widgets, and "NanoUI.Plot".
 module NanoUI.Diagrams
   ( module NanoUI.Diagrams.Backend
   , module NanoUI.Diagrams.Widget

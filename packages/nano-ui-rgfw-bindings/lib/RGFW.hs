@@ -1,3 +1,6 @@
+-- | Haskell wrappers over the RGFW C API used by nano-ui-rgfw: OpenGL windows,
+-- event polling and waiting, window size and scale, cursors, and the
+-- clipboard. Re-exports "RGFW.Raw".
 module RGFW
   ( Window (..)
   , Event (..)

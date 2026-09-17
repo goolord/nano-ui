@@ -1,3 +1,5 @@
+-- | Functions that build a 'NanoUI.Plot.Types.Chart' from series and set its
+-- titles, legend, grid and decimation.
 module NanoUI.Plot.Builder
   ( chart
   , withTitle

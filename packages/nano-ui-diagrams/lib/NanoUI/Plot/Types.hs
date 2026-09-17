@@ -1,3 +1,4 @@
+-- | Chart, series, domain and hover types.
 module NanoUI.Plot.Types
   ( Domain (..)
   , SeriesData (..)

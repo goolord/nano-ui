@@ -1,3 +1,5 @@
+-- | Widgets that place a diagram in a nano-ui layout, and the plot style
+-- derived from the current theme.
 module NanoUI.Diagrams.Widget
   ( diagram
   , diagramWithEnvelope

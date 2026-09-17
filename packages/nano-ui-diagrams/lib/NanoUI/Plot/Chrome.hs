@@ -1,3 +1,5 @@
+-- | Chart drawing: axes, ticks, grid, title and legend around the series, as
+-- a diagram.
 module NanoUI.Plot.Chrome
   ( chartDiagram
   , chartMargins

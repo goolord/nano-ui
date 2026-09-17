@@ -1,3 +1,5 @@
+-- | Series constructors (line, scatter, bar, area, step) and their style
+-- modifiers.
 module NanoUI.Plot.Series
   ( line
   , scatter
