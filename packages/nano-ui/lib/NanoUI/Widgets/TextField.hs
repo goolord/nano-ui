@@ -10,10 +10,11 @@ module NanoUI.Widgets.TextField
   ) where
 
 import Data.Dynamic (fromDynamic)
+import Data.IORef (writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
-import NanoUI.Context (Context (..), WidgetStore (..), getStore, intKey)
+import NanoUI.Context (Context (..), WidgetStore (..), getStore, intKey, setTextInputMenu)
 import NanoUI.Frame.Hit (findNodeByWidgetId)
 import NanoUI.Id (WidgetId)
 import NanoUI.Layout.Arena (NodeType (..), getNodeType, getStyleIdx)
@@ -34,8 +35,9 @@ import NanoUI.Widgets.TextInput (applyTextInputCommand, textInputMode)
 
 -- | Run a command on the text field (text input, search field, text area)
 -- with this id, as if its keys were pressed: @runTextCommand (respId resp)
--- Undo@. The field's next frame returns the changed text and a
--- 'NanoUI.respChanged' pulse. An id that is not a text field is ignored.
+-- Undo@. The field takes keyboard focus, and its next frame returns the
+-- changed text and a 'NanoUI.respChanged' pulse. An id that is not a text
+-- field is ignored.
 runTextCommand :: Ui :> es => WidgetId -> TextCommand -> Eff es ()
 runTextCommand wid cmd = do
   ctx <- askContext
@@ -52,12 +54,18 @@ textCanRedo wid = do
   ctx <- askContext
   uiIO (canRedo <$> textFieldHistory ctx wid)
 
+-- | Run a command on the field with this id and focus it: the command comes
+-- from a menu or button that may not be over the field, and the caret,
+-- selection highlight and next keystroke belong to the field it edited.
 applyTextFieldCommand :: Context -> WidgetId -> TextCommand -> IO ()
 applyTextFieldCommand ctx wid cmd =
   textFieldMode ctx wid >>= \case
-    Just mode
-      | modeMultiLine mode -> applyTextAreaCommand ctx wid cmd
-      | otherwise -> applyTextInputCommand ctx wid mode cmd
+    Just mode -> do
+      if modeMultiLine mode
+        then applyTextAreaCommand ctx wid cmd
+        else applyTextInputCommand ctx wid mode cmd
+      writeIORef (ctxFocusId ctx) wid
+      setTextInputMenu ctx Nothing
     Nothing -> pure ()
 
 -- | How the field with this id edits: from its node when it has one this

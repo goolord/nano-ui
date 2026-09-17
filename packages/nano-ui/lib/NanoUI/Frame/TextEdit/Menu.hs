@@ -289,11 +289,6 @@ applyTextFieldMenuAction ctx wid item =
   forM_ (take 1 (drop item textEditMenuCommands)) $ \cmd -> do
     modifyInteraction ctx (\s -> s {isTextEditLastAction = Just (wid, cmd)})
     applyTextFieldCommand ctx wid cmd
-    -- The menu edits a field that may not be under the pointer; focus it so
-    -- the selection highlight and caret become visible.
-    writeIORef (ctxFocusId ctx) wid
-    setTextInputMenu ctx Nothing
-    markDirty ctx
 
 textFieldMenuActionEnabled :: Context -> WidgetId -> Int -> IO Bool
 textFieldMenuActionEnabled ctx wid item = do

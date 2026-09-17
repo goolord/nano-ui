@@ -26,11 +26,12 @@ module Cases.TextInput
   , runTextAreaScrollCursorLeavesViewportTest
   , runRefreshRedrawTest
   , runTextAreaMenuPulseTest
+  , runTextCommandFocusTest
   , runTextAreaRemountScrollTest
   )
 where
 
-import Control.Monad (forM_, replicateM, replicateM_)
+import Control.Monad (forM_, replicateM, replicateM_, when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Text qualified as T
@@ -1049,6 +1050,27 @@ runTextAreaMenuPulseTest ctx failed = do
           assert failed (not (respChanged respIdle))
           assertEq failed valIdle ""
         _ -> assert failed False
+
+-- | A command run from a button elsewhere (an app's Edit menu) focuses the
+-- field it edits, so Select All followed by typing replaces the text.
+-- Regression: the press on the button cleared focus and 'runTextCommand' no
+-- longer restored it, so the typing went nowhere.
+runTextCommandFocusTest :: Context -> IORef Int -> IO ()
+runTextCommandFocusTest ctx failed = do
+  ref <- newIORef "abc"
+  let
+    inp = withInput 320 220
+    ui = column $ do
+      (area, _) <- held ref (textAreaWith' (fixedH 80))
+      selectAll <- button' "Select All"
+      when (respClicked selectAll) (runTextCommand (respId area) SelectAll)
+      pure selectAll
+  selectAll <- warmup2 ctx inp ui
+  let
+    Rect bx by bw bh = respRect selectAll
+    (press, release) = clickPair inp (V2 (bx + bw / 2) (by + bh / 2))
+  mapM_ (\i -> runFrame ctx i ui) [press, release, inp, inp {inputChars = "Z"}, inp]
+  assertEq failed "Z" =<< readIORef ref
 
 -- | After the editor is remounted under a new key (the notepad remounts on file
 -- load), wheel-on-hover with no focus must still scroll. Regression: the
