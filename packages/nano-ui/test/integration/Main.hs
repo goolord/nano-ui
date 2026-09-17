@@ -132,6 +132,7 @@ testSpecs =
       False
       runCompositeAnimationIsolationTest
   , TestSpec "button-hover-anim" False runButtonHoverAnimTest
+  , TestSpec "spinner" False runSpinnerTest
   -- Keyboard
   , TestSpec "keyboard-disabled" False runKeyboardDisabledTest
   , TestSpec "disabled-pointer" False runDisabledPointerTest

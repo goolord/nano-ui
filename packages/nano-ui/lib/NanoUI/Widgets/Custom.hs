@@ -53,6 +53,10 @@ module NanoUI.Widgets.Custom
   , circularProgress'
   , circularProgressWith
   , circularProgressWith'
+  , spinner
+  , spinner'
+  , spinnerWith
+  , spinnerWith'
   , progressBar
   , progressBar'
   , progressBarWith
@@ -63,7 +67,7 @@ module NanoUI.Widgets.Custom
   , sparklineWith'
   ) where
 
-import Control.Monad (void, when)
+import Control.Monad (forM_, void, when)
 import Data.IORef (readIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
@@ -109,7 +113,7 @@ import NanoUI.Input
   , inputScroll
   )
 import NanoUI.Layout.Arena (NodeType (NodeDrawing))
-import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO)
+import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, uiTime)
 import NanoUI.Store (WidgetStore (..), boolInt, slotDrag, slotKey)
 import NanoUI.Style
   ( AlignX (..)
@@ -127,6 +131,7 @@ import NanoUI.Style
   , themeButton
   , themePanel
   , themeOnAccent
+  , fadeAlpha
   )
 import NanoUI.Types
   ( Color
@@ -150,6 +155,7 @@ import NanoUI.Widgets.Node
   , respRect
   , setChanged
   )
+import NanoUI.Widgets.Animate (keepAnimating)
 
 -- -----------------------------------------------------------------------------
 -- Canvas Monad
@@ -593,6 +599,53 @@ circularProgressWith' f diameter frac =
         when (clampedFrac > 0) $
           drawCircle (V2 cx cy) (r * clampedFrac) accent
     }
+
+-- | An indeterminate loading indicator: a short accent arc turning over a
+-- faint ring, 18 px across. It keeps the frame loop running while it is on
+-- screen and repaints only its own rect.
+{-# INLINE spinner #-}
+spinner :: Ui :> es => Eff es ()
+spinner = void (spinnerWith' id 18)
+
+{-# INLINE spinner' #-}
+spinner' :: Ui :> es => Eff es Response
+spinner' = spinnerWith' id 18
+
+-- | 'spinner' with a layout modifier and a diameter in pixels.
+{-# INLINE spinnerWith #-}
+spinnerWith :: Ui :> es => (Layout -> Layout) -> Float -> Eff es ()
+spinnerWith f diameter = void (spinnerWith' f diameter)
+
+spinnerWith' :: Ui :> es => (Layout -> Layout) -> Float -> Eff es Response
+spinnerWith' f diameter = do
+  t <- uiTime
+  let !d = max 4 diameter
+      -- One turn every 0.8 s, in 48 steps: the step is the content key, so
+      -- frames within a step reuse the ops.
+      !step = floor (t * 48 / 0.8) `mod` 48 :: Int
+  resp <-
+    fst <$> customWidget defaultCustomWidgetSpec
+      { widgetLayout = fixedWH d d (f defaultLayout)
+      , widgetMeasure = Just $ \_ _ -> (d, d)
+      , widgetContent = step + 1
+      , widgetDraw = \cdc (Rect x y w h) -> runCanvas $ do
+          let theme = cdcTheme cdc
+              thick = max 1.5 (d / 9)
+              r = min w h / 2 - thick / 2
+              cx = x + w / 2
+              cy = y + h / 2
+              start = 2 * pi * fromIntegral step / 48
+              at a = V2 (cx + r * cos a) (cy + r * sin a)
+              segments = 8 :: Int
+              sweep = pi / 2
+          drawStrokeCircle (V2 cx cy) r thick (fadeAlpha (themeAccent theme) 48)
+          forM_ [0 .. segments - 1] $ \i -> do
+            let a0 = start + sweep * fromIntegral i / fromIntegral segments
+                a1 = start + sweep * fromIntegral (i + 1) / fromIntegral segments
+            drawStrokeAA (at a0) (at a1) thick (themeAccent theme)
+      }
+  keepAnimating resp
+  pure resp
 
 -- | Horizontal progress bar for a fraction in @[0, 1]@. It fills the
 -- available width at a fixed height.

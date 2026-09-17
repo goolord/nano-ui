@@ -7,15 +7,17 @@ module Cases.Animation
   , runAnimationSpringRetargetTest
   , runAnimationStaggerTest
   , runCompositeAnimationIsolationTest
+  , runSpinnerTest
   ) where
 
+import Control.Concurrent (threadDelay)
 import Control.Monad (forM_, replicateM, replicateM_, void)
 import Data.IORef (IORef)
 import Data.Text qualified as T
 import NanoUI
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert)
-import NanoUI.Testing.Harness (clickPair, withDelta)
+import NanoUI.Testing.Harness (clickPair, drawQuads, withDelta)
 
 -- A started animation requests redraws, settles on its target, and then
 -- leaves the context idle and clean.
@@ -179,3 +181,28 @@ runButtonHoverAnimTest ctx failed = do
   val <- getAnimationValue ctx hot
   assert failed (hashWidgetId hot /= 0)
   assert failed (val >= 0.99)
+
+-- A spinner keeps the loop drawing, repaints only around itself, and turns.
+runSpinnerTest :: Context -> IORef Int -> IO ()
+runSpinnerTest ctx failed = do
+  theme <- getTheme ctx
+  let inp = withDelta 400 300 0.016
+      ui = column $ do
+        label "Loading a long label so the window has more than the spinner"
+        spinner'
+  _ <- runFrame ctx inp ui
+  (resp, _, draw0, _) <- runFrame ctx inp ui
+  _ <- takeDamage ctx
+  need <- needsRedraw ctx inp inp
+  assert failed need
+  quads0 <- drawQuads draw0
+  assert failed (any ((== themeAccent theme) . snd) quads0)
+  threadDelay 60000
+  (_, _, draw1, _) <- runFrame ctx inp ui
+  dmg <- takeDamage ctx
+  case dmg of
+    DamageClip r -> assert failed (rectW r < 80 && rectH r < 80 && rectIntersect r (respRect resp) /= Nothing)
+    DamageFull -> assert failed False
+  quads1 <- drawQuads draw1
+  let arc qs = [q | (q, c) <- qs, c == themeAccent theme]
+  assert failed (arc quads0 /= arc quads1)

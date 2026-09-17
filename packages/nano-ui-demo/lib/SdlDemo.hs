@@ -553,6 +553,9 @@ demoUi = do
               muted "A single rounded bar, smoothly oscillating 0-100%."
               progResp <- progressBar' =<< pulse 6
               keepAnimating progResp
+              rowWith (tight . gap gapInline . alignMid) $ do
+                spinner
+                muted "Loading"
 
             --------------------------------------------- Typography ---------
             Typography -> do

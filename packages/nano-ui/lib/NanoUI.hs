@@ -285,6 +285,10 @@ module NanoUI
   , circularProgress'
   , circularProgressWith
   , circularProgressWith'
+  , spinner
+  , spinner'
+  , spinnerWith
+  , spinnerWith'
   , sparkline
   , sparkline'
   , sparklineWith

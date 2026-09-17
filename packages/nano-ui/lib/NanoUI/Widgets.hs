@@ -209,6 +209,10 @@ module NanoUI.Widgets
   , circularProgress'
   , circularProgressWith
   , circularProgressWith'
+  , spinner
+  , spinner'
+  , spinnerWith
+  , spinnerWith'
   , progressBar
   , progressBar'
   , progressBarWith
@@ -252,6 +256,10 @@ import NanoUI.Widgets.Custom
   , circularProgress'
   , circularProgressWith
   , circularProgressWith'
+  , spinner
+  , spinner'
+  , spinnerWith
+  , spinnerWith'
   , customWidget
   , customWidgetWithId
   , contentKey

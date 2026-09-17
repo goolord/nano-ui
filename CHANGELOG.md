@@ -17,6 +17,8 @@
 - `disabledWhen` disables the widgets inside it: they keep their layout and
   state, take no pointer or keyboard input, leave the focus order, and draw
   with `disabledTheme`.
+- `spinner`, an indeterminate loading indicator that repaints only its own
+  rect while it turns.
 - Theme slots `themeOnAccent`, `themeSelection`, `themeFocusRing`,
   `themeLink`, `themeShadow` and `themeDisabledFade`, which replace colours
   that were fixed in the painters.
