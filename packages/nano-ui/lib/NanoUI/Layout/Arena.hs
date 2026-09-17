@@ -478,24 +478,28 @@ ensureCapacity na needed = do
     then pure ()
     else do
       let newCap = cap * 2
-      a <- readIORef (naArrays na)
-      naArrGeom <- growPrimArrayCopy (naArrGeom a) (cap * geomStride) (newCap * geomStride) 0
-      naArrStyle <- growPrimArrayCopy (naArrStyle a) (cap * styleStride) (newCap * styleStride) 0
-      naArrTags <- growPrimArrayCopy (naArrTags a) (cap * tagStride) (newCap * tagStride) 0
-      naArrTree <- growPrimArrayCopy (naArrTree a) (cap * treeStride) (newCap * treeStride) 0
-      naArrTextStore <- growBoxedStoreCopy T.empty (naArrTextStore a) cap newCap
-      naArrOptionsStore <- growBoxedStoreCopy [] (naArrOptionsStore a) cap newCap
-      naArrFontColor <- growPrimArrayCopy (naArrFontColor a) cap newCap 0
-      naArrScope <- growPrimArrayCopy (naArrScope a) cap newCap 0
+      newA <- readIORef (naArrays na) >>= growNodeArenaArrays cap newCap
       growWidthMemo (naWrapMemo na) cap newCap
       growWidthMemo (naFitMemo na) cap newCap
-      let newA = NodeArenaArrays {..}
       writeIORef (naArrays na) newA
       m <- readIORef (naArraysSnap na)
       case m of
         Just{} -> writeIORef (naArraysSnap na) (Just newA)
         Nothing -> pure ()
       writeIORef (naCapacity na) newCap
+
+-- | Copy of @a@ with room for @newCap@ nodes; new slots are zero or empty.
+growNodeArenaArrays :: Int -> Int -> NodeArenaArrays -> IO NodeArenaArrays
+growNodeArenaArrays cap newCap a = do
+  naArrGeom <- growPrimArrayCopy (naArrGeom a) (cap * geomStride) (newCap * geomStride) 0
+  naArrStyle <- growPrimArrayCopy (naArrStyle a) (cap * styleStride) (newCap * styleStride) 0
+  naArrTags <- growPrimArrayCopy (naArrTags a) (cap * tagStride) (newCap * tagStride) 0
+  naArrTree <- growPrimArrayCopy (naArrTree a) (cap * treeStride) (newCap * treeStride) 0
+  naArrTextStore <- growBoxedStoreCopy T.empty (naArrTextStore a) cap newCap
+  naArrOptionsStore <- growBoxedStoreCopy [] (naArrOptionsStore a) cap newCap
+  naArrFontColor <- growPrimArrayCopy (naArrFontColor a) cap newCap 0
+  naArrScope <- growPrimArrayCopy (naArrScope a) cap newCap 0
+  pure NodeArenaArrays {..}
 
 {-# NOINLINE growPrimArrayCopy #-}
 growPrimArrayCopy :: Prim a => MutablePrimArray RealWorld a -> Int -> Int -> a -> IO (MutablePrimArray RealWorld a)
@@ -781,54 +785,36 @@ snapshotLayoutRects na = do
 
 -- | Cached layout signature and solved geometry for whole-layout reuse. The
 -- backing arrays are reused; only cache misses capture a new solved frame.
+-- The font colour and scope columns are paint state and stay unused.
 data LayoutCache = LayoutCache
   { lcCap :: !Int
   , lcCount :: !Int
-  , lcGeom :: !(MutablePrimArray RealWorld Float)
-  , lcStyle :: !(MutablePrimArray RealWorld Float)
-  , lcTags :: !(MutablePrimArray RealWorld Word8)
-  , lcTree :: !(MutablePrimArray RealWorld Int)
-  , lcText :: !(MutableArray RealWorld Text)
-  , lcOptions :: !(MutableArray RealWorld [Text])
+  , lcArrays :: !NodeArenaArrays
   }
 
 newLayoutCache :: Int -> IO LayoutCache
 newLayoutCache cap0 = do
   let !cap = max 16 cap0
-  lcGeom <- newPrimArray (cap * geomStride)
-  lcStyle <- newPrimArray (cap * styleStride)
-  lcTags <- newPrimArray (cap * tagStride)
-  lcTree <- newPrimArray (cap * treeStride)
-  lcText <- newArray cap T.empty
-  lcOptions <- newArray cap []
-  pure LayoutCache {lcCap = cap, lcCount = 0, ..}
-
-growLayoutCache :: LayoutCache -> Int -> IO LayoutCache
-growLayoutCache lc needed
-  | needed <= lcCap lc = pure lc
-  | otherwise = do
-      let !oldCap = lcCap lc
-          !newCap = max needed (oldCap * 2)
-      lcGeom <- growPrimArrayCopy (lcGeom lc) (oldCap * geomStride) (newCap * geomStride) 0
-      lcStyle <- growPrimArrayCopy (lcStyle lc) (oldCap * styleStride) (newCap * styleStride) 0
-      lcTags <- growPrimArrayCopy (lcTags lc) (oldCap * tagStride) (newCap * tagStride) 0
-      lcTree <- growPrimArrayCopy (lcTree lc) (oldCap * treeStride) (newCap * treeStride) 0
-      lcText <- growBoxedStoreCopy T.empty (lcText lc) oldCap newCap
-      lcOptions <- growBoxedStoreCopy [] (lcOptions lc) oldCap newCap
-      pure LayoutCache {lcCap = newCap, lcCount = lcCount lc, ..}
+  LayoutCache cap 0 <$> newNodeArenaArrays cap
 
 -- | Snapshot the current (post-solve) arena form, constraints and rects.
 captureLayoutCache :: NodeArena -> LayoutCache -> IO LayoutCache
 captureLayoutCache na lc0 = do
   n <- arenaCount na
-  lc <- growLayoutCache lc0 n
+  let !oldCap = lcCap lc0
+      !newCap = max n (oldCap * 2)
+  lc <-
+    if n <= oldCap
+      then pure lc0
+      else LayoutCache newCap (lcCount lc0) <$> growNodeArenaArrays oldCap newCap (lcArrays lc0)
   a <- arenaArrays na
-  copyMutablePrimArray (lcGeom lc) 0 (naArrGeom a) 0 (n * geomStride)
-  copyMutablePrimArray (lcStyle lc) 0 (naArrStyle a) 0 (n * styleStride)
-  copyMutablePrimArray (lcTags lc) 0 (naArrTags a) 0 (n * tagStride)
-  copyMutablePrimArray (lcTree lc) 0 (naArrTree a) 0 (n * treeStride)
-  copyMutableArray (lcText lc) 0 (naArrTextStore a) 0 n
-  copyMutableArray (lcOptions lc) 0 (naArrOptionsStore a) 0 n
+  let c = lcArrays lc
+  copyMutablePrimArray (naArrGeom c) 0 (naArrGeom a) 0 (n * geomStride)
+  copyMutablePrimArray (naArrStyle c) 0 (naArrStyle a) 0 (n * styleStride)
+  copyMutablePrimArray (naArrTags c) 0 (naArrTags a) 0 (n * tagStride)
+  copyMutablePrimArray (naArrTree c) 0 (naArrTree a) 0 (n * treeStride)
+  copyMutableArray (naArrTextStore c) 0 (naArrTextStore a) 0 n
+  copyMutableArray (naArrOptionsStore c) 0 (naArrOptionsStore a) 0 n
   pure lc {lcCount = n}
 
 -- | Floating placement depends on state outside the arena descriptor. Custom
@@ -853,11 +839,12 @@ layoutInputsMatch na lc = do
       -- The cache only holds eligible layouts, and matching node types
       -- keep the current one eligible too.
       a <- arenaArrays na
-      andThen (styleMatch (naArrStyle a) (lcStyle lc) n) $
-        andThen (allRangeM 0 (n * tagStride) (\k -> if k .&. (tagStride - 1) == tagScrollBarSlot then pure True else primEqAt (naArrTags a) (lcTags lc) k)) $
-          andThen (treeMatch a (lcTree lc) n) $
-            andThen (allRangeM 0 n (boxedEqAt (naArrTextStore a) (lcText lc))) $
-              allRangeM 0 n (boxedEqAt (naArrOptionsStore a) (lcOptions lc))
+      let c = lcArrays lc
+      andThen (styleMatch (naArrStyle a) (naArrStyle c) n) $
+        andThen (allRangeM 0 (n * tagStride) (\k -> if k .&. (tagStride - 1) == tagScrollBarSlot then pure True else primEqAt (naArrTags a) (naArrTags c) k)) $
+          andThen (treeMatch a (naArrTree c) n) $
+            andThen (allRangeM 0 n (boxedEqAt (naArrTextStore a) (naArrTextStore c))) $
+              allRangeM 0 n (boxedEqAt (naArrOptionsStore a) (naArrOptionsStore c))
 
 {-# INLINE andThen #-}
 andThen :: IO Bool -> IO Bool -> IO Bool
@@ -912,7 +899,8 @@ restoreLayoutCache :: NodeArena -> LayoutCache -> IO ()
 restoreLayoutCache na lc = do
   a <- arenaArrays na
   let !n = lcCount lc
-  copyMutablePrimArray (naArrGeom a) 0 (lcGeom lc) 0 (n * geomStride)
+      c = lcArrays lc
+  copyMutablePrimArray (naArrGeom a) 0 (naArrGeom c) 0 (n * geomStride)
   let go !i
         | i >= n = pure ()
         | otherwise = do
@@ -922,8 +910,8 @@ restoreLayoutCache na lc = do
             when (isScrollNode nt) $ do
               let !off = i * styleStride + styleScrollContentW
                   !slotOff = i * tagStride + tagScrollBarSlot
-              copyMutablePrimArray (naArrStyle a) off (lcStyle lc) off 2
-              readPrimArray (lcTags lc) slotOff >>= writePrimArray (naArrTags a) slotOff
+              copyMutablePrimArray (naArrStyle a) off (naArrStyle c) off 2
+              readPrimArray (naArrTags c) slotOff >>= writePrimArray (naArrTags a) slotOff
             go (i + 1)
   go 0
 
