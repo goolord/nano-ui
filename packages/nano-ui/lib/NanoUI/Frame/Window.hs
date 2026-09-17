@@ -32,7 +32,7 @@ import NanoUI.Context
   , setWindowDrag
   , setWindowResize
   , slotKey
-  , slotWinSize
+  , Slot (..)
   )
 import NanoUI.Font (ScrollBarSlot (..))
 import NanoUI.Frame.Hit (findNodeByWidgetId, nodeInSubtree, topmostOverlayAtMouse)
@@ -94,7 +94,7 @@ lookupWindowPos ctx wid = do
 lookupWindowSize :: Context -> WidgetId -> IO (Maybe (Float, Float))
 lookupWindowSize ctx wid = do
   store <- getStore ctx
-  pure (IM.lookup (slotKey slotWinSize (intKey wid)) (storePoint store))
+  pure (IM.lookup (slotKey SlotWinSize (intKey wid)) (storePoint store))
 
 persistWindowPositions :: Context -> IO ()
 persistWindowPositions ctx = do
@@ -108,7 +108,7 @@ persistWindowPositions ctx = do
             wid <- getWidgetId na idx
             (x, y, w, h) <- getRect na idx
             let k = intKey wid
-                sizeKey = slotKey slotWinSize k
+                sizeKey = slotKey SlotWinSize k
                 points = storePoint acc
             -- Keep an unchanged map as is, so the store comparison below
             -- short-circuits on pointer equality.
@@ -284,7 +284,7 @@ updateWindowResize ctx inp winW winH = do
           let (nw, nh, nx, ny) = resizeFromEdge wrd (inputMousePos inp) winW winH
               key = intKey (wrdWidget wrd)
           store <- getStore ctx
-          setStore ctx (store {storePoint = IM.insert (slotKey slotWinSize key) (nw, nh) (IM.insert key (nx, ny) (storePoint store))})
+          setStore ctx (store {storePoint = IM.insert (slotKey SlotWinSize key) (nw, nh) (IM.insert key (nx, ny) (storePoint store))})
           relayoutWindow ctx winW winH (wrdWidget wrd) nw nh
           damageWidget ctx (wrdWidget wrd) (DamageInflated haloDamageSlop)
           markDirty ctx

@@ -25,7 +25,7 @@ import NanoUI.Context (getStore, intKey, markDirty, registerFocusable, setStore)
 import NanoUI.Input (Key (..), inputKeys, inputKeysElem, inputModifiers, inputMouseDown, inputMousePos, inputMousePressed, modShift)
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO)
-import NanoUI.Store (WidgetStore (..), slotKey, slotNumericHeld, slotNumericRepeat)
+import NanoUI.Store (WidgetStore (..), slotKey, Slot (..))
 import NanoUI.Style (Layout (..), Sizing (..), defaultLayout)
 import NanoUI.Types (Rect (..), rectContains)
 import NanoUI.WidgetText (numericStepperRects, textInputFlagNumeric)
@@ -125,7 +125,7 @@ numericInputConfigured' cfg value = do
     pressDir
       | inputMousePressed inp = over upRect 1 + over downRect (-1)
       | otherwise = 0 :: Int
-    held0 = IM.findWithDefault 0 (slotKey slotNumericHeld key) (storeInt store)
+    held0 = IM.findWithDefault 0 (slotKey SlotNumericHeld key) (storeInt store)
     holding =
       held0 /= 0
         && inputMouseDown inp
@@ -137,7 +137,7 @@ numericInputConfigured' cfg value = do
       | otherwise = 0
   now <- if pressDir /= 0 || holding then uiIO getMonotonicTime else pure 0
   let
-    repeatAt0 = IM.findWithDefault 0 (slotKey slotNumericRepeat key) (storeDouble store)
+    repeatAt0 = IM.findWithDefault 0 (slotKey SlotNumericRepeat key) (storeDouble store)
     -- A held arrow repeats after a pause.
     repeatDir = if pressDir == 0 && holding && now >= repeatAt0 then held0 else 0
     dir
@@ -164,8 +164,8 @@ numericInputConfigured' cfg value = do
           let t = formatNumber cfg final
            in TextInputState t (T.length t) (T.length t)
       | otherwise = s1
-    heldK = slotKey slotNumericHeld key
-    repeatK = slotKey slotNumericRepeat key
+    heldK = slotKey SlotNumericHeld key
+    repeatK = slotKey SlotNumericRepeat key
     dirty =
       stored /= Just (tisText s2)
         || s2 /= s0

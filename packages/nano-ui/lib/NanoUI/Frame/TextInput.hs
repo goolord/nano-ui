@@ -37,8 +37,7 @@ import NanoUI.Context
   , setStore
   , setTextFieldClickCell
   , setTextInputDrag
-  , slotAnchor
-  , slotCursor
+  , Slot (..)
   , slotKey
   , nodeTheme
   )
@@ -67,7 +66,6 @@ import NanoUI.Layout.Arena
   , getText
   , getWidgetId
   )
-import NanoUI.Store (slotTextInputScroll)
 import NanoUI.Style (Style (..), themeSelection)
 import NanoUI.Types (Color (..), Rect (..), V2 (..), rectContains, rectIntersect, rectOverlapArea, rectW)
 import NanoUI.WidgetText
@@ -148,8 +146,8 @@ clearSearchField ctx wid = do
   store <- getStore ctx
   let key = intKey wid
       storeInt' =
-        IM.insert (slotKey slotAnchor key) 0 $
-          IM.insert (slotKey slotCursor key) 0 (storeInt store)
+        IM.insert (slotKey SlotAnchor key) 0 $
+          IM.insert (slotKey SlotCursor key) 0 (storeInt store)
       store' = store {storeText = IM.insert key "" (storeText store), storeInt = storeInt'}
   setStore ctx store'
   markDirty ctx
@@ -201,11 +199,11 @@ syncTextInputScroll ctx idx x y w h = do
       value <- textInputValue ctx idx
       focus <- textInputFocused ctx idx
       (_, clip) <- nodeTextFieldGeom ctx idx x y w h
-      let cursor = IM.findWithDefault (T.length value) (slotKey slotCursor key) (storeInt store)
-          oldScroll = IM.findWithDefault 0 (slotKey slotTextInputScroll key) (storeFloat store)
+      let cursor = IM.findWithDefault (T.length value) (slotKey SlotCursor key) (storeInt store)
+          oldScroll = IM.findWithDefault 0 (slotKey SlotTextInputScroll key) (storeFloat store)
       newScroll <- computeTextInputScroll (ctxFontMetrics ctx) (rectW clip) value cursor oldScroll focus
       when (newScroll /= oldScroll) $
-        setStore ctx (store {storeFloat = IM.insert (slotKey slotTextInputScroll key) newScroll (storeFloat store)})
+        setStore ctx (store {storeFloat = IM.insert (slotKey SlotTextInputScroll key) newScroll (storeFloat store)})
       pure newScroll
 
 drawTextInputSelection :: DrawArena -> Context -> NodeIdx -> Float -> Float -> Float -> Float -> Maybe Float -> IO ()
@@ -216,8 +214,8 @@ drawTextInputSelection da ctx idx x y w h mScrollX = do
     wid <- getWidgetId (ctxNodeArena ctx) idx
     store <- getStore ctx
     let key = intKey wid
-        cursor = IM.findWithDefault (T.length value) (slotKey slotCursor key) (storeInt store)
-        anchor = IM.findWithDefault cursor (slotKey slotAnchor key) (storeInt store)
+        cursor = IM.findWithDefault (T.length value) (slotKey SlotCursor key) (storeInt store)
+        anchor = IM.findWithDefault cursor (slotKey SlotAnchor key) (storeInt store)
         selLo = min anchor cursor
         selHi = max anchor cursor
     when (selLo < selHi) $ do
@@ -245,7 +243,7 @@ drawTextInputCaret da ctx idx x y w h style = do
       value <- textInputValue ctx idx
       wid <- getWidgetId (ctxNodeArena ctx) idx
       store <- getStore ctx
-      let cursor = IM.findWithDefault (T.length value) (slotKey slotCursor (intKey wid)) (storeInt store)
+      let cursor = IM.findWithDefault (T.length value) (slotKey SlotCursor (intKey wid)) (storeInt store)
       lbl <- getText (ctxNodeArena ctx) idx
       fm <- nodeFontMetrics ctx idx
       let fieldTxt = textInputFieldText lbl value focus
@@ -261,15 +259,15 @@ updateTextInputSelection :: Context -> WidgetId -> Int -> Int -> IO ()
 updateTextInputSelection ctx wid anchor cursor = do
   store <- getStore ctx
   let key = intKey wid
-      oldAnchor = IM.findWithDefault cursor (slotKey slotAnchor key) (storeInt store)
-      oldCursor = IM.findWithDefault 0 (slotKey slotCursor key) (storeInt store)
+      oldAnchor = IM.findWithDefault cursor (slotKey SlotAnchor key) (storeInt store)
+      oldCursor = IM.findWithDefault 0 (slotKey SlotCursor key) (storeInt store)
   when (oldAnchor /= anchor || oldCursor /= cursor) $ do
     setStore
       ctx
       ( store
           { storeInt =
-              IM.insert (slotKey slotAnchor key) anchor $
-                IM.insert (slotKey slotCursor key) cursor (storeInt store)
+              IM.insert (slotKey SlotAnchor key) anchor $
+                IM.insert (slotKey SlotCursor key) cursor (storeInt store)
           }
       )
     markDirty ctx
@@ -333,8 +331,8 @@ collapseTextInputSelection :: Context -> WidgetId -> IO ()
 collapseTextInputSelection ctx wid = do
   store <- getStore ctx
   let key = intKey wid
-      cur = IM.findWithDefault 0 (slotKey slotCursor key) (storeInt store)
-  setStore ctx (store {storeInt = IM.insert (slotKey slotAnchor key) cur (storeInt store)})
+      cur = IM.findWithDefault 0 (slotKey SlotCursor key) (storeInt store)
+  setStore ctx (store {storeInt = IM.insert (slotKey SlotAnchor key) cur (storeInt store)})
 
 -- | Count a press as a multi-click only when it lands on the same cell as the
 -- previous press; anything else restarts the count at one.

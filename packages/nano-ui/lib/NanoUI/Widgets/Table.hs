@@ -45,7 +45,7 @@ import NanoUI.Font (ScrollBarSlot (..), scrollBarGutter, tableCellInset, lineWid
 import NanoUI.Id (WidgetId (..))
 import NanoUI.Input (Input (..), inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased)
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
-import NanoUI.Store (WidgetStore (..), slotDrag, slotDragW, slotKey)
+import NanoUI.Store (WidgetStore (..), Slot (..), slotKey)
 import NanoUI.Style (AlignX (..), AlignY (..), Direction (..), FontVariant (..), Layout (..), Padding (..), Sizing (..), defaultLayout, fillH, fillW, tight)
 import Data.Bits ((.|.), shiftL)
 import NanoUI.Types (Rect (..), clamp, rectH, rectW, rectY, v2X, V2 (..))
@@ -545,8 +545,8 @@ finishTable TableFinish{tfN = n, tfStateKey = stateKey, tfVis = vis, tfOrder0 = 
   uiIO $ do
     st <- getStore ctx
     let dragCode = packHeaderDrag nextDrag
-        dragK = slotKey slotDrag stateKey
-        dragWK = slotKey slotDragW stateKey
+        dragK = slotKey SlotDrag stateKey
+        dragWK = slotKey SlotDragW stateKey
         unchanged =
           IM.lookup stateKey (storeIntList st) == Just nextOrder
             && IM.lookup stateKey (storeIntSet st) == Just nextHidden
@@ -616,9 +616,9 @@ tableConfigured cfg f key cols inputRows curSort =
         order0 = normalizeOrder n (IM.findWithDefault [0 .. n - 1] stateKey (storeIntList st0))
         hidden0 = IM.findWithDefault (tableHidden cfg) stateKey (storeIntSet st0)
         widths0 = fitList n 0 (IM.findWithDefault [] stateKey (storeFloatList st0))
-        drag0 = unpackHeaderDrag (IM.findWithDefault 0 (slotKey slotDrag stateKey) (storeInt st0))
+        drag0 = unpackHeaderDrag (IM.findWithDefault 0 (slotKey SlotDrag stateKey) (storeInt st0))
         dragX0 = IM.findWithDefault 0 stateKey (storeFloat st0)
-        dragW0 = IM.findWithDefault 0 (slotKey slotDragW stateKey) (storeFloat st0)
+        dragW0 = IM.findWithDefault 0 (slotKey SlotDragW stateKey) (storeFloat st0)
         mx = v2X (inputMousePos inp)
         -- A drag cannot push a column under its colFloor: the column reserved
         -- that much space for its text, and going under it wraps the cell and

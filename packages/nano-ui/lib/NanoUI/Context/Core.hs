@@ -109,7 +109,7 @@ import NanoUI.Store
   , intBool
   , ptrEq
   , slotKey
-  , slotSeen
+  , Slot (..)
   )
 import NanoUI.Style (Theme)
 import NanoUI.Types (Damage, DamageBounds (..), Rect, Size, defaultDamageSlop, rectH, rectW)
@@ -443,7 +443,7 @@ adoptSlot field setField ctx owner k v = do
   st <- readIORef (ctxStore ctx)
   let
     m = field st
-    seenK = slotKey slotSeen k
+    seenK = slotKey SlotSeen k
   when (IM.lookup seenK m /= Just v) $ do
     writeIORef (ctxStore ctx) $! setField (IM.insert seenK v (IM.insert k v m)) st
     when (IM.lookup k m /= Just v) $ do
@@ -462,7 +462,7 @@ recordSlot ::
   IO ()
 recordSlot field setField ctx k v = do
   st <- readIORef (ctxStore ctx)
-  let seenK = slotKey slotSeen k
+  let seenK = slotKey SlotSeen k
   when (IM.lookup seenK (field st) /= Just v) $
     writeIORef (ctxStore ctx) $! setField (IM.insert seenK v (field st)) st
 

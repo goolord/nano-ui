@@ -33,8 +33,7 @@ import NanoUI.Input
 import NanoUI.Monad (Ui, askContext, askDefaultLayout, askInput, nextId, uiIO)
 import NanoUI.Store
   ( WidgetStore (..)
-  , slotDrop
-  , slotDropPos
+  , Slot (..)
   , slotKey
   )
 import NanoUI.Style (Layout)
@@ -75,8 +74,8 @@ useDrop bounds = do
   ctx <- askContext
   inp <- askInput
   let key = intKey wid
-      activeK = slotKey slotDrop key
-      posK = slotKey slotDropPos key
+      activeK = slotKey SlotDrop key
+      posK = slotKey SlotDropPos key
   store <- uiIO (getStore ctx)
   let active0 = IM.findWithDefault 0 activeK (storeInt store) /= 0
       lastPos0 = fmap (\(x, y) -> V2 x y) (IM.lookup posK (storePoint store))

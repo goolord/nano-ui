@@ -51,7 +51,7 @@ import NanoUI.Frame.Scroll.Geometry (padTextClipRect)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), Key (..), foldInputKeys, inputKeys, inputMouseDown, inputMousePos, inputMousePressed)
 import NanoUI.Layout.Arena (NodeType (NodeSelect, NodeTextInput), findNodeM, foldNodeRevM, getNodeType, getOptions, getRect, getWidgetId)
-import NanoUI.Store (slotAnchor, slotComboContentW, slotComboCount, slotComboHighlight, slotComboScroll, slotComboScrollX, slotCursor, slotKey)
+import NanoUI.Store (Slot (..), slotKey)
 import NanoUI.Style (Style (..), Theme (..), scrollBarThumbColor, scrollBarTrackColor, themeAccent, themeInput)
 import NanoUI.Types (Color (..), Rect (..), V2 (..), rectContains, rectIntersect)
 import NanoUI.WidgetText (selectChevronReserve)
@@ -102,9 +102,9 @@ openDropdowns ctx = do
           slotInt slot def = IM.findWithDefault def (slotKey slot key) (storeInt store)
           slotFloat slot = IM.findWithDefault 0 (slotKey slot key) (storeFloat store)
           nOpts = length opts
-          rows = slotInt slotComboCount nOpts
-          window = slotInt slotComboScroll 0
-          contentW = slotFloat slotComboContentW
+          rows = slotInt SlotComboCount nOpts
+          window = slotInt SlotComboScroll 0
+          contentW = slotFloat SlotComboContentW
       pure
         Dropdown
           { ddWidget = wid
@@ -117,11 +117,11 @@ openDropdowns ctx = do
                 else selectDropRect x y w h nOpts
           , ddPicked =
               if combo
-                then slotInt slotComboHighlight (-1) - window
+                then slotInt SlotComboHighlight (-1) - window
                 else IM.findWithDefault 0 key (storeInt store)
           , ddComboRows = rows
           , ddComboWindow = window
-          , ddComboScrollX = slotFloat slotComboScrollX
+          , ddComboScrollX = slotFloat SlotComboScrollX
           , ddComboContentW = contentW
           }
 
@@ -279,8 +279,8 @@ finalizeSelectPick ctx inp =
                   ( st
                       { storeText = IM.insert key txt (storeText st)
                       , storeInt =
-                          IM.insert (slotKey slotCursor key) len $
-                            IM.insert (slotKey slotAnchor key) len (storeInt st)
+                          IM.insert (slotKey SlotCursor key) len $
+                            IM.insert (slotKey SlotAnchor key) len (storeInt st)
                       }
                   )
                 writeIORef (ctxFocusId ctx) (WidgetId 0)

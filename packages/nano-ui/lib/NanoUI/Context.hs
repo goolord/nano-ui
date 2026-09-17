@@ -236,11 +236,7 @@ module NanoUI.Context
   , WidgetStore (..)
   , bumpMirror
   , slotKey
-  , slotCursor
-  , slotAnchor
-  , slotDrag
-  , slotDragW
-  , slotWinSize
+  , Slot (..)
   , boolInt
   , intBool
   , anySelectOpen
@@ -353,12 +349,8 @@ import NanoUI.Store
   , isSelectOpen
   , ptrEq
   , setSelectOpen
-  , slotAnchor
-  , slotCursor
-  , slotDrag
-  , slotDragW
+  , Slot (..)
   , slotKey
-  , slotWinSize
   )
 import NanoUI.Style (FontStyle, FontVariant (..), FontWeight, Theme, defaultLayout, defaultTheme)
 import NanoUI.Types (ImageId)

@@ -113,7 +113,7 @@ import NanoUI.Input
   )
 import NanoUI.Layout.Arena (NodeType (NodeDrawing))
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, uiTime)
-import NanoUI.Store (WidgetStore (..), boolInt, slotDrag, slotKey)
+import NanoUI.Store (WidgetStore (..), boolInt, Slot (..), slotKey)
 import NanoUI.Style
   ( AlignX (..)
   , AlignY (..)
@@ -393,7 +393,7 @@ useDrag2D bounds = do
   inp <- askInput
   -- The drag flag lives in 'storeInt' and the last pointer position in
   -- 'storePoint', both under the widget's drag slot.
-  let dragK = slotKey slotDrag (intKey wid)
+  let dragK = slotKey SlotDrag (intKey wid)
       mouse = inputMousePos inp
   store <- uiIO (getStore ctx)
   let active0 = IM.findWithDefault 0 dragK (storeInt store) /= 0

@@ -73,12 +73,7 @@ import NanoUI.Frame.Input (isInteractiveNode)
 import NanoUI.Store
   ( WidgetStore (..)
   , slotKey
-  , slotPaneFocus
-  , slotPaneGest
-  , slotPaneGrab
-  , slotPaneMax
-  , slotPaneNext
-  , slotPaneResize
+  , Slot (..)
   )
 import NanoUI.Style
   ( AlignX (..)
@@ -276,7 +271,7 @@ data GridEnv es = GridEnv
     -- ^ Prev-frame rect of the grid's root container.
   , geTree :: !GridNode
   , geSeed :: !Word64
-    -- ^ Next fresh split / pane id ('slotPaneNext'); strictly monotonic per
+    -- ^ Next fresh split / pane id ('SlotPaneNext'); strictly monotonic per
     -- grid, so ids are never reused and state keyed by pane id cannot
     -- collide with a closed pane's state.
   , geDrag0 :: !Int
@@ -326,11 +321,11 @@ paneGrid cfg = do
   inp <- askInput
   uiIO (registerFocusable ctx wid)
   let key = intKey wid
-      gestK = slotKey slotPaneGest key
-      grabK = slotKey slotPaneGrab key
-      focusK = slotKey slotPaneFocus key
-      maxK = slotKey slotPaneMax key
-      seedK = slotKey slotPaneNext key
+      gestK = slotKey SlotPaneGest key
+      grabK = slotKey SlotPaneGrab key
+      focusK = slotKey SlotPaneFocus key
+      maxK = slotKey SlotPaneMax key
+      seedK = slotKey SlotPaneNext key
       spacing = max 0 (pgSpacing cfg)
       minSize = max 0 (pgMinSize cfg)
       leeway = max 0 (pgLeeway cfg)
@@ -684,7 +679,7 @@ drawDragOverlay env wid rendered ghost zone = do
   st <- uiIO (getStore (geCtx env))
   let ctx = geCtx env
       dragPane = fromIntegral (geDrag0 env)
-      cached = IM.lookup (slotKey slotPaneGrab (geKey env)) (storeDyn st) >>= fromDynamic
+      cached = IM.lookup (slotKey SlotPaneGrab (geKey env)) (storeDyn st) >>= fromDynamic
       title = maybe (fromMaybe "" cached) pvTitle (fmap rpView (find ((== dragPane) . rpPaneId) rendered))
   uiIO $
     registerCustomDrawing ctx wid 0 (\cdc _ -> drawOverlay (cdcTheme cdc) title ghost zone)
@@ -817,8 +812,8 @@ runGestures env dividers rendered dgi = do
         forM_ pickHit $ \pid -> do
           let title = maybe "" (pvTitle . rpView) (find ((== pid) . rpPaneId) rendered)
           storeWrite env False $ \st -> st
-            { storeDyn = IM.insert (slotKey slotPaneGrab (geKey env)) (toDyn title) (storeDyn st)
-            , storeInt = IM.delete (slotKey slotPaneGrab (geKey env)) (storeInt st)
+            { storeDyn = IM.insert (slotKey SlotPaneGrab (geKey env)) (toDyn title) (storeDyn st)
+            , storeInt = IM.delete (slotKey SlotPaneGrab (geKey env)) (storeInt st)
             }
           writeGest env (fromIntegral pid)
           writeGrab env $
@@ -828,7 +823,7 @@ runGestures env dividers rendered dgi = do
     forM_ (find ((== sid) . diSplitId) dividers) $ \d -> do
       st <- uiIO (getStore ctx)
       let (ratio0, main0) =
-            IM.findWithDefault (diRatio d, mouseMain d mouse) (slotKey slotPaneResize (geKey env)) (storePoint st)
+            IM.findWithDefault (diRatio d, mouseMain d mouse) (slotKey SlotPaneResize (geKey env)) (storePoint st)
           -- The ratio shares out the region minus the divider gutter.
           usable = mainLen (diAxis d) (diRegion d) - geGutter env
           r0 =
@@ -844,7 +839,7 @@ runGestures env dividers rendered dgi = do
   -- dirty every frame for the same reason.
   when (drag0 > 0 && down) $ uiIO (markDirty ctx)
   when (drag0 > 0 && down && dgiMoved dgi) $
-    storeWrite env False $ \st -> st {storeInt = IM.insert (slotKey slotPaneGrab (geKey env)) 1 (storeInt st)}
+    storeWrite env False $ \st -> st {storeInt = IM.insert (slotKey SlotPaneGrab (geKey env)) 1 (storeInt st)}
   when (drag0 > 0 && not down) $ do
     let moved = fromIntegral drag0
     when (dgiMoved dgi) $
@@ -852,7 +847,7 @@ runGestures env dividers rendered dgi = do
         forM_ (treeMovePane moved (geSeed env) dt (geTree env)) $ \t' -> do
           putSeed env (geSeed env + 1)
           putTree env (Just t')
-          putPaneSlot False slotPaneFocus env moved
+          putPaneSlot False SlotPaneFocus env moved
     writeGest env 0
 
 mouseMain :: DividerInfo -> V2 -> Float
@@ -872,7 +867,7 @@ moveFocus ::
   Eff es ()
 moveFocus env cur dir =
   case neighborPane (geRegions env) cur dir of
-    Just pid -> putPaneSlot False slotPaneFocus env pid
+    Just pid -> putPaneSlot False SlotPaneFocus env pid
     Nothing -> pure ()
 
 neighborPane :: Map Word64 Rect -> Word64 -> (Float, Float) -> Maybe Word64
@@ -910,7 +905,7 @@ splitPane env pid axis = do
       newPane = geSeed env + 1
   putTree env (Just (treeSplit pid splitId axis False newPane (geTree env)))
   putSeed env (geSeed env + 2)
-  putPaneSlot False slotPaneFocus env newPane
+  putPaneSlot False SlotPaneFocus env newPane
   pure newPane
 
 closePane :: (Ui :> es) => GridEnv es -> Word64 -> Eff es ()
@@ -919,18 +914,18 @@ closePane env pid =
     Nothing -> putTree env Nothing
     Just t' -> do
       putTree env (Just t')
-      when (geMax env == pid) (putPaneSlot True slotPaneMax env 0)
+      when (geMax env == pid) (putPaneSlot True SlotPaneMax env 0)
 
 maximizePane :: (Ui :> es) => GridEnv es -> Word64 -> Eff es ()
 maximizePane env pid = do
   let v = if geMax env == pid then 0 else pid
-  putPaneSlot True slotPaneMax env v
+  putPaneSlot True SlotPaneMax env v
   -- Maximizing hides the dividers and every other pane, so an armed drag or
   -- resize gesture could never complete; cancel it instead of leaking it.
   when (v /= 0) (writeGest env 0)
 
 restorePane :: (Ui :> es) => GridEnv es -> Eff es ()
-restorePane env = putPaneSlot True slotPaneMax env 0
+restorePane env = putPaneSlot True SlotPaneMax env 0
 
 -- | One store round-trip. @mirror@ bumps the mirror generation so the
 -- running frame rebuilds its UI and layout with the new value (see
@@ -970,8 +965,8 @@ writeGest env n =
     st
       { storeInt =
           if n == 0
-            then IM.delete (slotKey slotPaneGest (geKey env)) (storeInt st)
-            else IM.insert (slotKey slotPaneGest (geKey env)) n (storeInt st)
+            then IM.delete (slotKey SlotPaneGest (geKey env)) (storeInt st)
+            else IM.insert (slotKey SlotPaneGest (geKey env)) n (storeInt st)
       }
 
 -- | Grab offset (mouse - pane origin) captured for the drag threshold. The
@@ -979,7 +974,7 @@ writeGest env n =
 writeGrab :: (Ui :> es) => GridEnv es -> V2 -> Eff es ()
 writeGrab env off =
   storeWrite env False $ \st ->
-    st {storePoint = IM.insert (slotKey slotPaneGrab (geKey env)) (v2X off, v2Y off) (storePoint st)}
+    st {storePoint = IM.insert (slotKey SlotPaneGrab (geKey env)) (v2X off, v2Y off) (storePoint st)}
 
 -- | Record the divider's ratio and the pointer's main-axis coordinate when a
 -- resize starts, so subsequent drag frames move the divider by delta instead of
@@ -987,11 +982,11 @@ writeGrab env off =
 writeResizeStart :: (Ui :> es) => GridEnv es -> DividerInfo -> V2 -> Eff es ()
 writeResizeStart env d mouse =
   storeWrite env False $ \st ->
-    st {storePoint = IM.insert (slotKey slotPaneResize (geKey env)) (diRatio d, mouseMain d mouse) (storePoint st)}
+    st {storePoint = IM.insert (slotKey SlotPaneResize (geKey env)) (diRatio d, mouseMain d mouse) (storePoint st)}
 
 -- | Write a pane-id slot (maximized or focused pane) when it differs,
 -- bumping the mirror; @structural@ also flags 'pgrChanged'.
-putPaneSlot :: (Ui :> es) => Bool -> Word64 -> GridEnv es -> Word64 -> Eff es ()
+putPaneSlot :: (Ui :> es) => Bool -> Slot -> GridEnv es -> Word64 -> Eff es ()
 putPaneSlot structural slot env v = do
   let k = slotKey slot (geKey env)
       n = fromIntegral v
@@ -1000,8 +995,8 @@ putPaneSlot structural slot env v = do
     storeWrite env True (\st' -> st' {storeInt = IM.insert k n (storeInt st')})
     when structural (markChanged env)
 
--- | Advance the next-id seed ('slotPaneNext').
+-- | Advance the next-id seed ('SlotPaneNext').
 putSeed :: (Ui :> es) => GridEnv es -> Word64 -> Eff es ()
 putSeed env v =
   storeWrite env False $ \st ->
-    st {storeInt = IM.insert (slotKey slotPaneNext (geKey env)) (fromIntegral v) (storeInt st)}
+    st {storeInt = IM.insert (slotKey SlotPaneNext (geKey env)) (fromIntegral v) (storeInt st)}

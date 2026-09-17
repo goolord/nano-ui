@@ -34,7 +34,7 @@ import NanoUI.Id (WidgetId)
 import NanoUI.Input (inputMousePos, inputScroll)
 import NanoUI.Layout.Arena (setNodeValue)
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
-import NanoUI.Store (WidgetStore (storeFloat), slotKey, slotScrollContent)
+import NanoUI.Store (WidgetStore (storeFloat), slotKey, Slot (..))
 import NanoUI.Style
   ( AlignX (..)
   , AlignY (..)
@@ -219,7 +219,7 @@ renderScrollableHeaders ctx style hdrLay barLay groupId cur tabList = do
       -- but paints nothing (no well, no scrollbar), so the headers look
       -- exactly as they did before the strip could scroll.
       scrollerCfg = scrollHorizontalHidden {scrollBare = True}
-      rangeKey = slotKey slotScrollContent (intKey scrollWid)
+      rangeKey = slotKey SlotScrollContent (intKey scrollWid)
       renderInner =
         withKey ("tab-strip" :: Text) $
           row' innerLay (renderHeaders ctx hdrLay styleVal cur (zip [0 :: Int ..] tabList))

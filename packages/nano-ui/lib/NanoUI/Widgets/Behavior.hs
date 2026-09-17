@@ -34,8 +34,7 @@ import NanoUI.Context
   , getMenuPointerGesture
   , pointerBlockedByModal
   , setStore
-  , slotDrag
-  , slotDragW
+  , Slot (..)
   , slotKey
   )
 import NanoUI.Id (IdContext (..), WidgetId (..), enterKeyed, hashWidgetId, mix64)
@@ -75,7 +74,7 @@ keyedDragHeld k = do
         IdContext cid sid = child
         raw = mix64 cid sid
         wid = if raw == 0 then WidgetId 1 else WidgetId raw
-        dragK = slotKey slotDrag (intKey wid)
+        dragK = slotKey SlotDrag (intKey wid)
     store <- getStore ctx
     pure (IM.findWithDefault 0 dragK (storeInt store) /= 0)
 
@@ -93,7 +92,7 @@ useDrag1D axis lo hi current track = do
   ctx <- askContext
   inp <- askInput
   let key = intKey wid
-      dragK = slotKey slotDrag key
+      dragK = slotKey SlotDrag key
       trackLen = case axis of
         DragAxisX -> rectW track
         DragAxisY -> rectH track
@@ -139,7 +138,7 @@ useReorder order items = do
   ctx <- askContext
   inp <- askInput
   let key = intKey wid
-      dragK = slotKey slotDrag key
+      dragK = slotKey SlotDrag key
       mouse = inputMousePos inp
       down = inputMouseDown inp
       press = inputMousePressed inp
@@ -150,7 +149,7 @@ useReorder order items = do
           items
   store <- uiIO (getStore ctx)
   let from0 = IM.findWithDefault (-1) dragK (storeInt store)
-      startX = IM.findWithDefault 0 (slotKey slotDragW key) (storeFloat store)
+      startX = IM.findWithDefault 0 (slotKey SlotDragW key) (storeFloat store)
       dragging = if press then maybe (-1) fst hit else from0
       nextDrag =
         if release || not down
@@ -171,7 +170,7 @@ useReorder order items = do
           { storeInt = IM.insert dragK nextDrag (storeInt st)
           , storeFloat =
               IM.insert
-                (slotKey slotDragW key)
+                (slotKey SlotDragW key)
                 (if press then v2X mouse else startX)
                 (storeFloat st)
           }

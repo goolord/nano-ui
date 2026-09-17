@@ -52,7 +52,7 @@ import NanoUI.Input
   , inputWindowSize
   )
 import NanoUI.Frame.Hit (findNodeByKey)
-import NanoUI.Store (eqByPtr, mirrorStoresChanged, ptrEq, slotKey, slotScrollCross, slotTextAreaScroll)
+import NanoUI.Store (eqByPtr, mirrorStoresChanged, ptrEq, slotKey, Slot (..))
 import NanoUI.Layout.Arena
   ( NodeArena
   , NodeType (..)
@@ -675,7 +675,7 @@ scrollOffsetDamage ctx oldStore newStore =
   where
     na = ctxNodeArena ctx
     -- Floating-pane offsets live in storeFloat; wheel/keyboard offsets
-    -- live under the slotTextAreaScroll slot in storePoint. Both move the
+    -- live under the SlotTextAreaScroll slot in storePoint. Both move the
     -- scroller's content and its chrome. New or removed float offsets only
     -- count when nonzero.
     changedKeys =
@@ -693,8 +693,8 @@ scrollOffsetDamage ctx oldStore newStore =
           let widKey = intKey wid
           pure $
             IM.insert widKey idx $
-              IM.insert (slotKey slotScrollCross widKey) idx $
-                IM.insert (slotKey slotTextAreaScroll widKey) idx m
+              IM.insert (slotKey SlotScrollCross widKey) idx $
+                IM.insert (slotKey SlotTextAreaScroll widKey) idx m
 
 floatingAncestorRect :: Context -> Int -> IO (Maybe Rect)
 floatingAncestorRect ctx idx =

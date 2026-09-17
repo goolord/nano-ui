@@ -71,17 +71,7 @@ import NanoUI.Id (WidgetId)
 import NanoUI.Store
   ( WidgetStore (..)
   , slotKey
-  , slotScrollAxes
-  , slotScrollCfg
-  , slotScrollCross
-  , slotScrollLinkX
-  , slotScrollLinkY
-  , slotScrollOff
-  , slotScrollRange
-  , slotScrollStep
-  , slotScrollViewPos
-  , slotScrollViewSize
-  , slotTextAreaScroll
+  , Slot (..)
   )
 import NanoUI.Types (DamageBounds (..), Rect (..), V2 (..), clamp, onGrid, v2X, v2Y)
 
@@ -95,7 +85,7 @@ getScrollOffset :: Context -> WidgetId -> IO Float
 getScrollOffset ctx wid = do
   s <- getStore ctx
   let key = intKey wid
-      sKey = slotKey slotTextAreaScroll key
+      sKey = slotKey SlotTextAreaScroll key
   off <-
     case IM.lookup sKey (storePoint s) of
       Just (_, sy) -> pure sy
@@ -117,7 +107,7 @@ writeScrollOffset :: Context -> WidgetId -> Float -> IO ()
 writeScrollOffset ctx wid off = do
   store <- getStore ctx
   let key = intKey wid
-      sKey = slotKey slotTextAreaScroll key
+      sKey = slotKey SlotTextAreaScroll key
   case IM.lookup sKey (storePoint store) of
     Just (sx, sy) ->
       when (sy /= off) $ do
@@ -133,12 +123,12 @@ writeScrollOffset ctx wid off = do
           let prev = IM.findWithDefault 0 key (storeFloat store)
           when (prev /= off) $ do
             let floats0 = IM.insert key off (storeFloat store)
-                yKey = IM.findWithDefault 0 (slotKey slotScrollLinkY key) (storeInt store)
+                yKey = IM.findWithDefault 0 (slotKey SlotScrollLinkY key) (storeInt store)
             if yKey == 0
               then setStore ctx (store {storeFloat = floats0})
               else do
-                let offKey = slotKey slotScrollOff yKey
-                    crossKey = slotKey slotScrollCross yKey
+                let offKey = slotKey SlotScrollOff yKey
+                    crossKey = slotKey SlotScrollCross yKey
                     prevY = IM.findWithDefault 0 yKey floats0
                     floats1 = IM.insert yKey prevY $ IM.insert crossKey off floats0
                     points = IM.insert offKey (off, prevY) (storePoint store)
@@ -148,13 +138,13 @@ getScrollOffset2D :: Context -> WidgetId -> IO V2
 getScrollOffset2D ctx wid = do
   s <- getStore ctx
   let widKey = intKey wid
-      sKey = slotKey slotTextAreaScroll widKey
+      sKey = slotKey SlotTextAreaScroll widKey
   v <-
     case IM.lookup sKey (storePoint s) of
       Just (sx, sy) -> pure (V2 sx sy)
       Nothing -> do
-        let offKey = slotKey slotScrollOff widKey
-            crossKey = slotKey slotScrollCross widKey
+        let offKey = slotKey SlotScrollOff widKey
+            crossKey = slotKey SlotScrollCross widKey
         case IM.lookup offKey (storePoint s) of
           Just (x, y) -> pure (V2 x y)
           Nothing ->
@@ -177,7 +167,7 @@ writeScrollOffset2D :: Context -> WidgetId -> V2 -> IO ()
 writeScrollOffset2D ctx wid off = do
   store <- getStore ctx
   let widKey = intKey wid
-      sKey = slotKey slotTextAreaScroll widKey
+      sKey = slotKey SlotTextAreaScroll widKey
   -- Text areas only reach the first branch because `textAreaWith` seeds this
   -- slot at init; without the seed a freshly mounted editor falls through to
   -- the legacy container slots below and its offsets are never rendered.
@@ -189,13 +179,13 @@ writeScrollOffset2D ctx wid off = do
         setStore ctx (store {storePoint = IM.insert sKey (sx', sy') (storePoint store)})
         damageWidget ctx wid DamageSelf
     Nothing -> do
-      let offKey = slotKey slotScrollOff widKey
-          crossKey = slotKey slotScrollCross widKey
+      let offKey = slotKey SlotScrollOff widKey
+          crossKey = slotKey SlotScrollCross widKey
           prev = IM.lookup offKey (storePoint store)
           next = (v2X off, v2Y off)
           prevY = IM.findWithDefault 0 widKey (storeFloat store)
           prevX = IM.findWithDefault 0 crossKey (storeFloat store)
-          xLink = IM.findWithDefault 0 (slotKey slotScrollLinkX widKey) (storeInt store)
+          xLink = IM.findWithDefault 0 (slotKey SlotScrollLinkX widKey) (storeInt store)
       when (prev /= Just next || prevY /= v2Y off || prevX /= v2X off) $ do
         let floats0 =
               IM.insert widKey (v2Y off) $
@@ -215,8 +205,8 @@ linkScrollAxes ctx yWid xWid = do
   let yKey = intKey yWid
       xKey = intKey xWid
       ints =
-        IM.insert (slotKey slotScrollLinkX yKey) xKey $
-          IM.insert (slotKey slotScrollLinkY xKey) yKey (storeInt store)
+        IM.insert (slotKey SlotScrollLinkX yKey) xKey $
+          IM.insert (slotKey SlotScrollLinkY xKey) yKey (storeInt store)
   setStore ctx (store {storeInt = ints})
   V2 x2 y <- getScrollOffset2D ctx yWid
   x1 <- do
@@ -229,14 +219,14 @@ linkScrollAxes ctx yWid xWid = do
 getScrollConfig :: Context -> WidgetId -> IO ScrollConfig
 getScrollConfig ctx wid = do
   s <- getStore ctx
-  let cfgKey = slotKey slotScrollCfg (intKey wid)
+  let cfgKey = slotKey SlotScrollCfg (intKey wid)
       bits = IM.findWithDefault (encodeScrollConfig defaultScrollConfig) cfgKey (storeInt s)
   pure (decodeScrollConfig bits)
 
 setScrollConfig :: Context -> WidgetId -> ScrollConfig -> IO ()
 setScrollConfig ctx wid cfg = do
   store <- getStore ctx
-  let cfgKey = slotKey slotScrollCfg (intKey wid)
+  let cfgKey = slotKey SlotScrollCfg (intKey wid)
       bits = encodeScrollConfig cfg
       prev = IM.findWithDefault (encodeScrollConfig defaultScrollConfig) cfgKey (storeInt store)
   when (prev /= bits) $
@@ -261,7 +251,7 @@ setScrollTuning ctx tuning =
 getScrollStep :: Context -> WidgetId -> IO Float
 getScrollStep ctx wid = do
   s <- getStore ctx
-  pure (IM.findWithDefault 0 (slotKey slotScrollStep (intKey wid)) (storeFloat s))
+  pure (IM.findWithDefault 0 (slotKey SlotScrollStep (intKey wid)) (storeFloat s))
 
 -- | Give one scroller its own wheel step, in pixels per notch. @0@ puts it
 -- back on the context's step. A list whose rows are a fixed height reads best
@@ -269,7 +259,7 @@ getScrollStep ctx wid = do
 setScrollStep :: Context -> WidgetId -> Float -> IO ()
 setScrollStep ctx wid px = do
   store <- getStore ctx
-  let key = slotKey slotScrollStep (intKey wid)
+  let key = slotKey SlotScrollStep (intKey wid)
       prev = IM.findWithDefault 0 key (storeFloat store)
   when (prev /= px) $
     setStore ctx (store {storeFloat = IM.insert key px (storeFloat store)})
@@ -309,9 +299,9 @@ getScrollMetrics ctx wid = do
   s <- getStore ctx
   let key = intKey wid
       point slot = IM.lookup (slotKey slot key) (storePoint s)
-  case (point slotScrollViewPos, point slotScrollViewSize, point slotScrollRange) of
+  case (point SlotScrollViewPos, point SlotScrollViewSize, point SlotScrollRange) of
     (Just (vx, vy), Just (vw, vh), Just (mx, my)) -> do
-      let axes = decodeScrollAxes (IM.findWithDefault 0 (slotKey slotScrollAxes key) (storeInt s))
+      let axes = decodeScrollAxes (IM.findWithDefault 0 (slotKey SlotScrollAxes key) (storeInt s))
       off <- getScrollOffsetIn ctx wid axes
       pure $
         Just
@@ -358,10 +348,10 @@ writeScrollMetrics ctx wid axes (Rect vx vy vw vh) range@(V2 mx my) = do
   clampScrollGlide ctx wid range
   store <- getStore ctx
   let key = intKey wid
-      axesKey = slotKey slotScrollAxes key
-      posKey = slotKey slotScrollViewPos key
-      sizeKey = slotKey slotScrollViewSize key
-      rangeKey = slotKey slotScrollRange key
+      axesKey = slotKey SlotScrollAxes key
+      posKey = slotKey SlotScrollViewPos key
+      sizeKey = slotKey SlotScrollViewSize key
+      rangeKey = slotKey SlotScrollRange key
       code = encodeScrollAxes axes
       points = storePoint store
       ints = storeInt store

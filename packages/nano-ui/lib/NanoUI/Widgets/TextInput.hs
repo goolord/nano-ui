@@ -70,7 +70,7 @@ import NanoUI.Input
   )
 import NanoUI.Layout.Arena (NodeType (..), getNodeType, getStyleIdx)
 import NanoUI.Monad (Ui, askContext, askDefaultLayout, askInput, nextId, uiIO)
-import NanoUI.Store (WidgetStore (..), slotAnchor, slotCursor, slotKey, slotSearchAge, slotSearchCommitted, slotTextAreaChanged, slotTextHistory, slotTextMode)
+import NanoUI.Store (WidgetStore (..), Slot (..), slotKey)
 import NanoUI.Style (Layout (..), Sizing (..), defaultLayout)
 import NanoUI.WidgetText (packTextNodeStyleFull, textInputFlagPassword, textInputFlagSearch, textInputFlagSelectable, textInputPasswordMode, textInputSelectableMode)
 import NanoUI.Widgets.Behavior (keyboardFocused)
@@ -116,8 +116,8 @@ data TextInputState = TextInputState
 -- and the anchor to the cursor.
 loadTextInputState :: WidgetStore -> Int -> Text -> TextInputState
 loadTextInputState store key text =
-  let cursor = IM.findWithDefault (T.length text) (slotKey slotCursor key) (storeInt store)
-      anchor = IM.findWithDefault cursor (slotKey slotAnchor key) (storeInt store)
+  let cursor = IM.findWithDefault (T.length text) (slotKey SlotCursor key) (storeInt store)
+      anchor = IM.findWithDefault cursor (slotKey SlotAnchor key) (storeInt store)
    in TextInputState text cursor anchor
 
 saveTextInputState :: Int -> TextInputState -> WidgetStore -> WidgetStore
@@ -125,8 +125,8 @@ saveTextInputState key s store =
   store
     { storeText = IM.insert key (tisText s) (storeText store)
     , storeInt =
-        IM.insert (slotKey slotCursor key) (tisCursor s) $
-          IM.insert (slotKey slotAnchor key) (tisAnchor s) (storeInt store)
+        IM.insert (slotKey SlotCursor key) (tisCursor s) $
+          IM.insert (slotKey SlotAnchor key) (tisAnchor s) (storeInt store)
     }
 
 -- | The editor for a field's state, with the undo history stored for it. A
@@ -135,7 +135,7 @@ saveTextInputState key s store =
 textInputEditor :: WidgetStore -> Int -> TextInputState -> Editor
 textInputEditor store key s =
   let buf = TB.withCursor (TB.Cursor 0 (tisCursor s)) (TB.fromText (tisText s))
-      history = case IM.lookup (slotKey slotTextHistory key) (storeDyn store) >>= fromDynamic of
+      history = case IM.lookup (slotKey SlotTextHistory key) (storeDyn store) >>= fromDynamic of
         Just (text, h) | text == tisText s -> h
         _ -> emptyHistory
    in Editor buf (TB.clampCursor buf (TB.Cursor 0 (tisAnchor s))) history
@@ -150,7 +150,7 @@ saveTextEditor :: Int -> Editor -> WidgetStore -> WidgetStore
 saveTextEditor key ed store =
   let s = editorTextState ed
       saved = saveTextInputState key s store
-   in saved {storeDyn = IM.insert (slotKey slotTextHistory key) (toDyn (tisText s, editorHistory ed)) (storeDyn saved)}
+   in saved {storeDyn = IM.insert (slotKey SlotTextHistory key) (toDyn (tisText s, editorHistory ed)) (storeDyn saved)}
 
 -- | This frame's typing and shortcuts as commands, typed characters first.
 -- Ctrl turns characters into shortcuts; a line break never enters a
@@ -206,7 +206,7 @@ applyTextInputCommand ctx wid mode cmd = do
       saved = saveTextEditor key ed store
   setStore ctx $
     if tisText s1 /= tisText s0
-      then saved {storeInt = IM.insert (slotKey slotTextAreaChanged key) 1 (storeInt saved)}
+      then saved {storeInt = IM.insert (slotKey SlotTextAreaChanged key) 1 (storeInt saved)}
       else saved
   markDirty ctx
 
@@ -273,8 +273,8 @@ editTextField wid password initial unfocusedText = do
   let
     key = intKey wid
     mode = singleLineMode {modeCopyable = not password}
-    modeKey = slotKey slotTextMode key
-    pulseKey = slotKey slotTextAreaChanged key
+    modeKey = slotKey SlotTextMode key
+    pulseKey = slotKey SlotTextAreaChanged key
     stored = IM.lookup key (storeText store)
     text0 = fromMaybe initial stored
     -- Text replaced from outside the field can be shorter than the caret.
@@ -328,13 +328,13 @@ buildTextInput styleIdx layout placeholder value mDebounceMs = do
 -- | Debounced change pulse for a search field. Fires when the text differs from
 -- the last committed query and either the field is empty, lost focus, or has
 -- been idle for @ms@ (trailing edge). Field text lives under @key@; the last
--- committed query under 'slotSearchCommitted'.
+-- committed query under 'SlotSearchCommitted'.
 debounceSearchChanged :: Context -> Int -> Bool -> Bool -> Float -> IO Bool
 debounceSearchChanged ctx key focused rawChanged ms = do
   store <- getStore ctx
   let
-    committedKey = slotKey slotSearchCommitted key
-    ageKey = slotKey slotSearchAge key
+    committedKey = slotKey SlotSearchCommitted key
+    ageKey = slotKey SlotSearchAge key
     fieldText = IM.findWithDefault "" key (storeText store)
     committedMissing = not (IM.member committedKey (storeText store))
     committed = IM.findWithDefault fieldText committedKey (storeText store)
@@ -441,7 +441,7 @@ selectableTextWith' f txt = do
       clampToText s = s {tisCursor = min newLen (tisCursor s), tisAnchor = min newLen (tisAnchor s)}
       s0 = clampToText (loadTextInputState store key txt)
   -- The caller owns the text: store it (with the clamped caret) when it changes.
-  let modeKey = slotKey slotTextMode key
+  let modeKey = slotKey SlotTextMode key
       modeCode = editorModeCode singleLineMode {modeEditable = False}
   when (IM.findWithDefault "" key (storeText store) /= txt || IM.lookup modeKey (storeInt store) /= Just modeCode) $
     uiIO $ setStore ctx (saveTextInputState key s0 store) {storeInt = IM.insert modeKey modeCode (storeInt (saveTextInputState key s0 store))}

@@ -67,7 +67,7 @@ import NanoUI.Layout.Arena
   , getWidgetId
   )
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
-import NanoUI.Store (slotColorBase, slotKey, slotSeen)
+import NanoUI.Store (Slot (..), slotKey)
 import NanoUI.Style
   ( AlignY (..)
   , Direction (..)
@@ -163,7 +163,7 @@ widgetStoreBaseColor :: WidgetStore -> WidgetId -> Color -> Color
 widgetStoreBaseColor store wid fallback =
   storeColorAt
     store
-    (slotKey slotColorBase (intKey wid))
+    (slotKey SlotColorBase (intKey wid))
     (widgetStoreColor store wid fallback)
 
 -- RGB cannot tell hue 0 from 360. Keep the slider end the user last set.
@@ -647,7 +647,7 @@ adoptColorPickerValue ctx wid value = do
   let
     key = intKey wid
     packed = fromIntegral (colorToWord32 value)
-    seenKey = slotKey slotSeen key
+    seenKey = slotKey SlotSeen key
     ints = IM.insert seenKey packed (storeInt store0)
   when (IM.lookup seenKey (storeInt store0) /= Just packed) $
     setStore ctx $
@@ -656,14 +656,14 @@ adoptColorPickerValue ctx wid value = do
         else
           let (h, s, v) = rgbToHsv value
            in putColorState key value (clamp 0 360 h) (s, v) $
-                store0 {storeInt = IM.insert (slotKey slotColorBase key) packed ints}
+                store0 {storeInt = IM.insert (slotKey SlotColorBase key) packed ints}
 
 commitColorPickerCurrent :: Context -> WidgetId -> Color -> IO ()
 commitColorPickerCurrent ctx wid col = do
   st <- getStore ctx
   let
     packed = fromIntegral (colorToWord32 col)
-    k = slotKey slotColorBase (intKey wid)
+    k = slotKey SlotColorBase (intKey wid)
     old = IM.findWithDefault packed k (storeInt st)
   when (old /= packed) $
     setStore ctx (st {storeInt = IM.insert k packed (storeInt st)})

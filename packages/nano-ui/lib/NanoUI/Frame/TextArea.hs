@@ -50,7 +50,7 @@ import NanoUI.Input
   , inputMouseReleased
   )
 import NanoUI.Layout.Arena (NodeIdx, NodeType (NodeTextArea), getNodeType, getRect, getWidgetId)
-import NanoUI.Store (slotTextAreaCol, slotTextAreaRow, slotTextAreaScroll, slotTextAreaViewport)
+import NanoUI.Store (Slot (..))
 import NanoUI.Style (Style (..), Theme, scrollBarThumbColor, scrollBarTrackColor, themePanel, themeSelection)
 import NanoUI.Types (Rect (..), V2 (..), onGrid, rectContains)
 import NanoUI.Widgets.TextArea (TextAreaState (..), loadTextAreaState, saveTextAreaState)
@@ -100,13 +100,13 @@ syncTextAreaViewport ctx idx fm x y w h = do
   let key = intKey wid
       Rect _ _ clipW clipH = textAreaFieldClip fm (Rect x y w h)
       bars = textAreaBars fm (Rect x y w h) contentW contentH
-      (sx, sy) = IM.findWithDefault (0, 0) (slotKey slotTextAreaScroll key) (storePoint store)
+      (sx, sy) = IM.findWithDefault (0, 0) (slotKey SlotTextAreaScroll key) (storePoint store)
       sx' = max 0 (min (max 0 (contentW - tabViewW bars)) sx)
       sy' = max 0 (min (max 0 (contentH - tabViewH bars)) sy)
-      viewportKey = slotKey slotTextAreaViewport key
+      viewportKey = slotKey SlotTextAreaViewport key
       pts0 = IM.insert viewportKey (clipW, clipH) (storePoint store)
       pts1
-        | sx' /= sx || sy' /= sy = IM.insert (slotKey slotTextAreaScroll key) (sx', sy') pts0
+        | sx' /= sx || sy' /= sy = IM.insert (slotKey SlotTextAreaScroll key) (sx', sy') pts0
         | otherwise = pts0
   unless (sx' == sx && sy' == sy && IM.lookup viewportKey (storePoint store) == Just (clipW, clipH)) $
     writeIORef (ctxStore ctx) $! store {storePoint = pts1}
@@ -319,7 +319,7 @@ collapseTextAreaSelection ctx wid = do
   store <- getStore ctx
   let key = intKey wid
       text = IM.findWithDefault "" key (storeText store)
-      row = IM.findWithDefault 0 (slotKey slotTextAreaRow key) (storeInt store)
-      col = IM.findWithDefault 0 (slotKey slotTextAreaCol key) (storeInt store)
+      row = IM.findWithDefault 0 (slotKey SlotTextAreaRow key) (storeInt store)
+      col = IM.findWithDefault 0 (slotKey SlotTextAreaCol key) (storeInt store)
       state = loadTextAreaState store key text
   setStore ctx (saveTextAreaState key text state {selectionAnchor = TB.Cursor row col} store)

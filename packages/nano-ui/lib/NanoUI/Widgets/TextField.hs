@@ -18,7 +18,7 @@ import NanoUI.Frame.Hit (findNodeByWidgetId)
 import NanoUI.Id (WidgetId)
 import NanoUI.Layout.Arena (NodeType (..), getNodeType, getStyleIdx)
 import NanoUI.Monad (Ui, askContext, uiIO)
-import NanoUI.Store (slotKey, slotTextHistory, slotTextMode)
+import NanoUI.Store (slotKey, Slot (..))
 import NanoUI.Widgets.TextArea (applyTextAreaCommand)
 import NanoUI.Widgets.TextEditor
   ( EditHistory
@@ -72,14 +72,14 @@ textFieldMode ctx wid =
         _ -> pure Nothing
     Nothing -> do
       store <- getStore ctx
-      pure (IM.lookup (slotKey slotTextMode (intKey wid)) (storeInt store) >>= editorModeFromCode)
+      pure (IM.lookup (slotKey SlotTextMode (intKey wid)) (storeInt store) >>= editorModeFromCode)
 
 -- | The undo history of the field with this id, empty when it has none.
 textFieldHistory :: Context -> WidgetId -> IO EditHistory
 textFieldHistory ctx wid = do
   store <- getStore ctx
   let key = intKey wid
-      stored = IM.lookup (slotKey slotTextHistory key) (storeDyn store)
+      stored = IM.lookup (slotKey SlotTextHistory key) (storeDyn store)
       text = IM.findWithDefault "" key (storeText store)
   pure $ case (stored >>= fromDynamic, stored >>= fromDynamic) of
     (Just h, _) -> h

@@ -50,10 +50,8 @@ import NanoUI.Frame.TextEdit
   )
 import NanoUI.Store
   ( WidgetStore (..)
-  , slotAnchor
-  , slotCursor
+  , Slot (..)
   , slotKey
-  , slotTextInputScroll
   )
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertGt, withInput)
@@ -93,11 +91,11 @@ runTextInputBatchTest ctx failed = do
         key = intKey (respId resp)
       assertEq
         failed
-        (IM.lookup (slotKey slotCursor key) (storeInt store))
+        (IM.lookup (slotKey SlotCursor key) (storeInt store))
         (Just cursor)
       assertEq
         failed
-        (IM.lookup (slotKey slotAnchor key) (storeInt store))
+        (IM.lookup (slotKey SlotAnchor key) (storeInt store))
         (Just anchor)
   checkSelection 1 4
   -- An event filtered to nothing must not delete the current selection.
@@ -565,14 +563,14 @@ runTextInputScrollTest ctx failed = do
       store <- getStore ctx
       let
         key = intKey (respId resp)
-        scrollEnd = IM.findWithDefault 0 (slotKey slotTextInputScroll key) (storeFloat store)
+        scrollEnd = IM.findWithDefault 0 (slotKey SlotTextInputScroll key) (storeFloat store)
       assert failed (scrollEnd > 0)
       let
         atHome = inp0 {inputKeys = inputKeysFromList [KeyHome]}
       _ <- runFrame ctx atHome ui
       storeHome <- getStore ctx
       let
-        scrollHome = IM.findWithDefault 0 (slotKey slotTextInputScroll key) (storeFloat storeHome)
+        scrollHome = IM.findWithDefault 0 (slotKey SlotTextInputScroll key) (storeFloat storeHome)
       assertEq failed scrollHome 0
     _ -> assert failed False
 

@@ -63,19 +63,7 @@ import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO)
 import NanoUI.Store
   ( WidgetStore (..)
   , slotKey
-  , slotTextAreaAnchorCol
-  , slotTextAreaAnchorRow
-  , slotTextAreaBuffer
-  , slotTextAreaChanged
-  , slotTextAreaCol
-  , slotTextAreaContentFont
-  , slotTextAreaPrefCol
-  , slotTextAreaRow
-  , slotTextAreaScroll
-  , slotTextAreaViewport
-  , slotTextHistory
-  , slotTextMode
-  , slotSeen
+  , Slot (..)
   )
 import NanoUI.Style (FontStyle (..), FontVariant (..), FontWeight (..), Layout (..), Sizing (..), defaultLayout)
 import NanoUI.Types (DamageBounds (..), clamp)
@@ -272,9 +260,9 @@ textAreaWith' f value = do
   store0 <- uiIO (getStore ctx)
   let layout = f textAreaLayout
       key = intKey wid
-      seenKey = slotKey slotSeen key
-      contentCacheKey = slotKey slotTextAreaContentFont key
-      changedSlotKey = slotKey slotTextAreaChanged key
+      seenKey = slotKey SlotSeen key
+      contentCacheKey = slotKey SlotTextAreaContentFont key
+      changedSlotKey = slotKey SlotTextAreaChanged key
       texts0 = storeText store0
       replaced = IM.lookup key texts0 /= Just value
   -- Adopt the caller's text the way 'adoptStoreText' does. A replaced document
@@ -286,13 +274,13 @@ textAreaWith' f value = do
     uiIO $ setStore ctx
       store0
         { storeText = IM.insert seenKey value (IM.insert key value texts0)
-        , storePoint = IM.insertWith (\_ old -> old) (slotKey slotTextAreaScroll key) (0, 0) (storePoint store0)
+        , storePoint = IM.insertWith (\_ old -> old) (slotKey SlotTextAreaScroll key) (0, 0) (storePoint store0)
         , storeFloat = if replaced then IM.delete contentCacheKey (storeFloat store0) else storeFloat store0
         , storeDyn =
             if replaced
-              then IM.delete (slotKey slotTextHistory key) (IM.delete (slotKey slotTextAreaBuffer key) (storeDyn store0))
+              then IM.delete (slotKey SlotTextHistory key) (IM.delete (slotKey SlotTextAreaBuffer key) (storeDyn store0))
               else storeDyn store0
-        , storeInt = IM.insert (slotKey slotTextMode key) (editorModeCode multiLineMode) (storeInt store0)
+        , storeInt = IM.insert (slotKey SlotTextMode key) (editorModeCode multiLineMode) (storeInt store0)
         }
   store <- uiIO (getStore ctx)
   let current = IM.findWithDefault value key (storeText store)
@@ -309,7 +297,7 @@ textAreaWith' f value = do
             then pure (ctxFontMetrics ctx)
             else fst <$> uiIO (ctxResolveFont ctx (layoutFontSize layout) WeightNormal FontStyleNormal FontRegular)
         let oldState = loadTextAreaState store key value
-            (vw, vh) = IM.findWithDefault (200, 96) (slotKey slotTextAreaViewport key) (storePoint store)
+            (vw, vh) = IM.findWithDefault (200, 96) (slotKey SlotTextAreaViewport key) (storePoint store)
         newState <- uiIO (processTextArea ctx inp (realToFrac vw) (realToFrac vh) (realToFrac (fmLineHeight editFm)) oldState)
         let newText
               -- 'processTextArea' only edits text when this frame carried keys
@@ -355,7 +343,7 @@ loadTextAreaState store key initial =
       -- saveTextAreaState, so a present entry is always the buffer for the
       -- stored text; no (O(document)) re-comparison is needed.
       cachedBuffer :: Maybe TB.TextBuffer =
-        IM.lookup (slotKey slotTextAreaBuffer key) (storeDyn store) >>= fromDynamic
+        IM.lookup (slotKey SlotTextAreaBuffer key) (storeDyn store) >>= fromDynamic
       buf0 = case cachedBuffer of
         Just cached -> cached
         Nothing -> TB.fromText text
@@ -366,24 +354,24 @@ loadTextAreaState store key initial =
 -- store lookup).
 loadTextAreaStateWithBuffer :: WidgetStore -> Int -> Text -> TB.TextBuffer -> TextAreaState
 loadTextAreaStateWithBuffer store key _text buf0 =
-  let row = IM.findWithDefault 0 (slotKey slotTextAreaRow key) (storeInt store)
-      col = IM.findWithDefault 0 (slotKey slotTextAreaCol key) (storeInt store)
-      anchorRow = IM.findWithDefault row (slotKey slotTextAreaAnchorRow key) (storeInt store)
-      anchorCol = IM.findWithDefault col (slotKey slotTextAreaAnchorCol key) (storeInt store)
-      pref = IM.findWithDefault col (slotKey slotTextAreaPrefCol key) (storeInt store)
+  let row = IM.findWithDefault 0 (slotKey SlotTextAreaRow key) (storeInt store)
+      col = IM.findWithDefault 0 (slotKey SlotTextAreaCol key) (storeInt store)
+      anchorRow = IM.findWithDefault row (slotKey SlotTextAreaAnchorRow key) (storeInt store)
+      anchorCol = IM.findWithDefault col (slotKey SlotTextAreaAnchorCol key) (storeInt store)
+      pref = IM.findWithDefault col (slotKey SlotTextAreaPrefCol key) (storeInt store)
       scroll =
         let (sx, sy) =
-              IM.findWithDefault (0, 0) (slotKey slotTextAreaScroll key) (storePoint store)
+              IM.findWithDefault (0, 0) (slotKey SlotTextAreaScroll key) (storePoint store)
          in (realToFrac sx, realToFrac sy)
       viewport =
         let (vw, vh) =
-              IM.findWithDefault (200, 96) (slotKey slotTextAreaViewport key) (storePoint store)
+              IM.findWithDefault (200, 96) (slotKey SlotTextAreaViewport key) (storePoint store)
          in (realToFrac vw, realToFrac vh)
       buf =
         let b = TB.withCursor (TB.Cursor row col) buf0
          in b {TB.preferredCol = pref}
       anchor = TB.getCursor (TB.withCursor (TB.Cursor anchorRow anchorCol) buf0)
-      hist = case IM.lookup (slotKey slotTextHistory key) (storeDyn store) >>= fromDynamic of
+      hist = case IM.lookup (slotKey SlotTextHistory key) (storeDyn store) >>= fromDynamic of
         Just h -> h
         Nothing -> emptyHistory
    in TextAreaState
@@ -404,17 +392,17 @@ saveTextAreaState key text state store =
    in store
         { storeText = IM.insert key text (storeText store)
         , storeDyn =
-            IM.insert (slotKey slotTextAreaBuffer key) (toDyn (buffer state)) $
-              IM.insert (slotKey slotTextHistory key) (toDyn (history state)) (storeDyn store)
+            IM.insert (slotKey SlotTextAreaBuffer key) (toDyn (buffer state)) $
+              IM.insert (slotKey SlotTextHistory key) (toDyn (history state)) (storeDyn store)
         , storeInt =
-            IM.insert (slotKey slotTextAreaRow key) row $
-              IM.insert (slotKey slotTextAreaCol key) col $
-                IM.insert (slotKey slotTextAreaPrefCol key) (TB.preferredCol (buffer state)) $
-                  IM.insert (slotKey slotTextAreaAnchorRow key) anchorRow $
-                    IM.insert (slotKey slotTextAreaAnchorCol key) anchorCol (storeInt store)
+            IM.insert (slotKey SlotTextAreaRow key) row $
+              IM.insert (slotKey SlotTextAreaCol key) col $
+                IM.insert (slotKey SlotTextAreaPrefCol key) (TB.preferredCol (buffer state)) $
+                  IM.insert (slotKey SlotTextAreaAnchorRow key) anchorRow $
+                    IM.insert (slotKey SlotTextAreaAnchorCol key) anchorCol (storeInt store)
         , storePoint =
-            IM.insert (slotKey slotTextAreaScroll key) (realToFrac sx, realToFrac sy) $
-              IM.insert (slotKey slotTextAreaViewport key) (realToFrac vw, realToFrac vh) (storePoint store)
+            IM.insert (slotKey SlotTextAreaScroll key) (realToFrac sx, realToFrac sy) $
+              IM.insert (slotKey SlotTextAreaViewport key) (realToFrac vw, realToFrac vh) (storePoint store)
         }
   where
     (sx, sy) = scrollOffset state
@@ -438,8 +426,8 @@ applyTextAreaCommand ctx wid cmd = do
       then saved
       else
         saved
-          { storeInt = IM.insert (slotKey slotTextAreaChanged key) 1 (storeInt saved)
-          , storeFloat = IM.delete (slotKey slotTextAreaContentFont key) (storeFloat saved)
+          { storeInt = IM.insert (slotKey SlotTextAreaChanged key) 1 (storeInt saved)
+          , storeFloat = IM.delete (slotKey SlotTextAreaContentFont key) (storeFloat saved)
           }
   -- Store damage is keyed on slots, not the widget: damage the widget so a
   -- selection-only command (Select All) repaints this frame.

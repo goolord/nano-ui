@@ -25,7 +25,7 @@ import NanoUI.Context (getStore, intKey, setStore)
 import NanoUI.Font (menuItemPadX, menuItemRowH, menuMinW, menuOuterPad, menuSepH)
 import NanoUI.Input (inputMousePos, inputMouseReleased)
 import NanoUI.Monad (Ui, askContext, askDefaultLayout, askInput, nextId, uiIO)
-import NanoUI.Store (WidgetStore (..), slotKey, slotMenuOpen, slotMenuPos)
+import NanoUI.Store (WidgetStore (..), slotKey, Slot (..))
 import NanoUI.Style (Layout (..), defaultLayout, fillW, fixedH, fontMuted, gap, minW, padXY, tight)
 import NanoUI.Types (PopupAnchor (..), PopupPlacement (..), V2 (..))
 import NanoUI.WidgetText (buttonFlagMenu, buttonFlagMenuBar)
@@ -104,8 +104,8 @@ useContextMenu = do
   wid <- nextId
   ctx <- askContext
   let key = intKey wid
-      openK = slotKey slotMenuOpen key
-      posK = slotKey slotMenuPos key
+      openK = slotKey SlotMenuOpen key
+      posK = slotKey SlotMenuPos key
   store <- uiIO (getStore ctx)
   let isOpen = IM.findWithDefault 0 openK (storeInt store) /= 0
       (px, py) = IM.findWithDefault (0, 0) posK (storePoint store)
