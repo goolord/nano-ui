@@ -41,6 +41,13 @@ counter = do
   and `scrollIntoView`. `getScrollMetrics` gives a virtualized list the
   viewport and offset it needs to pick its rows.
 - Keyboard focus and navigation for every control.
+- Shaped text in the SDL backend, with fallback fonts for other scripts and
+  mixed left-to-right and right-to-left lines. `richText` wraps a paragraph
+  of mixed styles and links, as in
+  `richText ["Read ", strong "the guide", " or ", hyperlink "faq" "the FAQ"]`.
+- Text fields with undo and redo, driven by `TextCommand` values that code
+  can run too.
+- SVG icons (`loadSvg`, `svgIcon`) and a `spinner`.
 - Backends block on input and run a frame only when something needs
   redrawing. Each frame computes its damage against the previous one.
 - State in local hooks (`useInt`, `useText`, `useState`), in your own model,
