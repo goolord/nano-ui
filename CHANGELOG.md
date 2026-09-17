@@ -77,6 +77,11 @@
   `styled (panelStyle (background bg . borderColor border))` around a panel.
   `callout` tints the theme's panel colour instead of a fixed dark grey.
 - `uiTheme` returns the theme of the enclosing `styled` scope.
+- Fallback fonts for other scripts are shared across font sizes and opened
+  only when a text needs a character they cover. Each coverage font is
+  opened once a session as a probe, and each size draws from a copy that
+  shares the probe's file. Resolving 40 sizes that draw CJK, Arabic and
+  Devanagari opens 59 file descriptors instead of 959.
 - Rasterizing an SVG allocates far less: a 16px stroked icon with round
   joins allocates 42 KB instead of 1.1 MB, and at 128px 437 KB (mostly its
   pixel buffers) instead of 7.2 MB, taking 0.37 ms instead of 4 ms. Contours

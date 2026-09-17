@@ -33,7 +33,7 @@ module NanoUI.Sdl.Font
   ) where
 
 import Control.Exception (SomeException, bracket, catch, throwIO)
-import Control.Monad (foldM, forM, forM_, unless, when)
+import Control.Monad (foldM, forM_, unless, void, when)
 import Data.Bits ((.&.), (.|.), shiftL)
 import Foreign.Marshal.Alloc (alloca, allocaBytes)
 import Foreign.Marshal.Array (advancePtr, allocaArray)
@@ -104,9 +104,10 @@ data SdlFont = SdlFont
   , sfAlive :: !(IORef Bool)
   , sfPointSize :: !Float
   -- ^ The size the font was opened at, which its fallbacks open at too.
-  , sfFallbacks :: !(IORef (Maybe [SdlFont]))
-  -- ^ Fonts shaping falls back to for characters this one lacks, opened the
-  -- first time a text needs one ('Nothing' until then).
+  , sfFallbacks :: !(IORef (IM.IntMap SdlFont))
+  -- ^ Fonts shaping falls back to for characters this one lacks, by their
+  -- place in 'coverageFamilies': each is attached, at this font's size, the
+  -- first time a text needs a character only it covers.
   }
 
 data FontSource
@@ -490,7 +491,7 @@ shapingRuns txt
 shapeLine :: SdlFont -> Float -> Text -> IO Shaped
 shapeLine sf inv txt = do
   ensureFontAlive sf
-  fallbacks <- maybe [] id <$> readIORef (sfFallbacks sf)
+  fallbacks <- IM.elems <$> readIORef (sfFallbacks sf)
   let fontList = sf : fallbacks
       n = T.length txt
       totalBytes = lengthWord8 txt
@@ -631,40 +632,91 @@ shapeLine sf inv txt = do
 -- | Open the fonts that cover what this one lacks, the first time a text
 -- has a character it cannot draw.
 ensureCoverage :: SdlFont -> Text -> IO ()
-ensureCoverage sf txt = do
+ensureCoverage sf txt =
+  unless (T.all (\c -> ord c < 128) txt) $
+    forM_ (T.unpack txt) $ \c ->
+      when (ord c >= 128 && isPrint c) $ do
+        -- Whether the font or a fallback it already has draws the character.
+        has <- ttfHasGlyph (sfFont sf) (fromIntegral (ord c))
+        unless has $
+          coverageSourceFor c >>= \case
+            Just (source, probe) -> attachFallback sf source probe
+            Nothing -> pure ()
+
+-- | Open the coverage source @source@ at the font's size, sharing the
+-- source's stream with its probe, and attach it. Fallbacks stay in
+-- 'coverageFamilies' order, so a character two of them draw comes from the
+-- one listed first whichever was attached first.
+attachFallback :: SdlFont -> Int -> Ptr () -> IO ()
+attachFallback sf source probe = do
   attached <- readIORef (sfFallbacks sf)
-  case attached of
-    Just _ -> pure ()
-    Nothing -> do
-      missing <- if T.all (\c -> ord c < 128) txt then pure False else anyMissing (T.unpack txt)
-      when missing $ do
-        sources <- coverageSources
-        fonts <- fmap concat . forM sources $ \src ->
-          (pure <$> openFontSource src (sfPointSize sf)) `catch` \(_ :: SomeException) -> pure []
-        forM_ fonts $ \f -> ttfAddFallback (sfFont sf) (sfFont f)
-        writeIORef (sfFallbacks sf) (Just fonts)
-  where
-    anyMissing [] = pure False
-    anyMissing (c : cs)
-      | ord c < 128 || not (isPrint c) = anyMissing cs
-      | otherwise = do
-          has <- ttfHasGlyph (sfFont sf) (fromIntegral (ord c))
-          if has then anyMissing cs else pure True
+  unless (IM.member source attached) $ do
+    copy <- ttfCopyFont probe (realToFrac (sfPointSize sf))
+    unless (copy == nullPtr) $ do
+      fallback <- readSdlFont (sfPointSize sf) Nothing copy
+      let attached' = IM.insert source fallback attached
+      case IM.lookupMax attached of
+        Just (lastSource, _) | lastSource > source -> do
+          forM_ attached $ \f -> ttfRemoveFallback (sfFont sf) (sfFont f)
+          forM_ attached' $ \f -> ttfAddFallback (sfFont sf) (sfFont f)
+        _ -> void (ttfAddFallback (sfFont sf) copy)
+      writeIORef (sfFallbacks sf) attached'
 
--- | Installed fonts for scripts a UI font commonly lacks, found once.
-{-# NOINLINE coverageSourcesRef #-}
-coverageSourcesRef :: IORef (Maybe [FontSource])
-coverageSourcesRef = unsafePerformIO (newIORef Nothing)
+-- | What the process knows about coverage fonts: the installed files, found
+-- once; a probe font for each opened so far (null when it failed to open),
+-- which every size copies from; and the first source drawing each character
+-- asked about (-1 for none).
+data Coverage = Coverage
+  { covSources :: ![FilePath]
+  , covProbes :: !(IM.IntMap (Ptr ()))
+  , covChars :: !(IM.IntMap Int)
+  }
 
-coverageSources :: IO [FontSource]
-coverageSources =
-  readIORef coverageSourcesRef >>= \case
-    Just sources -> pure sources
+{-# NOINLINE coverageRef #-}
+coverageRef :: IORef (Maybe Coverage)
+coverageRef = unsafePerformIO (newIORef Nothing)
+
+-- | The first coverage source, in 'coverageFamilies' order, that draws the
+-- character, and its probe. Probes open only as far down the list as a
+-- search goes, once a session, whatever the number of font sizes.
+coverageSourceFor :: Char -> IO (Maybe (Int, Ptr ()))
+coverageSourceFor c = do
+  cov0 <-
+    readIORef coverageRef >>= \case
+      Just cov -> pure cov
+      Nothing -> do
+        files <- searchFontFamilies coverageFamilies `catch` \(_ :: SomeException) -> pure []
+        pure (Coverage files IM.empty IM.empty)
+  let cp = ord c
+      probeOf cov i path = case IM.lookup i (covProbes cov) of
+        Just probe -> pure (probe, cov)
+        Nothing -> do
+          probe <- withCString path $ \cpath -> ttfOpenFont cpath 12
+          pure (probe, cov {covProbes = IM.insert i probe (covProbes cov)})
+      search cov [] = pure (-1, cov)
+      search cov ((i, path) : rest) = do
+        (probe, cov') <- probeOf cov i path
+        has <- if probe == nullPtr then pure False else ttfHasGlyph probe (fromIntegral cp)
+        if has then pure (i, cov') else search cov' rest
+  (source, cov1) <- case IM.lookup cp (covChars cov0) of
+    Just known -> pure (known, cov0)
     Nothing -> do
-      files <- searchFontFamilies coverageFamilies `catch` \(_ :: SomeException) -> pure []
-      let sources = map FontFromPath files
-      writeIORef coverageSourcesRef (Just sources)
-      pure sources
+      (found, cov') <- search cov0 (zip [0 ..] (covSources cov0))
+      pure (found, cov' {covChars = IM.insert cp found (covChars cov')})
+  writeIORef coverageRef (Just cov1)
+  pure $ case IM.lookup source (covProbes cov1) of
+    Just probe | source >= 0 -> Just (source, probe)
+    _ -> Nothing
+
+-- | Close the coverage probes, before SDL_ttf shuts down. Fallbacks copied
+-- from them keep their shared streams open until they close themselves.
+closeCoverageProbes :: IO ()
+closeCoverageProbes =
+  readIORef coverageRef >>= \case
+    Nothing -> pure ()
+    Just cov -> do
+      forM_ (covProbes cov) $ \probe -> unless (probe == nullPtr) (ttfCloseFont probe)
+      writeIORef coverageRef (Just cov {covProbes = IM.empty})
 
 -- | Fallback families in the order shaping tries them: broad Latin, Greek
 -- and Cyrillic first, then scripts, then symbols, across Linux, Windows and
@@ -989,7 +1041,7 @@ withTtf act =
     startup = do
       ok <- ttfInit
       when (not ok) $ fail "TTF_Init failed"
-    shutdown _ = ttfQuit
+    shutdown _ = closeCoverageProbes >> ttfQuit
 
 openFont :: FilePath -> Float -> IO SdlFont
 openFont path ptsize =
@@ -1028,7 +1080,7 @@ readSdlFont :: Float -> Maybe FilePath -> Ptr () -> IO SdlFont
 readSdlFont ptsize mTemp font = do
   fid <- newFontId
   alive <- newIORef True
-  fallbacks <- newIORef Nothing
+  fallbacks <- newIORef IM.empty
   lineSkip <- ttfLineSkip font
   ascent <- ttfAscent font
   spaceAdv <- ttfSpaceAdvance font
@@ -1070,7 +1122,7 @@ closeFont sf = do
   when alive $ do
     ttfCloseFont (sfFont sf)
     mapM_ removeFile (sfTempPath sf)
-    readIORef (sfFallbacks sf) >>= mapM_ (mapM_ closeFont)
+    readIORef (sfFallbacks sf) >>= mapM_ closeFont
 
 -- | Install glyph-atlas-backed 'FontMetrics' (from 'buildGlyphFontMetrics')
 -- so that 'pushText' emits per-glyph textured quads into the draw arena.
@@ -1258,6 +1310,12 @@ foreign import ccall unsafe "nano_ui_ttf_has_glyph"
 foreign import ccall unsafe "nano_ui_ttf_add_fallback"
   ttfAddFallback :: Ptr () -> Ptr () -> IO Bool
 
+foreign import ccall unsafe "nano_ui_ttf_remove_fallback"
+  ttfRemoveFallback :: Ptr () -> Ptr () -> IO ()
+
+foreign import ccall unsafe "nano_ui_ttf_copy_font"
+  ttfCopyFont :: Ptr () -> CFloat -> IO (Ptr ())
+
 foreign import ccall unsafe "nano_ui_ttf_save_render_text"
   ttfSaveRenderText :: Ptr () -> CString -> CString -> IO Bool
 
@@ -1363,7 +1421,7 @@ setSdlFontCacheSource cache src = writeIORef (sfcPrimarySourceRef cache) src
 -- | Close fonts and drop their glyphs from the shared atlas index.
 closeCachedFonts :: GlyphAtlas -> [SdlFont] -> IO ()
 closeCachedFonts ga fonts = do
-  fallbacks <- concat <$> mapM (fmap (maybe [] id) . readIORef . sfFallbacks) fonts
+  fallbacks <- concat <$> mapM (fmap IM.elems . readIORef . sfFallbacks) fonts
   let handles = IS.fromList [fromIntegral (sfId f) | f <- fonts ++ fallbacks]
   mapM_ closeFont fonts
   modifyIORef' (gaEntries ga) (`IM.withoutKeys` IS.fromList (map (fromIntegral . sfId) fonts))

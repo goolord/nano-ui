@@ -33,6 +33,26 @@ TTF_Font *nano_ui_ttf_open_font(const char *path, float ptsize)
     return font;
 }
 
+/* A font at another size over the same source as @font@: the copy shares
+ * its file or memory stream, so any number of sizes read one source. */
+TTF_Font *nano_ui_ttf_copy_font(TTF_Font *font, float ptsize)
+{
+    TTF_Font *copy = font ? TTF_CopyFont(font) : NULL;
+    if (copy) {
+        TTF_SetFontSize(copy, ptsize);
+        TTF_SetFontKerning(copy, true);
+        TTF_SetFontHinting(copy, TTF_HINTING_LIGHT);
+    }
+    return copy;
+}
+
+void nano_ui_ttf_remove_fallback(TTF_Font *font, TTF_Font *fallback)
+{
+    if (font && fallback) {
+        TTF_RemoveFallbackFont(font, fallback);
+    }
+}
+
 TTF_Font *nano_ui_ttf_open_font_memory(const void *data, size_t size, float ptsize)
 {
     /* The font reads this stream after the Haskell ByteString callback ends.
