@@ -54,7 +54,6 @@ module NanoUI.Style
   , scrollBarTrackColor
   , scrollBarThumbColor
   , fadeAlpha
-  , panelPaintPad
   , windowPad
   , windowMargin
   , padAll
@@ -138,10 +137,6 @@ data Padding = Padding
   , padB :: {-# UNPACK #-} !Float
   }
   deriving (Eq, Show)
-
--- Containers fill with themePanel when any pad side is at least this.
-panelPaintPad :: Float
-panelPaintPad = 8
 
 -- Floating window chrome. The body sits one side-pad below the chrome and one
 -- side-pad above the window's bottom edge (the window's own column gap fills

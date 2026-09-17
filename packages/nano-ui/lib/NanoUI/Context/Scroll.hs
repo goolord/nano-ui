@@ -38,7 +38,6 @@ module NanoUI.Context.Scroll
   , applyScrollTarget
   , scrollTargetOffset
   , scrollGliding
-  , anyScrollGliding
   , clampScrollOffset
   , cancelScrollGlide
   , stepScrollGlides
@@ -560,11 +559,6 @@ scrollTargetOffset ctx wid fallback = do
 scrollGliding :: Context -> WidgetId -> IO Bool
 scrollGliding ctx wid =
   IM.member (intKey wid) . ssGlides <$> readIORef (ctxScrollState ctx)
-
--- | Whether any scroller is mid-glide. The frame loop keeps drawing while
--- this holds, the same way it does for a running animation.
-anyScrollGliding :: Context -> IO Bool
-anyScrollGliding ctx = not . IM.null . ssGlides <$> readIORef (ctxScrollState ctx)
 
 -- | Hold a glide in flight inside a range that has just been measured again.
 -- Without this a list filtered down mid-glide coasts past its new end and

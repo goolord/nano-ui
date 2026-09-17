@@ -19,7 +19,6 @@ module NanoUI.Monad
   , askInput
   , askDefaultLayout
   , withDefaultLayout
-  , withLayout
   , askHost
   , uiFontMetrics
   , uiTime
@@ -215,10 +214,6 @@ askDefaultLayout = do
 {-# INLINE withDefaultLayout #-}
 withDefaultLayout :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es a
 withDefaultLayout f = localStaticRep (\(UiRep ctx inp l) -> UiRep ctx inp (f l))
-
-{-# INLINE withLayout #-}
-withLayout :: Ui :> es => Layout -> Eff es a -> Eff es a
-withLayout l = localStaticRep (\(UiRep ctx inp _) -> UiRep ctx inp l)
 
 {-# INLINE uiFontMetrics #-}
 uiFontMetrics :: Ui :> es => Eff es FontMetrics

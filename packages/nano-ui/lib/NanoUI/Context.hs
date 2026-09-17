@@ -129,7 +129,6 @@ module NanoUI.Context
   , applyScrollTarget
   , scrollTargetOffset
   , scrollGliding
-  , anyScrollGliding
   , clampScrollOffset
   , cancelScrollGlide
   , stepScrollGlides
@@ -193,7 +192,6 @@ module NanoUI.Context
   , startAnimation
   , startAnimationEase
   , startAnimationEaseDelay
-  , stopAnimation
   , startSpring
   , setAnimationValue
   , tickAnimations

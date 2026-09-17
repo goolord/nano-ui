@@ -18,7 +18,6 @@ module NanoUI.Font
   , selectionSpans
   , monospaceMetrics
   , scaleFontMetrics
-  , measureText
   , measureTextWrappedIO
   , wrapTextLinesIO
   , truncateTextIO
@@ -44,14 +43,10 @@ module NanoUI.Font
   , checkboxBoxSize
   , checkboxLeading
   , treeItemPadding
-  , treeIndentStep
-  , treeChevronLeading
   , treeRowLeading
   , treeChevronRect
   , scrollBarWidth
-  , scrollBarSlimWidth
   , scrollBarSideGap
-  , scrollBarMargin
   , scrollBarGeomFor
   , scrollBarGap
   , scrollBarGutter

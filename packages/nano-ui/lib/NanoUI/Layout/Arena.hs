@@ -12,60 +12,30 @@ module NanoUI.Layout.Arena
   , DirTag (..)
   , NodeArena (..)
   , FlexScratch (..)
-  , WidthMemo
   , newNodeArena
   , resetNodeArena
   , arenaCount
   , arenaArrays
   , withArenaArraysSnap
-  , geomStride
   , geomX
   , geomY
   , geomW
   , geomH
-  , geomLayoutX
-  , geomLayoutY
-  , geomClipX
-  , geomClipY
-  , geomClipW
-  , geomClipH
-  , styleStride
   , styleWVal
   , styleHVal
-  , stylePadL
-  , stylePadR
-  , stylePadT
-  , stylePadB
-  , styleGap
   , styleMinW
   , styleMinH
   , styleMaxW
   , styleMaxH
-  , styleGrow
-  , styleScrollContentW
-  , styleNodeValue
-  , styleGridMinColW
-  , styleFontSize
-  , tagStride
   , tagNodeType
-  , tagDirection
   , tagWSizing
   , tagHSizing
-  , tagAlignX
-  , tagAlignY
-  , treeStride
   , treeParent
   , treeFirstChild
   , treeNextSibling
-  , treeChildCount
-  , treeWidgetId
-  , treeStyleIdx
-  , treeTextIdx
-  , treeGridCols
   , readGeom
   , writeGeom
   , readStyle
-  , writeStyle
   , readTagEnum
   , writeTagEnum
   , readTree
@@ -81,9 +51,7 @@ module NanoUI.Layout.Arena
   , getNodeType
   , getDirection
   , getGridCols
-  , setGridCols
   , getGridMinColW
-  , setGridMinColW
   , getScrollContentW
   , setScrollContentW
   , getWidthSizing
@@ -112,9 +80,7 @@ module NanoUI.Layout.Arena
   , getNodeValue
   , setNodeValue
   , getNodeFontSize
-  , setNodeFontSize
   , getNodeFontColor
-  , setNodeFontColor
   , getNodeScope
   , getArenaScope
   , setArenaScope

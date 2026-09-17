@@ -8,7 +8,6 @@ module NanoUI.Frame.Scroll
   , updateScrollDrag
   , scrollBarsFor
   , scrollBarLayout
-  , scrollNodeGeometry
   , ScrollBarLayout (..)
   ) where
 

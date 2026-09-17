@@ -80,7 +80,6 @@ module NanoUI.Testing
   , startAnimation
   , startAnimationEase
   , startAnimationEaseDelay
-  , stopAnimation
   , startSpring
   , anyAnimating
     -- * Images
@@ -175,7 +174,6 @@ import NanoUI.Context
   , startAnimation
   , startAnimationEase
   , startAnimationEaseDelay
-  , stopAnimation
   , startSpring
   , takeDamage
   , textInputEditActive

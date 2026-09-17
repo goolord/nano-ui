@@ -56,9 +56,6 @@ module NanoUI.Widgets.TextBuffer
     -- * Editing Operations
   , insertChar
   , insertText
-  , breakLine
-  , deletePrevChar
-  , deleteChar
   , deletePrevWord
   , deleteNextWord
   , killToEOL
@@ -315,21 +312,12 @@ insertText raw buf
   where
     txt = insertableText raw
 
-breakLine :: TextBuffer -> TextBuffer
-breakLine = insertText "\n"
-
 -- | Delete between the cursor and where a motion from it lands.
 deleteTo :: (TextBuffer -> Cursor -> Cursor) -> TextBuffer -> TextBuffer
 deleteTo motion buf =
   let cur = getCursor buf
       target = motion buf cur
    in if target == cur then buf else applyEdit (replaceEdit T.empty cur target buf) buf
-
-deletePrevChar :: TextBuffer -> TextBuffer
-deletePrevChar = deleteTo positionLeft
-
-deleteChar :: TextBuffer -> TextBuffer
-deleteChar = deleteTo positionRight
 
 deletePrevWord :: TextBuffer -> TextBuffer
 deletePrevWord = deleteTo wordLeft

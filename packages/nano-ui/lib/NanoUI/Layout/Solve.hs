@@ -129,7 +129,6 @@ import NanoUI.WidgetText
   , selectChevronReserve
   , textInputFieldHeight
   , textInputMinWidth
-  , textInputPlaceholder
   , textInputSearchMode
   , textInputNumericMode
   , numericStepperW
@@ -454,7 +453,7 @@ measureTextField ::
   Bool ->
   IO (Float, Float, Float, Float)
 measureTextField fm measure txt multiline = do
-  pw <- if multiline || T.null txt then pure 0 else fst <$> measure (textInputPlaceholder txt)
+  pw <- if multiline || T.null txt then pure 0 else fst <$> measure txt
   let fieldH = if multiline then max 96 (textInputFieldHeight fm * 4) else textInputFieldHeight fm
       contentW = max textInputMinWidth pw
   pure (contentW, fieldH, 0, 0)
@@ -546,7 +545,7 @@ measureWidget env@SolveEnv {seArena = na, seFm = fm, seMeasure = measure} idx = 
                 then pure " "
                 else
                   if isTableHeaderStyle si
-                    then pure (tableHeaderDisplayText si txt)
+                    then pure (tableHeaderDisplayText txt)
                     else pure txt
             (mw, mh) <- measure body
             pure (mw, mh, 0, 0)

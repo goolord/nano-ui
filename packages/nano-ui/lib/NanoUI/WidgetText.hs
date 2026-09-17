@@ -1,11 +1,9 @@
 module NanoUI.WidgetText
-  ( sliderValueText
-  , intValueText
+  ( intValueText
   , treeEncodeStyle
   , treeDecodeStyle
   , treeDecodeStripe
   , textInputFieldText
-  , textInputPlaceholder
   , textInputMinWidth
   , textInputFieldPadY
   , textInputFieldHeight
@@ -29,10 +27,8 @@ module NanoUI.WidgetText
   , selectChevronCenterX
   , colorPickerGap
   , colorPickerSvH
-  , colorPickerLabelText
   , colorPickerCurrentLabel
   , colorPickerNewLabel
-  , colorPickerDisplayText
   , colorToHex
   , colorToHexA
   , colorFromHex
@@ -82,9 +78,6 @@ import NanoUI.Font (FontMetrics (..), fmLineHeight, widgetContentInset)
 import NanoUI.Style (FontStyle (..), FontVariant (..), FontWeight (..), TextDecoration (..), Theme (..), styleBg, themeButton, themePanel, themeWindow)
 import NanoUI.Types (Color (..), Rect (..), colorA, colorB, colorG, colorR, colorRGBA, lerpColor)
 import qualified Data.Text as T
-
-sliderValueText :: Float -> Text
-sliderValueText = intValueText . (round :: Float -> Int)
 
 intValueText :: Int -> Text
 intValueText = TL.toStrict . TB.toLazyText . TB.decimal
@@ -151,9 +144,6 @@ searchFieldIconRects fm x y w h =
       mag = Rect (x + ix) (cy - s / 2) s s
       clear = Rect (x + w - ix - s) (cy - s / 2) s s
    in (mag, clear)
-
-textInputPlaceholder :: Text -> Text
-textInputPlaceholder ph = ph
 
 textInputFieldText :: Text -> Text -> Bool -> Text
 textInputFieldText ph value focused =
@@ -242,9 +232,6 @@ colorPickerGap = 4
 colorPickerSvH :: Float
 colorPickerSvH = 250
 
-colorPickerLabelText :: Text -> Text
-colorPickerLabelText = T.strip
-
 colorPickerCurrentLabel :: Text
 colorPickerCurrentLabel = "Current"
 
@@ -299,9 +286,6 @@ parseHexPair t = case T.unpack t of
   [hi, lo]
     | isHexDigit hi && isHexDigit lo -> Just (fromIntegral (digitToInt hi * 16 + digitToInt lo))
   _ -> Nothing
-
-colorPickerDisplayText :: Color -> Text
-colorPickerDisplayText col = colorToHex col
 
 tableStripeEven :: Int
 tableStripeEven = 1
@@ -384,12 +368,9 @@ tableSortMarkOf styleIdx = (styleIdx `shiftR` 16) .&. 0x03
 tableSortBlank :: Text
 tableSortBlank = T.map (const ' ') tableSortReserve
 
-tableHeaderDisplayText :: Int -> Text -> Text
-tableHeaderDisplayText _styleIdx txt =
-  let full = txt
-      reserve = tableSortReserve
-      title = fromMaybe full (T.stripSuffix reserve full)
-   in title <> tableSortBlank
+tableHeaderDisplayText :: Text -> Text
+tableHeaderDisplayText txt =
+  fromMaybe txt (T.stripSuffix tableSortReserve txt) <> tableSortBlank
 
 -- Type flags live in bits 28-31 so visual style and tab index stay in the low bits.
 buttonFlagClose :: Int

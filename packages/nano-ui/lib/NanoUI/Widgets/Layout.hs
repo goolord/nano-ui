@@ -31,7 +31,6 @@ module NanoUI.Widgets.Layout
   , scrollArea
   , scrollArea2D
   , scrollConfigured
-  , scrollAreaId
   , scrollAreaIdConfigured
   , grid
   , gridWith
@@ -328,12 +327,6 @@ scrollArea :: Ui :> es => (Layout -> Layout) -> Eff es a -> Eff es (WidgetId, a)
 scrollArea f child = do
   layout <- f <$> askDefaultLayout
   scrollConfigured (scrollDefault1D (layoutDirection layout)) layout child
-
--- | Scroll container with a chosen widget id. Same id on two panes shares the offset.
-scrollAreaId :: Ui :> es => WidgetId -> Layout -> Int -> Eff es a -> Eff es a
-scrollAreaId wid layout styleIdx child = do
-  ctx <- askContext
-  scrollContainerWith wid (\idx -> setStyleIdx (ctxNodeArena ctx) idx styleIdx) layout child
 
 {-# INLINE scrollAreaIdConfigured #-}
 scrollAreaIdConfigured :: Ui :> es => WidgetId -> Layout -> ScrollConfig -> Eff es a -> Eff es a

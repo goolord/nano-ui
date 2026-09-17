@@ -8,8 +8,6 @@ module NanoUI.Frame.Window
   , persistWindowPositions
   , updateWindowDrag
   , updateWindowResize
-  , resizeFromEdge
-  , windowResizeEdgeAt
   , WindowResizeEdge (..)
   , windowResizeCursorKind
   ) where

@@ -20,7 +20,6 @@ module NanoUI.Widgets.TextEditor
     -- * Key bindings
   , keyCommand
   , ctrlCharCommand
-  , isShortcutChar
     -- * History
   , EditHistory (..)
   , EditGroup (..)
@@ -332,9 +331,3 @@ ctrlCharCommand mode mods c =
     _ -> Nothing
   where
     multi = modeMultiLine mode
-
--- | Characters that arrive with Ctrl as shortcuts and never as text. Beyond
--- the editing commands this lists the zoom keys the SDL backend forwards as
--- Ctrl text (@=@, @+@, @-@, @0@), so focused fields do not insert them.
-isShortcutChar :: Bool -> Char -> Bool
-isShortcutChar ctrl ch = ctrl && T.elem ch "aAcCxXvVzZyYkKuUeE=+-0\x01\x03\x16\x18\x1a\x19\v\NAK\ENQ"

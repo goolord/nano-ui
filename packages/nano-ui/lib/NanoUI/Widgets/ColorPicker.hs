@@ -6,15 +6,11 @@
 module NanoUI.Widgets.ColorPicker
   ( ColorPickerPart (..)
   , colorPickerPartOf
-  , colorPickerDefaultColor
   , widgetStoreColor
   , widgetStoreBaseColor
-  , widgetStoreHue
-  , widgetStoreSv
   , colorPickerSvSquare
   , colorPickerPartRect
   , colorPickerPreviewGeom
-  , colorPickerBarHitRect
   , drawColorPickerPart
   , colorPicker
   , colorPicker'

@@ -13,7 +13,6 @@ module NanoUI.Widgets.TextInput
   , editTextInput
   , textInputMode
   , applyTextInputCommand
-  , isSelectableTextInput
     -- * Text fields
   , TextInputConfig (..)
   , defaultTextInputConfig
@@ -57,7 +56,6 @@ import NanoUI.Context
   , registerFocusable
   , setStore
   )
-import NanoUI.Frame.Hit (findNodeByWidgetId)
 import NanoUI.Id (WidgetId)
 import NanoUI.Input
   ( Input (..)
@@ -68,7 +66,7 @@ import NanoUI.Input
   , inputKeys
   , inputModifiers
   )
-import NanoUI.Layout.Arena (NodeType (..), getNodeType, getStyleIdx)
+import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, askDefaultLayout, askInput, nextId, uiIO)
 import NanoUI.Store (WidgetStore (..), Slot (..), slotKey)
 import NanoUI.Style (Layout (..), Sizing (..), defaultLayout)
@@ -179,17 +177,6 @@ textInputMode si =
     { modeEditable = not (textInputSelectableMode si)
     , modeCopyable = not (textInputPasswordMode si)
     }
-
--- | True when the widget is a text input in selectable (read-only label) mode.
-isSelectableTextInput :: Context -> WidgetId -> IO Bool
-isSelectableTextInput ctx wid =
-  findNodeByWidgetId ctx wid >>= \case
-    Nothing -> pure False
-    Just idx -> do
-      nt <- getNodeType (ctxNodeArena ctx) idx
-      if nt /= NodeTextInput
-        then pure False
-        else textInputSelectableMode <$> getStyleIdx (ctxNodeArena ctx) idx
 
 -- | Run a command on a single-line field outside its frame (a context menu
 -- row, an app's Edit menu). A change to the text pulses 'respChanged' on the

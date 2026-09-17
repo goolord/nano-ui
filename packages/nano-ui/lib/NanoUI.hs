@@ -676,7 +676,6 @@ module NanoUI
   , ScrollBarSlot (..)
   , scrollBarGutter
   , scrollBarWidth
-  , panelPaintPad
   , windowPad
   , windowMargin
   , Compact
@@ -897,7 +896,6 @@ import NanoUI.Style
   , minW
   , padAll
   , padXY
-  , panelPaintPad
   , percent
   , scrollBarThumbColor
   , scrollBarTrackColor
