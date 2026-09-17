@@ -13,7 +13,6 @@ import NanoUI
 import NanoUI.Backend.Sdl
   ( SdlEnv (..)
   , isDebugActive
-  , newSdlContext
   , newSdlDebugSampler
   , readSdlDebug
   , sdlDrawFrame
@@ -26,6 +25,7 @@ import NanoUI.Context (ctxNodeArena)
 import NanoUI.Layout.Arena (NodeType (NodeButton), findNodeRevM, getNodeType, getRect, getText)
 import NanoUI.Testing
   ( Context
+  , newPixelContext
   , collectTextSpans
   , debugPanelOpen
   , runFrame
@@ -86,7 +86,7 @@ main = do
   putStrLn "              NANO-UI SDL DEMO PROFILING & PERFORMANCE AUDIT                    "
   putStrLn "================================================================================"
   putStrLn ""
-  ctx0 <- newSdlContext
+  ctx0 <- newPixelContext
   ok <- registerDemoImages ctx0 demoImages
   if not ok
     then fail "registerImage failed"
@@ -137,7 +137,7 @@ main = do
           putStrLn "--- 5. FLOATING WINDOW STEADY-STATE ---"
           measureBench "Debug Open, ForceFull replay" iterations $
             void (sdlDrawFrame ctx' demoUi sdlEnv inp True)
-          churnCtx <- newSdlContext
+          churnCtx <- newPixelContext
           churnCounter <- newIORef (0 :: Int)
           void (runFrame churnCtx inp (churnWindowUi 0))
           (f0, c0, e0) <- countDamageKinds churnCtx iterations (churnFrame churnCtx inp churnCounter)

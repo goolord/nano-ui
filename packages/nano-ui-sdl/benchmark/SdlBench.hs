@@ -7,8 +7,8 @@ import GHC.IO.Encoding (setLocaleEncoding, utf8)
 import GHC.Conc (getAllocationCounter)
 import NanoUI
 import NanoUI.Context (Context (..))
-import NanoUI.Testing (runFrame)
-import NanoUI.Backend.Sdl (SdlEnv (..), newSdlContext, sdlDrawFrame, syncDisplay, withSdlBench)
+import NanoUI.Testing (newPixelContext, runFrame)
+import NanoUI.Backend.Sdl (SdlEnv (..), sdlDrawFrame, syncDisplay, withSdlBench)
 import System.Exit (exitFailure)
 import System.IO (hSetEncoding, stderr, stdout)
 import System.Mem (performGC)
@@ -118,7 +118,7 @@ glyphLookupGate ctx = do
 main :: IO ()
 main = do
   configureBenchIO
-  ctx0 <- newSdlContext
+  ctx0 <- newPixelContext
   withSdlBench ctx0 $ \ctx sdlEnv -> do
     (ctx', inp) <- syncDisplay ctx sdlEnv benchInput
     warmup ctx' sdlEnv inp

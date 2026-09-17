@@ -2,8 +2,7 @@
 
 -- | SDL3 draw path: retained damage updates or direct continuous presentation.
 module NanoUI.Sdl.Runner
-  ( newSdlContext
-  , sdlDrawFrame
+  ( sdlDrawFrame
   , drawReduceEff
   , askSdlDebug
   , setSdlUiFont
@@ -32,7 +31,6 @@ import NanoUI.Testing
   , damageFull
   , damageIsEmpty
   , markDirty
-  , newPixelContext
   , runEff
   , runFrameEff
   , runFrameReduceEff
@@ -78,24 +76,10 @@ import SDL3.Sys.Render
   , setTextureBlendMode
   )
 
-newSdlContext :: IO Context
-newSdlContext = newPixelContext
-
 sdlDrawFrame :: Context -> NanoUI () -> SdlEnv -> Input -> Bool -> IO (Bool, Input)
-sdlDrawFrame = drawEff runEff
-
-drawEff ::
-  IOE :> es =>
-  (forall x. Eff es x -> IO x) ->
-  Context ->
-  Eff (Ui : es) () ->
-  SdlEnv ->
-  Input ->
-  Bool ->
-  IO (Bool, Input)
-drawEff unlift ctx ui env inp forceFull =
+sdlDrawFrame ctx ui env inp forceFull =
   drawFrameWith ctx env inp forceFull $ do
-    (_, _, drawData, dirtyAfterUi) <- runFrameEff unlift ctx inp ui
+    (_, _, drawData, dirtyAfterUi) <- runFrameEff runEff ctx inp ui
     pure (drawData, dirtyAfterUi)
 
 -- | Both application styles share atlas maintenance, retain preparation,
@@ -259,12 +243,9 @@ ensureRetain env w h scale = do
       unless (tex == nullPtr) $ destroyTexture tex
       pure (tex', True)
 
-askSdlEnv :: Ui :> es => Eff es (Maybe SdlEnv)
-askSdlEnv = askHost
-
 askSdlDebug :: Ui :> es => Eff es SdlDebugSnapshot
 askSdlDebug = do
-  menv <- askSdlEnv
+  menv <- askHost @SdlEnv
   case menv of
     Nothing -> pure emptySdlDebug
     Just env -> uiIO (readSdlDebugEnv env)
@@ -274,7 +255,7 @@ askSdlDebug = do
 -- glyph atlas and text resolver. A no-op on non-SDL hosts.
 setSdlUiFont :: Ui :> es => NanoUIFont -> Eff es ()
 setSdlUiFont font = do
-  menv <- askSdlEnv
+  menv <- askHost @SdlEnv
   case menv of
     Nothing -> pure ()
     Just env -> uiIO $ do

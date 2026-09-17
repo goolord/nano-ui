@@ -25,7 +25,6 @@ module NanoUI.Backend.Sdl
   , askSaveFileDialog
   , askOpenFolderDialog
   , pollFileDialogUi
-  , newSdlContext
   , NanoUIFont (..)
   , listFontFamilies
   , runSdlApp
@@ -43,7 +42,7 @@ import Data.IORef (newIORef)
 import Data.Primitive.SmallArray (SmallArray)
 import Data.Typeable (Typeable)
 import NanoUI (NanoUI)
-import NanoUI.Sdl.Runner (askSdlDebug, drawReduceEff, newSdlContext, sdlDrawFrame, setSdlUiFont)
+import NanoUI.Sdl.Runner (askSdlDebug, drawReduceEff, sdlDrawFrame, setSdlUiFont)
 import NanoUI.Sdl.Session (runSdlSession)
 import NanoUI.Sdl.Debug
   ( SdlDebugSnapshot (..)
@@ -71,7 +70,7 @@ import NanoUI.Sdl.Dialog
   )
 import NanoUI.Sdl.NanoUIFont (NanoUIFont (..))
 import NanoUI.Sdl.Font.Search (listFontFamilies)
-import NanoUI.Testing (Context, registerImage, runEff, withTheme)
+import NanoUI.Testing (Context, newPixelContext, registerImage, runEff, withTheme)
 
 runSdlApp :: SdlOptions -> NanoUI () -> IO ()
 runSdlApp options ui = do
@@ -94,7 +93,7 @@ runSdlAppReduce options update model view = do
 
 sdlContext :: SdlOptions -> IO Context
 sdlContext options = do
-  ctx0 <- newSdlContext
+  ctx0 <- newPixelContext
   themed <- maybe (pure ctx0) (withTheme ctx0) (sdlAppTheme options)
   ok <- registerImages themed (sdlAppImages options)
   unless ok $ fail "registerImage failed"

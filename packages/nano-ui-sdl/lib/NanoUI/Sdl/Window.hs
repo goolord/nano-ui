@@ -206,8 +206,8 @@ syncDisplay ctx env inp = do
   when scaleChanged $ do
     -- Presents leave the renderer at 1:1 pixels; re-assert it only when the
     -- display scale moves.
-    unlessM (setRenderScale (sdlRenderer env) 1 1) $
-      fail "SDL_SetRenderScale failed"
+    ok <- setRenderScale (sdlRenderer env) 1 1
+    unless ok $ fail "SDL_SetRenderScale failed"
     writeIORef (sdlScaleRef env) scale
     setDrawSnapScale ctx scale
   -- Runtime font-family switch: the app publishes its requested family through
@@ -318,10 +318,10 @@ withSdlWindow ctx cfg act =
 
 startSdlWindow :: Context -> WindowConfig -> FontSource -> FontSource -> IO (Context, SdlEnv)
 startSdlWindow ctx cfg fontSource monoSource = do
-  unlessM (initSafe (SDL_InitFlags (fromIntegral sDL_INIT_VIDEO))) $
-    fail "SDL_Init(SDL_INIT_VIDEO) failed"
-  unlessM initRefreshEvent $
-    fail "SDL_RegisterEvents failed for refresh wake"
+  videoOk <- initSafe (SDL_InitFlags (fromIntegral sDL_INIT_VIDEO))
+  unless videoOk $ fail "SDL_Init(SDL_INIT_VIDEO) failed"
+  refreshOk <- initRefreshEvent
+  unless refreshOk $ fail "SDL_RegisterEvents failed for refresh wake"
   let Size w h = wcSize cfg
       bench = wcBench cfg
   -- NANO_FORCE_SCALE: debug override of the display scale.
@@ -371,8 +371,8 @@ startSdlWindow ctx cfg fontSource monoSource = do
                 if refreshHz > 0
                   then 1 / fromIntegral refreshHz
                   else 1 / 60
-          unlessM (setRenderScale ren 1 1) $
-            fail "SDL_SetRenderScale failed"
+          scaleOk <- setRenderScale ren 1 1
+          unless scaleOk $ fail "SDL_SetRenderScale failed"
           unless bench $ do
             void $ setRenderVSync ren (if wcVsync cfg then 1 else 0)
             void $ startTextInputSafe win
@@ -422,11 +422,6 @@ stopSdlWindow bench env = do
   destroyRendererSafe (sdlRenderer env)
   destroyWindowSafe (sdlWindow env)
   quitSafe
-
-unlessM :: IO Bool -> IO () -> IO ()
-unlessM p act = do
-  ok <- p
-  unless ok act
 
 saveScreenshot :: SdlEnv -> FilePath -> IO Bool
 saveScreenshot env path = do

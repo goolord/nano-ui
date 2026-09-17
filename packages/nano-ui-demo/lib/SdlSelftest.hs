@@ -29,6 +29,7 @@ import NanoUI.Testing
   ( Context
   , collectOverlayTextSpans
   , collectTextSpans
+  , newPixelContext
   )
 import NanoUI.Testing.Harness
   ( findExact
@@ -47,7 +48,7 @@ import qualified Data.Text as T
 -- widget interactions, failing loudly on any regression.
 selftest :: Bool -> SmallArray RgbaImage -> NanoUI () -> IO ()
 selftest continuous imgs ui = do
-  ctx0 <- newSdlContext
+  ctx0 <- newPixelContext
   ok <- registerDemoImages ctx0 imgs
   unless ok $ fail "selftest: registerImage failed"
   let opts =

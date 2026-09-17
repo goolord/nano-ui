@@ -7,8 +7,8 @@ import Data.IORef (writeIORef)
 import qualified Data.Text as T
 import Data.Primitive.PrimArray (indexPrimArray, sizeofPrimArray)
 import NanoUI
-import NanoUI.Testing (textIndexAtX)
-import NanoUI.Backend.Sdl (NanoUIFont (..), SdlEnv (..), newSdlContext, syncDisplay, withSdlBench)
+import NanoUI.Testing (newPixelContext, textIndexAtX)
+import NanoUI.Backend.Sdl (NanoUIFont (..), SdlEnv (..), syncDisplay, withSdlBench)
 import NanoUI.Context (ctxResolveFont, ctxResolveMeasure)
 import System.Environment (setEnv)
 import System.Mem (performGC)
@@ -17,7 +17,7 @@ main :: IO ()
 main = do
   setEnv "SDL_VIDEODRIVER" "dummy"
   setEnv "SDL_RENDER_DRIVER" "software"
-  ctx0 <- newSdlContext
+  ctx0 <- newPixelContext
   (font, snapshot, width, quad) <- withSdlBench ctx0 $ \ctx env -> do
     (fm, _) <- ctxResolveFont ctx 16 WeightNormal FontStyleNormal FontRegular
     let text = "AV To fi café λ"

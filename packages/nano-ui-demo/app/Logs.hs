@@ -28,7 +28,7 @@ import NanoUI.Context
   , takeTextEditLastAction
   )
 import NanoUI.Monad (askContext, askInput, uiTime)
-import NanoUI.Testing (collectTextSpans)
+import NanoUI.Testing (collectTextSpans, newPixelContext)
 import NanoUI.Testing.Harness (clickPos, findExact, hasText, requireSpan)
 import System.Environment (getArgs)
 import System.Exit (exitSuccess)
@@ -503,7 +503,7 @@ main = do
 {-# NOINLINE selftest #-}
 selftest :: IO ()
 selftest = do
-  ctx0 <- newSdlContext
+  ctx0 <- newPixelContext
   withSdl
     defaultSdlOptions
       { sdlWindowHidden = True

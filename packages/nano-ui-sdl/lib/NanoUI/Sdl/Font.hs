@@ -1251,10 +1251,9 @@ foreign import ccall unsafe "nano_ui_ttf_get_kerning"
 -- ---------------------------------------------------------------------------
 -- Dynamic font cache for crisp text rendering at arbitrary sizes and styles
 
-data FontCacheKey = FontCacheKey
-  { fckVariant :: !FontVariant
-  , fckPtKey   :: !Int -- round (targetPt * 2)
-  } deriving (Eq, Ord, Show)
+-- | A font variant and its point size key, @round (targetPt * 2)@.
+data FontCacheKey = FontCacheKey !FontVariant !Int
+  deriving (Eq)
 
 instance Hashable FontCacheKey where
   hashWithSalt s (FontCacheKey variant ptKey) =

@@ -19,6 +19,7 @@ import GHC.IO.Exception (IOException (..))                                      
 import NanoUI hiding (scrollBy)                                                                   -- core UI canvas & drawing monad
 import NanoUI.Backend.Sdl                                                                         -- SDL2 window & context initialization
 import NanoUI.Sdl.Input (SdlEvent (..), applyEvent, pollEvents)                                   -- SDL event loop & input handling
+import NanoUI.Testing (newPixelContext)                                                           -- pixel-host rendering context
 import Streaming (Of (..))                                                                        -- stream pair result type
 import Streaming.Prelude qualified as S                                                           -- stream iteration over PTY chunks
 import System.Environment (setEnv)                                                                -- export TERM environment variable
@@ -202,7 +203,7 @@ keys inp = E.encodeUtf8 (foldMap key (inputKeys inp) <> prefix <> text)         
 
 main :: IO ()                                                                                     -- executable entry point
 main = withPty $ \fd -> do                                                                        -- run terminal session with PTY master fd
-  ctx0 <- newSdlContext                                                                           -- create new SDL rendering context
+  ctx0 <- newPixelContext                                                                         -- create new SDL rendering context
   let monoFont = FontSearch ["Input Mono", "JetBrains Mono", "Menlo", "monospace"]                -- monospace font fallback chain
   withSdl defaultSdlOptions                                                                       -- start SDL backend with options
     { sdlWindowTitle = "nano-ui Terminal"                                                         -- window title bar text

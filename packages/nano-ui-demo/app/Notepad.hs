@@ -20,7 +20,7 @@ import DemoApp (useFileDialog)
 import NanoUI
 import NanoUI.Backend.Sdl
 import NanoUI.Monad (askInput)
-import NanoUI.Testing (collectOverlayTextSpans, collectTextSpans)
+import NanoUI.Testing (collectOverlayTextSpans, collectTextSpans, newPixelContext)
 import NanoUI.Testing.Harness
   ( clickPos
   , findExact
@@ -59,7 +59,7 @@ main = do
 -- with @cabal run nano-ui-sdl-notepad -- --selftest@.
 selftest :: IO ()
 selftest = do
-  ctx0 <- newSdlContext
+  ctx0 <- newPixelContext
   withSdl
     defaultSdlOptions
       { sdlWindowHidden = True
