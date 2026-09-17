@@ -71,7 +71,9 @@ import NanoUI.Layout.Arena
   , tagNodeType
   , tagWSizing
   , tagHSizing
+  , tagScrollBarSlot
   , readGeom
+  , writeTagEnum
   , writeGeom
   , readStyle
   , readTagEnum
@@ -308,7 +310,7 @@ measureNode env@SolveEnv {seArena = na, seFm = fm} idx = do
     NodeText -> measureTextNode env idx
     NodeSpacer -> measureSpacer na idx
     NodeSeparator -> measureSeparator na idx
-    NodeScrollContainer -> measureScrollContainer na idx
+    NodeScrollContainer -> measureScrollContainer env idx
     NodeImage -> measureImage na idx
     NodeBox -> measureImage na idx
     NodeDrawing -> do
@@ -595,8 +597,8 @@ measureContainer env@SolveEnv {seArena = na} idx = do
           _ -> clamp minH maxH (contentH + padT pad + padB pad)
   setRect na idx 0 0 w h
 
-measureScrollContainer :: NodeArena -> NodeIdx -> IO ()
-measureScrollContainer na idx = do
+measureScrollContainer :: SolveEnv -> NodeIdx -> IO ()
+measureScrollContainer SolveEnv {seArena = na, seArrays = a} idx = do
   pad <- getPadding na idx
   gap <- getGap na idx
   let padX = padL pad + padR pad
@@ -607,7 +609,18 @@ measureScrollContainer na idx = do
   (wTag, wVal) <- getWidthSizing na idx
   (hTag, hVal) <- getHeightSizing na idx
   (contentW, contentH) <- foldChildDimsFromParent na idx dir gap
-  slot <- scrollBarSlotOf na idx
+  parent <- getParent na idx
+  -- A modal's body scrolls like a window's: its bar sits just inside the
+  -- panel's edge, out in the panel padding.
+  isWin <-
+    if parent < 0
+      then pure False
+      else do
+        pnt <- getNodeType na parent
+        pure (pnt == NodeWindow || pnt == NodeModal)
+  inPanel <- hasPanelAncestor na parent
+  let slot = classifyScrollBar isWin (wTag == SizingGrow && hTag == SizingGrow && not inPanel)
+  writeTagEnum a idx tagScrollBarSlot slot
   let fullW = contentW + padX
       fullH = contentH + padT pad + padB pad
       assignedInnerH =
@@ -1014,26 +1027,11 @@ positionScrollChildren env@SolveEnv {seArena = na} depth idx dir gap pad px py p
         let actual = case dir of DirColumn -> actualContentH; DirRow -> actualContentW
         setNodeValue na idx (max oldVal actual)
 
+-- | Where a scroll container's bar sits, as measurement stored it. Text
+-- areas and other nodes read 'ScrollBarList'.
+{-# INLINE scrollBarSlotOf #-}
 scrollBarSlotOf :: NodeArena -> NodeIdx -> IO ScrollBarSlot
-scrollBarSlotOf na idx = do
-  nt <- getNodeType na idx
-  if nt == NodeTextArea
-    then pure ScrollBarList
-    else do
-      parent <- getParent na idx
-      -- A modal's body scrolls like a window's: its bar sits just inside the
-      -- panel's edge, out in the panel padding.
-      isWin <-
-        if parent < 0
-          then pure False
-          else do
-            pnt <- getNodeType na parent
-            pure (pnt == NodeWindow || pnt == NodeModal)
-      (wTag, _) <- getWidthSizing na idx
-      (hTag, _) <- getHeightSizing na idx
-      inPanel <- hasPanelAncestor na parent
-      let isPage = wTag == SizingGrow && hTag == SizingGrow && not inPanel
-      pure (classifyScrollBar isWin isPage)
+scrollBarSlotOf na idx = arenaArrays na >>= \a -> readTagEnum a idx tagScrollBarSlot
 
 hasPanelAncestor :: NodeArena -> NodeIdx -> IO Bool
 hasPanelAncestor na = go

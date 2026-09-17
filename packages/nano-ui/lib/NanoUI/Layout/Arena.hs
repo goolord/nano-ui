@@ -30,6 +30,7 @@ module NanoUI.Layout.Arena
   , tagNodeType
   , tagWSizing
   , tagHSizing
+  , tagScrollBarSlot
   , treeParent
   , treeFirstChild
   , treeNextSibling
@@ -318,13 +319,16 @@ styleNodeValue = 13
 styleGridMinColW = 14
 styleFontSize = 15
 
--- | Tag columns (enum values as 'Word8'). Columns 4 and 7 are unused.
-tagStride, tagNodeType, tagDirection, tagWSizing, tagHSizing, tagAlignX, tagAlignY :: Int
-tagStride = 8
+-- | Tag columns (enum values as 'Word8'). Column 7 is unused. The scrollbar
+-- slot is a solver output: measurement writes it for scroll containers, so
+-- the layout cache skips it when comparing inputs and restores it on a hit.
+tagStride, tagNodeType, tagDirection, tagWSizing, tagHSizing, tagScrollBarSlot, tagAlignX, tagAlignY :: Int
+tagStride = 8 -- a power of two: layoutInputsMatch masks by it
 tagNodeType = 0
 tagDirection = 1
 tagWSizing = 2
 tagHSizing = 3
+tagScrollBarSlot = 4
 tagAlignX = 5
 tagAlignY = 6
 
@@ -846,16 +850,14 @@ layoutInputsMatch na lc = do
   if n <= 0 || n /= lcCount lc
     then pure False
     else do
+      -- The cache only holds eligible layouts, and matching node types
+      -- keep the current one eligible too.
       a <- arenaArrays na
-      eligible <- layoutCacheEligible na
-      if not eligible
-        then pure False
-        else do
-          andThen (styleMatch (naArrStyle a) (lcStyle lc) n) $
-            andThen (allRangeM 0 (n * tagStride) (primEqAt (naArrTags a) (lcTags lc))) $
-              andThen (treeMatch a (lcTree lc) n) $
-                andThen (allRangeM 0 n (boxedEqAt (naArrTextStore a) (lcText lc))) $
-                  allRangeM 0 n (boxedEqAt (naArrOptionsStore a) (lcOptions lc))
+      andThen (styleMatch (naArrStyle a) (lcStyle lc) n) $
+        andThen (allRangeM 0 (n * tagStride) (\k -> if k .&. (tagStride - 1) == tagScrollBarSlot then pure True else primEqAt (naArrTags a) (lcTags lc) k)) $
+          andThen (treeMatch a (lcTree lc) n) $
+            andThen (allRangeM 0 n (boxedEqAt (naArrTextStore a) (lcText lc))) $
+              allRangeM 0 n (boxedEqAt (naArrOptionsStore a) (lcOptions lc))
 
 {-# INLINE andThen #-}
 andThen :: IO Bool -> IO Bool -> IO Bool
@@ -915,10 +917,13 @@ restoreLayoutCache na lc = do
         | i >= n = pure ()
         | otherwise = do
             nt <- readTagEnum a i tagNodeType
-            -- Scroll content width and node value (the content height).
-            when (isScrollNode nt) $
+            -- Scroll content width, node value (the content height) and
+            -- scrollbar slot.
+            when (isScrollNode nt) $ do
               let !off = i * styleStride + styleScrollContentW
-               in copyMutablePrimArray (naArrStyle a) off (lcStyle lc) off 2
+                  !slotOff = i * tagStride + tagScrollBarSlot
+              copyMutablePrimArray (naArrStyle a) off (lcStyle lc) off 2
+              readPrimArray (lcTags lc) slotOff >>= writePrimArray (naArrTags a) slotOff
             go (i + 1)
   go 0
 

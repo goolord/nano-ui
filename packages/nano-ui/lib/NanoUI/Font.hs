@@ -424,8 +424,10 @@ scrollBarGeomFor slot =
     -- Window bar: side gaps only. No end inset.
     ScrollBarWindow -> (scrollBarSlimWidth, 0)
 
-data ScrollBarSlot = ScrollBarPage | ScrollBarList | ScrollBarWindow
-  deriving (Eq, Show)
+-- | The layout arena stores a scroller's slot as its 'Enum' value, and every
+-- other node reads a zero there, so 'ScrollBarList' comes first.
+data ScrollBarSlot = ScrollBarList | ScrollBarPage | ScrollBarWindow
+  deriving (Eq, Show, Enum)
 
 classifyScrollBar :: Bool -> Bool -> ScrollBarSlot
 classifyScrollBar isWindowBody isPageGrow
