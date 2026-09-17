@@ -5,13 +5,7 @@ module NanoUI.Widgets.TextArea
     TextAreaState (..)
   , initTextAreaState
   , setTextAreaViewport
-  , TextAreaEvent (..)
-  , Modifiers (..)
-  , handleTextAreaEvent
   , setTextAreaSelection
-  , TextAreaLayout (..)
-  , VisualLine (..)
-  , computeTextAreaLayout
     -- * Widget
   , textArea
   , textArea'
@@ -24,14 +18,11 @@ module NanoUI.Widgets.TextArea
   , saveTextAreaState
   , textAreaEditor
   , runTextAreaCommand
-  , textAreaInputCommands
   , applyTextAreaCommand
   ) where
 
 import Control.Monad (foldM, when)
-import Data.Char (isPrint)
 import Data.Dynamic (fromDynamic, toDyn)
-import Data.Maybe (mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.IntMap.Strict as IM
@@ -51,13 +42,9 @@ import NanoUI.Font (fmLineHeight)
 import NanoUI.Id (WidgetId)
 import NanoUI.Input
   ( Input (..)
-  , Key (..)
-  , Modifiers (..)
-  , foldInputKeys
   , inputChars
   , inputKeys
   , inputKeysNull
-  , inputModifiers
   )
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO)
@@ -75,21 +62,14 @@ import NanoUI.Widgets.TextEditor
   ( Editor (..)
   , EditHistory
   , TextCommand (..)
-  , ctrlCharCommand
+  , inputTextCommands
   , editorModeCode
   , emptyHistory
-  , keyCommand
   , multiLineMode
   , runCommand
   , runCommandIO
   , sealHistory
   )
-
--- | One editor input: a typed character or a key.
-data TextAreaEvent
-  = TAChar !Char
-  | TAKey !Key
-  deriving (Eq, Show)
 
 data TextAreaState = TextAreaState
   { buffer :: !TB.TextBuffer
@@ -137,35 +117,6 @@ withEditor state ed =
 runTextAreaCommand :: TextCommand -> TextAreaState -> TextAreaState
 runTextAreaCommand cmd state = withEditor state (runCommand multiLineMode cmd (textAreaEditor state))
 
--- | The command one editor input runs. Ctrl or Alt turns Backspace, Delete,
--- Left and Right into word edits and motions; Ctrl+K/U/A/E kill to the end or
--- start of the line, select all, and jump to the line end; Ctrl+Z undoes and
--- Ctrl+Shift+Z or Ctrl+Y redoes. Escape and Tab belong to the frame (menus,
--- focus) and run nothing.
-textAreaEventCommand :: TextAreaEvent -> Modifiers -> Maybe TextCommand
-textAreaEventCommand event mods =
-  case event of
-    TAChar c
-      | not (modCtrl mods || modAlt mods) -> Just (InsertText (T.singleton c))
-      | modCtrl mods && not (modAlt mods) -> ctrlCharCommand multiLineMode mods c
-      | otherwise -> Nothing
-    TAKey KeyEscape -> Nothing
-    TAKey KeyTab -> Nothing
-    TAKey key -> keyCommand multiLineMode mods key
-
--- | Apply one typed character or key.
-handleTextAreaEvent :: TextAreaEvent -> Modifiers -> TextAreaState -> TextAreaState
-handleTextAreaEvent event mods state =
-  maybe state (`runTextAreaCommand` state) (textAreaEventCommand event mods)
-
--- | This frame's typing and keys as commands, typed characters first.
-textAreaInputCommands :: Input -> [TextCommand]
-textAreaInputCommands inp =
-  let mods = inputModifiers inp
-      typed = [TAChar ch | ch <- T.unpack (inputChars inp), isPrint ch]
-      keys = foldInputKeys (\acc k -> acc ++ [TAKey k]) [] (inputKeys inp)
-   in mapMaybe (`textAreaEventCommand` mods) (typed ++ keys)
-
 ensureCaretVisible :: TextAreaState -> TextAreaState
 ensureCaretVisible state =
   let TB.Cursor r _ = TB.getCursor (buffer state)
@@ -182,47 +133,6 @@ ensureCaretVisible state =
         | caretY + caretH > sy + vh = caretY + caretH - vh
         | otherwise = sy
   in state {scrollOffset = (sx, clamp 0 maxSy sy')}
-
-data VisualLine = VisualLine
-  { visualLineIndex :: !Int
-  , visualLineText :: !T.Text
-  , visualLineY :: !Double
-  }
-  deriving (Eq, Show)
-
-data TextAreaLayout = TextAreaLayout
-  { layoutLines :: ![VisualLine]
-  , layoutCaretX :: !Double
-  , layoutCaretY :: !Double
-  , layoutCaretH :: !Double
-  }
-  deriving (Eq, Show)
-
-computeTextAreaLayout
-  :: (T.Text -> Double)
-  -> Double
-  -> TextAreaState
-  -> TextAreaLayout
-computeTextAreaLayout measureWidth lineH state =
-  let buf = buffer state
-      TB.Cursor r c = TB.getCursor buf
-      (scrollX, scrollY) = scrollOffset state
-      linesList = TB.toLines buf
-      indexedLines = zip [0 ..] linesList
-      visLines =
-        [ VisualLine idx txt (fromIntegral idx * lineH - scrollY)
-        | (idx, txt) <- indexedLines
-        ]
-      currentLineText = TB.lineAt r buf
-      prefixText = T.take c currentLineText
-      caretX = measureWidth prefixText - scrollX
-      caretY = fromIntegral r * lineH - scrollY
-  in TextAreaLayout
-    { layoutLines = visLines
-    , layoutCaretX = caretX
-    , layoutCaretY = caretY
-    , layoutCaretH = lineH
-    }
 
 --------------------------------------------------------------------------------
 -- Widget
@@ -441,6 +351,6 @@ processTextArea ctx inp vpW vpH lineH s0 = do
   let s1 = setTextAreaViewport (vpW, vpH) lineH s0
   when (not (T.null (inputChars inp)) || not (inputKeysNull (inputKeys inp))) $
     setTextInputDrag ctx Nothing
-  case textAreaInputCommands inp of
+  case inputTextCommands multiLineMode inp of
     [] -> pure s1
     cmds -> withEditor s1 <$> foldM (flip (runCommandIO ctx multiLineMode)) (textAreaEditor s1) cmds

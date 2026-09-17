@@ -18,8 +18,8 @@ module NanoUI.Widgets.TextEditor
   , runCommand
   , runCommandIO
     -- * Key bindings
+  , inputTextCommands
   , keyCommand
-  , ctrlCharCommand
     -- * History
   , EditHistory (..)
   , EditGroup (..)
@@ -33,11 +33,11 @@ module NanoUI.Widgets.TextEditor
 
 import Control.Monad (void, when)
 import Data.Bits ((.&.), (.|.))
-import Data.Char (isSpace, toLower)
+import Data.Char (isPrint, isSpace, toLower)
 import Data.Text qualified as T
 import Data.Text.Short qualified as TS
 import NanoUI.Context (Context (..))
-import NanoUI.Input (Key (..), Modifiers (..))
+import NanoUI.Input (Input (..), Key (..), Modifiers (..))
 import NanoUI.Widgets.TextBuffer (Cursor (..), TextBuffer, TextEdit (..))
 import NanoUI.Widgets.TextCommand (TextCommand (..), TextMotion (..))
 import NanoUI.Widgets.TextBuffer qualified as TB
@@ -303,6 +303,20 @@ keyCommand mode mods key =
     multi = modeMultiLine mode
     word = modCtrl mods || modAlt mods
     move m = Just (Move m (modShift mods))
+
+-- | This frame's typing and keys as commands, typed characters first. Ctrl
+-- turns characters into shortcuts. Ctrl with Alt is AltGr on many layouts, so
+-- its characters are typed like plain ones.
+inputTextCommands :: EditorMode -> Input -> [TextCommand]
+inputTextCommands mode inp = T.foldr char keys (inputChars inp)
+  where
+    mods = inputModifiers inp
+    shortcut = modCtrl mods && not (modAlt mods)
+    char c rest
+      | shortcut = maybe rest (: rest) (ctrlCharCommand mode mods c)
+      | isPrint c = InsertText (T.singleton c) : rest
+      | otherwise = rest
+    keys = foldr (\k rest -> maybe rest (: rest) (keyCommand mode mods k)) [] (inputKeys inp)
 
 -- | The command a character typed with Ctrl runs. Letters may arrive as the
 -- letter or as their control code.

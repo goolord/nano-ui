@@ -4,7 +4,7 @@ module Main (main) where
 
 import Data.Text qualified as T
 import NanoUI.Frame.TextEdit (textWordBounds)
-import NanoUI.Input (Key (..))
+import NanoUI.Input (Input (..), Key (..), Modifiers (..), emptyInput, inputKeysFromList)
 import NanoUI.Widgets.TextArea as TA
 import NanoUI.Widgets.TextBuffer as TB
 import NanoUI.Widgets.TextEditor as TE
@@ -13,11 +13,25 @@ import Test.Hspec
 main :: IO ()
 main = hspec spec
 
-noMods :: TA.Modifiers
-noMods = TA.Modifiers False False False
+noMods :: Modifiers
+noMods = Modifiers False False False
 
-ctrlMods :: TA.Modifiers
-ctrlMods = TA.Modifiers False True False
+ctrlMods :: Modifiers
+ctrlMods = Modifiers False True False
+
+-- | One frame's typed text and keys, with modifiers held.
+frameInput :: Modifiers -> T.Text -> [Key] -> Input
+frameInput mods chars keys =
+  emptyInput {inputChars = chars, inputKeys = inputKeysFromList keys, inputModifiers = mods}
+
+-- | Run one frame of input on a text area.
+typeArea :: Modifiers -> T.Text -> [Key] -> TA.TextAreaState -> TA.TextAreaState
+typeArea mods chars keys s =
+  foldl' (flip TA.runTextAreaCommand) s (TE.inputTextCommands TE.multiLineMode (frameInput mods chars keys))
+
+-- | Run commands on a buffer.
+edit :: TE.EditorMode -> [TE.TextCommand] -> TB.TextBuffer -> TB.TextBuffer
+edit mode cmds buf = TE.editorBuffer (foldl' (flip (TE.runCommand mode)) (TE.editorFromBuffer buf) cmds)
 
 spec :: Spec
 spec = do
@@ -34,8 +48,8 @@ spec = do
         b = TB.fromText "αβ\n猫犬\nend"
         start = TB.Cursor 0 1
         end = TB.Cursor 1 1
-        replaced = TB.replaceRange "🙂\nλ" end start b
-        deleted = TB.deleteRange end start b
+        replaced = edit TE.multiLineMode [TE.Select end start, TE.InsertText "🙂\nλ"] b
+        deleted = edit TE.multiLineMode [TE.Select end start, TE.Delete TE.CharLeft] b
       TB.selectedText end start b `shouldBe` "β\n猫"
       TB.toText replaced `shouldBe` "α🙂\nλ犬\nend"
       TB.getCursor replaced `shouldBe` TB.Cursor 1 1
@@ -48,20 +62,20 @@ spec = do
 
     it "inserts a tab that text-zipper would otherwise drop" $ do
       let
-        b = TB.insertChar '\t' TB.empty
+        b = edit TE.multiLineMode [TE.InsertText "\t"] TB.empty
       TB.toText b `shouldBe` "\t"
       TB.getCursor b `shouldBe` TB.Cursor 0 1
 
     it "inserts Unicode, tabs, and newlines while filtering control characters" $ do
       let
-        b = TB.insertText "α\t\n猫\x01" (TB.withCursor (TB.Cursor 0 1) (TB.fromText "ab"))
+        b = edit TE.multiLineMode [TE.InsertText "α\t\n猫\x01"] (TB.withCursor (TB.Cursor 0 1) (TB.fromText "ab"))
       TB.toLines b `shouldBe` ["aα\t", "猫b"]
       TB.getCursor b `shouldBe` TB.Cursor 1 1
 
     it "empty insertion preserves the preferred column on a short line" $ do
       let
         b = TB.moveDown (TB.withCursor (TB.Cursor 0 4) (TB.fromText "12345\nx\n12345"))
-      TB.getCursor (TB.moveDown (TB.insertText "" b)) `shouldBe` TB.Cursor 2 4
+      TB.getCursor (TB.moveDown (edit TE.multiLineMode [TE.InsertText ""] b)) `shouldBe` TB.Cursor 2 4
 
     it
       "clamps vertical motion at document boundaries without losing the preferred column" $ do
@@ -85,27 +99,23 @@ spec = do
       TB.documentEnd (TB.fromText "α\n") `shouldBe` TB.Cursor 1 0
       TB.documentEnd TB.empty `shouldBe` TB.Cursor 0 0
 
-    it "deletePrevWord eats trailing whitespace then the previous word" $ do
+    it "deleting a word left eats trailing whitespace then the previous word" $ do
       let
-        b = TB.deletePrevWord (TB.moveToEOL (TB.fromText "foo "))
-      TB.toText b `shouldBe` ""
-      TB.toText (TB.deletePrevWord (TB.moveToEOL (TB.fromText "foo bar"))) `shouldBe` "foo "
+        deleteWordLeft = TB.toText . edit TE.multiLineMode [TE.Delete TE.WordLeft] . TB.moveToEOL . TB.fromText
+      deleteWordLeft "foo " `shouldBe` ""
+      deleteWordLeft "foo bar" `shouldBe` "foo "
 
-    it "deletePrevWord joins lines at beginning of line" $ do
+    it "deleting a word left joins lines at beginning of line" $ do
       let
-        b =
-          TB.deletePrevWord
-            (TB.moveToBOL (TB.moveDown (TB.fromText "foo\nbar")))
+        b = edit TE.multiLineMode [TE.Delete TE.WordLeft] (TB.moveToBOL (TB.moveDown (TB.fromText "foo\nbar")))
       TB.toText b `shouldBe` "bar"
 
-    it "deleteNextWord deletes the word after the cursor" $ do
-      let
-        b = TB.deleteNextWord (TB.fromText "foo bar")
-      TB.toText b `shouldBe` " bar"
+    it "deleting a word right deletes the word after the cursor" $ do
+      TB.toText (edit TE.multiLineMode [TE.Delete TE.WordRight] (TB.fromText "foo bar")) `shouldBe` " bar"
 
-    it "killToEOL and killToBOL remove the rest of the line on either side" $ do
-      TB.toText (TB.killToEOL (TB.moveRight (TB.fromText "hello"))) `shouldBe` "h"
-      TB.toText (TB.killToBOL (TB.moveToEOL (TB.fromText "hello"))) `shouldBe` ""
+    it "deleting to the line end or start removes the rest of the line on either side" $ do
+      TB.toText (edit TE.multiLineMode [TE.Delete TE.LineEnd] (TB.moveRight (TB.fromText "hello"))) `shouldBe` "h"
+      TB.toText (edit TE.multiLineMode [TE.Delete TE.LineStart] (TB.moveToEOL (TB.fromText "hello"))) `shouldBe` ""
 
   describe "NanoUI.Widgets.TextBuffer edits" $ do
     it "applies an edit across lines and inverts it back" $ do
@@ -116,14 +126,14 @@ spec = do
       TB.editRemoved e `shouldBe` "β\n猫犬\ne"
       TB.toText b1 `shouldBe` "α🙂\nλ\nμnd"
       TB.getCursor b1 `shouldBe` TB.Cursor 2 1
-      TB.editEnd e `shouldBe` TB.Cursor 2 1
       TB.toText (TB.applyEdit (TB.invertEdit e) b1) `shouldBe` "αβ\n猫犬\nend"
 
     it "edits the middle of a long document locally" $ do
       let
         doc = T.intercalate "\n" [T.pack (show i) | i <- [1 .. 20000 :: Int]]
         b0 = TB.fromText doc
-        edited = foldl' (\b i -> TB.insertText "x\n" (TB.withCursor (TB.Cursor (5000 + i) 0) b)) b0 [1 .. 500 :: Int]
+        insertAt b i = let at = TB.Cursor (5000 + i) 0 in TB.applyEdit (TB.replaceEdit "x\n" at at b) b
+        edited = foldl' insertAt b0 [1 .. 500 :: Int]
       TB.getLineCount edited `shouldBe` 20500
       TB.lineAt 5002 edited `shouldBe` "x"
 
@@ -191,12 +201,21 @@ spec = do
     it "Ctrl+Z undoes and Ctrl+Shift+Z redoes" $ do
       let
         s0 = TA.initTextAreaState ""
-        typed = foldl' (\s c -> TA.handleTextAreaEvent (TA.TAChar c) noMods s) s0 ("one two" :: String)
-        undone = TA.handleTextAreaEvent (TA.TAChar 'z') ctrlMods typed
-        redone = TA.handleTextAreaEvent (TA.TAChar 'z') (TA.Modifiers True True False) undone
+        typed = foldl' (\s c -> typeArea noMods (T.singleton c) [] s) s0 ("one two" :: String)
+        undone = typeArea ctrlMods "z" [] typed
+        redone = typeArea (Modifiers True True False) "z" [] undone
       TB.toText (TA.buffer undone) `shouldBe` "one "
       TB.toText (TA.buffer redone) `shouldBe` "one two"
 
+    it "Ctrl+Alt types characters (AltGr) while Ctrl alone runs shortcuts" $ do
+      let
+        s0 = typeArea noMods "" [KeyEnd] (TA.initTextAreaState "ab")
+        altGr = Modifiers False True True
+      TB.toText (TA.buffer (typeArea altGr "@€" [] s0)) `shouldBe` "ab@€"
+      TE.inputTextCommands TE.singleLineMode (frameInput altGr "@" [])
+        `shouldBe` [TE.InsertText "@"]
+      TE.inputTextCommands TE.singleLineMode (frameInput ctrlMods "a" [KeyLeft])
+        `shouldBe` [TE.SelectAll, TE.Move TE.WordLeft False]
 
     it
       "typing and Enter replace a backwards multiline selection and collapse its anchor" $ do
@@ -204,8 +223,8 @@ spec = do
         selected =
           TA.setTextAreaSelection (TB.Cursor 1 1) (TB.Cursor 0 1) $
             TA.initTextAreaState "abc\ndef"
-        typed = TA.handleTextAreaEvent (TA.TAChar 'λ') noMods selected
-        entered = TA.handleTextAreaEvent (TA.TAKey KeyEnter) noMods selected
+        typed = typeArea noMods "λ" [] selected
+        entered = typeArea noMods "" [KeyEnter] selected
       TB.toText (TA.buffer typed) `shouldBe` "aλef"
       TB.getCursor (TA.buffer typed) `shouldBe` TB.Cursor 0 2
       TA.selectionAnchor typed `shouldBe` TB.Cursor 0 2
@@ -219,31 +238,29 @@ spec = do
       mapM_
         ( \mods -> do
             let
-              deleted = TA.handleTextAreaEvent (TA.TAKey KeyDelete) mods s0
-              right = TA.handleTextAreaEvent (TA.TAKey KeyRight) mods s0
-              left = TA.handleTextAreaEvent (TA.TAKey KeyLeft) mods right
+              deleted = typeArea mods "" [KeyDelete] s0
+              right = typeArea mods "" [KeyRight] s0
+              left = typeArea mods "" [KeyLeft] right
             TB.toText (TA.buffer deleted) `shouldBe` " bar"
             TB.getCursor (TA.buffer right) `shouldBe` TB.Cursor 0 3
             TB.getCursor (TA.buffer left) `shouldBe` TB.Cursor 0 0
         )
-        [ctrlMods, TA.Modifiers False False True]
+        [ctrlMods, Modifiers False False True]
 
-    it "layout subtracts scrollOffset from caret and line Y" $ do
+    it "scrolls the caret into a one-line viewport" $ do
       let
         s0 =
           TA.setTextAreaViewport (80, 16) 16 $
             TA.initTextAreaState "a\nb"
-        s1 = TA.handleTextAreaEvent (TA.TAKey KeyDown) noMods s0
-        layout = TA.computeTextAreaLayout (fromIntegral . T.length) 16 s1
-      TA.layoutCaretY layout `shouldBe` 0
-      map TA.visualLineY (TA.layoutLines layout) `shouldBe` [-16, 0]
+        s1 = typeArea noMods "" [KeyDown] s0
+      TA.scrollOffset s1 `shouldBe` (0, 16)
 
     it "Ctrl+A and Ctrl+a both select all" $ do
       let
         s0 = TA.initTextAreaState "hello"
-        atEnd = TA.handleTextAreaEvent (TA.TAKey KeyEnd) noMods s0
-        fromLower = TA.handleTextAreaEvent (TA.TAChar 'a') ctrlMods atEnd
-        fromUpper = TA.handleTextAreaEvent (TA.TAChar 'A') ctrlMods atEnd
+        atEnd = typeArea noMods "" [KeyEnd] s0
+        fromLower = typeArea ctrlMods "a" [] atEnd
+        fromUpper = typeArea ctrlMods "A" [] atEnd
       TB.getCursor (TA.buffer fromLower) `shouldBe` TB.Cursor 0 5
       TA.selectionAnchor fromLower `shouldBe` TB.Cursor 0 0
       TB.getCursor (TA.buffer fromUpper) `shouldBe` TB.Cursor 0 5

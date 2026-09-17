@@ -9,7 +9,6 @@ module NanoUI.Widgets.TextInput
   , textInputEditor
   , editorTextState
   , saveTextEditor
-  , inputTextCommands
   , editTextInput
   , textInputMode
   , applyTextInputCommand
@@ -38,10 +37,9 @@ where
 
 import Control.Monad (foldM, void, when)
 import Data.Bits ((.|.))
-import Data.Char (isPrint)
 import Data.IntMap.Strict qualified as IM
 import Data.Dynamic (fromDynamic, toDyn)
-import Data.Maybe (fromMaybe, isNothing, mapMaybe)
+import Data.Maybe (fromMaybe, isNothing)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Effectful (Eff, type (:>))
@@ -61,11 +59,7 @@ import NanoUI.Id (WidgetId)
 import NanoUI.Input
   ( Input (..)
   , Key (..)
-  , Modifiers (..)
-  , foldInputKeys
-  , inputChars
   , inputKeys
-  , inputModifiers
   )
 import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, askDefaultLayout, askInput, nextId, uiIO)
@@ -79,10 +73,9 @@ import NanoUI.Widgets.TextEditor
   ( Editor (..)
   , EditorMode (..)
   , TextCommand (..)
-  , ctrlCharCommand
+  , inputTextCommands
   , editorModeCode
   , emptyHistory
-  , keyCommand
   , runCommandIO
   , sealHistory
   , singleLineMode
@@ -150,19 +143,6 @@ saveTextEditor key ed store =
   let s = editorTextState ed
       saved = saveTextInputState key s store
    in saved {storeDyn = IM.insert (slotKey SlotTextHistory key) (toDyn (tisText s, editorHistory ed)) (storeDyn saved)}
-
--- | This frame's typing and shortcuts as commands, typed characters first.
--- Ctrl turns characters into shortcuts; a line break never enters a
--- single-line field.
-inputTextCommands :: EditorMode -> Input -> [TextCommand]
-inputTextCommands mode inp =
-  let mods = inputModifiers inp
-      ctrl = modCtrl mods
-      chars
-        | ctrl = mapMaybe (ctrlCharCommand mode mods) (T.unpack (inputChars inp))
-        | otherwise =
-            [InsertText (T.singleton ch) | ch <- T.unpack (inputChars inp), isPrint ch, ch /= '\n']
-   in chars ++ foldInputKeys (\acc k -> acc ++ maybe [] pure (keyCommand mode mods k)) [] (inputKeys inp)
 
 -- | Run this frame's commands on a field, or 'Nothing' when it had none.
 editTextInput :: Context -> EditorMode -> Input -> WidgetStore -> Int -> TextInputState -> IO (Maybe Editor)

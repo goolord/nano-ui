@@ -42,24 +42,13 @@ module NanoUI.Widgets.TextBuffer
   , selectionRange
   , selectedText
   , textRange
-  , deleteRange
-  , replaceRange
   , documentEnd
 
     -- * Edits
   , applyEdit
   , invertEdit
-  , editEnd
   , replaceEdit
   , insertableText
-
-    -- * Editing Operations
-  , insertChar
-  , insertText
-  , deletePrevWord
-  , deleteNextWord
-  , killToEOL
-  , killToBOL
   )
 where
 
@@ -282,10 +271,6 @@ advance (Cursor row col) txt =
 invertEdit :: TextEdit -> TextEdit
 invertEdit (TextEdit at removed inserted) = TextEdit at inserted removed
 
--- | Where the cursor sits after an edit.
-editEnd :: TextEdit -> Cursor
-editEnd e = advance (editAt e) (editInserted e)
-
 -- | The edit replacing the text between two positions.
 replaceEdit :: Text -> Cursor -> Cursor -> TextBuffer -> TextEdit
 replaceEdit inserted a b buf =
@@ -296,43 +281,6 @@ replaceEdit inserted a b buf =
 -- breaks, with Windows line ends folded.
 insertableText :: Text -> Text
 insertableText = T.filter (\c -> isPrint c || c == '\t' || c == '\n') . T.replace "\r\n" "\n"
-
---------------------------------------------------------------------------------
--- Editing
---------------------------------------------------------------------------------
-
-insertChar :: Char -> TextBuffer -> TextBuffer
-insertChar c = insertText (T.singleton c)
-
--- | Insert at the cursor, dropping characters that cannot be in a document.
-insertText :: Text -> TextBuffer -> TextBuffer
-insertText raw buf
-  | T.null txt = buf
-  | otherwise = applyEdit (TextEdit (getCursor buf) T.empty txt) buf
-  where
-    txt = insertableText raw
-
--- | Delete between the cursor and where a motion from it lands.
-deleteTo :: (TextBuffer -> Cursor -> Cursor) -> TextBuffer -> TextBuffer
-deleteTo motion buf =
-  let cur = getCursor buf
-      target = motion buf cur
-   in if target == cur then buf else applyEdit (replaceEdit T.empty cur target buf) buf
-
-deletePrevWord :: TextBuffer -> TextBuffer
-deletePrevWord = deleteTo wordLeft
-
-deleteNextWord :: TextBuffer -> TextBuffer
-deleteNextWord = deleteTo wordRight
-
--- | Delete to the end of the line, or the line break itself on an empty line.
-killToEOL :: TextBuffer -> TextBuffer
-killToEOL = deleteTo $ \buf (Cursor row _) ->
-  let len = T.length (lineAt row buf)
-   in if len == 0 && row + 1 < getLineCount buf then Cursor (row + 1) 0 else Cursor row len
-
-killToBOL :: TextBuffer -> TextBuffer
-killToBOL = deleteTo (\_ (Cursor row _) -> Cursor row 0)
 
 --------------------------------------------------------------------------------
 -- Selection
@@ -354,12 +302,6 @@ textRange (Cursor loRow loCol) (Cursor hiRow hiCol) buf
   | otherwise =
       let middle = toList (Seq.take (hiRow - loRow - 1) (Seq.drop (loRow + 1) (bufferLines buf)))
        in T.intercalate "\n" (T.drop loCol (lineAt loRow buf) : middle ++ [T.take hiCol (lineAt hiRow buf)])
-
-deleteRange :: Cursor -> Cursor -> TextBuffer -> TextBuffer
-deleteRange = replaceRange T.empty
-
-replaceRange :: Text -> Cursor -> Cursor -> TextBuffer -> TextBuffer
-replaceRange inserted a b buf = applyEdit (replaceEdit inserted a b buf) buf
 
 documentEnd :: TextBuffer -> Cursor
 documentEnd buf =
