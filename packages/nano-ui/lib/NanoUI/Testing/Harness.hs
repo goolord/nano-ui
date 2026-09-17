@@ -14,8 +14,6 @@ module NanoUI.Testing.Harness
   , warmupDraw
   , held
   , runClick
-  , runClickPair
-  , runClickRelease
   , assertSpansHas
   , spanYOf
   , spanXOf
@@ -171,17 +169,9 @@ pickRight (p : ps) = Just (go p ps)
 requireSpan :: String -> Maybe V2 -> IO V2
 requireSpan msg = maybe (fail msg) pure
 
-clickAt :: Input -> V2 -> (Input, Input, Input)
-clickAt base pos =
-  let press = base {inputMousePos = pos, inputMouseDown = True, inputMousePressed = True}
-      hold = press {inputMousePressed = False}
-      release = hold {inputMouseDown = False, inputMouseReleased = True}
-   in (press, hold, release)
-
+-- | Press, hold and release at @pos@, then two idle frames.
 clickPos :: (Input -> IO ()) -> Input -> V2 -> IO ()
-clickPos drawFrame base pos = do
-  let (press, hold, release) = clickAt base pos
-  mapM_ drawFrame [press, hold, release, base, base]
+clickPos drawFrame base pos = dragPos drawFrame base pos pos
 
 clickTab :: (Context -> IO [DemoSpan]) -> (Input -> IO ()) -> Context -> Input -> T.Text -> IO ()
 clickTab getSpans drawFrame ctx base name = do
@@ -189,12 +179,12 @@ clickTab getSpans drawFrame ctx base name = do
   pos <- requireSpan ("selftest: tab " <> T.unpack name) (findExact name spans)
   clickPos drawFrame base pos
 
+-- | Press at @from@, hold at @to@ and release there, then two idle frames.
 dragPos :: (Input -> IO ()) -> Input -> V2 -> V2 -> IO ()
 dragPos drawFrame base from to = do
-  let press = base {inputMousePos = from, inputMouseDown = True, inputMousePressed = True}
+  let press = pressAt base from
       hold = press {inputMousePressed = False, inputMousePos = to}
-      release = hold {inputMouseDown = False, inputMouseReleased = True, inputMousePos = to}
-  mapM_ drawFrame [press, hold, release, base, base]
+  mapM_ drawFrame [press, hold, releaseAt hold, base, base]
 
 clickPair :: Input -> V2 -> (Input, Input)
 clickPair inp pos =
@@ -285,34 +275,18 @@ held ref widget = do
   uiIO (writeIORef ref (snd result))
   pure result
 
-runClick :: Context -> Input -> NanoUI a -> V2 -> IO ()
+-- | Run a press frame and a release frame at @pos@ ('clickPair'), returning
+-- the release frame's result.
+runClick :: Context -> Input -> NanoUI a -> V2 -> IO a
 runClick ctx inp0 ui pos = do
-  let
-    (press, release) = clickPair inp0 pos
-  _ <- runFrame ctx press ui
-  void (runFrame ctx release ui)
-
-runClickPair :: Context -> Input -> NanoUI a -> V2 -> IO a
-runClickPair ctx inp0 ui pos = do
   let
     (press, release) = clickPair inp0 pos
   _ <- runFrame ctx press ui
   (a, _, _, _) <- runFrame ctx release ui
   pure a
 
-runClickRelease :: Context -> Input -> NanoUI a -> V2 -> IO Input
-runClickRelease ctx inp0 ui pos = do
-  let
-    (press, release) = clickPair inp0 pos
-  _ <- runFrame ctx press ui
-  _ <- runFrame ctx release ui
-  pure release
-
 assertSpansHas :: HasCallStack => IORef Int -> T.Text -> [(Rect, T.Text, a, b, c)] -> IO ()
 assertSpansHas failed needle spans = assert failed (hasText needle spans)
-
-spanYs :: T.Text -> [(Rect, T.Text, a, b, c)] -> [Float]
-spanYs needle spans = [rectY r | (r, txt, _, _, _) <- spans, needle `T.isInfixOf` txt]
 
 spanYOf :: T.Text -> [(Rect, T.Text, a, b, c)] -> [Float]
 spanYOf lbl spans = [y | (Rect _ y _ _, txt, _, _, _) <- spans, txt == lbl]
@@ -354,7 +328,7 @@ assertWheelTitlePinned ::
 assertWheelTitlePinned failed ctx inp0 ui title line1 wheelAt mClipMax = do
   spans0 <- collectOverlayTextSpans ctx inp0
   let
-    titleYs0 = spanYs title spans0
+    titleYs0 = spanYOf title spans0
     line1Ys0 = spanYOf line1 spans0
   assert failed (not (null titleYs0))
   case line1Ys0 of
@@ -365,7 +339,7 @@ assertWheelTitlePinned failed ctx inp0 ui title line1 wheelAt mClipMax = do
       _ <- runFrame ctx wheel ui
       spans1 <- collectOverlayTextSpans ctx wheel
       let
-        titleYs1 = spanYs title spans1
+        titleYs1 = spanYOf title spans1
         line1Ys1 = spanYOf line1 spans1
       case (titleYs0, titleYs1) of
         (y0 : _, y1 : _) -> assertEq failed y1 y0

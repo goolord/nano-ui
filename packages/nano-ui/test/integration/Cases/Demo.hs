@@ -15,7 +15,7 @@ import Data.Text qualified as T
 import NanoUI
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, withInput)
-import NanoUI.Testing.Harness (held, pressAt, releaseAt, runClickPair, spanCenter, warmup2, withInputOff)
+import NanoUI.Testing.Harness (held, pressAt, releaseAt, runClick, spanCenter, warmup2, withInputOff)
 
 data DemoTab
   = Controls
@@ -49,7 +49,7 @@ runBoundedRadioTest ctx failed = do
   spans <- collectTextSpans ctx
   case [r | (r, txt, _, _, _) <- spans, "OffsetChoice 12" `T.isInfixOf` txt] of
     Rect x y w h : _ -> do
-      (_, selected) <- runClickPair ctx inp (ui (OffsetChoice 11)) (V2 (x + w / 2) (y + h / 2))
+      (_, selected) <- runClick ctx inp (ui (OffsetChoice 11)) (V2 (x + w / 2) (y + h / 2))
       assertEq failed selected (OffsetChoice 12)
       ((_, retained), _, _, _) <- runFrame ctx inp (ui selected)
       assertEq failed retained selected

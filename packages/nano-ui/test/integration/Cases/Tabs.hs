@@ -24,7 +24,6 @@ import NanoUI.Testing.Harness
   , drawQuads
   , hasText
   , runClick
-  , runClickPair
   , withInputOff
   , warmup2
   )
@@ -127,7 +126,7 @@ runTabsClosableTest ctx failed = do
   mClose <- findCloseButtonRect ctx
   case mClose of
     Just (Rect cx cy cw ch) -> do
-      tResp <- runClickPair ctx inp0 (ui TabA) (V2 (cx + cw / 2) (cy + ch / 2))
+      tResp <- runClick ctx inp0 (ui TabA) (V2 (cx + cw / 2) (cy + ch / 2))
       assertEq failed (tabClosed tResp) (Just TabA)
       assertEq failed (tabActive tResp) TabA
     Nothing -> assert failed False
@@ -168,11 +167,11 @@ runTabsDisabledTest _ failed = forM_ [TabTop, TabLeft] $ \orientation -> do
   _ <- warmup2 ctx inp (ui True)
   spans <- collectTextSpans ctx
   case [r | (r, txt, _, _, _) <- spans, txt == "Disabled"] of
-    Rect x y w h : _ -> check =<< runClickPair ctx inp (ui True) (V2 (x + w / 2) (y + h / 2))
+    Rect x y w h : _ -> check =<< runClick ctx inp (ui True) (V2 (x + w / 2) (y + h / 2))
     [] -> assert failed False
   closeRect <- findCloseButtonRect ctx
   case closeRect of
-    Just (Rect x y w h) -> check =<< runClickPair ctx inp (ui True) (V2 (x + w / 2) (y + h / 2))
+    Just (Rect x y w h) -> check =<< runClick ctx inp (ui True) (V2 (x + w / 2) (y + h / 2))
     Nothing -> assert failed False
   forM_ [wid | (txt, wid) <- headers, txt == "Disabled" || txt == "\215"] $ \wid -> do
     writeIORef (ctxFocusId ctx) wid
@@ -183,7 +182,7 @@ runTabsDisabledTest _ failed = forM_ [TabTop, TabLeft] $ \orientation -> do
   spansEnabled <- collectTextSpans ctx
   case [r | (r, txt, _, _, _) <- spansEnabled, txt == "Disabled"] of
     Rect x y w h : _ -> do
-      response <- runClickPair ctx inp (ui False) (V2 (x + w / 2) (y + h / 2))
+      response <- runClick ctx inp (ui False) (V2 (x + w / 2) (y + h / 2))
       assertEq failed (tabActive response) TabB
     [] -> assert failed False
 
@@ -203,7 +202,7 @@ runTabsStatePersistenceTest ctx failed = do
   spans0 <- collectTextSpans ctx
   case [r | (r, txt, _, _, _) <- spans0, "ToggleA" `T.isInfixOf` txt] of
     (Rect cx cy cw ch : _) -> do
-      runClick ctx inp0 (ui TabA) (V2 (cx + cw / 2) (cy + ch / 2))
+      _ <- runClick ctx inp0 (ui TabA) (V2 (cx + cw / 2) (cy + ch / 2))
       _ <- runFrame ctx inp0 (ui TabA)
       spans1 <- collectTextSpans ctx
       assertSpansHas failed "FlagIsOn" spans1
@@ -323,14 +322,14 @@ runTabsScrollTest _ failed = do
   case mRight of
     (Rect ax ay aw ah : _) -> do
       assert failed (ax + aw > 200)
-      runClick ctx inp (mkTabs 0) (V2 (ax + aw / 2) (ay + ah / 2))
+      _ <- runClick ctx inp (mkTabs 0) (V2 (ax + aw / 2) (ay + ah / 2))
       _ <- runFrame ctx inp (mkTabs 0)
       spans1 <- collectTextSpans ctx
       assert failed (not (hasText "Controls" spans1))
       mLeft <- arrowRect ctx '\8249'
       case mLeft of
         (Rect lx ly lw lh : _) -> do
-          runClick ctx inp (mkTabs 0) (V2 (lx + lw / 2) (ly + lh / 2))
+          _ <- runClick ctx inp (mkTabs 0) (V2 (lx + lw / 2) (ly + lh / 2))
           _ <- runFrame ctx inp (mkTabs 0)
           spans2 <- collectTextSpans ctx
           assert failed (hasText "Controls" spans2)

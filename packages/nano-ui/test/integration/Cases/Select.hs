@@ -20,7 +20,7 @@ import NanoUI.Testing.Harness
   , clickPair
   , hasText
   , held
-  , runClickRelease
+  , runClick
   , warmup2
   )
 
@@ -56,7 +56,9 @@ runSelectOverlayDamageTest ctx failed = do
       inp0 = (withInput 320 160) {inputMousePos = V2 20 20}
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect sx sy sw sh = respRect resp
-  open <- runClickRelease ctx inp0 ui (V2 (sx + sw / 2) (sy + sh / 2))
+  let pos = V2 (sx + sw / 2) (sy + sh / 2)
+      open = snd (clickPair inp0 pos)
+  _ <- runClick ctx inp0 ui pos
   let idle = open {inputMouseReleased = False, inputDeltaTime = 1}
   _ <- runFrame ctx idle ui
   overlays <- collectOverlayTextSpans ctx idle
@@ -221,9 +223,11 @@ runSelectCloseKeepsFocusTest ctx failed = do
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect sx sy sw sh = respRect resp
       mid = V2 (sx + sw / 2) (sy + sh / 2)
-  openRelease <- runClickRelease ctx inp0 ui mid
+      openRelease = snd (clickPair inp0 mid)
+      closeRelease = snd (clickPair openRelease mid)
+  _ <- runClick ctx inp0 ui mid
   assert failed . listed =<< collectOverlayTextSpans ctx openRelease
-  closeRelease <- runClickRelease ctx openRelease ui mid
+  _ <- runClick ctx openRelease ui mid
   let idle = closeRelease {inputMouseReleased = False}
   _ <- runFrame ctx idle ui
   assert failed . not . listed =<< collectOverlayTextSpans ctx idle

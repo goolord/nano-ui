@@ -16,7 +16,7 @@ import NanoUI.Testing.Harness
   ( centerOf
   , checkIdleFullDamage
   , clickPair
-  , runClickRelease
+  , runClick
   , spanYOf
   , warmup2
   , withInputOff
@@ -109,7 +109,7 @@ runModalCloseDamageTest ctx failed = do
       idle = inp0 {inputDeltaTime = 1}
   _ <- runFrame ctx inp0 ui
   (resp, _, _, _) <- runFrame ctx inp0 ui
-  _ <- runClickRelease ctx inp0 ui (centerOf resp)
+  _ <- runClick ctx inp0 ui (centerOf resp)
   checkIdleFullDamage failed ctx idle idle ui
   _ <- runFrame ctx esc ui
   checkIdleFullDamage failed ctx idle idle ui

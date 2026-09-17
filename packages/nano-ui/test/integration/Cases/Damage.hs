@@ -220,7 +220,7 @@ runTextAreaSelectAllDamageTest ctx failed = do
         _ <- label "Notes"
         fst <$> textAreaWith' (fixedWH 200 80) "hello world"
   area <- warmup2 ctx inp0 ui
-  runClick ctx inp0 ui (centerOf area)
+  _ <- runClick ctx inp0 ui (centerOf area)
   _ <- warmup2 ctx inp0 ui
   _ <- takeDamage ctx
   _ <- runFrame ctx inp0 {inputChars = "a", inputModifiers = Modifiers False True False} ui

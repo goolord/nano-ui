@@ -26,7 +26,7 @@ import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertGt, assertLt, withInput)
 import NanoUI.Testing.Harness
   ( assertWheelTitlePinned
-  , runClickPair
+  , runClick
   , clickPair
   , dragWindowEdge
   , runDragFrom
@@ -365,7 +365,7 @@ runScrolledDebugToggleTest ctx failed = do
   dbgBtn <- warmup2 ctx inp0 ui
   let Rect bx by bw bh = respRect dbgBtn
       pos = V2 (bx + bw / 2) (by + bh / 2)
-  _ <- runClickPair ctx inp0 ui pos
+  _ <- runClick ctx inp0 ui pos
   spans <- collectOverlayTextSpans ctx inp0
   let titles = [t | (_, t, _, _, _) <- spans, title `T.isInfixOf` t]
   assert failed (not (null titles))

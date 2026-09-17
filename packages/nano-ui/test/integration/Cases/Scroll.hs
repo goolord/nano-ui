@@ -44,7 +44,7 @@ import NanoUI.Testing.Harness
   ( assertScrollGutterPad
   , drawQuads
   , findGrabHover
-  , runClickPair
+  , runClick
   , spanYOf
   , warmup2
   , withInputOff
@@ -301,7 +301,7 @@ runScrollButtonClickTest ctx failed = do
           assertGt failed off 0
           ((_, _, resp1), _, _, _) <- runFrame c inp0 ui
           let Rect bx by bw bh = respRect resp1
-          (_, hit1, _) <- runClickPair c inp0 ui (V2 (bx + bw / 2) (by + bh / 2))
+          (_, hit1, _) <- runClick c inp0 ui (V2 (bx + bw / 2) (by + bh / 2))
           assertEq failed hit1 "yes"
         _ -> assert failed False
 
@@ -360,7 +360,7 @@ runScrolledOutImmunityTest ctx failed = do
           _ <- runFrame ctx hover ui
           hot <- getHotId ctx
           assert failed (hot /= respId b)
-          (_, _, hit1) <- runClickPair ctx hover ui pos
+          (_, _, hit1) <- runClick ctx hover ui pos
           assertEq failed hit1 ""
         _ -> assert failed False
     _ -> assert failed False
