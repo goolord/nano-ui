@@ -36,17 +36,13 @@ domainExtent = domainExtentBy id
 
 -- | Project while reducing, without materialising a mapped numeric vector.
 domainExtentBy :: GV.Vector v a => (a -> Double) -> v a -> Domain
-domainExtentBy project xs = case GV.uncons xs of
-  Nothing -> Domain 0 1
-  Just (first, rest) ->
-    -- Single-pass fold to find both min and max simultaneously
-    let !initial = project first
-        !(!lo, !hi) = GV.foldl' (\(!mn, !mx) value -> let !x = project value in (min mn x, max mx x))
-                               (initial, initial)
-                               rest
-     in if lo == hi
-          then Domain (lo - 0.5) (hi + 0.5)
-           else Domain lo hi
+domainExtentBy project xs
+  | lo > hi = Domain 0 1
+  | lo == hi = Domain (lo - 0.5) (hi + 0.5)
+  | otherwise = extent
+  where
+    extent@(Domain lo hi) =
+      GV.foldl' (\(Domain mn mx) value -> let !x = project value in Domain (min mn x) (max mx x)) (Domain (1 / 0) (-1 / 0)) xs
 {-# INLINE domainExtentBy #-}
 
 mergeDomains :: Domain -> Domain -> Domain

@@ -38,6 +38,7 @@ import NanoUI.Plot.Chrome
   , chartDiagram
   , chartMargins
   , seriesDomains
+  , seriesPoints
   )
 import NanoUI.Plot.Decimate (lttb, minMaxDecimate)
 import NanoUI.Plot.Hit (nearestPlotHover)
@@ -103,7 +104,7 @@ bareChart ss =
     }
 
 chartDia :: FontMetrics -> Chart -> Diagram B
-chartDia fm = chartDiagram fm defaultTheme defaultPlotStyle
+chartDia fm c = chartDiagram fm defaultTheme defaultPlotStyle (seriesDomains c) (map (seriesPoints c) (chartSeries c)) c
 
 rectsOverlap :: Rect -> Rect -> Bool
 rectsOverlap (Rect x1 y1 w1 h1) (Rect x2 y2 w2 h2) =
@@ -423,17 +424,18 @@ barChartSample =
 
 testPlotHover :: IO ()
 testPlotHover = do
+  let hoverAt c = nearestPlotHover (seriesDomains c) (map (seriesPoints c) (chartSeries c)) 0.5 0.5
   forM_ [bareChart [], bareChart [line "empty" []]] $ \chart ->
-    unless (nearestPlotHover chart 0.5 0.5 == Nothing) $
+    unless (hoverAt chart == Nothing) $
       fail "empty chart produced a hover target"
   let
     tied = bareChart [line "first" [(0, 0), (0, 0)], line "second" [(0, 0)]]
   unless
-    ( fmap (\h -> (hoverSeriesIdx h, hoverPointIdx h)) (nearestPlotHover tied 0.5 0.5)
+    ( fmap (\h -> (hoverSeriesIdx h, hoverPointIdx h)) (hoverAt tied)
         == Just (0, 0)
     ) $
     fail "equidistant hover targets did not prefer the first point"
-  case nearestPlotHover (bareChart [line "a" [(0, 0), (1, 1), (2, 4)]]) 0.5 0.5 of
+  case hoverAt (bareChart [line "a" [(0, 0), (1, 1), (2, 4)]]) of
     Nothing -> fail "nearestPlotHover missed center point"
     Just h ->
       unless

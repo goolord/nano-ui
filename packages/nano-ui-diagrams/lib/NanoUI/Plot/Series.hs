@@ -19,8 +19,8 @@ module NanoUI.Plot.Series
 
 import Data.Text (Text)
 import Data.Foldable (toList)
-import Data.Primitive.PrimArray (primArrayFromList)
-import Data.Primitive.SmallArray (smallArrayFromList)
+import Data.Primitive.PrimArray (generatePrimArray)
+import Data.Primitive.SmallArray (createSmallArray, writeSmallArray)
 import Data.Vector (Vector)
 import Data.Vector qualified as V
 import Data.Vector.Generic qualified as G
@@ -40,7 +40,7 @@ scatter :: Foldable f => Text -> f (Double, Double) -> Series
 scatter name = scatterVec name . U.fromList . toList
 
 bar :: Foldable f => Text -> f (Text, Double) -> Series
-bar name rows = Series name Nothing (BarSeries 0.72) (CategoryY (smallArrayFromList (map fst (toList rows))) (primArrayFromList (map snd (toList rows))))
+bar name = barVec name . V.fromList . toList
 
 area :: Foldable f => Text -> f (Double, Double) -> Series
 area name = areaVec name . U.fromList . toList
@@ -92,4 +92,10 @@ stepVec :: G.Vector v (Double, Double) => Text -> v (Double, Double) -> Series
 stepVec name pts = Series name Nothing (StepSeries 1.5) (PointsXY (G.convert pts))
 
 barVec :: Text -> Vector (Text, Double) -> Series
-barVec name = bar name . V.toList
+barVec name rows =
+  Series name Nothing (BarSeries 0.72) $
+    CategoryY
+      (createSmallArray n "" (\out -> V.imapM_ (\i (t, _) -> writeSmallArray out i t) rows))
+      (generatePrimArray n (snd . V.unsafeIndex rows))
+  where
+    n = V.length rows

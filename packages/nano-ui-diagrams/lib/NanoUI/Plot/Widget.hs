@@ -13,6 +13,7 @@ import Data.IORef (readIORef)
 import qualified Data.IntMap.Strict as IM
 import Data.Maybe (fromMaybe, catMaybes)
 import Data.Text (Text)
+import Data.Vector.Unboxed qualified as U
 import Diagrams.Prelude (Diagram, V2 (..), extentX, extentY, size)
 import Effectful (Eff, type (:>))
 import NanoUI
@@ -32,12 +33,13 @@ import NanoUI.Monad (askContext, nextId, uiIO)
 import NanoUI.Diagrams.Backend (B)
 import NanoUI.Diagrams.Widget (PlotStyle, diagramWithKeyAndEnvelope, uiPlotStyle)
 import NanoUI.Plot.Builder qualified as Builder
-import NanoUI.Plot.Chrome (chartDiagram, seriesDomains)
+import NanoUI.Plot.Chrome (chartDiagram, seriesDomains, seriesPoints)
 import NanoUI.Plot.Scale (formatTick, niceTicks)
 import NanoUI.Plot.Hit (hitTestChartCached)
 import NanoUI.Plot.Series (area, bar, line, scatter)
 import NanoUI.Plot.Types
   ( Chart (..)
+  , Domain
   , Series (..)
   , LegendPos (..)
   , PlotResponse (..)
@@ -54,6 +56,8 @@ data CachedChart = CachedChart
   , ccHeight :: {-# UNPACK #-} !Double
   , ccExtX :: !(Double, Double)
   , ccExtY :: !(Double, Double)
+  , ccDomains :: !(Domain, Domain)
+  , ccPoints :: ![U.Vector (Double, Double)]
   }
 
 -- Keep the cache in the owning context's widget store. Versions only need
@@ -67,17 +71,18 @@ cachedChartDiagram ctx wid fm theme ps chart = do
   case previous of
     Just cc | ccChart cc == chart && ccTheme cc == theme && ccFont cc == font && ccStyle cc == ps -> pure cc
     _ -> do
-      let (xDom, yDom) = seriesDomains chart
+      let domains@(xDom, yDom) = seriesDomains chart
+          points = map (seriesPoints chart) (chartSeries chart)
           labels = catMaybes [chartTitle chart, chartXTitle chart, chartYTitle chart]
             ++ map seriesName (chartSeries chart)
             ++ map formatTick (niceTicks 6 xDom ++ niceTicks 6 yDom)
       prepared <- prepareFontMetricsMany fm labels
-      let !d = chartDiagram prepared theme ps chart
+      let !d = chartDiagram prepared theme ps domains points chart
           !(V2 dw dh) = size d
           extX = fromMaybe (0, dw) (extentX d)
           extY = fromMaybe (0, dh) (extentY d)
       let !v = maybe 1 ((+ 1) . ccVersion) previous
-          !cc = CachedChart chart theme font ps v d dw dh extX extY
+          !cc = CachedChart chart theme font ps v d dw dh extX extY domains points
       setStore ctx (store {storeDyn = IM.insert k (toDyn cc) (storeDyn store)})
       pure cc
 
@@ -93,7 +98,7 @@ plot f chart = do
   cc <- uiIO (cachedChartDiagram ctx wid fm theme ps chart)
   resp <- diagramWithKeyAndEnvelope (ccVersion cc) (ccWidth cc) (ccHeight cc) f (ccDiagram cc)
   mouse <- uiMousePos
-  let hover = hitTestChartCached (ccDiagram cc) (ccWidth cc) (ccHeight cc) (ccExtX cc) (ccExtY cc) chart (respRect resp) mouse
+  let hover = hitTestChartCached (ccWidth cc) (ccHeight cc) (ccExtX cc) (ccExtY cc) (ccDomains cc) (ccPoints cc) (respRect resp) mouse
   pure PlotResponse {plotResponse = resp, plotHover = hover}
 
 -- | One line series with a grid and no legend.

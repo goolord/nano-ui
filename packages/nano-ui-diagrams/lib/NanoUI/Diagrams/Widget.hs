@@ -7,6 +7,7 @@ module NanoUI.Diagrams.Widget
   , fitLayout
   , labelFitScale
   , diagramFrame
+  , frameInner
   , PlotStyle (..)
   , themePlotStyle
   , defaultPlotStyle
@@ -18,7 +19,7 @@ module NanoUI.Diagrams.Widget
 
 import Data.Colour (Colour)
 import Data.Colour.SRGB (sRGB24)
-import Data.Hashable (hash)
+import Data.Hashable (hash, hashWithSalt)
 import Data.Primitive.PrimArray (indexPrimArray, newPrimArray, runPrimArray, writePrimArray)
 import Data.Primitive.SmallArray (SmallArray, emptySmallArray, indexSmallArray, mapSmallArray', sizeofSmallArray, smallArrayFromList)
 import Diagrams.Core (QDiagram)
@@ -100,20 +101,18 @@ defaultPlotStyle = themePlotStyle defaultTheme
 
 themePlotKey :: Theme -> Int
 themePlotKey t =
-  hash
-    [ colorToWord32 (themeAccent t)
-    , colorToWord32 (themeMuted t)
-    , colorToWord32 (themeRed t)
-    , colorToWord32 (themeOrange t)
-    , colorToWord32 (themeYellow t)
-    , colorToWord32 (themeGreen t)
-    , colorToWord32 (themePurple t)
-    , colorToWord32 (themeSeparator t)
-    , colorToWord32 (themeWindow t)
-    , colorToWord32 (styleBg (themePanel t))
-    , colorToWord32 (styleBorder (themePanel t))
-    , colorToWord32 (styleBg (themeInput t))
-    ]
+  hash (colorToWord32 (themeAccent t))
+    `hashWithSalt` colorToWord32 (themeMuted t)
+    `hashWithSalt` colorToWord32 (themeRed t)
+    `hashWithSalt` colorToWord32 (themeOrange t)
+    `hashWithSalt` colorToWord32 (themeYellow t)
+    `hashWithSalt` colorToWord32 (themeGreen t)
+    `hashWithSalt` colorToWord32 (themePurple t)
+    `hashWithSalt` colorToWord32 (themeSeparator t)
+    `hashWithSalt` colorToWord32 (themeWindow t)
+    `hashWithSalt` colorToWord32 (styleBg (themePanel t))
+    `hashWithSalt` colorToWord32 (styleBorder (themePanel t))
+    `hashWithSalt` colorToWord32 (styleBg (themeInput t))
 
 uiPlotStyle :: Ui :> es => Eff es PlotStyle
 uiPlotStyle = fmap themePlotStyle uiTheme
@@ -286,21 +285,22 @@ framedDiagram contentKey dw dh layout d = do
   theme <- uiTheme
   let ps = themePlotStyle theme
   drawingCached dw dh (fmLineHeight fm) (contentKey theme) (const layout) (fitLayoutIO fm layout d) $ \rectBox ->
-    let borderW = 1
-        inset = borderW
-        inner =
-          Rect
-            (rectX rectBox + inset)
-            (rectY rectBox + inset)
-            (max 0 (rectW rectBox - 2 * inset))
-            (max 0 (rectH rectBox - 2 * inset))
+    let inner = frameInner rectBox
         w = realToFrac (rectW inner) :: Double
         h = realToFrac (rectH inner)
         plot =
           if w <= 0 || h <= 0
             then emptySmallArray
             else mapSmallArray' (shiftDrawOp (rectX inner) (rectY inner)) (diagramOps w h d)
-     in diagramFrame ps borderW rectBox <> plot
+     in diagramFrame ps frameBorder rectBox <> plot
+
+frameBorder :: Float
+frameBorder = 1
+
+-- | The box a framed diagram draws into, inside its border.
+frameInner :: Rect -> Rect
+frameInner (Rect x y w h) =
+  Rect (x + frameBorder) (y + frameBorder) (max 0 (w - 2 * frameBorder)) (max 0 (h - 2 * frameBorder))
 
 fitLayoutIO :: FontMetrics -> Layout -> Diagram B -> IO Layout
 fitLayoutIO fm layout d = do

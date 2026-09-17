@@ -43,13 +43,8 @@ lttb k0 pts
                            in if area > bestArea
                                 then findBest (j + 1) j area
                                 else findBest (j + 1) bestIdx bestArea
-                    !initIdx = rangeStart
-                    !initArea = if rangeStart < rangeEnd
-                                  then triArea prevPt (pts V.! initIdx) (avgX, avgY)
-                                  else 0
-                    !best = if rangeStart < rangeEnd
-                              then findBest (rangeStart + 1) initIdx initArea
-                              else rangeStart
+                    -- An empty range keeps rangeStart; areas are never negative.
+                    !best = findBest rangeStart rangeStart (-1)
                  in do
                    MV.write out (i + 1) (pts V.! best)
                    go (i + 1) best

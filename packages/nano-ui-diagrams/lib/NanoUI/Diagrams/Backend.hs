@@ -7,7 +7,7 @@ module NanoUI.Diagrams.Backend
   , B
   , diagramOps
   , diagramTextOps
-  , uniformHeight
+  , letterbox
   )
 where
 
@@ -237,20 +237,18 @@ renderFull textOnly w h d
   | w <= 0 || h <= 0 = emptySmallArray
   | otherwise =
       let
-        outH = uniformHeight w h d
         V2 dw dh = size d
-        outW = if dh <= 1e-9 then w else outH * dw / dh
+        (_, outH, dx, dy) = letterbox dw dh w h
         ops = renderDia NanoUIBackend (NanoUIOptions (mkHeight outH) textOnly) d
-        dx = realToFrac ((w - outW) / 2)
-        dy = realToFrac ((h - outH) / 2)
        in
-        mapSmallArray' (shiftDrawOp dx dy) ops
+        mapSmallArray' (shiftDrawOp (realToFrac dx) (realToFrac dy)) ops
 
-uniformHeight :: Double -> Double -> QDiagram b V2 Double Any -> Double
-uniformHeight w h d =
+-- | Scale a @dw@ by @dh@ diagram uniformly to fit a @w@ by @h@ box and centre
+-- it: the drawn width and height, and the x and y offsets inside the box.
+letterbox :: Double -> Double -> Double -> Double -> (Double, Double, Double, Double)
+letterbox dw dh w h =
   let
-    V2 dw dh = size d
+    outH = if dw <= 1e-9 || dh <= 1e-9 then h else min h (w * dh / dw)
+    outW = if dh <= 1e-9 then w else outH * dw / dh
    in
-    if dw <= 1e-9 || dh <= 1e-9
-      then h
-      else min h (w * dh / dw)
+    (outW, outH, (w - outW) / 2, (h - outH) / 2)

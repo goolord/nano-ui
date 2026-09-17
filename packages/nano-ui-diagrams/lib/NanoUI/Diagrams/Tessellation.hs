@@ -5,7 +5,6 @@ module NanoUI.Diagrams.Tessellation
   , fillPolygon
   , strokePolyline
   , flattenCubic
-  , bezierTolerance
   ) where
 
 import Control.Monad (forM_)

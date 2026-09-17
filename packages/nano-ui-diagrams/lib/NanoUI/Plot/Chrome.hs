@@ -4,8 +4,6 @@ module NanoUI.Plot.Chrome
   ( chartDiagram
   , chartMargins
   , Margins (..)
-  , chartXDomain
-  , chartYDomain
   , seriesDomains
   , seriesPoints
   ) where
@@ -52,7 +50,7 @@ import NanoUI.Diagrams.Backend (B)
 import NanoUI.Diagrams.Widget (PlotStyle (..), colourOf)
 import NanoUI.Plot.Decimate (lttb)
 import NanoUI.Plot.Scale
-  ( domainExtent
+  ( domainExtentBy
   , domainToPlot
   , formatTick
   , mergeDomains
@@ -99,10 +97,11 @@ data ChartChrome = ChartChrome
   , ccPx :: Float -> Double
   , ccYTitleX :: !Double
   , ccXTitleY :: !Double
+  , ccLegendW :: !Float
   }
 
 chartMargins :: FontMetrics -> Chart -> Margins
-chartMargins fm chart = ccMargins (chartChrome fm (chartYDomain chart) chart)
+chartMargins fm chart = ccMargins (chartChrome fm (snd (seriesDomains chart)) chart)
 
 -- | Chrome for a chart whose y domain the caller has already computed.
 chartChrome :: FontMetrics -> Domain -> Chart -> ChartChrome
@@ -166,6 +165,7 @@ chartChrome fm yDom chart =
         , ccPx = px
         , ccYTitleX = yTitleX
         , ccXTitleY = xTitleY
+        , ccLegendW = legendW
         }
 
 textWidth :: FontMetrics -> T.Text -> Float
@@ -183,26 +183,20 @@ seriesExtent :: Series -> (Domain, Domain)
 seriesExtent s =
   case seriesData s of
     PointsXY pts ->
-      let (xs, ys) = U.unzip pts
-       in (padDomain 0.05 (domainExtent xs), padDomain 0.05 (domainExtent ys))
+      (padDomain 0.05 (domainExtentBy fst pts), padDomain 0.05 (domainExtentBy snd pts))
     CategoryY _ values ->
       let n = sizeofPrimArray values
-       in (Domain (-0.5) (fromIntegral n - 0.5), padDomain 0.05 (domainExtent (U.generate n (indexPrimArray values))))
+       in (Domain (-0.5) (fromIntegral n - 0.5), padDomain 0.05 (domainExtentBy (indexPrimArray values) (U.enumFromN 0 n)))
 
-chartXDomain :: Chart -> Domain
-chartYDomain :: Chart -> Domain
-chartXDomain = fst . seriesDomains
-chartYDomain = snd . seriesDomains
-
-chartDiagram :: FontMetrics -> Theme -> PlotStyle -> Chart -> Diagram B
-chartDiagram fm theme ps chart =
+-- | Draw a chart from its 'seriesDomains' and each series' 'seriesPoints'.
+chartDiagram :: FontMetrics -> Theme -> PlotStyle -> (Domain, Domain) -> [U.Vector (Double, Double)] -> Chart -> Diagram B
+chartDiagram fm theme ps (xDom, yDom) points chart =
   let chrome = chartChrome fm yDom chart
       margins = ccMargins chrome
       leftM = marginLeft margins
       rightM = marginRight margins
       botM = marginBottom margins
       topM = marginTop margins
-      (xDom, yDom) = seriesDomains chart
       xTicks = niceTicks 6 xDom
       yTicks = niceTicks 6 yDom
       tickPad = ccTickPad chrome
@@ -254,8 +248,8 @@ chartDiagram fm theme ps chart =
         ]
       seriesDia =
         mconcat
-          [ renderSeries ps color xDom yDom chart s
-          | (color, s) <- coloredSeries
+          [ renderSeries ps color xDom yDom s pts
+          | ((color, s), pts) <- zip coloredSeries points
           ]
       legend = renderLegend fm ps coloredSeries chart chrome
       marginBox :: Diagram B
@@ -272,12 +266,11 @@ plotLbl :: PlotStyle -> Double -> Double -> String -> Diagram B
 plotLbl ps ax ay s =
   alignedText ax ay s # fontSizeL 0.085 # fc (plotMuted ps) # lc (plotMuted ps) # lw none
 
-renderSeries :: PlotStyle -> Color -> Domain -> Domain -> Chart -> Series -> Diagram B
-renderSeries ps c xDom yDom chart s =
+renderSeries :: PlotStyle -> Color -> Domain -> Domain -> Series -> U.Vector (Double, Double) -> Diagram B
+renderSeries ps c xDom yDom s pts =
   let ink = colourOf c
       fillCol = lerpColor c (plotFrameBg ps) 0.18
       fill = colourOf fillCol
-      pts = seriesPoints chart s
       toP (x, y) = p2 (domainToPlot xDom x, domainToPlot yDom y)
    in case seriesKind s of
         LineSeries w _ ->
@@ -384,10 +377,7 @@ renderLegend _ _ _ Chart {chartLegend = LegendNone} _ = mempty
 renderLegend fm ps coloredSeries chart chrome =
   let px = ccPx chrome
       row = px (fmLineHeight fm + 8)
-      col =
-        let names = map seriesName (chartSeries chart)
-            w = maximum (0 : map (textWidth fm) names)
-         in px w + 0.22
+      col = px (ccLegendW chrome) + 0.22
       botLegendY =
         case chartXTitle chart of
           Nothing -> -(ccXTickPad chrome) - px (fmLineHeight fm) - px 6
