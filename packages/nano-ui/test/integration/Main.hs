@@ -12,6 +12,7 @@ import Cases.HostDraw (runExternalTextTest, runSquareGeometryTest)
 import Cases.PointerRelease
   ( runReleaseElsewhereTest
   , runReleaseReturnsTest
+  , runOverlapPressTest
   , runRightReleaseElsewhereTest
   )
 import Cases.Runner (runDrawingLockTest, runSessionLoopTest)
@@ -294,6 +295,7 @@ testSpecs =
   , TestSpec "release-elsewhere" False runReleaseElsewhereTest
   , TestSpec "right-release-elsewhere" False runRightReleaseElsewhereTest
   , TestSpec "release-returns" False runReleaseReturnsTest
+  , TestSpec "overlap-press" False runOverlapPressTest
   , TestSpec "tooltip-hover" False runTooltipHoverTest
   , TestSpec "tooltip-id-stable" False runTooltipIdStableTest
   , TestSpec "tooltip-scroll-pos" False runTooltipScrollPosTest

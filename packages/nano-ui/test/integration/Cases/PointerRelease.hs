@@ -4,6 +4,7 @@ module Cases.PointerRelease
   ( runReleaseElsewhereTest
   , runRightReleaseElsewhereTest
   , runReleaseReturnsTest
+  , runOverlapPressTest
   ) where
 
 import Control.Monad (void)
@@ -119,4 +120,27 @@ runReleaseReturnsTest ctx failed = do
   _ <- runFrame ctx (moveTo a (pressOn b)) ui
   ((_, bBack), _, _, _) <- runFrame ctx (releaseOn b (pressOn b)) ui
   assert failed (respClicked bBack)
+  void (runFrame ctx inp0 ui)
+
+-- | Where two widgets overlap, a held press belongs to the one hover lights
+-- up: the earlier sibling, which paints on top.
+runOverlapPressTest :: Context -> IORef Int -> IO ()
+runOverlapPressTest ctx failed = do
+  let inp0 = withInput 320 240
+      ui = rowWith (gap (-30)) $ do
+        a <- buttonWith' (fixedW 80) "Alpha"
+        b <- buttonWith' (fixedW 80) "Beta"
+        pure (a, b)
+  (a, _) <- warmup2 ctx inp0 ui
+  let Rect ax ay aw ah = respRect a
+      overlap = inp0 {inputMousePos = V2 (ax + aw - 10) (ay + ah / 2)}
+      press = overlap {inputMouseDown = True, inputMousePressed = True}
+      held' = overlap {inputMouseDown = True}
+  _ <- runFrame ctx overlap ui
+  hot <- getHotId ctx
+  assert failed (hot == respId a)
+  _ <- runFrame ctx press ui
+  ((aHeld, bHeld), _, _, _) <- runFrame ctx held' ui
+  assert failed (respPressed aHeld && not (respPressed bHeld))
+  void (runFrame ctx (overlap {inputMouseReleased = True}) ui)
   void (runFrame ctx inp0 ui)

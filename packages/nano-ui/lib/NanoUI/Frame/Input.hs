@@ -67,7 +67,6 @@ import NanoUI.Layout.Arena
   ( NodeIdx
   , NodeType (..)
   , findNodeM
-  , findNodeRevM
   , foldNodesM
   , getNodeType
   , getParent
@@ -168,11 +167,13 @@ finalizePointerPress ctx inp =
                 whenM (not <$> isDisabled ctx wid) $
                   writeIORef (ctxActiveId ctx) wid
 
+-- | The widget of a wanted type under @mouse@ that hover would pick: the
+-- first in arena order, since earlier siblings paint over later ones.
 findTopWidgetUnderMouse :: Context -> V2 -> (NodeType -> Bool) -> IO (Maybe WidgetId)
 findTopWidgetUnderMouse ctx mouse wanted = do
   let na = ctxNodeArena ctx
   mIdx <-
-    findNodeRevM na $ \idx -> do
+    findNodeM na $ \idx -> do
       nt <- getNodeType na idx
       if not (wanted nt)
         then pure False
