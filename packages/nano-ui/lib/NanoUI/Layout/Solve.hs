@@ -5,13 +5,14 @@ module NanoUI.Layout.Solve
   , placeWindows
   , placePopups
   , computePopupPosition
-  , positionWindowNode
+  , placeWindowNode
   , scrollBarSlotOf
   , findAncestorMaxW
   ) where
 
 import Control.Monad (foldM, unless, when)
 import Data.IORef (readIORef)
+import Data.Maybe (fromMaybe)
 import Data.Primitive.PrimArray
   ( MutablePrimArray
   , copyMutablePrimArray
@@ -1611,28 +1612,22 @@ placeWindows na fm winW winH lookupPos lookupSize = do
     nt <- getNodeType na idx
     when (nt == NodeWindow) $ do
       wid <- getWidgetId na idx
-      (minW, minH, maxW, maxH) <- getMinMax na idx
       (_, _, iw, ih) <- getRect na idx
-      msize <- lookupSize wid
-      let w0 =
-            case msize of
-              Just (sw, _) -> sw
-              Nothing -> min iw winW
-          h0 =
-            case msize of
-              Just (_, sh) -> sh
-              Nothing -> min ih winH
-          w = clamp minW (min maxW winW) w0
-          h = clamp minH (min maxH winH) h0
+      (w0, h0) <- fromMaybe (min iw winW, min ih winH) <$> lookupSize wid
       mpos <- lookupPos wid
-      let (x0, y0) = maybe (max 0 (winW - w - margin), margin) id mpos
-          x = clamp 0 (max 0 (winW - w)) x0
-          y = clamp 0 (max 0 (winH - h)) y0
-      positionWindowNode na fm idx x y w h
+      placeWindowNode na fm winW winH idx w0 h0 $ \w -> fromMaybe (winW - w - margin, margin) mpos
 
--- Fit sizing caps at intrinsic size; floating windows use an explicit frame size.
-positionWindowNode :: NodeArena -> FontMetrics -> NodeIdx -> Float -> Float -> Float -> Float -> IO ()
-positionWindowNode na fm idx x y w h = do
+-- | Lay out window @idx@ at size @w0 h0@, clamped to its min and max size and
+-- the screen, with its origin, given that size, clamped on screen. Fit sizing
+-- caps at intrinsic size; floating windows use an explicit frame size.
+placeWindowNode :: NodeArena -> FontMetrics -> Float -> Float -> NodeIdx -> Float -> Float -> (Float -> (Float, Float)) -> IO ()
+placeWindowNode na fm winW winH idx w0 h0 originFor = do
+  (minW, minH, maxW, maxH) <- getMinMax na idx
+  let w = clamp minW (min maxW winW) w0
+      h = clamp minH (min maxH winH) h0
+      (x0, y0) = originFor w
+      x = clamp 0 (max 0 (winW - w)) x0
+      y = clamp 0 (max 0 (winH - h)) y0
   setRect na idx x y w h
   env <- floatingEnv na fm
   (pad, gap, dir) <- containerFlow (seArrays env) idx

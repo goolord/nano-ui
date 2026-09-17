@@ -55,7 +55,7 @@ import NanoUI.Layout.Arena
   , getRect
   , getWidgetId
   )
-import NanoUI.Layout.Solve (positionWindowNode, scrollBarSlotOf)
+import NanoUI.Layout.Solve (placeWindowNode, scrollBarSlotOf)
 import NanoUI.Style (Padding (..))
 import NanoUI.Types (DamageBounds (..), Rect (..), V2 (..), haloDamageSlop, rectContains, rectInflate)
 
@@ -295,15 +295,9 @@ relayoutWindow ctx winW winH wid nw nh = do
   case mIdx of
     Nothing -> pure ()
     Just idx -> do
-      (minW, minH, maxW, maxH) <- getMinMax (ctxNodeArena ctx) idx
-      let w = max minW (min (min maxW winW) nw)
-          h = max minH (min (min maxH winH) nh)
       mpos <- lookupWindowPos ctx wid
       (x, y, _, _) <- getRect (ctxNodeArena ctx) idx
-      let (x0, y0) = fromMaybe (x, y) mpos
-          x' = max 0 (min x0 (max 0 (winW - w)))
-          y' = max 0 (min y0 (max 0 (winH - h)))
-      positionWindowNode (ctxNodeArena ctx) (ctxFontMetrics ctx) idx x' y' w h
+      placeWindowNode (ctxNodeArena ctx) (ctxFontMetrics ctx) winW winH idx nw nh (const (fromMaybe (x, y) mpos))
 
 -- | Resize edge under @mouse@ for the topmost window whose halo holds it,
 -- unless the halo is blocked or the pointer is on the title bar or one of its
