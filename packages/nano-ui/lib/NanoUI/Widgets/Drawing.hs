@@ -27,12 +27,9 @@ import NanoUI.Widgets.Node (Response, addWidget)
 -- repaints. Use 'drawingVersioned' for output that changes, or
 -- 'NanoUI.Widgets.Custom.customWidget' without a key to have every frame
 -- rebuild and compare.
+{-# INLINE drawing #-}
 drawing :: Ui :> es => (Layout -> Layout) -> (Rect -> SmallArray DrawOp) -> Eff es Response
-drawing f build = do
-  wid <- nextId
-  ctx <- askContext
-  uiIO (registerDrawing ctx wid 0 build)
-  addWidget wid NodeDrawing T.empty 0 (f defaultLayout)
+drawing = drawingVersioned 0
 
 -- | Like 'drawing', but the tessellated op cache is keyed by an explicit
 -- content version. Change the version whenever the builder output changes
@@ -44,7 +41,7 @@ drawingVersioned :: Ui :> es => Int -> (Layout -> Layout) -> (Rect -> SmallArray
 drawingVersioned version f build = do
   wid <- nextId
   ctx <- askContext
-  uiIO (registerDrawing ctx wid (if version == 0 then 1 else version) build)
+  uiIO (registerDrawing ctx wid version build)
   addWidget wid NodeDrawing T.empty 0 (f defaultLayout)
 
 -- | Like 'drawingVersioned', but the layout itself comes from @compute@, which
