@@ -223,7 +223,7 @@ syncDisplay ctx env inp = do
         else sdlFontCacheSource (sdlFontCache env)
     writeIORef (sdlFontAppliedRef env) requested
     reloadSdlFontCache (sdlFontCache env) source
-    writeIORef (sdlCachedCtx env) =<< withSdlFontCache (sdlFontCache env) ctx
+    writeIORef (sdlCachedCtx env) . withSdlClipboard =<< withSdlFontCache (sdlFontCache env) ctx
     clearMeasureCache ctx
     markDirty ctx
   queried <- queryWindowLogicalSize (sdlWindow env)
@@ -236,7 +236,7 @@ syncDisplay ctx env inp = do
           s -> s
   mouse <- queryMouseWindowPos
   ctxMeasured <- readIORef (sdlCachedCtx env)
-  pure (withSdlClipboard ctxMeasured, inp {inputWindowSize = winSize, inputMousePos = mouse})
+  pure (ctxMeasured, inp {inputWindowSize = winSize, inputMousePos = mouse})
 
 -- | Everything a window session is opened with, besides the context.
 data WindowConfig = WindowConfig
@@ -366,7 +366,7 @@ startSdlWindow ctx cfg fontSource monoSource = do
               glyphAtlas
               (wcFontSize cfg)
               scaleRef
-          cachedCtx <- newIORef =<< withSdlFontCache fontCache ctx
+          cachedCtx <- newIORef . withSdlClipboard =<< withSdlFontCache fontCache ctx
           let refreshPeriod =
                 if refreshHz > 0
                   then 1 / fromIntegral refreshHz
@@ -402,8 +402,7 @@ startSdlWindow ctx cfg fontSource monoSource = do
               , sdlFontCache = fontCache
               , sdlDialogState = dialogState
               }
-  ctxMeasured <- readIORef (sdlCachedCtx env)
-  let ctx' = withSdlClipboard ctxMeasured
+  ctx' <- readIORef (sdlCachedCtx env)
   setHost ctx' env
   setWakeLoop ctx' pushRefreshEvent
   pure (ctx', env)
