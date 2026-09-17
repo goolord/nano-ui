@@ -22,7 +22,7 @@ import Control.Monad (forM, forM_, unless, when)
 import Data.Foldable (find)
 import Data.IORef (readIORef, writeIORef)
 import qualified Data.IntMap.Strict as IM
-import Data.Maybe (catMaybes, listToMaybe)
+import Data.Maybe (catMaybes, listToMaybe, maybeToList)
 import qualified Data.Text as T
 import NanoUI.Context
   ( Context (..)
@@ -50,7 +50,7 @@ import NanoUI.Frame.Hit (findNodeByWidgetId, widgetOverlayAllowed)
 import NanoUI.Frame.Scroll.Geometry (padTextClipRect)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Input (Input (..), Key (..), foldInputKeys, inputKeys, inputMouseDown, inputMousePos, inputMousePressed)
-import NanoUI.Layout.Arena (NodeType (NodeSelect, NodeTextInput), findNodeM, foldNodeRevM, getNodeType, getOptions, getRect, getWidgetId)
+import NanoUI.Layout.Arena (NodeType (NodeSelect, NodeTextInput), findNodeM, foldNodeRevM, getNodeType, lookupNodeByWidgetId, getOptions, getRect, getWidgetId)
 import NanoUI.Store (Slot (..), slotKey)
 import NanoUI.Style (Style (..), Theme (..), scrollBarThumbColor, scrollBarTrackColor, themeAccent, themeInput)
 import NanoUI.Types (Color (..), Rect (..), V2 (..), rectContains, rectIntersect)
@@ -78,11 +78,15 @@ openDropdowns :: Context -> IO [Dropdown]
 openDropdowns ctx = do
   store <- getStore ctx
   focus <- readIORef (ctxFocusId ctx)
-  -- Selects open only through the store flag and combos only while focused,
-  -- so most frames skip the walk.
-  if not (anySelectOpen store) && hashWidgetId focus == 0
-    then pure []
-    else foldNodeRevM na (\acc idx -> maybe acc (: acc) <$> dropdownAt store focus idx) []
+  -- Selects open only through the store flag and combos only while focused.
+  -- With no select open, the focused node is the only candidate, so only an
+  -- open select walks the arena.
+  if anySelectOpen store
+    then foldNodeRevM na (\acc idx -> maybe acc (: acc) <$> dropdownAt store focus idx) []
+    else
+      if hashWidgetId focus == 0
+        then pure []
+        else maybe (pure []) (fmap maybeToList . dropdownAt store focus) =<< lookupNodeByWidgetId na focus
   where
     na = ctxNodeArena ctx
     dropdownAt store focus idx =
