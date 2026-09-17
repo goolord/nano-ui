@@ -77,6 +77,10 @@
   `styled (panelStyle (background bg . borderColor border))` around a panel.
   `callout` tints the theme's panel colour instead of a fixed dark grey.
 - `uiTheme` returns the theme of the enclosing `styled` scope.
+- Undo history keeps its edits' texts as `ShortText` copies, which never
+  hold on to the larger text a slice came from. A session of typing,
+  deleting and pasting in a 5000-line document keeps a 426 KB history
+  instead of 1.74 MB.
 - SVG documents are read by hexml instead of a hand-written XML scanner. A
   DOCTYPE, which hexml rejects, is skipped. Attribute values must be quoted,
   as XML requires.

@@ -170,6 +170,7 @@ library
         hexml ^>=0.3.5,
         primitive ^>=0.9,
         text ^>=2.1,
+        text-short ^>=0.1.6,
         unordered-containers ^>=0.2,
         vector ^>=0.13
     hs-source-dirs:   lib

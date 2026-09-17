@@ -24,6 +24,7 @@ module NanoUI.Widgets.TextEditor
     -- * History
   , EditHistory (..)
   , EditGroup (..)
+  , StoredEdit (..)
   , EditKind (..)
   , emptyHistory
   , sealHistory
@@ -35,6 +36,7 @@ import Control.Monad (void, when)
 import Data.Bits ((.&.), (.|.))
 import Data.Char (isSpace, toLower)
 import Data.Text qualified as T
+import Data.Text.Short qualified as TS
 import NanoUI.Context (Context (..))
 import NanoUI.Input (Key (..), Modifiers (..))
 import NanoUI.Widgets.TextBuffer (Cursor (..), TextBuffer, TextEdit (..))
@@ -104,10 +106,17 @@ hasSelection ed = editorAnchor ed /= TB.getCursor (editorBuffer ed)
 data EditKind = EditTyping | EditDeleting | EditOther
   deriving (Eq, Show)
 
+-- | An edit as history keeps it. Undo steps live for the life of a field and
+-- are rarely replayed, so their texts are compact copies: they cost two
+-- words less than a 'T.Text', and never keep alive the larger text a slice
+-- was cut from.
+data StoredEdit = StoredEdit !Cursor !TS.ShortText !TS.ShortText
+  deriving (Eq, Show)
+
 -- | Edits undone and redone as one step.
 data EditGroup = EditGroup
   { groupKind :: !EditKind
-  , groupEdits :: ![TextEdit]
+  , groupEdits :: ![StoredEdit]
   -- ^ Newest first.
   , groupBefore :: !(Cursor, Cursor)
   -- ^ Anchor and cursor before the first edit.
@@ -152,14 +161,15 @@ record kind before edit after (EditHistory undos _ depth open) =
   case undos of
     g : rest
       | joins g ->
-          EditHistory (g {groupEdits = edit : groupEdits g, groupAfter = after} : rest) [] depth True
+          EditHistory (g {groupEdits = stored : groupEdits g, groupAfter = after} : rest) [] depth True
     _ ->
       let depth' = depth + 1
-          group = EditGroup kind [edit] before after
+          group = EditGroup kind [stored] before after
        in if depth' > maxHistoryDepth + 50
             then EditHistory (take maxHistoryDepth (group : undos)) [] maxHistoryDepth True
             else EditHistory (group : undos) [] depth' True
   where
+    stored = StoredEdit (editAt edit) (TS.fromText (editRemoved edit)) (TS.fromText (editInserted edit))
     joins g =
       open
         && kind /= EditOther
@@ -168,7 +178,7 @@ record kind before edit after (EditHistory undos _ depth open) =
         && (kind /= EditTyping || not (startsWord g))
     -- A letter typed after a space starts a new undo step.
     startsWord g = case (groupEdits g, T.uncons (editInserted edit)) of
-      (prev : _, Just (c, _)) -> not (isSpace c) && maybe False (isSpace . snd) (T.unsnoc (editInserted prev))
+      (StoredEdit _ _ prevInserted : _, Just (c, _)) -> not (isSpace c) && maybe False (isSpace . snd) (TS.unsnoc prevInserted)
       _ -> False
 
 --------------------------------------------------------------------------------
@@ -211,19 +221,20 @@ runCommand mode cmd ed@(Editor buf anchor hist) =
           edit EditOther (TB.replaceEdit (singleLine txt) (Cursor 0 0) (TB.documentEnd buf) buf)
     Undo -> case historyUndo hist of
       g : rest ->
-        let buf' = foldl (\b e -> TB.applyEdit (TB.invertEdit e) b) buf (groupEdits g)
+        let buf' = foldl (\b e -> TB.applyEdit (TB.invertEdit (replayed e)) b) buf (groupEdits g)
             (a, c) = groupBefore g
          in Editor (TB.withCursor c buf') a hist {historyUndo = rest, historyRedo = g : historyRedo hist, historyDepth = historyDepth hist - 1, historyOpen = False}
       [] -> ed
     Redo -> case historyRedo hist of
       g : rest ->
-        let buf' = foldr TB.applyEdit buf (groupEdits g)
+        let buf' = foldr (TB.applyEdit . replayed) buf (groupEdits g)
             (a, c) = groupAfter g
          in Editor (TB.withCursor c buf') a hist {historyUndo = g : historyUndo hist, historyRedo = rest, historyDepth = historyDepth hist + 1, historyOpen = False}
       [] -> ed
     _ -> ed
   where
     cursor = TB.getCursor buf
+    replayed (StoredEdit at removed inserted) = TextEdit at (TS.toText removed) (TS.toText inserted)
     singleLine = if modeMultiLine mode then TB.insertableText else T.filter (/= '\n') . TB.insertableText
     replaceSelection kind txt = edit kind (TB.replaceEdit txt anchor cursor buf)
     edit kind e
