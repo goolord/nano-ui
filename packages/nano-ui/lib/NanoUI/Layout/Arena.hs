@@ -27,13 +27,22 @@ module NanoUI.Layout.Arena
   , styleMinH
   , styleMaxW
   , styleMaxH
+  , stylePadL
+  , stylePadR
+  , stylePadT
+  , stylePadB
+  , styleGap
+  , styleGridMinColW
   , tagNodeType
+  , tagDirection
   , tagWSizing
   , tagHSizing
   , tagScrollBarSlot
   , treeParent
   , treeFirstChild
   , treeNextSibling
+  , treeStyleIdx
+  , treeGridCols
   , readGeom
   , writeGeom
   , readStyle
