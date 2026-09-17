@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | Charting and plotting API for nano-ui.
 module NanoUI.Plot
   ( module NanoUI.Plot.Types

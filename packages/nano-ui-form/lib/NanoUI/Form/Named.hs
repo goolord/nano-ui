@@ -1,6 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-
 module NanoUI.Form.Named
   ( inputText
   , inputTextWithPlaceholder

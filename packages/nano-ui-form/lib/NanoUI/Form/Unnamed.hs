@@ -1,5 +1,3 @@
-{-# LANGUAGE ScopedTypeVariables #-}
-
 module NanoUI.Form.Unnamed
   ( inputText
   , inputPassword

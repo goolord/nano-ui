@@ -1,6 +1,3 @@
-{-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 module NanoUI.Plot.Scale
   ( domainToPlot
   , plotToDomain

@@ -1,6 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TypeFamilies #-}
-
 module NanoUI.Form.Backend
   ( FormInput (..)
   , formInputToText

@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 module NanoUI.Plot.Builder
   ( chart
   , withTitle

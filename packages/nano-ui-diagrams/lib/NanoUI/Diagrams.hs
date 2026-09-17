@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 -- | diagrams-lib backend that emits nano-ui 'DrawOp's.
 module NanoUI.Diagrams
   ( module NanoUI.Diagrams.Backend

@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 module NanoUI.Form
   ( -- * Core Form Types
     Form

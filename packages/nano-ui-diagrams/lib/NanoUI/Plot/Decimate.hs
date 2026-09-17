@@ -1,5 +1,3 @@
-{-# LANGUAGE BangPatterns #-}
-
 module NanoUI.Plot.Decimate
   ( lttb
   , minMaxDecimate

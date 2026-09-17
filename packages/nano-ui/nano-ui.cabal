@@ -19,14 +19,9 @@ extra-doc-files:
 common extensions
     default-language: GHC2024
     default-extensions:
-        BangPatterns
-        DeriveGeneric
         DuplicateRecordFields
-        FlexibleContexts
-        GeneralizedNewtypeDeriving
         MagicHash
         OverloadedStrings
-        ScopedTypeVariables
         UnboxedTuples
 
 common rts-options
@@ -37,10 +32,6 @@ common rts-options
 
 common test-rts-options
     ghc-options: -rtsopts -threaded "-with-rtsopts=-A8m -H64m -K128m -T"
-
--- Tests, benchmarks and executables also reject dependencies they never import.
-common unused-packages
-    ghc-options: -Wunused-packages
 
 common warnings
   ghc-options:
@@ -54,6 +45,16 @@ common warnings
     -Wmissing-home-modules
     -Wpartial-fields
     -Wredundant-constraints
+
+-- Tests, benchmarks and executables build against the library and also
+-- reject dependencies they never import.
+common downstream
+    import:           extensions
+    import:           warnings
+    ghc-options:      -Wunused-packages
+    build-depends:
+        base ^>=4.22.0.0,
+        nano-ui
 
 library
     import:           extensions
@@ -173,39 +174,28 @@ library
         unordered-containers ^>=0.2,
         vector ^>=0.13
     hs-source-dirs:   lib
-    default-language: GHC2024
 
 benchmark nano-ui-id-bench
-    import:           extensions
+    import:           downstream
     import:           test-rts-options
-    import:           warnings
-    import:           unused-packages
     type:             exitcode-stdio-1.0
     main-is:          IdBench.hs
     build-depends:
-        base ^>=4.22.0.0,
-        nano-ui,
         tasty-bench ^>=0.4
     hs-source-dirs:   benchmark
 
 test-suite text-buffer-spec
-    import:           extensions
-    import:           warnings
-    import:           unused-packages
+    import:           downstream
     type:             exitcode-stdio-1.0
     main-is:          NanoUI/TextBufferSpec.hs
     build-depends:
-        base ^>=4.22.0.0,
         hspec ^>=2.11,
-        nano-ui,
         text ^>=2.1
     hs-source-dirs:   test
 
 test-suite nano-ui-test
-    import:           extensions
+    import:           downstream
     import:           test-rts-options
-    import:           warnings
-    import:           unused-packages
     type:             exitcode-stdio-1.0
     main-is:          Main.hs
     other-modules:
@@ -240,26 +230,20 @@ test-suite nano-ui-test
         Cases.Tooltip
         Cases.Window
     build-depends:
-        base ^>=4.22.0.0,
         bytestring,
         containers,
         effectful ^>=2.6,
-        nano-ui,
         nothunks,
         primitive ^>=0.9,
         text ^>=2.1
     hs-source-dirs:   test/integration
 
 executable nano-ui-profile
-    import:           extensions
+    import:           downstream
     import:           rts-options
-    import:           warnings
-    import:           unused-packages
     main-is:          Profile.hs
     hs-source-dirs:   examples
     build-depends:
-        base ^>=4.22.0.0,
-        nano-ui,
         primitive ^>=0.9,
         text ^>=2.1
 
@@ -267,14 +251,10 @@ executable nano-ui-profile
 -- Assertions fail the build if GHC stops inlining or starts allocating in the
 -- checked bindings, converting silent performance regressions into errors.
 test-suite nano-ui-inspection
-    import:           extensions
-    import:           warnings
-    import:           unused-packages
+    import:           downstream
     type:             exitcode-stdio-1.0
     main-is:          Inspection.hs
     ghc-options:      -fplugin=Test.Inspection.Plugin
     build-depends:
-        base ^>=4.22.0.0,
-        inspection-testing,
-        nano-ui
+        inspection-testing
     hs-source-dirs:   test/inspection

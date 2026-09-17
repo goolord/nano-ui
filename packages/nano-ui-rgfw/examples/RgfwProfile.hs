@@ -1,5 +1,3 @@
-{-# LANGUAGE BangPatterns #-}
-
 -- | Frame loop of the RGFW demo on the OpenGL path, in a hidden window, for
 -- profiling (+RTS -p).
 module Main (main) where

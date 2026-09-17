@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 module Cases.Keyboard
   ( runKeyboardButtonTest
   , runKeyboardCheckboxTest

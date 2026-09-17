@@ -1,5 +1,3 @@
-{-# LANGUAGE BangPatterns #-}
-
 module NanoUI.Diagrams.Tessellation
   ( triangulatePolygon
   , fillPolygon

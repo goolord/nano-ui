@@ -25,13 +25,8 @@ flag sdl
 common extensions
     default-language: GHC2024
     default-extensions:
-        BangPatterns
-        DeriveGeneric
         DuplicateRecordFields
-        FlexibleContexts
-        GeneralizedNewtypeDeriving
         OverloadedStrings
-        ScopedTypeVariables
 
 common warnings
   ghc-options:

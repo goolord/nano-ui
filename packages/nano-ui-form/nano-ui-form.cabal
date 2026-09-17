@@ -18,13 +18,8 @@ extra-doc-files:
 common extensions
     default-language: GHC2024
     default-extensions:
-        BangPatterns
-        DeriveGeneric
         DuplicateRecordFields
-        FlexibleContexts
-        GeneralizedNewtypeDeriving
         OverloadedStrings
-        ScopedTypeVariables
         TypeFamilies
 
 common warnings
