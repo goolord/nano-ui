@@ -43,12 +43,8 @@ contextMenu ::
   Eff es a ->
   Eff es (Maybe a)
 contextMenu target child = do
-  (isOpen0, pos0, openAt, close) <- useContextMenu
-  inp <- askInput
-  let rightClick = respRightClicked target
-      mouse = inputMousePos inp
-  when rightClick (openAt mouse)
-  openMenuPopup (isOpen0 || rightClick) (if rightClick then mouse else pos0) child close
+  menu <- useContextMenu
+  runContextMenu menu (respRightClicked target) (const child)
 
 -- | A container whose right-click opens a context menu. The menu body
 -- receives the position it was opened at.
@@ -59,38 +55,32 @@ contextMenuArea ::
   (V2 -> Eff es b) ->
   Eff es (a, Maybe b)
 contextMenuArea f areaContent menuContent = do
-  (isOpen0, pos0, openAt, close) <- useContextMenu
+  menu <- useContextMenu
   base <- askDefaultLayout
   (areaRes, areaResp) <- containerResponse NodeContainer (f base) areaContent
-  inp <- askInput
-  let rightClick = respRightClicked areaResp
-      mouse = inputMousePos inp
-  when rightClick (openAt mouse)
-  mBody <-
-    openMenuPopup
-      (isOpen0 || rightClick)
-      (if rightClick then mouse else pos0)
-      (menuContent (if rightClick then mouse else pos0))
-      close
-  pure (areaRes, mBody)
+  (,) areaRes <$> runContextMenu menu (respRightClicked areaResp) menuContent
 
-openMenuPopup ::
+-- | Open the menu at the pointer on a right click, show it while open, and
+-- close it once a row is picked or it is dismissed.
+runContextMenu ::
   Ui :> es =>
+  (Bool, V2, V2 -> Eff es (), Eff es ()) ->
   Bool ->
-  V2 ->
-  Eff es a ->
-  Eff es () ->
+  (V2 -> Eff es a) ->
   Eff es (Maybe a)
-openMenuPopup isOpen pos child close = do
-  let cfg =
+runContextMenu (isOpen0, pos0, openAt, close) rightClick child = do
+  inp <- askInput
+  let mouse = inputMousePos inp
+      pos = if rightClick then mouse else pos0
+      cfg =
         PopupConfig
           { cfgAnchor = AnchorPoint pos
           , cfgPlacement = PlacementAtCursor
           , cfgDismissable = True
           , cfgOffset = 0
           }
-  (popupResp, mBody) <- popup isOpen cfg (columnWith (tight . gap 0) child)
-  inp <- askInput
+  when rightClick (openAt mouse)
+  (popupResp, mBody) <- popup (isOpen0 || rightClick) cfg (columnWith (tight . gap 0) (child pos))
   let picked = respHovered popupResp && inputMouseReleased inp
   when (respClicked popupResp || picked) close
   pure mBody
