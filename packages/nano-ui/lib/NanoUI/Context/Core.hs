@@ -251,25 +251,26 @@ modifyStore ctx f = do
   let !store = f prev
   writeIORef (ctxStore ctx) store
   let changedKeys =
-        [ diffKeys (storeInt prev) (storeInt store)
-        , diffKeys (storeFloat prev) (storeFloat store)
-        , diffKeys (storeDouble prev) (storeDouble store)
-        , diffKeys (storePoint prev) (storePoint store)
-        , diffKeys (storeText prev) (storeText store)
-        , diffKeys (storeFloatList prev) (storeFloatList store)
-        , diffKeys (storeIntList prev) (storeIntList store)
-        , diffKeys (storeIntSet prev) (storeIntSet store)
-        , diffKeysBy ptrEq (storeDyn prev) (storeDyn store)
-        ]
+        diffKeys (storeInt prev) (storeInt store)
+          ++ diffKeys (storeFloat prev) (storeFloat store)
+          ++ diffKeys (storeDouble prev) (storeDouble store)
+          ++ diffKeys (storePoint prev) (storePoint store)
+          ++ diffKeys (storeText prev) (storeText store)
+          ++ diffKeys (storeFloatList prev) (storeFloatList store)
+          ++ diffKeys (storeIntList prev) (storeIntList store)
+          ++ diffKeys (storeIntSet prev) (storeIntSet store)
+          ++ diffKeysBy ptrEq (storeDyn prev) (storeDyn store)
   -- The key diff doubles as the store comparison: checking 'prev /= store'
-  -- first would walk every changed map twice.
-  forM_ changedKeys $ mapM_ (\k -> damageKey ctx k (DamageInflated defaultDamageSlop))
+  -- first would walk every changed map twice. Its lazy concatenation stops at
+  -- the first changed key and allocates less than a list per map.
   when
     ( storeMirrorGen prev /= storeMirrorGen store
         || storeOpenSelect prev /= storeOpenSelect store
-        || any (not . null) changedKeys
+        || not (null changedKeys)
     )
-    (markDirty ctx)
+    $ do
+      forM_ changedKeys $ \k -> damageKey ctx k (DamageInflated defaultDamageSlop)
+      markDirty ctx
 
 diffKeysBy :: (a -> a -> Bool) -> IntMap a -> IntMap a -> [Int]
 diffKeysBy eq old new
