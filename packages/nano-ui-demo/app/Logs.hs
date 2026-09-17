@@ -21,7 +21,7 @@ import NanoUI.Context
   )
 import NanoUI.Monad (askContext, askInput, uiTime)
 import NanoUI.Testing (collectTextSpans, newPixelContext)
-import NanoUI.Testing.Harness (clickPos, findExact, hasText, requireSpan)
+import NanoUI.Testing.Harness (clickPos, expectText, findExact, hasText, keyInp, requireSpan)
 import System.Environment (getArgs)
 import System.Exit (exitSuccess)
 import Text.Printf (printf)
@@ -434,16 +434,9 @@ main = do
           }
         (logsApp appStateRef)
 
--- | Headless verification testing:
---   1. Initial rendering of virtualized logs and PINNED status.
---   2. All text selectable (sequence ID, timestamp, level, service, message).
---   3. Sticky scroll: appends when at bottom keep viewport pinned to latest logs.
---   4. History reading: scrolling up into history unpins sticky scroll.
---   5. Reading isolation: appends while in history DO NOT move the scroll position.
---   6. Jump to Bottom button: restores sticky scroll and pins to latest logs.
---   7. Filter buttons update view immediately without requiring mouse movement.
---   8. 2D Scroll: horizontal scroll offset updates on horizontal scroll wheel.
---   9. Select All / Context menu copies all logs to clipboard.
+-- | Drive the viewer on a hidden window: pinning while entries arrive,
+-- scrolling back, Jump to Bottom, filters, horizontal scroll, Select All,
+-- copying, and clearing the selection.
 {-# NOINLINE selftest #-}
 selftest :: IO ()
 selftest = do
@@ -460,61 +453,48 @@ selftest = do
       let baseInput = emptyInput {inputWindowSize = Size 1000 700, inputMousePos = V2 500 350}
           drawFrame inp = void (sdlDrawFrame ctx (logsApp appStateRef) env inp False)
 
-      -- 1. Warm up 2 frames and check initial state
       drawFrame baseInput
       drawFrame baseInput
 
       spans0 <- collectTextSpans ctx
-      unless (hasText "Log Viewer" spans0) $
-        fail "selftest: title 'Log Viewer' not found in spans"
-      unless (hasText "PINNED" spans0) $
-        fail "selftest: initial state should be PINNED to bottom"
+      expectText "selftest: title 'Log Viewer' not found in spans" "Log Viewer" spans0
+      expectText "selftest: initial state should be PINNED to bottom" "PINNED" spans0
 
-      -- 2. Verify that all of the text is selectable:
-      -- A log row contains the sequence ID (#000..), timestamp, level, and service in a single span.
+      -- A row is one selectable span: id, timestamp, level, service and message.
       let hasFullLogSpan = any (\(_, txt, _, _, _) -> "#00" `T.isPrefixOf` txt && " [" `T.isInfixOf` txt) spans0
       unless hasFullLogSpan $
         fail "selftest: full log line (sequence ID, timestamp, level, service, message) not found in selectable spans"
 
-      -- 3. Test sticky scroll: append 40 new logs while pinned
       readIORef appStateRef >>= (`appendEntries` 40) >>= writeIORef appStateRef
       drawFrame baseInput
       drawFrame baseInput
 
       spans1 <- collectTextSpans ctx
-      unless (hasText "PINNED" spans1) $
-        fail "selftest: sticky scroll failed to stay PINNED after appending logs"
+      expectText "selftest: sticky scroll failed to stay PINNED after appending logs" "PINNED" spans1
 
-      -- 4. Scroll up into middle of history (wheel up)
       let wheelUpInput = baseInput {inputScroll = V2 0 (-15.0)}
       drawFrame wheelUpInput
       drawFrame baseInput
 
       spans2 <- collectTextSpans ctx
-      unless (hasText "UNPINNED" spans2) $
-        fail "selftest: scrolling up into history did not transition to UNPINNED"
+      expectText "selftest: scrolling up into history did not transition to UNPINNED" "UNPINNED" spans2
 
-      -- 5. Append 50 more logs while reading history in the middle:
-      -- The scrollbar / viewport must NOT move, and state must stay UNPINNED
+      -- Entries arriving while scrolled back leave the view where it is.
       readIORef appStateRef >>= (`appendEntries` 50) >>= writeIORef appStateRef
       drawFrame baseInput
 
       spans3 <- collectTextSpans ctx
-      unless (hasText "UNPINNED" spans3) $
-        fail "selftest: appending logs while reading history should keep state UNPINNED"
+      expectText "selftest: appending logs while reading history should keep state UNPINNED" "UNPINNED" spans3
 
-      -- 6. Test "Jump to Bottom" button:
       jumpPos <- requireSpan "selftest: Jump to Bottom button" (findExact "Jump to Bottom" spans3)
       clickPos drawFrame baseInput jumpPos
       drawFrame baseInput
 
       spans4 <- collectTextSpans ctx
-      unless (hasText "PINNED" spans4) $
-        fail "selftest: Jump to Bottom button failed to restore PINNED status"
+      expectText "selftest: Jump to Bottom button failed to restore PINNED status" "PINNED" spans4
 
-      -- 7. Test Filter responsiveness:
-      -- Clicking "WARN" must immediately filter the logs in the exact same frame,
-      -- and rows must be visible immediately (not blank due to scroll offset overshooting).
+      -- A filter applies in the frame that clicks it, and the view clamps so
+      -- the fewer rows stay visible.
       warnPos <- requireSpan "selftest: WARN filter button" (findExact "WARN" spans4)
       clickPos drawFrame baseInput warnPos
       spansWarn <- collectTextSpans ctx
@@ -524,12 +504,9 @@ selftest = do
       unless hasWarnLogs $
         fail "selftest: filtered log lines were blank after filtering from bottom of list"
 
-      -- Restore filter to ALL
       allPos <- requireSpan "selftest: ALL filter button" (findExact "ALL" spansWarn)
       clickPos drawFrame baseInput allPos
 
-      -- 8. Test 2D Scroll:
-      -- Horizontal scroll wheel moves horizontal scroll offset
       stScroller <- readIORef appStateRef
       case asScrollerWid stScroller of
         Nothing -> fail "selftest: scroller WidgetId not found"
@@ -541,7 +518,6 @@ selftest = do
           unless (v2X off2d > 0) $
             fail "selftest: horizontal scroll did not update horizontal scroll offset (2D scroll failed)"
 
-      -- 9. Test "Select All":
       spansCur <- collectTextSpans ctx
       selAllPos <- requireSpan "selftest: Select All button" (findExact "Select All" spansCur)
       clickPos drawFrame baseInput selAllPos
@@ -549,7 +525,6 @@ selftest = do
       unless (hasText "ALL LOGS SELECTED" spansSelected || hasText "Deselect All" spansSelected) $
         fail "selftest: Select All failed to select all logs"
 
-      -- Test Ctrl+C copies all filtered logs to clipboard
       let ctrlCInput = baseInput {inputChars = "\ETX", inputModifiers = Modifiers False True False}
       drawFrame ctrlCInput
       mClip <- ctxClipboardGet ctx
@@ -559,15 +534,12 @@ selftest = do
           unless ("#00" `T.isPrefixOf` clipText && "\n" `T.isInfixOf` clipText) $
             fail "selftest: clipboard does not contain all selected log lines"
 
-      -- Press ESC to clear selection
-      let escInput = baseInput {inputKeys = inputKeysFromList [KeyEscape]}
-      drawFrame escInput
+      drawFrame (keyInp KeyEscape baseInput)
       drawFrame baseInput
       spansCleared <- collectTextSpans ctx
-      unless (hasText "Select All" spansCleared) $
-        fail "selftest: ESC failed to clear Select All"
+      expectText "selftest: ESC failed to clear Select All" "Select All" spansCleared
 
-      -- 10. Left click on a selectable log row clears the Select-All highlight.
+      -- A click on a row clears Select All.
       selAllPos2 <- requireSpan "selftest: Select All button" (findExact "Select All" spansCleared)
       clickPos drawFrame baseInput selAllPos2
       spansSel2 <- collectTextSpans ctx
@@ -587,9 +559,8 @@ selftest = do
             (pos : _) -> do
               clickPos drawFrame baseInput pos
               spansDeselected <- collectTextSpans ctx
-              unless (hasText "Select All" spansDeselected) $
-                fail "selftest: left click on a log row did not clear Select All"
+              expectText "selftest: left click on a log row did not clear Select All" "Select All" spansDeselected
             [] -> fail "selftest: no visible selectable log row found for deselect test"
 
-      putStrLn "selftest: all 2D log viewer, selectable text, filter, context menu, and sticky scroll tests passed successfully!"
+      putStrLn "logs selftest: ok"
       exitSuccess

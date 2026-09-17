@@ -34,13 +34,14 @@ module NanoUI.Testing.Harness
   , findHeader
   , findRightmost
   , requireSpan
+  , expectText
   , clickPos
   , clickTab
   , dragPos
   , drawQuads
   ) where
 
-import Control.Monad (forM, void, when)
+import Control.Monad (forM, unless, void, when)
 import Data.IORef (IORef, readIORef, writeIORef)
 import Data.Text qualified as T
 import Data.Word (Word32, Word8)
@@ -168,6 +169,10 @@ pickRight (p : ps) = Just (go p ps)
 
 requireSpan :: String -> Maybe V2 -> IO V2
 requireSpan msg = maybe (fail msg) pure
+
+-- | Fail with @msg@ unless a span contains @needle@.
+expectText :: String -> T.Text -> [(Rect, T.Text, a, b, c)] -> IO ()
+expectText msg needle spans = unless (hasText needle spans) (fail msg)
 
 -- | Press, hold and release at @pos@, then two idle frames.
 clickPos :: (Input -> IO ()) -> Input -> V2 -> IO ()
