@@ -47,6 +47,7 @@ import NanoUI.Testing.Harness
   , dragPos
   , findHeader
   , requireSpan
+  , spanCenter
   , warmup2
   , withInputOff
   )
@@ -659,7 +660,7 @@ runTableHBarReachTest ctx failed = do
         Just i -> do
           contentW <- getScrollContentW na i
           assertGt failed contentW bw
-          let wheel = inp0 {inputMousePos = V2 (bx + bw / 2) (by + bh / 2), inputScroll = V2 50 0}
+          let wheel = inp0 {inputMousePos = spanCenter (Rect bx by bw bh), inputScroll = V2 50 0}
           replicateM_ 20 (runFrame ctx wheel ui)
           V2 offX _ <- bodyOffset ctx
           -- Reached past the naive content - viewport range: the lane's width

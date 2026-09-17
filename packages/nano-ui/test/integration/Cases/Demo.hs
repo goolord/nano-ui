@@ -48,8 +48,8 @@ runBoundedRadioTest ctx failed = do
   assertEq failed initial (OffsetChoice 11)
   spans <- collectTextSpans ctx
   case [r | (r, txt, _, _, _) <- spans, "OffsetChoice 12" `T.isInfixOf` txt] of
-    Rect x y w h : _ -> do
-      (_, selected) <- runClick ctx inp (ui (OffsetChoice 11)) (V2 (x + w / 2) (y + h / 2))
+    r : _ -> do
+      (_, selected) <- runClick ctx inp (ui (OffsetChoice 11)) (spanCenter r)
       assertEq failed selected (OffsetChoice 12)
       ((_, retained), _, _, _) <- runFrame ctx inp (ui selected)
       assertEq failed retained selected

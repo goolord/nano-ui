@@ -9,7 +9,7 @@ import Data.Text qualified as T
 import NanoUI
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, evalUi, withInput)
-import NanoUI.Testing.Harness (centerOf, clickPair, rightClickPair, warmup2)
+import NanoUI.Testing.Harness (centerOf, clickPair, rightClickPair, spanCenter, warmup2)
 
 menuUi :: NanoUI (Response, Maybe (Response, Response))
 menuUi = column $ do
@@ -66,8 +66,8 @@ runContextMenuScrollPosTest ctx failed = do
   mScroll <- getPrevRect ctx sid
   case mScroll of
     Nothing -> assert failed False
-    Just (Rect sx sy sw sh) -> do
-      let hover = inp0 {inputMousePos = V2 (sx + sw / 2) (sy + sh / 2)}
+    Just scrollRect@(Rect _ sy _ sh) -> do
+      let hover = inp0 {inputMousePos = spanCenter scrollRect}
           wheel = hover {inputScroll = V2 0 1}
           inView btn =
             let y = rectY (respRect btn)

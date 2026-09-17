@@ -84,10 +84,10 @@ runModalNoPhantomScrollTest ctx failed = do
           _ <- button "Close"
           pure ()
   (dlg, _) <- warmup2 ctx inp0 ui
-  let Rect mx my mw mh = respRect dlg
+  let Rect _ _ mw mh = respRect dlg
   assert failed (mw > 0 && mh > 0)
   off0 <- getScrollOffset ctx (respId dlg)
-  let wheel = inp0 {inputMousePos = V2 (mx + mw / 2) (my + mh / 2), inputScroll = V2 0 1}
+  let wheel = inp0 {inputMousePos = centerOf dlg, inputScroll = V2 0 1}
   _ <- runFrame ctx wheel ui
   off1 <- getScrollOffset ctx (respId dlg)
   assertEq failed off0 0
@@ -141,8 +141,7 @@ runModalFractionalScaleNoScrollTest _ failed =
         -- Whether a wheel over the modal moves its first field.
         scrolls c i = do
           dlg <- warmup2 c i ui
-          let Rect mx my mw mh = respRect dlg
-              wheel = i {inputMousePos = V2 (mx + mw / 2) (my + mh / 2), inputScroll = V2 0 3}
+          let wheel = i {inputMousePos = centerOf dlg, inputScroll = V2 0 3}
           spans0 <- collectOverlayTextSpans c i
           _ <- runFrame c wheel ui
           spans1 <- collectOverlayTextSpans c wheel

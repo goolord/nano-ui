@@ -26,9 +26,10 @@ import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertGt, assertLt, withInput)
 import NanoUI.Testing.Harness
   ( assertWheelTitlePinned
-  , runClick
+  , centerOf
   , clickPair
   , dragWindowEdge
+  , runClick
   , runDragFrom
   , spanYOf
   , warmup2
@@ -315,18 +316,16 @@ runWindowScrollOnlyDamageTest ctx failed = do
             column $
               mapM_ (\i -> label (T.pack ("line " <> show (i :: Int)))) [1 .. 30]
   win <- warmup2 ctx inp0 ui
-  let Rect wx wy ww wh = respRect win
-      wheel =
+  let wheel =
         inp0
-          { inputMousePos = V2 (wx + ww / 2) (wy + wh / 2)
+          { inputMousePos = centerOf win
           , inputScroll = V2 0 1
           }
   _ <- runFrame ctx wheel ui
   dmg <- takeDamage ctx
-  let winPanel = Rect wx wy ww wh
   case dmg of
     DamageClip r ->
-      assert failed (maybe False (\i -> rectW i > 0 && rectH i > 0) (rectIntersect r winPanel))
+      assert failed (maybe False (\i -> rectW i > 0 && rectH i > 0) (rectIntersect r (respRect win)))
     _ -> assert failed False
 
 runWindowContentChurnTest :: Context -> IORef Int -> IO ()
@@ -363,8 +362,7 @@ runScrolledDebugToggleTest ctx failed = do
         when open $ void (window True "Debug" (label "fps"))
         pure dbgBtn
   dbgBtn <- warmup2 ctx inp0 ui
-  let Rect bx by bw bh = respRect dbgBtn
-      pos = V2 (bx + bw / 2) (by + bh / 2)
+  let pos = centerOf dbgBtn
   _ <- runClick ctx inp0 ui pos
   spans <- collectOverlayTextSpans ctx inp0
   let titles = [t | (_, t, _, _, _) <- spans, title `T.isInfixOf` t]

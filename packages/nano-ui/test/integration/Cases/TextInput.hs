@@ -58,8 +58,10 @@ import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertGt, withInput)
 import NanoUI.Testing.Harness
   ( assertSpansHas
+  , centerOf
   , clickPair
   , held
+  , spanCenter
   , warmup2
   )
 import NanoUI.Widgets.TextArea
@@ -165,13 +167,8 @@ runTextInputCursorTest ctx failed = do
 runTextInputCutClearsSelectionTest :: Context -> IORef Int -> IO ()
 runTextInputCutClearsSelectionTest ctx failed = do
   textRef <- newIORef "hello"
-  clipRef <- newIORef (Nothing :: Maybe T.Text)
+  (ctx', clipRef) <- memoryClipboard Nothing ctx
   let
-    ctx' =
-      withClipboard
-        ctx
-        (readIORef clipRef)
-        (\s -> writeIORef clipRef (Just s) >> pure True)
     inp0 = withInput 320 120
     ui = column (held textRef textInput')
   _ <- warmup2 ctx' inp0 ui
@@ -239,14 +236,9 @@ runTextInputWordKeysTest ctx failed = do
 
 runTextAreaCutClearsSelectionTest :: Context -> IORef Int -> IO ()
 runTextAreaCutClearsSelectionTest ctx failed = do
-  clipRef <- newIORef (Nothing :: Maybe T.Text)
+  (ctx', clipRef) <- memoryClipboard Nothing ctx
   textRef <- newIORef "hello"
   let
-    ctx' =
-      withClipboard
-        ctx
-        (readIORef clipRef)
-        (\s -> writeIORef clipRef (Just s) >> pure True)
     inp0 = withInput 320 220
     ui = column (label "Notes" >> held textRef textArea')
   _ <- warmup2 ctx' inp0 ui
@@ -376,13 +368,8 @@ runTextInputClickSelectTest ctx failed = do
 runTextInputClipboardTest :: Context -> IORef Int -> IO ()
 runTextInputClipboardTest ctx failed = do
   textRef <- newIORef "hello"
-  clipRef <- newIORef (Nothing :: Maybe T.Text)
+  (ctx', clipRef) <- memoryClipboard Nothing ctx
   let
-    ctx' =
-      withClipboard
-        ctx
-        (readIORef clipRef)
-        (\s -> writeIORef clipRef (Just s) >> pure True)
     inp0 = withInput 320 120
     ui = column (held textRef textInput')
   _ <- warmup2 ctx' inp0 ui
@@ -404,13 +391,8 @@ runTextInputClipboardTest ctx failed = do
 -- leaves the clipboard untouched while the field keeps its real value.
 runTextInputPasswordTest :: Context -> IORef Int -> IO ()
 runTextInputPasswordTest ctx failed = do
-  clipRef <- newIORef (Nothing :: Maybe T.Text)
+  (ctx', clipRef) <- memoryClipboard Nothing ctx
   let
-    ctx' =
-      withClipboard
-        ctx
-        (readIORef clipRef)
-        (\s -> writeIORef clipRef (Just s) >> pure True)
     inp0 = withInput 320 120
     ui = column (textInputConfigured' defaultTextInputConfig {ticPassword = True} "hunter2")
   _ <- warmup2 ctx' inp0 ui
@@ -434,13 +416,8 @@ runTextInputPasswordTest ctx failed = do
 runTextInputMenuTest :: Context -> IORef Int -> IO ()
 runTextInputMenuTest ctx failed = do
   textRef <- newIORef "hello"
-  clipRef <- newIORef (Just "pasted")
+  (ctx', clipRef) <- memoryClipboard (Just "pasted") ctx
   let
-    ctx' =
-      withClipboard
-        ctx
-        (readIORef clipRef)
-        (\s -> writeIORef clipRef (Just s) >> pure True)
     inp0 = withInput 320 160
     ui = column (held textRef textInput')
   _ <- warmup2 ctx' inp0 ui
@@ -458,9 +435,9 @@ runTextInputMenuTest ctx failed = do
           _ <- runFrame ctx' menuOpen ui
           overlays <- collectOverlayTextSpans ctx' menuOpen
           case [r | (r, txt, _, _, _) <- overlays, txt == entry] of
-            (Rect px py pw ph : _) -> do
+            (r : _) -> do
               let
-                (pickPress, pickRelease) = clickPair inp0 (V2 (px + pw / 2) (py + ph / 2))
+                (pickPress, pickRelease) = clickPair inp0 (spanCenter r)
               _ <- runFrame ctx' pickPress ui >> runFrame ctx' pickRelease ui
               ((_, val), _, _, _) <- runFrame ctx' inp0 ui
               pure (Just val)
@@ -582,7 +559,7 @@ runTextAreaScrollWheelTest ctx failed = do
     inp0 = withInput 320 220
     ui = column (labeledArea "Notes" longText)
     uiShort = column (keyed (1 :: Int) (labeledArea "Short" "Line 1\nLine 2"))
-    fieldCenter (Rect rx ry rw rh) = pure (V2 (rx + rw / 2) (ry + rh / 2))
+    fieldCenter = pure . spanCenter
   -- Text that fits the viewport does not wheel-scroll.
   (respShort, _) <- warmup2 ctx inp0 uiShort
   mRectShort <- getPrevRect ctx (respId respShort)
@@ -1036,12 +1013,12 @@ runTextAreaMenuPulseTest ctx failed = do
       _ <- runFrame ctx menuOpen ui
       overlays <- collectOverlayTextSpans ctx menuOpen
       case [r | (r, txt, _, _, _) <- overlays, txt == "Cut"] of
-        (Rect px py pw ph : _) -> do
+        (r : _) -> do
           -- The Cut runs through the field's command path on the press
           -- frame; the very next frame (release) must deliver the pulse and
           -- the emptied text, then go quiet again.
           let
-            (pickPress, pickRelease) = clickPair inp0 (V2 (px + pw / 2) (py + ph / 2))
+            (pickPress, pickRelease) = clickPair inp0 (spanCenter r)
           _ <- runFrame ctx pickPress ui
           ((resp, val), _, _, _) <- runFrame ctx pickRelease ui
           assert failed (respChanged resp)
@@ -1067,8 +1044,7 @@ runTextCommandFocusTest ctx failed = do
       pure selectAll
   selectAll <- warmup2 ctx inp ui
   let
-    Rect bx by bw bh = respRect selectAll
-    (press, release) = clickPair inp (V2 (bx + bw / 2) (by + bh / 2))
+    (press, release) = clickPair inp (centerOf selectAll)
   mapM_ (\i -> runFrame ctx i ui) [press, release, inp, inp {inputChars = "Z"}, inp]
   assertEq failed "Z" =<< readIORef ref
 
@@ -1201,3 +1177,10 @@ runTextAreaWidthTrackingTest ctx failed = do
   -- Undo brings it back.
   _ <- frame inp {inputChars = "z", inputModifiers = ctrl}
   check
+
+-- | The context with a clipboard kept in memory, starting with @initial@, and
+-- a reference to its contents.
+memoryClipboard :: Maybe T.Text -> Context -> IO (Context, IORef (Maybe T.Text))
+memoryClipboard initial ctx = do
+  clipRef <- newIORef initial
+  pure (withClipboard ctx (readIORef clipRef) (\s -> writeIORef clipRef (Just s) >> pure True), clipRef)

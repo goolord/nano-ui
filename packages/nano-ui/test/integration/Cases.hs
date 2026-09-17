@@ -340,9 +340,9 @@ runHoverDamageTest ctx failed = do
   d0 <- takeDamage ctx
   assertEq failed d0 DamageFull
   (resp, _, _, _) <- runFrame ctx inp0 ui
-  let Rect rx ry rw rh = respRect resp
-      inp1 = inp0 {inputMousePos = V2 (rx + rw / 2) (ry + rh / 2)}
-      inp2 = inp0 {inputMousePos = V2 (rx + rw / 2 + 1) (ry + rh / 2)}
+  let V2 cx cy = centerOf resp
+      inp1 = inp0 {inputMousePos = V2 cx cy}
+      inp2 = inp0 {inputMousePos = V2 (cx + 1) cy}
   needEnter <- needsRedraw ctx inp0 inp1
   assert failed needEnter
   _ <- runFrame ctx inp1 ui

@@ -17,6 +17,7 @@ import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, withInput)
 import NanoUI.Testing.Harness
   ( assertSpansHas
+  , centerOf
   , clickPair
   , hasText
   , held
@@ -55,8 +56,7 @@ runSelectOverlayDamageTest ctx failed = do
   let ui = column (select' ["Low", "Medium", "High"] 0)
       inp0 = (withInput 320 160) {inputMousePos = V2 20 20}
   (resp, _) <- warmup2 ctx inp0 ui
-  let Rect sx sy sw sh = respRect resp
-  let pos = V2 (sx + sw / 2) (sy + sh / 2)
+  let pos = centerOf resp
       open = snd (clickPair inp0 pos)
   _ <- runClick ctx inp0 ui pos
   let idle = open {inputMouseReleased = False, inputDeltaTime = 1}
@@ -64,7 +64,7 @@ runSelectOverlayDamageTest ctx failed = do
   overlays <- collectOverlayTextSpans ctx idle
   case [rectY r | (r, txt, _, _, _) <- overlays, "High" `T.isInfixOf` txt] of
     (highY : _) -> do
-      let overMenu = idle {inputMousePos = V2 (sx + sw / 2) (highY + 0.5)}
+      let overMenu = idle {inputMousePos = V2 (v2X pos) (highY + 0.5)}
       need <- needsRedraw ctx idle overMenu
       assert failed need
       _ <- runFrame ctx overMenu ui
@@ -121,14 +121,13 @@ runSelectChangeOnceTest ctx failed = do
   let inp0 = withInput 320 200
       ui = held indexRef (select' ["Low", "Medium", "High"])
   (resp, _) <- warmup2 ctx inp0 ui
-  let Rect sx sy sw sh = respRect resp
-      (openPress, openRelease) = clickPair inp0 (V2 (sx + sw / 2) (sy + sh / 2))
+  let (openPress, openRelease) = clickPair inp0 (centerOf resp)
   _ <- runFrame ctx openPress ui
   _ <- runFrame ctx openRelease ui
   overlays <- collectOverlayTextSpans ctx openRelease
   case [rectY r | (r, txt, _, _, _) <- overlays, "Low" `T.isInfixOf` txt] of
     (lowY : _) -> do
-      let lowPos = V2 (sx + sw / 2) (lowY + 0.5)
+      let lowPos = V2 (v2X (centerOf resp)) (lowY + 0.5)
           hover = inp0 {inputMousePos = lowPos}
           (pickPress, pickRelease) = clickPair inp0 lowPos
           frame inp = (\((r, i), _, _, _) -> (respChanged r, i)) <$> runFrame ctx inp ui
@@ -185,8 +184,7 @@ runSelectKeyboardTest ctx failed = do
       ui = column (held indexRef (select' (SA.smallArrayFromList ["Low", "Medium", "High"])))
   (resp, idx0) <- warmup2 ctx inp0 ui
   assertEq failed idx0 1
-  let Rect sx sy sw sh = respRect resp
-      (openPress, openRelease) = clickPair inp0 (V2 (sx + sw / 2) (sy + sh / 2))
+  let (openPress, openRelease) = clickPair inp0 (centerOf resp)
   _ <- runFrame ctx openPress ui
   _ <- runFrame ctx openRelease ui
   _ <- runFrame ctx (openRelease {inputKeys = inputKeysFromList [KeyDown]}) ui
@@ -221,8 +219,7 @@ runSelectCloseKeepsFocusTest ctx failed = do
       ui = column (held indexRef (select' (SA.smallArrayFromList ["Low", "Medium", "High"])))
       listed spans = any (\(_, txt, _, _, _) -> txt == "Low") spans
   (resp, _) <- warmup2 ctx inp0 ui
-  let Rect sx sy sw sh = respRect resp
-      mid = V2 (sx + sw / 2) (sy + sh / 2)
+  let mid = centerOf resp
       openRelease = snd (clickPair inp0 mid)
       closeRelease = snd (clickPair openRelease mid)
   _ <- runClick ctx inp0 ui mid

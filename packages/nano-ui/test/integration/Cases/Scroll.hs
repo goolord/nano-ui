@@ -42,9 +42,11 @@ import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, assertGt, withInput)
 import NanoUI.Testing.Harness
   ( assertScrollGutterPad
+  , centerOf
   , drawQuads
   , findGrabHover
   , runClick
+  , spanCenter
   , spanYOf
   , warmup2
   , withInputOff
@@ -200,8 +202,8 @@ runScrollTopClipTest ctx failed = do
       mR <- getPrevRect ctx (respId cb)
       case mR of
         Nothing -> assert failed False
-        Just (Rect rx ry rw rh) -> do
-          let hover = inp0 {inputMousePos = V2 (rx + rw / 2) (ry + rh / 2)}
+        Just r -> do
+          let hover = inp0 {inputMousePos = spanCenter r}
           _ <- runFrame ctx hover ui
           dHover <- takeDamage ctx
           assert failed (clipFits dHover)
@@ -219,8 +221,8 @@ runNestedScrollTest ctx failed = do
   mInner <- getPrevRect ctx inner
   mOuter <- getPrevRect ctx outer
   case (mInner, mOuter) of
-    (Just (Rect ix iy iw ih), Just (Rect _ oy _ oh)) | iw > 0 && ih > 0 -> do
-      let hoverInner = inp0 {inputMousePos = V2 (ix + iw / 2) (iy + ih / 2)}
+    (Just r@(Rect ix iy iw ih), Just (Rect _ oy _ oh)) | iw > 0 && ih > 0 -> do
+      let hoverInner = inp0 {inputMousePos = spanCenter r}
           wheelInner = hoverInner {inputScroll = V2 0 1}
       offI0 <- getScrollOffset ctx inner
       offO0 <- getScrollOffset ctx outer
@@ -263,8 +265,8 @@ runScrollHoverClipTest ctx failed = do
   (_, inner) <- warmup2 ctx inp0 ui
   mInner <- getPrevRect ctx inner
   case mInner of
-    Just (Rect ix iy iw ih) | iw > 0 && ih > 0 -> do
-      let hoverHidden = inp0 {inputMousePos = V2 (ix + iw / 2) (iy + ih / 2), inputScroll = V2 0 1}
+    Just r@(Rect _ _ iw ih) | iw > 0 && ih > 0 -> do
+      let hoverHidden = inp0 {inputMousePos = spanCenter r, inputScroll = V2 0 1}
       offI0 <- getScrollOffset ctx inner
       _ <- runFrame ctx hoverHidden ui
       offI1 <- getScrollOffset ctx inner
@@ -293,14 +295,13 @@ runScrollButtonClickTest ctx failed = do
       assertEq failed hit0 ""
       mScroll <- getPrevRect c sid
       case mScroll of
-        Just (Rect sx sy sw sh) -> do
-          let wheel = inp0 {inputMousePos = V2 (sx + sw / 2) (sy + sh / 2), inputScroll = V2 0 1}
+        Just r -> do
+          let wheel = inp0 {inputMousePos = spanCenter r, inputScroll = V2 0 1}
           forM_ [(1 :: Int) .. 8] $ \_ -> void (runFrame c wheel ui)
           off <- getScrollOffset c sid
           assertGt failed off 0
           ((_, _, resp1), _, _, _) <- runFrame c inp0 ui
-          let Rect bx by bw bh = respRect resp1
-          (_, hit1, _) <- runClick c inp0 ui (V2 (bx + bw / 2) (by + bh / 2))
+          (_, hit1, _) <- runClick c inp0 ui (centerOf resp1)
           assertEq failed hit1 "yes"
         _ -> assert failed False
 
@@ -346,13 +347,13 @@ runScrolledOutImmunityTest ctx failed = do
   assertEq failed hit0 ""
   mScroll <- getPrevRect ctx sid
   case mScroll of
-    Just (Rect sx sy sw sh) -> do
-      let wheel = inp0 {inputMousePos = V2 (sx + sw / 2) (sy + sh / 2), inputScroll = V2 0 1}
+    Just r -> do
+      let wheel = inp0 {inputMousePos = spanCenter r, inputScroll = V2 0 1}
       forM_ [(1 :: Int) .. 80] $ \_ -> void (runFrame ctx wheel ui)
       mBtn <- getPrevRect ctx (respId b)
       case mBtn of
-        Just (Rect bx by bw bh) -> do
-          let pos = V2 (bx + bw / 2) (by + bh / 2)
+        Just br -> do
+          let pos = spanCenter br
               hover = inp0 {inputMousePos = pos}
           kind <- uiCursorKind ctx hover
           assertEq failed kind UiCursorDefault
@@ -568,8 +569,8 @@ runScrollStepTest ctx failed = do
   mRect <- getPrevRect ctx sid
   case mRect of
     Nothing -> assert failed False
-    Just (Rect sx sy sw sh) -> do
-      let wheel = inp0 {inputMousePos = V2 (sx + sw / 2) (sy + sh / 2), inputScroll = V2 0 1}
+    Just r -> do
+      let wheel = inp0 {inputMousePos = spanCenter r, inputScroll = V2 0 1}
       _ <- runFrame ctx wheel ui
       assertEq failed 40 =<< getScrollOffset ctx sid
       -- The scroller's own step overrides the context's from the next notch on.
@@ -592,8 +593,8 @@ runScrollSmoothTest ctx failed = do
   mRect <- getPrevRect ctx sid
   case mRect of
     Nothing -> assert failed False
-    Just (Rect sx sy sw sh) -> do
-      let tick = inp0 {inputMousePos = V2 (sx + sw / 2) (sy + sh / 2), inputDeltaTime = 1 / 60}
+    Just r -> do
+      let tick = inp0 {inputMousePos = spanCenter r, inputDeltaTime = 1 / 60}
           wheel = tick {inputScroll = V2 0 1}
       _ <- runFrame ctx wheel ui
       partial <- getScrollOffset ctx sid
@@ -704,8 +705,8 @@ runScrollGlideClampTest ctx failed = do
   mRect <- getPrevRect ctx sid
   case mRect of
     Nothing -> assert failed False
-    Just (Rect sx sy sw sh) -> do
-      let tick = inp0 {inputMousePos = V2 (sx + sw / 2) (sy + sh / 2), inputDeltaTime = 1 / 60}
+    Just r -> do
+      let tick = inp0 {inputMousePos = spanCenter r, inputDeltaTime = 1 / 60}
           wheel = tick {inputScroll = V2 0 8}
       _ <- runFrame ctx wheel ui
       assert failed =<< scrollGliding ctx sid

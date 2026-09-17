@@ -22,7 +22,7 @@ import NanoUI.Testing
   , takeDamage
   )
 import NanoUI.Testing.Assert (assert, assertEq, withInput)
-import NanoUI.Testing.Harness (clickPair, drawQuads, warmup2, withInputOff)
+import NanoUI.Testing.Harness (centerOf, clickPair, drawQuads, warmup2, withInputOff)
 
 -- | Verifies custom intrinsic layout measurement via widgetMeasure hook, and
 -- that the measurement reverts once the hook is gone.
@@ -52,7 +52,7 @@ runCustomWidgetCursorTest ctx failed = do
           }
   resp <- warmup2 ctx inp0 ui
   let Rect rx ry rw rh = respRect resp
-      hoverInp = inp0 { inputMousePos = V2 (rx + rw / 2) (ry + rh / 2) }
+      hoverInp = inp0 { inputMousePos = centerOf resp }
   _ <- runFrame ctx hoverInp ui
   hoverOk <- cursorKindIs ctx hoverInp UiCursorNsResize
   assert failed hoverOk
@@ -72,8 +72,7 @@ runCustomWidgetInteractionTest ctx failed = do
           , widgetInteract = \resp cdc _ -> (resp, (cdcHovered cdc, cdcPressed cdc))
           }
   (resp0, _) <- warmup2 ctx inp0 ui
-  let Rect rx ry rw rh = respRect resp0
-      pos = V2 (rx + rw / 2) (ry + rh / 2)
+  let pos = centerOf resp0
       (pressInp, releaseInp) = clickPair inp0 pos
 
   _ <- runFrame ctx pressInp ui
@@ -244,8 +243,7 @@ runReferenceKnobTest ctx failed = do
   (resp0, val0) <- warmup2 ctx inp0 ui
   assert failed (val0 == 25)
 
-  let Rect rx ry rw rh = respRect resp0
-      pos = V2 (rx + rw / 2) (ry + rh / 2)
+  let pos = centerOf resp0
       dragStart = inp0 { inputMousePos = pos, inputMouseDown = True, inputMousePressed = True }
       -- Drag upward (negative dy in screen coords) to increase knob value
       dragUp = inp0 { inputMousePos = V2 (v2X pos) (v2Y pos - 30), inputMouseDown = True, inputMousePressed = False }
