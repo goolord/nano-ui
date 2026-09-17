@@ -333,65 +333,22 @@ lookupOrInsertGlyph ga sf c = do
   entries <- readIORef (gaEntries ga)
   case IM.lookup (fromIntegral (sfId sf)) entries >>= IM.lookup (ord c) of
     Just mSlot -> pure mSlot
-    Nothing    -> insertGlyph ga sf c
-
-insertGlyph :: GlyphAtlas -> SdlFont -> Char -> IO (Maybe GlyphSlot)
-insertGlyph ga sf c = do
-  let !cp = fromIntegral (ord c) :: CUInt
-      record entry =
-        modifyIORef' (gaEntries ga) (IM.insertWith IM.union (fromIntegral (sfId sf)) (IM.singleton (ord c) entry))
-  mMetrics <- getGlyphMetrics sf cp
-  case mMetrics of
     Nothing -> do
-      record Nothing
-      pure Nothing
-    Just metrics -> do
-      mSurf <- alloca $ \sp -> do
-        poke sp nullPtr
-        ok <- ttfRenderGlyphSurface (sfFont sf) cp sp
-        if not ok
-          then pure Nothing
-          else do
-            surf <- peek sp
-            if surf == nullPtr then pure Nothing else pure (Just surf)
-      case mSurf of
-        Nothing -> do
-          record Nothing
-          pure Nothing
-        Just surf -> do
-          -- If the atlas is full, defer the reset to the next frame start
-          -- (see 'markAtlasExhausted'): wiping the texture here would leave
-          -- quads already recorded this frame sampling blank pixels, making
-          -- all earlier text vanish for one frame. The glyph is unavailable
-          -- for the rest of the current frame, which is dropped.
-          mPos <- tryInsert (gaAtlas ga) surf
-          freeSurface surf
-          case mPos of
-            Nothing -> do
-              markAtlasExhausted ga
-              record Nothing
-              pure Nothing
-            Just (px, py, tw, th) -> do
-              (atW, atH) <- atlasSize (gaAtlas ga)
+      let !cp = fromIntegral (ord c) :: CUInt
+      mMetrics <- getGlyphMetrics sf cp
+      mSlot <- case mMetrics of
+        Nothing -> pure Nothing
+        Just metrics ->
+          placeGlyphImage ga (ttfRenderGlyphSurface (sfFont sf) cp) >>= \case
+            Nothing -> pure Nothing
+            Just slot -> do
               -- TTF_GetGlyphImage is a tight bitmap. Place it with the font
               -- bearings: pen + minX, lineTop + (ascent - maxY). Do not clamp
               -- minX; monospace glyphs are often centered (minX > 0).
-              let !offX = gmMinX metrics
-                  !offY = sfAscent sf - gmMaxY metrics
-                  !slot =
-                    GlyphSlot
-                      { gsW    = tw
-                      , gsH    = th
-                      , gsU0   = px / atW
-                      , gsV0   = py / atH
-                      , gsU1   = (px + tw) / atW
-                      , gsV1   = (py + th) / atH
-                      , gsOffX = offX
-                      , gsOffY = offY
-                      , gsAdvX = gmAdvance metrics
-                      }
-              record (Just slot)
-              pure (Just slot)
+              let !placed = slot {gsOffX = gmMinX metrics, gsOffY = sfAscent sf - gmMaxY metrics, gsAdvX = gmAdvance metrics}
+              pure (Just placed)
+      modifyIORef' (gaEntries ga) (IM.insertWith IM.union (fromIntegral (sfId sf)) (IM.singleton (ord c) mSlot))
+      pure mSlot
 
 -- | Look up or insert a glyph by font and glyph index, the way shaped text
 -- names glyphs. Glyphs are keyed by the font's id, which is never reused, and
@@ -402,38 +359,50 @@ lookupOrInsertGlyphIndex ga fontKey handle gi = do
   case IM.lookup fontKey entries >>= IM.lookup gi of
     Just mSlot -> pure mSlot
     Nothing -> do
-      let record entry = modifyIORef' (gaIndexEntries ga) (IM.insertWith IM.union fontKey (IM.singleton gi entry))
-      mSurf <- alloca $ \sp -> do
-        poke sp nullPtr
-        ok <- ttfRenderGlyphIndexSurface (intPtrToPtr (IntPtr handle)) (fromIntegral gi) sp
-        if ok then Just <$> peek sp else pure Nothing
-      case mSurf of
-        Just surf | surf /= nullPtr -> do
-          mPos <- tryInsert (gaAtlas ga) surf
-          freeSurface surf
-          case mPos of
-            Nothing -> do
-              markAtlasExhausted ga
-              pure Nothing
-            Just (px, py, tw, th) -> do
-              (atW, atH) <- atlasSize (gaAtlas ga)
-              let !slot =
-                    GlyphSlot
-                      { gsW = tw
-                      , gsH = th
-                      , gsU0 = px / atW
-                      , gsV0 = py / atH
-                      , gsU1 = (px + tw) / atW
-                      , gsV1 = (py + th) / atH
-                      , gsOffX = 0
-                      , gsOffY = 0
-                      , gsAdvX = 0
-                      }
-              record (Just slot)
-              pure (Just slot)
-        _ -> do
-          record Nothing
+      mSlot <- placeGlyphImage ga (ttfRenderGlyphIndexSurface (intPtrToPtr (IntPtr handle)) (fromIntegral gi))
+      modifyIORef' (gaIndexEntries ga) (IM.insertWith IM.union fontKey (IM.singleton gi mSlot))
+      pure mSlot
+
+-- | Render a glyph image into a surface and copy it into the atlas, as a slot
+-- with no bearings or advance. 'Nothing' when there is no image or no room.
+-- A full atlas is reset at the next frame start (see 'markAtlasExhausted'):
+-- wiping the texture here would leave quads already recorded this frame
+-- sampling blank pixels. The glyph is unavailable for the rest of the frame,
+-- which is dropped.
+placeGlyphImage :: GlyphAtlas -> (Ptr (Ptr ()) -> IO Bool) -> IO (Maybe GlyphSlot)
+placeGlyphImage ga render = do
+  surf <- alloca $ \sp -> do
+    poke sp nullPtr
+    ok <- render sp
+    if ok then peek sp else pure nullPtr
+  if surf == nullPtr
+    then pure Nothing
+    else do
+      mPos <- tryInsert (gaAtlas ga) surf
+      freeSurface surf
+      case mPos of
+        Nothing -> do
+          markAtlasExhausted ga
           pure Nothing
+        Just (px, py, tw, th) -> do
+          let !slot =
+                GlyphSlot
+                  { gsW = tw
+                  , gsH = th
+                  , gsU0 = px / glyphAtlasSize
+                  , gsV0 = py / glyphAtlasSize
+                  , gsU1 = (px + tw) / glyphAtlasSize
+                  , gsV1 = (py + th) / glyphAtlasSize
+                  , gsOffX = 0
+                  , gsOffY = 0
+                  , gsAdvX = 0
+                  }
+          pure (Just slot)
+
+-- | Width and height of the glyph atlas texture; mirrors
+-- NANO_UI_TEXT_ATLAS_SIZE in nano_ui_text_atlas.c.
+glyphAtlasSize :: Float
+glyphAtlasSize = 2048
 
 -- | A line shaped by SDL_ttf: its layout for measuring and caret placement,
 -- and per glyph nine numbers (glyph index, destination x y w h, source x y w
@@ -915,7 +884,6 @@ buildGlyphFontMetrics ga sf scale = do
     placeGlyphs (Shaped _ glyphs fontIndices fonts) = do
       let !count = sizeofPrimArray fontIndices
       out <- newPrimArray (count * 8)
-      (atW, atH) <- atlasSize (gaAtlas ga)
       let go !i
             | i >= count = pure ()
             | otherwise = do
@@ -936,10 +904,10 @@ buildGlyphFontMetrics ga sf scale = do
                         sy = g 6
                         sw = g 7
                         sh = g 8
-                        u0 = gsU0 slot + sx / atW
-                        v0 = gsV0 slot + sy / atH
-                        u1 = if sw > 0 then u0 + sw / atW else gsU1 slot
-                        v1 = if sh > 0 then v0 + sh / atH else gsV1 slot
+                        u0 = gsU0 slot + sx / glyphAtlasSize
+                        v0 = gsV0 slot + sy / glyphAtlasSize
+                        u1 = if sw > 0 then u0 + sw / glyphAtlasSize else gsU1 slot
+                        v1 = if sh > 0 then v0 + sh / glyphAtlasSize else gsV1 slot
                     write 4 u0
                     write 5 v0
                     write 6 u1
@@ -954,18 +922,14 @@ buildGlyphFontMetrics ga sf scale = do
       go 0
       ShapedGlyphs <$> unsafeFreezePrimArray out
 
-    -- Mirrors NANO_UI_TEXT_ATLAS_SIZE in nano_ui_text_atlas.c.
-    atlasTexSize :: Float
-    atlasTexSize = 2048
-
     -- A UV rect that always samples transparent pixels: column 4 sits
     -- right of the 4px white patch (columns 0..3) and left of the first
     -- slot (allocations start at x = 5), and the final row is never
     -- written because every slot keeps 1px of padding.
     deadUv :: (Float, Float, Float, Float)
     deadUv =
-      let !u = 4.5 / atlasTexSize
-          !v = (atlasTexSize - 0.5) / atlasTexSize
+      let !u = 4.5 / glyphAtlasSize
+          !v = (glyphAtlasSize - 0.5) / glyphAtlasSize
        in (u, v, u, v)
 
     -- The shaped layout of a line, from its metric snapshot when it has
@@ -1198,14 +1162,6 @@ tryInsert atlas surf =
         pure (Just (x, y, w, h))
       else pure Nothing
 
-atlasSize :: Ptr () -> IO (Float, Float)
-atlasSize atlas =
-  allocaBytes (2 * sizeOf (0 :: CFloat)) $ \w -> do
-    let h = plusPtr w (sizeOf (0 :: CFloat))
-    ok <- textAtlasSize atlas w h
-    when (not ok) $ fail "text atlas size failed"
-    (,) <$> (realToFrac <$> peek w) <*> (realToFrac <$> peek h)
-
 withUtf8 :: Text -> (CString -> CSize -> IO a) -> IO a
 withUtf8 txt act =
   TF.useAsPtr txt $ \ptr len ->
@@ -1246,9 +1202,6 @@ foreign import ccall unsafe "nano_ui_text_atlas_reset"
 
 foreign import ccall unsafe "nano_ui_text_atlas_texture"
   textAtlasTexture :: Ptr () -> IO (Ptr SDL_Texture)
-
-foreign import ccall unsafe "nano_ui_text_atlas_size"
-  textAtlasSize :: Ptr () -> Ptr CFloat -> Ptr CFloat -> IO Bool
 
 foreign import ccall unsafe "nano_ui_text_atlas_insert_surface"
   textAtlasInsertSurface ::

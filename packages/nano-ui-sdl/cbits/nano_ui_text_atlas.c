@@ -58,26 +58,10 @@ static bool create_texture(NanoUiTextAtlas *atlas, int w, int h)
      * shaped-run placement). NEAREST snaps to the closest texel and makes
      * scaled/slightly-misaligned text look blocky and pixelated. */
     SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_LINEAR);
-    size_t bytes = (size_t)w * (size_t)h * 4;
-    Uint8 *px = (Uint8 *)malloc(bytes);
+    Uint8 *px = (Uint8 *)calloc((size_t)w * (size_t)h, 4);
     if (!px) {
         SDL_DestroyTexture(tex);
         return false;
-    }
-    memset(px, 0, bytes);
-    if (atlas->pixels && atlas->w > 0 && atlas->h > 0) {
-        int copy_w = atlas->w < w ? atlas->w : w;
-        int copy_h = atlas->h < h ? atlas->h : h;
-        for (int row = 0; row < copy_h; row++) {
-            memcpy(
-                px + (size_t)row * (size_t)w * 4,
-                atlas->pixels + (size_t)row * (size_t)atlas->w * 4,
-                (size_t)copy_w * 4);
-        }
-    }
-    free(atlas->pixels);
-    if (atlas->tex) {
-        SDL_DestroyTexture(atlas->tex);
     }
     atlas->tex = tex;
     atlas->pixels = px;
@@ -118,31 +102,18 @@ static bool slot_for(NanoUiTextAtlas *atlas, int gw, int gh, int *out_x, int *ou
     return false;
 }
 
+/* Glyph surfaces arrive as RGBA32 (glyph_image_to_rgba in nano_ui_ttf.c). */
 static bool blit_surface(NanoUiTextAtlas *atlas, SDL_Surface *surface, int x, int y)
 {
-    SDL_Surface *converted = NULL;
-    SDL_Surface *src_surf = surface;
-    if (surface->format != SDL_PIXELFORMAT_RGBA32) {
-        converted = SDL_ConvertSurface(surface, SDL_PIXELFORMAT_RGBA32);
-        if (!converted) {
-            return false;
-        }
-        src_surf = converted;
-    }
-    const Uint8 *src = (const Uint8 *)src_surf->pixels;
-    int src_pitch = src_surf->pitch;
-    int w = src_surf->w;
-    int h = src_surf->h;
+    const Uint8 *src = (const Uint8 *)surface->pixels;
+    int w = surface->w;
+    int h = surface->h;
     for (int row = 0; row < h; row++) {
         Uint8 *dst = atlas->pixels + ((y + row) * atlas->w + x) * 4;
-        memcpy(dst, src + (size_t)row * (size_t)src_pitch, (size_t)w * 4);
+        memcpy(dst, src + (size_t)row * (size_t)surface->pitch, (size_t)w * 4);
     }
     SDL_Rect rect = {x, y, w, h};
-    bool ok = SDL_UpdateTexture(atlas->tex, &rect, atlas->pixels + (y * atlas->w + x) * 4, atlas->w * 4);
-    if (converted) {
-        SDL_DestroySurface(converted);
-    }
-    return ok;
+    return SDL_UpdateTexture(atlas->tex, &rect, atlas->pixels + (y * atlas->w + x) * 4, atlas->w * 4);
 }
 
 NanoUiTextAtlas *nano_ui_text_atlas_create(SDL_Renderer *renderer)
@@ -173,20 +144,6 @@ void nano_ui_text_atlas_destroy(NanoUiTextAtlas *atlas)
 SDL_Texture *nano_ui_text_atlas_texture(NanoUiTextAtlas *atlas)
 {
     return atlas ? atlas->tex : NULL;
-}
-
-bool nano_ui_text_atlas_size(NanoUiTextAtlas *atlas, float *out_w, float *out_h)
-{
-    if (!atlas || !atlas->tex) {
-        return false;
-    }
-    if (out_w) {
-        *out_w = (float)atlas->w;
-    }
-    if (out_h) {
-        *out_h = (float)atlas->h;
-    }
-    return true;
 }
 
 bool nano_ui_text_atlas_insert_surface(
