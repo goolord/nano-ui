@@ -5,7 +5,6 @@ module NanoUI.Frame.Hit
   ( findNodeByWidgetId
   , findNodeByKey
   , modalTreeOpen
-  , topmostModalIdx
   , nodeInSubtree
   , widgetIdInSubtree
   , overlayHitAllowed
@@ -32,6 +31,7 @@ import NanoUI.Layout.Arena
   , getWidgetId
   , lookupNodeByKey
   , lookupNodeByWidgetId
+  , topModalNode
   )
 import NanoUI.Types (Rect (..), V2 (..), rectContains, rectH, rectW)
 
@@ -43,13 +43,8 @@ findNodeByKey ctx k = lookupNodeByKey (ctxNodeArena ctx) k
 
 modalTreeOpen :: Context -> IO Bool
 modalTreeOpen ctx = do
-  top <- topmostModalIdx ctx
+  top <- topModalNode (ctxNodeArena ctx)
   pure (isJust top)
-
-topmostModalIdx :: Context -> IO (Maybe NodeIdx)
-topmostModalIdx ctx =
-  findNodeRevM (ctxNodeArena ctx) $ \i ->
-    (== NodeModal) <$> getNodeType (ctxNodeArena ctx) i
 
 nodeInSubtree :: Context -> NodeIdx -> NodeIdx -> IO Bool
 nodeInSubtree ctx idx top = go idx
@@ -70,7 +65,7 @@ widgetIdInSubtree ctx root wid = do
 
 overlayHitAllowed :: Context -> NodeIdx -> V2 -> IO Bool
 overlayHitAllowed ctx idx mouse = do
-  mModal <- topmostModalIdx ctx
+  mModal <- topModalNode (ctxNodeArena ctx)
   case mModal of
     Just top -> nodeInSubtree ctx idx top
     Nothing -> do
@@ -99,7 +94,7 @@ topmostFloatingAtMouse ctx mouse wanted =
 
 widgetOverlayAllowed :: Context -> WidgetId -> IO Bool
 widgetOverlayAllowed ctx wid = do
-  top <- topmostModalIdx ctx
+  top <- topModalNode (ctxNodeArena ctx)
   case top of
     Nothing -> pure True
     Just modal -> widgetIdInSubtree ctx modal wid

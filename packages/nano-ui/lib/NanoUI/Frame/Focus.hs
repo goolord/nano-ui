@@ -14,7 +14,7 @@ import Data.IORef (readIORef, writeIORef)
 import Data.Primitive.PrimArray (readPrimArray)
 import qualified Data.IntMap.Strict as IM
 import NanoUI.Context (Context (..), WidgetStore (..), getStore, intBool, intKey)
-import NanoUI.Frame.Hit (topmostModalIdx, widgetIdInSubtree)
+import NanoUI.Frame.Hit (widgetIdInSubtree)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
 import NanoUI.Layout.Arena
   ( NodeType (NodeCheckbox, NodeRadio, NodeTree)
@@ -24,6 +24,7 @@ import NanoUI.Layout.Arena
   , getStyleIdx
   , getWidgetId
   , setNodeValue
+  , topModalNode
   )
 import NanoUI.WidgetText (treeDecodeStyle)
 
@@ -78,14 +79,14 @@ filterModalFocusables :: Context -> [WidgetId] -> IO [WidgetId]
 filterModalFocusables ctx ids = do
   -- Searching the arena once per focusable makes a large modal's Tab traversal
   -- quadratic. Resolve its root once, then test ancestry for each widget.
-  top <- topmostModalIdx ctx
+  top <- topModalNode (ctxNodeArena ctx)
   case top of
     Nothing -> pure ids
     Just modal -> filterM (widgetIdInSubtree ctx modal) ids
 
 constrainFocusToModal :: Context -> IO ()
 constrainFocusToModal ctx = do
-  top <- topmostModalIdx ctx
+  top <- topModalNode (ctxNodeArena ctx)
   case top of
     Nothing -> pure ()
     Just modal -> do

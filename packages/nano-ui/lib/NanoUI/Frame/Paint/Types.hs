@@ -10,6 +10,7 @@ module NanoUI.Frame.Paint.Types
   ) where
 
 import Data.IORef (readIORef)
+import Data.Primitive.PrimArray (PrimArray)
 import NanoUI.Context (Context (..))
 import NanoUI.Draw (DrawArena)
 import NanoUI.Font (FontMetrics)
@@ -41,8 +42,9 @@ data PaintEnv = PaintEnv
     -- ^ The node scope 'peTheme' belongs to. A node in another scope repaints
     -- its subtree with that scope's theme.
   , peFontMetrics :: FontMetrics
-  , peOccluders :: [Rect]
-  , peHasOccluders :: Bool
+  , peOccluders :: PrimArray Float
+    -- ^ Opaque floating panel rects as @x0, y0, x1, y1@ runs; empty when the
+    -- frame has none.
   , peFocusRing :: WidgetId
     -- ^ The focused widget while its keyboard focus ring shows, else 0.
   }
@@ -50,7 +52,7 @@ data PaintEnv = PaintEnv
 -- | Locality helper for callers inside the paint frame loop; a fresh env
 -- re-reads the theme once.
 {-# NOINLINE buildPaintEnv #-}
-buildPaintEnv :: Context -> [Rect] -> IO PaintEnv
+buildPaintEnv :: Context -> PrimArray Float -> IO PaintEnv
 buildPaintEnv ctx occluders = do
   theme <- readIORef (ctxTheme ctx)
   focus <- readIORef (ctxFocusId ctx)
@@ -63,7 +65,6 @@ buildPaintEnv ctx occluders = do
     , peScope = 0
     , peFontMetrics = ctxFontMetrics ctx
     , peOccluders = occluders
-    , peHasOccluders = not (null occluders)
     , peFocusRing = if focusVisible then focus else WidgetId 0
     }
 

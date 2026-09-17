@@ -132,6 +132,13 @@
   boxes filter their options only while focused, pane grid dividers and
   overlays are keyed drawings, and unchanged animations are not rewritten
   to the store, cutting per-frame work for those widgets.
+- Damage is gathered into one running union instead of rect lists, paint
+  keeps the opaque floating panels it culls against in a flat array built
+  only when a frame has floating panels, and the node arena tracks the
+  topmost modal as nodes are added instead of hit tests scanning for it.
+  On the headless profiler, 3000 frames of a button grid with a pointer
+  moving over it and a floating window allocate 1.46 GB instead of 1.64 GB,
+  or 1.38 GB instead of 1.48 GB with a modal.
 
 ### Fixed
 

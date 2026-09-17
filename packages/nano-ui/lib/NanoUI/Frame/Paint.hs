@@ -25,6 +25,16 @@ module NanoUI.Frame.Paint
 import Control.Monad (forM_, unless, when)
 import Data.Bits ((.&.))
 import Data.Maybe (catMaybes, fromMaybe)
+import Data.Primitive.PrimArray
+  ( PrimArray
+  , emptyPrimArray
+  , indexPrimArray
+  , newPrimArray
+  , shrinkMutablePrimArray
+  , sizeofPrimArray
+  , unsafeFreezePrimArray
+  , writePrimArray
+  )
 import qualified Data.Text as T
 import Data.Word (Word32)
 import NanoUI.Context
@@ -83,6 +93,7 @@ import NanoUI.Layout.Arena
   , NodeType (..)
   , SizingTag (..)
   , arenaCount
+  , floatingNodeCount
   , foldNodesM
   , forChildNodes_
   , getHeightSizing
@@ -114,7 +125,7 @@ import NanoUI.Style
   , themeDisabledFade
   , themeFocusRing
   )
-import NanoUI.Types (Color (..), ImageId (..), Rect (..), V2 (..), colorA, colorRGBA, rectFullyInside, rectInflate)
+import NanoUI.Types (Color (..), ImageId (..), Rect (..), V2 (..), colorA, colorRGBA, rectInflate)
 import NanoUI.Widgets.ColorPicker (colorPickerPartRect)
 import NanoUI.Widgets.Custom (mkCustomDrawContext)
 import NanoUI.WidgetText
@@ -132,25 +143,43 @@ lowerShapes ctx = do
     buildPaintEnv ctx occluders >>= (`paintNodeWithEnv` 0)
 
 -- | Rects of opaque floating panels, inset past their rounded border, that
--- hide whatever lies fully behind them.
-collectFloatingOccluders :: Context -> IO [Rect]
+-- hide whatever lies fully behind them, as @x0, y0, x1, y1@ runs. Frames
+-- without floating nodes skip the arena walk.
+collectFloatingOccluders :: Context -> IO (PrimArray Float)
 collectFloatingOccluders ctx = do
   let na = ctxNodeArena ctx
-      isOpaque s = colorA (styleBg s) == 255
-      occludes theme = \case
-        NodeWindow -> isOpaque (overlayWindowStyle theme)
-        NodeModal -> isOpaque (overlayModalStyle theme)
-        NodePopup -> isOpaque (overlayMenuStyle theme)
-        _ -> False
-      addPanel acc idx = do
-        nt <- getNodeType na idx
-        opaque <- if isFloatingNode nt then (`occludes` nt) <$> nodeTheme ctx idx else pure False
-        if not opaque
-          then pure acc
-          else do
-            (x, y, w, h) <- getRect na idx
-            pure (if w > 6 && h > 6 then rectInflate (-3) (Rect x y w h) : acc else acc)
-  foldNodesM na addPanel []
+  floating <- floatingNodeCount na
+  if floating <= 0
+    then pure emptyPrimArray
+    else do
+      buf <- newPrimArray (floating * 4)
+      n <- foldNodesM na (addOccluder na buf) 0
+      shrinkMutablePrimArray buf (n * 4)
+      unsafeFreezePrimArray buf
+  where
+    isOpaque s = colorA (styleBg s) == 255
+    occludes theme = \case
+      NodeWindow -> isOpaque (overlayWindowStyle theme)
+      NodeModal -> isOpaque (overlayModalStyle theme)
+      NodePopup -> isOpaque (overlayMenuStyle theme)
+      _ -> False
+    addOccluder na buf !n idx = do
+      nt <- getNodeType na idx
+      opaque <- if isFloatingNode nt then (`occludes` nt) <$> nodeTheme ctx idx else pure False
+      if not opaque
+        then pure n
+        else do
+          (x, y, w, h) <- getRect na idx
+          if not (w > 6 && h > 6)
+            then pure n
+            else do
+              let !o = n * 4
+                  Rect ox oy ow oh = rectInflate (-3) (Rect x y w h)
+              writePrimArray buf o ox
+              writePrimArray buf (o + 1) oy
+              writePrimArray buf (o + 2) (ox + ow)
+              writePrimArray buf (o + 3) (oy + oh)
+              pure (n + 1)
 
 -- | Clip + occluder short-circuit, then lower the node. NOINLINE so the
 -- recursive container walk never exposes the dispatch below to the simplifier.
@@ -168,7 +197,7 @@ paintNodeWithEnv env idx = do
       !r = min (x + w + paintOverhang) (cx + cw)
       !b = min (y + h + paintOverhang) (cy + ch)
   unless (w <= 0 || h <= 0 || r <= l || b <= t) $
-    unless (peHasOccluders env && any (rectFullyInside (Rect l t (r - l) (b - t))) (peOccluders env)) $ do
+    unless (occluded (peOccluders env) l t r b) $ do
       nt <- getNodeType (peNodeArena env) idx
       scope <- getNodeScope (peNodeArena env) idx
       if scope == peScope env
@@ -176,6 +205,22 @@ paintNodeWithEnv env idx = do
         else do
           theme <- scopeTheme (peContext env) scope
           lowerNodeVisible env {peTheme = theme, peScope = scope} idx nt (Rect x y w h)
+
+-- | Whether an opaque floating panel fully covers the clipped node rect
+-- @l, t, r, b@, which the caller has already checked is non-empty.
+{-# INLINE occluded #-}
+occluded :: PrimArray Float -> Float -> Float -> Float -> Float -> Bool
+occluded occ !l !t !r !b = go 0
+  where
+    !end = sizeofPrimArray occ
+    go !o
+      | o >= end = False
+      | l >= indexPrimArray occ o
+          && t >= indexPrimArray occ (o + 1)
+          && r <= indexPrimArray occ (o + 2)
+          && b <= indexPrimArray occ (o + 3) =
+          True
+      | otherwise = go (o + 4)
 
 -- | How far a node may paint outside its rect: the focus ring sits 2px out
 -- with a 1.5px stroke.
@@ -390,4 +435,4 @@ walkChildrenWithOccluders env idx =
 -- (floating overlays); builds a fresh env without occluders.
 {-# NOINLINE walkChildren #-}
 walkChildren :: Context -> NodeIdx -> IO ()
-walkChildren ctx idx = buildPaintEnv ctx [] >>= (`walkChildrenWithOccluders` idx)
+walkChildren ctx idx = buildPaintEnv ctx emptyPrimArray >>= (`walkChildrenWithOccluders` idx)

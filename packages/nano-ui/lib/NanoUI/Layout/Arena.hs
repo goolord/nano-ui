@@ -18,6 +18,8 @@ module NanoUI.Layout.Arena
   , newNodeArena
   , resetNodeArena
   , arenaCount
+  , topModalNode
+  , floatingNodeCount
   , arenaArrays
   , withArenaArraysSnap
   , geomX
@@ -255,6 +257,12 @@ data NodeArena = NodeArena
   -- nodes added this frame, so a frame that only changes scopes can tell.
   , naScope :: IORef Int
   , naScopeSig :: IORef Word64
+  , naTopModal :: IORef Int
+  -- ^ Index of the last modal node added this frame, or -1. Node types are
+  -- fixed when a node is added and indices only grow until a reset, so this
+  -- is the topmost modal without a scan.
+  , naFloatingCount :: IORef Int
+  -- ^ Floating nodes (windows, modals, popups) added this frame.
   }
 
 -- | Flex solver scratch: child node indices, their measured widths and
@@ -445,6 +453,8 @@ newNodeArena = do
   naIndex <- newIORef =<< HT.new
   naScope <- newIORef 0
   naScopeSig <- newIORef 0
+  naTopModal <- newIORef (-1)
+  naFloatingCount <- newIORef 0
   pure NodeArena {..}
 
 resetNodeArena :: NodeArena -> IO ()
@@ -452,6 +462,8 @@ resetNodeArena na = do
   writeIORef (naCount na) 0
   writeIORef (naScope na) 0
   writeIORef (naScopeSig na) 0
+  writeIORef (naTopModal na) (-1)
+  writeIORef (naFloatingCount na) 0
   !ft <- readIORef (naFrameTag na)
   writeIORef (naFrameTag na) (if ft == maxBound then 1 else ft + 1)
   !ep <- readIORef (naEpoch na)
@@ -462,6 +474,17 @@ resetNodeArena na = do
       writeIORef (naEpoch na) nextEp
       writeIORef (naIndex na) =<< HT.new
     else writeIORef (naEpoch na) ep'
+
+-- | The topmost (last added) modal node, if any.
+{-# INLINE topModalNode #-}
+topModalNode :: NodeArena -> IO (Maybe NodeIdx)
+topModalNode na = do
+  i <- readIORef (naTopModal na)
+  pure (if i >= 0 then Just i else Nothing)
+
+{-# INLINE floatingNodeCount #-}
+floatingNodeCount :: NodeArena -> IO Int
+floatingNodeCount na = readIORef (naFloatingCount na)
 
 {-# INLINE arenaCount #-}
 arenaCount :: NodeArena -> IO Int
@@ -622,6 +645,10 @@ addNode na nt parent dir wSiz hSiz pad gap minW minH maxW maxH grow ax ay = do
     writeTree a parent treeFirstChild idx
     cc <- readTree a parent treeChildCount
     writeTree a parent treeChildCount (cc + 1)
+  when (isFloatingNode nt) $ do
+    when (nt == NodeModal) $ writeIORef (naTopModal na) idx
+    fc <- readIORef (naFloatingCount na)
+    writeIORef (naFloatingCount na) (fc + 1)
   writeIORef (naCount na) (idx + 1)
   pure idx
 
