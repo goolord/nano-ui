@@ -99,8 +99,6 @@ numericInputConfigured' cfg value = do
   isFocus <- keyboardFocused wid
   let
     key = intKey wid
-    heldK = slotKey SlotNumericHeld key
-    repeatK = slotKey SlotNumericRepeat key
     given = clampNumber cfg value
     stored = IM.lookup key (storeText store)
     -- Unfocused, the field shows the caller's value; focused, it keeps the
@@ -125,7 +123,7 @@ numericInputConfigured' cfg value = do
     pressDir
       | inputMousePressed inp = over upRect 1 + over downRect (-1)
       | otherwise = 0 :: Int
-    held0 = IM.findWithDefault 0 heldK (storeInt store)
+    held0 = IM.findWithDefault 0 (slotKey SlotNumericHeld key) (storeInt store)
     holding =
       held0 /= 0
         && inputMouseDown inp
@@ -137,7 +135,7 @@ numericInputConfigured' cfg value = do
       | otherwise = 0
   now <- if pressDir /= 0 || holding then uiIO getMonotonicTime else pure 0
   let
-    repeatAt0 = IM.findWithDefault 0 repeatK (storeDouble store)
+    repeatAt0 = IM.findWithDefault 0 (slotKey SlotNumericRepeat key) (storeDouble store)
     -- A held arrow repeats after a pause.
     repeatDir = if pressDir == 0 && holding && now >= repeatAt0 then held0 else 0
     dir
@@ -164,6 +162,8 @@ numericInputConfigured' cfg value = do
           let t = formatNumber cfg final
            in TextInputState t (T.length t) (T.length t)
       | otherwise = s1
+    heldK = slotKey SlotNumericHeld key
+    repeatK = slotKey SlotNumericRepeat key
     dirty =
       stored /= Just (tisText s2)
         || s2 /= s0
