@@ -104,9 +104,7 @@ numericInputConfigured' cfg value = do
     -- Unfocused, the field shows the caller's value; focused, it keeps the
     -- text being typed.
     text0 = if isFocus then fromMaybe (formatNumber cfg given) stored else formatNumber cfg given
-    len0 = T.length text0
-    loaded = loadTextInputState store key text0
-    s0 = loaded {tisCursor = min len0 (tisCursor loaded), tisAnchor = min len0 (tisAnchor loaded)}
+    s0 = loadTextInputState store key text0
     lastValue = IM.findWithDefault given key (storeDouble store)
   mEdited <- if isFocus then uiIO (editTextInput ctx singleLineMode inp store key s0) else pure Nothing
   resp <- addWidgetStyled wid NodeTextInput "" 0 (nicLayout cfg) textInputFlagNumeric

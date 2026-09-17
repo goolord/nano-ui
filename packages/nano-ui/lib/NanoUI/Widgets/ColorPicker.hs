@@ -116,6 +116,7 @@ import NanoUI.Widgets.Node
   , setChanged
   )
 import NanoUI.Widgets.NumericInput (NumericInputConfig (..), defaultNumericInputConfig, numericInputConfigured)
+import NanoUI.Widgets.TextEditor (singleLineMode)
 import NanoUI.Widgets.TextInput (editTextField)
 
 colorPickerDefaultColor :: Color
@@ -533,7 +534,7 @@ colorPickerWith showAlpha value = do
     hex <- readColor
     let hexText = if showAlpha then colorToHexA hex else colorToHex hex
     hexWid <- nextId
-    (_, thex, fhex, _) <- editTextField hexWid False hexText (Just hexText)
+    (_, thex, fhex, _) <- editTextField hexWid singleLineMode hexText (Just hexText)
     _ <-
       container NodeContainer (colorPickerFieldGroupLayout 100) $
         addWidgetStyled hexWid NodeTextInput "" 0 colorPickerFieldLayout 0

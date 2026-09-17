@@ -105,11 +105,13 @@ data TextInputState = TextInputState
   deriving (Eq, Show)
 
 -- | A field's cursor and anchor for @text@; the cursor defaults to the end
--- and the anchor to the cursor.
+-- and the anchor to the cursor. Both are clamped to the text, which can have
+-- been replaced from outside the field with a shorter one.
 loadTextInputState :: WidgetStore -> Int -> Text -> TextInputState
 loadTextInputState store key text =
-  let cursor = IM.findWithDefault (T.length text) (slotKey SlotCursor key) (storeInt store)
-      anchor = IM.findWithDefault cursor (slotKey SlotAnchor key) (storeInt store)
+  let len = T.length text
+      cursor = min len (IM.findWithDefault len (slotKey SlotCursor key) (storeInt store))
+      anchor = min len (IM.findWithDefault cursor (slotKey SlotAnchor key) (storeInt store))
    in TextInputState text cursor anchor
 
 saveTextInputState :: Int -> TextInputState -> WidgetStore -> WidgetStore
@@ -229,26 +231,20 @@ textInputConfigured' cfg value =
 -- @initial@ on first use) with its cursor and anchor, run the editor while
 -- focused, and save any change. While unfocused, @unfocusedText@ (when given)
 -- replaces the stored text, so a field that mirrors another value follows it.
--- A @password@ field never copies or cuts to the clipboard.
 -- Returns the text before and after this frame, whether it is focused, and
 -- whether a command run from outside the frame changed it.
-editTextField :: Ui :> es => WidgetId -> Bool -> Text -> Maybe Text -> Eff es (Text, Text, Bool, Bool)
-editTextField wid password initial unfocusedText = do
+editTextField :: Ui :> es => WidgetId -> EditorMode -> Text -> Maybe Text -> Eff es (Text, Text, Bool, Bool)
+editTextField wid mode initial unfocusedText = do
   ctx <- askContext
   uiIO $ registerFocusable ctx wid
   inp <- askInput
   store <- uiIO (getStore ctx)
   let
     key = intKey wid
-    mode = singleLineMode {modeCopyable = not password}
     modeKey = slotKey SlotTextMode key
     pulseKey = slotKey SlotTextAreaChanged key
     stored = IM.lookup key (storeText store)
-    text0 = fromMaybe initial stored
-    -- Text replaced from outside the field can be shorter than the caret.
-    len0 = T.length text0
-    loaded = loadTextInputState store key text0
-    s0 = loaded {tisCursor = min len0 (tisCursor loaded), tisAnchor = min len0 (tisAnchor loaded)}
+    s0 = loadTextInputState store key (fromMaybe initial stored)
     pulse = IM.member pulseKey (storeInt store)
   when (isNothing stored || IM.lookup modeKey (storeInt store) /= Just (editorModeCode mode) || pulse) $
     uiIO $ modifyStore ctx $ \st -> st
@@ -282,7 +278,7 @@ buildTextInput styleIdx layout placeholder value mDebounceMs = do
   ctx <- askContext
   let key = intKey wid
   _ <- uiIO $ adoptStoreText ctx wid key value
-  (oldText, newText, isFocus, pulse) <- editTextField wid (textInputPasswordMode styleIdx) value Nothing
+  (oldText, newText, isFocus, pulse) <- editTextField wid (textInputMode styleIdx) value Nothing
   uiIO $ recordStoreText ctx key newText
   inp <- askInput
   let submitted = isFocus && KeyEnter `elem` inputKeys inp
@@ -401,25 +397,9 @@ selectableTextWith' f txt = do
   layout <- f <$> askDefaultLayout
   wid <- nextId
   ctx <- askContext
-  uiIO $ registerFocusable ctx wid
-  inp <- askInput
-  store <- uiIO (getStore ctx)
-  let key = intKey wid
-      newLen = T.length txt
-      clampToText s = s {tisCursor = min newLen (tisCursor s), tisAnchor = min newLen (tisAnchor s)}
-      s0 = clampToText (loadTextInputState store key txt)
-  -- The caller owns the text: store it (with the clamped caret) when it changes.
-  let modeKey = slotKey SlotTextMode key
-      modeCode = editorModeCode singleLineMode {modeEditable = False}
-  when (IM.findWithDefault "" key (storeText store) /= txt || IM.lookup modeKey (storeInt store) /= Just modeCode) $
-    uiIO $ setStore ctx (saveTextInputState key s0 store) {storeInt = IM.insert modeKey modeCode (storeInt (saveTextInputState key s0 store))}
-  isFocus <- keyboardFocused wid
-  when isFocus $ do
-    let mode = singleLineMode {modeEditable = False}
-    mEdited <- uiIO (editTextInput ctx mode inp store key s0)
-    let s1 = maybe s0 (clampToText . editorTextState) mEdited
-    when (s1 /= s0) $
-      uiIO $ modifyStore ctx (saveTextInputState key s1)
+  -- The caller owns the text; the editor only moves the selection.
+  _ <- uiIO $ adoptStoreText ctx wid (intKey wid) txt
+  _ <- editTextField wid singleLineMode {modeEditable = False} txt Nothing
   let styleIdx =
         textInputFlagSelectable
           .|. packTextNodeStyleFull
