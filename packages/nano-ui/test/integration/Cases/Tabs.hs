@@ -23,6 +23,7 @@ import NanoUI.Testing.Harness
   , clickPair
   , drawQuads
   , hasText
+  , keyInp
   , runClick
   , spanCenter
   , warmup2
@@ -169,7 +170,7 @@ runTabsDisabledTest _ failed = forM_ [TabTop, TabLeft] $ \orientation -> do
     Nothing -> assert failed False
   forM_ [wid | (txt, wid) <- headers, txt == "Disabled" || txt == "\215"] $ \wid -> do
     writeIORef (ctxFocusId ctx) wid
-    (result, _, _, _) <- runFrame ctx (inp {inputKeys = inputKeysFromList [KeyEnter]}) (ui True)
+    (result, _, _, _) <- runFrame ctx (keyInp KeyEnter inp) (ui True)
     check result
   -- Re-enabling the same header preserves its identity and restores activation.
   _ <- warmup2 ctx inp (ui False)

@@ -13,7 +13,7 @@ import Data.IORef (IORef, readIORef, writeIORef)
 import NanoUI
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, withInput)
-import NanoUI.Testing.Harness (centerOf, drawQuads, runClick, warmup2, withInputOff)
+import NanoUI.Testing.Harness (centerOf, drawQuads, runClick, tabInp, warmup2, withInputOff)
 
 -- | A new version on a versioned drawing repaints its rect. Paint rebuilds the
 -- ops once the version moves, and nothing else damages them, so a clip frame
@@ -130,7 +130,7 @@ runStateChangeDamageTest ctx failed = do
 
   -- Warm up and focus textInput via Tab
   _ <- warmup2 ctx inp0 ui
-  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
+  _ <- runFrame ctx (tabInp inp0) ui
   _ <- takeDamage ctx
 
   -- Type a character into focused textInput

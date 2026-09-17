@@ -16,6 +16,7 @@ import NanoUI.Testing.Harness
   ( centerOf
   , checkIdleFullDamage
   , clickPair
+  , keyInp
   , runClick
   , spanYOf
   , warmup2
@@ -59,7 +60,7 @@ runModalOverlayTest ctx failed = do
       ((_, dlgHit, _), _, _, _) <- runFrame ctx backdrop ui
       assert failed (respClicked dlgHit)
 
-      let esc = inp0 {inputKeys = inputKeysFromList [KeyEscape]}
+      let esc = keyInp KeyEscape inp0
       ((_, dlgEsc, _), _, _, _) <- runFrame ctx esc ui
       assert failed (respClicked dlgEsc)
       consumed <- overlayConsumesQuit ctx esc
@@ -105,7 +106,7 @@ runModalCloseDamageTest ctx failed = do
         when (respClicked dlg) (setOpen False)
         pure resp
       inp0 = withInputOff 320 240
-      esc = inp0 {inputKeys = inputKeysFromList [KeyEscape]}
+      esc = keyInp KeyEscape inp0
       idle = inp0 {inputDeltaTime = 1}
   _ <- runFrame ctx inp0 ui
   (resp, _, _, _) <- runFrame ctx inp0 ui

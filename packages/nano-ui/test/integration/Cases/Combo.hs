@@ -14,7 +14,7 @@ import Data.Text qualified as T
 import NanoUI
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, withInput)
-import NanoUI.Testing.Harness (clickPair, hasText, held, warmup2)
+import NanoUI.Testing.Harness (clickPair, hasText, held, keyInp, tabInp, warmup2)
 
 comboOpts :: [T.Text]
 comboOpts = ["Alpha Sans", "Beta Serif", "Gamma Mono", "Delta Round"]
@@ -35,12 +35,12 @@ runComboFilterTest ctx failed = do
   let inp0 = withInput 320 100
       ui = held textRef (comboBox' "Font" comboOpts)
   _ <- warmup2 ctx inp0 ui
-  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
+  _ <- runFrame ctx (tabInp inp0) ui
   _ <- runFrame ctx (inp0 {inputChars = "ga"}) ui
   overlays <- collectOverlayTextSpans ctx inp0
   assert failed (hasText "Gamma Mono" overlays)
   assert failed (not (hasText "Alpha Sans" overlays))
-  ((_, t), _, _, _) <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyEnter]}) ui
+  ((_, t), _, _, _) <- runFrame ctx (keyInp KeyEnter inp0) ui
   assertEq failed t "ga"
 
 -- Up/Down move the keyboard highlight (Down from nothing selects the first
@@ -50,10 +50,10 @@ runComboKeyboardPickTest ctx failed = do
   let inp0 = withInput 320 100
       ui = comboBox' "Font" comboOpts ""
   _ <- warmup2 ctx inp0 ui
-  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
-  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyDown]}) ui
-  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyDown]}) ui
-  ((r, t), _, _, _) <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyEnter]}) ui
+  _ <- runFrame ctx (tabInp inp0) ui
+  _ <- runFrame ctx (keyInp KeyDown inp0) ui
+  _ <- runFrame ctx (keyInp KeyDown inp0) ui
+  ((r, t), _, _, _) <- runFrame ctx (keyInp KeyEnter inp0) ui
   assert failed (respChanged r)
   assertEq failed t "Beta Serif"
   spans <- collectTextSpans ctx
@@ -65,7 +65,7 @@ runComboMousePickTest ctx failed = do
   let inp0 = withInput 320 200
       ui = comboBox' "Font" comboOpts ""
   _ <- warmup2 ctx inp0 ui
-  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
+  _ <- runFrame ctx (tabInp inp0) ui
   _ <- runFrame ctx inp0 ui
   overlays <- collectOverlayTextSpans ctx inp0
   case [r | (r, txt, _, _, _) <- overlays, "Beta Serif" `T.isInfixOf` txt] of
@@ -92,7 +92,7 @@ runComboHoverHighlightTest ctx failed = do
   let inp0 = withInput 320 200
       ui = comboBox' "Font" comboOpts ""
   _ <- warmup2 ctx inp0 ui
-  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
+  _ <- runFrame ctx (tabInp inp0) ui
   _ <- runFrame ctx inp0 ui
   overlays <- collectOverlayTextSpans ctx inp0
   case [r | (r, txt, _, _, _) <- overlays, "Delta Round" `T.isInfixOf` txt] of
@@ -115,7 +115,7 @@ runComboHoverHighlightTest ctx failed = do
         ([dBg], [aBg]) -> assert failed (dBg /= aBg)
         _ -> assert failed False
       -- Enter commits the hovered row.
-      ((r1, t1), _, _, _) <- runFrame ctx (hover {inputKeys = inputKeysFromList [KeyEnter]}) ui
+      ((r1, t1), _, _, _) <- runFrame ctx (keyInp KeyEnter hover) ui
       assert failed (respChanged r1)
       assertEq failed t1 "Delta Round"
     _ -> assert failed False
@@ -127,7 +127,7 @@ runComboScrollbarDragTest ctx failed = do
   let inp0 = withInput 320 300
       ui = comboBox' "Fonts" comboLongOpts ""
   (resp, _) <- warmup2 ctx inp0 ui
-  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
+  _ <- runFrame ctx (tabInp inp0) ui
   _ <- runFrame ctx inp0 ui
   overlays0 <- collectOverlayTextSpans ctx inp0
   assert failed (hasText "Fam 01" overlays0)
@@ -156,7 +156,7 @@ runComboBlurCommitTest ctx failed = do
   let inp0 = withInput 320 200
       ui = column (held textRef (comboBox' "Font" comboOpts))
   _ <- warmup2 ctx inp0 ui
-  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
+  _ <- runFrame ctx (tabInp inp0) ui
   ((rA, tA), _, _, _) <- runFrame ctx (inp0 {inputChars = "N"}) ui
   assertEq failed tA "N"
   assert failed (not (respChanged rA))
@@ -168,7 +168,7 @@ runComboBlurCommitTest ctx failed = do
   ((rW, tW), _, _, _) <- runFrame ctx inp0 ui
   assertEq failed tW "No "
   assert failed (not (respChanged rW))
-  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyBackspace]}) ui
+  _ <- runFrame ctx (keyInp KeyBackspace inp0) ui
   -- Click far away: focus clears after the UI pass, and the frame after the
   -- blur commits the typed text.
   let away = inp0 {inputMousePos = V2 310 5, inputMouseDown = True, inputMousePressed = True}
@@ -194,9 +194,9 @@ runComboEscapeRevertTest ctx failed = do
   assert failed (not (hasText "Alpha Sans" overlays0))
   spans0 <- collectTextSpans ctx
   assert failed (hasText "Inter" spans0)
-  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
+  _ <- runFrame ctx (tabInp inp0) ui
   _ <- runFrame ctx (inp0 {inputChars = "No"}) ui
-  ((r, t), _, _, _) <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyEscape]}) ui
+  ((r, t), _, _, _) <- runFrame ctx (keyInp KeyEscape inp0) ui
   assert failed (not (respChanged r))
   assertEq failed t "Inter"
   focus <- getFocusId ctx
@@ -213,7 +213,7 @@ runComboWheelScrollTest ctx failed = do
       long = "A Very Long Font Family Name That Overflows"
       ui = comboBox' "Fonts" (comboLongOpts ++ [long]) ""
   _ <- warmup2 ctx inp0 ui
-  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
+  _ <- runFrame ctx (tabInp inp0) ui
   _ <- runFrame ctx inp0 ui
   overlays0 <- collectOverlayTextSpans ctx inp0
   assert failed (hasText "Fam 01" overlays0)

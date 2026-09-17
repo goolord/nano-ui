@@ -17,7 +17,7 @@ import NanoUI.Context (Context (..), getStore, intKey, registerImages, lookupIma
 import NanoUI.Store (WidgetStore (..))
 import NanoUI.Testing (clearDirty, collectTextSpans, isDirty, runFrame)
 import NanoUI.Testing.Assert (assert, assertEq)
-import NanoUI.Testing.Harness (tabInp, warmup2, withInputOff)
+import NanoUI.Testing.Harness (keyInp, tabInp, warmup2, withInputOff)
 
 runCollectionApiTest :: Context -> IORef Int -> IO ()
 runCollectionApiTest ctx failed = do
@@ -70,7 +70,7 @@ runControlledStateTest ctx failed = do
   _ <-
     runFrame
       ctx
-      (inp {inputKeys = inputKeysFromList [KeyEnter]})
+      (keyInp KeyEnter inp)
       (ui False "replacement" 75)
   assertEq failed [True] =<< readIORef callbacks
   _ <- runFrame ctx inp (ui False "replacement" 75)

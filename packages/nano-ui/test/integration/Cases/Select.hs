@@ -21,7 +21,9 @@ import NanoUI.Testing.Harness
   , clickPair
   , hasText
   , held
+  , keyInp
   , runClick
+  , tabInp
   , warmup2
   )
 
@@ -96,19 +98,19 @@ runTreeKeyboardTest ctx failed = do
   _ <- warmup2 ctx inp0 ui
   spans0 <- collectTextSpans ctx
   assert failed (hasText "root" spans0 && hasText "child" spans0 && hasText "leaf" spans0)
-  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
-  ((_, sel1), _, _, _) <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyDown]}) ui
+  _ <- runFrame ctx (tabInp inp0) ui
+  ((_, sel1), _, _, _) <- runFrame ctx (keyInp KeyDown inp0) ui
   assertEq failed sel1 1
-  ((_, sel0), _, _, _) <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyUp]}) ui
+  ((_, sel0), _, _, _) <- runFrame ctx (keyInp KeyUp inp0) ui
   assertEq failed sel0 0
-  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyDown]}) ui
-  ((_, parentSel), _, _, _) <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyLeft]}) ui
+  _ <- runFrame ctx (keyInp KeyDown inp0) ui
+  ((_, parentSel), _, _, _) <- runFrame ctx (keyInp KeyLeft inp0) ui
   assertEq failed parentSel 0
-  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyEnter]}) ui
+  _ <- runFrame ctx (keyInp KeyEnter inp0) ui
   _ <- runFrame ctx inp0 ui
   spans <- collectTextSpans ctx
   assert failed (not (hasText "child" spans))
-  ((_, afterCollapsed), _, _, _) <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyDown]}) ui
+  ((_, afterCollapsed), _, _, _) <- runFrame ctx (keyInp KeyDown inp0) ui
   assertEq failed afterCollapsed 2
 
 -- Open dropdown rows show the pointer cursor on hover and press, and
@@ -187,10 +189,10 @@ runSelectKeyboardTest ctx failed = do
   let (openPress, openRelease) = clickPair inp0 (centerOf resp)
   _ <- runFrame ctx openPress ui
   _ <- runFrame ctx openRelease ui
-  _ <- runFrame ctx (openRelease {inputKeys = inputKeysFromList [KeyDown]}) ui
+  _ <- runFrame ctx (keyInp KeyDown openRelease) ui
   ((_, idx1), _, _, _) <- runFrame ctx openRelease ui
   assertEq failed idx1 2
-  _ <- runFrame ctx (openRelease {inputKeys = inputKeysFromList [KeyUp]}) ui
+  _ <- runFrame ctx (keyInp KeyUp openRelease) ui
   ((_, idx2), _, _, _) <- runFrame ctx openRelease ui
   assertEq failed idx2 1
   _ <- runFrame ctx (openRelease {inputKeys = inputKeysFromList [KeyEscape], inputMouseReleased = False}) ui
@@ -198,15 +200,15 @@ runSelectKeyboardTest ctx failed = do
   _ <- runFrame ctx idleAfterOpen ui
   overlays <- collectOverlayTextSpans ctx idleAfterOpen
   assert failed (not (any (\(_, txt, _, _, _) -> txt `elem` ["Low", "Medium", "High"]) overlays))
-  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
+  _ <- runFrame ctx (tabInp inp0) ui
   focus <- getFocusId ctx
   assert failed (focus /= WidgetId 0)
-  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyRight]}) ui
+  _ <- runFrame ctx (keyInp KeyRight inp0) ui
   ((_, idx3), _, _, _) <- runFrame ctx inp0 ui
   assertEq failed idx3 2
   closedOverlays <- collectOverlayTextSpans ctx inp0
   assert failed (not (any (\(_, txt, _, _, _) -> txt `elem` ["Low", "Medium", "High"]) closedOverlays))
-  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyLeft]}) ui
+  _ <- runFrame ctx (keyInp KeyLeft inp0) ui
   ((_, idx4), _, _, _) <- runFrame ctx inp0 ui
   assertEq failed idx4 1
 

@@ -97,6 +97,7 @@ import NanoUI.Testing.Harness
   , held
   , spanXOf
   , spanYOf
+  , tabInp
   , vertUv
   , warmup2
   , warmupDraw
@@ -859,7 +860,7 @@ runSearchFieldDebounceTest ctx failed = do
   let inp0 = withInput 320 100
       ui = column (held queryRef (searchFieldConfigured' (defaultSearchFieldConfig {sfcDebounceMs = 40})))
   _ <- warmup2 ctx inp0 ui
-  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
+  _ <- runFrame ctx (tabInp inp0) ui
   ((rA, tA), _, _, _) <- runFrame ctx (inp0 {inputChars = "a"}) ui
   assertEq failed tA "a"
   assert failed (not (respChanged rA))

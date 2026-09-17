@@ -29,6 +29,7 @@ import NanoUI.Testing.Harness
   , centerOf
   , clickPair
   , dragWindowEdge
+  , keyInp
   , runClick
   , runDragFrom
   , spanYOf
@@ -162,7 +163,7 @@ runWindowOverlayTest ctx failed = do
   let (clickWin, _) = clickPair inp0 (V2 (wx + ww / 2) (wy + wh * 0.7))
   ((outsideMid, _, _), _, _, _) <- runFrame ctx clickWin ui
   assert failed (not (respClicked outsideMid))
-  let esc = inp0 {inputKeys = inputKeysFromList [KeyEscape]}
+  let esc = keyInp KeyEscape inp0
   ((_, winEsc, _), _, _, _) <- runFrame ctx esc ui
   assert failed (not (respClicked winEsc))
   let Rect px py pw _ =

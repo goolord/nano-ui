@@ -61,7 +61,9 @@ import NanoUI.Testing.Harness
   , centerOf
   , clickPair
   , held
+  , keyInp
   , spanCenter
+  , tabInp
   , warmup2
   )
 import NanoUI.Widgets.TextArea
@@ -81,10 +83,10 @@ runTextInputBatchTest ctx failed = do
   let
     inp = withInput 320 120
     ui = column (textInput' "aOLDz")
-    left = inp {inputKeys = inputKeysFromList [KeyLeft]}
+    left = keyInp KeyLeft inp
     step event = runFrame ctx event ui
   (resp, _) <- warmup2 ctx inp ui
-  _ <- step (inp {inputKeys = inputKeysFromList [KeyTab]})
+  _ <- step (tabInp inp)
   _ <- step left
   replicateM_ 3 (step (left {inputModifiers = Modifiers True False False}))
   let
@@ -172,7 +174,7 @@ runTextInputCutClearsSelectionTest ctx failed = do
     inp0 = withInput 320 120
     ui = column (held textRef textInput')
   _ <- warmup2 ctx' inp0 ui
-  _ <- runFrame ctx' (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
+  _ <- runFrame ctx' (tabInp inp0) ui
   let
     shiftLeft =
       inp0
@@ -200,7 +202,7 @@ runTextInputWordKeysTest ctx failed = do
     ui = column (held textRef textInput')
     ctrlMods = Modifiers False True False
   _ <- warmup2 ctx inp0 ui
-  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
+  _ <- runFrame ctx (tabInp inp0) ui
   -- Ctrl+Backspace deletes the word before the cursor ("world").
   _ <-
     runFrame
@@ -242,7 +244,7 @@ runTextAreaCutClearsSelectionTest ctx failed = do
     inp0 = withInput 320 220
     ui = column (label "Notes" >> held textRef textArea')
   _ <- warmup2 ctx' inp0 ui
-  _ <- runFrame ctx' (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
+  _ <- runFrame ctx' (tabInp inp0) ui
   _ <-
     runFrame
       ctx'
@@ -266,8 +268,8 @@ runTextInputSelectionTest ctx failed = do
     inp0 = withInput 320 120
     ui = column (button "Other" >> held textRef textInput')
   _ <- warmup2 ctx inp0 ui
-  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
-  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
+  _ <- runFrame ctx (tabInp inp0) ui
+  _ <- runFrame ctx (tabInp inp0) ui
   let
     shiftLeft =
       inp0
@@ -286,7 +288,7 @@ runTextInputSelectionTest ctx failed = do
         (inp0 {inputChars = selectAll, inputModifiers = Modifiers False True False})
         ui
     ((_, valClear), _, _, _) <-
-      runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyBackspace]}) ui
+      runFrame ctx (keyInp KeyBackspace inp0) ui
     assertEq failed valClear ""
 
 runTextInputMouseSelectionTest :: Context -> IORef Int -> IO ()
@@ -357,7 +359,7 @@ runTextInputClickSelectTest ctx failed = do
               )
               ui
           ((_, val), _, _, _) <-
-            runFrame c (inp0 {inputKeys = inputKeysFromList [KeyBackspace]}) ui
+            runFrame c (keyInp KeyBackspace inp0) ui
           pure (Just val)
         _ -> pure Nothing
   word <- clicksThenBackspace ctx "hello world" 2
@@ -373,11 +375,11 @@ runTextInputClipboardTest ctx failed = do
     inp0 = withInput 320 120
     ui = column (held textRef textInput')
   _ <- warmup2 ctx' inp0 ui
-  _ <- runFrame ctx' (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
+  _ <- runFrame ctx' (tabInp inp0) ui
   let
     selectAll = inp0 {inputChars = "a", inputModifiers = Modifiers False True False}
     copy = inp0 {inputChars = "c", inputModifiers = Modifiers False True False}
-    clear = inp0 {inputKeys = inputKeysFromList [KeyBackspace]}
+    clear = keyInp KeyBackspace inp0
     paste = inp0 {inputChars = "v", inputModifiers = Modifiers False True False}
   _ <- runFrame ctx' selectAll ui
   _ <- runFrame ctx' copy ui
@@ -399,7 +401,7 @@ runTextInputPasswordTest ctx failed = do
   spans <- collectTextSpans ctx'
   assert failed (not (any (\(_, txt, _, _, _) -> "hunter2" `T.isInfixOf` txt) spans))
   assertSpansHas failed "*******" spans
-  _ <- runFrame ctx' (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
+  _ <- runFrame ctx' (tabInp inp0) ui
   let
     selectAll = inp0 {inputChars = "a", inputModifiers = Modifiers False True False}
     copy = inp0 {inputChars = "c", inputModifiers = Modifiers False True False}
@@ -536,7 +538,7 @@ runTextInputScrollTest ctx failed = do
       _ <- runFrame ctx press ui
       _ <- runFrame ctx release ui
       let
-        atEnd = inp0 {inputKeys = inputKeysFromList [KeyEnd]}
+        atEnd = keyInp KeyEnd inp0
       _ <- runFrame ctx atEnd ui
       store <- getStore ctx
       let
@@ -544,7 +546,7 @@ runTextInputScrollTest ctx failed = do
         scrollEnd = IM.findWithDefault 0 (slotKey SlotTextInputScroll key) (storeFloat store)
       assert failed (scrollEnd > 0)
       let
-        atHome = inp0 {inputKeys = inputKeysFromList [KeyHome]}
+        atHome = keyInp KeyHome inp0
       _ <- runFrame ctx atHome ui
       storeHome <- getStore ctx
       let
@@ -910,7 +912,7 @@ runTextAreaScrollCursorLeavesViewportTest ctx failed = do
     ui = column (labeledArea "Notes" longText)
   (resp, _) <- warmup2 ctx inp0 ui
   -- Focus the textarea via Tab
-  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
+  _ <- runFrame ctx (tabInp inp0) ui
   mRect <- getPrevRect ctx (respId resp)
   case mRect of
     Just (Rect rx ry rw rh) -> do
@@ -1106,7 +1108,7 @@ runTextUndoTest ctx failed = do
     ctrlShift = Modifiers True True False
     frame i = (\(a, _, _, _) -> a) <$> runFrame ctx i ui
   _ <- warmup2 ctx inp ui
-  _ <- frame (inp {inputKeys = inputKeysFromList [KeyTab]})
+  _ <- frame (tabInp inp)
   mapM_ (\c -> frame inp {inputChars = T.singleton c}) ("red fox" :: String)
   assertEq failed "red fox" =<< readIORef ref
   (_, canUndo) <- frame inp
@@ -1160,19 +1162,19 @@ runTextAreaWidthTrackingTest ctx failed = do
           widths <- mapM (lineWidthIO fm) (T.splitOn "\n" text)
           assertEq failed (maximum widths) tracked
   _ <- warmup2 ctx inp ui
-  _ <- frame inp {inputKeys = inputKeysFromList [KeyTab]}
+  _ <- frame (tabInp inp)
   check
   -- Widen a short line past the widest.
-  mapM_ (\_ -> frame inp {inputKeys = inputKeysFromList [KeyDown]}) [1 .. 10 :: Int]
+  mapM_ (\_ -> frame (keyInp KeyDown inp)) [1 .. 10 :: Int]
   mapM_ (\c -> frame inp {inputChars = T.singleton c}) (replicate 40 'x')
   check
   -- Shorten it again, so the old widest line wins.
-  mapM_ (\_ -> frame inp {inputKeys = inputKeysFromList [KeyBackspace]}) [1 .. 40 :: Int]
+  mapM_ (\_ -> frame (keyInp KeyBackspace inp)) [1 .. 40 :: Int]
   check
   -- Delete the widest line itself.
-  mapM_ (\_ -> frame inp {inputKeys = inputKeysFromList [KeyDown]}) [1 .. 190 :: Int]
+  mapM_ (\_ -> frame (keyInp KeyDown inp)) [1 .. 190 :: Int]
   _ <- frame inp {inputKeys = inputKeysFromList [KeyHome, KeyEnd], inputModifiers = Modifiers True False False}
-  _ <- frame inp {inputKeys = inputKeysFromList [KeyBackspace]}
+  _ <- frame (keyInp KeyBackspace inp)
   check
   -- Undo brings it back.
   _ <- frame inp {inputChars = "z", inputModifiers = ctrl}

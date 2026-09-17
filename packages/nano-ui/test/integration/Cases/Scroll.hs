@@ -48,6 +48,7 @@ import NanoUI.Testing.Harness
   , runClick
   , spanCenter
   , spanYOf
+  , tabInp
   , warmup2
   , withInputOff
   )
@@ -318,7 +319,7 @@ runNestedScrollFocusTest ctx failed = do
                mapM_ (\i -> label (T.pack ("out " <> show (i :: Int)))) [1 .. 10]
                pure pair
   (_, (inner, _)) <- warmup2 ctx inp0 ui
-  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
+  _ <- runFrame ctx (tabInp inp0) ui
   focus <- getFocusId ctx
   assert failed (focus /= WidgetId 0)
   offI0 <- getScrollOffset ctx inner

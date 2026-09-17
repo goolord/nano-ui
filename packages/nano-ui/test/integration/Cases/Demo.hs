@@ -15,7 +15,7 @@ import Data.Text qualified as T
 import NanoUI
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, withInput)
-import NanoUI.Testing.Harness (held, pressAt, releaseAt, runClick, spanCenter, warmup2, withInputOff)
+import NanoUI.Testing.Harness (held, keyInp, pressAt, releaseAt, runClick, spanCenter, tabInp, warmup2, withInputOff)
 
 data DemoTab
   = Controls
@@ -209,14 +209,14 @@ runColorPickerEditTest ctx failed = do
       ui = colorPicker' initial
   _ <- warmup2 ctx inp0 ui
   -- Tab past the field and the hue bar to the R field.
-  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
-  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
-  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
+  _ <- runFrame ctx (tabInp inp0) ui
+  _ <- runFrame ctx (tabInp inp0) ui
+  _ <- runFrame ctx (tabInp inp0) ui
   _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyBackspace, KeyBackspace, KeyBackspace]}) ui
   ((_, col), _, _, _) <- runFrame ctx (inp0 {inputChars = "10"}) ui
   assertEq failed (colorR col) 10
   assertEq failed (colorG col) 102
-  ((_, stepped), _, _, _) <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyUp]}) ui
+  ((_, stepped), _, _, _) <- runFrame ctx (keyInp KeyUp inp0) ui
   assertEq failed (colorR stepped) 11
   ((_, lettered), _, _, _) <- runFrame ctx (inp0 {inputChars = "x"}) ui
   assertEq failed (colorR lettered) 11
@@ -229,7 +229,7 @@ runColorPickerDragAfterFieldTest ctx failed = do
   colorRef <- newIORef initial
   let inp0 = withInput 400 460
       ui = held colorRef colorPicker'
-      tabKey = inp0 {inputKeys = inputKeysFromList [KeyTab]}
+      tabKey = tabInp inp0
   (resp, _) <- warmup2 ctx inp0 ui
   -- Tab past the field and the hue bar to the R field.
   _ <- runFrame ctx tabKey ui
@@ -260,8 +260,8 @@ runColorPickerChangeOnceTest ctx failed = do
       ui = held colorRef colorPicker'
       changed inp = (\((resp, _), _, _, _) -> respChanged resp) <$> runFrame ctx inp ui
   (resp, _) <- warmup2 ctx inp0 ui
-  _ <- runFrame ctx (inp0 {inputKeys = inputKeysFromList [KeyTab]}) ui
-  moved <- changed (inp0 {inputKeys = inputKeysFromList [KeyRight]})
+  _ <- runFrame ctx (tabInp inp0) ui
+  moved <- changed (keyInp KeyRight inp0)
   assert failed moved
   store <- getStore ctx
   let wid = respId resp
