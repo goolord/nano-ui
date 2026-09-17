@@ -26,6 +26,7 @@ module NanoUI.Widgets.PaneGrid
 import Control.Monad (forM_, unless, void, when)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Dynamic (fromDynamic, toDyn)
+import Data.Hashable (hash)
 import Data.IntMap.Strict qualified as IM
 import Data.List (find, minimumBy)
 import Data.Map.Strict (Map)
@@ -108,6 +109,7 @@ import NanoUI.Widgets.Behavior (KeyNav (..), dragThresholdPx, useKeyNav)
 import NanoUI.Widgets.Custom
   ( CustomWidgetSpec (..)
   , CustomDrawContext (..)
+  , contentKey
   , defaultCustomWidgetSpec
   , customWidget
   , drawRect
@@ -431,7 +433,7 @@ paneGrid cfg = do
         ringPane <- uiIO ((&&) <$> getFocusVisible ctx <*> ((== wid) <$> getFocusId ctx))
         when (ringPane && not dgiShown) $
           forM_ (M.lookup focusedInit visibleRegions) $ \r ->
-            uiIO $ registerCustomDrawing ctx wid 0 $ \cdc _ ->
+            uiIO $ registerCustomDrawing ctx wid (contentKey [1, rectX r, rectY r, rectW r, rectH r]) $ \cdc _ ->
               runCanvas (drawStrokeRoundedRect (rectInflate (-2) r) 2 1.5 (themeAccent (cdcTheme cdc)))
 
   -- Keyboard navigation for the focused grid. Escape restores a maximized
@@ -626,6 +628,7 @@ dividerWidget env axis = do
     customWidget
       defaultCustomWidgetSpec
         { widgetLayout = dLay
+        , widgetContent = contentKey [if axis == AxisV then 1 else 2, geThickness env, geLeeway env]
         , widgetDraw = \cdc rect -> drawDivider cdc rect axis (geThickness env) (geLeeway env)
         , widgetCursor = Just (const (if axis == AxisV then UiCursorEwResize else UiCursorNsResize))
         }
@@ -677,8 +680,10 @@ drawDragOverlay env wid rendered ghost zone = do
       dragPane = fromIntegral (geDrag0 env)
       cached = IM.lookup (slotKey SlotPaneGrab (geKey env)) (storeDyn st) >>= fromDynamic
       title = maybe (fromMaybe "" cached) pvTitle (fmap rpView (find ((== dragPane) . rpPaneId) rendered))
+      rectKey = maybe [0, 0, 0, 0, 0] (\(Rect x y w h) -> [1, x, y, w, h])
+      key = contentKey (2 : fromIntegral (hash title) : rectKey ghost ++ rectKey zone)
   uiIO $
-    registerCustomDrawing ctx wid 0 (\cdc _ -> drawOverlay (cdcTheme cdc) title ghost zone)
+    registerCustomDrawing ctx wid key (\cdc _ -> drawOverlay (cdcTheme cdc) title ghost zone)
 
 -- | A compact, translucent drag indicator leaves the full-size drop preview
 -- visible. The indicator is offset from the pointer so it cannot obscure aim.
