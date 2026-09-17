@@ -19,21 +19,33 @@ module NanoUI.Widgets.Display
   , image'
   , freshImageId
   , registerImageRgba
+  , svgIcon
+  , svgIconWith
+  , svgIconWith'
+  , loadSvg
   , box
   )
 where
 
+import Control.Exception (IOException, try)
 import Control.Monad (void)
 import Data.ByteString (ByteString)
+import Data.ByteString qualified as BS
+import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
+import Data.Map.Strict qualified as Map
+import Data.Text.Encoding qualified as TE
 import Data.Text (Text)
 import Data.Text qualified as T
 import Effectful (Eff, type (:>))
 import NanoUI.Atlas qualified as Atlas
-import NanoUI.Context (Context (..), registerImage)
+import NanoUI.Context (Context (..), askHostIO, registerImage, setHost)
+import NanoUI.Draw (getDrawSnapScale)
 import NanoUI.Layout.Arena (NodeType (..))
-import NanoUI.Monad (Ui, askContext, nextId, uiIO)
+import NanoUI.Monad (Ui, askContext, nextId, uiIO, uiTheme)
+import NanoUI.Svg (Svg, parseSvg, rasterizeSvg, svgKey, svgMonochrome, svgSize)
 import NanoUI.Style
   ( Layout (..)
+  , Sizing (..)
   , alignEnd
   , alignMid
   , defaultLayout
@@ -48,9 +60,12 @@ import NanoUI.Style
   , gap
   , minW
   , padXY
+  , styleFg
+  , themePanel
   , tight
   )
-import NanoUI.Types (Color (..), ImageId (..), colorToWord32)
+import Data.Word (Word32)
+import NanoUI.Types (Color (..), ImageId (..), colorRGBA, colorToWord32)
 import NanoUI.WidgetText (intValueText)
 import NanoUI.Widgets.Layout (labelEx, labelWith, panelWith, row', rowWith)
 import NanoUI.Widgets.Node (Response, addWidget, addWidgetStyled)
@@ -135,6 +150,82 @@ registerImageRgba :: Ui :> es => ImageId -> Int -> Int -> ByteString -> Eff es B
 registerImageRgba iid w h pixels = do
   ctx <- askContext
   uiIO (registerImage ctx iid w h pixels)
+
+-- | Read and parse an SVG file.
+loadSvg :: FilePath -> IO (Either String Svg)
+loadSvg path = do
+  result <- try (BS.readFile path)
+  pure $ case result of
+    Left (err :: IOException) -> Left (show err)
+    Right bytes -> parseSvg (TE.decodeUtf8Lenient bytes)
+
+-- | An SVG icon @size@ logical pixels square, drawn in the text colour where
+-- it is used: a one-colour document (every paint @currentColor@ or
+-- unspecified) takes the colour as a tint, and a multicoloured one paints
+-- its @currentColor@ with it.
+{-# INLINE svgIcon #-}
+svgIcon :: Ui :> es => Float -> Svg -> Eff es ()
+svgIcon size = svgIconWith (fixedSquare size)
+  where
+    fixedSquare n l = l {layoutWidth = Fixed n, layoutHeight = Fixed n}
+
+-- | An SVG document sized by the layout modifier: a fixed width and height,
+-- or else the document's own size. A 'NanoUI.fontColor' in the modifier
+-- replaces the text colour.
+{-# INLINE svgIconWith #-}
+svgIconWith :: Ui :> es => (Layout -> Layout) -> Svg -> Eff es ()
+svgIconWith f doc = void (svgIconWith' f doc)
+
+-- | The document is rasterized once per pixel size and colour, at the
+-- display's scale, and kept in the image atlas for as long as the app runs.
+svgIconWith' :: Ui :> es => (Layout -> Layout) -> Svg -> Eff es Response
+svgIconWith' f doc = do
+  ctx <- askContext
+  theme <- uiTheme
+  let lay0 = f defaultLayout
+      (docW, docH) = svgSize doc
+      fixedOr sizing dflt = case sizing of
+        Fixed n -> n
+        _ -> dflt
+      w = fixedOr (layoutWidth lay0) docW
+      h = fixedOr (layoutHeight lay0) docH
+      color = maybe (styleFg (themePanel theme)) id (layoutFontColor lay0)
+      oneColour = svgMonochrome doc
+      white = colorRGBA 255 255 255 255
+      lay = lay0 {layoutWidth = Fixed w, layoutHeight = Fixed h, layoutFontColor = Just (if oneColour then color else white)}
+  scale <- uiIO (getDrawSnapScale (ctxDrawArena ctx))
+  let pw = max 1 (ceiling (w * max 1 scale))
+      ph = max 1 (ceiling (h * max 1 scale))
+      -- A one-colour raster is white and tinted when drawn, so every colour
+      -- shares it.
+      rasterColor = if oneColour then white else color
+      key = (svgKey doc, pw, ph, colorToWord32 rasterColor)
+  cache <- uiIO (svgRasterCache ctx)
+  known <- uiIO (Map.lookup key <$> readIORef cache)
+  iid <- case known of
+    Just iid -> pure iid
+    Nothing -> uiIO $ do
+      iid <- Atlas.freshImageId (ctxImageAtlas ctx)
+      ok <- registerImage ctx iid pw ph (rasterizeSvg pw ph rasterColor doc)
+      if ok
+        then atomicModifyIORef' cache (\m -> (Map.insert key iid m, ()))
+        else pure ()
+      pure (if ok then iid else ImageId 0)
+  wid <- nextId
+  let ImageId tid = iid
+  addWidget wid NodeImage (if tid <= 0 then T.empty else intValueText tid) 0 lay
+
+-- | Rasterized SVG documents by document, pixel size and colour.
+newtype SvgRasters = SvgRasters (IORef (Map.Map (Int, Int, Int, Word32) ImageId))
+
+svgRasterCache :: Context -> IO (IORef (Map.Map (Int, Int, Int, Word32) ImageId))
+svgRasterCache ctx =
+  askHostIO ctx >>= \case
+    Just (SvgRasters ref) -> pure ref
+    Nothing -> do
+      ref <- newIORef Map.empty
+      setHost ctx (SvgRasters ref)
+      pure ref
 
 -- | A solid rectangle sized by the layout modifier.
 box :: Ui :> es => (Layout -> Layout) -> Color -> Eff es ()

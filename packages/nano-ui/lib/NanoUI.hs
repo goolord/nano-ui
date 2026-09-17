@@ -324,6 +324,13 @@ module NanoUI
   , image'
   , freshImageId
   , registerImageRgba
+  , Svg
+  , parseSvg
+  , loadSvg
+  , svgIcon
+  , svgIconWith
+  , svgIconWith'
+  , svgSize
   , box
   , drawing
   , drawingVersioned

@@ -15,6 +15,7 @@ extra-doc-files:
     README.md
 data-files:
     data/lick.gif
+    data/icons/*.svg
 
 flag sdl
     description: Build the SDL3 demos. Needs SDL3, SDL3_ttf, and pkg-config.

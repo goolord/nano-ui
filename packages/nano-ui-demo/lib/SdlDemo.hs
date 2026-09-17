@@ -49,7 +49,7 @@ module SdlDemo
 import Control.Concurrent (forkIO)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, tryTakeMVar)
 import Control.Exception (SomeException, displayException, evaluate, try)
-import Control.Monad (forM, unless, void, when)
+import Control.Monad (forM, forM_, unless, void, when)
 import Data.Foldable (for_)
 import Data.List (elemIndex)
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
@@ -299,6 +299,7 @@ demoUi = do
   (saveDlg, setSaveDlg) <- useState (Nothing :: Maybe FileDialogId)
   (lick, setLick) <- useState (Nothing :: Maybe (Either String (V.Vector ImageId))) -- GIF frames, once loaded
   (lickLoad, setLickLoad) <- useState (Nothing :: Maybe GifLoad) -- the GIF while it decodes
+  (icons, setIcons) <- useState (Nothing :: Maybe [Either String Svg]) -- SVG icons, read on first show
   (folderDlg, setFolderDlg) <- useState (Nothing :: Maybe FileDialogId)
   (openPath, setOpenPath) <- useText ""
   (savePath, setSavePath) <- useText ""
@@ -526,6 +527,22 @@ demoUi = do
                 thumb (ImageId 1) "Swatch"
                 thumb (ImageId 2) "Checker"
                 thumb (ImageId 3) "Stripe"
+              separator
+              -- SVG icons read from disk the first time this tab shows. A
+              -- one-colour icon takes the text colour (or a fontColor), and
+              -- each size rasterizes once.
+              case icons of
+                Nothing -> do
+                  paths <- uiIO (mapM (\icon -> getDataFileName ("data/icons/" <> icon <> ".svg")) ["clock", "check", "star", "face"])
+                  setIcons . Just =<< uiIO (mapM loadSvg paths)
+                Just loaded -> do
+                  tint <- themeAccent <$> uiTheme
+                  rowWith (tight . gap gapInline . alignMid) $
+                    forM_ loaded $ \case
+                      Left err -> muted (T.pack err)
+                      Right doc -> do
+                        svgIcon 20 doc
+                        svgIconWith (fixedWH 32 32 . fontColor tint) doc
               separator
               -- An animated GIF loaded from disk the first time this tab
               -- shows: loadGif decodes it in the background, and gifFrames

@@ -88,6 +88,7 @@ library
         NanoUI.Frame.Window
         NanoUI.Runner
         NanoUI.SIMD
+        NanoUI.Svg
     other-modules:
         NanoUI.Animatable
         NanoUI.Animation
@@ -218,6 +219,7 @@ test-suite nano-ui-test
         Cases.Runner
         Cases.SIMD
         Cases.Styling
+        Cases.Svg
         Cases.State
         Cases.Table
         Cases.Modal

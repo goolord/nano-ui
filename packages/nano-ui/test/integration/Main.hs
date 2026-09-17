@@ -16,6 +16,7 @@ import Cases.PointerRelease
   )
 import Cases.Runner (runDrawingLockTest, runSessionLoopTest)
 import Cases.SIMD (runSimdWritesTest)
+import Cases.Svg (runSvgIconTest, runSvgRasterTest)
 import Cases.Styling
   ( runDisabledFocusOrderTest
   , runDisabledLookTest
@@ -104,6 +105,8 @@ testSpecs =
   , TestSpec "draw-external-text" False runExternalTextTest
   , TestSpec "drawing" False runDrawingTest
   , TestSpec "image" False runImageTest
+  , TestSpec "svg-raster" False runSvgRasterTest
+  , TestSpec "svg-icon" False runSvgIconTest
   , TestSpec "empty-frame" False runEmptyFrameTest
   , TestSpec "image-swap-damage" False runImageSwapDamageTest
   , TestSpec "atlas-growth" False runAtlasGrowthTest

@@ -24,6 +24,12 @@
 - `TextCommand` and `TextMotion`: what text fields do, as values. Keys and
   the context menu run them, and `runTextCommand` runs them on a field by its
   id, with `textCanUndo` and `textCanRedo` for enabling menu items.
+- SVG icons: `parseSvg` and `loadSvg` read the static subset of SVG icon
+  sets use (paths, basic shapes, groups, transforms, strokes with caps and
+  joins, fill rules, opacity), and `svgIcon` and `svgIconWith` draw one. A
+  one-colour icon is tinted with the text colour or a `fontColor`. Each
+  document is rasterized with anti-aliasing once per pixel size and colour,
+  at the display's scale, into the image atlas.
 - `spinner`, an indeterminate loading indicator that repaints only its own
   rect while it turns.
 - Theme slots `themeOnAccent`, `themeSelection`, `themeFocusRing`,

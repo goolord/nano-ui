@@ -25,7 +25,7 @@ module NanoUI.Frame.Paint
 import Control.Monad (forM_, unless, when)
 import Data.Bits ((.&.))
 import Data.IORef (readIORef)
-import Data.Maybe (catMaybes)
+import Data.Maybe (catMaybes, fromMaybe)
 import qualified Data.Text as T
 import Data.Word (Word32)
 import NanoUI.Context
@@ -92,6 +92,7 @@ import NanoUI.Layout.Arena
   , forChildNodes_
   , getDirection
   , getHeightSizing
+  , getNodeFontColor
   , getNodeFontSize
   , getNodeScope
   , getNodeType
@@ -375,11 +376,12 @@ paintImageNode env idx rect = do
   mUv <- lookupImageUv (peContext env) (ImageId tex)
   case mUv of
     Just (u0, v0, u1, v1) -> do
-      -- A disabled image fades the way disabled widget colours do.
+      -- An image may carry a tint in its font colour (an SVG icon). A
+      -- disabled image fades the way disabled widget colours do.
+      base <- fromMaybe (colorRGBA 255 255 255 255) <$> getNodeFontColor (peNodeArena env) idx
       let tint
-            | peScope env .&. 1 /= 0 = fadeAlpha white (round (255 * (1 - themeDisabledFade (peTheme env))))
-            | otherwise = white
-          white = colorRGBA 255 255 255 255
+            | peScope env .&. 1 /= 0 = fadeAlpha base (round (fromIntegral (colorA base) * (1 - themeDisabledFade (peTheme env))))
+            | otherwise = base
       pushImage da rect atlasTextureId u0 v0 u1 v1 tint
     _ -> pushRect da rect (themeAccent (peTheme env))
 

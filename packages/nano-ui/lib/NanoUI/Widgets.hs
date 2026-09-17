@@ -59,6 +59,13 @@ module NanoUI.Widgets
   , image'
   , freshImageId
   , registerImageRgba
+  , Svg
+  , parseSvg
+  , loadSvg
+  , svgIcon
+  , svgIconWith
+  , svgIconWith'
+  , svgSize
   , box
   , button
   , button'
@@ -297,6 +304,7 @@ import NanoUI.Widgets.Custom
   , useDrag2D
   , useWheelDelta
   )
+import NanoUI.Svg (Svg, parseSvg, svgSize)
 import NanoUI.Widgets.Display
   ( bold
   , box
@@ -313,6 +321,10 @@ import NanoUI.Widgets.Display
   , mono
   , muted
   , registerImageRgba
+  , loadSvg
+  , svgIcon
+  , svgIconWith
+  , svgIconWith'
   , toolbar
   , underline
   )
