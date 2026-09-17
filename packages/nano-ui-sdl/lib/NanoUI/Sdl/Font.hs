@@ -19,7 +19,7 @@ module NanoUI.Sdl.Font
   ) where
 
 import Control.Exception (SomeException, bracket, catch, throwIO)
-import Control.Monad (foldM, forM, forM_, unless, void, when)
+import Control.Monad (forM, forM_, unless, void, when)
 import Data.Bits ((.&.), (.|.), shiftL)
 import Foreign.Marshal.Alloc (alloca, allocaBytes)
 import Foreign.Marshal.Array (advancePtr, allocaArray)
@@ -405,11 +405,13 @@ glyphAtlasSize :: Float
 glyphAtlasSize = 2048
 
 -- | A line shaped by SDL_ttf: its layout for measuring and caret placement,
--- and per glyph nine numbers (glyph index, destination x y w h, source x y w
--- h, in raster pixels) with the index of the font that has it among the
--- line's font and its fallbacks.
+-- its measured width and height, and per glyph nine numbers (glyph index, destination x y w h,
+-- source x y w h, in raster pixels) with the index of the font that has it
+-- among the line's font and its fallbacks.
 data Shaped = Shaped
   { shapedText :: !ShapedText
+  , shapedSize :: !(Float, Float)
+  -- ^ Kept whole so measuring a cached line allocates nothing.
   , _shapedGlyphs :: !(PrimArray Int32)
   , _shapedFontIndices :: !(PrimArray Int32)
   , _shapedFonts :: !(SmallArray SdlFont)
@@ -494,12 +496,13 @@ shapeLine sf inv txt = do
     -- starts; a later cluster covering a character wins.
     stops <- newPrimArray n
     setPrimArray stops 0 n (0 / 0 :: Float)
-    let fillPieces !p !pen !g0 !inkEnd !endStop pieces = case pieces of
-          [] -> pure (pen, inkEnd, endStop)
+    let fillPieces !p !pen !height !g0 !inkEnd !endStop pieces = case pieces of
+          [] -> pure (pen, height, inkEnd, endStop)
           (start, _, _) : rest -> do
             let result = resultOf p
             byteStart <- byteAt start
             w <- fromIntegral <$> ttfShapedInt result 0
+            h <- fromIntegral <$> ttfShapedInt result 1
             nGlyphs <- fromIntegral <$> ttfShapedInt result 2
             nClusters <- fromIntegral <$> ttfShapedInt result 3
             glyphPtr <- castPtr <$> ttfShapedPtr result 0
@@ -563,8 +566,8 @@ shapeLine sf inv txt = do
             ink <- if glyphPtr == nullPtr then pure inkEnd else copyGlyphs 0 inkEnd
             end <- if clusterPtr == nullPtr then pure endStop else placeClusters 0 endStop
             ttfShapedFree result
-            fillPieces (p + 1) (pen + w) (g0 + nGlyphs) ink end rest
-    (total, inkEnd, endStop) <- fillPieces 0 0 0 0 (0 / 0) runs
+            fillPieces (p + 1) (pen + w) (max height h) (g0 + nGlyphs) ink end rest
+    (total, height, inkEnd, endStop) <- fillPieces 0 0 (0 :: Int) 0 0 (0 / 0) runs
     carets <- newPrimArray (n + 1)
     let fillCarets !i !prev
           | i >= n = pure ()
@@ -578,7 +581,9 @@ shapeLine sf inv txt = do
     caretArr <- unsafeFreezePrimArray carets
     glyphArr <- unsafeFreezePrimArray glyphs
     indexArr <- unsafeFreezePrimArray fontIndices
-    pure (Shaped (ShapedText (fromIntegral total / inv) (fromIntegral inkEnd / inv) caretArr) glyphArr indexArr (smallArrayFromList fontList))
+    let !width = fromIntegral total / inv
+        !measured = (width, fromIntegral height / inv)
+    pure (Shaped (ShapedText width (fromIntegral inkEnd / inv) caretArr) measured glyphArr indexArr (smallArrayFromList fontList))
   where
     utf8Length c
       | ord c < 0x80 = 1
@@ -717,7 +722,7 @@ data CachedQuad
 -- fast path for branchless O(1) in-memory indexing, with automatic cache invalidation
 -- whenever the underlying glyph atlas is reset.
 {-# NOINLINE buildGlyphFontMetrics #-}
-buildGlyphFontMetrics :: GlyphAtlas -> SdlFont -> Float -> IO FontMetrics
+buildGlyphFontMetrics :: GlyphAtlas -> SdlFont -> Float -> IO (FontMetrics, Text -> IO (Float, Float))
 buildGlyphFontMetrics ga sf scale = do
   let !inv = if scale > 0 then scale else 1
       baseFm = ttfFontMetricsScaled sf scale
@@ -758,6 +763,7 @@ buildGlyphFontMetrics ga sf scale = do
   -- resets; the glyph quads drawn from it hold atlas UVs, so their cache is
   -- dropped with the atlas epoch. Both caches are bounded by 'runCacheCap'.
   preparedRef <- newIORef emptyBounded
+  shapedRef <- newIORef emptyBounded
   quadCacheRef <- newIORef emptyBounded
   initQuadEpoch <- readIORef (gaEpoch ga)
   quadEpochRef <- newIORef initQuadEpoch
@@ -881,7 +887,7 @@ buildGlyphFontMetrics ga sf scale = do
 
     -- Put a shaped line's glyphs in the atlas. A glyph the atlas has no room
     -- for draws nothing, and the atlas resets before the next frame.
-    placeGlyphs (Shaped _ glyphs fontIndices fonts) = do
+    placeGlyphs (Shaped _ _ glyphs fontIndices fonts) = do
       let !count = sizeofPrimArray fontIndices
       out <- newPrimArray (count * 8)
       let go !i
@@ -932,16 +938,25 @@ buildGlyphFontMetrics ga sf scale = do
           !v = (glyphAtlasSize - 0.5) / glyphAtlasSize
        in (u, v, u, v)
 
-    -- The shaped layout of a line, from its metric snapshot when it has
-    -- one. Fonts that cover characters this one lacks join it before the
-    -- line is shaped.
+    -- The shaped layout of a line, shared by measuring, preparing and
+    -- drawing it. Fonts that cover characters this one lacks join it before
+    -- the line is shaped.
     shapeOf !txt = do
-      prepared <- readIORef preparedRef
-      case HM.lookup txt (bcEntries prepared) of
-        Just (_, Just shaped) -> pure shaped
-        _ -> do
+      shapedCache <- readIORef shapedRef
+      case HM.lookup txt (bcEntries shapedCache) of
+        Just shaped -> pure shaped
+        Nothing -> do
           ensureCoverage sf txt
-          shapeLine sf inv txt
+          shaped <- shapeLine sf inv txt
+          when (cacheableText txt) $
+            writeIORef shapedRef $! fst (insertBounded runCacheCap txt shaped shapedCache)
+          pure shaped
+
+    -- The width shaping draws with, so layout and drawing agree.
+    measure !txt
+      | T.null txt = pure emptySize
+      | otherwise = shapedSize <$> shapeOf txt
+    !emptySize = (0, sfLineSkip sf / inv)
 
     glyphGeometry c
       | ord c < 128 = pure (indexSmallArray asciiGeometry (ord c))
@@ -953,7 +968,7 @@ buildGlyphFontMetrics ga sf scale = do
       ensureFontAlive sf
       prepared <- readIORef preparedRef
       case HM.lookup txt (bcEntries prepared) of
-        Just (fm, _) -> pure fm
+        Just fm -> pure fm
         Nothing -> do
           let insertChar m c = IM.insert (ord c) c m
               chars = T.foldl' insertChar (T.foldl' insertChar IM.empty " HxM") txt
@@ -983,10 +998,11 @@ buildGlyphFontMetrics ga sf scale = do
                 , fmSnapScale = inv
                 }
           when (cacheableText txt) $
-            writeIORef preparedRef $! fst (insertBounded runCacheCap txt (fm, shaped) prepared)
+            writeIORef preparedRef $! fst (insertBounded runCacheCap txt fm prepared)
           pure fm
 
-  prepareText ""
+  fm <- prepareText ""
+  pure (fm, measure)
 
 -- | Return the SDL_Texture backing the glyph atlas, for passing to the renderer.
 glyphAtlasTexture :: GlyphAtlas -> IO (Ptr SDL_Texture)
@@ -1085,17 +1101,16 @@ closeFont sf = do
 
 -- | Install glyph-atlas-backed 'FontMetrics' (from 'buildGlyphFontMetrics')
 -- so that 'pushText' emits per-glyph textured quads into the draw arena.
--- Text measurement uses the primary font's SDL_ttf string-size path.
+-- Text measurement uses the primary font's shaped lines.
 withTtfMeasureGlyph ::
   Context ->
-  SdlFont ->
+  (Text -> IO (Float, Float)) -> -- ^ primary font measurement
   FontMetrics -> -- ^ glyph-atlas fm for primary font
   FontMetrics -> -- ^ glyph-atlas fm for mono font
   Float ->
   Context
-withTtfMeasureGlyph ctx sf fm monoFm scale =
-  let measure txt = measureTtfTextScaled sf scale txt
-      ctx1 =
+withTtfMeasureGlyph ctx measure fm monoFm scale =
+  let ctx1 =
         withExternalText
           ( withMeasureText
               (withMonoFontMetrics (withFontMetrics ctx fm) monoFm)
@@ -1111,40 +1126,6 @@ ttfFontMetricsScaled sf scale =
         { fmAscent = sfAscent sf / inv
         , fmAdvance = const (sfSpaceAdvance sf / inv)
         }
-
-measureTtfTextScaled :: SdlFont -> Float -> Text -> IO (Float, Float)
-measureTtfTextScaled sf scale txt = do
-  (w, h) <- measureTtfText sf txt
-  let inv = if scale > 0 then scale else 1
-  pure (w / inv, h / inv)
-
-measureTtfText :: SdlFont -> Text -> IO (Float, Float)
-measureTtfText sf txt = do
-  ensureFontAlive sf
-  -- Measure with the fallbacks shaping will draw with.
-  ensureCoverage sf txt
-  measureTtfTextOpen sf txt
-
-measureTtfTextOpen :: SdlFont -> Text -> IO (Float, Float)
-measureTtfTextOpen sf txt
-  | T.null txt = pure (0, sfLineSkip sf)
-  | otherwise = do
-      -- The width shaping draws with, so layout and drawing agree.
-      size <- fromIntegral <$> ttfShapedSize
-      allocaBytes size $ \out -> do
-        let piece (w, h) (start, end, dir) =
-              withUtf8 (T.take (end - start) (T.drop start txt)) $ \cstr len -> do
-                ok <- ttfShape (sfFont sf) cstr len dir out
-                result <-
-                  if ok
-                    then do
-                      pw <- ttfShapedInt out 0
-                      ph <- ttfShapedInt out 1
-                      pure (w + fromIntegral pw, max h (fromIntegral ph))
-                    else pure (w, h)
-                ttfShapedFree out
-                pure result
-        foldM piece (0, 0) (shapingRuns txt)
 
 tryInsert :: Ptr () -> Ptr () -> IO (Maybe (Float, Float, Float, Float))
 tryInsert atlas surf =
@@ -1285,24 +1266,6 @@ data CachedFontEntry = CachedFontEntry
   , cfeMeasure :: !(Text -> IO (Float, Float))
   }
 
-makeCachedFontEntry :: SdlFont -> FontMetrics -> Float -> IO CachedFontEntry
-makeCachedFontEntry font fm scale = do
-  measCache <- newIORef emptyBounded
-  let meas txt = do
-        cached <- HM.lookup txt . bcEntries <$> readIORef measCache
-        case cached of
-          Just sz -> pure sz
-          Nothing -> do
-            sz <- measureTtfTextScaled font scale txt
-            when (cacheableText txt) $
-              modifyIORef' measCache (fst . insertBounded runCacheCap txt sz)
-            pure sz
-  pure CachedFontEntry
-    { cfeFont    = font
-    , cfeFm      = fm
-    , cfeMeasure = meas
-    }
-
 data SdlFontCache = SdlFontCache
   { sfcPrimarySourceRef :: !(IORef FontSource)
   , sfcFallbackSource :: !FontSource
@@ -1360,8 +1323,8 @@ newSdlFontCache primary fallback mono monoFb ga basePt scaleRef = do
 openCachedFont :: GlyphAtlas -> Float -> FontSource -> FontSource -> Float -> IO CachedFontEntry
 openCachedFont ga scale primary fallback pt = do
   font <- openFontSourceWithFallback primary fallback (pt * scale)
-  fm <- buildGlyphFontMetrics ga font scale
-  makeCachedFontEntry font fm scale
+  (fm, measure) <- buildGlyphFontMetrics ga font scale
+  pure (CachedFontEntry font fm measure)
 
 -- | The primary (sans) family's source, for the debug readout.
 sdlFontCacheSource :: SdlFontCache -> IO FontSource
@@ -1403,7 +1366,7 @@ withSdlFontCache :: SdlFontCache -> Context -> IO Context
 withSdlFontCache cache ctx = do
   scale <- readIORef (sfcScaleRef cache)
   (sans, mono) <- readIORef (sfcBaseEntries cache)
-  pure (withFontResolver (withTtfMeasureGlyph ctx (cfeFont sans) (cfeFm sans) (cfeFm mono) scale) (resolveSdlFont cache) (resolveSdlMeasure cache))
+  pure (withFontResolver (withTtfMeasureGlyph ctx (cfeMeasure sans) (cfeFm sans) (cfeFm mono) scale) (resolveSdlFont cache) (resolveSdlMeasure cache))
 
 -- | The open font for a size and variant. Weight and style pick nothing
 -- here: they are drawn synthetically over the regular face, because SDL_ttf's
