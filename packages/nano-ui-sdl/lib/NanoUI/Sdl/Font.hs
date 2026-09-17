@@ -33,7 +33,7 @@ module NanoUI.Sdl.Font
   ) where
 
 import Control.Exception (SomeException, bracket, catch, throwIO)
-import Control.Monad (foldM, forM_, unless, void, when)
+import Control.Monad (foldM, forM, forM_, unless, void, when)
 import Data.Bits ((.&.), (.|.), shiftL)
 import Foreign.Marshal.Alloc (alloca, allocaBytes)
 import Foreign.Marshal.Array (advancePtr, allocaArray)
@@ -52,6 +52,7 @@ import Data.Primitive.SmallArray
   , indexSmallArray
   , newSmallArray
   , readSmallArray
+  , sizeofSmallArray
   , smallArrayFromList
   , writeSmallArray
   )
@@ -61,6 +62,9 @@ import Data.Word (Word64)
 import Data.Text (Text)
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
+import qualified Data.ByteString.Short as SBS
+import qualified GHC.Foreign as GHC
+import GHC.IO.Encoding (getFileSystemEncoding)
 import Data.Text.Unsafe (lengthWord8)
 import Foreign.C.String (CString, withCString)
 import Foreign.C.Types (CFloat (..), CInt (..), CSize (..), CUInt (..))
@@ -667,7 +671,9 @@ attachFallback sf source probe = do
 -- which every size copies from; and the first source drawing each character
 -- asked about (-1 for none).
 data Coverage = Coverage
-  { covSources :: ![FilePath]
+  { covSources :: !(SmallArray SBS.ShortByteString)
+  -- ^ Paths as the file system's bytes, kept compactly for the session and
+  -- handed to SDL_ttf as they are.
   , covProbes :: !(IM.IntMap (Ptr ()))
   , covChars :: !(IM.IntMap Int)
   }
@@ -686,22 +692,27 @@ coverageSourceFor c = do
       Just cov -> pure cov
       Nothing -> do
         files <- searchFontFamilies coverageFamilies `catch` \(_ :: SomeException) -> pure []
-        pure (Coverage files IM.empty IM.empty)
+        -- The file system encoding turns a path back into the bytes it was
+        -- read from, including bytes that are not valid in that encoding.
+        enc <- getFileSystemEncoding
+        sources <- forM files $ \path -> GHC.withCStringLen enc path $ \cstr -> SBS.toShort <$> BS.packCStringLen cstr
+        pure (Coverage (smallArrayFromList sources) IM.empty IM.empty)
   let cp = ord c
-      probeOf cov i path = case IM.lookup i (covProbes cov) of
+      probeOf cov i = case IM.lookup i (covProbes cov) of
         Just probe -> pure (probe, cov)
         Nothing -> do
-          probe <- withCString path $ \cpath -> ttfOpenFont cpath 12
+          probe <- SBS.useAsCString (indexSmallArray (covSources cov) i) $ \cpath -> ttfOpenFont cpath 12
           pure (probe, cov {covProbes = IM.insert i probe (covProbes cov)})
-      search cov [] = pure (-1, cov)
-      search cov ((i, path) : rest) = do
-        (probe, cov') <- probeOf cov i path
-        has <- if probe == nullPtr then pure False else ttfHasGlyph probe (fromIntegral cp)
-        if has then pure (i, cov') else search cov' rest
+      search cov i
+        | i >= sizeofSmallArray (covSources cov) = pure (-1, cov)
+        | otherwise = do
+            (probe, cov') <- probeOf cov i
+            has <- if probe == nullPtr then pure False else ttfHasGlyph probe (fromIntegral cp)
+            if has then pure (i, cov') else search cov' (i + 1)
   (source, cov1) <- case IM.lookup cp (covChars cov0) of
     Just known -> pure (known, cov0)
     Nothing -> do
-      (found, cov') <- search cov0 (zip [0 ..] (covSources cov0))
+      (found, cov') <- search cov0 0
       pure (found, cov' {covChars = IM.insert cp found (covChars cov')})
   writeIORef coverageRef (Just cov1)
   pure $ case IM.lookup source (covProbes cov1) of
