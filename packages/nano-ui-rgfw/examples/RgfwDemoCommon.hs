@@ -13,7 +13,9 @@ import Control.Monad (void, when)
 import Data.Text (Text)
 import qualified Data.Text as T
 import NanoUI
-  ( NanoUI
+  ( Input (..)
+  , NanoUI
+  , Size (..)
   , boundedRadio
   , button
   , button'
@@ -45,6 +47,7 @@ import NanoUI
   , tomorrowMinLightTheme
   , tomorrowNightMinDarkTheme
   )
+import NanoUI.Monad (askInput)
 import NanoUI.Backend.Rgfw
   ( RgfwOptions (..)
   , askRgfwDebug
@@ -57,7 +60,7 @@ import NanoUI.Emit qualified as Emit
 data TabChoice
   = TabControls
   | TabGallery
-  | TabArchitecture
+  | TabAbout
   | TabDiagnostics
   deriving (Bounded, Enum, Eq, Show)
 
@@ -142,7 +145,7 @@ initialModel =
     , volumeVal    = 0.72
     , opacityVal   = 0.90
     , textVal      = "nano-ui rgfw edition"
-    , notesVal     = "Lean single-pass backend\nBitmap Cozette typography\nTomorrow Min themes"
+    , notesVal     = "Edit me.\nSecond line."
     , profileOpt   = ProfileBalanced
     , totalClicks  = 0
     , debugOpen    = False
@@ -188,9 +191,8 @@ update msg m =
 appView :: Model -> NanoUI ()
 appView m = do
   panelWith (padAll 12 . gap 8 . fillW . fillH) $ do
-    -- Top Bar: Title, Theme, DPI Scale
     rowWith (gap 8 . fixedH 24 . fillW) $ do
-      label "NANO-UI // RGFW LEAN BACKEND"
+      label "nano-ui on RGFW"
       flex
 
       Emit.button (case currentTheme m of
@@ -202,53 +204,45 @@ appView m = do
 
       Emit.button (if debugOpen m then "[Debug: ON]" else "[Debug: OFF]") (ToggleDebug (not (debugOpen m)))
 
-    -- Tab Bar
     nextTab <-
       tabBar
         (activeTab m)
         [ tab TabControls "Controls" ()
         , tab TabGallery "Unicode Gallery" ()
-        , tab TabArchitecture "Architecture" ()
+        , tab TabAbout "About" ()
         , tab TabDiagnostics "Diagnostics" ()
         ]
     when (nextTab /= activeTab m) (Emit.emit (SetTab nextTab))
 
     separator
 
-    -- Main Content based on active tab
     case activeTab m of
       TabControls      -> viewControlsTab m
       TabGallery       -> viewGalleryTab
-      TabArchitecture  -> viewArchitectureTab
+      TabAbout         -> viewAboutTab
       TabDiagnostics   -> viewDiagnosticsTab m
 
-    -- Floating Debug Window
     when (debugOpen m) $ do
       snap <- askRgfwDebug
-      (win, _) <- window True "Debug Diagnostics" (debugWindowBody snap)
+      (win, _) <- window True "Debug" (debugWindowBody snap)
       when (respClicked win) (Emit.emit (ToggleDebug False))
 
--- | Tab 1: Controls
 viewControlsTab :: Model -> NanoUI ()
 viewControlsTab m = do
   gridWith 2 (gap 12 . fillW . fillH) $ do
-    -- Left Column: Interactive Form Controls
     panelWith (padAll 10 . gap 6 . fixedW 380 . fillH) $ do
-      label "WIDGET CONTROLS"
+      label "Controls"
       separator
 
-      -- Counter
       gridWith 4 (gap 6 . fixedH 22 . fillW) $ do
         label ("Counter: " <> T.pack (show (counter m)))
         Emit.button " +1 " Increment
         Emit.button " -1 " Decrement
         Emit.button " Reset " Reset
 
-      -- Checkbox
       gridWith 1 (gap 6 . fixedH 20) $ do
-        Emit.checkbox "Enable turbo execution mode" (turboOn m) ToggleTurbo
+        Emit.checkbox "Turbo mode" (turboOn m) ToggleTurbo
 
-      -- Context Menu
       gridWith 2 (gap 6 . fixedH 22) $ do
         label "Context Menu:"
         menuBtn <- button' "Right-click Me"
@@ -263,7 +257,6 @@ viewControlsTab m = do
           whenM (menuItem "Reset Counter") (Emit.emit Reset)
           menuItemDisabled "Disabled Command"
 
-      -- Sliders
       gridWith 1 (gap 2) $ do
         let volPct = round (volumeVal m * 100) :: Int
         label ("Master Volume: " <> T.pack (show volPct) <> "%")
@@ -274,19 +267,16 @@ viewControlsTab m = do
         label ("Surface Opacity: " <> T.pack (show opPct) <> "%")
         Emit.slider 0 1 (opacityVal m) SetOpacity
 
-      -- Text Input
       gridWith 1 (gap 2) $ do
         label "Single-line Text Input:"
         Emit.textInput (textVal m) SetInputText
 
-      -- Text Area
       gridWith 1 (gap 2) $ do
         gridWith 2 (gap 4 . fixedH 18) $ do
           label "Multi-line Notes Field:"
           Emit.button "Clear" ClearNotes
         Emit.textArea (notesVal m) SetNotesText
 
-      -- Radio Buttons
       gridWith 1 (gap 2) $ do
         label "Preset:"
         radVal <- boundedRadio (\case
@@ -295,9 +285,8 @@ viewControlsTab m = do
           ProfileQuality  -> "Quality (High Detail)") (profileOpt m)
         when (radVal /= profileOpt m) (Emit.emit (SetProfile radVal))
 
-    -- Right Column: Live State Inspector & Visualizer
     panelWith (padAll 10 . gap 8 . fillW . fillH) $ do
-      label "STATE INSPECTOR & METERS"
+      label "State"
       separator
 
       gridWith 2 (gap 6) $ do
@@ -325,7 +314,7 @@ viewControlsTab m = do
 
       separator
 
-      label "Live Unicode Progress Bars:"
+      label "Block-character bars:"
       gridWith 2 (gap 4) $ do
         let makeBar pct =
               let filled = max 0 (min 20 (pct `div` 5))
@@ -338,16 +327,16 @@ viewControlsTab m = do
         label "Surface Opacity:"
         label ("[" <> makeBar opPct  <> "] " <> T.pack (show opPct) <> "%")
 
--- | Tab 2: Unicode & Icon Gallery
+-- | A sample of the glyphs in the bundled Cozette font.
 viewGalleryTab :: NanoUI ()
 viewGalleryTab = do
   panelWith (padAll 10 . gap 8 . fillW . fillH) $ do
-    label "COZETTE EMBEDDED BITMAP FONT // UNICODE SHOWCASE"
+    label "Cozette glyphs"
     separator
 
     gridWith 1 (gap 8) $ do
       gridWith 1 (gap 2) $ do
-        label "ASCII Printable Characters:"
+        label "Printable ASCII:"
         label "!\"#$%&'()*+,-./0123456789:;<=>?"
         label "@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_"
         label "`abcdefghijklmnopqrstuvwxyz{|}~"
@@ -355,15 +344,15 @@ viewGalleryTab = do
       separator
 
       gridWith 1 (gap 2) $ do
-        label "Greek Letters & Physics Variables:"
+        label "Greek:"
         label "Δ Ω Σ α β γ δ ε θ λ μ π ρ τ ω"
 
       gridWith 1 (gap 2) $ do
-        label "Mathematical & Logic Operators:"
+        label "Math and logic:"
         label "± × ÷ √ ∞ ≤ ≥ ≠ ≈ ≡ ∀ ∃ ∈ ∉ ∧ ∨ ∂ ∇"
 
       gridWith 1 (gap 2) $ do
-        label "Box Drawing & Frame Elements:"
+        label "Box drawing:"
         label "┌───┬───┐  ╔═══╦═══╗  ┏━━━┳━━━┓"
         label "│ A │ B │  ║ X ║ Y ║  ┃ 1 ┃ 2 ┃"
         label "├───┼───┤  ╠═══╬═══╣  ┣━━━╋━━━┫"
@@ -371,17 +360,17 @@ viewGalleryTab = do
         label "└───┴───┘  ╚═══╩═══╝  ┗━━━┻━━━┛"
 
       gridWith 1 (gap 2) $ do
-        label "Block Elements & Shading Meters:"
+        label "Blocks and shades:"
         label "█ ▓ ▒ ░ ▀ ▄ ▌ ▐ ▖ ▗ ▘ ▙ ▚ ▛ ▜ ▝ ▞ ▟"
 
       gridWith 1 (gap 2) $ do
-        label "Keycaps & Modifiers:"
+        label "Keys:"
         label "⏎ Enter  ⇥ Tab  ⌃ Ctrl  ⌥ Alt  ⌘ Cmd  ⌫ Bksp  ⎋ Esc"
 
       separator
 
       gridWith 1 (gap 4) $ do
-        label "Nerd Font & UI Icon Buttons (4-Column Native Grid):"
+        label "Icon buttons:"
         gridWith 4 (gap 4 . fixedH 24 . fillW) $ do
           void $ button "\xF002 Search"
           void $ button "\xF004 Health"
@@ -400,95 +389,45 @@ viewGalleryTab = do
           void $ button "⏎ Enter"
           void $ button "⎋ Esc"
 
--- | Tab 3: Architecture
-viewArchitectureTab :: NanoUI ()
-viewArchitectureTab = do
+viewAboutTab :: NanoUI ()
+viewAboutTab =
   panelWith (padAll 10 . gap 8 . fillW . fillH) $ do
-    label "LEAN BACKEND ARCHITECTURE & DESIGN PRINCIPLES"
+    label "About"
     separator
+    label "Text uses the bundled Cozette bitmap font, so no font files are needed."
+    label "Themes are made square: corner radius 0 and 1px borders, so drawn boxes match hit boxes."
+    label "The scale button cycles Auto, 1x, 1.5x, 2x, 3x and 0.5x; Auto follows the monitor."
 
-    gridWith 1 (gap 6) $ do
-      label "1. Single-Pass O(N) Linear Grid & Flex Layout Engine:"
-      label "   - Native multi-column 2D grids (gridWith N) with automatic column & row distribution."
-      label "   - Zero backtracking, zero flex equations, zero quadratic passes."
-      label "   - Direct contiguous allocation in unboxed PrimArray."
-      label "   - Strictly clamps child nodes to parent remaining bounds."
-
-      separator
-
-      label "2. Exact 1:1 Collision-Box Theming:"
-      label "   - Visual geometry matches collision/hit-test bounds exactly."
-      label "   - Zero rounded corners, zero soft drop-shadows, zero bloat."
-      label "   - Pure color themes: Tomorrow Min Light, Night, and Midnight."
-
-      separator
-
-      label "3. Embedded Cozette Bitmap Typography:"
-      label "   - 18,492-byte pruned OpenType bitmap font (.otb) embedded in binary."
-      label "   - 921 custom glyphs (ASCII, Greek, Math, Box, Powerline, Nerd icons)."
-      label "   - Uniform 6px cell width, 13px line height, 10px ascent."
-      label "   - 1-bit glyph blitter bakes an OpenGL atlas, zero FreeType dependency."
-
-      separator
-
-      label "4. Integer DPI Scaling:"
-      label "   - Integer scaling factors (1x, 2x, 3x...)."
-      label "   - Logical UI coordinates mapped with exact integer floor division."
-      label "   - High-throughput nearest-neighbor pixel replication preserving crispness."
-
--- | Tab 4: Diagnostics
 viewDiagnosticsTab :: Model -> NanoUI ()
 viewDiagnosticsTab m = do
+  Size w h <- inputWindowSize <$> askInput
   panelWith (padAll 10 . gap 8 . fillW . fillH) $ do
-    label "SYSTEM DIAGNOSTICS & TELEMETRY"
+    label "Diagnostics"
     separator
 
-    gridWith 1 (gap 6) $ do
-      label "Window & Surface Telemetry (2-Column Property Grid):"
-      let !sc = dpiScale m
-          !physScale = physScaleFor sc
-          !physW = 1680 :: Int
-          !physH = 1040 :: Int
-          !effScale = if physScale > 0.0 then physScale else 1.0
-          !logW = round (fromIntegral physW / effScale) :: Int
-          !logH = round (fromIntegral physH / effScale) :: Int
+    gridWith 2 (gap 4) $ do
+      label "Window:"
+      label (T.pack (show (round w :: Int)) <> " x " <> T.pack (show (round h :: Int)) <> " logical px")
+      label "Scale:"
+      label (formatDpiScale (dpiScale m))
+      label "Renderer:"
+      label "OpenGL 3.2 core"
+      label "Active Tab:"
+      label (T.pack (show (activeTab m)))
+      label "Current Theme:"
+      label (T.pack (show (currentTheme m)))
+      label "Interaction Clicks:"
+      label (T.pack (show (totalClicks m)))
 
-      gridWith 2 (gap 4) $ do
-        label "Physical Window Size:"
-        label (T.pack (show physW) <> " x " <> T.pack (show physH) <> " px")
-        label "DPI Scale Choice:"
-        label (formatDpiScale sc <> (if physScale <= 0.0 then " (OS Native DPI)" else " (" <> T.pack (show physScale) <> "x DPI)"))
-        label "Logical Viewport Size:"
-        label (T.pack (show logW) <> " x " <> T.pack (show logH) <> " px")
-        label "Framebuffer Bit Depth:"
-        label "32-bit RGBA (OpenGL 3.2 core)"
-        label "Framebuffer Memory:"
-        label (T.pack (show (physW * physH * 4 `div` 1024)) <> " KB")
-        label "Target Frame Rate:"
-        label "120 FPS max pacing"
+    separator
 
-      separator
-
-      gridWith 2 (gap 4) $ do
-        label "Active Tab:"
-        label (T.pack (show (activeTab m)))
-        label "Current Theme:"
-        label (T.pack (show (currentTheme m)))
-        label "Interaction Clicks:"
-        label (T.pack (show (totalClicks m)))
-        label "Layout Paradigm:"
-        label "Native Multi-Column 2D Grid"
-
-      separator
-
-      label "Floating Diagnostics Window:"
-      Emit.button (if debugOpen m then "[Close Debug Window]" else "[Open Floating Debug Window (FPS, Timing, Arena, RTS)]") (ToggleDebug (not (debugOpen m)))
+    Emit.button (if debugOpen m then "[Close Debug Window]" else "[Open Debug Window]") (ToggleDebug (not (debugOpen m)))
 
 main :: IO ()
 main = do
   let opts =
         defaultRgfwOptions
-          { optTitle  = "nano-ui [RGFW Lean Backend // Tomorrow Min]"
+          { optTitle  = "nano-ui RGFW demo"
           , optWidth  = 1680
           , optHeight = 1040
           , optTheme  = tomorrowNightMinDarkTheme
