@@ -13,7 +13,7 @@ module NanoUI.Plot.Chrome
 import Data.Colour (Colour)
 import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
-import Data.Vector qualified as V
+import Data.Primitive.PrimArray (indexPrimArray, sizeofPrimArray)
 import Data.Vector.Unboxed qualified as U
 import Diagrams.Prelude
   ( Diagram
@@ -53,7 +53,6 @@ import NanoUI.Diagrams.Widget (PlotStyle (..), colourOf)
 import NanoUI.Plot.Decimate (lttb)
 import NanoUI.Plot.Scale
   ( domainExtent
-  , domainExtentBy
   , domainToPlot
   , formatTick
   , mergeDomains
@@ -186,9 +185,9 @@ seriesExtent s =
     PointsXY pts ->
       let (xs, ys) = U.unzip pts
        in (padDomain 0.05 (domainExtent xs), padDomain 0.05 (domainExtent ys))
-    CategoryY pts ->
-      let n = V.length pts
-       in (Domain (-0.5) (fromIntegral n - 0.5), padDomain 0.05 (domainExtentBy snd pts))
+    CategoryY _ values ->
+      let n = sizeofPrimArray values
+       in (Domain (-0.5) (fromIntegral n - 0.5), padDomain 0.05 (domainExtent (U.generate n (indexPrimArray values))))
 
 chartXDomain :: Chart -> Domain
 chartYDomain :: Chart -> Domain
@@ -298,8 +297,8 @@ seriesPoints chart s =
     PointsXY pts ->
       let k = decimateK (U.length pts)
        in if chartDecimate chart && U.length pts > k then lttb k pts else pts
-    CategoryY rows ->
-       U.generate (V.length rows) (\i -> (fromIntegral i, snd (rows V.! i)))
+    CategoryY _ values ->
+       U.generate (sizeofPrimArray values) (\i -> (fromIntegral i, indexPrimArray values i))
 
 decimateK :: Int -> Int
 decimateK n = min n (max 64 (min 2000 (n `div` 2)))

@@ -12,7 +12,7 @@ module Cases.Select
 import Data.IORef (IORef, newIORef)
 import Data.Text qualified as T
 import NanoUI
-import Data.Vector qualified as V
+import Data.Primitive.SmallArray qualified as SA
 import NanoUI.Testing
 import NanoUI.Testing.Assert (assert, assertEq, withInput)
 import NanoUI.Testing.Harness
@@ -88,7 +88,7 @@ runTreeSelectTest ctx failed = do
 runTreeKeyboardTest :: Context -> IORef Int -> IO ()
 runTreeKeyboardTest ctx failed = do
   selectedRef <- newIORef 0
-  let items = V.fromList [TreeItem "root" [TreeItem "child" []], TreeItem "leaf" []]
+  let items = SA.smallArrayFromList [TreeItem "root" [TreeItem "child" []], TreeItem "leaf" []]
       ui = column (held selectedRef (tree' "k" items))
       inp0 = withInput 40 12
   _ <- warmup2 ctx inp0 ui
@@ -180,7 +180,7 @@ runSelectKeyboardTest :: Context -> IORef Int -> IO ()
 runSelectKeyboardTest ctx failed = do
   indexRef <- newIORef 1
   let inp0 = withInput 320 200
-      ui = column (held indexRef (select' (V.fromList ["Low", "Medium", "High"])))
+      ui = column (held indexRef (select' (SA.smallArrayFromList ["Low", "Medium", "High"])))
   (resp, idx0) <- warmup2 ctx inp0 ui
   assertEq failed idx0 1
   let Rect sx sy sw sh = respRect resp
@@ -216,7 +216,7 @@ runSelectCloseKeepsFocusTest :: Context -> IORef Int -> IO ()
 runSelectCloseKeepsFocusTest ctx failed = do
   indexRef <- newIORef 1
   let inp0 = withInput 320 200
-      ui = column (held indexRef (select' (V.fromList ["Low", "Medium", "High"])))
+      ui = column (held indexRef (select' (SA.smallArrayFromList ["Low", "Medium", "High"])))
       listed spans = any (\(_, txt, _, _, _) -> txt == "Low") spans
   (resp, _) <- warmup2 ctx inp0 ui
   let Rect sx sy sw sh = respRect resp

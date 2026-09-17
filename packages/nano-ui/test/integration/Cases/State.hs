@@ -11,7 +11,7 @@ import Data.ByteString qualified as BS
 import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
 import Data.Sequence qualified as Seq
-import Data.Vector qualified as V
+import Data.Primitive.SmallArray qualified as SA
 import NanoUI
 import NanoUI.Context (Context (..), getStore, intKey, registerImages, lookupImageUv)
 import NanoUI.Store (WidgetStore (..))
@@ -23,11 +23,11 @@ runCollectionApiTest :: Context -> IORef Int -> IO ()
 runCollectionApiTest ctx failed = do
   seen <- newIORef []
   _ <- runFrame ctx (withInputOff 300 100) $
-    hstack (V.fromList [uiIO (modifyIORef' seen (key :)) | key <- [7, 2, 9 :: Int]])
+    hstack (SA.smallArrayFromList [uiIO (modifyIORef' seen (key :)) | key <- [7, 2, 9 :: Int]])
   assertEq failed [9, 2, 7] =<< readIORef seen
   ((emptySelect, emptyRadio, combo), _, _, _) <- runFrame ctx (withInputOff 300 200) $
     withKey ("collection-options" :: Text) $ column $ do
-      selectIndex <- select (V.empty :: V.Vector Text) 5
+      selectIndex <- select (SA.emptySmallArray :: SA.SmallArray Text) 5
       radioIndex <- radio (Seq.empty :: Seq.Seq Text) (-1)
       comboValue <- comboBox "Choose" (Seq.fromList ["Alpha", "Beta"]) "Beta"
       pure (selectIndex, radioIndex, comboValue)

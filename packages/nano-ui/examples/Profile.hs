@@ -4,7 +4,7 @@ import Control.Monad (forM_, replicateM_, void)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Vector (Vector)
+import Data.Primitive.SmallArray (SmallArray)
 import NanoUI
 import NanoUI.Testing (newContext, runFrame)
 import System.Environment (getArgs)
@@ -28,7 +28,7 @@ widgetScene =
 
 -- | A thousand rects: enough ops that building them costs more than replaying
 -- them, which is the case a content key is for.
-canvasOps :: CustomDrawContext -> Rect -> Vector DrawOp
+canvasOps :: CustomDrawContext -> Rect -> SmallArray DrawOp
 canvasOps cdc (Rect x y w h) = runCanvas $ do
   let side = 32 :: Int
       cw = w / fromIntegral side
@@ -45,7 +45,7 @@ canvasOps cdc (Rect x y w h) = runCanvas $ do
 -- says which path a scene took: one build for a keyed widget the frames reuse,
 -- one per frame for an unkeyed one.
 {-# NOINLINE countedCanvasOps #-}
-countedCanvasOps :: CustomDrawContext -> Rect -> Vector DrawOp
+countedCanvasOps :: CustomDrawContext -> Rect -> SmallArray DrawOp
 countedCanvasOps cdc rect = unsafePerformIO $ do
   modifyIORef' buildCount (+ 1)
   pure (canvasOps cdc rect)

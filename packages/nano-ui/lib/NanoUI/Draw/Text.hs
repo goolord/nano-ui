@@ -11,8 +11,7 @@ module NanoUI.Draw.Text
 import Control.Monad (forM_, unless, when)
 import Data.IORef (readIORef)
 import qualified Data.Text as T
-import Data.Vector (Vector)
-import qualified Data.Vector as V
+import Data.Primitive.SmallArray (SmallArray, indexSmallArray, sizeofSmallArray)
 import Data.Primitive.PrimArray (indexPrimArray, sizeofPrimArray)
 import Data.Word (Word32)
 import NanoUI.Draw.Arena
@@ -230,9 +229,12 @@ pushPreparedTextStyledQuads da fm weight fstyle deco x y txt col
 
 -- | Emit ops with @fm@ as the default font and @resolve@ giving the font of
 -- styled text, and whether it draws its weight and slant natively.
-emitDrawOps :: DrawArena -> FontMetrics -> (TextFont -> IO (FontMetrics, Bool)) -> Vector DrawOp -> IO ()
-emitDrawOps da fm resolve = V.mapM_ emitOne
+emitDrawOps :: DrawArena -> FontMetrics -> (TextFont -> IO (FontMetrics, Bool)) -> SmallArray DrawOp -> IO ()
+emitDrawOps da fm resolve ops = go 0
   where
+    go !i
+      | i >= sizeofSmallArray ops = pure ()
+      | otherwise = emitOne (indexSmallArray ops i) >> go (i + 1)
     emitOne (FillRect r c) = pushRect da r c
     emitOne (FillRoundedRect r radius c) = pushRoundedRect da r radius c
     emitOne (FillTriangle x0 y0 x1 y1 x2 y2 c) = pushFilledTriangle da x0 y0 x1 y1 x2 y2 c

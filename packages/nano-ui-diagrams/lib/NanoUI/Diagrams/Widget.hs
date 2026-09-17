@@ -19,9 +19,8 @@ module NanoUI.Diagrams.Widget
 import Data.Colour (Colour)
 import Data.Colour.SRGB (sRGB24)
 import Data.Hashable (hash)
-import Data.Vector (Vector)
-import Data.Vector qualified as V
-import Data.Vector.Unboxed qualified as U
+import Data.Primitive.PrimArray (indexPrimArray, newPrimArray, runPrimArray, writePrimArray)
+import Data.Primitive.SmallArray (SmallArray, emptySmallArray, indexSmallArray, mapSmallArray', sizeofSmallArray, smallArrayFromList)
 import Diagrams.Core (QDiagram)
 import Diagrams.Prelude (Any, Diagram, V2 (..), size)
 import Effectful (Eff, type (:>))
@@ -119,35 +118,40 @@ themePlotKey t =
 uiPlotStyle :: Ui :> es => Eff es PlotStyle
 uiPlotStyle = fmap themePlotStyle uiTheme
 
-labelFitScale :: FontMetrics -> V.Vector DrawOp -> Double
+labelFitScale :: FontMetrics -> SmallArray DrawOp -> Double
 labelFitScale fm ops =
-  let !ts = U.unfoldr nextBox 0
-      !n  = U.length ts
-      !k  = outerLoop 0 (1.0 :: Float)
+  let -- Six numbers a label: its anchor, and its box's origin and size.
+      !n = foldl' (\c op -> case op of DrawText {} -> c + 1; _ -> c) 0 ops
+      !ts = runPrimArray $ do
+        out <- newPrimArray (n * 6)
+        let fill !i !b
+              | i >= sizeofSmallArray ops = pure out
+              | otherwise = case indexSmallArray ops i of
+                  DrawText x y ax ay t _ -> do
+                    let Rect px py tw th = drawTextBox fm x y ax ay t
+                    writePrimArray out b x
+                    writePrimArray out (b + 1) y
+                    writePrimArray out (b + 2) px
+                    writePrimArray out (b + 3) py
+                    writePrimArray out (b + 4) tw
+                    writePrimArray out (b + 5) th
+                    fill (i + 1) (b + 6)
+                  _ -> fill (i + 1) b
+        fill 0 0
+      at i field = indexPrimArray ts (i * 6 + field)
+      !k = outerLoop 0 (1.0 :: Float)
         where
           outerLoop !i !acc
             | i >= n - 1 = acc
             | otherwise  =
-                let !(x1, y1, px1, py1, tw1, th1) = U.unsafeIndex ts i
-                    innerLoop !j !m
+                let innerLoop !j !m
                       | j >= n    = m
                       | otherwise =
-                          let !(x2, y2, px2, py2, tw2, th2) = U.unsafeIndex ts j
-                              !pairVal = pairK x1 y1 px1 py1 tw1 th1 x2 y2 px2 py2 tw2 th2
+                          let !pairVal = pairK (at i 0) (at i 1) (at i 2) (at i 3) (at i 4) (at i 5) (at j 0) (at j 1) (at j 2) (at j 3) (at j 4) (at j 5)
                           in innerLoop (j + 1) (max m pairVal)
                 in outerLoop (i + 1) (innerLoop (i + 1) acc)
    in min 2 (realToFrac k)
   where
-    nextBox !i
-      | i >= V.length ops = Nothing
-      | otherwise = case extractBox (V.unsafeIndex ops i) of
-          Nothing -> nextBox (i + 1)
-          Just box -> Just (box, i + 1)
-
-    extractBox (DrawText x y ax ay t _) =
-      let !(Rect px py tw th) = drawTextBox fm x y ax ay t
-       in Just (x, y, px, py, tw, th)
-    extractBox _ = Nothing
 
     pairK !x1 !y1 !px1 !py1 !tw1 !th1 !x2 !y2 !px2 !py2 !tw2 !th2 =
       let !overlapX = px1 < px2 + tw2 && px2 < px1 + tw1
@@ -168,9 +172,9 @@ labelFitScale fm ops =
           !need = loO + loS + 2 - hiO
        in if den <= 1e-6 then 1.0 else max 1.0 (need / den)
 
-diagramFrame :: PlotStyle -> Float -> Rect -> Vector DrawOp
+diagramFrame :: PlotStyle -> Float -> Rect -> SmallArray DrawOp
 diagramFrame ps bw (Rect x y w h) =
-  V.fromList
+  smallArrayFromList
     [ FillRect (Rect x y w h) (plotFrameBg ps)
     , Stroke x y (x + w) y bw (plotFrameBorder ps)
     , Stroke (x + w) y (x + w) (y + h) bw (plotFrameBorder ps)
@@ -294,13 +298,13 @@ framedDiagram contentKey dw dh layout d = do
         h = realToFrac (rectH inner)
         plot =
           if w <= 0 || h <= 0
-            then V.empty
-            else V.map (shiftDrawOp (rectX inner) (rectY inner)) (diagramOps w h d)
+            then emptySmallArray
+            else mapSmallArray' (shiftDrawOp (rectX inner) (rectY inner)) (diagramOps w h d)
      in diagramFrame ps borderW rectBox <> plot
 
 fitLayoutIO :: FontMetrics -> Layout -> Diagram B -> IO Layout
 fitLayoutIO fm layout d = do
-  let texts = V.foldr (\op rest -> case op of
+  let texts = foldr (\op rest -> case op of
         DrawText _ _ _ _ t _ -> t : rest
         _ -> rest) [] (diagramTextOps 100 100 d)
   prepared <- prepareFontMetricsMany fm texts

@@ -20,8 +20,7 @@ import Data.Maybe (fromMaybe)
 import Data.Text qualified as T
 import Data.Tree (Tree (Node))
 import Data.Typeable (Typeable)
-import Data.Vector (Vector)
-import Data.Vector qualified as V
+import Data.Primitive.SmallArray (SmallArray, emptySmallArray, mapSmallArray', smallArrayFromList)
 import Diagrams.Attributes (_lineWidthU)
 import Diagrams.Core
   ( Backend (..)
@@ -86,9 +85,9 @@ fullSize f (NanoUIOptions sz textOnly) = fmap (\sz' -> NanoUIOptions sz' textOnl
 instance (Typeable n, RealFloat n) => Backend NanoUIBackend V2 n where
   newtype Render NanoUIBackend V2 n
     = NRenderFull (Bool -> DiaCore.Style V2 n -> DList DrawOp)
-  type Result NanoUIBackend V2 n = Vector DrawOp
+  type Result NanoUIBackend V2 n = SmallArray DrawOp
   data Options NanoUIBackend V2 n = NanoUIOptions (SizeSpec V2 n) Bool
-  renderRTree _ (NanoUIOptions _ textOnly) rt = V.fromList (DL.toList (walkFull textOnly mempty rt))
+  renderRTree _ (NanoUIOptions _ textOnly) rt = smallArrayFromList (DL.toList (walkFull textOnly mempty rt))
   adjustDia c opts d = (sz, t <> reflectionY, d')
    where
     (sz, t, d') = adjustDia2D fullSize c opts (d # reflectY)
@@ -219,11 +218,11 @@ toF :: Real n => n -> Float
 toF = realToFrac
 
 diagramOps ::
-  Double -> Double -> QDiagram NanoUIBackend V2 Double Any -> Vector DrawOp
+  Double -> Double -> QDiagram NanoUIBackend V2 Double Any -> SmallArray DrawOp
 diagramOps = renderFull False
 
 diagramTextOps ::
-  Double -> Double -> QDiagram NanoUIBackend V2 Double Any -> Vector DrawOp
+  Double -> Double -> QDiagram NanoUIBackend V2 Double Any -> SmallArray DrawOp
 -- Text uses the same backend and viewport as geometry. In particular, do not
 -- coerce a QDiagram between backends: its primitives carry Renderable dictionaries.
 diagramTextOps = renderFull True
@@ -233,9 +232,9 @@ renderFull ::
   -> Double
   -> Double
   -> QDiagram NanoUIBackend V2 Double Any
-  -> Vector DrawOp
+  -> SmallArray DrawOp
 renderFull textOnly w h d
-  | w <= 0 || h <= 0 = V.empty
+  | w <= 0 || h <= 0 = emptySmallArray
   | otherwise =
       let
         outH = uniformHeight w h d
@@ -245,7 +244,7 @@ renderFull textOnly w h d
         dx = realToFrac ((w - outW) / 2)
         dy = realToFrac ((h - outH) / 2)
        in
-        V.map (shiftDrawOp dx dy) ops
+        mapSmallArray' (shiftDrawOp dx dy) ops
 
 uniformHeight :: Double -> Double -> QDiagram b V2 Double Any -> Double
 uniformHeight w h d =

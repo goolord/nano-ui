@@ -52,8 +52,7 @@ library
         nano-ui-rgfw-bindings ^>=0.1,
         nano-ui ^>=0.1,
         primitive ^>=0.9,
-        text ^>=2.1,
-        vector ^>=0.13
+        text ^>=2.1
     hs-source-dirs:   lib
 
 executable nano-ui-rgfw-demo

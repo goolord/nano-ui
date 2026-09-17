@@ -14,8 +14,9 @@ module NanoUI.Plot.Types
   , emptyChart
   ) where
 
+import Data.Primitive.PrimArray (PrimArray)
+import Data.Primitive.SmallArray (SmallArray)
 import Data.Text (Text)
-import Data.Vector (Vector)
 import Data.Vector.Unboxed qualified as U
 import NanoUI (Color, Response)
 
@@ -24,7 +25,8 @@ data Domain = Domain !Double !Double
 
 data SeriesData
   = PointsXY !(U.Vector (Double, Double))
-  | CategoryY !(Vector (Text, Double))
+  | -- | Bar labels and their values, in order.
+    CategoryY !(SmallArray Text) !(PrimArray Double)
   deriving (Eq, Show)
 
 data MarkShape = MarkCircle | MarkSquare | MarkDiamond | MarkTriangle | MarkCross

@@ -26,8 +26,7 @@ module NanoUI.Context.Drawing
 import Data.IORef (modifyIORef', readIORef)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IM
-import Data.Vector (Vector)
-import Data.Vector qualified as V
+import Data.Primitive.SmallArray (SmallArray, mapSmallArray')
 
 import NanoUI.Context.Animation (isAnimatingKey)
 import NanoUI.Context.Types
@@ -91,18 +90,18 @@ lookupDrawing = lookupIn dcsDrawings
 -- moved; a miss or a resize uses @rebuilt@. Ops that differ from the entry are
 -- written back with @store@.
 serveOps ::
-  Maybe (Rect, Vector DrawOp) ->
+  Maybe (Rect, SmallArray DrawOp) ->
   Rect ->
-  Vector DrawOp ->
-  (Vector DrawOp -> IO ()) ->
-  IO (Vector DrawOp)
+  SmallArray DrawOp ->
+  (SmallArray DrawOp -> IO ()) ->
+  IO (SmallArray DrawOp)
 serveOps hit rect rebuilt store =
   case hit of
     Just (r, ops)
       | rectW r == rectW rect && rectH r == rectH rect ->
           if rectX r == rectX rect && rectY r == rectY rect
             then pure ops
-            else keep (V.map (shiftDrawOp (rectX rect - rectX r) (rectY rect - rectY r)) ops)
+            else keep (mapSmallArray' (shiftDrawOp (rectX rect - rectX r) (rectY rect - rectY r)) ops)
     _ -> keep rebuilt
   where
     keep ops = store ops >> pure ops
@@ -111,7 +110,7 @@ serveOps hit rect rebuilt store =
 -- only translates. An unversioned drawing (content 0) additionally drops its
 -- cache while the widget is animating, since it has no other invalidation
 -- signal; versioned drawings are invalidated by their content key alone.
-cachedDrawingOps :: Context -> WidgetId -> Int -> Rect -> DrawingBuild -> IO (Vector DrawOp)
+cachedDrawingOps :: Context -> WidgetId -> Int -> Rect -> DrawingBuild -> IO (SmallArray DrawOp)
 cachedDrawingOps ctx wid content rect build = do
   let k = intKey wid
   animated <-
@@ -219,7 +218,7 @@ cachedCustomDrawingOps ::
   Rect ->
   CustomDrawContext ->
   CustomDrawBuild ->
-  IO (Vector DrawOp)
+  IO (SmallArray DrawOp)
 cachedCustomDrawingOps ctx wid content rect cdc build = do
   let k = intKey wid
   gen <- readIORef (ctxMetricGen ctx)
@@ -272,7 +271,7 @@ refreshCustomDrawingOps ctx wid content rect cdc build = do
       storeCustomDrawingOps ctx k content rect cdc gen ops
       pure changed
 
-storeCustomDrawingOps :: Context -> Int -> Int -> Rect -> CustomDrawContext -> Int -> Vector DrawOp -> IO ()
+storeCustomDrawingOps :: Context -> Int -> Int -> Rect -> CustomDrawContext -> Int -> SmallArray DrawOp -> IO ()
 storeCustomDrawingOps ctx k content rect cdc gen ops =
   modifyIORef' (ctxDrawingCache ctx) $ \s ->
     let entry =

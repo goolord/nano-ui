@@ -8,9 +8,17 @@ module NanoUI.Diagrams.Tessellation
   , bezierTolerance
   ) where
 
+import Control.Monad (forM_)
 import Control.Monad.ST (runST)
-import qualified Data.Vector.Unboxed as U
-import qualified Data.Vector.Unboxed.Mutable as M
+import Data.Primitive.PrimArray
+  ( PrimArray
+  , indexPrimArray
+  , newPrimArray
+  , readPrimArray
+  , runPrimArray
+  , sizeofPrimArray
+  , writePrimArray
+  )
 import NanoUI (Color, DrawOp (..), Rect (..))
 
 bezierTolerance :: Float
@@ -21,7 +29,7 @@ triangulatePolygon [] = []
 triangulatePolygon [_] = []
 triangulatePolygon pts0 =
   let pts = stripClosed pts0
-    in earClip (U.fromList pts)
+    in earClip (pointsArray pts)
 
 stripClosed :: [(Float, Float)] -> [(Float, Float)]
 stripClosed [] = []
@@ -30,9 +38,25 @@ stripClosed (p : rest)
   | p == last rest = p : init rest
   | otherwise = p : rest
 
-signedArea :: U.Vector (Float, Float) -> Float
+-- | Points stored as x then y.
+pointsArray :: [(Float, Float)] -> PrimArray Float
+pointsArray pts = runPrimArray $ do
+  out <- newPrimArray (2 * length pts)
+  let fill !_ [] = pure out
+      fill !i ((x, y) : rest) = do
+        writePrimArray out (2 * i) x
+        writePrimArray out (2 * i + 1) y
+        fill (i + 1) rest
+  fill 0 pts
+
+{-# INLINE pointAt #-}
+pointAt :: PrimArray Float -> Int -> (Float, Float)
+pointAt vs i = (indexPrimArray vs (2 * i), indexPrimArray vs (2 * i + 1))
+
+signedArea :: PrimArray Float -> Float
 signedArea vs =
-  U.ifoldl' (\acc i a -> acc + cross a (vs U.! ((i + 1) `mod` U.length vs)) / 2) 0 vs
+  let n = sizeofPrimArray vs `div` 2
+   in foldl' (\acc i -> acc + cross (pointAt vs i) (pointAt vs ((i + 1) `mod` n)) / 2) 0 [0 .. n - 1]
 
 cross :: (Float, Float) -> (Float, Float) -> Float
 cross (x0, y0) (x1, y1) = x0 * y1 - x1 * y0
@@ -54,21 +78,22 @@ pointInTri p a b c =
       d3 = sign (p, c, a)
    in not ((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0))
 
-earClip :: U.Vector (Float, Float) -> [((Float, Float), (Float, Float), (Float, Float))]
+earClip :: PrimArray Float -> [((Float, Float), (Float, Float), (Float, Float))]
 earClip vs
-  | U.length vs < 3 = []
-  | U.length vs == 3 = [(vs U.! 0, vs U.! 1, vs U.! 2)]
+  | n < 3 = []
+  | n == 3 = [(at 0, at 1, at 2)]
   | otherwise = runST $ do
-      let !n = U.length vs
-          !ccw = signedArea vs >= 0
-          at = (vs U.!)
+      let !ccw = signedArea vs >= 0
       -- Coordinates never move. Remove an ear by relinking two neighbours,
-      -- instead of copying the remaining coordinate vector at every step.
-      prevs <- U.thaw (U.generate n (\i -> (i - 1 + n) `mod` n))
-      nexts <- U.thaw (U.generate n (\i -> (i + 1) `mod` n))
+      -- instead of copying the remaining coordinates at every step.
+      prevs <- newPrimArray n
+      nexts <- newPrimArray n
+      forM_ [0 .. n - 1] $ \i -> do
+        writePrimArray prevs i ((i - 1 + n) `mod` n)
+        writePrimArray nexts i ((i + 1) `mod` n)
       let triangle i = do
-            p <- M.read prevs i
-            q <- M.read nexts i
+            p <- readPrimArray prevs i
+            q <- readPrimArray nexts i
             pure (p, q, (at p, at i, at q))
           isEarAt first count i p q (a, b, c)
             | not (isConvex ccw a b c) = pure False
@@ -78,7 +103,7 @@ earClip vs
               outside !j !left
                 | j /= p && j /= i && j /= q && pointInTri (at j) a b c = pure False
                 | otherwise = do
-                    next <- M.read nexts j
+                    next <- readPrimArray nexts j
                     outside next (left - 1)
           convex !_ 0 = pure True
           convex !i !left = do
@@ -87,18 +112,18 @@ earClip vs
           fan origin i left
             | left <= 0 = pure []
             | otherwise = do
-                q <- M.read nexts i
+                q <- readPrimArray nexts i
                 rest <- fan origin q (left - 1)
                 pure ((at origin, at i, at q) : rest)
           go !first !count !idx !tries tris
             | count == 3 = do
-                second <- M.read nexts first
-                third <- M.read nexts second
+                second <- readPrimArray nexts first
+                third <- readPrimArray nexts second
                 pure ((at first, at second, at third) : tris)
             | tries >= count = do
                 isConvexRing <- convex first count
                 if isConvexRing then do
-                  second <- M.read nexts first
+                  second <- readPrimArray nexts first
                   rest <- fan first second (count - 2)
                   pure (tris ++ rest)
                 else pure tris
@@ -106,12 +131,15 @@ earClip vs
                 (p, q, tri) <- triangle idx
                 ear <- isEarAt first count idx p q tri
                 if ear then do
-                  M.write nexts p q
-                  M.write prevs q p
+                  writePrimArray nexts p q
+                  writePrimArray prevs q p
                   let !first' = if idx == first then q else first
                   go first' (count - 1) first' 0 (tri : tris)
                 else go first count q (tries + 1) tris
       reverse <$> go 0 n 0 0 []
+  where
+    n = sizeofPrimArray vs `div` 2
+    at = pointAt vs
 
 fillPolygon :: Color -> [(Float, Float)] -> [DrawOp]
 fillPolygon col pts =
@@ -142,44 +170,53 @@ strokePolyline _ _ _ [_] = []
 strokePolyline col w closed pts0 =
   let pts = if closed && length pts0 > 2 then stripClosed pts0 else pts0
       hw = w / 2
-      !vPts = U.fromList pts
-      !n = U.length vPts
+      !vPts = pointsArray pts
+      !n = sizeofPrimArray vPts `div` 2
    in if n < 2
         then []
         else
           let !segCount = if closed then n else n - 1
-              !segNormals = U.generate segCount $ \i ->
-                let !(p0x, p0y) = vPts U.! i
-                    !(p1x, p1y) = vPts U.! ((i + 1) `mod` n)
-                    dx = p1x - p0x
-                    dy = p1y - p0y
-                    nx = -dy
-                    ny = dx
-                    d = sqrt (nx * nx + ny * ny)
-                 in if d <= 1e-9 then (0, 0) else (nx / d, ny / d)
+              -- Each segment's unit normal, x then y.
+              !segNormals = runPrimArray $ do
+                out <- newPrimArray (2 * segCount)
+                forM_ [0 .. segCount - 1] $ \i -> do
+                  let !(p0x, p0y) = pointAt vPts i
+                      !(p1x, p1y) = pointAt vPts ((i + 1) `mod` n)
+                      nx = p0y - p1y
+                      ny = p1x - p0x
+                      d = sqrt (nx * nx + ny * ny)
+                  writePrimArray out (2 * i) (if d <= 1e-9 then 0 else nx / d)
+                  writePrimArray out (2 * i + 1) (if d <= 1e-9 then 0 else ny / d)
+                pure out
               joinNormal !i
-                | not closed && i <= 0 = segNormals U.! 0
-                | not closed && i >= n - 1 = segNormals U.! (segCount - 1)
+                | not closed && i <= 0 = pointAt segNormals 0
+                | not closed && i >= n - 1 = pointAt segNormals (segCount - 1)
                 | otherwise =
-                    let (ax, ay) = segNormals U.! ((i - 1 + segCount) `mod` segCount)
-                        (bx, by) = segNormals U.! (i `mod` segCount)
+                    let (ax, ay) = pointAt segNormals ((i - 1 + segCount) `mod` segCount)
+                        (bx, by) = pointAt segNormals (i `mod` segCount)
                         sx = ax + bx
                         sy = ay + by
                         d = sqrt (sx * sx + sy * sy)
                      in if d <= 1e-9 then (0, 0) else (sx / d, sy / d)
-              -- Adjacent quads share a vertex, so offset each vertex once.
-              !offsets = U.generate n $ \i ->
-                let (!px, !py) = vPts U.! i
-                    (!nx, !ny) = joinNormal i
-                 in ((px + hw * nx, py + hw * ny), (px - hw * nx, py - hw * ny))
+              -- Adjacent quads share a vertex, so offset each vertex once: the
+              -- two sides' points, four numbers a vertex.
+              !offsets = runPrimArray $ do
+                out <- newPrimArray (4 * n)
+                forM_ [0 .. n - 1] $ \i -> do
+                  let (!px, !py) = pointAt vPts i
+                      (!nx, !ny) = joinNormal i
+                  writePrimArray out (4 * i) (px + hw * nx)
+                  writePrimArray out (4 * i + 1) (py + hw * ny)
+                  writePrimArray out (4 * i + 2) (px - hw * nx)
+                  writePrimArray out (4 * i + 3) (py - hw * ny)
+                pure out
+              offset i k = indexPrimArray offsets (4 * i + k)
               buildQuads !i
                 | i >= segCount = []
                 | otherwise =
                     let !j = if closed then (i + 1) `mod` n else i + 1
-                        ((!x0a, !y0a), (!x0b, !y0b)) = offsets U.! i
-                        ((!x1a, !y1a), (!x1b, !y1b)) = offsets U.! j
-                     in FillTriangle x0a y0a x1a y1a x1b y1b col
-                          : FillTriangle x0a y0a x1b y1b x0b y0b col
+                     in FillTriangle (offset i 0) (offset i 1) (offset j 0) (offset j 1) (offset j 2) (offset j 3) col
+                          : FillTriangle (offset i 0) (offset i 1) (offset j 2) (offset j 3) (offset i 2) (offset i 3) col
                           : buildQuads (i + 1)
            in buildQuads 0
 

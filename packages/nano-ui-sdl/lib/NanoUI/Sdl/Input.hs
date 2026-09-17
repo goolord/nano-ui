@@ -15,7 +15,6 @@ import Data.Bits ((.&.))
 import qualified Data.Text as T
 import Data.Text (Text)
 import qualified Data.Text.Foreign as TF
-import qualified Data.Vector as V
 import Data.Word (Word32)
 import Foreign.C.Types (CFloat)
 import Foreign.Marshal.Alloc (alloca)
@@ -34,7 +33,7 @@ import NanoUI
   , appendInputKey
   , v2Add
   )
-import NanoUI.Input (MouseButton (..), applyMouseButton)
+import NanoUI.Input (MouseButton (..), appendDropEvent, applyMouseButton)
 import NanoUI.Sdl.Display (readRefreshEventType)
 import SDL3.Sys.Bindgen.Events
   ( SDL_Event (..)
@@ -290,7 +289,7 @@ applyEvent inp ev =
     EvMouseRightRelease pos mods ->
       (applyMouseButton MouseRight False inp) {inputMousePos = pos, inputModifiers = mods}
     EvScroll delta -> inp {inputScroll = v2Add (inputScroll inp) delta}
-    EvDrop dropEv -> inp {inputDrops = V.snoc (inputDrops inp) dropEv}
+    EvDrop dropEv -> inp {inputDrops = appendDropEvent dropEv (inputDrops inp)}
     EvRefresh -> inp {inputWindowRedraw = True}
     EvWindowRedraw -> inp {inputWindowRedraw = True}
 

@@ -10,7 +10,7 @@ module NanoUI.Widgets.Drawing
 where
 
 import Data.Text qualified as T
-import Data.Vector (Vector)
+import Data.Primitive.SmallArray (SmallArray)
 import Effectful (Eff, type (:>))
 import NanoUI.Context (cachedWidgetLayout, registerDrawing)
 import NanoUI.Draw (DrawOp (..), DrawingBuild)
@@ -27,7 +27,7 @@ import NanoUI.Widgets.Node (Response, addWidget)
 -- repaints. Use 'drawingVersioned' for output that changes, or
 -- 'NanoUI.Widgets.Custom.customWidget' without a key to have every frame
 -- rebuild and compare.
-drawing :: Ui :> es => (Layout -> Layout) -> (Rect -> Vector DrawOp) -> Eff es Response
+drawing :: Ui :> es => (Layout -> Layout) -> (Rect -> SmallArray DrawOp) -> Eff es Response
 drawing f build = do
   wid <- nextId
   ctx <- askContext
@@ -40,7 +40,7 @@ drawing f build = do
 -- repaints the widget. Frames with the same version replay cached ops without
 -- rebuilding, even while the widget animates. Version 0 means unversioned, as
 -- in 'drawing'.
-drawingVersioned :: Ui :> es => Int -> (Layout -> Layout) -> (Rect -> Vector DrawOp) -> Eff es Response
+drawingVersioned :: Ui :> es => Int -> (Layout -> Layout) -> (Rect -> SmallArray DrawOp) -> Eff es Response
 drawingVersioned version f build = do
   wid <- nextId
   ctx <- askContext

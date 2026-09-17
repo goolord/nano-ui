@@ -50,7 +50,7 @@ import Control.Concurrent (forkIO)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, tryTakeMVar)
 import Control.Exception (SomeException, displayException, evaluate, try)
 import Control.Monad (forM, forM_, unless, void, when)
-import Data.Foldable (for_)
+import Data.Foldable (for_, toList)
 import Data.List (elemIndex)
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Primitive.SmallArray (SmallArray, smallArrayFromList)
@@ -89,7 +89,7 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Internal as BSI
 import qualified Data.Text as T
 import qualified Data.Text.Read as T.Read
-import qualified Data.Vector as V
+import Data.Primitive.SmallArray (indexSmallArray, sizeofSmallArray)
 import qualified Data.Vector.Storable as VS
 import qualified SdlSelftest
 
@@ -184,11 +184,11 @@ loadGif path =
 -- while the file is still decoding, then the frames' ids or why the file could
 -- not be used. The result comes once; keep it. Registering stops at the first
 -- frame the atlas refuses.
-gifFrames :: Ui :> es => GifLoad -> Eff es (Maybe (Either String (V.Vector ImageId)))
+gifFrames :: Ui :> es => GifLoad -> Eff es (Maybe (Either String (SmallArray ImageId)))
 gifFrames (GifLoad done) =
   uiIO (tryTakeMVar done) >>= traverse (either (pure . Left) (register []))
   where
-    register ids [] = pure (Right (V.fromList (reverse ids)))
+    register ids [] = pure (Right (smallArrayFromList (reverse ids)))
     register ids ((w, h, pixels) : rest) = do
       iid <- freshImageId
       ok <- registerImageRgba iid w h pixels
@@ -297,7 +297,7 @@ demoUi = do
   -- File dialog handles; results land in the paths below via useFileDialog.
   (openDlg, setOpenDlg) <- useState (Nothing :: Maybe FileDialogId)
   (saveDlg, setSaveDlg) <- useState (Nothing :: Maybe FileDialogId)
-  (lick, setLick) <- useState (Nothing :: Maybe (Either String (V.Vector ImageId))) -- GIF frames, once loaded
+  (lick, setLick) <- useState (Nothing :: Maybe (Either String (SmallArray ImageId))) -- GIF frames, once loaded
   (lickLoad, setLickLoad) <- useState (Nothing :: Maybe GifLoad) -- the GIF while it decodes
   (icons, setIcons) <- useState (Nothing :: Maybe [Either String Svg]) -- SVG icons, read on first show
   (folderDlg, setFolderDlg) <- useState (Nothing :: Maybe FileDialogId)
@@ -332,7 +332,7 @@ demoUi = do
   let wideWorkspace = sizeW (inputWindowSize rawInp) >= 1000
       inspectorWidth = if wideWorkspace then fixedW 280 else fillW
       volText = T.pack (show (round vol :: Int))
-  let rawDrop = T.intercalate " | " [T.pack (show (dropEventType ev)) <> " " <> dropEventData ev | ev <- V.toList (inputDrops rawInp)]
+  let rawDrop = T.intercalate " | " [T.pack (show (dropEventType ev)) <> " " <> dropEventData ev | ev <- toList (inputDrops rawInp)]
   when (not (T.null rawDrop)) (setDropRaw rawDrop)
 
   -------------------------------------------------------------- toolbar ---
@@ -562,7 +562,7 @@ demoUi = do
                 Just (Right frames) -> do
                   t <- uiTime
                   columnWith (tight . gap gapMicro) $ do
-                    keepAnimating =<< image' (fixedWH 150 150) (frames V.! (floor (t * 10) `mod` V.length frames))
+                    keepAnimating =<< image' (fixedWH 150 150) (indexSmallArray frames (floor (t * 10) `mod` sizeofSmallArray frames))
                     muted "lick.gif"
               separator
               -- A plain response-driven bar. pulse provides a smooth

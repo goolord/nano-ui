@@ -23,7 +23,7 @@ where
 
 import Colonnade (Colonnade, Headed (..), headed, headless)
 import Colonnade.Encode qualified as Encode
-import Control.Monad (unless, void, when)
+import Control.Monad (foldM, forM_, unless, void, when)
 import Data.Char (isDigit)
 import Data.Foldable (toList)
 import Data.IntSet (IntSet)
@@ -33,9 +33,10 @@ import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Ord (Down (..))
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Primitive.PrimArray (PrimArray, emptyPrimArray, generatePrimArray, indexPrimArray, newPrimArray, primArrayFromList, sizeofPrimArray, unsafeFreezePrimArray, writePrimArray)
+import Data.Primitive.SmallArray (SmallArray, emptySmallArray, indexSmallArray, newSmallArray, sizeofSmallArray, smallArrayFromList, unsafeFreezeSmallArray, writeSmallArray)
+import Data.Primitive.Types (Prim)
 import Data.Vector qualified as V
-import Data.Vector.Generic qualified as G
-import Data.Vector.Unboxed qualified as U
 import Effectful (Eff, type (:>))
 import qualified Data.IntMap.Strict as IM
 import NanoUI.Context (Context (..), getPrevRect, getScrollOffset2D, getStore, intKey, linkScrollAxes, setStore)
@@ -133,7 +134,7 @@ tableSplitPanes tp =
   colBox = tpColBox tp
   renderCell = tpRenderCell tp
   freezeR = length pinned
-  scrollRowsVec = V.fromList scrollRows
+  scrollRowsArr = smallArrayFromList scrollRows
   paneRoot =
     (if fillInner then tight . fillW . fillH else tight . fillH) defaultLayout
   minSum idxs = sum (map (layoutMinW . colBox) idxs) + fromIntegral (max 0 (length idxs - 1))
@@ -167,7 +168,7 @@ tableSplitPanes tp =
     pure hs
   bodyBlock idxs = do
     ctx <- askContext
-    let n = V.length scrollRowsVec
+    let n = sizeofSmallArray scrollRowsArr
     (lo, hi) <-
       if n == 0 || rowMinH <= 0
         then pure (0, -1)
@@ -185,7 +186,7 @@ tableSplitPanes tp =
         ( \rowIdx ->
             withKey rowIdx $ do
               when (rowIdx > 0) $ void separator
-              let r = scrollRowsVec V.! rowIdx
+              let r = indexSmallArray scrollRowsArr rowIdx
                   cell = renderCell (rowIdx + freezeR) r
               gridColumnsLay rowLay idxs colLays [void (cell colIdx) | colIdx <- idxs]
         )
@@ -206,7 +207,7 @@ tableSplitPanes tp =
     let vGutter = scrollBarGutter ScrollBarList 0
         idxs = unfrozenIdx
     mPrevV <- uiIO (getPrevRect ctx vWid)
-    let totalH = fromIntegral (V.length scrollRowsVec) * rowMinH
+    let totalH = fromIntegral (sizeofSmallArray scrollRowsArr) * rowMinH
         -- Prev-frame decision, one frame behind the body scroller's live 2D
         -- gutter: on the frame the vertical bar first appears (or vanishes)
         -- the header spacer disagrees with the body's reserved lane for one
@@ -322,8 +323,8 @@ isNumericCell txt =
         _ -> s
    in not (T.null digits) && T.all isDigit digits
 
-columnMetrics :: Context -> Colonnade Headed row Text -> [row] -> IO (U.Vector Float, U.Vector Bool)
-columnMetrics _ cols _ | columnCount cols == 0 = pure (U.empty, U.empty)
+columnMetrics :: Context -> Colonnade Headed row Text -> [row] -> IO (PrimArray Float, SmallArray Bool)
+columnMetrics _ cols _ | columnCount cols == 0 = pure (emptyPrimArray, emptySmallArray)
 columnMetrics ctx cols rows =
   let fm = ctxFontMetrics ctx
       mono = ctxMonoFontMetrics ctx
@@ -331,16 +332,24 @@ columnMetrics ctx cols rows =
       cellPadX = 2 * ix
       hdrs = Encode.header id cols
       -- Encode each row once, sharing it across column classification and sizing.
-      !encodedRows = V.fromList [Encode.row id cols r | r <- rows]
+      encodedRows = [Encode.row id cols r | r <- rows]
       measureColumn c hdr = do
         hdrW <- (+ cellPadX) <$> lineWidthIO fm (hdr <> tableSortReserve)
-        let isNum = not (null rows) && V.all (isNumericCell . (V.! c)) encodedRows
+        let isNum = not (null rows) && all (isNumericCell . (V.! c)) encodedRows
             font = if isNum then mono else fm
-        cellW <- V.foldM' (\w row -> do
+        cellW <- foldM (\w row -> do
           width <- lineWidthIO font (row V.! c)
-          pure (max w (width + cellPadX))) minColW encodedRows
+          pure $! max w (width + cellPadX)) minColW encodedRows
         pure (if null rows then hdrW else max hdrW cellW, isNum)
-   in U.unzip <$> U.generateM (V.length hdrs) (\c -> measureColumn c (hdrs V.! c))
+      count = V.length hdrs
+   in do
+        widths <- newPrimArray count
+        numeric <- newSmallArray count False
+        forM_ [0 .. count - 1] $ \c -> do
+          (w, isNum) <- measureColumn c (hdrs V.! c)
+          writePrimArray widths c w
+          writeSmallArray numeric c isNum
+        (,) <$> unsafeFreezePrimArray widths <*> unsafeFreezeSmallArray numeric
 
 nextSortCol :: Int -> SortCol -> Int -> SortCol
 nextSortCol n cur clicked =
@@ -373,15 +382,19 @@ unpackHeaderDrag n
 
 -- Metadata is indexed by original column id after reordering/hiding. Keep
 -- it indexed throughout layout, rather than walking a list for each cell.
-{-# INLINE vectorAt #-}
-vectorAt :: G.Vector v a => v a -> Int -> a -> a
-vectorAt xs i fallback = fromMaybe fallback (xs G.!? i)
+{-# INLINE primAt #-}
+primAt :: Prim a => PrimArray a -> Int -> a -> a
+primAt xs i fallback = if i >= 0 && i < sizeofPrimArray xs then indexPrimArray xs i else fallback
 
-resolvedWidth :: V.Vector ColSize -> U.Vector Float -> U.Vector Float -> Int -> Float
+{-# INLINE smallAt #-}
+smallAt :: SmallArray a -> Int -> a -> a
+smallAt xs i fallback = if i >= 0 && i < sizeofSmallArray xs then indexSmallArray xs i else fallback
+
+resolvedWidth :: SmallArray ColSize -> PrimArray Float -> PrimArray Float -> Int -> Float
 resolvedWidth sizes contentWs stored i =
-  let contentW = max minColW (vectorAt contentWs i minColW)
-      saved = vectorAt stored i 0
-   in case vectorAt sizes i ColContent of
+  let contentW = max minColW (primAt contentWs i minColW)
+      saved = primAt stored i 0
+   in case smallAt sizes i ColContent of
         ColStretch -> if saved > contentW then saved else contentW
         ColFixed f ->
           let base = max minColW f
@@ -391,16 +404,16 @@ resolvedWidth sizes contentWs stored i =
 -- Width floor a column cannot shrink under: its declared fixed width, else
 -- its content minimum. Shared by colSizing and the resize-drag clamp so a
 -- dragged or stored width never wraps the cell text.
-colFloor :: V.Vector ColSize -> U.Vector Float -> Int -> Float
-colFloor sizes contentWs i = case vectorAt sizes i ColContent of
+colFloor :: SmallArray ColSize -> PrimArray Float -> Int -> Float
+colFloor sizes contentWs i = case smallAt sizes i ColContent of
   ColFixed f -> max minColW f
-  _ -> max minColW (vectorAt contentWs i minColW)
+  _ -> max minColW (primAt contentWs i minColW)
 
-colSizing :: Bool -> Bool -> V.Vector ColSize -> U.Vector Float -> U.Vector Float -> Int -> Sizing
+colSizing :: Bool -> Bool -> SmallArray ColSize -> PrimArray Float -> PrimArray Float -> Int -> Sizing
 colSizing fillInner hasStretch sizes contentWs stored i =
-  let saved = vectorAt stored i 0
+  let saved = primAt stored i 0
       floorW = colFloor sizes contentWs i
-   in case vectorAt sizes i ColContent of
+   in case smallAt sizes i ColContent of
         ColFixed _ -> Fixed (max floorW saved)
         ColStretch
           | saved > 0 -> Fixed (max floorW saved)
@@ -570,8 +583,8 @@ tableWith = tableConfigured defaultTableConfig
 -- | A table of text rows under the given headers.
 simpleTable :: (Foldable f, Ui :> es) => [Text] -> f [Text] -> Eff es TableResponse
 simpleTable headers rows = do
-  let cols = mconcat [headed h (\r -> vectorAt r i "") | (i, h) <- zip [0 ..] headers]
-      indexedRows = map V.fromList (toList rows)
+  let cols = mconcat [headed h (\r -> smallAt r i "") | (i, h) <- zip [0 ..] headers]
+      indexedRows = map smallArrayFromList (toList rows)
   table "simple" cols indexedRows (SortCol 0 SortAsc)
 
 -- | 'tableWith' with column sizes, frozen rows and columns, and initially
@@ -600,7 +613,7 @@ tableConfigured cfg f key cols inputRows curSort =
     inp <- askInput
     st0 <- uiIO (getStore ctx)
     (!contentWs, !numeric) <- uiIO (columnMetrics ctx cols rows)
-    let sizes = V.fromList (tableColSizes cfg)
+    let sizes = smallArrayFromList (tableColSizes cfg)
         order0 = normalizeOrder n (IM.findWithDefault [0 .. n - 1] stateKey (storeIntList st0))
         hidden0 = IM.findWithDefault (tableHidden cfg) stateKey (storeIntSet st0)
         widths0 = fitList n 0 (IM.findWithDefault [] stateKey (storeFloatList st0))
@@ -618,7 +631,7 @@ tableConfigured cfg f key cols inputRows curSort =
           _ -> widths0
     when (widths1 /= widths0) $ uiIO $ writeColW ctx stateKey widths1
     let hasStretch = tableStretchN n (tableColSizes cfg)
-        indexedWidths = U.fromList widths1
+        indexedWidths = primArrayFromList widths1
         vis = visibleCols order0 hidden0
         freezeN = clamp 0 (length vis) (tableFreezeCols cfg)
         freezeR = max 0 (tableFreezeRows cfg)
@@ -626,22 +639,22 @@ tableConfigured cfg f key cols inputRows curSort =
         hdrs = Encode.header id cols
         rowMinH = 28
         fillInner = tableFillInner hasStretch outerLayout
-        mins = U.generate n (resolvedWidth sizes contentWs indexedWidths)
-        colBoxes = V.generate n $ \i -> colBoxLayout (colSizing fillInner hasStretch sizes contentWs indexedWidths i) (vectorAt mins i minColW)
-        resolvedW i = vectorAt mins i minColW
-        cellLayouts = V.generate n $ \i ->
+        mins = generatePrimArray n (resolvedWidth sizes contentWs indexedWidths)
+        colBoxes = smallArrayFromList [colBoxLayout (colSizing fillInner hasStretch sizes contentWs indexedWidths i) (primAt mins i minColW) | i <- [0 .. n - 1]]
+        resolvedW i = primAt mins i minColW
+        cellLayouts = smallArrayFromList $ flip map [0 .. n - 1] $ \i ->
           (tight defaultLayout)
               { layoutWidth = Grow 1
               , layoutHeight = Grow 1
-              , layoutAlignX = if vectorAt numeric i False then AlignEnd else AlignStart
+              , layoutAlignX = if smallAt numeric i False then AlignEnd else AlignStart
               , layoutAlignY = AlignMiddle
               , layoutMinH = rowMinH
-              , layoutFontVariant = if vectorAt numeric i False then FontMono else FontRegular
+              , layoutFontVariant = if smallAt numeric i False then FontMono else FontRegular
               }
-        cellLayout i = vectorAt cellLayouts i (tight defaultLayout)
+        cellLayout i = smallAt cellLayouts i (tight defaultLayout)
         renderHeader i =
           let !lay = cellLayout i
-           in buttonStyled (tableHeaderLabel (vectorAt hdrs i T.empty)) (if sortColIndex sort0 == i then 1 else 0) lay (sortMarkStyle sort0 i .|. buttonFlagTable)
+           in buttonStyled (tableHeaderLabel (fromMaybe T.empty (hdrs V.!? i))) (if sortColIndex sort0 == i then 1 else 0) lay (sortMarkStyle sort0 i .|. buttonFlagTable)
         renderCell ri r =
           let !rowCells = Encode.row id cols r
            in \i ->
@@ -665,7 +678,7 @@ tableConfigured cfg f key cols inputRows curSort =
             , tpUnfrozen = drop freezeN vis
             , tpPinned = take freezeR sorted
             , tpScrollRows = drop freezeR sorted
-            , tpColBox = \i -> vectorAt colBoxes i (tight defaultLayout)
+            , tpColBox = \i -> smallAt colBoxes i (tight defaultLayout)
             , tpRenderHeader = renderHeader
             , tpRenderCell = renderCell
             }

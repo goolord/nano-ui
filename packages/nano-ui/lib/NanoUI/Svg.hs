@@ -21,6 +21,7 @@ module NanoUI.Svg
 
 import Control.Monad (forM_, when)
 import Control.Monad.ST (ST, runST)
+import Foreign.Storable (pokeByteOff)
 import Data.Bits (xor)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
@@ -31,9 +32,7 @@ import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Read qualified as TR
-import Data.Vector.Storable qualified as VS
-import Data.Vector.Storable.Mutable qualified as VSM
-import Data.Vector.Unboxed.Mutable qualified as MV
+import Data.Primitive.PrimArray (MutablePrimArray, indexPrimArray, newPrimArray, readPrimArray, setPrimArray, unsafeFreezePrimArray, writePrimArray)
 import Data.Word (Word8)
 import NanoUI.Types (Color (..), colorA, colorB, colorG, colorR, colorRGBA)
 
@@ -735,10 +734,21 @@ signedArea poly = case poly of
 rasterizeSvg :: Int -> Int -> Color -> Svg -> ByteString
 rasterizeSvg width height current svg
   | width <= 0 || height <= 0 = BS.empty
-  | otherwise = runST $ do
+  | otherwise = BSI.unsafeCreate (width * height * 4) $ \out ->
+      forM_ [0 .. width * height - 1] $ \i -> do
+        let al = indexPrimArray image (i * 4 + 3)
+            byte x = fromIntegral (max 0 (min 255 (round (x * 255) :: Int))) :: Word8
+            unpremul k = pokeByteOff out (i * 4 + k) (if al <= 0 then 0 else byte (indexPrimArray image (i * 4 + k) / al))
+        unpremul 0
+        unpremul 1
+        unpremul 2
+        pokeByteOff out (i * 4 + 3) (byte al)
+  where
+    image = runST $ do
       -- Premultiplied RGBA in [0, 1].
-      acc <- MV.replicate (width * height * 4) (0 :: Float)
-      cov <- MV.replicate (width * height) (0 :: Float)
+      acc <- newPrimArray (width * height * 4)
+      setPrimArray acc 0 (width * height * 4) (0 :: Float)
+      cov <- newPrimArray (width * height)
       let Box vx vy vw vh = svgViewBox svg
           s = min (fromIntegral width / vw) (fromIntegral height / vh)
           tx = (fromIntegral width - vw * s) / 2 - vx * s
@@ -768,26 +778,13 @@ rasterizeSvg width height current svg
             coverPolygons width height cov NonZero polys
             -- A hairline thinner than a pixel keeps its weight as opacity.
             composite width height acc cov col (opacity * psStrokeOpacity style * min 1 (wanted / w))
-      out <- VSM.new (width * height * 4)
-      forM_ [0 .. width * height - 1] $ \i -> do
-        al <- MV.read acc (i * 4 + 3)
-        let byte x = fromIntegral (max 0 (min 255 (round (x * 255) :: Int))) :: Word8
-            unpremul k = do
-              ch <- MV.read acc (i * 4 + k)
-              VSM.write out (i * 4 + k) (if al <= 0 then 0 else byte (ch / al))
-        unpremul 0
-        unpremul 1
-        unpremul 2
-        VSM.write out (i * 4 + 3) (byte al)
-      frozen <- VS.unsafeFreeze out
-      let (fp, len) = VS.unsafeToForeignPtr0 frozen
-      pure (BSI.BS fp len)
+      unsafeFreezePrimArray acc
 
 -- | Coverage of the polygons in @cov@ (cleared first): five sample rows a
 -- pixel, each span's coverage split exactly across the pixels it crosses.
-coverPolygons :: Int -> Int -> MV.MVector s Float -> FillRule -> [[P]] -> ST s ()
+coverPolygons :: Int -> Int -> MutablePrimArray s Float -> FillRule -> [[P]] -> ST s ()
 coverPolygons width height cov rule polys = do
-  MV.set cov 0
+  setPrimArray cov 0 (width * height) 0
   let edges =
         [ (y0, y1, x0, (x1 - x0) / (y1 - y0), dir)
         | poly <- polys
@@ -817,25 +814,26 @@ coverPolygons width height cov rule polys = do
           let ia = floor xa :: Int
               ib = min (width - 1) (floor xb)
               base = row * width
+              add i v = readPrimArray cov i >>= \c -> writePrimArray cov i (c + v)
           if ia == ib
-            then MV.modify cov (+ (xb - xa) * weight) (base + ia)
+            then add (base + ia) ((xb - xa) * weight)
             else do
-              MV.modify cov (+ (fromIntegral (ia + 1) - xa) * weight) (base + ia)
-              forM_ [ia + 1 .. ib - 1] $ \i -> MV.modify cov (+ weight) (base + i)
-              when (ib < width) $ MV.modify cov (+ (xb - fromIntegral ib) * weight) (base + ib)
+              add (base + ia) ((fromIntegral (ia + 1) - xa) * weight)
+              forM_ [ia + 1 .. ib - 1] $ \i -> add (base + i) weight
+              when (ib < width) $ add (base + ib) ((xb - fromIntegral ib) * weight)
 
 -- | Draw @col@ at @alpha@ through the coverage over the accumulated image.
-composite :: Int -> Int -> MV.MVector s Float -> MV.MVector s Float -> Color -> Float -> ST s ()
+composite :: Int -> Int -> MutablePrimArray s Float -> MutablePrimArray s Float -> Color -> Float -> ST s ()
 composite width height acc cov col alpha =
   forM_ [0 .. width * height - 1] $ \i -> do
-    c <- MV.read cov i
+    c <- readPrimArray cov i
     when (c > 0) $ do
       let sa = min 1 c * alpha * fromIntegral (colorA col) / 255
           blend k src = do
-            dst <- MV.read acc (i * 4 + k)
-            MV.write acc (i * 4 + k) (src * sa + dst * (1 - sa))
+            dst <- readPrimArray acc (i * 4 + k)
+            writePrimArray acc (i * 4 + k) (src * sa + dst * (1 - sa))
       blend 0 (fromIntegral (colorR col) / 255)
       blend 1 (fromIntegral (colorG col) / 255)
       blend 2 (fromIntegral (colorB col) / 255)
-      dstA <- MV.read acc (i * 4 + 3)
-      MV.write acc (i * 4 + 3) (sa + dstA * (1 - sa))
+      dstA <- readPrimArray acc (i * 4 + 3)
+      writePrimArray acc (i * 4 + 3) (sa + dstA * (1 - sa))

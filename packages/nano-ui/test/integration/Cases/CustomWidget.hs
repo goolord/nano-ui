@@ -11,7 +11,7 @@ module Cases.CustomWidget
 
 import Control.Monad (forM_, void)
 import Data.IORef (IORef, writeIORef)
-import Data.Vector qualified as V
+import Data.Primitive.SmallArray qualified as SA
 import NanoUI
 import NanoUI.Context (Context (..))
 import NanoUI.Testing
@@ -264,7 +264,7 @@ runDropTargetTest ctx failed = do
       bounds = Rect 10 10 100 100
       dropPoint = V2 60 60
       ui = column (useDrop bounds)
-      dropsInp ds = inp0 {inputDrops = V.fromList ds}
+      dropsInp ds = inp0 {inputDrops = SA.smallArrayFromList ds}
   _ <- warmup2 ctx inp0 ui
 
   let beginInp = dropsInp [DropEvent DropBegin Nothing ""]

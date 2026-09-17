@@ -21,7 +21,7 @@ import Data.List (sortBy, sortOn, tails)
 import Data.Maybe (catMaybes, isJust, listToMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Vector qualified as V
+import Data.Primitive.SmallArray qualified as SA
 import NanoUI
 import NanoUI.Context (ctxNodeArena)
 import NanoUI.Layout.Arena
@@ -59,7 +59,7 @@ runTableSortTest _ failed = do
   assertEq
     failed
     [2, 4, 1, 3]
-    (map snd (sortRows columns (SortCol 0 SortAsc) (V.fromList rows)))
+    (map snd (sortRows columns (SortCol 0 SortAsc) (SA.smallArrayFromList rows)))
   assertEq
     failed
     [1, 3, 2, 4]
@@ -71,7 +71,7 @@ runTableReorderTest :: Context -> IORef Int -> IO ()
 runTableReorderTest ctx failed = do
   let
     input = withInputOff 500 240
-    ui = simpleTable ["First", "Second", "Third"] (V.fromList [["a", "b", "c"], ["short"], []])
+    ui = simpleTable ["First", "Second", "Third"] (SA.smallArrayFromList [["a", "b", "c"], ["short"], []])
     draw inp = void (runFrame ctx inp ui)
     header name = do
       spans <- collectTextSpans ctx

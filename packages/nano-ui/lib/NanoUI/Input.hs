@@ -11,6 +11,7 @@ module NanoUI.Input
   , inputInteracted
   , inputPointerHeld
   , appendInputKey
+  , appendDropEvent
   , MouseButton (..)
   , applyMouseButton
   , inputKeysNull
@@ -29,8 +30,7 @@ module NanoUI.Input
 
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Vector (Vector)
-import qualified Data.Vector as V
+import Data.Primitive.SmallArray (SmallArray, copySmallArray, emptySmallArray, newSmallArray, runSmallArray, sizeofSmallArray, smallArrayFromList)
 import NanoUI.Types (Size (..), V2 (..))
 
 data Key
@@ -81,12 +81,12 @@ data Input = Input
   , inputMouseRightReleased :: {-# UNPACK #-} !Bool
   , inputMouseClicks :: {-# UNPACK #-} !Int
   , inputScroll :: {-# UNPACK #-} !V2
-  , inputKeys :: Vector Key
+  , inputKeys :: SmallArray Key
   , inputChars :: !Text
   , inputModifiers :: !Modifiers
   , inputWindowSize :: {-# UNPACK #-} !Size
   , inputDeltaTime :: {-# UNPACK #-} !Float
-  , inputDrops :: Vector DropEvent
+  , inputDrops :: SmallArray DropEvent
   , inputWindowRedraw :: {-# UNPACK #-} !Bool
   }
   deriving (Eq, Show)
@@ -161,8 +161,21 @@ splitFrame isEdge events =
     (before, []) -> (before, [])
 
 {-# INLINE appendInputKey #-}
-appendInputKey :: Key -> Vector Key -> Vector Key
-appendInputKey k ks = V.snoc ks k
+appendInputKey :: Key -> SmallArray Key -> SmallArray Key
+appendInputKey k ks = snocSmallArray ks k
+
+-- | The drops with one more at the end.
+{-# INLINE appendDropEvent #-}
+appendDropEvent :: DropEvent -> SmallArray DropEvent -> SmallArray DropEvent
+appendDropEvent ev evs = snocSmallArray evs ev
+
+-- A frame holds a few keys and drops, so each append copies.
+snocSmallArray :: SmallArray a -> a -> SmallArray a
+snocSmallArray xs x = runSmallArray $ do
+  let n = sizeofSmallArray xs
+  out <- newSmallArray (n + 1) x
+  copySmallArray out 0 xs 0 n
+  pure out
 
 -- | Mouse buttons tracked by 'Input'.
 data MouseButton = MouseLeft | MouseRight
@@ -177,26 +190,26 @@ applyMouseButton MouseRight True inp = inp {inputMouseRightDown = True, inputMou
 applyMouseButton MouseRight False inp = inp {inputMouseRightDown = False, inputMouseRightReleased = True}
 
 {-# INLINE inputKeysFromList #-}
-inputKeysFromList :: [Key] -> Vector Key
-inputKeysFromList = V.fromList
+inputKeysFromList :: [Key] -> SmallArray Key
+inputKeysFromList = smallArrayFromList
 
-emptyInputKeys :: Vector Key
-emptyInputKeys = V.empty
+emptyInputKeys :: SmallArray Key
+emptyInputKeys = emptySmallArray
 
-emptyDropEvents :: Vector DropEvent
-emptyDropEvents = V.empty
+emptyDropEvents :: SmallArray DropEvent
+emptyDropEvents = emptySmallArray
 
 {-# INLINE inputKeysNull #-}
-inputKeysNull :: Vector Key -> Bool
-inputKeysNull = V.null
+inputKeysNull :: SmallArray Key -> Bool
+inputKeysNull ks = sizeofSmallArray ks == 0
 
 {-# INLINE inputKeysElem #-}
-inputKeysElem :: Key -> Vector Key -> Bool
-inputKeysElem = V.elem
+inputKeysElem :: Key -> SmallArray Key -> Bool
+inputKeysElem = elem
 
 {-# INLINE foldInputKeys #-}
-foldInputKeys :: (a -> Key -> a) -> a -> Vector Key -> a
-foldInputKeys = V.foldl'
+foldInputKeys :: (a -> Key -> a) -> a -> SmallArray Key -> a
+foldInputKeys = foldl'
 
 -- Buttons, keys, scroll, resize. Mouse motion alone does not count.
 inputInteracted :: Input -> Input -> Bool

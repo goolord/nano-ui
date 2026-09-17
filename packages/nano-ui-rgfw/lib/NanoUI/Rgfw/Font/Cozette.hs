@@ -31,6 +31,8 @@ import Data.FileEmbed (embedFileRelative)
 import Data.Primitive.PrimArray
   ( PrimArray
   , indexPrimArray
+  , primArrayFromList
+  , sizeofPrimArray
   , newPrimArray
   , unsafeFreezePrimArray
   , writePrimArray
@@ -38,7 +40,6 @@ import Data.Primitive.PrimArray
 import Data.Primitive.Types (Prim)
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified Data.Vector.Unboxed as U
 import Data.Word (Word16, Word32, Word8)
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (peekElemOff, pokeElemOff)
@@ -62,7 +63,7 @@ cozetteGlyphHeight = 13
 
 data CozetteFont = CozetteFont
   { cfNumGlyphs   :: {-# UNPACK #-} !Int
-  , cfGroups      :: !(U.Vector (Word32, Word32, Word32)) -- start, end, glyph
+  , cfGroups      :: !(PrimArray Word32) -- start, end, glyph: three a group
   , cfGlyphData   :: !(PrimArray Word8)  -- 921 * 12 bytes of packed 7x13 bitmap bits
   , cfGlyphData1x :: !(PrimArray Word8)  -- 921 * 13 bytes of row-unpacked Word8s (1 byte per row)
   , cfGlyphData2x :: !(PrimArray Word16) -- 921 * 26 Word16s (14 bits per row, 26 rows per glyph)
@@ -160,7 +161,7 @@ parseCozette bs = runST $ do
   frozen1xRows <- build1xRowGlyphs numGlyphs frozen1x
   frozen2x <- buildEpxTable numGlyphs 7 13 15 (getGlyphBit1x frozen1x)
   frozen4x <- buildEpxTable numGlyphs 14 26 31 (getGlyphBit2x frozen2x)
-  pure $ CozetteFont numGlyphs (U.fromList groups) frozen1x frozen1xRows frozen2x frozen4x
+  pure $ CozetteFont numGlyphs (primArrayFromList (concat [[start, end, glyph] | (start, end, glyph) <- groups])) frozen1x frozen1xRows frozen2x frozen4x
 
 -- | Build unpacked 1x glyphs: 13 bytes per glyph (1 byte per row, bit (7 - c) for col c).
 build1xRowGlyphs :: Int -> PrimArray Word8 -> ST s (PrimArray Word8)
@@ -289,13 +290,15 @@ charToGlyphId font c =
           0xf096 -> 1  -- FontAwesome square (\xf096) -> ' '
           _      -> binarySearch (cfGroups font) cp
   where
-    binarySearch grps cp = go 0 (U.length grps - 1)
+    binarySearch grps cp = go 0 (sizeofPrimArray grps `div` 3 - 1)
       where
         go !lo !hi
           | lo > hi = 0
           | otherwise =
               let !mid = (lo + hi) `div` 2
-                  (!start, !end, !glyph) = grps U.! mid
+                  !start = indexPrimArray grps (mid * 3)
+                  !end = indexPrimArray grps (mid * 3 + 1)
+                  !glyph = indexPrimArray grps (mid * 3 + 2)
                in if cp < start
                     then go lo (mid - 1)
                     else if cp > end

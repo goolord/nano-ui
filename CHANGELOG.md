@@ -77,6 +77,23 @@
   `styled (panelStyle (background bg . borderColor border))` around a panel.
   `callout` tints the theme's panel colour instead of a fixed dark grey.
 - `uiTheme` returns the theme of the enclosing `styled` scope.
+- Draw ops are a `SmallArray DrawOp` from `primitive` instead of a boxed
+  `Vector`: `DrawingBuild`, `CustomDrawBuild`, `runCanvas`, `drawing`,
+  `drawingVersioned`, `emitDrawOps`, and in nano-ui-diagrams `diagramOps`,
+  `diagramTextOps`, `diagramFrame` and `labelFitScale`. Build them with
+  `smallArrayFromList`; the arrays are `Foldable`, `Eq` and a `Semigroup`.
+- `inputKeys` and `inputDrops` are `SmallArray`s. `appendDropEvent` adds a
+  drop the way `appendInputKey` adds a key.
+- `CategoryY` holds its labels and values apart, as
+  `CategoryY (SmallArray Text) (PrimArray Double)`. `bar` and `barVec` build
+  it as before.
+- Tree rows, table column metrics and sizes, the SVG rasterizer's buffers,
+  polygon triangulation and stroking, and the Cozette glyph table use
+  `primitive` arrays. Stroking a 10,000-point line allocates 2.0 MB instead
+  of 4.7 MB and takes about 0.34 ms instead of 0.59 ms; a 50-row tree frame
+  allocates 213 KB instead of 275 KB. Plot series stay unboxed vectors, since
+  they come from users and a visible range will be sliced out of them.
+  nano-ui-sdl and nano-ui-rgfw no longer depend on `vector`.
 - A custom widget with a measure hook and a fit height is measured again at
   the width layout gives it, as wrapped labels are, so its height can follow
   its width.

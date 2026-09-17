@@ -72,8 +72,7 @@ import Data.IORef (readIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Vector (Vector)
-import Data.Vector qualified as V
+import Data.Primitive.SmallArray (SmallArray, emptySmallArray, smallArrayFromList)
 import Effectful (Eff, type (:>))
 import NanoUI.Context
   ( Context (..)
@@ -179,11 +178,11 @@ instance Monad CanvasM where
   CanvasM m >>= f = CanvasM $ \s ->
     case m s of (a, s') -> runCanvasM (f a) s'
 
--- | Compile a 'CanvasM' block into an immutable 'Vector DrawOp'.
-runCanvas :: CanvasM a -> Vector DrawOp
+-- | Compile a 'CanvasM' block into an immutable 'SmallArray DrawOp'.
+runCanvas :: CanvasM a -> SmallArray DrawOp
 runCanvas (CanvasM m) =
   let (_, diff) = m id
-   in V.fromList (diff [])
+   in smallArrayFromList (diff [])
 
 emitOp :: DrawOp -> CanvasM ()
 emitOp op = CanvasM $ \diff -> ((), diff . (op :))
@@ -284,7 +283,7 @@ defaultCustomWidgetSpec :: CustomWidgetSpec ()
 defaultCustomWidgetSpec = CustomWidgetSpec
   { widgetLayout     = defaultLayout
   , widgetMeasure    = Nothing
-  , widgetDraw       = \_ _ -> V.empty
+  , widgetDraw       = \_ _ -> emptySmallArray
   , widgetContent    = 0
   , widgetCursor     = Nothing
   , widgetFocusable  = False

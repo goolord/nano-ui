@@ -24,7 +24,6 @@ import Data.Primitive.SmallArray (SmallArray, indexSmallArray, smallArrayFromLis
 import Data.String (IsString (..))
 import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Vector qualified as V
 import Effectful (Eff, type (:>))
 import NanoUI.Context
   ( Context (..)
@@ -212,7 +211,7 @@ richTextWith' f pieces = do
       -- Words are drawn one by one, so a decoration is drawn once across a
       -- piece's words on a line and the spaces between them.
       draw _cdc (Rect x0 y0 w _) =
-        V.fromList $
+        smallArrayFromList $
           concat
             [ [ DrawTextStyled (x0 + x) (lineY line run) ((runFont run) {textFontDecoration = DecorationNone}) txt (runColor run)
               | (x, Token txt runIdx Word _) <- lineTokens line

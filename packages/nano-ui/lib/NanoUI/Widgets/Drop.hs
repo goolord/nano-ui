@@ -18,7 +18,7 @@ module NanoUI.Widgets.Drop
 import Control.Monad (when)
 import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
-import Data.Vector qualified as V
+import Data.Foldable (toList)
 import Effectful (Eff, type (:>))
 import NanoUI.Context
   ( getStore
@@ -80,10 +80,10 @@ useDrop bounds = do
   store <- uiIO (getStore ctx)
   let active0 = IM.findWithDefault 0 activeK (storeInt store) /= 0
       lastPos0 = fmap (\(x, y) -> V2 x y) (IM.lookup posK (storePoint store))
-      events = inputDrops inp
+      events = toList (inputDrops inp)
       -- A drag is active from 'DropBegin' until 'DropComplete'.
       active1 =
-        V.foldl'
+        foldl'
           ( \active ev -> case dropEventType ev of
               DropBegin -> True
               DropComplete -> False
@@ -96,7 +96,7 @@ useDrop bounds = do
       -- payload is attributed to the position at that point in the sequence,
       -- not to the frame's final position.
       positions =
-        V.postscanl'
+        drop 1 $ scanl
           ( \pos ev -> case dropEventType ev of
               DropPosition -> maybe pos Just (dropEventPos ev)
               DropComplete -> Nothing
@@ -104,13 +104,9 @@ useDrop bounds = do
           )
           lastPos0
           events
-      lastPos1 = if V.null positions then lastPos0 else V.last positions
+      lastPos1 = last (lastPos0 : positions)
       payloads ty =
-        V.toList
-          ( V.map
-              (dropEventData . fst)
-              (V.filter (\(ev, pos) -> dropEventType ev == ty && posInside bounds pos) (V.zip events positions))
-          )
+        [dropEventData ev | (ev, pos) <- zip events positions, dropEventType ev == ty, posInside bounds pos]
       files = payloads DropFile
       texts = payloads DropText
       hovered = active1 && posInside bounds lastPos1

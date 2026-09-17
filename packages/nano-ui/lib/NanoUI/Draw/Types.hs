@@ -29,7 +29,7 @@ import Data.IORef (IORef)
 import Data.Primitive.PrimArray (MutablePrimArray, PrimArray, indexPrimArray, sizeofPrimArray)
 import Data.Primitive.Types (Prim (..), defaultSetByteArray#, defaultSetOffAddr#)
 import qualified Data.Text as T
-import Data.Vector (Vector)
+import Data.Primitive.SmallArray (SmallArray)
 import Data.Word (Word32, Word8)
 import Foreign.ForeignPtr (ForeignPtr)
 import Foreign.Ptr (Ptr)
@@ -173,7 +173,7 @@ shiftDrawOp dx dy op =
     DrawText x y ax ay t c -> DrawText (x + dx) (y + dy) ax ay t c
     DrawTextStyled x y font t c -> DrawTextStyled (x + dx) (y + dy) font t c
 
-type DrawingBuild = Rect -> Vector DrawOp
+type DrawingBuild = Rect -> SmallArray DrawOp
 
 data DrawCmd = DrawCmd
   { cmdClipX :: {-# UNPACK #-} !Float

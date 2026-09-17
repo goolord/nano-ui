@@ -7,6 +7,7 @@ import Data.IORef (readIORef)
 import Data.List (tails)
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text qualified as T
+import Data.Primitive.SmallArray (SmallArray, emptySmallArray)
 import Data.Vector qualified as V
 import Diagrams.Prelude
   ( Diagram
@@ -118,10 +119,10 @@ testTextOnlyRendering fm = do
     let
       full = diagramOps w h d
       labels = diagramTextOps w h d
-    unless (labels == V.filter isText full) $
+    unless (toList labels == filter isText (toList full)) $
       fail "text-only rendering differs from the full render's text"
     unless
-      (w <= 0 || h <= 0 || (not (V.null labels) && V.length labels < V.length full)) $
+      (w <= 0 || h <= 0 || (not (null labels) && length labels < length full)) $
       fail "text-only rendering did not separate chart labels from geometry"
 
 testChartCache :: IO ()
@@ -280,7 +281,7 @@ testLttb = do
   unless (V.length out == 500) $
     fail "LTTB did not downsample to target count"
   let
-    ys = V.toList (V.map snd out)
+    ys = toList (V.map snd out)
   unless (minimum ys < -0.5 && maximum ys > 0.5) $
     fail "LTTB lost waveform extrema"
   let
@@ -335,8 +336,8 @@ testLabelFit fm = do
     ops =
       case (layoutWidth fitted, layoutHeight fitted) of
         (Fixed bw, Fixed bh) -> diagramOps (realToFrac bw) (realToFrac bh) dump
-        _ -> V.empty
-    texts = [(x, y, ax, ay, t) | DrawText x y ax ay t _ <- V.toList ops]
+        _ -> emptySmallArray
+    texts = [(x, y, ax, ay, t) | DrawText x y ax ay t _ <- toList ops]
     xs = [x | (x, _, _, _, _) <- texts]
     boxes = [drawTextBox fm x y ax ay t | (x, y, ax, ay, t) <- texts]
   unless (length xs >= 3 && maximum xs - minimum xs > 20) $
@@ -361,7 +362,7 @@ testLabelFit fm = do
     overlapTitleTick chart w h drawOps =
       let
         ts =
-          [(drawTextBox fm x y ax ay t, t) | DrawText x y ax ay t _ <- V.toList drawOps]
+          [(drawTextBox fm x y ax ay t, t) | DrawText x y ax ay t _ <- toList drawOps]
         titles =
           [ b
           | (b@(Rect bx by _ _), t) <- ts
@@ -375,7 +376,7 @@ testLabelFit fm = do
       let
         names = map seriesName (chartSeries chart)
         ts =
-          [(drawTextBox fm x y ax ay t, t) | DrawText x y ax ay t _ <- V.toList drawOps]
+          [(drawTextBox fm x y ax ay t, t) | DrawText x y ax ay t _ <- toList drawOps]
         legends =
           [ b
           | (b@(Rect bx by _ _), t) <- ts
@@ -453,7 +454,7 @@ testLegendColors fm = do
     fallback = themeSeries defaultTheme !! 1
   forM_ [LegendNone, LegendRight, LegendBottom, LegendTop, LegendInside] $ \position -> do
     let
-      ops = V.toList (diagramOps 400 280 (chartDia fm chart {chartLegend = position}))
+      ops = toList (diagramOps 400 280 (chartDia fm chart {chartLegend = position}))
       labels =
         [text | DrawText _ _ _ _ text _ <- ops, text == "custom" || text == "default"]
       colors = [color | FillTriangle _ _ _ _ _ _ color <- ops]
@@ -467,8 +468,8 @@ testLegendColors fm = do
         unless (custom `elem` colors && fallback `elem` colors) $
           fail "legend colors differ from series colors"
 
-fillTriCount :: V.Vector DrawOp -> Int
-fillTriCount ops = length [() | FillTriangle {} <- V.toList ops]
+fillTriCount :: SmallArray DrawOp -> Int
+fillTriCount ops = length [() | FillTriangle {} <- toList ops]
 
 testClosedSeriesFills :: FontMetrics -> IO ()
 testClosedSeriesFills fm = do
@@ -481,7 +482,7 @@ testClosedSeriesFills fm = do
     ink = fromMaybe (themeRed defaultTheme) (listToMaybe (themeSeries defaultTheme))
     inkXs =
       [ x
-      | FillTriangle x0 _ x1 _ x2 _ c <- V.toList crossOps
+      | FillTriangle x0 _ x1 _ x2 _ c <- toList crossOps
       , c == ink
       , x <- [x0, x1, x2]
       ]

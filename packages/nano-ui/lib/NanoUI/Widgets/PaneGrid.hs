@@ -34,7 +34,7 @@ import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Ord (comparing)
 import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Vector (Vector)
+import Data.Primitive.SmallArray (SmallArray)
 import Data.Word (Word64)
 import Effectful (Eff, type (:>))
 import NanoUI.Context
@@ -643,7 +643,7 @@ dividerWidget env axis = do
       AxisV -> sizingLay (Fixed (geGutter env)) (Grow 1)
       AxisH -> sizingLay (Grow 1) (Fixed (geGutter env))
 
-drawDivider :: CustomDrawContext -> Rect -> GridAxis -> Float -> Float -> Vector DrawOp
+drawDivider :: CustomDrawContext -> Rect -> GridAxis -> Float -> Float -> SmallArray DrawOp
 drawDivider cdc rect axis thickness leeway =
   runCanvas $ do
     let theme = cdcTheme cdc
@@ -691,7 +691,7 @@ drawDragOverlay env wid rendered ghost zone = do
 
 -- | A compact, translucent drag indicator leaves the full-size drop preview
 -- visible. The indicator is offset from the pointer so it cannot obscure aim.
-drawOverlay :: Theme -> Text -> Maybe Rect -> Maybe Rect -> Vector DrawOp
+drawOverlay :: Theme -> Text -> Maybe Rect -> Maybe Rect -> SmallArray DrawOp
 drawOverlay theme title ghost zone =
   runCanvas $ do
     let accent = themeAccent theme

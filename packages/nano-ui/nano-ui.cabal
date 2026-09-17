@@ -246,8 +246,7 @@ test-suite nano-ui-test
         nano-ui,
         nothunks,
         primitive ^>=0.9,
-        text ^>=2.1,
-        vector ^>=0.13
+        text ^>=2.1
     hs-source-dirs:   test/integration
 
 executable nano-ui-profile
@@ -260,8 +259,8 @@ executable nano-ui-profile
     build-depends:
         base ^>=4.22.0.0,
         nano-ui,
-        text ^>=2.1,
-        vector ^>=0.13
+        primitive ^>=0.9,
+        text ^>=2.1
 
 -- Compile-time verification of optimization invariants (inspection-testing).
 -- Assertions fail the build if GHC stops inlining or starts allocating in the

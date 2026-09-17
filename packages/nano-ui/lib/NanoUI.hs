@@ -634,6 +634,7 @@ module NanoUI
   , inputInteracted
   , inputPointerHeld
   , appendInputKey
+  , appendDropEvent
   , emptyInputKeys
   , inputKeysElem
   , inputKeysFromList
@@ -769,6 +770,7 @@ import NanoUI.Input
   , Key (..)
   , Modifiers (..)
   , appendInputKey
+  , appendDropEvent
   , emptyDropEvents
   , emptyInput
   , emptyInputKeys

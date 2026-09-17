@@ -9,7 +9,7 @@ import Data.IORef (writeIORef)
 import Data.Foldable (fold, toList)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
-import qualified Data.Vector as V
+import Data.Primitive.SmallArray (SmallArray, indexSmallArray, mapSmallArray', sizeofSmallArray, smallArrayFromList)
 import Effectful (Eff, type (:>))
 import qualified Data.IntSet as IS
 import NanoUI.Context (Context (..), adoptStoreInt, getFocusId, intKey, recordStoreInt, registerFocusable)
@@ -43,8 +43,8 @@ forestSize = foldl' (\acc x -> acc + subtreeSize x) 0
 -- | Visible rows in pre-order, skipping the children of collapsed nodes. One
 -- pass: rows come out in order, and a subtree hands the next pre-order index
 -- to the continuation that lists its later siblings.
-visibleRows :: IS.IntSet -> [TreeItem] -> V.Vector TreeRow
-visibleRows expanded items = V.fromList (go 0 0 items (const []))
+visibleRows :: IS.IntSet -> [TreeItem] -> SmallArray TreeRow
+visibleRows expanded items = smallArrayFromList (go 0 0 items (const []))
   where
     go !idx !_ [] k = k idx
     go !idx !depth (item@(TreeItem lbl kids) : rest) k =
@@ -66,29 +66,29 @@ parentIndices items = snd (go 0 items IS.empty)
 
 treeKeyNav ::
   KeyNav ->
-  V.Vector TreeRow ->
-  V.Vector Response ->
+  SmallArray TreeRow ->
+  SmallArray Response ->
   WidgetId ->
   Int ->
   IS.IntSet ->
   (Int, IS.IntSet, Maybe WidgetId)
 treeKeyNav nav rows resps focus selected expanded
   | hashWidgetId focus == 0 || not moving = (selected, expanded, Nothing)
-  | otherwise = case V.findIndex ((== focus) . rawRespId) resps of
-      Just pos -> step pos (rows V.! pos)
-      Nothing -> (selected, expanded, Nothing)
+  | otherwise = case [pos | pos <- [0 .. n - 1], widAt pos == focus] of
+      pos : _ -> step pos (indexSmallArray rows pos)
+      [] -> (selected, expanded, Nothing)
  where
   moving = knUp nav || knDown nav || knLeft nav || knRight nav || knEnter nav || knSpace nav
-  n = V.length rows
-  widAt i = rawRespId (resps V.! i)
-  idxAt i = let (idx, _, _, _) = rows V.! i in idx
+  n = sizeofSmallArray rows
+  widAt i = rawRespId (indexSmallArray resps i)
+  idxAt i = let (idx, _, _, _) = indexSmallArray rows i in idx
   wantToggle = knEnter nav || knSpace nav
   parentPosition pos depth = go (pos - 1)
     where
       go i
         | i < 0 = Nothing
         | otherwise =
-            let (_, d, _, _) = rows V.! i
+            let (_, d, _, _) = indexSmallArray rows i
              in if d < depth then Just i else go (i - 1)
   step pos (nodeIdx, depth, hasKids, _)
     | knDown nav, pos + 1 < n = let p = pos + 1 in (idxAt p, expanded, Just (widAt p))
@@ -150,10 +150,12 @@ tree' key inputItems index =
     let rows = visibleRows expandedSet items
     columnWith (tight . gap 0 . fillW) $ do
       tagContainer groupId
-      results <- V.imapM (\rowIdx row@(i, _, _, _) -> withKey i (treeRow rowIdx row selected expandedSet)) rows
-      let resps = V.map (\(r, _, _) -> r) results
-          afterClickSel = fromMaybe selected (V.foldr (\(_, idx, _) rest -> idx <|> rest) Nothing results)
-          afterClickExp = fromMaybe expandedSet (V.foldr (\(_, _, s) rest -> s <|> rest) Nothing results)
+      results <-
+        smallArrayFromList
+          <$> sequence [withKey i (treeRow rowIdx row selected expandedSet) | rowIdx <- [0 .. sizeofSmallArray rows - 1], let row@(i, _, _, _) = indexSmallArray rows rowIdx]
+      let resps = mapSmallArray' (\(r, _, _) -> r) results
+          afterClickSel = fromMaybe selected (foldr (\(_, idx, _) rest -> idx <|> rest) Nothing results)
+          afterClickExp = fromMaybe expandedSet (foldr (\(_, _, s) rest -> s <|> rest) Nothing results)
       focus <- uiIO (getFocusId ctx)
       nav <- useKeyNav focus
       let (keySel, keyExp, mFocus) = treeKeyNav nav rows resps focus afterClickSel afterClickExp

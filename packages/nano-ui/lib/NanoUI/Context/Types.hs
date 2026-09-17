@@ -55,11 +55,10 @@ import Data.IntSet (IntSet)
 import Data.IntSet qualified as IS
 import Data.Map.Strict (Map)
 import Data.Primitive.PrimArray (MutablePrimArray)
-import Data.Primitive.SmallArray (SmallMutableArray)
+import Data.Primitive.SmallArray (SmallArray, SmallMutableArray)
 import Data.Word (Word64)
 import Data.Text (Text)
 import Data.Typeable (TypeRep, Typeable, cast)
-import Data.Vector (Vector)
 import GHC.Exts (RealWorld)
 
 import NanoUI.Animation (Animation)
@@ -372,7 +371,7 @@ data CustomDrawContext = CustomDrawContext
   , cdcFont     :: !FontMetrics
   }
 
-type CustomDrawBuild = CustomDrawContext -> Rect -> Vector DrawOp
+type CustomDrawBuild = CustomDrawContext -> Rect -> SmallArray DrawOp
 
 -- | A registered custom drawing: its content key plus the op builder. A
 -- non-zero key is the author's promise that the ops follow it, so a frame
@@ -414,7 +413,7 @@ data PopupConfig = PopupConfig
 data DrawOpCacheEntry = DrawOpCacheEntry
   { doeContent :: {-# UNPACK #-} !Int
   , doeBounds :: !Rect
-  , doeOps :: !(Vector DrawOp)
+  , doeOps :: !(SmallArray DrawOp)
   }
 
 -- | Strict cache entry for a custom drawing's compiled draw ops. Every input
@@ -429,7 +428,7 @@ data CustomDrawOpCacheEntry = CustomDrawOpCacheEntry
   , cdeFocused :: {-# UNPACK #-} !Bool
   , cdeDisabled :: {-# UNPACK #-} !Bool
   , cdeGen :: {-# UNPACK #-} !Int
-  , cdeOps :: !(Vector DrawOp)
+  , cdeOps :: !(SmallArray DrawOp)
   }
 
 initialDrawingCacheState :: DrawingCacheState

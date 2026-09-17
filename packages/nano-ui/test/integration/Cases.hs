@@ -70,7 +70,6 @@ import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.IntMap.Strict qualified as IM
 import Data.Map.Strict qualified as M
 import Data.Text qualified as T
-import Data.Vector qualified as V
 import Data.Word (Word64)
 import Effectful (liftIO)
 import Effectful.State.Static.Local (State, evalState, get, modify)
@@ -206,7 +205,7 @@ runDrawingTest :: Context -> IORef Int -> IO ()
 runDrawingTest ctx failed = do
   let ui =
         drawing (fixedWH 80 40) $ \r ->
-          V.singleton
+          pure
             ( Stroke
                 (rectX r)
                 (rectY r + rectH r * 0.5)
