@@ -45,6 +45,7 @@ import NanoUI.Context
   , registerFocusable
   , setStore
   , setTextInputDrag
+  , modifyStore
   )
 import NanoUI.Font (fmLineHeight)
 import NanoUI.Id (WidgetId)
@@ -320,18 +321,19 @@ textAreaWith' f value = do
         when changed $
           uiIO $ do
             damageWidget ctx wid DamageSelf
-            st <- saveTextAreaState key newText newState <$> getStore ctx
-            setStore ctx st
-              { storeText = IM.insert seenKey newText (storeText st)
-              , storeInt = IM.delete changedSlotKey (storeInt st)
-              , storeFloat = IM.delete contentCacheKey (storeFloat st)
-              }
+            modifyStore ctx $ \st0 ->
+              let st = saveTextAreaState key newText newState st0
+               in st
+                    { storeText = IM.insert seenKey newText (storeText st)
+                    , storeInt = IM.delete changedSlotKey (storeInt st)
+                    , storeFloat = IM.delete contentCacheKey (storeFloat st)
+                    }
         pure (newText, changed)
       else do
         -- A command run on the unfocused area ('applyTextAreaCommand') still
         -- pulses this frame's respChanged, once.
         when menuPulse $
-          uiIO $ getStore ctx >>= \st -> setStore ctx st {storeInt = IM.delete changedSlotKey (storeInt st)}
+          uiIO $ modifyStore ctx $ \st -> st {storeInt = IM.delete changedSlotKey (storeInt st)}
         pure (current, menuPulse)
   resp <- addWidget wid NodeTextArea "" 0 layout
   pure (setChanged stateChanged resp, newText)

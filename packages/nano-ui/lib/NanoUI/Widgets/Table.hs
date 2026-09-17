@@ -40,7 +40,7 @@ import Data.Primitive.Types (Prim)
 import Data.Vector qualified as V
 import Effectful (Eff, type (:>))
 import qualified Data.IntMap.Strict as IM
-import NanoUI.Context (Context (..), getPrevRect, getScrollOffset2D, getStore, intKey, linkScrollAxes, setStore)
+import NanoUI.Context (Context (..), getPrevRect, getScrollOffset2D, getStore, intKey, linkScrollAxes, setStore, modifyStore)
 import NanoUI.Hooks (useInt)
 import NanoUI.Font (ScrollBarSlot (..), scrollBarGutter, tableCellInset, lineWidthIO)
 import NanoUI.Input (Input (..), inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased)
@@ -336,9 +336,8 @@ tableConfigured cfg f key cols inputRows curSort =
             | inputMouseDown inp ->
                 setAt c (max (colFloor sizes contentWs c) (dragW0 + mx - dragX0)) widths0
           _ -> widths0
-    when (widths1 /= widths0) $ uiIO $ do
-      st <- getStore ctx
-      setStore ctx (st {storeFloatList = IM.insert stateKey widths1 (storeFloatList st)})
+    when (widths1 /= widths0) $ uiIO $
+      modifyStore ctx (\st -> st {storeFloatList = IM.insert stateKey widths1 (storeFloatList st)})
     let hasStretch = tableStretchN n (tableColSizes cfg)
         indexedWidths = primArrayFromList widths1
         vis = filter (`IS.notMember` hidden0) order0

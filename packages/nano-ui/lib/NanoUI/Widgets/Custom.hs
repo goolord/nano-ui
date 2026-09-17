@@ -93,10 +93,10 @@ import NanoUI.Context
   , registerCustomDrawing
   , registerCustomMeasure
   , registerFocusable
-  , setStore
   , writeStoreBool
   , writeStoreFloat
   , widgetTheme
+  , modifyStore
   )
 import NanoUI.Draw (DrawOp (..))
 import NanoUI.Font (FontMetrics)
@@ -408,7 +408,7 @@ useDrag2D bounds = do
           (clamp (rectY bounds) (rectY bounds + rectH bounds) (v2Y mouse))
   when (active || active0) $
     uiIO $
-      getStore ctx >>= \st -> setStore ctx $
+      modifyStore ctx $ \st ->
         if active
           then
             st

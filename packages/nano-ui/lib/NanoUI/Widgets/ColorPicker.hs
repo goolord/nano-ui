@@ -38,6 +38,7 @@ import NanoUI.Context
   , setStore
   , getsOverlay
   , OverlayState (..)
+  , modifyStore
   )
 import NanoUI.Draw
   ( DrawArena
@@ -486,7 +487,7 @@ colorPickerWith showAlpha value = do
     key = intKey wid
     pct = 100 / (if showAlpha then 4 else 3)
     readColor = (\st -> widgetStoreColor st wid value) <$> uiIO (getStore ctx)
-    writePicker col hue sv = uiIO (getStore ctx >>= setStore ctx . putColorState key col hue sv)
+    writePicker col hue sv = uiIO (modifyStore ctx (putColorState key col hue sv))
     writeColor col =
       let (h, s, v) = rgbToHsv col
        in writePicker col (clamp 0 360 h) (s, v)
@@ -609,7 +610,7 @@ colorPickerCanvas parts initial svResp hueResp alphaResp = do
   when ((not dragging || blocked) && isActive) $
     uiIO $ writeIORef (ctxActiveId ctx) (WidgetId 0)
   when (dragging && (dragged /= current0 || nextHue /= h0 || nextS /= s0 || nextV /= v0)) $
-    uiIO $ getStore ctx >>= setStore ctx . putColorState (intKey wid) dragged nextHue (nextS, nextV)
+    uiIO $ modifyStore ctx (putColorState (intKey wid) dragged nextHue (nextS, nextV))
   svFocus <- keyboardFocused wid
   hueFocus <- keyboardFocused (ppHue parts)
   alphaFocus <- if showAlpha then keyboardFocused (ppAlpha parts) else pure False

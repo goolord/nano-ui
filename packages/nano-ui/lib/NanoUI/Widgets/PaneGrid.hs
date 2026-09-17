@@ -30,7 +30,7 @@ import Data.IntMap.Strict qualified as IM
 import Data.List (find, minimumBy)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
-import Data.Maybe (fromMaybe, listToMaybe)
+import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Ord (comparing)
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -53,6 +53,7 @@ import NanoUI.Context
   , registerCustomDrawing
   , registerFocusable
   , setStore
+  , modifyStore
   )
 import NanoUI.Draw (DrawOp)
 import NanoUI.Input
@@ -797,22 +798,31 @@ runGestures env dividers rendered dgi = do
           , maybe False (`rectHit` mouse) (pvDragPick v)
               || (pvDraggable v && maybe False (`rectHit` mouse) (M.lookup p regions))
           ]
+      gestK = slotKey SlotPaneGest (geKey env)
+      grabK = slotKey SlotPaneGrab (geKey env)
   menu <- uiIO (getMenuPointerGesture ctx)
+  -- A press arms the gesture slot (negative split id for a resize, pane id
+  -- for a drag) together with its start state in one store write. The resize
+  -- start keeps the divider's ratio and the pointer's main-axis coordinate so
+  -- drag frames move the divider by delta instead of snapping it to the
+  -- pointer; the drag start keeps the title and the grab offset (mouse - pane
+  -- origin) for the drag threshold.
   when (press && not busy && not menu && not (any rpControlHit rendered)) $ do
     case hitDiv of
-      Just d -> do
-        writeGest env (negate (fromIntegral (diSplitId d)))
-        writeResizeStart env d mouse
+      Just d ->
+        storeWrite env True $ \st -> st
+          { storeInt = IM.insert gestK (negate (fromIntegral (diSplitId d))) (storeInt st)
+          , storePoint = IM.insert (slotKey SlotPaneResize (geKey env)) (diRatio d, mouseMain d mouse) (storePoint st)
+          }
       Nothing ->
         forM_ pickHit $ \pid -> do
           let title = maybe "" (pvTitle . rpView) (find ((== pid) . rpPaneId) rendered)
-          storeWrite env False $ \st -> st
-            { storeDyn = IM.insert (slotKey SlotPaneGrab (geKey env)) (toDyn title) (storeDyn st)
-            , storeInt = IM.delete (slotKey SlotPaneGrab (geKey env)) (storeInt st)
+              (gx, gy) = maybe (0, 0) (\(Rect px py _ _) -> (v2X mouse - px, v2Y mouse - py)) (M.lookup pid regions)
+          storeWrite env True $ \st -> st
+            { storeDyn = IM.insert grabK (toDyn title) (storeDyn st)
+            , storeInt = IM.insert gestK (fromIntegral pid) (IM.delete grabK (storeInt st))
+            , storePoint = IM.insert grabK (gx, gy) (storePoint st)
             }
-          writeGest env (fromIntegral pid)
-          writeGrab env $
-            maybe (V2 0 0) (\(Rect px py _ _) -> V2 (v2X mouse - px) (v2Y mouse - py)) (M.lookup pid regions)
   when (drag0 < 0 && down) $ do
     let sid = fromIntegral (negate drag0)
     forM_ (find ((== sid) . diSplitId) dividers) $ \d -> do
@@ -835,15 +845,24 @@ runGestures env dividers rendered dgi = do
   when (drag0 > 0 && down) $ uiIO (markDirty ctx)
   when (drag0 > 0 && down && dgiMoved dgi) $
     storeWrite env False $ \st -> st {storeInt = IM.insert (slotKey SlotPaneGrab (geKey env)) 1 (storeInt st)}
+  -- A drop clears the gesture and, when it moved the pane, stores the new
+  -- tree, seed and focus in the same write.
   when (drag0 > 0 && not down) $ do
     let moved = fromIntegral drag0
-    when (dgiMoved dgi) $
-      forM_ (dgiZone dgi) $ \(_, dt) ->
-        forM_ (treeMovePane moved (geSeed env) dt (geTree env)) $ \t' -> do
-          putSeed env (geSeed env + 1)
-          putTree env (Just t')
-          putPaneSlot False SlotPaneFocus env moved
-    writeGest env 0
+        dropped
+          | dgiMoved dgi = dgiZone dgi >>= \(_, dt) -> treeMovePane moved (geSeed env) dt (geTree env)
+          | otherwise = Nothing
+    storeWrite env True $ \st -> case dropped of
+      Nothing -> st {storeInt = IM.delete gestK (storeInt st)}
+      Just t' ->
+        st
+          { storeDyn = IM.insert (geKey env) (toDyn t') (storeDyn st)
+          , storeInt =
+              IM.insert (slotKey SlotPaneNext (geKey env)) (fromIntegral (geSeed env + 1)) $
+                IM.insert (slotKey SlotPaneFocus (geKey env)) (fromIntegral moved) $
+                  IM.delete gestK (storeInt st)
+          }
+    when (isJust dropped) (markChanged env)
 
 mouseMain :: DividerInfo -> V2 -> Float
 mouseMain d mouse = case diAxis d of
@@ -931,10 +950,8 @@ storeWrite ::
   Bool ->
   (WidgetStore -> WidgetStore) ->
   Eff es ()
-storeWrite env mirror f = uiIO $ do
-  let ctx = geCtx env
-  st <- getStore ctx
-  setStore ctx ((if mirror then bumpMirror else id) (f st))
+storeWrite env mirror f =
+  uiIO $ modifyStore (geCtx env) ((if mirror then bumpMirror else id) . f)
 
 -- | Flag 'pgrChanged' for this frame.
 markChanged :: (Ui :> es) => GridEnv es -> Eff es ()
@@ -963,21 +980,6 @@ writeGest env n =
             then IM.delete (slotKey SlotPaneGest (geKey env)) (storeInt st)
             else IM.insert (slotKey SlotPaneGest (geKey env)) n (storeInt st)
       }
-
--- | Grab offset (mouse - pane origin) captured for the drag threshold. The
--- indicator itself uses a small fixed offset from the current pointer.
-writeGrab :: (Ui :> es) => GridEnv es -> V2 -> Eff es ()
-writeGrab env off =
-  storeWrite env False $ \st ->
-    st {storePoint = IM.insert (slotKey SlotPaneGrab (geKey env)) (v2X off, v2Y off) (storePoint st)}
-
--- | Record the divider's ratio and the pointer's main-axis coordinate when a
--- resize starts, so subsequent drag frames move the divider by delta instead of
--- snapping it to the pointer.
-writeResizeStart :: (Ui :> es) => GridEnv es -> DividerInfo -> V2 -> Eff es ()
-writeResizeStart env d mouse =
-  storeWrite env False $ \st ->
-    st {storePoint = IM.insert (slotKey SlotPaneResize (geKey env)) (diRatio d, mouseMain d mouse) (storePoint st)}
 
 -- | Write a pane-id slot (maximized or focused pane) when it differs,
 -- bumping the mirror; @structural@ also flags 'pgrChanged'.

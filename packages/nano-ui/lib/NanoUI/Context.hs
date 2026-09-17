@@ -76,6 +76,7 @@ module NanoUI.Context
   , resetDrawingScopeCache
   , getStore
   , setStore
+  , modifyStore
   , getStoreBool
   , writeStoreInt
   , writeStoreFloat

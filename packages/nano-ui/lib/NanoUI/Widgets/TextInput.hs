@@ -55,6 +55,7 @@ import NanoUI.Context
   , recordStoreText
   , registerFocusable
   , setStore
+  , modifyStore
   )
 import NanoUI.Id (WidgetId)
 import NanoUI.Input
@@ -270,7 +271,7 @@ editTextField wid password initial unfocusedText = do
     s0 = loaded {tisCursor = min len0 (tisCursor loaded), tisAnchor = min len0 (tisAnchor loaded)}
     pulse = IM.member pulseKey (storeInt store)
   when (isNothing stored || IM.lookup modeKey (storeInt store) /= Just (editorModeCode mode) || pulse) $
-    uiIO $ getStore ctx >>= \st -> setStore ctx st
+    uiIO $ modifyStore ctx $ \st -> st
       { storeText = if isNothing stored then IM.insert key initial (storeText st) else storeText st
       , storeInt = IM.delete pulseKey (IM.insert modeKey (editorModeCode mode) (storeInt st))
       }
@@ -280,7 +281,7 @@ editTextField wid password initial unfocusedText = do
         Just ed -> editorTextState ed
         Nothing -> maybe s0 (\t -> s0 {tisText = t}) unfocusedText
   when (s1 /= s0) $
-    uiIO $ getStore ctx >>= setStore ctx . maybe (saveTextInputState key s1) (saveTextEditor key) mEdited
+    uiIO $ modifyStore ctx (maybe (saveTextInputState key s1) (saveTextEditor key) mEdited)
   pure (tisText s0, tisText s1, isFocus, pulse)
 
 -- | Shared single-line field builder. The caller's @value@ is adopted as by
@@ -340,7 +341,7 @@ debounceSearchChanged ctx key focused rawChanged ms = do
         && dirty
         && (T.null fieldText || not focused || idleMs >= deadline)
   when (rawChanged || commit || committedMissing) $
-    getStore ctx >>= \st -> setStore ctx $
+    modifyStore ctx $ \st ->
       st
         { storeText =
             if commit || committedMissing
@@ -438,7 +439,7 @@ selectableTextWith' f txt = do
     mEdited <- uiIO (editTextInput ctx mode inp store key s0)
     let s1 = maybe s0 (clampToText . editorTextState) mEdited
     when (s1 /= s0) $
-      uiIO $ getStore ctx >>= setStore ctx . saveTextInputState key s1
+      uiIO $ modifyStore ctx (saveTextInputState key s1)
   let styleIdx =
         textInputFlagSelectable
           .|. packTextNodeStyleFull

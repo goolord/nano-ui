@@ -21,7 +21,7 @@ import Control.Monad (void, when)
 import Data.IntMap.Strict qualified as IM
 import Data.Text (Text)
 import Effectful (Eff, type (:>))
-import NanoUI.Context (getStore, intKey, setStore)
+import NanoUI.Context (getStore, intKey, modifyStore)
 import NanoUI.Font (menuItemPadX, menuItemRowH, menuMinW, menuOuterPad, menuSepH)
 import NanoUI.Input (inputMousePos, inputMouseReleased)
 import NanoUI.Monad (Ui, askContext, askDefaultLayout, askInput, nextId, uiIO)
@@ -111,12 +111,12 @@ useContextMenu = do
       (px, py) = IM.findWithDefault (0, 0) posK (storePoint store)
       openAt (V2 x y) =
         uiIO $
-          getStore ctx >>= \st -> setStore ctx $
+          modifyStore ctx $ \st ->
             st
               { storeInt = IM.insert openK 1 (storeInt st)
               , storePoint = IM.insert posK (x, y) (storePoint st)
               }
-      close = uiIO $ getStore ctx >>= \st -> setStore ctx $ st {storeInt = IM.delete openK (storeInt st)}
+      close = uiIO $ modifyStore ctx $ \st -> st {storeInt = IM.delete openK (storeInt st)}
   pure (isOpen, V2 px py, openAt, close)
 
 -- | One context-menu row; the whole row is the button.

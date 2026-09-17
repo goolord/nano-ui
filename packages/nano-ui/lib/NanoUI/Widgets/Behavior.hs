@@ -28,9 +28,9 @@ import NanoUI.Context
   , markEscapeConsumed
   , getMenuPointerGesture
   , pointerBlockedByModal
-  , setStore
   , Slot (..)
   , slotKey
+  , modifyStore
   )
 import NanoUI.Id (WidgetId (..), enterKeyed, hashWidgetId, idContextWidgetId)
 import NanoUI.Input
@@ -110,7 +110,7 @@ useDrag1D axis lo hi current track = do
           else current
   when (active /= active0) $
     uiIO $
-      getStore ctx >>= \st -> setStore ctx $
+      modifyStore ctx $ \st ->
         st
           { storeInt =
               if active
@@ -157,7 +157,7 @@ useReorder order items = do
           _ -> order
   when (nextDrag /= from0 || (press && nextDrag >= 0)) $
     uiIO $
-      getStore ctx >>= \st -> setStore ctx $
+      modifyStore ctx $ \st ->
         st
           { storeInt = IM.insert dragK nextDrag (storeInt st)
           , storeFloat =

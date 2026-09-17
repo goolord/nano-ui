@@ -24,7 +24,7 @@ import Effectful (Eff, type (:>))
 import NanoUI.Context
   ( getStore
   , intKey
-  , setStore
+  , modifyStore
   )
 import NanoUI.Input
   ( DropEvent (..)
@@ -112,7 +112,7 @@ useDrop bounds = do
       hovered = active1 && posInside bounds lastPos1
   when (active1 /= active0 || lastPos1 /= lastPos0) $
     uiIO $
-      getStore ctx >>= \st -> setStore ctx $
+      modifyStore ctx $ \st ->
         st
           { storeInt =
               if active1

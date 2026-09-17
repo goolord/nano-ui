@@ -34,6 +34,7 @@ module NanoUI.Context.Core
   -- Store
   , getStore
   , setStore
+  , modifyStore
   , getStoreBool
   , writeStoreInt
   , writeStoreFloat
@@ -237,32 +238,38 @@ getStore :: Context -> IO WidgetStore
 getStore ctx = readIORef (ctxStore ctx)
 
 setStore :: Context -> WidgetStore -> IO ()
-setStore ctx store = do
+setStore ctx store = modifyStore ctx (const store)
+
+-- | Replace the store with @f@ of it, damaging the keys whose values changed
+-- and waking the loop when anything did.
+modifyStore :: Context -> (WidgetStore -> WidgetStore) -> IO ()
+modifyStore ctx f = do
   prev <- readIORef (ctxStore ctx)
-  -- WHNF-force the incoming record: record-update arguments are unevaluated
+  -- WHNF-force the new record: record-update arguments are unevaluated
   -- thunks, and writeIORef would otherwise park one in the long-lived store
   -- every frame.
-  writeIORef (ctxStore ctx) $! store
+  let !store = f prev
+  writeIORef (ctxStore ctx) store
   let changedKeys =
-        diffKeys (storeInt prev) (storeInt store)
-          ++ diffKeys (storeFloat prev) (storeFloat store)
-          ++ diffKeys (storeDouble prev) (storeDouble store)
-          ++ diffKeys (storePoint prev) (storePoint store)
-          ++ diffKeys (storeText prev) (storeText store)
-          ++ diffKeys (storeFloatList prev) (storeFloatList store)
-          ++ diffKeys (storeIntList prev) (storeIntList store)
-          ++ diffKeys (storeIntSet prev) (storeIntSet store)
-          ++ diffKeysBy ptrEq (storeDyn prev) (storeDyn store)
+        [ diffKeys (storeInt prev) (storeInt store)
+        , diffKeys (storeFloat prev) (storeFloat store)
+        , diffKeys (storeDouble prev) (storeDouble store)
+        , diffKeys (storePoint prev) (storePoint store)
+        , diffKeys (storeText prev) (storeText store)
+        , diffKeys (storeFloatList prev) (storeFloatList store)
+        , diffKeys (storeIntList prev) (storeIntList store)
+        , diffKeys (storeIntSet prev) (storeIntSet store)
+        , diffKeysBy ptrEq (storeDyn prev) (storeDyn store)
+        ]
   -- The key diff doubles as the store comparison: checking 'prev /= store'
   -- first would walk every changed map twice.
+  forM_ changedKeys $ mapM_ (\k -> damageKey ctx k (DamageInflated defaultDamageSlop))
   when
     ( storeMirrorGen prev /= storeMirrorGen store
         || storeOpenSelect prev /= storeOpenSelect store
-        || not (null changedKeys)
+        || any (not . null) changedKeys
     )
-    $ do
-      forM_ changedKeys $ \k -> damageKey ctx k (DamageInflated defaultDamageSlop)
-      markDirty ctx
+    (markDirty ctx)
 
 diffKeysBy :: (a -> a -> Bool) -> IntMap a -> IntMap a -> [Int]
 diffKeysBy eq old new

@@ -24,10 +24,9 @@ import NanoUI.Context
   , adoptStoreInt
   , getStore
   , intKey
-  , markDirty
   , recordStoreInt
   , registerFocusable
-  , setStore
+  , modifyStore
   )
 import NanoUI.Font (menuItemRowH)
 import NanoUI.Frame.Select (selectDropPickIndex, selectDropRect)
@@ -82,22 +81,20 @@ selectWith' f options index = do
     rect@(Rect rx ry rw rh) = respRect resp
     mouse = inputMousePos inp
     dropRect = selectDropRect rx ry rw rh n
-  when (rectHit rect mouse && inputMousePressed inp) $
-    uiIO $ do
-      st <- getStore ctx
-      setStore ctx (setSelectOpen st key (not open))
+    picked
+      | open && rectNonEmpty rect && rectContains dropRect mouse && inputMouseReleased inp =
+          selectDropPickIndex dropRect menuItemRowH n (v2Y mouse)
+      | otherwise = Nothing
+    finalIdx = maybe current (clamp 0 (n - 1)) picked
+  -- Opening, closing or picking changes the store, which wakes the loop.
+  uiIO $ do
+    when (rectHit rect mouse && inputMousePressed inp) $ do
+      modifyStore ctx (\st -> setSelectOpen st key (not open))
       writeIORef (ctxFocusId ctx) wid
-      markDirty ctx
-  when (open && rectNonEmpty rect && rectContains dropRect mouse && inputMouseReleased inp) $
-    forM_ (selectDropPickIndex dropRect menuItemRowH n (v2Y mouse)) $ \picked ->
-      uiIO $ do
-        st <- getStore ctx
-        setStore ctx (setSelectOpen (st {storeInt = IM.insert key picked (storeInt st)}) key False)
-        writeIORef (ctxFocusId ctx) wid
-        markDirty ctx
-  store1 <- uiIO (getStore ctx)
-  let finalIdx = clamp 0 (n - 1) (IM.findWithDefault current key (storeInt store1))
-  uiIO $ recordStoreInt ctx key finalIdx
+    forM_ picked $ \i -> do
+      modifyStore ctx (\st -> setSelectOpen (st {storeInt = IM.insert key i (storeInt st)}) key False)
+      writeIORef (ctxFocusId ctx) wid
+    recordStoreInt ctx key finalIdx
   -- Compare with the caller's index, not 'current': a dropdown or keyboard
   -- pick lands in the store between frames and must still report a change.
   pure (setChanged (finalIdx /= clamp 0 (n - 1) index) resp, finalIdx)

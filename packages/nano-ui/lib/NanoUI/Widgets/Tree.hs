@@ -13,7 +13,7 @@ import Data.Primitive.SmallArray (SmallArray, indexSmallArray, mapSmallArray', s
 import Effectful (Eff, type (:>))
 import qualified Data.IntMap.Strict as IM
 import qualified Data.IntSet as IS
-import NanoUI.Context (Context (..), adoptStoreInt, getFocusId, getStore, intKey, recordStoreInt, registerFocusable, setStore, writeStoreInt)
+import NanoUI.Context (Context (..), adoptStoreInt, getFocusId, getStore, intKey, recordStoreInt, registerFocusable, setStore, writeStoreInt, modifyStore)
 import NanoUI.Font (treeChevronRect)
 import NanoUI.Frame.Hit (scrollHitRect)
 import NanoUI.Id (WidgetId (..), hashWidgetId)
@@ -169,8 +169,7 @@ tree' key inputItems index =
       uiIO $ do
         writeStoreInt ctx groupId groupKey keySel
         recordStoreInt ctx groupKey keySel
-      when (keyExp /= expandedSet) $ uiIO $ do
-        st' <- getStore ctx
-        setStore ctx (st' {storeIntSet = IM.insert groupKey keyExp (storeIntSet st')})
+      when (keyExp /= expandedSet) $ uiIO $
+        modifyStore ctx (\st' -> st' {storeIntSet = IM.insert groupKey keyExp (storeIntSet st')})
       maybe (pure ()) (\wid -> uiIO $ writeIORef (ctxFocusId ctx) wid) mFocus
       pure (setChanged (keySel /= selected) (fold resps), keySel)
