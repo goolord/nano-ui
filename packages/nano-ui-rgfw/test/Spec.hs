@@ -355,10 +355,17 @@ testRgfwTyping = do
   assert "RGFW typing: Ctrl+L twice types twice"
     (chars (ctrlLCharFirst ++ ctrlLCharFirst) == "ll" && chars (ctrlLPressFirst ++ ctrlLPressFirst) == "ll")
 
+-- | Wheel events queued in one batch add up rather than keeping the last.
+testRgfwScroll :: IO ()
+testRgfwScroll = do
+  let scrolled = inputScroll (foldl' applyRgfwEvent emptyInput (decodeRgfwEvents 1 [EventMouseScroll 0 1, EventMouseScroll 0.5 2]))
+  assert "RGFW scroll: a batch of wheel events accumulates" (scrolled == V2 0.5 3)
+
 main :: IO ()
 main = do
   putStrLn "=== Running nano-ui-rgfw Unit Tests ==="
   testRgfwTyping
+  testRgfwScroll
   testPackColor
   testSurfaceAllocation
   testScale2xGlyphTables

@@ -30,6 +30,7 @@ import NanoUI
   , V2 (..)
   , appendInputKey
   , emptyInput
+  , v2Add
   )
 import NanoUI.Context
   ( Context (..)
@@ -399,7 +400,7 @@ applyRgfwEvent inp ev = case ev of
     | btn == R.rgfw_mouseLeft -> applyMouseButton MouseLeft down inp
     | btn == R.rgfw_mouseRight -> applyMouseButton MouseRight down inp
     | otherwise -> inp
-  RgfwEvScroll dx dy -> inp {inputScroll = V2 dx dy}
+  RgfwEvScroll dx dy -> inp {inputScroll = v2Add (inputScroll inp) (V2 dx dy)}
   RgfwEvChar c chord ->
     inp
       { inputChars = T.snoc (inputChars inp) c
