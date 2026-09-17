@@ -193,27 +193,26 @@ svgIconWith' f doc = do
       oneColour = svgMonochrome doc
       white = colorRGBA 255 255 255 255
       lay = lay0 {layoutWidth = Fixed w, layoutHeight = Fixed h, layoutFontColor = Just (if oneColour then color else white)}
-  scale <- uiIO (getDrawSnapScale (ctxDrawArena ctx))
-  let pw = max 1 (ceiling (w * max 1 scale))
-      ph = max 1 (ceiling (h * max 1 scale))
-      -- A one-colour raster is white and tinted when drawn, so every colour
-      -- shares it.
-      rasterColor = if oneColour then white else color
-      key = (svgKey doc, pw, ph, colorToWord32 rasterColor)
-  cache <- uiIO (svgRasterCache ctx)
-  known <- uiIO (Map.lookup key <$> readIORef cache)
-  iid <- case known of
-    Just iid -> pure iid
-    Nothing -> uiIO $ do
-      iid <- Atlas.freshImageId (ctxImageAtlas ctx)
-      ok <- registerImage ctx iid pw ph (rasterizeSvg pw ph rasterColor doc)
-      if ok
-        then atomicModifyIORef' cache (\m -> (Map.insert key iid m, ()))
-        else pure ()
-      pure (if ok then iid else ImageId 0)
-  wid <- nextId
-  let ImageId tid = iid
-  addWidget wid NodeImage (if tid <= 0 then T.empty else intValueText tid) 0 lay
+  iid <- uiIO $ do
+    scale <- getDrawSnapScale (ctxDrawArena ctx)
+    let pw = max 1 (ceiling (w * max 1 scale))
+        ph = max 1 (ceiling (h * max 1 scale))
+        -- A one-colour raster is white and tinted when drawn, so every colour
+        -- shares it.
+        rasterColor = if oneColour then white else color
+        key = (svgKey doc, pw, ph, colorToWord32 rasterColor)
+    cache <- svgRasterCache ctx
+    known <- Map.lookup key <$> readIORef cache
+    case known of
+      Just iid -> pure iid
+      Nothing -> do
+        iid <- Atlas.freshImageId (ctxImageAtlas ctx)
+        ok <- registerImage ctx iid pw ph (rasterizeSvg pw ph rasterColor doc)
+        if ok
+          then atomicModifyIORef' cache (\m -> (Map.insert key iid m, ()))
+          else pure ()
+        pure (if ok then iid else ImageId 0)
+  image' (const lay) iid
 
 -- | Rasterized SVG documents by document, pixel size and colour.
 newtype SvgRasters = SvgRasters (IORef (Map.Map (Int, Int, Int, Word32) ImageId))

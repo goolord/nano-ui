@@ -191,7 +191,7 @@ runCommand mode cmd ed@(Editor buf anchor hist) =
   case cmd of
     InsertText raw
       | modeEditable mode ->
-          let txt = (if modeMultiLine mode then id else T.filter (/= '\n')) (TB.insertableText raw)
+          let txt = singleLine raw
               kind
                 | T.length txt == 1 && txt /= "\n" = EditTyping
                 | otherwise = EditOther
@@ -234,7 +234,7 @@ runCommand mode cmd ed@(Editor buf anchor hist) =
   where
     cursor = TB.getCursor buf
     replayed (StoredEdit at removed inserted) = TextEdit at (TS.toText removed) (TS.toText inserted)
-    singleLine = if modeMultiLine mode then TB.insertableText else T.filter (/= '\n') . TB.insertableText
+    singleLine = (if modeMultiLine mode then id else T.filter (/= '\n')) . TB.insertableText
     replaceSelection kind txt = edit kind (TB.replaceEdit txt anchor cursor buf)
     edit kind e
       | editRemoved e == editInserted e = ed

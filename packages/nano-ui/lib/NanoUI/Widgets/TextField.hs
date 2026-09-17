@@ -81,7 +81,6 @@ textFieldHistory ctx wid = do
   let key = intKey wid
       stored = IM.lookup (slotKey SlotTextHistory key) (storeDyn store)
       text = IM.findWithDefault "" key (storeText store)
-  pure $ case (stored >>= fromDynamic, stored >>= fromDynamic) of
-    (Just h, _) -> h
-    (_, Just (recorded, h)) | recorded == (text :: Text) -> h
+  pure $ case stored >>= fromDynamic of
+    Just (recorded, h) | recorded == (text :: Text) -> h
     _ -> emptyHistory

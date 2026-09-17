@@ -12,7 +12,6 @@ module NanoUI.Widgets.TextArea
   , textAreaWith
   , textAreaWith'
   , textAreaLayout
-  , processTextArea
   , loadTextAreaState
   , loadTextAreaStateWithBuffer
   , saveTextAreaState
@@ -208,15 +207,19 @@ textAreaWith' f value = do
             then pure (ctxFontMetrics ctx)
             else fst <$> uiIO (ctxResolveFont ctx (layoutFontSize layout) WeightNormal FontStyleNormal FontRegular)
         let oldState = loadTextAreaState store key value
-            (vw, vh) = IM.findWithDefault (200, 96) (slotKey SlotTextAreaViewport key) (storePoint store)
-        newState <- uiIO (processTextArea ctx inp (realToFrac vw) (realToFrac vh) (realToFrac (fmLineHeight editFm)) oldState)
+            s1 = setTextAreaViewport (viewportSize oldState) (realToFrac (fmLineHeight editFm)) oldState
+            hadInput = not (T.null (inputChars inp)) || not (inputKeysNull (inputKeys inp))
+        newState <- uiIO $ do
+          when hadInput $ setTextInputDrag ctx Nothing
+          case inputTextCommands multiLineMode inp of
+            [] -> pure s1
+            cmds -> withEditor s1 <$> foldM (flip (runCommandIO ctx multiLineMode)) (textAreaEditor s1) cmds
         let newText
-              -- 'processTextArea' only edits text when this frame carried keys
-              -- or chars, so idle focused frames skip the O(document)
-              -- 'TB.toText' and stop at the cheap cursor/scroll checks.
+              -- Commands only come from keys or chars, so idle focused frames
+              -- skip the O(document) 'TB.toText' and stop at the cheap
+              -- cursor/scroll checks.
               | hadInput || changed = TB.toText (buffer newState)
               | otherwise = current
-            hadInput = not (T.null (inputChars inp)) || not (inputKeysNull (inputKeys inp))
             changed =
               cursorOf newState /= cursorOf oldState
                 || selectionAnchor newState /= selectionAnchor oldState
@@ -259,13 +262,13 @@ loadTextAreaState store key initial =
       buf0 = case cachedBuffer of
         Just cached -> cached
         Nothing -> TB.fromText text
-   in loadTextAreaStateWithBuffer store key text buf0
+   in loadTextAreaStateWithBuffer store key buf0
 
 -- | 'loadTextAreaState' with the buffer already resolved (the paint path
 -- ensures the buffer cache and hands it straight through, avoiding a second
 -- store lookup).
-loadTextAreaStateWithBuffer :: WidgetStore -> Int -> Text -> TB.TextBuffer -> TextAreaState
-loadTextAreaStateWithBuffer store key _text buf0 =
+loadTextAreaStateWithBuffer :: WidgetStore -> Int -> TB.TextBuffer -> TextAreaState
+loadTextAreaStateWithBuffer store key buf0 =
   let row = IM.findWithDefault 0 (slotKey SlotTextAreaRow key) (storeInt store)
       col = IM.findWithDefault 0 (slotKey SlotTextAreaCol key) (storeInt store)
       anchorRow = IM.findWithDefault row (slotKey SlotTextAreaAnchorRow key) (storeInt store)
@@ -283,8 +286,10 @@ loadTextAreaStateWithBuffer store key _text buf0 =
         let b = TB.withCursor (TB.Cursor row col) buf0
          in b {TB.preferredCol = pref}
       anchor = TB.getCursor (TB.withCursor (TB.Cursor anchorRow anchorCol) buf0)
+      -- Replacing the document drops its history, so the recorded text is
+      -- always the current one here.
       hist = case IM.lookup (slotKey SlotTextHistory key) (storeDyn store) >>= fromDynamic of
-        Just h -> h
+        Just (_ :: Text, h) -> h
         Nothing -> emptyHistory
    in TextAreaState
         { buffer = buf
@@ -305,7 +310,7 @@ saveTextAreaState key text state store =
         { storeText = IM.insert key text (storeText store)
         , storeDyn =
             IM.insert (slotKey SlotTextAreaBuffer key) (toDyn (buffer state)) $
-              IM.insert (slotKey SlotTextHistory key) (toDyn (history state)) (storeDyn store)
+              IM.insert (slotKey SlotTextHistory key) (toDyn (text, history state)) (storeDyn store)
         , storeInt =
             IM.insert (slotKey SlotTextAreaRow key) row $
               IM.insert (slotKey SlotTextAreaCol key) col $
@@ -345,12 +350,3 @@ applyTextAreaCommand ctx wid cmd = do
   -- selection-only command (Select All) repaints this frame.
   damageWidget ctx wid DamageSelf
   markDirty ctx
-
-processTextArea :: Context -> Input -> Double -> Double -> Double -> TextAreaState -> IO TextAreaState
-processTextArea ctx inp vpW vpH lineH s0 = do
-  let s1 = setTextAreaViewport (vpW, vpH) lineH s0
-  when (not (T.null (inputChars inp)) || not (inputKeysNull (inputKeys inp))) $
-    setTextInputDrag ctx Nothing
-  case inputTextCommands multiLineMode inp of
-    [] -> pure s1
-    cmds -> withEditor s1 <$> foldM (flip (runCommandIO ctx multiLineMode)) (textAreaEditor s1) cmds

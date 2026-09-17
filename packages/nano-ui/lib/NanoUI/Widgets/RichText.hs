@@ -252,7 +252,7 @@ richTextWith' f pieces = do
               DecorationNone -> []
       drawKey = key `hashWithSalt` fromMaybe (-1) hoveredRun
   uiIO $ do
-    unless (paraWidth para0 == rw && isJust cached && fmap paraKey cached == Just key) $
+    unless (paraWidth para0 == rw && fmap paraKey cached == Just key) $
       modifyIORef' cacheRef $ \m ->
         -- Paragraphs no longer drawn are dropped all at once past a bound.
         IM.insert (intKey wid) para (if IM.size m > 4096 then IM.empty else m)

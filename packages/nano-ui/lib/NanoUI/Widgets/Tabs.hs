@@ -69,7 +69,7 @@ data TabStyle = TabUnderline | TabPill | TabSegmented | TabContained
 data TabOrientation = TabTop | TabBottom | TabLeft | TabRight
   deriving (Eq, Show, Enum, Bounded)
 
--- | Header look and placement for 'tabsWith' and 'tabBarWith'.
+-- | Header look and placement for 'tabsConfigured' and 'tabBarConfigured'.
 data TabsConfig = TabsConfig
   { tabsStyle :: !TabStyle
   , tabsOrientation :: !TabOrientation

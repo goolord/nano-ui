@@ -167,7 +167,8 @@ data Slot
     -- text area widget reads and clears this on its next frame, so the caller
     -- still gets a 'respChanged' pulse for edits that carry no keys or chars.
     SlotTextAreaChanged
-  | -- | A text field's undo history, in 'storeDyn'.
+  | -- | A text field's undo history with the text it was recorded against, in
+    -- 'storeDyn'.
     SlotTextHistory
   | -- | Which kind of text field a widget id is: 1 single-line, 2 multi-line.
     -- Commands sent to the id between frames read it.

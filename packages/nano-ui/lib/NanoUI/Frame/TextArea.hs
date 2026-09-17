@@ -80,7 +80,7 @@ loadTextAreaStateAt ctx idx fm x y w h = do
   let initial = IM.findWithDefault "" key (storeText store)
   buf <- ensureTextAreaBuffer ctx key initial
   let Rect _ _ vpW vpH = textAreaFieldClip fm (Rect x y w h)
-      state0 = TA.loadTextAreaStateWithBuffer store key initial buf
+      state0 = TA.loadTextAreaStateWithBuffer store key buf
   pure (TA.setTextAreaViewport (realToFrac vpW, realToFrac vpH) (realToFrac (textAreaLineHeight fm)) state0)
 
 loadHitState :: Context -> TextAreaHit -> IO TA.TextAreaState
