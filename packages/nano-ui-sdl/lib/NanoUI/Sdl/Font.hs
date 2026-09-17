@@ -1,9 +1,7 @@
 module NanoUI.Sdl.Font
-  ( SdlFont (..)
-  , FontSource (..)
+  ( FontSource (..)
   , GlyphAtlas
   , withTtf
-  , openFontSourceWithFallback
   , fontSourceLabel
   , newGlyphAtlas
   , destroyGlyphAtlas
