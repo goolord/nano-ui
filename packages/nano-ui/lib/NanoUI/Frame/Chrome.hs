@@ -9,6 +9,7 @@ module NanoUI.Frame.Chrome
   , textInputFocused
   , fillStyledRect
   , strokeStyledRect
+  , paintStyledRect
   , overlayWindowStyle
   , overlayModalStyle
   , overlayMenuStyle
@@ -220,7 +221,7 @@ paintTabHeader da theme styleIdx isActive style x y w h = do
       1 -> pushRoundedRect da rect r bg
       2 -> do
         pushRoundedRect da rect r bg
-        strokeStyledRect da style x y w h
+        strokeStyledRect da style rect
       _ -> do
         pushRoundedRect da rect r bg
         pushRoundedStroke da (Rect x y w (h + 1)) (min r (min (w / 2) (h / 2))) 1 (styleBorder (themePanel theme))
@@ -333,11 +334,18 @@ fillStyledRect da style rect =
     else pushRoundedRect da rect (styleCornerRadius style) (styleBg style)
 
 {-# INLINE strokeStyledRect #-}
-strokeStyledRect :: DrawArena -> Style -> Float -> Float -> Float -> Float -> IO ()
-strokeStyledRect da style x y w h =
+strokeStyledRect :: DrawArena -> Style -> Rect -> IO ()
+strokeStyledRect da style rect@(Rect _ _ w h) =
   when (styleBorderWidth style > 0) $ do
     let rr = max 0 (min (styleCornerRadius style) (min (w / 2) (h / 2)))
-    pushRoundedStroke da (Rect x y w h) rr (max 1 (styleBorderWidth style)) (styleBorder style)
+    pushRoundedStroke da rect rr (max 1 (styleBorderWidth style)) (styleBorder style)
+
+-- | A style's fill, then its border.
+{-# INLINE paintStyledRect #-}
+paintStyledRect :: DrawArena -> Style -> Rect -> IO ()
+paintStyledRect da style rect = do
+  fillStyledRect da style rect
+  strokeStyledRect da style rect
 
 overlayMenuStyle :: Theme -> Style
 overlayMenuStyle theme =
@@ -365,8 +373,7 @@ paintMenuPanel :: DrawArena -> Theme -> Style -> Rect -> IO ()
 paintMenuPanel da theme style rect@(Rect x y w h) = do
   when (colorA (themeShadow theme) > 0) $
     pushRoundedRect da (Rect (x + 3) (y + 3) w h) (styleCornerRadius style) (themeShadow theme)
-  fillStyledRect da style rect
-  strokeStyledRect da style x y w h
+  paintStyledRect da style rect
 
 -- | Accent marker at a menu row's left edge, inset from its top and bottom.
 paintMenuAccent :: DrawArena -> Theme -> Rect -> IO ()

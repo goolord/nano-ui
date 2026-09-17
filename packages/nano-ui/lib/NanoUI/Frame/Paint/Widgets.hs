@@ -44,6 +44,7 @@ import NanoUI.Frame.Chrome
   , paintTabHeader
   , paintTableHeader
   , strokeStyledRect
+  , paintStyledRect
   , textInputFocused
   , textInputValue
   , widgetVisualStyle
@@ -122,7 +123,7 @@ paintTextInputNode env idx rect@(Rect x y w h) = do
                 else paintComboField ctx da fm style idx focus rect
             else do
               let field = textInputFieldRect fm x y w h
-              paintTextFieldFrame da style field
+              paintStyledRect da style field
               spans <- widgetTextSpans ctx NodeTextInput idx x y w h
               case spans of
                 (Rect fx fy _ _, txt, ffg, _) : _ ->
@@ -137,7 +138,7 @@ paintTextAreaNode env idx (Rect x y w h) = do
       da = peDrawArena env
   style <- widgetVisualStyle ctx NodeTextArea idx
   areaFm <- resolveTextAreaFont ctx idx
-  paintTextFieldFrame da style (Rect x y w h)
+  paintStyledRect da style (Rect x y w h)
   drawTextAreaContentWith da ctx areaFm idx x y w h style
 
 -- | Generic foreground / chrome widget (button, checkbox, radio, slider,
@@ -187,7 +188,7 @@ paintWidgetBackground env idx nt style si menuRowRect value (Rect x y w h) = do
               && nt /= NodeTextInput && nt /= NodeTextArea && nt /= NodeColorPicker
   when opaqueBg $ fillStyledRect da style menuRowRect
   when (opaqueBg && not (isTab || isTable || isMenu) && nt /= NodeTree) $
-    strokeStyledRect da style x y w h
+    strokeStyledRect da style (Rect x y w h)
   when isMenuItem $ do
     wid <- getWidgetId (peNodeArena env) idx
     hot <- readIORef (ctxHotId ctx)
@@ -280,13 +281,6 @@ drawSortTriangle da cx cy down col =
     then pushFilledTriangle da (cx - 5) (cy - 3.5) (cx + 5) (cy - 3.5) cx (cy + 3.5) col
     else pushFilledTriangle da (cx - 5) (cy + 3.5) (cx + 5) (cy + 3.5) cx (cy - 3.5) col
 
--- | Field fill and border. 'widgetVisualStyle' already swaps in the accent
--- border while the field is focused.
-paintTextFieldFrame :: DrawArena -> Style -> Rect -> IO ()
-paintTextFieldFrame da style rect@(Rect x y w h) = do
-  fillStyledRect da style rect
-  strokeStyledRect da style x y w h
-
 -- | Draw a single-line field's text, selection, and caret inside @clip@.
 -- @penX/penY@ locate @txt@ (absolute); the node rect @x y w h@ positions the
 -- field box that selection / caret geometry is resolved against.
@@ -335,7 +329,7 @@ paintFieldValue ctx da fm style idx focus (Rect x y w h) clip@(Rect clipX _ _ _)
 -- stepper's up and down arrows beside a rule.
 paintNumericField :: Context -> DrawArena -> FontMetrics -> Style -> NodeIdx -> Bool -> Rect -> IO ()
 paintNumericField ctx da fm style idx focus box@(Rect x y w h) = do
-  paintTextFieldFrame da style box
+  paintStyledRect da style box
   value <- textInputValue ctx idx
   let (up@(Rect ux _ _ _), down) = numericStepperRects x y w h
       iconCol = lerpColor (styleFg style) (styleBg style) 0.4
@@ -362,7 +356,7 @@ paintSearchField :: Context -> DrawArena -> FontMetrics -> Style -> NodeIdx -> B
 paintSearchField ctx da fm style idx focus box@(Rect x y w h) = do
   let (magRect, Rect cx cy cw ch) = searchFieldIconRects fm x y w h
       iconCol = lerpColor (styleFg style) (styleBg style) 0.45
-  paintTextFieldFrame da style box
+  paintStyledRect da style box
   value <- textInputValue ctx idx
   lbl <- getText (ctxNodeArena ctx) idx
   drawSearchMagnifier da magRect iconCol
@@ -405,7 +399,7 @@ drawSearchMagnifier da (Rect x y w h) col = do
 -- right reserve that flips up while the dropdown is open (i.e. focused).
 paintComboField :: Context -> DrawArena -> FontMetrics -> Style -> NodeIdx -> Bool -> Rect -> IO ()
 paintComboField ctx da fm style idx focus box@(Rect x y w h) = do
-  paintTextFieldFrame da style box
+  paintStyledRect da style box
   value <- textInputValue ctx idx
   lbl <- getText (ctxNodeArena ctx) idx
   drawSelectChevron

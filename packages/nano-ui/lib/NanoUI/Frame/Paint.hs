@@ -58,14 +58,13 @@ import NanoUI.Draw
   )
 import NanoUI.Font (ScrollBarSlot (..))
 import NanoUI.Frame.Chrome
-  ( fillStyledRect
-  , floatingAncestor
+  ( floatingAncestor
   , imageIdFromText
   , overlayMenuStyle
   , overlayModalStyle
   , overlayWindowStyle
   , paintScrollBarLayout
-  , strokeStyledRect
+  , paintStyledRect
   )
 import NanoUI.Frame.Node (ScrollNode (..), readScrollNode, resolveFontFor, resolveTextFont, scrollNodeViewport)
 import NanoUI.Frame.Paint.Types (PaintEnv (..), buildPaintEnv)
@@ -242,11 +241,10 @@ paintContainerNode env idx rect = do
     withClip da rect (emitDrawOps da fm (resolveTextFont ctx) (build cdc rect))
 
 paintPanelNode :: PaintEnv -> NodeIdx -> Rect -> IO ()
-paintPanelNode env idx rect@(Rect x y w h) = do
+paintPanelNode env idx rect = do
   let da = peDrawArena env
       style = themePanel (peTheme env)
-  fillStyledRect da style rect
-  strokeStyledRect da style x y w h
+  paintStyledRect da style rect
   withClip da (borderContentClip style rect) $ walkChildrenWithOccluders env idx
 
 {-# NOINLINE paintScrollContainerNode #-}
@@ -275,8 +273,7 @@ paintScrollContainerNode env idx rect@(Rect x y w h) = do
       then pushRect da rect (if inFloating then styleBg (themeFloatingWindow tm) else themeWindow tm)
       else do
         let well = (if inFloating then themeFloatingWindow tm else themeInput tm) {styleCornerRadius = 0}
-        fillStyledRect da well rect
-        strokeStyledRect da well x y w h
+        paintStyledRect da well rect
   withClip da (scrollNodeViewport sn x y w h) $ walkChildrenWithOccluders env idx
   paintScrollChrome env idx sn rect
 
