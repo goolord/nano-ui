@@ -51,6 +51,7 @@ import NanoUI.Sdl.Display (queryMouseWindowPos, queryWindowLogicalSize)
 import NanoUI.Sdl.Font
   ( fontSourceLabel
   , glyphAtlasTexture
+  , sdlFontCacheSource
   , prepareGlyphAtlasForFrame
   , takeGlyphAtlasResetFlag
   )
@@ -283,7 +284,7 @@ setSdlUiFont font = do
 readSdlDebugEnv :: SdlEnv -> IO SdlDebugSnapshot
 readSdlDebugEnv env = do
   scale <- readIORef (sdlScaleRef env)
-  fontSource <- readIORef (sdlFontSourceRef env)
+  fontSource <- sdlFontCacheSource (sdlFontCache env)
   size <- queryWindowLogicalSize (sdlWindow env)
   pos <- queryMouseWindowPos
   let refreshHz = round (1 / sdlRefreshPeriod env)

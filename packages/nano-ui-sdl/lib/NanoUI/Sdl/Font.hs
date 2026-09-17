@@ -4,25 +4,18 @@ module NanoUI.Sdl.Font
   , GlyphAtlas
   , withTtf
   , openFontSourceWithFallback
-  , closeFont
   , fontSourceLabel
   , newGlyphAtlas
   , destroyGlyphAtlas
-  , resetGlyphAtlas
-  , registerGlyphAtlasRewarm
   , prepareGlyphAtlasForFrame
   , takeGlyphAtlasResetFlag
-  , warmGlyphAtlas
-  , withTtfMeasureGlyph
-  , buildGlyphFontMetrics
   , glyphAtlasTexture
   , SdlFontCache
-  , CachedFontEntry (..)
   , newSdlFontCache
   , destroySdlFontCache
-  , resetSdlFontCache
-  , setSdlFontCacheSource
-  , withTtfFontCache
+  , reloadSdlFontCache
+  , sdlFontCacheSource
+  , withSdlFontCache
   ) where
 
 import Control.Exception (SomeException, bracket, catch, throwIO)
@@ -284,11 +277,9 @@ destroyGlyphAtlas ga = do
   alive <- atomicModifyIORef' (gaAlive ga) (\open -> (False, open))
   when alive $ textAtlasDestroy (gaAtlas ga)
 
--- | Register an action to run after every atlas reset. The SDL backend
--- registers a hook that re-warms the base fonts' ASCII glyphs
--- ('warmGlyphAtlas'); the hook reads the current base fonts from their
--- 'IORef's lazily, so a reset always warms the live fonts and never one
--- that has since been closed.
+-- | Register an action to run after every atlas reset (DPI change, font
+-- switch, exhaustion recovery). 'newSdlFontCache' registers one that re-warms
+-- the base fonts' ASCII glyphs, so the next frame pays no cold glyph misses.
 registerGlyphAtlasRewarm :: GlyphAtlas -> IO () -> IO ()
 registerGlyphAtlasRewarm ga hook = modifyIORef' (gaRewarmHooks ga) (hook :)
 
@@ -1367,10 +1358,13 @@ data SdlFontCache = SdlFontCache
   , sfcGlyphAtlas     :: !GlyphAtlas
   , sfcBasePt         :: !Float
   , sfcScaleRef       :: !(IORef Float)
+  -- ^ The display scale, owned by the window and read here.
   , sfcBaseEntries    :: !(IORef (CachedFontEntry, CachedFontEntry))
   , sfcDynamicCache   :: !(IORef (BoundedCache FontCacheKey CachedFontEntry))
   }
 
+-- | Open the base sans and mono fonts at the display scale, and re-warm them
+-- into the glyph atlas after every atlas reset.
 newSdlFontCache ::
   FontSource -> -- ^ primary font source
   FontSource -> -- ^ fallback font source
@@ -1378,19 +1372,23 @@ newSdlFontCache ::
   FontSource -> -- ^ mono fallback font source
   GlyphAtlas ->
   Float ->      -- ^ base font size (pt)
-  Float ->      -- ^ initial display scale
-  SdlFont ->    -- ^ initial base sans font
-  FontMetrics -> -- ^ initial base sans metrics
-  SdlFont ->    -- ^ initial base mono font
-  FontMetrics -> -- ^ initial base mono metrics
+  IORef Float -> -- ^ display scale
   IO SdlFontCache
-newSdlFontCache primary fallback mono monoFb ga basePt scale baseFont baseFm monoFont monoFm = do
-  scaleRef <- newIORef scale
+newSdlFontCache primary fallback mono monoFb ga basePt scaleRef = do
+  scale <- readIORef scaleRef
   primaryRef <- newIORef primary
-  sansEntry <- makeCachedFontEntry baseFont baseFm scale
-  monoEntry <- makeCachedFontEntry monoFont monoFm scale
+  sansEntry <- openCachedFont ga scale primary fallback basePt
+  monoEntry <- openCachedFont ga scale mono monoFb basePt
   baseEntriesRef <- newIORef (sansEntry, monoEntry)
   cacheRef <- newIORef emptyBounded
+  -- The hook reads the base entries when it runs, so a reset always warms the
+  -- live fonts, never ones already closed.
+  let rewarm = do
+        (sans, monoBase) <- readIORef baseEntriesRef
+        warmGlyphAtlas ga (cfeFont sans)
+        warmGlyphAtlas ga (cfeFont monoBase)
+  registerGlyphAtlasRewarm ga rewarm
+  rewarm
   pure
     SdlFontCache
       { sfcPrimarySourceRef = primaryRef
@@ -1404,11 +1402,17 @@ newSdlFontCache primary fallback mono monoFb ga basePt scale baseFont baseFm mon
       , sfcDynamicCache   = cacheRef
       }
 
--- | Point the cache's primary (sans) family at a new source. Dynamic-size
--- entries created afterwards resolve against it; call 'resetSdlFontCache'
--- with a freshly opened base font to rebuild the base entry too.
-setSdlFontCacheSource :: SdlFontCache -> FontSource -> IO ()
-setSdlFontCacheSource cache src = writeIORef (sfcPrimarySourceRef cache) src
+-- | A font from a source (or its fallback) at a point size, rasterised at
+-- the display scale, with its glyph metrics.
+openCachedFont :: GlyphAtlas -> Float -> FontSource -> FontSource -> Float -> IO CachedFontEntry
+openCachedFont ga scale primary fallback pt = do
+  font <- openFontSourceWithFallback primary fallback (pt * scale)
+  fm <- buildGlyphFontMetrics ga font scale
+  makeCachedFontEntry font fm scale
+
+-- | The primary (sans) family's source, for the debug readout.
+sdlFontCacheSource :: SdlFontCache -> IO FontSource
+sdlFontCacheSource cache = readIORef (sfcPrimarySourceRef cache)
 
 -- | Close fonts and drop their glyphs from the shared atlas index.
 closeCachedFonts :: GlyphAtlas -> [SdlFont] -> IO ()
@@ -1419,26 +1423,34 @@ closeCachedFonts ga fonts = do
   modifyIORef' (gaEntries ga) (`IM.withoutKeys` IS.fromList (map (fromIntegral . sfId) fonts))
   modifyIORef' (gaIndexEntries ga) (`IM.withoutKeys` handles)
 
+-- | Close every open font, base and dynamic.
 destroySdlFontCache :: SdlFontCache -> IO ()
 destroySdlFontCache cache = do
   dynamic <- atomicModifyIORef' (sfcDynamicCache cache) (\c -> (emptyBounded, c))
-  closeCachedFonts (sfcGlyphAtlas cache) (map cfeFont (HM.elems (bcEntries dynamic)))
+  (sans, mono) <- readIORef (sfcBaseEntries cache)
+  closeCachedFonts (sfcGlyphAtlas cache) (cfeFont sans : cfeFont mono : map cfeFont (HM.elems (bcEntries dynamic)))
 
-resetSdlFontCache ::
-  SdlFontCache ->
-  Float ->
-  SdlFont ->
-  FontMetrics ->
-  SdlFont ->
-  FontMetrics ->
-  IO ()
-resetSdlFontCache cache newScale newBaseFont newBaseFm newMonoFont newMonoFm = do
-  dynamic <- atomicModifyIORef' (sfcDynamicCache cache) (\c -> (emptyBounded, c))
-  writeIORef (sfcScaleRef cache) newScale
-  sansEntry <- makeCachedFontEntry newBaseFont newBaseFm newScale
-  monoEntry <- makeCachedFontEntry newMonoFont newMonoFm newScale
+-- | Reopen the base fonts from @source@ at the current display scale, close
+-- every dynamic size, and reset the glyph atlas, which re-warms the new base
+-- fonts.
+reloadSdlFontCache :: SdlFontCache -> FontSource -> IO ()
+reloadSdlFontCache cache source = do
+  destroySdlFontCache cache
+  writeIORef (sfcPrimarySourceRef cache) source
+  scale <- readIORef (sfcScaleRef cache)
+  let ga = sfcGlyphAtlas cache
+  sansEntry <- openCachedFont ga scale source (sfcFallbackSource cache) (sfcBasePt cache)
+  monoEntry <- openCachedFont ga scale (sfcMonoSource cache) (sfcMonoFallback cache) (sfcBasePt cache)
   writeIORef (sfcBaseEntries cache) (sansEntry, monoEntry)
-  closeCachedFonts (sfcGlyphAtlas cache) (map cfeFont (HM.elems (bcEntries dynamic)))
+  resetGlyphAtlas ga
+
+-- | Install the cache's base fonts as the context's measurement and glyph
+-- metrics, and its sizes and variants as the font resolver.
+withSdlFontCache :: SdlFontCache -> Context -> IO Context
+withSdlFontCache cache ctx = do
+  scale <- readIORef (sfcScaleRef cache)
+  (sans, mono) <- readIORef (sfcBaseEntries cache)
+  pure (withFontResolver (withTtfMeasureGlyph ctx (cfeFont sans) (cfeFm sans) (cfeFm mono) scale) (resolveSdlFont cache) (resolveSdlMeasure cache))
 
 -- | The open font for a size and variant. Weight and style pick nothing
 -- here: they are drawn synthetically over the regular face, because SDL_ttf's
@@ -1488,21 +1500,13 @@ getOrLoadCachedFont cache sz _weight _style var = do
                 if var == FontMono
                   then (sfcMonoSource cache, sfcMonoFallback cache)
                   else (primarySans, sfcFallbackSource cache)
-              rasterPt = targetPt * (if scale > 0 then scale else 1.0)
-          font <- openFontSourceWithFallback primary fallback rasterPt
-          -- Note: We intentionally do NOT call warmGlyphAtlas here.
-          -- Dynamic fonts insert only glyphs actually drawn on screen.
-          fm <- buildGlyphFontMetrics (sfcGlyphAtlas cache) font scale
-          entry <- makeCachedFontEntry font fm scale
+          -- Dynamic fonts are not warmed: they insert only glyphs drawn.
+          entry <- openCachedFont (sfcGlyphAtlas cache) scale primary fallback targetPt
           -- At most 48 dynamic sizes stay open.
           let (dynamic', evicted) = insertBounded 48 key entry dynamic
           writeIORef (sfcDynamicCache cache) $! dynamic'
           mapM_ (closeCachedFonts (sfcGlyphAtlas cache) . pure . cfeFont) evicted
           pure entry
-
-withTtfFontCache :: SdlFontCache -> Context -> Context
-withTtfFontCache cache ctx =
-  withFontResolver ctx (resolveSdlFont cache) (resolveSdlMeasure cache)
 
 resolveSdlFont ::
   SdlFontCache ->

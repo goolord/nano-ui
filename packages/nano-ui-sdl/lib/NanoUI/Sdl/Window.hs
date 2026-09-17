@@ -40,25 +40,17 @@ import NanoUI.Sdl.Display
 import NanoUI.Sdl.Clipboard (withSdlClipboard)
 import NanoUI.Sdl.Cursor (SdlCursors (..), destroyCursors, initCursors)
 import NanoUI.Sdl.Font
-  ( SdlFont
-  , FontSource (..)
+  ( FontSource (..)
   , GlyphAtlas
-  , closeFont
-  , destroyGlyphAtlas
-  , newGlyphAtlas
-  , openFontSourceWithFallback
-  , registerGlyphAtlasRewarm
-  , resetGlyphAtlas
-  , warmGlyphAtlas
-  , withTtf
-  , buildGlyphFontMetrics
-  , withTtfMeasureGlyph
   , SdlFontCache
-  , newSdlFontCache
+  , destroyGlyphAtlas
   , destroySdlFontCache
-  , resetSdlFontCache
-  , setSdlFontCacheSource
-  , withTtfFontCache
+  , newGlyphAtlas
+  , newSdlFontCache
+  , reloadSdlFontCache
+  , sdlFontCacheSource
+  , withSdlFontCache
+  , withTtf
   )
 import NanoUI.Sdl.Font.Resolve
   ( embeddedFontSource
@@ -183,16 +175,11 @@ data SdlEnv = SdlEnv
   , sdlRenderer :: Ptr SDL_Renderer
   , sdlRendererName :: !Text
   , sdlBatch :: RenderBatch
-  , sdlFontSourceRef :: !(IORef FontSource)
-  , sdlMonoFontSource :: !FontSource
   , sdlFontRequestRef :: !(IORef NanoUIFont)
   , sdlFontAppliedRef :: !(IORef NanoUIFont)
-  , sdlFontSize :: !Float
   , sdlForcedScale :: !(Maybe Float)
   -- ^ NANO_FORCE_SCALE override of the display scale, read at startup.
   , sdlScaleRef :: IORef Float
-  , sdlFontRef :: IORef SdlFont
-  , sdlMonoFontRef :: IORef SdlFont
   , sdlGlyphAtlas :: GlyphAtlas
   , sdlImages :: ImageAtlas
   , sdlCursors :: SdlCursors
@@ -229,12 +216,16 @@ syncDisplay ctx env inp = do
   requested <- readIORef (sdlFontRequestRef env)
   applied <- readIORef (sdlFontAppliedRef env)
   let fontChanged = requested /= applied
-  when fontChanged $ do
-    newSource <- resolveNanoUIFont requested
-    writeIORef (sdlFontSourceRef env) newSource
-    setSdlFontCacheSource (sdlFontCache env) newSource
+  when (scaleChanged || fontChanged) $ do
+    source <-
+      if fontChanged
+        then resolveNanoUIFont requested
+        else sdlFontCacheSource (sdlFontCache env)
     writeIORef (sdlFontAppliedRef env) requested
-  when (scaleChanged || fontChanged) (rebuildScaledFonts ctx env scale)
+    reloadSdlFontCache (sdlFontCache env) source
+    writeIORef (sdlCachedCtx env) =<< withSdlFontCache (sdlFontCache env) ctx
+    clearMeasureCache ctx
+    markDirty ctx
   queried <- queryWindowLogicalSize (sdlWindow env)
   let winSize =
         case queried of
@@ -246,32 +237,6 @@ syncDisplay ctx env inp = do
   mouse <- queryMouseWindowPos
   ctxMeasured <- readIORef (sdlCachedCtx env)
   pure (withSdlClipboard ctxMeasured, inp {inputWindowSize = winSize, inputMousePos = mouse})
-
--- | Reopen the base sans/mono fonts at @scale@, rebuild metrics and the text
--- resolver, and invalidate cached measurements. Shared by the DPI-change and
--- runtime font-family-switch paths in 'syncDisplay'.
-rebuildScaledFonts :: Context -> SdlEnv -> Float -> IO ()
-rebuildScaledFonts ctx env scale = do
-  uiSource <- readIORef (sdlFontSourceRef env)
-  oldFont <- readIORef (sdlFontRef env)
-  closeFont oldFont
-  newFont <- openFontSourceWithFallback uiSource embeddedFontSource (sdlFontSize env * scale)
-  writeIORef (sdlFontRef env) newFont
-  oldMono <- readIORef (sdlMonoFontRef env)
-  closeFont oldMono
-  newMono <- openFontSourceWithFallback (sdlMonoFontSource env) embeddedFontSource (sdlFontSize env * scale)
-  writeIORef (sdlMonoFontRef env) newMono
-  -- resetGlyphAtlas re-warms the (already updated) base fonts through the
-  -- registered hook and bumps the epoch so run caches self-clear.
-  resetGlyphAtlas (sdlGlyphAtlas env)
-  let ga = sdlGlyphAtlas env
-  fm <- buildGlyphFontMetrics ga newFont scale
-  monoFm <- buildGlyphFontMetrics ga newMono scale
-  let ctx' = withTtfFontCache (sdlFontCache env) (withTtfMeasureGlyph ctx newFont fm monoFm scale)
-  resetSdlFontCache (sdlFontCache env) scale newFont fm newMono monoFm
-  writeIORef (sdlCachedCtx env) ctx'
-  clearMeasureCache ctx
-  markDirty ctx
 
 -- | Everything a window session is opened with, besides the context.
 data WindowConfig = WindowConfig
@@ -358,7 +323,6 @@ startSdlWindow ctx cfg fontSource monoSource = do
   unlessM initRefreshEvent $
     fail "SDL_RegisterEvents failed for refresh wake"
   let Size w h = wcSize cfg
-      fontSize = wcFontSize cfg
       bench = wcBench cfg
   -- NANO_FORCE_SCALE: debug override of the display scale.
   forcedEnv <- lookupEnv "NANO_FORCE_SCALE"
@@ -385,32 +349,14 @@ startSdlWindow ctx cfg fontSource monoSource = do
           refreshHz <- queryWindowRefreshHz win
           rendererName <- getRendererName ren >>= \name ->
             if PtrConst.unsafeToPtr name == nullPtr then pure "unknown" else TextForeign.peekCString (PtrConst.unsafeToPtr name)
-          font <- openFontSourceWithFallback fontSource embeddedFontSource (fontSize * scale)
-          monoFont <- openFontSourceWithFallback monoSource embeddedFontSource (fontSize * scale)
           scaleRef <- newIORef scale
-          fontRef <- newIORef font
-          monoFontRef <- newIORef monoFont
-          fontSourceRef <- newIORef fontSource
           fontRequestRef <- newIORef (wcUiFont cfg)
           fontAppliedRef <- newIORef (wcUiFont cfg)
           glyphAtlas <- newGlyphAtlas ren
-          -- Re-warm the base fonts after every atlas reset (DPI change,
-          -- font switch, exhaustion recovery) so the next frame does not
-          -- pay cold glyph misses. The hook reads the font refs lazily, so
-          -- it always warms the live fonts, never one already closed.
-          registerGlyphAtlasRewarm glyphAtlas $ do
-            warmSans <- readIORef fontRef
-            warmGlyphAtlas glyphAtlas warmSans
-            warmMono <- readIORef monoFontRef
-            warmGlyphAtlas glyphAtlas warmMono
-          warmGlyphAtlas glyphAtlas font
-          warmGlyphAtlas glyphAtlas monoFont
           images <- newImageAtlas
           cursors <- initCursors
           debug <- newSdlDebugSampler
           retain <- newIORef (nullPtr, 0, 0, 0)
-          fm <- buildGlyphFontMetrics glyphAtlas font scale
-          monoFm <- buildGlyphFontMetrics glyphAtlas monoFont scale
           fontCache <-
             newSdlFontCache
               fontSource
@@ -418,13 +364,9 @@ startSdlWindow ctx cfg fontSource monoSource = do
               monoSource
               embeddedFontSource
               glyphAtlas
-              fontSize
-              scale
-              font
-              fm
-              monoFont
-              monoFm
-          cachedCtx <- newIORef (withTtfFontCache fontCache (withTtfMeasureGlyph ctx font fm monoFm scale))
+              (wcFontSize cfg)
+              scaleRef
+          cachedCtx <- newIORef =<< withSdlFontCache fontCache ctx
           let refreshPeriod =
                 if refreshHz > 0
                   then 1 / fromIntegral refreshHz
@@ -443,15 +385,10 @@ startSdlWindow ctx cfg fontSource monoSource = do
               , sdlRenderer = ren
               , sdlRendererName = rendererName
               , sdlBatch = batch
-              , sdlFontSourceRef = fontSourceRef
-              , sdlMonoFontSource = monoSource
               , sdlFontRequestRef = fontRequestRef
               , sdlFontAppliedRef = fontAppliedRef
-              , sdlFontSize = fontSize
               , sdlForcedScale = forcedScale
               , sdlScaleRef = scaleRef
-              , sdlFontRef = fontRef
-              , sdlMonoFontRef = monoFontRef
               , sdlGlyphAtlas = glyphAtlas
               , sdlImages = images
               , sdlCursors = cursors
@@ -481,10 +418,6 @@ stopSdlWindow bench env = do
   destroyImageAtlas (sdlImages env)
   destroySdlFontCache (sdlFontCache env)
   destroyGlyphAtlas (sdlGlyphAtlas env)
-  font <- readIORef (sdlFontRef env)
-  closeFont font
-  monoFont <- readIORef (sdlMonoFontRef env)
-  closeFont monoFont
   unless bench $ void $ stopTextInputSafe (sdlWindow env)
   void $ setRenderScale (sdlRenderer env) 1 1
   destroyRendererSafe (sdlRenderer env)
