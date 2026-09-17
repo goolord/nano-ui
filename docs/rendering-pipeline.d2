@@ -1,4 +1,4 @@
-# One runFrame cycle, then backend present when needsRedraw is true.
+# One runSessionLoop pass: wait for events, run a frame when a redraw is needed, present.
 # Render: d2 docs/rendering-pipeline.d2 docs/rendering-pipeline.svg
 
 vars: {
@@ -46,16 +46,16 @@ heading: {
   }
 }
 
-idle: Backend idle loop {
+idle: "runSessionLoop (NanoUI.Runner)" {
   class: box
   style.fill: "#ece7dc"
   style.stroke: "#8a8174"
   direction: down
 
-  poll: Poll input { class: box; style.fill: "#fffdf8"; style.stroke: "#8a8174" }
-  gate: needsRedraw? { class: gate }
-  skip: Keep last blit { class: box; style.fill: "#e4e0d6"; style.stroke: "#8a8174" }
-  present: Present frame { class: box; style.fill: "#fffdf8"; style.stroke: "#8a8174" }
+  poll: Wait for events { class: box; style.fill: "#fffdf8"; style.stroke: "#8a8174" }
+  gate: redraw needed? { class: gate }
+  skip: Keep last frame { class: box; style.fill: "#e4e0d6"; style.stroke: "#8a8174" }
+  present: Draw frame { class: box; style.fill: "#fffdf8"; style.stroke: "#8a8174" }
 
   poll -> gate
   gate -> skip: idle
@@ -91,7 +91,7 @@ frame: runFrameEff {
     style.fill: "#f4f7fb"
     style.stroke: "#3d5a80"
   }
-  paint: "5  Paint\nLayerBackground then LayerOverlay" {
+  paint: "5  Paint\nbackground, content, overlay, chrome layers" {
     class: box
     style.fill: "#c5d4e8"
     style.stroke: "#3d5a80"
@@ -125,8 +125,14 @@ hosts: Hosts {
     style.fill: "#eef7f2"
     style.stroke: "#2d6a4f"
   }
+  rgfw: "RGFW\nrenderArenaGl, swapBuffersGL" {
+    class: box
+    style.fill: "#eef7f2"
+    style.stroke: "#2d6a4f"
+  }
 }
 
 idle.present -> frame.reset: run frame
 frame.damage -> drawdata
 drawdata -> hosts.sdl
+drawdata -> hosts.rgfw

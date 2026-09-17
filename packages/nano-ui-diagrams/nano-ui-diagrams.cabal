@@ -1,10 +1,10 @@
 cabal-version:      3.4
 name:               nano-ui-diagrams
 version:            0.1.0.0
-synopsis:           Charts and diagrams drawings for nano-ui
+synopsis:           Charts and diagrams-lib drawings for nano-ui
 description:
     Places diagrams-lib drawings in nano-ui layouts and builds line, bar,
-    scatter, and area charts with axes, legends, and hover lookup.
+    scatter, area, and step charts with axes, legends, and hover lookup.
 license:            MIT
 license-file:       LICENSE
 author:             goolord

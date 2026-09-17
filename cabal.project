@@ -11,16 +11,11 @@ packages:
 tests: True
 benchmarks: True
 
--- Packages build at Cabal's default -O1. On the headless frame profiler the
--- core at -O1 matches the runtime of the previous -O2 build while compiling
--- about twice as fast; add `optimization: 2` locally for release profiling.
+-- Packages build at Cabal's default -O1, and the optimisation flags below are
+-- left off. docs/development.md ("Performance") has the measurements.
 package *
   profiling-detail: late
 
--- No specialisation, worker/wrapper, or field-unboxing flags: measured on the
--- headless frame profiler, -fspecialise-aggressively -flate-specialise
--- -fmax-worker-args=32 -funbox-strict-fields made the core ~12% slower at
--- runtime while adding compile time.
 package nano-ui
   ghc-options: -Werror
 

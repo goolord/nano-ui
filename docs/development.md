@@ -6,7 +6,8 @@ You need GHC 9.14 and Cabal. `nix develop` provides both, along with SDL3,
 SDL3_ttf, and pkg-config.
 
 `nano-ui-form` depends on ditto 0.5, which `cabal.project` builds from a
-checkout at `../ditto`.
+checkout at `../ditto`. Clone [ditto](https://github.com/goolord/ditto) next to
+this repository before building.
 
 ## Building and testing
 
@@ -24,7 +25,7 @@ fails the build instead of swapping.
 | `nano-ui-test` | Widgets, layout, input, focus, damage, and drawing, run headlessly frame by frame |
 | `text-buffer-spec` | The multi-line text buffer |
 | `nano-ui-inspection` | Compile-time checks that the vertex writers inline without dictionaries or tuples |
-| `nano-ui-rgfw-test` | RGFW input translation, the software rasteriser, and the glyph atlas |
+| `nano-ui-rgfw-test` | RGFW input translation, the glyph atlas, and frames drawn by a software rasteriser kept in the test suite |
 | `nano-ui-font-search-test`, `nano-ui-font-effects-test` | SDL font discovery, measurement, and handle lifetimes |
 | `nano-ui-diagrams-test` | Diagram conversion, tessellation, and charts |
 | `nano-ui-form-test` | Form scopes, validation, reset, and submission |
@@ -33,18 +34,31 @@ fails the build instead of swapping.
 Run one suite with `cabal test nano-ui-test --test-show-details=failures`.
 
 The headless suites don't exercise native presentation. After changing a
-backend, run its demo. The SDL demo also has a self-test that renders into a
-hidden window:
+backend, run its demo. The SDL demo, notepad, and log viewer each have a
+self-test that drives the app in a hidden window and exits:
 
 ```sh
 cabal run nano-ui-sdl-demo -- --selftest
+cabal run nano-ui-sdl-notepad -- --selftest
+cabal run nano-ui-sdl-logs -- --selftest
 ```
+
+The RGFW backend has its own demo, `cabal run nano-ui-rgfw-demo`.
 
 ### Flags
 
-- `nano-ui-sdl:sdl` builds the SDL backend. `cabal.project` turns it on.
+`cabal.project` turns on these flags:
+
+- `nano-ui-sdl:sdl` builds the SDL backend. `nano-ui-demo` and `nano-ui-form`
+  have their own `sdl` flag for the executables that need it.
 - `nano-ui-sdl:simd` compiles the draw-batch culler with AVX2. It only applies
-  on x86-64, and the resulting binary needs an AVX2 CPU.
+  on x86-64, and the resulting binary needs an AVX2 CPU. To build without it,
+  add this to `cabal.project.local`:
+
+  ```cabal
+  package nano-ui-sdl
+    flags: -simd
+  ```
 
 ## Repository layout
 
@@ -54,27 +68,28 @@ cabal run nano-ui-sdl-demo -- --selftest
 | `NanoUI/Widgets/` | One module per widget family |
 | `NanoUI/Emit.hs` | Reducer-style widgets |
 | `NanoUI/Monad.hs`, `NanoUI/Id.hs` | The `Ui` effect, widget ids, and keys |
-| `NanoUI/Hooks.hs`, `NanoUI/Store.hs`, `NanoUI/Context/` | Widget state |
+| `NanoUI/Hooks.hs`, `NanoUI/Store.hs`, `NanoUI/Context.hs`, `NanoUI/Context/` | Widget state and the frame context |
 | `NanoUI/Layout/` | Layout storage and the solver |
 | `NanoUI/Frame.hs`, `NanoUI/Frame/` | Per-frame input, focus, painting, and damage |
-| `NanoUI/Draw/` | Vertex arenas and the draw list |
+| `NanoUI/Draw.hs`, `NanoUI/Draw/` | Vertex arenas and the draw list |
 | `NanoUI/Runner.hs` | The event loop the backends share |
-| `NanoUI/Testing.hs` | The headless test harness |
+| `NanoUI/Testing.hs`, `NanoUI/Testing/` | The headless test harness |
 | `packages/nano-ui-sdl`, `packages/nano-ui-rgfw` | Window backends |
-| `scripts/` | Font subsetting, a Windows RGFW build, and profiling helpers |
+| `packages/nano-ui-rgfw-bindings` | RGFW bindings, with the C source |
+| `packages/nano-ui-diagrams`, `packages/nano-ui-form` | Charts and diagrams, and forms |
+| `packages/nano-ui-demo` | Example applications |
+| `scripts/` | Font subsetting (`prune_inter.py`, `prune_cozette.py`) and profiling helpers |
 
-Paths in the first column after the first row are under `packages/nano-ui/lib`.
+Paths in the first column from the second row to `NanoUI/Testing/` are under
+`packages/nano-ui/lib`.
 
 ## How a frame works
 
-![Rendering pipeline](rendering-pipeline.svg)
+The README's "How it works" section lists the steps of a frame, and
+[rendering-pipeline.svg](rendering-pipeline.svg) (source:
+`rendering-pipeline.d2`) draws them with the backend loop around them.
 
-The backend waits for input and runs a frame only when something needs
-redrawing. A frame resets the arenas and runs the view, where widgets add
-layout nodes and write to the widget store. Layout is then solved, pointer and
-keyboard input is resolved against the new geometry, widgets are painted into
-vertex arenas, and damage is computed against the previous frame. The backend
-presents the resulting draw list.
+![Rendering pipeline](rendering-pipeline.svg)
 
 ## Conventions
 
@@ -86,8 +101,8 @@ presents the resulting draw list.
   matching `recordStore*`. New inputs should use the same pair, so edits made
   between frames survive a caller that passes the previous result back.
 - Local state goes through `NanoUI.Hooks`. Keyboard handling checks
-  `Widgets.Behavior.keyboardFocused` first, so disabled widgets and modals are
-  respected.
+  `NanoUI.Widgets.Behavior.keyboardFocused` first, so disabled widgets and
+  modals are respected.
 - Damage is part of correctness: a state change can need a follow-up frame
   without any new input. Add a test when you change it.
 - Backend-independent event sequencing lives in `NanoUI.Runner`. A backend
@@ -114,21 +129,30 @@ package nano-ui
 - Keep `INLINE` for small bodies and helpers inside per-vertex, per-glyph, or
   per-node loops. A large inlined body slows every importer's build for little
   runtime gain.
-- `-fspecialise-aggressively`, `-flate-specialise`, `-fmax-worker-args`, and
-  `-funbox-strict-fields` made the core slower at runtime as well as slower to
-  build. Leave them off.
+- `-fspecialise-aggressively`, `-flate-specialise`, `-fmax-worker-args=32`, and
+  `-funbox-strict-fields` made the core about 12% slower on the headless
+  profiler as well as slower to build. Leave them off.
 - A custom widget without a `widgetContent` key has its ops rebuilt and
   compared every frame, since only building them shows whether what it draws
   changed. That is right for a handful of ops and wasteful for thousands: give
   an op-heavy drawing a key covering everything it reads, and an unchanged key
   skips the rebuild and the repaint. `contentKey` hashes numbers into one.
-- `cabal run nano-ui-profile -- +RTS -s` runs frames headlessly. It takes a
-  scene: `widgets` (the default), `canvas` for an op-heavy unkeyed custom
-  widget, and `canvas-keyed` for the same drawing with a content key.
-  `scripts/profile/` has helpers for cost-centre profiles and for timing the
-  SDL demo's real event loop.
 - Compare compile times per module with
   `cabal build <target> --ghc-options="-ddump-timings -ddump-to-file"`.
+
+### Profilers and benchmarks
+
+| Command | Runs |
+| --- | --- |
+| `cabal run nano-ui-profile -- <scene> +RTS -s` | Headless frames. Scenes: `widgets` (the default), `canvas` (an op-heavy unkeyed custom widget), `canvas-keyed` (the same drawing with a content key), `textarea` (typing into a 100,000-line text area), and `svg` (icon rasterization) |
+| `cabal run nano-ui-sdl-profile` | The SDL demo's UI in a hidden window: the full demo, each tab, widget microbenchmarks, and scaling |
+| `cabal run nano-ui-rgfw-profile` | The RGFW demo's frame loop on the OpenGL path in a hidden window |
+| `cabal run nano-ui-sdl-anim` | Tween and spring animations in an SDL window, for checking animation pacing by eye |
+| `cabal bench nano-ui-id-bench` | Widget id generation; fails if a frame of ids allocates |
+| `cabal bench nano-ui-sdl-bench` | `runFrame` and SDL drawing for small, medium, and large UIs |
+
+`scripts/profile/` has helpers for cost-centre profiles and for timing the SDL
+demo's real event loop.
 
 ## Releasing
 

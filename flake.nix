@@ -1,5 +1,5 @@
 {
-  description = "nano-ui: purely functional immediate-mode GUI for Haskell";
+  description = "nano-ui: immediate-mode GUI toolkit for Haskell";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";

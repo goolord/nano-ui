@@ -5,8 +5,9 @@ An immediate-mode GUI toolkit for Haskell.
 A view is a function that runs every frame. Each widget is an ordinary effect
 that adds a layout node, reads this frame's input, and returns a result: `Bool`
 for a button, the new value for an input. There are no widget objects to keep
-and no callbacks to register. Widget state lives in a store keyed by where the
-widget was called, or in a model you pass through the view.
+and no callbacks to register. Widget state lives in a store keyed by each
+widget's position among its siblings (or by a key you give it with `withKey`),
+or in a model you pass through the view.
 
 ```haskell
 {-# LANGUAGE OverloadedStrings #-}
@@ -80,11 +81,15 @@ greeter = columnWith (gap 8 . padAll 16) $ do
   labelWith (fontSize size) (if shout then T.toUpper greeting else greeting)
 ```
 
-If you are a fan of the elm architecture, the widgets in
-`NanoUI.Emit` emit messages instead of returning
-values, and `runSdlAppReduce` folds them into the model:
+For an Elm-style update function, the widgets in `NanoUI.Emit` emit messages
+instead of returning values, and `runSdlAppReduce` folds them into the model:
 
 ```haskell
+{-# LANGUAGE OverloadedStrings #-}
+
+import Data.Text qualified as T
+import NanoUI
+import NanoUI.Backend.Sdl (defaultSdlOptions, runSdlAppReduce)
 import NanoUI.Emit qualified as Emit
 
 data Msg = Increment | Decrement
@@ -114,7 +119,8 @@ stack. A frame:
    nodes and read and write the widget store.
 2. Solves layout.
 3. Resolves pointer, keyboard, and focus against the new geometry.
-4. Paints into pinned vertex and index buffers, background layer then overlays.
+4. Paints into pinned vertex and index buffers, in background, content,
+   overlay, and chrome layers.
 5. Computes damage against the previous frame and hands the draw list to the
    backend.
 
@@ -129,7 +135,7 @@ suite checks that the vertex writers compile without dictionaries or tuples.
 | --- | --- |
 | `nano-ui` | Widgets, layout, input handling, and the draw list |
 | `nano-ui-sdl` | Window backend on SDL3, with TrueType fonts, installed-font lookup, and native file dialogs |
-| `nano-ui-rgfw` | Lightweight window backend on RGFW and OpenGL 3.2, with a bundled bitmap font and no system dependencies beyond windowing |
+| `nano-ui-rgfw` | Window backend on RGFW and OpenGL 3.2, with a bundled bitmap font and no system dependencies beyond windowing |
 | `nano-ui-rgfw-bindings` | Haskell bindings to RGFW |
 | `nano-ui-diagrams` | Line, bar, scatter, and area charts, and drawing with [diagrams](https://diagrams.github.io/) |
 | `nano-ui-form` | Validated forms built on [ditto](https://hackage.haskell.org/package/ditto) |
@@ -137,8 +143,10 @@ suite checks that the vertex writers compile without dictionaries or tuples.
 
 ## Running the demos
 
-You need GHC 9.14 and Cabal. The SDL backend also needs SDL3 and SDL3_ttf.
-`nix develop` sets all of this up.
+You need GHC 9.14 and Cabal. The SDL backend also needs SDL3, SDL3_ttf, and
+pkg-config. `nix develop` sets these up. `cabal.project` builds
+`nano-ui-form`'s ditto dependency from a checkout at `../ditto`, so clone
+[ditto](https://github.com/goolord/ditto) next to this repository first.
 
 ```sh
 cabal run nano-ui-sdl-demo       # widget and chart tour
