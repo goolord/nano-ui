@@ -278,7 +278,9 @@ buildTextInput styleIdx layout placeholder value mDebounceMs = do
   ctx <- askContext
   let key = intKey wid
   _ <- uiIO $ adoptStoreText ctx wid key value
-  (oldText, newText, isFocus, pulse) <- editTextField wid (textInputMode styleIdx) value Nothing
+  -- Both modes are constants, so an idle field allocates no mode record.
+  let mode = if textInputPasswordMode styleIdx then singleLineMode {modeCopyable = False} else singleLineMode
+  (oldText, newText, isFocus, pulse) <- editTextField wid mode value Nothing
   uiIO $ recordStoreText ctx key newText
   inp <- askInput
   let submitted = isFocus && KeyEnter `elem` inputKeys inp
