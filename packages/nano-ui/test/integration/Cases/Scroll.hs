@@ -31,7 +31,7 @@ import NanoUI
 import NanoUI.Context (ctxNodeArena, setDrawSnapScale)
 import NanoUI.Layout.Arena
   ( NodeType (..)
-  , arenaCount
+  , findNodeM
   , getNodeValue
   , getNodeType
   , getRect
@@ -175,8 +175,7 @@ runPageScrollBackdropCoverageTest ctx failed = do
       assert failed covered
 
 runScrollTopClipTest :: Context -> IORef Int -> IO ()
-runScrollTopClipTest _ failed = do
-  ctx <- newPixelContext
+runScrollTopClipTest ctx failed = do
   cbRef <- newIORef Nothing
   let inp0 = withInputOff 400 160
       ui = do
@@ -475,8 +474,7 @@ whitePixelV = 1.5 / 1024.0
 -- trailing padding extends the scroll range only once an axis genuinely
 -- overflows.
 run2DPadFillOverflowTest :: Context -> IORef Int -> IO ()
-run2DPadFillOverflowTest _ failed = do
-  ctx <- newPixelContext
+run2DPadFillOverflowTest ctx failed = do
   let inp0 = withInput 320 240
       ui =
         scrollArea2D (padAll 6 . fixedH 168 . fillW) $
@@ -512,36 +510,23 @@ overflowEps = 0.5
 scrollNodeState :: Context -> WidgetId -> Bool -> IO (Maybe (Float, Float))
 scrollNodeState ctx wid is2D = do
   let na = ctxNodeArena ctx
-  n <- arenaCount na
-  finds <-
-    fmap
-      (concat @[])
-      ( forM [0 .. n - 1] $ \i -> do
-          nt <- getNodeType na i
-          if nt /= NodeScrollContainer
-            then pure []
-            else do
-              w' <- getWidgetId na i
-              if w' /= wid
-                then pure []
-                else do
-                  contentMain <-
-                    if is2D
-                      then getScrollContentW na i
-                      else getNodeValue na i
-                  (_, _, rw, rh) <- getRect na i
-                  let inner = if is2D then rw - padTestBoth else rh - padTestBoth
-                  pure [(contentMain, inner)]
-      )
-  pure (listToMaybe finds)
+  found <- findNodeM na $ \i -> do
+    nt <- getNodeType na i
+    if nt == NodeScrollContainer then (== wid) <$> getWidgetId na i else pure False
+  forM found $ \i -> do
+    contentMain <-
+      if is2D
+        then getScrollContentW na i
+        else getNodeValue na i
+    (_, _, rw, rh) <- getRect na i
+    pure (contentMain, if is2D then rw - padTestBoth else rh - padTestBoth)
 
 -- The other side of the pad fix: a padded 2D scroller whose child really is
 -- wider and taller than the viewport must still report overflow on both
 -- axes, wheel-scroll vertically, and let scrolling reach the trailing
 -- padding at the end (the range extends past the last child by padB).
 run2DPadOverflowScrollsTest :: Context -> IORef Int -> IO ()
-run2DPadOverflowScrollsTest _ failed = do
-  ctx <- newPixelContext
+run2DPadOverflowScrollsTest ctx failed = do
   let inp0 = (withInput 320 240) {inputMousePos = V2 100 100}
       ui =
         scrollArea2D (padAll 6 . fixedH 168 . fillW) $
@@ -575,8 +560,7 @@ run2DPadOverflowScrollsTest _ failed = do
 -- The wheel covers the configured step per notch: the context's by default,
 -- and the scroller's own once it is given one.
 runScrollStepTest :: Context -> IORef Int -> IO ()
-runScrollStepTest _ failed = do
-  ctx <- newPixelContext
+runScrollStepTest ctx failed = do
   let inp0 = withInput 200 120
       ui = scrollArea (fillW . fixedH 80) (column (replicateM_ 16 (label "scroll line")))
   setScrollTuning ctx defaultScrollTuning {scrollWheelStep = 40}
@@ -600,8 +584,7 @@ runScrollStepTest _ failed = do
 -- With a glide time set, a notch eases onto its target over several frames,
 -- and the frame loop counts the scroller as animating until it lands.
 runScrollSmoothTest :: Context -> IORef Int -> IO ()
-runScrollSmoothTest _ failed = do
-  ctx <- newPixelContext
+runScrollSmoothTest ctx failed = do
   let inp0 = withInput 200 120
       ui = scrollArea (fillW . fixedH 80) (column (replicateM_ 16 (label "scroll line")))
   setScrollTuning ctx defaultScrollTuning {scrollWheelStep = 60, scrollSmoothTime = 0.2}
@@ -637,8 +620,7 @@ runScrollSmoothTest _ failed = do
 -- The metrics a scroller publishes each frame, and the commands that read
 -- them: to the end, back to the start, and by whole pages.
 runScrollMetricsTest :: Context -> IORef Int -> IO ()
-runScrollMetricsTest _ failed = do
-  ctx <- newPixelContext
+runScrollMetricsTest ctx failed = do
   let inp0 = withInput 200 160
       ui = scrollArea (fillW . fixedH 80) (column (replicateM_ 16 (label "scroll line")))
   (sid, ()) <- warmup2 ctx inp0 ui
@@ -670,8 +652,7 @@ runScrollMetricsTest _ failed = do
 
 -- Scrolling a widget into view, by widget and by content rectangle.
 runScrollIntoViewTest :: Context -> IORef Int -> IO ()
-runScrollIntoViewTest _ failed = do
-  ctx <- newPixelContext
+runScrollIntoViewTest ctx failed = do
   let inp0 = withInput 200 160
       ui =
         scrollArea (fillW . fixedH 80) $
@@ -712,8 +693,7 @@ runScrollIntoViewTest _ failed = do
 -- scroller must not coast to an offset the shorter content cannot reach and
 -- sit there showing nothing.
 runScrollGlideClampTest :: Context -> IORef Int -> IO ()
-runScrollGlideClampTest _ failed = do
-  ctx <- newPixelContext
+runScrollGlideClampTest ctx failed = do
   rows <- newIORef (40 :: Int)
   let inp0 = withInput 200 120
       ui = do

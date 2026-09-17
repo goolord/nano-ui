@@ -63,7 +63,7 @@ import Cases.Window
 import Cases.Keyboard
 import Cases.Cache
 import Cases.NumericInput
-import Control.Monad (forM, forM_, void, when)
+import Control.Monad (forM_, void, when)
 import Control.Concurrent (threadDelay)
 import Data.ByteString qualified as BS
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
@@ -79,7 +79,7 @@ import NanoUI.Emit qualified as Emit
 import NanoUI.Layout.Arena
   ( NodeType (..)
   , arenaArrays
-  , arenaCount
+  , foldNodesM
   , getNodeType
   , getNodeValue
   , tagNodeType
@@ -384,15 +384,10 @@ runCheckboxInitialTest ctx failed = do
 assertCheckboxNodeValue :: IORef Int -> Context -> Float -> IO ()
 assertCheckboxNodeValue failed ctx expected = do
   let na = ctxNodeArena ctx
-  n <- arenaCount na
-  vals <- forM [0 .. n - 1] $ \i -> do
+  vals <- foldNodesM na (\acc i -> do
     nt <- getNodeType na i
-    case nt of
-      NodeCheckbox -> do
-        v <- getNodeValue na i
-        pure [v]
-      _ -> pure []
-  case concat vals of
+    if nt == NodeCheckbox then (: acc) <$> getNodeValue na i else pure acc) []
+  case vals of
     [v] -> assertEq failed v expected
     vs -> assert failed (vs == [expected])
 
@@ -479,8 +474,7 @@ runGrowSplitTest ctx failed = do
     forM_ (zip got want) $ \(g, w) -> assert failed (abs (g - w) <= 0.5)
 
 runLabelAlignEndTest :: Context -> IORef Int -> IO ()
-runLabelAlignEndTest _ failed = do
-  ctx <- newPixelContext
+runLabelAlignEndTest ctx failed = do
   let
     fm = ctxFontMetrics ctx
     tw = fmAdvance fm ' ' * 2

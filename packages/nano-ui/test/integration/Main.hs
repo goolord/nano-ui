@@ -94,7 +94,7 @@ testSpecs =
   , TestSpec "grow-split" False runGrowSplitTest
   , TestSpec "percent-gap-shrink" False runPercentGapShrinkTest
   , TestSpec "aspect-layout" False runAspectLayoutTest
-  , TestSpec "label-align-end" False runLabelAlignEndTest
+  , TestSpec "label-align-end" True runLabelAlignEndTest
   , TestSpec "responsive-wrap" True runResponsiveWrapTest
   , TestSpec "kv-multiline-height" True runKvMultilineHeightTest
   , TestSpec "separator-span" False runSeparatorSpanTest
@@ -241,26 +241,26 @@ testSpecs =
   , TestSpec "scroll-scrolled-out" False runScrolledOutImmunityTest
   , TestSpec "scroll-lockstep-probe" False runScrollLockstepProbeTest
   , TestSpec "page-scroll-backdrop-coverage" False runPageScrollBackdropCoverageTest
-  , TestSpec "scroll-2d-pad-fill-overflow" False run2DPadFillOverflowTest
-  , TestSpec "scroll-2d-pad-overflow-scrolls" False run2DPadOverflowScrollsTest
-  , TestSpec "scroll-step" False runScrollStepTest
-  , TestSpec "scroll-smooth" False runScrollSmoothTest
-  , TestSpec "scroll-metrics" False runScrollMetricsTest
-  , TestSpec "scroll-into-view" False runScrollIntoViewTest
-  , TestSpec "scroll-glide-clamp" False runScrollGlideClampTest
+  , TestSpec "scroll-2d-pad-fill-overflow" True run2DPadFillOverflowTest
+  , TestSpec "scroll-2d-pad-overflow-scrolls" True run2DPadOverflowScrollsTest
+  , TestSpec "scroll-step" True runScrollStepTest
+  , TestSpec "scroll-smooth" True runScrollSmoothTest
+  , TestSpec "scroll-metrics" True runScrollMetricsTest
+  , TestSpec "scroll-into-view" True runScrollIntoViewTest
+  , TestSpec "scroll-glide-clamp" True runScrollGlideClampTest
   -- Tables
   , TestSpec "table-sort" False runTableSortTest
   , TestSpec "table-reorder" True runTableReorderTest
-  , TestSpec "table-scroll-reveal" False runTableScrollRevealTest
-  , TestSpec "table-shared-scroll-metrics" False runTableSharedScrollMetricsTest
-  , TestSpec "page-wheel-above-table" False runPageWheelAboveTableTest
-  , TestSpec "table-wrap-row-stretch" False runTableWrapRowStretchTest
+  , TestSpec "table-scroll-reveal" True runTableScrollRevealTest
+  , TestSpec "table-shared-scroll-metrics" True runTableSharedScrollMetricsTest
+  , TestSpec "page-wheel-above-table" True runPageWheelAboveTableTest
+  , TestSpec "table-wrap-row-stretch" True runTableWrapRowStretchTest
   , TestSpec "table-first-col" False runTableFirstColWidthTest
   , TestSpec "table-fill-width" False runTableFillWidthTest
   , TestSpec "table-cell-pad" True runTableCellPadTest
   , TestSpec "table-resize-overflow" True runTableResizeOverflowTest
   , TestSpec "table-col-resize-body" False runTableColResizeDemoReproTest
-  , TestSpec "table-hbar-reach" False runTableHBarReachTest
+  , TestSpec "table-hbar-reach" True runTableHBarReachTest
   -- Tabs
   , TestSpec "tabs-laziness" False runTabsLazinessTest
   , TestSpec "tabs-emit" False runTabsEmitTest

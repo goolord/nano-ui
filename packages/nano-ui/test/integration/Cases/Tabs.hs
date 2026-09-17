@@ -10,7 +10,7 @@ module Cases.Tabs
   , runTabResponseForwardingTest
   ) where
 
-import Control.Monad (forM_, replicateM)
+import Control.Monad (forM, forM_, replicateM)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef, writeIORef)
 import Data.Maybe (isJust)
 import Data.Text qualified as T
@@ -29,7 +29,7 @@ import NanoUI.Testing.Harness
   )
 import NanoUI.Context (Context (..))
 import NanoUI.Emit qualified as Emit
-import NanoUI.Layout.Arena (arenaCount, getRect, getText, getWidgetId)
+import NanoUI.Layout.Arena (arenaCount, findNodeM, getRect, getText, getWidgetId)
 
 data DummyTab = TabA | TabB | TabC
   deriving (Eq, Show)
@@ -134,17 +134,10 @@ runTabsClosableTest ctx failed = do
 findCloseButtonRect :: Context -> IO (Maybe Rect)
 findCloseButtonRect ctx = do
   let na = ctxNodeArena ctx
-  n <- arenaCount na
-  let go i
-        | i >= n = pure Nothing
-        | otherwise = do
-            txt <- getText na i
-            if "\215" `T.isInfixOf` txt
-              then do
-                (x, y, w, h) <- getRect na i
-                pure (Just (Rect x y w h))
-              else go (i + 1)
-  go 0
+  found <- findNodeM na (fmap ("\215" `T.isInfixOf`) . getText na)
+  forM found $ \i -> do
+    (x, y, w, h) <- getRect na i
+    pure (Rect x y w h)
 
 -- The public disabled flag covers both the header and its close control,
 -- including retained keyboard focus when an enabled tab becomes disabled.

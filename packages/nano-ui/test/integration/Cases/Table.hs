@@ -13,12 +13,12 @@ module Cases.Table
   , runTableWrapRowStretchTest
   ) where
 
-import Control.Monad (forM, forM_, replicateM_, void)
+import Control.Monad (forM, forM_, replicateM_, void, (<=<))
 import Data.Bits ((.&.))
 import Data.IORef (IORef)
 import Data.IntMap.Strict qualified as IM
 import Data.List (sortBy, sortOn, tails)
-import Data.Maybe (catMaybes, isJust, listToMaybe)
+import Data.Maybe (isJust, listToMaybe)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Primitive.SmallArray qualified as SA
@@ -28,7 +28,9 @@ import NanoUI.Layout.Arena
   ( DirTag (..)
   , NodeIdx
   , NodeType (..)
-  , arenaCount
+  , NodeArena
+  , findNodeM
+  , foldNodesM
   , getClipRect
   , getDirection
   , getNodeType
@@ -100,8 +102,7 @@ rowLabelIndex t = readMaybe (T.unpack (T.takeWhile (/= ' ') (T.drop 4 t)))
 -- page scroller only. Hit rects that drift by the page's scroll offset made
 -- the wheel grab the table's phantom rect and scroll the table instead.
 runPageWheelAboveTableTest :: Context -> IORef Int -> IO ()
-runPageWheelAboveTableTest _ failed = do
-  ctx <- newPixelContext
+runPageWheelAboveTableTest ctx failed = do
   let inp0 = withInput 320 220
       wheelAt = inp0 {inputMousePos = V2 160 80, inputScroll = V2 0 5}
       ui = scrollArea (fillW . fixedH 200 . gap 0) $ do
@@ -138,8 +139,7 @@ bottomRowIndex spans =
 -- that only translated the pre-scroll rows left the revealed strip without
 -- geometry (stale pixels under the damage clip).
 runTableScrollRevealTest :: Context -> IORef Int -> IO ()
-runTableScrollRevealTest _ failed = do
-  ctx <- newPixelContext
+runTableScrollRevealTest ctx failed = do
   let inp0 = (withInput 320 220) {inputMousePos = V2 40 80}
       ui = do
         (tableSort, _) <- useTableSort (SortCol 0 SortAsc)
@@ -179,8 +179,7 @@ runTableScrollRevealTest _ failed = do
 -- cell in the row must stretch to the same height so stripe backgrounds and
 -- row borders span the full row instead of leaving a gap.
 runTableWrapRowStretchTest :: Context -> IORef Int -> IO ()
-runTableWrapRowStretchTest _ failed = do
-  ctx <- newPixelContext
+runTableWrapRowStretchTest ctx failed = do
   let inp0 = (withInput 700 400) {inputMousePos = V2 (-40) (-40)}
       cfg = defaultTableConfig {tableColSizes = [ColFixed 280, ColFixed 90]}
       wrapCols = headed "Name" fst <> headed "Notes" snd
@@ -202,21 +201,16 @@ runTableWrapRowStretchTest _ failed = do
   _ <- runFrame ctx inp0 ui
   _ <- runFrame ctx inp0 ui
   let na = ctxNodeArena ctx
-  n <- arenaCount na
-  cells <-
-    fmap
-      concat
-      ( forM [0 .. n - 1] $ \i -> do
-          nt <- getNodeType na i
-          if nt == NodeText
-            then do
-              (_, y, w, h) <- getRect na i
-              -- Body cells sit below the header band and have real width
-              -- (both columns are wider than 50px; the 90px Notes column
-              -- wraps its long text and drives the row height).
-              pure [(y, [h]) | y > 25 && w > 50]
-            else pure []
-      )
+  cells <- foldNodesM na (\acc i -> do
+    nt <- getNodeType na i
+    if nt /= NodeText
+      then pure acc
+      else do
+        (_, y, w, h) <- getRect na i
+        -- Body cells sit below the header band and have real width (both
+        -- columns are wider than 50px; the 90px Notes column wraps its long
+        -- text and drives the row height).
+        pure (if y > 25 && w > 50 then (y, [h]) : acc else acc)) []
   -- Cells of one row share the same top y; every row group must be uniform
   -- (all cells stretch to the row height).
   let rowBands = IM.toAscList (IM.fromListWith (++) [(round y, hs) | (y, hs) <- cells])
@@ -297,47 +291,16 @@ runTableResizeOverflowTest ctx failed = do
 
 -- | Leftmost table-header button rect.
 headerButtonRect :: Context -> IO (Maybe Rect)
-headerButtonRect ctx = do
-  let na = ctxNodeArena ctx
-  n <- arenaCount na
-  rects <-
-    fmap
-      catMaybes
-      ( forM [0 .. n - 1] $ \i -> do
-          nt <- getNodeType na i
-          if nt /= NodeButton
-            then pure Nothing
-            else do
-              si <- getStyleIdx na i
-              if not (isTableHeaderStyleIdx si)
-                then pure Nothing
-                else do
-                  (x, y, w, h) <- getRect na i
-                  pure (Just (Rect x y w h))
-      )
-  pure (listToMaybe (sortOn rectX rects))
+headerButtonRect ctx = listToMaybe <$> headerButtonRects ctx
 
 -- | Content clip of the header row scroller (the Row-direction one).
 headerScrollerClip :: Context -> IO (Maybe Rect)
 headerScrollerClip ctx = do
   let na = ctxNodeArena ctx
-  n <- arenaCount na
-  found <-
-    fmap
-      catMaybes
-      ( forM [0 .. n - 1] $ \i -> do
-          nt <- getNodeType na i
-          if nt /= NodeScrollContainer
-            then pure Nothing
-            else do
-              d <- getDirection na i
-              if d /= DirRow
-                then pure Nothing
-                else Just <$> getClipRect na i
-      )
-  pure $ case found of
-    c : _ -> c
-    [] -> Nothing
+  found <- findNodeM na $ \i -> do
+    nt <- getNodeType na i
+    if nt == NodeScrollContainer then (== DirRow) <$> getDirection na i else pure False
+  maybe (pure Nothing) (getClipRect na) found
 
 isTableHeaderStyleIdx :: Int -> Bool
 isTableHeaderStyleIdx si = si .&. 0x80000000 /= 0
@@ -605,42 +568,22 @@ demoPeopleRows =
 headerButtonRects :: Context -> IO [Rect]
 headerButtonRects ctx = do
   let na = ctxNodeArena ctx
-  n <- arenaCount na
-  rects <-
-    fmap
-      catMaybes
-      ( forM [0 .. n - 1] $ \i -> do
-          nt <- getNodeType na i
-          if nt /= NodeButton
-            then pure Nothing
-            else do
-              si <- getStyleIdx na i
-              if not (isTableHeaderStyleIdx si)
-                then pure Nothing
-                else do
-                  (x, y, w, h) <- getRect na i
-                  pure (Just (Rect x y w h))
-      )
+  rects <- foldNodesM na (\acc i -> do
+    header <- isHeaderButton na i
+    if header then (\(x, y, w, h) -> Rect x y w h : acc) <$> getRect na i else pure acc) []
   pure (sortOn rectX rects)
+
+isHeaderButton :: NodeArena -> NodeIdx -> IO Bool
+isHeaderButton na i = do
+  nt <- getNodeType na i
+  if nt == NodeButton then isTableHeaderStyleIdx <$> getStyleIdx na i else pure False
 
 -- | Bottom edge of the table pane: from the first header button, walk up to
 -- the enclosing panel and return its bottom Y.
 tableBodyBottom :: Context -> IO Float
 tableBodyBottom ctx = do
   let na = ctxNodeArena ctx
-  n <- arenaCount na
-  let findBtn i
-        | i >= n = pure Nothing
-        | otherwise = do
-            nt <- getNodeType na i
-            if nt /= NodeButton
-              then findBtn (i + 1)
-              else do
-                si <- getStyleIdx na i
-                if not (isTableHeaderStyleIdx si)
-                  then findBtn (i + 1)
-                  else pure (Just i)
-      walkUp i
+  let walkUp i
         | i < 0 = pure 0
         | otherwise = do
             nt <- getNodeType na i
@@ -649,7 +592,7 @@ tableBodyBottom ctx = do
               else do
                 (_, py, _, ph) <- getRect na i
                 pure (py + ph)
-  findBtn 0 >>= maybe (pure 0) walkUp
+  findNodeM na (isHeaderButton na) >>= maybe (pure 0) walkUp
 
 -- | The body (unfrozen) v-scroller: a Column-direction 2D scroller with
 -- style bits "both policies Auto, clamp set" (shared predicate for the
@@ -671,39 +614,17 @@ isBodyScroller ctx i = do
 bodyScrollerRect :: Context -> IO (Maybe Rect)
 bodyScrollerRect ctx = do
   let na = ctxNodeArena ctx
-  n <- arenaCount na
-  finds <-
-    fmap
-      (concat @[])
-      ( forM [0 .. n - 1] $ \i -> do
-          hit <- isBodyScroller ctx i
-          if not hit
-            then pure []
-            else do
-              (x, y, w, h) <- getRect na i
-              pure [Rect x y w h]
-      )
-  pure (listToMaybe finds)
+  found <- findNodeM na (isBodyScroller ctx)
+  forM found $ \i -> do
+    (x, y, w, h) <- getRect na i
+    pure (Rect x y w h)
 
 -- | The body scroller's 2D offset.
 bodyOffset :: Context -> IO V2
 bodyOffset ctx = do
   let na = ctxNodeArena ctx
-  n <- arenaCount na
-  found <-
-    fmap
-      (concat @[])
-      ( forM [0 .. n - 1] $ \i -> do
-          hit <- isBodyScroller ctx i
-          if not hit
-            then pure []
-            else do
-              wid <- getWidgetId na i
-              pure [wid]
-      )
-  case found of
-    (wid : _) -> getScrollOffset2D ctx wid
-    [] -> pure (V2 0 0)
+  found <- findNodeM na (isBodyScroller ctx)
+  maybe (pure (V2 0 0)) (getScrollOffset2D ctx <=< getWidgetId na) found
 
 -- | Horizontal reach: at the end of the horizontal scroll the last column must
 -- clear the vertical scrollbar lane, not stop with its right edge under the
@@ -711,8 +632,7 @@ bodyOffset ctx = do
 -- so the reachable range must subtract that lane (regression: the range used
 -- the full padding box, leaving the last column partly hidden).
 runTableHBarReachTest :: Context -> IORef Int -> IO ()
-runTableHBarReachTest _ failed = do
-  ctx <- newPixelContext
+runTableHBarReachTest ctx failed = do
   let inp0 = (withInput 700 320) {inputMousePos = V2 300 160}
       cfg = defaultTableConfig {tableColSizes = [ColFixed 500, ColFixed 500]}
       ui = do
@@ -733,15 +653,11 @@ runTableHBarReachTest _ failed = do
     Nothing -> assert failed False
     Just (Rect bx by bw bh) -> do
       let na = ctxNodeArena ctx
-      n <- arenaCount na
-      contentWs <-
-        fmap concat $
-          forM [0 .. n - 1] $ \i -> do
-            hit <- isBodyScroller ctx i
-            if hit then (: []) <$> getScrollContentW na i else pure []
-      case contentWs of
-        [] -> assert failed False
-        (contentW : _) -> do
+      scroller <- findNodeM na (isBodyScroller ctx)
+      case scroller of
+        Nothing -> assert failed False
+        Just i -> do
+          contentW <- getScrollContentW na i
           assertGt failed contentW bw
           let wheel = inp0 {inputMousePos = V2 (bx + bw / 2) (by + bh / 2), inputScroll = V2 50 0}
           replicateM_ 20 (runFrame ctx wheel ui)
@@ -770,8 +686,7 @@ runTableHBarReachTest _ failed = do
 -- as long as the table is on screen. One publishes; what it publishes is the
 -- body scroller, whole, and it holds still from frame to frame.
 runTableSharedScrollMetricsTest :: Context -> IORef Int -> IO ()
-runTableSharedScrollMetricsTest _ failed = do
-  ctx <- newPixelContext
+runTableSharedScrollMetricsTest ctx failed = do
   let inp0 = (withInput 320 220) {inputMousePos = V2 40 80}
       cfg = defaultTableConfig {tableFreezeCols = 1}
       ui = do
@@ -795,9 +710,8 @@ runTableSharedScrollMetricsTest _ failed = do
 tableBodyScrollWid :: Context -> IO (Maybe WidgetId)
 tableBodyScrollWid ctx = do
   let na = ctxNodeArena ctx
-  n <- arenaCount na
-  wids <- fmap catMaybes $ forM [0 .. n - 1] $ \i -> do
+  wids <- reverse <$> foldNodesM na (\acc i -> do
     nt <- getNodeType na i
-    if nt == NodeScrollContainer then Just <$> getWidgetId na i else pure Nothing
+    if nt == NodeScrollContainer then (: acc) <$> getWidgetId na i else pure acc) []
   pure (listToMaybe [w | w : rest <- tails wids, w `elem` rest])
 
