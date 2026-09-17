@@ -23,7 +23,7 @@ where
 
 import Colonnade (Colonnade, Headed (..), headed, headless)
 import Colonnade.Encode qualified as Encode
-import Control.Monad (foldM, forM_, unless, void, when)
+import Control.Monad (foldM, forM, forM_, unless, void, when)
 import Data.Char (isDigit)
 import Data.Foldable (toList)
 import Data.IntSet (IntSet)
@@ -44,28 +44,15 @@ import NanoUI.Hooks (useInt)
 import NanoUI.Font (ScrollBarSlot (..), scrollBarGutter, tableCellInset, lineWidthIO)
 import NanoUI.Id (WidgetId (..))
 import NanoUI.Input (Input (..), inputMouseDown, inputMousePos, inputMousePressed, inputMouseReleased)
+import NanoUI.Layout.Arena (NodeType (..))
 import NanoUI.Monad (Ui, askContext, askInput, nextId, uiIO, withKey)
 import NanoUI.Store (WidgetStore (..), Slot (..), slotKey)
 import NanoUI.Style (AlignX (..), AlignY (..), Direction (..), FontVariant (..), Layout (..), Padding (..), Sizing (..), defaultLayout, fillH, fillW, tight)
 import Data.Bits ((.|.), shiftL)
-import NanoUI.Types (Rect (..), clamp, rectH, rectW, rectY, v2X, V2 (..))
+import NanoUI.Types (Rect (..), clamp, rectH, rectW, rectY, v2X, V2 (..), rectContains)
 import NanoUI.WidgetText (buttonFlagTable, tableHeaderLabel, tableSortReserve)
 import NanoUI.Widgets.Behavior (dragThresholdPx, useReorder)
-import NanoUI.Widgets.Combinators
-  ( buttonStyled
-  , fitList
-  , gridColumnsLay
-  , headerAtPoint
-  , headerEdgeHit
-  , keyedRowLay
-  , listClipper
-  , minColW
-  , normalizeOrder
-  , rebuildOrder
-  , setAt
-  , stripedRow
-  , visibleCols
-  )
+import NanoUI.Widgets.Combinators (buttonStyled)
 import NanoUI.Widgets.Layout (column', panel', row', scrollAreaIdConfigured, separator, spacer)
 import NanoUI.Frame.Scroll.Geometry (ScrollConfig (..), ScrollPolicy (..), scrollHorizontalHidden, scrollVerticalAuto, scrollVerticalHidden)
 import NanoUI.Widgets.Node
@@ -77,6 +64,7 @@ import NanoUI.Widgets.Node
   , setChanged
   , setClicked
   , tagContainer
+  , addWidgetStyled
   )
 
 -- | True if the first n column sizes contain ColStretch.
@@ -161,7 +149,10 @@ tableSplitPanes tp =
   -- Header row, its rule, the pinned rows and their rule: the same in both
   -- panes.
   headerBlock idxs = do
-    hs <- keyedRowLay (gridRowLay idxs) idxs $ \i -> column' (colBox i) (tpRenderHeader tp i)
+    hs <- row' (gridRowLay idxs) $
+      forM (zip [0 :: Int ..] idxs) $ \(k, i) -> do
+        when (k > 0) $ void separator
+        withKey i (column' (colBox i) (tpRenderHeader tp i))
     void separator
     pinnedBlock idxs
     when (not (null pinned) && not (null scrollRows)) $ void separator
@@ -492,7 +483,7 @@ finishTable TableFinish{tfN = n, tfStateKey = stateKey, tfVis = vis, tfOrder0 = 
           , maybe (maximum (map snd hdrSpans)) (\(Rect _ by _ bh) -> by + bh) mBodyRect
           )
       edgeCol = headerEdgeHit edgePad edgeTop edgeBot headerPairs mouse
-      hoverCol = headerAtPoint headerPairs mouse
+      hoverCol = listToMaybe [i | (i, r) <- headerPairs, rectContains (rawRespRect r) mouse]
       headerRects = [(i, rawRespRect r) | (i, r) <- headerPairs]
       (isResize, isReorder) = case drag0 of
         HeaderResize _ -> (True, False)
@@ -615,7 +606,7 @@ tableConfigured cfg f key cols inputRows curSort =
     let sizes = smallArrayFromList (tableColSizes cfg)
         order0 = normalizeOrder n (IM.findWithDefault [0 .. n - 1] stateKey (storeIntList st0))
         hidden0 = IM.findWithDefault (tableHidden cfg) stateKey (storeIntSet st0)
-        widths0 = fitList n 0 (IM.findWithDefault [] stateKey (storeFloatList st0))
+        widths0 = take n (IM.findWithDefault [] stateKey (storeFloatList st0) ++ repeat 0)
         drag0 = unpackHeaderDrag (IM.findWithDefault 0 (slotKey SlotDrag stateKey) (storeInt st0))
         dragX0 = IM.findWithDefault 0 stateKey (storeFloat st0)
         dragW0 = IM.findWithDefault 0 (slotKey SlotDragW stateKey) (storeFloat st0)
@@ -631,7 +622,7 @@ tableConfigured cfg f key cols inputRows curSort =
     when (widths1 /= widths0) $ uiIO $ writeColW ctx stateKey widths1
     let hasStretch = tableStretchN n (tableColSizes cfg)
         indexedWidths = primArrayFromList widths1
-        vis = visibleCols order0 hidden0
+        vis = filter (`IS.notMember` hidden0) order0
         freezeN = clamp 0 (length vis) (tableFreezeCols cfg)
         freezeR = max 0 (tableFreezeRows cfg)
         sorted = sortRows cols sort0 rows
@@ -658,7 +649,9 @@ tableConfigured cfg f key cols inputRows curSort =
           let !rowCells = Encode.row id cols r
            in \i ->
                 let !lay = cellLayout i
-                 in void (stripedRow ri lay (rowCells V.! i))
+                 in void $ do
+                      wid <- nextId
+                      addWidgetStyled wid NodeText (rowCells V.! i) 0 lay (if even ri then 1 else 2)
     column' outerLayout $ do
       showAllResp <-
         if IS.null hidden0
@@ -699,3 +692,68 @@ tableConfigured cfg f key cols inputRows curSort =
           , tfResolvedW = resolvedW
           , tfBodyWid = vWid
           }
+
+-- | One row of cells with custom row layout.
+gridColumnsLay :: (Ui :> es) => Layout -> [Int] -> [Layout] -> [Eff es ()] -> Eff es ()
+gridColumnsLay lay keys layouts cells =
+  void (row' lay (go True keys layouts cells))
+ where
+  -- Walk in lockstep without allocating zip tuples and indices per cell.
+  go first (key : moreKeys) (layout : moreLayouts) (cell : moreCells) = do
+    when (not first) $ void separator
+    void (withKey key (column' layout cell))
+    go False moreKeys moreLayouts moreCells
+  go _ _ _ _ = pure ()
+
+-- | First and last visible item index for a uniform-height list, or
+-- @(0, -1)@ when nothing is visible.
+{-# INLINE listClipper #-}
+listClipper :: Int -> Float -> Float -> Float -> (Int, Int)
+listClipper itemCount scrollOff viewH itemH
+  | itemCount <= 0 || itemH <= 0 || viewH <= 0 = (0, -1)
+  | otherwise =
+      let firstVis = max 0 (floor (scrollOff / itemH))
+          lastVis = min (itemCount - 1) (floor ((scrollOff + viewH - 1) / itemH))
+       in if lastVis < firstVis then (0, -1) else (firstVis, lastVis)
+
+setAt :: Int -> a -> [a] -> [a]
+setAt i x xs
+  | i < 0 = xs
+  | otherwise = case splitAt i xs of
+      (before, _ : after) -> before ++ x : after
+      (_, []) -> xs
+
+normalizeOrder :: Int -> [Int] -> [Int]
+normalizeOrder n stored =
+  let valid = filter (\i -> i >= 0 && i < n) stored
+      seen = IS.fromList valid
+   in valid ++ [i | i <- [0 .. n - 1], not (IS.member i seen)]
+
+rebuildOrder :: IntSet -> [Int] -> [Int] -> [Int]
+rebuildOrder hidden newVis old =
+  let go [] vs = vs
+      go (i : is) vs
+        | IS.member i hidden = i : go is vs
+        | otherwise = case vs of
+            (v : vs') -> v : go is vs'
+            [] -> i : is
+   in go old newVis
+
+minColW :: Float
+minColW = 40
+
+-- | Hit-test a column resize edge. The grab zone spans the whole column
+-- height (header top to body bottom), so a column can be resized by its
+-- boundary line anywhere down the table, not just on the header cell.
+headerEdgeHit :: Float -> Float -> Float -> [(Int, Response)] -> V2 -> Maybe Int
+headerEdgeHit pad yTop yBot cols mouse =
+  listToMaybe
+    [ i
+    | (i, r) <- cols
+    , let Rect x y w h = rawRespRect r
+    , w > 0 && h > 0
+    , let mx = v2X mouse
+          my = v2Y mouse
+    , my >= min y yTop && my <= max (y + h) yBot
+    , abs (mx - (x + w)) <= pad
+    ]
