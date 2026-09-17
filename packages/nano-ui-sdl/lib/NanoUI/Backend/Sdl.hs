@@ -35,29 +35,14 @@ module NanoUI.Backend.Sdl
   , withSdl
   , withSdlBench
   , saveScreenshot
-  , saveFontRenderText
-  , queryFontKerning
-  , queryFontPairKerning
-  , debugFontPair
-  , dumpFontLayout
   ) where
 
 import Control.Monad (unless)
-import Data.Char (ord)
 import Data.Foldable (foldlM)
 import Data.IORef (newIORef)
 import Data.Primitive.SmallArray (SmallArray)
-import Data.Text (Text)
 import Data.Typeable (Typeable)
-import Foreign.C.String (withCString)
-import Foreign.C.Types (CUInt)
-import Foreign.Ptr (Ptr)
-import NanoUI
-  ( FontStyle
-  , FontVariant
-  , FontWeight
-  , NanoUI
-  )
+import NanoUI (NanoUI)
 import NanoUI.Sdl.Runner (askSdlDebug, drawReduceEff, newSdlContext, sdlDrawFrame, setSdlUiFont)
 import NanoUI.Sdl.Session (runSdlSession)
 import NanoUI.Sdl.Debug
@@ -66,17 +51,6 @@ import NanoUI.Sdl.Debug
   , newSdlDebugSampler
   , readSdlDebug
   , takeDebugLive
-  )
-import NanoUI.Sdl.Font
-  ( CachedFontEntry (..)
-  , SdlFont (..)
-  , getOrLoadCachedFont
-  , ttfDumpLayout
-  , ttfGetKerning
-  , ttfGetPairKerning
-  , ttfDebugPair
-  , ttfSaveRenderText
-  , withUtf8
   )
 import NanoUI.Sdl.Window (RgbaImage (..), SdlEnv (..), SdlOptions (..), defaultSdlOptions, saveScreenshot, syncDisplay, withSdl, withSdlBench)
 import NanoUI.Sdl.Dialog
@@ -138,33 +112,3 @@ registerRgbaImage ctx img =
     (rgbaImageWidth img)
     (rgbaImageHeight img)
     (rgbaImagePixels img)
-
--- | Run a native query on a codepoint pair of the cached font for a size and
--- style.
-fontPairQuery ::
-  (Ptr () -> CUInt -> CUInt -> IO a) ->
-  SdlEnv -> Float -> FontWeight -> FontStyle -> FontVariant -> Char -> Char -> IO a
-fontPairQuery query env sz weight style var c1 c2 = do
-  entry <- getOrLoadCachedFont (sdlFontCache env) sz weight style var
-  query (sfFont (cfeFont entry)) (fromIntegral (ord c1)) (fromIntegral (ord c2))
-
-saveFontRenderText :: SdlEnv -> Float -> FontWeight -> FontStyle -> FontVariant -> Text -> FilePath -> IO Bool
-saveFontRenderText env sz weight style var txt path = do
-  entry <- getOrLoadCachedFont (sdlFontCache env) sz weight style var
-  withUtf8 txt $ \ctext _ -> withCString path (ttfSaveRenderText (sfFont (cfeFont entry)) ctext)
-
-queryFontKerning :: SdlEnv -> Float -> FontWeight -> FontStyle -> FontVariant -> Char -> Char -> IO Int
-queryFontKerning env sz weight style var c1 c2 =
-  fromIntegral <$> fontPairQuery ttfGetKerning env sz weight style var c1 c2
-
-queryFontPairKerning :: SdlEnv -> Float -> FontWeight -> FontStyle -> FontVariant -> Char -> Char -> IO Int
-queryFontPairKerning env sz weight style var c1 c2 =
-  fromIntegral <$> fontPairQuery ttfGetPairKerning env sz weight style var c1 c2
-
-debugFontPair :: SdlEnv -> Float -> FontWeight -> FontStyle -> FontVariant -> Char -> Char -> IO ()
-debugFontPair = fontPairQuery ttfDebugPair
-
-dumpFontLayout :: SdlEnv -> Float -> FontWeight -> FontStyle -> FontVariant -> Text -> IO ()
-dumpFontLayout env sz weight style var txt = do
-  entry <- getOrLoadCachedFont (sdlFontCache env) sz weight style var
-  withUtf8 txt $ \ctext _ -> ttfDumpLayout (sfFont (cfeFont entry)) ctext

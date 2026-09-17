@@ -23,13 +23,6 @@ module NanoUI.Sdl.Font
   , resetSdlFontCache
   , setSdlFontCacheSource
   , withTtfFontCache
-  , getOrLoadCachedFont
-  , ttfSaveRenderText
-  , ttfGetKerning
-  , ttfGetPairKerning
-  , ttfDebugPair
-  , ttfDumpLayout
-  , withUtf8
   ) where
 
 import Control.Exception (SomeException, bracket, catch, throwIO)
@@ -1327,20 +1320,8 @@ foreign import ccall unsafe "nano_ui_ttf_remove_fallback"
 foreign import ccall unsafe "nano_ui_ttf_copy_font"
   ttfCopyFont :: Ptr () -> CFloat -> IO (Ptr ())
 
-foreign import ccall unsafe "nano_ui_ttf_save_render_text"
-  ttfSaveRenderText :: Ptr () -> CString -> CString -> IO Bool
-
 foreign import ccall unsafe "nano_ui_ttf_get_kerning"
   ttfGetKerning :: Ptr () -> CUInt -> CUInt -> IO CInt
-
-foreign import ccall unsafe "nano_ui_ttf_get_pair_kerning"
-  ttfGetPairKerning :: Ptr () -> CUInt -> CUInt -> IO CInt
-
-foreign import ccall unsafe "nano_ui_ttf_dump_layout"
-  ttfDumpLayout :: Ptr () -> CString -> IO ()
-
-foreign import ccall unsafe "nano_ui_ttf_debug_pair"
-  ttfDebugPair :: Ptr () -> CUInt -> CUInt -> IO ()
 
 -- ---------------------------------------------------------------------------
 -- Dynamic font cache for crisp text rendering at arbitrary sizes and styles

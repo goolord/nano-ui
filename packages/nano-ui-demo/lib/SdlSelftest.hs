@@ -40,8 +40,6 @@ import NanoUI.Testing.Harness
   )
 import NanoUI.Testing.Harness qualified as Harness
 import DemoData (registerDemoImages)
-import System.Directory (XdgDirectory (XdgCache), createDirectoryIfMissing, getXdgDirectory)
-import System.FilePath ((</>))
 import Text.Printf (printf)
 import qualified Data.Text as T
 
@@ -52,9 +50,6 @@ selftest continuous imgs ui = do
   ctx0 <- newSdlContext
   ok <- registerDemoImages ctx0 imgs
   unless ok $ fail "selftest: registerImage failed"
-  -- Artifacts (font renders, screenshots) land in $XDG_CACHE_HOME/nano-ui-demo.
-  cacheDir <- getXdgDirectory XdgCache "nano-ui-demo"
-  createDirectoryIfMissing True cacheDir
   let opts =
         defaultSdlOptions
           { sdlWindowHidden = True
@@ -75,11 +70,6 @@ selftest continuous imgs ui = do
     when (abs (runItal - wItal) > 0.01) $
       fail $ printf "selftest: shaped width mismatch for italic sentence: measure=%.2f, shaped=%.2f" wItal runItal
     putStrLn $ printf "MEASURE string: norm=%.1f, ital=%.1f" wNorm wItal
-    let bracketTo :: String -> IO ()
-        bracketTo tag = do
-          (w, _) <- ctxResolveMeasure ctx 20.0 WeightNormal FontStyleNormal FontRegular "To"
-          putStrLn $ printf "  [bracket %s] width(To)@20 = %.1f" tag w
-    bracketTo "start"
     -- The shaped path (fmShape / pushText) must match SDL3_ttf measurement;
     -- catches regressions where per-glyph fallback ignored GPOS kerning for
     -- pairs like To, AV, and fi.
@@ -97,38 +87,6 @@ selftest continuous imgs ui = do
     checkRun "ital" fmItal20 FontStyleItalic "AV"
     checkRun "norm" fmNorm20 FontStyleNormal "fi"
     checkRun "ital" fmItal20 FontStyleItalic "fi"
-    let sentence = "The quick brown fox jumps over the lazy dog"
-    putStrLn "--- Kerning queries (Normal vs Italic) ---"
-    let pairs = zip (T.unpack sentence) (drop 1 (T.unpack sentence))
-    for_ pairs $ \(c1, c2) -> do
-      kN <- queryFontKerning env 20.0 WeightNormal FontStyleNormal FontRegular c1 c2
-      kI <- queryFontKerning env 20.0 WeightNormal FontStyleItalic FontRegular c1 c2
-      when (kN /= 0 || kI /= 0) $
-        putStrLn $ printf "Kerning '%c''%c': norm=%d, ital=%d" c1 c2 kN kI
-    putStrLn "--- Pair width probes (string-level GPOS kerning) ---"
-    let kernPairs = [('T', 'o'), ('W', 'e'), ('A', 'V'), ('T', 'a'), ('f', 'i'), ('r', 'y'), ('l', 'y'), ('F', 'o')]
-    for_ kernPairs $ \(a, b) ->
-      for_ [(FontStyleNormal, "norm" :: String), (FontStyleItalic, "ital")] $ \(st, tag) -> do
-        (wa, _) <- ctxResolveMeasure ctx 20.0 WeightNormal st FontRegular (T.singleton a)
-        (wb, _) <- ctxResolveMeasure ctx 20.0 WeightNormal st FontRegular (T.singleton b)
-        (wab, _) <- ctxResolveMeasure ctx 20.0 WeightNormal st FontRegular (T.pack [a, b])
-        putStrLn $ printf "width(%c)=%5.1f width(%c)=%5.1f width(%c%c)=%5.1f kern=%+5.1f [%s]"
-          a wa b wb a b wab (wab - wa - wb) tag
-    bracketTo "after width probes"
-    putStrLn "--- Shaped pair kerning (40pt raw px) ---"
-    let probePairs = [('r', ' '), (' ', 't'), ('e', ' '), (' ', 'l'), ('o', 'v'), ('v', 'e'), ('r', 't'), ('T', 'o'), ('A', 'V'), ('W', 'e'), ('P', 'a'), (' ', 'T'), ('y', ' '), ('f', 'i')]
-    for_ probePairs $ \(a, b) -> do
-      k <- queryFontPairKerning env 40.0 WeightNormal FontStyleNormal FontRegular a b
-      putStrLn $ printf "  pairKern('%c',''%c') = %d" a b k
-    bracketTo "after pairKern"
-    putStrLn "--- Debug pair internals ---"
-    for_ [16.0, 20.0, 24.0, 32.0, 40.0, 64.0] $ \sz -> do
-      putStrLn $ printf "size %.0f:" sz
-      debugFontPair env sz WeightNormal FontStyleNormal FontRegular 'T' 'o'
-    putStrLn "--- Shaped layout dump ---"
-    dumpFontLayout env 40.0 WeightNormal FontStyleNormal FontRegular "r the ovt"
-    void $ saveFontRenderText env 20.0 WeightNormal FontStyleItalic FontRegular sentence
-      (cacheDir </> "sdl_native_italic.bmp")
     -- Shaped text draws glyph by glyph, so a line wider than the 2048px glyph
     -- atlas still gets quads and a width, and a short line gets one quad a
     -- glyph.
@@ -157,11 +115,8 @@ selftest continuous imgs ui = do
     -- mid-frame, so every quad already recorded in the frame sampled the
     -- wiped texture (text below vanished) and the run itself drew from the
     -- atlas-origin UVs (the white patch). Exercise the full paint pipeline
-    -- with an oversized field value; span collection must survive it and
-    -- the screenshots (before / after) are diffed for wiped chrome in the
-    -- long-field regression check.
+    -- with an oversized field value; span collection must survive it.
     nameLbl <- requireSpan "selftest: Name label" (findRightmost "Name" spans0)
-    void $ saveScreenshot env (cacheDir </> "long_field_before.bmp")
     clickPos ui ctx' env base (V2 (v2X nameLbl + 80) (v2Y nameLbl))
     drawOnce ui ctx' env (base {inputChars = T.replicate 400 "f"})
     drawOnce ui ctx' env base
@@ -169,7 +124,6 @@ selftest continuous imgs ui = do
     unless (hasText "Feature" spansLong) $ fail "selftest: long field text lost the tab content"
     unless (length spansLong >= length spans0 - 1) $
       fail "selftest: long field text collapsed the span set"
-    void $ saveScreenshot env (cacheDir </> "long_field_after.bmp")
     clickTab ui ctx' env base "Table"
     spansTable <- collectTextSpans ctx'
     unless (hasText "David" spansTable) $ fail "selftest: table body missing after Table tab"
@@ -193,7 +147,6 @@ selftest continuous imgs ui = do
     unless (hasText "Live Playground" spansType) $ fail "selftest: typography missing after Typography tab"
     drawOnce ui ctx' env (base {inputScroll = V2 0 (-350)})
     drawOnce ui ctx' env base
-    void $ saveScreenshot env (cacheDir </> "typography_styles.bmp")
     sizeSpan <- requireSpan "selftest: Size slider" (findRightmost "Size" spansType)
     for_ [20, 60, 100, 140, 180, 50, 120, -60, -100, 0 :: Float] $ \dx ->
       dragPos ui ctx' env base sizeSpan (V2 (v2X sizeSpan + dx) (v2Y sizeSpan))
