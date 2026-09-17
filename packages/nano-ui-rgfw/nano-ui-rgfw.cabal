@@ -42,7 +42,6 @@ library
         NanoUI.Rgfw.Render
         NanoUI.Rgfw.Session
         NanoUI.Rgfw.Surface
-        NanoUI.Rgfw.Theme
     c-sources:        cbits/nano_ui_gl.c
     build-depends:
         base ^>=4.22.0.0,

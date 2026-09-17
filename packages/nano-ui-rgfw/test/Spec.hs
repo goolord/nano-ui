@@ -29,6 +29,9 @@ import NanoUI
   , fixedWH
   , grow
   , label
+  , Style (..)
+  , Theme (..)
+  , tomorrowNightMinDarkTheme
   , window
   )
 import Foreign.Marshal.Alloc (allocaBytes, callocBytes, free)
@@ -66,10 +69,6 @@ import NanoUI.Rgfw.Surface
   , sWidth
   , sHeight
   , toPhysRect
-  )
-import NanoUI.Rgfw.Theme
-  ( RgfwTheme (..)
-  , tomorrowNightMinDarkTheme
   )
 import qualified RGFW.Raw as R
 
@@ -246,7 +245,7 @@ testTriangleRaster =
       assert ("triangle raster " ++ name) (pixels == expected)
 
 -- | An RGFW context renders square, themed widgets: button corners are the
--- border colour, fills come from the RGFW palette, and label text is stamped
+-- border colour, fills come from the theme, and label text is stamped
 -- glyphs rather than solid per-character boxes.
 testSquareThemedRaster :: IO ()
 testSquareThemedRaster = do
@@ -262,7 +261,7 @@ testSquareThemedRaster = do
   (_, _, draw, _) <- runFrame ctx inp ui
   (baseSpans, overlaySpans) <- collectRasterSpans ctx inp
   surf <- newOffscreenRgfwSurface w h
-  clearScreen surf (packColor (thBackground theme))
+  clearScreen surf (packColor (themeWindow theme))
   renderArena surf getCozetteFont 1.0 draw baseSpans overlaySpans
   let na = ctxNodeArena ctx
       pixel x y = peekElemOff (sBuffer surf) (y * w + x)
@@ -275,9 +274,9 @@ testSquareThemedRaster = do
           x1 = round (bx + bw) - 1
           y1 = round (by + bh) - 1
       corners <- mapM (uncurry pixel) [(x0, y0), (x1, y0), (x0, y1), (x1, y1)]
-      assert "Button corners are square (border colour)" (all (== packColor (thBorder theme)) corners)
+      assert "Button corners are square (border colour)" (all (== packColor (styleBorder (themeButton theme))) corners)
       fillPx <- pixel (x0 + 2) (y0 + 2)
-      assert "Button fill uses the RGFW palette" (fillPx == packColor (thWidgetBg theme))
+      assert "Button fill uses the theme" (fillPx == packColor (styleBg (themeButton theme)))
     [] -> assert "Button node present" False
   case [(r, fg) | (r, t, fg, _, _) <- baseSpans, t == "Checkbox label"] of
     ((Rect sx sy sw sh, fg) : _) -> do

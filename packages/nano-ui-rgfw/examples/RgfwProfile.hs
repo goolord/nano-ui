@@ -9,6 +9,7 @@ import NanoUI
   ( Input (..)
   , Size (..)
   , V2 (..)
+  , Theme (..)
   , emptyInput
   )
 import NanoUI.Testing (collectRasterSpans, runFrameEff)
@@ -16,7 +17,6 @@ import NanoUI.Rgfw.Context (newRgfwContext)
 import NanoUI.Rgfw.Font.Cozette (getCozetteFont)
 import NanoUI.Rgfw.Render (renderArena)
 import NanoUI.Rgfw.Surface (clearScreen, freeRgfwSurface, newOffscreenRgfwSurface, packColor)
-import NanoUI.Rgfw.Theme (RgfwTheme (..))
 import RgfwDemoCommon (appView, currentTheme, dpiScale, initialModel, physScaleFor, themeForChoice)
 
 iterations :: Int
@@ -45,7 +45,7 @@ main = do
   let runSingleFrame = do
         (_, _, draw, _) <- runFrameEff runEff ctx inp (appView m)
         (baseSpans, overlaySpans) <- collectRasterSpans ctx inp
-        clearScreen surf (packColor (thBackground theme))
+        clearScreen surf (packColor (themeWindow theme))
         renderArena surf font scale draw baseSpans overlaySpans
 
   -- Warmup

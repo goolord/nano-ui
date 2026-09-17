@@ -6,7 +6,7 @@ module NanoUI.Rgfw.Context
   ) where
 
 import Data.Text (Text)
-import NanoUI (Color, Rect)
+import NanoUI (Color, Rect, Theme, borderWidth, cornerRadius, everyStyle)
 import NanoUI.Context
   ( Context
   , setDrawExternalText
@@ -15,15 +15,14 @@ import NanoUI.Context
   , withFontMetrics
   )
 import NanoUI.Rgfw.Font.Cozette (cozetteMetrics)
-import NanoUI.Rgfw.Theme (RgfwTheme, rgfwCoreTheme)
 import NanoUI.Testing (Layer (..), newPixelContext)
 
 -- | Pixel context configured for the RGFW renderers: Cozette metrics, square
 -- geometry (every primitive reaches 'NanoUI.Rgfw.Render.renderArena' as a flat
 -- quad or triangle), text left to the span stamper, and the core theme derived
--- from the RGFW palette. Sessions, tests and profiles share it so they render
--- the same frame.
-newRgfwContext :: RgfwTheme -> IO Context
+-- made square. Sessions, tests and profiles share it so they render the same
+-- frame.
+newRgfwContext :: Theme -> IO Context
 newRgfwContext theme = do
   ctx0 <- newPixelContext
   let ctx = withFontMetrics ctx0 cozetteMetrics
@@ -32,10 +31,11 @@ newRgfwContext theme = do
   applyRgfwTheme ctx theme
   pure ctx
 
--- | Switch the core theme to an RGFW palette. A no-op when it is unchanged;
+-- | Switch to a theme with every surface square: corner radius 0 and a 1px
+-- border, so geometry matches hit boxes. A no-op when it is unchanged;
 -- otherwise caches are dropped and the context is marked dirty.
-applyRgfwTheme :: Context -> RgfwTheme -> IO ()
-applyRgfwTheme ctx = setTheme ctx . rgfwCoreTheme
+applyRgfwTheme :: Context -> Theme -> IO ()
+applyRgfwTheme ctx = setTheme ctx . everyStyle (cornerRadius 0 . borderWidth 1)
 
 -- | A collected text span (see 'NanoUI.Testing.collectRasterSpans'): rect,
 -- text, foreground, background, and clip, in logical pixels.

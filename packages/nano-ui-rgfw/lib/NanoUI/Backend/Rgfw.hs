@@ -4,13 +4,6 @@ module NanoUI.Backend.Rgfw
   , runRgfwAppReduceCustom
   , RgfwOptions (..)
   , defaultRgfwOptions
-  , RgfwTheme (..)
-  , defaultDarkTheme
-  , defaultLightTheme
-  , tomorrowMinLightTheme
-  , tomorrowNightMinDarkTheme
-  , tomorrowMidnightMinDarkTheme
-  , rgfwCoreTheme
   , newRgfwContext
   , applyRgfwTheme
   , RgfwDebugSnapshot (..)
@@ -32,13 +25,4 @@ import NanoUI.Rgfw.Session
   , runRgfwApp
   , runRgfwAppReduce
   , runRgfwAppReduceCustom
-  )
-import NanoUI.Rgfw.Theme
-  ( RgfwTheme (..)
-  , defaultDarkTheme
-  , defaultLightTheme
-  , tomorrowMinLightTheme
-  , tomorrowNightMinDarkTheme
-  , tomorrowMidnightMinDarkTheme
-  , rgfwCoreTheme
   )

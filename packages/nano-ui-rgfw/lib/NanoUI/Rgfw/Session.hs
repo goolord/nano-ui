@@ -27,9 +27,11 @@ import NanoUI
   , Modifiers (..)
   , NanoUI
   , Size (..)
+  , Theme (..)
   , V2 (..)
   , appendInputKey
   , emptyInput
+  , tomorrowNightMinDarkTheme
   , v2Add
   )
 import NanoUI.Context
@@ -65,14 +67,13 @@ import NanoUI.Rgfw.Debug
   )
 import NanoUI.Rgfw.Font.Cozette (getCozetteFont)
 import NanoUI.Rgfw.Gl (freeGlRenderer, newGlRenderer, renderArenaGl)
-import NanoUI.Rgfw.Theme (RgfwTheme (..), defaultDarkTheme)
 import qualified RGFW as R
 
 data RgfwOptions = RgfwOptions
   { optTitle  :: !String
   , optWidth  :: !Int
   , optHeight :: !Int
-  , optTheme  :: !RgfwTheme
+  , optTheme  :: !Theme
   , optCenter :: !Bool
   , optScale  :: !Float
   , optRefreshHz :: !Int
@@ -84,7 +85,7 @@ defaultRgfwOptions =
     { optTitle  = "nano-ui (RGFW Single-Pass)"
     , optWidth  = 1680
     , optHeight = 1040
-    , optTheme  = defaultDarkTheme
+    , optTheme  = tomorrowNightMinDarkTheme
     , optCenter = True
     , optScale  = 0.0
     , optRefreshHz = 0
@@ -144,7 +145,7 @@ runRgfwAppReduce opts =
 runRgfwAppReduceCustom ::
   (Typeable msg, Eq model) =>
   RgfwOptions ->
-  (model -> (RgfwTheme, Float)) ->
+  (model -> (Theme, Float)) ->
   (msg -> model -> model) ->
   model ->
   (model -> NanoUI ()) ->
@@ -185,6 +186,9 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
       modelRef <- newIORef initialModel
       scaleRef <- newIORef initScale
       winSizeRef <- newIORef (initPhysW, initPhysH)
+      -- The theme last applied, before squaring: comparing it with the
+      -- model's theme skips rebuilding the squared theme on every frame.
+      themeRef <- newIORef initTheme
       cursorRef <- newIORef UiCursorDefault
 
       ctx0 <- newRgfwContext initTheme
@@ -215,7 +219,10 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
               tUiStart <- getMonotonicTime
               curModel <- readIORef modelRef
               let (frameTheme, _) = getThemeAndScale curModel
-              applyRgfwTheme c frameTheme
+              appliedTheme <- readIORef themeRef
+              when (frameTheme /= appliedTheme) $ do
+                writeIORef themeRef frameTheme
+                applyRgfwTheme c frameTheme
               (_, newModel, _, drawData, dirtyAfterUi) <-
                 runFrameReduceEff runEff updateModel c curInp curModel view
               writeIORef modelRef newModel
@@ -229,7 +236,7 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
               curScale <- readIORef scaleRef
               (pw, ph) <- readIORef winSizeRef
               (baseSpans, overlaySpans) <- collectRasterSpans c curInp
-              renderArenaGl renderer font curScale pw ph (thBackground frameTheme) drawData baseSpans overlaySpans
+              renderArenaGl renderer font curScale pw ph (themeWindow frameTheme) drawData baseSpans overlaySpans
               tRenderEnd <- getMonotonicTime
               let !renderMs = (tRenderEnd - tRenderStart) * 1000.0
 
@@ -257,11 +264,9 @@ runRgfwAppReduceCustom opts getThemeAndScale updateModel initialModel view = inB
                   !elapsedUs = round (frameMs * 1000.0)
                   !delayUs = max 0 (targetFrameUs - elapsedUs)
               when (delayUs > 0) $ threadDelay delayUs
-              -- A reduced message may have switched palettes; restyle the core
-              -- now and request the frame that paints it.
-              let (nextTheme, _) = getThemeAndScale newModel
-              applyRgfwTheme c nextTheme
-              pure (dirtyAfterUi || nextTheme /= frameTheme, curInp)
+              -- A reduced message that switched themes changed the model, so
+              -- the core marks the frame dirty and the next one applies it.
+              pure (dirtyAfterUi, curInp)
 
         let drv =
               SessionDriver

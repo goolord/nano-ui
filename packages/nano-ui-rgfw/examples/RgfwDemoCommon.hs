@@ -33,18 +33,17 @@ import NanoUI
   , whenM
   , window
   , respClicked
-  )
-import NanoUI.Backend.Rgfw
-  ( RgfwOptions (..)
-  , RgfwTheme (..)
-  , askRgfwDebug
-  , debugWindowBody
-  , defaultDarkTheme
-  , defaultRgfwOptions
-  , runRgfwAppReduceCustom
+  , Theme
   , tomorrowMidnightMinDarkTheme
   , tomorrowMinLightTheme
   , tomorrowNightMinDarkTheme
+  )
+import NanoUI.Backend.Rgfw
+  ( RgfwOptions (..)
+  , askRgfwDebug
+  , debugWindowBody
+  , defaultRgfwOptions
+  , runRgfwAppReduceCustom
   )
 import NanoUI.Emit qualified as Emit
 
@@ -142,7 +141,7 @@ initialModel =
     , debugOpen    = False
     }
 
-themeForChoice :: ThemeChoice -> RgfwTheme
+themeForChoice :: ThemeChoice -> Theme
 themeForChoice ThemeNight    = tomorrowNightMinDarkTheme
 themeForChoice ThemeLight    = tomorrowMinLightTheme
 themeForChoice ThemeMidnight = tomorrowMidnightMinDarkTheme
@@ -485,7 +484,7 @@ main = do
           { optTitle  = "nano-ui [RGFW Lean Backend // Tomorrow Min]"
           , optWidth  = 1680
           , optHeight = 1040
-          , optTheme  = defaultDarkTheme
+          , optTheme  = tomorrowNightMinDarkTheme
           , optScale  = 0.0 -- 0.0 uses the DPI reported by the OS by default
           }
   runRgfwAppReduceCustom opts (\m -> (themeForChoice (currentTheme m), physScaleFor (dpiScale m))) update initialModel appView
