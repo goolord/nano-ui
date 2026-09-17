@@ -151,7 +151,7 @@ nextId = do
   ctx <- askContext
   uiIO $ do
     ic <- readIORef (ctxIdContext ctx)
-    writeIORef (ctxIdContext ctx) (ic {siblingId = siblingId ic + 1})
+    writeIORef (ctxIdContext ctx) $! ic {siblingId = siblingId ic + 1}
     pure (idContextWidgetId ic)
 
 -- | Issue many widget ids in one IO loop (avoids deep Eff bind chains).
@@ -176,7 +176,7 @@ withIdFrame enter m = do
     bracket
       (do
         old <- readIORef (ctxIdContext ctx)
-        let (p, c) = enter old
+        let !(!p, !c) = enter old
         writeIORef (ctxIdContext ctx) c
         pure p)
       (\parent' -> writeIORef (ctxIdContext ctx) parent')
