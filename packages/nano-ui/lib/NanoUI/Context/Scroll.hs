@@ -84,15 +84,18 @@ getScrollOffset :: Context -> WidgetId -> IO Float
 getScrollOffset ctx wid = do
   s <- getStore ctx
   let key = intKey wid
-      sKey = slotKey SlotTextAreaScroll key
-  off <-
-    case IM.lookup sKey (storePoint s) of
-      Just (_, sy) -> pure sy
-      Nothing -> do
-        cfg <- getScrollConfig ctx wid
-        if scrollConfigNative2D cfg
-          then v2Y <$> getScrollOffset2D ctx wid
-          else pure (IM.findWithDefault 0 key (storeFloat s))
+      points = storePoint s
+      cfgBits = IM.findWithDefault (encodeScrollConfig defaultScrollConfig) (slotKey SlotScrollCfg key) (storeInt s)
+      -- Text areas keep both axes in their own slot; native 2D scrollers keep
+      -- them in the offset slot, falling back to the main-axis float as
+      -- 'getScrollOffset2D' does.
+      off = case IM.lookup (slotKey SlotTextAreaScroll key) points of
+        Just (_, sy) -> sy
+        Nothing
+          | scrollConfigNative2D (decodeScrollConfig cfgBits)
+          , Just (_, y) <- IM.lookup (slotKey SlotScrollOff key) points ->
+              y
+          | otherwise -> IM.findWithDefault 0 key (storeFloat s)
   snapScrollOffset ctx off
 
 -- | Move a scroller to an offset along its main axis. Cancels a glide in
