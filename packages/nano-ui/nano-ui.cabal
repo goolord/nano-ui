@@ -133,7 +133,6 @@ library
         NanoUI.Style
         NanoUI.Types
         NanoUI.WidgetText
-        NanoUI.Widgets
         NanoUI.Widgets.Node
         NanoUI.Widgets.Chrome
         NanoUI.Widgets.Layout
